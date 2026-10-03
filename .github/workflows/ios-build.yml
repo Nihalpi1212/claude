@@ -1,0 +1,22 @@
+name: iOS build check
+on:
+  push:
+    paths: ['PulseApp/**', '.github/workflows/ios-build.yml']
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate project
+        working-directory: PulseApp
+        run: xcodegen generate
+      - name: Build for iOS Simulator
+        working-directory: PulseApp
+        run: |
+          xcodebuild build -project Pulse.xcodeproj -scheme Pulse \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO | tee build.log | grep -E "error:|warning: unre|BUILD " || true
+          grep -q "BUILD SUCCEEDED" build.log
