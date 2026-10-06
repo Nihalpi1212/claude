@@ -1,3 +1,4 @@
+import { rise } from '@/lib/motion';
 import React, { useMemo, useState } from 'react';
 import { Keyboard, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
@@ -58,10 +59,10 @@ export default function Search() {
             <SectionHeader title={tr('categories')} />
             <View style={[styles.wrap, { gap: 12 }]}>
               {categories.map((c, i) => (
-                <Animated.View key={c.id} entering={FadeInDown.delay(i * 25).springify().damping(16)} style={{ width: '48%' }}>
+                <Animated.View key={c.id} entering={rise(i * 25)} style={{ width: '48%' }}>
                   <Tap onPress={() => router.push(`/category/${c.id}`)} scale={0.95}>
                     <Art emoji={c.emoji} colors={c.colors} radiusPx={20} style={{ height: 84, alignItems: 'flex-start', justifyContent: 'flex-end', padding: 12 }} />
-                    <View style={{ position: 'absolute', start: 14, bottom: 12 }}><Txt variant="callout" style={{ fontWeight: '800', color: '#1B1B1F' }}>{l(c.name)}</Txt></View>
+                    <View style={{ position: 'absolute', start: 14, bottom: 12 }}><Txt variant="callout" style={{ fontWeight: '800' }}>{l(c.name)}</Txt></View>
                   </Tap>
                 </Animated.View>
               ))}

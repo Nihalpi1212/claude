@@ -25,7 +25,7 @@ export default function Language() {
       <View style={{ padding: 20 }}>
         <Card>
           {(['en', 'ar'] as const).map((l, i) => (
-            <Row key={l} icon="language" title={l === 'en' ? 'English' : 'العربية'} onPress={() => pick(l)} last={i === 1} right={lang === l ? <Ionicons name="checkmark-circle" size={24} color={t.primary} /> : <View style={{ width: 24 }} />} />
+            <Row key={l} icon="language" title={l === 'en' ? 'English' : 'العربية'} onPress={() => pick(l)} last={i === 1} right={lang === l ? <Ionicons name="checkmark-circle" size={24} color={t.primaryText} /> : <View style={{ width: 24 }} />} />
           ))}
         </Card>
       </View>

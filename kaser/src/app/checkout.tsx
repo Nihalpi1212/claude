@@ -1,3 +1,4 @@
+import { rise } from '@/lib/motion';
 import React, { useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
@@ -98,7 +99,7 @@ export default function Checkout() {
         <Section title={tr('deliveryAddress')}>
           <Card onPress={() => router.push('/addresses')} style={{ padding: 16 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-              <View style={[styles.icon, { backgroundColor: t.primaryTint }]}><Ionicons name="location" size={20} color={t.primary} /></View>
+              <View style={[styles.icon, { backgroundColor: t.primaryTint }]}><Ionicons name="location" size={20} color={t.primaryText} /></View>
               <View style={{ flex: 1 }}>
                 {address ? (
                   <>
@@ -122,16 +123,16 @@ export default function Checkout() {
               return (
                 <Tap key={id} style={{ flex: 1 }} onPress={() => { haptic.select(); setMode(id); }} scale={0.95} feedback={false}>
                   <View style={[styles.mode, { backgroundColor: on ? t.primary : t.card, borderColor: on ? t.primary : t.separator }]}>
-                    <Ionicons name={icon} size={20} color={on ? '#fff' : t.primary} />
-                    <Text style={{ color: on ? '#fff' : t.text, fontWeight: '700', fontSize: 14 }}>{title}</Text>
-                    {sub ? <Text style={{ color: on ? 'rgba(255,255,255,0.8)' : t.textSecondary, fontSize: 11 }}>{sub}</Text> : null}
+                    <Ionicons name={icon} size={20} color={on ? t.onPrimary : t.primaryText} />
+                    <Text style={{ color: on ? t.onPrimary : t.text, fontWeight: '800', fontSize: 14 }}>{title}</Text>
+                    {sub ? <Text style={{ color: on ? t.onPrimary : t.textSecondary, opacity: on ? 0.8 : 1, fontSize: 11 }}>{sub}</Text> : null}
                   </View>
                 </Tap>
               );
             })}
           </View>
           {mode === 'scheduled' ? (
-            <Animated.View entering={FadeInDown.springify().damping(18)}>
+            <Animated.View entering={rise()}>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingTop: 12 }}>
                 {slotList.map((s) => <Chip key={s.ts} label={s.label} active={(slot ?? slotList[0].ts) === s.ts} onPress={() => setSlot(s.ts)} />)}
               </ScrollView>
@@ -220,7 +221,7 @@ export default function Checkout() {
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <Animated.View entering={FadeInDown.springify().damping(18)}>
+    <Animated.View entering={rise()}>
       <Txt variant="title3" style={{ marginBottom: 10 }}>{title}</Txt>
       {children}
     </Animated.View>

@@ -1,6 +1,6 @@
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
-import Animated, { useAnimatedStyle, withSpring } from 'react-native-reanimated';
+import Animated, { useAnimatedStyle, withTiming } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
 import { Txt } from './ui';
 import { useT, type Key } from '@/i18n';
@@ -16,17 +16,17 @@ const STEPS: { k: Key; icon: keyof typeof Ionicons.glyphMap }[] = [
 
 function Node({ done, current, icon }: { done: boolean; current: boolean; icon: keyof typeof Ionicons.glyphMap }) {
   const t = useTheme();
-  const a = useAnimatedStyle(() => ({ transform: [{ scale: withSpring(current ? 1.15 : 1, { damping: 10 }) }] }));
+  const a = useAnimatedStyle(() => ({ transform: [{ scale: withTiming(current ? 1.12 : 1, { duration: 180 }) }] }));
   return (
     <Animated.View style={[styles.node, { backgroundColor: done || current ? t.primary : t.fill }, a]}>
-      <Ionicons name={done ? 'checkmark' : icon} size={14} color={done || current ? '#fff' : t.textTertiary} />
+      <Ionicons name={done ? 'checkmark' : icon} size={14} color={done || current ? t.onPrimary : t.textTertiary} />
     </Animated.View>
   );
 }
 
 function Bar({ filled }: { filled: boolean }) {
   const t = useTheme();
-  const a = useAnimatedStyle(() => ({ width: withSpring(filled ? '100%' : '0%', { damping: 20 }) }));
+  const a = useAnimatedStyle(() => ({ width: withTiming(filled ? '100%' : '0%', { duration: 260 }) }));
   return (
     <View style={[styles.bar, { backgroundColor: t.fill }]}>
       <Animated.View style={[{ height: '100%', backgroundColor: t.primary, borderRadius: 2 }, a]} />

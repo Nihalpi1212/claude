@@ -1,6 +1,7 @@
+import { rise } from '@/lib/motion';
 import React, { useState } from 'react';
 import { I18nManager, ScrollView, StyleSheet, View } from 'react-native';
-import Animated, { FadeInDown, LinearTransition, useAnimatedStyle, withSpring } from 'react-native-reanimated';
+import Animated, { FadeInDown, LinearTransition, useAnimatedStyle, withTiming } from 'react-native-reanimated';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Art, Badge, Button, Card, Empty, Tap, Txt, haptic } from '@/components/ui';
@@ -17,7 +18,7 @@ import { radius, useTheme } from '@/theme';
 function Segmented({ value, onChange, items }: { value: number; onChange: (n: number) => void; items: string[] }) {
   const t = useTheme();
   const [w, setW] = useState(0);
-  const a = useAnimatedStyle(() => ({ transform: [{ translateX: withSpring((I18nManager.isRTL ? -1 : 1) * value * ((w - 6) / items.length), { damping: 18, stiffness: 220 }) }] }));
+  const a = useAnimatedStyle(() => ({ transform: [{ translateX: withTiming((I18nManager.isRTL ? -1 : 1) * value * ((w - 6) / items.length), { duration: 200 }) }] }));
   return (
     <View onLayout={(e) => setW(e.nativeEvent.layout.width)} style={[styles.seg, { backgroundColor: t.fill }]}>
       {w > 0 ? <Animated.View style={[styles.segThumb, { width: (w - 6) / items.length, backgroundColor: t.card }, a]} /> : null}
@@ -40,7 +41,7 @@ function OrderCard({ o, i, now }: { o: Order; i: number; now: number }) {
   const active = o.status === 'active' && stage < 4;
   const prog = progressOf(o, now);
   return (
-    <Animated.View entering={FadeInDown.delay(i * 50).springify().damping(18)} layout={LinearTransition.springify()}>
+    <Animated.View entering={rise(i * 50)} layout={LinearTransition.duration(220)}>
       <Card onPress={() => router.push(active ? `/tracking/${o.id}` : `/order/${o.id}`)} style={{ padding: 16, gap: 12 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
           <Art emoji={v.emoji} colors={v.colors} size={52} radiusPx={16} />
@@ -93,5 +94,5 @@ export default function Orders() {
 
 const styles = StyleSheet.create({
   seg: { height: 42, borderRadius: radius.md, padding: 3, flexDirection: 'row' },
-  segThumb: { position: 'absolute', top: 3, start: 3, height: 36, borderRadius: 13, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 4, shadowOffset: { width: 0, height: 2 } },
+  segThumb: { position: 'absolute', top: 3, start: 3, height: 36, borderRadius: 10, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 4, shadowOffset: { width: 0, height: 2 } },
 });

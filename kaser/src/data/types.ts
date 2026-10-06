@@ -49,6 +49,7 @@ export type Promo = {
   title: L;
   desc: L;
   colors: [string, string];
+  fg: string;
   emoji: string;
   kind: 'percent' | 'freeDelivery' | 'flat';
   value: number;

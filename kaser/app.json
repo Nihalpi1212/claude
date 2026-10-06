@@ -7,7 +7,7 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
-    "backgroundColor": "#8A1538",
+    "backgroundColor": "#FD8912",
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "qa.kaser.app",
@@ -22,7 +22,7 @@
       "package": "qa.kaser.app",
       "versionCode": 1,
       "adaptiveIcon": {
-        "backgroundColor": "#8A1538",
+        "backgroundColor": "#FD8912",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
@@ -38,7 +38,7 @@
           "image": "./assets/splash-icon.png",
           "imageWidth": 160,
           "resizeMode": "contain",
-          "backgroundColor": "#8A1538"
+          "backgroundColor": "#FD8912"
         }
       ],
       [

@@ -1,3 +1,4 @@
+import { rise } from '@/lib/motion';
 import React from 'react';
 import { Alert, ScrollView, View } from 'react-native';
 import Animated, { FadeInDown, FadeOut, LinearTransition } from 'react-native-reanimated';
@@ -29,15 +30,15 @@ export default function Addresses() {
         {list.map((a, i) => {
           const on = (sel ?? list[0]?.id) === a.id;
           return (
-            <Animated.View key={a.id} entering={FadeInDown.delay(i * 40).springify().damping(18)} exiting={FadeOut} layout={LinearTransition.springify()}>
+            <Animated.View key={a.id} entering={rise(i * 40)} exiting={FadeOut} layout={LinearTransition.duration(220)}>
               <Card onPress={() => { haptic.select(); select(a.id); router.back(); }} style={{ padding: 16, borderWidth: on ? 2 : 0, borderColor: t.primary }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                  <View style={{ width: 42, height: 42, borderRadius: 13, backgroundColor: t.primaryTint, alignItems: 'center', justifyContent: 'center' }}><Ionicons name={ICON[a.label]} size={20} color={t.primary} /></View>
+                  <View style={{ width: 42, height: 42, borderRadius: 13, backgroundColor: t.primaryTint, alignItems: 'center', justifyContent: 'center' }}><Ionicons name={ICON[a.label]} size={20} color={t.primaryText} /></View>
                   <View style={{ flex: 1 }}>
                     <Txt variant="headline">{tr(a.label)} · {l(areas.find((x) => x.id === a.area)!.name)}</Txt>
                     <Txt variant="footnote" color="secondary" numberOfLines={2}>{tr('building')} {a.building}, {tr('street')} {a.street}, {tr('zone')} {a.zone}{a.unit ? `, ${a.unit}` : ''}{a.landmark ? ` · ${a.landmark}` : ''}</Txt>
                   </View>
-                  {on ? <Ionicons name="checkmark-circle" size={24} color={t.primary} /> : null}
+                  {on ? <Ionicons name="checkmark-circle" size={24} color={t.primaryText} /> : null}
                 </View>
                 <View style={{ flexDirection: 'row', gap: 20, marginTop: 12, paddingStart: 54 }}>
                   <Tap onPress={() => router.push(`/address-edit?id=${a.id}`)}><Txt variant="subhead" color="primary" style={{ fontWeight: '600' }}>{tr('editAddress')}</Txt></Tap>

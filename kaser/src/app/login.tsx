@@ -1,13 +1,14 @@
+import { rise } from '@/lib/motion';
 import React, { useEffect, useRef, useState } from 'react';
 import { KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, View } from 'react-native';
 import Animated, { FadeIn, FadeInDown, FadeOut, useAnimatedStyle, useSharedValue, withSequence, withTiming } from 'react-native-reanimated';
-import { LinearGradient } from 'expo-linear-gradient';
+import { KaserLogo } from '@/components/Brand';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button, Tap, Txt, haptic } from '@/components/ui';
 import { useT } from '@/i18n';
 import { useStore } from '@/store';
 import { formatPhone, validQatarMobile } from '@/lib/format';
-import { brand, radius, useTheme } from '@/theme';
+import { radius, useTheme } from '@/theme';
 
 const DEMO_CODE = '1234';
 
@@ -68,17 +69,16 @@ export default function Login() {
 
   return (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, backgroundColor: t.bg }}>
-      <LinearGradient colors={[brand.maroonLight, brand.maroon, brand.maroonDeep]} style={[styles.hero, { paddingTop: insets.top + 30 }]}>
-        <Animated.View entering={FadeIn.duration(500)} style={styles.logoBox}>
-          <Text style={styles.logoK}>K</Text>
+      <View style={[styles.hero, { paddingTop: insets.top + 24 }]}>
+        <Animated.View entering={FadeIn.duration(300)}>
+          <KaserLogo size={104} />
         </Animated.View>
-        <Text style={styles.brand}>{tr('appName')}</Text>
-        <Text style={styles.tag}>{tr('tagline')}</Text>
-      </LinearGradient>
+        <Text style={[styles.tag, { color: t.textSecondary }]}>{tr('tagline')}</Text>
+      </View>
 
       <View style={[styles.sheet, { backgroundColor: t.bg }]}>
         {step === 'phone' && (
-          <Animated.View key="p" entering={FadeInDown.springify().damping(18)} exiting={FadeOut.duration(120)} style={{ gap: 14 }}>
+          <Animated.View key="p" entering={rise()} exiting={FadeOut.duration(120)} style={{ gap: 14 }}>
             <Txt variant="title1">{tr('welcome')}</Txt>
             <Txt variant="subhead" color="secondary">{tr('enterPhone')}</Txt>
             <View style={[styles.phoneRow, { backgroundColor: t.card, borderColor: error ? t.danger : t.separator }]}>
@@ -107,7 +107,7 @@ export default function Login() {
         )}
 
         {step === 'otp' && (
-          <Animated.View key="o" entering={FadeInDown.springify().damping(18)} exiting={FadeOut.duration(120)} style={{ gap: 14 }}>
+          <Animated.View key="o" entering={rise()} exiting={FadeOut.duration(120)} style={{ gap: 14 }}>
             <Txt variant="title1">{tr('enterCode')}</Txt>
             <Txt variant="subhead" color="secondary">{tr('codeSent', { phone: formatPhone(phone) })}</Txt>
             <Animated.View style={[{ flexDirection: 'row', gap: 12, justifyContent: 'center', marginVertical: 8 }, shakeStyle]}>
@@ -131,7 +131,7 @@ export default function Login() {
         )}
 
         {step === 'name' && (
-          <Animated.View key="n" entering={FadeInDown.springify().damping(18)} style={{ gap: 14 }}>
+          <Animated.View key="n" entering={rise()} style={{ gap: 14 }}>
             <Txt variant="title1">{tr('yourName')}</Txt>
             <View style={[styles.phoneRow, { backgroundColor: t.card, borderColor: t.separator }]}>
               <TextInput value={name} onChangeText={setName} placeholder="Mohammed Al Thani" placeholderTextColor={t.textTertiary} style={{ flex: 1, color: t.text, fontSize: 18, fontWeight: '600' }} autoFocus autoCapitalize="words" onSubmitEditing={finish} />
@@ -145,12 +145,9 @@ export default function Login() {
 }
 
 const styles = StyleSheet.create({
-  hero: { alignItems: 'center', paddingBottom: 44, borderBottomStartRadius: 36, borderBottomEndRadius: 36 },
-  logoBox: { width: 84, height: 84, borderRadius: 26, borderCurve: 'continuous', backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 20, shadowOffset: { width: 0, height: 10 } },
-  logoK: { color: brand.maroon, fontSize: 54, fontWeight: '900' },
-  brand: { color: '#fff', fontSize: 34, fontWeight: '900', marginTop: 14, letterSpacing: 0.5 },
-  tag: { color: 'rgba(255,255,255,0.8)', fontSize: 15, marginTop: 4 },
-  sheet: { flex: 1, padding: 24, paddingTop: 28 },
-  phoneRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, height: 62, borderRadius: radius.lg, borderCurve: 'continuous', borderWidth: 1 },
-  otpBox: { width: 64, height: 72, borderRadius: 18, borderCurve: 'continuous', alignItems: 'center', justifyContent: 'center' },
+  hero: { alignItems: 'center', paddingBottom: 12, gap: 10 },
+  tag: { fontSize: 16, fontWeight: '600' },
+  sheet: { flex: 1, padding: 24, paddingTop: 16 },
+  phoneRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, height: 62, borderRadius: radius.md, borderCurve: 'continuous', borderWidth: 1 },
+  otpBox: { width: 64, height: 72, borderRadius: radius.lg, borderCurve: 'continuous', alignItems: 'center', justifyContent: 'center' },
 });

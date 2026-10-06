@@ -1,3 +1,4 @@
+import { rise } from '@/lib/motion';
 import React, { useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import Animated, { FadeInDown, LinearTransition } from 'react-native-reanimated';
@@ -46,7 +47,7 @@ export default function ItemSheet() {
   return (
     <View style={{ flex: 1, backgroundColor: t.bg }}>
       <ScrollView contentContainerStyle={{ paddingBottom: 140 }} showsVerticalScrollIndicator={false}>
-        <Art emoji={item.emoji} colors={v.colors} radiusPx={0} style={{ height: 240 }} />
+        <Art emoji={item.emoji} radiusPx={0} style={{ height: 240 }} />
         <View style={{ padding: 20, gap: 8 }}>
           <Txt variant="title1">{l(item.name)}</Txt>
           {item.popular ? <Badge text={tr('popular')} icon="flame" tone="warning" /> : null}
@@ -55,7 +56,7 @@ export default function ItemSheet() {
         </View>
 
         {(item.groups ?? []).map((g, gi) => (
-          <Animated.View key={g.id} entering={FadeInDown.delay(gi * 60).springify().damping(18)} style={{ marginHorizontal: 20, marginBottom: 16 }}>
+          <Animated.View key={g.id} entering={rise(gi * 60)} style={{ marginHorizontal: 20, marginBottom: 16 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
               <Txt variant="headline">{l(g.title)}</Txt>
               <Badge text={g.required ? tr('required') : g.max > 1 ? `${tr('optional')} · ${g.max}` : tr('optional')} tone={g.required ? 'primary' : 'neutral'} />
@@ -68,7 +69,7 @@ export default function ItemSheet() {
                     <Tap onPress={() => toggle(g.id, o.id, g.max)} scale={0.99} feedback={false}>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16 }}>
                         <View style={[g.max === 1 ? styles.radio : styles.check, { borderColor: on ? t.primary : t.textTertiary, backgroundColor: on ? t.primary : 'transparent' }]}>
-                          {on ? <Ionicons name={g.max === 1 ? 'ellipse' : 'checkmark'} size={g.max === 1 ? 10 : 15} color="#fff" /> : null}
+                          {on ? <Ionicons name={g.max === 1 ? 'ellipse' : 'checkmark'} size={g.max === 1 ? 10 : 15} color={t.onPrimary} /> : null}
                         </View>
                         <Txt variant="callout" style={{ flex: 1, fontWeight: on ? '700' : '400' }}>{l(o.name)}</Txt>
                         {o.price > 0 ? <Txt variant="subhead" color="secondary">+{money(o.price, lang)}</Txt> : null}

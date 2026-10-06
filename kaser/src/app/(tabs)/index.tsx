@@ -1,7 +1,7 @@
+import { rise } from '@/lib/motion';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Dimensions, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeInDown, FadeInRight, Extrapolation, interpolate, useAnimatedScrollHandler, useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
-import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
@@ -68,24 +68,25 @@ export default function Home() {
             <View>
               <Txt variant="caption" color="secondary" style={{ textTransform: 'uppercase', letterSpacing: 0.8 }}>{tr('deliverTo')}</Txt>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 }}>
-                <Ionicons name="location" size={18} color={t.primary} />
+                <Ionicons name="location" size={18} color={t.primaryText} />
                 <Txt variant="title3" numberOfLines={1} style={{ flexShrink: 1 }}>{areaName}</Txt>
                 <Ionicons name="chevron-down" size={16} color={t.textSecondary} />
               </View>
             </View>
           </Tap>
           {plus ? (
-            <Tap onPress={() => router.push('/plus')}><View style={styles.plusPill}><Ionicons name="star" size={12} color="#fff" /><Text style={{ color: '#fff', fontWeight: '800', fontSize: 12 }}>PLUS</Text></View></Tap>
+            <Tap onPress={() => router.push('/plus')}><View style={styles.plusPill}><Ionicons name="star" size={12} color={brand.ink} /><Text style={{ color: brand.ink, fontWeight: '800', fontSize: 12 }}>{tr('rewardsPill')}</Text></View></Tap>
           ) : null}
           <GlassCircle onPress={() => router.push('/promos')}><Ionicons name="pricetags-outline" size={20} color={t.text} /></GlassCircle>
         </View>
 
-        <Animated.View entering={FadeInDown.springify().damping(18)} style={{ paddingHorizontal: 20, marginTop: 6 }}>
-          <Txt variant="largeTitle" numberOfLines={1} adjustsFontSizeToFit>{hello ? (lang === 'ar' ? `أهلاً ${hello} 👋` : `Hello, ${hello} 👋`) : (lang === 'ar' ? 'جائع؟ 👋' : 'Hungry? 👋')}</Txt>
+        <Animated.View entering={rise()} style={{ paddingHorizontal: 20, marginTop: 6 }}>
+          {hello ? <Txt variant="subhead" color="secondary" style={{ fontWeight: '600' }}>{lang === 'ar' ? `أهلاً ${hello}` : `Hello, ${hello}`}</Txt> : null}
+          <Txt variant="largeTitle" numberOfLines={1} adjustsFontSizeToFit>{tr('homeHeadline')}</Txt>
         </Animated.View>
 
         {/* Search */}
-        <Animated.View entering={FadeInDown.delay(60).springify().damping(18)} style={{ paddingHorizontal: 20, marginTop: 14 }}>
+        <Animated.View entering={rise(60)} style={{ paddingHorizontal: 20, marginTop: 14 }}>
           <Tap onPress={() => router.navigate('/(tabs)/search')} scale={0.985}>
             <View style={[styles.search, { backgroundColor: t.card }, shadow(t, 1)]}>
               <Ionicons name="search" size={20} color={t.textSecondary} />
@@ -97,10 +98,10 @@ export default function Home() {
         {/* Categories */}
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20, gap: 12, paddingVertical: 20 }}>
           {categories.map((c, i) => (
-            <Animated.View key={c.id} entering={FadeInRight.delay(80 + i * 30).springify().damping(16)}>
+            <Animated.View key={c.id} entering={rise(80 + i * 30)}>
               <Tap onPress={() => router.push(`/category/${c.id}`)} scale={0.92}>
                 <View style={{ alignItems: 'center', width: 76, gap: 8 }}>
-                  <Art emoji={c.emoji} colors={c.colors} size={68} radiusPx={22} />
+                  <Art emoji={c.emoji} size={68} radiusPx={radius.xl} />
                   <Txt variant="caption" numberOfLines={1} style={{ fontWeight: '600' }}>{l(c.name)}</Txt>
                 </View>
               </Tap>
@@ -111,16 +112,16 @@ export default function Home() {
         {/* Promos */}
         <ScrollView horizontal showsHorizontalScrollIndicator={false} snapToInterval={PROMO_W + 12} decelerationRate="fast" contentContainerStyle={{ paddingHorizontal: 20, gap: 12 }}>
           {promos.map((p, i) => (
-            <Animated.View key={p.code} entering={FadeInRight.delay(120 + i * 60).springify().damping(16)}>
+            <Animated.View key={p.code} entering={rise(120 + i * 60)}>
               <Tap onPress={() => router.push('/promos')} scale={0.97}>
-                <LinearGradient colors={p.colors} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.promo, { width: PROMO_W }]}>
+                <View style={[styles.promo, { width: PROMO_W, backgroundColor: p.colors[0] }]}>
                   <View style={{ flex: 1, gap: 6 }}>
-                    <Txt variant="title3" style={{ color: '#fff' }} numberOfLines={2}>{l(p.title)}</Txt>
-                    <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: 13 }}>{l(p.desc)}</Text>
-                    <View style={styles.codePill}><Text style={{ color: '#fff', fontWeight: '800', letterSpacing: 1.2, fontSize: 12 }}>{p.code}</Text></View>
+                    <Txt variant="title3" style={{ color: p.fg }} numberOfLines={2}>{l(p.title)}</Txt>
+                    <Text style={{ color: p.fg, opacity: 0.8, fontSize: 13 }}>{l(p.desc)}</Text>
+                    <View style={[styles.codePill, { backgroundColor: p.fg === '#FFFFFF' || p.fg === '#FFF8EE' ? 'rgba(255,255,255,0.18)' : 'rgba(32,27,23,0.12)' }]}><Text style={{ color: p.fg, fontWeight: '800', letterSpacing: 1.2, fontSize: 12 }}>{p.code}</Text></View>
                   </View>
-                  <Text style={{ fontSize: 64 }}>{p.emoji}</Text>
-                </LinearGradient>
+                  <Text style={{ fontSize: 60 }}>{p.emoji}</Text>
+                </View>
               </Tap>
             </Animated.View>
           ))}
@@ -185,8 +186,8 @@ export default function Home() {
 
 const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 20 },
-  search: { flexDirection: 'row', alignItems: 'center', gap: 10, height: 54, paddingHorizontal: 16, borderRadius: 20, borderCurve: 'continuous' },
-  promo: { height: 142, borderRadius: radius.xl, borderCurve: 'continuous', padding: 20, flexDirection: 'row', alignItems: 'center' },
-  codePill: { alignSelf: 'flex-start', paddingHorizontal: 10, height: 26, borderRadius: 13, backgroundColor: 'rgba(255,255,255,0.22)', alignItems: 'center', justifyContent: 'center', marginTop: 4 },
-  plusPill: { flexDirection: 'row', alignItems: 'center', gap: 4, height: 28, paddingHorizontal: 10, borderRadius: 14, backgroundColor: brand.goldDeep },
+  search: { flexDirection: 'row', alignItems: 'center', gap: 10, height: 54, paddingHorizontal: 16, borderRadius: radius.lg, borderCurve: 'continuous' },
+  promo: { height: 142, borderRadius: radius.xl, borderCurve: 'continuous', padding: 20, overflow: 'hidden', flexDirection: 'row', alignItems: 'center' },
+  codePill: { alignSelf: 'flex-start', paddingHorizontal: 10, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center', marginTop: 4 },
+  plusPill: { flexDirection: 'row', alignItems: 'center', gap: 4, height: 28, paddingHorizontal: 10, borderRadius: 14, backgroundColor: brand.orange },
 });

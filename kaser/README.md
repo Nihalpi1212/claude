@@ -13,8 +13,8 @@ Native **iOS + Android** app (React Native / Expo SDK 57, Expo Router, Reanimate
 | Items | Required / optional / multi-select option groups, notes, quantity, live price |
 | Cart & checkout | Promo codes (`WELCOME30`, `FREEDEL`, `KASER20`, `QND18`), tip, delivery fee / service fee, minimum order, Standard / Priority / Scheduled, Apple Pay / Google Pay / card (Visa · Mastercard · NAPS) / Kaser Wallet / cash on delivery, contactless drop-off |
 | Live tracking | Animated courier on a route map, 5-step status, ETA countdown, call / SMS courier, cancel, rating |
-| Account | Saved addresses (CRUD), favourites, wallet + top-up + cashback ledger, **Kaser Plus** subscription (free delivery, 5% cashback), language, help centre, dark mode |
-| Design | Apple-style: large titles, continuous corners, glass tab bar, spring physics on every tap, haptics, light + dark themes. Brand: Qatar maroon `#8A1538` + gold `#E4B25A` |
+| Account | Saved addresses (CRUD), favourites, wallet + top-up + cashback ledger, **Kaser Rewards** (free delivery + 5% cashback — named per the brand book's naming list), language, help centre, dark mode |
+| Design | Built to the **Kaser Brand Book v1.0**: Kaser Orange `#FD8912` with *ink* text on orange, Cream `#FFF8EE` backgrounds, Fresh Green `#276B54` for success, Error `#BC453D`; flat surfaces, 16 px cards / 12 px buttons / pill chips, 44 px minimum touch targets, ring brand pattern, 100–260 ms motion (respects reduced-motion), haptics, light + dark themes |
 
 ## Run it
 
@@ -56,7 +56,7 @@ src/components/     ui kit (Tap, Button, Chip, Art…), VendorCard, TabBar, Cart
 src/data/           stores, menus, categories, promos, Doha areas  (bilingual)
 src/store/          Zustand store, persisted to AsyncStorage
 src/lib/            pricing engine, order lifecycle, search, formatting, RTL
-src/i18n/           en.ts / ar.ts
+src/i18n/           en.ts / ar.ts  (launch lines from the brand book; Arabic needs native proofreading)
 ```
 
 ## Demo data vs. production
@@ -71,3 +71,11 @@ This build is **fully functional offline** so you can demo the whole flow. Befor
 6. **Push notifications** — add `expo-notifications` for order-status pushes.
 
 Store/restaurant names in the demo catalogue are fictional.
+
+## Brand implementation notes
+
+- **Logo** — `assets/kaser-logo.png` is the supplied circular master, extracted from the brand book PDF and used unmodified (only the square corners outside the circle are made transparent so it sits on cream). Shown on onboarding and login (min 48 px, 104 px on login).
+- **App icon / splash / Android adaptive icon** — orange field + the K glyph taken from the supplied logo, as in the brand book's icon page. The book marks a *simplified K icon redrawn from the approved vector master* as a required final asset: **replace `assets/icon.png`, `android-icon-*.png` and `splash-icon.png` once you have the vector master.**
+- **Typography** — the book specifies DejaVu Sans as a starting point and says to test a licensed Arabic family. The app uses the system fonts (SF Pro / Roboto, which render Arabic natively). Swap in a licensed family via `expo-font` when chosen.
+- **Colour** — tokens in `src/theme/index.ts`. `primaryText` (`#B35A00`) is a darker orange derived for small orange text/icons on light surfaces to meet contrast; fills use the exact brand orange.
+- **Imagery** — the book requires real food photography with honest portions; dishes currently use flat tiles with emoji placeholders.

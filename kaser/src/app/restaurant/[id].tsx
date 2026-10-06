@@ -1,3 +1,4 @@
+import { rise } from '@/lib/motion';
 import React, { useRef, useState } from 'react';
 import { Dimensions, LayoutChangeEvent, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated, { Extrapolation, FadeInDown, interpolate, useAnimatedReaction, useAnimatedRef, useAnimatedScrollHandler, useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
@@ -70,11 +71,11 @@ export default function Restaurant() {
       >
         <View style={{ height: HERO, overflow: 'hidden' }}>
           <Animated.View style={[{ height: HERO + 60 }, heroStyle]}>
-            <Art emoji={v.emoji} colors={v.colors} radiusPx={0} style={{ flex: 1 }} />
+            <Art emoji={v.emoji} radiusPx={0} style={{ flex: 1 }} />
           </Animated.View>
         </View>
 
-        <Animated.View entering={FadeInDown.springify().damping(18)} style={[styles.infoCard, { backgroundColor: t.card }, shadow(t, 2)]}>
+        <Animated.View entering={rise()} style={[styles.infoCard, { backgroundColor: t.card }, shadow(t, 2)]}>
           <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12 }}>
             <View style={{ flex: 1, gap: 4 }}>
               <Txt variant="title1">{l(v.name)}</Txt>
@@ -117,7 +118,7 @@ export default function Restaurant() {
               {s.items.map((item, ii) => {
                 const n = itemsInCart(item.id);
                 return (
-                  <Animated.View key={item.id} entering={FadeInDown.delay(ii * 40).springify().damping(18)}>
+                  <Animated.View key={item.id} entering={rise(ii * 40)}>
                     <Tap onPress={() => router.push(`/item/${v.id}/${item.id}`)} scale={0.98}>
                       <View style={[styles.item, { backgroundColor: t.card }, shadow(t, 1)]}>
                         <View style={{ flex: 1, gap: 4 }}>
@@ -129,7 +130,7 @@ export default function Restaurant() {
                           <Txt variant="callout" style={{ fontWeight: '800', marginTop: 4 }}>{money(item.price, lang)}</Txt>
                         </View>
                         <View>
-                          <Art emoji={item.emoji} colors={v.colors} size={92} radiusPx={20} />
+                          <Art emoji={item.emoji} size={92} radiusPx={radius.lg} />
                           <View style={styles.addWrap}>
                             <Tap
                               disabled={!open}
@@ -142,7 +143,7 @@ export default function Restaurant() {
                               }}
                             >
                               <View style={[styles.add, { backgroundColor: n ? t.primary : t.card, opacity: open ? 1 : 0.4 }, shadow(t, 2)]}>
-                                {n ? <Text style={{ color: '#fff', fontWeight: '800' }}>{n}</Text> : <Ionicons name="add" size={22} color={t.primary} />}
+                                {n ? <Text style={{ color: t.onPrimary, fontWeight: '800' }}>{n}</Text> : <Ionicons name="add" size={22} color={t.primaryText} />}
                               </View>
                             </Tap>
                           </View>
@@ -196,5 +197,5 @@ const styles = StyleSheet.create({
   nav: { position: 'absolute', start: 16, end: 16, flexDirection: 'row', alignItems: 'center', gap: 12 },
   item: { flexDirection: 'row', gap: 14, padding: 14, borderRadius: radius.lg, borderCurve: 'continuous' },
   addWrap: { position: 'absolute', end: -6, bottom: -6 },
-  add: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
+  add: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
 });

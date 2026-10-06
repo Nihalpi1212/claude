@@ -1,7 +1,7 @@
 import React from 'react';
 import { Platform, StyleSheet, Text, View } from 'react-native';
 import { BlurView } from 'expo-blur';
-import Animated, { useAnimatedStyle, withSpring } from 'react-native-reanimated';
+import Animated, { useAnimatedStyle, withTiming } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { ComponentProps } from 'react';
@@ -31,24 +31,24 @@ function TabItem({ name, focused, onPress, badge }: { name: string; focused: boo
   const t = useTheme();
   const { t: tr } = useT();
   const pill = useAnimatedStyle(() => ({
-    opacity: withSpring(focused ? 1 : 0, { damping: 20 }),
-    transform: [{ scale: withSpring(focused ? 1 : 0.6, { damping: 14, stiffness: 240 }) }],
+    opacity: withTiming(focused ? 1 : 0, { duration: 180 }),
+    transform: [{ scale: withTiming(focused ? 1 : 0.85, { duration: 180 }) }],
   }));
-  const icon = useAnimatedStyle(() => ({ transform: [{ translateY: withSpring(focused ? -1 : 0) }, { scale: withSpring(focused ? 1.08 : 1, { damping: 12 }) }] }));
+  const icon = useAnimatedStyle(() => ({ transform: [{ scale: withTiming(focused ? 1.05 : 1, { duration: 160 }) }] }));
   const [on, off] = ICONS[name] ?? ICONS.index;
   return (
     <Tap onPress={onPress} scale={0.88} style={{ flex: 1 }} feedback={false}>
       <View style={styles.item}>
-        <Animated.View style={[StyleSheet.absoluteFill, styles.pill, { backgroundColor: t.primaryTint }, pill]} />
+        <Animated.View style={[StyleSheet.absoluteFill, styles.pill, { backgroundColor: t.primary }, pill]} />
         <Animated.View style={icon}>
-          <Ionicons name={focused ? on : off} size={23} color={focused ? t.primary : t.textSecondary} />
+          <Ionicons name={focused ? on : off} size={23} color={focused ? t.onPrimary : t.textSecondary} />
           {badge ? (
-            <View style={[styles.badge, { backgroundColor: t.primary }]}>
-              <Text style={{ color: '#fff', fontSize: 10, fontWeight: '800' }}>{badge}</Text>
+            <View style={[styles.badge, { backgroundColor: t.text }]}>
+              <Text style={{ color: t.bg, fontSize: 10, fontWeight: '800' }}>{badge}</Text>
             </View>
           ) : null}
         </Animated.View>
-        <Text style={{ fontSize: 10.5, fontWeight: '700', marginTop: 2, color: focused ? t.primary : t.textSecondary }}>{tr(LABEL[name] ?? 'tabHome')}</Text>
+        <Text style={{ fontSize: 10.5, fontWeight: '700', marginTop: 2, color: focused ? t.onPrimary : t.textSecondary }}>{tr(LABEL[name] ?? 'tabHome')}</Text>
       </View>
     </Tap>
   );
@@ -68,7 +68,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
         <BlurView
           intensity={Platform.OS === 'ios' ? 70 : 100}
           tint={t.isDark ? 'dark' : 'light'}
-          style={[StyleSheet.absoluteFill, { backgroundColor: t.isDark ? 'rgba(28,28,31,0.72)' : 'rgba(255,255,255,0.78)' }]}
+          style={[StyleSheet.absoluteFill, { backgroundColor: t.isDark ? 'rgba(32,27,23,0.78)' : 'rgba(255,255,255,0.82)' }]}
         />
         <View style={styles.inner}>
           {state.routes.map((route, i) => {

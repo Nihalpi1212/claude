@@ -1,3 +1,4 @@
+import { rise } from '@/lib/motion';
 import React, { useState } from 'react';
 import { Linking, ScrollView, View } from 'react-native';
 import Animated, { FadeInDown, LinearTransition } from 'react-native-reanimated';
@@ -24,7 +25,7 @@ export default function Help() {
           <Button style={{ flex: 1 }} small variant="secondary" title="4400 1234" icon="call" onPress={() => Linking.openURL('tel:+97444001234')} />
         </View>
         {faqs.map(([q, a], i) => (
-          <Animated.View key={q} entering={FadeInDown.delay(i * 50).springify().damping(18)} layout={LinearTransition.springify()}>
+          <Animated.View key={q} entering={rise(i * 50)} layout={LinearTransition.duration(220)}>
             <Card onPress={() => { haptic.select(); setOpen(open === i ? null : i); }} style={{ padding: 16, gap: 8 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 <Txt variant="callout" style={{ flex: 1, fontWeight: '700' }}>{q}</Txt>

@@ -21,25 +21,25 @@ export const promos: Promo[] = [
     code: 'WELCOME30',
     title: { en: '30% off your first order', ar: 'خصم 30٪ على أول طلب' },
     desc: { en: 'Up to QAR 20 · Min. QAR 30', ar: 'حتى 20 ر.ق · الحد الأدنى 30 ر.ق' },
-    colors: ['#8A1538', '#C2285A'], emoji: '🎉', kind: 'percent', value: 30, cap: 20, minSubtotal: 30,
+    colors: ['#FD8912', '#FD8912'], fg: '#201B17', emoji: '🎉', kind: 'percent', value: 30, cap: 20, minSubtotal: 30,
   },
   {
     code: 'FREEDEL',
     title: { en: 'Free delivery today', ar: 'توصيل مجاني اليوم' },
     desc: { en: 'On orders over QAR 25', ar: 'على الطلبات فوق 25 ر.ق' },
-    colors: ['#0F6B63', '#2BB5A6'], emoji: '🛵', kind: 'freeDelivery', value: 0, minSubtotal: 25,
+    colors: ['#276B54', '#276B54'], fg: '#FFFFFF', emoji: '🛵', kind: 'freeDelivery', value: 0, minSubtotal: 25,
   },
   {
     code: 'KASER20',
     title: { en: '20% off weekend feasts', ar: 'خصم 20٪ على وجبات العطلة' },
     desc: { en: 'Up to QAR 15 · Min. QAR 40', ar: 'حتى 15 ر.ق · الحد الأدنى 40 ر.ق' },
-    colors: ['#B8741A', '#E4B25A'], emoji: '🍽️', kind: 'percent', value: 20, cap: 15, minSubtotal: 40,
+    colors: ['#201B17', '#201B17'], fg: '#FFF8EE', emoji: '🍽️', kind: 'percent', value: 20, cap: 15, minSubtotal: 40,
   },
   {
     code: 'QND18',
     title: { en: 'National Day: QAR 18 off', ar: 'اليوم الوطني: خصم 18 ر.ق' },
     desc: { en: 'Celebrate Qatar · Min. QAR 60', ar: 'احتفل مع قطر · الحد الأدنى 60 ر.ق' },
-    colors: ['#5C0D26', '#8A1538'], emoji: '🇶🇦', kind: 'flat', value: 18, minSubtotal: 60,
+    colors: ['#FFE9CF', '#FFE9CF'], fg: '#201B17', emoji: '🇶🇦', kind: 'flat', value: 18, minSubtotal: 60,
   },
 ];
 

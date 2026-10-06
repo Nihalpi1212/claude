@@ -1,3 +1,4 @@
+import { rise } from '@/lib/motion';
 import React from 'react';
 import { Alert, Dimensions, Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeIn, FadeInDown, ZoomIn } from 'react-native-reanimated';
@@ -14,7 +15,7 @@ import { vendorById } from '@/data/vendors';
 import { minutesLeft, progressOf, routeProgress, stageOf } from '@/lib/orders';
 import { useNow } from '@/lib/useNow';
 import { money, timeLabel } from '@/lib/format';
-import { radius, shadow, useTheme } from '@/theme';
+import { brand, radius, shadow, useTheme } from '@/theme';
 
 const { width: W, height: H } = Dimensions.get('window');
 const MAP_H = Math.round(H * 0.46);
@@ -54,7 +55,7 @@ export default function Tracking() {
         </View>
       </View>
 
-      <Animated.View entering={FadeInDown.springify().damping(18)} style={[styles.sheet, { backgroundColor: t.bg }]}>
+      <Animated.View entering={rise()} style={[styles.sheet, { backgroundColor: t.bg }]}>
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 20, paddingBottom: insets.bottom + 40, gap: 16 }}>
           <View style={{ alignSelf: 'center', width: 40, height: 5, borderRadius: 3, backgroundColor: t.separator, marginBottom: -4 }} />
           {cancelled ? (
@@ -67,9 +68,9 @@ export default function Tracking() {
               <View style={{ flex: 1, gap: 2 }}>
                 <Txt variant="footnote" color="secondary">{done ? tr('etaDone') : tr('eta')}</Txt>
                 {done ? (
-                  <Animated.View entering={ZoomIn.springify()}><Txt variant="title1">✅ {tr('st_delivered')}</Txt></Animated.View>
+                  <Animated.View entering={FadeIn.duration(240)}><Txt variant="title1">✅ {tr('st_delivered')}</Txt></Animated.View>
                 ) : (
-                  <Txt variant="largeTitle" style={{ fontVariant: ['tabular-nums'] }}>{left} <Txt variant="title3" color="secondary">{tr('min')}</Txt></Txt>
+                  <Txt variant="largeTitle" style={{ fontVariant: ['tabular-nums'] }}>{left <= 1 ? tr('arriving') : tr('etaRange', { a: Math.max(1, left - 2), b: left + 3 })}</Txt>
                 )}
                 {!done ? <Txt variant="footnote" color="secondary">{arrival}</Txt> : null}
               </View>
@@ -97,14 +98,14 @@ export default function Tracking() {
                   <Txt variant="footnote" color="secondary">⭐ {courier.rating} · {l(courier.vehicle)} · {courier.plate}</Txt>
                 </View>
                 <Tap onPress={() => Linking.openURL('sms:+97455501234')}><View style={[styles.round, { backgroundColor: t.fill }]}><Ionicons name="chatbubble" size={19} color={t.text} /></View></Tap>
-                <Tap onPress={() => Linking.openURL('tel:+97455501234')}><View style={[styles.round, { backgroundColor: t.success }]}><Ionicons name="call" size={19} color="#fff" /></View></Tap>
+                <Tap onPress={() => Linking.openURL('tel:+97455501234')}><View style={[styles.round, { backgroundColor: t.success }]}><Ionicons name="call" size={19} color={brand.white} /></View></Tap>
               </View>
             </Card>
           ) : null}
 
           <Card style={{ padding: 16, gap: 12 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-              <Art emoji={v.emoji} colors={v.colors} size={44} radiusPx={14} />
+              <Art emoji={v.emoji} size={44} radiusPx={radius.md} />
               <View style={{ flex: 1 }}>
                 <Txt variant="headline">{l(v.name)}</Txt>
                 <Txt variant="footnote" color="secondary">{order.lines.reduce((n, x) => n + x.qty, 0)} {tr('items')} · {money(order.totals.total, lang, true)}</Txt>
@@ -147,7 +148,7 @@ export default function Tracking() {
 
 const styles = StyleSheet.create({
   nav: { position: 'absolute', start: 16, end: 16, flexDirection: 'row', justifyContent: 'space-between' },
-  sheet: { flex: 1, marginTop: -28, borderTopStartRadius: 30, borderTopEndRadius: 30, borderCurve: 'continuous', overflow: 'hidden' },
+  sheet: { flex: 1, marginTop: -28, borderTopStartRadius: 24, borderTopEndRadius: 24, borderCurve: 'continuous', overflow: 'hidden' },
   avatar: { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center' },
   round: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
 });

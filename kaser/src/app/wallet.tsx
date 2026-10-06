@@ -1,7 +1,8 @@
+import { rise } from '@/lib/motion';
 import React, { useState } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
-import { LinearGradient } from 'expo-linear-gradient';
+import { RingPattern } from '@/components/Brand';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button, Card, Chip, Empty, Txt, haptic } from '@/components/ui';
@@ -9,7 +10,7 @@ import { Header } from '@/components/Header';
 import { useT } from '@/i18n';
 import { useStore } from '@/store';
 import { dateLabel, money } from '@/lib/format';
-import { brand, shadow, useTheme } from '@/theme';
+import { brand, radius, useTheme } from '@/theme';
 
 export default function Wallet() {
   const t = useTheme();
@@ -24,17 +25,18 @@ export default function Wallet() {
     <View style={{ flex: 1, backgroundColor: t.bg }}>
       <Header title={tr('walletTitle')} />
       <ScrollView contentContainerStyle={{ padding: 20, gap: 18, paddingBottom: insets.bottom + 40 }} showsVerticalScrollIndicator={false}>
-        <Animated.View entering={FadeInDown.springify().damping(18)}>
-          <LinearGradient colors={[brand.maroonLight, brand.maroon, brand.maroonDeep]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[{ borderRadius: 28, borderCurve: 'continuous', padding: 24, height: 190, justifyContent: 'space-between' }, shadow(t, 3), { shadowColor: brand.maroon }]}>
+        <Animated.View entering={rise()}>
+          <View style={[{ borderRadius: radius.xl, borderCurve: 'continuous', padding: 24, height: 190, justifyContent: 'space-between', backgroundColor: brand.orange, overflow: 'hidden' }]}>
+            <RingPattern width={400} height={220} opacity={0.14} />
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Text style={{ color: '#fff', fontSize: 22, fontWeight: '900' }}>Kaser</Text>
-              <Ionicons name="wifi" size={22} color="rgba(255,255,255,0.7)" style={{ transform: [{ rotate: '90deg' }] }} />
+              <Text style={{ color: brand.ink, fontSize: 22, fontWeight: '900', letterSpacing: 1 }}>KASER</Text>
+              <Ionicons name="wallet" size={24} color={brand.ink} />
             </View>
             <View>
-              <Text style={{ color: 'rgba(255,255,255,0.75)', fontSize: 13 }}>{tr('walletTitle')}</Text>
-              <Text style={{ color: '#fff', fontSize: 40, fontWeight: '800', fontVariant: ['tabular-nums'] }}>{money(wallet, lang, true)}</Text>
+              <Text style={{ color: brand.ink, opacity: 0.75, fontSize: 13, fontWeight: '600' }}>{tr('walletTitle')}</Text>
+              <Text style={{ color: brand.ink, fontSize: 40, fontWeight: '800', fontVariant: ['tabular-nums'] }}>{money(wallet, lang, true)}</Text>
             </View>
-          </LinearGradient>
+          </View>
         </Animated.View>
 
         <Card delay={80} style={{ padding: 16, gap: 12 }}>

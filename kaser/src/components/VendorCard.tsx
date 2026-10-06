@@ -1,6 +1,7 @@
+import { rise } from '@/lib/motion';
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import Animated, { FadeInDown, useAnimatedStyle, useSharedValue, withSequence, withSpring } from 'react-native-reanimated';
+import Animated, { FadeInDown, useAnimatedStyle, useSharedValue, withSequence, withTiming } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { Art, Badge, Stars, Tap, Txt, haptic } from './ui';
@@ -22,14 +23,14 @@ export function Heart({ id, size = 20 }: { id: string; size?: number }) {
       onPress={() => {
         haptic.medium();
         toggle(id);
-        k.value = withSequence(withSpring(1.35, { damping: 6, stiffness: 500 }), withSpring(1));
+        k.value = withSequence(withTiming(1.2, { duration: 100 }), withTiming(1, { duration: 140 }));
       }}
       scale={0.85}
       feedback={false}
     >
-      <View style={[styles.heart, { backgroundColor: t.isDark ? 'rgba(30,30,34,0.8)' : 'rgba(255,255,255,0.92)' }]}>
+      <View style={[styles.heart, { backgroundColor: t.isDark ? 'rgba(32,27,23,0.9)' : 'rgba(255,255,255,0.95)' }]}>
         <Animated.View style={a}>
-          <Ionicons name={fav ? 'heart' : 'heart-outline'} size={size} color={fav ? '#E5484D' : t.text} />
+          <Ionicons name={fav ? 'heart' : 'heart-outline'} size={size} color={fav ? t.danger : t.text} />
         </Animated.View>
       </View>
     </Tap>
@@ -40,7 +41,7 @@ export function EtaPill({ v }: { v: Vendor }) {
   const { t: tr } = useT();
   return (
     <View style={styles.eta}>
-      <Text style={{ fontSize: 12, fontWeight: '800', color: '#1B1B1F' }}>
+      <Text style={{ fontSize: 12, fontWeight: '800', color: '#201B17' }}>
         {v.etaMin}–{v.etaMax} {tr('min')}
       </Text>
     </View>
@@ -52,16 +53,16 @@ export function VendorCard({ v, delay = 0, width, compact }: { v: Vendor; delay?
   const { t: tr, l, lang } = useT();
   const open = isOpen(v);
   return (
-    <Animated.View entering={FadeInDown.delay(delay).springify().damping(18)} style={width ? { width } : undefined}>
+    <Animated.View entering={rise(delay)} style={width ? { width } : undefined}>
       <Tap onPress={() => router.push(`/restaurant/${v.id}`)} scale={0.975}>
-        <View style={[{ backgroundColor: t.card, borderRadius: radius.xl, borderCurve: 'continuous', overflow: 'hidden' }, shadow(t, 1)]}>
+        <View style={[{ backgroundColor: t.card, borderRadius: radius.lg, borderCurve: 'continuous', overflow: 'hidden' }, shadow(t, 1)]}>
           <View>
             <Art emoji={v.emoji} colors={v.colors} radiusPx={0} style={{ height: compact ? 112 : 150, width: '100%', opacity: open ? 1 : 0.55 }} />
             <View style={styles.topRow}>
               {v.promo ? (
                 <View style={[styles.promo, { backgroundColor: t.primary }]}>
-                  <Ionicons name="pricetag" size={11} color="#fff" />
-                  <Text numberOfLines={1} style={{ color: '#fff', fontSize: 12, fontWeight: '700', maxWidth: 170 }}>{l(v.promo)}</Text>
+                  <Ionicons name="pricetag" size={11} color={t.onPrimary} />
+                  <Text numberOfLines={1} style={{ color: t.onPrimary, fontSize: 12, fontWeight: '800', maxWidth: 170 }}>{l(v.promo)}</Text>
                 </View>
               ) : <View />}
               <Heart id={v.id} />
@@ -95,7 +96,7 @@ export function VendorCard({ v, delay = 0, width, compact }: { v: Vendor; delay?
 }
 
 const styles = StyleSheet.create({
-  heart: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
+  heart: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   topRow: { position: 'absolute', top: 12, start: 12, end: 12, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   bottomRow: { position: 'absolute', bottom: 10, start: 12, end: 12, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   promo: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, height: 26, borderRadius: radius.pill },

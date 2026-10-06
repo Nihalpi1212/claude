@@ -58,11 +58,11 @@ export function TrackingMap({ width, height, progress, stage }: { width: number;
   }, [progress, at]);
   const courier = useAnimatedStyle(() => ({ transform: [{ translateX: cx.value - 20 }, { translateY: cy.value - 20 }] }));
 
-  const land = t.isDark ? '#1B1B1E' : '#EDEAE4';
-  const block = t.isDark ? '#26262A' : '#F7F5F0';
-  const road = t.isDark ? '#38383D' : '#FFFFFF';
-  const water = t.isDark ? '#14263A' : '#BFDDF2';
-  const park = t.isDark ? '#17301F' : '#CFE8C6';
+  const land = t.isDark ? '#1B1613' : '#F1E7D6';
+  const block = t.isDark ? '#241D19' : '#FAF3E6';
+  const road = t.isDark ? '#3A312B' : '#FFFFFF';
+  const water = t.isDark ? '#14263A' : '#C6E0EF';
+  const park = t.isDark ? '#17301F' : '#D3E7C8';
   const home = pts[pts.length - 1];
   const shop = pts[0];
 
@@ -84,8 +84,8 @@ export function TrackingMap({ width, height, progress, stage }: { width: number;
         {[0.3, 0.56].map((y) => <Line key={y} x1={0} x2={width} y1={y * height} y2={y * height} stroke={road} strokeWidth={14} />)}
         {[0.16, 0.48, 0.84].map((x) => <Line key={x} y1={0} y2={height} x1={x * width} x2={x * width} stroke={road} strokeWidth={14} />)}
         {/* route */}
-        <Path d={d} stroke={t.isDark ? '#555' : '#C8C8CE'} strokeWidth={7} strokeLinecap="round" strokeLinejoin="round" fill="none" />
-        <Path d={d} stroke={brand.maroon} strokeWidth={4} strokeDasharray="1 9" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+        <Path d={d} stroke={t.isDark ? '#4A3F37' : '#E4D8C6'} strokeWidth={7} strokeLinecap="round" strokeLinejoin="round" fill="none" />
+        <Path d={d} stroke={brand.orange} strokeWidth={4} strokeDasharray="1 9" strokeLinecap="round" strokeLinejoin="round" fill="none" />
       </Svg>
 
       {/* store pin */}
@@ -93,13 +93,13 @@ export function TrackingMap({ width, height, progress, stage }: { width: number;
         <Animated.Text style={{ fontSize: 20 }}>🏪</Animated.Text>
       </View>
       {/* home pin */}
-      <Pulse x={home[0]} y={home[1]} color={brand.maroon} />
-      <View style={{ position: 'absolute', left: home[0] - 20, top: home[1] - 20, width: 40, height: 40, borderRadius: 20, backgroundColor: brand.maroon, alignItems: 'center', justifyContent: 'center', borderWidth: 3, borderColor: '#fff' }}>
+      <Pulse x={home[0]} y={home[1]} color={brand.orange} />
+      <View style={{ position: 'absolute', left: home[0] - 20, top: home[1] - 20, width: 40, height: 40, borderRadius: 20, backgroundColor: brand.orange, alignItems: 'center', justifyContent: 'center', borderWidth: 3, borderColor: '#fff' }}>
         <Animated.Text style={{ fontSize: 18 }}>🏠</Animated.Text>
       </View>
       {/* courier */}
       {stage >= 2 && stage < 4 ? (
-        <Animated.View style={[{ position: 'absolute', left: 0, top: 0, width: 40, height: 40, borderRadius: 20, backgroundColor: brand.gold, alignItems: 'center', justifyContent: 'center', borderWidth: 3, borderColor: '#fff', shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 8, shadowOffset: { width: 0, height: 4 } }, courier]}>
+        <Animated.View style={[{ position: 'absolute', left: 0, top: 0, width: 40, height: 40, borderRadius: 20, backgroundColor: brand.ink, alignItems: 'center', justifyContent: 'center', borderWidth: 3, borderColor: '#fff', shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 8, shadowOffset: { width: 0, height: 4 } }, courier]}>
           <Animated.Text style={{ fontSize: 20 }}>🛵</Animated.Text>
         </Animated.View>
       ) : null}

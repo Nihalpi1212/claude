@@ -1,3 +1,4 @@
+import { rise } from '@/lib/motion';
 import React, { useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import Animated, { FadeInDown, FadeOut, LinearTransition } from 'react-native-reanimated';
@@ -64,7 +65,7 @@ export default function Cart() {
     <View style={{ flex: 1, backgroundColor: t.bg }}>
       <Header close title={tr('cart')} noTop right={<Tap onPress={() => { clearCart(); router.back(); }}><Txt variant="subhead" color="danger" style={{ fontWeight: '600' }}>{tr('clearCart')}</Txt></Tap>} />
       <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 160, gap: 16 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-        <Animated.View entering={FadeInDown.springify().damping(18)} style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+        <Animated.View entering={rise()} style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
           <Art emoji={v.emoji} colors={v.colors} size={48} radiusPx={16} />
           <View style={{ flex: 1 }}>
             <Txt variant="headline">{l(v.name)}</Txt>
@@ -78,7 +79,7 @@ export default function Cart() {
             if (!item) return null;
             const opt = optionText(item, line.sel);
             return (
-              <Animated.View key={line.key} layout={LinearTransition.springify().damping(18)} exiting={FadeOut.duration(160)}>
+              <Animated.View key={line.key} layout={LinearTransition.duration(220)} exiting={FadeOut.duration(160)}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12 }}>
                   <Art emoji={item.emoji} colors={v.colors} size={56} radiusPx={16} />
                   <View style={{ flex: 1, gap: 2 }}>
@@ -97,7 +98,7 @@ export default function Cart() {
 
         <Tap onPress={() => router.back()} scale={0.97}>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 4 }}>
-            <Ionicons name="add-circle" size={20} color={t.primary} />
+            <Ionicons name="add-circle" size={20} color={t.primaryText} />
             <Txt variant="callout" color="primary" style={{ fontWeight: '700' }}>{tr('addMore')}</Txt>
           </View>
         </Tap>

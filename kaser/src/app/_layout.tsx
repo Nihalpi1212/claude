@@ -4,6 +4,7 @@ import { Stack, SplashScreen } from 'expo-router';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
+import { ReduceMotion, ReducedMotionConfig } from 'react-native-reanimated';
 import { useStore } from '@/store';
 import { useT } from '@/i18n';
 import { applyDirection } from '@/lib/rtl';
@@ -39,6 +40,7 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: t.bg }}>
       <SafeAreaProvider>
+        <ReducedMotionConfig mode={ReduceMotion.System} />
         <StatusBar style={t.isDark ? 'light' : 'dark'} />
         <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: t.bg }, animation: 'slide_from_right' }}>
           <Stack.Protected guard={!onboarded}>
