@@ -1,0 +1,54 @@
+{
+  "expo": {
+    "name": "Kaser",
+    "slug": "kaser",
+    "scheme": "kaser",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "backgroundColor": "#8A1538",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "qa.kaser.app",
+      "buildNumber": "1",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Kaser uses your location to find restaurants and stores that deliver to you.",
+        "ITSAppUsesNonExemptEncryption": false,
+        "CFBundleAllowMixedLocalizations": true
+      }
+    },
+    "android": {
+      "package": "qa.kaser.app",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "backgroundColor": "#8A1538",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "permissions": ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION"],
+      "predictiveBackGestureEnabled": true
+    },
+    "plugins": [
+      "expo-router",
+      "expo-font",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 160,
+          "resizeMode": "contain",
+          "backgroundColor": "#8A1538"
+        }
+      ],
+      [
+        "expo-localization",
+        { "supportedLocales": { "ios": ["en", "ar"], "android": ["en", "ar"] } }
+      ]
+    ],
+    "extra": {
+      "eas": { "projectId": "" }
+    },
+    "runtimeVersion": { "policy": "appVersion" }
+  }
+}
