@@ -161,7 +161,11 @@ export function uid(prefix = '') {
  *   { id, kind: 'image'|'video', name, mime, bytes, width, height, durationSec,
  *     path: 'media/<id>', thumbPath: 'media/<id>.thumb', folderId, tags: [string],
  *     notes, captionHint, usedBy: [postId], autopilot: bool, createdAt,
- *     originalRemovedAt?: ISO (Settings → Free up space deleted the full-size file; only the thumbnail is left) }
+ *     originalRemovedAt?: ISO (Settings → Free up space deleted the full-size file; only the thumbnail is left),
+ *     importUrl?: string (set while the worker still has to download the file from this http(s) link: CSV and RSS imports;
+ *       the browser cannot fetch other sites because of the page's Content-Security-Policy), importError?: string,
+ *     sourceUrl?: string (the link it was downloaded from) }
+ *   Assets downloaded by the worker have no separate thumbnail: thumbPath === path.
  *
  * List (lists.lists[]) - evergreen / recurring queue:
  *   { id, name, color, enabled, order: 'sequential'|'shuffle', repeat: true (false = remove items once used), slots: [{weekday, time}],
@@ -323,6 +327,8 @@ export function validatePost(post, assets = {}) {
     const a = get(m.assetId);
     if (!a) err('media', 'A media file is missing from the library.');
     else if (a.originalRemovedAt) err('media', `The original of "${a.name || 'this file'}" was removed to save space. Upload it again to use it.`);
+    else if (a.importUrl && a.importError) err('media', `"${a.name || 'A file'}" could not be downloaded from its link: ${a.importError}`);
+    else if (a.importUrl) warn('media', `"${a.name || 'A file'}" is still being downloaded from its link by the worker. It must finish before the post can publish.`);
   }
 
   if (post.type === 'feed' && media.length > 1) err('media', 'A single post takes one photo or video. Use Carousel for more.');
