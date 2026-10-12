@@ -23,7 +23,7 @@ postpilot/
   index.html              App shell (loads js/main.js as an ES module)
   bio.html                Public link-in-bio page (reads public/bio.json, no login)
   manifest.webmanifest    Installable on phones
-  sw.js                   Service worker (push notifications only, no caching)
+  sw.js                   Service worker: push notifications and the Android share target (no caching)
   icons/                  App icons
   css/app.css             Design tokens + all component styles
   vendor/                 Vendored ES modules (do NOT edit):
@@ -35,7 +35,9 @@ postpilot/
     ig.js                 Instagram Graph API client
     publish.js            Publishing pipeline (containers -> status -> publish -> first comment)
     schedule.js           Best-time scoring, queue slots, autopilot/evergreen planning (pure)
-    analytics.js          KPI math, period comparisons, aggregations (pure)
+    analytics.js          KPI math, period comparisons, aggregations, per-post history, monthly reports (pure)
+    feed.js               RSS/Atom/RDF parser, og:image lookup, JPEG size (pure)
+    mp4.js                MP4 metadata stripping and dimensions/duration
     rules.js              Automation rule matching (pure)
     ai.js                 Claude-powered captions, hashtags, replies, insights
     webpush.js            Web Push (RFC 8291 + VAPID) used by the worker to notify the owner's devices
@@ -46,7 +48,7 @@ postpilot/
     app.js                <App>: AppContext provider, layout, router outlet
     router.js             Hash router
     data.js               useDoc / useDocs / mutate hooks over the store (live-refreshing cache)
-    push.js               Service worker registration + push subscription management
+    push.js               Service worker registration (on app start) + push subscriptions + shared files
     media.js              Image processing (JPEG conversion, crop, thumbnails, video probe), asset upload, thumb URL cache
     ui/                   Reusable components (see section 6)
     views/                One module per screen (see section 7)
@@ -109,11 +111,14 @@ overrides from env vars `POSTPILOT_GITHUB_API`, `POSTPILOT_RAW_BASE`, `POSTPILOT
 Documents (`model.DOC_NAMES`): `settings`, `posts`, `library`, `lists`, `automations`, `autopilot`,
 `hashtags`, `competitors`, `analytics-daily`, `analytics-media`, `analytics-stories`, `audience`,
 `inbox`, `log`, `bio` (public), `posts-archive` (published/canceled posts older than 90 days, moved there daily by
-the worker so `posts` stays small). Shapes are documented in `core/model.js`; constructors `newPost`,
+the worker so `posts` stays small), `analytics-media-history` (growth points of posts under 30 days old),
+`reports` (monthly reports written by the worker). Shapes are documented in `core/model.js`; constructors `newPost`,
 `newAsset`, `newRule`, `newList`; `validatePost(post, assetsById)`; `addHistory(post, event, detail)`.
 
 Media: `media/<assetId>` (encrypted original, JPEG for photos), `media/<assetId>.thumb` (encrypted
-JPEG, longest side 480px). Publishing exposes a plaintext copy (videos with their metadata boxes
+JPEG, longest side 480px). Assets made from a link (CSV or RSS) carry `importUrl` until the worker's
+`feeds` job has downloaded them (the page CSP keeps the browser from fetching other sites); downloaded
+files have no separate thumbnail (`thumbPath === path`). Publishing exposes a plaintext copy (videos with their metadata boxes
 renamed to `free` by `core/mp4.js`) at `public/tmp/<epochSec>-<random>.<ext>` on a separate
 throwaway branch, `postpilot-public-tmp`, never on the data branch. That branch has no history:
 every change points it at a new root commit (force) holding only the copies still needed. The worker
@@ -122,7 +127,9 @@ branch to hold only copies of containers Instagram is still processing. GitHub m
 commits reachable by their id for some time, so treat anything published as public.
 
 Post lifecycle: `draft` -> `scheduled` -> `publishing` -> `published` | `failed`; `canceled` is
-terminal. Only the worker moves a post out of `scheduled`. The app asks for immediate publishing by
+terminal. Reminder posts (`publishMode: 'reminder'`) go `scheduled` -> `reminded` (the worker sends a
+push instead of calling Instagram) -> `published` when the owner taps "Mark as posted" in `#/post-now/<id>`.
+A post deleted from Instagram becomes `canceled` with `deletedFromInstagramAt`; its media stays "used". Only the worker moves a post out of `scheduled`. The app asks for immediate publishing by
 setting `scheduledAt` to now, `status: 'scheduled'`, then dispatching the worker workflow.
 
 ## 5. Instagram client (`core/ig.js`) and publishing (`core/publish.js`)
@@ -205,15 +212,16 @@ Layout: left sidebar (desktop) / bottom tab bar + "More" sheet (phone, < 760px).
 | Route | Module | Purpose |
 |---|---|---|
 | `#/` | dashboard.js | Today: account header, KPIs vs previous period, next posts, worker health, alerts, quick actions |
-| `#/planner` | planner.js | Month/week calendar, list, Instagram grid preview; drag to reschedule; best-time hints |
+| `#/planner` | planner.js | Month/week/day calendar, list, Instagram grid preview, search; drag to reschedule; best-time hints; AI ideas |
+| `#/post-now/<id>` | post-now.js | Reminder posts: save files to the phone, copy caption, open Instagram, mark as posted (not in the nav) |
 | composer drawer | composer.js | Create/edit post: type, media, crop, caption, hashtags, first comment, collaborators, tags, location, alt text, preview, AI assist, schedule / queue / publish now / draft |
 | `#/library` | library.js | Media library: upload, folders, tags, unused filter, send to autopilot |
-| `#/queues` | queues.js | Evergreen lists (recurring slots that recycle content) |
+| `#/queues` | queues.js | Evergreen lists (recurring slots that recycle content); RSS/Atom feeds, CSV import and AI generation per list |
 | `#/autopilot` | autopilot.js | Autopilot settings, upcoming generated posts, approve/reject drafts |
 | `#/analytics` | analytics.js | Overview, Posts, Reels, Stories, Audience, Best times, Hashtags tabs; date range + compare; CSV export |
-| `#/reports` | reports.js | Printable report builder (window.print) |
-| `#/inbox` | inbox.js | Comments, Messages, Mentions; reply/hide/delete; saved replies; AI suggestions |
-| `#/automations` | automations.js | Keyword rules (comment reply, private reply DM, DM reply, hide), welcome DM, blocked words, activity |
+| `#/reports` | reports.js | Printable report builder (window.print) with logo and campaign section; past monthly reports |
+| `#/inbox` | inbox.js | Comments, Messages (story reply/mention chips), Mentions, Invites (`#/inbox/invites`); reply/hide/delete; saved replies; AI suggestions |
+| `#/automations` | automations.js | Keyword rules (comments, DMs, story replies, story mentions), watched-posts window, welcome DM, blocked words, collab auto-accept list, activity |
 | `#/competitors` | competitors.js | Tracked accounts via Business Discovery (Facebook Login) |
 | `#/hashtags` | hashtags.js | Hashtag sets, caption templates, saved replies, hashtag research (Facebook Login) |
 | `#/bio` | bio.js | Link-in-bio editor + preview + publish |
@@ -228,16 +236,22 @@ Env: `POSTPILOT_DATA_KEY` (base64 32 bytes, Actions secret), `GITHUB_TOKEN`, `GI
 Order per run (each job isolated with try/catch; one failing job never blocks the others):
 1. `token` refresh (Instagram Login, when older than 6 days or < 10 days to expiry)
 2. `outbox` commands queued by the app
-3. `publish` due posts (`scheduledAt <= now + lookahead`; waits for posts due within the run window)
-4. `evergreen` fill list slots for the next `horizonDays`
-5. `autopilot` keep the queue filled at best times (AI captions when configured)
-6. `automations` poll recent comments/DMs, apply rules, welcome DMs, blocked words
-7. `stories` capture live story insights before they expire
-8. `analytics` daily snapshot (once per local day), media insights refresh, audience weekly
-9. `competitors` daily (Facebook Login only)
-10. `bio` refresh grid images daily
-11. `housekeeping` sweep `public/tmp`, trim logs, record run summary
-12. `notify` send Web Push notifications for this run's events to `settings.notifications.subscriptions`
+3. `publish` due posts (`scheduledAt <= now + lookahead`; waits for posts due within the run window);
+   reminder posts get a push right away and need no Instagram connection; posts whose media is still
+   downloading wait
+4. `feeds` download linked media (`importUrl`, up to 8 a run) and check RSS/Atom feeds (hourly per feed)
+5. `evergreen` fill list slots for the next `horizonDays`
+6. `autopilot` keep the queue filled at best times (AI captions when configured), reposts of top posts
+7. `automations` poll comments (watched-posts window + chosen posts) and DMs, apply rules, welcome DMs, blocked words
+8. `invites` collaboration invites every 6 hours (auto-accept allowlist, otherwise notify)
+9. `stories` capture live story insights before they expire
+10. `analytics` daily snapshot (once per local day), media insights refresh, per-post history, audience weekly
+11. `competitors` daily (Facebook Login only)
+12. `reports` monthly report on days 1-3 of a month
+13. `bio` refresh grid images daily
+14. `housekeeping` sweep the throwaway media branch, trim logs, archive old posts
+15. `maintenance` keep-alive and monthly compaction of the data branch
+Then: Web Push notifications for this run's events to `settings.notifications.subscriptions`, and the run record.
 
 Public-log rule: Actions logs of a public repo are public. The worker prints ONLY counts and
 generic status ("published 1 post"). Never print captions, usernames, comment text, ids, tokens

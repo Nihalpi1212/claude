@@ -1,17 +1,18 @@
 # Postpilot
 
-Your private Instagram planner, publisher, analytics suite and autopilot. Postpilot does what Metricool
-does for Instagram, for one account (yours), and runs for free on your own GitHub account. No server,
-no subscription, and nobody else can open it.
+Your private Instagram planner, publisher, analytics suite and autopilot. Postpilot covers most of what
+Metricool does for Instagram, for one account (yours), and runs for free on your own GitHub account. No
+server, no subscription, and nobody else can open it. What it does not do (and why) is listed under
+"Good to know" below.
 
 ## What it does
 
 | Area | Features |
 |---|---|
-| **Plan** | Month, week, list and Instagram-grid calendar with drag-to-reschedule · posts, carousels (up to 10), reels (cover frame, trial reels, share-to-feed) and stories · first comment, collaborators, user tags, location, alt text, "AI info" label · best-time suggestions and "add to queue" · drafts, duplicate, bulk actions · CSV import/export |
-| **Automate** | Auto-publishing on schedule · evergreen queues that recycle content on fixed weekly slots · **Autopilot**: drop photos and videos in a pool and it writes captions (Claude AI, optional), picks your best times and fills your calendar, with or without your approval · keyword auto-replies to comments, comment-to-DM private replies, DM keyword replies, welcome message, hide comments with blocked words · push notifications to your phone |
-| **Measure** | Follower growth, reach, views, interactions, accounts engaged, link taps with period comparison · post, reel and story tables (stories are saved every 10 minutes before Instagram deletes them) · audience demographics and online-follower heatmap · best times to post · hashtag performance · competitor benchmarks · printable/PDF reports and CSV export |
-| **Engage** | Unified inbox for comments and DMs with saved replies and AI-suggested replies · hide, delete, private reply, turn comments off |
+| **Plan** | Month, week, day, list and Instagram-grid calendar with drag-to-reschedule and search · posts, carousels (up to 10), reels (cover frame, trial reels, share-to-feed) and stories · first comment, collaborators, user tags, location, alt text, "AI info" label · best-time suggestions and "add to queue" · drafts, duplicate, bulk actions · CSV import/export (media from your library or from links) · AI caption writer with rewrite actions (shorter, longer, fix grammar, call to action, tone, translate) and "ideas for next week" |
+| **Automate** | Auto-publishing on schedule · **reminder posts** for what the API cannot post (music, link stickers, polls): your phone gets a notification and a "post now" screen with the files and caption ready · evergreen queues on fixed weekly slots, filled by hand, from RSS/Atom feeds, from a CSV or with AI · **Autopilot**: drop photos and videos in a pool and it writes captions (Claude AI, optional), picks your best times and fills your calendar, with or without your approval, and can repost your top posts · keyword auto-replies to comments and comment-to-DM private replies (posts from the last 90 days, up to 50, plus any post you pick; both adjustable) · DM keyword replies, replies to your stories and stories that mention you · welcome message · hide comments with blocked words · collaboration invites accepted automatically from people you allow · push notifications to your phone · share photos into Postpilot from the Android share sheet |
+| **Measure** | Follower growth, reach, views, interactions, accounts engaged, link taps with period comparison · reach and views from followers vs non-followers and by format · post, reel and story tables, with each young post's growth over time and views at 24 hours and 7 days (trial reels get a hint when they beat your median) · stories are captured while they are live (when first seen, then hourly, and on every run in their last 90 minutes) · audience demographics and online-follower heatmap · best times to post · hashtag performance · campaign results by post label · competitor benchmarks · printable/PDF reports with your logo, an automatic monthly report, and CSV export |
+| **Engage** | Inbox for comments on your latest 12 posts and for DMs, with saved replies and AI-suggested replies · hide, delete, private reply, turn comments off · collaboration invites (accept or decline) · delete a published post (Facebook Login only) |
 | **Grow** | Link-in-bio page with buttons and a grid of your posts, each linking wherever you want |
 
 ## How it works
@@ -34,6 +35,9 @@ no subscription, and nobody else can open it.
   (that is what keeps GitHub Pages and Actions free), but the data on that branch is unreadable without
   your passphrase.
 - The web app is a locked shell for anyone else: opening it needs your GitHub token **and** your passphrase.
+  If you turn on "Remember this device", that browser keeps the token and the data key, so anyone who can use
+  that browser profile can open Postpilot without the passphrase. Only turn it on for your own devices; the
+  lock button and Settings → Security → "Forget this device" remove them.
 - The worker gets the data key through an encrypted GitHub Actions secret and prints only counts in its
   (public) logs.
 - When a post is published, Instagram has to download the photo or video from a public URL. Postpilot
@@ -86,23 +90,35 @@ and starts the first run. From then on the worker runs every 10 minutes.
 ### 7. Optional
 - **AI captions and replies:** add an Anthropic API key in Settings → AI.
 - **Phone notifications:** Settings → Notifications. On iPhone, first add Postpilot to your Home Screen
-  (Share → Add to Home Screen) and turn notifications on from there.
+  (Share → Add to Home Screen) and turn notifications on from there. Reminder posts need this to reach your
+  phone (otherwise they only show on the Today screen).
+- **Share into Postpilot:** on Android, install Postpilot (browser menu → Install app / Add to Home screen),
+  then share photos or videos to it from any app. iPhone browsers do not support this.
 - **DM automations:** in the Instagram app, Settings → Messages and story replies → Message controls →
   Connected tools → turn on **Allow access to messages**.
 
 ## Good to know
 
 - **Timing:** GitHub starts scheduled runs every 10 minutes but can delay them, sometimes by 10–20 minutes
-  at busy times. Posts publish on the first run at or after their time. "Publish now" starts a run right away
-  (usually live in 1–3 minutes).
+  at busy times. A run also waits up to 9 minutes for posts that come due while it is running, so most posts go
+  out within a few minutes of their time; when GitHub delays runs, they go out on the next run. "Publish now"
+  starts a run right away (usually live in 1–3 minutes).
 - **Hashtags:** Instagram limits posts to 5 hashtags (since December 2025). Postpilot warns above 5.
 - **DM automation limits:** Instagram allows one private reply per comment within 7 days, and DM replies only
   within 24 hours of the person's last message. Postpilot never sends unsolicited DMs. Sending DMs to people
   who do not have a role on your Meta app may require Meta's Advanced Access (App Review); comment replies,
   publishing and analytics work without it.
-- **What the official API cannot do:** music from Instagram's library, story stickers and links, editing a
-  caption after publishing, following/liking/unfollowing (automating those breaks Instagram's terms and gets
-  accounts restricted, so Postpilot does not do it).
+- **What Postpilot cannot post for you:** story stickers and links, polls, filters, and editing a caption after
+  publishing are not in the official API. Music from Instagram's library is only in the API for some accounts on
+  Facebook Login, and Postpilot does not support it yet. Use a reminder post for these: Postpilot notifies you at
+  the right time with the files and caption ready to post by hand. Following, liking and unfollowing are not
+  automated (that breaks Instagram's terms and gets accounts restricted).
+- **Links and feeds:** the browser cannot download files from other websites, so photos and videos from RSS
+  feeds and CSV links are downloaded by the worker (up to 8 a run). It can only publish JPEG photos it downloads;
+  for PNG or WebP it tells you to download the file and upload it in the Library, which converts it.
+- **Less certain Instagram features:** Meta documents story replies, story mentions and collaboration invites
+  less clearly than the rest of the API. Postpilot handles the documented shapes; if Instagram refuses
+  collaboration invites for your account, the Invites tab says so and you answer them in the Instagram app.
 - **Storage:** media lives in this repository (encrypted). GitHub recommends keeping repositories under a few
   GB. Settings → Data can free space by removing media of posts published long ago. The worker compacts the
   data history monthly.
@@ -111,7 +127,10 @@ and starts the first run. From then on the worker runs every 10 minutes.
   could limit the workflow. Postpilot keeps runs short (most finish in seconds). If it is ever blocked, the app
   keeps working, and the worker runs anywhere with Node 20+: `node postpilot/worker/run.mjs` with the
   `POSTPILOT_DATA_KEY`, `GITHUB_TOKEN` (a token with Contents read/write) and `GITHUB_REPOSITORY` environment
-  variables, for example from a cron job on any always-on computer.
+  variables, for example from a cron job on any always-on computer. Run it every 10 minutes. Two things then
+  stop working: the app's "Publish now" and "Run now" buttons (they start the GitHub Actions workflow), and the
+  monthly keep-alive that stops GitHub from switching off scheduled workflows in quiet repositories (not needed
+  outside Actions).
 
 ## Developing locally
 
