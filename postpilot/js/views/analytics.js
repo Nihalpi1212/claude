@@ -272,6 +272,7 @@ export function useAnalytics(range, { compare = true } = {}) {
   const bridgeKey = bridge ? `${bridge.fromKey}|${bridge.toKey}` : '';
 
   const [live, setLive] = useState({});
+  const [retry, setRetry] = useState(0);
   const alive = useRef(true);
   useEffect(() => () => (alive.current = false), []);
   useEffect(() => {
@@ -286,7 +287,7 @@ export function useAnalytics(range, { compare = true } = {}) {
         (error) => alive.current && setLive((s) => ({ ...s, [k]: { status: 'error', error } })),
       );
     }
-  }, [ig, tz, curKey, prevKey, bridgeKey]);
+  }, [ig, tz, curKey, prevKey, bridgeKey, retry]);
 
   const curLive = curKey ? live[curKey] || { status: ig ? 'loading' : 'unavailable' } : null;
   const prevLive = prevKey ? live[prevKey] || { status: ig ? 'loading' : 'unavailable' } : null;
@@ -341,6 +342,8 @@ export function useAnalytics(range, { compare = true } = {}) {
     live: { current: curNeed && { ...curNeed, ...curLive }, previous: prevNeed && { ...prevNeed, ...prevLive } },
     coverage: coverage(stored, range, today),
     freshness,
+    /** Ask Instagram again for live days that failed to load. */
+    retryLive: () => setRetry((n) => n + 1),
   };
 }
 
@@ -376,8 +379,10 @@ export function computeOverview(a, tz, { compare = true } = {}) {
     return i != null && d.reach > 0 ? i / d.reach : null;
   });
   const has = (pv) => compare && isNum(pv);
-  const prevLoading = compare && a.live && a.live.previous && a.live.previous.status === 'loading';
-  const missingLabel = prevLoading ? 'Loading the previous period…' : 'No data for the previous period';
+  const prevState = compare && a.live && a.live.previous ? a.live.previous.status : null;
+  const missingLabel = prevState === 'loading' ? 'Loading the previous period…'
+    : prevState === 'error' ? 'Could not load the previous period from Instagram'
+    : 'No data for the previous period';
 
   const tiles = [
     {
@@ -626,6 +631,11 @@ function SourceNotes({ a, ig }) {
     else if (cur.status === 'done') out.push(html`<${Badge} tone="info" icon="instagram-outline" key="cd" title=${`Live from Instagram: ${formatRangeLabel(cur.fromKey, cur.toKey)}`}>${cur.mode === 'gaps' ? 'Gaps filled live from Instagram' : 'Live from Instagram'}<//>`);
   }
   if (prev && prev.status === 'done') out.push(html`<span class="muted text-sm" key="pd">Previous period loaded live from Instagram</span>`);
+  else if (prev && prev.status === 'error') {
+    const msg = prev.error && prev.error.userMessage;
+    out.push(html`<span class="muted text-sm" key="pe">Could not load the previous period from Instagram${msg ? `: ${msg}` : '.'}</span>`);
+    if (a.retryLive) out.push(html`<${Button} key="pr" size="sm" variant="ghost" icon="refresh" onClick=${a.retryLive}>Try again<//>`);
+  }
   return out.length ? html`<span class="row an-source">${out}</span>` : null;
 }
 

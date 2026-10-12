@@ -37,7 +37,9 @@ export function createGitHub({ token, owner, repo, apiBase = DEFAULT_API, fetchI
     if (token) headers.Authorization = `Bearer ${token}`;
     if (body !== undefined) headers['Content-Type'] = 'application/json';
     let res;
+    let text = null;
     for (let attempt = 0; ; attempt++) {
+      text = null;
       try {
         res = await doFetch(url, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), cache: 'no-store' });
       } catch (err) {
@@ -47,16 +49,25 @@ export function createGitHub({ token, owner, repo, apiBase = DEFAULT_API, fetchI
         }
         throw new GitHubError(0, `Could not reach GitHub (${err.message || err}).`);
       }
-      // Retry transient server errors and secondary rate limits a couple of times.
-      if ((res.status >= 500 || res.status === 429) && attempt < 2) {
-        await sleep(Number(res.headers.get('retry-after') || 0) * 1000 || 1000 * (attempt + 1));
+      // Retry transient server errors and rate limits a couple of times. GitHub reports secondary
+      // rate limits as 403 (or 429); a limit that resets more than a minute away is not waited for.
+      if (res.status >= 500 && attempt < 2) {
+        await sleep(Math.min(retryDelayMs(res, attempt), MAX_RETRY_WAIT_MS));
         continue;
+      }
+      if ((res.status === 429 || res.status === 403) && attempt < 2) {
+        text = await res.text();
+        const wait = retryDelayMs(res, attempt);
+        if ((res.status === 429 || /rate limit/i.test(text)) && wait <= MAX_RETRY_WAIT_MS) {
+          await sleep(wait);
+          continue;
+        }
       }
       break;
     }
     if (res.status === 404 && allow404) return null;
     if (res.status === 204) return null;
-    const text = await res.text();
+    if (text === null) text = await res.text();
     let data = null;
     if (text) {
       try {
@@ -167,6 +178,19 @@ function encodeBranch(branch) {
 
 function encodePath(path) {
   return path.split('/').map(encodeURIComponent).join('/');
+}
+
+const MAX_RETRY_WAIT_MS = 60_000;
+
+/** How long to wait before retrying: retry-after, else the rate-limit reset time, else a short backoff. */
+function retryDelayMs(res, attempt) {
+  const after = Number(res.headers.get('retry-after'));
+  if (after > 0) return after * 1000;
+  if (res.headers.get('x-ratelimit-remaining') === '0') {
+    const reset = Number(res.headers.get('x-ratelimit-reset')) * 1000 - Date.now();
+    if (reset > 0) return reset + 1000;
+  }
+  return 1000 * (attempt + 1);
 }
 
 function friendlyMessage(status, msg) {

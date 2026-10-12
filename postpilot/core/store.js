@@ -18,6 +18,18 @@ import { defaultDoc, docPath, migrateDoc } from './model.js';
 
 export const DATA_BRANCH = 'postpilot-data';
 
+// Plaintext marker `lock/compacting-<epochMs>` the worker commits while it replaces the branch
+// (worker/jobs/maintenance.mjs). Its forced reset could discard a commit made meanwhile, so
+// transact() waits while a fresh marker is in the tree. Markers older than 5 minutes are ignored.
+export const COMPACT_LOCK_PREFIX = 'lock/compacting-';
+const COMPACT_LOCK_MS = 5 * 60_000;
+
+function compactionLocked(files, writes) {
+  const locks = [...files.keys()].filter((p) => p.startsWith(COMPACT_LOCK_PREFIX));
+  if (!locks.length || locks.some((p) => writes.has(p))) return false; // the worker's own lock/unlock
+  return locks.some((p) => Math.abs(Date.now() - Number(p.slice(COMPACT_LOCK_PREFIX.length))) < COMPACT_LOCK_MS);
+}
+
 export class ConflictError extends Error {
   constructor() {
     super('Could not save because the data kept changing. Try again in a moment.');
@@ -25,24 +37,64 @@ export class ConflictError extends Error {
   }
 }
 
-/** In-memory (and optionally persistent) cache of git blobs keyed by sha. Blobs are immutable. */
-export function createBlobCache({ persist } = {}) {
-  const mem = new Map();
+/**
+ * In-memory (and optionally persistent) cache of git blobs keyed by sha. Blobs are immutable.
+ * The memory part is a byte-capped LRU that never holds large blobs (video originals), and only
+ * blobs under 8 MB are persisted. A persistent store that does not answer in time counts as a miss,
+ * so a stuck IndexedDB can never block reads.
+ */
+export function createBlobCache({ persist, maxMemBytes = 48 * 1024 * 1024, maxItemBytes = 4 * 1024 * 1024, persistMaxBytes = 8 * 1024 * 1024, persistTimeoutMs = 1500 } = {}) {
+  const mem = new Map(); // sha -> bytes, least recently used first
+  let memBytes = 0;
+  const drop = (sha) => {
+    const v = mem.get(sha);
+    if (!v) return;
+    mem.delete(sha);
+    memBytes -= v.length;
+  };
+  const remember = (sha, bytes) => {
+    drop(sha);
+    if (bytes.length > maxItemBytes) return;
+    mem.set(sha, bytes);
+    memBytes += bytes.length;
+    for (const k of mem.keys()) {
+      if (memBytes <= maxMemBytes) break;
+      drop(k);
+    }
+  };
+  const persisted = (p) =>
+    new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(null), persistTimeoutMs);
+      Promise.resolve(p).then(
+        (v) => (clearTimeout(timer), resolve(v || null)),
+        () => (clearTimeout(timer), resolve(null)),
+      );
+    });
   return {
     async get(sha) {
-      if (mem.has(sha)) return mem.get(sha);
+      const hit = mem.get(sha);
+      if (hit) {
+        remember(sha, hit); // mark as recently used
+        return hit;
+      }
       if (persist) {
-        const v = await persist.get(sha).catch(() => null);
+        const v = await persisted(persist.get(sha));
         if (v) {
-          mem.set(sha, v);
+          remember(sha, v);
           return v;
         }
       }
       return null;
     },
     async set(sha, bytes) {
-      mem.set(sha, bytes);
-      if (persist && bytes.length < 8 * 1024 * 1024) await persist.set(sha, bytes).catch(() => {});
+      remember(sha, bytes);
+      // Not awaited: the persistent copy is only an optimisation for the next visit.
+      if (persist && bytes.length < persistMaxBytes) Promise.resolve(persist.set(sha, bytes)).catch(() => {});
+    },
+    /** Drop a blob that is no longer needed (e.g. a superseded document version). */
+    async forget(sha) {
+      drop(sha);
+      if (persist && persist.delete) await persisted(persist.delete(sha));
     },
   };
 }
@@ -50,14 +102,27 @@ export function createBlobCache({ persist } = {}) {
 export function createStore({ gh, key, branch = DATA_BRANCH, cache = createBlobCache(), author = 'app', onChange } = {}) {
   let head = null; // { commit, tree, files: Map(path -> {sha, size}) }
   let headPromise = null;
-  const decoded = new Map(); // `${path}@${sha}` -> parsed doc (deep-cloned on read)
+  const decoded = new Map(); // path -> { sha, value }: the latest parsed version of each doc (deep-cloned on read)
+  const superseded = new Set(); // commits our own successful writes moved the branch past
+
+  /** Memoise a parsed doc version and let the cache drop the version it replaces. */
+  function rememberDoc(path, sha, value) {
+    const prev = decoded.get(path);
+    if (prev && prev.sha !== sha && cache.forget) cache.forget(prev.sha).catch(() => {});
+    decoded.set(path, { sha, value });
+  }
 
   async function loadHead() {
+    const before = head;
     const commit = await gh.getRef(branch);
     if (!commit) throw new GitHubError(404, `The data branch "${branch}" does not exist yet. Finish setup first.`);
     if (head && head.commit === commit) return head;
+    // A local commit landed while we were reading the ref, or the ref read lags behind our own write:
+    // keep the newer head instead of rolling back to an older snapshot.
+    if (head !== before || superseded.has(commit)) return head;
     const c = await gh.getCommit(commit);
     const entries = await gh.getTree(c.tree.sha);
+    if (head !== before) return head; // a local commit landed during the fetch
     const prev = head;
     head = { commit, tree: c.tree.sha, files: new Map(entries.map((e) => [e.path, { sha: e.sha, size: e.size }])), loadedAt: Date.now() };
     if (prev && onChange) {
@@ -91,13 +156,15 @@ export function createStore({ gh, key, branch = DATA_BRANCH, cache = createBlobC
     const path = docPath(name);
     const file = snapshot.files.get(path);
     if (!file) return defaultDoc(name);
-    const memoKey = `${path}@${file.sha}`;
-    if (!decoded.has(memoKey)) {
+    let memo = decoded.get(path);
+    if (!memo || memo.sha !== file.sha) {
       const raw = await blobBytes(file.sha);
       const value = path.endsWith('.enc') ? await decryptJSON(key, raw) : JSON.parse(fromUtf8(raw));
-      decoded.set(memoKey, migrateDoc(name, value));
+      memo = { sha: file.sha, value: migrateDoc(name, value) };
+      // Only the current head's version is kept, so a read of an older snapshot does not evict it.
+      if (snapshot === head || !decoded.has(path)) rememberDoc(path, file.sha, memo.value);
     }
-    return structuredClone(decoded.get(memoKey));
+    return structuredClone(memo.value);
   }
 
   async function readBytesAt(snapshot, path, { decrypt = true } = {}) {
@@ -109,6 +176,9 @@ export function createStore({ gh, key, branch = DATA_BRANCH, cache = createBlobC
 
   async function transact(fn, { message = 'update', retries = 6 } = {}) {
     let lastErr;
+    // Byte writes keep their blob across conflict retries. Encrypting again would give new bytes
+    // (fresh IV), so without this a large upload would be sent again on every attempt.
+    const byteBlobs = new Map(); // path -> { bytes, encrypt, sha }
     for (let attempt = 0; attempt <= retries; attempt++) {
       const snap = attempt === 0 ? await ensureHead() : await refresh();
       const writes = new Map(); // path -> {bytes|null}
@@ -148,19 +218,34 @@ export function createStore({ gh, key, branch = DATA_BRANCH, cache = createBlobC
       };
       const result = await fn(tx);
       if (!writes.size) return result;
+      if (compactionLocked(snap.files, writes)) {
+        // The worker is compacting the branch: wait, then build on the compacted branch.
+        lastErr = new ConflictError();
+        await sleep(2000);
+        continue;
+      }
 
       const entries = [];
+      const docBlobs = []; // [path, sha, docName, value]: memoised once the commit lands
       for (const [path, w] of writes) {
         if (w.remove) {
           entries.push({ path, sha: null });
           continue;
+        }
+        if (!w.doc) {
+          const prev = byteBlobs.get(path);
+          if (prev && prev.bytes === w.bytes && prev.encrypt === w.encrypt) {
+            entries.push({ path, sha: prev.sha });
+            continue;
+          }
         }
         let bytes;
         if (w.doc) bytes = path.endsWith('.enc') ? await encryptJSON(key, w.value) : utf8(JSON.stringify(w.value, null, 2));
         else bytes = w.encrypt ? await encryptBytes(key, w.bytes) : w.bytes;
         const sha = await gh.createBlob(bytes);
         await cache.set(sha, bytes);
-        if (w.doc) decoded.set(`${path}@${sha}`, migrateDoc(w.doc, structuredClone(w.value)));
+        if (w.doc) docBlobs.push([path, sha, w.doc, w.value]);
+        else byteBlobs.set(path, { bytes: w.bytes, encrypt: w.encrypt, sha });
         entries.push({ path, sha });
       }
       const tree = await gh.createTree(entries, snap.tree);
@@ -176,6 +261,9 @@ export function createStore({ gh, key, branch = DATA_BRANCH, cache = createBlobC
         throw err;
       }
       // Advance our cached head without another round trip.
+      if (superseded.size >= 200) superseded.clear();
+      superseded.add(snap.commit);
+      for (const [path, sha, name, value] of docBlobs) rememberDoc(path, sha, migrateDoc(name, structuredClone(value)));
       const files = new Map(snap.files);
       for (const e of entries) {
         if (e.sha === null) files.delete(e.path);

@@ -12,7 +12,7 @@ import { html, useEffect, useMemo, useRef, useState } from '../../vendor/preact.
 import { unusedAssets } from '../../core/schedule.js';
 import { loadViewCss } from '../css.js';
 import { useDoc } from '../data.js';
-import { isImageFile, isVideoFile, originalUrl, prepareFile, thumbUrl, uploadPrepared } from '../media.js';
+import { isImageFile, isVideoFile, onMediaUrlRevoked, originalUrl, prepareFile, thumbUrl, uploadPrepared } from '../media.js';
 import { Button, Callout, EmptyState, Frame, Modal, ProgressBar, Segmented, Select, Skeleton, TextInput, cx } from './kit.js';
 
 loadViewCss('composer');
@@ -21,6 +21,7 @@ loadViewCss('composer');
 // Decrypted media URLs
 
 const resolved = new Map(); // path -> object URL (already decrypted)
+onMediaUrlRevoked((path) => resolved.delete(path)); // media.js revokes least recently used URLs
 
 /** Object URL of an asset's thumbnail ('thumb') or original ('original'); null while loading or on error. */
 export function useAssetUrl(asset, variant = 'thumb') {

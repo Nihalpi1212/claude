@@ -97,19 +97,20 @@ export default function LockScreen({ onUnlocked, onChange }) {
       ${step === 'token' &&
       html`<form class="stack" onSubmit=${checkToken}>
         <div class="grid-2">
-          <${Field} label="GitHub account">
-            <${TextInput} id="lock-owner" value=${owner} onInput=${(e) => setOwner(e.currentTarget.value)} autocomplete="username" spellcheck=${false} />
+          <${Field} id="lock-owner" label="GitHub account">
+            <${TextInput} value=${owner} onInput=${(e) => setOwner(e.currentTarget.value)} autocomplete="username" spellcheck=${false} />
           <//>
-          <${Field} label="Repository">
-            <${TextInput} id="lock-repo" value=${repo} onInput=${(e) => setRepo(e.currentTarget.value)} spellcheck=${false} />
+          <${Field} id="lock-repo" label="Repository">
+            <${TextInput} value=${repo} onInput=${(e) => setRepo(e.currentTarget.value)} spellcheck=${false} />
           <//>
         </div>
         <${Field}
+          id="lock-token"
           label="GitHub access token"
           hint=${html`A fine-grained token for this repository with Contents, Actions and Secrets set to "Read and write".
             <a href=${tokenUrl(owner || 'me', repo || 'repo')} target="_blank" rel="noopener">Create one on GitHub <${Icon} name="external" size=${12} /></a>`}
         >
-          <${TextInput} id="lock-token" type="password" value=${token} onInput=${(e) => setToken(e.currentTarget.value)} autocomplete="off" spellcheck=${false} placeholder="github_pat_…" />
+          <${TextInput} type="password" value=${token} onInput=${(e) => setToken(e.currentTarget.value)} autocomplete="off" spellcheck=${false} placeholder="github_pat_…" />
         <//>
         ${error && html`<${Callout} tone="danger">${error}<//>`}
         <${Button} type="submit" variant="primary" loading=${busy}>Continue<//>
@@ -118,8 +119,8 @@ export default function LockScreen({ onUnlocked, onChange }) {
       ${step === 'unlock' &&
       html`<form class="stack" onSubmit=${doUnlock}>
         <p>Signed in to GitHub as <strong>${info.login}</strong>. Enter your passphrase to decrypt your workspace.</p>
-        <${Field} label="Passphrase">
-          <${TextInput} id="lock-passphrase" type="password" value=${passphrase} onInput=${(e) => setPassphrase(e.currentTarget.value)} autocomplete="current-password" autofocus />
+        <${Field} id="lock-passphrase" label="Passphrase">
+          <${TextInput} type="password" value=${passphrase} onInput=${(e) => setPassphrase(e.currentTarget.value)} autocomplete="current-password" autofocus />
         <//>
         <${Toggle} checked=${remember} onChange=${setRemember} label="Remember this device" />
         <p class="hint">Only turn this on for a device you alone use. Anyone with this browser profile could open ${APP_NAME}.</p>
@@ -134,11 +135,11 @@ export default function LockScreen({ onUnlocked, onChange }) {
       html`<form class="stack" onSubmit=${doCreate}>
         <p>Signed in as <strong>${info.login}</strong>. ${APP_NAME} is not set up in <span class="mono">${owner}/${repo}</span> yet.
         Choose a passphrase. It encrypts everything ${APP_NAME} stores in this public repository.</p>
-        <${Field} label="New passphrase" hint="At least 12 characters. A short sentence of three or four words is easy to remember and hard to guess. The encrypted key file is public, so a weak passphrase can be guessed offline.">
-          <${TextInput} id="lock-new-passphrase" type="password" value=${passphrase} onInput=${(e) => setPassphrase(e.currentTarget.value)} autocomplete="new-password" />
+        <${Field} id="lock-new-passphrase" label="New passphrase" hint="At least 12 characters. A short sentence of three or four words is easy to remember and hard to guess. The encrypted key file is public, so a weak passphrase can be guessed offline.">
+          <${TextInput} type="password" value=${passphrase} onInput=${(e) => setPassphrase(e.currentTarget.value)} autocomplete="new-password" />
         <//>
-        <${Field} label="Repeat passphrase">
-          <${TextInput} id="lock-new-passphrase-2" type="password" value=${passphrase2} onInput=${(e) => setPassphrase2(e.currentTarget.value)} autocomplete="new-password" />
+        <${Field} id="lock-new-passphrase-2" label="Repeat passphrase">
+          <${TextInput} type="password" value=${passphrase2} onInput=${(e) => setPassphrase2(e.currentTarget.value)} autocomplete="new-password" />
         <//>
         <${Callout} tone="warning" title="Write it down">There is no reset. If you forget the passphrase, your scheduled posts and settings cannot be decrypted.<//>
         <${Toggle} checked=${remember} onChange=${setRemember} label="Remember this device" />

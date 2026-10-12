@@ -324,6 +324,53 @@ test('expandListSlots: a slot inside the spring-forward gap moves to the next va
   assert.equal(local(f.slots[0].scheduledAt), '2026-11-01 01:30');
 });
 
+test('DST gap east of UTC: Sunday 02:30 stays on Sunday (03:30), times next to a transition stay exact', () => {
+  const sunday230 = [{ weekday: 0, time: '02:30' }];
+  for (const [tz, now, day] of [['Europe/Berlin', '2026-03-27T12:00:00Z', '2026-03-29'], ['Australia/Sydney', '2026-10-02T12:00:00Z', '2026-10-04']]) {
+    const fixed = suggestSlots({ tz, now, count: 1, horizonDays: 3, fixedSlots: sunday230 });
+    assert.deepEqual(fixed.map((s) => local(s, tz)), [`${day} 03:30`], tz);
+    const r = expandListSlots(list({ slots: sunday230 }), { tz, now, horizonDays: 3 });
+    assert.deepEqual(r.slots.map((s) => [local(s.scheduledAt, tz), s.listSlot]), [[`${day} 03:30`, `${day}@02:30`]], tz);
+  }
+  // Valid wall times on transition days keep their exact time.
+  const fall = expandListSlots(list({ slots: [{ weekday: 0, time: '01:30' }, { weekday: 0, time: '03:00' }] }), { tz: 'Europe/Berlin', now: '2026-10-23T12:00:00Z', horizonDays: 3 });
+  assert.deepEqual(fall.slots.map((s) => local(s.scheduledAt, 'Europe/Berlin')), ['2026-10-25 01:30', '2026-10-25 03:00']);
+  const syd = expandListSlots(list({ slots: [{ weekday: 0, time: '00:00' }] }), { tz: 'Australia/Sydney', now: '2026-04-03T00:00:00Z', horizonDays: 3 });
+  assert.deepEqual(syd.slots.map((s) => local(s.scheduledAt, 'Australia/Sydney')), ['2026-04-05 00:00']);
+  const ny = suggestSlots({ tz: TZ, now: '2026-03-07T12:00:00Z', count: 2, horizonDays: 3, fixedSlots: [{ weekday: 0, time: '03:00' }, { weekday: 0, time: '01:30' }], minGapHours: 0, maxPerDay: 0 });
+  assert.deepEqual(ny.map((s) => local(s)), ['2026-03-08 01:30', '2026-03-08 03:00']);
+});
+
+test('expandListSlots: a moved list post keeps its slot filled (listSlot identity)', () => {
+  const r = expandListSlots(list(), { tz: TZ, now: NOW });
+  assert.deepEqual(r.slots.map((s) => s.listSlot), ['2026-10-12@09:00', '2026-10-15@18:30', '2026-10-19@09:00', '2026-10-22@18:30']);
+  const created = r.slots.map((s) => newPost({ listId: 'l_1', status: 'scheduled', scheduledAt: s.scheduledAt, listSlot: s.listSlot }));
+  // Drag the Thursday post to Friday 10:00 and shift the next Monday one by two days.
+  created[1].scheduledAt = at('2026-10-16', '10:00');
+  created[2].scheduledAt = new Date(Date.parse(created[2].scheduledAt) + 2 * 864e5).toISOString();
+  created[3].status = 'canceled';
+  assert.deepEqual(expandListSlots(list({ nextIndex: r.nextIndex }), { tz: TZ, now: NOW, existingPosts: created }).slots, []);
+  // Without listSlot (posts made before it existed) only the time match counts, so the moved slots reopen.
+  const legacy = created.map((p) => ({ ...p, listSlot: undefined }));
+  assert.deepEqual(
+    expandListSlots(list(), { tz: TZ, now: NOW, existingPosts: legacy }).slots.map((s) => s.listSlot),
+    ['2026-10-15@18:30', '2026-10-19@09:00'],
+  );
+});
+
+test('expandListSlots: changing the time zone does not fill the same slots again', () => {
+  const now = '2026-10-12T02:00:00Z';
+  const berlin = expandListSlots(list(), { tz: 'Europe/Berlin', now });
+  assert.equal(berlin.slots.length, 4);
+  const posts = berlin.slots.map((s) => newPost({ listId: 'l_1', status: 'scheduled', scheduledAt: s.scheduledAt, listSlot: s.listSlot }));
+  for (const tz of [TZ, 'Asia/Tokyo', 'Europe/Berlin']) {
+    const again = expandListSlots(list(), { tz, now, existingPosts: posts });
+    const ids = new Set(posts.map((p) => p.listSlot));
+    assert.ok(again.slots.every((s) => !ids.has(s.listSlot)), `${tz}: no slot is filled twice`);
+  }
+  assert.deepEqual(expandListSlots(list(), { tz: TZ, now, existingPosts: posts }).slots, []);
+});
+
 test('listItemIndex: shuffle is a deterministic permutation per cycle without boundary repeats', () => {
   for (const id of ['l_a', 'l_b', 'l_c', 'l_d']) {
     const l = list({ id, order: 'shuffle', items: Array.from({ length: 5 }, (_, i) => ({ id: `i${i}` })) });
@@ -418,6 +465,19 @@ test('planAutopilot: only unused autopilot media, with useAllUnused fallback', (
   assert.equal(none.code, 'no_assets');
   const fallback = planAutopilot({ autopilot: { ...AP, useAllUnused: true }, assets: [newAsset({ id: 'x' })], tz: TZ, now: NOW });
   assert.deepEqual(fallback.create.map((c) => c.assetIds), [['x']]);
+});
+
+test('planAutopilot: media from a rejected draft is not suggested again by useAllUnused', () => {
+  const rejected = newPost({ id: 'p1', source: 'autopilot', status: 'canceled', media: [{ assetId: 'a1' }], history: [{ at: NOW, event: 'created' }, { at: NOW, event: 'rejected' }] });
+  const assets = [newAsset({ id: 'a1', autopilot: false, usedBy: ['p1'] })];
+  const ap = { ...AP, useAllUnused: true };
+  assert.equal(planAutopilot({ autopilot: ap, assets, posts: [rejected], tz: TZ, now: NOW }).code, 'no_assets');
+  // A post canceled for another reason frees its media as before.
+  const canceled = { ...rejected, history: [{ at: NOW, event: 'canceled' }] };
+  assert.deepEqual(planAutopilot({ autopilot: ap, assets, posts: [canceled], tz: TZ, now: NOW }).create.map((c) => c.assetIds), [['a1']]);
+  // Marking it for autopilot again is an explicit choice: it comes back.
+  const again = [{ ...assets[0], autopilot: true }];
+  assert.deepEqual(planAutopilot({ autopilot: ap, assets: again, posts: [rejected], tz: TZ, now: NOW }).create.map((c) => c.assetIds), [['a1']]);
 });
 
 test('planAutopilot: allowed types, long folders and video fallback', () => {

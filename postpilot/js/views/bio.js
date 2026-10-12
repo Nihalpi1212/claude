@@ -2,7 +2,9 @@
 // the same renderer as bio.html, and publish or unpublish it.
 //
 // The bio document is public JSON (public/bio.json). Edits stay local until "Publish"/"Save draft";
-// the photo is saved right away because it is a file upload.
+// the photo is saved right away because it is a file upload. Links switched off ("Show" off) are
+// never written to the public file: they are kept in the encrypted settings doc
+// (settings.bioHiddenLinks, each with its position in the list) and merged back in the editor.
 
 import { uid } from '../../core/model.js';
 import { formatDay, relative } from '../../core/time.js';
@@ -35,8 +37,22 @@ function loadPublicCss() {
 const MAX_GRID = 12;
 const ACCENTS = ['#1f5f8b', '#2d7a4d', '#b03a2e', '#c27a1a', '#6250d6', '#15191c'];
 
-function normalize(d) {
+/** Put hidden links (from settings.bioHiddenLinks) back at their saved positions. */
+function withHiddenLinks(links, hidden) {
+  const out = [...links];
+  const have = new Set(out.map((l) => l && l.id));
+  const list = (Array.isArray(hidden) ? hidden : []).filter((l) => l && l.id && !have.has(l.id));
+  list.sort((a, b) => (a.position ?? Infinity) - (b.position ?? Infinity));
+  for (const { position, ...l } of list) {
+    const at = Number.isInteger(position) && position >= 0 ? Math.min(position, out.length) : out.length;
+    out.splice(at, 0, { ...l, enabled: false });
+  }
+  return out;
+}
+
+function normalize(d, hiddenLinks) {
   const doc = structuredClone(d || {});
+  doc.links = withHiddenLinks(doc.links || [], hiddenLinks);
   doc.title = doc.title || '';
   doc.bio = doc.bio || '';
   doc.theme = doc.theme === 'ink' ? 'ink' : 'paper';
@@ -78,22 +94,34 @@ export function validateBio(doc) {
   return errors;
 }
 
-/** What gets written to public/bio.json from the editor state. */
+function cleanLink(l) {
+  const utm = Object.fromEntries(Object.entries(l.utm || {}).map(([k, v]) => [k, String(v || '').trim()]).filter(([, v]) => v));
+  const out = { id: l.id, title: String(l.title || '').trim(), url: String(l.url || '').trim(), enabled: l.enabled !== false, highlight: !!l.highlight };
+  if (Object.keys(utm).length) out.utm = utm;
+  return out;
+}
+
+/** What gets written to public/bio.json from the editor state. Hidden links are left out entirely. */
 export function publishable(draft) {
   return {
     title: String(draft.title || '').trim(),
     bio: String(draft.bio || '').trim(),
     theme: draft.theme === 'ink' ? 'ink' : 'paper',
     accent: normalAccent(draft.accent),
-    links: (draft.links || []).map((l) => {
-      const utm = Object.fromEntries(Object.entries(l.utm || {}).map(([k, v]) => [k, String(v || '').trim()]).filter(([, v]) => v));
-      const out = { id: l.id, title: String(l.title || '').trim(), url: String(l.url || '').trim(), enabled: l.enabled !== false, highlight: !!l.highlight };
-      if (Object.keys(utm).length) out.utm = utm;
-      out.href = withUtm(out.url, utm);
+    links: (draft.links || []).filter((l) => l.enabled !== false).map((l) => {
+      const out = cleanLink(l);
+      out.href = withUtm(out.url, out.utm);
       return out;
     }),
     grid: (draft.grid || []).map((g) => ({ ...g, url: String(g.url || '').trim() })),
   };
+}
+
+/** Hidden links with their place in the list, for the encrypted settings doc (never the public file). */
+export function hiddenLinks(draft) {
+  return (draft.links || [])
+    .map((l, position) => (l.enabled === false ? { ...cleanLink(l), enabled: false, position } : null))
+    .filter(Boolean);
 }
 
 function useAvatarUrl(path) {
@@ -199,6 +227,7 @@ function LinkEditor({ link, index, count, errors, onChange, onMove, onRemove }) 
       <${IconButton} icon="arrow-down" size="sm" label=${`Move "${link.title || 'link'}" down`} disabled=${index === count - 1} onClick=${() => onMove(1)} />
       <${IconButton} icon="trash" size="sm" label=${`Delete "${link.title || 'link'}"`} onClick=${onRemove} />
     </div>
+    ${!link.enabled ? html`<p class="muted text-sm bio-link-private">Hidden from your page. Its address stays private and is not in the public page file.</p>` : null}
     ${utmOpen
       ? html`<div class="bio-utm">
           <div class="grid-3">
@@ -213,10 +242,11 @@ function LinkEditor({ link, index, count, errors, onChange, onMove, onRemove }) 
 }
 
 export default function LinkInBio() {
-  const { session, toast, confirm, tz } = useApp();
+  const { session, settings, toast, confirm, tz } = useApp();
   const { data: bio, loading, error } = useDoc('bio');
   const { data: media } = useDoc('analytics-media');
-  const base = useMemo(() => (bio ? normalize(bio) : null), [bio]);
+  const savedHidden = settings && settings.bioHiddenLinks;
+  const base = useMemo(() => (bio ? normalize(bio, savedHidden) : null), [bio, savedHidden]);
   const [draft, setDraft] = useState(null);
   const [errors, setErrors] = useState({});
   const [busy, setBusy] = useState('');
@@ -269,10 +299,12 @@ export default function LinkInBio() {
       return;
     }
     const out = publishable(current);
+    const hidden = hiddenLinks(current);
     const now = new Date().toISOString();
     setBusy(publish === true ? 'publish' : 'save');
     try {
-      await mutate('bio', (d) => {
+      await transact(async (tx) => {
+        const d = await tx.read('bio');
         d.title = out.title;
         d.bio = out.bio;
         d.theme = out.theme;
@@ -285,11 +317,17 @@ export default function LinkInBio() {
         });
         if (publish === true) d.published = true;
         d.updatedAt = now;
+        tx.write('bio', d);
+        const s = await tx.read('settings');
+        if (hidden.length || (s.bioHiddenLinks && s.bioHiddenLinks.length)) {
+          s.bioHiddenLinks = hidden;
+          tx.write('settings', s);
+        }
       }, { message: publish ? 'publish link in bio' : 'save link in bio' });
       setDraft(null);
       toast(publish === true ? (published ? 'Changes are live.' : 'Your page is live.') : 'Draft saved.', { kind: 'success' });
     } catch {
-      /* mutate showed the error */
+      /* transact showed the error */
     } finally {
       setBusy('');
     }
@@ -411,11 +449,11 @@ export default function LinkInBio() {
               uploadAvatar(f);
             }} />
         </div>
-        <${Field} label="Title" hint="Your name or brand, shown in large type.">
-          <${TextInput} id="bio-title" value=${doc.title} onChange=${(v) => edit((d) => (d.title = v))} placeholder="Studio North" maxlength="80" />
+        <${Field} id="bio-title" label="Title" hint="Your name or brand, shown in large type.">
+          <${TextInput} value=${doc.title} onChange=${(v) => edit((d) => (d.title = v))} placeholder="Studio North" maxlength="80" />
         <//>
-        <${Field} label="Short bio" hint="One or two lines about you. Line breaks are kept.">
-          <${TextArea} id="bio-text" value=${doc.bio} onChange=${(v) => edit((d) => (d.bio = v))} rows=${2} maxRows=${6} maxlength="300" />
+        <${Field} id="bio-text" label="Short bio" hint="One or two lines about you. Line breaks are kept.">
+          <${TextArea} value=${doc.bio} onChange=${(v) => edit((d) => (d.bio = v))} rows=${2} maxRows=${6} maxlength="300" />
         <//>
       </div>
     <//>
@@ -543,7 +581,7 @@ export default function LinkInBio() {
         <p class="muted text-sm">
           ${published
             ? html`Live${bio.updatedAt ? `, last published ${relative(bio.updatedAt)}` : ''}. Add it to your profile in the Instagram app: <strong>Edit profile</strong> → <strong>Links</strong> → <strong>Add external link</strong>.`
-            : 'Not published yet: visitors see a "not published" note. Everything here is stored in a public file, so keep private notes elsewhere.'}
+            : 'Not published yet: visitors see a "not published" note. Everything here except hidden links is stored in a public file, so keep private notes elsewhere.'}
         </p>
       </div>
     </section>

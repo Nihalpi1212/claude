@@ -1,23 +1,29 @@
 // Unlocking the app: GitHub token + passphrase -> data key -> store.
 
-import { b64decode, b64encode, createKeyring, generateDataKey, importDataKey, unlockKeyring } from '../core/crypto.js';
+import { b64decode, b64encode, createKeyring, decryptBytes, DecryptError, generateDataKey, importDataKey, unlockKeyring, utf8 } from '../core/crypto.js';
 import { createGitHub, GitHubError } from '../core/github.js';
 import { createBlobCache, createDataBranch, createStore, readKeyring } from '../core/store.js';
-import { DATA_BRANCH, ENDPOINTS } from './config.js';
+import { DATA_BRANCH, DATA_KEY_SECRET, ENDPOINTS } from './config.js';
 import { idbBlobStore } from './idb.js';
 
 const KEY = 'postpilot.session';
 
-function storageGet() {
+/** Saved sessions, this tab's first, then the remembered one. */
+function storageAll() {
+  const out = [];
   for (const s of [safe(() => sessionStorage), safe(() => localStorage)]) {
     try {
       const raw = s && s.getItem(KEY);
-      if (raw) return JSON.parse(raw);
+      if (raw) out.push(JSON.parse(raw));
     } catch {
       /* storage unavailable */
     }
   }
-  return null;
+  return out;
+}
+
+function storageGet() {
+  return storageAll()[0] || null;
 }
 
 function storageSet(value, remember) {
@@ -132,20 +138,94 @@ export async function createWorkspace({ token, owner, repo, passphrase, remember
   return build({ token, owner, repo, dataKeyRaw, login, onChange });
 }
 
-/** Re-open a session saved in this browser (no passphrase needed). */
+/**
+ * Re-open a session saved in this browser (no passphrase needed). When the data key was replaced
+ * (Settings → Security on any device), a saved key no longer decrypts: it is dropped and the lock screen shows.
+ */
 export async function resume({ onChange } = {}) {
-  const s = storageGet();
-  if (!s || !s.token || !s.dataKey) return null;
-  try {
-    return await build({ token: s.token, owner: s.owner, repo: s.repo, dataKeyRaw: b64decode(s.dataKey), login: s.login, onChange });
-  } catch {
-    forget();
-    return null;
+  const tried = new Set();
+  for (const s of storageAll()) {
+    if (!s || !s.token || !s.dataKey || tried.has(s.dataKey)) continue;
+    tried.add(s.dataKey);
+    let session;
+    try {
+      session = await build({ token: s.token, owner: s.owner, repo: s.repo, dataKeyRaw: b64decode(s.dataKey), login: s.login, onChange });
+      await session.store.read('settings');
+    } catch (err) {
+      if (!session || err instanceof DecryptError) continue;
+      // Offline or GitHub unavailable: open anyway, the app explains the error.
+    }
+    if (tried.size > 1) storageSet(s, !!s.remember);
+    return session;
   }
+  if (tried.size) forget();
+  return null;
 }
 
-/** Re-wrap the data key under a new passphrase. */
+/**
+ * Re-wrap the same data key under a new passphrase. Nothing is re-encrypted and the worker keeps working.
+ * It does not lock anyone out: the previous keyring.json stays in the public history of the data branch.
+ */
 export async function changePassphrase(session, newPassphrase) {
   const keyring = await createKeyring(newPassphrase, session.dataKeyRaw);
   await session.store.transact(async (tx) => tx.writePublic('keyring.json', keyring), { message: 'change passphrase' });
+}
+
+/** Files encrypted with the data key: documents and media (originals and thumbnails). */
+function encryptedPaths(tx) {
+  return [...tx.list('db/').filter((p) => p.endsWith('.enc')), ...tx.list('media/')];
+}
+
+/**
+ * Change the passphrase AND replace the data key. In one commit every encrypted file (db/*.enc, media/*)
+ * is decrypted with the current key and re-encrypted with a new one, and keyring.json is re-written for
+ * the new passphrase. Then the worker's POSTPILOT_DATA_KEY secret is re-sealed and this browser's saved
+ * session switches to the new key. `session.store` keeps using the old key, so reload the app afterwards.
+ * Earlier commits stay readable with the old key: rotation protects what is written from now on.
+ * Returns { dataKeyRaw, secretSaved, secretError }.
+ */
+export async function rotateDataKey(session, newPassphrase, { onProgress } = {}) {
+  const { gh } = session;
+  // Without access to Actions secrets the worker would be left with a key that no longer works: stop before changing anything.
+  let pk;
+  try {
+    pk = await gh.getSecretsPublicKey();
+  } catch (err) {
+    if (err.status === 403 || err.status === 404) {
+      throw new Error('Your GitHub token cannot update the worker\'s secret, so the worker would stop working with a new key. Give the token "Secrets: Read and write" for this repository, or change only the passphrase.');
+    }
+    throw err;
+  }
+  const dataKeyRaw = generateDataKey();
+  const newKey = await importDataKey(dataKeyRaw);
+  const keyring = await createKeyring(newPassphrase, dataKeyRaw);
+  // A second store that encrypts with the new key; reads use raw bytes decrypted with the old key.
+  const writer = createStore({ gh, key: newKey, branch: session.branch || DATA_BRANCH, author: 'app' });
+  await writer.transact(async (tx) => {
+    const paths = encryptedPaths(tx);
+    let done = 0;
+    for (const path of paths) {
+      let plain;
+      try {
+        plain = await decryptBytes(session.key, await tx.readBytes(path, { decrypt: false }));
+      } catch (err) {
+        throw new Error(`Could not decrypt ${path} with the current key, so nothing was changed. ${err.message || err}`);
+      }
+      tx.writeBytes(path, plain);
+      onProgress?.({ done: ++done, total: paths.length });
+    }
+    tx.writePublic('keyring.json', keyring);
+  }, { message: 'rotate data key' });
+
+  const saved = storageGet() || { token: session.token, owner: session.owner, repo: session.repo, login: session.login, remember: false };
+  storageSet({ ...saved, dataKey: b64encode(dataKeyRaw) }, !!saved.remember);
+
+  try {
+    const { sealedBox } = await import('../vendor/sealed-box.js');
+    const sealed = sealedBox(utf8(b64encode(dataKeyRaw)), b64decode(pk.key));
+    await gh.putSecret(DATA_KEY_SECRET, b64encode(sealed), pk.key_id);
+    return { dataKeyRaw, secretSaved: true, secretError: null };
+  } catch (err) {
+    return { dataKeyRaw, secretSaved: false, secretError: err };
+  }
 }

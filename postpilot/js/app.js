@@ -3,7 +3,7 @@
 import { createIg } from '../core/ig.js';
 import { relative } from '../core/time.js';
 import { html, createContext, useCallback, useContext, useEffect, useErrorBoundary, useMemo, useRef, useState } from '../vendor/preact.js';
-import { APP_NAME, ENDPOINTS, WORKER_WORKFLOW } from './config.js';
+import { APP_NAME, DATA_BRANCH, ENDPOINTS, WORKER_WORKFLOW } from './config.js';
 import { initData, readDoc, refreshNow, stopData, useDoc } from './data.js';
 import { navigate, useRoute } from './router.js';
 import { forget } from './session.js';
@@ -78,6 +78,22 @@ function ViewOutlet({ name }) {
   return html`<${SafeView} key=${name} Comp=${Comp} />`;
 }
 
+/**
+ * Whether a run record can be the run the app dispatched at `sinceMs`: started from the app (a scheduled
+ * run that was already going would otherwise match) and finished after the request (5 s clock slack).
+ */
+export function isDispatchedRunSince(run, sinceMs) {
+  return !!run && run.trigger === 'workflow_dispatch' && Date.parse(run.finishedAt || 0) >= sinceMs - 5000;
+}
+
+/**
+ * A worker run that had job errors. run.ok is also false when only a post failed to publish; the
+ * worker itself is fine then (the failed post has its own alert), so the UI must not blame the worker.
+ */
+export function runBroken(run) {
+  return !!run && run.ok === false && (run.errors || []).length > 0;
+}
+
 /** Poll the encrypted run log until a worker run that started after `sinceMs` has finished. */
 export async function waitForWorkerRun(sinceMs, timeoutMs = 240_000) {
   const deadline = Date.now() + timeoutMs;
@@ -86,7 +102,7 @@ export async function waitForWorkerRun(sinceMs, timeoutMs = 240_000) {
     try {
       await refreshNow();
       const log = await readDoc('log');
-      const run = (log.runs || []).find((r) => Date.parse(r.finishedAt || 0) >= sinceMs - 5000);
+      const run = (log.runs || []).find((r) => isDispatchedRunSince(r, sinceMs));
       if (run) return run;
     } catch {
       /* keep waiting */
@@ -126,8 +142,9 @@ function WorkerStatus() {
   const at = last.finishedAt || last.startedAt;
   const ageMin = (Date.now() - new Date(at).getTime()) / 60000;
   // GitHub can delay scheduled runs and idle runs only report every 30 minutes, so allow some slack.
-  const tone = last.ok === false ? 'bad' : ageMin > 90 ? 'warn' : 'ok';
-  const label = last.ok === false ? 'Worker had a problem' : ageMin > 90 ? 'Worker is late' : 'Worker running';
+  const broken = runBroken(last);
+  const tone = broken ? 'bad' : ageMin > 90 ? 'warn' : 'ok';
+  const label = broken ? 'Worker had a problem' : ageMin > 90 ? 'Worker is late' : 'Worker running';
   return html`<a class=${`worker-status is-${tone}`} href="#/settings?section=worker" title=${`${label}. Last run ${relative(at)}`}>
     <span class="dot"></span><span>${label}</span><span class="worker-meta">${relative(at)}</span>
   </a>`;
@@ -216,6 +233,68 @@ function TabBar({ route, onCompose, onMore }) {
   </nav>`;
 }
 
+/** Plain-language reason the workspace could not be opened, and which way out to suggest first. */
+function bootProblem(err, gh) {
+  const repo = gh && gh.owner ? `${gh.owner}/${gh.repo}` : 'your repository';
+  const status = err && err.status;
+  if (err && err.name === 'DecryptError') {
+    return {
+      lockFirst: true,
+      lockLabel: 'Lock and unlock with your passphrase',
+      message: "This device's saved key no longer opens your workspace, for example because it was set up again on another device. Lock Postpilot and unlock with your passphrase.",
+    };
+  }
+  const lockLabel = 'Lock and use a different token';
+  if (status === 401) {
+    return { lockFirst: true, lockLabel, message: 'GitHub rejected your access token. It may have expired or been revoked. Lock Postpilot and unlock with a new token.' };
+  }
+  if (status === 403 && /rate limit/i.test(err.message || '')) return { lockFirst: false, lockLabel, message: err.message };
+  if (status === 403) return { lockFirst: true, lockLabel, message: `${err.message} If you made a new token, lock Postpilot and unlock with it.` };
+  if (status === 404) {
+    return {
+      lockFirst: true,
+      lockLabel,
+      message: `GitHub could not find your Postpilot data (the ${DATA_BRANCH} branch of ${repo}). It may have been deleted, or this token cannot see the repository. Lock Postpilot and unlock again to set it up.`,
+    };
+  }
+  if (status === 0) return { lockFirst: false, lockLabel, message: 'Could not reach GitHub. Check your internet connection. Postpilot tries again when you are back online.' };
+  return { lockFirst: false, lockLabel, message: (err && (err.userMessage || err.message)) || String(err) };
+}
+
+/** Full-page error when the first read of the workspace fails (instead of an endless "Opening…" spinner). */
+function BootError({ error, gh, onRetry, onLock }) {
+  const [busy, setBusy] = useState(false);
+  const alive = useRef(true);
+  const latest = useRef(onRetry);
+  latest.current = onRetry;
+  const retry = useCallback(() => {
+    setBusy(true);
+    return Promise.resolve()
+      .then(() => latest.current())
+      .catch(() => {})
+      .finally(() => alive.current && setBusy(false));
+  }, []);
+  useEffect(() => {
+    alive.current = true;
+    // Opened offline: try again by itself once the connection is back.
+    globalThis.addEventListener?.('online', retry);
+    return () => {
+      alive.current = false;
+      globalThis.removeEventListener?.('online', retry);
+    };
+  }, []);
+  const p = bootProblem(error, gh);
+  return html`<div class="boot boot-error">
+    <div class="stack" role="alert" style="max-width: 460px; text-align: left">
+      <${Callout} tone="danger" title="Could not open your workspace">${p.message}<//>
+      <div class="row">
+        <${Button} variant=${p.lockFirst ? 'secondary' : 'primary'} icon="refresh" loading=${busy} onClick=${retry}>Try again<//>
+        <${Button} variant=${p.lockFirst ? 'primary' : 'secondary'} icon="logout" onClick=${onLock}>${p.lockLabel}<//>
+      </div>
+    </div>
+  </div>`;
+}
+
 function MoreDrawer({ open, onClose, route }) {
   return html`<${Drawer} open=${open} title="All screens" onClose=${onClose}>
     <nav class="nav" aria-label="All screens"><${NavLinks} route=${route} onNavigate=${onClose} /></nav>
@@ -241,15 +320,13 @@ export function App({ session }) {
 
   useMemo(() => {
     initData(session.store, { onError: (err) => toast(err.userMessage || err.message || String(err), { kind: 'error' }) });
-    session.store.refresh().then(() => setReady(true)).catch((err) => {
-      toast(err.message, { kind: 'error' });
-      setReady(true);
-    });
+    // A failure here also fails the settings read below, which shows the boot error screen.
+    session.store.refresh().then(() => setReady(true)).catch(() => setReady(true));
   }, [session]);
 
   useEffect(() => () => stopData(), []);
 
-  const { data: settings } = useDoc('settings');
+  const { data: settings, error: settingsError, reload: reloadSettings } = useDoc('settings');
   const tz = (settings && settings.timezone) || 'UTC';
 
   const ig = useMemo(() => {
@@ -300,6 +377,11 @@ export function App({ session }) {
     [session],
   );
 
+  const lockNow = useCallback(() => {
+    forget();
+    location.reload();
+  }, []);
+
   const ctx = useMemo(
     () => ({
       session,
@@ -312,10 +394,7 @@ export function App({ session }) {
       confirm,
       dispatchWorker,
       openComposer: (initial) => setComposer({ key: Date.now(), initial: initial || null }),
-      lock: () => {
-        forget();
-        location.reload();
-      },
+      lock: lockNow,
     }),
     [session, settings, ig, tz, route, toast, confirm, dispatchWorker],
   );
@@ -326,6 +405,10 @@ export function App({ session }) {
     document.title = item ? `${item.label} · ${APP_NAME}` : APP_NAME;
   }, [titleName]);
 
+  if (ready && !settings && settingsError) {
+    // reload() re-reads the branch head too while it has never loaded (expired token, offline, missing branch).
+    return html`<${BootError} error=${settingsError} gh=${session.gh} onRetry=${reloadSettings} onLock=${lockNow} />`;
+  }
   if (!ready || !settings) {
     return html`<div class="boot"><${Spinner} /><p class="muted">Opening your encrypted workspace…</p></div>`;
   }

@@ -154,6 +154,26 @@ describe('Competitors and Hashtags', { timeout: 240_000 }, () => {
     await snap(page, 'competitors-ig-mode-desktop-light');
   });
 
+  test('competitors: composer styles do not reshape the page (no shared class names)', async () => {
+    await go('#/competitors');
+    // The planner, queues, autopilot and composer load composer.css for the rest of the session.
+    await page.evaluate(async () => {
+      const { loadViewCss } = await import('/postpilot/js/css.js');
+      loadViewCss('composer');
+      const link = [...document.querySelectorAll('link[rel="stylesheet"]')].find((l) => l.href.includes('/css/views/composer.css'));
+      for (let i = 0; i < 100 && !(link.sheet && link.sheet.cssRules.length); i++) await new Promise((r) => setTimeout(r, 50));
+    });
+    const form = page.locator('form', { has: page.getByLabel('Add an account') });
+    const style = await form.evaluate((f) => {
+      const cs = getComputedStyle(f);
+      return { dir: cs.flexDirection, width: f.getBoundingClientRect().width, border: cs.borderTopStyle };
+    });
+    assert.equal(style.dir, 'row');
+    assert.equal(style.border, 'none');
+    assert.ok(style.width > 400, `add form is ${style.width}px wide`);
+    assert.equal(await page.locator('.page [class*="cmp-"]').count(), 0, 'Competitors uses the composer class prefix');
+  });
+
   test('competitors: Facebook Login validates, adds, refreshes and shows posts', async () => {
     await setMode(page, 'facebook');
     await go('#/competitors');
@@ -212,9 +232,9 @@ describe('Competitors and Hashtags', { timeout: 240_000 }, () => {
     const drawer = page.locator('.drawer');
     await drawer.getByRole('heading', { name: 'Atelier Kin' }).waitFor();
     await drawer.getByText('Best recent posts').waitFor();
-    assert.equal(await drawer.locator('.cmp-sheet .frame').count(), 12);
-    assert.equal(await drawer.locator('.cmp-best').count(), 3);
-    const href = await drawer.locator('.cmp-tile').first().getAttribute('href');
+    assert.equal(await drawer.locator('.cpt-sheet .frame').count(), 12);
+    assert.equal(await drawer.locator('.cpt-best').count(), 3);
+    const href = await drawer.locator('.cpt-tile').first().getAttribute('href');
     assert.match(href, /^https:\/\/www\.instagram\.com\/p\//);
     await snap(page, 'competitors-drawer-desktop-light');
     await page.keyboard.press('Escape');
@@ -448,7 +468,7 @@ describe('Competitors and Hashtags', { timeout: 240_000 }, () => {
       await noHorizontalScroll(p);
       await snap(p, `competitors-${c.name}`);
       if (c.name === 'phone-light') {
-        await p.locator('.cmp-list-main', { hasText: '@northbound.coffee' }).click();
+        await p.locator('.cpt-list-main', { hasText: '@northbound.coffee' }).click();
         await p.locator('.drawer').getByRole('heading', { name: 'Recent posts', exact: true }).waitFor();
         await snap(p, 'competitors-drawer-phone-light');
         await p.keyboard.press('Escape');

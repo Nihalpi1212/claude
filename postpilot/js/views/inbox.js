@@ -1121,14 +1121,22 @@ export default function InboxView() {
       if (!ok) return;
     }
     try {
+      // Reset only a command that is still failed in the latest copy: another tab or device may have
+      // retried it already, and resetting one the worker is sending (or sent) would send it twice.
+      let latest = null;
       await mutate('inbox', (d) => {
         const c = (d.outbox || []).find((x) => x.id === cmd.id);
-        if (c) {
+        latest = c ? c.status : null;
+        if (latest === 'failed') {
           c.status = 'pending';
           c.error = null;
           c.attempts = 0;
         }
       }, { message: 'inbox: retry command' });
+      if (latest !== 'failed') {
+        toast(latest ? 'This action is already being sent or was sent.' : 'This action is no longer in the queue.', { kind: 'info' });
+        return;
+      }
       dispatchWorker('inbox', { quiet: true }).catch(() => {});
     } catch {
       /* toast shown */

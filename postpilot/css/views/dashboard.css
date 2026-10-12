@@ -257,6 +257,7 @@ a.dash-health-item:hover { background: var(--surface-2); color: var(--ink); }
 .dash-side-lead { color: var(--ink); }
 .dash-side-note { color: var(--ink-2); font-size: var(--fs-sm); }
 .dash-side-meta { color: var(--ink-2); font: 11px var(--font-mono); white-space: nowrap; }
+.dash-side-scope { margin: -4px 0 0; font-size: var(--fs-xs); }
 .dash-side-foot { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 2px; }
 .dash-kv { display: flex; flex-direction: column; margin: 0; }
 .dash-kv-row {

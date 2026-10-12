@@ -3,7 +3,8 @@
 // A random 256-bit data key encrypts every private file. The data key itself is
 // stored in the repo "wrapped" (encrypted) by a key derived from the owner's
 // passphrase, and handed to the worker directly through the POSTPILOT_DATA_KEY
-// Actions secret. Changing the passphrase only re-wraps the data key.
+// Actions secret. Changing the passphrase re-wraps the same data key; js/session.js
+// rotateDataKey() replaces the data key and re-encrypts everything.
 
 const subtle = globalThis.crypto.subtle;
 const MAGIC = [0x50, 0x50, 0x31]; // "PP1"

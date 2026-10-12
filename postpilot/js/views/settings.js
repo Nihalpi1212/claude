@@ -2,11 +2,11 @@
 // Sections are reachable with #/settings?section=<id> (used by the shell and other screens).
 
 import { formatNumber } from '../../core/analytics.js';
-import { unlockKeyring, WrongPassphraseError } from '../../core/crypto.js';
+import { passphraseProblem, unlockKeyring, WrongPassphraseError } from '../../core/crypto.js';
 import { GRAPH_VERSION } from '../../core/ig.js';
-import { DOC_NAMES, SCHEMA_VERSION, migrateDoc } from '../../core/model.js';
+import { DOC_NAMES, SCHEMA_VERSION, addHistory, migrateDoc } from '../../core/model.js';
 import { readKeyring } from '../../core/store.js';
-import { dayKey, formatDateTime, formatDay, relative } from '../../core/time.js';
+import { dayKey, formatDateTime, formatDay, formatTime, relative } from '../../core/time.js';
 import { html, useEffect, useMemo, useRef, useState } from '../../vendor/preact.js';
 import { useApp } from '../app.js';
 import { APP_NAME, DATA_BRANCH, DATA_KEY_SECRET, WORKER_WORKFLOW, bioPageUrl } from '../config.js';
@@ -16,7 +16,7 @@ import { clearBlobCache } from '../idb.js';
 import { saveBlob } from '../media.js';
 import { NOTIFY_EVENTS, currentEndpoint, defaultNotifications, enablePush, needsHomeScreenInstall, pushSupported, removeDevice } from '../push.js';
 import { setQuery } from '../router.js';
-import { changePassphrase, forget } from '../session.js';
+import { changePassphrase, forget, rotateDataKey } from '../session.js';
 import { AccountCard, ConnectInstagram, CopyButton, ExtLink, MessagesReminder } from '../ui/connect-instagram.js';
 import { Icon } from '../ui/icons.js';
 import {
@@ -100,6 +100,59 @@ export function mergeRestoredSettings(current, incoming) {
   return out;
 }
 
+// Statuses only the worker reaches: the live record is newer than any backup of it.
+const LIVE_POST_WINS = new Set(['published', 'publishing', 'failed', 'canceled']);
+
+/**
+ * Posts doc to write when restoring a backup, so a restore never publishes anything twice:
+ * - a post the worker has since published, started publishing, failed or that was canceled keeps its live record;
+ * - a restored post that was scheduled for a time that has passed (or was mid-publishing) comes back as a draft;
+ * - live posts that are published, publishing or failed but missing from the backup are kept.
+ */
+export function reconcileRestoredPosts(restored, live, now = Date.now()) {
+  const out = structuredClone(restored || {});
+  const livePosts = (live && live.posts) || [];
+  const liveById = new Map(livePosts.map((p) => [p.id, p]));
+  const ids = new Set();
+  out.posts = (out.posts || []).map((r) => {
+    ids.add(r.id);
+    const l = liveById.get(r.id);
+    if (l && LIVE_POST_WINS.has(l.status)) return structuredClone(l);
+    if (r.status === 'publishing' || (r.status === 'scheduled' && !(Date.parse(r.scheduledAt) > now))) {
+      r.status = 'draft';
+      delete r.containers;
+      delete r.exposedPaths;
+      delete r.publishStartedAt;
+      addHistory(r, 'restored', 'Restored from a backup after its time had passed; reschedule it to publish.');
+    }
+    return r;
+  });
+  for (const l of livePosts) {
+    if (!ids.has(l.id) && (l.status === 'published' || l.status === 'publishing' || l.status === 'failed')) out.posts.push(structuredClone(l));
+  }
+  return out;
+}
+
+/** Documents restoredDoc merges with the live version (the rest are replaced). */
+const RESTORE_MERGES = new Set(['settings', 'posts', 'inbox', 'automations']);
+
+/**
+ * Document to write for `name` when restoring a backup. Settings keep secrets missing from the backup,
+ * posts are reconciled (see reconcileRestoredPosts), the inbox keeps the live outbox (commands already sent
+ * are not sent again) and automations keep the live record of handled comments and messages.
+ */
+export function restoredDoc(name, incoming, live, now = Date.now()) {
+  let value = structuredClone(incoming);
+  if (name === 'settings') value = mergeRestoredSettings(live, value);
+  if (name === 'posts') value = reconcileRestoredPosts(value, live, now);
+  if (name === 'inbox' && live) value.outbox = structuredClone(live.outbox || []);
+  if (name === 'automations' && live) {
+    value.processed = structuredClone(live.processed || {});
+    value.cursors = structuredClone(live.cursors || {});
+  }
+  return migrateDoc(name, value);
+}
+
 /** Validate a parsed backup file. Returns an error message or null. */
 export function backupProblem(data) {
   if (!data || typeof data !== 'object') return 'This file is not a Postpilot backup.';
@@ -114,11 +167,12 @@ export function backupProblem(data) {
  * Library originals that only old published posts use (published more than `days` ago).
  * Thumbnails stay, so post history keeps its pictures. `exists(path)` tells which files are present.
  */
-export function freeUpPlan({ posts, library, lists, exists = () => true, now = Date.now(), days = 30 }) {
+export function freeUpPlan({ posts, archive, library, lists, exists = () => true, now = Date.now(), days = 30 }) {
   const cutoff = now - days * DAY;
   const keep = new Set();
   const old = new Set();
-  for (const p of (posts && posts.posts) || []) {
+  // Posts older than 90 days live in the posts-archive document; include them.
+  for (const p of [...((posts && posts.posts) || []), ...((archive && archive.posts) || [])]) {
     const ids = (p.media || []).map((m) => m.assetId).concat(p.coverAssetId ? [p.coverAssetId] : []);
     const isOld = p.status === 'published' && Date.parse(p.publishedAt || p.scheduledAt || '') < cutoff;
     for (const id of ids) (isOld ? old : keep).add(id);
@@ -521,13 +575,14 @@ function AiSection() {
       hint="Captions, hashtag ideas, reply suggestions, AI replies in automations and autopilot captions, written by Claude." />
     <div class="grid-2">
       <${Field}
+        id="settings-ai-key"
         label="Anthropic API key"
         error=${aiKeyWarning(form.apiKey)}
         hint=${html`Create one at <${ExtLink} href="https://console.anthropic.com/settings/keys">console.anthropic.com → API keys<//>. Usage is billed to your
           Anthropic account. Stored encrypted; the worker uses it too.`}
         action=${html`<button type="button" class="link-btn" onClick=${() => setReveal((r) => !r)}>${reveal ? 'Hide' : 'Show'}</button>`}
       >
-        <${TextInput} id="settings-ai-key" type=${reveal ? 'text' : 'password'} mono value=${form.apiKey} onChange=${(v) => (set({ apiKey: v }), setTest(null))}
+        <${TextInput} type=${reveal ? 'text' : 'password'} mono value=${form.apiKey} onChange=${(v) => (set({ apiKey: v }), setTest(null))}
           placeholder="sk-ant-…" autocomplete="off" spellcheck=${false} />
       <//>
       <${Field} label="Model" hint="Opus writes best. Sonnet and Haiku are faster and cost less per caption.">
@@ -567,7 +622,7 @@ function AiSection() {
 // ---------------------------------------------------------------------------
 
 function PreferencesSection() {
-  const { settings, toast } = useApp();
+  const { settings, toast, confirm } = useApp();
   const [tz, setTz] = useState(settings.timezone || 'UTC');
   const [theme, setTheme] = useState(readTheme);
   const [firstComment, setFirstComment] = useState((settings.publishing && settings.publishing.defaultFirstComment) || '');
@@ -577,6 +632,14 @@ function PreferencesSection() {
 
   async function saveTz() {
     const zone = tz;
+    const from = settings.timezone || 'UTC';
+    const sample = new Date(Math.ceil(Date.now() / 36e5) * 36e5);
+    const ok = await confirm({
+      title: `Change the time zone to ${zone}?`,
+      body: `Posts that are already scheduled keep their exact moment, so they show at different local times: ${formatTime(sample, from)} in ${from} is ${formatTime(sample, zone)} in ${zone}. Check the planner afterwards and move any post you want at a different time.`,
+      confirmLabel: 'Change time zone',
+    });
+    if (!ok) return;
     try {
       await mutate('settings', (s) => {
         s.timezone = zone;
@@ -755,36 +818,80 @@ function rememberedHere() {
   }
 }
 
+// Set just before the reload that follows a key rotation, shown once by the Security section afterwards.
+const ROTATED_KEY = 'postpilot.rotated';
+
+function takeRotationNotice() {
+  try {
+    const raw = sessionStorage.getItem(ROTATED_KEY);
+    sessionStorage.removeItem(ROTATED_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+const NEW_PASSPHRASE_HINT =
+  'At least 12 characters. A short sentence of three or four words is easy to remember and hard to guess. The encrypted key file is public, so a weak passphrase can be guessed offline.';
+
 function SecuritySection() {
-  const { session, toast, confirm, lock } = useApp();
+  const { session, toast, confirm, lock, navigate } = useApp();
   const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
   const [next2, setNext2] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState(''); // '' | 'change' | 'rotate'
+  const [progress, setProgress] = useState(null);
   const [error, setError] = useState('');
+  const [rotated] = useState(takeRotationNotice);
   const remembered = rememberedHere();
 
-  async function change(e) {
-    e.preventDefault();
+  async function change(e, rotate = false) {
+    e?.preventDefault();
     setError('');
     if (!current) return setError('Enter your current passphrase.');
-    if (next.length < 10) return setError('Use a new passphrase of at least 10 characters. A short sentence works well.');
+    const weak = passphraseProblem(next);
+    if (weak) return setError(weak);
     if (next !== next2) return setError('The two new passphrases do not match.');
     if (next === current) return setError('The new passphrase is the same as the current one.');
-    setBusy(true);
+    if (rotate) {
+      const ok = await confirm({
+        title: 'Replace the data key?',
+        body: 'Postpilot creates a new data key, re-encrypts all your data, photos and videos with it in one commit, saves the new passphrase and updates the worker\'s secret. With many videos this can take a few minutes; keep this tab open. Older versions in the history of the data branch stay readable with the old passphrase until GitHub removes them, so this protects what you save from now on. Other devices that remember Postpilot will need to unlock with the new passphrase.',
+        confirmLabel: 'Replace key',
+      });
+      if (!ok) return;
+    }
+    setBusy(rotate ? 'rotate' : 'change');
+    let reloading = false;
     try {
       const keyring = await readKeyring(session.gh, DATA_BRANCH);
       if (!keyring) throw new Error('Could not read the keyring from the data branch. Reload and try again.');
       await unlockKeyring(keyring, current);
+      if (rotate) {
+        const res = await rotateDataKey(session, next, { onProgress: setProgress });
+        try {
+          sessionStorage.setItem(ROTATED_KEY, JSON.stringify({ secretSaved: res.secretSaved, secretError: res.secretError ? res.secretError.message || String(res.secretError) : '' }));
+        } catch {
+          /* the notice is optional */
+        }
+        // This tab's store still holds the old key: start again with the new one.
+        reloading = true;
+        location.hash = '#/settings?section=security';
+        location.reload();
+        return;
+      }
       await changePassphrase(session, next);
       setCurrent('');
       setNext('');
       setNext2('');
-      toast('Passphrase changed. Use the new one next time you unlock.', { kind: 'success' });
+      toast('Passphrase changed. Unlock with the new one from now on.', { kind: 'success' });
     } catch (err) {
       setError(err instanceof WrongPassphraseError ? 'The current passphrase is not right. Check for typos and caps lock.' : err.message || String(err));
     } finally {
-      setBusy(false);
+      if (!reloading) {
+        setBusy('');
+        setProgress(null);
+      }
     }
   }
 
@@ -807,6 +914,19 @@ function SecuritySection() {
   }
 
   return html`<div class="settings-groups">
+    ${rotated
+      ? rotated.secretSaved
+        ? html`<${Callout} tone="success" title="Data key replaced">
+            Your data is now encrypted with a new key and the worker's secret is updated. Other devices need the new passphrase to unlock.
+          <//>`
+        : html`<${Callout}
+            tone="warning"
+            title="Data key replaced, but the worker's secret was not updated"
+            action=${html`<${Button} size="sm" variant="primary" icon="key" onClick=${() => navigate('#/settings?section=worker')}>Go to Worker<//>`}
+          >
+            ${rotated.secretError ? `${rotated.secretError} ` : ''}The worker cannot read your data until you click "Connect worker again" in the Worker section.
+          <//>`
+      : null}
     <dl class="kv settings-kv">
       <dt>GitHub account</dt>
       <dd>${session.login ? `@${session.login}` : '—'}</dd>
@@ -823,18 +943,36 @@ function SecuritySection() {
     </div>
     <form class="stack settings-narrow" onSubmit=${change}>
       <h3 class="settings-sub">Change passphrase</h3>
-      <p class="muted text-sm">Your data key stays the same, so the worker keeps working. Other devices need the new passphrase next time they unlock.</p>
+      <p class="muted text-sm"><strong>Change passphrase</strong> protects the same data key with a new passphrase, so the worker keeps working.
+        It does not lock out anyone who already knows the old passphrase: the old key file stays in the public history of the data branch,
+        and remembered devices stay signed in.</p>
+      <p class="muted text-sm"><strong>Change passphrase and replace key</strong> also re-encrypts all your data, photos and videos with a new
+        key and updates the worker's secret. Use it if your passphrase leaked or a device was lost. It protects what you save from now on;
+        older versions in the branch history stay readable with the old passphrase. Other remembered devices must unlock again. If a device
+        was lost, also revoke its GitHub token on GitHub.</p>
       <${Field} label="Current passphrase">
         <${TextInput} type="password" value=${current} onChange=${setCurrent} autocomplete="current-password" />
       <//>
-      <${Field} label="New passphrase" hint="At least 10 characters.">
+      <${Field} label="New passphrase" hint=${NEW_PASSPHRASE_HINT}>
         <${TextInput} type="password" value=${next} onChange=${setNext} autocomplete="new-password" />
       <//>
       <${Field} label="Repeat new passphrase">
         <${TextInput} type="password" value=${next2} onChange=${setNext2} autocomplete="new-password" />
       <//>
       ${error ? html`<${Callout} tone="danger">${error}<//>` : null}
-      <div class="row"><${Button} type="submit" variant="primary" icon="key" loading=${busy}>Change passphrase<//></div>
+      ${busy === 'rotate'
+        ? html`<div class="stack" role="status">
+            <span class="text-sm">${progress ? `Re-encrypting file ${progress.done} of ${progress.total}…` : 'Preparing the new key…'}
+              ${progress && progress.done === progress.total ? ' Saving to GitHub…' : ''} Keep this tab open.</span>
+            ${progress ? html`<${ProgressBar} value=${progress.done} max=${progress.total} label="Files re-encrypted" />` : null}
+          </div>`
+        : null}
+      <div class="row">
+        <${Button} type="submit" variant="primary" icon="key" loading=${busy === 'change'} disabled=${!!busy && busy !== 'change'}>Change passphrase<//>
+        <${Button} variant="secondary" icon="refresh" loading=${busy === 'rotate'} disabled=${!!busy && busy !== 'rotate'} onClick=${(e) => change(e, true)}>
+          Change passphrase and replace key
+        <//>
+      </div>
     </form>
   </div>`;
 }
@@ -872,6 +1010,7 @@ function DataSection() {
   const { data: library } = useDoc('library');
   const { data: posts } = useDoc('posts');
   const { data: lists } = useDoc('lists');
+  const { data: archive } = useDoc('posts-archive');
   const [includeSecrets, setIncludeSecrets] = useState(false);
   const [busy, setBusy] = useState('');
   const [restoreError, setRestoreError] = useState('');
@@ -879,8 +1018,8 @@ function DataSection() {
 
   const sum = storageSummary(session.store, library);
   const plan = useMemo(
-    () => (library && posts && lists ? freeUpPlan({ posts, library, lists, exists: (p) => !session.store.head || session.store.head.files.has(p) }) : { assets: [], bytes: 0 }),
-    [library, posts, lists],
+    () => (library && posts && lists ? freeUpPlan({ posts, archive, library, lists, exists: (p) => !session.store.head || session.store.head.files.has(p) }) : { assets: [], bytes: 0 }),
+    [library, posts, lists, archive],
   );
 
   async function backup() {
@@ -921,7 +1060,7 @@ function DataSection() {
     const when = data.exportedAt ? formatDateTime(data.exportedAt, tz) : 'an unknown date';
     const ok = await confirm({
       title: 'Restore this backup?',
-      body: `Your current posts, settings and other data are replaced with the backup from ${when} (${names.length} sections). Photos and videos are not part of a backup; the ones still in your repository keep working. Access tokens missing from the backup are kept.`,
+      body: `Your current posts, settings and other data are replaced with the backup from ${when} (${names.length} sections). Posts published since then are kept, and scheduled posts whose time has passed come back as drafts, so nothing is published twice. Replies and messages already sent are not sent again. Photos and videos are not part of a backup; the ones still in your repository keep working. Access tokens missing from the backup are kept.`,
       confirmLabel: 'Replace my data',
       danger: true,
     });
@@ -929,11 +1068,12 @@ function DataSection() {
     setBusy('restore');
     try {
       await transact(async (tx) => {
+        const now = Date.now();
         for (const name of names) {
-          let value = data.docs[name];
+          const value = data.docs[name];
           if (!value || typeof value !== 'object') continue;
-          if (name === 'settings') value = mergeRestoredSettings(await tx.read('settings'), value);
-          tx.write(name, migrateDoc(name, structuredClone(value)));
+          const live = RESTORE_MERGES.has(name) ? await tx.read(name) : null;
+          tx.write(name, restoredDoc(name, value, live, now));
         }
       }, { message: 'restore backup' });
       toast('Backup restored.', { kind: 'success' });
@@ -955,8 +1095,8 @@ function DataSection() {
     setBusy('free');
     try {
       const res = await transact(async (tx) => {
-        const [p, lib, l] = [await tx.read('posts'), await tx.read('library'), await tx.read('lists')];
-        const fresh = freeUpPlan({ posts: p, library: lib, lists: l, exists: (path) => tx.exists(path) });
+        const [p, lib, l, arch] = [await tx.read('posts'), await tx.read('library'), await tx.read('lists'), await tx.read('posts-archive')];
+        const fresh = freeUpPlan({ posts: p, archive: arch, library: lib, lists: l, exists: (path) => tx.exists(path) });
         const ids = new Set(fresh.assets.map((a) => a.id));
         const now = new Date().toISOString();
         for (const a of lib.assets) {

@@ -418,6 +418,11 @@ export default function Planner() {
   };
 
   const retry = async (post) => {
+    if (hasErrors(validatePost({ ...post, status: 'scheduled' }, assetsById))) {
+      toast('Fix the problems in this post, then try again.', { kind: 'error' });
+      openComposer(post.id);
+      return;
+    }
     const ok = await quietly(
       mutate(
         'posts',
@@ -435,7 +440,7 @@ export default function Planner() {
     );
     if (!ok) return;
     toast('Publishing again. This usually takes 1–3 minutes.', { kind: 'info' });
-    dispatchWorker('retry failed post').catch(() => {});
+    dispatchWorker('retry failed post', { quiet: true }).catch(() => {});
   };
 
   const swap = async (idA, idB) => {
@@ -1037,7 +1042,7 @@ function ImportModal({ assets, tz, toast, onClose }) {
       );
       const scheduled = ready.filter((r) => r.post.status === 'scheduled').length;
       toast(
-        `Imported ${plural(ready.length, 'post')}${scheduled && scheduled < ready.length ? ` (${scheduled} scheduled, ${ready.length - scheduled} drafts)` : scheduled ? ' as scheduled' : ' as drafts'}.${problems ? ` Skipped ${plural(problems, 'row')} with problems.` : ''}`,
+        `Imported ${plural(ready.length, 'post')}${scheduled && scheduled < ready.length ? ` (${scheduled} scheduled, ${plural(ready.length - scheduled, 'draft')})` : scheduled ? ' as scheduled' : ' as drafts'}.${problems ? ` Skipped ${plural(problems, 'row')} with problems.` : ''}`,
         { kind: 'success' },
       );
       onClose();

@@ -77,14 +77,24 @@ function parseTime(time) {
 function resolveLocal(day, time, tz) {
   const t = parseTime(time);
   if (!t) return null;
+  const exact = (ms) => {
+    const p = zonedParts(new Date(ms), tz);
+    return dayKey(new Date(ms), tz) === day && p.hour === t.h && p.minute === t.min;
+  };
   const date = zonedToUtc(day, t.text, tz);
-  const p = zonedParts(date, tz);
-  const want = t.h * 60 + t.min;
-  const got = p.hour * 60 + p.minute;
-  if (dayKey(date, tz) === day && got === want) return { ms: date.getTime(), exact: true };
-  // Inside a DST gap zonedToUtc lands before the gap; shift forward by the difference.
-  const diff = (want - got + 1440) % 1440;
-  return { ms: date.getTime() + diff * 60_000, exact: false };
+  if (exact(date.getTime())) return { ms: date.getTime(), exact: true };
+  // zonedToUtc may land on either side of a DST gap (before it west of UTC, after it east of UTC).
+  // Read the wall time with the offsets in force a day before and a day after instead.
+  const [y, mo, d] = day.split('-').map(Number);
+  const wall = Date.UTC(y, mo - 1, d, t.h, t.min);
+  const offsets = [offsetMinutes(wall - DAY_MS, tz), offsetMinutes(wall + DAY_MS, tz)];
+  for (const off of offsets) {
+    const ms = wall - off * 60_000;
+    if (exact(ms)) return { ms, exact: true };
+  }
+  // The wall time does not exist (spring-forward gap): the pre-transition (smaller) offset puts it
+  // after the gap by the gap's length, e.g. 02:30 -> 03:30 on the same day.
+  return { ms: wall - Math.min(...offsets) * 60_000, exact: false };
 }
 
 /** Offset of `tz` from UTC in minutes at `ms`. */
@@ -414,14 +424,18 @@ export function listItemIndex(list, p) {
 
 /**
  * Upcoming slot occurrences of an evergreen list that have no post yet.
- * A slot is filled when any post (any status, canceled included) with listId === list.id is
- * scheduled within 1 minute of it. Items are assigned chronologically from list.nextIndex.
+ * Each occurrence has a time-zone-independent identity, listSlot = 'YYYY-MM-DD@HH:mm' (local day and
+ * slot time). The worker stores it on the post it creates (post.listSlot). A slot is filled when any
+ * post (any status, canceled included) with listId === list.id carries its listSlot, or is
+ * scheduled within 1 minute of it (also covers posts created before listSlot existed). So moving a
+ * list post in the planner or changing the time zone never makes its slot look empty again.
+ * Items are assigned chronologically from list.nextIndex.
  * Persist the returned nextIndex on the list (for 'shuffle' it is a running counter; for
  * 'sequential' it wraps at the item count).
  * Slots in a DST gap move forward (02:30 on a spring-forward day becomes 03:30).
  * @param {object} list List (model.js)
  * @param {{tz?: string, now?: any, horizonDays?: number, existingPosts?: object[]}} opts
- * @returns {{slots: Array<{scheduledAt: string, itemIndex: number}>, nextIndex: number}}
+ * @returns {{slots: Array<{scheduledAt: string, itemIndex: number, listSlot: string}>, nextIndex: number}}
  */
 export function expandListSlots(list, { tz = 'UTC', now, horizonDays, existingPosts = [] } = {}) {
   const start = Number.isInteger(list?.nextIndex) && list.nextIndex >= 0 ? list.nextIndex : 0;
@@ -432,27 +446,31 @@ export function expandListSlots(list, { tz = 'UTC', now, horizonDays, existingPo
   const nowMs = toMs(now);
   const horizon = Math.max(0, horizonDays ?? list.horizonDays ?? 14);
   const endMs = nowMs + horizon * DAY_MS;
-  const existing = toList(existingPosts)
-    .filter((p) => p.listId === list.id && p.scheduledAt)
+  const own = toList(existingPosts).filter((p) => p.listId === list.id);
+  const filledIds = new Set(own.map((p) => p.listSlot).filter(Boolean));
+  const existing = own
+    .filter((p) => p.scheduledAt)
     .map((p) => parseTimestamp(p.scheduledAt))
     .filter(Number.isFinite);
 
   const today = dayKey(new Date(nowMs), tz);
-  const times = new Set();
+  const found = new Map(); // ms -> listSlot
   for (let i = 0; i <= Math.ceil(horizon) + 1; i++) {
     const day = addDaysKey(today, i);
     const wd = weekdayOfKey(day);
     for (const s of slotDefs) {
       if (Number(s.weekday) !== wd) continue;
       const r = resolveLocal(day, s.time, tz);
-      if (!r || r.ms <= nowMs || r.ms > endMs) continue;
+      if (!r || r.ms <= nowMs || r.ms > endMs || found.has(r.ms)) continue;
+      const id = `${day}@${parseTime(s.time).text}`;
+      if (filledIds.has(id)) continue;
       if (existing.some((t) => Math.abs(t - r.ms) <= 60_000)) continue;
-      times.add(r.ms);
+      found.set(r.ms, id);
     }
   }
-  const slots = [...times]
+  const slots = [...found.keys()]
     .sort((a, b) => a - b)
-    .map((ms, i) => ({ scheduledAt: iso(ms), itemIndex: listItemIndex(list, start + i) }));
+    .map((ms, i) => ({ scheduledAt: iso(ms), itemIndex: listItemIndex(list, start + i), listSlot: found.get(ms) }));
   const used = start + slots.length;
   const nextIndex = list.order === 'shuffle' && items.length > 2 ? used : used % items.length;
   return { slots, nextIndex };
@@ -510,8 +528,9 @@ function groupAssets(pool, allowed) {
  * Plan the posts autopilot should create to keep its queue filled.
  * Target: round(postsPerWeek * horizonDays / 7) (at least 1) posts of any source scheduled (status
  * draft/scheduled) within the horizon. Media: unused library assets with autopilot === true in library
- * order, then (autopilot.useAllUnused) any other unused asset. Consecutive assets sharing a folderId
- * become a carousel (2-10) when allowed; videos become reels when allowed; the rest single feed posts.
+ * order, then (autopilot.useAllUnused) any other unused asset that was not in a rejected draft.
+ * Consecutive assets sharing a folderId become a carousel (2-10) when allowed; videos become reels
+ * when allowed; the rest single feed posts.
  * Times: suggestSlots with the matrix ('best') or autopilot.fixedSlots ('fixed'), at least minGapHours
  * from every other active or recently published post.
  * @returns {{create: Array<{assetIds: string[], type: string, scheduledAt: string}>, reason: string,
@@ -542,7 +561,15 @@ export function planAutopilot({ autopilot, assets = [], posts = [], matrix, tz =
   const allowed = new Set(Array.isArray(ap.allowedTypes) && ap.allowedTypes.length ? ap.allowedTypes : ['feed', 'carousel', 'reel']);
   const unused = unusedAssets(assets, postList);
   const pool = unused.filter((a) => a.autopilot === true);
-  if (ap.useAllUnused) pool.push(...unused.filter((a) => a.autopilot !== true));
+  if (ap.useAllUnused) {
+    // Media of a rejected draft stays out of the fallback; marking it for autopilot again brings it back.
+    const rejected = new Set();
+    for (const p of postList) {
+      if (p.status !== 'canceled' || !(p.history || []).some((h) => h && h.event === 'rejected')) continue;
+      for (const m of p.media || []) rejected.add(m.assetId);
+    }
+    pool.push(...unused.filter((a) => a.autopilot !== true && !rejected.has(a.id)));
+  }
   const groups = groupAssets(pool, allowed);
   if (!groups.length) {
     return {

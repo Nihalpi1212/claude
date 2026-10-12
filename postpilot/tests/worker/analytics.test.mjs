@@ -61,6 +61,42 @@ test('the daily account snapshot is written once per local day', async (t) => {
   assert.equal(daily2.days[today].capturedAt, daily.days[today].capturedAt);
 });
 
+test('a rate-limited weekly audience fetch keeps last week\'s data and is retried hours later, not in a week', async (t) => {
+  const env = await startWorkerEnv();
+  t.after(() => env.close());
+  await env.run({ only: ['analytics'] });
+  const before = await env.read('audience');
+  assert.ok(before.fetchedAt && before.demographics.follower);
+
+  const audienceMetric = (p) => /online_followers|demographics/.test(String(p.metric || ''));
+  let calls = 0;
+  // Counts audience requests (never matches, so it injects nothing).
+  const counter = { method: 'GET', path: /\/insights$/, when: (p) => void (calls += audienceMetric(p) ? 1 : 0) };
+  const limited = { method: 'GET', path: /\/insights$/, when: audienceMetric, error: { code: 4, status: 400, message: 'Application request limit reached' } };
+  env.graph.state.faults.push(counter, limited);
+  const week = Date.now() + 8 * 864e5;
+  await env.run({ only: ['analytics'], now: week });
+  const failed = await env.read('audience');
+  assert.equal(failed.fetchedAt, before.fetchedAt, 'a failed attempt does not restart the weekly wait');
+  assert.deepEqual(failed.demographics, before.demographics, 'demographics are not wiped');
+  assert.deepEqual(failed.onlineFollowers, before.onlineFollowers);
+  assert.ok(failed.lastAttemptAt);
+
+  // An hour later the attempt is not repeated yet.
+  calls = 0;
+  await env.run({ only: ['analytics'], now: week + 36e5 });
+  assert.equal(calls, 0);
+
+  // Hours later, with Instagram back to normal, the audience is refreshed.
+  env.graph.state.faults.splice(env.graph.state.faults.indexOf(limited), 1);
+  await env.run({ only: ['analytics'], now: week + 7 * 36e5 });
+  assert.ok(calls > 0);
+  env.graph.state.faults.length = 0;
+  const after = await env.read('audience');
+  assert.ok(Date.parse(after.fetchedAt) > Date.parse(before.fetchedAt));
+  assert.ok(after.demographics.follower);
+});
+
 test('media refresh cadence: young often, older daily, old weekly', () => {
   const now = Date.parse('2026-10-12T12:00:00Z');
   const ago = (h) => new Date(now - h * 36e5).toISOString();
@@ -101,4 +137,34 @@ test('competitors need Facebook Login; in facebook mode they are snapshotted dai
   assert.equal(doc.status, 'ok');
   const r3 = await fb.run({ only: ['competitors'] });
   assert.equal(r3.summary.jobs.competitors.competitors, 0, 'once per day');
+});
+
+test('competitors removed in the app during the daily fetch are not brought back', async (t) => {
+  const fb = await startWorkerEnv({ mode: 'facebook', token: 'fb-user-token' });
+  t.after(() => fb.close());
+  await fb.update('competitors', (d) => {
+    d.accounts = ['atelier.kin', 'no.such.account'];
+  });
+  // The owner removes both accounts while the worker is reading Business Discovery.
+  const real = fb.graph.handle;
+  let removed = false;
+  fb.graph.handle = async (req, res, sub, body, url) => {
+    if (!removed && /business_discovery/.test(decodeURIComponent(sub))) {
+      removed = true;
+      await fb.update('competitors', (d) => {
+        d.accounts = [];
+        for (const k of ['snapshots', 'posts', 'profiles', 'errors']) if (d[k]) for (const u of ['atelier.kin', 'no.such.account']) delete d[k][u];
+      });
+    }
+    return real(req, res, sub, body, url);
+  };
+  await fb.run({ only: ['competitors'] });
+  fb.graph.handle = real;
+  assert.ok(removed);
+  const doc = await fb.read('competitors');
+  assert.deepEqual(doc.accounts, []);
+  for (const k of ['snapshots', 'posts', 'profiles', 'errors']) {
+    assert.equal(doc[k]?.['atelier.kin'], undefined, `${k} not restored`);
+    assert.equal(doc[k]?.['no.such.account'], undefined, `${k} not restored`);
+  }
 });

@@ -1,8 +1,8 @@
 // Remove location and device metadata from MP4/MOV files without re-encoding.
 //
 // Phones store GPS coordinates and device details in metadata boxes ('udta', 'meta', XMP 'uuid')
-// inside the file. Renaming those boxes to 'free' (same size, so no offsets change) makes every
-// player and Instagram ignore them, and the video still plays exactly as before.
+// inside the file. Their contents are zeroed and the boxes renamed to 'free' (same size, so no
+// offsets change): every player and Instagram ignores them, and the video plays exactly as before.
 
 const CONTAINERS = new Set(['moov', 'trak', 'mdia', 'minf', 'edts', 'dinf', 'stbl']);
 const STRIP = new Set(['udta', 'meta', 'uuid']);
@@ -28,6 +28,7 @@ function walk(bytes, view, start, end, depth, stripped) {
     }
     if (size < header || at + size > end) break; // malformed: stop rather than guess
     if (STRIP.has(t)) {
+      bytes.fill(0, at + header, at + size); // erase the contents (e.g. GPS text), not just hide them
       bytes.set([0x66, 0x72, 0x65, 0x65], at + 4); // 'free'
       stripped.push(t);
     } else if (CONTAINERS.has(t) && depth < 8) {

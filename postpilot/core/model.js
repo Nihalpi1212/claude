@@ -42,6 +42,8 @@ const DEFAULTS = {
     createdAt: new Date().toISOString(),
   }),
   posts: () => ({ v: SCHEMA_VERSION, posts: [] }),
+  // Published/canceled posts older than 90 days, moved out of `posts` by worker housekeeping.
+  'posts-archive': () => ({ v: SCHEMA_VERSION, posts: [] }),
   library: () => ({ v: SCHEMA_VERSION, assets: [], folders: [] }),
   lists: () => ({ v: SCHEMA_VERSION, lists: [] }),
   automations: () => ({

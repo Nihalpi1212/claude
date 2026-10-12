@@ -255,17 +255,27 @@ export async function uploadFiles(files, opts = {}, onProgress = () => {}) {
   return out;
 }
 
-/** Remove assets (and their files) from the library. Refuses assets used by scheduled posts. */
+/** Statuses of posts that may still publish, so their media must stay ('failed' posts can be retried). */
+const LIVE_POST_STATUSES = ['scheduled', 'publishing', 'draft', 'failed'];
+
+/** Ids of assets that posts which may still publish, or queue items, use. */
+export function assetsInUse(posts, lists) {
+  const ids = new Set();
+  for (const p of (posts && posts.posts) || []) {
+    if (!LIVE_POST_STATUSES.includes(p.status)) continue;
+    for (const m of p.media || []) ids.add(m.assetId);
+    if (p.coverAssetId) ids.add(p.coverAssetId);
+  }
+  for (const l of (lists && lists.lists) || []) for (const it of l.items || []) for (const m of it.media || []) ids.add(m.assetId);
+  return ids;
+}
+
+/** Remove assets (and their files) from the library. Keeps assets that scheduled, draft or failed posts or a queue still use. */
 export async function deleteAssets(ids) {
   return transact(
     async (tx) => {
       const lib = await tx.read('library');
-      const posts = await tx.read('posts');
-      const blocked = new Set(
-        posts.posts
-          .filter((p) => ['scheduled', 'publishing', 'draft'].includes(p.status))
-          .flatMap((p) => p.media.map((m) => m.assetId).concat(p.coverAssetId ? [p.coverAssetId] : [])),
-      );
+      const blocked = assetsInUse(await tx.read('posts'), await tx.read('lists'));
       const removed = [];
       lib.assets = lib.assets.filter((a) => {
         if (!ids.includes(a.id)) return true;
@@ -283,26 +293,122 @@ export async function deleteAssets(ids) {
 }
 
 // ---- Object URL cache (decrypted media) ----
+//
+// Every cached URL keeps a decrypted Blob alive, so the cache is bounded: thumbnails by count, originals
+// (up to ~95 MB each) by count and total size. Least recently used URLs are revoked first, but never
+// while an element on the page still shows them. Reads run a few at a time, so a big contact sheet
+// does not fire one GitHub request per asset at once.
 
-const urlCache = new Map(); // path -> Promise<string>
+const READ_CONCURRENCY = 4;
+const MAX_THUMB_URLS = 300;
+const MAX_ORIGINAL_URLS = 20;
+const MAX_ORIGINAL_BYTES = 200 * 1024 * 1024;
+
+const urlCache = new Map(); // path -> { promise: Promise<string>, url, size, original }, least recently used first
+const revokeListeners = new Set();
+let reading = 0;
+const readQueue = [];
+let trimTimer = null;
+
+/** Run a media read when fewer than READ_CONCURRENCY are in flight. */
+function limited(task) {
+  return new Promise((resolve, reject) => {
+    const start = () => {
+      reading++;
+      Promise.resolve()
+        .then(task)
+        .then(resolve, reject)
+        .finally(() => {
+          reading--;
+          if (readQueue.length) readQueue.shift()();
+        });
+    };
+    if (reading < READ_CONCURRENCY) start();
+    else readQueue.push(start);
+  });
+}
+
+const isOriginal = (path) => !path.endsWith('.thumb');
+
+function cacheUrl(entry, blob) {
+  entry.url = URL.createObjectURL(blob);
+  entry.size = blob.size;
+  if (!trimTimer) trimTimer = setTimeout(trimMediaUrls, 1000);
+  return entry.url;
+}
 
 function primeUrl(path, blob) {
-  urlCache.set(path, Promise.resolve(URL.createObjectURL(blob)));
+  const entry = { url: null, size: 0, original: isOriginal(path) };
+  entry.promise = Promise.resolve(cacheUrl(entry, blob));
+  urlCache.delete(path);
+  urlCache.set(path, entry);
+}
+
+/** Called with (path, url) whenever a cached object URL is revoked, so other caches can drop it. */
+export function onMediaUrlRevoked(fn) {
+  revokeListeners.add(fn);
+  return () => revokeListeners.delete(fn);
+}
+
+/** Object URLs that elements on the page currently show (src, poster or href). */
+function urlsInUse() {
+  const used = new Set();
+  const doc = globalThis.document;
+  if (!doc || !doc.querySelectorAll) return used;
+  for (const el of doc.querySelectorAll('[src^="blob:"], [poster^="blob:"], [href^="blob:"]')) {
+    for (const attr of ['src', 'poster', 'href']) {
+      const v = el.getAttribute(attr);
+      if (v) used.add(v);
+    }
+  }
+  return used;
+}
+
+/** Revoke least recently used object URLs beyond the cache limits, skipping any still on the page. */
+export function trimMediaUrls() {
+  clearTimeout(trimTimer);
+  trimTimer = null;
+  let thumbs = 0;
+  let originals = 0;
+  let originalBytes = 0;
+  for (const e of urlCache.values()) {
+    if (!e.url) continue;
+    if (e.original) {
+      originals++;
+      originalBytes += e.size;
+    } else thumbs++;
+  }
+  const over = (e) => (e.original ? originals > MAX_ORIGINAL_URLS || originalBytes > MAX_ORIGINAL_BYTES : thumbs > MAX_THUMB_URLS);
+  if (![...urlCache.values()].some((e) => e.url && over(e))) return;
+  const used = urlsInUse();
+  for (const [path, e] of urlCache) {
+    if (!e.url || !over(e) || used.has(e.url)) continue;
+    urlCache.delete(path);
+    URL.revokeObjectURL(e.url);
+    if (e.original) {
+      originals--;
+      originalBytes -= e.size;
+    } else thumbs--;
+    for (const fn of revokeListeners) fn(path, e.url);
+  }
 }
 
 /** Object URL for an encrypted file (thumbnail or original). */
 export function mediaUrl(path, mime = 'image/jpeg') {
-  if (!urlCache.has(path)) {
-    const p = getStore()
-      .readBytes(path)
-      .then((bytes) => {
-        if (!bytes) throw new Error('Media file is missing.');
-        return URL.createObjectURL(new Blob([bytes], { type: mime }));
-      });
-    p.catch(() => urlCache.delete(path));
-    urlCache.set(path, p);
+  const hit = urlCache.get(path);
+  if (hit) {
+    urlCache.delete(path); // mark as recently used
+    urlCache.set(path, hit);
+    return hit.promise;
   }
-  return urlCache.get(path);
+  const entry = { url: null, size: 0, original: isOriginal(path) };
+  entry.promise = limited(() => getStore().readBytes(path)).then((bytes) => {
+    if (!bytes) throw new Error('Media file is missing.');
+    return cacheUrl(entry, new Blob([bytes], { type: mime }));
+  });
+  entry.promise.catch(() => urlCache.get(path) === entry && urlCache.delete(path));
+  urlCache.set(path, entry);
+  return entry.promise;
 }
 
 export function thumbUrl(asset) {

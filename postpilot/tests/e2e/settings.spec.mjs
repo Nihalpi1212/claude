@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
-import { loadPlaywright, openApp, shot, startDevServer, unlock } from './helpers.mjs';
+import { DEMO_PASSPHRASE, loadPlaywright, openApp, shot, startDevServer, unlock } from './helpers.mjs';
 
 const PORT = Number(process.env.SETTINGS_E2E_PORT) || 5216;
 
@@ -83,8 +83,23 @@ test('settings: sections, theme, AI key + test, backup, worker, activity log', {
     assert.equal(await page.evaluate(() => document.documentElement.dataset.theme ?? null), null);
     assert.equal(await page.evaluate(() => localStorage.getItem('postpilot.theme')), null);
 
+    // Time zone: saving explains that scheduled posts keep their exact moment; Cancel changes nothing.
+    const prefs = page.locator('#settings-preferences');
+    await prefs.getByLabel('Time zone').fill('Europe/Berlin');
+    await prefs.getByRole('button', { name: 'Save time zone' }).click();
+    const tzDialog = page.getByRole('dialog');
+    await tzDialog.getByText('Change the time zone to Europe/Berlin?').waitFor();
+    await tzDialog.getByText(/already scheduled keep their exact moment/).waitFor();
+    await tzDialog.getByRole('button', { name: 'Cancel' }).click();
+    await prefs.getByRole('button', { name: 'Save time zone' }).waitFor();
+    await prefs.getByRole('button', { name: 'Save time zone' }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Change time zone' }).click();
+    await page.getByText('Time zone set to Europe/Berlin.').waitFor();
+
     // AI: save a new key, test it against the mock, then a rejected key.
-    const key = page.locator('#settings-ai-key');
+    // The label is tied to the input (screen readers, clicking the label, password managers).
+    const key = page.getByLabel('Anthropic API key');
+    assert.equal(await key.getAttribute('id'), 'settings-ai-key');
     await key.fill('sk-ant-e2e-key');
     const save = page.getByRole('button', { name: 'Save AI settings' });
     await save.click();
@@ -122,17 +137,167 @@ test('settings: sections, theme, AI key + test, backup, worker, activity log', {
     await page.locator('#settings-activity').getByRole('radio', { name: 'All' }).click();
     await page.locator('#settings-activity .settings-log-row').first().waitFor();
 
-    // Security: wrong current passphrase is explained.
+    // Security: a weak new passphrase is refused with the same rules as creating a workspace.
     const sec = page.locator('#settings-security');
+    await sec.getByText('At least 12 characters. A short sentence of three or four words').waitFor();
+    await sec.getByText(/does not lock out anyone who already knows the old passphrase/).waitFor();
     await sec.getByLabel('Current passphrase').fill('not the passphrase');
+    await sec.getByLabel('New passphrase', { exact: true }).fill('password12');
+    await sec.getByLabel('Repeat new passphrase').fill('password12');
+    await sec.getByRole('button', { name: 'Change passphrase', exact: true }).click();
+    await sec.getByText('Use at least 12 characters').waitFor();
+    await sec.getByLabel('New passphrase', { exact: true }).fill('password1234');
+    await sec.getByLabel('Repeat new passphrase').fill('password1234');
+    await sec.getByRole('button', { name: 'Change passphrase', exact: true }).click();
+    await sec.getByText('That passphrase is too common').waitFor();
+
+    // Wrong current passphrase is explained.
     await sec.getByLabel('New passphrase', { exact: true }).fill('a brand new passphrase');
     await sec.getByLabel('Repeat new passphrase').fill('a brand new passphrase');
-    await sec.getByRole('button', { name: 'Change passphrase' }).click();
+    await sec.getByRole('button', { name: 'Change passphrase', exact: true }).click();
     await sec.getByText('The current passphrase is not right').waitFor({ timeout: 20_000 });
 
     assert.deepEqual(errors, []);
     await shot(page, 'settings-flow-end');
     await screenshots(h, '#/settings', 'settings', '.settings-section');
+  } finally {
+    await h.close();
+  }
+});
+
+/** Read a document through the app's own store (the module instance the app uses). */
+async function readDoc(page, name) {
+  return page.evaluate(async (n) => {
+    const { getStore } = await import('/postpilot/js/data.js');
+    const store = getStore();
+    await store.refresh();
+    return store.read(n);
+  }, name);
+}
+
+test('settings: restore never republishes, passphrase change, data key rotation', { timeout: 300_000 }, async () => {
+  const h = await openApp({ port: PORT, hash: '#/settings?section=data' });
+  const { page, browser, url } = h;
+  const errors = trackErrors(page);
+  try {
+    await page.waitForSelector('#settings-data', { timeout: 20_000 });
+
+    // --- Restore: posts published since the backup stay published, overdue scheduled posts become drafts,
+    // queued replies are not re-sent and handled comments are not handled again.
+    const [download] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Download backup' }).click()]);
+    const backup = JSON.parse(await readFile(await download.path(), 'utf8'));
+    const posts = backup.docs.posts.posts;
+    const scheduled = posts.filter((p) => p.status === 'scheduled');
+    const published = posts.filter((p) => p.status === 'published');
+    assert.ok(scheduled.length >= 2 && published.length >= 2, 'seed has scheduled and published posts');
+    const [overdue, upcoming] = scheduled;
+    const [republished, missing] = published;
+    const past = new Date(Date.now() - 3600e3).toISOString();
+    overdue.scheduledAt = past; // its time passed while the backup sat on disk
+    Object.assign(republished, { status: 'scheduled', scheduledAt: past, igMediaId: null, permalink: null, publishedAt: null }); // published since
+    backup.docs.posts.posts = posts.filter((p) => p.id !== missing.id); // published after the backup was taken
+    backup.docs.inbox.outbox = [{ id: 'cmd_e2e', type: 'reply_comment', payload: { commentId: 'c1', text: 'Thanks' }, status: 'pending', createdAt: past }];
+    backup.docs.automations.processed = { comments: { c_old: past }, messages: {}, conversations: {} };
+    backup.docs.automations.cursors = { comments: 'stale-cursor' };
+    backup.docs.automations.welcome.text = 'Restored welcome message';
+    const liveInbox = await readDoc(page, 'inbox');
+    const liveAutomations = await readDoc(page, 'automations');
+
+    await page.locator('#settings-data input[type=file]').setInputFiles({ name: 'backup.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(backup)) });
+    const restoreDialog = page.getByRole('dialog');
+    await restoreDialog.getByText(/scheduled posts whose time has passed come back as drafts/).waitFor();
+    await restoreDialog.getByRole('button', { name: 'Replace my data' }).click();
+    await page.getByText('Backup restored.').waitFor({ timeout: 20_000 });
+
+    const after = (await readDoc(page, 'posts')).posts;
+    const byId = new Map(after.map((p) => [p.id, p]));
+    assert.equal(byId.get(overdue.id).status, 'draft', 'an overdue scheduled post is not published again');
+    assert.equal(byId.get(overdue.id).history.at(-1).event, 'restored');
+    assert.equal(byId.get(upcoming.id).status, 'scheduled', 'a future scheduled post stays scheduled');
+    assert.equal(byId.get(republished.id).status, 'published', 'a post published since the backup keeps its live record');
+    assert.ok(byId.get(republished.id).igMediaId);
+    assert.equal(byId.get(missing.id)?.status, 'published', 'a published post missing from the backup is kept');
+    assert.ok(!after.some((p) => p.status === 'scheduled' && Date.parse(p.scheduledAt) <= Date.now()), 'nothing restored is due right away');
+    const inbox = await readDoc(page, 'inbox');
+    assert.deepEqual(inbox.outbox, liveInbox.outbox, 'the live outbox is kept');
+    const automations = await readDoc(page, 'automations');
+    assert.equal(automations.welcome.text, 'Restored welcome message');
+    assert.deepEqual(automations.processed, liveAutomations.processed, 'handled comments and messages are kept');
+    assert.deepEqual(automations.cursors, liveAutomations.cursors);
+
+    // A second browser profile that remembers this device with the current key.
+    const other = await browser.newContext({ viewport: { width: 1280, height: 860 } });
+    const otherPage = await other.newPage();
+    await otherPage.goto(`${url}/postpilot/index.html#/`);
+    await otherPage.getByLabel('GitHub access token').fill('mock-token');
+    await otherPage.getByRole('button', { name: 'Continue' }).click();
+    await otherPage.getByLabel('Passphrase', { exact: true }).fill(DEMO_PASSPHRASE);
+    await otherPage.getByRole('switch', { name: 'Remember this device' }).click();
+    await otherPage.getByRole('button', { name: 'Unlock' }).click();
+    await otherPage.waitForSelector('.app', { timeout: 30_000 });
+
+    // --- Change passphrase (re-wrap only).
+    await page.goto(`${url}/postpilot/index.html#/settings?section=security`);
+    const sec = page.locator('#settings-security');
+    await sec.getByLabel('Current passphrase').fill(DEMO_PASSPHRASE);
+    await sec.getByLabel('New passphrase', { exact: true }).fill('second passphrase for e2e');
+    await sec.getByLabel('Repeat new passphrase').fill('second passphrase for e2e');
+    await sec.getByRole('button', { name: 'Change passphrase', exact: true }).click();
+    await page.getByText('Passphrase changed.').waitFor({ timeout: 30_000 });
+    // Re-wrapping keeps the data key, so the remembered device still opens without a passphrase.
+    await otherPage.reload();
+    await otherPage.waitForSelector('.app', { timeout: 30_000 });
+
+    // --- Change passphrase and replace the data key.
+    const rotatedAt = new Date().toISOString();
+    await sec.getByLabel('Current passphrase').fill('second passphrase for e2e');
+    await sec.getByLabel('New passphrase', { exact: true }).fill('third passphrase after rotation');
+    await sec.getByLabel('Repeat new passphrase').fill('third passphrase after rotation');
+    await sec.getByRole('button', { name: 'Change passphrase and replace key' }).click();
+    const rotateDialog = page.getByRole('dialog');
+    await rotateDialog.getByText(/protects what you save from now on/).waitFor();
+    await rotateDialog.getByRole('button', { name: 'Replace key' }).click();
+    // The app reloads with the new key and says what happened.
+    await page.locator('#settings-security').getByText('Data key replaced').waitFor({ timeout: 60_000 });
+    await page.locator('#settings-security').getByText(/worker's secret is updated/).waitFor();
+    await page.locator('#settings-instagram').getByText('@studio.north').first().waitFor();
+    assert.equal((await readDoc(page, 'automations')).welcome.text, 'Restored welcome message', 'data reads with the new key');
+
+    // The worker opens the re-sealed secret and reads the re-encrypted data.
+    await page.locator('#settings-worker').getByRole('button', { name: 'Run now' }).click();
+    await page.getByText('Worker started.').waitFor();
+    await page.waitForFunction(
+      async (since) => {
+        const res = await fetch('/mock/gh/repos/demo/postpilot/actions/workflows/postpilot-worker.yml/runs');
+        const run = (await res.json()).workflow_runs[0];
+        return run && run.status === 'completed' && Date.parse(run.created_at) >= Date.parse(since);
+      },
+      rotatedAt,
+      { timeout: 90_000, polling: 1000 },
+    );
+    const runs = await page.evaluate(async () => (await (await fetch('/mock/gh/repos/demo/postpilot/actions/workflows/postpilot-worker.yml/runs')).json()).workflow_runs);
+    assert.equal(runs[0].conclusion, 'success', 'the worker runs with the new key');
+    const log = await readDoc(page, 'log');
+    assert.ok(log.runs.some((r) => r.startedAt >= rotatedAt), 'the worker wrote its run log with the new key');
+
+    // The remembered device holds the old key: it now asks to unlock instead of failing to decrypt.
+    await otherPage.reload();
+    await otherPage.waitForSelector('#lock-token', { timeout: 30_000 });
+    assert.equal(await otherPage.locator('.app').count(), 0);
+    assert.equal(await otherPage.evaluate(() => localStorage.getItem('postpilot.session')), null);
+    // The previous passphrase no longer unlocks; the new one does.
+    await otherPage.getByLabel('GitHub access token').fill('mock-token');
+    await otherPage.getByRole('button', { name: 'Continue' }).click();
+    await otherPage.getByLabel('Passphrase', { exact: true }).fill('second passphrase for e2e');
+    await otherPage.getByRole('button', { name: 'Unlock' }).click();
+    await otherPage.getByText('That passphrase is not right').waitFor({ timeout: 30_000 });
+    await otherPage.getByLabel('Passphrase', { exact: true }).fill('third passphrase after rotation');
+    await otherPage.getByRole('button', { name: 'Unlock' }).click();
+    await otherPage.waitForSelector('.app', { timeout: 30_000 });
+    await other.close();
+
+    await shot(page, 'settings-security-rotated');
+    assert.deepEqual(errors, []);
   } finally {
     await h.close();
   }
@@ -149,13 +314,19 @@ test('onboarding: new workspace → connect Instagram → connect worker → tim
     errors = trackErrors(page);
     await page.goto(`${server.url}/postpilot/index.html#/`);
 
-    // Lock screen: create a workspace.
+    // Lock screen: every field is reachable through its label; create a workspace.
     await page.waitForSelector('#lock-token', { timeout: 20_000 });
-    await page.fill('#lock-token', 'mock-token');
+    assert.equal(await page.getByLabel('GitHub account').inputValue(), 'demo');
+    assert.equal(await page.getByLabel('Repository').inputValue(), 'postpilot');
+    await page.getByLabel('GitHub access token').fill('mock-token');
     await page.getByRole('button', { name: 'Continue' }).click();
     await page.waitForSelector('#lock-new-passphrase', { timeout: 20_000 });
-    await page.fill('#lock-new-passphrase', 'a fresh e2e passphrase');
-    await page.fill('#lock-new-passphrase-2', 'a fresh e2e passphrase');
+    await page.getByLabel('New passphrase').fill('password1234');
+    await page.getByLabel('Repeat passphrase').fill('password1234');
+    await page.getByRole('button', { name: 'Create encrypted workspace' }).click();
+    await page.getByText('That passphrase is too common').waitFor();
+    await page.getByLabel('New passphrase').fill('a fresh e2e passphrase');
+    await page.getByLabel('Repeat passphrase').fill('a fresh e2e passphrase');
     await page.getByRole('button', { name: 'Create encrypted workspace' }).click();
     await page.waitForSelector('.onboarding', { timeout: 60_000 });
     await page.getByRole('heading', { name: 'Connect your Instagram account' }).waitFor();
@@ -231,7 +402,7 @@ test('onboarding: new workspace → connect Instagram → connect worker → tim
       await p.fill('#lock-token', 'mock-token');
       await p.getByRole('button', { name: 'Continue' }).click();
       await p.waitForSelector('#lock-passphrase', { timeout: 20_000 });
-      await p.fill('#lock-passphrase', 'a fresh e2e passphrase');
+      await p.getByLabel('Passphrase', { exact: true }).fill('a fresh e2e passphrase');
       await p.getByRole('button', { name: 'Unlock' }).click();
       await p.waitForSelector('.onboarding', { timeout: 30_000 });
       await p.getByRole('button', { name: 'Use a different account' }).click();

@@ -253,6 +253,36 @@ describe('Inbox', { timeout: 240_000 }, () => {
     assert.ok(added.every((e) => /Failed to load resource|ERR_EMPTY_RESPONSE|ERR_CONNECTION/.test(e)), `unexpected console errors: ${added.join('\n')}`);
   });
 
+  test('"Try again" in a stale tab does not reset an action the worker is already sending', async () => {
+    const id = 'ob_e2e_retry_race';
+    const errorsBefore = consoleErrors.length;
+    await dev.seeded.store.update('inbox', (d) => {
+      d.outbox ||= [];
+      d.outbox.push({ id, type: 'reply_comment', payload: { commentId: '0', text: 'Retry race check' }, status: 'failed', error: 'Instagram is busy.', attempts: 1, createdAt: new Date().toISOString(), doneAt: new Date().toISOString() });
+    }, { message: 'e2e: failed command' });
+    await page.reload();
+    await page.waitForSelector('.app', { timeout: 30_000 });
+    const item = page.locator('.ibx-outbox-item', { hasText: 'Retry race check' });
+    await item.getByRole('button', { name: 'Try again' }).waitFor({ timeout: 30_000 });
+
+    // Meanwhile another tab retried it and a worker run claimed it; this tab still shows "failed".
+    await dev.seeded.store.update('inbox', (d) => {
+      const c = d.outbox.find((x) => x.id === id);
+      Object.assign(c, { status: 'sending', error: null, attempts: 1 });
+    }, { message: 'e2e: worker claims command' });
+    await item.getByRole('button', { name: 'Try again' }).click();
+    await page.locator('.toast', { hasText: 'This action is already being sent or was sent.' }).waitFor();
+    const cmd = (await readDoc('inbox')).outbox.find((x) => x.id === id);
+    assert.equal(cmd.status, 'sending', 'the claimed command is left to the worker');
+    // The stale tab's first commit is rejected (422, not a fast-forward) before it re-reads; that is expected.
+    const added = consoleErrors.splice(errorsBefore);
+    assert.ok(added.every((e) => /status of 422/.test(e)), `unexpected console errors: ${added.join('\n')}`);
+
+    await dev.seeded.store.update('inbox', (d) => {
+      d.outbox = d.outbox.filter((x) => x.id !== id);
+    }, { message: 'e2e: clean up' });
+  });
+
   test('no console errors', () => {
     assert.deepEqual(consoleErrors, []);
   });

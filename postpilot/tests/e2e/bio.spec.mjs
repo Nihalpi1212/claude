@@ -41,6 +41,18 @@ async function imagesLoaded(page, label) {
   assert.deepEqual(broken, [], `${label}: images failed to load`);
 }
 
+/** The public bio.json exactly as visitors can fetch it. */
+async function publicBioText(page) {
+  return page.evaluate(async () => {
+    const { DATA_BRANCH, ENDPOINTS } = await import('/postpilot/js/config.js');
+    const res = await fetch(`${ENDPOINTS.github}/repos/demo/postpilot/contents/public/bio.json?ref=${DATA_BRANCH}`, {
+      headers: { Accept: 'application/vnd.github.raw+json' },
+      cache: 'no-store',
+    });
+    return res.text();
+  });
+}
+
 async function noSideScroll(page, label) {
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   assert.ok(overflow <= 1, `${label}: page scrolls sideways by ${overflow}px`);
@@ -55,7 +67,9 @@ test('link in bio: edit, validate, publish, public page, photo, unpublish', { ti
   try {
     await page.waitForSelector('.bio-editor', { timeout: 20_000 });
 
-    // Seeded content renders in the editor and the live preview.
+    // Seeded content renders in the editor and the live preview. Labels name their inputs.
+    assert.equal(await page.getByLabel('Title', { exact: true }).inputValue(), 'Studio North');
+    assert.equal(await page.getByLabel('Short bio', { exact: true }).count(), 1);
     assert.equal(await page.locator('#bio-title').inputValue(), 'Studio North');
     assert.equal(await page.locator('.bio-link-edit').count(), 3);
     assert.equal(await page.locator('.bio-grid-row').count(), 6);
@@ -130,6 +144,53 @@ test('link in bio: edit, validate, publish, public page, photo, unpublish', { ti
     assert.equal(await pub.locator('.bio-grid a.bio-tile').count(), 7);
     assert.ok(await pub.locator('.bio-page.bio-theme-ink').count());
     await noSideScroll(pub, 'public bio desktop');
+
+    // A link switched off never reaches the public file; it stays in the editor at its place.
+    const workshop = page.locator('.bio-link-edit').nth(2);
+    assert.equal(await workshop.getByLabel('Label').inputValue(), 'Book a wheel-throwing workshop');
+    const workshopUrl = await workshop.getByLabel('Address').inputValue();
+    assert.ok(workshopUrl.startsWith('https://'), workshopUrl);
+    await workshop.getByRole('switch', { name: 'Show' }).click();
+    await workshop.getByText('Its address stays private').waitFor();
+    // The earlier "Changes are live." toast may still be up: wait for the save itself.
+    await page.getByRole('button', { name: 'Publish changes' }).first().click();
+    await page.locator('.bio-savebar').waitFor({ state: 'detached', timeout: 20_000 });
+    let rawBio = await publicBioText(page);
+    assert.ok(rawBio.includes('Shop the autumn drop'), 'public file has the visible links');
+    assert.ok(!rawBio.includes(workshopUrl) && !rawBio.includes('wheel-throwing'), 'hidden link leaked into public/bio.json');
+    const hiddenSaved = await page.evaluate(async () => (await (await import('/postpilot/js/data.js')).readDoc('settings')).bioHiddenLinks);
+    assert.deepEqual(hiddenSaved.map((l) => [l.title, l.position, l.enabled]), [['Book a wheel-throwing workshop', 2, false]]);
+    await page.reload();
+    await unlock(page);
+    await page.waitForSelector('.bio-editor', { timeout: 20_000 });
+    assert.deepEqual(await page.locator('.bio-link-edit').evaluateAll((els) => els.map((e) => e.querySelector('input').value)),
+      ['Newsletter', 'Shop the autumn drop', 'Book a wheel-throwing workshop', 'Custom orders']);
+    assert.equal(await page.locator('.bio-link-edit').nth(2).getByRole('switch', { name: 'Show' }).getAttribute('aria-checked'), 'false');
+    assert.equal(await page.locator('.bio-link-edit').nth(2).getByLabel('Address').inputValue(), workshopUrl);
+    await pub.reload();
+    await pub.locator('a.bio-link').first().waitFor({ timeout: 20_000 });
+    assert.deepEqual(await pub.locator('a.bio-link').allTextContents().then((t) => t.map((x) => x.trim())), ['Newsletter', 'Shop the autumn drop', 'Custom orders']);
+    // Showing it again puts it back in the public file at the same place.
+    await page.locator('.bio-link-edit').nth(2).getByRole('switch', { name: 'Show' }).click();
+    await page.locator('.bio-savebar').waitFor();
+    await page.getByRole('button', { name: 'Publish changes' }).first().click();
+    await page.locator('.bio-savebar').waitFor({ state: 'detached', timeout: 20_000 });
+    rawBio = await publicBioText(page);
+    assert.deepEqual(JSON.parse(rawBio).links.map((l) => l.title), ['Newsletter', 'Shop the autumn drop', 'Book a wheel-throwing workshop', 'Custom orders']);
+    assert.deepEqual(await page.evaluate(async () => (await (await import('/postpilot/js/data.js')).readDoc('settings')).bioHiddenLinks), []);
+    await pub.reload();
+    await pub.locator('h1.bio-title', { hasText: 'Studio North Ceramics' }).waitFor({ timeout: 20_000 });
+
+    // ?repo= cannot point a github.io address at another repository; custom domains still use it.
+    const repos = await pub.evaluate(async () => {
+      const { bioRepo } = await import('/postpilot/js/bio-page.js');
+      return {
+        pages: bioRepo({ hostname: 'owner.github.io', pathname: '/site/postpilot/bio.html', search: '?repo=attacker/x' }),
+        custom: bioRepo({ hostname: 'links.example.com', pathname: '/bio.html', search: '?repo=owner/site' }),
+      };
+    });
+    assert.notEqual(repos.pages && repos.pages.owner, 'attacker');
+    assert.deepEqual(repos.custom, { owner: 'owner', repo: 'site' });
 
     // Photo upload: saved to public/bio/ right away and shown on the live page.
     await page.locator('.bio-avatar-row input[type=file]').setInputFiles(AVATAR);

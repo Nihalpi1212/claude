@@ -1,6 +1,7 @@
 // Evergreen lists: turn each enabled list's recurring slots into scheduled posts for the next
 // `horizonDays`. Idempotent: a slot that already has a post from the list (any status, canceled
-// included) is never filled twice (see schedule.expandListSlots).
+// included) is never filled twice (see schedule.expandListSlots). Each post keeps its slot's
+// identity in `listSlot`, so moving it in the planner or changing the time zone does not empty the slot.
 //
 // Lists with `repeat: false` use each item once: items already used (timesUsed > 0) or waiting in
 // an active post are not scheduled again, and the publish job removes an item once it is published.
@@ -61,6 +62,7 @@ export function planList(list, { posts, assetIds, tz, now, nowIso }) {
         source: 'evergreen',
         listId: list.id,
         listItemId: item.id,
+        listSlot: slot.listSlot,
         needsApproval: false,
         createdAt: nowIso,
         updatedAt: nowIso,

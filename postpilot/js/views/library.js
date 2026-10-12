@@ -25,6 +25,9 @@ const FILTERS = [
   { value: 'autopilot', label: 'Autopilot pool' },
 ];
 const TYPE_LABEL = { feed: 'Post', carousel: 'Carousel', reel: 'Reel', story: 'Story' };
+// Frames shown at once. Each one fetches and decrypts its thumbnail as soon as it mounts, so a large
+// library on a cold cache would otherwise send one GitHub request per file at once (secondary rate limit).
+const SHEET_PAGE = 120;
 
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const REMOVED_HINT = 'The original was removed to save space (Settings → Free up space). Only the thumbnail is kept; upload the file again to post it.';
@@ -301,7 +304,7 @@ function AssetDrawer({ asset, folders, usedBy, tz, onClose, onCreatePost, onDele
 // ---------------------------------------------------------------------------
 // Small modals
 
-function NameModal({ open, title, label, initial = '', confirmLabel, onClose, onSubmit }) {
+function NameModal({ open, title, label, hint, initial = '', confirmLabel, onClose, onSubmit }) {
   const [name, setName] = useState(initial);
   const [busy, setBusy] = useState(false);
   useEffect(() => open && setName(initial), [open]);
@@ -321,7 +324,7 @@ function NameModal({ open, title, label, initial = '', confirmLabel, onClose, on
   return html`<${Modal} open=${open} title=${title} onClose=${onClose}
     footer=${html`<${Button} variant="ghost" onClick=${onClose}>Cancel<//><${Button} variant="primary" loading=${busy} disabled=${!name.trim()} onClick=${submit}>${confirmLabel}<//>`}>
     <form onSubmit=${submit}>
-      <${Field} label=${label}><${TextInput} value=${name} onChange=${setName} maxLength=${60} data-autofocus /><//>
+      <${Field} label=${label} hint=${hint}><${TextInput} value=${name} onChange=${setName} maxLength=${60} data-autofocus /><//>
     </form>
   <//>`;
 }
@@ -395,6 +398,7 @@ export default function Library() {
   const [uploads, setUploads] = useState([]);
   const [dragging, setDragging] = useState(false);
   const [modal, setModal] = useState(null); // 'new-folder' | 'rename-folder' | 'tags'
+  const [limit, setLimit] = useState(SHEET_PAGE);
   const fileRef = useRef(null);
   const lastIndex = useRef(-1);
 
@@ -418,6 +422,7 @@ export default function Library() {
       return true;
     });
   }, [assets, filter, folder, q, unusedIds]);
+  useEffect(() => setLimit(SHEET_PAGE), [filter, folder, q]);
 
   // Drop selections that no longer exist.
   useEffect(() => {
@@ -559,10 +564,11 @@ export default function Library() {
     }
   };
 
-  const moveTo = async (ids, folderId) => {
+  // folderName: pass it for a folder created in this render (`folders` does not have it yet).
+  const moveTo = async (ids, folderId, folderName) => {
     try {
       await writeAssets(ids, (a) => (a.folderId = folderId), 'move media');
-      const name = folderId ? (folders.find((f) => f.id === folderId) || {}).name : null;
+      const name = folderId ? folderName || (folders.find((f) => f.id === folderId) || {}).name || 'the folder' : null;
       toast(name ? `Moved ${plural(ids.length, 'file')} to ${name}.` : `Moved ${plural(ids.length, 'file')} out of folders.`, { kind: 'success' });
     } catch {
       /* toasted */
@@ -577,10 +583,15 @@ export default function Library() {
   const removeAssets = async (list) => {
     const n = list.length;
     const inUse = list.filter((a) => (usage.get(a.id) || []).some((p) => ['scheduled', 'publishing', 'draft'].includes(p.status))).length;
+    const deletable = n - inUse;
+    if (!deletable) {
+      toast(n === 1 ? 'This file is used by a scheduled post or draft. Remove it from that post first.' : 'These files are used by scheduled posts or drafts. Remove them from those posts first.', { kind: 'info' });
+      return false;
+    }
     const ok = await confirm({
-      title: n === 1 ? `Delete "${list[0].name || 'this file'}"?` : `Delete ${n} files?`,
-      body: `${n === 1 ? 'It is' : 'They are'} removed from your library and storage. This cannot be undone.${inUse ? ` ${inUse === n && n === 1 ? 'It is' : `${plural(inUse, 'file')} ${inUse === 1 ? 'is' : 'are'}`} used by a scheduled post or draft and will be kept.` : ''}`,
-      confirmLabel: n === 1 ? 'Delete file' : `Delete ${n} files`,
+      title: deletable === 1 ? (n === 1 ? `Delete "${list[0].name || 'this file'}"?` : 'Delete 1 file?') : `Delete ${deletable} files?`,
+      body: `${deletable === 1 ? 'It is' : 'They are'} removed from your library and storage. This cannot be undone.${inUse ? ` ${plural(inUse, 'other file')} ${inUse === 1 ? 'is' : 'are'} used by a scheduled post or draft and will be kept.` : ''}`,
+      confirmLabel: deletable === 1 ? 'Delete file' : `Delete ${deletable} files`,
       danger: true,
     });
     if (!ok) return false;
@@ -631,7 +642,7 @@ export default function Library() {
       { message: 'create folder' },
     );
     toast(`Folder "${name}" created.`, { kind: 'success' });
-    if (selected.size) await moveTo([...selected], id);
+    if (selected.size) await moveTo([...selected], id, name);
     setQuery({ folder: id });
   };
   const renameFolder = async (name) => {
@@ -740,14 +751,21 @@ export default function Library() {
         setQuery({ filter: null, folder: null });
       }}>Show all media<//>`} />`;
   } else {
+    const more = visible.length - limit;
     body = html`<ol class="contact-sheet lib-sheet" aria-label="Media">
-      ${visible.map(
+      ${visible.slice(0, limit).map(
         (a, i) => html`<${SheetItem} key=${a.id} asset=${a} index=${i} selected=${selected.has(a.id)} selecting=${selecting}
           usedCount=${(usage.get(a.id) || []).length}
           onOpen=${() => setOpenId(a.id)}
           onToggle=${(e) => toggle(a.id, i, e)} />`,
       )}
-    </ol>`;
+    </ol>
+    ${more > 0
+      ? html`<div class="row lib-more">
+          <span class="muted text-sm">Showing ${limit} of ${visible.length}</span>
+          <${Button} size="sm" variant="secondary" onClick=${() => setLimit((n) => n + SHEET_PAGE)}>Show ${Math.min(more, SHEET_PAGE)} more<//>
+        </div>`
+      : null}`;
   }
 
   return html`<div class="page lib" ...${dropHandlers}>
@@ -819,6 +837,7 @@ export default function Library() {
       : null}
 
     <${NameModal} open=${modal === 'new-folder'} title="New folder" label="Folder name" confirmLabel="Create folder"
+      hint=${selected.size ? `The ${selected.size === 1 ? 'selected file moves' : `${selected.size} selected files move`} into it.` : undefined}
       onClose=${() => setModal(null)} onSubmit=${createFolder} />
     <${NameModal} open=${modal === 'rename-folder' && !!activeFolder} title="Rename folder" label="Folder name" confirmLabel="Rename"
       initial=${activeFolder ? activeFolder.name : ''} onClose=${() => setModal(null)} onSubmit=${renameFolder} />

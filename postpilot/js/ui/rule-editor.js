@@ -432,7 +432,7 @@ export function RuleEditor({ open, rule, posts = [], aiReady = false, blockedWor
 
         <section class="rule-section stack" aria-labelledby="rule-then">
           <h3 class="rule-section-title label-caps" id="rule-then">Then</h3>
-          <p class="muted text-sm">Use <span class="mono">{username}</span>, <span class="mono">{first_name}</span> or <span class="mono">{mention}</span> (@username) in messages. <span class="mono">{first_name|there}</span> uses “there” when the name is unknown.</p>
+          <p class="muted text-sm">Use <span class="mono">{username}</span>, <span class="mono">{first_name}</span> or <span class="mono">{mention}</span> (@username) in messages. Postpilot does not get people’s names from Instagram, so <span class="mono">{first_name}</span> is their username too.</p>
           ${errFor('actions') ? html`<p class="field-error" role="alert"><span>${errFor('actions')}</span></p>` : null}
           <ol class="rule-actions">
             ${(draft.actions || []).map(

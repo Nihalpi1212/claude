@@ -93,6 +93,17 @@ describe('Automations', { timeout: 240_000 }, () => {
     await dialog.locator('.rule-test-verdict', { hasText: 'Matches' }).waitFor();
     assert.match(await dialog.locator('.rule-test-verdict').textContent(), /on “glaze”/);
     await dialog.locator('.rule-test-text', { hasText: 'Thanks new.fan! It is our speckled cream glaze.' }).waitFor();
+
+    // The hint says what {first_name} really becomes: the worker only gets usernames, so a
+    // "{first_name|there}" fallback never shows "there".
+    const hint = dialog.locator('p', { hasText: 'in messages.' });
+    assert.match(await hint.textContent(), /does not get people’s names from Instagram, so \{first_name\} is their username too/);
+    assert.doesNotMatch(await hint.textContent(), /uses “there”/);
+    const reply = dialog.getByLabel('Reply to the comment, version 1');
+    await reply.fill('Hi {first_name|there}!');
+    await dialog.locator('.rule-test-text', { hasText: 'Hi new.fan!' }).waitFor();
+    await reply.fill('Thanks {username}! It is our speckled cream glaze.');
+    await dialog.locator('.rule-test-text', { hasText: 'Thanks new.fan! It is our speckled cream glaze.' }).waitFor();
     await viewShot('automations-editor-desktop-light');
 
     await dialog.getByRole('button', { name: 'Save rule' }).click();

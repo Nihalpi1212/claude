@@ -4,7 +4,7 @@ import { after, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { openApp, shot } from './helpers.mjs';
+import { openApp, shot, unlock } from './helpers.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURE = path.resolve(here, '../../dev/fixtures/f02.jpg');
@@ -21,6 +21,22 @@ async function toastText(re, timeout = 15_000) {
   const t = page.locator('.toast', { hasText: re }).first();
   await t.waitFor({ timeout });
   return t.textContent();
+}
+
+/** A second, separate browser tab (own storage), unlocked. Its console is not checked. */
+async function secondPage() {
+  const context = await h.browser.newContext({ viewport: { width: 1280, height: 860 } });
+  const p = await context.newPage();
+  await p.goto(`${h.url}/postpilot/index.html#/`);
+  await unlock(p);
+  return { p, close: () => context.close() };
+}
+
+/** The dashboard Inbox card's "Comments to answer" value. */
+async function dashCommentsToAnswer(p) {
+  const row = p.locator('.dash-side .dash-kv-row', { hasText: 'Comments to answer' });
+  await row.waitFor({ timeout: 20_000 });
+  return (await row.locator('dd').textContent()).trim();
 }
 
 /** Close the composer (and confirm discarding if it asks). */
@@ -74,6 +90,75 @@ describe('Today, Library and Autopilot', { timeout: 240_000 }, () => {
     await page.waitForFunction(() => location.hash.startsWith('#/planner') && location.hash.includes('view=week'));
     await go('#/');
     await page.locator('.dash-account').waitFor();
+  });
+
+  test('dashboard counts comments to answer the same way as the Inbox', async () => {
+    // The dashboard reads the worker's cached comments; with Instagram unreachable the Inbox shows that
+    // same cache, so its "Needs reply" count must match the dashboard's.
+    const t = await secondPage();
+    try {
+      const p = t.p;
+      await p.locator('.dash-side', { hasText: 'Inbox' }).locator('.dash-side-scope', { hasText: 'Inbox reads Instagram live' }).waitFor({ timeout: 20_000 });
+      const dash = await dashCommentsToAnswer(p);
+      assert.match(dash, /^\d+$/);
+      assert.ok(Number(dash) > 0, 'the seed has comments waiting for a reply');
+      await p.route(/\/mock\/ig\/[^?]*\/media(\?|$)/, (r) =>
+        r.request().method() === 'GET'
+          ? r.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: { message: 'E2E: media list unavailable', type: 'OAuthException', code: 100 } }) })
+          : r.continue(),
+      );
+      await p.evaluate(() => (location.hash = '#/inbox'));
+      await p.locator('.badge', { hasText: 'Cached copy' }).waitFor({ timeout: 30_000 });
+      const label = await p.getByRole('radio', { name: /^Needs reply/ }).textContent();
+      assert.equal(label.match(/\((\d+)\)/)?.[1], dash, `Inbox "${label.trim()}" vs dashboard ${dash}`);
+    } finally {
+      await t.close();
+    }
+  });
+
+  test('a failed post is not reported as a worker problem', async () => {
+    await go('#/');
+    await page.locator('.dash-account').waitFor({ timeout: 20_000 });
+    // The fake scheduled run finishes well after every run the app dispatched (the seed run).
+    const lastDispatched = await page.evaluate(async () => {
+      const data = await import('/postpilot/js/data.js');
+      const log = await data.readDoc('log');
+      return Math.max(0, ...(log.runs || []).filter((r) => r.trigger === 'workflow_dispatch').map((r) => Date.parse(r.finishedAt) || 0));
+    });
+    const now = Math.max(Date.now(), lastDispatched + 10_000);
+    const fake = (extra) => ({ startedAt: new Date(now - 30_000).toISOString(), finishedAt: new Date(now).toISOString(), durationMs: 30_000, trigger: 'schedule', reason: 'e2e-fake', counts: { published: 0, failed: 1 }, ...extra });
+    // Writes through the app's own data layer (the page imports the same module instance).
+    const setFake = (run) =>
+      page.evaluate(async (r) => {
+        const data = await import('/postpilot/js/data.js');
+        await data.mutate('log', (l) => {
+          l.runs = [...(r ? [r] : []), ...(l.runs || []).filter((x) => x.reason !== 'e2e-fake')];
+        });
+      }, run);
+    try {
+      // The worker ran fine; only a post was rejected (worker/run.mjs stores ok:false for that).
+      await setFake(fake({ ok: false, errors: [] }));
+      await page.locator('.dash-health-item', { hasText: 'Worker ran' }).waitFor();
+      await page.locator('.dash-alerts .callout', { hasText: 'failed to publish' }).waitFor();
+      assert.equal(await page.locator('.dash-alerts .callout', { hasText: 'The last worker run had a problem' }).count(), 0);
+      assert.match(await page.locator('.sidebar .worker-status').textContent(), /Worker running/);
+
+      // "Run now" waits for the run it started, not a scheduled run that was already going.
+      const found = await page.evaluate(async (since) => {
+        const { waitForWorkerRun } = await import('/postpilot/js/app.js');
+        return waitForWorkerRun(since, 5000);
+      }, now);
+      assert.equal(found, null, 'a scheduled run is not taken for the dispatched one');
+
+      // A job error is a worker problem.
+      await setFake(fake({ ok: false, errors: [{ job: 'publish', message: 'E2E boom' }] }));
+      await page.locator('.dash-alerts .callout', { hasText: 'The last worker run had a problem' }).locator('text=E2E boom').waitFor();
+      await page.locator('.dash-health-item', { hasText: 'Worker had a problem' }).waitFor();
+      await page.locator('.sidebar .worker-status', { hasText: 'Worker had a problem' }).waitFor();
+    } finally {
+      await setFake(null);
+    }
+    await page.locator('.sidebar .worker-status', { hasText: 'Worker running' }).waitFor();
   });
 
   test('library: upload, filter, search, tag, autopilot pool, create post', async () => {
@@ -216,6 +301,86 @@ describe('Today, Library and Autopilot', { timeout: 240_000 }, () => {
     // Quick action: upload straight from Today.
     await page.setInputFiles('.dash input[type="file"]', FIXTURE);
     await toastText(/Added 1 file to the library/, 30_000);
+  });
+
+  test("dashboard before the worker's first sync does not claim there is nothing", async () => {
+    await go('#/');
+    await page.locator('.dash-account').waitFor({ timeout: 20_000 });
+    const saved = await page.evaluate(async () => {
+      const data = await import('/postpilot/js/data.js');
+      return { media: await data.readDoc('analytics-media'), inbox: await data.readDoc('inbox'), log: await data.readDoc('log') };
+    });
+    try {
+      // A fresh workspace: the worker has not filled post stats or the inbox cache yet.
+      await page.evaluate(async () => {
+        const data = await import('/postpilot/js/data.js');
+        await data.mutate('analytics-media', () => ({ media: {} }));
+        await data.mutate('inbox', (d) => ({ ...d, comments: [], conversations: [], fetchedAt: null }));
+        await data.mutate('log', (d) => ({ ...d, runs: [] }));
+      });
+      await page.locator('.dash-recent .empty-title', { hasText: 'Post stats are on their way' }).waitFor();
+      const inbox = page.locator('.dash-side', { hasText: 'Inbox' });
+      await inbox.getByText("Comments and messages show up here after the worker's first check.").waitFor();
+      assert.equal(await dashCommentsToAnswer(page), '—');
+      assert.equal(await inbox.getByText('You are all caught up').count(), 0);
+      await shot(page, 'home-e2e-dashboard-before-sync');
+    } finally {
+      await page.evaluate(async (s) => {
+        const data = await import('/postpilot/js/data.js');
+        await data.mutate('analytics-media', () => s.media);
+        await data.mutate('inbox', () => s.inbox);
+        await data.mutate('log', () => s.log);
+      }, saved);
+    }
+    await page.locator('.dash-sheet > li').first().waitFor();
+  });
+
+  test('boot: a failed first read shows the reason and a way out instead of spinning forever', async () => {
+    const t = await secondPage();
+    const p = t.p;
+    const boot = p.locator('.boot-error');
+    try {
+      // Expired or revoked token.
+      const ref = /\/mock\/gh\/repos\/[^/]+\/[^/]+\/git\/ref\//;
+      const deny = (r) => r.fulfill({ status: 401, contentType: 'application/json', body: JSON.stringify({ message: 'Bad credentials' }) });
+      await p.route(ref, deny);
+      await p.reload();
+      await boot.getByText('GitHub rejected your access token').waitFor({ timeout: 20_000 });
+      await boot.getByRole('button', { name: 'Lock and use a different token' }).waitFor();
+      await shot(p, 'home-e2e-boot-error');
+      // Try again once GitHub accepts it.
+      await p.unroute(ref, deny);
+      await boot.getByRole('button', { name: 'Try again' }).click();
+      await p.locator('.app .dash-account').waitFor({ timeout: 20_000 });
+
+      // Offline: retries by itself when the connection comes back.
+      const offline = (r) => r.abort('internetdisconnected');
+      await p.route(ref, offline);
+      await p.reload();
+      await boot.getByText('Could not reach GitHub').waitFor({ timeout: 20_000 });
+      await p.unroute(ref, offline);
+      await p.evaluate(() => window.dispatchEvent(new Event('online')));
+      await p.locator('.app .dash-account').waitFor({ timeout: 20_000 });
+
+      // The saved data key no longer decrypts the workspace.
+      await p.evaluate(() => {
+        const s = JSON.parse(sessionStorage.getItem('postpilot.session'));
+        s.dataKey = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32))));
+        sessionStorage.setItem('postpilot.session', JSON.stringify(s));
+      });
+      await p.reload();
+      // Resuming may already drop a key that does not decrypt (lock screen); otherwise the app explains it.
+      await p.locator('.boot-error, #lock-token, #lock-passphrase').first().waitFor({ timeout: 20_000 });
+      if (await boot.count()) {
+        await boot.getByText("This device's saved key no longer opens your workspace").waitFor();
+        await boot.getByRole('button', { name: 'Lock and unlock with your passphrase' }).click();
+        await p.locator('#lock-token, #lock-passphrase').first().waitFor({ timeout: 20_000 });
+      }
+      assert.equal(await p.locator('.boot:not(.boot-error)').count(), 0, 'not stuck on the boot spinner');
+      assert.equal(await p.evaluate(() => sessionStorage.getItem('postpilot.session')), null, 'Lock forgets the saved session');
+    } finally {
+      await t.close();
+    }
   });
 
   test('no console errors', () => {

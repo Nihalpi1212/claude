@@ -5,7 +5,8 @@
 //   from the profile into today's key.
 // - Media insights: media younger than 2 days every hour, younger than 30 days daily, older
 //   weekly; at most 60 per run, youngest first. Stored in analytics-media.media[id].
-// - Audience (online followers + demographics) weekly into the audience document.
+// - Audience (online followers + demographics) weekly into the audience document. A run that gets
+//   nothing usable keeps the old data and fetchedAt and tries again after AUDIENCE_RETRY_MS.
 // All writes happen in one transaction at the end.
 
 import { addDaysKey } from '../../core/time.js';
@@ -21,6 +22,7 @@ const MONTH_MS = 30 * DAY_MS;
 const DAILY_EVERY_MS = 20 * 36e5;
 const WEEKLY_EVERY_MS = 7 * DAY_MS;
 const AUDIENCE_EVERY_MS = 7 * DAY_MS;
+const AUDIENCE_RETRY_MS = 6 * 36e5;
 
 function ms(iso) {
   const t = Date.parse(iso || '');
@@ -119,7 +121,9 @@ export default async function analytics(ctx) {
 
   // ---- audience (weekly) ----------------------------------------------------------------------
   let audiencePatch = null;
-  if (!audience.fetchedAt || nowMs - ms(audience.fetchedAt) >= AUDIENCE_EVERY_MS) {
+  const audienceDue = !audience.fetchedAt || nowMs - ms(audience.fetchedAt) >= AUDIENCE_EVERY_MS;
+  // After a failed attempt, wait a few hours instead of asking again on every run.
+  if (audienceDue && !(nowMs - ms(audience.lastAttemptAt) < AUDIENCE_RETRY_MS)) {
     let online = null;
     let demographics = null;
     try {
@@ -134,7 +138,10 @@ export default async function analytics(ctx) {
       if (err && err.isAuth) throw err;
       ctx.log('analytics', 'warn', `Could not read audience demographics: ${describeError(err)}`);
     }
-    audiencePatch = { online, demographics };
+    // demographics() returns {follower: null, engaged: null} when Instagram refused every breakdown
+    // (rate limit, temporary error): that must not replace last week's data.
+    const usableDemo = demographics && (demographics.follower || demographics.engaged) ? demographics : null;
+    audiencePatch = { online, demographics: usableDemo };
   }
 
   if (!dayPatch && !insights.size && !newIds.length && !audiencePatch) return result;
@@ -195,7 +202,9 @@ export default async function analytics(ctx) {
         const a = await tx.read('audience');
         if (audiencePatch.online) a.onlineFollowers = audiencePatch.online;
         if (audiencePatch.demographics) a.demographics = audiencePatch.demographics;
-        a.fetchedAt = nowIso;
+        // Only real data restarts the weekly wait; a failed attempt is retried after a few hours.
+        if (audiencePatch.online || audiencePatch.demographics) a.fetchedAt = nowIso;
+        a.lastAttemptAt = nowIso;
         result.audience = audiencePatch.online || audiencePatch.demographics ? 1 : 0;
         tx.write('audience', a);
       }

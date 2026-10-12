@@ -37,7 +37,9 @@ no subscription, and nobody else can open it.
 - The worker gets the data key through an encrypted GitHub Actions secret and prints only counts in its
   (public) logs.
 - When a post is published, Instagram has to download the photo or video from a public URL. Postpilot
-  puts an unencrypted copy under `public/tmp/` for the minute Instagram needs, then deletes it.
+  puts an unencrypted copy on a throwaway `postpilot-public-tmp` branch for the minute Instagram
+  needs, then wipes that branch, so the copy is not kept in any branch's history. GitHub may still serve an unreferenced copy to someone who
+  saved its link for a while, so treat anything you publish as public.
 
 ## One-time setup (about 15 minutes)
 

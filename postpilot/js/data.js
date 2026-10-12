@@ -204,14 +204,21 @@ export async function refreshNow() {
   await getStore().refresh();
 }
 
+function poll() {
+  if (globalThis.document?.visibilityState !== 'visible' || !store) return;
+  store
+    .refresh()
+    .then(() => {
+      // Documents that failed to load earlier (offline, GitHub hiccup) get another try.
+      for (const [name, e] of entries) if (e.error && (listeners.get(name) || new Set()).size) load(name, true);
+    })
+    .catch(() => {});
+}
+
 function startPolling() {
   if (pollTimer) clearInterval(pollTimer);
-  pollTimer = setInterval(() => {
-    if (globalThis.document?.visibilityState === 'visible' && store) store.refresh().catch(() => {});
-  }, 60_000);
-  globalThis.document?.addEventListener('visibilitychange', () => {
-    if (globalThis.document.visibilityState === 'visible' && store) store.refresh().catch(() => {});
-  });
+  pollTimer = setInterval(poll, 60_000);
+  globalThis.document?.addEventListener('visibilitychange', poll);
 }
 
 export function stopData() {

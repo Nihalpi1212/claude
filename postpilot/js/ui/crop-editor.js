@@ -249,7 +249,11 @@ function EditorBody({ source, name, aspects = ['portrait', 'square', 'landscape'
         ${r ? html`<span class="mono num text-sm muted crop-size" title="Size that will be uploaded">${outW} × ${outH}</span>` : null}
       </div>
       ${bmp && outW < 1080 && (aspect || 1) <= 1.2
-        ? html`<p class="text-sm text-warn crop-hint">This crop is ${outW} px wide. Instagram shows photos at 1080 px, so it may look soft. Zoom out if you can.</p>`
+        ? html`<p class="text-sm text-warn crop-hint">This crop is ${outW} px wide. Instagram shows photos at 1080 px, so it may look soft. ${zoom > 1.01
+            ? 'Zoom out if you can.'
+            : !locked && aspect && aspect < 1 && aspects.includes('square') && Math.min(w, h) >= 1080
+              ? 'Square keeps the full width.'
+              : 'A larger original would look sharper.'}</p>`
         : null}
       ${aspectKey === 'original' && !locked && originalOutOfFeed
         ? html`<p class="text-sm text-warn crop-hint">The original shape is outside 4:5 to 1.91:1, so Instagram will not accept it in the feed. It still works for stories.</p>`

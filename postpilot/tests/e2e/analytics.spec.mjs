@@ -112,6 +112,13 @@ test('range switch changes the numbers and the URL', async () => {
   assert.notEqual(await tileValue('Reach'), before28);
   assert.match(await page.locator('.range-trigger').innerText(), /Last 7 days/);
 
+  // Followers move by a few dozen a week: the y-axis must still show distinct labels (not "4.8K" four times).
+  const axes = await page.locator('[role="tabpanel"] .chart-line').evaluateAll((charts) =>
+    charts.map((c) => ({ name: c.getAttribute('aria-label'), ticks: [...c.querySelectorAll('.chart-axis text[text-anchor="end"]')].map((t) => t.textContent) })),
+  );
+  assert.ok(axes.some((a) => a.name === 'Followers per day'), 'followers chart renders');
+  for (const a of axes) assert.equal(new Set(a.ticks).size, a.ticks.length, `${a.name}: repeated y-axis labels ${a.ticks.join(' / ')}`);
+
   // Compare off hides the deltas on the period tiles; on brings them back.
   await page.getByRole('switch', { name: /Compare with previous period/ }).click();
   await page.waitForFunction(() => location.hash.includes('compare=0'));
@@ -129,6 +136,41 @@ test('a range the worker never saved loads live from Instagram', async () => {
   assert.equal(await page.locator('input[aria-label="From"]').inputValue(), OLD_FROM);
   assert.equal(await page.locator('input[aria-label="To"]').inputValue(), OLD_TO);
   await go('#/analytics');
+  await waitForNumber('Reach');
+});
+
+test('a previous period Instagram fails to return is reported and can be retried', async () => {
+  // A week the worker never saved, so both it and the week before load live. Only the requests for
+  // the week before fail (their `until` is at or before the start of the range).
+  const from = daysAgo(50);
+  const rangeStart = Date.parse(`${from}T12:00:00Z`) / 1000;
+  let block = true;
+  const isPrevious = (url) => {
+    const until = Number(new URL(url).searchParams.get('until'));
+    return /\/insights$/.test(new URL(url).pathname) && until > 0 && until < rangeStart;
+  };
+  const graph = /\/mock\/(ig|fb)\//;
+  await page.route(graph, (route) => (block && isPrevious(route.request().url()) ? route.abort('failed') : route.continue()));
+  const errorsBefore = h.consoleErrors.length;
+  try {
+    await go(`#/analytics?range=custom&from=${from}&to=${daysAgo(44)}`);
+    const note = page.locator('.an-source', { hasText: 'Could not load the previous period from Instagram' });
+    await note.waitFor({ timeout: 30_000 });
+    await waitForNumber('Reach');
+    assert.match(await tile('Reach').innerText(), /Could not load the previous period from Instagram/);
+    assert.doesNotMatch(await tile('Reach').innerText(), /No data for the previous period/);
+
+    block = false;
+    await note.getByRole('button', { name: 'Try again' }).click();
+    await page.waitForSelector('.an-source >> text=Previous period loaded live from Instagram', { timeout: 30_000 });
+    assert.match(await tile('Reach').locator('.stat-delta').innerText(), /%/);
+  } finally {
+    await page.unroute(graph);
+    // The blocked requests are logged by Chromium; only those are expected.
+    const added = h.consoleErrors.splice(errorsBefore);
+    h.consoleErrors.push(...added.filter((e) => !/Failed to load resource: net::ERR_FAILED/.test(e)));
+    await go('#/analytics');
+  }
   await waitForNumber('Reach');
 });
 

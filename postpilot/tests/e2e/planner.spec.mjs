@@ -284,7 +284,7 @@ test('CSV import of two rows creates two posts; export downloads upcoming posts'
   await dialog.locator('.pl-import-row.is-ok').nth(1).waitFor();
   assert.equal(await dialog.locator('.pl-import-row.has-error').count(), 0);
   await dialog.getByRole('button', { name: 'Create 2 posts' }).click();
-  await page.getByText(/Imported 2 posts/).waitFor();
+  await page.getByText('Imported 2 posts (1 scheduled, 1 draft).').waitFor();
   const created = await waitFor(async () => {
     const posts = (await storedPosts()).filter((p) => p.source === 'csv');
     return posts.length === 2 ? posts : null;
@@ -317,6 +317,46 @@ test('CSV import of two rows creates two posts; export downloads upcoming posts'
   const text = String(await (await import('node:fs/promises')).readFile(await download.path()));
   assert.match(text.replace(/^﻿/, ''), /^date,time,type,caption,first_comment,media,status\r\n/);
   assert.match(text, /CSV row one, with a comma/);
+});
+
+test('"Try again" sends a post that still fails validation to the composer instead of the worker', async () => {
+  const { page } = h;
+  await setView('List');
+  const row = page.locator('.pl-row', { hasText: 'Late night at the studio.' });
+  const id = await row.getAttribute('data-post-id');
+  await row.getByRole('button', { name: 'Try again' }).click();
+  await page.getByText('Fix the problems in this post, then try again.').waitFor();
+  const drawer = page.locator('.cmp-drawer');
+  await drawer.waitFor();
+  await drawer.getByText('Feed photos must be between 4:5 and 1.91:1', { exact: false }).first().waitFor();
+  await closeComposer(page);
+  const post = (await storedPosts()).find((p) => p.id === id);
+  assert.equal(post.status, 'failed', 'not queued again');
+  assert.ok(!post.history.some((e) => e.event === 'retry'));
+
+  // A valid failed post is queued again with a single toast (the worker start is quiet).
+  const okId = await page.evaluate(async () => {
+    const data = await import('/postpilot/js/data.js');
+    const { newPost } = await import('/postpilot/core/model.js');
+    const lib = await data.getStore().read('library');
+    const asset = lib.assets.find((a) => a.name === 'Vase trio');
+    const post = newPost({
+      status: 'failed',
+      caption: 'E2E retry: a valid post that failed once.',
+      media: [{ assetId: asset.id, kind: asset.kind }],
+      scheduledAt: new Date(Date.now() - 3_600_000).toISOString(),
+      attempts: 4,
+      lastError: { message: 'Instagram was busy. Try again later.', code: 2, at: new Date().toISOString(), permanent: true },
+    });
+    await data.mutate('posts', (doc) => void doc.posts.push(post), { message: 'e2e: failed post' });
+    return post.id;
+  });
+  const okRow = page.locator(`.pl-row[data-post-id="${okId}"]`);
+  await okRow.getByRole('button', { name: 'Try again' }).click();
+  await page.getByText(/^Publishing again\./).waitFor();
+  await waitFor(async () => (await storedPosts()).find((p) => p.id === okId).history.some((e) => e.event === 'retry'), { message: 'retry committed' });
+  await page.waitForTimeout(1000);
+  assert.equal(await page.getByText(/^Worker started/).count(), 0, 'one toast, not two');
 });
 
 test('screenshots: desktop and phone, light and dark', async () => {

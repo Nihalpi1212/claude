@@ -5,17 +5,28 @@
 // the console and callers must pass NON-SENSITIVE text (counts, generic status). Everything
 // detailed goes through `log()`, which is persisted to the encrypted `log` document.
 
-import { b64decode, DecryptError, importDataKey, randomToken } from '../core/crypto.js';
+import { b64decode, DecryptError, importDataKey, randomToken, utf8 } from '../core/crypto.js';
 import { createGitHub, GitHubError } from '../core/github.js';
 import { createStore, DATA_BRANCH } from '../core/store.js';
 import { createIg } from '../core/ig.js';
 import { createAi } from '../core/ai.js';
 import { dayKey } from '../core/time.js';
+import { stripMp4Metadata } from '../core/mp4.js';
 
 export const LOG_ENTRY_CAP = 500;
 export const RUN_CAP = 200;
 export const DEFAULT_MAX_WAIT_SEC = 540;
 export const TMP_PREFIX = 'public/tmp/';
+/**
+ * Throwaway branch for the plaintext copies Instagram downloads while publishing. It never has
+ * history: every change points it at a new root commit holding only the copies still needed, so a
+ * removed copy is not reachable from any branch (unlike a delete commit on the data branch).
+ */
+export const TMP_BRANCH = 'postpilot-public-tmp';
+const TMP_README = '# Postpilot temporary media\n\nCopies of photos and videos that Instagram downloads while Postpilot publishes them.\nThe worker replaces this branch with a fresh commit as soon as Instagram has the media.\n';
+
+/** True only for an Instagram login error (not a GitHub 401/403 or an AI key error). */
+export const isIgAuth = (err) => err?.name === 'IgError' && !!err.isAuth;
 
 /** Thrown when the worker cannot start. `publicMessage` is safe to print; `fatal` decides the exit code. */
 export class ConfigError extends Error {
@@ -148,6 +159,9 @@ export async function createContext({ env = {}, fetchImpl, now, consoleLog = con
     if (err instanceof GitHubError && err.status === 404) {
       throw new ConfigError('no_data_branch', `Postpilot data branch "${branch}" was not found. Finish setup in the app first.`);
     }
+    if (err instanceof GitHubError && err.status === 403 && /rate limit/i.test(err.message)) {
+      throw new ConfigError('github_rate_limit', 'GitHub rate limit reached; the worker will try again on its next run.');
+    }
     if (err instanceof GitHubError && err.isAuth) {
       throw new ConfigError('github_auth', 'GitHub refused the worker token. Check that the workflow has "contents: write" permission.', { fatal: true });
     }
@@ -198,12 +212,63 @@ export async function createContext({ env = {}, fetchImpl, now, consoleLog = con
     }
   }
 
-  // ---- media exposure (public/tmp) -----------------------------------------------------------
+  // ---- media exposure (public/tmp on the throwaway branch) -----------------------------------
   const exposed = new Set();
   let repoPublicChecked = false;
+  let tmpFiles = null; // Map(path -> blob sha) of the copies on the throwaway branch, loaded once
+  let tmpExists = false;
+  let tmpReadmeSha = null;
+  let tmpQueue = Promise.resolve();
 
-  function rawUrl(path) {
-    return `${endpoints.raw}/${owner}/${repo}/${branch.split('/').map(encodeURIComponent).join('/')}/${path.split('/').map(encodeURIComponent).join('/')}`;
+  function rawUrl(path, ref = branch) {
+    return `${endpoints.raw}/${owner}/${repo}/${ref.split('/').map(encodeURIComponent).join('/')}/${path.split('/').map(encodeURIComponent).join('/')}`;
+  }
+
+  /** Run changes to the throwaway branch one at a time (each one replaces the whole branch). */
+  function withTmpBranch(fn) {
+    const next = tmpQueue.then(fn, fn);
+    tmpQueue = next.catch(() => {});
+    return next;
+  }
+
+  async function loadTmpFiles() {
+    if (tmpFiles) return tmpFiles;
+    const files = new Map();
+    const head = await gh.getRef(TMP_BRANCH);
+    if (head) {
+      const c = await gh.getCommit(head);
+      for (const e of await gh.getTree(c.tree.sha)) if (e.path.startsWith(TMP_PREFIX)) files.set(e.path, e.sha);
+    }
+    tmpExists = !!head;
+    tmpFiles = files;
+    return files;
+  }
+
+  /** Point the throwaway branch at a new root commit holding exactly `files` (force, no history). */
+  async function writeTmpBranch(files) {
+    if (!tmpReadmeSha) tmpReadmeSha = await gh.createBlob(utf8(TMP_README));
+    const tree = await gh.createTree([{ path: 'README.md', sha: tmpReadmeSha }, ...[...files].map(([path, sha]) => ({ path, sha }))]);
+    const commit = await gh.createCommit({ message: 'Temporary media for Instagram', tree, parents: [] });
+    const point = (create) => (create ? gh.createRef(TMP_BRANCH, commit) : gh.updateRef(TMP_BRANCH, commit, true));
+    try {
+      await point(!tmpExists);
+    } catch (err) {
+      if (!(err instanceof GitHubError && err.status === 422)) throw err;
+      await point(tmpExists); // the branch was created or deleted meanwhile
+    }
+    tmpExists = true;
+    tmpFiles = new Map(files);
+  }
+
+  /** Remove copies from the throwaway branch. Returns how many were there. */
+  function removeTmpFiles(shouldRemove) {
+    return withTmpBranch(async () => {
+      const files = await loadTmpFiles();
+      const next = new Map([...files].filter(([p]) => !shouldRemove(p)));
+      if (next.size === files.size) return 0;
+      await writeTmpBranch(next);
+      return files.size - next.size;
+    });
   }
 
   async function readMedia(asset) {
@@ -252,34 +317,61 @@ export async function createContext({ env = {}, fetchImpl, now, consoleLog = con
         });
       }
     }
+    // readMedia returns a fresh decrypted copy, so stripping in place never touches the stored original.
     const bytes = await readMedia(asset);
-    const path = `${TMP_PREFIX}${Math.floor(clock() / 1000)}-${randomToken(12)}.${extensionFor(asset)}`;
-    await store.transact(async (tx) => tx.writePublic(path, bytes), { message: 'expose media for publishing' });
+    const ext = extensionFor(asset);
+    if (ext !== 'jpg') stripMp4Metadata(bytes); // photos were re-encoded (no EXIF) when they were added
+    const path = `${TMP_PREFIX}${Math.floor(clock() / 1000)}-${randomToken(12)}.${ext}`;
+    const sha = await gh.createBlob(bytes);
+    await withTmpBranch(async () => {
+      const files = new Map(await loadTmpFiles());
+      files.set(path, sha);
+      await writeTmpBranch(files);
+    });
     exposed.add(path);
-    const url = rawUrl(path);
+    const url = rawUrl(path, TMP_BRANCH);
     await waitForUrl(url, { timeoutMs: Number(env.POSTPILOT_EXPOSE_TIMEOUT_MS || 60_000) });
     return { url, path };
+  }
+
+  /** Remove exposed copies from the throwaway branch (ignores paths that are already gone). */
+  async function removeExposed(paths) {
+    const list = new Set((paths || []).filter((p) => typeof p === 'string' && p.startsWith(TMP_PREFIX)));
+    if (!list.size) return 0;
+    const removed = await removeTmpFiles((p) => list.has(p));
+    for (const p of list) exposed.delete(p);
+    return removed;
+  }
+
+  /**
+   * Rewrite the throwaway branch so it holds only the copies in `keep` (media of containers that
+   * Instagram may still be downloading). Clears leftovers from earlier runs that stopped early.
+   */
+  async function pruneExposed(keep = []) {
+    const keepSet = new Set(keep);
+    return removeTmpFiles((p) => !keepSet.has(p));
   }
 
   /** Delete exposed public/tmp files (ignores paths that are already gone). */
   async function cleanupExposed(paths) {
     const list = [...new Set((paths || []).filter((p) => typeof p === 'string' && p.startsWith(TMP_PREFIX)))];
     if (!list.length) return 0;
-    let removed = 0;
+    const removed = await removeExposed(list);
+    // Copies made on the data branch by older versions of the worker.
+    let legacy = 0;
     await store.transact(
       async (tx) => {
-        removed = 0;
+        legacy = 0;
         for (const p of list) {
           if (tx.exists(p)) {
             tx.delete(p);
-            removed++;
+            legacy++;
           }
         }
       },
       { message: 'remove temporary media' },
     );
-    for (const p of list) exposed.delete(p);
-    return removed;
+    return removed + legacy;
   }
 
   const ctx = {
@@ -313,6 +405,8 @@ export async function createContext({ env = {}, fetchImpl, now, consoleLog = con
     exposeMedia,
     readMedia,
     cleanupExposed,
+    removeExposed,
+    pruneExposed,
     exposed,
     waitForUrl,
     trigger: env.GITHUB_EVENT_NAME || 'manual',
@@ -347,7 +441,7 @@ export function describeError(err) {
 /** Short, non-sensitive category for console output. */
 export function errorKind(err) {
   if (!err) return 'error';
-  if (err.isAuth) return 'Instagram login problem';
+  if (isIgAuth(err)) return 'Instagram login problem';
   if (err.isRateLimit) return 'rate limited';
   if (err.name === 'GitHubError') return `GitHub error ${err.status || ''}`.trim();
   if (err.name === 'ConflictError') return 'data kept changing';

@@ -3,7 +3,8 @@
 //
 // Data: public/bio.json on the data branch, read through the GitHub contents API (raw media type),
 // falling back to raw.githubusercontent.com when the API is rate limited.
-// Owner/repo come from the GitHub Pages address, or from ?repo=owner/name on a custom domain.
+// Owner/repo come from the GitHub Pages address. ?repo=owner/name is only a fallback for a custom
+// domain (or localhost); on *.github.io it is ignored so a link cannot show another repo's page.
 
 import { html, render, useEffect, useState } from '../vendor/preact.js';
 import { DATA_BRANCH, ENDPOINTS, guessRepoFromLocation } from './config.js';
@@ -176,9 +177,19 @@ export function publicFileUrl({ owner, repo }, path) {
   return `${ENDPOINTS.raw}/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${encodeURIComponent(DATA_BRANCH)}/${p.split('/').map(encodeURIComponent).join('/')}`;
 }
 
-function repoFromQuery() {
-  const m = /^([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+)$/.exec(new URLSearchParams(location.search).get('repo') || '');
+function repoFromQuery(loc) {
+  const m = /^([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+)$/.exec(new URLSearchParams(loc.search || '').get('repo') || '');
   return m ? { owner: m[1], repo: m[2] } : null;
+}
+
+/**
+ * Which repository's public/bio.json this page shows. On a GitHub Pages address (*.github.io) the
+ * address decides and ?repo= is ignored; elsewhere (custom domain, localhost) ?repo= comes first.
+ */
+export function bioRepo(loc = globalThis.location) {
+  if (!loc) return null;
+  if (/(^|\.)github\.io$/i.test(loc.hostname || '')) return guessRepoFromLocation(loc);
+  return repoFromQuery(loc) || guessRepoFromLocation(loc);
 }
 
 async function boot() {
@@ -187,7 +198,7 @@ async function boot() {
     root.textContent = '';
     render(node, root);
   };
-  const where = repoFromQuery() || guessRepoFromLocation();
+  const where = bioRepo();
   if (!where) {
     show(html`<${BioMessage} title="This page could not find its data"
       body="Open it from your GitHub Pages address, or add ?repo=account/repository to the address." />`);

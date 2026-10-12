@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { startWorkerEnv, visibleLines, TEST_TOKEN } from '../helpers/worker-env.mjs';
+import { runWorker } from '../../worker/run.mjs';
 
 const DAY = 864e5;
 
@@ -76,4 +77,32 @@ test('facebook mode validates the page token once a day', async (t) => {
   const settings = await env.read('settings');
   assert.equal(settings.ig.mode, 'facebook');
   assert.equal(settings.ig.status.state, 'ok');
+});
+
+test('a GitHub refusal while saving the refreshed token does not flag the login as expired', async (t) => {
+  const env = await startWorkerEnv();
+  t.after(() => env.close());
+  await env.update('settings', (s) => {
+    s.ig.tokenRefreshedAt = new Date(Date.now() - 7 * DAY).toISOString();
+  });
+  let refused = 0;
+  const fetchImpl = async (url, init = {}) => {
+    if (!refused && init.method === 'POST' && String(url).endsWith('/git/commits') && JSON.parse(init.body).message === 'worker: token: update Instagram connection') {
+      refused++;
+      return new Response(JSON.stringify({ message: 'Resource not accessible by integration' }), { status: 403, headers: { 'Content-Type': 'application/json' } });
+    }
+    return fetch(url, init);
+  };
+  const lines = [];
+  const res = await runWorker({ env: env.env, only: ['token', 'stories'], fetchImpl, log: (l) => lines.push(l) });
+  assert.equal(refused, 1);
+  assert.equal(res.exitCode, 0);
+  assert.equal(res.summary.jobs.token.tokenExpired, undefined);
+  assert.equal(res.summary.jobs.stories.skipped, undefined, 'Instagram jobs still run');
+  const settings = await env.read('settings');
+  assert.equal(settings.ig.status.state, 'ok');
+  assert.equal(env.pushes.length, 0);
+  assert.ok(!lines.some((l) => /login/i.test(l)));
+  const log = await env.read('log');
+  assert.ok(log.entries.some((e) => e.job === 'token' && e.level === 'warn' && /Could not refresh/.test(e.message)));
 });

@@ -4,11 +4,12 @@
 //   away. The new token is masked in the Actions log immediately.
 // - Facebook Login: Page tokens do not expire, but they die when the password changes or the app is
 //   removed, so validate with me() once a day.
-// Either way an auth error marks settings.ig.status = {state: 'expired', ...} so the app can show a
-// reconnect banner, and Instagram jobs are skipped for the rest of the run.
+// Either way an Instagram auth error marks settings.ig.status = {state: 'expired', ...} so the app can
+// show a reconnect banner, and Instagram jobs are skipped for the rest of the run. A GitHub error
+// (for example a 403 rate limit while saving) is never taken for an expired login.
 
 import { dayKey } from '../../core/time.js';
-import { describeError } from '../context.mjs';
+import { describeError, isIgAuth } from '../context.mjs';
 
 const HOUR = 36e5;
 const DAY = 24 * HOUR;
@@ -48,10 +49,13 @@ export async function markExpired(ctx, igs, err) {
   const at = ctx.nowIso();
   const message = describeError(err);
   if (igs.status?.state !== 'expired') ctx.notify('account', { message });
-  await saveIg(ctx, igs.token, (ig) => {
-    ig.status = { state: 'expired', at: ig.status?.state === 'expired' ? ig.status.at || at : at, checkedAt: at, message };
-  });
-  ctx.ig = null;
+  try {
+    await saveIg(ctx, igs.token, (ig) => {
+      ig.status = { state: 'expired', at: ig.status?.state === 'expired' ? ig.status.at || at : at, checkedAt: at, message };
+    });
+  } finally {
+    ctx.ig = null; // skip Instagram for the rest of the run even when saving the status failed
+  }
   ctx.log('token', 'error', `Instagram rejected the saved login: ${message}`, { code: err?.code ?? null, subcode: err?.subcode ?? null });
   return { tokenExpired: 1 };
 }
@@ -95,7 +99,7 @@ export default async function token(ctx) {
         }
         return { tokenRefreshed: 0 };
       } catch (err) {
-        if (err && err.isAuth) return markExpired(ctx, igs, err);
+        if (isIgAuth(err)) return markExpired(ctx, igs, err);
         ctx.log('token', 'warn', `Could not refresh the Instagram token: ${describeError(err)}`, { code: err?.code ?? null });
         // Fall through to the daily check.
       }
@@ -118,7 +122,7 @@ export default async function token(ctx) {
     if (wasExpired) ctx.log('token', 'info', 'Instagram login works again.');
     return { tokenChecked: 1 };
   } catch (err) {
-    if (err && err.isAuth) return markExpired(ctx, igs, err);
+    if (isIgAuth(err)) return markExpired(ctx, igs, err);
     ctx.log('token', 'warn', `Could not check the Instagram login: ${describeError(err)}`, { code: err?.code ?? null });
     return { tokenChecked: 0 };
   }

@@ -2,7 +2,7 @@
 // (KPIs, the coming week, up next, inbox / autopilot / automations, recent post performance).
 
 import { html, useEffect, useMemo, useRef, useState } from '../../vendor/preact.js';
-import { useApp } from '../app.js';
+import { runBroken, useApp } from '../app.js';
 import { readDoc, useDocs } from '../data.js';
 import { loadViewCss } from '../css.js';
 import { thumbUrl, uploadFiles } from '../media.js';
@@ -197,7 +197,8 @@ function buildAlerts({ settings, log, posts, automations, now, dispatchWorker })
       body: 'Scheduled posts, auto-replies and analytics all come from the worker. Connect it in Settings so it runs every 10 minutes.',
       action: { label: 'Set up the worker', href: '#/settings?section=worker' },
     });
-  } else if (last.ok === false) {
+  } else if (runBroken(last)) {
+    // Not for a run whose only problem was a failed post: that post has its own alert below.
     const err = (last.errors || [])[0];
     out.push({
       id: 'worker-failed',
@@ -312,7 +313,7 @@ function AccountStrip({ settings, followers, log, now }) {
   else {
     const at = new Date(last.finishedAt || last.startedAt);
     const late = (now - at.getTime()) / 60000 > 90;
-    worker = last.ok === false ? { tone: 'bad', label: `Worker had a problem ${ago(at)}` } : { tone: late ? 'warn' : 'ok', label: `Worker ran ${ago(at)}` };
+    worker = runBroken(last) ? { tone: 'bad', label: `Worker had a problem ${ago(at)}` } : { tone: late ? 'warn' : 'ok', label: `Worker ran ${ago(at)}` };
   }
   const exp = parseTimestamp(ig.tokenExpiresAt);
   const daysLeft = Number.isFinite(exp) ? Math.floor((exp - now) / DAY_MS) : null;
@@ -521,21 +522,27 @@ function AutopilotCard({ autopilot, posts, library, tz, now }) {
   <//>`;
 }
 
+/**
+ * Cached comments that need a reply, newest first. Same rule as the Inbox "Needs reply" filter
+ * (js/views/inbox.js): not the owner's own (by account id or username), not hidden, not marked done,
+ * and no reply from the owner. Like the Inbox's cached view, comments without a post are skipped.
+ */
+export function commentsNeedingReply(inbox, settings) {
+  const ig = (settings && settings.ig) || {};
+  const ownId = String(ig.userId || '');
+  const ownName = String(ig.username || '').toLowerCase();
+  const isMine = (c) => !!c && ((ownId && c.fromId && String(c.fromId) === ownId) || (!!ownName && String(c.username || '').toLowerCase() === ownName));
+  const done = (inbox && inbox.done) || {};
+  return ((inbox && inbox.comments) || [])
+    .filter((c) => c && c.mediaId && !isMine(c) && !c.hidden && !done[c.id] && !(c.replies || []).some(isMine))
+    .sort((a, b) => (parseTimestamp(b.timestamp) || 0) - (parseTimestamp(a.timestamp) || 0));
+}
+
 function InboxCard({ inbox, settings, now }) {
   if (!inbox) return html`<${Panel} title="Inbox"><${Skeleton} lines=${3} /><//>`;
-  const own = String((settings && settings.ig && settings.ig.username) || '').toLowerCase();
-  const done = inbox.done || {};
-  const needs = (inbox.comments || [])
-    .filter(
-      (c) =>
-        c &&
-        !c.hidden &&
-        !c.parentId &&
-        String(c.username || '').toLowerCase() !== own &&
-        !done[c.id] &&
-        !(c.replies || []).some((r) => String(r.username || '').toLowerCase() === own),
-    )
-    .sort((a, b) => (parseTimestamp(b.timestamp) || 0) - (parseTimestamp(a.timestamp) || 0));
+  // Comments and conversations are cached by the worker; before its first check there is nothing to count.
+  const synced = !!inbox.fetchedAt;
+  const needs = commentsNeedingReply(inbox, settings);
   const seen = inbox.seen || {};
   const waiting = (inbox.conversations || []).filter((c) => {
     const m = c.lastMessage;
@@ -546,10 +553,13 @@ function InboxCard({ inbox, settings, now }) {
   return html`<${Panel} title="Inbox" class="dash-side"
     actions=${inbox.fetchedAt ? html`<span class="dash-side-meta">Checked ${ago(inbox.fetchedAt)}</span>` : null}>
     <dl class="dash-kv">
-      <${SideRow} label="Comments to answer" value=${needs.length} tone=${needs.length ? 'warn' : null} />
-      <${SideRow} label="Messages waiting" value=${waiting} tone=${waiting ? 'warn' : null} />
+      <${SideRow} label="Comments to answer (recent posts)" value=${synced ? needs.length : '—'} tone=${synced && needs.length ? 'warn' : null} />
+      <${SideRow} label="Messages waiting" value=${synced ? waiting : '—'} tone=${synced && waiting ? 'warn' : null} />
     </dl>
-    ${needs.length
+    ${synced ? html`<p class="dash-side-scope faint">From the worker's last check. The Inbox reads Instagram live and may show more.</p>` : null}
+    ${!synced
+      ? html`<p class="dash-side-note">Comments and messages show up here after the worker's first check.</p>`
+      : needs.length
       ? html`<ul class="dash-comments">
           ${needs.slice(0, 3).map(
             (c) => html`<li key=${c.id} class="dash-comment">
@@ -589,7 +599,7 @@ function AutomationsCard({ automations, now }) {
 
 const PRODUCT_KIND = { REELS: 'reel', CAROUSEL_ALBUM: 'carousel', STORY: 'story' };
 
-function RecentPosts({ media, tz, followers }) {
+function RecentPosts({ media, tz, followers, synced }) {
   const list = toList(media)
     .filter((m) => m.productType !== 'STORY' && Number.isFinite(parseTimestamp(m.timestamp)))
     .sort((a, b) => parseTimestamp(b.timestamp) - parseTimestamp(a.timestamp))
@@ -623,7 +633,9 @@ function RecentPosts({ media, tz, followers }) {
             </li>`;
           })}
         </ol>`
-      : html`<${EmptyState} compact icon="chart" title="No published posts yet" body="Once you publish, each post's reach and engagement shows up here." />`}
+      : synced
+        ? html`<${EmptyState} compact icon="chart" title="No published posts yet" body="Once you publish, each post's reach and engagement shows up here." />`
+        : html`<${EmptyState} compact icon="chart" title="Post stats are on their way" body="Your published posts and their reach show up here after the worker's first run." />`}
   </section>`;
 }
 
@@ -667,6 +679,9 @@ export default function Dashboard() {
   const days = useLiveDays ? { ...snapDays, ...live.days } : snapDays;
 
   const followers = followerSummary(snapDays, today, settings && settings.ig && settings.ig.followersCount);
+  // Post stats come from the worker: until it has run, an empty list says nothing about the account.
+  // (An account with no posts never gets analytics-media.updatedAt, so any recorded run counts too.)
+  const mediaSynced = !!(data['analytics-media'] && data['analytics-media'].updatedAt) || !!(data.log && (data.log.runs || []).length);
   const alerts = buildAlerts({ settings, log: data.log, posts: data.posts, automations: data.automations, now, dispatchWorker });
 
   // Quick upload straight into the library.
@@ -737,7 +752,7 @@ export default function Dashboard() {
       <div class="dash-col-main stack">
         ${data.posts && data.library ? html`<${UpNext} posts=${posts} assetsById=${assetsById} tz=${tz} now=${now} openComposer=${openComposer} />` : html`<${Panel} title="Up next"><${Skeleton} lines=${5} /><//>`}
         ${data['analytics-media']
-          ? html`<${RecentPosts} media=${data['analytics-media'].media} tz=${tz} followers=${followers.latest ?? undefined} />`
+          ? html`<${RecentPosts} media=${data['analytics-media'].media} tz=${tz} followers=${followers.latest ?? undefined} synced=${mediaSynced} />`
           : html`<${Skeleton} height=${220} />`}
       </div>
       <div class="dash-col-side stack">

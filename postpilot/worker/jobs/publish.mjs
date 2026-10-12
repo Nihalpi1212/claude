@@ -9,13 +9,17 @@
 //     PublishPendingError -> stays 'publishing' with its containers; the next run resumes it
 //     permanent error     -> 'failed' with lastError (the run exits 1 so GitHub emails the owner)
 //     temporary error     -> back to 'scheduled' for the next run, 'failed' after 4 attempts
-// - Plaintext copies under public/tmp are deleted once Instagram has the media (success or failure);
-//   while a container is still processing they are kept and remembered on the post.
+// - Plaintext copies (public/tmp on the throwaway branch, see context.mjs) are removed once Instagram
+//   has the media (success or failure); while a container is still processing they are kept and
+//   remembered on the post. At the end of the job the throwaway branch is rewritten to hold only
+//   copies that a post still being processed needs.
+// - Once media_publish succeeded, a failed GitHub write never reschedules or fails the post: it stays
+//   'publishing' with its containers and the next run records it (no second publish).
 
 import { duePosts } from '../../core/schedule.js';
 import { classifyError, publishPost } from '../../core/publish.js';
 import { PublishPendingError } from '../../core/ig.js';
-import { describeError } from '../context.mjs';
+import { describeError, isIgAuth } from '../context.mjs';
 import { pushHistory } from './shared.mjs';
 import { markExpired } from './token.mjs';
 
@@ -23,6 +27,7 @@ export const MAX_ATTEMPTS = 4;
 const MAX_POSTS_PER_RUN = 10;
 const PENDING_GIVE_UP_MS = 3 * 36e5; // stop waiting for Instagram to process a video after 3 hours
 const RUN_BUDGET_MS = 14 * 60e3; // keep well inside the 20 minute workflow timeout
+const WAIT_SLICE_MS = 30_000; // while waiting for an upcoming post, look for new due posts this often
 
 const TYPE_NAMES = { feed: 'post', carousel: 'carousel', reel: 'reel', story: 'story' };
 
@@ -48,7 +53,7 @@ function classify(err) {
 
 /** Rate limits, the daily publishing quota and login problems do not count as a failed attempt. */
 function countsAsAttempt(err) {
-  return !(err && (err.isRateLimit || err.isAuth || err.code === 'publish_limit' || err.subcode === 2207042));
+  return !(err && (err.isRateLimit || isIgAuth(err) || err.code === 'publish_limit' || err.subcode === 2207042));
 }
 
 const normText = (s) => String(s || '').replace(/\s+/g, ' ').trim();
@@ -103,16 +108,34 @@ async function claim(ctx, postId) {
   return claimed;
 }
 
+/** Take plaintext copies off the throwaway branch now that Instagram has the media. Failures are retried by sweepExposed. */
+async function releaseExposed(ctx, paths) {
+  if (!paths.length) return;
+  try {
+    await ctx.removeExposed(paths);
+  } catch (err) {
+    ctx.log('publish', 'warn', `Could not remove temporary media yet: ${describeError(err)}`);
+  }
+}
+
 async function finishPublished(ctx, post, res, exposedNow) {
   let found = true;
+  let already = false;
+  let released = [];
   await ctx.store.transact(
     async (tx) => {
+      already = false;
       const doc = await tx.read('posts');
       const nowIso = ctx.nowIso();
       const p = doc.posts.find((x) => x.id === post.id);
       found = !!p;
-      for (const path of new Set([...(p?.exposedPaths || []), ...(post.exposedPaths || []), ...exposedNow])) if (tx.exists(path)) tx.delete(path);
+      released = [...new Set([...(p?.exposedPaths || []), ...(post.exposedPaths || []), ...exposedNow])];
+      for (const path of released) if (tx.exists(path)) tx.delete(path); // copies older workers put on the data branch
       if (!p) return;
+      if (p.status === 'published') {
+        already = true; // an earlier try whose reply was lost went through
+        return;
+      }
       p.status = 'published';
       p.igMediaId = res.igMediaId || null;
       p.permalink = res.permalink || null;
@@ -156,6 +179,8 @@ async function finishPublished(ctx, post, res, exposedNow) {
     },
     { message: 'publish: published' },
   );
+  await releaseExposed(ctx, released);
+  if (already) return;
   const what = TYPE_NAMES[post.type] || 'post';
   if (found) ctx.notify('published', { type: post.type, caption: post.caption, postId: post.id });
   if (found) ctx.log('publish', 'info', `Published a ${what}${post.caption ? ` ("${post.caption.slice(0, 60)}")` : ''}.`, { postId: post.id, permalink: res.permalink || null });
@@ -165,9 +190,11 @@ async function finishPublished(ctx, post, res, exposedNow) {
 
 async function keepPending(ctx, post, err, exposedNow) {
   let gaveUp = false;
+  let released = [];
   await ctx.store.transact(
     async (tx) => {
       gaveUp = false;
+      released = [];
       const doc = await tx.read('posts');
       const p = doc.posts.find((x) => x.id === post.id);
       if (!p) return;
@@ -177,7 +204,8 @@ async function keepPending(ctx, post, err, exposedNow) {
         gaveUp = true;
         p.status = 'failed';
         p.lastError = { message: 'Instagram did not finish processing the media within 3 hours. Try a smaller file or re-export it as MP4 (H.264, AAC).', code: 'processing_timeout', at: nowIso, permanent: true };
-        for (const path of new Set([...(p.exposedPaths || []), ...exposedNow])) if (tx.exists(path)) tx.delete(path);
+        released = [...new Set([...(p.exposedPaths || []), ...exposedNow])];
+        for (const path of released) if (tx.exists(path)) tx.delete(path);
         delete p.containers;
         delete p.exposedPaths;
         pushHistory(p, nowIso, 'failed', p.lastError.message);
@@ -192,6 +220,7 @@ async function keepPending(ctx, post, err, exposedNow) {
     },
     { message: 'publish: still processing' },
   );
+  await releaseExposed(ctx, released);
   if (gaveUp) {
     ctx.log('publish', 'error', 'Gave up on a post because Instagram did not finish processing it within 3 hours.', { postId: post.id });
     ctx.notify('failed', { message: 'Instagram did not finish processing the media within 3 hours.', postId: post.id });
@@ -202,14 +231,16 @@ async function keepPending(ctx, post, err, exposedNow) {
 
 async function finishError(ctx, post, err, exposedNow) {
   const c = classify(err);
-  if (err && err.isAuth) c.permanent = false; // publish once Instagram is reconnected
+  if (isIgAuth(err)) c.permanent = false; // publish once Instagram is reconnected
   let outcome = 'retried';
   let attempts = 0;
+  let released = [];
   await ctx.store.transact(
     async (tx) => {
       const doc = await tx.read('posts');
       const p = doc.posts.find((x) => x.id === post.id);
-      for (const path of new Set([...(p?.exposedPaths || []), ...exposedNow])) if (tx.exists(path)) tx.delete(path);
+      released = [...new Set([...(p?.exposedPaths || []), ...exposedNow])];
+      for (const path of released) if (tx.exists(path)) tx.delete(path);
       if (!p) {
         outcome = 'gone';
         return;
@@ -237,6 +268,7 @@ async function finishError(ctx, post, err, exposedNow) {
     },
     { message: 'publish: error' },
   );
+  await releaseExposed(ctx, released);
   if (outcome === 'failed') {
     ctx.log('publish', 'error', `A post failed to publish: ${c.userMessage}`, { postId: post.id, code: c.code, subcode: c.subcode });
     ctx.notify('failed', { message: c.userMessage, postId: post.id });
@@ -276,39 +308,65 @@ export async function publishOne(ctx, postId) {
   const maxWaitMs = Math.max(1000, Math.min(Number(env.POSTPILOT_PUBLISH_WAIT_MS) || 240_000, budgetLeft));
   const pollIntervalMs = Number(env.POSTPILOT_POLL_MS) || 4000;
 
+  let recorded = true;
   try {
-    if (post.containersMissing) {
-      const found = await findPublishedWithoutContainers(ctx, post);
-      if (found) {
-        await finishPublished(ctx, post, found, exposedNow);
-        return 'published';
+    let res = null;
+    try {
+      if (post.containersMissing) res = await findPublishedWithoutContainers(ctx, post);
+      if (!res) {
+        res = await publishPost({
+          ig: ctx.ig,
+          post,
+          assets,
+          exposeMedia,
+          readMedia: ctx.readMedia,
+          onContainers,
+          log: (message, data) => ctx.log('publish', 'info', String(message), data),
+          sleep: ctx.sleep,
+          pollIntervalMs,
+          maxWaitMs,
+        });
       }
+    } catch (err) {
+      if (err instanceof PublishPendingError || err?.name === 'PublishPendingError') return await keepPending(ctx, post, err, exposedNow);
+      const outcome = await finishError(ctx, post, err, exposedNow);
+      if (isIgAuth(err)) {
+        // The login stopped working: record it for the app and skip Instagram for the rest of the run.
+        await markExpired(ctx, ctx.settings.ig, err);
+        throw err;
+      }
+      return outcome;
     }
-    const res = await publishPost({
-      ig: ctx.ig,
-      post,
-      assets,
-      exposeMedia,
-      readMedia: ctx.readMedia,
-      onContainers,
-      log: (message, data) => ctx.log('publish', 'info', String(message), data),
-      sleep: ctx.sleep,
-      pollIntervalMs,
-      maxWaitMs,
-    });
-    await finishPublished(ctx, post, res, exposedNow);
+    // The post is live on Instagram. A failed write here must never reach finishError, which would
+    // reschedule or fail the post and drop its containers, so a later run would publish it again.
+    // Retry once on a fresh head; if that fails too, the post stays 'publishing' with its containers
+    // and the next run finds the container PUBLISHED and records it.
+    recorded = false;
+    try {
+      await finishPublished(ctx, post, res, exposedNow);
+    } catch {
+      await ctx.store.refresh().catch(() => {});
+      await finishPublished(ctx, post, res, exposedNow);
+    }
+    recorded = true;
     return 'published';
-  } catch (err) {
-    if (err instanceof PublishPendingError || err?.name === 'PublishPendingError') return keepPending(ctx, post, err, exposedNow);
-    const outcome = await finishError(ctx, post, err, exposedNow);
-    if (err && err.isAuth) {
-      // The login stopped working: record it for the app and skip Instagram for the rest of the run.
-      await markExpired(ctx, ctx.settings.ig, err);
-      throw err;
-    }
-    return outcome;
   } finally {
-    for (const p of exposedNow) ctx.exposed.delete(p);
+    // When the published post could not be recorded, its copies stay in ctx.exposed so the
+    // end-of-run cleanup removes them (Instagram already has the media).
+    if (recorded) for (const p of exposedNow) ctx.exposed.delete(p);
+  }
+}
+
+/** Rewrite the throwaway branch to hold only copies that posts still being processed need. */
+async function sweepExposed(ctx) {
+  try {
+    await ctx.store.refresh();
+    const { posts } = await ctx.store.read('posts');
+    const keep = posts.filter((p) => p.status === 'publishing').flatMap((p) => p.exposedPaths || []);
+    const removed = await ctx.pruneExposed(keep);
+    if (removed) ctx.log('publish', 'info', `Removed ${removed} leftover temporary media file${removed === 1 ? '' : 's'}.`);
+  } catch (err) {
+    ctx.log('publish', 'warn', `Could not remove temporary media: ${describeError(err)}`);
   }
 }
 
@@ -316,42 +374,55 @@ export default async function publish(ctx) {
   const result = { published: 0, failed: 0, pending: 0, retried: 0 };
   const handled = new Set();
   let saidWaiting = false;
-  for (let loop = 0; loop < 100; loop++) {
-    if (loop > 0) await ctx.store.refresh(); // pick up edits made in the app while we waited
-    const postsDoc = await ctx.store.read('posts');
-    const nowMs = ctx.nowMs();
-    const resumable = postsDoc.posts.filter((p) => p.status === 'publishing' && !handled.has(p.id));
-    const due = duePosts(postsDoc.posts, nowMs, 0).filter((p) => !handled.has(p.id));
-    const batch = [...resumable, ...due];
-    if (batch.length) {
-      for (const post of batch) {
-        if (handled.size >= MAX_POSTS_PER_RUN) break;
-        handled.add(post.id);
-        let outcome;
-        try {
-          outcome = await publishOne(ctx, post.id);
-        } catch (err) {
-          if (!(err && err.isAuth)) throw err;
-          // The login stopped working (recorded by publishOne); keep this run's counts.
-          result.retried++;
-          return result;
+  let outOfTime = false;
+  const waitSliceMs = Number(ctx.env.POSTPILOT_WAIT_SLICE_MS) || WAIT_SLICE_MS;
+  try {
+    for (let loop = 0; loop < 100; loop++) {
+      if (loop > 0) await ctx.store.refresh(); // pick up edits made in the app while we waited
+      const postsDoc = await ctx.store.read('posts');
+      const nowMs = ctx.nowMs();
+      const resumable = postsDoc.posts.filter((p) => p.status === 'publishing' && !handled.has(p.id));
+      const due = duePosts(postsDoc.posts, nowMs, 0).filter((p) => !handled.has(p.id));
+      const batch = [...resumable, ...due];
+      if (batch.length) {
+        for (const post of batch) {
+          if (handled.size >= MAX_POSTS_PER_RUN) break;
+          // Out of time: leave the rest to the next run (always handle at least one post per run).
+          if (handled.size > 0 && ctx.nowMs() >= ctx.startedAtMs + RUN_BUDGET_MS) {
+            outOfTime = true;
+            ctx.log('publish', 'info', 'This run is out of time; the next run publishes the remaining posts.');
+            break;
+          }
+          handled.add(post.id);
+          let outcome;
+          try {
+            outcome = await publishOne(ctx, post.id);
+          } catch (err) {
+            if (!isIgAuth(err)) throw err;
+            // The login stopped working (recorded by publishOne); keep this run's counts.
+            result.retried++;
+            return result;
+          }
+          if (outcome in result) result[outcome]++;
         }
-        if (outcome in result) result[outcome]++;
+        if (handled.size >= MAX_POSTS_PER_RUN || outOfTime) break;
+        continue;
       }
-      if (handled.size >= MAX_POSTS_PER_RUN) break;
-      continue;
+      // Nothing due right now: wait for a post due within this run's window. Wake up regularly so a
+      // post the owner publishes now (while this run waits) is not stuck behind the wait.
+      const remaining = ctx.deadlineMs - nowMs;
+      if (remaining <= 0) break;
+      const upcoming = duePosts(postsDoc.posts, nowMs, remaining).filter((p) => !handled.has(p.id));
+      if (!upcoming.length) break;
+      const waitMs = Math.max(0, Date.parse(upcoming[0].scheduledAt) - nowMs) + 500;
+      if (!saidWaiting) {
+        ctx.say('publish: waiting for a scheduled post');
+        saidWaiting = true;
+      }
+      await ctx.sleep(Math.min(waitMs, waitSliceMs));
     }
-    // Nothing due right now: wait for a post due within this run's window.
-    const remaining = ctx.deadlineMs - nowMs;
-    if (remaining <= 0) break;
-    const upcoming = duePosts(postsDoc.posts, nowMs, remaining).filter((p) => !handled.has(p.id));
-    if (!upcoming.length) break;
-    const waitMs = Math.max(0, Date.parse(upcoming[0].scheduledAt) - nowMs) + 500;
-    if (!saidWaiting) {
-      ctx.say('publish: waiting for a scheduled post');
-      saidWaiting = true;
-    }
-    await ctx.sleep(waitMs);
+    return result;
+  } finally {
+    await sweepExposed(ctx);
   }
-  return result;
 }

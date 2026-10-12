@@ -83,7 +83,10 @@ export default async function competitors(ctx) {
       d.posts ||= {};
       d.profiles ||= {};
       d.errors ||= {};
+      // Accounts removed in the app while this run was fetching stay removed.
+      const tracked = new Set((d.accounts || []).map(usernameOf).filter(Boolean));
       for (const [u, bd] of got) {
+        if (!tracked.has(u)) continue;
         d.snapshots[u] ||= {};
         d.snapshots[u][today] = { ...snapshotOf(bd, nowMs), capturedAt: nowIso };
         d.posts[u] = (bd.media || []).slice(0, MEDIA_LIMIT);
@@ -101,7 +104,7 @@ export default async function competitors(ctx) {
         };
         delete d.errors[u];
       }
-      for (const [u, message] of errors) d.errors[u] = { message, at: nowIso, day: today };
+      for (const [u, message] of errors) if (tracked.has(u)) d.errors[u] = { message, at: nowIso, day: today };
       d.status = 'ok';
       d.lastRunAt = nowIso;
       tx.write('competitors', d);

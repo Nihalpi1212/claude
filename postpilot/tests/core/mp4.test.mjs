@@ -26,6 +26,7 @@ test('renames location/device metadata boxes and keeps sizes', () => {
   assert.equal(bytes.length, before);
   const text = Buffer.from(bytes).toString('latin1');
   assert.ok(!text.includes('udta') && !text.includes('meta') && !text.includes('uuid'));
+  assert.ok(!text.includes('+40.7128-074.0060'), 'GPS text is erased, not just hidden');
   assert.ok(text.includes('mvhd') && text.includes('tkhd') && text.includes('mdat'), 'playback boxes untouched');
 });
 

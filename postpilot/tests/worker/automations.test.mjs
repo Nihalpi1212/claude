@@ -215,6 +215,88 @@ test('AI replies use the mock Claude when AI is configured', async (t) => {
   assert.equal(res.summary.jobs.automations.aiReplies, 1);
 });
 
+test('a temporary AI failure leaves the comment for the next run instead of dropping it', async (t) => {
+  const env = await startWorkerEnv({ settings: { ai: { provider: 'anthropic', apiKey: 'sk-ant-test', model: 'claude-opus-5-5', voice: '', language: 'English', emoji: 'some', enabled: true } } });
+  t.after(() => env.close());
+  await env.update('automations', (a) => {
+    a.rules = [newRule({ id: 'r_ai', name: 'AI', trigger: { source: 'comment', match: 'any', keywords: ['question'], mediaIds: null }, actions: [{ type: 'ai_reply', texts: [], guidance: 'Be kind.' }], oncePerUser: false })];
+  });
+  await env.run({ only: ['automations'] });
+  const c1 = env.addComment(env.graph.state.media[0].id, { username: 'asker', text: 'I have a question about glazes' });
+  const c2 = env.addComment(env.graph.state.media[1].id, { username: 'asker.two', text: 'Another question: do you ship?' });
+  // Claude is overloaded for the whole run (the SDK retries each request twice on its own).
+  for (let i = 0; i < 20; i++) env.anthropic.state.faults.push({ status: 529 });
+  const first = await env.run({ only: ['automations'] });
+  assert.equal(first.exitCode, 0);
+  const tried = 20 - env.anthropic.state.faults.length;
+  assert.ok(tried > 0 && tried <= 3, `only the first AI reply waits through the retries (${tried} requests)`);
+  assert.ok(!env.graph.state.replies.some((r) => r.commentId === c1.id || r.commentId === c2.id), 'nothing sent while AI is down');
+  let auto = await env.read('automations');
+  assert.ok(!auto.processed.comments[c1.id] && !auto.processed.comments[c2.id], 'comments stay unprocessed');
+
+  env.anthropic.state.faults.length = 0;
+  const second = await env.run({ only: ['automations'] });
+  assert.equal(second.summary.jobs.automations.aiReplies, 2);
+  assert.equal(env.graph.state.replies.filter((r) => r.commentId === c1.id).length, 1);
+  assert.equal(env.graph.state.replies.filter((r) => r.commentId === c2.id).length, 1);
+  auto = await env.read('automations');
+  assert.ok(auto.processed.comments[c1.id] && auto.processed.comments[c2.id]);
+
+  // Answered once only.
+  await env.run({ only: ['automations'] });
+  assert.equal(env.graph.state.replies.filter((r) => r.commentId === c1.id).length, 1);
+});
+
+test('turning automations on during a run keeps the start time the app set', async (t) => {
+  const env = await startWorkerEnv();
+  t.after(() => env.close());
+  await env.update('automations', (a) => {
+    a.enabled = false;
+    a.cursors = {};
+  });
+  const switchedOnAt = new Date().toISOString();
+  // The owner switches automations on while the worker is reading direct messages.
+  const real = env.graph.handle;
+  let toggled = false;
+  env.graph.handle = async (req, res, sub, body, url) => {
+    if (!toggled && req.method === 'GET' && /\/conversations(\?|$)/.test(sub)) {
+      toggled = true;
+      await env.update('automations', (d) => {
+        d.enabled = true;
+        d.cursors ||= {};
+        d.cursors.startedAt = switchedOnAt;
+      });
+    }
+    return real(req, res, sub, body, url);
+  };
+  await env.run({ only: ['automations'] });
+  env.graph.handle = real;
+  assert.ok(toggled);
+  const auto = await env.read('automations');
+  assert.equal(auto.enabled, true);
+  assert.equal(auto.cursors.startedAt, switchedOnAt);
+
+  // Switched off during a run: the worker does not put a start time back.
+  const real2 = env.graph.handle;
+  let toggledOff = false;
+  env.graph.handle = async (req, res, sub, body, url) => {
+    if (!toggledOff && req.method === 'GET' && /\/conversations(\?|$)/.test(sub)) {
+      toggledOff = true;
+      await env.update('automations', (d) => {
+        d.enabled = false;
+        d.cursors.startedAt = null;
+      });
+    }
+    return real2(req, res, sub, body, url);
+  };
+  await env.run({ only: ['automations'] });
+  env.graph.handle = real2;
+  assert.ok(toggledOff);
+  const off = await env.read('automations');
+  assert.equal(off.enabled, false);
+  assert.equal(off.cursors.startedAt, null);
+});
+
 const LOVE_RULE = newRule({ id: 'r_love', name: 'Thanks', trigger: { source: 'comment', match: 'any', keywords: ['love'], mediaIds: null }, actions: [{ type: 'reply_comment', texts: ['Thank you!'] }], oncePerUser: false });
 
 /** Make the ref update of the next commit whose message contains `text` fail. Returns a restore function. */

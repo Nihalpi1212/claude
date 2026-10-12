@@ -117,6 +117,12 @@ export async function publishPost({
       await onContainers(snapshot());
     } catch (err) {
       log(`Could not save upload progress (${(err && err.message) || err}).`);
+      // Never publish containers a later run cannot find: it would publish the post again.
+      throw new IgError('Could not save upload progress.', {
+        code: 'save_failed',
+        permanent: false,
+        userMessage: 'Could not save upload progress to GitHub. Postpilot will try again.',
+      });
     }
   }
 

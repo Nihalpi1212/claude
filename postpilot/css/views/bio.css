@@ -95,6 +95,7 @@
 }
 .bio-link-actions .icon-btn { margin-left: -10px; }
 .bio-utm { margin: 12px 0 0 32px; padding-top: 12px; border-top: 1px dashed var(--line); }
+.bio-link-private { margin: 6px 0 0 32px; }
 .bio-utm-final { margin-top: 8px; font-size: var(--fs-sm); overflow-wrap: anywhere; }
 .bio-note { display: flex; align-items: flex-start; gap: 6px; margin-top: 14px; }
 .bio-note .icon { flex: none; margin-top: 3px; }
@@ -193,6 +194,7 @@
   .bio-phone-screen { height: auto; min-height: 520px; max-height: none; }
   .bio-link-no { display: none; }
   .bio-link-actions,
+  .bio-link-private,
   .bio-utm { margin-left: 0; }
   .bio-grid-row {
     display: grid;

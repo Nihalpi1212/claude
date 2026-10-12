@@ -99,6 +99,13 @@ const sansW = (s) => String(s).length * SANS_CH;
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const f1 = (n) => Math.round(n * 10) / 10;
 
+// Axis tick labels: if compact rounding collapses distinct ticks to the same label, use full numbers instead.
+function axisLabels(ticks, format) {
+  const labels = ticks.map((v) => formatValue(v, format || 'compact'));
+  if (format || new Set(labels).size === labels.length) return labels;
+  return ticks.map((v) => formatValue(v, 'number'));
+}
+
 function truncate(s, maxPx, chPx = SANS_CH) {
   const str = String(s);
   const max = Math.max(2, Math.floor(maxPx / chPx));
@@ -248,14 +255,13 @@ export function LineChart({ series = [], xLabels = [], height = 220, format, are
     return html`<div class=${wrapCls} ref=${ref}><${ChartEmpty} height=${height} text=${emptyText} /></div>`;
   }
 
-  const axisFmt = (v) => formatValue(v, format || 'compact');
   const tipFmt = (v) => formatValue(v, format || 'number');
   const dMin = Math.min(...finite);
   const dMax = Math.max(...finite);
   const lo = yMin ?? (area && dMin >= 0 ? 0 : dMin);
   const hi = yMax ?? Math.max(dMax, lo);
   const sc = niceScale(lo, hi, height < 170 ? 3 : 5, { fixMin: yMin != null, fixMax: yMax != null });
-  const tickLabels = sc.ticks.map(axisFmt);
+  const tickLabels = axisLabels(sc.ticks, format);
   const left = Math.max(24, Math.max(...tickLabels.map(monoW)) + 10);
   const top = 12;
   const bottom = 26;
@@ -391,7 +397,6 @@ export function BarChart({ data = [], horizontal = false, height, format, highli
   const wrapCls = ['chart', horizontal ? 'chart-hbar' : 'chart-bar', cls].filter(Boolean).join(' ');
   if (!n) return html`<div class=${wrapCls} ref=${ref}><${ChartEmpty} height=${height || 180} text=${emptyText} /></div>`;
 
-  const axisFmt = (v) => formatValue(v, format || 'compact');
   const tipFmt = (v) => formatValue(v, format || 'number');
   let maxI = 0;
   rows.forEach((d, i) => d.value > rows[maxI].value && (maxI = i));
@@ -442,7 +447,7 @@ export function BarChart({ data = [], horizontal = false, height, format, highli
   const H = height || 220;
   const vals = rows.map((d) => d.value);
   const sc = niceScale(Math.min(0, ...vals), Math.max(0, ...vals), H < 170 ? 3 : 5);
-  const tickLabels = sc.ticks.map(axisFmt);
+  const tickLabels = axisLabels(sc.ticks, format);
   const left = Math.max(24, Math.max(...tickLabels.map(monoW)) + 10);
   const top = 18;
   const bottom = 26;

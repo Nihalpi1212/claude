@@ -637,7 +637,13 @@ function Editor({ start, docs, onClose }) {
           const doc = await tx.read('posts');
           const p = doc.posts.find((x) => x.id === draft.id);
           if (p && p.status === 'publishing') throw new Error('This post is being published right now, so it cannot be deleted.');
-          doc.posts = doc.posts.filter((x) => x.id !== draft.id);
+          if (p && p.listId) {
+            // Queue posts are canceled, not removed: a removed one would be created again for its slot.
+            p.status = 'canceled';
+            addHistory(p, 'canceled', 'Deleted in the composer');
+          } else {
+            doc.posts = doc.posts.filter((x) => x.id !== draft.id);
+          }
           tx.write('posts', doc);
         },
         { message: 'composer: delete post', silent: true },

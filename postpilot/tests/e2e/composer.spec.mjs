@@ -363,6 +363,62 @@ describe('composer', () => {
     assert.ok(post.history.some((e) => e.event === 'queued'));
   });
 
+  it('crop hint only says "Zoom out" when zooming out is possible', async () => {
+    await openNew(page);
+    await pickFromLibrary(page, ['Studio still life']); // 1080 x 1080
+    await page.locator('.cmp-detail').getByRole('button', { name: 'Crop' }).click();
+    const crop = page.locator('.crop-modal');
+    await crop.locator('canvas.crop-canvas').waitFor();
+    const hint = crop.locator('.crop-hint');
+    // Default 4:5 at 1.0x is 864 px wide: zooming out is impossible, so suggest square instead.
+    await hint.filter({ hasText: '864 px wide' }).waitFor();
+    assert.match(await hint.textContent(), /Square keeps the full width\.$/);
+    assert.doesNotMatch(await hint.textContent(), /Zoom out/);
+    await setRange(crop.locator('input[type="range"]'), 1.5);
+    await hint.filter({ hasText: 'Zoom out if you can.' }).waitFor();
+    await setRange(crop.locator('input[type="range"]'), 1);
+    await crop.getByRole('radio', { name: '1:1', exact: true }).click();
+    await hint.waitFor({ state: 'detached' });
+    await crop.getByRole('button', { name: 'Cancel' }).click();
+    await crop.waitFor({ state: 'detached' });
+    await closeComposer(page);
+  });
+
+  it('deleting a queue post cancels it so its slot is not filled again', async () => {
+    const id = await page.evaluate(async () => {
+      const data = await import('/postpilot/js/data.js');
+      const { newPost } = await import('/postpilot/core/model.js');
+      const store = data.getStore();
+      const [lists, lib] = [await store.read('lists'), await store.read('library')];
+      const asset = lib.assets.find((a) => a.name === 'Vase trio');
+      const post = newPost({
+        status: 'scheduled',
+        source: 'evergreen',
+        listId: lists.lists[0].id,
+        caption: 'E2E queue post to delete.',
+        media: [{ assetId: asset.id, kind: asset.kind }],
+        scheduledAt: new Date(Date.now() + 6 * 864e5).toISOString(),
+      });
+      await data.mutate('posts', (doc) => void doc.posts.push(post), { message: 'e2e: queue post' });
+      return post.id;
+    });
+    await page.evaluate(() => (location.hash = '#/planner?view=list'));
+    await page.locator(`.pl-row[data-post-id="${id}"] .pl-row-title`).click();
+    await drawer(page).waitFor();
+    await page.locator('.cmp-main').waitFor();
+    await footer(page).getByRole('button', { name: 'More actions' }).click();
+    await page.getByRole('menuitem', { name: 'Delete post' }).click();
+    await page.locator('.modal-confirm .overlay-foot').getByRole('button', { name: 'Delete post' }).click();
+    await page.locator('.toast', { hasText: 'Post deleted.' }).waitFor();
+    await drawer(page).waitFor({ state: 'detached' });
+    const post = (await readPosts(page)).find((p) => p.id === id);
+    assert.ok(post, 'queue posts are kept so the evergreen job sees the slot as taken');
+    assert.equal(post.status, 'canceled');
+    assert.ok(post.history.some((e) => e.event === 'canceled'));
+    await page.locator(`.pl-row[data-post-id="${id}"]`).waitFor({ state: 'detached' });
+    await page.evaluate(() => (location.hash = '#/'));
+  });
+
   it('inserts a hashtag set and moves hashtags to the first comment', async () => {
     await openNew(page);
     await page.locator('#cmp-caption').fill('Shop update.');

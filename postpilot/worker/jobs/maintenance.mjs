@@ -4,8 +4,12 @@
 // - compaction: every encrypted write adds a new copy of a document to the data branch's history,
 //   and encrypted data does not compress. About once a month, at night in the owner's time zone,
 //   the branch is replaced by a single commit holding the same files so old copies can be
-//   garbage-collected by GitHub. The current files are untouched.
+//   garbage-collected by GitHub. The current files are untouched. GitHub's ref update has no
+//   compare-and-swap, so the worker first commits a lock marker (core/store.js
+//   COMPACT_LOCK_PREFIX): the app does not commit on top of it, so the forced reset cannot
+//   discard an app commit. The compacted tree leaves the marker out.
 
+import { COMPACT_LOCK_PREFIX } from '../../core/store.js';
 import { zonedParts } from '../../core/time.js';
 import { DAY_MS } from './shared.mjs';
 
@@ -24,17 +28,40 @@ async function keepAlive(ctx, state) {
   return true;
 }
 
-/** Replace the data branch with one commit holding the current tree. Returns true when done. */
-export async function compactBranch({ gh, branch }) {
-  const head = await gh.getRef(branch);
-  if (!head) return false;
-  const commit = await gh.getCommit(head);
-  if (!commit.parents || !commit.parents.length) return false; // already a single commit
-  const root = await gh.createCommit({ message: 'Compact history (Postpilot keeps only the latest data)', tree: commit.tree.sha, parents: [] });
-  // Shrink the race window with the app: only force-move the branch if nobody wrote meanwhile.
-  if ((await gh.getRef(branch)) !== head) return false;
-  await gh.updateRef(branch, root, true);
-  return true;
+/**
+ * Replace the data branch with one commit holding the current tree. Returns true when done.
+ * With `store` (the worker's store on the same branch), a lock marker keeps app commits out while
+ * the branch is replaced.
+ */
+export async function compactBranch({ gh, branch, store = null, nowMs = Date.now() }) {
+  const first = await gh.getRef(branch);
+  if (!first) return false;
+  const firstCommit = await gh.getCommit(first);
+  if (!firstCommit.parents || !firstCommit.parents.length) return false; // already a single commit
+  const lockPath = `${COMPACT_LOCK_PREFIX}${nowMs}`;
+  if (store) await store.transact((tx) => tx.writePublic(lockPath, { startedAt: new Date(nowMs).toISOString() }), { message: 'maintenance: compacting history' });
+  let done = false;
+  try {
+    // Every app commit from here on is built on the lock commit, and the app refuses to make one.
+    const head = await gh.getRef(branch);
+    const commit = await gh.getCommit(head);
+    // Leave the marker (and any left by a run that crashed) out of the compacted tree.
+    const locks = store ? (await gh.getTree(commit.tree.sha)).map((e) => e.path).filter((p) => p.startsWith(COMPACT_LOCK_PREFIX)) : [];
+    const tree = locks.length ? await gh.createTree(locks.map((path) => ({ path, sha: null })), commit.tree.sha) : commit.tree.sha;
+    const root = await gh.createCommit({ message: 'Compact history (Postpilot keeps only the latest data)', tree, parents: [] });
+    if ((await gh.getRef(branch)) !== head) return false;
+    await gh.updateRef(branch, root, true);
+    done = true;
+    return true;
+  } finally {
+    if (store && !done) {
+      try {
+        await store.transact((tx) => tx.delete(lockPath), { message: 'maintenance: compaction skipped' });
+      } catch {
+        // a stale marker is ignored after 5 minutes
+      }
+    }
+  }
 }
 
 export default async function maintenance(ctx) {
@@ -54,7 +81,7 @@ export default async function maintenance(ctx) {
   const hour = zonedParts(new Date(ctx.nowMs()), ctx.tz || 'UTC').hour;
   const due = ctx.nowMs() - lastCompact >= COMPACT_EVERY_DAYS * DAY_MS && COMPACT_HOURS.includes(hour);
   if (due && ctx.env.POSTPILOT_NO_COMPACT !== '1') {
-    if (await compactBranch({ gh: ctx.gh, branch: ctx.store.branch })) {
+    if (await compactBranch({ gh: ctx.gh, branch: ctx.store.branch, store: ctx.store })) {
       out.compacted = 1;
       await ctx.store.refresh();
       ctx.log('maintenance', 'info', 'Compacted the data history to save storage. Your current data is unchanged.');

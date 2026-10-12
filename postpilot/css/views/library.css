@@ -155,6 +155,7 @@
 
 /* Contact sheet */
 .lib-sheet { --frame-min: 148px; margin: 0; list-style: none; }
+.lib-more { justify-content: center; margin-top: 20px; }
 .lib-item { position: relative; min-width: 0; }
 .lib-frame.is-used .frame-media img { filter: saturate(0.82); }
 .lib-check {

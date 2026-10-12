@@ -11,8 +11,10 @@ owner's GitHub account at no cost:
 | Data (`postpilot-data` branch) | Same GitHub repo, orphan branch | AES-256-GCM encrypted JSON documents + encrypted media. Only `public/` is plaintext. |
 
 The repo is public, so **everything private is encrypted** before it leaves the browser.
-Only someone holding the owner's GitHub token AND passphrase (or the worker, which holds
-the data key as an Actions secret) can read or change anything.
+Reading private data needs the passphrase (or the data key, which the worker holds as an Actions
+secret); the encrypted files and the wrapped key are public, so the passphrase must be strong.
+Changing anything also needs the owner's GitHub token. Settings can re-wrap the key under a new
+passphrase or rotate the data key itself (re-encrypting everything).
 
 ## 1. Directory layout
 
@@ -106,13 +108,18 @@ overrides from env vars `POSTPILOT_GITHUB_API`, `POSTPILOT_RAW_BASE`, `POSTPILOT
 
 Documents (`model.DOC_NAMES`): `settings`, `posts`, `library`, `lists`, `automations`, `autopilot`,
 `hashtags`, `competitors`, `analytics-daily`, `analytics-media`, `analytics-stories`, `audience`,
-`inbox`, `log`, `bio` (public). Shapes are documented in `core/model.js`; constructors `newPost`,
+`inbox`, `log`, `bio` (public), `posts-archive` (published/canceled posts older than 90 days, moved there daily by
+the worker so `posts` stays small). Shapes are documented in `core/model.js`; constructors `newPost`,
 `newAsset`, `newRule`, `newList`; `validatePost(post, assetsById)`; `addHistory(post, event, detail)`.
 
 Media: `media/<assetId>` (encrypted original, JPEG for photos), `media/<assetId>.thumb` (encrypted
-JPEG, longest side 480px). Publishing exposes a plaintext copy at `public/tmp/<random>.<ext>` only
-while Instagram fetches it; the worker deletes it after the container finishes (and sweeps
-leftovers older than 24h).
+JPEG, longest side 480px). Publishing exposes a plaintext copy (videos with their metadata boxes
+renamed to `free` by `core/mp4.js`) at `public/tmp/<epochSec>-<random>.<ext>` on a separate
+throwaway branch, `postpilot-public-tmp`, never on the data branch. That branch has no history:
+every change points it at a new root commit (force) holding only the copies still needed. The worker
+removes a copy as soon as Instagram has the media, and at the end of the publish job rewrites the
+branch to hold only copies of containers Instagram is still processing. GitHub may keep unreferenced
+commits reachable by their id for some time, so treat anything published as public.
 
 Post lifecycle: `draft` -> `scheduled` -> `publishing` -> `published` | `failed`; `canceled` is
 terminal. Only the worker moves a post out of `scheduled`. The app asks for immediate publishing by

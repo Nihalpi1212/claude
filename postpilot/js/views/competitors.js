@@ -270,18 +270,18 @@ function Change({ value }) {
   if (!value) return html`<span class="faint">—</span>`;
   const tone = value.abs > 0 ? 'text-ok' : value.abs < 0 ? 'text-bad' : 'muted';
   const sign = value.abs > 0 ? '+' : value.abs < 0 ? '−' : '';
-  return html`<span class=${`cmp-change ${tone}`}>
+  return html`<span class=${`cpt-change ${tone}`}>
     <span class="num">${sign}${formatNumber(Math.abs(value.abs))}</span>
-    <span class="cmp-change-pct num">${sign}${formatPercent(Math.abs(value.pct), 1)}</span>
+    <span class="cpt-change-pct num">${sign}${formatPercent(Math.abs(value.pct), 1)}</span>
   </span>`;
 }
 
 function AccountCell({ row }) {
-  return html`<span class="cmp-account">
+  return html`<span class="cpt-account">
     <${Avatar} src=${row.avatar} name=${row.name || row.username} size=${30} />
-    <span class="cmp-account-text">
-      ${row.name ? html`<span class="cmp-account-name truncate">${row.name}</span>` : null}
-      <span class=${row.name ? 'cmp-account-handle truncate' : 'cmp-account-handle is-only truncate'}>@${row.username}</span>
+    <span class="cpt-account-text">
+      ${row.name ? html`<span class="cpt-account-name truncate">${row.name}</span>` : null}
+      <span class=${row.name ? 'cpt-account-handle truncate' : 'cpt-account-handle is-only truncate'}>@${row.username}</span>
     </span>
     ${row.own ? html`<${Badge} tone="accent">You<//>` : null}
     ${row.error ? html`<${Badge} tone="warning" icon="alert" title=${row.error.message}>Check<//>` : null}
@@ -292,7 +292,7 @@ function MediaTile({ post, index, followers }) {
   const isVideo = post.mediaType === 'VIDEO' || post.productType === 'REELS';
   const kind = post.productType === 'REELS' ? 'reel' : post.mediaType === 'CAROUSEL_ALBUM' ? 'carousel' : isVideo ? 'video' : undefined;
   const er = followers ? ((post.likeCount || 0) + (post.commentsCount || 0)) / followers : null;
-  const badge = html`<span class="cmp-badge"><${Icon} name="heart" size=${11} />${formatNumber(post.likeCount, { compact: true })}<${Icon} name="comment" size=${11} />${formatNumber(post.commentsCount, { compact: true })}</span>`;
+  const badge = html`<span class="cpt-badge"><${Icon} name="heart" size=${11} />${formatNumber(post.likeCount, { compact: true })}<${Icon} name="comment" size=${11} />${formatNumber(post.commentsCount, { compact: true })}</span>`;
   const frame = html`<${Frame}
     src=${isVideo ? null : post.mediaUrl}
     alt=${post.caption ? post.caption.slice(0, 120) : 'Instagram post'}
@@ -305,8 +305,8 @@ function MediaTile({ post, index, followers }) {
   <//>`;
   const title = `${formatNumber(post.likeCount)} likes, ${formatNumber(post.commentsCount)} comments${er != null ? `, ${fmtPct(er)} engagement` : ''}. Open on Instagram`;
   return post.permalink
-    ? html`<a class="cmp-tile" href=${post.permalink} target="_blank" rel="noopener noreferrer" title=${title}>${frame}</a>`
-    : html`<div class="cmp-tile" title=${title}>${frame}</div>`;
+    ? html`<a class="cpt-tile" href=${post.permalink} target="_blank" rel="noopener noreferrer" title=${title}>${frame}</a>`
+    : html`<div class="cpt-tile" title=${title}>${frame}</div>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -327,11 +327,11 @@ function CompetitorDrawer({ row, doc, onClose, onRemove, fbMode }) {
     footer=${html`<${Button} variant="danger" icon="trash" onClick=${() => onRemove(u)}>Remove<//>
       <span class="spacer"></span>
       <${Button} href=${profileUrl} target="_blank" rel="noopener noreferrer" icon="external">Open on Instagram<//>`}>
-    <div class="stack stack-lg cmp-drawer">
-      <div class="row row-nowrap cmp-profile">
+    <div class="stack stack-lg cpt-drawer">
+      <div class="row row-nowrap cpt-profile">
         <${Avatar} src=${row.avatar} name=${row.name || u} size=${56} />
         <div class="min-w-0">
-          <p class="cmp-profile-handle">@${u}</p>
+          <p class="cpt-profile-handle">@${u}</p>
           ${profile.biography ? html`<p class="muted pre-wrap text-sm">${profile.biography}</p>` : null}
           ${profile.website
             ? html`<a class="text-sm break" href=${profile.website} target="_blank" rel="noopener noreferrer">${profile.website.replace(/^https?:\/\//, '')}</a>`
@@ -344,7 +344,7 @@ function CompetitorDrawer({ row, doc, onClose, onRemove, fbMode }) {
       ${row.followers == null && !posts.length
         ? html`<${EmptyState} icon="users" title="No numbers yet"
             body=${fbMode ? 'Use Refresh now, or wait for the worker’s daily run.' : 'Numbers appear once Instagram is connected with Facebook Login.'} />`
-        : html`<div class="stats cmp-drawer-stats">
+        : html`<div class="stats cpt-drawer-stats">
               <div class="stat"><div class="stat-label">Followers</div><div class="stat-value">${formatNumber(row.followers)}</div></div>
               <div class="stat"><div class="stat-label">Posts per week</div><div class="stat-value">${row.ppw == null ? '—' : formatNumber(row.ppw, { digits: 1 })}</div></div>
               <div class="stat"><div class="stat-label">Avg likes</div><div class="stat-value">${fmtAvg(row.avgLikes)}</div></div>
@@ -371,16 +371,16 @@ function CompetitorDrawer({ row, doc, onClose, onRemove, fbMode }) {
             <h3 class="section-title">Best recent posts</h3>
             <ul class="list">
               ${best.map(
-                (p) => html`<li class="list-row cmp-best" key=${p.id}>
-                  <span class="cmp-best-thumb">${p.mediaType === 'VIDEO' || p.productType === 'REELS'
+                (p) => html`<li class="list-row cpt-best" key=${p.id}>
+                  <span class="cpt-best-thumb">${p.mediaType === 'VIDEO' || p.productType === 'REELS'
                     ? html`${p.mediaUrl ? html`<video src=${`${p.mediaUrl}#t=0.1`} muted playsinline preload="metadata" aria-hidden="true"></video>` : null}
-                        <span class="cmp-play" aria-hidden="true"><${Icon} name="reel" size=${13} /></span>`
+                        <span class="cpt-play" aria-hidden="true"><${Icon} name="reel" size=${13} /></span>`
                     : p.mediaUrl ? html`<img src=${p.mediaUrl} alt="" loading="lazy" />` : null}</span>
-                  <span class="grow stack stack-sm cmp-best-text">
+                  <span class="grow stack stack-sm cpt-best-text">
                     <span class="clamp-2 text-sm">${p.caption || 'No caption'}</span>
                     <span class="row text-xs muted num">
-                      <span class="cmp-inline"><${Icon} name="heart" size=${13} />${formatNumber(p.likeCount)}</span>
-                      <span class="cmp-inline"><${Icon} name="comment" size=${13} />${formatNumber(p.commentsCount)}</span>
+                      <span class="cpt-inline"><${Icon} name="heart" size=${13} />${formatNumber(p.likeCount)}</span>
+                      <span class="cpt-inline"><${Icon} name="comment" size=${13} />${formatNumber(p.commentsCount)}</span>
                       ${row.followers ? html`<span>${fmtPct(((p.likeCount || 0) + (p.commentsCount || 0)) / row.followers)} engagement</span>` : null}
                       ${p.timestamp ? html`<span>${formatDay(p.timestamp, tz)}</span>` : null}
                     </span>
@@ -395,7 +395,7 @@ function CompetitorDrawer({ row, doc, onClose, onRemove, fbMode }) {
       ${posts.length
         ? html`<section class="stack stack-sm">
             <h3 class="section-title">Recent posts</h3>
-            <div class="contact-sheet cmp-sheet">${posts.map((p, i) => html`<${MediaTile} key=${p.id} post=${p} index=${i} followers=${row.followers} />`)}</div>
+            <div class="contact-sheet cpt-sheet">${posts.map((p, i) => html`<${MediaTile} key=${p.id} post=${p} index=${i} followers=${row.followers} />`)}</div>
           </section>`
         : null}
     </div>
@@ -456,13 +456,13 @@ function AddAccount({ names, ownUsername, fbMode, autofocus }) {
     }
   }
 
-  return html`<form class="cmp-add" onSubmit=${submit} novalidate>
+  return html`<form class="cpt-add" onSubmit=${submit} novalidate>
     <${Field} label="Add an account" error=${error}
       hint=${fbMode ? 'Business and creator accounts only. Postpilot checks the username with Instagram.' : 'Business and creator accounts only.'}>
       <${TextInput} value=${value} onChange=${(v) => (setValue(v), error && setError(null))} prefix="@" placeholder="username"
         autocomplete="off" autocapitalize="none" spellcheck=${false} data-autofocus=${autofocus ? '' : undefined} />
     <//>
-    <${Button} type="submit" variant="primary" icon="plus" loading=${busy} class="cmp-add-btn">Add account<//>
+    <${Button} type="submit" variant="primary" icon="plus" loading=${busy} class="cpt-add-btn">Add account<//>
   </form>`;
 }
 
@@ -642,7 +642,7 @@ export default function Competitors() {
   ];
   const onRow = (r) => (r.own ? navigate('#/analytics') : setOpenUser(r.username));
 
-  return html`<div class="page cmp-page">
+  return html`<div class="page cpt-page">
     ${header}
 
     ${!settings?.ig
@@ -663,18 +663,18 @@ export default function Competitors() {
       subtitle=${lastUpdated
         ? `Updated ${relative(lastUpdated)}. The worker refreshes these numbers once a day.`
         : 'The worker refreshes these numbers once a day.'}>
-      <div class="cmp-add-wrap"><${AddAccount} names=${names} ownUsername=${ownUsername} fbMode=${fbMode} /></div>
+      <div class="cpt-add-wrap"><${AddAccount} names=${names} ownUsername=${ownUsername} fbMode=${fbMode} /></div>
       ${!competitorRows.length
         ? html`<${EmptyState} icon="users" title="No accounts tracked yet"
             body="Add a business or creator account you want to compare with, like a studio you admire or a shop in your niche." />`
         : null}
       ${phone
-        ? html`<ul class="list cmp-list" aria-label="Tracked accounts">
+        ? html`<ul class="list cpt-list" aria-label="Tracked accounts">
             ${rows.map(
               (r) => html`<li key=${r.id} class="list-row">
-                <button type="button" class="cmp-list-main" onClick=${() => onRow(r)}>
+                <button type="button" class="cpt-list-main" onClick=${() => onRow(r)}>
                   <${AccountCell} row=${r} />
-                  <span class="cmp-list-nums">
+                  <span class="cpt-list-nums">
                     <span class="num strong">${formatNumber(r.followers)}</span>
                     <span class="text-xs muted">${fmtPct(r.er)} eng.</span>
                   </span>
@@ -687,12 +687,12 @@ export default function Competitors() {
             )}
           </ul>`
         : html`<${DataTable} columns=${columns} rows=${rows} onRowClick=${onRow} rowKey=${(r) => r.id} caption="Your account and tracked accounts" />`}
-      <p class="cmp-foot text-xs muted">
+      <p class="cpt-foot text-xs muted">
         Engagement = average likes + comments on recent posts ÷ followers. Instagram doesn’t share reach or saves for other accounts, so your row uses the same formula.
       </p>
     <//>
 
-    <div class="grid-2 cmp-charts">
+    <div class="grid-2 cpt-charts">
       <${Panel} title="Followers" subtitle="Last 30 days"
         actions=${html`<${Segmented} size="sm" label="Chart values" value=${chartMode} onChange=${setChartMode}
           options=${[{ value: 'followers', label: 'Followers' }, { value: 'growth', label: 'Change %' }]} />`}>
@@ -701,7 +701,7 @@ export default function Competitors() {
           label=${chartMode === 'growth' ? 'Follower change since the first day shown' : 'Followers over the last 30 days'}
           emptyText="No follower history yet. The worker saves one snapshot a day." />
         ${lineSeries.length && lineSeries.length < competitorRows.length + 1
-          ? html`<p class="text-xs muted cmp-chart-note">Accounts without saved numbers yet are not shown.</p>`
+          ? html`<p class="text-xs muted cpt-chart-note">Accounts without saved numbers yet are not shown.</p>`
           : null}
       <//>
       <${Panel} title="Engagement rate" subtitle="Likes + comments per post ÷ followers">

@@ -42,6 +42,46 @@ test('evergreen lists create scheduled posts idempotently', async (t) => {
   assert.equal((await env.read('posts')).posts.filter((p) => p.listId === 'l_tbt').length, posts.length);
 });
 
+test('evergreen: moving a queue post or changing the time zone does not refill its slot', async (t) => {
+  const env = await startWorkerEnv();
+  t.after(() => env.close());
+  const a1 = await env.addAsset('f01.jpg');
+  const a2 = await env.addAsset('f02.jpg');
+  const list = newList({
+    id: 'l_daily',
+    slots: [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({ weekday, time: '12:00' })),
+    horizonDays: 7,
+    items: [
+      { id: 'i1', type: 'feed', caption: 'One', media: [{ assetId: a1.id, kind: 'image', altText: '' }], timesUsed: 0 },
+      { id: 'i2', type: 'feed', caption: 'Two', media: [{ assetId: a2.id, kind: 'image', altText: '' }], timesUsed: 0 },
+    ],
+  });
+  await env.update('lists', (d) => void d.lists.push(list));
+  const now = '2026-10-12T08:00:00Z'; // Monday
+  const listPosts = async () => (await env.read('posts')).posts.filter((p) => p.listId === 'l_daily');
+
+  await env.run({ only: ['evergreen'], now });
+  const posts = await listPosts();
+  assert.deepEqual(posts.map((p) => p.listSlot).sort(), ['12', '13', '14', '15', '16', '17', '18'].map((d) => `2026-10-${d}@12:00`));
+
+  // Drag Wednesday's post to Thursday evening and shift Friday's by two days (planner moves).
+  await env.update('posts', (d) => {
+    d.posts.find((p) => p.listSlot === '2026-10-14@12:00').scheduledAt = '2026-10-15T18:00:00.000Z';
+    const fri = d.posts.find((p) => p.listSlot === '2026-10-16@12:00');
+    fri.scheduledAt = new Date(Date.parse(fri.scheduledAt) + 2 * 864e5).toISOString();
+  });
+  const moved = await env.run({ only: ['evergreen'], now });
+  assert.equal(moved.summary.jobs.evergreen.evergreenCreated, 0);
+
+  // Time zone changes: the same local slots are already filled.
+  for (const zone of ['Europe/Berlin', 'America/New_York']) {
+    await env.update('settings', (s) => void (s.timezone = zone));
+    const res = await env.run({ only: ['evergreen'], now });
+    assert.equal(res.summary.jobs.evergreen.evergreenCreated, 0, zone);
+  }
+  assert.equal((await listPosts()).length, 7);
+});
+
 test('publishing an evergreen post counts the use; non-repeating lists drop the item', async (t) => {
   const env = await startWorkerEnv();
   t.after(() => env.close());
@@ -106,4 +146,26 @@ test('autopilot without AI uses caption hints and hashtag sets; auto mode schedu
   assert.equal(p.status, 'scheduled');
   assert.equal(p.needsApproval, false);
   assert.equal(p.caption, 'Fresh from the kiln.\n\n#ceramics #pottery');
+});
+
+test('autopilot does not draft media again after its draft was rejected (use any unused media on)', async (t) => {
+  const env = await startWorkerEnv();
+  t.after(() => env.close());
+  const asset = await env.addAsset('f04.jpg', { captionHint: 'Glaze test.' });
+  await env.update('autopilot', (a) => Object.assign(a, { enabled: true, mode: 'review', postsPerWeek: 3, horizonDays: 7, useAi: false, useAllUnused: true }));
+  await env.run({ only: ['autopilot'] });
+  const [draft] = (await env.read('posts')).posts.filter((p) => p.source === 'autopilot');
+  assert.equal(draft.media[0].assetId, asset.id);
+
+  // Reject it the way the app does.
+  await env.update('posts', (d) => {
+    const p = d.posts.find((x) => x.id === draft.id);
+    p.status = 'canceled';
+    p.needsApproval = false;
+    p.history.push({ at: new Date().toISOString(), event: 'rejected', detail: 'Rejected in the app.' });
+  });
+  const again = await env.run({ only: ['autopilot'] });
+  assert.equal(again.summary.jobs.autopilot.autopilotCreated, 0);
+  assert.equal((await env.read('posts')).posts.filter((p) => p.source === 'autopilot' && p.status !== 'canceled').length, 0);
+  assert.equal((await env.read('autopilot')).lastResult.code, 'no_assets');
 });

@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { startWorkerEnv, visibleLines, sleep, TEST_TOKEN } from '../helpers/worker-env.mjs';
-import { newPost } from '../../core/model.js';
+import { startWorkerEnv, visibleLines, sleep, fixtureBytes, TEST_TOKEN } from '../helpers/worker-env.mjs';
+import { newAsset, newPost } from '../../core/model.js';
+import { runWorker } from '../../worker/run.mjs';
+import { TMP_BRANCH } from '../../worker/context.mjs';
 
 const CAPTION = 'Secret launch caption about our spring collection';
 
@@ -13,8 +15,60 @@ async function schedulePost(env, partial) {
   return post;
 }
 
-function tmpFiles(env) {
-  return env.store.refresh().then(() => env.store.list('public/tmp/'));
+/** Files on the throwaway media branch (path -> blob sha). */
+function tmpBranchFiles(env) {
+  const head = env.ghMock.refs.get(TMP_BRANCH);
+  if (!head) return new Map();
+  const tree = env.ghMock.trees.get(env.ghMock.commits.get(head).tree);
+  return new Map([...tree].filter(([p]) => p.startsWith('public/tmp/')));
+}
+
+/** Plaintext copies left anywhere: on the throwaway branch or (older workers) the data branch. */
+async function tmpFiles(env) {
+  await env.store.refresh();
+  return [...(await env.store.list('public/tmp/')), ...tmpBranchFiles(env).keys()];
+}
+
+/** Every path that was ever in the data branch's history. */
+function dataHistoryPaths(env) {
+  const seen = new Set();
+  const paths = new Set();
+  const stack = [env.ghMock.refs.get('postpilot-data')];
+  while (stack.length) {
+    const sha = stack.pop();
+    if (!sha || seen.has(sha)) continue;
+    seen.add(sha);
+    const c = env.ghMock.commits.get(sha);
+    for (const p of env.ghMock.trees.get(c.tree).keys()) paths.add(p);
+    stack.push(...c.parents);
+  }
+  return [...paths];
+}
+
+const jsonResponse = (status, body, headers = {}) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json', ...headers } });
+
+/**
+ * Run the worker with a fetch wrapper: `fault(url, init)` may return a Response to answer a
+ * request itself (injected GitHub failures); otherwise the request goes to the mocks.
+ */
+async function runWith(env, fault, { only = ['publish'], env: extra = {}, now } = {}) {
+  const lines = [];
+  const fetchImpl = async (url, init = {}) => (await fault(String(url), init)) || fetch(url, init);
+  const res = await runWorker({ env: { ...env.env, ...extra }, only, now, fetchImpl, log: (l) => lines.push(String(l)) });
+  return { ...res, lines };
+}
+
+/** Fail the next `times` data-branch commits with this message (fast: 422 is not retried). */
+function failCommit(message, times = 1) {
+  const state = { left: times, hits: 0 };
+  state.fault = (url, init) => {
+    if (state.left <= 0 || init.method !== 'POST' || !url.endsWith('/git/commits')) return null;
+    if (JSON.parse(init.body).message !== `worker: ${message}`) return null;
+    state.left--;
+    state.hits++;
+    return jsonResponse(422, { message: 'Validation Failed' });
+  };
+  return state;
 }
 
 test('publishes a due feed post end to end and cleans up public/tmp', async (t) => {
@@ -41,10 +95,13 @@ test('publishes a due feed post end to end and cleans up public/tmp', async (t) 
   assert.ok(media, 'mock graph has the new media');
   assert.equal(media.caption, CAPTION);
   assert.equal(media.alt_text, 'A mug');
-  // The image URL Instagram fetched was a raw GitHub URL of a public/tmp copy...
-  assert.match(media.url, /\/gh\/raw\/o\/r\/postpilot-data\/public\/tmp\/\d+-[0-9a-f]+\.jpg$/);
-  // ...which is gone again.
+  // The image URL Instagram fetched was a raw GitHub URL of a copy on the throwaway branch...
+  assert.match(media.url, /\/gh\/raw\/o\/r\/postpilot-public-tmp\/public\/tmp\/\d+-[0-9a-f]+\.jpg$/);
+  // ...which is gone again, and not reachable from any branch's history.
   assert.deepEqual(await tmpFiles(env), []);
+  const tmpHead = env.ghMock.commits.get(env.ghMock.refs.get(TMP_BRANCH));
+  assert.deepEqual(tmpHead.parents, [], 'the throwaway branch has no history');
+  assert.ok(!dataHistoryPaths(env).some((p) => p.startsWith('public/tmp/')), 'the plaintext copy never touched the data branch');
   // First comment posted.
   assert.ok([...env.graph.state.comments.values()].some((c) => c.mediaId === saved.igMediaId && c.text === 'First!'));
 
@@ -211,4 +268,203 @@ test('an expired login keeps the post scheduled and flags the connection', async
   assert.equal(saved.status, 'scheduled');
   assert.ok(res.lines.some((l) => /login has expired/.test(l)));
   assert.equal(res.summary.jobs.publish.skipped, 'token_expired');
+});
+
+test('video copies live on the throwaway branch without location metadata; a processing video keeps its copy and leftovers are swept', async (t) => {
+  const env = await startWorkerEnv({ graph: { videoProcessingMs: 1500 } });
+  t.after(() => env.close());
+  // Instagram Login has no resumable upload: the video goes out through a public link.
+  env.graph.state.faults.push({ method: 'POST', path: /\/media$/, when: (p) => p.upload_type === 'resumable', error: { code: 100, status: 400, message: 'Unsupported' }, times: 1 });
+  // A copy left behind by an earlier run that was stopped mid-way.
+  const stale = 'public/tmp/1700000000-0123456789abcdef01234567.jpg';
+  const staleBlob = await env.gh.createBlob(new Uint8Array([1, 2, 3]));
+  await env.gh.createRef(TMP_BRANCH, await env.gh.createCommit({ message: 'x', tree: await env.gh.createTree([{ path: stale, sha: staleBlob }]), parents: [] }));
+
+  // A phone video with a GPS metadata box.
+  const clip = await fixtureBytes('clip.mp4');
+  const gps = Buffer.from('+40.7128-074.0060/');
+  const udta = Buffer.alloc(8 + gps.length);
+  udta.writeUInt32BE(udta.length);
+  udta.write('udta', 4, 'latin1');
+  gps.copy(udta, 8);
+  const bytes = new Uint8Array(Buffer.concat([clip, udta]));
+  const video = newAsset({ name: 'home.mp4', kind: 'video', mime: 'video/mp4', bytes: bytes.length, width: 720, height: 1280, durationSec: 5 });
+  await env.store.refresh();
+  await env.store.transact(async (tx) => {
+    tx.writeBytes(video.path, bytes);
+    tx.writeBytes(video.thumbPath, await fixtureBytes('story02.jpg'));
+    const lib = await tx.read('library');
+    lib.assets.push(video);
+    tx.write('library', lib);
+  });
+  const post = await schedulePost(env, { type: 'reel', caption: 'Home pour', media: [{ assetId: video.id, kind: 'video' }] });
+
+  const exposedBlobs = [];
+  const watch = (url, init) => {
+    if (init.method === 'POST' && url.endsWith('/git/blobs')) {
+      const b = Buffer.from(JSON.parse(init.body).content, 'base64');
+      if (b.subarray(4, 8).toString('latin1') === 'ftyp') exposedBlobs.push(b);
+    }
+    return null;
+  };
+  const first = await runWith(env, watch, { env: { POSTPILOT_PUBLISH_WAIT_MS: '200' } });
+  assert.equal(first.exitCode, 0);
+  let saved = (await env.read('posts')).posts.find((p) => p.id === post.id);
+  assert.equal(saved.status, 'publishing');
+  assert.equal(saved.exposedPaths.length, 1);
+  assert.deepEqual([...tmpBranchFiles(env).keys()], saved.exposedPaths, 'the processing video keeps its copy; the leftover is gone');
+  const container = env.graph.state.containers.get(saved.containers.parent);
+  assert.match(container.params.video_url, /\/postpilot-public-tmp\/public\/tmp\/\d+-[0-9a-f]+\.mp4$/);
+
+  // What went public had its metadata box neutralised (same size, so the video still plays).
+  assert.equal(exposedBlobs.length, 1);
+  assert.equal(exposedBlobs[0].length, bytes.length);
+  const tail = exposedBlobs[0].subarray(clip.length);
+  assert.equal(tail.subarray(4, 8).toString('latin1'), 'free');
+  assert.ok(!exposedBlobs[0].includes(Buffer.from('udta')), 'no metadata box left');
+  // The stored original is untouched.
+  await env.store.refresh();
+  assert.ok(Buffer.from(await env.store.readBytes(video.path)).includes(Buffer.from('udta')));
+
+  await sleep(1600);
+  const second = await runWith(env, () => null, { env: { POSTPILOT_PUBLISH_WAIT_MS: '2000' } });
+  assert.equal(second.exitCode, 0);
+  saved = (await env.read('posts')).posts.find((p) => p.id === post.id);
+  assert.equal(saved.status, 'published');
+  assert.deepEqual(await tmpFiles(env), []);
+  assert.ok(!dataHistoryPaths(env).some((p) => p.startsWith('public/tmp/')));
+});
+
+test('a GitHub write failure after Instagram published never publishes the post twice', async (t) => {
+  const env = await startWorkerEnv();
+  t.after(() => env.close());
+  const asset = await env.addAsset('f08.jpg');
+  const before = env.graph.state.publishCount;
+
+  // One failed 'published' commit: retried on a fresh head in the same run, even on the last attempt.
+  const once = await schedulePost(env, { caption: 'Last try', attempts: 3, media: [{ assetId: asset.id, kind: 'image' }] });
+  const blip = failCommit('publish: published', 1);
+  const run1 = await runWith(env, blip.fault);
+  assert.equal(blip.hits, 1);
+  assert.equal(run1.exitCode, 0);
+  let saved = (await env.read('posts')).posts.find((p) => p.id === once.id);
+  assert.equal(saved.status, 'published');
+  assert.equal(env.graph.state.publishCount, before + 1);
+
+  // GitHub keeps failing: the post stays 'publishing' with its containers and the next run records it.
+  const post = await schedulePost(env, { caption: 'Live already', media: [{ assetId: asset.id, kind: 'image' }] });
+  const outage = failCommit('publish: published', 2);
+  const run2 = await runWith(env, outage.fault);
+  assert.equal(outage.hits, 2);
+  assert.equal(env.graph.state.publishCount, before + 2);
+  saved = (await env.read('posts')).posts.find((p) => p.id === post.id);
+  assert.equal(saved.status, 'publishing');
+  assert.ok(saved.containers && saved.containers.parent);
+  assert.equal(saved.lastError, null);
+  assert.deepEqual(await tmpFiles(env), [], 'the copy is removed at the end of the run');
+  assert.ok(run2.lines.some((l) => /^publish: failed \(GitHub error 422\)/.test(l)));
+
+  const run3 = await runWith(env, () => null);
+  assert.equal(run3.exitCode, 0);
+  saved = (await env.read('posts')).posts.find((p) => p.id === post.id);
+  assert.equal(saved.status, 'published');
+  assert.equal(env.graph.state.publishCount, before + 2, 'not published a second time');
+});
+
+test('a story is not published when its upload progress cannot be saved', async (t) => {
+  const env = await startWorkerEnv();
+  t.after(() => env.close());
+  const asset = await env.addAsset('story03.jpg', { width: 1080, height: 1920 });
+  const post = await schedulePost(env, { type: 'story', caption: '', media: [{ assetId: asset.id, kind: 'image' }] });
+  const before = env.graph.state.publishCount;
+
+  const blip = failCommit('publish: containers created', 1);
+  const run1 = await runWith(env, blip.fault);
+  assert.equal(run1.exitCode, 0);
+  assert.equal(env.graph.state.publishCount, before, 'media_publish never ran without saved containers');
+  let saved = (await env.read('posts')).posts.find((p) => p.id === post.id);
+  assert.equal(saved.status, 'scheduled');
+  assert.match(saved.lastError.message, /Could not save upload progress/);
+  assert.deepEqual(await tmpFiles(env), []);
+
+  await runWith(env, () => null);
+  saved = (await env.read('posts')).posts.find((p) => p.id === post.id);
+  assert.equal(saved.status, 'published');
+  assert.equal(env.graph.state.publishCount, before + 1);
+});
+
+test('a GitHub 403 while publishing is not taken for an expired Instagram login', async (t) => {
+  const env = await startWorkerEnv();
+  t.after(() => env.close());
+  const asset = await env.addAsset('f09.jpg');
+  const post = await schedulePost(env, { caption: 'Rate limited', media: [{ assetId: asset.id, kind: 'image' }] });
+  const isJpegBlob = (url, init) => init.method === 'POST' && url.endsWith('/git/blobs') && JSON.parse(init.body).content.startsWith('/9j/');
+
+  // A secondary rate limit on the exposed copy is waited out and retried.
+  let limited = 0;
+  const rateLimit = (url, init) => {
+    if (limited || !isJpegBlob(url, init)) return null;
+    limited++;
+    return jsonResponse(403, { message: 'You have exceeded a secondary rate limit. Please wait a few minutes before you try again.' }, { 'retry-after': '0.05' });
+  };
+  const run1 = await runWith(env, rateLimit, { only: ['token', 'publish'] });
+  assert.equal(limited, 1);
+  assert.equal(run1.exitCode, 0);
+  let saved = (await env.read('posts')).posts.find((p) => p.id === post.id);
+  assert.equal(saved.status, 'published');
+  assert.notEqual((await env.read('settings')).ig.status?.state, 'expired');
+
+  // A GitHub refusal that is not retried: the post goes back to the queue, the login stays fine.
+  const post2 = await schedulePost(env, { caption: 'Refused', media: [{ assetId: asset.id, kind: 'image' }] });
+  const refuse = (url, init) => (isJpegBlob(url, init) ? jsonResponse(403, { message: 'Resource not accessible by integration' }) : null);
+  const run2 = await runWith(env, refuse, { only: ['token', 'publish'] });
+  assert.equal(run2.exitCode, 0);
+  const settings = await env.read('settings');
+  assert.notEqual(settings.ig.status?.state, 'expired');
+  assert.equal(env.pushes.length, 0);
+  saved = (await env.read('posts')).posts.find((p) => p.id === post2.id);
+  assert.equal(saved.status, 'scheduled');
+  assert.equal(saved.lastError.code, 'github');
+  assert.ok(!run2.lines.some((l) => /login/i.test(l)));
+  assert.equal(run2.summary.jobs.publish.retried, 1);
+
+  // The next run publishes it (Instagram jobs were never paused).
+  const run3 = await runWith(env, () => null, { only: ['token', 'publish'] });
+  assert.equal(run3.summary.jobs.publish.published, 1);
+});
+
+test('stops claiming posts once the run is out of time', async (t) => {
+  const env = await startWorkerEnv();
+  t.after(() => env.close());
+  const asset = await env.addAsset('f10.jpg');
+  const a = await schedulePost(env, { caption: 'First', media: [{ assetId: asset.id, kind: 'image' }] });
+  const b = await schedulePost(env, { caption: 'Second', media: [{ assetId: asset.id, kind: 'image' }] });
+  const before = env.graph.state.publishCount;
+  // The clock jumps 15 minutes once the first post is out (a slow upload).
+  const res = await env.run({ only: ['publish'], now: () => Date.now() + (env.graph.state.publishCount > before ? 15 * 60e3 : 0) });
+  assert.equal(res.exitCode, 0);
+  assert.equal(env.graph.state.publishCount, before + 1);
+  const posts = (await env.read('posts')).posts;
+  const statuses = [a, b].map((p) => posts.find((x) => x.id === p.id)).map((p) => [p.status, p.attempts || 0]).sort();
+  assert.deepEqual(statuses, [['published', 1], ['scheduled', 0]]);
+  const next = await env.run({ only: ['publish'] });
+  assert.equal(next.summary.jobs.publish.published, 1);
+});
+
+test('a post published now is picked up while the run waits for a later post', async (t) => {
+  const env = await startWorkerEnv();
+  t.after(() => env.close());
+  const asset = await env.addAsset('f11.jpg');
+  const later = await schedulePost(env, { caption: 'Later', scheduledAt: new Date(Date.now() + 3000).toISOString(), media: [{ assetId: asset.id, kind: 'image' }] });
+  const running = env.run({ only: ['publish'], env: { POSTPILOT_MAX_WAIT_SEC: '8', POSTPILOT_WAIT_SLICE_MS: '200' } });
+  await sleep(400);
+  const now = await schedulePost(env, { caption: 'Now', scheduledAt: new Date().toISOString(), media: [{ assetId: asset.id, kind: 'image' }] });
+  const res = await running;
+  assert.equal(res.exitCode, 0);
+  const posts = (await env.read('posts')).posts;
+  const savedNow = posts.find((p) => p.id === now.id);
+  const savedLater = posts.find((p) => p.id === later.id);
+  assert.equal(savedNow.status, 'published');
+  assert.equal(savedLater.status, 'published');
+  assert.ok(Date.parse(savedNow.publishedAt) < Date.parse(later.scheduledAt), 'not held back until the later post was due');
 });
