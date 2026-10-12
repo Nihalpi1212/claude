@@ -79,7 +79,7 @@
 .qu-horizon { max-width: 160px; }
 
 .qu-slots-edit { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
-.qu-slot { display: grid; grid-template-columns: minmax(0, 1fr) 112px auto; gap: 6px; align-items: center; }
+.qu-slot { display: grid; grid-template-columns: minmax(0, 1fr) 136px auto; gap: 6px; align-items: center; }
 .qu-slot-time { font-family: var(--font-mono); }
 .qu-slot-time.is-invalid { border-color: var(--bad); }
 .qu-add-slot { align-self: flex-start; }

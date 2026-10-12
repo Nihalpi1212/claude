@@ -115,7 +115,7 @@ export function BioView({ doc, resolveUrl = (u) => u, preview = false }) {
             <div class="bio-grid">
               ${grid.map((it, i) => {
                 const href = safeHref(it.url || it.permalink);
-                const img = html`<img src=${it.imageUrl} alt=${it.alt || `Post ${i + 1}`} loading="lazy" decoding="async" referrerpolicy="no-referrer" />`;
+                const img = html`<img src=${it.imageUrl} alt=${it.alt || `Post ${i + 1}`} loading=${preview ? undefined : 'lazy'} decoding="async" referrerpolicy="no-referrer" />`;
                 return href
                   ? html`<a key=${it.id || i} class="bio-tile" href=${href} target=${target} rel="noopener">${img}</a>`
                   : html`<span key=${it.id || i} class="bio-tile">${img}</span>`;

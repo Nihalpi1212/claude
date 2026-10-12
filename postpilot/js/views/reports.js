@@ -137,14 +137,13 @@ function TopPostsTable({ ov, tz }) {
   const rows = topMedia(ov.posts, 'interactions', 5);
   if (!rows.length) return html`<p class="rp-empty">No post stats for this period.</p>`;
   const cols = [
-    { key: 'rank', label: '#', width: 36, render: (m) => html`<span class="mono">${String(rows.indexOf(m) + 1).padStart(2, '0')}</span>` },
     { key: 'thumb', label: '', width: 48, render: (m) => html`<${Thumb} src=${previewOf(m)} size=${36} kind=${mediaKindOf(m)} eager />` },
     {
       key: 'post',
       label: 'Post',
       class: 'rp-caption-cell',
       render: (m) => html`<span class="rp-caption">${captionLine(m.caption, 70) || 'No caption'}</span>
-        <span class="rp-post-meta">${KIND_LABEL[mediaKindOf(m)]} · ${shortDateTime(m.timestamp, tz)}</span>`,
+        <span class="rp-post-meta"><span class="mono">${String(rows.indexOf(m) + 1).padStart(2, '0')}</span> · ${KIND_LABEL[mediaKindOf(m)]} · ${shortDateTime(m.timestamp, tz)}</span>`,
     },
     { key: 'reach', label: 'Reach', align: 'right', render: (m) => formatValue(metricValue(m, 'reach')) },
     { key: 'inter', label: 'Interactions', align: 'right', render: (m) => formatValue(interactionsOf(m)) },
@@ -297,7 +296,7 @@ export default function ReportsView() {
   const compare = q.compare !== '0';
   const range = resolveRange(sel, tz);
   const a = useAnalytics(range, { compare });
-  const ov = useMemo(() => (a.ready ? computeOverview(a, tz, { compare }) : null), [a.days, a.media, a.ready, range.fromKey, range.toKey, tz, compare]);
+  const ov = useMemo(() => (a.ready ? computeOverview(a, tz, { compare }) : null), [a.days, a.media, a.ready, range.fromKey, range.toKey, a.live.previous && a.live.previous.status, tz, compare]);
 
   const [prefs, setPrefs] = useState(loadPrefs);
   useEffect(() => savePrefs(prefs), [prefs]);

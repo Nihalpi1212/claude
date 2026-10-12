@@ -89,15 +89,15 @@
 /* Performance */
 .ht-perf {
   display: grid;
-  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--sp-4);
-  align-items: start;
 }
+.ht-perf-list .list-row { padding-top: 8px; padding-bottom: 8px; }
+.ht-perf-list .grow { display: flex; flex-direction: column; gap: 2px; }
 .ht-tag-cell { --gap: 8px; }
 
 @media (max-width: 1023px) {
-  .ht-research,
-  .ht-perf { grid-template-columns: minmax(0, 1fr); }
+  .ht-research { grid-template-columns: minmax(0, 1fr); }
 }
 
 @media (max-width: 759px) {
@@ -105,5 +105,4 @@
   .ht-edge { margin-top: 0; }
   .ht-search-btn { margin-top: 0; margin-left: auto; }
   .ht-sheet { --frame-min: 100px; gap: 12px 10px; }
-  .ht-card .panel-actions { width: 100%; }
 }

@@ -64,7 +64,7 @@ export function TimeZoneField({ value, onChange, label = 'Time zone', hint }) {
     error=${error}
     hint=${zone ? html`It is ${formatTime(new Date(), zone)} there now. ${hint || ''}` : hint}
     action=${device && device !== zone
-      ? html`<button type="button" class="link-btn" onClick=${() => (setText(device), onChange?.(device))}>Use this device's (${device})</button>`
+      ? html`<button type="button" class="link-btn" onClick=${() => (setText(device), onChange?.(device))}>Use ${device} (this device)</button>`
       : null}
   >
     <${TextInput}
@@ -276,7 +276,9 @@ export function WorkerSetup({ onContinue, continueLabel = 'Continue', onSkip }) 
   useEffect(() => {
     if (!watch || watch.record) return;
     const latest = log && log.runs && log.runs[0];
-    if (latest && latest.startedAt !== watch.baseline) {
+    // A new record, finished after we asked (with slack for clock differences between GitHub and this device).
+    const fresh = latest && Date.parse(latest.finishedAt || latest.startedAt) >= watch.since - 5 * 60_000;
+    if (latest && fresh && latest.startedAt !== watch.baseline) {
       setWatch((w) => (w ? { ...w, record: latest } : w));
       mutate('settings', (s) => {
         s.ui = { ...(s.ui || {}), workerFirstRunAt: s.ui?.workerFirstRunAt || new Date().toISOString() };
@@ -591,7 +593,7 @@ export default function Onboarding() {
       history.replaceState(null, '', buildHash('onboarding', {}));
       globalThis.dispatchEvent(new HashChangeEvent('hashchange'));
     }
-  }, []);
+  }, [route.name]);
 
   const ui = settings.ui || {};
   const requested = route.name === 'onboarding' ? route.query.step : null;

@@ -506,6 +506,16 @@ export default function LinkInBio() {
           : null}
       </div>
     <//>
+    ${dirty
+    ? html`<div class="bio-savebar" role="region" aria-label="Unsaved changes">
+        <span><${Icon} name="edit" size=${15} /> Unsaved changes</span>
+        <span class="spacer"></span>
+        <${Button} size="sm" variant="ghost" onClick=${discard}>Discard<//>
+        ${published
+          ? html`<${Button} size="sm" variant="primary" loading=${busy === 'publish'} onClick=${() => save(true)}>Publish changes<//>`
+          : html`<${Button} size="sm" variant="secondary" loading=${busy === 'save'} onClick=${() => save(false)}>Save draft<//>`}
+      </div>`
+    : null}
   </div>`;
 
   const preview = html`<aside class="bio-preview" aria-label="Preview">
@@ -548,16 +558,6 @@ export default function LinkInBio() {
       ${!phone || tab === 'preview' ? preview : null}
     </div>
 
-    ${dirty
-      ? html`<div class="bio-savebar" role="region" aria-label="Unsaved changes">
-          <span><${Icon} name="edit" size=${15} /> Unsaved changes</span>
-          <span class="spacer"></span>
-          <${Button} size="sm" variant="ghost" onClick=${discard}>Discard<//>
-          ${published
-            ? html`<${Button} size="sm" variant="primary" loading=${busy === 'publish'} onClick=${() => save(true)}>Publish changes<//>`
-            : html`<${Button} size="sm" variant="secondary" loading=${busy === 'save'} onClick=${() => save(false)}>Save draft<//>`}
-        </div>`
-      : null}
 
     <${GridPicker}
       open=${pickerOpen}

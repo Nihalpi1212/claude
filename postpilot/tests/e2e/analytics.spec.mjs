@@ -6,6 +6,11 @@ import { readFile } from 'node:fs/promises';
 import { openApp, shot, unlock } from './helpers.mjs';
 
 const PORT = 5213;
+// A range before the worker's first snapshot (it saves the last 28 days) but within Instagram's 90 days.
+const daysAgo = (n) => new Date(Date.now() - n * 864e5).toISOString().slice(0, 10);
+const OLD_FROM = daysAgo(63);
+const OLD_TO = daysAgo(37);
+const OLD_RANGE = `#/analytics?range=custom&from=${OLD_FROM}&to=${OLD_TO}`;
 let h;
 let page;
 
@@ -15,6 +20,8 @@ before(async () => {
 });
 
 after(async () => {
+  // If the dev server died mid-run, show why.
+  if (h && h.server.child.exitCode !== null) console.log(`dev server exited (${h.server.child.exitCode}):\n${h.server.output().slice(-4000)}`);
   await h?.close();
 });
 
@@ -42,6 +49,22 @@ async function waitForNumber(label) {
     { timeout: 20_000 },
   );
   return tileValue(label);
+}
+
+/** Open a kit Menu by its trigger name. The menu closes on any scroll, so start from the top and retry once. */
+async function openMenu(p, name) {
+  await p.evaluate(() => window.scrollTo(0, 0));
+  await p.waitForTimeout(150);
+  for (let i = 0; i < 3; i++) {
+    await p.getByRole('button', { name }).click();
+    try {
+      await p.getByRole('menuitem').first().waitFor({ timeout: 1500 });
+      return;
+    } catch {
+      /* closed by a layout scroll; try again */
+    }
+  }
+  throw new Error(`menu "${name}" did not open`);
 }
 
 async function openTab(name) {
@@ -77,6 +100,7 @@ test('overview renders numbers and charts from the seeded workspace', async () =
 
 test('range switch changes the numbers and the URL', async () => {
   const before28 = await waitForNumber('Reach');
+  await page.evaluate(() => window.scrollTo(0, 0));
   await page.locator('.range-trigger').click();
   await page.getByRole('menuitem', { name: /Last 7 days/ }).click();
   await page.waitForFunction(() => location.hash.includes('range=7d'));
@@ -98,18 +122,18 @@ test('range switch changes the numbers and the URL', async () => {
 });
 
 test('a range the worker never saved loads live from Instagram', async () => {
-  await go('#/analytics?range=custom&from=2026-08-10&to=2026-09-05');
+  await go(OLD_RANGE);
   await page.waitForSelector('.an-source >> text=Live from Instagram', { timeout: 30_000 });
   assert.match(await waitForNumber('Reach'), /\d/);
   assert.match(await waitForNumber('Followers'), /\d/);
-  assert.equal(await page.locator('input[aria-label="From"]').inputValue(), '2026-08-10');
-  assert.equal(await page.locator('input[aria-label="To"]').inputValue(), '2026-09-05');
+  assert.equal(await page.locator('input[aria-label="From"]').inputValue(), OLD_FROM);
+  assert.equal(await page.locator('input[aria-label="To"]').inputValue(), OLD_TO);
   await go('#/analytics');
   await waitForNumber('Reach');
 });
 
 test('CSV export downloads daily metrics and posts', async () => {
-  await page.getByRole('button', { name: 'Export CSV' }).click();
+  await openMenu(page, 'Export CSV');
   const [daily] = await Promise.all([page.waitForEvent('download'), page.getByRole('menuitem', { name: /Daily metrics/ }).click()]);
   assert.match(daily.suggestedFilename(), /^postpilot-daily-\d{4}-\d{2}-\d{2}_\d{4}-\d{2}-\d{2}\.csv$/);
   const text = (await readFile(await daily.path(), 'utf8')).replace(/^﻿/, '');
@@ -118,7 +142,7 @@ test('CSV export downloads daily metrics and posts', async () => {
   assert.equal(lines.length, 1 + 28, 'header + 28 days');
   assert.match(lines[1], /^\d{4}-\d{2}-\d{2},\d+/);
 
-  await page.getByRole('button', { name: 'Export CSV' }).click();
+  await openMenu(page, 'Export CSV');
   const [posts] = await Promise.all([page.waitForEvent('download'), page.getByRole('menuitem', { name: /^Posts/ }).click()]);
   const ptext = (await readFile(await posts.path(), 'utf8')).replace(/^﻿/, '');
   assert.match(ptext.split('\r\n')[0], /^Date,Time,Type,Caption,Link,Reach/);
@@ -207,7 +231,7 @@ test('reports: preview, sections, AI summary, CSV and print stylesheet', async (
   await page.waitForSelector('.rp-ai', { timeout: 30_000 });
   assert.ok((await page.locator('.rp-ai').innerText()).trim().length > 20, 'AI summary text');
 
-  await page.getByRole('button', { name: 'Download CSV' }).click();
+  await openMenu(page, 'Download CSV');
   const [csv] = await Promise.all([page.waitForEvent('download'), page.getByRole('menuitem', { name: /Daily metrics/ }).click()]);
   assert.match(csv.suggestedFilename(), /\.csv$/);
 
@@ -245,7 +269,7 @@ test('screenshots at desktop and phone sizes, light and dark, without horizontal
     ['analytics-audience', '#/analytics?tab=audience'],
     ['analytics-best-times', '#/analytics?tab=best-times'],
     ['analytics-hashtags', '#/analytics?tab=hashtags&range=90d'],
-    ['analytics-live', '#/analytics?range=custom&from=2026-08-10&to=2026-09-05'],
+    ['analytics-live', OLD_RANGE],
     ['reports', '#/reports'],
   ];
   for (const [size, viewport, colorScheme] of variants) {

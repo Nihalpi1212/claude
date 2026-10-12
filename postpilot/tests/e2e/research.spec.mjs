@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { openApp, shot, unlock } from './helpers.mjs';
 
 const PORT = 5217;
+const SHOT_DIR = process.env.SCREENSHOT_DIR || '/tmp/claude-0/-home-user-claude/61a6d9a0-a933-5d86-8721-920a439be9c7/scratchpad/shots';
 const BENIGN = [/favicon/i, /Failed to load resource: the server responded with a status of 404/i];
 
 let h;
@@ -29,6 +30,29 @@ async function readDoc(p, name) {
     const data = await import('/postpilot/js/data.js');
     return data.readDoc(n);
   }, name);
+}
+
+/** Screenshot after toasts are dismissed and open/close animations finished. */
+async function snap(p, name) {
+  await p.evaluate(() => document.querySelectorAll('.toast-close').forEach((b) => b.click()));
+  if (await p.locator('.overlay').count()) {
+    // Full-page captures resize the viewport, which replays the drawer animation: capture the viewport.
+    await p.waitForTimeout(450);
+    const file = `${SHOT_DIR}/${name}.png`;
+    await p.screenshot({ path: file });
+    return file;
+  }
+  // Load lazy images below the fold so the full-page capture shows them.
+  await p.evaluate(async () => {
+    for (let y = 0; y < document.documentElement.scrollHeight; y += 500) {
+      window.scrollTo(0, y);
+      await new Promise((r) => setTimeout(r, 40));
+    }
+    window.scrollTo(0, 0);
+  });
+  await p.waitForFunction(() => [...document.images].every((i) => i.complete), null, { timeout: 5000 }).catch(() => {});
+  await p.waitForTimeout(300);
+  return shot(p, name);
 }
 
 /** Open a kit Menu. The kit closes menus on any scroll, so scroll the trigger into view first. */
@@ -127,7 +151,7 @@ describe('Competitors and Hashtags', { timeout: 240_000 }, () => {
     const doc = await readDoc(page, 'competitors');
     assert.deepEqual(doc.accounts.map((a) => a.username || a).sort(), ['atelier.kin', 'northbound.coffee']);
     assert.ok(!(await page.locator('table.table').textContent()).includes('@lumen.ceramics'));
-    await shot(page, 'competitors-ig-mode-desktop-light');
+    await snap(page, 'competitors-ig-mode-desktop-light');
   });
 
   test('competitors: Facebook Login validates, adds, refreshes and shows posts', async () => {
@@ -181,7 +205,7 @@ describe('Competitors and Hashtags', { timeout: 240_000 }, () => {
     doc = await readDoc(page, 'competitors');
     assert.ok(doc.profiles['atelier.kin'].updatedAt);
 
-    await shot(page, 'competitors-fb-desktop-light');
+    await snap(page, 'competitors-fb-desktop-light');
 
     // Drawer with recent and best posts.
     await table.locator('tr', { hasText: '@atelier.kin' }).click();
@@ -192,7 +216,7 @@ describe('Competitors and Hashtags', { timeout: 240_000 }, () => {
     assert.equal(await drawer.locator('.cmp-best').count(), 3);
     const href = await drawer.locator('.cmp-tile').first().getAttribute('href');
     assert.match(href, /^https:\/\/www\.instagram\.com\/p\//);
-    await shot(page, 'competitors-drawer-desktop-light');
+    await snap(page, 'competitors-drawer-desktop-light');
     await page.keyboard.press('Escape');
     await drawer.waitFor({ state: 'detached' });
   });
@@ -208,7 +232,7 @@ describe('Competitors and Hashtags', { timeout: 240_000 }, () => {
     const coffee = page.locator('.ht-card', { hasText: 'Coffee' });
     assert.equal((await coffee.locator('.ht-count .num').textContent()).trim(), '4/5');
     assert.match(await coffee.locator('.ht-count').getAttribute('class'), /is-ok/);
-    await shot(page, 'hashtags-sets-desktop-light');
+    await snap(page, 'hashtags-sets-desktop-light');
 
     // Create
     await page.getByRole('button', { name: 'New set' }).click();
@@ -224,6 +248,7 @@ describe('Competitors and Hashtags', { timeout: 240_000 }, () => {
     await chipInput.press('Enter');
     assert.equal((await modal.locator('.ht-count .num').textContent()).trim(), '6/5');
     await modal.locator('.callout', { hasText: 'may be ignored' }).waitFor();
+    await snap(page, 'hashtags-set-editor-desktop-light');
     await modal.getByRole('button', { name: 'Create set' }).click();
     await modal.waitFor({ state: 'detached' });
     await toastText(page, /Set “Glaze week” saved/);
@@ -294,7 +319,7 @@ describe('Competitors and Hashtags', { timeout: 240_000 }, () => {
     await toastText(page, /Template “Kiln opening” saved/);
     let doc = await readDoc(page, 'hashtags');
     assert.equal(doc.templates.find((t) => t.name === 'Kiln opening').text, 'Kiln opening on {date}.');
-    await shot(page, 'hashtags-templates-desktop-light');
+    await snap(page, 'hashtags-templates-desktop-light');
     await openMenu(tcard.getByRole('button', { name: 'More actions for Kiln opening' }));
     await page.getByRole('menuitem', { name: 'Delete' }).click();
     await confirmDialog(page, 'Delete');
@@ -333,6 +358,8 @@ describe('Competitors and Hashtags', { timeout: 240_000 }, () => {
     await page.getByRole('button', { name: 'Search' }).click();
     const results = page.locator('.panel', { has: page.getByRole('heading', { name: '#ceramics' }) });
     await results.waitFor();
+    assert.equal(await results.locator('.ht-sheet .frame').count(), 18);
+    await results.getByRole('button', { name: 'Show all 30 posts' }).click();
     assert.equal(await results.locator('.ht-sheet .frame').count(), 30);
     await page.locator('.ht-budget', { hasText: '1 of 30 used' }).waitFor();
 
@@ -340,7 +367,7 @@ describe('Competitors and Hashtags', { timeout: 240_000 }, () => {
     await page.getByRole('radio', { name: 'Recent' }).click();
     await results.getByText(/Recent posts, last 24 hours/).waitFor();
     await page.locator('.ht-budget', { hasText: '1 of 30 used' }).waitFor();
-    await shot(page, 'hashtags-research-desktop-light');
+    await snap(page, 'hashtags-research-desktop-light');
 
     // Pick a related hashtag and add both to the Coffee set.
     const chips = results.locator('.ht-chips .chip');
@@ -394,7 +421,7 @@ describe('Competitors and Hashtags', { timeout: 240_000 }, () => {
     assert.ok((await rows.count()) > 3);
     await page.locator('.ht-perf .chart-hbar svg').waitFor();
     await page.getByRole('radio', { name: '5 posts' }).click();
-    await shot(page, 'hashtags-performance-desktop-light');
+    await snap(page, 'hashtags-performance-desktop-light');
     await openMenu(rows.first().getByRole('button', { name: /Add/ }));
     await page.getByRole('menuitem', { name: 'New set…' }).click();
     const modal = page.locator('.modal');
@@ -419,11 +446,11 @@ describe('Competitors and Hashtags', { timeout: 240_000 }, () => {
       const { p, ctx, errors } = await extraPage({ ...c, hash: '#/competitors' });
       await p.getByText('@atelier.kin').first().waitFor();
       await noHorizontalScroll(p);
-      await shot(p, `competitors-${c.name}`);
+      await snap(p, `competitors-${c.name}`);
       if (c.name === 'phone-light') {
         await p.locator('.cmp-list-main', { hasText: '@northbound.coffee' }).click();
         await p.locator('.drawer').getByRole('heading', { name: 'Recent posts', exact: true }).waitFor();
-        await shot(p, 'competitors-drawer-phone-light');
+        await snap(p, 'competitors-drawer-phone-light');
         await p.keyboard.press('Escape');
       }
       for (const tab of ['sets', 'research', 'performance', 'templates']) {
@@ -435,10 +462,10 @@ describe('Competitors and Hashtags', { timeout: 240_000 }, () => {
           await p.getByRole('button', { name: 'Search' }).click();
           await p.getByRole('heading', { name: '#pottery' }).waitFor();
         }
-        if (tab === 'performance') await p.locator('.ht-perf table.table').waitFor();
+        if (tab === 'performance') await p.locator('.ht-perf-list, .ht-perf table.table').first().waitFor();
         if (tab === 'templates') await p.locator('.ht-card').first().waitFor();
         await noHorizontalScroll(p);
-        await shot(p, `hashtags-${tab}-${c.name}`);
+        await snap(p, `hashtags-${tab}-${c.name}`);
       }
       assert.deepEqual(realErrors(errors), [], `console errors in ${c.name}`);
       await ctx.close();

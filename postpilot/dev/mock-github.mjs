@@ -78,7 +78,7 @@ export function createMockGitHub({ owner = 'demo', repo = 'postpilot', defaultBr
     if (method === 'OPTIONS') return send(res, 204, null), true;
 
     // raw.githubusercontent.com style: /raw/<owner>/<repo>/<branch>/<path>
-    let m = path.match(/^\/raw\/([^/]+)\/([^/]+)\/([^/]+)\/(.+)$/);
+    let m = path.split('?')[0].match(/^\/raw\/([^/]+)\/([^/]+)\/([^/]+)\/(.+)$/);
     if (m) {
       const t = treeOfBranch(decodeURIComponent(m[3]));
       const f = t && t.get(decodeURIComponent(m[4]));
@@ -164,6 +164,9 @@ export function createMockGitHub({ owner = 'demo', repo = 'postpilot', defaultBr
       const t = treeOfBranch(ref);
       const f = t && t.get(decodeURIComponent(fp));
       if (!f) return send(res, 404, { message: 'Not Found' }), true;
+      if (/application\/vnd\.github\.raw/.test(req.headers.accept || '')) {
+        return send(res, 200, blobs.get(f), { 'Content-Type': 'application/vnd.github.raw+json; charset=utf-8' }), true;
+      }
       return send(res, 200, { path: fp, sha: f, encoding: 'base64', content: blobs.get(f).toString('base64') }), true;
     }
     if (method === 'POST' && (m = p.match(/^\/actions\/workflows\/([^/]+)\/dispatches$/))) {

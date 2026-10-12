@@ -100,7 +100,7 @@ const TAG_RE = /(^|[^\w&])(#[\p{L}\p{N}_]+)/gu;
 
 /** "Tue 14, 12:00 PM" in the account time zone. */
 function slotLabel(iso, tz) {
-  return format(iso, tz, { weekday: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  return `${format(iso, tz, { weekday: 'short' })} ${format(iso, tz, { day: 'numeric' })}, ${format(iso, tz, { hour: 'numeric', minute: '2-digit' })}`;
 }
 
 /** Read an asset's decrypted bytes as a Blob (kept for the last few assets). */
@@ -839,7 +839,7 @@ function Editor({ start, docs, onClose }) {
     ${existing ? html`<${History} post=${live || draft} />` : null}
   </div>`;
 
-  const side = html`<aside class=${cx('cmp-side', !wide && tab !== 'preview' && 'is-hidden')} aria-label="Preview">
+  const side = html`<aside class=${cx('cmp-side', !wide && tab !== 'preview' && 'is-hidden')} aria-label="Preview"><div class="cmp-side-inner">
     <div class="cmp-side-head">
       <span class="label-caps">Preview</span>
       <${Segmented} size="sm" label="Preview mode" value=${previewMode} onChange=${setPreviewMode}
@@ -851,7 +851,7 @@ function Editor({ start, docs, onClose }) {
         ? (i, pt) => update((d) => placeTag(d, i, pt))
         : undefined} />
     <p class="text-xs faint cmp-side-note">Approximate preview. Instagram decides the final crop and text layout.</p>
-  </aside>`;
+  </div></aside>`;
 
   return html`<${Drawer} open=${true} title=${titleText} onClose=${requestClose} footer=${footer} width=${1120} class="cmp-drawer">
     <div class=${cx('cmp', wide && 'is-wide')}
@@ -1069,6 +1069,7 @@ function ItemDetail({ m, index, asset, type, recropping, onAlt, onCrop }) {
 
 function ReelOptions({ draft, update, video, assetsById, mode, onPickCover, onUploadCover, setFrameUrl, issues }) {
   const src = useAssetUrl(video, 'original');
+  const poster = useAssetUrl(video, 'thumb');
   const coverAsset = draft.coverAssetId ? assetsById.get(draft.coverAssetId) || null : null;
   const coverSrc = useAssetUrl(coverAsset);
   const [dur, setDur] = useState((video && video.durationSec) || 0);
@@ -1120,7 +1121,7 @@ function ReelOptions({ draft, update, video, assetsById, mode, onPickCover, onUp
               ? html`<img src=${coverSrc} alt="Custom cover" />`
               : html`<span class="frame-blank"><${Icon} name="image" size=${20} /></span>`
             : src
-              ? html`<video ref=${vref} src=${src} muted playsinline preload="auto" aria-label="Cover frame"
+              ? html`<video ref=${vref} src=${src} poster=${poster || undefined} muted playsinline preload="auto" aria-label="Cover frame"
                   onLoadedMetadata=${(e) => {
                     const d = e.currentTarget.duration;
                     if (Number.isFinite(d) && d > 0) setDur(d);
@@ -1616,14 +1617,14 @@ function ReadOnly({ post, docs, assetsById, account, tz, wide, onClose, onDuplic
           : null}
         <${History} post=${post} />
       </div>
-      <aside class=${cx('cmp-side', !wide && tab !== 'preview' && 'is-hidden')} aria-label="Preview">
+      <aside class=${cx('cmp-side', !wide && tab !== 'preview' && 'is-hidden')} aria-label="Preview"><div class="cmp-side-inner">
         <div class="cmp-side-head">
           <span class="label-caps">Preview</span>
           <${Segmented} size="sm" label="Preview mode" value=${previewMode} onChange=${setPreviewMode}
             options=${[{ value: 'feed', label: post.type === 'reel' ? 'Reel' : post.type === 'story' ? 'Story' : 'Post' }, { value: 'grid', label: 'Grid' }]} />
         </div>
         <${PostPreview} post=${post} assetsById=${assetsById} account=${account} tz=${tz} mode=${previewMode} />
-      </aside>
+      </div></aside>
     </div>
   <//>`;
 }

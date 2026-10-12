@@ -137,3 +137,8 @@
   .settings-log-msg { flex-basis: 100%; }
   .settings-job-select { width: auto; flex: 1 1 140px; }
 }
+
+/* Groups inside a section. (Not .stack-lg: its --gap would leak into nested .stack elements.) */
+.settings-groups { display: flex; flex-direction: column; gap: var(--sp-5); min-width: 0; }
+.settings-groups > * { min-width: 0; }
+.stack > .settings-sub { margin-bottom: 0; }

@@ -350,8 +350,10 @@ function QueueCard({ list, posts, assetsById, tz, nowMs, onEdit, onToggle, onDup
 // Editor
 
 function QueueEditor({ editing, posts, assetsById, tz, nowMs, onClose, onSave }) {
+  const { confirm } = useApp();
   const { isNew, originalItemIds } = editing;
-  const [draft, setDraft] = useState(() => ({ ...editing.draft, items: (editing.draft.items || []).map((it) => ({ firstComment: '', caption: '', ...it })) }));
+  const [initial] = useState(() => ({ ...editing.draft, items: (editing.draft.items || []).map((it) => ({ firstComment: '', caption: '', ...it })) }));
+  const [draft, setDraft] = useState(initial);
   const [picker, setPicker] = useState(null); // { mode: 'add' } | { mode: 'replace', id }
   const [saving, setSaving] = useState(false);
   const [tried, setTried] = useState(false);
@@ -438,10 +440,24 @@ function QueueEditor({ editing, posts, assetsById, tz, nowMs, onClose, onSave })
   };
   const pickerItem = picker && picker.mode === 'replace' ? draft.items.find((it) => it.id === picker.id) : null;
 
-  const footer = html`<${Button} variant="ghost" onClick=${onClose}>Cancel<//>
+  const requestClose = async () => {
+    if (saving) return;
+    if (JSON.stringify(draft) !== JSON.stringify(initial)) {
+      const discard = await confirm({
+        title: 'Discard your changes?',
+        body: isNew ? 'This queue has not been created yet.' : 'Your changes to this queue will be lost.',
+        confirmLabel: 'Discard',
+        danger: true,
+      });
+      if (!discard) return;
+    }
+    onClose();
+  };
+
+  const footer = html`<${Button} variant="ghost" onClick=${requestClose}>Cancel<//>
     <${Button} variant="primary" loading=${saving} onClick=${submit} disabled=${tried && blocking}>${isNew ? 'Create queue' : 'Save queue'}<//>`;
 
-  return html`<${Modal} open wide title=${isNew ? 'New queue' : `Edit "${editing.draft.name}"`} onClose=${onClose} footer=${footer} closeOnBackdrop=${false} class="qu-modal">
+  return html`<${Modal} open wide title=${isNew ? 'New queue' : `Edit "${editing.draft.name}"`} onClose=${requestClose} footer=${footer} closeOnBackdrop=${false} class="qu-modal">
     <p class="qu-explain muted">The worker creates a post for each upcoming slot, cycling through the items below.</p>
     <div class="qu-editor">
       <div class="qu-settings stack">

@@ -327,7 +327,7 @@ function CompetitorDrawer({ row, doc, onClose, onRemove, fbMode }) {
     footer=${html`<${Button} variant="danger" icon="trash" onClick=${() => onRemove(u)}>Remove<//>
       <span class="spacer"></span>
       <${Button} href=${profileUrl} target="_blank" rel="noopener noreferrer" icon="external">Open on Instagram<//>`}>
-    <div class="stack-lg cmp-drawer">
+    <div class="stack stack-lg cmp-drawer">
       <div class="row row-nowrap cmp-profile">
         <${Avatar} src=${row.avatar} name=${row.name || u} size=${56} />
         <div class="min-w-0">
@@ -359,7 +359,7 @@ function CompetitorDrawer({ row, doc, onClose, onRemove, fbMode }) {
             </dl>`}
 
       ${keys.length > 1
-        ? html`<section class="stack-sm">
+        ? html`<section class="stack stack-sm">
             <h3 class="section-title">Followers</h3>
             <${LineChart} series=${[{ name: `@${u}`, values: keys.map((k) => snaps[k].followers) }]} xLabels=${keys.map(keyLabel)}
               height=${160} area=${false} label=${`Followers of @${u}`} />
@@ -367,15 +367,16 @@ function CompetitorDrawer({ row, doc, onClose, onRemove, fbMode }) {
         : null}
 
       ${best.length
-        ? html`<section class="stack-sm">
+        ? html`<section class="stack stack-sm">
             <h3 class="section-title">Best recent posts</h3>
             <ul class="list">
               ${best.map(
                 (p) => html`<li class="list-row cmp-best" key=${p.id}>
                   <span class="cmp-best-thumb">${p.mediaType === 'VIDEO' || p.productType === 'REELS'
-                    ? html`<video src=${`${p.mediaUrl}#t=0.1`} muted playsinline preload="metadata" aria-hidden="true"></video>`
+                    ? html`${p.mediaUrl ? html`<video src=${`${p.mediaUrl}#t=0.1`} muted playsinline preload="metadata" aria-hidden="true"></video>` : null}
+                        <span class="cmp-play" aria-hidden="true"><${Icon} name="reel" size=${13} /></span>`
                     : p.mediaUrl ? html`<img src=${p.mediaUrl} alt="" loading="lazy" />` : null}</span>
-                  <span class="grow stack-sm cmp-best-text">
+                  <span class="grow stack stack-sm cmp-best-text">
                     <span class="clamp-2 text-sm">${p.caption || 'No caption'}</span>
                     <span class="row text-xs muted num">
                       <span class="cmp-inline"><${Icon} name="heart" size=${13} />${formatNumber(p.likeCount)}</span>
@@ -392,7 +393,7 @@ function CompetitorDrawer({ row, doc, onClose, onRemove, fbMode }) {
         : null}
 
       ${posts.length
-        ? html`<section class="stack-sm">
+        ? html`<section class="stack stack-sm">
             <h3 class="section-title">Recent posts</h3>
             <div class="contact-sheet cmp-sheet">${posts.map((p, i) => html`<${MediaTile} key=${p.id} post=${p} index=${i} followers=${row.followers} />`)}</div>
           </section>`
@@ -517,7 +518,7 @@ export default function Competitors() {
 
   const erBars = rows
     .filter((r) => r.er != null)
-    .map((r) => ({ label: r.own ? `@${r.username} (you)` : `@${r.username}`, value: r.er, color: r.own ? 'var(--series-1)' : 'var(--series-muted)' }));
+    .map((r) => ({ label: r.own ? 'You' : `@${r.username}`, value: r.er, color: r.own ? 'var(--series-1)' : 'var(--series-muted)' }));
 
   const lastUpdated = competitorRows.map((r) => r.updatedAt).filter(Boolean).sort().pop() || null;
   const openRow = openUser ? competitorRows.find((r) => r.username === openUser) : null;

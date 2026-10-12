@@ -288,7 +288,9 @@ function TestPanel({ rule, blockedWords, posts }) {
   return html`<section class="rule-test" aria-labelledby="rule-test-title">
     <div class="row row-between">
       <h3 class="rule-test-title" id="rule-test-title">Test this rule</h3>
-      ${result && result.actions.some((a) => a.text) ? html`<${Button} size="sm" variant="ghost" icon="refresh" onClick=${() => setSeed((s) => s + 1)}>Try another version<//>` : null}
+      ${result && result.matched && (rule.actions || []).some((a) => (a.texts || []).filter((t) => String(t || '').trim()).length > 1)
+        ? html`<${Button} size="sm" variant="ghost" icon="refresh" onClick=${() => setSeed((s) => s + 1)}>Try another version<//>`
+        : null}
     </div>
     <div class="rule-test-inputs">
       <${Field} label=${source === 'dm' ? 'Sample message' : 'Sample comment'} class="grow">

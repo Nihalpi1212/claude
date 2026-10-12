@@ -36,6 +36,7 @@ import {
   Tabs,
   TextArea,
   TextInput,
+  usePhone,
 } from '../ui/kit.js';
 import { LIMITS, hashtagsIn, uid } from '../../core/model.js';
 import { formatNumber, formatPercent, hashtagPerformance, parseTimestamp } from '../../core/analytics.js';
@@ -49,6 +50,8 @@ const SEARCH_BUDGET = 30; // unique hashtags per rolling 7 days (Instagram Hasht
 const RECOMMENDED = LIMITS.hashtagsRecommended; // 5
 const MAX_TAGS = LIMITS.hashtags; // 30
 const REPLY_MAX = 1000; // Instagram direct messages are limited to 1,000 characters
+const MEDIA_PREVIEW = 18;
+const LOOKUPS_PREVIEW = 8;
 
 const TAB_IDS = ['sets', 'templates', 'replies', 'research', 'performance'];
 
@@ -267,13 +270,18 @@ function SetsTab({ sets, onEdit, onDelete, onCopy, onNew }) {
     <div class="grid-auto ht-cards" style="--min: 300px">
       ${sets.map(
         (s) => html`<${Panel} key=${s.id} class="ht-card" title=${s.name || 'Untitled set'}
-          actions=${html`<${HashtagCount} count=${s.tags.length} />
-            <${Button} size="sm" icon="copy" onClick=${() => onCopy(s.tags.join(' '), plural(s.tags.length, 'hashtag'))} aria-label=${`Copy ${s.name} hashtags`}>Copy<//>
+          actions=${html`<${Button} size="sm" icon="copy" onClick=${() => onCopy(s.tags.join(' '), plural(s.tags.length, 'hashtag'))} aria-label=${`Copy ${s.name} hashtags`}>Copy<//>
             <${Menu} size="sm" label=${`More actions for ${s.name}`} items=${[
               { label: 'Edit', icon: 'edit', onClick: () => onEdit(s) },
               { label: 'Delete', icon: 'trash', danger: true, onClick: () => onDelete(s) },
             ]} />`}>
-          ${s.tags.length ? html`<${TagChips} tags=${s.tags} />` : html`<p class="muted text-sm">No hashtags in this set.</p>`}
+          <div class="stack stack-sm">
+            ${s.tags.length ? html`<${TagChips} tags=${s.tags} />` : html`<p class="muted text-sm">No hashtags in this set.</p>`}
+            <div class="row ht-meta text-xs muted">
+              <${HashtagCount} count=${s.tags.length} />
+              <span>${s.tags.length > RECOMMENDED ? `Only the first ${RECOMMENDED} are likely to count` : plural(s.tags.length, 'hashtag')}</span>
+            </div>
+          </div>
         <//>`,
       )}
     </div>
@@ -299,7 +307,7 @@ function TextItemsTab({ kind, items, onEdit, onDelete, onCopy, onNew }) {
             { label: 'Edit', icon: 'edit', onClick: () => onEdit(it) },
             { label: 'Delete', icon: 'trash', danger: true, onClick: () => onDelete(it) },
           ]} />`}>
-        <div class="stack-sm">
+        <div class="stack stack-sm">
           <p class="pre-wrap clamp-3 ht-text">${it.text}</p>
           <div class="row ht-meta text-xs muted">
             <span class="num">${formatNumber((it.text || '').length)} characters</span>
@@ -321,6 +329,8 @@ function ResearchTab({ doc, sets, onAdd, onNewSet }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [picked, setPicked] = useState([]);
+  const [showAllMedia, setShowAllMedia] = useState(false);
+  const [showAllLookups, setShowAllLookups] = useState(false);
 
   const nowMs = Date.now();
   const active = activeLookups(doc.tracked, nowMs);
@@ -379,7 +389,8 @@ function ResearchTab({ doc, sets, onAdd, onNewSet }) {
       const media = await ig.hashtagMedia(id, edgeArg, { limit: 30 });
       setResult({ tag, id, edge: edgeArg, media });
       setEdge(edgeArg);
-      setPicked([]);
+      setPicked((p) => (result && result.tag === tag ? p : []));
+      setShowAllMedia(false);
     } catch (err) {
       setError(errText(err));
     } finally {
@@ -410,11 +421,10 @@ function ResearchTab({ doc, sets, onAdd, onNewSet }) {
               label=${picked.length ? `Add ${picked.length + 1} to set` : 'Add to set'} />`}>
             <div class="stack">
               ${summary
-                ? html`<p class="text-sm muted">These posts average <span class="num strong ht-ink">${formatNumber(Math.round(summary.likes))}</span> likes and
-                    <span class="num strong ht-ink">${formatNumber(Math.round(summary.comments))}</span> comments.</p>`
+                ? html`<p class="text-sm muted">These posts average <span class="num strong ht-ink">${formatNumber(Math.round(summary.likes))}</span> likes and${' '}<span class="num strong ht-ink">${formatNumber(Math.round(summary.comments))}</span> comments.</p>`
                 : null}
               ${related.length
-                ? html`<div class="stack-sm">
+                ? html`<div class="stack stack-sm">
                     <p class="label-caps">Used together with #${result.tag}</p>
                     <div class="ht-chips">
                       ${related.map(
@@ -426,7 +436,10 @@ function ResearchTab({ doc, sets, onAdd, onNewSet }) {
                   </div>`
                 : null}
               ${result.media.length
-                ? html`<div class="contact-sheet ht-sheet">${result.media.map((m, i) => html`<${MediaTile} key=${m.id} media=${m} index=${i} />`)}</div>`
+                ? html`<div class="contact-sheet ht-sheet">${(showAllMedia ? result.media : result.media.slice(0, MEDIA_PREVIEW)).map((m, i) => html`<${MediaTile} key=${m.id} media=${m} index=${i} />`)}</div>
+                    ${!showAllMedia && result.media.length > MEDIA_PREVIEW
+                      ? html`<div class="row row-end"><${Button} variant="ghost" size="sm" iconRight="chevron-down" onClick=${() => setShowAllMedia(true)}>Show all ${result.media.length} posts<//></div>`
+                      : null}`
                 : html`<${EmptyState} compact icon="image" title="No posts found" body=${result.edge === 'recent' ? 'Nobody used this hashtag in the last 24 hours.' : 'Instagram returned no top posts for this hashtag.'} />`}
             </div>
           <//>`
@@ -437,7 +450,7 @@ function ResearchTab({ doc, sets, onAdd, onNewSet }) {
     <${Panel} title="Lookups this week" class="ht-budget"
       subtitle=${`Instagram allows ${SEARCH_BUDGET} different hashtags per 7 days. Looking one up again is free.`}>
       <div class="stack">
-        <div class="stack-sm">
+        <div class="stack stack-sm">
           <div class="row row-between">
             <span><span class="num strong ht-big">${used}</span><span class="muted"> of ${SEARCH_BUDGET} used</span></span>
             <span class=${`text-sm ${left ? 'muted' : 'text-bad'}`}>${left} left</span>
@@ -447,7 +460,7 @@ function ResearchTab({ doc, sets, onAdd, onNewSet }) {
         </div>
         ${active.length
           ? html`<ul class="list ht-tracked">
-              ${[...active].reverse().map(
+              ${[...active].reverse().slice(0, showAllLookups ? undefined : LOOKUPS_PREVIEW).map(
                 (t) => html`<li key=${t.tag} class="list-row">
                   <span class="grow">
                     <span class="mono ht-tracked-tag">#${t.tag}</span>
@@ -456,7 +469,12 @@ function ResearchTab({ doc, sets, onAdd, onNewSet }) {
                   <${Button} size="sm" variant="ghost" disabled=${busy} onClick=${() => search(t.tag, edge)} aria-label=${`Show posts for #${t.tag}`}>Show posts<//>
                 </li>`,
               )}
-            </ul>`
+            </ul>
+            ${active.length > LOOKUPS_PREVIEW
+              ? html`<${Button} variant="ghost" size="sm" iconRight=${showAllLookups ? 'chevron-up' : 'chevron-down'} onClick=${() => setShowAllLookups((v) => !v)}>
+                  ${showAllLookups ? 'Show fewer' : `Show all ${active.length}`}
+                <//>`
+              : null}`
           : html`<p class="text-sm muted">No lookups in the last 7 days.</p>`}
       </div>
     <//>
@@ -465,6 +483,7 @@ function ResearchTab({ doc, sets, onAdd, onNewSet }) {
 
 function PerformanceTab({ sets, onAdd, onNewSet }) {
   const { data: media, loading, error } = useDoc('analytics-media');
+  const phone = usePhone();
   const [minPosts, setMinPosts] = useState(2);
   const rows = useMemo(() => hashtagPerformance((media && media.media) || {}, { minPosts }), [media, minPosts]);
   const inSets = useMemo(() => new Set(sets.flatMap((s) => s.tags)), [sets]);
@@ -496,10 +515,23 @@ function PerformanceTab({ sets, onAdd, onNewSet }) {
     ${rows.length
       ? html`<div class="ht-perf">
           <${Panel} title="Best hashtags by engagement" subtitle="Average engagement (interactions ÷ reach) of your posts that used each hashtag">
-            <${BarChart} data=${bars} horizontal format="percent" highlightMax label="Average engagement by hashtag" />
+            <${BarChart} data=${bars} horizontal format="percent" label="Average engagement by hashtag" />
           <//>
           <${Panel} title="All hashtags" flush subtitle=${`From ${plural(postsWithData, 'post')} with statistics. Hashtags only count once per post.`}>
-            <${DataTable} columns=${columns} rows=${rows} rowKey=${(r) => r.tag} initialSort=${{ key: 'avgER', dir: 'desc' }} maxHeight=${520} caption="Hashtag performance" />
+            ${phone
+              ? html`<ul class="list ht-perf-list" aria-label="Hashtag performance">
+                  ${rows.map(
+                    (r) => html`<li key=${r.tag} class="list-row">
+                      <span class="grow">
+                        <span class="row row-nowrap ht-tag-cell"><span class="mono truncate">${r.tag}</span>${inSets.has(r.tag) ? html`<${Badge} tone="outline">In a set<//>` : null}</span>
+                        <span class="text-xs muted num">${plural(r.posts, 'post')} · ${formatNumber(r.avgReach == null ? null : Math.round(r.avgReach))} avg reach</span>
+                      </span>
+                      <span class="num strong">${formatPercent(r.avgER, 1)}</span>
+                      <${AddToSetMenu} tags=${[r.tag]} sets=${sets} onAdd=${onAdd} onNewSet=${onNewSet} label="Add" />
+                    </li>`,
+                  )}
+                </ul>`
+              : html`<${DataTable} columns=${columns} rows=${rows} rowKey=${(r) => r.tag} initialSort=${{ key: 'avgER', dir: 'desc' }} maxHeight=${520} caption="Hashtag performance" />`}
           <//>
         </div>`
       : html`<${EmptyState} icon="hash" title=${`No hashtag on ${minPosts} or more posts`} body="Pick a lower minimum, or use the same hashtags on a few more posts to compare them." />`}

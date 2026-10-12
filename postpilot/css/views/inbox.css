@@ -73,11 +73,12 @@ a.ibx-post-thumb:hover { box-shadow: 0 0 0 1px var(--ink-3); }
 }
 .ibx-post-actions { flex: none; display: flex; align-items: center; gap: 4px; }
 .ibx-group-error { padding: 8px 14px 0; }
+.ibx-more { padding: 6px 14px 10px 56px; border-top: 1px solid var(--line); }
 .ibx-skel { padding: 14px; }
 @media (max-width: 759px) {
   .ibx-post { flex-wrap: wrap; padding: 10px 12px; }
   .ibx-post-info { flex-basis: calc(100% - 64px); }
-  .ibx-post-actions { flex-basis: 100%; justify-content: flex-start; margin-left: 52px; padding-left: var(--sp-3); }
+  .ibx-post-actions { flex: 1 1 100%; min-width: 0; flex-wrap: wrap; justify-content: flex-start; padding-left: 56px; margin-left: -8px; }
 }
 
 /* Comments */
@@ -104,6 +105,7 @@ a.ibx-post-thumb:hover { box-shadow: 0 0 0 1px var(--ink-3); }
 }
 .ibx-c-user { font-weight: 600; color: var(--ink); overflow-wrap: anywhere; }
 .ibx-c-likes { display: inline-flex; align-items: center; gap: 3px; }
+.ibx-c-menu { margin: -4px 0 -4px auto; }
 .ibx-c-text {
   margin-top: 3px;
   font-size: var(--fs-md);
@@ -265,14 +267,16 @@ a.ibx-post-thumb:hover { box-shadow: 0 0 0 1px var(--ink-3); }
 .ibx-window {
   display: flex;
   align-items: flex-start;
-  gap: 5px;
-  margin-top: 2px;
+  gap: 6px;
+  padding: 7px 14px;
+  border-bottom: 1px solid var(--line);
   font-size: var(--fs-sm);
-  line-height: 1.35;
+  line-height: 1.4;
 }
 .ibx-window .icon { flex: none; margin-top: 2px; }
-.ibx-window.is-open { color: var(--ok-ink); }
-.ibx-window.is-closed { color: var(--warn-ink); }
+.ibx-window.is-open { color: var(--ok-ink); background: var(--ok-soft); }
+.ibx-window.is-closed { color: var(--warn-ink); background: var(--warn-soft); }
+.ibx-window .faint { color: inherit; opacity: 0.8; }
 .ibx-thread-body {
   flex: 1 1 auto;
   min-height: 0;
@@ -341,3 +345,8 @@ a.ibx-post-thumb:hover { box-shadow: 0 0 0 1px var(--ink-3); }
 .ibx-tag { display: flex; flex-direction: column; gap: 4px; color: inherit; text-decoration: none; min-width: 0; }
 .ibx-tag:hover .frame { box-shadow: 0 0 0 1px var(--ink-3); }
 .ibx-mentions .list-row { align-items: flex-start; }
+
+@media (max-width: 759px) {
+  .inbox .tabs .tab > .icon { display: none; }
+  .ibx-more { padding-left: 12px; }
+}

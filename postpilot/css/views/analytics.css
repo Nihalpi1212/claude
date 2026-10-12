@@ -76,6 +76,8 @@
 .an-ink { color: var(--ink); font-weight: 600; }
 
 .an-subchart { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+/* Context chart: the axis carries the values; the end label would collide with a falling line. */
+.an-subchart .chart-value { display: none; }
 .an-subchart-title {
   margin: 0 0 6px;
   color: var(--ink-2);
@@ -110,6 +112,11 @@
 .an-mini-table td:last-child { padding-right: 0; }
 .an-mini-table tbody tr:hover td { background: none; }
 .an-key { margin-right: 8px; vertical-align: 0; }
+/* In narrow panels (the printed report, small tablets) the type table drops its reach column. */
+.an-freq { container-type: inline-size; }
+@container (max-width: 330px) {
+  .an-col-reach { display: none; }
+}
 
 /* Thumbnails: quiet placeholder tile behind every image (Instagram URLs expire). */
 .an-thumb {

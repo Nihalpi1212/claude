@@ -75,6 +75,7 @@
 .bio-theme-ink .bio-avatar-initials { color: var(--bio-ink); }
 .bio-title {
   margin: 8px 0 0;
+  color: var(--bio-ink);
   font-family: var(--bio-display);
   font-stretch: 112%;
   font-size: 26px;
@@ -116,7 +117,7 @@
   overflow-wrap: anywhere;
   transition: border-color 0.15s, transform 0.15s;
 }
-.bio-link:hover { border-color: var(--bio-accent); }
+.bio-link:hover { border-color: var(--bio-accent); color: var(--bio-ink); }
 .bio-theme-ink .bio-link:hover { border-color: var(--bio-ink-2); }
 .bio-link:active { transform: translateY(1px); }
 .bio-link:focus-visible,
@@ -126,11 +127,13 @@
 }
 .bio-theme-ink .bio-link:focus-visible,
 .bio-theme-ink .bio-tile:focus-visible { outline-color: var(--bio-ink); }
-.bio-link.is-highlight {
+.bio-link.is-highlight,
+.bio-link.is-highlight:hover {
   border-color: var(--bio-accent);
   background: var(--bio-accent);
   color: var(--bio-accent-ink);
 }
+.bio-link.is-highlight:hover { filter: brightness(1.06); }
 
 .bio-section {
   margin: 0 0 10px;

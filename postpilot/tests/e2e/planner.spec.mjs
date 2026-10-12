@@ -66,6 +66,43 @@ test('month view shows seeded posts, published Instagram media and today', async
   assert.match(await page.locator('.page-subtitle').innerText(), /scheduled in the next 7 days/);
 });
 
+async function closeComposer(page) {
+  const drawer = page.locator('.cmp-drawer');
+  await drawer.getByRole('button', { name: 'Close' }).first().click();
+  const discard = page.getByRole('dialog', { name: 'Discard your changes?' });
+  await Promise.race([drawer.waitFor({ state: 'detached' }), discard.waitFor().then(() => discard.getByRole('button', { name: 'Discard' }).click())]);
+  await drawer.waitFor({ state: 'detached' });
+}
+
+test('clicking an empty day opens the composer on that day; a chip opens its post', async () => {
+  const { page } = h;
+  const freeDay = () =>
+    page.evaluate(() => {
+      const free = [...document.querySelectorAll('.pl-day:not(.is-past):not(.is-other)')].filter((c) => !c.querySelector('.pl-chip')).map((c) => c.dataset.day);
+      return free[free.length - 1] || null;
+    });
+  let day = await freeDay();
+  if (!day) {
+    await page.getByRole('button', { name: 'Next month' }).click();
+    day = await freeDay();
+  }
+  assert.ok(day, 'a free future day');
+  await page.locator(`.pl-day[data-day="${day}"]`).click({ position: { x: 70, y: 70 } });
+  const drawer = page.locator('.cmp-drawer');
+  await drawer.waitFor();
+  await waitFor(async () => (await drawer.locator('input[type="date"]').count()) > 0, { message: 'composer date field' });
+  assert.equal(await drawer.locator('input[type="date"]').first().inputValue(), day);
+  await closeComposer(page);
+
+  const posts = await storedPosts();
+  const post = posts.find((p) => p.caption.startsWith('Swipe through'));
+  await showDay(dayKey(new Date(post.scheduledAt), TZ));
+  await page.locator(`.pl-month .pl-chip[data-post-id="${post.id}"]`).click();
+  await drawer.waitFor();
+  await waitFor(() => drawer.locator('textarea').evaluateAll((els) => els.some((e) => e.value.startsWith('Swipe through'))), { message: 'composer shows the post caption' });
+  await closeComposer(page);
+});
+
 test('drag a scheduled chip to another day keeps the time and persists', async () => {
   const { page } = h;
   const before = await storedPosts();
@@ -164,6 +201,30 @@ test('list view groups posts and bulk-moves selected posts to drafts', async () 
   assert.equal(stored.length, 2);
   for (const id of ids) await page.locator(`[data-section="drafts"] .pl-row[data-post-id="${id}"]`).waitFor();
   assert.equal(await page.getByRole('region', { name: 'Bulk actions' }).count(), 0, 'selection cleared');
+
+  // Shift one scheduled post by 2 days (same time of day).
+  const row = page.locator('[data-section="scheduled"] .pl-row').first();
+  const shiftId = await row.getAttribute('data-post-id');
+  const original = (await storedPosts()).find((p) => p.id === shiftId);
+  await row.locator('.checkbox').click();
+  await bar.getByLabel('Shift by').fill('2');
+  await bar.getByRole('button', { name: 'Shift', exact: true }).click();
+  await page.getByText(/Moved 1 post 2 days later/).waitFor();
+  const shifted = await waitFor(async () => {
+    const p = (await storedPosts()).find((x) => x.id === shiftId);
+    return p.scheduledAt !== original.scheduledAt ? p : null;
+  }, { message: 'shifted post' });
+  assert.equal(dayKey(new Date(shifted.scheduledAt), TZ), addDaysKey(dayKey(new Date(original.scheduledAt), TZ), 2));
+  assert.equal(timeKey(new Date(shifted.scheduledAt), TZ), timeKey(new Date(original.scheduledAt), TZ));
+
+  // Delete the undated draft after confirming.
+  const draftRow = page.locator('[data-section="drafts"] .pl-row', { hasText: 'Workshop announcement' });
+  const draftId = await draftRow.getAttribute('data-post-id');
+  await draftRow.locator('.checkbox').click();
+  await bar.getByRole('button', { name: 'Delete' }).click();
+  await page.getByRole('dialog', { name: 'Delete this post?' }).getByRole('button', { name: 'Delete post' }).click();
+  await page.getByText('Deleted 1 post.').waitFor();
+  await waitFor(async () => !(await storedPosts()).some((p) => p.id === draftId), { message: 'draft deleted' });
 });
 
 test('filters narrow the list and are kept in the URL', async () => {
@@ -271,7 +332,10 @@ test('screenshots: desktop and phone, light and dark', async () => {
       for (const view of ['month', 'week', 'list', 'grid']) {
         await page.evaluate((v) => (location.hash = v === 'month' ? '#/planner' : `#/planner?view=${v}`), view);
         await page.waitForSelector(view === 'month' ? '.pl-month' : view === 'week' ? '.pl-week' : view === 'list' ? '.pl-list' : '.pl-gridview');
-        await page.waitForTimeout(700);
+        await page.waitForTimeout(500);
+        await page
+          .waitForFunction(() => !document.querySelector('.pl-thumb:empty') && [...document.images].every((i) => i.complete), null, { timeout: 8000 })
+          .catch(() => {});
         const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
         assert.ok(overflow <= 0, `no horizontal page scroll in ${view} at ${w}px (${overflow}px)`);
         await shot(page, `planner-${view}-${w}-${scheme}`);

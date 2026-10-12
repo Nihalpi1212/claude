@@ -10,11 +10,19 @@ const CONTAINER_HINTS = {
   2207005: 'Instagram only accepts JPEG photos. Re-upload the photo and try again.',
   2207009: 'The photo aspect ratio is not allowed. Crop it to between 4:5 and 1.91:1.',
   2207026: 'Instagram does not support this video format. Export it as MP4 (H.264 video, AAC audio).',
-  2207052: 'Instagram could not download the file. Re-upload it (JPEG for photos, MP4 for videos) and try again.',
+  2207001: 'Instagram had a server error or flagged the content. Postpilot will try again; if it keeps failing, change the media.',
+  2207003: 'Instagram timed out downloading the file. Postpilot will try again.',
+  2207032: 'Instagram could not create the post. Postpilot will try again.',
+  2207052: 'Instagram could not download the file. Postpilot will try again; if it keeps failing, re-upload it (JPEG for photos, MP4 for videos).',
   2207053: 'Instagram could not process the video. Keep it under 300 MB, at most 1920 px wide and under 25 Mbps.',
   2207082: 'Instagram could not process the video. Re-export it as MP4 (H.264, AAC) and try again.',
   2207085: 'Instagram could not process the video. Re-export it as MP4 (H.264, AAC) and try again.',
 };
+
+// Publishing errors that a later run can fix (server errors, download timeouts, expired or lost
+// containers). The retry is bounded by the worker's attempt limit, and a resumed run recreates
+// containers in ERROR/EXPIRED/MISSING and checks for PUBLISHED before publishing again.
+const RETRY_SUBCODES = new Set([2207001, 2207003, 2207006, 2207008, 2207020, 2207032, 2207052]);
 
 class ExpiredSignal extends Error {
   constructor(id) {
@@ -32,7 +40,7 @@ function containerError(status) {
   return new IgError(`Instagram could not process the media: ${text}`, {
     code: code ? Number(code[1]) : 'container_error',
     subcode,
-    permanent: true,
+    permanent: !RETRY_SUBCODES.has(subcode),
     userMessage: `Instagram could not process the media. ${hint}`,
   });
 }
@@ -157,6 +165,21 @@ export async function publishPost({
   const tags = (post.userTags || []).filter((t) => t && stripAt(t.username));
   const tagsWithXY = (index) =>
     tags.filter((t) => (t.mediaIndex ?? 0) === index).map((t) => ({ username: stripAt(t.username), x: clamp01(t.x), y: clamp01(t.y) }));
+  // Everything that goes into the containers, saved with them so a later run notices edits.
+  const fp = JSON.stringify({
+    type,
+    caption: caption || '',
+    media: refs.map((r) => [r.assetId, r.altText || '']),
+    altText: post.altText || '',
+    cover: post.coverAssetId || null,
+    thumb: post.thumbOffsetMs ?? null,
+    collaborators,
+    tags: tags.map((t) => [stripAt(t.username), t.x ?? null, t.y ?? null, t.mediaIndex ?? 0]),
+    locationId: locationId || null,
+    shareToFeed: post.shareToFeed !== false,
+    trialReel: post.trialReel || null,
+    aiGenerated: !!aiGenerated,
+  });
 
   async function createVideo(params, asset) {
     if (tryResumable && readMedia && typeof ig.uploadResumable === 'function') {
@@ -211,7 +234,7 @@ export async function publishPost({
 
   /** Create every container for the post (children first for carousels). */
   async function createAll() {
-    containers = { parent: null, children: [], type, createdAt: new Date().toISOString() };
+    containers = { parent: null, children: [], type, fp, createdAt: new Date().toISOString() };
     if (type === 'carousel') {
       for (let i = 0; i < refs.length; i++) {
         const ref = refs[i];
@@ -293,7 +316,16 @@ export async function publishPost({
     }
     const recent = await ig.listMedia({ limit: 10, max: 10 });
     const prefix = normText(post.caption).slice(0, 60);
-    const found = recent.find((m) => (!prefix || normText(m.caption).startsWith(prefix)) && (!m.timestamp || Date.parse(m.timestamp) >= since));
+    const inWindow = (m) => !m.timestamp || Date.parse(m.timestamp) >= since;
+    let found;
+    if (prefix) {
+      found = recent.find((m) => normText(m.caption).startsWith(prefix) && inWindow(m));
+    } else {
+      // No caption to match: accept only a single captionless post of the same kind, never a guess.
+      const want = type === 'carousel' ? 'CAROUSEL_ALBUM' : type === 'reel' || getAsset(refs[0].assetId).kind === 'video' ? 'VIDEO' : 'IMAGE';
+      const cands = recent.filter((m) => !normText(m.caption) && (!m.mediaType || m.mediaType === want) && inWindow(m));
+      found = cands.length === 1 ? cands[0] : null;
+    }
     return found ? { id: found.id, permalink: found.permalink || null } : null;
   }
 
@@ -309,7 +341,9 @@ export async function publishPost({
       const res = await ig.post(`/${mediaId}/comments`, { message: text });
       return res.id || null;
     } catch (err) {
-      warnings.push(`The post is live, but the first comment could not be added: ${describeIgError(err)}`);
+      // Never resend: a comment whose response was lost may already be on the post.
+      if (err && err.maybeSent) warnings.push('The post is live, but Instagram did not confirm the first comment. Check the post and add it by hand if it is missing.');
+      else warnings.push(`The post is live, but the first comment could not be added: ${describeIgError(err)}`);
       return null;
     }
   }
@@ -330,7 +364,14 @@ export async function publishPost({
   }
 
   async function finishFromPublished(startedAt) {
-    const found = await locatePublished(startedAt);
+    // The container status already proves the post is live, so a failed lookup is only a warning.
+    let found = null;
+    try {
+      found = await locatePublished(startedAt);
+    } catch (err) {
+      if (err instanceof IgError && err.isAuth) throw err; // the worker keeps the containers and resumes after reconnecting
+      log(`Could not look up the published post: ${describeIgError(err)}`);
+    }
     if (!found) {
       warnings.push('Instagram reports this post as published, but Postpilot could not find it among your recent posts.');
       return { igMediaId: null, permalink: null, containers: snapshot(), firstCommentId: null, warnings, exposed };
@@ -342,15 +383,15 @@ export async function publishPost({
   // ----- resume from an earlier run ---------------------------------------------------------
   const prev = post.containers;
   if (prev && (prev.parent || (Array.isArray(prev.children) && prev.children.length))) {
-    containers = { parent: prev.parent || null, children: [...(prev.children || [])], type, createdAt: prev.createdAt || null };
+    // Containers saved before fingerprints existed are treated as matching.
+    containers = { parent: prev.parent || null, children: [...(prev.children || [])], type, fp: prev.fp || fp, createdAt: prev.createdAt || null };
     if (prev.parent) {
       const { statusCode } = await statusOf(prev.parent);
+      // Checked before the edit check below, so an already-published container is never published twice.
       if (statusCode === 'PUBLISHED') return finishFromPublished(prev.createdAt);
       if (statusCode !== 'FINISHED' && statusCode !== 'IN_PROGRESS') {
         log(`The earlier upload is no longer usable (${statusCode}); starting over.`);
         containers = null;
-      } else {
-        log('Resuming the earlier upload.');
       }
     } else {
       const states = await Promise.all(containers.children.map((id) => statusOf(id)));
@@ -358,6 +399,12 @@ export async function publishPost({
         log('An earlier carousel item is no longer usable; starting over.');
         containers = null;
       }
+    }
+    if (containers && prev.fp && prev.fp !== fp) {
+      log('The post was edited since the earlier upload; uploading again.');
+      containers = null;
+    } else if (containers && prev.parent) {
+      log('Resuming the earlier upload.');
     }
   }
 
@@ -403,8 +450,9 @@ export async function publishPost({
         await nap();
         continue;
       }
-      if (err instanceof IgError && (err.code === 'network' || err.status >= 500)) {
-        // The outcome is unknown: check whether Instagram published it anyway.
+      if (err instanceof IgError && !err.isAuth) {
+        // The outcome may be unknown (lost response), or a retry hit an already-published
+        // container (100/2207006): check whether Instagram published it anyway.
         const s = await statusOf(containers.parent).catch(() => null);
         if (s && s.statusCode === 'PUBLISHED') return finishFromPublished(containers.createdAt);
       }
@@ -426,7 +474,7 @@ export function classifyError(err) {
   }
   if (err instanceof IgError || err.name === 'IgError') {
     return {
-      permanent: !!err.isPermanent,
+      permanent: !!err.isPermanent && !RETRY_SUBCODES.has(err.subcode),
       userMessage: err.userMessage || err.message,
       code: err.code ?? null,
       subcode: err.subcode ?? null,

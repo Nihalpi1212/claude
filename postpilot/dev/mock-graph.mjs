@@ -10,7 +10,8 @@
 // Tokens: anything works except 'expired-token' (190/463) and 'invalid-token' (190/467).
 // Test hooks on `state`: faults (inject errors: {method, path: string|RegExp, when(params), times,
 // error: {status, code, subcode, message} | destroy: true}), dmMode ('ok'|'advanced_access'|'disabled'),
-// publishLimit, businessAccounts, requests (log), containers, media, comments, conversations, sentMessages, ...
+// publishLimit, businessAccounts, tokenExpiry (debug_token expires_at per token), requests (log), containers,
+// media, comments, conversations, sentMessages, ...
 
 import { addDaysKey, dayKey, startOfDay, zonedParts, zonedToUtc } from '../core/time.js';
 
@@ -322,6 +323,7 @@ export function createMockGraph({
     publishLimit,
     uploads: new Map(), // containerId -> byte length
     tokens: { refreshed: [], lastRefreshedFrom: null },
+    tokenExpiry: {}, // token -> unix seconds reported by debug_token (0 = never expires)
     dmMode: 'ok',
     faults: [],
     requests: [],
@@ -1323,6 +1325,28 @@ export function createMockGraph({
     }
     if (first === 'access_token') {
       return { access_token: `IGAAmocklong${h32(String(token)).toString(36)}`, token_type: 'bearer', expires_in: 5184000 };
+    }
+    if (first === 'debug_token') {
+      // Access Token Debugger. Page tokens never expire unless a test sets state.tokenExpiry[token]
+      // (unix seconds, 0 = never); other tokens act like 60-day user tokens.
+      const input = String(p.input_token || '');
+      if (!input) throw new GraphFail(100, '(#100) The parameter input_token is required');
+      const isPage = input.startsWith('page-');
+      const exp = input in state.tokenExpiry ? Number(state.tokenExpiry[input]) || 0 : isPage ? 0 : Math.floor(nowMs() / 1000) + 60 * 86400;
+      return {
+        data: {
+          app_id: '1234567890',
+          type: isPage ? 'PAGE' : 'USER',
+          application: 'Postpilot',
+          data_access_expires_at: Math.floor(nowMs() / 1000) + 90 * 86400,
+          expires_at: exp,
+          is_valid: true,
+          issued_at: Math.floor(t0 / 1000),
+          ...(isPage ? { profile_id: state.pageId } : {}),
+          scopes: ['pages_show_list', 'pages_read_engagement', 'business_management', 'instagram_basic', 'instagram_content_publish', 'instagram_manage_comments', 'instagram_manage_insights', 'instagram_manage_messages'],
+          user_id: state.appScopedId,
+        },
+      };
     }
     if (first === 'ig_hashtag_search') {
       const q = String(p.q || '').replace(/^#/, '').toLowerCase();

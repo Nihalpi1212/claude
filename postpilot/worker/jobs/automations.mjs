@@ -8,10 +8,17 @@
 // - Rules only act on comments/messages created after automations were switched on
 //   (cursors.startedAt), so turning automations on never answers old conversations.
 // - Every handled comment/message id goes into processed.{comments,messages}; rules marked
-//   oncePerUser use processed.users (core/rules.js recordFired).
+//   oncePerUser use processed.users (core/rules.js recordFired). Progress is saved every few
+//   actions and also when the run stops on an error. A comment that already has a reply from the
+//   account, or a message older than the account's latest message in the thread, gets no further
+//   reply or DM (in case a run's record was lost).
+// - A rule's DMs go out before its public reply, and the public reply ("check your DMs") is only
+//   posted when the DM went out.
 // Limits: limits.maxActionsPerRun, limits.maxDmsPerHour, the 7-day private-reply window, the 24h DM
 // window, one automated DM per conversation per run. Permission problems (Advanced Access, message
-// access turned off) are recorded in automations.status and stop DMs for the run.
+// access turned off) are recorded in automations.status and stop DMs for the run. When Instagram
+// rate-limits or temporarily blocks the account, the run stops reading and writing and
+// cursors.pausedUntil pauses automations on later runs.
 // Also refreshes inbox.comments / inbox.conversations, the cached view the app shows when live
 // Instagram calls are not possible.
 
@@ -35,6 +42,15 @@ const DM_TYPES = new Set(['private_reply', 'send_dm']);
 // DM problems the owner has to fix; the worker re-checks them every few hours instead of every run.
 const DM_BLOCKED = new Set(['needs_advanced_access', 'dm_disabled', 'no_permission']);
 const DM_RECHECK_MS = 6 * 36e5;
+// Pause after a rate limit (at least this long, or Instagram's estimated_time_to_regain_access) and
+// after error 368 ("temporarily blocked", which lasts hours).
+const RATE_LIMIT_PAUSE_MIN = 60;
+const BLOCKED_PAUSE_MS = 6 * 36e5;
+// perform() result when the request may have reached Instagram before failing (err.maybeSent).
+const UNSURE = 'unsure';
+
+const isDmAction = (a) => a.type === 'private_reply' || a.type === 'send_dm' || (a.type === 'ai_reply' && a.channel === 'dm');
+const isCommentReply = (a) => a.type === 'reply_comment' || (a.type === 'ai_reply' && a.channel !== 'dm');
 
 function ms(iso) {
   const t = Date.parse(iso || '');
@@ -76,6 +92,9 @@ export default async function automations(ctx) {
   const prevStatus = doc.status || {};
   const dmRecheckDue = !DM_BLOCKED.has(prevStatus.dm) || !(nowMs - ms(prevStatus.checkedAt || prevStatus.at) < DM_RECHECK_MS);
   let dmBlocked = !dmRecheckDue;
+  // Instagram is rate-limiting or blocking the account: no more reads or writes this run.
+  let throttled = ms(cursors.pausedUntil) > nowMs;
+  let pausedUntilMs = 0; // new cursors.pausedUntil, when this run hit a limit
   let status = null; // new automations.status.dm info, when it changed
   let unflushed = 0;
   // Push notifications for new comments/DMs: anything newer than what the previous run saw
@@ -125,14 +144,26 @@ export default async function automations(ctx) {
     return false;
   }
 
+  /** Stop reading and writing for this run and pause later runs when Instagram limits the account. */
+  function noteRateLimit(err) {
+    if (!err || !err.isRateLimit) return false;
+    const pauseMs = err.code === 368 ? BLOCKED_PAUSE_MS : Math.max(RATE_LIMIT_PAUSE_MIN, Number(ig.usage?.regainMinutes) || 0) * 60e3;
+    if (!throttled) {
+      const minutes = Math.round(pauseMs / 60e3);
+      ctx.log('automations', 'warn', `Instagram is limiting this account, so automations pause for ${minutes >= 120 ? `${Math.round(minutes / 60)} hours` : `${minutes} minutes`}: ${describeError(err)}`, { code: err.code ?? null });
+    }
+    throttled = true;
+    pausedUntilMs = Math.max(pausedUntilMs, ctx.nowMs() + pauseMs);
+    return true;
+  }
+
   function seen(key, iso) {
     if (iso && (!delta.seen[key] || iso > delta.seen[key])) delta.seen[key] = iso;
   }
 
   async function flush(final = false) {
+    // `delta` is reset only after the commit: when it fails, the batch is kept for the next flush.
     const d = delta;
-    delta = newDelta();
-    unflushed = 0;
     const statusNow = status;
     let blockedNow = null;
     await ctx.store.transact(
@@ -157,6 +188,10 @@ export default async function automations(ctx) {
         }
         if (d.dmUpdatedTime && (!a.cursors.dmUpdatedTime || d.dmUpdatedTime > a.cursors.dmUpdatedTime)) {
           a.cursors.dmUpdatedTime = d.dmUpdatedTime;
+          changed = true;
+        }
+        if (pausedUntilMs && !(ms(a.cursors.pausedUntil) >= pausedUntilMs)) {
+          a.cursors.pausedUntil = new Date(pausedUntilMs).toISOString();
           changed = true;
         }
         for (const [k, v] of Object.entries(d.seen)) {
@@ -201,6 +236,8 @@ export default async function automations(ctx) {
       },
       { message: 'automations: record activity' },
     );
+    delta = newDelta();
+    unflushed = 0;
     if (blockedNow) ctx.notify('account', { message: blockedNow.message });
   }
 
@@ -208,12 +245,16 @@ export default async function automations(ctx) {
     if (unflushed >= FLUSH_EVERY) await flush();
   }
 
-  /** Run one action. Returns true when it was performed. */
+  /**
+   * Run one action. Returns true when it was performed, UNSURE when Instagram may have received it
+   * but did not confirm (never send it again), false when it was skipped or refused.
+   */
   async function perform(action, ev, ctxInfo) {
-    if (actionsLeft <= 0) return false;
+    if (actionsLeft <= 0 || throttled) return false;
     const base = { source: ev.source, type: action.type, ruleId: action.ruleId || null, ruleName: action.ruleName || (action.reason === 'welcome' ? 'Welcome message' : action.reason === 'blocked_word' ? 'Blocked words' : ''), username: ev.username || null, mediaId: ev.mediaId || null };
     let text = action.text || '';
     let channel = action.type === 'ai_reply' ? action.channel || (ev.source === 'comment' ? 'comment' : 'dm') : null;
+    let kind = action.type;
     try {
       if (action.type === 'ai_reply') {
         if (ctx.ai) {
@@ -235,7 +276,7 @@ export default async function automations(ctx) {
           return false;
         }
       }
-      const kind = action.type === 'ai_reply' ? (ev.source === 'comment' ? (channel === 'dm' ? 'private_reply' : 'reply_comment') : 'send_dm') : action.type;
+      kind = action.type === 'ai_reply' ? (ev.source === 'comment' ? (channel === 'dm' ? 'private_reply' : 'reply_comment') : 'send_dm') : action.type;
       if (DM_TYPES.has(kind)) {
         if (!dmAllowed()) {
           activity({ ...base, ok: false, skipped: dmBlocked ? 'dm_blocked' : 'dm_hourly_limit' });
@@ -292,6 +333,15 @@ export default async function automations(ctx) {
       activity({ ...base, type: kind, ok: true, text: clip(text, 200) });
       return true;
     } catch (err) {
+      if (err && err.maybeSent) {
+        // The connection dropped after the request may have reached Instagram: count it as sent
+        // (and never send it again) but tell the owner to check.
+        if (DM_TYPES.has(kind)) recentDms.push(ctx.nowMs());
+        unflushed++;
+        activity({ ...base, type: kind, ok: false, unsure: true, error: 'Instagram did not confirm this. It may have gone through; check Instagram.', text: clip(text, 200) });
+        ctx.log('automations', 'warn', `Could not confirm ${String(kind).replace(/_/g, ' ')}: ${describeError(err)}`, { code: err.code ?? null });
+        return UNSURE;
+      }
       const wasBlocked = DM_BLOCKED.has(prevStatus.dm);
       const dmProblem = noteDmProblem(err);
       activity({ ...base, ok: false, error: describeError(err) });
@@ -299,196 +349,250 @@ export default async function automations(ctx) {
         ctx.log('automations', dmProblem ? 'error' : 'warn', `Could not ${String(action.type).replace(/_/g, ' ')}: ${describeError(err)}`, { code: err?.code ?? null, subcode: err?.subcode ?? null });
       }
       if (err && err.isAuth) throw err;
+      noteRateLimit(err);
       if (isRetryable(err)) throw Object.assign(err, { retryLater: true });
       return false;
     }
   }
 
-  /** Evaluate and act on one event. Returns {done: boolean, acted: boolean}. */
-  async function handle(ev, ctxInfo, { isFirstContact = false } = {}) {
-    const actions = evaluate({ rules: doc.rules || [], event: ev, processed: proc, blockedWords: doc.blockedWords, welcome: doc.welcome, isFirstContact, vars: doc.vars || {} });
+  /**
+   * Evaluate and act on one event. Returns {done: boolean, acted: boolean}.
+   * `answered`: the account already replied (by hand, or in a run whose record was lost), so only
+   * moderation (hide/delete) may still happen.
+   */
+  async function handle(ev, ctxInfo, { isFirstContact = false, answered = false } = {}) {
+    if (throttled) return { done: false, acted: false };
+    let actions = evaluate({ rules: doc.rules || [], event: ev, processed: proc, blockedWords: doc.blockedWords, welcome: doc.welcome, isFirstContact, vars: doc.vars || {} });
+    if (answered) actions = actions.filter((a) => a.type === 'hide_comment' || a.type === 'delete_comment');
     if (!actions.length) return { done: true, acted: false };
     if (actionsLeft <= 0) return { done: false, acted: false };
+    // All actions belong to one rule (evaluate() returns one rule's actions). For a comment, its DMs
+    // go first and its public reply only follows when they went out, so a rule never says "I sent
+    // you the details by DM" when the DM was skipped or refused.
+    const ordered = ev.source === 'comment' ? [...actions.filter(isDmAction), ...actions.filter((a) => !isDmAction(a))] : actions;
     let acted = false;
+    let dmFailed = false; // a DM was skipped or refused
+    let dmUnsure = false; // a DM may have gone out (Instagram did not confirm)
     const fired = new Set();
-    for (const action of actions) {
+    for (const action of ordered) {
+      if ((dmFailed || dmUnsure) && isCommentReply(action)) continue;
       try {
-        if (await perform(action, ev, ctxInfo)) {
+        const done = await perform(action, ev, ctxInfo);
+        if (done) {
           acted = true;
           if (action.ruleId) fired.add(action.ruleId);
+          if (done === UNSURE && isDmAction(action)) dmUnsure = true;
+        } else if (isDmAction(action)) {
+          // Only the hourly DM limit (or a rate limit) stopped it: try this event again on a later run.
+          if (!acted && (throttled || (!dmBlocked && !dmAllowed()))) return { done: false, acted: false };
+          dmFailed = true;
         }
       } catch (err) {
         if (err && err.retryLater && !acted) return { done: false, acted: false };
         if (err && err.isAuth) throw err;
+        if (isDmAction(action)) dmFailed = true;
       }
     }
-    for (const ruleId of fired) markFired(ruleId, ev.userId);
+    // A rule whose DM did not go out is not "used up" for oncePerUser.
+    if (!dmFailed) for (const ruleId of fired) markFired(ruleId, ev.userId);
     return { done: true, acted };
   }
 
-  // ---- comments ------------------------------------------------------------------------------
   let media = [];
-  let mediaOk = true;
-  try {
-    media = await ig.listMedia({ limit: MEDIA_MAX, max: MEDIA_MAX });
-  } catch (err) {
-    if (err && err.isAuth) throw err;
-    mediaOk = false;
-    ctx.log('automations', 'warn', `Could not list recent posts: ${describeError(err)}`);
-  }
-  const recent = media.filter((m) => m && m.id && nowMs - ms(m.timestamp) <= MEDIA_WINDOW_DAYS * DAY_MS);
-  const counts = cursors.mediaComments || {};
+  let mediaOk = !throttled;
+  let recent = [];
   const fetched = new Map(); // mediaId -> comments
-  for (const m of recent) {
-    const prev = counts[m.id];
-    const unchanged = prev !== undefined && m.commentsCount != null && prev === m.commentsCount;
-    if (unchanged || (prev === undefined && m.commentsCount === 0)) {
-      if (prev === undefined) delta.mediaComments[m.id] = 0;
-      continue;
-    }
-    let comments;
-    try {
-      comments = await ig.comments(m.id, { max: COMMENTS_PER_MEDIA });
-    } catch (err) {
-      if (err && err.isAuth) throw err;
-      ctx.log('automations', 'warn', `Could not read comments: ${describeError(err)}`);
-      continue;
-    }
-    fetched.set(m.id, comments);
-    let complete = true;
-    // Oldest first so replies go out in the order people commented.
-    const flat = comments.flatMap((c) => [c, ...(c.replies || []).map((r) => ({ ...r, parentId: r.parentId || c.id }))]).sort((a, b) => (ms(a.timestamp) || 0) - (ms(b.timestamp) || 0));
-    for (const c of flat) {
-      if (isOwn(c.fromId, c.username) || !c.timestamp) continue;
-      if (ms(c.timestamp) > prevCommentSeen) newComments.push(c);
-      seen('commentsSeenAt', c.timestamp);
-    }
-    for (const c of flat) {
-      if (!c.id || proc.comments[c.id]) continue;
-      if (isOwn(c.fromId, c.username)) continue;
-      if (!enabled || !(ms(c.timestamp) >= baselineMs)) continue; // before automations were on
-      if (c.hidden) {
-        // Hidden by the owner: Instagram does not allow replies, and it needs no automation.
-        proc.comments[c.id] = nowIso;
-        delta.comments[c.id] = nowIso;
-        continue;
-      }
-      result.commentsChecked++;
-      const ev = {
-        source: 'comment',
-        id: c.id,
-        text: c.text || '',
-        mediaId: m.id,
-        userId: c.fromId || (c.username ? `u:${String(c.username).toLowerCase()}` : null),
-        username: c.username || null,
-        isOwn: false,
-        timestamp: c.timestamp,
-        parentId: c.parentId || null,
-      };
-      const r = await handle(ev, { caption: m.caption });
-      if (!r.done) {
-        complete = false;
-        if (actionsLeft <= 0) break;
-        continue;
-      }
-      proc.comments[c.id] = nowIso;
-      delta.comments[c.id] = nowIso;
-      await maybeFlush();
-    }
-    if (complete && m.commentsCount != null) delta.mediaComments[m.id] = m.commentsCount;
-  }
-
-  // ---- DMs -------------------------------------------------------------------------------------
   let convs = [];
   let convsOk = false;
-  const cachedConvs = new Map((inboxDoc.conversations || []).map((c) => [c.id, c]));
+  let ordered = [];
   const threadMessages = new Map();
-  // Message access turned off or missing permission: Instagram refuses even to list threads, so
-  // only look again every few hours (the app shows automations.status meanwhile).
-  const skipListing = dmBlocked && (prevStatus.dm === 'dm_disabled' || prevStatus.dm === 'no_permission');
   try {
-    if (!skipListing) {
-      convs = await ig.conversations({ max: 50 });
-      convsOk = true;
-      if (prevStatus.dm === 'dm_disabled' || prevStatus.dm === 'no_permission') setDmStatus('ok');
-    }
-  } catch (err) {
-    if (err && err.isAuth) throw err;
-    let news = false;
-    if (noteDmProblem(err)) news = status.dm !== prevStatus.dm;
-    else if (err && err.isPermission) {
-      dmBlocked = true;
-      news = setDmStatus('no_permission', describeError(err));
-    } else news = true; // temporary problem: worth a warning
-    if (news) ctx.log('automations', status && status.dm !== 'ok' ? 'error' : 'warn', `Could not read direct messages: ${describeError(err)}`, { code: err?.code ?? null });
-  }
-  const dmCursorMs = ms(cursors.dmUpdatedTime) || baselineMs;
-  const ordered = convs.filter((c) => c && c.id).sort((a, b) => (ms(a.updatedTime) || 0) - (ms(b.updatedTime) || 0));
-  const top = new Set(ordered.slice(-CONVERSATION_CACHE_MAX).map((c) => c.id));
-  let calls = 0;
-  let cursorBlocked = false;
-  for (const conv of ordered) {
-    const updated = ms(conv.updatedTime) || 0;
-    // updated_time has one-second precision: re-check a thread whose time equals the cursor
-    // (already handled messages are skipped through processed.messages).
-    const isNew = enabled && updated >= dmCursorMs;
-    const cached = cachedConvs.get(conv.id);
-    const cacheStale = top.has(conv.id) && (!cached || cached.updatedTime !== conv.updatedTime);
-    if (!isNew && !cacheStale) continue;
-    let msgs;
+    // ---- comments ----------------------------------------------------------------------------
     try {
-      if (calls++ && dmDelayMs > 0) await ctx.sleep(dmDelayMs); // Conversations API: 2 calls/second
-      msgs = await ig.messages(conv.id);
+      if (!throttled) media = await ig.listMedia({ limit: MEDIA_MAX, max: MEDIA_MAX });
     } catch (err) {
       if (err && err.isAuth) throw err;
-      ctx.log('automations', 'warn', `Could not read a conversation: ${describeError(err)}`);
-      cursorBlocked = true;
-      continue;
+      noteRateLimit(err);
+      mediaOk = false;
+      ctx.log('automations', 'warn', `Could not list recent posts: ${describeError(err)}`);
     }
-    threadMessages.set(conv.id, msgs);
-    for (const m of msgs) {
-      if (isOwn(m.fromId, m.fromUsername) || !m.createdTime) continue;
-      if (ms(m.createdTime) > prevDmSeen) newDms.push({ ...m, username: m.fromUsername || (conv.participants || []).find((p) => !isOwn(p.id, p.username))?.username || null });
-      seen('dmSeenAt', m.createdTime);
-    }
-    if (!isNew) continue;
-
-    const seenBefore = !!proc.conversations[conv.id];
-    const fromUs = msgs.some((m) => isOwn(m.fromId, m.fromUsername));
-    let firstContact = !seenBefore && !fromUs && msgs.length > 0 && msgs.every((m) => ms(m.createdTime) >= baselineMs);
-    let sentInThread = false;
-    let complete = true;
-    const inbound = msgs.filter((m) => m.id && !isOwn(m.fromId, m.fromUsername) && !proc.messages[m.id]).sort((a, b) => (ms(a.createdTime) || 0) - (ms(b.createdTime) || 0));
-    const participant = (conv.participants || []).find((p) => !isOwn(p.id, p.username));
-    for (const m of inbound) {
-      if (ms(m.createdTime) >= baselineMs && !sentInThread) {
-        result.messagesChecked++;
+    recent = media.filter((m) => m && m.id && nowMs - ms(m.timestamp) <= MEDIA_WINDOW_DAYS * DAY_MS);
+    const counts = cursors.mediaComments || {};
+    const ownReplyAfter = (c, t) => (c?.replies || []).some((r) => isOwn(r.fromId, r.username) && (ms(r.timestamp) || 0) > t);
+    for (const m of recent) {
+      if (throttled) break; // the comment counts of the posts left are kept, so they are read next time
+      const prev = counts[m.id];
+      const unchanged = prev !== undefined && m.commentsCount != null && prev === m.commentsCount;
+      if (unchanged || (prev === undefined && m.commentsCount === 0)) {
+        if (prev === undefined) delta.mediaComments[m.id] = 0;
+        continue;
+      }
+      let comments;
+      try {
+        comments = await ig.comments(m.id, { max: COMMENTS_PER_MEDIA });
+      } catch (err) {
+        if (err && err.isAuth) throw err;
+        noteRateLimit(err);
+        ctx.log('automations', 'warn', `Could not read comments: ${describeError(err)}`);
+        continue;
+      }
+      fetched.set(m.id, comments);
+      const byId = new Map(comments.map((c) => [c.id, c]));
+      let complete = true;
+      // Oldest first so replies go out in the order people commented.
+      const flat = comments.flatMap((c) => [c, ...(c.replies || []).map((r) => ({ ...r, parentId: r.parentId || c.id }))]).sort((a, b) => (ms(a.timestamp) || 0) - (ms(b.timestamp) || 0));
+      for (const c of flat) {
+        if (isOwn(c.fromId, c.username) || !c.timestamp) continue;
+        if (ms(c.timestamp) > prevCommentSeen) newComments.push(c);
+        seen('commentsSeenAt', c.timestamp);
+      }
+      for (const c of flat) {
+        if (!c.id || proc.comments[c.id]) continue;
+        if (isOwn(c.fromId, c.username)) continue;
+        if (!enabled || !(ms(c.timestamp) >= baselineMs)) continue; // before automations were on
+        if (c.hidden) {
+          // Hidden by the owner: Instagram does not allow replies, and it needs no automation.
+          proc.comments[c.id] = nowIso;
+          delta.comments[c.id] = nowIso;
+          continue;
+        }
+        result.commentsChecked++;
         const ev = {
-          source: m.replyTo && m.replyTo.story ? 'story_reply' : 'dm',
-          id: m.id,
-          text: m.text || '',
-          userId: m.fromId || participant?.id || null,
-          username: m.fromUsername || participant?.username || null,
+          source: 'comment',
+          id: c.id,
+          text: c.text || '',
+          mediaId: m.id,
+          userId: c.fromId || (c.username ? `u:${String(c.username).toLowerCase()}` : null),
+          username: c.username || null,
           isOwn: false,
-          timestamp: m.createdTime,
+          timestamp: c.timestamp,
+          parentId: c.parentId || null,
         };
-        const r = await handle(ev, {}, { isFirstContact: firstContact });
-        firstContact = false;
+        // Already answered by the account: a comment with a reply from us, or a reply in a thread
+        // where we replied later (also covers a run whose record of its replies was lost).
+        const answered = c.parentId ? ownReplyAfter(byId.get(c.parentId), ms(c.timestamp) || 0) : ownReplyAfter(c, -Infinity);
+        const r = await handle(ev, { caption: m.caption }, { answered });
         if (!r.done) {
           complete = false;
-          break;
+          if (throttled || actionsLeft <= 0) break;
+          continue;
         }
-        if (r.acted) sentInThread = true;
+        proc.comments[c.id] = nowIso;
+        delta.comments[c.id] = nowIso;
+        await maybeFlush();
       }
-      proc.messages[m.id] = nowIso;
-      delta.messages[m.id] = nowIso;
-      await maybeFlush();
+      if (complete && m.commentsCount != null) delta.mediaComments[m.id] = m.commentsCount;
     }
-    proc.conversations[conv.id] = nowIso;
-    delta.conversations[conv.id] = nowIso;
-    if (!complete) cursorBlocked = true;
-    if (!cursorBlocked && conv.updatedTime) delta.dmUpdatedTime = conv.updatedTime;
-    if (actionsLeft <= 0) cursorBlocked = true;
+
+    // ---- DMs -----------------------------------------------------------------------------------
+    const cachedConvs = new Map((inboxDoc.conversations || []).map((c) => [c.id, c]));
+    // Message access turned off or missing permission: Instagram refuses even to list threads, so
+    // only look again every few hours (the app shows automations.status meanwhile).
+    const skipListing = dmBlocked && (prevStatus.dm === 'dm_disabled' || prevStatus.dm === 'no_permission');
+    try {
+      if (!skipListing && !throttled) {
+        convs = await ig.conversations({ max: 50 });
+        convsOk = true;
+        if (prevStatus.dm === 'dm_disabled' || prevStatus.dm === 'no_permission') setDmStatus('ok');
+      }
+    } catch (err) {
+      if (err && err.isAuth) throw err;
+      let news = false;
+      if (noteDmProblem(err)) news = status.dm !== prevStatus.dm;
+      else if (err && err.isPermission) {
+        dmBlocked = true;
+        news = setDmStatus('no_permission', describeError(err));
+      } else news = !noteRateLimit(err); // temporary problem: worth a warning
+      if (news) ctx.log('automations', status && status.dm !== 'ok' ? 'error' : 'warn', `Could not read direct messages: ${describeError(err)}`, { code: err?.code ?? null });
+    }
+    const dmCursorMs = ms(cursors.dmUpdatedTime) || baselineMs;
+    ordered = convs.filter((c) => c && c.id).sort((a, b) => (ms(a.updatedTime) || 0) - (ms(b.updatedTime) || 0));
+    const top = new Set(ordered.slice(-CONVERSATION_CACHE_MAX).map((c) => c.id));
+    let calls = 0;
+    let cursorBlocked = false;
+    for (const conv of ordered) {
+      if (throttled) {
+        cursorBlocked = true;
+        break;
+      }
+      const updated = ms(conv.updatedTime) || 0;
+      // updated_time has one-second precision: re-check a thread whose time equals the cursor
+      // (already handled messages are skipped through processed.messages).
+      const isNew = enabled && updated >= dmCursorMs;
+      const cached = cachedConvs.get(conv.id);
+      const cacheStale = top.has(conv.id) && (!cached || cached.updatedTime !== conv.updatedTime);
+      if (!isNew && !cacheStale) continue;
+      let msgs;
+      try {
+        if (calls++ && dmDelayMs > 0) await ctx.sleep(dmDelayMs); // Conversations API: 2 calls/second
+        msgs = await ig.messages(conv.id);
+      } catch (err) {
+        if (err && err.isAuth) throw err;
+        noteRateLimit(err);
+        ctx.log('automations', 'warn', `Could not read a conversation: ${describeError(err)}`);
+        cursorBlocked = true;
+        continue;
+      }
+      threadMessages.set(conv.id, msgs);
+      for (const m of msgs) {
+        if (isOwn(m.fromId, m.fromUsername) || !m.createdTime) continue;
+        if (ms(m.createdTime) > prevDmSeen) newDms.push({ ...m, username: m.fromUsername || (conv.participants || []).find((p) => !isOwn(p.id, p.username))?.username || null });
+        seen('dmSeenAt', m.createdTime);
+      }
+      if (!isNew) continue;
+
+      const seenBefore = !!proc.conversations[conv.id];
+      const fromUs = msgs.some((m) => isOwn(m.fromId, m.fromUsername));
+      // Messages up to our latest message in the thread were already answered (by hand, or by a
+      // run whose record was lost): they get no automated reply.
+      const answeredUntil = Math.max(0, ...msgs.filter((m) => isOwn(m.fromId, m.fromUsername)).map((m) => ms(m.createdTime) || 0));
+      let firstContact = !seenBefore && !fromUs && msgs.length > 0 && msgs.every((m) => ms(m.createdTime) >= baselineMs);
+      let sentInThread = false;
+      let complete = true;
+      const inbound = msgs.filter((m) => m.id && !isOwn(m.fromId, m.fromUsername) && !proc.messages[m.id]).sort((a, b) => (ms(a.createdTime) || 0) - (ms(b.createdTime) || 0));
+      const participant = (conv.participants || []).find((p) => !isOwn(p.id, p.username));
+      for (const m of inbound) {
+        if (ms(m.createdTime) >= baselineMs && ms(m.createdTime) > answeredUntil && !sentInThread) {
+          result.messagesChecked++;
+          const ev = {
+            source: m.replyTo && m.replyTo.story ? 'story_reply' : 'dm',
+            id: m.id,
+            text: m.text || '',
+            userId: m.fromId || participant?.id || null,
+            username: m.fromUsername || participant?.username || null,
+            isOwn: false,
+            timestamp: m.createdTime,
+          };
+          const r = await handle(ev, {}, { isFirstContact: firstContact });
+          if (!r.done) {
+            complete = false;
+            break;
+          }
+          firstContact = false;
+          if (r.acted) sentInThread = true;
+        }
+        proc.messages[m.id] = nowIso;
+        delta.messages[m.id] = nowIso;
+        await maybeFlush();
+      }
+      // A thread whose first message is still waiting (DM limit) keeps its first-contact welcome.
+      if (complete || sentInThread || !firstContact) {
+        proc.conversations[conv.id] = nowIso;
+        delta.conversations[conv.id] = nowIso;
+      }
+      if (!complete) cursorBlocked = true;
+      if (!cursorBlocked && conv.updatedTime) delta.dmUpdatedTime = conv.updatedTime;
+      if (actionsLeft <= 0) cursorBlocked = true;
+    }
+  } catch (err) {
+    // An expired token or a GitHub error stopped the run part-way: save what was already sent so
+    // the next run does not answer the same comments and messages again.
+    try {
+      await flush(true);
+    } catch {
+      // keep the original error
+    }
+    throw err;
   }
 
   await flush(true);
@@ -550,7 +654,8 @@ export default async function automations(ctx) {
       }
       const changed = JSON.stringify([ib.comments, ib.conversations]) !== before;
       const stale = !ib.fetchedAt || ctx.nowMs() - ms(ib.fetchedAt) >= CACHE_REFRESH_MS;
-      if (!changed && !stale) return;
+      // Nothing was read (paused, or Instagram unreachable): leave the document alone.
+      if (!changed && !(stale && (mediaOk || convsOk))) return;
       if (mediaOk || convsOk) ib.fetchedAt = ctx.nowIso();
       tx.write('inbox', ib);
     },

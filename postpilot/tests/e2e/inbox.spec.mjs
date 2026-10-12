@@ -17,6 +17,7 @@ let page;
 const consoleErrors = [];
 
 async function viewShot(name) {
+  await page.waitForTimeout(350);
   const dir = process.env.SCREENSHOT_DIR || '/tmp/claude-0/-home-user-claude/61a6d9a0-a933-5d86-8721-920a439be9c7/scratchpad/shots';
   const { mkdirSync } = await import('node:fs');
   mkdirSync(dir, { recursive: true });
@@ -201,6 +202,8 @@ describe('Inbox', { timeout: 240_000 }, () => {
     await page.emulateMedia({ colorScheme: 'light' });
 
     await page.getByRole('tab', { name: /Messages/ }).click();
+    // The last opened conversation (?c=) stays open; on a phone the list is one step back.
+    await page.getByRole('button', { name: 'Back to conversations' }).click();
     await page.getByRole('button', { name: /@theo\.builds/ }).click();
     await page.getByRole('region', { name: 'Conversation with @theo.builds' }).getByText(/wholesale pricing/).waitFor();
     overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
@@ -210,6 +213,44 @@ describe('Inbox', { timeout: 240_000 }, () => {
     await page.getByRole('navigation', { name: 'Conversations' }).waitFor();
     await page.emulateMedia({ colorScheme: 'dark' });
     await shot(page, 'inbox-conversations-phone-dark');
+  });
+
+  test('falls back to the worker copy when Instagram is unreachable and queues a reply for the worker', async () => {
+    await page.setViewportSize({ width: 1280, height: 860 });
+    await page.emulateMedia({ colorScheme: 'light' });
+    const errorsBefore = consoleErrors.length;
+    // The browser cannot reach Instagram: listing recent posts fails at the network level (with retries).
+    // (Chromium silently retries a reset GET once, so allow plenty of failures, then clear them.)
+    dev.graph.state.faults.push({ method: 'GET', path: /\/media$/, times: 12, destroy: true });
+    await page.goto(`${dev.url}/postpilot/index.html#/inbox`);
+    await page.reload();
+    await page.waitForSelector('.app', { timeout: 30_000 });
+    await page.getByText('Showing the worker’s copy').waitFor({ timeout: 30_000 });
+    await page.locator('.badge', { hasText: 'Cached copy' }).waitFor();
+    await page.locator('.ibx-group').first().waitFor();
+    dev.graph.state.faults.length = 0;
+
+    const { el, id, username } = await topComment(0);
+    await el.getByRole('button', { name: `Reply to @${username}` }).click();
+    await el.getByRole('textbox', { name: `Reply to @${username}` }).fill(`@${username} Thanks, sent from the queue!`);
+    await el.getByRole('button', { name: 'Send reply' }).click();
+    await page.locator('.toast', { hasText: 'The worker will post your reply' }).waitFor();
+
+    // The app queued the command in the encrypted inbox document and started the worker, which sends it.
+    const deadline = Date.now() + 60_000;
+    let cmd;
+    while (Date.now() < deadline) {
+      const inbox = await readDoc('inbox');
+      cmd = (inbox.outbox || []).find((c) => c.type === 'reply_comment' && c.payload.commentId === id);
+      if (cmd && cmd.status !== 'pending') break;
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+    assert.ok(cmd, 'reply_comment command queued');
+    assert.equal(cmd.status, 'done');
+    assert.ok(dev.graph.state.replies.some((r) => r.commentId === id && r.text === `@${username} Thanks, sent from the queue!`));
+    // Network failures of the faulted requests show up as console errors; they are expected here.
+    const added = consoleErrors.splice(errorsBefore);
+    assert.ok(added.every((e) => /Failed to load resource|ERR_EMPTY_RESPONSE|ERR_CONNECTION/.test(e)), `unexpected console errors: ${added.join('\n')}`);
   });
 
   test('no console errors', () => {

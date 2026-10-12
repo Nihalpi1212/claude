@@ -19,6 +19,7 @@ const consoleErrors = [];
 
 /** Viewport-only screenshot (overlays are position: fixed, so full-page shots crop them oddly). */
 async function viewShot(name) {
+  await page.waitForTimeout(350); // let the overlay's entry animation finish
   const dir = process.env.SCREENSHOT_DIR || '/tmp/claude-0/-home-user-claude/61a6d9a0-a933-5d86-8721-920a439be9c7/scratchpad/shots';
   const { mkdirSync } = await import('node:fs');
   mkdirSync(dir, { recursive: true });

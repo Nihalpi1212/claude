@@ -127,7 +127,8 @@
 }
 .cmp-main { display: flex; flex-direction: column; min-width: 0; padding: 18px 0 28px; }
 .cmp-main > .callout, .cmp-main > .cmp-status { margin-bottom: 14px; }
-.cmp-side {
+.cmp-side { min-width: 0; align-self: stretch; }
+.cmp-side-inner {
   position: sticky;
   top: 0;
   display: flex;
@@ -136,7 +137,7 @@
   min-width: 0;
   padding: 18px 0 24px;
 }
-.cmp.is-wide .cmp-side { padding-left: 24px; border-left: 1px solid var(--line); min-height: 100%; }
+.cmp.is-wide .cmp-side { padding-left: 24px; border-left: 1px solid var(--line); }
 .cmp-side-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .cmp-side-note { margin: 0; text-align: center; }
 .cmp > .is-hidden { display: none !important; }
@@ -420,7 +421,7 @@
 
 @media (max-width: 1023px) {
   .cmp-main { padding-top: 14px; }
-  .cmp-side { position: static; align-items: stretch; }
+  .cmp-side-inner { position: static; }
 }
 @media (max-width: 759px) {
   .cmp-drawer .overlay-foot { padding: 10px 12px; }

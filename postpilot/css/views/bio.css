@@ -173,8 +173,7 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  align-self: center;
-  width: min(560px, 100%);
+  width: 100%;
   padding: 8px 10px 8px 14px;
   border: 1px solid var(--line-strong);
   border-radius: var(--r-lg);
@@ -195,6 +194,14 @@
   .bio-link-no { display: none; }
   .bio-link-actions,
   .bio-utm { margin-left: 0; }
-  .bio-grid-tools { margin-top: 22px; }
+  .bio-grid-row {
+    display: grid;
+    grid-template-columns: 58px minmax(0, 1fr);
+    grid-template-areas: 'thumb tools' 'field field';
+    gap: 8px 12px;
+  }
+  .bio-grid-thumb { grid-area: thumb; margin-top: 0; }
+  .bio-grid-row > .field { grid-area: field; }
+  .bio-grid-tools { grid-area: tools; justify-self: end; align-self: center; margin-top: 0; }
   .bio-savebar { bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 10px); }
 }

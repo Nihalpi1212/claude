@@ -95,6 +95,7 @@ function Caption({ username, text, expanded, onExpand }) {
   if (long && !expanded) {
     shown = lines.slice(0, 2).join('\n');
     if (shown.length > 125) shown = shown.slice(0, 125).replace(/\s+\S*$/, '');
+    shown = shown.replace(/\s+$/, '');
   }
   return html`<p class="pv-caption"><span class="pv-user">${username}</span> <${RichText} text=${shown} />${long && !expanded
     ? html`<span class="faint">… </span><button type="button" class="pv-more" onClick=${onExpand}>more</button>`

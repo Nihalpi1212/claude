@@ -63,6 +63,7 @@ const avg = (vals) => {
   return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
 };
 const rel = (c, p) => (isNum(c) && isNum(p) && p !== 0 ? (c - p) / Math.abs(p) : null);
+const roundOrNull = (v) => (isNum(v) ? Math.round(v) : null);
 const firstNum = (arr) => arr.find(isNum) ?? null;
 const lastNum = (arr) => {
   for (let i = arr.length - 1; i >= 0; i--) if (isNum(arr[i])) return arr[i];
@@ -375,6 +376,8 @@ export function computeOverview(a, tz, { compare = true } = {}) {
     return i != null && d.reach > 0 ? i / d.reach : null;
   });
   const has = (pv) => compare && isNum(pv);
+  const prevLoading = compare && a.live && a.live.previous && a.live.previous.status === 'loading';
+  const missingLabel = prevLoading ? 'Loading the previous period…' : 'No data for the previous period';
 
   const tiles = [
     {
@@ -401,7 +404,7 @@ export function computeOverview(a, tz, { compare = true } = {}) {
       value: t.format === 'percent' ? (isNum(t.value) ? formatPercent(t.value) : null) : t.value,
       format: t.format === 'percent' ? undefined : fmtCount(t.value),
       delta: compare ? d : undefined,
-      deltaLabel: compare ? (has(t.prev) ? `vs ${show(t.prev, t.format === 'percent' ? 'percent' : 'number')} before` : 'No data for the previous period') : undefined,
+      deltaLabel: compare ? (has(t.prev) ? `vs ${show(t.prev, t.format === 'percent' ? 'percent' : 'number')} before` : missingLabel) : undefined,
     };
   });
 
@@ -556,7 +559,7 @@ export function PostingFrequency({ ov, compare = true }) {
   const segs = ov.typeRows.map((r) => ({ label: KIND_PLURAL[r.kind], value: r.count, color: KIND_COLOR[r.kind] }));
   return html`<${Panel} title="Posting frequency" subtitle="Feed posts and reels published in this period">
     ${ov.posts.length
-      ? html`<div class="stack">
+      ? html`<div class="stack an-freq">
           <div class="an-figure">
             <span class="an-figure-value">${formatValue(Math.round(ov.perWeek * 10) / 10)}</span>
             <span class="an-figure-unit">posts per week</span>
@@ -565,13 +568,13 @@ export function PostingFrequency({ ov, compare = true }) {
           <${StackedBar} label="Posts by type" segments=${segs} />
           <div class="table-wrap">
             <table class="table table-dense an-mini-table">
-              <thead><tr><th scope="col">Type</th><th scope="col" class="align-right">Posts</th><th scope="col" class="align-right">Avg reach</th><th scope="col" class="align-right">Eng. rate</th></tr></thead>
+              <thead><tr><th scope="col">Type</th><th scope="col" class="align-right">Posts</th><th scope="col" class="align-right an-col-reach">Avg reach</th><th scope="col" class="align-right">Eng. rate</th></tr></thead>
               <tbody>
                 ${ov.typeRows.map(
                   (r) => html`<tr key=${r.kind}>
                     <td><span class="legend-key is-rect an-key" style=${{ '--key': KIND_COLOR[r.kind] }}></span>${KIND_PLURAL[r.kind]}</td>
                     <td class="align-right">${r.count}</td>
-                    <td class="align-right">${formatValue(r.avgReach == null ? null : Math.round(r.avgReach))}</td>
+                    <td class="align-right an-col-reach">${formatValue(r.avgReach == null ? null : Math.round(r.avgReach))}</td>
                     <td class="align-right">${formatPercent(r.avgEr)}</td>
                   </tr>`,
                 )}
@@ -818,7 +821,7 @@ export function reelsOf(ov) {
 export function ReelsSummary({ reels }) {
   return html`<div class="stats an-stats-4">
     <${Stat} label="Reels" value=${reels.length} />
-    <${Stat} label="Avg views" value=${avg(reels.map((m) => metricValue(m, 'views')))} format="compact" />
+    <${Stat} label="Avg views" value=${roundOrNull(avg(reels.map((m) => metricValue(m, 'views'))))} format="compact" />
     <${Stat} label="Avg watch time" value=${formatDuration(avg(reels.map((m) => num(m.metrics?.avgWatchTimeMs))))} />
     <${Stat} label="Avg skip rate" value=${formatPercent(avg(reels.map(skipRateOf)))} hint="Viewers who swiped away in the first 3 seconds" />
   </div>`;
@@ -897,7 +900,7 @@ export function storyColumns(tz) {
 export function StoriesSummary({ stories }) {
   return html`<div class="stats an-stats-4">
     <${Stat} label="Stories" value=${stories.length} />
-    <${Stat} label="Avg reach" value=${avg(stories.map((s) => num(s.metrics?.reach)))} />
+    <${Stat} label="Avg reach" value=${roundOrNull(avg(stories.map((s) => num(s.metrics?.reach))))} />
     <${Stat} label="Replies" value=${sum(stories.map((s) => num(s.metrics?.replies))) ?? 0} />
     <${Stat} label="Avg exit rate" value=${formatPercent(avg(stories.map(exitRateOf)))} hint="Exits divided by views" />
   </div>`;
@@ -1184,7 +1187,7 @@ export default function AnalyticsView() {
   const loadingLive = a.live.current && a.live.current.status === 'loading';
   if (a.ready && !loadingLive) stable.current = a;
   const shown = loadingLive && stable.current ? stable.current : a;
-  const ov = useMemo(() => (shown.ready ? computeOverview(shown, tz, { compare }) : null), [shown.days, shown.media, shown.range.fromKey, shown.range.toKey, shown.ready, tz, compare]);
+  const ov = useMemo(() => (shown.ready ? computeOverview(shown, tz, { compare }) : null), [shown.days, shown.media, shown.range.fromKey, shown.range.toKey, shown.ready, shown.live.previous && shown.live.previous.status, tz, compare]);
 
   const openMedia = (m) => setOpen(m && m.id);
   const openItem = open ? (a.mediaDoc && a.mediaDoc.media && a.mediaDoc.media[open]) || null : null;

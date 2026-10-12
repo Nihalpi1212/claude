@@ -599,7 +599,7 @@ function PreferencesSection() {
     }
   }
 
-  return html`<div class="stack-lg stack">
+  return html`<div class="settings-groups">
     <div class="stack">
       <${TimeZoneField} value=${tz} onChange=${setTz} hint="The planner, analytics days and the worker's schedule use it." />
       ${tz !== settings.timezone ? html`<div class="row"><${Button} variant="primary" size="sm" onClick=${saveTz}>Save time zone<//></div>` : null}
@@ -733,7 +733,9 @@ function NotificationsSection() {
                 const cur = { ...defaultNotifications(), ...(s.notifications || {}) };
                 cur.events = { ...defaultNotifications().events, ...(cur.events || {}), [ev.id]: v };
                 s.notifications = cur;
-              }, { message: 'notification settings' }).catch(() => {})}
+              }, { message: 'notification settings' })
+                .then(() => toast(v ? `Notifications on: ${ev.label.toLowerCase()}.` : `Notifications off: ${ev.label.toLowerCase()}.`, { kind: 'success' }))
+                .catch(() => {})}
           />`,
         )}
       </div>
@@ -804,7 +806,7 @@ function SecuritySection() {
     location.reload();
   }
 
-  return html`<div class="stack-lg stack">
+  return html`<div class="settings-groups">
     <dl class="kv settings-kv">
       <dt>GitHub account</dt>
       <dd>${session.login ? `@${session.login}` : '—'}</dd>
@@ -974,7 +976,7 @@ function DataSection() {
   }
 
   const LIMIT = 1024 * MB;
-  return html`<div class="stack-lg stack">
+  return html`<div class="settings-groups">
     <div class="stack">
       <h3 class="settings-sub">Backup</h3>
       <p class="muted">Downloads all your Postpilot data (posts, library details, queues, automations, analytics, settings) as one JSON file. Photos and videos stay in your repository.</p>

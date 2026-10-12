@@ -348,3 +348,133 @@ test('trial reels and the AI label are sent only where Instagram accepts them', 
   assert.equal(p.is_ai_generated, 'true');
   assert.equal(p.trial_params, undefined);
 });
+
+// A client whose methods can be swapped per test (getters such as userId keep working).
+const withIg = (ig, overrides) => Object.assign(Object.create(ig), overrides);
+const commentsOn = (graph, mediaId, text) => [...graph.state.comments.values()].filter((c) => c.mediaId === mediaId && c.text === text);
+
+test('a lost media_publish response is recognised as published, not failed', async (t) => {
+  const { graph, ig, addAsset, base } = await setup(t);
+  const img = await addAsset('image', 'f04.jpg');
+
+  // The first response is lost and the retry hits the already-published container (100/2207006).
+  const retried = withIg(ig, {
+    publishContainer: async (id) => {
+      await ig.publishContainer(id);
+      return ig.publishContainer(id);
+    },
+  });
+  const before = creates(graph);
+  const post = newPost({ caption: 'Lost response', media: [{ assetId: img.id, kind: 'image' }], firstComment: 'first!' });
+  const res = await publishPost({ ...base, ig: retried, post });
+  assert.equal(graph.state.publishCount, 1);
+  assert.equal(creates(graph), before + 1, 'no new containers');
+  assert.equal(res.igMediaId, graph.state.media[0].id);
+  assert.ok(res.permalink);
+  assert.equal(commentsOn(graph, res.igMediaId, 'first!').length, 1);
+
+  // A dropped connection after the request may have reached Instagram is checked the same way.
+  const dropped = withIg(ig, {
+    publishContainer: async (id) => {
+      await ig.publishContainer(id);
+      throw new IgError('Could not reach Instagram (socket hang up).', { code: 'network', status: 0, maybeSent: true });
+    },
+  });
+  const res2 = await publishPost({ ...base, ig: dropped, post: newPost({ caption: 'Dropped', media: [{ assetId: img.id, kind: 'image' }] }) });
+  assert.equal(graph.state.publishCount, 2);
+  assert.equal(res2.igMediaId, graph.state.media[0].id);
+});
+
+test('resume: a PUBLISHED story is not failed when the stories lookup is unavailable', async (t) => {
+  const { graph, addAsset, base } = await setup(t);
+  const img = await addAsset('image', 'story01.jpg');
+  const post = newPost({ type: 'story', media: [{ assetId: img.id, kind: 'image' }] });
+  const first = await publishPost({ ...base, post });
+  graph.state.faults.push({ method: 'GET', path: /\/stories$/, error: { status: 400, code: 100, message: '(#100) Tried accessing nonexisting field (stories) on node type (User)' } });
+  const again = await publishPost({ ...base, post: { ...post, containers: first.containers } });
+  assert.equal(again.igMediaId, null);
+  assert.equal(again.warnings.length, 1);
+  assert.match(again.warnings[0], /published/);
+  assert.equal(graph.state.publishCount, 1);
+
+  // A login problem is still reported, so the worker keeps the containers and resumes later.
+  graph.state.faults.length = 0;
+  graph.state.faults.push({ method: 'GET', path: /\/stories$/, error: { status: 400, code: 190, subcode: 463, message: 'Error validating access token' } });
+  await assert.rejects(publishPost({ ...base, post: { ...post, containers: first.containers } }), (err) => err.isAuth);
+  assert.equal(graph.state.publishCount, 1);
+});
+
+test('resume: an edited post is uploaded again instead of publishing the old container', async (t) => {
+  const { graph, addAsset, base, saved } = await setup(t);
+  const oldImg = await addAsset('image', 'f06.jpg');
+  const newImg = await addAsset('image', 'f07.jpg');
+  // Daily quota hit at media_publish: the post goes back to 'scheduled' with a FINISHED container.
+  const quota = () => graph.state.faults.push({ method: 'POST', path: /\/media_publish$/, times: 1, error: { status: 400, code: 9, subcode: 2207042, message: 'Application request limit reached' } });
+
+  const kept = newPost({ caption: 'Unchanged', media: [{ assetId: oldImg.id, kind: 'image' }] });
+  quota();
+  await assert.rejects(publishPost({ ...base, post: kept }), (err) => err.isRateLimit);
+  const keptContainers = saved.at(-1);
+  let before = creates(graph);
+  const res1 = await publishPost({ ...base, post: { ...kept, scheduledAt: new Date().toISOString(), containers: keptContainers } });
+  assert.equal(creates(graph), before, 'an unchanged post reuses its container');
+  assert.equal(res1.containers.parent, keptContainers.parent);
+
+  const post = newPost({ caption: 'Fresh out of the klin', media: [{ assetId: oldImg.id, kind: 'image' }] });
+  quota();
+  await assert.rejects(publishPost({ ...base, post }), (err) => err.isRateLimit);
+  const oldContainers = saved.at(-1);
+  before = creates(graph);
+  const edited = { ...post, caption: 'Fresh out of the kiln', media: [{ assetId: newImg.id, kind: 'image' }], containers: oldContainers };
+  const res = await publishPost({ ...base, post: edited });
+  assert.equal(creates(graph), before + 1, 'a new container is created');
+  assert.notEqual(res.containers.parent, oldContainers.parent);
+  const m = graph.state.media[0];
+  assert.equal(m.id, res.igMediaId);
+  assert.equal(m.caption, 'Fresh out of the kiln');
+  assert.ok(lastCreate(graph).image_url.includes(newImg.id));
+  assert.equal(graph.state.publishCount, 2);
+});
+
+test('a failed media download (2207052) and retryable publishing subcodes are retried, not failed for good', async (t) => {
+  const { addAsset, base, srv } = await setup(t);
+  const img = await addAsset('image', 'f08.jpg');
+  const exposeMedia = async () => ({ url: `${srv.url}/public/missing.jpg`, path: 'public/tmp/missing.jpg' });
+  await assert.rejects(publishPost({ ...base, exposeMedia, post: newPost({ caption: 'Download fails', media: [{ assetId: img.id, kind: 'image' }] }) }), (err) => {
+    assert.ok(err instanceof IgError);
+    assert.equal(err.subcode, 2207052);
+    assert.equal(err.isPermanent, false);
+    assert.match(err.userMessage, /will try again/);
+    assert.equal(classifyError(err).permanent, false);
+    return true;
+  });
+  for (const [code, subcode] of [[-1, 2207001], [-2, 2207003], [24, 2207006], [24, 2207008], [-2, 2207020], [-1, 2207032], [9004, 2207052]]) {
+    assert.equal(classifyError(new IgError('Publishing failed', { code, subcode, status: 400 })).permanent, false, String(subcode));
+  }
+  assert.equal(classifyError(new IgError('Bad format', { code: 36001, subcode: 2207005, status: 400 })).permanent, true);
+  assert.equal(classifyError(new IgError('Caption too long', { code: 100, subcode: 2207010, status: 400 })).permanent, true);
+});
+
+test('resume: a captionless post is never matched to some other recent post', async (t) => {
+  const { graph, addAsset, base } = await setup(t);
+  const img = await addAsset('image', 'f05.jpg');
+  const other = await addAsset('image', 'f09.jpg');
+  const startedAt = new Date().toISOString();
+  const post = newPost({ caption: '', media: [{ assetId: img.id, kind: 'image' }], firstComment: 'first!' });
+  const first = await publishPost({ ...base, post });
+  // Another post goes live in the same window before the resume.
+  const busy = await publishPost({ ...base, post: newPost({ caption: 'Posted from the phone', media: [{ assetId: other.id, kind: 'image' }] }) });
+  const again = await publishPost({ ...base, post: { ...post, containers: first.containers, publishStartedAt: startedAt } });
+  assert.equal(again.igMediaId, first.igMediaId);
+  assert.notEqual(again.igMediaId, busy.igMediaId);
+  assert.equal(commentsOn(graph, busy.igMediaId, 'first!').length, 0);
+  assert.equal(commentsOn(graph, first.igMediaId, 'first!').length, 1);
+
+  // Two captionless candidates: no guess and no first comment.
+  const twin = await publishPost({ ...base, post: newPost({ caption: '', media: [{ assetId: other.id, kind: 'image' }] }) });
+  const third = await publishPost({ ...base, post: { ...post, containers: first.containers, publishStartedAt: startedAt } });
+  assert.equal(third.igMediaId, null);
+  assert.equal(third.warnings.length, 1);
+  assert.equal(commentsOn(graph, twin.igMediaId, 'first!').length, 0);
+  assert.equal(graph.state.publishCount, 3);
+});

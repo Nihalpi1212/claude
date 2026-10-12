@@ -6,6 +6,10 @@ import { addDaysKey, dayKey, format, formatDay, formatTime, pad, weekdayOfKey, z
 import { Icon } from './icons.js';
 import { IconButton, cx } from './kit.js';
 import { useAssetUrl } from './media-picker.js';
+import { loadViewCss } from '../css.js';
+
+// The calendar pieces are styled by the planner stylesheet (pl-* classes), also used by Queues.
+loadViewCss('planner');
 
 // ---------------------------------------------------------------------------
 // Post helpers
@@ -363,7 +367,7 @@ export function WeekView({ days, today, nowMs, tz, items, matrix, onCompose, onC
               if (d && !past) onDropPost(d.id, day, minutes);
             }}>
             ${hours.map((h) => {
-              const s = Math.min(1, Math.max(0, ((row[h] || 0) - 0.55) / 0.45));
+              const s = Math.min(1, Math.max(0, ((row[h] || 0) - 0.5) / 0.5));
               return s > 0.05
                 ? html`<div key=${h} class="pl-best" style=${{ top: `${(h - WEEK_START_HOUR) * HOUR_PX}px`, '--s': s.toFixed(2) }} title="Good time to post"></div>`
                 : null;

@@ -91,7 +91,13 @@ const ACCOUNT_TYPES = { BUSINESS: 'Business account', MEDIA_CREATOR: 'Creator ac
 export function cleanToken(raw) {
   let t = String(raw || '').trim();
   const m = t.match(/access_token=([^&\s#]+)/);
-  if (m) t = decodeURIComponent(m[1]);
+  if (m) {
+    try {
+      t = decodeURIComponent(m[1]);
+    } catch {
+      t = m[1];
+    }
+  }
   t = t.replace(/^bearer\s+/i, '').replace(/^["'`]+|["'`]+$/g, '');
   return t.replace(/\s+/g, '');
 }

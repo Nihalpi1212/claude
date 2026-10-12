@@ -327,7 +327,7 @@ span.pl-row-thumb { cursor: default; }
   left: 0;
   right: 0;
   height: var(--hour-px);
-  background: color-mix(in srgb, var(--ok) calc(var(--s) * 26%), transparent);
+  background: color-mix(in srgb, var(--ok) calc(var(--s) * 34%), transparent);
 }
 .pl-week-col.is-past .pl-best { opacity: 0.45; }
 .pl-week-now {

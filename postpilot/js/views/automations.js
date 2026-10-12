@@ -287,6 +287,7 @@ export default function AutomationsView() {
   const firedTotal = rules.reduce((n, r) => n + ((r.stats && r.stats.fired) || 0), 0);
   const logEntries = ((log && log.entries) || []).filter((e) => e.job === 'automations').slice(0, 50);
   const lastRun = log && log.runs && log.runs[0];
+  const pausedUntil = doc.cursors && Date.parse(doc.cursors.pausedUntil || '') > Date.now() ? doc.cursors.pausedUntil : null;
 
   const toggleMaster = async (on) => {
     setBusy(true);
@@ -457,6 +458,11 @@ export default function AutomationsView() {
           <${Stat} label="Rules fired" value=${firedTotal} />
         </div>
       </div>
+      ${pausedUntil
+        ? html`<${Callout} tone="warning" title="Paused while Instagram limits this account">
+            <p>Instagram asked apps to slow down for this account, so automations resume ${relative(pausedUntil)} (${formatDateTime(pausedUntil, tz)}). New comments and messages that arrive meanwhile are checked when they resume.</p>
+          <//>`
+        : null}
       ${dmProblem
         ? html`<${Callout} tone="warning" title=${dmProblem.title}>
             <p>${dmProblem.body}</p>

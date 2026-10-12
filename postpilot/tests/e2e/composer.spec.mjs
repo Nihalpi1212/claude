@@ -1,7 +1,7 @@
 // Composer e2e: create, schedule, edit, publish now (worker against the mock), carousel, upload + crop,
 // reel options, AI assist, validation, unsaved-changes guard, phone layout and screenshots.
 //   node --test tests/e2e/composer.spec.mjs
-import { after, before, describe, it } from 'node:test';
+import { after, before, beforeEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { mkdirSync } from 'node:fs';
@@ -63,8 +63,19 @@ async function closeComposer(p) {
   if (!(await drawer(p).count())) return;
   await p.keyboard.press('Escape');
   const confirmDlg = p.locator('.modal-confirm');
-  if (await confirmDlg.isVisible().catch(() => false)) await confirmDlg.getByRole('button', { name: /Discard|Close/ }).click();
+  await confirmDlg.waitFor({ timeout: 1500 }).catch(() => {});
+  if (await confirmDlg.isVisible().catch(() => false)) await confirmDlg.locator('.overlay-foot').getByRole('button', { name: /^(Discard|Close)$/ }).click();
   await drawer(p).waitFor({ state: 'detached' });
+}
+
+/** Close whatever a failed test left open (dialogs, picker, crop editor, composer). */
+async function reset(p) {
+  for (let i = 0; i < 6 && (await p.locator('.overlay').count()); i++) {
+    const dlg = p.locator('.modal-confirm');
+    if (await dlg.isVisible().catch(() => false)) await dlg.locator('.overlay-foot .btn').last().click();
+    else await p.keyboard.press('Escape');
+    await p.waitForTimeout(200);
+  }
 }
 
 async function setWhen(p, daysAhead, time) {
@@ -82,17 +93,30 @@ async function setRange(locator, value) {
   }, value);
 }
 
+// The mock Instagram serves just-published media from the worker's temporary public files, which the
+// worker deletes after publishing, so thumbnails of those posts 404 locally. Anything else is a bug.
+const badResponses = [];
+function trackResponses(p) {
+  p.on('response', (r) => {
+    if (r.status() >= 400 && !/\/public\/tmp\//.test(r.url())) badResponses.push(`${r.status()} ${r.url()}`);
+  });
+}
+
 function fresh(errors) {
-  return errors.filter((e) => !/favicon/i.test(e));
+  return errors.filter((e) => !/favicon/i.test(e) && !/^Failed to load resource/.test(e));
 }
 
 describe('composer', () => {
   before(async () => {
     h = await openApp({ port: PORT, viewport: { width: 1280, height: 860 } });
     page = h.page;
+    trackResponses(page);
   });
   after(async () => {
     if (h) await h.close();
+  });
+  beforeEach(async () => {
+    if (page) await reset(page);
   });
 
   it('creates a post from the library with caption and first comment, schedules it, then edits it', async () => {
@@ -159,7 +183,7 @@ describe('composer', () => {
     await footer(page).getByRole('button', { name: 'Publish now' }).click();
     const dlg = page.locator('.modal-confirm');
     await dlg.waitFor();
-    await dlg.getByRole('button', { name: 'Publish now' }).click();
+    await dlg.locator('.overlay-foot').getByRole('button', { name: 'Publish now' }).click();
     await page.locator('.toast', { hasText: 'Publishing' }).waitFor();
     await drawer(page).waitFor({ state: 'detached' });
     await page.locator('.toast', { hasText: 'Published on Instagram' }).waitFor({ timeout: 45_000 });
@@ -228,7 +252,7 @@ describe('composer', () => {
     const crop = page.locator('.crop-modal');
     await crop.locator('canvas.crop-canvas').waitFor();
     await snap(page, 'composer-crop-1280-light');
-    await crop.getByRole('radio', { name: '4:5' }).click();
+    await crop.getByRole('radio', { name: '4:5', exact: true }).click();
     await crop.getByRole('button', { name: 'Save crop' }).click();
     await page.locator('.toast', { hasText: 'Cropped copy saved' }).waitFor({ timeout: 20_000 });
     await page.locator('.cmp-issue.is-error').first().waitFor({ state: 'detached' });
@@ -245,7 +269,7 @@ describe('composer', () => {
     await page.locator('.cmp-main input[type="file"]').setInputFiles(path.join(FIXTURES, 'story02.jpg'));
     const crop = page.locator('.crop-modal');
     await crop.locator('canvas.crop-canvas').waitFor();
-    await crop.getByRole('radio', { name: '1:1' }).click();
+    await crop.getByRole('radio', { name: '1:1', exact: true }).click();
     await setRange(crop.locator('input[type="range"]'), 1.5);
     await crop.getByRole('button', { name: 'Use photo' }).click();
     await page.locator('.cmp-strip .cmp-item:not(.cmp-uploading)').first().waitFor({ timeout: 20_000 });
@@ -258,10 +282,10 @@ describe('composer', () => {
     await page.keyboard.press('Escape');
     const dlg = page.locator('.modal-confirm');
     await dlg.waitFor();
-    await dlg.getByRole('button', { name: 'Cancel' }).click();
+    await dlg.locator('.overlay-foot').getByRole('button', { name: 'Cancel' }).click();
     assert.equal(await drawer(page).count(), 1, 'still open after Cancel');
     await page.keyboard.press('Escape');
-    await dlg.getByRole('button', { name: 'Discard' }).click();
+    await dlg.locator('.overlay-foot').getByRole('button', { name: 'Discard' }).click();
     await drawer(page).waitFor({ state: 'detached' });
   });
 
@@ -300,10 +324,13 @@ describe('composer', () => {
     assert.ok(caption.length > 10, 'caption filled');
 
     await page.locator('#cmp-caption').fill('Coffee first, clay second.');
+    await page.locator('#cmp-first-comment').fill('');
     await page.getByRole('button', { name: 'Suggest hashtags' }).click();
     await page.locator('.cmp-ai-tags .chip').first().waitFor({ timeout: 20_000 });
+    const offered = await page.locator('.cmp-ai-tags .chip').count();
+    assert.ok(offered > 5 && offered <= 10, `offers up to 10 hashtags (got ${offered})`);
     const picked = await page.locator('.cmp-ai-tags .chip-main[aria-pressed="true"]').count();
-    assert.equal(picked, 5);
+    assert.equal(picked, 5, 'five preselected');
     await page.locator('.cmp-ai-tags').getByRole('button', { name: /^Add 5 hashtags/ }).click();
     assert.match(await page.locator('#cmp-caption').inputValue(), /Coffee first, clay second\.\n\n#\S+( #\S+){4}$/);
     await snap(page, 'composer-ai-1280-light');
@@ -334,6 +361,7 @@ describe('composer', () => {
       const errs = [];
       p.on('console', (m) => m.type() === 'error' && errs.push(m.text()));
       p.on('pageerror', (e) => errs.push(String(e)));
+      trackResponses(p);
       await p.goto(`${h.url}/postpilot/index.html#/`);
       await unlock(p);
       await openNew(p);
@@ -362,7 +390,8 @@ describe('composer', () => {
     }
   });
 
-  it('logged no console errors', () => {
+  it('logged no console errors and no failed requests', () => {
     assert.deepEqual(fresh(h.consoleErrors), []);
+    assert.deepEqual(badResponses, []);
   });
 });

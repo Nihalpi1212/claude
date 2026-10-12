@@ -52,7 +52,7 @@ const SUBCODE_MESSAGES = {
 
 /** Error from the Graph API (or the network) with classification helpers. */
 export class IgError extends Error {
-  constructor(message, { code, subcode, type, status, fbtraceId, userMessage, userTitle, userDetail, permanent, cause } = {}) {
+  constructor(message, { code, subcode, type, status, fbtraceId, userMessage, userTitle, userDetail, permanent, maybeSent, cause } = {}) {
     super(message);
     this.name = 'IgError';
     this.code = code ?? null;
@@ -63,6 +63,9 @@ export class IgError extends Error {
     this.userTitle = userTitle ?? null;
     this.userDetail = userDetail ?? null;
     this.permanentOverride = typeof permanent === 'boolean' ? permanent : null;
+    // True when a creating request (reply, DM, comment, publish) lost its connection after it may
+    // have reached Instagram: the outcome is unknown, so never resend it blindly.
+    this.maybeSent = maybeSent === true;
     if (cause) this.cause = cause;
     this.userMessage = userMessage || explain(this);
   }
@@ -185,6 +188,17 @@ function retryableNow(err) {
 }
 
 const CREATE_PATH = /\/(media|media_publish|messages|replies|comments|mentions)$/;
+
+// Connection failures that happen before the request leaves the machine (safe to resend).
+const NOT_SENT_CODES = new Set(['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED', 'UND_ERR_CONNECT_TIMEOUT']);
+
+const MAYBE_SENT_MESSAGE =
+  'The connection to Instagram dropped before it confirmed this. It may have gone through anyway. Check Instagram before trying again.';
+
+/** Node/undici error code of a fetch failure ('' in browsers, which do not expose one). */
+function networkCode(cause) {
+  return String((cause && ((cause.cause && cause.cause.code) || cause.code)) || '');
+}
 
 function encodeParams(params) {
   const out = new URLSearchParams();
@@ -352,8 +366,12 @@ function isTimeParamError(err) {
   return /\b(since|until)\b|more than 30 days|time range/i.test(err.message || '');
 }
 
+// Code-100 subcodes about the object itself rather than a metric (33: not found / no access,
+// 2108006: media posted before the account became a professional account).
+const OBJECT_ERROR_SUBCODES = new Set([33, 2108006]);
+
 function isMetricError(err) {
-  return err instanceof IgError && err.code === 100 && err.subcode !== 33 && !isTimeParamError(err);
+  return err instanceof IgError && err.code === 100 && !OBJECT_ERROR_SUBCODES.has(err.subcode) && !isTimeParamError(err);
 }
 
 function isNotEnoughViewers(err) {
@@ -469,8 +487,19 @@ export function createIg({
       try {
         res = await doFetch(url, init);
       } catch (cause) {
-        const err = new IgError(`Could not reach Instagram (${(cause && cause.message) || cause}).`, { code: 'network', status: 0, cause });
-        if (attempt < retries) {
+        // A request that failed after leaving the machine may still have reached Instagram, so
+        // only resend it when that is harmless. Creating calls are flagged `maybeSent` instead:
+        // callers must not blindly resend them (one reply could become three).
+        const notSent = NOT_SENT_CODES.has(networkCode(cause));
+        const maybeSent = !idempotent && !notSent;
+        const err = new IgError(`Could not reach Instagram (${(cause && cause.message) || cause}).`, {
+          code: 'network',
+          status: 0,
+          cause,
+          maybeSent,
+          ...(maybeSent ? { userMessage: MAYBE_SENT_MESSAGE } : {}),
+        });
+        if (attempt < retries && !maybeSent) {
           await sleep(retryDelayMs * 2 ** attempt);
           continue;
         }
@@ -558,15 +587,22 @@ export function createIg({
         }
         // Unclear which metric failed: ask for each one separately.
         const out = [];
+        const rejected = [];
+        let lastErr = err;
         for (const m of list) {
           try {
             const res = await get(path, { metric: m, ...extra });
             out.push(...((res && res.data) || []));
           } catch (e2) {
-            if (isMetricError(e2)) unsupported.add(`${scope}:${m}`);
-            else throw e2;
+            if (!isMetricError(e2)) throw e2;
+            rejected.push(m);
+            lastErr = e2;
           }
         }
+        // Every metric failed: the problem is this object, not the metrics. Remember nothing,
+        // or one bad media would hide every metric for its kind for the rest of the session.
+        if (rejected.length === list.length) throw lastErr;
+        for (const m of rejected) unsupported.add(`${scope}:${m}`);
         return out;
       }
     }
@@ -1137,6 +1173,9 @@ export function createIg({
   return ig;
 }
 
+/** Page tokens that expire sooner than this were made from a short-lived user token. */
+const SHORT_LIVED_MS = 24 * 36e5;
+
 /**
  * Validate a token and build the IgConnection to store in settings.ig.
  * Facebook mode: `token` is a Facebook user (or system user) token; the first Page with a linked
@@ -1191,6 +1230,27 @@ export async function connectInstagram({ mode = 'instagram', token, igBase, fbBa
     });
   }
   const chosen = (pageId && candidates.find((c) => c.pageId === pageId)) || candidates[0];
+  // A Page token only stops expiring when it comes from an extended (long-lived) user token. One
+  // made from a short-lived Graph API Explorer token dies with it within hours, so ask
+  // debug_token and refuse that case instead of storing it as "never expires".
+  let tokenExpiresAt = null;
+  try {
+    const dbg = await user.get('/debug_token', { input_token: chosen.pageToken });
+    const exp = Number(dbg && dbg.data && dbg.data.expires_at) || 0; // 0 = never
+    if (exp) {
+      if (exp * 1000 - Date.now() < SHORT_LIVED_MS) {
+        throw new IgError('Short-lived token.', {
+          code: 'short_lived',
+          userMessage:
+            'This token expires within hours. Open the Access Token Debugger, click "Extend Access Token", and paste the extended token.',
+        });
+      }
+      tokenExpiresAt = new Date(exp * 1000).toISOString();
+    }
+  } catch (err) {
+    if (err instanceof IgError && err.code === 'short_lived') throw err;
+    // debug_token refused (Page or System User token): do not block the connect.
+  }
   const ig = createIg({
     mode: 'facebook',
     token: chosen.pageToken,
@@ -1208,7 +1268,7 @@ export async function connectInstagram({ mode = 'instagram', token, igBase, fbBa
     mode: 'facebook',
     token: chosen.pageToken,
     tokenType: 'fb_page',
-    tokenExpiresAt: null,
+    tokenExpiresAt,
     tokenRefreshedAt: null,
     userToken: tok,
     userId: chosen.userId,

@@ -2,7 +2,7 @@
 
 .rp-layout {
   display: grid;
-  grid-template-columns: minmax(260px, 300px) minmax(0, 1fr);
+  grid-template-columns: minmax(270px, 320px) minmax(0, 1fr);
   gap: var(--sp-5);
   align-items: start;
   min-width: 0;
@@ -94,7 +94,13 @@
 /* The document is narrower than the Analytics screen: drop the tile sparklines so labels fit. */
 .rp-stats .sparkline { display: none !important; }
 .rp-table { border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; }
-.rp-caption-cell { min-width: 170px; max-width: 300px; }
+.rp-caption-cell { width: 100%; min-width: 160px; max-width: 0; }
+.rp-table .table th,
+.rp-table .table td { padding-left: 10px; padding-right: 10px; }
+.rp-table .table th:first-child,
+.rp-table .table td:first-child { padding-left: 14px; }
+.rp-table .table th:last-child,
+.rp-table .table td:last-child { padding-right: 14px; }
 .rp-caption { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
 .rp-post-meta { display: block; overflow: hidden; text-overflow: ellipsis; color: var(--ink-2); font-size: var(--fs-sm); white-space: nowrap; }
 .rp-doc .an-best { grid-template-columns: minmax(0, 1.6fr) minmax(220px, 1fr); }

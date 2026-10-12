@@ -257,8 +257,10 @@ function ReplyComposer({ initial = '', label, placeholder, sendLabel = 'Send', k
         }
       }} />
     <div class="ibx-composer-bar">
-      <${Menu} trigger="Saved replies" label="Saved replies" align="start" size="sm" items=${savedItems} />
-      <${SuggestButton} kind=${kind} message=${context.message || ''} postCaption=${context.postCaption || ''} onPick=${insert} />
+      ${!disabled
+        ? html`<${Menu} trigger="Saved replies" label="Saved replies" align="start" size="sm" items=${savedItems} />
+            <${SuggestButton} kind=${kind} message=${context.message || ''} postCaption=${context.postCaption || ''} onPick=${insert} />`
+        : null}
       <span class="spacer"></span>
       ${max ? html`<${CharCounter} value=${text} max=${max} />` : null}
       ${onCancel ? html`<${Button} size="sm" variant="ghost" onClick=${onCancel} disabled=${sending}>Cancel<//>` : null}
@@ -285,6 +287,11 @@ function CommentItem({ c, parent, group, ctx }) {
   const isDone = !!done[c.id];
   const replies = c.replies || [];
 
+  const menuItems = [
+    ...(c.username && !mine ? [{ label: 'Open profile', icon: 'external', onClick: () => window.open(`https://www.instagram.com/${encodeURIComponent(c.username)}/`, '_blank', 'noopener') }] : []),
+    { label: 'Delete comment', icon: 'trash', danger: true, onClick: () => actions.remove(c) },
+  ];
+  const more = html`<${Menu} size="sm" label=${`More actions for comment from ${handle}`} items=${menuItems} />`;
   const btn = (label, icon, onClick, opts = {}) => html`<${Button} size="sm" variant="ghost" icon=${icon} onClick=${onClick} disabled=${!canAct || opts.disabled}
     aria-label=${opts.aria} title=${opts.title} class=${opts.active ? 'is-active' : ''} aria-expanded=${opts.expanded}>${label}<//>`;
 
@@ -300,9 +307,10 @@ function CommentItem({ c, parent, group, ctx }) {
         ${isDone ? html`<${Badge} tone="success" icon="check">Done<//>` : null}
         ${prSent ? html`<${Badge} tone="neutral" icon="send">Private reply sent<//>` : null}
         ${pending ? html`<${Badge} tone="accent" icon="clock" title="Queued for the worker">${pending.status === 'failed' ? 'Failed' : 'Sending'}<//>` : null}
+        ${mine && canAct ? html`<span class="ibx-c-menu">${more}</span>` : null}
       </div>
       <p class="ibx-c-text">${c.text || html`<span class="faint">(no text)</span>`}</p>
-      ${canAct
+      ${canAct && !mine
         ? html`<div class="ibx-c-actions">
             ${!isReply && !mine
               ? btn('Reply', 'comment', () => setComposer(open === 'reply' ? null : { id: c.id, mode: 'reply' }), {
@@ -324,10 +332,7 @@ function CommentItem({ c, parent, group, ctx }) {
               : null}
             ${!mine ? btn(c.hidden ? 'Unhide' : 'Hide', 'eye', () => actions.hide(c, !c.hidden), { aria: `${c.hidden ? 'Unhide' : 'Hide'} comment from ${handle}` }) : null}
             ${!isReply && !mine ? btn(isDone ? 'Not done' : 'Mark done', 'check', () => actions.markDone(c, !isDone), { aria: `${isDone ? 'Mark as not done' : 'Mark as done'}: comment from ${handle}` }) : null}
-            <${Menu} size="sm" label=${`More actions for comment from ${handle}`} items=${[
-              ...(c.username ? [{ label: 'Open profile', icon: 'external', onClick: () => window.open(`https://www.instagram.com/${encodeURIComponent(c.username)}/`, '_blank', 'noopener') }] : []),
-              { label: 'Delete comment', icon: 'trash', danger: true, onClick: () => actions.remove(c) },
-            ]} />
+            ${more}
           </div>`
         : null}
       ${open === 'reply'
@@ -350,8 +355,13 @@ function CommentItem({ c, parent, group, ctx }) {
   </li>`;
 }
 
+const GROUP_PREVIEW = 4;
+
 function PostGroup({ group, comments, ctx, onToggleComments, toggling }) {
   const m = group.media;
+  const [expanded, setExpanded] = useState(false);
+  const collapsed = !expanded && comments.length > GROUP_PREVIEW + 1;
+  const shown = collapsed ? comments.slice(0, GROUP_PREVIEW) : comments;
   const day = m.timestamp ? formatDay(m.timestamp, ctx.tz) : '';
   const total = m.commentsCount ?? group.comments.length;
   return html`<section class="ibx-group" aria-label=${`Comments on ${kindLabel(m).toLowerCase()} from ${day}`}>
@@ -376,8 +386,11 @@ function PostGroup({ group, comments, ctx, onToggleComments, toggling }) {
     </header>
     ${group.error ? html`<p class="ibx-group-error text-warn text-sm">Could not load comments for this post: ${group.error}</p>` : null}
     <ul class="ibx-comments">
-      ${comments.map((c) => html`<${CommentItem} key=${c.id} c=${c} group=${group} ctx=${ctx} />`)}
+      ${shown.map((c) => html`<${CommentItem} key=${c.id} c=${c} group=${group} ctx=${ctx} />`)}
     </ul>
+    ${collapsed
+      ? html`<div class="ibx-more"><${Button} size="sm" variant="ghost" icon="chevron-down" onClick=${() => setExpanded(true)}>Show ${comments.length - GROUP_PREVIEW} more ${comments.length - GROUP_PREVIEW === 1 ? 'comment' : 'comments'}<//></div>`
+      : null}
   </section>`;
 }
 
@@ -459,7 +472,7 @@ function WindowNote({ info }) {
   }
   if (info.open) {
     const h = Math.floor(info.left / 36e5);
-    const m = Math.max(1, Math.round((info.left % 36e5) / 6e4));
+    const m = Math.max(1, Math.floor((info.left % 36e5) / 6e4));
     return html`<p class="ibx-window is-open"><${Icon} name="clock" size=${14} />You can reply until ${info.label} <span class="faint">(${h ? `${h} h ` : ''}${m} min left)</span></p>`;
   }
   return html`<p class="ibx-window is-closed"><${Icon} name="clock" size=${14} />The 24-hour reply window closed at ${info.label}. Instagram only lets apps reply within 24 hours of the person's last message, so answer from the Instagram app.</p>`;
@@ -510,7 +523,7 @@ function Bubble({ m, mine, tz }) {
 }
 
 function Thread({ conv, ctx, onBack, phone, markRead }) {
-  const { ig, tz, isMineMsg, savedReplies, toast, queue, canLive, setDmProblem, markSeen, onSent } = ctx;
+  const { ig, tz, isMineMsg, savedReplies, toast, queue, queueAfterFailure, canLive, setDmProblem, markSeen, onSent } = ctx;
   const other = conv.other || {};
   const handle = other.username ? `@${other.username}` : 'Instagram user';
   const [state, setState] = useState(() => {
@@ -581,9 +594,9 @@ function Thread({ conv, ctx, onBack, phone, markRead }) {
       return true;
     } catch (err) {
       if (isNetworkError(err)) {
-        await queue('send_dm', { recipientId: other.id, text }, `send your message to ${handle}`);
-        append({ id: uid('pending_'), createdTime: new Date().toISOString(), text, attachments: [], mineHint: true, pending: true });
-        return true;
+        const queued = await queueAfterFailure(err, 'send_dm', { recipientId: other.id, text }, `send your message to ${handle}`);
+        if (queued) append({ id: uid('pending_'), createdTime: new Date().toISOString(), text, attachments: [], mineHint: true, pending: true });
+        return queued;
       }
       const p = problemOf(err);
       if (p) setDmProblem(p);
@@ -609,13 +622,11 @@ function Thread({ conv, ctx, onBack, phone, markRead }) {
     <header class="ibx-thread-head">
       ${phone ? html`<${IconButton} icon="chevron-left" label="Back to conversations" onClick=${onBack} />` : null}
       <${Avatar} name=${other.username || '?'} size=${34} />
-      <div class="grow min-w-0">
-        <p class="ibx-thread-name truncate">${handle}</p>
-        <${WindowNote} info=${info} />
-      </div>
+      <p class="ibx-thread-name grow truncate">${handle}</p>
       ${canLive ? html`<${IconButton} icon="refresh" label="Reload conversation" onClick=${() => load(true)} />` : null}
       ${other.username ? html`<a class="icon-btn icon-btn-ghost" href=${`https://www.instagram.com/${encodeURIComponent(other.username)}/`} target="_blank" rel="noopener noreferrer" aria-label=${`Open ${handle} on Instagram`} title="Open profile on Instagram"><${Icon} name="external" size=${17} /></a>` : null}
     </header>
+    <${WindowNote} info=${info} />
     <div class="ibx-thread-body" ref=${scroller} tabindex="0" aria-label="Messages">
       ${state.status === 'loading'
         ? html`<div class="ibx-thread-loading"><${Spinner} label="Loading messages" /></div>`
@@ -832,10 +843,12 @@ export default function InboxView() {
 
   // Load conversations when the Messages tab is first opened.
   const convLoaded = useRef(false);
+  const convReload = useRef(0);
   useEffect(() => {
-    if (tab !== 'messages' && !(reloadKey && convLoaded.current)) return undefined;
+    if (tab !== 'messages' && !(reloadKey !== convReload.current && convLoaded.current)) return undefined;
     let cancelled = false;
-    const force = reloadKey > 0 && convLoaded.current;
+    const force = reloadKey !== convReload.current && convLoaded.current;
+    convReload.current = reloadKey;
     convLoaded.current = true;
     if (!ig) {
       setConvState({ mode: 'cache', list: [] });
@@ -956,6 +969,19 @@ export default function InboxView() {
     return true;
   };
 
+  /**
+   * After a network failure: queue the command for the worker. When the request may already have
+   * reached Instagram (err.maybeSent: replies and messages), queuing it could post it twice, so ask
+   * the owner to check Instagram first and only queue it on request.
+   */
+  const queueAfterFailure = async (err, type, payload, what) => {
+    if (err && err.maybeSent) {
+      toast(errText(err), { kind: 'error', duration: 12000, action: { label: 'Send it with the worker', onClick: () => queue(type, payload, what) } });
+      return false;
+    }
+    return queue(type, payload, what);
+  };
+
   /** Run a live Instagram call; on a network failure (or without live data) queue it for the worker. */
   const runOrQueue = async ({ call, type, payload, what, onDone }) => {
     if (!canLive) {
@@ -967,7 +993,7 @@ export default function InboxView() {
       onDone && onDone(r);
       return true;
     } catch (err) {
-      if (isNetworkError(err)) return queue(type, payload, what);
+      if (isNetworkError(err)) return queueAfterFailure(err, type, payload, what);
       toast(errText(err), { kind: 'error' });
       return false;
     }
@@ -1037,7 +1063,7 @@ export default function InboxView() {
           toast(`Private reply sent to @${c.username}`, { kind: 'success' });
           ok = true;
         } catch (err) {
-          if (isNetworkError(err)) ok = await queue('private_reply', { commentId: c.id, text }, `send your private reply to @${c.username}`);
+          if (isNetworkError(err)) ok = await queueAfterFailure(err, 'private_reply', { commentId: c.id, text }, `send your private reply to @${c.username}`);
           else {
             const p = problemOf(err);
             if (p) setDmProblem(p);
@@ -1146,7 +1172,7 @@ export default function InboxView() {
   };
 
   const ctx = {
-    ig, tz, isMine, isMineMsg, ownId, ownName, done, savedReplies, toast, queue, canAct, canLive: !!ig && (tab === 'messages' ? convState.mode === 'live' : canLive),
+    ig, tz, isMine, isMineMsg, ownId, ownName, done, savedReplies, toast, queue, queueAfterFailure, canAct, canLive: !!ig && (tab === 'messages' ? convState.mode === 'live' : canLive),
     composer, setComposer, actions, setDmProblem, markSeen, onSent, showComment,
     dmProblem: dmProblem || (data.automations && data.automations.status && ['needs_advanced_access', 'dm_disabled', 'no_permission'].includes(data.automations.status.dm) ? data.automations.status.dm : null),
     privateSent: (id) => localPrivate.has(id) || !!privateMap[id],

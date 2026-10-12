@@ -21,13 +21,10 @@
 .link-btn:hover { color: var(--accent-strong); text-decoration-color: currentColor; }
 
 .ext-link {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 3px;
   color: var(--accent);
   text-underline-offset: 3px;
 }
-.ext-link .icon { align-self: center; flex: none; }
+.ext-link .icon { display: inline-block; margin-left: 3px; vertical-align: -1px; }
 .ext-link:hover { color: var(--accent-strong); }
 
 .ci code,

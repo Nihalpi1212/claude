@@ -375,3 +375,94 @@ test('transient GET errors are retried; creating POSTs are not', async (t) => {
   assert.deepEqual(limit, { used: 0, total: 100, durationSec: 86400 });
   assert.ok(ig.usage && typeof ig.usage.callCount === 'number');
 });
+
+test('network errors: creating POSTs are sent once and flagged maybeSent; reads and unsent requests are retried', async (t) => {
+  const { graph, ig } = await setup(t);
+  const before = count(graph, 'POST', /\/replies$/);
+  graph.state.faults.push({ method: 'POST', path: /\/replies$/, times: 3, destroy: true });
+  await assert.rejects(ig.replyToComment('17900000000000001', 'Thank you'), (err) => {
+    assert.ok(err instanceof IgError);
+    assert.equal(err.code, 'network');
+    assert.equal(err.maybeSent, true);
+    assert.match(err.userMessage, /may have gone through/);
+    return true;
+  });
+  assert.equal(count(graph, 'POST', /\/replies$/) - before, 1, 'a reply that may have reached Instagram is not resent');
+  graph.state.faults.length = 0;
+
+  // Stub transport: every request fails at the socket.
+  const calls = [];
+  const failing = (code) => async (url, init) => {
+    calls.push(`${init.method} ${new URL(url).pathname}`);
+    throw Object.assign(new TypeError('fetch failed'), code ? { cause: Object.assign(new Error(code), { code }) } : {});
+  };
+  const stub = (code) => createIg({ token: 'tok', userId: '1784', igBase: 'http://ig.invalid', fetchImpl: failing(code), retryDelayMs: 1 });
+
+  for (const send of [(c) => c.sendMessage('123', 'hi'), (c) => c.publishContainer('999'), (c) => c.post('/555/comments', { message: 'first' })]) {
+    calls.length = 0;
+    await assert.rejects(send(stub('ECONNRESET')), (err) => err.code === 'network' && err.maybeSent === true);
+    assert.equal(calls.length, 1, `${calls[0]} sent once`);
+  }
+
+  calls.length = 0;
+  await assert.rejects(stub('ECONNRESET').get('/me', { fields: 'id' }), (err) => err.code === 'network' && err.maybeSent === false);
+  assert.equal(calls.length, 3, 'reads are retried');
+
+  calls.length = 0;
+  await assert.rejects(stub('ECONNREFUSED').replyToComment('1', 'x'), (err) => err.code === 'network' && err.maybeSent === false);
+  assert.equal(calls.length, 3, 'a request that never left the machine is safe to retry');
+  assert.match(new IgError('x', { code: 'network' }).userMessage, /Could not reach Instagram/);
+});
+
+test('an object-level insights error (2108006) is not mistaken for unsupported metrics', async (t) => {
+  const { graph, ig } = await setup(t);
+  const media = await ig.listMedia({ max: 70 });
+  const [old, other] = media.filter((m) => m.mediaType === 'IMAGE');
+  const fault = {
+    method: 'GET',
+    path: new RegExp(`/${old.id}/insights$`),
+    error: { status: 400, code: 100, subcode: 2108006, message: '(#100) Media posted before business account conversion' },
+  };
+  graph.state.faults.push(fault);
+  const before = count(graph, 'GET', /\/insights$/);
+  assert.deepEqual(await ig.mediaInsights(old), {});
+  assert.equal(count(graph, 'GET', /\/insights$/) - before, 1, 'one call, no per-metric probing');
+  assert.equal(ig.unsupportedMetrics.size, 0);
+  graph.state.faults.length = 0;
+  const ok = await ig.mediaInsights(other);
+  assert.ok(ok.reach > 0 && ok.likes >= 0, 'other photos still get their metrics');
+
+  // Unknown object-level code-100 error: every metric fails one by one, so nothing is cached.
+  graph.state.faults.push({ ...fault, error: { status: 400, code: 100, message: '(#100) Invalid parameter' } });
+  await assert.rejects(ig.mediaInsights(old), (err) => err instanceof IgError && err.code === 100);
+  assert.equal(ig.unsupportedMetrics.size, 0);
+  graph.state.faults.length = 0;
+  assert.ok((await ig.mediaInsights(other)).reach > 0);
+});
+
+test('connectInstagram (Facebook Login) stores the Page token expiry and refuses short-lived tokens', async (t) => {
+  const { graph, bases } = await setup(t);
+  const never = await connectInstagram({ mode: 'facebook', token: 'user-token', ...bases });
+  assert.equal(never.tokenExpiresAt, null);
+  const dbg = graph.state.requests.find((r) => r.path.endsWith('/debug_token'));
+  assert.equal(dbg.params.input_token, 'page-token-1');
+
+  const in30Days = Math.floor(Date.now() / 1000) + 30 * 86400;
+  graph.state.tokenExpiry['page-token-1'] = in30Days;
+  const dated = await connectInstagram({ mode: 'facebook', token: 'user-token', ...bases });
+  assert.equal(dated.tokenExpiresAt, new Date(in30Days * 1000).toISOString());
+
+  graph.state.tokenExpiry['page-token-1'] = Math.floor(Date.now() / 1000) + 3600;
+  await assert.rejects(connectInstagram({ mode: 'facebook', token: 'user-token', ...bases }), (err) => {
+    assert.equal(err.code, 'short_lived');
+    assert.match(err.userMessage, /Extend Access Token/);
+    return true;
+  });
+
+  // debug_token refused: connect anyway.
+  delete graph.state.tokenExpiry['page-token-1'];
+  graph.state.faults.push({ method: 'GET', path: /\/debug_token$/, times: 1, error: { status: 400, code: 190, message: 'Invalid OAuth access token' } });
+  const fallback = await connectInstagram({ mode: 'facebook', token: 'user-token', ...bases });
+  assert.equal(fallback.token, 'page-token-1');
+  assert.equal(fallback.tokenExpiresAt, null);
+});
