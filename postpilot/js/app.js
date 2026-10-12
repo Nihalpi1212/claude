@@ -52,6 +52,8 @@ const VIEWS = {
   bio: () => import('./views/bio.js'),
   settings: () => import('./views/settings.js'),
   onboarding: () => import('./views/onboarding.js'),
+  // Opened from a reminder notification (#/post-now/<postId>); not in the navigation.
+  'post-now': () => import('./views/post-now.js'),
 };
 
 function useLazyView(name) {

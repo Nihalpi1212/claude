@@ -10,12 +10,15 @@ import { sendNotifications } from './notify.mjs';
 import token from './jobs/token.mjs';
 import outbox from './jobs/outbox.mjs';
 import publish from './jobs/publish.mjs';
+import feeds from './jobs/feeds.mjs';
 import evergreen from './jobs/evergreen.mjs';
 import autopilot from './jobs/autopilot.mjs';
 import automations from './jobs/automations.mjs';
+import invites from './jobs/invites.mjs';
 import stories from './jobs/stories.mjs';
 import analytics from './jobs/analytics.mjs';
 import competitors from './jobs/competitors.mjs';
+import reports from './jobs/reports.mjs';
 import bio from './jobs/bio.mjs';
 import housekeeping from './jobs/housekeeping.mjs';
 import maintenance from './jobs/maintenance.mjs';
@@ -27,12 +30,15 @@ export const JOBS = [
   ['token', token, true],
   ['outbox', outbox, false],
   ['publish', publish, true],
+  ['feeds', feeds, false],
   ['evergreen', evergreen, false],
   ['autopilot', autopilot, false],
   ['automations', automations, true],
+  ['invites', invites, true],
   ['stories', stories, true],
   ['analytics', analytics, true],
   ['competitors', competitors, true],
+  ['reports', reports, false],
   ['bio', bio, true],
   ['housekeeping', housekeeping, false],
   ['maintenance', maintenance, false],
@@ -58,6 +64,11 @@ const ACTIVITY_KEYS = new Set([
   'deleted',
   'aiReplies',
   'tokenRefreshed',
+  'reminded',
+  'feedItems',
+  'reportsCreated',
+  'invitesAccepted',
+  'invitesNew',
 ]);
 
 /** Count keys every stored run record carries (others are stored only when non-zero). */

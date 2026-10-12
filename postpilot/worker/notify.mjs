@@ -5,12 +5,13 @@
 // subscribed device. Payloads are end-to-end encrypted to the device, so they may name the post or
 // the sender. Subscriptions the push service reports as gone (404/410) are removed from settings.
 //
-// Events (settings.notifications.events toggles): published, failed, approval, dm, comment, account.
+// Events (settings.notifications.events toggles): published, failed, approval, dm, comment, account,
+// reminder, report, collab.
 
 import { sendPush } from '../core/webpush.js';
 import { describeError } from './context.mjs';
 
-export const NOTIFY_DEFAULTS = { published: true, failed: true, approval: true, dm: true, comment: false, account: true };
+export const NOTIFY_DEFAULTS = { published: true, failed: true, approval: true, dm: true, comment: false, account: true, reminder: true, report: true, collab: true };
 const MAX_BODY = 180;
 
 const clip = (s, n = MAX_BODY) => {
@@ -66,6 +67,27 @@ export function buildPayload(event, items) {
         body: clip(first.message || 'Open Postpilot settings to reconnect Instagram.'),
         tag: 'postpilot-account',
         url: './#/settings',
+      };
+    case 'reminder':
+      return {
+        title: n === 1 ? `Time to post your ${TYPE_NAMES[first.type] || 'post'}` : `${n} posts to post now`,
+        body: first.caption ? clip(first.caption) : 'Tap to open it, copy the caption and post it on Instagram.',
+        tag: 'postpilot-reminder',
+        url: n === 1 && first.postId ? `./#/post-now/${encodeURIComponent(first.postId)}` : './#/planner',
+      };
+    case 'report':
+      return {
+        title: first.month ? `Your ${first.monthLabel || first.month} report is ready` : 'Your monthly report is ready',
+        body: clip(first.headline || 'Open Postpilot to see how last month went.'),
+        tag: 'postpilot-report',
+        url: './#/reports',
+      };
+    case 'collab':
+      return {
+        title: plural(n, 'New collaboration invite', '{n} new collaboration invites'),
+        body: clip(first.owner ? `@${first.owner} invited you to collaborate on a post.` : 'Open Postpilot to accept or decline.'),
+        tag: 'postpilot-collab',
+        url: './#/inbox/invites',
       };
     default:
       return null;

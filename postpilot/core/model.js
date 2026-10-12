@@ -4,7 +4,8 @@
 export const SCHEMA_VERSION = 1;
 
 export const POST_TYPES = ['feed', 'carousel', 'reel', 'story'];
-export const POST_STATUSES = ['draft', 'scheduled', 'publishing', 'published', 'failed', 'canceled'];
+// 'reminded' = a reminder post (publishMode 'reminder') whose phone notification was sent; the owner posts it by hand.
+export const POST_STATUSES = ['draft', 'scheduled', 'publishing', 'published', 'failed', 'canceled', 'reminded'];
 
 export const LIMITS = {
   captionChars: 2200,
@@ -36,7 +37,7 @@ const DEFAULTS = {
     notifications: {
       vapid: null, // { publicKey, privateKeyJwk, subject } generated in the browser, used by the worker to sign pushes
       subscriptions: [], // [{ endpoint, keys: {p256dh, auth}, device, createdAt }]
-      events: { published: true, failed: true, approval: true, dm: true, comment: false, account: true },
+      events: { published: true, failed: true, approval: true, dm: true, comment: false, account: true, reminder: true, report: true, collab: true },
     },
     ui: {},
     createdAt: new Date().toISOString(),
@@ -52,7 +53,10 @@ const DEFAULTS = {
     rules: [],
     welcome: { enabled: false, text: 'Thanks for reaching out! I will get back to you soon.' },
     blockedWords: { enabled: false, words: [], action: 'hide' },
-    limits: { maxActionsPerRun: 25, maxDmsPerHour: 40 },
+    // watchDays/watchPosts: how far back comment rules look (older docs lack them: read with ?? 90 / ?? 50).
+    limits: { maxActionsPerRun: 25, maxDmsPerHour: 40, watchDays: 90, watchPosts: 50 },
+    // Usernames whose collaboration invites are accepted automatically (others notify the owner).
+    collabAllowlist: [],
     processed: { comments: {}, messages: {}, conversations: {} },
     cursors: {},
     stats: { replies: 0, dms: 0, hidden: 0 },
@@ -79,8 +83,12 @@ const DEFAULTS = {
   'analytics-daily': () => ({ v: SCHEMA_VERSION, days: {} }),
   'analytics-media': () => ({ v: SCHEMA_VERSION, media: {} }),
   'analytics-stories': () => ({ v: SCHEMA_VERSION, stories: {} }),
+  // Per-post performance over time: media[id] = { points: [{t, v, r, l, c, s, sh, f}] } (see shapes below).
+  'analytics-media-history': () => ({ v: SCHEMA_VERSION, media: {} }),
+  // Monthly reports written by worker/jobs/reports.mjs (newest first).
+  reports: () => ({ v: SCHEMA_VERSION, reports: [], lastMonth: null }),
   audience: () => ({ v: SCHEMA_VERSION, demographics: null, onlineFollowers: null, fetchedAt: null }),
-  inbox: () => ({ v: SCHEMA_VERSION, outbox: [], comments: [], conversations: [], fetchedAt: null }),
+  inbox: () => ({ v: SCHEMA_VERSION, outbox: [], comments: [], conversations: [], invites: [], invitesCheckedAt: null, fetchedAt: null }),
   log: () => ({ v: SCHEMA_VERSION, entries: [], runs: [] }),
   bio: () => ({
     v: SCHEMA_VERSION,
@@ -139,14 +147,15 @@ export function uid(prefix = '') {
  *   { id, type: 'feed'|'carousel'|'reel'|'story', status, caption, firstComment,
  *     media: [MediaRef], location: {id, name}|null, collaborators: [username],
  *     userTags: [{username, x, y, mediaIndex}], shareToFeed: true, coverAssetId, thumbOffsetMs,
- *     trialReel: null|'MANUAL'|'SS_PERFORMANCE', aiGenerated: bool,
+ *     trialReel: null|'MANUAL'|'SS_PERFORMANCE', aiGenerated: bool, publishMode: 'auto'|'reminder', reminderSentAt: ISO|null,
  *     altText, scheduledAt: ISO|null, source: 'manual'|'autopilot'|'evergreen'|'csv'|'recycle',
  *     listId?, needsApproval: bool, labels: [string], notes,
  *     createdAt, updatedAt, publishedAt, igMediaId, permalink,
  *     attempts: number, lastError: {message, code, at, permanent}|null,
  *     history: [{at, event, detail}] }
  *
- * MediaRef: { assetId, kind: 'image'|'video', altText }
+ * MediaRef: { assetId, kind: 'image'|'video', altText } or, for items added from a feed or CSV URL,
+ *   { remoteUrl, kind: 'image', altText } (published by passing the URL to Instagram; JPEG only)
  *
  * Asset (library.assets[]):
  *   { id, kind: 'image'|'video', name, mime, bytes, width, height, durationSec,
@@ -156,8 +165,17 @@ export function uid(prefix = '') {
  *
  * List (lists.lists[]) - evergreen / recurring queue:
  *   { id, name, color, enabled, order: 'sequential'|'shuffle', repeat: true (false = remove items once used), slots: [{weekday, time}],
- *     items: [{id, type, caption, firstComment, media: [MediaRef], timesUsed, lastUsedAt}],
- *     nextIndex, horizonDays, createdAt }
+ *     items: [{id, type, caption, firstComment, media: [MediaRef], timesUsed, lastUsedAt, source?: 'rss'|'csv'|'ai', link?}],
+ *     nextIndex, horizonDays, feeds: [Feed], createdAt }
+ *
+ * Feed (lists.lists[].feeds[]): { id, url, title, disabled, addedAt, checkedAt, error, seen: [guid] }
+ *
+ * MediaHistory (analytics-media-history.media[id]): { points: [{t: ISO, v: views, r: reach, l: likes, c: comments,
+ *   s: saves, sh: shares, f: follows}] } (one point per refresh while the post is under 30 days old, at most 48)
+ *
+ * Report (reports.reports[]): { id, month: 'YYYY-MM', createdAt, summary, previous, top: [MediaStats-lite], ai: string|null }
+ *
+ * Invite (inbox.invites[]): { id, mediaId, owner, caption, permalink, status: 'pending'|'accepted'|'declined', seenAt, decidedAt }
  *
  * Rule (automations.rules[]):
  *   { id, name, enabled, trigger: {source: 'comment'|'dm'|'story_reply'|'mention',
@@ -202,6 +220,8 @@ export function newPost(partial = {}) {
     coverAssetId: null,
     thumbOffsetMs: null,
     trialReel: null, // null | 'MANUAL' | 'SS_PERFORMANCE' (reels only: shown to non-followers first)
+    publishMode: 'auto', // 'auto' = the worker publishes; 'reminder' = the worker sends a phone notification and you post it by hand
+    reminderSentAt: null,
     aiGenerated: false, // sends is_ai_generated=true so Instagram shows the "AI info" label
     altText: '',
     scheduledAt: null,
@@ -271,6 +291,7 @@ export function newList(partial = {}) {
     items: [],
     nextIndex: 0,
     horizonDays: 14,
+    feeds: [], // [{id, url, title, disabled, addedAt, checkedAt, error, seen: [guid]}] RSS/Atom feeds that add items
     createdAt: new Date().toISOString(),
     ...partial,
   };
