@@ -7,6 +7,10 @@
 //   private_reply {commentId, text}     -> DM to the commenter
 // Each command ends 'done' (with `result`) or 'failed' (with a plain-language `error`). Temporary
 // problems keep the command pending for up to 3 attempts.
+// Instagram commands are sent at most once: they are claimed ('sending', attempts + 1) in one commit
+// before any is sent, the same way publish.mjs claims a post. A command still 'sending' at the start
+// of a run belongs to a run that stopped before recording the outcome; it becomes 'failed' (it may
+// already have gone out) and is never sent again automatically.
 
 import { describeError } from '../context.mjs';
 import { clip, DAY_MS, findCachedComment, isRetryable, pushHistory } from './shared.mjs';
@@ -15,6 +19,7 @@ const MAX_PER_RUN = 25;
 const MAX_ATTEMPTS = 3;
 const KEEP_FINISHED_DAYS = 7;
 const IG_TYPES = new Set(['reply_comment', 'hide_comment', 'delete_comment', 'send_dm', 'private_reply']);
+const MAYBE_SENT_ERROR = 'It may already have been sent. Check Instagram before retrying.';
 
 async function execute(ctx, cmd) {
   const p = cmd.payload || {};
@@ -69,14 +74,46 @@ export default async function outbox(ctx) {
   const peek = await ctx.store.read('inbox');
   const all = peek.outbox || [];
   const pending = all.filter((c) => c && c.status === 'pending').slice(0, MAX_PER_RUN);
+  const interrupted = all.some((c) => c && c.status === 'sending');
   const nowMs = ctx.nowMs();
-  const stale = all.some((c) => c && c.status !== 'pending' && nowMs - Date.parse(c.doneAt || c.createdAt || 0) > (KEEP_FINISHED_DAYS + 1) * DAY_MS);
-  if (!pending.length && !stale) return { commands: 0 };
+  const stale = all.some((c) => c && c.status !== 'pending' && c.status !== 'sending' && nowMs - Date.parse(c.doneAt || c.createdAt || 0) > (KEEP_FINISHED_DAYS + 1) * DAY_MS);
+  if (!pending.length && !stale && !interrupted) return { commands: 0 };
+
+  // Claim the Instagram commands in one commit before sending any of them (see the top of the file).
+  const toClaim = new Set(ctx.ig ? pending.filter((c) => IG_TYPES.has(c.type)).map((c) => c.id) : []);
+  let claimed = [];
+  let unconfirmed = 0;
+  if (toClaim.size || interrupted) {
+    await ctx.store.transact(
+      async (tx) => {
+        claimed = [];
+        unconfirmed = 0;
+        const ib = await tx.read('inbox');
+        const nowIso = ctx.nowIso();
+        for (const c of ib.outbox || []) {
+          if (!c) continue;
+          if (c.status === 'sending') {
+            Object.assign(c, { status: 'failed', error: MAYBE_SENT_ERROR, doneAt: nowIso });
+            unconfirmed++;
+          } else if (c.status === 'pending' && toClaim.has(c.id)) {
+            c.status = 'sending';
+            c.attempts = (c.attempts || 0) + 1;
+            claimed.push(structuredClone(c));
+          }
+        }
+        if (claimed.length || unconfirmed) tx.write('inbox', ib);
+      },
+      { message: 'outbox: claim commands' },
+    );
+    if (unconfirmed) ctx.log('outbox', 'error', `${unconfirmed} queued action${unconfirmed === 1 ? '' : 's'} may already have been sent by an interrupted run; marked as failed instead of sending again.`);
+  }
+  const claimedIds = new Set(claimed.map((c) => c.id));
 
   const outcomes = new Map(); // id -> fields to merge
   const publishNow = [];
+  const toRun = [...claimed];
   let done = 0;
-  let failed = 0;
+  let failed = unconfirmed;
   for (const cmd of pending) {
     const nowIso = ctx.nowIso();
     if (cmd.type === 'publish_now') {
@@ -90,7 +127,11 @@ export default async function outbox(ctx) {
       failed++;
       continue;
     }
-    const attempts = (cmd.attempts || 0) + 1;
+    if (!IG_TYPES.has(cmd.type)) toRun.push(cmd); // unknown type: fails below
+  }
+  for (const cmd of toRun) {
+    const nowIso = ctx.nowIso();
+    const attempts = claimedIds.has(cmd.id) ? cmd.attempts : (cmd.attempts || 0) + 1;
     try {
       const result = await execute(ctx, cmd);
       outcomes.set(cmd.id, { status: 'done', result, error: null, doneAt: nowIso, attempts });
@@ -98,7 +139,12 @@ export default async function outbox(ctx) {
       ctx.log('outbox', 'info', `Done: ${cmd.type.replace(/_/g, ' ')}.`);
     } catch (err) {
       const message = describeError(err);
-      if (isRetryable(err) && attempts < MAX_ATTEMPTS) {
+      if (err && err.maybeSent) {
+        // The connection dropped after the request may have reached Instagram: never resend it.
+        outcomes.set(cmd.id, { status: 'failed', error: MAYBE_SENT_ERROR, doneAt: nowIso, attempts });
+        failed++;
+        ctx.log('outbox', 'error', `Could not confirm ${cmd.type.replace(/_/g, ' ')}: ${message}`, { code: err.code ?? null });
+      } else if (isRetryable(err) && attempts < MAX_ATTEMPTS) {
         outcomes.set(cmd.id, { status: 'pending', error: message, attempts });
         ctx.log('outbox', 'warn', `Will retry ${cmd.type.replace(/_/g, ' ')}: ${message}`);
       } else {
@@ -108,6 +154,7 @@ export default async function outbox(ctx) {
       }
     }
   }
+  if (!outcomes.size && !publishNow.length && !stale) return { commands: 0, commandsFailed: failed };
 
   await ctx.store.transact(
     async (tx) => {
@@ -141,13 +188,13 @@ export default async function outbox(ctx) {
       const list = ib.outbox || [];
       for (const c of list) {
         const o = outcomes.get(c.id);
-        if (o && c.status === 'pending') {
+        if (o && c.status === (claimedIds.has(c.id) ? 'sending' : 'pending')) {
           Object.assign(c, o);
           if (o.status === 'done' && IG_TYPES.has(c.type)) applyToCache(ib, c, o.result, ctx);
         }
       }
       const keepAfter = ctx.nowMs() - KEEP_FINISHED_DAYS * DAY_MS;
-      ib.outbox = list.filter((c) => c && (c.status === 'pending' || Date.parse(c.doneAt || c.createdAt || 0) >= keepAfter));
+      ib.outbox = list.filter((c) => c && (c.status === 'pending' || c.status === 'sending' || Date.parse(c.doneAt || c.createdAt || 0) >= keepAfter));
       tx.write('inbox', ib);
     },
     { message: 'outbox: process commands' },

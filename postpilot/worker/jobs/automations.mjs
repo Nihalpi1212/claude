@@ -543,8 +543,9 @@ export default async function automations(ctx) {
 
       const seenBefore = !!proc.conversations[conv.id];
       const fromUs = msgs.some((m) => isOwn(m.fromId, m.fromUsername));
-      // Messages up to our latest message in the thread were already answered (by hand, or by a
-      // run whose record was lost): they get no automated reply.
+      // Messages older than our latest message in the thread were already answered (by hand, or by
+      // a run whose record was lost): they get no automated reply. Times have one-second precision,
+      // so a message from the same second still counts as new.
       const answeredUntil = Math.max(0, ...msgs.filter((m) => isOwn(m.fromId, m.fromUsername)).map((m) => ms(m.createdTime) || 0));
       let firstContact = !seenBefore && !fromUs && msgs.length > 0 && msgs.every((m) => ms(m.createdTime) >= baselineMs);
       let sentInThread = false;
@@ -552,7 +553,7 @@ export default async function automations(ctx) {
       const inbound = msgs.filter((m) => m.id && !isOwn(m.fromId, m.fromUsername) && !proc.messages[m.id]).sort((a, b) => (ms(a.createdTime) || 0) - (ms(b.createdTime) || 0));
       const participant = (conv.participants || []).find((p) => !isOwn(p.id, p.username));
       for (const m of inbound) {
-        if (ms(m.createdTime) >= baselineMs && ms(m.createdTime) > answeredUntil && !sentInThread) {
+        if (ms(m.createdTime) >= baselineMs && ms(m.createdTime) >= answeredUntil && !sentInThread) {
           result.messagesChecked++;
           const ev = {
             source: m.replyTo && m.replyTo.story ? 'story_reply' : 'dm',

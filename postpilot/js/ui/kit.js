@@ -339,7 +339,14 @@ export function Menu({ items = [], trigger, label = 'More actions', icon = 'more
     }
     pop?.querySelector('[role="menuitem"]:not([disabled])')?.focus({ preventScroll: true });
     const onDown = (e) => rootRef.current && !rootRef.current.contains(e.target) && setOpen(false);
-    const onScroll = (e) => listRef.current && !listRef.current.contains(e.target) && setOpen(false);
+    // Close when the page actually scrolls the trigger away, not on incidental scroll events
+    // (e.g. the browser scrolling the button into view right after it was clicked).
+    const anchor = triggerEl()?.getBoundingClientRect();
+    const onScroll = (e) => {
+      if (!listRef.current || listRef.current.contains(e.target)) return;
+      const now = triggerEl()?.getBoundingClientRect();
+      if (!anchor || !now || Math.abs(now.top - anchor.top) > 4 || Math.abs(now.left - anchor.left) > 4) setOpen(false);
+    };
     const onResize = () => setOpen(false);
     document.addEventListener('pointerdown', onDown, true);
     window.addEventListener('scroll', onScroll, true);

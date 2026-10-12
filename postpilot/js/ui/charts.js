@@ -38,7 +38,7 @@ export function formatValue(n, kind = 'number') {
   const abs = Math.abs(n);
   switch (kind) {
     case 'percent':
-      return nf({ style: 'percent', maximumFractionDigits: 1 }).format(n);
+      return nf({ style: 'percent', minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(n);
     case 'compact':
       if (abs >= 1000) return nf({ notation: 'compact', maximumFractionDigits: 1 }).format(n);
       return nf({ maximumFractionDigits: Number.isInteger(n) ? 0 : 1 }).format(n);
