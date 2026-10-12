@@ -67,3 +67,6 @@
 @media (max-width: 759px) {
   .lock-card { padding: 20px; }
 }
+
+a.worker-status { text-decoration: none; border-radius: var(--r-md); }
+a.worker-status:hover { background: var(--surface-2); color: var(--ink); }

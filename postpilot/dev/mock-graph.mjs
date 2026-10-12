@@ -884,6 +884,12 @@ export function createMockGraph({
       });
     }
     if (p.share_to_feed !== undefined && mt !== 'REELS') throw new GraphFail(100, '(#100) share_to_feed is only supported for reels.');
+    if (p.is_ai_generated !== undefined && (isItem || mt === 'STORIES')) throw new GraphFail(100, '(#100) is_ai_generated is not supported for stories or carousel items.');
+    if (p.trial_params !== undefined) {
+      const tp = parseJson(p.trial_params, 'trial_params');
+      if (mt !== 'REELS') throw new GraphFail(100, '(#100) trial_params is only supported for reels.');
+      if (!tp || !['MANUAL', 'SS_PERFORMANCE'].includes(tp.graduation_strategy)) throw new GraphFail(100, '(#100) Param trial_params[graduation_strategy] must be MANUAL or SS_PERFORMANCE');
+    }
     let children = null;
     if (mt === 'CAROUSEL') {
       const raw = parseJson(String(p.children || '').trim().startsWith('[') ? p.children : null, 'children') || String(p.children || '').split(',').map((s) => s.trim()).filter(Boolean);

@@ -152,6 +152,8 @@ export async function publishPost({
   const caption = normText(post.caption) ? post.caption : undefined;
   const collaborators = (post.collaborators || []).map(stripAt).filter(Boolean).slice(0, 3);
   const locationId = post.location && post.location.id ? String(post.location.id) : undefined;
+  // "AI info" label (Graph API 2026-06): allowed on single posts, reels and carousel parents, not carousel items.
+  const aiGenerated = post.aiGenerated ? true : undefined;
   const tags = (post.userTags || []).filter((t) => t && stripAt(t.username));
   const tagsWithXY = (index) =>
     tags.filter((t) => (t.mediaIndex ?? 0) === index).map((t) => ({ username: stripAt(t.username), x: clamp01(t.x), y: clamp01(t.y) }));
@@ -193,7 +195,10 @@ export async function publishPost({
       collaborators,
       location_id: locationId,
       user_tags: tags.map((t) => ({ username: stripAt(t.username) })),
+      is_ai_generated: aiGenerated,
     };
+    // Trial reels are shown to non-followers first; graduation is manual or automatic.
+    if (post.trialReel === 'MANUAL' || post.trialReel === 'SS_PERFORMANCE') p.trial_params = { graduation_strategy: post.trialReel };
     if (post.coverAssetId) {
       const cover = getAsset(post.coverAssetId);
       if (cover) p.cover_url = (await expose(cover)).url;
@@ -245,6 +250,7 @@ export async function publishPost({
         user_tags: tagsWithXY(0),
         location_id: locationId,
         collaborators,
+        is_ai_generated: aiGenerated,
       });
       containers.parent = await createImage(params, asset);
     }
@@ -364,7 +370,7 @@ export async function publishPost({
       if (!containers) await createAll();
       if (type === 'carousel' && !containers.parent) {
         await waitFor(containers.children);
-        const params = clean({ media_type: 'CAROUSEL', children: containers.children.join(','), caption, location_id: locationId, collaborators });
+        const params = clean({ media_type: 'CAROUSEL', children: containers.children.join(','), caption, location_id: locationId, collaborators, is_ai_generated: aiGenerated });
         containers.parent = (await ig.createContainer(params)).id;
         log('Created the carousel container.');
         await save();

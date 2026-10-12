@@ -18,6 +18,7 @@ import analytics from './jobs/analytics.mjs';
 import competitors from './jobs/competitors.mjs';
 import bio from './jobs/bio.mjs';
 import housekeeping from './jobs/housekeeping.mjs';
+import maintenance from './jobs/maintenance.mjs';
 
 export const NOT_CONFIGURED_MESSAGE = 'Postpilot worker is not configured yet (POSTPILOT_DATA_KEY secret missing).';
 
@@ -34,10 +35,11 @@ export const JOBS = [
   ['competitors', competitors, true],
   ['bio', bio, true],
   ['housekeeping', housekeeping, false],
+  ['maintenance', maintenance, false],
 ];
 
 /** Jobs that still run while the worker is paused in Settings (maintenance only). */
-const RUN_WHEN_PAUSED = new Set(['token', 'housekeeping']);
+const RUN_WHEN_PAUSED = new Set(['token', 'housekeeping', 'maintenance']);
 
 /** Counts that make a run worth recording even when nothing failed. */
 const ACTIVITY_KEYS = new Set([

@@ -328,3 +328,23 @@ test('missing assets and generic errors are classified', async (t) => {
   assert.equal(classifyError(new Error('GitHub is down')).permanent, false);
   assert.equal(classifyError(new IgError('expired', { code: 190, subcode: 463 })).auth, true);
 });
+
+test('trial reels and the AI label are sent only where Instagram accepts them', async (t) => {
+  const { graph, addAsset, base } = await setup(t);
+  const video = await addAsset('video', 'clip.mp4', { durationSec: 5 });
+  await publishPost({ ...base, post: newPost({ type: 'reel', caption: 'Trial', media: [{ assetId: video.id, kind: 'video' }], trialReel: 'SS_PERFORMANCE', aiGenerated: true }) });
+  let p = lastCreate(graph);
+  assert.deepEqual(JSON.parse(p.trial_params), { graduation_strategy: 'SS_PERFORMANCE' });
+  assert.equal(p.is_ai_generated, 'true');
+
+  const a = await addAsset('image', 'f01.jpg');
+  const b = await addAsset('image', 'f02.jpg');
+  await publishPost({ ...base, post: newPost({ type: 'carousel', caption: 'Two', media: [{ assetId: a.id }, { assetId: b.id }], aiGenerated: true }) });
+  const creates = graph.state.requests.filter((r) => r.method === 'POST' && /\/media$/.test(r.path)).map((r) => r.params);
+  const children = creates.filter((c) => c.is_carousel_item === 'true');
+  assert.ok(children.length >= 2 && children.every((c) => c.is_ai_generated === undefined), 'never on carousel items');
+  p = lastCreate(graph);
+  assert.equal(p.media_type, 'CAROUSEL');
+  assert.equal(p.is_ai_generated, 'true');
+  assert.equal(p.trial_params, undefined);
+});

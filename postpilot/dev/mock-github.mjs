@@ -10,6 +10,7 @@ export function createMockGitHub({ owner = 'demo', repo = 'postpilot', defaultBr
   const refs = new Map(); // branch -> commitSha
   const secrets = new Map();
   const runs = [];
+  const workflow = { state: 'active', enabledCalls: 0 }; // state can be set to 'disabled_inactivity' in tests
   let seq = 0;
   const stats = { requests: 0, writes: 0 };
 
@@ -177,7 +178,12 @@ export function createMockGitHub({ owner = 'demo', repo = 'postpilot', defaultBr
       return send(res, 204, null), true;
     }
     if (method === 'GET' && (m = p.match(/^\/actions\/workflows\/([^/]+)\/runs/))) return send(res, 200, { total_count: runs.length, workflow_runs: runs.slice(0, 10) }), true;
-    if (method === 'GET' && (m = p.match(/^\/actions\/workflows\/([^/?]+)$/))) return send(res, 200, { id: 1, name: 'Postpilot worker', path: `.github/workflows/${m[1]}`, state: 'active' }), true;
+    if (method === 'GET' && (m = p.match(/^\/actions\/workflows\/([^/?]+)$/))) return send(res, 200, { id: 1, name: 'Postpilot worker', path: `.github/workflows/${m[1]}`, state: workflow.state }), true;
+    if (method === 'PUT' && (m = p.match(/^\/actions\/workflows\/([^/]+)\/enable$/))) {
+      workflow.state = 'active';
+      workflow.enabledCalls++;
+      return send(res, 204, null), true;
+    }
     if (method === 'GET' && p === '/actions/secrets/public-key') {
       // With secretsKeyPair (dev server) the real public key is returned so sealed secrets can be opened locally.
       if (secretsKeyPair) return send(res, 200, { key_id: 'mock-key', key: Buffer.from(secretsKeyPair.publicKey).toString('base64') }), true;
@@ -197,5 +203,5 @@ export function createMockGitHub({ owner = 'demo', repo = 'postpilot', defaultBr
     return send(res, 404, { message: `Mock GitHub: no route for ${method} ${p}` }), true;
   }
 
-  return { handle, refs, commits, trees, blobs, secrets, runs, stats, owner, repo, defaultBranch, secretsKeyPair };
+  return { handle, refs, commits, trees, blobs, secrets, runs, workflow, stats, owner, repo, defaultBranch, secretsKeyPair };
 }

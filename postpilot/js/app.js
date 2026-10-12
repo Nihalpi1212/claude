@@ -293,6 +293,12 @@ export function App({ session }) {
     [session, settings, ig, tz, route, toast, confirm, dispatchWorker],
   );
 
+  const titleName = route.name;
+  useEffect(() => {
+    const item = NAV.flatMap((g) => g.items).find((i) => i.name === titleName);
+    document.title = item ? `${item.label} · ${APP_NAME}` : APP_NAME;
+  }, [titleName]);
+
   if (!ready || !settings) {
     return html`<div class="boot"><${Spinner} /><p class="muted">Opening your encrypted workspace…</p></div>`;
   }
