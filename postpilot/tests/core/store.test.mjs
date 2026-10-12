@@ -77,3 +77,9 @@ test('store: gives up with ConflictError when the branch never stops moving', as
     ConflictError,
   );
 });
+
+test('passphrase strength rules', async () => {
+  const { passphraseProblem } = await import('../../core/crypto.js');
+  for (const weak of ['short', 'password1234', 'instagram2026!', 'aaaaaaaaaaaaaa', 'abcabcabcabc', 'lowercaseonly']) assert.ok(passphraseProblem(weak), weak);
+  for (const ok of ['blue harbour morning ferry', 'correct horse battery staple', 'Tr0ub4dor&3xyz', 'averylongsingleword']) assert.equal(passphraseProblem(ok), null, ok);
+});

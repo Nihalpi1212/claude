@@ -1,6 +1,6 @@
 // Lock screen: GitHub token + passphrase. Also creates the encrypted workspace on first use.
 
-import { WrongPassphraseError } from '../../core/crypto.js';
+import { passphraseProblem, WrongPassphraseError } from '../../core/crypto.js';
 import { html, useEffect, useState } from '../../vendor/preact.js';
 import { APP_NAME, ENDPOINTS, guessRepoFromLocation } from '../config.js';
 import { createWorkspace, inspectRepo, savedLogin, unlock } from '../session.js';
@@ -70,7 +70,8 @@ export default function LockScreen({ onUnlocked, onChange }) {
   async function doCreate(e) {
     e.preventDefault();
     setError('');
-    if (passphrase.length < 10) return setError('Use a passphrase of at least 10 characters. A short sentence works well.');
+    const weak = passphraseProblem(passphrase);
+    if (weak) return setError(weak);
     if (passphrase !== passphrase2) return setError('The two passphrases do not match.');
     setBusy(true);
     try {
@@ -133,7 +134,7 @@ export default function LockScreen({ onUnlocked, onChange }) {
       html`<form class="stack" onSubmit=${doCreate}>
         <p>Signed in as <strong>${info.login}</strong>. ${APP_NAME} is not set up in <span class="mono">${owner}/${repo}</span> yet.
         Choose a passphrase. It encrypts everything ${APP_NAME} stores in this public repository.</p>
-        <${Field} label="New passphrase" hint="At least 10 characters. A short sentence is easy to remember and hard to guess.">
+        <${Field} label="New passphrase" hint="At least 12 characters. A short sentence of three or four words is easy to remember and hard to guess. The encrypted key file is public, so a weak passphrase can be guessed offline.">
           <${TextInput} id="lock-new-passphrase" type="password" value=${passphrase} onInput=${(e) => setPassphrase(e.currentTarget.value)} autocomplete="new-password" />
         <//>
         <${Field} label="Repeat passphrase">

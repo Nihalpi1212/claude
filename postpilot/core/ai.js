@@ -168,7 +168,15 @@ export function cleanHashtags(list, { max = LIMITS.hashtags, avoid = [] } = {}) 
 }
 
 function untrusted(tag, text, max = 4000) {
-  return `<${tag}>\n${String(text ?? '').slice(0, max).replace(new RegExp(`</?${tag}>`, 'gi'), '')}\n</${tag}>`;
+  // Strip until nothing changes so nested pieces like '</mess</message>age>' cannot rebuild a tag.
+  const re = new RegExp(`<\\s*/?\\s*${tag}\\s*>`, 'gi');
+  let s = String(text ?? '').slice(0, max);
+  let prev;
+  do {
+    prev = s;
+    s = s.replace(re, '');
+  } while (s !== prev);
+  return `<${tag}>\n${s}\n</${tag}>`;
 }
 
 const EMOJI_GUIDE = {

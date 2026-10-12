@@ -48,6 +48,10 @@ const RATE_LIMIT_PAUSE_MIN = 60;
 const BLOCKED_PAUSE_MS = 6 * 36e5;
 // perform() result when the request may have reached Instagram before failing (err.maybeSent).
 const UNSURE = 'unsure';
+// perform() result when Claude was briefly unavailable (rate limit, overload, server or network
+// error) and the action has no fallback text: the event is left unprocessed and retried next run.
+const AI_RETRY = Symbol('ai_retry');
+const AI_TRANSIENT = new Set(['rate_limit', 'overloaded', 'server', 'network']);
 
 const isDmAction = (a) => a.type === 'private_reply' || a.type === 'send_dm' || (a.type === 'ai_reply' && a.channel === 'dm');
 const isCommentReply = (a) => a.type === 'reply_comment' || (a.type === 'ai_reply' && a.channel !== 'dm');
@@ -97,6 +101,7 @@ export default async function automations(ctx) {
   let pausedUntilMs = 0; // new cursors.pausedUntil, when this run hit a limit
   let status = null; // new automations.status.dm info, when it changed
   let unflushed = 0;
+  let aiDown = false; // Claude failed with a temporary error this run: later AI replies wait for the next run
   // Push notifications for new comments/DMs: anything newer than what the previous run saw
   // (nothing on the very first run). Works whether or not rules are switched on.
   const prevCommentSeen = ms(cursors.commentsSeenAt);
@@ -200,7 +205,8 @@ export default async function automations(ctx) {
             changed = true;
           }
         }
-        if ((a.cursors.startedAt || null) !== startedAt && (final || startedAt)) {
+        // Fill in only: the app sets (on) and clears (off) the start time, possibly during this run.
+        if (startedAt && !a.cursors.startedAt && a.enabled !== false) {
           a.cursors.startedAt = startedAt;
           changed = true;
         }
@@ -247,7 +253,8 @@ export default async function automations(ctx) {
 
   /**
    * Run one action. Returns true when it was performed, UNSURE when Instagram may have received it
-   * but did not confirm (never send it again), false when it was skipped or refused.
+   * but did not confirm (never send it again), AI_RETRY when Claude was temporarily unavailable
+   * (try the event again next run), false when it was skipped or refused.
    */
   async function perform(action, ev, ctxInfo) {
     if (actionsLeft <= 0 || throttled) return false;
@@ -257,7 +264,10 @@ export default async function automations(ctx) {
     let kind = action.type;
     try {
       if (action.type === 'ai_reply') {
-        if (ctx.ai) {
+        if (ctx.ai && aiDown) {
+          // Do not wait through the SDK's retries again for every event this run.
+          if (!text) return AI_RETRY;
+        } else if (ctx.ai) {
           try {
             const reply = await ctx.ai.autoReply({ message: ev.text || '', guidance: action.guidance || '', kind: channel === 'dm' ? 'dm' : 'comment', postCaption: ctxInfo.caption || '' });
             if (reply) {
@@ -268,8 +278,11 @@ export default async function automations(ctx) {
               return false;
             }
           } catch (err) {
+            // Handled here so the AiError's isAuth/isRateLimit are never taken for Instagram errors.
+            const transient = AI_TRANSIENT.has(err && err.code);
             ctx.log('automations', 'warn', `AI reply failed: ${describeError(err)}`);
-            if (!text) return false;
+            if (transient) aiDown = true;
+            if (!text) return transient ? AI_RETRY : false;
           }
         } else if (!text) {
           activity({ ...base, ok: false, skipped: 'ai_not_configured' });
@@ -378,6 +391,12 @@ export default async function automations(ctx) {
       if ((dmFailed || dmUnsure) && isCommentReply(action)) continue;
       try {
         const done = await perform(action, ev, ctxInfo);
+        if (done === AI_RETRY) {
+          // Nothing was sent for this event yet: leave it for the next run.
+          if (!acted) return { done: false, acted: false };
+          if (isDmAction(action)) dmFailed = true;
+          continue;
+        }
         if (done) {
           acted = true;
           if (action.ruleId) fired.add(action.ruleId);

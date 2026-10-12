@@ -150,3 +150,27 @@ export function concat(...parts) {
   }
   return out;
 }
+
+const COMMON_PASSPHRASES = [
+  'password', 'passphrase', 'instagram', 'postpilot', 'qwerty', 'qwertyuiop', 'asdfghjkl', 'iloveyou', 'letmein',
+  'welcome', 'sunflower', 'sunflowers', 'football', 'baseball', 'dragon', 'monkey', 'princess', 'master', 'shadow',
+  'superman', 'starwars', 'whatever', 'trustno', 'abcdefgh', 'abcdefghij', 'changeme', 'secret', 'mypassword',
+  'mysecret', 'loveyou', 'admin', 'administrator', 'photography', 'photographer', 'creator', 'business', 'socialmedia',
+];
+
+/**
+ * Why a passphrase is too weak to protect a keyring that anyone can download and attack offline,
+ * or null when it is acceptable. Rules: 12+ characters, not a common password (ignoring digits and
+ * symbols), not repetitive, and either 3+ words, 16+ characters, or 3 character classes.
+ */
+export function passphraseProblem(passphrase) {
+  const p = String(passphrase || '').normalize('NFKC');
+  if (p.length < 12) return 'Use at least 12 characters. A short sentence of three or four words works well.';
+  const letters = p.toLowerCase().replace(/[^a-z]/g, '');
+  if (COMMON_PASSPHRASES.some((w) => letters === w || letters === w + w)) return 'That passphrase is too common. Use a sentence only you would think of.';
+  if (new Set(p.toLowerCase()).size < 6) return 'That passphrase is too repetitive. Mix in more different characters or words.';
+  const words = p.trim().split(/[\s\-_.]+/).filter((w) => w.length >= 2).length;
+  const classes = [/[a-z]/, /[A-Z]/, /[0-9]/, /[^A-Za-z0-9]/].filter((r) => r.test(p)).length;
+  if (words >= 3 || p.length >= 16 || classes >= 3) return null;
+  return 'Make it stronger: use three or more words, or at least 16 characters.';
+}

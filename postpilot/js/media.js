@@ -1,6 +1,7 @@
 // Browser media pipeline: probe, crop/convert to JPEG, thumbnails, encrypted upload, object-URL cache.
 
 import { LIMITS, newAsset } from '../core/model.js';
+import { stripMp4Metadata } from '../core/mp4.js';
 import { getStore, transact } from './data.js';
 
 export const ASPECTS = {
@@ -178,9 +179,12 @@ export async function prepareFile(file, { aspect = null, focus, zoom } = {}) {
       throw new Error(`"${file.name}" is ${(file.size / 1048576).toFixed(0)} MB. Videos must be under ${LIMITS.videoMaxBytes / 1048576} MB to store on GitHub. Compress it first.`);
     }
     const meta = await probeVideo(file);
+    // Drop GPS/device metadata boxes before the file is stored (and, at publish time, made public).
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    stripMp4Metadata(bytes);
     return {
       kind: 'video',
-      blob: file,
+      blob: new Blob([bytes], { type: file.type || 'video/mp4' }),
       thumbBlob: meta.posterBlob,
       width: meta.width,
       height: meta.height,
