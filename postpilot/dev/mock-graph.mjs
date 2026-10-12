@@ -298,6 +298,7 @@ export function createMockGraph({
   const igsid = (u) => `7${String(h32(`igsid|${u}`)).padStart(10, '0')}${String(h32(`igsid2|${u}`) % 100000).padStart(5, '0')}`;
 
   const state = {
+    cdn: new Map(), // key -> {bytes, type}: copies of published media
     userId: `178414${String(h32(`uid|${seed}`)).padStart(11, '0')}`,
     appScopedId: `2690${String(h32(`asid|${seed}`)).padStart(12, '0')}`,
     pageId: `1040${String(h32(`page|${seed}`)).padStart(11, '0')}`,
@@ -574,7 +575,12 @@ export function createMockGraph({
     return `${ctx.fixtures.replace(/\/+$/, '')}/${file}`;
   }
 
+  function cdnUrl(ctx, key) {
+    return `${ctx.origin}${ctx.prefix}/cdn/${key}`;
+  }
+
   function mediaUrl(m, ctx) {
+    if (m.cdnKey) return cdnUrl(ctx, m.cdnKey);
     return m.url || fixtures(ctx, m.file);
   }
 
@@ -596,7 +602,7 @@ export function createMockGraph({
       media_type: m.media_type,
       media_product_type: m.media_product_type,
       media_url: mediaUrl(m, ctx),
-      thumbnail_url: isVideo ? m.thumbUrl || fixtures(ctx, m.thumbFile || 'f01.jpg') : undefined,
+      thumbnail_url: isVideo ? (m.thumbCdnKey ? cdnUrl(ctx, m.thumbCdnKey) : m.thumbUrl || fixtures(ctx, m.thumbFile || 'f01.jpg')) : undefined,
       permalink: permalinkOf(m),
       shortcode: m.media_product_type === 'STORY' ? undefined : m.shortcode,
       timestamp: graphTime(m.timestamp),
@@ -616,7 +622,7 @@ export function createMockGraph({
     return {
       id: c.id,
       media_type: c.media_type,
-      media_url: c.url || fixtures(ctx, c.file),
+      media_url: c.cdnKey ? cdnUrl(ctx, c.cdnKey) : c.url || fixtures(ctx, c.file),
       thumbnail_url: c.media_type === 'VIDEO' ? fixtures(ctx, 'f01.jpg') : undefined,
       timestamp: graphTime(c.timestamp),
       username: state.username,
@@ -790,6 +796,17 @@ export function createMockGraph({
     return c.uploadPending ? 'In Progress: Waiting for the video upload.' : 'In Progress: Media is still being processed.';
   }
 
+  // Like Instagram, keep our own copy of downloaded media ("CDN") so published posts keep working
+  // after the source URL (the worker's temporary public file) is deleted.
+  const fetchedMedia = new Map(); // source url -> {bytes, type}
+  function toCdn(url) {
+    const hit = url && fetchedMedia.get(url);
+    if (!hit) return null;
+    const key = `c${state.cdn.size + 1}${hit.type === 'video/mp4' ? '.mp4' : '.jpg'}`;
+    state.cdn.set(key, hit);
+    return key;
+  }
+
   async function checkUrl(kind, url, { aspect } = {}) {
     if (!validateMediaUrls) return null;
     let res;
@@ -800,6 +817,8 @@ export function createMockGraph({
     }
     if (!res.ok) return `Error: Media download has failed. The media URI doesn't meet our requirements (HTTP ${res.status}). (2207052)`;
     const buf = Buffer.from(await res.arrayBuffer());
+    fetchedMedia.set(url, { bytes: buf, type: kind === 'image' ? 'image/jpeg' : 'video/mp4' });
+    if (fetchedMedia.size > 200) fetchedMedia.delete(fetchedMedia.keys().next().value);
     if (kind === 'image') {
       if (buf.length < 4 || buf[0] !== 0xff || buf[1] !== 0xd8) return 'Error: Unsupported image format. Only JPEG images are supported. (36001, 2207005)';
       if (buf.length > 8 * 1024 * 1024) return 'Error: The image is too large. (36000, 2207004)';
@@ -951,8 +970,10 @@ export function createMockGraph({
       media_type: mt === 'CAROUSEL' ? 'CAROUSEL_ALBUM' : isVideo ? 'VIDEO' : 'IMAGE',
       media_product_type: isStory ? 'STORY' : mt === 'REELS' ? 'REELS' : 'FEED',
       url: pp.image_url || pp.video_url || null,
+      cdnKey: toCdn(pp.image_url || pp.video_url),
       file: pp.image_url || pp.video_url ? null : isVideo ? 'clip.mp4' : 'f01.jpg',
       thumbUrl: pp.cover_url || null,
+      thumbCdnKey: toCdn(pp.cover_url),
       thumbFile: isVideo ? 'f05.jpg' : null,
       timestamp: nowMs(),
       shortcode: shortcode(),
@@ -964,7 +985,7 @@ export function createMockGraph({
       location_id: pp.location_id || null,
       children: (c.children || []).map((cid) => {
         const ch = state.containers.get(cid);
-        return reg('child', { id: nextId('179'), media_type: ch.kind === 'video' ? 'VIDEO' : 'IMAGE', url: ch.params.image_url || ch.params.video_url || null, file: ch.params.image_url ? null : 'clip.mp4', timestamp: nowMs() });
+        return reg('child', { id: nextId('179'), media_type: ch.kind === 'video' ? 'VIDEO' : 'IMAGE', url: ch.params.image_url || ch.params.video_url || null, cdnKey: toCdn(ch.params.image_url || ch.params.video_url), file: ch.params.image_url ? null : 'clip.mp4', timestamp: nowMs() });
       }),
       comments_count: 0,
       like_count: 0,
@@ -1284,6 +1305,12 @@ export function createMockGraph({
       fixtures: typeof fixturesBase === 'function' ? fixturesBase(req) : fixturesBase || `http://${req.headers.host || 'localhost'}${fixturesPath}`,
       asApp: false,
     };
+    if (method === 'GET' && pathname.startsWith('/cdn/')) {
+      const hit = state.cdn.get(pathname.slice(5));
+      res.writeHead(hit ? 200 : 404, { 'Content-Type': hit ? hit.type : 'text/plain', 'Access-Control-Allow-Origin': '*' });
+      res.end(hit ? hit.bytes : 'not found');
+      return true;
+    }
     state.requests.push({ method, path: pathname, params: { ...params, access_token: undefined } });
     if (state.requests.length > 1000) state.requests.splice(0, 200);
     if (applyFault(method, pathname, params, res)) return true;

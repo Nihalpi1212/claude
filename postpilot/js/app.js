@@ -4,7 +4,7 @@ import { createIg } from '../core/ig.js';
 import { relative } from '../core/time.js';
 import { html, createContext, useCallback, useContext, useEffect, useErrorBoundary, useMemo, useRef, useState } from '../vendor/preact.js';
 import { APP_NAME, ENDPOINTS, WORKER_WORKFLOW } from './config.js';
-import { initData, refreshNow, stopData, useDoc } from './data.js';
+import { initData, readDoc, refreshNow, stopData, useDoc } from './data.js';
 import { navigate, useRoute } from './router.js';
 import { forget } from './session.js';
 import { Icon } from './ui/icons.js';
@@ -76,6 +76,23 @@ function ViewOutlet({ name }) {
   }
   if (!Comp) return html`<div class="page view-loading"><${Spinner} label="Loading" /></div>`;
   return html`<${SafeView} key=${name} Comp=${Comp} />`;
+}
+
+/** Poll the encrypted run log until a worker run that started after `sinceMs` has finished. */
+export async function waitForWorkerRun(sinceMs, timeoutMs = 240_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 4000));
+    try {
+      await refreshNow();
+      const log = await readDoc('log');
+      const run = (log.runs || []).find((r) => Date.parse(r.finishedAt || 0) >= sinceMs - 5000);
+      if (run) return run;
+    } catch {
+      /* keep waiting */
+    }
+  }
+  return null;
 }
 
 function SafeView({ Comp }) {
@@ -258,17 +275,27 @@ export function App({ session }) {
     [],
   );
 
+  /**
+   * Start the worker workflow now. Options:
+   *  - quiet: no "Worker started" toast (for screens that show their own progress)
+   *  - wait: resolve only when the run has reported (returns its run record, or null on timeout)
+   */
   const dispatchWorker = useCallback(
-    async (reason = 'app') => {
+    async (reason = 'app', { quiet = false, wait = false, timeoutMs = 240_000 } = {}) => {
+      const startedAt = Date.now();
       try {
         await session.gh.dispatchWorkflow(WORKER_WORKFLOW, (await session.gh.getRepo()).default_branch, { reason });
-        toast('Worker started. Changes appear within a couple of minutes.', { kind: 'success' });
-        // Pull fresh data a few times while the worker runs.
-        for (const ms of [45_000, 90_000, 150_000]) setTimeout(() => refreshNow().catch(() => {}), ms);
       } catch (err) {
         toast(`Could not start the worker: ${err.message}. Check Settings → Worker.`, { kind: 'error' });
         throw err;
       }
+      if (!quiet) toast('Worker started. Changes appear within a couple of minutes.', { kind: 'success' });
+      if (!wait) {
+        // Pull fresh data a few times while the worker runs.
+        for (const ms of [45_000, 90_000, 150_000]) setTimeout(() => refreshNow().catch(() => {}), ms);
+        return null;
+      }
+      return waitForWorkerRun(startedAt, timeoutMs);
     },
     [session],
   );

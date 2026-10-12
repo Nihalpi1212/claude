@@ -162,7 +162,7 @@ is still processing so the next run can resume from `post.containers`).
   toast(message, {kind: 'info'|'success'|'error', action?: {label, onClick}}),
   confirm({title, body, confirmLabel, danger}) -> Promise<boolean>,
   openComposer(postIdOrPartialPost?),       // opens the composer drawer
-  dispatchWorker(reason) -> Promise<void>,  // workflow_dispatch, toasts on failure
+  dispatchWorker(reason, {quiet, wait}) -> Promise<run|null>,  // workflow_dispatch; wait=true resolves with the finished run record
   lock(),
 }
 ```

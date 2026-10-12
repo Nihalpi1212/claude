@@ -506,7 +506,7 @@ export default function Autopilot() {
     const beforeLog = await store.read('log').catch(() => null);
     const before = { run: beforeLog && beforeLog.runs && beforeLog.runs[0] ? beforeLog.runs[0].startedAt : null, ap: current.lastRunAt };
     try {
-      await dispatchWorker('autopilot');
+      await dispatchWorker('autopilot', { quiet: true });
     } catch {
       setRunning(false);
       return;

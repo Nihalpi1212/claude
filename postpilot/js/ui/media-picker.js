@@ -87,22 +87,27 @@ function kindWord(kinds, n) {
   return n === 1 ? one : `${one}s`;
 }
 
+const REMOVED_HINT = 'The original was removed to save space (Settings → Free up space). Only the thumbnail is kept; upload the file again to post it.';
+
 function Tile({ asset, index, order, onToggle, onQuickPick, disabled }) {
   const src = useAssetUrl(asset);
   const selected = order > 0;
+  const removed = !!asset.originalRemovedAt;
   const kindLabel = asset.kind === 'video' ? 'Video' : 'Photo';
   return html`<${Frame}
-    class=${cx('mp-tile', selected && 'is-selected', disabled && !selected && 'is-dimmed')}
+    class=${cx('mp-tile', selected && 'is-selected', (disabled || removed) && !selected && 'is-dimmed')}
     src=${src}
     alt=""
     number=${index + 1}
     label=${asset.name}
     kind=${asset.kind === 'video' ? 'video' : undefined}
-    badge=${asset.kind === 'video' ? formatDuration(asset.durationSec) : undefined}
+    badge=${removed ? 'Original removed' : asset.kind === 'video' ? formatDuration(asset.durationSec) : undefined}
     onClick=${() => onToggle(asset.id)}
     onDblClick=${() => onQuickPick(asset.id)}
+    disabled=${removed && !selected}
+    title=${removed ? REMOVED_HINT : undefined}
     aria-pressed=${selected ? 'true' : 'false'}
-    aria-label=${`${kindLabel}: ${asset.name || 'untitled'}${selected ? `, selected ${order}` : ''}`}
+    aria-label=${`${kindLabel}: ${asset.name || 'untitled'}${removed ? ', original removed, cannot be picked' : ''}${selected ? `, selected ${order}` : ''}`}
     data-asset-id=${asset.id}
   >${selected ? html`<span class="mp-order num" aria-hidden="true">${order}</span>` : null}<//>`;
 }
@@ -143,6 +148,11 @@ function PickerBody({ onClose, onPick, multiple = true, kinds = ['image', 'video
 
   const toggle = (id) => {
     setNotice('');
+    const a = byId.get(id);
+    if (a && a.originalRemovedAt && !selected.includes(id)) {
+      setNotice(REMOVED_HINT);
+      return;
+    }
     setSelected((cur) => {
       if (cur.includes(id)) return cur.filter((x) => x !== id);
       if (limit === 1) return [id];
@@ -160,7 +170,8 @@ function PickerBody({ onClose, onPick, multiple = true, kinds = ['image', 'video
   };
 
   const quickPick = (id) => {
-    if (limit === 1) confirm([id]);
+    const a = byId.get(id);
+    if (limit === 1 && !(a && a.originalRemovedAt)) confirm([id]);
   };
 
   async function handleFiles(fileList) {

@@ -236,7 +236,7 @@ export function WorkerSetup({ onContinue, continueLabel = 'Continue', onSkip }) 
     const baseline = (log && log.runs && log.runs[0] && log.runs[0].startedAt) || null;
     setWatch({ since: Date.now(), baseline, ghRun: null, slow: false, record: null });
     try {
-      await dispatchWorker('setup check');
+      await dispatchWorker('setup check', { quiet: true });
     } catch (err) {
       setWatch(null);
       if (err.status === 422) {

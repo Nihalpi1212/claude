@@ -136,7 +136,7 @@ export function freeUpPlan({ posts, library, lists, exists = () => true, now = D
 
 function tokenRows(c, tz) {
   const rows = [];
-  if (c.mode === 'facebook') {
+  if (c.mode === 'facebook' && !c.tokenExpiresAt) {
     rows.push(['Token', 'Facebook Page token. It does not expire, but stops working if you change your Facebook password, lose access to the Page or remove the app.']);
   } else if (c.tokenExpiresAt) {
     const left = Date.parse(c.tokenExpiresAt) - Date.now();

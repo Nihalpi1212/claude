@@ -133,6 +133,7 @@ export function explainConnectError(err, mode) {
   }
   if (err.code === 'no_ig_account') return { title: 'No Instagram account found on your Facebook Pages', body: err.userMessage };
   if (err.code === 'no_token') return { title: 'Paste your access token first', body: err.userMessage };
+  if (err.code === 'short_lived') return { title: 'This token expires within hours', body: err.userMessage };
   if (err.isAuth) {
     if (err.subcode === 463) return { title: 'This token has expired', body: 'Generate a new token (see the steps above) and paste it here.' };
     if (err.subcode === 460) return { title: 'This token stopped working', body: 'The account password was changed after the token was made. Generate a new token and paste it here.' };

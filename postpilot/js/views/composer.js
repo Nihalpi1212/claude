@@ -623,7 +623,7 @@ function Editor({ start, docs, onClose }) {
       onClose();
       toast('Publishing… usually takes 1–3 minutes.', { kind: 'info', duration: 6000, action: { label: 'Open', onClick: () => openComposer(saved.id) } });
       watchPublish(saved.id, toast);
-      dispatchWorker('publish now').catch(() => {
+      dispatchWorker('publish now', { quiet: true }).catch(() => {
         /* dispatchWorker already explained the problem; the scheduled worker run still publishes it */
       });
     });

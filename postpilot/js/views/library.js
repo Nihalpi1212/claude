@@ -8,7 +8,7 @@ import { loadViewCss } from '../css.js';
 import { deleteAssets, isImageFile, isVideoFile, originalUrl, prepareFile, thumbUrl, uploadPrepared } from '../media.js';
 import { setQuery } from '../router.js';
 import {
-  Button, Callout, ChipInput, EmptyState, Field, Frame, Icon, IconButton, Menu, Modal, PageHeader, ProgressBar,
+  Badge, Button, Callout, ChipInput, EmptyState, Field, Frame, Icon, IconButton, Menu, Modal, PageHeader, ProgressBar,
   Segmented, Select, Skeleton, StatusPill, TextArea, TextInput, Toggle, Drawer, cx, usePhone,
 } from '../ui/kit.js';
 import { LIMITS, uid } from '../../core/model.js';
@@ -27,6 +27,7 @@ const FILTERS = [
 const TYPE_LABEL = { feed: 'Post', carousel: 'Carousel', reel: 'Reel', story: 'Story' };
 
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+const REMOVED_HINT = 'The original was removed to save space (Settings → Free up space). Only the thumbnail is kept; upload the file again to post it.';
 
 export function formatBytes(n) {
   if (!Number.isFinite(n) || n <= 0) return '—';
@@ -118,12 +119,14 @@ function SheetItem({ asset, index, selected, selecting, usedCount, onOpen, onTog
     asset.kind === 'video' ? `video${asset.durationSec ? `, ${formatDuration(asset.durationSec)}` : ''}` : 'photo',
     asset.autopilot ? 'in the autopilot pool' : null,
     usedCount ? `used in ${plural(usedCount, 'post')}` : 'unused',
+    asset.originalRemovedAt ? 'original removed' : null,
   ]
     .filter(Boolean)
     .join(', ');
   return html`<li class=${cx('lib-item', selected && 'is-selected', selecting && 'is-selecting')} data-asset=${asset.id}>
     <${Frame} src=${src} alt="" number=${index + 1} label=${asset.name || 'Untitled'} kind=${kind}
-      badge=${asset.kind === 'video' && asset.durationSec ? formatDuration(asset.durationSec) : undefined}
+      badge=${asset.originalRemovedAt ? 'Original removed' : asset.kind === 'video' && asset.durationSec ? formatDuration(asset.durationSec) : undefined}
+      title=${asset.originalRemovedAt ? REMOVED_HINT : undefined}
       class=${cx('lib-frame', selected && 'is-selected', usedCount && 'is-used')}
       onClick=${(e) => (selecting || e.shiftKey || e.metaKey || e.ctrlKey ? onToggle(e) : onOpen())}
       aria-label=${selecting ? `${selected ? 'Deselect' : 'Select'} ${desc}` : `Open ${desc}`}>
@@ -151,7 +154,8 @@ function AssetPreview({ asset }) {
     let alive = true;
     setUrl(null);
     setErr(null);
-    originalUrl(asset)
+    // Without the original (Free up space), show the thumbnail that was kept.
+    (asset.originalRemovedAt ? thumbUrl(asset) : originalUrl(asset))
       .then((u) => alive && setUrl(u))
       .catch((e) => alive && setErr(e.message || 'The file could not be opened.'));
     return () => {
@@ -173,7 +177,7 @@ function AssetPreview({ asset }) {
       ? html`<div class="lib-preview-msg"><${Icon} name="alert" /><span>${err}</span></div>`
       : !url
         ? html`<div class="lib-preview-msg"><span class="spinner" style="width:18px;height:18px" aria-label="Loading preview" role="status"></span></div>`
-        : asset.kind === 'video'
+        : asset.kind === 'video' && !asset.originalRemovedAt
           ? html`<video src=${url} poster=${poster || undefined} controls playsinline preload="metadata" aria-label=${asset.name || 'Video'}></video>`
           : html`<img src=${url} alt=${asset.name || ''} />`}
   </div>`;
@@ -226,6 +230,7 @@ function AssetDrawer({ asset, folders, usedBy, tz, onClose, onCreatePost, onDele
   useEffect(() => {
     let alive = true;
     setDl(null);
+    if (asset.originalRemovedAt) return undefined;
     originalUrl(asset)
       .then((u) => alive && setDl(u))
       .catch(() => {});
@@ -245,6 +250,9 @@ function AssetDrawer({ asset, folders, usedBy, tz, onClose, onCreatePost, onDele
       <${Button} variant="primary" onClick=${save} loading=${saving} disabled=${!dirty}>Save changes<//>`}>
     <div class="stack">
       <${AssetPreview} asset=${asset} />
+      ${asset.originalRemovedAt
+        ? html`<p class="text-sm"><${Badge} tone="warning">Original removed<//> <span class="muted">${REMOVED_HINT}</span></p>`
+        : null}
       <dl class="kv lib-kv">
         <dt>Type</dt><dd>${asset.kind === 'video' ? 'Video' : 'Photo'} · <span class="mono">${(asset.mime || '').replace(/^\w+\//, '').toUpperCase() || '—'}</span></dd>
         <dt>Size</dt><dd class="mono">${asset.width && asset.height ? `${asset.width} × ${asset.height}` : '—'}${ratioLabel(asset.width, asset.height) ? html` <span class="muted">(${ratioLabel(asset.width, asset.height)})</span>` : null}</dd>
@@ -587,7 +595,19 @@ export default function Library() {
     }
   };
 
-  const createPost = (list) => {
+  const createPost = (picked) => {
+    // Files whose original was removed (Free up space) cannot be posted.
+    const removed = picked.filter((a) => a.originalRemovedAt);
+    const list = picked.filter((a) => !a.originalRemovedAt);
+    if (removed.length) {
+      const one = removed.length === 1;
+      toast(
+        list.length
+          ? `Left out ${plural(removed.length, 'file')} whose original was removed to save space. Upload ${one ? 'it' : 'them'} again to post ${one ? 'it' : 'them'}.`
+          : `The original of ${one ? 'this file' : 'these files'} was removed to save space. Upload ${one ? 'it' : 'them'} again to post ${one ? 'it' : 'them'}.`,
+        { kind: list.length ? 'info' : 'error' },
+      );
+    }
     if (!list.length) return;
     if (list.length > LIMITS.carouselMax) {
       toast(`A carousel holds at most ${LIMITS.carouselMax} photos or videos. Select fewer.`, { kind: 'error' });

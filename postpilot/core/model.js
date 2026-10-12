@@ -149,7 +149,8 @@ export function uid(prefix = '') {
  * Asset (library.assets[]):
  *   { id, kind: 'image'|'video', name, mime, bytes, width, height, durationSec,
  *     path: 'media/<id>', thumbPath: 'media/<id>.thumb', folderId, tags: [string],
- *     notes, captionHint, usedBy: [postId], autopilot: bool, createdAt }
+ *     notes, captionHint, usedBy: [postId], autopilot: bool, createdAt,
+ *     originalRemovedAt?: ISO (Settings → Free up space deleted the full-size file; only the thumbnail is left) }
  *
  * List (lists.lists[]) - evergreen / recurring queue:
  *   { id, name, color, enabled, order: 'sequential'|'shuffle', repeat: true (false = remove items once used), slots: [{weekday, time}],
@@ -295,7 +296,11 @@ export function validatePost(post, assets = {}) {
 
   if (!POST_TYPES.includes(post.type)) err('type', 'Choose a post type.');
   if (!media.length) err('media', 'Add a photo or video.');
-  for (const m of media) if (!get(m.assetId)) err('media', 'A media file is missing from the library.');
+  for (const m of media) {
+    const a = get(m.assetId);
+    if (!a) err('media', 'A media file is missing from the library.');
+    else if (a.originalRemovedAt) err('media', `The original of "${a.name || 'this file'}" was removed to save space. Upload it again to use it.`);
+  }
 
   if (post.type === 'feed' && media.length > 1) err('media', 'A single post takes one photo or video. Use Carousel for more.');
   if (post.type === 'carousel') {

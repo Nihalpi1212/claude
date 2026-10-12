@@ -395,9 +395,10 @@ function PostGroup({ group, comments, ctx, onToggleComments, toggling }) {
 }
 
 function OutboxStrip({ outbox, onRetry, onDismiss }) {
-  const recent = (outbox || []).filter((c) => c && c.type !== 'publish_now' && (c.status === 'pending' || (c.status === 'failed' && Date.now() - ms(c.doneAt || c.createdAt) < 3 * 864e5)));
+  const waiting = (c) => c.status === 'pending' || c.status === 'sending'; // 'sending' = claimed by a worker run
+  const recent = (outbox || []).filter((c) => c && c.type !== 'publish_now' && (waiting(c) || (c.status === 'failed' && Date.now() - ms(c.doneAt || c.createdAt) < 3 * 864e5)));
   if (!recent.length) return null;
-  const pending = recent.filter((c) => c.status === 'pending').length;
+  const pending = recent.filter(waiting).length;
   return html`<div class="ibx-outbox" role="status">
     <p class="ibx-outbox-title"><${Icon} name="clock" size=${15} />${pending ? `${pending} waiting for the worker` : 'Some actions could not be sent'}</p>
     <ul class="ibx-outbox-list">
@@ -920,7 +921,7 @@ export default function InboxView() {
 
   const groups = comments.mode === 'cache' ? groupsFromCache(inbox.comments) : comments.groups;
   const pendingByComment = new Map();
-  for (const c of outbox) if (c && c.payload && c.payload.commentId && (c.status === 'pending' || c.status === 'failed')) pendingByComment.set(c.payload.commentId, c);
+  for (const c of outbox) if (c && c.payload && c.payload.commentId && (c.status === 'pending' || c.status === 'sending' || c.status === 'failed')) pendingByComment.set(c.payload.commentId, c);
   const privateMap = inbox.privateReplies || {};
 
   let needsCount = 0;
@@ -965,18 +966,18 @@ export default function InboxView() {
       return false;
     }
     toast(`Instagram could not be reached from this browser. The worker will ${what} within a few minutes.`, { kind: 'info', duration: 7000 });
-    dispatchWorker('inbox').catch(() => {});
+    dispatchWorker('inbox', { quiet: true }).catch(() => {});
     return true;
   };
 
   /**
    * After a network failure: queue the command for the worker. When the request may already have
-   * reached Instagram (err.maybeSent: replies and messages), queuing it could post it twice, so ask
-   * the owner to check Instagram first and only queue it on request.
+   * reached Instagram (err.maybeSent: replies and messages), queuing it could post it twice, so
+   * nothing is queued and the owner is asked to check Instagram first.
    */
   const queueAfterFailure = async (err, type, payload, what) => {
-    if (err && err.maybeSent) {
-      toast(errText(err), { kind: 'error', duration: 12000, action: { label: 'Send it with the worker', onClick: () => queue(type, payload, what) } });
+    if (err && err.maybeSent === true) {
+      toast('Instagram did not confirm this. Refresh in a moment and check before trying again.', { kind: 'error', duration: 12000 });
       return false;
     }
     return queue(type, payload, what);
@@ -1115,6 +1116,10 @@ export default function InboxView() {
   };
 
   const retryCommand = async (cmd) => {
+    if (cmd.maybeSent) {
+      const ok = await confirm({ title: 'Check Instagram first', body: 'This may already have been sent. Retry only if it is not on Instagram.', confirmLabel: 'Try again' });
+      if (!ok) return;
+    }
     try {
       await mutate('inbox', (d) => {
         const c = (d.outbox || []).find((x) => x.id === cmd.id);
@@ -1124,7 +1129,7 @@ export default function InboxView() {
           c.attempts = 0;
         }
       }, { message: 'inbox: retry command' });
-      dispatchWorker('inbox').catch(() => {});
+      dispatchWorker('inbox', { quiet: true }).catch(() => {});
     } catch {
       /* toast shown */
     }

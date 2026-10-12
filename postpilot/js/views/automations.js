@@ -6,14 +6,12 @@ import { html, useEffect, useMemo, useRef, useState } from '../../vendor/preact.
 import { getAi } from '../ai-client.js';
 import { useApp } from '../app.js';
 import { loadViewCss } from '../css.js';
-import { getStore, mutate, refreshNow, useDocs } from '../data.js';
+import { mutate, refreshNow, useDocs } from '../data.js';
 import { Icon } from '../ui/icons.js';
 import { Badge, Button, Callout, ChipInput, EmptyState, Field, IconButton, Menu, PageHeader, Panel, Select, Skeleton, Stat, TextArea, TextInput, Toggle, cx } from '../ui/kit.js';
 import { RuleEditor, STARTER_TEMPLATES, actionsSummary, triggerSummary } from '../ui/rule-editor.js';
 
 loadViewCss('automations');
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const DM_PROBLEMS = {
   needs_advanced_access: {
@@ -124,6 +122,7 @@ function ActivityFeed({ activity, logEntries, tz, onRefresh, refreshing }) {
                 <p class="auto-feed-line">
                   <span class="strong">${describeActivity(a)}</span>
                   ${a.ruleName ? html` <span class="muted">· ${a.ruleName}</span>` : null}
+                  ${a.unsure ? html` <${Badge} tone="warning" title="Instagram did not confirm this action. It may have gone through, so check Instagram before doing it again.">Not confirmed<//>` : null}
                 </p>
                 ${a.text ? html`<p class="auto-feed-text muted clamp-2">“${a.text}”</p>` : null}
                 ${a.skipped ? html`<p class="auto-feed-text text-warn text-sm">${SKIP_REASONS[a.skipped] || a.skipped}</p>` : null}
@@ -396,32 +395,19 @@ export default function AutomationsView() {
 
   const runNow = async () => {
     setRunning(true);
-    let before = null;
     try {
-      before = ((await getStore().read('log')).runs || [])[0]?.startedAt || null;
-      await dispatchWorker('automations');
-    } catch {
-      setRunning(false);
-      return;
-    }
-    // Watch for the run to finish (the worker usually takes 1-3 minutes on GitHub).
-    const deadline = Date.now() + 4 * 60_000;
-    while (alive.current && Date.now() < deadline) {
-      await sleep(3000);
-      try {
-        await refreshNow();
-        const latest = ((await getStore().read('log')).runs || [])[0];
-        if (latest && latest.startedAt !== before && latest.finishedAt) {
-          const c = latest.counts || {};
-          const n = (c.replies || 0) + (c.dms || 0) + (c.hidden || 0) + (c.deleted || 0);
-          toast(n ? `Worker finished: ${n} automated ${n === 1 ? 'action' : 'actions'}.` : 'Worker finished. Nothing new to answer.', { kind: 'success' });
-          break;
-        }
-      } catch {
-        /* keep polling */
+      // Resolves when the run has reported (the worker usually takes 1-3 minutes on GitHub), or null on timeout.
+      const latest = await dispatchWorker('automations', { quiet: true, wait: true });
+      if (latest && alive.current) {
+        const c = latest.counts || {};
+        const n = (c.replies || 0) + (c.dms || 0) + (c.hidden || 0) + (c.deleted || 0);
+        toast(n ? `Worker finished: ${n} automated ${n === 1 ? 'action' : 'actions'}.` : 'Worker finished. Nothing new to answer.', { kind: 'success' });
       }
+    } catch {
+      /* dispatchWorker already explained the problem */
+    } finally {
+      if (alive.current) setRunning(false);
     }
-    if (alive.current) setRunning(false);
   };
 
   const openNew = () => setEditor({ mode: 'new', title: 'New rule', rule: null });
@@ -459,8 +445,8 @@ export default function AutomationsView() {
         </div>
       </div>
       ${pausedUntil
-        ? html`<${Callout} tone="warning" title="Paused while Instagram limits this account">
-            <p>Instagram asked apps to slow down for this account, so automations resume ${relative(pausedUntil)} (${formatDateTime(pausedUntil, tz)}). New comments and messages that arrive meanwhile are checked when they resume.</p>
+        ? html`<${Callout} tone="warning">
+            <p>Instagram is limiting automated replies until <time datetime=${pausedUntil}>${formatDateTime(pausedUntil, tz)}</time>. Postpilot paused automations and will resume on its own.</p>
           <//>`
         : null}
       ${dmProblem
