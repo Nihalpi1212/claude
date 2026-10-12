@@ -8,7 +8,7 @@ import { initData, refreshNow, stopData, useDoc } from './data.js';
 import { navigate, useRoute } from './router.js';
 import { forget } from './session.js';
 import { Icon } from './ui/icons.js';
-import { Avatar, Button, ConfirmDialog, Spinner, ToastHost } from './ui/kit.js';
+import { Avatar, Button, Callout, ConfirmDialog, Drawer, IconButton, Spinner, ToastHost } from './ui/kit.js';
 
 export const AppContext = createContext(null);
 export const useApp = () => useContext(AppContext);
@@ -37,8 +37,6 @@ export const NAV = [
   ] },
 ];
 
-const TABBAR = ['dashboard', 'planner', '__compose', 'inbox', '__more'];
-
 const VIEWS = {
   dashboard: () => import('./views/dashboard.js'),
   planner: () => import('./views/planner.js'),
@@ -55,8 +53,6 @@ const VIEWS = {
   settings: () => import('./views/settings.js'),
   onboarding: () => import('./views/onboarding.js'),
 };
-
-const ALL_ITEMS = NAV.flatMap((g) => g.items);
 
 function useLazyView(name) {
   const [state, setState] = useState({ name: null, Comp: null, error: null });
@@ -76,22 +72,19 @@ function useLazyView(name) {
 function ViewOutlet({ name }) {
   const { Comp, error } = useLazyView(name);
   if (error) {
-    return html`<div class="main-inner"><div class="callout callout-danger" role="alert">
-      <strong>This screen failed to load.</strong> ${String(error.message || error)}
-    </div></div>`;
+    return html`<div class="page"><${Callout} tone="danger" title="This screen failed to load">${String(error.message || error)}<//></div>`;
   }
-  if (!Comp) return html`<div class="main-inner view-loading"><${Spinner} /></div>`;
+  if (!Comp) return html`<div class="page view-loading"><${Spinner} label="Loading" /></div>`;
   return html`<${SafeView} key=${name} Comp=${Comp} />`;
 }
 
 function SafeView({ Comp }) {
   const [error, reset] = useErrorBoundary((err) => console.error(err));
   if (error) {
-    return html`<div class="main-inner"><div class="callout callout-danger" role="alert">
-      <p><strong>Something went wrong on this screen.</strong></p>
-      <p class="mono muted">${String(error.message || error)}</p>
-      <${Button} variant="secondary" onClick=${reset}>Try again<//>
-    </div></div>`;
+    return html`<div class="page"><${Callout} tone="danger" title="Something went wrong on this screen"
+      action=${html`<${Button} variant="secondary" size="sm" onClick=${reset}>Try again<//>`}>
+      <span class="mono">${String(error.message || error)}</span>
+    <//></div>`;
   }
   return html`<${Comp} />`;
 }
@@ -105,90 +98,112 @@ function ComposerHost({ request, onClose }) {
   return html`<${Comp} key=${request.key} initial=${request.initial} onClose=${onClose} />`;
 }
 
-function WorkerStatus({ compact }) {
+function WorkerStatus() {
   const { data: log } = useDoc('log');
   const last = log && log.runs && log.runs[0];
-  if (!last) return html`<div class="worker-status muted" title="The background worker has not reported yet">
-    <span class="dot dot-neutral"></span>${compact ? '' : html`<span>Worker: no runs yet</span>`}
-  </div>`;
-  const ageMin = (Date.now() - new Date(last.finishedAt || last.startedAt).getTime()) / 60000;
-  const tone = last.ok === false ? 'bad' : ageMin > 45 ? 'warn' : 'ok';
-  const label = last.ok === false ? 'Worker reported a problem' : ageMin > 45 ? 'Worker is late' : 'Worker running';
-  return html`<div class="worker-status" title=${`${label}. Last run ${relative(last.finishedAt || last.startedAt)}`}>
-    <span class=${`dot dot-${tone}`}></span>${compact ? '' : html`<span>${label} · <span class="mono">${relative(last.finishedAt || last.startedAt)}</span></span>`}
-  </div>`;
+  if (!last) {
+    return html`<div class="worker-status" title="The background worker has not reported yet">
+      <span class="dot"></span><span>Worker not running yet</span>
+    </div>`;
+  }
+  const at = last.finishedAt || last.startedAt;
+  const ageMin = (Date.now() - new Date(at).getTime()) / 60000;
+  // GitHub can delay scheduled runs and idle runs only report every 30 minutes, so allow some slack.
+  const tone = last.ok === false ? 'bad' : ageMin > 90 ? 'warn' : 'ok';
+  const label = last.ok === false ? 'Worker had a problem' : ageMin > 90 ? 'Worker is late' : 'Worker running';
+  return html`<a class=${`worker-status is-${tone}`} href="#/settings?section=worker" title=${`${label}. Last run ${relative(at)}`}>
+    <span class="dot"></span><span>${label}</span><span class="worker-meta">${relative(at)}</span>
+  </a>`;
+}
+
+function useNavCounts() {
+  const { data: posts } = useDoc('posts');
+  const list = (posts && posts.posts) || [];
+  return {
+    planner: list.filter((p) => p.status === 'failed').length,
+    autopilot: list.filter((p) => p.needsApproval && p.status === 'draft').length,
+  };
+}
+
+function NavLinks({ route, onNavigate }) {
+  const counts = useNavCounts();
+  return NAV.map(
+    (g) => html`<div class="nav-group">
+      <div class="nav-group-label">${g.group}</div>
+      ${g.items.map((it) => {
+        const count = counts[it.name];
+        return html`<a href=${it.name === 'dashboard' ? '#/' : `#/${it.name}`}
+          class="nav-item"
+          aria-current=${route.name === it.name ? 'page' : undefined}
+          onClick=${onNavigate}>
+          <${Icon} name=${it.icon} /><span class="nav-label">${it.label}</span>
+          ${count ? html`<span class="nav-count is-attention" title=${it.name === 'planner' ? 'Failed posts' : 'Drafts to approve'}>${count}</span>` : null}
+        </a>`;
+      })}
+    </div>`,
+  );
+}
+
+function AccountChip({ settings }) {
+  const ig = settings && settings.ig;
+  if (!ig) {
+    return html`<a class="account-chip" href="#/onboarding">
+      <${Icon} name="instagram-outline" />
+      <span class="account-text"><span class="account-name">Connect Instagram</span><span class="account-handle">not connected</span></span>
+    </a>`;
+  }
+  return html`<a class="account-chip" href="#/settings?section=instagram">
+    <${Avatar} src=${ig.profilePictureUrl} name=${ig.name || ig.username} size=${32} />
+    <span class="account-text"><span class="account-name">${ig.name || ig.username}</span><span class="account-handle">@${ig.username}</span></span>
+  </a>`;
 }
 
 function Sidebar({ route, settings, onCompose }) {
-  const ig = settings && settings.ig;
   return html`<aside class="sidebar" aria-label="Main navigation">
-    <a class="brand" href="#/">
-      <span class="brand-mark" aria-hidden="true"></span>
-      <span class="brand-name">${APP_NAME}</span>
+    <a class="sidebar-brand" href="#/">
+      <span class="brand-mark" aria-hidden="true"><${Icon} name="instagram-outline" size=${18} /></span>
+      <span><span class="brand-name">${APP_NAME}</span><span class="brand-sub">Instagram autopilot</span></span>
     </a>
     <${Button} variant="primary" icon="plus" class="compose-button" onClick=${() => onCompose()}>New post<//>
-    <nav class="nav">
-      ${NAV.map(
-        (g) => html`<div class="nav-group">
-          <div class="nav-group-label">${g.group}</div>
-          ${g.items.map(
-            (it) => html`<a href=${it.name === 'dashboard' ? '#/' : `#/${it.name}`}
-              class=${`nav-item${route.name === it.name ? ' active' : ''}`}
-              aria-current=${route.name === it.name ? 'page' : undefined}>
-              <${Icon} name=${it.icon} /><span>${it.label}</span>
-            </a>`,
-          )}
-        </div>`,
-      )}
-    </nav>
+    <nav class="nav"><${NavLinks} route=${route} /></nav>
     <div class="sidebar-foot">
-      ${ig
-        ? html`<a class="account-chip" href="#/settings">
-            <${Avatar} src=${ig.profilePictureUrl} name=${ig.username} size=${28} />
-            <span class="account-name">@${ig.username}</span>
-          </a>`
-        : html`<a class="account-chip muted" href="#/onboarding"><${Icon} name="instagram-outline" /> <span>Connect Instagram</span></a>`}
       <${WorkerStatus} />
+      <${AccountChip} settings=${settings} />
     </div>
   </aside>`;
 }
 
+function MobileTopbar({ settings, onCompose }) {
+  const ig = settings && settings.ig;
+  return html`<header class="mobile-topbar">
+    <a class="sidebar-brand" href="#/">
+      <span class="brand-mark" aria-hidden="true"><${Icon} name="instagram-outline" size=${16} /></span>
+      <span class="brand-name">${APP_NAME}</span>
+    </a>
+    <span class="spacer"></span>
+    <${IconButton} icon="plus" label="New post" onClick=${() => onCompose()} />
+    ${ig && html`<a href="#/settings?section=instagram" aria-label="Account settings"><${Avatar} src=${ig.profilePictureUrl} name=${ig.username} size=${28} /></a>`}
+  </header>`;
+}
+
 function TabBar({ route, onCompose, onMore }) {
-  const items = { dashboard: ALL_ITEMS[0], planner: ALL_ITEMS[1], inbox: ALL_ITEMS.find((i) => i.name === 'inbox') };
+  const item = (name, label, icon) => html`<a class="tabbar-item" href=${name === 'dashboard' ? '#/' : `#/${name}`}
+    aria-current=${route.name === name ? 'page' : undefined}><${Icon} name=${icon} size=${20} /><span>${label}</span></a>`;
+  const inMore = !['dashboard', 'planner', 'inbox', 'analytics'].includes(route.name);
   return html`<nav class="tabbar" aria-label="Main navigation">
-    ${TABBAR.map((name) => {
-      if (name === '__compose') {
-        return html`<button class="tab tab-compose" type="button" onClick=${() => onCompose()} aria-label="New post"><${Icon} name="plus" size=${22} /></button>`;
-      }
-      if (name === '__more') {
-        const inMore = !['dashboard', 'planner', 'inbox'].includes(route.name);
-        return html`<button class=${`tab${inMore ? ' active' : ''}`} type="button" onClick=${onMore}><${Icon} name="menu" /><span>More</span></button>`;
-      }
-      const it = items[name];
-      return html`<a class=${`tab${route.name === name ? ' active' : ''}`} href=${name === 'dashboard' ? '#/' : `#/${name}`}>
-        <${Icon} name=${it.icon} /><span>${it.label}</span></a>`;
-    })}
+    ${item('dashboard', 'Today', 'home')}
+    ${item('planner', 'Planner', 'calendar')}
+    <button type="button" class="tabbar-item" onClick=${() => onCompose()}><${Icon} name="plus" size=${20} /><span>New</span></button>
+    ${item('inbox', 'Inbox', 'inbox')}
+    <button type="button" class=${`tabbar-item${inMore ? ' is-active' : ''}`} onClick=${onMore}><${Icon} name="menu" size=${20} /><span>More</span></button>
   </nav>`;
 }
 
-function MoreSheet({ open, onClose, route }) {
-  if (!open) return null;
-  return html`<div class="sheet-backdrop" onClick=${onClose}>
-    <div class="sheet" role="dialog" aria-label="All screens" onClick=${(e) => e.stopPropagation()}>
-      ${NAV.map(
-        (g) => html`<div class="nav-group">
-          <div class="nav-group-label">${g.group}</div>
-          <div class="sheet-grid">
-            ${g.items.map(
-              (it) => html`<a href=${it.name === 'dashboard' ? '#/' : `#/${it.name}`} class=${`sheet-item${route.name === it.name ? ' active' : ''}`} onClick=${onClose}>
-                <${Icon} name=${it.icon} size=${20} /><span>${it.label}</span></a>`,
-            )}
-          </div>
-        </div>`,
-      )}
-      <div class="sheet-foot"><${WorkerStatus} /></div>
-    </div>
-  </div>`;
+function MoreDrawer({ open, onClose, route }) {
+  return html`<${Drawer} open=${open} title="All screens" onClose=${onClose}>
+    <nav class="nav" aria-label="All screens"><${NavLinks} route=${route} onNavigate=${onClose} /></nav>
+    <div class="stack-sm" style="margin-top: 16px"><${WorkerStatus} /></div>
+  <//>`;
 }
 
 export function App({ session }) {
@@ -288,11 +303,12 @@ export function App({ session }) {
   return html`<${AppContext.Provider} value=${ctx}>
     <div class="app">
       <${Sidebar} route=${route} settings=${settings} onCompose=${() => ctx.openComposer()} />
+      <${MobileTopbar} settings=${settings} onCompose=${() => ctx.openComposer()} />
       <main class="main" id="main">
         <${ViewOutlet} name=${viewName} />
       </main>
       <${TabBar} route=${route} onCompose=${() => ctx.openComposer()} onMore=${() => setMoreOpen(true)} />
-      <${MoreSheet} open=${moreOpen} onClose=${() => setMoreOpen(false)} route=${route} />
+      <${MoreDrawer} open=${moreOpen} onClose=${() => setMoreOpen(false)} route=${route} />
       <${ComposerHost} request=${composer} onClose=${() => setComposer(null)} />
       <${ConfirmDialog}
         open=${!!confirmState}

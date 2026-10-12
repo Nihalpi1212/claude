@@ -6,6 +6,7 @@
 
 import { pathToFileURL } from 'node:url';
 import { ConfigError, createContext, describeError, errorKind, LOG_ENTRY_CAP, RUN_CAP } from './context.mjs';
+import { sendNotifications } from './notify.mjs';
 import token from './jobs/token.mjs';
 import outbox from './jobs/outbox.mjs';
 import publish from './jobs/publish.mjs';
@@ -57,8 +58,15 @@ const ACTIVITY_KEYS = new Set([
   'tokenRefreshed',
 ]);
 
-/** Write a run record at least this often even when nothing happened (worker heartbeat). */
-const HEARTBEAT_MS = 60 * 60 * 1000;
+/** Count keys every stored run record carries (others are stored only when non-zero). */
+export const CORE_COUNTS = ['published', 'failed', 'replies', 'dms', 'hidden', 'stories', 'snapshots'];
+
+/**
+ * Write a run record at least this often even when nothing happened (worker heartbeat). The app
+ * shows "Worker is late" when the newest record is older than 45 minutes. Every write stores the
+ * whole encrypted log document again, so idle runs in between are not recorded.
+ */
+export const HEARTBEAT_MS = 30 * 60 * 1000;
 
 const SKIP_TEXT = {
   not_connected: 'Instagram not connected',
@@ -165,9 +173,21 @@ export async function runWorker({ env = process.env, fetchImpl, now, log: consol
     }
   }
 
+  let pushed = null;
+  if (ctx.notifications.length) {
+    pushed = await sendNotifications(ctx, { fetchImpl });
+    if (pushed.sent || pushed.failed) ctx.say(`notifications: ${pushed.sent} sent, ${pushed.failed} failed`);
+  }
+
   const counts = sumCounts(jobs);
   const finishedAt = ctx.nowIso();
   const failedPosts = counts.failed || 0;
+  const noteworthy =
+    errors.length > 0 ||
+    ctx.entries.some((e) => e.level === 'error' || e.level === 'warn') ||
+    Object.entries(counts).some(([k, v]) => ACTIVITY_KEYS.has(k) && v > 0);
+  const skipped = Object.fromEntries(Object.entries(jobs).filter(([, r]) => r && r.skipped).map(([name, r]) => [name, r.skipped]));
+  // Stored run record (kept small: the log document is rewritten on every recorded run).
   const run = {
     startedAt,
     finishedAt,
@@ -175,15 +195,12 @@ export async function runWorker({ env = process.env, fetchImpl, now, log: consol
     ok: errors.length === 0 && failedPosts === 0,
     trigger: ctx.trigger,
     ...(env.POSTPILOT_REASON ? { reason: String(env.POSTPILOT_REASON).slice(0, 200) } : {}),
-    counts,
-    jobs,
+    counts: { ...Object.fromEntries(CORE_COUNTS.map((k) => [k, counts[k] || 0])), ...Object.fromEntries(Object.entries(counts).filter(([, v]) => v)) },
+    ...(Object.keys(skipped).length ? { skipped } : {}),
     errors,
+    ...(pushed ? { notifications: pushed } : {}),
+    ...(noteworthy ? {} : { idle: true }),
   };
-
-  const noteworthy =
-    errors.length > 0 ||
-    ctx.entries.some((e) => e.level === 'error' || e.level === 'warn') ||
-    Object.entries(counts).some(([k, v]) => ACTIVITY_KEYS.has(k) && v > 0);
   try {
     await ctx.store.transact(
       async (tx) => {
@@ -191,10 +208,13 @@ export async function runWorker({ env = process.env, fetchImpl, now, log: consol
         const lastRun = (logDoc.runs || [])[0];
         const lastMs = lastRun ? Date.parse(lastRun.finishedAt) : NaN;
         const heartbeatDue = !Number.isFinite(lastMs) || ctx.nowMs() - lastMs >= HEARTBEAT_MS || ctx.trigger === 'workflow_dispatch';
-        // Idle runs are only recorded as an hourly heartbeat to keep the data branch small.
+        // Idle runs are only recorded as a heartbeat (and replace the previous idle record) to keep
+        // the data branch small.
         if (!noteworthy && !heartbeatDue) return;
         logDoc.entries = [...ctx.entries.slice().reverse(), ...(logDoc.entries || [])].slice(0, LOG_ENTRY_CAP);
-        logDoc.runs = [run, ...(logDoc.runs || [])].slice(0, RUN_CAP);
+        const previous = logDoc.runs || [];
+        const keep = run.idle && previous[0] && previous[0].idle ? previous.slice(1) : previous;
+        logDoc.runs = [run, ...keep].slice(0, RUN_CAP);
         tx.write('log', logDoc);
       },
       { message: 'worker run log' },
@@ -206,7 +226,7 @@ export async function runWorker({ env = process.env, fetchImpl, now, log: consol
   const exitCode = failedPosts > 0 ? 1 : 0;
   if (failedPosts > 0) ctx.say(`${failedPosts} post${failedPosts === 1 ? '' : 's'} failed to publish. Open Postpilot to see why.`);
   ctx.say(`Postpilot worker finished in ${Math.round((Date.now() - realStart) / 1000)}s.`);
-  return { ok: run.ok, exitCode, summary: run };
+  return { ok: run.ok, exitCode, summary: { ...run, counts, jobs } };
 }
 
 const isMain = (() => {

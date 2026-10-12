@@ -1,0 +1,377 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { startServer } from '../helpers/servers.mjs';
+import { createMockGraph } from '../../dev/mock-graph.mjs';
+import { createIg, connectInstagram, describeIgError, IgError, GRAPH_VERSION } from '../../core/ig.js';
+import { addDaysKey, dayKey } from '../../core/time.js';
+
+const FIXTURES = new URL('../../dev/fixtures/', import.meta.url);
+
+async function serveFixture(req, res, path) {
+  try {
+    const name = path.split('?')[0].replace(/^\/+/, '');
+    if (!/^[\w.-]+$/.test(name)) throw new Error('bad name');
+    const bytes = await readFile(new URL(name, FIXTURES));
+    res.writeHead(200, { 'Content-Type': name.endsWith('.mp4') ? 'video/mp4' : 'image/jpeg' });
+    res.end(bytes);
+  } catch {
+    res.writeHead(404);
+    res.end();
+  }
+  return true;
+}
+
+async function setup(t, opts = {}) {
+  const graph = createMockGraph({ imageProcessingMs: 30, videoProcessingMs: 60, fixturesPath: '/fixtures', ...opts });
+  const srv = await startServer({
+    '/mock/ig': (req, res, path, body, url) => graph.handle(req, res, path, body, url),
+    '/mock/fb': (req, res, path, body, url) => graph.handle(req, res, path, body, url),
+    '/mock/rupload': (req, res, path, body) => graph.handleRupload(req, res, path, body),
+    '/fixtures': serveFixture,
+  });
+  t.after(() => srv.close());
+  const bases = { igBase: `${srv.url}/mock/ig`, fbBase: `${srv.url}/mock/fb`, ruploadBase: `${srv.url}/mock/rupload` };
+  const ig = createIg({ token: 'tok', ...bases, retryDelayMs: 1 });
+  return { graph, srv, bases, ig };
+}
+
+const count = (graph, method, re) => graph.state.requests.filter((r) => r.method === method && re.test(r.path)).length;
+
+test('GRAPH_VERSION is pinned to v26.0', () => {
+  assert.equal(GRAPH_VERSION, 'v26.0');
+});
+
+test('me() returns the professional account and falls back when optional fields fail', async (t) => {
+  const { graph, ig } = await setup(t);
+  const me = await ig.me();
+  assert.equal(me.username, 'studio.north');
+  assert.equal(me.userId, graph.state.userId);
+  assert.equal(me.id, graph.state.appScopedId);
+  assert.equal(me.followersCount, 4820);
+  assert.equal(me.accountType, 'BUSINESS');
+  assert.ok(me.biography);
+  assert.equal(ig.userId, graph.state.userId);
+
+  graph.state.faults.push({ method: 'GET', path: /\/me$/, times: 1, error: { status: 400, code: 100, message: '(#100) Tried accessing nonexisting field (biography) on node type (User)' } });
+  const me2 = await ig.me();
+  assert.equal(me2.username, 'studio.north');
+  assert.equal(me2.biography, null);
+  const last = graph.state.requests.filter((r) => r.path.endsWith('/me')).at(-1);
+  assert.ok(!last.params.fields.includes('biography'));
+});
+
+test('listMedia follows paging.next and normalizes media', async (t) => {
+  const { graph, ig } = await setup(t);
+  const media = await ig.listMedia({ limit: 25, max: 60 });
+  assert.equal(media.length, 60);
+  assert.equal(count(graph, 'GET', /\/media$/), 3);
+  for (let i = 1; i < media.length; i++) assert.ok(media[i - 1].timestamp >= media[i].timestamp, 'newest first');
+  const ids = new Set(media.map((m) => m.id));
+  assert.equal(ids.size, 60);
+  const reel = media.find((m) => m.mediaType === 'VIDEO');
+  assert.equal(reel.productType, 'REELS');
+  assert.ok(reel.thumbnailUrl);
+  assert.match(reel.permalink, /instagram\.com\/reel\//);
+  const album = media.find((m) => m.mediaType === 'CAROUSEL_ALBUM');
+  assert.ok(album.children.length >= 2);
+  assert.ok(album.children[0].mediaUrl.endsWith('.jpg'));
+  assert.equal(typeof media[0].likeCount, 'number');
+  assert.equal(typeof media[0].commentsCount, 'number');
+  assert.ok(media[0].shortcode);
+
+  const all = await ig.listMedia({ limit: 50, max: 500 });
+  assert.equal(all.length, 70);
+});
+
+test('mediaInsights drops metrics the API rejects and remembers them', async (t) => {
+  const { graph, ig } = await setup(t);
+  const media = await ig.listMedia({ max: 70 });
+  const albums = media.filter((m) => m.mediaType === 'CAROUSEL_ALBUM');
+  const first = await ig.mediaInsights(albums[0]);
+  assert.ok(first.reach > 0);
+  assert.ok(first.saved >= 0);
+  assert.equal(first.reposts, undefined, 'reposts unsupported for carousels in the mock');
+  assert.ok(ig.unsupportedMetrics.has('media-CAROUSEL_ALBUM:reposts'));
+  const before = count(graph, 'GET', /\/insights$/);
+  await ig.mediaInsights(albums[1]);
+  assert.equal(count(graph, 'GET', /\/insights$/) - before, 1, 'second album needs a single call');
+
+  const reel = media.find((m) => m.productType === 'REELS');
+  const ri = await ig.mediaInsights(reel);
+  assert.ok(ri.avgWatchTimeMs > 0);
+  assert.ok(ri.totalWatchTimeMs > 0);
+  assert.ok(ri.views >= ri.reach);
+  assert.equal(typeof ri.skipRate, 'number');
+
+  // Unclear error: probe metric by metric and still return data.
+  const image = media.find((m) => m.mediaType === 'IMAGE');
+  graph.state.faults.push({ method: 'GET', path: /\/insights$/, times: 1, error: { status: 400, code: 100, message: '(#100) Invalid parameter' } });
+  const ii = await ig.mediaInsights(image);
+  assert.ok(ii.reach > 0);
+  assert.ok(ii.profileVisits >= 0);
+
+  // Deprecated metric requested directly: all-or-nothing error from the mock.
+  await assert.rejects(ig.get(`/${image.id}/insights`, { metric: 'impressions,reach' }), (err) => err instanceof IgError && err.code === 100);
+});
+
+test('stories and story insights (navigation breakdown, not enough viewers)', async (t) => {
+  const { graph, ig } = await setup(t);
+  const stories = await ig.stories();
+  assert.equal(stories.length, 3);
+  const si = await ig.storyInsights(stories[0].id);
+  assert.ok(si.reach > 0);
+  assert.ok(si.navigation.tapForward > 0);
+  assert.equal(typeof si.navigation.swipeForward, 'number');
+  graph.state.stories[0].ins.reach = 2;
+  assert.deepEqual(await ig.mediaInsights({ id: graph.state.stories[0].id, mediaType: 'IMAGE', productType: 'STORY' }), {});
+});
+
+test('accountDaily returns daily snapshots across chunks and skips days past retention', async (t) => {
+  const { ig } = await setup(t);
+  const tz = 'Europe/Berlin';
+  const today = dayKey(new Date(), tz);
+  const untilKey = addDaysKey(today, -1);
+  const sinceKey = addDaysKey(today, -40);
+  const days = await ig.accountDaily({ sinceKey, untilKey, tz });
+  const keys = Object.keys(days).sort();
+  assert.equal(keys.length, 40);
+  assert.equal(keys[0], sinceKey);
+  assert.equal(keys.at(-1), untilKey);
+  for (const k of keys) {
+    const d = days[k];
+    for (const f of ['reach', 'views', 'likes', 'comments', 'shares', 'saves', 'accountsEngaged', 'totalInteractions', 'followsGained', 'unfollows']) {
+      assert.equal(typeof d[f], 'number', `${k}.${f}`);
+    }
+  }
+  assert.ok(days[untilKey].reach > 100);
+
+  const old = await ig.accountDaily({ sinceKey: addDaysKey(today, -100), untilKey: addDaysKey(today, -95), tz });
+  assert.deepEqual(old, {});
+});
+
+test('onlineFollowers converts Pacific hours into the requested zone', async (t) => {
+  const { ig } = await setup(t);
+  const of = await ig.onlineFollowers({ tz: 'America/New_York' });
+  assert.equal(of.byHour.length, 24);
+  assert.ok(of.days >= 28);
+  assert.equal(of.tz, 'America/New_York');
+  const peak = of.byHour.indexOf(Math.max(...of.byHour));
+  assert.ok(peak >= 18 && peak <= 22, `peak at ${peak}`);
+  assert.equal(of.byWeekdayHour.length, 7);
+  assert.equal(of.byWeekdayHour[3].length, 24);
+});
+
+test('demographics returns sorted breakdowns', async (t) => {
+  const { ig } = await setup(t);
+  const demo = await ig.demographics();
+  assert.ok(demo.follower.age.length >= 5);
+  assert.ok(demo.follower.age[0].value >= demo.follower.age[1].value);
+  assert.ok(demo.follower.country.some((r) => r.key === 'US'));
+  assert.ok(demo.engaged.gender.length === 3);
+
+  const small = await setup(t, { followers: 60 });
+  const d2 = await small.ig.demographics();
+  assert.equal(d2.follower, null);
+});
+
+test('comments: list with replies, reply, hide, unhide, delete', async (t) => {
+  const { graph, ig } = await setup(t);
+  const [recent] = await ig.listMedia({ max: 1 });
+  const comments = await ig.comments(recent.id);
+  assert.ok(comments.length >= 3);
+  const c = comments.find((x) => !x.hidden);
+  assert.ok(c.text && c.username && c.fromId && c.timestamp);
+  assert.equal(c.mediaId, recent.id);
+  assert.ok(Array.isArray(c.replies));
+
+  const reply = await ig.replyToComment(c.id, 'Thank you!');
+  assert.ok(reply.id);
+  assert.equal(graph.state.replies.at(-1).text, 'Thank you!');
+  const again = await ig.comments(recent.id);
+  const withReply = again.find((x) => x.id === c.id);
+  assert.ok(withReply.replies.some((r) => r.id === reply.id && r.parentId === c.id && r.username === 'studio.north'));
+
+  await ig.hideComment(c.id);
+  assert.ok(graph.state.hidden.has(c.id));
+  await assert.rejects(ig.replyToComment(c.id, 'nope'), (err) => err instanceof IgError && err.code === 100);
+  await ig.hideComment(c.id, false);
+  assert.ok(!graph.state.hidden.has(c.id));
+
+  await ig.deleteComment(c.id);
+  assert.ok(graph.state.deleted.includes(c.id));
+  assert.ok(!(await ig.comments(recent.id)).some((x) => x.id === c.id));
+
+  await ig.setCommentsEnabled(recent.id, false);
+  assert.equal(graph.state.media[0].is_comment_enabled, false);
+});
+
+test('conversations, messages, sending and messaging errors', async (t) => {
+  const { graph, ig } = await setup(t);
+  const convs = await ig.conversations();
+  assert.equal(convs.length, 6);
+  for (let i = 1; i < convs.length; i++) assert.ok(convs[i - 1].updatedTime >= convs[i].updatedTime);
+  const mara = convs.find((c) => c.participants.some((p) => p.username === 'mara.lens'));
+  const other = mara.participants.find((p) => p.username === 'mara.lens');
+  const msgs = await ig.messages(mara.id);
+  assert.equal(msgs[0].fromUsername, 'mara.lens');
+  assert.match(msgs[0].text, /custom orders/);
+  assert.ok(msgs[0].createdTime > msgs[1].createdTime);
+  assert.deepEqual(msgs[1].toIds, [other.id]);
+
+  const sent = await ig.sendMessage(other.id, 'Hi Mara, yes we do!');
+  assert.ok(sent.messageId);
+  assert.equal(graph.state.sentMessages.length, 1);
+  assert.equal((await ig.messages(mara.id))[0].text, 'Hi Mara, yes we do!');
+  const img = await ig.sendImage(other.id, 'https://example.com/a.jpg');
+  assert.ok(img.messageId);
+
+  const kiko = convs.find((c) => c.participants.some((p) => p.username === 'kiko.studio'));
+  const kikoId = kiko.participants.find((p) => p.username === 'kiko.studio').id;
+  await assert.rejects(ig.sendMessage(kikoId, 'late'), (err) => {
+    assert.ok(err.isOutsideWindow);
+    assert.match(err.userMessage, /24 hours/);
+    return true;
+  });
+
+  graph.state.dmMode = 'disabled';
+  await assert.rejects(ig.sendMessage(other.id, 'x'), (err) => err.isDmDisabled && /Allow access to messages/.test(err.userMessage));
+  graph.state.dmMode = 'advanced_access';
+  await assert.rejects(ig.sendMessage(other.id, 'x'), (err) => err.needsAdvancedAccess && err.isPermission && /Advanced Access/.test(err.userMessage));
+});
+
+test('privateReply sends one DM per comment', async (t) => {
+  const { graph, ig } = await setup(t);
+  const [recent] = await ig.listMedia({ max: 1 });
+  const [c] = await ig.comments(recent.id);
+  const r = await ig.privateReply(c.id, 'Here is the link you asked for');
+  assert.ok(r.messageId);
+  assert.equal(graph.state.sentMessages.at(-1).commentId, c.id);
+  await assert.rejects(ig.privateReply(c.id, 'again'), (err) => err instanceof IgError && err.code === 100);
+
+  const oldMedia = graph.state.media.at(-1);
+  const oldComment = [...graph.state.comments.values()].find((x) => x.mediaId === oldMedia.id);
+  await assert.rejects(ig.privateReply(oldComment.id, 'too late'), (err) => err.isOutsideWindow);
+});
+
+test('refreshToken swaps the token; expired tokens map to a reconnect message', async (t) => {
+  const { graph, ig, bases } = await setup(t);
+  const { token, expiresAt } = await ig.refreshToken();
+  assert.match(token, /refreshed1$/);
+  assert.equal(ig.token, token);
+  const days = (Date.parse(expiresAt) - Date.now()) / 864e5;
+  assert.ok(days > 59 && days < 61);
+  assert.equal(graph.state.tokens.lastRefreshedFrom, 'tok');
+  const refreshReq = graph.state.requests.find((r) => r.path === '/refresh_access_token');
+  assert.ok(refreshReq, 'refresh endpoint is unversioned');
+
+  const dead = createIg({ token: 'expired-token', ...bases });
+  await assert.rejects(dead.me(), (err) => {
+    assert.ok(err instanceof IgError);
+    assert.equal(err.code, 190);
+    assert.equal(err.subcode, 463);
+    assert.ok(err.isAuth);
+    assert.ok(err.isPermanent);
+    assert.match(err.userMessage, /Reconnect Instagram in Settings/);
+    assert.equal(describeIgError(err), err.userMessage);
+    return true;
+  });
+
+  const fb = createIg({ mode: 'facebook', token: 'page-token-1', ...bases });
+  await assert.rejects(fb.refreshToken(), (err) => err.code === 'unsupported');
+});
+
+test('connectInstagram in both modes; businessDiscovery and hashtags need Facebook Login', async (t) => {
+  const { graph, ig, bases } = await setup(t);
+  const igConn = await connectInstagram({ mode: 'instagram', token: 'tok', ...bases });
+  assert.equal(igConn.mode, 'instagram');
+  assert.equal(igConn.userId, graph.state.userId);
+  assert.equal(igConn.username, 'studio.north');
+  assert.equal(igConn.tokenType, 'ig_long');
+  assert.equal(igConn.apiVersion, 'v26.0');
+  assert.equal(igConn.tokenExpiresAt, null);
+
+  await assert.rejects(ig.businessDiscovery('atelier.kin'), (err) => {
+    assert.equal(err.code, 'unsupported');
+    assert.match(err.userMessage, /Facebook Login/);
+    return true;
+  });
+  await assert.rejects(ig.hashtagSearch('ceramics'), (err) => err.code === 'unsupported');
+
+  const fbConn = await connectInstagram({ mode: 'facebook', token: 'user-token', ...bases });
+  assert.equal(fbConn.mode, 'facebook');
+  assert.equal(fbConn.pageId, graph.state.pageId);
+  assert.equal(fbConn.userId, graph.state.userId);
+  assert.equal(fbConn.token, 'page-token-1');
+  assert.equal(fbConn.pageToken, 'page-token-1');
+  assert.equal(fbConn.userToken, 'user-token');
+  assert.equal(fbConn.pages.length, 1);
+  assert.equal(fbConn.pages[0].pageToken, undefined, 'page tokens are not repeated in the picker list');
+
+  const fb = createIg({ ...bases, mode: 'facebook', token: fbConn.token, userId: fbConn.userId, pageId: fbConn.pageId, pageToken: fbConn.pageToken });
+  const bd = await fb.businessDiscovery('@atelier.kin', { mediaLimit: 12 });
+  assert.equal(bd.username, 'atelier.kin');
+  assert.equal(bd.followersCount, 12480);
+  assert.equal(bd.media.length, 12);
+  assert.ok(bd.media[0].permalink && bd.media[0].timestamp && typeof bd.media[0].likeCount === 'number');
+  await assert.rejects(fb.businessDiscovery('nobody.here'), (err) => err.code === 100 && /could not find @nobody.here/.test(err.userMessage));
+
+  const tagId = await fb.hashtagSearch('#Ceramics');
+  assert.ok(tagId);
+  const top = await fb.hashtagMedia(tagId, 'top', { limit: 10 });
+  assert.equal(top.length, 10);
+  assert.ok(top[0].caption.includes('#ceramics'));
+  const tagged = await fb.tags();
+  assert.ok(tagged.length > 0 && tagged[0].username);
+
+  // Facebook-mode messaging goes through the Page.
+  const convs = await fb.conversations();
+  assert.equal(convs.length, 6);
+  assert.ok(graph.state.requests.some((r) => r.path.endsWith(`/${graph.state.pageId}/conversations`)));
+});
+
+test('IgError classification', () => {
+  const auth = new IgError('Error validating access token', { code: 190, subcode: 463 });
+  assert.ok(auth.isAuth && auth.isPermanent && !auth.isTransient);
+  assert.match(auth.userMessage, /Reconnect Instagram/);
+
+  const rate = new IgError('(#4) Application request limit reached', { code: 4 });
+  assert.ok(rate.isRateLimit && !rate.isPermanent && !rate.isAuth);
+  assert.ok(new IgError('x', { code: 80002 }).isRateLimit);
+
+  const adv = new IgError('(#200) App does not have Advanced Access to instagram_manage_messages permission, and recipient user does not have role on app', { code: 200 });
+  assert.ok(adv.needsAdvancedAccess && adv.isPermission && adv.isPermanent);
+  assert.ok(!new IgError('(#200) Permissions error', { code: 200 }).needsAdvancedAccess);
+
+  const win = new IgError('(#10) This message is sent outside of allowed window.', { code: 10, subcode: 2534022 });
+  assert.ok(win.isOutsideWindow && win.isPermission);
+  assert.match(win.userMessage, /24 hours/);
+
+  assert.ok(new IgError('x', { code: 2 }).isTransient);
+  assert.ok(new IgError('x', { code: -1 }).isTransient);
+  assert.ok(!new IgError('x', { code: -1, subcode: 2207001 }).isTransient);
+  assert.ok(new IgError('x', { status: 503 }).isTransient);
+  assert.ok(new IgError('x', { code: 'network' }).isTransient);
+  assert.ok(new IgError('x', { code: 9, subcode: 2207042 }).isRateLimit);
+  assert.ok(new IgError('x', { code: 100, subcode: 2207026 }).isPermanent);
+  assert.ok(new IgError('x', { code: 'container_error', permanent: false }).isPermanent === false);
+  assert.equal(describeIgError(new Error('plain')), 'plain');
+});
+
+test('transient GET errors are retried; creating POSTs are not', async (t) => {
+  const { graph, ig } = await setup(t);
+  graph.state.faults.push({ method: 'GET', path: /\/me$/, times: 1, error: { status: 500, code: 2, message: 'Service temporarily unavailable' } });
+  assert.equal((await ig.me()).username, 'studio.north');
+
+  graph.state.faults.push({ method: 'GET', path: /\/me$/, times: 1, destroy: true });
+  assert.equal((await ig.me()).username, 'studio.north');
+
+  const before = count(graph, 'POST', /\/media$/);
+  graph.state.faults.push({ method: 'POST', path: /\/media$/, times: 1, error: { status: 500, code: 2, message: 'Service temporarily unavailable' } });
+  await assert.rejects(ig.createContainer({ image_url: 'http://example.invalid/x.jpg' }), (err) => err.isTransient && !err.isPermanent);
+  assert.equal(count(graph, 'POST', /\/media$/) - before, 1, 'not retried');
+
+  const limit = await ig.publishingLimit();
+  assert.deepEqual(limit, { used: 0, total: 100, durationSec: 86400 });
+  assert.ok(ig.usage && typeof ig.usage.callCount === 'number');
+});

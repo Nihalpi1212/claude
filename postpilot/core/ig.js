@@ -68,7 +68,7 @@ export class IgError extends Error {
   }
 
   get isAuth() {
-    return this.code === 190 || this.code === 102 || this.code === 463 || this.code === 467 || AUTH_SUBCODES.has(this.subcode);
+    return this.code === 190 || this.code === 102 || this.code === 104 || this.code === 463 || this.code === 467 || AUTH_SUBCODES.has(this.subcode);
   }
 
   get isRateLimit() {
@@ -452,7 +452,7 @@ export function createIg({
     const tok = opts.token || accessToken;
     const m = method.toUpperCase();
     let url = fullUrl(path, opts.unversioned);
-    const init = { method: m, cache: 'no-store' };
+    const init = { method: m };
     if (m === 'POST') {
       const body = encodeParams({ ...params, access_token: tok });
       init.body = body;
@@ -573,7 +573,7 @@ export function createIg({
     return [];
   }
 
-  const ME_FIELDS = 'user_id,username,name,account_type,profile_picture_url,followers_count,follows_count,media_count';
+  const ME_FIELDS = 'id,user_id,username,name,account_type,profile_picture_url,followers_count,follows_count,media_count';
   const FB_USER_FIELDS = 'id,ig_id,username,name,profile_picture_url,followers_count,follows_count,media_count';
   const MEDIA_FIELDS =
     'id,caption,media_type,media_product_type,media_url,thumbnail_url,permalink,shortcode,timestamp,like_count,comments_count,is_comment_enabled,children{id,media_type,media_url,thumbnail_url}';

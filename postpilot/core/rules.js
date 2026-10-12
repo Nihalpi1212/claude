@@ -39,10 +39,10 @@ const NO_SPACE_SCRIPT = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p
 export function normalize(text) {
   if (text == null) return '';
   return String(text)
-    .toLowerCase()
     .normalize('NFKD')
     .replace(/[̀-ͯ]/g, '')
     .normalize('NFC')
+    .toLowerCase() // after NFKD so 𝐁 -> B -> b, and İ -> I -> i
     .replace(APOSTROPHES, '')
     .replace(/\p{P}/gu, ' ')
     .replace(EMOJI_NOISE, '')

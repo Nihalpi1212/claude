@@ -158,7 +158,8 @@ export function cleanHashtags(list, { max = LIMITS.hashtags, avoid = [] } = {}) 
   const avoidSet = new Set((avoid || []).map(normTag).filter(Boolean));
   const out = [];
   for (const raw of Array.isArray(list) ? list : [list]) {
-    for (const piece of String(raw ?? '').split(/[\s,]+/)) {
+    // "#a #b" and "a, b" hold several tags; "beach life" is one (#beachlife).
+    for (const piece of String(raw ?? '').split(/,|\s+(?=#)/)) {
       const t = normTag(piece);
       if (t && !avoidSet.has(t) && !out.includes(t)) out.push(t);
     }
@@ -369,11 +370,11 @@ export function createAi({
     count = 3,
     includeHashtags = true,
     hashtagSets = [],
-    hashtagCount = 15,
+    hashtagCount = LIMITS.hashtagsRecommended,
     signal,
   } = {}) {
     const n = Math.max(1, Math.min(10, Math.floor(count) || 3));
-    const tagCount = Math.max(3, Math.min(LIMITS.hashtags, Math.floor(hashtagCount) || 15));
+    const tagCount = Math.max(1, Math.min(LIMITS.hashtags, Math.floor(hashtagCount) || LIMITS.hashtagsRecommended));
     const imgs = imageBlocks(images);
     const sets = (hashtagSets || [])
       .map((s) => (Array.isArray(s) ? { tags: s } : s))
@@ -392,7 +393,7 @@ export function createAi({
       '- Make the options clearly different from each other (angle, tone or length).',
       '- Do not put hashtags inside the caption text.',
       includeHashtags
-        ? `- hashtags: ${tagCount} relevant hashtags per option, mixing broad, mid-size and niche tags. Lowercase, starting with #, no spaces, no banned or spammy tags.`
+        ? `- hashtags: ${tagCount} highly relevant hashtags per option (Instagram limits posts to ${LIMITS.hashtagsRecommended} hashtags), best first, mixing mid-size and niche tags. Lowercase, starting with #, no spaces, no banned or spammy tags.`
         : '- hashtags: return an empty list.',
       sets.length && includeHashtags ? `The owner's saved hashtag sets (prefer these tags when relevant):\n${sets.join('\n')}` : '',
       '- firstComment: an optional short first comment that invites conversation (a question or a useful extra detail), without hashtags. Use an empty string when it would not add anything.',
@@ -424,8 +425,8 @@ export function createAi({
    * @param {{caption?: string, images?: Array, count?: number, avoid?: string[], language?: string, signal?: AbortSignal}} args
    * @returns {Promise<string[]>} lowercase tags starting with #
    */
-  async function hashtags({ caption = '', images = [], count = 20, avoid = [], language, signal } = {}) {
-    const n = Math.max(1, Math.min(LIMITS.hashtags, Math.floor(count) || 20));
+  async function hashtags({ caption = '', images = [], count = 10, avoid = [], language, signal } = {}) {
+    const n = Math.max(1, Math.min(LIMITS.hashtags, Math.floor(count) || 10));
     const imgs = imageBlocks(images);
     const avoidTags = cleanHashtags(avoid, { max: LIMITS.hashtags });
     const lines = [

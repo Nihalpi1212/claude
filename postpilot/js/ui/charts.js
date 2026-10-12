@@ -145,11 +145,11 @@ function ChartEmpty({ height, text }) {
 }
 
 function SrTable({ caption, head, rows }) {
-  return html`<table class="sr-only">
+  return html`<div class="sr-only"><table>
     <caption>${caption}</caption>
     <thead><tr>${head.map((h) => html`<th scope="col">${h}</th>`)}</tr></thead>
     <tbody>${rows.map((r) => html`<tr>${r.map((c, i) => (i === 0 ? html`<th scope="row">${c}</th>` : html`<td>${c}</td>`))}</tr>`)}</tbody>
-  </table>`;
+  </table></div>`;
 }
 
 function Tip({ x, y, width, children, align = 'top' }) {
@@ -230,8 +230,9 @@ export function Legend({ items = [], shape = 'rect', class: cls }) {
 /**
  * LineChart {series: [{name, values: (number|null)[], color?}], xLabels: string[], height=220,
  *            format?: kind|fn, area=true, yMin?, yMax?, label?, emptyText?}
- * - y axis starts at 0 when `area` is on and the data is non-negative (areas must sit on a
- *   zero baseline); with area={false} the axis hugs the data. Pass yMin to force a floor.
+ * - `area` paints a 10% wash under a single series (washes are skipped for 2+ series, where
+ *   overlapping fills turn muddy). With area on and non-negative data the y axis starts at 0;
+ *   with area={false} the axis hugs the data. Pass yMin to force a floor.
  * - >= 2 series: legend above; 2-4 series also get direct end labels when they don't collide.
  * - null values leave a gap in the line.
  */
@@ -328,7 +329,7 @@ export function LineChart({ series = [], xLabels = [], height = 220, format, are
       .join('; ') +
     (n > 1 && xLabels.length ? ` (${xLabels[0]} to ${xLabels[n - 1]})` : '');
 
-  return html`<div class=${wrapCls} ref=${ref} tabindex="0" aria-label=${summary}
+  return html`<div class=${wrapCls} ref=${ref} tabindex="0" role="group" aria-label=${label || 'Chart'} aria-roledescription="chart"
       onKeyDown=${keyNav(n, hover, setHover)} onFocus=${() => hover == null && setHover(n - 1)} onBlur=${() => setHover(null)}>
     ${list.length >= 2 ? html`<${Legend} shape="line" items=${list.map((s, i) => ({ label: s.name, color: colors[i] }))} />` : null}
     <div class="chart-plot">
@@ -344,7 +345,7 @@ export function LineChart({ series = [], xLabels = [], height = 220, format, are
             return html`<text key=${'x' + i} x=${clamp(xOf(i), half, width - half)} y=${height - 8} text-anchor="middle">${text}</text>`;
           })}
         </g>
-        ${area ? list.map((s, i) => html`<path key=${'a' + i} d=${areaPath(s.values)} class="chart-area" style=${{ fill: colors[i] }} />`) : null}
+        ${area && single ? html`<path d=${areaPath(s0.values)} class="chart-area" style=${{ fill: colors[0] }} />` : null}
         ${list.map((s, i) => html`<path key=${'l' + i} d=${linePath(s.values)} class="chart-line-path" style=${{ stroke: colors[i] }} />`)}
         ${hover != null ? html`<line class="chart-crosshair" x1=${f1(xOf(hover)) + 0.5} x2=${f1(xOf(hover)) + 0.5} y1=${top} y2=${top + plotH} />` : null}
         ${list.map((s, i) => {
@@ -412,7 +413,7 @@ export function BarChart({ data = [], horizontal = false, height, format, highli
     const vmax = Math.max(0, ...rows.map((d) => d.value)) || 1;
     const yc = (i) => 4 + rowH * (i + 0.5);
     const xEnd = (v) => x0 + (Math.max(0, v) / vmax) * plotW;
-    return html`<div class=${wrapCls} ref=${ref} tabindex="0" aria-label=${summary}
+    return html`<div class=${wrapCls} ref=${ref} tabindex="0" role="group" aria-label=${label || 'Chart'} aria-roledescription="chart"
         onKeyDown=${keyNav(n, hover, setHover)} onFocus=${() => hover == null && setHover(0)} onBlur=${() => setHover(null)}>
       <div class="chart-plot">
         <svg width="100%" height=${H} viewBox=${`0 0 ${width} ${H}`} role="img" aria-label=${summary}>
@@ -459,7 +460,7 @@ export function BarChart({ data = [], horizontal = false, height, format, highli
     if (monoW(text) > band - 2) return false;
     return highlightMax ? i === maxI : n <= 7;
   };
-  return html`<div class=${wrapCls} ref=${ref} tabindex="0" aria-label=${summary}
+  return html`<div class=${wrapCls} ref=${ref} tabindex="0" role="group" aria-label=${label || 'Chart'} aria-roledescription="chart"
       onKeyDown=${keyNav(n, hover, setHover)} onFocus=${() => hover == null && setHover(maxI)} onBlur=${() => setHover(null)}>
     <div class="chart-plot">
       <svg width="100%" height=${H} viewBox=${`0 0 ${width} ${H}`} role="img" aria-label=${summary}>
@@ -484,7 +485,7 @@ export function BarChart({ data = [], horizontal = false, height, format, highli
         )}
       </svg>
       ${hover != null
-        ? html`<${Tip} x=${cxOf(hover)} y=${Math.max(top, Math.min(yOf(rows[hover].value), y0) - 4)} width=${width} align="bottom">
+        ? html`<${Tip} x=${cxOf(hover) + (cxOf(hover) > width * 0.58 ? -barW / 2 : barW / 2)} y=${(yOf(rows[hover].value) + y0) / 2} width=${width} align="middle">
             <div class="chart-tip-title">${rows[hover].label}</div>
             <${TipRow} color=${fillOf(rows[hover], hover)} shape="rect" value=${tipFmt(rows[hover].value)} />
           </${Tip}>`
@@ -555,7 +556,7 @@ export function Heatmap({ matrix = [], rowLabels = DEFAULT_ROWS, colLabels = DEF
   };
   const summary = (label ? `${label}. ` : '') + `Highest: ${rowLabels[best[0]] ?? ''} ${colLabels[best[1]] ?? ''} at ${fmt(rows[best[0]][best[1]])}.`;
 
-  return html`<div class=${wrapCls} ref=${ref} tabindex="0" aria-label=${summary} onKeyDown=${onKey}
+  return html`<div class=${wrapCls} ref=${ref} tabindex="0" role="group" aria-label=${label || 'Chart'} aria-roledescription="chart" onKeyDown=${onKey}
       onFocus=${() => hover == null && setHover(best)} onBlur=${() => setHover(null)}>
     <div class="chart-plot">
       <svg width="100%" height=${H} viewBox=${`0 0 ${width} ${H}`} role="img" aria-label=${summary}>

@@ -86,7 +86,7 @@ export default function LockScreen({ onUnlocked, onChange }) {
   return html`<div class="lock">
     <div class="lock-card">
       <div class="lock-brand">
-        <span class="brand-mark" aria-hidden="true"></span>
+        <span class="brand-mark" aria-hidden="true"><${Icon} name="instagram-outline" size=${24} /></span>
         <div>
           <h1 class="lock-title">${APP_NAME}</h1>
           <p class="muted">Your private Instagram planner, publisher and autopilot.</p>

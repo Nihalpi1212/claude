@@ -56,7 +56,7 @@ postpilot/
     mock-github.mjs       In-memory GitHub API (git data, refs, contents, raw, dispatch, secrets)
     mock-graph.mjs        In-memory Instagram Graph API with realistic demo data
     mock-anthropic.mjs    Canned Claude responses
-    server.mjs            Serves the app at http://localhost:5173/claude/postpilot/ with all mocks mounted
+    server.mjs            Serves the app at http://localhost:5173/postpilot/ with all mocks mounted
   tests/
     core/*.test.mjs       node:test unit tests
     worker/*.test.mjs     Worker against mock servers

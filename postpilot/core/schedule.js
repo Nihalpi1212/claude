@@ -311,20 +311,39 @@ export function suggestSlots({
   const today = dayKey(new Date(nowMs), tz);
   const seen = new Set();
   const candidates = [];
+  const add = (ms, day, weekday, hour) => {
+    if (ms < startMs || ms > endMs || seen.has(ms)) return;
+    seen.add(ms);
+    const score = scoreAt(scores, weekday, hour);
+    candidates.push({ ms, day, score, eff: score * Math.pow(decay, (ms - nowMs) / DAY_MS) });
+  };
   for (let i = 0; i <= Math.ceil(horizonDays) + 1; i++) {
     const day = addDaysKey(today, i);
     const wd = weekdayOfKey(day);
-    const times = useFixed
-      ? fixed.filter((s) => Number(s.weekday) === wd).map((s) => s.time)
-      : Array.from({ length: 24 }, (_, h) => `${pad(h)}:00`);
-    for (const time of times) {
-      const r = resolveLocal(day, time, tz);
-      if (!r || (!useFixed && !r.exact)) continue; // best-time mode skips hours that do not exist (DST)
-      if (r.ms < startMs || r.ms > endMs || seen.has(r.ms)) continue;
-      seen.add(r.ms);
-      const local = zonedParts(new Date(r.ms), tz);
-      const score = scoreAt(scores, local.weekday, local.hour);
-      candidates.push({ ms: r.ms, day, score, eff: score * Math.pow(decay, (r.ms - nowMs) / DAY_MS) });
+    if (useFixed) {
+      for (const s of fixed) {
+        if (Number(s.weekday) !== wd) continue;
+        const r = resolveLocal(day, s.time, tz);
+        if (!r) continue;
+        const local = zonedParts(new Date(r.ms), tz);
+        add(r.ms, day, local.weekday, local.hour);
+      }
+      continue;
+    }
+    // Best-time mode: every local hh:00 of the day. Stepping from local midnight is exact except
+    // around DST changes, where the full conversion decides (hours that do not exist are skipped).
+    const midnight = zonedToUtc(day, '00:00', tz).getTime();
+    if (midnight > endMs + DAY_MS) break;
+    if (midnight + 2 * DAY_MS < startMs) continue;
+    for (let h = 0; h < 24; h++) {
+      let ms = midnight + h * HOUR_MS;
+      const p = zonedParts(new Date(ms), tz);
+      if (p.hour !== h || p.minute !== 0 || p.day !== Number(day.slice(8))) {
+        const r = resolveLocal(day, `${pad(h)}:00`, tz);
+        if (!r || !r.exact) continue;
+        ms = r.ms;
+      }
+      add(ms, day, wd, h);
     }
   }
   if (useFixed) candidates.sort((a, b) => a.ms - b.ms);

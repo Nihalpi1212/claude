@@ -134,6 +134,12 @@ export async function createContext({ env = {}, fetchImpl, now, consoleLog = con
     return entry;
   }
 
+  // ---- push notifications (sent by run.mjs at the end of the run, see notify.mjs) -------------
+  const notifications = [];
+  function notify(event, detail = {}) {
+    notifications.push({ event, ...detail });
+  }
+
   // ---- open the data branch ----------------------------------------------------------------
   let settings;
   try {
@@ -175,7 +181,17 @@ export async function createContext({ env = {}, fetchImpl, now, consoleLog = con
     if (!ai.enabled || !ai.apiKey) return null;
     try {
       const { default: Anthropic } = await import('../vendor/anthropic-sdk.js');
-      return createAi({ Anthropic, apiKey: ai.apiKey, model: ai.model || undefined, baseURL: endpoints.anthropic, dangerouslyAllowBrowser: true });
+      return createAi({
+        Anthropic,
+        apiKey: ai.apiKey,
+        model: ai.model || undefined,
+        baseURL: endpoints.anthropic,
+        // The vendored SDK is a browser build; this flag only silences its browser check in Node.
+        dangerouslyAllowBrowser: true,
+        timeout: 120_000,
+        voice: ai.voice || '',
+        language: ai.language || 'English',
+      });
     } catch (err) {
       log('worker', 'warn', `AI assistant could not start: ${err.message || err}`);
       return null;
@@ -288,6 +304,8 @@ export async function createContext({ env = {}, fetchImpl, now, consoleLog = con
     sleep,
     log,
     entries,
+    notify,
+    notifications,
     say,
     mask,
     scrub,
