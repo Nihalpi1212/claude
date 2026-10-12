@@ -4,15 +4,21 @@
 //   <MediaPicker open onClose onPick=${(assets) => ...} multiple kinds=${['image']} max=${10} />
 //
 // Props: {open, onClose, onPick(assets[]), multiple=true, kinds=['image','video'], max?, title?,
-//         confirmLabel?, initialSelected? (asset ids)}
+//         confirmLabel?, initialSelected? (asset ids), blockPending? (files still downloading from
+//         their link cannot be picked, for uses that need the bytes now, like AI captions)}
 // onPick receives Asset objects in the order the owner selected them. The picker does not close
 // itself: call onClose from onPick when you are done.
+//
+// Files imported from a link (CSV, RSS) have no bytes until the worker has downloaded them
+// (asset.importUrl): thumbnails show a "Downloading…" or "Download failed" placeholder instead of
+// requesting a file that does not exist yet.
 
 import { html, useEffect, useMemo, useRef, useState } from '../../vendor/preact.js';
 import { unusedAssets } from '../../core/schedule.js';
 import { loadViewCss } from '../css.js';
 import { useDoc } from '../data.js';
-import { isImageFile, isVideoFile, onMediaUrlRevoked, originalUrl, prepareFile, thumbUrl, uploadPrepared } from '../media.js';
+import { hasThumb, importState, isImageFile, isVideoFile, onMediaUrlRevoked, originalUrl, prepareFile, thumbUrl, uploadPrepared } from '../media.js';
+import { Icon } from './icons.js';
 import { Button, Callout, EmptyState, Frame, Modal, ProgressBar, Segmented, Select, Skeleton, TextInput, cx } from './kit.js';
 
 loadViewCss('composer');
@@ -25,10 +31,12 @@ onMediaUrlRevoked((path) => resolved.delete(path)); // media.js revokes least re
 
 /** Object URL of an asset's thumbnail ('thumb') or original ('original'); null while loading or on error. */
 export function useAssetUrl(asset, variant = 'thumb') {
-  const path = asset ? (variant === 'original' ? asset.path : asset.thumbPath) : null;
+  // Nothing to load while a linked file is still downloading, or for a video without a thumbnail.
+  const loadable = asset && (variant === 'original' ? !importState(asset) : hasThumb(asset));
+  const path = loadable ? (variant === 'original' ? asset.path : asset.thumbPath) : null;
   const [state, setState] = useState(() => ({ path, url: path ? resolved.get(path) || null : null, failed: false }));
   useEffect(() => {
-    if (!asset || !path) {
+    if (!loadable || !path) {
       setState({ path, url: null, failed: false });
       return undefined;
     }
@@ -60,17 +68,56 @@ export function formatDuration(sec) {
   return h ? `${h}:${String(m).padStart(2, '0')}:${r}` : `${m}:${r}`;
 }
 
+// Inline styles (this module has no stylesheet of its own; tokens keep both themes right).
+const IMPORT_STYLE = {
+  position: 'absolute',
+  inset: '0',
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: '4px',
+  padding: '6px',
+  background: 'repeating-linear-gradient(-45deg, var(--surface-2) 0 8px, var(--surface-3) 8px 16px)',
+  color: 'var(--ink-2)',
+  fontSize: 'var(--fs-xs)',
+  lineHeight: '1.25',
+  textAlign: 'center',
+};
+const IMPORT_ERROR_STYLE = { ...IMPORT_STYLE, background: 'var(--bad-soft)', color: 'var(--bad-ink)' };
+
+/**
+ * Placeholder for a file the worker still has to download from its link, or whose download failed.
+ * Renders nothing for ordinary assets. {asset, compact?} (compact: icon only, for small thumbnails)
+ */
+export function ImportPlaceholder({ asset, compact = false, class: cls }) {
+  const state = importState(asset);
+  if (!state) return null;
+  const failed = state === 'failed';
+  const text = failed ? 'Download failed' : 'Downloading…';
+  const tip = failed
+    ? `Could not download from its link: ${asset.importError}`
+    : `The worker downloads this file from its link on its next run.${asset.importLastError ? ` Last try failed: ${asset.importLastError}` : ''}`;
+  return html`<span class=${cx('mp-import', failed && 'is-error', cls)} style=${failed ? IMPORT_ERROR_STYLE : IMPORT_STYLE} title=${tip}>
+    <${Icon} name=${failed ? 'alert' : 'download'} size=${compact ? 14 : 18} />
+    ${compact ? html`<span class="sr-only">${text}</span>` : html`<span>${text}</span>`}
+  </span>`;
+}
+
 /**
  * MediaThumb {asset | assetId, ratio='1 / 1', number?, label?, kind?, onClick?, selected?, badge?}
  * A library asset in a contact-sheet Frame, with its decrypted thumbnail.
  */
-export function MediaThumb({ asset, assetId, ratio = '1 / 1', kind, badge, ...rest }) {
+export function MediaThumb({ asset, assetId, ratio = '1 / 1', kind, badge, children, ...rest }) {
   const { data: lib } = useDoc('library');
   const a = asset || (assetId && lib ? (lib.assets || []).find((x) => x.id === assetId) : null);
   const src = useAssetUrl(a);
   const k = kind || (a && a.kind === 'video' ? 'video' : undefined);
-  const b = badge != null ? badge : a && a.kind === 'video' ? formatDuration(a.durationSec) : undefined;
-  return html`<${Frame} src=${src} alt=${(a && a.name) || ''} ratio=${ratio} kind=${k} badge=${b} ...${rest} />`;
+  const b = badge != null ? badge : a && a.kind === 'video' && !importState(a) ? formatDuration(a.durationSec) : undefined;
+  const placeholder = importState(a) ? html`<${ImportPlaceholder} asset=${a} compact=${rest.size != null && Number(rest.size) < 72} />` : null;
+  // Frame shows its blank icon only when there are no children, so pass none for ordinary assets.
+  const inner = placeholder && children ? [placeholder, children] : placeholder || children;
+  return html`<${Frame} src=${src} alt=${(a && a.name) || ''} ratio=${ratio} kind=${k} badge=${b} ...${rest} children=${inner} />`;
 }
 
 // ---------------------------------------------------------------------------
@@ -89,31 +136,48 @@ function kindWord(kinds, n) {
 }
 
 const REMOVED_HINT = 'The original was removed to save space (Settings → Free up space). Only the thumbnail is kept; upload the file again to post it.';
+const PENDING_HINT = 'The worker is still downloading this file from its link. You can pick it here once it is in your library.';
 
-function Tile({ asset, index, order, onToggle, onQuickPick, disabled }) {
+function Tile({ asset, index, order, onToggle, onQuickPick, disabled, blockPending }) {
   const src = useAssetUrl(asset);
   const selected = order > 0;
   const removed = !!asset.originalRemovedAt;
+  const imported = importState(asset);
+  const blocked = removed || imported === 'failed' || (blockPending && imported === 'pending');
   const kindLabel = asset.kind === 'video' ? 'Video' : 'Photo';
+  const state = removed
+    ? ', original removed, cannot be picked'
+    : imported === 'failed'
+      ? ', download from its link failed, cannot be picked'
+      : imported
+        ? `, still downloading from its link${blockPending ? ', cannot be picked yet' : ''}`
+        : '';
+  // Frame shows its blank icon only without children, so pass none when there is nothing to add.
+  const parts = [
+    imported ? html`<${ImportPlaceholder} key="import" asset=${asset} />` : null,
+    selected ? html`<span key="order" class="mp-order num" aria-hidden="true">${order}</span>` : null,
+  ].filter(Boolean);
+  const inner = parts.length ? parts : null;
   return html`<${Frame}
-    class=${cx('mp-tile', selected && 'is-selected', (disabled || removed) && !selected && 'is-dimmed')}
+    class=${cx('mp-tile', selected && 'is-selected', (disabled || blocked) && !selected && 'is-dimmed')}
     src=${src}
     alt=""
     number=${index + 1}
     label=${asset.name}
     kind=${asset.kind === 'video' ? 'video' : undefined}
-    badge=${removed ? 'Original removed' : asset.kind === 'video' ? formatDuration(asset.durationSec) : undefined}
+    badge=${removed ? 'Original removed' : asset.kind === 'video' && !imported ? formatDuration(asset.durationSec) : undefined}
     onClick=${() => onToggle(asset.id)}
     onDblClick=${() => onQuickPick(asset.id)}
-    disabled=${removed && !selected}
-    title=${removed ? REMOVED_HINT : undefined}
+    disabled=${blocked && !selected}
+    title=${removed ? REMOVED_HINT : imported === 'failed' ? `Could not download from its link: ${asset.importError}` : blocked ? PENDING_HINT : undefined}
     aria-pressed=${selected ? 'true' : 'false'}
-    aria-label=${`${kindLabel}: ${asset.name || 'untitled'}${removed ? ', original removed, cannot be picked' : ''}${selected ? `, selected ${order}` : ''}`}
+    aria-label=${`${kindLabel}: ${asset.name || 'untitled'}${state}${selected ? `, selected ${order}` : ''}`}
     data-asset-id=${asset.id}
-  >${selected ? html`<span class="mp-order num" aria-hidden="true">${order}</span>` : null}<//>`;
+    children=${inner}
+  />`;
 }
 
-function PickerBody({ onClose, onPick, multiple = true, kinds = ['image', 'video'], max, title, confirmLabel, initialSelected = [] }) {
+function PickerBody({ onClose, onPick, multiple = true, kinds = ['image', 'video'], max, title, confirmLabel, initialSelected = [], blockPending = false }) {
   const { data: lib, loading, error } = useDoc('library');
   const { data: postsDoc } = useDoc('posts');
   const [filter, setFilter] = useState('all');
@@ -154,6 +218,14 @@ function PickerBody({ onClose, onPick, multiple = true, kinds = ['image', 'video
       setNotice(REMOVED_HINT);
       return;
     }
+    if (importState(a) === 'failed' && !selected.includes(id)) {
+      setNotice(`"${a.name || 'This file'}" could not be downloaded from its link: ${a.importError} Fix it in the Library first.`);
+      return;
+    }
+    if (blockPending && importState(a) === 'pending' && !selected.includes(id)) {
+      setNotice(`"${a.name || 'This file'}" is still downloading from its link. You can pick it here once the worker has downloaded it.`);
+      return;
+    }
     setSelected((cur) => {
       if (cur.includes(id)) return cur.filter((x) => x !== id);
       if (limit === 1) return [id];
@@ -172,7 +244,7 @@ function PickerBody({ onClose, onPick, multiple = true, kinds = ['image', 'video
 
   const quickPick = (id) => {
     const a = byId.get(id);
-    if (limit === 1 && !(a && a.originalRemovedAt)) confirm([id]);
+    if (limit === 1 && !(a && a.originalRemovedAt) && importState(a) !== 'failed' && !(blockPending && importState(a) === 'pending')) confirm([id]);
   };
 
   async function handleFiles(fileList) {
@@ -297,7 +369,7 @@ function PickerBody({ onClose, onPick, multiple = true, kinds = ['image', 'video
               ? html`<${EmptyState} compact icon="search" title="Nothing matches" body=${filter === 'unused' ? 'Everything here is already used in a post.' : 'Try another search or filter.'} />`
               : html`<div class="contact-sheet mp-grid" role="group" aria-label="Library media">
                   ${shown.map((a, i) => html`<${Tile} key=${a.id} asset=${a} index=${i} order=${selected.indexOf(a.id) + 1}
-                    onToggle=${toggle} onQuickPick=${quickPick} disabled=${limit !== 1 && n >= limit} />`)}
+                    onToggle=${toggle} onQuickPick=${quickPick} disabled=${limit !== 1 && n >= limit} blockPending=${blockPending} />`)}
                 </div>`}
       ${dragOver ? html`<div class="mp-drop" aria-hidden="true"><span>Drop to upload</span></div>` : null}
     </div>

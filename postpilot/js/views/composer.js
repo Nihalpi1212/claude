@@ -3,7 +3,7 @@
 // inside its own Drawer (a full-height sheet on phones).
 
 import { html, useEffect, useMemo, useRef, useState } from '../../vendor/preact.js';
-import { AiError } from '../../core/ai.js';
+import { AiError, REWRITE_TONES } from '../../core/ai.js';
 import { LIMITS, addHistory, hashtagsIn, mentionsIn, newPost, uid, validatePost } from '../../core/model.js';
 import { bestTimeMatrix, suggestSlots } from '../../core/schedule.js';
 import { format, formatDateTime, relative } from '../../core/time.js';
@@ -11,7 +11,8 @@ import { aiPrefs, getAi } from '../ai-client.js';
 import { useApp } from '../app.js';
 import { loadViewCss } from '../css.js';
 import { getStore, refreshNow, transact, useDocs } from '../data.js';
-import { isImageFile, isVideoFile, prepareFile, thumbBase64, uploadPrepared, videoFrame } from '../media.js';
+import { importState, isImageFile, isVideoFile, prepareFile, thumbBase64, uploadPrepared, videoFrame } from '../media.js';
+import { reminderDelivery } from '../push.js';
 import { CropEditor, ratioLabel } from '../ui/crop-editor.js';
 import { Icon } from '../ui/icons.js';
 import {
@@ -30,6 +31,7 @@ import {
   Kbd,
   Menu,
   Segmented,
+  Select,
   Skeleton,
   Stat,
   StatusPill,
@@ -39,7 +41,7 @@ import {
   cx,
   useMediaQuery,
 } from '../ui/kit.js';
-import { MediaPicker, formatDuration, useAssetUrl } from '../ui/media-picker.js';
+import { ImportPlaceholder, MediaPicker, formatDuration, useAssetUrl } from '../ui/media-picker.js';
 import { PostPreview } from '../ui/post-preview.js';
 
 loadViewCss('composer');
@@ -54,10 +56,12 @@ const TYPES = [
   { value: 'story', label: 'Story', icon: 'story' },
 ];
 const TYPE_NAME = { feed: 'post', carousel: 'carousel', reel: 'reel', story: 'story' };
-const EDITABLE = ['type', 'caption', 'firstComment', 'media', 'location', 'collaborators', 'userTags', 'shareToFeed', 'coverAssetId', 'thumbOffsetMs', 'trialReel', 'aiGenerated', 'altText', 'scheduledAt', 'labels', 'notes'];
+const EDITABLE = ['type', 'caption', 'firstComment', 'media', 'location', 'collaborators', 'userTags', 'shareToFeed', 'coverAssetId', 'thumbOffsetMs', 'trialReel', 'aiGenerated', 'altText', 'scheduledAt', 'labels', 'notes', 'publishMode'];
 const CAPTION_ID = 'cmp-caption';
 const FIRST_COMMENT_ID = 'cmp-first-comment';
 const FIELD_TARGET = { type: 'cmp-type', media: 'cmp-media', caption: CAPTION_ID, firstComment: FIRST_COMMENT_ID, collaborators: 'cmp-details', location: 'cmp-details', trialReel: 'cmp-reel', cover: 'cmp-reel' };
+// API limits that do not apply when the owner posts by hand (publishMode 'reminder'): shown as warnings.
+const SOFT_IN_REMINDER = new Set(['caption', 'firstComment', 'location']);
 const ALT_MAX = 1000;
 const LOCKED = ['publishing', 'published', 'canceled'];
 const SOURCE_LABEL = { autopilot: 'Autopilot', evergreen: 'Evergreen queue', csv: 'Imported', recycle: 'Recycled' };
@@ -78,6 +82,13 @@ const EVENT_LABEL = {
   published: 'Published',
   failed: 'Failed',
   warning: 'Note',
+  canceled: 'Canceled',
+  waiting_download: 'Waiting for a download',
+  'reminder sent': 'Reminder sent',
+  'post by hand': 'Opened to post by hand',
+  'remind again': 'Reminder moved',
+  'posted by hand': 'Posted by hand',
+  'deleted from Instagram': 'Deleted from Instagram',
 };
 
 const pick = (obj, keys) => Object.fromEntries(keys.map((k) => [k, obj[k] === undefined ? null : obj[k]]));
@@ -504,8 +515,11 @@ function Editor({ start, docs, onClose }) {
 
   // ---- Validation ---------------------------------------------------------
 
+  const reminderMode = draft.publishMode === 'reminder';
+  // Whether a reminder can reach a phone; otherwise it only shows on the Today screen.
+  const delivery = reminderDelivery(settings);
   const issues = useMemo(() => {
-    const list = validatePost({ ...draft, status: 'scheduled' }, assetsById);
+    let list = validatePost({ ...draft, status: 'scheduled' }, assetsById);
     const loc = draft.location;
     if (loc && String(loc.id || '').trim() && !/^\d+$/.test(String(loc.id).trim())) list.push({ level: 'error', field: 'location', message: 'The Facebook location ID must be a number.' });
     if (draft.type === 'reel' && draft.coverAssetId && !assetsById.get(draft.coverAssetId)) list.push({ level: 'warning', field: 'cover', message: 'The cover image is missing from the library, so Instagram will pick a frame.' });
@@ -513,6 +527,13 @@ function Editor({ start, docs, onClose }) {
     if (draft.type === 'carousel') {
       const ratios = draft.media.map((m) => ratioOf(assetsById.get(m.assetId))).filter(Boolean);
       if (ratios.some((r) => Math.abs(r - ratios[0]) > 0.02)) list.push({ level: 'warning', field: 'media', message: `Instagram crops every carousel item to the shape of the first one (${ratioLabel(ratios[0])}).` });
+    }
+    // Posted by hand: caption, hashtag and location API limits do not block (media rules still do),
+    // and a story's text is added in the Instagram app (with a text or link sticker).
+    if (draft.publishMode === 'reminder') {
+      list = list
+        .filter((i) => !(draft.type === 'story' && i.field === 'caption' && i.level === 'warning' && /captions on stories/.test(i.message)))
+        .map((i) => (i.level === 'error' && SOFT_IN_REMINDER.has(i.field) ? { ...i, level: 'warning' } : i));
     }
     const seen = new Set();
     return list.filter((i) => !seen.has(i.message) && seen.add(i.message));
@@ -597,11 +618,27 @@ function Editor({ start, docs, onClose }) {
       }
       if (!at) throw new Error('Pick a date and time first.');
       const event = how === 'queue' ? 'queued' : how === 'approve' ? 'approved' : existing && draft.status === 'scheduled' ? (at !== start.draft.scheduledAt ? 'rescheduled' : 'edited') : 'scheduled';
-      const saved = await persist({ ...draft, scheduledAt: at }, { status: 'scheduled', event, extra: { needsApproval: false, lastError: null, attempts: draft.status === 'failed' ? 0 : draft.attempts || 0 } });
+      const saved = await persist({ ...draft, scheduledAt: at }, { status: 'scheduled', event, extra: { needsApproval: false, lastError: null, reminderSentAt: null, attempts: draft.status === 'failed' ? 0 : draft.attempts || 0 } });
       setBaseline(snapshot(saved));
       const when = formatDateTime(at, tz);
-      toast(how === 'queue' ? `Added to the queue for ${when}.` : how === 'approve' ? `Approved. Scheduled for ${when}.` : `Scheduled for ${when}.`, { kind: 'success', action: editAction(saved.id) });
+      const msg = saved.publishMode === 'reminder'
+        ? `Reminder set for ${when}. ${delivery === 'ok' ? 'You get a notification then.' : 'It shows on the Today screen then.'}`
+        : how === 'queue' ? `Added to the queue for ${when}.` : how === 'approve' ? `Approved. Scheduled for ${when}.` : `Scheduled for ${when}.`;
+      toast(msg, { kind: 'success', action: editAction(saved.id) });
       onClose();
+    });
+
+  /** Reminder posts: skip the notification and open the post-by-hand screen now. */
+  const postByHand = () =>
+    act('publish', async () => {
+      const saved = await persist(draft, {
+        status: 'reminded',
+        event: 'post by hand',
+        extra: { scheduledAt: draft.scheduledAt || new Date().toISOString(), needsApproval: false, attempts: 0, lastError: null, reminderSentAt: null },
+      });
+      setBaseline(snapshot(saved));
+      onClose();
+      navigate(`#/post-now/${encodeURIComponent(saved.id)}`);
     });
 
   const publishNow = (retry = false) =>
@@ -662,13 +699,13 @@ function Editor({ start, docs, onClose }) {
     toast('Copied into a new draft.', { kind: 'success' });
   };
 
-  const goSettingsAi = async () => {
+  const goSettings = async (section) => {
     if (dirty) {
       const ok = await confirm({ title: 'Discard your changes?', body: 'Opening Settings closes this post without saving.', confirmLabel: 'Discard', danger: true });
       if (!ok) return;
     }
     onClose();
-    navigate('#/settings?section=ai');
+    navigate(`#/settings?section=${section}`);
   };
 
   const recentGrid = useMemo(() => {
@@ -686,19 +723,20 @@ function Editor({ start, docs, onClose }) {
   if (ro) {
     primaryRef.current = null;
     return html`<${ReadOnly} post=${live || draft} docs=${docs} assetsById=${assetsById} account=${account} tz=${tz} wide=${wide}
-      onClose=${onClose} onDuplicate=${() => duplicate(live || draft)} />`;
+      ig=${app.ig} toast=${toast} confirm=${confirm} onClose=${onClose} onDuplicate=${() => duplicate(live || draft)} />`;
   }
 
   // ---- Primary action -----------------------------------------------------
 
   const approval = draft.needsApproval && draft.status === 'draft';
   const isScheduled = existing && draft.status === 'scheduled';
-  const primaryLabel = approval ? 'Approve and schedule' : isScheduled ? 'Save changes' : 'Schedule';
+  const primaryLabel = approval ? 'Approve and schedule' : isScheduled ? 'Save changes' : reminderMode ? 'Schedule reminder' : 'Schedule';
   const canPublish = !busy && !uploading && !errors.length;
   const canPrimary = canPublish && !!draft.scheduledAt;
   primaryRef.current = canPrimary ? () => schedule(approval ? 'approve' : 'schedule') : null;
   const failed = draft.status === 'failed';
-  const titleText = !existing ? 'New post' : approval ? 'Review draft' : failed ? 'Failed post' : draft.status === 'scheduled' ? 'Scheduled post' : 'Edit draft';
+  const reminded = existing && draft.status === 'reminded';
+  const titleText = !existing ? 'New post' : approval ? 'Review draft' : failed ? 'Failed post' : reminded ? 'Waiting to be posted' : draft.status === 'scheduled' ? 'Scheduled post' : 'Edit draft';
   const btnSize = wide ? 'md' : 'sm';
 
   const menuItems = existing
@@ -733,10 +771,10 @@ function Editor({ start, docs, onClose }) {
   } else if (!draft.scheduledAt) {
     stateText = html`<span class="muted">Pick a time to schedule</span>`;
   } else {
-    stateText = html`<span class="muted">Goes out ${relative(draft.scheduledAt)}${wide ? html` · <${Kbd}>${/Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent) ? '⌘' : 'Ctrl'}<//> <${Kbd}>Enter<//>` : null}</span>`;
+    stateText = html`<span class="muted">${reminderMode ? 'Reminder' : 'Goes out'} ${relative(draft.scheduledAt)}${wide ? html` · <${Kbd}>${/Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent) ? '⌘' : 'Ctrl'}<//> <${Kbd}>Enter<//>` : null}</span>`;
   }
 
-  const when = html`<${WhenControls} draft=${draft} tz=${tz} best=${best}
+  const when = html`<${WhenControls} draft=${draft} tz=${tz} best=${best} reminder=${reminderMode}
     onChange=${(iso) => update({ scheduledAt: iso })} onQueue=${() => schedule('queue')} queueDisabled=${!canPublish} busy=${busy} />`;
 
   const footer = html`<div class="cmp-foot">
@@ -746,7 +784,10 @@ function Editor({ start, docs, onClose }) {
       <span class="spacer"></span>
       ${menuItems.length ? html`<${Menu} items=${menuItems} label="More actions" size=${btnSize} />` : null}
       <${Button} variant="ghost" size=${btnSize} onClick=${saveDraft} loading=${busy === 'draft'} disabled=${!!busy && busy !== 'draft'}>${isScheduled ? 'Move to drafts' : 'Save draft'}<//>
-      <${Button} size=${btnSize} icon=${failed ? 'refresh' : 'send'} onClick=${() => publishNow(failed)} loading=${busy === 'publish'} disabled=${!canPublish && busy !== 'publish'}>${failed ? 'Try again' : 'Publish now'}<//>
+      ${reminderMode
+        ? html`<${Button} size=${btnSize} icon="send" onClick=${postByHand} loading=${busy === 'publish'} disabled=${!canPublish && busy !== 'publish'}
+            title="Skip the reminder and open the steps to post it in Instagram now">Post by hand now<//>`
+        : html`<${Button} size=${btnSize} icon=${failed ? 'refresh' : 'send'} onClick=${() => publishNow(failed)} loading=${busy === 'publish'} disabled=${!canPublish && busy !== 'publish'}>${failed ? 'Try again' : 'Publish now'}<//>`}
       <${Button} variant="primary" size=${btnSize} icon=${approval ? 'check' : 'calendar'} onClick=${() => schedule(approval ? 'approve' : 'schedule')}
         loading=${busy === 'schedule' || busy === 'approve' || busy === 'queue'} disabled=${!canPrimary && !['schedule', 'approve', 'queue'].includes(busy)}
         title=${!draft.scheduledAt ? 'Pick a date and time first' : errors.length ? 'Fix the problems listed first' : `${primaryLabel} (Ctrl+Enter)`}>${primaryLabel}<//>
@@ -757,7 +798,9 @@ function Editor({ start, docs, onClose }) {
   const selRef = draft.media[sel0];
   const selAsset = selRef ? assetsById.get(selRef.assetId) : null;
   const videoAsset = type === 'reel' && draft.media[0] ? assetsById.get(draft.media[0].assetId) : null;
-  const showCaption = type !== 'story' || !!(draft.caption && draft.caption.trim());
+  // Stories published automatically take no caption; a story posted by hand can carry text or a link
+  // to add with a sticker (the posting screen has a copy button for it).
+  const showCaption = type !== 'story' || reminderMode || !!(draft.caption && draft.caption.trim());
 
   const editor = html`<div class=${cx('cmp-main', !wide && tab !== 'edit' && 'is-hidden')}>
     ${existing ? html`<${StatusRow} post=${draft} live=${live} />` : null}
@@ -768,6 +811,15 @@ function Editor({ start, docs, onClose }) {
         <//>`
       : null}
     ${approval ? html`<${Callout} tone="marker" title="Autopilot drafted this post">Check the media and caption, then approve to schedule it for the time below.<//>` : null}
+    ${reminded
+      ? html`<${Callout} tone="marker" title="Waiting for you to post this"
+          action=${html`<${Button} size="sm" variant="primary" icon="send" onClick=${() => {
+            onClose();
+            navigate(`#/post-now/${encodeURIComponent(draft.id)}`);
+          }}>Post it now<//>`}>
+          ${draft.reminderSentAt ? `The reminder went out ${relative(draft.reminderSentAt)}. ` : ''}Open the steps to save the media, copy the caption and mark it as posted. Scheduling it again sends a new reminder.
+        <//>`
+      : null}
     ${live && existing && live.status !== start.draft.status && !LOCKED.includes(live.status)
       ? html`<${Callout} tone="warning" title="This post changed on another device">It is now ${live.status}. Saving here replaces those changes.<//>`
       : null}
@@ -781,6 +833,9 @@ function Editor({ start, docs, onClose }) {
         }} />
       <p class="cmp-type-hint text-sm muted">${TYPE_HINT[type]}</p>
     </section>
+
+    <${PublishModeSection} value=${draft.publishMode === 'reminder' ? 'reminder' : 'auto'} onChange=${(v) => update({ publishMode: v })}
+      delivery=${delivery} onNotifications=${() => goSettings('notifications')} />
 
     <${MediaSection}
       draft=${draft} type=${type} assetsById=${assetsById} uploads=${uploads} sel=${sel0} setSel=${setSel} note=${note}
@@ -817,23 +872,25 @@ function Editor({ start, docs, onClose }) {
           }} />`
       : null}
     ${type === 'story'
-      ? html`<p class="cmp-story-note text-sm muted"><${Icon} name="info" size=${15} /> Stories stay up for 24 hours. Captions, links, stickers and polls cannot be added through Instagram's publishing API, so put any text in the image itself.</p>`
+      ? html`<p class="cmp-story-note text-sm muted"><${Icon} name="info" size=${15} /> ${reminderMode
+          ? 'Stories stay up for 24 hours. You post this one yourself, so you can add stickers, polls and links in Instagram. Put the text or link to add below; the posting screen has a copy button for it.'
+          : 'Stories stay up for 24 hours. Captions, links, stickers and polls cannot be added through Instagram’s publishing API. Put any text in the image itself, or choose “Send me a reminder” above to post the story yourself with stickers.'}</p>`
       : null}
 
     ${showCaption
-      ? html`<${CaptionSection} draft=${draft} update=${update} hashtagsDoc=${docs.hashtags} issues=${issuesFor('caption')} />`
+      ? html`<${CaptionSection} draft=${draft} update=${update} hashtagsDoc=${docs.hashtags} issues=${issuesFor('caption')} story=${type === 'story' && reminderMode} />`
       : null}
 
     ${type !== 'story'
       ? ai
         ? html`<${AiPanel} ai=${ai} settings=${settings} draft=${draft} update=${update} assetsById=${assetsById} hashtagsDoc=${docs.hashtags} toast=${toast} />`
-        : html`<p class="cmp-ai-off text-sm muted"><${Icon} name="sparkle" size=${15} /> Want help with captions and hashtags? <button type="button" class="cmp-link" onClick=${goSettingsAi}>Turn on AI in Settings</button>.</p>`
+        : html`<p class="cmp-ai-off text-sm muted"><${Icon} name="sparkle" size=${15} /> Want help with captions and hashtags? <button type="button" class="cmp-link" onClick=${() => goSettings('ai')}>Turn on AI in Settings</button>.</p>`
       : null}
 
     ${type !== 'story'
       ? html`<section class="cmp-section">
           <${Field} id=${FIRST_COMMENT_ID} label="First comment" error=${issuesFor('firstComment').find((i) => i.level === 'error')?.message}
-            hint="Posted from your account right after publishing. Good for a question or extra details."
+            hint=${reminderMode ? 'You post it yourself right after the post is up; the posting screen has a copy button. Good for a question or extra details.' : 'Posted from your account right after publishing. Good for a question or extra details.'}
             action=${html`<${CharCounter} value=${draft.firstComment || ''} max=${LIMITS.firstCommentChars} />`}>
             <${TextArea} rows=${2} maxRows=${8} value=${draft.firstComment || ''} onChange=${(v) => update({ firstComment: v })} placeholder="Optional" />
           <//>
@@ -940,10 +997,46 @@ function placeTag(d, i, pt) {
 // ---------------------------------------------------------------------------
 // Sections
 
+const REMINDER_WHY = 'For what Instagram’s API cannot post: music from Instagram’s library, link stickers, polls, product tags or filters.';
+const PUBLISH_MODES = [
+  { value: 'auto', label: 'Publish automatically', hint: () => 'Postpilot posts it to Instagram at the time you pick.' },
+  {
+    value: 'reminder',
+    label: 'Send me a reminder to post it myself',
+    hint: (delivery) =>
+      `${REMINDER_WHY} ${delivery === 'ok' ? 'You get a phone notification at that time and post it in the Instagram app.' : 'At that time it shows on the Today screen and you post it in the Instagram app.'}`,
+  },
+];
+
+function PublishModeSection({ value, onChange, delivery, onNotifications }) {
+  return html`<section class="cmp-section cmp-mode" id="cmp-mode">
+    <fieldset class="cmp-mode-set">
+      <legend class="label-caps">How to publish</legend>
+      ${PUBLISH_MODES.map(
+        (m) => html`<label key=${m.value} class=${cx('cmp-mode-option', value === m.value && 'is-on')}>
+          <input type="radio" name="cmp-publish-mode" value=${m.value} checked=${value === m.value} onChange=${() => onChange(m.value)} />
+          <span class="cmp-mode-text">
+            <span class="cmp-mode-label">${m.label}</span>
+            <span class="cmp-mode-hint text-sm muted">${m.hint(delivery)}</span>
+          </span>
+        </label>`,
+      )}
+    </fieldset>
+    ${value === 'reminder' && delivery !== 'ok'
+      ? html`<p class="cmp-mode-warn text-sm text-warn" role="status">
+          <${Icon} name="alert" size=${14} />
+          <span>${delivery === 'off' ? 'Reminder notifications are turned off in Settings' : 'No device has notifications turned on'}, so you only see the reminder on the Today screen.${' '}<button type="button" class="cmp-link" onClick=${onNotifications}>${delivery === 'off' ? 'Notification settings' : 'Turn on notifications'}</button></span>
+        </p>`
+      : null}
+  </section>`;
+}
+
 function StatusRow({ post }) {
   const src = SOURCE_LABEL[post.source];
+  const reminded = post.status === 'reminded';
   return html`<div class="cmp-status row">
-    <${StatusPill} status=${post.needsApproval && post.status === 'draft' ? 'needs-approval' : post.status} />
+    <${StatusPill} status=${post.needsApproval && post.status === 'draft' ? 'needs-approval' : reminded ? 'needs-approval' : post.status} label=${reminded ? 'Post by hand' : undefined} />
+    ${post.publishMode === 'reminder' && !reminded ? html`<${Badge} tone="outline">Reminder<//>` : null}
     ${src ? html`<${Badge} tone="outline">${src}<//>` : null}
     <span class="text-sm muted">Created ${relative(post.createdAt)}${post.updatedAt && post.updatedAt !== post.createdAt ? ` · edited ${relative(post.updatedAt)}` : ''}</span>
   </div>`;
@@ -979,7 +1072,7 @@ function MediaItem({ m, asset, index, count, selected, needsCrop, single, onSele
       badge=${kind === 'video' ? formatDuration(asset && asset.durationSec) : needsCrop ? 'Needs crop' : undefined} marked=${needsCrop}
       class=${selected ? 'is-selected' : ''} onClick=${() => onSelect(index)} aria-pressed=${selected ? 'true' : 'false'}
       aria-label=${`${kind === 'video' ? 'Video' : 'Photo'} ${index + 1} of ${count}: ${name}${needsCrop ? '. Needs cropping' : ''}`} data-media-index=${index}>
-      ${!asset ? html`<span class="frame-blank"><${Icon} name="alert" size=${20} /></span>` : null}
+      ${!asset ? html`<span class="frame-blank"><${Icon} name="alert" size=${20} /></span>` : importState(asset) ? html`<${ImportPlaceholder} asset=${asset} compact />` : null}
     <//>
     <div class="cmp-item-tools">
       ${single
@@ -1056,18 +1149,24 @@ function MediaSection({ draft, type, assetsById, uploads, sel, setSel, note, iss
 
 function ItemDetail({ m, index, asset, type, recropping, onAlt, onCrop }) {
   const isImage = asset ? asset.kind === 'image' : m.kind !== 'video';
-  const needsCrop = (type === 'feed' || type === 'carousel') && outOfFeedRange(asset);
+  // A file the worker still has to download from its link has no bytes yet: nothing to measure or crop.
+  const importing = importState(asset);
+  const needsCrop = !importing && (type === 'feed' || type === 'carousel') && outOfFeedRange(asset);
   const altAllowed = isImage && (type === 'feed' || type === 'carousel');
   const r = ratioOf(asset);
   return html`<div class="cmp-detail">
     <div class="cmp-detail-head">
       <span class="text-sm"><strong>${isImage ? 'Photo' : 'Video'} ${index + 1}</strong>
-        <span class="muted mono num"> ${asset ? `${asset.width || '?'}×${asset.height || '?'} · ${r ? ratioLabel(r) : '—'}${asset.kind === 'video' && asset.durationSec ? ` · ${formatDuration(asset.durationSec)}` : ''}` : 'missing from the library'}</span>
+        ${importing
+          ? html`<span class=${importing === 'failed' ? 'text-bad' : 'muted'}> ${importing === 'failed' ? 'Download failed' : 'Downloading from link…'}</span>`
+          : html`<span class="muted mono num"> ${asset ? `${asset.width || '?'}×${asset.height || '?'} · ${r ? ratioLabel(r) : '—'}${asset.kind === 'video' && asset.durationSec ? ` · ${formatDuration(asset.durationSec)}` : ''}` : 'missing from the library'}</span>`}
       </span>
-      ${asset && isImage
+      ${asset && isImage && !importing
         ? html`<${Button} size="sm" icon="crop" variant=${needsCrop ? 'primary' : 'secondary'} onClick=${onCrop} loading=${recropping}>Crop<//>`
         : null}
     </div>
+    ${importing === 'pending' ? html`<p class="text-sm muted cmp-detail-warn">The worker downloads this file from its link on its next run. You can crop it once it is in your library.</p>` : null}
+    ${importing === 'failed' ? html`<p class="text-sm text-bad cmp-detail-warn">It could not be downloaded from its link: ${String(asset.importError).replace(/[.\s]*$/, '.')} Try again in the Library, or replace it here.</p>` : null}
     ${needsCrop ? html`<p class="text-sm text-bad cmp-detail-warn">This photo is ${ratioLabel(r)}. Feed photos must be between 4:5 and 1.91:1. Crop saves a new copy and keeps the original.</p>` : null}
     ${altAllowed
       ? html`<${Field} label="Alt text" hint="Describes the photo for people who use screen readers. Instagram writes one automatically when this is empty."
@@ -1171,7 +1270,7 @@ function ReelOptions({ draft, update, video, assetsById, mode, onPickCover, onUp
   </section>`;
 }
 
-function CaptionSection({ draft, update, hashtagsDoc, issues }) {
+function CaptionSection({ draft, update, hashtagsDoc, issues, story = false }) {
   const caption = draft.caption || '';
   const tags = hashtagsIn(caption).length;
   const mentions = mentionsIn(caption).length;
@@ -1242,6 +1341,17 @@ function CaptionSection({ draft, update, hashtagsDoc, issues }) {
 
   const remember = (e) => (caret.current = e.currentTarget.selectionStart);
 
+  if (story) {
+    // A story posted by hand: text or a link the owner adds with a sticker in Instagram.
+    return html`<section class="cmp-section cmp-caption">
+      <${Field} id=${CAPTION_ID} label="Text or link to add" error=${err && err.message}
+        hint="Optional. Add it in Instagram with a text or link sticker; the posting screen has a copy button.">
+        <${TextArea} rows=${2} maxRows=${8} value=${caption} onChange=${(v) => update({ caption: v })}
+          placeholder="e.g. New glazes are in the shop: https://…" />
+      <//>
+    </section>`;
+  }
+
   return html`<section class="cmp-section cmp-caption">
     <${Field} id=${CAPTION_ID} label="Caption" error=${err && err.message}
       action=${html`<${CharCounter} value=${caption} max=${LIMITS.captionChars} />`}>
@@ -1273,13 +1383,51 @@ function CaptionSection({ draft, update, hashtagsDoc, issues }) {
   </section>`;
 }
 
+/**
+ * A translation to add below the caption, without the hashtags and @mentions the caption already has:
+ * the rewrite keeps every tag, so they would appear twice and count twice against Instagram's limits.
+ * A line of nothing but tags keeps only new ones; inside a sentence a repeated tag keeps its word,
+ * without the # or @.
+ */
+function translationToAppend(caption, text) {
+  const have = new Set([...hashtagsIn(caption), ...mentionsIn(caption)]);
+  const keyOf = (token) => (token[0] === '#' ? hashtagsIn(token) : token[0] === '@' ? mentionsIn(token) : [])[0] || null;
+  const lines = [];
+  for (const line of String(text).split('\n')) {
+    const tokens = line.trim().split(/\s+/).filter(Boolean);
+    if (tokens.length && tokens.every((t) => keyOf(t))) {
+      const keep = tokens.filter((t) => !have.has(keyOf(t)));
+      if (keep.length) lines.push(keep.join(' '));
+      continue;
+    }
+    lines.push(
+      line
+        .replace(/(^|[^\w&])#([\p{L}\p{N}_]+)/gu, (m, pre, w) => (have.has(`#${w.toLowerCase()}`) ? `${pre}${w}` : m))
+        .replace(/(^|[^\w])@([A-Za-z0-9._]{1,30})/g, (m, pre, h) => (have.has(`@${h.toLowerCase()}`) ? `${pre}${h}` : m)),
+    );
+  }
+  return lines.join('\n').replace(/[ \t]+$/gm, '').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+const TRANSLATE_LANGUAGES = ['English', 'Spanish', 'French', 'German', 'Italian', 'Portuguese', 'Dutch', 'Polish', 'Swedish', 'Turkish', 'Arabic', 'Hindi', 'Indonesian', 'Japanese', 'Korean', 'Chinese (Simplified)'];
+const capWord = (w) => w[0].toUpperCase() + w.slice(1);
+const REWRITE_ACTIONS = [
+  { mode: 'shorter', label: 'Shorter' },
+  { mode: 'longer', label: 'Longer' },
+  { mode: 'fix', label: 'Fix grammar' },
+  { mode: 'cta', label: 'Add call to action' },
+];
+
 function AiPanel({ ai, settings, draft, update, assetsById, hashtagsDoc, toast }) {
   const [notes, setNotes] = useState('');
   const [busy, setBusy] = useState('');
   const [err, setErr] = useState('');
   const [variants, setVariants] = useState(null);
   const [tags, setTags] = useState(null); // {list, picked: string[]}
+  const [rewritten, setRewritten] = useState(null); // {mode, title, text}
+  const [lang, setLang] = useState(() => (aiPrefs(settings).language === 'English' ? 'Spanish' : 'English'));
   const ctrl = useRef(null);
+  const caption = draft.caption || '';
   useEffect(() => () => ctrl.current && ctrl.current.abort(), []);
 
   const images = async () => {
@@ -1329,6 +1477,43 @@ function AiPanel({ ai, settings, draft, update, assetsById, hashtagsDoc, toast }
     }
   };
 
+  /** Writing actions on the caption (core/ai.js rewrite); the result waits for "Use this". */
+  const runRewrite = async (mode, title, tone) => {
+    if (ctrl.current) ctrl.current.abort();
+    const c = new AbortController();
+    ctrl.current = c;
+    setBusy(`rewrite-${mode}`);
+    setErr('');
+    setRewritten(null);
+    try {
+      const prefs = aiPrefs(settings);
+      const text = await ai.rewrite({ text: caption, mode, tone, voice: prefs.voice, language: mode === 'translate' ? lang : prefs.language, signal: c.signal });
+      if (c.signal.aborted) return;
+      setRewritten({ mode, title, text });
+    } catch (e) {
+      if (e instanceof AiError && e.code === 'aborted') return;
+      if (c.signal.aborted) return;
+      setErr(e instanceof AiError ? e.userMessage : errText(e));
+    } finally {
+      if (ctrl.current === c) {
+        ctrl.current = null;
+        setBusy('');
+      }
+    }
+  };
+
+  const applyRewrite = (below = false) => {
+    const text = rewritten.text;
+    update((d) => {
+      if (!below) return { ...d, caption: text };
+      const base = (d.caption || '').replace(/\s+$/, '');
+      const add = translationToAppend(base, text);
+      return add ? { ...d, caption: `${base}\n\n${add}` } : d;
+    });
+    setRewritten(null);
+    toast(below ? 'Translation added below the caption.' : 'Caption replaced. Edit it as much as you like.', { kind: 'success' });
+  };
+
   const useVariant = (v) => {
     update((d) => {
       const tagsLine = (v.hashtags || []).slice(0, LIMITS.hashtagsRecommended).join(' ');
@@ -1372,7 +1557,40 @@ function AiPanel({ ai, settings, draft, update, assetsById, hashtagsDoc, toast }
       <${Button} icon="hash" variant="ghost" onClick=${() => run('hashtags')} loading=${busy === 'hashtags'} disabled=${!!busy && busy !== 'hashtags'}>Suggest hashtags<//>
     </div>
     <p class="text-xs muted">The AI sees your notes${draft.media.length ? ' and up to 3 thumbnails' : ''}. It writes in your brand voice from Settings.</p>
+    <div class="cmp-rewrite" role="group" aria-labelledby="cmp-rewrite-title">
+      <span class="text-sm cmp-rewrite-title" id="cmp-rewrite-title">Rewrite the caption</span>
+      <div class="cmp-rewrite-actions">
+        ${REWRITE_ACTIONS.map(
+          (a) => html`<${Button} key=${a.mode} size="sm" variant="secondary" onClick=${() => runRewrite(a.mode, a.label)}
+            loading=${busy === `rewrite-${a.mode}`} disabled=${!caption.trim() || (!!busy && busy !== `rewrite-${a.mode}`)}>${a.label}<//>`,
+        )}
+        ${caption.trim() && !busy
+          ? html`<${Menu} size="sm" trigger="Change tone" label="Change the tone" align="start"
+              items=${REWRITE_TONES.map((t) => ({ label: capWord(t), onClick: () => runRewrite('tone', `${capWord(t)} tone`, t) }))} />`
+          : html`<${Button} size="sm" variant="secondary" loading=${busy === 'rewrite-tone'} disabled>Change tone<//>`}
+        <span class="cmp-translate">
+          <${Select} options=${TRANSLATE_LANGUAGES} value=${lang} onChange=${setLang} aria-label="Language to translate into" class="cmp-translate-lang" />
+          <${Button} size="sm" variant="secondary" icon="globe" onClick=${() => runRewrite('translate', `In ${lang}`)}
+            loading=${busy === 'rewrite-translate'} disabled=${!caption.trim() || (!!busy && busy !== 'rewrite-translate')}>Translate<//>
+        </span>
+      </div>
+      ${!caption.trim() ? html`<p class="text-xs muted">Write a caption (or use an idea above) to rewrite it.</p>` : null}
+    </div>
     ${err ? html`<${Callout} tone="danger" title="AI could not help this time">${err}<//>` : null}
+    ${rewritten
+      ? html`<div class="cmp-variant cmp-rewrite-result" role="region" aria-label="Rewritten caption">
+          <p class="label-caps">${rewritten.title}</p>
+          <p class="pre-wrap cmp-variant-text">${rewritten.text}</p>
+          <div class="row row-between">
+            <span class="text-xs muted mono num">${rewritten.text.length} chars</span>
+            <div class="row">
+              <${Button} size="sm" variant="ghost" onClick=${() => setRewritten(null)}>Discard<//>
+              ${rewritten.mode === 'translate' ? html`<${Button} size="sm" variant="secondary" onClick=${() => applyRewrite(true)}>Add below<//>` : null}
+              <${Button} size="sm" variant="primary" icon="check" onClick=${() => applyRewrite(false)}>Use this<//>
+            </div>
+          </div>
+        </div>`
+      : null}
     ${variants && variants.length
       ? html`<div class="cmp-variants" role="list" aria-label="Caption ideas">
           ${variants.map(
@@ -1534,7 +1752,7 @@ function IssuesList({ issues, onJump }) {
   </section>`;
 }
 
-function WhenControls({ draft, tz, best, onChange, onQueue, queueDisabled, busy }) {
+function WhenControls({ draft, tz, best, onChange, onQueue, queueDisabled, busy, reminder }) {
   const past = draft.scheduledAt && new Date(draft.scheduledAt).getTime() < Date.now() - 60_000;
   return html`<div class="cmp-when" id="cmp-when" role="group" aria-label="When to post">
     <span class="label-caps cmp-when-label">When</span>
@@ -1549,7 +1767,7 @@ function WhenControls({ draft, tz, best, onChange, onQueue, queueDisabled, busy 
       : null}
     <${Button} size="sm" variant="ghost" icon="repeat" onClick=${onQueue} disabled=${queueDisabled} loading=${busy === 'queue'}
       title="Schedule at the next free best time">Add to queue<//>
-    ${past ? html`<p class="cmp-when-warn text-sm text-warn">This time has passed, so the post goes out on the next worker run.</p>` : null}
+    ${past ? html`<p class="cmp-when-warn text-sm text-warn">This time has passed, so ${reminder ? 'the reminder goes out' : 'the post goes out'} on the next worker run.</p>` : null}
   </div>`;
 }
 
@@ -1579,15 +1797,123 @@ function History({ post }) {
 // ---------------------------------------------------------------------------
 // Read-only view (published, publishing, canceled)
 
-function ReadOnly({ post, docs, assetsById, account, tz, wide, onClose, onDuplicate }) {
+/**
+ * Graph answers code 100 / subcode 33 ("does not exist, cannot be loaded due to missing permissions,
+ * or does not support this operation") both when the media is gone and when this connection may not
+ * delete it (no instagram_manage_contents permission, or a request Instagram does not support). So a
+ * "not found" answer to DELETE only counts as deleted when reading the media with the same connection,
+ * which Postpilot can always do, finds nothing too. Returns 'gone' | 'exists' | 'unknown'.
+ * UNVERIFIED against the live API: that reading deleted media answers 100/33 (or 404). Any other
+ * answer is 'unknown', and the post is not recorded as deleted.
+ */
+async function mediaGone(ig, id) {
+  try {
+    await ig.getMedia(id, 'id');
+    return 'exists';
+  } catch (err) {
+    return err && err.isNotFound ? 'gone' : 'unknown';
+  }
+}
+
+/**
+ * Delete a published post from Instagram (Facebook Login only: DELETE /{ig-media-id}, added to the
+ * API on 2025-12-03 per research_1.md section 11; Meta documents DELETE in its examples and POST in
+ * places, unverified which is canonical, so this follows the DELETE examples). DELETE is idempotent:
+ * when a retry finds the media already gone (and a read confirms it), the post is recorded as deleted.
+ * On success the post is canceled and its media leaves the autopilot pool: a canceled post no longer
+ * counts as using its files (core/schedule.js unusedAssets), so autopilot could post them again.
+ */
+function DeleteFromInstagram({ post, ig, mode, toast, confirm }) {
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState('');
+  if (post.status !== 'published') return null;
+  const facebook = mode === 'facebook';
+  let why = null;
+  if (!facebook) why = 'Deleting posts through the API needs a Facebook Login connection (Settings → Instagram). With Instagram Login, delete it in the Instagram app.';
+  else if (!post.igMediaId) why = 'Postpilot does not know this post’s Instagram id (for example, it was posted by hand), so delete it in the Instagram app.';
+  else if (!ig) why = 'Instagram is not connected right now.';
+
+  const fail = (message) => {
+    setBusy(false);
+    setProblem(message);
+    toast(message, { kind: 'error' });
+  };
+
+  const run = async () => {
+    const ok = await confirm({
+      title: 'Delete from Instagram?',
+      body: 'This removes the post from your Instagram profile for everyone, with its likes and comments. It cannot be undone. Postpilot keeps its copy, marked as deleted, and takes its media out of the autopilot pool.',
+      confirmLabel: 'Delete from Instagram',
+      danger: true,
+    });
+    if (!ok) return;
+    setBusy(true);
+    setProblem('');
+    let detail;
+    try {
+      await ig.deleteMedia(post.igMediaId);
+    } catch (err) {
+      // A lost connection may still have reached Instagram: say so instead of retrying.
+      if (err && err.maybeSent) return fail('The connection dropped, so Postpilot does not know whether Instagram deleted the post. Check your profile before you try again.');
+      if (!(err && err.isNotFound)) return fail(errText(err));
+      const state = await mediaGone(ig, post.igMediaId);
+      if (state === 'exists') {
+        return fail('Instagram did not delete the post: it is still on your profile. Deleting needs the instagram_manage_contents permission. Reconnect Instagram in Settings and allow every permission, or delete the post in the Instagram app.');
+      }
+      if (state !== 'gone') return fail('Instagram did not confirm that the post is gone. Check your profile, then try again.');
+      detail = 'It was already gone from Instagram.';
+    }
+    let unpooled = 0;
+    try {
+      await transact(
+        async (tx) => {
+          unpooled = 0;
+          const doc = await tx.read('posts');
+          const p = doc.posts.find((x) => x.id === post.id);
+          if (!p || p.deletedFromInstagramAt) return;
+          p.status = 'canceled';
+          p.deletedFromInstagramAt = new Date().toISOString();
+          addHistory(p, 'deleted from Instagram', detail);
+          tx.write('posts', doc);
+          const lib = await tx.read('library');
+          const ids = new Set([...(p.media || []).map((m) => m && m.assetId), p.coverAssetId].filter(Boolean));
+          for (const a of lib.assets || []) {
+            if (!ids.has(a.id) || !a.autopilot) continue;
+            a.autopilot = false;
+            unpooled++;
+          }
+          if (unpooled) tx.write('library', lib);
+        },
+        { message: 'composer: deleted from Instagram', silent: true },
+      );
+      toast(unpooled ? 'Deleted from Instagram. Its media was taken out of the autopilot pool.' : 'Deleted from Instagram.', { kind: 'success' });
+    } catch (err) {
+      toast(`The post was deleted from Instagram, but Postpilot could not save that: ${errText(err)}`, { kind: 'error' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return html`<section class="cmp-section cmp-delete-ig">
+    <h3 class="label-caps">Delete from Instagram</h3>
+    ${why
+      ? html`<p class="text-sm muted">${why}</p>`
+      : html`<p class="text-sm muted">Removes the ${TYPE_NAME[post.type] || 'post'} from your profile. Instagram does not allow deleting single carousel items.</p>`}
+    <div><${Button} size="sm" variant="danger" icon="trash" onClick=${run} loading=${busy} disabled=${!!why}>Delete from Instagram<//></div>
+    ${problem && !why ? html`<p class="text-sm text-bad" role="alert">${problem}</p>` : null}
+  </section>`;
+}
+
+function ReadOnly({ post, docs, assetsById, account, tz, wide, ig, toast, confirm, onClose, onDuplicate }) {
   const [tab, setTab] = useState('details');
   const [previewMode, setPreviewMode] = useState('feed');
   const stats = post.igMediaId && docs['analytics-media'] && docs['analytics-media'].media ? docs['analytics-media'].media[post.igMediaId] : null;
   const m = (stats && stats.metrics) || {};
-  const title = post.status === 'published' ? 'Published post' : post.status === 'publishing' ? 'Publishing' : 'Canceled post';
+  const deleted = post.status === 'canceled' && post.deletedFromInstagramAt;
+  const title = post.status === 'published' ? 'Published post' : post.status === 'publishing' ? 'Publishing' : deleted ? 'Deleted from Instagram' : 'Canceled post';
   const footer = html`<div class="cmp-actions">
     <span class="spacer"></span>
-    ${post.permalink ? html`<${Button} href=${post.permalink} target="_blank" rel="noopener noreferrer" icon="external" variant="ghost" size=${wide ? 'md' : 'sm'}>View on Instagram<//>` : null}
+    ${post.permalink && !deleted ? html`<${Button} href=${post.permalink} target="_blank" rel="noopener noreferrer" icon="external" variant="ghost" size=${wide ? 'md' : 'sm'}>View on Instagram<//>` : null}
     <${Button} icon="copy" onClick=${onDuplicate} size=${wide ? 'md' : 'sm'}>Duplicate as new post<//>
     <${Button} variant="primary" onClick=${onClose} size=${wide ? 'md' : 'sm'}>Close<//>
   </div>`;
@@ -1613,7 +1939,9 @@ function ReadOnly({ post, docs, assetsById, account, tz, wide, onClose, onDuplic
             <//>`
           : post.status === 'publishing'
             ? html`<${Callout} tone="marker" title="Publishing now">Instagram is processing the media. This usually takes 1–3 minutes; this panel updates by itself.<//>`
-            : html`<${Callout} tone="neutral" title="Canceled">This post will not be published. Duplicate it to use it again.<//>`}
+            : deleted
+              ? html`<${Callout} tone="neutral" title=${`Deleted from Instagram ${formatDateTime(post.deletedFromInstagramAt, tz)}`}>It is no longer on your profile. Duplicate it to post it again.<//>`
+              : html`<${Callout} tone="neutral" title="Canceled">This post will not be published. Duplicate it to use it again.<//>`}
         ${post.status === 'published'
           ? metrics.length
             ? html`<div class="stats cmp-stats">${metrics.map(([label, v]) => html`<${Stat} key=${label} label=${label} value=${v} format="compact" />`)}</div>`
@@ -1634,6 +1962,7 @@ function ReadOnly({ post, docs, assetsById, account, tz, wide, onClose, onDuplic
               ${(post.labels || []).length ? html`<dt>Labels</dt><dd>${post.labels.join(', ')}</dd>` : null}
             </dl></section>`
           : null}
+        <${DeleteFromInstagram} post=${post} ig=${ig} mode=${account && account.mode} toast=${toast} confirm=${confirm} />
         <${History} post=${post} />
       </div>
       <aside class=${cx('cmp-side', !wide && tab !== 'preview' && 'is-hidden')} aria-label="Preview"><div class="cmp-side-inner">

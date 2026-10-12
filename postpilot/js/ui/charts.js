@@ -722,3 +722,201 @@ export function Donut({ segments = [], size = 140, label, format, legend = true,
     ${legend ? html`<${Legend} class="legend-stacked" items=${segs.map((s, i) => ({ label: s.label, color: colorOf(s, i), value: pct(s.value) }))} />` : null}
   </div>`;
 }
+
+// ---------------------------------------------------------------------------
+// StackedColumns (parts of a total per x label)
+// ---------------------------------------------------------------------------
+
+/**
+ * StackedColumns {series: [{name, values: (number|null)[], color?}], xLabels, height=200, format?, label?, emptyText?}
+ * One column per x label, each series stacked bottom-up in series order (first series at the base).
+ * Only the top segment gets the rounded data end; 1px surface gaps separate segments. Legend above,
+ * tooltip lists every part and the total.
+ */
+export function StackedColumns({ series = [], xLabels = [], height = 200, format, label, emptyText, class: cls }) {
+  const [ref, width] = useWidth();
+  const [hover, setHover] = useState(null);
+  const list = (series || []).filter((s) => s && Array.isArray(s.values));
+  const n = Math.max(xLabels.length, 0, ...list.map((s) => s.values.length));
+  const val = (s, i) => (isNum(s.values[i]) && s.values[i] > 0 ? s.values[i] : 0);
+  const totals = Array.from({ length: n }, (_, i) => (list.some((s) => isNum(s.values[i])) ? list.reduce((a, s) => a + val(s, i), 0) : null));
+  const wrapCls = ['chart', 'chart-bar', 'chart-stackcol', cls].filter(Boolean).join(' ');
+  if (!list.length || !totals.some((t) => isNum(t) && t > 0)) {
+    return html`<div class=${wrapCls} ref=${ref}><${ChartEmpty} height=${height} text=${emptyText} /></div>`;
+  }
+  const tipFmt = (v) => formatValue(v, format || 'number');
+  const colors = list.map((s, i) => s.color || seriesColor(i));
+  const sc = niceScale(0, Math.max(...totals.filter(isNum)), height < 170 ? 3 : 4);
+  const tickLabels = axisLabels(sc.ticks, format);
+  const left = Math.max(24, Math.max(...tickLabels.map(monoW)) + 10);
+  const top = 10;
+  const bottom = 26;
+  const plotH = Math.max(40, height - top - bottom);
+  const plotW = Math.max(40, width - left - 8);
+  const band = plotW / Math.max(1, n);
+  const barW = Math.max(2, Math.min(24, band * 0.62, band - 2));
+  const cxOf = (i) => left + band * (i + 0.5);
+  const yOf = (v) => top + plotH - ((v - sc.min) / (sc.max - sc.min || 1)) * plotH;
+  const xs = visibleXIndices(n, xLabels, plotW);
+  const sumOf = (s) => s.values.reduce((a, v) => a + (isNum(v) ? v : 0), 0);
+  const grand = list.reduce((a, s) => a + sumOf(s), 0);
+  const summary = (label ? `${label}. ` : '') + list.map((s) => `${s.name}: ${tipFmt(sumOf(s))} (${formatValue(grand ? sumOf(s) / grand : null, 'percent')})`).join('; ') + (n > 1 && xLabels.length ? ` (${xLabels[0]} to ${xLabels[n - 1]})` : '');
+
+  return html`<div class=${wrapCls} ref=${ref} tabindex="0" role="group" aria-label=${label || 'Chart'} aria-roledescription="chart"
+      onKeyDown=${keyNav(n, hover, setHover)} onFocus=${() => hover == null && setHover(n - 1)} onBlur=${() => setHover(null)}>
+    ${list.length >= 2 ? html`<${Legend} items=${list.map((s, i) => ({ label: s.name, color: colors[i] }))} />` : null}
+    <div class="chart-plot">
+      <svg width="100%" height=${height} viewBox=${`0 0 ${width} ${height}`} role="img" aria-label=${summary}>
+        <g class="chart-grid">
+          ${sc.ticks.map((t, i) => html`<line key=${'g' + i} x1=${left} x2=${width - 8} y1=${f1(yOf(t)) + 0.5} y2=${f1(yOf(t)) + 0.5} class=${t === 0 ? 'is-base' : ''} />`)}
+        </g>
+        <g class="chart-axis">
+          ${sc.ticks.map((t, i) => html`<text key=${'t' + i} x=${left - 8} y=${yOf(t)} text-anchor="end" dominant-baseline="middle">${tickLabels[i]}</text>`)}
+          ${xs.map((i) => {
+            const text = String(xLabels[i] ?? '');
+            const half = monoW(text) / 2;
+            return html`<text key=${'x' + i} x=${clamp(cxOf(i), half, width - half)} y=${height - 8} text-anchor="middle">${text}</text>`;
+          })}
+        </g>
+        ${Array.from({ length: n }, (_, i) => {
+          let acc = 0;
+          const segs = [];
+          const topIdx = list.reduce((k, s, j) => (val(s, i) > 0 ? j : k), -1);
+          list.forEach((s, j) => {
+            const v = val(s, i);
+            if (!v) return;
+            const y0 = yOf(acc);
+            const y1 = yOf(acc + v);
+            acc += v;
+            const gap = j > 0 && y0 - y1 > 2 ? 1 : 0;
+            segs.push(
+              j === topIdx
+                ? html`<path key=${j} class="chart-barmark" d=${vBarPath(cxOf(i), y0 - gap, y1, barW, 3)} style=${{ fill: colors[j] }} />`
+                : html`<rect key=${j} class="chart-barmark" x=${f1(cxOf(i) - barW / 2)} y=${f1(y1)} width=${f1(barW)} height=${f1(Math.max(0, y0 - y1 - gap))} style=${{ fill: colors[j] }} />`,
+            );
+          });
+          return html`<g key=${i} class=${hover != null && hover !== i ? 'is-dim' : ''}>
+            ${segs}
+            <rect class="chart-hit" x=${left + band * i} y=${top} width=${band} height=${plotH}
+              onPointerEnter=${() => setHover(i)} onPointerDown=${() => setHover(i)} onPointerLeave=${() => setHover(null)} />
+          </g>`;
+        })}
+      </svg>
+      ${hover != null
+        ? html`<${Tip} x=${cxOf(hover) + (cxOf(hover) > width * 0.58 ? -barW / 2 : barW / 2)} y=${yOf(totals[hover] || 0)} width=${width} align="middle">
+            <div class="chart-tip-title">${xLabels[hover] ?? ''}</div>
+            ${list.map((s, j) => html`<${TipRow} color=${colors[j]} shape="rect" value=${tipFmt(isNum(s.values[hover]) ? s.values[hover] : null)} name=${s.name} />`).reverse()}
+            ${list.length > 1 ? html`<${TipRow} value=${tipFmt(totals[hover])} name="Total" />` : null}
+          </${Tip}>`
+        : null}
+    </div>
+    <${SrTable} caption=${label || 'Chart data'} head=${['', ...list.map((s) => s.name || 'Value'), 'Total']}
+      rows=${Array.from({ length: n }, (_, i) => [xLabels[i] ?? String(i + 1), ...list.map((s) => tipFmt(isNum(s.values[i]) ? s.values[i] : null)), tipFmt(totals[i])])} />
+  </div>`;
+}
+
+// ---------------------------------------------------------------------------
+// CurveChart (lines over a numeric x axis, e.g. hours since publishing)
+// ---------------------------------------------------------------------------
+
+/**
+ * CurveChart {series: [{name, points: [{x, y}], color?}], xTicks?: [{value, label}], xScale='linear'|'log',
+ *             xFormat?: (x) => string, xFrom?: number, height=200, format?, label?, emptyText?}
+ * Unevenly spaced points sit at their real x. xScale 'log' spaces x as log(1 + x), so the first
+ * hours of a post are readable next to its first month. Ticks that would collide are dropped.
+ * The x axis starts at 0 unless `xFrom` is given (then at xFrom, or the first point if earlier).
+ * Hover snaps to the nearest point; the tooltip shows every series at that x. Keyboard focus (not
+ * the focus a drawer gives its first element on open) shows the last point; arrows move along.
+ */
+export function CurveChart({ series = [], xTicks = [], xScale = 'linear', xFormat, xFrom, height = 200, format, label, emptyText, class: cls }) {
+  const [ref, width] = useWidth();
+  const [hover, setHover] = useState(null); // index into xsAll
+  const list = (series || [])
+    .filter((s) => s && Array.isArray(s.points))
+    .map((s) => ({ ...s, points: s.points.filter((p) => p && isNum(p.x) && isNum(p.y)).sort((a, b) => a.x - b.x) }))
+    .filter((s) => s.points.length);
+  const wrapCls = ['chart', 'chart-line', 'chart-curve', cls].filter(Boolean).join(' ');
+  if (!list.length) return html`<div class=${wrapCls} ref=${ref}><${ChartEmpty} height=${height} text=${emptyText} /></div>`;
+
+  const tipFmt = (v) => formatValue(v, format || 'number');
+  const xText = (x) => (xFormat ? xFormat(x) : formatValue(x));
+  const xsAll = [...new Set(list.flatMap((s) => s.points.map((p) => p.x)))].sort((a, b) => a - b);
+  const xMin = isNum(xFrom) ? Math.min(xFrom, xsAll[0]) : Math.min(0, xsAll[0]);
+  const xMax = Math.max(xsAll[xsAll.length - 1], xMin + 1);
+  const tx = (x) => (xScale === 'log' ? Math.log1p(Math.max(0, x)) : x);
+  const ys = list.flatMap((s) => s.points.map((p) => p.y));
+  const sc = niceScale(Math.min(0, ...ys), Math.max(...ys), height < 170 ? 3 : 4);
+  const tickLabels = axisLabels(sc.ticks, format);
+  const left = Math.max(24, Math.max(...tickLabels.map(monoW)) + 10);
+  const top = 12;
+  const bottom = 26;
+  const right = 14;
+  const plotH = Math.max(40, height - top - bottom);
+  const plotW = Math.max(40, width - left - right);
+  const xOf = (x) => left + ((tx(x) - tx(xMin)) / (tx(xMax) - tx(xMin) || 1)) * plotW;
+  const yOf = (v) => top + plotH - ((clamp(v, sc.min, sc.max) - sc.min) / (sc.max - sc.min || 1)) * plotH;
+  const colors = list.map((s, i) => s.color || seriesColor(i));
+
+  // X ticks inside the range, without collisions (keep the earlier tick).
+  const ticks = [];
+  for (const t of xTicks.filter((t) => isNum(t.value) && t.value >= xMin && t.value <= xMax)) {
+    const px = xOf(t.value);
+    const w = monoW(t.label) + 10;
+    if (ticks.every((o) => Math.abs(o.px - px) >= (w + o.w) / 2)) ticks.push({ ...t, px, w });
+  }
+  const at = (s, x) => {
+    const p = s.points.find((q) => q.x === x);
+    return p ? p.y : null;
+  };
+  const onMove = (e) => {
+    const svg = e.currentTarget.ownerSVGElement || e.currentTarget;
+    const r = svg.getBoundingClientRect();
+    const px = ((e.clientX - r.left) * width) / (r.width || width);
+    let best = 0;
+    xsAll.forEach((x, i) => Math.abs(xOf(x) - px) < Math.abs(xOf(xsAll[best]) - px) && (best = i));
+    setHover(best);
+  };
+  const path = (pts) => pts.map((p, i) => `${i ? 'L' : 'M'}${f1(xOf(p.x))} ${f1(yOf(p.y))}`).join('');
+  const single = list.length === 1;
+  const baseY = yOf(clamp(0, sc.min, sc.max));
+  const area = single && list[0].points.length > 1
+    ? `M${f1(xOf(list[0].points[0].x))} ${f1(baseY)}` + list[0].points.map((p) => `L${f1(xOf(p.x))} ${f1(yOf(p.y))}`).join('') + `L${f1(xOf(list[0].points[list[0].points.length - 1].x))} ${f1(baseY)}Z`
+    : '';
+  const hx = hover != null ? xsAll[hover] : null;
+  const summary =
+    (label ? `${label}. ` : '') +
+    list.map((s) => `${s.name || 'Series'}: ${tipFmt(s.points[0].y)} at ${xText(s.points[0].x)}, ${tipFmt(s.points[s.points.length - 1].y)} at ${xText(s.points[s.points.length - 1].x)}`).join('; ');
+
+  return html`<div class=${wrapCls} ref=${ref} tabindex="0" role="group" aria-label=${label || 'Chart'} aria-roledescription="chart"
+      onKeyDown=${keyNav(xsAll.length, hover, setHover)} onBlur=${() => setHover(null)}
+      onFocus=${(e) => hover == null && e.currentTarget.matches?.(':focus-visible') && setHover(xsAll.length - 1)}>
+    ${list.length >= 2 ? html`<${Legend} shape="line" items=${list.map((s, i) => ({ label: s.name, color: colors[i] }))} />` : null}
+    <div class="chart-plot">
+      <svg width="100%" height=${height} viewBox=${`0 0 ${width} ${height}`} role="img" aria-label=${summary}>
+        <g class="chart-grid">
+          ${sc.ticks.map((t, i) => html`<line key=${'g' + i} x1=${left} x2=${width - right} y1=${f1(yOf(t)) + 0.5} y2=${f1(yOf(t)) + 0.5} class=${t === sc.min ? 'is-base' : ''} />`)}
+        </g>
+        <g class="chart-axis">
+          ${sc.ticks.map((t, i) => html`<text key=${'t' + i} x=${left - 8} y=${yOf(t)} text-anchor="end" dominant-baseline="middle">${tickLabels[i]}</text>`)}
+          ${ticks.map((t) => html`<text key=${'x' + t.value} x=${clamp(t.px, t.w / 2 - 5, width - t.w / 2 + 5)} y=${height - 8} text-anchor="middle">${t.label}</text>`)}
+        </g>
+        ${area ? html`<path d=${area} class="chart-area" style=${{ fill: colors[0] }} />` : null}
+        ${list.map((s, i) => html`<path key=${'l' + i} d=${path(s.points)} class="chart-line-path" style=${{ stroke: colors[i] }} />`)}
+        ${hx != null ? html`<line class="chart-crosshair" x1=${f1(xOf(hx)) + 0.5} x2=${f1(xOf(hx)) + 0.5} y1=${top} y2=${top + plotH} />` : null}
+        ${list.map((s, i) => {
+          const p = hx != null ? s.points.find((q) => q.x === hx) : s.points[s.points.length - 1];
+          return p ? html`<circle key=${'d' + i} class="chart-dot" cx=${xOf(p.x)} cy=${yOf(p.y)} r="4" style=${{ fill: colors[i] }} />` : null;
+        })}
+        <rect class="chart-hit" x=${left} y=${top} width=${plotW} height=${plotH} onPointerMove=${onMove} onPointerDown=${onMove} onPointerLeave=${() => setHover(null)} />
+      </svg>
+      ${hx != null
+        ? html`<${Tip} x=${xOf(hx)} y=${top} width=${width}>
+            <div class="chart-tip-title">${xText(hx)}</div>
+            ${list.map((s, i) => html`<${TipRow} color=${colors[i]} value=${tipFmt(at(s, hx))} name=${single ? '' : s.name} />`)}
+          </${Tip}>`
+        : null}
+    </div>
+    <${SrTable} caption=${label || 'Chart data'} head=${['', ...list.map((s) => s.name || 'Value')]}
+      rows=${xsAll.map((x) => [xText(x), ...list.map((s) => tipFmt(at(s, x)))])} />
+  </div>`;
+}

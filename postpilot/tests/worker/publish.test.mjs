@@ -613,9 +613,16 @@ test('a post whose media is still downloading waits, noted once; a failed or sta
   const ready = await env.addAsset('f05.jpg');
   const pendingAsset = await env.addAsset('f06.jpg', { name: 'From the feed', importUrl: 'https://example.com/a.jpg' });
   const brokenAsset = await env.addAsset('f07.jpg', { name: 'Broken link', importUrl: 'https://example.com/b.jpg', importError: 'HTTP 404' });
+  // Tried twice already and backing off (the feeds job does not try it again in this run).
+  const slowAsset = await env.addAsset('f08.jpg', { name: 'Slow link', importUrl: 'https://example.com/c.jpg', importAttempts: 2, importTriedAt: new Date(Date.now() - 5 * 60e3).toISOString() });
   const waiting = await schedulePost(env, { type: 'carousel', caption: 'Waits for the download', media: [{ assetId: ready.id, kind: 'image' }, { assetId: pendingAsset.id, kind: 'image' }] });
   const broken = await schedulePost(env, { caption: 'Download failed', media: [{ assetId: brokenAsset.id, kind: 'image' }] });
-  const stalled = await schedulePost(env, { caption: 'Stalled', publishMode: 'reminder', scheduledAt: new Date(Date.now() - 7 * 36e5).toISOString(), media: [{ assetId: pendingAsset.id, kind: 'image' }] });
+  const longAgo = new Date(Date.now() - 7 * 36e5).toISOString();
+  const stalled = await schedulePost(env, { caption: 'Stalled', publishMode: 'reminder', scheduledAt: longAgo, history: [{ at: longAgo, event: 'scheduled' }], media: [{ assetId: slowAsset.id, kind: 'image' }] });
+  // Due 7 hours ago too, but its file was never tried (the worker was paused): it waits for this run's download.
+  const paused = await schedulePost(env, { caption: 'Due while paused', scheduledAt: longAgo, history: [{ at: longAgo, event: 'scheduled' }], media: [{ assetId: pendingAsset.id, kind: 'image' }] });
+  // Scheduled again a minute ago with its old time (after "Try again"): the 6 hours start now.
+  const again = await schedulePost(env, { caption: 'Scheduled again', scheduledAt: new Date(Date.now() - 2 * 864e5).toISOString(), history: [{ at: new Date(Date.now() - 60e3).toISOString(), event: 'scheduled' }], media: [{ assetId: slowAsset.id, kind: 'image' }] });
   const before = env.graph.state.publishCount;
 
   const res = await env.run({ only: ['publish'] });
@@ -638,6 +645,11 @@ test('a post whose media is still downloading waits, noted once; a failed or sta
   assert.equal(s.status, 'failed', 'a reminder needs its media too');
   assert.equal(s.lastError.code, 'import_timeout');
   assert.match(s.lastError.message, /6 hours after this post was due/);
+  for (const id of [paused.id, again.id]) {
+    const p = posts.find((x) => x.id === id);
+    assert.equal(p.status, 'scheduled', `${p.caption}: still waiting`);
+    assert.equal(p.history[p.history.length - 1].event, 'waiting_download');
+  }
 
   // Next run: still waiting, but not noted (or logged) again.
   await env.run({ only: ['publish'] });
@@ -653,6 +665,82 @@ test('a post whose media is still downloading waits, noted once; a failed or sta
     delete a.importUrl;
   });
   const after = await env.run({ only: ['publish'] });
-  assert.equal(after.summary.jobs.publish.published, 1);
-  assert.equal((await env.read('posts')).posts.find((p) => p.id === waiting.id).status, 'published');
+  assert.equal(after.summary.jobs.publish.published, 2, 'both posts that waited for this file');
+  posts = (await env.read('posts')).posts;
+  assert.equal(posts.find((p) => p.id === waiting.id).status, 'published');
+  assert.equal(posts.find((p) => p.id === paused.id).status, 'published');
+  assert.equal(posts.find((p) => p.id === again.id).status, 'scheduled', 'its file is still downloading');
+});
+
+test('a post due hours ago is not failed in the run that downloads its file (publish runs before feeds)', async (t) => {
+  const env = await startWorkerEnv();
+  t.after(() => env.close());
+  const jpeg = await fixtureBytes('f05.jpg');
+  const site = 'https://feeds.test';
+  const asset = await env.addAsset('f06.jpg', { name: 'From the CSV', importUrl: `${site}/img/a.jpg` });
+  const longAgo = new Date(Date.now() - 7 * 36e5).toISOString();
+  const post = await schedulePost(env, { caption: 'Paused, then resumed', scheduledAt: longAgo, history: [{ at: longAgo, event: 'scheduled' }], media: [{ assetId: asset.id, kind: 'image' }] });
+  const site200 = (url) => (url.startsWith(site) ? new Response(jpeg, { status: 200, headers: { 'Content-Type': 'image/jpeg' } }) : null);
+
+  const first = await runWith(env, site200, { only: ['publish', 'feeds'] });
+  assert.equal(first.exitCode, 0);
+  assert.equal(first.summary.jobs.feeds.downloaded, 1);
+  let saved = (await env.read('posts')).posts.find((p) => p.id === post.id);
+  assert.equal(saved.status, 'scheduled', 'waits for the download instead of failing');
+  assert.equal((await env.read('library')).assets.find((a) => a.id === asset.id).importUrl, undefined, 'downloaded in the same run');
+
+  const second = await runWith(env, site200, { only: ['publish', 'feeds'] });
+  assert.equal(second.summary.jobs.publish.published, 1);
+  saved = (await env.read('posts')).posts.find((p) => p.id === post.id);
+  assert.equal(saved.status, 'published');
+});
+
+test('a reminder push goes out right away, not after the run waits for a later post', async (t) => {
+  const env = await startWorkerEnv();
+  t.after(() => env.close());
+  const phone = await pushDevice(env, 'phone');
+  const { generateVapidKeys } = await import('../../core/webpush.js');
+  const vapid = { ...(await generateVapidKeys()), subject: 'mailto:owner@example.com' };
+  await env.update('settings', (s) => {
+    s.notifications = { vapid, subscriptions: [phone.sub], events: { reminder: true, published: true } };
+  });
+  const asset = await env.addAsset('f02.jpg');
+  const reminder = newPost({ status: 'scheduled', publishMode: 'reminder', scheduledAt: new Date(Date.now() + 1000).toISOString(), caption: 'Reminder first', media: [{ assetId: asset.id, kind: 'image' }] });
+  const later = newPost({ status: 'scheduled', scheduledAt: new Date(Date.now() + 6000).toISOString(), caption: 'Automatic later', media: [{ assetId: asset.id, kind: 'image' }] });
+  await env.update('posts', (d) => void d.posts.push(reminder, later));
+  let reminderPushAt = null;
+  const res = await runWith(
+    env,
+    (url) => {
+      if (url.includes('/push/') && reminderPushAt == null) reminderPushAt = Date.now();
+      return null;
+    },
+    { env: { POSTPILOT_MAX_WAIT_SEC: '10', POSTPILOT_WAIT_SLICE_MS: '200' } },
+  );
+  assert.equal(res.summary.jobs.publish.reminded, 1);
+  assert.equal(res.summary.jobs.publish.published, 1);
+  const saved = (await env.read('posts')).posts.find((p) => p.id === reminder.id);
+  assert.ok(reminderPushAt && reminderPushAt - Date.parse(saved.reminderSentAt) < 3000, 'pushed as soon as it was marked');
+  const payloads = await Promise.all(env.pushes.filter((p) => p.path === '/phone').map((p) => readPush(p.body, phone.keys, phone.auth)));
+  assert.equal(payloads.filter((p) => p.tag === 'postpilot-reminder').length, 1, 'sent once, not again at the end of the run');
+  assert.equal(payloads.filter((p) => p.tag === 'postpilot-published').length, 1, 'other events still go out at the end');
+  assert.ok(res.lines.some((l) => l === 'notifications: 1 sent, 0 failed'));
+});
+
+test('a reminder with no device to notify says so in the log and history', async (t) => {
+  const env = await startWorkerEnv();
+  t.after(() => env.close());
+  const asset = await env.addAsset('f02.jpg');
+  const post = await schedulePost(env, { caption: 'Nobody gets a push', publishMode: 'reminder', media: [{ assetId: asset.id, kind: 'image' }] });
+  const res = await env.run({ only: ['publish'] });
+  assert.equal(res.summary.jobs.publish.reminded, 1);
+  assert.equal(env.pushes.length, 0);
+  const saved = (await env.read('posts')).posts.find((p) => p.id === post.id);
+  assert.equal(saved.status, 'reminded');
+  assert.match(saved.history[saved.history.length - 1].detail, /No device gets notifications/);
+  const log = await env.read('log');
+  const entries = log.entries.filter((e) => e.job === 'publish' && e.data?.postId === post.id);
+  assert.equal(entries.length, 1);
+  assert.match(entries[0].message, /shows on the Today screen only/);
+  assert.ok(!entries.some((e) => /^Sent a reminder/.test(e.message)), 'does not claim a reminder was sent');
 });

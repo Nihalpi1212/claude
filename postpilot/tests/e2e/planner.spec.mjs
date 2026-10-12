@@ -1,5 +1,6 @@
-// Planner e2e: month / week / list / grid render seeded posts, drag and "Move to…" rescheduling persist,
-// bulk move to drafts, CSV import and export, grid swap, screenshots in both themes and sizes.
+// Planner e2e: month / week / day / list / grid render seeded posts, drag and "Move to…" rescheduling
+// persist, Day view keyboard use, search, reminded posts ("Post by hand"), AI ideas, bulk move to drafts,
+// CSV import (with a media link) and export, grid swap, screenshots in both themes and sizes.
 // Run: node --test tests/e2e/planner.spec.mjs
 
 import { after, before, test } from 'node:test';
@@ -7,7 +8,7 @@ import assert from 'node:assert/strict';
 import { addDaysKey, dayKey, timeKey } from '../../core/time.js';
 import { openApp, shot, unlock } from './helpers.mjs';
 
-const PORT = 5212;
+const PORT = 5532;
 const TZ = 'America/New_York';
 let h;
 
@@ -170,10 +171,173 @@ test('week view positions posts by time with best-time shading', async () => {
   assert.ok((await page.locator('.pl-legend .chip').count()) >= 1, 'best time chips');
   assert.match(page.url(), /view=week/);
   // Next week keeps working.
-  await page.getByRole('button', { name: 'Next week' }).click();
+  await page.getByRole('button', { name: 'Next week', exact: true }).click();
   await page.waitForTimeout(200);
   assert.match(page.url(), /date=/);
   await page.getByRole('button', { name: 'Today' }).click();
+});
+
+test('day view: hour rows with posts at their time, keyboard, add buttons and drag to another hour', async () => {
+  const { page } = h;
+  const story = (await storedPosts()).find((p) => p.type === 'story' && p.status === 'scheduled');
+  const day = dayKey(new Date(story.scheduledAt), TZ);
+  const hour = Number(timeKey(new Date(story.scheduledAt), TZ).slice(0, 2));
+  await page.evaluate((d) => (location.hash = `#/planner?view=day&date=${d}`), day);
+  await page.waitForSelector('.pl-dayview');
+  assert.equal(await page.getByRole('radio', { name: 'Day' }).getAttribute('aria-checked'), 'true');
+  const event = page.locator(`.pl-hour[data-hour="${hour}"] .pl-dayevent[data-post-id="${story.id}"]`);
+  await event.waitFor();
+  assert.match(await event.getAttribute('aria-label'), /Story/);
+  assert.ok((await page.locator('.pl-hour').count()) >= 18, 'one row per hour from 06:00');
+
+  // Keyboard: Enter on a post opens it.
+  await event.focus();
+  await page.keyboard.press('Enter');
+  const drawer = page.locator('.cmp-drawer');
+  await drawer.waitFor();
+  await closeComposer(page);
+
+  // "+" on an hour opens the composer at that hour.
+  await page.locator('.pl-hour[data-hour="20"] .pl-hour-add').click();
+  await drawer.waitFor();
+  await waitFor(async () => (await drawer.locator('input[type="time"]').count()) > 0, { message: 'composer time field' });
+  assert.equal(await drawer.locator('input[type="date"]').first().inputValue(), day);
+  assert.equal(await drawer.locator('input[type="time"]').first().inputValue(), '20:00');
+  await closeComposer(page);
+
+  // Drag the post two hours later: same minutes, new hour.
+  const target = hour + 2 <= 23 ? hour + 2 : hour - 2;
+  await event.dragTo(page.locator(`.pl-hour[data-hour="${target}"]`));
+  await page.getByText(/Rescheduled to/).first().waitFor();
+  await page.locator('.toast-close').first().click().catch(() => {});
+  const moved = await waitFor(async () => {
+    const p = (await storedPosts()).find((x) => x.id === story.id);
+    return p.scheduledAt !== story.scheduledAt ? p : null;
+  }, { message: 'moved to another hour' });
+  assert.equal(timeKey(new Date(moved.scheduledAt), TZ), `${String(target).padStart(2, '0')}:${timeKey(new Date(story.scheduledAt), TZ).slice(3)}`);
+  await page.locator(`.pl-hour[data-hour="${target}"] .pl-dayevent[data-post-id="${story.id}"]`).waitFor();
+
+  // Day navigation.
+  await page.getByRole('button', { name: 'Next day' }).click();
+  await waitFor(() => page.url().includes(`date=${addDaysKey(day, 1)}`), { message: 'next day in the URL' });
+  await page.getByRole('button', { name: 'Previous day' }).click();
+  await waitFor(() => page.url().includes(`date=${day}`), { message: 'previous day in the URL' });
+});
+
+test('search finds posts by caption, first comment, labels and notes, in every view', async () => {
+  const { page } = h;
+  await page.evaluate(() => (location.hash = '#/planner?view=list'));
+  await page.waitForSelector('.pl-list');
+  const search = page.getByRole('searchbox', { name: /Search captions/ });
+  const titles = () => page.locator('.pl-row .pl-row-title').allInnerTexts();
+
+  await search.fill('restock');
+  await page.getByText('1 post matches “restock”.').waitFor();
+  assert.deepEqual(await titles(), ['Three new shapes for the autumn drop. Which one goes home with you?'], 'first comment match');
+  await waitFor(() => page.url().includes('q=restock'), { message: 'search kept in the URL' });
+
+  await search.fill('product');
+  await page.getByText(/1 post matches “product”/).waitFor();
+  assert.deepEqual(await titles(), ['Our morning ritual before the wheel starts spinning.'], 'label match');
+
+  await search.fill('workshop announcement');
+  await page.getByText(/1 post matches/).waitFor();
+  assert.deepEqual(await titles(), ['Workshop announcement: add date and price.'], 'notes match');
+
+  await search.fill('#ceramics');
+  await page.getByText(/(1 post matches|\d+ posts match) “#ceramics”/).waitFor();
+  const tagged = await page.locator('.pl-row').evaluateAll((els) => els.map((e) => e.dataset.postId));
+  const byId = new Map((await storedPosts()).map((p) => [p.id, p]));
+  assert.ok(tagged.length >= 2 && tagged.every((id) => /#ceramics/.test(byId.get(id).caption)), 'caption hashtag match');
+
+  // The month view shows only matching posts; "Show as a list" switches view.
+  await search.fill('kilns');
+  await setView('Month');
+  await page.getByText(/1 post matches “kilns” \(all dates\)/).waitFor();
+  const kilns = (await storedPosts()).find((p) => p.caption.startsWith('Quiet evenings'));
+  await showDay(dayKey(new Date(kilns.scheduledAt), TZ));
+  await page.locator(`.pl-month .pl-chip[data-post-id="${kilns.id}"]`).waitFor();
+  assert.equal(await page.locator('.pl-month .pl-chip[data-post-id]').count(), 1);
+  await search.fill('zzz no match');
+  await page.getByText('No posts match “zzz no match”.').waitFor();
+  await page.getByRole('button', { name: 'Clear search' }).click();
+  assert.equal(await search.inputValue(), '');
+  await waitFor(() => !page.url().includes('q='), { message: 'search removed from the URL' });
+  await page.getByRole('button', { name: 'Today' }).click().catch(() => {});
+});
+
+test('a reminder that went out is styled apart and links to "Post by hand"', async () => {
+  const { page } = h;
+  const id = await page.evaluate(async () => {
+    const data = await import('/postpilot/js/data.js');
+    const { newPost } = await import('/postpilot/core/model.js');
+    const lib = await data.getStore().read('library');
+    const asset = lib.assets.find((a) => a.name === 'Desert sunrise');
+    const at = new Date(Date.now() - 30 * 60_000).toISOString();
+    const post = newPost({ status: 'reminded', publishMode: 'reminder', reminderSentAt: at, scheduledAt: at, caption: 'E2E reminder: post this one by hand.', media: [{ assetId: asset.id, kind: 'image' }] });
+    await data.mutate('posts', (doc) => void doc.posts.push(post), { message: 'e2e: reminded post' });
+    return post.id;
+  });
+  await page.evaluate(() => (location.hash = '#/planner'));
+  const chip = page.locator(`.pl-month .pl-chip.is-reminded[data-post-id="${id}"]`);
+  await chip.waitFor();
+  assert.match(await chip.getAttribute('aria-label'), /post by hand/);
+  // Week view: screen readers hear it too (not only the tooltip).
+  await page.evaluate(() => (location.hash = '#/planner?view=week'));
+  const event = page.locator(`.pl-week-event.is-reminded[data-post-id="${id}"]`);
+  await event.waitFor();
+  assert.match(await event.getAttribute('aria-label'), /· Post · E2E reminder: post this one by hand\., post by hand$/);
+  await page.evaluate(() => (location.hash = '#/planner'));
+  await chip.waitFor();
+  await chip.click();
+  await waitFor(() => page.url().includes(`#/post-now/${id}`), { message: 'opened Post by hand' });
+
+  await page.evaluate(() => (location.hash = '#/planner?view=list'));
+  const row = page.locator(`[data-section="reminded"] .pl-row[data-post-id="${id}"]`);
+  await row.waitFor();
+  await row.getByText('Post by hand', { exact: true }).first().waitFor();
+  assert.equal(await row.getByRole('link', { name: 'Post by hand' }).getAttribute('href'), `#/post-now/${id}`);
+  assert.match(await page.locator('.page-subtitle').innerText(), /1 to post by hand/);
+  // Status filter.
+  await page.getByRole('button', { name: /^Filters/ }).click();
+  await page.locator('#planner-filters').getByRole('button', { name: 'Post by hand' }).click();
+  await waitFor(() => page.url().includes('status=reminded'), { message: 'filter in the URL' });
+  assert.deepEqual(await page.locator('.pl-row').evaluateAll((els) => els.map((e) => e.dataset.postId)), [id]);
+  await page.locator('#planner-filters').getByRole('button', { name: 'Clear filters' }).click();
+  await page.getByRole('button', { name: /^Filters/ }).click();
+});
+
+test('ideas for next week: Claude suggests ideas, the kept ones become drafts with the idea in the notes', async () => {
+  const { page } = h;
+  await page.getByRole('button', { name: 'Ideas for next week' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Ideas for next week' });
+  await dialog.waitFor();
+  await dialog.getByLabel('Anything to focus on').fill('Autumn glazes go on sale Friday.');
+  await dialog.getByRole('button', { name: 'Get ideas' }).click();
+  await dialog.locator('.pl-idea').nth(1).waitFor({ timeout: 30_000 });
+  const n = await dialog.locator('.pl-idea').count(); // the mock returns 3 whatever was asked
+  await dialog.locator('.pl-idea').nth(1).getByRole('checkbox').click();
+  await page.waitForTimeout(300);
+  await shot(page, 'planner-ideas-1280-light');
+  const before = (await storedPosts()).length;
+  const keep = n - 1;
+  await dialog.getByRole('button', { name: `Create ${keep} draft${keep === 1 ? '' : 's'}` }).click();
+  await page.getByText(new RegExp(`^Added ${keep} drafts? with the idea in the notes`)).waitFor();
+  const ideas = await waitFor(async () => {
+    const posts = (await storedPosts()).filter((p) => (p.labels || []).includes('idea'));
+    return posts.length === keep ? posts : null;
+  }, { message: 'idea drafts' });
+  assert.equal((await storedPosts()).length, before + keep);
+  for (const p of ideas) {
+    assert.equal(p.status, 'draft');
+    assert.match(p.notes, /^Idea: /);
+    assert.ok(!p.scheduledAt || (Date.parse(p.scheduledAt) > Date.now() && Date.parse(p.scheduledAt) < Date.now() + 9 * 864e5));
+  }
+  // Remove them again so the later list and filter tests see the seeded posts only.
+  await page.evaluate(async () => {
+    const data = await import('/postpilot/js/data.js');
+    await data.mutate('posts', (doc) => void (doc.posts = doc.posts.filter((p) => !(p.labels || []).includes('idea'))), { message: 'e2e: remove idea drafts' });
+  });
 });
 
 test('list view groups posts and bulk-moves selected posts to drafts', async () => {
@@ -319,6 +483,44 @@ test('CSV import of two rows creates two posts; export downloads upcoming posts'
   assert.match(text, /CSV row one, with a comma/);
 });
 
+test('CSV import with a media link: the post waits for the worker to download the file', async () => {
+  const { page } = h;
+  await setView('List');
+  const day = addDaysKey(dayKey(new Date(), TZ), 6);
+  const link = `${h.url}/mock/img/f12.jpg`;
+  await page.getByRole('button', { name: 'Import CSV' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Import posts from CSV' });
+  await dialog.waitFor();
+  await dialog.getByText(/direct links to JPEG photos and MP4 videos: the worker downloads those/).waitFor();
+  await dialog.locator('input[type="file"]').setInputFiles({
+    name: 'links.csv',
+    mimeType: 'text/csv',
+    buffer: Buffer.from(`date,time,caption,media
+${day},09:30,From a link,${link}
+${day},18:30,Same link again,${link}
+`),
+  });
+  await dialog.locator('.pl-import-row.is-ok').nth(1).waitFor();
+  await dialog.getByText('1 file will be downloaded by the worker from its link after the import (it runs about every 10 minutes). Posts wait for their files.').waitFor();
+  assert.equal(await dialog.locator('.pl-import-row .pl-thumb.is-importing').count(), 2);
+  await page.waitForTimeout(300);
+  await shot(page, 'planner-import-links-1280-light');
+  await dialog.getByRole('button', { name: 'Create 2 posts' }).click();
+  await page.getByText(/Imported 2 posts as scheduled\. The worker downloads 1 linked file on its next run\./).waitFor();
+  const lib = await page.evaluate(async () => {
+    const { getStore } = await import('/postpilot/js/data.js');
+    await getStore().refresh();
+    return (await getStore().read('library')).assets;
+  });
+  const asset = lib.find((a) => a.importUrl === link);
+  assert.ok(asset, 'a library file waits for the download');
+  assert.equal(asset.name, 'f12.jpg');
+  const posts = (await storedPosts()).filter((p) => p.caption === 'From a link' || p.caption === 'Same link again');
+  assert.equal(posts.length, 2);
+  assert.ok(posts.every((p) => p.media[0].assetId === asset.id && p.status === 'scheduled' && p.source === 'csv'), 'one shared file');
+  await page.locator(`.pl-row[data-post-id="${posts[0].id}"] .pl-thumb.is-importing`).waitFor();
+});
+
 test('"Try again" sends a post that still fails validation to the composer instead of the worker', async () => {
   const { page } = h;
   await setView('List');
@@ -369,9 +571,11 @@ test('screenshots: desktop and phone, light and dark', async () => {
       page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
       await page.goto(`${h.url}/postpilot/index.html#/planner`);
       await unlock(page);
-      for (const view of ['month', 'week', 'list', 'grid']) {
-        await page.evaluate((v) => (location.hash = v === 'month' ? '#/planner' : `#/planner?view=${v}`), view);
-        await page.waitForSelector(view === 'month' ? '.pl-month' : view === 'week' ? '.pl-week' : view === 'list' ? '.pl-list' : '.pl-gridview');
+      const tomorrow = addDaysKey(dayKey(new Date(), TZ), 1);
+      for (const view of ['month', 'week', 'day', 'list', 'grid', 'search']) {
+        const hash = { month: '#/planner', day: `#/planner?view=day&date=${tomorrow}`, search: '#/planner?view=list&q=studio' }[view] || `#/planner?view=${view}`;
+        await page.evaluate((x) => (location.hash = x), hash);
+        await page.waitForSelector({ month: '.pl-month', week: '.pl-week', day: '.pl-dayview', search: '.pl-search-note' }[view] || (view === 'list' ? '.pl-list' : '.pl-gridview'));
         await page.waitForTimeout(500);
         await page
           .waitForFunction(() => !document.querySelector('.pl-thumb:empty') && [...document.images].every((i) => i.complete), null, { timeout: 8000 })

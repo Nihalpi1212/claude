@@ -255,8 +255,11 @@ export async function uploadFiles(files, opts = {}, onProgress = () => {}) {
   return out;
 }
 
-/** Statuses of posts that may still publish, so their media must stay ('failed' posts can be retried). */
-const LIVE_POST_STATUSES = ['scheduled', 'publishing', 'draft', 'failed'];
+/**
+ * Statuses of posts that may still publish, so their media must stay ('failed' posts can be retried;
+ * 'reminded' posts wait for the owner to save the files and post them by hand).
+ */
+const LIVE_POST_STATUSES = ['scheduled', 'publishing', 'draft', 'failed', 'reminded'];
 
 /** Ids of assets that posts which may still publish, or queue items, use. */
 export function assetsInUse(posts, lists) {
@@ -411,16 +414,42 @@ export function mediaUrl(path, mime = 'image/jpeg') {
   return entry.promise;
 }
 
+/**
+ * 'pending' while the worker still has to download the file from its link (asset.importUrl),
+ * 'failed' when that download failed (importError), else null. Such assets have no bytes yet.
+ */
+export function importState(asset) {
+  if (!asset || !asset.importUrl) return null;
+  return asset.importError ? 'failed' : 'pending';
+}
+
+/**
+ * True when the asset has a thumbnail image to show. Files downloaded by the worker double as their
+ * own thumbnail (thumbPath === path): fine for photos, but a video has no picture then.
+ */
+export function hasThumb(asset) {
+  if (!asset || importState(asset)) return false;
+  if (asset.thumbPath !== asset.path) return true;
+  // Its own thumbnail: none for a video, and gone once "Free up space" removed the original.
+  return asset.kind !== 'video' && !asset.originalRemovedAt;
+}
+
+const NO_FILE = (what) => Promise.reject(new Error(what));
+
 export function thumbUrl(asset) {
+  if (importState(asset)) return NO_FILE('This file is still being downloaded from its link.');
+  if (!hasThumb(asset)) return NO_FILE('This video has no thumbnail.');
   return mediaUrl(asset.thumbPath, 'image/jpeg');
 }
 
 export function originalUrl(asset) {
+  if (importState(asset)) return NO_FILE('This file is still being downloaded from its link.');
   return mediaUrl(asset.path, asset.mime || (asset.kind === 'video' ? 'video/mp4' : 'image/jpeg'));
 }
 
-/** Read a thumbnail as base64 (for AI captioning). */
+/** Read a thumbnail as base64 (for AI captioning); null when there is none (or it is too large for Claude). */
 export async function thumbBase64(asset) {
+  if (!hasThumb(asset) || (asset.thumbPath === asset.path && asset.bytes > 3.5 * 1024 * 1024)) return null;
   const bytes = await getStore().readBytes(asset.thumbPath);
   if (!bytes) return null;
   let s = '';

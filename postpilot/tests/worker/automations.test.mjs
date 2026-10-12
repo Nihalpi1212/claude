@@ -610,3 +610,308 @@ test('outbox: a command Instagram may have received is failed, not retried', asy
   await env.run({ only: ['outbox'] });
   assert.equal(postsTo(env, mark, '/replies'), 0);
 });
+
+const DAY = 864e5;
+
+test('comment rules watch posts up to watchDays old and every post a rule is scoped to', async (t) => {
+  const env = await startWorkerEnv();
+  t.after(() => env.close());
+  const st = env.graph.state;
+  const old = st.media.find((m) => Date.now() - m.timestamp > 40 * DAY && Date.now() - m.timestamp < 80 * DAY);
+  const ancient = st.media.find((m) => Date.now() - m.timestamp > 100 * DAY);
+  assert.ok(st.media.indexOf(ancient) >= 50, 'the oldest posts are beyond the listed 50');
+  const missing = '17999999999999999';
+  await env.update('automations', (a) => {
+    a.rules = [
+      newRule({ id: 'r_scoped', name: 'Old reel', trigger: { source: 'comment', match: 'any', keywords: ['pattern'], mediaIds: [ancient.id, missing] }, actions: [{ type: 'reply_comment', texts: ['The pattern is in my shop.'] }], oncePerUser: false }),
+      PRICE_RULE,
+    ];
+  });
+  const mark = st.requests.length;
+  await env.run({ only: ['automations'] });
+  const first = st.requests.slice(mark);
+  assert.equal(first.filter((r) => r.method === 'GET' && r.path.endsWith('/media')).length, 1, 'one listing call for 50 posts');
+  assert.equal(first.find((r) => r.path.endsWith('/media')).params.limit, '50');
+  assert.ok(/comments_count/.test(first.find((r) => r.path.endsWith('/media')).params.fields));
+  assert.ok(first.some((r) => r.method === 'GET' && r.path.endsWith(`/${ancient.id}`)), 'the scoped post outside the listing is read by id');
+  let auto = await env.read('automations');
+  assert.ok(auto.cursors.goneMedia[missing], 'the deleted post is remembered');
+  let log = await env.read('log');
+  const goneLogs = () => log.entries.filter((e) => e.job === 'automations' && /not found on Instagram/.test(e.message)).length;
+  assert.equal(goneLogs(), 1);
+  assert.equal(log.runs[0].errors.length, 0, 'a deleted post does not fail the job');
+
+  const c1 = env.addComment(old.id, { username: 'late.reader', text: 'price please?' });
+  const c2 = env.addComment(ancient.id, { username: 'pattern.fan', text: 'Is the PATTERN available?' });
+  // A post beyond the window that no rule is scoped to is not watched, so "all posts" rules skip it.
+  const unwatched = st.media.find((m) => Date.now() - m.timestamp > 100 * DAY && m.id !== ancient.id);
+  const c3 = env.addComment(unwatched.id, { username: 'other.fan', text: 'price?' });
+  // Chosen posts outside the listing are read every 30 minutes (each costs a call).
+  await env.update('automations', (a) => {
+    a.cursors.pinnedCheckedAt = new Date(Date.now() - 31 * 60e3).toISOString();
+  });
+  const mark2 = st.requests.length;
+  await env.run({ only: ['automations'] });
+  const second = st.requests.slice(mark2);
+  assert.ok(st.replies.some((r) => r.commentId === c1.id), 'a 2-month-old post is answered');
+  assert.equal(st.replies.find((r) => r.commentId === c2.id)?.text, 'The pattern is in my shop.');
+  assert.ok(!st.replies.some((r) => r.commentId === c3.id), 'unscoped rules only see watched posts');
+  assert.ok(!second.some((r) => r.path.endsWith(`/${unwatched.id}/comments`)));
+  // Comments are only read on the posts whose count changed.
+  const commentReads = second.filter((r) => r.method === 'GET' && r.path.endsWith('/comments')).map((r) => r.path);
+  assert.equal(commentReads.length, 2, `comment reads: ${commentReads.join(', ')}`);
+  for (const id of [ancient.id, old.id]) assert.ok(commentReads.some((p) => p.endsWith(`/${id}/comments`)));
+  // The deleted post is not looked up again within a day, and not logged again.
+  assert.ok(!second.some((r) => r.path.endsWith(`/${missing}`)));
+  log = await env.read('log');
+  assert.equal(goneLogs(), 1);
+
+  // Comment counts are kept only for watched posts.
+  auto = await env.read('automations');
+  const watched = Object.keys(auto.cursors.mediaComments);
+  assert.ok(watched.includes(ancient.id) && watched.includes(old.id));
+  assert.ok(watched.length <= 51, `at most the 50 listed posts plus the scoped one (${watched.length})`);
+  // The inbox cache keeps the scoped post's comments with its details.
+  const inbox = await env.read('inbox');
+  assert.ok(inbox.comments.some((c) => c.id === c2.id && c.mediaId === ancient.id && c.media.caption));
+
+  // The next run, minutes later, does not read the chosen old post again.
+  const mark3 = st.requests.length;
+  await env.run({ only: ['automations'] });
+  assert.ok(!st.requests.slice(mark3).some((r) => r.path.endsWith(`/${ancient.id}`)), 'chosen old posts are not read on every run');
+});
+
+test('watch settings come from automations.limits and are clamped', async (t) => {
+  const { watchLimits, pinnedMediaIds } = await import('../../worker/jobs/automations.mjs');
+  assert.deepEqual(watchLimits(undefined), { days: 90, posts: 50 });
+  assert.deepEqual(watchLimits({ maxActionsPerRun: 25 }), { days: 90, posts: 50 });
+  assert.deepEqual(watchLimits({ watchDays: 0, watchPosts: 999 }), { days: 1, posts: 200 });
+  assert.deepEqual(watchLimits({ watchDays: '30', watchPosts: 12.4 }), { days: 30, posts: 12 });
+  assert.deepEqual(watchLimits({ watchDays: 'x', watchPosts: null }), { days: 90, posts: 50 });
+  const ids = pinnedMediaIds([
+    { enabled: true, trigger: { source: 'comment', mediaIds: ['1', 2] } },
+    { enabled: false, trigger: { source: 'comment', mediaIds: ['3'] } },
+    { enabled: true, trigger: { source: 'dm', mediaIds: ['4'] } },
+    { enabled: true, trigger: { source: 'comment', mediaIds: null } },
+  ]);
+  assert.deepEqual([...ids], ['1', '2']);
+
+  const env = await startWorkerEnv();
+  t.after(() => env.close());
+  await env.update('automations', (a) => {
+    a.limits = { ...a.limits, watchDays: 7, watchPosts: 120 };
+  });
+  const st = env.graph.state;
+  const mark = st.requests.length;
+  await env.run({ only: ['automations'] });
+  const lists = st.requests.slice(mark).filter((r) => r.method === 'GET' && r.path.endsWith('/media'));
+  assert.equal(lists.length, 2, '70 posts in pages of 50');
+  const weekOld = st.media.find((m) => Date.now() - m.timestamp > 10 * DAY);
+  const c = env.addComment(weekOld.id, { username: 'x.y', text: 'price?' });
+  await env.update('automations', (a) => {
+    a.rules = [PRICE_RULE];
+  });
+  await env.run({ only: ['automations'] });
+  assert.ok(!st.replies.some((r) => r.commentId === c.id), 'posts older than watchDays are not answered');
+});
+
+/** A DM that replies to the account's story, or a story mention (no text), in the mock. */
+function addStoryMessage(env, kind, { username, text = '' }) {
+  const { msg, other } = env.addMessage({ username, text });
+  msg.story = kind === 'reply' ? { kind, id: env.graph.state.stories[0].id, file: 'story01.jpg' } : { kind, id: `1801${Math.floor(Math.random() * 1e9)}`, file: 'story02.jpg' };
+  return { msg, other };
+}
+
+test('story replies and story mentions trigger their own rules, whatever shape Instagram reports', async (t) => {
+  const env = await startWorkerEnv();
+  t.after(() => env.close());
+  await env.update('automations', (a) => {
+    a.welcome = { enabled: true, text: 'Welcome {first_name}!' };
+    a.rules = [
+      newRule({ id: 'r_story', name: 'Story guide', trigger: { source: 'story_reply', match: 'any', keywords: ['guide'], mediaIds: null }, actions: [{ type: 'send_dm', texts: ['Here is the guide, {username}.'] }], oncePerUser: true }),
+      newRule({ id: 'r_mention', name: 'Thanks for the mention', trigger: { source: 'story_mention', match: 'always', keywords: [], mediaIds: null }, actions: [{ type: 'send_dm', texts: ['Thank you for sharing, {mention}!'] }], oncePerUser: true }),
+      newRule({ id: 'r_dm', name: 'DM guide', trigger: { source: 'dm', match: 'any', keywords: ['guide'], mediaIds: null }, actions: [{ type: 'send_dm', texts: ['Guide by DM.'] }], oncePerUser: false }),
+    ];
+  });
+  await env.run({ only: ['automations'] });
+  const st = env.graph.state;
+  const textTo = (other) => st.sentMessages.filter((m) => m.recipientId === other.id).map((m) => m.text);
+
+  for (const shape of ['story', 'reply_to']) {
+    st.storyShape = shape;
+    const reply = addStoryMessage(env, 'reply', { username: `replier.${shape}`, text: 'GUIDE please' });
+    const mention = addStoryMessage(env, 'mention', { username: `mentioner.${shape}` });
+    const dm = env.addMessage({ username: `dmer.${shape}`, text: 'guide?' });
+    const res = await env.run({ only: ['automations'] });
+    assert.equal(res.exitCode, 0);
+    assert.deepEqual(textTo(reply.other), [`Here is the guide, replier.${shape}.`], `${shape}: story reply`);
+    assert.deepEqual(textTo(mention.other), [`Thank you for sharing, @mentioner.${shape}!`], `${shape}: story mention`);
+    assert.deepEqual(textTo(dm.other), ['Guide by DM.'], `${shape}: plain DM`);
+  }
+  const auto = await env.read('automations');
+  const sources = new Set(auto.activity.filter((a) => a.ok).map((a) => a.source));
+  assert.deepEqual([...sources].sort(), ['dm', 'story_mention', 'story_reply']);
+  assert.equal(auto.rules.find((r) => r.id === 'r_mention').stats.fired, 2);
+
+  // Without story fields (older API host), a story reply is treated as a DM and a mention gets the welcome message.
+  st.storyShape = 'none';
+  const plain = addStoryMessage(env, 'reply', { username: 'replier.none', text: 'guide' });
+  const quiet = addStoryMessage(env, 'mention', { username: 'mentioner.none' });
+  await env.run({ only: ['automations'] });
+  assert.deepEqual(textTo(plain.other), ['Guide by DM.']);
+  assert.deepEqual(textTo(quiet.other), ['Welcome mentioner.none!']);
+});
+
+test('a story mention without a rule gets the welcome message and its kind is cached for the inbox', async (t) => {
+  const env = await startWorkerEnv();
+  t.after(() => env.close());
+  await env.update('automations', (a) => {
+    a.welcome = { enabled: true, text: 'Hi {username}, thanks for the mention!' };
+    a.rules = [];
+  });
+  await env.run({ only: ['automations'] });
+  const cache = await env.read('inbox');
+  const junie = cache.conversations.find((c) => c.participants.some((p) => p.username === 'junie.makes'));
+  assert.equal(junie.lastMessage.story, 'mention', 'seeded story mention is marked in the cached preview');
+  const oak = cache.conversations.find((c) => c.participants.some((p) => p.username === 'oak.and.ash'));
+  assert.equal(oak.lastMessage.story, 'reply');
+
+  await env.update('automations', (a) => {
+    a.enabled = false;
+  });
+  const m = addStoryMessage(env, 'mention', { username: 'quiet.fan' });
+  await env.run({ only: ['automations'] });
+  assert.equal(env.graph.state.sentMessages.filter((x) => x.recipientId === m.other.id).length, 0, 'nothing is sent while automations are off');
+});
+
+const LINK_RULE = newRule({
+  id: 'r_link',
+  name: 'Link',
+  trigger: { source: 'comment', match: 'any', keywords: ['link'], mediaIds: null },
+  actions: [{ type: 'reply_comment', texts: ['Hi {mention}, the link is in my bio!'] }],
+  oncePerUser: false,
+});
+
+test('rules never answer old comments on posts that just started being watched', async (t) => {
+  const env = await startWorkerEnv();
+  t.after(() => env.close());
+  const st = env.graph.state;
+  const age = (m) => Date.now() - m.timestamp;
+  const repliedTo = (c) => st.replies.some((r) => r.commentId === c.id);
+  const old50 = st.media.find((m) => age(m) > 45 * DAY && age(m) < 60 * DAY);
+  const mid20 = st.media.find((m) => age(m) > 15 * DAY && age(m) < 30 * DAY);
+  const newest = st.media[0];
+  assert.ok(age(newest) < 14 * DAY);
+  // State the previous version of the job leaves (it watched the newest 15 posts of the last 14 days):
+  // on for 60 days, every comment so far recorded, no per-post watch starts yet.
+  await env.update('automations', (a) => {
+    a.rules = [LINK_RULE];
+    a.cursors = { startedAt: new Date(Date.now() - 60 * DAY).toISOString(), mediaComments: {} };
+    for (const m of st.media) a.cursors.mediaComments[m.id] = m.comments_count;
+    a.processed.comments = Object.fromEntries([...st.comments.keys()].map((id) => [id, new Date().toISOString()]));
+  });
+  const c25 = env.addComment(old50.id, { username: 'late.asker', text: 'link?', at: Date.now() - 25 * DAY });
+  const c3 = env.addComment(mid20.id, { username: 'mid.asker', text: 'link please', at: Date.now() - 3 * DAY });
+  const fresh = env.addComment(newest.id, { username: 'fresh.asker', text: 'link?', at: Date.now() - 2 * 60e3 });
+  let mark = st.requests.length;
+  await env.run({ only: ['automations'] });
+  assert.ok(repliedTo(fresh), 'a post the old job watched keeps answering new comments');
+  assert.ok(!repliedTo(c25), 'a 25-day-old comment on a post that was not watched before is left alone');
+  assert.ok(!repliedTo(c3), 'a 3-day-old comment on a post that was not watched before is left alone');
+  // Newly watched posts cost no comment reads: their counts are just recorded.
+  const reads = st.requests.slice(mark).filter((r) => r.path.endsWith('/comments')).map((r) => r.path);
+  assert.ok(!reads.some((p) => p.endsWith(`/${old50.id}/comments`) || p.endsWith(`/${mid20.id}/comments`)), reads.join(', '));
+  let auto = await env.read('automations');
+  assert.ok(Date.now() - Date.parse(auto.cursors.watchedFrom[old50.id]) < 60e3);
+  assert.ok(Math.abs(Date.parse(auto.cursors.watchedFrom[newest.id]) - newest.timestamp) < 1000, 'watched since it was published');
+  assert.ok(auto.cursors.watchListedAt);
+  // From now on the post is watched: a new comment is answered.
+  const later = env.addComment(old50.id, { username: 'later.asker', text: 'link?' });
+  await env.run({ only: ['automations'] });
+  assert.ok(repliedTo(later));
+  assert.ok(!repliedTo(c25));
+
+  // A post chosen in a new rule (beyond the 50 listed) only counts comments from then on.
+  const ancient = st.media.find((m) => age(m) > 100 * DAY);
+  const before = env.addComment(ancient.id, { username: 'way.back', text: 'link for the pattern?', at: Date.now() - 2 * DAY });
+  await env.update('automations', (a) => {
+    a.rules = [{ ...LINK_RULE, id: 'r_old', trigger: { ...LINK_RULE.trigger, mediaIds: [ancient.id] } }, LINK_RULE];
+  });
+  mark = st.requests.length;
+  await env.run({ only: ['automations'] });
+  assert.ok(st.requests.slice(mark).some((r) => r.path.endsWith(`/${ancient.id}`)), 'a newly chosen post is looked up right away');
+  assert.ok(!st.requests.slice(mark).some((r) => r.path.endsWith(`/${ancient.id}/comments`)));
+  assert.ok(!repliedTo(before));
+  const after = env.addComment(ancient.id, { username: 'now.asking', text: 'link?' });
+  await env.update('automations', (a) => {
+    a.cursors.pinnedCheckedAt = new Date(Date.now() - 31 * 60e3).toISOString();
+  });
+  await env.run({ only: ['automations'] });
+  assert.ok(repliedTo(after));
+  assert.ok(!repliedTo(before));
+
+  // Raising the watch settings: posts that come into the window are not combed for old comments.
+  const p70 = st.media.find((m) => age(m) > 92 * DAY && m.id !== ancient.id);
+  const c5 = env.addComment(p70.id, { username: 'five.days', text: 'link?', at: Date.now() - 5 * DAY });
+  await env.update('automations', (a) => {
+    a.limits = { ...a.limits, watchDays: 365, watchPosts: 200 };
+  });
+  await env.run({ only: ['automations'] });
+  assert.ok(!repliedTo(c5));
+  auto = await env.read('automations');
+  assert.ok(auto.cursors.watchedFrom[p70.id]);
+});
+
+test('a comment whose record housekeeping pruned is not answered again, and a new post counts every comment', async (t) => {
+  const env = await startWorkerEnv();
+  t.after(() => env.close());
+  const st = env.graph.state;
+  const age = (m) => Date.now() - m.timestamp;
+  const repliedTo = (c) => st.replies.some((r) => r.commentId === c.id);
+  await env.update('automations', (a) => {
+    a.rules = [LINK_RULE];
+    a.cursors = { startedAt: new Date(Date.now() - 90 * DAY).toISOString() };
+  });
+  await env.run({ only: ['automations'] });
+  // A post watched for two months; a 20-day-old comment that a rule did not answer then (e.g. the rule
+  // is new) and whose processed entry is gone.
+  const post = st.media.find((m) => age(m) > 45 * DAY && age(m) < 60 * DAY);
+  const old = env.addComment(post.id, { username: 'old.timer', text: 'link please', at: Date.now() - 20 * DAY });
+  await env.update('automations', (a) => {
+    a.cursors.watchedFrom[post.id] = new Date(post.timestamp).toISOString();
+    delete a.processed.comments[old.id];
+  });
+  const fresh = env.addComment(post.id, { username: 'new.fan', text: 'link?' });
+  await env.run({ only: ['automations'] });
+  assert.ok(repliedTo(fresh));
+  assert.ok(!repliedTo(old), 'comments older than 14 days get no automated action');
+
+  // A post published since the previous run: comments made before this run are answered.
+  const np = { ...structuredClone(st.media[0]), id: '17900000000000777', timestamp: Date.now() - 4 * 60e3, comments_count: 0, shortcode: 'NEWPOST1' };
+  st.nodes.set(np.id, { type: 'media', obj: np });
+  st.media.unshift(np);
+  const first = env.addComment(np.id, { username: 'first.fan', text: 'link?', at: Date.now() - 3 * 60e3 });
+  await env.run({ only: ['automations'] });
+  assert.ok(repliedTo(first), 'the first comments on a new post are answered');
+  const auto = await env.read('automations');
+  assert.ok(Math.abs(Date.parse(auto.cursors.watchedFrom[np.id]) - np.timestamp) < 1000, 'watched since it was published');
+});
+
+test('a story reply that no story-reply rule answers is answered by the DM rules, not just welcomed', async (t) => {
+  const env = await startWorkerEnv();
+  t.after(() => env.close());
+  await env.update('automations', (a) => {
+    a.welcome = { enabled: true, text: 'Welcome {first_name}!' };
+    a.rules = [newRule({ id: 'r_ws', name: 'Workshop', trigger: { source: 'dm', match: 'any', keywords: ['workshop'], mediaIds: null }, actions: [{ type: 'send_dm', texts: ['Workshops run every Saturday.'] }], oncePerUser: false })];
+  });
+  await env.run({ only: ['automations'] });
+  const st = env.graph.state;
+  st.storyShape = 'story';
+  const reply = addStoryMessage(env, 'reply', { username: 'story.asker', text: 'Is the workshop still open?' });
+  await env.run({ only: ['automations'] });
+  assert.deepEqual(st.sentMessages.filter((m) => m.recipientId === reply.other.id).map((m) => m.text), ['Workshops run every Saturday.']);
+  const auto = await env.read('automations');
+  const entry = auto.activity.find((a) => a.username === 'story.asker' && a.ok);
+  assert.equal(entry.source, 'story_reply');
+  assert.equal(entry.ruleName, 'Workshop');
+});

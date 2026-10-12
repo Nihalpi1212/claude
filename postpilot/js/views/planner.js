@@ -1,18 +1,23 @@
-// Planner: month / week calendar, list with bulk actions, Instagram grid preview, CSV import and export.
+// Planner: month / week / day calendar, list with bulk actions, Instagram grid preview, search,
+// CSV import (library files or links) and export, and AI "Ideas for next week".
+// Reminder posts that went out ('reminded') link to #/post-now/<id> ("Post by hand").
 
 import { html, useEffect, useMemo, useRef, useState } from '../../vendor/preact.js';
-import { addHistory, hasErrors, validatePost } from '../../core/model.js';
-import { parseTimestamp } from '../../core/analytics.js';
-import { bestTimeMatrix } from '../../core/schedule.js';
+import { addHistory, hasErrors, newPost, validatePost } from '../../core/model.js';
+import { engagementRate, parseTimestamp, topMedia } from '../../core/analytics.js';
+import { bestTimeMatrix, suggestSlots } from '../../core/schedule.js';
 import { addDaysKey, dayKey, format, formatDateTime, formatDay, formatTime, pad, weekdayOfKey, zonedToUtc } from '../../core/time.js';
+import { aiPrefs, getAi } from '../ai-client.js';
 import { useApp } from '../app.js';
 import { loadViewCss } from '../css.js';
 import { exportCsv, readImport, templateCsv, upcomingPosts } from '../csv-import.js';
 import { mutate, transact, useDocs } from '../data.js';
 import { saveBlob } from '../media.js';
-import { setQuery } from '../router.js';
+import { navigate, setQuery } from '../router.js';
 import {
+  DayView,
   MonthView,
+  PostStatus,
   PostThumb,
   SOURCE_LABEL,
   TYPE_ICON,
@@ -25,15 +30,16 @@ import {
   filterStatus,
   igType,
   localMinutes,
+  matchesSearch,
   monthDays,
   monthTitle,
   postInstant,
+  postNowHash,
   postTitle,
   previewAsset,
   sameTimeOn,
   shortTime,
   startDrag,
-  statusKey,
   toneClass,
   weekDays,
 } from '../ui/calendar.js';
@@ -54,8 +60,10 @@ import {
   Modal,
   PageHeader,
   Segmented,
+  Select,
   Skeleton,
   StatusPill,
+  TextArea,
   TextInput,
   cx,
   usePhone,
@@ -66,6 +74,7 @@ loadViewCss('planner');
 const VIEWS = [
   { value: 'month', label: 'Month', icon: 'calendar' },
   { value: 'week', label: 'Week', icon: 'clock' },
+  { value: 'day', label: 'Day', icon: 'sun' },
   { value: 'list', label: 'List', icon: 'list' },
   { value: 'grid', label: 'Grid', icon: 'grid' },
 ];
@@ -80,6 +89,7 @@ const FILTERS = {
     { value: 'scheduled', label: 'Scheduled' },
     { value: 'draft', label: 'Drafts' },
     { value: 'approval', label: 'Needs approval' },
+    { value: 'reminded', label: 'Post by hand' },
     { value: 'published', label: 'Published' },
     { value: 'failed', label: 'Failed' },
   ],
@@ -88,6 +98,7 @@ const FILTERS = {
     { value: 'autopilot', label: 'Autopilot' },
     { value: 'evergreen', label: 'Queues' },
     { value: 'csv', label: 'CSV import' },
+    { value: 'recycle', label: 'Reposts' },
   ],
 };
 const FILTER_TITLES = { type: 'Type', status: 'Status', source: 'Source' };
@@ -118,11 +129,35 @@ function useNow(ms = 60_000) {
   return now;
 }
 
-function matchPost(p, f) {
+function matchPost(p, f, search) {
   if (f.type.length && !f.type.includes(p.type)) return false;
   if (f.status.length && !f.status.includes(filterStatus(p))) return false;
   if (f.source.length && !f.source.includes(p.source || 'manual')) return false;
-  return true;
+  return matchesSearch(p, search);
+}
+
+/** Search box state: instant for filtering, written to the URL (?q=) after a short pause; follows links that set ?q=. */
+function useSearch(external) {
+  const [value, setValue] = useState(external || '');
+  const written = useRef(external || '');
+  const timer = useRef(null);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  useEffect(() => {
+    const ext = external || '';
+    if (ext === written.current) return;
+    written.current = ext;
+    clearTimeout(timer.current);
+    setValue(ext);
+  }, [external]);
+  const set = (v) => {
+    setValue(v);
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => {
+      written.current = v.trim();
+      setQuery({ q: v.trim() || undefined });
+    }, 300);
+  };
+  return [value, set];
 }
 
 /** Run a data-layer write; errors are already toasted by the data layer. */
@@ -147,12 +182,16 @@ export default function Planner() {
   const anchor = isDayKey(q.date) ? q.date : today;
   const filters = { type: splitQ(q.type), status: splitQ(q.status), source: splitQ(q.source) };
   const filterCount = filters.type.length + filters.status.length + filters.source.length;
+  const [search, setSearch] = useSearch(q.q);
+  const searching = search.trim().length > 0;
+  const ai = getAi(settings);
 
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [selectedDay, setSelectedDay] = useState(null);
   const [selection, setSelection] = useState(() => new Set());
   const [moving, setMoving] = useState(null);
   const [importing, setImporting] = useState(false);
+  const [ideasOpen, setIdeasOpen] = useState(false);
 
   useEffect(() => setSelection(new Set()), [view]);
 
@@ -169,7 +208,7 @@ export default function Planner() {
   );
 
   const livePosts = useMemo(() => posts.filter((p) => p.status !== 'canceled'), [postsDoc]);
-  const visiblePosts = livePosts.filter((p) => matchPost(p, filters));
+  const visiblePosts = livePosts.filter((p) => matchPost(p, filters, search));
   const showIg = !filters.source.length && (!filters.status.length || filters.status.includes('published'));
 
   const calItems = useMemo(() => {
@@ -194,6 +233,7 @@ export default function Planner() {
       for (const m of Object.values(mediaStats)) {
         if (!m || !m.id || linked.has(m.id) || m.productType === 'STORY') continue;
         if (filters.type.length && !filters.type.includes(igType(m))) continue;
+        if (searching && !matchesSearch({ caption: m.caption }, search)) continue;
         const t = parseTimestamp(m.timestamp);
         if (!Number.isFinite(t)) continue;
         const at = new Date(t).toISOString();
@@ -201,7 +241,7 @@ export default function Planner() {
       }
     }
     return out;
-  }, [postsDoc, data['analytics-media'], assetsById, listsById, tz, q.type, q.status, q.source]);
+  }, [postsDoc, data['analytics-media'], assetsById, listsById, tz, q.type, q.status, q.source, search]);
 
   // ---- writes ---------------------------------------------------------------
 
@@ -479,7 +519,9 @@ export default function Planner() {
   };
 
   const postActions = {
-    open: (post) => openComposer(post.id),
+    // A reminder that went out opens the "Post by hand" screen; everything else the composer.
+    open: (post) => (post.status === 'reminded' ? navigate(postNowHash(post)) : openComposer(post.id)),
+    edit: (post) => openComposer(post.id),
     move: (post) => setMoving(post),
     approve,
     retry,
@@ -493,11 +535,13 @@ export default function Planner() {
   const drafts = livePosts.filter((p) => p.status === 'draft' && !p.needsApproval).length;
   const approvals = livePosts.filter((p) => p.status === 'draft' && p.needsApproval).length;
   const failed = livePosts.filter((p) => p.status === 'failed').length;
+  const byHand = livePosts.filter((p) => p.status === 'reminded').length;
   const summary = postsDoc
     ? [
         `${weekAhead} scheduled in the next 7 days`,
         plural(drafts, 'draft'),
         approvals ? `${approvals} to approve` : null,
+        byHand ? `${byHand} to post by hand` : null,
         failed ? `${failed} failed` : null,
       ]
         .filter(Boolean)
@@ -505,12 +549,14 @@ export default function Planner() {
     : 'Plan, move and preview your posts.';
 
   const actions = phone
-    ? html`<${Menu} label="Import or export CSV" trigger="CSV" items=${[
+    ? html`<${Menu} label="More planner actions" trigger="More" items=${[
+          ai ? { label: 'Ideas for next week', icon: 'sparkle', onClick: () => setIdeasOpen(true) } : null,
           { label: 'Import CSV', icon: 'upload', onClick: () => setImporting(true) },
           { label: 'Export upcoming posts', icon: 'download', onClick: exportUpcoming },
         ]} />
         <${Button} variant="primary" icon="plus" onClick=${() => openComposer()}>New post<//>`
-    : html`<${Button} icon="upload" onClick=${() => setImporting(true)}>Import CSV<//>
+    : html`${ai ? html`<${Button} icon="sparkle" onClick=${() => setIdeasOpen(true)}>Ideas for next week<//>` : null}
+        <${Button} icon="upload" onClick=${() => setImporting(true)}>Import CSV<//>
         <${Button} icon="download" onClick=${exportUpcoming}>Export CSV<//>
         <${Button} variant="primary" icon="plus" onClick=${() => openComposer()}>New post<//>`;
 
@@ -519,12 +565,18 @@ export default function Planner() {
   const days = view === 'week' ? weekDays(anchor) : monthDays(anchor);
   const month = Number(anchor.slice(5, 7));
   const step = (dir) => {
-    const next = view === 'week' ? addDaysKey(anchor, dir * 7) : shiftMonth(anchor, dir);
+    const next = view === 'week' ? addDaysKey(anchor, dir * 7) : view === 'day' ? addDaysKey(anchor, dir) : shiftMonth(anchor, dir);
     setQuery({ date: next });
   };
-  const inPeriod = view === 'week' ? days.includes(today) : today.slice(0, 7) === anchor.slice(0, 7);
+  const inPeriod = view === 'week' ? days.includes(today) : view === 'day' ? anchor === today : today.slice(0, 7) === anchor.slice(0, 7);
+  const unit = { week: 'week', day: 'day' }[view] || 'month';
   let period = '';
   if (view === 'month') period = monthTitle(anchor, tz);
+  if (view === 'day') {
+    const rel = dayLabel(anchor, today, tz);
+    const date = format(zonedToUtc(anchor, '12:00', tz), tz, { weekday: 'short', month: 'short', day: 'numeric', ...(anchor.slice(0, 4) !== today.slice(0, 4) ? { year: 'numeric' } : {}) });
+    period = rel === formatDay(zonedToUtc(anchor, '12:00', tz), tz) ? date : `${rel}, ${date}`;
+  }
   if (view === 'week') {
     const a = zonedToUtc(days[0], '12:00', tz);
     const b = zonedToUtc(days[6], '12:00', tz);
@@ -541,18 +593,33 @@ export default function Planner() {
 
   const toolbar = html`<div class="pl-toolbar">
     <${Segmented} label="Planner view" options=${VIEWS} value=${view} onChange=${(v) => setQuery({ view: v === 'month' ? undefined : v })} class="pl-views" />
-    ${view === 'month' || view === 'week'
+    ${view === 'month' || view === 'week' || view === 'day'
       ? html`<div class="pl-nav">
-          <${IconButton} icon="chevron-left" label=${view === 'week' ? 'Previous week' : 'Previous month'} onClick=${() => step(-1)} />
+          <${IconButton} icon="chevron-left" label=${`Previous ${unit}`} onClick=${() => step(-1)} />
           <${Button} size="sm" variant=${inPeriod ? 'ghost' : 'secondary'} onClick=${() => setQuery({ date: undefined })} disabled=${inPeriod && anchor === today}>Today<//>
-          <${IconButton} icon="chevron-right" label=${view === 'week' ? 'Next week' : 'Next month'} onClick=${() => step(1)} />
+          <${IconButton} icon="chevron-right" label=${`Next ${unit}`} onClick=${() => step(1)} />
           <h2 class="pl-period" aria-live="polite">${period}</h2>
         </div>`
       : null}
     <span class="spacer"></span>
+    <div class="pl-search" role="search">
+      <${TextInput} type="search" icon="search" value=${search} onChange=${setSearch} placeholder="Search posts" aria-label="Search captions, labels, notes and first comments"
+        onKeyDown=${(e) => e.key === 'Escape' && search && (e.preventDefault(), setSearch(''))} />
+    </div>
     <${Button} size="sm" variant=${filterCount ? 'secondary' : 'ghost'} icon="filter" aria-expanded=${filtersOpen ? 'true' : 'false'} aria-controls="planner-filters"
       onClick=${() => setFiltersOpen((o) => !o)}>Filters${filterCount ? html` <span class="pl-count num">${filterCount}</span>` : null}<//>
   </div>`;
+
+  // The list view leaves published posts out, so count what it shows and point to the calendar for the rest.
+  const listed = view === 'list' ? visiblePosts.filter((p) => p.status !== 'published').length : visiblePosts.length;
+  const publishedHits = view === 'list' ? visiblePosts.length - listed : 0;
+  const searchNote = searching
+    ? html`<p class="pl-search-note text-sm" role="status">
+        <span>${listed ? `${plural(listed, 'post')} ${listed === 1 ? 'matches' : 'match'}` : 'No posts match'} “${search.trim()}”${view !== 'list' && listed ? ' (all dates)' : ''}.${publishedHits ? ` ${plural(publishedHits, 'published post')} too, in the calendar views.` : ''}</span>
+        ${view !== 'list' && listed ? html`<${Button} size="sm" variant="ghost" icon="list" onClick=${() => setQuery({ view: 'list' })}>Show as a list<//>` : null}
+        <${Button} size="sm" variant="ghost" icon="x" onClick=${() => setSearch('')}>Clear search<//>
+      </p>`
+    : null;
 
   const filterPanel = filtersOpen
     ? html`<div class="pl-filters" id="planner-filters" role="group" aria-label="Filters">
@@ -596,7 +663,7 @@ export default function Planner() {
       ${unscheduled.length ? html`<${DraftTray} posts=${unscheduled} assetsById=${assetsById} onOpen=${postActions.open} />` : null}
       ${sel
         ? html`<${DayPanel} day=${sel} today=${today} tz=${tz} items=${calItems.filter((it) => it.day === sel).sort((a, b) => a.minutes - b.minutes)}
-            listsById=${listsById} actions=${postActions} onCompose=${() => composeOnDay(sel)} />`
+            listsById=${listsById} actions=${postActions} onCompose=${() => composeOnDay(sel)} onDayView=${() => setQuery({ view: 'day', date: sel })} />`
         : html`<p class="muted text-sm pl-hint">Choose a day to see its posts. ${phone ? '' : 'Click an empty part of a day to plan a post at its best time, or drag a post to another day.'}</p>`}`;
   } else if (view === 'week') {
     body = html`
@@ -604,10 +671,18 @@ export default function Planner() {
       <${WeekView} days=${days} today=${today} nowMs=${nowMs} tz=${tz} items=${calItems} matrix=${best.matrix}
         onCompose=${composeAt} onComposeDay=${composeOnDay} onOpen=${(it) => postActions.open(it.post)}
         onDropPost=${(id, day, minutes) => dropOnDay(id, day, minutes)} />`;
+  } else if (view === 'day') {
+    body = html`
+      <${WeekLegend} best=${best} days=${[anchor]} tz=${tz} nowMs=${nowMs} onCompose=${(iso) => openComposer({ scheduledAt: iso })} />
+      <${DayView} day=${anchor} today=${today} nowMs=${nowMs} tz=${tz} items=${calItems} matrix=${best.matrix}
+        onCompose=${composeAt} onOpen=${(it) => postActions.open(it.post)} onDropPost=${(id, day, minutes) => dropOnDay(id, day, minutes)} />
+      ${!calItems.some((it) => it.day === anchor)
+        ? html`<p class="muted text-sm pl-hint">${searching || filterCount ? 'Nothing on this day matches.' : anchor < today ? 'Nothing was posted this day.' : 'Nothing planned for this day yet. Use + on an hour to plan a post at that time.'}</p>`
+        : null}`;
   } else if (view === 'list') {
     body = html`<${ListView} posts=${visiblePosts} assetsById=${assetsById} listsById=${listsById} tz=${tz} today=${today} nowMs=${nowMs}
       selection=${selection} setSelection=${setSelection} actions=${postActions}
-      onToDrafts=${toDrafts} onShift=${shiftDays} onDelete=${remove} onCompose=${() => openComposer()} filtered=${filterCount > 0} />`;
+      onToDrafts=${toDrafts} onShift=${shiftDays} onDelete=${remove} onCompose=${() => openComposer()} filtered=${filterCount > 0 || searching} />`;
   } else {
     body = html`<${GridView} posts=${visiblePosts} mediaStats=${showIg ? mediaStats : {}} assetsById=${assetsById} tz=${tz} nowMs=${nowMs}
       account=${settings && settings.ig} onOpen=${postActions.open} onSwap=${swap} phone=${phone} />`;
@@ -618,6 +693,7 @@ export default function Planner() {
     <div class="pl-controls">
       ${toolbar}
       ${filterPanel}
+      ${searchNote}
     </div>
     ${body}
     ${moving ? html`<${MoveDialog} post=${moving} tz=${tz} onClose=${() => setMoving(null)} onMove=${(iso) => {
@@ -626,6 +702,10 @@ export default function Planner() {
       reschedule(p, iso);
     }} />` : null}
     ${importing ? html`<${ImportModal} assets=${assets} tz=${tz} toast=${toast} onClose=${() => setImporting(false)} />` : null}
+    ${ideasOpen && ai
+      ? html`<${IdeasModal} ai=${ai} settings=${settings} mediaStats=${mediaStats} posts=${posts} matrix=${best.matrix} tz=${tz} toast=${toast}
+          onClose=${() => setIdeasOpen(false)} onShow=${() => setQuery({ view: 'list' })} />`
+      : null}
   </div>`;
 }
 
@@ -638,8 +718,10 @@ function PostRow({ post, asset, tz, listsById, actions, selectable, checked, onC
   const list = post.listId && listsById[post.listId];
   const editable = post.status === 'draft' || post.status === 'scheduled';
   const approval = post.needsApproval && post.status === 'draft';
+  const reminded = post.status === 'reminded';
   const menu = [
-    { label: post.status === 'published' ? 'View details' : 'Edit', icon: 'edit', onClick: () => actions.open(post) },
+    reminded ? { label: 'Post by hand', icon: 'send', onClick: () => actions.open(post) } : null,
+    { label: post.status === 'published' ? 'View details' : 'Edit', icon: 'edit', onClick: () => actions.edit(post) },
     editable ? { label: post.scheduledAt ? 'Move to…' : 'Set a date…', icon: 'calendar', onClick: () => actions.move(post) } : null,
     approval ? { label: 'Approve', icon: 'check', onClick: () => actions.approve(post) } : null,
     post.status === 'failed' ? { label: 'Try again', icon: 'refresh', onClick: () => actions.retry(post) } : null,
@@ -661,9 +743,11 @@ function PostRow({ post, asset, tz, listsById, actions, selectable, checked, onC
         ${(post.labels || []).slice(0, 2).map((l) => html`<${Badge} tone="outline" key=${l}>${l}<//>`)}
       </div>
       ${post.status === 'failed' && post.lastError ? html`<p class="pl-row-error"><${Icon} name="alert" size=${13} /><span>${post.lastError.message}</span></p>` : null}
+      ${!post.caption && post.notes ? html`<p class="pl-row-notes muted text-sm clamp-2">${post.notes}</p>` : null}
     </div>
     <div class="pl-row-side">
-      <${StatusPill} status=${statusKey(post)} />
+      <${PostStatus} post=${post} />
+      ${reminded ? html`<${Button} size="sm" variant="primary" icon="send" href=${postNowHash(post)}>Post by hand<//>` : null}
       ${approval ? html`<${Button} size="sm" variant="primary" icon="check" onClick=${() => actions.approve(post)}>Approve<//>` : null}
       ${post.status === 'failed' ? html`<${Button} size="sm" icon="refresh" onClick=${() => actions.retry(post)}>Try again<//>` : null}
       <${Menu} items=${menu} label=${`Actions for ${title}`} size="sm" />
@@ -691,7 +775,7 @@ function IgRow({ item, tz }) {
   </li>`;
 }
 
-function DayPanel({ day, today, tz, items, listsById, actions, onCompose }) {
+function DayPanel({ day, today, tz, items, listsById, actions, onCompose, onDayView }) {
   const date = formatDay(zonedToUtc(day, '12:00', tz), tz);
   const label = dayLabel(day, today, tz);
   return html`<section class="panel pl-daypanel" aria-label=${`Posts on ${date}`}>
@@ -700,7 +784,10 @@ function DayPanel({ day, today, tz, items, listsById, actions, onCompose }) {
         <h2 class="section-title">${label}</h2>
         ${label !== date ? html`<p class="muted text-sm">${date}</p>` : null}
       </div>
-      ${day >= today ? html`<${Button} size="sm" icon="plus" onClick=${onCompose}>New post on this day<//>` : null}
+      <div class="row">
+        <${Button} size="sm" variant="ghost" icon="sun" onClick=${onDayView}>Day view<//>
+        ${day >= today ? html`<${Button} size="sm" icon="plus" onClick=${onCompose}>New post on this day<//>` : null}
+      </div>
     </header>
     ${items.length
       ? html`<ul class="list pl-rows">
@@ -772,12 +859,13 @@ function ListView({ posts, assetsById, listsById, tz, today, nowMs, selection, s
   const [shift, setShift] = useState(1);
   const byTime = (a, b) => (Date.parse(a.scheduledAt || '') || Infinity) - (Date.parse(b.scheduledAt || '') || Infinity);
   const approval = posts.filter((p) => p.status === 'draft' && p.needsApproval).sort(byTime);
+  const byHand = posts.filter((p) => p.status === 'reminded').sort(byTime);
   const failedList = posts.filter((p) => p.status === 'failed').sort((a, b) => byTime(b, a));
   const scheduled = posts.filter((p) => p.status === 'scheduled' || p.status === 'publishing').sort(byTime);
   const draftList = posts
     .filter((p) => p.status === 'draft' && !p.needsApproval)
     .sort((a, b) => (a.scheduledAt && b.scheduledAt ? byTime(a, b) : a.scheduledAt ? -1 : b.scheduledAt ? 1 : String(b.updatedAt).localeCompare(String(a.updatedAt))));
-  const selectable = (p) => p.status !== 'publishing' && p.status !== 'published';
+  const selectable = (p) => p.status !== 'publishing' && p.status !== 'published' && p.status !== 'reminded';
   const ids = new Set(posts.map((p) => p.id));
   const chosen = [...selection].filter((id) => ids.has(id));
 
@@ -834,13 +922,14 @@ function ListView({ posts, assetsById, listsById, tz, today, nowMs, selection, s
     )}
   </div>`;
 
-  const empty = !approval.length && !failedList.length && !scheduled.length && !draftList.length;
+  const empty = !approval.length && !byHand.length && !failedList.length && !scheduled.length && !draftList.length;
   return html`<div class="pl-list">
     ${empty
       ? html`<${EmptyState} icon="list" title=${filtered ? 'No posts match these filters' : 'Nothing planned yet'}
           body=${filtered ? 'Clear a filter to see more.' : 'Create a post, import a CSV or set up a queue to fill your calendar.'}
           action=${filtered ? null : html`<${Button} variant="primary" icon="plus" onClick=${onCompose}>New post<//>`} />`
       : null}
+    ${section('reminded', 'Post by hand', byHand, rows(byHand), 'The reminder went out. Post these in the Instagram app, then mark them as posted.')}
     ${section('approval', 'Needs approval', approval, rows(approval), 'Created by autopilot. Approve to schedule.')}
     ${section('failed', 'Failed', failedList, rows(failedList), 'Fix the problem or try again.')}
     ${section('scheduled', 'Scheduled', scheduled, scheduledContent)}
@@ -997,7 +1086,7 @@ const COLUMN_HELP = [
   ['type', 'post, carousel, reel or story (blank: worked out from the media)'],
   ['caption', 'Post text'],
   ['first_comment', 'Optional first comment'],
-  ['media', 'Library file names or asset ids, separated by |'],
+  ['media', 'Library file names, asset ids or direct links (https://…) to JPEG photos or MP4 videos, separated by |'],
   ['status', 'draft or scheduled (blank: scheduled when a date and time are set)'],
 ];
 
@@ -1027,6 +1116,8 @@ function ImportModal({ assets, tz, toast, onClose }) {
   const rows = (result && result.rows) || [];
   const ready = rows.filter((r) => r.post);
   const problems = rows.length - ready.length;
+  // Files the worker downloads from their links (one asset per distinct link, shared between rows).
+  const downloads = [...new Map(ready.flatMap((r) => r.newAssets || []).map((a) => [a.id, a])).values()];
 
   const create = async () => {
     setBusy(true);
@@ -1037,12 +1128,18 @@ function ImportModal({ assets, tz, toast, onClose }) {
           const have = new Set(doc.posts.map((p) => p.id));
           for (const r of ready) if (!have.has(r.post.id)) doc.posts.push(structuredClone(r.post));
           tx.write('posts', doc);
+          if (downloads.length) {
+            const lib = await tx.read('library');
+            const known = new Set(lib.assets.map((a) => a.id));
+            for (const a of downloads) if (!known.has(a.id)) lib.assets.unshift(structuredClone(a));
+            tx.write('library', lib);
+          }
         },
         { message: 'import posts from CSV' },
       );
       const scheduled = ready.filter((r) => r.post.status === 'scheduled').length;
       toast(
-        `Imported ${plural(ready.length, 'post')}${scheduled && scheduled < ready.length ? ` (${scheduled} scheduled, ${plural(ready.length - scheduled, 'draft')})` : scheduled ? ' as scheduled' : ' as drafts'}.${problems ? ` Skipped ${plural(problems, 'row')} with problems.` : ''}`,
+        `Imported ${plural(ready.length, 'post')}${scheduled && scheduled < ready.length ? ` (${scheduled} scheduled, ${plural(ready.length - scheduled, 'draft')})` : scheduled ? ' as scheduled' : ' as drafts'}.${problems ? ` Skipped ${plural(problems, 'row')} with problems.` : ''}${downloads.length ? ` The worker downloads ${plural(downloads.length, 'linked file')} on its next run.` : ''}`,
         { kind: 'success' },
       );
       onClose();
@@ -1065,7 +1162,7 @@ function ImportModal({ assets, tz, toast, onClose }) {
   return html`<${Modal} open wide title="Import posts from CSV" onClose=${onClose} footer=${footer} class="pl-import">
     ${!result || result.error
       ? html`<div class="stack">
-          <p class="muted">Plan many posts at once from a spreadsheet. Upload the photos and videos to your library first, then refer to them by file name. Nothing is created until you check the preview.</p>
+          <p class="muted">Plan many posts at once from a spreadsheet. In the media column, use the names of files in your library, or direct links to JPEG photos and MP4 videos: the worker downloads those. Nothing is created until you check the preview.</p>
           <label class=${cx('pl-dropzone', dragOver && 'is-over')}
             onDragOver=${(e) => {
               if ([...(e.dataTransfer?.types || [])].includes('Files')) {
@@ -1107,6 +1204,9 @@ function ImportModal({ assets, tz, toast, onClose }) {
             ${problems ? html`<span class="text-bad"><strong class="num">${problems}</strong> with problems (skipped)</span>` : null}
             ${result.ignored.length ? html`<span class="muted text-sm">Ignored columns: ${result.ignored.join(', ')}</span>` : null}
           </div>
+          ${downloads.length
+            ? html`<p class="pl-import-downloads text-sm"><${Icon} name="download" size=${14} /><span>${plural(downloads.length, 'file')} will be downloaded by the worker from ${downloads.length === 1 ? 'its link' : 'their links'} after the import (it runs about every 10 minutes). Posts wait for their files.</span></p>`
+            : null}
           ${result.truncated ? html`<${Callout} tone="warning">Only the first 500 rows are shown and imported. Split the file to import the rest.<//>` : null}
           ${!rows.length ? html`<${EmptyState} compact icon="file" title="The file has no rows under the header" />` : null}
           <ol class="pl-import-rows">
@@ -1124,10 +1224,139 @@ function ImportModal({ assets, tz, toast, onClose }) {
                   <p class="clamp-2 text-sm">${r.data.caption ? r.data.caption : html`<span class="muted">No caption</span>`}</p>
                   ${r.errors.map((e) => html`<p class="pl-import-msg text-bad"><${Icon} name="alert" size=${13} /><span>${e}</span></p>`)}
                   ${r.warnings.map((w) => html`<p class="pl-import-msg text-warn"><${Icon} name="info" size=${13} /><span>${w}</span></p>`)}
+                  ${(r.notes || []).map((n) => html`<p class="pl-import-msg muted"><${Icon} name="download" size=${13} /><span>${n}</span></p>`)}
                 </div>
               </li>`;
             })}
           </ol>
+        </div>`}
+  <//>`;
+}
+
+// ---------------------------------------------------------------------------
+// Ideas for next week (AI)
+
+const IDEA_COUNTS = [3, 5, 7].map((n) => ({ value: n, label: `${n} ideas` }));
+
+function IdeasModal({ ai, settings, mediaStats, posts, matrix, tz, toast, onClose, onShow }) {
+  const [count, setCount] = useState(5);
+  const [notes, setNotes] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [ideas, setIdeas] = useState(null); // [{title, type, hook, caption, pick}]
+  const [saving, setSaving] = useState(false);
+  const abort = useRef(null);
+  useEffect(() => () => abort.current?.abort(), []);
+
+  const generate = async () => {
+    setBusy(true);
+    setError('');
+    abort.current = new AbortController();
+    try {
+      const followers = settings && settings.ig ? settings.ig.followersCount ?? undefined : undefined;
+      const topPosts = topMedia(Object.values(mediaStats || {}).filter((m) => m && m.productType !== 'STORY'), 'er', 10, { followers }).map((m) => ({
+        caption: m.caption || '',
+        productType: m.productType || m.mediaType || 'post',
+        er: engagementRate(m, followers),
+      }));
+      const prefs = aiPrefs(settings);
+      const list = await ai.ideas({ topPosts, voice: prefs.voice, language: prefs.language, count, notes, signal: abort.current.signal });
+      if (!list.length) setError('Claude did not return any ideas. Try again, or add a note about what you want to post.');
+      setIdeas(list.map((i) => ({ ...i, pick: true })));
+    } catch (err) {
+      if (err && err.name === 'AbortError') return;
+      setError(err.userMessage || err.message || String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const chosen = (ideas || []).filter((i) => i.pick);
+  const create = async () => {
+    if (!chosen.length) return;
+    setSaving(true);
+    const now = new Date().toISOString();
+    const taken = posts.filter((p) => ['draft', 'scheduled', 'publishing'].includes(p.status) && p.scheduledAt).map((p) => p.scheduledAt);
+    const slots = suggestSlots({ matrix, tz, count: chosen.length, horizonDays: 8, minGapHours: 20, taken, maxPerDay: 1 });
+    const drafts = chosen.map((idea, i) =>
+      newPost({
+        type: idea.type || 'feed',
+        status: 'draft',
+        caption: idea.caption || '',
+        notes: [`Idea: ${idea.title}`, idea.hook ? `Hook: ${idea.hook}` : ''].filter(Boolean).join('\n'),
+        labels: ['idea'],
+        scheduledAt: slots[i] || null,
+        createdAt: now,
+        updatedAt: now,
+        history: [{ at: now, event: 'created', detail: 'Created from an AI idea in the planner.' }],
+      }),
+    );
+    try {
+      await mutate(
+        'posts',
+        (doc) => {
+          const have = new Set(doc.posts.map((p) => p.id));
+          for (const d of drafts) if (!have.has(d.id)) doc.posts.push(structuredClone(d));
+        },
+        { message: 'planner: ideas for next week' },
+      );
+      const dated = drafts.filter((d) => d.scheduledAt).length;
+      const when =
+        dated === drafts.length
+          ? ''
+          : !dated
+            ? ' No free good time in the next 7 days, so they have no date yet.'
+            : ` ${dated} ${dated === 1 ? 'has a time' : 'have times'}, ${drafts.length - dated} ${drafts.length - dated === 1 ? 'has' : 'have'} no date yet.`;
+      toast(`Added ${plural(drafts.length, 'draft')} with the idea in the notes.${when} Add a photo or video to each, then schedule it.`, {
+        kind: 'success',
+        action: { label: 'Show drafts', onClick: onShow },
+      });
+      onClose();
+    } catch {
+      setSaving(false); // the data layer showed the error
+    }
+  };
+
+  const footer = ideas && ideas.length
+    ? html`<${Button} variant="ghost" onClick=${() => setIdeas(null)} disabled=${saving}>Start over<//>
+        <span class="spacer"></span>
+        <${Button} variant="ghost" onClick=${onClose}>Cancel<//>
+        <${Button} variant="primary" loading=${saving} disabled=${!chosen.length} onClick=${create}>${chosen.length ? `Create ${plural(chosen.length, 'draft')}` : 'Pick at least one idea'}<//>`
+    : html`<${Button} variant="ghost" onClick=${onClose}>Cancel<//>
+        <${Button} variant="primary" icon="sparkle" loading=${busy} onClick=${generate}>${busy ? 'Thinking…' : 'Get ideas'}<//>`;
+
+  return html`<${Modal} open wide title="Ideas for next week" onClose=${onClose} footer=${footer} class="pl-ideas">
+    ${ideas && ideas.length
+      ? html`<div class="stack">
+          <p class="muted">Each idea you keep becomes a draft with the idea and hook in its notes. Drafts go at good free times in the next 7 days, at most one a day; when there are no more, the rest have no date yet. Drafts never publish on their own.</p>
+          <ol class="pl-ideas-list">
+            ${ideas.map(
+              (idea, i) => html`<li key=${i} class=${cx('pl-idea', !idea.pick && 'is-off')}>
+                <${Checkbox} checked=${idea.pick} onChange=${(v) => setIdeas((list) => list.map((x, j) => (j === i ? { ...x, pick: v } : x)))}
+                  aria-label=${`Keep idea: ${idea.title}`} />
+                <div class="pl-idea-body">
+                  <div class="pl-idea-head">
+                    <strong>${idea.title}</strong>
+                    <span class="pl-meta-item text-sm"><${Icon} name=${TYPE_ICON[idea.type] || 'image'} size=${13} />${TYPE_LABEL[idea.type] || 'Post'}</span>
+                  </div>
+                  ${idea.hook ? html`<p class="text-sm"><span class="label-caps">Hook</span> ${idea.hook}</p>` : null}
+                  <p class="muted text-sm clamp-3">${idea.caption}</p>
+                </div>
+              </li>`,
+            )}
+          </ol>
+        </div>`
+      : html`<div class="stack">
+          <p class="muted">Claude suggests posts for the coming week from what worked best on your account, in your brand voice. You choose which ones become drafts.</p>
+          <div class="grid-2">
+            <${Field} label="How many">
+              <${Select} options=${IDEA_COUNTS} value=${count} onChange=${setCount} />
+            <//>
+          </div>
+          <${Field} label="Anything to focus on" hint="Optional. For example a launch, an event or a theme for the week.">
+            <${TextArea} value=${notes} onChange=${setNotes} rows=${2} maxLength=${1000} placeholder="New autumn glazes go on sale Friday." />
+          <//>
+          ${error ? html`<${Callout} tone="danger" title="Could not get ideas">${error}<//>` : null}
         </div>`}
   <//>`;
 }

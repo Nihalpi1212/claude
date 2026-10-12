@@ -1,11 +1,18 @@
-// CSV import / export for the planner (pure functions, no DOM).
+// CSV import / export for the planner and queues (pure functions, no DOM).
 //
 // Columns (header row required, any order, case-insensitive):
 //   date (YYYY-MM-DD), time (HH:mm, account time zone), type (post|carousel|reel|story),
-//   caption, first_comment, media (library file names or asset ids separated by |), status (draft|scheduled)
+//   caption, first_comment, media (library file names, asset ids or http(s) links, separated by |),
+//   status (draft|scheduled)
+//
+// A media link becomes a new library asset with importUrl set: the browser cannot fetch other sites
+// (the page's Content-Security-Policy), so the worker downloads the file on its next run. Rows that
+// use the same link share one asset, and a link already in the library (still downloading, or
+// downloaded before: asset.sourceUrl) reuses that asset.
 
 import { toCsv } from '../core/analytics.js';
-import { newPost, validatePost } from '../core/model.js';
+import { isHttpUrl, kindFromUrl, nameFromUrl } from '../core/feed.js';
+import { newAsset, newPost, uid, validatePost } from '../core/model.js';
 import { addDaysKey, dayKey, pad, timeKey, zonedToUtc } from '../core/time.js';
 
 export const CSV_COLUMNS = ['date', 'time', 'type', 'caption', 'first_comment', 'media', 'status'];
@@ -168,11 +175,12 @@ function stripExt(name) {
   return String(name || '').replace(/\.[a-z0-9]{2,5}$/i, '');
 }
 
-/** Index library assets for name / id lookups (library order is newest first). */
+/** Index library assets for name / id / link lookups (library order is newest first). */
 export function assetIndex(assets = []) {
   const byId = new Map();
   const byName = new Map();
   const byBase = new Map();
+  const byUrl = new Map();
   const push = (map, key, a) => {
     if (!key) return;
     if (!map.has(key)) map.set(key, []);
@@ -182,14 +190,49 @@ export function assetIndex(assets = []) {
     byId.set(a.id, a);
     push(byName, String(a.name || '').trim().toLowerCase(), a);
     push(byBase, stripExt(String(a.name || '').trim()).toLowerCase(), a);
+    for (const url of [a.importUrl, a.sourceUrl]) if (url && !byUrl.has(url) && !a.importError) byUrl.set(url, a);
   }
-  return { byId, byName, byBase };
+  // Links of this import that become new assets (shared by every row that uses the same link).
+  return { byId, byName, byBase, byUrl, created: new Map() };
 }
 
-function resolveMedia(token, index) {
+const NOT_JPEG_EXT = /\.(png|webp|gif|heic|heif|avif|bmp|tiff?)(?:$|[?#])/i;
+
+/** A new library asset the worker downloads from `url` (kind and name from the link). */
+export function linkAsset(url, { tag = 'csv' } = {}) {
+  const kind = kindFromUrl(url) || 'image';
+  return newAsset({
+    id: uid('a_'),
+    kind,
+    name: nameFromUrl(url),
+    mime: kind === 'video' ? 'video/mp4' : 'image/jpeg',
+    importUrl: url,
+    tags: [tag],
+    createdAt: new Date().toISOString(),
+  });
+}
+
+function resolveLink(t, index, tag) {
+  if (!isHttpUrl(t)) return { error: `"${shorten(t)}" is not a web link. Links must start with http:// or https://.` };
+  const url = new URL(t).href;
+  const known = index.byUrl.get(url) || index.byUrl.get(t);
+  if (known) return { asset: known };
+  let asset = index.created.get(url);
+  if (!asset) {
+    asset = linkAsset(url, { tag });
+    index.created.set(url, asset);
+  }
+  const ext = NOT_JPEG_EXT.exec(new URL(url).pathname);
+  const warning = ext
+    ? `"${shorten(nameFromUrl(url))}" looks like a ${ext[1].toUpperCase()} image. The worker can only post JPEG photos, so this download will fail unless the link actually serves a JPEG. Upload the file in the Library instead (it converts it).`
+    : null;
+  return { asset, created: true, warning };
+}
+
+function resolveMedia(token, index, { tag = 'csv' } = {}) {
   const t = token.trim();
   if (!t) return { asset: null };
-  if (/^https?:\/\//i.test(t)) return { error: `"${shorten(t)}" is a link. Upload the file to the library first, then use its name.` };
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(t)) return resolveLink(t, index, tag);
   if (index.byId.has(t)) return { asset: index.byId.get(t) };
   const lower = t.toLowerCase();
   const hits = index.byName.get(lower) || index.byBase.get(stripExt(lower)) || [];
@@ -241,17 +284,35 @@ export function readImport(text, { assets = [], tz = 'UTC', now = Date.now() } =
   return { columns, ignored, rows, truncated };
 }
 
-function readRow(data, { line, index, assetsById, tz, nowMs }) {
+/** Media cells of one row: library assets plus new link assets (and what to tell the owner about them). */
+function readMediaCell(cell, index, tag) {
   const errors = [];
   const warnings = [];
+  const notes = [];
   const picked = [];
-  for (const token of String(data.media).split('|')) {
-    const r = resolveMedia(token, index);
+  const newAssets = [];
+  for (const token of String(cell).split('|')) {
+    const r = resolveMedia(token, index, { tag });
     if (r.error) errors.push(r.error);
     if (r.warning) warnings.push(r.warning);
-    if (r.asset) picked.push(r.asset);
+    if (!r.asset) continue;
+    picked.push(r.asset);
+    if (r.created) {
+      newAssets.push(r.asset);
+      notes.push(`"${shorten(r.asset.name)}" will be downloaded by the worker from its link.`);
+    } else if (r.asset.importUrl) {
+      notes.push(`"${shorten(r.asset.name || 'A file')}" is already in the library and still downloading from its link.`);
+    }
   }
-  if (!picked.length && !errors.length) errors.push('Add at least one library file in the media column.');
+  return { errors, warnings, notes, picked, newAssets };
+}
+
+/** validatePost's note about files still downloading is replaced by the clearer import notes. */
+const isDownloadNote = (issue) => issue.field === 'media' && /still being downloaded/.test(issue.message);
+
+function readRow(data, { line, index, assetsById, tz, nowMs }) {
+  const { errors, warnings, notes, picked, newAssets } = readMediaCell(data.media, index, 'csv');
+  if (!picked.length && !errors.length) errors.push('Add at least one library file or link in the media column.');
 
   let type;
   const rawType = String(data.type).trim().toLowerCase();
@@ -304,14 +365,103 @@ function readRow(data, { line, index, assetsById, tz, nowMs }) {
     });
     post.history = [{ at: post.createdAt, event: 'created', detail: 'Imported from CSV.' }];
     if (picked.length) {
-      for (const issue of validatePost(post, assetsById)) {
+      const known = { ...assetsById, ...Object.fromEntries(newAssets.map((a) => [a.id, a])) };
+      for (const issue of validatePost(post, known)) {
         if (issue.field === 'scheduledAt') continue; // handled above with a clearer message
         if (issue.field === 'media' && issue.message === 'Add a photo or video.') continue;
+        if (isDownloadNote(issue)) continue;
         (issue.level === 'error' ? errors : warnings).push(issue.message);
       }
     }
   }
-  return { line, data, post: errors.length ? null : post, assets: picked, errors: [...new Set(errors)], warnings: [...new Set(warnings)], status, type, scheduledAt };
+  const ok = !errors.length;
+  return {
+    line,
+    data,
+    post: ok ? post : null,
+    assets: picked,
+    newAssets: ok ? newAssets : [],
+    errors: [...new Set(errors)],
+    warnings: [...new Set(warnings)],
+    notes: ok ? [...new Set(notes)] : [], // a skipped row downloads nothing
+    status,
+    type,
+    scheduledAt,
+  };
+}
+
+/**
+ * Read a CSV into queue items (same columns; date, time and status are ignored because the queue's
+ * time slots decide when items post). Each row needs media; type is worked out from the media when
+ * blank. Links in the media column become new assets the worker downloads.
+ * @returns {{error?: string, ignored: string[], rows: Array<{line, data, item: object|null, assets, newAssets,
+ *   errors, warnings, notes}>, truncated: boolean}}
+ */
+export function readQueueImport(text, { assets = [] } = {}) {
+  const table = parseCsv(text);
+  const empty = { ignored: [], rows: [], truncated: false };
+  if (!table.length) return { ...empty, error: 'The file is empty.' };
+  const header = table[0];
+  const map = header.map(normalizeHeader);
+  const ignored = header
+    .filter((h, i) => !map[i] || ['date', 'time', 'status'].includes(map[i]))
+    .map((h) => String(h).trim())
+    .filter(Boolean);
+  if (!map.includes('media')) {
+    return { ...empty, ignored, error: 'The first row must name the columns, including "media" (and usually "caption"). Download the template to see the format.' };
+  }
+  const index = assetIndex(assets);
+  const assetsById = Object.fromEntries(assets.map((a) => [a.id, a]));
+  const body = table.slice(1);
+  const rows = body.slice(0, MAX_IMPORT_ROWS).map((cells, r) => {
+    const data = {};
+    map.forEach((key, i) => {
+      if (key && data[key] === undefined) data[key] = unguard(cells[i] ?? '');
+    });
+    for (const k of CSV_COLUMNS) if (data[k] === undefined) data[k] = '';
+    const { errors, warnings, notes, picked, newAssets } = readMediaCell(data.media, index, 'csv');
+    if (!picked.length && !errors.length) errors.push('Add at least one library file or link in the media column.');
+    const rawType = String(data.type).trim().toLowerCase();
+    let type = rawType ? TYPE_IN[rawType] : picked.length > 1 ? 'carousel' : picked[0]?.kind === 'video' ? 'reel' : 'feed';
+    if (rawType && !type) errors.push(`Type "${shorten(String(data.type).trim(), 20)}" is not one of post, carousel or reel.`);
+    if (type === 'story') {
+      errors.push('Queues post to the feed, so stories cannot go in a queue.');
+      type = null;
+    }
+    const item = type
+      ? {
+          id: uid('li_'),
+          type,
+          caption: String(data.caption ?? ''),
+          firstComment: String(data.first_comment ?? ''),
+          media: picked.map((a) => ({ assetId: a.id, kind: a.kind, altText: '' })),
+          timesUsed: 0,
+          lastUsedAt: null,
+          source: 'csv',
+        }
+      : null;
+    if (item && picked.length) {
+      const known = { ...assetsById, ...Object.fromEntries(newAssets.map((a) => [a.id, a])) };
+      for (const issue of validatePost({ ...item, status: 'draft' }, known)) {
+        if (isDownloadNote(issue) || (issue.field === 'media' && issue.message === 'Add a photo or video.')) continue;
+        (issue.level === 'error' ? errors : warnings).push(issue.message);
+      }
+    }
+    const ok = !errors.length;
+    // A skipped row downloads nothing, so it gets no download notes.
+    return { line: r + 2, data, item: ok ? item : null, assets: picked, newAssets: ok ? newAssets : [], errors: [...new Set(errors)], warnings: [...new Set(warnings)], notes: ok ? [...new Set(notes)] : [] };
+  });
+  return { ignored, rows, truncated: body.length > MAX_IMPORT_ROWS };
+}
+
+/** A template for queue imports: caption, first_comment, media (files or links), type. */
+export function queueTemplateCsv(assets = []) {
+  const images = assets.filter((a) => a.kind === 'image' && !a.importUrl && !String(a.name || '').includes('|'));
+  const rows = [
+    { caption: 'A favourite from the archive.\n\n#throwback', first_comment: '', media: images[0] ? images[0].name || images[0].id : 'photo-1.jpg', type: 'post' },
+    { caption: 'Straight from our blog.', first_comment: 'Read it via the link in bio.', media: 'https://example.com/images/photo.jpg', type: 'post' },
+  ];
+  return toCsv(rows, ['caption', 'first_comment', 'media', 'type'].map((key) => ({ key })), { bom: true }) + '\r\n';
 }
 
 function mediaLabel(m, index, assetsById) {

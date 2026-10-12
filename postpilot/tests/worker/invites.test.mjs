@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { startWorkerEnv, visibleLines } from '../helpers/worker-env.mjs';
 import { b64url, generateVapidKeys } from '../../core/webpush.js';
-import { normUsername } from '../../worker/jobs/invites.mjs';
+import { decisionHolds, normUsername } from '../../worker/jobs/invites.mjs';
+import { runWorker } from '../../worker/run.mjs';
 
 const subtle = globalThis.crypto.subtle;
 const te = new TextEncoder();
@@ -176,4 +177,120 @@ test('a failed automatic accept leaves the invite pending and notifies the owner
 test('allowlist usernames are compared without @ and case', () => {
   assert.equal(normUsername(' @@Atelier.Kin '), 'atelier.kin');
   assert.equal(normUsername(null), '');
+});
+
+/** fetch that delivers the first `n` invite answers to Instagram but loses the responses (`reach: false`: never sends them). */
+function losingFetch(n, { reach = true } = {}) {
+  let lost = 0;
+  return async (url, init) => {
+    const isAnswer = init && init.method === 'POST' && String(url).includes('/collaboration_invites');
+    if (isAnswer && lost < n) {
+      lost++;
+      if (reach) await (await fetch(url, init)).text();
+      throw Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' }) });
+    }
+    return fetch(url, init);
+  };
+}
+
+const runWith = (env, fetchImpl, now) => runWorker({ env: env.env, only: ['invites'], fetchImpl, now, log: () => {} });
+
+test('an automatic accept whose response is lost is recorded as accepted, never as a new waiting invite', async (t) => {
+  const env = await startWorkerEnv();
+  t.after(() => env.close());
+  const phone = await withPhone(env);
+  await env.update('automations', (a) => {
+    a.collabAllowlist = ['atelier.kin'];
+  });
+  const atelierMedia = env.graph.state.collabInvites[0].media_id;
+  // The accept reaches Instagram, the response is lost; the resend is refused because the invite is closed.
+  const res = await runWith(env, losingFetch(1));
+  assert.deepEqual(res.summary.jobs.invites, { invitesNew: 2, invitesAccepted: 1 });
+  assert.deepEqual(env.graph.state.collabResponses.map((r) => [r.mediaId, r.accept]), [[atelierMedia, true]]);
+  let inbox = await env.read('inbox');
+  let atelier = inbox.invites.find((i) => i.owner === 'atelier.kin');
+  assert.deepEqual([atelier.status, atelier.auto, atelier.unconfirmed], ['accepted', true, true]);
+  assert.equal(env.pushes.length, 1);
+  const payload = await decrypt(env.pushes[0].body, phone.keys, phone.auth);
+  assert.equal(payload.title, 'New collaboration invite', 'only the other invite is announced');
+  // Next check: Instagram no longer lists it, which confirms the accept.
+  await env.run({ only: ['invites'], now: at(7 * HOUR) });
+  inbox = await env.read('inbox');
+  atelier = inbox.invites.find((i) => i.owner === 'atelier.kin');
+  assert.equal(atelier.status, 'accepted');
+  assert.equal(atelier.unconfirmed, undefined);
+});
+
+test('an automatic accept that never reached Instagram is tried again at the next check, without a push', async (t) => {
+  const env = await startWorkerEnv();
+  t.after(() => env.close());
+  await withPhone(env);
+  await env.update('automations', (a) => {
+    a.collabAllowlist = ['atelier.kin'];
+  });
+  // Every attempt is lost before Instagram gets it (but it could have reached it: maybeSent).
+  const res = await runWith(env, losingFetch(9, { reach: false }));
+  assert.deepEqual(res.summary.jobs.invites, { invitesNew: 2, invitesAccepted: 1 });
+  let inbox = await env.read('inbox');
+  assert.equal(inbox.invites.find((i) => i.owner === 'atelier.kin').unconfirmed, true);
+  assert.equal(env.pushes.length, 1, 'one push, for the other invite');
+  assert.equal(env.graph.state.collabResponses.length, 0);
+  const log = await env.read('log');
+  assert.ok(log.entries.some((e) => e.job === 'invites' && /did not confirm/.test(e.message)));
+  // Still listed at the next check: accepted again, this time confirmed.
+  const next = await env.run({ only: ['invites'], now: at(7 * HOUR) });
+  assert.deepEqual(next.summary.jobs.invites, { invitesNew: 1, invitesAccepted: 1 });
+  assert.equal(env.graph.state.collabResponses.length, 1);
+  inbox = await env.read('inbox');
+  const atelier = inbox.invites.find((i) => i.owner === 'atelier.kin');
+  assert.deepEqual([atelier.status, atelier.auto, atelier.unconfirmed], ['accepted', true, undefined]);
+  assert.equal(env.pushes.length, 1, 'no push for an invite accepted automatically');
+});
+
+test('an invite that closes before the automatic accept is left out, without a push', async (t) => {
+  const env = await startWorkerEnv();
+  t.after(() => env.close());
+  await withPhone(env);
+  await env.update('automations', (a) => {
+    a.collabAllowlist = ['atelier.kin'];
+  });
+  env.graph.state.faults.push({ method: 'POST', path: /\/collaboration_invites$/, times: 1, error: { status: 400, code: 100, subcode: 33, message: "(#100) Unsupported post request. Object with ID '1' does not exist" } });
+  const res = await env.run({ only: ['invites'] });
+  assert.deepEqual(res.summary.jobs.invites, { invitesNew: 1, invitesAccepted: 0 });
+  const inbox = await env.read('inbox');
+  assert.deepEqual(inbox.invites.map((i) => i.owner), ['lumen.ceramics']);
+  assert.equal(env.pushes.length, 1);
+});
+
+test('an invite sent again after a decline is open again; a decline from minutes ago is trusted', async (t) => {
+  const env = await startWorkerEnv();
+  t.after(() => env.close());
+  const phone = await withPhone(env);
+  await env.run({ only: ['invites'] });
+  assert.equal(env.pushes.length, 1);
+  const [first, second] = env.graph.state.collabInvites;
+  // The owner declined both in the app: one two hours ago, one ten minutes ago. Instagram lists both
+  // as open (a new invite after the decline, or an answer that did not take).
+  await env.update('inbox', (d) => {
+    for (const [inv, ago] of [[first, 2 * HOUR], [second, 10 * 60e3]]) {
+      const x = d.invites.find((i) => i.mediaId === inv.media_id);
+      x.status = 'declined';
+      x.decidedAt = at(-ago);
+    }
+    d.invitesCheckedAt = at(-7 * HOUR);
+  });
+  const res = await env.run({ only: ['invites'] });
+  assert.deepEqual(res.summary.jobs.invites, { invitesNew: 1, invitesAccepted: 0 });
+  const inbox = await env.read('inbox');
+  const byMedia = Object.fromEntries(inbox.invites.map((i) => [i.mediaId, i]));
+  assert.equal(byMedia[first.media_id].status, 'pending');
+  assert.equal(byMedia[first.media_id].decidedAt, null);
+  assert.equal(byMedia[second.media_id].status, 'declined', 'Instagram may list a fresh answer for a moment');
+  assert.equal(env.pushes.length, 2);
+  assert.equal((await decrypt(env.pushes[1].body, phone.keys, phone.auth)).body, '@atelier.kin invited you to collaborate on a post.');
+
+  const now = Date.now();
+  assert.ok(decisionHolds({ status: 'declined', decidedAt: new Date(now - 5 * 60e3).toISOString() }, now));
+  assert.ok(!decisionHolds({ status: 'declined', decidedAt: new Date(now - 2 * HOUR).toISOString() }, now));
+  assert.ok(!decisionHolds({ status: 'pending', decidedAt: null }, now));
 });

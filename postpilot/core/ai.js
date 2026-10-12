@@ -25,7 +25,8 @@ export class AiError extends Error {
    * @param {string} userMessage
    * @param {{status?: number|null, code?: string, detail?: string, cause?: unknown}} [info]
    *   code: 'auth' | 'forbidden' | 'not_found' | 'rate_limit' | 'overloaded' | 'server' | 'bad_request' |
-   *   'too_large' | 'credits' | 'network' | 'aborted' | 'refusal' | 'truncated' | 'bad_response' | 'no_key' | 'error'
+   *   'too_large' | 'credits' | 'network' | 'aborted' | 'refusal' | 'truncated' | 'bad_response' | 'no_key' |
+   *   'too_long' (rewrite: the answer is over the character limit) | 'error'
    */
   constructor(userMessage, { status = null, code = 'error', detail, cause } = {}) {
     super(userMessage);
@@ -594,7 +595,9 @@ export function createAi({
    *   fix: spelling, grammar and punctuation only
    * @param {{text: string, mode: 'shorter'|'longer'|'translate'|'tone'|'cta'|'fix', language?: string,
    *   tone?: 'friendly'|'professional'|'playful'|'bold', voice?: string, maxChars?: number, signal?: AbortSignal}} args
-   * @returns {Promise<string>} the rewritten text (at most maxChars, default the caption limit)
+   * @returns {Promise<string>} the rewritten text. Never cut silently: an answer over maxChars (default the
+   *   caption limit) is an AiError with code 'too_long', since cutting it would drop the closing call to
+   *   action or hashtags.
    */
   async function rewrite({ text = '', mode, language, tone, voice, maxChars = LIMITS.captionChars, signal } = {}) {
     const source = String(text ?? '');
@@ -602,11 +605,19 @@ export function createAi({
     if (!REWRITE_MODES.includes(mode)) throw new AiError('Choose what the AI should do with the text.', { code: 'bad_request' });
     if (mode === 'tone' && !REWRITE_TONES.includes(tone)) throw new AiError('Choose a tone.', { code: 'bad_request' });
     const max = Math.max(1, Math.min(LIMITS.captionChars, Math.floor(maxChars) || LIMITS.captionChars));
+    const len = source.trim().length;
+    // "Longer" asks for about 1.5-2x, but only as much as fits: the answer must stay within `max`
+    // (aim at 90% of it, since models overshoot a little).
+    const cap = Math.floor(max * 0.9);
+    const longHi = Math.min(cap, Math.max(len * 2, len + 150));
+    const longLo = Math.min(longHi, Math.max(Math.round(len * 1.5), len + 60));
+    if (mode === 'longer' && cap - len < Math.min(50, max / 10)) {
+      throw new AiError(`The text is already ${len} characters, close to the ${max}-character limit, so it cannot get longer.`, { code: 'bad_request' });
+    }
     const target = languageOf(language);
     const task = {
       shorter: 'Make it noticeably shorter (about half the length). Keep the opening hook, the main message and every fact; drop repetition and filler.',
-      longer:
-        'Make it longer and richer (about one and a half to two times the length) by expanding on what is already there: the story behind it, sensory detail, why it matters, and a closing question. Do not add facts that are not in the text; use [brackets] for details the owner must fill in.',
+      longer: `Make it longer and richer (${longLo < longHi ? `about ${longLo} to ${longHi}` : `up to ${longHi}`} characters; it is ${len} now) by expanding on what is already there: the story behind it, sensory detail, why it matters, and a closing question. Do not add facts that are not in the text; use [brackets] for details the owner must fill in.`,
       translate: `Translate it into ${target}. Keep the meaning, tone, line breaks and emoji. ${KEEP_TOKENS}`,
       tone: `Rewrite it in a ${tone} tone (${TONE_GUIDE[tone]}). Keep the meaning and every fact.`,
       cta: 'Keep the text as it is and add one short call to action as its own final line, before any closing block of hashtags. Choose what fits the post: ask a question, ask people to save or share it, or point to the link in bio, the shop or DMs only if the text already mentions them.',
@@ -628,8 +639,12 @@ export function createAi({
       schema: REWRITE_SCHEMA,
       signal,
     });
-    const out = clip(data.rewritten, max);
+    const out = String(data.rewritten ?? '').trim();
     if (!out) throw new AiError('The AI returned an empty response. Try again.', { code: 'bad_response' });
+    if (out.length > max) {
+      const hint = mode === 'translate' ? 'Shorten the text first, then translate it.' : mode === 'shorter' ? 'Try again.' : 'Try again, or use Shorter first.';
+      throw new AiError(`The AI wrote ${out.length} characters, more than the ${max}-character limit, so nothing was changed. ${hint}`, { code: 'too_long' });
+    }
     return out;
   }
 
@@ -641,7 +656,7 @@ export function createAi({
   async function explain({ summary, language, signal } = {}) {
     const data = typeof summary === 'string' ? summary : JSON.stringify(summary ?? {}, null, 1);
     const lines = [
-      'Here are Instagram analytics for the account (rates are fractions, e.g. 0.034 = 3.4%; deltas compare with the previous period of the same length):',
+      'Here are Instagram analytics for the account (rates are fractions, e.g. 0.034 = 3.4%; deltas compare with the previous period: the calendar month before for a whole month, otherwise the same number of days before):',
       untrusted('analytics', data, 12000),
       'Explain them to the owner in 3 to 5 short sentences of plain language: what changed most, the likely reason only when the data supports it, and one concrete thing to try next.',
       'Use only the numbers given; never invent figures. No headings, lists or markdown.',

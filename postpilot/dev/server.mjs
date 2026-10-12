@@ -8,6 +8,9 @@
 //   /mock/gh         GitHub REST API (+ /mock/gh/raw/... like raw.githubusercontent.com)
 //   /mock/ig         graph.instagram.com        /mock/fb   graph.facebook.com
 //   /mock/rupload    rupload.facebook.com       /mock/anthropic   api.anthropic.com
+//   /mock/feed/demo.xml   a demo RSS feed (and /mock/feed/<slug>.html pages) for queue feeds
+//   /mock/img/<file>      demo images for feed items and CSV links (fixtures; swatch.png and
+//                         workshop-poster are PNGs)
 // "Run worker" in the app (workflow_dispatch) runs worker/run.mjs in this process against the
 // mocks, using the POSTPILOT_DATA_KEY secret the app saved (opened with a real curve25519 key pair).
 //
@@ -135,6 +138,84 @@ async function serveStatic(req, res, pathname, root) {
   return res.end(req.method === 'HEAD' ? undefined : body);
 }
 
+// ---- demo feed and linked images (fetched by the in-process worker, like real sites) ---------------
+
+// A 1x1 PNG. The feed declares swatch.png as a PNG, so the worker skips that item; workshop-poster
+// has no type or extension, so the worker downloads it and refuses it (it can only post JPEG): the
+// demo shows both.
+const DEMO_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+const xmlEscape = (s) => String(s).replace(/[<>&"']/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' })[c]);
+
+/** Demo RSS 2.0 feed, newest first; image URLs point back at this server. */
+export function demoFeedXml(base, now = Date.now()) {
+  const at = (hours) => new Date(now - hours * 36e5).toUTCString();
+  const items = [
+    { slug: 'glaze-day', title: 'Glaze day: ocean and sand', hours: 2, desc: '<p>We mixed two new glazes this week: a deep ocean blue and a warm sand.</p>', media: `${base}/mock/img/f05.jpg` },
+    { slug: 'kiln-opening', title: 'Kiln opening: five things we learned', hours: 26, desc: '<p>Every firing teaches us something. Here are five lessons &amp; one mistake.</p>' },
+    { slug: 'studio-playlist', title: 'The studio playlist', hours: 50, desc: 'What we listen to at the wheel.', enclosure: `${base}/mock/img/swatch.png` },
+    { slug: 'workshops', title: 'Workshop dates for November', hours: 74, desc: 'Six spots per class. Materials included.', poster: `${base}/mock/img/workshop-poster` },
+    { slug: 'open-studio', title: 'Open studio on Saturday', hours: 98, desc: 'Come and throw a pot with us.', enclosure: `${base}/mock/img/f09.jpg` },
+    { slug: 'note', title: 'A note without a picture', hours: 122, desc: 'Just words today.' },
+  ];
+  const body = items
+    .map((it) => [
+      '    <item>',
+      `      <title>${xmlEscape(it.title)}</title>`,
+      `      <link>${base}/mock/feed/${it.slug}.html</link>`,
+      `      <guid isPermaLink="false">studio-north-${it.slug}</guid>`,
+      `      <pubDate>${at(it.hours)}</pubDate>`,
+      `      <description><![CDATA[${it.desc}]]></description>`,
+      it.media ? `      <media:content url="${it.media}" medium="image" width="1080" height="1350" />` : '',
+      it.poster ? `      <media:content url="${it.poster}" medium="image" />` : '',
+      it.enclosure ? `      <enclosure url="${it.enclosure}" length="1000" type="${it.enclosure.endsWith('.png') ? 'image/png' : 'image/jpeg'}" />` : '',
+      '    </item>',
+    ].filter(Boolean).join('\n'))
+    .join('\n');
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:media="http://search.yahoo.com/mrss/" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>Studio North Journal</title>
+    <link>${base}/mock/feed/</link>
+    <description>Notes from the studio (demo feed)</description>
+    <atom:link href="${base}/mock/feed/demo.xml" rel="self" type="application/rss+xml" />
+${body}
+  </channel>
+</rss>
+`;
+}
+
+async function handleDemoFeed(req, res, sub, base) {
+  const name = decodeURIComponent(sub.split('?')[0]).replace(/^\/+/, '');
+  if (name === 'demo.xml') {
+    res.writeHead(200, { 'Content-Type': 'application/rss+xml; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.end(req.method === 'HEAD' ? undefined : demoFeedXml(base));
+    return true;
+  }
+  const page = /^([\w-]+)\.html$/.exec(name);
+  if (page) {
+    const og = page[1] === 'kiln-opening' ? `<meta property="og:image" content="${base}/mock/img/f10.jpg">` : '';
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(`<!doctype html><html><head><meta charset="utf-8"><title>${xmlEscape(page[1])}</title>${og}</head><body><p>Demo post.</p></body></html>`);
+    return true;
+  }
+  return false;
+}
+
+async function handleDemoImage(req, res, sub) {
+  const name = decodeURIComponent(sub.split('?')[0]).replace(/^\/+/, '');
+  if (name === 'swatch.png' || name === 'workshop-poster') {
+    res.writeHead(200, { 'Content-Type': 'image/png', 'Content-Length': DEMO_PNG.length });
+    res.end(req.method === 'HEAD' ? undefined : DEMO_PNG);
+    return true;
+  }
+  if (!/^[\w-]+\.(jpg|mp4)$/.test(name)) return false;
+  const bytes = await readFile(path.join(here, 'fixtures', name)).catch(() => null);
+  if (!bytes) return false;
+  res.writeHead(200, { 'Content-Type': name.endsWith('.mp4') ? 'video/mp4' : 'image/jpeg', 'Content-Length': bytes.length });
+  res.end(req.method === 'HEAD' ? undefined : bytes);
+  return true;
+}
+
 /** Open the sealed POSTPILOT_DATA_KEY secret and return the base64 data key (or null). */
 export function openDataKeySecret(secret, keyPair) {
   if (!secret || !secret.encrypted_value) return null;
@@ -218,6 +299,8 @@ export async function startDevServer({ port = Number(process.env.PORT) || 5173, 
     ['/mock/fb', (req, res, sub, body, url) => graph.handle(req, res, sub, body, url)],
     ['/mock/rupload', (req, res, sub, body) => graph.handleRupload(req, res, sub, body)],
     ['/mock/anthropic', (req, res, sub, body, url) => (anthropic ? anthropic.handle(req, res, sub, body, url) : false)],
+    ['/mock/feed', (req, res, sub) => handleDemoFeed(req, res, sub, baseUrl)],
+    ['/mock/img', (req, res, sub) => handleDemoImage(req, res, sub)],
   ];
 
   // Until the demo workspace is seeded the app itself answers 503, so nobody (or no test) opens

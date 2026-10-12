@@ -148,6 +148,8 @@ export function uid(prefix = '') {
  *     media: [MediaRef], location: {id, name}|null, collaborators: [username],
  *     userTags: [{username, x, y, mediaIndex}], shareToFeed: true, coverAssetId, thumbOffsetMs,
  *     trialReel: null|'MANUAL'|'SS_PERFORMANCE', aiGenerated: bool, publishMode: 'auto'|'reminder', reminderSentAt: ISO|null,
+ *     deletedFromInstagramAt?: ISO (status 'canceled' after "Delete from Instagram"; its media still counts as used),
+ *     recycleOf?: postId (a repost of a top post made by autopilot),
  *     altText, scheduledAt: ISO|null, source: 'manual'|'autopilot'|'evergreen'|'csv'|'recycle',
  *     listId?, needsApproval: bool, labels: [string], notes,
  *     createdAt, updatedAt, publishedAt, igMediaId, permalink,
@@ -164,6 +166,8 @@ export function uid(prefix = '') {
  *     originalRemovedAt?: ISO (Settings → Free up space deleted the full-size file; only the thumbnail is left),
  *     importUrl?: string (set while the worker still has to download the file from this http(s) link: CSV and RSS imports;
  *       the browser cannot fetch other sites because of the page's Content-Security-Policy), importError?: string,
+ *     importErrorCode?: string ('tries' = gave up after retries; otherwise why the file was refused, e.g. a format),
+ *     importAttempts?, importTriedAt?, importLastError? (retry state between worker runs),
  *     sourceUrl?: string (the link it was downloaded from) }
  *   Assets downloaded by the worker have no separate thumbnail: thumbPath === path.
  *
@@ -172,20 +176,34 @@ export function uid(prefix = '') {
  *     items: [{id, type, caption, firstComment, media: [MediaRef], timesUsed, lastUsedAt, source?: 'rss'|'csv'|'ai', link?}],
  *     nextIndex, horizonDays, feeds: [Feed], createdAt }
  *
- * Feed (lists.lists[].feeds[]): { id, url, title, disabled, addedAt, checkedAt, error, seen: [guid] }
+ * Feed (lists.lists[].feeds[]): { id, url, title, disabled, addedAt, checkedAt, error, seen: [guid], etag, lastModified,
+ *   full?: true (the queue holds as many unused items from this feed as it may; new posts are skipped meanwhile) }
  *
  * MediaHistory (analytics-media-history.media[id]): { points: [{t: ISO, v: views, r: reach, l: likes, c: comments,
- *   s: saves, sh: shares, f: follows}] } (one point per refresh while the post is under 30 days old, at most 48)
+ *   s: saves, sh: shares, f: follows}] } while the post is under 30 days old: hourly in its first 6 hours, then at most
+ *   one point every 3 hours, at most 48 points (thinned to 20 after 30 days, keeping the points around 24 h and 7 days).
+ *   The document also carries a top-level updatedAt.
  *
- * Report (reports.reports[]): { id, month: 'YYYY-MM', createdAt, summary, previous, top: [MediaStats-lite], ai: string|null }
+ * Report (reports.reports[]): { id, month: 'YYYY-MM', createdAt, headline, summary, previous, top: [MediaStats-lite],
+ *   ai: string|null } where summary/previous carry daysSaved and daysInMonth (a month with under 90% of its days saved is
+ *   not compared), nonFollowerReachShare, breakdownDays and viewsByTypeDays. reports.branding = { logoAssetId }.
  *
- * Invite (inbox.invites[]): { id, mediaId, owner, caption, permalink, status: 'pending'|'accepted'|'declined', seenAt, decidedAt }
+ * Invite (inbox.invites[]): { id, mediaId, owner, caption, permalink, mediaUrl, status: 'pending'|'accepted'|'declined',
+ *   seenAt, decidedAt, auto?: true (accepted from automations.collabAllowlist), unconfirmed?: true (the answer may not
+ *   have reached Instagram; the next check confirms it) }. inbox.invitesStatus = { state: 'unsupported', at, message } when
+ *   Instagram refuses the endpoint for this account. inbox.conversations[].lastMessage.story = 'reply'|'mention'|null.
  *
  * Rule (automations.rules[]):
- *   { id, name, enabled, trigger: {source: 'comment'|'dm'|'story_reply'|'mention',
+ *   { id, name, enabled, trigger: {source: 'comment'|'dm'|'story_reply'|'story_mention'|'mention' (mention = a comment
+ *       that @mentions the account),
  *       match: 'any'|'all'|'exact'|'always', keywords: [string], mediaIds: [id]|null },
  *     actions: [{type: 'reply_comment'|'private_reply'|'send_dm'|'hide_comment'|'ai_reply', texts: [string], guidance?}],
  *     oncePerUser: bool, createdAt, stats: {fired, lastFiredAt} }
+ *
+ * Automations cursors (automations.cursors): startedAt, commentsSeenAt, mediaComments {mediaId: count}, watchedFrom
+ *   {mediaId: ISO} (comments before this are never answered: a post that starts being watched late does not get its old
+ *   comments answered), watchListedAt, goneMedia {mediaId: ISO} (chosen posts deleted on Instagram), pinnedNext,
+ *   pinnedCheckedAt, dmUpdatedTime, dmSeenAt, recentDms, pausedUntil.
  *
  * Outbox command (inbox.outbox[]): { id, type, payload, status: 'pending'|'sending'|'done'|'failed', error, createdAt, doneAt,
  *   attempts, maybeSent } ('sending' = claimed by a worker run; a command left 'sending' becomes 'failed' with maybeSent=true

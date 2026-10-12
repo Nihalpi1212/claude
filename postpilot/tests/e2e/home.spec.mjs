@@ -8,7 +8,7 @@ import { openApp, shot, unlock } from './helpers.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURE = path.resolve(here, '../../dev/fixtures/f02.jpg');
-const PORT = 5215;
+const PORT = 5513;
 
 let h;
 let page;
@@ -381,6 +381,66 @@ describe('Today, Library and Autopilot', { timeout: 240_000 }, () => {
     } finally {
       await t.close();
     }
+  });
+
+  test('Today lists reminder posts to post by hand and shows planned reminders among upcoming posts', async () => {
+    const ids = await page.evaluate(async () => {
+      const data = await import('/postpilot/js/data.js');
+      const { newPost } = await import('/postpilot/core/model.js');
+      const lib = await data.getStore().read('library');
+      const a = lib.assets.find((x) => x.name === 'Vase trio');
+      const media = [{ assetId: a.id, kind: 'image', altText: '' }];
+      const reminded = newPost({ status: 'reminded', publishMode: 'reminder', caption: 'E2E home: post with a link sticker', media, scheduledAt: new Date(Date.now() - 15 * 60e3).toISOString(), reminderSentAt: new Date().toISOString() });
+      // Sooner than any automatic post: it must not be called "the next one goes out".
+      const planned = newPost({ status: 'scheduled', publishMode: 'reminder', caption: 'E2E home: reel with library music', media, scheduledAt: new Date(Date.now() + 5 * 60e3).toISOString() });
+      // Due two minutes ago, but its file is still downloading from a link: the worker waits for it.
+      const pending = (await import('/postpilot/core/model.js')).newAsset({ kind: 'image', name: 'E2E home pending.jpg', mime: 'image/jpeg', importUrl: 'https://example.invalid/e2e/home.jpg' });
+      const broken = (await import('/postpilot/core/model.js')).newAsset({ kind: 'image', name: 'E2E home broken.jpg', mime: 'image/jpeg', importUrl: 'https://example.invalid/e2e/broken.jpg', importError: 'HTTP 404' });
+      await data.mutate('library', (doc) => void doc.assets.push(pending, broken), { message: 'e2e: linked files' });
+      const due = new Date(Date.now() - 2 * 60e3).toISOString();
+      const waiting = newPost({ status: 'scheduled', caption: 'E2E home: waits for its file', media: [{ assetId: pending.id, kind: 'image', altText: '' }], scheduledAt: due });
+      const failedDl = newPost({ status: 'scheduled', caption: 'E2E home: file failed', media: [{ assetId: broken.id, kind: 'image', altText: '' }], scheduledAt: due });
+      await data.mutate('posts', (doc) => void doc.posts.push(reminded, planned, waiting, failedDl), { message: 'e2e: reminder posts' });
+      return { reminded: reminded.id, planned: planned.id, waiting: waiting.id, failedDl: failedDl.id, assets: [pending.id, broken.id] };
+    });
+    await go('#/');
+    const card = page.locator('.dash-hand');
+    await card.waitFor({ timeout: 20_000 });
+    assert.match(await card.locator('.panel-title, h2').first().textContent(), /Post these by hand/);
+    await card.locator('.dash-post', { hasText: 'E2E home: post with a link sticker' }).waitFor();
+    assert.equal(await card.locator('.dash-post', { hasText: 'reel with library music' }).count(), 0, 'only posts whose reminder went out');
+    assert.match(await card.textContent(), /Waiting for you to post it in Instagram\./);
+    const subtitle = await page.locator('.page-subtitle').textContent();
+    assert.match(subtitle, /1 post is waiting for you to post by hand\./);
+    // Reminders are not "going out": the summary names the next automatic post and the reminders apart.
+    assert.match(subtitle, /The next one goes out /);
+    assert.match(subtitle, /1 reminder to post by hand this week, the next (today|tomorrow) at /);
+    const goesOut = /The next one goes out ([^.]+)\./.exec(subtitle)[1];
+    const nextReminder = /the next ((?:today|tomorrow) at [^.]+)\./.exec(subtitle)[1];
+    assert.notEqual(goesOut, nextReminder, 'the reminder due in 5 minutes is not the next post to go out');
+    // A due post whose file is still downloading waits for it (it is not "Publishing").
+    const waitingRow = page.locator('.dash-upnext .dash-post', { hasText: 'E2E home: waits for its file' });
+    await waitingRow.locator('.status', { hasText: 'Downloading' }).waitFor();
+    assert.equal(await waitingRow.locator('.status', { hasText: 'Publishing' }).count(), 0);
+    await page.locator('.dash-upnext .dash-post', { hasText: 'E2E home: file failed' }).locator('.status', { hasText: 'Download failed' }).waitFor();
+    await page.locator('.dash-upnext .dash-post', { hasText: 'reel with library music' }).locator('.dash-post-src', { hasText: 'Reminder' }).waitFor();
+    const legend = await page.locator('.dash-legend').textContent();
+    assert.match(legend, /Reminder/);
+    assert.match(legend, /Post by hand/);
+    await shot(page, 'home-e2e-by-hand');
+    await card.getByRole('link', { name: /Post this post by hand: E2E home/ }).click();
+    await page.waitForFunction((id) => location.hash === `#/post-now/${id}`, ids.reminded);
+    await page.locator('.pn-steps').waitFor();
+    // Clean up for the tests that follow.
+    await page.evaluate(async (ids) => {
+      const data = await import('/postpilot/js/data.js');
+      const drop = new Set([ids.reminded, ids.planned, ids.waiting, ids.failedDl]);
+      await data.mutate('posts', (doc) => void (doc.posts = doc.posts.filter((p) => !drop.has(p.id))), { message: 'e2e: clean up' });
+      await data.mutate('library', (doc) => void (doc.assets = doc.assets.filter((a) => !ids.assets.includes(a.id))), { message: 'e2e: clean up' });
+    }, ids);
+    await go('#/');
+    await page.locator('.dash-account').waitFor();
+    assert.equal(await page.locator('.dash-hand').count(), 0);
   });
 
   test('no console errors', () => {

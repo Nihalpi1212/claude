@@ -1,4 +1,5 @@
-// Automations: keyword rules for comments and DMs, welcome message, blocked words, limits and activity.
+// Automations: keyword rules for comments, DMs, story replies and story mentions, welcome message,
+// blocked words, watched posts, limits, collaboration-invite allowlist and activity.
 
 import { uid } from '../../core/model.js';
 import { formatDateTime, relative } from '../../core/time.js';
@@ -36,6 +37,44 @@ const SKIP_REASONS = {
   outside_window: 'Skipped: outside Instagram’s reply window.',
 };
 
+const SOURCE_ICONS = { comment: 'comment', dm: 'message', story_reply: 'story', story_mention: 'at', mention: 'at' };
+const WATCH_DAYS_DEFAULT = 90; // same defaults as worker/jobs/automations.mjs
+const WATCH_POSTS_DEFAULT = 50;
+const USERNAME_RE = /^[a-z0-9._]{1,30}$/;
+
+/** Allowlist entry as stored: lower case, no @. */
+const normUsername = (u) => String(u || '').trim().replace(/^@+/, '').toLowerCase();
+
+/** {days, posts} the worker uses for comment rules (older documents lack the fields). */
+function watchOf(doc) {
+  const l = (doc && doc.limits) || {};
+  return { days: l.watchDays ?? WATCH_DAYS_DEFAULT, posts: l.watchPosts ?? WATCH_POSTS_DEFAULT };
+}
+
+/**
+ * Posts the rule editor can scope a rule to: analytics-media (every post the worker has seen) plus
+ * posts Postpilot published that analytics has not picked up yet. Newest first, stories left out.
+ */
+function postChoices(mediaDoc, postsDoc) {
+  const byId = new Map();
+  for (const m of Object.values((mediaDoc && mediaDoc.media) || {})) {
+    if (m && m.id && m.productType !== 'STORY') byId.set(String(m.id), m);
+  }
+  for (const p of (postsDoc && postsDoc.posts) || []) {
+    if (!p || !p.igMediaId || p.type === 'story' || byId.has(String(p.igMediaId))) continue;
+    byId.set(String(p.igMediaId), {
+      id: String(p.igMediaId),
+      caption: p.caption || '',
+      timestamp: p.publishedAt || p.scheduledAt || null,
+      permalink: p.permalink || null,
+      mediaType: p.type === 'carousel' ? 'CAROUSEL_ALBUM' : p.type === 'reel' ? 'VIDEO' : 'IMAGE',
+      productType: p.type === 'reel' ? 'REELS' : 'FEED',
+      assetId: (p.media || []).find((x) => x && x.assetId)?.assetId || null,
+    });
+  }
+  return [...byId.values()].sort((a, b) => String(b.timestamp || '').localeCompare(String(a.timestamp || '')));
+}
+
 function who(u) {
   return u ? `@${String(u).replace(/^@/, '')}` : 'someone';
 }
@@ -43,10 +82,11 @@ function who(u) {
 /** Plain-language line for one automations.activity entry. */
 function describeActivity(a) {
   const u = who(a.username);
+  const dmVerb = a.ruleName === 'Welcome message' ? `Welcomed ${u} in DMs` : a.source === 'story_reply' ? `Replied to ${u}’s story reply` : a.source === 'story_mention' ? `Sent ${u} a DM for their story mention` : `Replied to ${u} in DMs`;
   const verb = {
     reply_comment: `Replied to ${u}’s comment`,
     private_reply: `Sent ${u} a private reply`,
-    send_dm: a.ruleName === 'Welcome message' ? `Welcomed ${u} in DMs` : `Replied to ${u} in DMs`,
+    send_dm: dmVerb,
     hide_comment: `Hid a comment from ${u}`,
     delete_comment: `Deleted a comment from ${u}`,
     ai_reply: `AI reply to ${u}`,
@@ -56,9 +96,12 @@ function describeActivity(a) {
   return `Could not finish: ${verb.charAt(0).toLowerCase()}${verb.slice(1)}`;
 }
 
-function RuleCard({ rule, index, count, onToggle, onMove, onEdit, onDuplicate, onDelete, busy }) {
+function RuleCard({ rule, index, count, gone, onToggle, onMove, onEdit, onDuplicate, onDelete, busy }) {
   const fired = (rule.stats && rule.stats.fired) || 0;
   const last = rule.stats && rule.stats.lastFiredAt;
+  // Chosen posts the worker could not find on Instagram (automations.cursors.goneMedia).
+  const t = rule.trigger || {};
+  const missing = (t.source || 'comment') === 'comment' && Array.isArray(t.mediaIds) ? t.mediaIds.filter((id) => gone && gone[String(id)]).length : 0;
   return html`<li class=${cx('auto-rule', !rule.enabled && 'is-off')} data-rule-id=${rule.id}>
     <span class="auto-rule-no mono" aria-hidden="true">${String(index + 1).padStart(2, '0')}</span>
     <div class="auto-rule-main">
@@ -67,8 +110,11 @@ function RuleCard({ rule, index, count, onToggle, onMove, onEdit, onDuplicate, o
         ${!rule.enabled ? html`<${Badge} tone="outline">Paused<//>` : null}
         ${rule.oncePerUser ? html`<${Badge} tone="neutral">Once per person<//>` : null}
       </div>
-      <p class="auto-rule-when"><${Icon} name=${rule.trigger && rule.trigger.source === 'dm' ? 'message' : 'comment'} size=${14} />${triggerSummary(rule)}</p>
+      <p class="auto-rule-when"><${Icon} name=${SOURCE_ICONS[(rule.trigger && rule.trigger.source) || 'comment'] || 'message'} size=${14} />${triggerSummary(rule)}</p>
       <p class="auto-rule-then muted"><${Icon} name="arrow-right" size=${14} />${actionsSummary(rule) || 'No actions'}</p>
+      ${missing
+        ? html`<p class="auto-rule-warn text-warn text-sm"><${Icon} name="alert" size=${14} /><span>${missing === 1 ? '1 chosen post no longer exists on Instagram.' : `${missing} chosen posts no longer exist on Instagram.`} <button type="button" class="auto-rule-link" onClick=${onEdit}>Edit the rule</button></span></p>`
+        : null}
       <p class="auto-rule-stats faint text-sm">
         ${fired ? html`Fired <span class="num">${fired}</span> ${fired === 1 ? 'time' : 'times'}${last ? html` · last <time datetime=${last} title=${last}>${relative(last)}</time>` : null}` : 'Not fired yet'}
       </p>
@@ -152,10 +198,10 @@ function WelcomePanel({ doc, onSave }) {
       setSaving(false);
     }
   };
-  return html`<${Panel} title="Welcome message" subtitle="Sent once to people who message you for the first time, when no rule matches.">
+  return html`<${Panel} title="Welcome message" subtitle="Sent once to people who message you, reply to your story or mention you in theirs for the first time, when no rule matches.">
     <div class="stack">
       <${Toggle} checked=${!!w.enabled} disabled=${saving} label="Send a welcome message" onChange=${(v) => save({ enabled: v }, v ? 'Welcome message on' : 'Welcome message off')} />
-      <${Field} label="Message" hint="Use {first_name} or {username}. Instagram limits DMs to 1,000 characters.">
+      <${Field} label="Message" hint="Write it so it also fits someone who only mentioned you in their story. Use {first_name} or {username}. Instagram limits DMs to 1,000 characters.">
         <${TextArea} value=${text} rows=${3} maxRows=${8} disabled=${saving} onChange=${setText} />
       <//>
       <div class="row row-end">
@@ -239,9 +285,96 @@ function LimitsPanel({ doc, onSave }) {
   <//>`;
 }
 
+/** "Watch comments on posts from the last N days, up to M posts" (automations.limits.watchDays/watchPosts). */
+function WatchPanel({ doc, onSave }) {
+  const cur = watchOf(doc);
+  const [days, setDays] = useState(cur.days);
+  const [count, setCount] = useState(cur.posts);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    setDays(cur.days);
+    setCount(cur.posts);
+  }, [cur.days, cur.posts]);
+  const daysOk = Number.isInteger(days) && days >= 1 && days <= 365;
+  const countOk = Number.isInteger(count) && count >= 1 && count <= 200;
+  const dirty = days !== cur.days || count !== cur.posts;
+  const calls = Math.ceil((countOk ? count : cur.posts) / 50);
+  const save = async () => {
+    setSaving(true);
+    try {
+      await onSave((d) => {
+        d.limits = { ...(d.limits || {}), watchDays: days, watchPosts: count };
+      }, 'Watched posts saved');
+    } finally {
+      setSaving(false);
+    }
+  };
+  return html`<${Panel} title="Watched posts" subtitle="Which posts comment rules answer on." class="auto-watch">
+    <div class="stack">
+      <p class="auto-watch-line">
+        <span>Watch comments on posts from the last</span>
+        <${TextInput} type="number" min="1" max="365" class="auto-watch-num" mono value=${days ?? ''} aria-label="Days" aria-invalid=${daysOk ? undefined : 'true'} onChange=${setDays} />
+        <span>days, up to</span>
+        <${TextInput} type="number" min="1" max="200" class="auto-watch-num" mono value=${count ?? ''} aria-label="Posts" aria-invalid=${countOk ? undefined : 'true'} onChange=${setCount} />
+        <span>posts.</span>
+      </p>
+      ${!daysOk || !countOk
+        ? html`<p class="field-error" role="alert"><span>${!daysOk ? 'Days: enter a number from 1 to 365. ' : ''}${!countOk ? 'Posts: enter a number from 1 to 200.' : ''}</span></p>`
+        : null}
+      <p class="muted text-sm">
+        Each run lists these posts with their comment counts (${calls === 1 ? 'one Instagram call' : `up to ${calls} Instagram calls`}) and reads comments only on posts whose count changed, so a larger window costs little. Posts you choose in a rule are always watched; each one outside this window costs one more call every 30 minutes.
+      </p>
+      <p class="faint text-sm">Rules only answer comments made while a post is watched, so raising these numbers never answers old comments.</p>
+      <div class="row row-end">
+        <${Button} size="sm" variant="secondary" disabled=${!dirty || !daysOk || !countOk} loading=${saving} onClick=${save}>Save watched posts<//>
+      </div>
+    </div>
+  <//>`;
+}
+
+/** Usernames whose collaboration invites the worker accepts automatically (automations.collabAllowlist). */
+function CollabPanel({ doc, inbox, onSave, navigate }) {
+  const stored = doc.collabAllowlist || [];
+  const [names, setNames] = useState(stored);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => setNames(stored), [JSON.stringify(stored)]);
+  const bad = names.filter((n) => !USERNAME_RE.test(n));
+  const dirty = JSON.stringify(names) !== JSON.stringify(stored);
+  const unsupported = inbox && inbox.invitesStatus && inbox.invitesStatus.state === 'unsupported';
+  // While Instagram does not offer invites to this connection, saved ones cannot be answered here.
+  const pending = unsupported ? 0 : ((inbox && inbox.invites) || []).filter((i) => i.status === 'pending').length;
+  const save = async () => {
+    setSaving(true);
+    try {
+      await onSave((d) => {
+        d.collabAllowlist = [...names];
+      }, 'Allowlist saved');
+    } finally {
+      setSaving(false);
+    }
+  };
+  return html`<${Panel} title="Collaboration invites" subtitle="Accounts that invite you to co-author their posts." class="auto-collab">
+    <div class="stack">
+      ${unsupported
+        ? html`<${Callout} tone="warning" title="Not available with this connection">Instagram does not share collaboration invites with Postpilot for this account. Answer them in the Instagram app. Postpilot checks again every 6 hours.<//>`
+        : null}
+      <${Field} label="Accept automatically from" error=${bad.length ? `Not a valid username: ${bad.join(', ')}` : ''}
+        hint="Invites from anyone else wait in Inbox → Invites and notify your phone. Postpilot checks for invites every 6 hours.">
+        <${ChipInput} values=${names} placeholder="username, then Enter" normalize=${normUsername} onChange=${setNames} />
+      <//>
+      <div class="row row-between">
+        ${pending
+          ? html`<${Button} size="sm" variant="ghost" icon="arrow-right" onClick=${() => navigate('#/inbox/invites')}>${pending} ${pending === 1 ? 'invite' : 'invites'} waiting<//>`
+          : html`<span></span>`}
+        <${Button} size="sm" variant="secondary" disabled=${!dirty || bad.length > 0} loading=${saving} onClick=${save}>Save allowlist<//>
+      </div>
+    </div>
+  <//>`;
+}
+
 export default function AutomationsView() {
   const { settings, ig, tz, toast, confirm, dispatchWorker, navigate } = useApp();
-  const { data, error } = useDocs(['automations', 'log', 'analytics-media']);
+  const { data, error } = useDocs(['automations', 'log', 'analytics-media', 'posts', 'inbox']);
   const doc = data.automations;
   const log = data.log;
   const [editor, setEditor] = useState(null); // { rule, mode: 'new'|'edit', title }
@@ -253,12 +386,7 @@ export default function AutomationsView() {
   useEffect(() => () => (alive.current = false), []);
 
   const aiReady = !!getAi(settings);
-  const posts = useMemo(() => {
-    const m = (data['analytics-media'] && data['analytics-media'].media) || {};
-    return Object.values(m)
-      .filter((x) => x && x.id && x.productType !== 'STORY')
-      .sort((a, b) => String(b.timestamp || '').localeCompare(String(a.timestamp || '')));
-  }, [data['analytics-media']]);
+  const posts = useMemo(() => postChoices(data['analytics-media'], data.posts), [data['analytics-media'], data.posts]);
 
   const save = (fn, message) =>
     mutate('automations', (d) => {
@@ -287,6 +415,7 @@ export default function AutomationsView() {
   const logEntries = ((log && log.entries) || []).filter((e) => e.job === 'automations').slice(0, 50);
   const lastRun = log && log.runs && log.runs[0];
   const pausedUntil = doc.cursors && Date.parse(doc.cursors.pausedUntil || '') > Date.now() ? doc.cursors.pausedUntil : null;
+  const gone = (doc.cursors && doc.cursors.goneMedia) || {};
 
   const toggleMaster = async (on) => {
     setBusy(true);
@@ -459,12 +588,12 @@ export default function AutomationsView() {
 
     <div class="auto-layout">
       <div class="auto-col stack stack-lg">
-        <${Panel} title="Rules" subtitle="Checked in order for each new comment or message. The first rule that matches answers; later rules are skipped." flush>
+        <${Panel} title="Rules" subtitle="Checked in order for each new comment, message, story reply or story mention. The first rule that matches answers; later rules are skipped." flush>
           ${!rules.length
             ? html`<${EmptyState} icon="bolt" title="No rules yet" body="Start with a template below, or write your own keyword rule." action=${html`<${Button} variant="primary" icon="plus" onClick=${openNew}>Create a rule<//>`} />`
             : html`<ol class="auto-rules" aria-label="Rules in priority order">
                 ${rules.map(
-                  (r, i) => html`<${RuleCard} key=${r.id} rule=${r} index=${i} count=${rules.length} busy=${busy}
+                  (r, i) => html`<${RuleCard} key=${r.id} rule=${r} index=${i} count=${rules.length} busy=${busy} gone=${gone}
                     onToggle=${(v) => toggleRule(r.id, v)} onMove=${(dir) => moveRule(r.id, dir)}
                     onEdit=${() => setEditor({ mode: 'edit', title: 'Edit rule', rule: r })}
                     onDuplicate=${() => duplicateRule(r)} onDelete=${() => deleteRule(r)} />`,
@@ -492,17 +621,19 @@ export default function AutomationsView() {
       <div class="auto-col stack stack-lg">
         <${WelcomePanel} doc=${doc} onSave=${save} />
         <${BlockedPanel} doc=${doc} onSave=${save} />
+        <${WatchPanel} doc=${doc} onSave=${save} />
         <${LimitsPanel} doc=${doc} onSave=${save} />
+        <${CollabPanel} doc=${doc} inbox=${data.inbox} onSave=${save} navigate=${navigate} />
         <section class="auto-policy" aria-labelledby="auto-policy-title">
           <h2 class="label-caps" id="auto-policy-title">Instagram's rules</h2>
           <p class="muted text-sm">
-            Instagram allows one private reply per comment, sent within 7 days of the comment. DM replies are only allowed within 24 hours of the person's last message, and apps may never send unsolicited DMs. Postpilot follows these limits and picks among your reply versions so automatic replies don't repeat word for word.
+            Instagram allows one private reply per comment, sent within 7 days of the comment. DM replies, including answers to story replies and story mentions, are only allowed within 24 hours of the person's last message, and apps may never send unsolicited DMs. Postpilot follows these limits and picks among your reply versions so automatic replies don't repeat word for word.
           </p>
         </section>
       </div>
     </div>
 
-    <${RuleEditor} open=${!!editor} rule=${editor && editor.rule} title=${editor && editor.title} posts=${posts} aiReady=${aiReady}
+    <${RuleEditor} open=${!!editor} rule=${editor && editor.rule} title=${editor && editor.title} posts=${posts} gone=${gone} watch=${watchOf(doc)} aiReady=${aiReady}
       blockedWords=${doc.blockedWords} saving=${saving} onClose=${() => !saving && setEditor(null)} onSave=${saveRule} />
   </div>`;
 }

@@ -300,3 +300,22 @@ test('evaluate: story replies use story-reply rules with keywords', () => {
   assert.deepEqual(evaluate({ rules: [guide], event: { ...ev, source: 'dm' } }), []);
   assert.deepEqual(evaluate({ rules: [guide], event: ev, processed: { users: { r_guide: { u_3: 'x' } } } }), []);
 });
+
+test('evaluate: a story reply no story-reply rule answers falls back to DM rules (not story mentions)', () => {
+  const dmRule = rule({ source: 'dm', keywords: ['price'] }, { id: 'r_dm', actions: [{ type: 'send_dm', texts: ['Prices: {link}'] }] });
+  const storyRule = rule({ source: 'story_reply', keywords: ['price'] }, { id: 'r_story', actions: [{ type: 'send_dm', texts: ['Story prices'] }] });
+  const ev = { source: 'story_reply', id: 'sr_2', text: 'price?', userId: 'u_4', username: 'lu', isOwn: false };
+  // Existing DM rules keep answering story replies, as they did before story triggers existed.
+  assert.deepEqual(evaluate({ rules: [dmRule], event: ev, vars: { link: 'x.example' } }), [{ ruleId: 'r_dm', ruleName: 'New rule', type: 'send_dm', text: 'Prices: x.example' }]);
+  // A story-reply rule wins even when a DM rule comes first.
+  assert.equal(evaluate({ rules: [dmRule, storyRule], event: ev })[0].ruleId, 'r_story');
+  // A DM rule's comment-style action still goes out as a DM.
+  const mixed = rule({ source: 'dm', match: 'always' }, { id: 'r_mixed', actions: [{ type: 'reply_comment', texts: ['hi'] }] });
+  assert.deepEqual(evaluate({ rules: [mixed], event: ev }).map((a) => a.type), ['send_dm']);
+  // No match in either: the welcome message, as before.
+  const welcome = { enabled: true, text: 'Hi {username}!' };
+  assert.equal(evaluate({ rules: [dmRule], event: { ...ev, text: 'love it' }, welcome, isFirstContact: true })[0].reason, 'welcome');
+  // Plain DMs never use story-reply rules, and story mentions never use DM rules.
+  assert.deepEqual(evaluate({ rules: [storyRule], event: { ...ev, source: 'dm' } }), []);
+  assert.deepEqual(evaluate({ rules: [rule({ source: 'dm', match: 'always' })], event: { ...ev, source: 'story_mention', text: '' } }), []);
+});

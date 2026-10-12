@@ -7,6 +7,7 @@
 
 import { addDaysKey, dayKey, isValidTimeZone, pad, weekdayOfKey, zonedParts, zonedToUtc } from './time.js';
 import { engagementRate, interactionsOf, parseTimestamp, toList } from './analytics.js';
+import { fitsFeed } from './feed.js';
 import { LIMITS } from './model.js';
 
 const HOUR_MS = 36e5;
@@ -485,12 +486,20 @@ const ACTIVE_STATUSES = new Set(['draft', 'scheduled', 'publishing']);
  * Asset ids used by a post that is not canceled. An asset is also treated as used when its
  * usedBy lists a post id that is not a known canceled post (deleted posts still count as used).
  */
+/**
+ * Whether a post no longer holds on to its media: canceled before it went out. A post deleted from
+ * Instagram after publishing is also 'canceled' but its media was posted, so it stays used.
+ */
+export function freesMedia(p) {
+  return !!p && p.status === 'canceled' && !p.deletedFromInstagramAt;
+}
+
 export function unusedAssets(assets, posts) {
   const postList = toList(posts);
   const used = new Set();
   const canceled = new Set();
   for (const p of postList) {
-    if (p.status === 'canceled') canceled.add(p.id);
+    if (freesMedia(p)) canceled.add(p.id);
     else for (const m of p.media || []) used.add(m.assetId);
   }
   return toList(assets).filter((a) => !used.has(a.id) && !(a.usedBy || []).some((id) => !canceled.has(id)));
@@ -528,15 +537,22 @@ function groupAssets(pool, allowed) {
  * Plan the posts autopilot should create to keep its queue filled.
  * Target: round(postsPerWeek * horizonDays / 7) (at least 1) posts of any source scheduled (status
  * draft/scheduled) within the horizon. Media: unused library assets with autopilot === true in library
- * order, then (autopilot.useAllUnused) any other unused asset that was not in a rejected draft.
+ * order, then (autopilot.useAllUnused) any other unused asset that was not in a rejected draft and is
+ * not an item of a queue (`lists`: queues post those themselves). Files still downloading from a
+ * link or whose download failed (importUrl) are never used, nor photos outside the feed's 4:5 to
+ * 1.91:1 range (autopilot makes feed posts and carousels from photos).
  * Consecutive assets sharing a folderId become a carousel (2-10) when allowed; videos become reels
  * when allowed; the rest single feed posts.
  * Times: suggestSlots with the matrix ('best') or autopilot.fixedSlots ('fixed'), at least minGapHours
  * from every other active or recently published post.
- * @returns {{create: Array<{assetIds: string[], type: string, scheduledAt: string}>, reason: string,
+ * Recycling (autopilot.recycleTopPosts, candidates from recycleCandidates): about one repost of a top
+ * post per week of the horizon (posts with source 'recycle' already planned count), placed after the
+ * pool's posts. While the pool has media, reposts are at most a third of the target (so at 1 or 2
+ * posts a week every post is fresh); when the pool is empty, reposts keep the queue going.
+ * @returns {{create: Array<{assetIds: string[], type: string, scheduledAt: string, recycleOf?: string}>, reason: string,
  *   code: 'disabled'|'full'|'no_assets'|'no_slots'|'planned'}}
  */
-export function planAutopilot({ autopilot, assets = [], posts = [], matrix, tz = 'UTC', now } = {}) {
+export function planAutopilot({ autopilot, assets = [], posts = [], lists = [], matrix, tz = 'UTC', now, recycle = [] } = {}) {
   const ap = autopilot || {};
   if (!ap.enabled) return { create: [], reason: 'Autopilot is off.', code: 'disabled' };
   const perWeek = Math.max(0, Number(ap.postsPerWeek) || 0);
@@ -559,25 +575,47 @@ export function planAutopilot({ autopilot, assets = [], posts = [], matrix, tz =
   if (needed <= 0) return { create: [], reason: `The next ${days} already have ${planned} posts planned.`, code: 'full' };
 
   const allowed = new Set(Array.isArray(ap.allowedTypes) && ap.allowedTypes.length ? ap.allowedTypes : ['feed', 'carousel', 'reel']);
-  const unused = unusedAssets(assets, postList);
+  // Nothing to post yet (downloading) or never (download failed), or a photo Instagram refuses in the feed.
+  const postable = (a) => !a.importUrl && !(a.kind === 'image' && !fitsFeed(a.width, a.height));
+  const unused = unusedAssets(assets, postList).filter(postable);
   const pool = unused.filter((a) => a.autopilot === true);
   if (ap.useAllUnused) {
     // Media of a rejected draft stays out of the fallback; marking it for autopilot again brings it back.
-    const rejected = new Set();
+    const excluded = new Set();
     for (const p of postList) {
       if (p.status !== 'canceled' || !(p.history || []).some((h) => h && h.event === 'rejected')) continue;
-      for (const m of p.media || []) rejected.add(m.assetId);
+      for (const m of p.media || []) excluded.add(m.assetId);
     }
-    pool.push(...unused.filter((a) => a.autopilot !== true && !rejected.has(a.id)));
+    // Queue items (feeds, CSV imports, picked files) are posted by their queue: never twice.
+    for (const l of toList(lists)) for (const it of (l && l.items) || []) for (const m of (it && it.media) || []) if (m) excluded.add(m.assetId);
+    pool.push(...unused.filter((a) => a.autopilot !== true && !excluded.has(a.id)));
   }
   const groups = groupAssets(pool, allowed);
-  if (!groups.length) {
+  let reposts = [];
+  if (ap.recycleTopPosts && Array.isArray(recycle) && recycle.length) {
+    const inHorizon = (p) => {
+      const t = parseTimestamp(p.scheduledAt);
+      return Number.isFinite(t) && t > nowMs && t <= endMs;
+    };
+    const already = postList.filter((p) => p.source === 'recycle' && (p.status === 'scheduled' || p.status === 'draft') && inHorizon(p)).length;
+    let room = Math.max(1, Math.round(horizonDays / 7)) - already;
+    // Fresh media first: while the pool has some, reposts are at most a third of the posts.
+    if (groups.length) room = Math.min(room, Math.floor(target / 3) - already);
+    reposts = recycle
+      .filter((c) => c && c.recycleOf && allowed.has(c.type) && (c.assetIds || []).length)
+      .slice(0, Math.max(0, room))
+      .map((c) => ({ assetIds: [...c.assetIds], type: c.type, recycleOf: c.recycleOf }));
+  }
+  if (!groups.length && !reposts.length) {
     return {
       create: [],
-      reason: 'No unused media is marked for autopilot. Send photos or videos to autopilot from the library.',
+      reason: ap.recycleTopPosts
+        ? 'No unused media is marked for autopilot, and no top post can be reposted yet. Send photos or videos to autopilot from the library.'
+        : 'No unused media is marked for autopilot. Send photos or videos to autopilot from the library.',
       code: 'no_assets',
     };
   }
+  const items = [...groups.slice(0, Math.max(0, needed - reposts.length)), ...reposts];
 
   const gapMs = minGapHours * HOUR_MS;
   const taken = [];
@@ -592,7 +630,7 @@ export function planAutopilot({ autopilot, assets = [], posts = [], matrix, tz =
     matrix,
     tz,
     now: nowMs,
-    count: Math.min(needed, groups.length),
+    count: Math.min(needed, items.length),
     horizonDays,
     minGapHours,
     taken,
@@ -606,9 +644,11 @@ export function planAutopilot({ autopilot, assets = [], posts = [], matrix, tz =
       code: 'no_slots',
     };
   }
-  const create = slots.map((scheduledAt, i) => ({ ...groups[i], scheduledAt }));
-  let reason = `Planned ${create.length} post${create.length === 1 ? '' : 's'}.`;
-  if (create.length < needed && groups.length < needed) reason += ' Add more media to autopilot to fill the queue.';
+  const create = slots.map((scheduledAt, i) => ({ ...items[i], scheduledAt }));
+  const repostCount = create.filter((c) => c.recycleOf).length;
+  const repostNote = !repostCount ? '' : repostCount === 1 ? ` (${create.length === 1 ? 'a' : '1'} repost of a top post)` : ` (${repostCount} reposts of top posts)`;
+  let reason = `Planned ${create.length} post${create.length === 1 ? '' : 's'}${repostNote}.`;
+  if (create.length < needed && items.length < needed) reason += ' Add more media to autopilot to fill the queue.';
   else if (create.length < needed) reason += ' Not enough free time slots for more.';
   return { create, reason, code: 'planned' };
 }
@@ -642,4 +682,56 @@ export function recyclePicks({ mediaStats, posts = [], now, afterDays = 120, cou
     .sort((a, b) => (b.er ?? -1) - (a.er ?? -1) || (b.inter ?? -1) - (a.inter ?? -1))
     .slice(0, Math.max(0, count))
     .map(({ m }) => m);
+}
+
+/**
+ * Top posts autopilot can post again: recyclePicks joined with the Postpilot post that published
+ * each one (posts and posts-archive), keeping only posts whose media is all still in the library
+ * (not removed to save space, not waiting for a download). Instagram media posted outside Postpilot
+ * has no library copy, so it is never recycled.
+ * @param {{mediaStats: object|Array, posts?: object[], archive?: object[], assets?: object[], now?: any,
+ *   afterDays?: number, count?: number, followers?: number}} args
+ * @returns {Array<{recycleOf: string, type: string, assetIds: string[], media: object[], caption: string,
+ *   firstComment: string, altText: string, coverAssetId: string|null, thumbOffsetMs: number|null, location: object|null,
+ *   publishedAt: string|null}>} best first
+ */
+export function recycleCandidates({ mediaStats, posts = [], archive = [], assets = [], now, afterDays = 120, count = 3, followers } = {}) {
+  const all = [...toList(posts), ...toList(archive)];
+  const nowMs = toMs(now);
+  const byMedia = new Map();
+  for (const p of all) if (p.igMediaId && p.status === 'published' && !byMedia.has(p.igMediaId)) byMedia.set(p.igMediaId, p);
+  // A repost the owner rejected keeps that post out for afterDays (recyclePicks ignores canceled reposts).
+  const rejected = new Set();
+  for (const p of all) {
+    if (!p.recycleOf || p.status !== 'canceled' || !(p.history || []).some((h) => h && h.event === 'rejected')) continue;
+    const t = parseTimestamp(p.updatedAt || p.createdAt);
+    if (!Number.isFinite(t) || t >= nowMs - Math.max(0, afterDays) * DAY_MS) rejected.add(p.recycleOf);
+  }
+  const lib = new Map(toList(assets).map((a) => [a.id, a]));
+  const usable = (id) => {
+    const a = lib.get(id);
+    return !!a && !a.originalRemovedAt && !a.importUrl;
+  };
+  const out = [];
+  for (const m of recyclePicks({ mediaStats, posts: all, now, afterDays, count: 50, followers })) {
+    const p = byMedia.get(m.id);
+    if (!p || p.type === 'story' || rejected.has(m.id)) continue;
+    const ids = (p.media || []).map((x) => x && x.assetId).filter(Boolean);
+    if (!ids.length || ids.length !== (p.media || []).length || !ids.every(usable)) continue;
+    out.push({
+      recycleOf: m.id,
+      type: p.type,
+      assetIds: ids,
+      media: (p.media || []).map((x) => ({ assetId: x.assetId, kind: x.kind || lib.get(x.assetId).kind || 'image', altText: x.altText || '' })),
+      caption: p.caption || '',
+      firstComment: p.firstComment || '',
+      altText: p.altText || '',
+      coverAssetId: p.coverAssetId && usable(p.coverAssetId) ? p.coverAssetId : null,
+      thumbOffsetMs: p.thumbOffsetMs ?? null,
+      location: p.location || null,
+      publishedAt: p.publishedAt || m.timestamp || null,
+    });
+    if (out.length >= count) break;
+  }
+  return out;
 }

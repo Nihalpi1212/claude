@@ -25,6 +25,19 @@ export function defaultNotifications() {
   };
 }
 
+/**
+ * Whether a reminder post's notification can reach a phone (the worker checks the same, see
+ * worker/jobs/publish.mjs): 'ok', 'no_devices' (no device has notifications turned on) or 'off'
+ * (the reminder event is turned off in Settings).
+ */
+export function reminderDelivery(settings) {
+  const cfg = (settings && settings.notifications) || {};
+  const subs = (cfg.subscriptions || []).filter((s) => s && s.endpoint && s.keys);
+  if (!cfg.vapid || !subs.length) return 'no_devices';
+  if (cfg.events && cfg.events.reminder === false) return 'off';
+  return 'ok';
+}
+
 export function pushSupported() {
   return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
 }

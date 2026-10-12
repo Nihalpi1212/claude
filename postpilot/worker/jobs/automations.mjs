@@ -4,10 +4,17 @@
 // - Watched posts: the newest limits.watchPosts posts (default 50, 1-200) that are at most
 //   limits.watchDays old (default 90, 1-365), listed with comments_count in the fields (one call per
 //   50 posts), plus every post an enabled rule is scoped to (trigger.mediaIds), whatever its age.
-//   Chosen posts that are not in the listing are read one by one (at most PINNED_MAX per run, in
-//   turns); a post Instagram cannot find (deleted) is skipped, logged once and looked up again a day
-//   later. A post's comments are fetched only when its comments_count changed since the last run
-//   (cursors.mediaComments[mediaId] = count), so most posts cost nothing beyond the listing.
+//   Chosen posts that are not in the listing are read one by one, at most every 30 minutes (at most
+//   PINNED_MAX per check, in turns); a post Instagram cannot find (deleted) is skipped, logged once and
+//   looked up again a day later. A post's comments are fetched only when its comments_count changed
+//   since the last run (cursors.mediaComments[mediaId] = count), so most posts cost nothing beyond the
+//   listing.
+// - Rules only answer comments made while their post was watched: cursors.watchedFrom[mediaId] is set
+//   when a post starts being watched (its publish time for a post that is new since the previous
+//   listing, otherwise the current time, e.g. after the watch settings were raised or an old post was
+//   chosen in a rule), so old unanswered comments are never answered weeks later. Comments older than
+//   COMMENT_MAX_AGE_MS get no automated action either: housekeeping forgets processed ids after 30 days,
+//   and a re-read old post must not look new.
 // - DM threads whose updated_time is newer than cursors.dmUpdatedTime (or whose cached preview is
 //   stale) have their latest messages read. A message is a 'story_reply' when it answers one of the
 //   account's stories, a 'story_mention' when Instagram reports that the sender mentioned the account
@@ -36,9 +43,20 @@ import { clip, DAY_MS, isRetryable } from './shared.mjs';
 export const WATCH_DAYS_DEFAULT = 90;
 export const WATCH_POSTS_DEFAULT = 50;
 const MEDIA_PAGE = 50; // posts per listing call
-const PINNED_MAX = 30; // chosen posts outside the listing read one by one per run (the rest wait their turn)
+const PINNED_MAX = 30; // chosen posts outside the listing read one by one per check (the rest wait their turn)
+const PINNED_EVERY_MS = 30 * 60e3; // chosen posts outside the listing cost one call each, so they are read less often
 const PINNED_FIELDS = 'id,caption,media_type,media_url,thumbnail_url,permalink,timestamp,comments_count';
 const GONE_RECHECK_MS = DAY_MS; // a chosen post Instagram could not find is looked up again after this
+// Rules never act on comments older than this. It stays well under housekeeping's 30-day retention
+// of processed comment ids, so a comment whose record was pruned is never answered a second time.
+const COMMENT_MAX_AGE_MS = 14 * DAY_MS;
+// A post first listed after the previous listing (or less than this before it, Instagram may list a
+// new post late) is new: all its comments count. Any other post that starts being watched only
+// counts comments from that moment on.
+const NEW_POST_SLACK_MS = 60 * 60e3;
+// The watch window before limits.watchDays/watchPosts existed (newest 15 posts, at most 14 days old):
+// on the first run after the upgrade, those posts keep counting comments since automations started.
+const LEGACY_WATCH = { days: 14, posts: 15 };
 const COMMENTS_PER_MEDIA = 100;
 const PRIVATE_REPLY_WINDOW_MS = 7 * DAY_MS - 30 * 60e3; // keep a margin for slow runs
 const DM_WINDOW_MS = 24 * 36e5 - 10 * 60e3;
@@ -99,6 +117,13 @@ export function pinnedMediaIds(rules) {
   return ids;
 }
 
+/** Names of the enabled comment rules scoped to a post (for the activity log). */
+function rulesChoosing(rules, mediaId) {
+  return (rules || [])
+    .filter((r) => r && r.enabled !== false && ((r.trigger && r.trigger.source) || 'comment') === 'comment' && ((r.trigger && r.trigger.mediaIds) || []).map(String).includes(String(mediaId)))
+    .map((r) => r.name || 'Untitled rule');
+}
+
 /** Event source of a DM (see core/rules.js). */
 export function messageSource(m) {
   if (m && m.storyMention) return 'story_mention';
@@ -153,6 +178,10 @@ export default async function automations(ctx) {
   const cursors = doc.cursors || {};
   const startedAt = enabled ? cursors.startedAt || nowIso : null;
   const baselineMs = startedAt ? ms(startedAt) - BASELINE_SLACK_MS : Infinity;
+  const watchedFrom = cursors.watchedFrom || {};
+  const prevListedMs = ms(cursors.watchListedAt);
+  // First run with per-post watch starts after automations already ran (see LEGACY_WATCH).
+  const legacy = !cursors.watchListedAt && !!cursors.startedAt;
   const dmDelayMs = ctx.env.POSTPILOT_DM_DELAY_MS != null ? Number(ctx.env.POSTPILOT_DM_DELAY_MS) : 550;
 
   // Working state: `proc` is what evaluate() sees; the deltas are merged into the stored document.
@@ -179,7 +208,7 @@ export default async function automations(ctx) {
   const newDms = [];
 
   function newDelta() {
-    return { comments: {}, messages: {}, conversations: {}, users: [], mediaComments: {}, goneMedia: {}, pinnedNext: null, dmUpdatedTime: null, seen: {}, stats: {}, rules: {}, activity: [] };
+    return { comments: {}, messages: {}, conversations: {}, users: [], mediaComments: {}, watchedFrom: {}, watchListedAt: null, goneMedia: {}, pinnedNext: null, pinnedCheckedAt: null, dmUpdatedTime: null, seen: {}, stats: {}, rules: {}, activity: [] };
   }
 
   function markFired(ruleId, userId) {
@@ -264,12 +293,25 @@ export default async function automations(ctx) {
           a.cursors.mediaComments = { ...(a.cursors.mediaComments || {}), ...d.mediaComments };
           changed = true;
         }
+        if (Object.keys(d.watchedFrom).length) {
+          // Fill in only: a post keeps the time it started being watched.
+          a.cursors.watchedFrom = { ...d.watchedFrom, ...(a.cursors.watchedFrom || {}) };
+          changed = true;
+        }
+        if (d.watchListedAt && !(a.cursors.watchListedAt >= d.watchListedAt)) {
+          a.cursors.watchListedAt = d.watchListedAt;
+          changed = true;
+        }
         if (final && keepMedia) {
-          const counts = a.cursors.mediaComments || {};
-          const kept = Object.fromEntries(Object.entries(counts).filter(([id]) => keepMedia.has(id)));
-          if (Object.keys(kept).length !== Object.keys(counts).length) {
-            a.cursors.mediaComments = kept;
-            changed = true;
+          // Posts no longer watched lose their count and their watch start: watched again later, they
+          // only count comments from then on.
+          for (const key of ['mediaComments', 'watchedFrom']) {
+            const all = a.cursors[key] || {};
+            const kept = Object.fromEntries(Object.entries(all).filter(([id]) => keepMedia.has(id)));
+            if (Object.keys(kept).length !== Object.keys(all).length) {
+              a.cursors[key] = kept;
+              changed = true;
+            }
           }
         }
         if (Object.keys(d.goneMedia).length || (final && a.cursors.goneMedia)) {
@@ -284,6 +326,10 @@ export default async function automations(ctx) {
         }
         if (d.pinnedNext != null && a.cursors.pinnedNext !== d.pinnedNext) {
           a.cursors.pinnedNext = d.pinnedNext;
+          changed = true;
+        }
+        if (d.pinnedCheckedAt && !(a.cursors.pinnedCheckedAt >= d.pinnedCheckedAt)) {
+          a.cursors.pinnedCheckedAt = d.pinnedCheckedAt;
           changed = true;
         }
         if (d.dmUpdatedTime && (!a.cursors.dmUpdatedTime || d.dmUpdatedTime > a.cursors.dmUpdatedTime)) {
@@ -531,12 +577,16 @@ export default async function automations(ctx) {
       mediaOk = false;
       ctx.log('automations', 'warn', `Could not list recent posts: ${describeError(err)}`);
     }
+    if (mediaOk) delta.watchListedAt = nowIso;
     recent = media.filter((m) => m && m.id && (nowMs - ms(m.timestamp) <= watch.days * DAY_MS || pinned.has(String(m.id))));
-    // Posts chosen in rules that the listing did not include (older or beyond watchPosts).
+    // Posts chosen in rules that the listing did not include (older or beyond watchPosts): newly chosen
+    // ones right away, the others every PINNED_EVERY_MS.
     const listed = new Set(media.map((m) => m && String(m.id)));
     const gone = cursors.goneMedia || {};
-    const outside = [...pinned].filter((id) => !listed.has(id) && !(nowMs - ms(gone[id]) < GONE_RECHECK_MS)).sort();
+    const pinnedDue = !(nowMs - ms(cursors.pinnedCheckedAt) < PINNED_EVERY_MS);
+    const outside = [...pinned].filter((id) => !listed.has(id) && !(nowMs - ms(gone[id]) < GONE_RECHECK_MS) && (pinnedDue || !watchedFrom[id])).sort();
     if (outside.length && !throttled) {
+      if (pinnedDue) delta.pinnedCheckedAt = nowIso;
       const start = outside.length > PINNED_MAX ? (Number(cursors.pinnedNext) || 0) % outside.length : 0;
       const batch = outside.length > PINNED_MAX ? [...outside.slice(start), ...outside.slice(0, start)].slice(0, PINNED_MAX) : outside;
       if (outside.length > PINNED_MAX) delta.pinnedNext = (start + PINNED_MAX) % outside.length;
@@ -551,7 +601,11 @@ export default async function automations(ctx) {
           if (noteRateLimit(err)) break;
           if (err && (err.isNotFound || (err.code === 100 && !err.isTransient))) {
             // Deleted (or no longer readable): skip it without failing the run; say so only once.
-            if (!gone[id]) ctx.log('automations', 'warn', 'A post chosen in a comment rule was not found on Instagram (it may have been deleted), so its comments are not checked.', { mediaId: id });
+            if (!gone[id]) {
+              const names = rulesChoosing(doc.rules, id);
+              const which = names.length ? `in the rule${names.length === 1 ? '' : 's'} ${names.map((n) => `“${n}”`).join(', ')}` : 'in a comment rule';
+              ctx.log('automations', 'warn', `A post chosen ${which} was not found on Instagram (it may have been deleted), so its comments are not checked. Edit the rule to remove it.`, { mediaId: id });
+            }
             delta.goneMedia[id] = nowIso;
           } else {
             ctx.log('automations', 'warn', `Could not read a post chosen in a comment rule: ${describeError(err)}`, { mediaId: id });
@@ -559,12 +613,35 @@ export default async function automations(ctx) {
         }
       }
     }
+    // When each watched post started being watched (see the top of the file). An older post that starts
+    // being watched now has nothing for rules to answer yet: its count is recorded without reading its
+    // comments (raising the watch settings must not cost one call per post).
+    const startedNow = new Set();
+    for (const m of recent) {
+      const id = String(m.id);
+      if (watchedFrom[id] || delta.watchedFrom[id]) continue;
+      const t = ms(m.timestamp);
+      const index = listed.has(id) ? media.findIndex((x) => x && String(x.id) === id) : Infinity;
+      let isNew;
+      if (Number.isFinite(prevListedMs)) isNew = t >= prevListedMs - NEW_POST_SLACK_MS;
+      else isNew = legacy && index < LEGACY_WATCH.posts && nowMs - t <= LEGACY_WATCH.days * DAY_MS;
+      delta.watchedFrom[id] = isNew && Number.isFinite(t) ? new Date(t).toISOString() : nowIso;
+      if (!isNew && (Number.isFinite(prevListedMs) || legacy)) startedNow.add(id); // the very first run reads them for the inbox cache
+    }
+    const watchStartMs = (id) => {
+      const t = ms(watchedFrom[id] || delta.watchedFrom[id]);
+      return Number.isFinite(t) ? t - BASELINE_SLACK_MS : -Infinity;
+    };
     const counts = cursors.mediaComments || {};
     const ownReplyAfter = (c, t) => (c?.replies || []).some((r) => isOwn(r.fromId, r.username) && (ms(r.timestamp) || 0) > t);
     for (const m of recent) {
       if (throttled) break; // the comment counts of the posts left are kept, so they are read next time
       const prev = counts[m.id];
       const unchanged = prev !== undefined && m.commentsCount != null && prev === m.commentsCount;
+      if (startedNow.has(String(m.id)) && m.commentsCount != null) {
+        delta.mediaComments[m.id] = m.commentsCount;
+        continue;
+      }
       if (unchanged || (prev === undefined && m.commentsCount === 0)) {
         if (prev === undefined) delta.mediaComments[m.id] = 0;
         continue;
@@ -580,6 +657,9 @@ export default async function automations(ctx) {
       }
       fetched.set(m.id, comments);
       const byId = new Map(comments.map((c) => [c.id, c]));
+      // Rules act on comments made after automations were switched on, while this post was watched and
+      // within COMMENT_MAX_AGE_MS; older ones are left alone (and not recorded).
+      const actFromMs = Math.max(baselineMs, watchStartMs(String(m.id)), nowMs - COMMENT_MAX_AGE_MS);
       let complete = true;
       // Oldest first so replies go out in the order people commented.
       const flat = comments.flatMap((c) => [c, ...(c.replies || []).map((r) => ({ ...r, parentId: r.parentId || c.id }))]).sort((a, b) => (ms(a.timestamp) || 0) - (ms(b.timestamp) || 0));
@@ -591,7 +671,7 @@ export default async function automations(ctx) {
       for (const c of flat) {
         if (!c.id || proc.comments[c.id]) continue;
         if (isOwn(c.fromId, c.username)) continue;
-        if (!enabled || !(ms(c.timestamp) >= baselineMs)) continue; // before automations were on
+        if (!enabled || !(ms(c.timestamp) >= actFromMs)) continue; // before automations were on, or too old
         if (c.hidden) {
           // Hidden by the owner: Instagram does not allow replies, and it needs no automation.
           proc.comments[c.id] = nowIso;
@@ -784,6 +864,7 @@ export default async function automations(ctx) {
             let lastMessage = old?.lastMessage || null;
             if (msgs && msgs.length) {
               const last = msgs.slice().sort((a, b) => (ms(b.createdTime) || 0) - (ms(a.createdTime) || 0))[0];
+              const fromMe = isOwn(last.fromId, last.fromUsername);
               lastMessage = {
                 id: last.id,
                 text: clip(last.text, 200),
@@ -791,9 +872,9 @@ export default async function automations(ctx) {
                 fromUsername: last.fromUsername,
                 createdTime: last.createdTime,
                 attachments: (last.attachments || []).length,
-                fromMe: isOwn(last.fromId, last.fromUsername),
-                // 'reply' = it answers one of your stories, 'mention' = their story mentions you
-                story: last.storyMention ? 'mention' : last.storyReply ? 'reply' : null,
+                fromMe,
+                // Their message only: 'reply' = it answers one of your stories, 'mention' = their story mentions you.
+                story: fromMe ? null : last.storyMention ? 'mention' : last.storyReply ? 'reply' : null,
               };
             }
             return { id: conv.id, updatedTime: conv.updatedTime, participants: conv.participants || [], lastMessage };

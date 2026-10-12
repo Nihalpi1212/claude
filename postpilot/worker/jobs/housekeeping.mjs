@@ -12,6 +12,7 @@
 //   is adjusted so unusedAssets() treats the media exactly as before.
 // Log entries (500) and run records (200) are trimmed by the run-log transaction in run.mjs.
 
+import { freesMedia } from '../../core/schedule.js';
 import { TMP_PREFIX } from '../context.mjs';
 import { DAY_MS, oldestProcessed, pruneProcessed } from './shared.mjs';
 
@@ -109,12 +110,13 @@ export default async function housekeeping(ctx) {
           arch.posts = [...(arch.posts || []).filter((p) => !ids.has(p.id)), ...moving];
           doc.posts = doc.posts.filter((p) => !ids.has(p.id));
           // unusedAssets() counts an unknown post id in usedBy as "used": drop archived canceled
-          // posts (which never used their media) and make sure published ones are listed.
+          // posts (which never used their media) and make sure published ones (also those later
+          // deleted from Instagram) are listed.
           const lib = await tx.read('library');
-          const canceledIds = new Set(moving.filter((p) => p.status === 'canceled').map((p) => p.id));
+          const canceledIds = new Set(moving.filter(freesMedia).map((p) => p.id));
           const byAsset = new Map();
           for (const p of moving) {
-            if (p.status !== 'published') continue;
+            if (freesMedia(p)) continue; // published, or deleted from Instagram after publishing
             for (const id of [...(p.media || []).map((m) => m.assetId), p.coverAssetId].filter(Boolean)) {
               if (!byAsset.has(id)) byAsset.set(id, []);
               byAsset.get(id).push(p.id);

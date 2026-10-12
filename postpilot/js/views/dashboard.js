@@ -1,5 +1,6 @@
-// Today: the first screen after unlock. Summary first (what goes out next, what needs you), then detail
-// (KPIs, the coming week, up next, inbox / autopilot / automations, recent post performance).
+// Today: the first screen after unlock. Summary first (what goes out next, what needs you, reminder
+// posts to post by hand), then detail (KPIs, the coming week, up next, inbox / autopilot / automations,
+// recent post performance).
 
 import { html, useEffect, useMemo, useRef, useState } from '../../vendor/preact.js';
 import { runBroken, useApp } from '../app.js';
@@ -410,9 +411,12 @@ function WeekStrip({ posts, today, tz, now, navigate }) {
     const k = dayKey(new Date(t), tz);
     if (byDay.has(k)) byDay.get(k).push({ p, t });
   }
-  const stateOf = (p) => (p.status === 'draft' && p.needsApproval ? 'approval' : p.status);
+  const stateOf = (p) => (p.status === 'draft' && p.needsApproval ? 'approval' : p.status === 'scheduled' && p.publishMode === 'reminder' ? 'reminder' : p.status);
+  const has = (state) => [...byDay.values()].some((l) => l.some(({ p }) => stateOf(p) === state));
   const legend = [
     ['scheduled', 'Scheduled'],
+    ...(has('reminder') ? [['reminder', 'Reminder']] : []),
+    ...(has('reminded') ? [['reminded', 'Post by hand']] : []),
     ['draft', 'Draft'],
     ['approval', 'Needs approval'],
     ['published', 'Published'],
@@ -453,6 +457,21 @@ function WeekStrip({ posts, today, tz, now, navigate }) {
   </section>`;
 }
 
+/**
+ * Whether the worker still has to download one of the post's files from its link (asset.importUrl):
+ * 'failed', 'pending' or null. The worker does not publish (or remind about) such a post until then.
+ */
+function downloadState(post, assetsById) {
+  let state = null;
+  for (const id of [...(post.media || []).map((m) => m && m.assetId), post.coverAssetId]) {
+    const a = id && assetsById.get(id);
+    if (!a || !a.importUrl) continue;
+    if (a.importError) return 'failed';
+    state = 'pending';
+  }
+  return state;
+}
+
 function UpNext({ posts, assetsById, tz, now, openComposer }) {
   const upcoming = posts
     .filter((p) => (p.status === 'scheduled' || p.status === 'publishing') && Number.isFinite(parseTimestamp(p.scheduledAt)))
@@ -464,28 +483,67 @@ function UpNext({ posts, assetsById, tz, now, openComposer }) {
       ? html`<ul class="list">
           ${upcoming.map((p) => {
             const due = parseTimestamp(p.scheduledAt) <= now;
+            const download = p.status === 'scheduled' ? downloadState(p, assetsById) : null;
+            const pill = () =>
+              download === 'failed'
+                ? html`<${StatusPill} status="failed" label="Download failed" />`
+                : download && due
+                  ? html`<${StatusPill} status="pending" label="Downloading" />`
+                  : p.status === 'publishing' || (due && p.publishMode !== 'reminder')
+                    ? html`<${StatusPill} status="publishing" />`
+                    : due
+                      ? html`<${StatusPill} status="needs-approval" label="Reminder due" />`
+                      : html`<span class="dash-post-eta mono">${eta(p.scheduledAt)}</span>`;
             return html`<li key=${p.id} class="list-row dash-post">
               <button type="button" class="dash-post-hit" onClick=${() => openComposer(p.id)}
-                aria-label=${`Open ${TYPE_LABEL[p.type] || 'post'} scheduled ${whenLabel(p.scheduledAt, tz, new Date(now))}`}></button>
+                aria-label=${`Open ${TYPE_LABEL[p.type] || 'post'} ${p.publishMode === 'reminder' ? 'with a reminder' : 'scheduled'} ${whenLabel(p.scheduledAt, tz, new Date(now))}`}></button>
               <${PostThumb} post=${p} assetsById=${assetsById} />
               <div class="dash-post-body">
                 <div class="dash-post-when">
                   <span class="mono">${cap(whenLabel(p.scheduledAt, tz, new Date(now)))}</span>
                   <span class="faint">·</span>
                   <span class="dash-post-type"><${Icon} name=${TYPE_ICON[p.type] || 'image'} size=${14} />${TYPE_LABEL[p.type] || 'Post'}</span>
+                  ${p.publishMode === 'reminder' ? html`<span class="dash-post-src is-hand" title="You get a reminder and post it yourself">Reminder</span>` : null}
                   ${p.source === 'autopilot' ? html`<span class="dash-post-src">Autopilot</span>` : p.source === 'evergreen' ? html`<span class="dash-post-src">Queue</span>` : null}
                 </div>
                 <div class="dash-post-caption">${excerpt(p.caption) || html`<span class="faint">${p.type === 'story' ? 'Story (no caption)' : 'No caption yet'}</span>`}</div>
               </div>
-              ${p.status === 'publishing' || due
-                ? html`<${StatusPill} status="publishing" />`
-                : html`<span class="dash-post-eta mono">${eta(p.scheduledAt)}</span>`}
+              ${pill()}
             </li>`;
           })}
         </ul>`
       : html`<${EmptyState} compact icon="calendar" title="Nothing scheduled"
           body="Plan your next post and Postpilot publishes it for you."
           action=${html`<${Button} size="sm" variant="primary" icon="plus" onClick=${() => openComposer()}>New post<//>`} />`}
+  <//>`;
+}
+
+/** Reminder posts whose notification went out: the owner posts them in the Instagram app. */
+function HandPosts({ posts, assetsById, tz, now }) {
+  const list = posts
+    .filter((p) => p.status === 'reminded')
+    .sort((a, b) => (parseTimestamp(a.scheduledAt) || 0) - (parseTimestamp(b.scheduledAt) || 0));
+  if (!list.length) return null;
+  return html`<${Panel} title="Post these by hand" class="dash-hand" flush
+    subtitle=${list.length === 1 ? 'Waiting for you to post it in Instagram. Open it to save the media and copy the caption.' : 'Waiting for you to post them in Instagram. Open one to save the media and copy the caption.'}>
+    <ul class="list">
+      ${list.map((p) => {
+        const href = `#/post-now/${encodeURIComponent(p.id)}`;
+        return html`<li key=${p.id} class="list-row dash-post">
+          <a class="dash-post-hit" href=${href} aria-label=${`Post this ${(TYPE_LABEL[p.type] || 'post').toLowerCase()} by hand: ${excerpt(p.caption, 60) || 'no caption'}`}></a>
+          <${PostThumb} post=${p} assetsById=${assetsById} />
+          <div class="dash-post-body">
+            <div class="dash-post-when">
+              <span class="mono">${p.scheduledAt ? `Due ${whenLabel(p.scheduledAt, tz, new Date(now))}` : 'Due now'}</span>
+              <span class="faint">·</span>
+              <span class="dash-post-type"><${Icon} name=${TYPE_ICON[p.type] || 'image'} size=${14} />${TYPE_LABEL[p.type] || 'Post'}</span>
+            </div>
+            <div class="dash-post-caption">${excerpt(p.caption) || html`<span class="faint">${p.type === 'story' ? 'Story (no caption)' : 'No caption'}</span>`}</div>
+          </div>
+          <span class="dash-hand-go" aria-hidden="true">Post now<${Icon} name="arrow-right" size=${14} /></span>
+        </li>`;
+      })}
+    </ul>
   <//>`;
 }
 
@@ -706,19 +764,33 @@ export default function Dashboard() {
     if (failed.length) toast(`Could not add ${failed.join('; ')}`, { kind: 'error' });
   };
 
-  // Summary sentence (header subtitle).
-  const nextPost = posts
+  // Summary sentence (header subtitle). Reminder posts do not "go out": the owner posts them by hand.
+  const upcoming = posts
     .filter((p) => p.status === 'scheduled' && parseTimestamp(p.scheduledAt) > now)
-    .sort((a, b) => parseTimestamp(a.scheduledAt) - parseTimestamp(b.scheduledAt))[0];
+    .sort((a, b) => parseTimestamp(a.scheduledAt) - parseTimestamp(b.scheduledAt));
+  const isReminder = (p) => p.publishMode === 'reminder';
+  const nextPost = upcoming.find((p) => !isReminder(p));
+  const nextReminder = upcoming.find(isReminder);
   const weekEnd = now + 7 * DAY_MS;
-  const weekCount = posts.filter((p) => p.status === 'scheduled' && parseTimestamp(p.scheduledAt) > now && parseTimestamp(p.scheduledAt) <= weekEnd).length;
+  const inWeek = upcoming.filter((p) => parseTimestamp(p.scheduledAt) <= weekEnd);
+  const weekCount = inWeek.filter((p) => !isReminder(p)).length;
+  const weekReminders = inWeek.length - weekCount;
   const approvals = posts.filter((p) => p.status === 'draft' && p.needsApproval).length;
   let summary = data.posts
     ? nextPost
       ? `${plural(weekCount, 'post')} scheduled for the next 7 days. The next one goes out ${whenLabel(nextPost.scheduledAt, tz, new Date(now))}.`
-      : 'Nothing is scheduled yet. Plan a post or turn on autopilot to keep your feed going.'
+      : nextReminder
+        ? 'Nothing publishes automatically yet.'
+        : 'Nothing is scheduled yet. Plan a post or turn on autopilot to keep your feed going.'
     : 'Loading your week…';
+  if (data.posts && nextReminder) {
+    summary += weekReminders
+      ? ` ${plural(weekReminders, 'reminder')} to post by hand this week, the next ${whenLabel(nextReminder.scheduledAt, tz, new Date(now))}.`
+      : ` Your next reminder to post by hand is ${whenLabel(nextReminder.scheduledAt, tz, new Date(now))}.`;
+  }
   if (data.posts && approvals) summary += ` ${plural(approvals, 'draft')} ${approvals === 1 ? 'needs' : 'need'} your approval.`;
+  const byHand = posts.filter((p) => p.status === 'reminded').length;
+  if (data.posts && byHand) summary += ` ${plural(byHand, 'post')} ${byHand === 1 ? 'is' : 'are'} waiting for you to post by hand.`;
 
   const eyebrow = format(new Date(now), tz, { weekday: 'long', month: 'long', day: 'numeric' });
 
@@ -739,6 +811,8 @@ export default function Dashboard() {
     ${error ? html`<${Callout} tone="danger" title="Some of your data could not be loaded">${error.message || String(error)} Reload the page to try again.<//>` : null}
 
     <${AlertList} alerts=${alerts} />
+
+    ${data.posts && data.library ? html`<${HandPosts} posts=${posts} assetsById=${assetsById} tz=${tz} now=${now} />` : null}
 
     <${AccountStrip} settings=${settings} followers=${followers} log=${data.log} now=${now} />
 

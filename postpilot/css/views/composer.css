@@ -308,6 +308,42 @@
 .cmp-variant-tags { margin: 0; color: var(--accent); overflow-wrap: anywhere; }
 .cmp-variant .row { margin-top: auto; }
 .cmp-ai-tags { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: var(--r-md); }
+.cmp-rewrite { display: flex; flex-direction: column; gap: 6px; padding-top: 4px; }
+.cmp-rewrite-title { font-weight: 500; }
+.cmp-rewrite-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.cmp-translate { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.cmp-translate-lang { width: 168px; max-width: 100%; }
+.cmp-translate-lang select.input { height: var(--control-h-sm); padding-top: 0; padding-bottom: 0; font-size: var(--fs-sm); }
+.cmp-rewrite-result { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+.cmp-rewrite-result .label-caps { margin: 0; }
+.cmp-rewrite-result .cmp-variant-text { max-height: 18em; }
+.cmp-rewrite-result .row { flex-wrap: wrap; gap: 6px; }
+
+/* How to publish */
+.cmp-mode-set { display: flex; flex-direction: column; gap: 6px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.cmp-mode-set legend { margin-bottom: 8px; padding: 0; }
+.cmp-mode-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  cursor: pointer;
+}
+.cmp-mode-option:hover { border-color: var(--line-strong); }
+.cmp-mode-option.is-on { border-color: var(--accent); background: var(--accent-soft); }
+.cmp-mode-option input { flex: none; width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--accent); }
+.cmp-mode-option input:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.cmp-mode-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.cmp-mode-label { font-weight: 500; }
+.cmp-mode-warn { display: flex; align-items: flex-start; gap: 6px; margin: 0; }
+.cmp-mode-warn .icon { flex: none; margin-top: 3px; }
+.cmp-mode-warn .cmp-link { color: inherit; }
+
+/* Delete from Instagram (read-only view) */
+.cmp-delete-ig p { margin: 0; }
 
 /* Details */
 .cmp-disclosure {

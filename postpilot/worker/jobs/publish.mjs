@@ -20,14 +20,21 @@
 //   due they become 'reminded' and the owner gets a phone notification that opens #/post-now/<id>.
 //   They do not use the publishing quota and still go out while Instagram is disconnected (run.mjs
 //   runs this job without a connection; only the Instagram part is skipped then).
+//   The reminder push is sent right away (ctx.notify only queues, and run.mjs sends the queue after
+//   every job, which can be many minutes later); without a device that gets notifications the
+//   reminder only shows on the Today screen, and the activity log says so.
 // - Media that the worker still has to download from a link (asset.importUrl, CSV and RSS imports):
 //   the post waits (noted once in its history); it fails when the download failed (importError) or
-//   is still pending 6 hours after the post was due.
+//   is still pending 6 hours after the post was due (or after it was last changed, e.g. scheduled
+//   again). It never fails while the feeds job, which runs after this one, is about to try the
+//   download in this same run (after a paused worker, or right after "Try again" in the Library).
 
 import { duePosts } from '../../core/schedule.js';
 import { classifyError, publishPost } from '../../core/publish.js';
 import { PublishPendingError } from '../../core/ig.js';
 import { describeError, isIgAuth } from '../context.mjs';
+import { NOTIFY_DEFAULTS, sendNotifications } from '../notify.mjs';
+import { pendingDownloads } from './feeds.mjs';
 import { pushHistory } from './shared.mjs';
 import { markExpired } from './token.mjs';
 
@@ -384,12 +391,33 @@ export function importState(post, assetsById) {
 
 const fileName = (a) => `"${a.name || 'a file'}"`;
 
+/** True when a reminder can reach a phone: push keys, at least one device, and the event turned on. */
+function canPushReminders(settings) {
+  const cfg = (settings && settings.notifications) || {};
+  const events = { ...NOTIFY_DEFAULTS, ...(cfg.events || {}) };
+  const subs = (cfg.subscriptions || []).filter((s) => s && s.endpoint && s.keys && s.keys.p256dh && s.keys.auth);
+  return !!(cfg.vapid && cfg.vapid.privateKeyJwk && cfg.vapid.publicKey && subs.length && events.reminder);
+}
+
 /**
- * Mark due reminder posts 'reminded' and queue one phone notification each. No Instagram calls, so
- * reminders never use the publishing quota. Returns how many were sent.
+ * Send reminder pushes now instead of at the end of the run: run.mjs only sends ctx.notify's queue
+ * after every job (and after this job's wait for later posts), and for a reminder the push is the
+ * post going out. sendNotifications never throws; problems go to the encrypted log.
+ */
+async function pushReminders(ctx, sent) {
+  const items = sent.map((p) => ({ event: 'reminder', postId: p.id, type: p.type, caption: p.caption }));
+  const res = await sendNotifications({ ...ctx, notifications: items }, { fetchImpl: ctx.fetch });
+  if (res.sent || res.failed) ctx.say(`notifications: ${res.sent} sent, ${res.failed} failed`);
+  return res;
+}
+
+/**
+ * Mark due reminder posts 'reminded' and send one phone notification for them. No Instagram calls,
+ * so reminders never use the publishing quota. Returns how many posts were reminded.
  */
 async function sendReminders(ctx, ids) {
   let sent = [];
+  const push = canPushReminders(ctx.settings);
   await ctx.store.transact(
     async (tx) => {
       sent = [];
@@ -402,16 +430,20 @@ async function sendReminders(ctx, ids) {
         p.status = 'reminded';
         p.reminderSentAt = nowIso;
         p.lastError = null;
-        pushHistory(p, nowIso, 'reminder sent');
+        pushHistory(p, nowIso, 'reminder sent', push ? undefined : 'No device gets notifications, so it shows on the Today screen only.');
         sent.push({ id: p.id, type: p.type, caption: p.caption || '' });
       }
       if (sent.length) tx.write('posts', doc);
     },
     { message: 'publish: reminders' },
   );
+  if (!sent.length) return 0;
+  const res = push ? await pushReminders(ctx, sent) : null;
   for (const p of sent) {
-    ctx.notify('reminder', { postId: p.id, type: p.type, caption: p.caption });
-    ctx.log('publish', 'info', `Sent a reminder to post a ${TYPE_NAMES[p.type] || 'post'} by hand${p.caption ? ` ("${p.caption.slice(0, 60)}")` : ''}.`, { postId: p.id });
+    const what = `${TYPE_NAMES[p.type] || 'post'}${p.caption ? ` ("${p.caption.slice(0, 60)}")` : ''}`;
+    if (!push) ctx.log('publish', 'info', `A ${what} is due to be posted by hand. No device gets notifications, so the reminder shows on the Today screen only.`, { postId: p.id });
+    else if (res && res.sent) ctx.log('publish', 'info', `Sent a reminder to post a ${what} by hand.`, { postId: p.id });
+    else ctx.log('publish', 'warn', `A ${what} is due to be posted by hand, but the phone notification could not be sent. It shows on the Today screen.`, { postId: p.id });
   }
   return sent.length;
 }
@@ -463,6 +495,21 @@ async function noteWaiting(ctx, postId, assets) {
 }
 
 /**
+ * When the post's 6-hour download clock started: when it was due, or when it was last changed (the
+ * newest history entry other than this job's own waiting note), whichever is later. Scheduling it
+ * again after a failed download restarts the clock even though its old time is kept.
+ */
+function waitingSince(post) {
+  let since = Date.parse(post.scheduledAt || '') || 0;
+  for (const h of post.history || []) {
+    if (h.event === 'waiting_download') continue;
+    const t = Date.parse(h.at || '');
+    if (Number.isFinite(t) && t > since) since = t;
+  }
+  return since;
+}
+
+/**
  * Due posts whose media is not ready: still downloading (wait) or failed to download (fail the post).
  * Returns the posts that can go ahead; `skip` collects the ids handled here.
  */
@@ -471,6 +518,8 @@ async function checkDownloads(ctx, due, skip, result) {
   if (!needs.length) return due;
   const library = await ctx.store.read('library');
   const assetsById = new Map((library.assets || []).map((a) => [a.id, a]));
+  // Files the feeds job (after this one) tries to download in this run: not backing off after a failed try.
+  const tryingNow = new Set(pendingDownloads(library, [], ctx.nowMs()).map((a) => a.id));
   const ready = [];
   for (const p of due) {
     const { pending, failed } = importState(p, assetsById);
@@ -483,7 +532,7 @@ async function checkDownloads(ctx, due, skip, result) {
       const a = failed[0];
       const message = `Postpilot could not download ${fileName(a)} from its link (${String(a.importError).slice(0, 200)}). In the Library, choose Try again or replace the file in this post, then schedule it again.`;
       if (await failDownload(ctx, p.id, message, 'import_failed')) result.failed++;
-    } else if (ctx.nowMs() - Date.parse(p.scheduledAt) > IMPORT_GIVE_UP_MS) {
+    } else if (ctx.nowMs() - waitingSince(p) > IMPORT_GIVE_UP_MS && !pending.some((a) => tryingNow.has(a.id))) {
       const message = `${fileName(pending[0])} was still downloading from its link 6 hours after this post was due. Check the link in the Library or replace the file, then schedule the post again.`;
       if (await failDownload(ctx, p.id, message, 'import_timeout')) result.failed++;
     } else {

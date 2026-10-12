@@ -357,7 +357,8 @@ export function recordFired(processed, ruleId, userId, at = new Date().toISOStri
  *     one gets no automated response at all.
  *  2. The first enabled rule (in order) whose trigger matches and that produces at least one action.
  *     Rules with oncePerUser are skipped for users they already fired for (processed.users), so a later
- *     rule can still match.
+ *     rule can still match. A story reply that no 'story_reply' rule answers is offered to the 'dm'
+ *     rules: story replies were plain DMs before story triggers existed, and they are messages too.
  *  3. DMs, story replies and story mentions with no matching rule get the welcome message when
  *     isFirstContact.
  * Text actions are rendered with renderTemplate using eventVars(event), {keyword} and `vars`
@@ -377,13 +378,16 @@ export function evaluate({ rules = [], event, processed, blockedWords, welcome, 
   }
   const seed = event.id ?? `${event.userId}:${event.timestamp}`;
   const base = { ...eventVars(event), ...(vars || {}) };
-  for (const rule of rules || []) {
-    if (!rule || rule.enabled === false) continue;
-    const { matched, keyword } = findMatch(rule, event);
-    if (!matched) continue;
-    if (rule.oncePerUser && hasFired(processed, rule.id, event.userId)) continue;
-    const actions = ruleActions(rule, event, { ...base, keyword: keyword && !keyword.startsWith('re:') ? keyword : '' }, seed);
-    if (actions.length) return actions;
+  const passes = event.source === 'story_reply' ? [event, { ...event, source: 'dm' }] : [event];
+  for (const ev of passes) {
+    for (const rule of rules || []) {
+      if (!rule || rule.enabled === false) continue;
+      const { matched, keyword } = findMatch(rule, ev);
+      if (!matched) continue;
+      if (rule.oncePerUser && hasFired(processed, rule.id, ev.userId)) continue;
+      const actions = ruleActions(rule, ev, { ...base, keyword: keyword && !keyword.startsWith('re:') ? keyword : '' }, seed);
+      if (actions.length) return actions;
+    }
   }
   if (DM_SOURCES.has(event.source) && isFirstContact && welcome?.enabled) {
     const text = renderTemplate(pickVariant(welcome.texts?.length ? welcome.texts : [welcome.text], seed), base).trim();

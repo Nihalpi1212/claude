@@ -202,6 +202,44 @@
 }
 .lib-flag.is-pool { background: var(--marker); color: #1b1408; }
 
+/* Files the worker still downloads from a link (CSV / RSS imports) */
+.lib-import {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px;
+  background: repeating-linear-gradient(-45deg, var(--surface-2) 0 8px, var(--surface-3) 8px 16px);
+  color: var(--ink-2);
+  font-size: var(--fs-xs);
+  text-align: center;
+}
+.lib-import .icon { color: var(--accent); }
+.lib-import.is-error { background: var(--bad-soft); color: var(--bad-ink); }
+.lib-import.is-error .icon { color: var(--bad-ink); }
+.lib-import-url { display: block; margin: 4px 0; font-size: var(--fs-xs); overflow-wrap: anywhere; }
+.lib-imports { display: flex; align-items: flex-start; gap: 8px; margin: 0; color: var(--ink-2); font-size: var(--fs-sm); }
+.lib-imports .icon { flex: none; margin-top: 2px; color: var(--accent); }
+.lib-imports.is-error .icon { color: var(--bad-ink); }
+
+/* Shared from another app */
+.lib-shared {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line));
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+.lib-shared-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.lib-shared-head .icon { color: var(--accent); }
+.lib-shared-head .section-title { margin: 0; }
+.lib-shared-files { --frame-min: 96px; margin: 0; padding: 0; list-style: none; }
+
 /* Drawer */
 .lib-preview {
   position: relative;

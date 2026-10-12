@@ -1,15 +1,15 @@
 // E2E: Library folders, delete confirmation and paging of a large contact sheet.
 // Run: node --test tests/e2e/library.spec.mjs
 //
-// The dev server runs in this process so the test can read and change the seeded documents. It binds an
-// ephemeral port by default so it can run next to the other e2e specs; set LIBRARY_E2E_PORT to pin one.
+// The dev server runs in this process so the test can read and change the seeded documents. It binds a
+// fixed port of its own (5512) so it can run next to the other e2e specs; set LIBRARY_E2E_PORT to change it.
 
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
 import { startDevServer } from '../../dev/server.mjs';
 import { loadPlaywright, shot, unlock } from './helpers.mjs';
 
-const PORT = Number(process.env.LIBRARY_E2E_PORT || 0);
+const PORT = Number(process.env.LIBRARY_E2E_PORT || 5512);
 
 let dev;
 let browser;
@@ -129,6 +129,137 @@ describe('Library', { timeout: 240_000 }, () => {
     await page.locator('.lib-selbar').getByRole('button', { name: 'Select all 130' }).click();
     await page.locator('.lib-selbar', { hasText: '130 selected' }).waitFor();
     await page.locator('.lib-selbar').getByRole('button', { name: 'Clear' }).click();
+  });
+
+  test('files still downloading from a link show a placeholder; a failed download can be tried again', async () => {
+    await dev.seeded.store.update('library', (lib) => {
+      const src = lib.assets.find((a) => a.name === 'Vase trio');
+      const base = { ...src, folderId: null, autopilot: false, tags: [], usedBy: [] };
+      lib.assets.unshift(
+        { ...base, id: 'as_pending', name: 'From the RSS feed', path: 'media/as_pending', thumbPath: 'media/as_pending', importUrl: 'https://studionorth.example/blog/kiln.jpg' },
+        { ...base, id: 'as_broken', name: 'Broken CSV link', path: 'media/as_broken', thumbPath: 'media/as_broken', importUrl: 'https://example.com/missing.jpg', importError: 'The link answered 404 Not Found.' },
+      );
+      return lib;
+    }, { message: 'e2e: imported assets' });
+    await page.reload();
+    await page.waitForSelector('.app', { timeout: 30_000 });
+    await page.locator('.lib-item[data-asset="as_pending"]').waitFor({ timeout: 30_000 });
+    const pending = page.locator('.lib-item[data-asset="as_pending"]');
+    const broken = page.locator('.lib-item[data-asset="as_broken"]');
+    await pending.locator('.lib-import', { hasText: 'Downloading from link…' }).waitFor();
+    await broken.locator('.lib-import.is-error', { hasText: 'Download failed' }).waitFor();
+    // No bytes are loaded for them: nothing to show yet.
+    await page.waitForTimeout(500);
+    assert.equal(await pending.locator('img').count(), 0);
+    assert.equal(await broken.locator('img').count(), 0);
+    assert.match(await page.locator('.lib-imports').textContent(), /1 file is waiting for the worker to download it from a link.*1 file could not be downloaded/);
+    await shot(page, 'library-e2e-importing');
+
+    // The failed one: why, the link, Try again (clears the error so the worker downloads it again).
+    await broken.locator('.lib-frame').click();
+    const drawer = page.locator('.lib-drawer');
+    await drawer.locator('.callout', { hasText: 'Could not download this file' }).waitFor();
+    await drawer.getByText('The link answered 404 Not Found.').waitFor();
+    await drawer.getByText('https://example.com/missing.jpg').waitFor();
+    assert.equal(await drawer.getByRole('link', { name: 'Download' }).count(), 0, 'nothing to download');
+    await drawer.getByRole('button', { name: 'Try again' }).click();
+    await toastText(/tries the download again on its next run/);
+    await drawer.locator('.callout', { hasText: 'Downloading from link…' }).waitFor();
+    const a = (await readDoc('library')).assets.find((x) => x.id === 'as_broken');
+    assert.equal(a.importError, undefined);
+    assert.equal(a.importUrl, 'https://example.com/missing.jpg');
+
+    // Delete works for files that never arrived.
+    await drawer.getByRole('button', { name: 'Delete' }).click();
+    await page.getByRole('dialog', { name: /Delete "Broken CSV link"/ }).getByRole('button', { name: 'Delete file' }).click();
+    await toastText(/Deleted 1 file/);
+    await page.locator('.lib-item[data-asset="as_pending"]').locator('.lib-frame').click();
+    await drawer.locator('.callout', { hasText: 'Downloading from link…' }).waitFor();
+    await drawer.getByRole('button', { name: 'Delete' }).click();
+    await page.getByRole('dialog', { name: /Delete "From the RSS feed"/ }).getByRole('button', { name: 'Delete file' }).click();
+    await toastText(/Deleted 1 file/);
+    await page.locator('.lib-item[data-asset="as_pending"]').waitFor({ state: 'detached' });
+    const left = (await readDoc('library')).assets;
+    assert.ok(!left.some((x) => x.id === 'as_pending' || x.id === 'as_broken'));
+  });
+
+  test('photos shared from another app (share target) are uploaded from the service worker mailbox', async () => {
+    // The app registers the service worker on start; it must control the page to receive the share.
+    await page.waitForFunction(() => !!navigator.serviceWorker.controller, null, { timeout: 30_000 });
+    const before = (await readDoc('library')).assets.length;
+    const res = await page.evaluate(async () => {
+      const jpeg = await (await fetch('/postpilot/dev/fixtures/f02.jpg')).blob();
+      const form = new FormData();
+      form.append('title', 'Glaze notes');
+      form.append('text', 'New glaze test from the kiln');
+      form.append('url', 'https://studionorth.example/blog/glaze');
+      form.append('media', new File([jpeg], 'IMG_2041.jpg', { type: 'image/jpeg' }));
+      form.append('media', new File([new Uint8Array([37, 80, 68, 70])], 'notes.pdf', { type: 'application/pdf' }));
+      // What Android does when Postpilot is picked in the share sheet (manifest share_target).
+      const r = await fetch(new URL('share-target', location.href), { method: 'POST', body: form });
+      return { redirected: r.redirected, url: r.url, mailbox: await caches.has('postpilot-share') };
+    });
+    assert.ok(res.redirected, 'the service worker answered with a redirect');
+    assert.match(res.url, /\/postpilot\//);
+    assert.ok(res.mailbox, 'the files wait in the share mailbox');
+
+    await page.evaluate(() => (location.hash = '#/library?shared=1'));
+    const panel = page.locator('.lib-shared');
+    await panel.waitFor({ timeout: 15_000 });
+    await panel.getByText('1 file cannot be added: only photos and videos can.').waitFor();
+    await panel.locator('.frame img').waitFor();
+    assert.equal(await panel.getByRole('textbox', { name: 'Caption hint' }).inputValue(), 'New glaze test from the kiln\nhttps://studionorth.example/blog/glaze');
+    await shot(page, 'library-e2e-shared');
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.waitForTimeout(300);
+    await panel.screenshot({ path: '/tmp/claude-0/-home-user-claude/61a6d9a0-a933-5d86-8721-920a439be9c7/scratchpad/shots/library-e2e-shared-390.png' });
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    assert.ok(overflow <= 0, `no horizontal overflow on a phone (${overflow})`);
+    await page.setViewportSize({ width: 1280, height: 860 });
+
+    await panel.getByRole('switch', { name: 'Add to the autopilot pool' }).click();
+    await panel.getByRole('button', { name: 'Add to library' }).click();
+    await panel.waitFor({ state: 'detached' });
+    const done = page.locator('.toast', { hasText: 'Added 1 shared file to your library and the autopilot pool.' });
+    await done.waitFor({ timeout: 30_000 });
+    const lib = (await readDoc('library')).assets;
+    assert.equal(lib.length, before + 1);
+    const added = lib[0];
+    assert.equal(added.name, 'IMG_2041.jpg');
+    assert.equal(added.autopilot, true);
+    assert.equal(added.captionHint, 'New glaze test from the kiln\nhttps://studionorth.example/blog/glaze');
+    assert.equal(await page.evaluate(() => caches.has('postpilot-share')), false, 'the mailbox is emptied');
+    assert.doesNotMatch(await page.evaluate(() => location.hash), /shared=/);
+
+    // The toast offers a post with the new file.
+    await done.getByRole('button', { name: 'Create post' }).click();
+    await page.locator('.cmp-drawer .cmp-strip .cmp-item').first().waitFor({ timeout: 20_000 });
+    await page.keyboard.press('Escape');
+    const discard = page.locator('.modal-confirm').getByRole('button', { name: 'Discard' });
+    if (await discard.isVisible().catch(() => false)) await discard.click();
+    await page.locator('.cmp-drawer').waitFor({ state: 'detached' });
+  });
+
+  test('a shared link without photos can start a post', async () => {
+    await page.evaluate(async () => {
+      const form = new FormData();
+      form.append('title', 'Studio blog');
+      form.append('text', 'Read how we mix our glazes');
+      form.append('url', 'https://studionorth.example/blog/mixing');
+      await fetch(new URL('share-target', location.href), { method: 'POST', body: form });
+    });
+    await page.evaluate(() => (location.hash = '#/library?shared=1'));
+    const panel = page.locator('.lib-shared');
+    await panel.getByText('Only photos and videos can be added to the library.').waitFor({ timeout: 15_000 });
+    await panel.getByRole('button', { name: 'Start a post with this text' }).click();
+    await page.locator('#cmp-caption').waitFor({ timeout: 20_000 });
+    assert.equal(await page.locator('#cmp-caption').inputValue(), 'Read how we mix our glazes\nhttps://studionorth.example/blog/mixing');
+    await page.keyboard.press('Escape');
+    const discard = page.locator('.modal-confirm').getByRole('button', { name: 'Discard' });
+    await discard.waitFor({ timeout: 3000 }).catch(() => {});
+    if (await discard.isVisible().catch(() => false)) await discard.click();
+    await page.locator('.cmp-drawer').waitFor({ state: 'detached' });
+    assert.equal(await page.evaluate(() => caches.has('postpilot-share')), false);
   });
 
   test('no console errors', () => {

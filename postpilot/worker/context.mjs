@@ -384,6 +384,8 @@ export async function createContext({ env = {}, fetchImpl, now, consoleLog = con
     store,
     settings,
     tz,
+    /** fetch for other sites (feeds and linked media downloads); the injected fetchImpl in tests. */
+    fetch: doFetch,
     ig: null,
     ai: null,
     startedAtMs,

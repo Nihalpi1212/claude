@@ -69,6 +69,8 @@ const ACTIVITY_KEYS = new Set([
   'reportsCreated',
   'invitesAccepted',
   'invitesNew',
+  'downloaded',
+  'downloadFailed',
 ]);
 
 /** Count keys every stored run record carries (others are stored only when non-zero). */

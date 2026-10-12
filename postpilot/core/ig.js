@@ -301,15 +301,24 @@ function normMessage(m) {
 }
 
 // Collaboration invites (field names unverified, see ig.collaborationInvites): read defensively.
+const VIDEO_URL = /\.(mp4|mov|m4v|webm)(\?|$)/i;
 function normInvite(i) {
   const media = i && i.media && typeof i.media === 'object' ? i.media : {};
   const owner = i.media_owner_username || i.owner_username || (i.owner && i.owner.username) || (i.inviter && i.inviter.username) || i.username || media.username || '';
+  // A preview image: the thumbnail first; media_url only when it is not a video (a reel's media_url is the video file).
+  const isVideo = (i.media_type || media.media_type) === 'VIDEO';
+  const full = i.media_url || media.media_url || null;
+  const thumb = i.thumbnail_url || media.thumbnail_url || (full && !isVideo && !VIDEO_URL.test(full) ? full : null);
+  // The edge is expected to list open invites only; an answered status, if Instagram includes one
+  // (field name unverified), keeps an answered invite from looking open.
+  const state = String(i.status || i.invite_status || i.state || '').toLowerCase();
   return {
     mediaId: String(i.media_id || media.id || i.id || ''),
     owner: String(owner).replace(/^@/, ''),
     caption: i.caption || media.caption || '',
-    mediaUrl: i.media_url || i.thumbnail_url || media.media_url || media.thumbnail_url || null,
+    mediaUrl: thumb,
     permalink: i.permalink || media.permalink || null,
+    open: !/accept|declin|reject|approv|expir|withdr|cancel/.test(state),
   };
 }
 
@@ -780,13 +789,66 @@ export function createIg({
     /**
      * Daily account metrics keyed by local day: { 'YYYY-MM-DD': partial DailySnapshot }.
      * Days that fail for non-auth reasons are skipped.
+     *
+     * `breakdowns` (false by default: each day costs 2-3 more calls) adds, for every day (true) or for
+     * the listed day keys, reach and views split by format and by followers:
+     *   reachByType, viewsByType   {POST, REEL, STORY, CAROUSEL_CONTAINER, AD, ...} as Instagram returns them
+     *   reachFollowers, reachNonFollowers, viewsFollowers, viewsNonFollowers
+     * Research (Graph v22+): reach takes breakdown media_product_type or follow_type, views takes
+     * media_product_type or follower_type, both only with metric_type=total_value. Meta's docs could not
+     * be checked directly (UNVERIFIED), so views falls back to follow_type when Instagram rejects
+     * follower_type (rejections are remembered for the client's life). Three calls per day when the
+     * research is right. A breakdown that fails is left out; a rate limit or network error stops the
+     * remaining breakdown calls but keeps everything already read. Only auth errors are thrown.
      */
-    async accountDaily({ sinceKey, untilKey, tz = 'UTC', concurrency = 3 } = {}) {
+    async accountDaily({ sinceKey, untilKey, tz = 'UTC', concurrency = 3, breakdowns = false } = {}) {
       const out = {};
       const keys = dayRange(sinceKey, untilKey);
       const day = (k) => (out[k] = out[k] || {});
       const fatal = (err) => !(err instanceof IgError) || err.isAuth || err.isRateLimit || err.code === 'network';
       const path = `${uidPath()}/insights`;
+      const breakdownDays = breakdowns === true ? new Set(keys) : new Set(Array.isArray(breakdowns) ? breakdowns : []);
+      let breakdownsStopped = false;
+      const typeMap = (item) => {
+        const m = {};
+        for (const r of breakdownResults(item)) {
+          const dim = (r.dimension_values || [])[0];
+          if (dim && typeof r.value === 'number') m[dim] = (m[dim] || 0) + r.value;
+        }
+        return m;
+      };
+      /** One breakdown call. Failures are skipped; a rate limit or network error stops the later ones. */
+      const breakdownCall = async (metrics, breakdown, scope, apply) => {
+        if (breakdownsStopped) return;
+        try {
+          for (const item of await insights(path, metrics, { breakdown, ...apply.params }, scope)) apply.item(item);
+        } catch (err) {
+          if (!(err instanceof IgError) || err.isAuth) throw err;
+          if (err.isRateLimit || err.code === 'network') breakdownsStopped = true;
+        }
+      };
+      const dayBreakdowns = async (k, params) => {
+        const d = () => day(k);
+        await breakdownCall(['reach', 'views'], 'media_product_type', 'account-bd-type', {
+          params,
+          item: (item) => {
+            const m = typeMap(item);
+            if (!Object.keys(m).length) return;
+            if (item.name === 'reach') d().reachByType = m;
+            if (item.name === 'views') d().viewsByType = m;
+          },
+        });
+        const split = (item) => {
+          const m = typeMap(item);
+          const pre = item.name === 'reach' ? 'reach' : item.name === 'views' ? 'views' : null;
+          if (!pre || (m.FOLLOWER === undefined && m.NON_FOLLOWER === undefined)) return;
+          if (m.FOLLOWER !== undefined) d()[`${pre}Followers`] = m.FOLLOWER;
+          if (m.NON_FOLLOWER !== undefined) d()[`${pre}NonFollowers`] = m.NON_FOLLOWER;
+        };
+        await breakdownCall(['reach'], 'follow_type', 'account-bd-follow', { params, item: split });
+        await breakdownCall(['views'], 'follower_type', 'account-bd-follower', { params, item: split });
+        if (unsupported.has('account-bd-follower:views')) await breakdownCall(['views'], 'follow_type', 'account-bd-follow-views', { params, item: split });
+      };
 
       for (let i = 0; i < keys.length; i += 30) {
         const chunk = keys.slice(i, i + 30);
@@ -836,6 +898,7 @@ export function createIg({
         } catch (err) {
           if (fatal(err)) throw err;
         }
+        if (breakdownDays.has(k)) await dayBreakdowns(k, params);
       });
 
       for (const k of Object.keys(out)) {
@@ -1208,23 +1271,43 @@ export function createIg({
           throw collabUnavailable(err2) ? collabUnsupported(err2) : err2;
         }
       }
-      return raw.map(normInvite).filter((i) => i.mediaId);
+      return raw
+        .map(normInvite)
+        .filter((i) => i.mediaId && i.open)
+        .map((i) => {
+          delete i.open;
+          return i;
+        });
     },
 
     /**
      * Accept or decline a collaboration invite (POST /{ig-user-id}/collaboration_invites with media_id
-     * and accept). Answering sets the invite's state and creates nothing, so sending the same answer
-     * again after a lost connection is harmless: the request is treated as idempotent (retried on
-     * network errors, never flagged maybeSent). A repeat answer may be refused because the invite is
-     * gone; callers treat isNotFound as "already answered".
+     * and accept). Answering sets the invite's state and creates nothing, so after a lost connection
+     * the same answer is sent again (up to twice). That repeat can only be refused as "not found"
+     * because the first answer already closed the invite, so it resolves with `unconfirmed: true`
+     * instead of failing. When every attempt is lost the error is flagged `maybeSent` (Instagram may
+     * have the answer): callers record the answer as unconfirmed instead of asking again.
+     * Returns {mediaId, accepted, success, unconfirmed?}. UNVERIFIED: Meta's error for an invite that
+     * is no longer open (the mock answers 100/33, read through isNotFound).
      */
     async respondCollabInvite(mediaId, accept) {
-      try {
-        const res = await post(`${uidPath()}/collaboration_invites`, { media_id: String(mediaId), accept: !!accept }, { idempotent: true });
-        return { mediaId: String(mediaId), accepted: !!accept, success: res && res.success !== false };
-      } catch (err) {
-        if (collabUnavailable(err) && (err.code !== 100 || /collaboration_invites/i.test(err.message))) throw collabUnsupported(err);
-        throw err;
+      const path = `${uidPath()}/collaboration_invites`;
+      const params = { media_id: String(mediaId), accept: !!accept };
+      const done = (res, unconfirmed) => ({ mediaId: String(mediaId), accepted: !!accept, success: !res || res.success !== false, ...(unconfirmed ? { unconfirmed: true } : {}) });
+      let mayHaveArrived = false; // an earlier attempt failed after it may have reached Instagram
+      for (let attempt = 0; ; attempt++) {
+        try {
+          return done(await post(path, params, { idempotent: true, retries: 0 }), false);
+        } catch (err) {
+          if (mayHaveArrived && err instanceof IgError && err.isNotFound) return done(null, true);
+          if (collabUnavailable(err) && (err.code !== 100 || /collaboration_invites/i.test(err.message))) throw collabUnsupported(err);
+          if (!(err instanceof IgError) || err.code !== 'network') throw err;
+          if (!NOT_SENT_CODES.has(networkCode(err.cause))) mayHaveArrived = true;
+          if (attempt >= 2) {
+            throw mayHaveArrived ? new IgError(err.message, { code: 'network', status: 0, cause: err.cause, maybeSent: true, userMessage: MAYBE_SENT_MESSAGE }) : err;
+          }
+          await sleep(retryDelayMs * 2 ** attempt);
+        }
       }
     },
 

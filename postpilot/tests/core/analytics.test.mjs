@@ -2,7 +2,24 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   aggregateByType,
+  appendHistoryPoint,
+  breakdownTotals,
   byWeekdayHour,
+  campaignStats,
+  historyPoint,
+  labelCounts,
+  labelsByMedia,
+  median,
+  mediaWithLabel,
+  monthBounds,
+  previousMonth,
+  thinPoints,
+  valueAtAge,
+  buildMonthlyReport,
+  HISTORY_FROZEN_POINTS,
+  monthCoverage,
+  reportComparable,
+  reportHeadline,
   comparePeriods,
   engagementRate,
   formatDelta,
@@ -233,4 +250,212 @@ test('toCsv: RFC 4180 quoting, CRLF and formula guard', () => {
   assert.ok(!csv.endsWith('\r\n'));
   assert.equal(toCsv([], [{ key: 'a' }]), 'a');
   assert.ok(toCsv([], [{ key: 'a' }], { bom: true }).startsWith('﻿'));
+});
+
+// ---------------------------------------------------------------------------
+// Per-post history, breakdowns, campaigns
+
+const T0 = Date.parse('2026-10-01T12:00:00Z');
+const at = (h) => new Date(T0 + h * 36e5).toISOString().replace(/\.\d{3}Z$/, 'Z');
+
+test('historyPoint: short keys, missing metrics left out, seconds precision', () => {
+  const p = historyPoint({ metrics: { views: 120, reach: 80, saved: 4, shares: 2, follows: 1 }, likeCount: 9, commentsCount: 2 }, T0 + 1234);
+  assert.deepEqual(p, { t: '2026-10-01T12:00:01Z', v: 120, r: 80, l: 9, c: 2, s: 4, sh: 2, f: 1 });
+  assert.deepEqual(historyPoint({ metrics: { reach: 5 } }, T0), { t: '2026-10-01T12:00:00Z', r: 5 });
+  assert.equal(historyPoint({ metrics: {} }, T0), null);
+  assert.equal(historyPoint({ metrics: { reach: 1 } }, 'not a date'), null);
+});
+
+test('appendHistoryPoint: skips unchanged points under 3 hours old, never goes back in time', () => {
+  const pts = [{ t: at(1), v: 10, r: 5 }];
+  assert.equal(appendHistoryPoint(pts, { t: at(2), v: 10, r: 5 }), null, 'unchanged, 1 hour later');
+  assert.equal(appendHistoryPoint(pts, { t: at(4.5), v: 10, r: 5 }).length, 2, 'unchanged, 3.5 hours later');
+  assert.equal(appendHistoryPoint(pts, { t: at(1.5), v: 11, r: 5 }).length, 2, 'changed');
+  assert.equal(appendHistoryPoint(pts, { t: at(0.5), v: 11, r: 5 }), null, 'older than the last point');
+  assert.deepEqual(appendHistoryPoint(undefined, { t: at(1), v: 1 }), [{ t: at(1), v: 1 }]);
+});
+
+test('thinPoints keeps 48 points, first and last, denser in the first hours', () => {
+  const pts = [];
+  for (let h = 1; h <= 48; h++) pts.push({ t: at(h), v: h });
+  for (let d = 3; d <= 30; d++) pts.push({ t: at(d * 24), v: 100 + d });
+  const thin = thinPoints(pts, 48, T0);
+  assert.equal(thin.length, 48);
+  assert.equal(thin[0], pts[0]);
+  assert.equal(thin.at(-1), pts.at(-1));
+  const hours = thin.map((p) => (Date.parse(p.t) - T0) / 36e5);
+  assert.ok(hours.filter((h) => h <= 24).length >= 15, 'the first day keeps most of its points');
+  assert.ok(hours.every((h, i) => i === 0 || h > hours[i - 1]), 'still in time order');
+  assert.equal(thinPoints(pts.slice(0, 5), 48).length, 5);
+});
+
+test('valueAtAge interpolates, anchors at 0 near the start and returns null when unknown', () => {
+  const pts = [{ t: at(6), v: 300 }, { t: at(20), v: 700 }, { t: at(30), v: 900 }, { t: at(150), v: 1500 }, { t: at(190), v: 1600 }];
+  assert.equal(valueAtAge(pts, T0, 24), 780);
+  assert.equal(valueAtAge(pts, T0, 168), 1545);
+  assert.equal(valueAtAge(pts, T0, 30), 900);
+  assert.equal(valueAtAge(pts, T0, 5), 250, 'between publishing (0) and the first point');
+  assert.equal(valueAtAge(pts, T0, 3), null, 'first point more than 1.5x the age away');
+  assert.equal(valueAtAge([{ t: at(60), v: 600 }], T0, 24), null, 'first point too far after the age');
+  assert.equal(valueAtAge([{ t: at(10), v: 100 }], T0, 24), null, 'history does not reach the age');
+  assert.equal(valueAtAge([{ t: at(23.6), v: 400 }], T0, 24), 400, 'a run a few minutes short counts');
+  assert.equal(valueAtAge([{ t: at(2), v: 10 }, { t: at(160), v: 900 }], T0, 24), null, 'points too far apart');
+  assert.equal(valueAtAge(pts, T0, 24, 'r'), null, 'metric missing');
+  assert.equal(valueAtAge(null, T0, 24), null);
+  assert.equal(valueAtAge(pts, 'bad', 24), null);
+  assert.equal(median([5, 1, 3]), 3);
+  assert.equal(median([4, 1, 3, 2]), 2.5);
+  assert.equal(median([null, undefined]), null);
+});
+
+test('breakdownTotals and the follower split sum over a range', () => {
+  const days = {
+    '2026-10-01': { reach: 100, reachFollowers: 60, reachNonFollowers: 40, viewsByType: { POST: 10, REEL: 20 } },
+    '2026-10-02': { reach: 50, viewsByType: { REEL: 5, STORY: 1 } },
+    '2026-10-03': { reach: 70 },
+  };
+  assert.deepEqual(breakdownTotals(days, '2026-10-01', '2026-10-03', 'viewsByType'), { POST: 10, REEL: 25, STORY: 1 });
+  assert.equal(breakdownTotals(days, '2026-10-03', '2026-10-03', 'viewsByType'), null);
+  assert.equal(breakdownTotals({ days }, '2026-10-01', '2026-10-01', 'viewsByType').POST, 10);
+  const s = summarizeDays(days, '2026-10-01', '2026-10-03');
+  assert.equal(s.reachFollowers, 60);
+  assert.equal(s.reachNonFollowers, 40);
+  assert.equal(s.viewsFollowers, null);
+});
+
+test('campaigns: labels joined by igMediaId, case-insensitive, with totals and averages', () => {
+  const posts = [
+    { id: 'p1', igMediaId: 'a', labels: ['Autumn drop', 'product'] },
+    { id: 'p2', igMediaId: 'b', labels: ['autumn drop'] },
+    { id: 'p3', igMediaId: null, labels: ['autumn drop'] },
+    { id: 'p4', igMediaId: 'c', labels: [] },
+  ];
+  const archive = { posts: [{ id: 'p0', igMediaId: 'd', labels: [' Autumn Drop '] }] };
+  const index = labelsByMedia(posts, archive);
+  assert.deepEqual([...index.keys()].sort(), ['a', 'b', 'd']);
+  assert.deepEqual(index.get('a'), ['Autumn drop', 'product']);
+  const media = [
+    m('a', '2026-10-01T10:00:00Z', { reach: 100, views: 200, likes: 10, comments: 1, saved: 2, shares: 1 }),
+    m('b', '2026-10-02T10:00:00Z', { reach: 300, views: 500, likes: 20, comments: 4, saved: 1, shares: 0 }),
+    m('c', '2026-10-03T10:00:00Z', { reach: 900 }),
+  ];
+  assert.deepEqual(labelCounts(media, index), [{ label: 'Autumn drop', count: 2 }, { label: 'product', count: 1 }]);
+  const set = mediaWithLabel(media, index, 'AUTUMN DROP');
+  assert.deepEqual(set.map((x) => x.id), ['a', 'b']);
+  assert.equal(mediaWithLabel(media, index, '').length, 3);
+  const c = campaignStats(set);
+  assert.equal(c.posts, 2);
+  assert.equal(c.reach, 400);
+  assert.equal(c.views, 700);
+  assert.equal(c.interactions, 39);
+  assert.equal(c.avgReach, 200);
+  assert.equal(c.top.id, 'b');
+  assert.equal(campaignStats([]).top, null);
+  assert.equal(campaignStats([]).reach, null);
+});
+
+test('month helpers', () => {
+  assert.deepEqual(monthBounds('2028-02'), { fromKey: '2028-02-01', toKey: '2028-02-29' });
+  assert.deepEqual(monthBounds('2026-12'), { fromKey: '2026-12-01', toKey: '2026-12-31' });
+  assert.equal(previousMonth('2026-01'), '2025-12');
+  assert.equal(previousMonth('2026-10'), '2026-09');
+});
+
+test('valueAtAge: a history that starts after the age gives no value (no straight line from publishing)', () => {
+  // A concave cumulative curve, as views and reach are: fast at first, then flat.
+  const views = (h) => Math.round(10000 * (1 - Math.exp(-h / 40)));
+  const pts = (hours) => hours.map((h) => ({ t: at(h), v: views(h) }));
+  assert.equal(valueAtAge(pts([240, 260, 280]), T0, 168), null, 'history from day 10: 7-day value unknown');
+  assert.equal(valueAtAge(pts([34, 35, 36]), T0, 24), null, 'history from hour 34: 24-hour value unknown');
+  assert.equal(valueAtAge(pts([25.5, 30]), T0, 24), null, '1.5 hours late is more than cron jitter');
+  // A first point a few minutes past the age still counts (within 1 hour, or 3% of the age).
+  const near = valueAtAge(pts([24.5, 30]), T0, 24);
+  assert.ok(Math.abs(near - views(24)) / views(24) < 0.03, `${near} vs ${views(24)}`);
+  assert.ok(valueAtAge(pts([172, 190]), T0, 168) != null, '4 hours past the 7-day mark is within 3%');
+  // Points around the age further apart than half the age: unknown rather than a straight-line guess.
+  assert.equal(valueAtAge(pts([60, 200]), T0, 168), null);
+  assert.ok(valueAtAge(pts([120, 190]), T0, 168) != null);
+});
+
+test('thinPoints keeps the points around 24 hours and 7 days, so thinned curves keep their values', () => {
+  const views = (h) => Math.round(20000 * (1 - Math.exp(-h / 40)));
+  const pts = [];
+  for (let h = 0.4; h < 48; h += 1) pts.push({ t: at(h), v: views(h) });
+  for (let h = 48.4; h < 168; h += 6) pts.push({ t: at(h), v: views(h) });
+  for (let h = 168.4; h < 720; h += 24) pts.push({ t: at(h), v: views(h) });
+  const v24 = valueAtAge(pts, T0, 24);
+  const v7 = valueAtAge(pts, T0, 168);
+  for (const max of [48, HISTORY_FROZEN_POINTS, 8]) {
+    const thin = thinPoints(pts, max, T0);
+    assert.equal(thin.length, max);
+    assert.equal(thin[0], pts[0]);
+    assert.equal(thin.at(-1), pts.at(-1));
+    assert.equal(valueAtAge(thin, T0, 24), v24, `24 h value with ${max} points`);
+    assert.equal(valueAtAge(thin, T0, 168), v7, `7-day value with ${max} points`);
+  }
+  // Without the publish time there is nothing to anchor on: plain thinning.
+  assert.equal(thinPoints(pts, 10).length, 10);
+});
+
+test('monthly report numbers record how much of each month was saved', () => {
+  const days = {};
+  // October: 12 days with numbers (from the 20th); September: 17 days (from the 14th).
+  for (let d = 14; d <= 30; d++) days[`2026-09-${String(d).padStart(2, '0')}`] = { reach: 1000, followers: 4800 + d };
+  for (let d = 20; d <= 31; d++) days[`2026-10-${d}`] = { reach: 1000, reachFollowers: 600, reachNonFollowers: 400 };
+  days['2026-10-31'].followers = 4820; // a single follower count in October
+  days['2026-10-05'] = { followers: 4810 }; // a follower count alone is not a day with account numbers
+  const r = buildMonthlyReport({ days, media: {}, month: '2026-10' });
+  assert.equal(r.summary.daysInMonth, 31);
+  assert.equal(r.summary.daysSaved, 12);
+  assert.equal(r.previous.daysInMonth, 30);
+  assert.equal(r.previous.daysSaved, 17);
+  assert.deepEqual(monthCoverage(r.summary, '2026-10'), { saved: 12, total: 31, complete: false });
+  assert.equal(reportComparable(r), false);
+  // Two follower counts in October (the 5th and the 31st): growth is known.
+  assert.equal(r.summary.followerGrowth, 10);
+  const headline = reportHeadline(r);
+  assert.doesNotMatch(headline, /%/, 'no month-on-month change for incomplete months');
+  assert.match(headline, /^Reach 12K · 0 posts · \+10 followers · 12 of 31 days saved$/);
+
+  // One follower count is not a change of 0.
+  delete days['2026-10-05'];
+  const one = buildMonthlyReport({ days, media: {}, month: '2026-10' });
+  assert.equal(one.summary.followersEnd, 4820);
+  assert.equal(one.summary.followerGrowth, null);
+  assert.equal(one.summary.followerGrowthPct, null);
+  assert.doesNotMatch(reportHeadline(one), /followers/);
+  // Two equal counts: no change, said in words (not "0 followers").
+  days['2026-10-20'].followers = 4820;
+  assert.match(reportHeadline(buildMonthlyReport({ days, media: {}, month: '2026-10' })), /· no follower change ·/);
+
+  // Complete months are compared; 28 of 30 days counts as complete (90%).
+  const full = {};
+  for (const k of ['2026-08', '2026-09']) {
+    const { toKey } = monthBounds(k);
+    for (let d = 1; d <= Number(toKey.slice(8)); d++) full[`${k}-${String(d).padStart(2, '0')}`] = { reach: k === '2026-09' ? 300 : 200 };
+  }
+  delete full['2026-09-01'];
+  delete full['2026-09-02'];
+  const cmp = buildMonthlyReport({ days: full, media: {}, month: '2026-09' });
+  assert.equal(cmp.summary.daysSaved, 28);
+  assert.equal(reportComparable(cmp), true);
+  assert.match(reportHeadline(cmp), /^Reach 8.4K \(\+35%\)/);
+  // Older stored reports without the coverage fields fall back to daysWithData and the month length.
+  assert.deepEqual(monthCoverage({ daysWithData: 30 }, '2026-09'), { saved: 30, total: 30, complete: true });
+});
+
+test('monthly report: the non-follower share of reach only counts days with the split', () => {
+  // The split starts on the 21st (an upgrade): reach is 1000 every day, 40% from non-followers.
+  const days = {};
+  for (let d = 1; d <= 30; d++) {
+    const k = `2026-09-${String(d).padStart(2, '0')}`;
+    days[k] = { reach: 1000, views: 3000 };
+    if (d >= 21) Object.assign(days[k], { reachFollowers: 600, reachNonFollowers: 400, viewsByType: { POST: 2000, REEL: 1000 } });
+  }
+  const r = buildMonthlyReport({ days, media: {}, month: '2026-09' });
+  assert.equal(r.summary.reach, 30000);
+  assert.equal(r.summary.breakdownDays, 10);
+  assert.equal(r.summary.viewsByTypeDays, 10);
+  assert.equal(r.summary.nonFollowerReachShare, 0.4);
+  assert.equal(r.previous.nonFollowerReachShare, null);
 });

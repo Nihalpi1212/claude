@@ -1,10 +1,11 @@
-// Planner calendar pieces: post helpers, thumbnails, drag state, Month and Week views.
+// Planner calendar pieces: post helpers, search, thumbnails, drag state, Month, Week and Day views.
 // Used by js/views/planner.js (and the post helpers by js/views/queues.js).
 
 import { html, useLayoutEffect, useMemo, useRef, useState } from '../../vendor/preact.js';
 import { addDaysKey, dayKey, format, formatDay, formatTime, pad, weekdayOfKey, zonedParts, zonedToUtc } from '../../core/time.js';
+import { hasThumb, importState } from '../media.js';
 import { Icon } from './icons.js';
-import { IconButton, cx } from './kit.js';
+import { IconButton, StatusPill, cx } from './kit.js';
 import { useAssetUrl } from './media-picker.js';
 import { loadViewCss } from '../css.js';
 
@@ -45,6 +46,26 @@ export function statusKey(post) {
   return post.status;
 }
 
+/** StatusPill for a post ('reminded' = the reminder went out and the owner posts it by hand). */
+export function PostStatus({ post }) {
+  if (post.status === 'reminded') return html`<${StatusPill} status="needs-approval" label="Reminder sent" class="is-reminded" />`;
+  return html`<${StatusPill} status=${statusKey(post)} />`;
+}
+
+/** Hash of the screen that posts a reminded post by hand. */
+export const postNowHash = (post) => `#/post-now/${encodeURIComponent(post.id)}`;
+
+/**
+ * Does a post match a search? Every word must appear in its caption, first comment, notes or labels
+ * (case-insensitive; a leading # or @ is optional).
+ */
+export function matchesSearch(post, query) {
+  const words = String(query || '').toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) return true;
+  const hay = [post.caption, post.firstComment, post.notes, ...(post.labels || [])].map((v) => String(v || '').toLowerCase()).join('\n');
+  return words.every((w) => hay.includes(w) || hay.includes(w.replace(/^[#@]/, '')));
+}
+
 /** Status bucket used by the planner filters. */
 export function filterStatus(post) {
   if (post.needsApproval && post.status === 'draft') return 'approval';
@@ -61,7 +82,7 @@ export function postInstant(post) {
 export function toneClass(post) {
   if (!post) return 'is-published';
   if (post.needsApproval && post.status === 'draft') return 'is-attention';
-  return { draft: 'is-draft', published: 'is-published', failed: 'is-failed', publishing: 'is-attention', canceled: 'is-draft' }[post.status] || '';
+  return { draft: 'is-draft', published: 'is-published', failed: 'is-failed', publishing: 'is-attention', canceled: 'is-draft', reminded: 'is-reminded' }[post.status] || '';
 }
 
 /** Post type of an Instagram media item from analytics-media. */
@@ -119,12 +140,29 @@ export function dayLabel(day, today, tz) {
 // ---------------------------------------------------------------------------
 // Thumbnails
 
-/** Small thumbnail of a library asset (or a direct image URL for Instagram media). */
+/**
+ * Small thumbnail of a library asset (or a direct image URL for Instagram media). Files the worker
+ * still has to download from a link show a download icon (an alert icon when the download failed);
+ * videos without a picture (downloaded by the worker, which makes no poster frame) a video icon.
+ */
 export function PostThumb({ asset, src, size = 20, class: cls }) {
   const url = useAssetUrl(src ? null : asset);
   const image = src || url;
-  return html`<span class=${cx('pl-thumb', cls)} style=${{ width: `${size}px`, height: `${size}px` }} aria-hidden="true">
-    ${image ? html`<img src=${image} alt="" loading="lazy" decoding="async" draggable="false" referrerpolicy="no-referrer" />` : null}
+  const state = src ? null : importState(asset);
+  const tip =
+    state === 'failed'
+      ? `Could not download from its link: ${asset.importError}`
+      : state
+        ? `Downloading from its link on the next worker run${asset.importLastError ? `. Last try failed: ${asset.importLastError}` : ''}`
+        : undefined;
+  const icon = state === 'failed' ? 'alert' : state ? 'download' : !src && asset && asset.kind === 'video' && !hasThumb(asset) ? 'video' : null;
+  return html`<span class=${cx('pl-thumb', state === 'pending' && 'is-importing', state === 'failed' && 'is-import-failed', icon === 'video' && 'is-video', cls)}
+    style=${{ width: `${size}px`, height: `${size}px` }} aria-hidden="true" title=${tip}>
+    ${image
+      ? html`<img src=${image} alt="" loading="lazy" decoding="async" draggable="false" referrerpolicy="no-referrer" />`
+      : icon
+        ? html`<${Icon} name=${icon} size=${Math.max(10, Math.min(18, Math.round(size * 0.42)))} />`
+        : null}
   </span>`;
 }
 
@@ -183,7 +221,8 @@ function Chip({ item, tz, onOpen }) {
   }
   return html`<div role="button" tabindex="0" class=${cx('cal-event pl-chip', toneClass(item.post), item.movable && 'is-movable')}
     draggable=${item.movable ? 'true' : 'false'} data-post-id=${item.post.id}
-    title=${item.movable ? `${label} (drag to another day to move it)` : label} aria-label=${`${label}, ${statusKey(item.post).replace('-', ' ')}`}
+    title=${item.movable ? `${label} (drag to another day to move it)` : item.post.status === 'reminded' ? `${label} (post it by hand)` : label}
+    aria-label=${`${label}, ${item.post.status === 'reminded' ? 'post by hand' : statusKey(item.post).replace('-', ' ')}`}
     onDragStart=${item.movable ? (e) => startDrag(e, item.post.id) : (e) => e.preventDefault()} onDragEnd=${endDrag}
     onClick=${() => onOpen(item)} onKeyDown=${activate(() => onOpen(item))}>${content}</div>`;
 }
@@ -407,10 +446,105 @@ function WeekEvent({ ev, tz, onOpen }) {
   }
   return html`<div role="button" tabindex="0" class=${cx('pl-week-event cal-event', toneClass(ev.post), ev.movable && 'is-movable')} style=${style}
     data-post-id=${ev.post.id} draggable=${ev.movable ? 'true' : 'false'}
-    title=${`${time} · ${TYPE_LABEL[type]} · ${title}${ev.movable ? ' (drag to move)' : ''}`}
+    aria-label=${`${time} · ${TYPE_LABEL[type]} · ${title}, ${ev.post.status === 'reminded' ? 'post by hand' : statusKey(ev.post).replace('-', ' ')}`}
+    title=${`${time} · ${TYPE_LABEL[type]} · ${title}${ev.movable ? ' (drag to move)' : ev.post.status === 'reminded' ? ' (post it by hand)' : ''}`}
     onDragStart=${ev.movable ? (e) => startDrag(e, ev.post.id, { offsetY: e.clientY - e.currentTarget.getBoundingClientRect().top }) : (e) => e.preventDefault()}
     onDragEnd=${endDrag}
     onClick=${() => onOpen(ev)} onKeyDown=${activate(() => onOpen(ev))}>${inner}</div>`;
+}
+
+// ---------------------------------------------------------------------------
+// Day view
+
+const DAY_FIRST_HOUR = 6;
+
+/**
+ * DayView {day, today, nowMs, tz, items, matrix, onCompose(day, minutes), onOpen(item), onDropPost(id, day, minutes)}
+ * One row per hour (from 06:00, or earlier when something is planned before that), each post in the
+ * row of its hour in time order. Posts are buttons (Enter or Space opens them), every future hour has
+ * an "add" button, and a post can be dragged to another hour (it keeps its minutes).
+ */
+export function DayView({ day, today, nowMs, tz, items, matrix, onCompose, onOpen, onDropPost }) {
+  const [dropHour, setDropHour] = useState(null);
+  const list = useMemo(() => items.filter((it) => it.day === day).sort((a, b) => a.minutes - b.minutes || (a.kind === 'ig') - (b.kind === 'ig')), [items, day]);
+  const first = Math.min(DAY_FIRST_HOUR, ...list.map((it) => Math.floor(it.minutes / 60)));
+  const hours = Array.from({ length: 24 - first }, (_, i) => first + i);
+  const row = (matrix && matrix[weekdayOfKey(day)]) || [];
+  const nowP = zonedParts(new Date(nowMs), tz);
+  const nowHour = day === today ? nowP.hour : null;
+  const past = (h) => day < today || (day === today && h < nowP.hour);
+  const dateLabel = formatDay(zonedToUtc(day, '12:00', tz), tz);
+  return html`<ol class="pl-dayview" aria-label=${`${dateLabel} by hour`}>
+    ${hours.map((h) => {
+      const inHour = list.filter((it) => Math.floor(it.minutes / 60) === h);
+      const good = Math.min(1, Math.max(0, ((row[h] || 0) - 0.5) / 0.5));
+      const label = clock(h * 60, tz, day);
+      const canAdd = !past(h) || h === nowHour;
+      return html`<li key=${h} data-hour=${h}
+        class=${cx('pl-hour', past(h) && h !== nowHour && 'is-past', h === nowHour && 'is-now', good > 0.05 && 'is-good', dropHour === h && 'is-drop')}
+        style=${good > 0.05 ? { '--s': good.toFixed(2) } : null}
+        onDragOver=${(e) => {
+          if (!currentDrag() || (past(h) && h !== nowHour)) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          if (dropHour !== h) setDropHour(h);
+        }}
+        onDragLeave=${(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget)) setDropHour((x) => (x === h ? null : x));
+        }}
+        onDrop=${(e) => {
+          e.preventDefault();
+          const d = currentDrag();
+          endDrag();
+          setDropHour(null);
+          if (d && !(past(h) && h !== nowHour)) onDropPost(d.id, day, h * 60 + (d.minute || 0));
+        }}>
+        <span class="pl-hour-label">
+          <span class="mono">${label}</span>
+          ${h === nowHour ? html`<span class="pl-hour-now">Now</span>` : good > 0.5 ? html`<span class="pl-hour-good" title="A good time to post">Good time</span>` : null}
+        </span>
+        <div class="pl-hour-items">
+          ${inHour.map((it) => html`<${DayEvent} key=${it.key} item=${it} tz=${tz} onOpen=${onOpen} />`)}
+        </div>
+        ${canAdd
+          ? html`<${IconButton} icon="plus" size="sm" class="pl-hour-add" label=${`New post on ${dateLabel} at ${label}`}
+              onClick=${() => onCompose(day, h === nowHour ? Math.min(23 * 60 + 45, Math.ceil((nowP.hour * 60 + nowP.minute + 20) / 15) * 15) : h * 60)} />`
+          : html`<span class="pl-hour-add-pad" aria-hidden="true"></span>`}
+      </li>`;
+    })}
+  </ol>`;
+}
+
+function DayEvent({ item, tz, onOpen }) {
+  const type = item.post ? item.post.type : igType(item.media);
+  const title = item.post ? postTitle(item.post) : (item.media.caption || '').split('\n')[0] || 'Published on Instagram';
+  const time = shortTime(item.at, tz);
+  const inner = html`
+    <${PostThumb} asset=${item.asset} src=${item.src} size=${40} />
+    <span class="pl-dayevent-text">
+      <span class="pl-dayevent-meta">
+        <span class="mono">${time}</span>
+        <span class="pl-meta-item"><${Icon} name=${TYPE_ICON[type]} size=${12} />${TYPE_LABEL[type]}</span>
+        ${item.listColor ? html`<span class="pl-list-dot" style=${{ background: item.listColor }} aria-hidden="true"></span>` : null}
+      </span>
+      <span class="pl-dayevent-title">${title}</span>
+    </span>`;
+  if (item.kind === 'ig') {
+    return html`<a class="pl-dayevent cal-event is-published is-ig" href=${item.media.permalink || undefined} target="_blank" rel="noopener noreferrer"
+      aria-label=${`Published on Instagram at ${time}: ${title}`}>${inner}<span class="pl-dayevent-side"><${StatusPill} status="published" /></span></a>`;
+  }
+  const p = item.post;
+  const reminded = p.status === 'reminded';
+  const minute = zonedParts(new Date(item.at), tz).minute;
+  return html`<div role="button" tabindex="0" class=${cx('pl-dayevent cal-event', toneClass(p), item.movable && 'is-movable')} data-post-id=${p.id}
+    draggable=${item.movable ? 'true' : 'false'}
+    aria-label=${`${time} · ${TYPE_LABEL[type]} · ${title}, ${reminded ? 'post by hand' : statusKey(p).replace('-', ' ')}`}
+    title=${reminded ? 'Open "Post by hand"' : item.movable ? 'Open, or drag to another hour' : undefined}
+    onDragStart=${item.movable ? (e) => startDrag(e, p.id, { minute }) : (e) => e.preventDefault()} onDragEnd=${endDrag}
+    onClick=${() => onOpen(item)} onKeyDown=${activate(() => onOpen(item))}>
+    ${inner}
+    <span class="pl-dayevent-side"><${PostStatus} post=${p} /></span>
+  </div>`;
 }
 
 /** Monday-start days of the week that contains `day`. */

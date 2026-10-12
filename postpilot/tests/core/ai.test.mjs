@@ -325,13 +325,30 @@ test('rewrite: request shape per mode, fenced text, voice only where it restyles
 });
 
 test('rewrite: default language, length limit, input checks and empty answers', async () => {
-  const sdk = fakeSdk(json({ rewritten: 'x'.repeat(2600) }));
+  // An answer over the limit is never cut (that would drop the closing call to action or hashtags).
+  const sdk = fakeSdk(json({ rewritten: `${'x'.repeat(2580)}\n\n#ceramics` }));
   const ai = createAi({ Anthropic: sdk.Anthropic, apiKey: 'k', language: 'Spanish' });
-  const long = await ai.rewrite({ text: 'Hola', mode: 'translate' });
-  assert.ok(long.length <= 2200);
+  await assert.rejects(ai.rewrite({ text: 'Hola', mode: 'translate' }), (e) => e instanceof AiError && e.code === 'too_long' && /2591 characters, more than the 2200-character limit/.test(e.userMessage) && /Shorten the text first/.test(e.userMessage));
   assert.match(sdk.calls[0].body.messages[0].content[0].text, /Translate it into Spanish/);
-  const short = await createAi({ Anthropic: fakeSdk(json({ rewritten: 'word '.repeat(100) })).Anthropic, apiKey: 'k' }).rewrite({ text: 'a', mode: 'longer', maxChars: 50 });
-  assert.ok(short.length <= 50);
+  await assert.rejects(
+    createAi({ Anthropic: fakeSdk(json({ rewritten: 'word '.repeat(100) })).Anthropic, apiKey: 'k' }).rewrite({ text: 'a', mode: 'longer', maxChars: 50 }),
+    (e) => e.code === 'too_long',
+  );
+  const fits = await createAi({ Anthropic: fakeSdk(json({ rewritten: 'x'.repeat(2200) })).Anthropic, apiKey: 'k' }).rewrite({ text: 'a', mode: 'shorter' });
+  assert.equal(fits.length, 2200, 'exactly at the limit is fine');
+
+  // "Longer" asks for as much as fits under the limit, and refuses when there is no room left.
+  const grow = fakeSdk(json({ rewritten: 'longer text' }));
+  await createAi({ Anthropic: grow.Anthropic, apiKey: 'k' }).rewrite({ text: 'y'.repeat(1500), mode: 'longer' });
+  const longPrompt = grow.calls[0].body.messages[0].content[0].text;
+  assert.match(longPrompt, /up to 1980 characters; it is 1500 now/);
+  assert.match(longPrompt, /at most 2200 characters/);
+  const growShort = fakeSdk(json({ rewritten: 'longer text' }));
+  await createAi({ Anthropic: growShort.Anthropic, apiKey: 'k' }).rewrite({ text: 'z'.repeat(400), mode: 'longer' });
+  assert.match(growShort.calls[0].body.messages[0].content[0].text, /about 600 to 800 characters; it is 400 now/);
+  const full = fakeSdk(json({ rewritten: 'unused' }));
+  await assert.rejects(createAi({ Anthropic: full.Anthropic, apiKey: 'k' }).rewrite({ text: 'w'.repeat(1990), mode: 'longer' }), (e) => e.code === 'bad_request' && /cannot get longer/.test(e.userMessage));
+  assert.equal(full.calls.length, 0);
 
   const none = fakeSdk(json({ rewritten: 'unused' }));
   const ai2 = createAi({ Anthropic: none.Anthropic, apiKey: 'k' });

@@ -182,6 +182,8 @@ a.dash-health-item:hover { background: var(--surface-2); color: var(--ink); }
 .dash-dot.is-approval { background: var(--marker); border-radius: 50%; }
 .dash-dot.is-published { background: var(--ok); }
 .dash-dot.is-failed { background: var(--bad); transform: rotate(45deg) scale(0.85); }
+.dash-dot.is-reminder { background: transparent; box-shadow: inset 0 0 0 2px var(--marker); border-radius: 50%; }
+.dash-dot.is-reminded { background: var(--marker); box-shadow: inset 0 0 0 2px var(--marker); border-radius: 2px; }
 
 .dash-legend {
   display: flex;
@@ -249,7 +251,26 @@ a.dash-health-item:hover { background: var(--surface-2); color: var(--ink); }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.dash-post-src.is-hand { border-color: var(--marker); background: var(--marker-soft); color: var(--ink); }
 .dash-post .status { flex: none; }
+
+/* Post these by hand */
+.dash-hand { border-color: color-mix(in srgb, var(--marker) 60%, var(--line)); }
+.dash-hand .list { padding-bottom: 4px; }
+.dash-hand-go {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 10px;
+  height: var(--control-h-sm);
+  border-radius: var(--r-md);
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  white-space: nowrap;
+}
 .dash-post-eta { flex: none; color: var(--ink-2); font-size: 12px; white-space: nowrap; }
 
 /* Side cards */

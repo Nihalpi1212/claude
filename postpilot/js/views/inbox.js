@@ -1,6 +1,9 @@
-// Inbox: comments on recent posts, DM conversations and mentions, with replies, moderation,
-// saved replies and AI suggestions. Live from Instagram when possible; otherwise the worker's
-// cached copy (inbox doc), with actions queued for the worker (inbox.outbox).
+// Inbox: comments on recent posts, DM conversations (with story replies and story mentions marked),
+// mentions and collaboration invites, with replies, moderation, saved replies and AI suggestions.
+// Live from Instagram when possible; otherwise the worker's cached copy (inbox doc), with actions
+// queued for the worker (inbox.outbox). Collaboration invites are answered live only.
+// Routes: #/inbox?tab=messages|mentions|invites; #/inbox/invites also opens the Invites tab (push
+// notifications for new invites link there).
 
 import { uid } from '../../core/model.js';
 import { formatDateTime, formatDay, formatTime, dayKey, relative } from '../../core/time.js';
@@ -9,7 +12,7 @@ import { aiPrefs, getAi } from '../ai-client.js';
 import { useApp } from '../app.js';
 import { loadViewCss } from '../css.js';
 import { mutate, useDocs } from '../data.js';
-import { setQuery } from '../router.js';
+import { buildHash, parseHash, setQuery } from '../router.js';
 import { Icon } from '../ui/icons.js';
 import {
   Avatar, Badge, Button, Callout, CharCounter, EmptyState, Frame, IconButton, Menu, PageHeader, Segmented, Skeleton, Spinner, Tabs, TextArea, cx, usePhone,
@@ -25,9 +28,26 @@ const PREVIEW_FETCH_MAX = 8;
 const DM_MAX = 1000;
 const COMMENT_MAX = 2200;
 const DONE_MAX = 2000;
+const TABS = ['comments', 'messages', 'mentions', 'invites'];
+const INVITE_KEEP_MS = 30 * 864e5;
 
 // Live results survive switching tabs and screens for a couple of minutes (Graph API calls are rate limited).
-const live = { comments: null, conversations: null, threads: new Map(), tags: null };
+const live = { comments: null, conversations: null, threads: new Map(), tags: null, invites: null };
+
+/** Switch tabs; also leaves the #/inbox/invites form so ?tab= is the only source of truth. */
+function setTab(id) {
+  const r = parseHash();
+  history.replaceState(null, '', buildHash('inbox', { ...r.query, tab: id === 'comments' ? null : id }, []));
+  globalThis.dispatchEvent(new HashChangeEvent('hashchange'));
+}
+
+/** 'reply' | 'mention' | null for a message (live, or the worker's cached lastMessage.story). */
+function storyKind(m) {
+  if (!m) return null;
+  if (m.storyMention) return 'mention';
+  if (m.storyReply) return 'reply';
+  return m.story === 'mention' || m.story === 'reply' ? m.story : null;
+}
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const ms = (iso) => {
@@ -507,18 +527,42 @@ function problemOf(err) {
   return null;
 }
 
+/**
+ * "Replied to your story" / "Mentioned you in their story", with a link to the story while Instagram
+ * still serves it. On the account's own messages (if Instagram marks them; unverified) the roles flip.
+ */
+function StoryChip({ m, mine }) {
+  const kind = storyKind(m);
+  if (!kind) return null;
+  const ref = kind === 'mention' ? m.storyMention : m.storyReply;
+  const url = ref && typeof ref.url === 'string' && /^https?:\/\//.test(ref.url) ? ref.url : null;
+  const label = mine
+    ? kind === 'mention' ? 'You mentioned them in your story' : 'You replied to their story'
+    : kind === 'mention' ? 'Mentioned you in their story' : 'Replied to your story';
+  return html`<p class="ibx-story-chip">
+    <${Icon} name=${kind === 'mention' ? 'at' : 'story'} size=${13} />
+    <span>${label}</span>
+    ${url ? html`<a href=${url} target="_blank" rel="noopener noreferrer" title="Stories disappear after 24 hours">View story</a>` : null}
+  </p>`;
+}
+
 function Bubble({ m, mine, tz }) {
-  const atts = m.attachments || [];
-  return html`<div class=${cx('ibx-msg', mine ? 'is-mine' : 'is-theirs')}>
-    <div class="ibx-msg-bubble">
-      ${atts.map((a, i) => {
-        const url = (a.image_data && (a.image_data.url || a.image_data.preview_url)) || null;
-        return url
-          ? html`<img key=${i} class="ibx-msg-img" src=${url} alt="Photo they sent" loading="lazy" referrerpolicy="no-referrer" />`
-          : html`<span key=${i} class="ibx-msg-att"><${Icon} name=${a.video_data ? 'video' : 'image'} size=${14} />${a.video_data ? 'Video' : 'Photo'} (open Instagram to view)</span>`;
-      })}
-      ${m.text ? html`<span class="ibx-msg-text">${m.text}</span>` : !atts.length ? html`<span class="faint">Unsupported message</span>` : null}
-    </div>
+  // Story mentions carry no text: the chip says what happened. Story-mention attachments are not shown twice.
+  const atts = (m.attachments || []).filter((a) => !(a && a.type === 'story_mention'));
+  const story = storyKind(m);
+  return html`<div class=${cx('ibx-msg', mine ? 'is-mine' : 'is-theirs', story && 'has-story')}>
+    <${StoryChip} m=${m} mine=${mine} />
+    ${m.text || atts.length || !story
+      ? html`<div class="ibx-msg-bubble">
+          ${atts.map((a, i) => {
+            const url = (a.image_data && (a.image_data.url || a.image_data.preview_url)) || null;
+            return url
+              ? html`<img key=${i} class="ibx-msg-img" src=${url} alt="Photo they sent" loading="lazy" referrerpolicy="no-referrer" />`
+              : html`<span key=${i} class="ibx-msg-att"><${Icon} name=${a.video_data ? 'video' : 'image'} size=${14} />${a.video_data ? 'Video' : 'Photo'} (open Instagram to view)</span>`;
+          })}
+          ${m.text ? html`<span class="ibx-msg-text">${m.text}</span>` : !atts.length ? html`<span class="faint">Unsupported message</span>` : null}
+        </div>`
+      : null}
     <time class="ibx-msg-time" datetime=${m.createdTime} title=${formatDateTime(m.createdTime, tz)}>${formatTime(m.createdTime, tz)}${m.pending ? ' · queued' : ''}</time>
   </div>`;
 }
@@ -541,7 +585,7 @@ function Thread({ conv, ctx, onBack, phone, markRead }) {
     }
     if (!canLive) {
       const lm = conv.lastMessage;
-      setState({ status: 'cache', messages: lm ? [{ id: lm.id, createdTime: lm.createdTime, fromId: lm.fromId, fromUsername: lm.fromUsername, text: lm.text, attachments: [], mineHint: lm.fromMe }] : [] });
+      setState({ status: 'cache', messages: lm ? [{ id: lm.id, createdTime: lm.createdTime, fromId: lm.fromId, fromUsername: lm.fromUsername, text: lm.text, attachments: [], mineHint: lm.fromMe, story: lm.story || null }] : [] });
       return;
     }
     setState((s) => ({ ...s, status: s.messages.length ? 'refreshing' : 'loading' }));
@@ -684,7 +728,9 @@ function MessagesTab({ ctx, convs, mode, loading, error, selectedId, explicit, o
                               <time class="ibx-conv-time faint mono" datetime=${c.updatedTime}>${c.updatedTime ? relative(c.updatedTime) : ''}</time>
                             </span>
                             <span class="ibx-conv-preview truncate">
-                              ${lm ? html`${lm.fromMe ? html`<span class="faint">You: </span>` : null}${lm.text || (lm.attachments ? 'Sent an attachment' : '…')}` : html`<span class="faint">${c.loadingPreview ? 'Loading…' : 'New activity'}</span>`}
+                              ${lm
+                                ? html`${lm.fromMe ? html`<span class="faint">You: </span>` : null}${!lm.fromMe && storyKind(lm) === 'reply' ? html`<span class="ibx-conv-story">Story reply: </span>` : null}${lm.text || (!lm.fromMe && storyKind(lm) === 'mention' ? 'Mentioned you in their story' : lm.attachments ? 'Sent an attachment' : '…')}`
+                                : html`<span class="faint">${c.loadingPreview ? 'Loading…' : 'New activity'}</span>`}
                             </span>
                           </span>
                           ${isUnread ? html`<span class="ibx-unread" aria-label="Unread"></span>` : null}
@@ -725,7 +771,7 @@ function MentionsTab({ ctx, mentionComments, settings }) {
     };
   }, [fb, ig]);
 
-  return html`<div class="stack-lg">
+  return html`<div class="stack stack-lg">
     ${!fb
       ? html`<${Callout} tone="info" title="Tagged posts need a Facebook Login connection"
           action=${html`<${Button} size="sm" variant="secondary" href="#/settings?section=instagram">Open Settings<//>`}>
@@ -776,13 +822,268 @@ function MentionsTab({ ctx, mentionComments, settings }) {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Collaboration invites
+
+// Same rules as worker/jobs/invites.mjs: an answer given here outweighs Instagram's list for an hour
+// (Instagram may still list it for a moment); listed after that, the invite is open again (the answer
+// did not take, or the account sent a new invite after a decline).
+const DECISION_HOLD_MS = 60 * 60e3;
+const decisionHolds = (inv, now) => !!inv && inv.status !== 'pending' && now - ms(inv.decidedAt) < DECISION_HOLD_MS;
+
+/** Invites still waiting for an answer (none counted while Instagram does not offer invites to this connection). */
+function waitingInvites(inbox) {
+  if (!inbox || (inbox.invitesStatus && inbox.invitesStatus.state === 'unsupported')) return [];
+  return (inbox.invites || []).filter((i) => i.status === 'pending');
+}
+
+/**
+ * inbox.invites brought in line with a live list from Instagram (pure; the worker applies the same
+ * rules): pending invites it no longer lists are dropped, answered ones it lists again after the hold
+ * are open again, new ones are added, and a successful read clears an 'unsupported' state.
+ * Returns {invites, status, changed}.
+ */
+function reconcileInvites(stored, status, items, now) {
+  const nowIso = new Date(now).toISOString();
+  const listed = new Map(items.map((i) => [String(i.mediaId), i]));
+  let changed = false;
+  const out = [];
+  for (const x of stored || []) {
+    const inv = listed.get(String(x.mediaId));
+    if (!inv) {
+      if (x.status === 'pending') {
+        changed = true; // answered in the Instagram app or withdrawn
+        continue;
+      }
+      if (x.unconfirmed) {
+        const confirmed = { ...x };
+        delete confirmed.unconfirmed;
+        out.push(confirmed);
+        changed = true;
+      } else out.push(x);
+      continue;
+    }
+    if (x.status !== 'pending' && !decisionHolds(x, now)) {
+      const reopened = { ...x, status: 'pending', decidedAt: null, seenAt: nowIso };
+      delete reopened.auto;
+      delete reopened.unconfirmed;
+      out.push(reopened);
+      changed = true;
+      continue;
+    }
+    out.push(x);
+  }
+  const have = new Set(out.map((x) => String(x.mediaId)));
+  for (const i of items) {
+    if (have.has(String(i.mediaId))) continue;
+    out.unshift({ id: uid('ci_'), mediaId: String(i.mediaId), owner: i.owner, caption: clip(i.caption, 300), permalink: i.permalink, mediaUrl: i.mediaUrl, status: 'pending', seenAt: nowIso, decidedAt: null });
+    changed = true;
+  }
+  const okStatus = status && status.state === 'ok' ? status : { state: 'ok', at: nowIso };
+  if (okStatus !== status) changed = true;
+  return { invites: out, status: okStatus, changed };
+}
+
+/** Post preview; Instagram's links expire, so a broken image falls back to an icon. */
+function InviteThumb({ src }) {
+  const [broken, setBroken] = useState(false);
+  useEffect(() => setBroken(false), [src]);
+  return html`<span class="ibx-invite-thumb">
+    ${src && !broken ? html`<img src=${src} alt="" loading="lazy" referrerpolicy="no-referrer" onError=${() => setBroken(true)} />` : html`<${Icon} name="image" size=${20} />`}
+  </span>`;
+}
+
+function InviteRow({ inv, tz, busy, canAnswer, appOnly, onAnswer }) {
+  const owner = inv.owner ? `@${inv.owner}` : 'An account';
+  const decided = inv.status === 'accepted' || inv.status === 'declined';
+  return html`<li class=${cx('ibx-invite', decided && 'is-decided')} data-media-id=${inv.mediaId}>
+    <${InviteThumb} src=${inv.mediaUrl} />
+    <div class="ibx-invite-body">
+      <p class="ibx-invite-title"><span class="strong">${owner}</span> invited you to collaborate on their post</p>
+      ${inv.caption ? html`<p class="ibx-invite-caption muted clamp-2">${inv.caption}</p>` : null}
+      <p class="ibx-invite-meta faint text-sm">
+        ${inv.seenAt ? html`<span>Received <time datetime=${inv.seenAt} title=${formatDateTime(inv.seenAt, tz)}>${relative(inv.seenAt)}</time></span>` : null}
+        ${inv.permalink ? html`<a href=${inv.permalink} target="_blank" rel="noopener noreferrer">Open on Instagram</a>` : null}
+      </p>
+    </div>
+    <div class="ibx-invite-actions">
+      ${decided
+        ? html`<${Badge} tone=${inv.status === 'accepted' ? 'success' : 'neutral'} icon=${inv.status === 'accepted' ? 'check' : 'x'}>${inv.status === 'accepted' ? (inv.auto ? 'Accepted automatically' : 'Accepted') : 'Declined'}<//>
+            ${inv.unconfirmed
+              ? html`<span class="ibx-invite-note text-warn text-sm" title="The connection dropped before Instagram confirmed the answer. Postpilot checks again at its next look.">Not confirmed yet</span>`
+              : inv.decidedAt ? html`<time class="faint text-sm" datetime=${inv.decidedAt} title=${formatDateTime(inv.decidedAt, tz)}>${relative(inv.decidedAt)}</time>` : null}`
+        : appOnly
+          ? html`<span class="ibx-invite-note faint text-sm">Answer in the Instagram app</span>`
+          : html`<${Button} size="sm" variant="primary" icon="check" loading=${busy === 'accept'} disabled=${!canAnswer || !!busy}
+                aria-label=${`Accept ${owner}’s invite`} title=${canAnswer ? undefined : 'Connect Instagram in Settings to answer invites.'} onClick=${() => onAnswer(inv, true)}>Accept<//>
+              <${Button} size="sm" variant="ghost" loading=${busy === 'decline'} disabled=${!canAnswer || !!busy}
+                aria-label=${`Decline ${owner}’s invite`} title=${canAnswer ? undefined : 'Connect Instagram in Settings to answer invites.'} onClick=${() => onAnswer(inv, false)}>Decline<//>`}
+    </div>
+  </li>`;
+}
+
+/**
+ * Invites from inbox.invites (written by worker/jobs/invites.mjs) merged with a live read when
+ * Instagram is connected; a live read also brings inbox.invites up to date (reconcileInvites).
+ * Accept / Decline call Instagram directly (core/ig.js resends a lost answer and reports one Instagram
+ * may have received as unconfirmed) and then record the answer in inbox.invites.
+ */
+function InvitesTab({ ig, inbox, tz, toast, confirm }) {
+  const stored = (inbox && inbox.invites) || [];
+  // The worker found that this connection has no invites: no automatic live read (it would fail on
+  // every visit) until the owner asks for one or the worker's next check says otherwise.
+  const storedUnsupported = !!(inbox && inbox.invitesStatus && inbox.invitesStatus.state === 'unsupported');
+  const [state, setState] = useState(() => (live.invites ? { status: 'ready', items: live.invites.items } : { status: !ig ? 'off' : storedUnsupported ? 'idle' : 'loading', items: [] }));
+  const [busy, setBusy] = useState({}); // mediaId -> 'accept'|'decline'
+  const [asked, setAsked] = useState(0); // "Check again" presses
+  const unsupported = state.status === 'unsupported' || (state.status !== 'ready' && storedUnsupported);
+  const inboxRef = useRef(inbox);
+  inboxRef.current = inbox;
+
+  useEffect(() => {
+    if (!ig) return undefined;
+    if (!asked && live.invites && Date.now() - live.invites.at < LIVE_TTL_MS) return undefined;
+    if (!asked && storedUnsupported) return undefined;
+    let alive = true;
+    if (asked) setState((s) => ({ ...s, status: 'loading' }));
+    ig.collaborationInvites()
+      .then((items) => {
+        live.invites = { at: Date.now(), items };
+        if (alive) setState({ status: 'ready', items });
+        // Bring the saved copy (tab badge, Automations) in line with Instagram's list.
+        const cur = inboxRef.current || {};
+        if (reconcileInvites(cur.invites, cur.invitesStatus, items, Date.now()).changed) {
+          mutate('inbox', (d) => {
+            const r = reconcileInvites(d.invites, d.invitesStatus, items, Date.now());
+            d.invites = r.invites;
+            d.invitesStatus = r.status;
+          }, { message: 'inbox: refresh collaboration invites', silent: true }).catch(() => {});
+        }
+      })
+      .catch((err) => alive && setState({ status: err && err.code === 'unsupported' ? 'unsupported' : 'error', items: [], error: errText(err) }));
+    return () => {
+      alive = false;
+    };
+  }, [ig, asked]);
+
+  const now = Date.now();
+  const byMedia = new Map(stored.map((i) => [String(i.mediaId), i]));
+  // Live: Instagram's list is the truth for what is still open. Otherwise: the worker's copy.
+  const pending = state.status === 'ready'
+    ? state.items.map((i) => {
+        const s = byMedia.get(i.mediaId);
+        return decisionHolds(s, now) ? null : { ...(s || {}), ...i, caption: i.caption || (s && s.caption) || '', status: 'pending' };
+      }).filter(Boolean)
+    : stored.filter((i) => i.status === 'pending');
+  const answered = stored
+    .filter((i) => (i.status === 'accepted' || i.status === 'declined') && now - ms(i.decidedAt || i.seenAt) < INVITE_KEEP_MS && !pending.some((p) => p.mediaId === i.mediaId))
+    .sort((a, b) => ms(b.decidedAt) - ms(a.decidedAt));
+
+  const record = (inv, status, unconfirmed) =>
+    mutate('inbox', (d) => {
+      d.invites ||= [];
+      const at = new Date().toISOString();
+      let x = d.invites.find((i) => String(i.mediaId) === String(inv.mediaId));
+      if (!x) {
+        x = { id: uid('ci_'), mediaId: String(inv.mediaId), owner: inv.owner || '', caption: clip(inv.caption, 300), permalink: inv.permalink || null, mediaUrl: inv.mediaUrl || null, seenAt: inv.seenAt || at };
+        d.invites.unshift(x);
+      }
+      x.status = status;
+      x.decidedAt = at;
+      delete x.auto;
+      if (unconfirmed) x.unconfirmed = true;
+      else delete x.unconfirmed;
+    }, { message: `inbox: ${status} collaboration invite` });
+
+  const dropLive = (mediaId) => {
+    if (live.invites) live.invites = { ...live.invites, items: live.invites.items.filter((i) => i.mediaId !== mediaId) };
+    setState((s) => (s.status === 'ready' ? { ...s, items: s.items.filter((i) => i.mediaId !== mediaId) } : s));
+  };
+
+  const answer = async (inv, accept) => {
+    const owner = inv.owner ? `@${inv.owner}` : 'this account';
+    if (!ig) return;
+    if (!accept) {
+      const ok = await confirm({ title: `Decline ${owner}’s invite?`, body: 'You will not be added as a collaborator on their post. They can send a new invite later.', confirmLabel: 'Decline invite', danger: true });
+      if (!ok) return;
+    }
+    setBusy((b) => ({ ...b, [inv.mediaId]: accept ? 'accept' : 'decline' }));
+    const status = accept ? 'accepted' : 'declined';
+    try {
+      const res = await ig.respondCollabInvite(inv.mediaId, accept);
+      dropLive(inv.mediaId);
+      await record(inv, status, !!(res && res.unconfirmed)).catch(() => {});
+      if (res && res.unconfirmed) toast(`The connection dropped, but Instagram no longer lists ${owner}’s invite, so your answer most likely went through. Check the Instagram app to be sure.`, { kind: 'info' });
+      else toast(accept ? `Accepted. The post now shows on your profile too.` : `Declined ${owner}’s invite.`, { kind: 'success' });
+    } catch (err) {
+      if (err && err.maybeSent) {
+        // Instagram may have the answer: record it (unconfirmed) rather than offering the buttons again.
+        dropLive(inv.mediaId);
+        await record(inv, status, true).catch(() => {});
+        toast(errText(err), { kind: 'info' });
+      } else if (err && err.isNotFound) {
+        dropLive(inv.mediaId);
+        mutate('inbox', (d) => {
+          d.invites = (d.invites || []).filter((i) => !(String(i.mediaId) === String(inv.mediaId) && i.status === 'pending'));
+        }, { message: 'inbox: remove closed collaboration invite', silent: true }).catch(() => {});
+        toast('This invite is no longer open. It was answered in the Instagram app or withdrawn.', { kind: 'info' });
+      } else if (err && err.code === 'network') {
+        toast('Could not reach Instagram, so nothing was sent. Try again.', { kind: 'error' });
+      } else {
+        toast(errText(err), { kind: 'error' });
+      }
+    } finally {
+      setBusy((b) => {
+        const next = { ...b };
+        delete next[inv.mediaId];
+        return next;
+      });
+    }
+  };
+
+  return html`<div class="stack stack-lg ibx-invites">
+    <p class="muted ibx-invites-intro">When another account adds you as a collaborator on their post, the invite waits here. Accepting adds the post to your profile too, with shared likes and comments. <a href="#/automations">Accept trusted accounts automatically</a>.</p>
+    ${unsupported
+      ? html`<${Callout} tone="warning" title="Invites are not available with this connection"
+          action=${ig ? html`<${Button} size="sm" variant="secondary" loading=${state.status === 'loading'} onClick=${() => setAsked((n) => n + 1)}>Check again<//>` : null}>
+          Instagram does not share collaboration invites with Postpilot for this account. Answer them in the Instagram app.
+        <//>`
+      : state.status === 'error'
+        ? html`<${Callout} tone="warning" title="Live invites are unavailable">${state.error} Showing the worker’s copy instead.<//>`
+        : null}
+    <section class="stack" aria-labelledby="ibx-inv-open">
+      <div class="row row-between">
+        <h2 class="section-title" id="ibx-inv-open">Waiting for you</h2>
+        ${state.status === 'ready' ? html`<${Badge} tone="success">Live<//>` : stored.length ? html`<${Badge} tone="warning">Cached<//>` : null}
+      </div>
+      ${state.status === 'loading' && !pending.length
+        ? html`<${Skeleton} lines=${3} />`
+        : !pending.length
+          ? html`<${EmptyState} compact icon="users" title="No open invites" body="New collaboration invites show up here and on your phone." />`
+          : html`<ul class="ibx-invite-list">
+              ${pending.map((inv) => html`<${InviteRow} key=${inv.mediaId} inv=${inv} tz=${tz} busy=${busy[inv.mediaId]} canAnswer=${!!ig} appOnly=${unsupported} onAnswer=${answer} />`)}
+            </ul>`}
+    </section>
+    ${answered.length
+      ? html`<section class="stack" aria-labelledby="ibx-inv-done">
+          <h2 class="section-title" id="ibx-inv-done">Answered</h2>
+          <ul class="ibx-invite-list">
+            ${answered.map((inv) => html`<${InviteRow} key=${inv.mediaId} inv=${inv} tz=${tz} />`)}
+          </ul>
+          <p class="faint text-sm">Answered invites are listed for 30 days.</p>
+        </section>`
+      : null}
+  </div>`;
+}
+
+// ---------------------------------------------------------------------------------------------
 
 export default function InboxView() {
   const { settings, ig, tz, route, toast, confirm, dispatchWorker, navigate } = useApp();
   const { data } = useDocs(['inbox', 'hashtags', 'automations']);
   const inbox = data.inbox;
   const phone = usePhone();
-  const tab = ['comments', 'messages', 'mentions'].includes(route.query.tab) ? route.query.tab : 'comments';
+  // ?tab= wins; #/inbox/invites (the push notification link) also opens a tab.
+  const tab = TABS.includes(route.query.tab) ? route.query.tab : TABS.includes(route.params[0]) ? route.params[0] : 'comments';
   const filter = ['needs', 'all', 'hidden'].includes(route.query.filter) ? route.query.filter : 'needs';
   const selectedConv = route.query.c || null;
 
@@ -885,7 +1186,7 @@ export default function InboxView() {
             live.threads.set(c.id, { at: Date.now(), updatedTime: c.updatedTime, messages: sorted });
             const last = sorted[sorted.length - 1];
             if (last) {
-              merged = merged.map((x) => (x.id === c.id ? { ...x, lastMessage: { id: last.id, text: last.text, fromId: last.fromId, fromUsername: last.fromUsername, createdTime: last.createdTime, attachments: (last.attachments || []).length, fromMe: isMineMsg(last) } } : x));
+              merged = merged.map((x) => (x.id === c.id ? { ...x, lastMessage: { id: last.id, text: last.text, fromId: last.fromId, fromUsername: last.fromUsername, createdTime: last.createdTime, attachments: (last.attachments || []).length, fromMe: isMineMsg(last), story: isMineMsg(last) ? null : storyKind(last) } } : x));
               live.conversations = { at: live.conversations.at, list: merged };
               if (!cancelled) setConvState({ mode: 'live', list: merged });
             }
@@ -943,6 +1244,7 @@ export default function InboxView() {
     ...c,
     other: (c.participants || []).find((p) => !((ownId && String(p.id) === ownId) || (ownName && String(p.username || '').toLowerCase() === ownName))) || (c.participants || [])[0] || {},
   }));
+  const invitesPending = waitingInvites(inbox).length;
   const unreadCount = convList.filter((c) => c.lastMessage && !c.lastMessage.fromMe && (!seen[c.id] || ms(seen[c.id]) < ms(c.lastMessage.createdTime))).length;
 
   // ---- actions
@@ -1197,13 +1499,14 @@ export default function InboxView() {
     live.conversations = null;
     live.threads.clear();
     live.tags = null;
+    live.invites = null;
     setReloadKey((k) => k + 1);
   };
 
   const cacheAge = inbox.fetchedAt ? relative(inbox.fetchedAt) : null;
 
   return html`<div class="page inbox">
-    <${PageHeader} title="Inbox" subtitle="Comments on your latest posts and direct messages, in one place."
+    <${PageHeader} title="Inbox" subtitle="Comments, direct messages, mentions and collaboration invites, in one place."
       actions=${html`<${Button} variant="secondary" icon="refresh" loading=${refreshing} disabled=${!ig} onClick=${refresh}>Refresh<//>`} />
 
     ${!ig
@@ -1220,11 +1523,12 @@ export default function InboxView() {
 
     <${OutboxStrip} outbox=${outbox} onRetry=${retryCommand} onDismiss=${dismissCommand} />
 
-    <${Tabs} label="Inbox sections" value=${tab} onChange=${(id) => setQuery({ tab: id === 'comments' ? null : id })}
+    <${Tabs} label="Inbox sections" value=${tab} onChange=${setTab}
       tabs=${[
         { id: 'comments', label: 'Comments', icon: 'comment', badge: needsCount || null },
         { id: 'messages', label: 'Messages', icon: 'message', badge: unreadCount || null },
         { id: 'mentions', label: 'Mentions', icon: 'at', badge: mentionComments.length || null },
+        { id: 'invites', label: 'Invites', icon: 'users', badge: invitesPending || null },
       ]} />
 
     ${tab === 'comments'
@@ -1237,6 +1541,8 @@ export default function InboxView() {
       : tab === 'messages'
         ? html`<${MessagesTab} ctx=${ctx} convs=${convList} mode=${convState.mode === 'loading' ? null : convState.mode} loading=${convState.mode === 'loading'} error=${convError}
             selectedId=${selectedConv || (!phone && convList[0] ? convList[0].id : null)} explicit=${!!selectedConv} onSelect=${(id) => setQuery({ c: id })} seen=${seen} phone=${phone} />`
-        : html`<${MentionsTab} ctx=${ctx} mentionComments=${mentionComments} settings=${settings} />`}
+        : tab === 'mentions'
+          ? html`<${MentionsTab} ctx=${ctx} mentionComments=${mentionComments} settings=${settings} />`
+          : html`<${InvitesTab} key=${reloadKey} ig=${ig} inbox=${inbox} tz=${tz} toast=${toast} confirm=${confirm} />`}
   </div>`;
 }

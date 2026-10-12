@@ -230,6 +230,7 @@ function ImportStatus({ asset, onRetry }) {
   }
   return html`<${Callout} tone="info" title="Downloading from link…">
     <span>The worker downloads this file from ${host} on its next run (about every 10 minutes). Posts that use it wait until it is here.</span>
+    ${asset.importLastError ? html`<span class="muted">Last try failed: ${asset.importLastError} The worker tries again.</span>` : null}
     <span class="lib-import-url mono">${asset.importUrl}</span>
   <//>`;
 }
@@ -452,11 +453,13 @@ function SharedThumb({ file }) {
 function SharedPanel({ shared, setShared, onAdd, onDiscard, onCompose }) {
   const files = shared.files.filter((f) => isImageFile(f) || isVideoFile(f));
   const n = files.length;
+  const videos = files.filter(isVideoFile).length;
+  const what = videos === n ? plural(n, 'video') : videos ? `${n} photos and videos` : plural(n, 'photo');
   return html`<section class="lib-shared" aria-labelledby="lib-shared-title">
     <div class="lib-shared-head">
       <${Icon} name="share" size=${18} />
       <h2 class="section-title" id="lib-shared-title">Shared with Postpilot</h2>
-      <span class="muted text-sm">${n ? plural(n, 'photo or video', 'photos and videos') : 'No photos or videos'}</span>
+      <span class="muted text-sm">${n ? what : 'No photos or videos'}</span>
     </div>
     ${n
       ? html`<ul class="contact-sheet lib-shared-files" aria-label="Shared files">${files.map((f, i) => html`<li key=${i}><${SharedThumb} file=${f} /></li>`)}</ul>
@@ -466,7 +469,7 @@ function SharedPanel({ shared, setShared, onAdd, onDiscard, onCompose }) {
             <${TextArea} rows=${2} maxRows=${6} value=${shared.hint} onChange=${(v) => setShared((s) => ({ ...s, hint: v }))} placeholder="Optional" />
           <//>
           <${Toggle} checked=${shared.pool} onChange=${(v) => setShared((s) => ({ ...s, pool: v }))} label="Add to the autopilot pool"
-            hint="Autopilot may post these for you." />
+            hint=${n === 1 ? 'Autopilot may post it for you.' : 'Autopilot may post them for you.'} />
           <div class="row">
             <${Button} variant="primary" icon="upload" onClick=${() => onAdd(files)}>${n === 1 ? 'Add to library' : `Add ${n} files to library`}<//>
             <${Button} variant="ghost" onClick=${onDiscard}>Discard<//>
@@ -735,7 +738,9 @@ export default function Library() {
 
   const removeAssets = async (list) => {
     const n = list.length;
-    const inUse = list.filter((a) => (usage.get(a.id) || []).some((p) => ['scheduled', 'publishing', 'draft'].includes(p.status))).length;
+    // 'reminded' posts still need their media: the owner posts them by hand (#/post-now).
+    const usedBy = (a, statuses) => (usage.get(a.id) || []).some((p) => statuses.includes(p.status));
+    const inUse = list.filter((a) => usedBy(a, ['scheduled', 'publishing', 'draft', 'reminded'])).length;
     const deletable = n - inUse;
     if (!deletable) {
       toast(n === 1 ? 'This file is used by a scheduled post or draft. Remove it from that post first.' : 'These files are used by scheduled posts or drafts. Remove them from those posts first.', { kind: 'info' });
@@ -749,7 +754,8 @@ export default function Library() {
     });
     if (!ok) return false;
     try {
-      const { removed, kept } = await deleteAssets(list.map((a) => a.id));
+      // media.js deleteAssets does not know about reminder posts yet, so leave their files out here.
+      const { removed, kept } = await deleteAssets(list.filter((a) => !usedBy(a, ['reminded'])).map((a) => a.id));
       if (removed.length) toast(`Deleted ${plural(removed.length, 'file')}.${kept.length ? ` Kept ${kept.length} that a scheduled post or draft still uses.` : ''}`, { kind: 'success' });
       else toast('Nothing was deleted: these files are used by scheduled posts or drafts. Remove them from those posts first.', { kind: 'error' });
       setSelected((prev) => new Set([...prev].filter((id) => !removed.includes(id))));
@@ -761,7 +767,14 @@ export default function Library() {
 
   const retryImport = async (ids) => {
     try {
-      await writeAssets(ids, (a) => delete a.importError, 'retry media download');
+      await writeAssets(
+        ids,
+        (a) => {
+          // A fresh start: the worker tries again on its next run with a new retry count.
+          for (const k of ['importError', 'importErrorCode', 'importLastError', 'importAttempts', 'importTriedAt']) delete a[k];
+        },
+        'retry media download',
+      );
       toast('The worker tries the download again on its next run.', { kind: 'success' });
     } catch {
       /* toasted */
@@ -865,6 +878,14 @@ export default function Library() {
   const openAsset = openId ? assets.find((a) => a.id === openId) : null;
   const folderCount = (id) => assets.filter((a) => (id === 'none' ? !a.folderId : a.folderId === id)).length;
   const filtersActive = filter !== 'all' || folder || q.trim();
+  const failedImports = assets.filter(importFailed).length;
+  const pendingImports = assets.filter(importing).length - failedImports;
+  const importNote = [
+    pendingImports ? `${plural(pendingImports, 'file')} ${pendingImports === 1 ? 'is' : 'are'} waiting for the worker to download ${pendingImports === 1 ? 'it' : 'them'} from a link (it runs about every 10 minutes).` : '',
+    failedImports ? `${plural(failedImports, 'file')} could not be downloaded. Open ${failedImports === 1 ? 'it' : 'them'} to try again.` : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
 
   const folderNav = html`<nav class="lib-folders" aria-label="Folders">
     <div class="lib-folders-head label-caps">Folders</div>
@@ -972,11 +993,14 @@ export default function Library() {
               }}
               onAdd=${(files) => {
                 const { hint, pool } = shared;
-                closeShared();
+                setShared(null);
+                setQuery({ shared: null });
                 startUpload(files, {
-                  opts: { autopilot: pool, folderId: null },
+                  opts: { autopilot: pool },
                   firstHint: hint.trim(),
                   onDone: (b) => {
+                    // The files are read from the share mailbox until here, so empty it only now.
+                    clearShared().catch(() => {});
                     const where = pool ? 'your library and the autopilot pool' : 'your library';
                     if (b.added.length) {
                       toast(`Added ${plural(b.added.length, 'shared file')} to ${where}.`, {
@@ -1019,6 +1043,7 @@ export default function Library() {
             </div>`
           : null}
 
+        ${importNote ? html`<p class=${cx('lib-imports', failedImports && 'is-error')} role="status"><${Icon} name=${failedImports ? 'alert' : 'download'} size=${15} /><span>${importNote}</span></p>` : null}
         ${selectionBar}
         ${!selecting && lib && visible.length ? html`<p class="lib-tip faint">Click a frame to see details. Use the circle (or Shift-click) to select several.</p>` : null}
         ${body}

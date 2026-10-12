@@ -387,7 +387,8 @@ span.pl-row-thumb { cursor: default; }
   .pl-week-scroll { max-height: 64vh; margin-inline: -4px; }
   .pl-week { min-width: 620px; }
   .pl-week-add { display: none; }
-  .pl-week-event .pl-thumb { display: none; }
+  .pl-week-event .pl-thumb,
+  .pl-week-event .pl-thumb[class*='is-'] { display: none; } /* also the placeholder thumbs (styled further down) */
 }
 
 /* List -------------------------------------------------------------------------- */
@@ -594,3 +595,137 @@ span.pl-row-thumb { cursor: default; }
   .pl-import-row { flex-direction: column; gap: 4px; }
   .pl-import-line { width: auto; padding-top: 0; }
 }
+
+/* Linked files waiting for the worker (CSV / feed imports) ------------------------ */
+
+.pl-thumb.is-importing,
+.pl-thumb.is-import-failed,
+.pl-thumb.is-video { display: inline-grid; place-items: center; }
+/* A video the worker downloaded has no poster frame: show what it is. */
+.pl-thumb.is-video { color: var(--ink-3); }
+.pl-thumb.is-importing {
+  background: repeating-linear-gradient(-45deg, var(--surface-2) 0 5px, var(--surface-3) 5px 10px);
+  color: var(--accent);
+}
+.pl-thumb.is-import-failed { background: var(--bad-soft); color: var(--bad-ink); }
+
+/* Reminder sent: posted by hand ---------------------------------------------------- */
+
+.cal-event.is-reminded {
+  border-left-style: dashed;
+  border-left-color: var(--marker);
+  background: color-mix(in srgb, var(--marker-soft) 70%, var(--surface-2));
+}
+.cal-event.is-reminded:hover { background: var(--marker-soft); }
+.status.is-reminded { background: var(--marker-soft); color: var(--ink); }
+
+/* Search ------------------------------------------------------------------------- */
+
+.pl-search { flex: 0 1 240px; min-width: 160px; }
+.pl-search .input-group { height: var(--control-h-sm, 32px); }
+.pl-search-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  margin: 0;
+  color: var(--ink-2);
+}
+@media (max-width: 759px) {
+  .pl-search { flex: 1 1 100%; order: 3; }
+  .pl-nav { flex: 1 1 auto; }
+  .pl-period { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  /* Five views fit on a phone without their icons. */
+  .pl-views .seg { padding: 0 10px; }
+  .pl-views .seg svg { display: none; }
+}
+
+/* Day view ----------------------------------------------------------------------- */
+
+.pl-dayview {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  overflow: hidden;
+}
+.pl-hour {
+  position: relative;
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr) 36px;
+  align-items: start;
+  gap: 10px;
+  min-height: 46px;
+  padding: 6px 8px 6px 12px;
+  border-top: 1px solid var(--line);
+}
+.pl-hour:first-child { border-top: 0; }
+.pl-hour.is-good { background: color-mix(in srgb, var(--ok) calc(var(--s) * 14%), var(--surface)); }
+.pl-hour.is-past { background: color-mix(in srgb, var(--surface-2) 45%, var(--surface)); }
+.pl-hour.is-now { box-shadow: inset 3px 0 0 var(--marker); }
+.pl-hour.is-drop { box-shadow: inset 0 0 0 2px var(--accent); }
+.pl-hour-label { display: flex; flex-direction: column; gap: 2px; padding-top: 6px; color: var(--ink-2); font-size: 12px; }
+.pl-hour.is-past .pl-hour-label { color: var(--ink-3); }
+.pl-hour-now,
+.pl-hour-good {
+  width: max-content;
+  padding: 0 5px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.pl-hour-now { background: var(--marker-soft); color: var(--ink); }
+.pl-hour-good { background: color-mix(in srgb, var(--ok) 18%, var(--surface)); color: var(--ink); }
+.pl-hour-items { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.pl-hour-add { margin-top: 2px; }
+.pl-hour:not(:hover):not(:focus-within) .pl-hour-add { opacity: 0.55; }
+.pl-hour-add-pad { width: 32px; }
+
+.pl-dayevent {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px 6px 6px;
+  font-size: var(--fs-sm);
+  text-decoration: none;
+  user-select: none;
+}
+.pl-dayevent.is-movable { cursor: grab; }
+.pl-dayevent:hover { background: var(--surface-3); }
+.pl-dayevent:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.pl-dayevent .pl-thumb { width: 40px; height: 40px; border-radius: var(--r-sm); }
+.pl-dayevent.is-ig { background: transparent; box-shadow: inset 0 0 0 1px var(--line); color: var(--ink-2); }
+.pl-dayevent.is-ig .pl-thumb { opacity: 0.72; }
+.pl-dayevent-text { display: flex; flex: 1 1 0; flex-direction: column; gap: 1px; min-width: 0; }
+.pl-dayevent-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; color: var(--ink-2); font-size: var(--fs-xs); }
+.pl-dayevent-title { overflow: hidden; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.pl-dayevent-side { flex: none; }
+
+@media (max-width: 759px) {
+  .pl-hour { grid-template-columns: 52px minmax(0, 1fr) 32px; gap: 6px; padding: 6px 4px 6px 8px; }
+  .pl-hour-good { display: none; }
+  .pl-dayevent { gap: 8px; }
+  .pl-dayevent .pl-thumb { width: 34px; height: 34px; }
+  .pl-dayevent-side { display: none; }
+}
+
+/* Rows: notes of caption-less drafts (ideas) */
+.pl-row-notes { margin: 2px 0 0; white-space: pre-line; }
+
+/* CSV import: files downloaded by the worker */
+.pl-import-downloads { display: flex; align-items: flex-start; gap: 6px; margin: 0; color: var(--ink-2); }
+.pl-import-downloads svg { flex: none; margin-top: 3px; color: var(--accent); }
+
+/* Ideas for next week */
+.pl-ideas-list { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.pl-idea { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface); }
+.pl-idea.is-off { opacity: 0.6; }
+.pl-idea .checkbox { margin-top: 2px; }
+.pl-idea-body { display: flex; flex: 1 1 0; flex-direction: column; gap: 4px; min-width: 0; }
+.pl-idea-body p { margin: 0; }
+.pl-idea-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }

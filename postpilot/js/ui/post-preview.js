@@ -102,6 +102,14 @@ function Caption({ username, text, expanded, onExpand }) {
     : null}</p>`;
 }
 
+/** Label before the post's time in the preview footer. */
+function whenWord(post) {
+  if (post.status === 'reminded') return post.reminderSentAt ? 'Reminder sent' : 'Post by hand';
+  if (post.status === 'canceled') return 'Canceled';
+  if (post.status !== 'scheduled') return 'Planned';
+  return post.publishMode === 'reminder' ? 'Reminder' : 'Scheduled';
+}
+
 function FeedCard({ post, assetsById, account, tz, index, setIndex, onMediaClick, showTags }) {
   const [expanded, setExpanded] = useState(false);
   const refs = post.media || [];
@@ -114,9 +122,11 @@ function FeedCard({ post, assetsById, account, tz, index, setIndex, onMediaClick
   const username = (account && account.username) || 'your.account';
   const when = post.status === 'published' && post.publishedAt
     ? formatDateTime(post.publishedAt, tz)
-    : post.scheduledAt
-      ? `${post.status === 'scheduled' ? 'Scheduled' : 'Planned'} · ${formatDateTime(post.scheduledAt, tz)}`
-      : 'Not scheduled yet';
+    : post.deletedFromInstagramAt
+      ? `Deleted from Instagram · ${formatDateTime(post.deletedFromInstagramAt, tz)}`
+      : post.scheduledAt
+        ? `${whenWord(post)} · ${formatDateTime(post.scheduledAt, tz)}`
+        : 'Not scheduled yet';
   const tags = showTags ? (post.userTags || []).filter((t) => (t.mediaIndex ?? 0) === i) : [];
   const collabs = (post.collaborators || []).filter(Boolean);
   const sub = post.location && post.location.name ? post.location.name : collabs.length ? `with ${collabs.map((c) => c.replace(/^@+/, '')).join(', ')}` : null;

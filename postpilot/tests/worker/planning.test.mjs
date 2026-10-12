@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { startWorkerEnv } from '../helpers/worker-env.mjs';
-import { newList, newPost } from '../../core/model.js';
+import { newAsset, newList, newPost } from '../../core/model.js';
 
 test('evergreen lists create scheduled posts idempotently', async (t) => {
   const env = await startWorkerEnv();
@@ -167,5 +167,85 @@ test('autopilot does not draft media again after its draft was rejected (use any
   const again = await env.run({ only: ['autopilot'] });
   assert.equal(again.summary.jobs.autopilot.autopilotCreated, 0);
   assert.equal((await env.read('posts')).posts.filter((p) => p.source === 'autopilot' && p.status !== 'canceled').length, 0);
+  assert.equal((await env.read('autopilot')).lastResult.code, 'no_assets');
+});
+
+test('autopilot leaves queue media and files still downloading to others (use any unused media on)', async (t) => {
+  const env = await startWorkerEnv();
+  t.after(() => env.close());
+  const queued = await env.addAsset('f04.jpg', { captionHint: 'From the blog.' });
+  const free = await env.addAsset('f05.jpg', { captionHint: 'Free to use.' });
+  await env.update('library', (d) => {
+    d.assets.push(newAsset({ id: 'a_wait', name: 'wait.jpg', importUrl: 'https://feeds.test/wait.jpg' }));
+    d.assets.push(newAsset({ id: 'a_png', name: 'chart.png', importUrl: 'https://feeds.test/chart.png', importError: 'This is a PNG image.' }));
+  });
+  await env.update('lists', (d) => void d.lists.push(newList({ id: 'l_blog', name: 'Blog', enabled: false, items: [{ id: 'li_1', type: 'feed', caption: 'x', media: [{ assetId: queued.id, kind: 'image' }] }], slots: [{ weekday: 3, time: '12:00' }] })));
+  await env.update('autopilot', (a) => Object.assign(a, { enabled: true, mode: 'review', postsPerWeek: 7, horizonDays: 7, useAi: false, useAllUnused: true }));
+  await env.run({ only: ['autopilot'] });
+  const drafted = (await env.read('posts')).posts.filter((p) => p.source === 'autopilot').flatMap((p) => p.media.map((m) => m.assetId));
+  assert.deepEqual(drafted, [free.id]);
+});
+
+test('autopilot reposts a top post when recycling is on (review mode drafts it, copying caption and media)', async (t) => {
+  const env = await startWorkerEnv();
+  t.after(() => env.close());
+  const asset = await env.addAsset('f06.jpg');
+  const old = new Date(Date.now() - 200 * 864e5).toISOString();
+  const original = newPost({
+    id: 'p_top',
+    status: 'published',
+    caption: 'Our most loved vase.\n\n#ceramics',
+    firstComment: 'Restocks every Friday.',
+    media: [{ assetId: asset.id, kind: 'image', altText: 'A blue vase' }],
+    scheduledAt: old,
+    publishedAt: old,
+    igMediaId: 'ig_top',
+  });
+  await env.update('posts-archive', (d) => void d.posts.push(original));
+  await env.update('analytics-media', (d) => {
+    d.media.ig_top = { id: 'ig_top', productType: 'FEED', mediaType: 'IMAGE', timestamp: old, metrics: { reach: 1000, totalInteractions: 300 } };
+    d.media.ig_other = { id: 'ig_other', productType: 'FEED', mediaType: 'IMAGE', timestamp: old, metrics: { reach: 1000, totalInteractions: 500 } }; // not from Postpilot
+  });
+  await env.update('autopilot', (a) => Object.assign(a, { enabled: true, mode: 'review', postsPerWeek: 3, horizonDays: 7, useAi: true, recycleTopPosts: true, recycleAfterDays: 120 }));
+
+  const res = await env.run({ only: ['autopilot'] });
+  assert.equal(res.summary.jobs.autopilot.autopilotCreated, 1);
+  assert.equal(res.summary.jobs.autopilot.reposts, 1);
+  const [repost] = (await env.read('posts')).posts;
+  assert.equal(repost.source, 'recycle');
+  assert.equal(repost.recycleOf, 'ig_top');
+  assert.equal(repost.status, 'draft');
+  assert.equal(repost.needsApproval, true);
+  assert.equal(repost.caption, original.caption);
+  assert.equal(repost.firstComment, 'Restocks every Friday.');
+  assert.deepEqual(repost.media, original.media);
+  assert.ok(Date.parse(repost.scheduledAt) > Date.now());
+  assert.equal(env.anthropic.state.requests.length, 0, 'a repost keeps its caption: no AI call');
+  assert.match((await env.read('autopilot')).lastResult.reason, /a repost of a top post/);
+
+  // Not planned twice; once rejected, not suggested again.
+  const again = await env.run({ only: ['autopilot'] });
+  assert.equal(again.summary.jobs.autopilot.autopilotCreated, 0);
+  await env.update('posts', (d) => {
+    const p = d.posts[0];
+    p.status = 'canceled';
+    p.history.push({ at: new Date().toISOString(), event: 'rejected' });
+    p.updatedAt = new Date().toISOString();
+  });
+  const afterReject = await env.run({ only: ['autopilot'] });
+  assert.equal(afterReject.summary.jobs.autopilot.autopilotCreated, 0);
+  assert.equal((await env.read('posts')).posts.filter((p) => p.status !== 'canceled').length, 0);
+
+  // Auto mode schedules the repost; its media must still be in the library.
+  await env.update('posts', (d) => void (d.posts = []));
+  await env.update('autopilot', (a) => void (a.mode = 'auto'));
+  await env.run({ only: ['autopilot'] });
+  const [scheduled] = (await env.read('posts')).posts;
+  assert.equal(scheduled.status, 'scheduled');
+  assert.equal(scheduled.needsApproval, false);
+  await env.update('posts', (d) => void (d.posts = []));
+  await env.update('library', (d) => void (d.assets = []));
+  const gone = await env.run({ only: ['autopilot'] });
+  assert.equal(gone.summary.jobs.autopilot.autopilotCreated, 0);
   assert.equal((await env.read('autopilot')).lastResult.code, 'no_assets');
 });

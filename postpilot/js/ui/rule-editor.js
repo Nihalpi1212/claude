@@ -1,21 +1,38 @@
 // Rule editor for Automations: a Modal that edits one keyword rule and tests it against a sample message.
 //
-//   <RuleEditor open rule=${draft} posts=${mediaStatsList} aiReady=${bool} blockedWords=${automations.blockedWords}
-//     onClose=${fn} onSave=${(rule) => ...} />
+//   <RuleEditor open rule=${draft} posts=${postList} gone=${automations.cursors.goneMedia} watch=${{days, posts}}
+//     aiReady=${bool} blockedWords=${automations.blockedWords} onClose=${fn} onSave=${(rule) => ...} />
 //
 // `rule` is a Rule (core/model.js). The editor works on a copy and hands the cleaned rule to onSave.
+// `posts` (for "Chosen posts"), newest first: [{id (Instagram media id), caption, timestamp, thumbnailUrl?,
+// mediaUrl?, mediaType?, productType?, assetId? (library thumbnail for posts published by Postpilot)}].
+// `gone` ({mediaId: ISO}): chosen posts the worker could not find on Instagram; the picker flags them.
 // Also exports the starter templates and the plain-language summaries used by the rules list.
 
 import { evaluate, findBlockedWord, keywordError, matchedKeyword, matchRule } from '../../core/rules.js';
 import { newRule } from '../../core/model.js';
-import { html, useEffect, useMemo, useState } from '../../vendor/preact.js';
+import { html, useEffect, useMemo, useRef, useState } from '../../vendor/preact.js';
 import { Button, Callout, ChipInput, Field, Frame, IconButton, Menu, Modal, Segmented, Select, TextArea, TextInput, Toggle, cx } from './kit.js';
 import { Icon } from './icons.js';
+import { MediaThumb } from './media-picker.js';
 
 export const SOURCE_OPTIONS = [
   { value: 'comment', label: 'Comments on my posts' },
   { value: 'dm', label: 'Direct messages' },
+  { value: 'story_reply', label: 'Replies to my stories' },
+  { value: 'story_mention', label: 'Stories that mention me' },
 ];
+
+/** One-line explanation under the source picker. */
+const SOURCE_HINTS = {
+  comment: 'New comments on the posts Postpilot watches (see Watched posts on the Automations screen).',
+  dm: 'New direct messages. Also answers replies to your stories when no “Replies to my stories” rule matches. Story mentions have their own trigger.',
+  story_reply: 'Messages people send by replying to one of your stories.',
+  story_mention: 'Instagram sends you a message when someone mentions you in their story. It usually has no text, so these rules normally answer every mention.',
+};
+
+/** Singular noun per source, for summaries and the test panel. */
+const SOURCE_NOUN = { comment: 'comment', dm: 'message', story_reply: 'story reply', story_mention: 'story mention', mention: 'mention' };
 
 export const MATCH_OPTIONS = [
   { value: 'any', label: 'Contains any keyword' },
@@ -36,6 +53,7 @@ const ACTIONS_FOR = {
   comment: ['reply_comment', 'private_reply', 'hide_comment', 'ai_reply'],
   dm: ['send_dm', 'ai_reply'],
   story_reply: ['send_dm', 'ai_reply'],
+  story_mention: ['send_dm', 'ai_reply'],
   mention: ['reply_comment', 'ai_reply'],
 };
 
@@ -87,6 +105,30 @@ export const STARTER_TEMPLATES = [
       }),
   },
   {
+    id: 'story-guide',
+    title: 'Reply GUIDE to my story → DM the guide',
+    body: 'Ask people to reply GUIDE to a story, and send everyone who does the link by DM.',
+    build: () =>
+      newRule({
+        name: 'Story guide',
+        trigger: { source: 'story_reply', match: 'any', keywords: ['guide'], mediaIds: null },
+        actions: [{ type: 'send_dm', texts: ['Here is the guide, {first_name}: [your link]'] }],
+        oncePerUser: true,
+      }),
+  },
+  {
+    id: 'story-mention-thanks',
+    title: 'Thank people who mention you in their story',
+    body: 'A short thank-you DM to everyone who mentions you in their story, once per person.',
+    build: () =>
+      newRule({
+        name: 'Story mention thanks',
+        trigger: { source: 'story_mention', match: 'always', keywords: [], mediaIds: null },
+        actions: [{ type: 'send_dm', texts: ['Thank you so much for the mention, {first_name}!', 'Thanks for sharing us in your story, {first_name}!'] }],
+        oncePerUser: true,
+      }),
+  },
+  {
     id: 'spam',
     title: 'Hide spam words',
     body: 'Hide comments that offer followers, promotions or crypto.',
@@ -110,7 +152,8 @@ function listWords(words, joiner = 'or') {
 /** "Comment contains price or cost" */
 export function triggerSummary(rule) {
   const t = (rule && rule.trigger) || {};
-  const noun = { comment: 'Comment', dm: 'Message', story_reply: 'Story reply', mention: 'Mention' }[t.source || 'comment'] || 'Message';
+  const n0 = SOURCE_NOUN[t.source || 'comment'] || 'message';
+  const noun = n0.charAt(0).toUpperCase() + n0.slice(1);
   const kws = (t.keywords || []).filter((k) => typeof k === 'string' && k.trim());
   let text;
   if (t.match === 'always') text = `Every ${noun.toLowerCase()}`;
@@ -266,14 +309,23 @@ function ActionEditor({ action, index, count, source, aiReady, onChange, onRemov
   </li>`;
 }
 
+const SAMPLE = {
+  comment: { label: 'Sample comment', placeholder: "What's the price of the blue one?" },
+  dm: { label: 'Sample message', placeholder: 'Hi! Is the workshop still open?' },
+  story_reply: { label: 'Sample story reply', placeholder: 'GUIDE' },
+  story_mention: { label: 'Text with the mention (usually none)', placeholder: 'Leave empty to test a plain mention' },
+};
+
 function TestPanel({ rule, blockedWords, posts }) {
   const [text, setText] = useState('');
   const [username, setUsername] = useState('');
   const [seed, setSeed] = useState(1);
   const source = (rule.trigger && rule.trigger.source) || 'comment';
   const scoped = source === 'comment' && Array.isArray(rule.trigger.mediaIds) && rule.trigger.mediaIds.length ? rule.trigger.mediaIds : null;
+  // Story mentions usually carry no text, so they are tested even with an empty sample.
+  const testable = !!text.trim() || source === 'story_mention';
   const result = useMemo(() => {
-    if (!text.trim()) return null;
+    if (!testable) return null;
     const user = username.replace(/^@/, '').trim() || 'maya.studio';
     const event = { source, id: `test-${seed}`, text, mediaId: scoped ? scoped[0] : null, userId: 'test-user', username: user, name: '', isOwn: false, timestamp: new Date().toISOString() };
     const test = { ...clean(rule), id: rule.id || 'draft', enabled: true, oncePerUser: false };
@@ -283,8 +335,13 @@ function TestPanel({ rule, blockedWords, posts }) {
     const words = blockedWords && blockedWords.enabled ? blockedWords.words || [] : [];
     const blocked = findBlockedWord(text, words);
     return { matched, keyword, actions, blocked };
-  }, [text, username, seed, rule, blockedWords]);
+  }, [text, username, seed, rule, blockedWords, testable]);
   const post = scoped && posts.find((p) => p.id === scoped[0]);
+  const sample = SAMPLE[source] || SAMPLE.dm;
+  const noun = SOURCE_NOUN[source] || 'message';
+  const missReason = !text.trim() && source === 'story_mention'
+    ? 'This mention has no text. Choose “Every message” to answer every mention.'
+    : rule.trigger.match === 'all' ? 'It needs every keyword.' : rule.trigger.match === 'exact' ? 'The whole message must equal a keyword.' : 'None of the keywords appear as whole words.';
   return html`<section class="rule-test" aria-labelledby="rule-test-title">
     <div class="row row-between">
       <h3 class="rule-test-title" id="rule-test-title">Test this rule</h3>
@@ -293,8 +350,8 @@ function TestPanel({ rule, blockedWords, posts }) {
         : null}
     </div>
     <div class="rule-test-inputs">
-      <${Field} label=${source === 'dm' ? 'Sample message' : 'Sample comment'} class="grow">
-        <${TextArea} value=${text} rows=${2} maxRows=${6} placeholder=${source === 'dm' ? 'Hi! Is the workshop still open?' : "What's the price of the blue one?"} onChange=${setText} />
+      <${Field} label=${sample.label} class="grow">
+        <${TextArea} value=${text} rows=${2} maxRows=${6} placeholder=${sample.placeholder} onChange=${setText} />
       <//>
       <${Field} label="From" class="rule-test-user">
         <${TextInput} value=${username} placeholder="maya.studio" prefix="@" onChange=${setUsername} />
@@ -303,16 +360,18 @@ function TestPanel({ rule, blockedWords, posts }) {
     ${scoped && post ? html`<p class="faint text-sm">Tested as a comment on “${excerpt(post.caption, 50) || 'your post'}”.</p>` : null}
     <div class="rule-test-result" aria-live="polite">
       ${!result
-        ? html`<p class="faint text-sm">Type a message to see whether the rule matches and exactly what it would send.</p>`
+        ? html`<p class="faint text-sm">Type a ${noun} to see whether the rule matches and exactly what it would send.</p>`
         : html`<div class="stack-sm">
             <p class=${cx('rule-test-verdict', result.matched ? 'is-match' : 'is-miss')}>
               ${result.matched
-                ? html`<strong>Matches</strong>${result.keyword ? html` <span class="muted">on “${result.keyword}”</span>` : rule.trigger.match === 'always' ? html` <span class="muted">every message</span>` : null}`
-                : html`<strong>No match</strong> <span class="muted">${rule.trigger.match === 'all' ? 'It needs every keyword.' : rule.trigger.match === 'exact' ? 'The whole message must equal a keyword.' : 'None of the keywords appear as whole words.'}</span>`}
+                ? html`<strong>Matches</strong>${result.keyword ? html` <span class="muted">on “${result.keyword}”</span>` : rule.trigger.match === 'always' ? html` <span class="muted">every ${noun}</span>` : null}`
+                : html`<strong>No match</strong> <span class="muted">${missReason}</span>`}
             </p>
             ${result.blocked && source === 'comment'
               ? html`<p class="text-warn text-sm">This text contains the blocked word “${result.blocked}”, so Postpilot would hide the comment instead of running rules.</p>`
-              : null}
+              : result.blocked
+                ? html`<p class="text-warn text-sm">This text contains the blocked word “${result.blocked}”, so Postpilot would not answer it.</p>`
+                : null}
             ${result.matched
               ? html`<ol class="rule-test-actions">
                   ${result.actions.map(
@@ -332,7 +391,18 @@ function TestPanel({ rule, blockedWords, posts }) {
   </section>`;
 }
 
-function PostPicker({ posts, value, onChange }) {
+const PICKER_PAGE = 36;
+
+function kindOf(p) {
+  if (p.productType === 'REELS' || p.mediaType === 'VIDEO') return 'reel';
+  if (p.mediaType === 'CAROUSEL_ALBUM') return 'carousel';
+  return undefined;
+}
+
+/** Every post (newest first), searchable by caption; chosen ones are marked. Deleted posts (`gone`) are left out and flagged. */
+function PostPicker({ posts: all, gone, value, onChange }) {
+  const [query, setQuery] = useState('');
+  const [limit, setLimit] = useState(PICKER_PAGE);
   const set = new Set(value || []);
   const toggle = (id) => {
     const next = new Set(set);
@@ -340,25 +410,71 @@ function PostPicker({ posts, value, onChange }) {
     else next.add(id);
     onChange([...next]);
   };
-  if (!posts.length) return html`<p class="muted text-sm">No posts yet. Analytics fills this list after the worker's first run.</p>`;
-  return html`<div class="rule-posts" role="group" aria-label="Choose posts">
-    ${posts.slice(0, 24).map(
-      (p, i) => html`<${Frame} key=${p.id} src=${thumbOf(p)} alt=${excerpt(p.caption, 80)} ratio="1 / 1" number=${i + 1}
-        kind=${p.productType === 'REELS' ? 'reel' : p.mediaType === 'CAROUSEL_ALBUM' ? 'carousel' : undefined}
-        label=${p.timestamp ? new Date(p.timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : ''}
-        selected=${set.has(p.id)} onClick=${() => toggle(p.id)} aria-label=${`${set.has(p.id) ? 'Remove' : 'Choose'} post: ${excerpt(p.caption, 60) || 'untitled'}`} />`,
-    )}
+  const q = query.trim().toLowerCase();
+  // Analytics keeps posts that were deleted later; the worker reports the chosen ones it cannot find.
+  const posts = useMemo(() => (gone ? all.filter((p) => !gone[String(p.id)]) : all), [all, gone]);
+  const shown = useMemo(() => (q ? posts.filter((p) => String(p.caption || '').toLowerCase().includes(q)) : posts), [posts, q]);
+  const known = new Set(posts.map((p) => p.id));
+  const unknown = [...set].filter((id) => !known.has(id));
+  const deleted = unknown.filter((id) => gone && gone[String(id)]).length;
+  if (!posts.length && !unknown.length) return html`<p class="muted text-sm">No posts yet. Analytics fills this list after the worker's first run.</p>`;
+  const dateOf = (p) => (p.timestamp ? new Date(p.timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: new Date(p.timestamp).getFullYear() === new Date().getFullYear() ? undefined : '2-digit' }) : '');
+  return html`<div class="rule-picker stack stack-sm">
+    <div class="rule-picker-bar">
+      <${TextInput} class="grow" icon="search" type="search" value=${query} placeholder="Search captions" aria-label="Search posts by caption"
+        onChange=${(v) => {
+          setQuery(v);
+          setLimit(PICKER_PAGE);
+        }} />
+      <span class="rule-picker-count faint text-sm" aria-live="polite"><span class="num">${set.size}</span> chosen</span>
+      ${set.size ? html`<${Button} size="sm" variant="ghost" onClick=${() => onChange([])}>Clear<//>` : null}
+    </div>
+    ${!shown.length
+      ? html`<p class="muted text-sm">No post caption contains “${query.trim()}”.</p>`
+      : html`<div class="rule-posts" role="group" aria-label="Choose posts">
+          ${shown.slice(0, limit).map((p, i) => {
+            const common = {
+              key: p.id,
+              ratio: '1 / 1',
+              number: i + 1,
+              kind: kindOf(p),
+              label: dateOf(p),
+              selected: set.has(p.id),
+              onClick: () => toggle(p.id),
+              title: excerpt(p.caption, 120) || undefined,
+              'aria-label': `${set.has(p.id) ? 'Remove' : 'Choose'} post: ${excerpt(p.caption, 60) || 'untitled'}${p.timestamp ? `, ${dateOf(p)}` : ''}`,
+            };
+            const src = thumbOf(p);
+            return !src && p.assetId
+              ? html`<${MediaThumb} assetId=${p.assetId} badge="" ...${common} />`
+              : html`<${Frame} src=${src} alt=${excerpt(p.caption, 80)} ...${common} />`;
+          })}
+        </div>`}
+    ${shown.length > limit
+      ? html`<div><${Button} size="sm" variant="ghost" icon="chevron-down" onClick=${() => setLimit((n) => n + PICKER_PAGE * 2)}>Show more posts (${shown.length - limit} more)<//></div>`
+      : null}
+    ${unknown.length
+      ? html`<p class="text-warn text-sm rule-picker-missing">
+          ${deleted === unknown.length
+            ? `${unknown.length === 1 ? 'One chosen post was' : `${unknown.length} chosen posts were`} not found on Instagram (deleted?), so the worker skips ${unknown.length === 1 ? 'it' : 'them'}.`
+            : `${unknown.length === 1 ? 'One chosen post is' : `${unknown.length} chosen posts are`} not in your post list (deleted, or not in analytics yet). The worker skips posts Instagram cannot find.`}
+          <${Button} size="sm" variant="ghost" onClick=${() => onChange((value || []).filter((id) => known.has(id)))}>Remove ${unknown.length === 1 ? 'it' : 'them'}<//>
+        </p>`
+      : null}
   </div>`;
 }
 
 /** Modal that edits one rule. */
-export function RuleEditor({ open, rule, posts = [], aiReady = false, blockedWords, onClose, onSave, saving = false, title }) {
+export function RuleEditor({ open, rule, posts = [], gone = null, watch = null, aiReady = false, blockedWords, onClose, onSave, saving = false, title }) {
   const [draft, setDraft] = useState(() => structuredClone(rule || newRule({ name: '' })));
   const [showErrors, setShowErrors] = useState(false);
+  // The Match the editor replaced with "Every message" when the source became story mentions.
+  const autoMatch = useRef(null);
   useEffect(() => {
     if (open) {
       setDraft(structuredClone(rule || newRule({ name: '' })));
       setShowErrors(false);
+      autoMatch.current = null;
     }
   }, [open, rule]);
   if (!open) return null;
@@ -372,7 +488,20 @@ export function RuleEditor({ open, rule, posts = [], aiReady = false, blockedWor
   const missing = allowed.filter((a) => !(draft.actions || []).some((x) => x.type === a));
   const kwErrors = (t.keywords || []).map((k) => [k, keywordError(k)]).filter(([, e]) => e);
 
-  const changeSource = (src) =>
+  const changeSource = (src) => {
+    // Story mentions rarely have text: start with "Every message" unless keywords were already set.
+    // Leaving them again puts the earlier Match back, or asks for keywords, so a comment or DM rule
+    // never silently becomes "answer everything".
+    let match = t.match || 'any';
+    if (src === 'story_mention' && source !== 'story_mention') {
+      if (!(t.keywords || []).length && match !== 'always') {
+        autoMatch.current = match;
+        match = 'always';
+      }
+    } else if (src !== 'story_mention' && source === 'story_mention') {
+      if (match === 'always') match = autoMatch.current || ((t.keywords || []).length ? 'always' : 'any');
+      autoMatch.current = null;
+    }
     setDraft((d) => {
       const ok = ACTIONS_FOR[src] || [];
       let actions = (d.actions || [])
@@ -380,8 +509,9 @@ export function RuleEditor({ open, rule, posts = [], aiReady = false, blockedWor
         .filter(Boolean);
       actions = actions.filter((a, i) => actions.findIndex((b) => b.type === a.type) === i);
       if (!actions.length) actions = [{ type: src === 'comment' ? 'reply_comment' : 'send_dm', texts: [''] }];
-      return { ...d, trigger: { ...d.trigger, source: src, mediaIds: src === 'comment' ? d.trigger.mediaIds : null }, actions };
+      return { ...d, trigger: { ...d.trigger, source: src, match, mediaIds: src === 'comment' ? d.trigger.mediaIds : null }, actions };
     });
+  };
 
   const save = () => {
     if (errors.length) {
@@ -405,11 +535,14 @@ export function RuleEditor({ open, rule, posts = [], aiReady = false, blockedWor
 
         <section class="rule-section stack" aria-labelledby="rule-when">
           <h3 class="rule-section-title label-caps" id="rule-when">When</h3>
-          <${Group} label="Listen to">
-            <${Segmented} label="Listen to" options=${SOURCE_OPTIONS} value=${source} onChange=${changeSource} />
+          <${Field} label="Listen to" hint=${SOURCE_HINTS[source]}>
+            <${Select} options=${SOURCE_OPTIONS} value=${source} onChange=${changeSource} />
           <//>
           <${Field} label="Match">
-            <${Select} options=${MATCH_OPTIONS} value=${t.match || 'any'} onChange=${(v) => setTrigger({ match: v })} />
+            <${Select} options=${MATCH_OPTIONS} value=${t.match || 'any'} onChange=${(v) => {
+              autoMatch.current = null;
+              setTrigger({ match: v });
+            }} />
           <//>
           ${t.match !== 'always'
             ? html`<${Field} label="Keywords" error=${errFor('keywords')}
@@ -419,14 +552,17 @@ export function RuleEditor({ open, rule, posts = [], aiReady = false, blockedWor
               ${kwErrors.length && !showErrors
                 ? html`<ul class="rule-kw-errors">${kwErrors.map(([k, e]) => html`<li key=${k} class="text-warn text-sm"><span class="mono">${k}</span>: ${e}</li>`)}</ul>`
                 : null}`
-            : html`<p class="muted text-sm">${source === 'dm' ? 'Every new message' : 'Every new comment'} triggers this rule. Turn on “Only once per person” so people get one reply.</p>`}
+            : html`<p class="muted text-sm">Every new ${SOURCE_NOUN[source] || 'message'} triggers this rule. Turn on “Only once per person” so people get one reply.</p>`}
           ${source === 'comment'
             ? html`<${Group} label="On" error=${errFor('scope')}>
                 <${Segmented} label="Which posts" value=${Array.isArray(t.mediaIds) ? 'chosen' : 'all'}
-                  options=${[{ value: 'all', label: 'All posts' }, { value: 'chosen', label: 'Chosen posts' }]}
+                  options=${[{ value: 'all', label: 'All watched posts' }, { value: 'chosen', label: 'Chosen posts' }]}
                   onChange=${(v) => setTrigger({ mediaIds: v === 'chosen' ? t.mediaIds || [] : null })} />
               <//>
-              ${Array.isArray(t.mediaIds) ? html`<${PostPicker} posts=${posts} value=${t.mediaIds} onChange=${(ids) => setTrigger({ mediaIds: ids })} />` : null}`
+              ${Array.isArray(t.mediaIds)
+                ? html`<${PostPicker} posts=${posts} gone=${gone} value=${t.mediaIds} onChange=${(ids) => setTrigger({ mediaIds: ids })} />
+                    <p class="faint text-sm">Chosen posts are watched however old they are; posts outside Watched posts are checked every 30 minutes. Comments made before a post was watched are not answered.</p>`
+                : html`<p class="faint text-sm">${watch ? `Your newest ${watch.posts} posts from the last ${watch.days} days` : 'Your recent posts'}, as set under Watched posts.</p>`}`
             : null}
         </section>
 
@@ -456,7 +592,7 @@ export function RuleEditor({ open, rule, posts = [], aiReady = false, blockedWor
         </section>
 
         <${Toggle} checked=${!!draft.oncePerUser} onChange=${(v) => setDraft((d) => ({ ...d, oncePerUser: v }))}
-          label="Only once per person" hint="Each person gets this rule's reply one time, even if they comment again." />
+          label="Only once per person" hint=${source === 'comment' ? "Each person gets this rule's reply one time, even if they comment again." : "Each person gets this rule's reply one time, even if they write again."} />
       </div>
       <aside class="rule-side">
         <${TestPanel} rule=${draft} blockedWords=${blockedWords} posts=${posts} />

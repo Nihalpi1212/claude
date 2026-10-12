@@ -124,6 +124,7 @@
 .ap-pool-item.is-used .frame-media { opacity: 0.45; }
 .ap-pool-item.is-used .frame-label { color: var(--ink-3); }
 .ap-pool-item:not(.is-used) .frame-label { color: var(--ok-ink); }
+.ap-pool-item.is-skipped .frame-label { color: var(--warn-ink); }
 .ap-pool-remove {
   position: absolute;
   top: 6px;
@@ -196,4 +197,23 @@
   .ap-form-foot .btn { flex: 1 1 auto; }
   .ap-group .segmented { width: 100%; }
   .ap-group .segmented .seg { flex: 1 1 0; }
+}
+
+/* Reposts of top posts (autopilot.recycleTopPosts) */
+.ap-repost {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--ink);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  line-height: 1.6;
+}
+.ap-repost svg { color: var(--accent); }
+.ap-recycle-days { max-width: 220px; margin-left: 46px; }
+@media (max-width: 759px) {
+  .ap-recycle-days { margin-left: 0; max-width: none; }
 }

@@ -9,6 +9,7 @@ import {
   listItemIndex,
   nextQueueSlot,
   planAutopilot,
+  recycleCandidates,
   recyclePicks,
   suggestSlots,
   unusedAssets,
@@ -480,6 +481,25 @@ test('planAutopilot: media from a rejected draft is not suggested again by useAl
   assert.deepEqual(planAutopilot({ autopilot: ap, assets: again, posts: [rejected], tz: TZ, now: NOW }).create.map((c) => c.assetIds), [['a1']]);
 });
 
+test('planAutopilot: never files still downloading or failed, wrong-shape photos, or queue items (useAllUnused)', () => {
+  const assets = [
+    newAsset({ id: 'pending', importUrl: 'https://blog.example/b.jpg', tags: ['feed'] }),
+    newAsset({ id: 'png', importUrl: 'https://blog.example/a.png', importError: 'This is a PNG image.', tags: ['feed'] }),
+    newAsset({ id: 'queued', width: 1080, height: 1350 }),
+    newAsset({ id: 'story', width: 1080, height: 1920, autopilot: true }),
+    newAsset({ id: 'free', width: 1080, height: 1080 }),
+  ];
+  const lists = [{ id: 'l1', items: [{ id: 'i1', media: [{ assetId: 'queued' }] }] }];
+  const r = planAutopilot({ autopilot: { ...AP, postsPerWeek: 7, useAllUnused: true }, assets, posts: [], lists, tz: TZ, now: NOW });
+  assert.deepEqual(r.create.map((c) => c.assetIds), [['free']]);
+  // Without the lists, the queued photo would be posted a second time.
+  const noLists = planAutopilot({ autopilot: { ...AP, postsPerWeek: 7, useAllUnused: true }, assets, posts: [], tz: TZ, now: NOW });
+  assert.deepEqual(noLists.create.map((c) => c.assetIds), [['queued'], ['free']]);
+  // The reviewer's case: only feed files that are downloading or failed.
+  const feedOnly = planAutopilot({ autopilot: { ...AP, postsPerWeek: 2, useAllUnused: true }, assets: assets.slice(0, 2), posts: [], tz: TZ, now: NOW });
+  assert.equal(feedOnly.code, 'no_assets');
+});
+
 test('planAutopilot: allowed types, long folders and video fallback', () => {
   const eleven = Array.from({ length: 11 }, (_, i) => newAsset({ id: `c${i}`, folderId: 'big', autopilot: true }));
   const r = planAutopilot({ autopilot: { ...AP, postsPerWeek: 7 }, assets: eleven, tz: TZ, now: NOW });
@@ -535,4 +555,96 @@ test('recyclePicks: best older media that was not recycled recently', () => {
   assert.deepEqual(picks.map((p) => p.id), ['m8', 'm2', 'm1']);
   assert.deepEqual(recyclePicks({ mediaStats, posts, now: NOW, afterDays: 120 }).map((p) => p.id), ['m8']);
   assert.deepEqual(recyclePicks({ mediaStats: {}, now: NOW }), []);
+});
+
+test('recycleCandidates: joins top media with the Postpilot posts that published them and checks the library', () => {
+  const daysAgo = (d) => new Date(Date.parse(NOW) - d * 864e5).toISOString();
+  const m = (id, d, er) => ({ id, productType: 'FEED', timestamp: daysAgo(d), metrics: { reach: 1000, totalInteractions: er * 1000 } });
+  const mediaStats = { ig1: m('ig1', 200, 0.5), ig2: m('ig2', 300, 0.4), ig3: m('ig3', 250, 0.3), ig4: m('ig4', 220, 0.2), ig5: m('ig5', 150, 0.1) };
+  const assets = [newAsset({ id: 'a1' }), newAsset({ id: 'a2' }), newAsset({ id: 'a3', originalRemovedAt: NOW }), newAsset({ id: 'a4' }), newAsset({ id: 'a5', importUrl: 'https://x.example/a.jpg' })];
+  const pub = (id, igMediaId, media, extra = {}) =>
+    newPost({ id, status: 'published', igMediaId, caption: `Caption of ${igMediaId}`, firstComment: 'First!', media: media.map((assetId) => ({ assetId, kind: 'image', altText: 'Alt' })), publishedAt: mediaStats[igMediaId].timestamp, ...extra });
+  const posts = [pub('p1', 'ig1', ['a1'], { location: { id: '1', name: 'Studio' } })];
+  const archive = [
+    pub('p2', 'ig2', ['a1', 'a2'], { type: 'carousel' }),
+    pub('p3', 'ig3', ['a3']), // original removed to save space
+    pub('p5', 'ig5', ['a5']), // still downloading
+  ];
+  // ig4 was posted outside Postpilot: no post, no library copy.
+  const out = recycleCandidates({ mediaStats, posts, archive, assets, now: NOW, afterDays: 120, count: 5 });
+  assert.deepEqual(out.map((c) => c.recycleOf), ['ig1', 'ig2']);
+  assert.deepEqual(out[0], {
+    recycleOf: 'ig1',
+    type: 'feed',
+    assetIds: ['a1'],
+    media: [{ assetId: 'a1', kind: 'image', altText: 'Alt' }],
+    caption: 'Caption of ig1',
+    firstComment: 'First!',
+    altText: '',
+    coverAssetId: null,
+    thumbOffsetMs: null,
+    location: { id: '1', name: 'Studio' },
+    publishedAt: mediaStats.ig1.timestamp,
+  });
+  assert.equal(out[1].type, 'carousel');
+  assert.deepEqual(out[1].assetIds, ['a1', 'a2']);
+  assert.equal(recycleCandidates({ mediaStats, posts, archive, assets, now: NOW, count: 1 }).length, 1);
+
+  // A repost planned or published within afterDays keeps the original out; a rejected one too.
+  const planned = newPost({ status: 'scheduled', source: 'recycle', recycleOf: 'ig1', scheduledAt: daysAgo(-2) });
+  assert.deepEqual(recycleCandidates({ mediaStats, posts: [...posts, planned], archive, assets, now: NOW }).map((c) => c.recycleOf), ['ig2']);
+  const rejected = newPost({ status: 'canceled', source: 'recycle', recycleOf: 'ig1', scheduledAt: daysAgo(1), updatedAt: daysAgo(1), history: [{ at: daysAgo(1), event: 'rejected' }] });
+  assert.deepEqual(recycleCandidates({ mediaStats, posts: [...posts, rejected], archive, assets, now: NOW }).map((c) => c.recycleOf), ['ig2']);
+  const oldReject = { ...rejected, updatedAt: daysAgo(200) };
+  assert.deepEqual(recycleCandidates({ mediaStats, posts: [...posts, oldReject], archive, assets, now: NOW }).map((c) => c.recycleOf), ['ig1', 'ig2']);
+});
+
+test('planAutopilot: recycling adds about one repost per week of the horizon, after the pool', () => {
+  const recycle = [
+    { recycleOf: 'ig1', type: 'feed', assetIds: ['old1'] },
+    { recycleOf: 'ig2', type: 'reel', assetIds: ['old2'] },
+  ];
+  const ap = { ...AP, recycleTopPosts: true };
+  const r = planAutopilot({ autopilot: ap, assets: libraryAssets(), posts: [], tz: TZ, now: NOW, recycle });
+  assert.equal(r.code, 'planned');
+  assert.deepEqual(r.create.map((c) => c.recycleOf || c.type), ['carousel', 'reel', 'ig1']);
+  assert.equal(r.reason, 'Planned 3 posts (1 repost of a top post).');
+
+  // Off: no reposts, same plan as before.
+  const off = planAutopilot({ autopilot: AP, assets: libraryAssets(), posts: [], tz: TZ, now: NOW, recycle });
+  assert.ok(off.create.every((c) => !c.recycleOf));
+
+  // An empty pool still gets a repost; a planned repost in the horizon uses up the weekly one.
+  const empty = planAutopilot({ autopilot: ap, assets: [], posts: [], tz: TZ, now: NOW, recycle });
+  assert.deepEqual(empty.create.map((c) => c.recycleOf), ['ig1']);
+  assert.equal(empty.reason, 'Planned 1 post (a repost of a top post). Add more media to autopilot to fill the queue.');
+  const soon = new Date(Date.parse(NOW) + 48 * HOUR).toISOString();
+  const already = [newPost({ status: 'draft', source: 'recycle', recycleOf: 'ig9', scheduledAt: soon })];
+  const none = planAutopilot({ autopilot: ap, assets: [], posts: already, tz: TZ, now: NOW, recycle });
+  assert.equal(none.code, 'no_assets');
+  assert.match(none.reason, /no top post can be reposted yet/);
+
+  // Two weeks of horizon allow two reposts; types autopilot may not create are skipped.
+  const twoWeeks = planAutopilot({ autopilot: { ...ap, horizonDays: 14, postsPerWeek: 2 }, assets: [], posts: [], tz: TZ, now: NOW, recycle });
+  assert.deepEqual(twoWeeks.create.map((c) => c.recycleOf), ['ig1', 'ig2']);
+  const feedOnly = planAutopilot({ autopilot: { ...ap, horizonDays: 14, postsPerWeek: 2, allowedTypes: ['feed'] }, assets: [], posts: [], tz: TZ, now: NOW, recycle });
+  assert.deepEqual(feedOnly.create.map((c) => c.recycleOf), ['ig1']);
+});
+
+test('planAutopilot: while the pool has media, reposts are at most a third of the posts', () => {
+  const recycle = [{ recycleOf: 'm1', type: 'feed', assetIds: ['old1'] }, { recycleOf: 'm2', type: 'feed', assetIds: ['old2'] }];
+  const pool = [1, 2, 3, 4, 5].map((i) => newAsset({ id: `p${i}`, autopilot: true }));
+  const plan = (perWeek, extra = {}) =>
+    planAutopilot({ autopilot: { ...AP, recycleTopPosts: true, postsPerWeek: perWeek, ...extra }, assets: pool, posts: [], tz: TZ, now: NOW, recycle }).create.map((c) => c.recycleOf || c.assetIds[0]);
+  // The reviewer's case: at 1 post a week every post used to be a repost.
+  assert.deepEqual(plan(1), ['p1']);
+  assert.deepEqual(plan(2), ['p1', 'p2']);
+  assert.deepEqual(plan(3), ['p1', 'p2', 'm1']);
+  assert.deepEqual(plan(4), ['p1', 'p2', 'p3', 'm1']);
+  assert.deepEqual(plan(7), ['p1', 'p2', 'p3', 'p4', 'p5', 'm1'], 'still about one a week');
+  // Steady state: one slot to refill a week after a repost published; a repost already planned counts.
+  const soon = new Date(Date.parse(NOW) + 48 * HOUR).toISOString();
+  const planned = [newPost({ status: 'scheduled', source: 'recycle', recycleOf: 'm9', scheduledAt: soon })];
+  const r = planAutopilot({ autopilot: { ...AP, recycleTopPosts: true, postsPerWeek: 4 }, assets: pool, posts: planned, tz: TZ, now: NOW, recycle });
+  assert.ok(r.create.every((c) => !c.recycleOf));
 });

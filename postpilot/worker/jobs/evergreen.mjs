@@ -5,7 +5,13 @@
 //
 // Lists with `repeat: false` use each item once: items already used (timesUsed > 0) or waiting in
 // an active post are not scheduled again, and the publish job removes an item once it is published.
+//
+// Items whose media is still being downloaded from a link (asset.importUrl, feed and CSV imports) are
+// scheduled as usual (the publish job waits for the file); items whose download failed
+// (asset.importError) are skipped until the owner fixes the file in the Library. So are items with a
+// photo outside the feed's 4:5 to 1.91:1 range: Instagram would refuse every post made from them.
 
+import { fitsFeed } from '../../core/feed.js';
 import { expandListSlots } from '../../core/schedule.js';
 import { newPost } from '../../core/model.js';
 
@@ -16,6 +22,10 @@ function hasAllMedia(item, assetIds) {
   return media.length > 0 && media.every((m) => assetIds.has(m.assetId));
 }
 
+function hasBrokenMedia(item, brokenIds) {
+  return !!brokenIds && (item.media || []).some((m) => brokenIds.has(m.assetId));
+}
+
 function postTypeFor(item) {
   if (item.type) return item.type;
   return (item.media || []).length > 1 ? 'carousel' : 'feed';
@@ -23,14 +33,16 @@ function postTypeFor(item) {
 
 /**
  * Plan posts for one list against the current posts. Returns { posts: [...], nextIndex, missing: [itemIds] }.
+ * brokenIds: assets that cannot be posted to the feed, because their download from a link failed or
+ * they are photos of the wrong shape (their items are skipped, not flagged missing; see brokenAssetIds).
  * Exported for tests.
  */
-export function planList(list, { posts, assetIds, tz, now, nowIso }) {
+export function planList(list, { posts, assetIds, brokenIds = null, tz, now, nowIso }) {
   const missing = [];
   const usable = [];
   for (const item of list.items || []) {
-    if (hasAllMedia(item, assetIds)) usable.push(item);
-    else missing.push(item.id);
+    if (!hasAllMedia(item, assetIds)) missing.push(item.id);
+    else if (!hasBrokenMedia(item, brokenIds)) usable.push(item);
   }
   let source;
   let limit = MAX_PER_RUN;
@@ -80,6 +92,11 @@ export function planList(list, { posts, assetIds, tz, now, nowIso }) {
   return { posts: created, nextIndex: next, missing };
 }
 
+/** Library assets a queue item cannot use: failed downloads and photos outside 4:5 to 1.91:1. Exported for tests. */
+export function brokenAssetIds(assets) {
+  return new Set((assets || []).filter((a) => (a.importUrl && a.importError) || (a.kind === 'image' && !fitsFeed(a.width, a.height))).map((a) => a.id));
+}
+
 export default async function evergreen(ctx) {
   const peek = await ctx.store.read('lists');
   const active = (peek.lists || []).filter((l) => l.enabled !== false && (l.items || []).length && (l.slots || []).length);
@@ -95,12 +112,13 @@ export default async function evergreen(ctx) {
       const postsDoc = await tx.read('posts');
       const library = await tx.read('library');
       const assetIds = new Set((library.assets || []).map((a) => a.id));
+      const brokenIds = brokenAssetIds(library.assets);
       const nowMs = ctx.nowMs();
       const nowIso = new Date(nowMs).toISOString();
       let listsChanged = false;
       for (const list of listsDoc.lists || []) {
         if (list.enabled === false || !(list.items || []).length || !(list.slots || []).length) continue;
-        const plan = planList(list, { posts: postsDoc.posts, assetIds, tz: ctx.tz, now: nowMs, nowIso });
+        const plan = planList(list, { posts: postsDoc.posts, assetIds, brokenIds, tz: ctx.tz, now: nowMs, nowIso });
         // Flag items whose media was deleted from the library (shown in the app; logged once).
         for (const item of list.items) {
           const isMissing = plan.missing.includes(item.id);

@@ -227,6 +227,51 @@ button.an-top-card:hover { border-color: var(--ink-3); }
 .an-slot-time { display: block; margin-bottom: 6px; font-weight: 500; }
 .an-slot-score { min-width: 2.5ch; text-align: right; font-family: var(--font-mono); font-size: 13px; color: var(--ink); }
 
+/* Versus-median chip next to a number (Reels 24 h / 7 days, drawer). */
+.an-vs {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 3px;
+  font: 500 11px var(--font-mono);
+  line-height: 18px;
+  white-space: nowrap;
+  vertical-align: 1px;
+  color: var(--ink-2);
+  background: var(--surface-2);
+}
+.an-vs.is-up { color: var(--ok); background: var(--ok-soft); }
+.an-vs.is-down { color: var(--bad); background: var(--bad-soft); }
+.an-age-cell { white-space: nowrap; }
+
+/* Caption cell with an optional "Trial" badge in front. */
+.an-caption-wrap { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.an-caption-wrap > .an-caption { flex: 1 1 auto; min-width: 0; }
+.an-trial-badge { flex: none; }
+
+/* Posts toolbar: type filter + label filter. */
+.an-label-filter { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.an-label-filter-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--ink-2);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+}
+.an-label-filter .select { min-width: 170px; max-width: 260px; }
+
+/* Campaign numbers: 5 tiles on wide screens. */
+@media (min-width: 900px) {
+  .stats.an-stats-5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+}
+.an-campaign-stats .stat-delta-label { overflow-wrap: anywhere; }
+
+/* Post drawer: history chart and age values. */
+.an-history { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.an-age dd { white-space: nowrap; }
+.an-trial-hint .callout-title { overflow-wrap: anywhere; }
+
 @media (max-width: 1023px) {
   .an-top { grid-template-columns: minmax(0, 1fr); }
   .an-top-card { grid-template-columns: 96px minmax(0, 1fr); }
@@ -244,4 +289,8 @@ button.an-top-card:hover { border-color: var(--ink-3); }
   .range-custom .input { flex: 1 1 0; width: auto; }
   .an-figure-value { font-size: 34px; }
   .an-drawer-head > .an-thumb { width: 88px !important; }
+  .an-posts-toolbar { gap: var(--sp-2); }
+  .an-label-filter { width: 100%; }
+  .an-label-filter .select { flex: 1 1 auto; max-width: none; }
+  .an-trial-hint { flex-wrap: wrap; }
 }

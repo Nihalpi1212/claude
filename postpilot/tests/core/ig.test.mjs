@@ -466,3 +466,216 @@ test('connectInstagram (Facebook Login) stores the Page token expiry and refuses
   assert.equal(fallback.token, 'page-token-1');
   assert.equal(fallback.tokenExpiresAt, null);
 });
+
+test('messages(): story replies and story mentions in every reported shape; falls back when the fields are refused', async (t) => {
+  const { graph, ig, bases } = await setup(t);
+  const convs = await ig.conversations();
+  const byUser = (u) => convs.find((c) => c.participants.some((p) => p.username === u));
+  for (const shape of ['story', 'reply_to']) {
+    graph.state.storyShape = shape;
+    const [reply] = await ig.messages(byUser('oak.and.ash').id);
+    assert.deepEqual(reply.storyReply, { id: graph.state.stories[0].id, url: reply.storyReply.url }, shape);
+    assert.match(reply.storyReply.url, /story01\.jpg$/);
+    assert.equal(reply.storyMention, null);
+    assert.match(reply.text, /workshop/);
+    const [mention, photo] = await ig.messages(byUser('junie.makes').id);
+    assert.equal(mention.text, '');
+    assert.match(mention.storyMention.url, /story02\.jpg$/);
+    assert.equal(mention.storyReply, null);
+    assert.equal(photo.storyMention, null, 'an ordinary photo is not a story mention');
+    const plain = await ig.messages(byUser('mara.lens').id);
+    assert.ok(plain.every((m) => m.storyReply === null && m.storyMention === null));
+  }
+  assert.ok(graph.state.requests.some((r) => /story,reply_to/.test(r.params.fields || '')));
+
+  // A host without the fields: one refused call, then plain reads for the rest of the client's life.
+  graph.state.storyShape = 'none';
+  const mark = graph.state.requests.length;
+  const msgs = await ig.messages(byUser('oak.and.ash').id);
+  assert.match(msgs[0].text, /workshop/);
+  assert.equal(msgs[0].storyReply, null);
+  assert.equal(ig.storyFieldsRejected, true);
+  await ig.messages(byUser('mara.lens').id);
+  const reads = graph.state.requests.slice(mark).map((r) => r.params.fields);
+  assert.equal(reads.length, 3);
+  assert.ok(!/story/.test(reads[2]), 'later reads skip the refused fields');
+
+  // A missing thread (100/33) is an error of its own, not refused fields.
+  graph.state.storyShape = 'story';
+  const other = createIg({ token: 'tok', igBase: bases.igBase, retryDelayMs: 1 });
+  await assert.rejects(other.messages('no-such-thread'), (err) => err.code === 100 && err.subcode === 33);
+  assert.equal(other.storyFieldsRejected, false);
+});
+
+test('normMessage reads webhook-style story mention attachments', async (t) => {
+  const { graph, ig } = await setup(t);
+  const convs = await ig.conversations();
+  const conv = convs.find((c) => c.participants.some((p) => p.username === 'junie.makes'));
+  graph.state.storyShape = 'reply_to';
+  const [mention] = await ig.messages(conv.id);
+  assert.equal(mention.storyMention.id, null, 'the attachment form carries only the link');
+  assert.ok(mention.attachments.some((a) => a.type === 'story_mention'));
+});
+
+test('collaboration invites: list, accept, decline, gone and unsupported (both login types)', async (t) => {
+  const { graph, ig, bases } = await setup(t);
+  const list = await ig.collaborationInvites();
+  assert.deepEqual(list.map((i) => i.owner), ['atelier.kin', 'lumen.ceramics']);
+  assert.match(list[0].mediaUrl, /f05\.jpg$/);
+  assert.match(list[0].caption, /joint mug/);
+  const req = graph.state.requests.find((r) => r.path.endsWith('/collaboration_invites'));
+  assert.equal(req.params.fields, 'media_id,media_owner_username,caption,media_url');
+
+  assert.deepEqual(await ig.respondCollabInvite(list[0].mediaId, true), { mediaId: list[0].mediaId, accepted: true, success: true });
+  assert.deepEqual(await ig.respondCollabInvite(list[1].mediaId, false), { mediaId: list[1].mediaId, accepted: false, success: true });
+  assert.deepEqual(graph.state.collabResponses.map((r) => r.accept), [true, false]);
+  assert.deepEqual(await ig.collaborationInvites(), []);
+  // Answering again: the invite is gone (not "unsupported").
+  await assert.rejects(ig.respondCollabInvite(list[0].mediaId, true), (err) => err.isNotFound && err.code === 100);
+
+  // Unknown field names: read again with the default fields.
+  graph.state.collabInvites.push({ media_id: '17900000000000777', owner: 'north.trails', caption: 'Trail mugs', file: 'f01.jpg', status: 'pending' });
+  graph.state.faults.push({ method: 'GET', path: /\/collaboration_invites$/, when: (p) => !!p.fields, times: 1, error: { status: 400, code: 100, message: '(#100) Tried accessing nonexisting field (media_owner_username) on node type (IGCollaborationInvite)' } });
+  assert.deepEqual((await ig.collaborationInvites()).map((i) => i.owner), ['north.trails']);
+
+  graph.state.collabMode = 'unsupported';
+  await assert.rejects(ig.collaborationInvites(), (err) => err instanceof IgError && err.code === 'unsupported' && /Instagram app/.test(err.userMessage) && err.cause.code === 100);
+  await assert.rejects(ig.respondCollabInvite('17900000000000777', true), (err) => err.code === 'unsupported');
+  graph.state.collabMode = undefined;
+
+  // Login and rate-limit errors keep their meaning.
+  graph.state.faults.push({ method: 'GET', path: /\/collaboration_invites$/, times: 1, error: { status: 400, code: 4, message: '(#4) Application request limit reached' } });
+  await assert.rejects(ig.collaborationInvites(), (err) => err.isRateLimit && err.code === 4);
+
+  // Facebook Login: the same edge on the account id.
+  const fb = createIg({ mode: 'facebook', token: 'user-token', userId: graph.state.userId, pageId: graph.state.pageId, pageToken: 'page-token-1', ...bases, retryDelayMs: 1 });
+  assert.deepEqual((await fb.collaborationInvites()).map((i) => i.owner), ['north.trails']);
+  assert.ok(graph.state.requests.some((r) => r.path.endsWith(`/${graph.state.userId}/collaboration_invites`)));
+
+  // A lost connection: answering is safe to resend, so it is retried and never flagged maybeSent.
+  let calls = 0;
+  const flaky = createIg({
+    token: 't',
+    igBase: 'https://graph.example',
+    retryDelayMs: 1,
+    fetchImpl: async () => {
+      calls++;
+      if (calls < 2) throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNRESET' } });
+      return new Response(JSON.stringify({ success: true }), { status: 200 });
+    },
+  });
+  assert.equal((await flaky.respondCollabInvite('1', true)).success, true);
+  assert.equal(calls, 2);
+});
+
+test('accountDaily breakdowns: format and follower splits for chosen days, bounded and non-fatal', async (t) => {
+  const { graph, ig, bases } = await setup(t);
+  const tz = 'UTC';
+  const today = dayKey(new Date(), tz);
+  const sinceKey = addDaysKey(today, -4);
+  const untilKey = addDaysKey(today, -1);
+  const bdCalls = (from) => graph.state.requests.slice(from).filter((r) => /insights$/.test(r.path) && /media_product_type|follow_type|follower_type/.test(r.params.breakdown || '') && /reach|views/.test(r.params.metric || ''));
+
+  // Off by default: the same calls as before.
+  let mark = graph.state.requests.length;
+  const plain = await ig.accountDaily({ sinceKey, untilKey, tz });
+  assert.equal(bdCalls(mark).length, 0);
+  assert.equal(plain[untilKey].reachByType, undefined);
+
+  mark = graph.state.requests.length;
+  const days = await ig.accountDaily({ sinceKey, untilKey, tz, breakdowns: [untilKey, sinceKey] });
+  const calls = bdCalls(mark);
+  assert.equal(calls.length, 2 * 3, 'three breakdown calls per chosen day');
+  assert.ok(calls.every((r) => r.params.metric_type === 'total_value'));
+  assert.deepEqual(calls.filter((r) => r.params.metric === 'views' && r.params.breakdown === 'follower_type').length, 2);
+  for (const k of [untilKey, sinceKey]) {
+    const d = days[k];
+    assert.deepEqual(Object.keys(d.viewsByType).sort(), ['CAROUSEL_CONTAINER', 'POST', 'REEL', 'STORY']);
+    assert.equal(Object.values(d.viewsByType).reduce((a, b) => a + b, 0), d.views);
+    assert.equal(d.reachFollowers + d.reachNonFollowers, d.reach);
+    assert.equal(d.viewsFollowers + d.viewsNonFollowers, d.views);
+  }
+  assert.equal(days[addDaysKey(today, -2)].reachByType, undefined, 'days not asked for get no breakdowns');
+
+  // If views rejects follower_type (the research is unverified) it is tried once with follow_type;
+  // both rejections are remembered, so later days make no more views-split calls.
+  graph.state.faults.push({ method: 'GET', path: /\/insights$/, when: (p) => p.breakdown === 'follower_type', times: 100, error: { status: 400, code: 100, message: '(#100) Incompatible breakdowns (follower_type) with metric (views)' } });
+  const fresh = createIg({ token: 'tok', ...bases, retryDelayMs: 1 });
+  mark = graph.state.requests.length;
+  const fb = await fresh.accountDaily({ sinceKey: untilKey, untilKey, tz, breakdowns: true });
+  const tried = bdCalls(mark).filter((r) => /views/.test(r.params.metric)).map((r) => r.params.breakdown);
+  assert.deepEqual(tried.sort(), ['follow_type', 'follower_type', 'media_product_type']);
+  assert.equal(fb[untilKey].viewsFollowers, undefined, 'the mock accepts neither, so no views split');
+  assert.equal(typeof fb[untilKey].reachFollowers, 'number');
+  assert.ok(fb[untilKey].viewsByType);
+  mark = graph.state.requests.length;
+  await fresh.accountDaily({ sinceKey: addDaysKey(today, -2), untilKey: addDaysKey(today, -2), tz, breakdowns: true });
+  assert.deepEqual(bdCalls(mark).map((r) => r.params.breakdown).sort(), ['follow_type', 'media_product_type'], 'rejections remembered');
+  graph.state.faults.length = 0;
+
+  // A rate limit stops the remaining breakdown calls but keeps the totals.
+  graph.state.faults.push({ method: 'GET', path: /\/insights$/, when: (p) => p.breakdown === 'media_product_type', times: 100, error: { status: 400, code: 4, message: 'Application request limit reached' } });
+  mark = graph.state.requests.length;
+  const limited = await ig.accountDaily({ sinceKey, untilKey, tz, breakdowns: true });
+  assert.equal(Object.keys(limited).length, 4);
+  assert.ok(Object.values(limited).every((d) => typeof d.reach === 'number' && d.reachByType === undefined && d.reachFollowers === undefined));
+  assert.ok(bdCalls(mark).length <= 3, `stopped after the rate limit (${bdCalls(mark).length})`);
+  graph.state.faults.length = 0;
+
+  // Auth errors still throw.
+  graph.state.faults.push({ method: 'GET', path: /\/insights$/, when: (p) => p.breakdown === 'follow_type' && p.metric === 'reach', times: 100, error: { status: 400, code: 190, subcode: 463, type: 'OAuthException', message: 'Error validating access token: Session has expired' } });
+  await assert.rejects(ig.accountDaily({ sinceKey: untilKey, untilKey, tz, breakdowns: true }), (err) => err.isAuth);
+  graph.state.faults.length = 0;
+});
+
+test('collaboration invites: a lost answer is resent once, and "not found" after it means Instagram has it', async (t) => {
+  const { graph, bases } = await setup(t);
+  const lose = (n) => {
+    let lost = 0;
+    return async (url, init) => {
+      const res = await fetch(url, init);
+      if (init && init.method === 'POST' && String(url).includes('/collaboration_invites') && lost < n) {
+        lost++;
+        await res.text(); // Instagram processed it, but the answer never arrived
+        throw Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' }) });
+      }
+      return res;
+    };
+  };
+  const [first, second] = graph.state.collabInvites;
+  const ig1 = createIg({ token: 'tok', ...bases, retryDelayMs: 1, fetchImpl: lose(1) });
+  assert.deepEqual(await ig1.respondCollabInvite(first.media_id, true), { mediaId: first.media_id, accepted: true, success: true, unconfirmed: true });
+  assert.deepEqual(graph.state.collabResponses.map((r) => r.accept), [true], 'answered once');
+
+  // Every attempt lost: flagged maybeSent, so callers do not report the invite as still open.
+  const ig2 = createIg({ token: 'tok', ...bases, retryDelayMs: 1, fetchImpl: lose(9) });
+  await assert.rejects(ig2.respondCollabInvite(second.media_id, false), (err) => err.code === 'network' && err.maybeSent === true && /may have gone through/.test(err.userMessage));
+
+  // Nothing left the machine: a plain network error, not maybeSent.
+  const ig3 = createIg({
+    token: 'tok',
+    igBase: 'https://graph.example',
+    retryDelayMs: 1,
+    fetchImpl: async () => {
+      throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } });
+    },
+  });
+  await assert.rejects(ig3.respondCollabInvite('1', true), (err) => err.code === 'network' && !err.maybeSent);
+  // An invite that was never open stays "not found" on the first attempt.
+  const { ig } = await setup(t);
+  await assert.rejects(ig.respondCollabInvite('17900000000000999', true), (err) => err.isNotFound);
+});
+
+test('collaboration invites: preview images skip video files, and answered invites are not listed as open', async () => {
+  // Imitates a response with more fields than the mock returns (field names unverified).
+  const data = [
+    { media_id: '1', media_owner_username: 'reel.maker', media_type: 'VIDEO', media_url: 'https://cdn.example/v.mp4?x=1', thumbnail_url: 'https://cdn.example/t.jpg' },
+    { media_id: '2', media_owner_username: 'clip.only', media_url: 'https://cdn.example/clip.mp4' },
+    { media_id: '3', media_owner_username: 'done.already', status: 'ACCEPTED', media_url: 'https://cdn.example/p.jpg' },
+    { media_id: '4', media_owner_username: 'photo.person', media_url: 'https://cdn.example/p.jpg' },
+  ];
+  const ig = createIg({ token: 't', igBase: 'https://graph.example', retryDelayMs: 1, fetchImpl: async () => new Response(JSON.stringify({ data }), { status: 200 }) });
+  const list = await ig.collaborationInvites();
+  assert.deepEqual(list.map((i) => [i.mediaId, i.mediaUrl]), [['1', 'https://cdn.example/t.jpg'], ['2', null], ['4', 'https://cdn.example/p.jpg']]);
+  assert.ok(!('open' in list[0]));
+});

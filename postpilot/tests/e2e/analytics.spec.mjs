@@ -1,11 +1,14 @@
-// E2E: Analytics (all tabs, range switch, live fallback, CSV export, post drawer, audience refresh)
-// and Reports (sections, AI summary, CSV, print stylesheet). Run: node --test tests/e2e/analytics.spec.mjs
+// E2E: Analytics (all tabs, range switch, live fallback, CSV export, post drawer with its history
+// curve, Reels 24 h / 7-day views and trial hint, label filter, reach/views breakdown charts, audience
+// refresh). Reports have their own spec (reports.spec.mjs). Run: node --test tests/e2e/analytics.spec.mjs
+// Some tests change the encrypted documents through the app's data module (as the worker would)
+// and put them back afterwards (page.evaluate: the app's CSP allows no eval, so no helper wraps it).
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { openApp, shot, unlock } from './helpers.mjs';
 
-const PORT = 5213;
+const PORT = 5521;
 // A range before the worker's first snapshot (it saves the last 28 days) but within Instagram's 90 days.
 const daysAgo = (n) => new Date(Date.now() - n * 864e5).toISOString().slice(0, 10);
 const OLD_FROM = daysAgo(63);
@@ -247,53 +250,246 @@ test('reels, stories, audience, best times and hashtags tabs render', async () =
   await waitForNumber('Reach');
 });
 
+test('overview: reach followers/non-followers and views by format charts from the worker\'s breakdowns', async () => {
+  await go('#/analytics');
+  await waitForNumber('Reach');
+  const split = page.locator('.panel', { has: page.locator('.panel-title', { hasText: 'Reach: followers vs non-followers' }) });
+  await split.locator('.chart-stackcol svg').waitFor();
+  assert.match(await split.innerText(), /\d+(\.\d)?% of reach came from non-followers/);
+  assert.ok((await split.locator('.chart-barmark').count()) >= 2 * 20, 'two stacked parts per day');
+  assert.match(await split.locator('.legend').innerText(), /Followers[\s\S]*Non-followers/);
+  // The hidden data table lists both parts and the total for every day.
+  assert.match(await split.locator('.sr-only caption').innerText(), /followers and non-followers/);
+  const views = page.locator('.panel', { has: page.locator('.panel-title', { hasText: 'Views by format' }) });
+  await views.locator('.stackbar').waitFor();
+  const legend = await views.locator('.chart-stack .legend').innerText();
+  for (const t of ['Posts', 'Reels', 'Stories', 'Carousels']) assert.match(legend, new RegExp(t));
+  assert.match(await views.locator('.panel-subtitle').innerText(), /of views from followers/);
+  assert.ok((await views.locator('.chart-stackcol .chart-barmark').count()) > 20, 'views per day by format');
+  // Hover shows every part and the total.
+  await split.locator('.chart-stackcol .chart-hit').last().hover({ force: true });
+  await split.locator('.chart-tip').waitFor();
+  assert.match(await split.locator('.chart-tip').innerText(), /Non-followers[\s\S]*Followers[\s\S]*Total/);
+  await page.mouse.move(1, 1);
+});
+
+test('posts tab: label filter shows the labelled posts and their numbers', async () => {
+  await go('#/analytics?tab=posts');
+  const rows = page.locator('[role="tabpanel"] tbody tr');
+  await rows.first().waitFor();
+  const all = await rows.count();
+  const select = page.getByRole('combobox', { name: 'Filter by label' });
+  const options = await select.locator('option').allInnerTexts();
+  assert.ok(options.some((o) => /^autumn drop \(\d+\)$/.test(o)), `label options: ${options.join(' | ')}`);
+  await select.selectOption({ label: options.find((o) => o.startsWith('autumn drop')) });
+  await page.waitForFunction(() => /label=autumn(%20|\+)drop/.test(location.hash));
+  await page.waitForFunction((n) => document.querySelectorAll('[role="tabpanel"] tbody tr').length < n, all);
+  const labelled = await rows.count();
+  assert.ok(labelled >= 2, `labelled rows (${labelled} of ${all})`);
+  const strip = page.locator('.an-campaign-stats');
+  assert.equal((await strip.locator('.stat').filter({ hasText: /^Posts/ }).locator('.stat-value').innerText()).trim(), String(labelled));
+  assert.match(await strip.innerText(), /per post vs/);
+  assert.match(await page.locator('[role="tabpanel"] .toolbar').innerText(), new RegExp(`${labelled} posts`));
+  // The trial reel carries a badge in the caption cell.
+  assert.ok((await page.locator('[role="tabpanel"] .an-trial-badge').count()) >= 1);
+  // Reload keeps the filter (it lives in the URL); "All posts" clears it.
+  await page.reload();
+  await unlock(page);
+  await page.locator('.an-campaign-stats').waitFor({ timeout: 20_000 });
+  await page.getByRole('combobox', { name: 'Filter by label' }).selectOption({ label: 'All posts' });
+  await page.waitForFunction(() => !location.hash.includes('label='));
+  await page.waitForFunction((n) => document.querySelectorAll('[role="tabpanel"] tbody tr').length === n, all);
+  assert.equal(await page.locator('.an-campaign-stats').count(), 0);
+});
+
+test('reels: views at 24 h and 7 days against the median, and the trial reel hint', async () => {
+  await go('#/analytics?tab=reels');
+  await page.locator('[role="tabpanel"] tbody tr').first().waitFor();
+  const heads = await page.locator('[role="tabpanel"] thead th').allInnerTexts();
+  assert.ok(heads.some((h) => /Views at 24 h/i.test(h)) && heads.some((h) => /Views at 7 days/i.test(h)), heads.join('|'));
+  const cells = page.locator('[role="tabpanel"] tbody td.an-age-cell');
+  const texts = await cells.allInnerTexts();
+  assert.ok(texts.some((t) => /^[\d,]+/.test(t)), 'known values');
+  assert.ok(texts.some((t) => /^—$/.test(t.trim())), 'blank (—) when not known yet (a reel under 7 days old)');
+  assert.ok((await page.locator('[role="tabpanel"] .an-vs').count()) >= 4, 'median comparison chips');
+  assert.match(await page.locator('[role="tabpanel"] .an-note', { hasText: 'median' }).innerText(), /Median of all your reels: [\d,.K]+ at 24 h/);
+  // Sorting by 24 h views puts the unknown ones last.
+  await page.locator('[role="tabpanel"] thead th', { hasText: 'Views at 24 h' }).locator('button').click();
+  await page.waitForFunction(() => document.querySelector('[role="tabpanel"] thead th[aria-sort="descending"], [role="tabpanel"] thead th[aria-sort="ascending"]')?.textContent.includes('Views at 24 h'));
+  // The seeded trial reel is judged at its latest known age. For a hint, point the trial post at the
+  // reel under 7 days old with the most views at 24 hours (ahead of the median); put it back after.
+  const setup = await page.evaluate(async () => {
+    const d = await import('/postpilot/js/data.js');
+    const A = await import('/postpilot/core/analytics.js');
+    const media = Object.values((await d.readDoc('analytics-media')).media);
+    const hist = (await d.readDoc('analytics-media-history')).media;
+    const reels = media
+      .filter((m) => m.productType === 'REELS' && hist[m.id])
+      .map((m) => ({ id: m.id, v24: A.valueAtAge(hist[m.id].points, m.timestamp, 24), v7: A.valueAtAge(hist[m.id].points, m.timestamp, 168) }));
+    const young = reels.filter((r) => r.v24 != null && r.v7 == null).sort((x, y) => y.v24 - x.v24)[0];
+    const med24 = A.median(reels.filter((r) => r !== young).map((r) => r.v24));
+    const trial = (await d.readDoc('posts')).posts.find((p) => p.trialReel);
+    await d.mutate('posts', (doc) => {
+      doc.posts.find((p) => p.id === trial.id).igMediaId = young.id;
+    });
+    return { post: trial.id, was: trial.igMediaId, young: young.id, ahead: young.v24 > med24, points: hist[young.id].points };
+  });
+  assert.ok(setup.ahead, 'the youngest reels include one ahead of the median at 24 hours');
+  try {
+    const hint = page.locator('.an-trial-hint').first();
+    await hint.waitFor();
+    assert.equal(await hint.locator('.callout-title').innerText(), 'Doing well with non-followers — share it to your followers in the Instagram app');
+    assert.match(await hint.innerText(), /views at 24 hours; the median of your other reels is [\d,]+/);
+    assert.match(await hint.innerText(), /can't share a trial reel/);
+    await hint.getByRole('button', { name: 'Details' }).click();
+    const drawer = page.getByRole('dialog', { name: 'Post details' });
+    await drawer.waitFor();
+    assert.match(await drawer.innerText(), /Trial reel/);
+    assert.equal(await drawer.locator('.an-trial-hint').count(), 1);
+    await page.keyboard.press('Escape');
+    await drawer.waitFor({ state: 'detached' });
+
+    // Once its 7-day views are known and below the median, the hint goes: it never contradicts the
+    // newer number in the same row.
+    await page.evaluate(async (s) => {
+      const d = await import('/postpilot/js/data.js');
+      const A = await import('/postpilot/core/analytics.js');
+      const m = (await d.readDoc('analytics-media')).media[s.young];
+      const t0 = A.parseTimestamp(m.timestamp);
+      const at = (h) => new Date(t0 + h * 36e5).toISOString().replace(/\.\d{3}Z$/, 'Z');
+      await d.mutate('analytics-media-history', (doc) => {
+        doc.media[s.young].points = [...s.points, { t: at(160), v: 10, r: 5 }, { t: at(176), v: 12, r: 6 }];
+      });
+    }, setup);
+    await page.waitForFunction(() => !document.querySelector('.an-trial-hint'));
+    const row = page.locator('[role="tabpanel"] tbody tr', { has: page.locator('.an-trial-badge') }).first();
+    assert.match(await row.locator('td.an-age-cell').nth(1).innerText(), /^11\s*−\d+(\.\d)?%$/, '7-day views (interpolated) below the median');
+  } finally {
+    await page.evaluate(async (s) => {
+      const d = await import('/postpilot/js/data.js');
+      await d.mutate('posts', (doc) => {
+        doc.posts.find((p) => p.id === s.post).igMediaId = s.was;
+      });
+      await d.mutate('analytics-media-history', (doc) => {
+        doc.media[s.young].points = s.points;
+      });
+    }, setup);
+  }
+});
+
+test('post drawer: views and reach since publishing, with 24 h and 7-day values', async () => {
+  await go('#/analytics?tab=reels');
+  const rows = page.locator('[role="tabpanel"] tbody tr');
+  await rows.first().waitFor();
+  // A reel (not the trial one) whose 7-day views are known.
+  const idx = await rows.evaluateAll((list) =>
+    list.findIndex((r) => {
+      const c = r.querySelectorAll('td.an-age-cell');
+      return c.length === 2 && /\d/.test(c[1].textContent) && !r.querySelector('.an-trial-badge');
+    }),
+  );
+  assert.ok(idx >= 0, 'a reel with known 7-day views');
+  await rows.nth(idx).click();
+  const drawer = page.getByRole('dialog', { name: 'Post details' });
+  await drawer.waitFor();
+  const chart = drawer.locator('.chart-curve');
+  await chart.locator('svg').waitFor();
+  assert.equal(await chart.locator('.chart-line-path').count(), 2, 'views and reach lines');
+  assert.match(await chart.locator('.legend').innerText(), /Views[\s\S]*Reach/);
+  const ticks = await chart.locator('.chart-axis text[text-anchor="middle"]').evaluateAll((els) => els.map((e) => e.textContent));
+  assert.ok(ticks.includes('1d') && ticks.includes('7d'), `hour/day ticks: ${ticks.join(' ')}`);
+  const kv = await drawer.locator('.an-age').innerText();
+  assert.match(kv, /Views at 24 h\s+[\d,]+/);
+  assert.match(kv, /Views at 7 days\s+[\d,]+/);
+  assert.match(kv, /vs median/);
+  // Keyboard: the chart is focusable and arrows move the tooltip along the curve.
+  await chart.focus();
+  await page.keyboard.press('Home');
+  await chart.locator('.chart-tip').waitFor();
+  assert.match(await chart.locator('.chart-tip-title').innerText(), /^0 min after posting$/);
+  await page.keyboard.press('End');
+  assert.match(await chart.locator('.chart-tip-title').innerText(), /days after posting$/);
+  // A live refresh still works (and may add a history point).
+  await drawer.getByRole('button', { name: /Refresh from Instagram/ }).click();
+  await page.waitForSelector('.toast >> text=Post stats updated from Instagram.', { timeout: 20_000 });
+  await page.keyboard.press('Escape');
+  await drawer.waitFor({ state: 'detached' });
+});
+
+test('post drawer: a history that starts late is not drawn from 0 and has no 24 h / 7-day values', async () => {
+  await go('#/analytics?tab=reels');
+  await page.locator('[role="tabpanel"] tbody tr').first().waitFor();
+  // A reel over 20 days old loses its first 20 days of points, as for a post that was already that
+  // old when Postpilot started saving history.
+  const setup = await page.evaluate(async () => {
+    const d = await import('/postpilot/js/data.js');
+    const A = await import('/postpilot/core/analytics.js');
+    const media = Object.values((await d.readDoc('analytics-media')).media);
+    const hist = (await d.readDoc('analytics-media-history')).media;
+    const m = media
+      .filter((x) => x.productType === 'REELS' && hist[x.id] && Date.now() - A.parseTimestamp(x.timestamp) > 21 * 864e5)
+      .sort((x, y) => A.parseTimestamp(y.timestamp) - A.parseTimestamp(x.timestamp))[0];
+    const t0 = A.parseTimestamp(m.timestamp);
+    const points = hist[m.id].points;
+    await d.mutate('analytics-media-history', (doc) => {
+      doc.media[m.id].points = points.filter((p) => A.parseTimestamp(p.t) - t0 >= 20 * 864e5);
+    });
+    const line = String(m.caption || '').split('\n').find((l) => l.trim()) || '';
+    return { id: m.id, points, line: line.trim().slice(0, 40) };
+  });
+  try {
+    const row = page.locator('[role="tabpanel"] tbody tr').filter({ hasText: setup.line }).first();
+    const cells = await row.locator('td.an-age-cell').allInnerTexts();
+    assert.deepEqual(cells.map((c) => c.trim()), ['—', '—'], 'no 24 h or 7-day value from a late history');
+    await row.click();
+    const drawer = page.getByRole('dialog', { name: 'Post details' });
+    await drawer.waitFor();
+    const chart = drawer.locator('.chart-curve');
+    await chart.locator('svg').waitFor();
+    assert.match(await drawer.locator('.an-history-late').innerText(), /^History starts 2\d(\.\d)? days after publishing\. Postpilot was not saving this post's growth before then\.$/);
+    await chart.focus();
+    await page.keyboard.press('Home');
+    await chart.locator('.chart-tip').waitFor();
+    assert.match(await chart.locator('.chart-tip-title').innerText(), /^2\d(\.\d)? days after posting$/, 'the line starts at the first saved point, not at 0');
+    assert.equal(await drawer.locator('.an-note', { hasText: 'Compared with the median' }).count(), 0);
+    await page.keyboard.press('Escape');
+    await drawer.waitFor({ state: 'detached' });
+  } finally {
+    await page.evaluate(async (s) => {
+      const d = await import('/postpilot/js/data.js');
+      await d.mutate('analytics-media-history', (doc) => {
+        doc.media[s.id].points = s.points;
+      });
+    }, setup);
+  }
+});
+
+test('stories: accurate capture copy and a stories CSV', async () => {
+  await go('#/analytics?tab=stories');
+  const callout = page.locator('.callout', { hasText: 'Story stats are saved while stories are live' });
+  await callout.waitFor();
+  const text = await callout.innerText();
+  assert.match(text, /when it first sees the story, then once an hour, and on every run .* in the story's last 90 minutes/);
+  assert.doesNotMatch(text, /every 10 minutes while a story is live/);
+  // The file holds what the tab lists, live stories included.
+  const listed = await page.locator('[role="tabpanel"] tbody tr').count();
+  const live = await page.locator('[role="tabpanel"] tbody tr', { hasText: 'Live' }).count();
+  assert.ok(live >= 1, 'the seed has live stories');
+  await openMenu(page, 'Export CSV');
+  const [file] = await Promise.all([page.waitForEvent('download'), page.getByRole('menuitem', { name: /^Stories/ }).click()]);
+  assert.match(file.suggestedFilename(), /^postpilot-stories-\d{4}-\d{2}-\d{2}_\d{4}-\d{2}-\d{2}\.csv$/);
+  const csv = (await readFile(await file.path(), 'utf8')).replace(/^\uFEFF/, '').split('\r\n');
+  assert.match(csv[0], /^Date,Time,Type,Link,Reach,Views,Replies,Shares,Interactions,Follows,Profile visits,Taps forward,Taps back,Exits,Swipes forward,Exit rate \(%\),Numbers saved at$/);
+  assert.equal(csv.length - 1, listed, 'one row per listed story');
+  assert.match(csv[1], /^\d{4}-\d{2}-\d{2},\d{2}:\d{2},(Photo|Video),https:/);
+  await page.waitForSelector(`.toast >> text=Downloaded ${listed} ${listed === 1 ? 'story' : 'stories'}.`);
+  await go('#/analytics');
+  await waitForNumber('Reach');
+});
+
 test('refresh now starts the worker', async () => {
   await page.getByRole('button', { name: 'Refresh now' }).click();
   await page.waitForSelector('.toast >> text=Worker started', { timeout: 20_000 });
-});
-
-test('reports: preview, sections, AI summary, CSV and print stylesheet', async () => {
-  await go('#/reports');
-  await page.waitForSelector('.rp-doc .rp-h2', { timeout: 20_000 });
-  assert.match(await page.locator('.rp-title').innerText(), /Instagram report/);
-  const sections = await page.locator('.rp-doc .rp-h2').count();
-  assert.ok(sections >= 9, `default sections (${sections})`);
-  assert.match(await page.locator('.rp-doc .an-stats').innerText(), /REACH|Reach/);
-
-  await page.getByRole('checkbox', { name: /Hashtags/ }).uncheck();
-  await page.waitForFunction((n) => document.querySelectorAll('.rp-doc .rp-h2').length === n - 1, sections);
-  await page.getByRole('checkbox', { name: /Competitors/ }).check();
-  await page.waitForSelector('.rp-h2 >> text=Competitors');
-  assert.match(await page.locator('.rp-section', { hasText: 'Competitors' }).innerText(), /Facebook Login/);
-
-  await page.locator('.rp-builder input').first().fill('Autumn drop results');
-  await page.waitForFunction(() => document.querySelector('.rp-title')?.textContent === 'Autumn drop results');
-
-  await page.getByRole('button', { name: 'Write a summary' }).click();
-  await page.waitForSelector('.rp-ai', { timeout: 30_000 });
-  assert.ok((await page.locator('.rp-ai').innerText()).trim().length > 20, 'AI summary text');
-
-  await openMenu(page, 'Download CSV');
-  const [csv] = await Promise.all([page.waitForEvent('download'), page.getByRole('menuitem', { name: /Daily metrics/ }).click()]);
-  assert.match(csv.suggestedFilename(), /\.csv$/);
-
-  await page.emulateMedia({ media: 'print' });
-  const vis = await page.evaluate(() => {
-    const shown = (sel) => {
-      const el = document.querySelector(sel);
-      return !!el && getComputedStyle(el).display !== 'none' && el.getClientRects().length > 0;
-    };
-    return { sidebar: shown('.sidebar'), builder: shown('.rp-builder'), actions: shown('.rp-page .page-actions'), tabbar: shown('.tabbar'), doc: shown('.rp-doc'), bg: getComputedStyle(document.body).backgroundColor };
-  });
-  assert.deepEqual(vis, { sidebar: false, builder: false, actions: false, tabbar: false, doc: true, bg: 'rgb(255, 255, 255)' });
-  await shot(page, 'reports-print-desktop-light');
-  await page.emulateMedia({ media: 'screen' });
-  assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('.sidebar')).display !== 'none'), true);
-
-  // Restore the default report choices for the screenshots.
-  await page.getByRole('checkbox', { name: /Hashtags/ }).check();
-  await page.getByRole('checkbox', { name: /Competitors/ }).uncheck();
-  await page.locator('.rp-builder input').first().fill('');
 });
 
 test('screenshots at desktop and phone sizes, light and dark, without horizontal scroll', async () => {
@@ -312,7 +508,7 @@ test('screenshots at desktop and phone sizes, light and dark, without horizontal
     ['analytics-best-times', '#/analytics?tab=best-times'],
     ['analytics-hashtags', '#/analytics?tab=hashtags&range=90d'],
     ['analytics-live', OLD_RANGE],
-    ['reports', '#/reports'],
+    ['analytics-posts-label', '#/analytics?tab=posts&label=autumn%20drop'],
   ];
   for (const [size, viewport, colorScheme] of variants) {
     const ctx = await h.browser.newContext({ viewport, colorScheme });
@@ -323,12 +519,12 @@ test('screenshots at desktop and phone sizes, light and dark, without horizontal
     await p.goto(`${h.url}/postpilot/index.html#/analytics`);
     await unlock(p);
     // Tabs other than the overview only in light mode, to keep the run short.
-    const list = colorScheme === 'dark' ? screens.filter(([n]) => n === 'analytics' || n === 'reports' || n === 'analytics-audience') : screens;
+    const list = colorScheme === 'dark' ? screens.filter(([n]) => ['analytics', 'analytics-audience', 'analytics-reels'].includes(n)) : screens;
     for (const [name, hash] of list) {
       await p.evaluate((x) => {
         location.hash = x;
       }, hash);
-      await p.waitForSelector(name === 'reports' ? '.rp-doc .rp-h2' : '[role="tabpanel"] > *', { timeout: 20_000 });
+      await p.waitForSelector('[role="tabpanel"] > *', { timeout: 20_000 });
       await p.waitForFunction(() => !document.querySelector('.an-panel.is-refreshing') && !document.querySelector('[aria-busy="true"]'), null, { timeout: 30_000 });
       await p.waitForTimeout(600);
       const overflow = await p.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
@@ -336,6 +532,17 @@ test('screenshots at desktop and phone sizes, light and dark, without horizontal
       await prepareShot(p);
       await shot(p, `${name}-${size}-${colorScheme}`);
     }
+    // The post drawer with its history curve (viewport shot: the drawer is an overlay).
+    await p.evaluate(() => (location.hash = '#/analytics?tab=reels'));
+    await p.locator('[role="tabpanel"] tbody tr').first().waitFor({ timeout: 20_000 });
+    await p.locator('[role="tabpanel"] tbody tr', { has: p.locator('.an-trial-badge') }).first().click();
+    const drawer = p.getByRole('dialog', { name: 'Post details' });
+    await drawer.locator('.chart-curve svg').waitFor();
+    await p.mouse.move(1, 1);
+    await p.waitForTimeout(500);
+    assert.ok((await p.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0, `drawer ${size} ${colorScheme}: horizontal scroll`);
+    await shot(p, `analytics-drawer-${size}-${colorScheme}`);
+    await p.keyboard.press('Escape');
     assert.deepEqual(errors, [], `console errors (${size} ${colorScheme})`);
     await ctx.close();
   }

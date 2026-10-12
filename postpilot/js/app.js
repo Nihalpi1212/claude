@@ -418,7 +418,8 @@ export function App({ session }) {
     return html`<div class="boot"><${Spinner} /><p class="muted">Opening your encrypted workspace…</p></div>`;
   }
 
-  const needsOnboarding = !settings.ig && route.name !== 'onboarding' && route.name !== 'settings';
+  // post-now needs no Instagram connection: reminders reach the owner while Instagram is disconnected.
+  const needsOnboarding = !settings.ig && route.name !== 'onboarding' && route.name !== 'settings' && route.name !== 'post-now';
   const viewName = needsOnboarding ? 'onboarding' : route.name in VIEWS ? route.name : 'dashboard';
 
   return html`<${AppContext.Provider} value=${ctx}>

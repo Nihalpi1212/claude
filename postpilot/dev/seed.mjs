@@ -372,6 +372,7 @@ export async function seedDemo({ gh, baseUrl, branch = DATA_BRANCH, now = new Da
     },
     { message: 'seed demo workspace' },
   );
+  await seedAnalyticsDemo({ store, ig, liveMedia, igBase, fetchImpl, now, tz }).catch(() => {}); // optional demo extras
   return { dataKeyRaw, key, store };
 }
 
@@ -380,3 +381,156 @@ export function dataKeySecretPlaintext(dataKeyRaw) {
   return utf8(b64encode(dataKeyRaw));
 }
 
+
+/**
+ * Analytics demo extras: a growth history for every post under 30 days old (as the worker would
+ * have saved it), labels on the published posts plus a published trial reel (campaign and trial
+ * hints), and last month's report. Runs before the dev server's first worker run, which adds
+ * today's numbers on top.
+ */
+export async function seedAnalyticsDemo({ store, ig, liveMedia, igBase, fetchImpl, now = new Date(), tz = DEMO_TZ }) {
+  const A = await import('../core/analytics.js');
+  const client = createIg({ mode: 'instagram', token: ig.token, userId: ig.userId, igBase, fetchImpl });
+  const nowMs = now.getTime();
+  const nowIso = now.toISOString();
+  const H = 36e5;
+  const statsOf = (m, metrics) => ({
+    id: m.id,
+    caption: m.caption || '',
+    mediaType: m.mediaType || null,
+    productType: m.productType || null,
+    permalink: m.permalink || null,
+    timestamp: m.timestamp || null,
+    thumbnailUrl: m.thumbnailUrl || (m.mediaType === 'VIDEO' ? null : m.mediaUrl) || null,
+    likeCount: m.likeCount ?? null,
+    commentsCount: m.commentsCount ?? null,
+    metrics,
+  });
+  const spread = (id, salt) => {
+    let h = 0;
+    for (const ch of `${id}:${salt}`) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+    return h / 4294967296;
+  };
+
+  // Growth curves: points at the worker's cadence (hourly, then every 6 hours, then daily), each
+  // metric saturating at its own pace and ending at today's numbers.
+  const history = {};
+  const bench = [];
+  const young = [];
+  for (const m of liveMedia) {
+    const t0 = Date.parse(m.timestamp);
+    const ageH = (nowMs - t0) / H;
+    if (!Number.isFinite(ageH) || ageH <= 0 || ageH >= 30 * 24) continue;
+    const final = A.historyPoint(statsOf(m, await client.mediaInsights(m).catch(() => ({}))), nowIso);
+    if (final) young.push({ m, t0, ageH, final });
+  }
+  // The trial reel candidate: a reel 1 to 7 days old that no demo post is linked to, with the most
+  // views; its curve rises fast (most views in the first day, as when non-followers picked it up).
+  const linkedBefore = new Set(((await store.read('posts').catch(() => null))?.posts || []).map((p) => p.igMediaId).filter(Boolean));
+  const candidate = young
+    .filter((y) => y.m.productType === 'REELS' && y.ageH >= 26 && y.ageH < 7 * 24 && !linkedBefore.has(y.m.id))
+    .sort((x, y) => (y.final.v ?? 0) - (x.final.v ?? 0))[0];
+  for (const { m, t0, ageH, final } of young) {
+    const reel = m.productType === 'REELS';
+    const tau = m === candidate?.m ? 6 : (reel ? 30 : 12) * (0.6 + spread(m.id, 'tau') * 1.1);
+    const hours = [];
+    for (let h = 1; h < Math.min(ageH, 48); h += 1) hours.push(h);
+    for (let h = 54; h < Math.min(ageH, 168); h += 6) hours.push(h);
+    for (let h = 192; h < ageH; h += 24) hours.push(h);
+    const curve = (h, k) => 1 - Math.exp(-h / (tau * (k === 'r' ? 0.8 : k === 'v' ? 1.1 : 1)));
+    let points = [];
+    for (const h of hours) {
+      const p = { t: new Date(t0 + h * H).toISOString().replace(/\.\d{3}Z$/, 'Z') };
+      for (const [k, v] of Object.entries(final)) if (k !== 't') p[k] = Math.round((v * curve(h, k)) / curve(ageH, k));
+      points = A.appendHistoryPoint(points, p, { originMs: t0 }) || points;
+    }
+    points = A.appendHistoryPoint(points, final, { originMs: t0 }) || points;
+    history[m.id] = { points };
+    if (reel) bench.push({ m, ageH, v24: A.valueAtAge(points, m.timestamp, 24), v7: A.valueAtAge(points, m.timestamp, 168) });
+  }
+
+  // A reel no demo post is linked to becomes a published trial reel: the one doing best against the
+  // median of the other reels at its latest known age (7 days, else 24 hours), as the app judges it.
+  // It may or may not be ahead, as with real trial reels.
+  const known = bench.filter((b) => b.v24 != null);
+  const score = (b) => {
+    const key = b.v7 != null ? 'v7' : 'v24';
+    const med = A.median(known.filter((o) => o !== b).map((o) => o[key]));
+    return med ? b[key] / med : 0;
+  };
+  // (Picked inside the transaction among reels no demo post is linked to yet.)
+  const pickTrial = (linked) => (known.length >= 3 ? known.filter((b) => !linked.has(b.m.id)).sort((x, y) => score(y) - score(x))[0]?.m || null : null);
+
+  // Last month's report, from Instagram's daily numbers and the posts of that month.
+  const today = dayKey(now, tz);
+  const month = A.previousMonth(today.slice(0, 7));
+  const { fromKey } = A.monthBounds(month);
+  const days = await client.accountDaily({ sinceKey: addDaysKey(fromKey, -31), untilKey: addDaysKey(today, -1), tz, breakdowns: true }).catch(() => ({}));
+  // Daily follower totals, as the worker would have captured them: today's count minus later net follows.
+  let followers = (await client.me().catch(() => null))?.followersCount ?? null;
+  for (const k of Object.keys(days).sort().reverse()) {
+    if (followers == null) break;
+    days[k].followers = followers;
+    followers -= (days[k].followsGained ?? 0) - (days[k].unfollows ?? 0);
+  }
+  const more = await client.listMedia({ limit: 50, max: 100 }).catch(() => liveMedia);
+  const media = {};
+  for (const m of more) {
+    const k = dayKey(new Date(m.timestamp), tz);
+    if ((k.slice(0, 7) !== month && k.slice(0, 7) !== A.previousMonth(month)) || m.productType === 'STORY') continue;
+    media[m.id] = statsOf(m, await client.mediaInsights(m).catch(() => ({})));
+  }
+  let report = null;
+  if (Object.keys(days).some((k) => k.startsWith(month))) {
+    const built = A.buildMonthlyReport({ days, media, stories: {}, month, tz });
+    const s = built.summary;
+    const p = built.previous;
+    const change = A.formatDelta(s.reach && p.reach ? (s.reach - p.reach) / p.reach : null, 0);
+    report = {
+      id: uid('rp_'),
+      month,
+      createdAt: new Date(Date.parse(`${today.slice(0, 7)}-02T07:10:00Z`)).toISOString(),
+      headline: A.reportHeadline(built),
+      summary: s,
+      previous: p,
+      top: built.top,
+      ai: `Reach was ${A.formatNumber(s.reach, { compact: true })} last month (${change} on the month before) from ${s.posts} posts. Your best post was a ${built.top[0]?.productType === 'REELS' ? 'reel' : 'post'} with ${A.formatNumber(built.top[0]?.metrics?.totalInteractions ?? null)} interactions. Try two reels a week at the times on the Best times tab.`,
+    };
+  }
+
+  await store.transact(
+    async (tx) => {
+      tx.write('analytics-media-history', { v: 1, media: history });
+      const posts = await tx.read('posts');
+      const lib = await tx.read('library');
+      const published = posts.posts.filter((p) => p.status === 'published' && p.igMediaId);
+      const labels = [['coffee', 'morning'], ['autumn drop'], ['autumn drop']];
+      published.slice(0, 3).forEach((p, i) => (p.labels = labels[i]));
+      const video = lib.assets.find((a) => a.kind === 'video');
+      const trial = pickTrial(new Set(posts.posts.map((p) => p.igMediaId).filter(Boolean)));
+      if (trial && video) {
+        posts.posts.push(
+          newPost({
+            type: 'reel',
+            status: 'published',
+            trialReel: 'MANUAL',
+            caption: trial.caption || '',
+            media: [{ assetId: video.id, kind: 'video', altText: '' }],
+            scheduledAt: trial.timestamp,
+            publishedAt: trial.timestamp,
+            igMediaId: trial.id,
+            permalink: trial.permalink || null,
+            labels: ['autumn drop'],
+            attempts: 1,
+            createdAt: trial.timestamp,
+            updatedAt: trial.timestamp,
+            history: [{ at: trial.timestamp, event: 'created' }, { at: trial.timestamp, event: 'published' }],
+          }),
+        );
+      }
+      tx.write('posts', posts);
+      if (report) tx.write('reports', { v: 1, reports: [report], lastMonth: month });
+    },
+    { message: 'seed analytics demo' },
+  );
+}

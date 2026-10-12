@@ -5,8 +5,14 @@
 //   mode 'review' -> status 'draft' with needsApproval, for the owner to approve in the app
 // Captions come from Claude (ctx.ai.captions, with the asset thumbnails as images) when autopilot.useAi
 // is on and AI is configured; otherwise from the assets' caption hints plus the chosen hashtag sets.
+//
+// Recycling (autopilot.recycleTopPosts): top posts published through Postpilot more than
+// recycleAfterDays ago (core/schedule.js recycleCandidates) are posted again as new posts with
+// source 'recycle' and recycleOf = the original Instagram media id, copying the caption, first
+// comment and media when all of the media is still in the library. Review / auto mode applies to
+// reposts like to any other autopilot post.
 
-import { bestTimeMatrix, planAutopilot } from '../../core/schedule.js';
+import { bestTimeMatrix, freesMedia, planAutopilot, recycleCandidates } from '../../core/schedule.js';
 import { LIMITS, newPost } from '../../core/model.js';
 import { b64encode } from '../../core/crypto.js';
 import { describeError } from '../context.mjs';
@@ -14,6 +20,9 @@ import { describeError } from '../context.mjs';
 const MAX_PER_RUN = 5;
 const MAX_IMAGES = 4;
 const LAST_RUN_EVERY_MS = 60 * 60e3;
+// Files downloaded by the worker double as their own thumbnail (thumbPath === path). Claude takes
+// images up to 5 MB, so larger originals and videos are left out of the AI request.
+const MAX_AI_IMAGE_BYTES = 3.5 * 1024 * 1024;
 
 function tagsOf(set) {
   if (!set) return [];
@@ -35,6 +44,8 @@ export function fallbackContent(assets, sets, { defaultFirstComment = '' } = {})
 async function thumbnails(ctx, assets) {
   const images = [];
   for (const a of assets.slice(0, MAX_IMAGES)) {
+    const own = a.thumbPath && a.thumbPath === a.path;
+    if (a.importUrl || (own && (a.kind === 'video' || a.bytes > MAX_AI_IMAGE_BYTES))) continue;
     try {
       const bytes = await ctx.store.readBytes(a.thumbPath || `media/${a.id}.thumb`);
       if (bytes && bytes.length) images.push({ base64: b64encode(bytes), mediaType: 'image/jpeg' });
@@ -48,11 +59,24 @@ async function thumbnails(ctx, assets) {
 export default async function autopilot(ctx) {
   const ap = await ctx.store.read('autopilot');
   if (!ap.enabled) return { skipped: 'disabled' };
-  const docs = await ctx.store.readMany(['library', 'posts', 'audience', 'analytics-media', 'hashtags']);
+  const docs = await ctx.store.readMany(['library', 'posts', 'lists', 'audience', 'analytics-media', 'hashtags', ...(ap.recycleTopPosts ? ['posts-archive'] : [])]);
   const nowMs = ctx.nowMs();
   const followers = ctx.settings.ig?.followersCount ?? undefined;
   const { matrix } = bestTimeMatrix({ onlineFollowers: docs.audience.onlineFollowers, mediaStats: docs['analytics-media'].media, tz: ctx.tz, now: nowMs, followers });
-  const plan = planAutopilot({ autopilot: ap, assets: docs.library.assets, posts: docs.posts.posts, matrix, tz: ctx.tz, now: nowMs });
+  const candidates = ap.recycleTopPosts
+    ? recycleCandidates({
+        mediaStats: docs['analytics-media'].media,
+        posts: docs.posts.posts,
+        archive: docs['posts-archive']?.posts || [],
+        assets: docs.library.assets,
+        now: nowMs,
+        afterDays: Number(ap.recycleAfterDays) > 0 ? Number(ap.recycleAfterDays) : 120,
+        count: 3,
+        followers,
+      })
+    : [];
+  // Queue items (feed and CSV imports among them) are left to their queues (lists).
+  const plan = planAutopilot({ autopilot: ap, assets: docs.library.assets, posts: docs.posts.posts, lists: docs.lists.lists, matrix, tz: ctx.tz, now: nowMs, recycle: candidates });
   const create = (plan.create || []).slice(0, MAX_PER_RUN);
 
   const sets = (docs.hashtags.sets || []).filter((s) => (ap.hashtagSetIds || []).includes(s.id));
@@ -67,6 +91,11 @@ export default async function autopilot(ctx) {
   for (const item of create) {
     const assets = item.assetIds.map((id) => assetsById.get(id)).filter(Boolean);
     if (assets.length !== item.assetIds.length) continue;
+    if (item.recycleOf) {
+      const original = candidates.find((c) => c.recycleOf === item.recycleOf);
+      if (original) drafts.push({ ...item, assets, original, caption: original.caption, firstComment: original.firstComment, altText: original.altText, ai: false });
+      continue;
+    }
     let content = fallbackContent(assets, sets, { defaultFirstComment });
     if (useAi && !aiFailed) {
       try {
@@ -106,19 +135,53 @@ export default async function autopilot(ctx) {
   }
 
   let created = 0;
+  let reposts = 0;
   const reason = plan.reason || '';
   await ctx.store.transact(
     async (tx) => {
       created = 0;
+      reposts = 0;
       const a = await tx.read('autopilot');
       const nowIso = ctx.nowIso();
       if (drafts.length) {
         const postsDoc = await tx.read('posts');
         const lib = await tx.read('library');
         const busy = new Set();
-        for (const p of postsDoc.posts) if (p.status !== 'canceled') for (const m of p.media || []) busy.add(m.assetId);
+        for (const p of postsDoc.posts) if (!freesMedia(p)) for (const m of p.media || []) busy.add(m.assetId);
         const mode = a.mode === 'auto' ? 'auto' : 'review';
+        const libIds = new Set((lib.assets || []).map((as) => as.id));
         for (const d of drafts) {
+          if (d.original) {
+            // A repost: its media is in use by the published original, so only check that it is
+            // still in the library and that no other repost of the same post is planned meanwhile.
+            const planned = postsDoc.posts.some((p) => p.recycleOf === d.recycleOf && ['draft', 'scheduled', 'publishing'].includes(p.status));
+            if (planned || !d.assetIds.every((id) => libIds.has(id))) continue;
+            const o = d.original;
+            const when = o.publishedAt ? ` first published ${o.publishedAt.slice(0, 10)}` : '';
+            const post = newPost({
+              type: d.type,
+              status: mode === 'auto' ? 'scheduled' : 'draft',
+              caption: o.caption,
+              firstComment: o.firstComment,
+              media: structuredClone(o.media),
+              altText: o.altText,
+              coverAssetId: o.coverAssetId,
+              thumbOffsetMs: o.thumbOffsetMs,
+              location: o.location ? structuredClone(o.location) : null,
+              scheduledAt: d.scheduledAt,
+              source: 'recycle',
+              recycleOf: d.recycleOf,
+              needsApproval: mode === 'review',
+              createdAt: nowIso,
+              updatedAt: nowIso,
+              history: [{ at: nowIso, event: 'created', detail: `Created by autopilot: a repost of a top post${when}.` }],
+            });
+            postsDoc.posts.push(post);
+            for (const as of lib.assets || []) if (d.assetIds.includes(as.id)) as.usedBy = [...new Set([...(as.usedBy || []), post.id])];
+            created++;
+            reposts++;
+            continue;
+          }
           if (d.assetIds.some((id) => busy.has(id))) continue; // used in the app meanwhile
           const single = d.assets.length === 1 && d.assets[0].kind === 'image';
           const post = newPost({
@@ -162,7 +225,8 @@ export default async function autopilot(ctx) {
   if (created) {
     if (ap.mode !== 'auto') ctx.notify('approval', { count: created });
     const what = ap.mode === 'auto' ? 'scheduled' : 'drafted for review';
-    ctx.log('autopilot', 'info', `Autopilot ${what} ${created} post${created === 1 ? '' : 's'}${aiCaptions ? ` (${aiCaptions} with AI captions)` : ''}.`);
+    const extras = [aiCaptions ? `${aiCaptions} with AI captions` : '', reposts ? `${reposts} repost${reposts === 1 ? '' : 's'} of top posts` : ''].filter(Boolean).join(', ');
+    ctx.log('autopilot', 'info', `Autopilot ${what} ${created} post${created === 1 ? '' : 's'}${extras ? ` (${extras})` : ''}.`);
   }
-  return { autopilotCreated: created, aiCaptions };
+  return { autopilotCreated: created, aiCaptions, ...(reposts ? { reposts } : {}) };
 }

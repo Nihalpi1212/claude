@@ -702,6 +702,7 @@ const STATUS = {
   published: ['Published', 'ok'],
   failed: ['Failed', 'bad'],
   canceled: ['Canceled', 'canceled'],
+  reminded: ['Post by hand', 'marker'],
   'needs-approval': ['Needs approval', 'marker'],
   pending: ['Pending', 'accent'],
   queued: ['Queued', 'accent'],

@@ -8,7 +8,7 @@ import { mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { openApp, unlock } from './helpers.mjs';
 
-const PORT = 5211;
+const PORT = 5511;
 const here = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES = path.resolve(here, '../../dev/fixtures');
 const SHOTS = process.env.SCREENSHOT_DIR || '/tmp/claude-0/-home-user-claude/61a6d9a0-a933-5d86-8721-920a439be9c7/scratchpad/shots';
@@ -435,6 +435,213 @@ describe('composer', () => {
     assert.equal(selected, '{product}');
     assert.match(await page.locator('#cmp-caption').inputValue(), /^Shop update\.\n\nNew in the shop: \{product\}/);
     await closeComposer(page);
+  });
+
+  it('reminder mode: media rules still apply, caption limits become warnings, schedules a reminder', async () => {
+    await openNew(page);
+    await pickFromLibrary(page, ['Story: kiln opening']); // 9:16, too tall for a feed post
+    await page.getByRole('radio', { name: /Send me a reminder to post it myself/ }).check();
+    await page.locator('.cmp-mode-option.is-on', { hasText: 'link stickers, polls' }).waitFor();
+    // The 9:16 photo is still an error: Instagram's app needs a feed-sized photo too.
+    await page.locator('.cmp-issue.is-error', { hasText: 'Feed photos must be between 4:5 and 1.91:1' }).waitFor();
+    await page.getByRole('button', { name: 'Remove item 1' }).click();
+    await pickFromLibrary(page, ['Speckled cream vases']);
+    const tags = Array.from({ length: 31 }, (_, i) => `#tag${i}`).join(' ');
+    const caption = `E2E reminder with a poll sticker. ${tags}`;
+    await page.locator('#cmp-caption').fill(caption);
+    await page.locator('.cmp-issue.is-warning', { hasText: 'at most 30 hashtags' }).waitFor();
+    assert.equal(await page.locator('.cmp-issue.is-error').count(), 0, 'caption limits do not block a reminder');
+    await setWhen(page, 2, '18:15');
+    const primary = footer(page).getByRole('button', { name: 'Schedule reminder' });
+    assert.equal(await primary.isDisabled(), false);
+    // No device has notifications in the demo workspace: no promise of a phone notification.
+    await page.locator('.cmp-mode-warn', { hasText: 'No device has notifications turned on' }).waitFor();
+    assert.equal(await footer(page).getByRole('button', { name: 'Publish now' }).count(), 0, 'nothing publishes automatically');
+    await footer(page).getByRole('button', { name: 'Post by hand now' }).waitFor();
+    await snap(page, 'composer-reminder-1280-light');
+    // Switching back to automatic publishing makes the hashtag limit an error again.
+    await page.getByRole('radio', { name: 'Publish automatically' }).check();
+    await page.locator('.cmp-issue.is-error', { hasText: 'at most 30 hashtags' }).waitFor();
+    await page.getByRole('radio', { name: /Send me a reminder/ }).check();
+    await primary.click();
+    await page.locator('.toast', { hasText: /Reminder set for .*It shows on the Today screen then\./ }).waitFor();
+    await drawer(page).waitFor({ state: 'detached' });
+    const post = (await readPosts(page)).find((p) => p.caption === caption);
+    assert.equal(post.status, 'scheduled');
+    assert.equal(post.publishMode, 'reminder');
+    assert.equal(post.reminderSentAt, null);
+  });
+
+  it('a story posted by hand gets a text field; a file still downloading cannot be cropped', async () => {
+    await openNew(page);
+    await page.locator('#cmp-type').getByRole('radio', { name: 'Story' }).click();
+    await pickFromLibrary(page, ['Story: kiln opening']);
+    assert.equal(await page.locator('#cmp-caption').count(), 0, 'an automatic story has no caption');
+    await page.getByRole('radio', { name: /Send me a reminder/ }).check();
+    await page.locator('.cmp-story-note', { hasText: 'You post this one yourself' }).waitFor();
+    await page.getByLabel('Text or link to add').fill('New glazes in the shop: https://example.com/shop');
+    assert.equal(await page.locator('.cmp-issue', { hasText: 'captions on stories' }).count(), 0, 'no caption warning for a story posted by hand');
+    await snap(page, 'composer-story-reminder-1280-light');
+    await closeComposer(page);
+
+    const assetId = await page.evaluate(async () => {
+      const data = await import('/postpilot/js/data.js');
+      const { newAsset } = await import('/postpilot/core/model.js');
+      const a = newAsset({ kind: 'image', name: 'E2E pending from link.jpg', mime: 'image/jpeg', importUrl: 'https://example.invalid/e2e/pending.jpg', tags: ['csv'] });
+      await data.mutate('library', (doc) => void doc.assets.unshift(a), { message: 'e2e: pending asset' });
+      return a.id;
+    });
+    try {
+      await openNew(page);
+      await pickFromLibrary(page, ['E2E pending from link']);
+      const detail = page.locator('.cmp-detail');
+      await detail.getByText('Downloading from link…').waitFor();
+      assert.equal(await detail.getByRole('button', { name: 'Crop' }).count(), 0, 'nothing to crop yet');
+      await page.locator('.cmp-strip .mp-import').first().waitFor();
+      await closeComposer(page);
+    } finally {
+      await page.evaluate(async (id) => {
+        const data = await import('/postpilot/js/data.js');
+        await data.mutate('library', (doc) => void (doc.assets = doc.assets.filter((a) => a.id !== id)), { message: 'e2e: clean up' });
+      }, assetId);
+    }
+  });
+
+  it('AI writing actions rewrite the caption; the result waits for "Use this"', async () => {
+    await openNew(page);
+    await pickFromLibrary(page, ['Heart latte']);
+    const rewrite = page.locator('.cmp-rewrite');
+    assert.equal(await rewrite.getByRole('button', { name: 'Shorter' }).isDisabled(), true, 'nothing to rewrite yet');
+    const original = 'our morning ritual.  i love this cup. Which mug do you reach for first?\n\n#coffee #slowmorning';
+    await page.locator('#cmp-caption').fill(original);
+
+    await rewrite.getByRole('button', { name: 'Shorter' }).click();
+    const result = page.locator('.cmp-rewrite-result');
+    await result.waitFor({ timeout: 20_000 });
+    assert.match(await result.textContent(), /Shorter/);
+    assert.equal(await page.locator('#cmp-caption').inputValue(), original, 'the caption only changes on "Use this"');
+    await result.getByRole('button', { name: 'Discard' }).click();
+    await result.waitFor({ state: 'detached' });
+
+    await rewrite.getByRole('button', { name: 'Fix grammar' }).click();
+    await result.waitFor({ timeout: 20_000 });
+    await result.getByRole('button', { name: 'Use this' }).click();
+    assert.equal(await page.locator('#cmp-caption').inputValue(), 'Our morning ritual. I love this cup. Which mug do you reach for first?\n\n#coffee #slowmorning');
+
+    await rewrite.getByRole('button', { name: 'Change tone' }).click();
+    await page.getByRole('menuitem', { name: 'Playful' }).click();
+    await result.waitFor({ timeout: 20_000 });
+    assert.match(await result.textContent(), /Playful tone/);
+    await result.getByRole('button', { name: 'Discard' }).click();
+
+    await rewrite.getByRole('combobox', { name: 'Language to translate into' }).selectOption({ label: 'German' });
+    await rewrite.getByRole('button', { name: 'Translate' }).click();
+    await result.waitFor({ timeout: 20_000 });
+    assert.match(await result.textContent(), /In German/);
+    await result.getByRole('button', { name: 'Add below' }).click();
+    const withTranslation = await page.locator('#cmp-caption').inputValue();
+    assert.match(withTranslation, /#slowmorning\n\n\[German\] Our morning ritual\./);
+    // The translation keeps the hashtags, but the caption already has them: they are not added twice.
+    assert.equal(withTranslation.match(/#slowmorning/g).length, 1);
+    assert.equal(withTranslation.match(/#coffee/g).length, 1);
+    assert.match(withTranslation, /reach for first\?$/);
+
+    await rewrite.getByRole('button', { name: 'Add call to action' }).click();
+    await result.waitFor({ timeout: 20_000 });
+    await snap(page, 'composer-rewrite-1280-light');
+    await result.getByRole('button', { name: 'Discard' }).click();
+
+    // Errors show inline (the AI service cannot be reached).
+    const route = /\/mock\/anthropic\/v1\/messages/;
+    await page.route(route, (r) => r.abort('failed'));
+    try {
+      await rewrite.getByRole('button', { name: 'Longer' }).click();
+      await page.locator('.cmp-ai .callout', { hasText: 'Could not reach the AI service' }).waitFor({ timeout: 30_000 });
+    } finally {
+      await page.unroute(route);
+    }
+    await closeComposer(page);
+  });
+
+  it('delete from Instagram: explained with Instagram Login, deletes with Facebook Login', async () => {
+    const openPublished = async () => {
+      await page.evaluate(() => (location.hash = '#/library'));
+      await page.locator('.lib-item').first().waitFor();
+      await page.getByRole('button', { name: /^Open Latte art/ }).click();
+      const row = page.locator('.lib-usedin .list-row', { hasText: 'What is in your mug' });
+      await row.getByRole('button', { name: 'Open post' }).click();
+      await page.locator('.cmp-drawer .overlay-title', { hasText: /Published post|Deleted from Instagram/ }).waitFor();
+    };
+    const posts = await readPosts(page);
+    const target = posts.find((p) => p.status === 'published' && /What is in your mug/.test(p.caption));
+    assert.ok(target && target.igMediaId, 'seeded published post with an Instagram id');
+
+    await openPublished();
+    const section = page.locator('.cmp-delete-ig');
+    await section.getByText('needs a Facebook Login connection').waitFor();
+    assert.equal(await section.getByRole('button', { name: 'Delete from Instagram' }).isDisabled(), true);
+    await closeComposer(page);
+
+    const setMode = (mode) =>
+      page.evaluate(async (mode) => {
+        const data = await import('/postpilot/js/data.js');
+        await data.mutate('settings', (s) => void (s.ig.mode = mode), { message: 'e2e: login mode' });
+      }, mode);
+    const assetId = target.media[0].assetId;
+    await page.evaluate(async (id) => {
+      const data = await import('/postpilot/js/data.js');
+      await data.mutate('library', (doc) => void (doc.assets.find((a) => a.id === id).autopilot = true), { message: 'e2e: autopilot pool' });
+    }, assetId);
+    await setMode('facebook');
+    // Graph answers 100/33 ("does not exist, cannot be loaded due to missing permissions, or does not
+    // support this operation") when the token may not delete: the media is still there, so nothing is recorded.
+    const mediaRoute = (url) => url.pathname.endsWith(`/${target.igMediaId}`);
+    const refuse = (route) =>
+      route.request().method() === 'DELETE'
+        ? route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: { message: `Unsupported delete request. Object with ID '${target.igMediaId}' does not exist, cannot be loaded due to missing permissions, or does not support this operation.`, type: 'GraphMethodException', code: 100, error_subcode: 33, fbtrace_id: 'e2e' } }) })
+        : route.continue();
+    const confirmDelete = async () => {
+      await section.getByRole('button', { name: 'Delete from Instagram' }).click();
+      const dlg = page.locator('.modal-confirm');
+      await dlg.getByText('removes the post from your Instagram profile').waitFor();
+      await dlg.locator('.overlay-foot').getByRole('button', { name: 'Delete from Instagram' }).click();
+    };
+    try {
+      await openPublished();
+      await page.route(mediaRoute, refuse);
+      try {
+        await confirmDelete();
+        await section.locator('[role="alert"]', { hasText: 'Instagram did not delete the post: it is still on your profile' }).waitFor({ timeout: 20_000 });
+        assert.match(await section.locator('[role="alert"]').textContent(), /instagram_manage_contents/);
+      } finally {
+        await page.unroute(mediaRoute, refuse);
+        // The refusal above was injected on purpose; any other failed request is still a bug.
+        for (let i = badResponses.length - 1; i >= 0; i--) if (badResponses[i].startsWith('400 ') && badResponses[i].includes(`/${target.igMediaId}?`)) badResponses.splice(i, 1);
+      }
+      const still = (await readPosts(page)).find((p) => p.id === target.id);
+      assert.equal(still.status, 'published', 'a refused delete is not recorded');
+      assert.equal(still.deletedFromInstagramAt ?? null, null);
+      assert.equal(await page.locator('.cmp-drawer .overlay-title').textContent(), 'Published post');
+
+      await confirmDelete();
+      await page.locator('.toast', { hasText: 'Deleted from Instagram. Its media was taken out of the autopilot pool.' }).waitFor({ timeout: 20_000 });
+      await page.locator('.cmp-drawer .overlay-title', { hasText: 'Deleted from Instagram' }).waitFor();
+      await page.locator('.cmp-side .pv-time', { hasText: /^Deleted from Instagram · / }).waitFor();
+      await snap(page, 'composer-deleted-1280-light');
+      await closeComposer(page);
+    } finally {
+      await setMode('instagram');
+    }
+    const lib = await readLibrary(page);
+    assert.equal(lib.find((a) => a.id === assetId).autopilot, false, 'autopilot does not post the deleted media again');
+    const post = (await readPosts(page)).find((p) => p.id === target.id);
+    assert.equal(post.status, 'canceled');
+    assert.ok(post.deletedFromInstagramAt);
+    assert.ok(post.history.some((e) => e.event === 'deleted from Instagram'));
+    // The mock Instagram no longer has the media.
+    const gone = (await fetch(`${h.url}/mock/ig/v26.0/${target.igMediaId}?fields=id&access_token=demo-instagram-token`)).status;
+    assert.ok(gone >= 400, `media is gone from Instagram (${gone})`);
+    await page.evaluate(() => (location.hash = '#/'));
   });
 
   it('screenshots in dark mode and on a phone, without horizontal overflow', async () => {

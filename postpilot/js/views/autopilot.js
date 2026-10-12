@@ -13,7 +13,8 @@ import {
   StatusPill, TextArea, TextInput, Toggle, cx,
 } from '../ui/kit.js';
 import { addHistory, hasErrors, LIMITS, validatePost } from '../../core/model.js';
-import { bestTimeMatrix, planAutopilot, suggestSlots, unusedAssets } from '../../core/schedule.js';
+import { bestTimeMatrix, planAutopilot, recycleCandidates, suggestSlots, unusedAssets } from '../../core/schedule.js';
+import { fitsFeed } from '../../core/feed.js';
 import { dayKey, format, formatDateTime, formatTime, relative } from '../../core/time.js';
 import { parseTimestamp } from '../../core/analytics.js';
 
@@ -33,7 +34,8 @@ const WEEKDAYS = [
 ];
 const HORIZONS = [3, 7, 14, 21, 30].map((d) => ({ value: d, label: `${d} days` }));
 const GAPS = [4, 8, 12, 16, 20, 24, 36, 48].map((h) => ({ value: h, label: `${h} hours` }));
-const SETTING_KEYS = ['mode', 'postsPerWeek', 'horizonDays', 'slotStrategy', 'fixedSlots', 'minGapHours', 'allowedTypes', 'useAi', 'captionStyle', 'hashtagSetIds', 'useAllUnused'];
+const RECYCLE_DAYS = [60, 90, 120, 180, 365].map((d) => ({ value: d, label: `${d} days` }));
+const SETTING_KEYS = ['mode', 'postsPerWeek', 'horizonDays', 'slotStrategy', 'fixedSlots', 'minGapHours', 'allowedTypes', 'useAi', 'captionStyle', 'hashtagSetIds', 'useAllUnused', 'recycleTopPosts', 'recycleAfterDays'];
 
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
@@ -76,6 +78,8 @@ function pickSettings(doc) {
   out.hashtagSetIds = Array.isArray(out.hashtagSetIds) ? out.hashtagSetIds : [];
   out.useAllUnused = !!out.useAllUnused;
   out.useAi = out.useAi !== false;
+  out.recycleTopPosts = !!out.recycleTopPosts;
+  out.recycleAfterDays = Number(out.recycleAfterDays) > 0 ? Number(out.recycleAfterDays) : 120;
   return out;
 }
 
@@ -86,6 +90,7 @@ function cleanSettings(d) {
     postsPerWeek: Number.isFinite(perWeek) ? Math.min(28, Math.max(1, perWeek)) : 4,
     fixedSlots: (d.fixedSlots || []).filter((s) => /^\d{2}:\d{2}$/.test(s.time || '')),
     captionStyle: String(d.captionStyle || '').slice(0, 500),
+    recycleAfterDays: Math.min(730, Math.max(30, Math.round(Number(d.recycleAfterDays) || 120))),
   };
 }
 
@@ -106,7 +111,7 @@ function useLoadedDocs(names) {
   return res;
 }
 
-const DOCS = ['autopilot', 'posts', 'library', 'hashtags', 'audience', 'analytics-media', 'log'];
+const DOCS = ['autopilot', 'posts', 'library', 'lists', 'hashtags', 'audience', 'analytics-media', 'log', 'posts-archive'];
 
 // ---------------------------------------------------------------------------
 // Post rows
@@ -131,6 +136,7 @@ function ApprovalRow({ post, assetsById, tz, now, busy, onApprove, onEdit, onRej
       <div class="ap-row-when">
         <span class="mono">${Number.isFinite(t) ? cap(whenLabel(post.scheduledAt, tz, new Date(now))) : 'No time yet'}</span>
         <span class="ap-type"><${Icon} name=${TYPE_ICON[post.type] || 'image'} size=${14} />${TYPE_LABEL[post.type] || 'Post'}</span>
+        ${post.source === 'recycle' ? html`<span class="ap-repost"><${Icon} name="repeat" size=${13} />Repost of a top post</span>` : null}
         ${passed ? html`<span class="ap-warn">Time passed: approving picks the next free slot</span>` : null}
       </div>
       <p class="ap-caption">${excerpt(post.caption) || html`<span class="faint">No caption</span>`}</p>
@@ -150,6 +156,7 @@ function ScheduledRow({ post, assetsById, tz, now, onEdit }) {
       <div class="ap-row-when">
         <span class="mono">${cap(whenLabel(post.scheduledAt, tz, new Date(now)))}</span>
         <span class="ap-type"><${Icon} name=${TYPE_ICON[post.type] || 'image'} size=${14} />${TYPE_LABEL[post.type] || 'Post'}</span>
+        ${post.source === 'recycle' ? html`<span class="ap-repost"><${Icon} name="repeat" size=${13} />Repost</span>` : null}
       </div>
       <p class="ap-caption is-one">${excerpt(post.caption, 90) || html`<span class="faint">No caption</span>`}</p>
     </div>
@@ -226,6 +233,14 @@ function SettingsForm({ draft, set, sets, aiOn, onSave, onDiscard, dirty, saving
         ${!draft.allowedTypes.length ? html`<p class="field-error"><${Icon} name="alert" size=${14} /><span>Pick at least one type.</span></p>` : null}
         <${Toggle} checked=${draft.useAllUnused} onChange=${(v) => set({ useAllUnused: v })} label="When the pool runs out, use any unused media"
           hint="Off: only media you added to the pool is posted." />
+        <${Toggle} checked=${draft.recycleTopPosts} onChange=${(v) => set({ recycleTopPosts: v })} label="Repost top posts"
+          hint=${`When the plan has room, about once a week autopilot posts one of your best posts from over ${draft.recycleAfterDays} days ago again, with the same caption and media (posts made with Postpilot only). While the pool has media, at most one post in three is a repost.`} />
+        ${draft.recycleTopPosts
+          ? html`<${Field} label="Only posts older than" hint="A post is not reposted again within this time either." class="ap-recycle-days">
+              <${Select} options=${RECYCLE_DAYS.some((o) => o.value === draft.recycleAfterDays) ? RECYCLE_DAYS : [...RECYCLE_DAYS, { value: draft.recycleAfterDays, label: `${draft.recycleAfterDays} days` }]}
+                value=${draft.recycleAfterDays} onChange=${(v) => set({ recycleAfterDays: v })} />
+            <//>`
+          : null}
       </fieldset>
 
       <fieldset class="ap-group">
@@ -352,7 +367,19 @@ export default function Autopilot() {
   const preview = useMemo(() => {
     if (!draft || !matrixInfo || !data.posts || !data.library) return null;
     const settingsNow = { ...cleanSettings(draft), enabled: true };
-    const plan = planAutopilot({ autopilot: settingsNow, assets, posts, matrix: matrixInfo.matrix, tz, now });
+    const recycle = settingsNow.recycleTopPosts
+      ? recycleCandidates({
+          mediaStats: data['analytics-media'] ? data['analytics-media'].media : {},
+          posts,
+          archive: (data['posts-archive'] && data['posts-archive'].posts) || [],
+          assets,
+          now,
+          afterDays: settingsNow.recycleAfterDays,
+          count: 3,
+          followers: settings && settings.ig ? settings.ig.followersCount ?? undefined : undefined,
+        })
+      : [];
+    const plan = planAutopilot({ autopilot: settingsNow, assets, posts, lists: (data.lists && data.lists.lists) || [], matrix: matrixInfo.matrix, tz, now, recycle });
     let open = [];
     if (!plan.create.length) {
       const taken = posts
@@ -362,18 +389,30 @@ export default function Autopilot() {
       open = suggestSlots({ matrix: matrixInfo.matrix, tz, now, count: 3, horizonDays: Math.max(14, settingsNow.horizonDays), minGapHours: settingsNow.minGapHours, taken, fixedSlots: fixed, maxPerDay: fixed ? null : Math.max(1, Math.ceil(settingsNow.postsPerWeek / 7)) });
     }
     return { plan, open };
-  }, [draft, matrixInfo, data.posts, data.library, now]);
+  }, [draft, matrixInfo, data.posts, data.library, data.lists, data['posts-archive'], now]);
 
   // Lists
   const approvals = posts
     .filter((p) => p.status === 'draft' && p.needsApproval)
     .sort((a, b) => (parseTimestamp(a.scheduledAt) || Infinity) - (parseTimestamp(b.scheduledAt) || Infinity));
   const scheduled = posts
-    .filter((p) => p.source === 'autopilot' && (p.status === 'scheduled' || p.status === 'publishing') && parseTimestamp(p.scheduledAt) > now - 3600e3)
+    .filter((p) => (p.source === 'autopilot' || p.source === 'recycle') && (p.status === 'scheduled' || p.status === 'publishing') && parseTimestamp(p.scheduledAt) > now - 3600e3)
     .sort((a, b) => parseTimestamp(a.scheduledAt) - parseTimestamp(b.scheduledAt));
   const pool = assets.filter((a) => a.autopilot);
   const unusedIds = useMemo(() => new Set(unusedAssets(assets, posts).map((a) => a.id)), [data.library, data.posts]);
-  const ready = pool.filter((a) => unusedIds.has(a.id));
+  // Pool files autopilot skips (planAutopilot): no file yet, or a photo the feed refuses. Short labels fit the tile.
+  const skipReason = (a) => {
+    if (a.importUrl) return a.importError ? 'Failed' : 'Waiting';
+    if (a.kind === 'image' && !fitsFeed(a.width, a.height)) return a.width / a.height > 1 ? 'Too wide' : 'Too tall';
+    return null;
+  };
+  const skipHint = (a) =>
+    a.importUrl
+      ? a.importError
+        ? 'Skipped: the download from its link failed.'
+        : 'Skipped until the worker has downloaded it from its link.'
+      : `Skipped: ${a.width}x${a.height} is not a shape the feed allows (4:5 to 1.91:1).`;
+  const ready = pool.filter((a) => unusedIds.has(a.id) && !skipReason(a));
 
   // Approve / reject
   const [busy, setBusy] = useState({}); // postId -> 'approve' | 'reject'
@@ -429,7 +468,10 @@ export default function Autopilot() {
   const reject = async (post) => {
     const ok = await confirm({
       title: 'Reject this draft?',
-      body: 'The draft is removed from your calendar and its media leaves the autopilot pool, so autopilot does not suggest it again.',
+      body:
+        post.source === 'recycle'
+          ? `The repost is removed from your calendar. Autopilot does not suggest this post again for ${saved ? saved.recycleAfterDays : 120} days.`
+          : 'The draft is removed from your calendar and its media leaves the autopilot pool, so autopilot does not suggest it again.',
       confirmLabel: 'Reject draft',
       danger: true,
     });
@@ -445,6 +487,7 @@ export default function Autopilot() {
           p.needsApproval = false;
           addHistory(p, 'rejected', 'Rejected in the app.');
           tx.write('posts', doc);
+          if (p.source === 'recycle') return; // a repost uses the original's media: the pool stays as it is
           const ids = new Set((p.media || []).map((m) => m.assetId));
           const lib = await tx.read('library');
           let changed = false;
@@ -458,7 +501,7 @@ export default function Autopilot() {
         },
         { message: 'reject autopilot post' },
       );
-      toast('Draft rejected. Its media left the autopilot pool.', { kind: 'success' });
+      toast(post.source === 'recycle' ? `Repost rejected. Autopilot does not suggest that post again for ${saved ? saved.recycleAfterDays : 120} days.` : 'Draft rejected. Its media left the autopilot pool.', { kind: 'success' });
     } catch {
       /* toasted */
     } finally {
@@ -629,7 +672,7 @@ export default function Autopilot() {
                       </div>
                       <div class="ap-plan-body">
                         <span class="mono">${cap(whenLabel(c.scheduledAt, tz, new Date(now)))}</span>
-                        <span class="muted text-sm">${TYPE_LABEL[c.type]}${c.assetIds.length > 1 ? ` · ${c.assetIds.length} items` : ''} · ${(assetsById.get(c.assetIds[0]) || {}).name || ''}</span>
+                        <span class="muted text-sm">${c.recycleOf ? 'Repost of a top post · ' : ''}${TYPE_LABEL[c.type]}${c.assetIds.length > 1 ? ` · ${c.assetIds.length} items` : ''} · ${(assetsById.get(c.assetIds[0]) || {}).name || ''}</span>
                       </div>
                     </li>`,
                   )}
@@ -645,7 +688,7 @@ export default function Autopilot() {
         <//>
 
         <${Panel} title="Content pool" class="ap-pool"
-          subtitle=${pool.length ? `${ready.length} ready · ${pool.length - ready.length} already used` : null}
+          subtitle=${pool.length ? `${ready.length} ready · ${pool.filter((a) => !unusedIds.has(a.id)).length} already used${pool.some((a) => unusedIds.has(a.id) && skipReason(a)) ? ` · ${pool.filter((a) => unusedIds.has(a.id) && skipReason(a)).length} skipped` : ''}` : null}
           actions=${html`<${Button} size="sm" icon="plus" onClick=${() => setPickerOpen(true)}>Add from library<//>`}>
           ${pool.length
             ? html`<ul class="ap-pool-grid">
@@ -653,8 +696,9 @@ export default function Autopilot() {
                   .slice()
                   .sort((a, b) => Number(unusedIds.has(b.id)) - Number(unusedIds.has(a.id)))
                   .map(
-                    (a) => html`<li key=${a.id} class=${cx('ap-pool-item', !unusedIds.has(a.id) && 'is-used')}>
-                      <${MediaThumb} asset=${a} label=${unusedIds.has(a.id) ? 'Ready' : 'Used'} />
+                    (a) => html`<li key=${a.id} class=${cx('ap-pool-item', !unusedIds.has(a.id) && 'is-used', unusedIds.has(a.id) && skipReason(a) && 'is-skipped')}>
+                      <${MediaThumb} asset=${a} label=${unusedIds.has(a.id) ? skipReason(a) || 'Ready' : 'Used'}
+                        title=${unusedIds.has(a.id) && skipReason(a) ? skipHint(a) : undefined} />
                       <button type="button" class="ap-pool-remove" aria-label=${`Remove ${a.name || 'file'} from the pool`} title="Remove from pool"
                         onClick=${() => setPool([a.id], false)}><${Icon} name="x" size=${12} strokeWidth=${2.5} /></button>
                     </li>`,

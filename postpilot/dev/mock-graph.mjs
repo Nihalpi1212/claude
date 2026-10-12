@@ -1139,13 +1139,16 @@ export function createMockGraph({
         }
         const value = totals[m] ?? 0;
         const tv = { value };
+        // Shares vary by day (keyed on the window's first day) so stacked charts look like real data.
+        const shareKey = dayKey(new Date((since + 43200) * 1000), 'UTC');
+        const share = (salt, lo, hi) => lo + (hi - lo) * noise(shareKey, `${salt}:${m}`);
         if (breakdown === 'media_product_type') {
-          const post = Math.round(value * 0.46);
-          const reel = Math.round(value * 0.38);
-          const story = Math.round(value * 0.11);
-          tv.breakdowns = [{ dimension_keys: ['media_product_type'], results: [['POST', post], ['REEL', reel], ['STORY', story], ['CAROUSEL_CONTAINER', value - post - reel - story]].map(([k, v]) => ({ dimension_values: [k], value: v })) }];
+          const post = Math.round(value * share('post', 0.36, 0.5));
+          const reel = Math.round(value * share('reel', 0.28, 0.42));
+          const story = Math.round(value * share('story', 0.07, 0.14));
+          tv.breakdowns = [{ dimension_keys: ['media_product_type'], results: [['POST', post], ['REEL', reel], ['STORY', story], ['CAROUSEL_CONTAINER', Math.max(0, value - post - reel - story)]].map(([k, v]) => ({ dimension_values: [k], value: v })) }];
         } else if (breakdown === 'follow_type' || breakdown === 'follower_type') {
-          const f = Math.round(value * 0.62);
+          const f = Math.round(value * share('followers', 0.5, 0.72));
           tv.breakdowns = [{ dimension_keys: [breakdown], results: [{ dimension_values: ['FOLLOWER'], value: f }, { dimension_values: ['NON_FOLLOWER'], value: value - f }] }];
         } else if (breakdown === 'contact_button_type') {
           tv.breakdowns = [{ dimension_keys: [breakdown], results: [{ dimension_values: ['EMAIL'], value: Math.ceil(value / 2) }, { dimension_values: ['DIRECTION'], value: Math.floor(value / 2) }] }];
