@@ -1,11 +1,14 @@
-// Library: the contact sheet of every photo and video. Upload (button, drag-and-drop, paste), folders,
-// tags, filters, the autopilot pool, bulk actions and a detail drawer per file.
+// Library: the contact sheet of every photo and video. Upload (button, drag-and-drop, paste, or shared
+// from another app through the Android share sheet: #/library?shared=1), folders, tags, filters, the
+// autopilot pool, bulk actions and a detail drawer per file. Files imported from a link (CSV, RSS) show
+// a placeholder until the worker has downloaded them (asset.importUrl / importError).
 
 import { html, useEffect, useMemo, useRef, useState } from '../../vendor/preact.js';
 import { useApp } from '../app.js';
 import { mutate, readDoc, useDocs } from '../data.js';
 import { loadViewCss } from '../css.js';
 import { deleteAssets, isImageFile, isVideoFile, originalUrl, prepareFile, thumbUrl, uploadPrepared } from '../media.js';
+import { clearShared, readShared } from '../push.js';
 import { setQuery } from '../router.js';
 import {
   Badge, Button, Callout, ChipInput, EmptyState, Field, Frame, Icon, IconButton, Menu, Modal, PageHeader, ProgressBar,
@@ -31,6 +34,16 @@ const SHEET_PAGE = 120;
 
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const REMOVED_HINT = 'The original was removed to save space (Settings → Free up space). Only the thumbnail is kept; upload the file again to post it.';
+// A file the worker still has to download from a link has no bytes yet: never try to load it.
+const importing = (a) => !!(a && a.importUrl);
+const importFailed = (a) => !!(a && a.importUrl && a.importError);
+const hostOf = (url) => {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch {
+    return 'its link';
+  }
+};
 
 export function formatBytes(n) {
   if (!Number.isFinite(n) || n <= 0) return '—';
@@ -115,24 +128,33 @@ function usageMap(posts) {
 // Contact sheet item
 
 function SheetItem({ asset, index, selected, selecting, usedCount, onOpen, onToggle }) {
-  const src = useThumb(asset);
+  const pending = importing(asset);
+  const failed = importFailed(asset);
+  const src = useThumb(pending ? null : asset);
   const kind = asset.kind === 'video' ? 'video' : undefined;
   const desc = [
     asset.name || 'Untitled',
     asset.kind === 'video' ? `video${asset.durationSec ? `, ${formatDuration(asset.durationSec)}` : ''}` : 'photo',
+    failed ? 'could not be downloaded from its link' : pending ? 'still downloading from its link' : null,
     asset.autopilot ? 'in the autopilot pool' : null,
     usedCount ? `used in ${plural(usedCount, 'post')}` : 'unused',
     asset.originalRemovedAt ? 'original removed' : null,
   ]
     .filter(Boolean)
     .join(', ');
-  return html`<li class=${cx('lib-item', selected && 'is-selected', selecting && 'is-selecting')} data-asset=${asset.id}>
+  return html`<li class=${cx('lib-item', selected && 'is-selected', selecting && 'is-selecting', pending && 'is-importing')} data-asset=${asset.id}>
     <${Frame} src=${src} alt="" number=${index + 1} label=${asset.name || 'Untitled'} kind=${kind}
-      badge=${asset.originalRemovedAt ? 'Original removed' : asset.kind === 'video' && asset.durationSec ? formatDuration(asset.durationSec) : undefined}
-      title=${asset.originalRemovedAt ? REMOVED_HINT : undefined}
+      badge=${asset.originalRemovedAt ? 'Original removed' : !pending && asset.kind === 'video' && asset.durationSec ? formatDuration(asset.durationSec) : undefined}
+      title=${asset.originalRemovedAt ? REMOVED_HINT : failed ? `Could not download: ${asset.importError}` : pending ? `Downloading from ${hostOf(asset.importUrl)}` : undefined}
       class=${cx('lib-frame', selected && 'is-selected', usedCount && 'is-used')}
       onClick=${(e) => (selecting || e.shiftKey || e.metaKey || e.ctrlKey ? onToggle(e) : onOpen())}
       aria-label=${selecting ? `${selected ? 'Deselect' : 'Select'} ${desc}` : `Open ${desc}`}>
+      ${pending
+        ? html`<span class=${cx('lib-import', failed && 'is-error')}>
+            <${Icon} name=${failed ? 'alert' : 'download'} size=${18} />
+            <span>${failed ? 'Download failed' : 'Downloading from link…'}</span>
+          </span>`
+        : null}
       ${asset.autopilot || usedCount
         ? html`<span class="lib-flags" aria-hidden="true">
             ${asset.autopilot ? html`<span class="lib-flag is-pool" title="In the autopilot pool"><${Icon} name="wand" size=${12} /></span>` : null}
@@ -157,6 +179,7 @@ function AssetPreview({ asset }) {
     let alive = true;
     setUrl(null);
     setErr(null);
+    if (importing(asset)) return undefined; // nothing to show until the worker has the file
     // Without the original (Free up space), show the thumbnail that was kept.
     (asset.originalRemovedAt ? thumbUrl(asset) : originalUrl(asset))
       .then((u) => alive && setUrl(u))
@@ -168,7 +191,7 @@ function AssetPreview({ asset }) {
   const [poster, setPoster] = useState(null);
   useEffect(() => {
     let alive = true;
-    if (asset.kind === 'video') thumbUrl(asset).then((u) => alive && setPoster(u)).catch(() => {});
+    if (asset.kind === 'video' && !importing(asset)) thumbUrl(asset).then((u) => alive && setPoster(u)).catch(() => {});
     return () => {
       alive = false;
     };
@@ -176,7 +199,9 @@ function AssetPreview({ asset }) {
   const r = asset.width && asset.height ? asset.width / asset.height : null;
   const style = r ? { aspectRatio: `${asset.width} / ${asset.height}`, width: `min(100%, calc(46vh * ${r.toFixed(4)}))` } : null;
   return html`<div class="lib-preview" style=${style} tabindex="-1" data-autofocus>
-    ${err
+    ${importing(asset)
+      ? html`<div class="lib-preview-msg"><${Icon} name=${importFailed(asset) ? 'alert' : 'download'} /><span>${importFailed(asset) ? 'Not downloaded' : 'Downloading from link…'}</span></div>`
+      : err
       ? html`<div class="lib-preview-msg"><${Icon} name="alert" /><span>${err}</span></div>`
       : !url
         ? html`<div class="lib-preview-msg"><span class="spinner" style="width:18px;height:18px" aria-label="Loading preview" role="status"></span></div>`
@@ -186,7 +211,30 @@ function AssetPreview({ asset }) {
   </div>`;
 }
 
-function AssetDrawer({ asset, folders, usedBy, tz, onClose, onCreatePost, onDelete }) {
+function ImportStatus({ asset, onRetry }) {
+  const [busy, setBusy] = useState(false);
+  if (!importing(asset)) return null;
+  const host = hostOf(asset.importUrl);
+  if (importFailed(asset)) {
+    return html`<${Callout} tone="danger" title="Could not download this file"
+      action=${html`<${Button} size="sm" variant="secondary" icon="refresh" loading=${busy}
+        onClick=${async () => {
+          setBusy(true);
+          await onRetry([asset.id]);
+          setBusy(false);
+        }}>Try again<//>`}>
+      <span>${asset.importError}</span>
+      <span class="lib-import-url mono">${asset.importUrl}</span>
+      <span class="muted">Check that the link opens the photo or video itself, then try again. Posts that use this file cannot publish until it is here.</span>
+    <//>`;
+  }
+  return html`<${Callout} tone="info" title="Downloading from link…">
+    <span>The worker downloads this file from ${host} on its next run (about every 10 minutes). Posts that use it wait until it is here.</span>
+    <span class="lib-import-url mono">${asset.importUrl}</span>
+  <//>`;
+}
+
+function AssetDrawer({ asset, folders, usedBy, tz, onClose, onCreatePost, onDelete, onRetry }) {
   const { toast, confirm, openComposer } = useApp();
   const pick = (a) => ({
     name: a.name || '',
@@ -233,7 +281,7 @@ function AssetDrawer({ asset, folders, usedBy, tz, onClose, onCreatePost, onDele
   useEffect(() => {
     let alive = true;
     setDl(null);
-    if (asset.originalRemovedAt) return undefined;
+    if (asset.originalRemovedAt || importing(asset)) return undefined;
     originalUrl(asset)
       .then((u) => alive && setDl(u))
       .catch(() => {});
@@ -252,6 +300,7 @@ function AssetDrawer({ asset, folders, usedBy, tz, onClose, onCreatePost, onDele
       <${Button} variant="secondary" icon="plus" onClick=${() => onCreatePost([asset])}>Create post<//>
       <${Button} variant="primary" onClick=${save} loading=${saving} disabled=${!dirty}>Save changes<//>`}>
     <div class="stack">
+      <${ImportStatus} asset=${asset} onRetry=${onRetry} />
       <${AssetPreview} asset=${asset} />
       ${asset.originalRemovedAt
         ? html`<p class="text-sm"><${Badge} tone="warning">Original removed<//> <span class="muted">${REMOVED_HINT}</span></p>`
@@ -380,6 +429,57 @@ function UploadList({ items, onDismiss }) {
 }
 
 // ---------------------------------------------------------------------------
+// Shared from another app (manifest share_target -> sw.js -> #/library?shared=1)
+
+/** Caption hint from what was shared: the text (or page title) plus the link when the text lacks it. */
+export function sharedHint({ title = '', text = '', url = '' } = {}) {
+  const body = String(text || title || '').trim();
+  const link = String(url || '').trim();
+  return (link && !body.includes(link) ? `${body}${body ? '\n' : ''}${link}` : body).slice(0, LIMITS.captionChars);
+}
+
+function SharedThumb({ file }) {
+  const [src, setSrc] = useState(null);
+  useEffect(() => {
+    if (!isImageFile(file)) return undefined;
+    const url = URL.createObjectURL(file);
+    setSrc(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
+  return html`<${Frame} src=${src} alt="" label=${file.name} kind=${isVideoFile(file) ? 'video' : undefined} />`;
+}
+
+function SharedPanel({ shared, setShared, onAdd, onDiscard, onCompose }) {
+  const files = shared.files.filter((f) => isImageFile(f) || isVideoFile(f));
+  const n = files.length;
+  return html`<section class="lib-shared" aria-labelledby="lib-shared-title">
+    <div class="lib-shared-head">
+      <${Icon} name="share" size=${18} />
+      <h2 class="section-title" id="lib-shared-title">Shared with Postpilot</h2>
+      <span class="muted text-sm">${n ? plural(n, 'photo or video', 'photos and videos') : 'No photos or videos'}</span>
+    </div>
+    ${n
+      ? html`<ul class="contact-sheet lib-shared-files" aria-label="Shared files">${files.map((f, i) => html`<li key=${i}><${SharedThumb} file=${f} /></li>`)}</ul>
+          ${shared.files.length > n ? html`<p class="text-sm text-warn">${plural(shared.files.length - n, 'file')} cannot be added: only photos and videos can.</p>` : null}
+          <${Field} label=${n === 1 ? 'Caption hint' : 'Caption hint for the first file'}
+            hint="Autopilot uses this as the caption when AI is off, and as a note for AI captions.">
+            <${TextArea} rows=${2} maxRows=${6} value=${shared.hint} onChange=${(v) => setShared((s) => ({ ...s, hint: v }))} placeholder="Optional" />
+          <//>
+          <${Toggle} checked=${shared.pool} onChange=${(v) => setShared((s) => ({ ...s, pool: v }))} label="Add to the autopilot pool"
+            hint="Autopilot may post these for you." />
+          <div class="row">
+            <${Button} variant="primary" icon="upload" onClick=${() => onAdd(files)}>${n === 1 ? 'Add to library' : `Add ${n} files to library`}<//>
+            <${Button} variant="ghost" onClick=${onDiscard}>Discard<//>
+          </div>`
+      : html`<p class="text-sm">Only photos and videos can be added to the library.${shared.hint ? ' You can start a post with the shared text instead.' : ''}</p>
+          <div class="row">
+            ${shared.hint ? html`<${Button} variant="primary" icon="plus" onClick=${() => onCompose(shared.hint)}>Start a post with this text<//>` : null}
+            <${Button} variant="ghost" onClick=${onDiscard}>Discard<//>
+          </div>`}
+  </section>`;
+}
+
+// ---------------------------------------------------------------------------
 
 export default function Library() {
   const { route, tz, toast, confirm, openComposer } = useApp();
@@ -401,6 +501,42 @@ export default function Library() {
   const [limit, setLimit] = useState(SHEET_PAGE);
   const fileRef = useRef(null);
   const lastIndex = useRef(-1);
+  const [shared, setShared] = useState(null); // {files, hint, pool} shared from another app
+
+  // Files shared from another app wait in the service worker's mailbox until they are added here.
+  const sharedFlag = route.query.shared;
+  useEffect(() => {
+    if (!sharedFlag) return undefined;
+    if (sharedFlag === 'error') {
+      toast('Postpilot could not read what was shared. Share it again.', { kind: 'error' });
+      setQuery({ shared: null });
+      return undefined;
+    }
+    let alive = true;
+    readShared()
+      .then((s) => {
+        if (!alive) return;
+        if (!s || (!s.files.length && !sharedHint(s))) {
+          setQuery({ shared: null }); // already added (or discarded) on another visit
+          return;
+        }
+        setShared({ files: s.files, hint: sharedHint(s), pool: false });
+      })
+      .catch(() => {
+        if (!alive) return;
+        toast('Postpilot could not read what was shared. Share it again.', { kind: 'error' });
+        setQuery({ shared: null });
+      });
+    return () => {
+      alive = false;
+    };
+  }, [sharedFlag]);
+
+  const closeShared = () => {
+    setShared(null);
+    setQuery({ shared: null });
+    clearShared().catch(() => {});
+  };
 
   const usage = useMemo(() => usageMap(posts), [data.posts]);
   const unusedIds = useMemo(() => new Set(unusedAssets(assets, posts).map((a) => a.id)), [data.library, data.posts]);
@@ -464,40 +600,57 @@ export default function Library() {
   // ---- upload --------------------------------------------------------------------------------
   const busyRef = useRef(false);
   const queueRef = useRef([]);
-  const startUpload = (fileList) => {
+  /**
+   * Queue files for upload. extra: {opts (uploadPrepared options), firstHint (caption hint of the first
+   * file), onDone(batch)} where batch is {added: Asset[], failed, opts}; without onDone a toast reports it.
+   */
+  const startUpload = (fileList, { opts: extraOpts = {}, firstHint = '', onDone } = {}) => {
     const files = [...(fileList || [])];
     const ok = files.filter((f) => isImageFile(f) || isVideoFile(f));
     const skipped = files.length - ok.length;
     if (skipped) toast(`${plural(skipped, 'file')} skipped: only photos and videos can be added.`, { kind: 'error' });
-    if (!ok.length) return;
-    const items = ok.map((f) => ({ id: uid('up_'), name: f.name, kind: isVideoFile(f) ? 'video' : 'image', phase: 'queued', error: null, file: f }));
+    if (!ok.length) return false;
+    const opts = { folderId: activeFolder ? activeFolder.id : null, autopilot: filter === 'autopilot', ...extraOpts };
+    const batch = { left: ok.length, added: [], failed: 0, opts, onDone };
+    const items = ok.map((f, i) => ({
+      id: uid('up_'),
+      name: f.name,
+      kind: isVideoFile(f) ? 'video' : 'image',
+      phase: 'queued',
+      error: null,
+      file: f,
+      batch,
+      opts: i === 0 && firstHint ? { ...opts, captionHint: firstHint } : opts,
+    }));
     setUploads((prev) => [...prev.filter((p) => p.phase !== 'done' && p.phase !== 'error'), ...items]);
     queueRef.current.push(...items);
-    const opts = { folderId: activeFolder ? activeFolder.id : null, autopilot: filter === 'autopilot' };
-    if (!busyRef.current) runQueue(opts);
+    if (!busyRef.current) runQueue();
+    return true;
   };
   const patchUpload = (id, patch) => setUploads((list) => list.map((u) => (u.id === id ? { ...u, ...patch } : u)));
-  const runQueue = async (opts) => {
+  const finishBatch = (b) => {
+    if (b.onDone) return b.onDone(b);
+    const where = b.opts.folderId ? ` in ${(folders.find((f) => f.id === b.opts.folderId) || {}).name || 'the folder'}` : '';
+    if (b.added.length) toast(`Added ${plural(b.added.length, 'file')} to your library${where}.`, { kind: 'success' });
+    if (b.failed) toast(`${plural(b.failed, 'file')} could not be added. See the upload list for why.`, { kind: 'error' });
+  };
+  const runQueue = async () => {
     busyRef.current = true;
-    let added = 0;
-    let failed = 0;
     while (queueRef.current.length) {
       const item = queueRef.current.shift();
       try {
         patchUpload(item.id, { phase: 'processing' });
         const prepared = await prepareFile(item.file);
         patchUpload(item.id, { phase: 'uploading' });
-        await uploadPrepared(prepared, opts);
+        item.batch.added.push(await uploadPrepared(prepared, item.opts));
         patchUpload(item.id, { phase: 'done' });
-        added++;
       } catch (err) {
-        failed++;
+        item.batch.failed++;
         patchUpload(item.id, { phase: 'error', error: err.message || 'Upload failed.' });
       }
+      if (--item.batch.left === 0) finishBatch(item.batch);
     }
     busyRef.current = false;
-    if (added) toast(`Added ${plural(added, 'file')} to your library${opts.folderId ? ` in ${(folders.find((f) => f.id === opts.folderId) || {}).name || 'the folder'}` : ''}.`, { kind: 'success' });
-    if (failed) toast(`${plural(failed, 'file')} could not be added. See the upload list for why.`, { kind: 'error' });
   };
 
   // Paste images from the clipboard anywhere on the page.
@@ -606,8 +759,29 @@ export default function Library() {
     }
   };
 
+  const retryImport = async (ids) => {
+    try {
+      await writeAssets(ids, (a) => delete a.importError, 'retry media download');
+      toast('The worker tries the download again on its next run.', { kind: 'success' });
+    } catch {
+      /* toasted */
+    }
+  };
+
   const createPost = (picked) => {
-    // Files whose original was removed (Free up space) cannot be posted.
+    // Files whose original was removed (Free up space) or could not be downloaded cannot be posted.
+    // Files still downloading can: the post waits for them.
+    const broken = picked.filter(importFailed);
+    if (broken.length) {
+      toast(
+        broken.length === picked.length
+          ? `${broken.length === 1 ? 'This file' : 'These files'} could not be downloaded from ${broken.length === 1 ? 'its link' : 'their links'}. Try the download again first.`
+          : `Left out ${plural(broken.length, 'file')} that could not be downloaded from ${broken.length === 1 ? 'its link' : 'their links'}.`,
+        { kind: broken.length === picked.length ? 'error' : 'info' },
+      );
+      picked = picked.filter((a) => !importFailed(a));
+      if (!picked.length) return;
+    }
     const removed = picked.filter((a) => a.originalRemovedAt);
     const list = picked.filter((a) => !a.originalRemovedAt);
     if (removed.length) {
@@ -789,6 +963,32 @@ export default function Library() {
           <span>Drop photos or videos here, or paste from the clipboard${activeFolder ? html` into <strong>${activeFolder.name}</strong>` : ''}.</span>
           <button type="button" class="lib-dropzone-btn" onClick=${() => fileRef.current && fileRef.current.click()}>Choose files</button>
         </div>
+        ${shared
+          ? html`<${SharedPanel} shared=${shared} setShared=${setShared}
+              onDiscard=${closeShared}
+              onCompose=${(caption) => {
+                closeShared();
+                openComposer({ caption });
+              }}
+              onAdd=${(files) => {
+                const { hint, pool } = shared;
+                closeShared();
+                startUpload(files, {
+                  opts: { autopilot: pool, folderId: null },
+                  firstHint: hint.trim(),
+                  onDone: (b) => {
+                    const where = pool ? 'your library and the autopilot pool' : 'your library';
+                    if (b.added.length) {
+                      toast(`Added ${plural(b.added.length, 'shared file')} to ${where}.`, {
+                        kind: 'success',
+                        action: b.added.length <= LIMITS.carouselMax ? { label: 'Create post', onClick: () => createPost(b.added) } : undefined,
+                      });
+                    }
+                    if (b.failed) toast(`${plural(b.failed, 'file')} could not be added. See the upload list for why.`, { kind: 'error' });
+                  },
+                });
+              }} />`
+          : null}
         <${UploadList} items=${uploads} onDismiss=${() => setUploads([])} />
 
         <div class="toolbar lib-toolbar">
@@ -831,6 +1031,7 @@ export default function Library() {
       ? html`<${AssetDrawer} key=${openAsset.id} asset=${openAsset} folders=${folders} usedBy=${usage.get(openAsset.id) || []} tz=${tz}
           onClose=${() => setOpenId(null)}
           onCreatePost=${createPost}
+          onRetry=${retryImport}
           onDelete=${async (a) => {
             if (await removeAssets([a])) setOpenId(null);
           }} />`

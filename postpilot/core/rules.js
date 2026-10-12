@@ -1,8 +1,11 @@
 // Automation rule engine (pure, environment-neutral).
 //
-// Event (built by the worker from comments, DMs, story replies and mentions):
-//   { source: 'comment'|'dm'|'story_reply'|'mention', id, text, mediaId, userId, username, name?,
-//     isOwn, timestamp }
+// Event (built by the worker from comments, DMs, story replies, story mentions and mentions):
+//   { source: 'comment'|'dm'|'story_reply'|'story_mention'|'mention', id, text, mediaId, userId,
+//     username, name?, isOwn, timestamp }
+//   'story_reply' = a DM replying to one of the account's stories, 'story_mention' = a DM Instagram
+//   sends when someone mentions the account in their story (usually no text), 'mention' = a comment
+//   that @mentions the account.
 //
 // Keywords (rule.trigger.keywords, blocked words):
 //   - plain words or phrases, matched as whole words after normalize() ("price" matches "Price?" and
@@ -303,7 +306,11 @@ const ACTION_MAP = {
   mention: { reply_comment: 'reply_comment', ai_reply: 'ai_reply' },
   dm: { send_dm: 'send_dm', reply_comment: 'send_dm', ai_reply: 'ai_reply' },
   story_reply: { send_dm: 'send_dm', reply_comment: 'send_dm', ai_reply: 'ai_reply' },
+  story_mention: { send_dm: 'send_dm', ai_reply: 'ai_reply' },
 };
+
+// Sources that arrive as direct messages (they get the welcome message on first contact).
+const DM_SOURCES = new Set(['dm', 'story_reply', 'story_mention']);
 
 function ruleActions(rule, event, vars, seed) {
   const out = [];
@@ -351,7 +358,8 @@ export function recordFired(processed, ruleId, userId, at = new Date().toISOStri
  *  2. The first enabled rule (in order) whose trigger matches and that produces at least one action.
  *     Rules with oncePerUser are skipped for users they already fired for (processed.users), so a later
  *     rule can still match.
- *  3. DMs and story replies with no matching rule get the welcome message when isFirstContact.
+ *  3. DMs, story replies and story mentions with no matching rule get the welcome message when
+ *     isFirstContact.
  * Text actions are rendered with renderTemplate using eventVars(event), {keyword} and `vars`
  * (e.g. { link }); the variant is chosen with pickVariant seeded by the event id.
  * @param {{rules?: object[], event: object, processed?: object, blockedWords?: object|string[],
@@ -377,7 +385,7 @@ export function evaluate({ rules = [], event, processed, blockedWords, welcome, 
     const actions = ruleActions(rule, event, { ...base, keyword: keyword && !keyword.startsWith('re:') ? keyword : '' }, seed);
     if (actions.length) return actions;
   }
-  if ((event.source === 'dm' || event.source === 'story_reply') && isFirstContact && welcome?.enabled) {
+  if (DM_SOURCES.has(event.source) && isFirstContact && welcome?.enabled) {
     const text = renderTemplate(pickVariant(welcome.texts?.length ? welcome.texts : [welcome.text], seed), base).trim();
     if (text) return [{ ruleId: null, type: 'send_dm', text, reason: 'welcome' }];
   }

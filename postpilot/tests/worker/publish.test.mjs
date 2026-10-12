@@ -468,3 +468,191 @@ test('a post published now is picked up while the run waits for a later post', a
   assert.equal(savedLater.status, 'published');
   assert.ok(Date.parse(savedNow.publishedAt) < Date.parse(later.scheduledAt), 'not held back until the later post was due');
 });
+
+// ---------------------------------------------------------------------------
+// Reminder posts and media still downloading from a link
+
+const subtle = globalThis.crypto.subtle;
+
+/** A push subscription on the test server plus the keys to read what was sent to it. */
+async function pushDevice(env, name) {
+  const { b64url } = await import('../../core/webpush.js');
+  const keys = await subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits']);
+  const auth = globalThis.crypto.getRandomValues(new Uint8Array(16));
+  const p256dh = b64url(new Uint8Array(await subtle.exportKey('raw', keys.publicKey)));
+  return { keys, auth, sub: { endpoint: `${env.url}/push/${name}`, keys: { p256dh, auth: b64url(auth) }, device: name, createdAt: new Date().toISOString() } };
+}
+
+/** RFC 8291 decryption, as the browser does it. */
+async function readPush(body, ua, authSecret) {
+  const te = new TextEncoder();
+  const salt = body.slice(0, 16);
+  const idlen = body[20];
+  const asPublic = body.slice(21, 21 + idlen);
+  const ct = body.slice(21 + idlen);
+  const uaPublic = new Uint8Array(await subtle.exportKey('raw', ua.publicKey));
+  const asKey = await subtle.importKey('raw', asPublic, { name: 'ECDH', namedCurve: 'P-256' }, false, []);
+  const secret = new Uint8Array(await subtle.deriveBits({ name: 'ECDH', public: asKey }, ua.privateKey, 256));
+  const hk = async (s, ikm, info, len) => new Uint8Array(await subtle.deriveBits({ name: 'HKDF', hash: 'SHA-256', salt: s, info }, await subtle.importKey('raw', ikm, 'HKDF', false, ['deriveBits']), len * 8));
+  const ikm = await hk(authSecret, secret, new Uint8Array([...te.encode('WebPush: info\0'), ...uaPublic, ...asPublic]), 32);
+  const cek = await hk(salt, ikm, te.encode('Content-Encoding: aes128gcm\0'), 16);
+  const nonce = await hk(salt, ikm, te.encode('Content-Encoding: nonce\0'), 12);
+  const key = await subtle.importKey('raw', cek, 'AES-GCM', false, ['decrypt']);
+  const plain = new Uint8Array(await subtle.decrypt({ name: 'AES-GCM', iv: nonce }, key, ct));
+  return JSON.parse(new TextDecoder().decode(plain.slice(0, -1)));
+}
+
+/** Instagram calls that publish or check the quota (none of these may happen for a reminder). */
+const publishingCalls = (env, from = 0) =>
+  env.graph.state.requests.slice(from).filter((r) => (r.method === 'POST' && /\/media(_publish)?$/.test(r.path)) || /content_publishing_limit/.test(r.path));
+
+test('a due reminder post sends a phone notification instead of publishing, once', async (t) => {
+  const env = await startWorkerEnv();
+  t.after(() => env.close());
+  const phone = await pushDevice(env, 'phone');
+  const { generateVapidKeys } = await import('../../core/webpush.js');
+  const vapid = { ...(await generateVapidKeys()), subject: 'mailto:owner@example.com' };
+  await env.update('settings', (s) => {
+    s.notifications = { vapid, subscriptions: [phone.sub], events: { published: true, failed: true, reminder: true } };
+  });
+  const asset = await env.addAsset('f02.jpg');
+  const reminder = await schedulePost(env, { caption: 'Poll in the story: which glaze next?', type: 'story', publishMode: 'reminder', media: [{ assetId: asset.id, kind: 'image' }] });
+  const auto = await schedulePost(env, { caption: 'Automatic one', media: [{ assetId: asset.id, kind: 'image' }] });
+  const before = env.graph.state.publishCount;
+  const mark = env.graph.state.requests.length;
+
+  const res = await env.run({ only: ['publish'] });
+  assert.equal(res.exitCode, 0);
+  assert.equal(env.graph.state.publishCount, before + 1, 'only the automatic post was published');
+  assert.equal(res.summary.jobs.publish.reminded, 1);
+  assert.equal(res.summary.jobs.publish.published, 1);
+  assert.ok(res.lines.includes('publish: 1 published, 0 failed, 0 pending, 0 retried, 1 reminded'));
+  assert.ok(!visibleLines(res.lines).join('\n').includes('which glaze'), 'caption never printed');
+
+  const posts = (await env.read('posts')).posts;
+  const saved = posts.find((p) => p.id === reminder.id);
+  assert.equal(saved.status, 'reminded');
+  assert.ok(Date.parse(saved.reminderSentAt) > Date.now() - 60_000);
+  assert.equal(saved.igMediaId, null);
+  assert.equal(saved.attempts, 0, 'a reminder is not a publishing attempt');
+  assert.equal(saved.history[saved.history.length - 1].event, 'reminder sent');
+  assert.equal(posts.find((p) => p.id === auto.id).status, 'published');
+  // Exactly one container + one publish for the automatic post: the reminder made no Instagram calls.
+  const created = env.graph.state.requests.slice(mark).filter((r) => r.method === 'POST' && /\/media$/.test(r.path));
+  assert.equal(created.length, 1);
+
+  const pushes = env.pushes.filter((p) => p.path === '/phone');
+  const payloads = await Promise.all(pushes.map((p) => readPush(p.body, phone.keys, phone.auth)));
+  const remind = payloads.find((p) => p.tag === 'postpilot-reminder');
+  assert.ok(remind, 'reminder push sent');
+  assert.equal(remind.title, 'Time to post your story');
+  assert.equal(remind.body, 'Poll in the story: which glaze next?');
+  assert.equal(remind.url, `./#/post-now/${encodeURIComponent(reminder.id)}`);
+  const log = await env.read('log');
+  assert.ok(log.entries.some((e) => e.job === 'publish' && /reminder/.test(e.message) && e.data?.postId === reminder.id));
+
+  // Not picked again on the next run.
+  const again = await env.run({ only: ['publish'] });
+  assert.equal(again.summary.jobs.publish.reminded, undefined);
+  assert.equal(env.pushes.filter((p) => p.path === '/phone').length, pushes.length, 'no second reminder');
+  assert.equal((await env.read('posts')).posts.find((p) => p.id === reminder.id).status, 'reminded');
+});
+
+test('reminders go out while Instagram is disconnected or its login expired; automatic posts wait', async (t) => {
+  const off = await startWorkerEnv({ connect: false });
+  t.after(() => off.close());
+  const asset = await off.addAsset('f03.jpg');
+  const reminder = await schedulePost(off, { caption: 'Link sticker to the shop', publishMode: 'reminder', media: [{ assetId: asset.id, kind: 'image' }] });
+  const auto = await schedulePost(off, { caption: 'Waits for Instagram', media: [{ assetId: asset.id, kind: 'image' }] });
+  const res = await off.run();
+  assert.equal(res.exitCode, 0);
+  assert.deepEqual(res.summary.jobs.publish, { reminded: 1 });
+  assert.ok(res.lines.includes('publish: 1 reminded'));
+  assert.ok(res.lines.some((l) => /Instagram is not connected/.test(l)), 'the other Instagram jobs still say why they were skipped');
+  let posts = (await off.read('posts')).posts;
+  assert.equal(posts.find((p) => p.id === reminder.id).status, 'reminded');
+  assert.equal(posts.find((p) => p.id === auto.id).status, 'scheduled');
+  assert.equal(off.graph.state.requests.length, 0, 'no Instagram calls at all');
+  // Nothing left to remind: the job reports the usual skip reason.
+  const idle = await off.run();
+  assert.equal(idle.summary.jobs.publish.skipped, 'not_connected');
+
+  const env = await startWorkerEnv();
+  t.after(() => env.close());
+  const a2 = await env.addAsset('f03.jpg');
+  const r2 = await schedulePost(env, { caption: 'Music from the library', type: 'reel', publishMode: 'reminder', media: [{ assetId: a2.id, kind: 'image' }] });
+  const p2 = await schedulePost(env, { caption: 'Blocked', media: [{ assetId: a2.id, kind: 'image' }] });
+  await env.update('settings', (s) => {
+    s.ig.token = 'expired-token';
+    s.ig.tokenRefreshedAt = new Date(Date.now() - 8 * 864e5).toISOString();
+  });
+  const expired = await env.run();
+  assert.equal(expired.summary.jobs.token.tokenExpired, 1);
+  assert.deepEqual(expired.summary.jobs.publish, { reminded: 1 });
+  posts = (await env.read('posts')).posts;
+  assert.equal(posts.find((p) => p.id === r2.id).status, 'reminded');
+  assert.equal(posts.find((p) => p.id === p2.id).status, 'scheduled');
+});
+
+test('reminders do not touch the publishing quota', async (t) => {
+  const env = await startWorkerEnv();
+  t.after(() => env.close());
+  env.graph.state.publishLimit = 0; // quota used up: automatic posts would be held back
+  const asset = await env.addAsset('f04.jpg');
+  const reminder = await schedulePost(env, { caption: 'Quota does not matter', publishMode: 'reminder', media: [{ assetId: asset.id, kind: 'image' }] });
+  const mark = env.graph.state.requests.length;
+  const res = await env.run({ only: ['publish'] });
+  assert.equal(res.summary.jobs.publish.reminded, 1);
+  assert.deepEqual(publishingCalls(env, mark), [], 'no quota check, container or publish call');
+  assert.equal((await env.read('posts')).posts.find((p) => p.id === reminder.id).status, 'reminded');
+});
+
+test('a post whose media is still downloading waits, noted once; a failed or stalled download fails it', async (t) => {
+  const env = await startWorkerEnv();
+  t.after(() => env.close());
+  const ready = await env.addAsset('f05.jpg');
+  const pendingAsset = await env.addAsset('f06.jpg', { name: 'From the feed', importUrl: 'https://example.com/a.jpg' });
+  const brokenAsset = await env.addAsset('f07.jpg', { name: 'Broken link', importUrl: 'https://example.com/b.jpg', importError: 'HTTP 404' });
+  const waiting = await schedulePost(env, { type: 'carousel', caption: 'Waits for the download', media: [{ assetId: ready.id, kind: 'image' }, { assetId: pendingAsset.id, kind: 'image' }] });
+  const broken = await schedulePost(env, { caption: 'Download failed', media: [{ assetId: brokenAsset.id, kind: 'image' }] });
+  const stalled = await schedulePost(env, { caption: 'Stalled', publishMode: 'reminder', scheduledAt: new Date(Date.now() - 7 * 36e5).toISOString(), media: [{ assetId: pendingAsset.id, kind: 'image' }] });
+  const before = env.graph.state.publishCount;
+
+  const res = await env.run({ only: ['publish'] });
+  assert.equal(res.exitCode, 1, 'failed posts make the run fail so GitHub emails the owner');
+  assert.equal(env.graph.state.publishCount, before, 'nothing was attempted');
+  assert.equal(res.summary.jobs.publish.failed, 2);
+  assert.equal(res.summary.jobs.publish.reminded, undefined);
+  let posts = (await env.read('posts')).posts;
+  const w = posts.find((p) => p.id === waiting.id);
+  assert.equal(w.status, 'scheduled');
+  assert.equal(w.attempts, 0);
+  assert.equal(w.history.filter((h) => h.event === 'waiting_download').length, 1);
+  assert.match(w.history[w.history.length - 1].detail, /"From the feed" from its link/);
+  const b = posts.find((p) => p.id === broken.id);
+  assert.equal(b.status, 'failed');
+  assert.equal(b.lastError.code, 'import_failed');
+  assert.equal(b.lastError.permanent, true);
+  assert.match(b.lastError.message, /could not download "Broken link" from its link \(HTTP 404\)/);
+  const s = posts.find((p) => p.id === stalled.id);
+  assert.equal(s.status, 'failed', 'a reminder needs its media too');
+  assert.equal(s.lastError.code, 'import_timeout');
+  assert.match(s.lastError.message, /6 hours after this post was due/);
+
+  // Next run: still waiting, but not noted (or logged) again.
+  await env.run({ only: ['publish'] });
+  posts = (await env.read('posts')).posts;
+  assert.equal(posts.find((p) => p.id === waiting.id).history.filter((h) => h.event === 'waiting_download').length, 1);
+  const log = await env.read('log');
+  assert.equal(log.entries.filter((e) => e.data?.postId === waiting.id).length, 1, 'logged once per post');
+
+  // Once the worker has the file, the post publishes.
+  await env.update('library', (lib) => {
+    const a = lib.assets.find((x) => x.id === pendingAsset.id);
+    a.sourceUrl = a.importUrl;
+    delete a.importUrl;
+  });
+  const after = await env.run({ only: ['publish'] });
+  assert.equal(after.summary.jobs.publish.published, 1);
+  assert.equal((await env.read('posts')).posts.find((p) => p.id === waiting.id).status, 'published');
+});

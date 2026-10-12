@@ -160,6 +160,28 @@ function plainAnswer(prompt, salt) {
   return SENTENCES[salt % SENTENCES.length];
 }
 
+/**
+ * Caption rewrites (core/ai.js rewrite(), schema {rewritten}): a visible, deterministic change of the
+ * fenced <text> so the composer flow can be checked end to end.
+ */
+function rewriteAnswer(prompt) {
+  const m = /<text>\n([\s\S]*?)\n<\/text>/.exec(prompt);
+  const text = (m ? m[1] : '').trim();
+  const task = ([...prompt.matchAll(/^Task: (.*)$/gm)].pop() || [])[1] || ''; // the last one (the system prompt has its own)
+  const tags = (text.match(/(^|\s)#[\p{L}\p{N}_]+/gu) || []).map((t) => t.trim());
+  const body = text.replace(/(^|\s)#[\p{L}\p{N}_]+/gu, '').trim();
+  const withTags = (s) => (tags.length ? `${s}\n\n${tags.join(' ')}` : s);
+  if (/^Make it noticeably shorter/.test(task)) return withTags((body.split(/(?<=[.!?])\s/)[0] || body).trim());
+  if (/^Make it longer/.test(task)) return withTags(`${body}\n\nEvery piece starts as a lump of clay and a quiet morning at the wheel. Which one would you take home?`);
+  const lang = /^Translate it into ([^.]+)\./.exec(task);
+  if (lang) return withTags(`[${lang[1]}] ${body}`);
+  const tone = /^Rewrite it in a (\w+) tone/.exec(task);
+  if (tone) return withTags(`(${tone[1]}) ${body}`);
+  if (/call to action/.test(task)) return withTags(`${body}\n\nSave this post for your next studio visit.`);
+  if (/^Fix spelling/.test(task)) return withTags(body.replace(/\s{2,}/g, ' ').replace(/\bi\b/g, 'I').replace(/^./, (c) => c.toUpperCase()));
+  return text;
+}
+
 function approxTokens(s) {
   return Math.max(1, Math.ceil(String(s).length / 4));
 }
@@ -218,7 +240,8 @@ export function createMockAnthropic() {
     const prompt = textOf(payload);
     const salt = h32(prompt) % 997;
     const schema = (payload.output_config && payload.output_config.format && payload.output_config.format.schema) || (payload.output_format && payload.output_format.schema);
-    const text = schema ? JSON.stringify(synthesize(schema, '', 0, salt)) : plainAnswer(prompt, salt);
+    const isRewrite = !!schema && Array.isArray(schema.required) && schema.required.includes('rewritten');
+    const text = isRewrite ? JSON.stringify({ rewritten: rewriteAnswer(prompt) }) : schema ? JSON.stringify(synthesize(schema, '', 0, salt)) : plainAnswer(prompt, salt);
     const id = `msg_mock${String(h32(`${prompt}|${seq}`)).padStart(10, '0')}`;
     const usage = { input_tokens: approxTokens(prompt), output_tokens: approxTokens(text), cache_creation_input_tokens: 0, cache_read_input_tokens: 0 };
 

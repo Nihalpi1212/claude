@@ -267,7 +267,23 @@ function normComment(c) {
   };
 }
 
+/** {id, url} of a story reference, or null. Meta uses `link` on the Message node and `url` in webhooks. */
+function storyRef(s) {
+  if (!s || typeof s !== 'object') return null;
+  const id = s.id != null && s.id !== '' ? String(s.id) : null;
+  const url = (typeof s.link === 'string' && s.link) || (typeof s.url === 'string' && s.url) || null;
+  return id || url ? { id, url } : null;
+}
+
+// Story replies and story mentions arrive as ordinary DMs. Meta documents the Message node field
+// `story` as {reply_to: {link, id}} or {mention: {link, id}} ("only mentions and replies are
+// supported"); webhooks use reply_to: {story: {url, id}} and an attachment of type 'story_mention'.
+// Which of these polling returns on the Instagram Login host is unverified, so all are accepted.
 function normMessage(m) {
+  const attachments = (m.attachments && m.attachments.data) || (Array.isArray(m.attachments) ? m.attachments : []);
+  const story = m.story && typeof m.story === 'object' ? m.story : null;
+  const replyTo = m.reply_to && typeof m.reply_to === 'object' ? m.reply_to : null;
+  const mentionAtt = attachments.find((a) => a && a.type === 'story_mention');
   return {
     id: m.id,
     createdTime: isoTime(m.created_time),
@@ -275,10 +291,41 @@ function normMessage(m) {
     fromUsername: (m.from && m.from.username) || null,
     toIds: ((m.to && m.to.data) || []).map((t) => t.id),
     text: m.message || '',
-    attachments: (m.attachments && m.attachments.data) || [],
+    attachments,
     replyTo: m.reply_to || null,
+    // Their reply to one of my stories / their story that mentions me: {id, url} (url: CDN link that expires with the story).
+    storyReply: storyRef(story && story.reply_to) || storyRef(replyTo && replyTo.story),
+    storyMention: storyRef(story && story.mention) || (mentionAtt ? storyRef(mentionAtt.payload) || { id: null, url: null } : null),
     isUnsupported: !!m.is_unsupported,
   };
+}
+
+// Collaboration invites (field names unverified, see ig.collaborationInvites): read defensively.
+function normInvite(i) {
+  const media = i && i.media && typeof i.media === 'object' ? i.media : {};
+  const owner = i.media_owner_username || i.owner_username || (i.owner && i.owner.username) || (i.inviter && i.inviter.username) || i.username || media.username || '';
+  return {
+    mediaId: String(i.media_id || media.id || i.id || ''),
+    owner: String(owner).replace(/^@/, ''),
+    caption: i.caption || media.caption || '',
+    mediaUrl: i.media_url || i.thumbnail_url || media.media_url || media.thumbnail_url || null,
+    permalink: i.permalink || media.permalink || null,
+  };
+}
+
+/** Instagram refused the collaboration invites edge itself (not a login, rate-limit or network problem). */
+function collabUnavailable(err) {
+  if (!(err instanceof IgError) || err.isAuth || err.isRateLimit || err.isTransient) return false;
+  return err.code === 100 || err.code === 3 || err.code === 12 || err.isPermission;
+}
+
+function collabUnsupported(err) {
+  return new IgError(err.message, {
+    code: 'unsupported',
+    status: err.status,
+    cause: err,
+    userMessage: 'Instagram does not let Postpilot read collaboration invites with this connection. Answer them in the Instagram app.',
+  });
 }
 
 function metricValue(item) {
@@ -983,13 +1030,28 @@ export function createIg({
       }));
     },
 
-    /** Messages of one thread, newest first (Instagram only returns the latest 20). */
+    /** True once Instagram rejected the story/reply_to message fields (messages() stops asking). */
+    storyFieldsRejected: false,
+
+    /**
+     * Messages of one thread, newest first (Instagram only returns the latest 20). Also asks for
+     * `story` and `reply_to` so story replies and story mentions can be told apart (see normMessage);
+     * when Instagram rejects those fields the thread is read without them from then on.
+     */
     async messages(conversationId) {
-      const res = await get(
-        `/${conversationId}`,
-        { fields: 'messages{id,created_time,from,to,message,attachments}' },
-        { token: msgToken() },
-      );
+      const base = 'id,created_time,from,to,message,attachments';
+      const read = (fields) => get(`/${conversationId}`, { fields: `messages{${fields}}` }, { token: msgToken() });
+      let res;
+      if (ig.storyFieldsRejected) res = await read(base);
+      else {
+        try {
+          res = await read(`${base},story,reply_to`);
+        } catch (err) {
+          if (!(err instanceof IgError) || err.code !== 100 || err.subcode === 33) throw err;
+          res = await read(base);
+          ig.storyFieldsRejected = true; // the plain read worked, so the extra fields were the problem
+        }
+      }
       return ((res.messages && res.messages.data) || []).map(normMessage);
     },
 
@@ -1121,6 +1183,49 @@ export function createIg({
       requireFacebook('Deleting posts');
       await del(`/${id}`);
       return { id, deleted: true };
+    },
+
+    /**
+     * Pending collaboration invites: other accounts asking this account to be a collaborator on
+     * their post (GET /{ig-user-id}/collaboration_invites, added by Meta on 2025-12-03).
+     * Returns [{mediaId, owner, caption, mediaUrl, permalink}].
+     * UNVERIFIED: the response fields and whether Instagram Login supports the edge (a third-party
+     * client uses it with Facebook Login). Known field names are asked for first; when Instagram
+     * rejects them the edge is read with its default fields. An edge this connection cannot use
+     * becomes IgError code 'unsupported'.
+     */
+    async collaborationInvites({ max = 50 } = {}) {
+      const path = `${uidPath()}/collaboration_invites`;
+      let raw;
+      try {
+        raw = await paginate(path, { fields: 'media_id,media_owner_username,caption,media_url' }, { max });
+      } catch (err) {
+        if (!collabUnavailable(err)) throw err;
+        if (err.code !== 100 || err.subcode === 33 || /collaboration_invites/i.test(err.message)) throw collabUnsupported(err);
+        try {
+          raw = await paginate(path, {}, { max });
+        } catch (err2) {
+          throw collabUnavailable(err2) ? collabUnsupported(err2) : err2;
+        }
+      }
+      return raw.map(normInvite).filter((i) => i.mediaId);
+    },
+
+    /**
+     * Accept or decline a collaboration invite (POST /{ig-user-id}/collaboration_invites with media_id
+     * and accept). Answering sets the invite's state and creates nothing, so sending the same answer
+     * again after a lost connection is harmless: the request is treated as idempotent (retried on
+     * network errors, never flagged maybeSent). A repeat answer may be refused because the invite is
+     * gone; callers treat isNotFound as "already answered".
+     */
+    async respondCollabInvite(mediaId, accept) {
+      try {
+        const res = await post(`${uidPath()}/collaboration_invites`, { media_id: String(mediaId), accept: !!accept }, { idempotent: true });
+        return { mediaId: String(mediaId), accepted: !!accept, success: res && res.success !== false };
+      } catch (err) {
+        if (collabUnavailable(err) && (err.code !== 100 || /collaboration_invites/i.test(err.message))) throw collabUnsupported(err);
+        throw err;
+      }
     },
 
     // Publishing primitives (used by core/publish.js)

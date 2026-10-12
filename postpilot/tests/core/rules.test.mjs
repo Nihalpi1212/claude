@@ -262,3 +262,41 @@ test('evaluate: actions are adapted to the event source', () => {
   const next = rule({ match: 'always' }, { id: 'r_next' });
   assert.equal(evaluate({ rules: [empty, next], event: comment('hey') })[0].ruleId, 'r_next');
 });
+
+test('evaluate: story mentions answer by DM, get the welcome message and never cross sources', () => {
+  const mention = (partial = {}) => ({ source: 'story_mention', id: 'sm_1', text: '', userId: 'u_7', username: 'trail.cafe', isOwn: false, ...partial });
+  const thanks = rule({ source: 'story_mention', match: 'always' }, {
+    id: 'r_thanks',
+    actions: [
+      { type: 'send_dm', texts: ['Thank you for the mention, {mention}!'] },
+      { type: 'reply_comment', texts: ['not possible on a story mention'] },
+      { type: 'hide_comment' },
+      { type: 'ai_reply', guidance: 'Thank them.' },
+    ],
+  });
+  const out = evaluate({ rules: [thanks], event: mention() });
+  assert.deepEqual(out.map((a) => [a.type, a.text]), [['send_dm', 'Thank you for the mention, @trail.cafe!'], ['ai_reply', undefined]]);
+  assert.equal(out[1].channel, 'dm');
+  // A story-mention rule ignores DMs, story replies and comments, and the other way round.
+  for (const source of ['dm', 'story_reply', 'comment']) assert.ok(!matchRule(thanks, mention({ source })));
+  assert.ok(!matchRule(rule({ source: 'story_reply', match: 'always' }), mention()));
+  assert.ok(!matchRule(rule({ source: 'dm', match: 'always' }), mention()));
+  // Keywords cannot match the usual empty text of a mention.
+  assert.ok(!matchRule(rule({ source: 'story_mention', keywords: ['thanks'] }), mention()));
+  // No rule: the welcome message goes out on first contact, like a DM.
+  const welcome = { enabled: true, text: 'Hi {username}!' };
+  assert.deepEqual(evaluate({ rules: [], event: mention(), welcome, isFirstContact: true }), [{ ruleId: null, type: 'send_dm', text: 'Hi trail.cafe!', reason: 'welcome' }]);
+  assert.deepEqual(evaluate({ rules: [], event: mention(), welcome, isFirstContact: false }), []);
+  // A blocked word stops every automated answer.
+  assert.deepEqual(evaluate({ rules: [thanks], event: mention({ text: 'free followers fast' }), blockedWords: { enabled: true, words: ['followers fast'] } }), []);
+});
+
+test('evaluate: story replies use story-reply rules with keywords', () => {
+  const guide = rule({ source: 'story_reply', keywords: ['guide'] }, { id: 'r_guide', actions: [{ type: 'send_dm', texts: ['Here is the guide: {link}'] }], oncePerUser: true });
+  const ev = { source: 'story_reply', id: 'sr_1', text: 'GUIDE please!', userId: 'u_3', username: 'pia', isOwn: false };
+  assert.deepEqual(evaluate({ rules: [guide], event: ev, vars: { link: 'https://x.example/g' } }), [
+    { ruleId: 'r_guide', ruleName: 'New rule', type: 'send_dm', text: 'Here is the guide: https://x.example/g' },
+  ]);
+  assert.deepEqual(evaluate({ rules: [guide], event: { ...ev, source: 'dm' } }), []);
+  assert.deepEqual(evaluate({ rules: [guide], event: ev, processed: { users: { r_guide: { u_3: 'x' } } } }), []);
+});

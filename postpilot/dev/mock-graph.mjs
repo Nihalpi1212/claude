@@ -11,7 +11,8 @@
 // Test hooks on `state`: faults (inject errors: {method, path: string|RegExp, when(params), times,
 // error: {status, code, subcode, message} | destroy: true}), dmMode ('ok'|'advanced_access'|'disabled'),
 // publishLimit, businessAccounts, tokenExpiry (debug_token expires_at per token), requests (log), containers,
-// media, comments, conversations, sentMessages, ...
+// media, comments, conversations, sentMessages, storyShape ('story'|'reply_to'|'none': how story replies and
+// mentions appear on messages), collabInvites, collabResponses, collabMode ('unsupported' removes the edge), ...
 
 import { addDaysKey, dayKey, startOfDay, zonedParts, zonedToUtc } from '../core/time.js';
 
@@ -482,15 +483,20 @@ export function createMockGraph({
     const convDefs = [
       ['mara.lens', [[50 * HOUR, 'in', 'Hi! I love your work 🧡'], [49 * HOUR, 'out', 'Thank you so much, Mara!'], [0.25 * HOUR, 'in', "Do you take custom orders? I'd love a set of 4 mugs in the speckled glaze. What's the price?"]]],
       ['theo.builds', [[3.2 * HOUR, 'in', "Hey! We're opening a café in Leeds and would love to stock your cups."], [3 * HOUR, 'in', 'Could we talk wholesale pricing?']]],
-      ['junie.makes', [[30 * HOUR, 'out', 'Thanks for ordering, Junie! Your vase ships tomorrow.'], [6 * HOUR, 'in', 'It arrived and it is perfect 😍', true]]],
-      ['oak.and.ash', [[20 * HOUR, 'in', 'Is the workshop on the 24th still open? Can I get more info?']]],
+      // 5th item: 'reply' = a reply to one of the account's stories, 'mention' = their story mentions the account.
+      ['junie.makes', [[30 * HOUR, 'out', 'Thanks for ordering, Junie! Your vase ships tomorrow.'], [6 * HOUR, 'in', 'It arrived and it is perfect 😍', true], [5 * HOUR, 'in', '', false, 'mention']]],
+      ['oak.and.ash', [[20 * HOUR, 'in', 'Is the workshop on the 24th still open? Can I get more info?', false, 'reply']]],
       ['kiko.studio', [[31 * HOUR, 'in', 'Thanks for the quick shipping!'], [29 * HOUR, 'out', 'Our pleasure, enjoy it!']]],
       ['lin.reads', [[100 * HOUR, 'in', 'Could you send me the link to the planter?'], [98 * HOUR, 'out', 'Here you go: https://studionorth.example/planter']]],
     ];
     for (const [u, msgs] of convDefs) {
       const other = { id: igsid(u), username: u };
       const conv = reg('conversation', { id: `aWdfZAG06${b64(`conv:${seed}:${u}`)}`, participants: [other, own], messages: [] });
-      msgs.forEach(([ago, dir, text, attach], i) => {
+      msgs.forEach(([ago, dir, text, attach, storyKind], i) => {
+        // No rng() here: drawing more numbers would change every random value seeded after this.
+        const story = storyKind === 'reply'
+          ? { kind: 'reply', id: state.stories[0] ? state.stories[0].id : `1800${h32(`story:${seed}`)}`, file: 'story01.jpg' }
+          : storyKind === 'mention' ? { kind: 'mention', id: `1801${h32(`story:${seed}:${u}`)}`, file: 'story02.jpg' } : null;
         const msg = reg('message', {
           id: `aWdfZAG1faXRlbToxOklHTWVzc2FnZAWQ${b64(`${u}:${i}:${seed}`)}`,
           created_time: t0 - ago,
@@ -498,11 +504,19 @@ export function createMockGraph({
           to: dir === 'in' ? [own] : [other],
           message: text,
           attachments: attach ? [{ id: `att_${i}`, mime_type: 'image/jpeg', name: 'photo.jpg', image_data: { width: 1080, height: 1350, fileName: 'f03.jpg' } }] : [],
+          story,
         });
         conv.messages.unshift(msg);
       });
       state.conversations.push(conv);
     }
+
+    // collaboration invites: other accounts asking this one to co-author their post
+    state.collabInvites = [
+      { media_id: `1790${h32(`collab:${seed}:1`)}`, owner: 'atelier.kin', caption: 'Our joint mug collection is live. Four glazes, two studios.', file: 'f05.jpg', status: 'pending' },
+      { media_id: `1790${h32(`collab:${seed}:2`)}`, owner: 'lumen.ceramics', caption: 'Glaze test day with friends from the studio down the road.', file: 'f10.jpg', status: 'pending' },
+    ];
+    state.collabResponses = []; // {mediaId, accept, at} for every answer received
   }
 
   const postedDays = new Map();
@@ -657,25 +671,37 @@ export function createMockGraph({
     };
   }
 
-  function messageNode(m) {
-    return {
+  // Story replies / mentions (m.story = {kind: 'reply'|'mention', id, file}). state.storyShape picks how
+  // they are reported: 'story' (Message node field story.reply_to / story.mention {link, id}, as Meta's
+  // Message reference documents), 'reply_to' (webhook-style reply_to.story {url, id} and a
+  // 'story_mention' attachment) or 'none' (the node has no story/reply_to fields: asking fails with #100).
+  function messageNode(m, ctx) {
+    const shape = state.storyShape || 'story';
+    const s = m.story;
+    const link = s && ctx ? fixtures(ctx, s.file) : null;
+    const atts = m.attachments.map((a) => ({ ...a, image_data: a.image_data ? { ...a.image_data } : undefined }));
+    if (s && s.kind === 'mention' && shape === 'reply_to') atts.push({ type: 'story_mention', payload: { url: link } });
+    const node = {
       id: m.id,
       created_time: graphTime(m.created_time),
       from: m.from,
       to: { data: m.to },
       message: m.message,
-      attachments: m.attachments.length ? { data: m.attachments.map((a) => ({ ...a, image_data: a.image_data ? { ...a.image_data } : undefined })) } : undefined,
+      attachments: atts.length ? { data: atts } : undefined,
       is_unsupported: false,
-      reply_to: undefined,
     };
+    if (shape === 'none') return node;
+    node.story = s && shape === 'story' ? { [s.kind === 'reply' ? 'reply_to' : 'mention']: { link, id: s.id } } : undefined;
+    node.reply_to = s && s.kind === 'reply' && shape === 'reply_to' ? { story: { url: link, id: s.id } } : undefined;
+    return node;
   }
 
-  function conversationNode(c) {
+  function conversationNode(c, ctx) {
     return {
       id: c.id,
       updated_time: graphTime(c.messages[0] ? c.messages[0].created_time : t0),
       participants: { data: c.participants },
-      messages: (mods, sub) => ({ data: c.messages.slice(0, Math.min(20, Number(mods.limit) || 20)).map((m) => project(messageNode(m), sub || parseFields('id,created_time'), 'Message')) }),
+      messages: (mods, sub) => ({ data: c.messages.slice(0, Math.min(20, Number(mods.limit) || 20)).map((m) => project(messageNode(m, ctx), sub || parseFields('id,created_time'), 'Message')) }),
       message_count: c.messages.length,
     };
   }
@@ -1409,7 +1435,27 @@ export function createMockGraph({
         let list = [...state.conversations].sort((a, b) => (b.messages[0]?.created_time || 0) - (a.messages[0]?.created_time || 0));
         if (p.user_id) list = list.filter((c) => c.participants.some((pp) => pp.id === p.user_id));
         const spec = parseFields(p.fields || 'id,updated_time');
-        return paged(list, p, ctx, (c) => project(conversationNode(c), spec, 'Conversation'));
+        return paged(list, p, ctx, (c) => project(conversationNode(c, ctx), spec, 'Conversation'));
+      }
+      if (edge === 'collaboration_invites') {
+        // state.collabMode 'unsupported' imitates a connection whose host has no such edge.
+        if (t === 'page' || state.collabMode === 'unsupported') throw new GraphFail(100, `(#100) Tried accessing nonexisting field (collaboration_invites) on node type (${t === 'page' ? 'Page' : 'User'})`);
+        if (method === 'GET') {
+          const spec = parseFields(p.fields || 'media_id,media_owner_username,caption,media_url');
+          const pending = state.collabInvites.filter((x) => x.status === 'pending');
+          return paged(pending, p, ctx, (x) => project({ media_id: x.media_id, media_owner_username: x.owner, caption: x.caption, media_url: fixtures(ctx, x.file) }, spec, 'IGCollaborationInvite'));
+        }
+        if (method === 'POST') {
+          if (!p.media_id) throw new GraphFail(100, '(#100) The parameter media_id is required');
+          if (p.accept !== 'true' && p.accept !== 'false') throw new GraphFail(100, '(#100) The parameter accept must be true or false');
+          const inv = state.collabInvites.find((x) => x.media_id === String(p.media_id));
+          if (!inv || inv.status !== 'pending') {
+            throw new GraphFail(100, `(#100) Unsupported post request. Object with ID '${p.media_id}' does not exist, cannot be loaded due to missing permissions, or does not support this operation.`, { subcode: 33 });
+          }
+          inv.status = p.accept === 'true' ? 'accepted' : 'declined';
+          state.collabResponses.push({ mediaId: inv.media_id, accept: p.accept === 'true', at: new Date(nowMs()).toISOString() });
+          return { success: true };
+        }
       }
       if (t === 'page') throw new GraphFail(100, `(#100) Tried accessing nonexisting field (${edge}) on node type (Page)`);
       if (edge === 'media' && method === 'POST') return createContainer(p);
@@ -1568,11 +1614,11 @@ export function createMockGraph({
     if (t === 'conversation') {
       if (edge === 'messages') {
         const spec = parseFields(p.fields || 'id,created_time');
-        return paged(target.obj.messages.slice(0, 20), p, ctx, (m) => project(messageNode(m), spec, 'Message'));
+        return paged(target.obj.messages.slice(0, 20), p, ctx, (m) => project(messageNode(m, ctx), spec, 'Message'));
       }
-      return project(conversationNode(target.obj), parseFields(p.fields || 'id,updated_time'), 'Conversation');
+      return project(conversationNode(target.obj, ctx), parseFields(p.fields || 'id,updated_time'), 'Conversation');
     }
-    if (t === 'message') return project(messageNode(target.obj), parseFields(p.fields || 'id,created_time'), 'Message');
+    if (t === 'message') return project(messageNode(target.obj, ctx), parseFields(p.fields || 'id,created_time'), 'Message');
 
     throw new GraphFail(100, '(#100) Unsupported request');
   }

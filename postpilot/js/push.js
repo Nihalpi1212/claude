@@ -1,5 +1,6 @@
-// Push notifications: register the service worker, subscribe this device, store the subscription
-// (encrypted) in settings.notifications so the worker can notify the owner.
+// Service worker and push notifications: register sw.js on app start (push notifications and the
+// Android share target), subscribe this device, store the subscription (encrypted) in
+// settings.notifications so the worker can notify the owner, and read what was shared into Postpilot.
 
 import { generateVapidKeys, fromB64url } from '../core/webpush.js';
 import { mutate, readDoc } from './data.js';
@@ -11,10 +12,17 @@ export const NOTIFY_EVENTS = [
   { id: 'dm', label: 'New direct messages' },
   { id: 'comment', label: 'New comments' },
   { id: 'account', label: 'Instagram connection problems' },
+  { id: 'reminder', label: 'Time to post a reminder post by hand' },
+  { id: 'report', label: 'Monthly report is ready' },
+  { id: 'collab', label: 'New collaboration invites' },
 ];
 
 export function defaultNotifications() {
-  return { vapid: null, subscriptions: [], events: { published: true, failed: true, approval: true, dm: true, comment: false, account: true } };
+  return {
+    vapid: null,
+    subscriptions: [],
+    events: { published: true, failed: true, approval: true, dm: true, comment: false, account: true, reminder: true, report: true, collab: true },
+  };
 }
 
 export function pushSupported() {
@@ -30,6 +38,51 @@ export function needsHomeScreenInstall() {
 
 async function registration() {
   return navigator.serviceWorker.register(new URL('../sw.js', import.meta.url), { scope: new URL('../', import.meta.url).pathname });
+}
+
+/**
+ * Register the service worker on app start, so notifications and sharing into Postpilot work without
+ * turning on push first. Never throws; resolves with the registration or null.
+ */
+export async function registerServiceWorker() {
+  if (!('serviceWorker' in navigator)) return null;
+  try {
+    return await registration();
+  } catch {
+    return null; // e.g. a private window that blocks service workers
+  }
+}
+
+// ---- Shared into Postpilot (manifest share_target -> sw.js) ----
+// sw.js keeps only the latest share in this cache: __shared__/meta (JSON) and __shared__/file-<i>.
+
+const SHARE_CACHE = 'postpilot-share';
+const shareKey = (name) => new URL(`../__shared__/${name}`, import.meta.url).href;
+
+/**
+ * What another app shared into Postpilot, or null: { files: File[], title, text, url, at }.
+ * Files that can no longer be read are left out.
+ */
+export async function readShared() {
+  if (!('caches' in globalThis)) return null;
+  const cache = await caches.open(SHARE_CACHE);
+  const metaRes = await cache.match(shareKey('meta'));
+  if (!metaRes) return null;
+  const meta = await metaRes.json().catch(() => null);
+  if (!meta) return null;
+  const files = [];
+  for (const f of meta.files || []) {
+    const res = await cache.match(f.key);
+    if (!res) continue;
+    const blob = await res.blob();
+    files.push(new File([blob], f.name || 'shared', { type: f.type || blob.type || '' }));
+  }
+  return { files, title: meta.title || '', text: meta.text || '', url: meta.url || '', at: meta.at || null };
+}
+
+/** Forget the shared files (after they were uploaded or dismissed). */
+export async function clearShared() {
+  if ('caches' in globalThis) await caches.delete(SHARE_CACHE);
 }
 
 /** Ask permission, subscribe this device and save it. Returns the saved subscription. */

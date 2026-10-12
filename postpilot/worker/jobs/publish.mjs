@@ -15,6 +15,14 @@
 //   copies that a post still being processed needs.
 // - Once media_publish succeeded, a failed GitHub write never reschedules or fails the post: it stays
 //   'publishing' with its containers and the next run records it (no second publish).
+// - Reminder posts (publishMode 'reminder', for what the API cannot post: library music on accounts
+//   without the Audio API, link stickers, polls, product tags, filters) make no Instagram calls: when
+//   due they become 'reminded' and the owner gets a phone notification that opens #/post-now/<id>.
+//   They do not use the publishing quota and still go out while Instagram is disconnected (run.mjs
+//   runs this job without a connection; only the Instagram part is skipped then).
+// - Media that the worker still has to download from a link (asset.importUrl, CSV and RSS imports):
+//   the post waits (noted once in its history); it fails when the download failed (importError) or
+//   is still pending 6 hours after the post was due.
 
 import { duePosts } from '../../core/schedule.js';
 import { classifyError, publishPost } from '../../core/publish.js';
@@ -28,6 +36,7 @@ const MAX_POSTS_PER_RUN = 10;
 const PENDING_GIVE_UP_MS = 3 * 36e5; // stop waiting for Instagram to process a video after 3 hours
 const RUN_BUDGET_MS = 14 * 60e3; // keep well inside the 20 minute workflow timeout
 const WAIT_SLICE_MS = 30_000; // while waiting for an upcoming post, look for new due posts this often
+const IMPORT_GIVE_UP_MS = 6 * 36e5; // a file still downloading 6 hours after the post was due fails the post
 
 const TYPE_NAMES = { feed: 'post', carousel: 'carousel', reel: 'reel', story: 'story' };
 
@@ -91,13 +100,13 @@ async function claim(ctx, postId) {
         if (!post.publishStartedAt) post.publishStartedAt = claimed.publishStartedAt = nowIso;
         tx.write('posts', doc);
         return;
-      } else if (post.status === 'scheduled' && !post.needsApproval && Date.parse(post.scheduledAt) <= ctx.nowMs() + 1000) {
+      } else if (post.status === 'scheduled' && !post.needsApproval && post.publishMode !== 'reminder' && Date.parse(post.scheduledAt) <= ctx.nowMs() + 1000) {
         post.status = 'publishing';
         post.publishStartedAt = nowIso;
         post.attempts = (post.attempts || 0) + 1;
         pushHistory(post, nowIso, 'publishing', post.attempts > 1 ? `Attempt ${post.attempts}.` : undefined);
       } else {
-        return; // changed in the app meanwhile (canceled, rescheduled, published)
+        return; // changed in the app meanwhile (canceled, rescheduled, published, switched to a reminder)
       }
       claimed = structuredClone(post);
       claimed.countedAttempt = true;
@@ -357,6 +366,133 @@ export async function publishOne(ctx, postId) {
   }
 }
 
+/**
+ * Library files of a post that the worker still has to download from a link (asset.importUrl).
+ * Returns {pending: Asset[], failed: Asset[]} (failed = the download failed: importError).
+ */
+export function importState(post, assetsById) {
+  const ids = [...new Set([...(post.media || []).map((m) => m && m.assetId), post.coverAssetId].filter(Boolean))];
+  const pending = [];
+  const failed = [];
+  for (const id of ids) {
+    const a = assetsById.get(id);
+    if (!a || !a.importUrl) continue;
+    (a.importError ? failed : pending).push(a);
+  }
+  return { pending, failed };
+}
+
+const fileName = (a) => `"${a.name || 'a file'}"`;
+
+/**
+ * Mark due reminder posts 'reminded' and queue one phone notification each. No Instagram calls, so
+ * reminders never use the publishing quota. Returns how many were sent.
+ */
+async function sendReminders(ctx, ids) {
+  let sent = [];
+  await ctx.store.transact(
+    async (tx) => {
+      sent = [];
+      const doc = await tx.read('posts');
+      const nowIso = ctx.nowIso();
+      for (const id of ids) {
+        const p = doc.posts.find((x) => x.id === id);
+        // Re-check: the owner may have changed or rescheduled it in the app meanwhile.
+        if (!p || p.status !== 'scheduled' || p.needsApproval || p.publishMode !== 'reminder' || !(Date.parse(p.scheduledAt) <= ctx.nowMs() + 1000)) continue;
+        p.status = 'reminded';
+        p.reminderSentAt = nowIso;
+        p.lastError = null;
+        pushHistory(p, nowIso, 'reminder sent');
+        sent.push({ id: p.id, type: p.type, caption: p.caption || '' });
+      }
+      if (sent.length) tx.write('posts', doc);
+    },
+    { message: 'publish: reminders' },
+  );
+  for (const p of sent) {
+    ctx.notify('reminder', { postId: p.id, type: p.type, caption: p.caption });
+    ctx.log('publish', 'info', `Sent a reminder to post a ${TYPE_NAMES[p.type] || 'post'} by hand${p.caption ? ` ("${p.caption.slice(0, 60)}")` : ''}.`, { postId: p.id });
+  }
+  return sent.length;
+}
+
+/** Fail a due post whose media could not be downloaded from its link. Returns true when it failed now. */
+async function failDownload(ctx, postId, message, code) {
+  let failed = false;
+  await ctx.store.transact(
+    async (tx) => {
+      failed = false;
+      const doc = await tx.read('posts');
+      const p = doc.posts.find((x) => x.id === postId);
+      if (!p || p.status !== 'scheduled') return;
+      const nowIso = ctx.nowIso();
+      p.status = 'failed';
+      p.lastError = { message, code, at: nowIso, permanent: true };
+      pushHistory(p, nowIso, 'failed', message);
+      tx.write('posts', doc);
+      failed = true;
+    },
+    { message: 'publish: media download failed' },
+  );
+  if (failed) {
+    ctx.log('publish', 'error', `A post failed: ${message}`, { postId, code });
+    ctx.notify('failed', { message, postId });
+  }
+  return failed;
+}
+
+/** Note on the post (once, until something else happens to it) that it waits for a download. */
+async function noteWaiting(ctx, postId, assets) {
+  const one = assets.length === 1;
+  const what = `${assets.map(fileName).join(', ')} from ${one ? 'its link' : 'their links'}`;
+  let noted = false;
+  await ctx.store.transact(
+    async (tx) => {
+      noted = false;
+      const doc = await tx.read('posts');
+      const p = doc.posts.find((x) => x.id === postId);
+      const last = p && (p.history || [])[p.history.length - 1];
+      if (!p || p.status !== 'scheduled' || (last && last.event === 'waiting_download')) return;
+      pushHistory(p, ctx.nowIso(), 'waiting_download', `Waiting for the worker to download ${what}.`);
+      tx.write('posts', doc);
+      noted = true;
+    },
+    { message: 'publish: waiting for a download' },
+  );
+  if (noted) ctx.log('publish', 'info', `A due post waits until the worker has downloaded ${what}.`, { postId });
+}
+
+/**
+ * Due posts whose media is not ready: still downloading (wait) or failed to download (fail the post).
+ * Returns the posts that can go ahead; `skip` collects the ids handled here.
+ */
+async function checkDownloads(ctx, due, skip, result) {
+  const needs = due.filter((p) => (p.media || []).some((m) => m && m.assetId) || p.coverAssetId);
+  if (!needs.length) return due;
+  const library = await ctx.store.read('library');
+  const assetsById = new Map((library.assets || []).map((a) => [a.id, a]));
+  const ready = [];
+  for (const p of due) {
+    const { pending, failed } = importState(p, assetsById);
+    if (!pending.length && !failed.length) {
+      ready.push(p);
+      continue;
+    }
+    skip.add(p.id);
+    if (failed.length) {
+      const a = failed[0];
+      const message = `Postpilot could not download ${fileName(a)} from its link (${String(a.importError).slice(0, 200)}). In the Library, choose Try again or replace the file in this post, then schedule it again.`;
+      if (await failDownload(ctx, p.id, message, 'import_failed')) result.failed++;
+    } else if (ctx.nowMs() - Date.parse(p.scheduledAt) > IMPORT_GIVE_UP_MS) {
+      const message = `${fileName(pending[0])} was still downloading from its link 6 hours after this post was due. Check the link in the Library or replace the file, then schedule the post again.`;
+      if (await failDownload(ctx, p.id, message, 'import_timeout')) result.failed++;
+    } else {
+      await noteWaiting(ctx, p.id, pending);
+    }
+  }
+  return ready;
+}
+
 /** Rewrite the throwaway branch to hold only copies that posts still being processed need. */
 async function sweepExposed(ctx) {
   try {
@@ -372,17 +508,32 @@ async function sweepExposed(ctx) {
 
 export default async function publish(ctx) {
   const result = { published: 0, failed: 0, pending: 0, retried: 0 };
-  const handled = new Set();
+  let reminded = 0;
+  const handled = new Set(); // posts this run tried to publish on Instagram
+  const skip = new Set(); // due posts handled without Instagram: reminders, waiting or failed downloads
+  // Without an Instagram connection (run.mjs still runs this job) only reminders go out; posts that
+  // publish automatically stay scheduled until Instagram is connected again.
+  const igOn = !!ctx.ig;
   let saidWaiting = false;
   let outOfTime = false;
   const waitSliceMs = Number(ctx.env.POSTPILOT_WAIT_SLICE_MS) || WAIT_SLICE_MS;
+  // `reminded` is only added when non-zero so the usual console line stays the same.
+  const done = () => (reminded ? { ...result, reminded } : result);
+  const inScope = (p) => igOn || p.publishMode === 'reminder';
   try {
     for (let loop = 0; loop < 100; loop++) {
       if (loop > 0) await ctx.store.refresh(); // pick up edits made in the app while we waited
       const postsDoc = await ctx.store.read('posts');
       const nowMs = ctx.nowMs();
-      const resumable = postsDoc.posts.filter((p) => p.status === 'publishing' && !handled.has(p.id));
-      const due = duePosts(postsDoc.posts, nowMs, 0).filter((p) => !handled.has(p.id));
+      const dueNow = duePosts(postsDoc.posts, nowMs, 0).filter((p) => !handled.has(p.id) && !skip.has(p.id) && inScope(p));
+      const ready = await checkDownloads(ctx, dueNow, skip, result);
+      const reminders = ready.filter((p) => p.publishMode === 'reminder');
+      if (reminders.length) {
+        for (const p of reminders) skip.add(p.id);
+        reminded += await sendReminders(ctx, reminders.map((p) => p.id));
+      }
+      const resumable = igOn ? postsDoc.posts.filter((p) => p.status === 'publishing' && !handled.has(p.id)) : [];
+      const due = ready.filter((p) => p.publishMode !== 'reminder');
       const batch = [...resumable, ...due];
       if (batch.length) {
         for (const post of batch) {
@@ -401,7 +552,7 @@ export default async function publish(ctx) {
             if (!isIgAuth(err)) throw err;
             // The login stopped working (recorded by publishOne); keep this run's counts.
             result.retried++;
-            return result;
+            return done();
           }
           if (outcome in result) result[outcome]++;
         }
@@ -412,7 +563,7 @@ export default async function publish(ctx) {
       // post the owner publishes now (while this run waits) is not stuck behind the wait.
       const remaining = ctx.deadlineMs - nowMs;
       if (remaining <= 0) break;
-      const upcoming = duePosts(postsDoc.posts, nowMs, remaining).filter((p) => !handled.has(p.id));
+      const upcoming = duePosts(postsDoc.posts, nowMs, remaining).filter((p) => !handled.has(p.id) && !skip.has(p.id) && inScope(p));
       if (!upcoming.length) break;
       const waitMs = Math.max(0, Date.parse(upcoming[0].scheduledAt) - nowMs) + 500;
       if (!saidWaiting) {
@@ -421,8 +572,12 @@ export default async function publish(ctx) {
       }
       await ctx.sleep(Math.min(waitMs, waitSliceMs));
     }
-    return result;
+    if (!igOn && !reminded && !result.failed) {
+      return { skipped: ctx.settings.ig?.status?.state === 'expired' ? 'token_expired' : 'not_connected' };
+    }
+    if (!igOn) return { ...(reminded ? { reminded } : {}), ...(result.failed ? { failed: result.failed } : {}) };
+    return done();
   } finally {
-    await sweepExposed(ctx);
+    if (igOn) await sweepExposed(ctx);
   }
 }

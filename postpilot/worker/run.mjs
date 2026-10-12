@@ -29,7 +29,7 @@ export const NOT_CONFIGURED_MESSAGE = 'Postpilot worker is not configured yet (P
 export const JOBS = [
   ['token', token, true],
   ['outbox', outbox, false],
-  ['publish', publish, true],
+  ['publish', publish, false], // runs without Instagram too: reminder posts need no connection (the job skips the rest)
   ['feeds', feeds, false],
   ['evergreen', evergreen, false],
   ['autopilot', autopilot, false],

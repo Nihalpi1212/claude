@@ -5,6 +5,7 @@ import { relative } from '../core/time.js';
 import { html, createContext, useCallback, useContext, useEffect, useErrorBoundary, useMemo, useRef, useState } from '../vendor/preact.js';
 import { APP_NAME, DATA_BRANCH, ENDPOINTS, WORKER_WORKFLOW } from './config.js';
 import { initData, readDoc, refreshNow, stopData, useDoc } from './data.js';
+import { registerServiceWorker } from './push.js';
 import { navigate, useRoute } from './router.js';
 import { forget } from './session.js';
 import { Icon } from './ui/icons.js';
@@ -327,6 +328,8 @@ export function App({ session }) {
   }, [session]);
 
   useEffect(() => () => stopData(), []);
+  // Notifications and sharing into Postpilot (Android share sheet) need the service worker.
+  useEffect(() => void registerServiceWorker(), []);
 
   const { data: settings, error: settingsError, reload: reloadSettings } = useDoc('settings');
   const tz = (settings && settings.timezone) || 'UTC';

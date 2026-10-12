@@ -1,10 +1,17 @@
-// Automations: poll recent comments and DMs, apply keyword rules, welcome DMs and blocked words.
+// Automations: poll comments and DMs, apply keyword rules, welcome DMs and blocked words.
 //
 // Polling design (Instagram has no "since" filter for comments):
-// - Recent media (last 14 days, at most 15). A media item's comments are fetched only when its
-//   comments_count changed since the last run (cursors.mediaComments[mediaId] = count).
+// - Watched posts: the newest limits.watchPosts posts (default 50, 1-200) that are at most
+//   limits.watchDays old (default 90, 1-365), listed with comments_count in the fields (one call per
+//   50 posts), plus every post an enabled rule is scoped to (trigger.mediaIds), whatever its age.
+//   Chosen posts that are not in the listing are read one by one (at most PINNED_MAX per run, in
+//   turns); a post Instagram cannot find (deleted) is skipped, logged once and looked up again a day
+//   later. A post's comments are fetched only when its comments_count changed since the last run
+//   (cursors.mediaComments[mediaId] = count), so most posts cost nothing beyond the listing.
 // - DM threads whose updated_time is newer than cursors.dmUpdatedTime (or whose cached preview is
-//   stale) have their latest messages read.
+//   stale) have their latest messages read. A message is a 'story_reply' when it answers one of the
+//   account's stories, a 'story_mention' when Instagram reports that the sender mentioned the account
+//   in their story (core/ig.js normMessage), otherwise a 'dm'; rules pick by trigger.source.
 // - Rules only act on comments/messages created after automations were switched on
 //   (cursors.startedAt), so turning automations on never answers old conversations.
 // - Every handled comment/message id goes into processed.{comments,messages}; rules marked
@@ -26,8 +33,12 @@ import { evaluate, recordFired } from '../../core/rules.js';
 import { describeError } from '../context.mjs';
 import { clip, DAY_MS, isRetryable } from './shared.mjs';
 
-const MEDIA_WINDOW_DAYS = 14;
-const MEDIA_MAX = 15;
+export const WATCH_DAYS_DEFAULT = 90;
+export const WATCH_POSTS_DEFAULT = 50;
+const MEDIA_PAGE = 50; // posts per listing call
+const PINNED_MAX = 30; // chosen posts outside the listing read one by one per run (the rest wait their turn)
+const PINNED_FIELDS = 'id,caption,media_type,media_url,thumbnail_url,permalink,timestamp,comments_count';
+const GONE_RECHECK_MS = DAY_MS; // a chosen post Instagram could not find is looked up again after this
 const COMMENTS_PER_MEDIA = 100;
 const PRIVATE_REPLY_WINDOW_MS = 7 * DAY_MS - 30 * 60e3; // keep a margin for slow runs
 const DM_WINDOW_MS = 24 * 36e5 - 10 * 60e3;
@@ -53,12 +64,68 @@ const UNSURE = 'unsure';
 const AI_RETRY = Symbol('ai_retry');
 const AI_TRANSIENT = new Set(['rate_limit', 'overloaded', 'server', 'network']);
 
+// What the AI sees for a story mention, which usually has no text.
+const STORY_MENTION_TEXT = 'They mentioned your account in their Instagram story.';
+
 const isDmAction = (a) => a.type === 'private_reply' || a.type === 'send_dm' || (a.type === 'ai_reply' && a.channel === 'dm');
 const isCommentReply = (a) => a.type === 'reply_comment' || (a.type === 'ai_reply' && a.channel !== 'dm');
 
 function ms(iso) {
   const t = Date.parse(iso || '');
   return Number.isFinite(t) ? t : NaN;
+}
+
+function clampInt(v, min, max, fallback) {
+  const n = Math.round(Number(v));
+  return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fallback;
+}
+
+/** Comment watch settings ({days, posts}) with defaults for documents written before they existed. */
+export function watchLimits(limits) {
+  const l = limits || {};
+  return {
+    days: clampInt(l.watchDays ?? WATCH_DAYS_DEFAULT, 1, 365, WATCH_DAYS_DEFAULT),
+    posts: clampInt(l.watchPosts ?? WATCH_POSTS_DEFAULT, 1, 200, WATCH_POSTS_DEFAULT),
+  };
+}
+
+/** Ids of the posts enabled comment rules are scoped to (watched whatever their age). */
+export function pinnedMediaIds(rules) {
+  const ids = new Set();
+  for (const r of rules || []) {
+    if (!r || r.enabled === false || ((r.trigger && r.trigger.source) || 'comment') !== 'comment') continue;
+    for (const id of (r.trigger && r.trigger.mediaIds) || []) if (id != null && id !== '') ids.add(String(id));
+  }
+  return ids;
+}
+
+/** Event source of a DM (see core/rules.js). */
+export function messageSource(m) {
+  if (m && m.storyMention) return 'story_mention';
+  if (m && (m.storyReply || (m.replyTo && m.replyTo.story))) return 'story_reply';
+  return 'dm';
+}
+
+function isoOf(t) {
+  if (!t) return null;
+  const d = new Date(String(t).replace(/([+-]\d\d)(\d\d)$/, '$1:$2'));
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+/** A post read with ig.getMedia (raw Graph fields) in the shape listMedia returns. */
+function mediaFromRaw(raw) {
+  const type = raw.media_type || null;
+  return {
+    id: String(raw.id),
+    caption: raw.caption || '',
+    mediaType: type,
+    productType: raw.media_product_type || (type === 'VIDEO' ? 'REELS' : type ? 'FEED' : null),
+    mediaUrl: raw.media_url || null,
+    thumbnailUrl: raw.thumbnail_url || null,
+    permalink: raw.permalink || null,
+    timestamp: isoOf(raw.timestamp),
+    commentsCount: raw.comments_count ?? null,
+  };
 }
 
 function latestActivity(c) {
@@ -81,6 +148,8 @@ export default async function automations(ctx) {
   const isOwn = (fromId, username) => (fromId && String(fromId) === own.id) || (!!username && own.username && String(username).toLowerCase() === own.username);
 
   const limits = { maxActionsPerRun: 25, maxDmsPerHour: 40, ...(doc.limits || {}) };
+  const watch = watchLimits(doc.limits);
+  const pinned = pinnedMediaIds(doc.rules);
   const cursors = doc.cursors || {};
   const startedAt = enabled ? cursors.startedAt || nowIso : null;
   const baselineMs = startedAt ? ms(startedAt) - BASELINE_SLACK_MS : Infinity;
@@ -110,7 +179,7 @@ export default async function automations(ctx) {
   const newDms = [];
 
   function newDelta() {
-    return { comments: {}, messages: {}, conversations: {}, users: [], mediaComments: {}, dmUpdatedTime: null, seen: {}, stats: {}, rules: {}, activity: [] };
+    return { comments: {}, messages: {}, conversations: {}, users: [], mediaComments: {}, goneMedia: {}, pinnedNext: null, dmUpdatedTime: null, seen: {}, stats: {}, rules: {}, activity: [] };
   }
 
   function markFired(ruleId, userId) {
@@ -166,7 +235,11 @@ export default async function automations(ctx) {
     if (iso && (!delta.seen[key] || iso > delta.seen[key])) delta.seen[key] = iso;
   }
 
-  async function flush(final = false) {
+  /**
+   * Save progress. `keepMedia` (final flush after a complete listing): the post ids whose comment
+   * counts are still worth remembering; counts of other posts are dropped so the cursor stays small.
+   */
+  async function flush(final = false, keepMedia = null) {
     // `delta` is reset only after the commit: when it fails, the batch is kept for the next flush.
     const d = delta;
     const statusNow = status;
@@ -189,6 +262,28 @@ export default async function automations(ctx) {
         a.cursors ||= {};
         if (Object.keys(d.mediaComments).length) {
           a.cursors.mediaComments = { ...(a.cursors.mediaComments || {}), ...d.mediaComments };
+          changed = true;
+        }
+        if (final && keepMedia) {
+          const counts = a.cursors.mediaComments || {};
+          const kept = Object.fromEntries(Object.entries(counts).filter(([id]) => keepMedia.has(id)));
+          if (Object.keys(kept).length !== Object.keys(counts).length) {
+            a.cursors.mediaComments = kept;
+            changed = true;
+          }
+        }
+        if (Object.keys(d.goneMedia).length || (final && a.cursors.goneMedia)) {
+          // Chosen posts Instagram could not find: {id: ISO of the last lookup}; forget posts no rule uses.
+          const stillPinned = pinnedMediaIds(a.rules);
+          const gone = Object.fromEntries(Object.entries({ ...(a.cursors.goneMedia || {}), ...d.goneMedia }).filter(([id, at]) => at && stillPinned.has(id)));
+          if (JSON.stringify(gone) !== JSON.stringify(a.cursors.goneMedia || {})) {
+            if (Object.keys(gone).length) a.cursors.goneMedia = gone;
+            else delete a.cursors.goneMedia;
+            changed = true;
+          }
+        }
+        if (d.pinnedNext != null && a.cursors.pinnedNext !== d.pinnedNext) {
+          a.cursors.pinnedNext = d.pinnedNext;
           changed = true;
         }
         if (d.dmUpdatedTime && (!a.cursors.dmUpdatedTime || d.dmUpdatedTime > a.cursors.dmUpdatedTime)) {
@@ -269,7 +364,8 @@ export default async function automations(ctx) {
           if (!text) return AI_RETRY;
         } else if (ctx.ai) {
           try {
-            const reply = await ctx.ai.autoReply({ message: ev.text || '', guidance: action.guidance || '', kind: channel === 'dm' ? 'dm' : 'comment', postCaption: ctxInfo.caption || '' });
+            const message = ev.text || (ev.source === 'story_mention' ? STORY_MENTION_TEXT : '');
+            const reply = await ctx.ai.autoReply({ message, guidance: action.guidance || '', kind: channel === 'dm' ? 'dm' : 'comment', postCaption: ctxInfo.caption || '' });
             if (reply) {
               text = reply;
               result.aiReplies++;
@@ -428,14 +524,41 @@ export default async function automations(ctx) {
   try {
     // ---- comments ----------------------------------------------------------------------------
     try {
-      if (!throttled) media = await ig.listMedia({ limit: MEDIA_MAX, max: MEDIA_MAX });
+      if (!throttled) media = await ig.listMedia({ limit: Math.min(watch.posts, MEDIA_PAGE), max: watch.posts });
     } catch (err) {
       if (err && err.isAuth) throw err;
       noteRateLimit(err);
       mediaOk = false;
       ctx.log('automations', 'warn', `Could not list recent posts: ${describeError(err)}`);
     }
-    recent = media.filter((m) => m && m.id && nowMs - ms(m.timestamp) <= MEDIA_WINDOW_DAYS * DAY_MS);
+    recent = media.filter((m) => m && m.id && (nowMs - ms(m.timestamp) <= watch.days * DAY_MS || pinned.has(String(m.id))));
+    // Posts chosen in rules that the listing did not include (older or beyond watchPosts).
+    const listed = new Set(media.map((m) => m && String(m.id)));
+    const gone = cursors.goneMedia || {};
+    const outside = [...pinned].filter((id) => !listed.has(id) && !(nowMs - ms(gone[id]) < GONE_RECHECK_MS)).sort();
+    if (outside.length && !throttled) {
+      const start = outside.length > PINNED_MAX ? (Number(cursors.pinnedNext) || 0) % outside.length : 0;
+      const batch = outside.length > PINNED_MAX ? [...outside.slice(start), ...outside.slice(0, start)].slice(0, PINNED_MAX) : outside;
+      if (outside.length > PINNED_MAX) delta.pinnedNext = (start + PINNED_MAX) % outside.length;
+      for (const id of batch) {
+        if (throttled) break;
+        try {
+          const m = mediaFromRaw(await ig.getMedia(id, PINNED_FIELDS));
+          if (m.id) recent.push(m);
+          if (gone[id]) delta.goneMedia[id] = null; // found again
+        } catch (err) {
+          if (err && err.isAuth) throw err;
+          if (noteRateLimit(err)) break;
+          if (err && (err.isNotFound || (err.code === 100 && !err.isTransient))) {
+            // Deleted (or no longer readable): skip it without failing the run; say so only once.
+            if (!gone[id]) ctx.log('automations', 'warn', 'A post chosen in a comment rule was not found on Instagram (it may have been deleted), so its comments are not checked.', { mediaId: id });
+            delta.goneMedia[id] = nowIso;
+          } else {
+            ctx.log('automations', 'warn', `Could not read a post chosen in a comment rule: ${describeError(err)}`, { mediaId: id });
+          }
+        }
+      }
+    }
     const counts = cursors.mediaComments || {};
     const ownReplyAfter = (c, t) => (c?.replies || []).some((r) => isOwn(r.fromId, r.username) && (ms(r.timestamp) || 0) > t);
     for (const m of recent) {
@@ -575,7 +698,7 @@ export default async function automations(ctx) {
         if (ms(m.createdTime) >= baselineMs && ms(m.createdTime) >= answeredUntil && !sentInThread) {
           result.messagesChecked++;
           const ev = {
-            source: m.replyTo && m.replyTo.story ? 'story_reply' : 'dm',
+            source: messageSource(m),
             id: m.id,
             text: m.text || '',
             userId: m.fromId || participant?.id || null,
@@ -615,7 +738,8 @@ export default async function automations(ctx) {
     throw err;
   }
 
-  await flush(true);
+  // A complete listing tells which posts are still watched: comment counts of the others are dropped.
+  await flush(true, mediaOk && !throttled ? new Set([...recent.map((m) => String(m.id)), ...pinned]) : null);
 
   const newest = (list, key) => list.slice().sort((a, b) => (ms(b[key]) || 0) - (ms(a[key]) || 0))[0];
   if (newComments.length) {
@@ -624,7 +748,8 @@ export default async function automations(ctx) {
   }
   if (newDms.length) {
     const m = newest(newDms, 'createdTime');
-    ctx.notify('dm', { count: newDms.length, username: m.username, text: m.text || (m.attachments?.length ? 'Sent an attachment.' : '') });
+    const fallback = m.storyMention ? 'Mentioned you in their story.' : m.storyReply ? 'Replied to your story.' : m.attachments?.length ? 'Sent an attachment.' : '';
+    ctx.notify('dm', { count: newDms.length, username: m.username, text: m.text || fallback });
   }
 
   // ---- inbox cache -----------------------------------------------------------------------------
@@ -667,6 +792,8 @@ export default async function automations(ctx) {
                 createdTime: last.createdTime,
                 attachments: (last.attachments || []).length,
                 fromMe: isOwn(last.fromId, last.fromUsername),
+                // 'reply' = it answers one of your stories, 'mention' = their story mentions you
+                story: last.storyMention ? 'mention' : last.storyReply ? 'reply' : null,
               };
             }
             return { id: conv.id, updatedTime: conv.updatedTime, participants: conv.participants || [], lastMessage };
