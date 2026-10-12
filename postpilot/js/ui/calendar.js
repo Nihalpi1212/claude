@@ -1,0 +1,434 @@
+// Planner calendar pieces: post helpers, thumbnails, drag state, Month and Week views.
+// Used by js/views/planner.js (and the post helpers by js/views/queues.js).
+
+import { html, useLayoutEffect, useMemo, useRef, useState } from '../../vendor/preact.js';
+import { addDaysKey, dayKey, format, formatDay, formatTime, pad, weekdayOfKey, zonedParts, zonedToUtc } from '../../core/time.js';
+import { Icon } from './icons.js';
+import { IconButton, cx } from './kit.js';
+import { useAssetUrl } from './media-picker.js';
+
+// ---------------------------------------------------------------------------
+// Post helpers
+
+export const TYPE_LABEL = { feed: 'Post', carousel: 'Carousel', reel: 'Reel', story: 'Story' };
+export const TYPE_ICON = { feed: 'image', carousel: 'carousel', reel: 'reel', story: 'story' };
+export const SOURCE_LABEL = { manual: 'Manual', autopilot: 'Autopilot', evergreen: 'Queue', csv: 'CSV import', recycle: 'Repost' };
+export const WEEKDAYS_MON = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const WEEKDAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+/** The asset that represents a post visually (reel cover when set, else the first media item). */
+export function previewAsset(post, assetsById) {
+  if (!post) return null;
+  if (post.type === 'reel' && post.coverAssetId && assetsById[post.coverAssetId]) return assetsById[post.coverAssetId];
+  const first = (post.media || [])[0];
+  return (first && assetsById[first.assetId]) || null;
+}
+
+/** One-line title for a post: first caption line, else notes, else the type. */
+export function postTitle(post) {
+  const line = String(post.caption || '')
+    .split('\n')
+    .map((s) => s.trim())
+    .find(Boolean);
+  if (line) return line;
+  if (post.notes) return String(post.notes).split('\n')[0];
+  return `${TYPE_LABEL[post.type] || 'Post'} without caption`;
+}
+
+/** Status key for StatusPill ('needs-approval' for drafts waiting for approval). */
+export function statusKey(post) {
+  if (post.needsApproval && post.status === 'draft') return 'needs-approval';
+  return post.status;
+}
+
+/** Status bucket used by the planner filters. */
+export function filterStatus(post) {
+  if (post.needsApproval && post.status === 'draft') return 'approval';
+  if (post.status === 'publishing') return 'scheduled';
+  return post.status;
+}
+
+/** When a post appears on the calendar (publish time for published posts). */
+export function postInstant(post) {
+  return post.status === 'published' ? post.publishedAt || post.scheduledAt : post.scheduledAt;
+}
+
+/** Calendar chip tone class for a post. */
+export function toneClass(post) {
+  if (!post) return 'is-published';
+  if (post.needsApproval && post.status === 'draft') return 'is-attention';
+  return { draft: 'is-draft', published: 'is-published', failed: 'is-failed', publishing: 'is-attention', canceled: 'is-draft' }[post.status] || '';
+}
+
+/** Post type of an Instagram media item from analytics-media. */
+export function igType(m) {
+  if (m.productType === 'REELS') return 'reel';
+  if (m.productType === 'STORY') return 'story';
+  if (m.mediaType === 'CAROUSEL_ALBUM') return 'carousel';
+  return 'feed';
+}
+
+/** Compact clock time: "6:00p" in 12-hour locales, "18:00" otherwise. */
+export function shortTime(iso, tz) {
+  return formatTime(iso, tz).replace(/\s?([AaPp])\.?\s?[Mm]\.?$/, (_, p) => p.toLowerCase());
+}
+
+/** Same wall-clock time on another day, as an ISO string. */
+export function sameTimeOn(iso, day, tz) {
+  const p = zonedParts(new Date(iso), tz);
+  return zonedToUtc(day, `${pad(p.hour)}:${pad(p.minute)}`, tz).toISOString();
+}
+
+/** Minutes after local midnight of an instant. */
+export function localMinutes(iso, tz) {
+  const p = zonedParts(new Date(iso), tz);
+  return p.hour * 60 + p.minute;
+}
+
+/**
+ * Best publish time on a day: the highest-scoring hour of the best-time matrix that is at least
+ * 20 minutes in the future. Returns an ISO string, or null when the day has no future hours left.
+ */
+export function bestTimeOn(day, { matrix, tz, nowMs = Date.now() }) {
+  const wd = weekdayOfKey(day);
+  const row = (matrix && matrix[wd]) || [];
+  const hours = Array.from({ length: 24 }, (_, h) => h)
+    .filter((h) => h >= 6)
+    .sort((a, b) => (row[b] || 0) - (row[a] || 0) || a - b);
+  for (const h of hours) {
+    const iso = zonedToUtc(day, `${pad(h)}:00`, tz).toISOString();
+    if (Date.parse(iso) >= nowMs + 20 * 60_000) return iso;
+  }
+  // Late today: the next quarter hour at least 30 minutes away, if still on the same day.
+  const next = Math.ceil((nowMs + 30 * 60_000) / (15 * 60_000)) * 15 * 60_000;
+  return dayKey(new Date(next), tz) === day ? new Date(next).toISOString() : null;
+}
+
+/** "Today", "Tomorrow", "Yesterday" or "Tue, Oct 13". */
+export function dayLabel(day, today, tz) {
+  if (day === today) return 'Today';
+  if (day === addDaysKey(today, 1)) return 'Tomorrow';
+  if (day === addDaysKey(today, -1)) return 'Yesterday';
+  return formatDay(zonedToUtc(day, '12:00', tz), tz);
+}
+
+// ---------------------------------------------------------------------------
+// Thumbnails
+
+/** Small thumbnail of a library asset (or a direct image URL for Instagram media). */
+export function PostThumb({ asset, src, size = 20, class: cls }) {
+  const url = useAssetUrl(src ? null : asset);
+  const image = src || url;
+  return html`<span class=${cx('pl-thumb', cls)} style=${{ width: `${size}px`, height: `${size}px` }} aria-hidden="true">
+    ${image ? html`<img src=${image} alt="" loading="lazy" decoding="async" draggable="false" referrerpolicy="no-referrer" />` : null}
+  </span>`;
+}
+
+// ---------------------------------------------------------------------------
+// Drag state (HTML5 drag and drop does not expose data during dragover)
+
+let drag = null;
+
+export function startDrag(e, id, extra = {}) {
+  drag = { id, ...extra };
+  try {
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', id);
+  } catch {
+    /* some browsers refuse setData on certain targets */
+  }
+}
+
+export function endDrag() {
+  drag = null;
+}
+
+export function currentDrag() {
+  return drag;
+}
+
+function activate(handler) {
+  return (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      handler(e);
+    }
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Month view
+
+/**
+ * items: [{key, kind: 'post'|'ig', at (ISO), day, minutes, post?, media?, asset?, src?, movable, listColor?}]
+ */
+function Chip({ item, tz, onOpen }) {
+  const type = item.post ? item.post.type : igType(item.media);
+  const title = item.post ? postTitle(item.post) : (item.media.caption || '').split('\n')[0] || 'Published on Instagram';
+  const time = shortTime(item.at, tz);
+  const label = `${time} · ${TYPE_LABEL[type]} · ${title}`;
+  const content = html`
+    <${PostThumb} asset=${item.asset} src=${item.src} size=${18} />
+    <span class="cal-time">${time}</span>
+    ${type !== 'feed' ? html`<span class="pl-chip-type" title=${TYPE_LABEL[type]}><${Icon} name=${TYPE_ICON[type]} size=${12} /></span>` : null}
+    ${item.listColor ? html`<span class="pl-list-dot" style=${{ background: item.listColor }} aria-hidden="true"></span>` : null}
+    <span class="cal-title">${title}</span>`;
+  if (item.kind === 'ig') {
+    return html`<a class="cal-event pl-chip is-published is-ig" href=${item.media.permalink || undefined} target="_blank" rel="noopener noreferrer"
+      title=${`Published on Instagram: ${label}`} aria-label=${`Published on Instagram: ${label}`}>${content}</a>`;
+  }
+  return html`<div role="button" tabindex="0" class=${cx('cal-event pl-chip', toneClass(item.post), item.movable && 'is-movable')}
+    draggable=${item.movable ? 'true' : 'false'} data-post-id=${item.post.id}
+    title=${item.movable ? `${label} (drag to another day to move it)` : label} aria-label=${`${label}, ${statusKey(item.post).replace('-', ' ')}`}
+    onDragStart=${item.movable ? (e) => startDrag(e, item.post.id) : (e) => e.preventDefault()} onDragEnd=${endDrag}
+    onClick=${() => onOpen(item)} onKeyDown=${activate(() => onOpen(item))}>${content}</div>`;
+}
+
+/**
+ * MonthView {days, month (1-12), today, tz, items, selected, phone, onCellClick(day), onSelect(day), onOpen(item), onDropPost(id, day)}
+ */
+export function MonthView({ days, month, today, tz, items, selected, phone, onCellClick, onSelect, onOpen, onDropPost }) {
+  const [dropDay, setDropDay] = useState(null);
+  const byDay = useMemo(() => {
+    const m = new Map();
+    for (const it of items) {
+      if (!m.has(it.day)) m.set(it.day, []);
+      m.get(it.day).push(it);
+    }
+    for (const list of m.values()) list.sort((a, b) => a.minutes - b.minutes || (a.kind === 'ig') - (b.kind === 'ig'));
+    return m;
+  }, [items]);
+  const max = phone ? 2 : 3;
+  return html`<div class="cal pl-month">
+    ${WEEKDAYS_MON.map((d) => html`<div class="cal-head" key=${d}><span aria-hidden=${phone ? 'true' : undefined}>${phone ? d.slice(0, 1) : d}</span>${phone ? html`<span class="sr-only">${d}</span>` : null}</div>`)}
+    ${days.map((day) => {
+      const list = byDay.get(day) || [];
+      const other = Number(day.slice(5, 7)) !== month;
+      const past = day < today;
+      const shown = list.length > max ? list.slice(0, max - 1) : list;
+      const rest = list.length - shown.length;
+      const dateLabel = `${formatDay(zonedToUtc(day, '12:00', tz), tz)}${day === today ? ', today' : ''}: ${list.length ? `${list.length} post${list.length === 1 ? '' : 's'}` : 'nothing planned'}`;
+      return html`<div key=${day} data-day=${day}
+        class=${cx('cal-day pl-day', other && 'is-other', day === today && 'is-today', past && 'is-past', dropDay === day && 'is-drop', selected === day && 'is-selected')}
+        onClick=${(e) => {
+          if (e.target.closest('.cal-event, .pl-more, .cal-date')) return;
+          onCellClick(day);
+        }}
+        onDragOver=${(e) => {
+          if (!currentDrag() || past) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          if (dropDay !== day) setDropDay(day);
+        }}
+        onDragLeave=${(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget)) setDropDay((d) => (d === day ? null : d));
+        }}
+        onDrop=${(e) => {
+          e.preventDefault();
+          const d = currentDrag();
+          endDrag();
+          setDropDay(null);
+          if (d && !past) onDropPost(d.id, day);
+        }}>
+        <button type="button" class="cal-date" aria-label=${dateLabel} aria-pressed=${selected === day ? 'true' : 'false'} onClick=${() => onSelect(day)}>${Number(day.slice(8))}</button>
+        ${shown.map((it) => html`<${Chip} key=${it.key} item=${it} tz=${tz} onOpen=${onOpen} />`)}
+        ${rest > 0 ? html`<button type="button" class="pl-more" onClick=${() => onSelect(day)} aria-label=${`${rest} more on ${dateLabel}`}>+${rest}<span class="hide-phone"> more</span></button>` : null}
+      </div>`;
+    })}
+  </div>`;
+}
+
+// ---------------------------------------------------------------------------
+// Week view
+
+export const WEEK_START_HOUR = 6;
+const END_HOUR = 24;
+const HOUR_PX = 48;
+const SNAP = 15;
+const BLOCK_H = 40;
+
+function layoutDay(list) {
+  const out = [];
+  let cluster = [];
+  let clusterEnd = -1;
+  const flush = () => {
+    const lanes = [];
+    for (const ev of cluster) {
+      let lane = lanes.findIndex((end) => end <= ev.top);
+      if (lane < 0) {
+        lane = lanes.length;
+        lanes.push(0);
+      }
+      lanes[lane] = ev.top + BLOCK_H;
+      ev.lane = lane;
+    }
+    for (const ev of cluster) ev.lanes = lanes.length;
+    out.push(...cluster);
+    cluster = [];
+    clusterEnd = -1;
+  };
+  const height = (END_HOUR - WEEK_START_HOUR) * HOUR_PX;
+  for (const it of [...list].sort((a, b) => a.minutes - b.minutes)) {
+    const raw = ((it.minutes - WEEK_START_HOUR * 60) / 60) * HOUR_PX;
+    const top = Math.min(Math.max(0, raw), height - BLOCK_H);
+    const ev = { ...it, top, early: raw < 0 };
+    if (cluster.length && top >= clusterEnd) flush();
+    cluster.push(ev);
+    clusterEnd = Math.max(clusterEnd, top + BLOCK_H);
+  }
+  flush();
+  return out;
+}
+
+function minutesAt(e, col, offsetY = 0, round = Math.round) {
+  const rect = col.getBoundingClientRect();
+  const y = e.clientY - rect.top - offsetY;
+  const m = WEEK_START_HOUR * 60 + round(((y / HOUR_PX) * 60) / SNAP) * SNAP;
+  return Math.min(Math.max(m, WEEK_START_HOUR * 60), END_HOUR * 60 - SNAP);
+}
+
+function clock(minutes, tz, day) {
+  return shortTime(zonedToUtc(day, `${pad(Math.floor(minutes / 60))}:${pad(minutes % 60)}`, tz).toISOString(), tz);
+}
+
+/**
+ * WeekView {days (7 keys from Monday), today, nowMs, tz, items, matrix,
+ *           onCompose(day, minutes), onComposeDay(day), onOpen(item), onDropPost(id, day, minutes)}
+ */
+export function WeekView({ days, today, nowMs, tz, items, matrix, onCompose, onComposeDay, onOpen, onDropPost }) {
+  const [ghost, setGhost] = useState(null);
+  const scrollRef = useRef(null);
+  const byDay = useMemo(() => {
+    const m = new Map(days.map((d) => [d, []]));
+    for (const it of items) if (m.has(it.day)) m.get(it.day).push(it);
+    for (const [d, list] of m) m.set(d, layoutDay(list));
+    return m;
+  }, [items, days.join()]);
+
+  // Start scrolled to the earliest post of the week (or 08:00).
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const earliest = Math.min(8 * 60, ...items.filter((it) => days.includes(it.day)).map((it) => it.minutes));
+    el.scrollTop = Math.max(0, ((Math.max(earliest, WEEK_START_HOUR * 60) - WEEK_START_HOUR * 60 - 30) / 60) * HOUR_PX);
+  }, [days[0]]);
+
+  const hours = Array.from({ length: END_HOUR - WEEK_START_HOUR }, (_, i) => WEEK_START_HOUR + i);
+  const nowP = zonedParts(new Date(nowMs), tz);
+  const nowMin = nowP.hour * 60 + nowP.minute;
+
+  return html`<div class="pl-week-scroll" ref=${scrollRef} style=${{ '--hour-px': `${HOUR_PX}px` }}>
+    <div class="pl-week">
+      <div class="pl-week-head">
+        <div class="pl-week-corner" aria-hidden="true"></div>
+        ${days.map((day) => {
+          const wd = WEEKDAY_SHORT[weekdayOfKey(day)];
+          return html`<div key=${day} class=${cx('pl-week-dayhead', day === today && 'is-today', day < today && 'is-past')}>
+            <span class="pl-week-wd">${wd}</span>
+            <span class=${cx('pl-week-dn', day === today && 'today-mark')}>${Number(day.slice(8))}</span>
+            ${day >= today ? html`<${IconButton} icon="plus" size="sm" class="pl-week-add" label=${`New post on ${formatDay(zonedToUtc(day, '12:00', tz), tz)}`} onClick=${() => onComposeDay(day)} />` : null}
+          </div>`;
+        })}
+      </div>
+      <div class="pl-week-body" style=${{ height: `${hours.length * HOUR_PX}px` }}>
+        <div class="pl-week-gutter" aria-hidden="true">
+          ${hours.map((h) => html`<span key=${h} class="pl-week-hour" style=${{ top: `${(h - WEEK_START_HOUR) * HOUR_PX}px` }}>${clock(h * 60, tz, days[0]).replace(':00', '')}</span>`)}
+        </div>
+        ${days.map((day) => {
+          const wd = weekdayOfKey(day);
+          const row = (matrix && matrix[wd]) || [];
+          const past = day < today;
+          return html`<div key=${day} class=${cx('pl-week-col', past && 'is-past', day === today && 'is-today')} data-day=${day}
+            onClick=${(e) => {
+              if (e.target.closest('.pl-week-event')) return;
+              onCompose(day, minutesAt(e, e.currentTarget, 0, Math.floor));
+            }}
+            onDragOver=${(e) => {
+              const d = currentDrag();
+              if (!d || past) return;
+              e.preventDefault();
+              e.dataTransfer.dropEffect = 'move';
+              const minutes = minutesAt(e, e.currentTarget, d.offsetY || 0);
+              if (!ghost || ghost.day !== day || ghost.minutes !== minutes) setGhost({ day, minutes });
+            }}
+            onDragLeave=${(e) => {
+              if (!e.currentTarget.contains(e.relatedTarget)) setGhost((g) => (g && g.day === day ? null : g));
+            }}
+            onDrop=${(e) => {
+              e.preventDefault();
+              const d = currentDrag();
+              const minutes = d ? minutesAt(e, e.currentTarget, d.offsetY || 0) : null;
+              endDrag();
+              setGhost(null);
+              if (d && !past) onDropPost(d.id, day, minutes);
+            }}>
+            ${hours.map((h) => {
+              const s = Math.min(1, Math.max(0, ((row[h] || 0) - 0.55) / 0.45));
+              return s > 0.05
+                ? html`<div key=${h} class="pl-best" style=${{ top: `${(h - WEEK_START_HOUR) * HOUR_PX}px`, '--s': s.toFixed(2) }} title="Good time to post"></div>`
+                : null;
+            })}
+            ${day === today && nowMin >= WEEK_START_HOUR * 60
+              ? html`<div class="pl-week-now" style=${{ top: `${((nowMin - WEEK_START_HOUR * 60) / 60) * HOUR_PX}px` }} aria-hidden="true"></div>`
+              : null}
+            ${ghost && ghost.day === day
+              ? html`<div class="pl-week-ghost" style=${{ top: `${((ghost.minutes - WEEK_START_HOUR * 60) / 60) * HOUR_PX}px` }} aria-hidden="true">${clock(ghost.minutes, tz, day)}</div>`
+              : null}
+            ${(byDay.get(day) || []).map((ev) => html`<${WeekEvent} key=${ev.key} ev=${ev} tz=${tz} onOpen=${onOpen} />`)}
+          </div>`;
+        })}
+      </div>
+    </div>
+  </div>`;
+}
+
+function WeekEvent({ ev, tz, onOpen }) {
+  const type = ev.post ? ev.post.type : igType(ev.media);
+  const title = ev.post ? postTitle(ev.post) : (ev.media.caption || '').split('\n')[0] || 'Published on Instagram';
+  const time = shortTime(ev.at, tz);
+  const style = {
+    top: `${ev.top}px`,
+    left: `calc(${ev.lane} * (100% - 4px) / ${ev.lanes} + 2px)`,
+    width: `calc((100% - 4px) / ${ev.lanes} - 2px)`,
+  };
+  const inner = html`
+    <${PostThumb} asset=${ev.asset} src=${ev.src} size=${28} />
+    <span class="pl-week-event-text">
+      <span class="pl-week-event-time"><${Icon} name=${TYPE_ICON[type]} size=${11} />${time}</span>
+      <span class="pl-week-event-title">${title}</span>
+    </span>`;
+  if (ev.kind === 'ig') {
+    return html`<a class="pl-week-event cal-event is-published is-ig" style=${style} href=${ev.media.permalink || undefined} target="_blank" rel="noopener noreferrer"
+      title=${`Published on Instagram: ${time} · ${title}`}>${inner}</a>`;
+  }
+  return html`<div role="button" tabindex="0" class=${cx('pl-week-event cal-event', toneClass(ev.post), ev.movable && 'is-movable')} style=${style}
+    data-post-id=${ev.post.id} draggable=${ev.movable ? 'true' : 'false'}
+    title=${`${time} · ${TYPE_LABEL[type]} · ${title}${ev.movable ? ' (drag to move)' : ''}`}
+    onDragStart=${ev.movable ? (e) => startDrag(e, ev.post.id, { offsetY: e.clientY - e.currentTarget.getBoundingClientRect().top }) : (e) => e.preventDefault()}
+    onDragEnd=${endDrag}
+    onClick=${() => onOpen(ev)} onKeyDown=${activate(() => onOpen(ev))}>${inner}</div>`;
+}
+
+/** Monday-start days of the week that contains `day`. */
+export function weekDays(day) {
+  const wd = (weekdayOfKey(day) + 6) % 7;
+  const start = addDaysKey(day, -wd);
+  return Array.from({ length: 7 }, (_, i) => addDaysKey(start, i));
+}
+
+/** Monday-start cells (5 or 6 weeks) covering the month that contains `day`. */
+export function monthDays(day) {
+  const first = `${day.slice(0, 7)}-01`;
+  const start = weekDays(first)[0];
+  const nextMonth = addDaysKey(first, 32).slice(0, 7);
+  const last = addDaysKey(`${nextMonth}-01`, -1);
+  const end = weekDays(last)[6];
+  const out = [];
+  for (let k = start; k <= end; k = addDaysKey(k, 1)) out.push(k);
+  return out;
+}
+
+/** "October 2026" for a day key. */
+export function monthTitle(day, tz) {
+  return format(zonedToUtc(day, '12:00', tz), tz, { month: 'long', year: 'numeric' });
+}

@@ -1,0 +1,189 @@
+/* Reports: builder + paper-styled preview; print rules hide the app chrome. */
+
+.rp-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 300px) minmax(0, 1fr);
+  gap: var(--sp-5);
+  align-items: start;
+  min-width: 0;
+}
+.rp-builder { position: sticky; top: 16px; min-width: 0; }
+.rp-range-picker { flex-direction: column; align-items: stretch; gap: var(--sp-3); }
+.rp-range-picker .menu { display: flex; }
+.rp-range-picker .range-trigger { width: 100%; justify-content: flex-start; }
+.rp-range-picker .range-trigger .icon:last-child { margin-left: auto; }
+.rp-range-picker .range-custom .input { flex: 1 1 0; width: auto; }
+
+.rp-sections { margin: 0; padding: 0; border: 0; min-width: 0; }
+.rp-sections > legend { padding: 0; margin-bottom: 8px; }
+.rp-section-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 6px; }
+.rp-ai-box { padding-top: var(--sp-3); border-top: 1px solid var(--line); }
+.rp-ai-box .field-hint { margin: 0; }
+
+.rp-preview { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; }
+.rp-preview-label { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+
+/* The document: a sheet of paper on the light table. */
+.rp-doc {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  width: 100%;
+  max-width: 920px;
+  min-width: 0;
+  padding: 36px 40px 28px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+}
+.rp-doc-head { display: flex; flex-direction: column; gap: 10px; padding-bottom: 18px; border-bottom: 2px solid var(--ink); }
+.rp-account { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.rp-account-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
+.rp-account-name { font-weight: 600; }
+.rp-account-handle { color: var(--ink-2); font-size: 12px; }
+.rp-generated { color: var(--ink-2); font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; white-space: nowrap; }
+.rp-title {
+  margin-top: 6px;
+  font-family: var(--font-display);
+  font-stretch: 115%;
+  font-size: var(--fs-3xl);
+  font-weight: 700;
+  line-height: 1.05;
+  letter-spacing: -0.015em;
+  overflow-wrap: anywhere;
+}
+.rp-range { margin: 0; font-size: var(--fs-lg); }
+.rp-note { margin: 0; color: var(--ink-2); font-size: var(--fs-sm); }
+.rp-empty {
+  margin: 0;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--surface-2) 45%, var(--surface));
+  color: var(--ink-2);
+  font-size: var(--fs-sm);
+}
+
+.rp-section { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.rp-h2 {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+  font-family: var(--font-display);
+  font-stretch: 112%;
+  font-size: var(--fs-xl);
+  font-weight: 650;
+}
+.rp-num {
+  color: var(--ink-3);
+  font: 500 12px var(--font-mono);
+  letter-spacing: 0.04em;
+}
+.rp-ai {
+  margin: 0;
+  padding: 14px 16px;
+  border-left: 3px solid var(--accent);
+  background: var(--accent-soft);
+  color: var(--ink);
+  font-size: var(--fs-lg);
+  line-height: 1.55;
+}
+.rp-grid { --gap: var(--sp-4); }
+/* The document is narrower than the Analytics screen: drop the tile sparklines so labels fit. */
+.rp-stats .sparkline { display: none !important; }
+.rp-table { border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; }
+.rp-caption-cell { min-width: 170px; max-width: 300px; }
+.rp-caption { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
+.rp-post-meta { display: block; overflow: hidden; text-overflow: ellipsis; color: var(--ink-2); font-size: var(--fs-sm); white-space: nowrap; }
+.rp-doc .an-best { grid-template-columns: minmax(0, 1.6fr) minmax(220px, 1fr); }
+.rp-doc .panel { break-inside: avoid; }
+.rp-foot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 6px 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  color: var(--ink-3);
+  font: 11px var(--font-mono);
+}
+
+@media (max-width: 1100px) {
+  .rp-layout { grid-template-columns: minmax(0, 1fr); }
+  .rp-builder { position: static; }
+  .rp-section-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; }
+}
+
+@media (max-width: 759px) {
+  .rp-doc { padding: 20px 16px; gap: 22px; }
+  .rp-title { font-size: var(--fs-2xl); }
+  .rp-account { flex-wrap: wrap; }
+  .rp-generated { flex-basis: 100%; }
+  .rp-section-list { grid-template-columns: minmax(0, 1fr); }
+  .rp-doc .an-best { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Print: only the document, in the light palette, edge to edge. */
+@media print {
+  @page { margin: 14mm 12mm; }
+  :root,
+  :root:not([data-theme="light"]),
+  :root[data-theme="dark"] {
+    color-scheme: light;
+    --bg: #FFFFFF;
+    --surface: #FFFFFF;
+    --surface-2: #EAECE7;
+    --surface-3: #DFE2DC;
+    --ink: #15191C;
+    --ink-2: #484F56;
+    --ink-3: #767D85;
+    --line: #D7DAD3;
+    --line-strong: #B9BEB6;
+    --accent: #1F5F8B;
+    --accent-strong: #174A6D;
+    --accent-ink: #FFFFFF;
+    --accent-soft: #DCE7F0;
+    --marker: #D9912B;
+    --marker-soft: #F6E7CF;
+    --ok: #2D7A4D;
+    --ok-soft: #DDEFE3;
+    --warn: #9A6A12;
+    --warn-soft: #F5EACF;
+    --bad: #B03A2E;
+    --bad-soft: #F6DEDB;
+    --series-1: #1D66A6;
+    --series-2: #E8662B;
+    --series-3: #189E6E;
+    --series-4: #6250D6;
+    --series-5: #D9628F;
+    --series-6: #B8860B;
+  }
+  html, body { background: #FFFFFF !important; }
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+  .rp-page > .page-header,
+  .page-actions,
+  .rp-builder,
+  .rp-preview-label,
+  .chart-tip { display: none !important; }
+  .rp-layout { display: block; }
+  .rp-doc {
+    max-width: none;
+    padding: 0;
+    border: 0;
+    gap: 22px;
+  }
+  .rp-section { break-inside: auto; }
+  .rp-h2 { break-after: avoid; }
+  .rp-doc .stats,
+  .rp-doc .panel,
+  .rp-table,
+  .rp-ai { break-inside: avoid; }
+  .rp-doc .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .rp-doc .an-best { grid-template-columns: minmax(0, 1.6fr) minmax(200px, 1fr); }
+  .rp-doc .stats.an-stats { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .rp-doc .table-wrap { max-height: none !important; overflow: visible !important; }
+  .rp-doc a { color: inherit; text-decoration: none; }
+}

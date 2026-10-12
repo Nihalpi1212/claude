@@ -1,0 +1,134 @@
+/* Competitors screen */
+
+.cmp-add-wrap {
+  padding: 0 16px 14px;
+  border-bottom: 1px solid var(--line);
+}
+.cmp-add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--sp-2) var(--sp-3);
+}
+.cmp-add .field { flex: 1 1 260px; max-width: 420px; }
+/* Line the button up with the input, not the label above it. */
+.cmp-add-btn { margin-top: 26px; }
+
+.cmp-account {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  max-width: 100%;
+}
+.cmp-account-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.25;
+}
+.cmp-account-name { font-weight: 600; color: var(--ink); }
+.cmp-account-handle { font: 400 var(--fs-sm)/1.3 var(--font-mono); color: var(--ink-2); }
+
+.cmp-change {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  line-height: 1.2;
+}
+.cmp-change-pct { font-size: var(--fs-xs); opacity: 0.85; }
+
+.cmp-foot {
+  margin: 0;
+  padding: 10px 16px 14px;
+  border-top: 1px solid var(--line);
+}
+
+.cmp-chart-note { margin-top: 8px; }
+
+/* Phone list */
+.cmp-list .list-row { padding-top: 8px; padding-bottom: 8px; gap: var(--sp-2); }
+.cmp-list-main {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  min-width: 0;
+  padding: 4px 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.cmp-list-main:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: var(--r-sm); }
+.cmp-list-main .cmp-account { flex: 1 1 auto; }
+.cmp-list-nums {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  line-height: 1.25;
+}
+
+/* Drawer */
+.cmp-profile { align-items: flex-start; gap: var(--sp-3); }
+.cmp-profile-handle {
+  font: 500 var(--fs-md)/1.3 var(--font-mono);
+  margin-bottom: 4px;
+}
+.cmp-drawer-stats { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.cmp-drawer .stat-value { font-size: var(--fs-xl); }
+
+.cmp-sheet { --frame-min: 128px; padding: 4px 2px; }
+.cmp-tile {
+  display: block;
+  min-width: 0;
+  color: inherit;
+  text-decoration: none;
+  border-radius: 1px;
+}
+.cmp-tile:hover .frame { box-shadow: 0 0 0 1px var(--ink-3); }
+.cmp-tile:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+
+.cmp-badge,
+.cmp-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.cmp-badge .icon:not(:first-child) { margin-left: 5px; }
+
+.cmp-best { align-items: flex-start; }
+.cmp-best-thumb {
+  flex: none;
+  width: 56px;
+  aspect-ratio: 4 / 5;
+  overflow: hidden;
+  border-radius: 1px;
+  background: var(--surface-3);
+  box-shadow: 0 0 0 1px var(--line);
+}
+.cmp-best-thumb img,
+.cmp-best-thumb video { display: block; width: 100%; height: 100%; object-fit: cover; }
+.cmp-best-text { --gap: 4px; }
+
+@media (max-width: 759px) {
+  .cmp-add .field { max-width: none; flex-basis: 100%; }
+  .cmp-add-btn { margin-top: 0; width: 100%; justify-content: center; }
+  .cmp-drawer-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cmp-sheet { --frame-min: 100px; gap: 12px 10px; }
+}
+
+/* Fit the comparison table on desktop without sideways scrolling. */
+.cmp-page .table th,
+.cmp-page .table td { padding-left: 10px; padding-right: 10px; }
+.cmp-page .table th:first-child,
+.cmp-page .table td:first-child { padding-left: 16px; }
+.cmp-page .table th:last-child,
+.cmp-page .table td:last-child { padding-right: 12px; }
+.cmp-page .table td.align-right { white-space: nowrap; }
+.cmp-account-handle.is-only { font: 600 var(--fs-md)/1.3 var(--font-mono); color: var(--ink); }
+.cmp-charts { align-items: start; }

@@ -27,7 +27,7 @@ function tagsOf(set) {
 /** Caption without AI: caption hints of the assets plus hashtags from the selected sets. Exported for tests. */
 export function fallbackContent(assets, sets, { defaultFirstComment = '' } = {}) {
   const hints = [...new Set(assets.map((a) => String(a.captionHint || '').trim()).filter(Boolean))];
-  const tags = [...new Set(sets.flatMap(tagsOf))].slice(0, LIMITS.hashtags);
+  const tags = [...new Set(sets.flatMap(tagsOf))].slice(0, LIMITS.hashtagsRecommended); // Instagram shows at most 5
   const caption = [hints.join('\n\n'), tags.join(' ')].filter(Boolean).join('\n\n').slice(0, LIMITS.captionChars);
   return { caption, firstComment: defaultFirstComment || '', altText: '', ai: false };
 }

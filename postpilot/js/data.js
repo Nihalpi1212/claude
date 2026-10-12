@@ -90,10 +90,14 @@ export function readDoc(name) {
  */
 export function useDoc(name) {
   const [, setTick] = useState(0);
+  const rendered = entry(name);
+  const seen = { version: rendered.version, error: rendered.error, loading: rendered.loading };
   useEffect(() => {
     const off = subscribe(name, () => setTick((t) => t + 1));
     const e = entry(name);
     if (e.data === null && !e.error) load(name);
+    // The load may have finished between render and this effect; catch up so we never stay stuck.
+    if (e.version !== seen.version || e.error !== seen.error || e.loading !== seen.loading) setTick((t) => t + 1);
     return off;
   }, [name]);
   const e = entry(name);
@@ -105,12 +109,20 @@ export function useDoc(name) {
 export function useDocs(names) {
   const key = names.join('|');
   const [, setTick] = useState(0);
+  const seen = names.map((n) => {
+    const e = entry(n);
+    return `${e.version}|${!!e.error}|${e.loading}`;
+  });
   useEffect(() => {
     const offs = names.map((n) => subscribe(n, () => setTick((t) => t + 1)));
-    for (const n of names) {
+    let stale = false;
+    names.forEach((n, i) => {
       const e = entry(n);
       if (e.data === null && !e.error) load(n);
-    }
+      if (`${e.version}|${!!e.error}|${e.loading}` !== seen[i]) stale = true;
+    });
+    // Catch up with loads that finished between render and subscription.
+    if (stale) setTick((t) => t + 1);
     return () => offs.forEach((off) => off());
   }, [key]);
   return useMemo(() => {
