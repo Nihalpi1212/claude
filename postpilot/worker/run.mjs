@@ -1,0 +1,229 @@
+// Postpilot worker entry point: `node postpilot/worker/run.mjs` (GitHub Actions cron + dispatch).
+//
+// Runs every job in a fixed order. Each job is isolated: an error is recorded in the run summary and
+// the encrypted activity log, and the next job still runs. Console output is public (Actions logs of
+// a public repo), so it only ever contains counts and generic status lines.
+
+import { pathToFileURL } from 'node:url';
+import { ConfigError, createContext, describeError, errorKind, LOG_ENTRY_CAP, RUN_CAP } from './context.mjs';
+import token from './jobs/token.mjs';
+import outbox from './jobs/outbox.mjs';
+import publish from './jobs/publish.mjs';
+import evergreen from './jobs/evergreen.mjs';
+import autopilot from './jobs/autopilot.mjs';
+import automations from './jobs/automations.mjs';
+import stories from './jobs/stories.mjs';
+import analytics from './jobs/analytics.mjs';
+import competitors from './jobs/competitors.mjs';
+import bio from './jobs/bio.mjs';
+import housekeeping from './jobs/housekeeping.mjs';
+
+export const NOT_CONFIGURED_MESSAGE = 'Postpilot worker is not configured yet (POSTPILOT_DATA_KEY secret missing).';
+
+/** [name, fn, needsInstagram] in run order. */
+export const JOBS = [
+  ['token', token, true],
+  ['outbox', outbox, false],
+  ['publish', publish, true],
+  ['evergreen', evergreen, false],
+  ['autopilot', autopilot, false],
+  ['automations', automations, true],
+  ['stories', stories, true],
+  ['analytics', analytics, true],
+  ['competitors', competitors, true],
+  ['bio', bio, true],
+  ['housekeeping', housekeeping, false],
+];
+
+/** Jobs that still run while the worker is paused in Settings (maintenance only). */
+const RUN_WHEN_PAUSED = new Set(['token', 'housekeeping']);
+
+/** Counts that make a run worth recording even when nothing failed. */
+const ACTIVITY_KEYS = new Set([
+  'published',
+  'failed',
+  'pending',
+  'retried',
+  'commands',
+  'commandsFailed',
+  'evergreenCreated',
+  'autopilotCreated',
+  'replies',
+  'privateReplies',
+  'dms',
+  'hidden',
+  'deleted',
+  'aiReplies',
+  'tokenRefreshed',
+]);
+
+/** Write a run record at least this often even when nothing happened (worker heartbeat). */
+const HEARTBEAT_MS = 60 * 60 * 1000;
+
+const SKIP_TEXT = {
+  not_connected: 'Instagram not connected',
+  paused: 'worker paused in Settings',
+  disabled: 'turned off',
+  not_due: 'not due yet',
+  nothing_due: 'nothing due',
+  token_expired: 'Instagram login expired',
+  needs_facebook_login: 'needs Facebook Login',
+  unsupported: 'not supported for this account',
+  no_ai: 'AI not configured',
+};
+
+function humanize(key) {
+  return key.replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase();
+}
+
+/** One public console line per job: numbers and fixed reason codes only. */
+export function formatJobLine(name, result) {
+  if (!result || typeof result !== 'object') return `${name}: done`;
+  if (result.skipped) return `${name}: skipped (${SKIP_TEXT[result.skipped] || 'nothing to do'})`;
+  const parts = Object.entries(result)
+    .filter(([, v]) => typeof v === 'number' && Number.isFinite(v))
+    .map(([k, v]) => `${v} ${humanize(k)}`);
+  return `${name}: ${parts.length ? parts.join(', ') : 'done'}`;
+}
+
+function sumCounts(jobs) {
+  const counts = {};
+  for (const res of Object.values(jobs)) {
+    if (!res || typeof res !== 'object') continue;
+    for (const [k, v] of Object.entries(res)) if (typeof v === 'number' && Number.isFinite(v)) counts[k] = (counts[k] || 0) + v;
+  }
+  return counts;
+}
+
+/**
+ * Run the worker once.
+ * @param {{env?: object, fetchImpl?: Function, now?: string|number|Date|Function, log?: Function, maxWaitSec?: number, only?: string[]}} opts
+ * @returns {Promise<{ok: boolean, exitCode: number, summary: object}>}
+ */
+export async function runWorker({ env = process.env, fetchImpl, now, log: consoleLog = console.log, maxWaitSec, only } = {}) {
+  if (!env.POSTPILOT_DATA_KEY) {
+    consoleLog(NOT_CONFIGURED_MESSAGE);
+    return { ok: true, exitCode: 0, summary: { configured: false } };
+  }
+
+  let ctx;
+  try {
+    ctx = await createContext({ env, fetchImpl, now, consoleLog, maxWaitSec });
+  } catch (err) {
+    if (err instanceof ConfigError) {
+      consoleLog(err.publicMessage);
+      return { ok: !err.fatal, exitCode: err.fatal ? 1 : 0, summary: { configured: false, reason: err.code } };
+    }
+    consoleLog(`Postpilot worker could not start (${errorKind(err)}).`);
+    return { ok: false, exitCode: 1, summary: { configured: true, error: true } };
+  }
+
+  const startedAt = ctx.nowIso();
+  const realStart = Date.now();
+  ctx.say(`Postpilot worker started (${ctx.trigger === 'schedule' ? 'scheduled run' : ctx.trigger === 'workflow_dispatch' ? 'started from the app' : 'manual run'}).`);
+
+  const paused = ctx.settings.worker && ctx.settings.worker.enabled === false;
+  if (paused) ctx.say('The worker is paused in Settings; only maintenance jobs run.');
+
+  const jobs = {};
+  const errors = [];
+  let saidNotConnected = false;
+  for (const [name, fn, needsIg] of JOBS) {
+    if (only && !only.includes(name)) continue;
+    if (paused && !RUN_WHEN_PAUSED.has(name)) {
+      jobs[name] = { skipped: 'paused' };
+      continue;
+    }
+    if (needsIg && !ctx.ig) {
+      const expired = ctx.settings.ig?.status?.state === 'expired';
+      jobs[name] = { skipped: expired ? 'token_expired' : 'not_connected' };
+      if (!saidNotConnected) {
+        ctx.say(expired ? 'Instagram login has expired; reconnect it in Settings. Instagram jobs skipped.' : 'Instagram is not connected; Instagram jobs skipped.');
+        saidNotConnected = true;
+      }
+      continue;
+    }
+    try {
+      const res = (await fn(ctx)) || {};
+      jobs[name] = res;
+      ctx.say(formatJobLine(name, res));
+    } catch (err) {
+      const message = describeError(err);
+      errors.push({ job: name, message });
+      jobs[name] = { error: true };
+      ctx.log(name, 'error', message, { code: err?.code ?? null, name: err?.name || 'Error' });
+      ctx.say(`${name}: failed (${errorKind(err)}); details are in the app's activity log.`);
+    }
+  }
+
+  // Exposed media that a job forgot to clean up (never leave plaintext copies behind).
+  if (ctx.exposed.size) {
+    try {
+      await ctx.cleanupExposed([...ctx.exposed]);
+    } catch (err) {
+      ctx.log('worker', 'warn', `Could not remove temporary media: ${describeError(err)}`);
+    }
+  }
+
+  const counts = sumCounts(jobs);
+  const finishedAt = ctx.nowIso();
+  const failedPosts = counts.failed || 0;
+  const run = {
+    startedAt,
+    finishedAt,
+    durationMs: Date.now() - realStart,
+    ok: errors.length === 0 && failedPosts === 0,
+    trigger: ctx.trigger,
+    ...(env.POSTPILOT_REASON ? { reason: String(env.POSTPILOT_REASON).slice(0, 200) } : {}),
+    counts,
+    jobs,
+    errors,
+  };
+
+  const noteworthy =
+    errors.length > 0 ||
+    ctx.entries.some((e) => e.level === 'error' || e.level === 'warn') ||
+    Object.entries(counts).some(([k, v]) => ACTIVITY_KEYS.has(k) && v > 0);
+  try {
+    await ctx.store.transact(
+      async (tx) => {
+        const logDoc = await tx.read('log');
+        const lastRun = (logDoc.runs || [])[0];
+        const lastMs = lastRun ? Date.parse(lastRun.finishedAt) : NaN;
+        const heartbeatDue = !Number.isFinite(lastMs) || ctx.nowMs() - lastMs >= HEARTBEAT_MS || ctx.trigger === 'workflow_dispatch';
+        // Idle runs are only recorded as an hourly heartbeat to keep the data branch small.
+        if (!noteworthy && !heartbeatDue) return;
+        logDoc.entries = [...ctx.entries.slice().reverse(), ...(logDoc.entries || [])].slice(0, LOG_ENTRY_CAP);
+        logDoc.runs = [run, ...(logDoc.runs || [])].slice(0, RUN_CAP);
+        tx.write('log', logDoc);
+      },
+      { message: 'worker run log' },
+    );
+  } catch (err) {
+    ctx.say(`Could not save the run log (${errorKind(err)}).`);
+  }
+
+  const exitCode = failedPosts > 0 ? 1 : 0;
+  if (failedPosts > 0) ctx.say(`${failedPosts} post${failedPosts === 1 ? '' : 's'} failed to publish. Open Postpilot to see why.`);
+  ctx.say(`Postpilot worker finished in ${Math.round((Date.now() - realStart) / 1000)}s.`);
+  return { ok: run.ok, exitCode, summary: run };
+}
+
+const isMain = (() => {
+  try {
+    return !!process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+  } catch {
+    return false;
+  }
+})();
+
+if (isMain) {
+  runWorker()
+    .then((res) => {
+      process.exitCode = res.exitCode;
+    })
+    .catch((err) => {
+      console.log(`Postpilot worker crashed (${errorKind(err)}).`);
+      process.exitCode = 1;
+    });
+}

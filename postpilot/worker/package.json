@@ -1,0 +1,5 @@
+{
+  "name": "postpilot-worker",
+  "private": true,
+  "type": "module"
+}

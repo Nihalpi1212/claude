@@ -1,0 +1,56 @@
+# Postpilot worker
+#
+# Runs the Postpilot background worker (postpilot/worker/run.mjs) every 10 minutes and on demand
+# (the app's "Publish now" / "Run worker" buttons send a workflow_dispatch). Each run publishes due
+# posts, applies comment/DM automation rules, captures story insights, snapshots daily analytics,
+# refreshes the Instagram token and fills the autopilot / evergreen queues.
+#
+# All Postpilot data lives encrypted on the `postpilot-data` branch. The worker decrypts it with the
+# POSTPILOT_DATA_KEY Actions secret, which the app saves for you in Settings > Worker.
+#
+# Actions logs of a public repository are PUBLIC. The worker therefore prints counts only
+# ("publish: 1 published, 0 failed"); captions, usernames, ids, URLs and tokens never reach the log.
+# Details go to the encrypted activity log you can read in the app.
+#
+# Without the POSTPILOT_DATA_KEY secret the worker prints a notice and exits successfully.
+
+name: Postpilot worker
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Why the worker was started (shown in the app activity log)'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: postpilot-worker
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: postpilot
+          sparse-checkout-cone-mode: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run Postpilot worker
+        run: node postpilot/worker/run.mjs
+        env:
+          POSTPILOT_DATA_KEY: ${{ secrets.POSTPILOT_DATA_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          POSTPILOT_BRANCH: postpilot-data
+          POSTPILOT_REASON: ${{ inputs.reason }}
