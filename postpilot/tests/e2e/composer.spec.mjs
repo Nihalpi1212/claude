@@ -184,9 +184,22 @@ describe('composer', () => {
     const dlg = page.locator('.modal-confirm');
     await dlg.waitFor();
     await dlg.locator('.overlay-foot').getByRole('button', { name: 'Publish now' }).click();
-    await page.locator('.toast', { hasText: 'Publishing' }).waitFor();
+    const publishing = page.locator('.toast', { hasText: 'Publishing' });
+    await publishing.waitFor();
     await drawer(page).waitFor({ state: 'detached' });
+    // Open it from the toast: a read-only view that updates by itself when Instagram has the post.
+    await publishing.getByRole('button', { name: 'Open' }).click();
+    await drawer(page).waitFor();
+    await page.locator('.cmp-drawer .overlay-title', { hasText: 'Published post' }).waitFor({ timeout: 45_000 });
+    await page.locator('.cmp-main .callout', { hasText: 'Published' }).waitFor();
     await page.locator('.toast', { hasText: 'Published on Instagram' }).waitFor({ timeout: 45_000 });
+    await snap(page, 'composer-published-1280-light');
+    assert.equal(await page.locator('#cmp-caption').count(), 0, 'published posts are read-only');
+    // Duplicate as a new post.
+    await footer(page).getByRole('button', { name: 'Duplicate as new post' }).click();
+    await page.locator('.cmp-drawer .overlay-title', { hasText: 'New post' }).waitFor();
+    assert.equal(await page.locator('#cmp-caption').inputValue(), caption);
+    await closeComposer(page);
     const posts = await readPosts(page);
     const post = posts.find((p) => p.caption === caption);
     assert.equal(post.status, 'published');
@@ -337,6 +350,19 @@ describe('composer', () => {
     await closeComposer(page);
   });
 
+  it('adds a post to the queue at the next free best time', async () => {
+    await openNew(page);
+    await pickFromLibrary(page, ['Arched windows']);
+    await page.locator('#cmp-caption').fill('E2E queue: golden hour in the studio.');
+    await page.locator('#cmp-when').getByRole('button', { name: 'Add to queue' }).click();
+    await page.locator('.toast', { hasText: 'Added to the queue for' }).waitFor();
+    await drawer(page).waitFor({ state: 'detached' });
+    const post = (await readPosts(page)).find((p) => p.caption === 'E2E queue: golden hour in the studio.');
+    assert.equal(post.status, 'scheduled');
+    assert.ok(Date.parse(post.scheduledAt) > Date.now());
+    assert.ok(post.history.some((e) => e.event === 'queued'));
+  });
+
   it('inserts a hashtag set and moves hashtags to the first comment', async () => {
     await openNew(page);
     await page.locator('#cmp-caption').fill('Shop update.');
@@ -346,6 +372,12 @@ describe('composer', () => {
     await page.getByRole('button', { name: 'Move hashtags to first comment' }).click();
     assert.equal(await page.locator('#cmp-caption').inputValue(), 'Shop update.');
     assert.match(await page.locator('#cmp-first-comment').inputValue(), /#smallbusiness #shopsmall/);
+    // Caption template: inserted at the end, first {placeholder} selected for typing.
+    await page.getByRole('button', { name: 'Templates' }).click();
+    await page.getByRole('menuitem', { name: /New drop/ }).click();
+    const selected = await page.locator('#cmp-caption').evaluate((el) => el.value.slice(el.selectionStart, el.selectionEnd));
+    assert.equal(selected, '{product}');
+    assert.match(await page.locator('#cmp-caption').inputValue(), /^Shop update\.\n\nNew in the shop: \{product\}/);
     await closeComposer(page);
   });
 

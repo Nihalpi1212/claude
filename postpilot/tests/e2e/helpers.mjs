@@ -85,6 +85,9 @@ export async function shot(page, name) {
   const { mkdirSync } = await import('node:fs');
   mkdirSync(dir, { recursive: true });
   const file = path.join(dir, `${name}.png`);
-  await page.screenshot({ path: file, fullPage: true });
+  // Full-page capture re-runs overlay open animations (drawers come out see-through), so only
+  // capture the viewport while a modal or drawer is open.
+  const overlayOpen = await page.$('.overlay, [role="dialog"]').then(Boolean).catch(() => false);
+  await page.screenshot({ path: file, fullPage: !overlayOpen });
   return file;
 }

@@ -154,7 +154,7 @@
 .cmp-tabs .seg { flex: 1 1 0; justify-content: center; }
 
 .cmp-section { position: relative; display: flex; flex-direction: column; gap: 10px; padding: 16px 0; border-top: 1px solid var(--line); }
-.cmp-main > .cmp-section:first-of-type, #cmp-type { border-top: 0; padding-top: 4px; }
+#cmp-type { border-top: 0; padding-top: 4px; }
 .cmp-sec-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .cmp-sec-head .label-caps { display: inline-flex; align-items: center; gap: 6px; margin: 0; }
 .cmp-section > h3.label-caps { margin: 0; }
@@ -383,7 +383,7 @@
 .cmp-history-list { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 0; padding: 0; list-style: none; }
 .cmp-history-list li { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 10px; align-items: baseline; }
 .cmp-ro-text { margin: 0; }
-.cmp-stats { margin-bottom: 4px; }
+.cmp-stats { margin-bottom: 14px; }
 .cmp-strip.is-readonly .cmp-item { width: 96px; }
 .cmp-strip.is-readonly .frame { width: 96px; }
 
@@ -393,7 +393,7 @@
 .cmp-when-label { margin-right: 2px; }
 .cmp-when .datetime { flex: none; flex-wrap: nowrap; }
 .cmp-when .datetime input[type="date"] { flex: 0 0 150px; }
-.cmp-when .datetime input[type="time"] { flex: 0 0 112px; }
+.cmp-when .datetime input[type="time"] { flex: 0 0 128px; }
 .cmp-best { display: flex; align-items: center; gap: 6px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
 .cmp-best::-webkit-scrollbar { display: none; }
 .cmp-best .chip { flex: none; }

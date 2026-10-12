@@ -338,7 +338,7 @@ export default async function automations(ctx) {
         // (and never send it again) but tell the owner to check.
         if (DM_TYPES.has(kind)) recentDms.push(ctx.nowMs());
         unflushed++;
-        activity({ ...base, type: kind, ok: false, unsure: true, error: 'Instagram did not confirm this. It may have gone through; check Instagram.', text: clip(text, 200) });
+        activity({ ...base, type: kind, ok: false, unsure: true, error: describeError(err), text: clip(text, 200) });
         ctx.log('automations', 'warn', `Could not confirm ${String(kind).replace(/_/g, ' ')}: ${describeError(err)}`, { code: err.code ?? null });
         return UNSURE;
       }

@@ -38,7 +38,7 @@ export default async function housekeeping(ctx) {
 
   const inbox = await ctx.store.read('inbox');
   const outboxCutoff = nowMs - OUTBOX_KEEP_DAYS * DAY_MS;
-  const needOutbox = (inbox.outbox || []).some((c) => c && c.status !== 'pending' && Date.parse(c.doneAt || c.createdAt || 0) < outboxCutoff - DAY_MS);
+  const needOutbox = (inbox.outbox || []).some((c) => c && c.status !== 'pending' && c.status !== 'sending' && Date.parse(c.doneAt || c.createdAt || 0) < outboxCutoff - DAY_MS);
 
   if (!stale.length && !needPrune && !needOutbox) return { tmpDeleted: 0, pruned: 0 };
 
@@ -62,7 +62,7 @@ export default async function housekeeping(ctx) {
       if (needOutbox) {
         const ib = await tx.read('inbox');
         const before = (ib.outbox || []).length;
-        ib.outbox = (ib.outbox || []).filter((c) => c && (c.status === 'pending' || Date.parse(c.doneAt || c.createdAt || 0) >= outboxCutoff));
+        ib.outbox = (ib.outbox || []).filter((c) => c && (c.status === 'pending' || c.status === 'sending' || Date.parse(c.doneAt || c.createdAt || 0) >= outboxCutoff));
         pruned += before - ib.outbox.length;
         tx.write('inbox', ib);
       }

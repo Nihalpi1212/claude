@@ -409,7 +409,9 @@ function Editor({ start, docs, onClose }) {
       toast(`A carousel holds up to ${LIMITS.carouselMax} items, so ${files.length - room} ${files.length - room === 1 ? 'was' : 'were'} left out.`, { kind: 'error' });
       files = files.slice(0, room);
     }
-    let lock = lockRatioFor(t, draftRef.current.media);
+    const media0 = draftRef.current.media;
+    const carouselish = t === 'carousel' || (t === 'feed' && files.length + media0.length > 1);
+    let lock = t === 'story' ? 9 / 16 : carouselish ? lockRatioFor('carousel', media0) : null;
     let reuse = null;
     const photos = files.filter(isImageFile).length;
     let seen = 0;
@@ -423,7 +425,7 @@ function Editor({ start, docs, onClose }) {
           if (!c) return; // closed: stop this batch
           if (c.all) reuse = c;
         }
-        if (!lock && (t === 'carousel' || (t === 'feed' && files.length + draftRef.current.media.length > 1))) lock = c.ratio;
+        if (!lock && carouselish) lock = c.ratio;
         if (reuse && lock && !c.aspect) reuse = { ...reuse, aspect: lock };
       }
       enqueue(file, c, (asset) => addAssets([asset]));
@@ -473,14 +475,15 @@ function Editor({ start, docs, onClose }) {
   }
 
   // Paste photos anywhere in the composer (text paste is left alone).
+  const filesRef = useRef(null);
+  filesRef.current = ro ? null : handleFiles;
   useEffect(() => {
     const onPaste = (e) => {
       if (overlayRef.current.picker || overlayRef.current.crop || document.querySelector('.overlay-modal')) return;
       const files = [...(e.clipboardData?.files || [])];
-      if (!files.length) return;
+      if (!files.length || !filesRef.current) return;
       e.preventDefault();
-      if (LOCKED.includes(draftRef.current.status) && existing) return;
-      handleFiles(files);
+      filesRef.current(files);
     };
     document.addEventListener('paste', onPaste);
     return () => document.removeEventListener('paste', onPaste);
@@ -560,16 +563,17 @@ function Editor({ start, docs, onClose }) {
     onClose();
   };
 
+  const busyRef = useRef('');
   async function act(kind, fn) {
-    if (busy) return;
+    if (busyRef.current) return;
+    busyRef.current = kind;
     setBusy(kind);
     try {
       await fn();
     } catch (err) {
       toast(errText(err), { kind: 'error' });
-      if (mounted.current) setBusy('');
-      return;
     }
+    busyRef.current = '';
     if (mounted.current) setBusy('');
   }
 
@@ -617,7 +621,7 @@ function Editor({ start, docs, onClose }) {
       });
       setBaseline(snapshot(saved));
       onClose();
-      toast('Publishing… usually takes 1–3 minutes.', { kind: 'info', duration: 6000 });
+      toast('Publishing… usually takes 1–3 minutes.', { kind: 'info', duration: 6000, action: { label: 'Open', onClick: () => openComposer(saved.id) } });
       watchPublish(saved.id, toast);
       dispatchWorker('publish now').catch(() => {
         /* dispatchWorker already explained the problem; the scheduled worker run still publishes it */
@@ -644,7 +648,7 @@ function Editor({ start, docs, onClose }) {
 
   const duplicate = async (source = draft) => {
     if (dirty && source === draft) {
-      const ok = await confirm({ title: 'Discard your changes?', body: 'Duplicating opens a copy of the saved post. Unsaved edits here are lost.', confirmLabel: 'Duplicate anyway', danger: true });
+      const ok = await confirm({ title: 'Duplicate with your edits?', body: 'The copy includes your unsaved edits. This post keeps its last saved version.', confirmLabel: 'Duplicate' });
       if (!ok) return;
     }
     const copy = structuredClone(pick(source, EDITABLE.filter((k) => k !== 'scheduledAt')));
@@ -674,6 +678,7 @@ function Editor({ start, docs, onClose }) {
   // ---- Read-only (published / publishing / canceled) -----------------------
 
   if (ro) {
+    primaryRef.current = null;
     return html`<${ReadOnly} post=${live || draft} docs=${docs} assetsById=${assetsById} account=${account} tz=${tz} wide=${wide}
       onClose=${onClose} onDuplicate=${() => duplicate(live || draft)} />`;
   }
@@ -693,7 +698,6 @@ function Editor({ start, docs, onClose }) {
   const menuItems = existing
     ? [
         { label: 'Duplicate', icon: 'copy', onClick: () => duplicate() },
-        isScheduled ? { label: 'Move to drafts', icon: 'clock', onClick: saveDraft } : null,
         '-',
         { label: 'Delete post', icon: 'trash', danger: true, onClick: remove },
       ].filter(Boolean)
@@ -702,6 +706,7 @@ function Editor({ start, docs, onClose }) {
   const scrollTo = (field) => {
     const id = FIELD_TARGET[field] || 'cmp-issues';
     if (!wide) setTab('edit');
+    if (id === 'cmp-details') setShowDetails(true);
     requestAnimationFrame(() => {
       const el = document.getElementById(id);
       if (!el) return;
@@ -1184,11 +1189,19 @@ function CaptionSection({ draft, update, hashtagsDoc, issues }) {
 
   const insertTemplate = (text) => {
     const el = document.getElementById(CAPTION_ID);
-    const cur = caption;
+    let cur = caption;
     let pos = cur.length;
     let insert = text;
-    if (cur.trim() && caret.current != null) pos = Math.min(caret.current, cur.length);
-    else if (cur.trim()) insert = `\n\n${text}`;
+    if (cur.trim() && caret.current != null && caret.current < cur.replace(/\s+$/, '').length) {
+      // Inside the text: insert at the cursor, with a space when it would touch a word.
+      pos = caret.current;
+      if (pos > 0 && !/\s/.test(cur[pos - 1])) insert = ` ${text}`;
+    } else if (cur.trim()) {
+      // At the end (or never focused): start a new paragraph.
+      cur = cur.replace(/\s+$/, '');
+      pos = cur.length;
+      insert = `\n\n${text}`;
+    }
     const next = cur.slice(0, pos) + insert + cur.slice(pos);
     update({ caption: next });
     requestAnimationFrame(() => {
@@ -1430,7 +1443,7 @@ function DetailsSection({ open, setOpen, draft, update, type, sel, assetsById, i
                 <${ChipInput} values=${draft.collaborators || []} onChange=${(v) => update({ collaborators: v })} normalize=${normUser} max=${LIMITS.collaborators} placeholder="username, then Enter" />
               <//>`
             : null}
-          ${!story
+          ${!story || draft.location
             ? html`<div class="grid-2 cmp-location">
                 <${Field} label="Location name" hint="Shown in the preview and in Postpilot.">
                   <${TextInput} value=${(draft.location && draft.location.name) || ''} onChange=${(v) => setLoc({ name: v })} placeholder="e.g. Studio North, Brooklyn" />
@@ -1517,7 +1530,7 @@ function IssuesList({ issues, onJump }) {
 
 function WhenControls({ draft, tz, best, onChange, onQueue, queueDisabled, busy }) {
   const past = draft.scheduledAt && new Date(draft.scheduledAt).getTime() < Date.now() - 60_000;
-  return html`<div class="cmp-when" id="cmp-when">
+  return html`<div class="cmp-when" id="cmp-when" role="group" aria-label="When to post">
     <span class="label-caps cmp-when-label">When</span>
     <${DateTimeField} value=${draft.scheduledAt} tz=${tz} onChange=${onChange} clearable />
     ${best.length

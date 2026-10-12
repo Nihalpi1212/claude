@@ -9,8 +9,9 @@
 // problems keep the command pending for up to 3 attempts.
 // Instagram commands are sent at most once: they are claimed ('sending', attempts + 1) in one commit
 // before any is sent, the same way publish.mjs claims a post. A command still 'sending' at the start
-// of a run belongs to a run that stopped before recording the outcome; it becomes 'failed' (it may
-// already have gone out) and is never sent again automatically.
+// of a run belongs to a run that stopped before recording the outcome; it becomes 'failed' with
+// `maybeSent: true` (it may already have gone out) and is never sent again automatically. So does a
+// command whose connection dropped after the request may have reached Instagram (err.maybeSent).
 
 import { describeError } from '../context.mjs';
 import { clip, DAY_MS, findCachedComment, isRetryable, pushHistory } from './shared.mjs';
@@ -93,11 +94,12 @@ export default async function outbox(ctx) {
         for (const c of ib.outbox || []) {
           if (!c) continue;
           if (c.status === 'sending') {
-            Object.assign(c, { status: 'failed', error: MAYBE_SENT_ERROR, doneAt: nowIso });
+            Object.assign(c, { status: 'failed', error: MAYBE_SENT_ERROR, maybeSent: true, doneAt: nowIso });
             unconfirmed++;
           } else if (c.status === 'pending' && toClaim.has(c.id)) {
             c.status = 'sending';
             c.attempts = (c.attempts || 0) + 1;
+            delete c.maybeSent; // retried by the owner after a "may already have been sent" failure
             claimed.push(structuredClone(c));
           }
         }
@@ -141,7 +143,7 @@ export default async function outbox(ctx) {
       const message = describeError(err);
       if (err && err.maybeSent) {
         // The connection dropped after the request may have reached Instagram: never resend it.
-        outcomes.set(cmd.id, { status: 'failed', error: MAYBE_SENT_ERROR, doneAt: nowIso, attempts });
+        outcomes.set(cmd.id, { status: 'failed', error: message, maybeSent: true, doneAt: nowIso, attempts });
         failed++;
         ctx.log('outbox', 'error', `Could not confirm ${cmd.type.replace(/_/g, ' ')}: ${message}`, { code: err.code ?? null });
       } else if (isRetryable(err) && attempts < MAX_ATTEMPTS) {

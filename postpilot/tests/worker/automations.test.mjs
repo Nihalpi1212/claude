@@ -214,3 +214,317 @@ test('AI replies use the mock Claude when AI is configured', async (t) => {
   assert.ok(reply && reply.text.length > 0);
   assert.equal(res.summary.jobs.automations.aiReplies, 1);
 });
+
+const LOVE_RULE = newRule({ id: 'r_love', name: 'Thanks', trigger: { source: 'comment', match: 'any', keywords: ['love'], mediaIds: null }, actions: [{ type: 'reply_comment', texts: ['Thank you!'] }], oncePerUser: false });
+
+/** Make the ref update of the next commit whose message contains `text` fail. Returns a restore function. */
+function failCommit(env, text) {
+  const real = env.ghMock.handle;
+  let armed = false;
+  let done = false;
+  env.ghMock.handle = (req, res, sub, body) => {
+    if (!done && req.method === 'POST' && /\/git\/commits$/.test(sub) && String(body?.message || '').includes(text)) armed = true;
+    if (armed && req.method === 'PATCH' && /\/git\/refs\/heads\//.test(sub)) {
+      armed = false;
+      done = true;
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ message: 'Simulated failure' }));
+      return true;
+    }
+    return real(req, res, sub, body);
+  };
+  return () => {
+    env.ghMock.handle = real;
+    return done;
+  };
+}
+
+const postsTo = (env, mark, suffix) => env.graph.state.requests.slice(mark).filter((r) => r.method === 'POST' && r.path.endsWith(suffix)).length;
+
+test('a rule never says it sent a DM when the DM was refused, and stays available for that person', async (t) => {
+  const env = await startWorkerEnv();
+  t.after(() => env.close());
+  await env.update('automations', (a) => {
+    a.rules = [PRICE_RULE];
+  });
+  await env.run({ only: ['automations'] });
+  const media = env.graph.state.media[0];
+  env.graph.state.dmMode = 'advanced_access';
+  const c = env.addComment(media.id, { username: 'no.role', text: 'price please' });
+  const res = await env.run({ only: ['automations'] });
+  assert.equal(res.exitCode, 0);
+  assert.ok(!env.graph.state.replies.some((r) => r.commentId === c.id), 'no public "check your DMs" reply');
+  assert.ok(!env.graph.state.sentMessages.some((m) => m.commentId === c.id));
+  let auto = await env.read('automations');
+  assert.ok(auto.processed.comments[c.id], 'the comment is not retried every run');
+  assert.ok(!auto.processed.users?.r_price?.[c.fromId], 'oncePerUser is not used up');
+  assert.equal(auto.status.dm, 'needs_advanced_access');
+
+  // Access fixed: after the re-check window the same person asking again gets the DM and the reply.
+  env.graph.state.dmMode = 'ok';
+  const again = env.addComment(media.id, { username: 'no.role', text: 'price?' });
+  await env.run({ only: ['automations'], now: Date.now() + 7 * 36e5 });
+  assert.ok(env.graph.state.sentMessages.some((m) => m.commentId === again.id));
+  assert.ok(env.graph.state.replies.some((r) => r.commentId === again.id));
+  auto = await env.read('automations');
+  assert.ok(auto.processed.users.r_price[again.fromId]);
+});
+
+test('a comment held back by the hourly DM limit is answered on a later run, DM first', async (t) => {
+  const env = await startWorkerEnv();
+  t.after(() => env.close());
+  await env.update('automations', (a) => {
+    a.rules = [PRICE_RULE];
+    a.limits = { maxActionsPerRun: 25, maxDmsPerHour: 1 };
+  });
+  await env.run({ only: ['automations'] });
+  const media = env.graph.state.media[0];
+  const first = env.addComment(media.id, { username: 'first.asker', text: 'price?', at: Date.now() - 2000 });
+  const second = env.addComment(media.id, { username: 'second.asker', text: 'price?' });
+  await env.run({ only: ['automations'] });
+  assert.ok(env.graph.state.sentMessages.some((m) => m.commentId === first.id));
+  assert.ok(env.graph.state.replies.some((r) => r.commentId === first.id));
+  assert.ok(!env.graph.state.sentMessages.some((m) => m.commentId === second.id));
+  assert.ok(!env.graph.state.replies.some((r) => r.commentId === second.id), 'no public reply without the DM');
+  let auto = await env.read('automations');
+  assert.ok(!auto.processed.comments[second.id], 'kept for the next run');
+
+  await env.run({ only: ['automations'], now: Date.now() + 61 * 60e3 });
+  assert.equal(env.graph.state.sentMessages.filter((m) => m.commentId === second.id).length, 1);
+  assert.equal(env.graph.state.replies.filter((r) => r.commentId === second.id).length, 1);
+  assert.equal(env.graph.state.replies.filter((r) => r.commentId === first.id).length, 1);
+  auto = await env.read('automations');
+  assert.ok(auto.processed.comments[second.id]);
+});
+
+test('replies already sent are saved when a run stops part-way (expired token)', async (t) => {
+  const env = await startWorkerEnv();
+  t.after(() => env.close());
+  await env.update('automations', (a) => {
+    a.rules = [LOVE_RULE];
+  });
+  await env.run({ only: ['automations'] });
+  const media = env.graph.state.media[0];
+  const a1 = env.addComment(media.id, { username: 'a.one', text: 'love it', at: Date.now() - 2000 });
+  const a2 = env.addComment(media.id, { username: 'b.two', text: 'love it' });
+  let n = 0;
+  env.graph.state.faults.push({ method: 'POST', path: /\/replies$/, when: () => ++n === 2, error: { code: 190, status: 400, message: 'Error validating access token: The session has been invalidated.' } });
+  const res = await env.run({ only: ['automations'] });
+  assert.ok(res.summary.jobs.automations.error);
+  let auto = await env.read('automations');
+  assert.ok(auto.processed.comments[a1.id], 'the reply that went out is recorded');
+  assert.ok(!auto.processed.comments[a2.id]);
+  assert.equal(auto.stats.replies, 1);
+
+  env.graph.state.faults.length = 0;
+  await env.run({ only: ['automations'] });
+  assert.equal(env.graph.state.replies.filter((r) => r.commentId === a1.id).length, 1);
+  assert.equal(env.graph.state.replies.filter((r) => r.commentId === a2.id).length, 1);
+  auto = await env.read('automations');
+  assert.equal(auto.stats.replies, 2);
+});
+
+test('a failed save keeps the batch, so the next run does not answer the same comments again', async (t) => {
+  const env = await startWorkerEnv();
+  t.after(() => env.close());
+  await env.update('automations', (a) => {
+    a.rules = [LOVE_RULE];
+  });
+  await env.run({ only: ['automations'] });
+  const media = env.graph.state.media[0];
+  const ids = ['u.one', 'u.two', 'u.three', 'u.four', 'u.five', 'u.six'].map((u, i) => env.addComment(media.id, { username: u, text: 'love it', at: Date.now() - (6 - i) * 1000 }).id);
+  const restore = failCommit(env, 'automations: record activity');
+  const res = await env.run({ only: ['automations'] });
+  assert.ok(restore(), 'the save after five replies failed');
+  assert.ok(res.summary.jobs.automations.error);
+  let auto = await env.read('automations');
+  assert.equal(ids.slice(0, 5).filter((id) => auto.processed.comments[id]).length, 5, 'the batch was saved on the way out');
+  assert.equal(auto.stats.replies, 5);
+
+  await env.run({ only: ['automations'] });
+  for (const id of ids) assert.equal(env.graph.state.replies.filter((r) => r.commentId === id).length, 1);
+});
+
+test('comments and messages the account already answered get no second reply when a record is lost', async (t) => {
+  const env = await startWorkerEnv();
+  t.after(() => env.close());
+  await env.update('automations', (a) => {
+    a.rules = [
+      LOVE_RULE,
+      newRule({ id: 'r_hours', name: 'Hours', trigger: { source: 'dm', match: 'any', keywords: ['hours'], mediaIds: null }, actions: [{ type: 'send_dm', texts: ['We are open 9-5.'] }], oncePerUser: false }),
+    ];
+  });
+  await env.run({ only: ['automations'] });
+  const media = env.graph.state.media[0];
+  const top = env.addComment(media.id, { username: 'top.level', text: 'love this', at: Date.now() - 3000 });
+  const parent = env.addComment(media.id, { username: 'thread.starter', text: 'Nice glaze', at: Date.now() - 2000 });
+  const child = env.addComment(media.id, { username: 'thread.reply', text: 'love it too', parentId: parent.id, at: Date.now() - 1000 });
+  const { other, msg } = env.addMessage({ username: 'dm.person', text: 'What are your hours?', at: Date.now() - 1000 });
+  await env.run({ only: ['automations'] });
+  assert.equal(env.graph.state.replies.filter((r) => r.commentId === top.id).length, 1);
+  assert.equal(env.graph.state.replies.filter((r) => r.commentId === parent.id).length, 1, 'a reply is answered on its parent');
+  assert.equal(env.graph.state.sentMessages.filter((m) => m.recipientId === other.id).length, 1);
+
+  // Lose the record of what was done (as if the save after the replies had failed).
+  await env.update('automations', (a) => {
+    for (const id of [top.id, child.id, parent.id]) delete a.processed.comments[id];
+    delete a.processed.messages[msg.id];
+    a.cursors.mediaComments = {};
+    a.cursors.dmUpdatedTime = null;
+  });
+  const mark = env.graph.state.requests.length;
+  await env.run({ only: ['automations'] });
+  assert.equal(postsTo(env, mark, '/replies'), 0);
+  assert.equal(postsTo(env, mark, '/messages'), 0);
+  const auto = await env.read('automations');
+  assert.ok(auto.processed.comments[top.id] && auto.processed.comments[child.id] && auto.processed.messages[msg.id]);
+
+  // A new message after our answer is still answered.
+  env.addMessage({ username: 'dm.person', text: 'and on sundays? hours?' });
+  await env.run({ only: ['automations'] });
+  assert.equal(env.graph.state.sentMessages.filter((m) => m.recipientId === other.id).length, 2);
+});
+
+test('a rate limit or temporary block stops automation writes and pauses later runs', async (t) => {
+  const env = await startWorkerEnv();
+  t.after(() => env.close());
+  await env.update('automations', (a) => {
+    a.rules = [LOVE_RULE];
+  });
+  await env.run({ only: ['automations'] });
+  const media = env.graph.state.media[0];
+  const ids = ['r.one', 'r.two', 'r.three'].map((u, i) => env.addComment(media.id, { username: u, text: 'love it', at: Date.now() - (3 - i) * 1000 }).id);
+  env.addMessage({ username: 'dm.waiting', text: 'hello' });
+  env.graph.state.faults.push({ method: 'POST', path: /\/replies$/, error: { code: 368, status: 400, message: 'It looks like you were misusing this feature by going too fast.' } });
+  let mark = env.graph.state.requests.length;
+  const res = await env.run({ only: ['automations'] });
+  assert.equal(res.exitCode, 0);
+  assert.equal(postsTo(env, mark, '/replies'), 1, 'one attempt, then it stops');
+  assert.equal(env.graph.state.requests.slice(mark).filter((r) => r.path.endsWith('/conversations')).length, 0, 'no more reads either');
+  let auto = await env.read('automations');
+  const until = Date.parse(auto.cursors.pausedUntil);
+  assert.ok(until > Date.now() + 5.5 * 36e5 && until < Date.now() + 6.5 * 36e5, 'error 368 pauses for hours');
+  assert.equal(ids.filter((id) => auto.processed.comments[id]).length, 0);
+
+  // Still paused: no reads, no writes.
+  mark = env.graph.state.requests.length;
+  await env.run({ only: ['automations'], now: Date.now() + 2 * 36e5 });
+  assert.equal(env.graph.state.requests.length - mark, 0);
+
+  // After the pause the waiting comments are answered.
+  env.graph.state.faults.length = 0;
+  await env.run({ only: ['automations'], now: Date.now() + 7 * 36e5 });
+  for (const id of ids) assert.equal(env.graph.state.replies.filter((r) => r.commentId === id).length, 1);
+  auto = await env.read('automations');
+  assert.equal(ids.filter((id) => auto.processed.comments[id]).length, 3);
+});
+
+test('a rate limit on reads pauses automations for at least an hour', async (t) => {
+  const env = await startWorkerEnv();
+  t.after(() => env.close());
+  await env.update('automations', (a) => {
+    a.rules = [LOVE_RULE];
+  });
+  await env.run({ only: ['automations'] });
+  env.addComment(env.graph.state.media[0].id, { username: 'reader', text: 'love it' });
+  env.graph.state.faults.push({ method: 'GET', path: /\/comments$/, error: { code: 80002, status: 400, message: 'There have been too many calls to this Instagram account.' } });
+  const mark = env.graph.state.requests.length;
+  await env.run({ only: ['automations'] });
+  assert.equal(env.graph.state.requests.slice(mark).filter((r) => r.path.endsWith('/comments')).length, 1);
+  const auto = await env.read('automations');
+  const until = Date.parse(auto.cursors.pausedUntil);
+  assert.ok(until >= Date.now() + 55 * 60e3 && until < Date.now() + 65 * 60e3);
+});
+
+test('outbox: an Instagram command is sent at most once, even when its outcome is not saved', async (t) => {
+  const env = await startWorkerEnv();
+  t.after(() => env.close());
+  const media = env.graph.state.media[0];
+  const target = [...env.graph.state.comments.values()].find((c) => c.mediaId === media.id && !c.parentId && !c.hidden);
+  await env.update('inbox', (d) => {
+    d.outbox.push({ id: 'once', type: 'reply_comment', payload: { commentId: target.id, text: 'Only once' }, status: 'pending', createdAt: new Date().toISOString() });
+  });
+  const restore = failCommit(env, 'outbox: process commands');
+  const res = await env.run({ only: ['outbox'] });
+  assert.ok(restore(), 'the outcome commit failed');
+  assert.ok(res.summary.jobs.outbox.error);
+  let inbox = await env.read('inbox');
+  let cmd = inbox.outbox.find((c) => c.id === 'once');
+  assert.equal(cmd.status, 'sending', 'claimed before it was sent');
+  assert.equal(cmd.attempts, 1);
+  assert.equal(env.graph.state.replies.filter((r) => r.text === 'Only once').length, 1);
+
+  const next = await env.run({ only: ['outbox'] });
+  assert.equal(next.exitCode, 0);
+  inbox = await env.read('inbox');
+  cmd = inbox.outbox.find((c) => c.id === 'once');
+  assert.equal(cmd.status, 'failed');
+  assert.match(cmd.error, /may already have been sent/);
+  assert.equal(cmd.maybeSent, true);
+  assert.equal(env.graph.state.replies.filter((r) => r.text === 'Only once').length, 1, 'never sent twice');
+});
+
+test('outbox: a temporary failure is retried on the next run', async (t) => {
+  const env = await startWorkerEnv();
+  t.after(() => env.close());
+  const media = env.graph.state.media[0];
+  const target = [...env.graph.state.comments.values()].find((c) => c.mediaId === media.id && !c.parentId && !c.hidden);
+  await env.update('inbox', (d) => {
+    d.outbox.push({ id: 'retry', type: 'reply_comment', payload: { commentId: target.id, text: 'Second try' }, status: 'pending', createdAt: new Date().toISOString() });
+  });
+  env.graph.state.faults.push({ method: 'POST', path: /\/replies$/, times: 1, error: { code: 2, status: 503, message: 'Service temporarily unavailable' } });
+  await env.run({ only: ['outbox'] });
+  let cmd = (await env.read('inbox')).outbox.find((c) => c.id === 'retry');
+  assert.equal(cmd.status, 'pending');
+  assert.equal(cmd.attempts, 1);
+  await env.run({ only: ['outbox'] });
+  cmd = (await env.read('inbox')).outbox.find((c) => c.id === 'retry');
+  assert.equal(cmd.status, 'done');
+  assert.equal(cmd.attempts, 2);
+  assert.equal(env.graph.state.replies.filter((r) => r.text === 'Second try').length, 1);
+});
+
+test('a DM Instagram may have received (connection dropped) is never sent again and gets no public claim', async (t) => {
+  const env = await startWorkerEnv();
+  t.after(() => env.close());
+  await env.update('automations', (a) => {
+    a.rules = [PRICE_RULE];
+  });
+  await env.run({ only: ['automations'] });
+  const c = env.addComment(env.graph.state.media[0].id, { username: 'flaky.line', text: 'price?' });
+  env.graph.state.faults.push({ method: 'POST', path: /\/messages$/, times: 1, destroy: true });
+  let mark = env.graph.state.requests.length;
+  const res = await env.run({ only: ['automations'] });
+  assert.equal(res.exitCode, 0);
+  assert.equal(postsTo(env, mark, '/messages'), 1, 'not resent within the run');
+  assert.ok(!env.graph.state.replies.some((r) => r.commentId === c.id), 'no "check your DMs" without a confirmed DM');
+  const auto = await env.read('automations');
+  assert.ok(auto.processed.comments[c.id]);
+  assert.ok(auto.processed.users.r_price[c.fromId], 'the person is not DMed again by this rule');
+  assert.equal(auto.activity[0].unsure, true);
+
+  mark = env.graph.state.requests.length;
+  await env.run({ only: ['automations'] });
+  assert.equal(postsTo(env, mark, '/messages'), 0);
+});
+
+test('outbox: a command Instagram may have received is failed, not retried', async (t) => {
+  const env = await startWorkerEnv();
+  t.after(() => env.close());
+  const media = env.graph.state.media[0];
+  const target = [...env.graph.state.comments.values()].find((c) => c.mediaId === media.id && !c.parentId && !c.hidden);
+  await env.update('inbox', (d) => {
+    d.outbox.push({ id: 'flaky', type: 'reply_comment', payload: { commentId: target.id, text: 'Maybe sent' }, status: 'pending', createdAt: new Date().toISOString() });
+  });
+  env.graph.state.faults.push({ method: 'POST', path: /\/replies$/, times: 1, destroy: true });
+  let mark = env.graph.state.requests.length;
+  await env.run({ only: ['outbox'] });
+  assert.equal(postsTo(env, mark, '/replies'), 1);
+  const cmd = (await env.read('inbox')).outbox.find((c) => c.id === 'flaky');
+  assert.equal(cmd.status, 'failed');
+  assert.match(cmd.error, /may have gone through/);
+  assert.equal(cmd.maybeSent, true);
+  mark = env.graph.state.requests.length;
+  await env.run({ only: ['outbox'] });
+  assert.equal(postsTo(env, mark, '/replies'), 0);
+});

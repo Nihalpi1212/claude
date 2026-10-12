@@ -162,7 +162,9 @@ export function uid(prefix = '') {
  *     actions: [{type: 'reply_comment'|'private_reply'|'send_dm'|'hide_comment'|'ai_reply', texts: [string], guidance?}],
  *     oncePerUser: bool, createdAt, stats: {fired, lastFiredAt} }
  *
- * Outbox command (inbox.outbox[]): { id, type, payload, status: 'pending'|'done'|'failed', error, createdAt, doneAt }
+ * Outbox command (inbox.outbox[]): { id, type, payload, status: 'pending'|'sending'|'done'|'failed', error, createdAt, doneAt,
+ *   attempts, maybeSent } ('sending' = claimed by a worker run; a command left 'sending' becomes 'failed' with maybeSent=true
+ *   and is never re-sent automatically, because Instagram may already have received it)
  *   types: 'publish_now' {postId} | 'reply_comment' {commentId, text} | 'hide_comment' {commentId, hide} |
  *          'delete_comment' {commentId} | 'send_dm' {recipientId, text} | 'private_reply' {commentId, text}
  *

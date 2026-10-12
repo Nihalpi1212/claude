@@ -43,6 +43,7 @@ function load(name, force = false) {
   const e = entry(name);
   if (e.promise && !force) return e.promise;
   e.loading = e.data === null;
+  e.reloading = true;
   const p = getStore()
     .read(name)
     .then((data) => {
@@ -50,6 +51,7 @@ function load(name, force = false) {
       e.data = data;
       e.error = null;
       e.loading = false;
+      e.reloading = false;
       e.version++;
       emit(name);
       return data;
@@ -58,6 +60,7 @@ function load(name, force = false) {
       if (e.promise !== p) return e.data;
       e.error = err;
       e.loading = false;
+      e.reloading = false;
       emit(name);
       throw err;
     });
@@ -80,6 +83,8 @@ export function onAnyChange(fn) {
 /** Promise of the current version of a document (no subscription). */
 export function readDoc(name) {
   const e = entries.get(name);
+  // While a (re)load is in flight, wait for it so callers never get the copy it is replacing.
+  if (e && e.reloading && e.promise) return e.promise.then((d) => structuredClone(d));
   if (e && e.data && !e.error) return Promise.resolve(structuredClone(e.data));
   return load(name).then((d) => structuredClone(d));
 }
@@ -146,6 +151,7 @@ function applyLocal(name, value) {
   e.error = null;
   e.loading = false;
   e.version++;
+  e.reloading = false;
   e.promise = Promise.resolve(value);
   emit(name);
 }

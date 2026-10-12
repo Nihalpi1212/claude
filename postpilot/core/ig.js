@@ -1199,6 +1199,8 @@ export async function connectInstagram({ mode = 'instagram', token, igBase, fbBa
       name: me.name,
       profilePictureUrl: me.profilePictureUrl,
       accountType: me.accountType,
+      followersCount: me.followersCount ?? null,
+      mediaCount: me.mediaCount ?? null,
       apiVersion: version,
       connectedAt: now,
     };
@@ -1276,6 +1278,8 @@ export async function connectInstagram({ mode = 'instagram', token, igBase, fbBa
     name: me.name,
     profilePictureUrl: me.profilePictureUrl,
     accountType: me.accountType || 'BUSINESS',
+    followersCount: me.followersCount ?? null,
+    mediaCount: me.mediaCount ?? null,
     pageId: chosen.pageId,
     pageName: chosen.pageName,
     pageToken: chosen.pageToken,
