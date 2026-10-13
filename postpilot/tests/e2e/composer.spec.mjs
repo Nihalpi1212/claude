@@ -737,7 +737,7 @@ describe('composer', () => {
         return iso ? { iso, date: dayKey(new Date(iso), tz), time: timeKey(new Date(iso), tz) } : null;
       });
     /** Click the composer's first best-time chip and read back the time it set. */
-    const chipTime = async () => {
+    const chipTimeOnce = async () => {
       await openNew(page);
       await page.locator('.cmp-best .chip-main').first().click();
       const when = page.locator('#cmp-when');
@@ -745,9 +745,20 @@ describe('composer', () => {
       await closeComposer(page);
       return picked;
     };
+    // The chips are recomputed when the posts document refreshes after a write, so a click can land on a
+    // chip that is being replaced: retry briefly until the composer shows the expected time.
+    const chipTime = async (expected) => {
+      let picked;
+      for (let i = 0; i < 6; i++) {
+        picked = await chipTimeOnce();
+        if (picked.date === expected.date && picked.time === expected.time) break;
+        await page.waitForTimeout(500);
+      }
+      return picked;
+    };
     const before = await firstBest();
     assert.ok(before, 'there is a free best time');
-    assert.deepEqual(await chipTime(), { date: before.date, time: before.time });
+    assert.deepEqual(await chipTime(before), { date: before.date, time: before.time });
     // A post the owner is posting by hand: planned long ago, its reminder went out at that best time.
     const id = await page.evaluate(async (at) => {
       const data = await import('/postpilot/js/data.js');
@@ -762,7 +773,7 @@ describe('composer', () => {
       const after = await firstBest();
       assert.ok(after && after.iso !== before.iso, 'the reminded post takes that time');
       assert.ok(Math.abs(Date.parse(after.iso) - Date.parse(before.iso)) >= 20 * 36e5, 'at least the 20-hour gap away');
-      assert.deepEqual(await chipTime(), { date: after.date, time: after.time });
+      assert.deepEqual(await chipTime(after), { date: after.date, time: after.time });
     } finally {
       await page.evaluate(async (id) => {
         const data = await import('/postpilot/js/data.js');
