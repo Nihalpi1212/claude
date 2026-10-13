@@ -1,0 +1,12 @@
+{
+  "v": 1,
+  "app": "postpilot",
+  "kdf": {
+    "name": "PBKDF2",
+    "hash": "SHA-256",
+    "iterations": 600000,
+    "salt": "FB9T9spq4zymyqMW67es4Q=="
+  },
+  "wrapped": "DwvM54zq8SamPKwuHIWKms4unEByP1YzgSBKGWbQGFOf6H8mDXd8f6SZxNVJ49qmlu+1no2dxtHbU2xd",
+  "createdAt": "2026-10-13T09:29:53.565Z"
+}
