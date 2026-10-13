@@ -245,7 +245,9 @@ test('feed errors are recorded on the feed (logged once) and checked again an ho
   feed = (await env.read('lists')).lists[0].feeds[0];
   assert.match(feed.error, /web page, not a feed/);
   web.routes.set(`${SITE}/missing.xml`, ok(rss([]), 'application/rss+xml'));
-  await run(env, web, { now: new Date(t0 + 6 * HOUR).toISOString() });
+  // Third failure in a row: the next check waits 2 hours (feedInterval). The run clock keeps ticking
+  // from its start time, so check a minute past the boundary instead of exactly on it.
+  await run(env, web, { now: new Date(t0 + 6 * HOUR + 60e3).toISOString() });
   assert.equal((await env.read('lists')).lists[0].feeds[0].error, null);
 });
 
