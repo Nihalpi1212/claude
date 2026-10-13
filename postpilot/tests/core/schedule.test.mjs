@@ -500,6 +500,35 @@ test('planAutopilot: never files still downloading or failed, wrong-shape photos
   assert.equal(feedOnly.code, 'no_assets');
 });
 
+test('planAutopilot: files downloaded from a link are not in the useAllUnused fallback (a deleted queue leaves them behind)', () => {
+  const assets = [
+    // An RSS image from another site whose queue was deleted, and a CSV link whose item was removed.
+    newAsset({ id: 'rss', width: 1200, height: 630, tags: ['feed'], sourceUrl: 'https://someone-else.example/p/1.jpg', notes: 'From the feed "Someone else\'s blog".' }),
+    newAsset({ id: 'csv', width: 1080, height: 1350, sourceUrl: 'https://cdn.example/me.jpg' }),
+    newAsset({ id: 'own', width: 1080, height: 1080 }),
+  ];
+  const ap = { ...AP, postsPerWeek: 7, useAllUnused: true };
+  assert.deepEqual(planAutopilot({ autopilot: ap, assets, posts: [], lists: [], tz: TZ, now: NOW }).create.map((c) => c.assetIds), [['own']]);
+  assert.equal(planAutopilot({ autopilot: ap, assets: assets.slice(0, 2), posts: [], lists: [], tz: TZ, now: NOW }).code, 'no_assets');
+  // Marking one for autopilot is the owner's choice: it is used.
+  const marked = assets.map((a) => (a.id === 'csv' ? { ...a, autopilot: true } : a));
+  assert.deepEqual(planAutopilot({ autopilot: ap, assets: marked, posts: [], lists: [], tz: TZ, now: NOW }).create.map((c) => c.assetIds), [['csv'], ['own']]);
+});
+
+test('planAutopilot: a reminder post being posted by hand keeps the minimum gap like a scheduled one', () => {
+  const now = '2026-10-12T09:00:00Z'; // Monday
+  const ap = { ...AP, postsPerWeek: 7, horizonDays: 1, slotStrategy: 'fixed', fixedSlots: [{ weekday: 1, time: '12:00' }], minGapHours: 20 };
+  const assets = [newAsset({ id: 'n1', autopilot: true })];
+  const reminder = (status, extra = {}) => newPost({ status, publishMode: 'reminder', scheduledAt: '2026-10-12T08:30:00Z', ...extra });
+  const plan = (post) => planAutopilot({ autopilot: ap, assets, posts: [post], tz: 'UTC', now }).code;
+  assert.equal(plan(reminder('scheduled')), 'no_slots');
+  assert.equal(plan(reminder('published', { publishedAt: '2026-10-12T08:40:00Z' })), 'no_slots');
+  assert.equal(plan(reminder('reminded', { reminderSentAt: '2026-10-12T08:30:00Z' })), 'no_slots', 'the reminder went out 30 minutes ago');
+  assert.equal(plan(reminder('reminded', { reminderSentAt: null })), 'no_slots', 'timed at scheduledAt without reminderSentAt');
+  // A reminder sent more than minGapHours ago no longer blocks the slot.
+  assert.equal(plan(reminder('reminded', { scheduledAt: '2026-10-11T08:00:00Z', reminderSentAt: '2026-10-11T08:00:00Z' })), 'planned');
+});
+
 test('planAutopilot: allowed types, long folders and video fallback', () => {
   const eleven = Array.from({ length: 11 }, (_, i) => newAsset({ id: `c${i}`, folderId: 'big', autopilot: true }));
   const r = planAutopilot({ autopilot: { ...AP, postsPerWeek: 7 }, assets: eleven, tz: TZ, now: NOW });
@@ -597,6 +626,27 @@ test('recycleCandidates: joins top media with the Postpilot posts that published
   assert.deepEqual(recycleCandidates({ mediaStats, posts: [...posts, rejected], archive, assets, now: NOW }).map((c) => c.recycleOf), ['ig2']);
   const oldReject = { ...rejected, updatedAt: daysAgo(200) };
   assert.deepEqual(recycleCandidates({ mediaStats, posts: [...posts, oldReject], archive, assets, now: NOW }).map((c) => c.recycleOf), ['ig1', 'ig2']);
+});
+
+test('recyclePicks / recycleCandidates: a repost deleted from Instagram still counts as recent', () => {
+  const daysAgo = (d) => new Date(Date.parse(NOW) - d * 864e5).toISOString();
+  const mediaStats = { M_TOP: { id: 'M_TOP', productType: 'FEED', timestamp: daysAgo(200), metrics: { reach: 1000, totalInteractions: 300 } } };
+  const assets = [newAsset({ id: 'a1' })];
+  const original = newPost({ id: 'p_top', status: 'published', igMediaId: 'M_TOP', publishedAt: daysAgo(200), media: [{ assetId: 'a1', kind: 'image' }] });
+  const repost = newPost({ id: 'p_re', source: 'recycle', recycleOf: 'M_TOP', status: 'published', igMediaId: 'M_RE', scheduledAt: daysAgo(3), publishedAt: daysAgo(3), media: [{ assetId: 'a1', kind: 'image' }] });
+  const pick = (posts) => recyclePicks({ mediaStats, posts, now: NOW, afterDays: 120 }).map((m) => m.id);
+  assert.deepEqual(pick([original, repost]), []);
+  // "Delete from Instagram" (composer): canceled with deletedFromInstagramAt. Posting it again at once would undo that.
+  const deleted = { ...repost, status: 'canceled', deletedFromInstagramAt: daysAgo(1), history: [{ at: daysAgo(1), event: 'deleted from Instagram' }] };
+  assert.deepEqual(pick([original, deleted]), []);
+  assert.deepEqual(recycleCandidates({ mediaStats, posts: [original, deleted], assets, now: NOW, afterDays: 120 }), []);
+  // A repost canceled before it went out frees the original, as before.
+  const canceled = { ...repost, status: 'canceled', igMediaId: null, publishedAt: null, scheduledAt: daysAgo(-1) };
+  assert.deepEqual(pick([original, canceled]), ['M_TOP']);
+  assert.deepEqual(recycleCandidates({ mediaStats, posts: [original, canceled], assets, now: NOW, afterDays: 120 }).map((c) => c.recycleOf), ['M_TOP']);
+  // Once afterDays have passed since the deleted repost, the original can come back.
+  const longAgo = { ...deleted, scheduledAt: daysAgo(130), publishedAt: daysAgo(130), deletedFromInstagramAt: daysAgo(125) };
+  assert.deepEqual(pick([original, longAgo]), ['M_TOP']);
 });
 
 test('planAutopilot: recycling adds about one repost per week of the horizon, after the pool', () => {

@@ -129,7 +129,12 @@ commits reachable by their id for some time, so treat anything published as publ
 Post lifecycle: `draft` -> `scheduled` -> `publishing` -> `published` | `failed`; `canceled` is
 terminal. Reminder posts (`publishMode: 'reminder'`) go `scheduled` -> `reminded` (the worker sends a
 push instead of calling Instagram) -> `published` when the owner taps "Mark as posted" in `#/post-now/<id>`.
-A post deleted from Instagram becomes `canceled` with `deletedFromInstagramAt`; its media stays "used". Only the worker moves a post out of `scheduled`. The app asks for immediate publishing by
+A post deleted from Instagram becomes `canceled` with `deletedFromInstagramAt`; its media stays "used".
+Only the worker moves a post from `scheduled` to `publishing`, `published` or `failed`, and a reminder post to
+`reminded`. The app moves a scheduled post back to `draft` ("Move to drafts"), to `canceled` (delete), to
+`reminded` ("Post by hand now" in the composer), or to `published` when the owner taps "Mark as posted" in
+`#/post-now/<id>` (which accepts `reminded`, `scheduled`, `draft` and `failed` posts; "Remind me again in 1 hour"
+there puts a reminder post back to `scheduled`). The app asks for immediate publishing by
 setting `scheduledAt` to now, `status: 'scheduled'`, then dispatching the worker workflow.
 
 ## 5. Instagram client (`core/ig.js`) and publishing (`core/publish.js`)
@@ -247,10 +252,11 @@ Order per run (each job isolated with try/catch; one failing job never blocks th
 9. `stories` capture live story insights before they expire
 10. `analytics` daily snapshot (once per local day), media insights refresh, per-post history, audience weekly
 11. `competitors` daily (Facebook Login only)
-12. `reports` monthly report on days 1-3 of a month
+12. `reports` monthly report, checked on days 1-3 of a month and made on the 2nd (once the month's last day
+    was read again) or the 3rd, never the 1st
 13. `bio` refresh grid images daily
 14. `housekeeping` sweep the throwaway media branch, trim logs, archive old posts
-15. `maintenance` keep-alive and monthly compaction of the data branch
+15. `maintenance` keep-alive of the schedule (every ~20 days) and monthly compaction of the data branch
 Then: Web Push notifications for this run's events to `settings.notifications.subscriptions`, and the run record.
 
 Public-log rule: Actions logs of a public repo are public. The worker prints ONLY counts and

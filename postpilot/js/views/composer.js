@@ -13,6 +13,7 @@ import { loadViewCss } from '../css.js';
 import { getStore, refreshNow, transact, useDocs } from '../data.js';
 import { importState, isImageFile, isVideoFile, prepareFile, thumbBase64, uploadPrepared, videoFrame } from '../media.js';
 import { reminderDelivery } from '../push.js';
+import { SOURCE_LABEL } from '../ui/calendar.js';
 import { CropEditor, ratioLabel } from '../ui/crop-editor.js';
 import { Icon } from '../ui/icons.js';
 import {
@@ -64,7 +65,6 @@ const FIELD_TARGET = { type: 'cmp-type', media: 'cmp-media', caption: CAPTION_ID
 const SOFT_IN_REMINDER = new Set(['caption', 'firstComment', 'location']);
 const ALT_MAX = 1000;
 const LOCKED = ['publishing', 'published', 'canceled'];
-const SOURCE_LABEL = { autopilot: 'Autopilot', evergreen: 'Evergreen queue', csv: 'Imported', recycle: 'Recycled' };
 const EVENT_LABEL = {
   created: 'Created',
   draft: 'Saved as draft',
@@ -1032,10 +1032,11 @@ function PublishModeSection({ value, onChange, delivery, onNotifications }) {
 }
 
 function StatusRow({ post }) {
-  const src = SOURCE_LABEL[post.source];
+  // Source names as in the planner (shared map); manual posts get no badge.
+  const src = post.source && post.source !== 'manual' ? SOURCE_LABEL[post.source] : null;
   const reminded = post.status === 'reminded';
   return html`<div class="cmp-status row">
-    <${StatusPill} status=${post.needsApproval && post.status === 'draft' ? 'needs-approval' : reminded ? 'needs-approval' : post.status} label=${reminded ? 'Post by hand' : undefined} />
+    <${StatusPill} status=${post.needsApproval && post.status === 'draft' ? 'needs-approval' : post.status} />
     ${post.publishMode === 'reminder' && !reminded ? html`<${Badge} tone="outline">Reminder<//>` : null}
     ${src ? html`<${Badge} tone="outline">${src}<//>` : null}
     <span class="text-sm muted">Created ${relative(post.createdAt)}${post.updatedAt && post.updatedAt !== post.createdAt ? ` · edited ${relative(post.updatedAt)}` : ''}</span>
@@ -1820,8 +1821,8 @@ async function mediaGone(ig, id) {
  * API on 2025-12-03 per research_1.md section 11; Meta documents DELETE in its examples and POST in
  * places, unverified which is canonical, so this follows the DELETE examples). DELETE is idempotent:
  * when a retry finds the media already gone (and a read confirms it), the post is recorded as deleted.
- * On success the post is canceled and its media leaves the autopilot pool: a canceled post no longer
- * counts as using its files (core/schedule.js unusedAssets), so autopilot could post them again.
+ * On success the post is canceled with deletedFromInstagramAt, so its media still counts as used (see
+ * core/schedule.js freesMedia), and its files are taken out of the autopilot pool (asset.autopilot = false).
  */
 function DeleteFromInstagram({ post, ig, mode, toast, confirm }) {
   const [busy, setBusy] = useState(false);

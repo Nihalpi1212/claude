@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import {
+  brokenAssetIds,
   clipText,
   decodeEntities,
   DOWNLOAD_RETRY_BASE_MS,
@@ -25,7 +26,7 @@ import {
   stripJpegMetadata,
 } from '../../core/feed.js';
 import { mp4Info } from '../../core/mp4.js';
-import { LIMITS } from '../../core/model.js';
+import { LIMITS, newAsset } from '../../core/model.js';
 
 const fixture = (name) => readFile(new URL(`../../dev/fixtures/${name}`, import.meta.url));
 const text = async (name) => String(await fixture(name));
@@ -125,6 +126,43 @@ test('parseXml: resolves namespace prefixes for elements', () => {
   assert.equal(m.ns, 'http://search.yahoo.com/mrss/');
   assert.equal(c.prefix, 'content');
   assert.equal(c.ns, '');
+});
+
+test('parseXml: hundreds of namespace prefixes on the root cost linear time and memory (hostile 2 MB feed)', () => {
+  // The reviewer's feed: the root declares N prefixes, then 2 MB of elements. Each element used to copy
+  // every prefix in scope, so N=1000 ran out of memory; every child declaring one more prefix as well.
+  const decls = Array.from({ length: 1000 }, (_, i) => `xmlns:p${i}="u${i}"`).join(' ');
+  const head = `<rss ${decls} xmlns:media="http://search.yahoo.com/mrss/"><channel><title>T</title><item><guid>1</guid><media:content url="https://a.example/x.jpg" medium="image"/></item>`;
+  const bodyA = '<a/>'.repeat(Math.floor((2 * 1024 * 1024 - head.length) / 8));
+  const bodyB = '<a xmlns:q="u"/>'.repeat(30000);
+  const t0 = performance.now();
+  const before = process.memoryUsage().heapUsed;
+  const r = parseFeed(`${head}${bodyA}${bodyB}</channel></rss>`);
+  const ms = performance.now() - t0;
+  assert.equal(r.items.length, 1);
+  assert.equal(r.items[0].imageUrl, 'https://a.example/x.jpg', 'prefixes still resolve');
+  assert.ok(ms < 5000, `took ${Math.round(ms)} ms`);
+  assert.ok(process.memoryUsage().heapUsed - before < 600 * 1024 * 1024, 'no per-element copy of the prefixes');
+  // Scopes nest and shadow; prefixes that are Object.prototype names resolve to nothing.
+  const { root } = parseXml('<r xmlns:a="one"><x xmlns:a="two"><a:i/></x><a:j/><constructor:k/><__proto__:l/><toString:m xmlns:toString="ts"/></r>');
+  const [x, j, k, l, m] = root.children[0].children;
+  assert.equal(x.children[0].ns, 'two');
+  assert.equal(j.ns, 'one');
+  assert.equal(k.ns, '');
+  assert.equal(l.ns, '');
+  assert.equal(m.ns, 'ts');
+  assert.equal(root.children[0].scope, undefined, 'scopes are not kept on the elements');
+});
+
+test('parseXml: stops after 200,000 elements (truncated) and keeps at most 64 attributes per tag', () => {
+  const many = parseXml(`<r>${'<a/>'.repeat(200_010)}<last/></r>`);
+  assert.equal(many.truncated, true);
+  assert.equal(many.root.children[0].children.length, 200_000 - 1);
+  assert.equal(parseXml('<r><a/></r>').truncated, false);
+  const attrs = Array.from({ length: 100 }, (_, i) => `a${i}="${i}"`).join(' ');
+  const { root } = parseXml(`<r ${attrs}><c/></r>`);
+  assert.equal(Object.keys(root.children[0].attrs).length, 64);
+  assert.equal(root.children[0].children[0].name, 'c', 'the tag still ends in the right place');
 });
 
 // ---------------------------------------------------------------------------
@@ -268,6 +306,30 @@ test('newestFirst: sorts by date when every item has one, else keeps feed order'
   assert.deepEqual(newestFirst([a, c, b]).map((x) => x.guid), ['a', 'c', 'b']);
 });
 
+test('ogImage: a 1 MB page of long attribute-less tags is read in linear time', () => {
+  const junk = `<meta ${'a'.repeat(3990)}>`.repeat(250); // about 1 MB
+  const t0 = performance.now();
+  assert.equal(ogImage(`<head>${junk}<meta property="og:image" content="/hero.jpg"></head>`, 'https://a.example/p'), 'https://a.example/hero.jpg');
+  const img = parseFeed(`<rss><channel><item><guid>1</guid><description><![CDATA[${`<img ${'b'.repeat(3990)}>`.repeat(120)}<img src="https://a.example/in.jpg" width="1080">]]></description></item></channel></rss>`);
+  assert.equal(img.items[0].imageUrl, 'https://a.example/in.jpg');
+  assert.ok(performance.now() - t0 < 1500, `took ${Math.round(performance.now() - t0)} ms`);
+  // Same answers as before for ordinary markup: values with spaces, unquoted, names without values.
+  assert.equal(ogImage('<meta async content = "https://a.example/a b.jpg" property=og:image>', ''), 'https://a.example/a%20b.jpg');
+  assert.equal(ogImage(`<meta property='og:image' content=/x.jpg/>`, 'https://a.example/'), 'https://a.example/x.jpg/');
+});
+
+test('brokenAssetIds: failed or refused downloads and photos outside the feed range', () => {
+  const assets = [
+    newAsset({ id: 'ok', width: 1080, height: 1350 }),
+    newAsset({ id: 'wide', width: 1200, height: 600 }),
+    newAsset({ id: 'refused', importUrl: 'https://a.example/x.png', importError: 'This is a PNG image.' }),
+    newAsset({ id: 'pending', importUrl: 'https://a.example/y.jpg' }),
+    newAsset({ id: 'video', kind: 'video', width: 1920, height: 600 }),
+  ];
+  assert.deepEqual([...brokenAssetIds(assets)].sort(), ['refused', 'wide']);
+  assert.deepEqual([...brokenAssetIds(null)], []);
+});
+
 test('ogImage: og:image in any attribute order, relative URLs, twitter and image_src fallbacks', async () => {
   const page = await text('page-og.html');
   assert.equal(ogImage(page, 'https://studionorth.example/2026/10/kiln-opening/'), 'https://studionorth.example/wp-content/uploads/2026/10/kiln-share.jpg?ver=2&crop=1');
@@ -354,6 +416,35 @@ test('stripJpegMetadata: removes EXIF (with GPS), IPTC and comments, keeps JFIF,
   assert.equal(stripJpegMetadata(clean), clean, 'nothing to strip: same bytes');
   const notJpeg = new Uint8Array([1, 2, 3, 4]);
   assert.equal(stripJpegMetadata(notJpeg), notJpeg);
+});
+
+test('stripJpegMetadata: cuts what follows the image (motion photo, MPO secondary image) and the MPF index, keeps ICC profiles', () => {
+  const ascii = (s) => [...s].map((c) => c.charCodeAt(0));
+  const seg = (marker, body) => [0xff, marker, ((body.length + 2) >> 8) & 255, (body.length + 2) & 255, ...body];
+  const icc = seg(0xe2, [...ascii('ICC_PROFILE'), 0, 1, 1, 9, 9]);
+  const mpf = seg(0xe2, [...ascii('MPF'), 0, ...ascii('MM'), 0, 42, 9, 9]);
+  const maker = seg(0xea, ascii('vendor serial 123')); // APP10
+  const main = jpeg({ width: 800, height: 1000, orientation: 1, extra: [icc, mpf, maker] });
+  // A secondary image with its own EXIF/GPS (MPO), then a motion-photo MP4.
+  const second = jpeg({ width: 400, height: 500, orientation: 1 });
+  const video = [0, 0, 0, 24, ...ascii('ftypisom'), 0, 0, 0, 0, ...ascii('mp42isom'), ...ascii('MotionPhoto_Data')];
+  const src = new Uint8Array([...main, ...second, ...video]);
+  const out = stripJpegMetadata(src);
+  const s = String.fromCharCode(...out);
+  assert.ok(!s.includes('GPS') && !s.includes('Exif') && !s.includes('MPF') && !s.includes('vendor') && !s.includes('ftyp') && !s.includes('MotionPhoto'));
+  assert.ok(s.includes('ICC_PROFILE') && s.includes('JFIF'));
+  assert.deepEqual([...out.subarray(-7)], [0x12, 0x34, 0xff, 0x00, 0x56, 0xff, 0xd9], 'ends with the main image');
+  assert.equal(jpegInfo(out).width, 800);
+  // A progressive JPEG: tables and further scans between the scans are kept up to the real end.
+  const dht = seg(0xc4, [0x10, ...new Array(16).fill(0)]);
+  const scan2 = [...seg(0xda, [1, 1, 0, 0, 63, 0]), 0x77, 0xff, 0x00, 0xff, 0xd3, 0x88];
+  const prog = jpeg({ sof: 0xc2 });
+  const progressive = new Uint8Array([...prog.subarray(0, -2), ...dht, ...scan2, 0xff, 0xd9, ...ascii('trailer')]);
+  const p = stripJpegMetadata(progressive);
+  assert.deepEqual([...p], [...progressive.subarray(0, progressive.length - 7)], 'second scan kept, trailer cut');
+  // No end marker at all: nothing after the scan data is cut.
+  const open = jpeg().subarray(0, -2);
+  assert.equal(stripJpegMetadata(open), open);
 });
 
 /** MP4 boxes for mp4Info tests. */

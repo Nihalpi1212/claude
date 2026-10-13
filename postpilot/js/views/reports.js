@@ -208,12 +208,11 @@ function TopPostsTable({ ov, tz, rows: given, caption = 'Top posts', assetFor })
   return html`<div class="rp-table"><${DataTable} dense columns=${cols} rows=${rows} rowKey=${(m) => m.id} caption=${caption} /></div>`;
 }
 
-/** Campaign: the posts in the period that carry one label, their totals, averages and top post. */
+/**
+ * Campaign: the posts in the period that carry one label, their totals, averages and top post. Only in
+ * the report once a label is chosen (the options panel says so), so no instruction to the app user prints.
+ */
 function CampaignBlock({ a, ov, tz, label }) {
-  const anyLabels = a.labels && a.labels.size > 0;
-  if (!label) {
-    return html`<p class="rp-empty">${anyLabels ? 'Pick a label under Campaign in the report options.' : 'No published post has a label yet. Add labels to posts in the composer (for example a campaign name).'}</p>`;
-  }
   const list = mediaWithLabel(ov.posts, a.labels, label);
   if (!list.length) return html`<p class="rp-empty">No posts labelled “${label}” were published in this period.</p>`;
   const c = campaignStats(list);
@@ -354,7 +353,7 @@ export function ReportDocument({ a, ov, tz, title, sections, aiText, compare, ac
         <//>`
       : null}
     ${on('top') ? html`<${Section} n=${next()} title="Top posts"><${TopPostsTable} ov=${ov} tz=${tz} /><//>` : null}
-    ${on('campaign') ? html`<${Section} n=${next()} title=${campaignLabel ? `Campaign: ${campaignLabel}` : 'Campaign'} class="rp-campaign-section"><${CampaignBlock} a=${a} ov=${ov} tz=${tz} label=${campaignLabel} /><//>` : null}
+    ${on('campaign') && campaignLabel ? html`<${Section} n=${next()} title=${`Campaign: ${campaignLabel}`} class="rp-campaign-section"><${CampaignBlock} a=${a} ov=${ov} tz=${tz} label=${campaignLabel} /><//>` : null}
     ${on('reels')
       ? html`<${Section} n=${next()} title="Reels">
           ${reels.length
@@ -653,7 +652,12 @@ export default function ReportsView() {
               <//>
             </fieldset>
             ${prefs.sections.includes('campaign')
-              ? html`<${Field} label="Campaign" hint=${campaignOpts.length ? 'Posts in the date range that carry this label.' : 'No post in this range has a label. Add labels in the composer.'}>
+              ? html`<${Field} label="Campaign"
+                  hint=${!campaignOpts.length
+                    ? 'No post in this range has a label, so the Campaign section is left out. Add labels in the composer (for example a campaign name).'
+                    : prefs.campaignLabel
+                      ? 'Posts in the date range that carry this label.'
+                      : 'Choose a label, or the Campaign section is left out of the report.'}>
                   <${Select} options=${campaignOpts} value=${prefs.campaignLabel || null} placeholder="Choose a label"
                     onChange=${(v) => setPrefs((p) => ({ ...p, campaignLabel: v || '' }))} />
                 <//>`
@@ -669,7 +673,7 @@ export default function ReportsView() {
                     </div>
                     ${aiError ? html`<${Callout} tone="danger" title="Could not write the summary">${aiError}<//>` : null}
                     ${aiText ? html`<${TextArea} aria-label="AI summary text" value=${aiText} onChange=${setAiText} rows=${4} />` : null}`
-                : html`<p class="field-hint">Add an Anthropic API key in <a href="#/settings?section=ai">Settings → AI</a> to add a written summary.</p>`}
+                : html`<p class="field-hint">Turn on AI in <a href="#/settings?section=ai">Settings → AI</a> (an Anthropic API key and “Use AI features”) to add a written summary.</p>`}
             </div>
           </div>
         <//>`}

@@ -29,6 +29,19 @@ function trackErrors(page) {
   return errors;
 }
 
+/**
+ * Wait until `fn` (run in the page, may be async) returns something truthy. page.waitForFunction
+ * takes the Promise an async function returns as truthy, so it would not wait at all.
+ */
+async function pollPage(page, fn, arg, { timeout = 90_000, every = 1000 } = {}) {
+  const deadline = Date.now() + timeout;
+  for (;;) {
+    if (await page.evaluate(fn, arg)) return;
+    if (Date.now() > deadline) throw new Error(`Timed out after ${timeout} ms waiting for: ${fn}`);
+    await new Promise((r) => setTimeout(r, every));
+  }
+}
+
 async function screenshots(h, hash, name, waitFor) {
   for (const [vw, vh, tag] of [[1280, 860, 'desktop'], [390, 844, 'phone']]) {
     for (const scheme of ['light', 'dark']) {
@@ -157,6 +170,90 @@ test('settings: sections, theme, AI key + test, backup, worker, activity log', {
     await sec.getByRole('button', { name: 'Change passphrase', exact: true }).click();
     await sec.getByText('The current passphrase is not right').waitFor({ timeout: 20_000 });
 
+    // Recent runs name what the newer jobs did (reminders, feeds, downloads, invites, reports, reposts).
+    // (The run started with "Run now" above finishes first: it would otherwise be listed on top.)
+    await pollPage(page, async () => (await (await fetch('/mock/gh/repos/demo/postpilot/actions/workflows/postpilot-worker.yml/runs')).json()).workflow_runs.every((r) => r.status === 'completed'));
+    await page.evaluate(async () => {
+      const { getStore, mutate } = await import('/postpilot/js/data.js');
+      await getStore().refresh(); // the worker's run just committed: start from the latest commit
+      const t0 = Date.now() + 3600e3; // newer than the worker's own runs, so they are listed first
+      const at = (min) => new Date(t0 + min * 60e3).toISOString();
+      const run = (min, counts) => ({ startedAt: at(min), finishedAt: at(min), durationMs: 1000, ok: true, trigger: 'workflow_dispatch', counts: { published: 0, failed: 0, replies: 0, dms: 0, hidden: 0, stories: 0, snapshots: 0, ...counts }, errors: [] });
+      await mutate('log', (d) => {
+        d.runs = [
+          run(5, { reminded: 1 }),
+          run(4, { feedsChecked: 1, feedItems: 3, downloaded: 4, downloadFailed: 1 }),
+          run(3, { invitesNew: 2, invitesAccepted: 1 }),
+          run(2, { reportsCreated: 1 }),
+          run(1, { autopilotCreated: 2, reposts: 2 }),
+          ...(d.runs || []),
+        ];
+      }, { message: 'e2e: runs of the newer jobs' });
+    });
+    await page.reload();
+    const worker = page.locator('#settings-worker');
+    await worker.getByText('Recent runs').waitFor({ timeout: 20_000 });
+    const activity = await worker.locator('table tbody tr').evaluateAll((rows) => rows.slice(0, 5).map((r) => r.lastElementChild.textContent.trim()));
+    assert.deepEqual(activity, [
+      '1 reminder sent',
+      '1 feed checked, 3 feed items, 4 files downloaded, 1 download failed',
+      '2 new invites, 1 invite accepted',
+      '1 monthly report',
+      '2 autopilot drafts, 2 reposts',
+    ]);
+
+    // Notification toggles keep their wording in the confirmation.
+    const notif = page.locator('#settings-notifications');
+    await notif.getByRole('switch', { name: 'Time to post by hand' }).waitFor();
+    await notif.getByRole('switch', { name: 'Instagram connection problems' }).click();
+    await page.getByText('Notifications off: Instagram connection problems.').waitFor();
+    await notif.getByRole('switch', { name: 'Instagram connection problems' }).click();
+    await page.getByText('Notifications on: Instagram connection problems.').waitFor();
+
+    // Retries: 4 attempts in all (worker/jobs/publish.mjs MAX_ATTEMPTS).
+    await page.getByText('the worker tries again on the next runs (up to 4 attempts in all).').waitFor();
+
+    // Disconnecting says reminder posts still come due (no device gets notifications in the demo).
+    await page.locator('#settings-instagram').getByRole('button', { name: 'Disconnect' }).click();
+    const dis = page.getByRole('dialog');
+    await dis.getByText(/Posts set to publish automatically wait, and automations stop, until you connect again\./).waitFor();
+    await dis.getByText(/Reminder posts still come due, but no device has notifications turned on/).waitFor();
+    await dis.getByRole('button', { name: 'Cancel' }).click();
+    await dis.waitFor({ state: 'detached' });
+
+    // Free up space keeps photos downloaded from a link: their file is also their thumbnail.
+    const planned = await page.evaluate(async () => {
+      const { freeUpPlan } = await import('/postpilot/js/views/settings.js');
+      const old = new Date(Date.now() - 60 * 864e5).toISOString();
+      const asset = (id, kind, own) => ({ id, kind, path: `media/${id}`, thumbPath: own ? `media/${id}` : `media/${id}.thumb`, bytes: 1000 });
+      const post = { id: 'p1', status: 'published', publishedAt: old, media: ['a_up', 'a_dl', 'a_vid'].map((assetId) => ({ assetId, kind: 'image' })) };
+      const plan = freeUpPlan({ posts: { posts: [post] }, archive: { posts: [] }, library: { assets: [asset('a_up', 'image', false), asset('a_dl', 'image', true), asset('a_vid', 'video', true)] }, lists: { lists: [] } });
+      return plan.assets.map((a) => a.id);
+    });
+    assert.deepEqual(planned, ['a_up', 'a_vid']);
+
+    // Phone: a deep link (the composer's "Notification settings", the worker chip...) opens with the
+    // section title below the sticky top bar.
+    const phoneCtx = await h.browser.newContext({ viewport: { width: 390, height: 844 } });
+    const phone = await phoneCtx.newPage();
+    const phoneErrors = trackErrors(phone);
+    await phone.goto(`${h.url}/postpilot/index.html#/settings?section=notifications`);
+    await unlock(phone);
+    await phone.waitForSelector('#settings-notifications .panel-title', { timeout: 20_000 });
+    await phone.waitForFunction(() => window.scrollY > 500 && document.activeElement && document.activeElement.id === 'settings-notifications', null, { timeout: 20_000 });
+    await phone.waitForTimeout(500);
+    const title = await phone.evaluate(() => {
+      const t = document.querySelector('#settings-notifications .panel-title');
+      const r = t.getBoundingClientRect();
+      const hit = document.elementFromPoint(r.left + 8, r.top + r.height / 2);
+      return { top: r.top, bar: document.querySelector('.mobile-topbar').getBoundingClientRect().bottom, visible: !!hit && t.contains(hit) };
+    });
+    assert.ok(title.top >= title.bar, `the Notifications title (top ${Math.round(title.top)}) is below the top bar (ends at ${Math.round(title.bar)})`);
+    assert.ok(title.visible, 'nothing covers the Notifications title');
+    await shot(phone, 'settings-deeplink-notifications-phone-light');
+    assert.deepEqual(phoneErrors, []);
+    await phoneCtx.close();
+
     assert.deepEqual(errors, []);
     await shot(page, 'settings-flow-end');
     await screenshots(h, '#/settings', 'settings', '.settings-section');
@@ -266,14 +363,14 @@ test('settings: restore never republishes, passphrase change, data key rotation'
     // The worker opens the re-sealed secret and reads the re-encrypted data.
     await page.locator('#settings-worker').getByRole('button', { name: 'Run now' }).click();
     await page.getByText('Worker started.').waitFor();
-    await page.waitForFunction(
+    await pollPage(
+      page,
       async (since) => {
         const res = await fetch('/mock/gh/repos/demo/postpilot/actions/workflows/postpilot-worker.yml/runs');
         const run = (await res.json()).workflow_runs[0];
         return run && run.status === 'completed' && Date.parse(run.created_at) >= Date.parse(since);
       },
       rotatedAt,
-      { timeout: 90_000, polling: 1000 },
     );
     const runs = await page.evaluate(async () => (await (await fetch('/mock/gh/repos/demo/postpilot/actions/workflows/postpilot-worker.yml/runs')).json()).workflow_runs);
     assert.equal(runs[0].conclusion, 'success', 'the worker runs with the new key');
@@ -375,6 +472,25 @@ test('onboarding: new workspace → connect Instagram → connect worker → tim
     // The dev server opens the secret with its private key and runs the worker: success proves the key decrypts.
     await page.getByText('The worker ran successfully').waitFor({ timeout: 90_000 });
     await shot(page, 'onboarding-2-worker-desktop-light');
+
+    // A secret that no longer matches: the run fails on GitHub, and the advice names the button on screen.
+    await page.evaluate(async () => {
+      const { sealedBox } = await import('/postpilot/vendor/sealed-box.js');
+      const pk = await (await fetch('/mock/gh/repos/demo/postpilot/actions/secrets/public-key')).json();
+      const b64 = (u8) => btoa(String.fromCharCode(...u8));
+      const otherKey = b64(crypto.getRandomValues(new Uint8Array(32))); // a valid data key, of another workspace
+      const sealed = sealedBox(new TextEncoder().encode(otherKey), Uint8Array.from(atob(pk.key), (ch) => ch.charCodeAt(0)));
+      await fetch('/mock/gh/repos/demo/postpilot/actions/secrets/POSTPILOT_DATA_KEY', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ encrypted_value: b64(sealed), key_id: pk.key_id }) });
+    });
+    await page.getByRole('button', { name: 'Run again' }).click();
+    const failed = page.locator('.callout', { hasText: 'The worker run failed on GitHub' });
+    await failed.waitFor({ timeout: 90_000 });
+    assert.match(await failed.textContent(), /click\s+“Save the key again” to save it again/);
+    assert.equal(await page.getByRole('button', { name: 'Connect worker' }).count(), 0, 'no "Connect worker" button is shown in this state');
+    await page.getByRole('button', { name: 'Save the key again' }).click();
+    await page.getByText('Worker connected. It can now read your encrypted data.').last().waitFor({ timeout: 20_000 });
+    await page.getByRole('button', { name: 'Run worker now' }).or(page.getByRole('button', { name: 'Run again' })).first().click();
+    await page.getByText('The worker ran successfully').waitFor({ timeout: 90_000 });
     await page.getByRole('button', { name: 'Continue' }).click();
 
     // Step 3: time zone.

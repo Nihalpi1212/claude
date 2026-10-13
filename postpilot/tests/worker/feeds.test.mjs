@@ -2,10 +2,28 @@
 // plays the other sites (https://feeds.test/...). GitHub, Instagram and Claude are the usual mocks.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { fixtureBytes, startWorkerEnv, visibleLines } from '../helpers/worker-env.mjs';
 import { runWorker } from '../../worker/run.mjs';
-import { checkFeed, feedBacklogCap, feedOnlyAssets, fetchCapped, FetchError, MAX_DOWNLOAD_TRIES, SEEN_CAP } from '../../worker/jobs/feeds.mjs';
-import { brokenAssetIds, planList } from '../../worker/jobs/evergreen.mjs';
+import {
+  checkFeed,
+  dueFeeds,
+  feedBacklogCap,
+  feedInterval,
+  feedOnlyAssets,
+  fetchCapped,
+  FetchError,
+  FEED_EVERY_MS,
+  MAX_DOWNLOAD_TRIES,
+  parseFeedIsolated,
+  RUN_DEADLINE_MS,
+  runDownloads,
+  runFeeds,
+  runTimeLeft,
+  SEEN_CAP,
+} from '../../worker/jobs/feeds.mjs';
+import { brokenAssetIds, planList, stalePosts } from '../../worker/jobs/evergreen.mjs';
+import { parseFeed } from '../../core/feed.js';
 import { newAsset, newList, newPost } from '../../core/model.js';
 
 const SITE = 'https://feeds.test';
@@ -517,4 +535,270 @@ test('fetchCapped: truncate keeps the first bytes of a larger response', async (
   const stream = () => new Response(new ReadableStream({ start(c) { c.enqueue(new Uint8Array(8).fill(1)); c.enqueue(new Uint8Array(8).fill(2)); c.close(); } }), { status: 200, headers: { 'Content-Length': '16' } });
   const r = await fetchCapped(stream, 'https://big.example/page', { maxBytes: 10, timeoutMs: 1000, truncate: true });
   assert.deepEqual([...r.bytes], [1, 1, 1, 1, 1, 1, 1, 1, 2, 2]);
+});
+
+test('items whose picture is refused do not clog the feed: later posts still come in, and only the newest refused ones are kept', async (t) => {
+  const env = await startWorkerEnv({ connect: false });
+  t.after(() => env.close());
+  const web = fakeWeb();
+  const t0 = Date.parse('2026-10-12T08:00:00Z');
+  const items = [];
+  let next = 1;
+  const publish = (n, img) => {
+    for (let k = 0; k < n; k++, next++) items.unshift({ id: `p${next}`, title: `Post ${next}`, at: t0 + next * 60e3, media: `${SITE}/img/${img}.jpg?${next}` });
+  };
+  web.routes.set(`${SITE}/feed.xml`, () => new Response(rss(items), { status: 200, headers: { 'Content-Type': 'application/rss+xml' } }));
+  const wide = await jpegSized(1200, 600); // a 2:1 banner: refused for the feed
+  const square = await fixtureBytes('f01.jpg');
+  const fetchImpl = async (url, init) => {
+    const u = String(url);
+    if (u.startsWith(`${SITE}/img/wide.jpg`)) return new Response(wide, { status: 200, headers: { 'Content-Type': 'image/jpeg' } });
+    if (u.startsWith(`${SITE}/img/square.jpg`)) return new Response(square, { status: 200, headers: { 'Content-Type': 'image/jpeg' } });
+    return web.fetchImpl(url, init);
+  };
+  const list = await addQueueWithFeed(env, {}, { slots: [{ weekday: 3, time: '12:00' }], horizonDays: 14 });
+  const cap = feedBacklogCap(list);
+  assert.equal(cap, 10);
+  let hour = 0;
+  const check = async () => {
+    hour += 2;
+    return runWorker({ env: env.env, only: ['feeds'], now: new Date(t0 + hour * HOUR).toISOString(), fetchImpl, log: () => {} });
+  };
+  // The blog's banners: 3 + 5 + 5 + 5 items, every one refused at download (the old code marked the
+  // feed full after 10 of them, and every later post was skipped for good).
+  publish(3, 'wide');
+  await check();
+  for (let k = 0; k < 3; k++) {
+    publish(5, 'wide');
+    await check();
+  }
+  let doc = (await env.read('lists')).lists[0];
+  let lib = (await env.read('library')).assets;
+  const broken = brokenAssetIds(lib);
+  const fromFeed = () => doc.items.filter((it) => it.feedId === 'fd_1');
+  const titles = () => fromFeed().map((it) => it.caption.split('\n')[0]);
+  assert.ok(fromFeed().every((it) => broken.has(it.media[0].assetId)), 'every item so far was refused');
+  assert.ok(!doc.feeds[0].full, 'refused items take no room: the feed is not marked full');
+  // Before adding, a check keeps the newest `cap` refused items: at most cap + one check's items remain.
+  assert.deepEqual(titles(), Array.from({ length: 15 }, (_, i) => `Post ${i + 4}`));
+  assert.ok(!lib.some((a) => /^Post [1-3]$/.test(a.name)), 'the removed items took their file-less assets with them');
+  let log = (await env.read('log')).entries;
+  assert.ok(log.some((e) => e.job === 'feeds' && /Removed 3 older items of the feed "Studio Journal" from the queue "From the blog"/.test(e.message)));
+  assert.ok(!log.some((e) => /new posts are skipped/.test(e.message)));
+
+  // The blog switches to square pictures: they come in and can be scheduled.
+  publish(5, 'square');
+  const res = await check();
+  assert.equal(res.summary.jobs.feeds.feedItems, 5);
+  assert.equal(res.summary.jobs.feeds.downloaded, 5);
+  doc = (await env.read('lists')).lists[0];
+  lib = (await env.read('library')).assets;
+  assert.equal(fromFeed().filter((it) => brokenAssetIds(lib).has(it.media[0].assetId)).length, cap);
+  assert.ok(!lib.some((a) => /^Post [1-8]$/.test(a.name)));
+  log = (await env.read('log')).entries;
+  assert.ok(log.some((e) => e.job === 'feeds' && /Removed 5 older items/.test(e.message)));
+  const usable = fromFeed().filter((it) => !brokenAssetIds(lib).has(it.media[0].assetId));
+  assert.deepEqual(usable.map((it) => it.caption.split('\n')[0]), [19, 20, 21, 22, 23].map((n) => `Post ${n}`));
+  assert.equal(planList(doc, { posts: [], assetIds: new Set(lib.map((a) => a.id)), brokenIds: brokenAssetIds(lib), tz: 'UTC', now: t0, nowIso: new Date(t0).toISOString() }).posts.length, 2, 'evergreen fills the weekly slot with them');
+});
+
+test('dueFeeds: a broken item or one whose media was deleted takes no room; a 304 clears "full" when room came back', async (t) => {
+  const items = [
+    ...Array.from({ length: 8 }, (_, i) => ({ id: `ok${i}`, feedId: 'f', media: [{ assetId: `a${i}` }], timesUsed: 0 })),
+    { id: 'bad', feedId: 'f', media: [{ assetId: 'refused' }], timesUsed: 0 },
+    { id: 'gone', feedId: 'f', media: [{ assetId: 'deleted' }], timesUsed: 0, mediaMissing: true },
+  ];
+  const doc = { lists: [newList({ id: 'l', items, feeds: [{ id: 'f', url: `${SITE}/feed.xml`, seen: ['x'], checkedAt: null, full: true }] })] };
+  assert.equal(dueFeeds(doc, Date.now())[0].room, 1, 'without the library only the deleted media is known');
+  assert.equal(dueFeeds(doc, Date.now(), new Set(['refused']))[0].room, 2);
+
+  const env = await startWorkerEnv({ connect: false });
+  t.after(() => env.close());
+  const web = fakeWeb();
+  web.routes.set(`${SITE}/feed.xml`, () => new Response(null, { status: 304 }));
+  await env.update('lists', (d) => void d.lists.push(doc.lists[0]));
+  await env.update('library', (d) => void d.assets.push(newAsset({ id: 'refused', importUrl: `${SITE}/x.jpg`, importError: 'The photo is 1200x600, wider than Instagram allows' })));
+  await run(env, web);
+  const feed = (await env.read('lists')).lists[0].feeds[0];
+  assert.equal(feed.full, undefined, 'room for 2 items: the queue card no longer says the feed is full');
+  assert.ok(feed.checkedAt);
+});
+
+test('a feed that keeps failing is checked less often (up to daily); a success or "Check now" resets it', async (t) => {
+  const env = await startWorkerEnv({ connect: false });
+  t.after(() => env.close());
+  const web = fakeWeb();
+  const t0 = Date.parse('2026-10-12T08:00:00Z');
+  await addQueueWithFeed(env, { url: `${SITE}/dead.xml` });
+  // A minute more per hour, so "an hour later" is never a few milliseconds short of an hour.
+  const at = async (h) => run(env, web, { now: new Date(t0 + h * (HOUR + 60e3)).toISOString() });
+  const hits = () => web.hits('/dead.xml');
+  const feed = async () => (await env.read('lists')).lists[0].feeds[0];
+  // Hourly for the first two failures, then 2, 4, 8 hours apart.
+  for (const h of [0, 1, 2]) await at(h);
+  assert.equal(hits(), 3);
+  assert.equal((await feed()).errorCount, 3);
+  await at(3);
+  assert.equal(hits(), 3, 'third failure: waits 2 hours');
+  await at(4);
+  assert.equal(hits(), 4);
+  await at(7);
+  assert.equal(hits(), 4, 'fourth failure: waits 4 hours');
+  await at(8);
+  assert.equal(hits(), 5);
+  assert.equal((await feed()).errorCount, 5);
+  const warns = (await env.read('log')).entries.filter((e) => e.job === 'feeds' && e.level === 'warn');
+  assert.equal(warns.length, 1, 'the same error is logged once');
+  assert.equal(feedInterval({ error: 'x', errorCount: 30 }), 24 * HOUR, 'at most a day apart');
+  assert.equal(feedInterval({ error: 'x' }), FEED_EVERY_MS, 'older docs without errorCount: hourly');
+  assert.equal(feedInterval({ error: null, errorCount: 9 }), FEED_EVERY_MS);
+
+  // "Check now" in the app clears checkedAt: checked at once. The feed is back: hourly again.
+  web.routes.set(`${SITE}/dead.xml`, ok(rss([]), 'application/rss+xml'));
+  await env.update('lists', (d) => void (d.lists[0].feeds[0].checkedAt = null));
+  await at(9);
+  assert.equal(hits(), 6);
+  const back = await feed();
+  assert.equal(back.error, null);
+  assert.equal(back.errorCount, undefined);
+  await at(10);
+  assert.equal(hits(), 7);
+});
+
+test('the run deadline: feeds wait for the next run when publishing used the run; a request cut short counts as nothing', async (t) => {
+  const env = await startWorkerEnv({ connect: false });
+  t.after(() => env.close());
+  const web = fakeWeb();
+  const t0 = Date.parse('2026-10-12T08:00:00Z');
+  web.routes.set(`${SITE}/feed.xml`, ok(rss([{ id: 'n1', title: 'New', at: t0 - HOUR, media: `${SITE}/img/n.jpg` }]), 'application/rss+xml'));
+  web.routes.set(`${SITE}/img/n.jpg`, ok(await fixtureBytes('f02.jpg'), 'image/jpeg'));
+  await addQueueWithFeed(env);
+  assert.equal(RUN_DEADLINE_MS, 15.5 * 60e3);
+  assert.equal(runTimeLeft({ startedAtMs: t0, nowMs: () => t0 + 14 * 60e3 }), 1.5 * 60e3);
+  // The run started 15 minutes ago (a long publish): less than a minute is left.
+  let calls = 0;
+  const late = () => (calls++ === 0 ? t0 : t0 + 15 * 60e3);
+  const res = await runWorker({ env: env.env, only: ['feeds'], now: late, fetchImpl: web.fetchImpl, log: () => {} });
+  assert.deepEqual(res.summary.jobs.feeds, { skipped: 'no_time' });
+  assert.equal(web.calls.length, 0);
+  assert.equal((await env.read('lists')).lists[0].feeds[0].checkedAt, null, 'still due');
+
+  // A site that hangs past the deadline: the download is not a failed try, the feed check is not recorded.
+  const hang = (url, init) => new Promise((_, reject) => init.signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError'))));
+  await assert.rejects(fetchCapped(hang, `${SITE}/slow`, { maxBytes: 10, timeoutMs: 30_000, deadline: Date.now() + 50 }), (err) => err.code === 'deadline' && err.transient);
+  await assert.rejects(fetchCapped(hang, `${SITE}/slow`, { maxBytes: 10, timeoutMs: 30_000, deadline: Date.now() - 1 }), (err) => err.code === 'deadline');
+  await env.update('library', (d) => void d.assets.push(newAsset({ id: 'a_slow', name: 'slow.jpg', importUrl: `${SITE}/slow.jpg` })));
+  const ctx = { store: env.store, nowIso: () => new Date(t0).toISOString(), nowMs: () => t0, log: () => {}, fetchLinks: hang };
+  await env.store.refresh();
+  const result = {};
+  await runDownloads(ctx, result, { deadline: Date.now() + 80 });
+  assert.deepEqual(result, {});
+  const slow = (await env.read('library')).assets.find((a) => a.id === 'a_slow');
+  assert.equal(slow.importAttempts, undefined, 'no try counted');
+  assert.equal(slow.importError, undefined);
+  const feedHangs = { ...ctx, fetchLinks: hang };
+  const lists = await env.read('lists');
+  const r2 = {};
+  await runFeeds(feedHangs, dueFeeds(lists, t0), r2, { deadline: Date.now() + 80 });
+  assert.equal(r2.feedsChecked, 0);
+  assert.equal((await env.read('lists')).lists[0].feeds[0].checkedAt, null, 'the feed stays due for the next run');
+  // The page lookup for og:image is cut short too: nothing is marked as seen.
+  const pageHangs = (url, init) => (String(url).endsWith('/feed.xml') ? web.fetchImpl(url, init) : hang(url, init));
+  web.routes.set(`${SITE}/feed.xml`, ok(rss([{ id: 'n2', title: 'No image', at: t0, link: `${SITE}/post/n2` }]), 'application/rss+xml'));
+  assert.deepEqual(await checkFeed(pageHangs, { url: `${SITE}/feed.xml`, seen: [] }, { deadline: Date.now() + 80 }), { deferred: true });
+});
+
+test('feeds are parsed in a worker thread: a hostile feed is cheap, and one that runs out of time or memory only fails its own check', async () => {
+  const xml = rss([{ id: 'g1', title: 'One', at: Date.parse('2026-10-12T08:00:00Z'), media: `${SITE}/img/a.jpg` }]);
+  assert.deepEqual(await parseFeedIsolated(xml, `${SITE}/feed.xml`), parseFeed(xml, { url: `${SITE}/feed.xml` }));
+  assert.match((await parseFeedIsolated(xml, '', { timeoutMs: 1 })).error, /too large or too complex/);
+  // Out of memory in the thread: the run goes on. In a child process without NODE_OPTIONS, whose
+  // --max-old-space-size (set in some shells) would override the thread's heap limit.
+  const code = `import { parseFeedIsolated } from ${JSON.stringify(new URL('../../worker/jobs/feeds.mjs', import.meta.url).href)};
+    const item = (i) => '<item><title>Post ' + i + '</title><guid>g' + i + '</guid><description>' + 'x'.repeat(200) + '</description></item>';
+    const xml = '<rss><channel>' + Array.from({ length: 20000 }, (_, i) => item(i)).join('') + '</channel></rss>';
+    const r = await parseFeedIsolated(xml, '', { heapMb: 16 });
+    console.log(JSON.stringify({ error: r.error || null, alive: true }));`;
+  const child = spawnSync(process.execPath, ['--input-type=module', '-e', code], { env: { ...process.env, NODE_OPTIONS: '' }, encoding: 'utf8', timeout: 60_000 });
+  assert.equal(child.status, 0, child.stderr);
+  assert.match(JSON.parse(child.stdout.trim().split('\n').pop()).error, /too large or too complex/);
+  // The reviewer's feed (1000 prefixes, 2 MB): read in well under the feed timeout.
+  const decls = Array.from({ length: 1000 }, (_, i) => `xmlns:p${i}="u"`).join(' ');
+  const hostile = `<rss ${decls}><channel><title>T</title>${'<a/>'.repeat(500_000)}</channel></rss>`;
+  const t0 = Date.now();
+  const r = await checkFeed(async () => new Response(hostile, { status: 200, headers: { 'Content-Type': 'application/rss+xml' } }), { url: `${SITE}/feed.xml`, seen: [] });
+  assert.ok(Date.now() - t0 < 10_000, `took ${Date.now() - t0} ms`);
+  assert.equal(r.error, undefined);
+  assert.deepEqual(r.items, []);
+});
+
+test('a downloaded photo loses what follows the image (motion-photo video); the 8 MB limit applies to what is kept', async (t) => {
+  const env = await startWorkerEnv({ connect: false });
+  t.after(() => env.close());
+  const web = fakeWeb();
+  const photo = await jpegWithExif('f05.jpg');
+  const trailer = new Uint8Array(8.5 * 1024 * 1024);
+  trailer.set([0, 0, 0, 24, ...Buffer.from('ftypisomMotionPhoto_Data')]);
+  web.routes.set(`${SITE}/motion.jpg`, ok(new Uint8Array([...photo, ...trailer]), 'image/jpeg'));
+  await env.update('library', (d) => void d.assets.push(newAsset({ id: 'a_motion', name: 'motion.jpg', importUrl: `${SITE}/motion.jpg` })));
+  const res = await run(env, web);
+  assert.equal(res.summary.jobs.feeds.downloaded, 1);
+  const a = (await env.read('library')).assets.find((x) => x.id === 'a_motion');
+  assert.equal(a.importError, undefined);
+  const stored = Buffer.from(await env.store.readBytes(a.path));
+  assert.ok(stored.length < 1024 * 1024 && stored.length === a.bytes);
+  assert.ok(!stored.includes('ftyp') && !stored.includes('GPS 40.7128'));
+  assert.deepEqual([...stored.subarray(-2)], [0xff, 0xd9]);
+});
+
+test('evergreen: a post scheduled while its file was downloading is removed when the download is refused, and its slot goes to the next item', async (t) => {
+  const env = await startWorkerEnv({ connect: false });
+  t.after(() => env.close());
+  const web = fakeWeb();
+  const t0 = Date.parse('2026-10-12T08:00:00Z');
+  const ids = ['i1', 'i2', 'i3'];
+  await env.update('library', (d) => {
+    for (const id of ids) d.assets.push(newAsset({ id: `a_${id}`, name: `${id}.jpg`, importUrl: `${SITE}/img/${id}.jpg` }));
+  });
+  const list = newList({
+    id: 'l_csv',
+    name: 'From the CSV',
+    slots: [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({ weekday, time: '12:00' })),
+    horizonDays: 6,
+    items: ids.map((id) => ({ id, type: 'feed', caption: id, media: [{ assetId: `a_${id}`, kind: 'image', altText: '' }], timesUsed: 0 })),
+  });
+  await env.update('lists', (d) => void d.lists.push(list));
+  // First run: nothing downloaded yet (the sites do not answer), the items are scheduled anyway.
+  const first = await runWorker({ env: env.env, only: ['evergreen'], now: new Date(t0).toISOString(), log: () => {} });
+  assert.equal(first.summary.jobs.evergreen.evergreenCreated, 6);
+  let posts = (await env.read('posts')).posts;
+  const forI2 = posts.filter((p) => p.listItemId === 'i2');
+  assert.equal(forI2.length, 2);
+  // The owner moved one of them in the planner: that one is theirs now.
+  await env.update('posts', (d) => {
+    const p = d.posts.find((x) => x.id === forI2[1].id);
+    p.history.push({ at: new Date(t0).toISOString(), event: 'rescheduled', detail: 'Moved in the planner' });
+  });
+  // Next run: i2 turns out to be a 2:1 banner (refused for the feed); i1 and i3 are fine.
+  web.routes.set(`${SITE}/img/i1.jpg`, ok(await fixtureBytes('f01.jpg'), 'image/jpeg'));
+  web.routes.set(`${SITE}/img/i2.jpg`, ok(await jpegSized(1200, 600), 'image/jpeg'));
+  web.routes.set(`${SITE}/img/i3.jpg`, ok(await fixtureBytes('f03.jpg'), 'image/jpeg'));
+  const second = await runWorker({ env: env.env, only: ['feeds', 'evergreen'], now: new Date(t0 + 10 * 60e3).toISOString(), fetchImpl: web.fetchImpl, log: () => {} });
+  assert.equal(second.summary.jobs.feeds.downloadFailed, 1);
+  assert.equal(second.summary.jobs.evergreen.evergreenCreated, 1, 'the freed slot is filled again');
+  posts = (await env.read('posts')).posts.filter((p) => p.listId === 'l_csv');
+  assert.ok(!posts.some((p) => p.id === forI2[0].id), 'the untouched post for the refused file is gone');
+  const refill = posts.find((p) => p.listSlot === forI2[0].listSlot);
+  assert.ok(refill && refill.listItemId !== 'i2', 'its slot has a post of another item');
+  assert.ok(posts.some((p) => p.id === forI2[1].id), 'the post the owner moved stays (publishing reports the problem)');
+  assert.equal(posts.length, 6);
+  const log = (await env.read('log')).entries;
+  assert.ok(log.some((e) => e.job === 'evergreen' && e.level === 'warn' && /Removed 1 scheduled post of the queue "From the CSV"/.test(e.message)));
+  // stalePosts: only scheduled evergreen posts with nothing but 'created' in their history.
+  const broken = new Set(['bad']);
+  const p = (extra) => newPost({ source: 'evergreen', status: 'scheduled', media: [{ assetId: 'bad' }], history: [{ at: 'x', event: 'created' }], ...extra });
+  const waited = p({ history: [{ event: 'created' }, { event: 'waiting_download' }] }); // the publish job's note
+  const stale = stalePosts([p(), waited, p({ status: 'publishing' }), p({ source: 'manual' }), p({ media: [{ assetId: 'good' }] }), p({ history: [{ event: 'created' }, { event: 'scheduled' }] })], broken);
+  assert.equal(stale.length, 2);
+  assert.ok(stale.includes(waited));
 });

@@ -293,6 +293,8 @@ export function WorkerSetup({ onContinue, continueLabel = 'Continue', onSkip }) 
   const ghRunFailed = watch && !watch.record && watch.ghRun && watch.ghRun.status === 'completed' && watch.ghRun.conclusion && watch.ghRun.conclusion !== 'success';
   const runUrl = watch && watch.ghRun && watch.ghRun.html_url && /^https:\/\//.test(watch.ghRun.html_url) ? watch.ghRun.html_url : null;
   const actionsUrl = `https://github.com/${owner}/${repo}/actions/workflows/${WORKER_WORKFLOW}`;
+  // The button that saves the key, as the button row below labels it.
+  const keyButton = !secretOk || manual ? 'Connect worker' : 'Save the key again';
 
   return html`<div class="ws stack">
     <p class="ws-intro">
@@ -399,7 +401,7 @@ export function WorkerSetup({ onContinue, continueLabel = 'Continue', onSkip }) 
             : ghRunFailed
               ? html`<${Callout} tone="danger" title="The worker run failed on GitHub">
                   It stopped before it could save its log. Most often the data key secret does not match this workspace: click
-                  "Connect worker" to save it again.${runUrl ? html` <${ExtLink} href=${runUrl}>Open the run on GitHub<//>` : null}
+                  “${keyButton}” to save it again.${runUrl ? html` <${ExtLink} href=${runUrl}>Open the run on GitHub<//>` : null}
                 <//>`
               : html`<p class="ws-busy" role="status">
                   <${Spinner} size=${14} label="" />
@@ -547,6 +549,37 @@ function PreferencesStep({ onNext, onBack }) {
   </form>`;
 }
 
+const POST_TYPES = { feed: 'Post', carousel: 'Carousel', reel: 'Reel', story: 'Story' };
+
+/**
+ * Reminder posts still come due while Instagram is disconnected (worker/jobs/publish.mjs), but every
+ * screen except this one, Settings and post-now waits for a connection: list them here, so they can
+ * be posted by hand even without a device that gets notifications.
+ */
+function HandPosts() {
+  const { tz } = useApp();
+  const { data } = useDoc('posts');
+  const list = ((data && data.posts) || [])
+    .filter((p) => p && p.status === 'reminded')
+    .sort((a, b) => (Date.parse(a.scheduledAt || '') || 0) - (Date.parse(b.scheduledAt || '') || 0));
+  if (!list.length) return null;
+  const caption = (p) => {
+    const t = String(p.caption || '').replace(/\s+/g, ' ').trim();
+    return t.length > 70 ? `${t.slice(0, 69)}…` : t;
+  };
+  return html`<${Callout} tone="info" class="ob-hand" title=${list.length === 1 ? 'A post is waiting to be posted by hand' : `${list.length} posts are waiting to be posted by hand`}>
+    <p>Reminder posts come due without an Instagram connection. Open one to save the media and copy the caption.</p>
+    <ul class="ob-hand-list">
+      ${list.slice(0, 8).map(
+        (p) => html`<li key=${p.id}>
+          <a href=${buildHash('post-now', {}, [p.id])}>${caption(p) || `${POST_TYPES[p.type] || 'Post'} without a caption`}</a>
+          <span class="muted"> · ${POST_TYPES[p.type] || 'Post'}${p.scheduledAt ? `, due ${formatDay(p.scheduledAt, tz)} ${formatTime(p.scheduledAt, tz)}` : ''}</span>
+        </li>`,
+      )}
+    </ul>
+  <//>`;
+}
+
 function DoneStep() {
   const { settings, navigate, openComposer } = useApp();
   const ui = settings.ui || {};
@@ -573,7 +606,7 @@ function DoneStep() {
       ${item(!!ig, 'Instagram', ig ? `connected as @${ig.username}.` : 'not connected.', ig ? null : { href: '#/onboarding?step=instagram', label: 'Connect' })}
       ${item(workerOn, 'Worker', workerOn ? 'publishes, replies and saves analytics every 10 minutes.' : 'not turned on yet, so scheduled posts will not publish.', workerOn ? null : { href: '#/settings?section=worker', label: 'Turn it on' })}
       ${item(true, 'Time zone', `${settings.timezone}.`)}
-      ${item(ai, 'AI', ai ? 'captions, hashtags and reply suggestions are on.' : 'off. Add an Anthropic key in Settings any time.', null)}
+      ${item(ai, 'AI', ai ? 'captions, hashtags and reply suggestions are on.' : 'off. Turn it on in Settings → AI any time (you need an Anthropic API key).', null)}
     </ul>
     <div class="row">
       <${Button} variant="primary" icon="plus" onClick=${() => (navigate('#/planner'), openComposer())}>Plan your first post<//>
@@ -611,6 +644,7 @@ export default function Onboarding() {
   const stepIndex = STEPS.findIndex((s) => s.id === step);
   return html`<div class="page onboarding">
     <${PageHeader} eyebrow="Setup" title="Set up Postpilot" subtitle="Four short steps. Everything can be changed later in Settings." />
+    ${!settings.ig ? html`<${HandPosts} />` : null}
     <nav aria-label="Setup steps">
       <ol class="ob-steps">
         ${STEPS.map((s, i) => {

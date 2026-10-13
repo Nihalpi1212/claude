@@ -265,6 +265,8 @@ export async function startDevServer({ port = Number(process.env.PORT) || 5173, 
       POSTPILOT_POLL_MS: '500',
       POSTPILOT_DM_DELAY_MS: '0',
       POSTPILOT_REASON: reason || '',
+      // The demo feed and its images are on this server (localhost), which the worker refuses otherwise.
+      POSTPILOT_ALLOW_PRIVATE_LINKS: '1',
     };
     const res = await runWorker({ env, log: (line) => say(`[worker] ${line}`) });
     if (res.exitCode) throw new Error('worker run failed');

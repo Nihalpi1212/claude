@@ -493,6 +493,7 @@ span.pl-row-thumb { cursor: default; }
   pointer-events: none;
 }
 .pl-tile.is-upcoming.is-draft::after { box-shadow: none; outline: 2px dashed var(--ink-2); outline-offset: -3px; }
+.pl-tile.is-upcoming.is-reminded::after { box-shadow: inset 0 0 0 3px var(--marker); }
 .pl-tile.is-upcoming[draggable="true"] { cursor: grab; }
 .pl-tile.is-drop::after { box-shadow: inset 0 0 0 4px var(--marker); }
 .pl-tile.is-published:hover img { opacity: 0.85; }
@@ -532,6 +533,7 @@ span.pl-row-thumb { cursor: default; }
 .pl-note-swatch { width: 16px; height: 20px; border-radius: 1px; background: var(--surface-3); }
 .pl-note-swatch.is-upcoming { box-shadow: inset 0 0 0 2px var(--accent); }
 .pl-note-swatch.is-draft { outline: 2px dashed var(--ink-2); outline-offset: -2px; }
+.pl-note-swatch.is-reminded { box-shadow: inset 0 0 0 3px var(--marker); }
 
 @media (max-width: 899px) {
   .pl-gridview { grid-template-columns: minmax(0, 1fr); gap: var(--sp-4); }

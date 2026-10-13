@@ -14,7 +14,7 @@ import { loadViewCss } from '../css.js';
 import { mutate, transact, useDoc } from '../data.js';
 import { clearBlobCache } from '../idb.js';
 import { saveBlob } from '../media.js';
-import { NOTIFY_EVENTS, currentEndpoint, defaultNotifications, enablePush, needsHomeScreenInstall, pushSupported, removeDevice } from '../push.js';
+import { NOTIFY_EVENTS, currentEndpoint, defaultNotifications, enablePush, needsHomeScreenInstall, pushSupported, reminderDelivery, removeDevice } from '../push.js';
 import { setQuery } from '../router.js';
 import { changePassphrase, forget, rotateDataKey } from '../session.js';
 import { AccountCard, ConnectInstagram, CopyButton, ExtLink, MessagesReminder } from '../ui/connect-instagram.js';
@@ -165,7 +165,9 @@ export function backupProblem(data) {
 
 /**
  * Library originals that only old published posts use (published more than `days` ago).
- * Thumbnails stay, so post history keeps its pictures. `exists(path)` tells which files are present.
+ * Thumbnails stay, so post history keeps its pictures. Photos the worker downloaded from a link are
+ * their own thumbnail (thumbPath === path), so they are kept (videos have no picture to lose).
+ * `exists(path)` tells which files are present.
  */
 export function freeUpPlan({ posts, archive, library, lists, exists = () => true, now = Date.now(), days = 30 }) {
   const cutoff = now - days * DAY;
@@ -179,7 +181,7 @@ export function freeUpPlan({ posts, archive, library, lists, exists = () => true
   }
   for (const l of (lists && lists.lists) || []) for (const it of l.items || []) for (const m of it.media || []) keep.add(m.assetId);
   const assets = ((library && library.assets) || []).filter(
-    (a) => old.has(a.id) && !keep.has(a.id) && !a.autopilot && !a.originalRemovedAt && exists(a.path),
+    (a) => old.has(a.id) && !keep.has(a.id) && !a.autopilot && !a.originalRemovedAt && !(a.thumbPath === a.path && a.kind !== 'video') && exists(a.path),
   );
   return { assets, bytes: assets.reduce((n, a) => n + (a.bytes || 0), 0) };
 }
@@ -266,9 +268,14 @@ function InstagramSection() {
   }
 
   async function disconnect() {
+    // Reminder posts need no connection: the worker still sends them (worker/jobs/publish.mjs).
+    const delivery = reminderDelivery(settings);
+    const reminders = delivery === 'ok'
+      ? 'Reminder posts still notify your phone when they are due.'
+      : `Reminder posts still come due, but ${delivery === 'off' ? 'their notifications are turned off' : 'no device has notifications turned on'}, so you see them on the Setup screen until you connect again.`;
     const ok = await confirm({
       title: 'Disconnect Instagram?',
-      body: 'Scheduled posts stay in Postpilot but will not publish, and automations stop, until you connect again. Your posts, media and analytics history are kept.',
+      body: `Posts set to publish automatically wait, and automations stop, until you connect again. ${reminders} Your posts, media and analytics history are kept.`,
       confirmLabel: 'Disconnect',
       danger: true,
     });
@@ -334,12 +341,43 @@ function InstagramSection() {
 
 const TRIGGERS = { schedule: 'Scheduled', workflow_dispatch: 'From the app', push: 'Code change' };
 
+// Run counts as the worker's jobs report them: every key in worker/run.mjs ACTIVITY_KEYS (a run with
+// one of them is not idle, so it must not read "—") and the other counts that say what a run did. [one, many].
+const RUN_COUNT_LABELS = {
+  published: ['published', 'published'],
+  reminded: ['reminder sent', 'reminders sent'],
+  pending: ['post processing', 'posts processing'],
+  failed: ['failed', 'failed'],
+  retried: ['to retry', 'to retry'],
+  replies: ['reply', 'replies'],
+  aiReplies: ['written by AI', 'written by AI'],
+  privateReplies: ['private reply', 'private replies'],
+  dms: ['DM', 'DMs'],
+  hidden: ['hidden', 'hidden'],
+  deleted: ['comment deleted', 'comments deleted'],
+  commands: ['inbox action sent', 'inbox actions sent'],
+  commandsFailed: ['inbox action failed', 'inbox actions failed'],
+  stories: ['story', 'stories'],
+  snapshots: ['snapshot', 'snapshots'],
+  autopilotCreated: ['autopilot draft', 'autopilot drafts'],
+  reposts: ['repost', 'reposts'],
+  evergreenCreated: ['queue post', 'queue posts'],
+  feedsChecked: ['feed checked', 'feeds checked'],
+  feedItems: ['feed item', 'feed items'],
+  downloaded: ['file downloaded', 'files downloaded'],
+  downloadFailed: ['download failed', 'downloads failed'],
+  invitesNew: ['new invite', 'new invites'],
+  invitesAccepted: ['invite accepted', 'invites accepted'],
+  reportsCreated: ['monthly report', 'monthly reports'],
+  tokenRefreshed: ['token renewed', 'token renewed'],
+};
+
 function runActivity(run) {
   const c = run.counts || {};
-  const labels = { published: 'published', failed: 'failed', replies: 'replies', dms: 'DMs', hidden: 'hidden', stories: 'stories', snapshots: 'snapshots', autopilotCreated: 'autopilot drafts', evergreenCreated: 'queue posts', tokenRefreshed: 'token renewed' };
-  const parts = Object.entries(labels)
+  const count = (k, [one, many]) => `${c[k]} ${c[k] === 1 ? one : many}`;
+  const parts = Object.entries(RUN_COUNT_LABELS)
     .filter(([k]) => c[k])
-    .map(([k, label]) => `${c[k]} ${label}`);
+    .map(([k, label]) => count(k, label));
   return parts.join(', ') || (run.idle ? 'Nothing to do' : '—');
 }
 
@@ -684,7 +722,7 @@ function PreferencesSection() {
       <${Toggle}
         checked=${!(settings.publishing && settings.publishing.retryFailed === false)}
         label="Retry failed posts automatically"
-        hint="When Instagram has a temporary problem, the worker tries again on the next runs (up to 4 times)."
+        hint="When Instagram has a temporary problem, the worker tries again on the next runs (up to 4 attempts in all)."
         onChange=${(v) =>
           mutate('settings', (s) => {
             s.publishing = { ...(s.publishing || {}), retryFailed: v };
@@ -797,7 +835,7 @@ function NotificationsSection() {
                 cur.events = { ...defaultNotifications().events, ...(cur.events || {}), [ev.id]: v };
                 s.notifications = cur;
               }, { message: 'notification settings' })
-                .then(() => toast(v ? `Notifications on: ${ev.label.toLowerCase()}.` : `Notifications off: ${ev.label.toLowerCase()}.`, { kind: 'success' }))
+                .then(() => toast(`Notifications ${v ? 'on' : 'off'}: ${ev.label}.`, { kind: 'success' }))
                 .catch(() => {})}
           />`,
         )}

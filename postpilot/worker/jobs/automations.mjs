@@ -16,9 +16,11 @@
 //   COMMENT_MAX_AGE_MS get no automated action either: housekeeping forgets processed ids after 30 days,
 //   and a re-read old post must not look new.
 // - DM threads whose updated_time is newer than cursors.dmUpdatedTime (or whose cached preview is
-//   stale) have their latest messages read. A message is a 'story_reply' when it answers one of the
-//   account's stories, a 'story_mention' when Instagram reports that the sender mentioned the account
-//   in their story (core/ig.js normMessage), otherwise a 'dm'; rules pick by trigger.source.
+//   stale) have their latest messages read. A thread whose time equals the cursor is read once more
+//   (one-second precision), then left alone while its newest message is ours or handled. A message is
+//   a 'story_reply' when it answers one of the account's stories, a 'story_mention' when Instagram
+//   reports that the sender mentioned the account in their story (core/ig.js normMessage), otherwise
+//   a 'dm'; rules pick by trigger.source.
 // - Rules only act on comments/messages created after automations were switched on
 //   (cursors.startedAt), so turning automations on never answers old conversations.
 // - Every handled comment/message id goes into processed.{comments,messages}; rules marked
@@ -35,6 +37,15 @@
 // cursors.pausedUntil pauses automations on later runs.
 // Also refreshes inbox.comments / inbox.conversations, the cached view the app shows when live
 // Instagram calls are not possible.
+// Writes: the automations document holds the processed ids and the activity log, and every write
+// commits a full encrypted copy, so a run where nothing happened writes nothing. Time stamps of the
+// run's reads (cursors.watchListedAt, cursors.inboxCheckedAt) are saved along with real changes, or
+// on their own once they are STAMP_REFRESH_MS old. The inbox document is rewritten when its content
+// changed, or every INBOX_STAMP_MS just to move inbox.fetchedAt.
+// Comment push notifications compare each comment with the newest one an earlier run saw on the same
+// post (cursors.commentsSeen[mediaId], else the time the post started being watched), so a post read
+// later than the others (a chosen post outside the listing, a failed read) still notifies.
+// The media listing is shared with later jobs of the run through ctx.mediaListing.
 
 import { evaluate, recordFired } from '../../core/rules.js';
 import { describeError } from '../context.mjs';
@@ -64,7 +75,14 @@ const BASELINE_SLACK_MS = 5 * 60e3;
 const COMMENT_CACHE_MAX = 100;
 const CONVERSATION_CACHE_MAX = 30;
 const ACTIVITY_MAX = 100;
-const CACHE_REFRESH_MS = 60 * 60e3;
+// inbox.fetchedAt alone is rewritten at most this often (the document is rewritten whenever its
+// content changes); cursors.inboxCheckedAt, saved with the automations document, is more current.
+const INBOX_STAMP_MS = 6 * 36e5;
+// cursors.watchListedAt and cursors.inboxCheckedAt are saved on their own at most this often. A stale
+// watchListedAt only widens NEW_POST_SLACK_MS by up to this much for a post that starts being watched.
+const STAMP_REFRESH_MS = 60 * 60e3;
+// A DM thread read by a run that started this long after the thread's last second needs no re-check.
+const SETTLED_AFTER_MS = 60e3;
 const FLUSH_EVERY = 5;
 
 const DM_TYPES = new Set(['private_reply', 'send_dm']);
@@ -200,15 +218,18 @@ export default async function automations(ctx) {
   let status = null; // new automations.status.dm info, when it changed
   let unflushed = 0;
   let aiDown = false; // Claude failed with a temporary error this run: later AI replies wait for the next run
-  // Push notifications for new comments/DMs: anything newer than what the previous run saw
-  // (nothing on the very first run). Works whether or not rules are switched on.
-  const prevCommentSeen = ms(cursors.commentsSeenAt);
+  // Push notifications for new comments/DMs: anything newer than what earlier runs saw (nothing on the
+  // very first run). Works whether or not rules are switched on. Comments are compared per post (see
+  // the top of the file); the single commentsSeenAt mark of older versions is no longer moved and
+  // only serves as a floor for posts that have no mark of their own yet.
+  const commentsSeen = cursors.commentsSeen || {};
+  const legacyCommentSeen = ms(cursors.commentsSeenAt);
   const prevDmSeen = ms(cursors.dmSeenAt);
   const newComments = [];
   const newDms = [];
 
   function newDelta() {
-    return { comments: {}, messages: {}, conversations: {}, users: [], mediaComments: {}, watchedFrom: {}, watchListedAt: null, goneMedia: {}, pinnedNext: null, pinnedCheckedAt: null, dmUpdatedTime: null, seen: {}, stats: {}, rules: {}, activity: [] };
+    return { comments: {}, messages: {}, conversations: {}, users: [], mediaComments: {}, watchedFrom: {}, watchListedAt: null, inboxCheckedAt: null, goneMedia: {}, pinnedNext: null, pinnedCheckedAt: null, dmUpdatedTime: null, seen: {}, commentsSeen: {}, stats: {}, rules: {}, activity: [] };
   }
 
   function markFired(ruleId, userId) {
@@ -289,23 +310,27 @@ export default async function automations(ctx) {
           changed = true;
         }
         a.cursors ||= {};
-        if (Object.keys(d.mediaComments).length) {
+        if (Object.entries(d.mediaComments).some(([id, n]) => (a.cursors.mediaComments || {})[id] !== n)) {
           a.cursors.mediaComments = { ...(a.cursors.mediaComments || {}), ...d.mediaComments };
           changed = true;
         }
-        if (Object.keys(d.watchedFrom).length) {
+        if (Object.keys(d.watchedFrom).some((id) => !(a.cursors.watchedFrom || {})[id])) {
           // Fill in only: a post keeps the time it started being watched.
           a.cursors.watchedFrom = { ...d.watchedFrom, ...(a.cursors.watchedFrom || {}) };
           changed = true;
         }
-        if (d.watchListedAt && !(a.cursors.watchListedAt >= d.watchListedAt)) {
-          a.cursors.watchListedAt = d.watchListedAt;
-          changed = true;
+        for (const [id, iso] of Object.entries(d.commentsSeen)) {
+          const marks = (a.cursors.commentsSeen ||= {});
+          if (!(ms(marks[id]) >= ms(iso))) {
+            marks[id] = iso;
+            changed = true;
+          }
         }
         if (final && keepMedia) {
-          // Posts no longer watched lose their count and their watch start: watched again later, they
-          // only count comments from then on.
-          for (const key of ['mediaComments', 'watchedFrom']) {
+          // Posts no longer watched lose their count, their watch start and their comment mark: watched
+          // again later, they only count comments from then on.
+          for (const key of ['mediaComments', 'watchedFrom', 'commentsSeen']) {
+            if (!a.cursors[key]) continue;
             const all = a.cursors[key] || {};
             const kept = Object.fromEntries(Object.entries(all).filter(([id]) => keepMedia.has(id)));
             if (Object.keys(kept).length !== Object.keys(all).length) {
@@ -351,8 +376,11 @@ export default async function automations(ctx) {
           a.cursors.startedAt = startedAt;
           changed = true;
         }
+        // DM times for the hourly limit: saved when a DM went out. Times that only aged out are dropped
+        // with the next real change (readers ignore times older than an hour).
+        const storedDms = a.cursors.recentDms || [];
         const keepDms = recentDms.filter((t) => ctx.nowMs() - t < 36e5);
-        if (JSON.stringify(a.cursors.recentDms || []) !== JSON.stringify(keepDms) && (keepDms.length || (a.cursors.recentDms || []).length)) {
+        if (keepDms.some((t) => !storedDms.includes(t))) {
           a.cursors.recentDms = keepDms;
           changed = true;
         }
@@ -379,7 +407,18 @@ export default async function automations(ctx) {
             changed = true;
           }
         }
-        if (changed) tx.write('automations', a);
+        // Time stamps of this run's reads: with a real change, or on their own once they are old.
+        for (const key of ['watchListedAt', 'inboxCheckedAt']) {
+          const iso = d[key];
+          if (!iso || ms(a.cursors[key]) >= ms(iso)) continue;
+          if (!changed && ms(iso) - ms(a.cursors[key]) < STAMP_REFRESH_MS) continue;
+          a.cursors[key] = iso;
+          changed = true;
+        }
+        if (changed) {
+          if (storedDms.length) a.cursors.recentDms = keepDms;
+          tx.write('automations', a);
+        }
       },
       { message: 'automations: record activity' },
     );
@@ -570,7 +609,11 @@ export default async function automations(ctx) {
   try {
     // ---- comments ----------------------------------------------------------------------------
     try {
-      if (!throttled) media = await ig.listMedia({ limit: Math.min(watch.posts, MEDIA_PAGE), max: watch.posts });
+      if (!throttled) {
+        media = await ig.listMedia({ limit: Math.min(watch.posts, MEDIA_PAGE), max: watch.posts });
+        // Newest first, the same fields analytics lists: it reuses this instead of listing again.
+        ctx.mediaListing = { items: media, max: watch.posts };
+      }
     } catch (err) {
       if (err && err.isAuth) throw err;
       noteRateLimit(err);
@@ -628,8 +671,10 @@ export default async function automations(ctx) {
       delta.watchedFrom[id] = isNew && Number.isFinite(t) ? new Date(t).toISOString() : nowIso;
       if (!isNew && (Number.isFinite(prevListedMs) || legacy)) startedNow.add(id); // the very first run reads them for the inbox cache
     }
+    // Kept for the whole run: a flush part-way through the posts resets `delta`.
+    const watchStarts = { ...delta.watchedFrom, ...watchedFrom };
     const watchStartMs = (id) => {
-      const t = ms(watchedFrom[id] || delta.watchedFrom[id]);
+      const t = ms(watchStarts[id]);
       return Number.isFinite(t) ? t - BASELINE_SLACK_MS : -Infinity;
     };
     const counts = cursors.mediaComments || {};
@@ -663,10 +708,13 @@ export default async function automations(ctx) {
       let complete = true;
       // Oldest first so replies go out in the order people commented.
       const flat = comments.flatMap((c) => [c, ...(c.replies || []).map((r) => ({ ...r, parentId: r.parentId || c.id }))]).sort((a, b) => (ms(a.timestamp) || 0) - (ms(b.timestamp) || 0));
+      // Notify comments newer than the newest one seen on this post before (or than its watch start).
+      const id = String(m.id);
+      const notifyAfter = Number.isFinite(ms(commentsSeen[id])) ? ms(commentsSeen[id]) : Math.max(watchStartMs(id) + BASELINE_SLACK_MS, Number.isFinite(legacyCommentSeen) ? legacyCommentSeen : -Infinity);
       for (const c of flat) {
         if (isOwn(c.fromId, c.username) || !c.timestamp) continue;
-        if (ms(c.timestamp) > prevCommentSeen) newComments.push(c);
-        seen('commentsSeenAt', c.timestamp);
+        if (ms(c.timestamp) > notifyAfter) newComments.push(c);
+        if (!(ms(delta.commentsSeen[id]) >= ms(c.timestamp)) && !(ms(commentsSeen[id]) >= ms(c.timestamp))) delta.commentsSeen[id] = c.timestamp;
       }
       for (const c of flat) {
         if (!c.id || proc.comments[c.id]) continue;
@@ -738,11 +786,15 @@ export default async function automations(ctx) {
         break;
       }
       const updated = ms(conv.updatedTime) || 0;
-      // updated_time has one-second precision: re-check a thread whose time equals the cursor
-      // (already handled messages are skipped through processed.messages).
-      const isNew = enabled && updated >= dmCursorMs;
       const cached = cachedConvs.get(conv.id);
       const cacheStale = top.has(conv.id) && (!cached || cached.updatedTime !== conv.updatedTime);
+      // updated_time has one-second precision: re-check a thread whose time equals the cursor
+      // (already handled messages are skipped through processed.messages), but only until a run that
+      // started well after that second (SETTLED_AFTER_MS: clocks differ) has read it and its newest
+      // message is ours or handled.
+      const last = cached && cached.updatedTime === conv.updatedTime ? cached.lastMessage : null;
+      const settled = updated === dmCursorMs && ms(proc.conversations[conv.id]) >= updated + SETTLED_AFTER_MS && !!last && (last.fromMe || !!proc.messages[last.id]);
+      const isNew = enabled && updated >= dmCursorMs && !settled;
       if (!isNew && !cacheStale) continue;
       let msgs;
       try {
@@ -818,6 +870,7 @@ export default async function automations(ctx) {
     throw err;
   }
 
+  if (mediaOk || convsOk) delta.inboxCheckedAt = nowIso;
   // A complete listing tells which posts are still watched: comment counts of the others are dropped.
   await flush(true, mediaOk && !throttled ? new Set([...recent.map((m) => String(m.id)), ...pinned]) : null);
 
@@ -881,7 +934,7 @@ export default async function automations(ctx) {
           });
       }
       const changed = JSON.stringify([ib.comments, ib.conversations]) !== before;
-      const stale = !ib.fetchedAt || ctx.nowMs() - ms(ib.fetchedAt) >= CACHE_REFRESH_MS;
+      const stale = !ib.fetchedAt || ctx.nowMs() - ms(ib.fetchedAt) >= INBOX_STAMP_MS;
       // Nothing was read (paused, or Instagram unreachable): leave the document alone.
       if (!changed && !(stale && (mediaOk || convsOk))) return;
       if (mediaOk || convsOk) ib.fetchedAt = ctx.nowIso();

@@ -1,4 +1,5 @@
-// E2E: Inbox (comments grouped by post, reply, hide/unhide, comments on/off, mark done,
+// E2E: Inbox (comments grouped by post, older watched posts from the worker copy with the same count
+// as Today, reply, hide/unhide, comments on/off, mark done,
 // DM conversation reply with the 24-hour window, story reply / story mention chips, mentions gating,
 // collaboration invites tab opened from #/inbox/invites, accept and decline, a live read that updates
 // the saved invites, invites unavailable for the connection, the account's own story reply, four tabs
@@ -74,6 +75,80 @@ describe('Inbox', { timeout: 240_000 }, () => {
     assert.equal(await page.getByRole('radio', { name: /Needs reply/ }).getAttribute('aria-checked'), 'true');
     assert.match(await page.getByRole('tab', { name: /Comments/ }).textContent(), /\d+/);
     await shot(page, 'inbox-comments-desktop-light');
+  });
+
+  test('every comment Today counts is in the Inbox: older watched posts come from the worker copy', async () => {
+    // The worker watches up to 50 posts / 90 days; live mode reads the latest 12. Today counts the
+    // worker's copy (commentsNeedingReply), so the Inbox must list those comments too.
+    const { needs, unread } = await page.evaluate(async () => {
+      const { getStore } = await import('/postpilot/js/data.js');
+      const { commentsNeedingReply } = await import('/postpilot/js/views/dashboard.js');
+      const store = getStore();
+      const [inbox, settings] = [await store.read('inbox'), await store.read('settings')];
+      const seen = inbox.seen || {};
+      const unread = (inbox.conversations || []).filter((c) => c.lastMessage && !c.lastMessage.fromMe && !(seen[c.id] && Date.parse(seen[c.id]) >= Date.parse(c.lastMessage.createdTime))).length;
+      return { needs: commentsNeedingReply(inbox, settings).map((c) => ({ id: c.id, mediaId: c.mediaId })), unread };
+    });
+    const liveIds = new Set(dev.graph.state.media.filter((m) => m.media_product_type !== 'STORY').slice(0, 12).map((m) => m.id));
+    assert.ok(needs.some((c) => !liveIds.has(c.mediaId)), 'the seed has comments to answer on posts older than the latest 12');
+
+    // The Messages badge counts the worker's copy before the tab is opened (as Today does).
+    assert.ok(unread > 0, 'the seed has unread conversations');
+    assert.equal((await page.getByRole('tab', { name: /Messages/ }).textContent()).match(/\d+/)?.[0], String(unread));
+
+    // The Comments badge and "Needs reply" match Today's count.
+    await page.getByText('Live from Instagram').waitFor();
+    assert.equal((await page.getByRole('tab', { name: /Comments/ }).textContent()).match(/\d+/)?.[0], String(needs.length));
+    assert.match(await page.getByRole('radio', { name: /Needs reply/ }).textContent(), new RegExp(`\\(${needs.length}\\)`));
+
+    const older = page.locator('section.ibx-older');
+    await older.getByRole('heading', { name: 'Older posts' }).waitFor();
+    assert.match(await older.textContent(), /from its last check/);
+    // Older posts follow the live ones.
+    const order = await page.locator('.ibx-group, .ibx-older').evaluateAll((els) => els.map((el) => el.classList.contains('ibx-older')));
+    assert.ok(order.indexOf(true) > 0, 'live posts first');
+    // Expand every post, then each counted comment is on the page.
+    const more = page.getByRole('button', { name: /^Show \d+ more comments?$/ });
+    while (await more.count()) await more.first().click();
+    for (const c of needs) assert.equal(await page.locator(`[data-comment-id="${c.id}"]`).count(), 1, `comment ${c.id} on post ${c.mediaId} is in the Inbox`);
+    await shot(page, 'inbox-comments-older-desktop-light');
+    await page.reload(); // collapse the groups again for the tests that follow
+    await page.waitForSelector('.inbox .ibx-group', { timeout: 30_000 });
+  });
+
+  test('an action on an older post goes to Instagram and updates the worker copy', async () => {
+    const el = page.locator('section.ibx-older .ibx-comments > .ibx-c').first();
+    await el.waitFor();
+    const id = await el.getAttribute('data-comment-id');
+    const username = (await el.locator('> .ibx-c-body > .ibx-c-meta .ibx-c-user').textContent()).replace(/^@/, '');
+    const card = page.locator(`[data-comment-id="${id}"]`);
+    await card.getByRole('button', { name: `Hide comment from @${username}` }).first().click();
+    await page.locator('.toast', { hasText: `Comment from @${username} hidden` }).waitFor();
+    await card.locator('.badge', { hasText: 'Hidden' }).first().waitFor();
+    assert.ok(dev.graph.state.hidden.has(id), 'hidden on Instagram');
+    // The worker reads a post again only when its comment count changes: the app updates its copy.
+    const cachedHidden = async () => {
+      const inbox = await readDoc('inbox');
+      return (inbox.comments || []).find((c) => c.id === id)?.hidden;
+    };
+    let deadline = Date.now() + 15_000;
+    while (Date.now() < deadline && (await cachedHidden()) !== true) await new Promise((r) => setTimeout(r, 250));
+    assert.equal(await cachedHidden(), true);
+
+    await card.getByRole('button', { name: `Unhide comment from @${username}` }).first().click();
+    await page.locator('.toast', { hasText: `Comment from @${username} is visible again` }).waitFor();
+    assert.equal(dev.graph.state.hidden.has(id), false);
+    deadline = Date.now() + 15_000;
+    while (Date.now() < deadline && (await cachedHidden()) !== false) await new Promise((r) => setTimeout(r, 250));
+    assert.equal(await cachedHidden(), false);
+  });
+
+  test('DM problems name the messages permission of the login type', async () => {
+    const perm = await page.evaluate(async () => {
+      const { messagesPermission } = await import('/postpilot/js/views/inbox.js');
+      return [messagesPermission('instagram'), messagesPermission('facebook')];
+    });
+    assert.deepEqual(perm, ['instagram_business_manage_messages', 'instagram_manage_messages']);
   });
 
   test('replies to a comment and the reply appears in the thread', async () => {
@@ -237,6 +312,10 @@ describe('Inbox', { timeout: 240_000 }, () => {
     await page.locator('.toast', { hasText: 'Declined @lumen.ceramics’s invite.' }).waitFor();
     await answered.locator('.ibx-invite', { hasText: '@lumen.ceramics' }).getByText('Declined').waitFor();
     await open.getByText('No open invites').waitFor();
+    // No device gets notifications in the demo workspace, so the phone is not promised.
+    assert.equal(await open.getByText('New collaboration invites show up here.', { exact: true }).count(), 1);
+    assert.equal(await open.getByText(/on your phone/).count(), 0);
+    assert.equal(await page.getByRole('link', { name: 'Accept trusted accounts automatically' }).getAttribute('href'), '#/automations?section=collab');
     const lumenMedia = dev.graph.state.collabInvites.find((i) => i.owner === 'lumen.ceramics').media_id;
     assert.ok(dev.graph.state.collabResponses.some((r) => r.mediaId === lumenMedia && r.accept === false));
 

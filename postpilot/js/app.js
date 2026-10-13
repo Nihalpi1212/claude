@@ -9,7 +9,7 @@ import { registerServiceWorker } from './push.js';
 import { navigate, useRoute } from './router.js';
 import { forget } from './session.js';
 import { Icon } from './ui/icons.js';
-import { Avatar, Button, Callout, ConfirmDialog, Drawer, IconButton, Spinner, ToastHost } from './ui/kit.js';
+import { Avatar, Button, Callout, ConfirmDialog, Drawer, IconButton, Spinner, ToastHost, cx } from './ui/kit.js';
 
 export const AppContext = createContext(null);
 export const useApp = () => useContext(AppContext);
@@ -224,9 +224,11 @@ function MobileTopbar({ settings, onCompose }) {
 }
 
 function TabBar({ route, onCompose, onMore }) {
-  const item = (name, label, icon) => html`<a class="tabbar-item" href=${name === 'dashboard' ? '#/' : `#/${name}`}
+  // "Post by hand" (post-now) is opened from Today and from reminder notifications: Today stays lit.
+  const item = (name, label, icon) => html`<a class=${cx('tabbar-item', name === 'dashboard' && route.name === 'post-now' && 'is-active')} href=${name === 'dashboard' ? '#/' : `#/${name}`}
     aria-current=${route.name === name ? 'page' : undefined}><${Icon} name=${icon} size=${20} /><span>${label}</span></a>`;
-  const inMore = !['dashboard', 'planner', 'inbox', 'analytics'].includes(route.name);
+  // Every other screen (Analytics too) is reached through More.
+  const inMore = !['dashboard', 'planner', 'inbox', 'post-now'].includes(route.name);
   return html`<nav class="tabbar" aria-label="Main navigation">
     ${item('dashboard', 'Today', 'home')}
     ${item('planner', 'Planner', 'calendar')}

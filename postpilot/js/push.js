@@ -12,7 +12,7 @@ export const NOTIFY_EVENTS = [
   { id: 'dm', label: 'New direct messages' },
   { id: 'comment', label: 'New comments' },
   { id: 'account', label: 'Instagram connection problems' },
-  { id: 'reminder', label: 'Time to post a reminder post by hand' },
+  { id: 'reminder', label: 'Time to post by hand' },
   { id: 'report', label: 'Monthly report is ready' },
   { id: 'collab', label: 'New collaboration invites' },
 ];
@@ -26,16 +26,21 @@ export function defaultNotifications() {
 }
 
 /**
- * Whether a reminder post's notification can reach a phone (the worker checks the same, see
- * worker/jobs/publish.mjs): 'ok', 'no_devices' (no device has notifications turned on) or 'off'
- * (the reminder event is turned off in Settings).
+ * Whether the worker's notification for `event` (an id from NOTIFY_EVENTS) can reach a device:
+ * 'ok', 'no_devices' (no device has notifications turned on) or 'off' (the event is turned off in
+ * Settings).
  */
-export function reminderDelivery(settings) {
+export function notifyDelivery(settings, event) {
   const cfg = (settings && settings.notifications) || {};
   const subs = (cfg.subscriptions || []).filter((s) => s && s.endpoint && s.keys);
   if (!cfg.vapid || !subs.length) return 'no_devices';
-  if (cfg.events && cfg.events.reminder === false) return 'off';
+  if (cfg.events && cfg.events[event] === false) return 'off';
   return 'ok';
+}
+
+/** Whether a reminder post's notification can reach a phone (the worker checks the same, see worker/jobs/publish.mjs). */
+export function reminderDelivery(settings) {
+  return notifyDelivery(settings, 'reminder');
 }
 
 export function pushSupported() {

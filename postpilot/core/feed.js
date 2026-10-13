@@ -131,6 +131,10 @@ export function clipText(text, n) {
 // XML scanner
 
 const MAX_DEPTH = 200;
+// Bounds on hostile input; real feeds stay far below them. Elements past MAX_ELEMENTS end the parse
+// (feeds list their newest items first); attributes past MAX_ATTRS in one tag are skipped.
+const MAX_ELEMENTS = 200_000;
+const MAX_ATTRS = 64;
 
 /**
  * Parse XML into a small element tree. Tolerant: unknown entities stay as text, unclosed elements
@@ -139,14 +143,21 @@ const MAX_DEPTH = 200;
  *   { name: 'media:content', local: 'content', prefix: 'media', ns: 'http://search.yahoo.com/mrss/',
  *     attrs: {url: '...'}, children: [Element], text: 'direct text', start, end }
  * `start`/`end` are offsets of the element's inner source (for raw XHTML content). Elements nested
- * deeper than MAX_DEPTH are dropped (their text is kept).
+ * deeper than MAX_DEPTH are dropped (their text is kept); after MAX_ELEMENTS elements the rest of the
+ * document is ignored (`truncated`).
+ * Namespace prefixes in scope live on a stack beside the open elements, not on the elements: an
+ * element that declares none shares its parent's scope, one that does gets a scope inheriting from
+ * its parent's (prototype chain), so cost stays linear in the input however many prefixes a feed declares.
  * @param {string} source
- * @returns {{root: object, source: string}} root is a synthetic element holding the top-level elements
+ * @returns {{root: object, source: string, truncated: boolean}} root is a synthetic element holding the top-level elements
  */
 export function parseXml(source) {
   const src = String(source ?? '').replace(/^﻿/, '');
-  const root = { name: '#root', local: '#root', prefix: '', ns: '', attrs: {}, children: [], text: '', start: 0, end: src.length, scope: {} };
+  const root = { name: '#root', local: '#root', prefix: '', ns: '', attrs: {}, children: [], text: '', start: 0, end: src.length };
   const stack = [root];
+  const scopes = [Object.create(null)]; // scopes[k]: prefixes in scope inside stack[k] ('' = default namespace)
+  let elements = 0;
+  let stop = src.length; // where parsing ended (before src.length when MAX_ELEMENTS was reached)
   let i = 0;
   const top = () => stack[stack.length - 1];
   const addText = (t) => {
@@ -198,6 +209,7 @@ export function parseXml(source) {
         if (stack[k].name === name) {
           for (let m = stack.length - 1; m >= k; m--) if (stack[m].end == null) stack[m].end = lt;
           stack.length = k;
+          scopes.length = k;
           break;
         }
       }
@@ -212,6 +224,7 @@ export function parseXml(source) {
     }
     let j = lt + m[0].length;
     const attrs = {};
+    let attrCount = 0;
     let selfClose = false;
     while (j < src.length) {
       while (j < src.length && /\s/.test(src[j])) j++;
@@ -250,7 +263,7 @@ export function parseXml(source) {
           }
         }
       }
-      attrs[an[0]] = decodeEntities(value);
+      if (attrCount++ < MAX_ATTRS) attrs[an[0]] = decodeEntities(value);
     }
     // Past MAX_DEPTH, elements are not nested further (their text goes to the deepest element):
     // real feeds never come close, and it keeps end-tag lookups cheap on hostile input.
@@ -258,33 +271,42 @@ export function parseXml(source) {
       i = j;
       continue;
     }
+    if (++elements > MAX_ELEMENTS) {
+      stop = lt;
+      break;
+    }
     const parent = top();
-    const scope = { ...parent.scope };
-    for (const [k, v] of Object.entries(attrs)) {
-      if (k === 'xmlns') scope[''] = v;
-      else if (k.startsWith('xmlns:')) scope[k.slice(6)] = v;
+    const parentScope = scopes[scopes.length - 1];
+    let scope = parentScope;
+    for (const k of Object.keys(attrs)) {
+      if (k !== 'xmlns' && !k.startsWith('xmlns:')) continue;
+      if (scope === parentScope) scope = Object.create(parentScope);
+      scope[k === 'xmlns' ? '' : k.slice(6)] = attrs[k];
     }
     const name = m[1];
     const colon = name.indexOf(':');
     const prefix = colon > 0 ? name.slice(0, colon) : '';
+    const ns = scope[prefix];
     const el = {
       name,
       local: (colon > 0 ? name.slice(colon + 1) : name).toLowerCase(),
       prefix: prefix.toLowerCase(),
-      ns: scope[prefix] || '',
+      ns: typeof ns === 'string' ? ns : '',
       attrs,
       children: [],
       text: '',
       start: j,
       end: selfClose ? j : null,
-      scope,
     };
     parent.children.push(el);
-    if (!selfClose) stack.push(el);
+    if (!selfClose) {
+      stack.push(el);
+      scopes.push(scope);
+    }
     i = j;
   }
-  for (let k = stack.length - 1; k > 0; k--) if (stack[k].end == null) stack[k].end = src.length;
-  return { root, source: src };
+  for (let k = stack.length - 1; k > 0; k--) if (stack[k].end == null) stack[k].end = stop;
+  return { root, source: src, truncated: stop < src.length };
 }
 
 /** All text inside an element (its own and its descendants', in document order). No recursion. */
@@ -445,12 +467,42 @@ function isIconUrl(url) {
   }
 }
 
-/** Attributes of one start tag (names lower-cased, entities decoded). */
+const isSpace = (c) => c === ' ' || c === '\n' || c === '\t' || c === '\r' || c === '\f';
+
+/**
+ * Attributes of one start tag (names lower-cased, entities decoded; names without a value are left
+ * out). One pass over the text, so a long run of junk in a hostile page stays cheap.
+ */
 function tagAttrs(tag) {
   const attrs = {};
-  const re = /([^\s=/>]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/g;
-  let a;
-  while ((a = re.exec(tag))) attrs[a[1].toLowerCase()] = decodeEntities(a[2] ?? a[3] ?? a[4] ?? '');
+  const s = String(tag ?? '');
+  const n = s.length;
+  let i = 0;
+  let count = 0;
+  while (i < n && count < MAX_ATTRS) {
+    while (i < n && (isSpace(s[i]) || s[i] === '/' || s[i] === '>' || s[i] === '=')) i++;
+    const from = i;
+    while (i < n && !isSpace(s[i]) && s[i] !== '=' && s[i] !== '/' && s[i] !== '>') i++;
+    if (i === from) continue;
+    const name = s.slice(from, i).toLowerCase();
+    while (i < n && isSpace(s[i])) i++;
+    if (s[i] !== '=') continue;
+    i++;
+    while (i < n && isSpace(s[i])) i++;
+    const q = s[i];
+    const close = q === '"' || q === "'" ? s.indexOf(q, i + 1) : -1;
+    let value;
+    if (close >= 0) {
+      value = s.slice(i + 1, close);
+      i = close + 1;
+    } else {
+      const start = i; // unquoted (or an unclosed quote: up to the next space, as before)
+      while (i < n && !isSpace(s[i]) && s[i] !== '>') i++;
+      value = s.slice(start, i);
+    }
+    attrs[name] = decodeEntities(value);
+    count++;
+  }
   return attrs;
 }
 
@@ -755,6 +807,16 @@ export function fitsFeed(width, height) {
 }
 
 /**
+ * Library assets a queue item cannot be posted with: downloads from a link that failed or were
+ * refused (importError) and photos outside the feed's 4:5 to 1.91:1 range. Evergreen skips their items
+ * and they do not count toward a feed's backlog (worker/jobs/evergreen.mjs, worker/jobs/feeds.mjs).
+ * @returns {Set<string>}
+ */
+export function brokenAssetIds(assets) {
+  return new Set((assets || []).filter((a) => a && ((a.importUrl && a.importError) || (a.kind === 'image' && !fitsFeed(a.width, a.height)))).map((a) => a.id));
+}
+
+/**
  * What a downloaded file is, from its first bytes:
  * { format: 'jpeg'|'png'|'webp'|'gif'|'heic'|'avif'|'mp4'|'mov'|'html'|null, kind: 'image'|'video'|null, mime }
  */
@@ -849,10 +911,48 @@ export function jpegInfo(bytes) {
 }
 
 /**
- * Copy of a JPEG without metadata segments: EXIF and XMP (APP1, which can hold GPS coordinates and
- * camera details), IPTC/Photoshop (APP13) and comments. JFIF, ICC colour profiles (APP2) and the
- * Adobe colour-transform segment (APP14) are kept, so colours do not change. Returns the input
- * unchanged when it is not a JPEG or cannot be read safely.
+ * Offset just past the EOI marker that ends the image whose scan data starts at `from` (the scans of
+ * a progressive JPEG and the table segments between them included), or b.length when there is none
+ * or the data cannot be followed safely.
+ */
+function jpegEnd(b, from) {
+  let i = from;
+  while (i + 1 < b.length) {
+    if (b[i] !== 0xff) {
+      i++;
+      continue;
+    }
+    const m = b[i + 1];
+    if (m === 0x00 || (m >= 0xd0 && m <= 0xd7)) i += 2; // stuffed 0xFF byte, restart marker
+    else if (m === 0xff) i++; // fill byte
+    else if (m === 0xd9) return i + 2;
+    else {
+      // DHT, DQT, DRI, SOS... between scans: skip the segment.
+      if (m === 0xd8 || m === 0x01 || i + 4 > b.length) return b.length;
+      const len = (b[i + 2] << 8) | b[i + 3];
+      if (len < 2) return b.length;
+      i += 2 + len;
+    }
+  }
+  return b.length;
+}
+
+/** Segments before the scan data that only hold metadata (see stripJpegMetadata). */
+function isMetadataSegment(b, seg) {
+  const m = seg.marker;
+  // APP2 holds ICC colour profiles (kept) but also the multi-picture index and Flashpix data.
+  if (m === 0xe2) return /^(MPF|FPXR)\0/.test(String.fromCharCode(...b.subarray(seg.at + 4, seg.at + 9)));
+  return m === 0xe1 || (m >= 0xe3 && m <= 0xed) || m === 0xef || m === 0xfe;
+}
+
+/**
+ * Copy of a JPEG without metadata: EXIF and XMP (APP1, which can hold GPS coordinates and camera
+ * details), IPTC/Photoshop (APP13), other application segments (APP3-APP12, APP15), the multi-picture
+ * index and Flashpix data (APP2 "MPF" / "FPXR") and comments, plus anything
+ * after the image's end marker: cameras and phones append secondary images with their own EXIF (MPO),
+ * motion-photo videos and vendor data there. JFIF (APP0), ICC colour profiles (APP2) and the Adobe
+ * colour-transform segment (APP14) are kept, so colours do not change. Returns the input unchanged
+ * when it is not a JPEG or cannot be read safely.
  */
 export function stripJpegMetadata(bytes) {
   const b = bytes instanceof Uint8Array ? bytes : null;
@@ -860,15 +960,16 @@ export function stripJpegMetadata(bytes) {
   const segs = jpegSegments(b);
   const sos = segs.find((s) => s.marker === 0xda);
   if (!sos) return bytes;
-  const drop = segs.filter((s) => s.marker === 0xe1 || s.marker === 0xed || s.marker === 0xfe);
-  if (!drop.length) return bytes;
+  const end = jpegEnd(b, sos.at + 2 + sos.len);
+  const drop = segs.filter((s) => isMetadataSegment(b, s));
+  if (!drop.length && end === b.length) return bytes;
   const parts = [b.subarray(0, 2)];
   let at = 2;
   for (const s of drop) {
     if (s.at > at) parts.push(b.subarray(at, s.at));
     at = s.at + 2 + s.len;
   }
-  parts.push(b.subarray(at));
+  parts.push(b.subarray(at, end));
   const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
   let o = 0;
   for (const p of parts) {

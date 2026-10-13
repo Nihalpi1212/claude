@@ -183,6 +183,50 @@ describe('Library', { timeout: 240_000 }, () => {
     assert.ok(!left.some((x) => x.id === 'as_pending' || x.id === 'as_broken'));
   });
 
+  test('a linked file Instagram cannot take (a PNG) says how to fix it, without "Try again"', async () => {
+    const url = 'https://studionorth.example/img/workshop-poster';
+    await dev.seeded.store.update('library', (lib) => {
+      const src = lib.assets.find((a) => a.name === 'Vase trio');
+      lib.assets.unshift({
+        ...src, id: 'as_png', name: 'Workshop poster', folderId: null, autopilot: false, tags: [], usedBy: [],
+        path: 'media/as_png', thumbPath: 'media/as_png', mime: 'image/jpeg', // the placeholder type of a linked file
+        importUrl: url, importErrorCode: 'not_jpeg',
+        importError: 'This is a PNG image. Instagram only takes JPEG photos and the worker cannot convert images. Download the file and upload it in the Library, which converts it to JPEG.',
+      });
+      return lib;
+    }, { message: 'e2e: refused import' });
+    await page.reload();
+    await page.waitForSelector('.app', { timeout: 30_000 });
+    const tile = page.locator('.lib-item[data-asset="as_png"]');
+    await tile.waitFor({ timeout: 30_000 });
+    await tile.locator('.lib-import.is-error', { hasText: 'Cannot be posted' }).waitFor();
+    const note = await page.locator('.lib-imports').textContent();
+    assert.match(note, /Instagram cannot take 1 file from a link as it is\. Open it to see why\./);
+    assert.doesNotMatch(note, /try again/i, 'trying again downloads the same PNG');
+
+    await tile.locator('.lib-frame').click();
+    const drawer = page.locator('.lib-drawer');
+    const callout = drawer.locator('.callout', { hasText: 'Instagram cannot take this file' });
+    await callout.waitFor();
+    await callout.getByText(/This is a PNG image\./).waitFor();
+    assert.match(await callout.textContent(), /Upload a fixed copy in the Library/);
+    assert.doesNotMatch(await callout.textContent(), /Check that the link opens|then try again/);
+    assert.equal(await drawer.getByRole('button', { name: 'Try again' }).count(), 0);
+    // The link opens in a new tab, so the file can be downloaded from there.
+    const link = callout.getByRole('link', { name: url });
+    assert.equal(await link.getAttribute('href'), url);
+    assert.equal(await link.getAttribute('target'), '_blank');
+    // The type is not known until the file is here (not the "JPEG" placeholder).
+    const type = drawer.locator('.lib-kv dt', { hasText: /^Type$/ }).locator('xpath=following-sibling::dd[1]');
+    assert.equal((await type.textContent()).trim(), 'Not downloaded yet');
+    await shot(page, 'library-e2e-refused-import');
+
+    await drawer.getByRole('button', { name: 'Delete' }).click();
+    await page.getByRole('dialog', { name: /Delete "Workshop poster"/ }).getByRole('button', { name: 'Delete file' }).click();
+    await toastText(/Deleted 1 file/);
+    await tile.waitFor({ state: 'detached' });
+  });
+
   test('photos shared from another app (share target) are uploaded from the service worker mailbox', async () => {
     // The app registers the service worker on start; it must control the page to receive the share.
     await page.waitForFunction(() => !!navigator.serviceWorker.controller, null, { timeout: 30_000 });

@@ -75,6 +75,10 @@ a.ibx-post-thumb:hover { box-shadow: 0 0 0 1px var(--ink-3); }
 .ibx-group-error { padding: 8px 14px 0; }
 .ibx-more { padding: 6px 14px 10px 56px; border-top: 1px solid var(--line); }
 .ibx-skel { padding: 14px; }
+/* Older posts: comments from the worker's copy, after the live ones. */
+.ibx-older { margin-top: var(--sp-3); }
+.ibx-older-head { display: flex; flex-direction: column; gap: 2px; }
+.ibx-older-head p { max-width: 72ch; }
 @media (max-width: 759px) {
   .ibx-post { flex-wrap: wrap; padding: 10px 12px; }
   .ibx-post-info { flex-basis: calc(100% - 64px); }
@@ -237,6 +241,8 @@ a.ibx-post-thumb:hover { box-shadow: 0 0 0 1px var(--ink-3); }
 .ibx-conv-name { font-weight: 500; min-width: 0; }
 .ibx-conv.is-unread .ibx-conv-name { font-weight: 700; }
 .ibx-conv-time { flex: none; font-size: var(--fs-xs); }
+/* --ink-3 is under 4.5:1 on the selected row's tint. */
+.ibx-conv.is-selected .faint { color: var(--ink-2); }
 .ibx-conv-preview { font-size: var(--fs-sm); color: var(--ink-2); min-width: 0; }
 .ibx-conv.is-unread .ibx-conv-preview { color: var(--ink); }
 .ibx-unread {

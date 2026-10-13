@@ -10,7 +10,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openApp, unlock } from './helpers.mjs';
 
-const PORT = 5514;
+const PORT = Number(process.env.POST_NOW_E2E_PORT || 5514);
 const here = path.dirname(fileURLToPath(import.meta.url));
 const SHOTS = process.env.SCREENSHOT_DIR || '/tmp/claude-0/-home-user-claude/61a6d9a0-a933-5d86-8721-920a439be9c7/scratchpad/shots';
 
@@ -161,6 +161,90 @@ describe('post by hand', { timeout: 300_000 }, () => {
     await go(page, '#/');
     await page.locator('.dash-account').waitFor();
     assert.equal(await page.locator('.dash-hand .dash-post', { hasText: 'E2E reminder' }).count(), 0);
+  });
+
+  test('a pasted link is cleaned up and matched to its Instagram media, so the planner shows the post once', async () => {
+    // The two newest Instagram posts no Postpilot post has (analytics-media fills in shortly after the server starts).
+    const media = await page.evaluate(async () => {
+      const data = await import('/postpilot/js/data.js');
+      for (let i = 0; i < 60; i++) {
+        await data.refreshNow();
+        const store = data.getStore();
+        const linked = new Set((await store.read('posts')).posts.map((p) => p.igMediaId).filter(Boolean));
+        const list = Object.values((await store.read('analytics-media')).media || {})
+          .filter((m) => m.productType !== 'STORY' && m.permalink && !linked.has(m.id))
+          .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
+        if (list.length >= 2) return list.slice(0, 2);
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+      return [];
+    });
+    assert.equal(media.length, 2, 'Instagram media to post by hand');
+    const [saved, live] = media;
+    const dayOf = (ts) =>
+      page.evaluate(async (x) => {
+        const t = await import('/postpilot/core/time.js');
+        const data = await import('/postpilot/js/data.js');
+        return t.dayKey(new Date(x), (await data.getStore().read('settings')).timezone);
+      }, ts);
+    // Before: the planner's Day view shows the Instagram post as "Published on Instagram".
+    await go(page, `#/planner?view=day&date=${await dayOf(saved.timestamp)}`);
+    await page.locator(`.pl-dayview a.is-ig[href="${saved.permalink}"]`).waitFor();
+    const at = new Date(Date.now() - 600e3).toISOString();
+    const reminded = (caption) => addPost({ status: 'reminded', publishMode: 'reminder', caption, scheduledAt: at, reminderSentAt: at });
+
+    // 1. A link to a post whose numbers Postpilot already saved: linked at once. A profile link is refused,
+    //    the share query (?igsh=…) is dropped.
+    const first = await reminded('E2E posted by hand, saved media.');
+    await go(page, `#/post-now/${first}`);
+    await page.locator('.pn-steps').waitFor();
+    assert.equal((await page.locator('.pn-status .status').textContent()).trim(), 'Post by hand');
+    const box = page.getByRole('textbox', { name: 'Link to the post' });
+    await box.fill('https://www.instagram.com/studio.north/');
+    await page.getByRole('button', { name: 'Mark as posted' }).click();
+    await page.getByText('Paste the link to the post, starting with https://www.instagram.com/').waitFor();
+    await box.fill(`  ${saved.permalink}?igsh=ZTJlLXRlc3Q=  `);
+    await page.getByRole('button', { name: 'Mark as posted' }).click();
+    await page.locator('.callout', { hasText: 'Already posted' }).waitFor();
+    let post = (await readPosts()).find((p) => p.id === first);
+    assert.equal(post.status, 'published');
+    assert.equal(post.igMediaId, saved.id, 'linked to its Instagram media');
+    assert.equal(post.permalink, saved.permalink, 'the clean link');
+    assert.match(post.history.find((e) => e.event === 'posted by hand').detail, /matched to the Instagram post/);
+
+    // 2. A post Postpilot has no numbers for yet: looked up on Instagram (the newest posts).
+    await page.evaluate(async (id) => {
+      const data = await import('/postpilot/js/data.js');
+      await data.mutate('analytics-media', (doc) => void delete doc.media[id], { message: 'e2e: not saved yet' });
+    }, live.id);
+    try {
+      const second = await reminded('E2E posted by hand, live lookup.');
+      await go(page, `#/post-now/${second}`);
+      await page.locator('.pn-steps').waitFor();
+      await page.getByRole('textbox', { name: 'Link to the post' }).fill(live.permalink.replace(/^https:\/\/www\./, ''));
+      await page.getByRole('button', { name: 'Mark as posted' }).click();
+      await page.locator('.callout', { hasText: 'Already posted' }).waitFor();
+      post = (await readPosts()).find((p) => p.id === second);
+      assert.equal(post.igMediaId, live.id, 'found among the newest posts on Instagram');
+      assert.equal(post.permalink, live.permalink);
+    } finally {
+      await page.evaluate(async (m) => {
+        const data = await import('/postpilot/js/data.js');
+        await data.mutate('analytics-media', (doc) => void (doc.media[m.id] = doc.media[m.id] || m), { message: 'e2e: restore media' });
+      }, live);
+    }
+
+    // 3. The planner shows each once: no separate "Published on Instagram" item, one grid tile.
+    for (const m of [saved, live]) {
+      await go(page, `#/planner?view=day&date=${await dayOf(m.timestamp)}`);
+      await page.locator('.pl-dayview').waitFor();
+      await page.waitForTimeout(300);
+      assert.equal(await page.locator(`.pl-dayview a.is-ig[href="${m.permalink}"]`).count(), 0, `${m.permalink} is not shown apart from its post`);
+    }
+    await go(page, '#/planner?view=grid');
+    await page.locator('.pl-ig-grid').waitFor();
+    await page.locator(`.pl-tile.is-published[href="${saved.permalink}"]`).first().waitFor();
+    for (const m of [saved, live]) assert.equal(await page.locator(`.pl-tile.is-published[href="${m.permalink}"]`).count(), 1, `one grid tile for ${m.permalink}`);
   });
 
   test('remind me again in 1 hour puts the post back on the schedule', async () => {

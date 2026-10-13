@@ -461,7 +461,10 @@
 }
 @media (max-width: 759px) {
   .cmp-drawer .overlay-foot { padding: 10px 12px; }
-  .cmp-actions { flex-wrap: nowrap; gap: 6px; }
+  /* Buttons keep their full labels: when they do not fit one row (a reminder, an approval, a
+     scheduled post on a narrow phone), the last ones (the main button first) wrap onto a second,
+     full-width row instead of running off the screen. */
+  .cmp-actions { gap: 6px; }
   .cmp-actions .cmp-state, .cmp-actions .spacer { display: none; }
   .overlay-foot .cmp-actions .btn { flex: 1 1 auto; padding-inline: 8px; }
   .cmp-actions .menu { flex: none; }

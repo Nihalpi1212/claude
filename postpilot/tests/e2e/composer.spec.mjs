@@ -8,7 +8,7 @@ import { mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { openApp, unlock } from './helpers.mjs';
 
-const PORT = 5511;
+const PORT = Number(process.env.COMPOSER_E2E_PORT || 5511);
 const here = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES = path.resolve(here, '../../dev/fixtures');
 const SHOTS = process.env.SCREENSHOT_DIR || '/tmp/claude-0/-home-user-claude/61a6d9a0-a933-5d86-8721-920a439be9c7/scratchpad/shots';
@@ -642,6 +642,78 @@ describe('composer', () => {
     const gone = (await fetch(`${h.url}/mock/ig/v26.0/${target.igMediaId}?fields=id&access_token=demo-instagram-token`)).status;
     assert.ok(gone >= 400, `media is gone from Instagram (${gone})`);
     await page.evaluate(() => (location.hash = '#/'));
+  });
+
+  it('on a phone the footer keeps every button on screen with its full label (360 and 390 px); source badges use the planner names', async () => {
+    // The footer sits in a drawer that clips overflow, so the page never scrolls sideways: measure the buttons.
+    const ids = await page.evaluate(async () => {
+      const data = await import('/postpilot/js/data.js');
+      const { newPost } = await import('/postpilot/core/model.js');
+      const lib = await data.getStore().read('library');
+      const a = lib.assets.find((x) => x.name === 'Vase trio');
+      const media = [{ assetId: a.id, kind: 'image', altText: '' }];
+      const at = (hours) => new Date(Date.now() + hours * 36e5).toISOString();
+      const posts = {
+        scheduled: newPost({ status: 'scheduled', scheduledAt: at(50), caption: 'E2E footer: scheduled', media, source: 'csv' }),
+        reminded: newPost({ status: 'reminded', publishMode: 'reminder', scheduledAt: at(-1), reminderSentAt: at(-1), caption: 'E2E footer: reminded', media }),
+        approval: newPost({ status: 'draft', needsApproval: true, source: 'recycle', scheduledAt: at(74), caption: 'E2E footer: approval', media }),
+      };
+      await data.mutate('posts', (doc) => void doc.posts.push(...Object.values(posts)), { message: 'e2e: footer posts' });
+      return Object.fromEntries(Object.entries(posts).map(([k, p]) => [k, p.id]));
+    });
+    for (const w of [360, 390]) {
+      const ctx = await h.browser.newContext({ viewport: { width: w, height: 780 } });
+      const p = await ctx.newPage();
+      const errs = [];
+      p.on('pageerror', (e) => errs.push(String(e)));
+      await p.goto(`${h.url}/postpilot/index.html#/planner?view=list`);
+      await unlock(p);
+      const fits = async (what) => {
+        const bad = await p.evaluate(() => {
+          const vw = document.documentElement.clientWidth;
+          return [...document.querySelectorAll('.cmp-drawer .overlay-foot .btn, .cmp-drawer .overlay-foot .icon-btn')]
+            .filter((b) => b.getClientRects().length)
+            .map((b) => {
+              const r = b.getBoundingClientRect();
+              const label = b.querySelector('.btn-label');
+              return { text: (b.textContent || b.getAttribute('aria-label') || '').trim(), left: Math.round(r.left), right: Math.round(r.right), cut: !!label && label.scrollWidth > label.clientWidth + 1 };
+            })
+            .filter((b) => b.left < 0 || b.right > vw || b.cut);
+        });
+        assert.deepEqual(bad, [], `${what} at ${w}px: footer buttons off screen or cut`);
+      };
+      for (const [what, label, badge] of [['scheduled', 'Save changes', 'CSV import'], ['reminded', 'Schedule reminder', null], ['approval', 'Approve and schedule', 'Repost']]) {
+        const row = p.locator(`.pl-row[data-post-id="${ids[what]}"]`);
+        await row.waitFor({ timeout: 20_000 });
+        await row.getByRole('button', { name: /^Actions for/ }).click();
+        await p.getByRole('menuitem', { name: 'Edit', exact: true }).click();
+        await footer(p).getByRole('button', { name: label }).waitFor();
+        await fits(what);
+        if (w === 360) await snap(p, `composer-footer-${what}-${w}`);
+        if (badge) await p.locator('.cmp-status .badge', { hasText: new RegExp(`^${badge}$`) }).waitFor();
+        if (what === 'reminded') {
+          // One name for the status everywhere: "Post by hand" (not "Reminder sent").
+          assert.equal((await p.locator('.cmp-status .status').textContent()).trim(), 'Post by hand');
+        }
+        await closeComposer(p);
+      }
+      await openNew(p);
+      await pickFromLibrary(p, ['Vase trio']);
+      await setWhen(p, 2, '10:00');
+      await footer(p).getByRole('button', { name: 'Schedule', exact: true }).waitFor();
+      await fits('new post');
+      await p.getByRole('radio', { name: /Send me a reminder/ }).check();
+      await footer(p).getByRole('button', { name: 'Schedule reminder' }).waitFor();
+      await fits('new reminder');
+      await closeComposer(p);
+      assert.deepEqual(errs, []);
+      await ctx.close();
+    }
+    await page.evaluate(async (ids) => {
+      const data = await import('/postpilot/js/data.js');
+      const gone = new Set(Object.values(ids));
+      await data.mutate('posts', (doc) => void (doc.posts = doc.posts.filter((x) => !gone.has(x.id))), { message: 'e2e: clean up' });
+    }, ids);
   });
 
   it('screenshots in dark mode and on a phone, without horizontal overflow', async () => {

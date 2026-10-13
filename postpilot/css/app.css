@@ -17,7 +17,7 @@
   --surface-3: #DFE2DC;
   --ink: #15191C;
   --ink-2: #484F56;
-  --ink-3: #767D85;
+  --ink-3: #646B72; /* 4.5:1 or more on --bg, --surface and --surface-2 (.faint text) */
   --line: #D7DAD3;
   --line-strong: #B9BEB6;
   --accent: #1F5F8B;
@@ -97,7 +97,7 @@
     --surface-3: #252D33;
     --ink: #E6E9EB;
     --ink-2: #AAB2B9;
-    --ink-3: #7B848C;
+    --ink-3: #858E96;
     --line: #283036;
     --line-strong: #3A444C;
     --accent: #74AEDB;
@@ -132,7 +132,7 @@
   --surface-3: #252D33;
   --ink: #E6E9EB;
   --ink-2: #AAB2B9;
-  --ink-3: #7B848C;
+  --ink-3: #858E96;
   --line: #283036;
   --line-strong: #3A444C;
   --accent: #74AEDB;
@@ -601,6 +601,11 @@ a.account-chip:hover { background: var(--surface-2); }
 }
 
 @media (max-width: 759px) {
+  /* Deep links (scrollIntoView) and keyboard focus stop clear of the sticky top bar and the tab bar. */
+  html {
+    scroll-padding-top: calc(52px + env(safe-area-inset-top));
+    scroll-padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom));
+  }
   .app { grid-template-columns: minmax(0, 1fr); }
   .sidebar { display: none; }
 

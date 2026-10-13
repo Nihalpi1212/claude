@@ -5,6 +5,8 @@
 // the console and callers must pass NON-SENSITIVE text (counts, generic status). Everything
 // detailed goes through `log()`, which is persisted to the encrypted `log` document.
 
+import { lookup as dnsLookup } from 'node:dns/promises';
+import { isIP } from 'node:net';
 import { b64decode, DecryptError, importDataKey, randomToken, utf8 } from '../core/crypto.js';
 import { createGitHub, GitHubError } from '../core/github.js';
 import { createStore, DATA_BRANCH } from '../core/store.js';
@@ -12,6 +14,7 @@ import { createIg } from '../core/ig.js';
 import { createAi } from '../core/ai.js';
 import { dayKey } from '../core/time.js';
 import { stripMp4Metadata } from '../core/mp4.js';
+import { stripJpegMetadata } from '../core/feed.js';
 
 export const LOG_ENTRY_CAP = 500;
 export const RUN_CAP = 200;
@@ -50,6 +53,132 @@ export class WorkerError extends Error {
     this.isTransient = !permanent;
     this.code = code;
   }
+}
+
+// ---- links third parties pick (feeds, their pages and images, CSV links) ----------------------
+
+const LINK_PORTS = new Set(['', '80', '443']);
+const MAX_LINK_REDIRECTS = 5;
+
+/** A link guardLinks refuses (fetchCapped in worker/jobs/feeds.mjs reports err.message to the owner). */
+export class BlockedLinkError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'BlockedLinkError';
+    this.blocked = true;
+  }
+}
+
+/** The 8 groups of an IPv6 address (embedded IPv4 included), or null. */
+function ipv6Groups(ip) {
+  let s = ip.toLowerCase().replace(/%.*$/, '');
+  const v4 = /(\d+\.\d+\.\d+\.\d+)$/.exec(s);
+  if (v4) {
+    const [a, b, c, d] = v4[1].split('.').map(Number);
+    s = `${s.slice(0, -v4[1].length)}${((a << 8) | b).toString(16)}:${((c << 8) | d).toString(16)}`;
+  }
+  const [head, tail] = s.split('::');
+  const part = (x) => (x ? x.split(':').map((h) => parseInt(h, 16)) : []);
+  const h = part(head);
+  const t = s.includes('::') ? part(tail) : [];
+  const groups = s.includes('::') ? [...h, ...new Array(Math.max(0, 8 - h.length - t.length)).fill(0), ...t] : h;
+  return groups.length === 8 && groups.every((g) => Number.isInteger(g) && g >= 0 && g <= 0xffff) ? groups : null;
+}
+
+/**
+ * Whether an IP address is not on the public internet: loopback, private (RFC 1918, unique local),
+ * link-local (cloud metadata at 169.254.169.254), shared (CGNAT), unspecified, multicast, reserved and
+ * documentation ranges, and IPv4 addresses inside IPv6 (mapped, compatible, NAT64, 6to4). Anything that
+ * is not an IP address counts as private. Exported for tests.
+ */
+export function isPrivateAddress(ip) {
+  const v = isIP(String(ip || ''));
+  if (v === 4) {
+    const [a, b, c] = ip.split('.').map(Number);
+    return (
+      a === 0 || a === 10 || a === 127 || a >= 224 ||
+      (a === 100 && b >= 64 && b <= 127) || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) || (a === 192 && b === 0 && (c === 0 || c === 2)) || (a === 198 && (b === 18 || b === 19)) ||
+      (a === 198 && b === 51 && c === 100) || (a === 203 && b === 0 && c === 113)
+    );
+  }
+  if (v !== 6) return true;
+  const g = ipv6Groups(ip);
+  if (!g) return true;
+  const v4 = (hi, lo) => isPrivateAddress(`${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`);
+  const zeros = (n) => g.slice(0, n).every((x) => x === 0);
+  if (zeros(8) || (zeros(7) && g[7] === 1)) return true; // :: and ::1
+  if (zeros(5) && (g[5] === 0xffff || g[5] === 0)) return v4(g[6], g[7]); // ::ffff:a.b.c.d, ::a.b.c.d
+  if (g[0] === 0x64 && g[1] === 0xff9b && g.slice(2, 6).every((x) => x === 0)) return v4(g[6], g[7]); // NAT64
+  if (g[0] === 0x2002) return v4(g[1], g[2]); // 6to4
+  return (g[0] & 0xfe00) === 0xfc00 || (g[0] & 0xffc0) === 0xfe80 || (g[0] & 0xffc0) === 0xfec0 || (g[0] & 0xff00) === 0xff00 || (g[0] === 0x2001 && g[1] === 0xdb8) || (g[0] === 0x100 && !g[1] && !g[2] && !g[3]);
+}
+
+/**
+ * fetch for links third parties pick (feed items, their pages and og:images, CSV links): http(s) on
+ * ports 80 and 443 only, every address the host name resolves to must be public (isPrivateAddress),
+ * and redirects are followed here (at most 5), each checked the same way. On GitHub's runners nothing
+ * private is reachable; this matters when the worker runs on a computer in a home or office network.
+ * fetch resolves the name again itself, so a DNS server answering differently the second time is not
+ * covered. Throws BlockedLinkError for a refused link. Exported for tests.
+ */
+export function guardLinks(fetchImpl, { lookup = (host) => dnsLookup(host, { all: true, verbatim: true }) } = {}) {
+  async function check(href) {
+    const u = new URL(href);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new BlockedLinkError('The link is not a web address (it must start with http:// or https://).');
+    const host = u.hostname.replace(/^\[|\]$/g, '');
+    const addresses = isIP(host) ? [host] : (await lookup(host)).map((r) => (typeof r === 'string' ? r : r.address));
+    if (!addresses.length || addresses.some(isPrivateAddress)) {
+      throw new BlockedLinkError('The link points to a private or local network address. Postpilot only downloads from public websites.');
+    }
+    if (!LINK_PORTS.has(u.port)) throw new BlockedLinkError(`The link uses port ${u.port}. Postpilot only downloads from the standard web ports (80 and 443).`);
+  }
+  return async function fetchLinks(url, init = {}) {
+    let href = String(url);
+    for (let hop = 0; ; hop++) {
+      await check(href);
+      const res = await fetchImpl(href, { ...init, redirect: 'manual' });
+      const location = res.status >= 300 && res.status < 400 && res.status !== 304 ? res.headers.get('location') : null;
+      if (!location) return res;
+      res.body?.cancel?.().catch(() => {});
+      if (hop >= MAX_LINK_REDIRECTS) throw new BlockedLinkError('The link redirects too many times.');
+      href = new URL(location, href).href;
+    }
+  };
+}
+
+// ---- GitHub write pacing ----------------------------------------------------------------------
+
+/** Content-creating GitHub requests per minute the worker allows itself (GitHub's secondary limit is 80). */
+export const GITHUB_WRITES_PER_MIN = 60;
+
+/**
+ * fetch that keeps content-creating requests (anything but GET and HEAD) under `perMinute` in any 60
+ * seconds, waiting for a free slot when needed. Publishing a backlog makes many in a burst (each
+ * exposed file is a blob, tree, commit and ref update on the throwaway branch, each post three data
+ * commits), and GitHub answers 403 past its secondary rate limit. Exported for tests.
+ */
+export function paceWrites(fetchImpl, { perMinute = GITHUB_WRITES_PER_MIN, now = () => Date.now(), sleep = (ms) => new Promise((r) => setTimeout(r, ms)) } = {}) {
+  const times = []; // when the writes of the last minute started
+  let queue = Promise.resolve();
+  return async function pacedFetch(url, init = {}) {
+    const method = String(init.method || 'GET').toUpperCase();
+    if (method === 'GET' || method === 'HEAD') return fetchImpl(url, init);
+    const turn = queue.then(async () => {
+      for (;;) {
+        const t = now();
+        while (times.length && t - times[0] >= 60_000) times.shift();
+        if (times.length < perMinute) {
+          times.push(t);
+          return;
+        }
+        await sleep(60_000 - (t - times[0]) + 10);
+      }
+    });
+    queue = turn.catch(() => {});
+    await turn;
+    return fetchImpl(url, init);
+  };
 }
 
 /** Parse a "now" override (ISO string, epoch ms, Date or function) into a clock function. */
@@ -108,8 +237,16 @@ export async function createContext({ env = {}, fetchImpl, now, consoleLog = con
     anthropic: env.POSTPILOT_ANTHROPIC_BASE ? trimSlash(env.POSTPILOT_ANTHROPIC_BASE) : undefined,
   };
 
-  const gh = createGitHub({ token: env.GITHUB_TOKEN, owner, repo, apiBase: endpoints.github, fetchImpl: doFetch });
+  // Writes to the real GitHub API are paced (paceWrites); POSTPILOT_GITHUB_WRITES_PER_MIN overrides the
+  // rate (0 = no pacing). The local mocks are not paced.
+  const writesPerMin = env.POSTPILOT_GITHUB_WRITES_PER_MIN !== undefined ? Number(env.POSTPILOT_GITHUB_WRITES_PER_MIN) : endpoints.github === 'https://api.github.com' ? GITHUB_WRITES_PER_MIN : 0;
+  const ghFetch = writesPerMin > 0 ? paceWrites(doFetch, { perMinute: writesPerMin }) : doFetch;
+  const gh = createGitHub({ token: env.GITHUB_TOKEN, owner, repo, apiBase: endpoints.github, fetchImpl: ghFetch });
   const store = createStore({ gh, key, branch, author: 'worker' });
+  // Links feeds and CSV imports point to: private addresses refused (guardLinks), except with an
+  // injected fetch (tests) or POSTPILOT_ALLOW_PRIVATE_LINKS=1 (the dev server, whose demo feed is on
+  // localhost, or a self-hosted worker meant to read feeds on its own network).
+  const fetchLinks = fetchImpl || env.POSTPILOT_ALLOW_PRIVATE_LINKS === '1' ? doFetch : guardLinks(doFetch);
 
   const clock = makeClock(now, env.POSTPILOT_NOW);
   const startedAtMs = clock();
@@ -219,6 +356,7 @@ export async function createContext({ env = {}, fetchImpl, now, consoleLog = con
   let tmpExists = false;
   let tmpReadmeSha = null;
   let tmpQueue = Promise.resolve();
+  let tmpBatch = null; // copies waiting for the next rewrite of the throwaway branch: {files, done}
 
   function rawUrl(path, ref = branch) {
     return `${endpoints.raw}/${owner}/${repo}/${ref.split('/').map(encodeURIComponent).join('/')}/${path.split('/').map(encodeURIComponent).join('/')}`;
@@ -258,6 +396,25 @@ export async function createContext({ env = {}, fetchImpl, now, consoleLog = con
     }
     tmpExists = true;
     tmpFiles = new Map(files);
+  }
+
+  /**
+   * Add a copy to the throwaway branch. Copies added while an earlier rewrite is still running go in
+   * one rewrite together (exposing a carousel's files at the same time costs two rewrites, not ten).
+   */
+  function addTmpFile(path, sha) {
+    if (!tmpBatch) {
+      const files = new Map();
+      const done = withTmpBranch(async () => {
+        if (tmpBatch && tmpBatch.files === files) tmpBatch = null; // copies added from now on wait for the next rewrite
+        const all = new Map(await loadTmpFiles());
+        for (const [p, s] of files) all.set(p, s);
+        await writeTmpBranch(all);
+      });
+      tmpBatch = { files, done };
+    }
+    tmpBatch.files.set(path, sha);
+    return tmpBatch.done;
   }
 
   /** Remove copies from the throwaway branch. Returns how many were there. */
@@ -318,16 +475,16 @@ export async function createContext({ env = {}, fetchImpl, now, consoleLog = con
       }
     }
     // readMedia returns a fresh decrypted copy, so stripping in place never touches the stored original.
-    const bytes = await readMedia(asset);
+    let bytes = await readMedia(asset);
     const ext = extensionFor(asset);
-    if (ext !== 'jpg') stripMp4Metadata(bytes); // photos were re-encoded (no EXIF) when they were added
+    if (ext !== 'jpg') stripMp4Metadata(bytes);
+    // Photos uploaded in the app were re-encoded (no metadata). One the worker downloaded from a link
+    // (thumbPath === path) was stripped when it was stored; again here for files stored before
+    // stripping also cut what follows the image (motion-photo videos, secondary images).
+    else if (asset.thumbPath && asset.thumbPath === asset.path) bytes = stripJpegMetadata(bytes);
     const path = `${TMP_PREFIX}${Math.floor(clock() / 1000)}-${randomToken(12)}.${ext}`;
     const sha = await gh.createBlob(bytes);
-    await withTmpBranch(async () => {
-      const files = new Map(await loadTmpFiles());
-      files.set(path, sha);
-      await writeTmpBranch(files);
-    });
+    await addTmpFile(path, sha);
     exposed.add(path);
     const url = rawUrl(path, TMP_BRANCH);
     await waitForUrl(url, { timeoutMs: Number(env.POSTPILOT_EXPOSE_TIMEOUT_MS || 60_000) });
@@ -384,8 +541,10 @@ export async function createContext({ env = {}, fetchImpl, now, consoleLog = con
     store,
     settings,
     tz,
-    /** fetch for other sites (feeds and linked media downloads); the injected fetchImpl in tests. */
+    /** fetch for other services (web push); the injected fetchImpl in tests. */
     fetch: doFetch,
+    /** fetch for links third parties pick (feeds and linked media downloads): see guardLinks. */
+    fetchLinks,
     ig: null,
     ai: null,
     startedAtMs,

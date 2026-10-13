@@ -82,9 +82,11 @@ test('idle runs only write a heartbeat, coalesced into one record', async (t) =>
   await env.run();
   assert.equal(env.ghMock.stats.writes, writes, 'an idle run inside the heartbeat window writes nothing');
   await env.run({ now: Date.now() + 31 * 60e3 });
+  assert.equal(env.ghMock.stats.writes, writes, 'the heartbeat is hourly');
+  await env.run({ now: Date.now() + 61 * 60e3 });
   log = await env.read('log');
   assert.equal(log.runs.length, 1, 'idle heartbeats replace each other');
-  assert.ok(Date.parse(log.runs[0].finishedAt) > Date.now() + 30 * 60e3);
+  assert.ok(Date.parse(log.runs[0].finishedAt) > Date.now() + 60 * 60e3);
   // A run that does something is kept, and the next heartbeat goes on top of it.
   const asset = await env.addAsset('f01.jpg');
   await env.update('posts', (d) => void d.posts.push(newPost({ status: 'scheduled', scheduledAt: new Date(Date.now() - 1000).toISOString(), caption: 'x', media: [{ assetId: asset.id, kind: 'image' }] })));
@@ -95,6 +97,26 @@ test('idle runs only write a heartbeat, coalesced into one record', async (t) =>
   assert.ok(!log.runs[0].idle);
   assert.ok(log.runs[0].counts.evergreenCreated > 0);
   assert.ok(JSON.stringify(log.runs[0]).length < 600, 'run records stay small');
+});
+
+test('an idle run inside the heartbeat window still saves what it logged', async (t) => {
+  const env = await startWorkerEnv({ connect: false });
+  t.after(() => env.close());
+  await env.run();
+  const kept = (log) => log.entries.filter((e) => e.job === 'maintenance' && /Kept the scheduled worker enabled/.test(e.message)).length;
+  assert.equal(kept(await env.read('log')), 1);
+  // 21 days since the last keep-alive: the next run (10 minutes later, nothing else to do) does it again.
+  await env.update('settings', (s) => void (s.worker.maintenance.keepaliveAt = new Date(Date.now() - 21 * 864e5).toISOString()));
+  const res = await env.run({ now: Date.now() + 10 * 60e3 });
+  assert.equal(res.summary.jobs.maintenance.keepalive, 1);
+  const log = await env.read('log');
+  assert.equal(kept(log), 2, 'the keep-alive entry is not dropped');
+  assert.equal(log.runs.length, 1, 'still one coalesced idle record');
+  assert.equal(log.runs[0].idle, true);
+  // A run that logged nothing writes nothing.
+  const writes = env.ghMock.stats.writes;
+  await env.run({ now: Date.now() + 20 * 60e3 });
+  assert.equal(env.ghMock.stats.writes, writes);
 });
 
 test('a paused worker only does maintenance', async (t) => {

@@ -5,9 +5,9 @@
 // a public repo), so it only ever contains counts and generic status lines.
 
 import { pathToFileURL } from 'node:url';
-import { ConfigError, createContext, describeError, errorKind, LOG_ENTRY_CAP, RUN_CAP } from './context.mjs';
+import { ConfigError, createContext, describeError, errorKind, isIgAuth, LOG_ENTRY_CAP, RUN_CAP } from './context.mjs';
 import { sendNotifications } from './notify.mjs';
-import token from './jobs/token.mjs';
+import token, { markExpired } from './jobs/token.mjs';
 import outbox from './jobs/outbox.mjs';
 import publish from './jobs/publish.mjs';
 import feeds from './jobs/feeds.mjs';
@@ -78,10 +78,11 @@ export const CORE_COUNTS = ['published', 'failed', 'replies', 'dms', 'hidden', '
 
 /**
  * Write a run record at least this often even when nothing happened (worker heartbeat). The app
- * shows "Worker is late" when the newest record is older than 45 minutes. Every write stores the
- * whole encrypted log document again, so idle runs in between are not recorded.
+ * shows "Worker is late" when the newest record is older than 90 minutes, which leaves 30 minutes
+ * for GitHub's delays of scheduled runs. Every write stores the whole encrypted log document again
+ * (up to about 150 KB), so idle runs in between are not recorded unless they logged something.
  */
-export const HEARTBEAT_MS = 30 * 60 * 1000;
+export const HEARTBEAT_MS = 60 * 60 * 1000;
 
 const SKIP_TEXT = {
   not_connected: 'Instagram not connected',
@@ -171,6 +172,18 @@ export async function runWorker({ env = process.env, fetchImpl, now, log: consol
       jobs[name] = res;
       ctx.say(formatJobLine(name, res));
     } catch (err) {
+      if (isIgAuth(err) && ctx.ig && ctx.settings.ig) {
+        // Instagram rejected the login mid-run (revoked after the token job's daily check): record it
+        // as the token job does (reconnect banner, one 'account' push, a single log entry) and skip
+        // Instagram for the rest of this run; later runs skip it until the token job's recheck.
+        try {
+          jobs[name] = { error: true, ...(await markExpired(ctx, ctx.settings.ig, err)) };
+          ctx.say(formatJobLine(name, jobs[name]));
+          continue;
+        } catch {
+          // Could not save the status: report the job error as usual (Instagram is skipped anyway).
+        }
+      }
       const message = describeError(err);
       errors.push({ job: name, message });
       jobs[name] = { error: true };
@@ -224,8 +237,9 @@ export async function runWorker({ env = process.env, fetchImpl, now, log: consol
         const lastMs = lastRun ? Date.parse(lastRun.finishedAt) : NaN;
         const heartbeatDue = !Number.isFinite(lastMs) || ctx.nowMs() - lastMs >= HEARTBEAT_MS || ctx.trigger === 'workflow_dispatch';
         // Idle runs are only recorded as a heartbeat (and replace the previous idle record) to keep
-        // the data branch small.
-        if (!noteworthy && !heartbeatDue) return;
+        // the data branch small. A run that logged something (keep-alive, compaction, archiving,
+        // feed notes...) is saved too: its entries exist only in this run's buffer.
+        if (!noteworthy && !heartbeatDue && !ctx.entries.length) return;
         logDoc.entries = [...ctx.entries.slice().reverse(), ...(logDoc.entries || [])].slice(0, LOG_ENTRY_CAP);
         const previous = logDoc.runs || [];
         const keep = run.idle && previous[0] && previous[0].idle ? previous.slice(1) : previous;

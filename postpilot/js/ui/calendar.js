@@ -46,14 +46,55 @@ export function statusKey(post) {
   return post.status;
 }
 
-/** StatusPill for a post ('reminded' = the reminder went out and the owner posts it by hand). */
+/**
+ * StatusPill for a post ('reminded' = waiting for the owner to post it by hand: the reminder went out,
+ * or "Post by hand now" skipped it, so the pill never says a reminder was sent).
+ */
 export function PostStatus({ post }) {
-  if (post.status === 'reminded') return html`<${StatusPill} status="needs-approval" label="Reminder sent" class="is-reminded" />`;
+  if (post.status === 'reminded') return html`<${StatusPill} status="reminded" class="is-reminded" />`;
   return html`<${StatusPill} status=${statusKey(post)} />`;
 }
 
 /** Hash of the screen that posts a reminded post by hand. */
 export const postNowHash = (post) => `#/post-now/${encodeURIComponent(post.id)}`;
+
+// instagram.com/p/<code>/, /reel/<code>/ (also /reels/, /tv/, or with the account name in front),
+// with or without the scheme; the query (?igsh=…) and fragment are ignored.
+const PERMALINK_RE = /^(?:https?:\/\/)?(?:www\.|m\.)?instagram\.com\/(?:[A-Za-z0-9._]+\/)?(p|reels?|tv)\/([A-Za-z0-9_-]+)\/?(?:[?#]\S*)?$/i;
+
+/**
+ * A pasted link to an Instagram post as {url, shortcode} (url cleaned up:
+ * https://www.instagram.com/p/<code>/ or /reel/<code>/), or null when it is not a post link.
+ */
+export function parsePermalink(text) {
+  const m = PERMALINK_RE.exec(String(text || '').trim());
+  if (!m) return null;
+  const kind = m[1].toLowerCase();
+  return { url: `https://www.instagram.com/${kind.startsWith('reel') ? 'reel' : kind}/${m[2]}/`, shortcode: m[2] };
+}
+
+/** Shortcode of an analytics-media item (stored, or read from its permalink), or null. */
+export function mediaCode(m) {
+  return (m && (m.shortcode || (parsePermalink(m.permalink) || {}).shortcode)) || null;
+}
+
+/**
+ * Instagram media ids and shortcodes already shown as a Postpilot post: by igMediaId, and by the
+ * link of a post marked as posted by hand before the worker linked it (so it never shows twice).
+ */
+export function linkedMedia(posts) {
+  const ids = new Set();
+  const codes = new Set();
+  for (const p of posts || []) {
+    if (!p) continue;
+    if (p.igMediaId) ids.add(String(p.igMediaId));
+    else if (p.status === 'published' && p.permalink) {
+      const parsed = parsePermalink(p.permalink);
+      if (parsed) codes.add(parsed.shortcode);
+    }
+  }
+  return { ids, codes, has: (m) => !!m && (ids.has(String(m.id)) || codes.has(mediaCode(m))) };
+}
 
 /**
  * Does a post match a search? Every word must appear in its caption, first comment, notes or labels
@@ -220,7 +261,7 @@ function Chip({ item, tz, onOpen }) {
       title=${`Published on Instagram: ${label}`} aria-label=${`Published on Instagram: ${label}`}>${content}</a>`;
   }
   return html`<div role="button" tabindex="0" class=${cx('cal-event pl-chip', toneClass(item.post), item.movable && 'is-movable')}
-    draggable=${item.movable ? 'true' : 'false'} data-post-id=${item.post.id}
+    draggable=${!!item.movable} data-post-id=${item.post.id}
     title=${item.movable ? `${label} (drag to another day to move it)` : item.post.status === 'reminded' ? `${label} (post it by hand)` : label}
     aria-label=${`${label}, ${item.post.status === 'reminded' ? 'post by hand' : statusKey(item.post).replace('-', ' ')}`}
     onDragStart=${item.movable ? (e) => startDrag(e, item.post.id) : (e) => e.preventDefault()} onDragEnd=${endDrag}
@@ -445,7 +486,7 @@ function WeekEvent({ ev, tz, onOpen }) {
       title=${`Published on Instagram: ${time} · ${title}`}>${inner}</a>`;
   }
   return html`<div role="button" tabindex="0" class=${cx('pl-week-event cal-event', toneClass(ev.post), ev.movable && 'is-movable')} style=${style}
-    data-post-id=${ev.post.id} draggable=${ev.movable ? 'true' : 'false'}
+    data-post-id=${ev.post.id} draggable=${!!ev.movable}
     aria-label=${`${time} · ${TYPE_LABEL[type]} · ${title}, ${ev.post.status === 'reminded' ? 'post by hand' : statusKey(ev.post).replace('-', ' ')}`}
     title=${`${time} · ${TYPE_LABEL[type]} · ${title}${ev.movable ? ' (drag to move)' : ev.post.status === 'reminded' ? ' (post it by hand)' : ''}`}
     onDragStart=${ev.movable ? (e) => startDrag(e, ev.post.id, { offsetY: e.clientY - e.currentTarget.getBoundingClientRect().top }) : (e) => e.preventDefault()}
@@ -537,7 +578,7 @@ function DayEvent({ item, tz, onOpen }) {
   const reminded = p.status === 'reminded';
   const minute = zonedParts(new Date(item.at), tz).minute;
   return html`<div role="button" tabindex="0" class=${cx('pl-dayevent cal-event', toneClass(p), item.movable && 'is-movable')} data-post-id=${p.id}
-    draggable=${item.movable ? 'true' : 'false'}
+    draggable=${!!item.movable}
     aria-label=${`${time} · ${TYPE_LABEL[type]} · ${title}, ${reminded ? 'post by hand' : statusKey(p).replace('-', ' ')}`}
     title=${reminded ? 'Open "Post by hand"' : item.movable ? 'Open, or drag to another hour' : undefined}
     onDragStart=${item.movable ? (e) => startDrag(e, p.id, { minute }) : (e) => e.preventDefault()} onDragEnd=${endDrag}

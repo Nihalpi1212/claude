@@ -10,10 +10,14 @@ server, no subscription, and nobody else can open it. What it does not do (and w
 | Area | Features |
 |---|---|
 | **Plan** | Month, week, day, list and Instagram-grid calendar with drag-to-reschedule and search · posts, carousels (up to 10), reels (cover frame, trial reels, share-to-feed) and stories · first comment, collaborators, user tags, location, alt text, "AI info" label · best-time suggestions and "add to queue" · drafts, duplicate, bulk actions · CSV import/export (media from your library or from links) · AI caption writer with rewrite actions (shorter, longer, fix grammar, call to action, tone, translate) and "ideas for next week" |
-| **Automate** | Auto-publishing on schedule · **reminder posts** for what the API cannot post (music, link stickers, polls): your phone gets a notification and a "post now" screen with the files and caption ready · evergreen queues on fixed weekly slots, filled by hand, from RSS/Atom feeds, from a CSV or with AI · **Autopilot**: drop photos and videos in a pool and it writes captions (Claude AI, optional), picks your best times and fills your calendar, with or without your approval, and can repost your top posts · keyword auto-replies to comments and comment-to-DM private replies (posts from the last 90 days, up to 50, plus any post you pick; both adjustable) · DM keyword replies, replies to your stories and stories that mention you · welcome message · hide comments with blocked words · collaboration invites accepted automatically from people you allow · push notifications to your phone · share photos into Postpilot from the Android share sheet |
+| **Automate** | Auto-publishing on schedule · **reminder posts** for what the API cannot post (music, link stickers, polls): your phone gets a notification and a "post now" screen with the files and caption ready · evergreen queues on fixed weekly slots, filled by hand, from RSS/Atom feeds, from a CSV or with AI · **Autopilot**: drop photos and videos in a pool and it writes captions (Claude AI, optional), picks your best times and fills your calendar, with or without your approval, and can repost your top posts · keyword auto-replies to comments and comment-to-DM private replies† (posts from the last 90 days, up to 50, plus any post you pick; both adjustable) · DM keyword replies, replies to your stories and stories that mention you† · welcome message† · hide comments with blocked words · collaboration invites accepted automatically from people you allow · push notifications to your phone · share photos into Postpilot from the Android share sheet |
 | **Measure** | Follower growth, reach, views, interactions, accounts engaged, link taps with period comparison · reach and views from followers vs non-followers and by format · post, reel and story tables, with each young post's growth over time and views at 24 hours and 7 days (trial reels get a hint when they beat your median) · stories are captured while they are live (when first seen, then hourly, and on every run in their last 90 minutes) · audience demographics and online-follower heatmap · best times to post · hashtag performance · campaign results by post label · competitor benchmarks · printable/PDF reports with your logo, an automatic monthly report, and CSV export |
-| **Engage** | Inbox for comments on your latest 12 posts and for DMs, with saved replies and AI-suggested replies · hide, delete, private reply, turn comments off · collaboration invites (accept or decline) · delete a published post (Facebook Login only) |
+| **Engage** | Inbox for comments on your latest 12 posts and for DMs†, with saved replies and AI-suggested replies · hide, delete, private reply†, turn comments off · collaboration invites (accept or decline) · delete a published post (Facebook Login only) |
 | **Grow** | Link-in-bio page with buttons and a grid of your posts, each linking wherever you want |
+
+† Instagram lets your Meta app send DMs and private replies only to people who have a role on the app (you and
+any testers) until Meta grants it **Advanced Access** through App Review and Business Verification. Publishing,
+analytics, comment replies and moderation work without it. See step 5 of the setup.
 
 ## How it works
 
@@ -47,11 +51,16 @@ server, no subscription, and nobody else can open it. What it does not do (and w
 
 ## One-time setup (about 15 minutes)
 
-You need: an Instagram **professional** account (Business or Creator) and this GitHub repository.
+You need: an Instagram **professional** account (Business or Creator) and this GitHub repository, set to
+**public**.
 
-### 1. Put Postpilot on the default branch
-GitHub only runs scheduled workflows from a repository's default branch. Merge the branch that contains
-`postpilot/` into the default branch (or make that branch the default).
+### 1. Prepare the repository
+- Make sure the repository is **public** (if it is not: repository **Settings → General → Danger Zone → Change
+  visibility**). Instagram downloads the photos and videos you publish from it, and the link-in-bio page and
+  free GitHub Pages need it public too. Your Postpilot data stays encrypted. In a private repository, posts
+  that Postpilot publishes for you fail with "Instagram can only download media from a public repository".
+- GitHub only runs scheduled workflows from a repository's default branch. Merge the branch that contains
+  `postpilot/` into the default branch (or make that branch the default).
 
 ### 2. Turn on GitHub Pages
 Repository **Settings → Pages → Build and deployment → Source: Deploy from a branch → Branch: your default
@@ -77,23 +86,31 @@ The app walks you through this. In short (Instagram Login, recommended):
    Instagram and accept. If asked, accept the tester invite in Instagram.
 4. Click **Generate token**, copy it and paste it into Postpilot.
 
-The app stays in Development mode; you do not need App Review for your own account. The worker refreshes
-the token automatically before it expires (60 days).
+The app can stay in Development mode: publishing, analytics, comment replies and moderation on your own
+account need no App Review. DMs and private replies (comment-to-DM, DM and story replies, the welcome message,
+answering DMs in the Inbox) are different: until Meta grants your app **Advanced Access** to
+`instagram_business_manage_messages` (`instagram_manage_messages` with Facebook Login) through App Review and
+Business Verification, they only reach people who have a role on your Meta app. Postpilot tells you in
+Automations and the Inbox when Instagram blocks them. The worker refreshes the token automatically before it
+expires (60 days).
 
 Use **Facebook Login** instead (Instagram account linked to a Facebook Page) if you want competitor
 benchmarks and hashtag research: those Instagram APIs are only available through Facebook Login.
 
 ### 6. Connect the worker
-In the app, click **Connect worker**. It stores the data key as the `POSTPILOT_DATA_KEY` Actions secret
-and starts the first run. From then on the worker runs every 10 minutes.
+In the app, click **Connect worker**. It stores the data key as the `POSTPILOT_DATA_KEY` Actions secret.
+Then click **Run worker now** to test it. After that the worker runs every 10 minutes.
 
 ### 7. Optional
-- **AI captions and replies:** add an Anthropic API key in Settings → AI.
+- **AI captions and replies:** in Settings → AI, add an Anthropic API key and turn on **Use AI features**.
 - **Phone notifications:** Settings → Notifications. On iPhone, first add Postpilot to your Home Screen
   (Share → Add to Home Screen) and turn notifications on from there. Reminder posts need this to reach your
   phone (otherwise they only show on the Today screen).
 - **Share into Postpilot:** on Android, install Postpilot (browser menu → Install app / Add to Home screen),
   then share photos or videos to it from any app. iPhone browsers do not support this.
+- **Unlocking on your phone:** turn on **Remember this device** when you unlock Postpilot on your own phone.
+  Otherwise, when Postpilot is closed, a reminder notification or a share opens the lock screen and you need
+  your GitHub token and passphrase again.
 - **DM automations:** in the Instagram app, Settings → Messages and story replies → Message controls →
   Connected tools → turn on **Allow access to messages**.
 
@@ -105,9 +122,9 @@ and starts the first run. From then on the worker runs every 10 minutes.
   starts a run right away (usually live in 1–3 minutes).
 - **Hashtags:** Instagram limits posts to 5 hashtags (since December 2025). Postpilot warns above 5.
 - **DM automation limits:** Instagram allows one private reply per comment within 7 days, and DM replies only
-  within 24 hours of the person's last message. Postpilot never sends unsolicited DMs. Sending DMs to people
-  who do not have a role on your Meta app may require Meta's Advanced Access (App Review); comment replies,
-  publishing and analytics work without it.
+  within 24 hours of the person's last message. Postpilot never sends unsolicited DMs. Sending DMs and private
+  replies to people who do not have a role on your Meta app requires Meta's Advanced Access (App Review and
+  Business Verification); comment replies, publishing and analytics work without it.
 - **What Postpilot cannot post for you:** story stickers and links, polls, filters, and editing a caption after
   publishing are not in the official API. Music from Instagram's library is only in the API for some accounts on
   Facebook Login, and Postpilot does not support it yet. Use a reminder post for these: Postpilot notifies you at
@@ -129,8 +146,8 @@ and starts the first run. From then on the worker runs every 10 minutes.
   `POSTPILOT_DATA_KEY`, `GITHUB_TOKEN` (a token with Contents read/write) and `GITHUB_REPOSITORY` environment
   variables, for example from a cron job on any always-on computer. Run it every 10 minutes. Two things then
   stop working: the app's "Publish now" and "Run now" buttons (they start the GitHub Actions workflow), and the
-  monthly keep-alive that stops GitHub from switching off scheduled workflows in quiet repositories (not needed
-  outside Actions).
+  keep-alive (every ~20 days) that stops GitHub from switching off scheduled workflows in quiet repositories,
+  which is only needed in Actions.
 
 ## Developing locally
 

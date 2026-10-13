@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { addDaysKey, dayKey, timeKey } from '../../core/time.js';
 import { openApp, shot, unlock } from './helpers.mjs';
 
-const PORT = 5532;
+const PORT = Number(process.env.PLANNER_E2E_PORT || 5532);
 const TZ = 'America/New_York';
 let h;
 
@@ -305,6 +305,90 @@ test('a reminder that went out is styled apart and links to "Post by hand"', asy
   assert.deepEqual(await page.locator('.pl-row').evaluateAll((els) => els.map((e) => e.dataset.postId)), [id]);
   await page.locator('#planner-filters').getByRole('button', { name: 'Clear filters' }).click();
   await page.getByRole('button', { name: /^Filters/ }).click();
+
+  // One name for the status ("Post by hand"), with when the reminder went out as extra detail.
+  await row.waitFor();
+  assert.equal((await row.locator('.status').textContent()).trim(), 'Post by hand');
+  await row.getByText(/^Reminder sent /).waitFor();
+  const hint = page.locator('[data-section="reminded"] .pl-section-hint');
+  assert.match(await hint.innerText(), /^The reminder went out\. Post these in the Instagram app/);
+  // "Post by hand now" in the composer sends no reminder: nothing claims one went out.
+  const nowId = await page.evaluate(async () => {
+    const data = await import('/postpilot/js/data.js');
+    const { newPost } = await import('/postpilot/core/model.js');
+    const lib = await data.getStore().read('library');
+    const asset = lib.assets.find((a) => a.name === 'Night hills');
+    const post = newPost({ status: 'reminded', publishMode: 'reminder', reminderSentAt: null, scheduledAt: new Date().toISOString(), caption: 'E2E by hand now, no reminder.', media: [{ assetId: asset.id, kind: 'image' }] });
+    await data.mutate('posts', (doc) => void doc.posts.push(post), { message: 'e2e: by hand now' });
+    return post.id;
+  });
+  const nowRow = page.locator(`[data-section="reminded"] .pl-row[data-post-id="${nowId}"]`);
+  await nowRow.waitFor();
+  assert.equal((await nowRow.locator('.status').textContent()).trim(), 'Post by hand');
+  assert.equal(await nowRow.getByText(/Reminder sent/).count(), 0);
+  assert.equal((await hint.innerText()).trim(), 'Post these in the Instagram app, then mark them as posted.');
+
+  // Grid: a reminded post keeps its place among the planned tiles, flagged "Post by hand", not movable.
+  await page.evaluate(() => (location.hash = '#/planner?view=grid'));
+  const tile = page.locator(`.pl-tile.is-upcoming.is-reminded[data-post-id="${id}"]`);
+  await tile.waitFor();
+  assert.equal(await tile.getAttribute('draggable'), 'false');
+  assert.equal((await tile.locator('.pl-tile-flag').textContent()).trim(), 'Post by hand');
+  assert.match(await tile.locator('.pl-tile-open').getAttribute('aria-label'), /^Waiting to be posted by hand: Post, .*E2E reminder: post this one by hand\.$/);
+  await page.locator('.pl-notes li', { hasText: 'Post by hand' }).waitFor();
+  await shot(page, 'planner-grid-reminded');
+  await tile.locator('.pl-tile-open').click();
+  await waitFor(() => page.url().includes(`#/post-now/${id}`), { message: 'the grid tile opens Post by hand' });
+  await page.evaluate(async (gone) => {
+    const data = await import('/postpilot/js/data.js');
+    await data.mutate('posts', (doc) => void (doc.posts = doc.posts.filter((p) => p.id !== gone)), { message: 'e2e: clean up' });
+  }, nowId);
+  await page.evaluate(() => (location.hash = '#/planner'));
+});
+
+test('a post marked as posted by hand shows once, by its link, before the worker links it to its media', async () => {
+  const { page } = h;
+  // The newest Instagram post no Postpilot post has (analytics-media fills in shortly after the server starts).
+  const m = await waitFor(
+    () =>
+      page.evaluate(async () => {
+        const { getStore } = await import('/postpilot/js/data.js');
+        const store = getStore();
+        await store.refresh();
+        const linked = new Set((await store.read('posts')).posts.map((p) => p.igMediaId).filter(Boolean));
+        return Object.values((await store.read('analytics-media')).media || {})
+          .filter((x) => x.productType !== 'STORY' && x.permalink && !linked.has(x.id))
+          .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))[0];
+      }),
+    { timeout: 60_000, interval: 1000, message: 'saved Instagram media' },
+  );
+  const day = dayKey(new Date(m.timestamp), TZ);
+  await page.evaluate((d) => (location.hash = `#/planner?view=day&date=${d}`), day);
+  const igItem = page.locator(`.pl-dayview a.is-ig[href="${m.permalink}"]`);
+  await igItem.waitFor();
+  // As "Mark as posted" leaves it when Postpilot could not find the media yet: the link, no igMediaId.
+  const id = await page.evaluate(async (m) => {
+    const data = await import('/postpilot/js/data.js');
+    const { newPost } = await import('/postpilot/core/model.js');
+    const lib = await data.getStore().read('library');
+    const asset = lib.assets.find((a) => a.name === 'Desert sunrise');
+    const post = newPost({ status: 'published', publishMode: 'reminder', type: m.mediaType === 'CAROUSEL_ALBUM' ? 'carousel' : m.productType === 'REELS' ? 'reel' : 'feed', caption: 'E2E posted by hand, not linked yet.', scheduledAt: m.timestamp, publishedAt: m.timestamp, permalink: `${m.permalink}?igsh=ZTJl`, media: [{ assetId: asset.id, kind: 'image' }] });
+    await data.mutate('posts', (doc) => void doc.posts.push(post), { message: 'e2e: posted by hand' });
+    return post.id;
+  }, m);
+  await page.locator(`.pl-dayview [data-post-id="${id}"]`).waitFor();
+  assert.equal(await igItem.count(), 0, 'no separate "Published on Instagram" item');
+  // Grid: one tile, the Instagram one (with its picture).
+  await page.evaluate(() => (location.hash = '#/planner?view=grid'));
+  await page.locator('.pl-ig-grid').waitFor();
+  await page.locator(`.pl-tile.is-published[href="${m.permalink}"]`).waitFor();
+  assert.equal(await page.locator(`.pl-tile.is-published[href^="${m.permalink}"]`).count(), 1);
+  assert.equal(await page.locator('.pl-tile.is-published[aria-label*="E2E posted by hand"]').count(), 0);
+  await page.evaluate(async (gone) => {
+    const data = await import('/postpilot/js/data.js');
+    await data.mutate('posts', (doc) => void (doc.posts = doc.posts.filter((p) => p.id !== gone)), { message: 'e2e: clean up' });
+  }, id);
+  await page.evaluate(() => (location.hash = '#/planner'));
 });
 
 test('ideas for next week: Claude suggests ideas, the kept ones become drafts with the idea in the notes', async () => {

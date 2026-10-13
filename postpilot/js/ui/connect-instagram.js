@@ -223,7 +223,8 @@ function Steps({ mode }) {
       60 days; the worker renews it automatically.
     </li>
     <li>
-      Paste it below and click <strong>Connect</strong>. You can leave the app in Development mode: App Review is not needed for your own account.
+      Paste it below and click <strong>Connect</strong>. You can leave the app in Development mode: publishing, analytics and comment replies on your own account need no App Review.
+      DMs and private replies only reach people with a role on your Meta app until Meta grants it Advanced Access (App Review and Business Verification).
     </li>
   </ol>`;
 }

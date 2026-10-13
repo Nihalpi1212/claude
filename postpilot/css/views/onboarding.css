@@ -38,6 +38,13 @@
   overflow-wrap: anywhere;
 }
 
+/* ---- Reminder posts due while Instagram is disconnected ----------------------- */
+
+.onboarding .ob-hand { width: 100%; max-width: 860px; }
+.ob-hand-list { margin: 6px 0 0; padding-left: 18px; }
+.ob-hand-list li { overflow-wrap: anywhere; }
+.ob-hand-list li + li { margin-top: 2px; }
+
 /* ---- Stepper ---------------------------------------------------------------- */
 
 .onboarding .ob-steps {

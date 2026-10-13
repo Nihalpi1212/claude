@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { startWorkerEnv, visibleLines, TEST_TOKEN } from '../helpers/worker-env.mjs';
 import { runWorker } from '../../worker/run.mjs';
+import { b64url, generateVapidKeys } from '../../core/webpush.js';
 
 const DAY = 864e5;
 
@@ -105,4 +106,44 @@ test('a GitHub refusal while saving the refreshed token does not flag the login 
   assert.ok(!lines.some((l) => /login/i.test(l)));
   const log = await env.read('log');
   assert.ok(log.entries.some((e) => e.job === 'token' && e.level === 'warn' && /Could not refresh/.test(e.message)));
+});
+
+test('a login revoked after the day\'s check is recorded by the first Instagram job that hits it', async (t) => {
+  const env = await startWorkerEnv();
+  t.after(() => env.close());
+  const keys = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits']);
+  const p256dh = b64url(new Uint8Array(await crypto.subtle.exportKey('raw', keys.publicKey)));
+  const phone = { endpoint: `${env.url}/push/phone`, keys: { p256dh, auth: b64url(crypto.getRandomValues(new Uint8Array(16))) }, device: 'phone', createdAt: new Date().toISOString() };
+  const vapid = { ...(await generateVapidKeys()), subject: 'mailto:owner@example.com' };
+  await env.update('settings', (s) => {
+    s.notifications = { vapid, subscriptions: [phone], events: { published: true, failed: true, dm: false, comment: false, account: true } };
+  });
+  await env.run();
+  assert.equal((await env.read('settings')).ig.status.state, 'ok', 'checked once today');
+
+  // Revoked in Instagram later that day: the token job does not look again until tomorrow.
+  await env.update('settings', (s) => void (s.ig.token = 'expired-token'));
+  const pushes = env.pushes.length;
+  const res = await env.run();
+  assert.equal(res.exitCode, 0);
+  assert.equal(res.summary.jobs.token.tokenChecked, 0);
+  assert.equal(res.summary.jobs.automations.tokenExpired, 1, 'the first Instagram job records it');
+  for (const job of ['invites', 'stories', 'analytics', 'competitors', 'bio']) assert.equal(res.summary.jobs[job].skipped, 'token_expired', job);
+  assert.deepEqual(res.summary.errors, []);
+  const settings = await env.read('settings');
+  assert.equal(settings.ig.status.state, 'expired');
+  assert.match(settings.ig.status.message, /expired or was revoked/);
+  assert.equal(env.pushes.length - pushes, 1, 'one account push');
+  let log = await env.read('log');
+  assert.equal(log.entries.filter((e) => e.level === 'error').length, 1, 'a single log entry');
+
+  // Later runs leave Instagram alone (until the token job's recheck) and log nothing more.
+  const requests = env.graph.state.requests.length;
+  const entries = log.entries.length;
+  const again = await env.run({ now: Date.now() + 10 * 60e3 });
+  assert.equal(again.summary.jobs.automations.skipped, 'token_expired');
+  assert.equal(env.graph.state.requests.length, requests);
+  log = await env.read('log');
+  assert.equal(log.entries.length, entries);
+  assert.equal(env.pushes.length - pushes, 1);
 });

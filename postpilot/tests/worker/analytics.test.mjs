@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { startWorkerEnv } from '../helpers/worker-env.mjs';
 import { dayKey } from '../../core/time.js';
-import { breakdownDaysFor, hasBreakdowns, mediaDue, repullSince, updateHistory } from '../../worker/jobs/analytics.mjs';
+import { breakdownDaysFor, handPostedLinks, hasBreakdowns, mediaDue, mediaToRefresh, repullSince, sharedListing, shortcodeOf, updateHistory } from '../../worker/jobs/analytics.mjs';
+import { newPost } from '../../core/model.js';
+import { captureDue } from '../../worker/jobs/stories.mjs';
 import { HISTORY_FROZEN_POINTS, valueAtAge } from '../../core/analytics.js';
 
 test('stories are captured with their insights', async (t) => {
@@ -405,4 +407,225 @@ test('after the worker was stopped, the next daily snapshot fills the missing da
   await env.run({ only: ['analytics'], now });
   const daily = await env.read('analytics-daily');
   assert.deepEqual(gap.filter((k) => !(daily.days[k] && daily.days[k].reach > 0)), [], 'the gap is filled');
+});
+
+const typeOf = (m) => (m.media_type === 'CAROUSEL_ALBUM' ? 'carousel' : m.media_type === 'VIDEO' ? 'reel' : 'feed');
+const isoAtMs = (t) => new Date(t).toISOString();
+
+test('posts marked as posted by hand are linked to their Instagram media, by their link or else by time', async (t) => {
+  const env = await startWorkerEnv();
+  t.after(() => env.close());
+  const st = env.graph.state;
+  const [m0, m1, m2] = st.media;
+  const byLinkMedia = st.media[5];
+  const posts = {
+    // The pasted link decides, even far from the planned time.
+    byLink: newPost({ type: typeOf(byLinkMedia), status: 'published', publishMode: 'reminder', scheduledAt: isoAtMs(byLinkMedia.timestamp - 864e5), publishedAt: isoAtMs(byLinkMedia.timestamp - 864e5), permalink: ` https://www.instagram.com/p/${byLinkMedia.shortcode}/?igsh=abc ` }),
+    // No link: the media of the same kind published within 2 hours after the reminder.
+    byTime: newPost({ type: typeOf(m0), status: 'published', publishMode: 'reminder', scheduledAt: isoAtMs(m0.timestamp - 40 * 60e3), reminderSentAt: isoAtMs(m0.timestamp - 39 * 60e3), publishedAt: isoAtMs(m0.timestamp + 5 * 60e3) }),
+    // Published by Postpilot: its media is not free.
+    taken: newPost({ type: typeOf(m1), status: 'published', igMediaId: m1.id, publishedAt: isoAtMs(m1.timestamp) }),
+    near: newPost({ type: typeOf(m1), status: 'published', publishMode: 'reminder', scheduledAt: isoAtMs(m1.timestamp - 10 * 60e3) }),
+    // A link to someone else's post: no guessing by time.
+    wrongLink: newPost({ type: typeOf(m2), status: 'published', publishMode: 'reminder', scheduledAt: isoAtMs(m2.timestamp - 10 * 60e3), permalink: 'https://www.instagram.com/p/NotOurs123/' }),
+    story: newPost({ type: 'story', status: 'published', publishMode: 'reminder', scheduledAt: isoAtMs(m0.timestamp - 10 * 60e3) }),
+  };
+  await env.update('posts', (d) => void d.posts.push(...Object.values(posts)));
+  const res = await env.run({ only: ['analytics'] });
+  assert.equal(res.summary.jobs.analytics.linked, 2);
+  const after = Object.fromEntries((await env.read('posts')).posts.map((p) => [p.id, p]));
+  const got = (k) => after[posts[k].id];
+  assert.equal(got('byLink').igMediaId, byLinkMedia.id);
+  assert.equal(got('byLink').permalink, posts.byLink.permalink, 'the pasted link is kept');
+  assert.equal(got('byTime').igMediaId, m0.id);
+  assert.match(got('byTime').permalink, new RegExp(m0.shortcode));
+  assert.equal(got('byTime').history.at(-1).event, 'linked');
+  assert.equal(got('byTime').status, 'published');
+  const sched = Date.parse(posts.near.scheduledAt);
+  const other = st.media.find((x) => x.id !== m1.id && x.id !== m0.id && typeOf(x) === typeOf(m1) && x.timestamp >= sched && x.timestamp - sched <= 2 * 36e5);
+  assert.equal(got('near').igMediaId, other ? other.id : null, 'never the media another post has');
+  assert.equal(got('wrongLink').igMediaId, null);
+  assert.equal(got('story').igMediaId, null);
+  const log = await env.read('log');
+  assert.ok(log.entries.some((e) => e.job === 'analytics' && /Found 2 posts you posted by hand/.test(e.message)));
+
+  // Nothing more to link: the posts are left alone.
+  const again = await env.run({ only: ['analytics'] });
+  assert.equal(again.summary.jobs.analytics.linked, undefined);
+  const later = (await env.read('posts')).posts.find((p) => p.id === posts.byTime.id);
+  assert.deepEqual(later.history, got('byTime').history);
+});
+
+test('handPostedLinks: closest pairs first, each media once, posts by Postpilot and stories left out', () => {
+  const T = Date.parse('2026-10-12T12:00:00Z');
+  const media = [
+    { id: 'm3', mediaType: 'IMAGE', timestamp: isoAtMs(T + 100 * 60e3), shortcode: 'C3', permalink: 'https://www.instagram.com/p/C3/' },
+    { id: 'm2', mediaType: 'IMAGE', timestamp: isoAtMs(T + 20 * 60e3), shortcode: 'C2', permalink: 'https://www.instagram.com/p/C2/' },
+    { id: 'm1', mediaType: 'VIDEO', productType: 'REELS', timestamp: isoAtMs(T + 5 * 60e3), shortcode: 'C1', permalink: 'https://www.instagram.com/reel/C1/' },
+    { id: 'm0', mediaType: 'IMAGE', timestamp: isoAtMs(T - 3 * 36e5), shortcode: 'C0' },
+  ];
+  const post = (id, extra) => ({ id, type: 'feed', status: 'published', igMediaId: null, scheduledAt: isoAtMs(T), ...extra });
+  const links = handPostedLinks(
+    [
+      post('a', { scheduledAt: isoAtMs(T + 15 * 60e3) }), // m2 is 5 minutes after
+      post('b'), // m2 is 20 minutes after, but a is closer; m3 is 100 minutes after
+      post('c', { type: 'reel' }), // m1
+      post('d', { scheduledAt: isoAtMs(T - 6 * 36e5), publishedAt: isoAtMs(T - 3 * 36e5 + 10 * 60e3) }), // marked as posted 10 minutes after m0
+      post('e', { status: 'reminded' }),
+      post('f', { type: 'story' }),
+      post('g', { igMediaId: 'm9' }),
+      post('h', { permalink: 'https://instagram.com/reel/C3' }), // by link, whatever the time
+    ],
+    media,
+  );
+  const map = Object.fromEntries(links.map((l) => [l.postId, l.media.id]));
+  assert.deepEqual(map, { h: 'm3', a: 'm2', c: 'm1', d: 'm0' });
+  assert.equal(shortcodeOf('https://www.instagram.com/studio.north/p/AbC_1-x/?img_index=2'), 'AbC_1-x');
+  assert.equal(shortcodeOf('instagram.com/reels/XyZ'), 'XyZ');
+  assert.equal(shortcodeOf('https://example.com/p/abc'), null);
+});
+
+test('media deleted from Instagram is flagged deletedAt, archived media unlistedAt, and both clear when listed again', async (t) => {
+  const env = await startWorkerEnv();
+  t.after(() => env.close());
+  const st = env.graph.state;
+  await env.run({ only: ['analytics'] });
+  const [gone, viaApp, archived] = [st.media[1], st.media[3], st.media[4]];
+  const fullList = st.media.slice();
+  // Deleted in Instagram, deleted with "Delete from Instagram" in the app, archived (hidden from the listing).
+  st.media = st.media.filter((m) => ![gone.id, viaApp.id, archived.id].includes(m.id));
+  st.nodes.delete(gone.id);
+  await env.update('posts', (d) => void d.posts.push(newPost({ type: typeOf(viaApp), status: 'canceled', igMediaId: viaApp.id, deletedFromInstagramAt: new Date().toISOString() })));
+  const mark = st.requests.length;
+  const res = await env.run({ only: ['analytics'], now: Date.now() + 36e5 });
+  assert.equal(res.summary.jobs.analytics.deletedMedia, 2);
+  let md = (await env.read('analytics-media')).media;
+  assert.ok(md[gone.id].deletedAt && md[gone.id].metrics.reach > 0, 'flagged, numbers kept');
+  assert.ok(md[viaApp.id].deletedAt);
+  assert.ok(md[archived.id].unlistedAt && !md[archived.id].deletedAt);
+  assert.equal(Object.values(md).filter((m) => m.deletedAt || m.unlistedAt).length, 3);
+  const lookups = st.requests.slice(mark).filter((r) => r.method === 'GET' && /\/\d+$/.test(r.path)).map((r) => r.path.split('/').pop());
+  assert.deepEqual(lookups.sort(), [gone.id, archived.id].sort(), 'the app-deleted one needs no lookup');
+
+  // Not looked up again within a day.
+  const mark2 = st.requests.length;
+  await env.run({ only: ['analytics'], now: Date.now() + 2 * 36e5 });
+  assert.ok(!st.requests.slice(mark2).some((r) => r.path.endsWith(`/${archived.id}`) || r.path.endsWith(`/${gone.id}`)));
+
+  // Back from the archive: listed again, the flag goes.
+  st.media = fullList.filter((m) => m.id !== gone.id && m.id !== viaApp.id);
+  await env.run({ only: ['analytics'], now: Date.now() + 3 * 36e5 });
+  md = (await env.read('analytics-media')).media;
+  assert.ok(!md[archived.id].unlistedAt && !md[archived.id].deletedAt);
+  assert.ok(md[gone.id].deletedAt && md[viaApp.id].deletedAt);
+});
+
+test('analytics reuses the automations listing: one media listing per run once its posts are known', async (t) => {
+  const env = await startWorkerEnv();
+  t.after(() => env.close());
+  const st = env.graph.state;
+  const listings = (from) => st.requests.slice(from).filter((r) => r.method === 'GET' && r.path.endsWith(`/${st.userId}/media`)).length;
+  await env.run({ only: ['automations', 'analytics'] });
+  await env.run({ only: ['automations', 'analytics'] }); // the 10 oldest posts were left for this run (60 per run)
+  const mark = st.requests.length;
+  const res = await env.run({ only: ['automations', 'analytics'] });
+  assert.equal(listings(mark), 1, 'only the automations listing');
+  assert.ok(res.summary.jobs.analytics);
+  // A week later the posts beyond the first 50 are due: analytics lists the newest 100 itself.
+  const mark2 = st.requests.length;
+  await env.run({ only: ['automations', 'analytics'], now: Date.now() + 8 * 864e5 });
+  const reqs = st.requests.slice(mark2).filter((r) => r.method === 'GET' && r.path.endsWith(`/${st.userId}/media`));
+  assert.ok(reqs.length > 1);
+  const md = (await env.read('analytics-media')).media;
+  assert.equal(Object.keys(md).length, st.media.length);
+});
+
+test('sharedListing: reused when it is everything, enough, or nothing stored beyond it is due', () => {
+  const now = Date.parse('2026-10-12T12:00:00Z');
+  const item = (i) => ({ id: `m${i}`, timestamp: isoAtMs(now - (i + 1) * 864e5) });
+  const items = Array.from({ length: 50 }, (_, i) => item(i));
+  const fresh = (i, h) => ({ ...item(i), fetchedAt: isoAtMs(now - h * 36e5) });
+  assert.equal(sharedListing(null, {}, now), null);
+  assert.equal(sharedListing({ items: items.slice(0, 20), max: 50 }, {}, now).length, 20, 'the whole account');
+  assert.equal(sharedListing({ items, max: 50 }, {}, now), null, 'nothing known yet');
+  const known = Object.fromEntries(Array.from({ length: 70 }, (_, i) => [`m${i}`, fresh(i, 1)]));
+  assert.equal(sharedListing({ items, max: 50 }, known, now).length, 50);
+  known.m60 = fresh(60, 24 * 8); // weekly refresh due beyond the shared listing
+  assert.equal(sharedListing({ items, max: 50 }, known, now), null);
+  known.m60 = { ...known.m60, deletedAt: isoAtMs(now) };
+  assert.equal(sharedListing({ items, max: 50 }, known, now).length, 50, 'deleted media is never due');
+  const many = Array.from({ length: 150 }, (_, i) => item(i));
+  assert.equal(sharedListing({ items: many, max: 200 }, {}, now).length, 100);
+});
+
+test('mediaToRefresh: due posts youngest first; with a write anyway, posts halfway to their refresh go along', () => {
+  const now = Date.parse('2026-10-12T12:00:00Z');
+  const ago = (h) => isoAtMs(now - h * 36e5);
+  const listed = [
+    { id: 'young', timestamp: ago(3) }, // hourly: due
+    { id: 'day1', timestamp: ago(20) }, // every 3 hours: 2 hours since, past halfway
+    { id: 'week', timestamp: ago(24 * 4) }, // every 6 hours: 2 hours since, not halfway
+    { id: 'old', timestamp: ago(24 * 60) }, // weekly: 4 days since, past halfway
+  ];
+  const known = { young: { fetchedAt: ago(1.2) }, day1: { fetchedAt: ago(2) }, week: { fetchedAt: ago(2) }, old: { fetchedAt: ago(24 * 4) } };
+  assert.deepEqual(mediaToRefresh(listed, known, now).map((m) => m.id), ['young', 'day1', 'old']);
+  known.young.fetchedAt = ago(0.5);
+  assert.deepEqual(mediaToRefresh(listed, known, now), [], 'nothing due: no early refresh');
+  assert.deepEqual(mediaToRefresh(listed, known, now, { writing: true }).map((m) => m.id), ['young', 'day1', 'old']);
+  assert.equal(mediaDue({ timestamp: ago(20) }, { fetchedAt: ago(1.5) }, now), false, 'after 6 hours, every 3 hours');
+  assert.equal(mediaDue({ timestamp: ago(20) }, { fetchedAt: ago(3.1) }, now), true);
+});
+
+test('analytics-media write volume: under 20 writes a day at one post a day (hourly refreshes made 24 to 49)', () => {
+  // Replays mediaToRefresh with a run every 10 minutes for 60 days, posts at varying times of day.
+  const start = Date.parse('2026-06-01T00:00:00Z');
+  const posts = Array.from({ length: 60 }, (_, d) => ({ id: String(1e9 + d), timestamp: isoAtMs(start + d * 864e5 + ((d * 7) % 24) * 36e5 + 13 * 60e3) }));
+  const known = {};
+  const writes = {};
+  for (let t = start; t < start + 60 * 864e5; t += 10 * 60e3) {
+    const listed = posts.filter((p) => Date.parse(p.timestamp) <= t).reverse().slice(0, 100);
+    const fresh = listed.filter((p) => !known[p.id]);
+    const pick = mediaToRefresh(listed, known, t, { writing: fresh.length > 0 });
+    for (const p of fresh) known[p.id] = { id: p.id, timestamp: p.timestamp, fetchedAt: null };
+    for (const p of pick) known[p.id] = { ...known[p.id], fetchedAt: isoAtMs(t) };
+    if (pick.length || fresh.length) {
+      const day = isoAtMs(t).slice(0, 10);
+      writes[day] = (writes[day] || 0) + 1;
+    }
+  }
+  const last = Object.keys(writes).sort().slice(-20).map((d) => writes[d]);
+  assert.ok(last.every((n) => n < 20), `writes per day: ${last.join(', ')}`);
+});
+
+test('account insights and the audience use the worker clock (moved forward in tests and simulations)', async (t) => {
+  const shift = 8 * 864e5;
+  const env = await startWorkerEnv({ graph: { now: () => new Date(Date.now() + shift) } });
+  t.after(() => env.close());
+  const res = await env.run({ only: ['analytics'], now: Date.now() + shift });
+  assert.equal(res.exitCode, 0);
+  const daily = await env.read('analytics-daily');
+  const today = dayKey(new Date(Date.now() + shift), 'UTC');
+  const reachDays = Object.keys(daily.days).filter((k) => typeof daily.days[k].reach === 'number').sort();
+  assert.equal(reachDays.at(-1) >= dayKey(new Date(Date.now() + shift - 2 * 864e5), 'UTC'), true, `reach saved up to yesterday (${reachDays.at(-1)})`);
+  assert.ok(reachDays.length >= 25, `${reachDays.length} days with reach`);
+  assert.equal(daily.lastDailyRun, today);
+  const audience = await env.read('audience');
+  assert.ok(audience.onlineFollowers && audience.onlineFollowers.days > 0);
+});
+
+test('story captures: first sight, every 3 hours, every 30 minutes in the last 90 and every run in the last 20', () => {
+  const posted = Date.parse('2026-10-12T08:03:00Z');
+  const story = { id: 's1', timestamp: isoAtMs(posted) };
+  let prev = null;
+  const at = [];
+  for (let t = posted + 4 * 60e3; t < posted + 864e5; t += 10 * 60e3) {
+    if (!captureDue(prev, story, t)) continue;
+    at.push((t - posted) / 60e3);
+    prev = { capturedAt: isoAtMs(t) };
+  }
+  assert.ok(at.length <= 14, `${at.length} captures (one per run in the last 90 minutes and hourly before made about 32): ${at.join(', ')}`);
+  assert.equal(at[0], 4, 'first sight');
+  assert.ok(at.at(-1) >= 24 * 60 - 20, 'a capture in the last 20 minutes');
+  const gaps = at.slice(1).map((m, i) => m - at[i]);
+  assert.ok(gaps.every((g) => g <= 180), 'never more than 3 hours apart');
 });

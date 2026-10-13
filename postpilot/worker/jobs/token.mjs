@@ -83,7 +83,7 @@ export default async function token(ctx) {
     const due = !Number.isFinite(refreshed) || now - refreshed >= REFRESH_EVERY || (Number.isFinite(expires) && expires - now < REFRESH_BEFORE_EXPIRY);
     if (due && !tooNew) {
       try {
-        const r = await ctx.ig.refreshToken();
+        const r = await ctx.ig.refreshToken({ nowMs: now });
         if (!r || !r.token) throw new Error('Instagram returned no token.');
         ctx.mask(r.token);
         const saved = await saveIg(ctx, igs.token, (ig) => {

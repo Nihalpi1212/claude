@@ -8,30 +8,36 @@ import { getAi } from '../ai-client.js';
 import { useApp } from '../app.js';
 import { loadViewCss } from '../css.js';
 import { mutate, refreshNow, useDocs } from '../data.js';
+import { notifyDelivery } from '../push.js';
 import { Icon } from '../ui/icons.js';
 import { Badge, Button, Callout, ChipInput, EmptyState, Field, IconButton, Menu, PageHeader, Panel, Select, Skeleton, Stat, TextArea, TextInput, Toggle, cx } from '../ui/kit.js';
 import { RuleEditor, STARTER_TEMPLATES, actionsSummary, triggerSummary } from '../ui/rule-editor.js';
 
 loadViewCss('automations');
 
-const DM_PROBLEMS = {
-  needs_advanced_access: {
-    title: 'DM replies are limited until Meta approves your app',
-    body: 'Instagram only lets your app message people who have a role on it until it gets Advanced Access to instagram_business_manage_messages. Apply through App Review in the Meta App Dashboard. Comment replies keep working meanwhile.',
-  },
-  dm_disabled: {
-    title: 'Message access is turned off in Instagram',
-    body: 'In the Instagram app open Settings → Messages and story replies → Message controls → Connected tools and turn on “Allow access to messages”. Postpilot checks again every few hours.',
-  },
-  no_permission: {
-    title: 'Postpilot cannot read your messages',
-    body: 'The Instagram connection is missing the messages permission. Replace the token in Settings with one that includes instagram_business_manage_messages.',
-  },
-};
+/** What a DM problem (automations.status.dm) means; the permission name depends on the login type (settings.ig.mode). */
+export function dmProblemOf(code, mode) {
+  const perm = mode === 'facebook' ? 'instagram_manage_messages' : 'instagram_business_manage_messages';
+  const problems = {
+    needs_advanced_access: {
+      title: 'DM replies are limited until Meta approves your app',
+      body: `Instagram only lets your app message people who have a role on it until it gets Advanced Access to ${perm}. Apply through App Review in the Meta App Dashboard. Comment replies keep working meanwhile.`,
+    },
+    dm_disabled: {
+      title: 'Message access is turned off in Instagram',
+      body: 'In the Instagram app open Settings → Messages and story replies → Message controls → Connected tools and turn on “Allow access to messages”. Postpilot checks again every few hours.',
+    },
+    no_permission: {
+      title: 'Postpilot cannot read your messages',
+      body: `The Instagram connection is missing the messages permission. Replace the token in Settings with one that includes ${perm}.`,
+    },
+  };
+  return problems[code] || null;
+}
 
 const SKIP_REASONS = {
   ai_declined: 'The AI chose not to reply (spam, or it needs a person).',
-  ai_not_configured: 'Skipped: AI replies need an Anthropic API key.',
+  ai_not_configured: 'Skipped: AI is off. AI replies need an Anthropic API key and “Use AI features” turned on in Settings → AI.',
   dm_blocked: 'Skipped: Instagram is blocking DMs for this app.',
   dm_hourly_limit: 'Skipped: the hourly DM limit was reached.',
   outside_window: 'Skipped: outside Instagram’s reply window.',
@@ -333,7 +339,7 @@ function WatchPanel({ doc, onSave }) {
 }
 
 /** Usernames whose collaboration invites the worker accepts automatically (automations.collabAllowlist). */
-function CollabPanel({ doc, inbox, onSave, navigate }) {
+function CollabPanel({ doc, inbox, settings, onSave, navigate }) {
   const stored = doc.collabAllowlist || [];
   const [names, setNames] = useState(stored);
   const [saving, setSaving] = useState(false);
@@ -353,13 +359,13 @@ function CollabPanel({ doc, inbox, onSave, navigate }) {
       setSaving(false);
     }
   };
-  return html`<${Panel} title="Collaboration invites" subtitle="Accounts that invite you to co-author their posts." class="auto-collab">
+  return html`<${Panel} title="Collaboration invites" subtitle="Accounts that invite you to co-author their posts." class="auto-collab" id="automations-collab" tabindex="-1">
     <div class="stack">
       ${unsupported
         ? html`<${Callout} tone="warning" title="Not available with this connection">Instagram does not share collaboration invites with Postpilot for this account. Answer them in the Instagram app. Postpilot checks again every 6 hours.<//>`
         : null}
       <${Field} label="Accept automatically from" error=${bad.length ? `Not a valid username: ${bad.join(', ')}` : ''}
-        hint="Invites from anyone else wait in Inbox → Invites and notify your phone. Postpilot checks for invites every 6 hours.">
+        hint=${`Invites from anyone else wait in Inbox → Invites${notifyDelivery(settings, 'collab') === 'ok' ? ' and notify your phone' : ''}. Postpilot checks for invites every 6 hours.`}>
         <${ChipInput} values=${names} placeholder="username, then Enter" normalize=${normUsername} onChange=${setNames} />
       <//>
       <div class="row row-between">
@@ -372,10 +378,32 @@ function CollabPanel({ doc, inbox, onSave, navigate }) {
   <//>`;
 }
 
+// #/automations?section=collab (the Inbox's Invites tab links there): the panel to scroll to.
+const SECTIONS = { collab: 'automations-collab' };
+
 export default function AutomationsView() {
-  const { settings, ig, tz, toast, confirm, dispatchWorker, navigate } = useApp();
-  const { data, error } = useDocs(['automations', 'log', 'analytics-media', 'posts', 'inbox']);
+  const { settings, ig, tz, route, toast, confirm, dispatchWorker, navigate } = useApp();
+  const { data, error, loading } = useDocs(['automations', 'log', 'analytics-media', 'posts', 'inbox']);
   const doc = data.automations;
+  const section = SECTIONS[route.query.section] || null;
+  // Once every document has loaded (panels above it change height until then), bring the requested
+  // panel into view once and put the cursor in its first field.
+  const scrolledTo = useRef(null);
+  const settled = !!doc && !loading;
+  useEffect(() => {
+    if (!section) scrolledTo.current = null;
+    if (!settled || !section || scrolledTo.current === section) return undefined;
+    const raf = requestAnimationFrame(() => {
+      const el = document.getElementById(section);
+      if (!el) return;
+      scrolledTo.current = section;
+      const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+      el.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
+      const field = el.querySelector('input, textarea, select');
+      (field || el).focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [settled, section]);
   const log = data.log;
   const [editor, setEditor] = useState(null); // { rule, mode: 'new'|'edit', title }
   const [saving, setSaving] = useState(false);
@@ -409,7 +437,7 @@ export default function AutomationsView() {
 
   const rules = doc.rules || [];
   const status = doc.status || {};
-  const dmProblem = DM_PROBLEMS[status.dm];
+  const dmProblem = dmProblemOf(status.dm, settings && settings.ig ? settings.ig.mode : null);
   const stats = doc.stats || {};
   const firedTotal = rules.reduce((n, r) => n + ((r.stats && r.stats.fired) || 0), 0);
   const logEntries = ((log && log.entries) || []).filter((e) => e.job === 'automations').slice(0, 50);
@@ -623,7 +651,7 @@ export default function AutomationsView() {
         <${BlockedPanel} doc=${doc} onSave=${save} />
         <${WatchPanel} doc=${doc} onSave=${save} />
         <${LimitsPanel} doc=${doc} onSave=${save} />
-        <${CollabPanel} doc=${doc} inbox=${data.inbox} onSave=${save} navigate=${navigate} />
+        <${CollabPanel} doc=${doc} inbox=${data.inbox} settings=${settings} onSave=${save} navigate=${navigate} />
         <section class="auto-policy" aria-labelledby="auto-policy-title">
           <h2 class="label-caps" id="auto-policy-title">Instagram's rules</h2>
           <p class="muted text-sm">

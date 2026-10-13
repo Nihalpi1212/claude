@@ -207,7 +207,7 @@ export function ruleErrors(rule, { aiReady = true } = {}) {
       errs.push({ field: `action-${i}`, message: 'AI reply: tell the AI what to say (guidance).' });
     }
     if (a.type === 'ai_reply' && !aiReady && !(a.texts || []).some((x) => String(x || '').trim())) {
-      errs.push({ field: `action-${i}`, message: 'AI reply needs an Anthropic API key (Settings → AI), or add a fallback message.' });
+      errs.push({ field: `action-${i}`, message: 'AI reply needs AI turned on in Settings → AI (an Anthropic API key and “Use AI features”), or add a fallback message.' });
     }
   });
   return errs;
@@ -288,7 +288,7 @@ function ActionEditor({ action, index, count, source, aiReady, onChange, onRemov
     ${action.type === 'hide_comment' ? html`<p class="field-hint">Hidden comments stay visible to the person who wrote them and their followers, but not to anyone else.</p>` : null}
     ${action.type === 'ai_reply'
       ? html`<div class="stack-sm">
-          ${!aiReady ? html`<${Callout} tone="warning">AI replies need an Anthropic API key. Add one in <a href="#/settings?section=ai">Settings → AI</a>, or write a fallback message below.<//>` : null}
+          ${!aiReady ? html`<${Callout} tone="warning">AI replies need AI turned on: in <a href="#/settings?section=ai">Settings → AI</a> add an Anthropic API key and turn on “Use AI features”, or write a fallback message below.<//>` : null}
           <${Field} label="What should the AI say?" hint="Facts, links and tone it may use. It skips spam and anything that needs a person.">
             <${TextArea} value=${action.guidance || ''} rows=${3} placeholder="Answer questions about shipping (worldwide, every Friday) and custom orders (DM us). Keep it warm."
               onChange=${(v) => onChange({ ...action, guidance: v })} />

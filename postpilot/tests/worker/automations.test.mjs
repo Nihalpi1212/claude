@@ -915,3 +915,100 @@ test('a story reply that no story-reply rule answers is answered by the DM rules
   assert.equal(entry.source, 'story_reply');
   assert.equal(entry.ruleName, 'Workshop');
 });
+
+test('a run where nothing happened writes nothing, and the newest DM thread is not read again and again', async (t) => {
+  const env = await startWorkerEnv();
+  t.after(() => env.close());
+  const st = env.graph.state;
+  await env.update('automations', (a) => {
+    a.welcome = { enabled: true, text: 'Welcome! We reply within a day.' };
+  });
+  const commits = () => [...env.ghMock.commits.values()].filter((c) => /^worker: automations: /.test(c.message)).length;
+  const at = (min) => Date.now() + min * 60e3;
+  await env.run({ only: ['automations'] });
+  const { conv, other } = env.addMessage({ username: 'new.customer', text: 'Hi there' });
+  await env.run({ only: ['automations'] });
+  assert.equal(st.sentMessages.filter((m) => m.recipientId === other.id).length, 1, 'welcomed');
+  // Our welcome moved the thread's time: the next run reads it once more...
+  await env.run({ only: ['automations'], now: at(10) });
+  const auto = await env.read('automations');
+  const inbox = await env.read('inbox');
+
+  // ...after that, idle runs neither read it nor write anything.
+  const threadReads = () => st.requests.filter((r) => r.method === 'GET' && r.path.endsWith(`/${conv.id}`)).length;
+  const reads = threadReads();
+  const before = commits();
+  const writes = env.ghMock.stats.writes;
+  await env.run({ only: ['automations'], now: at(20) });
+  await env.run({ only: ['automations'], now: at(30) });
+  assert.equal(threadReads(), reads, 'the settled thread is not read again');
+  assert.equal(commits(), before, 'no automations commit');
+  assert.equal(env.ghMock.stats.writes, writes, 'nothing written at all');
+  assert.deepEqual((await env.read('automations')).processed, auto.processed);
+  assert.equal((await env.read('inbox')).fetchedAt, inbox.fetchedAt);
+
+  // Once the read time stamps are an hour old they are saved on their own, once.
+  await env.run({ only: ['automations'], now: at(75) });
+  assert.equal(commits(), before + 1);
+  const later = await env.read('automations');
+  assert.ok(Date.parse(later.cursors.watchListedAt) > Date.parse(auto.cursors.watchListedAt));
+  assert.ok(Date.parse(later.cursors.inboxCheckedAt) >= Date.parse(later.cursors.watchListedAt));
+  assert.deepEqual(later.processed, auto.processed);
+  await env.run({ only: ['automations'], now: at(85) });
+  assert.equal(commits(), before + 1);
+
+  // A new message in the thread is still read and answered by the rules.
+  await env.update('automations', (a) => {
+    a.rules = [newRule({ id: 'r_hours', name: 'Hours', trigger: { source: 'dm', match: 'any', keywords: ['hours'], mediaIds: null }, actions: [{ type: 'send_dm', texts: ['We are open 9-5.'] }], oncePerUser: false })];
+  });
+  // (A later second than the welcome: this test's worker clock runs ahead of the mock's.)
+  env.addMessage({ username: 'new.customer', text: 'What are your hours?', at: Date.now() + 1500 });
+  await env.run({ only: ['automations'], now: at(95) });
+  assert.equal(st.sentMessages.filter((m) => m.recipientId === other.id).length, 2);
+
+  // Switched off: still no write on an idle run.
+  await env.update('automations', (a) => void (a.enabled = false));
+  await env.run({ only: ['automations'], now: at(105) });
+  const off = commits();
+  await env.run({ only: ['automations'], now: at(115) });
+  assert.equal(commits(), off);
+});
+
+test('a comment on a chosen post read later than the others is still notified, once', async (t) => {
+  const { b64url, generateVapidKeys } = await import('../../core/webpush.js');
+  const env = await startWorkerEnv();
+  t.after(() => env.close());
+  const st = env.graph.state;
+  const keys = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits']);
+  const p256dh = b64url(new Uint8Array(await crypto.subtle.exportKey('raw', keys.publicKey)));
+  const phone = { endpoint: `${env.url}/push/phone`, keys: { p256dh, auth: b64url(crypto.getRandomValues(new Uint8Array(16))) }, device: 'phone', createdAt: new Date().toISOString() };
+  const vapid = { ...(await generateVapidKeys()), subject: 'mailto:owner@example.com' };
+  await env.update('settings', (s) => {
+    s.notifications = { vapid, subscriptions: [phone], events: { comment: true, dm: false, account: true } };
+  });
+  const chosen = st.media[60]; // beyond the listed posts: read by id every 30 minutes
+  await env.update('automations', (a) => {
+    a.limits = { ...a.limits, watchPosts: 5 };
+    a.rules = [newRule({ id: 'r_give', name: 'Giveaway', trigger: { source: 'comment', match: 'always', keywords: [], mediaIds: [chosen.id] }, actions: [{ type: 'reply_comment', texts: ['Good luck!'] }], oncePerUser: false })];
+  });
+  await env.run({ only: ['automations'] });
+  assert.equal(env.pushes.length, 0, 'nothing on the first run');
+
+  const old = env.addComment(chosen.id, { username: 'giveaway.fan', text: 'Count me in' });
+  env.addComment(st.media[0].id, { username: 'recent.fan', text: 'Lovely', at: Date.now() + 1000 });
+  await env.run({ only: ['automations'] });
+  assert.equal(env.pushes.length, 1, 'the newest post is read at once');
+
+  // Half an hour later the chosen post is read: its comment is answered and notified too.
+  await env.update('automations', (a) => void (a.cursors.pinnedCheckedAt = new Date(Date.now() - 31 * 60e3).toISOString()));
+  await env.run({ only: ['automations'] });
+  assert.ok(st.replies.some((r) => r.commentId === old.id), 'the rule answered');
+  assert.equal(env.pushes.length, 2, 'and the owner is told');
+
+  // Nothing new: no repeat.
+  await env.update('automations', (a) => void (a.cursors.pinnedCheckedAt = new Date(Date.now() - 31 * 60e3).toISOString()));
+  await env.run({ only: ['automations'] });
+  assert.equal(env.pushes.length, 2);
+  const auto = await env.read('automations');
+  assert.ok(auto.cursors.commentsSeen[chosen.id] && auto.cursors.commentsSeen[st.media[0].id], 'a mark per post');
+});

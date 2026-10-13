@@ -466,6 +466,8 @@ const defaultSleep = (ms) => new Promise((r) => setTimeout(r, ms));
  * @param {string} [opts.userId] Instagram professional account id (user_id / instagram_business_account.id)
  * @param {string} [opts.pageId] Facebook Page id (facebook mode, messaging)
  * @param {string} [opts.pageToken] Page token (facebook mode, messaging). Defaults to `token`.
+ * @param {() => number} [opts.now] Clock in epoch ms (the worker's clock, which tests move); calls that
+ *   take `nowMs` use that instead. Defaults to the real time.
  */
 export function createIg({
   mode = 'instagram',
@@ -480,6 +482,7 @@ export function createIg({
   fetchImpl,
   retryDelayMs = 500,
   sleep = defaultSleep,
+  now = () => Date.now(),
 } = {}) {
   const doFetch = fetchImpl || globalThis.fetch.bind(globalThis);
   const host = (mode === 'facebook' ? fbBase : igBase).replace(/\/+$/, '');
@@ -511,7 +514,7 @@ export function createIg({
           totalCputime: u.total_cputime ?? null,
           totalTime: u.total_time ?? null,
           regainMinutes: u.estimated_time_to_regain_access ?? 0,
-          at: new Date().toISOString(),
+          at: new Date(now()).toISOString(),
         };
       }
     } catch {
@@ -800,8 +803,10 @@ export function createIg({
      * follower_type (rejections are remembered for the client's life). Three calls per day when the
      * research is right. A breakdown that fails is left out; a rate limit or network error stops the
      * remaining breakdown calls but keeps everything already read. Only auth errors are thrown.
+     * `nowMs` (default: the client's clock) caps the last day at the current time.
      */
-    async accountDaily({ sinceKey, untilKey, tz = 'UTC', concurrency = 3, breakdowns = false } = {}) {
+    async accountDaily({ sinceKey, untilKey, tz = 'UTC', concurrency = 3, breakdowns = false, nowMs } = {}) {
+      const nowSec = Math.floor((Number.isFinite(nowMs) ? nowMs : now()) / 1000);
       const out = {};
       const keys = dayRange(sinceKey, untilKey);
       const day = (k) => (out[k] = out[k] || {});
@@ -853,7 +858,7 @@ export function createIg({
       for (let i = 0; i < keys.length; i += 30) {
         const chunk = keys.slice(i, i + 30);
         const since = unix(startOfDay(chunk[0], tz));
-        const until = Math.min(unix(startOfDay(addDaysKey(chunk[chunk.length - 1], 1), tz)), unix(new Date()));
+        const until = Math.min(unix(startOfDay(addDaysKey(chunk[chunk.length - 1], 1), tz)), nowSec);
         if (until <= since) continue;
         try {
           const data = await insights(path, ['follower_count', 'reach'], { period: 'day', since, until }, `account-ts-${chunk[0]}`);
@@ -870,7 +875,6 @@ export function createIg({
         }
       }
 
-      const nowSec = unix(new Date());
       await mapLimit(keys, concurrency, async (k) => {
         const since = unix(startOfDay(k, tz));
         const until = Math.min(unix(startOfDay(addDaysKey(k, 1), tz)), nowSec);
@@ -912,17 +916,18 @@ export function createIg({
       return out;
     },
 
-    /** Alias kept for ARCHITECTURE.md: accountInsights({since, until, tz}) with day keys. */
-    accountInsights({ since, until, tz } = {}) {
-      return ig.accountDaily({ sinceKey: since, untilKey: until, tz });
+    /** Alias kept for ARCHITECTURE.md: accountInsights({since, until, tz, nowMs}) with day keys. */
+    accountInsights({ since, until, tz, nowMs } = {}) {
+      return ig.accountDaily({ sinceKey: since, untilKey: until, tz, nowMs });
     },
 
     /**
      * When followers are online over the last 30 days, converted to `tz` wall-clock hours.
      * -> { byHour: number[24], byWeekdayHour: number[7][24] | null, days, tz }
+     * `nowMs` (default: the client's clock) ends the 30 days.
      */
-    async onlineFollowers({ tz = 'UTC' } = {}) {
-      const until = unix(new Date());
+    async onlineFollowers({ tz = 'UTC', nowMs } = {}) {
+      const until = Math.floor((Number.isFinite(nowMs) ? nowMs : now()) / 1000);
       const since = until - 30 * 86400;
       const data = await insights(`${uidPath()}/insights`, ['online_followers'], { period: 'lifetime', since, until }, 'online');
       const hourSum = new Array(24).fill(0);
@@ -1148,8 +1153,8 @@ export function createIg({
       };
     },
 
-    /** Extend a long-lived Instagram token by 60 days (Instagram Login only). */
-    async refreshToken() {
+    /** Extend a long-lived Instagram token by 60 days (Instagram Login only). `nowMs` (default: the client's clock) dates expiresAt. */
+    async refreshToken({ nowMs } = {}) {
       if (isFb) {
         throw new IgError('Facebook Login tokens cannot be refreshed.', {
           code: 'unsupported',
@@ -1159,7 +1164,7 @@ export function createIg({
       const res = await get('/refresh_access_token', { grant_type: 'ig_refresh_token' }, { unversioned: true });
       if (!res || !res.access_token) throw new IgError('Instagram did not return a new token.', { code: 'refresh_failed' });
       accessToken = res.access_token;
-      const expiresAt = res.expires_in ? new Date(Date.now() + Number(res.expires_in) * 1000).toISOString() : null;
+      const expiresAt = res.expires_in ? new Date((Number.isFinite(nowMs) ? nowMs : now()) + Number(res.expires_in) * 1000).toISOString() : null;
       return { token: res.access_token, expiresAt };
     },
 

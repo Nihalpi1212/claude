@@ -8,7 +8,7 @@ import { openApp, shot, unlock } from './helpers.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURE = path.resolve(here, '../../dev/fixtures/f02.jpg');
-const PORT = 5513;
+const PORT = Number(process.env.HOME_E2E_PORT || 5513);
 
 let h;
 let page;
@@ -98,7 +98,8 @@ describe('Today, Library and Autopilot', { timeout: 240_000 }, () => {
     const t = await secondPage();
     try {
       const p = t.p;
-      await p.locator('.dash-side', { hasText: 'Inbox' }).locator('.dash-side-scope', { hasText: 'Inbox reads Instagram live' }).waitFor({ timeout: 20_000 });
+      // The card says where its numbers come from (the worker's last check).
+      await p.locator('.dash-side', { hasText: 'Inbox' }).locator('.dash-side-scope').waitFor({ timeout: 20_000 });
       const dash = await dashCommentsToAnswer(p);
       assert.match(dash, /^\d+$/);
       assert.ok(Number(dash) > 0, 'the seed has comments waiting for a reply');
@@ -441,6 +442,58 @@ describe('Today, Library and Autopilot', { timeout: 240_000 }, () => {
     await go('#/');
     await page.locator('.dash-account').waitFor();
     assert.equal(await page.locator('.dash-hand').count(), 0);
+  });
+
+  test('phone tab bar: Analytics lights More, a post by hand lights Today', async () => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    const state = () =>
+      page.evaluate(() => [...document.querySelectorAll('.tabbar-item')].filter((el) => el.classList.contains('is-active') || el.getAttribute('aria-current') === 'page').map((el) => el.textContent.trim()));
+    for (const [hash, lit] of [['#/analytics?tab=posts', 'More'], ['#/reports', 'More'], ['#/inbox', 'Inbox'], ['#/post-now/e2e-missing', 'Today'], ['#/', 'Today']]) {
+      await go(hash);
+      await page.waitForFunction((want) => [...document.querySelectorAll('.tabbar-item')].some((el) => (el.classList.contains('is-active') || el.getAttribute('aria-current') === 'page') && el.textContent.trim() === want), lit);
+      assert.deepEqual(await state(), [lit], `${hash} lights ${lit} only`);
+    }
+    await page.setViewportSize({ width: 1280, height: 860 });
+  });
+
+  test('with Instagram disconnected, reminder posts due are listed on the Setup screen', async () => {
+    const id = await page.evaluate(async () => {
+      const data = await import('/postpilot/js/data.js');
+      const { newPost } = await import('/postpilot/core/model.js');
+      const lib = await data.getStore().read('library');
+      const a = lib.assets.find((x) => x.name === 'Vase trio');
+      const media = [{ assetId: a.id, kind: 'image', altText: '' }];
+      const post = newPost({ status: 'reminded', publishMode: 'reminder', caption: 'E2E home: post while disconnected', media, scheduledAt: new Date(Date.now() - 10 * 60e3).toISOString(), reminderSentAt: new Date().toISOString() });
+      await data.mutate('posts', (doc) => void doc.posts.push(post), { message: 'e2e: reminder post' });
+      // Disconnect (Settings → Instagram → Disconnect), keeping the connection to restore it afterwards.
+      await data.mutate('settings', (s) => {
+        s.e2eSavedIg = s.ig;
+        s.ig = null;
+      }, { message: 'e2e: disconnect' });
+      return post.id;
+    });
+    try {
+      await go('#/');
+      const card = page.locator('.ob-hand');
+      await card.waitFor({ timeout: 20_000 });
+      assert.match(await card.textContent(), /A post is waiting to be posted by hand/);
+      assert.match(await card.textContent(), /Post, due /);
+      await shot(page, 'home-disconnected-hand-posts');
+      await card.getByRole('link', { name: 'E2E home: post while disconnected' }).click();
+      await page.waitForFunction((x) => location.hash === `#/post-now/${x}`, id);
+      await page.locator('.pn-steps').waitFor();
+    } finally {
+      await page.evaluate(async (x) => {
+        const data = await import('/postpilot/js/data.js');
+        await data.mutate('settings', (s) => {
+          s.ig = s.e2eSavedIg;
+          delete s.e2eSavedIg;
+        }, { message: 'e2e: reconnect' });
+        await data.mutate('posts', (doc) => void (doc.posts = doc.posts.filter((p) => p.id !== x)), { message: 'e2e: clean up' });
+      }, id);
+    }
+    await go('#/');
+    await page.locator('.dash-account').waitFor({ timeout: 20_000 });
   });
 
   test('no console errors', () => {

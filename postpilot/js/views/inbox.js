@@ -12,6 +12,7 @@ import { aiPrefs, getAi } from '../ai-client.js';
 import { useApp } from '../app.js';
 import { loadViewCss } from '../css.js';
 import { mutate, useDocs } from '../data.js';
+import { notifyDelivery } from '../push.js';
 import { buildHash, parseHash, setQuery } from '../router.js';
 import { Icon } from '../ui/icons.js';
 import {
@@ -99,6 +100,41 @@ function mediaFromLive(m) {
     commentsEnabled: m.commentsEnabled ?? null,
     commentsCount: m.commentsCount ?? null,
   };
+}
+
+// This screen's writes to the inbox document go one at a time: two commits built on the same version
+// conflict (GitHub answers 422 and the store starts over), e.g. a hide right after a reply.
+let inboxWrites = Promise.resolve();
+function mutateInbox(fn, opts) {
+  const run = inboxWrites.then(() => mutate('inbox', fn, opts));
+  inboxWrites = run.catch(() => {});
+  return run;
+}
+
+/** Where a comment or reply sits in the worker's cached list (as worker/jobs/shared.mjs findCachedComment). */
+function findCached(list, id) {
+  for (let i = 0; i < (list || []).length; i++) {
+    const c = list[i];
+    if (!c) continue;
+    if (c.id === id) return { comment: c, parent: null, index: i };
+    const r = (c.replies || []).findIndex((x) => x && x.id === id);
+    if (r >= 0) return { comment: c.replies[r], parent: c, index: r };
+  }
+  return null;
+}
+
+/**
+ * Reflect a live action in the worker's cached comments, as worker/jobs/outbox.mjs does for queued
+ * ones: older posts are shown from that copy and the Today screen counts it, while the worker reads a
+ * post's comments again only when its comment count changes (a hidden comment would stay unhidden).
+ * edit(doc, found) changes the found comment in place.
+ */
+function patchCache(inbox, commentId, edit) {
+  if (!findCached(inbox && inbox.comments, commentId)) return;
+  mutateInbox((d) => {
+    const found = findCached(d.comments, commentId);
+    if (found) edit(d, found);
+  }, { message: 'inbox: update the saved copy of a comment', silent: true }).catch(() => {});
 }
 
 /** Group the worker's cached comments (inbox.comments) by post. */
@@ -436,7 +472,7 @@ function OutboxStrip({ outbox, onRetry, onDismiss }) {
   </div>`;
 }
 
-function CommentsTab({ ctx, groups, mode, loading, filter, setFilter, keep, needsCount, hiddenCount, onToggleComments, togglingId }) {
+function CommentsTab({ ctx, groups, mode, loading, filter, setFilter, keep, needsCount, hiddenCount, onToggleComments, togglingId, cacheAge }) {
   const { isMine, done } = ctx;
   const filtered = useMemo(() => {
     const keepSet = keep;
@@ -452,6 +488,9 @@ function CommentsTab({ ctx, groups, mode, loading, filter, setFilter, keep, need
       })
       .filter((x) => x.list.length || (filter === 'all' && x.g.error));
   }, [groups, filter, keep, done]);
+  const recent = filtered.filter((x) => !x.g.cached);
+  const older = filtered.filter((x) => x.g.cached);
+  const group = ({ g, list }) => html`<${PostGroup} key=${g.media.id} group=${g} comments=${list} ctx=${ctx} onToggleComments=${onToggleComments} toggling=${togglingId === g.media.id} />`;
 
   return html`<div class="stack ibx-comments-tab">
     <div class="toolbar ibx-toolbar">
@@ -469,9 +508,18 @@ function CommentsTab({ ctx, groups, mode, loading, filter, setFilter, keep, need
       : !filtered.length
         ? html`<${EmptyState} icon=${filter === 'hidden' ? 'eye' : 'check'}
             title=${filter === 'needs' ? 'All caught up' : filter === 'hidden' ? 'No hidden comments' : 'No comments yet'}
-            body=${filter === 'needs' ? `Every comment on your latest ${MEDIA_LIMIT} posts has a reply or is marked done.` : filter === 'hidden' ? 'Comments you or your automations hide show up here.' : 'Comments on your latest posts appear here.'}
+            body=${filter === 'needs' ? 'Every comment on your recent posts has a reply or is marked done.' : filter === 'hidden' ? 'Comments you or your automations hide show up here.' : 'Comments on your latest posts appear here.'}
             action=${filter === 'needs' ? html`<${Button} size="sm" variant="secondary" onClick=${() => setFilter('all')}>Show all comments<//>` : null} />`
-        : filtered.map(({ g, list }) => html`<${PostGroup} key=${g.media.id} group=${g} comments=${list} ctx=${ctx} onToggleComments=${onToggleComments} toggling=${togglingId === g.media.id} />`)}
+        : html`${recent.map(group)}
+            ${older.length
+              ? html`<section class="stack ibx-older" aria-labelledby="ibx-older-title">
+                  <div class="ibx-older-head">
+                    <h2 class="section-title" id="ibx-older-title">Older posts</h2>
+                    <p class="muted text-sm">Comments on older posts the worker watches, from its last check${cacheAge ? ` ${cacheAge}` : ''}. Your latest ${MEDIA_LIMIT} posts above come straight from Instagram.</p>
+                  </div>
+                  ${older.map(group)}
+                </section>`
+              : null}`}
   </div>`;
 }
 
@@ -499,11 +547,14 @@ function WindowNote({ info }) {
   return html`<p class="ibx-window is-closed"><${Icon} name="clock" size=${14} />The 24-hour reply window closed at ${info.label}. Instagram only lets apps reply within 24 hours of the person's last message, so answer from the Instagram app.</p>`;
 }
 
-function DmProblem({ problem }) {
+/** The messages permission of the connection's login type (the two scope families are never mixed). */
+export const messagesPermission = (mode) => (mode === 'facebook' ? 'instagram_manage_messages' : 'instagram_business_manage_messages');
+
+function DmProblem({ problem, mode }) {
   if (!problem) return null;
   if (problem === 'needs_advanced_access') {
     return html`<${Callout} tone="warning" title="Instagram only allows messages to people with a role on your app">
-      <p>Until Meta grants your app Advanced Access to instagram_business_manage_messages (App Review in the Meta App Dashboard), you can only message accounts that are testers or admins of the app. Reply from the Instagram app meanwhile.</p>
+      <p>Until Meta grants your app Advanced Access to ${messagesPermission(mode)} (App Review in the Meta App Dashboard), you can only message accounts that are testers or admins of the app. Reply from the Instagram app meanwhile.</p>
     <//>`;
   }
   if (problem === 'dm_disabled') {
@@ -513,7 +564,7 @@ function DmProblem({ problem }) {
   }
   if (problem === 'no_permission') {
     return html`<${Callout} tone="warning" title="Postpilot cannot read your messages">
-      <p>The Instagram token is missing the messages permission. Replace it in <a href="#/settings?section=instagram">Settings</a> with one that includes instagram_business_manage_messages.</p>
+      <p>The Instagram token is missing the messages permission. Replace it in <a href="#/settings?section=instagram">Settings</a> with one that includes ${messagesPermission(mode)}.</p>
     <//>`;
   }
   return null;
@@ -701,7 +752,7 @@ function MessagesTab({ ctx, convs, mode, loading, error, selectedId, explicit, o
     return !s || ms(s) < ms(lm.createdTime);
   };
   return html`<div class="stack">
-    <${DmProblem} problem=${ctx.dmProblem} />
+    <${DmProblem} problem=${ctx.dmProblem} mode=${ctx.igMode} />
     ${error ? html`<${Callout} tone="warning" title="Live messages are unavailable">${error}<//>` : null}
     <div class=${cx('ibx-dm', phone && 'is-phone')}>
       ${showList
@@ -912,7 +963,7 @@ function InviteRow({ inv, tz, busy, canAnswer, appOnly, onAnswer }) {
               ? html`<span class="ibx-invite-note text-warn text-sm" title="The connection dropped before Instagram confirmed the answer. Postpilot checks again at its next look.">Not confirmed yet</span>`
               : inv.decidedAt ? html`<time class="faint text-sm" datetime=${inv.decidedAt} title=${formatDateTime(inv.decidedAt, tz)}>${relative(inv.decidedAt)}</time>` : null}`
         : appOnly
-          ? html`<span class="ibx-invite-note faint text-sm">Answer in the Instagram app</span>`
+          ? html`<span class="ibx-invite-note muted text-sm">Answer in the Instagram app</span>`
           : html`<${Button} size="sm" variant="primary" icon="check" loading=${busy === 'accept'} disabled=${!canAnswer || !!busy}
                 aria-label=${`Accept ${owner}’s invite`} title=${canAnswer ? undefined : 'Connect Instagram in Settings to answer invites.'} onClick=${() => onAnswer(inv, true)}>Accept<//>
               <${Button} size="sm" variant="ghost" loading=${busy === 'decline'} disabled=${!canAnswer || !!busy}
@@ -927,7 +978,7 @@ function InviteRow({ inv, tz, busy, canAnswer, appOnly, onAnswer }) {
  * Accept / Decline call Instagram directly (core/ig.js resends a lost answer and reports one Instagram
  * may have received as unconfirmed) and then record the answer in inbox.invites.
  */
-function InvitesTab({ ig, inbox, tz, toast, confirm }) {
+function InvitesTab({ ig, inbox, settings, tz, toast, confirm }) {
   const stored = (inbox && inbox.invites) || [];
   // The worker found that this connection has no invites: no automatic live read (it would fail on
   // every visit) until the owner asks for one or the worker's next check says otherwise.
@@ -952,7 +1003,7 @@ function InvitesTab({ ig, inbox, tz, toast, confirm }) {
         // Bring the saved copy (tab badge, Automations) in line with Instagram's list.
         const cur = inboxRef.current || {};
         if (reconcileInvites(cur.invites, cur.invitesStatus, items, Date.now()).changed) {
-          mutate('inbox', (d) => {
+          mutateInbox((d) => {
             const r = reconcileInvites(d.invites, d.invitesStatus, items, Date.now());
             d.invites = r.invites;
             d.invitesStatus = r.status;
@@ -979,7 +1030,7 @@ function InvitesTab({ ig, inbox, tz, toast, confirm }) {
     .sort((a, b) => ms(b.decidedAt) - ms(a.decidedAt));
 
   const record = (inv, status, unconfirmed) =>
-    mutate('inbox', (d) => {
+    mutateInbox((d) => {
       d.invites ||= [];
       const at = new Date().toISOString();
       let x = d.invites.find((i) => String(i.mediaId) === String(inv.mediaId));
@@ -1022,7 +1073,7 @@ function InvitesTab({ ig, inbox, tz, toast, confirm }) {
         toast(errText(err), { kind: 'info' });
       } else if (err && err.isNotFound) {
         dropLive(inv.mediaId);
-        mutate('inbox', (d) => {
+        mutateInbox((d) => {
           d.invites = (d.invites || []).filter((i) => !(String(i.mediaId) === String(inv.mediaId) && i.status === 'pending'));
         }, { message: 'inbox: remove closed collaboration invite', silent: true }).catch(() => {});
         toast('This invite is no longer open. It was answered in the Instagram app or withdrawn.', { kind: 'info' });
@@ -1041,7 +1092,7 @@ function InvitesTab({ ig, inbox, tz, toast, confirm }) {
   };
 
   return html`<div class="stack stack-lg ibx-invites">
-    <p class="muted ibx-invites-intro">When another account adds you as a collaborator on their post, the invite waits here. Accepting adds the post to your profile too, with shared likes and comments. <a href="#/automations">Accept trusted accounts automatically</a>.</p>
+    <p class="muted ibx-invites-intro">When another account adds you as a collaborator on their post, the invite waits here. Accepting adds the post to your profile too, with shared likes and comments. <a href="#/automations?section=collab">Accept trusted accounts automatically</a>.</p>
     ${unsupported
       ? html`<${Callout} tone="warning" title="Invites are not available with this connection"
           action=${ig ? html`<${Button} size="sm" variant="secondary" loading=${state.status === 'loading'} onClick=${() => setAsked((n) => n + 1)}>Check again<//>` : null}>
@@ -1058,7 +1109,8 @@ function InvitesTab({ ig, inbox, tz, toast, confirm }) {
       ${state.status === 'loading' && !pending.length
         ? html`<${Skeleton} lines=${3} />`
         : !pending.length
-          ? html`<${EmptyState} compact icon="users" title="No open invites" body="New collaboration invites show up here and on your phone." />`
+          ? html`<${EmptyState} compact icon="users" title="No open invites"
+              body=${`New collaboration invites show up here${notifyDelivery(settings, 'collab') === 'ok' ? ' and on your phone' : ''}.`} />`
           : html`<ul class="ibx-invite-list">
               ${pending.map((inv) => html`<${InviteRow} key=${inv.mediaId} inv=${inv} tz=${tz} busy=${busy[inv.mediaId]} canAnswer=${!!ig} appOnly=${unsupported} onAnswer=${answer} />`)}
             </ul>`}
@@ -1101,6 +1153,9 @@ export default function InboxView() {
   const [localPrivate, setLocalPrivate] = useState(() => new Set());
   const [togglingId, setTogglingId] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
+  // Live actions on comments shown from the worker's copy (older posts), applied until that copy
+  // catches up (patchCache). Each is an idempotent groups -> groups function.
+  const [cacheEdits, setCacheEdits] = useState([]);
 
   // ---- messages state
   const [convState, setConvState] = useState(() => (live.conversations ? { mode: 'live', list: live.conversations.list } : { mode: 'loading', list: [] }));
@@ -1220,7 +1275,14 @@ export default function InboxView() {
   const canAct = !!ig;
   const canLive = !!ig && comments.mode === 'live';
 
-  const groups = comments.mode === 'cache' ? groupsFromCache(inbox.comments) : comments.groups;
+  // Live mode reads the latest MEDIA_LIMIT posts; the worker also watches older posts (up to
+  // automations.limits watchPosts / watchDays) and the Today screen counts their comments too, so
+  // those come from its copy, after the live ones.
+  const liveIds = new Set(comments.groups.map((g) => String(g.media.id)));
+  const older = comments.mode === 'live'
+    ? cacheEdits.reduce((gs, fn) => fn(gs), groupsFromCache(inbox.comments).filter((g) => !liveIds.has(String(g.media.id))).map((g) => ({ ...g, cached: true })))
+    : [];
+  const groups = comments.mode === 'cache' ? groupsFromCache(inbox.comments) : [...comments.groups, ...older];
   const pendingByComment = new Map();
   for (const c of outbox) if (c && c.payload && c.payload.commentId && (c.status === 'pending' || c.status === 'sending' || c.status === 'failed')) pendingByComment.set(c.payload.commentId, c);
   const privateMap = inbox.privateReplies || {};
@@ -1245,7 +1307,9 @@ export default function InboxView() {
     other: (c.participants || []).find((p) => !((ownId && String(p.id) === ownId) || (ownName && String(p.username || '').toLowerCase() === ownName))) || (c.participants || [])[0] || {},
   }));
   const invitesPending = waitingInvites(inbox).length;
-  const unreadCount = convList.filter((c) => c.lastMessage && !c.lastMessage.fromMe && (!seen[c.id] || ms(seen[c.id]) < ms(c.lastMessage.createdTime))).length;
+  // Conversations load when the Messages tab opens; until then its badge counts the worker's copy (as Today does).
+  const unreadOf = (list) => list.filter((c) => c.lastMessage && !c.lastMessage.fromMe && (!seen[c.id] || ms(seen[c.id]) < ms(c.lastMessage.createdTime))).length;
+  const unreadCount = unreadOf(convState.mode === 'loading' && !convState.list.length ? convCache : convList);
 
   // ---- actions
   const setGroups = (fn) => {
@@ -1255,12 +1319,13 @@ export default function InboxView() {
       if (live.comments) live.comments = { ...live.comments, groups: next };
       return { ...s, groups: next };
     });
+    setCacheEdits((list) => [...list, fn]);
   };
   const keepVisible = (id) => setKeep((k) => new Set(k).add(id));
 
   const queue = async (type, payload, what) => {
     try {
-      await mutate('inbox', (d) => {
+      await mutateInbox((d) => {
         d.outbox ||= [];
         d.outbox.push({ id: uid('ob_'), type, payload, status: 'pending', error: null, createdAt: new Date().toISOString() });
       }, { message: `inbox: queue ${type}` });
@@ -1311,7 +1376,9 @@ export default function InboxView() {
         what: `post your reply to @${c.username}`,
         onDone: (r) => {
           const reply = { id: r.id || uid('reply_'), text, timestamp: new Date().toISOString(), username: (settings.ig && settings.ig.username) || '', fromId: ownId, likeCount: 0, hidden: false, parentId: c.id, replies: [] };
-          setGroups((gs) => updateComment(gs, c.id, (x) => ({ ...x, replies: [...(x.replies || []), reply] })));
+          const withReply = (x) => ({ ...x, replies: [...(x.replies || []).filter((y) => y.id !== reply.id), reply] });
+          setGroups((gs) => updateComment(gs, c.id, withReply));
+          patchCache(inbox, c.id, (d, f) => Object.assign(f.comment, withReply(f.comment)));
           keepVisible(c.id);
           toast(`Replied to @${c.username}`, { kind: 'success' });
         },
@@ -1327,6 +1394,9 @@ export default function InboxView() {
         what: hide ? 'hide the comment' : 'unhide the comment',
         onDone: () => {
           setGroups((gs) => updateComment(gs, c.id, (x) => ({ ...x, hidden: hide })));
+          patchCache(inbox, c.id, (d, f) => {
+            f.comment.hidden = hide;
+          });
           keepVisible(c.parentId || c.id);
           if (hide && composer && composer.id === c.id && composer.mode === 'reply') setComposer(null);
           toast(hide ? `Comment from @${c.username} hidden. Only they and their followers can still see it.` : `Comment from @${c.username} is visible again`, {
@@ -1346,13 +1416,14 @@ export default function InboxView() {
         what: 'delete the comment',
         onDone: () => {
           setGroups((gs) => updateComment(gs, c.id, () => null));
+          patchCache(inbox, c.id, (d, f) => (f.parent ? f.parent.replies : d.comments).splice(f.index, 1));
           toast('Comment deleted', { kind: 'success' });
         },
       });
     },
     privateReply: async (c, text) => {
       const record = () =>
-        mutate('inbox', (d) => {
+        mutateInbox((d) => {
           d.privateReplies ||= {};
           d.privateReplies[c.id] = new Date().toISOString();
           const keys = Object.keys(d.privateReplies);
@@ -1385,7 +1456,7 @@ export default function InboxView() {
     },
     markDone: async (c, on) => {
       try {
-        await mutate('inbox', (d) => {
+        await mutateInbox((d) => {
           d.done ||= {};
           if (on) d.done[c.id] = new Date().toISOString();
           else delete d.done[c.id];
@@ -1426,7 +1497,7 @@ export default function InboxView() {
       // Reset only a command that is still failed in the latest copy: another tab or device may have
       // retried it already, and resetting one the worker is sending (or sent) would send it twice.
       let latest = null;
-      await mutate('inbox', (d) => {
+      await mutateInbox((d) => {
         const c = (d.outbox || []).find((x) => x.id === cmd.id);
         latest = c ? c.status : null;
         if (latest === 'failed') {
@@ -1446,7 +1517,7 @@ export default function InboxView() {
   };
   const dismissCommand = async (cmd) => {
     try {
-      await mutate('inbox', (d) => {
+      await mutateInbox((d) => {
         d.outbox = (d.outbox || []).filter((x) => x.id !== cmd.id);
       }, { message: 'inbox: dismiss command' });
     } catch {
@@ -1459,7 +1530,7 @@ export default function InboxView() {
     const prev = seenWrites.current.get(convId) || seen[convId];
     if (prev && ms(prev) >= ms(iso)) return;
     seenWrites.current.set(convId, iso);
-    mutate('inbox', (d) => {
+    mutateInbox((d) => {
       d.seen ||= {};
       if (!d.seen[convId] || ms(d.seen[convId]) < ms(iso)) d.seen[convId] = iso;
     }, { message: 'inbox: mark conversation read', silent: true }).catch(() => seenWrites.current.delete(convId));
@@ -1488,6 +1559,7 @@ export default function InboxView() {
 
   const ctx = {
     ig, tz, isMine, isMineMsg, ownId, ownName, done, savedReplies, toast, queue, queueAfterFailure, canAct, canLive: !!ig && (tab === 'messages' ? convState.mode === 'live' : canLive),
+    igMode: settings && settings.ig ? settings.ig.mode : null,
     composer, setComposer, actions, setDmProblem, markSeen, onSent, showComment,
     dmProblem: dmProblem || (data.automations && data.automations.status && ['needs_advanced_access', 'dm_disabled', 'no_permission'].includes(data.automations.status.dm) ? data.automations.status.dm : null),
     privateSent: (id) => localPrivate.has(id) || !!privateMap[id],
@@ -1500,6 +1572,7 @@ export default function InboxView() {
     live.threads.clear();
     live.tags = null;
     live.invites = null;
+    setCacheEdits([]);
     setReloadKey((k) => k + 1);
   };
 
@@ -1537,12 +1610,12 @@ export default function InboxView() {
             setKeep(new Set());
             setQuery({ filter: f === 'needs' ? null : f });
           }}
-          keep=${keep} needsCount=${needsCount} hiddenCount=${hiddenCount} onToggleComments=${toggleComments} togglingId=${togglingId} />`
+          keep=${keep} needsCount=${needsCount} hiddenCount=${hiddenCount} onToggleComments=${toggleComments} togglingId=${togglingId} cacheAge=${cacheAge} />`
       : tab === 'messages'
         ? html`<${MessagesTab} ctx=${ctx} convs=${convList} mode=${convState.mode === 'loading' ? null : convState.mode} loading=${convState.mode === 'loading'} error=${convError}
             selectedId=${selectedConv || (!phone && convList[0] ? convList[0].id : null)} explicit=${!!selectedConv} onSelect=${(id) => setQuery({ c: id })} seen=${seen} phone=${phone} />`
         : tab === 'mentions'
           ? html`<${MentionsTab} ctx=${ctx} mentionComments=${mentionComments} settings=${settings} />`
-          : html`<${InvitesTab} key=${reloadKey} ig=${ig} inbox=${inbox} tz=${tz} toast=${toast} confirm=${confirm} />`}
+          : html`<${InvitesTab} key=${reloadKey} ig=${ig} inbox=${inbox} settings=${settings} tz=${tz} toast=${toast} confirm=${confirm} />`}
   </div>`;
 }

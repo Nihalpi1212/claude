@@ -146,6 +146,9 @@
 @media (max-width: 759px) {
   .auto-limits { grid-template-columns: minmax(0, 1fr); }
 }
+/* #/automations?section=collab scrolls here (the phone's top bar is covered by html scroll-padding). */
+.auto-collab { scroll-margin-top: 16px; }
+.auto-collab:focus { outline: none; }
 .auto-policy {
   padding: 14px 0 0;
   border-top: 1px solid var(--line);

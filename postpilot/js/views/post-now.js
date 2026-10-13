@@ -2,7 +2,8 @@
 // composer. For reminder posts (publishMode 'reminder'): what Instagram's API cannot post (music from
 // Instagram's library, link stickers, polls, product tags, filters) the owner posts in the Instagram
 // app. The page saves the media to the phone, copies the caption and first comment, opens Instagram,
-// and records the result ("Mark as posted") or asks for another reminder in an hour.
+// and records the result ("Mark as posted", with the post's link: matched to its Instagram media when
+// Postpilot can find it, otherwise by the worker's analytics job) or asks for another reminder in an hour.
 // Phone first: one column of numbered steps.
 
 import { html, useEffect, useMemo, useRef, useState } from '../../vendor/preact.js';
@@ -13,6 +14,7 @@ import { loadViewCss } from '../css.js';
 import { getStore, mutate, readDoc, transact, useDocs } from '../data.js';
 import { saveBlob } from '../media.js';
 import { reminderDelivery } from '../push.js';
+import { mediaCode, parsePermalink } from '../ui/calendar.js';
 import { useAssetUrl } from '../ui/media-picker.js';
 import { Button, Callout, EmptyState, Field, Icon, PageHeader, Skeleton, StatusPill, TextInput, cx } from '../ui/kit.js';
 
@@ -20,7 +22,7 @@ loadViewCss('post-now');
 
 const TYPE_NAME = { feed: 'post', carousel: 'carousel', reel: 'reel', story: 'story' };
 const INSTAGRAM_URL = 'https://www.instagram.com/';
-const PERMALINK_RE = /^https:\/\/(www\.)?instagram\.com\/\S+$/i;
+const LOOKUP_MS = 8000; // longest wait for Instagram when looking up a pasted link
 // Statuses a post can be posted by hand from ('publishing' belongs to the worker).
 const OPEN = ['reminded', 'scheduled', 'draft', 'failed'];
 
@@ -42,6 +44,29 @@ function useLoadedDocs(names) {
     };
   }, [key]);
   return res;
+}
+
+/**
+ * The Instagram media a pasted post link points to, as {id, permalink}: from the saved numbers
+ * (analytics-media), else from a live look at the newest posts when Instagram is connected. null
+ * when it is not found or anything fails: the worker's analytics job links the post later.
+ */
+async function findMedia(shortcode, ig) {
+  const pick = (m) => (m ? { id: String(m.id), permalink: m.permalink || null } : null);
+  try {
+    const saved = await readDoc('analytics-media');
+    const m = Object.values((saved && saved.media) || {}).find((x) => x && x.id && mediaCode(x) === shortcode);
+    if (m) return pick(m);
+  } catch {
+    /* not readable right now: ask Instagram */
+  }
+  if (!ig) return null;
+  try {
+    const listed = await Promise.race([ig.listMedia({ limit: 25, max: 25 }), new Promise((r) => setTimeout(() => r(null), LOOKUP_MS))]);
+    return pick((listed || []).find((x) => x && x.id && mediaCode(x) === shortcode));
+  } catch {
+    return null;
+  }
 }
 
 /** "postpilot-1-vase-trio.jpg": a file name the phone's photo library and Instagram accept. */
@@ -216,7 +241,7 @@ function Step({ n, title, done, children }) {
 }
 
 export default function PostNow() {
-  const { route, tz, toast, navigate, openComposer, settings } = useApp();
+  const { route, tz, toast, navigate, openComposer, settings, ig } = useApp();
   const postId = route.params[0] || '';
   const { data, error } = useLoadedDocs(['posts', 'library']);
   const posts = (data.posts && data.posts.posts) || [];
@@ -301,14 +326,19 @@ export default function PostNow() {
   };
 
   const markPosted = async () => {
-    const url = link.trim();
-    if (url && !PERMALINK_RE.test(url)) {
+    const text = link.trim();
+    // Stored cleaned up (https://www.instagram.com/p/<code>/), without the share tracking query.
+    const parsed = text ? parsePermalink(text) : null;
+    if (text && !parsed) {
       setLinkError('Paste the link to the post, starting with https://www.instagram.com/, or leave this empty.');
       return;
     }
     setLinkError('');
     setBusy('posted');
     try {
+      // Link the post to its Instagram media right away when Postpilot can find it, so the planner
+      // shows it once, with its numbers, labels count in Analytics and autopilot can repost it.
+      const media = parsed ? await findMedia(parsed.shortcode, ig) : null;
       await transact(
         async (tx) => {
           const doc = await tx.read('posts');
@@ -318,9 +348,12 @@ export default function PostNow() {
           if (!OPEN.includes(p.status)) throw new Error(p.status === 'publishing' ? 'Postpilot is publishing this post right now.' : 'This post was canceled.');
           p.status = 'published';
           p.publishedAt = new Date().toISOString();
-          if (url) p.permalink = url;
+          if (parsed) p.permalink = (media && media.permalink) || parsed.url;
+          // Never the media of another post (one Instagram post is one Postpilot post).
+          const linked = media && !p.igMediaId && !doc.posts.some((x) => x.id !== p.id && x.igMediaId && String(x.igMediaId) === media.id);
+          if (linked) p.igMediaId = media.id;
           p.lastError = null;
-          addHistory(p, 'posted by hand', url ? 'Link to the post saved.' : undefined);
+          addHistory(p, 'posted by hand', parsed ? (linked ? 'Link to the post saved and matched to the Instagram post.' : 'Link to the post saved.') : undefined);
           tx.write('posts', doc);
           // Library: remember which posts used each file (as the worker does after publishing).
           const lib = await tx.read('library');
@@ -400,7 +433,7 @@ export default function PostNow() {
 
   return html`<div class="page pn">
     <${PageHeader} eyebrow="Post by hand" title=${`Post your ${what}`} subtitle=${subtitle}>
-      <div class="pn-status"><${StatusPill} status=${post.status === 'reminded' ? 'needs-approval' : post.status} label=${post.status === 'reminded' ? 'Waiting for you' : undefined} /></div>
+      <div class="pn-status"><${StatusPill} status=${post.status} /></div>
     <//>
 
     ${auto && post.status === 'scheduled'

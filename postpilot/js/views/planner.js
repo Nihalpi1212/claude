@@ -6,7 +6,7 @@ import { html, useEffect, useMemo, useRef, useState } from '../../vendor/preact.
 import { addHistory, hasErrors, newPost, validatePost } from '../../core/model.js';
 import { engagementRate, parseTimestamp, topMedia } from '../../core/analytics.js';
 import { bestTimeMatrix, suggestSlots } from '../../core/schedule.js';
-import { addDaysKey, dayKey, format, formatDateTime, formatDay, formatTime, pad, weekdayOfKey, zonedToUtc } from '../../core/time.js';
+import { addDaysKey, dayKey, format, formatDateTime, formatDay, formatTime, pad, relative, weekdayOfKey, zonedToUtc } from '../../core/time.js';
 import { aiPrefs, getAi } from '../ai-client.js';
 import { useApp } from '../app.js';
 import { loadViewCss } from '../css.js';
@@ -29,10 +29,13 @@ import {
   endDrag,
   filterStatus,
   igType,
+  linkedMedia,
   localMinutes,
+  mediaCode,
   matchesSearch,
   monthDays,
   monthTitle,
+  parsePermalink,
   postInstant,
   postNowHash,
   postTitle,
@@ -212,7 +215,7 @@ export default function Planner() {
   const showIg = !filters.source.length && (!filters.status.length || filters.status.includes('published'));
 
   const calItems = useMemo(() => {
-    const linked = new Set(posts.map((p) => p.igMediaId).filter(Boolean));
+    const linked = linkedMedia(posts);
     const out = [];
     for (const p of visiblePosts) {
       const at = postInstant(p);
@@ -231,7 +234,7 @@ export default function Planner() {
     }
     if (showIg) {
       for (const m of Object.values(mediaStats)) {
-        if (!m || !m.id || linked.has(m.id) || m.productType === 'STORY') continue;
+        if (!m || !m.id || linked.has(m) || m.productType === 'STORY' || m.deletedAt) continue;
         if (filters.type.length && !filters.type.includes(igType(m))) continue;
         if (searching && !matchesSearch({ caption: m.caption }, search)) continue;
         const t = parseTimestamp(m.timestamp);
@@ -739,6 +742,7 @@ function PostRow({ post, asset, tz, listsById, actions, selectable, checked, onC
       <div class="pl-row-meta">
         <span class="pl-meta-item mono">${at ? (showDate ? formatDateTime(at, tz) : formatTime(at, tz)) : 'No date yet'}</span>
         <span class="pl-meta-item"><${Icon} name=${TYPE_ICON[post.type]} size=${13} />${TYPE_LABEL[post.type]}${post.media && post.media.length > 1 ? ` · ${post.media.length}` : ''}</span>
+        ${reminded && post.reminderSentAt ? html`<span class="pl-meta-item">Reminder sent ${relative(post.reminderSentAt)}</span>` : null}
         ${post.source && post.source !== 'manual' ? html`<span class="pl-meta-item">${list ? html`<span class="pl-list-dot" style=${{ background: list.color }} aria-hidden="true"></span>${list.name}` : SOURCE_LABEL[post.source] || post.source}</span>` : null}
         ${(post.labels || []).slice(0, 2).map((l) => html`<${Badge} tone="outline" key=${l}>${l}<//>`)}
       </div>
@@ -929,7 +933,7 @@ function ListView({ posts, assetsById, listsById, tz, today, nowMs, selection, s
           body=${filtered ? 'Clear a filter to see more.' : 'Create a post, import a CSV or set up a queue to fill your calendar.'}
           action=${filtered ? null : html`<${Button} variant="primary" icon="plus" onClick=${onCompose}>New post<//>`} />`
       : null}
-    ${section('reminded', 'Post by hand', byHand, rows(byHand), 'The reminder went out. Post these in the Instagram app, then mark them as posted.')}
+    ${section('reminded', 'Post by hand', byHand, rows(byHand), `${byHand.every((p) => p.reminderSentAt) ? 'The reminder went out. ' : ''}Post these in the Instagram app, then mark them as posted.`)}
     ${section('approval', 'Needs approval', approval, rows(approval), 'Created by autopilot. Approve to schedule.')}
     ${section('failed', 'Failed', failedList, rows(failedList), 'Fix the problem or try again.')}
     ${section('scheduled', 'Scheduled', scheduled, scheduledContent)}
@@ -965,16 +969,21 @@ function GridImage({ asset, src }) {
 
 function GridView({ posts, mediaStats, assetsById, tz, nowMs, account, onOpen, onSwap, phone }) {
   const [dropId, setDropId] = useState(null);
+  // Planned: scheduled, publishing, drafts with a future date, and reminder posts waiting to be
+  // posted by hand ('reminded': about to go on the profile, so they keep their place).
   const upcoming = posts
     .filter((p) => p.type !== 'story' && !(p.type === 'reel' && p.shareToFeed === false) && p.scheduledAt)
-    .filter((p) => p.status === 'scheduled' || p.status === 'publishing' || (p.status === 'draft' && Date.parse(p.scheduledAt) >= nowMs))
+    .filter((p) => p.status === 'scheduled' || p.status === 'publishing' || p.status === 'reminded' || (p.status === 'draft' && Date.parse(p.scheduledAt) >= nowMs))
     .sort((a, b) => Date.parse(b.scheduledAt) - Date.parse(a.scheduledAt));
+  const media = Object.values(mediaStats).filter((m) => m && m.id && m.productType !== 'STORY' && !m.deletedAt);
+  // A post marked as posted by hand shows as its Instagram media once that is saved: linked by id, or
+  // by the shortcode of its link until the worker links it.
+  const codes = new Set(media.map(mediaCode).filter(Boolean));
+  const shownAsMedia = (p) => (p.igMediaId && mediaStats[p.igMediaId]) || (p.permalink && codes.has((parsePermalink(p.permalink) || {}).shortcode));
   const published = [
-    ...Object.values(mediaStats)
-      .filter((m) => m && m.id && m.productType !== 'STORY')
-      .map((m) => ({ key: `ig_${m.id}`, t: parseTimestamp(m.timestamp), src: m.thumbnailUrl, permalink: m.permalink, type: igType(m), caption: m.caption || '' })),
+    ...media.map((m) => ({ key: `ig_${m.id}`, t: parseTimestamp(m.timestamp), src: m.thumbnailUrl, permalink: m.permalink, type: igType(m), caption: m.caption || '' })),
     ...posts
-      .filter((p) => p.status === 'published' && p.type !== 'story' && !(p.igMediaId && mediaStats[p.igMediaId]))
+      .filter((p) => p.status === 'published' && p.type !== 'story' && !shownAsMedia(p))
       .map((p) => ({ key: p.id, t: Date.parse(p.publishedAt || p.scheduledAt), asset: previewAsset(p, assetsById), permalink: p.permalink, type: p.type, caption: p.caption || '', post: p })),
   ]
     .filter((x) => Number.isFinite(x.t))
@@ -985,13 +994,14 @@ function GridView({ posts, mediaStats, assetsById, tz, nowMs, account, onOpen, o
     const title = postTitle(p);
     const when = `${format(p.scheduledAt, tz, { month: 'short', day: 'numeric' })} ${shortTime(p.scheduledAt, tz)}`;
     const movable = (p.status === 'scheduled' || p.status === 'draft') && Date.parse(p.scheduledAt) > nowMs;
+    const byHand = p.status === 'reminded';
     const items = [
-      { label: 'Edit', icon: 'edit', onClick: () => onOpen(p) },
+      byHand ? { label: 'Post by hand', icon: 'send', onClick: () => onOpen(p) } : { label: 'Edit', icon: 'edit', onClick: () => onOpen(p) },
       { label: 'Move up in grid', icon: 'arrow-up', disabled: !movable || i === 0 || !upcoming[i - 1], onClick: () => onSwap(p.id, upcoming[i - 1].id) },
       { label: 'Move down in grid', icon: 'arrow-down', disabled: !movable || i === upcoming.length - 1, onClick: () => onSwap(p.id, upcoming[i + 1].id) },
     ];
-    return html`<div key=${p.id} class=${cx('pl-tile is-upcoming', p.status === 'draft' && 'is-draft', dropId === p.id && 'is-drop')} data-post-id=${p.id}
-      draggable=${movable ? 'true' : 'false'}
+    return html`<div key=${p.id} class=${cx('pl-tile is-upcoming', p.status === 'draft' && 'is-draft', byHand && 'is-reminded', dropId === p.id && 'is-drop')} data-post-id=${p.id}
+      draggable=${movable}
       onDragStart=${movable ? (e) => startDrag(e, p.id) : (e) => e.preventDefault()}
       onDragEnd=${() => {
         endDrag();
@@ -1011,11 +1021,11 @@ function GridView({ posts, mediaStats, assetsById, tz, nowMs, account, onOpen, o
         setDropId(null);
         if (d && d.id !== p.id) onSwap(d.id, p.id);
       }}>
-      <div role="button" tabindex="0" class="pl-tile-open" aria-label=${`${p.status === 'draft' ? 'Draft' : 'Scheduled'} ${TYPE_LABEL[p.type]}, ${when}: ${title}`}
+      <div role="button" tabindex="0" class="pl-tile-open" aria-label=${`${p.status === 'draft' ? `Draft ${TYPE_LABEL[p.type]}` : byHand ? `Waiting to be posted by hand: ${TYPE_LABEL[p.type]}` : `Scheduled ${TYPE_LABEL[p.type]}`}, ${when}: ${title}`}
         onClick=${() => onOpen(p)} onKeyDown=${(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), onOpen(p))}>
         <${GridImage} asset=${previewAsset(p, assetsById)} />
         <span class="pl-tile-time">${when}</span>
-        ${p.status === 'draft' ? html`<span class="pl-tile-flag">Draft</span>` : null}
+        ${p.status === 'draft' ? html`<span class="pl-tile-flag">Draft</span>` : byHand ? html`<span class="pl-tile-flag is-reminded">Post by hand</span>` : null}
         ${p.type !== 'feed' ? html`<span class="pl-tile-kind" aria-hidden="true"><${Icon} name=${TYPE_ICON[p.type]} size=${14} /></span>` : null}
       </div>
       <${Menu} class="pl-tile-menu" items=${items} label=${`Actions for ${title}`} size="sm" icon="more" />
@@ -1050,6 +1060,7 @@ function GridView({ posts, mediaStats, assetsById, tz, nowMs, account, onOpen, o
       <ul class="pl-notes">
         <li><span class="pl-note-swatch is-upcoming" aria-hidden="true"></span>Scheduled</li>
         <li><span class="pl-note-swatch is-draft" aria-hidden="true"></span>Draft with a date</li>
+        ${upcoming.some((p) => p.status === 'reminded') ? html`<li><span class="pl-note-swatch is-reminded" aria-hidden="true"></span>Post by hand</li>` : null}
         <li><span class="pl-note-swatch is-published" aria-hidden="true"></span>Published</li>
       </ul>
       <p class="muted text-sm">${phone ? 'Use the menu on a tile to move it up or down; that swaps the two publish times.' : 'Drag a planned tile onto another to swap their publish times, or use the tile menu.'}</p>

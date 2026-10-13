@@ -14,6 +14,7 @@ import {
   Badge, Button, Callout, ChipInput, EmptyState, Field, Frame, Icon, IconButton, Menu, Modal, PageHeader, ProgressBar,
   Segmented, Select, Skeleton, StatusPill, TextArea, TextInput, Toggle, Drawer, cx, usePhone,
 } from '../ui/kit.js';
+import { IMPORT_REFUSED } from '../../core/feed.js';
 import { LIMITS, uid } from '../../core/model.js';
 import { unusedAssets } from '../../core/schedule.js';
 import { formatDateTime } from '../../core/time.js';
@@ -37,6 +38,9 @@ const REMOVED_HINT = 'The original was removed to save space (Settings → Free 
 // A file the worker still has to download from a link has no bytes yet: never try to load it.
 const importing = (a) => !!(a && a.importUrl);
 const importFailed = (a) => !!(a && a.importUrl && a.importError);
+// Refused for good: Instagram cannot take the file as it is (a PNG, the wrong shape, too big...).
+// Downloading it again gives the same file, so only a fixed copy uploaded in the Library helps.
+const importRefused = (a) => importFailed(a) && IMPORT_REFUSED.has(a.importErrorCode);
 const hostOf = (url) => {
   try {
     return new URL(url).hostname.replace(/^www\./, '');
@@ -130,12 +134,13 @@ function usageMap(posts) {
 function SheetItem({ asset, index, selected, selecting, usedCount, onOpen, onToggle }) {
   const pending = importing(asset);
   const failed = importFailed(asset);
+  const refused = importRefused(asset);
   const src = useThumb(pending ? null : asset);
   const kind = asset.kind === 'video' ? 'video' : undefined;
   const desc = [
     asset.name || 'Untitled',
     asset.kind === 'video' ? `video${asset.durationSec ? `, ${formatDuration(asset.durationSec)}` : ''}` : 'photo',
-    failed ? 'could not be downloaded from its link' : pending ? 'still downloading from its link' : null,
+    refused ? 'Instagram cannot take it as it is' : failed ? 'could not be downloaded from its link' : pending ? 'still downloading from its link' : null,
     asset.autopilot ? 'in the autopilot pool' : null,
     usedCount ? `used in ${plural(usedCount, 'post')}` : 'unused',
     asset.originalRemovedAt ? 'original removed' : null,
@@ -145,14 +150,14 @@ function SheetItem({ asset, index, selected, selecting, usedCount, onOpen, onTog
   return html`<li class=${cx('lib-item', selected && 'is-selected', selecting && 'is-selecting', pending && 'is-importing')} data-asset=${asset.id}>
     <${Frame} src=${src} alt="" number=${index + 1} label=${asset.name || 'Untitled'} kind=${kind}
       badge=${asset.originalRemovedAt ? 'Original removed' : !pending && asset.kind === 'video' && asset.durationSec ? formatDuration(asset.durationSec) : undefined}
-      title=${asset.originalRemovedAt ? REMOVED_HINT : failed ? `Could not download: ${asset.importError}` : pending ? `Downloading from ${hostOf(asset.importUrl)}` : undefined}
+      title=${asset.originalRemovedAt ? REMOVED_HINT : refused ? `Cannot be posted: ${asset.importError}` : failed ? `Could not download: ${asset.importError}` : pending ? `Downloading from ${hostOf(asset.importUrl)}` : undefined}
       class=${cx('lib-frame', selected && 'is-selected', usedCount && 'is-used')}
       onClick=${(e) => (selecting || e.shiftKey || e.metaKey || e.ctrlKey ? onToggle(e) : onOpen())}
       aria-label=${selecting ? `${selected ? 'Deselect' : 'Select'} ${desc}` : `Open ${desc}`}>
       ${pending
         ? html`<span class=${cx('lib-import', failed && 'is-error')}>
             <${Icon} name=${failed ? 'alert' : 'download'} size=${18} />
-            <span>${failed ? 'Download failed' : 'Downloading from link…'}</span>
+            <span>${refused ? 'Cannot be posted' : failed ? 'Download failed' : 'Downloading from link…'}</span>
           </span>`
         : null}
       ${asset.autopilot || usedCount
@@ -215,6 +220,15 @@ function ImportStatus({ asset, onRetry }) {
   const [busy, setBusy] = useState(false);
   if (!importing(asset)) return null;
   const host = hostOf(asset.importUrl);
+  const link = html`<a class="lib-import-url mono" href=${asset.importUrl} target="_blank" rel="noopener noreferrer">${asset.importUrl}</a>`;
+  if (importRefused(asset)) {
+    // The error says what to do (download it, upload it in the Library); trying again cannot help.
+    return html`<${Callout} tone="danger" title="Instagram cannot take this file">
+      <span>${asset.importError}</span>
+      ${link}
+      <span class="muted">Posts that use this file cannot publish. Upload a fixed copy in the Library, then swap it into those posts.</span>
+    <//>`;
+  }
   if (importFailed(asset)) {
     return html`<${Callout} tone="danger" title="Could not download this file"
       action=${html`<${Button} size="sm" variant="secondary" icon="refresh" loading=${busy}
@@ -224,14 +238,14 @@ function ImportStatus({ asset, onRetry }) {
           setBusy(false);
         }}>Try again<//>`}>
       <span>${asset.importError}</span>
-      <span class="lib-import-url mono">${asset.importUrl}</span>
+      ${link}
       <span class="muted">Check that the link opens the photo or video itself, then try again. Posts that use this file cannot publish until it is here.</span>
     <//>`;
   }
   return html`<${Callout} tone="info" title="Downloading from link…">
     <span>The worker downloads this file from ${host} on its next run (about every 10 minutes). Posts that use it wait until it is here.</span>
     ${asset.importLastError ? html`<span class="muted">Last try failed: ${asset.importLastError} The worker tries again.</span>` : null}
-    <span class="lib-import-url mono">${asset.importUrl}</span>
+    ${link}
   <//>`;
 }
 
@@ -307,7 +321,9 @@ function AssetDrawer({ asset, folders, usedBy, tz, onClose, onCreatePost, onDele
         ? html`<p class="text-sm"><${Badge} tone="warning">Original removed<//> <span class="muted">${REMOVED_HINT}</span></p>`
         : null}
       <dl class="kv lib-kv">
-        <dt>Type</dt><dd>${asset.kind === 'video' ? 'Video' : 'Photo'} · <span class="mono">${(asset.mime || '').replace(/^\w+\//, '').toUpperCase() || '—'}</span></dd>
+        <dt>Type</dt><dd>${importing(asset)
+          ? html`<span class="muted">Not downloaded yet</span>`
+          : html`${asset.kind === 'video' ? 'Video' : 'Photo'} · <span class="mono">${(asset.mime || '').replace(/^\w+\//, '').toUpperCase() || '—'}</span>`}</dd>
         <dt>Size</dt><dd class="mono">${asset.width && asset.height ? `${asset.width} × ${asset.height}` : '—'}${ratioLabel(asset.width, asset.height) ? html` <span class="muted">(${ratioLabel(asset.width, asset.height)})</span>` : null}</dd>
         <dt>File</dt><dd class="mono">${formatBytes(asset.bytes)}</dd>
         ${asset.kind === 'video' ? html`<dt>Length</dt><dd class="mono">${asset.durationSec ? formatDuration(asset.durationSec) : '—'}</dd>` : null}
@@ -788,7 +804,9 @@ export default function Library() {
     if (broken.length) {
       toast(
         broken.length === picked.length
-          ? `${broken.length === 1 ? 'This file' : 'These files'} could not be downloaded from ${broken.length === 1 ? 'its link' : 'their links'}. Try the download again first.`
+          ? broken.every(importRefused)
+            ? `Instagram cannot take ${broken.length === 1 ? 'this file' : 'these files'} as ${broken.length === 1 ? 'it is' : 'they are'}. Upload a fixed copy in the Library first.`
+            : `${broken.length === 1 ? 'This file' : 'These files'} could not be downloaded from ${broken.length === 1 ? 'its link' : 'their links'}. Try the download again first.`
           : `Left out ${plural(broken.length, 'file')} that could not be downloaded from ${broken.length === 1 ? 'its link' : 'their links'}.`,
         { kind: broken.length === picked.length ? 'error' : 'info' },
       );
@@ -879,10 +897,13 @@ export default function Library() {
   const folderCount = (id) => assets.filter((a) => (id === 'none' ? !a.folderId : a.folderId === id)).length;
   const filtersActive = filter !== 'all' || folder || q.trim();
   const failedImports = assets.filter(importFailed).length;
+  const refusedImports = assets.filter(importRefused).length;
+  const retryable = failedImports - refusedImports;
   const pendingImports = assets.filter(importing).length - failedImports;
   const importNote = [
     pendingImports ? `${plural(pendingImports, 'file')} ${pendingImports === 1 ? 'is' : 'are'} waiting for the worker to download ${pendingImports === 1 ? 'it' : 'them'} from a link (it runs about every 10 minutes).` : '',
-    failedImports ? `${plural(failedImports, 'file')} could not be downloaded. Open ${failedImports === 1 ? 'it' : 'them'} to try again.` : '',
+    retryable ? `${plural(retryable, 'file')} could not be downloaded. Open ${retryable === 1 ? 'it' : 'them'} to try again.` : '',
+    refusedImports ? `Instagram cannot take ${plural(refusedImports, 'file')} from a link as ${refusedImports === 1 ? 'it is' : 'they are'}. Open ${refusedImports === 1 ? 'it' : 'them'} to see why.` : '',
   ]
     .filter(Boolean)
     .join(' ');

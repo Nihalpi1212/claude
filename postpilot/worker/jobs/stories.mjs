@@ -1,16 +1,31 @@
 // Stories: Instagram only reports story insights while a story is live (24 hours), so capture them
-// from every run. To keep the data branch small the document is written when a story is first
-// seen, at most hourly while it is live, and on every run in its last 90 minutes (the final numbers).
+// from every run. The document keeps up to KEEP_MAX stories and is re-encrypted and committed whole on
+// every write, so it is written when a story is first seen, every 3 hours while it is live (a
+// fallback in case the final capture is missed), every 30 minutes in its last 90 minutes and on every
+// run in its last 20 (the final numbers): about 13 writes per story instead of about 32.
 // Media URLs are kept as returned (they expire; the app falls back to a placeholder).
 
 import { describeError } from '../context.mjs';
 import { DAY_MS } from './shared.mjs';
 
 const STORY_LIFETIME_MS = DAY_MS;
-const CAPTURE_EVERY_MS = 60 * 60e3;
+const CAPTURE_EVERY_MS = 3 * 36e5;
 const FINAL_WINDOW_MS = 90 * 60e3;
+const FINAL_EVERY_MS = 30 * 60e3;
+const LAST_CALL_MS = 20 * 60e3;
 const RETRY_UNSUPPORTED_MS = DAY_MS;
 const KEEP_MAX = 1000;
+
+/** Should a live story's insights be captured (and the document written) now? Exported for tests. */
+export function captureDue(prev, story, nowMs) {
+  if (!prev) return true;
+  const lastCapture = Date.parse(prev.capturedAt || prev.lastSeenAt || '');
+  if (!Number.isFinite(lastCapture)) return true;
+  const postedMs = Date.parse(story.timestamp || '') || nowMs;
+  const expiresIn = postedMs + STORY_LIFETIME_MS - nowMs;
+  const since = nowMs - lastCapture;
+  return since >= CAPTURE_EVERY_MS || (expiresIn <= FINAL_WINDOW_MS && since >= FINAL_EVERY_MS) || expiresIn <= LAST_CALL_MS;
+}
 
 function isUnsupported(err) {
   return err && (err.code === 'unsupported' || err.code === 100 || err.isPermission);
@@ -41,12 +56,7 @@ export default async function stories(ctx) {
   const captured = [];
   for (const s of live) {
     if (!s || !s.id) continue;
-    const prev = known[s.id];
-    const postedMs = Date.parse(s.timestamp || '') || nowMs;
-    const expiresIn = postedMs + STORY_LIFETIME_MS - nowMs;
-    const lastCapture = prev ? Date.parse(prev.capturedAt || prev.lastSeenAt || '') : NaN;
-    const due = !prev || !Number.isFinite(lastCapture) || nowMs - lastCapture >= CAPTURE_EVERY_MS || expiresIn <= FINAL_WINDOW_MS;
-    if (!due) continue;
+    if (!captureDue(known[s.id], s, nowMs)) continue;
     let metrics = {};
     try {
       metrics = (await ctx.ig.storyInsights(s.id)) || {};

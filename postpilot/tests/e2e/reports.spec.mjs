@@ -4,7 +4,7 @@ import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { openApp, shot, unlock } from './helpers.mjs';
 
-const PORT = 5522;
+const PORT = Number(process.env.REPORTS_E2E_PORT || 5522);
 // The seed stores a report for last month in the demo time zone.
 const todayNY = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 const [Y, M] = todayNY.split('-').map(Number);
@@ -220,9 +220,14 @@ test('campaign section: pick a label to see its posts, totals, averages and top 
   await page.locator('.rp-doc .rp-h2').first().waitFor();
   await page.getByRole('checkbox', { name: /^Campaign/ }).check();
   const section = page.locator('.rp-section.rp-campaign-section');
-  await section.waitFor();
-  assert.match(await section.innerText(), /Pick a label under Campaign/);
+  // Until a label is chosen the section stays out of the report (no instruction to the app user
+  // prints); the options panel says so next to the label picker.
   const select = page.getByRole('combobox', { name: 'Campaign' });
+  await select.waitFor();
+  await page.locator('.rp-builder .field', { has: select }).getByText('Choose a label, or the Campaign section is left out of the report.').waitFor();
+  assert.equal(await section.count(), 0);
+  assert.ok(!(await page.locator('.rp-doc .rp-h2').allInnerTexts()).some((t) => /Campaign/.test(t)), 'no Campaign heading');
+  assert.doesNotMatch(await page.locator('.rp-doc').innerText(), /Pick a label|report options/);
   const options = await select.locator('option').allInnerTexts();
   const autumn = options.find((o) => /^autumn drop \(\d+\)$/.test(o));
   assert.ok(autumn, `label options: ${options.join(' | ')}`);

@@ -482,6 +482,9 @@ export function expandListSlots(list, { tz = 'UTC', now, horizonDays, existingPo
 
 const ACTIVE_STATUSES = new Set(['draft', 'scheduled', 'publishing']);
 
+/** A library file the worker downloaded (or still has to download) from a link: CSV imports and feed images. */
+const fromLink = (a) => !!(a.sourceUrl || a.importUrl || (a.tags || []).includes('feed'));
+
 /**
  * Asset ids used by a post that is not canceled. An asset is also treated as used when its
  * usedBy lists a post id that is not a known canceled post (deleted posts still count as used).
@@ -537,14 +540,16 @@ function groupAssets(pool, allowed) {
  * Plan the posts autopilot should create to keep its queue filled.
  * Target: round(postsPerWeek * horizonDays / 7) (at least 1) posts of any source scheduled (status
  * draft/scheduled) within the horizon. Media: unused library assets with autopilot === true in library
- * order, then (autopilot.useAllUnused) any other unused asset that was not in a rejected draft and is
- * not an item of a queue (`lists`: queues post those themselves). Files still downloading from a
+ * order, then (autopilot.useAllUnused) any other unused asset that was not in a rejected draft, is
+ * not an item of a queue (`lists`: queues post those themselves) and was not downloaded from a link
+ * (other sites' feed images, CSV links: they belong to their queue). Files still downloading from a
  * link or whose download failed (importUrl) are never used, nor photos outside the feed's 4:5 to
  * 1.91:1 range (autopilot makes feed posts and carousels from photos).
  * Consecutive assets sharing a folderId become a carousel (2-10) when allowed; videos become reels
  * when allowed; the rest single feed posts.
  * Times: suggestSlots with the matrix ('best') or autopilot.fixedSlots ('fixed'), at least minGapHours
- * from every other active or recently published post.
+ * from every other active or recently published post, and from a reminder post the owner is posting
+ * by hand ('reminded', timed at its reminder).
  * Recycling (autopilot.recycleTopPosts, candidates from recycleCandidates): about one repost of a top
  * post per week of the horizon (posts with source 'recycle' already planned count), placed after the
  * pool's posts. While the pool has media, reposts are at most a third of the target (so at 1 or 2
@@ -588,7 +593,10 @@ export function planAutopilot({ autopilot, assets = [], posts = [], lists = [], 
     }
     // Queue items (feeds, CSV imports, picked files) are posted by their queue: never twice.
     for (const l of toList(lists)) for (const it of (l && l.items) || []) for (const m of (it && it.media) || []) if (m) excluded.add(m.assetId);
-    pool.push(...unused.filter((a) => a.autopilot !== true && !excluded.has(a.id)));
+    // Files downloaded from a link (RSS images from other sites, CSV links) stay with their queue even
+    // after it is deleted or the item removed: posted here they would go out without their caption or
+    // credit. Marking one for autopilot is an explicit choice that brings it in.
+    pool.push(...unused.filter((a) => a.autopilot !== true && !excluded.has(a.id) && !fromLink(a)));
   }
   const groups = groupAssets(pool, allowed);
   let reposts = [];
@@ -621,8 +629,10 @@ export function planAutopilot({ autopilot, assets = [], posts = [], lists = [], 
   const taken = [];
   for (const p of postList) {
     const active = ACTIVE_STATUSES.has(p.status);
-    if (!active && p.status !== 'published') continue;
-    const t = parseTimestamp(active ? p.scheduledAt : p.publishedAt || p.scheduledAt);
+    // A reminder post the owner is posting by hand right now ('reminded') counts from its reminder.
+    const reminded = p.status === 'reminded';
+    if (!active && !reminded && p.status !== 'published') continue;
+    const t = parseTimestamp(active ? p.scheduledAt : reminded ? p.reminderSentAt || p.scheduledAt : p.publishedAt || p.scheduledAt);
     if (Number.isFinite(t) && t >= nowMs - gapMs && t <= endMs + gapMs) taken.push(iso(t));
   }
   const fixed = ap.slotStrategy === 'fixed' && Array.isArray(ap.fixedSlots) && ap.fixedSlots.length ? ap.fixedSlots : null;
@@ -667,7 +677,9 @@ export function recyclePicks({ mediaStats, posts = [], now, afterDays = 120, cou
   const reposts = new Set();
   for (const p of toList(posts)) {
     if (p.source === 'recycle' && p.igMediaId) reposts.add(p.igMediaId);
-    if (!p.recycleOf || p.status === 'canceled') continue;
+    // A repost canceled before it went out does not count; one deleted from Instagram after
+    // publishing does (the owner just took it down: posting it again would undo that).
+    if (!p.recycleOf || freesMedia(p)) continue;
     const t = parseTimestamp(p.scheduledAt || p.publishedAt || p.createdAt);
     if (!Number.isFinite(t) || t >= cutoff) recent.add(p.recycleOf);
   }
@@ -700,7 +712,8 @@ export function recycleCandidates({ mediaStats, posts = [], archive = [], assets
   const nowMs = toMs(now);
   const byMedia = new Map();
   for (const p of all) if (p.igMediaId && p.status === 'published' && !byMedia.has(p.igMediaId)) byMedia.set(p.igMediaId, p);
-  // A repost the owner rejected keeps that post out for afterDays (recyclePicks ignores canceled reposts).
+  // A repost the owner rejected keeps that post out for afterDays (recyclePicks ignores reposts
+  // canceled before publishing).
   const rejected = new Set();
   for (const p of all) {
     if (!p.recycleOf || p.status !== 'canceled' || !(p.history || []).some((h) => h && h.event === 'rejected')) continue;

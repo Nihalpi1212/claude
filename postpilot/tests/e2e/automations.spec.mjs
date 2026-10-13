@@ -382,6 +382,56 @@ describe('Automations', { timeout: 300_000 }, () => {
     await page.waitForSelector('.automations .auto-rule', { timeout: 30_000 });
   });
 
+  test('the Invites tab link opens the allowlist in view on a phone, ready to type', async () => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(`${dev.url}/postpilot/index.html#/inbox/invites`);
+    await page.getByRole('link', { name: 'Accept trusted accounts automatically' }).click();
+    await page.waitForFunction(() => location.hash === '#/automations?section=collab');
+    // The panel is the last one on a page about five screens tall: it is scrolled into view and its field focused.
+    await page.waitForFunction(() => document.activeElement && document.activeElement.closest('.auto-collab') && document.activeElement.tagName === 'INPUT', null, { timeout: 20_000 });
+    await page.waitForTimeout(1000); // smooth scrolling
+    const pos = await page.evaluate(() => {
+      const title = document.querySelector('.auto-collab .panel-title').getBoundingClientRect();
+      return { top: title.top, bottom: title.bottom, bar: document.querySelector('.mobile-topbar').getBoundingClientRect().bottom, scrollY: window.scrollY };
+    });
+    assert.ok(pos.scrollY > 1000, `scrolled down to the panel (scrollY ${pos.scrollY})`);
+    assert.ok(pos.top >= pos.bar && pos.bottom <= 844 - 60, `panel title visible below the top bar (title ${Math.round(pos.top)}–${Math.round(pos.bottom)}, top bar ends at ${pos.bar})`);
+    // No device gets notifications in the demo workspace, so the hint does not promise the phone.
+    const panel = page.locator('.auto-collab');
+    await panel.getByText(/Invites from anyone else wait in Inbox → Invites\. Postpilot checks/).waitFor();
+    assert.equal(await panel.getByText(/notify your phone/).count(), 0);
+    await shot(page, 'automations-collab-deeplink-phone-light');
+    await page.setViewportSize({ width: 1280, height: 860 });
+    await page.goto(`${dev.url}/postpilot/index.html#/automations`);
+    await page.waitForSelector('.automations .auto-rule', { timeout: 30_000 });
+  });
+
+  test('DM problems name the messages permission of the login type', async () => {
+    const texts = await page.evaluate(async () => {
+      const { dmProblemOf } = await import('/postpilot/js/views/automations.js');
+      return ['instagram', 'facebook'].map((mode) => ['needs_advanced_access', 'no_permission'].map((code) => dmProblemOf(code, mode).body));
+    });
+    for (const body of texts[0]) assert.match(body, /instagram_business_manage_messages/);
+    for (const body of texts[1]) {
+      assert.match(body, /instagram_manage_messages/);
+      assert.doesNotMatch(body, /instagram_business_/, 'Facebook Login never names the Instagram Login scopes');
+    }
+    // The seeded (Instagram Login) workspace shows its own permission name.
+    const before = (await readDoc('automations')).status;
+    await dev.seeded.store.update('automations', (d) => {
+      d.status = { ...(d.status || {}), dm: 'no_permission' };
+    }, { message: 'e2e: DM problem' });
+    await page.reload();
+    await page.waitForSelector('.automations .auto-rule', { timeout: 30_000 });
+    const callout = page.locator('.callout', { hasText: 'Postpilot cannot read your messages' });
+    await callout.getByText(/instagram_business_manage_messages/).waitFor();
+    await dev.seeded.store.update('automations', (d) => {
+      d.status = { ...(d.status || {}), dm: (before && before.dm) ?? null };
+    }, { message: 'e2e: DM problem cleared' });
+    await page.reload();
+    await page.waitForSelector('.automations .auto-rule', { timeout: 30_000 });
+  });
+
   test('screenshots in dark mode and on a phone', async () => {
     await page.emulateMedia({ colorScheme: 'dark' });
     await page.evaluate(() => window.scrollTo(0, 0));

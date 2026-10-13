@@ -281,6 +281,29 @@ test('refreshToken swaps the token; expired tokens map to a reconnect message', 
   await assert.rejects(fb.refreshToken(), (err) => err.code === 'unsupported');
 });
 
+test('a moved clock (the worker\'s, in tests) dates account insights, the audience window and the token expiry', async (t) => {
+  const shift = 8 * 864e5;
+  const { bases } = await setup(t, { now: () => new Date(Date.now() + shift) });
+  const tz = 'UTC';
+  const today = dayKey(new Date(Date.now() + shift), tz);
+  const untilKey = addDaysKey(today, -1);
+  const sinceKey = addDaysKey(today, -6);
+  // Per call...
+  const ig = createIg({ token: 'tok', ...bases, retryDelayMs: 1 });
+  const days = await ig.accountDaily({ sinceKey, untilKey, tz, nowMs: Date.now() + shift });
+  assert.deepEqual(Object.keys(days).filter((k) => typeof days[k].reach === 'number').sort(), [0, 1, 2, 3, 4, 5].map((i) => addDaysKey(sinceKey, i)));
+  // ...or for the whole client.
+  const moved = createIg({ token: 'tok', ...bases, retryDelayMs: 1, now: () => Date.now() + shift });
+  assert.equal(Object.keys(await moved.accountDaily({ sinceKey, untilKey, tz })).length, 6);
+  const online = await moved.onlineFollowers({ tz });
+  assert.ok(online.days >= 28);
+  const { expiresAt } = await moved.refreshToken();
+  const days60 = (Date.parse(expiresAt) - (Date.now() + shift)) / 864e5;
+  assert.ok(days60 > 59 && days60 < 61, `${days60} days`);
+  const perCall = await ig.refreshToken({ nowMs: Date.now() + shift });
+  assert.ok(Date.parse(perCall.expiresAt) - Date.now() > 67 * 864e5);
+});
+
 test('connectInstagram in both modes; businessDiscovery and hashtags need Facebook Login', async (t) => {
   const { graph, ig, bases } = await setup(t);
   const igConn = await connectInstagram({ mode: 'instagram', token: 'tok', ...bases });

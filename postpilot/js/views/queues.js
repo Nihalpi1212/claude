@@ -158,7 +158,7 @@ async function quietly(promise) {
 // ---------------------------------------------------------------------------
 
 export default function Queues() {
-  const { tz, toast, confirm, dispatchWorker, settings } = useApp();
+  const { tz, toast, confirm, dispatchWorker, settings, navigate } = useApp();
   const { data, loading, error } = useDocs(['lists', 'posts', 'library']);
   const [editing, setEditing] = useState(null); // { draft, isNew, originalItemIds }
   const [feedEdit, setFeedEdit] = useState(null); // { listId, feed|null }
@@ -388,7 +388,15 @@ export default function Queues() {
       const feeds = pick(after);
       const added = feeds.reduce((n, f) => n + (f.added || 0), 0) - addedBefore;
       const failed = feeds.filter((f) => f.error);
+      // The run may have skipped the feeds job (worker paused, out of time): then nothing was checked.
+      const skipped = run && run.skipped && run.skipped.feeds;
       if (!run) toast('The worker is still running. New items appear here when it finishes.', { kind: 'info' });
+      else if (skipped === 'paused') {
+        toast(`The worker is paused in Settings, so ${feedId ? 'the feed was' : 'the feeds were'} not checked.`, {
+          kind: 'info',
+          action: { label: 'Open Settings', onClick: () => navigate('#/settings?section=worker') },
+        });
+      } else if (skipped) toast(`The worker did not get to ${feedId ? 'the feed' : 'the feeds'} this time. It checks ${feedId ? 'it' : 'them'} on its next run (about every 10 minutes).`, { kind: 'info' });
       else if (failed.length) toast(`Could not read ${failed.length === 1 ? 'the feed' : `${failed.length} feeds`}: ${failed[0].error}`, { kind: 'error' });
       else if (added) toast(`Added ${plural(added, 'item')} from the feed.`, { kind: 'success' });
       else if (feeds.some((f) => f.full)) toast('Checked. The queue already has enough unused items from this feed, so new posts are skipped for now.', { kind: 'info' });

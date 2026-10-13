@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { openApp, shot, unlock } from './helpers.mjs';
 
 // Separate from the planner spec's port (5532) so both files can run in parallel.
-const PORT = 5531;
+const PORT = Number(process.env.QUEUES_E2E_PORT || 5531);
 let h;
 
 async function stored(name, page = h.page) {
@@ -325,6 +325,29 @@ test('RSS feed: add the demo feed, the worker adds its newest 3 usable posts and
   await again.getByLabel('Feed address').fill(`${h.url}/mock/feed/demo.xml`);
   await again.getByRole('button', { name: 'Add feed' }).click();
   await again.waitFor({ state: 'detached' });
+});
+
+test('"Check now" while the worker is paused in Settings says the feed was not checked', async () => {
+  const { page } = h;
+  const row = page.locator('.qu-card', { hasText: 'Throwback Thursday' }).locator('.qu-feed');
+  await row.waitFor();
+  const setWorker = (enabled) =>
+    page.evaluate(async (on) => {
+      const data = await import('/postpilot/js/data.js');
+      await data.mutate('settings', (s) => void (s.worker = { ...(s.worker || {}), enabled: on }), { message: 'e2e: worker on/off' });
+    }, enabled);
+  await setWorker(false);
+  try {
+    await openMenu(row.getByRole('button', { name: /^Actions for the feed/ }));
+    await page.getByRole('menuitem', { name: 'Check now' }).click();
+    // The run skips the feeds job (run.skipped.feeds = 'paused'): no "Checked." claim.
+    const toast = page.locator('.toast', { hasText: 'The worker is paused in Settings, so the feed was not checked.' });
+    await toast.waitFor({ timeout: 60_000 });
+    await toast.getByRole('button', { name: 'Open Settings' }).waitFor();
+    assert.equal(await page.locator('.toast', { hasText: /^Checked\./ }).count(), 0);
+  } finally {
+    await setWorker(true);
+  }
 });
 
 test('pause, duplicate and delete', async () => {
