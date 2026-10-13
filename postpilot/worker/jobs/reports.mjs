@@ -20,7 +20,7 @@ import { describeError } from '../context.mjs';
 import { clip } from './shared.mjs';
 
 export const REPORTS_KEEP = 24;
-const LAST_DAY = 3; // reports are made on days 1-3 of the month
+const LAST_DAY = 3; // checked on days 1-3 of the month, made on the 2nd or 3rd
 const MIN_DAYS = 7; // a month with fewer saved days gets no report
 const AI_MAX_CHARS = 1500;
 

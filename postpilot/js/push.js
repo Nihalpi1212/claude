@@ -72,14 +72,15 @@ export async function registerServiceWorker() {
 }
 
 // ---- Shared into Postpilot (manifest share_target -> sw.js) ----
-// sw.js keeps only the latest share in this cache: __shared__/meta (JSON) and __shared__/file-<i>.
+// sw.js keeps the waiting share in this cache: __shared__/meta (JSON) and __shared__/file-<i>. A new
+// share is added to one still waiting (up to 10 files and 300 MB; extra files are counted in meta.skipped).
 
 const SHARE_CACHE = 'postpilot-share';
 const shareKey = (name) => new URL(`../__shared__/${name}`, import.meta.url).href;
 
 /**
- * What another app shared into Postpilot, or null: { files: File[], title, text, url, at }.
- * Files that can no longer be read are left out.
+ * What another app shared into Postpilot, or null: { files: File[], title, text, url, at, skipped }.
+ * Files that can no longer be read are left out; skipped counts files the mailbox had no room for.
  */
 export async function readShared() {
   if (!('caches' in globalThis)) return null;
@@ -95,7 +96,7 @@ export async function readShared() {
     const blob = await res.blob();
     files.push(new File([blob], f.name || 'shared', { type: f.type || blob.type || '' }));
   }
-  return { files, title: meta.title || '', text: meta.text || '', url: meta.url || '', at: meta.at || null };
+  return { files, title: meta.title || '', text: meta.text || '', url: meta.url || '', at: meta.at || null, skipped: meta.skipped || 0 };
 }
 
 /** Forget the shared files (after they were uploaded or dismissed). */

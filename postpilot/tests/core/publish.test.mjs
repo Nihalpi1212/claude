@@ -142,6 +142,52 @@ test('carousel: children with alt text, polled, then a CAROUSEL parent', async (
   assert.equal(saved[1].parent, res.containers.parent);
 });
 
+test('carousel: linked files are exposed together before any container; a failed copy throws once the others are reported', async (t) => {
+  const { graph, addAsset, base } = await setup(t);
+  const a = await addAsset('image', 'f02.jpg');
+  const b = await addAsset('image', 'f03.jpg');
+  const c = await addAsset('image', 'f04.jpg');
+  const v = await addAsset('video', 'clip.mp4');
+  let inFlight = 0;
+  let maxInFlight = 0;
+  const startedAt = []; // container creations already made when each copy was started
+  const reported = []; // what the worker's wrapper records for cleanup
+  const slowExpose = (failId) => async (asset) => {
+    startedAt.push(creates(graph));
+    inFlight++;
+    maxInFlight = Math.max(maxInFlight, inFlight);
+    try {
+      if (asset.id === failId) throw new Error('GitHub did not serve the media file in time.');
+      await new Promise((r) => setTimeout(r, 30));
+      const r = await base.exposeMedia(asset);
+      reported.push(r.path);
+      return r;
+    } finally {
+      inFlight--;
+    }
+  };
+  // `a` twice: one copy serves both items. The video is uploaded directly (no copy).
+  const post = newPost({ type: 'carousel', caption: 'Together', media: [{ assetId: a.id, kind: 'image' }, { assetId: b.id, kind: 'image' }, { assetId: a.id, kind: 'image' }, { assetId: c.id, kind: 'image' }, { assetId: v.id, kind: 'video' }] });
+  const res = await publishPost({ ...base, post, exposeMedia: slowExpose(null) });
+  assert.equal(res.containers.children.length, 5);
+  assert.equal(maxInFlight, 3, 'the three photos at once');
+  assert.deepEqual(startedAt, [0, 0, 0], 'before any container was created');
+  assert.deepEqual(res.exposed.map((e) => e.assetId).sort(), [a.id, b.id, c.id].sort());
+  const children = graph.state.requests.filter((r) => r.method === 'POST' && r.path.endsWith('/media') && r.params.is_carousel_item === 'true');
+  assert.equal(children[0].params.image_url, children[2].params.image_url);
+  assert.equal(children[4].params.upload_type, 'resumable');
+  assert.equal(graph.state.media[0].children.length, 5);
+
+  // One copy fails: the error comes after the other copies are done (and reported), and nothing is created.
+  reported.length = 0;
+  startedAt.length = 0;
+  const before = creates(graph);
+  const failing = newPost({ type: 'carousel', caption: 'One fails', media: [{ assetId: a.id, kind: 'image' }, { assetId: b.id, kind: 'image' }, { assetId: c.id, kind: 'image' }] });
+  await assert.rejects(publishPost({ ...base, post: failing, exposeMedia: slowExpose(b.id) }), /did not serve the media file/);
+  assert.equal(reported.length, 2, 'both other copies were made and reported before the error');
+  assert.equal(creates(graph), before);
+});
+
 test('reel via resumable upload with a cover image', async (t) => {
   const { graph, addAsset, base, exposed } = await setup(t);
   const video = await addAsset('video', 'clip.mp4', { durationSec: 5 });

@@ -424,6 +424,60 @@ test('ideas for next week: Claude suggests ideas, the kept ones become drafts wi
   });
 });
 
+test('ideas keep the gap from a post being posted by hand', async () => {
+  const { page } = h;
+  // Where one idea goes, worked out as the planner does (core/schedule.js on the same documents).
+  const firstSlot = () =>
+    page.evaluate(async () => {
+      const data = await import('/postpilot/js/data.js');
+      const { bestTimeMatrix, suggestSlots } = await import('/postpilot/core/schedule.js');
+      await data.refreshNow();
+      const store = data.getStore();
+      const tz = (await store.read('settings')).timezone;
+      const audience = await store.read('audience');
+      const media = await store.read('analytics-media');
+      const posts = (await store.read('posts')).posts;
+      const matrix = bestTimeMatrix({ onlineFollowers: audience.onlineFollowers, mediaStats: media.media, tz }).matrix;
+      const taken = posts
+        .filter((p) => ['draft', 'scheduled', 'publishing', 'reminded'].includes(p.status) && p.scheduledAt)
+        .map((p) => (p.status === 'reminded' ? p.reminderSentAt || p.scheduledAt : p.scheduledAt));
+      return suggestSlots({ matrix, tz, count: 1, horizonDays: 8, minGapHours: 20, taken, maxPerDay: 1 })[0] || null;
+    });
+  const before = await firstSlot();
+  assert.ok(before, 'there is a free time for an idea');
+  // "Post by hand now" on a post planned for that time: no reminder went out, so it counts at its planned time.
+  const id = await page.evaluate(async (at) => {
+    const data = await import('/postpilot/js/data.js');
+    const { newPost } = await import('/postpilot/core/model.js');
+    const lib = await data.getStore().read('library');
+    const a = lib.assets.find((x) => x.name === 'Vase trio');
+    const post = newPost({ status: 'reminded', publishMode: 'reminder', caption: 'E2E ideas gap: posting by hand', media: [{ assetId: a.id, kind: 'image', altText: '' }], scheduledAt: at, reminderSentAt: null });
+    await data.mutate('posts', (doc) => void doc.posts.push(post), { message: 'e2e: reminded post' });
+    return post.id;
+  }, before);
+  try {
+    const expected = await firstSlot();
+    assert.ok(expected && Math.abs(Date.parse(expected) - Date.parse(before)) >= 20 * 36e5, 'the next free time keeps the 20-hour gap');
+    await page.evaluate(async () => (await import('/postpilot/js/data.js')).refreshNow());
+    await page.getByRole('button', { name: 'Ideas for next week' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Ideas for next week' });
+    await dialog.waitFor();
+    await dialog.getByRole('button', { name: 'Get ideas' }).click();
+    await dialog.locator('.pl-idea').nth(2).waitFor({ timeout: 30_000 });
+    const n = await dialog.locator('.pl-idea').count();
+    for (let i = 1; i < n; i++) await dialog.locator('.pl-idea').nth(i).getByRole('checkbox').click();
+    await dialog.getByRole('button', { name: 'Create 1 draft' }).click();
+    await page.getByText(/^Added 1 draft with the idea in the notes/).waitFor();
+    const idea = await waitFor(async () => (await storedPosts()).find((p) => (p.labels || []).includes('idea')), { message: 'idea draft' });
+    assert.equal(idea.scheduledAt, expected, 'the idea goes to the next free time, not the reminded post\'s');
+  } finally {
+    await page.evaluate(async (id) => {
+      const data = await import('/postpilot/js/data.js');
+      await data.mutate('posts', (doc) => void (doc.posts = doc.posts.filter((p) => p.id !== id && !(p.labels || []).includes('idea'))), { message: 'e2e: clean up' });
+    }, id);
+  }
+});
+
 test('list view groups posts and bulk-moves selected posts to drafts', async () => {
   const { page } = h;
   await setView('List');

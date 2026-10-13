@@ -20,6 +20,20 @@ function tokenUrl(owner, repo) {
   return `https://github.com/settings/personal-access-tokens/new?${p}`;
 }
 
+/**
+ * Warning for a private repository (session.inspectRepo isPrivate, or repoInfo.private): Postpilot needs a public
+ * one. Also shown on the onboarding and Settings worker step.
+ */
+export function PrivateRepoCallout({ owner, repo }) {
+  return html`<${Callout} tone="warning" title="This repository is private" class="private-repo-callout">
+    <p>${APP_NAME} needs a public repository. GitHub Pages is only free for public repositories, and when ${APP_NAME} publishes a post,
+    Instagram downloads the photo or video from a throwaway public branch. Your ${APP_NAME} data stays encrypted either way.</p>
+    <p>To change it on GitHub, open the repository's${' '}
+    <a href=${`https://github.com/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/settings`} target="_blank" rel="noopener">Settings <${Icon} name="external" size=${12} /></a>${' '}
+    → General → Danger Zone → Change visibility.</p>
+  <//>`;
+}
+
 export default function LockScreen({ onUnlocked, onChange }) {
   const saved = savedLogin();
   const guess = guessRepoFromLocation();
@@ -107,7 +121,7 @@ export default function LockScreen({ onUnlocked, onChange }) {
         <${Field}
           id="lock-token"
           label="GitHub access token"
-          hint=${html`A fine-grained token for this repository with Contents, Actions and Secrets set to "Read and write".
+          hint=${html`A fine-grained token for this repository with Contents, Actions and Secrets set to "Read and write".${' '}
             <a href=${tokenUrl(owner || 'me', repo || 'repo')} target="_blank" rel="noopener">Create one on GitHub <${Icon} name="external" size=${12} /></a>`}
         >
           <${TextInput} type="password" value=${token} onInput=${(e) => setToken(e.currentTarget.value)} autocomplete="off" spellcheck=${false} placeholder="github_pat_…" />
@@ -119,6 +133,7 @@ export default function LockScreen({ onUnlocked, onChange }) {
       ${step === 'unlock' &&
       html`<form class="stack" onSubmit=${doUnlock}>
         <p>Signed in to GitHub as <strong>${info.login}</strong>. Enter your passphrase to decrypt your workspace.</p>
+        ${info.isPrivate ? html`<${PrivateRepoCallout} owner=${owner.trim()} repo=${repo.trim()} />` : null}
         <${Field} id="lock-passphrase" label="Passphrase">
           <${TextInput} type="password" value=${passphrase} onInput=${(e) => setPassphrase(e.currentTarget.value)} autocomplete="current-password" autofocus />
         <//>
@@ -134,7 +149,8 @@ export default function LockScreen({ onUnlocked, onChange }) {
       ${step === 'create' &&
       html`<form class="stack" onSubmit=${doCreate}>
         <p>Signed in as <strong>${info.login}</strong>. ${APP_NAME} is not set up in <span class="mono">${owner}/${repo}</span> yet.
-        Choose a passphrase. It encrypts everything ${APP_NAME} stores in this public repository.</p>
+        Choose a passphrase. It encrypts everything ${APP_NAME} stores in this ${info.isPrivate ? '' : 'public '}repository.</p>
+        ${info.isPrivate ? html`<${PrivateRepoCallout} owner=${owner.trim()} repo=${repo.trim()} />` : null}
         <${Field} id="lock-new-passphrase" label="New passphrase" hint="At least 12 characters. A short sentence of three or four words is easy to remember and hard to guess. The encrypted key file is public, so a weak passphrase can be guessed offline.">
           <${TextInput} type="password" value=${passphrase} onInput=${(e) => setPassphrase(e.currentTarget.value)} autocomplete="new-password" />
         <//>

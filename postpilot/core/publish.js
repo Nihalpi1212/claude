@@ -134,6 +134,18 @@ export async function publishPost({
     return r;
   }
 
+  /**
+   * Expose several files at once (the worker puts copies made together on its throwaway branch in one
+   * rewrite). Waits for every one before throwing, so each copy made is reported to exposeMedia's
+   * caller for cleanup. Returns Map(assetId -> url).
+   */
+  async function exposeAll(list) {
+    const results = await Promise.allSettled(list.map((asset) => expose(asset)));
+    const failed = results.find((r) => r.status === 'rejected');
+    if (failed) throw failed.reason;
+    return new Map(list.map((asset, i) => [asset.id, results[i].value.url]));
+  }
+
   async function statusOf(id) {
     try {
       return await ig.containerStatus(id);
@@ -187,8 +199,12 @@ export async function publishPost({
     aiGenerated: !!aiGenerated,
   });
 
-  async function createVideo(params, asset) {
-    if (tryResumable && readMedia && typeof ig.uploadResumable === 'function') {
+  const direct = !!(tryResumable && readMedia && ig && typeof ig.uploadResumable === 'function');
+
+  /** `exposedUrl`: the file was already exposed (a carousel item), so it goes by link. */
+  async function createVideo(params, asset, exposedUrl = null) {
+    if (exposedUrl) return (await ig.createContainer({ ...params, video_url: exposedUrl })).id;
+    if (direct) {
       let created = null;
       try {
         created = await ig.createContainer({ ...params, upload_type: 'resumable' });
@@ -211,9 +227,9 @@ export async function publishPost({
     return (await ig.createContainer({ ...params, video_url: url })).id;
   }
 
-  async function createImage(params, asset) {
-    const { url } = await expose(asset);
-    return (await ig.createContainer({ ...params, image_url: url })).id;
+  async function createImage(params, asset, url = null) {
+    const link = url || (await expose(asset)).url;
+    return (await ig.createContainer({ ...params, image_url: link })).id;
   }
 
   async function reelParams() {
@@ -242,14 +258,19 @@ export async function publishPost({
   async function createAll() {
     containers = { parent: null, children: [], type, fp, createdAt: new Date().toISOString() };
     if (type === 'carousel') {
+      // Every file that goes by link is exposed together before any container exists (one rewrite of
+      // the worker's throwaway branch instead of one per item). Videos uploaded directly need no copy.
+      const byLink = new Map(refs.map((r) => getAsset(r.assetId)).filter((a) => a.kind !== 'video' || !direct).map((a) => [a.id, a]));
+      const urls = await exposeAll([...byLink.values()]);
       for (let i = 0; i < refs.length; i++) {
         const ref = refs[i];
         const asset = getAsset(ref.assetId);
+        const url = urls.get(asset.id) || null;
         let id;
         if (asset.kind === 'video') {
-          id = await createVideo({ is_carousel_item: true, media_type: 'VIDEO' }, asset);
+          id = await createVideo({ is_carousel_item: true, media_type: 'VIDEO' }, asset, url);
         } else {
-          id = await createImage(clean({ is_carousel_item: true, alt_text: ref.altText || undefined, user_tags: tagsWithXY(i) }), asset);
+          id = await createImage(clean({ is_carousel_item: true, alt_text: ref.altText || undefined, user_tags: tagsWithXY(i) }), asset, url);
         }
         containers.children.push(id);
       }

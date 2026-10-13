@@ -185,7 +185,8 @@ function PostThumb({ m, asset, size = 36 }) {
 }
 
 function TopPostsTable({ ov, tz, rows: given, caption = 'Top posts', assetFor }) {
-  const rows = given || topMedia(ov.posts, 'interactions', 5);
+  // Posts deleted from Instagram still count in the totals but are not shown as top posts (as in Analytics).
+  const rows = given || topMedia(ov.posts.filter((m) => !m.deletedAt), 'interactions', 5);
   if (!rows.length) return html`<p class="rp-empty">No post stats for this period.</p>`;
   const cols = [
     {

@@ -55,6 +55,8 @@ const ms = (iso) => {
   const t = Date.parse(iso || '');
   return Number.isFinite(t) ? t : 0;
 };
+/** The later of two ISO times (either may be missing), or null. */
+export const latestTime = (a, b) => (ms(a) || ms(b) ? (ms(a) >= ms(b) ? a : b) : null);
 
 function clip(text, n = 80) {
   const s = String(text ?? '').replace(/\s+/g, ' ').trim();
@@ -1576,7 +1578,9 @@ export default function InboxView() {
     setReloadKey((k) => k + 1);
   };
 
-  const cacheAge = inbox.fetchedAt ? relative(inbox.fetchedAt) : null;
+  // inbox.fetchedAt moves at most every 6 hours when nothing changed; automations.cursors.inboxCheckedAt is the worker's latest read.
+  const checkedAt = latestTime(inbox.fetchedAt, data.automations && data.automations.cursors && data.automations.cursors.inboxCheckedAt);
+  const cacheAge = checkedAt ? relative(checkedAt) : null;
 
   return html`<div class="page inbox">
     <${PageHeader} title="Inbox" subtitle="Comments, direct messages, mentions and collaboration invites, in one place."

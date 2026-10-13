@@ -1,4 +1,4 @@
-// js/session.js rotateDataKey against the mock GitHub (no browser storage in Node: those calls are no-ops).
+// js/session.js rotateDataKey and inspectRepo against the mock GitHub (no browser storage in Node: those calls are no-ops).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { startMockGitHub } from '../helpers/servers.mjs';
@@ -6,7 +6,7 @@ import { createGitHub } from '../../core/github.js';
 import { createDataBranch, createStore, readKeyring } from '../../core/store.js';
 import { b64decode, b64encode, createKeyring, decryptBytes, DecryptError, fromUtf8, generateDataKey, importDataKey, unlockKeyring, WrongPassphraseError } from '../../core/crypto.js';
 import { newPost } from '../../core/model.js';
-import { rotateDataKey } from '../../js/session.js';
+import { inspectRepo, rotateDataKey } from '../../js/session.js';
 
 globalThis.self = globalThis.self || globalThis; // the sealed-box bundle expects `self` (as in dev/server.mjs)
 const { boxKeyPair, sealedBoxOpen } = await import('../../vendor/sealed-box.js');
@@ -94,4 +94,29 @@ test('rotateDataKey changes nothing when the token cannot update Actions secrets
   await assert.rejects(rotateDataKey({ ...session, gh: denied }, 'a brand new passphrase'), /Secrets: Read and write/);
   assert.equal(await gh.getRef('postpilot-data'), before);
   assert.deepEqual([...(await unlockKeyring(await readKeyring(gh), 'old passphrase words'))], [...session.dataKeyRaw]);
+});
+
+test('inspectRepo flags a private repository (Postpilot needs a public one)', async (t) => {
+  const { mock } = await workspace(t);
+  // inspectRepo talks to api.github.com outside a browser: send it to the mock, with the visibility under test.
+  let visibility = true;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const target = String(url).replace('https://api.github.com', mock.apiBase);
+    const res = await realFetch(target, init);
+    if (new URL(target).pathname !== new URL(`${mock.apiBase}/repos/o/r`).pathname) return res;
+    const body = await res.json();
+    const info = visibility === undefined ? (({ private: _, ...rest }) => rest)(body) : { ...body, private: visibility };
+    return new Response(JSON.stringify(info), { status: res.status, headers: { 'content-type': 'application/json' } });
+  };
+  t.after(() => (globalThis.fetch = realFetch));
+
+  const res = await inspectRepo({ token: 't', owner: 'o', repo: 'r' });
+  assert.equal(res.isPrivate, true);
+  assert.equal(res.login, 'o');
+  assert.ok(res.keyring, 'the existing workspace is found');
+  visibility = false;
+  assert.equal((await inspectRepo({ token: 't', owner: 'o', repo: 'r' })).isPrivate, false);
+  visibility = undefined; // GitHub always says; a missing field is not treated as private
+  assert.equal((await inspectRepo({ token: 't', owner: 'o', repo: 'r' })).isPrivate, false);
 });

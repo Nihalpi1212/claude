@@ -20,6 +20,61 @@ test('keep-alive re-enables the scheduled workflow about every 20 days', async (
   assert.ok(s.worker.maintenance.keepaliveAt);
 });
 
+/** Answer the workflow "enable" call with `status`; returns the list of calls made. */
+function refuseEnable(env, status) {
+  const calls = [];
+  const real = env.ghMock.handle;
+  env.ghMock.handle = async (req, res, sub, body) => {
+    if (req.method === 'PUT' && /\/actions\/workflows\/[^/]+\/enable$/.test(sub)) {
+      calls.push(sub);
+      res.writeHead(status, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ message: status === 404 ? 'Not Found' : 'Resource not accessible by integration' }));
+      return true;
+    }
+    return real(req, res, sub, body);
+  };
+  return calls;
+}
+
+const keepAliveWarnings = async (env) => (await env.read('log')).entries.filter((e) => e.job === 'maintenance' && e.level === 'warn' && /keep-alive/.test(e.message)).length;
+
+test('keep-alive is skipped outside GitHub Actions: no call and no warning, run after run', async (t) => {
+  const env = await startWorkerEnv();
+  t.after(() => env.close());
+  const calls = refuseEnable(env, 403);
+  const outside = { GITHUB_ACTIONS: '', POSTPILOT_NO_COMPACT: '1' };
+  for (let i = 0; i < 3; i++) {
+    const res = await env.run({ only: ['maintenance'], env: outside, now: Date.now() + i * 25 * 864e5 });
+    assert.equal(res.summary.jobs.maintenance.keepalive, 0);
+  }
+  assert.deepEqual(calls, []);
+  assert.equal(await keepAliveWarnings(env), 0);
+  assert.equal(env.ghMock.workflow.enabledCalls, 0);
+});
+
+test('a refused keep-alive (403 or 404) waits the normal interval instead of warning every run', async (t) => {
+  for (const status of [403, 404]) {
+    const env = await startWorkerEnv();
+    t.after(() => env.close());
+    const calls = refuseEnable(env, status);
+    const opts = { only: ['maintenance'], env: { POSTPILOT_NO_COMPACT: '1' } };
+    const first = await env.run(opts);
+    assert.equal(first.summary.jobs.maintenance.keepalive, 0);
+    assert.equal(calls.length, 1);
+    assert.equal(await keepAliveWarnings(env), 1);
+    const s = await env.read('settings');
+    assert.ok(s.worker.maintenance.keepaliveTriedAt, `${status}: the attempt is recorded`);
+    assert.ok(!s.worker.maintenance.keepaliveAt, 'not as a success');
+    // Ten minutes and ten days later: not tried again.
+    for (const later of [10 * 60e3, 10 * 864e5]) await env.run({ ...opts, now: Date.now() + later });
+    assert.equal(calls.length, 1, `${status}: no second call within 20 days`);
+    assert.equal(await keepAliveWarnings(env), 1);
+    // After the interval it is tried again.
+    await env.run({ ...opts, now: Date.now() + 21 * 864e5 });
+    assert.equal(calls.length, 2);
+  }
+});
+
 test('compaction keeps every file and leaves a single commit', async (t) => {
   const env = await startWorkerEnv();
   t.after(() => env.close());

@@ -367,6 +367,59 @@ describe('post by hand', { timeout: 300_000 }, () => {
     await page.locator('.dash-account').waitFor({ timeout: 20_000 });
   });
 
+  test('the save hint names the share sheet button for the kind of media', async () => {
+    const cases = [
+      { type: 'feed', media: ['Vase trio'], word: 'Save image' },
+      { type: 'carousel', media: ['Vase trio', 'Night hills'], word: 'Save images' },
+      { type: 'reel', media: ['Reel: on the wheel'], word: 'Save video' },
+      { type: 'carousel', media: ['Reel: on the wheel', 'Reel: on the wheel'], word: 'Save videos' },
+      { type: 'carousel', media: ['Vase trio', 'Reel: on the wheel'], word: 'Save files' },
+    ];
+    const ids = await page.evaluate(async (cases) => {
+      const data = await import('/postpilot/js/data.js');
+      const { newPost } = await import('/postpilot/core/model.js');
+      const lib = await data.getStore().read('library');
+      const at = new Date(Date.now() - 600e3).toISOString();
+      const posts = cases.map((c, i) =>
+        newPost({
+          status: 'reminded',
+          publishMode: 'reminder',
+          type: c.type,
+          caption: `E2E save hint ${i}`,
+          scheduledAt: at,
+          reminderSentAt: at,
+          media: c.media.map((name) => {
+            const a = lib.assets.find((x) => x.name === name);
+            return { assetId: a.id, kind: a.kind, altText: '' };
+          }),
+        }),
+      );
+      await data.mutate('posts', (doc) => void doc.posts.push(...posts), { message: 'e2e: save hint posts' });
+      return posts.map((p) => p.id);
+    }, cases);
+    try {
+      for (const [i, c] of cases.entries()) {
+        await go(page, `#/post-now/${ids[i]}`);
+        // This post's page with its files ready (not the previous one's).
+        await page.waitForFunction(
+          ({ caption, n }) =>
+            document.querySelector('#pn-caption')?.value === caption &&
+            document.querySelectorAll('.pn-media > li').length === n &&
+            [...document.querySelectorAll('.pn button')].some((b) => /Save to phone/.test(b.textContent) && !b.disabled),
+          { caption: `E2E save hint ${i}`, n: c.media.length },
+          { timeout: 30_000 },
+        );
+        const hint = await page.locator('.pn-steps .text-sm.muted', { hasText: 'in the share sheet' }).textContent();
+        assert.match(hint, new RegExp(`^On a phone, choose “${c.word}” or “Save to Photos” in the share sheet\\.`), `${c.media.join(' + ')}: ${hint}`);
+      }
+    } finally {
+      await page.evaluate(async (ids) => {
+        const data = await import('/postpilot/js/data.js');
+        await data.mutate('posts', (doc) => void (doc.posts = doc.posts.filter((p) => !ids.includes(p.id))), { message: 'e2e: clean up' });
+      }, ids);
+    }
+  });
+
   test('screenshots on desktop and phone, light and dark, without horizontal overflow', async () => {
     const id = await addPost({
       status: 'reminded',

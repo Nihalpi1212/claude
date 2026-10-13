@@ -324,6 +324,7 @@ export async function createContext({ env = {}, fetchImpl, now, consoleLog = con
       fbBase: endpoints.fb,
       ruploadBase: endpoints.rupload,
       fetchImpl: doFetch,
+      now: clock, // the worker clock (POSTPILOT_NOW in tests) for every date the client computes
     });
   }
 
@@ -352,6 +353,7 @@ export async function createContext({ env = {}, fetchImpl, now, consoleLog = con
   // ---- media exposure (public/tmp on the throwaway branch) -----------------------------------
   const exposed = new Set();
   let repoPublicChecked = false;
+  let repoCheck = null;
   let tmpFiles = null; // Map(path -> blob sha) of the copies on the throwaway branch, loaded once
   let tmpExists = false;
   let tmpReadmeSha = null;
@@ -465,7 +467,9 @@ export async function createContext({ env = {}, fetchImpl, now, consoleLog = con
 
   async function exposeMedia(asset) {
     if (!repoPublicChecked) {
-      const info = await gh.getRepo().catch(() => null);
+      // One lookup for copies exposed at the same time (a carousel's files).
+      if (!repoCheck) repoCheck = gh.getRepo().catch(() => null);
+      const info = await repoCheck;
       repoPublicChecked = true;
       if (info && info.private === true) {
         throw new WorkerError('Instagram can only download media from a public repository, and this repository is private. Make it public (all private data stays encrypted).', {

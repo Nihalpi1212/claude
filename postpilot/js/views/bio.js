@@ -157,14 +157,25 @@ function imageOf(m) {
   return m.thumbnailUrl || (m.mediaType !== 'VIDEO' ? m.mediaUrl : null) || null;
 }
 
-function GridPicker({ open, onClose, media, existing, room, onAdd, tz }) {
+/**
+ * Instagram media ids known to be deleted from Instagram: flagged by the worker's analytics job
+ * (analytics-media `deletedAt`) or deleted with "Delete from Instagram" (posts `deletedFromInstagramAt`).
+ */
+export function deletedMediaIds(media, posts) {
+  const ids = new Set();
+  for (const m of Object.values((media && media.media) || {})) if (m && m.id && m.deletedAt) ids.add(String(m.id));
+  for (const p of (posts && posts.posts) || []) if (p && p.igMediaId && p.deletedFromInstagramAt) ids.add(String(p.igMediaId));
+  return ids;
+}
+
+function GridPicker({ open, onClose, media, deleted, existing, room, onAdd, tz }) {
   const [sel, setSel] = useState([]);
   useEffect(() => {
     if (open) setSel([]);
   }, [open]);
   const taken = new Set(existing.map((g) => g.igMediaId).filter(Boolean));
   const items = Object.values((media && media.media) || {})
-    .filter((m) => m && m.productType !== 'STORY' && imageOf(m))
+    .filter((m) => m && m.productType !== 'STORY' && !deleted.has(String(m.id)) && imageOf(m))
     .sort((a, b) => (Date.parse(b.timestamp || 0) || 0) - (Date.parse(a.timestamp || 0) || 0))
     .slice(0, 36);
   const toggle = (id) => setSel((s) => (s.includes(id) ? s.filter((x) => x !== id) : s.length >= room ? s : [...s, id]));
@@ -245,6 +256,8 @@ export default function LinkInBio() {
   const { session, settings, toast, confirm, tz } = useApp();
   const { data: bio, loading, error } = useDoc('bio');
   const { data: media } = useDoc('analytics-media');
+  const { data: posts } = useDoc('posts');
+  const deleted = useMemo(() => deletedMediaIds(media, posts), [media, posts]);
   const savedHidden = settings && settings.bioHiddenLinks;
   const base = useMemo(() => (bio ? normalize(bio, savedHidden) : null), [bio, savedHidden]);
   const [draft, setDraft] = useState(null);
@@ -491,26 +504,31 @@ export default function LinkInBio() {
       ${doc.grid.length
         ? html`<ul class="bio-grid-edit">
             ${doc.grid.map(
-              (g, i) => html`<li key=${g.id} class="bio-grid-row">
-                <span class="bio-grid-thumb">${g.imageUrl ? html`<img src=${g.imageUrl} alt="" loading="lazy" referrerpolicy="no-referrer" />` : html`<${Icon} name="image" />`}</span>
-                <${Field} class="grow" label=${`Tile ${i + 1} opens`} error=${errors[g.id] && errors[g.id].url}
-                  hint=${!g.url || g.url === g.permalink ? 'The post on Instagram.' : null}>
-                  <${TextInput} type="url" value=${g.url || ''} placeholder=${g.permalink || 'https://'}
-                    onChange=${(v) => edit((d) => {
-                      const t = d.grid.find((x) => x.id === g.id);
-                      if (t) t.url = v;
-                    })}
-                    onBlur=${() => g.url && fixUrl(g.url) !== g.url && edit((d) => {
-                      const t = d.grid.find((x) => x.id === g.id);
-                      if (t) t.url = fixUrl(t.url);
-                    })} />
-                <//>
-                <div class="bio-grid-tools">
-                  <${IconButton} icon="arrow-up" size="sm" label=${`Move tile ${i + 1} up`} disabled=${i === 0} onClick=${() => move('grid', g.id, -1)} />
-                  <${IconButton} icon="arrow-down" size="sm" label=${`Move tile ${i + 1} down`} disabled=${i === doc.grid.length - 1} onClick=${() => move('grid', g.id, 1)} />
-                  <${IconButton} icon="x" size="sm" label=${`Remove tile ${i + 1}`} onClick=${() => edit((d) => (d.grid = d.grid.filter((x) => x.id !== g.id)))} />
-                </div>
-              </li>`,
+              (g, i) => {
+                const gone = !!(g.igMediaId || g.mediaId) && deleted.has(String(g.igMediaId || g.mediaId));
+                return html`<li key=${g.id} class=${cx('bio-grid-row', gone && 'is-deleted')}>
+                  <span class="bio-grid-thumb">${g.imageUrl ? html`<img src=${g.imageUrl} alt="" loading="lazy" referrerpolicy="no-referrer" />` : html`<${Icon} name="image" />`}</span>
+                  <${Field} class="grow" label=${`Tile ${i + 1} opens`} error=${errors[g.id] && errors[g.id].url}
+                    hint=${gone
+                      ? html`<span class="bio-grid-gone"><${Icon} name="alert" size=${14} /><span><strong>Deleted from Instagram.</strong> ${published ? 'The worker takes it off your page on its next run.' : 'Remove this tile.'}</span></span>`
+                      : !g.url || g.url === g.permalink ? 'The post on Instagram.' : null}>
+                    <${TextInput} type="url" value=${g.url || ''} placeholder=${g.permalink || 'https://'}
+                      onChange=${(v) => edit((d) => {
+                        const t = d.grid.find((x) => x.id === g.id);
+                        if (t) t.url = v;
+                      })}
+                      onBlur=${() => g.url && fixUrl(g.url) !== g.url && edit((d) => {
+                        const t = d.grid.find((x) => x.id === g.id);
+                        if (t) t.url = fixUrl(t.url);
+                      })} />
+                  <//>
+                  <div class="bio-grid-tools">
+                    <${IconButton} icon="arrow-up" size="sm" label=${`Move tile ${i + 1} up`} disabled=${i === 0} onClick=${() => move('grid', g.id, -1)} />
+                    <${IconButton} icon="arrow-down" size="sm" label=${`Move tile ${i + 1} down`} disabled=${i === doc.grid.length - 1} onClick=${() => move('grid', g.id, 1)} />
+                    <${IconButton} icon="x" size="sm" label=${`Remove tile ${i + 1}`} onClick=${() => edit((d) => (d.grid = d.grid.filter((x) => x.id !== g.id)))} />
+                  </div>
+                </li>`;
+              },
             )}
           </ul>`
         : html`<${EmptyState} compact icon="grid" title="No posts in the grid" body="Show your latest posts as a tappable grid, like your profile."
@@ -601,6 +619,7 @@ export default function LinkInBio() {
       open=${pickerOpen}
       onClose=${() => setPickerOpen(false)}
       media=${media}
+      deleted=${deleted}
       existing=${doc.grid}
       room=${Math.max(0, room)}
       tz=${tz}

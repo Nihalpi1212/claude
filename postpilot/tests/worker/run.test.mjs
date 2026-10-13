@@ -131,6 +131,7 @@ test('a paused worker only does maintenance', async (t) => {
 test('formatJobLine prints numbers and fixed reasons only', () => {
   assert.equal(formatJobLine('publish', { published: 1, failed: 0 }), 'publish: 1 published, 0 failed');
   assert.equal(formatJobLine('bio', { skipped: 'not_due' }), 'bio: skipped (not due yet)');
+  assert.equal(formatJobLine('feeds', { skipped: 'no_time' }), 'feeds: skipped (out of time this run)');
   assert.equal(formatJobLine('x', { skipped: 'something <secret>' }), 'x: skipped (nothing to do)');
   assert.equal(formatJobLine('x', { note: 'secret caption', count: 2 }), 'x: 2 count');
 });

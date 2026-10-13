@@ -293,6 +293,18 @@ function trialReelsByMedia(...docs) {
   return out;
 }
 
+/**
+ * Media entries with posts deleted from Instagram marked `deletedAt`: the worker's analytics job sets it,
+ * and a post deleted with "Delete from Instagram" (posts deletedFromInstagramAt) is marked before that run.
+ * Deleted posts keep counting in totals; tables mark them and top-post lists leave them out.
+ */
+export function markDeleted(media, ...docs) {
+  const gone = new Map();
+  for (const d of docs) for (const p of (d && d.posts) || []) if (p && p.igMediaId && p.deletedFromInstagramAt) gone.set(String(p.igMediaId), p.deletedFromInstagramAt);
+  if (!gone.size) return media;
+  return media.map((m) => (m && !m.deletedAt && gone.has(String(m.id)) ? { ...m, deletedAt: gone.get(String(m.id)) } : m));
+}
+
 const DAY_H = 24;
 const WEEK_H = 7 * 24;
 // The trial reel hint is shown while sharing it to followers is still timely (a product choice:
@@ -395,9 +407,9 @@ export function useAnalytics(range, { compare = true } = {}) {
     return out;
   }, [stored, curLive, prevLive, bridgeLive, today]);
 
-  const media = useMemo(() => toList(docs.data['analytics-media']?.media), [docs.data['analytics-media']]);
   const postsDoc = docs.data.posts;
   const archiveDoc = docs.data['posts-archive'];
+  const media = useMemo(() => markDeleted(toList(docs.data['analytics-media']?.media), postsDoc, archiveDoc), [docs.data['analytics-media'], postsDoc, archiveDoc]);
   const labels = useMemo(() => labelsByMedia(postsDoc, archiveDoc), [postsDoc, archiveDoc]);
   const trials = useMemo(() => trialReelsByMedia(postsDoc, archiveDoc), [postsDoc, archiveDoc]);
   const postsByMedia = useMemo(() => postsByMediaId(postsDoc, archiveDoc), [postsDoc, archiveDoc]);
@@ -560,7 +572,7 @@ export function computeOverview(a, tz, { compare = true } = {}) {
     perWeek: postingFrequency(posts, range.fromKey, range.toKey, tz),
     prevPerWeek: postingFrequency(prevPosts, prev.fromKey, prev.toKey, tz),
     typeRows,
-    top: topMedia(posts, 'interactions', 3),
+    top: topMedia(posts.filter((m) => !m.deletedAt), 'interactions', 3),
     tiles,
     reachSplit: split('reachFollowers', 'reachNonFollowers'),
     viewsSplit: split('viewsFollowers', 'viewsNonFollowers'),
@@ -640,6 +652,7 @@ export function exportPostsCsv(a, tz) {
     { key: 'er', label: 'Engagement rate (%)', value: (m) => (engagementRate(m) == null ? null : Math.round(engagementRate(m) * 10000) / 100) },
     { key: 'watch', label: 'Avg watch time (s)', value: (m) => (isNum(m.metrics?.avgWatchTimeMs) ? Math.round(m.metrics.avgWatchTimeMs / 100) / 10 : null) },
     { key: 'skip', label: 'Skip rate (%)', value: (m) => (skipRateOf(m) == null ? null : Math.round(skipRateOf(m) * 1000) / 10) },
+    { key: 'deleted', label: 'Deleted from Instagram', value: (m) => (m.deletedAt ? dayKey(new Date(m.deletedAt), tz) : null) },
   ];
   csvDownload(list, cols, `postpilot-posts-${range.fromKey}_${range.toKey}.csv`);
   return list.length;
@@ -1015,10 +1028,13 @@ export function PostDrawer({ media, onClose, history, bench, trials }) {
       setBusy(false);
     }
   };
+  const deleted = !!media.deletedAt;
   return html`<${Drawer} open=${true} title="Post details" onClose=${onClose}
-    footer=${html`
-      ${media.permalink ? html`<${Button} variant="ghost" icon="external" href=${media.permalink} target="_blank" rel="noopener noreferrer">View on Instagram<//>` : null}
-      <${Button} variant="secondary" icon="refresh" loading=${busy} disabled=${!ig} onClick=${refresh}>Refresh from Instagram<//>`}>
+    footer=${deleted
+      ? null
+      : html`
+        ${media.permalink ? html`<${Button} variant="ghost" icon="external" href=${media.permalink} target="_blank" rel="noopener noreferrer">View on Instagram<//>` : null}
+        <${Button} variant="secondary" icon="refresh" loading=${busy} disabled=${!ig} onClick=${refresh}>Refresh from Instagram<//>`}>
     <div class="stack an-drawer">
       <div class="an-drawer-head">
         <${Thumb} src=${previewOf(media)} size=${120} ratio="4 / 5" kind=${kind} eager />
@@ -1031,9 +1047,11 @@ export function PostDrawer({ media, onClose, history, bench, trials }) {
           <p class="pre-wrap an-drawer-caption">${media.caption || 'No caption'}</p>
         </div>
       </div>
-      <${TrialHint} verdict=${verdict} mode=${trial} />
+      ${deleted
+        ? html`<${Callout} tone="warning" title=${`Deleted from Instagram ${shortDateTime(media.deletedAt, tz)}`}>Its last numbers are kept and still count in your totals.<//>`
+        : html`<${TrialHint} verdict=${verdict} mode=${trial} />`}
       ${error ? html`<${Callout} tone="danger" title="Could not refresh this post">${error}<//>` : null}
-      ${!ig ? html`<p class="an-note">Connect Instagram in Settings to refresh a post's stats live.</p>` : null}
+      ${!ig && !deleted ? html`<p class="an-note">Connect Instagram in Settings to refresh a post's stats live.</p>` : null}
       <h3 class="section-title">Since publishing</h3>
       ${points.length
         ? html`<div class="an-history">
@@ -1045,7 +1063,7 @@ export function PostDrawer({ media, onClose, history, bench, trials }) {
             : 'Postpilot saves how this post grows each time the worker refreshes it during its first 30 days. The first point appears after the next refresh.'}</p>`}
       <h3 class="section-title">Stats</h3>
       <${MetricList} m=${media} />
-      <p class="an-note">${media.fetchedAt ? `Updated ${relative(media.fetchedAt)}.` : 'Not refreshed yet.'} The worker refreshes a post hourly for its first 2 days, every 6 hours until day 7, daily until day 30, then weekly.</p>
+      <p class="an-note">${media.fetchedAt ? `Updated ${relative(media.fetchedAt)}.` : 'Not refreshed yet.'}${deleted ? '' : ' The worker refreshes a post hourly for its first 2 days, every 6 hours until day 7, daily until day 30, then weekly.'}</p>
     </div>
   <//>`;
 }
@@ -1078,7 +1096,7 @@ function mediaColumns(tz, { reels = false, bench = null, trials = null } = {}) {
     key: 'caption',
     label: 'Caption',
     class: 'an-caption-cell',
-    render: (m) => html`<span class="an-caption-wrap">${trials && trials.has(String(m.id)) ? html`<${Badge} tone="info" class="an-trial-badge" title="Published as a trial reel">Trial<//>` : null}<span class="an-caption" title=${captionLine(m.caption, 300)}>${captionLine(m.caption, 90) || html`<span class="faint">No caption</span>`}</span></span>`,
+    render: (m) => html`<span class="an-caption-wrap">${m.deletedAt ? html`<${Badge} tone="warning" class="an-deleted-badge" title=${`Deleted from Instagram ${shortDateTime(m.deletedAt, tz)}. Its numbers still count in totals.`}>Deleted from Instagram<//>` : null}${trials && trials.has(String(m.id)) ? html`<${Badge} tone="info" class="an-trial-badge" title="Published as a trial reel">Trial<//>` : null}<span class="an-caption" title=${captionLine(m.caption, 300)}>${captionLine(m.caption, 90) || html`<span class="faint">No caption</span>`}</span></span>`,
   });
   if (reels) {
     const at = (key) => (m) => bench?.byId.get(String(m.id))?.[key] ?? null;
@@ -1219,7 +1237,7 @@ function ReelsTab({ a, ov, tz, onOpen }) {
     return html`<${EmptyState} icon="reel" title="No reels in this period" body="Pick a longer date range, or publish a reel from the composer." />`;
   }
   const ahead = reels
-    .filter((m) => a.trials.has(String(m.id)))
+    .filter((m) => !m.deletedAt && a.trials.has(String(m.id)))
     .map((m) => ({ m, v: trialVerdict(a.bench, m.id) }))
     .filter((x) => x.v && x.v.ahead);
   const med24 = median([...a.bench.byId.values()].map((v) => v.v24));
@@ -1581,7 +1599,7 @@ export default function AnalyticsView() {
   const ov = useMemo(() => (shown.ready ? computeOverview(shown, tz, { compare }) : null), [shown.days, shown.media, shown.range.fromKey, shown.range.toKey, shown.ready, shown.live.previous && shown.live.previous.status, tz, compare]);
 
   const openMedia = (m) => setOpen(m && m.id);
-  const openItem = open ? (a.mediaDoc && a.mediaDoc.media && a.mediaDoc.media[open]) || null : null;
+  const openItem = open ? a.media.find((m) => m && String(m.id) === String(open)) || null : null;
   const storiesCount = a.ready ? storiesInRange(a.storiesDoc, range, tz, { includeLive: true }).length : 0;
   const tabs = TABS.map((t) => ({
     ...t,

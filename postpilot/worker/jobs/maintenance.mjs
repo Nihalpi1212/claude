@@ -1,6 +1,9 @@
 // Maintenance:
 // - keep-alive: GitHub disables scheduled workflows in public repositories after 60 days without
-//   repository activity. Every ~20 days the worker calls the "enable workflow" API on itself.
+//   repository activity. Every ~20 days the worker calls the "enable workflow" API on itself (only
+//   in GitHub Actions: a worker run elsewhere has no schedule there to keep alive). A refusal (403,
+//   no `actions: write` permission) or a missing workflow (404) also waits the ~20 days, so it is one
+//   warning per interval instead of one per run.
 // - compaction: every encrypted write adds a new copy of a document to the data branch's history,
 //   and encrypted data does not compress. About once a month, at night in the owner's time zone,
 //   the branch is replaced by a single commit holding the same files so old copies can be
@@ -19,10 +22,17 @@ const COMPACT_EVERY_DAYS = 30;
 const COMPACT_HOURS = [2, 3, 4, 5]; // local night hours, when the app is least likely to be writing
 
 async function keepAlive(ctx, state) {
-  const last = Date.parse(state.keepaliveAt || 0) || 0;
+  if (ctx.env.GITHUB_ACTIONS !== 'true') return false;
+  // keepaliveAt: the last success; keepaliveTriedAt: the last attempt GitHub refused (see the top).
+  const last = Math.max(Date.parse(state.keepaliveAt || 0) || 0, Date.parse(state.keepaliveTriedAt || 0) || 0);
   if (ctx.nowMs() - last < KEEPALIVE_EVERY_DAYS * DAY_MS) return false;
   const path = `/repos/${encodeURIComponent(ctx.owner)}/${encodeURIComponent(ctx.repo)}/actions/workflows/${WORKFLOW_FILE}/enable`;
-  await ctx.gh.request('PUT', path);
+  try {
+    await ctx.gh.request('PUT', path);
+  } catch (err) {
+    if (err && (err.status === 403 || err.status === 404) && !err.isRateLimit) state.keepaliveTriedAt = ctx.nowIso();
+    throw err;
+  }
   state.keepaliveAt = ctx.nowIso();
   ctx.log('maintenance', 'info', 'Kept the scheduled worker enabled (GitHub turns schedules off after 60 quiet days).');
   return true;
@@ -72,7 +82,7 @@ export default async function maintenance(ctx) {
   try {
     if (await keepAlive(ctx, state)) out.keepalive = 1;
   } catch (err) {
-    // Missing `actions: write` permission or an API hiccup: not fatal, try again next run.
+    // Not fatal: a refusal waits the normal interval (keepaliveTriedAt), an API hiccup is tried again next run.
     ctx.log('maintenance', 'warn', `Could not refresh the schedule keep-alive (${err.status || err.message}).`);
     state.keepaliveAt = state.keepaliveAt || null;
   }

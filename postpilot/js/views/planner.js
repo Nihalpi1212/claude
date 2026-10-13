@@ -1287,7 +1287,10 @@ function IdeasModal({ ai, settings, mediaStats, posts, matrix, tz, toast, onClos
     if (!chosen.length) return;
     setSaving(true);
     const now = new Date().toISOString();
-    const taken = posts.filter((p) => ['draft', 'scheduled', 'publishing'].includes(p.status) && p.scheduledAt).map((p) => p.scheduledAt);
+    // A post waiting to be posted by hand ('reminded') counts from its reminder, as in core/schedule.js planAutopilot.
+    const taken = posts
+      .filter((p) => ['draft', 'scheduled', 'publishing', 'reminded'].includes(p.status) && p.scheduledAt)
+      .map((p) => (p.status === 'reminded' ? p.reminderSentAt || p.scheduledAt : p.scheduledAt));
     const slots = suggestSlots({ matrix, tz, count: chosen.length, horizonDays: 8, minGapHours: 20, taken, maxPerDay: 1 });
     const drafts = chosen.map((idea, i) =>
       newPost({

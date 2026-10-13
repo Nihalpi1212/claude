@@ -127,6 +127,42 @@ test('settings: sections, theme, AI key + test, backup, worker, activity log', {
     assert.match(await page.locator('#settings-ai .callout-danger').innerText(), /rejected/i);
     await key.fill('sk-ant-e2e-key');
 
+    // A first key turns AI on (as onboarding does) and says so.
+    await page.evaluate(async () => {
+      const { mutate } = await import('/postpilot/js/data.js');
+      await mutate('settings', (d) => {
+        d.ai = { ...d.ai, apiKey: '', enabled: false };
+      }, { message: 'e2e: no AI key' });
+    });
+    const useAi = page.locator('#settings-ai').getByRole('switch', { name: 'Use AI features' });
+    await page.waitForFunction(() => document.querySelector('#settings-ai-key')?.value === '');
+    assert.equal(await useAi.getAttribute('aria-checked'), 'false');
+    await key.fill('sk-ant-e2e-key');
+    await save.click();
+    await page.getByText('API key saved. AI features are now on.').waitFor();
+    assert.equal(await useAi.getAttribute('aria-checked'), 'true');
+    const aiSaved = await page.evaluate(async () => (await (await import('/postpilot/js/data.js')).readDoc('settings')).ai);
+    assert.equal(aiSaved.enabled, true);
+    assert.equal(aiSaved.apiKey, 'sk-ant-e2e-key');
+    // Turning AI off by hand while adding a first key keeps it off.
+    await page.evaluate(async () => {
+      const { mutate } = await import('/postpilot/js/data.js');
+      await mutate('settings', (d) => {
+        d.ai = { ...d.ai, apiKey: '', enabled: false };
+      }, { message: 'e2e: no AI key' });
+    });
+    await page.waitForFunction(() => document.querySelector('#settings-ai-key')?.value === '');
+    await key.fill('sk-ant-e2e-key');
+    await useAi.click();
+    await useAi.click();
+    await save.click();
+    await pollPage(page, async () => (await (await import('/postpilot/js/data.js')).readDoc('settings')).ai.apiKey === 'sk-ant-e2e-key', null, { timeout: 20_000, every: 250 });
+    assert.equal((await page.evaluate(async () => (await (await import('/postpilot/js/data.js')).readDoc('settings')).ai)).enabled, false);
+    assert.equal(await useAi.getAttribute('aria-checked'), 'false');
+    await useAi.click();
+    await save.click();
+    await pollPage(page, async () => (await (await import('/postpilot/js/data.js')).readDoc('settings')).ai.enabled === true, null, { timeout: 20_000, every: 250 });
+
     // Backup downloads every document, without secrets by default.
     const [download] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Download backup' }).click()]);
     assert.match(download.suggestedFilename(), /^postpilot-backup-\d{4}-\d{2}-\d{2}\.json$/);
@@ -204,6 +240,8 @@ test('settings: sections, theme, AI key + test, backup, worker, activity log', {
 
     // Notification toggles keep their wording in the confirmation.
     const notif = page.locator('#settings-notifications');
+    // This device was unlocked without "Remember this device": a notification opens the lock screen.
+    await notif.getByText('Notifications open the lock screen unless you turn on Remember this device when you unlock.').waitFor();
     await notif.getByRole('switch', { name: 'Time to post by hand' }).waitFor();
     await notif.getByRole('switch', { name: 'Instagram connection problems' }).click();
     await page.getByText('Notifications off: Instagram connection problems.').waitFor();
@@ -332,6 +370,11 @@ test('settings: restore never republishes, passphrase change, data key rotation'
     await otherPage.getByRole('switch', { name: 'Remember this device' }).click();
     await otherPage.getByRole('button', { name: 'Unlock' }).click();
     await otherPage.waitForSelector('.app', { timeout: 30_000 });
+    // A remembered device opens from a notification without the lock screen: no hint about it.
+    await otherPage.goto(`${url}/postpilot/index.html#/settings?section=notifications`);
+    await otherPage.locator('#settings-notifications .panel-title').waitFor({ timeout: 20_000 });
+    await otherPage.locator('#settings-notifications').getByRole('heading', { name: 'Devices' }).waitFor();
+    assert.equal(await otherPage.locator('#settings-notifications').getByText(/Notifications open the lock screen/).count(), 0);
 
     // --- Change passphrase (re-wrap only).
     await page.goto(`${url}/postpilot/index.html#/settings?section=security`);
@@ -415,9 +458,21 @@ test('onboarding: new workspace → connect Instagram → connect worker → tim
     await page.waitForSelector('#lock-token', { timeout: 20_000 });
     assert.equal(await page.getByLabel('GitHub account').inputValue(), 'demo');
     assert.equal(await page.getByLabel('Repository').inputValue(), 'postpilot');
+    assert.match(await page.locator('#lock-token-hint').textContent(), /"Read and write"\. Create one on GitHub/);
+    // A private repository is flagged on the create step and the worker step (GitHub says so in the repository info).
+    await page.route(/\/mock\/gh\/repos\/demo\/postpilot$/, async (route) => {
+      const res = await route.fetch();
+      await route.fulfill({ response: res, json: { ...(await res.json()), private: true } });
+    });
     await page.getByLabel('GitHub access token').fill('mock-token');
     await page.getByRole('button', { name: 'Continue' }).click();
     await page.waitForSelector('#lock-new-passphrase', { timeout: 20_000 });
+    const lockWarning = page.locator('.private-repo-callout');
+    await lockWarning.getByText('This repository is private').waitFor();
+    assert.match(await lockWarning.textContent(), /needs a public repository/);
+    assert.match(await lockWarning.textContent(), /Settings\s+→ General → Danger Zone → Change visibility\./);
+    assert.equal(await lockWarning.getByRole('link', { name: /Settings/ }).getAttribute('href'), 'https://github.com/demo/postpilot/settings');
+    assert.doesNotMatch(await page.locator('.lock-card form > p').first().textContent(), /public repository/, 'a private repository is not called public');
     await page.getByLabel('New passphrase').fill('password1234');
     await page.getByLabel('Repeat passphrase').fill('password1234');
     await page.getByRole('button', { name: 'Create encrypted workspace' }).click();
@@ -464,6 +519,8 @@ test('onboarding: new workspace → connect Instagram → connect worker → tim
     // Step 2: connect the worker (sealed-box secret) and run it once.
     await page.getByRole('heading', { name: /Turn on the worker/ }).waitFor({ timeout: 20_000 });
     assert.match(await page.evaluate(() => location.hash), /#\/onboarding\?step=worker/);
+    await page.locator('.ws .private-repo-callout').getByText('This repository is private').waitFor({ timeout: 20_000 });
+    await page.unroute(/\/mock\/gh\/repos\/demo\/postpilot$/);
     await page.getByText('not saved yet').waitFor({ timeout: 20_000 });
     await page.getByRole('button', { name: 'Connect worker' }).click();
     await page.getByText('Worker connected. It can now read your encrypted data.').waitFor({ timeout: 20_000 });

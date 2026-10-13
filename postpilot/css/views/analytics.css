@@ -247,7 +247,8 @@ button.an-top-card:hover { border-color: var(--ink-3); }
 /* Caption cell with an optional "Trial" badge in front. */
 .an-caption-wrap { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .an-caption-wrap > .an-caption { flex: 1 1 auto; min-width: 0; }
-.an-trial-badge { flex: none; }
+.an-trial-badge,
+.an-deleted-badge { flex: none; }
 
 /* Posts toolbar: type filter + label filter. */
 .an-label-filter { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }

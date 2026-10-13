@@ -58,16 +58,29 @@ function watchOf(doc) {
 }
 
 /**
- * Posts the rule editor can scope a rule to: analytics-media (every post the worker has seen) plus
- * posts Postpilot published that analytics has not picked up yet. Newest first, stories left out.
+ * Instagram media ids known to be deleted from Instagram: analytics-media entries the worker flagged
+ * (`deletedAt`) and posts deleted with "Delete from Instagram" (`deletedFromInstagramAt`, known before the next run).
  */
-function postChoices(mediaDoc, postsDoc) {
+export function deletedMediaIds(mediaDoc, postsDoc) {
+  const ids = new Set();
+  for (const m of Object.values((mediaDoc && mediaDoc.media) || {})) if (m && m.id && m.deletedAt) ids.add(String(m.id));
+  for (const p of (postsDoc && postsDoc.posts) || []) if (p && p.igMediaId && p.deletedFromInstagramAt) ids.add(String(p.igMediaId));
+  return ids;
+}
+
+/**
+ * Posts the rule editor can scope a rule to: analytics-media (every post the worker has seen) plus
+ * posts Postpilot published that analytics has not picked up yet. Newest first; stories, canceled
+ * posts and posts deleted from Instagram left out.
+ */
+export function postChoices(mediaDoc, postsDoc) {
+  const deleted = deletedMediaIds(mediaDoc, postsDoc);
   const byId = new Map();
   for (const m of Object.values((mediaDoc && mediaDoc.media) || {})) {
-    if (m && m.id && m.productType !== 'STORY') byId.set(String(m.id), m);
+    if (m && m.id && m.productType !== 'STORY' && !deleted.has(String(m.id))) byId.set(String(m.id), m);
   }
   for (const p of (postsDoc && postsDoc.posts) || []) {
-    if (!p || !p.igMediaId || p.type === 'story' || byId.has(String(p.igMediaId))) continue;
+    if (!p || !p.igMediaId || p.type === 'story' || p.status === 'canceled' || deleted.has(String(p.igMediaId)) || byId.has(String(p.igMediaId))) continue;
     byId.set(String(p.igMediaId), {
       id: String(p.igMediaId),
       caption: p.caption || '',
@@ -79,6 +92,23 @@ function postChoices(mediaDoc, postsDoc) {
     });
   }
   return [...byId.values()].sort((a, b) => String(b.timestamp || '').localeCompare(String(a.timestamp || '')));
+}
+
+/**
+ * What "Run now" reports for the worker's run record: {text, kind, section?} (section: the Settings section to open).
+ * The run may have skipped the automations job (worker paused, Instagram login gone): then nothing was checked.
+ */
+export function runNowResult(run) {
+  const c = (run && run.counts) || {};
+  const n = (c.replies || 0) + (c.dms || 0) + (c.hidden || 0) + (c.deleted || 0);
+  const skipped = run && run.skipped && run.skipped.automations;
+  if (skipped === 'paused') return { text: 'The worker is paused in Settings, so automations did not run.', kind: 'info', section: 'worker' };
+  if (skipped === 'token_expired' || skipped === 'not_connected') {
+    const why = skipped === 'token_expired' ? 'The Instagram login has expired' : 'Instagram is not connected';
+    return { text: `${why}, so automations did not run. Reconnect Instagram in Settings.`, kind: 'error', section: 'instagram' };
+  }
+  if (skipped === 'disabled') return { text: 'Automations are paused, so nothing was answered. Turn them on above.', kind: 'info' };
+  return { text: n ? `Worker finished: ${n} automated ${n === 1 ? 'action' : 'actions'}.` : 'Worker finished. Nothing new to answer.', kind: 'success' };
 }
 
 function who(u) {
@@ -105,7 +135,7 @@ function describeActivity(a) {
 function RuleCard({ rule, index, count, gone, onToggle, onMove, onEdit, onDuplicate, onDelete, busy }) {
   const fired = (rule.stats && rule.stats.fired) || 0;
   const last = rule.stats && rule.stats.lastFiredAt;
-  // Chosen posts the worker could not find on Instagram (automations.cursors.goneMedia).
+  // Chosen posts that are gone from Instagram (automations.cursors.goneMedia plus deleted media).
   const t = rule.trigger || {};
   const missing = (t.source || 'comment') === 'comment' && Array.isArray(t.mediaIds) ? t.mediaIds.filter((id) => gone && gone[String(id)]).length : 0;
   return html`<li class=${cx('auto-rule', !rule.enabled && 'is-off')} data-rule-id=${rule.id}>
@@ -415,6 +445,7 @@ export default function AutomationsView() {
 
   const aiReady = !!getAi(settings);
   const posts = useMemo(() => postChoices(data['analytics-media'], data.posts), [data['analytics-media'], data.posts]);
+  const deletedIds = useMemo(() => deletedMediaIds(data['analytics-media'], data.posts), [data['analytics-media'], data.posts]);
 
   const save = (fn, message) =>
     mutate('automations', (d) => {
@@ -443,7 +474,8 @@ export default function AutomationsView() {
   const logEntries = ((log && log.entries) || []).filter((e) => e.job === 'automations').slice(0, 50);
   const lastRun = log && log.runs && log.runs[0];
   const pausedUntil = doc.cursors && Date.parse(doc.cursors.pausedUntil || '') > Date.now() ? doc.cursors.pausedUntil : null;
-  const gone = (doc.cursors && doc.cursors.goneMedia) || {};
+  // Chosen posts that are gone: the worker's lookups (cursors.goneMedia) plus posts known to be deleted from Instagram.
+  const gone = { ...Object.fromEntries([...deletedIds].map((id) => [id, true])), ...((doc.cursors && doc.cursors.goneMedia) || {}) };
 
   const toggleMaster = async (on) => {
     setBusy(true);
@@ -556,9 +588,8 @@ export default function AutomationsView() {
       // Resolves when the run has reported (the worker usually takes 1-3 minutes on GitHub), or null on timeout.
       const latest = await dispatchWorker('automations', { quiet: true, wait: true });
       if (latest && alive.current) {
-        const c = latest.counts || {};
-        const n = (c.replies || 0) + (c.dms || 0) + (c.hidden || 0) + (c.deleted || 0);
-        toast(n ? `Worker finished: ${n} automated ${n === 1 ? 'action' : 'actions'}.` : 'Worker finished. Nothing new to answer.', { kind: 'success' });
+        const r = runNowResult(latest);
+        toast(r.text, { kind: r.kind, ...(r.section ? { action: { label: 'Open Settings', onClick: () => navigate(`#/settings?section=${r.section}`) } } : {}) });
       }
     } catch {
       /* dispatchWorker already explained the problem */

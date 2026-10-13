@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { openApp, shot, unlock } from './helpers.mjs';
 
-const PORT = 5521;
+const PORT = Number(process.env.ANALYTICS_E2E_PORT) || 5521; // ANALYTICS_E2E_PORT runs it next to another copy
 // A range before the worker's first snapshot (it saves the last 28 days) but within Instagram's 90 days.
 const daysAgo = (n) => new Date(Date.now() - n * 864e5).toISOString().slice(0, 10);
 const OLD_FROM = daysAgo(63);
@@ -485,6 +485,75 @@ test('stories: accurate capture copy and a stories CSV', async () => {
   await page.waitForSelector(`.toast >> text=Downloaded ${listed} ${listed === 1 ? 'story' : 'stories'}.`);
   await go('#/analytics');
   await waitForNumber('Reach');
+});
+
+test('a post deleted from Instagram still counts in totals; the table marks it and top posts leave it out', async () => {
+  const marked = await page.evaluate(async () => {
+    const { markDeleted } = await import('/postpilot/js/views/analytics.js');
+    const media = [{ id: 'a' }, { id: 'b', deletedAt: '2026-10-01T00:00:00Z' }, { id: 'c' }, { id: 'd' }];
+    const posts = { posts: [{ igMediaId: 'c', status: 'canceled', deletedFromInstagramAt: '2026-10-02T00:00:00Z' }] };
+    const archive = { posts: [{ igMediaId: 'a', status: 'canceled' }, { igMediaId: 'd', status: 'canceled', deletedFromInstagramAt: '2026-10-03T00:00:00Z' }] };
+    return markDeleted(media, posts, archive).map((m) => m.deletedAt || null);
+  });
+  assert.deepEqual(marked, [null, '2026-10-01T00:00:00Z', '2026-10-02T00:00:00Z', '2026-10-03T00:00:00Z']);
+
+  await go('#/analytics');
+  const postsBefore = await waitForNumber('Posts published');
+  const top = page.locator('.an-top-card');
+  await top.first().waitFor();
+  const label = await top.first().getAttribute('aria-label');
+  const id = await page.evaluate(async (l) => {
+    const d = await import('/postpilot/js/data.js');
+    const { captionLine } = await import('/postpilot/js/views/analytics.js');
+    const hits = Object.values((await d.readDoc('analytics-media')).media).filter((m) => l === `Post 1: ${captionLine(m.caption, 60)}`);
+    return hits.length === 1 ? hits[0].id : null;
+  }, label);
+  assert.ok(id, `found the top post (${label})`);
+  await page.evaluate(async (x) => {
+    const d = await import('/postpilot/js/data.js');
+    await d.mutate('analytics-media', (doc) => {
+      doc.media[x].deletedAt = new Date().toISOString();
+    });
+  }, id);
+  try {
+    // Top posts move on; the count of posts published in the period does not change.
+    await page.waitForFunction((l) => document.querySelector('.an-top-card')?.getAttribute('aria-label') !== l, label);
+    const caption = label.replace(/^Post 1: /, '');
+    const shown = await top.evaluateAll((els) => els.map((e) => e.getAttribute('aria-label').replace(/^Post \d+: /, '')));
+    assert.ok(!shown.includes(caption), `the deleted post is not among the top posts: ${shown.join(' | ')}`);
+    assert.equal(await tileValue('Posts published'), postsBefore);
+
+    // The Posts table keeps the row and marks it; its drawer says so and offers no Instagram actions.
+    await openTab('Posts');
+    const row = page.locator('[role="tabpanel"] tbody tr', { has: page.locator('.an-deleted-badge') });
+    await row.first().waitFor();
+    assert.equal(await row.count(), 1);
+    assert.equal((await row.locator('.an-deleted-badge').innerText()).trim(), 'Deleted from Instagram');
+    await row.click();
+    const drawer = page.getByRole('dialog', { name: 'Post details' });
+    await drawer.waitFor();
+    await drawer.locator('.callout', { hasText: /^Deleted from Instagram/ }).waitFor();
+    assert.match(await drawer.innerText(), /still count in your totals/);
+    assert.equal(await drawer.getByRole('link', { name: /View on Instagram/ }).count(), 0);
+    assert.equal(await drawer.getByRole('button', { name: /Refresh from Instagram/ }).count(), 0);
+    await page.keyboard.press('Escape');
+    await drawer.waitFor({ state: 'detached' });
+
+    // The posts CSV has a column for it.
+    await openMenu(page, 'Export CSV');
+    const [csv] = await Promise.all([page.waitForEvent('download'), page.getByRole('menuitem', { name: /^Posts/ }).click()]);
+    const lines = (await readFile(await csv.path(), 'utf8')).replace(/^﻿/, '').split('\r\n');
+    assert.match(lines[0], /,Deleted from Instagram$/);
+    assert.equal(lines.slice(1).filter((l) => /,\d{4}-\d{2}-\d{2}$/.test(l)).length, 1, 'one post has a deletion date');
+  } finally {
+    await page.evaluate(async (x) => {
+      const d = await import('/postpilot/js/data.js');
+      await d.mutate('analytics-media', (doc) => {
+        delete doc.media[x].deletedAt;
+      });
+    }, id);
+    await go('#/analytics');
+  }
 });
 
 test('refresh now starts the worker', async () => {

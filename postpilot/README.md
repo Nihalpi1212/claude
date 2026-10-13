@@ -12,7 +12,7 @@ server, no subscription, and nobody else can open it. What it does not do (and w
 | **Plan** | Month, week, day, list and Instagram-grid calendar with drag-to-reschedule and search · posts, carousels (up to 10), reels (cover frame, trial reels, share-to-feed) and stories · first comment, collaborators, user tags, location, alt text, "AI info" label · best-time suggestions and "add to queue" · drafts, duplicate, bulk actions · CSV import/export (media from your library or from links) · AI caption writer with rewrite actions (shorter, longer, fix grammar, call to action, tone, translate) and "ideas for next week" |
 | **Automate** | Auto-publishing on schedule · **reminder posts** for what the API cannot post (music, link stickers, polls): your phone gets a notification and a "post now" screen with the files and caption ready · evergreen queues on fixed weekly slots, filled by hand, from RSS/Atom feeds, from a CSV or with AI · **Autopilot**: drop photos and videos in a pool and it writes captions (Claude AI, optional), picks your best times and fills your calendar, with or without your approval, and can repost your top posts · keyword auto-replies to comments and comment-to-DM private replies† (posts from the last 90 days, up to 50, plus any post you pick; both adjustable) · DM keyword replies, replies to your stories and stories that mention you† · welcome message† · hide comments with blocked words · collaboration invites accepted automatically from people you allow · push notifications to your phone · share photos into Postpilot from the Android share sheet |
 | **Measure** | Follower growth, reach, views, interactions, accounts engaged, link taps with period comparison · reach and views from followers vs non-followers and by format · post, reel and story tables, with each young post's growth over time and views at 24 hours and 7 days (trial reels get a hint when they beat your median) · stories are captured while they are live (when first seen, then hourly, and on every run in their last 90 minutes) · audience demographics and online-follower heatmap · best times to post · hashtag performance · campaign results by post label · competitor benchmarks · printable/PDF reports with your logo, an automatic monthly report, and CSV export |
-| **Engage** | Inbox for comments on your latest 12 posts and for DMs†, with saved replies and AI-suggested replies · hide, delete, private reply†, turn comments off · collaboration invites (accept or decline) · delete a published post (Facebook Login only) |
+| **Engage** | Inbox for comments on your recent posts (the latest 12 read live, older watched posts from the worker's copy) and for DMs†, with saved replies and AI-suggested replies · hide, delete, private reply†, turn comments off · collaboration invites (accept or decline) · delete a published post (Facebook Login only) |
 | **Grow** | Link-in-bio page with buttons and a grid of your posts, each linking wherever you want |
 
 † Instagram lets your Meta app send DMs and private replies only to people who have a role on the app (you and
@@ -147,7 +147,11 @@ Then click **Run worker now** to test it. After that the worker runs every 10 mi
   variables, for example from a cron job on any always-on computer. Run it every 10 minutes. Two things then
   stop working: the app's "Publish now" and "Run now" buttons (they start the GitHub Actions workflow), and the
   keep-alive (every ~20 days) that stops GitHub from switching off scheduled workflows in quiet repositories,
-  which is only needed in Actions.
+  which is only needed in Actions (the worker skips it elsewhere). The worker never downloads feed or CSV links
+  that point to a private or local network address (your router, other computers at home); set
+  `POSTPILOT_ALLOW_PRIVATE_LINKS=1` if it should read feeds on its own network. It also makes at most 60 writes
+  to GitHub a minute, below GitHub's limit; `POSTPILOT_GITHUB_WRITES_PER_MIN` changes that number (`0` turns
+  the pacing off).
 
 ## Developing locally
 

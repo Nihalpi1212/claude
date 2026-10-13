@@ -695,14 +695,15 @@ function monthNumbers(days, media, stories, month, tz) {
 }
 
 /**
- * Numbers for a monthly report: the month, the month before it and its top posts.
+ * Numbers for a monthly report: the month, the month before it and its top posts. Posts deleted from
+ * Instagram (deletedAt) still count in the totals but are not listed among the top posts.
  * @param {{days: object, media: object|Array, stories?: object|Array, month: string, tz?: string, topCount?: number}} args
  * @returns {{month, summary, previous, top: object[]}}
  */
 export function buildMonthlyReport({ days, media, stories, month, tz = 'UTC', topCount = 5 }) {
   const summary = monthNumbers(days, media, stories, month, tz);
   const previous = monthNumbers(days, media, stories, previousMonth(month), tz);
-  const inMonth = mediaInRange(media, summary.fromKey, summary.toKey, tz).filter((m) => m.productType !== 'STORY');
+  const inMonth = mediaInRange(media, summary.fromKey, summary.toKey, tz).filter((m) => m.productType !== 'STORY' && !m.deletedAt);
   return { month, summary, previous, top: topMedia(inMonth, 'interactions', topCount).map(mediaLite) };
 }
 

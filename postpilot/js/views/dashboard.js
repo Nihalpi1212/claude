@@ -172,7 +172,7 @@ function buildAlerts({ settings, log, posts, automations, now, dispatchWorker })
         id: 'token-expired',
         tone: 'danger',
         title: 'Instagram is disconnected',
-        body: (ig.status && ig.status.message) || 'Your Instagram login expired. Scheduled posts stay on hold until you connect again.',
+        body: (ig.status && ig.status.message) || 'Your Instagram login expired. Posts set to publish automatically wait until you connect again; reminder posts still come due.',
         action: { label: 'Reconnect', href: '#/settings?section=instagram' },
       });
     } else if (daysLeft != null && daysLeft < 10) {
@@ -596,10 +596,20 @@ export function commentsNeedingReply(inbox, settings) {
     .sort((a, b) => (parseTimestamp(b.timestamp) || 0) - (parseTimestamp(a.timestamp) || 0));
 }
 
-function InboxCard({ inbox, settings, now }) {
+/**
+ * When the worker last checked comments and messages: the later of inbox.fetchedAt and
+ * automations.cursors.inboxCheckedAt (the worker rewrites the inbox only when it changed, or every 6 hours).
+ */
+export function inboxCheckedAt(inbox, automations) {
+  const times = [inbox && inbox.fetchedAt, automations && automations.cursors && automations.cursors.inboxCheckedAt].filter((t) => Number.isFinite(parseTimestamp(t)));
+  return times.sort((a, b) => parseTimestamp(b) - parseTimestamp(a))[0] || null;
+}
+
+function InboxCard({ inbox, automations, settings, now }) {
   if (!inbox) return html`<${Panel} title="Inbox"><${Skeleton} lines=${3} /><//>`;
   // Comments and conversations are cached by the worker; before its first check there is nothing to count.
   const synced = !!inbox.fetchedAt;
+  const checkedAt = synced ? inboxCheckedAt(inbox, automations) : null;
   const needs = commentsNeedingReply(inbox, settings);
   const seen = inbox.seen || {};
   const waiting = (inbox.conversations || []).filter((c) => {
@@ -609,12 +619,12 @@ function InboxCard({ inbox, settings, now }) {
     return !(s && parseTimestamp(s) >= parseTimestamp(m.createdTime));
   }).length;
   return html`<${Panel} title="Inbox" class="dash-side"
-    actions=${inbox.fetchedAt ? html`<span class="dash-side-meta">Checked ${ago(inbox.fetchedAt)}</span>` : null}>
+    actions=${checkedAt ? html`<span class="dash-side-meta">Checked ${ago(checkedAt)}</span>` : null}>
     <dl class="dash-kv">
       <${SideRow} label="Comments to answer (recent posts)" value=${synced ? needs.length : '—'} tone=${synced && needs.length ? 'warn' : null} />
       <${SideRow} label="Messages waiting" value=${synced ? waiting : '—'} tone=${synced && waiting ? 'warn' : null} />
     </dl>
-    ${synced ? html`<p class="dash-side-scope faint">From the worker's last check. The Inbox reads Instagram live and may show more.</p>` : null}
+    ${synced ? html`<p class="dash-side-scope faint">From the worker's last check of the posts it watches. The Inbox shows the same comments, with your latest 12 posts read live.</p>` : null}
     ${!synced
       ? html`<p class="dash-side-note">Comments and messages show up here after the worker's first check.</p>`
       : needs.length
@@ -657,8 +667,17 @@ function AutomationsCard({ automations, now }) {
 
 const PRODUCT_KIND = { REELS: 'reel', CAROUSEL_ALBUM: 'carousel', STORY: 'story' };
 
-function RecentPosts({ media, tz, followers, synced }) {
-  const list = toList(media)
+/**
+ * Instagram media still on Instagram: without the worker's deletedAt mark, and without media of posts
+ * deleted with "Delete from Instagram" (posts[].deletedFromInstagramAt, shown before the worker's next run).
+ */
+export function liveMedia(media, posts) {
+  const gone = new Set((posts || []).filter((p) => p && p.deletedFromInstagramAt && p.igMediaId).map((p) => String(p.igMediaId)));
+  return toList(media).filter((m) => m && !m.deletedAt && !gone.has(String(m.id)));
+}
+
+function RecentPosts({ media, posts, tz, followers, synced }) {
+  const list = liveMedia(media, posts)
     .filter((m) => m.productType !== 'STORY' && Number.isFinite(parseTimestamp(m.timestamp)))
     .sort((a, b) => parseTimestamp(b.timestamp) - parseTimestamp(a.timestamp))
     .slice(0, 6);
@@ -826,12 +845,12 @@ export default function Dashboard() {
       <div class="dash-col-main stack">
         ${data.posts && data.library ? html`<${UpNext} posts=${posts} assetsById=${assetsById} tz=${tz} now=${now} openComposer=${openComposer} />` : html`<${Panel} title="Up next"><${Skeleton} lines=${5} /><//>`}
         ${data['analytics-media']
-          ? html`<${RecentPosts} media=${data['analytics-media'].media} tz=${tz} followers=${followers.latest ?? undefined} synced=${mediaSynced} />`
+          ? html`<${RecentPosts} media=${data['analytics-media'].media} posts=${posts} tz=${tz} followers=${followers.latest ?? undefined} synced=${mediaSynced} />`
           : html`<${Skeleton} height=${220} />`}
       </div>
       <div class="dash-col-side stack">
         <${AutopilotCard} autopilot=${data.autopilot} posts=${posts} library=${data.library} tz=${tz} now=${now} />
-        <${InboxCard} inbox=${data.inbox} settings=${settings} now=${now} />
+        <${InboxCard} inbox=${data.inbox} automations=${data.automations} settings=${settings} now=${now} />
         <${AutomationsCard} automations=${data.automations} now=${now} />
       </div>
     </div>

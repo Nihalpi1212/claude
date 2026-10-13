@@ -20,11 +20,15 @@ export class GitHubError extends Error {
   get isAuth() {
     return this.status === 401 || this.status === 403;
   }
+  /** GitHub's primary or secondary rate limit (429, or 403 saying so): not a problem with the request itself. */
+  get isRateLimit() {
+    return this.status === 429 || (this.status === 403 && /rate limit/i.test(`${this.message} ${(this.body && this.body.message) || ''}`));
+  }
 }
 
 const DEFAULT_API = 'https://api.github.com';
 
-export function createGitHub({ token, owner, repo, apiBase = DEFAULT_API, fetchImpl } = {}) {
+export function createGitHub({ token, owner, repo, apiBase = DEFAULT_API, fetchImpl, sleep: pause = sleep } = {}) {
   if (!owner || !repo) throw new Error('GitHub owner and repo are required.');
   const doFetch = fetchImpl || globalThis.fetch.bind(globalThis);
   const repoPath = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
@@ -38,13 +42,14 @@ export function createGitHub({ token, owner, repo, apiBase = DEFAULT_API, fetchI
     if (body !== undefined) headers['Content-Type'] = 'application/json';
     let res;
     let text = null;
+    let waitedMinute = false;
     for (let attempt = 0; ; attempt++) {
       text = null;
       try {
         res = await doFetch(url, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), cache: 'no-store' });
       } catch (err) {
         if (attempt < 2) {
-          await sleep(500 * (attempt + 1));
+          await pause(500 * (attempt + 1));
           continue;
         }
         throw new GitHubError(0, `Could not reach GitHub (${err.message || err}).`);
@@ -52,15 +57,24 @@ export function createGitHub({ token, owner, repo, apiBase = DEFAULT_API, fetchI
       // Retry transient server errors and rate limits a couple of times. GitHub reports secondary
       // rate limits as 403 (or 429); a limit that resets more than a minute away is not waited for.
       if (res.status >= 500 && attempt < 2) {
-        await sleep(Math.min(retryDelayMs(res, attempt), MAX_RETRY_WAIT_MS));
+        await pause(Math.min(retryDelayMs(res, attempt), MAX_RETRY_WAIT_MS));
         continue;
       }
       if ((res.status === 429 || res.status === 403) && attempt < 2) {
         text = await res.text();
-        const wait = retryDelayMs(res, attempt);
-        if ((res.status === 429 || /rate limit/i.test(text)) && wait <= MAX_RETRY_WAIT_MS) {
-          await sleep(wait);
-          continue;
+        if (res.status === 429 || /rate limit/i.test(text)) {
+          // A secondary limit without retry-after: GitHub asks for at least a minute, waited once per
+          // request (a second refusal is thrown as a rate limit, see GitHubError.isRateLimit).
+          const wait = rateLimitDelayMs(res);
+          if (wait === null && !waitedMinute) {
+            waitedMinute = true;
+            await pause(SECONDARY_WAIT_MS);
+            continue;
+          }
+          if (wait !== null && wait <= MAX_RETRY_WAIT_MS) {
+            await pause(wait);
+            continue;
+          }
         }
       }
       break;
@@ -181,16 +195,25 @@ function encodePath(path) {
 }
 
 const MAX_RETRY_WAIT_MS = 60_000;
+const SECONDARY_WAIT_MS = 60_000;
 
 /** How long to wait before retrying: retry-after, else the rate-limit reset time, else a short backoff. */
 function retryDelayMs(res, attempt) {
+  return rateLimitDelayMs(res) ?? 1000 * (attempt + 1);
+}
+
+/**
+ * How long a rate limit asks to wait: retry-after, else until x-ratelimit-reset when no requests are
+ * left (the primary limit). null when neither says (a secondary limit: wait at least a minute).
+ */
+function rateLimitDelayMs(res) {
   const after = Number(res.headers.get('retry-after'));
   if (after > 0) return after * 1000;
   if (res.headers.get('x-ratelimit-remaining') === '0') {
     const reset = Number(res.headers.get('x-ratelimit-reset')) * 1000 - Date.now();
-    if (reset > 0) return reset + 1000;
+    return reset > 0 ? reset + 1000 : 1000;
   }
-  return 1000 * (attempt + 1);
+  return null;
 }
 
 function friendlyMessage(status, msg) {

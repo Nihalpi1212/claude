@@ -258,6 +258,54 @@ test('link in bio: edit, validate, publish, public page, photo, unpublish', { ti
         await ctx.close();
       }
     }
+
+    // Posts deleted from Instagram: their tiles are marked and the picker no longer offers them.
+    // (The dev server runs in another process: change the documents through the app's data module, as the worker would.)
+    const docs = await page.evaluate(async () => {
+      const d = await import('/postpilot/js/data.js');
+      await d.getStore().refresh();
+      return { grid: (await d.readDoc('bio')).grid, media: (await d.readDoc('analytics-media')).media };
+    });
+    const grid = docs.grid;
+    const [flagged, deletedInApp] = [String(grid[0].igMediaId), String(grid[1].igMediaId)];
+    const entry = docs.media[flagged];
+    assert.ok(entry, 'the first tile is a post analytics knows');
+    await page.evaluate(async (ids) => {
+      const d = await import('/postpilot/js/data.js');
+      await d.mutate('analytics-media', (doc) => {
+        doc.media[ids.flagged].deletedAt = new Date().toISOString();
+      }, { message: 'e2e: worker flagged a deleted post' });
+      await d.mutate('posts', (doc) => {
+        doc.posts.push({ id: 'p_e2e_deleted', type: 'feed', status: 'canceled', igMediaId: ids.deletedInApp, deletedFromInstagramAt: new Date().toISOString(), media: [], history: [] });
+      }, { message: 'e2e: post deleted from Instagram in the app' });
+    }, { flagged, deletedInApp });
+    await page.reload();
+    await unlock(page);
+    await page.waitForSelector('.bio-editor', { timeout: 20_000 });
+    const rows = page.locator('.bio-grid-row');
+    for (const i of [0, 1]) {
+      await rows.nth(i).getByText('Deleted from Instagram.').waitFor();
+      assert.match(await rows.nth(i).getAttribute('class'), /\bis-deleted\b/);
+      assert.match(await rows.nth(i).textContent(), /The worker takes it off your page on its next run\./);
+    }
+    assert.equal(await rows.nth(2).getByText('Deleted from Instagram.').count(), 0);
+    await page.getByRole('button', { name: 'Choose posts' }).first().click();
+    const picker = page.getByRole('dialog', { name: 'Choose posts for the grid' });
+    await picker.locator('.frame').first().waitFor();
+    const srcs = await picker.locator('.frame img').evaluateAll((imgs) => imgs.map((img) => img.getAttribute('src')));
+    // The picker lists the newest 36 posts with an image (as js/views/bio.js GridPicker); images repeat in the demo,
+    // so compare the whole list with and without the two deleted posts.
+    const srcOf = (m) => m.thumbnailUrl || (m.mediaType !== 'VIDEO' ? m.mediaUrl : null);
+    const offered = (skip) => Object.values(docs.media)
+      .filter((m) => m && m.productType !== 'STORY' && !skip.has(String(m.id)) && srcOf(m))
+      .sort((a, b) => (Date.parse(b.timestamp || 0) || 0) - (Date.parse(a.timestamp || 0) || 0))
+      .slice(0, 36)
+      .map(srcOf);
+    assert.deepEqual(srcs, offered(new Set([flagged, deletedInApp])), 'the two deleted posts are left out');
+    assert.notDeepEqual(srcs, offered(new Set()), 'they were among the posts offered before');
+    await page.keyboard.press('Escape');
+    await shot(page, 'bio-editor-deleted-tiles-desktop-light');
+    assert.deepEqual(errors, []);
   } finally {
     await h.close();
   }

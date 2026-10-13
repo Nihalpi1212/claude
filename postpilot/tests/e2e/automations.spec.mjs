@@ -432,6 +432,99 @@ describe('Automations', { timeout: 300_000 }, () => {
     await page.waitForSelector('.automations .auto-rule', { timeout: 30_000 });
   });
 
+  test('"Run now" says why nothing ran when the worker skipped automations', async () => {
+    const results = await page.evaluate(async () => {
+      const { runNowResult } = await import('/postpilot/js/views/automations.js');
+      return ['paused', 'token_expired', 'not_connected', 'disabled', null].map((s) => runNowResult({ counts: {}, ...(s ? { skipped: { automations: s } } : {}) }));
+    });
+    assert.deepEqual(results[0], { text: 'The worker is paused in Settings, so automations did not run.', kind: 'info', section: 'worker' });
+    assert.deepEqual(results[1], { text: 'The Instagram login has expired, so automations did not run. Reconnect Instagram in Settings.', kind: 'error', section: 'instagram' });
+    assert.deepEqual(results[2], { text: 'Instagram is not connected, so automations did not run. Reconnect Instagram in Settings.', kind: 'error', section: 'instagram' });
+    assert.match(results[3].text, /^Automations are paused, so nothing was answered\./);
+    assert.deepEqual(results[4], { text: 'Worker finished. Nothing new to answer.', kind: 'success' });
+
+    // A real run while the worker is paused in Settings.
+    await dev.seeded.store.update('settings', (s) => {
+      s.worker = { ...(s.worker || {}), enabled: false };
+    }, { message: 'e2e: pause the worker' });
+    try {
+      await page.reload();
+      await page.waitForSelector('.automations .auto-rule', { timeout: 30_000 });
+      await page.getByRole('button', { name: 'Run now' }).click();
+      const toast = page.locator('.toast', { hasText: 'The worker is paused in Settings, so automations did not run.' });
+      await toast.waitFor({ timeout: 60_000 });
+      assert.equal(await page.locator('.toast', { hasText: 'Nothing new to answer' }).count(), 0);
+      await toast.getByRole('button', { name: 'Open Settings' }).click();
+      await page.waitForFunction(() => location.hash === '#/settings?section=worker');
+    } finally {
+      await dev.seeded.store.update('settings', (s) => {
+        s.worker = { ...(s.worker || {}), enabled: true };
+      }, { message: 'e2e: resume the worker' });
+      await page.goto(`${dev.url}/postpilot/index.html#/automations`);
+      await page.waitForSelector('.automations .auto-rule', { timeout: 30_000 });
+    }
+  });
+
+  test('the post picker leaves out canceled posts and posts deleted from Instagram', async () => {
+    const r = await page.evaluate(async () => {
+      const { deletedMediaIds, postChoices } = await import('/postpilot/js/views/automations.js');
+      const media = {
+        media: {
+          a: { id: 'a', caption: 'kept', timestamp: '2026-10-01T10:00:00Z', productType: 'FEED' },
+          b: { id: 'b', caption: 'flagged by the worker', timestamp: '2026-10-02T10:00:00Z', productType: 'FEED', deletedAt: '2026-10-05T00:00:00Z' },
+          c: { id: 'c', caption: 'deleted in the app', timestamp: '2026-10-03T10:00:00Z', productType: 'REELS' },
+          s: { id: 's', caption: 'story', timestamp: '2026-10-04T10:00:00Z', productType: 'STORY' },
+        },
+      };
+      const posts = {
+        posts: [
+          { id: 'p1', igMediaId: 'c', type: 'reel', status: 'canceled', deletedFromInstagramAt: '2026-10-06T00:00:00Z' },
+          { id: 'p2', igMediaId: 'd', type: 'feed', status: 'canceled', caption: 'canceled', publishedAt: '2026-10-07T10:00:00Z' },
+          { id: 'p3', igMediaId: 'e', type: 'feed', status: 'published', caption: 'not in analytics yet', publishedAt: '2026-10-08T10:00:00Z' },
+        ],
+      };
+      return { ids: postChoices(media, posts).map((p) => p.id), deleted: [...deletedMediaIds(media, posts)].sort() };
+    });
+    assert.deepEqual(r.ids, ['e', 'a']);
+    assert.deepEqual(r.deleted, ['b', 'c']);
+
+    // In the editor: the first post offered, once flagged as deleted by the worker, is no longer offered.
+    const firstId = await page.evaluate(async () => {
+      const { getStore } = await import('/postpilot/js/data.js');
+      const { postChoices } = await import('/postpilot/js/views/automations.js');
+      const store = getStore();
+      return postChoices(await store.read('analytics-media'), await store.read('posts'))[0].id;
+    });
+    assert.ok((await readDoc('analytics-media')).media[firstId], 'the newest post is in analytics');
+    const firstLabel = async () => {
+      await page.getByRole('button', { name: 'New rule' }).click();
+      const dialog = page.getByRole('dialog', { name: 'New rule' });
+      await dialog.getByRole('radio', { name: 'Chosen posts' }).click();
+      const grid = dialog.getByRole('group', { name: 'Choose posts' });
+      await grid.locator('.frame').first().waitFor();
+      const labels = await grid.locator('.frame').evaluateAll((els) => els.slice(0, 2).map((el) => el.getAttribute('aria-label')));
+      await dialog.getByRole('button', { name: 'Cancel' }).click();
+      await dialog.waitFor({ state: 'detached' });
+      return labels;
+    };
+    const before = await firstLabel();
+    await dev.seeded.store.update('analytics-media', (d) => {
+      d.media[firstId].deletedAt = new Date().toISOString();
+    }, { message: 'e2e: newest post deleted from Instagram' });
+    try {
+      await page.reload();
+      await page.waitForSelector('.automations .auto-rule', { timeout: 30_000 });
+      const after = await firstLabel();
+      assert.equal(after[0], before[1], 'the deleted post is left out and the next one moves up');
+    } finally {
+      await dev.seeded.store.update('analytics-media', (d) => {
+        delete d.media[firstId].deletedAt;
+      }, { message: 'e2e: clean up' });
+      await page.reload();
+      await page.waitForSelector('.automations .auto-rule', { timeout: 30_000 });
+    }
+  });
+
   test('screenshots in dark mode and on a phone', async () => {
     await page.emulateMedia({ colorScheme: 'dark' });
     await page.evaluate(() => window.scrollTo(0, 0));

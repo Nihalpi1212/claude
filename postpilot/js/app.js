@@ -144,7 +144,7 @@ function WorkerStatus() {
   }
   const at = last.finishedAt || last.startedAt;
   const ageMin = (Date.now() - new Date(at).getTime()) / 60000;
-  // GitHub can delay scheduled runs and idle runs only report every 30 minutes, so allow some slack.
+  // GitHub can delay scheduled runs and idle runs only report every 60 minutes, so allow some slack.
   const broken = runBroken(last);
   const tone = broken ? 'bad' : ageMin > 90 ? 'warn' : 'ok';
   const label = broken ? 'Worker had a problem' : ageMin > 90 ? 'Worker is late' : 'Worker running';

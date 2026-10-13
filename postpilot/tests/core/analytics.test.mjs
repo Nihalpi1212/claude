@@ -444,6 +444,16 @@ test('monthly report numbers record how much of each month was saved', () => {
   assert.deepEqual(monthCoverage({ daysWithData: 30 }, '2026-09'), { saved: 30, total: 30, complete: true });
 });
 
+test('monthly report: a post deleted from Instagram counts in the totals but is not a top post', () => {
+  const post = (id, likes, extra = {}) => ({ id, mediaType: 'IMAGE', productType: 'FEED', timestamp: '2026-09-10T12:00:00Z', likeCount: likes, commentsCount: 0, metrics: { reach: 100, likes, comments: 0, shares: 0, saved: 0 }, ...extra });
+  const media = { a: post('a', 50, { deletedAt: '2026-09-20T00:00:00Z' }), b: post('b', 20), c: post('c', 10) };
+  const r = buildMonthlyReport({ days: {}, media, month: '2026-09' });
+  assert.deepEqual(r.top.map((m) => m.id), ['b', 'c']);
+  assert.equal(r.summary.posts, 3, 'still counted in the month');
+  const all = buildMonthlyReport({ days: {}, media: { ...media, a: post('a', 50) }, month: '2026-09' });
+  assert.deepEqual(all.top.map((m) => m.id), ['a', 'b', 'c']);
+});
+
 test('monthly report: the non-follower share of reach only counts days with the split', () => {
   // The split starts on the 21st (an upgrade): reach is 1000 every day, 40% from non-followers.
   const days = {};

@@ -89,6 +89,7 @@ const EVENT_LABEL = {
   'remind again': 'Reminder moved',
   'posted by hand': 'Posted by hand',
   'deleted from Instagram': 'Deleted from Instagram',
+  linked: 'Found on Instagram',
 };
 
 const pick = (obj, keys) => Object.fromEntries(keys.map((k) => [k, obj[k] === undefined ? null : obj[k]]));
@@ -556,11 +557,12 @@ function Editor({ start, docs, onClose }) {
       }).matrix,
     [docs.audience, docs['analytics-media'], tz],
   );
+  // A post waiting to be posted by hand ('reminded') counts from its reminder, as in core/schedule.js planAutopilot.
   const taken = useMemo(
     () =>
       posts
-        .filter((p) => p.id !== draft.id && ['scheduled', 'publishing'].includes(p.status) && p.scheduledAt && (p.type === 'story') === (type === 'story'))
-        .map((p) => p.scheduledAt),
+        .filter((p) => p.id !== draft.id && ['scheduled', 'publishing', 'reminded'].includes(p.status) && p.scheduledAt && (p.type === 'story') === (type === 'story'))
+        .map((p) => (p.status === 'reminded' ? p.reminderSentAt || p.scheduledAt : p.scheduledAt)),
     [docs.posts, draft.id, type],
   );
   const best = useMemo(() => {

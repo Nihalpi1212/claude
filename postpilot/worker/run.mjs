@@ -94,6 +94,7 @@ const SKIP_TEXT = {
   needs_facebook_login: 'needs Facebook Login',
   unsupported: 'not supported for this account',
   no_ai: 'AI not configured',
+  no_time: 'out of time this run',
 };
 
 function humanize(key) {

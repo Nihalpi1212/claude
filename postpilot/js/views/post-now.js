@@ -306,6 +306,9 @@ export default function PostNow() {
     items.length <= 1
       ? videos ? 'video' : 'photo'
       : `${items.length} ${videos === items.length ? 'videos' : videos ? 'photos and videos' : 'photos'}`;
+  // The share sheet's button for these files (iOS says "Save Image", "Save 2 Videos", ...).
+  const multi = items.length > 1;
+  const saveWord = !videos ? (multi ? 'Save images' : 'Save image') : videos === items.length ? (multi ? 'Save videos' : 'Save video') : 'Save files';
 
   const saveToPhone = async () => {
     if (!files.length) return;
@@ -454,7 +457,7 @@ export default function PostNow() {
           <${Button} variant="primary" icon="download" onClick=${saveToPhone}
             disabled=${originals.status !== 'ready' || !files.length} loading=${originals.status === 'loading'}>Save to phone<//>
         </div>
-        <p class="text-sm muted">On a phone, choose “Save image” or “Save to Photos” in the share sheet. On a computer the files download.${post.type === 'carousel' ? ' Keep them in this order.' : ''}</p>
+        <p class="text-sm muted">On a phone, choose “${saveWord}” or “Save to Photos” in the share sheet. On a computer the files download.${post.type === 'carousel' ? ' Keep them in this order.' : ''}</p>
         ${problems.length && originals.status === 'ready' && !files.length ? html`<p class="text-sm text-bad">Nothing can be saved from here yet.</p>` : null}
       <//>
 

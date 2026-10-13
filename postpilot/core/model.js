@@ -155,6 +155,8 @@ export function uid(prefix = '') {
  *     createdAt, updatedAt, publishedAt, igMediaId, permalink,
  *     attempts: number, lastError: {message, code, at, permanent}|null,
  *     history: [{at, event, detail}] }
+ *   History events include 'linked': the worker's analytics job matched a post marked as posted by hand
+ *   (status 'published' without igMediaId) to its Instagram media and set igMediaId (and permalink when missing).
  *
  * MediaRef: { assetId, kind: 'image'|'video', altText } or, for items added from a feed or CSV URL,
  *   { remoteUrl, kind: 'image', altText } (published by passing the URL to Instagram; JPEG only)
@@ -177,7 +179,9 @@ export function uid(prefix = '') {
  *     nextIndex, horizonDays, feeds: [Feed], createdAt }
  *
  * Feed (lists.lists[].feeds[]): { id, url, title, disabled, addedAt, checkedAt, error, seen: [guid], etag, lastModified,
- *   full?: true (the queue holds as many unused items from this feed as it may; new posts are skipped meanwhile) }
+ *   full?: true (the queue holds as many unused items from this feed as it may; new posts are skipped meanwhile),
+ *   errorCount?: number (failed checks in a row; from the third the feed is checked half as often each time, up to
+ *     daily; missing on older docs counts as 1 while `error` is set; a successful check removes it) }
  *
  * MediaHistory (analytics-media-history.media[id]): { points: [{t: ISO, v: views, r: reach, l: likes, c: comments,
  *   s: saves, sh: shares, f: follows}] } while the post is under 30 days old: hourly in its first 6 hours, then at most
@@ -200,10 +204,13 @@ export function uid(prefix = '') {
  *     actions: [{type: 'reply_comment'|'private_reply'|'send_dm'|'hide_comment'|'ai_reply', texts: [string], guidance?}],
  *     oncePerUser: bool, createdAt, stats: {fired, lastFiredAt} }
  *
- * Automations cursors (automations.cursors): startedAt, commentsSeenAt, mediaComments {mediaId: count}, watchedFrom
+ * Automations cursors (automations.cursors): startedAt, commentsSeenAt (older docs: one mark for every post, no
+ *   longer advanced), commentsSeen {mediaId: ISO} (the newest comment a run saw on that post: comment pushes go out
+ *   for newer ones; removed when the post stops being watched), mediaComments {mediaId: count}, watchedFrom
  *   {mediaId: ISO} (comments before this are never answered: a post that starts being watched late does not get its old
- *   comments answered), watchListedAt, goneMedia {mediaId: ISO} (chosen posts deleted on Instagram), pinnedNext,
- *   pinnedCheckedAt, dmUpdatedTime, dmSeenAt, recentDms, pausedUntil.
+ *   comments answered), watchListedAt, inboxCheckedAt (when the worker last read comments and messages; more current
+ *   than inbox.fetchedAt, which is rewritten at most every 6 hours), goneMedia {mediaId: ISO} (chosen posts deleted
+ *   on Instagram), pinnedNext, pinnedCheckedAt, dmUpdatedTime, dmSeenAt, recentDms, pausedUntil.
  *
  * Outbox command (inbox.outbox[]): { id, type, payload, status: 'pending'|'sending'|'done'|'failed', error, createdAt, doneAt,
  *   attempts, maybeSent } ('sending' = claimed by a worker run; a command left 'sending' becomes 'failed' with maybeSent=true
@@ -219,7 +226,10 @@ export function uid(prefix = '') {
  * MediaStats (analytics-media.media[id]):
  *   { id, caption, mediaType, productType, permalink, timestamp, thumbnailUrl, likeCount, commentsCount,
  *     metrics: {reach, views, likes, comments, shares, saved, totalInteractions, profileVisits, follows,
- *               avgWatchTimeMs, totalWatchTimeMs}, fetchedAt }
+ *               avgWatchTimeMs, totalWatchTimeMs}, fetchedAt,
+ *     deletedAt?: ISO (deleted from Instagram: the numbers stay for totals and reports; lists of posts leave it out),
+ *     unlistedAt?: ISO (still on Instagram but missing from its listing, e.g. archived; looked up again daily) }
+ *   Both flags are removed when the post is listed again; a missing flag means not deleted.
  *
  * StoryStats (analytics-stories.stories[id]):
  *   { id, mediaType, timestamp, permalink, thumbPath?, metrics: {reach, views, replies, shares,

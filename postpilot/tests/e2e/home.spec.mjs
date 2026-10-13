@@ -496,6 +496,80 @@ describe('Today, Library and Autopilot', { timeout: 240_000 }, () => {
     await page.locator('.dash-account').waitFor({ timeout: 20_000 });
   });
 
+  test("Today: the inbox check time is the worker's latest, deleted posts leave Recent posts, the expired-login alert", async () => {
+    await go('#/');
+    await page.locator('.dash-sheet > li').first().waitFor({ timeout: 20_000 });
+    // The helpers, as the card and the list use them.
+    const unit = await page.evaluate(async () => {
+      const { inboxCheckedAt, liveMedia } = await import('/postpilot/js/views/dashboard.js');
+      const a = '2026-10-01T10:00:00.000Z';
+      const b = '2026-10-01T12:00:00.000Z';
+      return {
+        cursorLater: inboxCheckedAt({ fetchedAt: a }, { cursors: { inboxCheckedAt: b } }),
+        fetchLater: inboxCheckedAt({ fetchedAt: b }, { cursors: { inboxCheckedAt: a } }),
+        onlyCursor: inboxCheckedAt({ fetchedAt: null }, { cursors: { inboxCheckedAt: a } }),
+        none: inboxCheckedAt({}, null),
+        live: liveMedia({ m1: { id: 'm1' }, m2: { id: 'm2', deletedAt: b }, m3: { id: 'm3' } }, [{ igMediaId: 'm3', status: 'canceled', deletedFromInstagramAt: b }]).map((m) => m.id),
+      };
+    });
+    assert.deepEqual(unit, { cursorLater: '2026-10-01T12:00:00.000Z', fetchLater: '2026-10-01T12:00:00.000Z', onlyCursor: '2026-10-01T10:00:00.000Z', none: null, live: ['m1'] });
+
+    const saved = await page.evaluate(async () => {
+      const data = await import('/postpilot/js/data.js');
+      return { inbox: await data.readDoc('inbox'), automations: await data.readDoc('automations'), media: await data.readDoc('analytics-media'), settings: await data.readDoc('settings'), posts: await data.readDoc('posts') };
+    });
+    // The two newest posts in Recent posts: the worker marked one deleted; the other was deleted from Postpilot.
+    const newest = Object.values(saved.media.media || {})
+      .filter((m) => m.productType !== 'STORY' && m.permalink && Date.parse(m.timestamp))
+      .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
+      .slice(0, 2);
+    assert.equal(newest.length, 2);
+    const tile = (m) => page.locator(`.dash-sheet a[href="${m.permalink}"]`);
+    await tile(newest[0]).waitFor();
+    await tile(newest[1]).waitFor();
+    try {
+      await page.evaluate(async ({ ids }) => {
+        const data = await import('/postpilot/js/data.js');
+        const { newPost } = await import('/postpilot/core/model.js');
+        const hour = 36e5;
+        // The worker rewrote the inbox 5 hours ago, but checked it 1 hour ago (automations.cursors.inboxCheckedAt).
+        await data.mutate('inbox', (d) => void (d.fetchedAt = new Date(Date.now() - 5 * hour).toISOString()), { message: 'e2e: inbox time' });
+        await data.mutate('automations', (d) => void (d.cursors = { ...(d.cursors || {}), inboxCheckedAt: new Date(Date.now() - hour).toISOString() }), { message: 'e2e: inbox check' });
+        await data.mutate('analytics-media', (d) => void (d.media[ids[0]].deletedAt = new Date().toISOString()), { message: 'e2e: deleted media' });
+        const gone = newPost({ status: 'canceled', caption: 'E2E home: deleted from Instagram', igMediaId: ids[1], deletedFromInstagramAt: new Date().toISOString() });
+        await data.mutate('posts', (doc) => void doc.posts.push(gone), { message: 'e2e: deleted post' });
+        await data.mutate('settings', (s) => void (s.ig.status = { state: 'expired' }), { message: 'e2e: expired login' });
+      }, { ids: newest.map((m) => m.id) });
+      const card = page.locator('.dash-side', { hasText: 'Inbox' });
+      const expected = await page.evaluate(async () => {
+        const { relative } = await import('/postpilot/core/time.js');
+        return `Checked ${relative(new Date(Date.now() - 36e5), new Date())}`;
+      });
+      await card.locator('.dash-side-meta', { hasText: expected }).waitFor({ timeout: 20_000 });
+      assert.equal(
+        (await card.locator('.dash-side-scope').textContent()).trim(),
+        "From the worker's last check of the posts it watches. The Inbox shows the same comments, with your latest 12 posts read live.",
+      );
+      await tile(newest[0]).waitFor({ state: 'detached' });
+      await tile(newest[1]).waitFor({ state: 'detached' });
+      assert.ok((await page.locator('.dash-sheet > li').count()) >= 3, 'older posts fill the list');
+      const alert = page.locator('.dash-alerts .callout', { hasText: 'Instagram is disconnected' });
+      await alert.waitFor();
+      assert.match(await alert.textContent(), /Your Instagram login expired\. Posts set to publish automatically wait until you connect again; reminder posts still come due\./);
+    } finally {
+      await page.evaluate(async (s) => {
+        const data = await import('/postpilot/js/data.js');
+        await data.mutate('settings', (d) => void (d.ig.status = s.settings.ig.status), { message: 'e2e: restore' });
+        await data.mutate('inbox', () => s.inbox);
+        await data.mutate('automations', () => s.automations);
+        await data.mutate('analytics-media', () => s.media);
+        await data.mutate('posts', () => s.posts);
+      }, saved);
+    }
+    await page.locator('.dash-alerts .callout', { hasText: 'Instagram is disconnected' }).waitFor({ state: 'detached', timeout: 20_000 });
+    await tile(newest[0]).waitFor();
+  });
+
   test('no console errors', () => {
     const errors = h.consoleErrors.filter((e) => !/favicon/i.test(e));
     assert.deepEqual(errors, []);

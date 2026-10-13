@@ -123,7 +123,8 @@ renamed to `free` by `core/mp4.js`) at `public/tmp/<epochSec>-<random>.<ext>` on
 throwaway branch, `postpilot-public-tmp`, never on the data branch. That branch has no history:
 every change points it at a new root commit (force) holding only the copies still needed. The worker
 removes a copy as soon as Instagram has the media, and at the end of the publish job rewrites the
-branch to hold only copies of containers Instagram is still processing. GitHub may keep unreferenced
+branch to hold only copies of containers Instagram is still processing. A carousel's files are exposed
+together, before any container is created, so their copies share one rewrite. GitHub may keep unreferenced
 commits reachable by their id for some time, so treat anything published as public.
 
 Post lifecycle: `draft` -> `scheduled` -> `publishing` -> `published` | `failed`; `canceled` is
@@ -236,7 +237,16 @@ Layout: left sidebar (desktop) / bottom tab bar + "More" sheet (phone, < 760px).
 
 Env: `POSTPILOT_DATA_KEY` (base64 32 bytes, Actions secret), `GITHUB_TOKEN`, `GITHUB_REPOSITORY`,
 `POSTPILOT_BRANCH` (default `postpilot-data`), optional endpoint overrides (section 3),
-`POSTPILOT_NOW` (ISO, tests only), `POSTPILOT_MAX_WAIT_SEC` (default 540).
+`POSTPILOT_NOW` (ISO, tests only), `POSTPILOT_MAX_WAIT_SEC` (default 540),
+`POSTPILOT_GITHUB_WRITES_PER_MIN` (write pacing, below), `POSTPILOT_ALLOW_PRIVATE_LINKS=1` (turns the link
+guard off: the dev server, whose demo feed is on localhost, or a self-hosted worker reading feeds on its own network).
+
+Write pacing: GitHub answers 403 past its secondary rate limit (about 80 content-creating requests a
+minute), and publishing a backlog makes many in a burst. Requests to the real API other than GET and HEAD
+are paced to 60 a minute (`paceWrites` in `worker/context.mjs`; `POSTPILOT_GITHUB_WRITES_PER_MIN`
+overrides it, 0 = off; the local mocks are not paced). A secondary limit without `retry-after` is waited
+out once for a minute (`core/github.js`); a GitHub rate limit that remains (`GitHubError.isRateLimit`)
+does not count as a publishing attempt.
 
 Order per run (each job isolated with try/catch; one failing job never blocks the others):
 1. `token` refresh (Instagram Login, when older than 6 days or < 10 days to expiry)
@@ -244,20 +254,31 @@ Order per run (each job isolated with try/catch; one failing job never blocks th
 3. `publish` due posts (`scheduledAt <= now + lookahead`; waits for posts due within the run window);
    reminder posts get a push right away and need no Instagram connection; posts whose media is still
    downloading wait
-4. `feeds` download linked media (`importUrl`, up to 8 a run) and check RSS/Atom feeds (hourly per feed)
+4. `feeds` download linked media (`importUrl`, up to 8 a run) and check RSS/Atom feeds (hourly per feed;
+   from a feed's third failed check in a row, `feed.errorCount`, twice as long between checks each time, up
+   to a day). Links go through the link guard (section 9)
 5. `evergreen` fill list slots for the next `horizonDays`
 6. `autopilot` keep the queue filled at best times (AI captions when configured), reposts of top posts
 7. `automations` poll comments (watched-posts window + chosen posts) and DMs, apply rules, welcome DMs, blocked words
 8. `invites` collaboration invites every 6 hours (auto-accept allowlist, otherwise notify)
 9. `stories` capture live story insights before they expire
-10. `analytics` daily snapshot (once per local day), media insights refresh, per-post history, audience weekly
+10. `analytics` daily snapshot (once per local day), media insights refresh, per-post history, audience weekly;
+    links posts marked as posted by hand (`published` without `igMediaId`) to their Instagram media, by the
+    pasted link's shortcode or else by type and time (history event `linked`); flags media deleted from
+    Instagram as `analytics-media.media[id].deletedAt` ("Delete from Instagram" in the app, or a lookup of a
+    post missing from the listing that Instagram cannot find; one it still finds, e.g. archived, gets
+    `unlistedAt`). Flagged media keeps its numbers for totals; lists of posts leave it out
 11. `competitors` daily (Facebook Login only)
 12. `reports` monthly report, checked on days 1-3 of a month and made on the 2nd (once the month's last day
     was read again) or the 3rd, never the 1st
-13. `bio` refresh grid images daily
+13. `bio` refresh grid images daily; posts deleted from Instagram leave the grid (and `public/bio.json`)
 14. `housekeeping` sweep the throwaway media branch, trim logs, archive old posts
-15. `maintenance` keep-alive of the schedule (every ~20 days) and monthly compaction of the data branch
+15. `maintenance` keep-alive of the schedule (every ~20 days, in GitHub Actions only; a refused call also
+    waits the interval) and monthly compaction of the data branch
 Then: Web Push notifications for this run's events to `settings.notifications.subscriptions`, and the run record.
+Every write of the `log` document stores it whole again, so a run is recorded when it did or logged
+something, and an idle run only as an hourly heartbeat (replacing the previous idle record). The app
+says the worker is late when the newest record is older than 90 minutes.
 
 Public-log rule: Actions logs of a public repo are public. The worker prints ONLY counts and
 generic status ("published 1 post"). Never print captions, usernames, comment text, ids, tokens
@@ -271,3 +292,8 @@ Detailed logs go to the encrypted `log` doc. Exit code 1 only when a post failed
 - `index.html` ships a strict Content-Security-Policy: scripts `'self'`; connect-src limited to the endpoints above.
 - No secrets in URLs except Graph API `access_token` query params (required by Graph; never logged).
 - The bio page and anything under `public/` must never contain private data.
+- Link guard: the worker fetches links third parties pick (feeds, their pages and images, CSV links) only
+  over http(s) on ports 80 and 443, and refuses any whose host resolves to a private or local address
+  (loopback, private ranges, link-local such as cloud metadata, IPv4 inside IPv6), checking every redirect
+  itself (`guardLinks` in `worker/context.mjs`). A refused link is a lasting import error (code `blocked`).
+  DNS rebinding is not covered (fetch resolves the name again).

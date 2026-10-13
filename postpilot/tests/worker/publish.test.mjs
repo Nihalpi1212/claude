@@ -335,6 +335,23 @@ test('video copies live on the throwaway branch without location metadata; a pro
   assert.ok(!dataHistoryPaths(env).some((p) => p.startsWith('public/tmp/')));
 });
 
+test('a carousel exposes its photos together: fewer throwaway-branch rewrites, all copies removed', async (t) => {
+  const env = await startWorkerEnv();
+  t.after(() => env.close());
+  const assets = [await env.addAsset('f01.jpg'), await env.addAsset('f02.jpg'), await env.addAsset('f03.jpg'), await env.addAsset('f04.jpg')];
+  const post = await schedulePost(env, { type: 'carousel', caption: 'Four at once', media: assets.map((a) => ({ assetId: a.id, kind: 'image' })) });
+  const rewrites = () => [...env.ghMock.commits.values()].filter((c) => c.message === 'Temporary media for Instagram').length;
+  const before = rewrites();
+  const res = await env.run({ only: ['publish'] });
+  assert.equal(res.summary.jobs.publish.published, 1);
+  const saved = (await env.read('posts')).posts.find((p) => p.id === post.id);
+  assert.equal(saved.status, 'published');
+  assert.equal(env.graph.state.media.find((m) => m.id === saved.igMediaId).children.length, 4);
+  // One at a time this took 4 rewrites to add the copies and 1 to remove them.
+  assert.ok(rewrites() - before <= 3, `copies exposed together share rewrites (${rewrites() - before})`);
+  assert.deepEqual(await tmpFiles(env), []);
+});
+
 test('a GitHub write failure after Instagram published never publishes the post twice', async (t) => {
   const env = await startWorkerEnv();
   t.after(() => env.close());
@@ -431,6 +448,34 @@ test('a GitHub 403 while publishing is not taken for an expired Instagram login'
   // The next run publishes it (Instagram jobs were never paused).
   const run3 = await runWith(env, () => null, { only: ['token', 'publish'] });
   assert.equal(run3.summary.jobs.publish.published, 1);
+});
+
+test('a GitHub rate limit that outlasts the retries is not counted as an attempt', async (t) => {
+  const env = await startWorkerEnv();
+  t.after(() => env.close());
+  const asset = await env.addAsset('f09.jpg');
+  const post = await schedulePost(env, { caption: 'Busy GitHub', media: [{ assetId: asset.id, kind: 'image' }] });
+  let limited = 0;
+  const rateLimit = (url, init) => {
+    if (init.method !== 'POST' || !url.endsWith('/git/blobs') || !JSON.parse(init.body).content.startsWith('/9j/')) return null;
+    limited++;
+    return jsonResponse(403, { message: 'You have exceeded a secondary rate limit. Please wait a few minutes before you try again.' }, { 'retry-after': '0.01' });
+  };
+  // More runs than MAX_ATTEMPTS: a temporary error would have failed the post by now.
+  for (let i = 0; i < 5; i++) {
+    const res = await runWith(env, rateLimit, { only: ['publish'] });
+    assert.equal(res.exitCode, 0);
+    assert.equal(res.summary.jobs.publish.retried, 1);
+  }
+  assert.equal(limited, 15, 'each run tried three times');
+  const saved = (await env.read('posts')).posts.find((p) => p.id === post.id);
+  assert.equal(saved.status, 'scheduled');
+  assert.equal(saved.attempts, 0);
+  assert.equal(saved.lastError.code, 'github');
+  assert.equal(saved.lastError.permanent, false);
+  assert.match(saved.lastError.message, /rate limit/);
+  const run = await runWith(env, () => null, { only: ['publish'] });
+  assert.equal(run.summary.jobs.publish.published, 1);
 });
 
 test('stops claiming posts once the run is out of time', async (t) => {
@@ -672,6 +717,38 @@ test('a post whose media is still downloading waits, noted once; a failed or sta
   assert.equal(posts.find((p) => p.id === again.id).status, 'scheduled', 'its file is still downloading');
 });
 
+test('a post whose file Instagram cannot take fails without offering Try again', async (t) => {
+  const env = await startWorkerEnv();
+  t.after(() => env.close());
+  const png = await env.addAsset('f05.jpg', {
+    name: 'Banner',
+    importUrl: 'https://example.com/banner.png',
+    importError: 'This is a PNG image. Instagram only takes JPEG photos and the worker cannot convert images. Download the file and upload it in the Library, which converts it to JPEG.',
+    importErrorCode: 'not_jpeg',
+  });
+  const flaky = await env.addAsset('f06.jpg', { name: 'Flaky', importUrl: 'https://example.com/f.jpg', importError: 'HTTP 503 Tried 5 times.', importErrorCode: 'tries' });
+  const refused = await schedulePost(env, { caption: 'PNG from the feed', media: [{ assetId: png.id, kind: 'image' }] });
+  // Both kinds in one carousel: the refused file is the one named (trying again cannot help).
+  const both = await schedulePost(env, { type: 'carousel', caption: 'Mixed', media: [{ assetId: flaky.id, kind: 'image' }, { assetId: png.id, kind: 'image' }] });
+  const retry = await schedulePost(env, { caption: 'Temporary failure', media: [{ assetId: flaky.id, kind: 'image' }] });
+
+  const res = await env.run({ only: ['publish'] });
+  assert.equal(res.summary.jobs.publish.failed, 3);
+  const posts = (await env.read('posts')).posts;
+  for (const id of [refused.id, both.id]) {
+    const p = posts.find((x) => x.id === id);
+    assert.equal(p.status, 'failed');
+    assert.equal(p.lastError.code, 'import_failed');
+    assert.equal(
+      p.lastError.message,
+      'Instagram cannot take "Banner": This is a PNG image. Instagram only takes JPEG photos and the worker cannot convert images. Download the file and upload it in the Library, which converts it to JPEG. Replace the file in this post.',
+    );
+    assert.doesNotMatch(p.lastError.message, /Try again/);
+  }
+  const r = posts.find((x) => x.id === retry.id);
+  assert.match(r.lastError.message, /could not download "Flaky" from its link \(HTTP 503 Tried 5 times\.\)\. In the Library, choose Try again/);
+});
+
 test('a post due hours ago is not failed in the run that downloads its file (publish runs before feeds)', async (t) => {
   const env = await startWorkerEnv();
   t.after(() => env.close());
@@ -743,4 +820,18 @@ test('a reminder with no device to notify says so in the log and history', async
   assert.equal(entries.length, 1);
   assert.match(entries[0].message, /shows on the Today screen only/);
   assert.ok(!entries.some((e) => /^Sent a reminder/.test(e.message)), 'does not claim a reminder was sent');
+
+  // Instagram disconnected: the app shows only the Setup screen, which lists posts to post by hand.
+  const off = await startWorkerEnv({ connect: false });
+  t.after(() => off.close());
+  const a2 = await off.addAsset('f02.jpg');
+  const p2 = await schedulePost(off, { caption: 'Disconnected', publishMode: 'reminder', media: [{ assetId: a2.id, kind: 'image' }] });
+  const res2 = await off.run({ only: ['publish'] });
+  assert.equal(res2.summary.jobs.publish.reminded, 1);
+  const s2 = (await off.read('posts')).posts.find((p) => p.id === p2.id);
+  assert.equal(s2.history[s2.history.length - 1].detail, 'No device gets notifications, so it shows on the Setup screen only.');
+  const e2 = (await off.read('log')).entries.filter((e) => e.job === 'publish' && e.data?.postId === p2.id);
+  assert.equal(e2.length, 1);
+  assert.match(e2[0].message, /shows on the Setup screen only/);
+  assert.doesNotMatch(e2[0].message, /Today/);
 });

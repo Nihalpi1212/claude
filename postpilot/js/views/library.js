@@ -448,7 +448,7 @@ function UploadList({ items, onDismiss }) {
 // ---------------------------------------------------------------------------
 // Shared from another app (manifest share_target -> sw.js -> #/library?shared=1)
 
-/** Caption hint from what was shared: the text (or page title) plus the link when the text lacks it. */
+/** The text that was shared: the text (or page title) plus the link when the text lacks it. */
 export function sharedHint({ title = '', text = '', url = '' } = {}) {
   const body = String(text || title || '').trim();
   const link = String(url || '').trim();
@@ -466,33 +466,49 @@ function SharedThumb({ file }) {
   return html`<${Frame} src=${src} alt="" label=${file.name} kind=${isVideoFile(file) ? 'video' : undefined} />`;
 }
 
+// Any website can send a share (see sw.js), so the shared text is only shown, never used on its own:
+// the caption hint starts empty and takes the text only when the owner asks.
 function SharedPanel({ shared, setShared, onAdd, onDiscard, onCompose }) {
   const files = shared.files.filter((f) => isImageFile(f) || isVideoFile(f));
   const n = files.length;
   const videos = files.filter(isVideoFile).length;
   const what = videos === n ? plural(n, 'video') : videos ? `${n} photos and videos` : plural(n, 'photo');
+  const quote = shared.quote
+    ? html`<figure class="lib-shared-quote">
+        <figcaption class="muted text-sm">Shared text</figcaption>
+        <blockquote class="pre-wrap">${shared.quote}</blockquote>
+      </figure>`
+    : null;
   return html`<section class="lib-shared" aria-labelledby="lib-shared-title">
     <div class="lib-shared-head">
       <${Icon} name="share" size=${18} />
-      <h2 class="section-title" id="lib-shared-title">Shared with Postpilot</h2>
+      <h2 class="section-title" id="lib-shared-title">Something was shared with Postpilot. Only add it if you shared it yourself.</h2>
       <span class="muted text-sm">${n ? what : 'No photos or videos'}</span>
     </div>
+    ${shared.skipped
+      ? html`<p class="text-sm text-warn">${plural(shared.skipped, 'more file was', 'more files were')} not kept: a share holds up to 10 files and 300 MB.</p>`
+      : null}
     ${n
       ? html`<ul class="contact-sheet lib-shared-files" aria-label="Shared files">${files.map((f, i) => html`<li key=${i}><${SharedThumb} file=${f} /></li>`)}</ul>
           ${shared.files.length > n ? html`<p class="text-sm text-warn">${plural(shared.files.length - n, 'file')} cannot be added: only photos and videos can.</p>` : null}
+          ${quote}
           <${Field} label=${n === 1 ? 'Caption hint' : 'Caption hint for the first file'}
             hint="Autopilot uses this as the caption when AI is off, and as a note for AI captions.">
             <${TextArea} rows=${2} maxRows=${6} value=${shared.hint} onChange=${(v) => setShared((s) => ({ ...s, hint: v }))} placeholder="Optional" />
           <//>
+          ${shared.quote && shared.hint !== shared.quote
+            ? html`<div class="row"><${Button} variant="secondary" size="sm" onClick=${() => setShared((s) => ({ ...s, hint: s.quote }))}>Use shared text as caption hint<//></div>`
+            : null}
           <${Toggle} checked=${shared.pool} onChange=${(v) => setShared((s) => ({ ...s, pool: v }))} label="Add to the autopilot pool"
             hint=${n === 1 ? 'Autopilot may post it for you.' : 'Autopilot may post them for you.'} />
           <div class="row">
             <${Button} variant="primary" icon="upload" onClick=${() => onAdd(files)}>${n === 1 ? 'Add to library' : `Add ${n} files to library`}<//>
             <${Button} variant="ghost" onClick=${onDiscard}>Discard<//>
           </div>`
-      : html`<p class="text-sm">Only photos and videos can be added to the library.${shared.hint ? ' You can start a post with the shared text instead.' : ''}</p>
+      : html`<p class="text-sm">Only photos and videos can be added to the library.${shared.quote ? ' You can start a post with the shared text instead.' : ''}</p>
+          ${quote}
           <div class="row">
-            ${shared.hint ? html`<${Button} variant="primary" icon="plus" onClick=${() => onCompose(shared.hint)}>Start a post with this text<//>` : null}
+            ${shared.quote ? html`<${Button} variant="primary" icon="plus" onClick=${() => onCompose(shared.quote)}>Start a post with this text<//>` : null}
             <${Button} variant="ghost" onClick=${onDiscard}>Discard<//>
           </div>`}
   </section>`;
@@ -520,7 +536,7 @@ export default function Library() {
   const [limit, setLimit] = useState(SHEET_PAGE);
   const fileRef = useRef(null);
   const lastIndex = useRef(-1);
-  const [shared, setShared] = useState(null); // {files, hint, pool} shared from another app
+  const [shared, setShared] = useState(null); // {files, quote, hint, pool, skipped} shared from another app
 
   // Files shared from another app wait in the service worker's mailbox until they are added here.
   const sharedFlag = route.query.shared;
@@ -535,11 +551,11 @@ export default function Library() {
     readShared()
       .then((s) => {
         if (!alive) return;
-        if (!s || (!s.files.length && !sharedHint(s))) {
+        if (!s || (!s.files.length && !sharedHint(s) && !s.skipped)) {
           setQuery({ shared: null }); // already added (or discarded) on another visit
           return;
         }
-        setShared({ files: s.files, hint: sharedHint(s), pool: false });
+        setShared({ files: s.files, quote: sharedHint(s), hint: '', pool: false, skipped: s.skipped || 0 });
       })
       .catch(() => {
         if (!alive) return;

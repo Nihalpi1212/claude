@@ -147,3 +147,14 @@ test('exposed copies: downloaded photos lose trailing data; copies exposed toget
   for (const [i, e] of exposed.entries()) assert.deepEqual(blobOf(e.path), Buffer.from(await fixtureBytes(`f0${i + 1}.jpg`)), 'every copy is on the branch');
   assert.ok(blobOf(one.path), 'earlier copies stay');
 });
+
+test('the Instagram client uses the worker clock (POSTPILOT_NOW / now)', async (t) => {
+  const env = await startWorkerEnv();
+  t.after(() => env.close());
+  const base = Date.parse('2020-03-01T00:00:00Z');
+  const ctx = await createContext({ env: env.env, now: '2020-03-01T00:00:00Z', consoleLog: () => {} });
+  // refreshToken dates the new expiry from the client's clock when no nowMs is passed.
+  const { expiresAt } = await ctx.ig.refreshToken();
+  const ms = Date.parse(expiresAt) - (base + 5184000 * 1000);
+  assert.ok(ms >= 0 && ms < 60_000, `expiry dated from the worker clock (${expiresAt})`);
+});

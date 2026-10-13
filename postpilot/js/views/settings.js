@@ -558,6 +558,7 @@ function AiSection() {
   const [testing, setTesting] = useState(false);
   const [test, setTest] = useState(null);
   const [error, setError] = useState('');
+  const [toggled, setToggled] = useState(false); // "Use AI features" was switched by hand since the last save
   const dirty = JSON.stringify(form) !== base;
 
   // Follow outside changes (another tab, a restore) while there are no unsaved edits.
@@ -565,6 +566,7 @@ function AiSection() {
     if (!dirty && savedKey !== base) {
       setBase(savedKey);
       setForm(saved);
+      setToggled(false);
     }
   }, [savedKey]);
 
@@ -577,15 +579,19 @@ function AiSection() {
     e.preventDefault();
     const next = { ...form, apiKey: form.apiKey.trim() };
     if (next.enabled && !next.apiKey) return setError('Add an API key to turn AI features on.');
+    // A first key turns AI on (as in onboarding), unless the toggle was switched by hand in this edit.
+    const auto = !toggled;
     setSaving(true);
     try {
       const doc = await mutate('settings', (s) => {
-        s.ai = { ...(s.ai || {}), provider: 'anthropic', ...next };
+        const firstKey = !String((s.ai && s.ai.apiKey) || '').trim() && !!next.apiKey;
+        s.ai = { ...(s.ai || {}), provider: 'anthropic', ...next, ...(firstKey && auto ? { enabled: true } : {}) };
       }, { message: 'ai settings' });
       const fresh = pickAi(doc.ai);
       setBase(JSON.stringify(fresh));
       setForm(fresh);
-      toast('AI settings saved.', { kind: 'success' });
+      setToggled(false);
+      toast(fresh.enabled && !next.enabled ? 'API key saved. AI features are now on.' : 'AI settings saved.', { kind: 'success' });
     } catch {
       /* mutate showed the error */
     } finally {
@@ -609,7 +615,7 @@ function AiSection() {
 
   const models = MODELS.some((m) => m.value === form.model) ? MODELS : [...MODELS, { value: form.model, label: form.model }];
   return html`<form class="stack" onSubmit=${save}>
-    <${Toggle} checked=${form.enabled} onChange=${(v) => set({ enabled: v })} label="Use AI features"
+    <${Toggle} checked=${form.enabled} onChange=${(v) => (set({ enabled: v }), setToggled(true))} label="Use AI features"
       hint="Captions, hashtag ideas, reply suggestions, AI replies in automations and autopilot captions, written by Claude." />
     <div class="grid-2">
       <${Field}
@@ -744,6 +750,7 @@ function PreferencesSection() {
 
 function NotificationsSection() {
   const { settings, toast, confirm, tz } = useApp();
+  const remembered = rememberedHere();
   const n = { ...defaultNotifications(), ...(settings.notifications || {}) };
   const events = { ...defaultNotifications().events, ...(n.events || {}) };
   const subs = n.subscriptions || [];
@@ -804,6 +811,9 @@ function NotificationsSection() {
         ? html`<${Badge} tone="success" icon="check">On for this device<//>`
         : html`<${Button} variant="primary" icon="bell" loading=${busy} disabled=${!supported || ios} onClick=${enable}>Turn on notifications for this device<//>`}
     </div>
+    ${!remembered
+      ? html`<p class="muted text-sm settings-notify-lock">Notifications open the lock screen unless you turn on <strong>Remember this device</strong> when you unlock.</p>`
+      : null}
     <div>
       <h3 class="settings-sub">Devices</h3>
       ${subs.length

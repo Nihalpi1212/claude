@@ -14,6 +14,7 @@ import { buildHash } from '../router.js';
 import { AccountCard, ConnectInstagram, CopyButton, ExtLink, MessagesReminder } from '../ui/connect-instagram.js';
 import { Icon } from '../ui/icons.js';
 import { Badge, Button, Callout, Field, PageHeader, Spinner, TextInput, cx } from '../ui/kit.js';
+import { PrivateRepoCallout } from './lock.js';
 
 loadViewCss('onboarding');
 
@@ -142,6 +143,7 @@ export function WorkerSetup({ onContinue, continueLabel = 'Continue', onSkip }) 
   const [secret, setSecret] = useState(undefined); // undefined: checking, null: missing, 'forbidden', {updated_at}
   const [workflow, setWorkflow] = useState(undefined); // undefined: checking, null: missing, 'forbidden', {state}
   const [branch, setBranch] = useState('main');
+  const [isPrivate, setIsPrivate] = useState(false); // Postpilot needs a public repository (Pages, media Instagram downloads)
   const [busy, setBusy] = useState('');
   const [error, setError] = useState(null);
   const [manual, setManual] = useState(false);
@@ -167,7 +169,11 @@ export function WorkerSetup({ onContinue, continueLabel = 'Continue', onSkip }) 
     const [s] = await Promise.all([
       gh.getSecret(DATA_KEY_SECRET).catch((err) => (err.status === 403 ? 'forbidden' : undefined)),
       checkWorkflow(),
-      gh.getRepo().then((r) => alive.current && r && r.default_branch && setBranch(r.default_branch)).catch(() => {}),
+      gh.getRepo().then((r) => {
+        if (!alive.current || !r) return;
+        if (r.default_branch) setBranch(r.default_branch);
+        setIsPrivate(r.private === true);
+      }).catch(() => {}),
     ]);
     if (alive.current) setSecret(s === undefined ? 'unknown' : s);
   }
@@ -335,6 +341,8 @@ export function WorkerSetup({ onContinue, continueLabel = 'Continue', onSkip }) 
         </span>
       </li>
     </ul>
+
+    ${isPrivate ? html`<${PrivateRepoCallout} owner=${owner} repo=${repo} />` : null}
 
     ${workflow === null
       ? html`<${Callout} tone="danger" title="The worker workflow is missing"

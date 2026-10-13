@@ -716,6 +716,101 @@ describe('composer', () => {
     }, ids);
   });
 
+  it('best times keep the gap from a post being posted by hand (timed at its reminder)', async () => {
+    // The first best time as the composer works it out (core/schedule.js on the same documents).
+    const firstBest = () =>
+      page.evaluate(async () => {
+        const data = await import('/postpilot/js/data.js');
+        const { bestTimeMatrix, suggestSlots } = await import('/postpilot/core/schedule.js');
+        const { dayKey, timeKey } = await import('/postpilot/core/time.js');
+        await data.refreshNow();
+        const store = data.getStore();
+        const tz = (await store.read('settings')).timezone;
+        const audience = await store.read('audience');
+        const media = await store.read('analytics-media');
+        const posts = (await store.read('posts')).posts;
+        const matrix = bestTimeMatrix({ onlineFollowers: audience.onlineFollowers, mediaStats: media.media, tz }).matrix;
+        const taken = posts
+          .filter((p) => ['scheduled', 'publishing', 'reminded'].includes(p.status) && p.scheduledAt && p.type !== 'story')
+          .map((p) => (p.status === 'reminded' ? p.reminderSentAt || p.scheduledAt : p.scheduledAt));
+        const iso = suggestSlots({ matrix, tz, count: 3, taken, horizonDays: 14 })[0];
+        return iso ? { iso, date: dayKey(new Date(iso), tz), time: timeKey(new Date(iso), tz) } : null;
+      });
+    /** Click the composer's first best-time chip and read back the time it set. */
+    const chipTime = async () => {
+      await openNew(page);
+      await page.locator('.cmp-best .chip-main').first().click();
+      const when = page.locator('#cmp-when');
+      const picked = { date: await when.locator('input[type="date"]').inputValue(), time: await when.locator('input[type="time"]').inputValue() };
+      await closeComposer(page);
+      return picked;
+    };
+    const before = await firstBest();
+    assert.ok(before, 'there is a free best time');
+    assert.deepEqual(await chipTime(), { date: before.date, time: before.time });
+    // A post the owner is posting by hand: planned long ago, its reminder went out at that best time.
+    const id = await page.evaluate(async (at) => {
+      const data = await import('/postpilot/js/data.js');
+      const { newPost } = await import('/postpilot/core/model.js');
+      const lib = await data.getStore().read('library');
+      const a = lib.assets.find((x) => x.name === 'Vase trio');
+      const post = newPost({ status: 'reminded', publishMode: 'reminder', caption: 'E2E gap: posting by hand', media: [{ assetId: a.id, kind: 'image', altText: '' }], scheduledAt: new Date(Date.parse(at) - 10 * 864e5).toISOString(), reminderSentAt: at });
+      await data.mutate('posts', (doc) => void doc.posts.push(post), { message: 'e2e: reminded post' });
+      return post.id;
+    }, before.iso);
+    try {
+      const after = await firstBest();
+      assert.ok(after && after.iso !== before.iso, 'the reminded post takes that time');
+      assert.ok(Math.abs(Date.parse(after.iso) - Date.parse(before.iso)) >= 20 * 36e5, 'at least the 20-hour gap away');
+      assert.deepEqual(await chipTime(), { date: after.date, time: after.time });
+    } finally {
+      await page.evaluate(async (id) => {
+        const data = await import('/postpilot/js/data.js');
+        await data.mutate('posts', (doc) => void (doc.posts = doc.posts.filter((p) => p.id !== id)), { message: 'e2e: clean up' });
+      }, id);
+    }
+  });
+
+  it('the activity list names the worker\'s "linked" event', async () => {
+    const id = await page.evaluate(async () => {
+      const data = await import('/postpilot/js/data.js');
+      const { newPost } = await import('/postpilot/core/model.js');
+      const lib = await data.getStore().read('library');
+      const a = lib.assets.find((x) => x.name === 'Vase trio');
+      const at = new Date(Date.now() - 36e5).toISOString();
+      const post = newPost({
+        status: 'published',
+        publishMode: 'reminder',
+        caption: 'E2E linked: posted by hand',
+        media: [{ assetId: a.id, kind: 'image', altText: '' }],
+        scheduledAt: at,
+        publishedAt: at,
+        history: [
+          { at, event: 'posted by hand', detail: '' },
+          { at: new Date().toISOString(), event: 'linked', detail: 'Found this post on Instagram; its numbers now show here.' },
+        ],
+      });
+      await data.mutate('posts', (doc) => void doc.posts.push(post), { message: 'e2e: linked post' });
+      return post.id;
+    });
+    try {
+      await page.evaluate(() => (location.hash = '#/library'));
+      await page.locator('.lib-item').first().waitFor();
+      await page.getByRole('button', { name: /^Open Vase trio/ }).click();
+      await page.locator('.lib-usedin .list-row', { hasText: 'E2E linked: posted by hand' }).getByRole('button', { name: 'Open post' }).click();
+      await page.locator('.cmp-drawer .overlay-title', { hasText: 'Published post' }).waitFor();
+      await page.locator('.cmp-history .cmp-disclosure').click();
+      const first = page.locator('.cmp-history-list li').first();
+      assert.match(await first.textContent(), /Found on Instagram: Found this post on Instagram; its numbers now show here\./);
+      await closeComposer(page);
+    } finally {
+      await page.evaluate(async (id) => {
+        const data = await import('/postpilot/js/data.js');
+        await data.mutate('posts', (doc) => void (doc.posts = doc.posts.filter((p) => p.id !== id)), { message: 'e2e: clean up' });
+      }, id);
+    }
+  });
+
   it('screenshots in dark mode and on a phone, without horizontal overflow', async () => {
     const shots = [
       { w: 1280, hgt: 860, scheme: 'dark' },

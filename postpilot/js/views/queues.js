@@ -9,14 +9,14 @@ import { html, useEffect, useMemo, useRef, useState } from '../../vendor/preact.
 import { DOWNLOADS_PER_RUN, FEED_TEMPLATE, IMPORT_REFUSED, MAX_DOWNLOAD_TRIES, downloadRetryAt, feedBacklogCap, fitsFeed, isHttpUrl } from '../../core/feed.js';
 import { engagementRate, topMedia } from '../../core/analytics.js';
 import { LIMITS, hasErrors, newList, uid, validatePost } from '../../core/model.js';
-import { expandListSlots } from '../../core/schedule.js';
+import { expandListSlots, freesMedia, unusedAssets } from '../../core/schedule.js';
 import { formatDateTime, relative } from '../../core/time.js';
 import { aiPrefs, getAi } from '../ai-client.js';
 import { useApp } from '../app.js';
 import { loadViewCss } from '../css.js';
 import { queueTemplateCsv, readQueueImport } from '../csv-import.js';
 import { mutate, readDoc, transact, useDocs } from '../data.js';
-import { importState, saveBlob, thumbBase64 } from '../media.js';
+import { deleteAssets, importState, saveBlob, thumbBase64 } from '../media.js';
 import { PostThumb, TYPE_ICON, TYPE_LABEL, shortTime } from '../ui/calendar.js';
 import { Icon } from '../ui/icons.js';
 import {
@@ -130,6 +130,38 @@ function usableItems(list, posts, assetsById = null) {
   return (list.items || []).filter((it) => !busy.has(it.id) && !(it.timesUsed > 0) && !broken(it));
 }
 
+/** A library file that came from a link (a feed or a CSV row): downloaded (sourceUrl) or still to download (importUrl). */
+const fromLink = (a) => !!a && !!(a.sourceUrl || a.importUrl);
+
+/**
+ * Ids of the link files used by `dropped` items that nothing else uses once the change is saved: no item
+ * in `lists` (as they will be then), no post that still counts as using its media (core/schedule.js
+ * unusedAssets: published posts keep theirs) and not in the autopilot pool. deleteAssets checks again.
+ */
+function orphanLinkAssets(dropped, { lists, posts, assetsById }) {
+  const ids = new Set(dropped.flatMap((it) => (it.media || []).map((m) => m.assetId)).filter((id) => fromLink(assetsById[id]) && !assetsById[id].autopilot));
+  for (const l of lists) for (const it of l.items || []) for (const m of it.media || []) ids.delete(m.assetId);
+  for (const p of posts) if (p.coverAssetId && !freesMedia(p)) ids.delete(p.coverAssetId);
+  return unusedAssets([...ids].map((id) => assetsById[id]), posts).map((a) => a.id);
+}
+
+/** The offer to delete those files too (queue delete, items removed in the editor). Off until ticked. */
+function LinkFilesChoice({ count, checked, onChange }) {
+  const one = count === 1;
+  return html`<${Checkbox} checked=${checked} onChange=${onChange} class="qu-cleanup"
+    label=${`Also delete ${plural(count, 'file')} from the library`}
+    hint=${`${one ? 'It' : 'They'} came from links (a feed or a CSV file) and nothing else uses ${one ? 'it' : 'them'}.`} />`;
+}
+
+/** Confirm-dialog body for deleting a queue, with the offer above. */
+function DeleteQueueBody({ text, count, onChange }) {
+  const [on, setOn] = useState(false);
+  return html`<div class="stack">
+    <p class="confirm-body">${text}</p>
+    <${LinkFilesChoice} count=${count} checked=${on} onChange=${(v) => (setOn(v), onChange(v))} />
+  </div>`;
+}
+
 /** When the worker will next create a post for this list. */
 function nextFill(list, posts, tz, nowMs, assetsById) {
   if (list.enabled === false) return { text: 'Paused' };
@@ -184,7 +216,7 @@ export default function Queues() {
   };
   const openEdit = (list) => setEditing({ draft: structuredClone(list), isNew: false, originalItemIds: new Set((list.items || []).map((it) => it.id)) });
 
-  const save = async ({ draft, isNew, originalItemIds }) => {
+  const save = async ({ draft, isNew, originalItemIds, deleteAssetIds = [] }) => {
     const fields = {
       name: draft.name.trim(),
       color: draft.color,
@@ -236,8 +268,11 @@ export default function Queues() {
     );
     if (!ok) return false;
     setEditing(null);
+    // Link files of removed items, when the owner ticked the offer (after the save, so the queue no longer uses them).
+    const cleaned = deleteAssetIds.length ? await quietly(deleteAssets(deleteAssetIds)) : null;
+    const gone = cleaned ? cleaned.removed.length : 0;
     const runs = fields.enabled && draft.items.length && fields.slots.length;
-    toast(isNew ? `Queue "${fields.name}" created.${runs ? ' Posts appear after the next worker run.' : ''}` : `Queue "${fields.name}" saved.`, {
+    toast(isNew ? `Queue "${fields.name}" created.${runs ? ' Posts appear after the next worker run.' : ''}` : `Queue "${fields.name}" saved.${gone ? ` Deleted ${plural(gone, 'file')} from the library.` : ''}`, {
       kind: 'success',
       action: runs ? { label: 'Fill now', onClick: () => dispatchWorker('fill queues').catch(() => {}) } : undefined,
     });
@@ -307,7 +342,12 @@ export default function Queues() {
           }
           const f = id && l.feeds.find((x) => x.id === id);
           if (f) {
-            if (f.url !== clean.url) Object.assign(f, { url: clean.url, title: '', checkedAt: null, error: null, seen: [], etag: null, lastModified: null });
+            if (f.url !== clean.url) {
+              // A new address starts over: no failures to space checks out (feeds.mjs feedInterval), no backlog.
+              Object.assign(f, { url: clean.url, title: '', checkedAt: null, error: null, seen: [], etag: null, lastModified: null });
+              delete f.errorCount;
+              delete f.full;
+            }
             f.template = clean.template;
           } else {
             l.feeds.push({ id: uid('fd_'), url: clean.url, title: '', template: clean.template, disabled: false, addedAt: new Date().toISOString(), checkedAt: null, error: null, seen: [], added: 0 });
@@ -434,12 +474,16 @@ export default function Queues() {
   };
 
   const remove = async (list) => {
+    const goesWith = (p) => p.listId === list.id && (p.status === 'scheduled' || p.status === 'draft' || p.status === 'canceled');
     const upcoming = posts.filter((p) => p.listId === list.id && (p.status === 'scheduled' || p.status === 'draft')).length;
+    const text = upcoming
+      ? `This deletes the queue and its ${plural(upcoming, 'upcoming post')}. Posts already on Instagram stay there.`
+      : 'This deletes the queue and its items. Posts already on Instagram stay there.';
+    const linkFiles = orphanLinkAssets(list.items || [], { lists: lists.filter((l) => l.id !== list.id), posts: posts.filter((p) => !goesWith(p)), assetsById });
+    let alsoFiles = false;
     const yes = await confirm({
       title: `Delete "${list.name}"?`,
-      body: upcoming
-        ? `This deletes the queue and its ${plural(upcoming, 'upcoming post')}. Posts already on Instagram stay there.`
-        : 'This deletes the queue and its items. Posts already on Instagram stay there.',
+      body: linkFiles.length ? html`<${DeleteQueueBody} text=${text} count=${linkFiles.length} onChange=${(v) => (alsoFiles = v)} />` : text,
       confirmLabel: 'Delete queue',
       danger: true,
     });
@@ -453,7 +497,7 @@ export default function Queues() {
           const postsDoc = await tx.read('posts');
           listsDoc.lists = listsDoc.lists.filter((l) => l.id !== list.id);
           postsDoc.posts = postsDoc.posts.filter((p) => {
-            if (p.listId !== list.id || (p.status !== 'scheduled' && p.status !== 'draft' && p.status !== 'canceled')) return true;
+            if (!goesWith(p)) return true;
             if (p.status !== 'canceled') removed++;
             return false;
           });
@@ -464,7 +508,12 @@ export default function Queues() {
         { message: 'delete queue' },
       ),
     );
-    if (ok) toast(`Deleted "${list.name}"${removed ? ` and ${plural(removed, 'upcoming post')}` : ''}.`, { kind: 'success' });
+    if (!ok) return;
+    // After the queue is gone, so deleteAssets no longer counts its items as using the files.
+    const cleaned = alsoFiles ? await quietly(deleteAssets(linkFiles)) : null;
+    const gone = cleaned ? cleaned.removed.length : 0;
+    const parts = [`"${list.name}"`, removed ? plural(removed, 'upcoming post') : '', gone ? `${plural(gone, 'file')} from the library` : ''].filter(Boolean);
+    toast(`Deleted ${parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}` : parts[0]}.`, { kind: 'success' });
   };
 
   let body;
@@ -493,7 +542,7 @@ export default function Queues() {
       actions=${html`<${Button} variant="primary" icon="plus" onClick=${openNew}>New queue<//>`} />
     ${body}
     ${editing
-      ? html`<${QueueEditor} key=${editing.draft.id} editing=${editing} posts=${posts} assetsById=${assetsById} tz=${tz} nowMs=${nowMs}
+      ? html`<${QueueEditor} key=${editing.draft.id} editing=${editing} lists=${lists} posts=${posts} assetsById=${assetsById} tz=${tz} nowMs=${nowMs}
           onClose=${() => setEditing(null)} onSave=${save} />`
       : null}
     ${feedEdit && listFor(feedEdit.listId)
@@ -642,7 +691,9 @@ function FeedsSection({ list, tz, nowMs, checking, onAdd, onEdit, onDisabled, on
                 <span class="qu-feed-meta">
                   ${busy ? 'Checking…' : f.disabled ? 'Off' : paused ? 'Queue paused' : checked} · ${plural(f.added || 0, 'item')} added
                 </span>
-                ${f.error && !f.disabled ? html`<span class="qu-feed-error"><${Icon} name="alert" size=${13} /><span>${f.error}</span></span>` : null}
+                ${f.error && !f.disabled
+                  ? html`<span class="qu-feed-error"><${Icon} name="alert" size=${13} /><span>${f.error}${Number(f.errorCount) > 2 ? ' It keeps failing, so it is checked less often, up to once a day.' : ''}</span></span>`
+                  : null}
                 ${f.full && !f.error && !f.disabled
                   ? html`<span class="qu-feed-full"><${Icon} name="info" size=${13} /><span>The queue has enough unused items from this feed. New posts are skipped until it has used some.</span></span>`
                   : null}
@@ -680,6 +731,7 @@ function FeedModal({ list, feed, onClose, onSave }) {
   return html`<${Modal} open title=${feed ? 'Edit feed' : `Add a feed to "${list.name}"`} onClose=${onClose} footer=${footer} class="qu-feed-modal">
     <div class="stack">
       <p class="muted">The worker checks the feed every hour. Each new post with a JPEG picture becomes an item in this queue: the first check adds the newest 3, later checks up to 5 at a time, while the queue has fewer than ${feedBacklogCap(list)} unused items from the feed.</p>
+      <p class="muted text-sm">A feed that keeps failing is checked less often, up to once a day.</p>
       <${Field} label="Feed address" error=${tried ? urlError : undefined} hint="The RSS or Atom link of a blog or site, for example https://example.com/feed/">
         <${TextInput} type="url" value=${url} onChange=${setUrl} placeholder="https://" data-autofocus inputmode="url" autocomplete="off"
           onKeyDown=${(e) => e.key === 'Enter' && (e.preventDefault(), submit())} />
@@ -936,7 +988,7 @@ function AiItemsModal({ ai, settings, list, onClose, onAdd }) {
 // ---------------------------------------------------------------------------
 // Editor
 
-function QueueEditor({ editing, posts, assetsById, tz, nowMs, onClose, onSave }) {
+function QueueEditor({ editing, lists, posts, assetsById, tz, nowMs, onClose, onSave }) {
   const { confirm } = useApp();
   const { isNew, originalItemIds } = editing;
   const [initial] = useState(() => ({ ...editing.draft, items: (editing.draft.items || []).map((it) => ({ firstComment: '', caption: '', ...it })) }));
@@ -945,6 +997,12 @@ function QueueEditor({ editing, posts, assetsById, tz, nowMs, onClose, onSave })
   const [saving, setSaving] = useState(false);
   const [tried, setTried] = useState(false);
   const [dragIndex, setDragIndex] = useState(null);
+  const [alsoFiles, setAlsoFiles] = useState(false);
+  // Link files that removed items (or changed media) leave unused: offered for deletion on save.
+  const linkFiles = useMemo(
+    () => orphanLinkAssets(initial.items, { lists: [...lists.filter((l) => l.id !== draft.id), { items: draft.items }], posts, assetsById }),
+    [draft.items, lists, posts, assetsById],
+  );
 
   const set = (patch) => setDraft((d) => ({ ...d, ...patch }));
   const setSlot = (i, patch) => setDraft((d) => ({ ...d, slots: d.slots.map((s, j) => (j === i ? { ...s, ...patch } : s)) }));
@@ -1006,7 +1064,7 @@ function QueueEditor({ editing, posts, assetsById, tz, nowMs, onClose, onSave })
     setTried(true);
     if (blocking) return;
     setSaving(true);
-    const ok = await onSave({ draft, isNew, originalItemIds });
+    const ok = await onSave({ draft, isNew, originalItemIds, deleteAssetIds: alsoFiles ? linkFiles : [] });
     if (!ok) setSaving(false);
   };
 
@@ -1168,6 +1226,7 @@ function QueueEditor({ editing, posts, assetsById, tz, nowMs, onClose, onSave })
             </ol>`
           : html`<${EmptyState} compact icon="image" title="No items yet" body="Add photos or videos from your library. Each one becomes an item with its own caption."
               action=${html`<${Button} size="sm" icon="plus" onClick=${() => setPicker({ mode: 'add' })}>Add from library<//>`} />`}
+        ${linkFiles.length ? html`<${LinkFilesChoice} count=${linkFiles.length} checked=${alsoFiles} onChange=${setAlsoFiles} />` : null}
 
         <section class="qu-preview" aria-label="Coming up">
           <h3 class="label-caps">Coming up</h3>

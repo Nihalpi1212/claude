@@ -96,7 +96,8 @@ function build({ token, owner, repo, dataKeyRaw, login, onChange }) {
 
 /**
  * Check a token against a repo before asking for the passphrase.
- * Returns { login, repo, keyring } (keyring null when Postpilot has not been set up there).
+ * Returns { login, repoInfo, keyring, isPrivate } (keyring null when Postpilot has not been set up there;
+ * isPrivate true for a private repository, where free GitHub Pages and publishing do not work).
  */
 export async function inspectRepo({ token, owner, repo }) {
   const gh = createGitHub({ token, owner, repo, apiBase: ENDPOINTS.github });
@@ -114,7 +115,7 @@ export async function inspectRepo({ token, owner, repo }) {
     throw new GitHubError(403, 'This token can read the repository but cannot write to it. Give it "Contents: Read and write".');
   }
   const keyring = await readKeyring(gh, DATA_BRANCH);
-  return { login: user.login, repoInfo, keyring };
+  return { login: user.login, repoInfo, keyring, isPrivate: repoInfo.private === true };
 }
 
 export async function unlock({ token, owner, repo, passphrase, remember, keyring, login, onChange }) {

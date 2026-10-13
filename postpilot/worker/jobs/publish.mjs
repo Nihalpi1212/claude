@@ -22,7 +22,8 @@
 //   runs this job without a connection; only the Instagram part is skipped then).
 //   The reminder push is sent right away (ctx.notify only queues, and run.mjs sends the queue after
 //   every job, which can be many minutes later); without a device that gets notifications the
-//   reminder only shows on the Today screen, and the activity log says so.
+//   reminder only shows on the Today screen (on the Setup screen while Instagram is disconnected: the
+//   app shows only that screen then, and it lists posts to post by hand), and the activity log says so.
 // - Media that the worker still has to download from a link (asset.importUrl, CSV and RSS imports):
 //   the post waits (noted once in its history); it fails when the download failed (importError) or
 //   is still pending 6 hours after the post was due (or after it was last changed, e.g. scheduled
@@ -32,6 +33,7 @@
 import { duePosts } from '../../core/schedule.js';
 import { classifyError, publishPost } from '../../core/publish.js';
 import { PublishPendingError } from '../../core/ig.js';
+import { IMPORT_REFUSED } from '../../core/feed.js';
 import { describeError, isIgAuth } from '../context.mjs';
 import { NOTIFY_DEFAULTS, sendNotifications } from '../notify.mjs';
 import { pendingDownloads } from './feeds.mjs';
@@ -418,6 +420,8 @@ async function pushReminders(ctx, sent) {
 async function sendReminders(ctx, ids) {
   let sent = [];
   const push = canPushReminders(ctx.settings);
+  // Without a connection the app shows only the Setup screen, which lists posts to post by hand.
+  const where = ctx.settings.ig ? 'the Today screen' : 'the Setup screen';
   await ctx.store.transact(
     async (tx) => {
       sent = [];
@@ -430,7 +434,7 @@ async function sendReminders(ctx, ids) {
         p.status = 'reminded';
         p.reminderSentAt = nowIso;
         p.lastError = null;
-        pushHistory(p, nowIso, 'reminder sent', push ? undefined : 'No device gets notifications, so it shows on the Today screen only.');
+        pushHistory(p, nowIso, 'reminder sent', push ? undefined : `No device gets notifications, so it shows on ${where} only.`);
         sent.push({ id: p.id, type: p.type, caption: p.caption || '' });
       }
       if (sent.length) tx.write('posts', doc);
@@ -441,9 +445,9 @@ async function sendReminders(ctx, ids) {
   const res = push ? await pushReminders(ctx, sent) : null;
   for (const p of sent) {
     const what = `${TYPE_NAMES[p.type] || 'post'}${p.caption ? ` ("${p.caption.slice(0, 60)}")` : ''}`;
-    if (!push) ctx.log('publish', 'info', `A ${what} is due to be posted by hand. No device gets notifications, so the reminder shows on the Today screen only.`, { postId: p.id });
+    if (!push) ctx.log('publish', 'info', `A ${what} is due to be posted by hand. No device gets notifications, so the reminder shows on ${where} only.`, { postId: p.id });
     else if (res && res.sent) ctx.log('publish', 'info', `Sent a reminder to post a ${what} by hand.`, { postId: p.id });
-    else ctx.log('publish', 'warn', `A ${what} is due to be posted by hand, but the phone notification could not be sent. It shows on the Today screen.`, { postId: p.id });
+    else ctx.log('publish', 'warn', `A ${what} is due to be posted by hand, but the phone notification could not be sent. It shows on ${where}.`, { postId: p.id });
   }
   return sent.length;
 }
@@ -529,8 +533,12 @@ async function checkDownloads(ctx, due, skip, result) {
     }
     skip.add(p.id);
     if (failed.length) {
-      const a = failed[0];
-      const message = `Postpilot could not download ${fileName(a)} from its link (${String(a.importError).slice(0, 200)}). In the Library, choose Try again or replace the file in this post, then schedule it again.`;
+      // A file refused for good (a PNG, the wrong shape...) downloads the same way again: no "Try again".
+      const a = failed.find((x) => IMPORT_REFUSED.has(x.importErrorCode)) || failed[0];
+      const reason = String(a.importError).slice(0, 300);
+      const message = IMPORT_REFUSED.has(a.importErrorCode)
+        ? `Instagram cannot take ${fileName(a)}: ${reason.replace(/[.\s]+$/, '')}. Replace the file in this post.`
+        : `Postpilot could not download ${fileName(a)} from its link (${reason.slice(0, 200)}). In the Library, choose Try again or replace the file in this post, then schedule it again.`;
       if (await failDownload(ctx, p.id, message, 'import_failed')) result.failed++;
     } else if (ctx.nowMs() - waitingSince(p) > IMPORT_GIVE_UP_MS && !pending.some((a) => tryingNow.has(a.id))) {
       const message = `${fileName(pending[0])} was still downloading from its link 6 hours after this post was due. Check the link in the Library or replace the file, then schedule the post again.`;

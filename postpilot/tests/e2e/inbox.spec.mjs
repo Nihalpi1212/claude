@@ -116,6 +116,48 @@ describe('Inbox', { timeout: 240_000 }, () => {
     await page.waitForSelector('.inbox .ibx-group', { timeout: 30_000 });
   });
 
+  test('the worker copy is dated by the worker’s latest check, not only inbox.fetchedAt', async () => {
+    const cases = await page.evaluate(async () => {
+      const { latestTime } = await import('/postpilot/js/views/inbox.js');
+      const a = '2026-10-01T10:00:00.000Z';
+      const b = '2026-10-01T12:00:00.000Z';
+      return [latestTime(a, b), latestTime(b, a), latestTime(a, null), latestTime(undefined, b), latestTime(null, undefined)];
+    });
+    assert.deepEqual(cases, ['2026-10-01T12:00:00.000Z', '2026-10-01T12:00:00.000Z', '2026-10-01T10:00:00.000Z', '2026-10-01T12:00:00.000Z', null]);
+
+    const saved = { fetchedAt: (await readDoc('inbox')).fetchedAt, checkedAt: ((await readDoc('automations')).cursors || {}).inboxCheckedAt };
+    const setTimes = async (fetchedAt, checkedAt) => {
+      await dev.seeded.store.update('inbox', (d) => {
+        d.fetchedAt = fetchedAt;
+      }, { message: 'e2e: inbox copy time' });
+      await dev.seeded.store.update('automations', (d) => {
+        d.cursors = { ...(d.cursors || {}), inboxCheckedAt: checkedAt };
+        if (checkedAt === undefined) delete d.cursors.inboxCheckedAt;
+      }, { message: 'e2e: inbox check time' });
+      await page.reload();
+      await page.waitForSelector('.inbox .ibx-group', { timeout: 30_000 });
+    };
+    const olderNote = async (iso) => {
+      const ago = await page.evaluate(async (t) => (await import('/postpilot/core/time.js')).relative(t), iso);
+      const note = page.locator('section.ibx-older p', { hasText: 'from its last check' });
+      await note.waitFor();
+      const text = await note.textContent();
+      assert.ok(text.includes(`from its last check ${ago}.`), `${text} (expected ${ago})`);
+    };
+    try {
+      // The worker read comments 3 minutes ago but last rewrote the inbox copy 5 hours ago.
+      const fetchedAt = new Date(Date.now() - 5 * 3600e3).toISOString();
+      const checkedAt = new Date(Date.now() - 3 * 60e3).toISOString();
+      await setTimes(fetchedAt, checkedAt);
+      await olderNote(checkedAt);
+      // An older check mark (or none) leaves inbox.fetchedAt in charge.
+      await setTimes(fetchedAt, new Date(Date.now() - 9 * 3600e3).toISOString());
+      await olderNote(fetchedAt);
+    } finally {
+      await setTimes(saved.fetchedAt, saved.checkedAt);
+    }
+  });
+
   test('an action on an older post goes to Instagram and updates the worker copy', async () => {
     const el = page.locator('section.ibx-older .ibx-comments > .ibx-c').first();
     await el.waitFor();

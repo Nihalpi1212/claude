@@ -129,6 +129,8 @@
 .qu-issues { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; font-size: var(--fs-sm); }
 .qu-issues li { display: flex; align-items: flex-start; gap: 6px; }
 .qu-issues svg { flex: none; margin-top: 3px; }
+/* "Also delete N files from the library" (removed link items, queue delete). */
+.qu-items-col .qu-cleanup { padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r-sm); }
 
 .qu-preview {
   display: flex;

@@ -252,7 +252,14 @@ describe('Library', { timeout: 240_000 }, () => {
     await panel.waitFor({ timeout: 15_000 });
     await panel.getByText('1 file cannot be added: only photos and videos can.').waitFor();
     await panel.locator('.frame img').waitFor();
-    assert.equal(await panel.getByRole('textbox', { name: 'Caption hint' }).inputValue(), 'New glaze test from the kiln\nhttps://studionorth.example/blog/glaze');
+    // Any website can send a share, so the panel asks the owner to check, and the shared text is only quoted.
+    assert.equal((await panel.getByRole('heading').textContent()).trim(), 'Something was shared with Postpilot. Only add it if you shared it yourself.');
+    assert.equal(await panel.locator('.lib-shared-quote blockquote').textContent(), 'New glaze test from the kiln\nhttps://studionorth.example/blog/glaze');
+    const hint = panel.getByRole('textbox', { name: 'Caption hint' });
+    assert.equal(await hint.inputValue(), '', 'the caption hint is not filled from the shared text');
+    assert.equal(await panel.getByText(/not kept/).count(), 0, 'nothing was skipped');
+    await panel.getByRole('button', { name: 'Use shared text as caption hint' }).click();
+    assert.equal(await hint.inputValue(), 'New glaze test from the kiln\nhttps://studionorth.example/blog/glaze');
     await shot(page, 'library-e2e-shared');
     await page.setViewportSize({ width: 390, height: 844 });
     await page.waitForTimeout(300);
@@ -295,6 +302,7 @@ describe('Library', { timeout: 240_000 }, () => {
     await page.evaluate(() => (location.hash = '#/library?shared=1'));
     const panel = page.locator('.lib-shared');
     await panel.getByText('Only photos and videos can be added to the library.').waitFor({ timeout: 15_000 });
+    assert.equal(await panel.locator('.lib-shared-quote blockquote').textContent(), 'Read how we mix our glazes\nhttps://studionorth.example/blog/mixing');
     await panel.getByRole('button', { name: 'Start a post with this text' }).click();
     await page.locator('#cmp-caption').waitFor({ timeout: 20_000 });
     assert.equal(await page.locator('#cmp-caption').inputValue(), 'Read how we mix our glazes\nhttps://studionorth.example/blog/mixing');
@@ -304,6 +312,28 @@ describe('Library', { timeout: 240_000 }, () => {
     if (await discard.isVisible().catch(() => false)) await discard.click();
     await page.locator('.cmp-drawer').waitFor({ state: 'detached' });
     assert.equal(await page.evaluate(() => caches.has('postpilot-share')), false);
+  });
+
+  test('files past the share mailbox limit are counted and mentioned; Discard adds nothing', async () => {
+    const before = (await readDoc('library')).assets.length;
+    await page.evaluate(async () => {
+      const jpeg = await (await fetch('/postpilot/dev/fixtures/f02.jpg')).blob();
+      // Two shares: the second one is added to the first, and the mailbox keeps at most 10 files.
+      for (const n of [6, 6]) {
+        const form = new FormData();
+        for (let i = 0; i < n; i++) form.append('media', new File([jpeg], `IMG_${i}.jpg`, { type: 'image/jpeg' }));
+        await fetch(new URL('share-target', location.href), { method: 'POST', body: form });
+      }
+    });
+    await page.evaluate(() => (location.hash = '#/library?shared=1'));
+    const panel = page.locator('.lib-shared');
+    await panel.getByText('2 more files were not kept: a share holds up to 10 files and 300 MB.').waitFor({ timeout: 15_000 });
+    assert.equal(await panel.locator('.lib-shared-files > li').count(), 10);
+    assert.equal(await panel.locator('.lib-shared-quote').count(), 0, 'no text was shared');
+    await panel.getByRole('button', { name: 'Discard' }).click();
+    await panel.waitFor({ state: 'detached' });
+    assert.equal(await page.evaluate(() => caches.has('postpilot-share')), false);
+    assert.equal((await readDoc('library')).assets.length, before, 'nothing was added');
   });
 
   test('no console errors', () => {

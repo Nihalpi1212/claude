@@ -350,6 +350,149 @@ test('"Check now" while the worker is paused in Settings says the feed was not c
   }
 });
 
+test('a new feed address clears the failure count and the full flag; a feed that keeps failing says it is checked less often', async () => {
+  const { page } = h;
+  const card = page.locator('.qu-card', { hasText: 'Throwback Thursday' });
+  const row = card.locator('.qu-feed');
+  await row.waitFor();
+  const feedOf = async () => (await stored('lists')).lists.find((l) => l.name === 'Throwback Thursday').feeds[0];
+  // As the worker leaves a feed after five failed checks in a row (worker/jobs/feeds.mjs feedInterval).
+  await page.evaluate(async () => {
+    const data = await import('/postpilot/js/data.js');
+    await data.mutate('lists', (doc) => {
+      const f = doc.lists.find((l) => l.name === 'Throwback Thursday').feeds[0];
+      Object.assign(f, { error: 'The feed answered 500 Internal Server Error.', errorCount: 5, full: true, checkedAt: new Date().toISOString() });
+    }, { message: 'e2e: failing feed' });
+  });
+  await row.getByText('The feed answered 500 Internal Server Error. It keeps failing, so it is checked less often, up to once a day.').waitFor({ timeout: 15_000 });
+
+  await openMenu(row.getByRole('button', { name: /^Actions for the feed/ }));
+  await page.getByRole('menuitem', { name: 'Edit feed' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Edit feed' });
+  await dialog.getByText('A feed that keeps failing is checked less often, up to once a day.').waitFor();
+  const url = `${h.url}/mock/feed/demo.xml?e2e=moved`;
+  await dialog.getByLabel('Feed address').fill(url);
+  await dialog.getByText('A new address is checked from scratch: the newest 3 posts are added again.').waitFor();
+  await dialog.getByRole('button', { name: 'Save feed' }).click();
+  await dialog.waitFor({ state: 'detached' });
+  const feed = await waitFor(async () => {
+    const f = await feedOf();
+    return f.url === url ? f : null;
+  }, { message: 'feed saved' });
+  assert.equal(feed.error, null);
+  assert.equal(feed.checkedAt, null);
+  assert.equal(feed.errorCount, undefined, 'the new address starts without failures');
+  assert.equal(feed.full, undefined, 'and without the full flag');
+  await row.getByText('Not checked yet').waitFor();
+  assert.equal(await row.getByText(/checked less often/).count(), 0);
+});
+
+test('removing items or deleting a queue offers to delete the link files nothing else uses', async () => {
+  const { page } = h;
+  // Files from links (downloads that failed, so the page never loads them): one per case.
+  const ids = await page.evaluate(async () => {
+    const data = await import('/postpilot/js/data.js');
+    const { newAsset, newList, newPost, uid } = await import('/postpilot/core/model.js');
+    const lib = await data.getStore().read('library');
+    const vase = lib.assets.find((a) => a.name === 'Vase trio');
+    const link = (name, extra = {}) =>
+      newAsset({ name, importUrl: `https://example.invalid/e2e/${name}`, importError: 'The link answered 404 Not Found.', importErrorCode: 'http', ...extra });
+    const a = {
+      gone: link('e2e-gone.jpg'), // only in the queue
+      kept: link('e2e-kept.jpg'), // only in the queue, offer left unticked
+      shared: link('e2e-shared.jpg'), // also in another queue
+      posted: link('e2e-posted.jpg'), // used by a published post
+      pool: link('e2e-pool.jpg', { autopilot: true }), // in the autopilot pool
+      last1: link('e2e-last1.jpg'),
+      last2: link('e2e-last2.jpg'),
+    };
+    const item = (asset, caption) => ({ id: uid('li_'), type: 'feed', caption, firstComment: '', media: [{ assetId: asset.id, kind: 'image', altText: '' }], timesUsed: 0, lastUsedAt: null });
+    const list = newList({ name: 'E2E link cleanup', enabled: false, items: [
+      item(a.gone, 'Gone'), item(a.kept, 'Kept'), item(a.shared, 'Shared'), item(a.posted, 'Posted'), item(a.pool, 'Pool'), item(vase, 'Library file'), item(a.last1, 'Last one'), item(a.last2, 'Last two'),
+    ] });
+    const other = newList({ name: 'E2E other queue', enabled: false, items: [item(a.shared, 'Shared too')] });
+    const post = newPost({ status: 'published', caption: 'E2E posted from a link', media: [{ assetId: a.posted.id, kind: 'image', altText: '' }], scheduledAt: new Date(Date.now() - 864e5).toISOString(), publishedAt: new Date(Date.now() - 864e5).toISOString() });
+    await data.mutate('library', (doc) => void doc.assets.push(...Object.values(a)), { message: 'e2e: link files' });
+    await data.mutate('lists', (doc) => void doc.lists.push(list, other), { message: 'e2e: link queues' });
+    await data.mutate('posts', (doc) => void doc.posts.push(post), { message: 'e2e: posted link file' });
+    return { assets: Object.fromEntries(Object.entries(a).map(([k, v]) => [k, v.id])), vase: vase.id, list: list.id, other: other.id, post: post.id, items: list.items.map((it) => it.id) };
+  });
+  const inLibrary = async () => new Set((await stored('library')).assets.map((a) => a.id));
+  const card = page.locator('.qu-card', { hasText: 'E2E link cleanup' });
+  await card.waitFor({ timeout: 15_000 });
+  const editor = page.getByRole('dialog', { name: 'Edit "E2E link cleanup"' });
+  const removeItem = (id) => editor.locator(`.qu-item[data-item-id="${id}"]`).locator('.qu-item-remove').click();
+  const offer = editor.getByRole('checkbox', { name: /^Also delete/ });
+
+  // Files that something else uses are never offered: another queue, a published post, the autopilot pool, uploads.
+  await card.getByRole('button', { name: 'Edit queue' }).click();
+  await editor.waitFor();
+  for (const i of [2, 3, 4, 5]) await removeItem(ids.items[i]);
+  assert.equal(await offer.count(), 0, 'nothing to offer');
+  // Removing an item whose file is only in this queue offers it, unticked.
+  await removeItem(ids.items[0]);
+  await offer.waitFor();
+  assert.match(await editor.locator('.qu-cleanup').textContent(), /Also delete 1 file from the library.*It came from links \(a feed or a CSV file\) and nothing else uses it\./);
+  assert.equal(await offer.isChecked(), false);
+  await removeItem(ids.items[1]);
+  await editor.locator('.qu-cleanup', { hasText: 'Also delete 2 files from the library' }).waitFor();
+  // Tick it, then untick it again: unticked keeps the files.
+  await offer.check();
+  await offer.uncheck();
+  await editor.getByRole('button', { name: 'Save queue' }).click();
+  await page.locator('.toast-msg', { hasText: /^Queue "E2E link cleanup" saved\.$/ }).waitFor();
+  let lib = await inLibrary();
+  assert.ok(lib.has(ids.assets.gone) && lib.has(ids.assets.kept), 'unticked: the files stay');
+
+  // Edit again: the two files are no longer in any queue item, so removing more items offers only theirs.
+  await card.getByRole('button', { name: 'Edit queue' }).click();
+  await editor.waitFor();
+  await removeItem(ids.items[6]);
+  await editor.locator('.qu-cleanup', { hasText: 'Also delete 1 file from the library' }).waitFor();
+  await offer.check();
+  await editor.getByRole('button', { name: 'Save queue' }).click();
+  await page.locator('.toast', { hasText: 'Queue "E2E link cleanup" saved. Deleted 1 file from the library.' }).waitFor();
+  lib = await inLibrary();
+  assert.ok(!lib.has(ids.assets.last1), 'the ticked file is deleted');
+  for (const k of ['gone', 'kept', 'shared', 'posted', 'pool', 'last2']) assert.ok(lib.has(ids.assets[k]), `${k} stays`);
+  assert.ok(lib.has(ids.vase));
+
+  // Delete the queue: its last link file is offered (the uploaded one is not).
+  await openMenu(card.getByRole('button', { name: 'Actions for E2E link cleanup' }));
+  await page.getByRole('menuitem', { name: 'Delete' }).click();
+  const confirm = page.getByRole('dialog', { name: 'Delete "E2E link cleanup"?' });
+  await confirm.getByText('This deletes the queue and its items. Posts already on Instagram stay there.').waitFor();
+  const del = confirm.getByRole('checkbox', { name: /^Also delete 1 file from the library/ });
+  assert.equal(await del.isChecked(), false);
+  await del.check();
+  await confirm.getByRole('button', { name: 'Delete queue' }).click();
+  await page.locator('.toast', { hasText: 'Deleted "E2E link cleanup" and 1 file from the library.' }).waitFor();
+  await card.waitFor({ state: 'detached' });
+  lib = await inLibrary();
+  assert.ok(!lib.has(ids.assets.last2));
+  for (const k of ['gone', 'kept', 'shared', 'posted', 'pool']) assert.ok(lib.has(ids.assets[k]), `${k} stays`);
+  assert.ok(lib.has(ids.vase), 'uploaded files are never offered');
+
+  // The file the other queue shared is now only there: deleting that queue offers it. Left unticked, it stays.
+  const other = page.locator('.qu-card', { hasText: 'E2E other queue' });
+  await openMenu(other.getByRole('button', { name: 'Actions for E2E other queue' }));
+  await page.getByRole('menuitem', { name: 'Delete' }).click();
+  const again = page.getByRole('dialog', { name: 'Delete "E2E other queue"?' });
+  await again.getByRole('checkbox', { name: /^Also delete 1 file from the library/ }).waitFor();
+  await again.getByRole('button', { name: 'Delete queue' }).click();
+  await page.locator('.toast-msg', { hasText: /^Deleted "E2E other queue"\.$/ }).waitFor();
+  await other.waitFor({ state: 'detached' });
+  assert.ok((await inLibrary()).has(ids.assets.shared), 'unticked: the file stays');
+
+  // Clean up what is left for the tests that follow.
+  await page.evaluate(async (ids) => {
+    const data = await import('/postpilot/js/data.js');
+    const drop = new Set(Object.values(ids.assets));
+    await data.mutate('posts', (doc) => void (doc.posts = doc.posts.filter((p) => p.id !== ids.post)), { message: 'e2e: clean up' });
+    await data.mutate('library', (doc) => void (doc.assets = doc.assets.filter((a) => !drop.has(a.id))), { message: 'e2e: clean up' });
+  }, ids);
+});
+
 test('pause, duplicate and delete', async () => {
   const { page } = h;
   const seeded = page.locator('.qu-card', { hasText: 'Throwback Thursday' });
