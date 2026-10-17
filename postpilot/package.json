@@ -1,0 +1,9 @@
+{
+  "name": "postpilot",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/core/*.test.mjs tests/worker/*.test.mjs",
+    "dev": "node dev/server.mjs"
+  }
+}

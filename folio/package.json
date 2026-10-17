@@ -1,0 +1,35 @@
+{
+  "name": "folio-pdf",
+  "productName": "Folio PDF",
+  "version": "0.1.0",
+  "description": "Free, open-source PDF reader for Windows and macOS: view, search, annotate, fill forms, sign, and organize pages.",
+  "main": "src/main/main.js",
+  "type": "module",
+  "private": true,
+  "license": "MIT",
+  "author": "Folio PDF contributors",
+  "homepage": "https://github.com/Nihalpi1212/claude",
+  "scripts": {
+    "postinstall": "node scripts/copy-vendor.mjs",
+    "start": "electron .",
+    "test": "node --test tests/unit/*.test.mjs",
+    "test:e2e": "playwright test -c tests/e2e/playwright.config.mjs",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win",
+    "dist:mac": "electron-builder --mac",
+    "dist:linux": "electron-builder --linux",
+    "dev:web": "node tests/e2e/server.mjs 8765",
+    "fixtures": "node tests/fixtures/make-fixtures.mjs"
+  },
+  "dependencies": {
+    "@pdf-lib/fontkit": "1.1.1",
+    "pdf-lib": "1.17.1",
+    "pdfjs-dist": "6.4.299"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.56.1",
+    "electron": "44.9.0",
+    "electron-builder": "26.15.3"
+  }
+}

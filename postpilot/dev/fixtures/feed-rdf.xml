@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<!DOCTYPE rdf:RDF [
+  <!ENTITY copy "&#169;">
+]>
+<rdf:RDF
+  xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+  xmlns="http://purl.org/rss/1.0/"
+  xmlns:dc="http://purl.org/dc/elements/1.1/"
+  xmlns:content="http://purl.org/rss/1.0/modules/content/">
+  <channel rdf:about="https://news.example.net/">
+    <title>Maker News</title>
+    <link>https://news.example.net/</link>
+    <description>Daily maker links</description>
+    <items>
+      <rdf:Seq>
+        <rdf:li rdf:resource="https://news.example.net/a"/>
+        <rdf:li rdf:resource="https://news.example.net/b"/>
+      </rdf:Seq>
+    </items>
+  </channel>
+  <item rdf:about="https://news.example.net/a">
+    <title>Wood-fired kilns are back</title>
+    <link>https://news.example.net/a</link>
+    <description>A short &lt;b&gt;report&lt;/b&gt;.</description>
+    <dc:date>2026-10-12T06:00:00Z</dc:date>
+    <content:encoded><![CDATA[<p>Body</p><img src='https://news.example.net/img/kiln.jpg'>]]></content:encoded>
+  </item>
+  <item rdf:about="https://news.example.net/b">
+    <title>Glaze chemistry 101</title>
+    <link>https://news.example.net/b</link>
+    <dc:date>2026-10-11T06:00:00Z</dc:date>
+  </item>
+</rdf:RDF>
