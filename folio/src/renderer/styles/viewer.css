@@ -1,0 +1,76 @@
+/* Document view: the pdf.js viewer container, page chrome, night mode, tool cursors, overlays. */
+.doc-host { position: absolute; inset: 0; }
+.viewerContainer {
+  position: absolute; inset: 0; overflow: auto;
+  background: var(--viewer-bg);
+  -webkit-overflow-scrolling: touch;
+  outline: none;
+}
+.viewerContainer .pdfViewer { padding-top: 12px; padding-bottom: 12px; }
+.viewerContainer .pdfViewer .page { margin: 0 auto 12px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.22); border: 0; background-clip: content-box; }
+.viewerContainer .pdfViewer.removePageBorders .page { margin: 0 auto 10px; }
+.viewerContainer.night .page canvas { filter: invert(0.92) hue-rotate(180deg); }
+.viewerContainer.night .page .annotationLayer img { filter: invert(0.92) hue-rotate(180deg); }
+.viewerContainer.hand-tool { cursor: grab; }
+.viewerContainer.hand-tool.grabbing { cursor: grabbing; }
+.viewerContainer.hand-tool .textLayer { pointer-events: none; }
+.viewerContainer.hand-tool .textLayer span { cursor: grab; }
+.viewerContainer.tool-shape .page, .viewerContainer.tool-measure .page, .viewerContainer.tool-note .page, .viewerContainer.tool-eraser .page, .viewerContainer.tool-snapshot .page { cursor: crosshair; }
+.viewerContainer.tool-eraser .annotationLayer section { cursor: pointer; }
+.viewerContainer.tool-shape .textLayer, .viewerContainer.tool-measure .textLayer, .viewerContainer.tool-note .textLayer, .viewerContainer.tool-snapshot .textLayer, .viewerContainer.tool-eraser .textLayer { pointer-events: none; }
+.viewerContainer.tool-shape .annotationLayer, .viewerContainer.tool-measure .annotationLayer, .viewerContainer.tool-note .annotationLayer, .viewerContainer.tool-snapshot .annotationLayer { pointer-events: none; }
+
+/* text selection colour */
+.textLayer ::selection { background: var(--selection); }
+.textLayer .highlight { background-color: rgba(255, 221, 0, 0.55); }
+.textLayer .highlight.selected { background-color: rgba(255, 140, 0, 0.75); }
+
+/* form field highlight (Acrobat-style) */
+.viewerContainer.highlight-fields .annotationLayer .textWidgetAnnotation :is(input, textarea),
+.viewerContainer.highlight-fields .annotationLayer .choiceWidgetAnnotation select,
+.viewerContainer.highlight-fields .annotationLayer .buttonWidgetAnnotation.checkBox input,
+.viewerContainer.highlight-fields .annotationLayer .buttonWidgetAnnotation.radioButton input {
+  background-color: rgba(60, 120, 255, 0.18);
+  outline: 1px solid rgba(60, 120, 255, 0.5);
+}
+.viewerContainer.highlight-fields .annotationLayer .textWidgetAnnotation :is(input, textarea):focus,
+.viewerContainer.highlight-fields .annotationLayer .choiceWidgetAnnotation select:focus { background-color: rgba(60, 120, 255, 0.08); outline-color: var(--accent); }
+
+/* per-page overlay used by the shape/measure/snapshot tools (added by annotate.js) */
+.page .folio-overlay { position: absolute; inset: 0; z-index: 5; pointer-events: none; }
+.page .folio-overlay.active { pointer-events: auto; }
+.page .folio-overlay svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.folio-measure-label { position: absolute; transform: translate(-50%, -130%); background: var(--fg); color: var(--bg); padding: 2px 6px; border-radius: 4px; font-size: 11px; white-space: nowrap; pointer-events: none; }
+
+/* pdf.js editor layer: sane defaults for variables the host must define */
+:root {
+  --editor-toolbar-bg-color: var(--bg-elevated);
+  --editor-toolbar-fg-color: var(--fg);
+  --editor-toolbar-border-color: var(--border);
+  --editor-toolbar-hover-bg-color: var(--hover);
+  --editor-toolbar-hover-fg-color: var(--fg);
+  --editor-toolbar-highlight-color: var(--accent);
+  --editor-toolbar-shadow: var(--shadow);
+  --focus-outline: 2px solid var(--accent);
+  --hover-outline: 2px dashed var(--accent);
+  --freetext-line-height: 1.35;
+  --freetext-padding: 2px;
+  --resizer-bg-color: var(--accent);
+  --resizer-size: 8px;
+  --editorFreeText-editing-cursor: text;
+  --editorInk-editing-cursor: pointer;
+  --alt-text-bg-color: rgba(0,0,0,0.6);
+}
+.viewerContainer.dark-page-bg { --viewer-bg: #2b2b31; }
+
+/* loading / error overlays per document */
+.doc-overlay { position: absolute; inset: 0; display: grid; place-items: center; background: var(--viewer-bg); z-index: 10; color: var(--fg-muted); }
+.doc-overlay .doc-loading { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.doc-overlay .spinner { width: 28px; height: 28px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.doc-error { max-width: 420px; text-align: center; padding: 24px; background: var(--bg-elevated); border-radius: 12px; box-shadow: var(--shadow); color: var(--fg); }
+.doc-error svg { width: 40px; height: 40px; stroke: var(--danger); fill: none; stroke-width: 1.75; }
+
+/* presentation mode */
+body.presentation .viewerContainer { background: #000; }
+body.presentation .viewerContainer .pdfViewer .page { box-shadow: none; }

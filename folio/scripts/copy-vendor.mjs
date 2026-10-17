@@ -13,6 +13,8 @@ const copies = [
   ['pdfjs-dist/build/pdf.mjs.map', 'pdfjs/pdf.mjs.map'],
   ['pdfjs-dist/build/pdf.worker.mjs', 'pdfjs/pdf.worker.mjs'],
   ['pdfjs-dist/build/pdf.worker.mjs.map', 'pdfjs/pdf.worker.mjs.map'],
+  ['pdfjs-dist/build/pdf.sandbox.mjs', 'pdfjs/pdf.sandbox.mjs'],
+  ['pdfjs-dist/build/pdf.sandbox.mjs.map', 'pdfjs/pdf.sandbox.mjs.map'],
   ['pdfjs-dist/web/pdf_viewer.mjs', 'pdfjs/pdf_viewer.mjs'],
   ['pdfjs-dist/web/pdf_viewer.mjs.map', 'pdfjs/pdf_viewer.mjs.map'],
   ['pdfjs-dist/web/pdf_viewer.css', 'pdfjs/pdf_viewer.css'],

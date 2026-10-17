@@ -1,6 +1,6 @@
 // Minimal static file server for the renderer, used by the Playwright e2e tests and `npm run dev:web`.
-// Serves src/renderer at / (so index.html, lib/, styles/, vendor/ resolve exactly like under folio://app/)
-// and tests/fixtures/out at /fixtures/. No dependencies.
+// Serves src/renderer at / (so index.html, lib/, styles/, vendor/ resolve exactly like under folio://app/),
+// src/shared at /shared/, build/ at /build/ and tests/fixtures/out at /fixtures/. No dependencies.
 import { createServer } from 'node:http';
 import { createReadStream, promises as fs } from 'node:fs';
 import { dirname, extname, join, normalize, resolve, sep } from 'node:path';
@@ -9,6 +9,8 @@ import { fileURLToPath } from 'node:url';
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '..', '..');
 const RENDERER = join(root, 'src', 'renderer');
+const SHARED = join(root, 'src', 'shared');
+const BUILD = join(root, 'build');
 const FIXTURES = join(root, 'tests', 'fixtures', 'out');
 
 export const MIME = {
@@ -42,6 +44,12 @@ function resolveFile(urlPath) {
   if (clean.startsWith('/fixtures/')) {
     const file = normalize(join(FIXTURES, clean.slice('/fixtures/'.length)));
     return file.startsWith(FIXTURES + sep) ? file : null;
+  }
+  for (const [prefix, dir] of [['/shared/', SHARED], ['/build/', BUILD]]) {
+    if (clean.startsWith(prefix)) {
+      const file = normalize(join(dir, clean.slice(prefix.length - 1)));
+      return file.startsWith(dir + sep) ? file : null;
+    }
   }
   const rel = clean === '/' ? '/index.html' : clean;
   const file = normalize(join(RENDERER, rel));
