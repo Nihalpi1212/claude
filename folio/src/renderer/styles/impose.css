@@ -34,7 +34,7 @@
 .impose-table { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
 .impose-table th, .impose-table td { padding: 4px 8px; border-bottom: 1px solid var(--border); text-align: right; white-space: nowrap; }
 .impose-table th:first-child, .impose-table td:first-child { text-align: left; }
-.impose-table th { position: sticky; top: 0; background: var(--bg-raised); font-weight: 600; color: var(--fg-muted); }
+.impose-table th { position: sticky; top: 0; background: var(--bg-elevated); font-weight: 600; color: var(--fg-muted); }
 .impose-table tr.current td { background: var(--accent-soft); }
 
 .impose-list { border: 1px solid var(--border); border-radius: 8px; max-height: 240px; overflow: auto; }

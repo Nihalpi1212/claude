@@ -226,7 +226,7 @@ export function buildMenuTemplate({ platform, state = {}, recent = [], run, isPa
       item('Create Sample &Document…', 'impose:sample'),
       item('Sheet Si&zes…', 'impose:sheet-sizes'),
       item('Automation Se&quences…', 'impose:sequences'),
-      item(state.imposeRecording ? 'Stop Recording Sequence' : 'Record Sequence…', 'impose:record', { type: 'checkbox', checked: !!state.imposeRecording }),
+      item(state.imposeRecording ? 'Stop Recording Sequence' : 'Record Sequence…', 'impose:record'),
     ],
   };
 

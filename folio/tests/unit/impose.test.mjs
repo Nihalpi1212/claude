@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as impose from '../../src/shared/impose.js';
 import * as engine from '../../src/shared/engine.js';
+import { PDFDocument, PDFName, StandardFonts, degrees } from 'pdf-lib';
 import { fixture, pageTexts, withPdfjs, pdflibLoad } from './helpers.mjs';
 
 const near = (a, b, tol = 0.6) => assert.ok(Math.abs(a - b) <= tol, `${a} is not within ${tol} of ${b}`);
@@ -75,6 +76,21 @@ test('createBooklet pairs pages for saddle stitching (left and right binding, cr
   near(a4pages[0].width, 841.89, 0.1);
   assert.deepEqual(a4pages.map(bigNumbers), [[8, 1], [2, 7], [6, 3], [4, 5]]);
   for (const it of a4pages[0].items) assert.ok(it.x >= 20 && it.x <= 841.89 - 20 && it.y >= 20 && it.y <= 595.28 - 20);
+
+  // creep: the outermost sheet is not shifted, inner sheets move toward the spine
+  const crept = await textItems((await impose.createBooklet(sample, { creep: 10 })).bytes);
+  const plain = await textItems(bytes);
+  const labelX = (sheet, n) => sheet.items.find((it) => it.str === `Page ${n} of 8` && it.y > 300).x;
+  near(labelX(crept[0], 8), labelX(plain[0], 8)); // outer sheet front, left page: unchanged
+  near(labelX(crept[2], 6), labelX(plain[2], 6) + 10); // inner sheet front, left page: toward the spine (right)
+  near(labelX(crept[2], 3), labelX(plain[2], 3) - 10); // inner sheet front, right page: toward the spine (left)
+
+  // pages without a content stream (allowed for blank pages) can be imposed
+  const doc = await PDFDocument.create();
+  doc.addPage([300, 400]).drawText('hello', { x: 10, y: 10, size: 12, font: await doc.embedFont(StandardFonts.Helvetica) });
+  doc.addPage([300, 400]).node.delete(PDFName.of('Contents'));
+  const noContents = await impose.createBooklet(await doc.save());
+  assert.equal(noContents.sheets, 2);
 });
 
 test('nUp lays pages out in a grid (across or down) and stepAndRepeat repeats them', async () => {
@@ -90,6 +106,11 @@ test('nUp lays pages out in a grid (across or down) and stepAndRepeat repeats th
 
   // gap/margin too large for the cells
   await assert.rejects(impose.nUp(sample, { sheet: 'A6', rows: 1, cols: 2, margin: 200 }), (e) => e.code === 'range');
+
+  // rotate is counter-clockwise (text then runs upwards: positive b in the text matrix)
+  const rotated = await impose.nUp(await fixture('text'), { sheet: 'Letter-landscape', rows: 1, cols: 1, rotate: 90, pageIndices: [0] });
+  const rotatedItems = await withPdfjs(rotated.bytes, async (doc) => (await (await doc.getPage(1)).getTextContent()).items.filter((it) => it.str.trim()));
+  assert.ok(rotatedItems[0].transform[1] > 0 && rotatedItems[0].transform[2] < 0, 'rotated counter-clockwise');
 
   const one = await impose.stepAndRepeat(sample, { sheet: 'A4', rows: 2, cols: 2, each: false });
   assert.equal(one.sheets, 1);
@@ -148,6 +169,11 @@ test('shufflePages, shufflePreset, reversePages and applyOrder rebuild the page 
   await assert.rejects(impose.applyOrder(text, [0, 9]), (e) => e.code === 'range');
   const blanks = await impose.applyOrder(text, [null, 0], { blankSize: [100, 200] });
   assert.deepEqual(await sizes(blanks), [[100, 200], [612, 792]]);
+  // blanks follow the *displayed* size of the first page
+  const landscapeDoc = await PDFDocument.create();
+  landscapeDoc.addPage([612, 792]).setRotation(degrees(90));
+  const withBlank = await impose.insertBlankPages(await landscapeDoc.save(), { at: 'end' });
+  assert.deepEqual(await sizes(withBlank), [[792, 612], [792, 612]]);
 });
 
 test('insertBlankPages, fillToMultiple and duplicatePages', async () => {
@@ -274,6 +300,13 @@ test('setPageBoxes sets, insets and removes page boxes; pageInfo reports them', 
   out = await impose.setPageBoxes(out, { pageIndices: [0], box: 'trim', remove: true });
   assert.equal((await impose.pageInfo(out))[0].trimBox, null);
   await assert.rejects(impose.setPageBoxes(text, { box: 'crop', values: [0, 0, 0, 10] }), (e) => e.code === 'range');
+  // insets are visual: on a /Rotate 90 page the displayed top edge is the user-space left edge
+  const rotDoc = await PDFDocument.create();
+  rotDoc.addPage([612, 792]).setRotation(degrees(90));
+  const rotCrop = await impose.setPageBoxes(await rotDoc.save(), { box: 'crop', insets: { top: 100, left: 20 } });
+  const rc = (await impose.pageInfo(rotCrop))[0];
+  assert.deepEqual(rc.cropBox, [100, 20, 512, 772]);
+  assert.deepEqual([rc.width, rc.height], [772, 512]);
   await assert.rejects(impose.setPageBoxes(text, { box: 'nope' }), (e) => e.code === 'range');
   const mixed = await impose.pageInfo(await fixture('mixed'));
   assert.deepEqual(mixed.map((p) => p.orientation), ['portrait', 'landscape', 'square', 'landscape']);
@@ -321,11 +354,16 @@ test('stickOnText draws page numbers, Bates numbers and headers at the requested
   assert.ok(s[2].items.some((it) => it.str === 'n=10'));
   assert.ok(s[4].items.some((it) => it.str === 'n=11'));
 
-  // rotated pages: the text follows the visual orientation (lands near the visual bottom)
+  // rotated pages: positions follow the displayed orientation. Page 4 of the mixed fixture is
+  // 612x792 with /Rotate 90, so its displayed bottom edge is the user-space right edge (x near 612)
+  // and its displayed top-left corner is the user-space bottom-left corner.
   const mixed = await fixture('mixed');
-  const rot = await impose.stickOnText(mixed, { text: 'X{page}X', position: 'bottom-center', pageIndices: [3] });
-  const texts = await pageTexts(rot);
-  assert.match(texts[3], /X4X/);
+  const rot = await impose.stickOnText(mixed, { text: 'X{page}X', position: 'bottom-center', pageIndices: [3], margin: 18 });
+  const bottom = (await textItems(rot))[3].items.find((it) => it.str === 'X4X');
+  assert.ok(bottom.x > 585 && bottom.x < 600, `bottom-center lands by the user-space right edge: ${bottom.x}`);
+  assert.ok(bottom.y > 300 && bottom.y < 450, `and vertically centred: ${bottom.y}`);
+  const topLeft = (await textItems(await impose.stickOnText(mixed, { text: 'TL', position: 'top-left', pageIndices: [3], margin: 18 })))[3].items.find((it) => it.str === 'TL');
+  assert.ok(topLeft.x > 18 && topLeft.x < 45 && topLeft.y > 15 && topLeft.y < 22, `top-left lands at the user-space bottom-left: ${topLeft.x},${topLeft.y}`);
 });
 
 test('maskingTape covers a rectangle or an edge and rejects empty tape', async () => {
@@ -360,8 +398,10 @@ test('placeMarks grows the page and draws crop marks, registration, colour bars 
   const after = pages[0].items.find((it) => it.str === before.str);
   near(after.x, before.x + 36);
   near(after.y, before.y + 36);
-  const same = await impose.placeMarks(text, { grow: false, margin: 0, registration: false, colorBars: false });
+  const same = await impose.placeMarks(text, { grow: false, margin: 36, label: 'INSIDE', pageIndices: [0] });
   assert.deepEqual((await sizes(same))[0], [612, 792]);
+  const inside = (await textItems(same))[0].items.find((it) => it.str === 'INSIDE');
+  assert.ok(inside && inside.x > 0 && inside.y > 0 && inside.y < 36, 'label drawn inside the page when not growing');
 });
 
 test('runSequence replays recorded steps and rejects unknown ones', async () => {

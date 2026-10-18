@@ -97,6 +97,8 @@ test('manual imposition with auto-arrange, and recorded sequences replay', async
 
   await run(page, 'impose:manual');
   await expect(dialog(page)).toBeVisible();
+  await expect(dialog(page).locator('[data-f="size"]')).toHaveValue('A4'); // the sheet field reflects the A4 landscape default
+  await expect(dialog(page).locator('[data-f="size-orient"]')).toHaveValue('landscape');
   await dialog(page).locator('[data-act="add-all"]').click();
   await expect(dialog(page).locator('[data-rows] tr')).toHaveCount(5);
   await expect(dialog(page).locator('[data-preview] .cell')).toHaveCount(5);
@@ -130,26 +132,40 @@ test('manual imposition with auto-arrange, and recorded sequences replay', async
   await withReload(page, () => dialog(page).locator('button.primary').click());
   await expect(page.locator('#tb-page-count')).toHaveText('of 8');
   await expect(page.locator('#statusbar')).toContainText('2 steps');
+  // a step whose dialog is cancelled or whose operation fails is not recorded
+  await run(page, 'impose:marks');
+  await dialog(page).locator('[data-f="label"]').fill('{file}');
+  await dialog(page).locator('[data-f="margin"]').fill('0');
+  await dialog(page).locator('button.primary').click();
+  await expect(page.locator('.toast.error').last()).toContainText('margin');
+  await dialog(page).locator('[data-f="margin"]').fill('10');
+  await withReload(page, () => dialog(page).locator('button.primary').click());
+  await expect(page.locator('#statusbar')).toContainText('3 steps');
   await run(page, 'impose:record'); // stop
-  await expect.poll(() => page.evaluate(() => (window.folioApp.settings.imposeSequences ?? []).map((s) => [s.name, s.steps.map((st) => st.op)]))).toEqual([['Prep', ['reverse', 'fill-multiple']]]);
+  await expect.poll(() => page.evaluate(() => (window.folioApp.settings.imposeSequences ?? []).map((s) => [s.name, s.steps.map((st) => st.op)]))).toEqual([['Prep', ['reverse', 'fill-multiple', 'marks']]]);
+  expect(await page.evaluate(() => window.folioApp.settings.imposeSequences[0].steps[2].params.file)).toBeUndefined(); // {file} is resolved when the step runs
   await expect(page.locator('#statusbar')).not.toContainText('Recording');
 
-  // undo both steps, then run the sequence in one go
+  // undo the three steps, then run the sequence in one go
+  await withReload(page, () => run(page, 'edit:undo'));
   await withReload(page, () => run(page, 'edit:undo'));
   await withReload(page, () => run(page, 'edit:undo'));
   await expect(page.locator('#tb-page-count')).toHaveText('of 5');
   await withReload(page, () => run(page, 'impose:run-sequence', { name: 'Prep' }));
   await expect(page.locator('#tb-page-count')).toHaveText('of 8');
-  expect((await pageTexts(page))[0]).toContain('Page 5 of 5');
+  const replayed = await pageTexts(page);
+  expect(replayed[0]).toContain('Page 5 of 5');
+  expect(replayed[0]).toContain('text.pdf'); // the marks label printed this document's name
 
   // the sequences dialog lists it and can run it again
   await run(page, 'impose:sequences');
   await expect(dialog(page).locator('.impose-list-row')).toHaveCount(1);
-  await expect(dialog(page).locator('.impose-list-row')).toContainText('2 steps');
+  await expect(dialog(page).locator('.impose-list-row')).toContainText('3 steps');
   await withReload(page, () => dialog(page).locator('[data-run]').click());
   await expect(page.locator('#tb-page-count')).toHaveText('of 8');
   const again = await pageTexts(page); // [5,4,3,2,1,b,b,b] reversed -> three blanks, then 1..5; already a multiple of 4
-  expect(again[0]).toBe('');
+  expect(again[0]).toContain('text.pdf'); // only the marks label on the (former) blank page
+  expect(again[0]).not.toContain('Page');
   expect(again[3]).toContain('Page 1 of 5');
   expect(again[7]).toContain('Page 5 of 5');
 });
@@ -181,13 +197,16 @@ test('trim and shift, split and masking tape change the pages in place with unit
   await withReload(page, () => dialog(page).locator('button.primary').click());
   expect((await pageInfo(page)).count).toBe(8);
 
-  // invalid page ranges keep the dialog open
+  // invalid or empty page ranges keep the dialog open
   await run(page, 'impose:mirror');
   await dialog(page).locator('input[type="radio"][value="range"]').check();
+  await dialog(page).locator('button.primary').click();
+  await expect(dialog(page)).toBeVisible();
+  await expect(page.locator('.toast.error')).toContainText('Enter the pages');
   await dialog(page).locator('[data-f="pageIndices-range"]').fill('99');
   await dialog(page).locator('button.primary').click();
   await expect(dialog(page)).toBeVisible();
-  await expect(page.locator('.toast.error')).toBeVisible();
+  await expect(page.locator('.toast.error').last()).toContainText('between 1 and');
   await dialog(page).locator('[data-f="pageIndices-range"]').fill('1-2');
   await withReload(page, () => dialog(page).locator('button.primary').click());
   expect((await pageInfo(page)).count).toBe(8);

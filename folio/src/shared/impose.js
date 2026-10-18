@@ -66,9 +66,14 @@ function normalizeIndices(doc, pageIndices) {
   return out;
 }
 
-/** Visual (as displayed) size of a page: its crop box, swapped for 90/270 rotation. */
+/** Visual (as displayed) size of a page: its crop box (clipped to the media box), swapped for 90/270 rotation. */
 export function visualSize(page) {
-  const box = page.getCropBox();
+  const norm = (b) => ({ x: Math.min(b.x, b.x + b.width), y: Math.min(b.y, b.y + b.height), width: Math.abs(b.width), height: Math.abs(b.height) });
+  const media = norm(page.getMediaBox());
+  const crop = norm(page.getCropBox());
+  const x1 = Math.max(media.x, crop.x), y1 = Math.max(media.y, crop.y);
+  const x2 = Math.min(media.x + media.width, crop.x + crop.width), y2 = Math.min(media.y + media.height, crop.y + crop.height);
+  const box = x2 > x1 && y2 > y1 ? { x: x1, y: y1, width: x2 - x1, height: y2 - y1 } : media;
   const rot = ((page.getRotation().angle % 360) + 360) % 360;
   return rot % 180 ? { width: box.height, height: box.width, rotation: rot, box } : { width: box.width, height: box.height, rotation: rot, box };
 }
@@ -126,6 +131,11 @@ export function drawVisual(target, embedded, { tx, ty, sx = 1, sy = sx, rotation
 
 /** Embeds a source page using its crop box (what viewers show). */
 async function embedVisual(out, page) {
+  if (!page.node.Contents()) {
+    // pdf-lib refuses to embed a page without a content stream (blank pages are allowed to have none)
+    const ctx = page.doc.context;
+    page.node.set(PDFName.of('Contents'), ctx.register(ctx.stream(new Uint8Array(0))));
+  }
   const { box } = visualSize(page);
   const embedded = await out.embedPage(page, { left: box.x, bottom: box.y, right: box.x + box.width, top: box.y + box.height });
   return embedded;
@@ -184,7 +194,7 @@ export async function createBooklet(bytes, opts = {}) {
       // front: [n-2s, 1+2s]   back: [2+2s, n-1-2s]  (1-based within the group)
       const front = [group[n - 1 - 2 * s], group[2 * s]];
       const back = [group[2 * s + 1], group[n - 2 - 2 * s]];
-      const shift = creep * (sheets - 1 - s); // outer sheets shift least
+      const shift = creep * s; // the outermost sheet is not shifted; inner sheets move toward the spine
       for (const [side, pair] of [['front', front], ['back', back]]) {
         const page = out.addPage([sheetW, sheetH]);
         const order = binding === 'right' ? [pair[1], pair[0]] : pair;
@@ -196,8 +206,8 @@ export async function createBooklet(bytes, opts = {}) {
           const sc = fitScale(v.width, v.height, cellW, cellH, scale);
           const w = v.width * sc, h = v.height * sc;
           const cellX = margin + k * (cellW + gap);
-          const inner = k === 0 ? +1 : -1; // move content away from the spine for creep
-          const tx = cellX + (cellW - w) / 2 - inner * shift * (side === 'front' ? 1 : 1);
+          const towardSpine = k === 0 ? +1 : -1; // the spine is between the two cells
+          const tx = cellX + (cellW - w) / 2 + towardSpine * shift;
           const ty = margin + (cellH - h) / 2;
           drawVisual(page, e, { tx, ty, sx: sc, rotation: v.rotation });
         }
@@ -208,7 +218,7 @@ export async function createBooklet(bytes, opts = {}) {
   return { bytes: await save(out), sheets: sheetCount };
 }
 
-/** Places pages in a rows×cols grid on each sheet, in reading order. */
+/** Places pages in a rows×cols grid on each sheet, in reading order; `rotate` is degrees counter-clockwise. */
 export async function nUp(bytes, opts = {}) {
   const { sheet = 'A4-landscape', rows = 1, cols = 2, order = 'across', gap = 0, margin = 0, scale = 'fit', pageIndices, rotate = 0, duplicate = false } = opts;
   const src = await load(bytes);
@@ -237,7 +247,8 @@ export async function nUp(bytes, opts = {}) {
       const w = vw * sc, h = vh * sc;
       const cx = margin + c * (cellW + gap) + (cellW - w) / 2;
       const cy = margin + (R - 1 - r) * (cellH + gap) + (cellH - h) / 2;
-      drawVisual(page, e, { tx: cx, ty: cy, sx: sc, rotation: (v.rotation + rotate) % 360 });
+      // /Rotate-style angles are clockwise, so a counter-clockwise user rotation is 360 - rotate
+      drawVisual(page, e, { tx: cx, ty: cy, sx: sc, rotation: (v.rotation + ((360 - (rotate % 360)) % 360)) % 360 });
     }
   }
   return { bytes: await save(out), sheets: out.getPageCount() };
@@ -344,7 +355,8 @@ export async function applyOrder(bytes, order, { blankSize } = {}) {
   if (real.some((i) => !Number.isInteger(i) || i < 0 || i >= count)) throw new EngineError('range', 'The order refers to pages that do not exist');
   const copied = await out.copyPages(src, real);
   let k = 0;
-  const size = blankSize ?? (count ? [src.getPage(0).getWidth(), src.getPage(0).getHeight()] : [612, 792]);
+  const first = count ? visualSize(src.getPage(0)) : null;
+  const size = blankSize ?? (first ? [first.width, first.height] : [612, 792]);
   for (const i of order) {
     if (i === null || i === undefined) out.addPage(size);
     else out.addPage(copied[k++]);
@@ -545,6 +557,15 @@ export async function tilePages(bytes, { pageIndices, tile = 'A4', overlap = 0, 
 
 const BOX_KEYS = { media: 'MediaBox', crop: 'CropBox', bleed: 'BleedBox', trim: 'TrimBox', art: 'ArtBox' };
 
+/** Maps insets given for the displayed (rotated) page onto the unrotated user-space edges. */
+function visualInsetsToUserSpace(v, rotation) {
+  // /Rotate 90 shows the page turned clockwise: the visual top edge is the user-space left edge, and so on
+  if (rotation === 90) return { left: v.top, bottom: v.left, right: v.bottom, top: v.right };
+  if (rotation === 180) return { left: v.right, right: v.left, top: v.bottom, bottom: v.top };
+  if (rotation === 270) return { right: v.top, bottom: v.right, left: v.bottom, top: v.left };
+  return v;
+}
+
 /** Sets a page box, either to absolute [x, y, w, h] values or by insets from the media box. */
 export async function setPageBoxes(bytes, { pageIndices, box = 'crop', values, insets, remove = false } = {}) {
   const doc = await load(bytes);
@@ -560,7 +581,7 @@ export async function setPageBoxes(bytes, { pageIndices, box = 'crop', values, i
     if (Array.isArray(values) && values.length === 4) [x, y, w, h] = values.map(Number);
     else {
       const m = page.getMediaBox();
-      const ins = { top: 0, right: 0, bottom: 0, left: 0, ...(insets ?? {}) };
+      const ins = visualInsetsToUserSpace({ top: 0, right: 0, bottom: 0, left: 0, ...(insets ?? {}) }, visualSize(page).rotation);
       x = m.x + ins.left;
       y = m.y + ins.bottom;
       w = m.width - ins.left - ins.right;
@@ -712,9 +733,11 @@ function drawOnVisual(page, v, fn) {
   page.pushOperators();
   // visual -> user space transform
   let matrix;
-  if (rot === 90) matrix = { a: 0, b: -1, c: 1, d: 0, e: box.x, f: box.y + box.height }; // (vx,vy) -> (box.x + vy, box.y + box.height - vx)
+  // /Rotate 90 displays the page turned clockwise: the visual bottom-left corner is the user-space
+  // bottom-right corner, vx runs up the user-space right edge and vy runs left along the bottom edge.
+  if (rot === 90) matrix = { a: 0, b: 1, c: -1, d: 0, e: box.x + box.width, f: box.y }; // (vx,vy) -> (box.x + width - vy, box.y + vx)
   else if (rot === 180) matrix = { a: -1, b: 0, c: 0, d: -1, e: box.x + box.width, f: box.y + box.height };
-  else if (rot === 270) matrix = { a: 0, b: 1, c: -1, d: 0, e: box.x + box.width, f: box.y };
+  else if (rot === 270) matrix = { a: 0, b: -1, c: 1, d: 0, e: box.x, f: box.y + box.height }; // (vx,vy) -> (box.x + vy, box.y + height - vx)
   else matrix = { a: 1, b: 0, c: 0, d: 1, e: box.x, f: box.y };
   const { pushGraphicsState, popGraphicsState, concatTransformationMatrix } = pdfLibOperators();
   page.pushOperators(pushGraphicsState(), concatTransformationMatrix(matrix.a, matrix.b, matrix.c, matrix.d, matrix.e, matrix.f));
@@ -756,9 +779,10 @@ export async function maskingTape(bytes, { pageIndices, rect, color = '#ffffff',
 }
 
 /**
- * Printer's marks. The page grows by `margin` on every side (unless grow=false) and crop marks,
- * registration marks, fold marks, colour bars and a label are drawn in the new margin around the
- * original page area.
+ * Printer's marks. The page grows by `margin` on every side and crop marks, registration marks,
+ * fold marks, colour bars and a label are drawn in the new margin around the original page area.
+ * With grow=false the page keeps its size and the marks are drawn inside it, in a `margin`-wide
+ * band around a smaller trim area.
  */
 export async function placeMarks(bytes, opts = {}) {
   const { pageIndices, margin = 36, grow = true, cropMarks = true, registration = true, foldMarks = false, colorBars = true, label = '', lineWidth = 0.5, length = 18, offset = 6, font = 'Helvetica' } = opts;
@@ -774,7 +798,7 @@ export async function placeMarks(bytes, opts = {}) {
   for (const i of normalizeIndices(doc, pageIndices)) {
     const page = doc.getPage(i);
     const v = visualSize(page);
-    const m = grow ? margin : 0;
+    const m = margin;
     const x1 = m, y1 = m, x2 = v.width - m, y2 = v.height - m; // trim area
     drawOnVisual(page, v, (draw) => {
       const line = (sx, sy, ex, ey) => draw.line({ start: { x: sx, y: sy }, end: { x: ex, y: ey }, thickness: lineWidth, color: black });
