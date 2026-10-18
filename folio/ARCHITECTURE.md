@@ -213,7 +213,6 @@ interface App {
   get session(): DocumentSession | null;   // active tab's session
   emit(name: string, detail?: any): void; on(name, handler): () => void;
   saveSettings(patch: Partial<Settings>): Promise<void>;
-  l10n: L10n;                      // lib/l10n.js minimal English dictionary for pdf.js components
 }
 
 interface DocumentSession {

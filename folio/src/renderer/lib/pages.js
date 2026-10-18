@@ -70,7 +70,7 @@ async function organizeDialog(app) {
   let lastClicked = -1;
 
   const thumb = (index) => {
-    if (!thumbs.has(index)) thumbs.set(index, v.renderPage(index, { width: 120, dpr: Math.min(2, window.devicePixelRatio || 1) }).catch(() => null));
+    if (!thumbs.has(index)) thumbs.set(index, v.renderPage(index, { width: 120, dpr: Math.min(2, window.devicePixelRatio || 1), ignoreViewRotation: true }).catch(() => null));
     return thumbs.get(index);
   };
 

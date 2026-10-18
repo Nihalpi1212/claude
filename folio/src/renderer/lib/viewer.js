@@ -669,9 +669,9 @@ export class DocumentView {
    * @param {number} index 0-based
    * @param {{ scale?: number, width?: number, annotationMode?: number, forPrint?: boolean, rotation?: number, dpr?: number }} opts
    */
-  async renderPage(index, { scale, width, annotationMode = AnnotationMode.ENABLE_FORMS, forPrint = false, rotation, dpr = 1 } = {}) {
+  async renderPage(index, { scale, width, annotationMode = AnnotationMode.ENABLE_FORMS, forPrint = false, rotation, dpr = 1, ignoreViewRotation = false } = {}) {
     const page = await this.pdfDocument.getPage(index + 1);
-    const rot = rotation ?? (page.rotate + this.rotation) % 360;
+    const rot = rotation ?? (page.rotate + (ignoreViewRotation ? 0 : this.rotation)) % 360;
     const base = page.getViewport({ scale: 1, rotation: rot });
     const s = scale ?? (width ? width / base.width : 1);
     const viewport = page.getViewport({ scale: s, rotation: rot });
