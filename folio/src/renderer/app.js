@@ -14,7 +14,7 @@ import { MENU_KEYS, RENDERER_KEYS, SHORTCUT_GROUPS, COMMAND_LABELS, describeAcce
 
 // Feature modules installed after the core. Missing modules are skipped with a warning so the
 // app keeps working while features are being developed.
-const MODULES = ['welcome', 'findbar', 'shortcuts', 'panels', 'annotate', 'sign', 'forms', 'pages', 'tools', 'print', 'properties', 'preferences', 'comments'];
+const MODULES = ['welcome', 'findbar', 'shortcuts', 'history', 'annotate', 'sign', 'forms', 'panels', 'comments', 'pages', 'tools', 'print', 'properties', 'preferences'];
 
 class App extends EventTarget {
   constructor() {
@@ -164,8 +164,20 @@ function registerCoreCommands(app) {
     'file:quit': () => bridge.closeWindow(),
 
     // edit (smart dispatch between text fields, pdf.js editors and native)
-    'edit:undo': () => (isTextTarget() || !view()?.uiManager?.hasSomethingToUndo?.() ? bridge.nativeEdit('undo') : view().editorAction('undo')),
-    'edit:redo': () => (isTextTarget() || !view()?.uiManager?.hasSomethingToRedo?.() ? bridge.nativeEdit('redo') : view().editorAction('redo')),
+    'edit:undo': () => {
+      if (isTextTarget()) return bridge.nativeEdit('undo');
+      const v = view();
+      if (v?.editorStates.hasSomethingToUndo) return v.editorAction('undo');
+      if (app.edit?.canUndo()) return app.edit.undo();
+      return bridge.nativeEdit('undo');
+    },
+    'edit:redo': () => {
+      if (isTextTarget()) return bridge.nativeEdit('redo');
+      const v = view();
+      if (v?.editorStates.hasSomethingToRedo) return v.editorAction('redo');
+      if (app.edit?.canRedo()) return app.edit.redo();
+      return bridge.nativeEdit('redo');
+    },
     'edit:cut': () => bridge.nativeEdit('cut'),
     'edit:copy': () => bridge.nativeEdit('copy'),
     'edit:paste': () => bridge.nativeEdit('paste'),

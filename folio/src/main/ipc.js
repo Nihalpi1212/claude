@@ -75,6 +75,12 @@ export function registerIpc(ctx) {
     return result.canceled || !result.filePath ? null : result.filePath;
   });
 
+  handle('openDirectoryDialog', async (opts = {}) => {
+    const win = getWindow();
+    const result = await dialog.showOpenDialog(win ?? undefined, { title: typeof opts.title === 'string' ? opts.title : 'Choose a folder', properties: ['openDirectory', 'createDirectory'] });
+    return result.canceled || !result.filePaths.length ? null : result.filePaths[0];
+  });
+
   handle('readFile', async (path) => {
     assertString(path, 'path');
     const buffer = await fs.readFile(path);

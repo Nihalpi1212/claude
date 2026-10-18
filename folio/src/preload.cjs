@@ -15,6 +15,7 @@ const api = {
 
   openFileDialog: (opts) => invoke('openFileDialog', opts),
   saveFileDialog: (opts) => invoke('saveFileDialog', opts),
+  openDirectoryDialog: (opts) => invoke('openDirectoryDialog', opts),
   readFile: (path) => invoke('readFile', path),
   writeFile: (path, data) => invoke('writeFile', path, data),
   pathInfo: (path) => invoke('pathInfo', path),

@@ -268,3 +268,20 @@ test('pdf-lib can load a document saved by pdf.js (incremental update) and vice 
     assert.equal(widgetOf(fields, 'email').value, 'a@b.c');
   });
 });
+
+test('flattenAnnotations bakes appearances into the page and removes the annotations', async () => {
+  let bytes = await fixture('annotated');
+  ({ bytes } = await engine.addAnnotation(bytes, 0, { type: 'square', rect: [100, 100, 300, 200], color: '#ff0000', width: 3, author: 'A', opacity: 0.5 }));
+  ({ bytes } = await engine.addAnnotation(bytes, 0, { type: 'stamp-text', rect: [320, 540, 520, 600], text: 'FINAL', color: '#c62828', author: 'A' }));
+  const before = await withPdfjs(bytes, async (doc) => (await (await doc.getPage(1)).getOperatorList({ annotationMode: 0 })).fnArray.length);
+  const flat = await engine.flattenAnnotations(bytes);
+  assert.deepEqual(await engine.listAnnotations(flat), []);
+  await withPdfjs(flat, async (doc) => {
+    const page = await doc.getPage(1);
+    assert.equal((await page.getAnnotations()).length, 0);
+    const ops = await page.getOperatorList({ annotationMode: 0 });
+    assert.ok(ops.fnArray.length > before, 'page content grew with the baked appearances');
+    const text = (await page.getTextContent()).items.map((i) => i.str).join(' ');
+    assert.match(text, /FINAL/, 'the stamp text is now page content');
+  });
+});

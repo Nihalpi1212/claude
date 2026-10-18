@@ -35,7 +35,7 @@ export class Dialogs {
       dialog.setAttribute('role', 'dialog');
       dialog.setAttribute('aria-modal', 'true');
       if (opts.width) dialog.style.width = `${opts.width}px`;
-      if (opts.className) dialog.classList.add(opts.className);
+      if (opts.className) dialog.classList.add(...String(opts.className).split(/\s+/).filter(Boolean));
 
       if (opts.title) {
         const header = document.createElement('div');

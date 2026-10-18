@@ -72,6 +72,7 @@ export class DocumentView {
     this.nightMode = false;
     this.handTool = false;
     this.presentation = false;
+    this.editorStates = { isEditing: false, isEmpty: true, hasSomethingToUndo: false, hasSomethingToRedo: false, hasSelectedEditor: false, hasSelectedText: false };
 
     this.container = document.createElement('div');
     this.container.className = 'viewerContainer';
@@ -318,8 +319,18 @@ export class DocumentView {
     on('scalechanging', ({ scale, presetValue }) => app.emit('zoom:changed', { session: this.session, scale, value: presetValue ?? scale }));
     on('rotationchanging', ({ pagesRotation }) => app.emit('rotation:changed', { session: this.session, rotation: pagesRotation }));
     on('editingstateschanged', ({ details }) => {
-      app.emit('editor:states', { session: this.session, ...details });
+      this.editorStates = { ...this.editorStates, ...details };
+      app.emit('editor:states', { session: this.session, ...this.editorStates });
       app.commands.invalidate();
+    });
+    // pdf.js asks the host to switch modes (floating highlight button, double-click on an editable annotation)
+    on('showannotationeditorui', ({ mode }) => {
+      if (this.pdfDocument && Number.isInteger(mode)) this.pdfViewer.annotationEditorMode = { mode };
+    });
+    on('switchannotationeditormode', (evt) => {
+      if (!this.pdfDocument) return;
+      const { mode, editId = null, mustEnterInEditMode = false, isFromKeyboard = false } = evt;
+      if (Number.isInteger(mode)) this.pdfViewer.annotationEditorMode = { mode, editId, mustEnterInEditMode, isFromKeyboard };
     });
     on('annotationeditormodechanged', ({ mode }) => app.emit('editor:mode', { session: this.session, mode }));
     on('scrollmodechanged', ({ mode }) => app.emit('layout:mode', { session: this.session, scrollMode: mode }));
@@ -471,10 +482,6 @@ export class DocumentView {
   }
   editorAction(name) {
     this.eventBus.dispatch('editingaction', { source: this, name });
-  }
-  get editorStates() {
-    const m = this.uiManager;
-    return m ? { hasSelectedEditor: m.hasSelection, hasSomethingToUndo: m.hasSomethingToUndo?.(), hasSomethingToRedo: m.hasSomethingToRedo?.() } : {};
   }
 
   /** Adds an image (PNG blob) as a stamp editor, centred in the view or at page coordinates (CSS px inside the page). */
@@ -681,7 +688,8 @@ export class DocumentView {
       annotationMode,
       intent: forPrint ? 'print' : 'display',
       printAnnotationStorage: forPrint ? this.pdfDocument.annotationStorage.print : undefined,
-      optionalContentConfigPromise: this.pdfViewer.optionalContentConfigPromise ?? undefined,
+      // the optional-content config must be fetched with the same intent as the render
+      optionalContentConfigPromise: forPrint ? this.pdfDocument.getOptionalContentConfig({ intent: 'print' }) : this.pdfViewer.optionalContentConfigPromise ?? undefined,
     });
     await renderTask.promise;
     return canvas;

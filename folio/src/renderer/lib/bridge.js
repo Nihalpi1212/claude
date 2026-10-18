@@ -124,6 +124,9 @@ function createBrowserBridge() {
       const chosen = test.silent ? name : window.prompt('Save as (file name)', name);
       return chosen ? `download:/${chosen}` : null;
     },
+    async openDirectoryDialog() {
+      return typeof test.nextDirectory === 'string' ? test.nextDirectory : null;
+    },
     async readFile(path) {
       if (test.files[path]) return test.files[path];
       const response = await fetch(path);
@@ -256,3 +259,5 @@ function createBrowserBridge() {
 export const bridge = isElectron ? window.folio : createBrowserBridge();
 export const platform = bridge.platform;
 export const isMac = platform === 'darwin';
+export const pathSep = platform === 'win32' ? '\\' : '/';
+export const joinPath = (dir, name) => (dir.endsWith(pathSep) ? dir + name : dir + pathSep + name);

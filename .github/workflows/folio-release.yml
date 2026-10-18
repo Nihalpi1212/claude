@@ -1,0 +1,102 @@
+# Folio PDF release builds.
+#
+# Builds the installers with electron-builder on each platform's own runner:
+#   macos-latest   -> universal (Apple silicon + Intel) .dmg and .zip
+#   windows-latest -> NSIS installer (x64 + arm64) and a portable .exe
+#   ubuntu-latest  -> AppImage
+#
+# Runs on tags named folio-v* (and on demand). Tag pushes also create a GitHub Release with the
+# installers attached. The builds are NOT code-signed (no certificates in this repository), so
+# macOS Gatekeeper and Windows SmartScreen show a warning on first launch; see folio/README.md.
+
+name: Folio release
+
+on:
+  push:
+    tags:
+      - 'folio-v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            args: --mac dmg zip --universal
+          - os: windows-latest
+            args: --win nsis portable
+          - os: ubuntu-latest
+            args: --linux AppImage
+    defaults:
+      run:
+        working-directory: folio
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: folio/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build installers
+        run: npx electron-builder ${{ matrix.args }} --publish never
+
+      - name: List artifacts
+        shell: bash
+        run: ls -la dist | grep -v -E "builder-|\.yml$|\.blockmap$" || true
+
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: folio-${{ matrix.os }}
+          path: |
+            folio/dist/*.dmg
+            folio/dist/*.zip
+            folio/dist/*.exe
+            folio/dist/*.AppImage
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/folio-v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: installers
+          merge-multiple: true
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Folio PDF ${{ github.ref_name }}
+          body: |
+            Free, open-source PDF reader for Windows, macOS and Linux.
+
+            **Downloads**
+            - Windows: `Folio PDF-*-win-*.exe` (installer) or `Folio PDF-*-portable.exe` (no install)
+            - macOS: `Folio PDF-*-mac-universal.dmg` (Apple silicon and Intel)
+            - Linux: `Folio PDF-*-linux-x86_64.AppImage`
+
+            These builds are not code-signed. On macOS, right-click the app and choose Open the first
+            time (or run `xattr -dr com.apple.quarantine "/Applications/Folio PDF.app"`). On Windows,
+            choose "More info" then "Run anyway" in the SmartScreen prompt.
+          files: installers/*

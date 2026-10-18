@@ -1,6 +1,6 @@
 // The document engine: pure functions over PDF bytes built on pdf-lib. See ARCHITECTURE.md
 // "The engine" for the contract. Works in the browser (import map) and in Node (unit tests).
-import { PDFDocument, PDFName, PDFString, PDFHexString, PDFNumber, PDFArray, PDFDict, PDFRef, PDFBool, PDFStream, StandardFonts, degrees } from 'pdf-lib';
+import { PDFDocument, PDFName, PDFString, PDFHexString, PDFNumber, PDFArray, PDFDict, PDFRef, PDFBool, PDFStream, StandardFonts, degrees, pushGraphicsState, popGraphicsState, concatTransformationMatrix, drawObject, setGraphicsState } from 'pdf-lib';
 import { annotId, parseAnnotId } from './pdf-ids.js';
 import { toPdfDate, fromPdfDate } from './pdf-date.js';
 import {
@@ -777,6 +777,84 @@ export async function addReply(bytes, parentId, { contents, author }) {
   pageAnnots(doc, page).push(ref);
   parent.set(PDFName.of('M'), PDFString.of(toPdfDate(new Date())));
   return { bytes: await save(doc), id: refToId(ref) };
+}
+
+/**
+ * Bakes annotation appearances into the page content (PDF 32000-1 algorithm 8.1) and removes the
+ * annotations. Widgets (form fields) are left alone: use flattenForms for those. Annotations without
+ * an appearance stream (e.g. note icons) are simply removed.
+ */
+export async function flattenAnnotations(bytes) {
+  const doc = await load(bytes);
+  for (const page of doc.getPages()) {
+    const annots = page.node.Annots();
+    if (!annots) continue;
+    const keep = [];
+    for (let i = 0; i < annots.size(); i++) {
+      const ref = annots.get(i);
+      const dict = resolveDict(doc, ref);
+      if (!dict) continue;
+      const subtype = textOf(dict.get(PDFName.of('Subtype')));
+      if (subtype === 'Widget' || subtype === 'Link') {
+        keep.push(ref);
+        continue;
+      }
+      if (subtype === 'Popup') continue;
+      const flags = dictNumber(doc, dict, 'F', 0);
+      if (flags & FLAG_HIDDEN) continue;
+      const streamRef = appearanceStreamRef(doc, dict);
+      const stream = streamRef ? doc.context.lookup(streamRef) : null;
+      const rect = numberArray(doc, doc.context.lookup(dict.get(PDFName.of('Rect'))));
+      if (!(stream instanceof PDFStream) || !rect || rect.length !== 4) continue;
+      const bbox = numberArray(doc, doc.context.lookup(stream.dict.get(PDFName.of('BBox')))) ?? [0, 0, 1, 1];
+      const m = numberArray(doc, doc.context.lookup(stream.dict.get(PDFName.of('Matrix')))) ?? [1, 0, 0, 1, 0, 0];
+      const corners = [
+        [bbox[0], bbox[1]],
+        [bbox[2], bbox[1]],
+        [bbox[2], bbox[3]],
+        [bbox[0], bbox[3]],
+      ].map(([x, y]) => [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]]);
+      const tx1 = Math.min(...corners.map((c) => c[0])), tx2 = Math.max(...corners.map((c) => c[0]));
+      const ty1 = Math.min(...corners.map((c) => c[1])), ty2 = Math.max(...corners.map((c) => c[1]));
+      const [rx1, ry1, rx2, ry2] = normRect(rect);
+      const sx = tx2 - tx1 > 1e-9 ? (rx2 - rx1) / (tx2 - tx1) : 1;
+      const sy = ty2 - ty1 > 1e-9 ? (ry2 - ry1) / (ty2 - ty1) : 1;
+      const name = page.node.newXObject('FolioAnnot', streamRef instanceof PDFRef ? streamRef : doc.context.register(stream));
+      const ops = [pushGraphicsState(), concatTransformationMatrix(sx, 0, 0, sy, rx1 - tx1 * sx, ry1 - ty1 * sy)];
+      const opacity = dictNumber(doc, dict, 'CA', 1);
+      if (opacity < 1) {
+        const gs = doc.context.register(doc.context.obj({ Type: 'ExtGState', CA: opacity, ca: opacity }));
+        ops.push(setGraphicsState(page.node.newExtGState('FolioGS', gs)));
+      }
+      ops.push(drawObject(name), popGraphicsState());
+      page.pushOperators(...ops);
+    }
+    page.node.set(PDFName.of('Annots'), doc.context.obj(keep));
+  }
+  return save(doc);
+}
+
+/** The /AP /N stream ref of an annotation, honouring /AS for state dictionaries. */
+function appearanceStreamRef(doc, dict) {
+  const ap = resolveDict(doc, dict.get(PDFName.of('AP')));
+  if (!ap) return null;
+  const n = ap.get(PDFName.of('N'));
+  if (n instanceof PDFRef) {
+    const obj = doc.context.lookup(n);
+    if (obj instanceof PDFStream) return n;
+    if (obj instanceof PDFDict) {
+      const as = dict.get(PDFName.of('AS'));
+      const pick = as instanceof PDFName ? obj.get(as) : obj.entries()[0]?.[1];
+      return pick instanceof PDFRef ? pick : null;
+    }
+    return null;
+  }
+  if (n instanceof PDFDict) {
+    const as = dict.get(PDFName.of('AS'));
+    const pick = as instanceof PDFName ? n.get(as) : n.entries()[0]?.[1];
+    return pick instanceof PDFRef ? pick : null;
+  }
+  return null;
 }
 
 /** Lightweight check without parsing the whole file. */

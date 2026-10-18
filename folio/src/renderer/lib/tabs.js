@@ -231,7 +231,7 @@ export class TabManager {
   }
 
   activate(session) {
-    if (this.active === session) return;
+    if (this.active === session && session) return;
     if (this.active) {
       this.active.host.hidden = true;
       this.active.view.onDeactivate?.();

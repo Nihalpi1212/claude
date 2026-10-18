@@ -81,6 +81,7 @@ interface FolioBridge {
   // files
   openFileDialog(opts?: { multiple?: boolean; filters?: Filter[]; title?: string }): Promise<string[]>;   // [] when cancelled
   saveFileDialog(opts?: { defaultPath?: string; filters?: Filter[]; title?: string }): Promise<string | null>;
+  openDirectoryDialog(opts?: { title?: string }): Promise<string | null>;
   readFile(path: string): Promise<Uint8Array>;
   writeFile(path: string, data: Uint8Array): Promise<void>;
   pathInfo(path: string): Promise<PathInfo>;
@@ -99,11 +100,12 @@ interface FolioBridge {
   getStartupFiles(): Promise<string[]>;              // files passed on argv / open-file before the renderer was ready
 
   // window and document state
-  setDocumentState(state: { path: string | null; title: string; dirty: boolean; hasDocument: boolean }): void;
+  setUiState(state: { hasDocument: boolean; dirty: boolean; path: string | null; title: string; scrollMode; spreadMode; sidebarOpen; sidebarView; nightMode; theme; tool; handTool; highlightFormFields; readAloud }): void;  // drives the window title and native menu state
+  nativeEdit(action: 'undo'|'redo'|'cut'|'copy'|'paste'|'delete'|'selectAll'): void;   // webContents.<action>() for text fields
   setFullScreen(flag: boolean): Promise<void>;
   isFullScreen(): Promise<boolean>;
   closeWindow(): void;
-  respondClose(allow: boolean): void;                // answer to the 'before-close' event
+  respondClose(allow: boolean, quit?: boolean): void; // answer to the 'before-close' event ({ quitting } payload echoed back)
   setTheme(theme: 'system'|'light'|'dark'): Promise<boolean>;   // returns shouldUseDarkColors after applying
   getSystemDark(): Promise<boolean>;
 
@@ -126,7 +128,8 @@ interface FolioBridge {
   on(channel: 'open-files', handler: (paths: string[]) => void): () => void;           // open-file / second-instance / argv
   on(channel: 'theme', handler: (info: { dark: boolean }) => void): () => void;        // nativeTheme 'updated'
   on(channel: 'file-changed', handler: (info: { path: string }) => void): () => void;
-  on(channel: 'before-close', handler: () => void): () => void;                        // renderer must call respondClose
+  on(channel: 'before-close', handler: (info: { quitting: boolean }) => void): () => void;   // renderer must call respondClose
+  on(channel: 'fullscreen', handler: (info: { fullScreen: boolean }) => void): () => void;
 }
 ```
 
@@ -228,6 +231,8 @@ interface DocumentSession {
   close(): Promise<boolean>;       // prompts when dirty; true when closed
 }
 ```
+
+Document-level undo/redo for engine operations lives in `lib/history.js` (`app.edit.apply(op, {label})`, `undo()`, `redo()`), while pdf.js keeps its own undo stack for its editors; `edit:undo` consults pdf.js first (`view.editorStates`), then the document history, then the native text-field undo.
 
 Events emitted on `app` (detail in parentheses): `tab:opened` (session), `tab:activated` (session|null), `tab:closed` (id),
 `doc:loaded` (session) after the first pages are ready, `doc:reloaded` (session) after replaceBytes, `doc:dirty` ({session, dirty}),

@@ -12,7 +12,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   sidebarView: 'thumbnails',
   highlightFormFields: true,
   nightMode: false,
-  highlightColor: '#ffff00',
+  highlightColor: '#ffff98',
   inkColor: '#e53935',
   inkThickness: 3,
   inkOpacity: 1,
