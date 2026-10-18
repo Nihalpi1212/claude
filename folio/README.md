@@ -76,7 +76,7 @@ the workflow builds all three platforms and publishes the Release.
 
 ## How it works
 
-See [ARCHITECTURE.md](ARCHITECTURE.md). In short: the Electron main process owns windows, menus,
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the design and [docs/USER-GUIDE.md](docs/USER-GUIDE.md) for a feature-by-feature guide. In short: the Electron main process owns windows, menus,
 dialogs and files; a plain ES-module renderer (no bundler) renders documents with pdf.js' viewer
 components, which also handle forms and its own annotation editors; and a pure-function engine built on
 pdf-lib performs page operations and writes annotation types pdf.js cannot create (notes, shapes,
