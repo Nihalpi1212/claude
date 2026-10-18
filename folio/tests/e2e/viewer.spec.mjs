@@ -80,3 +80,20 @@ test('text selection exposes PDF-space quads', async ({ page }) => {
   expect(y2).toBeLessThan(400);
   expect(x2).toBeGreaterThan(x1 + 50);
 });
+
+test('password-protected documents prompt for the password and report wrong ones', async ({ page }) => {
+  await openApp(page);
+  await page.evaluate(() => {
+    window.folioApp.tabs.open({ path: '/fixtures/secret.pdf' });
+  });
+  const dialog = page.locator('.dialog');
+  await expect(dialog).toContainText('is protected');
+  await dialog.locator('input[type="password"]').fill('nope');
+  await dialog.locator('button.primary').click();
+  await expect(page.locator('.dialog')).toContainText('incorrect');
+  await page.locator('.dialog input[type="password"]').fill('secret');
+  await page.locator('.dialog button.primary').click();
+  await page.waitForSelector('.doc-host:not([hidden]) .page[data-loaded="true"] canvas');
+  await expect(page.locator('.textLayer')).toContainText('Secret page');
+  await expect(page.locator('.tab')).toHaveCount(1);
+});

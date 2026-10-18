@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { PDFDocument } from 'pdf-lib';
-import { makeTextPdf, makeFormPdf, makeMixedPdf, makeAnnotatedPdf } from '../fixtures/make-fixtures.mjs';
+import { makeTextPdf, makeFormPdf, makeMixedPdf, makeAnnotatedPdf, makeEncryptedPdf } from '../fixtures/make-fixtures.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 export const ROOT = join(here, '..', '..');
@@ -13,16 +13,17 @@ const PDFJS_DIR = join(ROOT, 'node_modules', 'pdfjs-dist');
 const cache = new Map();
 export async function fixture(name) {
   if (!cache.has(name)) {
-    const makers = { text: () => makeTextPdf(5), long: () => makeTextPdf(40), form: makeFormPdf, mixed: makeMixedPdf, annotated: makeAnnotatedPdf };
+    const makers = { text: () => makeTextPdf(5), long: () => makeTextPdf(40), form: makeFormPdf, mixed: makeMixedPdf, annotated: makeAnnotatedPdf, secret: () => makeEncryptedPdf('secret') };
     cache.set(name, await makers[name]());
   }
   return cache.get(name).slice();
 }
 
 /** Loads bytes with pdf.js and returns the PDFDocumentProxy (caller destroys). */
-export async function pdfjsLoad(bytes) {
+export async function pdfjsLoad(bytes, password) {
   const task = pdfjs.getDocument({
     data: bytes.slice(),
+    password,
     standardFontDataUrl: join(PDFJS_DIR, 'standard_fonts') + '/',
     cMapUrl: join(PDFJS_DIR, 'cmaps') + '/',
     cMapPacked: true,

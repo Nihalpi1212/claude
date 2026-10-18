@@ -377,6 +377,16 @@ function colorArrayToHex(arr) {
   return colorToHex(arr);
 }
 
+/** Text colour from a default-appearance string such as "0 0 1 rg /Helv 12 Tf". */
+function colorFromDA(da) {
+  if (!da) return null;
+  const rgb = /(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+rg/.exec(da);
+  if (rgb) return colorToHex([Number(rgb[1]), Number(rgb[2]), Number(rgb[3])]);
+  const g = /(-?[\d.]+)\s+g\b/.exec(da);
+  if (g) return colorToHex([Number(g[1]), Number(g[1]), Number(g[1])]);
+  return null;
+}
+
 /** All annotation (ref, dict) pairs of a page with the Annots array, creating the array when missing. */
 function pageAnnots(doc, page) {
   let annots = page.node.Annots();
@@ -479,6 +489,8 @@ export async function listAnnotations(bytes) {
       const irt = dict.get(PDFName.of('IRT'));
       const flags = dictNumber(doc, dict, 'F', 0);
       const rect = numberArray(doc, doc.context.lookup(dict.get(PDFName.of('Rect')))) ?? [0, 0, 0, 0];
+      let color = colorArrayToHex(numberArray(doc, doc.context.lookup(dict.get(PDFName.of('C')))));
+      if (!color && subtype === 'FreeText') color = colorFromDA(textOf(dict.get(PDFName.of('DA'))));
       out.push({
         id: refToId(entry),
         page: p,
@@ -488,7 +500,7 @@ export async function listAnnotations(bytes) {
         author: textOf(dict.get(PDFName.of('T'))),
         created: fromPdfDate(textOf(dict.get(PDFName.of('CreationDate')))),
         modified: fromPdfDate(textOf(dict.get(PDFName.of('M')))),
-        color: colorArrayToHex(numberArray(doc, doc.context.lookup(dict.get(PDFName.of('C'))))),
+        color,
         opacity: dictNumber(doc, dict, 'CA', 1),
         inReplyTo: irt instanceof PDFRef ? refToId(irt) : null,
         name: textOf(dict.get(PDFName.of('NM'))) || null,

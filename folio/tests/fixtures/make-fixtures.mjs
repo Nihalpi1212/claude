@@ -2,6 +2,7 @@
 // Run: node tests/fixtures/make-fixtures.mjs
 import { PDFDocument, StandardFonts, rgb, degrees, PDFName, PDFString, PDFHexString } from 'pdf-lib';
 import { mkdirSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -172,6 +173,68 @@ export async function makeAnnotatedPdf() {
   return doc.save({ useObjectStreams: false });
 }
 
+// ---- password protected (standard security handler, revision 2, RC4 40-bit) ---------------------------
+const PAD = Buffer.from([0x28, 0xbf, 0x4e, 0x5e, 0x4e, 0x75, 0x8a, 0x41, 0x64, 0x00, 0x4e, 0x56, 0xff, 0xfa, 0x01, 0x08, 0x2e, 0x2e, 0x00, 0xb6, 0xd0, 0x68, 0x3e, 0x80, 0x2f, 0x0c, 0xa9, 0xfe, 0x64, 0x53, 0x69, 0x7a]);
+const md5 = (...parts) => createHash('md5').update(Buffer.concat(parts.map((p) => Buffer.from(p)))).digest();
+function rc4(key, data) {
+  const S = new Uint8Array(256);
+  for (let i = 0; i < 256; i++) S[i] = i;
+  for (let i = 0, j = 0; i < 256; i++) {
+    j = (j + S[i] + key[i % key.length]) & 0xff;
+    [S[i], S[j]] = [S[j], S[i]];
+  }
+  const out = Buffer.alloc(data.length);
+  for (let k = 0, i = 0, j = 0; k < data.length; k++) {
+    i = (i + 1) & 0xff;
+    j = (j + S[i]) & 0xff;
+    [S[i], S[j]] = [S[j], S[i]];
+    out[k] = data[k] ^ S[(S[i] + S[j]) & 0xff];
+  }
+  return out;
+}
+const padPassword = (pwd) => Buffer.concat([Buffer.from(pwd, 'latin1'), PAD]).subarray(0, 32);
+
+/** A one-page PDF that needs `password` to open (user password = owner password). */
+export function makeEncryptedPdf(password = 'secret', text = 'Secret page') {
+  const id = md5(Buffer.from('folio-encrypted-fixture'));
+  const P = -1;
+  const ownerKey = md5(padPassword(password)).subarray(0, 5);
+  const O = rc4(ownerKey, padPassword(password));
+  const pBytes = Buffer.alloc(4);
+  pBytes.writeInt32LE(P);
+  const key = md5(padPassword(password), O, pBytes, id).subarray(0, 5);
+  const U = rc4(key, PAD);
+  const objKey = (num, gen) => md5(key, Buffer.from([num & 0xff, (num >> 8) & 0xff, (num >> 16) & 0xff, gen & 0xff, (gen >> 8) & 0xff])).subarray(0, 10);
+  const hex = (b) => Buffer.from(b).toString('hex').toUpperCase();
+  const content = Buffer.from(`BT /F1 24 Tf 72 700 Td (${text}) Tj ET`, 'latin1');
+  const encContent = rc4(objKey(4, 0), content);
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>',
+    null, // stream
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+    `<< /Filter /Standard /V 1 /R 2 /Length 40 /P ${P} /O <${hex(O)}> /U <${hex(U)}> >>`,
+  ];
+  const parts = [Buffer.from('%PDF-1.4\n%\xe2\xe3\xcf\xd3\n', 'latin1')];
+  const offsets = [];
+  let pos = parts[0].length;
+  objects.forEach((obj, i) => {
+    offsets.push(pos);
+    let buf;
+    if (obj === null) buf = Buffer.concat([Buffer.from(`${i + 1} 0 obj\n<< /Length ${encContent.length} >>\nstream\n`, 'latin1'), encContent, Buffer.from('\nendstream\nendobj\n', 'latin1')]);
+    else buf = Buffer.from(`${i + 1} 0 obj\n${obj}\nendobj\n`, 'latin1');
+    parts.push(buf);
+    pos += buf.length;
+  });
+  const xrefPos = pos;
+  let xref = `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  for (const o of offsets) xref += `${String(o).padStart(10, '0')} 00000 n \n`;
+  xref += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R /Encrypt 6 0 R /ID [<${hex(id)}> <${hex(id)}>] >>\nstartxref\n${xrefPos}\n%%EOF\n`;
+  parts.push(Buffer.from(xref, 'latin1'));
+  return new Uint8Array(Buffer.concat(parts));
+}
+
 export async function makeAll() {
   mkdirSync(OUT_DIR, { recursive: true });
   const files = {
@@ -180,6 +243,7 @@ export async function makeAll() {
     'form.pdf': await makeFormPdf(),
     'mixed.pdf': await makeMixedPdf(),
     'annotated.pdf': await makeAnnotatedPdf(),
+    'secret.pdf': makeEncryptedPdf('secret'),
   };
   for (const [name, bytes] of Object.entries(files)) writeFileSync(join(OUT_DIR, name), bytes);
   return Object.keys(files);

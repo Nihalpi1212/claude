@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as engine from '../../src/shared/engine.js';
-import { fixture, pageTexts, annotationsOfPage, pdflibLoad, withPdfjs, makePng, widgetOf } from './helpers.mjs';
+import { fixture, pageTexts, annotationsOfPage, pdflibLoad, withPdfjs, makePng, widgetOf, pdfjsLoad } from './helpers.mjs';
 
 const pageNumbers = (texts) => texts.map((t) => Number(/Page (\d+) of/.exec(t)?.[1] ?? /Mixed page (\d+)/.exec(t)?.[1]));
 
@@ -284,4 +284,15 @@ test('flattenAnnotations bakes appearances into the page and removes the annotat
     const text = (await page.getTextContent()).items.map((i) => i.str).join(' ');
     assert.match(text, /FINAL/, 'the stamp text is now page content');
   });
+});
+
+test('encrypted fixture needs its password in pdf.js and is reported as encrypted by the engine', async () => {
+  const bytes = await fixture('secret');
+  await assert.rejects(pdfjsLoad(bytes), (e) => e.name === 'PasswordException' && e.code === 1);
+  await assert.rejects(pdfjsLoad(bytes, 'wrong'), (e) => e.name === 'PasswordException' && e.code === 2);
+  const doc = await pdfjsLoad(bytes, 'secret');
+  const text = (await (await doc.getPage(1)).getTextContent()).items.map((i) => i.str).join(' ');
+  assert.match(text, /Secret page/);
+  await doc.loadingTask.destroy();
+  await assert.rejects(engine.rotatePages(bytes, [0], 90), (e) => e.code === 'encrypted');
 });
