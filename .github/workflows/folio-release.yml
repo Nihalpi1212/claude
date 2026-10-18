@@ -100,7 +100,9 @@ jobs:
           target_commitish: ${{ github.sha }}
           name: Folio PDF ${{ env.RELEASE_TAG }}
           body: |
-            Free, open-source PDF reader for Windows, macOS and Linux.
+            Free, open-source PDF reader for Windows, macOS and Linux, with the Impose menu
+            (booklets, n-up, step and repeat, manual imposition, shuffles, page numbers and Bates
+            numbers, trims, page sizes, printer's marks, sequences; see folio/docs/IMPOSITION.md).
 
             **Downloads**
             - Windows: `folio-pdf-*-win-*.exe` (installer) or `folio-pdf-*-win-portable.exe` (no install)
