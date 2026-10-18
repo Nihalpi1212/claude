@@ -29,6 +29,8 @@ export class Statusbar {
 
   clear(key) {
     const el = this.items.get(key);
-    if (el) el.hidden = true;
+    if (!el) return;
+    el.replaceChildren();
+    el.hidden = true;
   }
 }

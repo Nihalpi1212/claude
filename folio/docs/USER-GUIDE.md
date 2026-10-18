@@ -76,6 +76,27 @@ Pick a tool from the toolbar (or the **Tools** menu); the bar below the toolbar 
 | Flatten | File › Export › Flattened PDF bakes form values and comments into the pages so they can no longer be edited |
 | Print | Ctrl+P: all pages, the current page or a range; choose whether comments and form fields print |
 
+## Imposition (the Impose menu)
+
+Everything from the Quite Imposing Plus toolbox, in the **Impose** menu and the toolbar's **Impose** button.
+Each dialog lets you replace the pages in place (undo with Ctrl+Z) or open the result in a new tab.
+Lengths use the unit from Preferences. Full details: [IMPOSITION.md](IMPOSITION.md).
+
+| Task | How |
+|---|---|
+| Booklet | Impose › Create Booklet…: sheet size, binding edge, signatures, creep, gap, margin |
+| Several pages per sheet | Impose › N-up Pages… (grid) or Step and Repeat… (copies of one page: cards, labels) |
+| Place pages by hand | Impose › Manual Imposition…: add pages to sheets, drag them in the preview, type exact positions |
+| Reorder for printing | Impose › Shuffle Pages… (reverse, booklet order, cut and stack, odd/even, custom rule), Reverse Pages |
+| Blank pages, copies | Insert Blank Pages…, Fill to a Multiple of Pages…, Duplicate Pages… |
+| Page geometry | Trim and Shift…, Adjust Page Sizes…, Mirror Pages…, Rotate Page Content…, Split Pages…, Tile Pages…, Page Boxes…, Page Info… |
+| Page numbers, Bates numbers, headers | Impose › Page Numbers… / Bates Numbers… / Stick On Text… with tokens such as {page}, {pages}, {bates}, {date}, {file} |
+| Hide part of a page | Impose › Masking Tape… |
+| Crop and registration marks, colour bars | Impose › Printer's Marks… |
+| Test document | Impose › Create Sample Document… |
+| Own sheet sizes | Impose › Sheet Sizes… |
+| Automate | Impose › Record Sequence…, apply the steps, Stop Recording; replay from Impose › Automation Sequences… |
+
 ## Preferences (Ctrl+,)
 
 Your name (used as the author of comments), appearance, session restore, default zoom and layout,

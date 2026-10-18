@@ -55,12 +55,20 @@ export class JsonStore {
   /** Atomic write: temp file + rename, serialised so concurrent saves never interleave. */
   save() {
     const text = JSON.stringify(this.value, null, 2);
-    this.writeChain = this.writeChain.then(async () => {
-      await fs.mkdir(dirname(this.filePath), { recursive: true });
-      const tmp = `${this.filePath}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
-      await fs.writeFile(tmp, text, 'utf8');
-      await fs.rename(tmp, this.filePath);
-    });
+    // A failed write must not poison the chain: later saves still run (each caller only sees its own outcome).
+    this.writeChain = this.writeChain
+      .catch(() => {})
+      .then(async () => {
+        await fs.mkdir(dirname(this.filePath), { recursive: true });
+        const tmp = `${this.filePath}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+        try {
+          await fs.writeFile(tmp, text, 'utf8');
+          await fs.rename(tmp, this.filePath);
+        } catch (err) {
+          await fs.rm(tmp, { force: true }).catch(() => {});
+          throw err;
+        }
+      });
     return this.writeChain;
   }
 }

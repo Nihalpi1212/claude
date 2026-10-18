@@ -1,0 +1,58 @@
+/* Imposition dialogs (lib/impose.js): forms, previews, page info table, sequence editor */
+.impose-dialog .dialog-body { display: flex; flex-direction: column; gap: 10px; }
+.impose-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px 14px; align-items: end; }
+.impose-form .field { margin-bottom: 0; }
+.impose-form .field.span-2 { grid-column: span 2; }
+.impose-form .field.span-all { grid-column: 1 / -1; }
+.impose-form .checkbox { align-self: center; }
+.impose-form .field > span { font-size: 12px; }
+.impose-section { font-size: 12px; font-weight: 600; letter-spacing: 0.02em; text-transform: uppercase; color: var(--fg-muted); grid-column: 1 / -1; margin-top: 6px; border-bottom: 1px solid var(--border); padding-bottom: 3px; }
+.impose-note { font-size: 12px; color: var(--fg-muted); grid-column: 1 / -1; margin: 0; }
+.impose-inline { display: flex; gap: 6px; align-items: center; }
+.impose-inline .input { width: 90px; }
+.impose-output { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; border-top: 1px solid var(--border); padding-top: 8px; font-size: 12px; }
+.impose-output .checkbox { margin: 0; }
+.impose-summary { font-size: 12px; color: var(--fg-muted); min-height: 16px; }
+
+.impose-preview { display: flex; gap: 12px; align-items: flex-start; }
+.impose-sheet { flex: none; background: #fff; border: 1px solid var(--border); box-shadow: 0 1px 4px rgba(0,0,0,0.25); position: relative; overflow: hidden; }
+.impose-sheet canvas { position: absolute; left: 0; top: 0; }
+.impose-sheet .cell { position: absolute; border: 1px dashed rgba(0,0,0,0.3); box-sizing: border-box; font: 11px/1 var(--mono); color: rgba(0,0,0,0.6); display: grid; place-items: center; background: rgba(79,129,255,0.08); }
+.impose-sheet .cell.selected { border: 2px solid var(--accent); background: rgba(79,129,255,0.18); }
+.impose-sheet .cell .cell-num { font-size: 16px; font-weight: 600; color: rgba(0,0,0,0.55); }
+
+.impose-placements { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.impose-placements table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.impose-placements th { text-align: left; font-weight: 600; color: var(--fg-muted); padding: 2px 4px; }
+.impose-placements td { padding: 2px 4px; }
+.impose-placements tr.selected td { background: var(--accent-soft); }
+.impose-placements .input { width: 100%; height: 26px; padding: 0 6px; }
+.impose-placements .tb-button { height: 24px; min-width: 24px; }
+.impose-placements .tb-button svg { width: 14px; height: 14px; }
+
+.impose-table-wrap { max-height: 55vh; overflow: auto; border: 1px solid var(--border); border-radius: 8px; }
+.impose-table { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+.impose-table th, .impose-table td { padding: 4px 8px; border-bottom: 1px solid var(--border); text-align: right; white-space: nowrap; }
+.impose-table th:first-child, .impose-table td:first-child { text-align: left; }
+.impose-table th { position: sticky; top: 0; background: var(--bg-raised); font-weight: 600; color: var(--fg-muted); }
+.impose-table tr.current td { background: var(--accent-soft); }
+
+.impose-list { border: 1px solid var(--border); border-radius: 8px; max-height: 240px; overflow: auto; }
+.impose-list-row { display: flex; align-items: center; gap: 8px; padding: 5px 10px; border-bottom: 1px solid var(--border); font-size: 13px; }
+.impose-list-row:last-child { border-bottom: 0; }
+.impose-list-row.selected { background: var(--accent-soft); }
+.impose-list-row .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.impose-list-row .muted { font-size: 11px; }
+.impose-list-row .tb-button { height: 24px; min-width: 24px; }
+.impose-list-row .tb-button svg { width: 14px; height: 14px; }
+.impose-list-empty { padding: 14px; text-align: center; font-size: 12px; color: var(--fg-muted); }
+.impose-toolbar { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.impose-toolbar .btn { height: 28px; padding: 0 10px; }
+.impose-toolbar .spacer { flex: 1; }
+.impose-rec { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
+.impose-rec .dot { width: 8px; height: 8px; border-radius: 50%; background: #e53935; box-shadow: 0 0 0 2px rgba(229,57,53,0.3); }
+.impose-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); }
+.impose-tabs button { background: none; border: 0; border-bottom: 2px solid transparent; padding: 6px 10px; font: inherit; color: var(--fg-muted); cursor: pointer; }
+.impose-tabs button[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--accent); }
+.impose-tabpanel[hidden] { display: none; }
+#tb-impose-label { font-size: 12px; }

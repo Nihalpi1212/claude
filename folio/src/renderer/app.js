@@ -14,7 +14,7 @@ import { MENU_KEYS, RENDERER_KEYS, SHORTCUT_GROUPS, COMMAND_LABELS, describeAcce
 
 // Feature modules installed after the core. Missing modules are skipped with a warning so the
 // app keeps working while features are being developed.
-const MODULES = ['welcome', 'findbar', 'shortcuts', 'history', 'annotate', 'sign', 'forms', 'panels', 'comments', 'pages', 'tools', 'print', 'properties', 'preferences'];
+const MODULES = ['welcome', 'findbar', 'shortcuts', 'history', 'annotate', 'sign', 'forms', 'panels', 'comments', 'pages', 'impose', 'tools', 'print', 'properties', 'preferences'];
 
 class App extends EventTarget {
   constructor() {
@@ -106,6 +106,7 @@ class App extends EventTarget {
       handTool: !!s?.view.handTool,
       highlightFormFields: this.settings.highlightFormFields !== false,
       readAloud: this.readAloud,
+      imposeRecording: !!this.impose?.recording,
     };
     const changed = Object.keys(state).some((k) => this.uiState[k] !== state[k]);
     if (!changed) return;
@@ -606,6 +607,7 @@ function setupHostEvents(app) {
     }
   });
   bridge.on('before-close', async ({ quitting } = {}) => {
+    bridge.closeAck?.(); // tell main we are alive before prompting (it stops its hung-renderer timer)
     try {
       const lastSession = app.tabs.list().filter((s) => s.path && !s.path.startsWith('browser:/')).map((s) => ({ path: s.path, page: s.view.page }));
       for (const s of app.tabs.list()) app.tabs.rememberRecent(s);

@@ -25,6 +25,8 @@ export const DEFAULT_SETTINGS = Object.freeze({
   signatures: [],
   stampPresets: ['APPROVED', 'DRAFT', 'CONFIDENTIAL', 'FINAL', 'REVIEWED', 'VOID', 'SIGN HERE'],
   measureUnit: 'mm',
+  customSheetSizes: [], // [{ name, width, height }] in points (Impose > Sheet Sizes)
+  imposeSequences: [], // [{ name, steps: [{ op, params }] }] (Impose > Automation Sequences)
   recentLimit: 20,
   lastSession: [],
 });

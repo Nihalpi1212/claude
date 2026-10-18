@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync, rmSync, mkdirSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { JsonStore } from '../../src/main/settings-store.js';
@@ -29,6 +29,17 @@ test('JsonStore loads defaults, persists patches atomically and survives corrupt
     assert.equal(corrupt.get().theme, 'system');
     await Promise.all([corrupt.patch({ a: 1 }), corrupt.patch({ b: 2 })]);
     assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')).b, 2);
+
+    // a failed write does not poison later saves: block the target with a directory, then unblock
+    const blockedFile = join(dir, 'blocked.json');
+    const blocked = new JsonStore(blockedFile, withDefaults);
+    await blocked.load();
+    mkdirSync(blockedFile); // the rename onto a directory fails
+    await assert.rejects(blocked.patch({ theme: 'dark' }));
+    rmSync(blockedFile, { recursive: true, force: true });
+    await blocked.patch({ theme: 'light' });
+    assert.equal(JSON.parse(readFileSync(blockedFile, 'utf8')).theme, 'light');
+    assert.deepEqual(readdirSync(dir).filter((f) => f.endsWith('.tmp')), []);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -94,7 +105,7 @@ test('menu template references known commands and accelerators', () => {
     });
     assert.equal(template[0].label, platform === 'darwin' ? 'Folio PDF' : '&File');
   }
-  for (const cmd of ['file:open', 'file:save', 'file:print', 'edit:find', 'view:zoom-in', 'tool:highlight', 'pages:organize', 'help:shortcuts', 'file:open-recent']) assert.ok(seen.has(cmd), `menu runs ${cmd}`);
+  for (const cmd of ['file:open', 'file:save', 'file:print', 'edit:find', 'view:zoom-in', 'tool:highlight', 'pages:organize', 'impose:booklet', 'impose:sequences', 'impose:record', 'help:shortcuts', 'file:open-recent']) assert.ok(seen.has(cmd), `menu runs ${cmd}`);
   const noDoc = buildMenuTemplate({ platform: 'win32', state: { hasDocument: false }, recent: [], run, isPackaged: true });
   const save = noDoc[0].submenu.find((i) => i.label === '&Save');
   assert.equal(save.enabled, false);

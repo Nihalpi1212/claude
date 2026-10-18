@@ -1,7 +1,7 @@
 {
   "name": "folio-pdf",
   "productName": "Folio PDF",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Free, open-source PDF reader for Windows and macOS: view, search, annotate, fill forms, sign, and organize pages.",
   "main": "src/main/main.js",
   "type": "module",

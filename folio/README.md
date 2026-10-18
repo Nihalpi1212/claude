@@ -35,6 +35,13 @@ Built with [Electron](https://www.electronjs.org/), [pdf.js](https://mozilla.git
 - Export text, export pages as PNG/JPEG, flatten forms and comments
 - Print with page ranges and quality options
 
+**Impose** (the Quite Imposing Plus feature set, see [docs/IMPOSITION.md](docs/IMPOSITION.md))
+- Booklets (saddle stitch, signatures, creep, left/right binding), n-up, step and repeat, manual imposition with a drag-and-drop preview
+- Shuffle pages (reverse, booklet order, cut and stack, odd/even separation, custom rules), insert blank pages, fill to a multiple, duplicate pages
+- Trim and shift, adjust page sizes, mirror, rotate content, split pages, tile posters, set page boxes, page info table (CSV export)
+- Stick-on text with page numbers, Bates numbers, dates and file names; masking tape; printer's marks (crop, registration, fold marks, colour bars)
+- Sample documents, custom sheet sizes, and recorded automation sequences that replay on any document (export/import as JSON)
+
 Everything is written straight into the PDF as standard annotations and form data, so the results open in
 Acrobat and other readers.
 

@@ -194,6 +194,42 @@ export function buildMenuTemplate({ platform, state = {}, recent = [], run, isPa
     ],
   };
 
+  const imposeMenu = {
+    label: '&Impose',
+    submenu: [
+      doc('Create &Booklet…', 'impose:booklet'),
+      doc('&N-up Pages…', 'impose:nup'),
+      doc('Step and &Repeat…', 'impose:step-repeat'),
+      doc('&Manual Imposition…', 'impose:manual'),
+      sep,
+      doc('&Shuffle Pages…', 'impose:shuffle'),
+      doc('Re&verse Pages', 'impose:reverse'),
+      doc('Insert Blank Pages…', 'impose:insert-blank'),
+      doc('Fill to a Multiple of Pages…', 'impose:fill-multiple'),
+      doc('Duplicate Pages…', 'impose:duplicate'),
+      sep,
+      doc('&Trim and Shift…', 'impose:trim-shift'),
+      doc('&Adjust Page Sizes…', 'impose:adjust-size'),
+      doc('Mirror Pages…', 'impose:mirror'),
+      doc('Rotate Page Content…', 'impose:rotate-content'),
+      doc('Split Pages…', 'impose:split'),
+      doc('Tile Pages…', 'impose:tile'),
+      doc('Page Bo&xes…', 'impose:page-boxes'),
+      doc('Page &Info…', 'impose:page-info'),
+      sep,
+      doc('&Page Numbers…', 'impose:page-numbers'),
+      doc('Bates Numbers…', 'impose:bates'),
+      doc('Stick On Text…', 'impose:stick-text'),
+      doc('Masking Tape…', 'impose:tape'),
+      doc("Printer's Mar&ks…", 'impose:marks'),
+      sep,
+      item('Create Sample &Document…', 'impose:sample'),
+      item('Sheet Si&zes…', 'impose:sheet-sizes'),
+      item('Automation Se&quences…', 'impose:sequences'),
+      item(state.imposeRecording ? 'Stop Recording Sequence' : 'Record Sequence…', 'impose:record', { type: 'checkbox', checked: !!state.imposeRecording }),
+    ],
+  };
+
   const windowMenu = {
     role: 'window',
     label: '&Window',
@@ -238,5 +274,5 @@ export function buildMenuTemplate({ platform, state = {}, recent = [], run, isPa
     ],
   };
 
-  return [...(mac ? [appMenu] : []), fileMenu, editMenu, viewMenu, toolsMenu, windowMenu, helpMenu];
+  return [...(mac ? [appMenu] : []), fileMenu, editMenu, viewMenu, toolsMenu, imposeMenu, windowMenu, helpMenu];
 }

@@ -106,6 +106,7 @@ interface FolioBridge {
   isFullScreen(): Promise<boolean>;
   closeWindow(): void;
   respondClose(allow: boolean, quit?: boolean): void; // answer to the 'before-close' event ({ quitting } payload echoed back)
+  closeAck(): void;                                  // sent first thing in the 'before-close' handler: main then waits for respondClose without a timeout
   setTheme(theme: 'system'|'light'|'dark'): Promise<boolean>;   // returns shouldUseDarkColors after applying
   getSystemDark(): Promise<boolean>;
 
@@ -178,6 +179,7 @@ nothing else calls module methods across module boundaries. Commands registered 
 | view | `view:zoom-in`, `view:zoom-out`, `view:zoom-reset`, `view:fit-page`, `view:fit-width`, `view:actual-size`, `view:set-zoom` (number or preset string), `view:rotate-cw`, `view:rotate-ccw`, `view:first-page`, `view:last-page`, `view:next-page`, `view:prev-page`, `view:go-to-page` (number), `view:back`, `view:forward`, `view:scroll-vertical`, `view:scroll-horizontal`, `view:scroll-wrapped`, `view:scroll-page`, `view:spread-none`, `view:spread-odd`, `view:spread-even`, `view:toggle-sidebar`, `view:sidebar` (view name), `view:presentation`, `view:fullscreen`, `view:night-mode`, `view:theme` ('system'/'light'/'dark'), `view:hand-tool`, `view:select-tool`, `view:read-aloud`, `view:next-tab`, `view:prev-tab`, `view:focus-page-number` |
 | tool | `tool:none`, `tool:highlight`, `tool:highlight-free`, `tool:underline`, `tool:strikeout`, `tool:squiggly`, `tool:note`, `tool:text`, `tool:ink`, `tool:rect`, `tool:ellipse`, `tool:line`, `tool:arrow`, `tool:stamp`, `tool:image`, `tool:sign`, `tool:initials`, `tool:measure`, `tool:eraser` |
 | pages | `pages:organize`, `pages:insert`, `pages:extract`, `pages:split`, `pages:rotate` (indices), `pages:delete` (indices), `pages:crop` |
+| impose | `impose:booklet`, `impose:nup`, `impose:step-repeat`, `impose:manual`, `impose:shuffle`, `impose:reverse`, `impose:insert-blank`, `impose:fill-multiple`, `impose:duplicate`, `impose:trim-shift`, `impose:adjust-size`, `impose:mirror`, `impose:rotate-content`, `impose:split`, `impose:tile`, `impose:page-boxes`, `impose:page-info`, `impose:stick-text` ({preset}), `impose:page-numbers`, `impose:bates`, `impose:tape`, `impose:marks`, `impose:sample`, `impose:sheet-sizes`, `impose:sequences`, `impose:record` (toggle), `impose:run-sequence` (name or {steps}) — see docs/IMPOSITION.md |
 | form | `form:toggle-highlight`, `form:reset`, `form:export`, `form:next-field` |
 | help | `help:shortcuts`, `help:about`, `help:website`, `help:devtools` |
 
@@ -230,6 +232,8 @@ interface DocumentSession {
   close(): Promise<boolean>;       // prompts when dirty; true when closed
 }
 ```
+
+`lib/impose.js` (the Impose menu) builds its dialogs with a small form builder (fields in the user's unit, sheet-size and page-range fields), records steps into `app.impose.recording` while a sequence is being recorded, and routes results either to a new tab (`app.tabs.open({ bytes, name })`) or in place through `app.edit.apply`; the engine is `src/shared/impose.js` (`OPS` maps step names to functions, `runSequence` replays them). Custom sheet sizes and sequences live in settings (`customSheetSizes`, `imposeSequences`).
 
 Document-level undo/redo for engine operations lives in `lib/history.js` (`app.edit.apply(op, {label})`, `undo()`, `redo()`), while pdf.js keeps its own undo stack for its editors; `edit:undo` consults pdf.js first (`view.editorStates`), then the document history, then the native text-field undo.
 

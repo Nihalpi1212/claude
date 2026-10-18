@@ -206,8 +206,12 @@ function createBrowserBridge() {
     closeWindow() {
       emit('before-close', { quitting: false });
     },
-    respondClose(allow) {
+    respondClose(allow, quit) {
       test.closeResponse = allow;
+      test.closeQuit = !!quit;
+    },
+    closeAck() {
+      test.closeAcked = true;
     },
     async setTheme(theme) {
       return theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);

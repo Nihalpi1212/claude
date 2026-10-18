@@ -35,6 +35,7 @@ function toUint8(data) {
  * @param {{ files: string[], rendererReady: boolean }} ctx.startup
  * @param {{ current: object }} ctx.uiState
  * @param {(allow: boolean, quit: boolean) => void} ctx.onCloseResponse
+ * @param {() => void} [ctx.onCloseAck]   renderer acknowledged 'before-close' (it is alive and prompting)
  */
 export function registerIpc(ctx) {
   const { electron, settings, recent, watcher, getWindow, updateMenu, startup, uiState } = ctx;
@@ -183,9 +184,16 @@ export function registerIpc(ctx) {
     updateMenu();
   });
 
-  handle('getStartupFiles', async () => {
+  handle('getStartupFiles', async (event) => {
     startup.rendererReady = true;
     const files = startup.files.splice(0);
+    // menu commands issued while no window existed (macOS) run once the renderer listens
+    const pending = Array.isArray(startup.commands) ? startup.commands.splice(0) : [];
+    if (pending.length) {
+      setImmediate(() => {
+        for (const { cmd, arg } of pending) if (!event.sender.isDestroyed()) event.sender.send('folio:event:command', cmd, arg);
+      });
+    }
     return files;
   });
 
@@ -213,7 +221,8 @@ export function registerIpc(ctx) {
   handle('isFullScreen', async () => !!getWindow()?.isFullScreen());
 
   on('closeWindow', () => getWindow()?.close());
-  on('respondClose', (allow, quit) => ctx.onCloseResponse(!!allow, !!quit));
+  on('respondClose', (allow, quit) => ctx.onCloseResponse(allow === true, quit === true));
+  on('closeAck', () => ctx.onCloseAck?.());
 
   handle('setTheme', async (theme) => {
     nativeTheme.themeSource = ['light', 'dark'].includes(theme) ? theme : 'system';

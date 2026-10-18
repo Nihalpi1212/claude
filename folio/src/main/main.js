@@ -1,5 +1,5 @@
 // Folio PDF — Electron main process.
-import { app, BrowserWindow, Menu, nativeTheme, protocol, session, shell, ipcMain, dialog, clipboard, nativeImage } from 'electron';
+import { screen, app, BrowserWindow, Menu, nativeTheme, protocol, session, shell, ipcMain, dialog, clipboard, nativeImage } from 'electron';
 import { promises as fs, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -29,7 +29,7 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 // ---- single instance + files to open ------------------------------------------------------------
-const startup = { files: [], rendererReady: false };
+const startup = { files: [], commands: [], rendererReady: false };
 let mainWindow = null;
 let quitting = false;
 let closeTimer = null;
@@ -78,7 +78,11 @@ const uiState = { current: {} };
 // ---- menu --------------------------------------------------------------------------------------------
 function runCommand(cmd, arg) {
   if (!mainWindow || mainWindow.isDestroyed()) {
-    if (cmd === 'file:open' || cmd === 'file:open-recent') createWindow().then(() => mainWindow?.webContents.once('did-finish-load', () => mainWindow.webContents.send('folio:event:command', cmd, arg)));
+    // No window (macOS after closing it): queue the command; getStartupFiles delivers it once the
+    // new renderer listens (the load event fires before the renderer has attached its handlers).
+    if (cmd === 'file:open-recent' && typeof arg === 'string') queueFiles([arg]);
+    else if (cmd !== 'help:devtools') startup.commands.push({ cmd, arg });
+    if (app.isReady()) createWindow();
     return;
   }
   if (cmd === 'help:devtools') {
@@ -98,11 +102,21 @@ function updateMenu() {
 }
 
 // ---- window ------------------------------------------------------------------------------------------
+/** Saved bounds are only reused when they still intersect a connected display's work area. */
+function visibleBounds(b) {
+  if (!b || ![b.x, b.y, b.width, b.height].every(Number.isFinite)) return null;
+  const onDisplay = screen.getAllDisplays().some(({ workArea: a }) => b.x < a.x + a.width && b.x + b.width > a.x && b.y < a.y + a.height && b.y + b.height > a.y);
+  return onDisplay ? b : null;
+}
+
 async function createWindow() {
-  const bounds = settings.get().windowBounds;
+  startup.rendererReady = false; // files/commands arriving while this renderer loads are queued
+  const saved = settings.get().windowBounds;
+  const bounds = visibleBounds(saved);
+  const work = screen.getPrimaryDisplay().workArea;
   const win = new BrowserWindow({
-    width: bounds?.width ?? 1280,
-    height: bounds?.height ?? 860,
+    width: Math.min(bounds?.width ?? saved?.width ?? 1280, work.width),
+    height: Math.min(bounds?.height ?? saved?.height ?? 860, work.height),
     x: bounds?.x,
     y: bounds?.y,
     minWidth: 720,
@@ -125,7 +139,7 @@ async function createWindow() {
   mainWindow = win;
 
   win.once('ready-to-show', () => {
-    if (bounds?.maximized) win.maximize();
+    if (saved?.maximized) win.maximize();
     win.show();
   });
 
@@ -153,15 +167,30 @@ async function createWindow() {
       win.close();
       return;
     }
+    if (win.closePending) return; // the renderer is already prompting; ignore repeated close requests
+    win.closePending = true;
     win.webContents.send('folio:event:before-close', { quitting });
     clearTimeout(closeTimer);
     closeTimer = setTimeout(() => {
-      // Renderer did not answer: do not trap the user in an unclosable window.
+      // The renderer never acknowledged the request (hung before it could prompt): do not trap the
+      // user in an unclosable window. Once acknowledged there is no time limit, because the
+      // renderer may be waiting on the user ("Save changes?") or on a long save.
       win.allowClose = true;
       win.close();
     }, 8000);
   });
+  const forceClose = () => {
+    clearTimeout(closeTimer);
+    if (win.isDestroyed()) return;
+    win.allowClose = true;
+    win.close();
+  };
+  win.webContents.on('render-process-gone', forceClose);
+  win.webContents.on('unresponsive', () => {
+    if (win.closePending) forceClose();
+  });
   win.on('closed', () => {
+    clearTimeout(closeTimer);
     if (mainWindow === win) mainWindow = null;
     watcher.close();
   });
@@ -192,16 +221,25 @@ function openExternalSafely(url) {
   }
 }
 
+function onCloseAck() {
+  // The renderer received 'before-close' and is prompting/saving: wait for its answer however long it takes.
+  clearTimeout(closeTimer);
+  closeTimer = null;
+}
+
 function onCloseResponse(allow, quit) {
   clearTimeout(closeTimer);
+  closeTimer = null;
   const win = mainWindow;
   if (!win || win.isDestroyed()) return;
+  win.closePending = false;
   if (allow) {
     win.allowClose = true;
     win.close();
     if (quit) app.quit();
   } else {
     quitting = false;
+    win.allowClose = false;
   }
 }
 
@@ -244,6 +282,7 @@ app.whenReady().then(async () => {
     startup,
     uiState,
     onCloseResponse,
+    onCloseAck,
   });
 
   nativeTheme.on('updated', () => mainWindow?.webContents.send('folio:event:theme', { dark: nativeTheme.shouldUseDarkColors }));
