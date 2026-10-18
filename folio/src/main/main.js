@@ -77,16 +77,18 @@ const uiState = { current: {} };
 
 // ---- menu --------------------------------------------------------------------------------------------
 function runCommand(cmd, arg) {
-  if (!mainWindow || mainWindow.isDestroyed()) {
-    // No window (macOS after closing it): queue the command; getStartupFiles delivers it once the
-    // new renderer listens (the load event fires before the renderer has attached its handlers).
-    if (cmd === 'file:open-recent' && typeof arg === 'string') queueFiles([arg]);
-    else if (cmd !== 'help:devtools') startup.commands.push({ cmd, arg });
-    if (app.isReady()) createWindow();
+  const hasWindow = mainWindow && !mainWindow.isDestroyed();
+  if (cmd === 'help:devtools') {
+    if (hasWindow) mainWindow.webContents.toggleDevTools();
     return;
   }
-  if (cmd === 'help:devtools') {
-    mainWindow.webContents.toggleDevTools();
+  if (!hasWindow || !startup.rendererReady) {
+    // No window (macOS after closing it) or a renderer that is still loading: queue the command;
+    // getStartupFiles delivers it once the renderer listens (the load event fires before the
+    // renderer has attached its handlers). Recent files go through the file queue.
+    if (cmd === 'file:open-recent' && typeof arg === 'string') queueFiles([arg]);
+    else startup.commands.push({ cmd, arg });
+    if (!hasWindow && app.isReady()) createWindow();
     return;
   }
   mainWindow.webContents.send('folio:event:command', cmd, arg);
@@ -102,18 +104,27 @@ function updateMenu() {
 }
 
 // ---- window ------------------------------------------------------------------------------------------
-/** Saved bounds are only reused when they still intersect a connected display's work area. */
+/**
+ * Saved bounds are only reused when enough of the window's title bar (a 100×20 px piece of its top
+ * strip) is on a connected display's work area, so the window can always be grabbed and moved.
+ */
 function visibleBounds(b) {
-  if (!b || ![b.x, b.y, b.width, b.height].every(Number.isFinite)) return null;
-  const onDisplay = screen.getAllDisplays().some(({ workArea: a }) => b.x < a.x + a.width && b.x + b.width > a.x && b.y < a.y + a.height && b.y + b.height > a.y);
-  return onDisplay ? b : null;
+  if (!b || ![b.x, b.y, b.width, b.height].every(Number.isFinite) || b.width <= 0 || b.height <= 0) return null;
+  const strip = { x: b.x, y: b.y, width: b.width, height: Math.min(40, b.height) };
+  const grabbable = screen.getAllDisplays().some(({ workArea: a }) => {
+    const w = Math.min(strip.x + strip.width, a.x + a.width) - Math.max(strip.x, a.x);
+    const h = Math.min(strip.y + strip.height, a.y + a.height) - Math.max(strip.y, a.y);
+    return w >= Math.min(100, strip.width) && h >= Math.min(20, strip.height);
+  });
+  return grabbable ? b : null;
 }
 
 async function createWindow() {
   startup.rendererReady = false; // files/commands arriving while this renderer loads are queued
   const saved = settings.get().windowBounds;
   const bounds = visibleBounds(saved);
-  const work = screen.getPrimaryDisplay().workArea;
+  // cap the size to the display the window will appear on (not necessarily the primary one)
+  const work = (bounds ? screen.getDisplayMatching(bounds) : screen.getPrimaryDisplay()).workArea;
   const win = new BrowserWindow({
     width: Math.min(bounds?.width ?? saved?.width ?? 1280, work.width),
     height: Math.min(bounds?.height ?? saved?.height ?? 860, work.height),
@@ -185,7 +196,25 @@ async function createWindow() {
     win.allowClose = true;
     win.close();
   };
-  win.webContents.on('render-process-gone', forceClose);
+  win.webContents.on('render-process-gone', async (_event, details) => {
+    if (win.isDestroyed()) return;
+    if (win.closePending) return forceClose(); // it died while we were waiting for its answer
+    // A crash with no close pending: offer a reload instead of silently losing the window (and, on
+    // Windows/Linux, the whole app through window-all-closed).
+    const { response } = await dialog.showMessageBox(win, {
+      type: 'error',
+      message: 'The document view stopped working',
+      detail: `Reason: ${details?.reason ?? 'unknown'}. Reload it to continue (unsaved changes are lost), or close the window.`,
+      buttons: ['Reload', 'Close Window'],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (win.isDestroyed()) return;
+    if (response === 0) {
+      startup.rendererReady = false;
+      win.webContents.reload();
+    } else forceClose();
+  });
   win.webContents.on('unresponsive', () => {
     if (win.closePending) forceClose();
   });
@@ -193,6 +222,9 @@ async function createWindow() {
     clearTimeout(closeTimer);
     if (mainWindow === win) mainWindow = null;
     watcher.close();
+    // the menu must not keep offering document commands for a window that no longer exists
+    uiState.current = {};
+    updateMenu();
   });
   win.on('enter-full-screen', () => win.webContents.send('folio:event:fullscreen', { fullScreen: true }));
   win.on('leave-full-screen', () => win.webContents.send('folio:event:fullscreen', { fullScreen: false }));
