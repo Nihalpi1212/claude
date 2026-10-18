@@ -160,7 +160,7 @@ export class DocumentView {
     }
     if (this.#loadingTask !== task) {
       // superseded by another load
-      pdfDocument.destroy();
+      pdfDocument.loadingTask.destroy().catch(() => {});
       throw new Error('Load cancelled');
     }
     this.pdfDocument = pdfDocument;
@@ -198,7 +198,7 @@ export class DocumentView {
       this.linkService.setDocument(null, null);
       const doc = this.pdfDocument;
       this.pdfDocument = null;
-      await doc.destroy().catch(() => {});
+      await doc.loadingTask.destroy().catch(() => {});
     } else if (task) {
       await task.destroy().catch(() => {});
     }

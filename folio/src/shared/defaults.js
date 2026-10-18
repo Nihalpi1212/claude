@@ -31,7 +31,8 @@ export const DEFAULT_SETTINGS = Object.freeze({
 
 /** Returns a fresh settings object: defaults overlaid with the given (possibly partial/invalid) stored values. */
 export function withDefaults(stored) {
-  const out = { ...DEFAULT_SETTINGS };
+  const out = {};
+  for (const [key, value] of Object.entries(DEFAULT_SETTINGS)) out[key] = Array.isArray(value) ? value.slice() : value;
   if (stored && typeof stored === 'object') {
     for (const [key, value] of Object.entries(stored)) {
       if (value === undefined || value === null) continue;
