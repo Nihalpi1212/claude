@@ -50,7 +50,7 @@
       "!**/*.map"
     ],
     "asar": true,
-    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+    "artifactName": "folio-pdf-${version}-${os}-${arch}.${ext}",
     "fileAssociations": [
       {
         "ext": "pdf",
@@ -123,7 +123,7 @@
       "deleteAppDataOnUninstall": false
     },
     "portable": {
-      "artifactName": "${productName}-${version}-portable.${ext}"
+      "artifactName": "folio-pdf-${version}-win-portable.${ext}"
     },
     "linux": {
       "target": [

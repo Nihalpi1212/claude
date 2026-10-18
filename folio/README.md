@@ -45,9 +45,9 @@ Release tagged `folio-v*`:
 
 | Platform | File |
 |---|---|
-| Windows 10/11 (x64, Arm) | `Folio PDF-<version>-win-<arch>.exe` (installer) or `Folio PDF-<version>-portable.exe` |
-| macOS 11+ (Apple silicon and Intel) | `Folio PDF-<version>-mac-universal.dmg` |
-| Linux (x64) | `Folio PDF-<version>-linux-x86_64.AppImage` |
+| Windows 10/11 (x64, Arm) | `folio-pdf-<version>-win-<arch>.exe` (installer) or `folio-pdf-<version>-win-portable.exe` |
+| macOS 11+ (Apple silicon and Intel) | `folio-pdf-<version>-mac-universal.dmg` |
+| Linux (x64) | `folio-pdf-<version>-linux-x86_64.AppImage` |
 
 The builds are **not code-signed** (signing certificates cost money and are not part of this repository), so:
 
