@@ -72,7 +72,7 @@ test('folio:// url resolution stays inside the app directories', () => {
 test('startup files from argv', () => {
   const exists = (p) => !p.includes('missing');
   // expected paths go through resolve() so the test holds on Windows (drive letters, backslashes) too
-  assert.deepEqual(filesFromArgv(['electron', '.', '--inspect', 'a.pdf', '/tmp/b.PDF', 'c.txt', 'missing.pdf'], { isPackaged: false, cwd: '/x', exists }), [resolve('/x', 'a.pdf'), resolve('/tmp/b.PDF')]);
+  assert.deepEqual(filesFromArgv(['electron', '.', '--inspect', 'a.pdf', '/tmp/b.PDF', 'c.txt', 'missing.pdf'], { isPackaged: false, cwd: '/x', exists }), [resolve('/x', 'a.pdf'), '/tmp/b.PDF']); // '/tmp/b.PDF' counts as absolute on every platform and is kept as given
   assert.deepEqual(filesFromArgv(['Folio.exe', 'C:\\docs\\a.pdf'], { isPackaged: true, cwd: 'C:\\', exists }), [resolve('C:\\', 'C:\\docs\\a.pdf')]);
   assert.deepEqual(filesFromArgv(['Folio', 'a.pdf', 'a.pdf'], { isPackaged: true, cwd: '/x', exists }), [resolve('/x', 'a.pdf')]);
 });
