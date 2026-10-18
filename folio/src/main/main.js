@@ -18,6 +18,8 @@ const APP_URL = `${APP_SCHEME}://app/index.html`;
 const IS_MAC = process.platform === 'darwin';
 
 app.setName('Folio PDF');
+// Tests and portable setups can point the settings/recent files elsewhere.
+if (process.env.FOLIO_USER_DATA) app.setPath('userData', process.env.FOLIO_USER_DATA);
 if (process.platform === 'win32') app.setAppUserModelId('com.foliopdf.app');
 
 // The renderer page lives on a privileged scheme so it has a real origin (module workers, fetch,

@@ -6,6 +6,7 @@
   -webkit-overflow-scrolling: touch;
   outline: none;
 }
+.viewerContainer:focus-visible { box-shadow: none; }
 .viewerContainer .pdfViewer { padding-top: 12px; padding-bottom: 12px; }
 .viewerContainer .pdfViewer .page { margin: 0 auto 12px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.22); border: 0; background-clip: content-box; }
 .viewerContainer .pdfViewer.removePageBorders .page { margin: 0 auto 10px; }

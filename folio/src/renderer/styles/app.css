@@ -63,10 +63,18 @@ body.platform-win32 .titlebar, body.platform-linux .titlebar, body.platform-brow
 /* ---- toolbars ---- */
 .toolbar {
   grid-area: toolbar;
-  display: flex; align-items: center; gap: 2px;
-  height: var(--toolbar-height); padding: 0 8px;
+  display: flex; align-items: center; gap: 2px; flex-wrap: wrap;
+  min-height: var(--toolbar-height); padding: 0 8px;
   background: var(--bg); border-bottom: 1px solid var(--border);
-  overflow: hidden;
+}
+@media (max-width: 1240px) {
+  .toolbar-group { padding: 0 3px; }
+  .tb-button { min-width: 28px; padding: 0 3px; }
+  #tb-fit-page, #tb-fit-width { display: none; }
+}
+@media (max-width: 1040px) {
+  #tb-measure, #tb-eraser, #tb-print { display: none; }
+  .tb-zoom-input { width: 56px; }
 }
 .toolbar-secondary { grid-area: secondary; height: 40px; background: var(--bg-elevated); gap: 8px; padding: 0 14px; }
 .toolbar-group { display: flex; align-items: center; gap: 2px; padding: 0 6px; position: relative; }

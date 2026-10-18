@@ -56,6 +56,7 @@ class App extends EventTarget {
       console.warn('Could not persist settings', err);
     }
     this.emit('settings:changed', patch);
+    if (patch && 'theme' in patch) await this.applyTheme();
   }
 
   reportError(err, context) {
@@ -109,6 +110,7 @@ class App extends EventTarget {
     const changed = Object.keys(state).some((k) => this.uiState[k] !== state[k]);
     if (!changed) return;
     this.uiState = state;
+    document.title = state.hasDocument ? `${state.dirty ? '• ' : ''}${state.title} — Folio PDF` : 'Folio PDF';
     bridge.setUiState(state);
   }
 

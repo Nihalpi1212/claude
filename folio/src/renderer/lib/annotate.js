@@ -335,8 +335,8 @@ export function install(app) {
   }
 
   // apply selection tools when the user finishes selecting text
-  document.addEventListener('mouseup', () => {
-    if (!SELECTION_TOOLS[state.tool]) return;
+  document.addEventListener('mouseup', (event) => {
+    if (!SELECTION_TOOLS[state.tool] || !view()?.container.contains(event.target)) return;
     setTimeout(() => {
       if (view()?.getSelection()) applySelectionMarkup(state.tool);
     }, 30);

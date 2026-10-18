@@ -1,5 +1,5 @@
 # Folio PDF CI: unit tests (node:test) and browser end-to-end tests (Playwright) on every change
-# under folio/. The Electron binary is not needed for the tests, so its download is skipped.
+# under folio/, plus tests that launch the real Electron app under Xvfb.
 
 name: Folio CI
 
@@ -23,8 +23,6 @@ jobs:
     defaults:
       run:
         working-directory: folio
-    env:
-      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
     steps:
       - uses: actions/checkout@v4
 
@@ -46,10 +44,15 @@ jobs:
       - name: End-to-end tests
         run: npm run test:e2e
 
+      - name: Electron app tests
+        run: xvfb-run -a npm run test:electron
+
       - name: Upload test artifacts
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: folio-e2e-artifacts
-          path: folio/tests/e2e/.artifacts
+          path: |
+            folio/tests/e2e/.artifacts
+            folio/tests/electron/.artifacts
           if-no-files-found: ignore

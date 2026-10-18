@@ -65,6 +65,7 @@ npm ci                 # installs dependencies and copies the pdf.js / pdf-lib b
 npm start              # run the app in development
 npm test               # unit tests (node:test)
 npm run test:e2e       # browser end-to-end tests (Playwright, Chromium)
+npm run test:electron  # tests that launch the real Electron app (Linux: xvfb-run -a npm run test:electron)
 npm run dist:win       # Windows installer + portable exe   (run on Windows)
 npm run dist:mac       # macOS universal .dmg and .zip      (run on macOS)
 npm run dist:linux     # Linux AppImage
