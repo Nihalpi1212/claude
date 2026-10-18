@@ -5,8 +5,9 @@
 #   windows-latest -> NSIS installer (x64 + arm64) and a portable .exe
 #   ubuntu-latest  -> AppImage
 #
-# Runs on tags named folio-v* (and on demand). Tag pushes also create a GitHub Release with the
-# installers attached. The builds are NOT code-signed (no certificates in this repository), so
+# Runs on tags named folio-v* and on demand. A tag push, or a manual run with the `tag` input set,
+# also creates (or updates) the GitHub Release for that tag with the installers attached; a manual
+# run without `tag` only uploads workflow artifacts. The builds are NOT code-signed (no certificates in this repository), so
 # macOS Gatekeeper and Windows SmartScreen show a warning on first launch; see folio/README.md.
 
 name: Folio release
@@ -16,6 +17,12 @@ on:
     tags:
       - 'folio-v*'
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to publish, e.g. folio-v0.1.0 (leave empty to only build the installers)'
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: write
@@ -76,8 +83,10 @@ jobs:
   release:
     name: Publish GitHub Release
     needs: build
-    if: startsWith(github.ref, 'refs/tags/folio-v')
+    if: startsWith(github.ref, 'refs/tags/folio-v') || inputs.tag != ''
     runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -87,7 +96,9 @@ jobs:
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
-          name: Folio PDF ${{ github.ref_name }}
+          tag_name: ${{ env.RELEASE_TAG }}
+          target_commitish: ${{ github.sha }}
+          name: Folio PDF ${{ env.RELEASE_TAG }}
           body: |
             Free, open-source PDF reader for Windows, macOS and Linux.
 
