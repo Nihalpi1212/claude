@@ -1,9 +1,10 @@
-// Keyboard shortcuts in the renderer (see src/shared/keymap.js for the dispatch rules).
+// Keyboard dispatch (see src/shared/keymap.js for the rules). Plain letters select tools; Shift +
+// the same letter cycles through the tools sharing a toolbox slot; Space temporarily switches to
+// the hand tool; the active tool gets first refusal on keys it handles itself (arrows, Backspace).
 import { MENU_KEYS, RENDERER_KEYS, parseAccelerator, eventMatches } from '../../shared/keymap.js';
 import { isMac } from './bridge.js';
 
-const NATIVE_IN_TEXT = new Set(['edit:undo', 'edit:redo', 'edit:cut', 'edit:copy', 'edit:paste', 'edit:select-all', 'edit:delete', 'view:first-page', 'view:last-page', 'view:next-page', 'view:prev-page', 'view:back', 'view:forward', 'view:zoom-in', 'view:zoom-out']);
-const NAV_WHEN_EDITOR_SELECTED = new Set(['view:first-page', 'view:last-page', 'view:next-page', 'view:prev-page', 'view:back', 'view:forward', 'edit:delete']);
+const NATIVE_IN_TEXT = new Set(['edit:undo', 'edit:redo', 'edit:cut', 'edit:copy', 'edit:paste', 'edit:select-all', 'select:all', 'edit:clear', 'view:zoom-in', 'view:zoom-out']);
 
 function isTextInput(el) {
   if (!el) return false;
@@ -22,48 +23,88 @@ export function install(app) {
       table.push({ cmd, desc, plain });
     }
   }
-  // longer modifier combos first so Ctrl+Shift+Z wins over Ctrl+Z
-  table.sort((a, b) => Number(b.desc.shift) + Number(b.desc.alt) - (Number(a.desc.shift) + Number(a.desc.alt)));
+  // more modifiers first so Ctrl+Shift+Z wins over Ctrl+Z
+  table.sort((a, b) => Number(b.desc.shift) + Number(b.desc.alt) + Number(b.desc.cmdOrCtrl) - (Number(a.desc.shift) + Number(a.desc.alt) + Number(a.desc.cmdOrCtrl)));
 
+  const toolKeys = new Map(); // letter -> slot id
+  for (const [cmd, accels] of Object.entries(RENDERER_KEYS)) {
+    if (!cmd.startsWith('tool:')) continue;
+    for (const a of accels) if (/^[a-z]$/.test(a)) toolKeys.set(a, cmd.slice(5));
+  }
+
+  let spaceTool = null;
   document.addEventListener('keydown', (event) => {
     if (event.defaultPrevented || event.isComposing) return;
     const inText = isTextInput(event.target);
     const inDialog = !!event.target.closest?.('.dialog-backdrop');
-    const view = app.view;
-    const editorBusy = !!view?.uiManager && (view.uiManager.isEditorHandlingKeyboard || view.uiManager.hasSelection);
+    // Space: temporary hand tool
+    if (event.key === ' ' && !inText && !inDialog && app.view) {
+      event.preventDefault();
+      if (!event.repeat && !spaceTool) {
+        spaceTool = true;
+        app.view.spaceHeld = true;
+        app.view.setCursor('grab');
+      }
+      return;
+    }
+    if (!inText && !inDialog && app.tools?.active?.onKeyDown?.(event)) {
+      event.preventDefault();
+      return;
+    }
+    // Shift+letter cycles the slot's tools
+    if (!inText && !inDialog && event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey && event.key.length === 1) {
+      const slot = toolKeys.get(event.key.toLowerCase());
+      if (slot && app.tools) {
+        event.preventDefault();
+        const s = app.tools.slots.find((x) => x.id === slot);
+        if (s) {
+          const current = s.tools.includes(app.tools.active?.id) ? app.tools.active.id : s.current;
+          const next = s.tools[(s.tools.indexOf(current) + 1) % s.tools.length];
+          app.tools.activate(next);
+        }
+        return;
+      }
+    }
     for (const entry of table) {
       if (!eventMatches(event, entry.desc, isMac)) continue;
       const { cmd, plain } = entry;
       if (inDialog && cmd !== 'app:escape') return;
       if (inText) {
-        if (plain || NATIVE_IN_TEXT.has(cmd)) return;
+        if (plain || NATIVE_IN_TEXT.has(cmd) || cmd === 'app:enter' || cmd === 'window:toggle-panels') return;
         if (cmd === 'app:escape') {
           event.target.blur();
           event.preventDefault();
           return;
         }
       }
-      if (editorBusy && (NAV_WHEN_EDITOR_SELECTED.has(cmd) || plain)) {
-        if (cmd === 'app:escape') break;
-        return; // pdf.js moves/deletes the selected editor itself
+      if (plain && event.repeat && cmd !== 'tool:brush-size-up' && cmd !== 'tool:brush-size-down') return;
+      if (plain && !app.doc && cmd.startsWith('tool:') && !['tool:swap-colors', 'tool:default-colors'].includes(cmd)) {
+        // tools can still be chosen without a document
       }
-      if (plain && event.repeat) return;
-      // "n"/"p"/"j"/"k" style letters only apply when the viewer has focus (not when typing in forms)
-      if (plain && !app.session && !['app:escape'].includes(cmd)) return;
       event.preventDefault();
       event.stopPropagation();
+      if (cmd.startsWith('tool:') && !app.commands.has(cmd) && toolKeys.has(event.key.toLowerCase())) {
+        app.tools.activateSlot(cmd.slice(5));
+        return;
+      }
       app.commands.run(cmd, undefined, 'key');
       return;
     }
-    // Space / Shift+Space page through the document when the viewer is focused.
-    if (event.key === ' ' && !inText && view && !editorBusy && !inDialog) {
-      const c = view.container;
-      if (c.contains(event.target) || event.target === document.body) {
-        event.preventDefault();
-        const delta = event.shiftKey ? -c.clientHeight * 0.9 : c.clientHeight * 0.9;
-        if (view.scrollMode === 3) app.commands.run(event.shiftKey ? 'view:prev-page' : 'view:next-page', undefined, 'key');
-        else c.scrollBy({ top: delta, behavior: 'auto' });
+  });
+  document.addEventListener('keyup', (event) => {
+    if (event.key === ' ' && spaceTool) {
+      spaceTool = null;
+      if (app.view) {
+        app.view.spaceHeld = false;
+        app.tools.updateCursor();
       }
+    }
+  });
+  window.addEventListener('blur', () => {
+    if (spaceTool && app.view) {
+      spaceTool = null;
+      app.view.spaceHeld = false;
+      app.tools.updateCursor();
     }
   });
 }

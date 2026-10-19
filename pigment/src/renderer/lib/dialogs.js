@@ -228,7 +228,7 @@ export class Dialogs {
    * Popover menu anchored to an element.
    * items: { label, icon?, shortcut?(accelerator), checked?, disabled?, onSelect?, type?: 'separator'|'title'|'custom', element?, keepOpen? }
    */
-  popover(anchor, items, { align = 'left', closeOnSelect = true } = {}) {
+  popover(anchor, items, { align = 'left', closeOnSelect = true, at = null, side = 'bottom' } = {}) {
     this.closePopover();
     const pop = document.createElement('div');
     pop.className = 'popover';
@@ -278,11 +278,15 @@ export class Dialogs {
       pop.appendChild(btn);
     }
     document.body.appendChild(pop);
-    const rect = anchor.getBoundingClientRect();
+    const rect = at ? { left: at.x, right: at.x, top: at.y, bottom: at.y } : anchor.getBoundingClientRect();
     const pw = pop.offsetWidth;
     const ph = pop.offsetHeight;
     let left = align === 'right' ? rect.right - pw : rect.left;
     let top = rect.bottom + 4;
+    if (side === 'right') {
+      left = rect.right + 4;
+      top = rect.top;
+    }
     if (left + pw > window.innerWidth - 8) left = window.innerWidth - pw - 8;
     if (left < 8) left = 8;
     if (top + ph > window.innerHeight - 8) top = Math.max(8, rect.top - ph - 4);
