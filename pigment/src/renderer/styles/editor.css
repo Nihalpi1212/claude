@@ -99,3 +99,14 @@
 .welcome-presets .btn { font-size: 12px; }
 
 .drop-overlay { position: fixed; inset: 0; background: rgba(79,129,255,0.15); border: 3px dashed var(--accent); z-index: 50; display: grid; place-items: center; font-size: 20px; color: var(--accent); pointer-events: none; }
+
+/* Liquify */
+.liquify-dialog .dialog-body { display: flex; padding: 0; overflow: hidden; }
+.liquify { display: grid; grid-template-columns: 48px minmax(0, 1fr) 240px; flex: 1; min-height: 0; }
+.liquify-tools { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 4px; border-right: 1px solid var(--border); background: var(--bg-elevated); }
+.liquify-tools .tool-button[aria-pressed="true"] { background: var(--accent); color: #fff; }
+.liquify-stage { display: grid; place-items: center; background: var(--canvas-bg, var(--bg-sunken)); min-height: 0; overflow: hidden; }
+.liquify-canvas { cursor: crosshair; touch-action: none; background: repeating-conic-gradient(#ccc 0% 25%, #fff 0% 50%) 50% / 12px 12px; box-shadow: 0 0 0 1px var(--border); }
+.liquify .liquify-options.dialog-form { padding: 12px; border-left: 1px solid var(--border); align-content: start; min-width: 0; grid-template-columns: minmax(0, 1fr); }
+.liquify .liquify-options .slider-field input[type="range"] { flex: 1; min-width: 0; }
+.liquify .liquify-options .slider-field .input { width: 64px; flex: none; }

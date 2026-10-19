@@ -32,6 +32,7 @@ const MODULES = [
   'lib/tools/nav.js',
   'lib/adjust-ui.js',
   'lib/filter-ui.js',
+  'lib/liquify.js',
   'lib/style-ui.js',
   'lib/panels/color.js',
   'lib/panels/swatches.js',

@@ -152,6 +152,14 @@ each with a dialog and live preview. Filter › Last Filter (Ctrl+F) repeats the
 the same settings. A selection limits the filter to the selected area (with soft edges for
 feathered selections).
 
+### Liquify
+
+Filter › Liquify (Shift+Ctrl+X) opens the image in a large window with five brushes: Forward Warp
+(W) pushes pixels as you drag, Reconstruct (R) brings them back, Twirl (C), Pucker (S) and Bloat (B)
+work while you hold the mouse button. `[` and `]` change the brush size; Alt-drag with Forward Warp
+reconstructs; Ctrl+Z undoes the last stroke, Restore All starts over. OK applies the result as one
+undo step (limited to the selection if there is one).
+
 ## Transforming
 
 - **Free Transform** (Ctrl+T) on the selected layers, or on the selected pixels when there is a
@@ -207,7 +215,7 @@ Help › Keyboard Shortcuts shows every shortcut. The most used ones:
 | New layer / Layer via copy / Merge down | Ctrl+Shift+N / Ctrl+J / Ctrl+E |
 | Group / Ungroup | Ctrl+G / Ctrl+Shift+G |
 | Levels / Curves / Hue-Saturation / Invert | Ctrl+L / Ctrl+M / Ctrl+U / Ctrl+I |
-| Last filter | Ctrl+F |
+| Last filter / Liquify | Ctrl+F / Shift+Ctrl+X |
 | Zoom in / out / fit / 100% | Ctrl+= / Ctrl+- / Ctrl+0 / Ctrl+1 |
 | Brush size / hardness | [ ] / Shift+[ Shift+] |
 | Swap / default colours | X / D |

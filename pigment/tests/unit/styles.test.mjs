@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DEFAULT_STYLES, STYLE_KEYS, mergeStyles, stylePadding, applyStyles, hasEnabledStyles } from '../../src/shared/pixels/styles.js';
-import { createImage, setPixel, getPixel, luminance } from '../../src/shared/pixels/core.js';
+import { createImage, setPixel, getPixel, luminance, randomSeeded } from '../../src/shared/pixels/core.js';
 import { assertPixel } from './helpers.mjs';
 
 const RED = [255, 0, 0, 1];
@@ -483,4 +483,213 @@ test('everything at once: deterministic, layer pixels intact under interior-free
   // invalid values fall back instead of throwing
   const odd = applyStyles(square(), { dropShadow: { enabled: true, blend: 'nope', size: 'x', distance: NaN, color: 'bogus' } });
   assert.equal(odd.image.width, 12 + 2 * 10);
+});
+
+// ---------------------------------------------------------------------------------------------
+// Regression tests (review): results must not depend on the work window, and edge cases.
+
+/** Largest per-channel difference (alpha in 0..255) between two results over source rect [x0, x1) x [y0, y1). */
+function maxDiffOver(a, b, x0, y0, x1, y1) {
+  let m = 0;
+  for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+    const p = at(a, x, y), q = at(b, x, y);
+    for (let c = 0; c < 4; c++) m = Math.max(m, Math.abs((c === 3 ? 255 : 1) * (p[c] - q[c])));
+  }
+  return m;
+}
+
+test('interior effects do not depend on the padding or on other enabled effects', () => {
+  const img = square(40, 12, 16);
+  const cases = [
+    ['satin', {}],
+    ['innerShadow', { distance: 8, size: 10 }],
+    ['innerGlow', { size: 20 }], // box-blur path
+    ['bevel', { size: 10, direction: 'down' }],
+    ['bevel', { size: 10, soften: 8 }],
+  ];
+  for (const [key, fx] of cases) {
+    const alone = applyStyles(img, { [key]: { enabled: true, ...fx } });
+    const padded = applyStyles(img, { [key]: { enabled: true, ...fx } }, { pad: 30 });
+    const withShadow = applyStyles(img, { [key]: { enabled: true, ...fx }, dropShadow: { enabled: true, size: 40 } });
+    assert.equal(maxDiffOver(alone, padded, 0, 0, 40, 40), 0, `${key} ${JSON.stringify(fx)} vs pad 30`);
+    // the layer is opaque, so its interior hides the shadow: pixels must be identical
+    assert.equal(maxDiffOver(alone, withShadow, 12, 12, 28, 28), 0, `${key} ${JSON.stringify(fx)} vs + drop shadow`);
+  }
+});
+
+test('outer bevel, emboss and pillow emboss: no shading far from the layer, nothing clipped by stylePadding', () => {
+  const img = square(40, 12, 16);
+  for (const fx of [{ style: 'outer-bevel', direction: 'down' }, { style: 'pillow-emboss' }, { style: 'emboss', direction: 'down' }]) {
+    const r = applyStyles(img, { bevel: { enabled: true, size: 6, ...fx } }, { pad: 20 });
+    eachOut(r, (x, y, p) => {
+      const dist = Math.max(12 - x, x - 27, 12 - y, y - 27);
+      if (dist > 8) assert.equal(p[3], 0, `${JSON.stringify(fx)} stray shading at ${x},${y}`);
+    });
+  }
+  // content touching the image edges: whatever lies beyond stylePadding would be cut off hard
+  const full = createImage(20, 20, [255, 0, 0, 1]);
+  for (const style of ['outer-bevel', 'emboss', 'pillow-emboss']) for (const technique of ['smooth', 'chisel-hard']) for (const [size, soften] of [[1, 0], [6, 0], [6, 4], [15, 0]]) {
+    const styles = { bevel: { enabled: true, style, technique, size, soften, depth: 300 } };
+    const pad = stylePadding(styles);
+    const r = applyStyles(full, styles, { pad: pad + 10 });
+    let beyond = 0;
+    eachOut(r, (x, y, p) => { if ((x < -pad || y < -pad || x >= 20 + pad || y >= 20 + pad) && p[3] > 0) beyond++; });
+    assert.equal(beyond, 0, `${style} ${technique} size ${size} soften ${soften}: ${beyond} pixels beyond pad ${pad}`);
+    assert.ok(alphaAt(r, -1, 10) > 0, `${style} shades outside`);
+  }
+});
+
+test('rect selects an output region that matches the whole-image result, even through the content', () => {
+  const img = square(30, 6, 18);
+  for (let x = 6; x < 24; x++) setPixel(img, x, 23, [255, 0, 0, 0.5]); // antialiased bottom row
+  const pattern = createImage(3, 2, [20, 200, 90, 0.8]);
+  const all = {
+    dropShadow: { enabled: true, distance: 4, size: 6 }, outerGlow: { enabled: true, size: 4 }, stroke: { enabled: true, size: 2 },
+    bevel: { enabled: true, size: 4, style: 'emboss' }, satin: { enabled: true }, innerGlow: { enabled: true, size: 6 },
+    innerShadow: { enabled: true, size: 3 }, gradientOverlay: { enabled: true, angle: 30, opacity: 0.5 }, patternOverlay: { enabled: true, pattern, opacity: 0.5 },
+  };
+  const full = applyStyles(img, all, { fillOpacity: 0.7 });
+  for (const rect of [{ x: 0, y: 0, width: 15, height: 30 }, { x: 10, y: 12, width: 4, height: 5 }, { x: 22, y: 20, width: 8, height: 10 }]) {
+    for (const pad of [0, 2, stylePadding(all)]) {
+      const part = applyStyles(img, all, { fillOpacity: 0.7, rect, pad });
+      assert.deepEqual([part.image.width, part.image.height, part.offsetX, part.offsetY], [rect.width + 2 * pad, rect.height + 2 * pad, rect.x - pad, rect.y - pad]);
+      eachOut(part, (x, y, p) => assertPixel(p, at(full, x, y), 0, `rect ${JSON.stringify(rect)} pad ${pad} at ${x},${y}`));
+    }
+  }
+  // the cut is not an edge: no stroke appears where the rect slices the layer
+  const cut = applyStyles(img, { stroke: { enabled: true, size: 2, color: BLUE } }, { rect: { x: 0, y: 0, width: 15, height: 30 } });
+  assertPixel(at(cut, 14, 12), RED, 0);
+  assertPixel(at(cut, 16, 12), RED, 0, 'layer pixels beyond the rect still show inside the padding');
+  // a rect outside the image selects nothing
+  const none = applyStyles(img, all, { rect: { x: 100, y: 100, width: 5, height: 5 } });
+  assert.ok(none.image.data.every((v) => v === 0));
+});
+
+test('a smaller pad only crops: layer touching the image edge, shadows pointing out of it', () => {
+  const img = square(16, 0, 8);
+  const styles = { dropShadow: { enabled: true, angle: 180, distance: 4, size: 6 }, innerShadow: { enabled: true, angle: 0, distance: 3, size: 4 }, satin: { enabled: true, size: 6 } };
+  const full = applyStyles(img, styles);
+  for (const pad of [0, 1, 3]) {
+    const clipped = applyStyles(img, styles, { pad });
+    eachOut(clipped, (x, y, p) => assertPixel(p, at(full, x, y), 0, `pad ${pad} at ${x},${y}`));
+  }
+  // the shadow reaches the image's left edge (light from the right): the clipped output keeps it
+  assert.ok(alphaAt(applyStyles(img, styles, { pad: 0 }), 9, 2) > 0);
+});
+
+test('drop shadow knock-out is continuous in the fill and follows coverage at antialiased edges', () => {
+  const img = square(20, 6, 8);
+  for (let y = 6; y < 14; y++) setPixel(img, 14, y, [255, 0, 0, 0.5]);
+  const ds = { dropShadow: { enabled: true, distance: 0, size: 4 } };
+  const one = applyStyles(img, ds);
+  let worst = 0;
+  eachOut(one, (x, y, p) => {
+    const q = at(applyStyles(img, ds, { fillOpacity: 0.99 }), x, y);
+    for (let c = 0; c < 4; c++) worst = Math.max(worst, Math.abs((c === 3 ? 255 : 1) * (p[c] - q[c])));
+  });
+  assert.ok(worst <= 3, `fill 0.99 vs 1 differ by ${worst}`);
+  // fill 0: no shadow under the opaque part; under a half-covered pixel exactly the uncovered half shows
+  const f0 = applyStyles(img, ds, { fillOpacity: 0 });
+  assert.equal(alphaAt(f0, 10, 10), 0);
+  const halfCovered = alphaAt(f0, 14, 9) / 255;
+  const shadowThere = alphaAt(applyStyles(createImage(20, 20), ds, { pad: 7 }), 14, 9); // sanity: empty layer, no shadow
+  assert.equal(shadowThere, 0);
+  assert.ok(halfCovered > 0.1 && halfCovered < 0.3, `edge ${halfCovered}`);
+  // fill 0 with an opaque colour overlay looks exactly like fill 1 with it
+  const ov = { ...ds, colorOverlay: { enabled: true, color: '#ff0000' } };
+  assert.deepEqual(applyStyles(img, ov, { fillOpacity: 0 }).image.data, applyStyles(img, ov).image.data);
+});
+
+test('shadow offsets are mirror images for opposite angles', () => {
+  const img = square(20, 8, 4);
+  for (const [a, d] of [[120, 5], [45, 3], [30, 7], [0, 2.5]]) {
+    const p = applyStyles(img, { dropShadow: { enabled: true, angle: a, distance: d, size: 0 } });
+    const q = applyStyles(img, { dropShadow: { enabled: true, angle: a + 180, distance: d, size: 0 } });
+    // the square spans [8, 12): x -> 19 - x mirrors it onto itself
+    for (let y = -6; y < 26; y++) for (let x = -6; x < 26; x++) assert.equal(alphaAt(p, x, y), alphaAt(q, 19 - x, 19 - y), `angle ${a} distance ${d} at ${x},${y}`);
+  }
+});
+
+test('spread / choke of 0+ is continuous with 0 on antialiased edges', () => {
+  const disc = createImage(30, 30);
+  for (let y = 0; y < 30; y++) for (let x = 0; x < 30; x++) {
+    const a = Math.min(1, Math.max(0, 9 - Math.hypot(x + 0.5 - 15, y + 0.5 - 15) + 0.5));
+    if (a > 0) setPixel(disc, x, y, [30, 120, 220, a]);
+  }
+  for (const [key, field] of [['innerShadow', 'spread'], ['innerGlow', 'choke'], ['dropShadow', 'spread'], ['outerGlow', 'spread']]) {
+    const a = applyStyles(disc, { [key]: { enabled: true, size: 3, [field]: 0 } }, { pad: 10 });
+    const b = applyStyles(disc, { [key]: { enabled: true, size: 3, [field]: 0.001 } }, { pad: 10 });
+    assert.ok(maxDiffOver(a, b, -10, -10, 40, 40) <= 1, key);
+  }
+});
+
+test('satin: inverted darkens the far interior by exactly its opacity, plain leaves it, symmetric', () => {
+  const big = square(80, 10, 60);
+  assertPixel(at(applyStyles(big, { satin: { enabled: true } }), 40, 40), [128, 0, 0, 1], 1, 'multiply black at 50%');
+  assertPixel(at(applyStyles(big, { satin: { enabled: true, invert: false } }), 40, 40), RED, 0);
+  const s0 = applyStyles(big, { satin: { enabled: true, angle: 0 } });
+  for (let y = 10; y < 70; y += 3) for (let x = 10; x < 70; x++) assert.equal(at(s0, x, y)[0], at(s0, 79 - x, y)[0], `${x},${y}`);
+  const near = at(s0, 12, 40)[0], far = at(s0, 40, 40)[0];
+  assert.ok(near > far, `edges lighter than the middle when inverted: ${near} vs ${far}`);
+});
+
+test('pattern overlay scale stretches the tile', () => {
+  const pattern = createImage(2, 1);
+  setPixel(pattern, 0, 0, [0, 0, 0, 1]);
+  setPixel(pattern, 1, 0, [255, 255, 255, 1]);
+  const img = square(24, 0, 24);
+  const r = applyStyles(img, { patternOverlay: { enabled: true, pattern, scale: 2 } });
+  const row = Array.from({ length: 24 }, (_, x) => at(r, x, 5)[0]);
+  for (let x = 0; x + 4 < 24; x++) assert.equal(row[x], row[x + 4], `period 4 at ${x}`);
+  assert.ok(Math.abs(row[0] - row[2]) > 100, `half a period apart differ: ${row.slice(0, 4)}`);
+});
+
+test('random styles: deterministic, rect and pad only crop, nothing beyond stylePadding', () => {
+  const rnd = randomSeeded(7);
+  const pick = (a) => a[Math.floor(rnd() * a.length)];
+  const px = (res, x, y) => {
+    const X = x - res.offsetX, Y = y - res.offsetY;
+    if (X < 0 || Y < 0 || X >= res.image.width || Y >= res.image.height) return null;
+    const i = (Y * res.image.width + X) * 4;
+    return res.image.data.subarray(i, i + 4);
+  };
+  for (let iter = 0; iter < 60; iter++) {
+    const w = 1 + Math.floor(rnd() * 12), h = 1 + Math.floor(rnd() * 12);
+    const img = createImage(w, h);
+    for (let i = 0; i < w * h; i++) {
+      if (rnd() < 0.5) img.data.set([Math.floor(rnd() * 256), Math.floor(rnd() * 256), Math.floor(rnd() * 256), rnd() < 0.5 ? 255 : Math.floor(rnd() * 256)], i * 4);
+    }
+    const styles = {};
+    for (const { key } of STYLE_KEYS) {
+      if (rnd() < 0.35) {
+        styles[key] = {
+          enabled: true, size: Math.floor(rnd() * 12), distance: Math.floor(rnd() * 8) - 2, spread: rnd() < 0.3 ? 2 : 0, choke: rnd() < 0.3 ? 1.5 : 0,
+          angle: Math.floor(rnd() * 360), soften: rnd() < 0.3 ? 3 : 0, style: pick(['inner-bevel', 'outer-bevel', 'emboss', 'pillow-emboss']),
+          direction: pick(['up', 'down']), position: pick(['outside', 'inside', 'center']), blend: pick(['normal', 'multiply', 'screen', 'overlay', 'color']),
+          kind: pick(['linear', 'radial', 'angle', 'reflected', 'diamond']), invert: rnd() < 0.5, source: pick(['edge', 'center']),
+          technique: pick(['smooth', 'chisel-hard']), scale: pick([1, 1.5, 0.5]),
+        };
+      }
+    }
+    if (styles.patternOverlay) styles.patternOverlay.pattern = createImage(3, 2, [200, 30, 90, 0.7]);
+    const fillOpacity = pick([1, 1, 0.5, 0]);
+    const label = `iter ${iter} ${w}x${h} ${Object.keys(styles)} fill ${fillOpacity}`;
+    const full = applyStyles(img, styles, { fillOpacity });
+    assert.deepEqual(applyStyles(img, styles, { fillOpacity }).image.data, full.image.data, `${label}: deterministic`);
+    const big = applyStyles(img, styles, { fillOpacity, pad: stylePadding(styles) + 7 });
+    const rx = Math.floor(rnd() * w), ry = Math.floor(rnd() * h);
+    const rect = { x: rx, y: ry, width: 1 + Math.floor(rnd() * (w - rx)), height: 1 + Math.floor(rnd() * (h - ry)) };
+    const part = applyStyles(img, styles, { fillOpacity, rect, pad: Math.floor(rnd() * 4) });
+    for (const other of [big, part]) {
+      for (let Y = 0; Y < other.image.height; Y++) for (let X = 0; X < other.image.width; X++) {
+        const x = X + other.offsetX, y = Y + other.offsetY;
+        const p = px(other, x, y), q = px(full, x, y);
+        if (!q) {
+          assert.ok(other === part || p[3] <= 1, `${label}: alpha ${p[3]} beyond stylePadding at ${x},${y}`);
+          continue;
+        }
+        assert.deepEqual([...p], [...q], `${label}: ${other === big ? 'big pad' : `rect ${JSON.stringify(rect)}`} differs at ${x},${y}`);
+      }
+    }
+  }
 });

@@ -10,8 +10,8 @@
 .color-widget .color-area:focus-visible, .color-widget .hue-bar:focus-visible { box-shadow: var(--focus-ring); }
 .color-widget .color-marker { width: 14px; height: 14px; }
 .color-widget .hue-bar { outline: none; }
-.color-widget .color-fields .input { -moz-appearance: textfield; }
-.color-widget .color-fields .input::-webkit-inner-spin-button { opacity: 0.6; }
+.color-widget .color-fields .input { -moz-appearance: textfield; appearance: textfield; }
+.color-widget .color-fields .input::-webkit-inner-spin-button, .color-widget .color-fields .input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 .color-widget .color-hex .input { text-transform: lowercase; }
 .color-panel .color-preview { gap: 4px; flex: none; }
 /* the square takes whatever height the top group leaves (the group is often short) */

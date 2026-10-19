@@ -352,17 +352,22 @@ export function install(app) {
       input.disabled = locked || !b;
       input.dataset.axis = axis;
       input.title = locked ? 'The layer position is locked' : `${axis.toUpperCase()} position of the layer's left/top edge (px)`;
+      let done = false; // one move per edit, however the edit ends (Enter, Tab, blur)
       const commit = () => {
+        if (done) return;
         const v = Math.round(Number(input.value));
-        if (!Number.isFinite(v) || !b) return;
+        if (input.value === '' || !Number.isFinite(v) || !b) return;
         const d = v - (axis === 'x' ? b.x : b.y);
-        if (d) offsetLayer(app, layer, axis === 'x' ? d : 0, axis === 'y' ? d : 0, 'Move');
-        input.blur();
+        if (!d) return;
+        done = true;
+        offsetLayer(app, layer, axis === 'x' ? d : 0, axis === 'y' ? d : 0, 'Move');
       };
       input.addEventListener('change', commit);
       input.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') commit();
-        if (e.key === 'Escape') {
+        if (e.key === 'Enter') {
+          commit();
+          input.blur();
+        } else if (e.key === 'Escape') {
           input.value = String(Math.round(value));
           input.blur();
         }

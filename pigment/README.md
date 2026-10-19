@@ -49,6 +49,7 @@ with [ag-psd](https://github.com/Agamnentzar/ag-psd) for Photoshop files. MIT li
   mosaic, crystallize, pointillize, fragment; twirl, pinch, spherize, ripple, wave, zigzag, polar
   coordinates, shear, offset; emboss, find edges, solarize, diffuse, oil paint, glowing edges;
   clouds, difference clouds, lens flare, vignette; maximum, minimum, custom kernel; Last Filter (Ctrl+F)
+- **Liquify** (Shift+Ctrl+X): forward warp, reconstruct, twirl, pucker and bloat brushes
 
 **Transform and canvas**
 - Free transform (Ctrl+T): scale, rotate, skew, distort, perspective, numeric entry, flips and 90° turns;
@@ -116,6 +117,6 @@ npm run dist:mac  # or dist:win / dist:linux: installers in dist/
 - CMYK, Lab, 16/32-bit channels and color management (Pigment edits 8-bit RGB)
 - Smart objects, artboards, 3D, video timelines, camera RAW
 - Generative fill and other AI features
-- Content-aware fill (spot healing samples nearby texture instead), puppet warp, liquify
+- Content-aware fill (spot healing samples nearby texture instead), puppet warp
 - Text on a path and vertical CJK typesetting details
 - Printing (export an image and print it from your system's image viewer)

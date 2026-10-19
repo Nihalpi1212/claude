@@ -195,3 +195,27 @@ test('retouch tools: clone stamp copies pixels from the source', async ({ page }
   for (let i = 0; i < 3; i++) expect(Math.abs(got[i] - src[i])).toBeLessThan(6);
   expect(errors).toEqual([]);
 });
+
+test('Liquify pushes pixels with the forward warp brush and is one undo step', async ({ page }) => {
+  const errors = await openApp(page);
+  await openFixture(page, 'shapes.png'); // red square 20..80
+  await run(page, 'filter:liquify');
+  const canvas = page.locator('.liquify-canvas');
+  await expect(canvas).toBeVisible();
+  await page.waitForTimeout(200);
+  const box = await canvas.boundingBox();
+  // drag from the square's right edge (x=80) to the right
+  const at = (x, y) => ({ x: box.x + (x / 200) * box.width, y: box.y + (y / 150) * box.height });
+  const a = at(75, 50), b = at(120, 50);
+  await page.mouse.move(a.x, a.y);
+  await page.mouse.down();
+  await page.mouse.move(b.x, b.y, { steps: 15 });
+  await page.mouse.up();
+  await confirmDialog(page);
+  const pushed = await pixel(page, 95, 50);
+  expect(pushed[0]).toBeGreaterThan(200);
+  expect(pushed[3]).toBeGreaterThan(200);
+  await runAwait(page, 'edit:undo');
+  expect((await pixel(page, 95, 50))[3]).toBe(0);
+  expect(errors).toEqual([]);
+});

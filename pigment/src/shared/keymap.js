@@ -63,6 +63,7 @@ export const MENU_KEYS = {
   'select:inverse': 'CmdOrCtrl+Shift+I',
   'select:feather': 'Shift+F6',
   'filter:last': 'CmdOrCtrl+F',
+  'filter:liquify': 'CmdOrCtrl+Shift+X',
   'view:zoom-in': 'CmdOrCtrl+=',
   'view:zoom-out': 'CmdOrCtrl+-',
   'view:zoom-fit': 'CmdOrCtrl+0',

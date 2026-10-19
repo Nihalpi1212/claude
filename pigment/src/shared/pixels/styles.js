@@ -519,7 +519,7 @@ function makeContext(src, win, cb, maxA, fill) {
     gb: { x: cb.x - win.x, y: cb.y - win.y, width: cb.width, height: cb.height },
     thr: Math.max(1, Math.ceil(maxA / 2)),
     fill, originX: -win.x, originY: -win.y,
-    bEmpty: true,
+    bEmpty: true, dissolveSalt: 0,
     inside: null, dOut: null, dIn: null, knock: null,
   };
 }
@@ -637,15 +637,37 @@ function fillMatte(ctx, rect, col, matte, dx, dy, invert, knock) {
   }
 }
 
+/** Uniform [0, 1) hash noise for source pixel (x, y) and a salt: independent of the work window. */
+function hashNoise(x, y, salt) {
+  let v = Math.imul(x | 0, 0x27d4eb2d) ^ Math.imul(y | 0, 0x165667b1) ^ Math.imul(salt + 1, 0x9e3779b1);
+  v = Math.imul(v ^ (v >>> 15), 0x85ebca6b);
+  v = Math.imul(v ^ (v >>> 13), 0xc2b2ae35);
+  return ((v ^ (v >>> 16)) >>> 0) / 4294967296;
+}
+
 /**
  * Blends ctx.fx onto target inside rect with the effect's blend mode and opacity. The first
  * effect drawn into the (still transparent) below-layer buffer is copied instead: over a
- * transparent backdrop every mode except dissolve yields the source colour at alpha * opacity.
+ * transparent backdrop every mode yields the source colour at alpha * opacity. 'dissolve' keeps
+ * each effect pixel fully opaque with probability alpha * opacity (noise keyed on source
+ * coordinates, so it does not move with pad / rect) and then draws it normally.
  */
 function composite(ctx, target, mode, opacity, rect) {
   if (!(opacity > 0)) return;
-  const m = blendOf(mode);
-  if (target === ctx.B && ctx.bEmpty && m !== 'dissolve') {
+  let m = blendOf(mode);
+  if (m === 'dissolve') {
+    const s = ctx.fx.data, w = ctx.w, r = rect || ctx.full, op = opacity > 1 ? 1 : opacity;
+    const salt = ctx.dissolveSalt++;
+    for (let y = r.y; y < r.y + r.height; y++) {
+      for (let x = r.x, p = (y * w + r.x) * 4 + 3; x < r.x + r.width; x++, p += 4) {
+        const sa = (s[p] / 255) * op;
+        s[p] = sa > 0 && hashNoise(x - ctx.originX, y - ctx.originY, salt) < sa ? 255 : 0;
+      }
+    }
+    m = 'normal';
+    opacity = 1;
+  }
+  if (target === ctx.B && ctx.bEmpty) {
     const s = ctx.fx.data, d = target.data, w = ctx.w;
     const r = rect || ctx.full;
     for (let y = r.y; y < r.y + r.height; y++) {
@@ -923,13 +945,15 @@ function bevelMaps(ctx, fx, opts) {
   const H = new Float32Array(n);
   const half = size / 2;
   const tFar = style === 3 ? 1 : 0; // the profile's value far outside (pillow emboss rises outwards)
+  // pixel centres sit at |sd| >= 0.5, so a pillow narrower than 1px a side would be flat
+  const pillowHalf = half > 1 ? half : 1;
   for (let i = 0; i < n; i++) {
     const sd = inside[i] ? Math.sqrt(dI[i]) - 0.5 : 0.5 - Math.sqrt(dO[i]);
     let t;
     if (style === 0) t = sd / size;
     else if (style === 1) t = (sd + size) / size;
     else if (style === 2) t = (sd + half) / size;
-    else t = (sd < 0 ? -sd : sd) / half;
+    else t = (sd < 0 ? -sd : sd) / pillowHalf;
     t = t <= 0 ? 0 : t >= 1 ? 1 : t;
     if (smooth) t = t * t * (3 - 2 * t);
     H[i] = down ? tFar - t : t - tFar;

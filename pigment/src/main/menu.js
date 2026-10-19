@@ -231,6 +231,8 @@ export function buildMenuTemplate({ platform, state = {}, recent = [], run, isPa
   const filterMenu = sub('Fil&ter', [
     lyr(state.lastFilter ? `Last Filter: ${state.lastFilter}` : 'Last Filter', 'filter:last', { enabled: layer && !!state.lastFilter }),
     sep,
+    lyr('&Liquify…', 'filter:liquify'),
+    sep,
     ...FILTER_CATEGORIES.map((cat) => sub(cat.name, cat.kinds.map((k) => lyr(`${FILTERS[k].name}${DIRECT_FILTERS.has(k) ? '' : '…'}`, `filter:${k}`)), layer)),
   ]);
 
