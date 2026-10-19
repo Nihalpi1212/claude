@@ -1,6 +1,11 @@
 /* Editor layout: options bar, toolbox, canvas view, rulers, status bar. */
-.app { display: grid; grid-template-rows: auto auto 1fr auto; height: 100vh; overflow: hidden; }
-.main { display: grid; grid-template-columns: auto 1fr auto; min-height: 0; position: relative; }
+.app { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; grid-template-areas: "title" "options" "main" "status"; height: 100vh; overflow: hidden; }
+.app > .titlebar { grid-area: title; }
+.app > .options-bar { grid-area: options; }
+.app > .main { grid-area: main; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; min-height: 0; position: relative; }
+.app > .statusbar { grid-area: status; }
+.doc-frame { position: absolute; inset: 0; }
+.doc-frame[hidden] { display: none; }
 .app.panels-hidden .toolbox, .app.panels-hidden .panels, .app.panels-hidden .options-bar { display: none; }
 .app.panels-hidden .main { grid-template-columns: 1fr; }
 

@@ -33,6 +33,8 @@ export class CanvasView {
     this.spaceHeld = false;
     this.tempTool = null;
     this.overlayFns = new Set();
+    this.cssWidth = 1;
+    this.cssHeight = 1;
 
     this.el = document.createElement('div');
     this.el.className = 'canvas-view';
@@ -70,6 +72,8 @@ export class CanvasView {
 
   resize() {
     const r = this.area.getBoundingClientRect();
+    // hidden frames have no size yet: fit once they are shown
+    if (r.width < 2 || r.height < 2) return;
     this.cssWidth = Math.max(1, Math.floor(r.width));
     this.cssHeight = Math.max(1, Math.floor(r.height));
     this.dpr = window.devicePixelRatio || 1;

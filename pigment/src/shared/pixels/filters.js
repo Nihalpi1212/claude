@@ -349,6 +349,44 @@ function affinePair(src, dst, w, h, m1, m2) {
   }
 }
 
+/**
+ * affinePair for the pure translations +-(ox, oy): the bilinear weights are the same for every
+ * pixel, so only the tap indices are computed (clamped to the buffer like affinePair).
+ */
+function translatePair(src, dst, w, h, ox, oy) {
+  const stride = w * 4, xm = w - 1, ym = h - 1;
+  const ax = Math.floor(ox), ay = Math.floor(oy), tx = ox - ax, ty = oy - ay;
+  const bx = Math.floor(-ox), by = Math.floor(-oy), ux = -ox - bx, uy = -oy - by;
+  const a00 = (1 - tx) * (1 - ty) * 0.5, a10 = tx * (1 - ty) * 0.5, a01 = (1 - tx) * ty * 0.5, a11 = tx * ty * 0.5;
+  const b00 = (1 - ux) * (1 - uy) * 0.5, b10 = ux * (1 - uy) * 0.5, b01 = (1 - ux) * uy * 0.5, b11 = ux * uy * 0.5;
+  // columns where all four x taps are inside the buffer
+  const xlo = Math.max(0, -ax, -bx), xhi = Math.min(w, w - ax - 1, w - bx - 1);
+  const cy = (v) => (v < 0 ? 0 : v > ym ? ym : v) * stride;
+  for (let y = 0; y < h; y++) {
+    const ra0 = cy(y + ay), ra1 = cy(y + ay + 1), rb0 = cy(y + by), rb1 = cy(y + by + 1), o = y * stride;
+    for (let x = 0; x < w; x++) {
+      let pa0, pa1, pb0, pb1;
+      if (x >= xlo && x < xhi) {
+        pa0 = (x + ax) * 4;
+        pa1 = pa0 + 4;
+        pb0 = (x + bx) * 4;
+        pb1 = pb0 + 4;
+      } else {
+        const c0 = x + ax, c1 = x + bx;
+        pa0 = (c0 < 0 ? 0 : c0 > xm ? xm : c0) * 4;
+        pa1 = (c0 + 1 < 0 ? 0 : c0 + 1 > xm ? xm : c0 + 1) * 4;
+        pb0 = (c1 < 0 ? 0 : c1 > xm ? xm : c1) * 4;
+        pb1 = (c1 + 1 < 0 ? 0 : c1 + 1 > xm ? xm : c1 + 1) * 4;
+      }
+      const q = o + x * 4;
+      for (let c = 0; c < 4; c++) {
+        dst[q + c] = src[ra0 + pa0 + c] * a00 + src[ra0 + pa1 + c] * a10 + src[ra1 + pa0 + c] * a01 + src[ra1 + pa1 + c] * a11
+          + src[rb0 + pb0 + c] * b00 + src[rb0 + pb1 + c] * b10 + src[rb1 + pb0 + c] * b01 + src[rb1 + pb1 + c] * b11;
+      }
+    }
+  }
+}
+
 /** Smallest power of two >= n, within [2, cap]. */
 function nextPow2(n, cap) {
   let N = 2;
@@ -368,7 +406,9 @@ function tapPasses(f, w, h, N, step, setMap) {
     const s = step * 2 ** (j - 1);
     setMap(m1, s);
     setMap(m2, -s);
-    affinePair(f, t, w, h, m1, m2);
+    const shift = m1[0] === 1 && m1[1] === 0 && m1[3] === 0 && m1[4] === 1 && m2[2] === -m1[2] && m2[5] === -m1[5];
+    if (shift) translatePair(f, t, w, h, m1[2], m1[5]);
+    else affinePair(f, t, w, h, m1, m2);
     const swap = f;
     f = t;
     t = swap;

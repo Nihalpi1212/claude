@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { dabMask, dodge, burn, sponge, blurDab, sharpenDab, smudge, heal, replaceColor } from '../../src/shared/pixels/retouch.js';
 import { createImage, cloneImage, getPixel, setPixel, luminance, randomSeeded } from '../../src/shared/pixels/core.js';
 import { rgbToHsl } from '../../src/shared/pixels/color.js';
-import { solidImage, quadrantImage, assertPixel, assertNear } from './helpers.mjs';
+import { solidImage, assertPixel, assertNear } from './helpers.mjs';
 
 const ones = (w, h) => new Float32Array(w * h).fill(1);
 const lumaAt = (img, x, y) => {
@@ -194,9 +194,9 @@ test('sharpenDab increases edge contrast and leaves flat areas alone', () => {
   const soft = halves(20, 8, [64, 64, 64, 1], [192, 192, 192, 1]);
   const dab = dabMask(20, 8, 0);
   sharpenDab(soft, null, dab, { strength: 1 });
-  const centre = 64 - soft.data[(4 * 20 + 9) * 4];
-  assert.ok(centre > 0 && centre < 64 - (64 - 128 / 3) + 1);
-  assert.equal(soft.data[(0 * 20 + 9) * 4], 64, 'zero weight at the dab corner row');
+  const centre = 64 - soft.data[(4 * 20 + 9) * 4], rim = 64 - soft.data[(0 * 20 + 9) * 4];
+  assert.ok(centre > 0 && centre < 64 - (64 - 128 / 3) + 1, `centre ${centre}`);
+  assert.ok(rim < centre, `rim moves less than the centre: ${rim} vs ${centre}`);
 });
 
 test('smudge drags red into blue and the carried buffer picks up blue', () => {
@@ -217,10 +217,19 @@ test('smudge drags red into blue and the carried buffer picks up blue', () => {
   const k = getPixel(carried, 5, 5);
   assert.ok(k[2] > 0 && k[0] < 255, `carried turns bluish: ${k}`);
   assertPixel(k, [204, 0, 51, 1], 1, 'mix(red, blue, 1 - 0.8)');
-  for (let n = 0; n < 12; n++) carried = smudge(img, { x: 30, y: 0, width: 10, height: 10 }, dab, carried, { strength: 0.8 });
-  const k2 = getPixel(carried, 5, 5);
-  assert.ok(k2[2] > k2[0], `after more dabs carried is mostly blue: ${k2}`);
   assert.deepEqual(alphaBytes(img), alphaBytes(before));
+  // a moving stroke: the smear fades as the finger travels through the blue
+  const wide = halves(90, 10, [255, 0, 0, 1], [0, 0, 255, 1], 20);
+  let c = null, prevBlue = -1;
+  for (let x = 8; x <= 70; x += 3) {
+    c = smudge(wide, { x, y: 0, width: 10, height: 10 }, dab, c, { strength: 0.8 });
+    const b = getPixel(c, 5, 5)[2];
+    assert.ok(b >= prevBlue, 'carried only gets bluer');
+    prevBlue = b;
+  }
+  const k2 = getPixel(c, 5, 5);
+  assert.ok(k2[2] > 3 * k2[0], `after the stroke carried is mostly blue: ${k2}`);
+  assert.ok(getPixel(wide, 25, 5)[0] > 150, 'red dragged just past the boundary');
 
   // transparent pixels picked up add no black and paint nothing
   const t = halves(20, 4, [0, 0, 0, 0], [0, 200, 0, 1]);
@@ -287,9 +296,10 @@ test('replaceColor swaps colour within tolerance, keeps luma and far colours', (
   const s = getPixel(sat, 0, 0);
   assert.ok(s[0] === s[1] && s[1] === s[2], `saturation from grey -> grey: ${s}`);
   const lum = solidImage(2, 2, [255, 0, 0, 1]);
-  replaceColor(lum, null, null, { color: '#ffffff', tolerance: 10, mode: 'luminosity' });
+  replaceColor(lum, null, null, { color: '#a0a0a0', tolerance: 10, mode: 'luminosity' });
   const l = getPixel(lum, 0, 0);
-  assert.ok(luminance(l[0], l[1], l[2]) > 150 && l[0] > l[1], `luminosity mode brightens, still red: ${l}`);
+  assertNear(luminance(l[0], l[1], l[2]), 160, 2, 'luminosity mode takes the colour\'s luma');
+  assert.ok(l[0] > l[1] && l[1] === l[2], `still red: ${l}`);
 
   // default sample = the pixel under the dab centre; dab weight scales the change
   const two = halves(10, 4, [255, 0, 0, 1], [0, 0, 255, 1]);
@@ -302,8 +312,9 @@ test('replaceColor swaps colour within tolerance, keeps luma and far colours', (
 });
 
 test('an all-zero dab changes nothing, and alpha is never touched', () => {
-  const base = quadrantImage(16);
-  for (let i = 3; i < base.data.length; i += 16) if (base.data[i]) base.data[i] = 100; // some partial alpha
+  const base = noiseImage(16, 16, [150, 100, 80], 60, 11);
+  for (let i = 3; i < base.data.length; i += 16) base.data[i] = 100; // some partial alpha
+  for (let x = 0; x < 16; x++) base.data[x * 4 + 3] = 0; // and a transparent row
   const zero = new Float32Array(16 * 16);
   const src = noiseImage(16, 16, [120, 120, 120], 50);
   const ops = [

@@ -162,3 +162,6 @@
 .popover-brush .val { width: 44px; text-align: right; font-family: var(--mono); }
 .layer-style-badge { color: var(--fg-muted); font-size: 10px; }
 .tabbar .tab-dirty { color: var(--accent); }
+.prop-inline { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--fg-muted); white-space: nowrap; }
+.prop-inline .input.num, .panel-toolbar .input.num { width: 52px; flex: none; }
+.layers-toolbar .select { flex: 1; min-width: 0; }
