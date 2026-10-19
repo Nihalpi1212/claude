@@ -3,6 +3,7 @@ import { bridge } from './bridge.js';
 import { icon } from './icons.js';
 import { History } from './history.js';
 import { CanvasView } from './canvas-view.js';
+import { flattenDocument } from './compositor.js';
 import { openDocument, encodeForPath, isLayeredPath, extOf, baseName, OPEN_FILTERS } from './io.js';
 
 export const SAVE_FILTERS = [
@@ -103,7 +104,7 @@ export class DocumentManager {
         const name = path.split(/[\\/]/).pop();
         const doc = await this.app.busy(`Opening ${name}…`, () => openDocument(bytes, { name, path }));
         this.add(doc);
-        doc.history.markSaved();
+        doc.history.markSaved(flattenDocument(doc, doc.view.compositor));
         this.rememberRecent(doc);
         last = doc;
       } catch (err) {
@@ -165,7 +166,7 @@ export class DocumentManager {
       this.app.tools?.active?.commit?.();
       const bytes = await this.app.busy(`Saving ${path.split(/[\\/]/).pop()}…`, () => encodeForPath(doc, path, doc.view.compositor, this.app.settings.exportDefaults));
       await bridge.writeFile(path, bytes);
-      if (!copy) doc.history.markSaved();
+      if (!copy) doc.history.markSaved(flattenDocument(doc, doc.view.compositor));
       this.app.dialogs.toast(`Saved ${path.split(/[\\/]/).pop()}`, { kind: 'success', timeout: 1600 });
       this.app.emit('doc:saved', doc);
       return true;

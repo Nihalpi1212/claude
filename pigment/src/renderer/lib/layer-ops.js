@@ -43,16 +43,18 @@ export function restoreTree(doc, snap) {
 /** Runs a structural mutation as one undoable entry. */
 export function structural(app, label, mutate, doc = app.doc) {
   const before = snapshotTree(doc);
-  const extraBefore = { selection: doc.selection, guides: doc.guides.slice(), channels: doc.channels.slice() };
+  const extraBefore = { selection: doc.selection, guides: doc.guides.slice(), channels: doc.channels.slice(), paths: doc.paths.slice(), dpi: doc.dpi };
   const result = mutate();
   if (result === false) return false;
   const after = snapshotTree(doc);
-  const extraAfter = { selection: doc.selection, guides: doc.guides.slice(), channels: doc.channels.slice() };
+  const extraAfter = { selection: doc.selection, guides: doc.guides.slice(), channels: doc.channels.slice(), paths: doc.paths.slice(), dpi: doc.dpi };
   const apply = (snap, extra) => {
     restoreTree(doc, snap);
     doc.selection = extra.selection;
     doc.guides = extra.guides.slice();
     doc.channels = extra.channels.slice();
+    doc.paths = extra.paths.slice();
+    doc.dpi = extra.dpi;
     doc.changed('selection');
   };
   doc.history.push({ label, undo: () => apply(before, extraBefore), redo: () => apply(after, extraAfter), bytes: 0, at: Date.now() });

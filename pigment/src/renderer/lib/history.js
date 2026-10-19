@@ -29,9 +29,15 @@ export class History {
   get dirty() {
     return this.index !== this.savedIndex;
   }
-  markSaved() {
+  /** Marks the current state as saved; `image` (optional) is the flattened composite, used by
+   *  Fill › History and the history brush. */
+  markSaved(image = null) {
     this.savedIndex = this.index;
+    if (image) this.savedImage = image;
     this.onChange();
+  }
+  savedSnapshot() {
+    return this.savedImage ?? null;
   }
 
   /** Pushes an entry whose redo has already been applied. */
@@ -145,7 +151,8 @@ export class History {
       layer.touch();
       doc.changed('pixels', { layer });
     };
-    this.push({ label, undo: () => set(before), redo: () => set({ canvas: after.canvas, x: layer.x, y: layer.y }), bytes: (before.canvas.width * before.canvas.height + after.canvas.width * after.canvas.height) * 4, at: Date.now() });
+    const afterState = { canvas: layer.canvas, x: layer.x, y: layer.y };
+    this.push({ label, undo: () => set(before), redo: () => set(afterState), bytes: (before.canvas.width * before.canvas.height + after.canvas.width * after.canvas.height) * 4, at: Date.now() });
     doc.changed('pixels', { layer });
   }
 

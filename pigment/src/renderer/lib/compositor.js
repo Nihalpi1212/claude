@@ -107,19 +107,20 @@ export class Compositor {
       cctx.drawImage(canvas, 0, 0);
       work = copy;
     }
-    if (layer.fillOpacity < 1 && layer.type === 'raster' && !layer.styles) {
+    const styled = !!layer.styles && Object.values(layer.styles).some((s) => s?.enabled);
+    if (layer.fillOpacity < 1 && !layer.isGroup && !styled) {
       const faded = createCanvas(work.width, work.height);
       const fctx = faded.getContext('2d');
       fctx.globalAlpha = layer.fillOpacity;
       fctx.drawImage(work, 0, 0);
       work = faded;
     }
-    if (layer.styles && Object.values(layer.styles).some((s) => s?.enabled)) {
-      const styled = this.styledCanvas(layer, work, wx, wy);
-      if (styled) {
-        work = styled.canvas;
-        wx = styled.x;
-        wy = styled.y;
+    if (styled) {
+      const out = this.styledCanvas(layer, work, wx, wy, doc);
+      if (out) {
+        work = out.canvas;
+        wx = out.x;
+        wy = out.y;
       }
     }
     if (layer.mask?.enabled && layer.mask.canvas) {
@@ -169,15 +170,16 @@ export class Compositor {
     return null;
   }
 
-  styledCanvas(layer, canvas, x, y) {
+  styledCanvas(layer, canvas, x, y, doc = null) {
     const cached = this.styleCache.get(layer);
-    if (cached && cached.version === layer.version && cached.source === canvas) return cached;
+    const angle = doc?.globalLight?.angle ?? 120, altitude = doc?.globalLight?.altitude ?? 30;
+    if (cached && cached.version === layer.version && cached.source === canvas && cached.angle === angle && cached.altitude === altitude) return cached;
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const out = applyStyles(img, layer.styles, {});
+    const out = applyStyles(img, layer.styles, { fillOpacity: layer.fillOpacity ?? 1, globalAngle: angle, globalAltitude: altitude });
     const result = createCanvas(out.image.width, out.image.height);
     result.getContext('2d').putImageData(new ImageData(out.image.data, out.image.width, out.image.height), 0, 0);
-    const entry = { version: layer.version, source: canvas, canvas: result, x: x + out.offsetX, y: y + out.offsetY };
+    const entry = { version: layer.version, source: canvas, canvas: result, x: x + out.offsetX, y: y + out.offsetY, angle, altitude };
     this.styleCache.set(layer, entry);
     return entry;
   }
