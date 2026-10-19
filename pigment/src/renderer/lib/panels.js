@@ -60,7 +60,7 @@ export class PanelDock {
 
   isVisible(id) {
     const e = this.panels.get(id);
-    return !!e && e.group.current === id && !e.group.el.classList.contains('collapsed') && !this.root.hidden;
+    return !!e && e.group.current === id && !e.group.el.classList.contains('collapsed') && !this.root.hidden && !document.getElementById('app')?.classList.contains('panels-hidden');
   }
 
   show(id, { save = true, reveal = false } = {}) {

@@ -1,6 +1,7 @@
 // Move tool: drags the active layer(s) (or the selected pixels), auto-select, alignment buttons,
 // arrow-key nudging; and the crop tool.
 import { Tool } from '../tools.js';
+import { beginLayerMove, offsetLayers } from '../layer-move.js';
 import { createCanvas, RasterLayer } from '../document.js';
 import { applySelection } from './select.js';
 import { Selection } from '../selection.js';
@@ -142,8 +143,8 @@ export class MoveTool extends Tool {
     this.drag.dx = dx;
     this.drag.dy = dy;
     this.drag.moved = true;
-    for (const o of this.drag.origin) this.offsetLayer(o.l, o.x + dx, o.y + dy);
-    this.doc.changed('props');
+    if (!this.drag.session) this.drag.session = beginLayerMove(this.doc, this.drag.origin.map((o) => o.l));
+    this.drag.session.set(dx, dy);
   }
   snapDelta(dx, dy) {
     const doc = this.doc;
@@ -162,73 +163,18 @@ export class MoveTool extends Tool {
     for (const e of edgesY) for (const t of targetsY) if (Math.abs(e - t) <= tol) return [dx, dy + Math.round(t - e)];
     return [dx, dy];
   }
-  offsetLayer(layer, x, y) {
-    const move = (l, nx, ny) => {
-      if (l.isGroup) {
-        const dx = nx - (l._dragX ?? 0), dy = ny - (l._dragY ?? 0);
-        l._dragX = nx;
-        l._dragY = ny;
-        for (const c of l.children) move(c, (c.x ?? 0) + dx, (c.y ?? 0) + dy);
-        return;
-      }
-      if (l.type === 'shape') {
-        const dx = nx - (l.x ?? 0), dy = ny - (l.y ?? 0);
-        for (const sp of l.path.subpaths) for (const pt of sp.points) {
-          pt.x += dx;
-          pt.y += dy;
-          if (pt.inX !== undefined) pt.inX += dx;
-          if (pt.inY !== undefined) pt.inY += dy;
-          if (pt.outX !== undefined) pt.outX += dx;
-          if (pt.outY !== undefined) pt.outY += dy;
-        }
-        l.x = nx;
-        l.y = ny;
-      } else if ('x' in l) {
-        l.x = nx;
-        l.y = ny;
-      }
-      if (l.mask?.linked !== false && l.mask?.canvas && l.type === 'raster') {
-        // masks are document-sized: shift the mask pixels along with linked layers
-        const mdx = nx - (l._maskX ?? nx), mdy = ny - (l._maskY ?? ny);
-        if (mdx || mdy) shiftCanvas(l.mask.canvas, mdx, mdy);
-        l._maskX = nx;
-        l._maskY = ny;
-      }
-      l.touch();
-    };
-    move(layer, x, y);
-  }
   onPointerUp(p) {
     const d = this.drag;
     this.drag = null;
     if (!d) return;
-    for (const o of d.origin) {
-      delete o.l._dragX;
-      delete o.l._dragY;
-      delete o.l._maskX;
-      delete o.l._maskY;
-    }
     if (!d.moved || p.cancelled) {
-      if (d.moved && p.cancelled) for (const o of d.origin) this.offsetLayer(o.l, o.x, o.y);
+      if (d.moved && p.cancelled) d.session?.reset();
       if (d.floating) this.commitFloating(d.floating, 0, 0);
       return;
     }
     const doc = this.doc;
     const { dx, dy } = d;
-    const origin = d.origin;
-    const tool = this;
-    doc.history.run(d.floating ? 'Move selection' : 'Move', () => {
-      return {
-        undo: () => {
-          for (const o of origin) tool.offsetLayer(o.l, o.x, o.y);
-          doc.changed('props');
-        },
-        redo: () => {
-          for (const o of origin) tool.offsetLayer(o.l, o.x + dx, o.y + dy);
-          doc.changed('props');
-        },
-      };
-    });
+    d.session?.commit(d.floating ? 'Move selection' : 'Move');
     if (d.floating) this.commitFloating(d.floating, dx, dy);
     if (d.sel && !d.floating) {
       // moving a whole layer with a selection active moves the selection too
@@ -276,28 +222,7 @@ export class MoveTool extends Tool {
     const k = e.shiftKey ? 10 : 1;
     const dx = v[0] * k, dy = v[1] * k;
     const doc = this.doc;
-    const origin = layers.map((l) => ({ l, x: l.x ?? 0, y: l.y ?? 0 }));
-    const tool = this;
-    doc.history.run('Nudge', () => {
-      for (const o of origin) tool.offsetLayer(o.l, o.x + dx, o.y + dy);
-      doc.changed('props');
-      return {
-        undo: () => {
-          for (const o of origin) tool.offsetLayer(o.l, o.x, o.y);
-          doc.changed('props');
-        },
-        redo: () => {
-          for (const o of origin) tool.offsetLayer(o.l, o.x + dx, o.y + dy);
-          doc.changed('props');
-        },
-      };
-    });
-    for (const o of origin) {
-      delete o.l._dragX;
-      delete o.l._dragY;
-      delete o.l._maskX;
-      delete o.l._maskY;
-    }
+    offsetLayers(doc, layers, dx, dy, 'Nudge');
     return true;
   }
   drawOverlay(ctx, view) {

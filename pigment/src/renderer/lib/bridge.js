@@ -245,6 +245,10 @@ function createBrowserBridge() {
     writeClipboardImage(dataUrl) {
       test.clipboardImage = dataUrl;
     },
+    async readClipboardImage() {
+      // the browser build reads the clipboard through navigator.clipboard (see edit-ops.js)
+      return null;
+    },
     async watchFile() {},
     async unwatchFile() {},
     on(channel, handler) {

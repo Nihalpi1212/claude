@@ -8,8 +8,9 @@
 import { icon } from '../icons.js';
 import { buildAdjustmentEditor, adjustmentSource, ADJUSTMENT_ICONS } from '../adjust-ui.js';
 import { setLayerProps } from '../layer-ops.js';
+import { offsetLayers } from '../layer-move.js';
 import { ADJUSTMENTS } from '../../../shared/pixels/adjust.js';
-import { createCanvas, copyCanvas, unionRect, BLEND_LABELS } from '../document.js';
+import { createCanvas, unionRect, BLEND_LABELS } from '../document.js';
 import { parseColor, rgbaToHex } from '../../../shared/pixels/color.js';
 
 const clone = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
@@ -31,18 +32,20 @@ function alphaBounds(canvas) {
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   // strips grow as the scan finds nothing (few reads for sparse layers, small reads for full ones)
   const grow = (n) => Math.min(1024, n * 2);
-  const rowHit = (d, r, rw) => {
-    for (let i = r * rw * 4 + 3, end = (r + 1) * rw * 4; i < end; i += 4) if (d[i]) return true;
+  // pixels as 32-bit words: alpha is the top byte on little-endian machines (all supported platforms)
+  const words = (img) => new Uint32Array(img.data.buffer, img.data.byteOffset, img.data.length >> 2);
+  const rowHit = (u, r, rw) => {
+    for (let i = r * rw, end = i + rw; i < end; i++) if (u[i] > 0xffffff) return true;
     return false;
   };
-  const colHit = (d, c, sw, rows) => {
-    for (let r = 0, i = c * 4 + 3; r < rows; r++, i += sw * 4) if (d[i]) return true;
+  const colHit = (u, c, sw, rows) => {
+    for (let r = 0, i = c; r < rows; r++, i += sw) if (u[i] > 0xffffff) return true;
     return false;
   };
   let top = -1;
   for (let y = 0, step = 32; y < h && top < 0; y += step, step = grow(step)) {
     const sh = Math.min(step, h - y);
-    const d = ctx.getImageData(0, y, w, sh).data;
+    const d = words(ctx.getImageData(0, y, w, sh));
     for (let r = 0; r < sh; r++) if (rowHit(d, r, w)) {
       top = y + r;
       break;
@@ -52,7 +55,7 @@ function alphaBounds(canvas) {
   let bottom = top;
   for (let y = h, step = 32; y > top; y -= step, step = grow(step)) {
     const y0 = Math.max(top, y - step);
-    const d = ctx.getImageData(0, y0, w, y - y0).data;
+    const d = words(ctx.getImageData(0, y0, w, y - y0));
     let hit = -1;
     for (let r = y - y0 - 1; r >= 0; r--) if (rowHit(d, r, w)) {
       hit = y0 + r;
@@ -67,7 +70,7 @@ function alphaBounds(canvas) {
   let left = -1;
   for (let x = 0, step = 32; x < w && left < 0; x += step, step = grow(step)) {
     const sw = Math.min(step, w - x);
-    const d = ctx.getImageData(x, top, sw, rows).data;
+    const d = words(ctx.getImageData(x, top, sw, rows));
     for (let c = 0; c < sw; c++) if (colHit(d, c, sw, rows)) {
       left = x + c;
       break;
@@ -76,7 +79,7 @@ function alphaBounds(canvas) {
   let right = left;
   for (let x = w, step = 32; x > left; x -= step, step = grow(step)) {
     const x0 = Math.max(left, x - step), sw = x - x0;
-    const d = ctx.getImageData(x0, top, sw, rows).data;
+    const d = words(ctx.getImageData(x0, top, sw, rows));
     let hit = -1;
     for (let c = sw - 1; c >= 0; c--) if (colHit(d, c, sw, rows)) {
       hit = x0 + c;
@@ -119,96 +122,10 @@ export function layerContentBounds(layer) {
   return rect;
 }
 
-// ---- undoable offset of a layer (and its children / linked mask) ------------------------------------------------
-function shiftPath(path, dx, dy) {
-  const p = clone(path);
-  for (const sp of p.subpaths ?? []) for (const pt of sp.points ?? []) {
-    pt.x += dx;
-    pt.y += dy;
-    if (pt.inX !== undefined) pt.inX += dx;
-    if (pt.inY !== undefined) pt.inY += dy;
-    if (pt.outX !== undefined) pt.outX += dx;
-    if (pt.outY !== undefined) pt.outY += dy;
-  }
-  return p;
-}
-
-function shiftedCanvas(src, dx, dy) {
-  const c = createCanvas(src.width, src.height);
-  c.getContext('2d').drawImage(src, dx, dy);
-  return c;
-}
-
-function captureState(l) {
-  const s = { l };
-  if (l.type !== 'group' && typeof l.x === 'number') {
-    s.x = l.x;
-    s.y = l.y;
-  }
-  if (l.type === 'text') s.transform = l.transform ? l.transform.slice() : null;
-  if (l.type === 'shape') s.path = clone(l.path);
-  if (l.mask?.canvas) s.maskCanvas = l.mask.canvas;
-  return s;
-}
-
-function shiftedState(s, dx, dy) {
-  const n = { ...s };
-  const l = s.l;
-  if (l.type === 'text' && s.transform) {
-    n.transform = s.transform.slice();
-    n.transform[4] += dx;
-    n.transform[5] += dy;
-  } else if (s.x !== undefined) {
-    n.x = s.x + dx;
-    n.y = s.y + dy;
-  }
-  if (l.type === 'shape' && s.path) {
-    n.path = shiftPath(s.path, dx, dy);
-    if (s.x !== undefined) {
-      n.x = s.x + dx;
-      n.y = s.y + dy;
-    }
-  }
-  if (s.maskCanvas && l.mask?.linked !== false) n.maskCanvas = shiftedCanvas(s.maskCanvas, dx, dy);
-  return n;
-}
-
-function applyState(s) {
-  const l = s.l;
-  if (s.x !== undefined) {
-    l.x = s.x;
-    l.y = s.y;
-  }
-  if ('transform' in s) l.transform = s.transform ? s.transform.slice() : null;
-  if (s.path) l.path = clone(s.path);
-  if (s.maskCanvas && l.mask) l.mask = { ...l.mask, canvas: s.maskCanvas };
-  l.touch();
-}
-
+// ---- undoable offset of a layer (and its children / linked mask): see layer-move.js ----------------------------
 export function offsetLayer(app, layer, dx, dy, label = 'Move') {
-  const doc = app.doc;
-  if (!doc || !layer || (!dx && !dy)) return;
-  const all = [];
-  const walk = (l) => {
-    all.push(l);
-    if (l.isGroup) for (const c of l.children) walk(c);
-  };
-  walk(layer);
-  // fill and adjustment layers have no position of their own; only their (linked) masks move
-  const movable = all.filter((l) => !(l.type === 'fill' || l.type === 'adjustment' || l.isGroup) || l.mask?.canvas);
-  const before = movable.map(captureState);
-  const after = before.map((s) => shiftedState(s, dx, dy));
-  const apply = (states) => {
-    for (const s of states) applyState(s);
-    doc.changed('props', { layer });
-  };
-  apply(after);
-  let bytes = 0;
-  after.forEach((s, i) => {
-    if (s.maskCanvas && s.maskCanvas !== before[i].maskCanvas) bytes += s.maskCanvas.width * s.maskCanvas.height * 4;
-  });
-  doc.history.push({ label, undo: () => apply(before), redo: () => apply(after), bytes, at: Date.now() });
-  doc.changed('history');
+  if (!app.doc || !layer) return;
+  offsetLayers(app.doc, [layer], dx, dy, label);
 }
 
 // ---- small DOM helpers ------------------------------------------------------------------------------------------
@@ -261,11 +178,9 @@ export function install(app) {
 
   let built = null; // adjustment editor state: { layerId, kind, params, docId }
   let pending = 0;
-  let dirty = true;
 
   const visible = () => app.panels.isVisible('properties');
   const schedule = () => {
-    dirty = true;
     if (pending || !visible()) return;
     pending = requestAnimationFrame(render);
   };
@@ -279,7 +194,6 @@ export function install(app) {
 
   function render() {
     pending = 0;
-    dirty = false;
     const doc = app.doc;
     if (!doc) return empty('No document open');
     const layer = doc.active;
@@ -379,12 +293,12 @@ export function install(app) {
       main.appendChild(fillSection(layer));
       return;
     }
-    main.appendChild(transformSection(layer, doc));
+    main.appendChild(transformSection(layer));
     if (layer.type === 'shape') main.appendChild(shapeSection(layer, doc));
     if (layer.type === 'text') main.appendChild(textSection(layer));
   }
 
-  function transformSection(layer, doc) {
+  function transformSection(layer) {
     const s = section('Transform');
     const b = layerContentBounds(layer);
     const locked = layer.locked.position || layer.locked.all;
@@ -448,7 +362,6 @@ export function install(app) {
       align.appendChild(btn);
     }
     s.appendChild(align);
-    void doc;
     return s;
   }
 
@@ -658,6 +571,5 @@ export function install(app) {
   // helpers for other modules and tests
   app.offsetLayer = (layer, dx, dy, label) => offsetLayer(app, layer, dx, dy, label);
   app.layerContentBounds = layerContentBounds;
-  void copyCanvas;
   return { render };
 }

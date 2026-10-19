@@ -3,6 +3,7 @@
 // operations (merges create new layers), so the snapshots stay valid.
 import { RasterLayer, GroupLayer, FillLayer, AdjustmentLayer, createCanvas, copyCanvas, intersectRect, unionRect, BLEND_LABELS } from './document.js';
 import { Compositor } from './compositor.js';
+import { offsetEach } from './layer-move.js';
 import { Selection } from './selection.js';
 
 // ---- snapshots ----------------------------------------------------------------------------------------------
@@ -653,10 +654,8 @@ export function install(app) {
     if (!layers.length) return;
     const sel = d.selection && !d.selection.isEmpty ? d.selection.bounds : null;
     const ref = sel ?? (layers.length > 1 ? layers.map(layerBox).reduce(unionRect) : d.bounds);
-    const move = app.tools.get('move');
-    const origin = layers.map((l) => ({ l, x: l.x ?? 0, y: l.y ?? 0, b: layerBox(l) }));
-    const target = (o) => {
-      const b = o.b;
+    const moves = layers.map((l) => {
+      const b = layerBox(l);
       let dx = 0, dy = 0;
       if (edge === 'left') dx = ref.x - b.x;
       if (edge === 'right') dx = ref.x + ref.width - (b.x + b.width);
@@ -664,21 +663,9 @@ export function install(app) {
       if (edge === 'top') dy = ref.y - b.y;
       if (edge === 'bottom') dy = ref.y + ref.height - (b.y + b.height);
       if (edge === 'vcenter') dy = Math.round(ref.y + ref.height / 2 - (b.y + b.height / 2));
-      return { x: o.x + dx, y: o.y + dy };
-    };
-    const apply = (to) => {
-      for (const o of origin) {
-        const t = to(o);
-        move.offsetLayer(o.l, t.x, t.y);
-        delete o.l._dragX;
-        delete o.l._dragY;
-        delete o.l._maskX;
-        delete o.l._maskY;
-      }
-      d.changed('props');
-    };
-    apply(target);
-    d.history.push({ label: 'Align', undo: () => apply((o) => ({ x: o.x, y: o.y })), redo: () => apply(target), bytes: 0, at: Date.now() });
+      return { layer: l, dx: Math.round(dx), dy: Math.round(dy) };
+    });
+    offsetEach(d, moves, 'Align');
   }
 
   function distribute(axis = 'horizontal') {
@@ -689,22 +676,12 @@ export function install(app) {
     const items = layers.map((l) => ({ l, b: layerBox(l), x: l.x ?? 0, y: l.y ?? 0 })).sort((a, b) => a.b[key] + a.b[size] / 2 - (b.b[key] + b.b[size] / 2));
     const first = items[0].b[key] + items[0].b[size] / 2, last = items[items.length - 1].b[key] + items[items.length - 1].b[size] / 2;
     const step = (last - first) / (items.length - 1);
-    const move = app.tools.get('move');
-    const targets = items.map((it, i) => {
+    const moves = items.map((it, i) => {
       const c = it.b[key] + it.b[size] / 2;
       const delta = Math.round(first + step * i - c);
-      return axis === 'vertical' ? { x: it.x, y: it.y + delta } : { x: it.x + delta, y: it.y };
+      return axis === 'vertical' ? { layer: it.l, dx: 0, dy: delta } : { layer: it.l, dx: delta, dy: 0 };
     });
-    const apply = (list) => {
-      items.forEach((it, i) => {
-        move.offsetLayer(it.l, list[i].x, list[i].y);
-        delete it.l._dragX;
-        delete it.l._dragY;
-      });
-      d.changed('props');
-    };
-    apply(targets);
-    d.history.push({ label: 'Distribute', undo: () => apply(items.map((it) => ({ x: it.x, y: it.y }))), redo: () => apply(targets), bytes: 0, at: Date.now() });
+    offsetEach(d, moves, 'Distribute');
   }
 
   function mergeLayers(layers, name, label) {

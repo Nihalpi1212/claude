@@ -72,59 +72,83 @@ export function install(app) {
     return c;
   }
 
+  const rowEls = new Map(); // key -> { li, nameEl, thumbEl, path, name, r }
+  let emptyEl = null;
+
+  /** Updates the list in place (rows keep their nodes, so double-clicks and renames survive refreshes). */
   function render() {
     pending = 0;
     if (renaming) return;
     const doc = app.doc;
-    list.replaceChildren();
-    if (!doc) {
-      list.innerHTML = '<li class="panel-empty">No document open</li>';
-      updateButtons();
-      return;
-    }
-    const all = rows();
-    if (!all.length) {
-      const li = document.createElement('li');
-      li.className = 'panel-empty';
-      li.textContent = 'No paths. Draw with the Pen or a Shape tool in Path mode, or make a work path from a selection.';
-      list.appendChild(li);
-    }
+    const all = doc ? rows() : [];
     const current = activePathTarget(app)?.key ?? null;
-    for (const r of all) list.appendChild(row(r, r.key === current));
+    const order = [];
+    for (const r of all) {
+      let e = rowEls.get(r.key);
+      if (!e) {
+        e = buildRow(r);
+        rowEls.set(r.key, e);
+      }
+      e.r = r;
+      if (e.path !== r.path || e.docSize !== `${doc.width}x${doc.height}`) {
+        e.thumbEl.replaceChildren(thumb(r.path));
+        e.path = r.path;
+        e.docSize = `${doc.width}x${doc.height}`;
+      }
+      if (e.name !== r.name) {
+        e.nameEl.textContent = r.name;
+        e.name = r.name;
+      }
+      e.li.classList.toggle('selected', r.key === current);
+      e.li.setAttribute('aria-selected', String(r.key === current));
+      order.push(e.li);
+    }
+    const keys = new Set(all.map((r) => r.key));
+    for (const [k, e] of rowEls) if (!keys.has(k)) {
+      e.li.remove();
+      rowEls.delete(k);
+    }
+    if (!all.length) {
+      emptyEl ??= document.createElement('li');
+      emptyEl.className = 'panel-empty';
+      emptyEl.textContent = doc ? 'No paths. Draw with the Pen or a Shape tool in Path mode, or make a work path from a selection.' : 'No document open';
+      order.push(emptyEl);
+    }
+    const same = order.length === list.children.length && order.every((n, i) => list.children[i] === n);
+    if (!same) list.replaceChildren(...order);
     updateButtons();
   }
 
-  function row(r, selected) {
+  function buildRow(r0) {
+    const e = { r: r0 };
     const li = document.createElement('li');
-    li.className = 'path-row' + (selected ? ' selected' : '');
-    li.dataset.key = r.key;
+    li.className = 'path-row';
+    li.dataset.key = r0.key;
     li.setAttribute('role', 'option');
-    li.setAttribute('aria-selected', String(selected));
     const t = document.createElement('span');
     t.className = 'path-thumb';
-    t.appendChild(thumb(r.path));
     const name = document.createElement('span');
-    name.className = 'path-name' + (r.italic ? ' italic' : '');
-    name.textContent = r.name;
+    name.className = 'path-name' + (r0.italic ? ' italic' : '');
     li.append(t, name);
-    li.addEventListener('click', (e) => {
-      e.stopPropagation();
-      setActivePath(app, r.ap);
-      render();
-      if (e.ctrlKey || e.metaKey) {
-        const op = e.shiftKey && e.altKey ? 'intersect' : e.shiftKey ? 'add' : e.altKey ? 'subtract' : 'replace';
+    Object.assign(e, { li, thumbEl: t, nameEl: name });
+    li.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      if (renaming) return;
+      setActivePath(app, e.r.ap);
+      if (ev.ctrlKey || ev.metaKey) {
+        const op = ev.shiftKey && ev.altKey ? 'intersect' : ev.shiftKey ? 'add' : ev.altKey ? 'subtract' : 'replace';
         app.commands.run('path:make-selection', { op }, 'panel');
       }
     });
-    li.addEventListener('dblclick', (e) => {
-      e.stopPropagation();
-      if (r.ap.kind === 'saved') startRename(r, name);
-      else if (r.ap.kind === 'work') app.commands.run('path:save', undefined, 'panel');
+    li.addEventListener('dblclick', (ev) => {
+      ev.stopPropagation();
+      if (e.r.ap.kind === 'saved') startRename(e.r, name);
+      else if (e.r.ap.kind === 'work') app.commands.run('path:save', undefined, 'panel');
     });
-    li.addEventListener('contextmenu', (e) => {
-      e.preventDefault();
+    li.addEventListener('contextmenu', (ev) => {
+      ev.preventDefault();
+      const r = e.r;
       setActivePath(app, r.ap);
-      render();
       const run = (cmd, arg) => () => app.commands.run(cmd, arg, 'panel');
       app.dialogs.popover(li, [
         ...(r.ap.kind === 'work' ? [{ label: 'Save Path…', onSelect: run('path:save') }] : []),
@@ -133,9 +157,9 @@ export function install(app) {
         { label: 'Make Selection…', onSelect: run('path:make-selection') },
         { label: 'Fill Path…', onSelect: run('path:fill') },
         { label: 'Stroke Path…', onSelect: run('path:stroke') },
-      ], { at: { x: e.clientX, y: e.clientY } });
+      ], { at: { x: ev.clientX, y: ev.clientY } });
     });
-    return li;
+    return e;
   }
 
   function startRename(r, nameEl) {
@@ -149,6 +173,7 @@ export function install(app) {
     const done = (commit) => {
       if (renaming !== r.id) return;
       renaming = null;
+      nameEl.textContent = r.name;
       if (commit && input.value.trim() && input.value.trim() !== r.name) app.commands.run('path:rename', { id: r.id, name: input.value.trim() }, 'panel');
       render();
     };
@@ -167,10 +192,7 @@ export function install(app) {
 
   // clicking the empty part of the list deselects (hides the path outline)
   list.addEventListener('click', (e) => {
-    if (e.target === list && app.ui.activePath) {
-      setActivePath(app, null);
-      render();
-    }
+    if ((e.target === list || e.target === emptyEl) && app.ui.activePath) setActivePath(app, null);
   });
 
   const schedule = () => {

@@ -154,9 +154,11 @@ export class EyedropperTool extends Tool {
     if (!w) return null;
     const color = a > 0 ? [r / a, g / a, b / a, a / w] : [0, 0, 0, 0];
     const hex = rgbaToHex(color);
+    // the ring shows the colour before this drag started next to the sampled one
+    const previous = this.ring?.previous ?? (setBackground ? this.app.settings.background : this.app.settings.foreground);
     if (setBackground) this.app.setColors({ background: hex });
     else if (setForeground) this.app.setColors({ foreground: hex });
-    this.ring = { color: hex, previous: setBackground ? this.app.settings.background : this.app.settings.foreground };
+    this.ring = { color: hex, previous };
     this.app.statusbar.set('hint', `${hex}  R ${Math.round(color[0])} G ${Math.round(color[1])} B ${Math.round(color[2])}`);
     return color;
   }

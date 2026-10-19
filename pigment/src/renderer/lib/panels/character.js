@@ -77,7 +77,8 @@ export function install(app) {
     if (TYPE_TOOLS.includes(app.tools.active?.id)) for (const [k, v] of Object.entries(opts)) app.tools.updateControl(k, v);
   }
 
-  function apply(patch, { merge = true } = {}) {
+  // only continuous inputs (colour pickers) merge into one history entry; discrete edits get their own
+  function apply(patch, { merge = false } = {}) {
     const sub = subject();
     if (sub.layer) applyTypeStyle(app, patch, { label: 'Character', merge });
     else if ('color' in patch) app.setColors({ foreground: patch.color }); // new text uses the foreground colour
@@ -86,8 +87,8 @@ export function install(app) {
   }
 
   family.addEventListener('pointerdown', () => loadSystemFonts());
-  family.addEventListener('change', () => apply({ family: family.value }, { merge: false }));
-  style.addEventListener('change', () => apply(styleToFont(style.value), { merge: false }));
+  family.addEventListener('change', () => apply({ family: family.value }));
+  style.addEventListener('change', () => apply(styleToFont(style.value)));
   size.addEventListener('change', () => {
     const v = Number(size.value);
     if (v > 0) apply({ size: v });
@@ -101,16 +102,16 @@ export function install(app) {
     const v = Number(tracking.value);
     if (Number.isFinite(v)) apply({ letterSpacing: v });
   });
-  color.addEventListener('input', () => apply({ color: color.value }));
-  for (const b of align.querySelectorAll('button')) b.addEventListener('click', () => apply({ align: b.dataset.value }, { merge: false }));
-  underline.addEventListener('change', () => apply({ underline: underline.checked }, { merge: false }));
+  color.addEventListener('input', () => apply({ color: color.value }, { merge: true }));
+  for (const b of align.querySelectorAll('button')) b.addEventListener('click', () => apply({ align: b.dataset.value }));
+  underline.addEventListener('change', () => apply({ underline: underline.checked }));
   const strokePatch = () => {
     const w = Number(strokeWidth.value);
     return { stroke: w > 0 ? { color: strokeColor.value, width: w } : null };
   };
   strokeColor.addEventListener('input', () => {
     if (!(Number(strokeWidth.value) > 0)) strokeWidth.value = '2';
-    apply(strokePatch());
+    apply(strokePatch(), { merge: true });
   });
   strokeWidth.addEventListener('change', () => apply(strokePatch()));
 

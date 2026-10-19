@@ -25,7 +25,8 @@ export class Compositor {
   composite(doc, opts = {}) {
     const rect = opts.rect ? intersectRect(opts.rect, doc.bounds) ?? { x: 0, y: 0, width: 1, height: 1 } : doc.bounds;
     const isFull = !opts.rect && !opts.skip && !opts.until && !opts.target;
-    if (isFull && this.full && this.full.version === doc.version && this.full.canvas.width === doc.width && this.full.canvas.height === doc.height) return this.full.canvas;
+    // layer.touch() bumps the root's version without a document change event (brush strokes), so both count
+    if (isFull && this.full && this.full.version === doc.version && this.full.rootVersion === doc.root.version && this.full.canvas.width === doc.width && this.full.canvas.height === doc.height) return this.full.canvas;
     const canvas = opts.target ?? createCanvas(rect.width, rect.height);
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -34,7 +35,7 @@ export class Compositor {
     ctx.translate(-rect.x, -rect.y);
     this.drawChildren(ctx, doc.root, rect, doc, opts);
     ctx.restore();
-    if (isFull) this.full = { version: doc.version, canvas };
+    if (isFull) this.full = { version: doc.version, rootVersion: doc.root.version, canvas };
     return canvas;
   }
 

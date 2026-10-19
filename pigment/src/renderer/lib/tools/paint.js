@@ -105,6 +105,8 @@ export class StrokeTool extends Tool {
       pressureSize: this.opt('pressureSize') ?? true,
       pressureOpacity: this.opt('pressureOpacity') ?? false,
       blend: this.opt('blend') ?? 'normal',
+      angle: this.opt('angle') ?? 0,
+      roundness: this.opt('roundness') ?? 1,
       color: s.foreground,
       mode: target.mask ? 'mask' : 'paint',
       maskValue,

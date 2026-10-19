@@ -83,8 +83,14 @@ export class App extends EventTarget {
 
   async saveSettings(patch) {
     Object.assign(this.settings, patch);
+    // send anything still queued by saveSettingsSoon along, or the reply below would drop it
+    clearTimeout(this.saveTimer);
+    const queued = this.pendingAll ? { ...this.settings } : this.pendingSettings;
+    this.pendingSettings = {};
+    this.pendingAll = false;
+    const full = { ...queued, ...patch };
     try {
-      this.settings = withDefaults(await bridge.setSettings(patch));
+      this.settings = withDefaults(await bridge.setSettings(full));
     } catch (err) {
       console.warn('Could not persist settings', err);
     }
@@ -92,17 +98,23 @@ export class App extends EventTarget {
     if (patch && 'theme' in patch) await this.applyTheme();
   }
 
-  /** Coalesces frequent setting writes (tool options, panel layout) into one write. */
+  /**
+   * Coalesces frequent setting writes (tool options, panel layout) into one write. Without a patch,
+   * the caller changed app.settings directly and the whole settings object is written.
+   */
   saveSettingsSoon(patch) {
-    Object.assign(this.settings, patch);
-    Object.assign(this.pendingSettings, patch);
+    if (patch) {
+      Object.assign(this.settings, patch);
+      Object.assign(this.pendingSettings, patch);
+    } else this.pendingAll = true;
     clearTimeout(this.saveTimer);
     this.saveTimer = setTimeout(() => {
-      const p = this.pendingSettings;
+      const p = this.pendingAll ? { ...this.settings, ...this.pendingSettings } : this.pendingSettings;
       this.pendingSettings = {};
+      this.pendingAll = false;
       bridge.setSettings(p).catch((err) => console.warn('Could not persist settings', err));
     }, 400);
-    this.emit('settings:changed', patch);
+    this.emit('settings:changed', patch ?? {});
   }
 
   reportError(err, context) {

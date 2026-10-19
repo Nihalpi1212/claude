@@ -5,7 +5,6 @@ import { bridge } from './bridge.js';
 import { formDialog } from './form.js';
 import { createColorWidget, normHex } from './panels/color.js';
 import { DEFAULT_SETTINGS, DEFAULT_SWATCHES } from '../../shared/defaults.js';
-import { parseColor } from '../../shared/pixels/color.js';
 
 const MAX_SIDE = 30000;
 const MAX_AREA = 250e6;
@@ -53,9 +52,8 @@ function fmtUnit(v, unit) {
   const d = unit === 'mm' ? 1 : 2;
   return String(Number(v.toFixed(d)));
 }
-function memoryText(w, h, transparent) {
+function memoryText(w, h) {
   const bytes = w * h * 4;
-  void transparent;
   return bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(2)} GB` : bytes >= 1024 ** 2 ? `${(bytes / 1024 ** 2).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
 }
 
@@ -449,5 +447,4 @@ export function install(app) {
   app.newDocumentDialog = (arg) => newDocumentDialog(app, arg);
   app.pickColor = (initial, opts) => pickColor(app, initial, opts);
   app.preferencesDialog = () => preferencesDialog(app);
-  void parseColor;
 }

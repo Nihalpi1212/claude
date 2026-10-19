@@ -31,7 +31,7 @@ export function install(app) {
 
   const palette = () => {
     const s = app.settings.swatches;
-    if (app.settings.swatchesEdited || (Array.isArray(s) && s.length)) return Array.isArray(s) ? s : [];
+    if (app.settings.swatchesEdited || (Array.isArray(s) && s.length)) return Array.isArray(s) ? s.slice() : [];
     return DEFAULT_SWATCHES.slice();
   };
   const savePalette = (list) => app.saveSettingsSoon({ swatches: list.slice(), swatchesEdited: true });

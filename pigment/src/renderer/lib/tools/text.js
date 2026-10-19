@@ -775,6 +775,8 @@ export function install(app) {
     if (tools.includes(active) && !active.session) active.syncFromLayer();
   });
   app.on('doc:change', (e) => {
+    const active = app.tools.active;
+    if (tools.includes(active) && !active.session && e.doc === app.doc && (e.kind === 'props' || e.kind === 'history') && e.doc.active?.type === 'text') active.syncFromLayer();
     for (const t of tools) {
       const s = t.session;
       if (!s || s.doc !== e.doc) continue;

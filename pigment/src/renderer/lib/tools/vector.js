@@ -570,10 +570,6 @@ export function currentPathTarget(app) {
 
 const pathOf = (t) => (state.preview?.key === t.key ? state.preview.path : t.get());
 
-function startPreview(target) {
-  return { original: target.get() };
-}
-
 function showPreview(app, target, draft) {
   if (target.kind === 'shape') {
     target.layer.path = draft;
