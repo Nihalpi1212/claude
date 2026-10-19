@@ -73,10 +73,19 @@ export function install(app) {
   async function quickExport() {
     const d = app.doc;
     let path;
-    if (d.path) path = d.path.replace(/\.[^.\\/]+$/, '') + '.png';
-    else path = await bridge.saveFileDialog({ title: 'Quick Export as PNG', defaultPath: `${baseName(d.name)}.png`, filters: [{ name: 'PNG image', extensions: ['png'] }] });
+    if (d.path) {
+      path = d.path.replace(/\.[^.\\/]+$/, '') + '.png';
+      if (path === d.path) path = path.replace(/\.png$/i, ' copy.png');
+      // never overwrite an existing file (it may be the original photo) without asking
+      let exists = false;
+      try {
+        exists = !!(await bridge.pathInfo(path));
+      } catch {
+        exists = false;
+      }
+      if (exists) path = await bridge.saveFileDialog({ title: 'Quick Export as PNG', defaultPath: path, filters: [{ name: 'PNG image', extensions: ['png'] }] });
+    } else path = await bridge.saveFileDialog({ title: 'Quick Export as PNG', defaultPath: `${baseName(d.name)}.png`, filters: [{ name: 'PNG image', extensions: ['png'] }] });
     if (!path) return;
-    if (d.path && path === d.path) path = path.replace(/\.png$/i, ' copy.png');
     return exportAs({ path, format: 'png' });
   }
 

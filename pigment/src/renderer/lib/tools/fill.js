@@ -125,7 +125,7 @@ export class GradientTool extends Tool {
     const layer = this.paintableLayer();
     if (!layer) return;
     if (layer.type !== 'raster' && !(this.app.ui.editingMask && layer.mask)) {
-      this.app.rasterizePrompt(layer).then((ok) => ok && this.onPointerDown(p));
+      this.app.rasterizePrompt(layer); // a gradient is a drag: start it again once rasterized
       return;
     }
     this.drag = { from: { x: p.x, y: p.y }, to: { x: p.x, y: p.y }, layer };

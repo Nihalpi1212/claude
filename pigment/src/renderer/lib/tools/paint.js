@@ -33,7 +33,7 @@ export class StrokeTool extends Tool {
     const layer = this.paintableLayer();
     if (!layer) return;
     if (layer.type !== 'raster' && !(this.app.ui.editingMask && layer.mask)) {
-      this.app.rasterizePrompt(layer).then((ok) => ok && this.onPointerDown(p));
+      this.app.rasterizePrompt(layer); // the button is up by the time it is answered: paint again
       return;
     }
     this.ensureCoverage(layer, p);

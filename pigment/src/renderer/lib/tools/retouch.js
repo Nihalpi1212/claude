@@ -74,7 +74,7 @@ class DabTool extends StrokeTool {
       return;
     }
     if (layer.type !== 'raster') {
-      this.app.rasterizePrompt(layer).then((ok) => ok && this.onPointerDown(p));
+      this.app.rasterizePrompt(layer); // the button is up by the time it is answered: paint again
       return;
     }
     if (this.beforeStroke?.(p, layer) === false) return;
@@ -413,7 +413,7 @@ class SpotHealingTool extends DabTool {
     if (!layer) return;
     if (this.app.ui.editingMask) return this.app.dialogs.toast('Spot healing works on layer pixels, not masks', { kind: 'error', timeout: 2000 });
     if (layer.type !== 'raster') {
-      this.app.rasterizePrompt(layer).then((ok) => ok && this.onPointerDown(p));
+      this.app.rasterizePrompt(layer); // the button is up by the time it is answered: paint again
       return;
     }
     const d = this.doc;

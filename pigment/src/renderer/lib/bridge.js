@@ -141,7 +141,8 @@ function createBrowserBridge() {
     },
     async pathInfo(path) {
       const name = path.split(/[\\/]/).pop();
-      const bytes = test.files[path];
+      const bytes = test.files[path] ?? test.written[path];
+      if (!bytes) throw new Error(`No such file: ${path}`);
       return { path, name, dir: path.slice(0, Math.max(0, path.length - name.length - 1)), size: bytes?.byteLength ?? 0, mtimeMs: Date.now() };
     },
     pathForFile(file) {

@@ -67,6 +67,8 @@ export class CommandRegistry {
     const last = this.lastRun.get(id);
     if (last && last.source !== source && now - last.at < DEDUPE_MS && last.arg === arg) return undefined;
     this.lastRun.set(id, { at: now, source, arg });
+    // menus stay live in the native menu bar while a modal dialog previews on the canvas: ignore them
+    if (source === 'menu' && this.app.dialogs?.isOpen) return undefined;
     // a running Free Transform is applied before anything else touches the document (undo/redo cancel it)
     const tt = this.app.transformTool;
     if (tt?.session && !tt.committing && !SAFE_DURING_TRANSFORM.test(id)) {
