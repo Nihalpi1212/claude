@@ -918,7 +918,7 @@ function bevelMaps(ctx, fx, opts) {
   const style = BEVEL_STYLES[fx.style] ?? 0;
   const smooth = fx.technique !== 'chisel-hard';
   const down = fx.direction === 'down';
-  const { w, h, n } = ctx;
+  const { w, h, n, A8 } = ctx;
   const inside = insideMask(ctx), dI = distIn(ctx), dO = distOut(ctx);
   const H = new Float32Array(n);
   const half = size / 2;
@@ -941,6 +941,10 @@ function bevelMaps(ctx, fx, opts) {
   const hiDen = 1 - lz, shDen = Math.max(lz, 1e-3);
   const k = size * depth;
   const hl = new Float32Array(n), sh = new Float32Array(n);
+  // Outside the layer the shading ends (1px antialiased fade) at the nominal extent, size (half
+  // of it for emboss and pillow emboss) plus soften, which is what stylePadding() pads for: the
+  // central differences and the blur would otherwise leak a few pixels past it and get clipped.
+  const lim = style === 0 ? 0 : (style === 1 ? size : half) + nonNeg(fx.soften) + 1;
   for (let y = 0; y < h; y++) {
     const up = (y > 0 ? y - 1 : 0) * w, dn = (y < h - 1 ? y + 1 : h - 1) * w;
     const row = y * w;
@@ -949,11 +953,17 @@ function bevelMaps(ctx, fx, opts) {
       const gx = (Hb[x < w - 1 ? i + 1 : i] - Hb[x > 0 ? i - 1 : i]) * 0.5;
       const gy = (Hb[dn + x] - Hb[up + x]) * 0.5;
       if (gx === 0 && gy === 0) continue;
+      let fade = 1;
+      if (!A8[i]) {
+        fade = lim - Math.sqrt(dO[i]);
+        if (fade <= 0) continue;
+        if (fade > 1) fade = 1;
+      }
       const nx = -k * gx, ny = -k * gy;
       const shade = (nx * lx + ny * ly + lz) / Math.sqrt(nx * nx + ny * ny + 1);
       if (shade > lz) {
-        if (hiDen > 1e-6) hl[i] = Math.min(1, (shade - lz) / hiDen);
-      } else if (shade < lz) sh[i] = Math.min(1, (lz - shade) / shDen);
+        if (hiDen > 1e-6) hl[i] = Math.min(1, (shade - lz) / hiDen) * fade;
+      } else if (shade < lz) sh[i] = Math.min(1, (lz - shade) / shDen) * fade;
     }
   }
   return { hl, sh, inner: style !== 1, outer: style !== 0 };

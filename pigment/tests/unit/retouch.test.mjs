@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { dabMask, dodge, burn, sponge, blurDab, sharpenDab, smudge, heal, replaceColor } from '../../src/shared/pixels/retouch.js';
 import { createImage, cloneImage, getPixel, setPixel, luminance, randomSeeded } from '../../src/shared/pixels/core.js';
 import { rgbToHsl } from '../../src/shared/pixels/color.js';
+import { blendPixel } from '../../src/shared/pixels/blend.js';
 import { solidImage, assertPixel, assertNear } from './helpers.mjs';
 
 const ones = (w, h) => new Float32Array(w * h).fill(1);
@@ -398,5 +399,242 @@ test('200 px dabs are fast enough for interactive strokes', () => {
     for (let k = 0; k < n; k++) fn();
     const ms = (performance.now() - t0) / n;
     assert.ok(ms < 16, `${name}: ${ms.toFixed(2)} ms per 200 px dab`);
+  }
+});
+
+// ---- regression tests from the adversarial review -------------------------------------------
+
+test('dabMask: the centre weighs 1 for even and tiny sizes at any hardness', () => {
+  for (const hd of [0, 0.5, 1]) {
+    for (const n of [2, 4, 20, 64]) {
+      const m = dabMask(n, n, hd), c = n / 2;
+      for (const [x, y] of [[c - 1, c - 1], [c, c - 1], [c - 1, c], [c, c]]) assert.equal(m[y * n + x], 1, `${n}px hardness ${hd} centre ${x},${y}`);
+      if (n >= 4) for (const k of [0, n - 1, n * (n - 1), n * n - 1]) assert.equal(m[k], 0, `${n}px corner`);
+    }
+  }
+  // a 2 px brush covers its four pixels fully instead of 21 %, hard or soft; 2x1 and 1x2 too
+  assert.deepEqual(Array.from(dabMask(2, 2, 1)), [1, 1, 1, 1]);
+  assert.deepEqual(Array.from(dabMask(2, 2, 0)), [1, 1, 1, 1]);
+  assert.deepEqual(Array.from(dabMask(2, 1, 0)), [1, 1]);
+  assert.deepEqual(Array.from(dabMask(1, 2, 0)), [1, 1]);
+  // the soft falloff is still a falloff
+  const soft = dabMask(4, 4, 0);
+  assert.ok(soft[1] > 0 && soft[1] < 0.5, `4px soft edge ${soft[1]}`);
+});
+
+test('heal leaves pixels alone where the source is transparent or missing', () => {
+  const textured = () => noiseImage(16, 16, [120, 140, 160], 50, 5);
+  // fully transparent source (e.g. a sample taken off the canvas): no change at all, not a blur
+  const a = textured(), a0 = cloneImage(a);
+  heal(a, null, null, createImage(16, 16));
+  assert.deepEqual(a.data, a0.data, 'transparent source');
+  // a source smaller than the rect only heals the part it covers
+  const b = textured(), b0 = cloneImage(b);
+  heal(b, null, null, solidImage(8, 6, [10, 10, 10, 1]));
+  let changedInside = 0;
+  for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+    const i = (y * 16 + x) * 4;
+    const same = b.data[i] === b0.data[i] && b.data[i + 1] === b0.data[i + 1] && b.data[i + 2] === b0.data[i + 2];
+    if (x >= 8 || y >= 6) assert.ok(same, `uncovered pixel ${x},${y} changed`);
+    else if (!same) changedInside++;
+  }
+  assert.ok(changedInside > 30, `covered part is healed (${changedInside})`);
+  // half-transparent source heals half way
+  const flat = () => solidImage(20, 20, [100, 100, 100, 1]);
+  const src = noiseImage(20, 20, [90, 90, 90], 60, 9);
+  const half = cloneImage(src);
+  for (let i = 3; i < half.data.length; i += 4) half.data[i] = 128;
+  const full = flat(), part = flat();
+  heal(full, null, null, src);
+  heal(part, null, null, half);
+  for (let i = 0; i < full.data.length; i += 4) {
+    assertNear(part.data[i] - 100, ((full.data[i] - 100) * 128) / 255, 1, `pixel ${i / 4}`);
+  }
+});
+
+test('heal source pixel (i, j) lands on image pixel (rect.x + i, rect.y + j), also when clipped', () => {
+  const img = solidImage(12, 12, [100, 100, 100, 1]);
+  const src = solidImage(10, 10, [50, 50, 50, 1]);
+  setPixel(src, 5, 4, [250, 250, 250, 1]); // one bright texel
+  heal(img, { x: -3, y: -2, width: 10, height: 10 }, null, src, { radius: 2 });
+  let best = [-1, -1, -1];
+  for (let y = 0; y < 12; y++) for (let x = 0; x < 12; x++) if (img.data[(y * 12 + x) * 4] > best[0]) best = [img.data[(y * 12 + x) * 4], x, y];
+  assert.deepEqual(best.slice(1), [2, 2], 'texel at (-3 + 5, -2 + 4)');
+  assert.ok(best[0] > 250, `the texel's contrast over its blur is added: ${best[0]}`);
+  assert.equal(img.data[(11 * 12 + 11) * 4], 100, 'outside the rect untouched');
+});
+
+test('smudge keeps the carried colour at full precision so long smears fade out', () => {
+  const W = 400, img = halves(W, 10, [255, 0, 0, 1], [0, 0, 255, 1], 20);
+  const dab = dabMask(10, 10, 0.5);
+  let c = null;
+  for (let x = 8; x <= 380; x++) c = smudge(img, { x, y: 0, width: 10, height: 10 }, dab, c, { strength: 0.8 });
+  // 8-bit rounding of the carried buffer on every dab left (10, 0, 245) carried and painted (20, 0, 235) here
+  assertPixel(getPixel(c, 5, 5), [0, 0, 255, 1], 1, 'carried converged on blue');
+  assertPixel(getPixel(img, 370, 5), [0, 0, 255, 1], 1, 'no endless red tint along the stroke');
+  assert.ok(getPixel(img, 30, 5)[0] > 100, 'red is still dragged into the blue near the boundary');
+
+  // the bytes stay the rounded state, and bytes the caller rewrites are honoured
+  const t = solidImage(10, 4, [0, 0, 255, 1]);
+  const k = smudge(t, { x: 0, y: 0, width: 4, height: 4 }, null, null);
+  smudge(t, { x: 4, y: 0, width: 4, height: 4 }, null, k, { strength: 0.5 });
+  for (let i = 0; i < k.data.length; i += 4) k.data.set([0, 255, 0, 255], i); // finger-paint green
+  smudge(t, { x: 6, y: 0, width: 4, height: 4 }, null, k, { strength: 1 });
+  assertPixel(getPixel(t, 8, 2), [0, 255, 0, 1], 0, 'rewritten carried bytes paint');
+});
+
+/** Brute-force premultiplied box mean over the window clipped to [bx0, bx1) x [by0, by1). */
+function naiveMean(img, x, y, r, bx0, bx1, by0, by1) {
+  let sr = 0, sg = 0, sb = 0, sa = 0;
+  for (let yy = Math.max(by0, y - r); yy <= Math.min(by1 - 1, y + r); yy++)
+    for (let xx = Math.max(bx0, x - r); xx <= Math.min(bx1 - 1, x + r); xx++) {
+      const i = (yy * img.width + xx) * 4, a = img.data[i + 3];
+      sr += img.data[i] * a;
+      sg += img.data[i + 1] * a;
+      sb += img.data[i + 2] * a;
+      sa += a;
+    }
+  return sa > 0 ? [sr / sa, sg / sa, sb / sa] : null;
+}
+
+function randomCase(rnd, n) {
+  const ri = (a, b) => a + Math.floor(rnd() * (b - a + 1));
+  const W = ri(1, 21), H = ri(1, 21);
+  const img = createImage(W, H);
+  for (let i = 0; i < img.data.length; i++) img.data[i] = (i & 3) !== 3 ? ri(0, 255) : n % 3 === 0 ? 255 : rnd() < 0.3 ? 0 : ri(1, 255);
+  const rect = { x: ri(-7, W), y: ri(-7, H), width: ri(1, 18), height: ri(1, 18) };
+  const dab = new Float32Array(rect.width * rect.height).map(() => (rnd() < 0.2 ? 0 : rnd() * 1.2));
+  return { W, H, img, rect, dab, ri };
+}
+
+test('blurDab / sharpenDab / heal match a brute-force reference on clipped rects, odd sizes and alpha', () => {
+  const rnd = randomSeeded(2024);
+  for (let n = 0; n < 150; n++) {
+    const { W, H, img, rect, dab, ri } = randomCase(rnd, n);
+    const rad = ri(1, 5), s = rnd();
+    const x0 = Math.max(0, rect.x), y0 = Math.max(0, rect.y), x1 = Math.min(W, rect.x + rect.width), y1 = Math.min(H, rect.y + rect.height);
+    const weight = (x, y) => Math.min(1, dab[(y - rect.y) * rect.width + (x - rect.x)]);
+    const win = [Math.max(0, x0 - rad), Math.min(W, x1 + rad), Math.max(0, y0 - rad), Math.min(H, y1 + rad)];
+    for (const sharpen of [false, true]) {
+      const got = cloneImage(img), want = cloneImage(img);
+      (sharpen ? sharpenDab : blurDab)(got, rect, dab, { strength: s, radius: rad });
+      for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+        const i = (y * W + x) * 4, m = weight(x, y);
+        if (!(m > 0) || img.data[i + 3] === 0) continue;
+        const mean = naiveMean(img, x, y, rad, ...win);
+        for (let c = 0; c < 3; c++) want.data[i + c] = img.data[i + c] + (sharpen ? img.data[i + c] - mean[c] : mean[c] - img.data[i + c]) * s * m;
+      }
+      for (let i = 0; i < got.data.length; i++) assert.ok(Math.abs(got.data[i] - want.data[i]) <= 1, `${sharpen ? 'sharpen' : 'blur'} case ${n} byte ${i}: ${got.data[i]} vs ${want.data[i]}`);
+    }
+    // heal with a source that may be smaller or larger than the rect and partly transparent
+    const src = createImage(Math.max(1, rect.width + ri(-3, 3)), Math.max(1, rect.height + ri(-3, 3)));
+    for (let i = 0; i < src.data.length; i++) src.data[i] = (i & 3) !== 3 ? ri(0, 255) : rnd() < 0.25 ? 0 : ri(1, 255);
+    const got = cloneImage(img), want = cloneImage(img);
+    heal(got, rect, dab, src, { radius: rad, strength: s });
+    const ox = x0 - rect.x, oy = y0 - rect.y;
+    const sw = Math.min(x1 - x0, src.width - ox), sh = Math.min(y1 - y0, src.height - oy);
+    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+      const sx = x - rect.x, sy = y - rect.y;
+      if (sx - ox >= sw || sy - oy >= sh) continue;
+      const i = (y * W + x) * 4, si = (sy * src.width + sx) * 4;
+      const m = weight(x, y) * s * (src.data[si + 3] / 255);
+      if (!(m > 0) || img.data[i + 3] === 0) continue;
+      const dm = naiveMean(img, x, y, rad, ...win);
+      const sm = naiveMean(src, sx, sy, rad, Math.max(0, ox - rad), Math.min(src.width, ox + sw + rad), Math.max(0, oy - rad), Math.min(src.height, oy + sh + rad));
+      for (let c = 0; c < 3; c++) want.data[i + c] = img.data[i + c] + (dm[c] + src.data[si + c] - sm[c] - img.data[i + c]) * m;
+    }
+    for (let i = 0; i < got.data.length; i++) assert.ok(Math.abs(got.data[i] - want.data[i]) <= 1, `heal case ${n} byte ${i}: ${got.data[i]} vs ${want.data[i]}`);
+  }
+});
+
+test('per-pixel ops index the dab from the rect origin and clip exactly (Float32 and alpha-image dabs)', () => {
+  const ops = [
+    (im, r, d) => dodge(im, r, d, { range: 'shadows', exposure: 0.7 }),
+    (im, r, d) => burn(im, r, d, { range: 'highlights', exposure: 0.9 }),
+    (im, r, d) => sponge(im, r, d, { mode: 'saturate', flow: 0.6 }),
+    (im, r, d) => sponge(im, r, d, { mode: 'desaturate', flow: 0.6 }),
+    (im, r, d) => replaceColor(im, r, d, { color: '#3a9f20', sampleColor: [128, 128, 128, 1], tolerance: 90, mode: 'hue', strength: 0.8 }),
+  ];
+  const rnd = randomSeeded(31);
+  for (let n = 0; n < 120; n++) {
+    const { W, H, img, rect, dab: fl } = randomCase(rnd, n);
+    let dab = fl;
+    if (n % 2) {
+      dab = createImage(rect.width, rect.height);
+      for (let k = 0; k < fl.length; k++) fl[k] = (dab.data[k * 4 + 3] = Math.round(Math.min(1, fl[k]) * 255)) / 255;
+    }
+    ops.forEach((op, o) => {
+      const got = cloneImage(img), want = cloneImage(img);
+      op(got, rect, dab);
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+        const dx = x - rect.x, dy = y - rect.y;
+        if (dx < 0 || dy < 0 || dx >= rect.width || dy >= rect.height) continue;
+        const one = { width: 1, height: 1, data: want.data.subarray((y * W + x) * 4, (y * W + x) * 4 + 4) };
+        op(one, null, new Float32Array([fl[dy * rect.width + dx]]));
+      }
+      assert.deepEqual(got.data, want.data, `op ${o} case ${n}`);
+    });
+  }
+});
+
+test('replaceColor modes are exactly the W3C hue/saturation/color/luminosity blends of blend.js', () => {
+  const rnd = randomSeeded(5);
+  for (let n = 0; n < 400; n++) {
+    const p = [0, 0, 0].map(() => Math.floor(rnd() * 256)), c = [0, 0, 0].map(() => Math.floor(rnd() * 256));
+    for (const mode of ['hue', 'saturation', 'color', 'luminosity']) {
+      const img = solidImage(1, 1, [...p, 1]);
+      replaceColor(img, null, null, { color: [...c, 1], tolerance: 255, sampleColor: [0, 0, 0, 1], mode });
+      const e = blendPixel(mode, c[0], c[1], c[2], p[0], p[1], p[2]);
+      for (let k = 0; k < 3; k++) assert.ok(Math.abs(img.data[k] - e[k]) <= 0.5 + 1e-9, `${mode} ${p} <- ${c}: ${Array.from(img.data)} vs ${e}`);
+    }
+  }
+});
+
+test('1x1 images, empty images and rects in every op', () => {
+  const px = () => solidImage(1, 1, [100, 50, 20, 1]);
+  const a = px();
+  dodge(a, null, null, { range: 'shadows', exposure: 1 });
+  const L = luminance(100, 50, 20), Lt = L + (1 - L / 255) * (255 - L);
+  assertNear(luminance(a.data[0], a.data[1], a.data[2]), Lt, 1, '1x1 dodge');
+  for (const op of [
+    (im) => burn(im, null, null, {}), (im) => sponge(im, null, null, {}), (im) => blurDab(im, null, null, { radius: 8 }),
+    (im) => sharpenDab(im, null, null, { radius: 3 }), (im) => heal(im, null, null, px()), (im) => replaceColor(im, null, null, {}),
+    (im) => smudge(im, null, null, smudge(im, null, null, null), {}),
+  ]) {
+    const im = px();
+    op(im);
+    assert.equal(im.data[3], 255);
+    op(createImage(0, 0));
+    const e = px();
+    op(e, { x: 0, y: 0, width: 0, height: 0 });
+  }
+  // blur / sharpen / heal of a lone pixel: its own mean, so no change
+  const b = px();
+  blurDab(b, null, null, { strength: 1, radius: 5 });
+  sharpenDab(b, null, null, { strength: 1, radius: 5 });
+  heal(b, null, null, solidImage(1, 1, [0, 255, 0, 1]));
+  assertPixel(getPixel(b, 0, 0), [100, 50, 20, 1], 0);
+  assert.equal(smudge(createImage(0, 0), null, null, null).width, 0);
+});
+
+test('every op on a whole 1024x1024 image stays well under 1.5 s', () => {
+  const img = noiseImage(1024, 1024, [128, 128, 128], 100, 4);
+  const src = noiseImage(1024, 1024, [100, 120, 140], 60, 8);
+  const ops = {
+    dabMask: () => dabMask(1024, 1024, 0.5),
+    dodge: () => dodge(img, null, null, { exposure: 0.2 }),
+    burn: () => burn(img, null, null, { exposure: 0.2 }),
+    sponge: () => sponge(img, null, null, { mode: 'saturate', flow: 0.3 }),
+    blur: () => blurDab(img, null, null, { strength: 0.5, radius: 200 }),
+    sharpen: () => sharpenDab(img, null, null, { strength: 0.5, radius: 50 }),
+    smudge: () => smudge(img, null, null, src, { strength: 0.5 }),
+    heal: () => heal(img, null, null, src),
+    replace: () => replaceColor(img, null, null, { color: '#00ff00', tolerance: 120, sampleColor: '#808080' }),
+  };
+  for (const [name, fn] of Object.entries(ops)) {
+    const t0 = performance.now();
+    fn();
+    const ms = performance.now() - t0;
+    assert.ok(ms < 1500, `${name}: ${ms.toFixed(0)} ms on 1024x1024`);
   }
 });

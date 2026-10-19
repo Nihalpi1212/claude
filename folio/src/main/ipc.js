@@ -5,6 +5,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import { basename, dirname } from 'node:path';
 import { addRecent, removeRecent } from './recent.js';
+import { writeClipboardText, writeClipboardImage } from './clipboard.js';
 
 const PDF_FILTERS = [
   { name: 'PDF files', extensions: ['pdf'] },
@@ -271,12 +272,10 @@ export function registerIpc(ctx) {
 
   // ---- clipboard -------------------------------------------------------------------------------
   on('writeClipboardText', (text) => {
-    if (typeof text === 'string') clipboard.writeText(text);
+    writeClipboardText(clipboard, text).catch((err) => console.warn('clipboard text write failed', err));
   });
   on('writeClipboardImage', (dataUrl) => {
-    if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) return;
-    const image = nativeImage.createFromDataURL(dataUrl);
-    if (!image.isEmpty()) clipboard.writeImage(image);
+    writeClipboardImage(clipboard, nativeImage, dataUrl).catch((err) => console.warn('clipboard image write failed', err));
   });
 
   // ---- file watching ---------------------------------------------------------------------------

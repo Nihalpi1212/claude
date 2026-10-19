@@ -336,6 +336,19 @@ function pickColor(app, initial, { title = 'Color Picker', live } = {}) {
 // ---- preferences ---------------------------------------------------------------------------------------------
 const PREF_KEYS = ['theme', 'zoomWithWheel', 'rulerUnit', 'historyLimit', 'historyMemoryMB', 'checkerboardSize', 'checkerboardLight', 'checkerboardDark', 'gridSize', 'pixelGrid', 'showSelectionEdges', 'cursorStyle', 'resampleMethod', 'transformInterpolation', 'transformProportional', 'transformScalesStrokes'];
 
+/**
+ * app.saveSettings() replaces app.settings with what the store returns, which drops changes still
+ * queued by saveSettingsSoon() (written 400 ms later). Send them along with the patch.
+ */
+async function saveSettingsNow(app, patch) {
+  const queued = app.pendingSettings && Object.keys(app.pendingSettings).length ? app.pendingSettings : null;
+  if (queued) {
+    clearTimeout(app.saveTimer);
+    app.pendingSettings = {};
+  }
+  await app.saveSettings(queued ? { ...queued, ...patch } : patch);
+}
+
 function applyRuntimeSettings(app) {
   const s = app.settings;
   for (const d of app.docs?.list() ?? []) {
@@ -403,7 +416,7 @@ async function preferencesDialog(app) {
     if (v !== s[k]) patch[k] = v;
   }
   if (Object.keys(patch).length) {
-    await app.saveSettings(patch);
+    await saveSettingsNow(app, patch);
     applyRuntimeSettings(app);
     app.dialogs.toast('Preferences saved', { kind: 'success', timeout: 1500 });
   }
@@ -419,7 +432,7 @@ async function resetAllSettings(app) {
     if (keep.has(k)) continue;
     patch[k] = Array.isArray(v) ? v.slice() : v && typeof v === 'object' ? JSON.parse(JSON.stringify(v)) : v;
   }
-  await app.saveSettings(patch);
+  await saveSettingsNow(app, patch);
   app.panels?.reset();
   app.tools?.renderOptions();
   app.setColors({ foreground: DEFAULT_SETTINGS.foreground, background: DEFAULT_SETTINGS.background });

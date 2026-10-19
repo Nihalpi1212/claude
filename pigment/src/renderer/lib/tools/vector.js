@@ -1682,17 +1682,18 @@ class SelectionToolBase extends AnchorEditTool {
     const t = sel.key ? targetByKey(this.app, sel.key) : null;
     if (!t || this.drag) return false;
     const arrows = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
-    if (arrows[e.key]) {
+    const empty = !state.sel.subpaths.size && !state.sel.anchors.size;
+    if (arrows[e.key] && !empty) {
       if (!editable(this.app, t)) return true;
       const k = e.shiftKey ? 10 : 1;
       const [dx, dy] = arrows[e.key].map((v) => v * k);
       const original = t.get();
       const draft = clonePath(original);
       this.moveSelection(draft, original, dx, dy);
-      commitDraft(this.app, t, original, draft, 'Nudge', { reshaped: this.reshapes });
+      commitDraft(this.app, t, original, draft, 'Nudge', { reshaped: this.reshapesFor(original) });
       return true;
     }
-    if (e.key === 'Delete' || e.key === 'Backspace') {
+    if ((e.key === 'Delete' || e.key === 'Backspace') && !empty) {
       if (!editable(this.app, t)) return true;
       const original = t.get();
       const draft = this.deleteSelection(clonePath(original));
@@ -1726,6 +1727,10 @@ export class PathSelectionTool extends SelectionToolBase {
       options: [...PATH_BUTTONS],
     });
     this.reshapes = false;
+  }
+  /** Moving every subpath keeps a live shape parametric; moving some of them turns it into a path. */
+  reshapesFor(path) {
+    return state.sel.subpaths.size !== path.subpaths.length;
   }
   overlaySpec() {
     return { anchors: 'selected-subpaths' };
@@ -1778,7 +1783,8 @@ export class PathSelectionTool extends SelectionToolBase {
     sel.anchors = new Set();
     state.sel = sel;
     if (!sel.subpaths.size || !editable(this.app, hit.target)) return;
-    this.beginDrag(hit.target, { start: { x: p.x, y: p.y }, duplicate: p.alt });
+    const d = this.beginDrag(hit.target, { start: { x: p.x, y: p.y }, duplicate: p.alt });
+    d.base = d.original; // positions the selected subpaths move from (includes copies when duplicating)
   }
   onPointerMove(p, dragging) {
     const d = this.drag;
@@ -1793,14 +1799,13 @@ export class PathSelectionTool extends SelectionToolBase {
     if (!d.moved && d.duplicate) {
       // Alt-drag: move copies of the selected subpaths
       const copies = [...state.sel.subpaths].sort((a, b) => a - b).map((s) => clonePath({ subpaths: [d.original.subpaths[s]] }).subpaths[0]);
-      const base = d.draft.subpaths.length;
+      const first = d.draft.subpaths.length;
       d.draft.subpaths.push(...copies);
-      d.original = { subpaths: [...d.original.subpaths, ...copies.map((c) => clonePath({ subpaths: [c] }).subpaths[0])] };
-      d.realOriginal = d.target.get();
-      state.sel.subpaths = new Set(copies.map((_, k) => base + k));
+      d.base = { subpaths: [...d.original.subpaths, ...clonePath({ subpaths: copies }).subpaths] };
+      state.sel.subpaths = new Set(copies.map((_, k) => first + k));
     }
     d.moved = true;
-    this.moveSelection(d.draft, d.original, dx, dy);
+    this.moveSelection(d.draft, d.base, dx, dy);
     showPreview(this.app, d.target, d.draft);
   }
   onPointerUp(p) {
@@ -1810,8 +1815,7 @@ export class PathSelectionTool extends SelectionToolBase {
       this.cancel();
       return;
     }
-    if (d.realOriginal) d.original = d.realOriginal;
-    this.endDrag(d.duplicate ? 'Duplicate Path' : 'Move Path', { reshaped: !!d.duplicate });
+    this.endDrag(d.duplicate ? 'Duplicate Path' : 'Move Path', { reshaped: !!d.duplicate || this.reshapesFor(d.draft) });
   }
 }
 
@@ -1827,6 +1831,9 @@ export class DirectSelectionTool extends SelectionToolBase {
     });
     this.reshapes = true;
     this.marquee = null;
+  }
+  reshapesFor() {
+    return true;
   }
   overlaySpec() {
     return { anchors: 'all', handles: 'selected' };

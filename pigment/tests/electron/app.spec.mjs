@@ -64,8 +64,16 @@ test('starts, opens an image from the command line, has the native menu and save
 
     // clipboard: copy merged then paste as a new document goes through the native clipboard
     await window.evaluate(() => window.pigmentApp.commands.run('edit:copy-merged', undefined, 'api'));
-    const hasImage = await app.evaluate(({ clipboard }) => !clipboard.readImage().isEmpty());
-    expect(hasImage).toBe(true);
+    await expect
+      .poll(() => app.evaluate(async ({ clipboard }) => {
+        if (typeof clipboard.readImage === 'function') return !clipboard.readImage().isEmpty();
+        const items = await clipboard.read();
+        return items.some((i) => i.types.some((t) => t.startsWith('image/')));
+      }))
+      .toBe(true);
+    // and it comes back through the preload bridge as PNG bytes
+    const back = await window.evaluate(async () => Array.from((await window.pigment.readClipboardImage())?.slice(0, 4) ?? []));
+    expect(back).toEqual([0x89, 0x50, 0x4e, 0x47]);
   } finally {
     await close();
   }

@@ -6,6 +6,7 @@ import os from 'node:os';
 import { basename, dirname } from 'node:path';
 import { addRecent, removeRecent } from './recent.js';
 import { OPEN_DIALOG_FILTERS } from '../shared/formats.js';
+import { writeClipboardText, writeClipboardImage, readClipboardImage } from './clipboard.js';
 
 const DEFAULT_FILTERS = OPEN_DIALOG_FILTERS;
 
@@ -269,18 +270,12 @@ export function registerIpc(ctx) {
 
   // ---- clipboard -------------------------------------------------------------------------------
   on('writeClipboardText', (text) => {
-    if (typeof text === 'string') clipboard.writeText(text);
+    writeClipboardText(clipboard, text).catch((err) => console.warn('clipboard text write failed', err));
   });
-  handle('readClipboardImage', async () => {
-    const image = clipboard.readImage();
-    if (!image || image.isEmpty()) return null;
-    return new Uint8Array(image.toPNG());
-  });
+  handle('readClipboardImage', async () => readClipboardImage(clipboard, nativeImage));
 
   on('writeClipboardImage', (dataUrl) => {
-    if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) return;
-    const image = nativeImage.createFromDataURL(dataUrl);
-    if (!image.isEmpty()) clipboard.writeImage(image);
+    writeClipboardImage(clipboard, nativeImage, dataUrl).catch((err) => console.warn('clipboard image write failed', err));
   });
 
   // ---- file watching ---------------------------------------------------------------------------
