@@ -157,51 +157,57 @@ function gaussKernel(sigma) {
   return k;
 }
 
+/** Horizontal pass of a symmetric kernel k (2K + 1 taps), edges replicated. */
 function convolveH(src, dst, w, h, k, K) {
-  const stride = w * 4, taps = 2 * K + 1;
+  const stride = w * 4, kc = k[K];
   for (let y = 0; y < h; y++) {
     const row = y * stride;
     for (let x = 0; x < w; x++) {
-      let r = 0, g = 0, b = 0, a = 0;
+      const ci = row + x * 4;
+      let r, g, b, a;
       if (x >= K && x + K < w) {
-        for (let j = 0, i = row + (x - K) * 4; j < taps; j++, i += 4) {
-          const wt = k[j];
-          r += src[i] * wt;
-          g += src[i + 1] * wt;
-          b += src[i + 2] * wt;
-          a += src[i + 3] * wt;
+        r = src[ci] * kc;
+        g = src[ci + 1] * kc;
+        b = src[ci + 2] * kc;
+        a = src[ci + 3] * kc;
+        for (let j = 1, lo = ci - 4, hi = ci + 4; j <= K; j++, lo -= 4, hi += 4) {
+          const wt = k[K + j];
+          r += (src[lo] + src[hi]) * wt;
+          g += (src[lo + 1] + src[hi + 1]) * wt;
+          b += (src[lo + 2] + src[hi + 2]) * wt;
+          a += (src[lo + 3] + src[hi + 3]) * wt;
         }
       } else {
-        for (let j = 0; j < taps; j++) {
-          let xx = x + j - K;
+        r = g = b = a = 0;
+        for (let j = -K; j <= K; j++) {
+          let xx = x + j;
           xx = xx < 0 ? 0 : xx >= w ? w - 1 : xx;
-          const i = row + xx * 4, wt = k[j];
+          const i = row + xx * 4, wt = k[j + K];
           r += src[i] * wt;
           g += src[i + 1] * wt;
           b += src[i + 2] * wt;
           a += src[i + 3] * wt;
         }
       }
-      const o = row + x * 4;
-      dst[o] = r;
-      dst[o + 1] = g;
-      dst[o + 2] = b;
-      dst[o + 3] = a;
+      dst[ci] = r;
+      dst[ci + 1] = g;
+      dst[ci + 2] = b;
+      dst[ci + 3] = a;
     }
   }
 }
 
+/** Vertical pass of a symmetric kernel: whole rows at a time into a float64 accumulator (cache friendly). */
 function convolveV(src, dst, w, h, k, K) {
-  const stride = w * 4;
+  const stride = w * 4, kc = k[K], acc = new Float64Array(stride);
   for (let y = 0; y < h; y++) {
-    const o = y * stride;
-    dst.fill(0, o, o + stride);
-    for (let j = -K; j <= K; j++) {
-      let yy = y + j;
-      yy = yy < 0 ? 0 : yy >= h ? h - 1 : yy;
-      const s = yy * stride, wt = k[j + K];
-      for (let i = 0; i < stride; i++) dst[o + i] += src[s + i] * wt;
+    const c = y * stride;
+    for (let i = 0; i < stride; i++) acc[i] = src[c + i] * kc;
+    for (let j = 1; j <= K; j++) {
+      const sa = (y - j < 0 ? 0 : y - j) * stride, sb = (y + j >= h ? h - 1 : y + j) * stride, wt = k[K + j];
+      for (let i = 0; i < stride; i++) acc[i] += (src[sa + i] + src[sb + i]) * wt;
     }
+    for (let i = 0; i < stride; i++) dst[c + i] = acc[i];
   }
 }
 
@@ -244,23 +250,20 @@ function boxH(src, dst, w, h, rad) {
 
 /** Vertical box (same weights as boxH), running sums per column processed row by row (cache friendly). */
 function boxV(src, dst, w, h, rad) {
-  const n = Math.floor(rad), f = rad - n, norm = 1 / (2 * n + 1 + 2 * f), stride = w * 4, last = h - 1;
+  const n = Math.floor(rad), f = rad - n, norm = 1 / (2 * n + 1 + 2 * f), fw = f * norm, stride = w * 4, last = h - 1;
   const acc = new Float64Array(stride);
   for (let j = -n; j <= n; j++) {
     const s = (j < 0 ? 0 : j > last ? last : j) * stride;
     for (let i = 0; i < stride; i++) acc[i] += src[s + i];
   }
   for (let y = 0; y < h; y++) {
-    const o = y * stride;
-    const ya = y + n + 1, yr = y - n;
-    const sa = (ya > last ? last : ya) * stride, sr = (yr < 0 ? 0 : yr) * stride;
-    if (f > 0) {
-      const yo = y - n - 1, so = (yo < 0 ? 0 : yo) * stride;
-      for (let i = 0; i < stride; i++) dst[o + i] = (acc[i] + f * (src[so + i] + src[sa + i])) * norm;
-    } else {
-      for (let i = 0; i < stride; i++) dst[o + i] = acc[i] * norm;
+    const o = y * stride, ya = y + n + 1, yr = y - n, yo = y - n - 1;
+    const sa = (ya > last ? last : ya) * stride, sr = (yr < 0 ? 0 : yr) * stride, so = (yo < 0 ? 0 : yo) * stride;
+    for (let i = 0; i < stride; i++) {
+      const s = acc[i], va = src[sa + i];
+      dst[o + i] = s * norm + (src[so + i] + va) * fw;
+      acc[i] = s + va - src[sr + i];
     }
-    for (let i = 0; i < stride; i++) acc[i] += src[sa + i] - src[sr + i];
   }
 }
 
@@ -310,31 +313,38 @@ function blurredRegion(img, r, sigma) {
   return { g, f };
 }
 
-/** Adds s * bilinear(src at fx, fy) to dst[o..o+3]; coordinates clamped to the buffer. */
-function bilerpAdd(src, w, h, fx, fy, dst, o, s) {
-  if (!(fx > 0)) fx = 0;
-  else if (fx > w - 1) fx = w - 1;
-  if (!(fy > 0)) fy = 0;
-  else if (fy > h - 1) fy = h - 1;
-  const x0 = fx | 0, y0 = fy | 0, tx = fx - x0, ty = fy - y0;
-  const x1 = x0 + 1 < w ? x0 + 1 : x0, y1 = y0 + 1 < h ? y0 + 1 : y0;
-  const i00 = (y0 * w + x0) * 4, i10 = (y0 * w + x1) * 4, i01 = (y1 * w + x0) * 4, i11 = (y1 * w + x1) * 4;
-  const w00 = (1 - tx) * (1 - ty) * s, w10 = tx * (1 - ty) * s, w01 = (1 - tx) * ty * s, w11 = tx * ty * s;
-  dst[o] += src[i00] * w00 + src[i10] * w10 + src[i01] * w01 + src[i11] * w11;
-  dst[o + 1] += src[i00 + 1] * w00 + src[i10 + 1] * w10 + src[i01 + 1] * w01 + src[i11 + 1] * w11;
-  dst[o + 2] += src[i00 + 2] * w00 + src[i10 + 2] * w10 + src[i01 + 2] * w01 + src[i11 + 2] * w11;
-  dst[o + 3] += src[i00 + 3] * w00 + src[i10 + 3] * w10 + src[i01 + 3] * w01 + src[i11 + 3] * w11;
-}
-
-/** dst(p) = (src(m1 p) + src(m2 p)) / 2 for 2x3 affine maps m1, m2 (bilinear, clamped). */
+/**
+ * dst(p) = (src(m1 p) + src(m2 p)) / 2 for 2x3 affine maps m1, m2: bilinear on the (premultiplied)
+ * float buffer, coordinates clamped to it. The sampling is written out inline (no helper call per
+ * sample: passing doubles to a non-inlined function boxes them).
+ */
 function affinePair(src, dst, w, h, m1, m2) {
-  const a0 = m1[0], a1 = m1[1], a2 = m1[2], a3 = m1[3], a4 = m1[4], a5 = m1[5];
-  const b0 = m2[0], b1 = m2[1], b2 = m2[2], b3 = m2[3], b4 = m2[4], b5 = m2[5];
+  const xm = w - 1, ym = h - 1;
   for (let y = 0, o = 0; y < h; y++) {
-    for (let x = 0; x < w; x++, o += 4) {
-      dst[o] = dst[o + 1] = dst[o + 2] = dst[o + 3] = 0;
-      bilerpAdd(src, w, h, a0 * x + a1 * y + a2, a3 * x + a4 * y + a5, dst, o, 0.5);
-      bilerpAdd(src, w, h, b0 * x + b1 * y + b2, b3 * x + b4 * y + b5, dst, o, 0.5);
+    // both maps are affine: step along the row by their x columns
+    let ax = m1[1] * y + m1[2], ay = m1[4] * y + m1[5], bx = m2[1] * y + m2[2], by = m2[4] * y + m2[5];
+    const adx = m1[0], ady = m1[3], bdx = m2[0], bdy = m2[3];
+    for (let x = 0; x < w; x++, o += 4, ax += adx, ay += ady, bx += bdx, by += bdy) {
+      let r = 0, g = 0, b = 0, a = 0;
+      for (let s = 0; s < 2; s++) {
+        let fx = s ? bx : ax, fy = s ? by : ay;
+        if (!(fx > 0)) fx = 0;
+        else if (fx > xm) fx = xm;
+        if (!(fy > 0)) fy = 0;
+        else if (fy > ym) fy = ym;
+        const x0 = fx | 0, y0 = fy | 0, tx = fx - x0, ty = fy - y0;
+        const i00 = (y0 * w + x0) * 4, dx = x0 < xm ? 4 : 0, dy = y0 < ym ? w * 4 : 0;
+        const i10 = i00 + dx, i01 = i00 + dy, i11 = i01 + dx;
+        const w00 = (1 - tx) * (1 - ty), w10 = tx * (1 - ty), w01 = (1 - tx) * ty, w11 = tx * ty;
+        r += src[i00] * w00 + src[i10] * w10 + src[i01] * w01 + src[i11] * w11;
+        g += src[i00 + 1] * w00 + src[i10 + 1] * w10 + src[i01 + 1] * w01 + src[i11 + 1] * w11;
+        b += src[i00 + 2] * w00 + src[i10 + 2] * w10 + src[i01 + 2] * w01 + src[i11 + 2] * w11;
+        a += src[i00 + 3] * w00 + src[i10 + 3] * w10 + src[i01 + 3] * w01 + src[i11 + 3] * w11;
+      }
+      dst[o] = r * 0.5;
+      dst[o + 1] = g * 0.5;
+      dst[o + 2] = b * 0.5;
+      dst[o + 3] = a * 0.5;
     }
   }
 }

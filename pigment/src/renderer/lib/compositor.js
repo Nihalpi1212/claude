@@ -6,6 +6,7 @@ import { createCanvas, intersectRect, unionRect } from './document.js';
 import { CANVAS_BLEND, blendImages } from '../../shared/pixels/blend.js';
 import { applyAdjustment } from '../../shared/pixels/adjust.js';
 import { applyStyles, stylePadding } from '../../shared/pixels/styles.js';
+import { resolvePattern } from './patterns.js';
 
 const SIMPLE_OVER = new Set(['normal', 'pass-through']);
 
@@ -176,7 +177,16 @@ export class Compositor {
     if (cached && cached.version === layer.version && cached.source === canvas && cached.angle === angle && cached.altitude === altitude) return cached;
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const out = applyStyles(img, layer.styles, { fillOpacity: layer.fillOpacity ?? 1, globalAngle: angle, globalAltitude: altitude });
+    let styles = layer.styles;
+    const po = styles.patternOverlay;
+    if (po?.enabled && typeof po.pattern === 'string') {
+      const data = resolvePattern(po.pattern, () => {
+        layer.touch();
+        doc?.changed('pixels', { layer });
+      });
+      styles = { ...styles, patternOverlay: { ...po, pattern: data, enabled: !!data } };
+    }
+    const out = applyStyles(img, styles, { fillOpacity: layer.fillOpacity ?? 1, globalAngle: angle, globalAltitude: altitude });
     const result = createCanvas(out.image.width, out.image.height);
     result.getContext('2d').putImageData(new ImageData(out.image.data, out.image.width, out.image.height), 0, 0);
     const entry = { version: layer.version, source: canvas, canvas: result, x: x + out.offsetX, y: y + out.offsetY, angle, altitude };
