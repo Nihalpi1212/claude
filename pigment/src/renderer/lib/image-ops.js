@@ -35,6 +35,9 @@ export function affineCanvas(src, sx, sy, m, { smooth = true, clip = null } = {}
   ctx.imageSmoothingQuality = 'high';
   ctx.setTransform(m[0], m[1], m[2], m[3], m[4] - out.x, m[5] - out.y);
   ctx.drawImage(src, sx, sy);
+  // the canvas becomes a layer canvas: leave its context in the default state
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.imageSmoothingEnabled = true;
   return { canvas: c, x: out.x, y: out.y };
 }
 
@@ -274,6 +277,10 @@ function remapDocument(app, label, spec) {
     if (spec.extend) extendBackground(root, d, spec, W, H);
     d.selection = d.selection && !d.selection.isEmpty && spec.keepSelection !== false ? Selection.fromMask(W, H, mapAlpha(d.selection.mask)) : null;
     if (d.selection?.isEmpty) d.selection = null;
+    // Reselect must bring back a selection of the new geometry
+    const saved = d.savedSelection;
+    d.savedSelection = saved && !saved.isEmpty && saved.width === d.width && saved.height === d.height ? Selection.fromMask(W, H, mapAlpha(saved.mask)) : null;
+    if (d.savedSelection?.isEmpty) d.savedSelection = null;
     d.guides = d.guides.map(mapGuide).filter(Boolean);
     d.channels = d.channels.map((ch) => ({ ...ch, mask: mapAlpha(ch.mask) }));
     d.paths = d.paths.map((p) => ({ ...p, path: mapPath(p.path, point) }));
@@ -540,9 +547,39 @@ export function install(app) {
     remapDocument(app, 'Canvas size', { width: W, height: H, matrix: [1, 0, 0, 1, dx, dy], mode: 'translate', clip: W < d.width || H < d.height ? app.settings.cropDeletes !== false : false, extend: opts.color ?? null });
   }
 
+  function rotateArbitrary(deg) {
+    const d = doc();
+    const W = d.width, H = d.height;
+    const n = ((deg % 360) + 360) % 360;
+    if (!n) return;
+    if (n === 90 || n === 180 || n === 270) return rotateCanvas(n === 90 ? 90 : n === 180 ? 180 : -90);
+    const rad = (deg * Math.PI) / 180;
+    const r = T.matrixFrom({ rotate: rad, origin: [W / 2, H / 2] });
+    const b = T.transformBounds(r, { x: 0, y: 0, width: W, height: H });
+    const m = T.multiplyMatrix([1, 0, 0, 1, -b.x, -b.y], r);
+    return remapDocument(app, 'Rotate canvas', { width: b.width, height: b.height, matrix: m, mode: 'affine' });
+  }
+
+  /** Rotates the active layer(s) by deg (clockwise) around their centre, as one transform. */
+  function rotateLayer(deg) {
+    const tt = transformTool;
+    if (!tt.canStart() || !deg) return false;
+    tt.start({ mode: 'free' });
+    const s = tt.session;
+    if (!s) return false;
+    s.quad = quadFromMatrix(s.box, T.matrixFrom({ rotate: (deg * Math.PI) / 180, origin: s.pivot }));
+    tt.commit();
+    return true;
+  }
+
   async function rotateCanvas(kind) {
     const d = doc();
     const W = d.width, H = d.height;
+    if (kind && typeof kind === 'object') {
+      // { angle, layerOnly } from the ruler's Straighten button
+      if (!Number.isFinite(kind.angle)) return;
+      return kind.layerOnly ? rotateLayer(kind.angle) : rotateArbitrary(kind.angle);
+    }
     if (kind === 'arbitrary') {
       const o = await formDialog(app, {
         title: 'Rotate Canvas',
@@ -552,14 +589,7 @@ export function install(app) {
         ],
       });
       if (!o || !o.angle) return;
-      const deg = o.dir === 'ccw' ? -o.angle : o.angle;
-      const n = ((deg % 360) + 360) % 360;
-      if (n === 90 || n === 180 || n === 270) return rotateCanvas(n === 90 ? 90 : n === 180 ? 180 : -90);
-      const rad = (deg * Math.PI) / 180;
-      const r = T.matrixFrom({ rotate: rad, origin: [W / 2, H / 2] });
-      const b = T.transformBounds(r, { x: 0, y: 0, width: W, height: H });
-      const m = T.multiplyMatrix([1, 0, 0, 1, -b.x, -b.y], r);
-      return remapDocument(app, 'Rotate canvas', { width: b.width, height: b.height, matrix: m, mode: 'affine' });
+      return rotateArbitrary(o.dir === 'ccw' ? -o.angle : o.angle);
     }
     const specs = {
       90: { w: H, h: W, m: [0, 1, -1, 0, H, 0], label: 'Rotate 90° clockwise' },
@@ -1036,8 +1066,10 @@ export class TransformTool extends Tool {
       };
       // masks follow affine transforms (perspective leaves them in place)
       const mapMask = (mask) => (m ? transformMaskCanvas(mask, m, d.width, d.height, { smooth: !s.exact }) : mask);
+      // selection masks: an axis-aligned scale keeps hard edges hard (no bilinear halo)
+      const renderMask = (c) => (m && isAxisAligned(m) ? affineCanvas(c, 0, 0, m, { smooth: false }) : render(c, 0, 0));
       if (s.selectionOnly) {
-        const r = render(s.selCanvas, 0, 0);
+        const r = renderMask(s.selCanvas);
         const c = createCanvas(d.width, d.height);
         c.getContext('2d').drawImage(r.canvas, r.x, r.y);
         const sel = Selection.fromMask(d.width, d.height, canvasAlpha(c));
@@ -1056,7 +1088,7 @@ export class TransformTool extends Tool {
             return { canvas: c, x: b.x, y: b.y };
           });
           // the selection follows the pixels
-          const sr = render(alphaCanvas(f.selection.mask, d.width, d.height), 0, 0);
+          const sr = renderMask(alphaCanvas(f.selection.mask, d.width, d.height));
           const sc = createCanvas(d.width, d.height);
           sc.getContext('2d').drawImage(sr.canvas, sr.x, sr.y);
           const before = d.selection, after = Selection.fromMask(d.width, d.height, canvasAlpha(sc));

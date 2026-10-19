@@ -51,7 +51,8 @@ export class Tool {
     const doc = this.doc;
     const layer = doc?.active;
     if (!layer) return null;
-    if (layer.isGroup) {
+    if (layer.isGroup && !(this.app.ui.editingMask && layer.mask?.canvas)) {
+      // a group's own mask can be painted; its pixels cannot
       if (!quiet) this.app.dialogs.toast('Select a layer, not a group', { kind: 'error', timeout: 1800 });
       return null;
     }

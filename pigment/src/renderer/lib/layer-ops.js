@@ -48,7 +48,7 @@ export function restoreTree(doc, snap) {
  */
 export function structural(app, label, mutate, doc = app.doc, { bytes = 0 } = {}) {
   const before = snapshotTree(doc);
-  const extras = () => ({ selection: doc.selection, guides: doc.guides.slice(), channels: doc.channels.slice(), paths: doc.paths.slice(), workPath: doc.workPath ?? null, dpi: doc.dpi });
+  const extras = () => ({ selection: doc.selection, savedSelection: doc.savedSelection ?? null, guides: doc.guides.slice(), channels: doc.channels.slice(), paths: doc.paths.slice(), workPath: doc.workPath ?? null, dpi: doc.dpi });
   const extraBefore = extras();
   const result = mutate();
   if (result === false) return false;
@@ -57,6 +57,7 @@ export function structural(app, label, mutate, doc = app.doc, { bytes = 0 } = {}
   const apply = (snap, extra) => {
     restoreTree(doc, snap);
     doc.selection = extra.selection;
+    doc.savedSelection = extra.savedSelection;
     doc.guides = extra.guides.slice();
     doc.channels = extra.channels.slice();
     doc.paths = extra.paths.slice();

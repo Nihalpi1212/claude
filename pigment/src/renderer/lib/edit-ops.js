@@ -7,7 +7,7 @@ import { Selection, selectionOps } from './selection.js';
 import { flattenDocument } from './compositor.js';
 import { structural, nextLayerName } from './layer-ops.js';
 import { decodeImage, baseName, OPEN_FILTERS } from './io.js';
-import { CANVAS_BLEND } from '../../shared/pixels/blend.js';
+import { drawBlended, drawOnMask } from './brush.js';
 import { BLEND_MODES } from './document.js';
 import { formDialog } from './form.js';
 
@@ -180,11 +180,13 @@ export function install(app) {
     }
     const layer = new RasterLayer({ name: nextLayerName(d), canvas, x, y });
     if (into && hasSel()) layer.mask = { canvas: copyCanvas(d.selection.toCanvas()), enabled: true, linked: false };
-    structural(app, into ? 'Paste into' : 'Paste', () => {
-      d.add(layer);
-      d.setActive(layer);
+    d.history.group(into ? 'Paste into' : 'Paste', () => {
+      structural(app, into ? 'Paste into' : 'Paste', () => {
+        d.add(layer);
+        d.setActive(layer);
+      });
+      if (into) app.applySelection(null, 'replace', 'Deselect');
     });
-    if (into) app.applySelection(null, 'replace', 'Deselect');
     app.setEditingMask(false);
   }
 
@@ -247,11 +249,8 @@ export function install(app) {
     }
     const local = { x: area.x - target.x, y: area.y - target.y, width: area.width, height: area.height };
     d.history.pixels('Fill', target.canvas, local, (ctx) => {
-      ctx.save();
-      ctx.globalAlpha = (opts.opacity ?? 100) / 100;
-      ctx.globalCompositeOperation = opts.preserve && !t.mask ? 'source-atop' : CANVAS_BLEND[opts.blend ?? 'normal'] ?? 'source-over';
-      ctx.drawImage(fill, local.x, local.y);
-      ctx.restore();
+      if (t.mask) drawOnMask(ctx, fill, local.x, local.y, (opts.opacity ?? 100) / 100);
+      else drawBlended(ctx, fill, local.x, local.y, opts.blend ?? 'normal', (opts.opacity ?? 100) / 100, { lockTransparency: !!opts.preserve });
     }, { layer: t.layer, kind: t.mask ? 'mask' : 'pixels' });
   }
 
@@ -276,7 +275,7 @@ export function install(app) {
     const inner = opts.location === 'inside' ? w : opts.location === 'center' ? w / 2 : 0;
     const outer = opts.location === 'outside' ? w : opts.location === 'center' ? w / 2 : 0;
     const grown = outer > 0 ? sel.expand(Math.ceil(outer)) : sel;
-    const shrunk = inner > 0 ? sel.contract(Math.ceil(inner)) : sel;
+    const shrunk = inner > 0 ? contractWithinCanvas(sel, Math.ceil(inner)) : sel;
     const ring = new Selection(d.width, d.height, selectionOps.combineMasks(grown.mask, shrunk.mask, 'subtract'));
     const b = ring.bounds;
     if (!b) return;
@@ -290,12 +289,21 @@ export function install(app) {
     fctx.drawImage(ring.toCanvas(), -b.x, -b.y);
     const local = { x: b.x - target.x, y: b.y - target.y, width: b.width, height: b.height };
     d.history.pixels('Stroke', target.canvas, local, (ctx) => {
-      ctx.save();
-      ctx.globalAlpha = opts.opacity / 100;
-      ctx.globalCompositeOperation = CANVAS_BLEND[opts.blend] ?? 'source-over';
-      ctx.drawImage(fill, local.x, local.y);
-      ctx.restore();
+      if (t.mask) drawOnMask(ctx, fill, local.x, local.y, opts.opacity / 100);
+      else drawBlended(ctx, fill, local.x, local.y, opts.blend ?? 'normal', opts.opacity / 100, { lockTransparency: !!t.layer.locked.transparency });
     }, { layer: t.layer, kind: t.mask ? 'mask' : 'pixels' });
+  }
+
+  /** Contracts a selection treating the canvas edge as selection edge (so Select All + Stroke Inside frames the image). */
+  function contractWithinCanvas(sel, px) {
+    const w = sel.width, h = sel.height, k = px;
+    const W = w + 2 * k, H = h + 2 * k;
+    const pad = new Uint8ClampedArray(W * H);
+    for (let y = 0; y < h; y++) pad.set(sel.mask.subarray(y * w, (y + 1) * w), (y + k) * W + k);
+    const c = selectionOps.contract(pad, W, H, k);
+    const out = new Uint8ClampedArray(w * h);
+    for (let y = 0; y < h; y++) out.set(c.subarray((y + k) * W + k, (y + k) * W + k + w), y * w);
+    return new Selection(w, h, out);
   }
 
   // ---- place --------------------------------------------------------------------------------------------------
@@ -430,10 +438,12 @@ export function install(app) {
     if (d.layers().includes(layer)) d.remove(layer);
     if (previous && d.layers().includes(previous)) d.setActive(previous);
     if (app.doc === d) app.statusbar.clear('target');
+    // the parked selection comes back as the "before" state so undo restores it
+    d.selection = state.selection ?? null;
     if (apply && mask) {
       const sel = Selection.fromMask(d.width, d.height, mask);
       app.applySelection(sel.isEmpty ? null : sel, 'replace', 'Quick mask');
-    }
+    } else d.changed('selection');
     app.commands.invalidate();
   }
 
@@ -478,9 +488,12 @@ export function install(app) {
       octx.drawImage(tint, 0, 0);
       octx.restore();
     });
-    const state = { layer, previous: d.active, overlay, unsubscribe: () => {} };
+    const state = { layer, previous: d.active, overlay, unsubscribe: () => {}, selection: d.selection };
     quickMasks.set(d, state);
     view.quickMask = layer;
+    // painting edits the whole mask: the selection must not clip it while quick mask is on
+    d.selection = null;
+    d.changed('selection');
     d.add(layer, d.root, d.root.children.length);
     d.setActive(layer);
     state.unsubscribe = d.onChange((e) => {
@@ -566,7 +579,10 @@ export function install(app) {
     'edit:select-all': { run: () => app.commands.run('select:all', undefined, 'api') },
     'select:none': { enabled: hasSel, run: () => app.applySelection(null, 'replace', 'Deselect') },
     'select:reselect': {
-      enabled: () => !!app.doc?.savedSelection,
+      enabled: () => {
+        const d = app.doc, sv = d?.savedSelection;
+        return !!sv && sv.width === d.width && sv.height === d.height;
+      },
       run: () => app.applySelection(doc().savedSelection.clone(), 'replace', 'Reselect'),
     },
     'select:inverse': { enabled: has, run: () => app.applySelection(hasSel() ? doc().selection.invert() : Selection.all(doc().width, doc().height), 'replace', 'Inverse') },

@@ -35,9 +35,13 @@ test('every toolbox tool activates and renders its options', async ({ page }) =>
     await page.evaluate((t) => window.pigmentApp.tools.activate(t), id);
     await expect(page.locator('#options-bar .options-title')).toBeVisible();
   }
-  // tool shortcuts: B brush, Shift+B cycles inside the slot, M marquee
+  // tool shortcuts: B picks the brush slot's current tool (never cycles), Shift+B cycles inside the slot, M marquee
+  await page.evaluate(() => window.pigmentApp.tools.activate('brush'));
+  await page.evaluate(() => window.pigmentApp.tools.activate('move'));
   await page.locator('canvas.view').click({ position: { x: 5, y: 5 } }).catch(() => {});
   await page.keyboard.press('Escape');
+  await page.keyboard.press('b');
+  expect(await page.evaluate(() => window.pigmentApp.tools.active.id)).toBe('brush');
   await page.keyboard.press('b');
   expect(await page.evaluate(() => window.pigmentApp.tools.active.id)).toBe('brush');
   await page.keyboard.press('Shift+B');

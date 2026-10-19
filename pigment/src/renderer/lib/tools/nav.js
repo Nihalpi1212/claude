@@ -151,8 +151,8 @@ export class EyedropperTool extends Tool {
       a += al;
       w++;
     }
-    if (!w) return null;
-    const color = a > 0 ? [r / a, g / a, b / a, a / w] : [0, 0, 0, 0];
+    if (!w || a <= 0) return null; // fully transparent: keep the current colour, like Photoshop
+    const color = [r / a, g / a, b / a, a / w];
     const hex = rgbaToHex(color);
     // the ring shows the colour before this drag started next to the sampled one
     const previous = this.ring?.previous ?? (setBackground ? this.app.settings.background : this.app.settings.foreground);

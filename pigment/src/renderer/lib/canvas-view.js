@@ -171,10 +171,16 @@ export class CanvasView {
 
   /** Keeps at least a sliver of the document on screen. */
   clampPan() {
-    const w = this.doc.width * this.zoom, h = this.doc.height * this.zoom;
     const margin = 40;
-    this.panX = Math.min(this.cssWidth - margin, Math.max(margin - w, this.panX));
-    this.panY = Math.min(this.cssHeight - margin, Math.max(margin - h, this.panY));
+    const W = this.doc.width, H = this.doc.height;
+    // screen box of the (possibly rotated) document
+    const pts = [[0, 0], [W, 0], [0, H], [W, H]].map(([x, y]) => this.toScreen(x, y));
+    const minX = Math.min(...pts.map((p) => p.x)), maxX = Math.max(...pts.map((p) => p.x));
+    const minY = Math.min(...pts.map((p) => p.y)), maxY = Math.max(...pts.map((p) => p.y));
+    if (maxX < margin) this.panX += margin - maxX;
+    else if (minX > this.cssWidth - margin) this.panX -= minX - (this.cssWidth - margin);
+    if (maxY < margin) this.panY += margin - maxY;
+    else if (minY > this.cssHeight - margin) this.panY -= minY - (this.cssHeight - margin);
   }
 
   setRotation(deg) {
@@ -368,27 +374,41 @@ export class CanvasView {
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.strokeStyle = '#1ec8ff';
     ctx.lineWidth = 1;
-    for (const g of this.doc.guides) {
+    const guides = this.guideDrag ? [...this.doc.guides, { axis: this.guideDrag.axis, pos: this.guideDrag.pos }] : this.doc.guides;
+    for (const g of guides) {
       ctx.beginPath();
-      if (g.axis === 'x') {
-        const a = this.toScreen(g.pos, 0), b = this.toScreen(g.pos, this.doc.height);
-        ctx.moveTo(Math.round(a.x) + 0.5, 0);
-        ctx.lineTo(Math.round(b.x) + 0.5, this.cssHeight);
-      } else {
-        const a = this.toScreen(0, g.pos);
-        ctx.moveTo(0, Math.round(a.y) + 0.5);
-        ctx.lineTo(this.cssWidth, Math.round(a.y) + 0.5);
-      }
+      this.guideLine(ctx, g);
       ctx.stroke();
     }
     ctx.restore();
+  }
+
+  /** Adds the screen-space line of a guide (through the view's rotation) to the current path. */
+  guideLine(ctx, g) {
+    const a = g.axis === 'x' ? this.toScreen(g.pos, 0) : this.toScreen(0, g.pos);
+    const b = g.axis === 'x' ? this.toScreen(g.pos, this.doc.height) : this.toScreen(this.doc.width, g.pos);
+    if (!this.rotation) {
+      if (g.axis === 'x') {
+        ctx.moveTo(Math.round(a.x) + 0.5, 0);
+        ctx.lineTo(Math.round(a.x) + 0.5, this.cssHeight);
+      } else {
+        ctx.moveTo(0, Math.round(a.y) + 0.5);
+        ctx.lineTo(this.cssWidth, Math.round(a.y) + 0.5);
+      }
+      return;
+    }
+    const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+    const ux = (b.x - a.x) / len, uy = (b.y - a.y) / len;
+    const reach = (this.cssWidth + this.cssHeight) * 2;
+    ctx.moveTo(a.x - ux * reach, a.y - uy * reach);
+    ctx.lineTo(a.x + ux * reach, a.y + uy * reach);
   }
 
   paintRulers() {
     if (!this.rulersVisible) return;
     const dpr = this.dpr;
     const unit = this.app.settings.rulerUnit ?? 'px';
-    const perUnit = { px: 1, in: this.doc.dpi, cm: this.doc.dpi / 2.54, mm: this.doc.dpi / 25.4, pt: this.doc.dpi / 72, percent: this.doc.width / 100 }[unit] ?? 1;
+    const perUnitFor = (horizontal) => ({ px: 1, in: this.doc.dpi, cm: this.doc.dpi / 2.54, mm: this.doc.dpi / 25.4, pt: this.doc.dpi / 72, percent: (horizontal ? this.doc.width : this.doc.height) / 100 }[unit] ?? 1);
     const style = getComputedStyle(this.el);
     const bg = style.getPropertyValue('--bg-elevated') || '#eee';
     const fg = style.getPropertyValue('--fg-muted') || '#666';
@@ -406,7 +426,7 @@ export class CanvasView {
       c.strokeStyle = fg;
       c.font = '9px system-ui, sans-serif';
       c.textBaseline = 'top';
-      const pxPerUnit = perUnit * this.zoom;
+      const pxPerUnit = perUnitFor(horizontal) * this.zoom;
       // choose a tick step so labels are >= 50px apart
       const candidates = unit === 'px' ? [1, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000] : [0.1, 0.25, 0.5, 1, 2, 5, 10, 25, 50, 100, 250, 500, 1000];
       const major = candidates.find((s) => s * pxPerUnit >= 50) ?? candidates[candidates.length - 1];
@@ -467,11 +487,44 @@ export class CanvasView {
       const r = canvas.getBoundingClientRect();
       const sx = e.clientX - r.left, sy = e.clientY - r.top;
       const d = this.toDoc(sx, sy);
-      return { x: d.x, y: d.y, screenX: sx, screenY: sy, pressure: e.pressure || (e.pointerType === 'mouse' ? 1 : e.pressure), tiltX: e.tiltX, tiltY: e.tiltY, buttons: e.buttons, button: e.button, shift: e.shiftKey, alt: e.altKey, ctrl: e.ctrlKey, meta: e.metaKey, pointerType: e.pointerType, original: e };
+      return { x: d.x, y: d.y, screenX: sx, screenY: sy, pressure: e.pointerType === 'pen' && e.pressure > 0 ? e.pressure : 1, tiltX: e.tiltX, tiltY: e.tiltY, buttons: e.buttons, button: e.button, shift: e.shiftKey, alt: e.altKey, ctrl: e.ctrlKey, meta: e.metaKey, pointerType: e.pointerType, original: e };
     };
     let dragging = false;
     let handDrag = null;
     const currentTool = () => this.tempTool ?? this.app.tools?.active;
+    // dragging out of a ruler creates a guide (released over the canvas) at the pointer position
+    for (const [ruler, axis] of [[this.rulerH, 'y'], [this.rulerV, 'x']]) {
+      const docPos = (e) => {
+        const r = canvas.getBoundingClientRect();
+        const d = this.toDoc(e.clientX - r.left, e.clientY - r.top);
+        return Math.round(d[axis] * 100) / 100;
+      };
+      ruler.style.cursor = axis === 'y' ? 'row-resize' : 'col-resize';
+      ruler.addEventListener('pointerdown', (e) => {
+        if (e.button !== 0) return;
+        ruler.setPointerCapture(e.pointerId);
+        this.guideDrag = { axis, pos: docPos(e), active: false };
+        e.preventDefault();
+      });
+      ruler.addEventListener('pointermove', (e) => {
+        if (!this.guideDrag || this.guideDrag.axis !== axis) return;
+        const r = canvas.getBoundingClientRect();
+        this.guideDrag.active = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+        this.guideDrag.pos = docPos(e);
+        this.invalidate();
+      });
+      const finish = (e) => {
+        const g = this.guideDrag;
+        if (!g || g.axis !== axis) return;
+        this.guideDrag = null;
+        const r = canvas.getBoundingClientRect();
+        const over = e.type === 'pointerup' && e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+        if (over) this.app.commands.run('view:new-guide', { axis, pos: docPos(e) }, 'api');
+        this.invalidate();
+      };
+      ruler.addEventListener('pointerup', finish);
+      ruler.addEventListener('pointercancel', finish);
+    }
     canvas.addEventListener('pointerdown', (e) => {
       canvas.focus({ preventScroll: true });
       const p = norm(e);

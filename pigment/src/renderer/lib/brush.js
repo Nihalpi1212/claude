@@ -1,15 +1,15 @@
 // Brush engine (see ARCHITECTURE.md "Brush engine"): dabs along a smoothed path into a stroke
 // buffer, composited onto the target with opacity/flow/blend, clipped by the selection.
-import { CANVAS_BLEND } from '../../shared/pixels/blend.js';
+import { CANVAS_BLEND, blendImages } from '../../shared/pixels/blend.js';
 import { createCanvas } from './document.js';
 import { parseColor, rgbaToHex } from '../../shared/pixels/color.js';
 
 const dabCache = new Map();
 
 /** A soft or hard round dab canvas of the given diameter (cached). */
-export function dabCanvas(size, hardness, color = '#000000') {
+export function dabCanvas(size, hardness, color = '#000000', { aliased = false } = {}) {
   const d = Math.max(1, Math.ceil(size));
-  const key = `${d}|${Math.round(hardness * 100)}|${color}`;
+  const key = `${d}|${Math.round(hardness * 100)}|${color}|${aliased ? 'a' : 's'}`;
   let c = dabCache.get(key);
   if (c) return c;
   const pad = 1;
@@ -19,7 +19,11 @@ export function dabCanvas(size, hardness, color = '#000000') {
   const cx = r + pad, cy = r + pad;
   const [cr, cg, cb] = parseColor(color);
   const rgb = `${Math.round(cr)},${Math.round(cg)},${Math.round(cb)}`;
-  if (d <= 2) {
+  if (aliased) {
+    // pencil: whole pixels only, by pixel centre (pixel art needs fully opaque pixels at every size)
+    ctx.fillStyle = `rgb(${rgb})`;
+    for (let py = 0; py < d; py++) for (let px = 0; px < d; px++) if ((px + 0.5 - r) ** 2 + (py + 0.5 - r) ** 2 <= r * r) ctx.fillRect(px + pad, py + pad, 1, 1);
+  } else if (d <= 2) {
     ctx.fillStyle = `rgb(${rgb})`;
     ctx.beginPath();
     ctx.arc(cx, cy, r, 0, Math.PI * 2);
@@ -75,7 +79,6 @@ export class BrushStroke {
   get composite() {
     const { mode, blend } = this.s;
     if (mode === 'erase') return 'destination-out';
-    if (mode === 'mask') return this.s.maskValue >= 0.5 ? 'source-over' : 'destination-out';
     return CANVAS_BLEND[blend] ?? 'source-over';
   }
 
@@ -114,7 +117,8 @@ export class BrushStroke {
       this.dab(this.last.x + nx * t, this.last.y + ny * t, pr);
       travelled = t;
     }
-    this.distance = dist - travelled;
+    // carry the distance since the last dab across segments that placed none (slow strokes)
+    this.distance = travelled > 0 ? dist - travelled : this.distance + dist;
     this.last = { x: p.x, y: p.y, pressure: p.pressure };
     this.schedule();
   }
@@ -146,7 +150,7 @@ export class BrushStroke {
       tctx.drawImage(dab, 0, 0);
       ctx.drawImage(tmp, Math.round(x - half - 1), Math.round(y - half - 1));
     } else {
-      const dab = dabCanvas(size, this.s.antialias === false ? 1 : this.s.hardness, color);
+      const dab = dabCanvas(size, this.s.antialias === false ? 1 : this.s.hardness, color, { aliased: this.s.antialias === false });
       ctx.imageSmoothingEnabled = this.s.antialias !== false;
       if (this.s.angle || rx !== 1) {
         ctx.translate(x, y);
@@ -188,21 +192,53 @@ export class BrushStroke {
     ctx.clip();
     ctx.globalCompositeOperation = 'copy';
     ctx.drawImage(this.backup, rect.x, rect.y, rect.width, rect.height, rect.x, rect.y, rect.width, rect.height);
-    ctx.globalCompositeOperation = this.composite;
-    ctx.globalAlpha = this.s.opacity;
-    let src = this.buffer;
+    // the stroke so far, clipped by the selection, as a rect-sized canvas
+    let src = this.buffer, sx = rect.x, sy = rect.y;
     if (this.selection) {
       const tmp = createCanvas(rect.width, rect.height);
       const tctx = tmp.getContext('2d');
       tctx.drawImage(this.buffer, rect.x, rect.y, rect.width, rect.height, 0, 0, rect.width, rect.height);
       tctx.globalCompositeOperation = 'destination-in';
       tctx.drawImage(this.selection.toCanvas(), -(rect.x + this.target.x), -(rect.y + this.target.y));
-      ctx.drawImage(tmp, rect.x, rect.y);
-    } else ctx.drawImage(src, rect.x, rect.y, rect.width, rect.height, rect.x, rect.y, rect.width, rect.height);
-    if (this.s.lockTransparency) {
-      ctx.globalCompositeOperation = 'destination-in';
+      src = tmp;
+      sx = sy = 0;
+    }
+    const draw = (op, alpha) => {
+      ctx.globalCompositeOperation = op;
+      ctx.globalAlpha = alpha;
+      ctx.drawImage(src, sx, sy, rect.width, rect.height, rect.x, rect.y, rect.width, rect.height);
+    };
+    const { mode, blend, opacity } = this.s;
+    if (mode === 'mask') {
+      // mask value follows the paint's grey level: new = old * (1 - c) + value * c
+      draw('destination-out', opacity);
+      draw('lighter', opacity * Math.max(0, Math.min(1, this.s.maskValue ?? 1)));
+    } else if (mode === 'erase') {
+      draw('destination-out', opacity);
+    } else if (!CANVAS_BLEND[blend] && blend !== 'normal' && blend !== 'pass-through') {
+      // blend modes Canvas 2D lacks (linear burn, vivid light, hard mix, ...): per pixel
+      ctx.globalCompositeOperation = 'source-over';
       ctx.globalAlpha = 1;
-      ctx.drawImage(this.backup, rect.x, rect.y, rect.width, rect.height, rect.x, rect.y, rect.width, rect.height);
+      const dst = ctx.getImageData(rect.x, rect.y, rect.width, rect.height);
+      const srcData = src.getContext('2d', { willReadFrequently: true }).getImageData(sx, sy, rect.width, rect.height);
+      blendImages(blend, { width: rect.width, height: rect.height, data: srcData.data }, { width: rect.width, height: rect.height, data: dst.data }, opacity);
+      if (this.s.lockTransparency) {
+        const back = this.backup.getContext('2d', { willReadFrequently: true }).getImageData(rect.x, rect.y, rect.width, rect.height).data;
+        for (let i = 3; i < dst.data.length; i += 4) dst.data[i] = back[i];
+      }
+      ctx.putImageData(dst, rect.x, rect.y);
+    } else if (this.s.lockTransparency && (blend === 'normal' || !blend)) {
+      // only the colour changes: alpha stays exactly as it was
+      draw('source-atop', opacity);
+    } else {
+      draw(CANVAS_BLEND[blend] ?? 'source-over', opacity);
+      if (this.s.lockTransparency) {
+        // keep the alpha exactly as it was
+        const dst = ctx.getImageData(rect.x, rect.y, rect.width, rect.height);
+        const back = this.backup.getContext('2d', { willReadFrequently: true }).getImageData(rect.x, rect.y, rect.width, rect.height).data;
+        for (let i = 3; i < dst.data.length; i += 4) dst.data[i] = back[i];
+        ctx.putImageData(dst, rect.x, rect.y);
+      }
     }
     ctx.restore();
     this.layer?.touch();
@@ -231,4 +267,53 @@ function union(a, b) {
 function clip(r, w, h) {
   const x1 = Math.max(0, r.x), y1 = Math.max(0, r.y), x2 = Math.min(w, r.x + r.width), y2 = Math.min(h, r.y + r.height);
   return x2 > x1 && y2 > y1 ? { x: x1, y: y1, width: x2 - x1, height: y2 - y1 } : null;
+}
+
+/**
+ * Draws a fill canvas onto ctx at (x, y) with a Photoshop blend mode and opacity, per pixel when
+ * Canvas 2D has no equivalent. lockTransparency keeps the target's alpha.
+ */
+export function drawBlended(ctx, fill, x, y, blend = 'normal', opacity = 1, { lockTransparency = false } = {}) {
+  const op = CANVAS_BLEND[blend];
+  ctx.save();
+  if (!op && blend !== 'normal' && blend !== 'pass-through') {
+    const w = fill.width, h = fill.height;
+    const cw = ctx.canvas.width, ch = ctx.canvas.height;
+    const x0 = Math.max(0, x), y0 = Math.max(0, y), x1 = Math.min(cw, x + w), y1 = Math.min(ch, y + h);
+    if (x1 > x0 && y1 > y0) {
+      const dst = ctx.getImageData(x0, y0, x1 - x0, y1 - y0);
+      const srcData = fill.getContext('2d', { willReadFrequently: true }).getImageData(x0 - x, y0 - y, x1 - x0, y1 - y0);
+      const backAlpha = lockTransparency ? new Uint8ClampedArray(dst.data) : null;
+      blendImages(blend, { width: x1 - x0, height: y1 - y0, data: srcData.data }, { width: x1 - x0, height: y1 - y0, data: dst.data }, opacity);
+      if (backAlpha) for (let i = 3; i < dst.data.length; i += 4) dst.data[i] = backAlpha[i];
+      ctx.putImageData(dst, x0, y0);
+    }
+  } else {
+    ctx.globalAlpha = opacity;
+    ctx.globalCompositeOperation = lockTransparency ? 'source-atop' : op ?? 'source-over';
+    ctx.drawImage(fill, x, y);
+  }
+  ctx.restore();
+}
+
+/**
+ * Paints a fill onto a layer mask at (x, y): the fill's grey level becomes the mask value where it
+ * covers, new = old * (1 - c) + grey * c with c = fill alpha * opacity (black hides, white reveals).
+ */
+export function drawOnMask(ctx, fill, x, y, opacity = 1) {
+  const w = fill.width, h = fill.height;
+  const cw = ctx.canvas.width, ch = ctx.canvas.height;
+  const x0 = Math.max(0, x), y0 = Math.max(0, y), x1 = Math.min(cw, x + w), y1 = Math.min(ch, y + h);
+  if (x1 <= x0 || y1 <= y0) return;
+  const dst = ctx.getImageData(x0, y0, x1 - x0, y1 - y0);
+  const src = fill.getContext('2d', { willReadFrequently: true }).getImageData(x0 - x, y0 - y, x1 - x0, y1 - y0).data;
+  const d = dst.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const c = (src[i + 3] / 255) * opacity;
+    if (c <= 0) continue;
+    const grey = 0.299 * src[i] + 0.587 * src[i + 1] + 0.114 * src[i + 2];
+    d[i] = d[i + 1] = d[i + 2] = 255;
+    d[i + 3] = Math.round(d[i + 3] * (1 - c) + grey * c);
+  }
+  ctx.putImageData(dst, x0, y0);
 }

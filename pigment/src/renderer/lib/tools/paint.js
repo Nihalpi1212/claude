@@ -57,8 +57,15 @@ export class StrokeTool extends Tool {
       this.stroke.extend(p);
     }
   }
-  onPointerUp() {
+  onPointerUp(p) {
     if (!this.stroke) return;
+    if (p && !p.cancelled && Number.isFinite(p.x)) {
+      // smoothing lags behind the pointer: finish the stroke at the release point
+      const smoothing = this.stroke.s.smoothing;
+      this.stroke.s.smoothing = 0;
+      this.stroke.extend(p);
+      this.stroke.s.smoothing = smoothing;
+    }
     this.stroke.end();
     this.stroke = null;
   }

@@ -2,6 +2,7 @@
 // locks, drag-and-drop reordering and grouping, rename, context menu and the footer buttons.
 import { icon } from '../icons.js';
 import { BLEND_MODES } from '../document.js';
+import { Selection } from '../selection.js';
 
 const THUMB_W = 36, THUMB_H = 30;
 
@@ -229,6 +230,18 @@ export function install(app) {
         for (const id of ids.slice(lo, hi + 1)) doc.selected.add(doc.find(id));
         doc.active = layer;
         doc.changed('active', { layer });
+      } else if ((e.ctrlKey || e.metaKey) && e.target.closest('.layer-thumb') && !layer.isGroup && layer.type !== 'adjustment') {
+        // Ctrl-click a thumbnail: the layer's transparency (or its mask) as a selection
+        const fromMask = !!e.target.closest('.mask-thumb') && layer.mask?.canvas;
+        const mode = e.shiftKey && e.altKey ? 'intersect' : e.shiftKey ? 'add' : e.altKey ? 'subtract' : 'replace';
+        let sel = null;
+        if (fromMask) {
+          const a = layer.mask.canvas.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, doc.width, doc.height).data;
+          const m = new Uint8ClampedArray(doc.width * doc.height);
+          for (let i = 0; i < m.length; i++) m[i] = a[i * 4 + 3];
+          sel = Selection.fromMask(doc.width, doc.height, m);
+        } else sel = app.layerAlphaSelection?.(layer) ?? null;
+        if (sel) app.applySelection(sel, mode, 'Load selection');
       } else if (e.ctrlKey || e.metaKey) {
         if (doc.selected.has(layer) && doc.selected.size > 1) {
           doc.selected.delete(layer);

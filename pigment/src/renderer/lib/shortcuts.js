@@ -85,9 +85,14 @@ export function install(app) {
       }
       event.preventDefault();
       event.stopPropagation();
-      if (cmd.startsWith('tool:') && !app.commands.has(cmd) && toolKeys.has(event.key.toLowerCase())) {
-        app.tools.activateSlot(cmd.slice(5));
-        return;
+      if (plain && cmd.startsWith('tool:') && toolKeys.has(event.key.toLowerCase()) && app.tools) {
+        // a plain letter picks the slot's current tool and never cycles (Shift+letter cycles)
+        const slotId = toolKeys.get(event.key.toLowerCase());
+        const slot = app.tools.slots.find((s) => s.id === slotId) ?? app.tools.slots.find((s) => s.tools.includes(slotId));
+        if (slot) {
+          app.tools.activate(slot.current ?? slot.tools[0]);
+          return;
+        }
       }
       app.commands.run(cmd, undefined, 'key');
       return;

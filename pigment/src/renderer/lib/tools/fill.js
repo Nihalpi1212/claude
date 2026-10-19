@@ -5,7 +5,7 @@ import { selectionOps } from '../selection.js';
 import { flattenDocument } from '../compositor.js';
 import { createCanvas, makeGradient } from '../document.js';
 import { BLEND_MODES } from '../document.js';
-import { CANVAS_BLEND } from '../../../shared/pixels/blend.js';
+import { drawBlended, drawOnMask } from '../brush.js';
 
 const BLEND_OPTIONS = BLEND_MODES.filter(Boolean).filter(([id]) => id !== 'dissolve').map(([id, label]) => [id, label]);
 
@@ -71,13 +71,10 @@ export class BucketTool extends Tool {
     const b = sel.bounds;
     if (!b) return;
     const color = p.alt ? this.app.settings.background : this.app.settings.foreground;
+    if (!mask) layer.ensureCovers(b); // may replace layer.canvas: build the target after it
     const target = mask ? { canvas: layer.mask.canvas, x: 0, y: 0 } : { canvas: layer.canvas, x: layer.x, y: layer.y };
-    if (!mask) layer.ensureCovers(b);
     const local = { x: b.x - target.x, y: b.y - target.y, width: b.width, height: b.height };
     doc.history.pixels('Paint bucket', target.canvas, local, (ctx) => {
-      ctx.save();
-      ctx.globalAlpha = this.opt('opacity') ?? 1;
-      ctx.globalCompositeOperation = mask ? 'source-over' : CANVAS_BLEND[this.opt('blend')] ?? 'source-over';
       const fillCanvas = createCanvas(b.width, b.height);
       const fctx = fillCanvas.getContext('2d');
       if (this.opt('source') === 'pattern' && this.app.currentPattern) {
@@ -86,11 +83,8 @@ export class BucketTool extends Tool {
       fctx.fillRect(0, 0, b.width, b.height);
       fctx.globalCompositeOperation = 'destination-in';
       fctx.drawImage(sel.toCanvas(), -b.x, -b.y);
-      if (layer.locked.transparency && !mask) {
-        ctx.globalCompositeOperation = 'source-atop';
-      }
-      ctx.drawImage(fillCanvas, local.x, local.y);
-      ctx.restore();
+      if (mask) drawOnMask(ctx, fillCanvas, local.x, local.y, this.opt('opacity') ?? 1);
+      else drawBlended(ctx, fillCanvas, local.x, local.y, this.opt('blend') ?? 'normal', this.opt('opacity') ?? 1, { lockTransparency: !!layer.locked.transparency });
     }, { layer, kind: mask ? 'mask' : 'pixels' });
   }
 }
@@ -148,10 +142,10 @@ export class GradientTool extends Tool {
     const doc = this.doc;
     const layer = d.layer;
     const mask = this.app.ui.editingMask && layer.mask?.canvas;
-    const target = mask ? { canvas: layer.mask.canvas, x: 0, y: 0 } : { canvas: layer.canvas, x: layer.x, y: layer.y };
     const sel = doc.selection && !doc.selection.isEmpty ? doc.selection : null;
     const area = sel ? sel.bounds : doc.bounds;
-    if (!mask) layer.ensureCovers(area);
+    if (!mask) layer.ensureCovers(area); // may replace layer.canvas: build the target after it
+    const target = mask ? { canvas: layer.mask.canvas, x: 0, y: 0 } : { canvas: layer.canvas, x: layer.x, y: layer.y };
     const local = { x: area.x - target.x, y: area.y - target.y, width: area.width, height: area.height };
     const g = { kind: this.opt('kind') ?? 'linear', stops: this.stops(), from: [d.from.x, d.from.y], to: [d.to.x, d.to.y], reverse: !!this.opt('reverse') };
     if (Math.hypot(d.to.x - d.from.x, d.to.y - d.from.y) < 1) g.to = [d.from.x + 1, d.from.y];
@@ -167,11 +161,8 @@ export class GradientTool extends Tool {
         fctx.globalCompositeOperation = 'destination-in';
         fctx.drawImage(sel.toCanvas(), -area.x, -area.y);
       }
-      ctx.save();
-      ctx.globalAlpha = this.opt('opacity') ?? 1;
-      ctx.globalCompositeOperation = mask ? 'source-over' : layer.locked.transparency ? 'source-atop' : CANVAS_BLEND[this.opt('blend')] ?? 'source-over';
-      ctx.drawImage(fill, local.x, local.y);
-      ctx.restore();
+      if (mask) drawOnMask(ctx, fill, local.x, local.y, this.opt('opacity') ?? 1);
+      else drawBlended(ctx, fill, local.x, local.y, this.opt('blend') ?? 'normal', this.opt('opacity') ?? 1, { lockTransparency: !!layer.locked.transparency });
     }, { layer, kind: mask ? 'mask' : 'pixels' });
   }
   cancel() {

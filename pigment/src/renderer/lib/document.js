@@ -332,6 +332,7 @@ export function makeGradient(ctx, g, rect) {
   } else grad = ctx.createLinearGradient(from[0], from[1], to[0], to[1]);
   const stops = (g.stops?.length ? g.stops : [{ pos: 0, color: '#000000' }, { pos: 1, color: '#ffffff' }]).slice().sort((a, b) => a.pos - b.pos);
   const list = g.reverse ? stops.map((s) => ({ pos: 1 - s.pos, color: s.color })).sort((a, b) => a.pos - b.pos) : stops;
+  if (kind === 'diamond') return diamondPattern(ctx, list, from, to, rect);
   if (kind === 'reflected') {
     // mirror the stops around the middle
     const half = list.map((s) => ({ pos: 0.5 + s.pos / 2, color: s.color }));
@@ -339,6 +340,42 @@ export function makeGradient(ctx, g, rect) {
     for (const s of [...mirrored, ...half].sort((a, b) => a.pos - b.pos)) grad.addColorStop(Math.min(1, Math.max(0, s.pos)), rgbaToHex(parseColor(s.color), true));
   } else for (const s of list) grad.addColorStop(Math.min(1, Math.max(0, s.pos)), rgbaToHex(parseColor(s.color), true));
   return grad;
+}
+
+/** Canvas 2D has no diamond gradient: render it per pixel (L1 distance in the drag frame) as a pattern. */
+function diamondPattern(ctx, stops, from, to, rect) {
+  const lutCanvas = createCanvas(256, 1);
+  const lctx = lutCanvas.getContext('2d');
+  const lg = lctx.createLinearGradient(0, 0, 256, 0);
+  for (const s of stops) lg.addColorStop(Math.min(1, Math.max(0, s.pos)), rgbaToHex(parseColor(s.color), true));
+  lctx.fillStyle = lg;
+  lctx.fillRect(0, 0, 256, 1);
+  const lut = lctx.getImageData(0, 0, 256, 1).data;
+  const w = Math.max(1, Math.ceil(rect.width)), h = Math.max(1, Math.ceil(rect.height));
+  const c = createCanvas(w, h);
+  const cctx = c.getContext('2d');
+  const img = cctx.createImageData(w, h);
+  const dx = to[0] - from[0], dy = to[1] - from[1];
+  const len = Math.hypot(dx, dy) || 1;
+  const ux = dx / len, uy = dy / len;
+  const d = img.data;
+  for (let y = 0; y < h; y++) {
+    const py = rect.y + y + 0.5 - from[1];
+    for (let x = 0; x < w; x++) {
+      const px = rect.x + x + 0.5 - from[0];
+      const u = px * ux + py * uy, v = -px * uy + py * ux;
+      const t = Math.min(255, Math.round(((Math.abs(u) + Math.abs(v)) / len) * 255));
+      const o = (y * w + x) * 4, l = t * 4;
+      d[o] = lut[l];
+      d[o + 1] = lut[l + 1];
+      d[o + 2] = lut[l + 2];
+      d[o + 3] = lut[l + 3];
+    }
+  }
+  cctx.putImageData(img, 0, 0);
+  const pattern = ctx.createPattern(c, 'no-repeat');
+  pattern.setTransform(new DOMMatrix().translate(rect.x, rect.y));
+  return pattern;
 }
 
 export class ShapeLayer extends Layer {

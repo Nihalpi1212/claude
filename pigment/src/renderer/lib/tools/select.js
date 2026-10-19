@@ -17,26 +17,9 @@ function combineMode(tool, p) {
 
 /** Applies a new selection to the document through the history (undoable). */
 export function applySelection(app, next, mode = 'replace', label = 'Selection') {
-  const doc = app.doc;
-  const before = doc.selection;
-  let result = next;
-  if (before && !before.isEmpty && mode !== 'replace') result = before.combine(next, mode);
-  if (result && result.isEmpty) result = null;
-  doc.history.run(label, () => {
-    doc.selection = result;
-    doc.changed('selection');
-    return {
-      undo: () => {
-        doc.selection = before;
-        doc.changed('selection');
-      },
-      redo: () => {
-        doc.selection = result;
-        doc.changed('selection');
-      },
-    };
-  });
-  app.emit('selection:changed', doc);
+  // one implementation for tools and commands (records the previous selection for Reselect)
+  app.applySelection(next, mode, label);
+  app.emit('selection:changed', app.doc);
 }
 
 export class MarqueeTool extends Tool {
@@ -68,7 +51,10 @@ export class MarqueeTool extends Tool {
       applySelection(this.app, Selection.fromRect(doc.width, doc.height, rect), combineMode(this, p), 'Marquee');
       return;
     }
-    this.drag = { start: { x: p.x, y: p.y }, current: { x: p.x, y: p.y }, mode: combineMode(this, p), fromCenter: p.alt && !p.shift, moved: false };
+    // with a selection, Shift/Alt held at mouse-down only choose the combine mode; pressed later
+    // (or without a selection) they constrain to a square / draw from the centre
+    const hasSel = !!this.doc.selection && !this.doc.selection.isEmpty;
+    this.drag = { start: { x: p.x, y: p.y }, current: { x: p.x, y: p.y }, mode: combineMode(this, p), fromCenter: p.alt && !p.shift && !hasSel, square: p.shift && !hasSel, latch: { shift: p.shift && hasSel, alt: p.alt && hasSel }, moved: false };
     if (this.opt('style') === 'size') {
       this.drag.current = { x: p.x + this.opt('fixedW'), y: p.y + this.opt('fixedH') };
       this.drag.moved = true;
@@ -83,9 +69,11 @@ export class MarqueeTool extends Tool {
     }
     this.drag.current = { x: p.x, y: p.y };
     this.drag.moved = true;
-    this.drag.square = p.shift;
-    this.drag.fromCenter = p.alt && !(p.shift && p.alt && !this.drag.square);
-    if (p.shift && p.alt) this.drag.square = true;
+    const latch = this.drag.latch;
+    if (!p.shift) latch.shift = false;
+    if (!p.alt) latch.alt = false;
+    this.drag.square = p.shift && !latch.shift;
+    this.drag.fromCenter = p.alt && !latch.alt;
   }
   rect() {
     const d = this.drag;
@@ -398,8 +386,15 @@ export class WandTool extends Tool {
         for (let xx = 0; xx < win.width; xx++) if (m[srow + xx] > s.mask[row + xx]) s.mask[row + xx] = m[srow + xx];
       }
     }
-    // always include the brush disc itself
-    for (let yy = Math.max(0, Math.floor(y - r)); yy < Math.min(doc.height, y + r); yy++) for (let xx = Math.max(0, Math.floor(x - r)); xx < Math.min(doc.width, x + r); xx++) if ((xx - x) ** 2 + (yy - y) ** 2 <= r * r) s.mask[yy * doc.width + xx] = 255;
+    // include the brush disc itself, but only pixels close in colour to the one under the centre
+    const img = s.img.data, W = doc.width;
+    const c0 = (y * W + x) * 4;
+    const near = (i) => Math.max(Math.abs(img[i] - img[c0]), Math.abs(img[i + 1] - img[c0 + 1]), Math.abs(img[i + 2] - img[c0 + 2]), Math.abs(img[i + 3] - img[c0 + 3])) <= tol;
+    for (let yy = Math.max(0, Math.floor(y - r)); yy < Math.min(doc.height, y + r); yy++) {
+      for (let xx = Math.max(0, Math.floor(x - r)); xx < Math.min(W, x + r); xx++) {
+        if ((xx - x) ** 2 + (yy - y) ** 2 <= r * r && near((yy * W + xx) * 4)) s.mask[yy * W + xx] = 255;
+      }
+    }
     this.preview = Selection.fromMask(doc.width, doc.height, s.mask);
   }
   onPointerMove(p, dragging) {
