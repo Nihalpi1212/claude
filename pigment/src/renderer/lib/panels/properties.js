@@ -20,30 +20,74 @@ const MAX_SCAN = 25e6; // pixels: larger canvases report their canvas box instea
 // ---- content bounds (cached per layer version) ----------------------------------------------------------------
 const boundsCache = new WeakMap();
 
+/**
+ * Bounding box of the non-transparent pixels of a canvas, or null when it is empty. Reads strips
+ * from the edges inwards, so a layer whose content reaches its edges costs a few rows and columns
+ * instead of the whole canvas.
+ */
 function alphaBounds(canvas) {
   const w = canvas.width, h = canvas.height;
   if (w * h > MAX_SCAN) return { x: 0, y: 0, width: w, height: h };
-  const data = canvas.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, w, h).data;
-  let top = -1, bottom = -1, left = w, right = -1;
-  for (let y = 0; y < h; y++) {
-    const row = y * w * 4;
-    let first = -1, last = -1;
-    for (let x = 0; x < w; x++) if (data[row + x * 4 + 3]) {
-      first = x;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  // strips grow as the scan finds nothing (few reads for sparse layers, small reads for full ones)
+  const grow = (n) => Math.min(1024, n * 2);
+  const rowHit = (d, r, rw) => {
+    for (let i = r * rw * 4 + 3, end = (r + 1) * rw * 4; i < end; i += 4) if (d[i]) return true;
+    return false;
+  };
+  const colHit = (d, c, sw, rows) => {
+    for (let r = 0, i = c * 4 + 3; r < rows; r++, i += sw * 4) if (d[i]) return true;
+    return false;
+  };
+  let top = -1;
+  for (let y = 0, step = 32; y < h && top < 0; y += step, step = grow(step)) {
+    const sh = Math.min(step, h - y);
+    const d = ctx.getImageData(0, y, w, sh).data;
+    for (let r = 0; r < sh; r++) if (rowHit(d, r, w)) {
+      top = y + r;
       break;
     }
-    if (first < 0) continue;
-    for (let x = w - 1; x >= first; x--) if (data[row + x * 4 + 3]) {
-      last = x;
-      break;
-    }
-    if (top < 0) top = y;
-    bottom = y;
-    if (first < left) left = first;
-    if (last > right) right = last;
   }
   if (top < 0) return null;
-  return { x: left, y: top, width: right - left + 1, height: bottom - top + 1 };
+  let bottom = top;
+  for (let y = h, step = 32; y > top; y -= step, step = grow(step)) {
+    const y0 = Math.max(top, y - step);
+    const d = ctx.getImageData(0, y0, w, y - y0).data;
+    let hit = -1;
+    for (let r = y - y0 - 1; r >= 0; r--) if (rowHit(d, r, w)) {
+      hit = y0 + r;
+      break;
+    }
+    if (hit >= 0) {
+      bottom = hit;
+      break;
+    }
+  }
+  const rows = bottom - top + 1;
+  let left = -1;
+  for (let x = 0, step = 32; x < w && left < 0; x += step, step = grow(step)) {
+    const sw = Math.min(step, w - x);
+    const d = ctx.getImageData(x, top, sw, rows).data;
+    for (let c = 0; c < sw; c++) if (colHit(d, c, sw, rows)) {
+      left = x + c;
+      break;
+    }
+  }
+  let right = left;
+  for (let x = w, step = 32; x > left; x -= step, step = grow(step)) {
+    const x0 = Math.max(left, x - step), sw = x - x0;
+    const d = ctx.getImageData(x0, top, sw, rows).data;
+    let hit = -1;
+    for (let c = sw - 1; c >= 0; c--) if (colHit(d, c, sw, rows)) {
+      hit = x0 + c;
+      break;
+    }
+    if (hit >= 0) {
+      right = hit;
+      break;
+    }
+  }
+  return { x: left, y: top, width: right - left + 1, height: rows };
 }
 
 /** Bounds of what the layer draws (non-transparent pixels), in document coordinates; null when empty. */
