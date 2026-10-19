@@ -97,7 +97,7 @@ async function canvasToPng(canvas) {
 export async function writePigment(doc) {
   const description = doc.describe();
   const entries = [];
-  const layers = doc.layers();
+  const layers = doc.layers().filter((l) => !l.quickMask && !l.preview);
   for (const layer of layers) {
     if (layer.type === 'raster') entries.push({ name: `layers/${layer.id}.png`, data: await canvasToPng(layer.canvas) });
     if (layer.mask?.canvas) entries.push({ name: `masks/${layer.id}.png`, data: await canvasToPng(layer.mask.canvas) });
@@ -125,6 +125,8 @@ export async function readPigment(bytes) {
   doc.guides = Array.isArray(d.guides) ? d.guides : [];
   doc.paths = Array.isArray(d.paths) ? d.paths : [];
   doc.meta = d.meta ?? {};
+  if (d.workPath?.subpaths) doc.workPath = d.workPath;
+  if (d.globalLight && Number.isFinite(d.globalLight.angle)) doc.globalLight = { angle: d.globalLight.angle, altitude: d.globalLight.altitude ?? 30 };
   const image = async (name) => {
     const e = findEntry(entries, name);
     return e ? decodeImage(e.data, 'x.png') : null;
@@ -289,7 +291,7 @@ export function writePsdDocument(doc, compositor) {
   const psd = {
     width: doc.width,
     height: doc.height,
-    children: doc.root.children.map(toPsd),
+    children: doc.root.children.filter((l) => !l.quickMask && !l.preview).map(toPsd),
     canvas: flattenDocument(doc, compositor),
     imageResources: { resolutionInfo: { horizontalResolution: doc.dpi, horizontalResolutionUnit: 'PPI', widthUnit: 'Inches', verticalResolution: doc.dpi, verticalResolutionUnit: 'PPI', heightUnit: 'Inches' } },
   };

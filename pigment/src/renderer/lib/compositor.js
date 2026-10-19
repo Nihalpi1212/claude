@@ -191,7 +191,8 @@ export class Compositor {
     const result = createCanvas(out.image.width, out.image.height);
     result.getContext('2d').putImageData(new ImageData(out.image.data, out.image.width, out.image.height), 0, 0);
     const entry = { version: layer.version, source: canvas, canvas: result, x: x + out.offsetX, y: y + out.offsetY, angle, altitude };
-    this.styleCache.set(layer, entry);
+    // a pattern still decoding must not be cached as "no pattern"
+    if (!(styles.patternOverlay?.enabled === false && layer.styles.patternOverlay?.enabled)) this.styleCache.set(layer, entry);
     return entry;
   }
 

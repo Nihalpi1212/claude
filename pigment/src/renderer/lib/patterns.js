@@ -3,6 +3,7 @@
 import { createCanvas } from './document.js';
 
 const cache = new Map(); // dataUrl -> ImageData | 'pending'
+const waiters = new Map(); // dataUrl -> Set of callbacks to run once decoded
 
 function imageDataOf(canvas) {
   return canvas.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, canvas.width, canvas.height);
@@ -20,6 +21,10 @@ export function resolvePattern(url, onReady) {
   if (!url || typeof url !== 'string') return null;
   const v = cache.get(url);
   if (v && v !== 'pending') return v;
+  if (onReady) {
+    if (!waiters.has(url)) waiters.set(url, new Set());
+    waiters.get(url).add(onReady);
+  }
   if (!v) {
     cache.set(url, 'pending');
     const img = new Image();
@@ -27,9 +32,14 @@ export function resolvePattern(url, onReady) {
       const c = createCanvas(img.naturalWidth || 1, img.naturalHeight || 1);
       c.getContext('2d').drawImage(img, 0, 0);
       cache.set(url, imageDataOf(c));
-      onReady?.();
+      const list = waiters.get(url);
+      waiters.delete(url);
+      for (const fn of list ?? []) fn();
     };
-    img.onerror = () => cache.delete(url);
+    img.onerror = () => {
+      cache.delete(url);
+      waiters.delete(url);
+    };
     img.src = url;
   }
   return null;

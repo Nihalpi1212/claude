@@ -3,7 +3,7 @@
 // Destructive edits run through a "pixel edit session" (also used by filter-ui.js) that limits
 // the change to the selection, previews in place and records one undo entry.
 import { ADJUSTMENTS, ADJUSTMENT_KINDS, applyAdjustment, histogram, autoLevels, autoContrast, autoColor, curveLut, levelsLut } from '../../shared/pixels/adjust.js';
-import { CANVAS_BLEND } from '../../shared/pixels/blend.js';
+import { CANVAS_BLEND, blendImages } from '../../shared/pixels/blend.js';
 import { BLEND_MODES, createCanvas, intersectRect } from './document.js';
 import { buildForm, formDialog, frameThrottle } from './form.js';
 import { flattenDocument } from './compositor.js';
@@ -610,9 +610,10 @@ export function beginPixelEdit(app, { quiet = false, label = 'Edit', margin = 0 
         t.layer.touch();
         d.changed(isMask ? 'mask' : 'pixels', { layer: t.layer, rect: docRect });
       };
-      d.history.push({ label: entryLabel, undo: () => apply(original), redo: () => apply(after), bytes: original.data.length * 2, at: Date.now() });
+      const entry = { label: entryLabel, undo: () => apply(original), redo: () => apply(after), bytes: original.data.length * 2, at: Date.now() };
+      d.history.push(entry);
       d.changed('history');
-      app.lastPixelEdit = { doc: d, index: d.history.index, label: entryLabel, canvas, local, original, after, layer: t.layer, isMask };
+      app.lastPixelEdit = { doc: d, entry, label: entryLabel, canvas, local, original, after, layer: t.layer, isMask };
       app.commands.invalidate();
       return after;
     },
@@ -733,10 +734,16 @@ export function install(app) {
     session.commit(label, processed(session, (img) => fn(img, { clip: 0.1 })));
   }
 
+  /** Fade applies only while the last pixel edit is the current history state (not after undo + a new action). */
+  function canFade() {
+    const e = app.lastPixelEdit, d = app.doc;
+    return !!e && !!d && e.doc === d && d.history.entries[d.history.index] === e.entry;
+  }
+
   async function fade() {
     const e = app.lastPixelEdit;
     const d = app.doc;
-    if (!e || e.doc !== d || d.history.index !== e.index) return app.dialogs.toast('Nothing to fade', { kind: 'error' });
+    if (!canFade()) return app.dialogs.toast('Nothing to fade', { kind: 'error' });
     const render = (opacity, mode) => {
       const w = e.local.width, h = e.local.height;
       if (mode === 'normal') {
@@ -745,6 +752,13 @@ export function install(app) {
         const img = new ImageData(w, h);
         for (let i = 0; i < A.length; i++) img.data[i] = A[i] + (B[i] - A[i]) * opacity;
         return img;
+      }
+      if (!CANVAS_BLEND[mode]) {
+        // modes Canvas 2D lacks (vivid light, hard mix, subtract, ...): blend in JS, keep the original alpha
+        const dst = { width: w, height: h, data: new Uint8ClampedArray(e.original.data) };
+        blendImages(mode, { width: w, height: h, data: e.after.data }, dst, opacity);
+        for (let i = 3; i < dst.data.length; i += 4) dst.data[i] = e.original.data[i];
+        return new ImageData(dst.data, w, h);
       }
       const a = createCanvas(w, h), b = createCanvas(w, h);
       a.getContext('2d').putImageData(e.original, 0, 0);
@@ -851,7 +865,19 @@ export function install(app) {
     // gradient
     const g = paint.gradient ?? {};
     const stops = g.stops ?? [];
-    const angleNow = g.from && g.to ? Math.round((Math.atan2(-(g.to[1] - g.from[1]), g.to[0] - g.from[0]) * 180) / Math.PI) : 0;
+    // read angle, scale and offset back from the stored end points (inverse of build() below)
+    const radialNow = g.kind === 'radial' || g.kind === 'diamond' || g.kind === 'angle';
+    let angleNow = 0, scaleNow = 100, offXNow = 0, offYNow = 0;
+    if (g.from && g.to) {
+      const vx = (g.to[0] - g.from[0]) / (radialNow ? 1 : 2), vy = (g.to[1] - g.from[1]) / (radialNow ? 1 : 2);
+      const rad = Math.atan2(-vy, vx);
+      angleNow = Math.round((rad * 180) / Math.PI);
+      const half0 = (Math.abs(Math.cos(rad)) * d.width + Math.abs(Math.sin(rad)) * d.height) / 2 || 1;
+      scaleNow = Math.round((Math.hypot(vx, vy) / half0) * 100);
+      const cx = radialNow ? g.from[0] : (g.from[0] + g.to[0]) / 2, cy = radialNow ? g.from[1] : (g.from[1] + g.to[1]) / 2;
+      offXNow = Math.round(((cx - d.width / 2) / d.width) * 100);
+      offYNow = Math.round(((cy - d.height / 2) / d.height) * 100);
+    }
     const build = (v) => {
       const rad = (v.angle * Math.PI) / 180;
       const cx = d.width / 2 + (v.offsetX / 100) * d.width, cy = d.height / 2 + (v.offsetY / 100) * d.height;
@@ -876,9 +902,9 @@ export function install(app) {
         { key: 'c0', label: 'Start color', type: 'color', value: stops[0]?.color ?? '#000000' },
         { key: 'c1', label: 'End color', type: 'color', value: stops[stops.length - 1]?.color ?? '#ffffff' },
         { key: 'angle', label: 'Angle', type: 'slider', value: angleNow, min: -180, max: 180, unit: '°' },
-        { key: 'scale', label: 'Scale', type: 'slider', value: 100, min: 10, max: 150, unit: '%' },
-        { key: 'offsetX', label: 'Offset X', type: 'slider', value: 0, min: -100, max: 100, unit: '%' },
-        { key: 'offsetY', label: 'Offset Y', type: 'slider', value: 0, min: -100, max: 100, unit: '%' },
+        { key: 'scale', label: 'Scale', type: 'slider', value: Math.min(1000, Math.max(10, scaleNow)), min: 10, max: 1000, unit: '%' },
+        { key: 'offsetX', label: 'Offset X', type: 'slider', value: Math.min(100, Math.max(-100, offXNow)), min: -100, max: 100, unit: '%' },
+        { key: 'offsetY', label: 'Offset Y', type: 'slider', value: Math.min(100, Math.max(-100, offYNow)), min: -100, max: 100, unit: '%' },
         { key: 'reverse', label: 'Reverse', type: 'checkbox', value: !!g.reverse },
       ],
       live: {
@@ -912,7 +938,7 @@ export function install(app) {
     'image:auto-tone': { enabled: has, run: () => auto('tone'), label: 'Auto Tone' },
     'image:auto-contrast': { enabled: has, run: () => auto('contrast'), label: 'Auto Contrast' },
     'image:auto-color': { enabled: has, run: () => auto('color'), label: 'Auto Color' },
-    'edit:fade': { enabled: () => !!app.lastPixelEdit && app.lastPixelEdit.doc === app.doc && app.doc?.history.index === app.lastPixelEdit.index, run: fade, label: 'Fade…' },
+    'edit:fade': { enabled: () => canFade(), run: fade, label: 'Fade…' },
     'layer:edit-adjustment': { enabled: () => app.doc?.active?.type === 'adjustment', run: editAdjustmentLayer },
     'layer:edit-fill': { enabled: () => app.doc?.active?.type === 'fill', run: editFillLayer },
   };

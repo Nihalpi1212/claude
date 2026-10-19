@@ -593,16 +593,19 @@ function surfaceBlur(img, p, rect) {
 
 /**
  * Unsharp mask: colour += amount * (colour - gaussian(colour)) where the max channel difference
- * reaches threshold. reduceNoise (smart sharpen) additionally scales the amount by an edge weight
- * (smoothstep of the Sobel magnitude of luma above reduceNoise / 2). The blur is premultiplied, alpha kept.
+ * reaches threshold. reduceNoise (smart sharpen, 0..100) additionally scales the amount by an edge
+ * weight: smoothstep of the Sobel magnitude of luma from reduceNoise / 2 over a window that widens
+ * to 24 levels by reduceNoise 10, so reduceNoise 0 is exactly the plain unsharp mask. The blur is
+ * premultiplied, alpha kept.
  */
 function unsharp(img, rect, amount, sigma, threshold, reduceNoise) {
   const r = region(img, rect);
   if (isEmpty(r) || !(sigma > 0) || amount === 0) return img;
   const { g, f } = blurredRegion(img, r, sigma);
   const gw = g.width, gh = g.height;
-  const L = reduceNoise === null ? null : lumaPlane(img, g);
-  const e0 = reduceNoise === null ? 0 : reduceNoise * 0.5;
+  const weighted = reduceNoise !== null && reduceNoise > 0;
+  const L = weighted ? lumaPlane(img, g) : null;
+  const e0 = weighted ? reduceNoise * 0.5 : 0, e1 = weighted ? e0 + 2.4 * Math.min(reduceNoise, 10) : 0;
   const d = img.data, W = img.width, k = amount / 100;
   const out = new Uint8ClampedArray(r.width * r.height * 4);
   for (let y = r.y, o = 0; y < r.y + r.height; y++) {
@@ -618,7 +621,7 @@ function unsharp(img, rect, amount, sigma, threshold, reduceNoise) {
       const s = 255 / fa;
       const dr = R - f[fi] * s, dg = G - f[fi + 1] * s, db = B - f[fi + 2] * s;
       if (threshold > 0 && Math.max(Math.abs(dr), Math.abs(dg), Math.abs(db)) < threshold) continue;
-      const kk = L ? k * smoothstep(e0, e0 + 24, sobelMag(L, gw, gh, x - g.x, y - g.y)) : k;
+      const kk = L ? k * smoothstep(e0, e1, sobelMag(L, gw, gh, x - g.x, y - g.y)) : k;
       out[o] = round8(R + kk * dr);
       out[o + 1] = round8(G + kk * dg);
       out[o + 2] = round8(B + kk * db);
@@ -867,13 +870,15 @@ function mosaic(img, p, rect) {
 /**
  * Voronoi cells for crystallize/pointillize: one seed per size x size grid cell (aligned to the
  * image origin, jittered by hash3(cell, seed)), and the premultiplied colour sums of every cell
- * that a pixel of r can belong to (the nearest seed is searched in the 3x3 surrounding cells).
+ * that a pixel of r can belong to. A pixel's own seed is closer than 2 cells, so its nearest seed
+ * lies within 2 cells of it: the seeds of r's pixels lie within 2 cells of r, their members within
+ * 4, and the members' nearest-seed searches read seeds within 6.
  */
 function voronoi(img, r, s, seed) {
   const W = img.width, H = img.height, d = img.data;
   const ci0 = Math.floor((r.x + 0.5) / s), ci1 = Math.floor((r.x + r.width - 0.5) / s);
   const cj0 = Math.floor((r.y + 0.5) / s), cj1 = Math.floor((r.y + r.height - 0.5) / s);
-  const i0 = ci0 - 3, j0 = cj0 - 3, nx = ci1 - ci0 + 7, ny = cj1 - cj0 + 7;
+  const i0 = ci0 - 6, j0 = cj0 - 6, nx = ci1 - ci0 + 13, ny = cj1 - cj0 + 13;
   const sx = new Float64Array(nx * ny), sy = new Float64Array(nx * ny);
   for (let j = 0; j < ny; j++) {
     for (let i = 0; i < nx; i++) {
@@ -883,16 +888,16 @@ function voronoi(img, r, s, seed) {
     }
   }
   const grid = { s, i0, j0, nx, sx, sy, acc: new Float64Array(nx * ny * 5), d2: 0 };
-  // Pixels whose own cell is within 2 cells of r's cells: every pixel of a cell r can use.
-  const ax0 = Math.max(0, Math.floor((ci0 - 2) * s) - 1), ax1 = Math.min(W, Math.ceil((ci1 + 3) * s) + 1);
-  const ay0 = Math.max(0, Math.floor((cj0 - 2) * s) - 1), ay1 = Math.min(H, Math.ceil((cj1 + 3) * s) + 1);
+  // Pixels whose own cell is within 4 cells of r's cells: every member of a seed r can use.
+  const ax0 = Math.max(0, Math.floor((ci0 - 4) * s) - 1), ax1 = Math.min(W, Math.ceil((ci1 + 5) * s) + 1);
+  const ay0 = Math.max(0, Math.floor((cj0 - 4) * s) - 1), ay1 = Math.min(H, Math.ceil((cj1 + 5) * s) + 1);
   const acc = grid.acc;
   for (let y = ay0; y < ay1; y++) {
     const cj = Math.floor((y + 0.5) / s);
-    if (cj < cj0 - 2 || cj > cj1 + 2) continue;
+    if (cj < cj0 - 4 || cj > cj1 + 4) continue;
     for (let x = ax0, i = (y * W + ax0) * 4; x < ax1; x++, i += 4) {
       const ci = Math.floor((x + 0.5) / s);
-      if (ci < ci0 - 2 || ci > ci1 + 2) continue;
+      if (ci < ci0 - 4 || ci > ci1 + 4) continue;
       const k = nearestSeed(grid, x + 0.5, y + 0.5) * 5, a = d[i + 3];
       acc[k] += d[i] * a;
       acc[k + 1] += d[i + 1] * a;
@@ -904,7 +909,12 @@ function voronoi(img, r, s, seed) {
   return grid;
 }
 
-/** Index of the seed nearest to (px, py) among the 3x3 cells around it; grid.d2 gets the squared distance. */
+/**
+ * Index of the seed nearest to (px, py); grid.d2 gets the squared distance. The 3x3 cells around
+ * the point are searched first; seeds further out are more than one cell size away, so the outer
+ * ring of the 5x5 block (which always holds the nearest seed) is only searched when the best
+ * distance so far exceeds the cell size.
+ */
 function nearestSeed(grid, px, py) {
   const s = grid.s, nx = grid.nx, sx = grid.sx, sy = grid.sy;
   const ci = Math.floor(px / s) - grid.i0, cj = Math.floor(py / s) - grid.j0;
@@ -916,6 +926,18 @@ function nearestSeed(grid, px, py) {
       if (dd < bd) {
         bd = dd;
         best = k;
+      }
+    }
+  }
+  if (bd > s * s) {
+    for (let dj = -2; dj <= 2; dj++) {
+      const row = (cj + dj) * nx + ci, edge = dj === -2 || dj === 2;
+      for (let di = -2; di <= 2; di += edge ? 1 : 4) {
+        const k = row + di, dx = sx[k] - px, dy = sy[k] - py, dd = dx * dx + dy * dy;
+        if (dd < bd) {
+          bd = dd;
+          best = k;
+        }
       }
     }
   }

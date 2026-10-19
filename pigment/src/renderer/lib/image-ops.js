@@ -100,7 +100,7 @@ const isTranslation = (m) => m[0] === 1 && m[1] === 0 && m[2] === 0 && m[3] === 
 const isAxisAligned = (m) => (Math.abs(m[1]) < 1e-9 && Math.abs(m[2]) < 1e-9) || (Math.abs(m[0]) < 1e-9 && Math.abs(m[3]) < 1e-9);
 
 /** Transforms a document-sized mask canvas into a new document-sized mask (uncovered area = old background). */
-function transformMaskCanvas(mask, m, newW, newH, { smooth = true, resizeMethod = null } = {}) {
+function transformMaskCanvas(mask, m, newW, newH, { smooth = true, resizeMethod = null, background = null } = {}) {
   const c = createCanvas(newW, newH);
   const ctx = c.getContext('2d');
   if (resizeMethod) {
@@ -108,7 +108,8 @@ function transformMaskCanvas(mask, m, newW, newH, { smooth = true, resizeMethod 
     ctx.putImageData(new ImageData(img.data, img.width, img.height), 0, 0);
     return c;
   }
-  const bg = cornerAlpha(mask);
+  // newly exposed areas: layer masks keep their background, selections and channels stay empty
+  const bg = background ?? cornerAlpha(mask);
   if (bg > 0) {
     ctx.fillStyle = `rgba(255,255,255,${bg / 255})`;
     ctx.fillRect(0, 0, newW, newH);
@@ -225,6 +226,12 @@ function remapDocument(app, label, spec) {
         out = shallow(layer, over);
         break;
       }
+      case 'fill': {
+        // gradient end points are document coordinates
+        const g = layer.paint?.gradient;
+        out = shallow(layer, g?.from && g?.to ? { paint: { ...layer.paint, gradient: { ...g, from: point(...g.from), to: point(...g.to) } } } : {});
+        break;
+      }
       default:
         out = shallow(layer);
     }
@@ -240,7 +247,7 @@ function remapDocument(app, label, spec) {
 
   const mapAlpha = (mask) => {
     const c = alphaCanvas(mask, d.width, d.height);
-    const nc = mode === 'scale' ? transformMaskCanvas(c, m, W, H, { resizeMethod: 'bilinear' }) : transformMaskCanvas(c, m, W, H, { smooth: mode === 'affine' });
+    const nc = mode === 'scale' ? transformMaskCanvas(c, m, W, H, { resizeMethod: 'bilinear' }) : transformMaskCanvas(c, m, W, H, { smooth: mode === 'affine', background: 0 });
     return canvasAlpha(nc);
   };
 
@@ -252,6 +259,15 @@ function remapDocument(app, label, spec) {
     return { ...g, axis, pos: Math.round((axis === 'x' ? p[0] : p[1]) * 100) / 100 };
   };
 
+  const keptBytes = () => {
+    // the entry keeps every new layer and mask canvas alive
+    let n = 0;
+    for (const l of d.layers()) {
+      if (l.canvas) n += l.canvas.width * l.canvas.height * 4;
+      if (l.mask?.canvas) n += l.mask.canvas.width * l.mask.canvas.height * 4;
+    }
+    return n;
+  };
   structural(app, label, () => {
     const root = mapLayer(d.root);
     root.parent = null;
@@ -261,9 +277,10 @@ function remapDocument(app, label, spec) {
     d.guides = d.guides.map(mapGuide).filter(Boolean);
     d.channels = d.channels.map((ch) => ({ ...ch, mask: mapAlpha(ch.mask) }));
     d.paths = d.paths.map((p) => ({ ...p, path: mapPath(p.path, point) }));
+    if (d.workPath?.subpaths?.length) d.workPath = mapPath(d.workPath, point);
     if (spec.dpi) d.dpi = spec.dpi;
     d.replaceTree(root, { width: W, height: H });
-  });
+  }, d, { bytes: keptBytes });
   app.view?.center?.();
   app.view?.invalidate();
 }
@@ -341,8 +358,8 @@ export function install(app) {
       const unit0 = app.settings.imageSizeUnit ?? 'px';
       const fields = [
         { key: 'unit', label: 'Units', type: 'select', value: unit0, options: UNITS },
-        { key: 'width', label: 'Width', type: 'number', value: round(fromPx(pxW, unit0, dpi, d.width), unit0), min: 0.001, step: 0.001 },
-        { key: 'height', label: 'Height', type: 'number', value: round(fromPx(pxH, unit0, dpi, d.height), unit0), min: 0.001, step: 0.001 },
+        { key: 'width', label: 'Width', type: 'number', value: round(fromPx(pxW, unit0, dpi, d.width), unit0), min: 0.001, step: 0.001, disabled: (v) => !v.resample && (v.unit === 'px' || v.unit === 'percent') },
+        { key: 'height', label: 'Height', type: 'number', value: round(fromPx(pxH, unit0, dpi, d.height), unit0), min: 0.001, step: 0.001, disabled: (v) => !v.resample && (v.unit === 'px' || v.unit === 'percent') },
         { key: 'dpi', label: 'Resolution (pixels/inch)', type: 'number', value: dpi, min: 1, max: 10000, step: 0.01 },
         { key: 'constrain', label: 'Constrain proportions', type: 'checkbox', value: true },
         { key: 'resample', label: 'Resample', type: 'checkbox', value: true },
@@ -415,6 +432,11 @@ export function install(app) {
       app.settings.imageSizeUnit = opts.unit;
       app.settings.resampleMethod = opts.method;
       app.saveSettingsSoon();
+      if (!opts.resample) {
+        // without resampling only the resolution (print size) changes
+        pxW = d.width;
+        pxH = d.height;
+      }
       opts = { width: Math.round(pxW), height: Math.round(pxH), dpi, method: opts.resample ? opts.method : null, scaleStyles: opts.scaleStyles };
     }
     const W = Math.max(1, Math.round(opts.width)), H = Math.max(1, Math.round(opts.height));
@@ -656,6 +678,8 @@ export function install(app) {
     copy.guides = d.guides.map((g) => ({ ...g }));
     copy.channels = d.channels.map((c) => ({ ...c, mask: new Uint8ClampedArray(c.mask) }));
     copy.paths = d.paths.map((p) => JSON.parse(JSON.stringify(p)));
+    copy.meta = { ...(d.meta ?? {}) };
+    if (d.globalLight) copy.globalLight = { ...d.globalLight };
     if (d.selection) copy.selection = Selection.fromMask(d.width, d.height, new Uint8ClampedArray(d.selection.mask));
     app.docs.add(copy);
     copy.history.markSaved();

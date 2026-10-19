@@ -2,6 +2,8 @@
 // shortcuts and context menus all run commands; modules register handlers.
 
 const DEDUPE_MS = 40;
+/** Commands that leave a running Free Transform alone (viewing, panels, Enter/Escape handled by the tool). */
+const SAFE_DURING_TRANSFORM = /^(view:|window:|help:|app:enter$|app:escape$|tool:brush-|edit:free-transform$)/;
 
 export class CommandRegistry {
   constructor(app) {
@@ -65,6 +67,15 @@ export class CommandRegistry {
     const last = this.lastRun.get(id);
     if (last && last.source !== source && now - last.at < DEDUPE_MS && last.arg === arg) return undefined;
     this.lastRun.set(id, { at: now, source, arg });
+    // a running Free Transform is applied before anything else touches the document (undo/redo cancel it)
+    const tt = this.app.transformTool;
+    if (tt?.session && !tt.committing && !SAFE_DURING_TRANSFORM.test(id)) {
+      if (/^edit:(undo|redo|step-backward|step-forward)$/.test(id)) {
+        tt.cancel();
+        return undefined;
+      }
+      tt.commit();
+    }
     if (!this.isEnabled(id)) return undefined;
     try {
       const result = def.run(arg);

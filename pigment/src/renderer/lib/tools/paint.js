@@ -92,6 +92,11 @@ export class StrokeTool extends Tool {
     }
     ctx.restore();
   }
+  /** Document position of a point given in the stroke canvas's coordinates (the canvas grows during a stroke). */
+  docPoint(lx, ly, fallback) {
+    const t = this.stroke?.target ?? fallback;
+    return [lx + t.x, ly + t.y];
+  }
   baseSettings(layer, target) {
     const s = this.app.settings;
     const maskValue = this.app.ui.editingMask ? luminanceOf(s.foreground) : 1;
@@ -224,6 +229,17 @@ export class EraserTool extends StrokeTool {
     if (target.mask) {
       s.mode = 'mask';
       s.maskValue = 0; // erasing a mask paints black (hide)
+      return s;
+    }
+    const snap = this.opt('eraseToHistory') ? this.doc.history.savedSnapshot?.() : null;
+    if (snap && snap.width === this.doc.width && snap.height === this.doc.height) {
+      // erase to the image as it was when opened or last saved
+      s.mode = 'paint';
+      s.blend = 'normal';
+      s.sampler = (tctx, lx, ly, w, h) => {
+        const [dx, dy] = this.docPoint(lx, ly, target);
+        tctx.drawImage(snap, Math.round(dx), Math.round(dy), w, h, 0, 0, w, h);
+      };
       return s;
     }
     if (layer.locked.transparency || this.opt('eraseToBackground')) {

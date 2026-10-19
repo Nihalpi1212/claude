@@ -71,6 +71,8 @@ export function install(app) {
       if (inDialog && cmd !== 'app:escape') return;
       if (inText) {
         if (plain || NATIVE_IN_TEXT.has(cmd) || cmd === 'app:enter' || cmd === 'window:toggle-panels') return;
+        // while typing, only file, window and view commands may run (Ctrl+I must not invert the image)
+        if (!/^(file:|view:|help:|window:)/.test(cmd) && cmd !== 'app:escape') return;
         if (cmd === 'app:escape') {
           event.target.blur();
           event.preventDefault();

@@ -59,7 +59,7 @@
 .canvas-view .ruler-h { grid-column: 2; grid-row: 1; display: block; border-bottom: 1px solid var(--border); }
 .canvas-view .ruler-v { grid-column: 1; grid-row: 2; display: block; border-right: 1px solid var(--border); }
 .canvas-view.no-rulers .ruler, .canvas-view.no-rulers .ruler-corner { display: none; }
-.canvas-area { grid-column: 2; grid-row: 2; position: relative; overflow: hidden; }
+.canvas-area { grid-column: 2; grid-row: 2; position: relative; overflow: hidden; overflow: clip; }
 .canvas-area canvas.view { position: absolute; left: 0; top: 0; display: block; touch-action: none; outline: none; }
 .canvas-host[hidden] { display: none; }
 

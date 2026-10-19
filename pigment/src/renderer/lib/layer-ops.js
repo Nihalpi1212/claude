@@ -11,7 +11,8 @@ import { Selection } from './selection.js';
 export function snapshotTree(doc) {
   const groups = [];
   const walk = (g) => {
-    groups.push([g, g.children.slice()]);
+    // transform previews and the quick mask layer are never part of a recorded state
+    groups.push([g, g.children.filter((c) => !c.preview && !c.quickMask)]);
     for (const c of g.children) if (c.isGroup) walk(c);
   };
   walk(doc.root);
@@ -41,24 +42,29 @@ export function restoreTree(doc, snap) {
   doc.changed(sizeChanged ? 'canvas' : 'tree');
 }
 
-/** Runs a structural mutation as one undoable entry. */
-export function structural(app, label, mutate, doc = app.doc) {
+/**
+ * Runs a structural mutation as one undoable entry. opts.bytes (number or function evaluated after
+ * the mutation) tells the history how much memory the entry keeps alive.
+ */
+export function structural(app, label, mutate, doc = app.doc, { bytes = 0 } = {}) {
   const before = snapshotTree(doc);
-  const extraBefore = { selection: doc.selection, guides: doc.guides.slice(), channels: doc.channels.slice(), paths: doc.paths.slice(), dpi: doc.dpi };
+  const extras = () => ({ selection: doc.selection, guides: doc.guides.slice(), channels: doc.channels.slice(), paths: doc.paths.slice(), workPath: doc.workPath ?? null, dpi: doc.dpi });
+  const extraBefore = extras();
   const result = mutate();
   if (result === false) return false;
   const after = snapshotTree(doc);
-  const extraAfter = { selection: doc.selection, guides: doc.guides.slice(), channels: doc.channels.slice(), paths: doc.paths.slice(), dpi: doc.dpi };
+  const extraAfter = extras();
   const apply = (snap, extra) => {
     restoreTree(doc, snap);
     doc.selection = extra.selection;
     doc.guides = extra.guides.slice();
     doc.channels = extra.channels.slice();
     doc.paths = extra.paths.slice();
+    doc.workPath = extra.workPath;
     doc.dpi = extra.dpi;
     doc.changed('selection');
   };
-  doc.history.push({ label, undo: () => apply(before, extraBefore), redo: () => apply(after, extraAfter), bytes: 0, at: Date.now() });
+  doc.history.push({ label, undo: () => apply(before, extraBefore), redo: () => apply(after, extraAfter), bytes: typeof bytes === 'function' ? bytes() : bytes, at: Date.now() });
   restoreTree(doc, after);
   doc.changed('history');
   return result;

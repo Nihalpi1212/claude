@@ -116,14 +116,17 @@ export class History {
     const after = ctx.getImageData(r.x, r.y, r.width, r.height);
     layer?.touch();
     const doc = this.doc;
+    const reattach = attacher(layer, canvas);
     this.push({
       label,
       undo: () => {
+        reattach();
         canvas.getContext('2d').putImageData(before, r.x, r.y);
         layer?.touch();
         doc.changed(kind, { layer, rect: r });
       },
       redo: () => {
+        reattach();
         canvas.getContext('2d').putImageData(after, r.x, r.y);
         layer?.touch();
         doc.changed(kind, { layer, rect: r });
@@ -180,14 +183,17 @@ export class History {
     s.layer?.touch();
     const doc = this.doc;
     const { canvas, layer, kind } = s;
+    const reattach = attacher(layer, canvas);
     const entry = this.push({
       label: s.label,
       undo: () => {
+        reattach();
         canvas.getContext('2d').putImageData(before, r.x, r.y);
         layer?.touch();
         doc.changed(kind, { layer, rect: r });
       },
       redo: () => {
+        reattach();
         canvas.getContext('2d').putImageData(after, r.x, r.y);
         layer?.touch();
         doc.changed(kind, { layer, rect: r });
@@ -253,6 +259,22 @@ export class History {
     this.snapshots.push({ name, canvas: copy, at: Date.now() });
     this.onChange();
   }
+}
+
+/**
+ * When `canvas` is the layer's own pixel canvas, returns a function that puts it (and the layer's
+ * current offset) back on the layer: canvases are swapped by Free Transform and by layers growing
+ * under a brush, and an undo/redo must write into the canvas the edit was recorded on.
+ */
+function attacher(layer, canvas) {
+  if (!layer || layer.canvas !== canvas) return () => {};
+  const x = layer.x, y = layer.y;
+  return () => {
+    if (layer.canvas === canvas) return;
+    layer.canvas = canvas;
+    layer.x = x;
+    layer.y = y;
+  };
 }
 
 function unionRect(a, b) {

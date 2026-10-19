@@ -806,8 +806,10 @@ class CloneStampTool extends StrokeTool {
       ...this.baseSettings(layer, target),
       label: 'Clone stamp',
       sampler: (tctx, lx, ly, w, h) => {
-        if (all) tctx.drawImage(comp, Math.round(lx + target.x + off.x), Math.round(ly + target.y + off.y), w, h, 0, 0, w, h);
-        else tctx.drawImage(snapshot, Math.round(lx + off.x), Math.round(ly + off.y), w, h, 0, 0, w, h);
+        // lx/ly are relative to the stroke canvas, which moves when the stroke grows the layer
+        const [dx, dy] = this.docPoint(lx, ly, target);
+        if (all) tctx.drawImage(comp, Math.round(dx + off.x), Math.round(dy + off.y), w, h, 0, 0, w, h);
+        else tctx.drawImage(snapshot, Math.round(dx - target.x + off.x), Math.round(dy - target.y + off.y), w, h, 0, 0, w, h);
       },
     };
   }
@@ -841,7 +843,8 @@ class PatternStampTool extends StrokeTool {
       label: 'Pattern stamp',
       sampler: (tctx, lx, ly, w, h) => {
         tctx.save();
-        const ox = lx + target.x - origin.x, oy = ly + target.y - origin.y;
+        const [dx, dy] = this.docPoint(lx, ly, target);
+        const ox = dx - origin.x, oy = dy - origin.y;
         tctx.translate(-ox, -oy);
         tctx.fillStyle = tctx.createPattern(pat, 'repeat');
         tctx.fillRect(ox, oy, w, h);
@@ -876,7 +879,10 @@ class HistoryBrushTool extends StrokeTool {
     return {
       ...this.baseSettings(layer, target),
       label: 'History brush',
-      sampler: (tctx, lx, ly, w, h) => tctx.drawImage(snap, Math.round(lx + target.x), Math.round(ly + target.y), w, h, 0, 0, w, h),
+      sampler: (tctx, lx, ly, w, h) => {
+        const [dx, dy] = this.docPoint(lx, ly, target);
+        tctx.drawImage(snap, Math.round(dx), Math.round(dy), w, h, 0, 0, w, h);
+      },
     };
   }
 }

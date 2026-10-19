@@ -619,10 +619,12 @@ export class Document {
 
   /** Serialisable description of the tree (no pixels). */
   describe() {
+    // temporary layers (quick mask, transform previews) are never saved
+    const saved = (l) => !l.quickMask && !l.preview;
     const walk = (layer) => {
       const d = layer.describe();
       if (layer.type === 'raster') Object.assign(d, { x: layer.x, y: layer.y, width: layer.canvas.width, height: layer.canvas.height });
-      if (layer.type === 'group') Object.assign(d, { expanded: layer.expanded, children: layer.children.map(walk) });
+      if (layer.type === 'group') Object.assign(d, { expanded: layer.expanded, children: layer.children.filter(saved).map(walk) });
       if (layer.type === 'text') Object.assign(d, { x: layer.x, y: layer.y, width: layer.width, text: layer.text, font: { ...layer.font }, rotation: layer.rotation, transform: layer.transform ? layer.transform.slice() : null });
       if (layer.type === 'shape') Object.assign(d, { path: JSON.parse(JSON.stringify(layer.path)), fill: layer.fill, stroke: layer.stroke, shapeKind: layer.shapeKind, shapeProps: layer.shapeProps });
       if (layer.type === 'fill') Object.assign(d, { paint: JSON.parse(JSON.stringify({ ...layer.paint, pattern: layer.paint.pattern ? { scale: layer.paint.pattern.scale } : undefined })) });
@@ -640,8 +642,10 @@ export class Document {
       guides: this.guides.map((g) => ({ ...g })),
       channels: this.channels.map((c) => ({ id: c.id, name: c.name })),
       paths: this.paths.map((p) => ({ id: p.id, name: p.name, path: p.path })),
+      workPath: this.workPath?.subpaths?.length ? JSON.parse(JSON.stringify(this.workPath)) : null,
       meta: this.meta,
-      layers: this.root.children.map(walk),
+      globalLight: this.globalLight ?? null,
+      layers: this.root.children.filter(saved).map(walk),
     };
   }
 }
