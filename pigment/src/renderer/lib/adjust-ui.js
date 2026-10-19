@@ -23,6 +23,9 @@ export const LAYER_KINDS = ['brightness-contrast', 'levels', 'curves', 'exposure
 /** Destructive-only kinds (no adjustment layer). */
 const DIRECT_ONLY = ['desaturate', 'equalize', 'shadows-highlights'];
 const NO_PARAMS = new Set(['invert', 'desaturate', 'equalize']);
+/** Where Photoshop's dialogs start (the engine's defaults are the identity). */
+const START_VALUES = { 'photo-filter': { density: 25 }, 'shadows-highlights': { shadows: 35 } };
+const startParams = (kind) => ({ ...clone(ADJUSTMENTS[kind].defaults), ...(START_VALUES[kind] ?? {}) });
 
 // ---- path helpers --------------------------------------------------------------------------------------------
 
@@ -687,7 +690,7 @@ export async function pixelEditDialog(app, { title, label = title, params, edito
 
 export function install(app) {
   const has = () => !!app.doc?.active;
-  app.adjustments = Object.fromEntries(ADJUSTMENT_KINDS.map((k) => [k, { name: ADJUSTMENTS[k].name, defaults: clone(ADJUSTMENTS[k].defaults) }]));
+  app.adjustments = Object.fromEntries(ADJUSTMENT_KINDS.map((k) => [k, { name: ADJUSTMENTS[k].name, defaults: startParams(k) }]));
   app.buildAdjustmentEditor = buildAdjustmentEditor;
   app.beginPixelEdit = (opts) => beginPixelEdit(app, opts);
   app.pixelEditDialog = (opts) => pixelEditDialog(app, opts);
@@ -708,7 +711,7 @@ export function install(app) {
       session.commit(def.name, img);
       return;
     }
-    const start = clone(lastParams()[kind] ?? def.defaults);
+    const start = clone(lastParams()[kind] ?? startParams(kind));
     const used = await pixelEditDialog(app, {
       title: def.name,
       params: start,
