@@ -442,6 +442,19 @@ test('shadows/highlights lifts darks, pulls down lights, and ignores transparent
   assert.ok(inner[0] > 70, 'lifted');
   assertPixel(edge, inner, 0, 'edge matches interior');
   assert.equal(getPixel(half, 3, 3)[3], 0, 'transparent stays transparent');
+  // The blurred mask is separable and symmetric: a transposed image gives the transposed result.
+  const rows = createImage(5, 16), cols = createImage(16, 5);
+  for (let a = 0; a < 16; a++) for (let b = 0; b < 5; b++) {
+    const v = a < 8 ? 40 : 200, c = [v, (v + b * 9) & 255, 255 - v, 1];
+    setPixel(rows, b, a, c);
+    setPixel(cols, a, b, c);
+  }
+  const params = { shadows: 70, highlights: 50, radius: 5 };
+  applyAdjustment(rows, 'shadows-highlights', params);
+  applyAdjustment(cols, 'shadows-highlights', params);
+  for (let a = 0; a < 16; a++) for (let b = 0; b < 5; b++) assert.deepEqual(getPixel(rows, b, a), getPixel(cols, a, b), `transpose ${a},${b}`);
+  // A dark pixel next to the bright half sees a brighter blurred mask, so it is lifted less.
+  assert.ok(getPixel(rows, 2, 7)[0] < getPixel(rows, 2, 0)[0], 'mask is blurred across the boundary');
   // Highlights alone leave dark tones nearly unchanged; shadows alone leave light tones.
   const g2 = gradientImage(32, 1);
   applyAdjustment(g2, 'shadows-highlights', { shadows: 0, highlights: 100, radius: 0 });
@@ -478,7 +491,7 @@ test('histogram counts channels and luma of non-transparent pixels in rect', () 
 test('autoLevels stretches a low-contrast gradient to near 0..255; autoContrast and autoColor', () => {
   const img = createImage(64, 2);
   for (let y = 0; y < 2; y++) for (let x = 0; x < 64; x++) setPixel(img, x, y, [100 + x, 90 + x, 110 + x, 1]);
-  const contrast = cloneImage(img), color = cloneImage(img);
+  const contrast = cloneImage(img);
   autoLevels(img, { clip: 0.1 });
   const lo = getPixel(img, 0, 0), hi = getPixel(img, 63, 0);
   for (let c = 0; c < 3; c++) {
@@ -499,7 +512,6 @@ test('autoLevels stretches a low-contrast gradient to near 0..255; autoContrast 
   const mean = (hist) => hist.reduce((a, n, v) => a + n * v, 0) / hs.count;
   const ms = [mean(hs.r), mean(hs.g), mean(hs.b)];
   assert.ok(Math.max(...ms) - Math.min(...ms) < 12, `means ${ms}`);
-  void color;
   // Flat and empty images are left alone.
   const flat = solidImage(4, 4, [90, 90, 90, 1]);
   autoLevels(flat);
@@ -511,9 +523,8 @@ test('autoLevels stretches a low-contrast gradient to near 0..255; autoContrast 
 });
 
 test('auto functions honour rect', () => {
-  const img = createImage(16, 2);
-  for (let y = 0; y < 2; y++) for (let x = 0; x < 16; x++) setPixel(img, x, y, [100 + x, 100 + x, 100 + x, 1]);
-  const before = cloneImage(img);
+  const before = createImage(16, 2);
+  for (let y = 0; y < 2; y++) for (let x = 0; x < 16; x++) setPixel(before, x, y, [100 + x, 100 + x, 100 + x, 1]);
   const rect = { x: 0, y: 0, width: 8, height: 1 };
   for (const fn of [autoLevels, autoContrast, autoColor]) {
     const t = cloneImage(before);
@@ -525,7 +536,6 @@ test('auto functions honour rect', () => {
       assert.deepEqual(getPixel(t, x, y), getPixel(before, x, y), `${fn.name} outside rect ${x},${y}`);
     }
   }
-  void img;
 });
 
 test('rect limits every kind: pixels outside are untouched, nothing outside the image is written', () => {
@@ -550,6 +560,20 @@ test('rect limits every kind: pixels outside are untouched, nothing outside the 
     const miss = noiseImage(6, 6, 9), missBefore = cloneImage(miss);
     applyAdjustment(miss, kind, ACTIVE_PARAMS[kind], { x: 10, y: 10, width: 4, height: 4 });
     assert.deepEqual(miss.data, missBefore.data, `${kind} rect outside image`);
+  }
+});
+
+test('inside rect, every kind (except equalize, which analyses the rect) matches the whole-image result', () => {
+  const rect = { x: 9, y: 7, width: 6, height: 5 };
+  for (const kind of EXPECTED_KINDS) {
+    if (kind === 'equalize') continue;
+    const params = kind === 'shadows-highlights' ? { shadows: 80, highlights: 60, radius: 4 } : ACTIVE_PARAMS[kind];
+    const whole = noiseImage(24, 20, 17), part = cloneImage(whole);
+    applyAdjustment(whole, kind, params);
+    applyAdjustment(part, kind, params, rect);
+    for (let y = rect.y; y < rect.y + rect.height; y++) for (let x = rect.x; x < rect.x + rect.width; x++) {
+      assert.deepEqual(getPixel(part, x, y), getPixel(whole, x, y), `${kind} at ${x},${y}`);
+    }
   }
 });
 

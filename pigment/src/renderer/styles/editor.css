@@ -95,7 +95,7 @@
 .welcome-features { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
 .welcome-feature { padding: 12px 14px; border-radius: 8px; background: var(--bg-elevated); border: 1px solid var(--border); font-size: 13px; color: var(--fg-muted); }
 .welcome-feature strong { display: block; color: var(--fg); margin-bottom: 4px; }
-.welcome-presets { display: flex; flex-wrap: wrap; gap: 8px; }
+.welcome-presets { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
 .welcome-presets .btn { font-size: 12px; }
 
 .drop-overlay { position: fixed; inset: 0; background: rgba(79,129,255,0.15); border: 3px dashed var(--accent); z-index: 50; display: grid; place-items: center; font-size: 20px; color: var(--accent); pointer-events: none; }

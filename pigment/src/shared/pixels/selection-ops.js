@@ -305,55 +305,102 @@ export function invertMask(mask, w = 0, h = 0, rect = null) {
 // Feather, expand, contract, border, smooth
 // ---------------------------------------------------------------------------------------------
 
+const FEATHER_PASSES = 3;
+
 /**
- * Feathers a mask with a separable gaussian (sigma = radius / 2, kernel radius 3 sigma). Outside the
+ * Extended box filter (Gwosdek et al. 2011): integer radius r plus end taps of weight alpha, chosen so
+ * that `passes` successive passes have exactly variance sigma^2 (no jumps as the radius changes).
+ */
+function extendedBox(sigma, passes) {
+  const s = (sigma * sigma) / passes;
+  const r = Math.max(0, Math.floor(0.5 * Math.sqrt(12 * s + 1) - 0.5));
+  const alpha = ((2 * r + 1) * (3 * s - r * (r + 1))) / (6 * ((r + 1) * (r + 1) - s));
+  return { r, alpha, inv: 1 / (2 * r + 1 + 2 * alpha) };
+}
+
+/** One extended-box pass along a line of n values (zero beyond both ends), O(n) whatever r. */
+function boxPassLine(src, dst, n, r, alpha, inv) {
+  let s = 0;
+  for (let k = 0, e = r < n ? r : n - 1; k <= e; k++) s += src[k];
+  for (let i = 0; i < n; i++) {
+    const a = i - r - 1, b = i + r + 1;
+    const vb = b < n ? src[b] : 0;
+    dst[i] = (s + alpha * ((a >= 0 ? src[a] : 0) + vb)) * inv;
+    if (i >= r) s -= src[i - r];
+    s += vb;
+  }
+}
+
+/** One extended-box pass down the columns of a rows x cw buffer (zero above and below), row-major. */
+function boxPassCols(src, dst, rows, cw, r, alpha, inv, sum) {
+  sum.fill(0);
+  for (let k = 0, e = r < rows ? r : rows - 1; k <= e; k++) {
+    const o = k * cw;
+    for (let x = 0; x < cw; x++) sum[x] += src[o + x];
+  }
+  for (let y = 0; y < rows; y++) {
+    const o = y * cw, a = y - r - 1, b = y + r + 1, oa = a * cw, ob = b * cw;
+    if (a >= 0 && b < rows) for (let x = 0; x < cw; x++) dst[o + x] = (sum[x] + alpha * (src[oa + x] + src[ob + x])) * inv;
+    else if (a >= 0) for (let x = 0; x < cw; x++) dst[o + x] = (sum[x] + alpha * src[oa + x]) * inv;
+    else if (b < rows) for (let x = 0; x < cw; x++) dst[o + x] = (sum[x] + alpha * src[ob + x]) * inv;
+    else for (let x = 0; x < cw; x++) dst[o + x] = sum[x] * inv;
+    if (y >= r) {
+      const od = (y - r) * cw;
+      for (let x = 0; x < cw; x++) sum[x] -= src[od + x];
+    }
+    if (b < rows) for (let x = 0; x < cw; x++) sum[x] += src[ob + x];
+  }
+}
+
+/**
+ * Feathers a mask IN PLACE with a gaussian of sigma = radius / 2, computed as three separable
+ * extended-box passes (exact variance, constant time per pixel whatever the radius). Outside the
  * canvas counts as unselected, so a selection touching the canvas edge fades there. Total coverage of
  * shapes away from the edges is preserved (up to rounding).
- * @param {Mask} mask @param {number} w @param {number} h @param {number} radius px (0 = copy)
+ * @param {Mask} mask modified in place
+ * @param {number} w @param {number} h @param {number} radius px (<= 0 = unchanged)
  * @param {Rect|null} [rect] only pixels inside are rewritten (they still see neighbours outside it)
- * @returns {Mask}
+ * @returns {Mask} the same `mask` array
  */
 export function feather(mask, w, h, radius, rect = null) {
-  const out = new Uint8ClampedArray(mask);
   const r = clampRect(rect, w, h);
   const sigma = radius / 2;
-  if (r.width <= 0 || !(sigma > 0)) return out;
-  const kr = Math.max(1, Math.ceil(sigma * 3));
-  const kernel = new Float32Array(kr * 2 + 1);
-  let sum = 0;
-  for (let k = -kr; k <= kr; k++) {
-    const v = Math.exp(-(k * k) / (2 * sigma * sigma));
-    kernel[k + kr] = v;
-    sum += v;
-  }
-  for (let k = 0; k < kernel.length; k++) kernel[k] /= sum;
-  // Horizontal pass over every row the vertical pass will read.
-  const ry0 = Math.max(0, r.y - kr), ry1 = Math.min(h, r.y + r.height + kr);
-  const rw = r.width;
-  const tmp = new Float32Array((ry1 - ry0) * rw);
-  for (let yy = ry0; yy < ry1; yy++) {
-    const row = yy * w, trow = (yy - ry0) * rw;
-    for (let xx = 0; xx < rw; xx++) {
-      const x = r.x + xx;
-      const kmin = x - kr < 0 ? -x : -kr, kmax = x + kr >= w ? w - 1 - x : kr;
-      let acc = 0;
-      for (let k = kmin; k <= kmax; k++) acc += mask[row + x + k] * kernel[k + kr];
-      tmp[trow + xx] = acc;
+  if (r.width <= 0 || !(sigma > 0)) return mask;
+  const { r: br, alpha, inv } = extendedBox(sigma, FEATHER_PASSES);
+  // Each pass reads br + 1 pixels on each side; values more than `ext` away from a buffer edge that is
+  // not the canvas edge are exact, so the working region is the rect grown by ext (clipped).
+  const ext = FEATHER_PASSES * (br + 1);
+  const cx0 = Math.max(0, r.x - ext), cx1 = Math.min(w, r.x + r.width + ext), cw = cx1 - cx0;
+  const ry0 = Math.max(0, r.y - ext), ry1 = Math.min(h, r.y + r.height + ext), rows = ry1 - ry0;
+  const rw = r.width, sx = r.x - cx0;
+  let bufA = new Float32Array(rows * rw), bufB = new Float32Array(rows * rw);
+  const la = new Float32Array(cw), lb = new Float32Array(cw);
+  for (let y = ry0; y < ry1; y++) {
+    const off = y * w + cx0;
+    let any = 0;
+    for (let x = 0; x < cw; x++) {
+      const v = mask[off + x];
+      la[x] = v;
+      any |= v;
     }
+    if (!any) continue; // an empty row stays empty after the horizontal passes
+    boxPassLine(la, lb, cw, br, alpha, inv);
+    boxPassLine(lb, la, cw, br, alpha, inv);
+    boxPassLine(la, lb, cw, br, alpha, inv);
+    bufA.set(lb.subarray(sx, sx + rw), (y - ry0) * rw);
   }
-  // Vertical pass, accumulating whole rows for cache-friendly access.
-  const acc = new Float32Array(rw);
-  for (let yy = r.y, ye = r.y + r.height; yy < ye; yy++) {
-    const kmin = yy - kr < 0 ? -yy : -kr, kmax = yy + kr >= h ? h - 1 - yy : kr;
-    acc.fill(0);
-    for (let k = kmin; k <= kmax; k++) {
-      const wk = kernel[k + kr], trow = (yy + k - ry0) * rw;
-      for (let xx = 0; xx < rw; xx++) acc[xx] += tmp[trow + xx] * wk;
-    }
-    const orow = yy * w + r.x;
-    for (let xx = 0; xx < rw; xx++) out[orow + xx] = Math.round(acc[xx]);
+  const sum = new Float64Array(rw);
+  for (let p = 0; p < FEATHER_PASSES; p++) {
+    boxPassCols(bufA, bufB, rows, rw, br, alpha, inv, sum);
+    const t = bufA;
+    bufA = bufB;
+    bufB = t;
   }
-  return out;
+  for (let y = r.y, ye = r.y + r.height; y < ye; y++) {
+    const o = (y - ry0) * rw, mo = y * w + r.x;
+    for (let x = 0; x < rw; x++) mask[mo + x] = bufA[o + x]; // Uint8ClampedArray rounds and clamps
+  }
+  return mask;
 }
 
 /**

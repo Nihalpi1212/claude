@@ -37,7 +37,27 @@ export const DEFAULT_SETTINGS = Object.freeze({
   tools: {}, // per-tool option values keyed by tool id
   lastFilter: null,
   tourSeen: false,
+  // panels and dialogs (lib/panels/*.js, lib/extras.js)
+  swatchesEdited: false, // false: the Swatches panel shows DEFAULT_SWATCHES until the user changes the palette
+  recentColors: [],
+  colorPanelTarget: 'fg', // which colour the Color panel edits: fg | bg
+  resampleMethod: 'bicubic', // Image Size default: bicubic | lanczos | bilinear | area | nearest
+  transformInterpolation: 'bicubic', // free transform: bicubic | bilinear | nearest
+  transformProportional: false, // true: transform handles keep proportions unless Shift is held
+  transformScalesStrokes: false,
 });
+
+/** The Swatches panel's default palette (used until the user edits it; see swatchesEdited). */
+export const DEFAULT_SWATCHES = Object.freeze([
+  '#000000', '#1f1f1f', '#404040', '#606060', '#808080', '#a0a0a0', '#c0c0c0', '#e0e0e0', '#f2f2f2', '#ffffff',
+  '#ff0000', '#ff8000', '#ffff00', '#80ff00', '#00ff00', '#00ff80', '#00ffff', '#0080ff', '#0000ff', '#8000ff',
+  '#ff00ff', '#ff0080', '#f7977a', '#fbad82', '#fdc68c', '#fff799', '#c6df9c', '#a4d49d', '#81ca9d', '#7bcdc8',
+  '#6ecff6', '#7ea7d8', '#8493ca', '#8882be', '#a187be', '#bc8dbf', '#f49bc1', '#f5999d', '#ed1c24', '#f26522',
+  '#f7941d', '#fff200', '#8dc63f', '#39b54a', '#00a651', '#00a99d', '#00aeef', '#0072bc', '#0054a6', '#2e3192',
+  '#662d91', '#92278f', '#ec008c', '#ed145b', '#9e0b0f', '#a0410d', '#a36209', '#aba000', '#598527', '#1a7b30',
+  '#007236', '#00746b', '#0076a3', '#004b80', '#003471', '#1b1464', '#440e62', '#630460', '#9e005d', '#9e0039',
+  '#c69c6d', '#a67c52', '#8c6239', '#754c24', '#603913', '#3c2415',
+]);
 
 const isObject = (v) => v && typeof v === 'object' && !Array.isArray(v);
 
