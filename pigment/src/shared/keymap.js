@@ -18,6 +18,7 @@ export const MENU_KEYS = {
   'file:close': 'CmdOrCtrl+W',
   'file:close-all': 'CmdOrCtrl+Alt+W',
   'file:properties': 'CmdOrCtrl+Alt+Shift+I',
+  'file:print': 'CmdOrCtrl+P',
   'edit:undo': 'CmdOrCtrl+Z',
   'edit:redo': 'CmdOrCtrl+Shift+Z',
   'edit:step-forward': 'CmdOrCtrl+Alt+Shift+Z',
@@ -64,6 +65,8 @@ export const MENU_KEYS = {
   'select:feather': 'Shift+F6',
   'filter:last': 'CmdOrCtrl+F',
   'filter:liquify': 'CmdOrCtrl+Shift+X',
+  'filter:camera-raw': 'CmdOrCtrl+Shift+A',
+  'view:gamut': 'CmdOrCtrl+Shift+Y',
   'view:zoom-in': 'CmdOrCtrl+=',
   'view:zoom-out': 'CmdOrCtrl+-',
   'view:zoom-fit': 'CmdOrCtrl+0',
@@ -122,19 +125,21 @@ export const RENDERER_KEYS = {
 };
 
 export const SHORTCUT_GROUPS = [
-  { title: 'Files', commands: ['file:new', 'file:open', 'file:save', 'file:save-as', 'file:export', 'file:export-quick', 'file:close', 'file:properties'] },
+  { title: 'Files', commands: ['file:new', 'file:open', 'file:save', 'file:save-as', 'file:export', 'file:export-quick', 'file:print', 'file:close', 'file:properties'] },
   { title: 'Editing', commands: ['edit:undo', 'edit:redo', 'edit:step-backward', 'edit:step-forward', 'edit:cut', 'edit:copy', 'edit:copy-merged', 'edit:paste', 'edit:paste-in-place', 'edit:clear', 'edit:fill', 'edit:fill-foreground', 'edit:fill-background', 'edit:free-transform', 'edit:preferences'] },
   { title: 'Image', commands: ['image:adjust-levels', 'image:adjust-curves', 'image:adjust-hue-saturation', 'image:adjust-color-balance', 'image:adjust-black-white', 'image:adjust-invert', 'image:adjust-desaturate', 'image:auto-tone', 'image:auto-contrast', 'image:auto-color', 'image:size', 'image:canvas-size'] },
   { title: 'Layers', commands: ['layer:new', 'layer:via-copy', 'layer:via-cut', 'layer:group', 'layer:ungroup', 'layer:clip', 'layer:merge-down', 'layer:merge-visible', 'layer:arrange-front', 'layer:arrange-forward', 'layer:arrange-backward', 'layer:arrange-back', 'layer:select-all'] },
   { title: 'Selection', commands: ['select:all', 'select:none', 'select:reselect', 'select:inverse', 'select:feather'] },
-  { title: 'View', commands: ['view:zoom-in', 'view:zoom-out', 'view:zoom-fit', 'view:zoom-100', 'view:zoom-200', 'view:rulers', 'view:grid', 'view:guides', 'view:extras', 'view:snap', 'view:fullscreen', 'window:toggle-panels', 'view:next-tab', 'view:prev-tab'] },
+  { title: 'Filters', commands: ['filter:last', 'filter:liquify', 'filter:camera-raw'] },
+  { title: 'View', commands: ['view:zoom-in', 'view:zoom-out', 'view:zoom-fit', 'view:zoom-100', 'view:zoom-200', 'view:rulers', 'view:grid', 'view:guides', 'view:extras', 'view:snap', 'view:gamut', 'view:fullscreen', 'window:toggle-panels', 'view:next-tab', 'view:prev-tab'] },
   { title: 'Tools', commands: ['tool:move', 'tool:marquee', 'tool:lasso', 'tool:wand', 'tool:crop', 'tool:eyedropper', 'tool:heal', 'tool:brush', 'tool:clone', 'tool:history', 'tool:eraser', 'tool:fill', 'tool:retouch', 'tool:pen', 'tool:text', 'tool:path-select', 'tool:shape', 'tool:hand', 'tool:rotate-view', 'tool:zoom', 'tool:swap-colors', 'tool:default-colors', 'tool:brush-size-down', 'tool:brush-size-up', 'tool:brush-hardness-down', 'tool:brush-hardness-up', 'app:escape', 'app:enter'] },
   { title: 'Help', commands: ['help:shortcuts', 'help:devtools'] },
 ];
 
 export const COMMAND_LABELS = {
   'file:new': 'New document', 'file:open': 'Open', 'file:save': 'Save', 'file:save-as': 'Save as', 'file:export': 'Export as', 'file:export-quick': 'Quick export as PNG',
-  'file:close': 'Close', 'file:close-all': 'Close all', 'file:properties': 'Document info',
+  'file:close': 'Close', 'file:close-all': 'Close all', 'file:properties': 'Document info', 'file:print': 'Print',
+  'filter:liquify': 'Liquify', 'filter:camera-raw': 'Camera Raw filter', 'view:gamut': 'Gamut warning',
   'edit:undo': 'Undo', 'edit:redo': 'Redo', 'edit:step-backward': 'Step backward', 'edit:step-forward': 'Step forward', 'edit:cut': 'Cut', 'edit:copy': 'Copy',
   'edit:copy-merged': 'Copy merged', 'edit:paste': 'Paste', 'edit:paste-in-place': 'Paste in place', 'edit:paste-into': 'Paste into selection', 'edit:clear': 'Clear selection',
   'edit:fill': 'Fill…', 'edit:fill-foreground': 'Fill with foreground colour', 'edit:fill-background': 'Fill with background colour', 'edit:free-transform': 'Free transform',

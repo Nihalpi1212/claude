@@ -360,3 +360,145 @@ Same tokens as Folio (`styles/theme.css`): `--bg`, `--bg-elevated`, `--bg-sunken
 - `npm run test:e2e` — Playwright (Chromium) against `tests/e2e/server.mjs` serving `src/renderer` with the browser bridge; specs drive the real UI (`window.pigmentApp`, `window.__pigmentTest`).
 - `npm run test:electron` — launches the real app (xvfb on Linux): bridge, menu, open/save through the main process, packaged build.
 - CI: `.github/workflows/pigment-ci.yml`; releases: `pigment-release.yml` (tags `pigment-v*` or a manual run with a `tag` input) build installers on windows-latest, macos-latest and ubuntu-latest.
+
+## 0.2 features (contracts)
+
+Pigment 0.2 adds AI (Sign in with ChatGPT, OpenAI and Gemini API keys), smart objects with smart
+filters, Warp / Perspective Warp / Puppet Warp, the Camera Raw filter, printing, shape path
+operations, text on a path, stacked vertical text, and Lab/CMYK readouts with proof colours. Each
+feature is a module listed in `app.js` `MODULES` that registers the commands the menu already names
+(`src/main/menu.js`, `src/shared/keymap.js`); until a module lands, a stub registers the same ids
+disabled. **Ownership** (one builder per group of files, nobody else edits them):
+
+| Feature | Files owned |
+|---|---|
+| AI core | `src/main/ai.js`, `src/renderer/lib/ai/client.js`, `lib/ai/providers.js`, `lib/ai/accounts.js`, `styles/ai.css` (accounts part), `tests/unit/ai.test.mjs`, `tests/e2e/ai-core.spec.mjs` |
+| AI features | `lib/ai/features.js`, `lib/ai/assistant.js`, `lib/panels/assistant.js`, `tests/e2e/ai-features.spec.mjs` (uses a fake provider through `window.__pigmentTest.ai`) |
+| Smart objects | `lib/smart-object.js`, `lib/io.js` (smart entries in `.pigment`, rasterised in PSD), `lib/panels/layers.js` (type icon, smart filter rows), `styles/smart.css`, `tests/e2e/smart.spec.mjs` |
+| Warp | `src/shared/pixels/warp.js`, `lib/warp.js`, `lib/image-ops.js` (only the `TransformTool` warp mode hooks named below), `styles/warp.css`, `tests/unit/warp.test.mjs`, `tests/e2e/warp.spec.mjs` |
+| Camera Raw, print, path ops | `src/shared/pixels/develop.js`, `lib/develop-ui.js`, `lib/print.js`, `src/main/print.js`, `lib/path-ops.js`, `lib/tools/vector.js` (path-operation option and commands), `tests/unit/develop.test.mjs`, `tests/e2e/extras.spec.mjs` |
+| Text and colour | `lib/text-path.js`, `lib/tools/text.js` (type-on-path entry), `lib/panels/character.js` (orientation control), `lib/color-modes.js`, `src/shared/pixels/color.js` (Lab/CMYK), `lib/panels/info.js`, `lib/canvas-view.js` (proof/gamut overlay hook named below), `tests/unit/color.test.mjs`, `tests/e2e/text-color.spec.mjs` |
+
+Shared integration points that already exist (do not re-implement them):
+
+- `document.js`: `registerLayerType(type, cls, { describe })` + `LAYER_TYPES` (used by `layerFromDescription` and `Document.describe`), `textExtensions` (`{ test(layer), layout(layer, ctx), baseBounds(layer), renderBase(layer) }`), `TextLayer.pathText`, `ShapeLayer.render()` delegating to `lib/path-ops.js renderShapeLayer(layer, canvas, bounds)`.
+- `image-ops.js`: any layer with `usesMatrixTransform === true` is transformed exactly like a text layer (a `transform` matrix, set through `setLayerProps`, kept editable); distort/perspective are refused for it.
+- `preload.cjs` `pigment.ai(method, payload)` ↔ `ipc.js` `createAi({ electron, getWindow, settings }).dispatch(method, payload)`; `pigment.printImage(opts)` ↔ `src/main/print.js printImage({ electron, getWindow }, opts)`. The browser bridge has `ai: null` and `printImage()` → `window.print()`.
+- `index.html` CSP `connect-src` allows `https://api.openai.com`, `https://auth.openai.com`, `https://generativelanguage.googleapis.com` (browser build only; the desktop app calls from the main process). Stylesheets `styles/ai.css`, `warp.css`, `smart.css`, `extras2.css` are linked and empty.
+- UI state for the menu (`app.syncUiState`): `layerType` (`'smart'` enables the Smart Objects items), `textOrientation`, `proofColors`, `gamutWarning` (the last two mirror `settings.proofColors` / `settings.gamutWarning`).
+- Icons: `sparkle`, `smart`, `warp`, `print` exist in `lib/icons.js`.
+
+### AI
+
+**Accounts.** Two providers, each with one of two sign-in methods:
+
+- OpenAI: *Sign in with ChatGPT* (the open-source token-sharing flow, uses the user's ChatGPT Plus/Pro plan for Responses API requests) or an *API key* (platform.openai.com, billed to the key; the only way to use image models).
+- Google Gemini: an *API key* from Google AI Studio (Google offers no plan-based sign-in for third-party apps; the accounts dialog says so).
+
+All secrets live in the main process: `<userData>/ai-credentials.json`, every value encrypted with `safeStorage.encryptString` (base64) when `safeStorage.isEncryptionAvailable()`, otherwise stored plain and `status.encryption === false` so the dialog can warn. The renderer only ever receives a status object.
+
+```ts
+// pigment.ai(method, payload) -> Promise<result>; errors reject with { message, code? }
+status(): { available: true, encryption: boolean,
+            openai: { method: 'chatgpt'|'api_key'|null, email?: string, plan?: boolean /* chatgpt.tokens.use.direct granted */ },
+            gemini: { method: 'api_key'|null } }
+setApiKey({ provider: 'openai'|'gemini', key: string }): status   // validates with a models request first
+signOut({ provider }): status
+chatgptSignIn({ port?: number }): status      // opens the system browser; resolves when the loopback callback arrives (5 min timeout)
+chatgptSignInStatus(): { pending: boolean, url?: string }   // the authorization URL, for a "copy link" button
+chatgptSignInManual({ callbackUrl: string }): status        // paste the address bar of the callback page (browser on another machine)
+chatgptSignInCancel(): void
+models({ provider }): { id: string, kind: 'chat'|'image'|'other', label?: string }[]   // cached 10 minutes
+request({ provider, path, method?: 'GET'|'POST', json?: object, multipart?: { fields: Record<string,string>, files: { field, name, type, base64 }[] },
+          stream?: boolean, timeoutMs?: number }): { status: number, body: any }
+// `path` is relative to the provider base: OpenAI https://api.openai.com/v1, Gemini https://generativelanguage.googleapis.com/v1beta.
+// main adds Authorization: Bearer <api key | ChatGPT access token> or x-goog-api-key, refreshes ChatGPT tokens,
+// and for the ChatGPT plan route reshapes a /responses body (below). stream: true means the SSE events of
+// /responses are aggregated and the `response.completed` payload's `response` object is returned as body.
+```
+
+Sign in with ChatGPT (from OpenAI's open-source flow): authorize URL `https://auth.openai.com/api/accounts/authorize`, token URL `https://auth.openai.com/api/accounts/oauth/token`, issuer `https://auth.openai.com`, `resource=https://api.openai.com/v1` in both requests, scope `openid profile email offline_access resource.invoke chatgpt.tokens.use.direct`, PKCE S256, `state` + `nonce`, loopback `redirect_uri=http://127.0.0.1:1455/auth/callback` (the port may vary, nothing else). First sign-in sends `client_id=dynamic_agent_client`, `agent_name_hint=Pigment` and a stable `ext_agent_host_id=urn:uuid:<generated once per installation, stored in settings>`; the callback query carries the issued `client_id` (`oaiapp_…`) which is stored and used for the code exchange (`grant_type=authorization_code`, `code_verifier`, `redirect_uri`, `resource`) and for refreshes (`grant_type=refresh_token`, tokens rotate; honour `earliest_refresh_at`; refresh 5 minutes before `expires_in`). Validate the ID token claims (`iss`, `aud` contains the client id, `exp`, `nonce`). Fatal token errors (`invalid_grant`, `invalid_client`, `invalid_refresh_token`, `refresh_token_expired`, `refresh_token_invalidated`, `refresh_token_reused`, `token_expired`) clear the sign-in. Plan-route request shaping for `POST /responses`: `store: false`, `stream: true`, system/developer messages moved into `instructions`, drop `background, conversation, max_output_tokens, max_tool_calls, metadata, moderation, multi_agent, prompt, prompt_cache_key, prompt_cache_options, prompt_cache_retention, safety_identifier, service_tier, temperature, top_logprobs, top_p, truncation, user`, drop hosted tools `code_interpreter, file_search, image_generation, mcp, tool_search` (function tools and `web_search` stay), no object `tool_choice`. The plan model catalog is `GET /v1/models` answering `{ models: [{ slug }] }` (API keys answer `{ data: [{ id }] }`). Error codes to translate: `subscription_sharing_user_not_eligible`, `subscription_sharing_usage_limit_exceeded` (HTTP 429), `subscription_sharing_usage_unavailable`, `subscription_sharing_route_not_supported`, `subscription_sharing_unsupported_capability`, `subscription_sharing_invalid_user`.
+
+**Providers (`lib/ai/providers.js`).** Pure request builders over `aiRequest` from `lib/ai/client.js` (which calls `bridge.ai` in Electron and, in the browser build, fetches the providers directly with keys from `localStorage['pigment.ai.keys']`; tests inject `window.__pigmentTest.ai = { request(payload) -> body }` and the client prefers it).
+
+```ts
+listModels(provider): Promise<{ chat: string[], image: string[], default: { chat, image } }>
+  // OpenAI defaults: chat = first of [gpt-5.5, gpt-5.1, gpt-5, gpt-4.1, gpt-4o] present, image = first of [gpt-image-1.5, gpt-image-1, gpt-image-2] present
+  // Gemini: chat = first of [gemini-2.5-pro, gemini-2.5-flash, gemini-2.0-flash] present, image = first of [gemini-3.1-flash-image(-preview), gemini-3-pro-image-preview, gemini-2.5-flash-image] present
+chat({ provider, model, instructions, messages: { role: 'user'|'assistant', text?: string, images?: string[] /* data URLs */ }[],
+       tools?: { name, description, parameters /* JSON schema */ }[], onToolCall?: (name, args) => Promise<any>, maxRounds?: number })
+  : Promise<{ text: string, calls: { name, args, result }[] }>
+  // OpenAI: POST /responses (input items input_text / input_image; function tools; function_call -> function_call_output loop, the whole
+  // history resent each round). Gemini: POST /models/{model}:generateContent (parts text / inline_data; tools.functionDeclarations;
+  // functionCall -> functionResponse parts).
+generateImage({ provider, model, prompt, width, height, transparent?: boolean, n?: 1 }): Promise<HTMLCanvasElement>
+  // OpenAI POST /images/generations { model, prompt, n, size, quality: 'auto', background: transparent ? 'transparent' : 'auto', output_format: 'png' }
+  //   (size from the nearest of 1024x1024 / 1536x1024 / 1024x1536, the result is resampled to width × height; `background` only for gpt-image-1/1.5)
+  // Gemini POST /models/{model}:generateContent with generationConfig.responseModalities ['IMAGE'] (+ 'TEXT' when the model needs it),
+  //   imageConfig.aspectRatio from the nearest supported ratio, imageSize only for gemini-3.x; the first inlineData part is the image.
+editImage({ provider, model, image: HTMLCanvasElement, mask?: HTMLCanvasElement /* alpha 255 = pixels to change */, prompt, transparent?: boolean })
+  : Promise<HTMLCanvasElement /* same size as image */>
+  // OpenAI POST /images/edits multipart: image[] (PNG), mask (PNG whose alpha is 0 where the image may change), prompt, model, size, output_format png,
+  //   input_fidelity 'high' (gpt-image-1/1.5 only), background. Gemini: the image (and, when a mask is given, the mask as a second image with the
+  //   instruction to change only the white area) plus the prompt; the result is composited back through the mask so untouched pixels stay exact.
+describeImage({ provider, model, image, prompt? }): Promise<string>
+```
+
+Images sent to a provider are downscaled so the long edge is at most 1536 px (OpenAI) or 2048 px (Gemini); results are resampled back (`pixels/transform.js resize`).
+
+**Features (`lib/ai/features.js`, AI menu).** Every command checks `status` first and opens the accounts dialog when nothing is connected; long requests run under `app.busy` with a cancel button and a toast on error. Results land as new layers above the active one (undoable through `structural`) except where noted:
+
+- `ai:generative-fill` (needs a selection): crops a square-ish region around the selection bounds padded by 25 % (clamped to the canvas, at most 1536 px), `editImage` with the selection as mask, composites the answer through the selection (feathered 1 px) into a new layer "Generative Fill". Prompt dialog with provider/model selects (remembered in `settings.ai`) and a "Variations: 1–3" count (one layer each).
+- `ai:generative-expand`: the transparent area of the canvas (after Canvas Size) is the mask; same flow, layer "Generative Expand".
+- `ai:generate-image`: prompt + size (document size by default, or a new document of W × H) → new layer or new document.
+- `ai:remove-background`: `editImage` with prompt "remove the background, keep the subject, transparent background" and `transparent: true`; the result's alpha becomes a layer mask on a copy of the layer (so it stays editable); Gemini (no alpha output) returns the subject on white, the near-white border is keyed out.
+- `ai:replace-background` / `ai:replace-sky`: prompt dialog; mask = inverse of the subject (from `remove-background`) or the top sky region prompt; new layer.
+- `ai:describe`: `describeImage` → dialog with the text, "Copy", "Use as document description" (`doc.meta.description`).
+
+**Assistant (`lib/ai/assistant.js`, panel `assistant`).** A chat panel: provider/model selects, "attach the current image" toggle (downscaled composite, default on), message list, input. The model gets `instructions` describing Pigment and these tools (JSON schema, same for both providers); each call runs through the normal command/history path so it is undoable, and its result (text) is returned to the model:
+
+`get_document` (size, layers with id/name/type/visible/opacity/blend, selection bounds), `set_active_layer(id)`, `apply_adjustment(kind, params)` (`image:adjust-*` with params, see `pixels/adjust.js`), `apply_filter(kind, params)` (`filter:*`), `run_command(id, arg)` (any registered command id; the assistant sees the command list in its instructions), `new_layer(name)`, `set_layer_props(id, { opacity, blend, visible, name })`, `select(kind: 'all'|'none'|'inverse'|'rect', rect?)`, `crop(rect)`, `resize_image(width, height)`, `canvas_size(width, height, anchor)`, `fill_selection(color)`, `add_text(text, x, y, size, color)`, `generative_fill(prompt)` (when a selection exists and an image model is connected). The panel shows the calls it made ("Applied Levels…") and a final message. The conversation is per document and kept in memory only.
+
+### Smart objects (`lib/smart-object.js`)
+
+```ts
+class SmartLayer extends Layer {            // type 'smart', registered with registerLayerType('smart', SmartLayer, { describe })
+  source: { kind: 'document', doc: Document } | { kind: 'image', canvas: HTMLCanvasElement, name?: string };
+  transform: Matrix | null;                 // base space (0,0 .. source width/height) -> document space; usesMatrixTransform = true
+  filters: { kind: string, params: object, enabled: boolean, mask?: null }[];   // smart filters, applied in order at render time
+  filtersEnabled: boolean;
+  bounds(): Rect; render(): { canvas, x, y }  // cached on (source version, transform, filters); the document source is composited with a Compositor
+}
+```
+
+Commands: `layer:smart-convert` (selected layers → one smart object whose source is a new Document of the canvas size holding copies of those layers; the originals are removed, undoable), `layer:smart-via-copy` (duplicate with a deep-copied source), `layer:smart-edit` (opens the source document in a new tab titled "<layer name> (smart object)"; File › Save in that tab writes back into the layer (`doc.smartHost = { hostDoc, layerId }`) and re-renders the host; closing asks to apply unsaved changes), `layer:smart-replace` (file dialog → new source image, transform kept), `layer:smart-export` (writes the source as `.pigment` or PNG), `layer:smart-reset` (transform = null), `layer:smart-rasterize` (replaces by a raster layer of the render), `layer:smart-filters-toggle`, `layer:smart-filters-clear`. `file:place` places images as smart objects when `settings.placeAsSmart !== false` (Preferences). Filters run on a smart layer (any `filter:*` dialog, Camera Raw included) append a smart filter instead of editing pixels; adjustments too (`kind: 'adjust:<kind>'`). The Layers panel shows a `smart` badge and, below the layer, one row per smart filter with a visibility eye and double-click to re-open the dialog with its params. Save: `.pigment` entries `smart/<layerId>.pigment` (nested document written with `writePigment`) or `smart/<layerId>.png`; PSD export rasterises. Free Transform works through `usesMatrixTransform` (the render stays sharp because it resamples the source at the final size: `render()` must rasterise the source through the matrix, not scale a cached bitmap).
+
+### Warp (`src/shared/pixels/warp.js`, `lib/warp.js`)
+
+Pure engine (Node-tested): `meshWarp(img, src: Grid, dst: Grid, { interp: 'bilinear'|'bicubic' })` where a Grid is `{ cols, rows, points: [x, y][] }` ((cols+1)·(rows+1) points, row-major; the inverse mapping of each destination quad uses two triangles with affine maps); `bezierWarp(img, rect, controls: [x, y][16], { subdivisions })` (a bicubic Bézier patch over `rect`, sampled into a mesh then `meshWarp`); `mlsWarp(img, pins: { from: [x,y], to: [x,y] }[], { kind: 'rigid'|'similarity'|'affine', alpha: 1, step: 4 })` (moving least squares on a step-px grid, then `meshWarp`); `perspectiveMesh(quads: { src: Quad, dst: Quad }[])` helper building a Grid from adjoining quads for Perspective Warp. Every function returns `{ image: ImageDataLike, x, y }` with the bounding box of the warped pixels (transparent outside).
+
+UI: Free Transform gains a **Warp** mode (`edit:transform-warp`, or the Warp button in the options bar while transforming): the box shows a 4×4 Bézier control net (corner anchors with handles, 4 inner points), draggable; presets (None, Arc, Arc Lower, Arc Upper, Arch, Bulge, Shell Lower, Shell Upper, Flag, Wave, Fish, Rise, Fisheye, Inflate, Squeeze, Twist) with a Bend slider and horizontal/vertical distortion fields; Enter commits through `history.replaceCanvas` (raster) or a toast for text/shape (rasterise first). The hooks in `image-ops.js` for this are `TransformTool.warp = { active, controls, render(canvas, x, y) }`, read by `update()` / `commit()` / `drawOverlay()`; the warp builder owns those three hook sites and nothing else in the file. `edit:perspective-warp`: layout mode (drag quads on the image, edges snap together), warp mode (drag corners; shift-click an edge makes it vertical/horizontal), Enter commits. `edit:puppet-warp`: shows a triangle mesh over the layer's opaque pixels (density: fewer/normal/more), click adds pins, drag moves them (Alt-drag rotates around a pin), Delete removes the selected pin, modes rigid/normal/distort, Enter commits. All three run as a session of the `transform` tool (`app.tools.activate('transform')` style) with the same Enter/Escape handling as Free Transform.
+
+### Camera Raw filter (`src/shared/pixels/develop.js`, `lib/develop-ui.js`)
+
+`develop(img, params)` applies in order: white balance (`temperature` −100..100 as a blue/yellow shift, `tint` −100..100 green/magenta), `exposure` −5..5 EV, `contrast` −100..100, `highlights`/`shadows`/`whites`/`blacks` −100..100 (luminance-masked curves), `texture` −100..100 (mid-frequency), `clarity` −100..100 (local contrast, radius ≈ 1 % of the long edge), `dehaze` −100..100, `vibrance`/`saturation` −100..100, HSL per range (reds, oranges, yellows, greens, aquas, blues, purples, magentas: hue/saturation/luminance −100..100), `sharpen: { amount 0..150, radius 0.5..3, detail }`, `noise: { luminance 0..100, color 0..100 }`, `vignette` −100..100, `grain` 0..100. `DEVELOP_DEFAULTS` holds the neutral values. The dialog (Filter › Camera Raw Filter…, `pixelEditDialog` with tabs Basic / Detail / HSL / Effects, live preview, Auto button = auto tone, Reset) applies with history label "Camera Raw"; on a smart layer it becomes a smart filter.
+
+### Printing (`lib/print.js`, `src/main/print.js`)
+
+File › Print… (`file:print`): a dialog with printer (from `bridge.getPrinters()`), paper size (A4, Letter, Legal, A3, Tabloid, custom mm), orientation, margins, scale (Fit to page / 100 % / custom %), position (centre or offset), copies, and a preview of the page. OK renders the flattened document to a PNG data URL and calls `bridge.printImage({ dataUrl, widthMm, heightMm, paper, landscape, marginsMm, offsetMm, printer, copies, silent: false })`. `src/main/print.js printImage()` opens a hidden `BrowserWindow`, loads an inline HTML page (`@page { size, margin }`, the image positioned in mm) and calls `webContents.print(...)`, resolving `{ ok, reason? }`; it also offers `pdf: true` to return PDF bytes (`printToPDF`) for a "Save as PDF…" button.
+
+### Path operations (`lib/path-ops.js`, `lib/tools/vector.js`)
+
+`PathData.subpaths[i].op` ∈ `'combine' | 'subtract' | 'intersect' | 'exclude'` (missing = combine). `renderShapeLayer` builds the shape area in subpath order on an alpha canvas (combine = source-over, subtract = destination-out, intersect = destination-in with the subpath, exclude = xor), paints the fill through it (destination-in) and strokes every subpath outline (inside/outside alignment clip against the combined area). Also exported: `pathAreaCanvas(path, width, height)` (used by Make Selection, `select:from-layer`, hit testing) and `combinePaths`. Shape tools get a "Path operations" select in the options bar (new shape / combine / subtract / intersect / exclude) that sets the op of the subpath they draw (new shape = a new layer); `path:op` (arg) changes the op of the selected subpaths (path selection tool) or of the whole active shape layer, undoable; `path:merge-components` rasterises the area into a single-subpath outline (marching squares → simplified path).
+
+### Text on a path and stacked vertical text (`lib/text-path.js`, `lib/tools/text.js`, `lib/panels/character.js`)
+
+A text layer with `pathText = { path: PathData, startOffset: 0..1, flip: boolean, align: 'left'|'center'|'right' }` lays its glyphs along the path: the text extension's `layout()` returns glyph positions (`glyphs: { ch, x, y, angle, width }[]`) and `renderBase()` draws each glyph rotated at its position; `baseBounds()` is the union of the glyph boxes (+ padding). The Type tool starts text on a path when the pointer is over a path of the active shape layer, the work path or a saved path (the cursor changes); `text:on-path` attaches the active text layer to the active path, `text:release-path` detaches (keeping the text), `text:flip-path` toggles `flip`; dragging the small I-beam handle on the path moves `startOffset`. `font.orientation = 'vertical-stacked'` lays glyphs top to bottom, one per line box (upright CJK), with lines running right to left; `text:orientation` (arg) switches between horizontal, vertical (rotated, the existing behaviour) and vertical-stacked, and the Character panel exposes the same three. Serialisation is generic (`pathText`, `font.orientation`).
+
+### Colour modes (`lib/color-modes.js`, `src/shared/pixels/color.js`)
+
+`color.js` gains `rgbToLab`, `labToRgb` (D65, sRGB), `rgbToCmyk`, `cmykToRgb` (naive GCR: k = 1 − max(r,g,b)), `isOutOfCmykGamut(rgb)` (true when the round trip through CMYK moves a channel by more than 24/255). Info panel: a second readout in Lab or CMYK (setting `settings.infoSecondary`: `'cmyk'|'lab'|'hsb'`); Color Picker dialog: Lab and CMYK fields next to RGB/HSB/Hex. View › Proof Colors (`view:proof`, `settings.proofColors`) renders the composite through the CMYK round trip; View › Gamut Warning (`view:gamut`, `settings.gamutWarning`, Ctrl+Shift+Y) overlays mid-grey on out-of-gamut pixels. Both are applied in `canvas-view.js` through one hook: `view.postProcess = (canvas) => canvas | null` set by the colour module (the view calls it on the composite before drawing when set). The document stays 8-bit RGB; this is a preview only.
+
+### Tests expected from every builder
+
+Unit tests for pure modules under `tests/unit/*.test.mjs` (node:test, no DOM); e2e specs under `tests/e2e/*.spec.mjs` using `helpers.mjs` (`openApp`, `newDoc`, `run`, `runAwait`, `pixel`, `drag`, `confirmDialog`). AI specs never call a real provider: they set `window.__pigmentTest.ai = { request: async (payload) => fakeBody }` before the feature runs and assert the request payload and the pixels produced from the fake answer. `npm test`, `npm run test:e2e` and the app spec (every menu command registered, every panel registered) must pass.

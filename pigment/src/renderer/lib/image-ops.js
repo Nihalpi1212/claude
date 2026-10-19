@@ -821,7 +821,7 @@ export class TransformTool extends Tool {
     const add = (l) => {
       if (l.isGroup) return l.children.forEach(add);
       if (!l.visible && l !== d.active) return;
-      if (['raster', 'text', 'shape'].includes(l.type)) out.push(l);
+      if (['raster', 'text', 'shape'].includes(l.type) || l.usesMatrixTransform) out.push(l);
     };
     const sel = d.selectedLayers();
     (sel.length ? sel : d.active ? [d.active] : []).forEach(add);
@@ -994,7 +994,8 @@ export class TransformTool extends Tool {
           l.canvas = r.canvas;
           l.x = r.x;
           l.y = r.y;
-        } else if (l.type === 'text') {
+        } else if (l.type === 'text' || l.usesMatrixTransform) {
+          // text and smart objects keep their source and carry a matrix
           if (m) l.transform = T.multiplyMatrix(m, o.transform ?? T.IDENTITY);
         } else if (l.type === 'shape') {
           const H = m ? null : T.homography(quadFromMatrix(s.box, T.IDENTITY), s.quad);
@@ -1028,7 +1029,7 @@ export class TransformTool extends Tool {
         l.canvas = o.canvas;
         l.x = o.x;
         l.y = o.y;
-      } else if (l.type === 'text') l.transform = o.transform;
+      } else if (l.type === 'text' || l.usesMatrixTransform) l.transform = o.transform;
       else if (l.type === 'shape') l.path = o.path;
       l.touch();
     }
@@ -1157,9 +1158,9 @@ export class TransformTool extends Tool {
               const src = s.sources.get(l);
               if (!src) continue;
               d.history.replaceCanvas('Transform', l, () => render(src.canvas, src.x, src.y));
-            } else if (l.type === 'text') {
+            } else if (l.type === 'text' || l.usesMatrixTransform) {
               if (m) setLayerProps(app, l, { transform: T.multiplyMatrix(m, o.transform ?? T.IDENTITY) }, 'Transform');
-              else app.dialogs.toast('Distort and perspective need a rasterized text layer', { kind: 'error' });
+              else app.dialogs.toast(`Distort and perspective need a rasterized ${l.type === 'text' ? 'text' : 'smart object'} layer`, { kind: 'error' });
             } else if (l.type === 'shape') {
               const H = m ? null : T.homography(quadFromMatrix(s.box, T.IDENTITY), s.quad);
               const f = m ? (x, y) => T.applyMatrix(m, x, y) : (x, y) => T.applyHomography(H, x, y);

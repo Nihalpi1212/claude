@@ -3,6 +3,24 @@
 // so the compositor can cache. Mutations happen through lib/history.js so they are undoable.
 import { parseColor, rgbaToHex } from '../../shared/pixels/color.js';
 import { transformBounds } from '../../shared/pixels/transform.js';
+import { renderShapeLayer } from './path-ops.js';
+
+// ---- extension points (see ARCHITECTURE.md "0.2 features") -------------------------------------------------
+/**
+ * Layer classes registered by feature modules (smart objects): type -> { cls, describe?(layer) -> extra
+ * serialisable props }. layerFromDescription() and Document.describe() consult it before the built-ins.
+ */
+export const LAYER_TYPES = new Map();
+export function registerLayerType(type, cls, { describe = null } = {}) {
+  LAYER_TYPES.set(type, { cls, describe });
+}
+/**
+ * Text layout/render extensions (text on a path, stacked vertical text): the first entry whose test(layer)
+ * is true takes over layout(layer, ctx) -> { lines, lineHeight, width, height, ascent, glyphs? },
+ * baseBounds(layer) -> Rect and renderBase(layer) -> { canvas, x, y }; everything else in TextLayer stays.
+ */
+export const textExtensions = [];
+export const textExtensionFor = (layer) => textExtensions.find((e) => e.test(layer)) ?? null;
 
 export const BLEND_MODES = [
   ['normal', 'Normal'], ['dissolve', 'Dissolve'], null,
@@ -158,10 +176,14 @@ export class TextLayer extends Layer {
     this.rotation = props.rotation ?? 0;
     // optional affine matrix [a, b, c, d, e, f] in document space (free transform keeps text editable)
     this.transform = props.transform ?? null;
+    // text on a path: { path: PathData (document space), startOffset: 0..1, flip: boolean, align } or null
+    this.pathText = props.pathText ?? null;
     this._cache = null;
   }
   /** Lines after wrapping, with their measured widths. */
   layout(ctx = measureContext()) {
+    const ext = textExtensionFor(this);
+    if (ext) return ext.layout(this, ctx);
     ctx.font = cssFont(this.font);
     const lineHeight = this.font.size * this.font.lineHeight;
     const words = this.text.split('\n');
@@ -189,6 +211,8 @@ export class TextLayer extends Layer {
   }
   /** Bounds before the free-transform matrix. */
   baseBounds() {
+    const ext = textExtensionFor(this);
+    if (ext) return ext.baseBounds(this);
     const l = this.layout();
     const pad = Math.ceil(this.font.size * 0.3) + (this.font.stroke?.width ?? 0);
     return { x: Math.floor(this.x - pad), y: Math.floor(this.y - pad), width: Math.ceil(l.width + pad * 2), height: Math.ceil(l.height + pad * 2) };
@@ -216,6 +240,8 @@ export class TextLayer extends Layer {
   }
   /** Renders the text without the transform matrix: { canvas, x, y }. */
   renderBase() {
+    const ext = textExtensionFor(this);
+    if (ext) return ext.renderBase(this);
     const l = this.layout();
     const b = this.baseBounds();
     const canvas = createCanvas(b.width, b.height);
@@ -398,36 +424,7 @@ export class ShapeLayer extends Layer {
     if (this._cache && this._cache.version === this.version) return this._cache;
     const b = this.bounds() ?? { x: 0, y: 0, width: 1, height: 1 };
     const canvas = createCanvas(b.width, b.height);
-    const ctx = canvas.getContext('2d');
-    const p = pathToPath2D(this.path, -b.x, -b.y);
-    const rect = { x: 0, y: 0, width: b.width, height: b.height };
-    if (this.fill) {
-      ctx.fillStyle = makePaint(ctx, this.fill, rect);
-      ctx.fill(p, 'nonzero');
-    }
-    if (this.stroke && this.stroke.width > 0) {
-      ctx.lineWidth = this.stroke.width * (this.stroke.align === 'center' || !this.stroke.align ? 1 : 2);
-      ctx.strokeStyle = makePaint(ctx, this.stroke.paint ?? { type: 'solid', color: this.stroke.color ?? '#000' }, rect);
-      ctx.lineJoin = this.stroke.join ?? 'miter';
-      ctx.lineCap = this.stroke.cap ?? 'butt';
-      ctx.setLineDash(this.stroke.dash ?? []);
-      if (this.stroke.align === 'inside') {
-        ctx.save();
-        ctx.clip(p);
-        ctx.stroke(p);
-        ctx.restore();
-      } else if (this.stroke.align === 'outside') {
-        ctx.save();
-        ctx.globalCompositeOperation = 'destination-over';
-        ctx.stroke(p);
-        ctx.restore();
-        // keep fill on top: redraw fill
-        if (this.fill) {
-          ctx.fillStyle = makePaint(ctx, this.fill, rect);
-          ctx.fill(p, 'nonzero');
-        }
-      } else ctx.stroke(p);
-    }
+    renderShapeLayer(this, canvas, b);
     this._cache = { version: this.version, canvas, x: b.x, y: b.y };
     return this._cache;
   }
@@ -467,6 +464,8 @@ export class AdjustmentLayer extends Layer {
 }
 
 export function layerFromDescription(d) {
+  const registered = LAYER_TYPES.get(d.type);
+  if (registered) return new registered.cls(d);
   switch (d.type) {
     case 'group': return new GroupLayer(d);
     case 'text': return new TextLayer(d);
@@ -662,7 +661,9 @@ export class Document {
       const d = layer.describe();
       if (layer.type === 'raster') Object.assign(d, { x: layer.x, y: layer.y, width: layer.canvas.width, height: layer.canvas.height });
       if (layer.type === 'group') Object.assign(d, { expanded: layer.expanded, children: layer.children.filter(saved).map(walk) });
-      if (layer.type === 'text') Object.assign(d, { x: layer.x, y: layer.y, width: layer.width, text: layer.text, font: { ...layer.font }, rotation: layer.rotation, transform: layer.transform ? layer.transform.slice() : null });
+      if (layer.type === 'text') Object.assign(d, { x: layer.x, y: layer.y, width: layer.width, text: layer.text, font: { ...layer.font }, rotation: layer.rotation, transform: layer.transform ? layer.transform.slice() : null, pathText: layer.pathText ? JSON.parse(JSON.stringify(layer.pathText)) : null });
+      const registered = LAYER_TYPES.get(layer.type);
+      if (registered?.describe) Object.assign(d, registered.describe(layer));
       if (layer.type === 'shape') Object.assign(d, { path: JSON.parse(JSON.stringify(layer.path)), fill: layer.fill, stroke: layer.stroke, shapeKind: layer.shapeKind, shapeProps: layer.shapeProps });
       if (layer.type === 'fill') Object.assign(d, { paint: JSON.parse(JSON.stringify({ ...layer.paint, pattern: layer.paint.pattern ? { scale: layer.paint.pattern.scale } : undefined })) });
       if (layer.type === 'adjustment') Object.assign(d, { kind: layer.kind, params: JSON.parse(JSON.stringify(layer.params)) });

@@ -38,6 +38,16 @@ const MODULES = [
   'lib/liquify.js',
   'lib/content-aware.js',
   'lib/style-ui.js',
+  'lib/smart-object.js',
+  'lib/warp.js',
+  'lib/develop-ui.js',
+  'lib/print.js',
+  'lib/text-path.js',
+  'lib/color-modes.js',
+  'lib/ai/accounts.js',
+  'lib/ai/features.js',
+  'lib/ai/assistant.js',
+  'lib/panels/assistant.js',
   'lib/panels/color.js',
   'lib/panels/swatches.js',
   'lib/panels/brushes.js',
@@ -176,6 +186,9 @@ export class App extends EventTarget {
       lastFilter: this.settings.lastFilter?.name ?? '',
       editingMask: !!this.ui.editingMask,
       layerType: d?.active?.type ?? null,
+      textOrientation: d?.active?.type === 'text' ? d.active.font?.orientation ?? 'horizontal' : null,
+      proofColors: !!this.settings.proofColors,
+      gamutWarning: !!this.settings.gamutWarning,
     };
     const changed = Object.keys(state).some((k) => this.uiState[k] !== state[k]);
     if (!changed) return;

@@ -236,6 +236,13 @@ function createBrowserBridge() {
     async printToPDF() {
       throw new Error('Print to PDF is only available in the desktop app');
     },
+    async printImage() {
+      if (test.silent) return { ok: true };
+      window.print();
+      return { ok: true };
+    },
+    // AI in the browser build: lib/ai/client.js talks to the providers directly (keys kept in localStorage)
+    ai: null,
     async getPrinters() {
       return [];
     },

@@ -16,7 +16,8 @@ const DIRECT_FILTERS = new Set(['despeckle', 'fragment', 'find-edges', 'solarize
 export const PANELS = [
   ['color', 'Color'], ['swatches', 'Swatches'], ['brushes', 'Brushes'], null,
   ['properties', 'Properties'], ['adjustments', 'Adjustments'], ['character', 'Character'], ['paths', 'Paths'], null,
-  ['layers', 'Layers'], ['channels', 'Channels'], ['history', 'History'], ['navigator', 'Navigator'], ['info', 'Info'],
+  ['layers', 'Layers'], ['channels', 'Channels'], ['history', 'History'], ['navigator', 'Navigator'], ['info', 'Info'], null,
+  ['assistant', 'AI Assistant'],
 ];
 
 /**
@@ -69,6 +70,8 @@ export function buildMenuTemplate({ platform, state = {}, recent = [], run, isPa
     sep,
     doc('&Place Image as Layer…', 'file:place'),
     sep,
+    doc('&Print…', 'file:print'),
+    sep,
     doc('Document &Properties…', 'file:properties'),
     doc(mac ? 'Reveal in Finder' : platform === 'win32' ? 'Show in Explorer' : 'Show in File Manager', 'file:reveal', { enabled: has && !!state.path }),
     ...(mac ? [] : [sep, { role: 'quit', label: platform === 'win32' ? 'E&xit' : '&Quit' }]),
@@ -102,6 +105,7 @@ export function buildMenuTemplate({ platform, state = {}, recent = [], run, isPa
       lyr('Skew', 'edit:transform-skew'),
       lyr('Distort', 'edit:transform-distort'),
       lyr('Perspective', 'edit:transform-perspective'),
+      lyr('Warp', 'edit:transform-warp'),
       sep,
       lyr('Rotate 180°', 'edit:transform-rotate-180'),
       lyr('Rotate 90° Clockwise', 'edit:transform-rotate-90'),
@@ -110,6 +114,8 @@ export function buildMenuTemplate({ platform, state = {}, recent = [], run, isPa
       lyr('Flip Horizontal', 'edit:transform-flip-h'),
       lyr('Flip Vertical', 'edit:transform-flip-v'),
     ], layer),
+    lyr('Puppet Warp', 'edit:puppet-warp'),
+    lyr('Perspective Warp', 'edit:perspective-warp'),
     sep,
     doc('Define &Pattern', 'edit:define-pattern'),
     sep,
@@ -193,6 +199,37 @@ export function buildMenuTemplate({ platform, state = {}, recent = [], run, isPa
     sub('Distri&bute', [lyr('Horizontally', 'layer:distribute', { arg: 'horizontal' }), lyr('Vertically', 'layer:distribute', { arg: 'vertical' })], layer),
     sub('Loc&k Layer', [lyr('All', 'layer:lock', { arg: 'all' }), lyr('Image Pixels', 'layer:lock', { arg: 'pixels' }), lyr('Position', 'layer:lock', { arg: 'position' }), lyr('Transparent Pixels', 'layer:lock', { arg: 'transparency' })], layer),
     sep,
+    sub('Smart &Objects', [
+      lyr('Convert to Smart Object', 'layer:smart-convert'),
+      lyr('New Smart Object via Copy', 'layer:smart-via-copy', { enabled: layer && state.layerType === 'smart' }),
+      sep,
+      lyr('Edit Contents', 'layer:smart-edit', { enabled: layer && state.layerType === 'smart' }),
+      lyr('Replace Contents…', 'layer:smart-replace', { enabled: layer && state.layerType === 'smart' }),
+      lyr('Export Contents…', 'layer:smart-export', { enabled: layer && state.layerType === 'smart' }),
+      lyr('Reset Transform', 'layer:smart-reset', { enabled: layer && state.layerType === 'smart' }),
+      sep,
+      lyr('Enable / Disable Smart Filters', 'layer:smart-filters-toggle', { enabled: layer && state.layerType === 'smart' }),
+      lyr('Clear Smart Filters', 'layer:smart-filters-clear', { enabled: layer && state.layerType === 'smart' }),
+      sep,
+      lyr('Rasterize', 'layer:smart-rasterize', { enabled: layer && state.layerType === 'smart' }),
+    ], layer),
+    sub('&Type', [
+      lyr('Text on Path', 'text:on-path', { enabled: layer && state.layerType === 'text' }),
+      lyr('Release from Path', 'text:release-path', { enabled: layer && state.layerType === 'text' }),
+      lyr('Flip Text on Path', 'text:flip-path', { enabled: layer && state.layerType === 'text' }),
+      sep,
+      lyr('Horizontal', 'text:orientation', { arg: 'horizontal', type: 'radio', checked: !state.textOrientation || state.textOrientation === 'horizontal', enabled: layer && state.layerType === 'text' }),
+      lyr('Vertical', 'text:orientation', { arg: 'vertical', type: 'radio', checked: state.textOrientation === 'vertical', enabled: layer && state.layerType === 'text' }),
+      lyr('Vertical, Stacked (CJK)', 'text:orientation', { arg: 'vertical-stacked', type: 'radio', checked: state.textOrientation === 'vertical-stacked', enabled: layer && state.layerType === 'text' }),
+    ], layer),
+    sub('Shape &Operations', [
+      lyr('Combine Shapes', 'path:op', { arg: 'combine' }),
+      lyr('Subtract Front Shape', 'path:op', { arg: 'subtract' }),
+      lyr('Intersect Shape Areas', 'path:op', { arg: 'intersect' }),
+      lyr('Exclude Overlapping Shapes', 'path:op', { arg: 'exclude' }),
+      sep,
+      lyr('Merge Shape Components', 'path:merge-components'),
+    ], layer && state.layerType === 'shape'),
     sub('Rasteri&ze', [lyr('Layer', 'layer:rasterize'), lyr('Layer Style', 'layer:rasterize-style')], layer),
     lyr('Edit &Text', 'layer:edit-text', { enabled: layer && state.layerType === 'text' }),
     sep,
@@ -233,6 +270,7 @@ export function buildMenuTemplate({ platform, state = {}, recent = [], run, isPa
     lyr(state.lastFilter ? `Last Filter: ${state.lastFilter}` : 'Last Filter', 'filter:last', { enabled: layer && !!state.lastFilter }),
     sep,
     lyr('&Liquify…', 'filter:liquify'),
+    lyr('Camera &Raw Filter…', 'filter:camera-raw'),
     sep,
     ...FILTER_CATEGORIES.map((cat) => sub(cat.name, cat.kinds.map((k) => lyr(`${FILTERS[k].name}${DIRECT_FILTERS.has(k) ? '' : '…'}`, `filter:${k}`)), layer)),
   ]);
@@ -255,6 +293,9 @@ export function buildMenuTemplate({ platform, state = {}, recent = [], run, isPa
     ]),
     item('&Rulers', 'view:rulers', { type: 'checkbox', checked: state.showRulers !== false }),
     item('Sna&p', 'view:snap', { type: 'checkbox', checked: state.snap !== false }),
+    sep,
+    doc('Proof Colors (CMYK)', 'view:proof', { type: 'checkbox', checked: !!state.proofColors }),
+    doc('Gamut Warning', 'view:gamut', { type: 'checkbox', checked: !!state.gamutWarning }),
     sep,
     doc('New &Guide…', 'view:new-guide'),
     doc('&Clear Guides', 'view:clear-guides'),
@@ -286,7 +327,23 @@ export function buildMenuTemplate({ platform, state = {}, recent = [], run, isPa
     ],
   };
 
-  const template = [fileMenu, editMenu, imageMenu, layerMenu, selectMenu, filterMenu, viewMenu, windowMenu, helpMenu];
+  const aiMenu = sub('A&I', [
+    item('AI &Accounts…', 'ai:accounts'),
+    sep,
+    lyr('Generative &Fill…', 'ai:generative-fill', { enabled: layer && sel }),
+    lyr('Generative &Expand…', 'ai:generative-expand'),
+    doc('Generate &Image…', 'ai:generate-image'),
+    sep,
+    lyr('Remove &Background', 'ai:remove-background'),
+    lyr('Replace Background…', 'ai:replace-background'),
+    lyr('Replace &Sky…', 'ai:replace-sky'),
+    sep,
+    doc('&Describe Image', 'ai:describe'),
+    sep,
+    item('AI A&ssistant', 'window:panel-assistant'),
+  ]);
+
+  const template = [fileMenu, editMenu, imageMenu, layerMenu, selectMenu, filterMenu, aiMenu, viewMenu, windowMenu, helpMenu];
   if (mac) {
     template.unshift({
       label: 'Pigment',

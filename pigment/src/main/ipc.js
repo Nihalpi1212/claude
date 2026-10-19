@@ -7,6 +7,8 @@ import { basename, dirname } from 'node:path';
 import { addRecent, removeRecent } from './recent.js';
 import { OPEN_DIALOG_FILTERS } from '../shared/formats.js';
 import { writeClipboardText, writeClipboardImage, readClipboardImage } from './clipboard.js';
+import { createAi } from './ai.js';
+import { printImage } from './print.js';
 
 const DEFAULT_FILTERS = OPEN_DIALOG_FILTERS;
 
@@ -235,7 +237,12 @@ export function registerIpc(ctx) {
     win.webContents[action]();
   });
 
+  // ---- AI (src/main/ai.js) ---------------------------------------------------------------------
+  const ai = createAi({ electron, getWindow, settings });
+  handle('ai', (method, payload) => ai.dispatch(method, payload));
+
   // ---- printing --------------------------------------------------------------------------------
+  handle('printImage', (opts = {}) => printImage({ electron, getWindow }, opts));
   handle('print', (opts = {}) => {
     const win = getWindow();
     if (!win) return { ok: false, reason: 'No window' };

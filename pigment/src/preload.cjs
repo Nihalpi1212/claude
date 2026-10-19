@@ -49,6 +49,9 @@ const api = {
   nativeEdit: (action) => send('nativeEdit', action),
 
   print: (opts) => invoke('print', opts),
+  printImage: (opts) => invoke('printImage', opts),
+  // AI accounts and requests live in the main process (src/main/ai.js); the renderer never sees a secret
+  ai: (method, payload) => invoke('ai', method, payload),
   printToPDF: (opts) => invoke('printToPDF', opts),
   getPrinters: () => invoke('getPrinters'),
 
