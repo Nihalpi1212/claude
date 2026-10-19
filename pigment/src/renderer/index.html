@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'sha256-REPLACED_BY_SCRIPT='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; worker-src 'self' blob:; connect-src 'self' blob: data:; media-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Pigment</title>
+  <link rel="icon" href="/build/icon.png">
+  <!-- The import map is inline; its sha256 hash is allowed by the CSP above. If you change the map,
+       recompute the hash: node scripts/csp-hash.mjs -->
+  <script type="importmap">
+  {
+    "imports": {
+      "ag-psd": "./vendor/ag-psd.js"
+    }
+  }
+  </script>
+  <link rel="stylesheet" href="./styles/theme.css">
+  <link rel="stylesheet" href="./styles/app.css">
+  <link rel="stylesheet" href="./styles/dialogs.css">
+  <link rel="stylesheet" href="./styles/editor.css">
+  <link rel="stylesheet" href="./styles/panels.css">
+</head>
+<body>
+  <div id="app" class="app">
+    <header id="titlebar" class="titlebar">
+      <div id="tabbar" class="tabbar" role="tablist" aria-label="Open documents"></div>
+      <div id="titlebar-right" class="titlebar-right"></div>
+    </header>
+    <div id="options-bar" class="options-bar" role="toolbar" aria-label="Tool options"></div>
+    <div id="main" class="main">
+      <aside id="toolbox" class="toolbox" role="toolbar" aria-label="Tools" aria-orientation="vertical"></aside>
+      <section id="canvas-host" class="canvas-host" aria-live="polite"></section>
+      <section id="welcome" class="welcome" hidden></section>
+      <aside id="panels" class="panels">
+        <div id="panels-resizer" class="panels-resizer" role="separator" aria-orientation="vertical"></div>
+        <div id="panels-dock" class="panels-dock"></div>
+      </aside>
+    </div>
+    <footer id="statusbar" class="statusbar" role="status"></footer>
+  </div>
+  <div id="dialogs" class="dialogs"></div>
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+  <script src="./lib/polyfills.js"></script>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
