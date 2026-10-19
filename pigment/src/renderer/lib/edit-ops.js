@@ -409,33 +409,66 @@ export function install(app) {
     const d = doc();
     if (!d) return;
     if (!quickMask) {
-      // a temporary layer whose alpha is the selection, shown as a red overlay; paint on it to edit
+      // a hidden greyscale layer (white = selected) that the paint tools edit; the view shows the
+      // unselected area as a red overlay, like Photoshop's rubylith
       const c = createCanvas(d.width, d.height);
-      if (hasSel()) c.getContext('2d').drawImage(d.selection.toCanvas(), 0, 0);
-      const layer = new RasterLayer({ name: 'Quick Mask', canvas: c, x: 0, y: 0, opacity: 0.5 });
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(0, 0, d.width, d.height);
+      if (hasSel()) ctx.drawImage(d.selection.toCanvas(), 0, 0);
+      else {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, d.width, d.height);
+      }
+      const layer = new RasterLayer({ name: 'Quick Mask', canvas: c, x: 0, y: 0, visible: false });
       layer.quickMask = true;
-      // tint: draw selected areas clear, unselected red
-      quickMask = { layer, previous: d.active };
+      layer.locked.position = true;
+      const view = d.view;
+      let tint = null, tintVersion = -1;
+      const overlay = view.addOverlay((octx, v) => {
+        if (!tint || tintVersion !== layer.version) {
+          tint = createCanvas(d.width, d.height);
+          const t = tint.getContext('2d');
+          t.fillStyle = '#ff0000';
+          t.fillRect(0, 0, d.width, d.height);
+          t.globalCompositeOperation = 'screen';
+          t.drawImage(layer.canvas, 0, 0);
+          tintVersion = layer.version;
+        }
+        const m = v.matrix();
+        octx.save();
+        octx.setTransform(v.dpr * m.a, v.dpr * m.b, v.dpr * m.c, v.dpr * m.d, v.dpr * m.e, v.dpr * m.f);
+        octx.globalCompositeOperation = 'multiply';
+        octx.globalAlpha = 0.5;
+        octx.imageSmoothingEnabled = v.zoom < 1;
+        octx.drawImage(tint, 0, 0);
+        octx.restore();
+      });
+      quickMask = { layer, previous: d.active, overlay, selection: d.selection };
+      view.quickMask = layer;
       d.add(layer, d.root, d.root.children.length);
       d.setActive(layer);
-      layer.render = undefined;
+      view.hideAnts = true;
       app.statusbar.set('target', 'Quick Mask: paint with black to remove from the selection, white to add. Press Q to finish.');
       app.dialogs.toast('Quick Mask on: paint to edit the selection, then press Q', { timeout: 2500 });
+      if (!app.tools.active?.strokeSettings) app.tools.activate('brush');
     } else {
-      const { layer, previous } = quickMask;
+      const { layer, previous, overlay } = quickMask;
       quickMask = null;
+      overlay();
+      d.view.quickMask = null;
+      d.view.hideAnts = false;
       const img = layer.canvas.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, d.width, d.height);
       const mask = new Uint8ClampedArray(d.width * d.height);
-      // white strokes add (alpha up and bright), black strokes remove: use luminance * alpha
       for (let i = 0; i < mask.length; i++) {
         const j = i * 4;
-        const lum = (0.299 * img.data[j] + 0.587 * img.data[j + 1] + 0.114 * img.data[j + 2]) / 255;
-        mask[i] = Math.round(img.data[j + 3] * lum);
+        mask[i] = Math.round(((0.299 * img.data[j] + 0.587 * img.data[j + 1] + 0.114 * img.data[j + 2]) * img.data[j + 3]) / 255);
       }
-      d.remove(layer);
+      if (layer.parent?.children.includes(layer)) d.remove(layer);
       if (previous && previous.parent) d.setActive(previous);
       app.statusbar.clear('target');
-      app.applySelection(Selection.fromMask(d.width, d.height, mask), 'replace', 'Quick mask');
+      const sel = Selection.fromMask(d.width, d.height, mask);
+      app.applySelection(sel.isEmpty ? null : sel, 'replace', 'Quick mask');
     }
     app.commands.invalidate();
   }

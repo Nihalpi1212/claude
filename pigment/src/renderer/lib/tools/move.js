@@ -367,6 +367,7 @@ export class CropTool extends Tool {
   resetBox() {
     if (!this.doc) return;
     this.box = { x: 0, y: 0, width: this.doc.width, height: this.doc.height };
+    this.pristine = true; // dragging inside the untouched full-canvas box draws a new box
     this.view?.invalidate();
   }
   ratio() {
@@ -391,7 +392,9 @@ export class CropTool extends Tool {
     return null;
   }
   onPointerDown(p) {
-    const h = this.handleAt(p);
+    let h = this.handleAt(p);
+    if (h === 'move' && this.pristine) h = null;
+    this.pristine = false;
     if (h) this.drag = { handle: h, start: p, box: { ...this.box } };
     else this.drag = { handle: 'new', start: p, box: { x: p.x, y: p.y, width: 0, height: 0 } };
   }

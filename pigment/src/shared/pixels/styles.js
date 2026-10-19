@@ -26,8 +26,12 @@
 //
 // Limitation of a standalone image: effects blend with each other and with the layer, not with
 // the document underneath; the compositor draws the whole result with the layer's blend mode.
+//
+// Every output pixel is what an unbounded canvas would show there: the work window always holds
+// the layer content the pixel depends on plus the full reach of every intermediate buffer, so the
+// result does not depend on pad, rect or which other effects are enabled.
 
-import { createImage, cloneImage, cropImage, pasteImage, clampRect, contentBounds, clamp01 } from './core.js';
+import { createImage, pasteImage, clampRect, intersectRect, unionRect, inflateRect, isEmptyRect, fullRect, clamp01 } from './core.js';
 import { parseColor } from './color.js';
 import { blendImages, isBlendMode } from './blend.js';
 
@@ -317,6 +321,15 @@ function gaussianBlur(src, w, h, sigma) {
   return b;
 }
 
+/** How far (pixels) gaussianBlur(sigma) spreads non-zero values beyond its input's support. */
+function blurReach(sigma) {
+  if (!(sigma >= 0.2)) return 0;
+  if (sigma <= 4) return Math.ceil(sigma * 3);
+  let s = 0;
+  for (const r of boxRadii(sigma)) s += r;
+  return s;
+}
+
 const EDT_INF = 1e20;
 
 /** Felzenszwalb-Huttenlocher 1D squared distance transform of f (length n) into d. */
@@ -396,45 +409,138 @@ function squaredDistance(seed, w, h, borderSeeds) {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Working context: everything happens in a window = the layer's content bounds grown by the
-// padding, clipped to the output, so the cost follows the content, not the canvas.
+// Working context: everything happens in a window (in source-image coordinates, possibly larger
+// than the image) around the layer content, so the cost follows the content, not the canvas.
 
-function makeContext(src, pad, win, cb, fill, originX, originY) {
+/** Content bounds (alpha > 0) and peak alpha of the whole image in one pass, or null when empty. */
+function alphaStats(img) {
+  const { width, height, data } = img;
+  let x1 = width, y1 = height, x2 = -1, y2 = -1, maxA = 0;
+  for (let y = 0; y < height; y++) {
+    let p = y * width * 4 + 3, any = false;
+    for (let x = 0; x < width; x++, p += 4) {
+      const a = data[p];
+      if (!a) continue;
+      if (!any) {
+        any = true;
+        if (x < x1) x1 = x;
+      }
+      if (x > x2) x2 = x;
+      if (a > maxA) maxA = a;
+    }
+    if (any) {
+      if (y < y1) y1 = y;
+      y2 = y;
+    }
+  }
+  return x2 < 0 ? null : { cb: { x: x1, y: y1, width: x2 - x1 + 1, height: y2 - y1 + 1 }, maxA };
+}
+
+/**
+ * Margins of the enabled effects, in whole pixels:
+ *  - extent: how far beyond the content the output can be non-zero;
+ *  - support: how far beyond the content any intermediate buffer (dilated / blurred mattes, bevel
+ *    height map, stroke ring) can be non-zero, so a window this much larger loses nothing;
+ *  - reach: how far from a pixel the content it depends on can lie (window cut through content).
+ */
+function styleMargins(s) {
+  let extent = 0, support = 0, reach = 0;
+  const use = (e, sp, re) => {
+    if (e > extent) extent = e;
+    if (sp > support) support = sp;
+    if (re > reach) reach = re;
+  };
+  const shadow = (fx, outside) => {
+    const br = blurReach(nonNeg(fx.size, 5) / 2.5), sp = Math.ceil(nonNeg(fx.spread)) + 1;
+    const off = Math.ceil(Math.abs(num(fx.distance, 5))) + 1;
+    use(outside ? sp + br + off : 0, outside ? sp + br : br + 1, sp + br + off + 2);
+  };
+  if (s.dropShadow.enabled) shadow(s.dropShadow, true);
+  if (s.innerShadow.enabled) shadow(s.innerShadow, false);
+  if (s.outerGlow.enabled) {
+    const g = s.outerGlow, sp = Math.ceil(nonNeg(g.spread)) + 1 + blurReach(nonNeg(g.size, 5) / 2.5);
+    use(sp, sp, sp + 2);
+  }
+  if (s.innerGlow.enabled) {
+    const g = s.innerGlow, br = blurReach(nonNeg(g.size, 5) / 2.5);
+    use(0, br + 1, Math.ceil(nonNeg(g.choke)) + br + 3);
+  }
+  if (s.satin.enabled) {
+    const st = s.satin, br = blurReach(nonNeg(st.size, 14) / 2.5);
+    use(0, br + 1, Math.ceil(Math.abs(num(st.distance, 11))) + br + 3);
+  }
+  if (s.bevel.enabled) {
+    const bv = s.bevel, sp = Math.ceil(nonNeg(bv.size, 5)) + blurReach(bevelSigma(bv)) + 3;
+    use((BEVEL_STYLES[bv.style] ?? 0) === 0 ? 0 : sp, sp, sp + 2);
+  }
+  if (s.stroke.enabled) {
+    const st = s.stroke, size = nonNeg(st.size, 3), sp = Math.ceil(size) + 2;
+    use(st.position === 'inside' ? 0 : Math.ceil(st.position === 'center' ? size / 2 : size) + 1, sp, sp + 2);
+  }
+  return { extent, support, reach: Math.max(reach, support) };
+}
+
+/**
+ * Buffers for one applyStyles() call over the window win (source coordinates). cb is the whole
+ * layer's content bounds and maxA its peak alpha, so results do not depend on the window.
+ */
+function makeContext(src, win, cb, maxA, fill) {
   const w = win.width, h = win.height, n = w * h;
   const A8 = new Uint8Array(n), L = new Float32Array(n);
   const I = { width: w, height: h, data: new Uint8ClampedArray(n * 4) };
   const Id = I.data, sd = src.data;
   const fillByte = Math.round(fill * 255);
   if (fillByte) for (let p = 3; p < Id.length; p += 4) Id[p] = fillByte;
-  const sx0 = Math.max(0, win.x - pad), sx1 = Math.min(src.width, win.x + w - pad);
-  const sy0 = Math.max(0, win.y - pad), sy1 = Math.min(src.height, win.y + h - pad);
-  let maxA = 0;
+  const sx0 = Math.max(0, win.x), sx1 = Math.min(src.width, win.x + w);
+  const sy0 = Math.max(0, win.y), sy1 = Math.min(src.height, win.y + h);
   for (let sy = sy0; sy < sy1; sy++) {
     let si = (sy * src.width + sx0) * 4;
-    let wi = (sy + pad - win.y) * w + (sx0 + pad - win.x);
+    let wi = (sy - win.y) * w + (sx0 - win.x);
     for (let sx = sx0; sx < sx1; sx++, si += 4, wi++) {
       const a = sd[si + 3];
       if (!a) continue;
       A8[wi] = a;
       L[wi] = a / 255;
-      if (a > maxA) maxA = a;
       const p = wi * 4;
       Id[p] = sd[si];
       Id[p + 1] = sd[si + 1];
       Id[p + 2] = sd[si + 2];
     }
   }
+  const cw = intersectRect(cb, win);
   return {
     w, h, n, A8, L, I,
     B: { width: w, height: h, data: new Uint8ClampedArray(n * 4) },
     fx: { width: w, height: h, data: new Uint8ClampedArray(n * 4) },
     full: { x: 0, y: 0, width: w, height: h },
-    cb: { x: cb.x + pad - win.x, y: cb.y + pad - win.y, width: cb.width, height: cb.height },
+    // content inside the window (where interior effects are evaluated) and the whole content box
+    // (gradient geometry), both in window coordinates
+    cb: { x: cw.x - win.x, y: cw.y - win.y, width: cw.width, height: cw.height },
+    gb: { x: cb.x - win.x, y: cb.y - win.y, width: cb.width, height: cb.height },
     thr: Math.max(1, Math.ceil(maxA / 2)),
-    fill, originX, originY,
+    fill, originX: -win.x, originY: -win.y,
     bEmpty: true,
-    inside: null, dOut: null, dIn: null,
+    inside: null, dOut: null, dIn: null, knock: null,
   };
+}
+
+/**
+ * Per-pixel factor for effects drawn under the layer ("layer knocks out drop shadow"): with the
+ * finished interior alpha ia over them, (1 - a) / (1 - ia) leaves them exactly (1 - a) visible,
+ * a being the layer alpha. That hides them under a see-through fill (fill 0 -> ia = 0) and is 1
+ * where the interior is as opaque as the layer (fill 1), so it varies continuously with the fill.
+ */
+function knockout(ctx) {
+  if (!ctx.knock) {
+    const { n, A8 } = ctx, Id = ctx.I.data;
+    const K = new Float32Array(n);
+    for (let i = 0, p = 3; i < n; i++, p += 4) {
+      const a = A8[i], ia = Id[p];
+      K[i] = !a ? 1 : ia >= 255 ? 0 : (255 - a) / (255 - ia);
+    }
+    ctx.knock = K;
+  }
+  return ctx.knock;
 }
 
 /** 1 where the alpha reaches half the layer's peak alpha: the thresholded matte. */
@@ -482,14 +588,21 @@ function dilateAlpha(ctx, r) {
   return out;
 }
 
-/** Layer alpha choked inwards by r pixels (antialiased). */
+/**
+ * Layer alpha choked inwards by r pixels (antialiased). Edge pixels below the matte threshold
+ * fade with the first pixel of the inside, so a choke of 0+ is continuous with no choke.
+ */
 function erodeAlpha(ctx, r) {
   const { n, L } = ctx;
   if (!(r > 0)) return L;
   const inside = insideMask(ctx), dI = distIn(ctx);
   const out = new Float32Array(n);
+  const fringe = r < 1 ? 1 - r : 0;
   for (let i = 0; i < n; i++) {
-    if (!inside[i]) continue;
+    if (!inside[i]) {
+      if (fringe) out[i] = L[i] * fringe;
+      continue;
+    }
     const v = Math.sqrt(dI[i]) - r;
     out[i] = v >= 1 ? L[i] : v > 0 ? L[i] * v : 0;
   }
@@ -498,8 +611,8 @@ function erodeAlpha(ctx, r) {
 
 /**
  * Writes colour (r, g, b) with alpha = matte into ctx.fx inside rect. The matte is read at
- * (x - dx, y - dy) (0 outside the window), optionally inverted, optionally multiplied by
- * (1 - knock).
+ * (x - dx, y - dy) (0 outside the window), optionally inverted, optionally multiplied by the
+ * per-pixel factor knock.
  */
 function fillMatte(ctx, rect, col, matte, dx, dy, invert, knock) {
   const d = ctx.fx.data, w = ctx.w, h = ctx.h;
@@ -514,7 +627,7 @@ function fillMatte(ctx, rect, col, matte, dx, dy, invert, knock) {
       const sx = x - dx;
       let v = rowOk && sx >= 0 && sx < w ? matte[srow + x] : 0;
       if (invert) v = 1 - v;
-      if (knock) v *= 1 - knock[i];
+      if (knock) v *= knock[i];
       const p = i * 4;
       d[p] = r;
       d[p + 1] = g;
@@ -555,10 +668,19 @@ function lightAngle(fx, opts) {
   return fx.useGlobalLight && Number.isFinite(opts.globalAngle) ? opts.globalAngle : num(fx.angle, 120);
 }
 
+/**
+ * Rounds half away from zero after snapping float noise (cos(120 deg) * 5 is 2.4999999999999990),
+ * so opposite angles give mirror-image offsets.
+ */
+function roundSym(v) {
+  const a = Math.round(Math.round(Math.abs(v) * 1e6) / 1e6);
+  return v < 0 && a ? -a : a;
+}
+
 /** Integer shadow offset for Photoshop's light angle: the shadow falls away from the light. */
 function shadowOffset(angle, distance) {
   const a = angle * RAD;
-  return [Math.round(-Math.cos(a) * distance), Math.round(Math.sin(a) * distance)];
+  return [roundSym(-Math.cos(a) * distance), roundSym(Math.sin(a) * distance)];
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -570,8 +692,8 @@ function dropShadow(ctx, fx, opts) {
   const base = dilateAlpha(ctx, nonNeg(fx.spread));
   const matte = gaussianBlur(base, ctx.w, ctx.h, nonNeg(fx.size, 5) / 2.5);
   const [dx, dy] = shadowOffset(lightAngle(fx, opts), num(fx.distance, 5));
-  // "Layer knocks out drop shadow": only matters when the fill is see-through.
-  fillMatte(ctx, ctx.full, col, matte, dx, dy, false, ctx.fill < 1 ? ctx.L : null);
+  // "Layer knocks out drop shadow": only visible where the interior is more see-through than the layer.
+  fillMatte(ctx, ctx.full, col, matte, dx, dy, false, knockout(ctx));
   composite(ctx, ctx.B, fx.blend, alpha, null);
 }
 
@@ -610,7 +732,7 @@ function satin(ctx, fx) {
   const { w, h, cb } = ctx;
   const bl = gaussianBlur(ctx.L, w, h, nonNeg(fx.size, 14) / 2.5);
   const a = num(fx.angle, 19) * RAD, dist = num(fx.distance, 11);
-  const ox = Math.round(Math.cos(a) * dist), oy = Math.round(-Math.sin(a) * dist);
+  const ox = roundSym(Math.cos(a) * dist), oy = roundSym(-Math.sin(a) * dist);
   const invert = fx.invert !== false;
   const d = ctx.fx.data, r = col[0], g = col[1], b = col[2];
   for (let y = cb.y; y < cb.y + cb.height; y++) {
@@ -695,10 +817,11 @@ function gradientOverlay(ctx, fx) {
   const vx = -uy, vy = ux;
   const scale = Math.max(0.01, num(fx.scale, 1));
   const reverse = !!fx.reverse;
-  const cx = cb.x + cb.width / 2, cy = cb.y + cb.height / 2;
+  const gb = ctx.gb;
+  const cx = gb.x + gb.width / 2, cy = gb.y + gb.height / 2;
   // Aligned with the layer: a linear gradient spans the content box along its direction.
-  const len = Math.max(1e-6, (Math.abs(cb.width * ux) + Math.abs(cb.height * uy)) * scale);
-  const rad = Math.max(1e-6, (Math.max(cb.width, cb.height) / 2) * scale);
+  const len = Math.max(1e-6, (Math.abs(gb.width * ux) + Math.abs(gb.height * uy)) * scale);
+  const rad = Math.max(1e-6, (Math.max(gb.width, gb.height) / 2) * scale);
   const TWO_PI = Math.PI * 2, top = LUT_SIZE - 1;
   for (let y = cb.y; y < cb.y + cb.height; y++) {
     const py = y + 0.5 - cy;
@@ -779,10 +902,15 @@ function patternOverlay(ctx, fx) {
 
 const BEVEL_STYLES = { 'inner-bevel': 0, 'outer-bevel': 1, emboss: 2, 'pillow-emboss': 3 };
 
+/** Blur applied to a bevel's height map: a little for 'smooth', plus soften. */
+const bevelSigma = (fx) => Math.hypot(fx.technique !== 'chisel-hard' ? 0.75 : 0, nonNeg(fx.soften) / 2.5);
+
 /**
  * Highlight and shadow mattes of a bevel: a height map from the signed distance to the
  * thresholded edge (profile per style, smoothstep for 'smooth'), lightly blurred (plus soften),
- * lit by a directional light (angle, altitude) with the depth scaling the slopes.
+ * lit by a directional light (angle, altitude) with the depth scaling the slopes. The height is
+ * stored relative to its value far outside the layer (so it is 0 there and the zero-padded blur
+ * cannot invent an edge at the window border); only its gradient matters.
  */
 function bevelMaps(ctx, fx, opts) {
   const size = nonNeg(fx.size, 5), depth = nonNeg(fx.depth, 100) / 100;
@@ -794,6 +922,7 @@ function bevelMaps(ctx, fx, opts) {
   const inside = insideMask(ctx), dI = distIn(ctx), dO = distOut(ctx);
   const H = new Float32Array(n);
   const half = size / 2;
+  const tFar = style === 3 ? 1 : 0; // the profile's value far outside (pillow emboss rises outwards)
   for (let i = 0; i < n; i++) {
     const sd = inside[i] ? Math.sqrt(dI[i]) - 0.5 : 0.5 - Math.sqrt(dO[i]);
     let t;
@@ -803,10 +932,9 @@ function bevelMaps(ctx, fx, opts) {
     else t = (sd < 0 ? -sd : sd) / half;
     t = t <= 0 ? 0 : t >= 1 ? 1 : t;
     if (smooth) t = t * t * (3 - 2 * t);
-    H[i] = down ? 1 - t : t;
+    H[i] = down ? tFar - t : t - tFar;
   }
-  const sigma = Math.hypot(smooth ? 0.75 : 0, nonNeg(fx.soften) / 2.5);
-  const Hb = gaussianBlur(H, w, h, sigma);
+  const Hb = gaussianBlur(H, w, h, bevelSigma(fx));
   const angle = lightAngle(fx, opts) * RAD;
   const alt = Math.min(90, Math.max(0, fx.useGlobalLight && Number.isFinite(opts.globalAltitude) ? opts.globalAltitude : num(fx.altitude, 30))) * RAD;
   const lx = Math.cos(angle) * Math.cos(alt), ly = -Math.sin(angle) * Math.cos(alt), lz = Math.sin(alt);
@@ -834,7 +962,7 @@ function bevelMaps(ctx, fx, opts) {
 function bevelPart(ctx, fx, maps, outer) {
   const target = outer ? ctx.B : ctx.I;
   const rect = outer ? ctx.full : ctx.cb;
-  const knock = outer ? ctx.L : null;
+  const knock = outer ? knockout(ctx) : null;
   const hc = parseColor(fx.highlightColor), ha = effectAlpha({ opacity: fx.highlightOpacity }, hc, 0.75);
   if (ha > 0) {
     fillMatte(ctx, rect, hc, maps.hl, 0, 0, false, knock);
@@ -910,20 +1038,31 @@ function strokeOuter(ctx, fx, r) {
   composite(ctx, ctx.B, fx.blend, alpha, null);
 }
 
+/** Copies rect of src into dst at (dx, dy) (rect inside src, destination inside dst). */
+function copyRect(src, rect, dst, dx, dy) {
+  for (let y = 0; y < rect.height; y++) {
+    const s = ((rect.y + y) * src.width + rect.x) * 4;
+    dst.data.set(src.data.subarray(s, s + rect.width * 4), ((dy + y) * dst.width + dx) * 4);
+  }
+}
+
 /**
  * Renders the enabled layer effects of styles around img.
  *
  * The output is (width + 2 * pad) x (height + 2 * pad) with the layer drawn at (pad, pad);
  * offsetX / offsetY are where its top-left lands relative to the input (-pad, -pad), so the
- * caller draws it at (layer.x + offsetX, layer.y + offsetY). With nothing enabled (and full fill
- * opacity) it returns a copy of img padded by pad (pad defaults to 0 then). Deterministic.
+ * caller draws it at (layer.x + offsetX, layer.y + offsetY). Every output pixel is what an
+ * unbounded canvas would show at that position: a smaller pad or a rect only crops the result,
+ * it never changes the pixels that remain. With nothing enabled (and full fill opacity) it
+ * returns a copy of img padded by pad (pad defaults to 0 then). Deterministic.
  *
  * @param {ImageDataLike} img layer pixels, straight alpha; not modified
  * @param {object | null} styles partial styles (see DEFAULT_STYLES); missing fields use defaults
  * @param {{ pad?: number, rect?: Rect, fillOpacity?: number, globalAngle?: number, globalAltitude?: number }} [opts]
  *   pad: border to add (default stylePadding(styles)); a smaller pad clips the effects.
- *   rect: only style this part of img (default the whole image); the output then covers the rect
- *     grown by pad and the offsets are rect.x - pad, rect.y - pad.
+ *   rect: output region of img (clipped to it, default the whole image): the output covers the
+ *     rect grown by pad, offsets rect.x - pad, rect.y - pad, and matches the whole-image result
+ *     there (layer pixels outside the rect still cast their effects into it, as in filters.js).
  *   fillOpacity: Photoshop's Fill (0..1, default 1): fades the layer's own pixels but not its
  *     effects (a 0 fill with a stroke or overlay keeps only the effect).
  *   globalAngle / globalAltitude: used by effects that set useGlobalLight: true.
@@ -934,33 +1073,26 @@ export function applyStyles(img, styles, opts = {}) {
   const s = mergeStyles(styles);
   const need = stylePadding(s);
   const pad = Math.max(0, Math.floor(num(o.pad, need)));
-  let src = img, ox = 0, oy = 0;
-  if (o.rect) {
-    const r = clampRect(o.rect, img.width, img.height);
-    if (r.x !== 0 || r.y !== 0 || r.width !== img.width || r.height !== img.height) {
-      src = cropImage(img, r);
-      ox = r.x;
-      oy = r.y;
-    }
-  }
-  const W = src.width + pad * 2, H = src.height + pad * 2;
-  const offsetX = ox - pad, offsetY = oy - pad;
+  const r = o.rect ? clampRect(o.rect, img.width, img.height) : fullRect(img);
+  const W = r.width + pad * 2, H = r.height + pad * 2;
+  const offsetX = r.x - pad, offsetY = r.y - pad;
+  const out = createImage(W, H);
   const fill = clamp01(num(o.fillOpacity, 1));
   if (!hasEnabledStyles(s) && fill >= 1) {
-    return { image: pad ? pasteImage(createImage(W, H), src, pad, pad) : cloneImage(src), offsetX, offsetY };
+    pasteImage(out, img, -offsetX, -offsetY);
+    return { image: out, offsetX, offsetY };
   }
-  const out = createImage(W, H);
-  const cb = contentBounds(src);
-  if (!cb) return { image: out, offsetX, offsetY };
-  const m = Math.max(pad, need);
-  const win = clampRect({ x: cb.x + pad - m, y: cb.y + pad - m, width: cb.width + 2 * m, height: cb.height + 2 * m }, W, H);
-  const ctx = makeContext(src, pad, win, cb, fill, pad - ox - win.x, pad - oy - win.y);
-
-  // Below the layer.
-  if (s.dropShadow.enabled) dropShadow(ctx, s.dropShadow, o);
-  if (s.outerGlow.enabled) outerGlow(ctx, s.outerGlow);
+  const stats = alphaStats(img);
+  if (!stats) return { image: out, offsetX, offsetY };
+  const cb = stats.cb;
+  const { extent, support, reach } = styleMargins(s);
+  // R: the output pixels that can be non-zero (source coordinates). The window adds the content
+  // they depend on (reach) wherever intermediate buffers can be non-zero (support).
+  const R = intersectRect({ x: offsetX, y: offsetY, width: W, height: H }, inflateRect(cb, extent));
+  if (isEmptyRect(R)) return { image: out, offsetX, offsetY };
+  const win = unionRect(intersectRect(inflateRect(R, reach), inflateRect(cb, support)), R);
+  const ctx = makeContext(img, win, cb, stats.maxA, fill);
   const maps = s.bevel.enabled ? bevelMaps(ctx, s.bevel, o) : null;
-  if (maps && maps.outer) bevelPart(ctx, s.bevel, maps, true);
 
   // The layer and the effects clipped to it, bottom to top.
   if (s.patternOverlay.enabled) patternOverlay(ctx, s.patternOverlay);
@@ -981,12 +1113,18 @@ export function applyStyles(img, styles, opts = {}) {
     else Id[p] = Id[p + 1] = Id[p + 2] = Id[p + 3] = 0;
   }
 
+  // Below the layer, bottom to top (drawn once the interior is known, for the knock-out).
+  if (s.dropShadow.enabled) dropShadow(ctx, s.dropShadow, o);
+  if (s.outerGlow.enabled) outerGlow(ctx, s.outerGlow);
+  if (maps && maps.outer) bevelPart(ctx, s.bevel, maps, true);
   if (strokeOut > 0) strokeOuter(ctx, s.stroke, strokeOut);
+
   // Nothing below the layer: the clipped interior is the result (what blendImages would produce).
-  if (ctx.bEmpty) pasteImage(out, ctx.I, win.x, win.y);
-  else {
+  let res = ctx.I;
+  if (!ctx.bEmpty) {
     blendImages('normal', ctx.I, ctx.B, 1, ctx.cb);
-    pasteImage(out, ctx.B, win.x, win.y);
+    res = ctx.B;
   }
+  copyRect(res, { x: R.x - win.x, y: R.y - win.y, width: R.width, height: R.height }, out, R.x - offsetX, R.y - offsetY);
   return { image: out, offsetX, offsetY };
 }
