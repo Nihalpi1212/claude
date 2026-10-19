@@ -13,50 +13,60 @@ pigment/
   package.json                 electron, electron-builder, playwright, ag-psd (bundled by esbuild at install)
   scripts/build-vendor.mjs     bundles ag-psd -> src/renderer/vendor/ag-psd.js (git-ignored)
   scripts/csp-hash.mjs         recomputes the CSP hash of the inline import map in index.html
-  src/main/                    Electron main process (main.js, ipc.js, menu.js, protocol.js, settings-store.js, recent.js, watch.js, startup-files.js)
+  src/main/                    Electron main process: main.js (window, lifecycle, protocol, permissions), ipc.js,
+                               menu.js (native menus), clipboard.js (Electron 44 async clipboard), protocol.js,
+                               settings-store.js, recent.js, watch.js, startup-files.js
   src/preload.cjs              contextBridge -> window.pigment (see "The preload bridge")
   src/shared/                  code shared by main, renderer and Node tests (no DOM, no Electron):
     defaults.js                settings defaults
+    formats.js                 file extensions Pigment opens, dialog filters
     keymap.js                  shortcuts (MENU_KEYS / RENDERER_KEYS), labels, accelerator parsing
     zip.js                     minimal ZIP (store + deflate) reader/writer used by the .pigment format
     pixels/core.js             ImageDataLike helpers used by every pixel module (see "Pixel modules")
     pixels/color.js            colour conversions (rgb/hsl/hsv/hex/lab), luminance, hex parsing
     pixels/blend.js            all Photoshop blend modes per pixel (used when Canvas 2D has no equivalent)
     pixels/adjust.js           adjustments (levels, curves, hue/saturation, ...) as LUTs or per-pixel ops
-    pixels/filters.js          filters (blur, sharpen, noise, pixelate, distort, stylize, render)
-    pixels/selection-ops.js    flood fill, colour range, marching-squares outline, feather/expand/contract/border/smooth
-    pixels/transform.js        resampling: affine and perspective warps, high-quality resize
-    pixels/styles.js           layer effects on ImageData (shadows, glows, stroke, bevel, overlays)
-    pixels/retouch.js          dab-sized pixel ops for dodge/burn/sponge/blur/sharpen/smudge/heal
+    pixels/filters.js          filters (blur, sharpen, noise, pixelate, distort, stylize, render, other)
+    pixels/selection-ops.js    flood fill, colour range, outline, feather/expand/contract/border/smooth, rasterizing
+    pixels/transform.js        resampling: affine and perspective warps, high-quality resize, exact rotations
+    pixels/styles.js           layer effects on ImageData (shadows, glows, stroke, bevel, satin, overlays)
+    pixels/retouch.js          dab-sized pixel ops for dodge/burn/sponge/blur/sharpen/smudge/heal/colour replacement
+    pixels/inpaint.js          content-aware fill (multi-scale PatchMatch + voting)
   src/renderer/
     index.html                 CSP, import map (ag-psd), layout skeleton
-    app.js                     App object: settings, commands, documents (tabs), panels dock, startup
+    app.js                     App object: settings, commands, core commands, module loading, startup
     lib/bridge.js              window.pigment or an in-browser stand-in (tests, npm run dev:web)
     lib/commands.js            command registry (ids below), de-duplication across sources
-    lib/dialogs.js             modal dialogs, prompts, confirm, toasts, popovers, form builder
-    lib/toolbar.js             options bar (top) and toolbox (left) components
-    lib/sidebar.js             panels dock (right): tabbed panel groups
-    lib/statusbar.js
-    lib/shortcuts.js           key dispatch (keymap.js rules)
-    lib/icons.js
-    lib/document.js            Document, Layer classes, layer tree operations, selection, guides
+    lib/dialogs.js             modal dialogs, prompts, confirm, toasts, popovers
+    lib/form.js                declarative form fields and formDialog() (preview thumbnail or live canvas preview)
+    lib/toolbar.js, statusbar.js, shortcuts.js, icons.js, panels.js (dock), welcome.js
+    lib/document.js            Document and Layer classes (raster, group, text, shape, fill, adjustment)
     lib/compositor.js          renders a Document (or a region of it) to a canvas
-    lib/history.js             per-document undo/redo with pixel patches; history panel data
+    lib/history.js             per-document undo/redo with pixel patches
     lib/canvas-view.js         viewport: zoom/pan/rotate, rulers, guides, grid, checkerboard, overlays, pointer routing
-    lib/tools.js               tool registry, options bar binding, cursor handling
-    lib/tools/*.js             one file per tool family (see "Tools")
-    lib/brush.js               brush engine (dabs, dynamics, stroke buffer, mask painting)
-    lib/selection.js           Selection object (mask + outline cache + marching ants) wrapping pixels/selection-ops.js
+    lib/documents.js           open documents and tabs, open/save/close flows
     lib/io.js                  open/save/export: images, PSD (ag-psd), .pigment container
+    lib/layer-ops.js           Layer menu commands, structural undo snapshots
+    lib/layer-move.js          undoable layer offsets (move tool, align, distribute, properties)
+    lib/edit-ops.js            Edit and Select menu commands, clipboard, fill/stroke, quick mask
+    lib/image-ops.js           Image menu (size, canvas, rotate, crop, trim, duplicate) and Free Transform
+    lib/file-ops.js            Export As, quick export, export layers, document properties
+    lib/adjust-ui.js           adjustment dialogs and editors, pixel-edit sessions, Fade, fill layer editing
+    lib/filter-ui.js           Filter menu dialogs, Last Filter;  lib/liquify.js: Liquify;  lib/content-aware.js
+    lib/style-ui.js            Layer Style dialog, global light;  lib/patterns.js: pattern cache for styles
+    lib/extras.js              New Document dialog, colour picker, Preferences
+    lib/tools.js               tool registry, toolbox, options bar binding, cursor handling
+    lib/tools/*.js             tool families (see "Tools")
+    lib/brush.js               brush engine (dabs, dynamics, stroke buffer, mask painting, samplers)
+    lib/selection.js           Selection object (mask + outline cache) wrapping pixels/selection-ops.js
     lib/panels/*.js            layers, properties, adjustments, color, swatches, brushes, history, navigator, channels, paths, info, character
-    lib/dialogs/*.js           new document, image size, canvas size, adjustments, filters, layer style, export, preferences, shortcuts
-    lib/pixel-worker.js        Worker that runs pixels/* functions off the main thread (transferable buffers)
     styles/*.css
     vendor/                    git-ignored, produced by scripts/build-vendor.mjs
-  tests/unit/*.test.mjs        node:test; pixel modules, zip, keymap, menu, protocol, startup-files
+  tests/unit/*.test.mjs        node:test; pixel modules, zip, menu
   tests/e2e/*.spec.mjs         Playwright (Chromium) against tests/e2e/server.mjs + the browser bridge
   tests/electron/*.spec.mjs    Playwright _electron against the real app (xvfb on Linux)
-  docs/                        USER-GUIDE.md and feature docs
+  tests/fixtures/              make-fixtures.mjs writes PNG and PSD test images to tests/fixtures/out
+  docs/                        USER-GUIDE.md
 ```
 
 ## Runtime model
@@ -82,7 +92,6 @@ showMessage, settings, recent files, startup files, ui state, close flow with `c
 
 ```ts
 readClipboardImage(): Promise<Uint8Array | null>;   // PNG bytes of the system clipboard image, if any
-localFonts(): Promise<string[]>;                     // family names from the OS (Electron queryLocalFonts), [] in the browser
 ```
 
 Channel names are `pigment:<method>` and events `pigment:event:<channel>`. The browser bridge
@@ -228,17 +237,17 @@ interface Tool {
 }
 ```
 
-Tool families and files: `move.js` (move, artboard-free auto-select, align), `marquee.js` (rect, ellipse,
-single row/column), `lasso.js` (free, polygonal, magnetic), `wand.js` (magic wand, quick selection), `crop.js`
-(crop + straighten + perspective crop basics), `eyedropper.js` (eyedropper, color sampler, ruler), `heal.js`
-(spot healing, healing brush, patch basic), `brush.js` tools (brush, pencil, color replacement, mixer? no),
-`clone.js` (clone stamp, pattern stamp), `eraser.js` (eraser, background eraser, magic eraser),
-`fill.js` (gradient, paint bucket), `retouch.js` (blur, sharpen, smudge, dodge, burn, sponge), `pen.js`
-(pen, freeform pen, add/delete anchor, convert point), `text.js`, `path-select.js` (path selection, direct selection),
-`shapes.js` (rectangle, rounded rectangle, ellipse, polygon, line, custom), `hand.js` (hand, rotate view), `zoom.js`.
+Tool families and files (toolbox slot in brackets): `move.js` (move [move], crop [crop]),
+`select.js` (rectangular/elliptical/row/column marquee [marquee], lasso/polygonal/magnetic [lasso],
+quick selection and magic wand [wand]), `nav.js` (eyedropper, color sampler, ruler [eyedropper]; hand and rotate
+view [hand]; zoom [zoom]), `paint.js` (brush, pencil [brush]; eraser [eraser]), `retouch.js` (spot healing, healing,
+patch, red eye [heal]; color replacement [brush]; clone and pattern stamp [clone]; history brush [history]; background
+and magic eraser [eraser]; blur, sharpen, smudge [blur]; dodge, burn, sponge [retouch]), `fill.js` (gradient, paint
+bucket [fill]), `text.js` (horizontal and vertical type [text]), `vector.js` (shapes [shape], pen family [pen], path and
+direct selection [path-select]). Free Transform (`image-ops.js`) is a tool without a toolbox slot.
 
 The options bar is built from `OptionSpec`s (`{ kind: 'number'|'slider'|'select'|'checkbox'|'color'|'button'|'segment'|'brush', key, label, min, max, step, options, default }`)
-by `lib/toolbar.js`; tools read `this.opt(key)`.
+by `ToolManager.renderOptions` in `lib/tools.js`; tools read `this.opt(key)` and may add custom controls in `renderOptions(bar)`.
 
 ### Brush engine (`lib/brush.js`)
 

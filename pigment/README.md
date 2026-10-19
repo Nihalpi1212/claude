@@ -118,5 +118,6 @@ npm run dist:mac  # or dist:win / dist:linux: installers in dist/
 - Smart objects, artboards, 3D, video timelines, camera RAW
 - Generative fill and other AI features
 - Puppet warp, perspective warp, sky replacement and other AI-based tools
-- Text on a path and vertical CJK typesetting details
+- Text on a path; vertical type is horizontal text turned 90° (no upright stacked CJK layout); one style per text layer
+- Shape path operations (combine, subtract, intersect shapes)
 - Printing (export an image and print it from your system's image viewer)
