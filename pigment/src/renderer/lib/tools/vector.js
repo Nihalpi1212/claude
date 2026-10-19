@@ -35,6 +35,8 @@ const hasIn = (p) => p.inX !== undefined && p.inY !== undefined;
 const hasOut = (p) => p.outX !== undefined && p.outY !== undefined;
 const isLine = (a, b) => !hasOut(a) && !hasIn(b);
 const segCtrl = (a, b) => [a.x, a.y, a.outX ?? a.x, a.outY ?? a.y, b.inX ?? b.x, b.inY ?? b.y, b.x, b.y];
+const r2 = (n) => Math.round(n * 100) / 100; // stored coordinates: 1/100 px
+const rp = (p) => ({ x: r2(p.x), y: r2(p.y) });
 const lerp2 = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
 
 function cubicAt(c, t) {
@@ -1107,6 +1109,8 @@ export class ShapeTool extends VectorTool {
       let a = d.start, b = d.current;
       if (d.shift) b = snap45(a, b);
       if (d.alt) a = { x: 2 * a.x - b.x, y: 2 * a.y - b.y };
+      a = rp(a);
+      b = rp(b);
       const weight = Number(this.opt('weight') ?? 2);
       const path = linePath(a.x, a.y, b.x, b.y, weight, !!this.opt('arrowStart'), !!this.opt('arrowEnd'));
       return isEmptyPath(path) ? null : { path, props: { x1: a.x, y1: a.y, x2: b.x, y2: b.y, weight, arrowStart: !!this.opt('arrowStart'), arrowEnd: !!this.opt('arrowEnd') } };
@@ -1248,7 +1252,7 @@ export class PenTool extends VectorTool {
       }
       let q = { x: p.x, y: p.y };
       if (p.shift) q = snap45(last, q);
-      sp.points.push({ x: q.x, y: q.y });
+      sp.points.push(rp(q));
       d.drag = { index: sp.points.length - 1, moved: false };
       this.preview();
       return;
@@ -1282,7 +1286,7 @@ export class PenTool extends VectorTool {
     if (target && !editable(this.app, target)) return;
     const original = target ? target.get() : EMPTY;
     const draft = clonePath(original);
-    draft.subpaths.push({ closed: false, points: [{ x: p.x, y: p.y }] });
+    draft.subpaths.push({ closed: false, points: [rp(p)] });
     this.draw = { target, original, draft, sp: draft.subpaths.length - 1, drag: { index: 0, moved: false } };
     this.preview();
   }
@@ -1310,6 +1314,7 @@ export class PenTool extends VectorTool {
     const pt = sp.points[d.drag.index];
     let h = { x: p.x, y: p.y };
     if (p.shift) h = snap45(pt, h);
+    h = rp(h);
     if (!d.drag.moved && Math.hypot(h.x - pt.x, h.y - pt.y) * this.view.zoom < 3) return;
     d.drag.moved = true;
     if (d.drag.closing) {
@@ -1488,7 +1493,8 @@ export class FreeformPenTool extends VectorTool {
     }
     pts = closed ? simplifyClosed(pts, tol) : simplify(pts, tol);
     if (pts.length < 2) return;
-    const sp = smoothSubpath(pts, closed && pts.length > 2);
+    const sp = smoothSubpath(pts.map(([x, y]) => [r2(x), r2(y)]), closed && pts.length > 2);
+    for (const q of sp.points) for (const k of ['inX', 'inY', 'outX', 'outY']) if (q[k] !== undefined) q[k] = r2(q[k]);
     const draft = clonePath(s.target ? s.target.get() : EMPTY);
     draft.subpaths.push(sp);
     this.commitNewSubpath(s.target, draft, 'Freeform Pen Tool');
@@ -1574,7 +1580,7 @@ export class AddAnchorTool extends AnchorEditTool {
     if (!dragging || !d) return;
     const pt = d.draft.subpaths[d.sp].points[d.index];
     Object.assign(pt, d.base);
-    translatePoint(pt, p.x - d.start.x, p.y - d.start.y);
+    translatePoint(pt, r2(p.x - d.start.x), r2(p.y - d.start.y));
     d.moved = true;
     showPreview(this.app, d.target, d.draft);
   }
@@ -1635,6 +1641,7 @@ export class ConvertPointTool extends AnchorEditTool {
     const pt = d.draft.subpaths[d.sp].points[d.i];
     let h = { x: p.x, y: p.y };
     if (p.shift) h = snap45(pt, h);
+    h = rp(h);
     if (d.kind === 'handle') {
       pt[`${d.side}X`] = h.x;
       pt[`${d.side}Y`] = h.y;
@@ -1679,6 +1686,11 @@ function shapeLayerAt(app, p, tol) {
 class SelectionToolBase extends AnchorEditTool {
   onKeyDown(e) {
     const sel = state.sel;
+    if (e.key === 'Escape' && !this.drag && !this.marquee && sel.key) {
+      clearSel();
+      this.view?.invalidate();
+      return true;
+    }
     const t = sel.key ? targetByKey(this.app, sel.key) : null;
     if (!t || this.drag) return false;
     const arrows = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
@@ -1705,15 +1717,7 @@ class SelectionToolBase extends AnchorEditTool {
     }
     return false;
   }
-  cancel() {
-    if (super.cancel()) return true;
-    if (state.sel.key) {
-      clearSel();
-      this.view?.invalidate();
-      return true;
-    }
-    return false;
-  }
+  // cancel() (Escape during a gesture, or Undo) only aborts a drag: Undo must still undo
 }
 
 export class PathSelectionTool extends SelectionToolBase {
@@ -1796,6 +1800,8 @@ export class PathSelectionTool extends SelectionToolBase {
       dx = q.x - d.start.x;
       dy = q.y - d.start.y;
     }
+    dx = r2(dx);
+    dy = r2(dy);
     if (!d.moved && d.duplicate) {
       // Alt-drag: move copies of the selected subpaths
       const copies = [...state.sel.subpaths].sort((a, b) => a - b).map((s) => clonePath({ subpaths: [d.original.subpaths[s]] }).subpaths[0]);
@@ -1923,6 +1929,7 @@ export class DirectSelectionTool extends SelectionToolBase {
       const pt = d.draft.subpaths[d.sp].points[d.i];
       let h = { x: p.x, y: p.y };
       if (p.shift) h = snap45(pt, h);
+      h = rp(h);
       pt[`${d.side}X`] = h.x;
       pt[`${d.side}Y`] = h.y;
       if (d.collinear && !p.alt) {
@@ -1951,6 +1958,8 @@ export class DirectSelectionTool extends SelectionToolBase {
       dx = q.x - d.start.x;
       dy = q.y - d.start.y;
     }
+    dx = r2(dx);
+    dy = r2(dy);
     d.moved = true;
     if (d.kind === 'anchors') this.moveSelection(d.draft, d.original, dx, dy);
     else if (d.kind === 'curve') reshapeCurve(d, dx, dy);

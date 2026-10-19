@@ -263,7 +263,7 @@ test('copy, paste and paste in place create layers with the copied pixels', asyn
   expect(await page.evaluate(() => { const l = window.pigmentApp.doc.active; return [l.x, l.y, l.canvas.width, l.canvas.height]; })).toEqual([10, 10, 80, 80]);
   expect(await layerPixel(page, 40, 40)).toEqual([255, 0, 0, 255]);
   await page.keyboard.press('Control+x');
-  expect((await layerPixel(page, 40, 40))[3]).toBe(0);
+  await expect.poll(async () => (await layerPixel(page, 40, 40))[3]).toBe(0);
   await page.keyboard.press('Control+v');
   await expect.poll(() => page.evaluate(() => window.pigmentApp.doc.layers().length)).toBe(3);
   expect(errors).toEqual([]);
