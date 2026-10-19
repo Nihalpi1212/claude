@@ -283,7 +283,7 @@ test('CANVAS_BLEND covers every mode with the Canvas 2D names', () => {
     normal: 'source-over', multiply: 'multiply', screen: 'screen', overlay: 'overlay', darken: 'darken', lighten: 'lighten',
     'color-dodge': 'color-dodge', 'color-burn': 'color-burn', 'hard-light': 'hard-light', 'soft-light': 'soft-light',
     difference: 'difference', exclusion: 'exclusion', hue: 'hue', saturation: 'saturation', color: 'color', luminosity: 'luminosity',
-    'linear-dodge': 'lighter', 'pass-through': 'source-over',
+    'pass-through': 'source-over',
   };
   for (const mode of Object.keys(CANVAS_BLEND)) {
     assert.equal(CANVAS_BLEND[mode], expected[mode] ?? null, `CANVAS_BLEND.${mode}`);

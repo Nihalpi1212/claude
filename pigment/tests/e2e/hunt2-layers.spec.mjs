@@ -323,3 +323,184 @@ test('clicking a tab of a collapsed panel group expands it', async ({ page }) =>
   await expect(page.locator('[data-panel="navigator"].panel')).toBeVisible();
   expect(errors).toEqual([]);
 });
+
+// ---- second pass of the layers hunt ----
+
+test('a clipped layer shows and repaints on a base that has a mask and a style', async ({ page }) => {
+  const errors = await openApp(page);
+  await newDoc(page, { background: 'white' });
+  await addLayer(page, 'Base', '#ff0000', [50, 50, 100, 100]);
+  await page.evaluate(async () => {
+    const { createCanvas } = await import('/lib/document.js');
+    const d = window.pigmentApp.doc;
+    const l = d.active;
+    const m = createCanvas(d.width, d.height);
+    const mc = m.getContext('2d');
+    mc.fillStyle = '#fff';
+    mc.fillRect(0, 0, 120, d.height);
+    l.mask = { canvas: m, enabled: true, linked: true };
+    l.styles = { stroke: { enabled: true, size: 4, position: 'outside', color: '#000000', opacity: 1, blend: 'normal' } };
+    l.touch();
+    d.changed('props', { layer: l });
+  });
+  expect((await pixel(page, 100, 100)).slice(0, 3)).toEqual([255, 0, 0]);
+  await addLayer(page, 'Blue', '#0000ff');
+  await runAwait(page, 'layer:clip');
+  expect((await pixel(page, 100, 100)).slice(0, 3)).toEqual([0, 0, 255]);
+  await page.evaluate(() => { const d = window.pigmentApp.doc; const l = d.active; const c = l.canvas.getContext('2d'); c.fillStyle = '#00ff00'; c.fillRect(0, 0, 400, 300); l.touch(); d.changed('pixels', { layer: l }); });
+  expect((await pixel(page, 100, 100)).slice(0, 3)).toEqual([0, 255, 0]);
+  expect((await pixel(page, 130, 100)).slice(0, 3)).toEqual([255, 255, 255]); // still masked out
+  expect(errors).toEqual([]);
+});
+
+test('a Pass Through group with opacity or a mask still lets an adjustment inside work', async ({ page }) => {
+  const errors = await openApp(page);
+  await newDoc(page, { background: 'white' });
+  await page.evaluate(() => { const l = window.pigmentApp.doc.active; const c = l.canvas.getContext('2d'); c.fillStyle = 'rgb(100,100,100)'; c.fillRect(0, 0, 400, 300); l.touch(); });
+  await runAwait(page, 'layer:new-adjustment', 'invert');
+  await runAwait(page, 'layer:group');
+  expect((await pixel(page, 50, 50))[0]).toBe(155);
+  await page.evaluate(() => { const d = window.pigmentApp.doc; const g = d.layers().find((l) => l.isGroup); g.opacity = 0.5; g.touch(); d.changed('props', { layer: g }); });
+  expect(Math.abs((await pixel(page, 50, 50))[0] - 128)).toBeLessThanOrEqual(1);
+  await page.evaluate(async () => {
+    const { createCanvas } = await import('/lib/document.js');
+    const d = window.pigmentApp.doc;
+    const g = d.layers().find((l) => l.isGroup);
+    g.opacity = 1;
+    const m = createCanvas(d.width, d.height);
+    m.getContext('2d').fillStyle = '#fff';
+    m.getContext('2d').fillRect(0, 0, 200, 300);
+    g.mask = { canvas: m, enabled: true, linked: true };
+    g.touch();
+    d.changed('props', { layer: g });
+  });
+  expect((await pixel(page, 50, 50))[0]).toBe(155);
+  expect((await pixel(page, 300, 50))[0]).toBe(100);
+  expect(errors).toEqual([]);
+});
+
+test('Linear Dodge composites colour only, also at reduced opacity', async ({ page }) => {
+  const errors = await openApp(page);
+  await newDoc(page, { background: 'white' });
+  await page.evaluate(() => { const l = window.pigmentApp.doc.active; const c = l.canvas.getContext('2d'); c.fillStyle = 'rgb(200,200,200)'; c.fillRect(0, 0, 400, 300); l.touch(); });
+  await addLayer(page, 'Top', '#ffffff');
+  await page.evaluate(() => { const d = window.pigmentApp.doc; const l = d.active; l.blend = 'linear-dodge'; l.opacity = 0.5; l.touch(); d.changed('props', { layer: l }); });
+  const p = await pixel(page, 50, 50);
+  expect(Math.abs(p[0] - 228)).toBeLessThanOrEqual(2);
+  expect(p[3]).toBe(255);
+  expect(errors).toEqual([]);
+});
+
+test('Rasterize Layer Style does not change a masked layer with a shadow', async ({ page }) => {
+  const errors = await openApp(page);
+  await newDoc(page, { background: 'white' });
+  await addLayer(page, 'Sq', '#ff0000', [50, 50, 100, 100]);
+  await page.evaluate(async () => {
+    const { createCanvas } = await import('/lib/document.js');
+    const d = window.pigmentApp.doc;
+    const l = d.active;
+    const m = createCanvas(d.width, d.height);
+    m.getContext('2d').fillStyle = '#fff';
+    m.getContext('2d').fillRect(0, 0, 100, d.height);
+    l.mask = { canvas: m, enabled: true, linked: true };
+    l.styles = { dropShadow: { enabled: true, distance: 20, angle: 180, size: 0, spread: 0, color: '#000000', opacity: 1, blend: 'multiply', useGlobalLight: false } };
+    l.touch();
+    d.changed('props', { layer: l });
+  });
+  const live = await pixel(page, 112, 100);
+  expect(live[0]).toBeLessThan(80); // the visible half's shadow falls past the mask edge
+  await runAwait(page, 'layer:rasterize-style');
+  expect(await pixel(page, 112, 100)).toEqual(live);
+  expect((await pixel(page, 75, 100)).slice(0, 3)).toEqual([255, 0, 0]);
+  expect((await pixel(page, 130, 100)).slice(0, 3)).toEqual([255, 255, 255]);
+  expect(errors).toEqual([]);
+});
+
+test('Align uses the painted pixels of raster layers', async ({ page }) => {
+  const errors = await openApp(page);
+  await newDoc(page, { background: 'white' });
+  await addLayer(page, 'Red', '#ff0000', [200, 100, 50, 50]);
+  await addLayer(page, 'Blue', '#0000ff', [100, 200, 50, 50]);
+  await page.evaluate(() => { const d = window.pigmentApp.doc; d.selected.clear(); for (const n of ['Red', 'Blue']) d.selected.add(d.layers().find((l) => l.name === n)); });
+  await runAwait(page, 'layer:align', 'left');
+  expect((await pixel(page, 125, 125)).slice(0, 3)).toEqual([255, 0, 0]);
+  expect((await pixel(page, 125, 225)).slice(0, 3)).toEqual([0, 0, 255]);
+  expect((await pixel(page, 225, 125)).slice(0, 3)).toEqual([255, 255, 255]);
+  await page.evaluate(() => { const d = window.pigmentApp.doc; d.selected.clear(); d.setActive(d.layers().find((l) => l.name === 'Red')); });
+  await runAwait(page, 'layer:align', 'right');
+  expect((await pixel(page, 375, 125)).slice(0, 3)).toEqual([255, 0, 0]);
+  expect(errors).toEqual([]);
+});
+
+test('Merge Down keeps the lower layer blend mode and refuses hidden or adjustment targets', async ({ page }) => {
+  const errors = await openApp(page);
+  await newDoc(page, { background: 'white' });
+  await page.evaluate(() => { const l = window.pigmentApp.doc.active; const c = l.canvas.getContext('2d'); c.fillStyle = '#0000ff'; c.fillRect(0, 0, 400, 300); l.touch(); });
+  await addLayer(page, 'Shade', 'rgb(128,128,128)');
+  await page.evaluate(() => { const d = window.pigmentApp.doc; const l = d.active; l.blend = 'multiply'; l.touch(); d.changed('props', { layer: l }); });
+  await addLayer(page, 'Paint', '#ff0000', [20, 20, 30, 30]);
+  const before = await pixel(page, 100, 100);
+  expect(before.slice(0, 3)).toEqual([0, 0, 128]);
+  await runAwait(page, 'layer:merge-down');
+  expect(await names(page)).toEqual(['Background', 'Shade']);
+  expect(await page.evaluate(() => window.pigmentApp.doc.active.blend)).toBe('multiply');
+  expect(await pixel(page, 100, 100)).toEqual(before);
+  // hidden layers are not merged away
+  await addLayer(page, 'Hidden', '#00ff00');
+  await page.evaluate(() => { const d = window.pigmentApp.doc; const l = d.active; l.visible = false; d.changed('props', { layer: l }); });
+  const n = await historyLength(page);
+  await runAwait(page, 'layer:merge-down');
+  expect(await historyLength(page)).toBe(n);
+  expect(await names(page)).toEqual(['Background', 'Shade', 'Hidden']);
+  // an adjustment layer below is never a merge target
+  await runAwait(page, 'layer:new-adjustment', 'invert');
+  await addLayer(page, 'Over', '#ffffff', [0, 0, 10, 10]);
+  await runAwait(page, 'layer:merge-down');
+  expect(await page.evaluate(() => window.pigmentApp.doc.layers().filter((l) => l.type === 'adjustment').length)).toBe(1);
+  expect(errors).toEqual([]);
+});
+
+test('a context menu closed with Escape leaves the next one working', async ({ page }) => {
+  const errors = await openApp(page);
+  await newDoc(page);
+  await runAwait(page, 'window:panel-layers');
+  const row = page.locator('[data-panel="layers"] .layer-row').first();
+  await row.click({ button: 'right' });
+  await expect(page.locator('.popover')).toHaveCount(1);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.popover')).toHaveCount(0);
+  await row.click({ button: 'right' });
+  await expect(page.locator('.popover')).toHaveCount(1);
+  await page.locator('.popover .popover-item').filter({ hasText: 'Rename Layer' }).click();
+  await expect(page.locator('[data-panel="layers"] .layer-row .layer-name input')).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
+test('Merge Layers across a group keeps the group opacity in the result', async ({ page }) => {
+  const errors = await openApp(page);
+  await newDoc(page, { background: 'white' });
+  await addLayer(page, 'A', '#ff0000', [0, 0, 100, 100]);
+  await runAwait(page, 'layer:group');
+  await page.evaluate(() => { const d = window.pigmentApp.doc; const g = d.layers().find((l) => l.isGroup); g.opacity = 0.5; g.touch(); d.changed('props', { layer: g }); });
+  await addLayer(page, 'B', '#0000ff', [300, 0, 100, 100]);
+  const before = await pixel(page, 50, 50);
+  await page.evaluate(() => { const d = window.pigmentApp.doc; d.selected.clear(); for (const n of ['A', 'B']) d.selected.add(d.layers().find((l) => l.name === n)); });
+  await runAwait(page, 'layer:merge-selected');
+  expect(near(await pixel(page, 50, 50), before, 2)).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+test('un-soloing a layer restores the visibility from before the solo', async ({ page }) => {
+  const errors = await openApp(page);
+  await newDoc(page, { background: 'white' });
+  await addLayer(page, 'Hidden', '#ff0000');
+  await page.evaluate(() => { const d = window.pigmentApp.doc; const l = d.active; l.visible = false; d.changed('props', { layer: l }); });
+  await addLayer(page, 'A', '#00ff00', [0, 0, 10, 10]);
+  await addLayer(page, 'B', '#0000ff', [20, 0, 10, 10]);
+  const b = await byName(page, 'B');
+  await runAwait(page, 'layer:solo', b);
+  await runAwait(page, 'layer:solo', b);
+  const vis = await page.evaluate(() => Object.fromEntries(window.pigmentApp.doc.layers().map((l) => [l.name, l.visible])));
+  expect(vis).toEqual({ Background: true, Hidden: false, A: true, B: true });
+  expect(errors).toEqual([]);
+});

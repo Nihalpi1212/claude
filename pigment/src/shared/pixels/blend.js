@@ -35,8 +35,9 @@ export const BLEND_MODES = Object.freeze([
 
 /**
  * Canvas 2D globalCompositeOperation that reproduces a mode, or null when the compositor has to
- * fall back to blendImages(). 'linear-dodge' maps to the additive 'lighter' (exact for opaque
- * pixels); 'pass-through' groups that need their own canvas are drawn with plain 'source-over'.
+ * fall back to blendImages(). 'linear-dodge' has no equivalent: Canvas 'lighter' also adds the
+ * alpha and ignores the opacity lerp once the sum clips; 'pass-through' groups that need their own
+ * canvas are drawn with plain 'source-over'.
  * @type {Readonly<Record<BlendMode | 'pass-through', string | null>>}
  */
 export const CANVAS_BLEND = Object.freeze({
@@ -50,7 +51,7 @@ export const CANVAS_BLEND = Object.freeze({
   lighten: 'lighten',
   screen: 'screen',
   'color-dodge': 'color-dodge',
-  'linear-dodge': 'lighter',
+  'linear-dodge': null,
   'lighter-color': null,
   overlay: 'overlay',
   'soft-light': 'soft-light',

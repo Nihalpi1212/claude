@@ -3,6 +3,7 @@
 // operations (merges create new layers), so the snapshots stay valid.
 import { RasterLayer, GroupLayer, FillLayer, AdjustmentLayer, createCanvas, copyCanvas, intersectRect, unionRect, BLEND_LABELS } from './document.js';
 import { Compositor } from './compositor.js';
+import { contentBounds } from '../../shared/pixels/core.js';
 import { offsetEach } from './layer-move.js';
 import { Selection } from './selection.js';
 
@@ -141,16 +142,16 @@ export function cloneLayer(layer, { name } = {}) {
 export function rasterizeLayer(layer, doc, { bakeStyles = false } = {}) {
   let canvas, x, y;
   if (layer.isGroup || bakeStyles) {
-    // styles are baked with neutral opacity/blend and without the mask: those stay live on the new layer
-    const saved = { opacity: layer.opacity, blend: layer.blend, mask: layer.mask };
+    // styles are baked with neutral opacity/blend (those stay live on the new layer); the mask shapes the
+    // effects, so it is rendered in and not kept
+    const saved = { opacity: layer.opacity, blend: layer.blend };
     if (!layer.isGroup) {
       layer.opacity = 1;
       layer.blend = 'normal';
-      layer.mask = null;
       layer.touch();
     }
     try {
-      canvas = renderLayersFlat(doc, [layer]);
+      canvas = renderLayersFlat(doc, [layer], { dest: layer.parent });
     } finally {
       if (!layer.isGroup) {
         Object.assign(layer, saved);
@@ -170,23 +171,27 @@ export function rasterizeLayer(layer, doc, { bakeStyles = false } = {}) {
     y = r.y;
   } else return null;
   const out = new RasterLayer({ name: layer.name, canvas, x, y, opacity: layer.isGroup ? 1 : layer.opacity, blend: layer.isGroup ? 'normal' : layer.blend, visible: layer.visible, clip: layer.clip, styles: bakeStyles ? null : layer.styles, fillOpacity: bakeStyles ? 1 : layer.fillOpacity });
-  if (layer.mask && !layer.isGroup) out.mask = { ...layer.mask, canvas: copyCanvas(layer.mask.canvas) };
+  if (layer.mask && !layer.isGroup && !bakeStyles) out.mask = { ...layer.mask, canvas: copyCanvas(layer.mask.canvas) };
   return out;
 }
 
-/** Composites the given layers (in document order) into one document-sized canvas. */
-export function renderLayersFlat(doc, layers) {
+/**
+ * Composites the given layers (in document order) into one document-sized canvas. Groups above
+ * `dest` (where the result will live) are neutral: their opacity, blend, mask and styles keep
+ * applying to the result once it is placed; other groups' properties are baked in.
+ */
+export function renderLayersFlat(doc, layers, { dest = null } = {}) {
   const set = new Set();
   const addWithChildren = (l) => {
     set.add(l);
     if (l.isGroup) l.children.forEach(addWithChildren);
   };
   layers.forEach(addWithChildren);
-  // ancestors are walked but must not apply their own opacity, blend, mask or styles: the result goes back inside them
+  const target = dest ?? layers[0]?.parent ?? doc.root;
   const ancestors = [];
   for (const l of [...set]) for (let p = l.parent; p && p !== doc.root; p = p.parent) if (!set.has(p)) {
     set.add(p);
-    ancestors.push(p);
+    if (p === target || isAncestor(p, target)) ancestors.push(p);
   }
   // a clipped layer whose base is not rendered keeps its pixels (drawn unclipped)
   const baseOf = (l) => {
@@ -355,8 +360,13 @@ export function install(app) {
         const others = d.layers().filter((l) => l !== layer && !isAncestor(l, layer) && !isAncestor(layer, l));
         const allHidden = others.every((l) => !l.visible || l.isGroup);
         d.history.group('Show only this layer', () => {
-          if (allHidden) for (const l of others) setLayerProps(app, l, { visible: true });
-          else {
+          if (allHidden) {
+            // un-solo: back to what was visible before the solo (layers hidden by the user stay hidden)
+            const remembered = d.soloState?.layer === layer ? d.soloState.visible : null;
+            for (const l of others) setLayerProps(app, l, { visible: remembered?.has(l) ? remembered.get(l) : true });
+            d.soloState = null;
+          } else {
+            d.soloState = { layer, visible: new Map(others.map((l) => [l, l.visible])) };
             for (const l of others) if (l.visible && !l.isGroup) setLayerProps(app, l, { visible: false });
             setLayerProps(app, layer, { visible: true });
           }
@@ -480,8 +490,9 @@ export function install(app) {
         const d = doc();
         const top = d.active;
         const below = top.parent.children[top.parent.children.indexOf(top) - 1];
-        if (!below || below.type === 'adjustment' && top.type !== 'adjustment') return app.dialogs.toast('Nothing to merge into', { kind: 'error' });
-        mergeLayers([below, top], below.name, 'Merge down');
+        if (!below || below.type === 'adjustment') return app.dialogs.toast('Nothing to merge into: the layer below is an adjustment layer', { kind: 'error' });
+        if (!top.visible || !below.visible) return app.dialogs.toast('Show both layers before merging', { kind: 'error' });
+        mergeLayers([below, top], below.name, 'Merge down', { keepBase: true });
       },
     },
     'layer:merge-selected': { enabled: () => (doc()?.selected.size ?? 0) > 1, run: () => mergeLayers(selectedOrActive(doc()), null, 'Merge layers') },
@@ -704,7 +715,15 @@ export function install(app) {
     });
   }
 
+  /** Box used by align/distribute: the painted pixels of a raster layer (not its canvas), the union for a group. */
   function layerBox(l) {
+    if (l.type === 'raster') {
+      if (!l.canvas?.width || !l.canvas?.height) return null;
+      const img = l.canvas.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, l.canvas.width, l.canvas.height);
+      const cb = contentBounds(img);
+      return cb ? { x: l.x + cb.x, y: l.y + cb.y, width: cb.width, height: cb.height } : null;
+    }
+    if (l.isGroup) return l.children.map(layerBox).filter(Boolean).reduce((a, b) => (a ? unionRect(a, b) : b), null);
     return l.bounds() ?? null;
   }
 
@@ -744,16 +763,31 @@ export function install(app) {
     offsetEach(d, moves, 'Distribute');
   }
 
-  function mergeLayers(layers, name, label) {
+  function mergeLayers(layers, name, label, { keepBase = false } = {}) {
     const d = doc();
     const order = d.layers();
     layers = layers.filter(Boolean).sort((a, b) => order.indexOf(a) - order.indexOf(b));
     if (layers.length < 2) return;
-    const flat = renderLayersFlat(d, layers.filter((l) => l.visible));
-    // clipped layers merged among themselves stay clipped to their base; merging onto the base releases the clip
-    const merged = new RasterLayer({ name: name ?? layers[layers.length - 1].name, canvas: flat, x: 0, y: 0, clip: layers.every((l) => l.clip) });
-    // trim to content to keep memory down
+    if (layers.some((l) => !l.visible)) return app.dialogs.toast('Hidden layers cannot be merged: show or deselect them first', { kind: 'error' });
     const top = layers[layers.length - 1];
+    // Merge Down keeps the lower layer's blend mode and opacity (rendered neutral, applied by the result)
+    const base = layers[0];
+    const keep = keepBase ? { blend: base.blend, opacity: base.opacity } : { blend: 'normal', opacity: 1 };
+    if (keepBase) {
+      Object.assign(base, { blend: 'normal', opacity: 1 });
+      base.touch();
+    }
+    let flat;
+    try {
+      flat = renderLayersFlat(d, layers, { dest: top.parent });
+    } finally {
+      if (keepBase) {
+        Object.assign(base, keep);
+        base.touch();
+      }
+    }
+    // clipped layers merged among themselves stay clipped to their base; merging onto the base releases the clip
+    const merged = new RasterLayer({ name: name ?? top.name, canvas: flat, x: 0, y: 0, clip: layers.every((l) => l.clip), blend: keep.blend, opacity: keep.opacity });
     structural(app, label, () => {
       const parent = top.parent;
       const index = parent.children.indexOf(top);

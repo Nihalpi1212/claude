@@ -314,7 +314,8 @@ export class Dialogs {
         anchor.focus?.();
       }
     };
-    setTimeout(() => {
+    // registered after the opening click has finished; cancelled if the popover closes before that
+    const timer = setTimeout(() => {
       document.addEventListener('mousedown', onDown, true);
       document.addEventListener('keydown', onKey, true);
     });
@@ -322,6 +323,7 @@ export class Dialogs {
       element: pop,
       anchor,
       remove: () => {
+        clearTimeout(timer);
         document.removeEventListener('mousedown', onDown, true);
         document.removeEventListener('keydown', onKey, true);
         pop.remove();
