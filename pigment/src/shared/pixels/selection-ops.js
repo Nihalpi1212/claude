@@ -436,14 +436,120 @@ function runMax(src, w, hw, dst, g, hh) {
 }
 
 /**
+ * 1-D squared Euclidean distance transform (Felzenszwalb & Huttenlocher): d[q] = min_p (q - p)^2 + f[p]
+ * over n samples. v (Int32Array n) and z (Float64Array n + 1) are scratch.
+ */
+function distanceTransform1D(f, n, d, v, z) {
+  let k = 0;
+  v[0] = 0;
+  z[0] = -Infinity;
+  z[1] = Infinity;
+  for (let q = 1; q < n; q++) {
+    const fq = f[q] + q * q;
+    let p = v[k];
+    let s = (fq - (f[p] + p * p)) / (2 * (q - p));
+    while (s <= z[k]) {
+      k--;
+      p = v[k];
+      s = (fq - (f[p] + p * p)) / (2 * (q - p));
+    }
+    k++;
+    v[k] = q;
+    z[k] = s;
+    z[k + 1] = Infinity;
+  }
+  k = 0;
+  for (let q = 0; q < n; q++) {
+    while (z[k + 1] < q) k++;
+    const p = v[k];
+    d[q] = (q - p) * (q - p) + f[p];
+  }
+}
+
+/**
+ * Exact disc dilation of a 0/255 mask with a Euclidean distance transform, O(n) whatever the radius:
+ * a pixel is selected when some selected pixel lies at dx^2 + dy^2 <= radius^2. Works on the region
+ * [xa, xb) x [ya, yb) (the rect grown by the radius) and writes the rect [x0, x1) x [y0, y1) of out.
+ */
+function binaryDiscDilate(mask, w, out, radius, xa, xb, ya, yb, x0, x1, y0, y1) {
+  const sw = xb - xa, rows = yb - ya;
+  const cap = Math.floor(radius) + 1; // vertical distances beyond the radius all look alike
+  const r2 = radius * radius;
+  // Vertical distance (capped) to the nearest selected pixel in the same column, two sweeps.
+  const vd = new Int32Array(rows * sw);
+  const run = new Int32Array(sw).fill(cap);
+  for (let y = 0; y < rows; y++) {
+    const mo = (ya + y) * w + xa, o = y * sw;
+    for (let x = 0; x < sw; x++) {
+      const t = mask[mo + x] === 255 ? 0 : run[x] < cap ? run[x] + 1 : cap;
+      run[x] = t;
+      vd[o + x] = t;
+    }
+  }
+  run.fill(cap);
+  for (let y = rows - 1; y >= 0; y--) {
+    const o = y * sw;
+    for (let x = 0; x < sw; x++) {
+      const up = run[x] < cap ? run[x] + 1 : cap, t = vd[o + x] < up ? vd[o + x] : up;
+      run[x] = t;
+      vd[o + x] = t;
+    }
+  }
+  const f = new Float64Array(sw), d = new Float64Array(sw), v = new Int32Array(sw), z = new Float64Array(sw + 1);
+  const ox0 = x0 - xa, ox1 = x1 - xa;
+  for (let y = y0; y < y1; y++) {
+    const o = (y - ya) * sw, mo = y * w + xa;
+    let any = false;
+    for (let x = 0; x < sw; x++) {
+      const t = vd[o + x];
+      f[x] = t * t;
+      if (t < cap) any = true;
+    }
+    if (!any) {
+      out.fill(0, mo + ox0, mo + ox1);
+      continue;
+    }
+    distanceTransform1D(f, sw, d, v, z);
+    for (let x = ox0; x < ox1; x++) out[mo + x] = d[x] <= r2 ? 255 : 0;
+  }
+}
+
+/**
  * Grey-level dilation of the mask with a disc of the given radius (offsets with dx^2 + dy^2 <= r^2),
- * replicating edge pixels. Rows are processed with per-band horizontal max filters, O(n * radius).
+ * replicating edge pixels. Masks holding only 0 and 255 go through an exact distance transform (O(n));
+ * soft masks through per-band horizontal max filters (O(n * radius)), skipping empty rows.
  */
 function discMax(mask, w, h, radius, rect) {
   const out = new Uint8ClampedArray(mask);
   const r = clampRect(rect, w, h);
   const R = Math.floor(radius);
   if (r.width <= 0 || !(radius >= 1)) return out;
+  const x0 = r.x, x1 = r.x + r.width, y0 = r.y, y1 = r.y + r.height;
+  // Only pixels within R of the rect can reach it (clipping a max window = replicating the edge).
+  const xa = Math.max(0, x0 - R), xb = Math.min(w, x1 + R), sw = xb - xa;
+  const ya = Math.max(0, y0 - R), yb = Math.min(h, y1 + R);
+  const rowAny = new Uint8Array(h);
+  let binary = true, anyRow = false;
+  for (let y = ya; y < yb; y++) {
+    let any = 0;
+    for (let i = y * w + xa, e = i + sw; i < e; i++) {
+      const v = mask[i];
+      if (v) {
+        any = 1;
+        if (v !== 255) binary = false;
+      }
+    }
+    rowAny[y] = any;
+    if (any) anyRow = true;
+  }
+  if (!anyRow) {
+    for (let y = y0; y < y1; y++) out.fill(0, y * w + x0, y * w + x1);
+    return out;
+  }
+  if (binary) {
+    binaryDiscDilate(mask, w, out, radius, xa, xb, ya, yb, x0, x1, y0, y1);
+    return out;
+  }
   // Group the rows of the disc by their half-width (bands of equal hw share one horizontal filter).
   const bandHw = [], bandFrom = [], bandTo = [];
   for (let dy = 0; dy <= R; dy++) {
@@ -455,23 +561,23 @@ function discMax(mask, w, h, radius, rect) {
       bandTo.push(dy);
     }
   }
-  const acc = new Uint8Array(w), tmp = new Uint8Array(w), g = new Uint8Array(w), hh = new Uint8Array(w), rowOut = new Uint8Array(w);
-  const x0 = r.x, x1 = r.x + r.width;
-  for (let y = r.y, ye = r.y + r.height; y < ye; y++) {
-    rowOut.fill(0, x0, x1);
+  const acc = new Uint8Array(sw), tmp = new Uint8Array(sw), g = new Uint8Array(sw), hh = new Uint8Array(sw), rowOut = new Uint8Array(sw);
+  const ox0 = x0 - xa, ox1 = x1 - xa;
+  for (let y = y0; y < y1; y++) {
+    rowOut.fill(0);
     for (let bnd = 0; bnd < bandHw.length; bnd++) {
       let any = false;
       for (let s = -1; s <= 1; s += 2) {
         for (let dy = bandFrom[bnd]; dy <= bandTo[bnd]; dy++) {
           if (dy === 0 && s === 1) continue;
           const yy = y + s * dy;
-          if (yy < 0 || yy >= h) continue;
-          const off = yy * w;
+          if (yy < 0 || yy >= h || !rowAny[yy]) continue;
+          const off = yy * w + xa;
           if (!any) {
-            acc.set(mask.subarray(off, off + w));
+            for (let x = 0; x < sw; x++) acc[x] = mask[off + x];
             any = true;
           } else {
-            for (let x = 0; x < w; x++) {
+            for (let x = 0; x < sw; x++) {
               const v = mask[off + x];
               if (v > acc[x]) acc[x] = v;
             }
@@ -479,10 +585,10 @@ function discMax(mask, w, h, radius, rect) {
         }
       }
       if (!any) continue;
-      const src = bandHw[bnd] === 0 ? acc : (runMax(acc, w, bandHw[bnd], tmp, g, hh), tmp);
-      for (let x = x0; x < x1; x++) if (src[x] > rowOut[x]) rowOut[x] = src[x];
+      const src = bandHw[bnd] === 0 ? acc : (runMax(acc, sw, bandHw[bnd], tmp, g, hh), tmp);
+      for (let x = ox0; x < ox1; x++) if (src[x] > rowOut[x]) rowOut[x] = src[x];
     }
-    out.set(rowOut.subarray(x0, x1), y * w + x0);
+    out.set(rowOut.subarray(ox0, ox1), y * w + x0);
   }
   return out;
 }
@@ -490,7 +596,8 @@ function discMax(mask, w, h, radius, rect) {
 /**
  * Expands the selection by px: morphological dilation with a disc (dx^2 + dy^2 <= px^2), a max filter
  * so soft edges are preserved. Expanding a 3x3 square by 1 gives a 5x5 square minus its 4 corners
- * (21 pixels). Edge pixels are replicated at the canvas bounds.
+ * (21 pixels). Edge pixels are replicated at the canvas bounds. Hard (0/255) masks go through an exact
+ * distance transform, O(n) at any px; soft masks cost O(n * px).
  * @param {Mask} mask @param {number} w @param {number} h @param {number} px >= 1 (less = copy) @param {Rect|null} [rect]
  * @returns {Mask}
  */
@@ -563,7 +670,7 @@ function boxMean(mask, w, h, rad, r) {
     }
   }
   const out = new Float32Array(rw * rh);
-  const colSum = new Float32Array(rw);
+  const colSum = new Float64Array(rw);
   let ya = r.y - rad, yb = r.y + rad, cnt = 0;
   for (let yy = ya < ry0 ? ry0 : ya, e = yb >= ry1 ? ry1 - 1 : yb; yy <= e; yy++) {
     const trow = (yy - ry0) * rw;
@@ -861,21 +968,28 @@ function resolveRow(mask, off, cov, diff, width) {
   }
 }
 
-/** Normalises polygon input into a list of flat [x0, y0, x1, y1, ...] arrays. */
+/** One polygon ([[x, y], ...], [{x, y}, ...] or flat [x0, y0, ...]) as a flat array. */
+function flattenPolygon(poly) {
+  if (!poly || !poly.length) return [];
+  if (typeof poly[0] === 'number') return poly;
+  const out = new Float64Array(poly.length * 2);
+  for (let i = 0; i < poly.length; i++) {
+    const p = poly[i];
+    out[i * 2] = p ? (p.x ?? p[0]) : NaN;
+    out[i * 2 + 1] = p ? (p.y ?? p[1]) : NaN;
+  }
+  return out;
+}
+
+/** True when `p` is a single point: [x, y] or { x, y }. */
+const isPoint = (p) => !!p && (typeof p.x === 'number' || (p.length === 2 && typeof p[0] === 'number'));
+
+/** Normalises polygon input (one polygon or a list of them) into a list of flat [x0, y0, x1, y1, ...] arrays. */
 function flatPolygons(points) {
   if (!points || !points.length) return [];
-  const flatten = (poly) => {
-    if (!poly || !poly.length) return [];
-    if (typeof poly[0] === 'number') return poly;
-    const out = new Float64Array(poly.length * 2);
-    for (let i = 0; i < poly.length; i++) {
-      out[i * 2] = poly[i][0];
-      out[i * 2 + 1] = poly[i][1];
-    }
-    return out;
-  };
-  if (typeof points[0] === 'number' || typeof points[0][0] === 'number') return [flatten(points)];
-  return points.map(flatten);
+  const first = points[0];
+  if (typeof first === 'number' || isPoint(first)) return [flattenPolygon(points)];
+  return Array.from(points, flattenPolygon);
 }
 
 /**
@@ -978,9 +1092,13 @@ export function rasterizePolygon(points, w, h, { antialias = true, samples = 4 }
 export function rasterizeEllipse(rect, w, h, { antialias = true, samples = 16 } = {}, clip = null) {
   const mask = new Uint8ClampedArray(w * h);
   const r = clampRect(clip, w, h);
-  if (r.width <= 0 || !rect || !(rect.width > 0) || !(rect.height > 0)) return mask;
-  const a = rect.width / 2, b = rect.height / 2, cx = rect.x + a, cy = rect.y + b;
-  const yStart = Math.max(r.y, Math.floor(rect.y)), yEnd = Math.min(r.y + r.height, Math.ceil(rect.y + rect.height));
+  if (!rect) return mask;
+  // A rect dragged up or left (negative size) describes the same ellipse.
+  const ew = Math.abs(rect.width), eh = Math.abs(rect.height);
+  const ex = rect.width < 0 ? rect.x + rect.width : rect.x, ey = rect.height < 0 ? rect.y + rect.height : rect.y;
+  if (r.width <= 0 || !(ew > 0) || !(eh > 0) || !Number.isFinite(ex + ey + ew + eh)) return mask;
+  const a = ew / 2, b = eh / 2, cx = ex + a, cy = ey + b;
+  const yStart = Math.max(r.y, Math.floor(ey)), yEnd = Math.min(r.y + r.height, Math.ceil(ey + eh));
   if (yStart >= yEnd) return mask;
   const S = antialias ? Math.max(1, samples | 0) : 1, wgt = 1 / S;
   const width = r.width;

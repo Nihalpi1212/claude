@@ -35,7 +35,7 @@ function createBrowserBridge() {
     for (const handler of listeners.get(channel) ?? []) handler(...args);
   };
 
-  async function pickFiles({ multiple = false, accept = '.pdf,application/pdf' } = {}) {
+  async function pickFiles({ multiple = false, accept = 'image/*,.psd,.psb,.pigment' } = {}) {
     if (Array.isArray(test.nextOpenFiles)) {
       const files = test.nextOpenFiles;
       test.nextOpenFiles = null;
@@ -67,7 +67,7 @@ function createBrowserBridge() {
   }
 
   function download(name, bytes) {
-    const blob = new Blob([bytes], { type: name.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'application/octet-stream' });
+    const blob = new Blob([bytes], { type: 'application/octet-stream' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -120,7 +120,7 @@ function createBrowserBridge() {
         test.nextSavePath = null;
         return path;
       }
-      const name = (opts.defaultPath ?? 'document.pdf').split(/[\\/]/).pop();
+      const name = (opts.defaultPath ?? 'image.png').split(/[\\/]/).pop();
       const chosen = test.silent ? name : window.prompt('Save as (file name)', name);
       return chosen ? `download:/${chosen}` : null;
     },
