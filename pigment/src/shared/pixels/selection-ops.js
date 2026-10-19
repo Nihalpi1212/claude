@@ -4,13 +4,15 @@
 // Node tests. Functions that take an image read ImageDataLike ({ width, height, data }) with
 // straight alpha. Every function accepts an optional rect (default: the whole image); pixels
 // outside the rect are left as they were (or unselected for functions that build a new mask), and
-// nothing is ever read or written outside the image. Mask inputs are never modified: every
-// function returns a new mask.
+// nothing is ever read or written outside the image. Mask inputs are never modified and every
+// function returns a new mask, with one exception: feather() works IN PLACE and returns the same
+// array (callers may use either the argument or the return value).
 //
 // What lies beyond the canvas:
-//   feather                        -> unselected (0): a selection touching the canvas edge fades there
-//   expand/contract/border/smooth  -> edge pixels are replicated (Photoshop's "do not apply at canvas bounds")
-//   outline                        -> the canvas (or rect) edge is a boundary, so loops close along it
+//   feather                -> unselected (0): a selection touching the canvas edge fades there
+//   expand/contract/border -> edge pixels are replicated (Photoshop's "do not apply at canvas bounds")
+//   smooth                 -> ignored (the box mean is taken over the in-canvas part of the window)
+//   outline                -> the canvas (or rect) edge is a boundary, so loops close along it
 
 import { clampRect, makeLut } from './core.js';
 import { parseColor } from './color.js';
@@ -233,44 +235,69 @@ export function maskBounds(mask, w, h, rect = null) {
   return x2 < 0 ? null : { x: x1, y: y1, width: x2 - x1 + 1, height: y2 - y1 + 1 };
 }
 
+const COMBINE_MODES = { replace: 0, add: 1, subtract: 2, intersect: 3 };
+
+/** Writes combine(a[i], b[i]) into out[i] for i in [from, to) (b missing beyond its length = 0). */
+function combineRange(a, b, out, op, from, to) {
+  const m = to < b.length ? to : b.length;
+  let i = from;
+  if (op === 0) for (; i < m; i++) out[i] = b[i];
+  else if (op === 1) for (; i < m; i++) out[i] = a[i] > b[i] ? a[i] : b[i];
+  else if (op === 2) {
+    for (; i < m; i++) {
+      const inv = 255 - b[i];
+      out[i] = a[i] < inv ? a[i] : inv;
+    }
+  } else for (; i < m; i++) out[i] = a[i] < b[i] ? a[i] : b[i];
+  // Past the end of b: b counts as 0 (replace/intersect -> 0, add/subtract -> a).
+  for (; i < to; i++) out[i] = op === 1 || op === 2 ? a[i] : 0;
+}
+
 /**
  * Combines two masks of the same size into a new one. Soft coverage is combined with max/min so
  * feathered edges keep their shape: 'replace' -> b, 'add' -> max(a, b), 'subtract' -> min(a, 255 - b),
- * 'intersect' -> min(a, b).
- * @param {Mask} a @param {Mask} b @param {'replace'|'add'|'subtract'|'intersect'} mode @returns {Mask}
+ * 'intersect' -> min(a, b). With (w, h, rect) only the pixels inside rect are combined; the others
+ * keep a's coverage.
+ * @param {Mask} a @param {Mask} b @param {'replace'|'add'|'subtract'|'intersect'} [mode]
+ * @param {number} [w] @param {number} [h] @param {Rect|null} [rect] needs w and h
+ * @returns {Mask}
  */
-export function combineMasks(a, b, mode = 'replace') {
+export function combineMasks(a, b, mode = 'replace', w = 0, h = 0, rect = null) {
+  const op = COMBINE_MODES[mode];
+  if (op === undefined) throw new RangeError(`combineMasks: unknown mode "${mode}"`);
   const n = a.length;
-  const out = new Uint8ClampedArray(n);
-  const m = Math.min(n, b.length);
-  switch (mode) {
-    case 'replace':
-      out.set(b.subarray(0, m));
-      break;
-    case 'add':
-      for (let i = 0; i < m; i++) out[i] = a[i] > b[i] ? a[i] : b[i];
-      if (m < n) out.set(a.subarray(m), m);
-      break;
-    case 'subtract':
-      for (let i = 0; i < m; i++) {
-        const inv = 255 - b[i];
-        out[i] = a[i] < inv ? a[i] : inv;
-      }
-      if (m < n) out.set(a.subarray(m), m);
-      break;
-    case 'intersect':
-      for (let i = 0; i < m; i++) out[i] = a[i] < b[i] ? a[i] : b[i];
-      break;
-    default:
-      throw new RangeError(`combineMasks: unknown mode "${mode}"`);
+  if (!rect || !(w > 0)) {
+    const out = new Uint8ClampedArray(n);
+    combineRange(a, b, out, op, 0, n);
+    return out;
+  }
+  const out = new Uint8ClampedArray(a);
+  const r = clampRect(rect, w, h);
+  for (let y = r.y, ye = r.y + r.height; y < ye; y++) {
+    const i = y * w + r.x;
+    combineRange(a, b, out, op, i, i + r.width);
   }
   return out;
 }
 
-/** Returns a new mask with coverage inverted (255 - v). @param {Mask} mask @returns {Mask} */
-export function invertMask(mask) {
-  const out = new Uint8ClampedArray(mask.length);
-  for (let i = 0; i < mask.length; i++) out[i] = 255 - mask[i];
+/**
+ * Returns a new mask with coverage inverted (255 - v). With (w, h, rect) only the pixels inside rect
+ * are inverted; the others are copied.
+ * @param {Mask} mask @param {number} [w] @param {number} [h] @param {Rect|null} [rect] needs w and h
+ * @returns {Mask}
+ */
+export function invertMask(mask, w = 0, h = 0, rect = null) {
+  const n = mask.length;
+  if (!rect || !(w > 0)) {
+    const out = new Uint8ClampedArray(n);
+    for (let i = 0; i < n; i++) out[i] = 255 - mask[i];
+    return out;
+  }
+  const out = new Uint8ClampedArray(mask);
+  const r = clampRect(rect, w, h);
+  for (let y = r.y, ye = r.y + r.height; y < ye; y++) {
+    for (let i = y * w + r.x, e = i + r.width; i < e; i++) out[i] = 255 - mask[i];
+  }
   return out;
 }
 

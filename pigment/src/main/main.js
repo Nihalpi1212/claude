@@ -16,6 +16,8 @@ const here = dirname(fileURLToPath(import.meta.url));
 const RENDERER_DIR = join(here, '..', 'renderer');
 const APP_URL = `${APP_SCHEME}://app/index.html`;
 const IS_MAC = process.platform === 'darwin';
+// local-fonts lets the Type tool list installed fonts (window.queryLocalFonts)
+const ALLOWED_PERMISSIONS = ['fullscreen', 'clipboard-sanitized-write', 'clipboard-read', 'local-fonts'];
 
 app.setName('Pigment');
 // Tests and portable setups can point the settings/recent files elsewhere.
@@ -293,8 +295,9 @@ app.whenReady().then(async () => {
   });
 
   session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
-    callback(['fullscreen', 'clipboard-sanitized-write', 'clipboard-read'].includes(permission));
+    callback(ALLOWED_PERMISSIONS.includes(permission));
   });
+  session.defaultSession.setPermissionCheckHandler((_wc, permission) => ALLOWED_PERMISSIONS.includes(permission));
 
   app.setAboutPanelOptions({
     applicationName: 'Pigment',

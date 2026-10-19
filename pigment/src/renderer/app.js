@@ -21,6 +21,7 @@ const MODULES = [
   'lib/layer-ops.js',
   'lib/edit-ops.js',
   'lib/image-ops.js',
+  'lib/file-ops.js',
   'lib/tools/move.js',
   'lib/tools/select.js',
   'lib/tools/paint.js',

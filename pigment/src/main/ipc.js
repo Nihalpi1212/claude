@@ -5,11 +5,9 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import { basename, dirname } from 'node:path';
 import { addRecent, removeRecent } from './recent.js';
+import { OPEN_DIALOG_FILTERS } from '../shared/formats.js';
 
-const PDF_FILTERS = [
-  { name: 'PDF files', extensions: ['pdf'] },
-  { name: 'All files', extensions: ['*'] },
-];
+const DEFAULT_FILTERS = OPEN_DIALOG_FILTERS;
 
 const EDIT_ACTIONS = new Set(['undo', 'redo', 'cut', 'copy', 'paste', 'delete', 'selectAll']);
 
@@ -60,7 +58,7 @@ export function registerIpc(ctx) {
     const result = await dialog.showOpenDialog(win ?? undefined, {
       title: typeof opts.title === 'string' ? opts.title : 'Open',
       properties: ['openFile', ...(opts.multiple ? ['multiSelections'] : [])],
-      filters: Array.isArray(opts.filters) && opts.filters.length ? opts.filters : PDF_FILTERS,
+      filters: Array.isArray(opts.filters) && opts.filters.length ? opts.filters : DEFAULT_FILTERS,
     });
     return result.canceled ? [] : result.filePaths;
   });
@@ -70,7 +68,7 @@ export function registerIpc(ctx) {
     const result = await dialog.showSaveDialog(win ?? undefined, {
       title: typeof opts.title === 'string' ? opts.title : 'Save',
       defaultPath: typeof opts.defaultPath === 'string' ? opts.defaultPath : undefined,
-      filters: Array.isArray(opts.filters) && opts.filters.length ? opts.filters : PDF_FILTERS,
+      filters: Array.isArray(opts.filters) && opts.filters.length ? opts.filters : DEFAULT_FILTERS,
       properties: ['createDirectory', 'showOverwriteConfirmation'],
     });
     return result.canceled || !result.filePath ? null : result.filePath;
@@ -91,7 +89,7 @@ export function registerIpc(ctx) {
   handle('writeFile', async (path, data) => {
     assertString(path, 'path');
     const bytes = toUint8(data);
-    // Write next to the target and rename so a crash never leaves a truncated PDF behind.
+    // Write next to the target and rename so a crash never leaves a truncated file behind.
     const tmp = `${path}.pigment-${process.pid}-${Date.now()}.tmp`;
     try {
       await fs.writeFile(tmp, bytes);
@@ -273,6 +271,12 @@ export function registerIpc(ctx) {
   on('writeClipboardText', (text) => {
     if (typeof text === 'string') clipboard.writeText(text);
   });
+  handle('readClipboardImage', async () => {
+    const image = clipboard.readImage();
+    if (!image || image.isEmpty()) return null;
+    return new Uint8Array(image.toPNG());
+  });
+
   on('writeClipboardImage', (dataUrl) => {
     if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) return;
     const image = nativeImage.createFromDataURL(dataUrl);

@@ -280,18 +280,29 @@ function posterizeLut(p) {
   return makeLut((v) => (Math.floor((v * n) / 256) * 255) / (n - 1));
 }
 
-/** Color Balance tables: v + shadows * ws(v) + midtones * wm(v) + highlights * wh(v) per channel. */
+/** Black/white point travel (fraction of the range) of a Color Balance slider at +-100. */
+const CB_POINT = 0.4;
+
+/**
+ * Color Balance tables, one per channel, as a per-channel Levels: the shadows slider moves the
+ * channel's black point (adding colour raises the output black, removing it raises the input
+ * black), highlights moves the white point the same way (adding lowers the input white,
+ * removing lowers the output white) and midtones is a gamma (2^-m, so +-100 is gamma 2 / 0.5).
+ * Each step is monotone, so tones never reverse; shadows keep white, highlights keep black and
+ * midtones keep both.
+ */
 function colorBalanceLuts(p) {
   const sh = vec3(p.shadows), mid = vec3(p.midtones), hi = vec3(p.highlights);
   const luts = [];
   for (let c = 0; c < 3; c++) {
-    const s = clampNum(sh[c], -100, 100), m = clampNum(mid[c], -100, 100), h = clampNum(hi[c], -100, 100);
+    const s = (clampNum(sh[c], -100, 100) / 100) * CB_POINT, h = (clampNum(hi[c], -100, 100) / 100) * CB_POINT;
+    const expo = Math.pow(2, -clampNum(mid[c], -100, 100) / 100);
     luts.push(makeLut((v) => {
-      const ws = 1.075 - 1 / ((255 - v) / 16 + 1); // ~1 at black, ~0.075 at white
-      const wh = 1.075 - 1 / (v / 16 + 1); // ~1 at white, ~0.075 at black
-      const dm = (v - 127.5) / 127.5;
-      const wm = 0.667 * (1 - dm * dm); // bell peaking at mid grey, 0 at black and white
-      return v + s * ws + m * wm + h * wh;
+      let t = v / 255;
+      t = s >= 0 ? s + t * (1 - s) : t <= -s ? 0 : (t + s) / (1 + s);
+      if (expo !== 1) t = Math.pow(t, expo);
+      t = h >= 0 ? (t >= 1 - h ? 1 : t / (1 - h)) : t * (1 + h);
+      return t * 255;
     }));
   }
   return luts;
@@ -511,8 +522,10 @@ function vibrance(img, p, rect) {
       if (delta === 0) continue; // grey stays grey
       let k = kSat;
       if (vib !== 0) {
-        const s = delta / max; // HSV saturation: the less saturated, the more vibrance acts
-        let amt = vib * (1 - s);
+        // HSV saturation: the less saturated, the more vibrance acts; (1 - s)^2 leaves colours
+        // that are already vivid almost alone so they do not clip.
+        const s = delta / max;
+        let amt = vib * (1 - s) * (1 - s);
         if (vib > 0) {
           // Protect skin tones: hues within 30 degrees of orange (30) get up to half the boost.
           let h;
@@ -741,15 +754,20 @@ function boxBlurField(f, w, h, rad, tmp) {
       sum += f[row + (add > last ? last : add)] - f[row + (sub < 0 ? 0 : sub)];
     }
   }
-  for (let x = 0; x < w; x++) {
-    const last = h - 1;
-    let sum = 0;
-    for (let k = -rad; k <= rad; k++) sum += tmp[(k < 0 ? 0 : k > last ? last : k) * w + x];
-    for (let y = 0; y < h; y++) {
-      f[y * w + x] = sum / win;
-      const add = y + rad + 1, sub = y - rad;
-      sum += tmp[(add > last ? last : add) * w + x] - tmp[(sub < 0 ? 0 : sub) * w + x];
-    }
+  // Vertical pass row by row (cache friendly) with one running sum per column.
+  const last = h - 1;
+  const colSum = new Float64Array(w);
+  for (let k = -rad; k <= rad; k++) {
+    const row = (k < 0 ? 0 : k > last ? last : k) * w;
+    for (let x = 0; x < w; x++) colSum[x] += tmp[row + x];
+  }
+  const inv = 1 / win;
+  for (let y = 0; y < h; y++) {
+    const o = y * w;
+    for (let x = 0; x < w; x++) f[o + x] = colSum[x] * inv;
+    const add = y + rad + 1, sub = y - rad;
+    const ra = (add > last ? last : add) * w, rs = (sub < 0 ? 0 : sub) * w;
+    for (let x = 0; x < w; x++) colSum[x] += tmp[ra + x] - tmp[rs + x];
   }
   return f;
 }
@@ -871,16 +889,22 @@ const freezeDeep = (o) => {
  *   hue shift via HSL; saturation scales chroma about luma (-100 == desaturate, +100 pushes HSL
  *   saturation to 1); lightness blends towards white/black; range limits the edit to a hue band
  *   (full within 15 degrees of the band centre, fading out by 45); colorize paints luma with one hue.
- * - color-balance { shadows, midtones, highlights: [cyanRed, magentaGreen, yellowBlue] -100..100, preserveLuminosity }.
+ * - color-balance { shadows, midtones, highlights: [cyanRed, magentaGreen, yellowBlue] -100..100, preserveLuminosity }:
+ *   per-channel black point / gamma / white point (see colorBalanceLuts); preserveLuminosity
+ *   (default) restores each pixel's Rec. 601 luma.
  * - black-white { reds, yellows, greens, cyans, blues, magentas (percent), tint?: { hue, sat } | null }:
  *   Photoshop's min + (mid - min) * secondary + (max - mid) * primary weighting.
- * - photo-filter { color, density 0..100, preserveLuminosity }: multiplies by the filter colour at density.
+ * - photo-filter { color, density 0..100, preserveLuminosity }: multiplies by the filter colour at density
+ *   (density defaults to 0 so a new adjustment starts neutral; Photoshop's dialog suggests 25).
  * - channel-mixer { r, g, b: { r, g, b, constant } percent, monochrome, gray }: monochrome uses the gray row (or r when absent).
  * - invert, desaturate (Rec. 601 luma), equalize (luma histogram equalisation, hue kept): no params.
  * - posterize { levels 2..255 }, threshold { level 1..255 } (luma >= level -> white).
  * - gradient-map { stops: [{ offset 0..1, color }], reverse }: luma picks the gradient colour.
  * - selective-color { reds..magentas, whites, neutrals, blacks: { c, m, y, k } -100..100, relative }: see selectiveColor.
- * - shadows-highlights { shadows 0..100, highlights 0..100, radius px }: see shadowsHighlights.
+ * - shadows-highlights { shadows 0..100, highlights 0..100, radius px }: see shadowsHighlights (amounts
+ *   default to 0, i.e. neutral; Photoshop's dialog suggests shadows 35).
+ * Defaults of every parameter-driven kind are the identity; invert, posterize, threshold,
+ * gradient-map, black-white, desaturate and equalize change the image by definition.
  * @type {Readonly<Record<AdjustmentKind, { name: string, defaults: object, apply: (img: ImageDataLike, params?: object, rect?: Rect | null) => ImageDataLike, lut?: (params?: object) => LutTriple }>>}
  */
 export const ADJUSTMENTS = Object.freeze({

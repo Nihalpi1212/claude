@@ -54,6 +54,7 @@ const api = {
 
   writeClipboardText: (text) => send('writeClipboardText', text),
   writeClipboardImage: (dataUrl) => send('writeClipboardImage', dataUrl),
+  readClipboardImage: () => invoke('readClipboardImage'),
 
   watchFile: (path) => invoke('watchFile', path),
   unwatchFile: (path) => invoke('unwatchFile', path),

@@ -1,5 +1,6 @@
 // Pure helper: which of the command-line arguments are files to open.
 import { isAbsolute, resolve } from 'node:path';
+import { isOpenablePath } from '../shared/formats.js';
 
 /**
  * @param {string[]} argv       process.argv (or the argv of a second instance)
@@ -12,7 +13,7 @@ export function filesFromArgv(argv, { isPackaged, cwd, exists = () => true }) {
   for (const arg of args) {
     if (typeof arg !== 'string' || !arg || arg.startsWith('-')) continue;
     const abs = isAbsolute(arg) ? arg : resolve(cwd, arg);
-    if (!/\.pdf$/i.test(abs)) continue;
+    if (!isOpenablePath(abs)) continue;
     if (!exists(abs)) continue;
     if (!files.includes(abs)) files.push(abs);
   }
