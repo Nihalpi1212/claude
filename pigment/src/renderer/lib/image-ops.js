@@ -306,18 +306,25 @@ function scaleStyles(styles, s) {
   return out;
 }
 
-/** Canvas Size: paints the newly exposed area on the bottom layer when it covered the old canvas. */
+/** True when the bottom layer is an opaque raster covering the whole canvas (a Photoshop "Background"). */
+export function hasOpaqueBackground(d) {
+  const bottom = d.root.children[0];
+  if (!bottom || bottom.type !== 'raster' || !bottom.visible) return false;
+  if (bottom.x > 0 || bottom.y > 0 || bottom.x + bottom.canvas.width < d.width || bottom.y + bottom.canvas.height < d.height) return false;
+  const a = bottom.canvas.getContext('2d', { willReadFrequently: true }).getImageData(-bottom.x, -bottom.y, d.width, d.height).data;
+  for (let i = 3; i < a.length; i += 4) if (a[i] !== 255) return false;
+  return true;
+}
+
+/** Canvas Size / Rotate Canvas: paints the newly exposed area under an opaque background layer (never on a transparent image). */
 function extendBackground(root, d, spec, W, H) {
   const bottom = root.children[0];
-  if (!bottom || bottom.type !== 'raster') return;
-  const old = { x: spec.matrix[4], y: spec.matrix[5], width: d.width, height: d.height };
-  const b = { x: bottom.x, y: bottom.y, width: bottom.canvas.width, height: bottom.canvas.height };
-  if (b.x > old.x || b.y > old.y || b.x + b.width < old.x + old.width || b.y + b.height < old.y + old.height) return;
+  if (!bottom || bottom.type !== 'raster' || !hasOpaqueBackground(d)) return;
   const c = createCanvas(W, H);
   const ctx = c.getContext('2d');
   ctx.fillStyle = spec.extend;
   ctx.fillRect(0, 0, W, H);
-  ctx.clearRect(old.x, old.y, old.width, old.height);
+  if (isTranslation(spec.matrix)) ctx.clearRect(spec.matrix[4], spec.matrix[5], d.width, d.height);
   ctx.drawImage(bottom.canvas, bottom.x, bottom.y);
   bottom.canvas = c;
   bottom.x = 0;
@@ -507,6 +514,7 @@ export function install(app) {
   async function canvasSize(arg) {
     const d = doc();
     let opts = arg && typeof arg === 'object' ? arg : null;
+    const opaqueBg = hasOpaqueBackground(d);
     if (!opts) {
       const unit0 = app.settings.canvasSizeUnit ?? 'px';
       opts = await formDialog(app, {
@@ -518,8 +526,9 @@ export function install(app) {
           { key: 'width', label: 'Width', type: 'number', value: round(fromPx(d.width, unit0, d.dpi, d.width), unit0), step: 0.001 },
           { key: 'height', label: 'Height', type: 'number', value: round(fromPx(d.height, unit0, d.dpi, d.height), unit0), step: 0.001 },
           anchorField('c'),
-          { key: 'extend', label: 'Canvas extension color', type: 'select', value: 'background', options: [['background', 'Background color'], ['foreground', 'Foreground color'], ['white', 'White'], ['black', 'Black'], ['grey', 'Gray'], ['transparent', 'Transparent'], ['custom', 'Other…']] },
-          { key: 'custom', label: 'Color', type: 'color', value: '#ffffff', when: (v) => v.extend === 'custom' },
+          // like Photoshop, the extension colour exists only for an opaque Background; a transparent image stays transparent
+          { key: 'extend', label: 'Canvas extension color', type: 'select', value: opaqueBg ? 'background' : 'transparent', options: [['background', 'Background color'], ['foreground', 'Foreground color'], ['white', 'White'], ['black', 'Black'], ['grey', 'Gray'], ['transparent', 'Transparent'], ['custom', 'Other…']], when: () => opaqueBg },
+          { key: 'custom', label: 'Color', type: 'color', value: '#ffffff', when: (v) => opaqueBg && v.extend === 'custom' },
         ],
         onChange: (v, key, form) => {
           if (key === 'unit' || key === 'relative') {
@@ -541,7 +550,7 @@ export function install(app) {
         W += d.width;
         H += d.height;
       }
-      opts = { width: Math.round(W), height: Math.round(H), anchor: opts.anchor, color: extensionColor(opts.extend, opts.custom) };
+      opts = { width: Math.round(W), height: Math.round(H), anchor: opts.anchor, color: opaqueBg ? extensionColor(opts.extend, opts.custom) : null };
     }
     const W = Math.round(opts.width), H = Math.round(opts.height);
     if (W < 1 || H < 1 || W > 30000 || H > 30000) return app.dialogs.toast('The canvas must be between 1 and 30,000 pixels', { kind: 'error' });
@@ -560,7 +569,8 @@ export function install(app) {
     const r = T.matrixFrom({ rotate: rad, origin: [W / 2, H / 2] });
     const b = T.transformBounds(r, { x: 0, y: 0, width: W, height: H });
     const m = T.multiplyMatrix([1, 0, 0, 1, -b.x, -b.y], r);
-    return remapDocument(app, 'Rotate canvas', { width: b.width, height: b.height, matrix: m, mode: 'affine' });
+    // the uncovered corners take the background colour under an opaque Background layer (transparent images stay transparent)
+    return remapDocument(app, 'Rotate canvas', { width: b.width, height: b.height, matrix: m, mode: 'affine', extend: hasOpaqueBackground(d) ? app.settings.background : null });
   }
 
   /** Rotates the active layer(s) by deg (clockwise) around their centre, as one transform. */
@@ -700,8 +710,13 @@ export function install(app) {
       copy.root.children.push(layer);
       copy.active = layer;
     } else {
+      const keepLocks = (src, dst) => {
+        dst.locked = { ...src.locked };
+        if (src.isGroup) src.children.forEach((sc, i) => dst.children[i] && keepLocks(sc, dst.children[i]));
+      };
       for (const l of d.root.children) {
         const c = cloneLayer(l, { name: l.name });
+        keepLocks(l, c); // a duplicate image is an exact copy: Duplicate Layer's unlocking does not apply
         c.parent = copy.root;
         copy.root.children.push(c);
       }
@@ -877,6 +892,8 @@ export class TransformTool extends Tool {
       }
     }
     s.hasText = s.targets.some((l) => l.type === 'text');
+    // linked masks of selected groups move with the group's children (the Move tool does the same)
+    s.groupMasks = s.floating ? [] : d.selectedLayers().filter((l) => l.isGroup && l.mask?.canvas && l.mask.linked !== false && !l.locked.all && !l.locked.position);
     s.quad = quadFromMatrix(s.box, T.IDENTITY);
     s.pivot = [s.box.x + s.box.width / 2, s.box.y + s.box.height / 2];
     s.interp = app.settings.transformInterpolation ?? 'bicubic';
@@ -1067,8 +1084,38 @@ export class TransformTool extends Tool {
         }
         return perspectiveCanvas(canvas, x, y, this.quadFor({ x, y, width: canvas.width, height: canvas.height }), { quality: quality === 'nearest' ? 'nearest' : quality === 'bilinear' ? 'bilinear' : 'bicubic' });
       };
-      // masks follow affine transforms (perspective leaves them in place)
-      const mapMask = (mask) => (m ? transformMaskCanvas(mask, m, d.width, d.height, { smooth: !s.exact }) : mask);
+      // masks follow the layer: affine through transformMaskCanvas, distort/perspective through the homography
+      const mapMask = (mask) => {
+        if (m) return transformMaskCanvas(mask, m, d.width, d.height, { smooth: !s.exact });
+        const r = perspectiveCanvas(mask, 0, 0, this.quadFor({ x: 0, y: 0, width: mask.width, height: mask.height }), { quality: 'bilinear' });
+        const c = createCanvas(d.width, d.height);
+        const ctx = c.getContext('2d');
+        const bg = cornerAlpha(mask);
+        if (bg > 0) {
+          ctx.fillStyle = `rgba(255,255,255,${bg / 255})`;
+          ctx.fillRect(0, 0, d.width, d.height);
+          ctx.globalCompositeOperation = 'destination-out';
+          ctx.fillStyle = '#000';
+          const q = this.quadFor({ x: 0, y: 0, width: mask.width, height: mask.height });
+          ctx.beginPath();
+          q.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+          ctx.closePath();
+          ctx.fill();
+          ctx.globalCompositeOperation = 'source-over';
+        }
+        ctx.drawImage(r.canvas, r.x, r.y);
+        return c;
+      };
+      const transformMask = (l) => {
+        const before = l.mask, after = { ...l.mask, canvas: mapMask(l.mask.canvas) };
+        const set = (v) => {
+          l.mask = v;
+          l.touch();
+          d.changed('pixels', { layer: l });
+        };
+        set(after);
+        d.history.push({ label: 'Transform mask', undo: () => set(before), redo: () => set(after), bytes: d.width * d.height * 4, at: Date.now() });
+      };
       // selection masks: an axis-aligned scale keeps hard edges hard (no bilinear halo)
       const renderMask = (c) => (m && isAxisAligned(m) ? affineCanvas(c, 0, 0, m, { smooth: false }) : render(c, 0, 0));
       if (s.selectionOnly) {
@@ -1120,22 +1167,17 @@ export class TransformTool extends Tool {
               if (l.stroke && m && app.settings.transformScalesStrokes) patch.stroke = { ...l.stroke, width: l.stroke.width * Math.sqrt(Math.abs(m[0] * m[3] - m[1] * m[2])) };
               setLayerProps(app, l, patch, 'Transform');
             }
-            if (l.mask?.canvas && l.mask.linked !== false && m) {
-              const before = l.mask, after = { ...l.mask, canvas: mapMask(l.mask.canvas) };
-              const set = (v) => {
-                l.mask = v;
-                l.touch();
-                d.changed('pixels', { layer: l });
-              };
-              set(after);
-              d.history.push({ label: 'Transform mask', undo: () => set(before), redo: () => set(after), bytes: d.width * d.height * 4, at: Date.now() });
-            }
+            if (l.mask?.canvas && l.mask.linked !== false) transformMask(l);
           }
+          for (const g of s.groupMasks ?? []) if (g.mask?.canvas) transformMask(g);
         });
       }
       if (m) {
+        // Transform Again replays the linear part about the new box centre plus the centre's displacement (a plain move included)
+        const c0 = [s.box.x + s.box.width / 2, s.box.y + s.box.height / 2];
+        const c1 = T.applyMatrix(m, c0[0], c0[1]);
         this.lastMatrix = m;
-        this.lastShift = null;
+        this.lastShift = [c1[0] - c0[0], c1[1] - c0[1]];
       }
     } catch (err) {
       app.reportError(err, 'Could not apply the transform');
@@ -1462,12 +1504,12 @@ export class TransformTool extends Tool {
       return { sx, sy, rot, skew };
     };
     const rebuild = (s, parts) => {
+      // typed values apply about the reference point, like dragging does
       const b = s.box;
-      const c = [b.x + b.width / 2, b.y + b.height / 2];
       const lin = T.matrixFrom({ scale: [parts.sx, parts.sy], skew: [parts.skew, 0], rotate: parts.rot });
-      const cur = T.applyMatrix(this.matrix, c[0], c[1]);
-      const p = T.applyMatrix(lin, c[0], c[1]);
-      const M = [lin[0], lin[1], lin[2], lin[3], cur[0] - p[0], cur[1] - p[1]];
+      const pv = T.applyMatrix(T.invertMatrix(this.matrix), s.pivot[0], s.pivot[1]);
+      const p = T.applyMatrix(lin, pv[0], pv[1]);
+      const M = [lin[0], lin[1], lin[2], lin[3], s.pivot[0] - p[0], s.pivot[1] - p[1]];
       s.quad = quadFromMatrix(b, M);
     };
     add('x', 'X', 'px', (v) => withMatrix((s, m) => {

@@ -382,6 +382,9 @@ export class CropTool extends Tool {
     return true;
   }
   cancel() {
+    // only a crop box the user adjusted is cancelled; otherwise Escape/Undo belong to the document
+    if (this.pristine && !this.drag) return false;
+    this.drag = null;
     this.resetBox();
     return true;
   }
