@@ -51,6 +51,25 @@ function vec3(v, fallback = [0, 0, 0]) {
 
 const region = (img, rect) => clampRect(rect, img.width, img.height);
 
+/**
+ * Applies per-channel LUTs to RGB inside rect with plain loops (core.js applyLut walks a rect
+ * through a per-pixel callback); alpha is never touched.
+ */
+function applyLuts(img, lr, lg, lb, rect) {
+  if (!rect) return applyLut(img, lr, lg, lb);
+  const r = region(img, rect);
+  if (!r.width) return img;
+  const d = img.data, w = img.width;
+  for (let y = r.y, ye = r.y + r.height; y < ye; y++) {
+    for (let i = (y * w + r.x) * 4, e = i + r.width * 4; i < e; i += 4) {
+      d[i] = lr[d[i]];
+      d[i + 1] = lg[d[i + 1]];
+      d[i + 2] = lb[d[i + 2]];
+    }
+  }
+  return img;
+}
+
 // Scratch outputs of the allocation-free HSL -> RGB conversion used in per-pixel loops (same maths
 // as color.js hslToRgb, which allocates a result array and is used here only to build tables).
 let R = 0, G = 0, B = 0;
@@ -270,8 +289,8 @@ function colorBalanceLuts(p) {
     luts.push(makeLut((v) => {
       const ws = 1.075 - 1 / ((255 - v) / 16 + 1); // ~1 at black, ~0.075 at white
       const wh = 1.075 - 1 / (v / 16 + 1); // ~1 at white, ~0.075 at black
-      const dm = (v - 127) / 127;
-      const wm = 0.667 * (1 - dm * dm); // bell peaking at 127
+      const dm = (v - 127.5) / 127.5;
+      const wm = 0.667 * (1 - dm * dm); // bell peaking at mid grey, 0 at black and white
       return v + s * ws + m * wm + h * wh;
     }));
   }
@@ -280,7 +299,7 @@ function colorBalanceLuts(p) {
 
 function photoFilterLuts(p) {
   const col = parseColor(p.color, [236, 138, 0, 1]);
-  const dens = clampNum(num(p.density, 25), 0, 100) / 100;
+  const dens = clampNum(num(p.density, 0), 0, 100) / 100;
   const luts = [];
   for (let c = 0; c < 3; c++) {
     const k = 1 - dens + (dens * clamp255(col[c])) / 255;
@@ -517,12 +536,12 @@ function vibrance(img, p, rect) {
 
 function colorBalance(img, p, rect) {
   const [lr, lg, lb] = colorBalanceLuts(p);
-  return p.preserveLuminosity === false ? applyLut(img, lr, lg, lb, rect) : applyLutKeepLuma(img, lr, lg, lb, rect);
+  return p.preserveLuminosity === false ? applyLuts(img, lr, lg, lb, rect) : applyLutKeepLuma(img, lr, lg, lb, rect);
 }
 
 function photoFilter(img, p, rect) {
   const [lr, lg, lb] = photoFilterLuts(p);
-  return p.preserveLuminosity === false ? applyLut(img, lr, lg, lb, rect) : applyLutKeepLuma(img, lr, lg, lb, rect);
+  return p.preserveLuminosity === false ? applyLuts(img, lr, lg, lb, rect) : applyLutKeepLuma(img, lr, lg, lb, rect);
 }
 
 function blackWhite(img, p, rect) {
@@ -617,7 +636,8 @@ function inkRow(row) {
  * magenta for green, yellow for blue) and black is 1 - max/255. Each range's CMYK deltas are
  * weighted by how much the pixel belongs to it (reds/greens/blues by max - mid of the dominant
  * channel, yellows/cyans/magentas by mid - min, whites by 2*min - 255, blacks by 255 - 2*max,
- * neutrals by 255 - |max + min - 255|). Relative mode scales a delta by the ink already present
+ * neutrals by 255 - |max - 127.5| - |min - 127.5|, so pure hues, white and black are not
+ * neutral). Relative mode scales a delta by the ink already present
  * (so it cannot touch pure white, like Photoshop), absolute adds it outright. Monotonic in every
  * slider.
  */
@@ -648,8 +668,8 @@ function selectiveColor(img, p, rect) {
       const wp = (max - mid) / 255, ws = (mid - min) / 255;
       const ww = min > 127 ? (2 * min - 255) / 255 : 0;
       const wb = max < 128 ? (255 - 2 * max) / 255 : 0;
-      const dn = max + min - 255;
-      const wn = (255 - (dn < 0 ? -dn : dn)) / 255;
+      const dmax = max - 127.5, dmin = min - 127.5;
+      const wn = (255 - (dmax < 0 ? -dmax : dmax) - (dmin < 0 ? -dmin : dmin)) / 255;
       const P = prim[maxI], S = sec[minI];
       const ac = wp * P[0] + ws * S[0] + ww * whites[0] + wn * neutrals[0] + wb * blacks[0];
       const am = wp * P[1] + ws * S[1] + ww * whites[1] + wn * neutrals[1] + wb * blacks[1];
@@ -735,31 +755,32 @@ function boxBlurField(f, w, h, rad, tmp) {
 }
 
 /**
- * Shadows/Highlights: a box-blurred luma mask (radius px) decides how much each pixel is
- * "shadow" ((1 - m)^2) or "highlight" (m^2); shadows lifts towards white and highlights pulls
- * towards black by up to half the distance at 100. The mask is built from alpha-weighted luma
- * divided by blurred alpha (premultiplied averaging) so transparent neighbours do not darken it.
+ * Shadows/Highlights: a blurred luma mask (three box passes of radius/2, close to a Gaussian
+ * with sigma radius/2) decides how much each pixel is "shadow" ((1 - m)^2) or "highlight"
+ * (m^2); shadows lifts towards white and highlights pulls towards black by up to half the
+ * distance at 100. The mask is built from alpha-weighted luma divided by blurred alpha
+ * (premultiplied averaging) so transparent neighbours do not darken it. Pixels outside rect
+ * (but inside the image) feed the mask; only pixels inside rect change.
  */
 function shadowsHighlights(img, p, rect) {
-  const sh = clampNum(num(p.shadows, 35), 0, 100) / 100, hi = clampNum(num(p.highlights, 0), 0, 100) / 100;
+  const sh = clampNum(num(p.shadows, 0), 0, 100) / 100, hi = clampNum(num(p.highlights, 0), 0, 100) / 100;
   if (sh === 0 && hi === 0) return img;
   const rad = clampNum(Math.round(num(p.radius, 30)), 0, 1000);
+  const pass = rad > 0 ? Math.max(1, Math.round(rad / 2)) : 0, support = pass * 3;
   const r = region(img, rect);
   if (!r.width) return img;
   const d = img.data, w = img.width;
-  const reg = clampRect({ x: r.x - rad, y: r.y - rad, width: r.width + 2 * rad, height: r.height + 2 * rad }, img.width, img.height);
+  const reg = clampRect({ x: r.x - support, y: r.y - support, width: r.width + 2 * support, height: r.height + 2 * support }, img.width, img.height);
   const rw = reg.width, rh = reg.height;
   const lum = new Float32Array(rw * rh);
   let alpha = null, opaque = true;
-  for (let y = 0; y < rh; y++) {
-    let i = ((reg.y + y) * w + reg.x) * 4, o = y * rw;
-    for (let x = 0; x < rw; x++, i += 4, o++) {
+  for (let y = 0; y < rh && opaque; y++) {
+    for (let i = ((reg.y + y) * w + reg.x) * 4, e = i + rw * 4; i < e; i += 4) {
       if (d[i + 3] !== 255) {
         opaque = false;
         break;
       }
     }
-    if (!opaque) break;
   }
   if (!opaque) alpha = new Float32Array(rw * rh);
   for (let y = 0; y < rh; y++) {
@@ -771,8 +792,10 @@ function shadowsHighlights(img, p, rect) {
     }
   }
   const tmp = new Float32Array(rw * rh);
-  boxBlurField(lum, rw, rh, rad, tmp);
-  if (alpha) boxBlurField(alpha, rw, rh, rad, tmp);
+  for (let k = 0; k < 3; k++) {
+    boxBlurField(lum, rw, rh, pass, tmp);
+    if (alpha) boxBlurField(alpha, rw, rh, pass, tmp);
+  }
   const sAmt = sh * 0.5, hAmt = hi * 0.5;
   for (let y = r.y, ye = r.y + r.height; y < ye; y++) {
     let i = (y * w + r.x) * 4, o = (y - reg.y) * rw + (r.x - reg.x);
@@ -806,7 +829,7 @@ function lutKind(name, defaults, build) {
     lut,
     apply(img, params, rect = null) {
       const [lr, lg, lb] = lut(params);
-      return applyLut(img, lr, lg, lb, rect);
+      return applyLuts(img, lr, lg, lb, rect);
     },
   });
 }
@@ -865,7 +888,7 @@ export const ADJUSTMENTS = Object.freeze({
     const l = brightnessContrastLut(p);
     return [l, l, l];
   }),
-  levels: lutKind('Levels', freezeDeep({ perChannel: false, rgb: { ...DEFAULT_LEVELS }, r: null, g: null, b: null }), (p) =>
+  levels: lutKind('Levels', freezeDeep({ perChannel: true, rgb: { ...DEFAULT_LEVELS }, r: null, g: null, b: null }), (p) =>
     perChannelLuts(p, levelsLut, p.perChannel !== false)),
   curves: lutKind('Curves', freezeDeep({ rgb: [[0, 0], [255, 255]], r: null, g: null, b: null }), (p) => perChannelLuts(p, curveLut, true)),
   exposure: lutKind('Exposure', freezeDeep({ exposure: 0, offset: 0, gamma: 1 }), (p) => {
@@ -880,7 +903,7 @@ export const ADJUSTMENTS = Object.freeze({
   ),
   'color-balance': pixelKind('Color Balance', freezeDeep({ shadows: [0, 0, 0], midtones: [0, 0, 0], highlights: [0, 0, 0], preserveLuminosity: true }), colorBalance),
   'black-white': pixelKind('Black & White', freezeDeep({ reds: 40, yellows: 60, greens: 40, cyans: 60, blues: 20, magentas: 80, tint: null }), blackWhite),
-  'photo-filter': pixelKind('Photo Filter', freezeDeep({ color: '#ec8a00', density: 25, preserveLuminosity: true }), photoFilter),
+  'photo-filter': pixelKind('Photo Filter', freezeDeep({ color: '#ec8a00', density: 0, preserveLuminosity: true }), photoFilter),
   'channel-mixer': pixelKind('Channel Mixer', freezeDeep({ r: { ...MIXER_IDENTITY.r }, g: { ...MIXER_IDENTITY.g }, b: { ...MIXER_IDENTITY.b }, gray: { ...MIXER_IDENTITY.gray }, monochrome: false }), channelMixer),
   invert: lutKind('Invert', freezeDeep({}), () => {
     const l = makeLut((v) => 255 - v);
@@ -899,7 +922,7 @@ export const ADJUSTMENTS = Object.freeze({
   ),
   desaturate: pixelKind('Desaturate', freezeDeep({}), (img, _p, rect) => desaturate(img, rect)),
   equalize: pixelKind('Equalize', freezeDeep({}), (img, _p, rect) => equalize(img, rect)),
-  'shadows-highlights': pixelKind('Shadows/Highlights', freezeDeep({ shadows: 35, highlights: 0, radius: 30 }), shadowsHighlights),
+  'shadows-highlights': pixelKind('Shadows/Highlights', freezeDeep({ shadows: 0, highlights: 0, radius: 30 }), shadowsHighlights),
 });
 
 /** Every kind id, in menu order. @type {readonly AdjustmentKind[]} */
@@ -980,7 +1003,7 @@ export function autoLevels(img, { clip = 0.1 } = {}, rect = null) {
     const lv = clipLevels(hist, h.count, clip);
     return lv ? levelsLut({ inBlack: lv[0], inWhite: lv[1] }) : makeLut((v) => v);
   });
-  return applyLut(img, luts[0], luts[1], luts[2], rect);
+  return applyLuts(img, luts[0], luts[1], luts[2], rect);
 }
 
 /**
@@ -996,7 +1019,7 @@ export function autoContrast(img, { clip = 0.1 } = {}, rect = null) {
   const lv = clipLevels(h.l, h.count, clip);
   if (!lv) return img;
   const l = levelsLut({ inBlack: lv[0], inWhite: lv[1] });
-  return applyLut(img, l, l, l, rect);
+  return applyLuts(img, l, l, l, rect);
 }
 
 /**
@@ -1025,5 +1048,5 @@ export function autoColor(img, { clip = 0.1 } = {}, rect = null) {
     if (m > 1 && m < 254 && target > 1 && target < 254) gamma = clampNum(Math.log(m / 255) / Math.log(target / 255), 0.5, 2);
     return levelsLut({ inBlack: lv[0], inWhite: lv[1], gamma });
   });
-  return applyLut(img, luts[0], luts[1], luts[2], rect);
+  return applyLuts(img, luts[0], luts[1], luts[2], rect);
 }

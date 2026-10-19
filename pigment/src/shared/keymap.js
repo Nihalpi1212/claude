@@ -99,6 +99,7 @@ export const RENDERER_KEYS = {
   'tool:heal': ['j'],
   'tool:brush': ['b'],
   'tool:clone': ['s'],
+  'tool:history': ['y'],
   'tool:eraser': ['e'],
   'tool:fill': ['g'],
   'tool:retouch': ['o'],
@@ -127,7 +128,7 @@ export const SHORTCUT_GROUPS = [
   { title: 'Layers', commands: ['layer:new', 'layer:via-copy', 'layer:via-cut', 'layer:group', 'layer:ungroup', 'layer:clip', 'layer:merge-down', 'layer:merge-visible', 'layer:arrange-front', 'layer:arrange-forward', 'layer:arrange-backward', 'layer:arrange-back', 'layer:select-all'] },
   { title: 'Selection', commands: ['select:all', 'select:none', 'select:reselect', 'select:inverse', 'select:feather'] },
   { title: 'View', commands: ['view:zoom-in', 'view:zoom-out', 'view:zoom-fit', 'view:zoom-100', 'view:zoom-200', 'view:rulers', 'view:grid', 'view:guides', 'view:extras', 'view:snap', 'view:fullscreen', 'window:toggle-panels', 'view:next-tab', 'view:prev-tab'] },
-  { title: 'Tools', commands: ['tool:move', 'tool:marquee', 'tool:lasso', 'tool:wand', 'tool:crop', 'tool:eyedropper', 'tool:heal', 'tool:brush', 'tool:clone', 'tool:eraser', 'tool:fill', 'tool:retouch', 'tool:pen', 'tool:text', 'tool:path-select', 'tool:shape', 'tool:hand', 'tool:rotate-view', 'tool:zoom', 'tool:swap-colors', 'tool:default-colors', 'tool:brush-size-down', 'tool:brush-size-up', 'tool:brush-hardness-down', 'tool:brush-hardness-up', 'app:escape', 'app:enter'] },
+  { title: 'Tools', commands: ['tool:move', 'tool:marquee', 'tool:lasso', 'tool:wand', 'tool:crop', 'tool:eyedropper', 'tool:heal', 'tool:brush', 'tool:clone', 'tool:history', 'tool:eraser', 'tool:fill', 'tool:retouch', 'tool:pen', 'tool:text', 'tool:path-select', 'tool:shape', 'tool:hand', 'tool:rotate-view', 'tool:zoom', 'tool:swap-colors', 'tool:default-colors', 'tool:brush-size-down', 'tool:brush-size-up', 'tool:brush-hardness-down', 'tool:brush-hardness-up', 'app:escape', 'app:enter'] },
   { title: 'Help', commands: ['help:shortcuts', 'help:devtools'] },
 ];
 
@@ -148,7 +149,7 @@ export const COMMAND_LABELS = {
   'view:zoom-in': 'Zoom in', 'view:zoom-out': 'Zoom out', 'view:zoom-fit': 'Fit on screen', 'view:zoom-100': '100%', 'view:zoom-200': '200%', 'view:rulers': 'Rulers', 'view:grid': 'Grid',
   'view:guides': 'Guides', 'view:extras': 'Show / hide extras', 'view:snap': 'Snap', 'view:fullscreen': 'Full screen', 'window:toggle-panels': 'Hide / show panels', 'view:next-tab': 'Next document', 'view:prev-tab': 'Previous document',
   'tool:move': 'Move', 'tool:marquee': 'Marquee', 'tool:lasso': 'Lasso', 'tool:wand': 'Magic wand / quick selection', 'tool:crop': 'Crop', 'tool:eyedropper': 'Eyedropper', 'tool:heal': 'Healing',
-  'tool:brush': 'Brush / pencil', 'tool:clone': 'Clone stamp', 'tool:eraser': 'Eraser', 'tool:fill': 'Gradient / paint bucket', 'tool:retouch': 'Dodge / burn / sponge', 'tool:pen': 'Pen', 'tool:text': 'Text',
+  'tool:brush': 'Brush / pencil', 'tool:clone': 'Clone stamp', 'tool:history': 'History brush', 'tool:eraser': 'Eraser', 'tool:fill': 'Gradient / paint bucket', 'tool:retouch': 'Dodge / burn / sponge', 'tool:pen': 'Pen', 'tool:text': 'Text',
   'tool:path-select': 'Path selection', 'tool:shape': 'Shapes', 'tool:hand': 'Hand', 'tool:rotate-view': 'Rotate view', 'tool:zoom': 'Zoom', 'tool:swap-colors': 'Swap colours', 'tool:default-colors': 'Default colours',
   'tool:brush-size-down': 'Smaller brush', 'tool:brush-size-up': 'Larger brush', 'tool:brush-hardness-down': 'Softer brush', 'tool:brush-hardness-up': 'Harder brush',
   'app:escape': 'Cancel / deselect tool action', 'app:enter': 'Commit (transform, crop, text)', 'help:shortcuts': 'Keyboard shortcuts', 'help:devtools': 'Developer tools',

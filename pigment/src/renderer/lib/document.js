@@ -22,6 +22,8 @@ export function createCanvas(width, height) {
   const c = document.createElement('canvas');
   c.width = Math.max(1, Math.round(width));
   c.height = Math.max(1, Math.round(height));
+  // document canvases are read back often (history, filters, picking): keep them in memory
+  c.getContext('2d', { willReadFrequently: true });
   return c;
 }
 

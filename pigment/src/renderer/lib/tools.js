@@ -63,6 +63,10 @@ export class Tool {
   }
 }
 
+/** Toolbox order (Photoshop's), with separators between groups. */
+const SLOT_ORDER = ['move', 'marquee', 'lasso', 'wand', 'crop', 'eyedropper', 'heal', 'brush', 'clone', 'history', 'eraser', 'fill', 'blur', 'retouch', 'pen', 'type', 'text', 'path-select', 'shape', 'hand', 'rotate-view', 'zoom'];
+const SLOT_GROUP = { move: 0, marquee: 0, lasso: 0, wand: 0, crop: 0, eyedropper: 0, heal: 1, brush: 1, clone: 1, history: 1, eraser: 1, fill: 1, blur: 1, retouch: 1, pen: 2, type: 2, text: 2, 'path-select': 2, shape: 2, hand: 3, 'rotate-view': 3, zoom: 3 };
+
 export class ToolManager {
   constructor(app) {
     this.app = app;
@@ -86,6 +90,7 @@ export class ToolManager {
       this.slots.push(slot);
     }
     slot.tools.push(tool.id);
+    this.toolboxBuilt = false;
     this.app.commands.register(`tool:${tool.id}`, {
       run: () => this.activate(tool.id),
       checked: () => this.active?.id === tool.id,
@@ -168,7 +173,20 @@ export class ToolManager {
     if (!this.toolbox) return;
     if (!this.toolboxBuilt) {
       this.toolbox.replaceChildren();
+      const rank = (id) => {
+        const i = SLOT_ORDER.indexOf(id);
+        return i < 0 ? SLOT_ORDER.length : i;
+      };
+      this.slots.sort((a, b) => rank(a.id) - rank(b.id));
+      let lastGroup = null;
       for (const slot of this.slots) {
+        const group = SLOT_GROUP[slot.id] ?? 9;
+        if (lastGroup !== null && group !== lastGroup) {
+          const sep = document.createElement('div');
+          sep.className = 'tool-separator';
+          this.toolbox.appendChild(sep);
+        }
+        lastGroup = group;
         const btn = document.createElement('button');
         btn.className = 'tool-button';
         btn.type = 'button';
