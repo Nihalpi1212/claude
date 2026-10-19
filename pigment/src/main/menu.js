@@ -90,6 +90,7 @@ export function buildMenuTemplate({ platform, state = {}, recent = [], run, isPa
     item('Clea&r', 'edit:clear'),
     sep,
     lyr('&Fill…', 'edit:fill'),
+    lyr('Content-A&ware Fill', 'edit:content-aware-fill', { enabled: layer && sel }),
     lyr('&Stroke…', 'edit:stroke', { enabled: sel }),
     sep,
     lyr('Free &Transform', 'edit:free-transform'),

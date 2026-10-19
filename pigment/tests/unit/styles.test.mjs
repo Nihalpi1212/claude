@@ -665,7 +665,7 @@ test('random styles: deterministic, rect and pad only crop, nothing beyond style
         styles[key] = {
           enabled: true, size: Math.floor(rnd() * 12), distance: Math.floor(rnd() * 8) - 2, spread: rnd() < 0.3 ? 2 : 0, choke: rnd() < 0.3 ? 1.5 : 0,
           angle: Math.floor(rnd() * 360), soften: rnd() < 0.3 ? 3 : 0, style: pick(['inner-bevel', 'outer-bevel', 'emboss', 'pillow-emboss']),
-          direction: pick(['up', 'down']), position: pick(['outside', 'inside', 'center']), blend: pick(['normal', 'multiply', 'screen', 'overlay', 'color']),
+          direction: pick(['up', 'down']), position: pick(['outside', 'inside', 'center']), blend: pick(['normal', 'multiply', 'screen', 'overlay', 'color', 'dissolve']),
           kind: pick(['linear', 'radial', 'angle', 'reflected', 'diamond']), invert: rnd() < 0.5, source: pick(['edge', 'center']),
           technique: pick(['smooth', 'chisel-hard']), scale: pick([1, 1.5, 0.5]),
         };
@@ -691,5 +691,29 @@ test('random styles: deterministic, rect and pad only crop, nothing beyond style
         assert.deepEqual([...p], [...q], `${label}: ${other === big ? 'big pad' : `rect ${JSON.stringify(rect)}`} differs at ${x},${y}`);
       }
     }
+  }
+});
+
+test('dissolve effects: fully opaque speckles at the effect alpha, stable whatever the pad or rect', () => {
+  const img = square(30, 10, 10);
+  const styles = { dropShadow: { enabled: true, blend: 'dissolve', distance: 0, size: 8, opacity: 1 }, innerGlow: { enabled: true, blend: 'dissolve', size: 4 } };
+  const full = applyStyles(img, styles);
+  let partial = 0, kept = 0, smooth = 0;
+  const ref = applyStyles(img, { dropShadow: { ...styles.dropShadow, blend: 'normal' } });
+  eachOut(full, (x, y, p) => {
+    if (inSquare(x, y, 10, 10)) return;
+    if (p[3] > 0 && p[3] < 1) partial++;
+    if (p[3] === 1) kept++;
+    smooth += at(ref, x, y)[3];
+  });
+  assert.equal(partial, 0, 'dissolve pixels are all-or-nothing');
+  assert.ok(Math.abs(kept - smooth) < smooth * 0.15, `kept ${kept} vs expected ${smooth.toFixed(1)}`);
+  for (const opts of [{ pad: 3 }, { pad: 20 }, { rect: { x: 5, y: 12, width: 10, height: 9 } }]) {
+    const other = applyStyles(img, styles, opts);
+    eachOut(other, (x, y, p) => {
+      const X = x - full.offsetX, Y = y - full.offsetY;
+      if (X < 0 || Y < 0 || X >= full.image.width || Y >= full.image.height) return; // beyond stylePadding
+      assertPixel(p, getPixel(full.image, X, Y), 0, `${JSON.stringify(opts)} at ${x},${y}`);
+    });
   }
 });

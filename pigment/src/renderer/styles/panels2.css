@@ -175,3 +175,5 @@
 .prefs-dialog .dialog-form input[type="color"] { width: 36px; height: 28px; padding: 0; border: 1px solid var(--border); border-radius: 4px; background: none; flex: none; }
 .newdoc-dialog .dialog-form input[type="color"] { width: 36px; height: 28px; padding: 0; border: 1px solid var(--border); border-radius: 4px; background: none; flex: none; }
 .dialog-form .slider-field .input[type="number"] { flex: none; }
+/* colour fields (form.js 'color' type): room for a full #rrggbb */
+.dialog-form .slider-field input.input:not([type="number"]) { width: 84px; font-family: var(--mono); font-size: 12px; }

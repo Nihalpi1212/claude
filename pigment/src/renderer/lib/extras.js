@@ -103,7 +103,8 @@ async function newDocumentDialog(app, arg) {
   const last = { ...DEFAULT_SETTINGS.newDocPreset, ...(app.settings.newDocPreset ?? {}) };
   const clip = await clipboardSize(app);
   const presets = [...(clip ? [{ id: 'clipboard', label: `Clipboard — ${clip.width} × ${clip.height} px`, width: clip.width, height: clip.height, dpi: 72, unit: 'px' }] : []), ...DOC_PRESETS];
-  const startPreset = clip ? 'clipboard' : presets.some((p) => p.id === last.preset) ? last.preset : 'custom';
+  const matching = presets.find((p) => p.id !== 'clipboard' && p.width === last.width && p.height === last.height && p.dpi === (last.dpi ?? 72));
+  const startPreset = clip ? 'clipboard' : presets.some((p) => p.id === last.preset) ? last.preset : last.preset === 'custom' ? 'custom' : matching?.id ?? 'custom';
   const p0 = presets.find((p) => p.id === startPreset);
   const values0 = {
     preset: startPreset,
@@ -136,6 +137,8 @@ async function newDocumentDialog(app, arg) {
       label: 'Size',
       type: 'custom',
       render: (values, _set, form) => {
+        // width/height (px) and unit are not form fields of their own: seed them into the form values
+        for (const k of ['width', 'height', 'unit']) if (values[k] === undefined) values[k] = values0[k];
         const wrap = document.createElement('div');
         wrap.className = 'newdoc-size';
         wrap.innerHTML = `

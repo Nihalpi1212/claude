@@ -17,7 +17,9 @@
 // Interior effects are composited onto the layer colour first and the result is masked by the
 // layer alpha afterwards (so overlays recolour antialiased edges without changing their alpha),
 // and the outside stroke is sized so that stroke plus layer cover exactly the dilated shape
-// (no light seam along antialiased edges).
+// (no light seam along antialiased edges). The interior is rendered before the effects below it
+// so the drop shadow and the outer bevel can be knocked out by it: they stay (1 - layer alpha)
+// visible, which hides them under a see-through fill and varies continuously with fillOpacity.
 //
 // Conventions: angles are Photoshop's, in degrees counter-clockwise from 3 o'clock, naming where
 // the light comes from (120 = upper left, so shadows fall down-right). Sizes, distances, spread,

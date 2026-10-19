@@ -28,7 +28,7 @@ with [ag-psd](https://github.com/Agamnentzar/ag-psd) for Photoshop files. MIT li
 **Paint and retouch**
 - Brush, pencil, eraser with size, hardness, opacity, flow, spacing, smoothing and pen pressure
 - Brush presets, color picker, swatches, eyedropper and color sampler
-- Spot healing brush, healing brush, patch, red eye, clone stamp, pattern stamp, history brush
+- **Content-Aware Fill** and a content-aware spot healing brush; healing brush, patch, red eye, clone stamp, pattern stamp, history brush
 - Background eraser, magic eraser, color replacement, blur, sharpen, smudge, dodge, burn, sponge
 - Paint bucket and gradients (linear, radial, angle, reflected, diamond) with presets and dithering
 
@@ -117,6 +117,6 @@ npm run dist:mac  # or dist:win / dist:linux: installers in dist/
 - CMYK, Lab, 16/32-bit channels and color management (Pigment edits 8-bit RGB)
 - Smart objects, artboards, 3D, video timelines, camera RAW
 - Generative fill and other AI features
-- Content-aware fill (spot healing samples nearby texture instead), puppet warp
+- Puppet warp, perspective warp, sky replacement and other AI-based tools
 - Text on a path and vertical CJK typesetting details
 - Printing (export an image and print it from your system's image viewer)

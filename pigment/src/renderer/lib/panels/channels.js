@@ -14,7 +14,7 @@ export function install(app) {
   el.innerHTML = `
     <ul class="channel-list" role="listbox" aria-label="Channels"></ul>
     <div class="panel-footer">
-      <span class="muted channels-hint">Ctrl-click a thumbnail to load it as a selection</span>
+      <span class="muted channels-hint" title="Ctrl/Cmd-click a channel to load it as a selection (Shift adds, Alt subtracts); the composite loads its luminosity">Ctrl-click: load selection</span>
       <span style="flex:1"></span>
       <button class="pbtn" data-act="load" title="Load the channel as a selection">${icon('marquee-ellipse')}</button>
       <button class="pbtn" data-act="save" title="Save the selection as a channel">${icon('mask')}</button>
@@ -247,7 +247,7 @@ export function install(app) {
       app.setEditingMask(false);
       schedule();
     };
-    list.appendChild(channelRow({ label: 'RGB', canvas: t.rgb, which: { type: 'rgb' }, selected: compositeOn, onClick: pick, hint: 'luminosity' }));
+    list.appendChild(channelRow({ label: 'RGB', canvas: t.rgb, which: { type: 'rgb' }, selected: compositeOn, onClick: pick }));
     list.appendChild(channelRow({ label: 'Red', canvas: t.r, which: { type: 'r' }, selected: compositeOn, onClick: pick }));
     list.appendChild(channelRow({ label: 'Green', canvas: t.g, which: { type: 'g' }, selected: compositeOn, onClick: pick }));
     list.appendChild(channelRow({ label: 'Blue', canvas: t.b, which: { type: 'b' }, selected: compositeOn, onClick: pick }));

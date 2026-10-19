@@ -191,7 +191,7 @@ export function install(app) {
     if (doc !== app.doc) return;
     app.tools?.active?.commit?.();
     const canvas = copyCanvas(snap.canvas);
-    structural(app, `Snapshot: ${snap.name}`, () => {
+    structural(app, `Restore ${snap.name}`, () => {
       const layer = new RasterLayer({ name: snap.name, canvas, x: 0, y: 0 });
       const resized = doc.width !== canvas.width || doc.height !== canvas.height;
       doc.root.children = [layer];

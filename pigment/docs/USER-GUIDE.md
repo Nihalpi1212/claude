@@ -119,7 +119,10 @@ Global Light sets the shared angle for shadows and bevels.
 
 ## Retouching
 
-- **Spot Healing Brush** (J): paint over a blemish; texture comes from around it automatically.
+- **Spot Healing Brush** (J): paint over a blemish or a small object; when you release the mouse it is
+  replaced with texture synthesised from around it (Content-Aware). Proximity Match blends nearby texture instead.
+- **Content-Aware Fill** (Edit menu, or Contents › Content-Aware in Edit › Fill): select an object
+  and it is replaced with texture from the rest of the image.
 - **Healing Brush**: Alt-click a clean area to set the source, then paint; the texture is copied
   and blended into the colours of the destination.
 - **Patch**: draw around the area to fix (or use any selection), then drag it onto clean texture.

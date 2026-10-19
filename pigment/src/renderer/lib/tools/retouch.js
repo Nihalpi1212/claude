@@ -400,9 +400,87 @@ class SpotHealingTool extends DabTool {
   constructor(app) {
     super(app, {
       id: 'spot-heal', name: 'Spot Healing Brush Tool', icon: 'spot-heal', spacing: 0.25,
-      hint: 'Paint over spots and blemishes: texture is taken automatically from around the brush.',
-      options: [{ ...SIZE, default: 30 }, { ...HARD, default: 0.3 }, SAMPLE_ALL],
+      hint: 'Paint over spots and blemishes: they are replaced with texture from around them when you release the mouse.',
+      options: [{ ...SIZE, default: 30 }, { ...HARD, default: 0.3 }, { kind: 'segment', key: 'type', label: 'Type', options: [['content-aware', 'Content-Aware'], ['proximity', 'Proximity Match']], default: 'content-aware' }, SAMPLE_ALL],
     });
+  }
+  get contentAware() {
+    return (this.opt('type') ?? 'content-aware') === 'content-aware' && !!this.app.contentAwareFill;
+  }
+  onPointerDown(p) {
+    if (!this.contentAware) return super.onPointerDown(p);
+    const layer = this.paintableLayer();
+    if (!layer) return;
+    if (this.app.ui.editingMask) return this.app.dialogs.toast('Spot healing works on layer pixels, not masks', { kind: 'error', timeout: 2000 });
+    if (layer.type !== 'raster') {
+      this.app.rasterizePrompt(layer).then((ok) => ok && this.onPointerDown(p));
+      return;
+    }
+    const d = this.doc;
+    this.caMask = new Uint8Array(d.width * d.height);
+    this.caPts = [[p.x, p.y]];
+    this.stamp(p.x, p.y);
+    this.view.invalidate();
+  }
+  stamp(cx, cy) {
+    const d = this.doc;
+    const r = Math.max(1, (this.opt('size') ?? 30) / 2);
+    const x0 = Math.max(0, Math.floor(cx - r)), x1 = Math.min(d.width - 1, Math.ceil(cx + r));
+    const y0 = Math.max(0, Math.floor(cy - r)), y1 = Math.min(d.height - 1, Math.ceil(cy + r));
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) if ((x + 0.5 - cx) ** 2 + (y + 0.5 - cy) ** 2 <= r * r) this.caMask[y * d.width + x] = 255;
+  }
+  onPointerMove(p, dragging) {
+    if (!this.caMask) return super.onPointerMove(p, dragging);
+    if (!dragging) return;
+    const [lx, ly] = this.caPts[this.caPts.length - 1];
+    const step = Math.max(1, (this.opt('size') ?? 30) / 4);
+    const dist = Math.hypot(p.x - lx, p.y - ly);
+    for (let t = step; t <= dist; t += step) this.stamp(lx + ((p.x - lx) * t) / dist, ly + ((p.y - ly) * t) / dist);
+    this.stamp(p.x, p.y);
+    this.caPts.push([p.x, p.y]);
+    this.view.invalidate();
+  }
+  onPointerUp() {
+    if (!this.caMask) return super.onPointerUp();
+    const d = this.doc;
+    const mask = this.caMask;
+    this.caMask = null;
+    this.caPts = null;
+    const sel = d.selection && !d.selection.isEmpty ? d.selection : null;
+    if (sel) for (let i = 0; i < mask.length; i++) if (mask[i] && sel.mask[i] < 128) mask[i] = 0;
+    this.view.invalidate();
+    this.app.contentAwareFill(mask, { label: 'Spot Healing' });
+  }
+  cancel() {
+    if (this.caMask) {
+      this.caMask = null;
+      this.caPts = null;
+      this.view.invalidate();
+      return true;
+    }
+    return super.cancel();
+  }
+  drawOverlay(ctx, view) {
+    if (this.caPts?.length) {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.45)';
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.lineWidth = Math.max(1, (this.opt('size') ?? 30) * view.zoom);
+      ctx.beginPath();
+      this.caPts.forEach(([x, y], i) => {
+        const s = view.toScreen(x, y);
+        if (i) ctx.lineTo(s.x, s.y);
+        else ctx.moveTo(s.x, s.y);
+      });
+      if (this.caPts.length === 1) {
+        const s = view.toScreen(this.caPts[0][0], this.caPts[0][1]);
+        ctx.lineTo(s.x + 0.01, s.y);
+      }
+      ctx.stroke();
+      ctx.restore();
+    }
+    super.drawOverlay(ctx, view);
   }
   beforeStroke(p, layer) {
     this.src = this.opt('sampleAll') ? { canvas: flattenDocument(this.doc, this.doc.view.compositor), x: 0, y: 0 } : { canvas: copyOf(layer.canvas), x: layer.x, y: layer.y };

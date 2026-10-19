@@ -219,3 +219,52 @@ test('Liquify pushes pixels with the forward warp brush and is one undo step', a
   expect((await pixel(page, 95, 50))[3]).toBe(0);
   expect(errors).toEqual([]);
 });
+
+test('content-aware fill and the spot healing brush remove an object from a flat background', async ({ page }) => {
+  const errors = await openApp(page);
+  await newDoc(page, { width: 300, height: 200 });
+  await page.evaluate(() => {
+    const l = window.pigmentApp.doc.active;
+    const ctx = l.canvas.getContext('2d');
+    ctx.fillStyle = '#3366cc';
+    ctx.fillRect(0, 0, 300, 200);
+    ctx.fillStyle = '#ff0000';
+    ctx.fillRect(100, 80, 20, 20);
+    ctx.fillRect(200, 80, 10, 10);
+    l.touch();
+  });
+  // content-aware fill through Edit > Fill
+  await page.keyboard.press('m');
+  await drag(page, [95, 75], [125, 105]);
+  await run(page, 'edit:fill');
+  await page.locator('.dialog select[data-key="use"]').selectOption('content-aware');
+  await confirmDialog(page);
+  await expect.poll(() => pixel(page, 110, 90)).toEqual([51, 102, 204, 255]);
+  await page.keyboard.press('Control+d');
+  // spot healing (content-aware) over the second square
+  await page.evaluate(() => {
+    const app = window.pigmentApp;
+    app.tools.activate('spot-heal');
+    app.tools.setOpt('spot-heal', 'size', 24);
+  });
+  await drag(page, [203, 85], [207, 85], { steps: 3 });
+  await expect.poll(() => pixel(page, 205, 85)).toEqual([51, 102, 204, 255]);
+  expect(errors).toEqual([]);
+});
+
+test('copy, paste and paste in place create layers with the copied pixels', async ({ page }) => {
+  const errors = await openApp(page);
+  await openFixture(page, 'shapes.png');
+  await page.keyboard.press('m');
+  await drag(page, [10, 10], [90, 90]);
+  await page.keyboard.press('Control+c');
+  await page.keyboard.press('Control+Shift+v'); // paste in place
+  await expect.poll(() => page.evaluate(() => window.pigmentApp.doc.layers().length)).toBe(2);
+  expect(await page.evaluate(() => { const l = window.pigmentApp.doc.active; return [l.x, l.y, l.canvas.width, l.canvas.height]; })).toEqual([10, 10, 80, 80]);
+  expect(await layerPixel(page, 40, 40)).toEqual([255, 0, 0, 255]);
+  await page.keyboard.press('Control+x');
+  expect((await layerPixel(page, 40, 40))[3]).toBe(0);
+  await page.keyboard.press('Control+v');
+  await expect.poll(() => page.evaluate(() => window.pigmentApp.doc.layers().length)).toBe(3);
+  expect(errors).toEqual([]);
+});

@@ -206,7 +206,7 @@ export function install(app) {
         title: 'Fill',
         okLabel: 'OK',
         fields: [
-          { key: 'use', label: 'Contents', type: 'select', value: 'foreground', options: [['foreground', 'Foreground Color'], ['background', 'Background Color'], ['color', 'Color…'], ['pattern', 'Pattern'], ['black', 'Black'], ['grey', '50% Gray'], ['white', 'White'], ['history', 'History (last saved state)']] },
+          { key: 'use', label: 'Contents', type: 'select', value: 'foreground', options: [['foreground', 'Foreground Color'], ['background', 'Background Color'], ['color', 'Color…'], ['content-aware', 'Content-Aware'], ['pattern', 'Pattern'], ['black', 'Black'], ['grey', '50% Gray'], ['white', 'White'], ['history', 'History (last saved state)']] },
           { key: 'color', label: 'Color', type: 'color', value: app.settings.foreground, when: (v) => v.use === 'color' },
           { key: 'blend', label: 'Mode', type: 'select', value: 'normal', options: BLEND_OPTIONS },
           { key: 'opacity', label: 'Opacity', type: 'slider', value: 100, min: 1, max: 100, unit: '%' },
@@ -216,6 +216,10 @@ export function install(app) {
       if (!opts) return;
     }
     const d = doc();
+    if ((opts.use ?? 'foreground') === 'content-aware') {
+      if (!hasSel()) return app.dialogs.toast('Content-Aware fill needs a selection', { kind: 'error' });
+      return app.commands.run('edit:content-aware-fill', undefined, 'api');
+    }
     const sel = hasSel() ? d.selection : null;
     const area = sel ? sel.bounds : d.bounds;
     if (!t.mask) t.layer.ensureCovers(area);

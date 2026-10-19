@@ -340,10 +340,11 @@ export class TypeTool extends Tool {
     const d = this.drag;
     this.drag = null;
     if (!d || p.cancelled || !this.doc) return;
+    const r2 = (n) => Math.round(n * 100) / 100;
     if (d.moved) {
       const x1 = Math.min(d.start.x, d.current.x), y1 = Math.min(d.start.y, d.current.y);
-      this.beginNew(d.start, { x: x1, y: y1, width: Math.abs(d.current.x - d.start.x), height: Math.abs(d.current.y - d.start.y) });
-    } else this.beginNew(d.start, null);
+      this.beginNew(d.start, { x: r2(x1), y: r2(y1), width: r2(Math.abs(d.current.x - d.start.x)), height: r2(Math.abs(d.current.y - d.start.y)) });
+    } else this.beginNew({ x: r2(d.start.x), y: r2(d.start.y) }, null);
   }
   /** Index into layer.text nearest to the document point p. */
   caretIndex(layer, p) {
@@ -454,6 +455,15 @@ export class TypeTool extends Tool {
       ta.scrollTop = 0;
       ta.scrollLeft = 0;
     });
+    // the canvas area is overflow:hidden but still scrollable: the browser would scroll it (and the
+    // canvas with it) to reveal a caret that is off screen
+    const area = s.doc.view.area;
+    s.unpinArea = () => area.removeEventListener('scroll', s.pinArea);
+    s.pinArea = () => {
+      area.scrollTop = 0;
+      area.scrollLeft = 0;
+    };
+    area.addEventListener('scroll', s.pinArea);
     ta.addEventListener('wheel', (e) => {
       e.preventDefault();
       s.doc.view.canvas.dispatchEvent(new WheelEvent('wheel', e));
@@ -474,7 +484,9 @@ export class TypeTool extends Tool {
     const s = this.session;
     if (!s) return null;
     this.session = null;
+    s.unpinArea?.();
     s.textarea.remove();
+    s.pinArea?.();
     s.doc.view?.invalidate();
     if (this.app.tools.active === this) this.app.tools.renderOptions();
     this.app.emit('type:session', { layer: null });
@@ -586,6 +598,7 @@ export class TypeTool extends Tool {
     ta.style.transform = `matrix(${m.a}, ${m.b}, ${m.c}, ${m.d}, ${m.e}, ${m.f})`;
     ta.scrollTop = 0;
     ta.scrollLeft = 0;
+    s.pinArea?.();
     view.invalidate();
   }
   /** Distance from the top of a CSS line box to its baseline (measured, so it matches the textarea). */
