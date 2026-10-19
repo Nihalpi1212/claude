@@ -12,7 +12,10 @@ keyboard shortcuts. This guide walks through each area. On macOS read **Ctrl** a
   `.pigment` files.
 - **New from clipboard**: copy an image anywhere, then Edit › Paste (Ctrl+V) with no document open.
 - **Save**: File › Save (Ctrl+S). Layered work is saved as `.pigment` (everything is kept) or `.psd`
-  (for other apps). Saving a flat format (PNG, JPEG, WebP) asks before merging the layers.
+  (for other apps: layers, groups, masks, locks, fill opacity, adjustment layers and editable text).
+  Saving a flat format (PNG, JPEG, WebP) asks before merging the layers; JPEG and WebP ask for their
+  quality the first time. Formats Pigment can only read (GIF, BMP, SVG, AVIF, ICO) are never
+  overwritten: Save opens Save As for them.
 - **Export**: File › Export › Export As (Ctrl+Alt+Shift+S) for PNG, JPEG or WebP with quality,
   size and background; Quick Export as PNG; Layers to Files writes each top-level layer as an image.
 

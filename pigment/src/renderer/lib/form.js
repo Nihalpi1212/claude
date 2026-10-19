@@ -333,17 +333,25 @@ export function toHex6(c) {
 export function frameThrottle(fn) {
   let pending = null;
   let scheduled = false;
-  return (...args) => {
+  let raf = 0;
+  const throttled = (...args) => {
     pending = args;
     if (scheduled) return;
     scheduled = true;
-    requestAnimationFrame(() => {
+    raf = requestAnimationFrame(() => {
       scheduled = false;
       const a = pending;
       pending = null;
       fn(...a);
     });
   };
+  /** Drops a pending call (a preview must not run after its dialog was cancelled). */
+  throttled.cancel = () => {
+    if (scheduled) cancelAnimationFrame(raf);
+    scheduled = false;
+    pending = null;
+  };
+  return throttled;
 }
 
 /** Debounces fn by ms. */
@@ -472,6 +480,7 @@ export async function formDialog(app, opts) {
     validate: validate ? () => validate({ ...form.values }) : undefined,
   });
   // live preview: always revert so the caller applies the final result through history
+  runLive.cancel();
   if (live && liveApplied) {
     try {
       live.revert();

@@ -55,6 +55,18 @@ export class History {
     return entry;
   }
 
+  /** Refreshes the entry at the current index for a merged change (a slider drag): any redo entries are dropped. */
+  merge(redo) {
+    const last = this.entries[this.index];
+    if (!last) return null;
+    this.entries.length = this.index + 1;
+    if (this.savedIndex > this.index) this.savedIndex = -2;
+    last.redo = redo;
+    last.at = Date.now();
+    this.onChange();
+    return last;
+  }
+
   trim() {
     let bytes = this.entries.reduce((n, e) => n + (e.bytes ?? 0), 0);
     while (this.entries.length > this.limit || (bytes > this.memoryLimit && this.entries.length > 1)) {

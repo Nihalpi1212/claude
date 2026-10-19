@@ -122,14 +122,21 @@ export function styleToFont(style) {
 
 const hex6 = (c) => rgbaToHex(parseColor(c ?? '#000000')).slice(0, 7);
 const autoName = (text) => String(text ?? '').split('\n')[0].slice(0, 30) || 'Text';
-const snapshot = (layer) => ({ text: layer.text, font: JSON.parse(JSON.stringify(layer.font)), width: layer.width, name: layer.name });
+const snapshot = (layer) => ({ text: layer.text, font: JSON.parse(JSON.stringify(layer.font)), width: layer.width, name: layer.name, x: layer.x, y: layer.y });
 function restore(layer, snap) {
   layer.text = snap.text;
   layer.font = JSON.parse(JSON.stringify(snap.font));
   layer.width = snap.width;
   layer.name = snap.name;
+  if (snap.x !== undefined) layer.x = snap.x;
+  if (snap.y !== undefined) layer.y = snap.y;
   layer.touch();
 }
+/** False when the layer or any group above it is hidden. */
+const shown = (layer) => {
+  for (let l = layer; l; l = l.parent) if (l.visible === false) return false;
+  return true;
+};
 
 /** Text layers a style change applies to: the selected text layers, else the active one. */
 export function textTargets(doc) {
@@ -236,8 +243,31 @@ export class TypeTool extends Tool {
     const doc = this.doc;
     const targets = textTargets(doc);
     if (!targets.length) return;
-    if (targets.length === 1) setLayerProps(this.app, targets[0], { font: { ...targets[0].font, ...patch } }, label, { merge });
-    else doc.history.group(label, () => targets.forEach((l) => setLayerProps(this.app, l, { font: { ...l.font, ...patch } }, label)));
+    if (targets.length === 1) {
+      setLayerProps(this.app, targets[0], { font: { ...targets[0].font, ...patch } }, label, { merge });
+      return;
+    }
+    // several layers: consecutive changes of the same property (a colour-picker drag) merge into one entry
+    const key = `text:${targets.map((l) => l.id).join('+')}:${Object.keys(patch).join(',')}`;
+    const h = doc.history;
+    const last = h.entries[h.index];
+    const apply = (fonts) => {
+      targets.forEach((l, i) => {
+        l.font = { ...fonts[i] };
+        l.touch();
+        doc.changed('props', { layer: l });
+      });
+    };
+    const after = targets.map((l) => ({ ...l.font, ...patch }));
+    if (merge && last?.mergeKey === key && Date.now() - last.at < 1500) {
+      apply(after);
+      h.merge(() => apply(after));
+      return;
+    }
+    const before = targets.map((l) => ({ ...l.font }));
+    apply(after);
+    h.push({ label, undo: () => apply(before), redo: () => apply(after), bytes: 0, at: Date.now(), mergeKey: key });
+    doc.changed('history');
   }
   renderOptions(bar) {
     if (!this.session) return;
@@ -279,6 +309,16 @@ export class TypeTool extends Tool {
       this.drag = null;
       return true;
     }
+    if (this.resize) {
+      const r = this.resize;
+      this.resize = null;
+      r.layer.x = r.x;
+      r.layer.width = r.width;
+      r.layer.touch();
+      this.session?.doc.changed('props', { layer: r.layer });
+      this.layoutEditor();
+      return true;
+    }
     if (!this.session) return false;
     this.cancelSession();
     return true;
@@ -289,8 +329,8 @@ export class TypeTool extends Tool {
   hitTextLayer(p) {
     const doc = this.doc;
     const zoom = this.view?.zoom ?? 1;
-    const list = doc.layers().filter((l) => l.type === 'text' && l.visible).reverse();
-    if (doc.active?.type === 'text') list.unshift(doc.active);
+    const list = doc.layers().filter((l) => l.type === 'text' && shown(l)).reverse();
+    if (doc.active?.type === 'text' && shown(doc.active)) list.unshift(doc.active);
     for (const l of list) {
       const q = this.toLocal(l, p);
       if (!q) continue;
@@ -310,9 +350,31 @@ export class TypeTool extends Tool {
       return null;
     }
   }
+  /** Which corner handle of the session's paragraph box is under the document point p (screen tolerance). */
+  hitBoxHandle(p) {
+    const s = this.session;
+    const l = s?.layer;
+    if (!l || l.width === null || !this.view) return null;
+    const lay = l.layout();
+    const w = l.width, h = Math.max(lay.height, lay.lineHeight);
+    const sp = this.view.toScreen(p.x, p.y);
+    const corners = { nw: [l.x, l.y], ne: [l.x + w, l.y], se: [l.x + w, l.y + h], sw: [l.x, l.y + h] };
+    for (const [name, [x, y]] of Object.entries(corners)) {
+      const [dx, dy] = l.transform ? applyMatrix(l.transform, x, y) : [x, y];
+      const c = this.view.toScreen(dx, dy);
+      if (Math.abs(c.x - sp.x) <= 6 && Math.abs(c.y - sp.y) <= 6) return name;
+    }
+    return null;
+  }
   onPointerDown(p) {
     const s = this.session;
     if (s) {
+      const handle = this.hitBoxHandle(p);
+      if (handle) {
+        const q = this.toLocal(s.layer, p) ?? p;
+        this.resize = { layer: s.layer, handle, start: q, x: s.layer.x, width: s.layer.width };
+        return;
+      }
       const hit = this.hitTextLayer(p);
       if (hit === s.layer) {
         const i = this.caretIndex(hit, p);
@@ -332,11 +394,32 @@ export class TypeTool extends Tool {
     this.drag = { start: { x: p.x, y: p.y }, current: { x: p.x, y: p.y }, moved: false };
   }
   onPointerMove(p, dragging) {
+    const r = this.resize;
+    if (dragging && r && this.session?.layer === r.layer) {
+      const q = this.toLocal(r.layer, p) ?? p;
+      const dx = q.x - r.start.x;
+      const min = r.layer.font.size;
+      if (r.handle === 'ne' || r.handle === 'se') r.layer.width = Math.max(min, Math.round((r.width + dx) * 100) / 100);
+      else {
+        const w = Math.max(min, r.width - dx);
+        r.layer.x = Math.round((r.x + (r.width - w)) * 100) / 100;
+        r.layer.width = Math.round(w * 100) / 100;
+      }
+      r.layer.touch();
+      this.session.doc.changed('props', { layer: r.layer });
+      this.layoutEditor();
+      return;
+    }
     if (!dragging || !this.drag) return;
     this.drag.current = { x: p.x, y: p.y };
     if (Math.hypot(p.x - this.drag.start.x, p.y - this.drag.start.y) * this.view.zoom > 4) this.drag.moved = true;
   }
   onPointerUp(p) {
+    if (this.resize) {
+      this.resize = null;
+      this.session?.textarea.focus({ preventScroll: true });
+      return;
+    }
     const d = this.drag;
     this.drag = null;
     if (!d || p.cancelled || !this.doc) return;
@@ -451,6 +534,31 @@ export class TypeTool extends Tool {
     s.doc.view.area.appendChild(ta);
     ta.addEventListener('input', () => this.onInput());
     ta.addEventListener('keydown', (e) => this.onEditorKey(e));
+    // the editor covers the text box, so its corner handles are grabbed here and driven like a canvas drag
+    ta.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0 || !this.session) return;
+      const view = this.session.doc.view;
+      const toDoc = (ev) => {
+        const r = view.canvas.getBoundingClientRect();
+        const d = view.toDoc(ev.clientX - r.left, ev.clientY - r.top);
+        return { x: d.x, y: d.y, shift: ev.shiftKey, alt: ev.altKey, ctrl: ev.ctrlKey, meta: ev.metaKey, button: ev.button, buttons: ev.buttons, pointerType: ev.pointerType, pressure: 1, original: ev };
+      };
+      const p = toDoc(e);
+      if (!this.hitBoxHandle(p)) return;
+      e.preventDefault();
+      this.onPointerDown(p);
+      ta.setPointerCapture(e.pointerId);
+      const move = (ev) => this.onPointerMove(toDoc(ev), true);
+      const up = (ev) => {
+        ta.removeEventListener('pointermove', move);
+        ta.removeEventListener('pointerup', up);
+        ta.removeEventListener('pointercancel', up);
+        this.onPointerUp({ ...toDoc(ev), cancelled: ev.type === 'pointercancel' });
+      };
+      ta.addEventListener('pointermove', move);
+      ta.addEventListener('pointerup', up);
+      ta.addEventListener('pointercancel', up);
+    });
     ta.addEventListener('scroll', () => {
       ta.scrollTop = 0;
       ta.scrollLeft = 0;
@@ -780,7 +888,7 @@ export function install(app) {
     for (const t of tools) {
       const s = t.session;
       if (!s || s.doc !== e.doc) continue;
-      if (!s.layer.parent) t.closeEditor();
+      if (!s.layer.parent || s.doc.find(s.layer.id) !== s.layer) t.closeEditor();
       else if (e.kind === 'props' || e.kind === 'history' || e.kind === 'canvas') {
         if (s.textarea.value !== s.layer.text) s.textarea.value = s.layer.text;
         t.layoutEditor();

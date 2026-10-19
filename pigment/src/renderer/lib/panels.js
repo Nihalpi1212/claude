@@ -49,13 +49,18 @@ export class PanelDock {
     tab.setAttribute('role', 'tab');
     tab.dataset.panel = panel.id;
     tab.innerHTML = `${panel.icon ? icon(panel.icon) : ''}<span>${panel.title}</span>`;
-    tab.addEventListener('click', () => this.show(panel.id));
+    tab.addEventListener('click', () => this.show(panel.id, { reveal: true }));
     group.tabs.insertBefore(tab, group.spacer);
     this.panels.set(panel.id, { panel, tab, group });
     const preferred = this.layout[`${panel.group}:current`];
     if (!group.current || preferred === panel.id) this.show(panel.id, { save: false });
     if (this.layout[`${panel.group}:collapsed`]) this.setCollapsed(panel.group, true, { save: false });
     this.app.commands.register(`window:panel-${panel.id}`, { run: () => this.show(panel.id, { reveal: true }), checked: () => this.isVisible(panel.id), label: panel.title });
+  }
+
+  /** Re-renders the panels that became visible again (they skip rendering while hidden). */
+  refreshVisible() {
+    for (const g of this.groups.values()) if (g.current && !g.el.classList.contains('collapsed')) this.panels.get(g.current)?.panel.onShow?.();
   }
 
   isVisible(id) {

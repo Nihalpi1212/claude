@@ -103,6 +103,7 @@ export function install(app) {
 
   function render() {
     pending = 0;
+    if (renaming) return; // the rename input lives in the current rows
     const doc = app.doc;
     list.replaceChildren();
     if (!doc) {
@@ -281,7 +282,8 @@ export function install(app) {
       const r = li.getBoundingClientRect();
       const y = (e.clientY - r.top) / r.height;
       li.classList.remove('drop-above', 'drop-below', 'drop-into');
-      li.classList.add(layer.isGroup && y > 0.3 && y < 0.7 ? 'drop-into' : y < 0.5 ? 'drop-above' : 'drop-below');
+      // the lower part of an expanded group's row sits above its children: dropping there goes into the group
+      li.classList.add(layer.isGroup && y > 0.3 && (layer.expanded || y < 0.7) ? 'drop-into' : y < 0.5 ? 'drop-above' : 'drop-below');
     });
     li.addEventListener('dragleave', () => li.classList.remove('drop-above', 'drop-below', 'drop-into'));
     li.addEventListener('drop', (e) => {
@@ -295,6 +297,11 @@ export function install(app) {
   }
 
   function startRename(layer, nameEl) {
+    if (!nameEl) return;
+    if (pending) {
+      cancelAnimationFrame(pending); // the double-click's own clicks scheduled a re-render that would drop the input
+      pending = 0;
+    }
     renaming = layer;
     const input = document.createElement('input');
     input.className = 'input';
@@ -313,7 +320,8 @@ export function install(app) {
       if (e.key === 'Enter') done(true);
       if (e.key === 'Escape') done(false);
     });
-    input.addEventListener('blur', () => done(true));
+    // committed asynchronously: a DOM removal inside the blur handler must not re-enter render()
+    input.addEventListener('blur', () => setTimeout(() => done(true), 0));
   }
 
   function contextMenu(layer) {

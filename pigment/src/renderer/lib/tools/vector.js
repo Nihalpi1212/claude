@@ -222,15 +222,15 @@ export function splitSegment(sp, i, t) {
   const n = sp.points.length;
   const a = sp.points[i], b = sp.points[(i + 1) % n];
   let np;
-  if (isLine(a, b)) np = { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+  if (isLine(a, b)) np = { x: r2(a.x + (b.x - a.x) * t), y: r2(a.y + (b.y - a.y) * t) };
   else {
     const c = segCtrl(a, b);
     const p0 = [c[0], c[1]], p1 = [c[2], c[3]], p2 = [c[4], c[5]], p3 = [c[6], c[7]];
     const p01 = lerp2(p0, p1, t), p12 = lerp2(p1, p2, t), p23 = lerp2(p2, p3, t);
     const p012 = lerp2(p01, p12, t), p123 = lerp2(p12, p23, t), m = lerp2(p012, p123, t);
-    if (hasOut(a)) [a.outX, a.outY] = p01;
-    if (hasIn(b)) [b.inX, b.inY] = p23;
-    np = { x: m[0], y: m[1], inX: p012[0], inY: p012[1], outX: p123[0], outY: p123[1] };
+    if (hasOut(a)) [a.outX, a.outY] = p01.map(r2);
+    if (hasIn(b)) [b.inX, b.inY] = p23.map(r2);
+    np = { x: r2(m[0]), y: r2(m[1]), inX: r2(p012[0]), inY: r2(p012[1]), outX: r2(p123[0]), outY: r2(p123[1]) };
   }
   sp.points.splice(i + 1, 0, np);
   return i + 1;
@@ -1246,6 +1246,12 @@ export class PenTool extends VectorTool {
         this.preview();
         return;
       }
+      if (Math.hypot(last.x - p.x, last.y - p.y) <= tol) {
+        // clicking the last anchor again never stacks a second anchor on it; a drag re-shapes its handles
+        d.drag = { index: sp.points.length - 1, moved: false };
+        this.preview();
+        return;
+      }
       let q = { x: p.x, y: p.y };
       if (p.shift) q = snap45(last, q);
       sp.points.push(rp(q));
@@ -1560,8 +1566,14 @@ export class AddAnchorTool extends AnchorEditTool {
   }
   onPointerDown(p) {
     for (const t of visibleTargets(this.app)) {
-      const s = hitSegment(t.get(), p.x, p.y, this.tol);
+      const path = t.get();
+      // on an existing anchor there is nothing to add (a split at t≈0 or 1 would stack a ghost anchor)
+      if (hitAnchor(path, p.x, p.y, this.tol)) return;
+      const s = hitSegment(path, p.x, p.y, this.tol);
       if (!s) continue;
+      const sp = path.subpaths[s.sp];
+      const a = sp.points[s.i], b = sp.points[(s.i + 1) % sp.points.length];
+      if (Math.hypot(a.x - p.x, a.y - p.y) <= this.tol || Math.hypot(b.x - p.x, b.y - p.y) <= this.tol || s.t < 0.02 || s.t > 0.98) return;
       if (!editable(this.app, t)) return;
       const d = this.beginDrag(t, { start: { x: p.x, y: p.y } });
       d.index = splitSegment(d.draft.subpaths[s.sp], s.i, s.t);

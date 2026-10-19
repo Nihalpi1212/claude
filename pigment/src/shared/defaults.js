@@ -28,6 +28,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   canvasBackground: 'auto', // auto (theme) | #hex
   newDocPreset: { width: 1920, height: 1080, dpi: 72, background: 'white', name: 'Untitled' },
   exportDefaults: { format: 'png', quality: 0.92, scale: 1 },
+  saveQuality: 0.92,
   historyLimit: 100,
   historyMemoryMB: 512,
   cursorStyle: 'outline', // outline | precise | dot

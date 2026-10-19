@@ -332,7 +332,8 @@ and have a unit test in `tests/unit/<module>.test.mjs` that checks numbers (not 
 
 - **Open**: PNG, JPEG, WebP, GIF (first frame), BMP, AVIF, SVG (rasterised at document size), PSD/PSB (via ag-psd: layers, groups, masks, opacity, blend modes, visibility, clipping, text layers (rasterised + text data kept when available), adjustment layers mapped where kinds exist), `.pigment`.
 - **`.pigment`**: a ZIP (store or deflate) with `document.json` (version, size, dpi, tree with layer parameters, selection/channels/paths/guides) and `layers/<id>.png` (raster pixels), `masks/<id>.png`, `thumbnail.png`. Written and read by `src/shared/zip.js` + the renderer's PNG encoding (canvas `toBlob`).
-- **Export As**: PNG (8-bit, transparency), JPEG (quality, background), WebP (quality / lossless), BMP? (no), PSD (ag-psd `writePsd`: raster layers, groups, masks, opacity/blend/visibility, text layers as text), scale/resample, metadata strip, "quick export" PNG.
+- **Export As**: PNG (8-bit, transparency), JPEG (quality, background), WebP (quality / lossless), BMP? (no), PSD (ag-psd `writePsd`: raster layers, groups (with masks), masks, opacity/fill opacity/blend/visibility/locks, text layers as text, adjustment layers as PSD adjustments where a type exists), scale/resample, metadata strip, "quick export" PNG.
+- **Save safety**: `WRITE_EXTENSIONS` (pigment, psd, png, jpg, jpeg, webp) are the only formats `encodeForPath` writes; `Documents.save` sends read-only formats (gif, bmp, svg, ...) to Save As, and a typed-in read-only extension becomes `.png`. JPEG/WebP quality is asked once per document (`doc.saveOpts`, remembered as `settings.saveQuality`) and never taken from the Export As dialog.
 - **Clipboard**: copy/paste images with the system clipboard (PNG) through the bridge; copy merged.
 
 ## Panels (`lib/panels/*.js`) and layout

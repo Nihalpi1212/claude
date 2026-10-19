@@ -16,7 +16,9 @@ export function snapshotTree(doc) {
     for (const c of g.children) if (c.isGroup) walk(c);
   };
   walk(doc.root);
-  return { root: doc.root, groups, active: doc.active, selected: [...doc.selected], width: doc.width, height: doc.height };
+  // the clip flag is the one property structural commands change (a moved layer loses its base)
+  const clips = groups.flatMap(([, children]) => children.map((c) => [c, c.clip]));
+  return { root: doc.root, groups, clips, active: doc.active, selected: [...doc.selected], width: doc.width, height: doc.height };
 }
 
 export function restoreTree(doc, snap) {
@@ -27,6 +29,7 @@ export function restoreTree(doc, snap) {
     g.touch();
   }
   doc.root.parent = null;
+  for (const [l, clip] of snap.clips ?? []) l.clip = clip;
   const sizeChanged = doc.width !== snap.width || doc.height !== snap.height;
   doc.width = snap.width;
   doc.height = snap.height;
@@ -85,8 +88,7 @@ export function setLayerProps(app, layer, patch, label = 'Layer properties', { m
   // consecutive changes of the same property (slider drags) merge into one entry
   const last = doc.history.entries[doc.history.index];
   if (merge && last?.mergeKey === `${layer.id}:${Object.keys(patch).join(',')}` && Date.now() - last.at < 1500) {
-    last.redo = () => apply(patch);
-    last.at = Date.now();
+    doc.history.merge(() => apply(patch));
     return;
   }
   doc.history.push({ label, undo: () => apply(before), redo: () => apply(patch), bytes: 0, at: Date.now(), mergeKey: `${layer.id}:${Object.keys(patch).join(',')}` });
@@ -138,22 +140,37 @@ export function cloneLayer(layer, { name } = {}) {
 /** Renders any non-group layer to a raster layer in document space (styles baked in when asked). */
 export function rasterizeLayer(layer, doc, { bakeStyles = false } = {}) {
   let canvas, x, y;
-  if (layer.type === 'raster') {
+  if (layer.isGroup || bakeStyles) {
+    // styles are baked with neutral opacity/blend and without the mask: those stay live on the new layer
+    const saved = { opacity: layer.opacity, blend: layer.blend, mask: layer.mask };
+    if (!layer.isGroup) {
+      layer.opacity = 1;
+      layer.blend = 'normal';
+      layer.mask = null;
+      layer.touch();
+    }
+    try {
+      canvas = renderLayersFlat(doc, [layer]);
+    } finally {
+      if (!layer.isGroup) {
+        Object.assign(layer, saved);
+        layer.touch();
+      }
+    }
+    x = 0;
+    y = 0;
+  } else if (layer.type === 'raster') {
     canvas = copyCanvas(layer.canvas);
     x = layer.x;
     y = layer.y;
-  } else if (layer.isGroup || bakeStyles) {
-    canvas = renderLayersFlat(doc, [layer]);
-    x = 0;
-    y = 0;
   } else if (layer.render) {
     const r = layer.render();
     canvas = copyCanvas(r.canvas);
     x = r.x;
     y = r.y;
   } else return null;
-  const out = new RasterLayer({ name: layer.name, canvas, x, y, opacity: layer.isGroup || bakeStyles ? 1 : layer.opacity, blend: layer.isGroup || bakeStyles ? 'normal' : layer.blend, visible: layer.visible, clip: layer.clip, styles: bakeStyles ? null : layer.styles, fillOpacity: bakeStyles ? 1 : layer.fillOpacity });
-  if (layer.mask && !bakeStyles && !layer.isGroup) out.mask = { ...layer.mask, canvas: copyCanvas(layer.mask.canvas) };
+  const out = new RasterLayer({ name: layer.name, canvas, x, y, opacity: layer.isGroup ? 1 : layer.opacity, blend: layer.isGroup ? 'normal' : layer.blend, visible: layer.visible, clip: layer.clip, styles: bakeStyles ? null : layer.styles, fillOpacity: bakeStyles ? 1 : layer.fillOpacity });
+  if (layer.mask && !layer.isGroup) out.mask = { ...layer.mask, canvas: copyCanvas(layer.mask.canvas) };
   return out;
 }
 
@@ -165,12 +182,43 @@ export function renderLayersFlat(doc, layers) {
     if (l.isGroup) l.children.forEach(addWithChildren);
   };
   layers.forEach(addWithChildren);
-  // include ancestors so the tree walk reaches them
-  for (const l of [...set]) for (let p = l.parent; p && p !== doc.root; p = p.parent) set.add(p);
-  const skip = new Set(doc.layers().filter((l) => !set.has(l)));
-  const comp = new Compositor();
-  const c = comp.composite(doc, { skip });
-  return copyCanvas(c);
+  // ancestors are walked but must not apply their own opacity, blend, mask or styles: the result goes back inside them
+  const ancestors = [];
+  for (const l of [...set]) for (let p = l.parent; p && p !== doc.root; p = p.parent) if (!set.has(p)) {
+    set.add(p);
+    ancestors.push(p);
+  }
+  // a clipped layer whose base is not rendered keeps its pixels (drawn unclipped)
+  const baseOf = (l) => {
+    const k = l.parent?.children ?? [];
+    let i = k.indexOf(l) - 1;
+    while (i >= 0 && k[i].clip) i--;
+    return k[i] ?? null;
+  };
+  const orphans = [...set].filter((l) => l.clip && !ancestors.includes(l) && !set.has(baseOf(l)));
+  const saved = ancestors.map((g) => ({ g, opacity: g.opacity, blend: g.blend, mask: g.mask, styles: g.styles }));
+  for (const g of ancestors) Object.assign(g, { opacity: 1, blend: 'pass-through', mask: null, styles: null });
+  for (const l of orphans) l.clip = false;
+  try {
+    const skip = new Set(doc.layers().filter((l) => !set.has(l)));
+    return copyCanvas(new Compositor().composite(doc, { skip }));
+  } finally {
+    for (const s of saved) Object.assign(s.g, { opacity: s.opacity, blend: s.blend, mask: s.mask, styles: s.styles });
+    for (const l of orphans) l.clip = true;
+  }
+}
+
+/** Clears the clip flag of layers that no longer have a base below them (Photoshop releases such clipping masks). */
+export function releaseOrphanClips(doc) {
+  const walk = (group) => {
+    let base = false;
+    for (const l of group.children) {
+      if (l.clip && !base) l.clip = false;
+      if (!l.clip) base = true;
+      if (l.isGroup) walk(l);
+    }
+  };
+  walk(doc.root);
 }
 
 function selectedOrActive(doc) {
@@ -272,6 +320,7 @@ export function install(app) {
         if (!layers.length) return;
         structural(app, layers.length > 1 ? 'Delete layers' : 'Delete layer', () => {
           for (const l of layers) if (l.parent) d.remove(l);
+          releaseOrphanClips(d);
         });
         app.setEditingMask(false);
       },
@@ -303,7 +352,7 @@ export function install(app) {
       run: (id) => {
         const d = doc();
         const layer = d.find(id) ?? d.active;
-        const others = d.layers().filter((l) => l !== layer && !isAncestor(l, layer));
+        const others = d.layers().filter((l) => l !== layer && !isAncestor(l, layer) && !isAncestor(layer, l));
         const allHidden = others.every((l) => !l.visible || l.isGroup);
         d.history.group('Show only this layer', () => {
           if (allHidden) for (const l of others) setLayerProps(app, l, { visible: true });
@@ -371,6 +420,7 @@ export function install(app) {
           const index = parent.children.indexOf(top) + 1;
           d.add(g, parent, index);
           for (const l of layers) d.move(l, g, g.children.length);
+          releaseOrphanClips(d);
           d.setActive(g);
         });
       },
@@ -386,6 +436,7 @@ export function install(app) {
           const kids = g.children.slice();
           for (const c of kids) d.move(c, parent, index++);
           d.remove(g);
+          releaseOrphanClips(d);
           d.selected.clear();
           kids.forEach((k) => d.selected.add(k));
           d.active = kids[kids.length - 1] ?? null;
@@ -413,6 +464,7 @@ export function install(app) {
             const idx = parent.children.indexOf(t) + (mode === 'above' ? 1 : 0);
             d.move(subject, parent, idx);
           }
+          releaseOrphanClips(d);
           d.setActive(subject);
         });
       },
@@ -646,6 +698,7 @@ export function install(app) {
     structural(app, 'Arrange', () => {
       parent.children.splice(i, 1);
       parent.children.splice(target, 0, layer);
+      releaseOrphanClips(d);
       layer.touch();
       d.changed('tree');
     });
@@ -697,7 +750,8 @@ export function install(app) {
     layers = layers.filter(Boolean).sort((a, b) => order.indexOf(a) - order.indexOf(b));
     if (layers.length < 2) return;
     const flat = renderLayersFlat(d, layers.filter((l) => l.visible));
-    const merged = new RasterLayer({ name: name ?? layers[layers.length - 1].name, canvas: flat, x: 0, y: 0 });
+    // clipped layers merged among themselves stay clipped to their base; merging onto the base releases the clip
+    const merged = new RasterLayer({ name: name ?? layers[layers.length - 1].name, canvas: flat, x: 0, y: 0, clip: layers.every((l) => l.clip) });
     // trim to content to keep memory down
     const top = layers[layers.length - 1];
     structural(app, label, () => {

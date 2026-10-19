@@ -46,7 +46,8 @@ export class Compositor {
       const layer = kids[i];
       if (opts.until && layer === opts.until) return true;
       if (!layer.visible || opts.skip?.has(layer)) continue;
-      if (layer.clip) continue; // drawn with its base below
+      // a clipped layer is drawn with its base below; without any base (it sits at the bottom) it is an ordinary layer
+      if (layer.clip && kids.slice(0, i).some((k) => !k.clip)) continue;
       // clipping chain: this layer plus following clip layers
       let j = i + 1;
       while (j < kids.length && kids[j].clip) j++;
@@ -64,7 +65,8 @@ export class Compositor {
       return false;
     }
     if (layer.isGroup) {
-      const passThrough = (layer.blend === 'pass-through' || layer.blend === 'normal') && layer.opacity >= 1 && !layer.mask?.enabled && !clipped.length && !layer.styles;
+      // only Pass Through lets the children blend with what is below the group; Normal isolates them
+      const passThrough = layer.blend === 'pass-through' && layer.opacity >= 1 && !layer.mask?.enabled && !clipped.length && !layer.styles;
       if (passThrough) return this.drawChildren(ctx, layer, rect, doc, opts);
       const tmp = createCanvas(rect.width, rect.height);
       const tctx = tmp.getContext('2d', { willReadFrequently: true });
@@ -117,21 +119,23 @@ export class Compositor {
       fctx.drawImage(work, 0, 0);
       work = faded;
     }
+    // the mask shapes the layer before its effects (Photoshop's default: a stroke or shadow follows the mask edge)
+    const masked = !!(layer.mask?.enabled && layer.mask.canvas);
+    if (masked) {
+      const m = createCanvas(work.width, work.height);
+      const mctx = m.getContext('2d');
+      mctx.drawImage(work, 0, 0);
+      mctx.globalCompositeOperation = 'destination-in';
+      mctx.drawImage(layer.mask.canvas, -wx, -wy);
+      work = m;
+    }
     if (styled) {
-      const out = this.styledCanvas(layer, work, wx, wy, doc);
+      const out = this.styledCanvas(layer, work, wx, wy, doc, { masked });
       if (out) {
         work = out.canvas;
         wx = out.x;
         wy = out.y;
       }
-    }
-    if (layer.mask?.enabled && layer.mask.canvas) {
-      const masked = createCanvas(work.width, work.height);
-      const mctx = masked.getContext('2d');
-      mctx.drawImage(work, 0, 0);
-      mctx.globalCompositeOperation = 'destination-in';
-      mctx.drawImage(layer.mask.canvas, -wx, -wy);
-      work = masked;
     }
     const mode = layer.isGroup && layer.blend === 'pass-through' ? 'normal' : layer.blend;
     const op = CANVAS_BLEND[mode] ?? (SIMPLE_OVER.has(mode) ? 'source-over' : null);
@@ -172,10 +176,12 @@ export class Compositor {
     return null;
   }
 
-  styledCanvas(layer, canvas, x, y, doc = null) {
+  styledCanvas(layer, canvas, x, y, doc = null, { masked = false } = {}) {
     const cached = this.styleCache.get(layer);
     const angle = doc?.globalLight?.angle ?? 120, altitude = doc?.globalLight?.altitude ?? 30;
-    if (cached && cached.version === layer.version && cached.source === canvas && cached.angle === angle && cached.altitude === altitude) return cached;
+    // a masked source is a fresh canvas every time: mask edits touch the layer, so its version is the key then
+    const sameSource = cached && (cached.source === canvas || (masked && cached.masked && cached.x0 === x && cached.y0 === y && cached.w === canvas.width && cached.h === canvas.height));
+    if (cached && cached.version === layer.version && sameSource && cached.angle === angle && cached.altitude === altitude) return cached;
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
     let styles = layer.styles;
@@ -190,7 +196,7 @@ export class Compositor {
     const out = applyStyles(img, styles, { fillOpacity: layer.fillOpacity ?? 1, globalAngle: angle, globalAltitude: altitude });
     const result = createCanvas(out.image.width, out.image.height);
     result.getContext('2d').putImageData(new ImageData(out.image.data, out.image.width, out.image.height), 0, 0);
-    const entry = { version: layer.version, source: canvas, canvas: result, x: x + out.offsetX, y: y + out.offsetY, angle, altitude };
+    const entry = { version: layer.version, source: canvas, masked, x0: x, y0: y, w: canvas.width, h: canvas.height, canvas: result, x: x + out.offsetX, y: y + out.offsetY, angle, altitude };
     // a pattern still decoding must not be cached as "no pattern"
     if (!(styles.patternOverlay?.enabled === false && layer.styles.patternOverlay?.enabled)) this.styleCache.set(layer, entry);
     return entry;
@@ -202,17 +208,34 @@ export class Compositor {
     const below = ctx.getImageData(0, 0, r.width, r.height); // getImageData ignores the transform; the target canvas is rect-sized
     const img = { width: below.width, height: below.height, data: new Uint8ClampedArray(below.data) };
     applyAdjustment(img, layer.kind, layer.params);
-    const adjusted = createCanvas(r.width, r.height);
-    adjusted.getContext('2d').putImageData(new ImageData(img.data, img.width, img.height), 0, 0);
+    // the adjusted pixels replace the originals (a lerp by opacity × mask): drawing them over would re-composite
+    // partially transparent pixels onto themselves and change their alpha
+    let m = null;
     if (layer.mask?.enabled && layer.mask.canvas) {
-      const actx = adjusted.getContext('2d');
-      actx.globalCompositeOperation = 'destination-in';
-      actx.drawImage(layer.mask.canvas, -r.x, -r.y);
+      const mc = createCanvas(r.width, r.height);
+      mc.getContext('2d').drawImage(layer.mask.canvas, -r.x, -r.y);
+      m = mc.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, r.width, r.height).data;
+    }
+    const o = Math.max(0, Math.min(1, layer.opacity ?? 1));
+    const d = below.data, a = img.data;
+    for (let i = 0; i < d.length; i += 4) {
+      const t = o * (m ? m[i + 3] / 255 : 1);
+      if (t <= 0) continue;
+      if (t >= 1) {
+        d[i] = a[i];
+        d[i + 1] = a[i + 1];
+        d[i + 2] = a[i + 2];
+        d[i + 3] = a[i + 3];
+      } else {
+        d[i] += (a[i] - d[i]) * t;
+        d[i + 1] += (a[i + 1] - d[i + 1]) * t;
+        d[i + 2] += (a[i + 2] - d[i + 2]) * t;
+        d[i + 3] += (a[i + 3] - d[i + 3]) * t;
+      }
     }
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.globalAlpha = layer.opacity;
-    ctx.drawImage(adjusted, 0, 0);
+    ctx.putImageData(below, 0, 0);
     ctx.restore();
   }
 

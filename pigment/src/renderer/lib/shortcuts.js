@@ -36,7 +36,7 @@ export function install(app) {
   document.addEventListener('keydown', (event) => {
     if (event.defaultPrevented || event.isComposing) return;
     const inText = isTextInput(event.target);
-    const inDialog = !!event.target.closest?.('.dialog-backdrop');
+    const inDialog = !!app.dialogs?.isOpen || !!event.target.closest?.('.dialog-backdrop');
     // Space: temporary hand tool
     if (event.key === ' ' && !inText && !inDialog && app.view) {
       event.preventDefault();

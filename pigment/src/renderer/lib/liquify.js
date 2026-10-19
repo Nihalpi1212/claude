@@ -230,8 +230,10 @@ export function install(app) {
       field.brush(t, p.x, p.y, size / 2, pressure, mx, my);
       draw();
     };
+    canvas.tabIndex = 0; // keeps Ctrl+Z, [ ] and the tool letters inside the dialog after a stroke
     canvas.addEventListener('pointerdown', (e) => {
       if (e.button !== 0) return;
+      canvas.focus({ preventScroll: true });
       canvas.setPointerCapture(e.pointerId);
       undo.push(field.clone());
       if (undo.length > 30) undo.shift();

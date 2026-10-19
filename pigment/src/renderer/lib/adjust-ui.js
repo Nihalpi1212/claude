@@ -637,7 +637,9 @@ export async function pixelEditDialog(app, { title, label = title, params, edito
   if (!session) return null;
   let current = params;
   let preview = app.settings.dialogPreview !== false;
+  let done = false;
   const refresh = frameThrottle(() => {
+    if (done) return;
     if (!preview) return session.restore();
     try {
       session.show(processed(session, (img) => run(img, current)));
@@ -672,6 +674,8 @@ export async function pixelEditDialog(app, { title, label = title, params, edito
     buttons: [...(extraButtons ?? []), { label: 'Cancel', value: null }, { label: 'OK', value: true, primary: true }],
     onOpen: () => refresh(),
   });
+  done = true;
+  refresh.cancel();
   if (!result) {
     session.cancel();
     return null;

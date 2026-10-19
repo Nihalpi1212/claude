@@ -104,9 +104,21 @@ export class Dialogs {
           }
         }
       };
-      backdrop.addEventListener('keydown', onKey);
+      // keys are trapped at the document level: a click on a non-focusable part of the dialog (a canvas, a
+      // list entry) moves focus to the body, and Escape/Enter must keep working while no shortcut may run
+      dialog.tabIndex = -1;
+      const onDocKey = (event) => {
+        if (this.stack[this.stack.length - 1] !== entry) return;
+        onKey(event);
+      };
+      document.addEventListener('keydown', onDocKey, true);
       backdrop.addEventListener('mousedown', (event) => {
-        if (event.target === backdrop && opts.dismissible !== false) close(null);
+        if (event.target === backdrop && opts.dismissible !== false) return close(null);
+        if (!event.target.closest?.('input, select, textarea, button, a[href], [contenteditable], [tabindex]')) {
+          requestAnimationFrame(() => {
+            if (!closed && !dialog.contains(document.activeElement)) dialog.focus({ preventScroll: true });
+          });
+        }
       });
 
       let closed = false;
@@ -117,6 +129,7 @@ export class Dialogs {
           if (ok === false) return;
         }
         closed = true;
+        document.removeEventListener('keydown', onDocKey, true);
         backdrop.remove();
         const i = entry.dialogs?.stack.indexOf(entry);
         if (entry.dialogs) entry.dialogs.stack.splice(i, 1);

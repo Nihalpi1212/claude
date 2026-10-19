@@ -11,6 +11,9 @@ import { createDocument } from './lib/document.js';
 import { Selection } from './lib/selection.js';
 import { icon } from './lib/icons.js';
 import { withDefaults } from '../shared/defaults.js';
+import { openDocument } from './lib/io.js';
+import { flattenDocument } from './lib/compositor.js';
+import { typeSession } from './lib/tools/text.js';
 import { parseColor, rgbaToHex } from '../shared/pixels/color.js';
 import { MENU_KEYS, RENDERER_KEYS, SHORTCUT_GROUPS, COMMAND_LABELS, describeAccelerator } from '../shared/keymap.js';
 
@@ -265,9 +268,20 @@ function registerCoreCommands(app) {
         const d = app.doc;
         const ok = await app.dialogs.confirm(`Discard all changes to "${d.name}" and reload it from disk?`, { title: 'Revert', okLabel: 'Revert', danger: true });
         if (!ok) return;
+        // reload first: the open document (and its edits) is replaced only when the file could be read again
         const path = d.path;
+        let fresh;
+        try {
+          const bytes = await bridge.readFile(path);
+          fresh = await app.busy('Reverting…', () => openDocument(bytes, { name: path.split(/[\\/]/).pop(), path }));
+        } catch (err) {
+          app.reportError(err, 'Could not revert');
+          return;
+        }
+        const index = app.docs.docs.indexOf(d);
         await app.docs.close(d, { force: true });
-        await app.docs.openPaths([path]);
+        app.docs.add(fresh, { index });
+        fresh.history.markSaved(flattenDocument(fresh, fresh.view.compositor));
       },
     },
     'file:reveal': { enabled: () => !!app.doc?.path, run: () => bridge.showItemInFolder(app.doc.path) },
@@ -277,6 +291,12 @@ function registerCoreCommands(app) {
     'edit:undo': {
       run: () => {
         if (isTextTarget()) return bridge.nativeEdit('undo');
+        // while text is being typed, Undo steps back inside the text instead of throwing the session away
+        const typing = typeSession(app);
+        if (typing) {
+          typing.session.textarea.focus({ preventScroll: true });
+          return bridge.nativeEdit('undo');
+        }
         if (app.tools?.active?.cancel?.()) return;
         app.doc?.history.undo();
       },
@@ -284,6 +304,11 @@ function registerCoreCommands(app) {
     'edit:redo': {
       run: () => {
         if (isTextTarget()) return bridge.nativeEdit('redo');
+        const typing = typeSession(app);
+        if (typing) {
+          typing.session.textarea.focus({ preventScroll: true });
+          return bridge.nativeEdit('redo');
+        }
         app.doc?.history.redo();
       },
     },
@@ -341,6 +366,7 @@ function registerCoreCommands(app) {
       run: () => {
         const appEl = document.getElementById('app');
         appEl.classList.toggle('panels-hidden');
+        if (!appEl.classList.contains('panels-hidden')) app.panels.refreshVisible();
         requestAnimationFrame(() => app.view?.resize());
       },
     },
@@ -348,6 +374,7 @@ function registerCoreCommands(app) {
       run: () => {
         app.panels.reset();
         document.getElementById('app').classList.remove('panels-hidden');
+        app.panels.refreshVisible();
         requestAnimationFrame(() => app.view?.resize());
       },
     },
@@ -496,7 +523,7 @@ function setupStatusbar(app) {
   });
   app.on('doc:activated', update);
   app.on('doc:change', (e) => {
-    if (e.kind === 'tree' || e.kind === 'canvas') update();
+    if (e.kind === 'tree' || e.kind === 'canvas' || e.kind === 'props' || e.kind === 'history') update();
   });
   app.on('pointer:moved', ({ x, y }) => {
     const d = app.doc;

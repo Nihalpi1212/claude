@@ -170,6 +170,9 @@ function shallow(layer, over = {}) {
  *         extend: css colour for newly exposed canvas on a full-canvas bottom layer, scaleStyles }
  */
 function remapDocument(app, label, spec) {
+  // an open text edit must land in the tree before every layer is replaced (other tools, e.g. crop, are the callers)
+  const active = app.tools?.active;
+  if (active?.session && typeof active.id === 'string' && active.id.startsWith('type-')) active.commit?.();
   const d = app.doc;
   const { width: W, height: H, matrix: m, mode } = spec;
   const clipRect = spec.clip ? { x: 0, y: 0, width: W, height: H } : null;

@@ -4,7 +4,8 @@ import { icon } from './icons.js';
 import { History } from './history.js';
 import { CanvasView } from './canvas-view.js';
 import { flattenDocument } from './compositor.js';
-import { openDocument, encodeForPath, isLayeredPath, extOf, baseName, OPEN_FILTERS } from './io.js';
+import { openDocument, encodeForPath, isLayeredPath, canWritePath, extOf, baseName, OPEN_FILTERS } from './io.js';
+import { formDialog } from './form.js';
 
 export const SAVE_FILTERS = [
   { name: 'Pigment document (layers)', extensions: ['pigment'] },
@@ -32,7 +33,7 @@ export class DocumentManager {
   }
 
   /** Adds a document (new or opened) and shows it. */
-  add(doc, { activate = true } = {}) {
+  add(doc, { activate = true, index = -1 } = {}) {
     const app = this.app;
     doc.history = new History(doc, {
       limit: app.settings.historyLimit,
@@ -55,7 +56,8 @@ export class DocumentManager {
       if (e.kind === 'selection') app.emit('selection:changed', doc);
       if (e.kind === 'active') app.emit('layer:activated', { doc, layer: doc.active });
     });
-    this.docs.push(doc);
+    if (index >= 0 && index < this.docs.length) this.docs.splice(index, 0, doc);
+    else this.docs.push(doc);
     if (activate || !this.active) this.activate(doc);
     else this.renderTabs();
     app.emit('doc:opened', doc);
@@ -133,8 +135,27 @@ export class DocumentManager {
   /** Saves to the document's path; flattened formats ask before discarding layers. */
   async save(doc = this.active) {
     if (!doc) return false;
-    if (!doc.path || doc.path.startsWith('browser:/') || !isLayeredPath(doc.path) && doc.layers().length > 1 && !doc.flattenOk) return this.saveAs(doc);
+    // formats Pigment can only read (GIF, SVG, BMP, ...) go through Save As: the original file is never overwritten with other bytes
+    if (!doc.path || doc.path.startsWith('browser:/') || !canWritePath(doc.path) || !isLayeredPath(doc.path) && doc.layers().length > 1 && !doc.flattenOk) return this.saveAs(doc);
     return this.writeTo(doc, doc.path);
+  }
+
+  /** JPEG/WebP quality for this document: asked once (JPEG Options), then reused by later saves. */
+  async lossyOptions(doc, path) {
+    const ext = extOf(path);
+    if (!['jpg', 'jpeg', 'webp'].includes(ext)) return {};
+    if (doc.saveOpts?.format === ext) return doc.saveOpts;
+    const last = this.app.settings.saveQuality ?? 0.92;
+    const o = await formDialog(this.app, {
+      title: `${ext === 'webp' ? 'WebP' : 'JPEG'} Options`,
+      fields: [{ key: 'quality', label: 'Quality', type: 'slider', value: Math.round(last * 100), min: 1, max: 100, unit: '%' }],
+      okLabel: 'Save',
+    });
+    if (!o) return null;
+    doc.saveOpts = { format: ext, quality: o.quality / 100 };
+    this.app.settings.saveQuality = o.quality / 100;
+    this.app.saveSettingsSoon();
+    return doc.saveOpts;
   }
 
   async saveAs(doc = this.active, { copy = false } = {}) {
@@ -144,6 +165,12 @@ export class DocumentManager {
     if (!target) return false;
     let path = target;
     if (!extOf(path)) path += '.pigment';
+    if (!canWritePath(path)) {
+      // a typed-in extension Pigment cannot write (.gif, .svg, .bmp, ...): save a PNG instead of mislabelled bytes
+      const typed = extOf(path);
+      path = path.replace(/\.[^.\\/]+$/, '.png');
+      this.app.dialogs.toast(`Pigment cannot write .${typed} files; saving as PNG instead`, { kind: 'info', timeout: 3200 });
+    }
     if (!isLayeredPath(path) && doc.layers().filter((l) => l.visible).length > 1) {
       const ok = await this.app.dialogs.confirm(`${extOf(path).toUpperCase()} files cannot hold layers. The image will be flattened in the saved file (your document keeps its layers).`, { title: 'Save as a flat image', okLabel: 'Save' });
       if (!ok) return false;
@@ -164,7 +191,9 @@ export class DocumentManager {
   async writeTo(doc, path, { copy = false } = {}) {
     try {
       this.app.tools?.active?.commit?.();
-      const bytes = await this.app.busy(`Saving ${path.split(/[\\/]/).pop()}…`, () => encodeForPath(doc, path, doc.view.compositor, this.app.settings.exportDefaults));
+      const opts = await this.lossyOptions(doc, path);
+      if (!opts) return false;
+      const bytes = await this.app.busy(`Saving ${path.split(/[\\/]/).pop()}…`, () => encodeForPath(doc, path, doc.view.compositor, opts));
       await bridge.writeFile(path, bytes);
       if (!copy) doc.history.markSaved(flattenDocument(doc, doc.view.compositor));
       this.app.dialogs.toast(`Saved ${path.split(/[\\/]/).pop()}`, { kind: 'success', timeout: 1600 });

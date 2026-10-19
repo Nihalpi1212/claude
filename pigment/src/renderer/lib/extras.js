@@ -116,7 +116,8 @@ async function newDocumentDialog(app, arg) {
   };
   let sizeNode = null;
   let summary = null;
-  let lastDpi = values0.dpi;
+  // physical size in inches: typing a resolution digit by digit must not compound rounding errors
+  let phys = { w: values0.width / values0.dpi, h: values0.height / values0.dpi };
 
   const updateSummary = (v) => {
     if (!summary) return;
@@ -158,6 +159,7 @@ async function newDocumentDialog(app, arg) {
             const n = Number(i.value);
             if (!(n > 0)) return;
             values[i.dataset.dim] = Math.max(1, Math.round(toPx(n, values.unit, values.dpi)));
+            phys = { w: values.width / values.dpi, h: values.height / values.dpi };
             markCustom();
             updateSummary(values);
           });
@@ -169,6 +171,7 @@ async function newDocumentDialog(app, arg) {
         });
         wrap.querySelector('[data-act="swap"]').addEventListener('click', () => {
           [values.width, values.height] = [values.height, values.width];
+          phys = { w: values.width / values.dpi, h: values.height / values.dpi };
           markCustom();
           show();
           updateSummary(values);
@@ -210,17 +213,16 @@ async function newDocumentDialog(app, arg) {
           values.height = p.height;
           values.unit = p.unit;
           form.set('dpi', p.dpi, { silent: true });
-          lastDpi = p.dpi;
+          phys = { w: p.width / p.dpi, h: p.height / p.dpi };
         }
         sizeNode?.show();
       } else if (key === 'dpi') {
         const dpi = Number(values.dpi) || 72;
         if (values.unit !== 'px') {
           // keep the physical size: the pixel count follows the resolution
-          values.width = Math.max(1, Math.round((values.width / lastDpi) * dpi));
-          values.height = Math.max(1, Math.round((values.height / lastDpi) * dpi));
-        }
-        lastDpi = dpi;
+          values.width = Math.max(1, Math.round(phys.w * dpi));
+          values.height = Math.max(1, Math.round(phys.h * dpi));
+        } else phys = { w: values.width / dpi, h: values.height / dpi };
         if (values.preset !== 'custom') form.set('preset', 'custom', { silent: true });
         sizeNode?.show();
       }
