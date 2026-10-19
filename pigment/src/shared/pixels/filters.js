@@ -444,6 +444,99 @@ function boxBlur(img, p, rect) {
   return img;
 }
 
+/**
+ * Line kernel of length dist along (ux, uy) on a premultiplied float buffer (w x h), by shearing:
+ * with the major axis the one the direction is closer to and m the minor offset per major step,
+ * line j (the points (i, j + i m)) is resampled with linear interpolation across the minor axis,
+ * box-filtered along the major axis (running sums, fractional ends, half length dist |u_major| / 2)
+ * and scattered back to the pixel grid with the inverse interpolation. Only two 1-D linear
+ * interpolations touch the cross direction, so an edge parallel to the motion stays sharp, and the
+ * cost is O(w h) whatever the distance. Positions past the buffer's ends repeat the edge (across the
+ * line) or the line's last sample (along it). ox, oy: image position of the buffer's first pixel, so
+ * the family of lines (and with it the interpolation phases) is anchored to the image, not the
+ * buffer. Returns a new buffer.
+ */
+function lineBlur(f, w, h, ux, uy, dist, ox, oy) {
+  const horiz = Math.abs(ux) >= Math.abs(uy);
+  const nMaj = horiz ? w : h, nMin = horiz ? h : w, sMaj = horiz ? 4 : w * 4, sMin = horiz ? w * 4 : 4;
+  const m = horiz ? uy / ux : ux / uy, R = (dist * (horiz ? Math.abs(ux) : Math.abs(uy))) / 2;
+  const n = Math.floor(R), fr = R - n, norm = 1 / (2 * n + 1 + 2 * fr), lastMaj = nMaj - 1, lastMin = nMin - 1;
+  const out = new Float32Array(f.length), line = new Float32Array(nMaj * 4);
+  // Major position i sits i m off the line's origin: floor fl[i] + fraction ft[i]; its output
+  // (i, k) interpolates lines k - i m: j = k - c[i] with weight 1 - u[i] and j + 1 with u[i].
+  const fl = new Int32Array(nMaj), ft = new Float64Array(nMaj), c = new Int32Array(nMaj), u = new Float64Array(nMaj);
+  const origin = horiz ? ox : oy;
+  for (let i = 0; i < nMaj; i++) {
+    const o = (i + origin) * m, a = Math.floor(o), b = Math.ceil(o);
+    fl[i] = a;
+    ft[i] = o - a;
+    c[i] = b;
+    u[i] = b - o;
+  }
+  const cLo = Math.min(c[0], c[lastMaj]), cHi = Math.max(c[0], c[lastMaj]);
+  for (let j = -cHi; j <= nMin - cLo; j++) {
+    // major positions whose output lands in the buffer: 0 <= j + c[i] and j + c[i] - 1 <= lastMin
+    let ia = 0, ib = lastMaj;
+    if (m > 0) {
+      while (ia <= lastMaj && j + c[ia] < 0) ia++;
+      while (ib >= ia && j + c[ib] - 1 > lastMin) ib--;
+    } else if (m < 0) {
+      while (ia <= lastMaj && j + c[ia] - 1 > lastMin) ia++;
+      while (ib >= ia && j + c[ib] < 0) ib--;
+    }
+    if (ia > ib) continue;
+    // resample the line where the box reads it
+    const i0 = ia - n - 1 < 0 ? 0 : ia - n - 1, i1 = ib + n + 1 > lastMaj ? lastMaj : ib + n + 1;
+    for (let i = i0; i <= i1; i++) {
+      let y0 = j + fl[i], y1 = y0 + 1;
+      const t = ft[i];
+      y0 = y0 < 0 ? 0 : y0 > lastMin ? lastMin : y0;
+      y1 = y1 < 0 ? 0 : y1 > lastMin ? lastMin : y1;
+      const p0 = i * sMaj + y0 * sMin, p1 = i * sMaj + y1 * sMin, q = i * 4;
+      line[q] = f[p0] + (f[p1] - f[p0]) * t;
+      line[q + 1] = f[p0 + 1] + (f[p1 + 1] - f[p0 + 1]) * t;
+      line[q + 2] = f[p0 + 2] + (f[p1 + 2] - f[p0 + 2]) * t;
+      line[q + 3] = f[p0 + 3] + (f[p1 + 3] - f[p0 + 3]) * t;
+    }
+    // running box along the line (reads stay in i0..i1), scattered to the two output rows
+    let s0 = 0, s1 = 0, s2 = 0, s3 = 0;
+    for (let k = ia - n; k <= ia + n; k++) {
+      const q = (k < 0 ? 0 : k > lastMaj ? lastMaj : k) * 4;
+      s0 += line[q];
+      s1 += line[q + 1];
+      s2 += line[q + 2];
+      s3 += line[q + 3];
+    }
+    for (let i = ia; i <= ib; i++) {
+      const ko = i - n - 1, ka = i + n + 1;
+      const qo = (ko < 0 ? 0 : ko) * 4, qa = (ka > lastMaj ? lastMaj : ka) * 4;
+      const v0 = (s0 + fr * (line[qo] + line[qa])) * norm, v1 = (s1 + fr * (line[qo + 1] + line[qa + 1])) * norm;
+      const v2 = (s2 + fr * (line[qo + 2] + line[qa + 2])) * norm, v3 = (s3 + fr * (line[qo + 3] + line[qa + 3])) * norm;
+      const k1 = j + c[i], wu = u[i], w1 = 1 - wu;
+      if (k1 <= lastMin) {
+        const o = i * sMaj + k1 * sMin;
+        out[o] += v0 * w1;
+        out[o + 1] += v1 * w1;
+        out[o + 2] += v2 * w1;
+        out[o + 3] += v3 * w1;
+      }
+      if (wu > 0 && k1 >= 1) {
+        const o = i * sMaj + (k1 - 1) * sMin;
+        out[o] += v0 * wu;
+        out[o + 1] += v1 * wu;
+        out[o + 2] += v2 * wu;
+        out[o + 3] += v3 * wu;
+      }
+      const kr = i - n, qr = (kr < 0 ? 0 : kr) * 4, qn = (ka > lastMaj ? lastMaj : ka) * 4;
+      s0 += line[qn] - line[qr];
+      s1 += line[qn + 1] - line[qr + 1];
+      s2 += line[qn + 2] - line[qr + 2];
+      s3 += line[qn + 3] - line[qr + 3];
+    }
+  }
+  return out;
+}
+
 function motionBlur(img, p, rect) {
   const r = region(img, rect);
   const dist = clampNum(num(p.distance, 0), 0, 2000);
@@ -452,14 +545,10 @@ function motionBlur(img, p, rect) {
   let ux = Math.cos(ang), uy = -Math.sin(ang); // degrees counter-clockwise from horizontal, y down
   if (Math.abs(ux) < 1e-12) ux = 0;
   if (Math.abs(uy) < 1e-12) uy = 0;
-  const N = nextPow2(Math.ceil(dist) + 1, 4096);
-  const g = grow(img, r, dist / 2 + 2);
+  // the kernel reaches dist / 2 along the line, plus one pixel of interpolation and the fractional end
+  const g = grow(img, r, dist / 2 + 3);
   const tmp = cropImage(img, g);
-  const f = tapPasses(premultiply(tmp), g.width, g.height, N, dist / (N - 1), (m, t) => {
-    m[0] = 1; m[1] = 0; m[2] = ux * t;
-    m[3] = 0; m[4] = 1; m[5] = uy * t;
-  });
-  unpremultiply(f, tmp);
+  unpremultiply(lineBlur(premultiply(tmp), g.width, g.height, ux, uy, dist, g.x, g.y), tmp);
   copyBack(img, tmp, g, r);
   return img;
 }
