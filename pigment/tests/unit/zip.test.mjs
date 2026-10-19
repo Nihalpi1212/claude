@@ -69,7 +69,8 @@ test('archives are readable by an independent implementation', async (t) => {
     writeFileSync(file, bytes);
     let ok = false;
     try {
-      const out = execFileSync('python3', ['-c', 'import sys,zipfile; z=zipfile.ZipFile(sys.argv[1]); assert z.testzip() is None; print(",".join(z.namelist()))', file], { encoding: 'utf8' });
+      // PYTHONIOENCODING: on Windows Python would print the names in the console code page, mangling "ßü"
+      const out = execFileSync('python3', ['-c', 'import sys,zipfile; z=zipfile.ZipFile(sys.argv[1]); assert z.testzip() is None; print(",".join(z.namelist()))', file], { encoding: 'utf8', env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' } });
       assert.equal(out.trim(), 'document.json,layers/1.png,empty.txt,ßü.png');
       ok = true;
     } catch (err) {
