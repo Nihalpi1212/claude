@@ -18,8 +18,9 @@
 // - Randomised kinds are deterministic for a seed and position stable: the noise depends only on
 //   (seed, x, y), whatever rect is.
 // - Hot paths use typed arrays and plain loops: separable passes, running sums (box blur and the
-//   3-box Gaussian), sliding histograms (median, surface blur, oil paint), van Herk/Gil-Werman
-//   (maximum/minimum) and log2(N) two-tap passes for the motion and radial blurs.
+//   3-box Gaussian), sliding histograms (median, surface blur, oil paint; constant-time column
+//   histograms for large median radii), van Herk/Gil-Werman (maximum/minimum), a sheared line box
+//   for the motion blur and polar resampling (rings / rays) for the radial blur.
 
 import {
   clampRect, inflateRect, cropImage, pasteImage, premultiply, unpremultiply, makeLut, applyLut,
@@ -197,14 +198,63 @@ function convolveH(src, dst, w, h, k, K) {
   }
 }
 
-/** Vertical pass of a symmetric kernel: whole rows at a time into a float64 accumulator (cache friendly). */
-function convolveV(src, dst, w, h, k, K) {
-  const stride = w * 4, kc = k[K], acc = new Float64Array(stride);
+/** convolveH for 3-channel (RGB) buffers. */
+function convolveH3(src, dst, w, h, k, K) {
+  const stride = w * 3, kc = k[K];
+  for (let y = 0; y < h; y++) {
+    const row = y * stride;
+    for (let x = 0; x < w; x++) {
+      const ci = row + x * 3;
+      let r, g, b;
+      if (x >= K && x + K < w) {
+        r = src[ci] * kc;
+        g = src[ci + 1] * kc;
+        b = src[ci + 2] * kc;
+        for (let j = 1, lo = ci - 3, hi = ci + 3; j <= K; j++, lo -= 3, hi += 3) {
+          const wt = k[K + j];
+          r += (src[lo] + src[hi]) * wt;
+          g += (src[lo + 1] + src[hi + 1]) * wt;
+          b += (src[lo + 2] + src[hi + 2]) * wt;
+        }
+      } else {
+        r = g = b = 0;
+        for (let j = -K; j <= K; j++) {
+          let xx = x + j;
+          xx = xx < 0 ? 0 : xx >= w ? w - 1 : xx;
+          const i = row + xx * 3, wt = k[j + K];
+          r += src[i] * wt;
+          g += src[i + 1] * wt;
+          b += src[i + 2] * wt;
+        }
+      }
+      dst[ci] = r;
+      dst[ci + 1] = g;
+      dst[ci + 2] = b;
+    }
+  }
+}
+
+/**
+ * Vertical pass of a symmetric kernel: whole rows at a time into a float64 accumulator (cache
+ * friendly), four tap pairs per sweep of the accumulator; ch channels per pixel.
+ */
+function convolveV(src, dst, w, h, k, K, ch = 4) {
+  const stride = w * ch, kc = k[K], acc = new Float64Array(stride), last = h - 1;
+  const row = (y) => (y < 0 ? 0 : y > last ? last : y) * stride;
   for (let y = 0; y < h; y++) {
     const c = y * stride;
     for (let i = 0; i < stride; i++) acc[i] = src[c + i] * kc;
-    for (let j = 1; j <= K; j++) {
-      const sa = (y - j < 0 ? 0 : y - j) * stride, sb = (y + j >= h ? h - 1 : y + j) * stride, wt = k[K + j];
+    let j = 1;
+    for (; j + 3 <= K; j += 4) {
+      const a1 = row(y - j), b1 = row(y + j), a2 = row(y - j - 1), b2 = row(y + j + 1);
+      const a3 = row(y - j - 2), b3 = row(y + j + 2), a4 = row(y - j - 3), b4 = row(y + j + 3);
+      const w1 = k[K + j], w2 = k[K + j + 1], w3 = k[K + j + 2], w4 = k[K + j + 3];
+      for (let i = 0; i < stride; i++) {
+        acc[i] += (src[a1 + i] + src[b1 + i]) * w1 + (src[a2 + i] + src[b2 + i]) * w2 + (src[a3 + i] + src[b3 + i]) * w3 + (src[a4 + i] + src[b4 + i]) * w4;
+      }
+    }
+    for (; j <= K; j++) {
+      const sa = row(y - j), sb = row(y + j), wt = k[K + j];
       for (let i = 0; i < stride; i++) acc[i] += (src[sa + i] + src[sb + i]) * wt;
     }
     for (let i = 0; i < stride; i++) dst[c + i] = acc[i];
@@ -289,15 +339,42 @@ function boxRadiusFor(sigma) {
 const gaussSupport = (sigma) =>
   sigma <= GAUSS_DIRECT_MAX ? Math.max(1, Math.ceil(3 * sigma)) : 3 * (Math.floor(boxRadiusFor(sigma)) + 2);
 
-/** Gaussian blur of a float RGBA buffer, in place (returns it). */
+/**
+ * Gaussian blur of a premultiplied float RGBA buffer, in place (returns it). When every pixel is
+ * opaque the direct kernel runs on the RGB channels only (alpha stays 1), a quarter less work.
+ */
 function gaussianFloat(f, w, h, sigma) {
-  const tmp = new Float32Array(f.length);
   if (sigma <= GAUSS_DIRECT_MAX) {
-    const k = gaussKernel(sigma), K = (k.length - 1) >> 1;
-    convolveH(f, tmp, w, h, k, K);
-    convolveV(tmp, f, w, h, k, K);
+    const k = gaussKernel(sigma), K = (k.length - 1) >> 1, n = w * h;
+    let opaque = true;
+    for (let i = 3; i < f.length; i += 4) {
+      if (f[i] !== 1) {
+        opaque = false;
+        break;
+      }
+    }
+    if (!opaque) {
+      const tmp = new Float32Array(f.length);
+      convolveH(f, tmp, w, h, k, K);
+      convolveV(tmp, f, w, h, k, K);
+      return f;
+    }
+    const a = new Float32Array(n * 3), b = new Float32Array(n * 3);
+    for (let p = 0, i = 0, j = 0; p < n; p++, i += 4, j += 3) {
+      a[j] = f[i];
+      a[j + 1] = f[i + 1];
+      a[j + 2] = f[i + 2];
+    }
+    convolveH3(a, b, w, h, k, K);
+    convolveV(b, a, w, h, k, K, 3);
+    for (let p = 0, i = 0, j = 0; p < n; p++, i += 4, j += 3) {
+      f[i] = a[j];
+      f[i + 1] = a[j + 1];
+      f[i + 2] = a[j + 2];
+    }
     return f;
   }
+  const tmp = new Float32Array(f.length);
   const rad = boxRadiusFor(sigma);
   for (let p = 0; p < 3; p++) {
     boxH(f, tmp, w, h, rad);
@@ -311,109 +388,6 @@ function blurredRegion(img, r, sigma) {
   const g = grow(img, r, gaussSupport(sigma) + 1);
   const f = gaussianFloat(premultiply(cropImage(img, g)), g.width, g.height, sigma);
   return { g, f };
-}
-
-/**
- * dst(p) = (src(m1 p) + src(m2 p)) / 2 for 2x3 affine maps m1, m2: bilinear on the (premultiplied)
- * float buffer, coordinates clamped to it. The sampling is written out inline (no helper call per
- * sample: passing doubles to a non-inlined function boxes them).
- */
-function affinePair(src, dst, w, h, m1, m2) {
-  const xm = w - 1, ym = h - 1;
-  for (let y = 0, o = 0; y < h; y++) {
-    // both maps are affine: step along the row by their x columns
-    let ax = m1[1] * y + m1[2], ay = m1[4] * y + m1[5], bx = m2[1] * y + m2[2], by = m2[4] * y + m2[5];
-    const adx = m1[0], ady = m1[3], bdx = m2[0], bdy = m2[3];
-    for (let x = 0; x < w; x++, o += 4, ax += adx, ay += ady, bx += bdx, by += bdy) {
-      let r = 0, g = 0, b = 0, a = 0;
-      for (let s = 0; s < 2; s++) {
-        let fx = s ? bx : ax, fy = s ? by : ay;
-        if (!(fx > 0)) fx = 0;
-        else if (fx > xm) fx = xm;
-        if (!(fy > 0)) fy = 0;
-        else if (fy > ym) fy = ym;
-        const x0 = fx | 0, y0 = fy | 0, tx = fx - x0, ty = fy - y0;
-        const i00 = (y0 * w + x0) * 4, dx = x0 < xm ? 4 : 0, dy = y0 < ym ? w * 4 : 0;
-        const i10 = i00 + dx, i01 = i00 + dy, i11 = i01 + dx;
-        const w00 = (1 - tx) * (1 - ty), w10 = tx * (1 - ty), w01 = (1 - tx) * ty, w11 = tx * ty;
-        r += src[i00] * w00 + src[i10] * w10 + src[i01] * w01 + src[i11] * w11;
-        g += src[i00 + 1] * w00 + src[i10 + 1] * w10 + src[i01 + 1] * w01 + src[i11 + 1] * w11;
-        b += src[i00 + 2] * w00 + src[i10 + 2] * w10 + src[i01 + 2] * w01 + src[i11 + 2] * w11;
-        a += src[i00 + 3] * w00 + src[i10 + 3] * w10 + src[i01 + 3] * w01 + src[i11 + 3] * w11;
-      }
-      dst[o] = r * 0.5;
-      dst[o + 1] = g * 0.5;
-      dst[o + 2] = b * 0.5;
-      dst[o + 3] = a * 0.5;
-    }
-  }
-}
-
-/**
- * affinePair for the pure translations +-(ox, oy): the bilinear weights are the same for every
- * pixel, so only the tap indices are computed (clamped to the buffer like affinePair).
- */
-function translatePair(src, dst, w, h, ox, oy) {
-  const stride = w * 4, xm = w - 1, ym = h - 1;
-  const ax = Math.floor(ox), ay = Math.floor(oy), tx = ox - ax, ty = oy - ay;
-  const bx = Math.floor(-ox), by = Math.floor(-oy), ux = -ox - bx, uy = -oy - by;
-  const a00 = (1 - tx) * (1 - ty) * 0.5, a10 = tx * (1 - ty) * 0.5, a01 = (1 - tx) * ty * 0.5, a11 = tx * ty * 0.5;
-  const b00 = (1 - ux) * (1 - uy) * 0.5, b10 = ux * (1 - uy) * 0.5, b01 = (1 - ux) * uy * 0.5, b11 = ux * uy * 0.5;
-  // columns where all four x taps are inside the buffer
-  const xlo = Math.max(0, -ax, -bx), xhi = Math.min(w, w - ax - 1, w - bx - 1);
-  const cy = (v) => (v < 0 ? 0 : v > ym ? ym : v) * stride;
-  for (let y = 0; y < h; y++) {
-    const ra0 = cy(y + ay), ra1 = cy(y + ay + 1), rb0 = cy(y + by), rb1 = cy(y + by + 1), o = y * stride;
-    for (let x = 0; x < w; x++) {
-      let pa0, pa1, pb0, pb1;
-      if (x >= xlo && x < xhi) {
-        pa0 = (x + ax) * 4;
-        pa1 = pa0 + 4;
-        pb0 = (x + bx) * 4;
-        pb1 = pb0 + 4;
-      } else {
-        const c0 = x + ax, c1 = x + bx;
-        pa0 = (c0 < 0 ? 0 : c0 > xm ? xm : c0) * 4;
-        pa1 = (c0 + 1 < 0 ? 0 : c0 + 1 > xm ? xm : c0 + 1) * 4;
-        pb0 = (c1 < 0 ? 0 : c1 > xm ? xm : c1) * 4;
-        pb1 = (c1 + 1 < 0 ? 0 : c1 + 1 > xm ? xm : c1 + 1) * 4;
-      }
-      const q = o + x * 4;
-      for (let c = 0; c < 4; c++) {
-        dst[q + c] = src[ra0 + pa0 + c] * a00 + src[ra0 + pa1 + c] * a10 + src[ra1 + pa0 + c] * a01 + src[ra1 + pa1 + c] * a11
-          + src[rb0 + pb0 + c] * b00 + src[rb0 + pb1 + c] * b10 + src[rb1 + pb0 + c] * b01 + src[rb1 + pb1 + c] * b11;
-      }
-    }
-  }
-}
-
-/** Smallest power of two >= n, within [2, cap]. */
-function nextPow2(n, cap) {
-  let N = 2;
-  while (N < n && N < cap) N *= 2;
-  return N;
-}
-
-/**
- * Applies a 2^k-tap box along a one-parameter family of affine maps as k two-tap passes: pass j
- * averages the maps at parameter +-step * 2^(j-1), and the passes compose into 2^k equally spaced
- * taps spanning the whole range. setMap(m, t) writes the map for parameter t into m.
- */
-function tapPasses(f, w, h, N, step, setMap) {
-  let t = new Float32Array(f.length);
-  const m1 = new Float64Array(6), m2 = new Float64Array(6);
-  for (let j = 0; (1 << j) < N; j++) {
-    const s = step * 2 ** (j - 1);
-    setMap(m1, s);
-    setMap(m2, -s);
-    const shift = m1[0] === 1 && m1[1] === 0 && m1[3] === 0 && m1[4] === 1 && m2[2] === -m1[2] && m2[5] === -m1[5];
-    if (shift) translatePair(f, t, w, h, m1[2], m1[5]);
-    else affinePair(f, t, w, h, m1, m2);
-    const swap = f;
-    f = t;
-    t = swap;
-  }
-  return f;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -444,94 +418,85 @@ function boxBlur(img, p, rect) {
   return img;
 }
 
+/** Lines per pixel (across the motion) of the sheared motion-blur grid. */
+const LINE_OVERSAMPLE = 2;
+
 /**
  * Line kernel of length dist along (ux, uy) on a premultiplied float buffer (w x h), by shearing:
  * with the major axis the one the direction is closer to and m the minor offset per major step,
- * line j (the points (i, j + i m)) is resampled with linear interpolation across the minor axis,
- * box-filtered along the major axis (running sums, fractional ends, half length dist |u_major| / 2)
- * and scattered back to the pixel grid with the inverse interpolation. Only two 1-D linear
- * interpolations touch the cross direction, so an edge parallel to the motion stays sharp, and the
- * cost is O(w h) whatever the distance. Positions past the buffer's ends repeat the edge (across the
- * line) or the line's last sample (along it). ox, oy: image position of the buffer's first pixel, so
- * the family of lines (and with it the interpolation phases) is anchored to the image, not the
- * buffer. Returns a new buffer.
+ * line j (the points (i, (j + q_i) / OV) with q_i = OV i m, OV lines per pixel) is resampled with
+ * linear interpolation across the minor axis, box-filtered along the major axis (running sums,
+ * fractional ends, total length dist |u_major|) and scattered back to the pixel grid with the
+ * inverse interpolation (each line feeds one pixel per major position). Only two 1-D linear
+ * interpolations, one of them on the oversampled grid, touch the cross direction, so an edge
+ * parallel to the motion stays sharp; the cost is O(w h OV) whatever the distance. Positions past
+ * the buffer's ends repeat the edge (across the line) or the line's last sample (along it). ox, oy:
+ * image position of the buffer's first pixel, so the family of lines (and with it the interpolation
+ * phases) is anchored to the image, not the buffer. Returns a new buffer.
  */
 function lineBlur(f, w, h, ux, uy, dist, ox, oy) {
+  const OV = LINE_OVERSAMPLE, inv = 1 / OV;
   const horiz = Math.abs(ux) >= Math.abs(uy);
   const nMaj = horiz ? w : h, nMin = horiz ? h : w, sMaj = horiz ? 4 : w * 4, sMin = horiz ? w * 4 : 4;
-  const m = horiz ? uy / ux : ux / uy, R = (dist * (horiz ? Math.abs(ux) : Math.abs(uy))) / 2;
+  // box of total weight dist |u_major| (2 R + 1 with the fractional ends): a segment of length dist
+  const m = horiz ? uy / ux : ux / uy, R = Math.max(0, (dist * (horiz ? Math.abs(ux) : Math.abs(uy)) - 1) / 2);
   const n = Math.floor(R), fr = R - n, norm = 1 / (2 * n + 1 + 2 * fr), lastMaj = nMaj - 1, lastMin = nMin - 1;
-  const out = new Float32Array(f.length), line = new Float32Array(nMaj * 4);
-  // Major position i sits i m off the line's origin: floor fl[i] + fraction ft[i]; its output
-  // (i, k) interpolates lines k - i m: j = k - c[i] with weight 1 - u[i] and j + 1 with u[i].
-  const fl = new Int32Array(nMaj), ft = new Float64Array(nMaj), c = new Int32Array(nMaj), u = new Float64Array(nMaj);
+  const out = new Float32Array(f.length), line = new Float32Array(nMaj * 4), q = new Float64Array(nMaj);
   const origin = horiz ? ox : oy;
-  for (let i = 0; i < nMaj; i++) {
-    const o = (i + origin) * m, a = Math.floor(o), b = Math.ceil(o);
-    fl[i] = a;
-    ft[i] = o - a;
-    c[i] = b;
-    u[i] = b - o;
-  }
-  const cLo = Math.min(c[0], c[lastMaj]), cHi = Math.max(c[0], c[lastMaj]);
-  for (let j = -cHi; j <= nMin - cLo; j++) {
-    // major positions whose output lands in the buffer: 0 <= j + c[i] and j + c[i] - 1 <= lastMin
+  for (let i = 0; i < nMaj; i++) q[i] = OV * (i + origin) * m;
+  const qLo = Math.min(q[0], q[lastMaj]), qHi = Math.max(q[0], q[lastMaj]);
+  // output (i, k) sits at line position OV k - q_i: lines floor(.) and floor(.) + 1
+  const jLo = Math.floor(-qHi) - 1, jHi = Math.ceil(OV * lastMin - qLo) + 1;
+  /** Output row fed by line j at major i (it may lie outside 0..lastMin). */
+  const target = (j, i) => Math.ceil((j - 1 + q[i]) * inv);
+  for (let j = jLo; j <= jHi; j++) {
+    // major positions whose target row is inside the buffer (target is monotone in i)
     let ia = 0, ib = lastMaj;
     if (m > 0) {
-      while (ia <= lastMaj && j + c[ia] < 0) ia++;
-      while (ib >= ia && j + c[ib] - 1 > lastMin) ib--;
+      while (ia <= lastMaj && target(j, ia) < 0) ia++;
+      while (ib >= ia && target(j, ib) > lastMin) ib--;
     } else if (m < 0) {
-      while (ia <= lastMaj && j + c[ia] - 1 > lastMin) ia++;
-      while (ib >= ia && j + c[ib] < 0) ib--;
-    }
+      while (ia <= lastMaj && target(j, ia) > lastMin) ia++;
+      while (ib >= ia && target(j, ib) < 0) ib--;
+    } else if (target(j, 0) < 0 || target(j, 0) > lastMin) continue;
     if (ia > ib) continue;
-    // resample the line where the box reads it
+    // resample the line where the box reads it: minor coordinate (j + q_i) / OV
     const i0 = ia - n - 1 < 0 ? 0 : ia - n - 1, i1 = ib + n + 1 > lastMaj ? lastMaj : ib + n + 1;
     for (let i = i0; i <= i1; i++) {
-      let y0 = j + fl[i], y1 = y0 + 1;
-      const t = ft[i];
-      y0 = y0 < 0 ? 0 : y0 > lastMin ? lastMin : y0;
-      y1 = y1 < 0 ? 0 : y1 > lastMin ? lastMin : y1;
-      const p0 = i * sMaj + y0 * sMin, p1 = i * sMaj + y1 * sMin, q = i * 4;
-      line[q] = f[p0] + (f[p1] - f[p0]) * t;
-      line[q + 1] = f[p0 + 1] + (f[p1 + 1] - f[p0 + 1]) * t;
-      line[q + 2] = f[p0 + 2] + (f[p1 + 2] - f[p0 + 2]) * t;
-      line[q + 3] = f[p0 + 3] + (f[p1 + 3] - f[p0 + 3]) * t;
+      const yy = (j + q[i]) * inv, fy = Math.floor(yy), t = yy - fy;
+      const y0 = fy < 0 ? 0 : fy > lastMin ? lastMin : fy, y1 = fy + 1 < 0 ? 0 : fy + 1 > lastMin ? lastMin : fy + 1;
+      const p0 = i * sMaj + y0 * sMin, p1 = i * sMaj + y1 * sMin, o = i * 4;
+      line[o] = f[p0] + (f[p1] - f[p0]) * t;
+      line[o + 1] = f[p0 + 1] + (f[p1 + 1] - f[p0 + 1]) * t;
+      line[o + 2] = f[p0 + 2] + (f[p1 + 2] - f[p0 + 2]) * t;
+      line[o + 3] = f[p0 + 3] + (f[p1 + 3] - f[p0 + 3]) * t;
     }
-    // running box along the line (reads stay in i0..i1), scattered to the two output rows
+    // running box along the line (reads stay in i0..i1), each value scattered to its output pixel
     let s0 = 0, s1 = 0, s2 = 0, s3 = 0;
     for (let k = ia - n; k <= ia + n; k++) {
-      const q = (k < 0 ? 0 : k > lastMaj ? lastMaj : k) * 4;
-      s0 += line[q];
-      s1 += line[q + 1];
-      s2 += line[q + 2];
-      s3 += line[q + 3];
+      const o = (k < 0 ? 0 : k > lastMaj ? lastMaj : k) * 4;
+      s0 += line[o];
+      s1 += line[o + 1];
+      s2 += line[o + 2];
+      s3 += line[o + 3];
     }
     for (let i = ia; i <= ib; i++) {
       const ko = i - n - 1, ka = i + n + 1;
       const qo = (ko < 0 ? 0 : ko) * 4, qa = (ka > lastMaj ? lastMaj : ka) * 4;
-      const v0 = (s0 + fr * (line[qo] + line[qa])) * norm, v1 = (s1 + fr * (line[qo + 1] + line[qa + 1])) * norm;
-      const v2 = (s2 + fr * (line[qo + 2] + line[qa + 2])) * norm, v3 = (s3 + fr * (line[qo + 3] + line[qa + 3])) * norm;
-      const k1 = j + c[i], wu = u[i], w1 = 1 - wu;
-      if (k1 <= lastMin) {
-        const o = i * sMaj + k1 * sMin;
-        out[o] += v0 * w1;
-        out[o + 1] += v1 * w1;
-        out[o + 2] += v2 * w1;
-        out[o + 3] += v3 * w1;
+      // the output row k with OV k - q_i in [j - 1, j + 1): weight 1 - |OV k - q_i - j|
+      const k = target(j, i), pos = OV * k - q[i] - j, wt = (pos >= 0 ? 1 - pos : 1 + pos) * norm;
+      if (wt > 0) {
+        const o = i * sMaj + k * sMin;
+        out[o] += (s0 + fr * (line[qo] + line[qa])) * wt;
+        out[o + 1] += (s1 + fr * (line[qo + 1] + line[qa + 1])) * wt;
+        out[o + 2] += (s2 + fr * (line[qo + 2] + line[qa + 2])) * wt;
+        out[o + 3] += (s3 + fr * (line[qo + 3] + line[qa + 3])) * wt;
       }
-      if (wu > 0 && k1 >= 1) {
-        const o = i * sMaj + (k1 - 1) * sMin;
-        out[o] += v0 * wu;
-        out[o + 1] += v1 * wu;
-        out[o + 2] += v2 * wu;
-        out[o + 3] += v3 * wu;
-      }
-      const kr = i - n, qr = (kr < 0 ? 0 : kr) * 4, qn = (ka > lastMaj ? lastMaj : ka) * 4;
-      s0 += line[qn] - line[qr];
-      s1 += line[qn + 1] - line[qr + 1];
-      s2 += line[qn + 2] - line[qr + 2];
-      s3 += line[qn + 3] - line[qr + 3];
+      const qr = (i - n < 0 ? 0 : i - n) * 4;
+      s0 += line[qa] - line[qr];
+      s1 += line[qa + 1] - line[qr + 1];
+      s2 += line[qa + 2] - line[qr + 2];
+      s3 += line[qa + 3] - line[qr + 3];
     }
   }
   return out;
@@ -556,6 +521,276 @@ function motionBlur(img, p, rect) {
 /** Log-scale span of the zoom blur at amount 100. */
 const ZOOM_SPAN = 0.8;
 
+/**
+ * Bilinear sample of the premultiplied float buffer f (w x h) at (fx, fy), clamped to the buffer,
+ * written to dst[o..o+3].
+ */
+function sampleFloat(f, w, h, fx, fy, dst, o) {
+  const xm = w - 1, ym = h - 1;
+  if (!(fx > 0)) fx = 0;
+  else if (fx > xm) fx = xm;
+  if (!(fy > 0)) fy = 0;
+  else if (fy > ym) fy = ym;
+  const x0 = fx | 0, y0 = fy | 0, tx = fx - x0, ty = fy - y0;
+  const i00 = (y0 * w + x0) * 4, i10 = i00 + (x0 < xm ? 4 : 0), i01 = i00 + (y0 < ym ? w * 4 : 0), i11 = i01 + (i10 - i00);
+  const w00 = (1 - tx) * (1 - ty), w10 = tx * (1 - ty), w01 = (1 - tx) * ty, w11 = tx * ty;
+  for (let c = 0; c < 4; c++) dst[o + c] = f[i00 + c] * w00 + f[i10 + c] * w10 + f[i01 + c] * w01 + f[i11 + c] * w11;
+}
+
+/**
+ * Angles of rect r's pixels seen from (cx, cy): { full: true } when the centre is in (or next to)
+ * r, otherwise { ref, lo, hi } with every pixel's angle within ref + [lo, hi] (a rect that does not
+ * hold the centre spans less than half a turn, and its extreme angles are at its corners).
+ */
+function angularRange(r, cx, cy) {
+  const x0 = r.x, x1 = r.x + r.width - 1, y0 = r.y, y1 = r.y + r.height - 1;
+  if (cx >= x0 - 1 && cx <= x1 + 1 && cy >= y0 - 1 && cy <= y1 + 1) return { full: true, ref: 0, lo: 0, hi: TAU };
+  const ref = Math.atan2((y0 + y1) / 2 - cy, (x0 + x1) / 2 - cx);
+  let lo = Infinity, hi = -Infinity;
+  for (let k = 0; k < 4; k++) {
+    const t = relAngle(Math.atan2((k & 2 ? y1 : y0) - cy, (k & 1 ? x1 : x0) - cx), ref);
+    if (t < lo) lo = t;
+    if (t > hi) hi = t;
+  }
+  return { full: false, ref, lo, hi };
+}
+
+/** Angle t relative to ref, in (-pi, pi]. */
+function relAngle(t, ref) {
+  t -= ref;
+  return t > Math.PI ? t - TAU : t <= -Math.PI ? t + TAU : t;
+}
+
+/**
+ * Polar coordinates of r's pixels about (cx, cy) (radius, and the angle on the branch of ar) and
+ * the pixels sorted by key(radius, angle) (counting sort): { rho, th, order, start, k0, nk } where
+ * the pixels of key k are order[start[k - k0] .. start[k - k0 + 1] - 1].
+ */
+function polarBuckets(r, cx, cy, ar, key) {
+  const n = r.width * r.height, rho = new Float64Array(n), th = new Float64Array(n), keys = new Int32Array(n);
+  let k0 = Infinity, k1 = -Infinity;
+  for (let y = r.y, q = 0; y < r.y + r.height; y++) {
+    for (let x = r.x; x < r.x + r.width; x++, q++) {
+      const dx = x - cx, dy = y - cy, t = Math.atan2(dy, dx);
+      rho[q] = Math.sqrt(dx * dx + dy * dy);
+      th[q] = ar.full ? (t < 0 ? t + TAU : t) : ar.ref + relAngle(t, ar.ref);
+      const k = (keys[q] = key(rho[q], th[q]));
+      if (k < k0) k0 = k;
+      if (k > k1) k1 = k;
+    }
+  }
+  const nk = k1 - k0 + 1, start = new Int32Array(nk + 1), order = new Int32Array(n);
+  for (let q = 0; q < n; q++) start[keys[q] - k0 + 1]++;
+  for (let k = 0; k < nk; k++) start[k + 1] += start[k];
+  const next = start.slice(0, nk);
+  for (let q = 0; q < n; q++) order[next[keys[q] - k0]++] = q;
+  return { rho, th, order, start, k0, nk };
+}
+
+/** Radial distance between the rings of the spin blur, px. */
+const RING_STEP = 0.5;
+
+/**
+ * Spin blur by polar resampling into out (r-sized premultiplied floats): ring a (radius a RING_STEP
+ * px about the centre, n = max(32, ceil(4 pi radius)) samples, i.e. half a pixel apart, anchored at
+ * angle 0 so the grid does not depend on r) is sampled bilinearly from f (region g), box-filtered
+ * along the ring over the arc span (running sums with fractional ends, wrapping round a whole
+ * ring), and every pixel takes its angle's value on the four nearest rings (linear along each
+ * ring) and interpolates them radially with Catmull-Rom (a steep radial profile, such as an edge
+ * circling the centre, stays sharp).
+ */
+function spinPolar(f, g, r, cx, cy, span, out) {
+  const ar = angularRange(r, cx, cy), gx = cx - g.x, gy = cy - g.y, gw = g.width, gh = g.height;
+  const pb = polarBuckets(r, cx, cy, ar, (rho) => Math.floor(rho / RING_STEP));
+  const amax = (pb.k0 + pb.nk) * RING_STEP, cap = Math.max(32, Math.ceil(2 * TAU * amax)) + 16;
+  const P = new Float32Array((cap + Math.ceil(span * cap / (2 * TAU)) * 2 + 8) * 4);
+  const rings = [0, 1, 2, 3].map(() => ({ a: -Infinity, B: new Float32Array(cap * 4), dt: 0, b0: 0, len: 0, full: true }));
+  const build = (rg, a) => {
+    const rad = a * RING_STEP, n = Math.max(32, Math.ceil(2 * TAU * rad)), dt = TAU / n, R = span / 2 / dt, nn = Math.floor(R), fr = R - nn;
+    let b0 = 0, len = n, full = true;
+    if (!ar.full) {
+      b0 = Math.floor((ar.ref + ar.lo) / dt - R) - 3;
+      const b1 = Math.ceil((ar.ref + ar.hi) / dt + R) + 3;
+      if (b1 - b0 + 1 < n) {
+        len = b1 - b0 + 1;
+        full = false;
+      }
+    }
+    // P holds the ring samples k = -pad .. len + pad - 1 at P[(k + pad) * 4]: wrapped round a whole
+    // ring, edge-repeated on a partial one (whose margins keep the repeats out of the result)
+    const pad = nn + 2;
+    if (rg.B.length < len * 4) rg.B = new Float32Array(len * 4);
+    const cs = Math.cos(dt), sn = Math.sin(dt);
+    let co = 0, si = 0;
+    for (let k = 0; k < len; k++) {
+      if ((k & 255) === 0) {
+        co = Math.cos((b0 + k) * dt);
+        si = Math.sin((b0 + k) * dt);
+      }
+      sampleFloat(f, gw, gh, gx + rad * co, gy + rad * si, P, (k + pad) * 4);
+      const c2 = co * cs - si * sn;
+      si = si * cs + co * sn;
+      co = c2;
+    }
+    for (let k = 0; k < pad; k++) {
+      const lo = full ? ((((-1 - k) % len) + len) % len) : 0, hi = full ? (len + k) % len : len - 1;
+      P.copyWithin((pad - 1 - k) * 4, (lo + pad) * 4, (lo + pad) * 4 + 4);
+      P.copyWithin((len + pad + k) * 4, (hi + pad) * 4, (hi + pad) * 4 + 4);
+    }
+    const B = rg.B, norm = 1 / (2 * nn + 1 + 2 * fr);
+    let s0 = 0, s1 = 0, s2 = 0, s3 = 0;
+    for (let k = pad - nn; k <= pad + nn; k++) {
+      s0 += P[k * 4];
+      s1 += P[k * 4 + 1];
+      s2 += P[k * 4 + 2];
+      s3 += P[k * 4 + 3];
+    }
+    for (let k = 0; k < len; k++) {
+      const qo = (k + pad - nn - 1) * 4, qa = (k + pad + nn + 1) * 4, qr = (k + pad - nn) * 4, o = k * 4;
+      B[o] = (s0 + fr * (P[qo] + P[qa])) * norm;
+      B[o + 1] = (s1 + fr * (P[qo + 1] + P[qa + 1])) * norm;
+      B[o + 2] = (s2 + fr * (P[qo + 2] + P[qa + 2])) * norm;
+      B[o + 3] = (s3 + fr * (P[qo + 3] + P[qa + 3])) * norm;
+      s0 += P[qa] - P[qr];
+      s1 += P[qa + 1] - P[qr + 1];
+      s2 += P[qa + 2] - P[qr + 2];
+      s3 += P[qa + 3] - P[qr + 3];
+    }
+    rg.a = a;
+    rg.dt = dt;
+    rg.b0 = b0;
+    rg.len = len;
+    rg.full = full;
+  };
+  /** Ring with index a, built into a cache slot not holding one of keep's rings. */
+  const get = (a, keep) => {
+    for (const rg of rings) if (rg.a === a) return rg;
+    const rg = rings.find((q) => q.a < keep || q.a > keep + 3);
+    build(rg, a);
+    return rg;
+  };
+  /** Adds wt * ring(t) (linear between the ring's samples) to out[o..o+3]. */
+  const add = (rg, t, wt, o) => {
+    let i0 = Math.floor(t / rg.dt - rg.b0);
+    const wl = t / rg.dt - rg.b0 - i0, len = rg.len, B = rg.B;
+    let i1 = i0 + 1;
+    if (rg.full) {
+      i0 = ((i0 % len) + len) % len;
+      i1 = i0 + 1 === len ? 0 : i0 + 1;
+    } else {
+      i0 = i0 < 0 ? 0 : i0 >= len ? len - 1 : i0;
+      i1 = i1 < 0 ? 0 : i1 >= len ? len - 1 : i1;
+    }
+    const w0 = (1 - wl) * wt, w1 = wl * wt;
+    i0 *= 4;
+    i1 *= 4;
+    out[o] += B[i0] * w0 + B[i1] * w1;
+    out[o + 1] += B[i0 + 1] * w0 + B[i1 + 1] * w1;
+    out[o + 2] += B[i0 + 2] * w0 + B[i1 + 2] * w1;
+    out[o + 3] += B[i0 + 3] * w0 + B[i1 + 3] * w1;
+  };
+  for (let k = 0; k < pb.nk; k++) {
+    const s0 = pb.start[k], s1 = pb.start[k + 1];
+    if (s0 === s1) continue;
+    // Catmull-Rom across rings a - 1 .. a + 2 (ring -1 is ring 1 seen through the centre)
+    const a = pb.k0 + k, r0 = get(a - 1, a - 1), r1 = get(a, a - 1), r2 = get(a + 1, a - 1), r3 = get(a + 2, a - 1);
+    for (let s = s0; s < s1; s++) {
+      const q = pb.order[s], t = pb.th[q], w = pb.rho[q] / RING_STEP - a, o = q * 4, w2 = w * w, w3 = w2 * w;
+      add(r0, t, -0.5 * w3 + w2 - 0.5 * w, o);
+      add(r1, t, 1.5 * w3 - 2.5 * w2 + 1, o);
+      add(r2, t, -1.5 * w3 + 2 * w2 + 0.5 * w, o);
+      add(r3, t, 0.5 * w3 - 0.5 * w2, o);
+    }
+  }
+}
+
+/**
+ * Zoom blur by polar resampling into out (r-sized premultiplied floats): the mean over
+ * t in [-span/2, span/2] of the image at centre + e^t (p - centre). Rays at n angles (anchored at
+ * angle 0; n from the image size, so the grid does not depend on r) are sampled bilinearly from f
+ * every pixel of radius; with the ray piecewise linear in radius, F(rho) = integral of
+ * ray(rho') / rho' is exact in closed form, the mean is (F(rho e^(s/2)) - F(rho e^(-s/2))) / s,
+ * and every pixel interpolates linearly between its two rays.
+ */
+function zoomPolar(f, g, r, cx, cy, span, out, W, H) {
+  const ar = angularRange(r, cx, cy), gx = cx - g.x, gy = cy - g.y, gw = g.width, gh = g.height;
+  const eh = Math.exp(span / 2), el = 1 / eh, hs = span / 2, inv = 1 / span;
+  let rimg = 0;
+  for (let k = 0; k < 4; k++) rimg = Math.max(rimg, Math.hypot((k & 1 ? W - 0.5 : -0.5) - cx, (k & 2 ? H - 0.5 : -0.5) - cy));
+  const nT = Math.max(8, Math.ceil(TAU * rimg * eh)), dt = TAU / nT;
+  const pb = polarBuckets(r, cx, cy, ar, (_rho, t) => Math.floor(t / dt));
+  let rmin = Infinity, rmax = 0;
+  for (let q = 0; q < pb.rho.length; q++) {
+    if (pb.rho[q] < rmin) rmin = pb.rho[q];
+    if (pb.rho[q] > rmax) rmax = pb.rho[q];
+  }
+  const k0 = Math.max(0, Math.floor(rmin * el) - 1), k1 = Math.ceil(rmax * eh) + 2, nk = k1 - k0 + 1;
+  const lnk = new Float64Array(nk);
+  for (let k = Math.max(1, k0); k <= k1; k++) lnk[k - k0] = Math.log(k);
+  // per ray: samples Q at radii k0..k1 and F (integral of ray / rho) at those radii, relative to
+  // radius max(k0, 1) (so F(1) = 0 when the ray starts at the centre)
+  const rays = [0, 1].map(() => ({ b: NaN, Q: new Float64Array(nk * 4), P: new Float64Array(nk * 4) }));
+  const build = (ry, b) => {
+    const t = b * dt, co = Math.cos(t), si = Math.sin(t), Q = ry.Q, P = ry.P;
+    for (let k = 0; k < nk; k++) sampleFloat(f, gw, gh, gx + (k0 + k) * co, gy + (k0 + k) * si, Q, k * 4);
+    const first = Math.max(k0, 1) - k0;
+    for (let c = 0; c < 4; c++) P[first * 4 + c] = 0;
+    for (let k = Math.max(k0, 1); k < k1; k++) {
+      const i = (k - k0) * 4, l = lnk[k - k0 + 1] - lnk[k - k0];
+      for (let c = 0; c < 4; c++) {
+        const beta = Q[i + 4 + c] - Q[i + c];
+        P[i + 4 + c] = P[i + c] + (Q[i + c] - k * beta) * l + beta;
+      }
+    }
+    ry.b = b;
+  };
+  /** Adds wt * F(x) (ln x = lx) of ray (Q, P) to acc, per channel. */
+  const addF = (Q, P, x, lx, wt, acc) => {
+    if (x < 1) {
+      // first interval of a ray from the centre: ray = Q0 + beta rho, F(1) = 0
+      for (let c = 0; c < 4; c++) acc[c] += wt * (P[(1 - k0) * 4 + c] + Q[c] * lx + (Q[4 + c] - Q[c]) * (x - 1));
+      return;
+    }
+    let k = Math.floor(x);
+    if (k >= k1) k = k1 - 1;
+    const i = (k - k0) * 4, dl = lx - lnk[k - k0], dx = x - k;
+    for (let c = 0; c < 4; c++) {
+      const beta = Q[i + 4 + c] - Q[i + c];
+      acc[c] += wt * (P[i + c] + (Q[i + c] - k * beta) * dl + beta * dx);
+    }
+  };
+  const acc = new Float64Array(4);
+  let lo = rays[0], hi = rays[1];
+  for (let k = 0; k < pb.nk; k++) {
+    const s0 = pb.start[k], s1 = pb.start[k + 1];
+    if (s0 === s1) continue;
+    const b = pb.k0 + k;
+    if (hi.b === b) {
+      const t = lo;
+      lo = hi;
+      hi = t;
+    } else if (lo.b !== b) build(lo, b);
+    build(hi, b + 1);
+    for (let s = s0; s < s1; s++) {
+      const q = pb.order[s], rho = pb.rho[q], w = pb.th[q] / dt - b, o = q * 4;
+      if (!(rho > 1e-9)) {
+        for (let c = 0; c < 4; c++) out[o + c] = lo.Q[c];
+        continue;
+      }
+      const lr = Math.log(rho), xh = rho * eh, xl = rho * el, wl = (1 - w) * inv, wh = w * inv;
+      acc[0] = acc[1] = acc[2] = acc[3] = 0;
+      addF(lo.Q, lo.P, xh, lr + hs, wl, acc);
+      addF(lo.Q, lo.P, xl, lr - hs, -wl, acc);
+      addF(hi.Q, hi.P, xh, lr + hs, wh, acc);
+      addF(hi.Q, hi.P, xl, lr - hs, -wh, acc);
+      out[o] = acc[0];
+      out[o + 1] = acc[1];
+      out[o + 2] = acc[2];
+      out[o + 3] = acc[3];
+    }
+  }
+}
+
 function radialBlur(img, p, rect) {
   const r = region(img, rect);
   const amount = clampNum(num(p.amount, 0), 0, 100);
@@ -563,15 +798,16 @@ function radialBlur(img, p, rect) {
   const zoom = p.method === 'zoom';
   const W = img.width, H = img.height, c = p.center || {};
   const cx = clampNum(num(c.x, 0.5), -2, 3) * W - 0.5, cy = clampNum(num(c.y, 0.5), -2, 3) * H - 0.5;
+  // spin: total arc in radians (amount = degrees); zoom: total log-scale range, symmetric about 1
+  const span = zoom ? (amount / 100) * ZOOM_SPAN : amount * DEG;
+  let rimg = 0;
+  for (let k = 0; k < 4; k++) rimg = Math.max(rimg, Math.hypot((k & 1 ? W - 1 : 0) - cx, (k & 2 ? H - 1 : 0) - cy));
+  // largest displacement anywhere in the image (not just r, so a rect matches a whole-image run)
+  if ((zoom ? rimg * (Math.exp(span / 2) - Math.exp(-span / 2)) : rimg * span) < 0.5) return img;
+  // Every pixel the rect depends on lies on the rect mapped through the parameter range.
   const xs = [r.x, r.x + r.width - 1], ys = [r.y, r.y + r.height - 1];
   let rmax = 0;
   for (const x of xs) for (const y of ys) rmax = Math.max(rmax, Math.hypot(x - cx, y - cy));
-  // spin: total arc in radians (amount = degrees); zoom: total log-scale range, symmetric about 1
-  const span = zoom ? (amount / 100) * ZOOM_SPAN : amount * DEG;
-  const disp = zoom ? rmax * (Math.exp(span / 2) - Math.exp(-span / 2)) : rmax * span;
-  if (disp < 0.5) return img;
-  const N = nextPow2(Math.ceil(disp) + 1, 8192);
-  // Every pixel the rect depends on lies on the rect mapped through the parameter range.
   let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
   const steps = zoom ? 1 : 32;
   for (let s = 0; s <= steps; s++) {
@@ -587,23 +823,15 @@ function radialBlur(img, p, rect) {
       }
     }
   }
-  const margin = 2 + (zoom ? 0 : rmax * (1 - Math.cos(span / steps / 2)));
+  // plus the polar grid's reach: one ring/ray step and the bilinear footprint
+  const margin = 4 + (zoom ? 0 : rmax * (1 - Math.cos(span / steps / 2)));
   const g = clampRect({ x: x1 - margin, y: y1 - margin, width: x2 - x1 + 2 * margin + 1, height: y2 - y1 + 2 * margin + 1 }, W, H);
-  const gx = cx - g.x, gy = cy - g.y;
-  const tmp = cropImage(img, g);
-  const f = tapPasses(premultiply(tmp), g.width, g.height, N, span / (N - 1), zoom
-    ? (m, t) => {
-      const s = Math.exp(t);
-      m[0] = s; m[1] = 0; m[2] = gx - s * gx;
-      m[3] = 0; m[4] = s; m[5] = gy - s * gy;
-    }
-    : (m, t) => {
-      const co = Math.cos(t), si = Math.sin(t);
-      m[0] = co; m[1] = -si; m[2] = gx - co * gx + si * gy;
-      m[3] = si; m[4] = co; m[5] = gy - si * gx - co * gy;
-    });
-  unpremultiply(f, tmp);
-  copyBack(img, tmp, g, r);
+  const f = premultiply(cropImage(img, g)), out = new Float32Array(r.width * r.height * 4);
+  if (zoom) zoomPolar(f, g, r, cx, cy, span, out, W, H);
+  else spinPolar(f, g, r, cx, cy, span, out);
+  const res = { width: r.width, height: r.height, data: new Uint8ClampedArray(out.length) };
+  unpremultiply(out, res);
+  storeOut(img, r, res.data);
   return img;
 }
 
@@ -633,7 +861,10 @@ function weightedMean(hist, v, span, wt) {
   return sw > 0 ? sv / sw : v;
 }
 
-/** Photoshop-style surface blur over a square window (sliding histograms, cost independent of radius). Alpha kept. */
+/**
+ * Photoshop-style surface blur over a square window (Huang sliding histograms: cost per pixel
+ * O(radius) to slide the window plus O(threshold) for the weighted mean). Alpha kept.
+ */
 function surfaceBlurCore(img, r, rad, threshold) {
   const W = img.width, H = img.height, d = img.data;
   const T = 2.5 * threshold, wt = new Float64Array(256);
@@ -662,8 +893,10 @@ function surfaceBlurCore(img, r, rad, threshold) {
         out[o + 1] = round8(weightedMean(hg, d[i + 1], span, wt));
         out[o + 2] = round8(weightedMean(hb, d[i + 2], span, wt));
       }
-      if (x - rad >= 0) histColumn(d, W, x - rad, y0, y1, hr, hg, hb, -1);
-      if (x + rad + 1 < W) histColumn(d, W, x + rad + 1, y0, y1, hr, hg, hb, 1);
+      if (x + 1 < r.x + r.width) { // slide the window (not past the row's last pixel)
+        if (x - rad >= 0) histColumn(d, W, x - rad, y0, y1, hr, hg, hb, -1);
+        if (x + rad + 1 < W) histColumn(d, W, x + rad + 1, y0, y1, hr, hg, hb, 1);
+      }
     }
   }
   return out;
@@ -811,12 +1044,13 @@ function medColumn(d, W, x, y0, y1, hist, m, lt, cnt, s) {
 }
 
 /**
- * Per-channel median over a square window (Huang's sliding histogram with median tracking). RGB
- * medians only count pixels with alpha > 0; alpha takes the median of every pixel. Returns an
- * r-sized buffer.
+ * Per-channel median over a square window (Huang's sliding histogram with median tracking): the
+ * lower median (element (n - 1) >> 1) of the window clipped to the image. RGB medians only count
+ * pixels with alpha > 0 (no such pixel: the centre is kept); alpha takes the median of every pixel.
+ * Returns an r-sized buffer. Cost O(radius) per pixel, so large radii use medianConstant.
  */
-function medianCore(img, r, rad) {
-  const W = img.width, H = img.height, d = img.data;
+function medianHuang(img, r, rad) {
+  const W = img.width, H = img.height, d = img.data, xEnd = r.x + r.width;
   const hist = new Int32Array(1024), m = new Int32Array(4), lt = new Int32Array(4), cnt = new Int32Array(2);
   const out = new Uint8ClampedArray(r.width * r.height * 4);
   for (let y = r.y, o = 0; y < r.y + r.height; y++) {
@@ -827,7 +1061,7 @@ function medianCore(img, r, rad) {
     cnt.fill(0);
     for (let xx = Math.max(0, r.x - rad), xe = Math.min(W - 1, r.x + rad); xx <= xe; xx++) medColumn(d, W, xx, y0, y1, hist, m, lt, cnt, 1);
     let i = (y * W + r.x) * 4;
-    for (let x = r.x; x < r.x + r.width; x++, i += 4, o += 4) {
+    for (let x = r.x; x < xEnd; x++, i += 4, o += 4) {
       for (let c = 0; c < 4; c++) {
         const n = c === 3 ? cnt[1] : cnt[0];
         if (n === 0) {
@@ -848,12 +1082,140 @@ function medianCore(img, r, rad) {
         lt[c] = l;
         out[o + c] = mc;
       }
-      if (x - rad >= 0) medColumn(d, W, x - rad, y0, y1, hist, m, lt, cnt, -1);
-      if (x + rad + 1 < W) medColumn(d, W, x + rad + 1, y0, y1, hist, m, lt, cnt, 1);
+      if (x + 1 < xEnd) { // slide the window (not past the row's last pixel)
+        if (x - rad >= 0) medColumn(d, W, x - rad, y0, y1, hist, m, lt, cnt, -1);
+        if (x + rad + 1 < W) medColumn(d, W, x + rad + 1, y0, y1, hist, m, lt, cnt, 1);
+      }
     }
   }
   return out;
 }
+
+/** Radius from which medianConstant is faster than medianHuang. */
+const MEDIAN_CONSTANT_MIN = 10;
+
+/**
+ * Adds (s = 1) or removes (s = -1) image row y, columns cx0 .. cx0 + nc - 1, to the per-column
+ * histograms of medianConstant: column k, channel c has 256 fine bins at ((k * 4 + c) << 8) and 16
+ * coarse bins at ((k * 4 + c) << 4); colN counts the column's pixels with alpha > 0. Without
+ * withAlpha (every pixel opaque) the alpha histograms are not kept.
+ */
+function medRow(d, W, y, cx0, nc, fine, coarse, colN, s, withAlpha) {
+  for (let k = 0, i = (y * W + cx0) * 4; k < nc; k++, i += 4) {
+    const a = d[i + 3], kk = k * 4;
+    if (withAlpha) {
+      fine[((kk + 3) << 8) + a] += s;
+      coarse[((kk + 3) << 4) + (a >> 4)] += s;
+      if (a === 0) continue;
+    }
+    colN[k] += s;
+    const r = d[i], g = d[i + 1], b = d[i + 2];
+    fine[(kk << 8) + r] += s;
+    coarse[(kk << 4) + (r >> 4)] += s;
+    fine[((kk + 1) << 8) + g] += s;
+    coarse[((kk + 1) << 4) + (g >> 4)] += s;
+    fine[((kk + 2) << 8) + b] += s;
+    coarse[((kk + 2) << 4) + (b >> 4)] += s;
+  }
+}
+
+/** True when every pixel of rect has alpha 255. */
+function opaqueRegion(img, rect) {
+  const d = img.data, W = img.width;
+  for (let y = rect.y; y < rect.y + rect.height; y++) {
+    for (let x = rect.x, i = (y * W + rect.x) * 4 + 3; x < rect.x + rect.width; x++, i += 4) if (d[i] !== 255) return false;
+  }
+  return true;
+}
+
+/**
+ * Same result as medianHuang in O(1) per pixel whatever the radius (Perreault & Hebert, "Median
+ * filtering in constant time", 2007): every column keeps 256-bin (and 16-bin coarse) histograms of
+ * the window's rows, moved down one row at a time. Along a row the window's coarse histogram adds
+ * and drops whole columns; its fine histogram is only kept in the 16-bin segment that holds the
+ * median, lazily (each segment remembers the columns it holds and catches up, or is rebuilt, when
+ * the median next falls into it).
+ */
+function medianConstant(img, r, rad) {
+  const W = img.width, H = img.height, d = img.data, xEnd = r.x + r.width, yEnd = r.y + r.height;
+  const cx0 = Math.max(0, r.x - rad), cx1 = Math.min(W - 1, xEnd - 1 + rad), nc = cx1 - cx0 + 1;
+  const ry0 = Math.max(0, r.y - rad), ry1 = Math.min(H - 1, yEnd - 1 + rad);
+  const withAlpha = !opaqueRegion(img, { x: cx0, y: ry0, width: nc, height: ry1 - ry0 + 1 }), nch = withAlpha ? 4 : 3, cw = nch << 4;
+  const fine = new Uint16Array(nc * 1024), coarse = new Uint16Array(nc * 64), colN = new Int32Array(nc);
+  const kc = new Int32Array(64), kf = new Int32Array(1024), segLo = new Int32Array(64), segHi = new Int32Array(64);
+  const out = new Uint8ClampedArray(r.width * r.height * 4);
+  for (let y = ry0, ye = Math.min(H - 1, r.y + rad); y <= ye; y++) medRow(d, W, y, cx0, nc, fine, coarse, colN, 1, withAlpha);
+  for (let y = r.y, o = 0; y < yEnd; y++) {
+    if (y > r.y) {
+      if (y - rad - 1 >= 0) medRow(d, W, y - rad - 1, cx0, nc, fine, coarse, colN, -1, withAlpha);
+      if (y + rad < H) medRow(d, W, y + rad, cx0, nc, fine, coarse, colN, 1, withAlpha);
+    }
+    const rows = Math.min(H - 1, y + rad) - Math.max(0, y - rad) + 1;
+    // window columns ka..kb (relative to cx0) for x = r.x
+    let ka = Math.max(0, r.x - rad) - cx0, kb = Math.min(W - 1, r.x + rad) - cx0, n0 = 0;
+    kc.fill(0);
+    for (let k = ka; k <= kb; k++) {
+      n0 += colN[k];
+      for (let b = 0, src = k << 6; b < cw; b++) kc[b] += coarse[src + b];
+    }
+    segLo.fill(1);
+    segHi.fill(0); // every fine segment empty
+    let i = (y * W + r.x) * 4;
+    for (let x = r.x; x < xEnd; x++, i += 4, o += 4) {
+      if (x > r.x) {
+        if (x + rad < W) {
+          kb++;
+          n0 += colN[kb];
+          for (let b = 0, src = kb << 6; b < cw; b++) kc[b] += coarse[src + b];
+        }
+        if (x - rad - 1 >= 0) {
+          n0 -= colN[ka];
+          for (let b = 0, src = ka << 6; b < cw; b++) kc[b] -= coarse[src + b];
+          ka++;
+        }
+      }
+      if (!withAlpha) out[o + 3] = 255;
+      for (let c = 0; c < nch; c++) {
+        const n = c === 3 ? rows * (kb - ka + 1) : n0;
+        if (n === 0) {
+          out[o + c] = d[i + c];
+          continue;
+        }
+        const t = (n - 1) >> 1, cbase = c << 4;
+        let acc = 0, cb = 0;
+        while (acc + kc[cbase + cb] <= t) acc += kc[cbase + cb++];
+        // bring the fine segment (c, cb) to columns ka..kb
+        const sg = cbase + cb, fb = (c << 8) + (cb << 4);
+        let lo = segLo[sg], hi = segHi[sg];
+        if (hi < lo || ka - lo + (kb - hi) > kb - ka + 1) {
+          for (let b = 0; b < 16; b++) kf[fb + b] = 0;
+          for (let k = ka; k <= kb; k++) {
+            const src = (((k << 2) + c) << 8) + (cb << 4);
+            for (let b = 0; b < 16; b++) kf[fb + b] += fine[src + b];
+          }
+        } else {
+          while (hi < kb) {
+            const src = ((((++hi) << 2) + c) << 8) + (cb << 4);
+            for (let b = 0; b < 16; b++) kf[fb + b] += fine[src + b];
+          }
+          for (; lo < ka; lo++) {
+            const src = (((lo << 2) + c) << 8) + (cb << 4);
+            for (let b = 0; b < 16; b++) kf[fb + b] -= fine[src + b];
+          }
+        }
+        segLo[sg] = ka;
+        segHi[sg] = kb;
+        let v = fb;
+        while (acc + kf[v] <= t) acc += kf[v++];
+        out[o + c] = v - (c << 8);
+      }
+    }
+  }
+  return out;
+}
+
+/** Window median of r (see medianHuang), with the algorithm that is faster for the radius. */
+const medianCore = (img, r, rad) => (rad >= MEDIAN_CONSTANT_MIN ? medianConstant(img, r, rad) : medianHuang(img, r, rad));
 
 function median(img, p, rect) {
   const r = region(img, rect);
@@ -1526,8 +1888,11 @@ function oilPaint(img, p, rect) {
         out[o + 2] = d[i + 2];
       }
       out[o + 3] = d[i + 3];
-      if (x - rad >= 0) oilColumn(d, W, x - rad, y0, y1, bins, g, cnt, sums, -1);
-      if (x + rad + 1 < W) oilColumn(d, W, x + rad + 1, y0, y1, bins, g, cnt, sums, 1);
+      // slide the window, but not past the row's last pixel (whose next column lies outside bins)
+      if (x + 1 < r.x + r.width) {
+        if (x - rad >= 0) oilColumn(d, W, x - rad, y0, y1, bins, g, cnt, sums, -1);
+        if (x + rad + 1 < W) oilColumn(d, W, x + rad + 1, y0, y1, bins, g, cnt, sums, 1);
+      }
     }
   }
   storeOut(img, r, out);
@@ -1815,18 +2180,24 @@ function kind(name, category, defaults, fn) {
  * - gaussian-blur { radius 0.1..1000 (sigma, px) }: separable, premultiplied, kernel +-3 sigma;
  *   radius > 20 uses three exact-variance box passes (running sums).
  * - box-blur { radius px (fractional ok) }: (2 radius + 1)^2 average.
- * - motion-blur { angle deg (counter-clockwise from horizontal), distance px }: line kernel of length distance.
- * - radial-blur { amount 0..100, method 'spin'|'zoom', center {x, y} 0..1 }: spin arc = amount degrees,
- *   zoom scales the image by e^(+-0.4 amount / 100) about the centre.
+ * - motion-blur { angle deg (counter-clockwise from horizontal), distance px }: centred line kernel of
+ *   length distance (sheared running box: O(pixels) whatever the distance, edges parallel to the
+ *   motion stay sharp).
+ * - radial-blur { amount 0..100, method 'spin'|'zoom', center {x, y} 0..1 }: spin = mean over an arc of
+ *   amount degrees about the centre, zoom = mean over the scales e^t, t in +-0.4 amount / 100 (uniform
+ *   in t); both by polar resampling (rings / rays), O(pixels).
  * - surface-blur { radius px, threshold 1..255 }: Photoshop's 1 - |dv| / (2.5 threshold) weights; alpha kept.
  * sharpen (colour only, alpha kept)
  * - sharpen { amount % }: unsharp mask radius 1.
  * - unsharp-mask { amount %, radius px, threshold 0..255 }.
- * - smart-sharpen { amount %, radius px, reduceNoise 0..100 }: unsharp mask weighted by edge strength.
+ * - smart-sharpen { amount %, radius px, reduceNoise 0..100 }: unsharp mask weighted by edge strength
+ *   (reduceNoise 0 is exactly unsharp-mask with threshold 0).
  * - high-pass { radius px }: colour - gaussian + 128.
  * noise
  * - add-noise { amount 0..400 %, distribution 'uniform'|'gaussian', monochromatic, seed }.
- * - median { radius px }, dust-scratches { radius px, threshold 0..255 }: median (alpha included);
+ * - median { radius px }, dust-scratches { radius px, threshold 0..255 }: lower median of the window
+ *   clipped to the image, per channel (RGB of pixels with alpha > 0, alpha of all), O(1) per pixel
+ *   for large radii;
  *   dust & scratches only replaces pixels that differ from the median by more than threshold.
  * - despeckle {}: 3x3 blur except on edges. reduce-noise { strength 0..10 }: edge-preserving surface blur.
  * pixelate

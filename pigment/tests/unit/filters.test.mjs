@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { FILTERS, FILTER_KINDS, FILTER_CATEGORIES, applyFilter } from '../../src/shared/pixels/filters.js';
-import { createImage, cloneImage, getPixel, setPixel, luminance } from '../../src/shared/pixels/core.js';
+import { createImage, cloneImage, getPixel, setPixel, luminance, randomSeeded, sampleBilinear } from '../../src/shared/pixels/core.js';
 import { gradientImage, quadrantImage, solidImage, assertPixel, assertNear } from './helpers.mjs';
 
 const CONTRACT_KINDS = [
@@ -673,4 +673,363 @@ test('custom kernel: identity, scale/offset, 5x5, validation', () => {
   const box = applyFilter(solidImage(5, 5, [90, 90, 90, 1]), 'custom', { kernel: new Array(9).fill(1), scale: 9 });
   assert.equal(getPixel(box, 2, 2)[0], 90);
   assert.throws(() => applyFilter(createImage(2, 2), 'custom', { kernel: [1, 2, 3] }), RangeError);
+});
+
+// ---------------------------------------------------------------------------------------------
+// Review regressions: brute-force references and the bugs they caught
+
+/** Antialiased grey image (8 x 8 supersampling) of inside(x, y), coordinates about the image centre. */
+function aaImage(w, h, inside) {
+  const img = createImage(w, h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let s = 0;
+      for (let j = 0; j < 8; j++) for (let i = 0; i < 8; i++) if (inside(x + (i + 0.5) / 8 - w / 2, y + (j + 0.5) / 8 - h / 2)) s++;
+      const v = Math.round((s / 64) * 255);
+      setPixel(img, x, y, [v, v, v, 1]);
+    }
+  }
+  return img;
+}
+
+/** Textured test image: checkerboard red, ramps in green and blue, a transparent corner when holed. */
+function textureImage(w, h, holed = false) {
+  const img = createImage(w, h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const a = holed && x > w * 0.8 && y > h * 0.75 ? 0 : 1;
+      setPixel(img, x, y, [((x >> 3) + (y >> 3)) % 2 ? 230 : 20, (x * 5 + y * 3) % 256, Math.round(Math.sin(x / 3) * Math.cos(y / 4) * 120 + 128), a]);
+    }
+  }
+  return img;
+}
+
+/** Mean and max |a - b| over the colour channels of pixels inside [x0, x1) x [y0, y1) where keep(i) holds. */
+function diffStats(a, b, x0 = 0, y0 = 0, x1 = a.width, y1 = a.height, keep = () => true) {
+  let max = 0, sum = 0, n = 0;
+  for (let y = y0; y < y1; y++) {
+    for (let x = x0; x < x1; x++) {
+      const i = (y * a.width + x) * 4;
+      if (!keep(i)) continue;
+      for (let c = 0; c < 3; c++) {
+        const d = Math.abs(a.data[i + c] - b.data[i + c]);
+        max = Math.max(max, d);
+        sum += d;
+        n++;
+      }
+    }
+  }
+  return { max, mean: sum / n };
+}
+
+/** Rect run equals the whole-image run exactly inside rect and leaves the outside alone. */
+function assertRectMatches(src, kind, params, rect) {
+  const full = applyFilter(cloneImage(src), kind, params);
+  const part = applyFilter(cloneImage(src), kind, params, rect);
+  for (let y = 0; y < src.height; y++) {
+    for (let x = 0; x < src.width; x++) {
+      const inside = x >= rect.x && x < rect.x + rect.width && y >= rect.y && y < rect.y + rect.height;
+      const i = (y * src.width + x) * 4;
+      for (let c = 0; c < 4; c++) {
+        const want = inside ? full.data[i + c] : src.data[i + c];
+        assert.equal(part.data[i + c], want, `${kind} ${JSON.stringify(params)} at ${x},${y} c${c}`);
+      }
+    }
+  }
+}
+
+test('smart sharpen: reduceNoise 0 is exactly unsharp mask, reduceNoise spares low-contrast noise only', () => {
+  const noisy = () => {
+    const rnd = randomSeeded(11), img = createImage(40, 20);
+    for (let y = 0; y < 20; y++) for (let x = 0; x < 40; x++) {
+      const v = (x < 20 ? 100 : 180) + Math.round((rnd() - 0.5) * 12);
+      setPixel(img, x, y, [v, v, v, 1]);
+    }
+    return img;
+  };
+  const plain = applyFilter(noisy(), 'smart-sharpen', { amount: 100, radius: 1, reduceNoise: 0 });
+  assert.deepEqual(plain.data, applyFilter(noisy(), 'unsharp-mask', { amount: 100, radius: 1, threshold: 0 }).data);
+  const src = noisy(), reduced = applyFilter(noisy(), 'smart-sharpen', { amount: 100, radius: 1, reduceNoise: 60 });
+  const flat = (img) => diffStats(img, src, 3, 2, 15, 18).mean;
+  assert.ok(flat(plain) > 2, `plain sharpening amplifies the noise (${flat(plain)})`);
+  assert.ok(flat(reduced) < flat(plain) * 0.25, `reduceNoise leaves the noise alone (${flat(reduced)} vs ${flat(plain)})`);
+  for (let y = 2; y < 18; y++) {
+    assert.ok(reduced.data[(y * 40 + 19) * 4] < src.data[(y * 40 + 19) * 4], 'edge still sharpened (dark side)');
+    assert.ok(reduced.data[(y * 40 + 20) * 4] > src.data[(y * 40 + 20) * 4], 'edge still sharpened (bright side)');
+  }
+});
+
+test('crystallize: every pixel belongs to its nearest seed (exact Voronoi cells)', () => {
+  // The seed lattice of filters.js, copied: one seed per size x size cell, jittered by a hash.
+  const hash3 = (x, y, z) => {
+    let h = (Math.imul(x | 0, 0x27d4eb2d) + Math.imul(y | 0, 0x165667b1) + Math.imul(z | 0, 0x9e3779b1)) | 0;
+    h = Math.imul(h ^ (h >>> 15), 0x85ebca6b);
+    h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35);
+    return (h ^ (h >>> 16)) >>> 0;
+  };
+  const reference = (src, s, seed) => {
+    const W = src.width, H = src.height, d = src.data, owner = new Array(W * H), sums = new Map();
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const px = x + 0.5, py = y + 0.5, ci = Math.floor(px / s), cj = Math.floor(py / s);
+        let best = '', bd = Infinity;
+        for (let j = cj - 3; j <= cj + 3; j++) {
+          for (let i = ci - 3; i <= ci + 3; i++) {
+            const sx = (i + hash3(i, j, seed) / 4294967296) * s, sy = (j + hash3(i, j, seed ^ 0x5bd1e995) / 4294967296) * s;
+            const dd = (sx - px) ** 2 + (sy - py) ** 2;
+            if (dd < bd) [bd, best] = [dd, `${i},${j}`];
+          }
+        }
+        owner[y * W + x] = best;
+        const k = (y * W + x) * 4, a = d[k + 3], e = sums.get(best) || [0, 0, 0, 0, 0];
+        e[0] += d[k] * a;
+        e[1] += d[k + 1] * a;
+        e[2] += d[k + 2] * a;
+        e[3] += a;
+        e[4]++;
+        sums.set(best, e);
+      }
+    }
+    const out = createImage(W, H);
+    for (let q = 0; q < W * H; q++) {
+      const e = sums.get(owner[q]), k = q * 4;
+      for (let c = 0; c < 3; c++) out.data[k + c] = e[3] ? Math.round(e[c] / e[3]) : 0;
+      out.data[k + 3] = Math.round(e[3] / e[4]);
+    }
+    return out;
+  };
+  const coords = (holes) => {
+    const img = createImage(40, 40);
+    for (let y = 0; y < 40; y++) for (let x = 0; x < 40; x++) setPixel(img, x, y, [x * 6, y * 6, 100, holes && (x * y) % 7 === 0 ? 0 : 1]);
+    return img;
+  };
+  // (7.5, 371) has a pixel whose nearest seed lies two cells away (a 3x3 search got it wrong)
+  for (const [size, seed, holes] of [[7.5, 371, false], [4, 5, true], [10, 2, true], [3, 9, false]]) {
+    const src = coords(holes), got = applyFilter(cloneImage(src), 'crystallize', { size, seed }), want = reference(src, size, seed);
+    for (let i = 0; i < got.data.length; i++) assert.ok(Math.abs(got.data[i] - want.data[i]) <= 1, `size ${size} seed ${seed} at pixel ${i >> 2} c${i & 3}: ${got.data[i]} vs ${want.data[i]}`);
+  }
+});
+
+test('motion blur: a sharp line kernel at any angle, close to a brute-force segment average', () => {
+  // an antialiased edge parallel to the motion survives (the bilinear-pass version softened it by ~1 px)
+  for (const angle of [10, 30, 63]) {
+    const a = angle * Math.PI / 180, nx = Math.sin(a), ny = Math.cos(a);
+    const edge = aaImage(120, 120, (x, y) => x * nx + y * ny > 0);
+    const s = diffStats(applyFilter(cloneImage(edge), 'motion-blur', { angle, distance: 20 }), edge, 30, 30, 90, 90);
+    assert.ok(s.mean < 1.1 && s.max < 58, `angle ${angle}: edge softened, mean ${s.mean} max ${s.max}`);
+  }
+  // brute force: mean of bilinear samples along the centred segment of length distance
+  const src = textureImage(64, 56);
+  for (const [angle, distance] of [[0, 9], [17, 12], [45, 15], [-60, 21], [100, 10]]) {
+    const a = angle * Math.PI / 180, ux = Math.cos(a), uy = -Math.sin(a), N = Math.ceil(4 * distance) + 2, want = cloneImage(src), smp = [0, 0, 0, 0];
+    for (let y = 0; y < 56; y++) {
+      for (let x = 0; x < 64; x++) {
+        const acc = [0, 0, 0];
+        for (let k = 0; k < N; k++) {
+          const t = -distance / 2 + (distance * k) / (N - 1);
+          sampleBilinear(src, Math.min(63, Math.max(0, x + t * ux)), Math.min(55, Math.max(0, y + t * uy)), smp);
+          for (let c = 0; c < 3; c++) acc[c] += smp[c];
+        }
+        for (let c = 0; c < 3; c++) want.data[(y * 64 + x) * 4 + c] = Math.round(acc[c] / N);
+      }
+    }
+    const m = Math.ceil(distance / 2) + 2;
+    const s = diffStats(applyFilter(cloneImage(src), 'motion-blur', { angle, distance }), want, m, m, 64 - m, 56 - m);
+    assert.ok(s.mean < 1.6 && s.max < 25, `angle ${angle} distance ${distance}: mean ${s.mean} max ${s.max}`);
+  }
+  // the family of sheared lines is anchored to the image, so any rect gives the whole-image pixels
+  const big = textureImage(211, 157, true);
+  assertRectMatches(big, 'motion-blur', { angle: 23, distance: 90 }, { x: 61, y: 47, width: 83, height: 59 });
+  assertRectMatches(big, 'motion-blur', { angle: 77, distance: 41 }, { x: 140, y: 3, width: 60, height: 100 });
+});
+
+test('radial blur: matches a brute-force arc / scale average, keeps circles sharp, rect independent', () => {
+  const reference = (img, amount, method, center) => {
+    const W = img.width, H = img.height, cx = center.x * W - 0.5, cy = center.y * H - 0.5, zoom = method === 'zoom';
+    const span = zoom ? (amount / 100) * 0.8 : (amount * Math.PI) / 180, out = cloneImage(img), smp = [0, 0, 0, 0];
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const N = Math.max(2, Math.ceil(3 * Math.hypot(x - cx, y - cy) * span) + 2), acc = [0, 0, 0, 0];
+        for (let k = 0; k < N; k++) {
+          const t = -span / 2 + (span * k) / (N - 1), c = Math.cos(t), s = Math.sin(t), e = Math.exp(t);
+          const fx = zoom ? cx + e * (x - cx) : cx + c * (x - cx) - s * (y - cy), fy = zoom ? cy + e * (y - cy) : cy + s * (x - cx) + c * (y - cy);
+          sampleBilinear(img, Math.min(W - 1, Math.max(0, fx)), Math.min(H - 1, Math.max(0, fy)), smp);
+          const a = smp[3] / 255;
+          for (let q = 0; q < 3; q++) acc[q] += smp[q] * a;
+          acc[3] += a;
+        }
+        const i = (y * W + x) * 4;
+        for (let q = 0; q < 3; q++) out.data[i + q] = acc[3] > 0 ? Math.round(acc[q] / acc[3]) : 0;
+        out.data[i + 3] = Math.round((acc[3] / N) * 255);
+      }
+    }
+    return out;
+  };
+  const src = textureImage(64, 48, true);
+  for (const [amount, method, center] of [[20, 'spin', { x: 0.5, y: 0.5 }], [60, 'spin', { x: 0.3, y: 0.7 }], [100, 'spin', { x: 1.2, y: -0.3 }], [30, 'zoom', { x: 0.5, y: 0.5 }], [100, 'zoom', { x: 0.2, y: 0.6 }], [70, 'zoom', { x: -0.5, y: 1.5 }]]) {
+    const got = applyFilter(cloneImage(src), 'radial-blur', { amount, method, center }), want = reference(src, amount, method, center);
+    let amax = 0, asum = 0;
+    for (let i = 3; i < got.data.length; i += 4) {
+      amax = Math.max(amax, Math.abs(got.data[i] - want.data[i]));
+      asum += Math.abs(got.data[i] - want.data[i]);
+    }
+    assert.ok(amax <= 12 && asum / (64 * 48) < 0.5, `${method} ${amount} alpha: max ${amax} mean ${asum / (64 * 48)}`);
+    const s = diffStats(got, want, 0, 0, 64, 48, (i) => want.data[i + 3] >= 8);
+    assert.ok(s.mean < 1.5, `${method} ${amount} ${JSON.stringify(center)}: mean ${s.mean} (max ${s.max})`);
+  }
+  // spin moves along circles about the centre: a centred disc keeps its antialiased edge
+  const disc = aaImage(120, 120, (x, y) => x * x + y * y < 40 * 40);
+  for (const amount of [10, 100]) {
+    const s = diffStats(applyFilter(cloneImage(disc), 'radial-blur', { amount }), disc);
+    assert.ok(s.mean < 0.85 && s.max < 60, `spin ${amount}: disc edge softened, mean ${s.mean} max ${s.max}`);
+  }
+  // the polar grid does not depend on the rect
+  const big = textureImage(211, 157, true);
+  assertRectMatches(big, 'radial-blur', { amount: 100, method: 'zoom', center: { x: 0.2, y: 0.7 } }, { x: 61, y: 47, width: 83, height: 59 });
+  assertRectMatches(big, 'radial-blur', { amount: 70, center: { x: 0.45, y: 0.55 } }, { x: 61, y: 47, width: 83, height: 59 });
+  assertRectMatches(big, 'radial-blur', { amount: 35, center: { x: 1.4, y: -0.2 } }, { x: 0, y: 100, width: 50, height: 57 });
+});
+
+test('median and dust & scratches match a brute-force window median at every radius', () => {
+  const rnd = randomSeeded(21);
+  const make = (w, h, opaque) => {
+    const img = createImage(w, h);
+    for (let i = 0; i < img.data.length; i += 4) {
+      img.data[i] = Math.floor(((i >> 2) % w) * 9 + rnd() * 60) & 255;
+      img.data[i + 1] = Math.floor(rnd() * 256);
+      img.data[i + 2] = rnd() < 0.5 ? 10 : 240;
+      const q = rnd();
+      img.data[i + 3] = opaque ? 255 : q < 0.2 ? 0 : q < 0.4 ? Math.floor(rnd() * 255) : 255;
+    }
+    return img;
+  };
+  const reference = (img, rad) => {
+    const { width: W, height: H, data: d } = img, out = new Uint8ClampedArray(d.length);
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const vals = [[], [], [], []];
+        for (let yy = Math.max(0, y - rad); yy <= Math.min(H - 1, y + rad); yy++) {
+          for (let xx = Math.max(0, x - rad); xx <= Math.min(W - 1, x + rad); xx++) {
+            const i = (yy * W + xx) * 4;
+            vals[3].push(d[i + 3]);
+            if (d[i + 3] > 0) for (let c = 0; c < 3; c++) vals[c].push(d[i + c]);
+          }
+        }
+        const o = (y * W + x) * 4;
+        for (let c = 0; c < 4; c++) {
+          const v = vals[c].sort((a, b) => a - b);
+          out[o + c] = v.length ? v[(v.length - 1) >> 1] : d[o + c];
+        }
+      }
+    }
+    return out;
+  };
+  // radii on both sides of the switch to the constant-time algorithm, windows clipped by the image
+  for (const [w, h, opaque] of [[23, 17, false], [19, 21, true], [1, 9, false]]) {
+    const src = make(w, h, opaque);
+    for (const rad of [1, 2, 5, 9, 10, 12, 30]) {
+      const want = reference(src, rad);
+      assert.deepEqual(applyFilter(cloneImage(src), 'median', { radius: rad }).data, want, `median ${w}x${h} radius ${rad}`);
+      for (const rect of [{ x: 3, y: 2, width: 9, height: 11 }, { x: w - 1, y: 0, width: 1, height: h }]) {
+        const part = applyFilter(cloneImage(src), 'median', { radius: rad }, rect);
+        for (let y = 0; y < h; y++) {
+          for (let x = 0; x < w; x++) {
+            const inside = x >= rect.x && x < rect.x + rect.width && y >= rect.y && y < rect.y + rect.height, i = (y * w + x) * 4;
+            for (let c = 0; c < 4; c++) assert.equal(part.data[i + c], inside ? want[i + c] : src.data[i + c], `median rect radius ${rad} at ${x},${y}`);
+          }
+        }
+      }
+      // dust & scratches: the median where any channel differs from it by more than threshold
+      const ds = applyFilter(cloneImage(src), 'dust-scratches', { radius: rad, threshold: 40 }).data;
+      for (let i = 0; i < ds.length; i += 4) {
+        const far = [0, 1, 2, 3].some((c) => Math.abs(src.data[i + c] - want[i + c]) > 40);
+        for (let c = 0; c < 4; c++) assert.equal(ds[i + c], far ? want[i + c] : src.data[i + c], `dust & scratches radius ${rad}`);
+      }
+    }
+  }
+});
+
+test('gaussian blur: the opaque RGB-only path matches the premultiplied RGBA path', () => {
+  const rnd = randomSeeded(5), opaque = createImage(48, 36);
+  for (let i = 0; i < opaque.data.length; i++) opaque.data[i] = (i & 3) === 3 ? 255 : Math.floor(rnd() * 256);
+  for (const radius of [0.8, 3, 12]) {
+    const a = applyFilter(cloneImage(opaque), 'gaussian-blur', { radius });
+    const general = cloneImage(opaque);
+    general.data[3] = 254; // one non-opaque pixel in the corner forces the RGBA path
+    const b = applyFilter(general, 'gaussian-blur', { radius });
+    const reach = Math.ceil(3 * radius) + 1;
+    for (let y = 0; y < 36; y++) {
+      for (let x = 0; x < 48; x++) {
+        const i = (y * 48 + x) * 4;
+        assert.equal(a.data[i + 3], 255, 'opaque stays exactly opaque');
+        if (x <= reach && y <= reach) continue;
+        for (let c = 0; c < 4; c++) assert.ok(Math.abs(a.data[i + c] - b.data[i + c]) <= 1, `radius ${radius} at ${x},${y} c${c}: ${a.data[i + c]} vs ${b.data[i + c]}`);
+      }
+    }
+  }
+});
+
+test('surface blur, oil paint, maximum and minimum match brute-force definitions (with alpha)', () => {
+  const rnd = randomSeeded(8), W = 21, H = 15, src = createImage(W, H);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const q = rnd();
+    setPixel(src, x, y, [(x * 11 + Math.floor(rnd() * 40)) % 256, Math.floor(rnd() * 256), y * 15, q < 0.15 ? 0 : q < 0.3 ? 0.5 : 1]);
+  }
+  const d = src.data, at = (x, y) => (y * W + x) * 4;
+  const window = (x, y, rad, fn) => {
+    for (let yy = Math.max(0, y - rad); yy <= Math.min(H - 1, y + rad); yy++) for (let xx = Math.max(0, x - rad); xx <= Math.min(W - 1, x + rad); xx++) fn(at(xx, yy));
+  };
+  // surface blur: alpha-weighted mean of the window values v_q with weight max(0, 1 - |v_q - v| / (2.5 threshold))
+  for (const [radius, threshold] of [[2, 15], [4, 60]]) {
+    const got = applyFilter(cloneImage(src), 'surface-blur', { radius, threshold }).data;
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const i = at(x, y);
+      assert.equal(got[i + 3], d[i + 3], 'surface blur keeps alpha');
+      if (d[i + 3] === 0) continue;
+      for (let c = 0; c < 3; c++) {
+        let sw = 0, sv = 0;
+        window(x, y, radius, (j) => {
+          const wt = d[j + 3] * Math.max(0, 1 - Math.abs(d[j + c] - d[i + c]) / (2.5 * threshold));
+          sw += wt;
+          sv += wt * d[j + c];
+        });
+        assert.ok(Math.abs(got[i + c] - sv / sw) <= 0.5 + 1e-9, `surface blur ${radius}/${threshold} at ${x},${y} c${c}: ${got[i + c]} vs ${sv / sw}`);
+      }
+    }
+  }
+  // oil paint: the (alpha-weighted) most common luminance bin of the window, lowest bin on ties, averaged
+  for (const [radius, levels] of [[1, 8], [3, 20]]) {
+    const got = applyFilter(cloneImage(src), 'oil-paint', { radius, levels }).data;
+    const bin = (j) => (Math.floor(luminance(d[j], d[j + 1], d[j + 2]) + 0.5) * levels) >> 8;
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const cnt = new Array(levels).fill(0), sums = Array.from({ length: levels }, () => [0, 0, 0]), i = at(x, y);
+      window(x, y, radius, (j) => {
+        const b = bin(j), a = d[j + 3];
+        cnt[b] += a;
+        for (let c = 0; c < 3; c++) sums[b][c] += d[j + c] * a;
+      });
+      const best = cnt.indexOf(Math.max(...cnt));
+      for (let c = 0; c < 3; c++) assert.equal(got[i + c], cnt[best] ? Math.round(sums[best][c] / cnt[best]) : d[i + c], `oil paint ${radius}/${levels} at ${x},${y}`);
+      assert.equal(got[i + 3], d[i + 3]);
+    }
+  }
+  // maximum / minimum: per channel over the window's non-transparent pixels; transparent pixels unchanged
+  for (const [kind, radius] of [['maximum', 2], ['minimum', 3], ['maximum', 9]]) {
+    const got = applyFilter(cloneImage(src), kind, { radius }).data;
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const i = at(x, y);
+      if (d[i + 3] === 0) {
+        assert.deepEqual([...got.subarray(i, i + 4)], [...d.subarray(i, i + 4)], `${kind}: transparent pixel untouched`);
+        continue;
+      }
+      for (let c = 0; c < 3; c++) {
+        let v = kind === 'maximum' ? 0 : 255;
+        window(x, y, radius, (j) => {
+          if (d[j + 3] > 0) v = kind === 'maximum' ? Math.max(v, d[j + c]) : Math.min(v, d[j + c]);
+        });
+        assert.equal(got[i + c], v, `${kind} ${radius} at ${x},${y} c${c}`);
+      }
+      assert.equal(got[i + 3], d[i + 3]);
+    }
+  }
 });
