@@ -93,6 +93,8 @@ function createFromOptions(app, o) {
     background = 'custom';
   }
   const name = (o.name ?? '').trim() || `Untitled-${++untitledCount}`;
+  const m = /^Untitled-(\d+)$/.exec(name);
+  if (m) untitledCount = Math.max(untitledCount, Number(m[1]));
   return app.newDocument({ width, height, dpi, name, background, backgroundColor });
 }
 

@@ -129,6 +129,7 @@ export function install(app) {
 
   // recent colours: remember the foreground once it settles (dragging in a picker fires many changes)
   let recentTimer = 0;
+  let settingsTimer = 0;
   let lastFg = normHex(app.settings.foreground);
   app.on('color:changed', ({ fg }) => {
     const hex = normHex(fg);
@@ -144,6 +145,14 @@ export function install(app) {
     app.saveSettingsSoon({ recentColors: list.slice(0, RECENT_MAX) });
     render();
   }
+
+  app.on('swatches:changed', () => render());
+  app.on('settings:changed', (patch) => {
+    if (patch && ('swatches' in patch || 'recentColors' in patch)) {
+      clearTimeout(settingsTimer);
+      settingsTimer = setTimeout(render, 0);
+    }
+  });
 
   app.panels.register({ id: 'swatches', title: 'Swatches', icon: 'swatches', element: el, group: 'top', onShow: render });
   render();

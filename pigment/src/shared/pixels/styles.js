@@ -1082,7 +1082,7 @@ export function applyStyles(img, styles, opts = {}) {
     pasteImage(out, img, -offsetX, -offsetY);
     return { image: out, offsetX, offsetY };
   }
-  const stats = alphaStats(img);
+  const stats = isEmptyRect(r) ? null : alphaStats(img); // a rect outside img selects nothing
   if (!stats) return { image: out, offsetX, offsetY };
   const cb = stats.cb;
   const { extent, support, reach } = styleMargins(s);

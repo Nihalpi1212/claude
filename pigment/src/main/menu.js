@@ -244,7 +244,8 @@ export function buildMenuTemplate({ platform, state = {}, recent = [], run, isPa
     doc('Reset View Rotation', 'view:rotate', { arg: 'reset' }),
     sep,
     sub('&Show', [
-      item('Selection Edges', 'view:extras', { type: 'checkbox', checked: state.extras !== false }),
+      // Cmd+H hides the app on macOS, so Show Extras has no accelerator there
+      item('Selection Edges', 'view:extras', { type: 'checkbox', checked: state.extras !== false, ...(mac ? { accelerator: undefined } : {}) }),
       item('Grid', 'view:grid', { type: 'checkbox', checked: !!state.showGrid }),
       item('Guides', 'view:guides', { type: 'checkbox', checked: state.showGuides !== false }),
       item('Pixel Grid', 'view:pixel-grid', { type: 'checkbox', checked: state.pixelGrid !== false }),
@@ -277,7 +278,7 @@ export function buildMenuTemplate({ platform, state = {}, recent = [], run, isPa
       item('Pigment &Help', 'help:guide'),
       item('&Keyboard Shortcuts', 'help:shortcuts'),
       item('Pigment &Website', 'help:website'),
-      ...(isPackaged ? [] : [sep, item('Toggle Developer Tools', 'help:devtools', { accelerator: mac ? 'Alt+Cmd+I' : 'Ctrl+Shift+I' })]),
+      ...(isPackaged ? [] : [sep, item('Toggle Developer Tools', 'help:devtools', { accelerator: mac ? 'Alt+Cmd+I' : 'F12' })]),
       ...(mac ? [] : [sep, item('&About Pigment', 'help:about')]),
     ],
   };

@@ -216,7 +216,8 @@ function boxMean(d, W, H, x0, y0, w, h, r, out, margin) {
 /**
  * Round soft dab mask (an ellipse filling width×height): weight 1 inside the hard radius
  * (hardness × radius), then a smoothstep falloff to 0 at the edge. hardness is 0..1 (values above
- * 1 are read as percent); hardness 1 still gets a one-pixel anti-aliased rim.
+ * 1 are read as percent); hardness 1 still gets a one-pixel anti-aliased rim. The pixel(s)
+ * nearest the centre always weigh 1, also for even sizes (which have no centre pixel) and tiny dabs.
  * @param {number} width
  * @param {number} [height=width]
  * @param {number} [hardness=1]
@@ -231,7 +232,10 @@ export function dabMask(width, height = width, hardness = 1) {
   hd = clamp01(hd);
   const rx = w / 2, ry = h / 2;
   const aa = 1 / Math.max(1, Math.min(rx, ry));
-  const inner = Math.max(0, Math.min(hd, 1 - aa));
+  // Even sizes have no centre pixel: the hard core reaches at least the four (or two) pixels
+  // around the centre, so the centre weighs 1 at any hardness and a 2 px dab is not a 21 % dab.
+  const ex = (w & 1 ? 0 : 0.5) / rx, ey = (h & 1 ? 0 : 0.5) / ry;
+  const inner = Math.max(Math.sqrt(ex * ex + ey * ey), Math.min(hd, 1 - aa));
   const span = 1 - inner;
   for (let y = 0, k = 0; y < h; y++) {
     const ny = (y + 0.5 - ry) / ry, ny2 = ny * ny;
@@ -434,6 +438,9 @@ export function sharpenDab(img, rect, dab, opts = {}) {
 // ---------------------------------------------------------------------------------------------
 // Smudge
 
+/** Float copy of each carried buffer between dabs (8-bit rounding every dab stalls the smear). */
+const carriedFloat = new WeakMap();
+
 /**
  * Smudge tool dab. `carried` is the rect-sized buffer of pixels the finger drags along (pixel
  * (i, j) sits over image pixel (rect.x + i, rect.y + j)). When carried is null (start of a stroke)
@@ -443,6 +450,9 @@ export function sharpenDab(img, rect, dab, opts = {}) {
  * then the carried pixel picks up the current (pre-dab) pixel:
  * carried' = mix(carried, c, (1 - strength) × dab), premultiplied so transparent pixels add no
  * colour (carried alpha follows the mix and scales how much it paints). Image alpha never changes.
+ * Between dabs the carried colour is kept at float precision (a hidden plane tied to the carried
+ * object; carried.data holds its rounded bytes and wins if the caller changes them), so a smear
+ * keeps fading instead of stalling a few levels short of the colour it is dragged through.
  * @param {ImageDataLike} img modified in place
  * @param {Rect | null} rect
  * @param {DabMask} dab
@@ -470,6 +480,11 @@ export function smudge(img, rect, dab, carried, opts = {}) {
   const s = clamp01(num((opts || {}).strength, 0.5));
   const u = 1 - s;
   const d = img.data, kd = carried.data, W = img.width, { x0, y0, w, h, rx, ry, wt } = g;
+  let kf = carriedFloat.get(carried);
+  if (!kf || kf.length !== kd.length) {
+    kf = Float32Array.from(kd);
+    carriedFloat.set(carried, kf);
+  }
   for (let j = 0, k = 0; j < h; j++) {
     let i = ((y0 + j) * W + x0) * 4;
     let ci = ((y0 - ry + j) * rw + (x0 - rx)) * 4;
@@ -477,7 +492,15 @@ export function smudge(img, rect, dab, carried, opts = {}) {
       const m = wt[k];
       if (m <= 0) continue;
       const r = d[i], gg = d[i + 1], b = d[i + 2], a = d[i + 3];
-      const kr = kd[ci], kg = kd[ci + 1], kb = kd[ci + 2], ka = kd[ci + 3];
+      let kr = kf[ci], kg = kf[ci + 1], kb = kf[ci + 2], ka = kf[ci + 3];
+      // the bytes are the rounded float plane; anything further off was written by the caller
+      if (kr - kd[ci] > 0.5 || kd[ci] - kr > 0.5 || kg - kd[ci + 1] > 0.5 || kd[ci + 1] - kg > 0.5 ||
+          kb - kd[ci + 2] > 0.5 || kd[ci + 2] - kb > 0.5 || ka - kd[ci + 3] > 0.5 || kd[ci + 3] - ka > 0.5) {
+        kr = kd[ci];
+        kg = kd[ci + 1];
+        kb = kd[ci + 2];
+        ka = kd[ci + 3];
+      }
       if (a > 0 && ka > 0 && s > 0) {
         const t = (s * m * ka) / 255;
         d[i] = r + (kr - r) * t;
@@ -488,12 +511,21 @@ export function smudge(img, rect, dab, carried, opts = {}) {
       if (p > 0) {
         const wk = ka * (1 - p), wc = a * p, na = wk + wc;
         if (na > 0) {
-          kd[ci] = (kr * wk + r * wc) / na;
-          kd[ci + 1] = (kg * wk + gg * wc) / na;
-          kd[ci + 2] = (kb * wk + b * wc) / na;
+          kr = (kr * wk + r * wc) / na;
+          kg = (kg * wk + gg * wc) / na;
+          kb = (kb * wk + b * wc) / na;
         }
-        kd[ci + 3] = na;
+        ka = na;
       }
+      // store the float plane, then its rounded bytes (|float - byte| <= 0.5 by construction)
+      kf[ci] = kr;
+      kf[ci + 1] = kg;
+      kf[ci + 2] = kb;
+      kf[ci + 3] = ka;
+      kd[ci] = kf[ci];
+      kd[ci + 1] = kf[ci + 1];
+      kd[ci + 2] = kf[ci + 2];
+      kd[ci + 3] = kf[ci + 3];
     }
   }
   return carried;
@@ -508,7 +540,9 @@ export function smudge(img, rect, dab, carried, opts = {}) {
  * destination: target = blur(dest) + (source - blur(source)), where blur is a premultiplied box
  * mean of radius max(2, rect.width / 8) over the respective rect (the destination's may look
  * `radius` pixels past the rect, inside the image). Each pixel moves toward the target by
- * dab × strength, clamped to 0..255; alpha is unchanged and transparent source pixels add no texture.
+ * dab × strength × source alpha, clamped to 0..255; alpha is unchanged. Where the source is
+ * transparent or does not reach (a sample taken off the canvas edge) there is nothing to heal
+ * with, so the destination is left exactly as it was instead of being blurred.
  * @param {ImageDataLike} img modified in place
  * @param {Rect | null} rect
  * @param {DabMask} dab
@@ -532,28 +566,29 @@ export function heal(img, rect, dab, source, opts = {}) {
   const sw = Math.max(0, Math.min(w, SW - ox)), sh = Math.max(0, Math.min(h, SH - oy));
   const sm = sw && sh ? boxMean(sd, SW, SH, ox, oy, sw, sh, rad, scratch('mean2', Float32Array, sw * sh * 3), true) : null;
   for (let j = 0, k = 0; j < h; j++) {
+    if (j >= sh) break; // rows the source does not reach: nothing to heal with
     let i = ((y0 + j) * W + x0) * 4;
-    const srow = j < sh;
-    for (let c = 0; c < w; c++, k++, i += 4) {
-      const m = wt[k] * str;
+    let si = ((oy + j) * SW + ox) * 4;
+    for (let c = 0; c < w; c++, k++, i += 4, si += 4) {
+      if (c >= sw) {
+        k += w - c; // rest of the row has no source
+        break;
+      }
+      const sa = sd[si + 3];
+      const m = (wt[k] * str * sa) / 255;
       if (m <= 0 || d[i + 3] === 0) continue;
       const r = d[i], gg = d[i + 1], b = d[i + 2];
-      const q = k * 3;
+      const q = k * 3, sq = (j * sw + c) * 3;
       let tr = r, tg = gg, tb = b;
       if (dm[q] >= 0) {
         tr = dm[q];
         tg = dm[q + 1];
         tb = dm[q + 2];
       }
-      if (srow && c < sw) {
-        const si = ((oy + j) * SW + ox + c) * 4, sq = (j * sw + c) * 3, sa = sd[si + 3];
-        if (sa > 0 && sm[sq] >= 0) {
-          const f = sa / 255;
-          tr += (sd[si] - sm[sq]) * f;
-          tg += (sd[si + 1] - sm[sq + 1]) * f;
-          tb += (sd[si + 2] - sm[sq + 2]) * f;
-        }
-      }
+      // sa > 0 here, so the source window holds alpha and sm[sq] is a real mean
+      tr += sd[si] - sm[sq];
+      tg += sd[si + 1] - sm[sq + 1];
+      tb += sd[si + 2] - sm[sq + 2];
       d[i] = r + (tr - r) * m;
       d[i + 1] = gg + (tg - gg) * m;
       d[i + 2] = b + (tb - b) * m;

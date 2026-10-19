@@ -75,7 +75,6 @@ export const MENU_KEYS = {
   'view:next-tab': 'Ctrl+Tab',
   'view:prev-tab': 'Ctrl+Shift+Tab',
   'help:shortcuts': 'CmdOrCtrl+/',
-  'help:devtools': 'CmdOrCtrl+Shift+I',
 };
 
 // Renderer-only combos. Plain letters select tools (Photoshop's keys); Shift+letter cycles a tool slot.
