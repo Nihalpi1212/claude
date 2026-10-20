@@ -1,0 +1,58 @@
+# Folio PDF CI: unit tests (node:test) and browser end-to-end tests (Playwright) on every change
+# under folio/, plus tests that launch the real Electron app under Xvfb.
+
+name: Folio CI
+
+on:
+  push:
+    paths:
+      - 'folio/**'
+      - '.github/workflows/folio-ci.yml'
+  pull_request:
+    paths:
+      - 'folio/**'
+      - '.github/workflows/folio-ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: folio
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: folio/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: End-to-end tests
+        run: npm run test:e2e
+
+      - name: Electron app tests
+        run: xvfb-run -a npm run test:electron
+
+      - name: Upload test artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: folio-e2e-artifacts
+          path: |
+            folio/tests/e2e/.artifacts
+            folio/tests/electron/.artifacts
+          if-no-files-found: ignore

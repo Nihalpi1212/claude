@@ -1,0 +1,9 @@
+/* Warp / Perspective Warp / Puppet Warp options bar (lib/warp.js); the overlays are drawn on the view canvas. */
+.options-bar .warp-toggle[aria-pressed="true"] { background: var(--accent); color: #fff; border-color: var(--accent); }
+.options-bar .warp-toggle svg, .options-bar .warp-group .btn svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+.options-bar .warp-group { display: inline-flex; align-items: center; gap: 10px; padding-left: 10px; border-left: 1px solid var(--border); }
+.options-bar .warp-group .opt-number .input { width: 56px; }
+.options-bar .warp-group input[type="range"] { width: 80px; accent-color: var(--accent); }
+.options-bar .warp-group .select { max-width: 150px; }
+.options-bar .warp-group .opt-checkbox { gap: 4px; }
+.options-bar .warp-hint { color: var(--fg-muted); font-size: 11px; }
