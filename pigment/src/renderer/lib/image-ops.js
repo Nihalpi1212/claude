@@ -254,7 +254,9 @@ function remapDocument(app, label, spec) {
           const s = sx;
           const font = { ...layer.font, size: layer.font.size * s, letterSpacing: (layer.font.letterSpacing ?? 0) * s };
           if (font.stroke) font.stroke = { ...font.stroke, width: font.stroke.width * s };
-          out = shallow(layer, { x: layer.x * s, y: layer.y * s, width: layer.width === null ? null : layer.width * s, font });
+          // text on a path: the path is document coordinates, so it scales with the document
+          const pathText = layer.pathText ? { pathText: { ...layer.pathText, path: mapPath(layer.pathText.path, point), ...(layer.pathText.baselineShift ? { baselineShift: layer.pathText.baselineShift * s } : {}) } } : {};
+          out = shallow(layer, { x: layer.x * s, y: layer.y * s, width: layer.width === null ? null : layer.width * s, font, ...pathText });
         } else out = shallow(layer, { transform: T.multiplyMatrix(m, layer.transform ?? T.IDENTITY) });
         break;
       }

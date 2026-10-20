@@ -141,7 +141,9 @@ function layoutOnPath(layer, ctx) {
   for (let i = 0; i < text.length; i++) chars.push({ ch: text[i], index: i, width: text[i] === '\n' ? 0 : ctx.measureText(text[i]).width });
   const total = chars.reduce((n, c) => n + c.width + spacing, 0) - (chars.length ? spacing : 0);
   let cursor = (pt.startOffset ?? 0) * sampler.length;
-  const align = pt.align ?? font.align ?? 'left';
+  // the live alignment (Character panel, options bar) wins; pathText.align is what it was when attached
+  const align = font.align ?? pt.align ?? 'left';
+  const s0 = (pt.startOffset ?? 0) * sampler.length - (align === 'center' ? total / 2 : align === 'right' ? total : 0);
   if (align === 'center') cursor -= total / 2;
   else if (align === 'right') cursor -= total;
   const shift = pt.baselineShift ?? 0;
@@ -151,7 +153,8 @@ function layoutOnPath(layer, ctx) {
     cursor += c.width + spacing;
     // the baseline offset moves the glyph along the normal (local "up" is (sin θ, −cos θ))
     const x = p.x + Math.sin(p.angle) * shift, y = p.y - Math.cos(p.angle) * shift;
-    const hidden = c.ch === '\n' || (!sampler.closed && (mid < 0 || mid > sampler.length));
+    // text longer than the path is hidden at its end; on a closed path it must not wrap round over its own start
+    const hidden = c.ch === '\n' || (sampler.closed ? mid - s0 > sampler.length : mid < 0 || mid > sampler.length);
     return { ch: c.ch, x, y, angle: p.angle, width: c.width, index: c.index, hidden };
   });
   const start = sampler.at((pt.startOffset ?? 0) * sampler.length);
@@ -282,6 +285,11 @@ export function setOrientation(app, layer, next) {
   if (!ORIENTATIONS.includes(next)) return false;
   const current = layer.font.orientation ?? 'horizontal';
   if (current === next) return false;
+  // text on a path follows the path: rotating it about the document origin would throw it off the canvas
+  if (layer.pathText && next !== 'horizontal') {
+    app.dialogs?.toast('Text on a path is always horizontal; release it from the path (Layer › Type) to make it vertical', { kind: 'error', timeout: 3200 });
+    return false;
+  }
   let transform = layer.transform ? layer.transform.slice() : null;
   const R = verticalRotation(layer);
   if (current === 'vertical') transform = multiplyMatrix(transform ?? [1, 0, 0, 1, 0, 0], invertMatrix(R));
@@ -316,7 +324,8 @@ export function install(app) {
           // rotated (vertical) text would rotate the whole path layout: it goes back to horizontal first
           if ((layer.font.orientation ?? 'horizontal') === 'vertical') setOrientation(app, layer, 'horizontal');
           // the path is stored in document space; x/y become the (zero) offset Move adds to it
-          setLayerProps(app, layer, { pathText: { path: clonePath(found.path), startOffset: keep.startOffset ?? 0, flip: !!keep.flip, align: keep.align ?? layer.font.align ?? 'left' }, x: 0, y: 0 }, 'Text on Path');
+          // a Free Transform matrix of the text would move the path layout off the path: the glyphs follow the path alone
+          setLayerProps(app, layer, { pathText: { path: clonePath(found.path), startOffset: keep.startOffset ?? 0, flip: !!keep.flip, align: keep.align ?? layer.font.align ?? 'left' }, x: 0, y: 0, transform: null }, 'Text on Path');
         });
         return true;
       },

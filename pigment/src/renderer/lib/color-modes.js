@@ -17,7 +17,8 @@ export function install(app) {
     const { proof, gamut } = enabled();
     if (!proof && !gamut) return null;
     const doc = view?.doc ?? app.doc;
-    const key = `${doc?.id}:${doc?.version}:${composite.width}x${composite.height}:${proof ? 'p' : ''}${gamut ? 'g' : ''}`;
+    // root.version moves with every layer.touch() (a brush stroke calls no doc.changed until it ends)
+    const key = `${doc?.id}:${doc?.version}:${doc?.root?.version}:${composite.width}x${composite.height}:${proof ? 'p' : ''}${gamut ? 'g' : ''}`;
     if (cache?.key === key) return cache.canvas;
     try {
       const w = composite.width, h = composite.height;

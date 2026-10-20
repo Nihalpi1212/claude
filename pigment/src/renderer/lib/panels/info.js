@@ -93,7 +93,7 @@ export function install(app) {
   /** RGBA of the composite at a document pixel (cached per document version and position). */
   function sampleAt(doc, x, y) {
     if (x < 0 || y < 0 || x >= doc.width || y >= doc.height) return null;
-    const key = `${doc.id}:${doc.version}:${x}:${y}`;
+    const key = `${doc.id}:${doc.version}:${doc.root?.version}:${x}:${y}`;
     if (last.key === key) return last.rgba;
     let rgba = null;
     try {

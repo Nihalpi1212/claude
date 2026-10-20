@@ -779,8 +779,9 @@ export class TypeTool extends Tool {
     if (lay.glyphs) {
       // text on a path / stacked text: the editor is a plain box over the glyphs (the layer draws them)
       const b = textBox(layer, lay);
-      ta.wrap = 'soft';
-      ta.style.whiteSpace = 'pre-wrap';
+      // the glyphs are laid out by the layer: the hidden editor must not soft-wrap (Home / End follow logical lines)
+      ta.wrap = 'off';
+      ta.style.whiteSpace = 'pre';
       ta.style.textAlign = 'left';
       ta.style.width = `${Math.max(b.width * z, fs * 2, 40)}px`;
       ta.style.height = `${Math.max(b.height * z, lh)}px`;

@@ -189,3 +189,37 @@ test('autoTone derives a sensible patch from the histogram', () => {
   assert.equal(q.whites, 0);
   assert.deepEqual(autoTone(createImage(4, 4)), {});
 });
+
+test('texture boosts (+) and smooths (-) fine detail that clarity-sized thresholds would ignore; flat areas stay put', () => {
+  const noisy = (amp) => {
+    const img = createImage(64, 64, [128, 128, 128, 1]);
+    let seed = 1;
+    for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) {
+      seed = (seed * 1103515245 + 12345) % 2147483648;
+      const v = 128 + Math.round(((seed / 2147483648) * 2 - 1) * amp);
+      setPixel(img, x, y, [v, v, v, 1]);
+    }
+    return img;
+  };
+  const spread = (img) => {
+    let s = 0, s2 = 0, n = 0;
+    for (let i = 0; i < img.data.length; i += 4) {
+      s += img.data[i];
+      s2 += img.data[i] * img.data[i];
+      n++;
+    }
+    return Math.sqrt(s2 / n - (s / n) ** 2);
+  };
+  for (const amp of [8, 20]) {
+    const base = spread(noisy(amp));
+    const up = noisy(amp);
+    develop(up, { texture: 100 });
+    const down = noisy(amp);
+    develop(down, { texture: -100 });
+    assert.ok(spread(up) > base * 1.15, `texture +100 on ±${amp}: ${spread(up)} vs ${base}`);
+    assert.ok(spread(down) < base * 0.85, `texture -100 on ±${amp}: ${spread(down)} vs ${base}`);
+  }
+  const flat = createImage(16, 16, [90, 90, 90, 1]);
+  develop(flat, { texture: 100 });
+  assert.deepEqual(rgb(flat, 8, 8), [90, 90, 90]);
+});

@@ -14,7 +14,8 @@ const num = (v, fallback) => (Number.isFinite(Number(v)) ? Number(v) : fallback)
 
 /** Validates and normalises the renderer's options (the renderer is sandboxed and untrusted). */
 export function normalizePrintOptions(opts = {}) {
-  const dataUrl = typeof opts.dataUrl === 'string' && /^data:image\/(png|jpeg|webp);base64,/.test(opts.dataUrl) ? opts.dataUrl : null;
+  // the whole string must be base64 image data: it is written into the print page's HTML
+  const dataUrl = typeof opts.dataUrl === 'string' && /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(opts.dataUrl) ? opts.dataUrl : null;
   if (!dataUrl) throw new Error('printImage needs a PNG/JPEG/WebP data URL');
   const paper = opts.paper && typeof opts.paper === 'object' ? opts.paper : {};
   let pageW = Math.max(10, num(paper.width, 210)), pageH = Math.max(10, num(paper.height, 297));
@@ -47,7 +48,7 @@ export function normalizePrintOptions(opts = {}) {
 /** The inline page: @page carries the paper size and margins, the image sits at (x, y) mm on the page. */
 export function buildPrintHtml(o) {
   const r = (n) => Math.round(n * 1000) / 1000;
-  return `<!doctype html><html><head><meta charset="utf-8"><title>Pigment print</title><style>
+  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'"><title>Pigment print</title><style>
 @page { size: ${r(o.pageW)}mm ${r(o.pageH)}mm; margin: ${r(o.margin)}mm; }
 html, body { margin: 0; padding: 0; background: #ffffff; }
 body { width: ${r(o.pageW - o.margin * 2)}mm; height: ${r(o.pageH - o.margin * 2)}mm; position: relative; overflow: hidden; }
@@ -77,8 +78,11 @@ export async function printImage({ electron, getWindow }, opts = {}) {
       parent,
       width: 800,
       height: 600,
-      webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false },
+      webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false, javascript: true },
     });
+    // the print page never navigates or opens windows
+    win.webContents.on('will-navigate', (e) => e.preventDefault());
+    win.webContents.setWindowOpenHandler?.(() => ({ action: 'deny' }));
     const html = buildPrintHtml(o);
     if (html.length <= DATA_URL_LIMIT) await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
     else {

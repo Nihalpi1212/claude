@@ -44,6 +44,8 @@ test('printImage resolves { ok: false } on bad input and drives a fake BrowserWi
     constructor(opts) {
       calls.push(['new', opts.show]);
       this.webContents = {
+        on: (event) => calls.push(['on', event]),
+        setWindowOpenHandler: (fn) => calls.push(['windowOpen', fn().action]),
         executeJavaScript: async () => true,
         print: (options, cb) => {
           calls.push(['print', options]);
@@ -75,10 +77,21 @@ test('printImage resolves { ok: false } on bad input and drives a fake BrowserWi
   assert.equal(print.margins.marginType, 'custom');
   assert.ok(Math.abs(print.margins.top - (10 * 96) / 25.4) < 1e-6);
   assert.equal(calls[0][1], false, 'the window is hidden');
+  assert.ok(calls.some((c) => c[0] === 'on' && c[1] === 'will-navigate'), 'navigation is blocked');
+  assert.ok(calls.some((c) => c[0] === 'windowOpen' && c[1] === 'deny'), 'new windows are denied');
   assert.ok(calls.some((c) => c[0] === 'destroy'));
   const pdf = await printImage({ electron, getWindow: () => null }, { dataUrl: PNG, widthMm: 100, heightMm: 50, paper: { width: 210, height: 297 }, marginsMm: 10, pdf: true });
   assert.equal(pdf.ok, true);
   assert.ok(pdf.pdf instanceof Uint8Array && pdf.pdf.length === 3);
   const pdfOpts = calls.find((c) => c[0] === 'pdf')[1];
   assert.equal(pdfOpts.preferCSSPageSize, true);
+});
+
+test('normalizePrintOptions accepts only well-formed base64 image data, and the print page allows no script', () => {
+  assert.throws(() => normalizePrintOptions({ dataUrl: 'data:image/png;base64,AAAA" onload="fetch(1)"><script>fetch(2)</script>' }), /data URL/);
+  assert.throws(() => normalizePrintOptions({ dataUrl: 'data:image/png;base64,AA AA' }), /data URL/);
+  assert.equal(normalizePrintOptions({ dataUrl: 'data:image/jpeg;base64,/9j/4AAQ==' }).dataUrl, 'data:image/jpeg;base64,/9j/4AAQ==');
+  const html = buildPrintHtml(normalizePrintOptions({ dataUrl: PNG }));
+  assert.match(html, /Content-Security-Policy" content="default-src 'none'; img-src data:/);
+  assert.doesNotMatch(html, /<script/i);
 });

@@ -209,7 +209,7 @@ export function develop(img, params = {}, rect = null) {
   if (texture || clarity) {
     const L = luma(R, G, B, n);
     const out = new Float32Array(L);
-    if (texture) localContrast(L, out, w, h, Math.max(0.8, long * 0.003), texture * 0.6, 0.1);
+    if (texture) textureContrast(L, out, w, h, Math.max(0.8, long * 0.003), texture);
     if (clarity) localContrast(out.slice(), out, w, h, Math.max(1.5, long * 0.01), clarity * 0.8, 0);
     scaleToLuma(R, G, B, L, out, n);
   }
@@ -358,6 +358,20 @@ function applyLumaCurve(R, G, B, n, curve) {
  * Unsharp mask on a float channel: out = src + amount * (src - blur(src)), with an optional
  * threshold under which (flat) differences are ignored. Negative amounts soften (clarity < 0).
  */
+/**
+ * Texture: boosts (or, negative, smooths) fine and medium detail. The weight falls off for large
+ * differences, so strong edges are left to Clarity and are not haloed.
+ */
+function textureContrast(src, out, w, h, sigma, amount) {
+  const blur = gaussianBlurFloat(src, w, h, sigma);
+  for (let i = 0; i < src.length; i++) {
+    const d = src[i] - blur[i];
+    const q = d / 0.08;
+    out[i] = clamp01(src[i] + amount * d / (1 + q * q));
+  }
+  return out;
+}
+
 function localContrast(src, out, w, h, sigma, amount, threshold) {
   const blur = gaussianBlurFloat(src, w, h, sigma);
   for (let i = 0; i < src.length; i++) {

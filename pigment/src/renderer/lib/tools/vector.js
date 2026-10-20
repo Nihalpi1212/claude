@@ -953,12 +953,14 @@ class VectorTool extends Tool {
   onOptionChanged(key, value) {
     if (SHARED_KEYS.has(key)) {
       for (const t of this.app.tools.tools.values()) if (t !== this && t.isVector && t.options.some((o) => o.key === key)) this.app.tools.setOpt(t.id, key, value, { silent: true });
-      this.applyStyleToLayer(key);
+      // the path operation only sets the mode for the next shape drawn: it never restyles the active layer
+      if (key !== 'pathOp') this.applyStyleToLayer(key);
     }
     if (RERENDER_KEYS.has(key)) this.app.tools.renderOptions();
   }
   /** Changing fill/stroke options restyles the selected shape layer (as in Photoshop). */
   applyStyleToLayer(key) {
+    if (!['fillOn', 'strokeOn', 'strokeColor', 'strokeWidth', 'strokeAlign'].includes(key)) return;
     const layer = this.doc?.active;
     if (!layer || layer.type !== 'shape' || layer.locked.all || !isShapeMode(this)) return;
     const style = shapeStyle(this);
