@@ -3,7 +3,7 @@
 // plus one PNG per raster layer and mask).
 import { readPsd, writePsdUint8Array, initializeCanvas } from 'ag-psd';
 import { writeZip, readZip, findEntry, streamCodecs } from '../../shared/zip.js';
-import { Document, RasterLayer, GroupLayer, TextLayer, AdjustmentLayer, createCanvas, layerFromDescription, canvasIsBlank } from './document.js';
+import { Document, RasterLayer, GroupLayer, TextLayer, AdjustmentLayer, createCanvas, layerFromDescription, canvasIsBlank, textExtensionFor } from './document.js';
 import { parseColor } from '../../shared/pixels/color.js';
 import { flattenDocument } from './compositor.js';
 import { Selection } from './selection.js';
@@ -496,7 +496,8 @@ export function writePsdDocument(doc, compositor) {
       y = r.y;
     }
     const out = { ...base, left: x, top: y, canvas };
-    if (layer.type === 'text') out.text = textToPsd(layer);
+    // text on a path / stacked text (lib/text-path.js) has no PSD equivalent: it exports rasterised
+    if (layer.type === 'text' && !textExtensionFor(layer)) out.text = textToPsd(layer);
     return out;
   };
   const psd = {

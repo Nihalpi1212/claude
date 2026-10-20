@@ -33,6 +33,10 @@ export const DEFAULT_SETTINGS = Object.freeze({
   ai: { openaiChat: null, openaiImage: null, geminiChat: null, geminiImage: null, defaultProvider: 'openai' },
   aiHostId: null,
   placeAsSmart: true,
+  // View > Proof Colors / Gamut Warning and the Info panel's second readout
+  proofColors: false,
+  gamutWarning: false,
+  infoSecondary: 'cmyk',
   historyLimit: 100,
   historyMemoryMB: 512,
   cursorStyle: 'outline', // outline | precise | dot

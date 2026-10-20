@@ -134,3 +134,102 @@ export function contrastColor(rgba) {
 export function colorDistance(r1, g1, b1, r2, g2, b2) {
   return Math.max(Math.abs(r1 - r2), Math.abs(g1 - g2), Math.abs(b1 - b2));
 }
+
+// ---- CMYK and proofing (see ARCHITECTURE.md "Colour modes") ---------------------------------------------------
+// The document stays RGB; CMYK is a readout and a preview. rgbToCmyk/cmykToRgb are the naive GCR
+// separation (percentages 0..100, lossless round trip). A real press cannot print most of sRGB,
+// so Proof Colors and the gamut warning look at the separation through simulated process inks
+// (cmykToProofRgb): that round trip is lossy exactly where a CMYK conversion would be.
+
+const clamp01 = (v) => Math.min(1, Math.max(0, v));
+
+/** Naive GCR: k = 1 − max(r, g, b), the rest shared by c/m/y. Returns [c, m, y, k] in percent. */
+export function rgbToCmyk(r, g, b) {
+  const R = clamp01(r / 255), G = clamp01(g / 255), B = clamp01(b / 255);
+  const k = 1 - Math.max(R, G, B);
+  if (k >= 1 - 1e-9) return [0, 0, 0, 100];
+  const d = 1 - k;
+  return [((1 - R - k) / d) * 100, ((1 - G - k) / d) * 100, ((1 - B - k) / d) * 100, k * 100];
+}
+
+/** Inverse of rgbToCmyk (percentages in, 0..255 out). */
+export function cmykToRgb(c, m, y, k) {
+  const K = 1 - clamp01(k / 100);
+  return [255 * (1 - clamp01(c / 100)) * K, 255 * (1 - clamp01(m / 100)) * K, 255 * (1 - clamp01(y / 100)) * K];
+}
+
+// sRGB appearance of solid process inks on white paper (SWOP-like); 100 % black ink is not a true black
+export const PROCESS_INKS = Object.freeze({ c: [0, 174, 239], m: [236, 0, 140], y: [255, 241, 0], k: [20, 20, 20] });
+
+/** What a CMYK separation looks like printed: white paper filtered by each ink in proportion to its coverage. */
+export function cmykToProofRgb(c, m, y, k) {
+  const amounts = [clamp01(c / 100), clamp01(m / 100), clamp01(y / 100), clamp01(k / 100)];
+  const inks = [PROCESS_INKS.c, PROCESS_INKS.m, PROCESS_INKS.y, PROCESS_INKS.k];
+  let R = 1, G = 1, B = 1;
+  for (let i = 0; i < 4; i++) {
+    const a = amounts[i];
+    if (!a) continue;
+    R *= 1 - a * (1 - inks[i][0] / 255);
+    G *= 1 - a * (1 - inks[i][1] / 255);
+    B *= 1 - a * (1 - inks[i][2] / 255);
+  }
+  return [R * 255, G * 255, B * 255];
+}
+
+/** An sRGB colour as the press would show it (separation, then the inks). */
+export function proofRgb(r, g, b) {
+  const [c, m, y, k] = rgbToCmyk(r, g, b);
+  return cmykToProofRgb(c, m, y, k);
+}
+
+/** True when the proof round trip moves a channel by more than 24/255 (the colour cannot be printed as is). */
+export function isOutOfCmykGamut(rgb) {
+  const [r, g, b] = Array.isArray(rgb) ? rgb : [rgb, arguments[1], arguments[2]];
+  const p = proofRgb(r, g, b);
+  return Math.abs(p[0] - r) > 24 || Math.abs(p[1] - g) > 24 || Math.abs(p[2] - b) > 24;
+}
+
+// A 6-bit-per-channel lookup, filled on demand, keeps the proof fast on whole composites; the
+// quantisation (±2 levels) is invisible in a preview. Each entry: proof r, g, b and the gamut flag.
+let proofLut = null;
+function proofEntry(r, g, b) {
+  if (!proofLut) proofLut = new Uint8Array(64 * 64 * 64 * 4);
+  const i = (((r >> 2) << 12) | ((g >> 2) << 6) | (b >> 2)) * 4;
+  if (!proofLut[i + 3]) {
+    // bucket representatives span 0..255 exactly so white and black proof to themselves
+    const rq = Math.round(((r >> 2) * 255) / 63), gq = Math.round(((g >> 2) * 255) / 63), bq = Math.round(((b >> 2) * 255) / 63);
+    const p = proofRgb(rq, gq, bq);
+    proofLut[i] = Math.round(p[0]);
+    proofLut[i + 1] = Math.round(p[1]);
+    proofLut[i + 2] = Math.round(p[2]);
+    proofLut[i + 3] = isOutOfCmykGamut([rq, gq, bq]) ? 2 : 1; // 0 = not computed yet
+  }
+  return i;
+}
+
+/**
+ * Proof Colors / Gamut Warning on an ImageDataLike, in place: `proof` replaces colours by their
+ * printed appearance, `gamut` paints out-of-gamut pixels mid-grey. Alpha is never touched.
+ */
+export function applyProof(img, { proof = true, gamut = false, rect = null, gray = 128 } = {}) {
+  const w = img.width, h = img.height, d = img.data;
+  const x0 = rect ? Math.max(0, rect.x) : 0, y0 = rect ? Math.max(0, rect.y) : 0;
+  const x1 = rect ? Math.min(w, rect.x + rect.width) : w, y1 = rect ? Math.min(h, rect.y + rect.height) : h;
+  for (let y = y0; y < y1; y++) {
+    for (let x = x0; x < x1; x++) {
+      const o = (y * w + x) * 4;
+      if (!d[o + 3]) continue;
+      const i = proofEntry(d[o], d[o + 1], d[o + 2]);
+      if (gamut && proofLut[i + 3] === 2) {
+        d[o] = gray;
+        d[o + 1] = gray;
+        d[o + 2] = gray;
+      } else if (proof) {
+        d[o] = proofLut[i];
+        d[o + 1] = proofLut[i + 1];
+        d[o + 2] = proofLut[i + 2];
+      }
+    }
+  }
+  return img;
+}

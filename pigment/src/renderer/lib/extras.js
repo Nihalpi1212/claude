@@ -4,6 +4,7 @@ import { icon } from './icons.js';
 import { bridge } from './bridge.js';
 import { formDialog } from './form.js';
 import { createColorWidget, normHex } from './panels/color.js';
+import { parseColor, rgbaToHex, rgbToLab, labToRgb, rgbToCmyk, cmykToRgb } from '../../shared/pixels/color.js';
 import { DEFAULT_SETTINGS, DEFAULT_SWATCHES } from '../../shared/defaults.js';
 
 const MAX_SIDE = 30000;
@@ -279,14 +280,44 @@ function pickColor(app, initial, { title = 'Color Picker', live } = {}) {
       <div class="cp-swatches"><span class="cp-new"></span><button type="button" class="cp-old" title="Click to go back to the current colour"></button></div>
       <span class="muted">current</span>
     </div>
+    <div class="color-fields cp-modes" style="grid-template-columns: repeat(4, 1fr)" aria-label="Lab and CMYK">
+      <label title="Lightness (0–100)">L <input class="input" data-m="L" type="number" min="0" max="100" step="1"></label>
+      <label title="a (green–red)">a <input class="input" data-m="a" type="number" min="-128" max="127" step="1"></label>
+      <label title="b (blue–yellow)">b <input class="input" data-m="b" type="number" min="-128" max="127" step="1"></label>
+      <label title="Cyan (%)">C <input class="input" data-m="c" type="number" min="0" max="100" step="1"></label>
+      <label title="Magenta (%)">M <input class="input" data-m="m" type="number" min="0" max="100" step="1"></label>
+      <label title="Yellow (%)">Y <input class="input" data-m="y" type="number" min="0" max="100" step="1"></label>
+      <label title="Black (%)">K <input class="input" data-m="k" type="number" min="0" max="100" step="1"></label>
+    </div>
     <div class="cp-quick-title muted">Recent and swatches</div>
     <div class="cp-quick"></div>
     <button type="button" class="btn small cp-add">${icon('plus')} Add to Swatches</button>`;
   const newSw = side.querySelector('.cp-new');
   const oldSw = side.querySelector('.cp-old');
   oldSw.style.background = start;
+  // Lab and CMYK readouts/fields (lib/color-modes.js owns the maths): typing in one converts back to RGB
+  const modes = Object.fromEntries([...side.querySelectorAll('[data-m]')].map((i) => [i.dataset.m, i]));
+  const showModes = () => {
+    const [r, g, b] = parseColor(current);
+    const lab = rgbToLab(r, g, b), cmyk = rgbToCmyk(r, g, b);
+    const vals = { L: lab[0], a: lab[1], b: lab[2], c: cmyk[0], m: cmyk[1], y: cmyk[2], k: cmyk[3] };
+    for (const [k, input] of Object.entries(modes)) if (document.activeElement !== input) input.value = String(Math.round(vals[k]));
+  };
+  const commitMode = (key) => {
+    const n = (k) => Number(modes[k].value);
+    if (Object.values(modes).some((i) => i.value === '' || !Number.isFinite(Number(i.value)))) return;
+    const rgb = 'Lab'.includes(key) ? labToRgb(n('L'), n('a'), n('b')) : cmykToRgb(n('c'), n('m'), n('y'), n('k'));
+    choose(rgbaToHex(rgb.map((v) => Math.round(v))));
+  };
+  for (const [k, input] of Object.entries(modes)) {
+    input.addEventListener('change', () => commitMode(k));
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') commitMode(k);
+    });
+  }
   const showNew = () => {
     newSw.style.background = current;
+    showModes();
   };
   const choose = (hex) => {
     current = normHex(hex);

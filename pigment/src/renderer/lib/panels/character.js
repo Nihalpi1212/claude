@@ -33,6 +33,7 @@ export function install(app) {
         <button type="button" class="seg-button" data-value="center" title="Center text">${icon('align-hcenter')}</button>
         <button type="button" class="seg-button" data-value="right" title="Right align text">${icon('align-right')}</button>
       </span></div>
+      <div class="prop-row" data-row="orientation"><span>Orientation</span><select class="select" data-k="orientation" aria-label="Text orientation"><option value="horizontal">Horizontal</option><option value="vertical">Vertical (rotated)</option><option value="vertical-stacked">Vertical, stacked</option></select></div>
       <div class="prop-row"><span>Decoration</span><label class="checkbox"><input type="checkbox" data-k="underline"> Underline</label></div>
       <div class="prop-row"><span>Stroke</span><input type="color" data-k="strokeColor" aria-label="Stroke colour"><input class="input num" type="number" min="0" max="200" step="0.5" data-k="strokeWidth" aria-label="Stroke width"><span class="muted">px</span></div>
       <div class="prop-row" data-row="box"><span>Text</span><select class="select" data-k="box" aria-label="Point or paragraph text"><option value="point">Point text</option><option value="paragraph">Paragraph box</option></select><input class="input num" type="number" min="1" max="30000" step="1" data-k="boxWidth" aria-label="Box width" title="Paragraph box width (px)"></div>
@@ -42,6 +43,8 @@ export function install(app) {
   const family = q('family'), style = q('style'), size = q('size'), leading = q('leading'), tracking = q('tracking'), color = q('color');
   const align = q('align'), underline = q('underline'), strokeColor = q('strokeColor'), strokeWidth = q('strokeWidth'), box = q('box'), boxWidth = q('boxWidth');
   const boxRow = el.querySelector('[data-row="box"]');
+  const orientation = q('orientation');
+  const orientRow = el.querySelector('[data-row="orientation"]');
   for (const [v, label] of STYLES) style.add(new Option(label, v));
 
   function fillFamilies(current) {
@@ -105,6 +108,13 @@ export function install(app) {
   color.addEventListener('input', () => apply({ color: color.value }, { merge: true }));
   for (const b of align.querySelectorAll('button')) b.addEventListener('click', () => apply({ align: b.dataset.value }));
   underline.addEventListener('change', () => apply({ underline: underline.checked }));
+  // orientation goes through the command (lib/text-path.js): it also rotates/unrotates the layer
+  orientation.addEventListener('change', () => {
+    const tool = typeSession(app);
+    if (tool) tool.commitSession(); // the orientation switch is its own history entry
+    app.commands.run('text:orientation', orientation.value, 'panel');
+    refresh();
+  });
   const strokePatch = () => {
     const w = Number(strokeWidth.value);
     return { stroke: w > 0 ? { color: strokeColor.value, width: w } : null };
@@ -165,6 +175,8 @@ export function install(app) {
     set(strokeColor, hex6(font.stroke?.color ?? '#000000'));
     set(strokeWidth, font.stroke?.width ?? 0);
     boxRow.hidden = !layer;
+    orientRow.hidden = !layer;
+    if (layer) set(orientation, font.orientation ?? 'horizontal');
     if (layer) {
       set(box, layer.width === null ? 'point' : 'paragraph');
       boxWidth.hidden = layer.width === null;

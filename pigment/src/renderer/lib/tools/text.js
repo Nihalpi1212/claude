@@ -14,6 +14,11 @@ import { bridge } from '../bridge.js';
 import { icon } from '../icons.js';
 import { invertMatrix, applyMatrix } from '../../../shared/pixels/transform.js';
 import { parseColor, rgbaToHex } from '../../../shared/pixels/color.js';
+import { hitSegment, isEmptyPath, clonePath, visibleTargets } from './vector.js';
+import { pathOffsetAt } from '../text-path.js';
+
+// type-on-path (lib/text-path.js): an I-beam crossing a curve, shown when the pointer is over a path
+const PATH_CURSOR = `url("data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"><path d="M3 17q9-12 18-2" fill="none" stroke="#fff" stroke-width="3"/><path d="M3 17q9-12 18-2" fill="none" stroke="#000" stroke-width="1.5"/><path d="M9 4h6M12 4v16M9 20h6" stroke="#fff" stroke-width="3" fill="none"/><path d="M9 4h6M12 4v16M9 20h6" stroke="#000" stroke-width="1.2" fill="none"/></svg>')}") 12 12, text`;
 
 // ---- fonts --------------------------------------------------------------------------------------------------
 
@@ -122,7 +127,7 @@ export function styleToFont(style) {
 
 const hex6 = (c) => rgbaToHex(parseColor(c ?? '#000000')).slice(0, 7);
 const autoName = (text) => String(text ?? '').split('\n')[0].slice(0, 30) || 'Text';
-const snapshot = (layer) => ({ text: layer.text, font: JSON.parse(JSON.stringify(layer.font)), width: layer.width, name: layer.name, x: layer.x, y: layer.y });
+const snapshot = (layer) => ({ text: layer.text, font: JSON.parse(JSON.stringify(layer.font)), width: layer.width, name: layer.name, x: layer.x, y: layer.y, pathText: layer.pathText ? JSON.parse(JSON.stringify(layer.pathText)) : null });
 function restore(layer, snap) {
   layer.text = snap.text;
   layer.font = JSON.parse(JSON.stringify(snap.font));
@@ -130,7 +135,16 @@ function restore(layer, snap) {
   layer.name = snap.name;
   if (snap.x !== undefined) layer.x = snap.x;
   if (snap.y !== undefined) layer.y = snap.y;
+  if ('pathText' in snap) layer.pathText = snap.pathText ? JSON.parse(JSON.stringify(snap.pathText)) : null;
   layer.touch();
+}
+/**
+ * The text box in the layer's base space: the paragraph/point box for plain text, the glyph union
+ * (`layout().box`) for text on a path and stacked text (lib/text-path.js).
+ */
+function textBox(layer, lay = layer.layout()) {
+  if (lay.box) return { x: lay.box.x, y: lay.box.y, width: lay.box.width, height: lay.box.height, glyphs: true };
+  return { x: layer.x, y: layer.y, width: layer.width ?? lay.width, height: Math.max(lay.height, lay.lineHeight), glyphs: false };
 }
 /** False when the layer or any group above it is hidden. */
 const shown = (layer) => {
@@ -305,8 +319,9 @@ export class TypeTool extends Tool {
     return true;
   }
   cancel() {
-    if (this.drag) {
+    if (this.drag || this.offsetDrag) {
       this.drag = null;
+      this.offsetDrag = null;
       return true;
     }
     if (this.resize) {
@@ -334,10 +349,9 @@ export class TypeTool extends Tool {
     for (const l of list) {
       const q = this.toLocal(l, p);
       if (!q) continue;
-      const lay = l.layout();
-      const w = l.width ?? lay.width, h = Math.max(lay.height, lay.lineHeight);
+      const b = textBox(l);
       const pad = 4 / zoom;
-      if (q.x >= l.x - pad && q.x <= l.x + w + pad && q.y >= l.y - pad && q.y <= l.y + h + pad) return l;
+      if (q.x >= b.x - pad && q.x <= b.x + b.width + pad && q.y >= b.y - pad && q.y <= b.y + b.height + pad) return l;
     }
     return null;
   }
@@ -356,6 +370,7 @@ export class TypeTool extends Tool {
     const l = s?.layer;
     if (!l || l.width === null || !this.view) return null;
     const lay = l.layout();
+    if (lay.glyphs) return null; // text on a path / stacked text has no resizable box
     const w = l.width, h = Math.max(lay.height, lay.lineHeight);
     const sp = this.view.toScreen(p.x, p.y);
     const corners = { nw: [l.x, l.y], ne: [l.x + w, l.y], se: [l.x + w, l.y + h], sw: [l.x, l.y + h] };
@@ -366,6 +381,29 @@ export class TypeTool extends Tool {
     }
     return null;
   }
+  /** A visible path (active shape layer, chosen path, work path) under the document point p, for type-on-path. */
+  pathHit(p) {
+    if (!this.doc || !this.view) return null;
+    const tol = 6 / this.view.zoom;
+    for (const t of visibleTargets(this.app)) {
+      const path = t.get();
+      if (isEmptyPath(path)) continue;
+      const seg = hitSegment(path, p.x, p.y, tol);
+      if (seg) return { path, target: t };
+    }
+    return null;
+  }
+  /** Is the document point p on the start-offset I-beam of the session's text on a path (screen tolerance)? */
+  hitOffsetHandle(p) {
+    const s = this.session;
+    const l = s?.layer;
+    if (!l?.pathText || !this.view) return false;
+    const a = l.layout().anchor;
+    if (!a) return false;
+    const [dx, dy] = l.transform ? applyMatrix(l.transform, a.x, a.y) : [a.x, a.y];
+    const c = this.view.toScreen(dx, dy), sp = this.view.toScreen(p.x, p.y);
+    return Math.hypot(c.x - sp.x, c.y - sp.y) <= 9;
+  }
   onPointerDown(p) {
     const s = this.session;
     if (s) {
@@ -373,6 +411,10 @@ export class TypeTool extends Tool {
       if (handle) {
         const q = this.toLocal(s.layer, p) ?? p;
         this.resize = { layer: s.layer, handle, start: q, x: s.layer.x, width: s.layer.width };
+        return;
+      }
+      if (this.hitOffsetHandle(p)) {
+        this.offsetDrag = { layer: s.layer };
         return;
       }
       const hit = this.hitTextLayer(p);
@@ -391,9 +433,29 @@ export class TypeTool extends Tool {
       this.beginEdit(hit, { at: p });
       return;
     }
+    const onPath = this.pathHit(p);
+    if (onPath) {
+      this.beginNew({ x: p.x, y: p.y }, null, { path: onPath.path });
+      return;
+    }
     this.drag = { start: { x: p.x, y: p.y }, current: { x: p.x, y: p.y }, moved: false };
   }
   onPointerMove(p, dragging) {
+    if (!dragging && !this.session && !this.drag) this.view?.setCursor(this.pathHit(p) ? PATH_CURSOR : this.cursorStyle);
+    const od = this.offsetDrag;
+    if (dragging && od && this.session?.layer === od.layer) {
+      // dragging the I-beam slides the text along its path (part of the editing session's entry)
+      const l = od.layer;
+      const q = this.toLocal(l, p) ?? p;
+      // offsets are measured along the direction of travel, which flip reverses
+      const raw = pathOffsetAt(l.pathText.path, q.x - l.x, q.y - l.y);
+      const startOffset = Math.round((l.pathText.flip ? 1 - raw : raw) * 1000) / 1000;
+      l.pathText = { ...l.pathText, startOffset };
+      l.touch();
+      this.session.doc.changed('props', { layer: l });
+      this.layoutEditor();
+      return;
+    }
     const r = this.resize;
     if (dragging && r && this.session?.layer === r.layer) {
       const q = this.toLocal(r.layer, p) ?? p;
@@ -415,8 +477,9 @@ export class TypeTool extends Tool {
     if (Math.hypot(p.x - this.drag.start.x, p.y - this.drag.start.y) * this.view.zoom > 4) this.drag.moved = true;
   }
   onPointerUp(p) {
-    if (this.resize) {
+    if (this.resize || this.offsetDrag) {
       this.resize = null;
+      this.offsetDrag = null;
       this.session?.textarea.focus({ preventScroll: true });
       return;
     }
@@ -434,6 +497,21 @@ export class TypeTool extends Tool {
     const q = this.toLocal(layer, p);
     if (!q) return layer.text.length;
     const lay = layer.layout();
+    if (lay.glyphs) {
+      // text on a path / stacked text: the nearest glyph, before or after its centre along its baseline
+      let best = null, bestD = Infinity;
+      for (const g of lay.glyphs) {
+        if (g.hidden) continue;
+        const d = Math.hypot(g.x - q.x, g.y - q.y);
+        if (d < bestD) {
+          bestD = d;
+          best = g;
+        }
+      }
+      if (!best) return layer.text.length;
+      const along = (q.x - best.x) * Math.cos(best.angle) + (q.y - best.y) * Math.sin(best.angle);
+      return Math.min(layer.text.length, best.index + (along > 0 ? 1 : 0));
+    }
     const ctx = measureContext();
     ctx.font = cssFont(layer.font);
     const starts = [];
@@ -462,12 +540,19 @@ export class TypeTool extends Tool {
   }
 
   // ---- sessions ----
-  beginNew(at, box) {
+  beginNew(at, box, { path = null } = {}) {
     const doc = this.doc;
     const font = this.fontFromOptions();
     const ascent = font.size * 0.8; // TextLayer.layout() puts the first baseline at y + 0.8 × size
-    let x, y, width = null, transform = null;
-    if (this.vertical) {
+    let x, y, width = null, transform = null, pathText = null;
+    if (path) {
+      // type on a path (lib/text-path.js): the text starts where the path was clicked; the path is
+      // stored in document space, so the layer's offset is zero
+      x = 0;
+      y = 0;
+      if (font.orientation === 'vertical') delete font.orientation;
+      pathText = { path: clonePath(path), startOffset: Math.round(pathOffsetAt(path, at.x, at.y) * 1000) / 1000, flip: false, align: font.align ?? 'left' };
+    } else if (this.vertical) {
       // rotate 90° clockwise about the box's local top-left corner (qx, qy)
       let qx, qy;
       if (box) {
@@ -489,7 +574,7 @@ export class TypeTool extends Tool {
       x = at.x;
       y = at.y - ascent;
     }
-    const layer = new TextLayer({ x: Math.round(x * 100) / 100, y: Math.round(y * 100) / 100, width, text: '', font, transform });
+    const layer = new TextLayer({ x: Math.round(x * 100) / 100, y: Math.round(y * 100) / 100, width, text: '', font, transform, pathText });
     structural(this.app, this.name, () => {
       doc.add(layer);
       doc.setActive(layer);
@@ -544,7 +629,7 @@ export class TypeTool extends Tool {
         return { x: d.x, y: d.y, shift: ev.shiftKey, alt: ev.altKey, ctrl: ev.ctrlKey, meta: ev.metaKey, button: ev.button, buttons: ev.buttons, pointerType: ev.pointerType, pressure: 1, original: ev };
       };
       const p = toDoc(e);
-      if (!this.hitBoxHandle(p)) return;
+      if (!this.hitBoxHandle(p) && !this.hitOffsetHandle(p)) return;
       e.preventDefault();
       this.onPointerDown(p);
       ta.setPointerCapture(e.pointerId);
@@ -689,6 +774,24 @@ export class TypeTool extends Tool {
     ta.style.letterSpacing = `${(font.letterSpacing ?? 0) * z}px`;
     ta.style.textAlign = font.align ?? 'left';
     ta.style.caretColor = hex6(font.color);
+    let m = view.matrix();
+    if (layer.transform) m = m.multiply(new DOMMatrix(layer.transform));
+    if (lay.glyphs) {
+      // text on a path / stacked text: the editor is a plain box over the glyphs (the layer draws them)
+      const b = textBox(layer, lay);
+      ta.wrap = 'soft';
+      ta.style.whiteSpace = 'pre-wrap';
+      ta.style.textAlign = 'left';
+      ta.style.width = `${Math.max(b.width * z, fs * 2, 40)}px`;
+      ta.style.height = `${Math.max(b.height * z, lh)}px`;
+      m = m.translate(b.x, b.y).scale(1 / z);
+      ta.style.transform = `matrix(${m.a}, ${m.b}, ${m.c}, ${m.d}, ${m.e}, ${m.f})`;
+      ta.scrollTop = 0;
+      ta.scrollLeft = 0;
+      s.pinArea?.();
+      view.invalidate();
+      return;
+    }
     const point = layer.width === null;
     ta.wrap = point ? 'off' : 'soft';
     ta.style.whiteSpace = point ? 'pre' : 'pre-wrap';
@@ -700,8 +803,6 @@ export class TypeTool extends Tool {
     const align = font.align ?? 'left';
     const shiftX = point ? (align === 'center' ? -extra / 2 : align === 'right' ? -extra : 0) : 0;
     const dy = lay.ascent * z - this.cssBaseline(fontCss, lh, ta.parentElement);
-    let m = view.matrix();
-    if (layer.transform) m = m.multiply(new DOMMatrix(layer.transform));
     m = m.translate(layer.x, layer.y).scale(1 / z).translate(shiftX, dy);
     ta.style.transform = `matrix(${m.a}, ${m.b}, ${m.c}, ${m.d}, ${m.e}, ${m.f})`;
     ta.scrollTop = 0;
@@ -798,8 +899,8 @@ export class TypeTool extends Tool {
     if (s && s.doc === view.doc) {
       const l = s.layer;
       const lay = l.layout();
-      const w = l.width ?? lay.width, h = Math.max(lay.height, lay.lineHeight);
-      const corners = [[l.x, l.y], [l.x + w, l.y], [l.x + w, l.y + h], [l.x, l.y + h]].map(([x, y]) => {
+      const b = textBox(l, lay);
+      const corners = [[b.x, b.y], [b.x + b.width, b.y], [b.x + b.width, b.y + b.height], [b.x, b.y + b.height]].map(([x, y]) => {
         const [dx, dy] = l.transform ? applyMatrix(l.transform, x, y) : [x, y];
         return view.toScreen(dx, dy);
       });
@@ -811,7 +912,7 @@ export class TypeTool extends Tool {
       ctx.strokeStyle = 'rgba(30,136,255,0.9)';
       ctx.lineWidth = 1;
       ctx.stroke();
-      if (l.width !== null) {
+      if (l.width !== null && !b.glyphs) {
         ctx.setLineDash([]);
         ctx.fillStyle = '#fff';
         ctx.strokeStyle = 'rgba(30,136,255,0.9)';
@@ -819,6 +920,26 @@ export class TypeTool extends Tool {
           ctx.fillRect(Math.round(c.x) - 3, Math.round(c.y) - 3, 6, 6);
           ctx.strokeRect(Math.round(c.x) - 2.5, Math.round(c.y) - 2.5, 6, 6);
         }
+      }
+      if (lay.anchor) {
+        // the start-offset I-beam of text on a path: drag it to slide the text along
+        const a = lay.anchor;
+        const [dx, dy] = l.transform ? applyMatrix(l.transform, a.x, a.y) : [a.x, a.y];
+        const c = view.toScreen(dx, dy);
+        ctx.save();
+        ctx.translate(c.x, c.y);
+        ctx.rotate(a.angle + (view.rotation * Math.PI) / 180);
+        ctx.setLineDash([]);
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = '#fff';
+        ctx.beginPath();
+        ctx.moveTo(0, -10);
+        ctx.lineTo(0, 10);
+        ctx.stroke();
+        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = 'rgba(30,136,255,1)';
+        ctx.stroke();
+        ctx.restore();
       }
     }
     ctx.restore();

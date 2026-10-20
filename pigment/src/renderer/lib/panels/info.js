@@ -2,7 +2,14 @@
 // pointer position, document size, selection size, active layer bounds and the colour sampler
 // points placed with the Color Sampler tool (doc.samplers).
 import { layerContentBounds } from './properties.js';
-import { rgbaToHex } from '../../../shared/pixels/color.js';
+import { rgbaToHex, rgbToCmyk, rgbToLab, rgbToHsv } from '../../../shared/pixels/color.js';
+
+// the secondary readout (settings.infoSecondary): label -> rows of [key, text]
+const SECONDARY = {
+  cmyk: { label: 'CMYK', rows: ([r, g, b]) => rgbToCmyk(r, g, b).map((v, i) => ['CMYK'[i], `${Math.round(v)}%`]) },
+  lab: { label: 'Lab', rows: ([r, g, b]) => rgbToLab(r, g, b).map((v, i) => ['Lab'[i], String(Math.round(v))]) },
+  hsb: { label: 'HSB', rows: ([r, g, b]) => rgbToHsv(r, g, b).map((v, i) => (i ? [i === 1 ? 'S' : 'B', `${Math.round(v * 100)}%`] : ['H', `${Math.round(v)}°`])) },
+};
 
 const UNIT_LABEL = { px: 'px', in: 'in', cm: 'cm', mm: 'mm', pt: 'pt', percent: '%' };
 
@@ -18,6 +25,12 @@ export function install(app) {
           <span class="k">G</span><span data-k="g">—</span>
           <span class="k">B</span><span data-k="b">—</span>
           <span class="k">A</span><span data-k="a">—</span>
+        </div>
+        <div class="info-secondary">
+          <select class="select info-mode" data-k="mode" aria-label="Secondary colour readout" title="Second readout: CMYK, Lab or HSB">
+            <option value="cmyk">CMYK</option><option value="lab">Lab</option><option value="hsb">HSB</option>
+          </select>
+          <div class="info-grid info-alt" data-k="alt"></div>
         </div>
       </div>
       <div class="info-col">
@@ -41,6 +54,19 @@ export function install(app) {
       <div class="info-sampler-list"></div>
     </div>`;
   const $ = (k) => el.querySelector(`[data-k="${k}"]`);
+  const mode = $('mode');
+  const secondary = () => (SECONDARY[app.settings.infoSecondary] ? app.settings.infoSecondary : 'cmyk');
+  mode.value = secondary();
+  mode.addEventListener('change', () => {
+    app.saveSettingsSoon({ infoSecondary: mode.value });
+    renderPointer();
+  });
+  if (!document.getElementById('info-secondary-style')) {
+    const style = document.createElement('style');
+    style.id = 'info-secondary-style';
+    style.textContent = '.info-secondary { margin-top: 6px; } .info-panel .info-mode { height: 20px; font-size: 10px; padding: 0 4px; margin-bottom: 4px; } .info-panel .info-alt { font-family: var(--mono); }';
+    document.head.appendChild(style);
+  }
   const samplersBox = el.querySelector('.info-samplers');
   const samplerList = el.querySelector('.info-sampler-list');
   let pointer = null; // { doc, x, y }
@@ -93,6 +119,16 @@ export function install(app) {
     $('units').textContent = ux ? `${ux} · ${uy}` : '';
     const rgba = inside ? sampleAt(doc, x, y) : null;
     const sw = $('swatch');
+    const sec = SECONDARY[secondary()];
+    if (mode.value !== secondary()) mode.value = secondary();
+    $('alt').replaceChildren(...sec.rows(rgba ?? [0, 0, 0]).flatMap(([k, v]) => {
+      const key = document.createElement('span');
+      key.className = 'k';
+      key.textContent = k;
+      const val = document.createElement('span');
+      val.textContent = rgba ? v : '—';
+      return [key, val];
+    }));
     if (rgba) {
       $('r').textContent = String(rgba[0]);
       $('g').textContent = String(rgba[1]);
@@ -179,7 +215,7 @@ export function install(app) {
   app.on('selection:changed', () => scheduleDoc());
   app.on('samplers:changed', () => scheduleDoc(0));
   app.on('settings:changed', (patch) => {
-    if (patch && 'rulerUnit' in patch) scheduleDoc(0);
+    if (patch && ('rulerUnit' in patch || 'infoSecondary' in patch)) scheduleDoc(0);
   });
   app.on('doc:change', (e) => {
     if (e.doc !== app.doc) return;

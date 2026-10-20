@@ -251,7 +251,9 @@ export class CanvasView {
     const composite = this.compositor.composite(this.doc);
     ctx.imageSmoothingEnabled = this.zoom < 4;
     ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(composite, 0, 0);
+    // colour proofing (lib/color-modes.js) may hand back a processed copy to draw instead of the composite
+    const shown = (this.postProcess && this.postProcess(composite, this)) || composite;
+    ctx.drawImage(shown, 0, 0);
     if (this.maskView && this.doc.active?.mask?.canvas) {
       ctx.fillStyle = '#000';
       ctx.fillRect(0, 0, this.doc.width, this.doc.height);
