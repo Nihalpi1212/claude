@@ -518,7 +518,7 @@ export class BezierWarp extends WarpSession {
     const g = this.group(bar);
     this.fields = {};
     this.fields.preset = this.select(g, 'warp-preset', 'Warp', WARP_PRESETS, this.preset, (v) => this.setPreset(v === 'custom' ? 'custom' : v));
-    this.fields.bend = this.number(g, 'warp-bend', 'Bend', { min: -100, max: 100, step: 1, unit: '%', slider: true }, this.bend, (v) => this.setPreset(this.preset === 'custom' || this.preset === 'none' ? 'arc' : this.preset, { bend: v }));
+    this.fields.bend = this.number(g, 'warp-bend', 'Bend', { min: -100, max: 100, step: 1, unit: '%', slider: true }, this.bend, (v) => this.setPreset(this.preset, { bend: v }));
     this.fields.h = this.number(g, 'warp-h', 'H', { min: -100, max: 100, step: 1, unit: '%' }, this.h, (v) => this.setPreset(this.preset === 'custom' ? 'none' : this.preset, { h: v }));
     this.fields.v = this.number(g, 'warp-v', 'V', { min: -100, max: 100, step: 1, unit: '%' }, this.v, (v) => this.setPreset(this.preset === 'custom' ? 'none' : this.preset, { v }));
     const actions = this.group(bar);
@@ -536,7 +536,8 @@ export class BezierWarp extends WarpSession {
     set(f.bend, this.bend);
     set(f.h, this.h);
     set(f.v, this.v);
-    const geometric = this.preset !== 'custom';
+    // Bend only shapes a geometric preset: it is idle for None (nothing to bend) and Custom (a hand-edited net)
+    const geometric = this.preset !== 'custom' && this.preset !== 'none';
     f.bend.input.disabled = !geometric;
     if (f.bend.range) f.bend.range.disabled = !geometric;
   }
@@ -918,17 +919,22 @@ export class PuppetWarp extends WarpSession {
     this.meshInfo = { sp, cols, rows, cells };
     this.invalidate();
   }
-  /** Pins as the MLS engine sees them; a rotated pin adds two satellites that carry its rotation. */
+  /**
+   * Pins as the MLS engine sees them. A rotated pin adds four satellites turned about it; their
+   * radius is a share of the distance to the nearest other pin (a quarter of the box for a lone
+   * pin), because satellites hugging the pin would be outweighed by the anchors everywhere else
+   * and the turn would never show.
+   */
   mlsPins() {
     const out = [];
-    const r = Math.max(8, Math.min(this.box.width, this.box.height) * 0.1);
     for (const p of this.pins) {
       out.push({ from: [p.x, p.y], to: [p.tx, p.ty] });
-      if (p.angle) {
-        const c = Math.cos(p.angle), s = Math.sin(p.angle);
-        out.push({ from: [p.x + r, p.y], to: [p.tx + r * c, p.ty + r * s] });
-        out.push({ from: [p.x, p.y + r], to: [p.tx - r * s, p.ty + r * c] });
-      }
+      if (!p.angle) continue;
+      let nearest = Infinity;
+      for (const o of this.pins) if (o !== p) nearest = Math.min(nearest, Math.hypot(o.x - p.x, o.y - p.y));
+      const r = Math.max(8, Number.isFinite(nearest) ? nearest * 0.4 : Math.max(this.box.width, this.box.height) * 0.25);
+      const c = Math.cos(p.angle), s = Math.sin(p.angle);
+      for (const [dx, dy] of [[r, 0], [0, r], [-r, 0], [0, -r]]) out.push({ from: [p.x + dx, p.y + dy], to: [p.tx + dx * c - dy * s, p.ty + dx * s + dy * c] });
     }
     return out;
   }
@@ -997,9 +1003,18 @@ export class PuppetWarp extends WarpSession {
     const pin = this.pins[d.index];
     if (!pin) return;
     if (d.rotate || p.alt) {
-      // Alt-drag: rotate the surroundings about the pin; the pin itself stays put
-      const a0 = Math.atan2(d.start[1] - d.ty, d.start[0] - d.tx), a1 = Math.atan2(p.y - d.ty, p.x - d.tx);
-      pin.angle = d.angle + (a1 - a0);
+      // Alt-drag: rotate the surroundings about the pin, which stays put. The drag starts on the pin
+      // itself, so there is no start angle to measure from: the angle accumulates from the pointer's
+      // sweep around the pin instead, ignoring moves while it is still within a few screen px of it.
+      const prev = d.prev ?? d.start;
+      const near = 3 / Math.max(0.01, this.view?.zoom ?? 1);
+      if (dist(prev, [d.tx, d.ty]) > near && dist([p.x, p.y], [d.tx, d.ty]) > near) {
+        let delta = Math.atan2(p.y - d.ty, p.x - d.tx) - Math.atan2(prev[1] - d.ty, prev[0] - d.tx);
+        if (delta > Math.PI) delta -= 2 * Math.PI;
+        else if (delta < -Math.PI) delta += 2 * Math.PI;
+        pin.angle += delta;
+      }
+      d.prev = [p.x, p.y];
       pin.tx = d.tx;
       pin.ty = d.ty;
     } else {

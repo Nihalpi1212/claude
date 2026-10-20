@@ -200,21 +200,36 @@ test('Puppet Warp: two pins, dragging one moves the pixels near it and not the p
 test('Puppet Warp: Alt-drag rotates around a pin', async ({ page }) => {
   const errors = await openApp(page);
   await newDoc(page, { background: 'transparent' });
-  await paint(page, '#ff0000', [100, 140, 200, 20]);
+  await paint(page, '#ff0000', [100, 140, 300, 20]);
+  const n = await historyLength(page);
   await runAwait(page, 'edit:puppet-warp');
   await click(page, 110, 150);
-  await click(page, 290, 150);
+  await click(page, 250, 150);
   await expect.poll(() => page.evaluate(() => window.pigmentApp.transformTool.warp.pins.length)).toBe(2);
-  // rotate about the right pin: Alt-drag from above the pin to its right (a quarter turn)
-  await drag(page, [290, 150], [340, 150], { modifiers: ['Alt'] });
-  const angle = await page.evaluate(() => window.pigmentApp.transformTool.warp.pins[1].angle);
-  expect(Math.abs(angle)).toBeGreaterThan(0);
-  // the pin itself stayed put while the mesh around it turned
+  // Alt-drag starting on the right pin, out to its right and then down: a quarter turn clockwise
+  const a = await screenPoint(page, 250, 150), b = await screenPoint(page, 300, 150), c = await screenPoint(page, 250, 200);
+  await page.keyboard.down('Alt');
+  await page.mouse.move(a.x, a.y);
+  await page.mouse.down();
+  await page.mouse.move(b.x, b.y, { steps: 8 });
+  await page.mouse.move(c.x, c.y, { steps: 12 });
+  await page.mouse.up();
+  await page.keyboard.up('Alt');
   const pin = await page.evaluate(() => window.pigmentApp.transformTool.warp.pins[1]);
-  expect(Math.round(pin.tx)).toBe(290);
+  expect(pin.angle).toBeCloseTo(Math.PI / 2, 2);
+  // the pin itself stayed put while the arm beyond it swung down
+  expect(Math.round(pin.tx)).toBe(250);
   expect(Math.round(pin.ty)).toBe(150);
-  await page.keyboard.press('Escape');
+  await expect.poll(async () => clear(await pixel(page, 380, 150))).toBe(true);
+  expect(red(await pixel(page, 250, 220))).toBe(true);
+  expect(red(await pixel(page, 120, 150))).toBe(true); // the other pin holds its end
+  await page.keyboard.press('Enter');
   await expect.poll(() => session(page)).toEqual({ active: false, warp: null, tool: 'move' });
+  expect(await historyLength(page)).toBe(n + 1);
+  expect(clear(await pixel(page, 380, 150))).toBe(true);
+  expect(red(await pixel(page, 250, 220))).toBe(true);
+  await runAwait(page, 'edit:undo');
+  expect(red(await pixel(page, 380, 150))).toBe(true);
   expect(errors).toEqual([]);
 });
 
@@ -224,9 +239,9 @@ test('Edit › Transform › Warp is enabled with a raster layer and the native 
   const enabled = await page.evaluate(() => ['edit:transform-warp', 'edit:perspective-warp', 'edit:puppet-warp'].map((id) => window.pigmentApp.commands.isEnabled(id)));
   expect(enabled).toEqual([true, true, true]);
   // the warp toggle is checked only while a Bézier warp session runs
-  expect(await page.evaluate(() => window.pigmentApp.commands.get('edit:transform-warp').checked())).toBe(false);
+  expect(await page.evaluate(() => window.pigmentApp.commands.isChecked('edit:transform-warp'))).toBe(false);
   await run(page, 'edit:transform-warp');
-  await expect.poll(() => page.evaluate(() => window.pigmentApp.commands.get('edit:transform-warp').checked())).toBe(true);
+  await expect.poll(() => page.evaluate(() => window.pigmentApp.commands.isChecked('edit:transform-warp'))).toBe(true);
   await page.keyboard.press('Escape');
   expect(errors).toEqual([]);
 });
