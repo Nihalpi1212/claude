@@ -37,8 +37,38 @@ export async function aiCall(method, payload = {}) {
     if (method === 'models') return { data: [] };
     return null;
   }
-  if (isElectron && typeof bridge.ai === 'function') return bridge.ai(method, payload);
+  if (isElectron && typeof bridge.ai === 'function') {
+    try {
+      return await bridge.ai(method, payload);
+    } catch (err) {
+      throw parseBridgeError(err);
+    }
+  }
   return browserCall(method, payload);
+}
+
+/** Separates the message from the JSON { code, status } tail src/main/ai.js appends (Electron keeps only the message). */
+export const AI_ERROR_SEPARATOR = '\u001f';
+
+/** Restores { message, code, status } from an error that crossed the IPC bridge. */
+export function parseBridgeError(err) {
+  let message = String(err?.message ?? err ?? 'Request failed');
+  // ipcRenderer.invoke wraps the main-process message: "Error invoking remote method 'pigment:ai': Error: <message>"
+  message = message.replace(/^Error invoking remote method '[^']*':\s*(?:[A-Za-z]*Error:\s*)?/, '');
+  let code = null;
+  let status = 0;
+  const i = message.indexOf(AI_ERROR_SEPARATOR);
+  if (i >= 0) {
+    try {
+      const tail = JSON.parse(message.slice(i + 1));
+      code = typeof tail.code === 'string' ? tail.code : null;
+      status = Number(tail.status) || 0;
+    } catch {
+      /* no tail */
+    }
+    message = message.slice(0, i);
+  }
+  return Object.assign(new Error(message.trim() || 'Request failed'), { code, status });
 }
 
 /** Browser build: the same methods without a main process (API keys only). */

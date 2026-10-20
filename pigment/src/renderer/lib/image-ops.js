@@ -963,6 +963,8 @@ export class TransformTool extends Tool {
     if (!s) return;
     const m = this.matrix;
     const big = s.box.width * s.box.height > 4e6;
+    // warp hook (lib/warp.js): an active warp session resamples raster pixels through its mesh instead of the quad
+    const warp = this.warp?.active ? this.warp : null;
     if (s.selectionOnly) {
       this.view?.invalidate();
       this.syncBar();
@@ -970,7 +972,7 @@ export class TransformTool extends Tool {
     }
     if (s.floating) {
       const f = s.floating;
-      const r = m ? affineCanvas(f.piece, f.pieceX, f.pieceY, m, { smooth: !big || final }) : perspectiveCanvas(f.piece, f.pieceX, f.pieceY, this.quadFor({ x: f.pieceX, y: f.pieceY, width: f.piece.width, height: f.piece.height }), { maxSize: final ? 0 : 700 });
+      const r = warp ? warp.render(f.piece, f.pieceX, f.pieceY, { final }) : m ? affineCanvas(f.piece, f.pieceX, f.pieceY, m, { smooth: !big || final }) : perspectiveCanvas(f.piece, f.pieceX, f.pieceY, this.quadFor({ x: f.pieceX, y: f.pieceY, width: f.piece.width, height: f.piece.height }), { maxSize: final ? 0 : 700 });
       if (!s.previewLayer) {
         s.previewLayer = new RasterLayer({ name: 'Transform', canvas: r.canvas, x: r.x, y: r.y, opacity: f.layer.opacity, blend: f.layer.blend });
         s.previewLayer.preview = true;
@@ -989,7 +991,7 @@ export class TransformTool extends Tool {
         if (l.type === 'raster') {
           const src = s.sources.get(l);
           if (!src) continue;
-          const r = m ? affineCanvas(src.canvas, src.x, src.y, m, { smooth: !big || final }) : perspectiveCanvas(src.canvas, src.x, src.y, this.quadFor({ x: src.x, y: src.y, width: src.canvas.width, height: src.canvas.height }), { maxSize: final ? 0 : 700 });
+          const r = warp ? warp.render(src.canvas, src.x, src.y, { final }) : m ? affineCanvas(src.canvas, src.x, src.y, m, { smooth: !big || final }) : perspectiveCanvas(src.canvas, src.x, src.y, this.quadFor({ x: src.x, y: src.y, width: src.canvas.width, height: src.canvas.height }), { maxSize: final ? 0 : 700 });
           // pixels of the layer outside the content rect are transparent: the preview replaces the canvas
           l.canvas = r.canvas;
           l.x = r.x;
@@ -1067,7 +1069,9 @@ export class TransformTool extends Tool {
     const app = this.app;
     const d = s.doc;
     const m = this.matrix;
-    const identity = m && Math.abs(m[0] - 1) < 1e-9 && Math.abs(m[3] - 1) < 1e-9 && Math.abs(m[1]) < 1e-9 && Math.abs(m[2]) < 1e-9 && Math.abs(m[4]) < 1e-9 && Math.abs(m[5]) < 1e-9;
+    // warp hook (lib/warp.js): a warp session renders through its mesh; an unchanged mesh is the identity
+    const warp = this.warp?.active ? this.warp : null;
+    const identity = warp ? !warp.changed : m && Math.abs(m[0] - 1) < 1e-9 && Math.abs(m[3] - 1) < 1e-9 && Math.abs(m[1]) < 1e-9 && Math.abs(m[2]) < 1e-9 && Math.abs(m[4]) < 1e-9 && Math.abs(m[5]) < 1e-9;
     this.restoreOriginals();
     if (identity) {
       d.changed('pixels');
@@ -1078,6 +1082,7 @@ export class TransformTool extends Tool {
     try {
       const quality = s.interp;
       const render = (canvas, x, y) => {
+        if (warp) return warp.render(canvas, x, y, { final: true }); // warp hook (lib/warp.js)
         if (m) {
           if (s.exact) return affineCanvas(canvas, x, y, m, { smooth: false });
           if (quality === 'nearest') return affineCanvas(canvas, x, y, m, { smooth: false });
@@ -1087,8 +1092,9 @@ export class TransformTool extends Tool {
       };
       // masks follow the layer: affine through transformMaskCanvas, distort/perspective through the homography
       const mapMask = (mask) => {
-        if (m) return transformMaskCanvas(mask, m, d.width, d.height, { smooth: !s.exact });
-        const r = perspectiveCanvas(mask, 0, 0, this.quadFor({ x: 0, y: 0, width: mask.width, height: mask.height }), { quality: 'bilinear' });
+        if (m && !warp) return transformMaskCanvas(mask, m, d.width, d.height, { smooth: !s.exact });
+        // warp hook (lib/warp.js): the mask follows the pixels through the same mesh
+        const r = warp ? warp.render(mask, 0, 0, { final: true }) : perspectiveCanvas(mask, 0, 0, this.quadFor({ x: 0, y: 0, width: mask.width, height: mask.height }), { quality: 'bilinear' });
         const c = createCanvas(d.width, d.height);
         const ctx = c.getContext('2d');
         const bg = cornerAlpha(mask);
@@ -1118,7 +1124,7 @@ export class TransformTool extends Tool {
         d.history.push({ label: 'Transform mask', undo: () => set(before), redo: () => set(after), bytes: d.width * d.height * 4, at: Date.now() });
       };
       // selection masks: an axis-aligned scale keeps hard edges hard (no bilinear halo)
-      const renderMask = (c) => (m && isAxisAligned(m) ? affineCanvas(c, 0, 0, m, { smooth: false }) : render(c, 0, 0));
+      const renderMask = (c) => (m && !warp && isAxisAligned(m) ? affineCanvas(c, 0, 0, m, { smooth: false }) : render(c, 0, 0));
       if (s.selectionOnly) {
         const r = renderMask(s.selCanvas);
         const c = createCanvas(d.width, d.height);
@@ -1128,7 +1134,7 @@ export class TransformTool extends Tool {
       } else if (s.floating) {
         const f = s.floating;
         const r = render(f.piece, f.pieceX, f.pieceY);
-        const label = 'Free transform';
+        const label = warp?.label ?? 'Free transform';
         d.history.group(label, () => {
           d.history.replaceCanvas(label, f.layer, () => {
             const b = unionRect({ x: f.layer.x, y: f.layer.y, width: f.erased.width, height: f.erased.height }, { x: r.x, y: r.y, width: r.canvas.width, height: r.canvas.height });
@@ -1151,7 +1157,7 @@ export class TransformTool extends Tool {
           d.history.push({ label: 'Transform selection', undo: () => set(before), redo: () => set(after), bytes: 0, at: Date.now() });
         });
       } else {
-        d.history.group('Free transform', () => {
+        d.history.group(warp?.label ?? 'Free transform', () => {
           for (const o of s.orig) {
             const l = o.layer;
             if (l.type === 'raster') {
@@ -1173,7 +1179,7 @@ export class TransformTool extends Tool {
           for (const g of s.groupMasks ?? []) if (g.mask?.canvas) transformMask(g);
         });
       }
-      if (m) {
+      if (m && !warp) {
         // Transform Again replays the linear part about the new box centre plus the centre's displacement (a plain move included)
         const c0 = [s.box.x + s.box.width / 2, s.box.y + s.box.height / 2];
         const c1 = T.applyMatrix(m, c0[0], c0[1]);
@@ -1416,6 +1422,7 @@ export class TransformTool extends Tool {
   drawOverlay(ctx, view) {
     const s = this.session;
     if (!s) return;
+    if (this.warp?.active) return this.warp.drawOverlay(ctx, view); // warp hook (lib/warp.js): the mesh replaces the quad
     const q = this.screenQuad();
     ctx.save();
     if (s.selectionOnly) {
