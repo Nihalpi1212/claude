@@ -432,14 +432,18 @@ listModels(provider): Promise<{ chat: string[], image: string[], default: { chat
   // OpenAI defaults: chat = first of [gpt-5.5, gpt-5.1, gpt-5, gpt-4.1, gpt-4o] present, image = first of [gpt-image-1.5, gpt-image-1, gpt-image-2] present
   // Gemini: chat = first of [gemini-2.5-pro, gemini-2.5-flash, gemini-2.0-flash] present, image = first of [gemini-3.1-flash-image(-preview), gemini-3-pro-image-preview, gemini-2.5-flash-image] present
 chat({ provider, model, instructions, messages: { role: 'user'|'assistant', text?: string, images?: string[] /* data URLs */ }[],
-       tools?: { name, description, parameters /* JSON schema */ }[], onToolCall?: (name, args) => Promise<any>, maxRounds?: number })
-  : Promise<{ text: string, calls: { name, args, result }[] }>
+       tools?: { name, description, parameters /* JSON schema */ }[], onToolCall?: (name, args) => Promise<any>, maxRounds?: number,
+       shouldStop?: () => boolean /* checked before every follow-up request; an onToolCall error with code 'stopped' aborts the loop */ })
+  : Promise<{ text: string, calls: { name, args, result }[], truncated: boolean /* the model wanted more rounds than maxRounds */ }>
   // OpenAI: POST /responses (input items input_text / input_image; function tools; function_call -> function_call_output loop, the whole
-  // history resent each round). Gemini: POST /models/{model}:generateContent (parts text / inline_data; tools.functionDeclarations;
-  // functionCall -> functionResponse parts).
+  // history resent each round). Gemini: POST /models/{model}:generateContent (parts text / inline_data; tools.functionDeclarations built by
+  // geminiDeclaration(): a tool without properties declares no parameters, open objects and untyped values become JSON strings that the
+  // tool implementations parse back (assistant.js parseMaybeJson); functionCall -> functionResponse parts).
 generateImage({ provider, model, prompt, width, height, transparent?: boolean, n?: 1 }): Promise<HTMLCanvasElement>
   // OpenAI POST /images/generations { model, prompt, n, size, quality: 'auto', background: transparent ? 'transparent' : 'auto', output_format: 'png' }
-  //   (size from the nearest of 1024x1024 / 1536x1024 / 1024x1536, the result is resampled to width × height; `background` only for gpt-image-1/1.5)
+  //   (size from the nearest the model accepts: gpt-image 1024x1024 / 1536x1024 / 1024x1536, dall-e-3 1024x1024 / 1792x1024 / 1024x1792, dall-e-2 squares;
+  //   the result is scaled to cover width × height and centre-cropped, never stretched; `background` only for gpt-image-1/1.5; dall-e-3 cannot edit)
+  //   Gemini with `transparent`: the prompt asks for a plain white background and the near-white border is keyed out (keyWhiteBorder).
   // Gemini POST /models/{model}:generateContent with generationConfig.responseModalities ['IMAGE'] (+ 'TEXT' when the model needs it),
   //   imageConfig.aspectRatio from the nearest supported ratio, imageSize only for gemini-3.x; the first inlineData part is the image.
 editImage({ provider, model, image: HTMLCanvasElement, mask?: HTMLCanvasElement /* alpha 255 = pixels to change */, prompt, transparent?: boolean })
@@ -455,9 +459,11 @@ Images sent to a provider are downscaled so the long edge is at most 1536 px (Op
 **Features (`lib/ai/features.js`, AI menu).** Every command checks `status` first and opens the accounts dialog when nothing is connected; long requests run under `app.busy` with a cancel button and a toast on error. Results land as new layers above the active one (undoable through `structural`) except where noted:
 
 - `ai:generative-fill` (needs a selection): crops a square-ish region around the selection bounds padded by 25 % (clamped to the canvas, at most 1536 px), `editImage` with the selection as mask, composites the answer through the selection (feathered 1 px) into a new layer "Generative Fill". Prompt dialog with provider/model selects (remembered in `settings.ai`) and a "Variations: 1–3" count (one layer each).
-- `ai:generative-expand`: the transparent area of the canvas (after Canvas Size) is the mask; same flow, layer "Generative Expand".
-- `ai:generate-image`: prompt + size (document size by default, or a new document of W × H) → new layer or new document.
-- `ai:remove-background`: `editImage` with prompt "remove the background, keep the subject, transparent background" and `transparent: true`; the result's alpha becomes a layer mask on a copy of the layer (so it stays editable); Gemini (no alpha output) returns the subject on white, the near-white border is keyed out.
+- `ai:generative-expand`: the dialog takes the new canvas size and anchor; the canvas grows with a transparent extension (`image:canvas-size` with `color: null`) and the transparent area of the composite is the mask (a transparent band added earlier by Canvas Size counts too); same flow, layer "Generative Expand".
+- `ai:generate-image`: prompt + size (document size by default, or a new document of W × H) → new layer or new document (recorded as a "Generate Image" history entry, so the document counts as unsaved).
+- `ai:remove-background`: `editImage` with prompt "remove the background, keep the subject, transparent background" and `transparent: true`; the result's alpha becomes a layer mask on a copy of the layer (so it stays editable), intersected with the layer's existing enabled mask (whose hidden pixels are also not sent); Gemini (no alpha output) returns the subject on white, the near-white border is keyed out.
+
+Provider choice: `settings.ai.defaultProvider` ("Preferred provider" in AI Accounts) wins whenever it serves the request kind; otherwise the provider the last dialog chose for that kind (`imageProvider` / `chatProvider`); changing the preferred provider resets both. Masks built from the selection are feathered as if the canvas continued beyond its border (`featherKeepingBorder`), so a fill touching the border stays opaque there.
 - `ai:replace-background` / `ai:replace-sky`: prompt dialog; mask = inverse of the subject (from `remove-background`) or the top sky region prompt; new layer.
 - `ai:describe`: `describeImage` → dialog with the text, "Copy", "Use as document description" (`doc.meta.description`).
 
