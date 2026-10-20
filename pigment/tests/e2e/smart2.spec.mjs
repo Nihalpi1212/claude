@@ -165,3 +165,51 @@ test('Rasterize keeps the part of a smart object that lies outside the canvas', 
   expect(l).toEqual({ type: 'raster', x: -300, y: -250, w: 800, h: 600, offCanvas: [255, 0, 0, 255], onCanvas: [255, 0, 0, 255] });
   expect(errors).toEqual([]);
 });
+
+test('duplicated smart object instances still share their contents after a .pigment save and reopen', async ({ page }) => {
+  const errors = await openApp(page);
+  await newDoc(page, { width: 100, height: 100, background: 'transparent' });
+  await paint(page, '#ff0000', [0, 0, 100, 100]);
+  await runAwait(page, 'layer:smart-convert');
+  await runAwait(page, 'layer:duplicate');
+  await page.evaluate(() => (window.__pigmentTest.nextSavePath = 'mem:/dup.pigment'));
+  await runAwait(page, 'file:save-as');
+  await expect.poll(() => page.evaluate(() => !!window.__pigmentTest.written['mem:/dup.pigment'])).toBe(true);
+  await page.evaluate(() => {
+    window.__pigmentTest.files['mem:/again.pigment'] = window.__pigmentTest.written['mem:/dup.pigment'];
+  });
+  await runAwait(page, 'file:open-paths', ['mem:/again.pigment']);
+  await expect.poll(() => page.evaluate(() => window.pigmentApp.doc?.path ?? null)).toBe('mem:/again.pigment');
+  const shared = await page.evaluate(() => {
+    const [a, b] = window.pigmentApp.doc.layers();
+    return { types: [a.type, b.type], shared: a.source === b.source, px: Array.from(a.sourceCanvas().getContext('2d').getImageData(50, 50, 1, 1).data) };
+  });
+  expect(shared).toEqual({ types: ['smart', 'smart'], shared: true, px: [255, 0, 0, 255] });
+  expect(errors).toEqual([]);
+});
+
+test('converting a mixed selection (a clipped layer and an unclipped one) keeps the smart object unclipped', async ({ page }) => {
+  const errors = await openApp(page);
+  await newDoc(page, { width: 300, height: 300, background: 'transparent' });
+  await paint(page, '#0000ff', [0, 0, 100, 100]);
+  await runAwait(page, 'layer:new', { name: 'A' });
+  await paint(page, '#00ff00', [0, 0, 300, 300]);
+  await runAwait(page, 'layer:clip');
+  await runAwait(page, 'layer:new', { name: 'B' });
+  await paint(page, '#ff0000', [200, 200, 50, 50]);
+  await page.evaluate(() => {
+    const d = window.pigmentApp.doc;
+    const [, a, b] = d.layers();
+    d.selected = new Set([a, b]);
+    d.setActive(b);
+    d.selected = new Set([a, b]);
+  });
+  await runAwait(page, 'layer:smart-convert');
+  const r = await page.evaluate(() => {
+    const d = window.pigmentApp.doc;
+    return d.layers().map((l) => `${l.type}${l.clip ? ':clip' : ''}`);
+  });
+  expect(r).toEqual(['raster', 'smart']);
+  expect(await pixel(page, 220, 220)).toEqual([255, 0, 0, 255]);
+  expect(errors).toEqual([]);
+});

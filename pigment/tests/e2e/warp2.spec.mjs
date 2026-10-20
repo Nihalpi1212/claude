@@ -101,7 +101,7 @@ test('Warp and Puppet Warp keep the layer mask outside the warped box', async ({
   expect(errors).toEqual([]);
 });
 
-test('Warp toggles inside one session: Escape cancels a pending scale too, the pressed button returns to Free Transform', async ({ page }) => {
+test('Warp toggles inside one session when untouched; a scaled Free Transform is applied first and survives any preset', async ({ page }) => {
   const errors = await openApp(page);
   await newDoc(page, { background: 'transparent' });
   await paint(page, '#ff0000', [100, 100, 100, 100]);
@@ -113,25 +113,28 @@ test('Warp toggles inside one session: Escape cancels a pending scale too, the p
   await page.locator('#options-bar .warp-toggle').click();
   await expect.poll(() => session(page)).toEqual({ active: true, warp: null });
   expect(await historyLength(page)).toBe(n);
-  // scale 2x, then Warp: the net starts on the scaled box; Escape cancels both
+  // scale 2x, then Warp: the scale is applied as its own step and the warp starts on the scaled pixels
   await page.evaluate(() => {
     const tt = window.pigmentApp.transformTool;
-    const s = tt.session;
-    s.quad = [[100, 100], [300, 100], [300, 300], [100, 300]];
+    tt.session.quad = [[100, 100], [300, 100], [300, 300], [100, 300]];
     tt.update({ final: true });
   });
-  expect(red(await pixel(page, 250, 250))).toBe(true);
   await page.locator('#options-bar .warp-toggle').click();
   await expect.poll(() => session(page)).toEqual({ active: true, warp: 'bezier' });
-  expect(await page.evaluate(() => window.pigmentApp.transformTool.warp.controls[15].map(Math.round))).toEqual([300, 300]);
+  expect(await historyLength(page)).toBe(n + 1);
+  expect(await page.evaluate(() => window.pigmentApp.transformTool.warp.box)).toEqual({ x: 100, y: 100, width: 200, height: 200 });
+  expect(await page.evaluate(() => !!window.pigmentApp.transformTool.lastMatrix)).toBe(true);
+  // a preset or None never loses the scale
+  await page.selectOption('#options-bar select[data-key="warp-preset"]', 'arc');
   expect(red(await pixel(page, 250, 250))).toBe(true);
-  expect(await historyLength(page)).toBe(n);
+  await page.selectOption('#options-bar select[data-key="warp-preset"]', 'none');
+  expect(red(await pixel(page, 250, 250))).toBe(true);
+  // Escape cancels the warp only
   await focusCanvas(page);
   await page.keyboard.press('Escape');
   await expect.poll(() => session(page)).toEqual({ active: false, warp: null });
-  expect(await historyLength(page)).toBe(n);
-  expect((await pixel(page, 250, 250))[3]).toBe(0);
-  expect(red(await pixel(page, 150, 150))).toBe(true);
+  expect(await historyLength(page)).toBe(n + 1);
+  expect(red(await pixel(page, 250, 250))).toBe(true);
   expect(errors).toEqual([]);
 });
 
@@ -240,5 +243,67 @@ test('Warp on a text layer: confirming the prompt rasterizes it and starts the w
   expect((await labels(page)).at(-1)).toBe('Rasterize layer');
   await focusCanvas(page);
   await page.keyboard.press('Escape');
+  expect(errors).toEqual([]);
+});
+
+test('Perspective Warp: a collapsed quad is left as it is, never erased', async ({ page }) => {
+  const errors = await openApp(page);
+  await newDoc(page, { background: 'transparent' });
+  await paint(page, '#ff0000', [50, 50, 300, 200]);
+  await runAwait(page, 'edit:perspective-warp');
+  await page.evaluate(() => {
+    const w = window.pigmentApp.transformTool.warp;
+    w.addQuad([[60, 60], [150, 60], [150, 200], [60, 200]]);
+    w.addQuad([[250, 60], [340, 60], [340, 200], [250, 200]]);
+    w.setMode('warp');
+    // collapse quad 0 (its top-right corner onto its bottom-right one) and move quad 1 a little
+    const q0 = w.quads[0].pts, q1 = w.quads[1].pts;
+    w.points[q0[1]] = w.points[q0[2]].slice();
+    w.points[q1[0]] = [w.points[q1[0]][0] - 10, w.points[q1[0]][1]];
+    w.updateChanged();
+    w.finish();
+  });
+  expect(await page.evaluate(() => window.pigmentApp.transformTool.warp.quads.map((q) => window.pigmentApp.transformTool.warp.validQuad(q)))).toEqual([false, true]);
+  await page.keyboard.press('Enter');
+  await expect.poll(() => session(page)).toEqual({ active: false, warp: null });
+  expect(red(await pixel(page, 100, 150))).toBe(true);
+  expect(red(await pixel(page, 70, 190))).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+test('Perspective Warp accepts a narrow quad', async ({ page }) => {
+  const errors = await openApp(page);
+  await newDoc(page, { background: 'transparent' });
+  await paint(page, '#ff0000', [50, 50, 300, 200]);
+  await runAwait(page, 'edit:perspective-warp');
+  const ok = await page.evaluate(() => {
+    const w = window.pigmentApp.transformTool.warp;
+    const zoom = window.pigmentApp.view.zoom;
+    const narrow = 12 / zoom; // 12 screen px wide
+    return w.addQuad([[100, 80], [100 + narrow, 80], [100 + narrow, 200], [100, 200]]);
+  });
+  expect(ok).toBe(true);
+  await page.keyboard.press('Escape');
+  expect(errors).toEqual([]);
+});
+
+test('Warp with a raster and a text layer selected shows the rasterize toast instead of dropping a layer', async ({ page }) => {
+  const errors = await openApp(page);
+  await newDoc(page, { background: 'transparent' });
+  await paint(page, '#ff0000', [100, 100, 100, 100]);
+  await page.evaluate(async () => {
+    const { TextLayer } = await import('/lib/document.js');
+    const d = window.pigmentApp.doc;
+    const raster = d.active;
+    const l = new TextLayer({ name: 'Hello', text: 'Hello', x: 50, y: 50, font: { family: 'Arial', size: 36, color: '#0000ff' } });
+    d.add(l, d.root, d.root.children.length);
+    d.setActive(l);
+    d.selected = new Set([raster, l]);
+    d.changed('tree');
+  });
+  await runAwait(page, 'edit:transform-warp');
+  await expect(page.locator('.toast.error')).toContainText(/Rasterize the text layer first/);
+  expect(await page.locator('.dialog-backdrop').count()).toBe(0);
+  expect(await session(page)).toEqual({ active: false, warp: null });
   expect(errors).toEqual([]);
 });

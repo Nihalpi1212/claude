@@ -102,12 +102,27 @@ export async function writePigment(doc) {
   const description = doc.describe();
   const entries = [];
   const layers = doc.layers().filter((l) => !l.quickMask && !l.preview);
+  // smart objects: instances made by Duplicate Layer share one source; it is written once and every instance refers to it
+  const sourceRefs = new Map(); // source -> id of the layer whose entry holds it
+  for (const l of layers) if (l.type === 'smart' && l.source && !sourceRefs.has(l.source)) sourceRefs.set(l.source, l.id);
+  const byId = new Map(layers.map((l) => [l.id, l]));
+  const markRefs = (list) => {
+    for (const ld of list ?? []) {
+      const l = byId.get(ld.id);
+      if (l?.type === 'smart') {
+        const ref = sourceRefs.get(l.source);
+        if (ref && ref !== l.id) ld.sourceRef = ref;
+      }
+      markRefs(ld.children);
+    }
+  };
+  markRefs(description.layers);
   for (const layer of layers) {
     if (layer.type === 'raster') entries.push({ name: `layers/${layer.id}.png`, data: await canvasToPng(layer.canvas) });
     if (layer.mask?.canvas) entries.push({ name: `masks/${layer.id}.png`, data: await canvasToPng(layer.mask.canvas) });
     if (layer.type === 'fill' && layer.paint?.type === 'pattern' && layer.paint.pattern?.canvas) entries.push({ name: `patterns/${layer.id}.png`, data: await canvasToPng(layer.paint.pattern.canvas) });
     // smart objects (lib/smart-object.js): a document source is a nested .pigment, an image source a PNG
-    if (layer.type === 'smart' && layer.source) {
+    if (layer.type === 'smart' && layer.source && sourceRefs.get(layer.source) === layer.id) {
       if (layer.source.kind === 'document' && layer.source.doc) entries.push({ name: `smart/${layer.id}.pigment`, data: await writePigment(layer.source.doc) });
       else if (layer.source.canvas) entries.push({ name: `smart/${layer.id}.png`, data: await canvasToPng(layer.source.canvas) });
     }
@@ -136,6 +151,7 @@ export async function readPigment(bytes) {
   doc.meta = d.meta ?? {};
   if (d.workPath?.subpaths) doc.workPath = d.workPath;
   if (d.globalLight && Number.isFinite(d.globalLight.angle)) doc.globalLight = { angle: d.globalLight.angle, altitude: d.globalLight.altitude ?? 30 };
+  const smartSources = new Map(); // sourceRef -> the source shared by every instance that names it
   const image = async (name) => {
     const e = findEntry(entries, name);
     return e ? decodeImage(e.data, 'x.png') : null;
@@ -158,12 +174,18 @@ export async function readPigment(bytes) {
       if (canvas) layer.mask = { canvas, enabled: desc.maskEnabled !== false, linked: desc.maskLinked !== false };
     }
     if (layer.type === 'smart' && typeof layer.setSource === 'function') {
-      // smart objects (lib/smart-object.js): the layer was built from its description; its source follows
-      const nested = findEntry(entries, `smart/${desc.id}.pigment`);
-      if (nested) layer.setSource({ kind: 'document', doc: await readPigment(nested.data), name: desc.source?.name ?? null }, doc);
+      // smart objects (lib/smart-object.js): the layer was built from its description; its source follows. Instances
+      // sharing one source name it with sourceRef and get the very same source object back
+      const ref = typeof desc.sourceRef === 'string' && desc.sourceRef ? desc.sourceRef : desc.id;
+      if (smartSources.has(ref)) layer.setSource(smartSources.get(ref), doc);
       else {
-        const canvas = await image(`smart/${desc.id}.png`);
-        if (canvas) layer.setSource({ kind: 'image', canvas, name: desc.source?.name ?? null }, doc);
+        const nested = findEntry(entries, `smart/${ref}.pigment`);
+        if (nested) layer.setSource({ kind: 'document', doc: await readPigment(nested.data), name: desc.source?.name ?? null }, doc);
+        else {
+          const canvas = await image(`smart/${ref}.png`);
+          if (canvas) layer.setSource({ kind: 'image', canvas, name: desc.source?.name ?? null }, doc);
+        }
+        if (nested || findEntry(entries, `smart/${ref}.png`)) smartSources.set(ref, layer.source);
       }
     }
     parent.children.push(layer);

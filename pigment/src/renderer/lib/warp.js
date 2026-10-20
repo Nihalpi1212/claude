@@ -9,7 +9,6 @@ import { createCanvas, unionRect } from './document.js';
 import { canvasData, dataCanvas } from './image-ops.js';
 import { icon } from './icons.js';
 import * as W from '../../shared/pixels/warp.js';
-import * as T from '../../shared/pixels/transform.js';
 
 const PREVIEW_MAX = 700; // longest edge of the source while dragging (the final render uses every pixel)
 const HIT = 8; // screen px around a control point
@@ -578,10 +577,10 @@ export class PerspectiveWarp extends WarpSession {
       return false;
     }
   }
-  nearestPoint(x, y, exclude = -1) {
+  nearestPoint(x, y, exclude = -1, limit = Infinity) {
     let best = -1, bd = this.snapDist();
     this.points.forEach((pt, i) => {
-      if (i === exclude) return;
+      if (i === exclude || i >= limit) return;
       const d = dist(pt, [x, y]);
       if (d <= bd) {
         bd = d;
@@ -592,14 +591,16 @@ export class PerspectiveWarp extends WarpSession {
   }
   /** Adds a quad (corners tl, tr, br, bl in document coords); corners near existing ones are shared. */
   addQuad(corners) {
+    const existing = this.points.length;
     const idx = corners.map(([x, y]) => {
-      const n = this.nearestPoint(x, y);
+      const n = this.nearestPoint(x, y, -1, existing);
       if (n >= 0) return n;
       this.points.push([x, y]);
       return this.points.length - 1;
     });
     if (new Set(idx).size < 4) {
       this.pruneUnused();
+      this.app.dialogs.toast('That quad would share two corners with another one; draw it a little farther away', { kind: 'error', timeout: 2600 });
       return false;
     }
     this.quads.push({ pts: idx, src: idx.map((i) => this.points[i].slice()) });
@@ -666,6 +667,9 @@ export class PerspectiveWarp extends WarpSession {
   /** Pixels outside the quads stay where they are; the warped quads are drawn over them. */
   render(canvas, x, y, opts) {
     if (!this.changed || !this.quads.length) return { canvas, x, y };
+    // the same quads mesh() warps: a collapsed quad is left as it is, never erased
+    const good = this.quads.filter((q) => this.validQuad(q));
+    if (!good.length) return { canvas, x, y };
     const warped = super.render(canvas, x, y, opts);
     const b = unionRect({ x, y, width: canvas.width, height: canvas.height }, { x: warped.x, y: warped.y, width: warped.canvas.width, height: warped.canvas.height });
     const c = createCanvas(b.width, b.height);
@@ -673,7 +677,7 @@ export class PerspectiveWarp extends WarpSession {
     ctx.drawImage(canvas, x - b.x, y - b.y);
     ctx.globalCompositeOperation = 'destination-out';
     ctx.fillStyle = '#000';
-    for (const q of this.quads) {
+    for (const q of good) {
       ctx.beginPath();
       q.src.forEach(([px, py], i) => (i ? ctx.lineTo(px - b.x, py - b.y) : ctx.moveTo(px - b.x, py - b.y)));
       ctx.closePath();
@@ -1282,24 +1286,11 @@ export function install(app) {
       if (tt.warp?.active && tt.warp.kind === kind) return tt.warp;
       const s = tt.session;
       // a Free Transform of text, shapes or smart objects stays live: warping them needs pixels first
-      const nonRaster = !s.selectionOnly && s.targets.find((l) => l.type !== 'raster');
-      if (nonRaster) return askRasterize(d, [nonRaster], kind);
-      if (!tt.warp && rasterOnly(s)) {
-        // an untouched Free Transform of raster layers becomes the warp session in place
-        if (isIdentity(tt.matrix)) return attach(kind);
-        // a scaled / rotated / skewed one too, for Warp: an affine map is exactly a Bézier patch, so the net
-        // starts where the box is and Escape still cancels both as one session
-        if (kind === 'bezier' && tt.matrix) {
-          const m = tt.matrix;
-          const w = attach(kind);
-          w.controls = W.identityControls(w.box).map(([x, y]) => T.applyMatrix(m, x, y));
-          w.preset = 'custom';
-          w.updateChanged();
-          w.syncBar();
-          w.finish();
-          return w;
-        }
-      }
+      const nonRaster = !s.selectionOnly ? s.targets.filter((l) => l.type !== 'raster') : [];
+      if (nonRaster.length) return askRasterize(d, nonRaster, kind, s.targets);
+      // an untouched Free Transform of raster layers becomes the warp session in place; a scaled or rotated one
+      // is applied first (its own step, kept for Transform Again), then the warp starts on the result
+      if (!tt.warp && rasterOnly(s) && isIdentity(tt.matrix)) return attach(kind);
       tt.commit(); // apply what is pending first (end() clears any warp)
     }
     const layers = tt.collectTargets(d, { quiet: true });
@@ -1308,16 +1299,18 @@ export function install(app) {
       return null;
     }
     const others = layers.filter((l) => l.type !== 'raster');
-    if (others.length) return askRasterize(d, others, kind);
+    if (others.length) return askRasterize(d, others, kind, layers);
     tt.start({ mode: kind });
     if (!tt.session) return null;
     return attach(kind);
   }
 
   /** Warps need pixels: asks to rasterize one text / shape / smart object layer, then starts the session. */
-  async function askRasterize(d, layers, kind) {
+  async function askRasterize(d, layers, kind, targets = layers) {
     const what = (l) => (l.type === 'text' ? 'text' : l.type === 'shape' ? 'shape' : l.type === 'smart' ? 'smart object' : l.type);
-    if (layers.length !== 1 || d.active !== layers[0]) {
+    // the prompt only when that layer is the only one to warp: rasterizing resets the selection to it, and
+    // the other selected layers would silently drop out of the warp
+    if (layers.length !== 1 || targets.length !== 1 || d.active !== layers[0]) {
       app.dialogs.toast(`Rasterize the ${what(layers[0])} layer first (Layer › Rasterize), then warp it`, { kind: 'error', timeout: 3000 });
       return null;
     }

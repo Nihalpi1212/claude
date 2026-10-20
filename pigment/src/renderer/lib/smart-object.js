@@ -433,7 +433,10 @@ export function install(app) {
     const bottom = layers[0];
     const siblings = bottom.parent.children;
     const bi = siblings.indexOf(bottom);
-    const keepClip = !!bottom.clip && bi > 0 && !layers.includes(siblings[bi - 1]);
+    // only for one contiguous run of clipped layers directly over the same base (a mixed selection cannot keep
+    // its composite whichever way it goes, and stays unclipped as before)
+    const run = layers.every((l, i) => l.parent === bottom.parent && l.clip && siblings.indexOf(l) === bi + i);
+    const keepClip = run && bi > 0 && !layers.includes(siblings[bi - 1]);
     const smart = new SmartLayer({ name: top.name, clip: keepClip, source: makeSource({ kind: 'document', doc: src, name: top.name }), transform: box.x || box.y ? [1, 0, 0, 1, box.x, box.y] : null });
     hosts.set(smart, d);
     structural(app, layers.length > 1 ? 'Convert layers to smart object' : 'Convert to smart object', () => {
