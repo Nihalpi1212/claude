@@ -1,7 +1,7 @@
 {
   "name": "pigment",
   "productName": "Pigment",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Free, open-source image editor for Windows and macOS: layers, masks, brushes, selections, adjustments, filters, text, vector shapes, PSD import and export.",
   "main": "src/main/main.js",
   "type": "module",
@@ -39,23 +39,76 @@
     "appId": "com.pigmentapp.app",
     "productName": "Pigment",
     "copyright": "Copyright © 2026 Pigment contributors",
-    "directories": { "output": "dist", "buildResources": "build" },
-    "files": ["src/**/*", "package.json", "!**/*.map"],
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "package.json",
+      "!**/*.map"
+    ],
     "asar": true,
     "artifactName": "pigment-${version}-${os}-${arch}.${ext}",
     "fileAssociations": [
-      { "ext": "pigment", "name": "Pigment Document", "description": "Pigment layered image", "role": "Editor" },
-      { "ext": "psd", "name": "Photoshop Document", "role": "Editor" },
-      { "ext": "png", "name": "PNG Image", "role": "Editor" },
-      { "ext": "jpg", "name": "JPEG Image", "role": "Editor" },
-      { "ext": "jpeg", "name": "JPEG Image", "role": "Editor" },
-      { "ext": "webp", "name": "WebP Image", "role": "Editor" },
-      { "ext": "gif", "name": "GIF Image", "role": "Editor" },
-      { "ext": "bmp", "name": "Bitmap Image", "role": "Editor" }
+      {
+        "ext": "pigment",
+        "name": "Pigment Document",
+        "description": "Pigment layered image",
+        "role": "Editor"
+      },
+      {
+        "ext": "psd",
+        "name": "Photoshop Document",
+        "role": "Editor"
+      },
+      {
+        "ext": "png",
+        "name": "PNG Image",
+        "role": "Editor"
+      },
+      {
+        "ext": "jpg",
+        "name": "JPEG Image",
+        "role": "Editor"
+      },
+      {
+        "ext": "jpeg",
+        "name": "JPEG Image",
+        "role": "Editor"
+      },
+      {
+        "ext": "webp",
+        "name": "WebP Image",
+        "role": "Editor"
+      },
+      {
+        "ext": "gif",
+        "name": "GIF Image",
+        "role": "Editor"
+      },
+      {
+        "ext": "bmp",
+        "name": "Bitmap Image",
+        "role": "Editor"
+      }
     ],
     "mac": {
       "category": "public.app-category.graphics-design",
-      "target": [{ "target": "dmg", "arch": ["universal"] }, { "target": "zip", "arch": ["universal"] }],
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "universal"
+          ]
+        }
+      ],
       "hardenedRuntime": false,
       "gatekeeperAssess": false,
       "darkModeSupport": true,
@@ -63,11 +116,55 @@
       "identity": null,
       "minimumSystemVersion": "11.0"
     },
-    "dmg": { "contents": [{ "x": 130, "y": 220 }, { "x": 410, "y": 220, "type": "link", "path": "/Applications" }] },
-    "win": { "target": [{ "target": "nsis", "arch": ["x64", "arm64"] }, { "target": "portable", "arch": ["x64"] }] },
-    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true, "perMachine": false, "createDesktopShortcut": true, "shortcutName": "Pigment", "artifactName": "pigment-${version}-win-${arch}.${ext}" },
-    "portable": { "artifactName": "pigment-${version}-win-portable.${ext}" },
-    "linux": { "target": ["AppImage"], "category": "Graphics", "artifactName": "pigment-${version}-linux-${arch}.${ext}" },
+    "dmg": {
+      "contents": [
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "shortcutName": "Pigment",
+      "artifactName": "pigment-${version}-win-${arch}.${ext}"
+    },
+    "portable": {
+      "artifactName": "pigment-${version}-win-portable.${ext}"
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Graphics",
+      "artifactName": "pigment-${version}-linux-${arch}.${ext}"
+    },
     "publish": null
   }
 }

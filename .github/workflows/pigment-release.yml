@@ -102,10 +102,17 @@ jobs:
           name: Pigment ${{ env.RELEASE_TAG }}
           body: |
             Free, open-source image editor for Windows, macOS and Linux: layers, groups, masks and
-            clipping masks, 27 blend modes, adjustment and fill layers, layer styles, brushes,
-            retouching (healing, clone, patch, dodge/burn), selections (marquee, lasso, magic wand,
-            quick selection, color range, quick mask), 18 adjustments, 40+ filters, free transform,
-            text, shapes and the pen tool, PSD import/export. See pigment/README.md.
+            clipping masks, smart objects with smart filters, 27 blend modes, adjustment and fill
+            layers, layer styles, brushes, retouching (healing, clone, patch, dodge/burn), selections
+            (marquee, lasso, magic wand, quick selection, color range, quick mask), 18 adjustments,
+            the Camera Raw filter, 40+ filters, free transform, Warp, Perspective Warp and Puppet
+            Warp, text (on a path, stacked vertical), shapes with path operations and the pen tool,
+            printing, CMYK proof colours, PSD import/export. See pigment/README.md.
+
+            **AI (optional)**: sign in with ChatGPT (uses your Plus/Pro plan) or add an OpenAI or
+            Google Gemini API key in AI › AI Accounts for Generative Fill / Expand, Generate Image,
+            Remove / Replace Background, Replace Sky, Describe Image and the AI Assistant panel.
+            Image generation needs an API key. See pigment/docs/USER-GUIDE.md.
 
             **Downloads**
             - Windows: `pigment-*-win-x64.exe` (installer) or `pigment-*-win-portable.exe` (no install)

@@ -18,6 +18,9 @@ keyboard shortcuts. This guide walks through each area. On macOS read **Ctrl** a
   overwritten: Save opens Save As for them.
 - **Export**: File › Export › Export As (Ctrl+Alt+Shift+S) for PNG, JPEG or WebP with quality,
   size and background; Quick Export as PNG; Layers to Files writes each top-level layer as an image.
+- **Print**: File › Print (Ctrl+P) opens a dialog with the printer, copies, paper size (A4, Letter,
+  Legal, A3, A5, Tabloid or custom millimetres), orientation, margins, scale (fit to page, 100 % or a
+  percentage) and position, with a preview of the page. Save as PDF writes the same page to a file.
 
 Each open image has a tab. Ctrl+Tab / Ctrl+Shift+Tab switch between them.
 
@@ -30,8 +33,8 @@ Each open image has a tab. Ctrl+Tab / Ctrl+Shift+Tab switch between them.
   Shift + the letter to cycle through them.
 - **Options bar** (top): settings of the current tool.
 - **Panels** (right): Color, Swatches, Brushes · Properties, Adjustments, Character, Paths ·
-  Layers, Channels, History, Navigator, Info. Window menu shows any panel; Tab hides and shows all
-  panels; Window › Reset Workspace restores the layout.
+  Layers, Channels, History, Navigator, Info, AI Assistant. Window menu shows any panel; Tab hides
+  and shows all panels; Window › Reset Workspace restores the layout.
 - **Status bar**: zoom (type a value), document size, and a hint for the current tool.
 
 ## Viewing
@@ -43,6 +46,11 @@ Each open image has a tab. Ctrl+Tab / Ctrl+Shift+Tab switch between them.
 - Rulers (Ctrl+R), grid (Ctrl+'), guides (drag from a ruler, Ctrl+; shows/hides), pixel grid at
   high zoom, snapping (View › Snap).
 - View › Theme switches between light, dark and the system setting.
+- **Proof Colors (CMYK)** in the View menu shows how the image would look printed with process
+  inks; **Gamut Warning** (Ctrl+Shift+Y) greys out colours that CMYK cannot reproduce. Both are
+  previews: the document stays RGB. The Info panel shows a second readout under the pointer in
+  CMYK, Lab or HSB (pick it in the panel), and the Color Picker has Lab and CMYK fields that
+  convert in both directions.
 
 ## Layers
 
@@ -84,6 +92,27 @@ Inner Shadow, Outer Glow, Inner Glow, Bevel & Emboss, Satin, Color Overlay, Grad
 Pattern Overlay and Stroke. Tick an effect to enable it and click its name to change its settings.
 Effects stay editable; copy and paste them between layers, or Rasterize › Layer Style to bake them in.
 Global Light sets the shared angle for shadows and bevels.
+
+### Smart objects
+
+A smart object keeps its source (a layered document or an image) and renders it through its
+transform, so scaling it down and up again loses nothing, and every filter applied to it stays
+editable.
+
+- **Make one**: Layer › Smart Objects › Convert to Smart Object wraps the selected layers;
+  File › Place Image as Layer places files as smart objects (Preferences › Place files as smart
+  objects turns that off). New Smart Object via Copy duplicates one with its own source.
+- **Edit the contents**: Layer › Smart Objects › Edit Contents (or double-click the thumbnail) opens
+  the source in its own tab, named "<layer> (smart object)". Save (Ctrl+S) in that tab writes the
+  change back into the layer; closing the tab asks whether to apply unsaved changes.
+- **Replace Contents** swaps the source for another file and keeps the transform; **Export Contents**
+  writes the source as `.pigment` or PNG; **Reset Transform** returns it to its original size;
+  **Rasterize** turns it into ordinary pixels.
+- **Smart filters**: any filter, adjustment or Camera Raw applied to a smart object is listed under
+  the layer in the Layers panel. Click the eye to toggle one, double-click to change its settings,
+  right-click for more; Layer › Smart Objects › Clear Smart Filters removes them all. The layer mask
+  applies to the filtered result.
+- Free Transform, Warp and the other transforms work on smart objects without rasterizing them.
 
 ## Selections
 
@@ -158,6 +187,14 @@ each with a dialog and live preview. Filter › Last Filter (Ctrl+F) repeats the
 the same settings. A selection limits the filter to the selected area (with soft edges for
 feathered selections).
 
+**Camera Raw Filter** (Filter › Camera Raw Filter…, Ctrl+Shift+A) develops the layer like a RAW
+converter: Basic (white balance temperature and tint, exposure, contrast, highlights, shadows,
+whites, blacks, texture, clarity, dehaze, vibrance, saturation), Detail (sharpening amount, radius
+and detail; luminance and colour noise reduction), HSL (hue, saturation and luminance for reds,
+oranges, yellows, greens, aquas, blues, purples and magentas) and Effects (vignette, grain). Auto
+sets the tone from the histogram; Reset clears everything. On a smart object it becomes a smart
+filter you can reopen later. It works on RGB images: Pigment does not open camera RAW files.
+
 ### Liquify
 
 Filter › Liquify (Shift+Ctrl+X) opens the image in a large window with five brushes: Forward Warp
@@ -175,6 +212,18 @@ undo step (limited to the selection if there is one).
   Edit › Transform › Skew / Distort / Perspective. The options bar takes exact values. Enter
   applies, Escape cancels.
 - Edit › Transform also has Rotate 90°/180° and Flip, and Transform Again (Ctrl+Shift+T).
+- **Warp** (Edit › Transform › Warp, or the Warp button while transforming): a 4 × 4 control net
+  with corner handles and inner points to drag. Pick a preset (Arc, Arc Lower/Upper, Arch, Bulge,
+  Shell Lower/Upper, Flag, Wave, Fish, Rise, Fisheye, Inflate, Squeeze, Twist) and set its Bend;
+  dragging a point makes it Custom. Enter applies, Escape cancels. Text and shape layers are
+  rasterized first.
+- **Perspective Warp** (Edit › Perspective Warp): in Layout mode drag out a quad over each plane of
+  the photo (edges snap together; Delete removes the selected quad), switch to Warp and drag the
+  corners; Shift-click an edge to make it vertical or horizontal. Enter applies.
+- **Puppet Warp** (Edit › Puppet Warp): a mesh covers the layer's pixels (choose fewer or more
+  points). Click to add pins, drag them to move that part of the image while the other pins hold
+  it in place; Delete removes the selected pin. Rigid keeps shapes stiff, Normal is the default,
+  Distort allows stretching. Enter applies.
 - **Image size** (Ctrl+Alt+I) resamples the image (choose the method; untick Resample to change only
   the print resolution). **Canvas size** (Ctrl+Alt+C) adds or removes canvas around an anchor.
   Image › Image Rotation turns or flips the whole image. **Crop** (C): drag a box, adjust the
@@ -189,6 +238,15 @@ underline and stroke too). Click the ✓ or press Ctrl+Enter to finish, Escape t
 editable: click it with the Type tool or double-click its thumbnail. Free Transform scales and
 rotates text without rasterizing it; Layer › Rasterize › Layer turns it into pixels.
 
+- **Text on a path**: with the Type tool, move the pointer over a path (the work path, a saved path
+  or the outline of the active shape layer); the cursor changes, and clicking starts text that
+  follows the path. Layer › Type › Text on Path attaches an existing text layer to the active path;
+  Release from Path detaches it; Flip Text on Path puts it on the other side. Drag the small
+  I-beam on the path to slide the text along it.
+- **Orientation**: Layer › Type › Horizontal, Vertical (the line turned 90°) or Vertical, Stacked
+  (each character upright, lines running right to left, for Chinese, Japanese and Korean). The
+  Character panel has the same choice.
+
 ## Shapes and paths
 
 - **Shape tools** (U): rectangle, rounded rectangle, ellipse, polygon/star, line and custom shapes.
@@ -199,6 +257,70 @@ rotates text without rasterizing it; Layer › Rasterize › Layer turns it into
 - **Path Selection / Direct Selection** (A) move whole paths or single points and handles.
 - The **Paths** panel keeps the work path and saved paths: fill or stroke a path, load it as a
   selection, or make a path from a selection.
+- **Path operations**: with a shape layer active, the shape tools' options bar offers New Layer,
+  Combine Shapes, Subtract Front Shape, Intersect Shape Areas and Exclude Overlapping Shapes, so a
+  second shape can cut a hole in the first or keep only the overlap. Layer › Shape Operations
+  changes how the selected subpaths (Path Selection tool) or the whole layer combine; Merge Shape
+  Components turns the result into a single outline.
+
+## AI
+
+The AI menu adds generative tools and an assistant. They are optional and off until you connect an
+account: nothing leaves your computer unless you run one of them, and then only the pixels and
+text that feature needs.
+
+### Accounts
+
+AI › AI Accounts… shows one card per provider:
+
+- **OpenAI**: click **Sign in with ChatGPT**. Your browser opens the ChatGPT sign-in; approve
+  Pigment there and come back. This uses your ChatGPT Plus or Pro plan for the chat models (Describe
+  Image and the assistant). If the browser is on another computer, use Copy link to open the page
+  there and paste the address it ends on into the card. Alternatively paste an **API key** from
+  platform.openai.com: it is billed per use, and it is the only way to use OpenAI's image models
+  (Generative Fill, Generative Expand, Generate Image, Remove / Replace Background, Replace Sky).
+- **Google Gemini**: paste an API key from Google AI Studio. Google offers no plan sign-in for
+  third-party apps. Gemini keys cover both chat and image models.
+
+Each card lets you choose the chat and image model and sign out; Preferred provider picks which
+one the features use when both are connected (each dialog can still switch). Keys and tokens are
+stored in the app data folder, encrypted with the system keychain where one is available; the
+dialog warns when it is not. Sign in with ChatGPT needs the desktop app; in the browser version keys
+are kept in the browser.
+
+### Generative tools
+
+Each tool asks for a prompt and the provider and model, then adds the result as a new layer above
+the current one (one undo step; the original pixels are never changed), with a Cancel button in
+the status toast while it runs.
+
+- **Generative Fill**: make a selection, describe what should appear in it. Up to three
+  variations, each a layer holding only the selected area.
+- **Generative Expand**: enlarge the canvas first (Image › Canvas Size), then describe how the
+  empty area should continue the picture.
+- **Generate Image**: a picture from a description, as a layer in the open document or as a new
+  document of the size you choose, optionally with a transparent background.
+- **Remove Background**: keeps the subject of the active layer. The result is a copy of the layer
+  with a layer mask (so you can refine the edge with a brush), and the original is hidden.
+- **Replace Background**: keeps the subject and generates new surroundings from your description.
+- **Replace Sky**: the bright area at the top of the image is treated as the sky, or select the
+  sky yourself first; describe the new one.
+- **Describe Image**: a text description of the composite that you can copy or store as the
+  document description (File › Document Properties).
+
+### Assistant
+
+Window › AI Assistant (or AI › AI Assistant) opens a chat panel for the active document. Choose the
+provider and chat model at the top, type a question or an instruction and press Enter (Shift+Enter
+for a new line). With Attach image ticked, a downscaled copy of the composite goes with each
+message so the model can see what it is working on.
+
+The assistant can read the document (layers, selection) and edit it: apply adjustments and filters,
+change the selection, crop, resize the image or canvas, add or change layers, fill, add text, run
+most menu commands and run Generative Fill. Every action shows in the conversation as a step,
+changes the document immediately and is a normal history entry, so Ctrl+Z undoes it. Stop ends a
+turn after the current step; the trash button clears the conversation. It cannot open, save,
+close or print files, and it never talks to the providers on its own.
 
 ## Undo and history
 
@@ -222,6 +344,9 @@ Help › Keyboard Shortcuts shows every shortcut. The most used ones:
 | Group / Ungroup | Ctrl+G / Ctrl+Shift+G |
 | Levels / Curves / Hue-Saturation / Invert | Ctrl+L / Ctrl+M / Ctrl+U / Ctrl+I |
 | Last filter / Liquify | Ctrl+F / Shift+Ctrl+X |
+| Camera Raw filter | Ctrl+Shift+A |
+| Print | Ctrl+P |
+| Gamut warning | Ctrl+Shift+Y |
 | Zoom in / out / fit / 100% | Ctrl+= / Ctrl+- / Ctrl+0 / Ctrl+1 |
 | Brush size / hardness | [ ] / Shift+[ Shift+] |
 | Swap / default colours | X / D |
@@ -239,3 +364,13 @@ Help › Keyboard Shortcuts shows every shortcut. The most used ones:
   parts, or work at a smaller size.
 - **Fonts are missing in the Type tool**: Pigment lists installed fonts when the system allows it;
   otherwise it offers common font families.
+- **Sign in with ChatGPT never comes back**: the browser must reach `http://127.0.0.1:1455` (or
+  the next few ports) on the computer running Pigment. If the browser is elsewhere, or a firewall
+  blocks it, copy the final address from the browser's address bar and paste it into the card.
+  "Plan access not granted" means the sign-in finished but the account's plan cannot be used by
+  apps; use an API key instead.
+- **An AI feature says it needs an image model**: ChatGPT plans do not include image models. Add
+  an OpenAI API key (after signing out of ChatGPT) or a Gemini key.
+- **"No secure storage" warning in AI Accounts**: the system keychain (Keychain, Credential
+  Manager, or libsecret on Linux) is not available, so keys are stored unencrypted in
+  `ai-credentials.json` in the app data folder. Install or unlock a keyring, or sign out when done.

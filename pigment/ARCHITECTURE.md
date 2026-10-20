@@ -361,7 +361,13 @@ Same tokens as Folio (`styles/theme.css`): `--bg`, `--bg-elevated`, `--bg-sunken
 - `npm run test:electron` — launches the real app (xvfb on Linux): bridge, menu, open/save through the main process, packaged build.
 - CI: `.github/workflows/pigment-ci.yml`; releases: `pigment-release.yml` (tags `pigment-v*` or a manual run with a `tag` input) build installers on windows-latest, macos-latest and ubuntu-latest.
 
-## 0.2 features (contracts)
+## 0.2 features
+
+This section was written as the contract between the 0.2 builders and is kept as the reference for
+those modules; everything below is implemented. Known gaps: text on a path follows the first
+subpath with two or more anchors; smart filters have no individual masks; `filter:last` does not
+repeat the Camera Raw filter; the browser build has no Sign in with ChatGPT (keys only, kept in
+`localStorage`).
 
 Pigment 0.2 adds AI (Sign in with ChatGPT, OpenAI and Gemini API keys), smart objects with smart
 filters, Warp / Perspective Warp / Puppet Warp, the Camera Raw filter, printing, shape path

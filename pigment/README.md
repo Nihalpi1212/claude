@@ -16,6 +16,8 @@ with [ag-psd](https://github.com/Agamnentzar/ag-psd) for Photoshop files. MIT li
 - Save layered work as **.pigment** (zip with PNG layers, masks, styles, channels, paths, guides) or **.psd**
 - Export As PNG / JPEG / WebP with quality, scale and size; quick PNG export; export layers to files
 - Copy and paste through the system clipboard (paste into, paste in place, new image from clipboard)
+- **Print** (Ctrl+P): printer, paper size, orientation, margins, scale and position with a page preview;
+  Save as PDF
 
 **Layers**
 - Pixel, text, shape, fill (solid, gradient, pattern) and adjustment layers; groups with pass-through
@@ -24,6 +26,10 @@ with [ag-psd](https://github.com/Agamnentzar/ag-psd) for Photoshop files. MIT li
 - **Layer styles**: drop shadow, inner shadow, outer and inner glow, bevel and emboss, satin, color,
   gradient and pattern overlay, stroke; copy/paste styles; global light
 - Thumbnails, drag-and-drop reordering, rename in place, solo visibility (Alt-click the eye)
+- **Smart objects**: place files as smart objects or convert layers into one, edit the contents in
+  their own tab, replace or export the source, transform without losing quality, reset the transform
+- **Smart filters**: filters, adjustments and the Camera Raw filter applied to a smart object stay
+  editable (double-click to change, toggle or clear them in the Layers panel)
 
 **Paint and retouch**
 - Brush, pencil, eraser with size, hardness, opacity, flow, spacing, smoothing and pen pressure
@@ -50,23 +56,43 @@ with [ag-psd](https://github.com/Agamnentzar/ag-psd) for Photoshop files. MIT li
   coordinates, shear, offset; emboss, find edges, solarize, diffuse, oil paint, glowing edges;
   clouds, difference clouds, lens flare, vignette; maximum, minimum, custom kernel; Last Filter (Ctrl+F)
 - **Liquify** (Shift+Ctrl+X): forward warp, reconstruct, twirl, pucker and bloat brushes
+- **Camera Raw Filter** (Ctrl+Shift+A): white balance, exposure, contrast, highlights, shadows, whites,
+  blacks, texture, clarity, dehaze, vibrance, saturation, HSL per colour range, sharpening, noise
+  reduction, vignette and grain, with Auto
 
 **Transform and canvas**
 - Free transform (Ctrl+T): scale, rotate, skew, distort, perspective, numeric entry, flips and 90° turns;
   transforms pixels, selections, text and shapes; Transform Again
 - Image size (bicubic, Lanczos, bilinear, area, nearest), canvas size with anchor, rotate canvas,
   crop tool with ratios and overlays, crop to selection, trim, reveal all, duplicate image
+- **Warp** (Edit › Transform › Warp): a Bézier control net with Arc, Arch, Bulge, Flag, Wave, Fish,
+  Rise, Fisheye, Inflate, Squeeze, Twist and more presets and a Bend slider
+- **Perspective Warp**: lay out quads on the planes of a photo, then move their corners
+- **Puppet Warp**: a mesh over the layer, pins to hold and drag, rigid / normal / distort modes
 
 **Type and vectors**
 - Point and paragraph text, editable at any time: font, style, size, leading, tracking, color, alignment, stroke
+- **Text on a path**: type along any path or shape, slide and flip it; horizontal, vertical and
+  **stacked vertical** (upright CJK) orientation
 - Rectangle, rounded rectangle, ellipse, polygon/star, line and custom shapes as shape layers, paths or pixels
+- **Path operations**: combine, subtract, intersect and exclude shape areas, merge shape components
 - Pen, freeform pen, add/delete/convert anchor points, path and direct selection; Paths panel
   (fill, stroke, make selection, path from selection)
+
+**AI (optional, bring your own account)**
+- **Sign in with ChatGPT** (uses your ChatGPT Plus or Pro plan for the chat models), or an OpenAI or
+  Google Gemini **API key**; credentials stay on your computer, encrypted with the system keychain
+- **Generative Fill** and **Generative Expand**, **Generate Image** (new layer or document),
+  **Remove Background** (as a layer mask), **Replace Background**, **Replace Sky**, **Describe Image**
+- **AI Assistant** panel: chat about the open image and let the model edit it; adjustments, filters,
+  selections, crop, resize, layers, text and generative fill all land as undoable history steps
 
 **Workspace**
 - Photoshop's menu layout and keyboard shortcuts, tool flyouts, options bar
 - Panels: Color, Swatches, Brushes, Properties, Adjustments, Character, Paths, Layers, Channels,
-  History (with snapshots), Navigator, Info
+  History (with snapshots), Navigator, Info, AI Assistant
+- **Proof Colors** (CMYK preview) and **Gamut Warning**; Lab and CMYK readouts in the Info panel and
+  the Color Picker
 - Rulers, guides, grid, pixel grid, snapping, view rotation, light and dark themes
 
 ## Download
@@ -104,8 +130,11 @@ npm run dist:mac  # or dist:win / dist:linux: installers in dist/
 
 ## How it works
 
-- `src/main/` is the Electron main process (window, native menu, file dialogs, settings, recent files).
-  The renderer is sandboxed and talks to it only through the preload bridge (`src/preload.cjs`).
+- `src/main/` is the Electron main process (window, native menu, file dialogs, settings, recent files,
+  printing). The renderer is sandboxed and talks to it only through the preload bridge (`src/preload.cjs`).
+- `src/main/ai.js` holds the AI accounts: the Sign in with ChatGPT flow, API keys encrypted with
+  Electron's `safeStorage`, and the only code that talks to the providers. The renderer never sees a
+  token or key; it sends request descriptions and receives answers.
 - `src/shared/pixels/` is the image-processing engine: blend modes, adjustments, filters, layer styles,
   selections, transforms and retouching, written as pure functions on RGBA buffers and unit-tested in Node.
 - `src/renderer/` is the editor: the document model and compositor, history (undo), the canvas view,
@@ -114,10 +143,16 @@ npm run dist:mac  # or dist:win / dist:linux: installers in dist/
 
 ## What it does not do (yet)
 
-- CMYK, Lab, 16/32-bit channels and color management (Pigment edits 8-bit RGB)
-- Smart objects, artboards, 3D, video timelines, camera RAW
-- Generative fill and other AI features
-- Puppet warp, perspective warp, sky replacement and other AI-based tools
-- Text on a path; vertical type is horizontal text turned 90° (no upright stacked CJK layout); one style per text layer
-- Shape path operations (combine, subtract, intersect shapes)
-- Printing (export an image and print it from your system's image viewer)
+- True CMYK, Lab, 16/32-bit documents and ICC colour management: Pigment edits 8-bit RGB. Proof
+  Colors, Gamut Warning and the Lab/CMYK readouts are previews and conversions of that RGB data
+- Opening camera RAW files (CR2, NEF, ARW, DNG…): the Camera Raw filter develops RGB images only
+- Artboards, 3D, video timelines
+- Several styles inside one text layer (one font, size and colour per layer); text on a path follows
+  the first subpath of the chosen path
+- Masks on individual smart filters (the smart object's layer mask applies to all of them); Last
+  Filter does not repeat the Camera Raw filter
+- Image generation through a ChatGPT plan: OpenAI only serves image models to API keys, so
+  Generative Fill, Generate Image and the background tools need an OpenAI or Gemini key. Plan
+  sign-in covers Describe Image and the assistant
+- Sign in with ChatGPT in the browser build (`npm run dev:web`): it needs the desktop app, so the
+  browser build takes API keys only
