@@ -32,6 +32,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   // AI: model preferences chosen in the AI Accounts dialog and the per-installation host id of Sign in with ChatGPT
   ai: { openaiChat: null, openaiImage: null, geminiChat: null, geminiImage: null, defaultProvider: 'openai' },
   aiHostId: null,
+  placeAsSmart: true,
   historyLimit: 100,
   historyMemoryMB: 512,
   cursorStyle: 'outline', // outline | precise | dot

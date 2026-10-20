@@ -239,7 +239,8 @@ function remapDocument(app, label, spec) {
         break;
       }
       default:
-        out = shallow(layer);
+        // smart objects (and any other matrix layer) follow Image Size, Canvas Size and Rotate Canvas through their matrix
+        out = shallow(layer, layer.usesMatrixTransform ? { transform: T.multiplyMatrix(m, layer.transform ?? T.IDENTITY) } : {});
     }
     if (layer.mask?.canvas) {
       out.mask = {

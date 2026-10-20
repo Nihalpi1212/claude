@@ -337,7 +337,7 @@ function pickColor(app, initial, { title = 'Color Picker', live } = {}) {
 }
 
 // ---- preferences ---------------------------------------------------------------------------------------------
-const PREF_KEYS = ['theme', 'zoomWithWheel', 'rulerUnit', 'historyLimit', 'historyMemoryMB', 'checkerboardSize', 'checkerboardLight', 'checkerboardDark', 'gridSize', 'pixelGrid', 'showSelectionEdges', 'cursorStyle', 'resampleMethod', 'transformInterpolation', 'transformProportional', 'transformScalesStrokes'];
+const PREF_KEYS = ['theme', 'zoomWithWheel', 'rulerUnit', 'historyLimit', 'historyMemoryMB', 'checkerboardSize', 'checkerboardLight', 'checkerboardDark', 'gridSize', 'pixelGrid', 'showSelectionEdges', 'cursorStyle', 'resampleMethod', 'transformInterpolation', 'transformProportional', 'transformScalesStrokes', 'placeAsSmart'];
 
 /**
  * app.saveSettings() replaces app.settings with what the store returns, which drops changes still
@@ -385,6 +385,7 @@ async function preferencesDialog(app) {
     { key: 'resampleMethod', label: 'Image Size resampling', type: 'select', options: [['bicubic', 'Bicubic (smooth gradients)'], ['lanczos', 'Lanczos (sharper)'], ['bilinear', 'Bilinear'], ['area', 'Area average (reduction)'], ['nearest', 'Nearest neighbor (hard edges)']] },
     { key: 'transformProportional', label: 'Keep proportions while transforming (Shift releases)', type: 'checkbox', span: true },
     { key: 'transformScalesStrokes', label: 'Scale shape strokes with transforms', type: 'checkbox', span: true },
+    { key: 'placeAsSmart', label: 'Place files as smart objects', type: 'checkbox', span: true },
     { type: 'section', label: 'Canvas' },
     { key: 'checkerboardSize', label: 'Transparency grid size', type: 'select', options: [[4, 'Small'], [8, 'Medium'], [16, 'Large']] },
     { key: 'gridSize', label: 'Grid spacing', type: 'number', min: 2, max: 2000, unit: 'px' },

@@ -140,6 +140,7 @@ export const COMMAND_LABELS = {
   'file:new': 'New document', 'file:open': 'Open', 'file:save': 'Save', 'file:save-as': 'Save as', 'file:export': 'Export as', 'file:export-quick': 'Quick export as PNG',
   'file:close': 'Close', 'file:close-all': 'Close all', 'file:properties': 'Document info', 'file:print': 'Print',
   'filter:liquify': 'Liquify', 'filter:camera-raw': 'Camera Raw filter', 'view:gamut': 'Gamut warning',
+  'layer:smart-convert': 'Convert to smart object', 'layer:smart-edit': 'Edit smart object contents', 'layer:smart-rasterize': 'Rasterize smart object',
   'edit:undo': 'Undo', 'edit:redo': 'Redo', 'edit:step-backward': 'Step backward', 'edit:step-forward': 'Step forward', 'edit:cut': 'Cut', 'edit:copy': 'Copy',
   'edit:copy-merged': 'Copy merged', 'edit:paste': 'Paste', 'edit:paste-in-place': 'Paste in place', 'edit:paste-into': 'Paste into selection', 'edit:clear': 'Clear selection',
   'edit:fill': 'Fill…', 'edit:fill-foreground': 'Fill with foreground colour', 'edit:fill-background': 'Fill with background colour', 'edit:free-transform': 'Free transform',

@@ -14,8 +14,8 @@ import { createCanvas, unionRect, BLEND_LABELS } from '../document.js';
 import { parseColor, rgbaToHex } from '../../../shared/pixels/color.js';
 
 const clone = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
-const TYPE_LABEL = { raster: 'Pixel layer', group: 'Group', text: 'Type layer', shape: 'Shape layer', fill: 'Fill layer', adjustment: 'Adjustment layer' };
-const TYPE_ICON = { raster: 'image', group: 'folder', text: 'text', shape: 'shape', fill: 'fill', adjustment: 'adjust' };
+const TYPE_LABEL = { raster: 'Pixel layer', group: 'Group', text: 'Type layer', shape: 'Shape layer', fill: 'Fill layer', adjustment: 'Adjustment layer', smart: 'Smart object' };
+const TYPE_ICON = { raster: 'image', group: 'folder', text: 'text', shape: 'shape', fill: 'fill', adjustment: 'adjust', smart: 'smart' };
 const MAX_SCAN = 25e6; // pixels: larger canvases report their canvas box instead of a scanned content box
 
 // ---- content bounds (cached per layer version) ----------------------------------------------------------------

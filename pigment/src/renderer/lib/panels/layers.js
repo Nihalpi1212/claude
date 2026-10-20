@@ -98,7 +98,7 @@ export function install(app) {
   }
 
   function typeIcon(layer) {
-    return { group: 'folder', text: 'text', shape: 'shape', fill: 'fill', adjustment: 'adjust' }[layer.type];
+    return { group: 'folder', text: 'text', shape: 'shape', fill: 'fill', adjustment: 'adjust', smart: 'smart' }[layer.type];
   }
 
   function render() {
@@ -116,11 +116,13 @@ export function install(app) {
       for (let i = group.children.length - 1; i >= 0; i--) {
         const layer = group.children[i];
         rows.push({ layer, depth });
+        // smart objects (lib/smart-object.js): their smart filters are listed under the layer
+        if (layer.type === 'smart' && layer.filters?.length) rows.push({ layer, depth, filters: true });
         if (layer.isGroup && layer.expanded) walk(layer, depth + 1);
       }
     };
     walk(doc.root, 0);
-    for (const { layer, depth } of rows) list.appendChild(row(layer, depth));
+    for (const { layer, depth, filters } of rows) list.appendChild(filters ? filterRows(layer, depth) : row(layer, depth));
     updateControls();
   }
 
@@ -219,6 +221,13 @@ export function install(app) {
     }
     if (layer.locked.all || layer.locked.pixels || layer.locked.position || layer.locked.transparency) badges.insertAdjacentHTML('beforeend', icon(layer.locked.all ? 'lock' : 'lock-alpha'));
     if (layer.type === 'text' || layer.type === 'shape' || layer.type === 'fill' || layer.type === 'adjustment') badges.insertAdjacentHTML('beforeend', icon(typeIcon(layer)));
+    if (layer.type === 'smart') {
+      const b = document.createElement('span');
+      b.className = 'layer-smart-badge';
+      b.title = 'Smart object: double-click the thumbnail to edit its contents';
+      b.innerHTML = icon('smart');
+      badges.appendChild(b);
+    }
     li.appendChild(badges);
 
     li.addEventListener('click', (e) => {
@@ -256,6 +265,7 @@ export function install(app) {
     });
     li.addEventListener('dblclick', (e) => {
       if (e.target.closest('.layer-name')) startRename(layer, name);
+      else if (layer.type === 'smart' && e.target.closest('.layer-thumb:not(.mask-thumb)')) app.commands.run('layer:smart-edit', layer.id, 'panel');
       else if (layer.type === 'text') app.commands.run('layer:edit-text', layer.id, 'panel');
       else if (layer.type === 'adjustment' || layer.type === 'fill') app.commands.run('layer:properties', layer.id, 'panel');
       else if (!e.target.closest('.layer-thumb')) app.commands.run('layer:style', 'dialog', 'panel');
@@ -294,6 +304,85 @@ export function install(app) {
       app.commands.run('layer:move-to', { id: dragLayer.id, target: layer.id, mode, duplicate: e.altKey }, 'panel');
     });
     return li;
+  }
+
+  /** The "Smart Filters" header and one row per filter below a smart object (lib/smart-object.js). */
+  function filterRows(layer, depth) {
+    const doc = app.doc;
+    const frag = document.createDocumentFragment();
+    const indentPx = depth * 14 + 22;
+    const base = (cls, title) => {
+      const li = document.createElement('li');
+      li.className = `layer-row ${cls}` + (doc.selected.has(layer) ? ' selected' : '');
+      li.dataset.id = layer.id;
+      li.title = title;
+      li.addEventListener('click', () => {
+        if (doc.active !== layer) doc.setActive(layer);
+      });
+      return li;
+    };
+    const eyeButton = (on, title, onClick) => {
+      const eye = document.createElement('button');
+      eye.className = 'eye' + (on ? '' : ' off');
+      eye.title = title;
+      eye.innerHTML = icon('eye');
+      eye.addEventListener('click', (e) => {
+        e.stopPropagation();
+        onClick();
+      });
+      return eye;
+    };
+    const indent = () => {
+      const sp = document.createElement('span');
+      sp.className = 'layer-indent';
+      sp.style.width = `${indentPx}px`;
+      return sp;
+    };
+    const head = base('smart-filter-head' + (layer.filtersEnabled === false ? ' off' : ''), 'Smart filters apply to the smart object non-destructively');
+    head.append(eyeButton(layer.filtersEnabled !== false, layer.filtersEnabled === false ? 'Enable the smart filters' : 'Disable the smart filters', () => app.commands.run('layer:smart-filters-toggle', layer.id, 'panel')), indent());
+    const headName = document.createElement('span');
+    headName.className = 'layer-name';
+    headName.textContent = 'Smart Filters';
+    head.appendChild(headName);
+    head.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      app.dialogs.popover(head, [
+        { label: layer.filtersEnabled === false ? 'Enable Smart Filters' : 'Disable Smart Filters', onSelect: () => app.commands.run('layer:smart-filters-toggle', layer.id, 'panel') },
+        { label: 'Clear Smart Filters', onSelect: () => app.commands.run('layer:smart-filters-clear', layer.id, 'panel') },
+      ], { at: { x: e.clientX, y: e.clientY } });
+    });
+    frag.appendChild(head);
+    layer.filters.forEach((f, index) => {
+      const on = f.enabled !== false && layer.filtersEnabled !== false;
+      const li = base('smart-filter-row' + (on ? '' : ' off'), 'Double-click to edit the smart filter, right-click for more');
+      li.dataset.index = String(index);
+      const run = (op) => app.commands.run('layer:smart-filter', { id: layer.id, index, op }, 'panel');
+      li.append(eyeButton(f.enabled !== false, f.enabled === false ? 'Show this smart filter' : 'Hide this smart filter', () => run('toggle')), indent());
+      const name = document.createElement('span');
+      name.className = 'layer-name';
+      name.textContent = app.smartFilters?.kindName(f.kind) ?? f.kind;
+      li.appendChild(name);
+      li.addEventListener('dblclick', (e) => {
+        e.stopPropagation();
+        run('edit');
+      });
+      li.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (doc.active !== layer) doc.setActive(layer);
+        app.dialogs.popover(li, [
+          { label: 'Edit Smart Filter…', onSelect: () => run('edit') },
+          { label: f.enabled === false ? 'Show Smart Filter' : 'Hide Smart Filter', onSelect: () => run('toggle') },
+          { type: 'separator' },
+          { label: 'Move Up', disabled: index >= layer.filters.length - 1, onSelect: () => run('up') },
+          { label: 'Move Down', disabled: index <= 0, onSelect: () => run('down') },
+          { type: 'separator' },
+          { label: 'Delete Smart Filter', onSelect: () => run('delete') },
+        ], { at: { x: e.clientX, y: e.clientY } });
+      });
+      frag.appendChild(li);
+    });
+    return frag;
   }
 
   function startRename(layer, nameEl) {
@@ -343,6 +432,18 @@ export function install(app) {
       { label: 'Select Layer Pixels', onSelect: run('select:from-layer', layer.id) },
       { type: 'separator' },
       ...(layer.type !== 'raster' && !layer.isGroup ? [{ label: 'Rasterize Layer', onSelect: run('layer:rasterize') }] : []),
+      // smart objects (lib/smart-object.js)
+      ...(layer.type === 'smart'
+        ? [
+            { label: 'Edit Contents', onSelect: run('layer:smart-edit', layer.id) },
+            { label: 'New Smart Object via Copy', onSelect: run('layer:smart-via-copy') },
+            { label: 'Replace Contents…', onSelect: run('layer:smart-replace') },
+            { label: 'Export Contents…', onSelect: run('layer:smart-export') },
+            { label: 'Reset Transform', disabled: !layer.transform, onSelect: run('layer:smart-reset', layer.id) },
+            ...(layer.filters?.length ? [{ label: 'Clear Smart Filters', onSelect: run('layer:smart-filters-clear', layer.id) }] : []),
+          ]
+        : [{ label: 'Convert to Smart Object', onSelect: run('layer:smart-convert') }]),
+      { type: 'separator' },
       ...(layer.styles ? [{ label: 'Copy Layer Style', onSelect: run('layer:copy-style') }, { label: 'Clear Layer Style', onSelect: run('layer:clear-style') }] : []),
       { label: 'Paste Layer Style', onSelect: run('layer:paste-style'), disabled: !app.copiedStyle },
       { type: 'separator' },

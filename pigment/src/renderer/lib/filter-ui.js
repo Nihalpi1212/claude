@@ -116,6 +116,8 @@ export function install(app) {
     const d = app.doc;
     if (!d) return;
     const direct = arg && typeof arg === 'object' ? arg : null;
+    // smart objects (lib/smart-object.js): a filter on a smart layer becomes a smart filter, not a pixel edit
+    if (app.smartFilters?.intercept(d.active, kind, direct, def.name)) return;
     const hasFields = !!FIELDS[kind]?.length;
     if (direct || !hasFields || !dialog) {
       const params = direct ?? paramsFor(app, kind, saved()[kind]);
@@ -175,4 +177,6 @@ export function install(app) {
   for (const k of FILTER_KINDS) cmds[`filter:${k}`] = { enabled: has, run: (arg) => run(k, arg && typeof arg === 'object' ? arg : null), label: `${FILTERS[k].name}${FIELDS[k]?.length ? '…' : ''}` };
   app.commands.registerAll(cmds);
   app.filterCategories = FILTER_CATEGORIES;
+  // smart objects (lib/smart-object.js) re-use the filter dialogs' editors for smart filters
+  app.filterEditor = { editor: (kind, params, onChange) => filterEditor(kind, params, onChange), defaults: (kind) => paramsFor(app, kind, saved()[kind]), hasFields: (kind) => !!FIELDS[kind]?.length, toRun };
 }
