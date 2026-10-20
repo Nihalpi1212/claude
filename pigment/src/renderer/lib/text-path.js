@@ -5,7 +5,7 @@ export function install(app) {
     'text:release-path': { enabled: () => false, run: () => app.dialogs.toast('Text on a path is not available in this build', { kind: 'error' }), label: 'text:release-path' },
     'text:flip-path': { enabled: () => false, run: () => app.dialogs.toast('Text on a path is not available in this build', { kind: 'error' }), label: 'text:flip-path' },
     'text:orientation': { enabled: () => false, run: () => app.dialogs.toast('Text on a path is not available in this build', { kind: 'error' }), label: 'text:orientation' },
-    'path:op': { enabled: () => false, run: () => app.dialogs.toast('Text on a path is not available in this build', { kind: 'error' }), label: 'path:op' },
-    'path:merge-components': { enabled: () => false, run: () => app.dialogs.toast('Text on a path is not available in this build', { kind: 'error' }), label: 'path:merge-components' },
+    // path:op and path:merge-components belong to lib/tools/vector.js (path operations); the stub
+    // used to claim them too and, loading later, hid the real commands
   });
 }

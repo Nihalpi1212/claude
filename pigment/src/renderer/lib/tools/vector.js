@@ -16,6 +16,7 @@ import { Selection } from '../selection.js';
 import { BrushStroke } from '../brush.js';
 import { formDialog } from '../form.js';
 import { parseColor } from '../../../shared/pixels/color.js';
+import { PATH_OPS, hasPathOps, pathAreaMask, hitPathArea, setSubpathOps } from '../path-ops.js';
 
 const ACCENT = '#1e88ff';
 const KAPPA = 0.5522847498307936;
@@ -24,7 +25,8 @@ const EMPTY = Object.freeze({ subpaths: Object.freeze([]) });
 // ---- path geometry ------------------------------------------------------------------------------------------
 
 export function clonePath(path) {
-  return { subpaths: (path?.subpaths ?? []).map((sp) => ({ closed: !!sp.closed, points: sp.points.map((p) => ({ ...p })) })) };
+  // `op` (path operation, see lib/path-ops.js) rides along; combine is the default and stays implicit
+  return { subpaths: (path?.subpaths ?? []).map((sp) => ({ closed: !!sp.closed, points: sp.points.map((p) => ({ ...p })), ...(sp.op && sp.op !== 'combine' ? { op: sp.op } : {}) })) };
 }
 
 export function isEmptyPath(path) {
@@ -768,6 +770,8 @@ export function strokePathPixels(app, path, { tool = 'brush', simulatePressure =
 
 /** Coverage mask (document size) of a path. */
 export function pathMask(doc, path, { antialias = true, rule = 'nonzero' } = {}) {
+  // subpaths with path operations are combined in order by lib/path-ops.js (the fill rule is moot then)
+  if (hasPathOps(path)) return pathAreaMask(path, doc.width, doc.height, { antialias });
   const c = createCanvas(doc.width, doc.height);
   const ctx = c.getContext('2d', { willReadFrequently: true });
   ctx.fillStyle = '#fff';
@@ -919,6 +923,10 @@ function snap45(from, to) {
 
 const MODE_SHAPE_PATH = [['shape', 'Shape'], ['path', 'Path']];
 const isShapeMode = (t) => t.opt('mode') === 'shape';
+/** "Path operations" of the shape and pen tools: where a drawn subpath goes and how it combines. */
+const PATH_OP_OPTIONS = [['new', 'New Layer'], ['combine', 'Combine Shapes'], ['subtract', 'Subtract Front Shape'], ['intersect', 'Intersect Shape Areas'], ['exclude', 'Exclude Overlapping Shapes']];
+const PATH_OP_LABELS = { combine: 'Combine Shapes', subtract: 'Subtract Front Shape', intersect: 'Intersect Shape Areas', exclude: 'Exclude Overlapping Shapes' };
+const PATH_OP_OPTION = { kind: 'select', key: 'pathOp', label: '', options: PATH_OP_OPTIONS, default: 'new', when: isShapeMode };
 const STYLE_OPTIONS = [
   { kind: 'checkbox', key: 'fillOn', label: 'Fill (foreground)', default: true, when: isShapeMode },
   { kind: 'checkbox', key: 'strokeOn', label: 'Stroke', default: false, when: isShapeMode },
@@ -926,7 +934,7 @@ const STYLE_OPTIONS = [
   { kind: 'number', key: 'strokeWidth', label: '', min: 0.5, max: 288, step: 0.5, default: 3, unit: 'px', when: (t) => isShapeMode(t) && !!t.opt('strokeOn') },
   { kind: 'select', key: 'strokeAlign', label: '', options: [['inside', 'Inside'], ['center', 'Center'], ['outside', 'Outside']], default: 'center', when: (t) => isShapeMode(t) && !!t.opt('strokeOn') },
 ];
-const SHARED_KEYS = new Set(['fillOn', 'strokeOn', 'strokeColor', 'strokeWidth', 'strokeAlign']);
+const SHARED_KEYS = new Set(['fillOn', 'strokeOn', 'strokeColor', 'strokeWidth', 'strokeAlign', 'pathOp']);
 const RERENDER_KEYS = new Set(['mode', 'strokeOn', 'star', 'shape']);
 const PATH_BUTTONS = [
   { kind: 'button', key: 'makeSel', label: 'Selection', icon: 'marquee-rect', onClick: (t) => t.app.commands.run('path:make-selection', undefined, 'toolbar') },
@@ -974,11 +982,16 @@ class VectorTool extends Tool {
     }
     if (tm.active === this) tm.renderOptions();
   }
+  /** The path operation chosen in the options bar ('new' = a new shape layer). */
+  pathOp() {
+    const op = this.opt('pathOp') ?? (this.opt('combine') === 'add' ? 'combine' : 'new');
+    return PATH_OPS.includes(op) ? op : 'new';
+  }
   /** Where a new path drawn with this tool goes: null means "a new shape layer". */
   drawTarget() {
     const doc = this.doc;
     if (this.opt('mode') === 'shape') {
-      if (this.opt('combine') === 'add' && doc.active?.type === 'shape' && !doc.active.locked.all) return shapeTarget(this.app, doc.active);
+      if (this.pathOp() !== 'new' && doc.active?.type === 'shape' && !doc.active.locked.all) return shapeTarget(this.app, doc.active);
       return null;
     }
     const ap = activePathTarget(this.app);
@@ -990,6 +1003,15 @@ class VectorTool extends Tool {
     if (!target) {
       createShapeLayer(this.app, draft, { name, label, style: shapeStyle(this), kind, props });
       return;
+    }
+    if (target.kind === 'shape') {
+      // the subpaths added to an existing shape carry the chosen operation (combine stays implicit)
+      const op = this.pathOp();
+      const existing = target.get().subpaths.length;
+      for (let i = existing; i < draft.subpaths.length; i++) {
+        if (op === 'new' || op === 'combine') delete draft.subpaths[i].op;
+        else draft.subpaths[i].op = op;
+      }
     }
     target.commit(draft, label, target.kind === 'shape' ? { shapeKind: 'path' } : undefined);
     if (target.kind === 'work' && activePathTarget(this.app)?.key !== 'work') setActivePath(this.app, { kind: 'work' });
@@ -1036,6 +1058,7 @@ export class ShapeTool extends VectorTool {
       hint: shape === 'line' ? 'Drag to draw a line; Shift constrains to 45°, Alt draws from the centre.' : 'Drag to draw; Shift keeps proportions, Alt draws from the centre. Click without dragging to enter a size.',
       options: [
         { kind: 'select', key: 'mode', label: '', options: [...MODE_SHAPE_PATH, ['pixels', 'Pixels']], default: 'shape' },
+        PATH_OP_OPTION,
         ...STYLE_OPTIONS,
         { kind: 'checkbox', key: 'antialias', label: 'Anti-alias', default: true, when: (t) => t.opt('mode') === 'pixels' },
         ...extra,
@@ -1152,6 +1175,16 @@ export class ShapeTool extends VectorTool {
       this.commitNewSubpath(target, draft, label);
       return;
     }
+    // shape mode with a path operation: add the subpath to the active shape layer (combine /
+    // subtract / intersect / exclude); "New Layer" (or no shape layer to add to) creates a layer
+    const target = this.drawTarget();
+    if (target) {
+      if (!editable(this.app, target)) return;
+      const draft = clonePath(target.get());
+      draft.subpaths.push(...clonePath(path).subpaths);
+      this.commitNewSubpath(target, draft, label);
+      return;
+    }
     createShapeLayer(this.app, path, { name: this.def.layer, label, style: shapeStyle(this), kind: this.def.kind, props });
   }
   async sizeDialog(at) {
@@ -1220,7 +1253,7 @@ export class PenTool extends VectorTool {
       hint: 'Click to add corner points, drag for smooth points; click the first point to close. Enter or Esc finishes, Backspace removes the last point. Shift constrains to 45°.',
       options: [
         { kind: 'select', key: 'mode', label: '', options: MODE_SHAPE_PATH, default: 'path' },
-        { kind: 'select', key: 'combine', label: '', options: [['new', 'New layer'], ['add', 'Add to shape']], default: 'new', when: isShapeMode },
+        PATH_OP_OPTION,
         ...STYLE_OPTIONS,
         { kind: 'checkbox', key: 'autoAddDelete', label: 'Auto add/delete', default: true },
       ],
@@ -1457,7 +1490,7 @@ export class FreeformPenTool extends VectorTool {
       hint: 'Drag to draw a path freehand; it is simplified and smoothed when you release. End near the start to close it.',
       options: [
         { kind: 'select', key: 'mode', label: '', options: MODE_SHAPE_PATH, default: 'path' },
-        { kind: 'select', key: 'combine', label: '', options: [['new', 'New layer'], ['add', 'Add to shape']], default: 'new', when: isShapeMode },
+        PATH_OP_OPTION,
         ...STYLE_OPTIONS,
         { kind: 'number', key: 'fit', label: 'Curve fit', min: 0.5, max: 10, step: 0.5, default: 2, unit: 'px' },
       ],
@@ -1686,7 +1719,11 @@ function shapeLayerAt(app, p, tol) {
   for (const l of doc.layers().slice().reverse()) {
     if (l.type !== 'shape' || !l.visible || l === doc.active) continue;
     const s = hitSubpath(l.path, p.x, p.y, tol);
-    if (s >= 0) return { layer: l, sp: s };
+    if (s < 0) continue;
+    // inside a subtracted (hole) subpath nothing is painted: the layer is not hit there unless the
+    // pointer is on an outline
+    if (hasPathOps(l.path) && !hitSegment(l.path, p.x, p.y, tol) && !hitPathArea(l.path, p.x, p.y)) continue;
+    return { layer: l, sp: s };
   }
   return null;
 }
@@ -2184,6 +2221,58 @@ function renamePath(app, { id, name } = {}) {
   recordPaths(doc, 'Rename Path', { paths: doc.paths.map((p) => (p.id === id ? { ...p, name: name.trim() } : p)) });
 }
 
+// ---- path operations (lib/path-ops.js) ---------------------------------------------------------------------
+
+/** What path:op acts on: the selected subpaths of the path selection tools, else the whole active shape / path. */
+function pathOpTarget(app) {
+  const doc = app.doc;
+  if (!doc) return null;
+  if (state.sel.key && state.sel.subpaths.size) {
+    const t = targetByKey(app, state.sel.key);
+    if (t) return { target: t, indices: [...state.sel.subpaths] };
+  }
+  if (doc.active?.type === 'shape' && !isEmptyPath(doc.active.path)) return { target: shapeTarget(app, doc.active), indices: null };
+  const t = currentPathTarget(app);
+  return t ? { target: t, indices: null } : null;
+}
+
+function setPathOp(app, op) {
+  if (!PATH_OPS.includes(op)) return;
+  const got = pathOpTarget(app);
+  if (!got) return app.dialogs.toast('Select a shape layer or a path first', { kind: 'error' });
+  const { target, indices } = got;
+  if (!editable(app, target)) return;
+  // with no component selected the operation applies to every component in front of the first
+  // one (the back-most shape is what the others combine with, as in Photoshop)
+  const path = target.get();
+  const which = indices ?? path.subpaths.map((_, i) => i).filter((i) => i > 0);
+  if (!which.length) return app.dialogs.toast('Draw a second shape component to combine with', { kind: 'info', timeout: 2500 });
+  const next = setSubpathOps(path, op, which);
+  if (samePath(target.get(), next)) return;
+  target.commit(next, PATH_OP_LABELS[op]);
+}
+
+/** Rasterises the combined area and traces it back into one outline per region (Merge Shape Components). */
+function mergeComponents(app) {
+  const doc = app.doc;
+  const layer = doc?.active;
+  const target = layer?.type === 'shape' ? shapeTarget(app, layer) : currentPathTarget(app);
+  if (!target || isEmptyPath(target.get())) return app.dialogs.toast('Select a shape layer or a path first', { kind: 'error' });
+  if (!editable(app, target)) return;
+  const path = target.get();
+  const b = pathBounds(path);
+  const pad = 2;
+  const ox = Math.floor(b.x) - pad, oy = Math.floor(b.y) - pad;
+  const w = Math.ceil(b.width) + pad * 2 + 1, h = Math.ceil(b.height) + pad * 2 + 1;
+  const sel = Selection.fromMask(w, h, pathAreaMask(path, w, h, { offsetX: -ox, offsetY: -oy }));
+  if (sel.isEmpty) return app.dialogs.toast('The shape has no area to merge', { kind: 'error' });
+  const merged = pathFromSelectionMask(sel, 1);
+  if (isEmptyPath(merged)) return app.dialogs.toast('The shape is too small to merge', { kind: 'error' });
+  mapPoints(merged, (x, y) => [r2(x + ox), r2(y + oy)]);
+  clearSel();
+  target.commit(merged, 'Merge Shape Components', target.kind === 'shape' ? { shapeKind: 'path' } : undefined);
+}
+
 // ---- install ------------------------------------------------------------------------------------------------
 
 export function install(app) {
@@ -2214,7 +2303,30 @@ export function install(app) {
     'path:delete': { enabled: () => !!app.doc && !!deletableTarget(app), label: 'Delete Path', run: () => deletePath(app) },
     'path:rename': { enabled: has, run: (arg) => renamePath(app, arg) },
     'path:select': { enabled: has, run: (arg) => setActivePath(app, arg ?? null) },
+    'path:op': { enabled: () => !!pathOpTarget(app), label: 'Path operation', run: (arg) => setPathOp(app, typeof arg === 'string' ? arg : arg?.op) },
+    'path:merge-components': { enabled: () => !!app.doc && (app.doc.active?.type === 'shape' || !!currentPathTarget(app)), label: 'Merge Shape Components', run: () => mergeComponents(app) },
   });
+  // a module loaded later may still register these ids as disabled stubs: re-assert ours once every
+  // module is installed
+  const ours = { 'path:op': app.commands.commands.get('path:op'), 'path:merge-components': app.commands.commands.get('path:merge-components') };
+  app.on('app:ready', () => {
+    for (const [id, def] of Object.entries(ours)) if (app.commands.commands.get(id) !== def) app.commands.register(id, def);
+    app.commands.invalidate();
+  });
+  // select:from-layer (edit-ops.js) reads the rendered alpha; a shape layer's selection is its path
+  // area with the operations applied and without the stroke, so route shape layers through path-ops
+  const fromLayer = app.commands.commands.get('select:from-layer');
+  if (fromLayer) {
+    app.commands.register('select:from-layer', {
+      ...fromLayer,
+      run: (id) => {
+        const d = app.doc;
+        const layer = (typeof id === 'string' && d?.find(id)) || d?.active;
+        if (layer?.type !== 'shape' || isEmptyPath(layer.path)) return fromLayer.run(id);
+        app.applySelection(Selection.fromMask(d.width, d.height, pathAreaMask(layer.path, d.width, d.height)), 'replace', 'Select layer pixels');
+      },
+    });
+  }
 
   const attach = (doc) => {
     if (!doc?.view || doc.view.__pathOverlay) return;
