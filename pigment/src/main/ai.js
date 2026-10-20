@@ -571,6 +571,8 @@ export function createAi({ electron, getWindow, settings, fetch: fetchImpl = glo
       try {
         tokens = await tokenRequest({ grant_type: 'refresh_token', refresh_token: refreshToken, client_id: o.clientId, resource: CHATGPT_AUTH.resource }, 'ChatGPT');
       } catch (err) {
+        // replaced (sign-out, an API key, a new sign-in) while the refresh was in flight: the new entry must survive
+        if (gen !== openaiGen || c.openai !== o) throw new AiError('The ChatGPT sign-in was removed while its token was being refreshed', { code: 'not_connected' });
         if (FATAL_TOKEN_ERRORS.has(err.code)) {
           await clearOpenAi();
           throw new AiError('Your ChatGPT sign-in has expired. Sign in again.', { code: err.code, status: err.status });
@@ -644,9 +646,10 @@ export function createAi({ electron, getWindow, settings, fetch: fetchImpl = glo
     return tryPort(0);
   }
 
-  function finishPending(err, value) {
+  /** Ends the sign-in attempt in progress; with `entry`, only when that attempt is still the current one. */
+  function finishPending(err, value, entry = null) {
     const p = pending;
-    if (!p) return;
+    if (!p || (entry && p !== entry)) return;
     pending = null;
     clearTimeout(p.timer);
     try {
@@ -677,7 +680,7 @@ export function createAi({ electron, getWindow, settings, fetch: fetchImpl = glo
       modelCache.delete('openai:chatgpt');
       await save();
       const s = await status();
-      finishPending(null, s);
+      finishPending(null, s, p);
       return s;
     })();
     try {
@@ -721,7 +724,8 @@ export function createAi({ electron, getWindow, settings, fetch: fetchImpl = glo
           (err) => {
             res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }).end(callbackPage({ ok: false, reason: err.message }));
             // a wrong state may be a stray request; the real callback can still arrive
-            if (err.code !== 'state_mismatch') finishPending(err);
+            // only this attempt ends: a cancelled one is already finished and must not end the next sign-in
+            if (err.code !== 'state_mismatch') finishPending(err, undefined, entry);
           }
         );
       };
@@ -756,10 +760,11 @@ export function createAi({ electron, getWindow, settings, fetch: fetchImpl = glo
   async function chatgptSignInManual({ callbackUrl } = {}) {
     if (!pending) throw new AiError('Start "Sign in with ChatGPT" first, then paste the address the browser landed on', { code: 'no_sign_in' });
     const parsed = parseCallback(callbackUrl);
+    const attempt = pending;
     try {
       return await completeSignIn(parsed);
     } catch (err) {
-      if (err.code !== 'state_mismatch') finishPending(err);
+      if (err.code !== 'state_mismatch') finishPending(err, undefined, attempt);
       throw err;
     }
   }

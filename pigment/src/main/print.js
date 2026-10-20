@@ -12,10 +12,29 @@ const DATA_URL_LIMIT = 1_500_000;
 
 const num = (v, fallback) => (Number.isFinite(Number(v)) ? Number(v) : fallback);
 
+/**
+ * A base64 PNG / JPEG / WebP data URL and nothing else. A negated character class runs in one linear
+ * pass (a whole-string anchored regex took seconds on 100 MB prints, blocking the main process).
+ */
+export function isImageDataUrl(s) {
+  if (typeof s !== 'string') return false;
+  const m = /^data:image\/(png|jpeg|webp);base64,/.exec(s);
+  if (!m) return false;
+  const start = m[0].length;
+  if (start >= s.length) return false;
+  // scan in place (no copy of a possibly huge string): only base64 characters after the prefix
+  const bad = /[^A-Za-z0-9+/=]/g;
+  bad.lastIndex = start;
+  if (bad.test(s)) return false;
+  // '=' only as padding: at most the last two characters
+  const eq = s.indexOf('=', start);
+  return eq === -1 || (eq >= s.length - 2 && (eq === s.length - 1 || s[s.length - 1] === '='));
+}
+
 /** Validates and normalises the renderer's options (the renderer is sandboxed and untrusted). */
 export function normalizePrintOptions(opts = {}) {
   // the whole string must be base64 image data: it is written into the print page's HTML
-  const dataUrl = typeof opts.dataUrl === 'string' && /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(opts.dataUrl) ? opts.dataUrl : null;
+  const dataUrl = isImageDataUrl(opts.dataUrl) ? opts.dataUrl : null;
   if (!dataUrl) throw new Error('printImage needs a PNG/JPEG/WebP data URL');
   const paper = opts.paper && typeof opts.paper === 'object' ? opts.paper : {};
   let pageW = Math.max(10, num(paper.width, 210)), pageH = Math.max(10, num(paper.height, 297));

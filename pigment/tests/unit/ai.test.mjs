@@ -539,3 +539,70 @@ test('createAi: bug hunt 3 — safeStorage wiring, re-sealing, refresh races, ro
     for (const dir of dirs) await rm(dir, { recursive: true, force: true });
   }
 });
+
+test('createAi: review fixes — a fatal refresh after a new API key keeps the key; a cancelled attempt never ends the next sign-in', async () => {
+  const clock = 1_800_000_000_000;
+  const now = () => clock;
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const sealed = (v) => `enc:${Buffer.from(`sealed:${v}`).toString('base64')}`;
+  const knobs = { refreshDelay: 150, codeDelay: 0, nonce: null };
+  const fetchImpl = async (url, init) => {
+    if (url === CHATGPT_AUTH.tokenUrl) {
+      const form = new URLSearchParams(init.body);
+      if (form.get('grant_type') === 'refresh_token') {
+        await sleep(knobs.refreshDelay);
+        return jsonResponse(400, { error: 'invalid_grant', error_description: 'gone' });
+      }
+      if (knobs.codeDelay) await sleep(knobs.codeDelay);
+      return jsonResponse(200, { access_token: 'access-1', refresh_token: 'refresh-1', expires_in: 3600, id_token: fakeJwt({ iss: 'https://auth.openai.com', aud: 'dynamic_agent_client', exp: clock / 1000 + 3600, nonce: knobs.nonce }) });
+    }
+    if (url === 'https://api.openai.com/v1/models') return jsonResponse(200, { data: [{ id: 'gpt-5' }] });
+    return jsonResponse(404, { error: { message: `no route ${url}` } });
+  };
+  const dirs = [];
+  const fresh = async (initial = null) => {
+    const dir = await mkdtemp(join(tmpdir(), 'pigment-ai4-'));
+    dirs.push(dir);
+    if (initial) await writeFile(join(dir, 'ai-credentials.json'), JSON.stringify({ version: 1, ...initial }));
+    return { dir, ai: createAi({ electron: fakeElectron(), settings: fakeSettings(), fetch: fetchImpl, now, userDataDir: dir }) };
+  };
+  try {
+    {
+      const { ai } = await fresh({ openai: { method: 'chatgpt', clientId: 'oaiapp_42', accessToken: sealed('access-1'), refreshToken: sealed('refresh-1'), expiresAt: clock / 1000 - 10, earliestRefreshAt: 0 } });
+      const req = ai.dispatch('request', { provider: 'openai', path: '/models', method: 'GET' });
+      req.catch(() => {});
+      await sleep(30);
+      assert.equal((await ai.dispatch('setApiKey', { provider: 'openai', key: 'sk-new' })).openai.method, 'api_key');
+      await assert.rejects(req, /removed|not connected/i);
+      assert.equal((await ai.dispatch('status')).openai.method, 'api_key');
+    }
+    {
+      knobs.codeDelay = 200;
+      const { ai } = await fresh();
+      const a = ai.dispatch('chatgptSignIn', { port: 18471 });
+      a.catch(() => {});
+      await sleep(60);
+      const sa = await ai.dispatch('chatgptSignInStatus');
+      const ua = new URL(sa.url);
+      knobs.nonce = ua.searchParams.get('nonce');
+      const manual = ai.dispatch('chatgptSignInManual', { callbackUrl: `${ua.searchParams.get('redirect_uri')}?code=c&state=${ua.searchParams.get('state')}` });
+      manual.catch(() => {});
+      await sleep(30);
+      await ai.dispatch('chatgptSignInCancel');
+      await assert.rejects(a, /cancelled/i);
+      // attempt B starts while A's exchange is still in flight
+      const b = ai.dispatch('chatgptSignIn', { port: 18472 });
+      b.catch(() => {});
+      await sleep(60);
+      await assert.rejects(manual, /cancelled/i);
+      await sleep(250);
+      const sb = await ai.dispatch('chatgptSignInStatus');
+      assert.equal(sb.pending, true, 'attempt B is still waiting for its own callback');
+      await ai.dispatch('chatgptSignInCancel');
+      await assert.rejects(b, /cancelled/i);
+      knobs.codeDelay = 0;
+    }
+  } finally {
+    for (const dir of dirs) await rm(dir, { recursive: true, force: true });
+  }
+});

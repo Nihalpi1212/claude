@@ -51,6 +51,28 @@ export function parseMaybeJson(v) {
 
 const stoppedError = () => Object.assign(new Error('Stopped by the user'), { code: 'stopped' });
 
+/** A params object from the model (an object, or an object as JSON text); unreadable text is an error the model sees. */
+export function objectArg(v, name) {
+  const p = parseMaybeJson(v);
+  if (p === undefined || p === null || (typeof p === 'string' && !p.trim())) return {};
+  if (typeof p === 'string') throw new Error(`${name} must be a JSON object such as {"radius": 4}; could not read: ${p.slice(0, 80)}`);
+  if (typeof p !== 'object' || Array.isArray(p)) throw new Error(`${name} must be an object`);
+  return p;
+}
+
+/** run_command's argument: JSON text (an object, a quoted string, a number, true/false) is decoded; plain text stays text. */
+export function valueArg(v) {
+  if (typeof v !== 'string') return v;
+  const s = v.trim();
+  if (!/^([[{"]|-?\d|true$|false$|null$)/.test(s)) return v;
+  try {
+    return JSON.parse(s);
+  } catch {
+    if (/^[[{"]/.test(s)) throw new Error(`arg looks like JSON but could not be read: ${s.slice(0, 80)}`);
+    return v;
+  }
+}
+
 /** Sanitises a params object: finite numbers (clamped by the range table), booleans, short strings, arrays and plain objects. */
 export function sanitizeParams(params, ranges, depth = 0) {
   if (!params || typeof params !== 'object' || depth > 4) return {};
@@ -272,7 +294,7 @@ export function install(app) {
     apply_adjustment: async (d, { kind, params }) => {
       if (!ADJUSTMENTS[kind]) throw new Error(`Unknown adjustment "${kind}"`);
       needRaster(d);
-      const p = withDefaults(app.adjustments?.[kind]?.defaults ?? ADJUSTMENTS[kind].defaults, sanitizeParams(parseMaybeJson(params), ADJUST_RANGES));
+      const p = withDefaults(app.adjustments?.[kind]?.defaults ?? ADJUSTMENTS[kind].defaults, sanitizeParams(objectArg(params, 'params'), ADJUST_RANGES));
       await runCommand(`image:adjust-${kind}`, p);
       return `Applied ${ADJUSTMENTS[kind].name} to "${d.active.name}"`;
     },
@@ -281,13 +303,14 @@ export function install(app) {
       needRaster(d);
       // the dialog's field ranges for this kind win over the shared table (vignette's size is 0..1, mosaic's 2..200)
       const ranges = { ...FILTER_RANGES, ...(app.filterEditor?.ranges?.(kind) ?? {}) };
-      const p = withDefaults(app.filterEditor?.defaults?.(kind) ?? FILTERS[kind].defaults, sanitizeParams(parseMaybeJson(params), ranges));
+      // the defaults the instructions advertise (not the last dialog run, which can carry dialog-only keys such as Shear's __bend)
+      const p = withDefaults(FILTERS[kind].defaults, sanitizeParams(objectArg(params, 'params'), ranges));
       await runCommand(`filter:${kind}`, p);
       return `Applied ${FILTERS[kind].name} to "${d.active.name}"`;
     },
     run_command: async (d, { id, arg }) => {
       if (typeof id !== 'string' || BLOCKED_COMMANDS.test(id)) throw new Error(`Command "${id}" cannot be run by the assistant`);
-      arg = parseMaybeJson(arg);
+      arg = valueArg(arg);
       return runCommand(id, arg && typeof arg === 'object' ? sanitizeParams(arg, {}) : arg);
     },
     new_layer: async (d, { name } = {}) => {
@@ -363,9 +386,10 @@ export function install(app) {
     add_text: async (d, { text, x, y, size, color }) => {
       const t = String(text ?? '').slice(0, 2000);
       if (!t.trim()) throw new Error('text is empty');
-      const fontSize = size === undefined ? Math.max(12, Math.round(d.height / 12)) : Math.round(num(size, 'size', 4, 2000));
-      const px = x === undefined ? Math.round(d.width * 0.1) : Math.round(num(x, 'x', -d.width, d.width * 2));
-      const py = y === undefined ? Math.round(d.height * 0.1 + fontSize) : Math.round(num(y, 'y', -d.height, d.height * 2));
+      // null means "use the default", as for the colour
+      const fontSize = size == null ? Math.max(12, Math.round(d.height / 12)) : Math.round(num(size, 'size', 4, 2000));
+      const px = x == null ? Math.round(d.width * 0.1) : Math.round(num(x, 'x', -d.width, d.width * 2));
+      const py = y == null ? Math.round(d.height * 0.1 + fontSize) : Math.round(num(y, 'y', -d.height, d.height * 2));
       const fontColor = color == null ? app.settings.foreground : colorArg(color).hex;
       const layer = new TextLayer({ text: t, x: px, y: py, font: { size: fontSize, color: fontColor } });
       structural(app, 'Add text', () => {
@@ -438,14 +462,24 @@ export function install(app) {
     if (c.messages.length > MAX_TURNS) c.messages.splice(0, c.messages.length - MAX_TURNS);
     const pending = { role: 'assistant', text: '', calls: [], pending: true, at: Date.now() };
     c.messages.push(pending);
-    const run = { doc: d, stopped: false, stop: () => (run.stopped = true) };
+    let onStop;
+    const stopSignal = new Promise((resolve) => (onStop = resolve));
+    const run = {
+      doc: d,
+      stopped: false,
+      stop: () => {
+        run.stopped = true;
+        onStop();
+      },
+    };
     running = run;
     app.emit('assistant:changed', { doc: d, running: true });
     const notify = () => app.emit('assistant:changed', { doc: d, running: !!running });
     // only the latest user message carries the image: earlier ones are resent as text to keep requests small
     const history = c.messages.filter((m) => !m.pending && !m.error).map((m, i, all) => ({ role: m.role, text: m.text, images: m.image && i === all.length - 1 ? [m.image] : undefined }));
     try {
-      const result = await app.ai.providers.chat({
+      // Stop ends the turn at once: a request still in flight is dropped when it answers (its tools never run)
+      const chatPromise = app.ai.providers.chat({
         provider,
         model,
         instructions: instructions(),
@@ -470,6 +504,8 @@ export function install(app) {
           return call.result;
         },
       });
+      chatPromise.catch(() => {}); // a request answering after Stop is dropped
+      const result = await Promise.race([chatPromise, stopSignal.then(() => Promise.reject(stoppedError()))]);
       if (run.stopped) {
         pending.text = pending.text || 'Stopped.';
         pending.stopped = true;

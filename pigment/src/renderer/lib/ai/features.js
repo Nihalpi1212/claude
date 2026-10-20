@@ -164,7 +164,7 @@ export function skyMask(composite, { minPixels = 0.01 } = {}) {
   }
   // blur the edge a little so the horizon blends; the canvas border is not an edge, so the mask is padded
   // with its own border pixels before blurring (otherwise the sky would fade out along the top and sides)
-  const PAD = 4;
+  const PAD = 8; // wider than the blur's reach (about 3 sigma), so no transparency bleeds in from outside
   const c = canvasFromImageData(out);
   const padded = createCanvas(w + 2 * PAD, h + 2 * PAD);
   const pc = padded.getContext('2d');
@@ -235,7 +235,11 @@ export function install(app) {
   const ai = () => app.ai;
 
   /** Checks the connection and returns { provider, status } or null (the accounts dialog was shown). */
-  async function connected(kind) {
+  /**
+   * Dialog-less features follow the Preferred provider; a dialog starts from the provider it was last
+   * used with (changing the Preferred provider in AI Accounts resets that memory).
+   */
+  async function connected(kind, { dialog = false } = {}) {
     if (!ai()) {
       app.dialogs.toast('AI is not available in this build', { kind: 'error' });
       return null;
@@ -247,7 +251,8 @@ export function install(app) {
     const prefs = ai().prefs();
     const def = prefs.defaultProvider;
     const saved = prefs[kind === 'image' ? 'imageProvider' : 'chatProvider'];
-    const pick = def && ai().fits(def, kind) ? def : saved && ai().fits(saved, kind) ? saved : provider;
+    const fits = (p) => !!p && ai().fits(p, kind);
+    const pick = dialog ? (fits(saved) ? saved : fits(def) ? def : provider) : fits(def) ? def : fits(saved) ? saved : provider;
     return { provider: pick, status };
   }
 
@@ -324,7 +329,7 @@ export function install(app) {
 
   /** Shows a dialog with a prompt, the provider/model fields and extra fields; resolves with the values or null. */
   async function optionsDialog({ title, kind = 'image', intro, promptLabel = 'Prompt', promptDefault = '', extra = [], okLabel = 'Generate', noPrompt = false }) {
-    const c = await connected(kind);
+    const c = await connected(kind, { dialog: true });
     if (!c) return null;
     const pf = providerFields(kind, c.provider, c.status);
     const fields = [
@@ -456,15 +461,27 @@ export function install(app) {
     ai().setPrefs({ lastExpandPrompt: values.prompt });
     const W = Math.max(d.width, Math.round(values.width) || d.width), H = Math.max(d.height, Math.round(values.height) || d.height);
     // the canvas grows here with a transparent extension (Canvas Size fills an opaque Background by default)
-    if (W > d.width || H > d.height) await app.commands.run('image:canvas-size', { width: W, height: H, anchor: values.anchor, color: null }, 'api');
+    let resizedAt = -1;
+    if (W > d.width || H > d.height) {
+      await app.commands.run('image:canvas-size', { width: W, height: H, anchor: values.anchor, color: null }, 'api');
+      resizedAt = d.history.index;
+    }
+    // a cancelled or failed expansion takes its resize back (when nothing was done after it)
+    const undoResize = () => {
+      if (resizedAt >= 0 && d.history.index === resizedAt) d.history.undo();
+    };
     const mask = transparentAreaMask(composite(d));
-    if (!mask) return app.dialogs.toast('Nothing to expand: enter a larger size, or enlarge the canvas with a transparent extension (Image › Canvas Size)', { kind: 'error', timeout: 6000 });
+    if (!mask) {
+      undoResize();
+      return app.dialogs.toast('Nothing to expand: enter a larger size, or enlarge the canvas with a transparent extension (Image › Canvas Size)', { kind: 'error', timeout: 6000 });
+    }
     const region = { x: 0, y: 0, width: d.width, height: d.height };
     try {
       const layers = await aiTask(app, 'Generative Expand…', (state) => fillThroughMask(d, mask, region, { ...values, variations: 1, name: 'Generative Expand' }, state));
-      if (!layers.length) return;
+      if (!layers.length) return undoResize();
       addLayers(d, layers, 'Generative Expand');
     } catch (err) {
+      undoResize();
       reportAiError(app, err, 'Generative Expand failed');
     }
   }

@@ -1,7 +1,7 @@
 // Main-process printing helpers (src/main/print.js): option validation and the inline page.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizePrintOptions, buildPrintHtml, printImage } from '../../src/main/print.js';
+import { normalizePrintOptions, buildPrintHtml, printImage, isImageDataUrl } from '../../src/main/print.js';
 
 const PNG = 'data:image/png;base64,iVBORw0KGgo=';
 
@@ -94,4 +94,9 @@ test('normalizePrintOptions accepts only well-formed base64 image data, and the 
   const html = buildPrintHtml(normalizePrintOptions({ dataUrl: PNG }));
   assert.match(html, /Content-Security-Policy" content="default-src 'none'; img-src data:/);
   assert.doesNotMatch(html, /<script/i);
+});
+
+test('isImageDataUrl: base64 characters only, padding only at the end', () => {
+  for (const ok of ['data:image/png;base64,AAAA', 'data:image/png;base64,AA==', 'data:image/jpeg;base64,AAA=', 'data:image/webp;base64,a+/9']) assert.equal(isImageDataUrl(ok), true, ok);
+  for (const bad of ['data:image/png;base64,', 'data:image/png;base64,A=AA', 'data:image/png;base64,AAA===', 'data:image/png;base64,AA"x', 'data:image/gif;base64,AAAA', 'data:text/html;base64,AAAA', null, 42]) assert.equal(isImageDataUrl(bad), false, String(bad));
 });
