@@ -139,6 +139,7 @@ function link(label, url) {
 
 function keyField({ placeholder, onConnect, helpUrl, helpLabel }) {
   const wrap = el('div', 'ai-key-row');
+  wrap.dataset.noEnter = ''; // Enter connects the key; it must not close the dialog
   const input = el('input', 'input');
   input.type = 'password';
   input.placeholder = placeholder;
@@ -244,6 +245,7 @@ async function accountsDialog(app, ai, { reason = null } = {}) {
     );
     box.append(row);
     const manual = el('div', 'ai-key-row');
+    manual.dataset.noEnter = '';
     const input = el('input', 'input');
     input.placeholder = 'Paste the address of the page the browser landed on';
     input.spellcheck = false;
@@ -385,7 +387,8 @@ async function accountsDialog(app, ai, { reason = null } = {}) {
     select.dataset.ai = 'default-provider';
     select.append(new Option('OpenAI', 'openai'), new Option('Google Gemini', 'gemini'));
     select.value = ai.prefs().defaultProvider === 'gemini' ? 'gemini' : 'openai';
-    select.addEventListener('change', () => ai.setPrefs({ defaultProvider: select.value }));
+    // the preferred provider is what every feature starts from: the per-kind choices of earlier dialogs follow it
+    select.addEventListener('change', () => ai.setPrefs({ defaultProvider: select.value, imageProvider: select.value, chatProvider: select.value }));
     def.append(lab, select);
     foot.append(def);
     if (status.encryption === false && !status.browser) foot.append(el('p', 'ai-warning', 'This system offers no secure storage: keys and tokens are kept unencrypted in ai-credentials.json in the app data folder.'));

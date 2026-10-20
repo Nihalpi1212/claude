@@ -135,10 +135,13 @@ test('generative expand fills only the transparent band added by Canvas Size', a
   expect(call.path).toBe('/images/edits');
   expect(call.multipart.fields.prompt).toBe('more grass');
   expect(call.multipart.files.map((f) => f.field)).toEqual(['image[]', 'mask']);
-  // no transparent area: the command explains instead of calling the provider
+  // no transparent area and no larger size entered: the command explains instead of calling the provider
   await runAwait(page, 'edit:undo');
   await runAwait(page, 'edit:undo');
   await run(page, 'ai:generative-expand');
+  await expect(dialog.locator('.dialog-header h2')).toHaveText('Generative Expand');
+  await expect(dialog.locator('input[data-key="width"]')).toHaveValue('200');
+  await confirmDialog(page);
   await expect(page.locator('.toast.error')).toContainText('Nothing to expand');
   expect(await page.evaluate(() => window.__pigmentTest.aiCalls.length)).toBe(1);
   expect(errors).toEqual([]);
@@ -158,7 +161,7 @@ test('remove background turns a subject-on-white answer into a layer mask on a c
     return d.active.canvas.toDataURL('image/png').split(',')[1];
   });
   await installFakeAi(page, [{ candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/png', data: answer } }] } }] }]);
-  await page.evaluate(() => window.pigmentApp.ai.setPrefs({ imageProvider: 'gemini' }));
+  await page.evaluate(() => window.pigmentApp.ai.setPrefs({ defaultProvider: 'gemini' }));
 
   await runAwait(page, 'ai:remove-background');
   await expect.poll(() => layerNames(page)).toEqual(['Background', 'Background (no background)']);

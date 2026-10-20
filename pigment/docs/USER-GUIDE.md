@@ -296,8 +296,9 @@ the status toast while it runs.
 
 - **Generative Fill**: make a selection, describe what should appear in it. Up to three
   variations, each a layer holding only the selected area.
-- **Generative Expand**: enlarge the canvas first (Image › Canvas Size), then describe how the
-  empty area should continue the picture.
+- **Generative Expand**: enter the new canvas size (and where the image stays) and describe how
+  the new area should continue the picture; the canvas grows and the empty band is filled. A
+  transparent area you added yourself with Image › Canvas Size is filled too.
 - **Generate Image**: a picture from a description, as a layer in the open document or as a new
   document of the size you choose, optionally with a transparent background.
 - **Remove Background**: keeps the subject of the active layer. The result is a copy of the layer

@@ -10,7 +10,12 @@ import { structural, setLayerProps, nextLayerName, cloneLayer, rasterizeLayer } 
 import { flattenDocument } from '../compositor.js';
 import { formDialog } from '../form.js';
 import { bridge } from '../bridge.js';
-import { PROVIDERS, makeCanvas, cropCanvas, resampleTo, imageDataOf, canvasFromImageData } from './providers.js';
+import { PROVIDERS, makeCanvas, cropCanvas, resampleTo, imageDataOf, canvasFromImageData, isOpaque, keyWhiteBorder } from './providers.js';
+import * as selOps from '../../../shared/pixels/selection-ops.js';
+
+export { isOpaque, keyWhiteBorder };
+
+const ANCHORS = [['nw', 'Top left'], ['n', 'Top'], ['ne', 'Top right'], ['w', 'Left'], ['c', 'Centre'], ['e', 'Right'], ['sw', 'Bottom left'], ['s', 'Bottom'], ['se', 'Bottom right']];
 
 /** Largest region sent for a generative fill (the providers downscale further when their own limit is lower). */
 const MAX_REGION = 1536;
@@ -62,61 +67,22 @@ export function reportAiError(app, err, context) {
 
 // ---- pixel helpers ---------------------------------------------------------------------------------------------------
 
-/** True when every pixel is fully opaque (an answer without an alpha channel). */
-export function isOpaque(img) {
-  const d = img.data;
-  for (let i = 3; i < d.length; i += 4) if (d[i] < 255) return false;
-  return true;
-}
-
 /**
- * Keys out the near-white background connected to the image border (a Gemini "subject on white"
- * answer): flood from the edges over pixels whose channels all exceed `threshold`, then fade the ring of
- * lighter pixels next to the keyed area so the subject edge is not left with a white fringe. In place.
+ * Feathers a coverage mask as if the canvas continued beyond its border (edges replicated), so a
+ * selection touching the border keeps full coverage there: the border is not a selection edge.
  */
-export function keyWhiteBorder(img, { threshold = 232 } = {}) {
-  const { width: w, height: h, data: d } = img;
-  const keyed = new Uint8Array(w * h);
-  const stack = [];
-  const isWhite = (i) => d[i * 4] >= threshold && d[i * 4 + 1] >= threshold && d[i * 4 + 2] >= threshold;
-  const push = (i) => {
-    if (!keyed[i] && isWhite(i)) {
-      keyed[i] = 1;
-      stack.push(i);
-    }
-  };
-  for (let x = 0; x < w; x++) {
-    push(x);
-    push((h - 1) * w + x);
+export function featherKeepingBorder(mask, width, height, radius) {
+  const f = Math.ceil(radius) * 3 + 2; // wider than the blur kernel, so nothing outside the padding is ever read
+  const W = width + 2 * f, H = height + 2 * f;
+  const big = new Uint8ClampedArray(W * H);
+  for (let y = 0; y < H; y++) {
+    const sy = Math.min(height - 1, Math.max(0, y - f));
+    for (let x = 0; x < W; x++) big[y * W + x] = mask[sy * width + Math.min(width - 1, Math.max(0, x - f))];
   }
-  for (let y = 0; y < h; y++) {
-    push(y * w);
-    push(y * w + w - 1);
-  }
-  while (stack.length) {
-    const i = stack.pop();
-    const x = i % w, y = (i - x) / w;
-    if (x > 0) push(i - 1);
-    if (x < w - 1) push(i + 1);
-    if (y > 0) push(i - w);
-    if (y < h - 1) push(i + w);
-  }
-  let count = 0;
-  for (let i = 0; i < keyed.length; i++) {
-    if (!keyed[i]) continue;
-    d[i * 4 + 3] = 0;
-    count++;
-  }
-  // soften the edge: an unkeyed pixel next to the keyed area keeps alpha in proportion to how far from white it is
-  for (let i = 0; i < keyed.length; i++) {
-    if (keyed[i]) continue;
-    const x = i % w, y = (i - x) / w;
-    const near = (x > 0 && keyed[i - 1]) || (x < w - 1 && keyed[i + 1]) || (y > 0 && keyed[i - w]) || (y < h - 1 && keyed[i + w]);
-    if (!near) continue;
-    const m = Math.min(d[i * 4], d[i * 4 + 1], d[i * 4 + 2]);
-    if (m > 200) d[i * 4 + 3] = Math.round((d[i * 4 + 3] * (255 - m)) / 55);
-  }
-  return count;
+  selOps.feather(big, W, H, radius);
+  const out = new Uint8ClampedArray(width * height);
+  for (let y = 0; y < height; y++) out.set(big.subarray((y + f) * W + f, (y + f) * W + f + width), y * width);
+  return out;
 }
 
 /** An alpha-only canvas (white, alpha = source alpha) of `size`, with the source placed at (x, y). */
@@ -196,19 +162,37 @@ export function skyMask(composite, { minPixels = 0.01 } = {}) {
     o[i * 4] = o[i * 4 + 1] = o[i * 4 + 2] = 255;
     o[i * 4 + 3] = sky[i] ? 255 : 0;
   }
-  // dilate + blur the edge a little so the horizon blends
+  // blur the edge a little so the horizon blends; the canvas border is not an edge, so the mask is padded
+  // with its own border pixels before blurring (otherwise the sky would fade out along the top and sides)
+  const PAD = 4;
   const c = canvasFromImageData(out);
-  const soft = createCanvas(w, h);
-  const ctx = soft.getContext('2d');
-  ctx.filter = 'blur(2px)';
-  ctx.drawImage(c, 0, 0);
-  ctx.filter = 'none';
-  return soft;
+  const padded = createCanvas(w + 2 * PAD, h + 2 * PAD);
+  const pc = padded.getContext('2d');
+  pc.drawImage(c, PAD, PAD);
+  pc.drawImage(c, 0, 0, w, 1, PAD, 0, w, PAD); // top strip
+  pc.drawImage(c, 0, h - 1, w, 1, PAD, h + PAD, w, PAD); // bottom strip
+  pc.drawImage(c, 0, 0, 1, h, 0, PAD, PAD, h); // left strip
+  pc.drawImage(c, w - 1, 0, 1, h, w + PAD, PAD, PAD, h); // right strip
+  pc.drawImage(c, 0, 0, 1, 1, 0, 0, PAD, PAD);
+  pc.drawImage(c, w - 1, 0, 1, 1, w + PAD, 0, PAD, PAD);
+  pc.drawImage(c, 0, h - 1, 1, 1, 0, h + PAD, PAD, PAD);
+  pc.drawImage(c, w - 1, h - 1, 1, 1, w + PAD, h + PAD, PAD, PAD);
+  const blurred = createCanvas(w + 2 * PAD, h + 2 * PAD);
+  const bc = blurred.getContext('2d');
+  bc.filter = 'blur(2px)';
+  bc.drawImage(padded, 0, 0);
+  bc.filter = 'none';
+  return cropCanvas(blurred, PAD, PAD, w, h);
 }
 
-/** The selection as a feathered (1 px) alpha canvas cropped to `region`. */
+/** The selection as a feathered (1 px) alpha canvas cropped to `region`; full coverage is kept along the canvas border. */
 function selectionMaskCanvas(doc, region, feather = 1) {
-  const sel = feather > 0 ? doc.selection.feather(feather) : doc.selection;
+  let sel = doc.selection;
+  if (feather > 0) {
+    sel = doc.selection.clone();
+    sel.mask = featherKeepingBorder(doc.selection.mask, sel.width, sel.height, feather);
+    sel.invalidate();
+  }
   return cropCanvas(sel.toCanvas(), region.x, region.y, region.width, region.height);
 }
 
@@ -259,8 +243,12 @@ export function install(app) {
     const provider = await ai().ensureConnected(kind);
     if (!provider) return null;
     const status = ai().current;
-    const saved = ai().prefs()[kind === 'image' ? 'imageProvider' : 'chatProvider'];
-    return { provider: saved && ai().fits(saved, kind) ? saved : provider, status };
+    // the Preferred provider (AI Accounts) decides when it serves this kind; otherwise the last dialog's choice
+    const prefs = ai().prefs();
+    const def = prefs.defaultProvider;
+    const saved = prefs[kind === 'image' ? 'imageProvider' : 'chatProvider'];
+    const pick = def && ai().fits(def, kind) ? def : saved && ai().fits(saved, kind) ? saved : provider;
+    return { provider: pick, status };
   }
 
   /**
@@ -381,11 +369,15 @@ export function install(app) {
     app.setEditingMask(false);
   }
 
-  /** The active layer's pixels in document space as { canvas, x, y } (text/shape/smart layers rendered). */
+  /** The active layer's pixels in document space as { canvas, x, y } (text/shape/smart layers rendered; an enabled layer mask applied). */
   function activePixels(d) {
     const layer = d.active;
     if (!layer || layer.isGroup) return null;
-    if (layer.type === 'raster') return { layer, canvas: layer.canvas, x: layer.x, y: layer.y };
+    if (layer.type === 'raster') {
+      let canvas = layer.canvas;
+      if (layer.mask?.canvas && layer.mask.enabled !== false) canvas = throughMask(layer.canvas, cropCanvas(layer.mask.canvas, layer.x, layer.y, layer.canvas.width, layer.canvas.height));
+      return { layer, canvas, x: layer.x, y: layer.y };
+    }
     const r = rasterizeLayer(layer, d);
     return r ? { layer, canvas: r.canvas, x: r.x, y: r.y } : null;
   }
@@ -446,17 +438,27 @@ export function install(app) {
   async function generativeExpand() {
     const d = doc();
     if (!d) return;
-    const flat = composite(d);
-    const mask = transparentAreaMask(flat);
-    if (!mask) return app.dialogs.toast('Nothing to expand: enlarge the canvas first (Image › Canvas Size) so there is a transparent area to fill', { kind: 'error', timeout: 6000 });
+    const already = !!transparentAreaMask(composite(d));
     const values = await optionsDialog({
       title: 'Generative Expand',
-      intro: 'Fills the transparent area around the image. Describe what should appear there, or leave a short hint such as "continue the scene".',
+      intro: already
+        ? 'Fills the transparent area around the image (enlarge the canvas further here if you like). Describe what should appear there, or leave a short hint such as "continue the scene".'
+        : 'Enlarges the canvas and fills the new area so the picture continues. Describe what should appear there, or leave a short hint such as "continue the scene".',
       promptLabel: 'Describe the expansion',
       promptDefault: ai().prefs().lastExpandPrompt ?? 'Continue the image naturally into the empty area, matching its style, lighting and perspective.',
+      extra: [
+        { key: 'width', label: 'New width', type: 'number', value: d.width, min: d.width, max: 30000, unit: 'px' },
+        { key: 'height', label: 'New height', type: 'number', value: d.height, min: d.height, max: 30000, unit: 'px' },
+        { key: 'anchor', label: 'Keep the image', type: 'select', value: 'c', options: ANCHORS },
+      ],
     });
     if (!values) return;
     ai().setPrefs({ lastExpandPrompt: values.prompt });
+    const W = Math.max(d.width, Math.round(values.width) || d.width), H = Math.max(d.height, Math.round(values.height) || d.height);
+    // the canvas grows here with a transparent extension (Canvas Size fills an opaque Background by default)
+    if (W > d.width || H > d.height) await app.commands.run('image:canvas-size', { width: W, height: H, anchor: values.anchor, color: null }, 'api');
+    const mask = transparentAreaMask(composite(d));
+    if (!mask) return app.dialogs.toast('Nothing to expand: enter a larger size, or enlarge the canvas with a transparent extension (Image › Canvas Size)', { kind: 'error', timeout: 6000 });
     const region = { x: 0, y: 0, width: d.width, height: d.height };
     try {
       const layers = await aiTask(app, 'Generative Expand…', (state) => fillThroughMask(d, mask, region, { ...values, variations: 1, name: 'Generative Expand' }, state));
@@ -480,7 +482,7 @@ export function install(app) {
         { key: 'target', label: 'Place in', type: 'select', value: d ? 'layer' : 'document', options: [...(d ? [['layer', 'New layer (document size)']] : []), ['document', 'New document']] },
         { key: 'width', label: 'Width', type: 'number', value: d?.width ?? preset.width ?? 1024, min: 16, max: 8192, unit: 'px', when: (v) => v.target === 'document' },
         { key: 'height', label: 'Height', type: 'number', value: d?.height ?? preset.height ?? 1024, min: 16, max: 8192, unit: 'px', when: (v) => v.target === 'document' },
-        { key: 'transparent', label: 'Transparent background', type: 'checkbox', value: false },
+        { key: 'transparent', label: 'Transparent background', type: 'checkbox', value: false, when: (v) => !/^dall-e/.test(String(v.model ?? '')), help: 'gpt-image models return real transparency; Gemini models are asked for a plain white background, which is keyed out afterwards.' },
       ],
     });
     if (!values) return;
@@ -494,11 +496,10 @@ export function install(app) {
         const fresh = createDocument({ width, height, dpi: d?.dpi ?? 72, name: values.prompt.slice(0, 40) || 'Generated image', background: 'transparent' });
         const first = fresh.root.children[0];
         first.name = 'Generated';
-        first.canvas.getContext('2d').drawImage(image, 0, 0);
-        first.touch();
         fresh.meta.description = values.prompt;
         app.docs.add(fresh);
-        fresh.history.markSaved();
+        // a history entry, so the new document counts as unsaved (closing asks) and the generation can be undone
+        fresh.history.pixels('Generate Image', first.canvas, { x: 0, y: 0, width, height }, (ctx) => ctx.drawImage(image, 0, 0), { layer: first });
         return fresh.id;
       }
       const layer = new RasterLayer({ name: nextLayerName(d, 'Generated'), canvas: image, x: 0, y: 0 });
@@ -536,6 +537,13 @@ export function install(app) {
     if (!model) return reportAiError(app, Object.assign(new Error(`No ${PROVIDERS[c.provider].label} image model is available`), { code: 'not_connected' }), 'Remove Background failed');
     try {
       const r = await aiTask(app, 'Removing background…', (state) => subjectMask(d, { provider: c.provider, model }, state));
+      // what the user had already masked away stays hidden: intersect with the existing (enabled) mask
+      if (r.layer.mask?.canvas && r.layer.mask.enabled !== false) {
+        const mctx = r.mask.getContext('2d');
+        mctx.globalCompositeOperation = 'destination-in';
+        mctx.drawImage(r.layer.mask.canvas, 0, 0);
+        mctx.globalCompositeOperation = 'source-over';
+      }
       const copy = cloneLayer(r.layer, { name: `${r.layer.name} (no background)` });
       copy.mask = { canvas: r.mask, enabled: true, linked: true };
       // the copy carries the mask so the original stays editable; it is hidden, not removed. Visibility is not

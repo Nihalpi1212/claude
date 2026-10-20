@@ -18,6 +18,10 @@ export const PREFERRED_MODELS = Object.freeze({
 });
 
 const OPENAI_SIZES = ['1024x1024', '1536x1024', '1024x1536'];
+const DALLE3_SIZES = ['1024x1024', '1792x1024', '1024x1792'];
+const DALLE2_SIZES = ['256x256', '512x512', '1024x1024'];
+/** The sizes an OpenAI image model accepts (gpt-image-*: the three 1024/1536 shapes). */
+export const openaiSizesFor = (model) => (/^dall-e-3/.test(String(model)) ? DALLE3_SIZES : /^dall-e-2/.test(String(model)) ? DALLE2_SIZES : OPENAI_SIZES);
 const GEMINI_RATIOS = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
 
 const providerOf = (p) => {
@@ -135,6 +139,73 @@ export function cropCanvas(canvas, x, y, width, height) {
   return c;
 }
 
+/** Resamples to width × height keeping the proportions: scales to cover, then crops the centre (never stretches). */
+export function coverTo(canvas, width, height) {
+  const w = Math.max(1, Math.round(width)), h = Math.max(1, Math.round(height));
+  if (canvas.width === w && canvas.height === h) return canvas;
+  const s = Math.max(w / canvas.width, h / canvas.height);
+  const sw = Math.min(canvas.width, Math.max(1, Math.round(w / s))), sh = Math.min(canvas.height, Math.max(1, Math.round(h / s)));
+  const crop = sw === canvas.width && sh === canvas.height ? canvas : cropCanvas(canvas, Math.floor((canvas.width - sw) / 2), Math.floor((canvas.height - sh) / 2), sw, sh);
+  return resampleTo(crop, w, h);
+}
+
+/** True when every pixel is fully opaque (an answer without an alpha channel). */
+export function isOpaque(img) {
+  const d = img.data;
+  for (let i = 3; i < d.length; i += 4) if (d[i] < 255) return false;
+  return true;
+}
+
+/**
+ * Keys out the near-white background connected to the image border (a "subject on white" answer): flood
+ * from the edges over pixels whose channels all exceed `threshold`, then fade the ring of lighter pixels
+ * next to the keyed area so the subject edge is not left with a white fringe. In place; returns the count.
+ */
+export function keyWhiteBorder(img, { threshold = 232 } = {}) {
+  const { width: w, height: h, data: d } = img;
+  const keyed = new Uint8Array(w * h);
+  const stack = [];
+  const isWhite = (i) => d[i * 4] >= threshold && d[i * 4 + 1] >= threshold && d[i * 4 + 2] >= threshold;
+  const push = (i) => {
+    if (!keyed[i] && isWhite(i)) {
+      keyed[i] = 1;
+      stack.push(i);
+    }
+  };
+  for (let x = 0; x < w; x++) {
+    push(x);
+    push((h - 1) * w + x);
+  }
+  for (let y = 0; y < h; y++) {
+    push(y * w);
+    push(y * w + w - 1);
+  }
+  while (stack.length) {
+    const i = stack.pop();
+    const x = i % w, y = (i - x) / w;
+    if (x > 0) push(i - 1);
+    if (x < w - 1) push(i + 1);
+    if (y > 0) push(i - w);
+    if (y < h - 1) push(i + w);
+  }
+  let count = 0;
+  for (let i = 0; i < keyed.length; i++) {
+    if (!keyed[i]) continue;
+    d[i * 4 + 3] = 0;
+    count++;
+  }
+  // soften the edge: an unkeyed pixel next to the keyed area keeps alpha in proportion to how far from white it is
+  for (let i = 0; i < keyed.length; i++) {
+    if (keyed[i]) continue;
+    const x = i % w, y = (i - x) / w;
+    const near = (x > 0 && keyed[i - 1]) || (x < w - 1 && keyed[i + 1]) || (y > 0 && keyed[i - w]) || (y < h - 1 && keyed[i + w]);
+    if (!near) continue;
+    const m = Math.min(d[i * 4], d[i * 4 + 1], d[i * 4 + 2]);
+    if (m > 200) d[i * 4 + 3] = Math.round((d[i * 4 + 3] * (255 - m)) / 55);
+  }
+  return count;
+}
+
 /**
  * Pads image (and mask) to the aspect ratio the provider will answer in, centred, so the answer is never
  * stretched. Returns { image, mask, x, y, width, height } where x/y/width/height locate the original.
@@ -221,15 +292,20 @@ export function compositeThroughMask(original, answer, mask) {
 
 // ---- sizes and aspect ratios ----------------------------------------------------------------------------------------------
 
-export function nearestOpenaiSize(width, height) {
+export function nearestOpenaiSize(width, height, sizes = OPENAI_SIZES) {
   const r = width / height;
-  let best = OPENAI_SIZES[0], bestD = Infinity;
-  for (const s of OPENAI_SIZES) {
+  const edge = Math.max(width, height);
+  let best = sizes[0], bestD = Infinity, bestEdge = 0;
+  for (const s of sizes) {
     const [w, h] = s.split('x').map(Number);
     const d = Math.abs(Math.log(r) - Math.log(w / h));
-    if (d < bestD) {
+    const e = Math.max(w, h);
+    // same aspect (dall-e-2's squares): the smallest size that still holds the image, else the largest
+    const better = d < bestD - 1e-9 || (Math.abs(d - bestD) <= 1e-9 && ((e >= edge && (bestEdge < edge || e < bestEdge)) || (e < edge && bestEdge < edge && e > bestEdge)));
+    if (better) {
       bestD = d;
       best = s;
+      bestEdge = e;
     }
   }
   return best;
@@ -487,12 +563,20 @@ export async function generateImage({ provider, model, prompt, width = 1024, hei
     const generationConfig = { responseModalities: geminiModalities(model), imageConfig: { aspectRatio } };
     const imageSize = geminiImageSize(model, Math.max(w, h));
     if (imageSize) generationConfig.imageConfig.imageSize = imageSize;
-    const res = await aiRequest({ provider, path: `/models/${encodeURIComponent(model)}:generateContent`, method: 'POST', json: { contents: [{ role: 'user', parts: [{ text: String(prompt) }] }], generationConfig }, timeoutMs: 300_000 });
+    // Gemini has no alpha output: a transparent background is asked for as plain white and keyed out afterwards
+    const text = transparent ? `${String(prompt)}\n\nRender the subject alone on a plain, pure white (#ffffff) background with nothing else: no shadow, no floor, no frame.` : String(prompt);
+    const res = await aiRequest({ provider, path: `/models/${encodeURIComponent(model)}:generateContent`, method: 'POST', json: { contents: [{ role: 'user', parts: [{ text }] }], generationConfig }, timeoutMs: 300_000 });
     const part = firstInlineImage(res);
     if (!part) throw new Error(geminiImageFailure(res));
-    return resampleTo(await canvasFromBase64(part.data, part.mime), w, h);
+    let out = await canvasFromBase64(part.data, part.mime);
+    if (transparent) {
+      const img = imageDataOf(out);
+      if (isOpaque(img)) keyWhiteBorder(img);
+      out = canvasFromImageData(img);
+    }
+    return coverTo(out, w, h);
   }
-  const size = nearestOpenaiSize(w, h);
+  const size = nearestOpenaiSize(w, h, openaiSizesFor(model));
   const json = { model, prompt: String(prompt), n: 1, size };
   if (isGptImage(model)) {
     json.quality = 'auto';
@@ -500,7 +584,8 @@ export async function generateImage({ provider, model, prompt, width = 1024, hei
     if (isGptImage1(model)) json.background = transparent ? 'transparent' : 'auto';
   } else json.response_format = 'b64_json';
   const res = await aiRequest({ provider, path: '/images/generations', method: 'POST', json, timeoutMs: 300_000 });
-  return resampleTo(await openaiImageResult(res), w, h);
+  // the answer keeps its proportions: scaled to cover the requested size and cropped, never stretched
+  return coverTo(await openaiImageResult(res), w, h);
 }
 
 /**
@@ -516,7 +601,9 @@ export async function editImage({ provider, model, image, mask = null, prompt, t
   const smallMask = mask ? (small === image ? mask : resampleTo(mask, small.width, small.height, 'bilinear')) : null;
   let answer;
   if (provider === 'openai') {
-    const size = nearestOpenaiSize(small.width, small.height);
+    if (/^dall-e-3/.test(String(model))) throw new Error('dall-e-3 cannot edit images; choose a gpt-image model (or dall-e-2) for this feature');
+    const dalle2 = /^dall-e-2/.test(String(model));
+    const size = nearestOpenaiSize(small.width, small.height, openaiSizesFor(model));
     const pad = padToAspect(small, smallMask, ratioOf(size));
     const fields = { model, prompt: String(prompt ?? ''), n: '1', size };
     if (isGptImage(model)) {
@@ -527,7 +614,8 @@ export async function editImage({ provider, model, image, mask = null, prompt, t
         fields.background = transparent ? 'transparent' : 'auto';
       }
     } else fields.response_format = 'b64_json';
-    const files = [{ field: 'image[]', name: 'image.png', type: 'image/png', base64: canvasToBase64(pad.image) }];
+    // dall-e-2 takes exactly one square image under `image`; gpt-image models take a list under `image[]`
+    const files = [{ field: dalle2 ? 'image' : 'image[]', name: 'image.png', type: 'image/png', base64: canvasToBase64(pad.image) }];
     if (pad.mask) files.push({ field: 'mask', name: 'mask.png', type: 'image/png', base64: canvasToBase64(openaiMask(pad.mask)) });
     const res = await aiRequest({ provider, path: '/images/edits', method: 'POST', multipart: { fields, files }, timeoutMs: 300_000 });
     const out = await openaiImageResult(res);

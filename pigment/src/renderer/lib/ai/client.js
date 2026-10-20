@@ -79,6 +79,8 @@ async function browserCall(method, payload) {
       return { available: true, encryption: false, browser: true, openai: { method: keys.openai ? 'api_key' : null }, gemini: { method: keys.gemini ? 'api_key' : null } };
     case 'setApiKey': {
       const next = { ...keys, [payload.provider]: payload.key };
+      // like the desktop build: a models request validates the key before it is stored (a bad key throws the provider's error)
+      await browserRequest(next, { provider: payload.provider, path: payload.provider === 'openai' ? '/models' : '/models?pageSize=1', method: 'GET' });
       setBrowserKeys(next);
       return browserCall('status', {});
     }
