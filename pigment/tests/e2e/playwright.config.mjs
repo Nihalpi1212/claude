@@ -1,8 +1,10 @@
 import { defineConfig } from '@playwright/test';
+import path from 'node:path';
 
-// PIGMENT_E2E_PORT lets several test runs (or builders) share one checkout without port clashes.
+// PIGMENT_E2E_PORT lets several test runs (or builders) share one checkout without port clashes;
+// PIGMENT_E2E_OUT (relative to the current directory) keeps their artifacts apart.
 const PORT = Number(process.env.PIGMENT_E2E_PORT || 8765);
-const OUT = process.env.PIGMENT_E2E_OUT || './.artifacts';
+const OUT = process.env.PIGMENT_E2E_OUT ? path.resolve(process.cwd(), process.env.PIGMENT_E2E_OUT) : './.artifacts';
 
 export default defineConfig({
   testDir: '.',

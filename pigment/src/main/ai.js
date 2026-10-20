@@ -758,6 +758,14 @@ export function createAi({ electron, getWindow, settings, fetch: fetchImpl = glo
     const provider = assertProvider(payload.provider);
     const path = typeof payload.path === 'string' && payload.path.startsWith('/') && !payload.path.startsWith('//') ? payload.path : null;
     if (!path) throw new AiError('The request path must start with /', { code: 'bad_request' });
+    // the credentials must only ever reach the provider base: "/../x" or "/x/..%2F" would resolve elsewhere on the host
+    let resolved;
+    try {
+      resolved = new URL(`${BASES[provider]}${path}`).href;
+    } catch {
+      resolved = '';
+    }
+    if (!resolved.startsWith(`${BASES[provider]}/`) || /(^|\/)\.\.?(\/|$|[?#])/.test(path) || /%2e|%2f|\\/i.test(path)) throw new AiError('The request path must stay inside the provider API', { code: 'bad_request' });
     const method = payload.method === 'GET' ? 'GET' : payload.method === 'POST' || payload.method === undefined ? 'POST' : null;
     if (!method) throw new AiError('Only GET and POST requests are allowed', { code: 'bad_request' });
     const json = payload.json && typeof payload.json === 'object' ? payload.json : undefined;

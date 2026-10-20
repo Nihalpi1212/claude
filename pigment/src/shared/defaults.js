@@ -29,6 +29,9 @@ export const DEFAULT_SETTINGS = Object.freeze({
   newDocPreset: { width: 1920, height: 1080, dpi: 72, background: 'white', name: 'Untitled' },
   exportDefaults: { format: 'png', quality: 0.92, scale: 1 },
   saveQuality: 0.92,
+  // AI: model preferences chosen in the AI Accounts dialog and the per-installation host id of Sign in with ChatGPT
+  ai: { openaiChat: null, openaiImage: null, geminiChat: null, geminiImage: null, defaultProvider: 'openai' },
+  aiHostId: null,
   historyLimit: 100,
   historyMemoryMB: 512,
   cursorStyle: 'outline', // outline | precise | dot

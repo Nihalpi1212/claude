@@ -205,7 +205,7 @@ test('createAi: API keys are validated, sealed on disk, used for requests and li
       assert.equal(init.headers['x-goog-api-key'], 'AIza-good');
       return jsonResponse(200, { models: [{ name: 'models/gemini-2.5-flash', supportedGenerationMethods: ['generateContent'] }] });
     }
-    if (url === 'https://api.openai.com/v1/responses') {
+    if (url.startsWith('https://api.openai.com/v1/responses')) {
       const body = JSON.parse(init.body);
       assert.equal(body.stream, undefined, 'api keys do not force streaming');
       return jsonResponse(200, { output: [{ type: 'message', content: [{ type: 'output_text', text: `echo:${body.input}` }] }] });
@@ -248,6 +248,9 @@ test('createAi: API keys are validated, sealed on disk, used for requests and li
     const m = await ai.dispatch('request', { provider: 'openai', path: '/images/edits', multipart: { fields: { prompt: 'make it blue' }, files: [{ field: 'image[]', name: 'img.png', type: 'image/png', base64: Buffer.from('png').toString('base64') }] } });
     assert.equal(m.body.data[0].b64_json, 'AAAA');
     await assert.rejects(ai.dispatch('request', { provider: 'openai', path: 'responses' }), /start with/);
+    // credentials never leave the provider base: dot segments and encoded slashes are refused
+    for (const path of ['/../other', '/responses/../../x', '/%2e%2e/x', '/a%2Fb', '/a\\b', '/..']) await assert.rejects(ai.dispatch('request', { provider: 'openai', path }), /inside the provider API/, path);
+    assert.equal((await ai.dispatch('request', { provider: 'openai', path: '/responses?x=1', json: { input: 'q' } })).status, 200);
     await assert.rejects(ai.dispatch('request', { provider: 'openai', path: '/x', method: 'DELETE' }), /GET and POST/);
     await assert.rejects(ai.dispatch('nope'), /Unknown AI method/);
     const s3 = await ai.dispatch('signOut', { provider: 'openai' });
