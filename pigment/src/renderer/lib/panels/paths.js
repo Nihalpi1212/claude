@@ -3,7 +3,8 @@
 // saved path or saves the work path, Ctrl/Cmd-click loads a path as a selection; footer buttons fill,
 // stroke, load as selection, make a work path from the selection, save, create and delete paths.
 import { icon } from '../icons.js';
-import { pathToPath2D } from '../document.js';
+import { pathToPath2D, createCanvas } from '../document.js';
+import { pathAreaCanvas, hasPathOps } from '../path-ops.js';
 import { activePathTarget, setActivePath, isEmptyPath } from '../tools/vector.js';
 
 const TW = 40, TH = 30;
@@ -64,7 +65,17 @@ export function install(app) {
     ctx.translate(ox, oy);
     ctx.scale(s, s);
     ctx.fillStyle = '#5a5a66';
-    ctx.fill(pathToPath2D(path), 'nonzero');
+    if (hasPathOps(path)) {
+      // subtract / intersect / exclude components: tint the combined area instead of a plain non-zero fill
+      const area = pathAreaCanvas(path, doc.width, doc.height);
+      const tinted = createCanvas(doc.width, doc.height);
+      const tctx = tinted.getContext('2d');
+      tctx.fillStyle = '#5a5a66';
+      tctx.fillRect(0, 0, doc.width, doc.height);
+      tctx.globalCompositeOperation = 'destination-in';
+      tctx.drawImage(area, 0, 0);
+      ctx.drawImage(tinted, 0, 0);
+    } else ctx.fill(pathToPath2D(path), 'nonzero');
     ctx.lineWidth = 1 / s;
     ctx.strokeStyle = '#2b2b33';
     ctx.stroke(pathToPath2D(path));

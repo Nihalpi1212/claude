@@ -86,6 +86,7 @@ export function developEditor(start, onChange, { onAuto = null } = {}) {
   autoBtn.className = 'btn';
   autoBtn.textContent = 'Auto';
   autoBtn.dataset.action = 'auto';
+  autoBtn.hidden = !onAuto; // no source pixels to analyse (smart filter re-edit)
   const resetBtn = document.createElement('button');
   resetBtn.type = 'button';
   resetBtn.className = 'btn';
@@ -194,10 +195,12 @@ export function install(app) {
     const d = app.doc;
     const layer = d?.active;
     if (!layer) return;
-    const start = { ...developDefaults(), ...(arg && typeof arg === 'object' ? clone(arg) : {}) };
-    // smart objects: the smart-object module owns the dialog flow and appends a smart filter
+    const explicit = arg && typeof arg === 'object' ? clone(arg) : null;
+    const start = { ...developDefaults(), ...(explicit ?? {}) };
+    // smart objects: the smart-object module owns the dialog flow (params null opens its dialog
+    // with the editor registered below) and appends a smart filter instead of editing pixels
     if (layer.type === 'smart' && typeof app.smartFilters?.intercept === 'function') {
-      const handled = await app.smartFilters.intercept(layer, 'camera-raw', start, LABEL);
+      const handled = await app.smartFilters.intercept(layer, 'camera-raw', explicit ? start : null, LABEL);
       if (handled !== false) return handled;
     }
     const used = await pixelEditDialog(app, {
@@ -205,18 +208,31 @@ export function install(app) {
       label: LABEL,
       params: start,
       width: 560,
+      // clarity / sharpening / noise reduction read around each pixel: a margin lets a selection's
+      // edge blend with its surroundings instead of showing a hard border
+      margin: 48,
       editor: (onChange, session) =>
         developEditor(start, onChange, {
           onAuto: () => autoTone(session.base),
         }),
       run: (img, params) => develop(img, params),
     });
-    if (used) app.lastCameraRaw = clone(used);
     return used;
   }
 
-  // shared with other modules (smart filters re-render through it)
+  // shared with other modules; the smart-object module renders and re-edits Camera Raw smart filters
+  // through the kind registered here (its module installs before this one, app:ready covers the rest)
   app.cameraRaw = { develop, defaults: developDefaults, autoTone, editor: developEditor, label: LABEL };
+  const registerSmartKind = () =>
+    app.smartFilters?.registerKind?.('camera-raw', {
+      name: LABEL,
+      defaults: developDefaults,
+      apply: (img, params) => develop(img, params),
+      editor: (params, onChange) => developEditor({ ...developDefaults(), ...(params ?? {}) }, onChange),
+      padding: () => 48,
+    });
+  registerSmartKind();
+  app.on('app:ready', registerSmartKind);
   app.commands.registerAll({
     'filter:camera-raw': { enabled: has, label: 'Camera Raw Filter…', run: (arg) => cameraRaw(arg) },
   });

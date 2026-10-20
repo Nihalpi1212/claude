@@ -77,8 +77,20 @@ for (let i = 0; i < 256; i++) {
   const c = i / 255;
   TO_LINEAR[i] = c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
 }
-const toSrgb = (v) => (v <= 0.0031308 ? v * 12.92 : 1.055 * Math.pow(v, 1 / 2.4) - 0.055);
+const toSrgbExact = (v) => (v <= 0.0031308 ? v * 12.92 : 1.055 * Math.pow(v, 1 / 2.4) - 0.055);
 const toLinear = (v) => (v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4));
+// the encode runs three times per pixel: an interpolated table (8192 steps, denser than 8 bits
+// anywhere on the curve) replaces Math.pow with an error far below one output level
+const SRGB_STEPS = 8192;
+const TO_SRGB = new Float32Array(SRGB_STEPS + 2);
+for (let i = 0; i <= SRGB_STEPS + 1; i++) TO_SRGB[i] = toSrgbExact(Math.min(1, i / SRGB_STEPS));
+const toSrgb = (v) => {
+  if (v <= 0) return 0;
+  if (v >= 1) return 1;
+  const t = v * SRGB_STEPS;
+  const i = t | 0;
+  return TO_SRGB[i] + (TO_SRGB[i + 1] - TO_SRGB[i]) * (t - i);
+};
 
 const LUMA_R = 0.2126, LUMA_G = 0.7152, LUMA_B = 0.0722;
 
@@ -361,8 +373,13 @@ function localContrast(src, out, w, h, sigma, amount, threshold) {
   return out;
 }
 
-/** Separable Gaussian blur of a single float channel (edge pixels repeat). Returns a new array. */
+/**
+ * Separable Gaussian blur of a single float channel (edge pixels repeat). Returns a new array.
+ * Above sigma 4 three running-sum box blurs approximate the kernel in O(n) regardless of radius,
+ * which keeps clarity on large images interactive.
+ */
 export function gaussianBlurFloat(src, w, h, sigma) {
+  if (sigma > 4) return boxGaussian(src, w, h, sigma);
   const radius = Math.max(1, Math.ceil(sigma * 3));
   const k = new Float32Array(radius * 2 + 1);
   let sum = 0;
@@ -401,6 +418,51 @@ export function gaussianBlurFloat(src, w, h, sigma) {
   return out;
 }
 
+/** Three box blurs of the "ideal averaging filter" width for sigma (Wells / Kovesi). */
+function boxGaussian(src, w, h, sigma) {
+  const ideal = Math.sqrt((12 * sigma * sigma) / 3 + 1);
+  let wl = Math.floor(ideal);
+  if (wl % 2 === 0) wl--;
+  const rad = (wl - 1) / 2;
+  let a = new Float32Array(src), b = new Float32Array(src.length);
+  for (let pass = 0; pass < 3; pass++) {
+    boxBlurH(a, b, w, h, rad);
+    boxBlurV(b, a, w, h, rad);
+  }
+  return a;
+}
+
+function boxBlurH(src, dst, w, h, r) {
+  const norm = 1 / (2 * r + 1);
+  for (let y = 0; y < h; y++) {
+    const row = y * w;
+    const first = src[row], last = src[row + w - 1];
+    let acc = (r + 1) * first;
+    for (let j = 0; j < r; j++) acc += src[row + Math.min(j, w - 1)];
+    for (let x = 0; x < w; x++) {
+      const add = x + r < w ? src[row + x + r] : last;
+      const sub = x - r - 1 >= 0 ? src[row + x - r - 1] : first;
+      acc += add - sub;
+      dst[row + x] = acc * norm;
+    }
+  }
+}
+
+function boxBlurV(src, dst, w, h, r) {
+  const norm = 1 / (2 * r + 1);
+  for (let x = 0; x < w; x++) {
+    const first = src[x], last = src[(h - 1) * w + x];
+    let acc = (r + 1) * first;
+    for (let j = 0; j < r; j++) acc += src[Math.min(j, h - 1) * w + x];
+    for (let y = 0; y < h; y++) {
+      const add = y + r < h ? src[(y + r) * w + x] : last;
+      const sub = y - r - 1 >= 0 ? src[(y - r - 1) * w + x] : first;
+      acc += add - sub;
+      dst[y * w + x] = acc * norm;
+    }
+  }
+}
+
 /**
  * Saturation and vibrance: chroma is scaled around the luminance. Vibrance scales muted colours
  * more than vivid ones (and never over-saturates), saturation scales every colour alike.
@@ -436,9 +498,26 @@ export function hslRangeWeights(hue) {
   return out;
 }
 
+let WEIGHT_TABLE = null; // [hue half-degree][range] weights, built once
+function weightTable() {
+  if (WEIGHT_TABLE) return WEIGHT_TABLE;
+  WEIGHT_TABLE = new Float32Array(720 * HSL_RANGES.length);
+  for (let i = 0; i < 720; i++) {
+    const w = hslRangeWeights(i / 2);
+    for (let r = 0; r < HSL_RANGES.length; r++) WEIGHT_TABLE[i * HSL_RANGES.length + r] = w[HSL_RANGES[r]];
+  }
+  return WEIGHT_TABLE;
+}
+
 function applyHsl(R, G, B, n, hsl) {
-  // precompute which ranges are active
-  const active = HSL_RANGES.filter((k) => num(hsl[k].hue) || num(hsl[k].saturation) || num(hsl[k].luminance));
+  // precompute which ranges are active and their amounts
+  const active = [];
+  HSL_RANGES.forEach((k, r) => {
+    const dh = clamp(num(hsl[k].hue), -100, 100) * 0.3, ds = clamp(num(hsl[k].saturation), -100, 100) / 100, dl = clamp(num(hsl[k].luminance), -100, 100) / 100;
+    if (dh || ds || dl) active.push({ r, dh, ds, dl });
+  });
+  const table = weightTable();
+  const rangeCount = HSL_RANGES.length;
   for (let i = 0; i < n; i++) {
     const r = R[i], g = G[i], b = B[i];
     const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
@@ -451,14 +530,14 @@ function applyHsl(R, G, B, n, hsl) {
     hue = (hue * 60 + 360) % 360;
     const l = (mx + mn) / 2;
     const s = chroma / (1 - Math.abs(2 * l - 1));
-    const weights = hslRangeWeights(hue);
+    const row = (Math.round(hue * 2) % 720) * rangeCount;
     let dh = 0, ds = 0, dl = 0;
-    for (const k of active) {
-      const wgt = weights[k];
+    for (const a of active) {
+      const wgt = table[row + a.r];
       if (!wgt) continue;
-      dh += wgt * clamp(num(hsl[k].hue), -100, 100) * 0.3; // ±100 = ±30°, like Camera Raw
-      ds += wgt * clamp(num(hsl[k].saturation), -100, 100) / 100;
-      dl += wgt * clamp(num(hsl[k].luminance), -100, 100) / 100;
+      dh += wgt * a.dh; // ±100 = ±30°, like Camera Raw
+      ds += wgt * a.ds;
+      dl += wgt * a.dl;
     }
     if (!dh && !ds && !dl) continue;
     // fade the effect in for weakly saturated colours so near-greys do not pick up a cast
@@ -511,7 +590,13 @@ function denoise(R, G, B, w, h, lumAmount, colorAmount) {
     const sigmaS = rad / 1.5;
     const spatial = [];
     for (let dy = -rad; dy <= rad; dy++) for (let dx = -rad; dx <= rad; dx++) spatial.push(Math.exp(-(dx * dx + dy * dy) / (2 * sigmaS * sigmaS)));
-    const inv2r2 = 1 / (2 * sigmaR * sigmaR);
+    // range weight exp(-d² / 2σ²) tabulated over |d| in 0..1 (1024 steps)
+    const RANGE_STEPS = 1024;
+    const range = new Float32Array(RANGE_STEPS + 1);
+    for (let i = 0; i <= RANGE_STEPS; i++) {
+      const d = i / RANGE_STEPS;
+      range[i] = Math.exp(-(d * d) / (2 * sigmaR * sigmaR));
+    }
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
         const i = y * w + x;
@@ -526,8 +611,8 @@ function denoise(R, G, B, w, h, lumAmount, colorAmount) {
             if (xx < 0) xx = 0;
             else if (xx >= w) xx = w - 1;
             const v = Y[yy * w + xx];
-            const d = v - c;
-            const wgt = spatial[k] * Math.exp(-d * d * inv2r2);
+            const d = v > c ? v - c : c - v;
+            const wgt = spatial[k] * range[(d * RANGE_STEPS) | 0];
             acc += v * wgt;
             wsum += wgt;
           }
@@ -610,4 +695,4 @@ export function autoTone(img, { clip = 0.1 } = {}, rect = null) {
   return out;
 }
 
-export { toSrgb, toLinear };
+export { toSrgbExact as toSrgb, toLinear };
