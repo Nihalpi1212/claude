@@ -715,6 +715,21 @@ export class TypeTool extends Tool {
       stop();
       return;
     }
+    // text on a path / stacked text: the editor box wraps visually, but Home / End go to the logical line ends
+    const glyphText = !!this.session.layer.pathText || this.session.layer.font.orientation === 'vertical-stacked';
+    if (glyphText && (e.key === 'Home' || e.key === 'End') && !mod && !e.altKey) {
+      stop();
+      const ta = this.session.textarea;
+      const v = ta.value;
+      const backward = ta.selectionDirection === 'backward';
+      const pos = backward ? ta.selectionStart : ta.selectionEnd;
+      const anchor = backward ? ta.selectionEnd : ta.selectionStart;
+      const nl = v.indexOf('\n', pos);
+      const target = e.key === 'Home' ? v.lastIndexOf('\n', pos - 1) + 1 : nl === -1 ? v.length : nl;
+      if (e.shiftKey) ta.setSelectionRange(Math.min(anchor, target), Math.max(anchor, target), target < anchor ? 'backward' : 'forward');
+      else ta.setSelectionRange(target, target);
+      return;
+    }
     if (!mod || e.altKey) return;
     const k = e.key.toLowerCase();
     const f = this.session.layer.font;
@@ -779,9 +794,10 @@ export class TypeTool extends Tool {
     if (lay.glyphs) {
       // text on a path / stacked text: the editor is a plain box over the glyphs (the layer draws them)
       const b = textBox(layer, lay);
-      // the glyphs are laid out by the layer: the hidden editor must not soft-wrap (Home / End follow logical lines)
-      ta.wrap = 'off';
-      ta.style.whiteSpace = 'pre';
+      // the glyphs are laid out by the layer; the editor box soft-wraps so its caret stays visible, and
+      // Home / End are handled in onEditorKey so they still follow logical lines
+      ta.wrap = 'soft';
+      ta.style.whiteSpace = 'pre-wrap';
       ta.style.textAlign = 'left';
       ta.style.width = `${Math.max(b.width * z, fs * 2, 40)}px`;
       ta.style.height = `${Math.max(b.height * z, lh)}px`;

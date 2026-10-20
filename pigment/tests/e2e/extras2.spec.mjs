@@ -95,6 +95,8 @@ test('Text on Path drops a Free Transform matrix so the glyphs sit on the path',
   });
   await runAwait(page, 'text:on-path');
   expect(await page.evaluate(() => window.pigmentApp.doc.active.transform)).toBeNull();
+  // the matrix was a pure rotation: the type keeps its size
+  expect(await page.evaluate(() => window.pigmentApp.doc.active.font.size)).toBe(24);
   const s = await redRadius(page, 200, 150);
   expect(Math.abs(s.r - 100)).toBeLessThan(12);
   // one undo brings the rotated free text back
@@ -115,6 +117,8 @@ test('vertical orientation is refused for text on a path', async ({ page }) => {
   expect(await page.evaluate(() => ({ o: window.pigmentApp.doc.active.font.orientation ?? 'horizontal', t: window.pigmentApp.doc.active.transform }))).toEqual({ o: 'horizontal', t: null });
   expect(await historyLength(page)).toBe(n);
   expect((await redRadius(page, 200, 150)).n).toBe(before.n);
+  // the native menu state is resent so its radio goes back to Horizontal
+  expect(await page.evaluate(() => window.pigmentApp.uiState.textOrientation)).toBe('horizontal');
   expect(errors).toEqual([]);
 });
 
@@ -146,14 +150,18 @@ test('text on a path follows the live alignment, and a closed path hides what do
     const visible = glyphs.filter((g) => !g.hidden);
     let overlaps = 0;
     for (let i = 0; i < visible.length; i++) for (let j = i + 2; j < visible.length; j++) if (Math.hypot(visible[i].x - visible[j].x, visible[i].y - visible[j].y) < 4) overlaps++;
-    return { hidden: glyphs.length - visible.length, overlaps };
+    // the last visible glyph and the first must not overlap edge to edge (centre distance at least half their widths)
+    const a = visible[0], b = visible[visible.length - 1];
+    const seamGap = Math.hypot(a.x - b.x, a.y - b.y) - (a.width + b.width) / 2;
+    return { hidden: glyphs.length - visible.length, overlaps, seamGap };
   });
   expect(r.hidden).toBeGreaterThan(0);
   expect(r.overlaps).toBe(0);
+  expect(r.seamGap).toBeGreaterThan(-1.5);
   expect(errors).toEqual([]);
 });
 
-test('the hidden editor of text on a path does not soft-wrap', async ({ page }) => {
+test('Home and End follow the logical line while editing text on a path', async ({ page }) => {
   const errors = await openApp(page);
   await newDoc(page);
   await page.evaluate(async () => {
@@ -175,14 +183,15 @@ test('the hidden editor of text on a path does not soft-wrap', async ({ page }) 
   await page.mouse.click(top.x, top.y);
   await expect.poll(() => page.evaluate(() => !!window.pigmentApp.tools.active.session)).toBe(true);
   await page.keyboard.type('Hello path text on a circle');
-  const ta = await page.evaluate(() => {
-    const t = window.pigmentApp.tools.active.session.textarea;
-    return { wrap: t.wrap, ws: t.style.whiteSpace };
-  });
-  expect(ta).toEqual({ wrap: 'off', ws: 'pre' });
+  const caret = () => page.evaluate(() => window.pigmentApp.tools.active.session.textarea.selectionStart);
   await page.keyboard.press('Home');
+  expect(await caret()).toBe(0);
   await page.keyboard.press('End');
-  expect(await page.evaluate(() => window.pigmentApp.tools.active.session.textarea.selectionStart)).toBe('Hello path text on a circle'.length);
+  expect(await caret()).toBe('Hello path text on a circle'.length);
+  await page.keyboard.press('Home');
+  expect(await caret()).toBe(0);
+  await page.keyboard.press('Shift+End');
+  expect(await page.evaluate(() => [window.pigmentApp.tools.active.session.textarea.selectionStart, window.pigmentApp.tools.active.session.textarea.selectionEnd])).toEqual([0, 'Hello path text on a circle'.length]);
   await page.keyboard.press('Escape');
   expect(errors).toEqual([]);
 });
@@ -212,5 +221,21 @@ test('Proof Colors refreshes during a brush stroke (no doc.changed until the str
   const painted = await shown();
   expect(painted[0]).toBeLessThan(80);
   await runAwait(page, 'view:proof');
+  expect(errors).toEqual([]);
+});
+
+test('Text on Path folds a Free Transform scale into the type size', async ({ page }) => {
+  const errors = await openApp(page);
+  await newDoc(page, { width: 400, height: 300 });
+  await circleAndText(page, 'Big');
+  await page.evaluate(async () => {
+    const { setLayerProps } = await import('/lib/layer-ops.js');
+    const app = window.pigmentApp;
+    setLayerProps(app, app.doc.active, { transform: [3, 0, 0, 3, -40, -40] }, 'Scale');
+  });
+  await runAwait(page, 'text:on-path');
+  expect(await page.evaluate(() => ({ size: window.pigmentApp.doc.active.font.size, t: window.pigmentApp.doc.active.transform }))).toEqual({ size: 72, t: null });
+  await runAwait(page, 'edit:undo');
+  expect(await page.evaluate(() => ({ size: window.pigmentApp.doc.active.font.size, t: window.pigmentApp.doc.active.transform }))).toEqual({ size: 24, t: [3, 0, 0, 3, -40, -40] });
   expect(errors).toEqual([]);
 });

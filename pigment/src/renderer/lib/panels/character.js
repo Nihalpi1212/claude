@@ -113,6 +113,8 @@ export function install(app) {
     const tool = typeSession(app);
     if (tool) tool.commitSession(); // the orientation switch is its own history entry
     app.commands.run('text:orientation', orientation.value, 'panel');
+    // the select shows what the layer really has (a switch can be refused, e.g. for text on a path)
+    orientation.value = subject().layer?.font.orientation ?? 'horizontal';
     refresh();
   });
   const strokePatch = () => {

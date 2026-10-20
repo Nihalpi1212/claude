@@ -154,7 +154,8 @@ function layoutOnPath(layer, ctx) {
     // the baseline offset moves the glyph along the normal (local "up" is (sin θ, −cos θ))
     const x = p.x + Math.sin(p.angle) * shift, y = p.y - Math.cos(p.angle) * shift;
     // text longer than the path is hidden at its end; on a closed path it must not wrap round over its own start
-    const hidden = c.ch === '\n' || (sampler.closed ? mid - s0 > sampler.length : mid < 0 || mid > sampler.length);
+    // (on a closed path the glyph's far edge counts, so the last visible glyph never overlaps the first)
+    const hidden = c.ch === '\n' || (sampler.closed ? mid + c.width / 2 - s0 > sampler.length + 1e-6 : mid < 0 || mid > sampler.length);
     return { ch: c.ch, x, y, angle: p.angle, width: c.width, index: c.index, hidden };
   });
   const start = sampler.at((pt.startOffset ?? 0) * sampler.length);
@@ -324,8 +325,13 @@ export function install(app) {
           // rotated (vertical) text would rotate the whole path layout: it goes back to horizontal first
           if ((layer.font.orientation ?? 'horizontal') === 'vertical') setOrientation(app, layer, 'horizontal');
           // the path is stored in document space; x/y become the (zero) offset Move adds to it
-          // a Free Transform matrix of the text would move the path layout off the path: the glyphs follow the path alone
-          setLayerProps(app, layer, { pathText: { path: clonePath(found.path), startOffset: keep.startOffset ?? 0, flip: !!keep.flip, align: keep.align ?? layer.font.align ?? 'left' }, x: 0, y: 0, transform: null }, 'Text on Path');
+          // a Free Transform matrix of the text would move the path layout off the path: the glyphs follow the path
+          // alone, and the matrix's scale is folded into the type so scaled text keeps its size
+          const t = layer.transform;
+          const k = t ? Math.sqrt(Math.abs(t[0] * t[3] - t[1] * t[2])) : 1;
+          const r2 = (v) => Math.round(v * 100) / 100;
+          const font = Math.abs(k - 1) > 1e-6 ? { ...layer.font, size: r2(layer.font.size * k), letterSpacing: r2((layer.font.letterSpacing ?? 0) * k), ...(layer.font.stroke ? { stroke: { ...layer.font.stroke, width: r2(layer.font.stroke.width * k) } } : {}) } : null;
+          setLayerProps(app, layer, { pathText: { path: clonePath(found.path), startOffset: keep.startOffset ?? 0, flip: !!keep.flip, align: keep.align ?? layer.font.align ?? 'left' }, x: 0, y: 0, transform: null, ...(font ? { font } : {}) }, 'Text on Path');
         });
         return true;
       },
@@ -370,6 +376,8 @@ export function install(app) {
         };
         if (list.length > 1) app.doc.history.group('Text Orientation', apply);
         else apply();
+        // a refused switch (text on a path) must still put the native menu's radio back: force a resend
+        if (app.uiState) app.uiState = { ...app.uiState, textOrientation: undefined };
         app.syncUiState();
         return true;
       },
