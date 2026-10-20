@@ -9,6 +9,7 @@ import { createCanvas, unionRect } from './document.js';
 import { canvasData, dataCanvas } from './image-ops.js';
 import { icon } from './icons.js';
 import * as W from '../../shared/pixels/warp.js';
+import * as T from '../../shared/pixels/transform.js';
 
 const PREVIEW_MAX = 700; // longest edge of the source while dragging (the final render uses every pixel)
 const HIT = 8; // screen px around a control point
@@ -388,9 +389,10 @@ export class BezierWarp extends WarpSession {
   setPreset(preset, { bend = this.bend, h = this.h, v = this.v } = {}) {
     this.preset = preset;
     this.bend = bend;
-    this.h = h;
-    this.v = v;
-    if (preset !== 'custom') this.controls = presetControls(this.box, preset, bend, h, v);
+    // None means no warp at all, whatever the distortion fields said before
+    this.h = preset === 'none' ? 0 : h;
+    this.v = preset === 'none' ? 0 : v;
+    if (preset !== 'custom') this.controls = presetControls(this.box, preset, bend, this.h, this.v);
     this.updateChanged();
     this.syncBar();
     this.finish();
@@ -519,8 +521,9 @@ export class BezierWarp extends WarpSession {
     this.fields = {};
     this.fields.preset = this.select(g, 'warp-preset', 'Warp', WARP_PRESETS, this.preset, (v) => this.setPreset(v === 'custom' ? 'custom' : v));
     this.fields.bend = this.number(g, 'warp-bend', 'Bend', { min: -100, max: 100, step: 1, unit: '%', slider: true }, this.bend, (v) => this.setPreset(this.preset, { bend: v }));
-    this.fields.h = this.number(g, 'warp-h', 'H', { min: -100, max: 100, step: 1, unit: '%' }, this.h, (v) => this.setPreset(this.preset === 'custom' ? 'none' : this.preset, { h: v }));
-    this.fields.v = this.number(g, 'warp-v', 'V', { min: -100, max: 100, step: 1, unit: '%' }, this.v, (v) => this.setPreset(this.preset === 'custom' ? 'none' : this.preset, { v }));
+    // like Bend, H and V only shape a geometric preset (disabled for None and Custom, see syncBar)
+    this.fields.h = this.number(g, 'warp-h', 'H', { min: -100, max: 100, step: 1, unit: '%' }, this.h, (v) => this.geometric() && this.setPreset(this.preset, { h: v }));
+    this.fields.v = this.number(g, 'warp-v', 'V', { min: -100, max: 100, step: 1, unit: '%' }, this.v, (v) => this.geometric() && this.setPreset(this.preset, { v }));
     const actions = this.group(bar);
     this.applyButtons(actions);
     this.syncBar();
@@ -536,10 +539,16 @@ export class BezierWarp extends WarpSession {
     set(f.bend, this.bend);
     set(f.h, this.h);
     set(f.v, this.v);
-    // Bend only shapes a geometric preset: it is idle for None (nothing to bend) and Custom (a hand-edited net)
-    const geometric = this.preset !== 'custom' && this.preset !== 'none';
-    f.bend.input.disabled = !geometric;
-    if (f.bend.range) f.bend.range.disabled = !geometric;
+    // Bend, H and V only shape a geometric preset: idle for None (nothing to bend) and Custom (a hand-edited net)
+    const geometric = this.geometric();
+    for (const k of ['bend', 'h', 'v']) {
+      if (!f[k]) continue;
+      f[k].input.disabled = !geometric;
+      if (f[k].range) f[k].range.disabled = !geometric;
+    }
+  }
+  geometric() {
+    return this.preset !== 'custom' && this.preset !== 'none';
   }
 }
 
@@ -556,7 +565,18 @@ export class PerspectiveWarp extends WarpSession {
     this.snapTarget = -1;
   }
   snapDist() {
-    return 10 / Math.max(0.01, this.view?.zoom ?? 1);
+    // well above the 8 px corner hit radius, so a new quad drawn from next to a corner shares it
+    return 20 / Math.max(0.01, this.view?.zoom ?? 1);
+  }
+  /** A quad the perspective mesh can use (no coincident corners, no three corners in a line). */
+  validQuad(q) {
+    if (new Set(q.pts).size < 4) return false;
+    try {
+      W.perspectiveMesh([{ src: q.src, dst: q.pts.map((i) => this.points[i]) }], { subdivisions: 1 });
+      return true;
+    } catch {
+      return false;
+    }
   }
   nearestPoint(x, y, exclude = -1) {
     let best = -1, bd = this.snapDist();
@@ -605,7 +625,8 @@ export class PerspectiveWarp extends WarpSession {
     this.changed = false;
   }
   updateChanged() {
-    this.changed = this.quads.some((q) => q.pts.some((i, k) => dist(this.points[i], q.src[k]) > 1e-6));
+    // a quad dragged into a degenerate shape cannot warp: it does not count (so Enter records no empty step)
+    this.changed = this.quads.some((q) => this.validQuad(q) && q.pts.some((i, k) => dist(this.points[i], q.src[k]) > 1e-6));
   }
   setMode(mode) {
     if (mode === this.mode) return;
@@ -632,8 +653,14 @@ export class PerspectiveWarp extends WarpSession {
     this.finish();
   }
   mesh(map, { final }) {
-    if (!this.quads.length) return null;
-    const quads = this.quads.map((q) => ({ src: q.src.map(([x, y]) => map(x, y)), dst: q.pts.map((i) => map(...this.points[i])) }));
+    // degenerate quads are skipped (the others still warp) instead of failing the whole mesh
+    const good = this.quads.filter((q) => this.validQuad(q));
+    if (good.length < this.quads.length && !this.warnedDegenerate) {
+      this.warnedDegenerate = true;
+      this.app.dialogs.toast('A quad has collapsed corners and is left out of the warp; move its corners apart', { kind: 'error', timeout: 3200 });
+    } else if (good.length === this.quads.length) this.warnedDegenerate = false;
+    if (!good.length) return null;
+    const quads = good.map((q) => ({ src: q.src.map(([x, y]) => map(x, y)), dst: q.pts.map((i) => map(...this.points[i])) }));
     return W.perspectiveMesh(quads, { subdivisions: final ? 16 : 10 });
   }
   /** Pixels outside the quads stay where they are; the warped quads are drawn over them. */
@@ -756,8 +783,13 @@ export class PerspectiveWarp extends WarpSession {
     if (d.point !== undefined && this.mode === 'layout') {
       if (this.snapTarget >= 0 && this.snapTarget !== d.point) {
         const from = d.point, to = this.snapTarget;
-        for (const q of this.quads) q.pts = q.pts.map((i) => (i === from ? to : i));
-        this.pruneUnused();
+        // a merge that would give one quad two identical corners is refused: the corner goes back
+        const collapses = this.quads.some((q) => new Set(q.pts.map((i) => (i === from ? to : i))).size < 4);
+        if (collapses) this.points[from] = d.from.slice();
+        else {
+          for (const q of this.quads) q.pts = q.pts.map((i) => (i === from ? to : i));
+          this.pruneUnused();
+        }
       }
       this.snapTarget = -1;
       this.refreshSources();
@@ -773,7 +805,10 @@ export class PerspectiveWarp extends WarpSession {
       return true;
     }
     if ((e.key === 'Delete' || e.key === 'Backspace') && this.mode === 'layout' && this.quads.length) {
-      this.quads.pop();
+      // the quad holding the selected corner (the last one drawn when nothing is selected)
+      const qi = this.selected >= 0 ? this.quads.findIndex((q) => q.pts.includes(this.selected)) : -1;
+      this.quads.splice(qi >= 0 ? qi : this.quads.length - 1, 1);
+      this.selected = -1;
       this.pruneUnused();
       this.refreshSources();
       this.invalidate();
@@ -947,16 +982,43 @@ export class PuppetWarp extends WarpSession {
     const pins = this.mlsPins().map((p) => ({ from: map(...p.from), to: map(...p.to) }));
     return W.mlsGrids({ x: x0, y: y0, width: x1 - x0, height: y1 - y0 }, pins, { kind: this.kind_, alpha: 1, step: 4 });
   }
-  /** Position a document point currently shows pixels from (inverse of the live warp, by fixed-point iteration). */
+  /**
+   * Position a document point currently shows pixels from (inverse of the live warp): Newton steps with a
+   * numeric Jacobian, which converge under rotation too (a plain fixed-point iteration diverges there).
+   */
   inverse(x, y) {
     if (!this.changed) return [x, y];
     const pins = this.mlsPins();
     const opts = { kind: this.kind_, alpha: 1 };
+    const f = (px, py) => {
+      const out = [0, 0];
+      W.mlsPoint(pins, [px, py], opts, out);
+      return out;
+    };
+    const h = 0.5;
+    const maxStep = Math.max(8, Math.max(this.box.width, this.box.height) * 0.25);
     let v = [x, y];
-    const out = [0, 0];
-    for (let i = 0; i < 10; i++) {
-      W.mlsPoint(pins, v, opts, out);
-      v = [v[0] - (out[0] - x), v[1] - (out[1] - y)];
+    for (let i = 0; i < 40; i++) {
+      const fv = f(v[0], v[1]);
+      const ex = fv[0] - x, ey = fv[1] - y;
+      if (Math.hypot(ex, ey) < 0.01) break;
+      const fx = f(v[0] + h, v[1]), fy = f(v[0], v[1] + h);
+      const a = (fx[0] - fv[0]) / h, b = (fy[0] - fv[0]) / h, c = (fx[1] - fv[1]) / h, dd = (fy[1] - fv[1]) / h;
+      const det = a * dd - b * c;
+      let sx, sy;
+      if (!Number.isFinite(det) || Math.abs(det) < 1e-9) {
+        sx = ex;
+        sy = ey;
+      } else {
+        sx = (dd * ex - b * ey) / det;
+        sy = (-c * ex + a * ey) / det;
+      }
+      const len = Math.hypot(sx, sy);
+      if (len > maxStep) {
+        sx *= maxStep / len;
+        sy *= maxStep / len;
+      }
+      v = [v[0] - sx, v[1] - sy];
     }
     return v;
   }
@@ -1160,7 +1222,15 @@ export function install(app) {
   wrap('onPointerMove', (orig, p, dragging) => (tt.warp?.active ? tt.warp.onPointerMove(p, dragging) : orig(p, dragging)));
   wrap('onPointerUp', (orig, p) => (tt.warp?.active ? tt.warp.onPointerUp(p) : orig(p)));
   wrap('onDoubleClick', (orig, p) => (tt.warp?.active ? tt.warp.onDoubleClick(p) : orig(p)));
-  wrap('onKeyDown', (orig, e) => (tt.warp?.active && tt.warp.onKeyDown(e)) || orig(e));
+  wrap('onKeyDown', (orig, e) => {
+    if (tt.warp?.active) {
+      if (tt.warp.onKeyDown(e)) return true;
+      // Delete with no pin/quad selected, and arrows with nothing to nudge, do nothing inside a warp session:
+      // they must not reach the keymap (Delete would apply the warp and then delete the layer)
+      if (e.key === 'Delete' || e.key === 'Backspace' || /^Arrow/.test(e.key)) return true;
+    }
+    return orig(e);
+  });
   wrap('syncBar', (orig) => (tt.warp?.active ? tt.warp.syncBar() : orig()));
   wrap('renderOptions', (orig, bar) => {
     if (tt.warp?.active) return tt.warp.renderBar(bar);
@@ -1210,8 +1280,26 @@ export function install(app) {
     if (!d) return null;
     if (tt.session) {
       if (tt.warp?.active && tt.warp.kind === kind) return tt.warp;
-      // an untouched Free Transform of raster layers becomes the warp session in place
-      if (!tt.warp && rasterOnly(tt.session) && isIdentity(tt.matrix)) return attach(kind);
+      const s = tt.session;
+      // a Free Transform of text, shapes or smart objects stays live: warping them needs pixels first
+      const nonRaster = !s.selectionOnly && s.targets.find((l) => l.type !== 'raster');
+      if (nonRaster) return askRasterize(d, [nonRaster], kind);
+      if (!tt.warp && rasterOnly(s)) {
+        // an untouched Free Transform of raster layers becomes the warp session in place
+        if (isIdentity(tt.matrix)) return attach(kind);
+        // a scaled / rotated / skewed one too, for Warp: an affine map is exactly a Bézier patch, so the net
+        // starts where the box is and Escape still cancels both as one session
+        if (kind === 'bezier' && tt.matrix) {
+          const m = tt.matrix;
+          const w = attach(kind);
+          w.controls = W.identityControls(w.box).map(([x, y]) => T.applyMatrix(m, x, y));
+          w.preset = 'custom';
+          w.updateChanged();
+          w.syncBar();
+          w.finish();
+          return w;
+        }
+      }
       tt.commit(); // apply what is pending first (end() clears any warp)
     }
     const layers = tt.collectTargets(d, { quiet: true });
@@ -1219,15 +1307,27 @@ export function install(app) {
       app.dialogs.toast(d.selection && !d.selection.isEmpty ? 'Select a layer to warp (the selection alone cannot be warped)' : 'Select a layer to warp', { kind: 'error' });
       return null;
     }
-    const other = layers.find((l) => l.type !== 'raster');
-    if (other) {
-      const what = other.type === 'text' ? 'text' : other.type === 'shape' ? 'shape' : other.type === 'smart' ? 'smart object' : other.type;
-      app.dialogs.toast(`Rasterize the ${what} layer first (Layer › Rasterize), then warp it`, { kind: 'error', timeout: 3000 });
-      return null;
-    }
+    const others = layers.filter((l) => l.type !== 'raster');
+    if (others.length) return askRasterize(d, others, kind);
     tt.start({ mode: kind });
     if (!tt.session) return null;
     return attach(kind);
+  }
+
+  /** Warps need pixels: asks to rasterize one text / shape / smart object layer, then starts the session. */
+  async function askRasterize(d, layers, kind) {
+    const what = (l) => (l.type === 'text' ? 'text' : l.type === 'shape' ? 'shape' : l.type === 'smart' ? 'smart object' : l.type);
+    if (layers.length !== 1 || d.active !== layers[0]) {
+      app.dialogs.toast(`Rasterize the ${what(layers[0])} layer first (Layer › Rasterize), then warp it`, { kind: 'error', timeout: 3000 });
+      return null;
+    }
+    const l = layers[0];
+    const detail = l.type === 'smart' ? 'The smart object becomes an ordinary pixel layer; its contents and smart filters are no longer editable.' : l.type === 'text' ? 'The text keeps its look but can no longer be edited as text.' : 'The shape keeps its look but is no longer an editable vector shape.';
+    const ok = await app.dialogs.confirm(`Rasterize the ${what(l)} layer "${l.name}" to warp it?`, { title: 'Warp', detail, okLabel: 'Rasterize' });
+    if (!ok || app.doc !== d) return null;
+    app.commands.run('layer:rasterize', undefined, 'api');
+    if (d.active?.type !== 'raster') return null;
+    return startSession(kind);
   }
 
   /** Edit › Transform › Warp and the options-bar toggle: into warp mode, or back to Free Transform. */

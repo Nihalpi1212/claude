@@ -3,7 +3,8 @@
 
 const DEDUPE_MS = 40;
 /** Commands that leave a running Free Transform alone (viewing, panels, Enter/Escape handled by the tool). */
-const SAFE_DURING_TRANSFORM = /^(view:|window:|help:|app:enter$|app:escape$|tool:brush-|edit:free-transform$)/;
+/** The warp commands switch modes inside the running session (lib/warp.js), so they must not commit it first. */
+const SAFE_DURING_TRANSFORM = /^(view:|window:|help:|app:enter$|app:escape$|tool:brush-|edit:free-transform$|edit:transform-warp$|edit:perspective-warp$|edit:puppet-warp$)/;
 
 export class CommandRegistry {
   constructor(app) {

@@ -91,6 +91,38 @@ function canvasAlpha(canvas) {
   return out;
 }
 
+/**
+ * A layer mask through a Warp / Puppet Warp mesh (lib/warp.js): the mask outside the warped box stays as
+ * it was; inside the box it takes the mask's background value, and wherever the warped box lands the
+ * warped mask replaces what is there. (A warp only renders its box, so the old "fill and erase the whole
+ * quad" approach hid everything outside it.)
+ */
+function warpMaskCanvas(mask, warp, d) {
+  const box = warp.box;
+  const bx = Math.floor(box.x), by = Math.floor(box.y), bw = Math.ceil(box.x + box.width) - bx, bh = Math.ceil(box.y + box.height) - by;
+  const r = warp.render(mask, 0, 0, { final: true });
+  const c = createCanvas(d.width, d.height);
+  const ctx = c.getContext('2d');
+  ctx.drawImage(mask, 0, 0);
+  ctx.clearRect(bx, by, bw, bh);
+  const bg = cornerAlpha(mask);
+  if (bg > 0) {
+    ctx.fillStyle = `rgba(255,255,255,${bg / 255})`;
+    ctx.fillRect(bx, by, bw, bh);
+  }
+  // the footprint of the warped box: an opaque box sent through the same mesh
+  const solid = createCanvas(Math.max(1, bw), Math.max(1, bh));
+  const sctx = solid.getContext('2d');
+  sctx.fillStyle = '#fff';
+  sctx.fillRect(0, 0, solid.width, solid.height);
+  const f = warp.render(solid, bx, by, { final: true });
+  ctx.globalCompositeOperation = 'destination-out';
+  ctx.drawImage(f.canvas, f.x, f.y);
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.drawImage(r.canvas, r.x, r.y);
+  return c;
+}
+
 function cornerAlpha(canvas) {
   try {
     return canvas.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, 1, 1).data[3];
@@ -1094,6 +1126,7 @@ export class TransformTool extends Tool {
       // masks follow the layer: affine through transformMaskCanvas, distort/perspective through the homography
       const mapMask = (mask) => {
         if (m && !warp) return transformMaskCanvas(mask, m, d.width, d.height, { smooth: !s.exact });
+        if (warp && warp.kind !== 'perspective') return warpMaskCanvas(mask, warp, d);
         // warp hook (lib/warp.js): the mask follows the pixels through the same mesh
         const r = warp ? warp.render(mask, 0, 0, { final: true }) : perspectiveCanvas(mask, 0, 0, this.quadFor({ x: 0, y: 0, width: mask.width, height: mask.height }), { quality: 'bilinear' });
         const c = createCanvas(d.width, d.height);
@@ -1409,6 +1442,8 @@ export class TransformTool extends Tool {
       this.cancel();
       return true;
     }
+    // Delete while transforming does nothing (it must not apply the transform and then clear or delete the layer)
+    if (e.key === 'Delete' || e.key === 'Backspace') return true;
     return false;
   }
 

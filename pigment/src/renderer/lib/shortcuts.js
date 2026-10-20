@@ -47,6 +47,8 @@ export function install(app) {
       }
       return;
     }
+    // a focused slider keeps its own arrow keys (the options bar's Bend slider, for example)
+    if (event.target?.tagName === 'INPUT' && event.target.type === 'range' && /^(Arrow|Page|Home$|End$)/.test(event.key)) return;
     if (!inText && !inDialog && app.tools?.active?.onKeyDown?.(event)) {
       event.preventDefault();
       return;

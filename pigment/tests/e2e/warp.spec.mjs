@@ -84,7 +84,7 @@ test('Warp: dragging a control point changes the mesh, Bend and the Custom prese
   expect(errors).toEqual([]);
 });
 
-test('Warp refuses a text layer with a toast instead of rasterizing it silently', async ({ page }) => {
+test('Warp asks before rasterizing a text layer; Cancel leaves the text layer and the history alone', async ({ page }) => {
   const errors = await openApp(page);
   await newDoc(page, { background: 'transparent' });
   await page.evaluate(async () => {
@@ -96,8 +96,12 @@ test('Warp refuses a text layer with a toast instead of rasterizing it silently'
     d.changed('tree');
   });
   const n = await historyLength(page);
-  await runAwait(page, 'edit:transform-warp');
-  await expect(page.locator('.toast')).toContainText(/Rasterize the text layer/);
+  await run(page, 'edit:transform-warp');
+  const dialog = page.locator('.dialog-backdrop');
+  await expect(dialog).toContainText(/Rasterize the text layer "Hello"/);
+  await dialog.locator('.dialog-buttons .btn').filter({ hasText: 'Cancel' }).click();
+  await expect(page.locator('.dialog-backdrop')).toHaveCount(0);
+  expect(await page.evaluate(() => window.pigmentApp.doc.active.type)).toBe('text');
   expect(await session(page)).toEqual({ active: false, warp: null, tool: 'move' });
   expect(await historyLength(page)).toBe(n);
   expect(errors).toEqual([]);

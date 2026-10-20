@@ -113,7 +113,7 @@ editable.
   right-click for more; Layer › Smart Objects › Clear Smart Filters removes them all. The layer mask
   applies to the filtered result.
 - Free Transform, scale, rotate, skew and flip work on smart objects without rasterizing them; Warp,
-  Perspective Warp and Puppet Warp ask to rasterize first. Layer › Duplicate Layer makes a second
+  Perspective Warp and Puppet Warp offer to rasterize the smart object first. Layer › Duplicate Layer makes a second
   instance that shares the contents (editing one updates both); New Smart Object via Copy makes an
   independent copy.
 
@@ -218,8 +218,9 @@ undo step (limited to the selection if there is one).
 - **Warp** (Edit › Transform › Warp, or the Warp button while transforming): a 4 × 4 control net
   with corner handles and inner points to drag. Pick a preset (Arc, Arc Lower/Upper, Arch, Bulge,
   Shell Lower/Upper, Flag, Wave, Fish, Rise, Fisheye, Inflate, Squeeze, Twist) and set its Bend;
-  dragging a point makes it Custom. Enter applies, Escape cancels. Text and shape layers are
-  rasterized first.
+  dragging a point makes it Custom (Bend, H and V only apply to a preset). Clicking Warp while you
+  scale or rotate keeps the session: Escape cancels both. Enter applies, Escape cancels. Text, shape
+  and smart object layers are rasterized first, after you confirm. A layer mask warps with the layer.
 - **Perspective Warp** (Edit › Perspective Warp): in Layout mode drag out a quad over each plane of
   the photo (edges snap together; Delete removes the selected quad), switch to Warp and drag the
   corners; Shift-click an edge to make it vertical or horizontal. Enter applies.
