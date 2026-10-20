@@ -114,7 +114,7 @@ export function install(app) {
       const call = document.createElement('div');
       call.className = `assistant-call${c.pending ? ' pending' : ''}${c.result && typeof c.result === 'object' && c.result.error ? ' failed' : ''}`;
       call.innerHTML = `${icon(c.pending ? 'spinner' : c.result && typeof c.result === 'object' && c.result.error ? 'warning' : 'check')}<span></span>`;
-      call.querySelector('span').textContent = app.assistant.describeCall(c);
+      call.querySelector('span').textContent = app.assistant.describeCall(c) + (c.waiting ? ' — waiting for you to finish the dialog' : '');
       const detail = c.result && typeof c.result === 'object' && c.result.error ? c.result.error : JSON.stringify(c.args ?? {});
       call.title = detail.length > 400 ? `${detail.slice(0, 400)}…` : detail;
       row.appendChild(call);
@@ -173,7 +173,12 @@ export function install(app) {
     input.value = '';
     autosize();
     try {
-      await app.assistant.send(text, { provider: providerSel.value || undefined, model: modelSel.value || undefined, attach: attach.checked });
+      const sent = await app.assistant.send(text, { provider: providerSel.value || undefined, model: modelSel.value || undefined, attach: attach.checked });
+      if (sent === null && !input.value) {
+        // nothing was sent (no provider connected and the accounts dialog was closed): keep the typed text
+        input.value = text;
+        autosize();
+      }
     } catch (err) {
       app.dialogs.toast(err?.message ?? String(err), { kind: 'error', timeout: 6000, action: /not connected|not available|model/i.test(err?.message ?? '') ? { label: 'AI Accounts…', run: () => ai()?.openAccounts() } : undefined });
     }

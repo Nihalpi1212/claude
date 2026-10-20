@@ -11,6 +11,7 @@ import { RasterLayer, TextLayer, BLEND_LABELS } from '../document.js';
 import { structural, setLayerProps, nextLayerName } from '../layer-ops.js';
 import { flattenDocument } from '../compositor.js';
 import { Selection } from '../selection.js';
+import { hasOpaqueBackground } from '../image-ops.js';
 import { PROVIDERS, downscale, canvasToDataUrl } from './providers.js';
 
 const MAX_TURNS = 40; // messages kept per document
@@ -25,8 +26,9 @@ const ADJUST_RANGES = {
   density: [0, 100], levels: [2, 255], level: [1, 255], shadows: [-100, 100], highlights: [-100, 100], radius: [0, 250],
   inBlack: [0, 255], inWhite: [0, 255], outBlack: [0, 255], outWhite: [0, 255],
 };
+/** Fallback ranges for filter params; the dialog's own field ranges (app.filterEditor.ranges) win per kind. */
 const FILTER_RANGES = {
-  radius: [0.1, 500], amount: [-999, 999], angle: [-999, 999], distance: [1, 2000], threshold: [0, 255], size: [2, 2000], strength: [0, 10],
+  radius: [0.1, 500], amount: [-999, 999], angle: [-999, 999], distance: [1, 2000], threshold: [0, 255], strength: [0, 10],
   amplitude: [1, 999], wavelength: [2, 999], ridges: [1, 20], dx: [-4000, 4000], dy: [-4000, 4000], height: [1, 100], width: [1, 14], brightness: [0, 300], scale: [1, 9999], levels: [2, 256],
 };
 
@@ -34,6 +36,20 @@ const FILTER_RANGES = {
 const BLOCKED_COMMANDS = /^(file:(quit|close|close-all|revert|open|open-paths|open-recent|clear-recent|save|save-as|save-copy|export|export-quick|export-layers|place|import-image|print|reveal|new)|help:|ai:|window:|tool:|edit:preferences|app:)/;
 
 const clampNum = (v, [lo, hi]) => Math.max(lo, Math.min(hi, v));
+
+/** Models that can only send strings (Gemini schemas) send objects as JSON text: parse it when it looks like one. */
+export function parseMaybeJson(v) {
+  if (typeof v !== 'string') return v;
+  const s = v.trim();
+  if (!/^[[{]/.test(s)) return v;
+  try {
+    return JSON.parse(s);
+  } catch {
+    return v;
+  }
+}
+
+const stoppedError = () => Object.assign(new Error('Stopped by the user'), { code: 'stopped' });
 
 /** Sanitises a params object: finite numbers (clamped by the range table), booleans, short strings, arrays and plain objects. */
 export function sanitizeParams(params, ranges, depth = 0) {
@@ -82,7 +98,7 @@ export const TOOLS = [
   { name: 'set_active_layer', description: 'Makes a layer active (the target of adjustments, filters and fills).', parameters: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] } },
   { name: 'apply_adjustment', description: 'Applies an image adjustment to the active layer pixels (destructive, undoable). kind is one of the adjustment kinds; params uses the listed parameter names.', parameters: { type: 'object', properties: { kind: { type: 'string' }, params: { type: 'object', properties: {} } }, required: ['kind'] } },
   { name: 'apply_filter', description: 'Applies a filter to the active layer pixels. kind is one of the filter kinds; params uses the listed parameter names.', parameters: { type: 'object', properties: { kind: { type: 'string' }, params: { type: 'object', properties: {} } }, required: ['kind'] } },
-  { name: 'run_command', description: 'Runs a registered Pigment command by id with an optional argument (see the command list).', parameters: { type: 'object', properties: { id: { type: 'string' }, arg: { description: 'Argument for the command (string, number or object), when it takes one' } }, required: ['id'] } },
+  { name: 'run_command', description: 'Runs a registered Pigment command by id with an optional argument (see the command list).', parameters: { type: 'object', properties: { id: { type: 'string' }, arg: { description: 'Argument for the command when it takes one: a string, a number, or an object (may be given as a JSON string)' } }, required: ['id'] } },
   { name: 'new_layer', description: 'Adds an empty raster layer above the active one and makes it active. Returns its id.', parameters: { type: 'object', properties: { name: { type: 'string' } } } },
   { name: 'set_layer_props', description: 'Changes layer properties: opacity (0-100), blend mode, visible, name.', parameters: { type: 'object', properties: { id: { type: 'string' }, opacity: { type: 'number' }, blend: { type: 'string' }, visible: { type: 'boolean' }, name: { type: 'string' } }, required: ['id'] } },
   { name: 'select', description: "Changes the selection: kind 'all', 'none', 'inverse' or 'rect' (with rect in pixels).", parameters: { type: 'object', properties: { kind: { type: 'string', enum: ['all', 'none', 'inverse', 'rect'] }, rect: rectSchema }, required: ['kind'] } },
@@ -169,11 +185,18 @@ export function install(app) {
     return Math.max(lo, Math.min(hi, n));
   };
 
+  /** A rectangle argument intersected with the canvas; an empty intersection or a non-positive size is an error. */
   function rectArg(d, r) {
+    r = parseMaybeJson(r);
     if (!r || typeof r !== 'object') throw new Error('rect must be { x, y, width, height }');
-    const x = Math.round(num(r.x, 'rect.x', 0, d.width - 1)), y = Math.round(num(r.y, 'rect.y', 0, d.height - 1));
-    const w = Math.round(num(r.width, 'rect.width', 1, d.width - x)), h = Math.round(num(r.height, 'rect.height', 1, d.height - y));
-    return { x, y, width: w, height: h };
+    const BIG = 1e7;
+    const x0 = num(r.x, 'rect.x', -BIG, BIG), y0 = num(r.y, 'rect.y', -BIG, BIG);
+    const w0 = num(r.width, 'rect.width', -BIG, BIG), h0 = num(r.height, 'rect.height', -BIG, BIG);
+    if (w0 <= 0 || h0 <= 0) throw new Error('rect.width and rect.height must be positive');
+    const x1 = Math.max(0, Math.round(x0)), y1 = Math.max(0, Math.round(y0));
+    const x2 = Math.min(d.width, Math.round(x0 + w0)), y2 = Math.min(d.height, Math.round(y0 + h0));
+    if (x2 <= x1 || y2 <= y1) throw new Error(`rect lies outside the canvas (${d.width} × ${d.height})`);
+    return { x: x1, y: y1, width: x2 - x1, height: y2 - y1 };
   }
 
   const needRaster = (d) => {
@@ -185,31 +208,48 @@ export function install(app) {
     return l;
   };
 
-  /** A colour argument from the model: hex, rgb(), or any CSS colour name; throws on nonsense. */
+  /** A colour argument from the model: hex, rgb(a), or any CSS colour name, as { hex, alpha 0..1 }; throws on nonsense. */
   function colorArg(value) {
     const s = String(value ?? '').trim();
-    const parsed = parseColor(s, null);
-    if (parsed) return rgbaToHex(parsed);
-    // CSS names beyond the few parseColor knows: let the canvas parse them (an unknown name leaves fillStyle unchanged)
-    const ctx = document.createElement('canvas').getContext('2d');
-    ctx.fillStyle = '#010203';
-    ctx.fillStyle = s;
-    if (ctx.fillStyle === '#010203' && s.toLowerCase() !== '#010203') throw new Error(`Unknown colour "${s}"`);
-    return rgbaToHex(parseColor(ctx.fillStyle, [0, 0, 0, 1]));
+    let parsed = parseColor(s, null);
+    if (!parsed) {
+      // CSS names beyond the few parseColor knows: let the canvas parse them (an unknown name leaves fillStyle unchanged)
+      const ctx = document.createElement('canvas').getContext('2d');
+      ctx.fillStyle = '#010203';
+      ctx.fillStyle = s;
+      if (ctx.fillStyle === '#010203' && s.toLowerCase() !== '#010203') throw new Error(`Unknown colour "${s}"`);
+      parsed = parseColor(ctx.fillStyle, [0, 0, 0, 1]);
+    }
+    const alpha = Math.max(0, Math.min(1, Number(parsed[3] ?? 1)));
+    return { hex: rgbaToHex([parsed[0], parsed[1], parsed[2], 1]), alpha };
   }
+
+  let currentCall = null; // the tool call being executed (for the panel: waiting on a dialog)
+  let currentNotify = () => {};
 
   async function runCommand(id, arg) {
     if (!app.commands.has(id)) throw new Error(`Unknown command "${id}"`);
     if (!app.commands.isEnabled(id)) throw new Error(`Command "${id}" is not available right now`);
     const before = app.dialogs.stack.length;
     const p = app.commands.run(id, arg, 'assistant');
-    // a command that opened a dialog waits for the user: tell the model instead of hanging the turn on it
     await new Promise((r) => setTimeout(r, 60));
-    if (app.dialogs.stack.length > before) {
-      Promise.resolve(p).catch(() => {});
-      return 'The command opened a dialog for the user to complete; the result is not known yet.';
+    let opened = app.dialogs.stack.length > before;
+    if (opened && currentCall) {
+      // the command opened a dialog: the turn waits for the user to finish it (the modal blocks the app anyway),
+      // so later tools act on the document the dialog produced and the model learns the real outcome
+      currentCall.waiting = true;
+      currentNotify();
     }
-    const result = await p;
+    let result;
+    try {
+      result = await p;
+    } finally {
+      if (opened && currentCall) {
+        currentCall.waiting = false;
+        currentNotify();
+      }
+    }
+    if (opened && (result === undefined || result === null || result === false)) return 'The command opened a dialog; the user has closed it (completed or cancelled). Call get_document to see the current state.';
     return result === undefined ? 'ok' : result;
   }
 
@@ -232,19 +272,22 @@ export function install(app) {
     apply_adjustment: async (d, { kind, params }) => {
       if (!ADJUSTMENTS[kind]) throw new Error(`Unknown adjustment "${kind}"`);
       needRaster(d);
-      const p = withDefaults(app.adjustments?.[kind]?.defaults ?? ADJUSTMENTS[kind].defaults, sanitizeParams(params, ADJUST_RANGES));
+      const p = withDefaults(app.adjustments?.[kind]?.defaults ?? ADJUSTMENTS[kind].defaults, sanitizeParams(parseMaybeJson(params), ADJUST_RANGES));
       await runCommand(`image:adjust-${kind}`, p);
       return `Applied ${ADJUSTMENTS[kind].name} to "${d.active.name}"`;
     },
     apply_filter: async (d, { kind, params }) => {
       if (!FILTERS[kind]) throw new Error(`Unknown filter "${kind}"`);
       needRaster(d);
-      const p = withDefaults(FILTERS[kind].defaults, sanitizeParams(params, FILTER_RANGES));
+      // the dialog's field ranges for this kind win over the shared table (vignette's size is 0..1, mosaic's 2..200)
+      const ranges = { ...FILTER_RANGES, ...(app.filterEditor?.ranges?.(kind) ?? {}) };
+      const p = withDefaults(app.filterEditor?.defaults?.(kind) ?? FILTERS[kind].defaults, sanitizeParams(parseMaybeJson(params), ranges));
       await runCommand(`filter:${kind}`, p);
       return `Applied ${FILTERS[kind].name} to "${d.active.name}"`;
     },
     run_command: async (d, { id, arg }) => {
       if (typeof id !== 'string' || BLOCKED_COMMANDS.test(id)) throw new Error(`Command "${id}" cannot be run by the assistant`);
+      arg = parseMaybeJson(arg);
       return runCommand(id, arg && typeof arg === 'object' ? sanitizeParams(arg, {}) : arg);
     },
     new_layer: async (d, { name } = {}) => {
@@ -258,13 +301,17 @@ export function install(app) {
     set_layer_props: async (d, { id, opacity, blend, visible, name }) => {
       const l = findLayer(d, id);
       const patch = {};
-      if (opacity !== undefined) patch.opacity = num(opacity, 'opacity', 0, 100) / 100;
-      if (blend !== undefined) {
+      // null means "leave unchanged" (models fill unused fields with null), never a value
+      if (opacity != null) patch.opacity = num(opacity, 'opacity', 0, 100) / 100;
+      if (blend != null) {
         if (!BLEND_LABELS[blend] && !(blend === 'pass-through' && l.isGroup)) throw new Error(`Unknown blend mode "${blend}"`);
         patch.blend = blend;
       }
-      if (visible !== undefined) patch.visible = !!visible;
-      if (name !== undefined) patch.name = String(name).slice(0, 80);
+      if (visible != null) patch.visible = typeof visible === 'string' ? !/^(false|0|no|off)$/i.test(visible) : !!visible;
+      if (name != null) {
+        patch.name = String(name).trim().slice(0, 80);
+        if (!patch.name) throw new Error('name is empty');
+      }
       if (!Object.keys(patch).length) throw new Error('Nothing to change');
       setLayerProps(app, l, patch, 'Layer properties');
       return `Updated ${l.name}: ${Object.keys(patch).join(', ')}`;
@@ -290,15 +337,28 @@ export function install(app) {
     canvas_size: async (d, { width, height, anchor }) => {
       const w = Math.round(num(width, 'width', 1, 30000)), h = Math.round(num(height, 'height', 1, 30000));
       const a = ['nw', 'n', 'ne', 'w', 'c', 'e', 'sw', 's', 'se'].includes(anchor) ? anchor : 'c';
-      await runCommand('image:canvas-size', { width: w, height: h, anchor: a });
-      return `Canvas is now ${d.width} × ${d.height}`;
+      // like the Canvas Size dialog: an opaque Background is extended with the background colour
+      const color = hasOpaqueBackground(d) ? app.settings.background : null;
+      await runCommand('image:canvas-size', { width: w, height: h, anchor: a, color });
+      return `Canvas is now ${d.width} × ${d.height}; the added area is ${color ? `filled with ${color}` : 'transparent'}`;
     },
     fill_selection: async (d, { color }) => {
-      const hex = colorArg(color);
-      needRaster(d);
-      if (d.active.type !== 'raster') throw new Error('Fill needs a raster layer');
-      await runCommand('edit:fill', { use: 'color', color: hex, opacity: 100, blend: 'normal', preserve: false });
-      return `Filled ${d.selection && !d.selection.isEmpty ? 'the selection' : 'the layer'} with ${hex}`;
+      const { hex, alpha } = colorArg(color);
+      const l = needRaster(d);
+      if (l.type !== 'raster') throw new Error('Fill needs a raster layer');
+      const hasSel = !!d.selection && !d.selection.isEmpty;
+      const where = hasSel ? 'the selection' : 'the layer';
+      if (alpha <= 0) {
+        // a transparent colour clears: Edit › Clear inside a selection; the whole layer canvas without one
+        // (edit:clear without a selection deletes the layer, which is not what "fill with transparent" means)
+        if (l.locked.transparency) throw new Error(`Layer "${l.name}" has its transparency locked`);
+        if (hasSel) await runCommand('edit:clear');
+        else d.history.pixels('Clear', l.canvas, { x: 0, y: 0, width: l.canvas.width, height: l.canvas.height }, (ctx) => ctx.clearRect(0, 0, l.canvas.width, l.canvas.height), { layer: l });
+        return `Cleared ${where} to transparent`;
+      }
+      const opacity = Math.round(alpha * 100);
+      await runCommand('edit:fill', { use: 'color', color: hex, opacity, blend: 'normal', preserve: false });
+      return `Filled ${where} with ${hex}${opacity < 100 ? ` at ${opacity} % opacity` : ''}`;
     },
     add_text: async (d, { text, x, y, size, color }) => {
       const t = String(text ?? '').slice(0, 2000);
@@ -306,7 +366,7 @@ export function install(app) {
       const fontSize = size === undefined ? Math.max(12, Math.round(d.height / 12)) : Math.round(num(size, 'size', 4, 2000));
       const px = x === undefined ? Math.round(d.width * 0.1) : Math.round(num(x, 'x', -d.width, d.width * 2));
       const py = y === undefined ? Math.round(d.height * 0.1 + fontSize) : Math.round(num(y, 'y', -d.height, d.height * 2));
-      const fontColor = color === undefined ? app.settings.foreground : colorArg(color);
+      const fontColor = color == null ? app.settings.foreground : colorArg(color).hex;
       const layer = new TextLayer({ text: t, x: px, y: py, font: { size: fontSize, color: fontColor } });
       structural(app, 'Add text', () => {
         d.add(layer);
@@ -325,12 +385,20 @@ export function install(app) {
     },
   };
 
-  async function callTool(d, name, args) {
+  async function callTool(d, name, args, { call = null, notify = null } = {}) {
     const impl = TOOL_IMPL[name];
     if (!impl) throw new Error(`Unknown tool "${name}"`);
     if (app.doc !== d) throw new Error('The document is no longer active');
     app.tools?.active?.commit?.();
-    return impl(d, args && typeof args === 'object' ? args : {});
+    args = parseMaybeJson(args);
+    currentCall = call;
+    currentNotify = notify ?? (() => {});
+    try {
+      return await impl(d, args && typeof args === 'object' ? args : {});
+    } finally {
+      currentCall = null;
+      currentNotify = () => {};
+    }
   }
 
   // ---- turns ------------------------------------------------------------------------------------------------------------
@@ -384,29 +452,40 @@ export function install(app) {
         messages: history,
         tools: TOOLS,
         maxRounds: MAX_ROUNDS,
+        shouldStop: () => run.stopped,
         onToolCall: async (name, args) => {
-          if (run.stopped) return { error: 'Stopped by the user; do not call more tools.' };
+          // Stop ends the turn: no more tools, no more provider requests (the providers abort on this error)
+          if (run.stopped) throw stoppedError();
           const call = { name, args, result: null, pending: true };
           pending.calls.push(call);
           notify();
           try {
-            call.result = await callTool(d, name, args);
+            call.result = await callTool(d, name, args, { call, notify });
           } catch (err) {
             call.result = { error: err?.message ?? String(err) };
           }
           call.pending = false;
           notify();
+          if (run.stopped) throw stoppedError();
           return call.result;
         },
       });
       if (run.stopped) {
         pending.text = pending.text || 'Stopped.';
         pending.stopped = true;
+      } else if (result.truncated) {
+        pending.text = `${result.text ? `${result.text}\n\n` : ''}Stopped after ${MAX_ROUNDS} tool steps; say "continue" to go on.`;
+        pending.truncated = true;
       } else pending.text = result.text || (pending.calls.length ? 'Done.' : '(no answer)');
     } catch (err) {
-      pending.error = err?.message ?? String(err);
-      pending.text = pending.error;
-      if (err?.code === 'not_connected' || /not connected/i.test(pending.error)) pending.needsAccounts = true;
+      if (run.stopped || err?.code === 'stopped') {
+        pending.text = pending.text || 'Stopped.';
+        pending.stopped = true;
+      } else {
+        pending.error = err?.message ?? String(err);
+        pending.text = pending.error;
+        if (err?.code === 'not_connected' || /not connected/i.test(pending.error)) pending.needsAccounts = true;
+      }
     } finally {
       pending.pending = false;
       running = null;
@@ -437,6 +516,7 @@ export function install(app) {
     tools: TOOLS,
     instructions,
     callTool: (name, args) => callTool(app.doc, name, args),
+    parseMaybeJson,
     describeCall,
   };
 

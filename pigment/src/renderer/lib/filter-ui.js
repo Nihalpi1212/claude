@@ -178,5 +178,7 @@ export function install(app) {
   app.commands.registerAll(cmds);
   app.filterCategories = FILTER_CATEGORIES;
   // smart objects (lib/smart-object.js) re-use the filter dialogs' editors for smart filters
-  app.filterEditor = { editor: (kind, params, onChange) => filterEditor(kind, params, onChange), defaults: (kind) => paramsFor(app, kind, saved()[kind]), hasFields: (kind) => !!FIELDS[kind]?.length, toRun };
+  /** [min, max] per numeric field of a kind (what the dialog's sliders allow), for callers that clamp model-supplied params. */
+  const ranges = (kind) => Object.fromEntries((FIELDS[kind] ?? []).filter((f) => typeof f.min === 'number' && typeof f.max === 'number').map((f) => [f.key, [f.min, f.max]]));
+  app.filterEditor = { editor: (kind, params, onChange) => filterEditor(kind, params, onChange), defaults: (kind) => paramsFor(app, kind, saved()[kind]), hasFields: (kind) => !!FIELDS[kind]?.length, toRun, ranges };
 }

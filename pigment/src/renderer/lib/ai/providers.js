@@ -282,10 +282,13 @@ function parseArgs(raw) {
 
 const resultText = (result) => (typeof result === 'string' ? result : JSON.stringify(result === undefined ? null : result));
 
+const stoppedError = () => Object.assign(new Error('Stopped by the user'), { code: 'stopped' });
+
 async function runTool(onToolCall, name, args) {
   try {
     return await onToolCall(name, args);
   } catch (err) {
+    if (err?.code === 'stopped') throw err; // the user pressed Stop: abort the whole tool loop
     return { error: err?.message ?? String(err) };
   }
 }
@@ -309,7 +312,7 @@ function replayableItem(it) {
 
 const outputText = (output) => output.filter((it) => it.type === 'message').flatMap((it) => it.content ?? []).filter((c) => c.type === 'output_text').map((c) => c.text ?? '').join('');
 
-async function openaiChat({ model, instructions, messages, tools, onToolCall, maxRounds }) {
+async function openaiChat({ model, instructions, messages, tools, onToolCall, maxRounds, shouldStop }) {
   const body = { model, input: messages.map(openaiItem), store: false };
   if (instructions) body.instructions = instructions;
   if (tools.length) {
@@ -318,13 +321,19 @@ async function openaiChat({ model, instructions, messages, tools, onToolCall, ma
   }
   const calls = [];
   let text = '';
+  let truncated = false;
   for (let round = 0; ; round++) {
+    if (round > 0 && shouldStop?.()) throw stoppedError();
     const res = await aiRequest({ provider: 'openai', path: '/responses', method: 'POST', json: body, timeoutMs: 180_000 });
     if (res?.error) throw new Error(res.error.message ?? 'The model request failed');
     const output = Array.isArray(res?.output) ? res.output : [];
     text = outputText(output) || (typeof res?.output_text === 'string' ? res.output_text : '');
     const functionCalls = output.filter((it) => it.type === 'function_call');
-    if (!functionCalls.length || !onToolCall || round >= maxRounds) break;
+    if (!functionCalls.length || !onToolCall) break;
+    if (round >= maxRounds) {
+      truncated = true; // the model wanted more steps than allowed: the caller tells the user
+      break;
+    }
     // the whole history is resent each round: the model's items, then one output per call
     for (const it of output) {
       const item = replayableItem(it);
@@ -337,7 +346,7 @@ async function openaiChat({ model, instructions, messages, tools, onToolCall, ma
       body.input.push({ type: 'function_call_output', call_id: fc.call_id, output: resultText(result) });
     }
   }
-  return { text, calls };
+  return { text, calls, truncated };
 }
 
 /** Gemini accepts an OpenAPI subset: strip the JSON-schema keys it rejects. */
@@ -350,6 +359,38 @@ export function cleanSchema(schema) {
     out[k] = cleanSchema(v);
   }
   return out;
+}
+
+/**
+ * Gemini's Schema subset also needs a `type` on every schema and refuses OBJECT schemas without
+ * properties, so open objects ("params": any keys) and untyped values travel as JSON strings; the
+ * tool implementations parse them back (assistant.js parseMaybeJson).
+ */
+export function geminiSchema(schema) {
+  const s = cleanSchema(schema);
+  if (!s || typeof s !== 'object' || Array.isArray(s)) return s;
+  const asJsonString = (desc, what) => ({ type: 'string', description: `${desc ? `${desc} ` : ''}(${what}, as a JSON string)`.trim() });
+  if (s.type === 'object' || s.properties) {
+    const props = s.properties && typeof s.properties === 'object' ? s.properties : {};
+    const keys = Object.keys(props);
+    if (!keys.length) return asJsonString(s.description, 'an object');
+    const out = { ...s, type: 'object', properties: {} };
+    for (const k of keys) out.properties[k] = geminiSchema(props[k]);
+    if (Array.isArray(out.required)) out.required = out.required.filter((k) => k in out.properties);
+    return out;
+  }
+  if (s.type === 'array') return { ...s, type: 'array', items: s.items ? geminiSchema(s.items) : { type: 'string' } };
+  if (Array.isArray(s.type)) return { ...s, type: s.type.find((t) => t !== 'null') ?? 'string' };
+  if (!s.type) return asJsonString(s.description, 'any value');
+  return s;
+}
+
+/** One Gemini function declaration; a tool without parameters declares none (an empty OBJECT is refused). */
+export function geminiDeclaration(t) {
+  const decl = { name: t.name, description: t.description ?? '' };
+  const p = geminiSchema(t.parameters ?? { type: 'object', properties: {} });
+  if (p && p.type === 'object' && Object.keys(p.properties ?? {}).length) decl.parameters = p;
+  return decl;
 }
 
 function geminiContent(m) {
@@ -366,20 +407,26 @@ function geminiContent(m) {
 const geminiParts = (res) => res?.candidates?.[0]?.content?.parts ?? [];
 const geminiText = (parts) => parts.filter((p) => typeof p.text === 'string' && !p.thought).map((p) => p.text).join('');
 
-async function geminiChat({ model, instructions, messages, tools, onToolCall, maxRounds }) {
+async function geminiChat({ model, instructions, messages, tools, onToolCall, maxRounds, shouldStop }) {
   const body = { contents: messages.map(geminiContent) };
   if (instructions) body.systemInstruction = { parts: [{ text: instructions }] };
-  if (tools.length) body.tools = [{ functionDeclarations: tools.map((t) => ({ name: t.name, description: t.description ?? '', parameters: cleanSchema(t.parameters ?? { type: 'object', properties: {} }) })) }];
+  if (tools.length) body.tools = [{ functionDeclarations: tools.map(geminiDeclaration) }];
   const calls = [];
   let text = '';
+  let truncated = false;
   for (let round = 0; ; round++) {
+    if (round > 0 && shouldStop?.()) throw stoppedError();
     const res = await aiRequest({ provider: 'gemini', path: `/models/${encodeURIComponent(model)}:generateContent`, method: 'POST', json: body, timeoutMs: 180_000 });
     if (res?.error) throw new Error(res.error.message ?? 'The model request failed');
     if (res?.promptFeedback?.blockReason) throw new Error(`Gemini blocked the request (${res.promptFeedback.blockReason})`);
     const parts = geminiParts(res);
     text = geminiText(parts);
     const functionCalls = parts.filter((p) => p.functionCall && typeof p.functionCall.name === 'string');
-    if (!functionCalls.length || !onToolCall || round >= maxRounds) break;
+    if (!functionCalls.length || !onToolCall) break;
+    if (round >= maxRounds) {
+      truncated = true;
+      break;
+    }
     // the model turn goes back verbatim (thought signatures included), then the function responses
     body.contents.push({ role: 'model', parts });
     const responses = [];
@@ -391,17 +438,17 @@ async function geminiChat({ model, instructions, messages, tools, onToolCall, ma
     }
     body.contents.push({ role: 'user', parts: responses });
   }
-  return { text, calls };
+  return { text, calls, truncated };
 }
 
 /**
  * Chat with an optional tool loop. messages: { role: 'user'|'assistant', text?, images?: dataUrl[] }[];
  * tools: { name, description, parameters }[]; onToolCall(name, args) -> result (any JSON value).
  */
-export async function chat({ provider, model, instructions, messages = [], tools = [], onToolCall, maxRounds = 8 }) {
+export async function chat({ provider, model, instructions, messages = [], tools = [], onToolCall, maxRounds = 8, shouldStop = null }) {
   providerOf(provider);
   if (!model) throw new Error(`No ${PROVIDERS[provider].label} chat model is selected`);
-  const args = { model, instructions, messages, tools, onToolCall, maxRounds: Math.max(0, maxRounds | 0) };
+  const args = { model, instructions, messages, tools, onToolCall, maxRounds: Math.max(0, maxRounds | 0), shouldStop };
   return provider === 'gemini' ? geminiChat(args) : openaiChat(args);
 }
 
