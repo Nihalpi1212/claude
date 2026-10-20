@@ -150,7 +150,8 @@ npm run dist:mac  # or dist:win / dist:linux: installers in dist/
 - Several styles inside one text layer (one font, size and colour per layer); text on a path follows
   the first subpath of the chosen path
 - Masks on individual smart filters (the smart object's layer mask applies to all of them); Last
-  Filter does not repeat the Camera Raw filter
+  Filter does not repeat the Camera Raw filter; Warp, Perspective Warp and Puppet Warp rasterize a
+  smart object first
 - Image generation through a ChatGPT plan: OpenAI only serves image models to API keys, so
   Generative Fill, Generate Image and the background tools need an OpenAI or Gemini key. Plan
   sign-in covers Describe Image and the assistant

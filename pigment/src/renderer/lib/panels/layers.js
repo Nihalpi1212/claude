@@ -352,7 +352,9 @@ export function install(app) {
       ], { at: { x: e.clientX, y: e.clientY } });
     });
     frag.appendChild(head);
-    layer.filters.forEach((f, index) => {
+    // listed like Photoshop: the filter applied last on top (so "Move Up" = applied later)
+    [...layer.filters.keys()].reverse().forEach((index) => {
+      const f = layer.filters[index];
       const on = f.enabled !== false && layer.filtersEnabled !== false;
       const li = base('smart-filter-row' + (on ? '' : ' off'), 'Double-click to edit the smart filter, right-click for more');
       li.dataset.index = String(index);

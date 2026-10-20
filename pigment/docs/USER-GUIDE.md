@@ -112,7 +112,10 @@ editable.
   the layer in the Layers panel. Click the eye to toggle one, double-click to change its settings,
   right-click for more; Layer › Smart Objects › Clear Smart Filters removes them all. The layer mask
   applies to the filtered result.
-- Free Transform, Warp and the other transforms work on smart objects without rasterizing them.
+- Free Transform, scale, rotate, skew and flip work on smart objects without rasterizing them; Warp,
+  Perspective Warp and Puppet Warp ask to rasterize first. Layer › Duplicate Layer makes a second
+  instance that shares the contents (editing one updates both); New Smart Object via Copy makes an
+  independent copy.
 
 ## Selections
 

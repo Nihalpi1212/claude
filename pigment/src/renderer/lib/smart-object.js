@@ -119,6 +119,13 @@ export function applySmartFilter(img, f) {
 }
 
 /** Pixels a chain of filters can spread beyond the layer's content (blurs, maxima, offsets). */
+/** Filters whose result depends on where the image centre and edges are: they must see the whole object, not the host-clipped part. */
+const GEOMETRIC_FILTERS = new Set(['twirl', 'pinch', 'spherize', 'ripple', 'wave', 'zigzag', 'polar', 'shear', 'radial-blur', 'lens-flare', 'vignette', 'clouds', 'difference-clouds', 'offset', 'camera-raw']);
+export const isGeometricFilter = (f) => GEOMETRIC_FILTERS.has(f.kind) || !!EXTRA_KINDS.get(f.kind)?.geometric;
+/** The largest render a smart object may allocate (pixels, and per side): a 40× scale must never ask for gigabytes. */
+const RENDER_BUDGET = 25_000_000;
+const RENDER_MAX_SIDE = 16_384;
+
 export function filterPadding(filters) {
   let pad = 0;
   for (const f of filters) {
@@ -157,6 +164,8 @@ export class SmartLayer extends Layer {
   }
   /** Set at install: () => true while a transform is being dragged (filters are skipped on big renders). */
   static previewing = null;
+  /** Set at install: (layer) => the open Document holding the layer, for render clipping when the WeakMap has no entry. */
+  static findHost = null;
 
   // The Move tool and alignment offset layers through x/y: for a smart object they are the
   // translation part of its matrix (base space maps to document space through `transform`).
@@ -220,21 +229,32 @@ export class SmartLayer extends Layer {
    * Rasterises the source through the matrix at the final size (the source stays sharp), then runs
    * the smart filters on the result. Cached on layer version, source version, matrix and filters.
    */
-  render() {
+  render({ full = false } = {}) {
     const m = this.transform ?? IDENTITY;
     const base = this.baseRect();
     const out = transformBounds(m, base);
     let filters = this.activeFilters();
     const previewing = filters.length > 0 && SmartLayer.previewing?.() === true && out.width * out.height > PREVIEW_FILTER_LIMIT;
     if (previewing) filters = [];
-    // not keyed on layer.version: opacity, visibility or mask edits must not re-rasterise the source
-    const key = `${this.sourceVersion()}|${m.join(',')}|${filters.length ? JSON.stringify(filters) : ''}`;
-    if (this._cache?.key === key) return this._cache;
     const pad = filterPadding(filters);
     let rect = { x: out.x - pad, y: out.y - pad, width: out.width + pad * 2, height: out.height + pad * 2 };
-    // only what can reach the host canvas is rendered: a 40× scale must not allocate a gigantic canvas
-    const host = hosts.get(this);
-    if (host) rect = intersectRect(rect, { x: -pad, y: -pad, width: host.width + pad * 2, height: host.height + pad * 2 });
+    // geometry filters (vignette, spherize, ...) see the whole object so moving it, even off the canvas, cannot change
+    // their result; rasterising wants the whole object too. Either way the render stays within a pixel budget
+    const withinBudget = rect.width * rect.height <= RENDER_BUDGET && rect.width <= RENDER_MAX_SIDE && rect.height <= RENDER_MAX_SIDE;
+    const whole = (full || filters.some(isGeometricFilter)) && withinBudget;
+    // not keyed on layer.version: opacity, visibility or mask edits must not re-rasterise the source
+    const key = `${this.sourceVersion()}|${m.join(',')}|${filters.length ? JSON.stringify(filters) : ''}|${whole ? 'whole' : 'clipped'}`;
+    if (this._cache?.key === key) return this._cache;
+    // only what can reach the host canvas is rendered: a 40× scale must not allocate a gigantic canvas. The host is
+    // learnt from tree changes; after a whole-document remap (Image Size, Crop, ...) the layer objects are new, so it is
+    // looked up again
+    let host = hosts.get(this);
+    if (!host) {
+      host = SmartLayer.findHost?.(this) ?? null;
+      if (host) hosts.set(this, host);
+    }
+    if (host && !whole) rect = intersectRect(rect, { x: -pad, y: -pad, width: host.width + pad * 2, height: host.height + pad * 2 });
+    else if (!host && !withinBudget) rect = intersectRect(rect, { x: -pad, y: -pad, width: 8192 + pad * 2, height: 8192 + pad * 2 });
     if (!rect || rect.width < 1 || rect.height < 1) {
       this._cache = { key, canvas: createCanvas(1, 1), x: out.x, y: out.y, version: this.version };
       return this._cache;
@@ -352,6 +372,7 @@ export function install(app) {
   const NO_PARAMS = new Set(['invert', 'desaturate', 'equalize']);
 
   SmartLayer.previewing = () => !!app.transformTool?.session && !app.transformTool.committing;
+  SmartLayer.findHost = (layer) => app.docs?.docs.find((d) => d.find(layer.id) === layer) ?? null;
 
   /** Document that holds a layer (the active one unless the layer lives in another open document). */
   const docOf = (layer) => (app.doc && app.doc.find(layer.id) === layer ? app.doc : app.docs.docs.find((d) => d.find(layer.id) === layer) ?? app.doc);
@@ -365,12 +386,20 @@ export function install(app) {
     return false;
   };
 
-  /** Replaces a layer's source as one undo entry (sources hold Documents, which setLayerProps cannot clone). */
+  /**
+   * Replaces a layer's source as one undo entry (sources hold Documents, which setLayerProps cannot clone).
+   * Instances made by Duplicate Layer share one source: every layer holding it is updated together, as
+   * in Photoshop (New Smart Object via Copy is the way to get an independent copy).
+   */
   function setSmartSource(hostDoc, layer, source, label) {
     const before = layer.source;
+    const targets = hostDoc.layers().filter((l) => isSmart(l) && l.source === before);
+    if (!targets.includes(layer)) targets.push(layer);
     const apply = (s) => {
-      layer.setSource(s, hostDoc);
-      hostDoc.changed('props', { layer });
+      for (const t of targets) {
+        t.setSource(s, hostDoc);
+        hostDoc.changed('props', { layer: t });
+      }
     };
     apply(source);
     const bytes = sourceWidth(source) * sourceHeight(source) * 4;
@@ -400,12 +429,19 @@ export function install(app) {
     releaseOrphanClips(src);
     src.active = src.root.children[src.root.children.length - 1] ?? null;
     src.selected = new Set(src.active ? [src.active] : []);
-    const smart = new SmartLayer({ name: top.name, source: makeSource({ kind: 'document', doc: src, name: top.name }), transform: box.x || box.y ? [1, 0, 0, 1, box.x, box.y] : null });
+    // a clipped bottom layer whose base stays behind keeps clipping to it (the composite must not change)
+    const bottom = layers[0];
+    const siblings = bottom.parent.children;
+    const bi = siblings.indexOf(bottom);
+    const keepClip = !!bottom.clip && bi > 0 && !layers.includes(siblings[bi - 1]);
+    const smart = new SmartLayer({ name: top.name, clip: keepClip, source: makeSource({ kind: 'document', doc: src, name: top.name }), transform: box.x || box.y ? [1, 0, 0, 1, box.x, box.y] : null });
     hosts.set(smart, d);
     structural(app, layers.length > 1 ? 'Convert layers to smart object' : 'Convert to smart object', () => {
-      const parent = top.parent;
-      const index = parent.children.indexOf(top);
-      d.add(smart, parent, index + 1);
+      // the smart object takes the top layer's place, or sits right above its clip base when it stays clipped
+      const anchor = keepClip ? bottom : top;
+      const parent = anchor.parent;
+      const index = parent.children.indexOf(anchor);
+      d.add(smart, parent, keepClip ? index : index + 1);
       for (const l of layers) d.remove(l);
       releaseOrphanClips(d);
       d.setActive(smart);
@@ -785,6 +821,8 @@ export function install(app) {
   });
   app.on('doc:change', (e) => {
     if (e.kind === 'tree' && isSmart(e.layer) && !hosts.has(e.layer)) hosts.set(e.layer, e.doc);
+    // a whole-document remap (Image Size, Canvas Size, Rotate, Flip, Crop) replaces the layer objects under a 'canvas' change
+    else if ((e.kind === 'canvas' || e.kind === 'tree') && e.doc) for (const l of e.doc.layers()) if (isSmart(l) && !hosts.has(l)) hosts.set(l, e.doc);
   });
 
   app.smartObjects = { SmartLayer, makeSource, cloneDocument, writeBack, convert, editContents };

@@ -165,7 +165,8 @@ export function rasterizeLayer(layer, doc, { bakeStyles = false } = {}) {
     x = layer.x;
     y = layer.y;
   } else if (layer.render) {
-    const r = layer.render();
+    // the whole layer, canvas edges included (a smart object's view render is clipped to the canvas)
+    const r = layer.render({ full: true });
     canvas = copyCanvas(r.canvas);
     x = r.x;
     y = r.y;
