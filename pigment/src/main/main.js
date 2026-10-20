@@ -1,5 +1,5 @@
 // Pigment — Electron main process.
-import { screen, app, BrowserWindow, Menu, nativeTheme, protocol, session, shell, ipcMain, dialog, clipboard, nativeImage } from 'electron';
+import { screen, app, BrowserWindow, Menu, nativeTheme, protocol, session, shell, ipcMain, dialog, clipboard, nativeImage, safeStorage } from 'electron';
 import { promises as fs, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -308,7 +308,8 @@ app.whenReady().then(async () => {
   });
 
   registerIpc({
-    electron: { app, ipcMain, dialog, shell, clipboard, nativeImage, nativeTheme, BrowserWindow },
+    // safeStorage encrypts the AI credentials with the OS keychain (src/main/ai.js)
+    electron: { app, ipcMain, dialog, shell, clipboard, nativeImage, nativeTheme, BrowserWindow, safeStorage },
     settings,
     recent,
     watcher,

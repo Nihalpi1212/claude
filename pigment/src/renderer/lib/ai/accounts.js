@@ -226,6 +226,16 @@ async function accountsDialog(app, ai, { reason = null } = {}) {
   function renderPending(card) {
     const box = el('div', 'ai-pending');
     box.append(el('div', 'ai-pending-text', 'Waiting for your browser… finish signing in to ChatGPT there, then come back.'));
+    // no free loopback port: the browser cannot come back by itself, the pasted address is the only way
+    const warn = el('p', 'ai-warning');
+    warn.hidden = true;
+    box.append(warn);
+    aiCall('chatgptSignInStatus').then((s) => {
+      if (!closed && s?.warning) {
+        warn.textContent = `${s.warning}.`;
+        warn.hidden = false;
+      }
+    }).catch(() => {});
     const row = el('div', 'ai-row');
     row.append(
       button('Copy link', async () => {

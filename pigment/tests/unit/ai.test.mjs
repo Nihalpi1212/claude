@@ -1,7 +1,8 @@
 // Pure parts of src/main/ai.js (the module loads without Electron) and createAi with a fake fetch.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -388,5 +389,153 @@ test('createAi: without safeStorage the status warns and values are stored plain
     assert.equal(onDisk.gemini.key, 'plain:AIza-x');
   } finally {
     await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('createAi: bug hunt 3 — safeStorage wiring, re-sealing, refresh races, rotated tokens, busy ports, stray errors, cancel during exchange, missing ID token', async () => {
+  // the desktop app must hand safeStorage to the AI core, or every secret is written plain
+  const mainSrc = await readFile(new URL('../../src/main/main.js', import.meta.url), 'utf8');
+  assert.match(mainSrc, /import \{[^}]*\bsafeStorage\b[^}]*\} from 'electron'/);
+  assert.match(mainSrc, /electron: \{[^}]*\bsafeStorage\b[^}]*\}/);
+
+  const clock = 1_800_000_000_000;
+  const now = () => clock;
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const sealed = (v) => `enc:${Buffer.from(`sealed:${v}`).toString('base64')}`;
+  const unsealed = (v) => Buffer.from(String(v).replace(/^enc:/, ''), 'base64').toString().replace(/^sealed:/, '');
+  const knobs = { refreshDelay: 0, refreshIdToken: () => undefined, codeDelay: 0, codeIdToken: true, nonce: null };
+  const fetchImpl = async (url, init) => {
+    if (url === CHATGPT_AUTH.tokenUrl) {
+      const form = new URLSearchParams(init.body);
+      if (form.get('grant_type') === 'refresh_token') {
+        if (knobs.refreshDelay) await sleep(knobs.refreshDelay);
+        return jsonResponse(200, { access_token: 'access-2', refresh_token: 'refresh-2', id_token: knobs.refreshIdToken(), expires_in: 3600 });
+      }
+      if (knobs.codeDelay) await sleep(knobs.codeDelay);
+      const body = { access_token: 'access-1', refresh_token: 'refresh-1', expires_in: 3600 };
+      if (knobs.codeIdToken) body.id_token = fakeJwt({ iss: 'https://auth.openai.com', aud: 'dynamic_agent_client', exp: clock / 1000 + 3600, nonce: knobs.nonce, email: 'me@example.com' });
+      return jsonResponse(200, body);
+    }
+    if (url === 'https://api.openai.com/v1/models') return jsonResponse(200, { models: [{ slug: 'gpt-5.1' }] });
+    return jsonResponse(404, { error: { message: `no route ${url}` } });
+  };
+  const dirs = [];
+  const fresh = async (initial = null) => {
+    const dir = await mkdtemp(join(tmpdir(), 'pigment-ai3-'));
+    dirs.push(dir);
+    if (initial) await writeFile(join(dir, 'ai-credentials.json'), JSON.stringify({ version: 1, ...initial }));
+    return { dir, ai: createAi({ electron: fakeElectron(), settings: fakeSettings(), fetch: fetchImpl, now, userDataDir: dir }) };
+  };
+  const fileOf = async (dir) => JSON.parse(await readFile(join(dir, 'ai-credentials.json'), 'utf8'));
+  const expiredChatgpt = () => ({ openai: { method: 'chatgpt', clientId: 'oaiapp_42', accessToken: sealed('access-1'), refreshToken: sealed('refresh-1'), idToken: sealed('id-old'), expiresAt: clock / 1000 - 10, earliestRefreshAt: 0, email: 'me@example.com', plan: true } });
+  const startSignIn = async (ai, port) => {
+    const promise = ai.dispatch('chatgptSignIn', { port });
+    await sleep(60);
+    const s = await ai.dispatch('chatgptSignInStatus');
+    assert.equal(s.pending, true);
+    const u = new URL(s.url);
+    knobs.nonce = u.searchParams.get('nonce');
+    return { promise, state: u.searchParams.get('state'), status: s, redirect: u.searchParams.get('redirect_uri') };
+  };
+  try {
+    // plain values are sealed as soon as a keychain is available
+    {
+      const { dir, ai } = await fresh({ openai: { method: 'api_key', key: 'plain:sk-plain' } });
+      assert.equal((await ai.dispatch('status')).openai.method, 'api_key');
+      const f = await fileOf(dir);
+      assert.match(f.openai.key, /^enc:/);
+      assert.equal(unsealed(f.openai.key), 'sk-plain');
+    }
+    // a refresh that lands after Sign out must not resurrect the account
+    {
+      knobs.refreshDelay = 150;
+      knobs.refreshIdToken = () => undefined;
+      const { dir, ai } = await fresh(expiredChatgpt());
+      const req = ai.dispatch('request', { provider: 'openai', path: '/models', method: 'GET' });
+      req.catch(() => {});
+      await sleep(30);
+      assert.equal((await ai.dispatch('signOut', { provider: 'openai' })).openai.method, null);
+      await assert.rejects(req, /removed|not connected/i);
+      assert.equal((await ai.dispatch('status')).openai.method, null);
+      assert.equal((await fileOf(dir)).openai, undefined);
+      knobs.refreshDelay = 0;
+    }
+    // the rotated refresh token is kept even when the refreshed ID token does not validate
+    {
+      knobs.refreshIdToken = () => fakeJwt({ iss: 'https://auth.openai.com', aud: 'oaiapp_42', exp: clock / 1000 - 5 });
+      const { dir, ai } = await fresh(expiredChatgpt());
+      const r = await ai.dispatch('request', { provider: 'openai', path: '/models', method: 'GET' });
+      assert.equal(r.status, 200);
+      const f = await fileOf(dir);
+      assert.equal(unsealed(f.openai.refreshToken), 'refresh-2');
+      assert.equal(unsealed(f.openai.accessToken), 'access-2');
+      assert.equal(unsealed(f.openai.idToken), 'id-old');
+      knobs.refreshIdToken = () => undefined;
+    }
+    // every loopback port busy: the attempt stays alive with a warning and the pasted address finishes it
+    {
+      const busy = [];
+      for (const port of [18457, ...CHATGPT_AUTH.ports]) {
+        await new Promise((resolve) => {
+          const srv = createServer();
+          srv.once('error', () => resolve()); // already taken by something else: busy all the same
+          srv.listen(port, '127.0.0.1', () => {
+            busy.push(srv);
+            resolve();
+          });
+        });
+      }
+      try {
+        const { ai } = await fresh();
+        const { promise, state, status, redirect } = await startSignIn(ai, 18457);
+        assert.match(status.warning, /all in use/);
+        assert.equal(redirect, 'http://127.0.0.1:18457/auth/callback');
+        const done = await ai.dispatch('chatgptSignInManual', { callbackUrl: `${redirect}?code=the-code&state=${state}` });
+        assert.equal(done.openai.method, 'chatgpt');
+        assert.equal((await promise).openai.email, 'me@example.com');
+      } finally {
+        for (const srv of busy) srv.close();
+      }
+    }
+    // a callback carrying an error but not this attempt's state is a stray request
+    {
+      const { ai } = await fresh();
+      const { promise, state, redirect } = await startSignIn(ai, 18458);
+      const res = await fetch(`${redirect}?error=access_denied&error_description=stray`);
+      assert.equal(res.status, 200);
+      assert.match(await res.text(), /another sign-in attempt/);
+      assert.equal((await ai.dispatch('chatgptSignInStatus')).pending, true);
+      const real = await fetch(`${redirect}?code=the-code&state=${state}`);
+      assert.match(await real.text(), /connected/i);
+      assert.equal((await promise).openai.method, 'chatgpt');
+    }
+    // cancelled while the code exchange is in flight: nothing is stored
+    {
+      knobs.codeDelay = 250;
+      const { dir, ai } = await fresh();
+      const { promise, state, redirect } = await startSignIn(ai, 18459);
+      const manual = ai.dispatch('chatgptSignInManual', { callbackUrl: `${redirect}?code=the-code&state=${state}` });
+      manual.catch(() => {});
+      await sleep(40);
+      await ai.dispatch('chatgptSignInCancel');
+      await assert.rejects(promise, /cancelled/i);
+      await assert.rejects(manual, /cancelled/i);
+      await sleep(300);
+      assert.equal((await ai.dispatch('status')).openai.method, null);
+      assert.equal((await fileOf(dir).catch(() => ({}))).openai, undefined);
+      knobs.codeDelay = 0;
+    }
+    // the first exchange must answer with an ID token
+    {
+      knobs.codeIdToken = false;
+      const { ai } = await fresh();
+      const { promise, state, redirect } = await startSignIn(ai, 18460);
+      await assert.rejects(ai.dispatch('chatgptSignInManual', { callbackUrl: `${redirect}?code=the-code&state=${state}` }), /no ID token/);
+      await assert.rejects(promise, /no ID token/);
+      assert.equal((await ai.dispatch('status')).openai.method, null);
+      knobs.codeIdToken = true;
+    }
+  } finally {
+    for (const dir of dirs) await rm(dir, { recursive: true, force: true });
   }
 });

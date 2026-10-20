@@ -371,6 +371,8 @@ export function createAi({ electron, getWindow, settings, fetch: fetchImpl = glo
   const modelCache = new Map(); // `${provider}:${method}` -> { at, list }
   let pending = null; // the sign-in in progress
   let refreshing = null; // single-flight token refresh
+  let openaiGen = 0; // bumped whenever the OpenAI entry is replaced or removed: a refresh that started before must not store
+  if (electron && !electron.safeStorage) console.warn('ai: electron.safeStorage was not provided; credentials will be stored unencrypted');
 
   // ---- credential store ----------------------------------------------------------------------------------------
   const encryptionAvailable = () => {
@@ -403,6 +405,20 @@ export function createAi({ electron, getWindow, settings, fetch: fetchImpl = glo
       creds = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
     } catch {
       creds = {};
+    }
+    // values stored plain while no keychain was available are sealed as soon as one is
+    if (encryptionAvailable()) {
+      let changed = false;
+      for (const p of ['openai', 'gemini']) {
+        for (const k of ['key', 'accessToken', 'refreshToken', 'idToken']) {
+          const v = creds[p]?.[k];
+          if (typeof v === 'string' && v.startsWith('plain:') && v.length > 6) {
+            creds[p][k] = seal(v.slice(6));
+            changed = true;
+          }
+        }
+      }
+      if (changed) await save().catch((err) => console.warn('ai: could not re-seal the credentials', err?.message));
     }
     return creds;
   }
@@ -510,6 +526,8 @@ export function createAi({ electron, getWindow, settings, fetch: fetchImpl = glo
   }
 
   function storeTokens(prev, tokens, { clientId, nonce }) {
+    // the first exchange (a nonce was sent) must answer with an ID token, or the claims are never checked
+    if (nonce && !tokens.id_token) throw new AiError('The sign-in answer carried no ID token', { code: 'invalid_id_token' });
     const idClaims = tokens.id_token ? validateIdToken(tokens.id_token, { clientId, nonce, now: now() / 1000 }) : null;
     const info = accountInfo(tokens);
     const expiresIn = Number(tokens.expires_in);
@@ -530,6 +548,7 @@ export function createAi({ electron, getWindow, settings, fetch: fetchImpl = glo
 
   async function clearOpenAi() {
     const c = await load();
+    openaiGen++;
     delete c.openai;
     modelCache.delete('openai:chatgpt');
     modelCache.delete('openai:api_key');
@@ -541,6 +560,7 @@ export function createAi({ electron, getWindow, settings, fetch: fetchImpl = glo
     refreshing = (async () => {
       const c = await load();
       const o = c.openai;
+      const gen = openaiGen;
       if (o?.method !== 'chatgpt') throw notConnected('openai');
       const refreshToken = unseal(o.refreshToken);
       if (!refreshToken) {
@@ -557,8 +577,19 @@ export function createAi({ electron, getWindow, settings, fetch: fetchImpl = glo
         }
         throw err;
       }
-      // a refreshed ID token has no nonce to check; issuer, audience and expiry still apply
-      c.openai = storeTokens(o, tokens, { clientId: o.clientId, nonce: null });
+      // signed out (or replaced by an API key) while the refresh was in flight: the rotated tokens are dropped
+      if (gen !== openaiGen || c.openai !== o) throw new AiError('The ChatGPT sign-in was removed while its token was being refreshed', { code: 'not_connected' });
+      // a refreshed ID token has no nonce to check; issuer, audience and expiry still apply. The server has
+      // already rotated the refresh token by now, so a bad ID token is dropped rather than costing the sign-in
+      let next;
+      try {
+        next = storeTokens(o, tokens, { clientId: o.clientId, nonce: null });
+      } catch (err) {
+        if (err?.code !== 'invalid_id_token') throw err;
+        console.warn('ai: the refreshed ID token did not validate; keeping the previous one', err.message);
+        next = storeTokens(o, { ...tokens, id_token: undefined }, { clientId: o.clientId, nonce: null });
+      }
+      c.openai = next;
       await save();
       return unseal(c.openai.accessToken);
     })().finally(() => {
@@ -602,7 +633,7 @@ export function createAi({ electron, getWindow, settings, fetch: fetchImpl = glo
   function listenLoopback(ports, onRequest) {
     const tryPort = (i) =>
       new Promise((resolve, reject) => {
-        if (i >= ports.length) return reject(new AiError(`Ports ${ports[0]}–${ports[ports.length - 1]} are all in use; close the program using them or paste the callback address manually`, { code: 'port_in_use' }));
+        if (i >= ports.length) return reject(new AiError(`Ports ${ports[0]}–${ports[ports.length - 1]} are all in use; close the program using them, or finish the sign-in by pasting the address the browser lands on`, { code: 'port_in_use' }));
         const server = createServer(onRequest);
         server.once('error', (err) => {
           if (err?.code === 'EADDRINUSE' || err?.code === 'EACCES') resolve(tryPort(i + 1));
@@ -631,14 +662,18 @@ export function createAi({ electron, getWindow, settings, fetch: fetchImpl = glo
   async function completeSignIn(parsed) {
     const p = pending;
     if (!p) throw new AiError('No sign-in is in progress', { code: 'no_sign_in' });
-    if (parsed.error) throw new AiError(parsed.errorDescription || `Sign-in refused (${parsed.error})`, { code: parsed.error });
+    // a callback without this attempt's state is a stray request whatever else it carries (an error included)
     if (parsed.state !== p.state) throw new AiError('The callback belongs to another sign-in attempt; start again', { code: 'state_mismatch' });
+    if (parsed.error) throw new AiError(parsed.errorDescription || `Sign-in refused (${parsed.error})`, { code: parsed.error });
     if (p.exchanging) return p.exchanging;
     p.exchanging = (async () => {
       const clientId = parsed.clientId || CHATGPT_AUTH.dynamicClientId;
       const tokens = await tokenRequest({ grant_type: 'authorization_code', code: parsed.code, code_verifier: p.verifier, redirect_uri: p.redirectUri, client_id: clientId, resource: CHATGPT_AUTH.resource }, 'ChatGPT');
+      // cancelled (or timed out) while the exchange was in flight: nothing is stored
+      if (pending !== p) throw new AiError('Sign-in cancelled', { code: 'cancelled' });
       const c = await load();
       c.openai = storeTokens(null, tokens, { clientId, nonce: p.nonce });
+      openaiGen++;
       modelCache.delete('openai:chatgpt');
       await save();
       const s = await status();
@@ -690,7 +725,17 @@ export function createAi({ electron, getWindow, settings, fetch: fetchImpl = glo
           }
         );
       };
-      const { server, port: boundPort } = await listenLoopback(ports, onRequest);
+      let bound;
+      try {
+        bound = await listenLoopback(ports, onRequest);
+      } catch (err) {
+        if (err?.code !== 'port_in_use') throw err;
+        // every port is taken: the attempt stays alive without a listener, so the user can still paste the
+        // address the browser lands on (the card shows the warning)
+        bound = { server: null, port: ports[0] };
+        entry.warning = err.message;
+      }
+      const { server, port: boundPort } = bound;
       entry.server = server;
       entry.redirectUri = redirectUriFor(boundPort);
       entry.url = buildAuthorizeUrl({ redirectUri: entry.redirectUri, state, nonce, codeChallenge: pkce.challenge, hostId: await hostId() });
@@ -706,7 +751,7 @@ export function createAi({ electron, getWindow, settings, fetch: fetchImpl = glo
     return entry.promise;
   }
 
-  const chatgptSignInStatus = async () => (pending ? { pending: true, url: pending.url ?? undefined } : { pending: false });
+  const chatgptSignInStatus = async () => (pending ? { pending: true, url: pending.url ?? undefined, warning: pending.warning ?? undefined } : { pending: false });
 
   async function chatgptSignInManual({ callbackUrl } = {}) {
     if (!pending) throw new AiError('Start "Sign in with ChatGPT" first, then paste the address the browser landed on', { code: 'no_sign_in' });
@@ -735,6 +780,7 @@ export function createAi({ electron, getWindow, settings, fetch: fetchImpl = glo
     const r = await providerCall({ provider, path: provider === 'openai' ? '/models' : '/models?pageSize=200', method: 'GET', timeoutMs: 30_000, auth });
     const c = await load();
     if (provider === 'openai' && c.openai?.method === 'chatgpt') finishPending(new AiError('Sign-in cancelled', { code: 'cancelled' }));
+    if (provider === 'openai') openaiGen++;
     c[provider] = { method: 'api_key', key: seal(k), addedAt: now() / 1000 };
     modelCache.set(`${provider}:api_key`, { at: now(), list: parseModelCatalog(provider, r.body) });
     await save();
@@ -744,7 +790,10 @@ export function createAi({ electron, getWindow, settings, fetch: fetchImpl = glo
   async function signOut({ provider } = {}) {
     assertProvider(provider);
     const c = await load();
-    if (provider === 'openai') finishPending(new AiError('Sign-in cancelled', { code: 'cancelled' }));
+    if (provider === 'openai') {
+      finishPending(new AiError('Sign-in cancelled', { code: 'cancelled' }));
+      openaiGen++;
+    }
     delete c[provider];
     modelCache.delete(`${provider}:api_key`);
     modelCache.delete(`${provider}:chatgpt`);
