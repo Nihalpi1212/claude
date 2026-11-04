@@ -1,0 +1,33 @@
+name: Marquee
+options:
+  bundleIdPrefix: com.marquee.personal
+  deploymentTarget:
+    macOS: "14.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+targets:
+  Marquee:
+    type: application
+    platform: macOS
+    sources:
+      - Marquee
+    info:
+      path: Marquee/Info.plist
+      properties:
+        CFBundleDisplayName: Marquee
+        LSApplicationCategoryType: public.app-category.entertainment
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoadsForMedia: true
+          NSAllowsLocalNetworking: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.marquee.personal.app
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        # "Sign to Run Locally": no Apple developer account needed to run from Xcode.
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: "-"
+        DEVELOPMENT_TEAM: ""
+        ENABLE_HARDENED_RUNTIME: NO

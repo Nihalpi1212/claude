@@ -1,0 +1,61 @@
+# Marquee (Mac video app): compiles on every change under MarqueeApp/ and uploads a
+# ready-to-run Marquee.app (Apple silicon + Intel) as a workflow artifact.
+# The app is ad-hoc signed, not notarized; see MarqueeApp/README.md for the first-launch step.
+
+name: Marquee macOS build
+
+on:
+  push:
+    paths: ['MarqueeApp/**', '.github/workflows/marquee-macos.yml']
+  pull_request:
+    paths: ['MarqueeApp/**', '.github/workflows/marquee-macos.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: MarqueeApp
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate project
+        run: xcodegen generate
+
+      - name: Build (Release, universal)
+        run: |
+          set -o pipefail
+          xcodebuild build -project Marquee.xcodeproj -scheme Marquee -configuration Release \
+            -destination 'generic/platform=macOS' -derivedDataPath build \
+            ONLY_ACTIVE_ARCH=NO CODE_SIGNING_ALLOWED=NO | tee build.log | grep -E "error:|warning:|BUILD " || true
+          grep -q "BUILD SUCCEEDED" build.log
+
+      - name: Sign (ad-hoc) and zip
+        run: |
+          APP=build/Build/Products/Release/Marquee.app
+          codesign --force --deep --sign - "$APP"
+          codesign --verify --verbose "$APP"
+          lipo -info "$APP/Contents/MacOS/Marquee"
+          ditto -c -k --keepParent "$APP" Marquee-macOS.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Marquee-macOS
+          path: MarqueeApp/Marquee-macOS.zip
+          if-no-files-found: error
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: marquee-build-log
+          path: MarqueeApp/build.log
+          if-no-files-found: ignore
