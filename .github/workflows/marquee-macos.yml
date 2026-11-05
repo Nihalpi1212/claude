@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write  # to publish the marquee-latest release
 
 jobs:
   build:
@@ -51,6 +51,19 @@ jobs:
           name: Marquee-macOS
           path: MarqueeApp/Marquee-macOS.zip
           if-no-files-found: error
+
+      # Public download that needs no GitHub login:
+      # https://github.com/<owner>/<repo>/releases/download/marquee-latest/Marquee-macOS.zip
+      - name: Publish to the marquee-latest release
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete marquee-latest --cleanup-tag --yes || true
+          gh release create marquee-latest Marquee-macOS.zip \
+            --target "$GITHUB_SHA" --latest=false \
+            --title "Marquee for Mac (latest build)" \
+            --notes "Download Marquee-macOS.zip, unzip it and drag Marquee.app to Applications. First launch: System Settings > Privacy & Security > Open Anyway. Needs macOS 14 or later. Built from ${GITHUB_SHA::7}."
 
       - name: Upload build log on failure
         if: failure()

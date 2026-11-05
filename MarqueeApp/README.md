@@ -29,8 +29,8 @@ for content you have the right to watch.
 * File > Open Video… (⌘O) plays any file; MKV/AVI and other formats open in your default video app (e.g. IINA or VLC)
 
 ## Install without Xcode
-1. On GitHub, open **Actions > Marquee macOS build**, pick the latest green run, and download the
-   **Marquee-macOS** artifact. Unzip it (you may need to unzip twice) and drag **Marquee.app** to Applications.
+1. Download **[Marquee-macOS.zip](https://github.com/Nihalpi1212/claude/releases/download/marquee-latest/Marquee-macOS.zip)**
+   (no GitHub login needed; every build updates it). Unzip it and drag **Marquee.app** to Applications.
 2. The app isn't notarized by Apple, so the first launch is blocked. Open it once, then go to
    **System Settings > Privacy & Security** and click **Open Anyway**. Or in Terminal:
    ```bash
