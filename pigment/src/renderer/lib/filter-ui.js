@@ -152,10 +152,13 @@ export function install(app) {
     }
     const hasFields = fieldsFor(kind).length > 0 && !def.direct;
     if (direct || !hasFields || !dialog) {
-      const params = direct ?? paramsFor(app, kind, saved()[kind]);
+      let params = direct ?? paramsFor(app, kind, saved()[kind]);
       const session = beginPixelEdit(app, { label: def.name, margin: marginFor(kind, params) });
       if (!session) return ctx?.cancel();
       try {
+        // a registered prepare(params, session) re-derives document state the params only name (Lens Blur's depth map)
+        const prepare = REGISTERED.get(kind)?.prepare;
+        if (prepare) params = (await prepare(params, session)) ?? params;
         const img = await app.busy(`${def.name}…`, async () => processed(session, (x) => applyFilter(x, kind, toRun(kind, params))));
         session.commit(def.name, img, { filter: { kind, params: clone(toRun(kind, params)) } });
       } catch (err) {
@@ -223,7 +226,7 @@ export function install(app) {
     fields: fieldsFor,
     toRun,
     ranges,
-    /** 0.3 modules register field tables, margins and custom openers for their kinds (see REGISTERED). */
+    /** 0.3 modules register field tables, margins, custom openers and prepare(params, session) hooks for their kinds (see REGISTERED). */
     register: (kind, def) => REGISTERED.set(kind, { ...(REGISTERED.get(kind) ?? {}), ...def }),
     /** Runs a kind directly with params (what the custom openers call after their own session committed is not needed: they commit themselves). */
     run: (kind, params, opts) => run(kind, params, opts),

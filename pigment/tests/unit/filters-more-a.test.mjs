@@ -224,8 +224,6 @@ test('shape-blur: shapes export, square kernel is a box, ring kernel excludes th
   // a radius far beyond 8 runs downscaled and still gives a flat result on a flat image and a wide spread on an impulse
   const flat = applyFilter(solidImage(64, 48, [10, 200, 30, 1]), 'shape-blur', { radius: 40, shape: 'heart' });
   assertPixel(getPixel(flat, 30, 20), [10, 200, 30, 1], 1, 'flat stays flat');
-  const wide = applyFilter(solidImage(101, 101, [0, 0, 0, 1]), 'shape-blur', { radius: 30, shape: 'circle' }, null);
-  void wide;
   const spot = solidImage(101, 101, [0, 0, 0, 1]);
   for (let y = 45; y < 56; y++) for (let x = 45; x < 56; x++) setPixel(spot, x, y, [255, 255, 255, 1]);
   const big = applyFilter(spot, 'shape-blur', { radius: 30, shape: 'circle' });

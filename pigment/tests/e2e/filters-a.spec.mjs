@@ -130,10 +130,10 @@ test('dialog kinds preview on the canvas, commit one entry, remember their param
   const halftoned = await layerPixel(page, 50, 50);
   expect(halftoned[3]).toBe(255);
   // De-Interlace with explicit params runs without a dialog: eliminating even rows copies row 19 (transparent) over row 20
-  await runAwait(page, 'edit:undo');
-  await runAwait(page, 'edit:undo');
-  await runAwait(page, 'edit:undo');
-  n -= 3;
+  // (back to the untouched square first: shake, mezzotint, halftone and the star blur are undone)
+  for (let k = 0; k < 4; k++) await runAwait(page, 'edit:undo');
+  n -= 4;
+  expect(await layerPixel(page, 50, 20)).toEqual([255, 0, 0, 255]);
   await runAwait(page, 'filter:de-interlace', { eliminate: 'even', method: 'duplication' });
   await expect.poll(() => historyLength(page)).toBe(++n);
   expect((await layerPixel(page, 50, 20))[3]).toBe(0);

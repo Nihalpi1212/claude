@@ -22,7 +22,7 @@
 //   the tap count stays bounded.
 
 import {
-  clampRect, inflateRect, cropImage, premultiply, unpremultiply, luminance, randomSeeded,
+  clampRect, inflateRect, cropImage, premultiply, unpremultiply, luminance,
 } from './core.js';
 import { rgbToHsl, hslToRgb, rgbToHsv, hsvToRgb } from './color.js';
 import { num, clampNum, round8, smoothstep, DEG, TAU, region, defineFilter } from './filter-def.js';
@@ -771,7 +771,6 @@ export function estimateShakeKernel(img, { traceBounds = 41, rect = null } = {})
     }
   }
   const anisotropy = along > 0 ? across / along : Infinity;
-  if (globalThis.__shakeDebug) none.debug = { significance, lead, anisotropy, bx, by, N, median, mad, best, second };
   if (significance < SHAKE_SIGNIFICANCE || lead < SHAKE_LEAD || anisotropy < SHAKE_ANISOTROPY) return { ...none, tile: cands[0] };
   // sub-pixel refinement along the dominant axis (parabola through the spike and its neighbours)
   let length = Math.sqrt(bx * bx + by * by);
@@ -782,7 +781,7 @@ export function estimateShakeKernel(img, { traceBounds = 41, rect = null } = {})
     const off = clampNum((0.5 * (vm - vp)) / den, -0.5, 0.5);
     length = Math.sqrt((bx + off * ax) ** 2 + (by + off * ay) ** 2);
   }
-  return { detected: true, length, angle, kernel: lineKernel(length, angle), tile: cands[0], debug: none.debug };
+  return { detected: true, length, angle, kernel: lineKernel(length, angle), tile: cands[0] };
 }
 
 // noise-to-signal presets: measured on synthetic shakes, below ~1e-2 the restored ringing costs more than the

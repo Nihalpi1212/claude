@@ -120,5 +120,15 @@ export function install(app) {
     fields: FILTERS[KIND].fields,
     margin: FILTERS[KIND].margin,
     open: (kind, opts) => openLensBlur(app, opts),
+    // direct runs (Last Filter, actions, the assistant) name the source; the map itself is re-read from the document
+    prepare: (params, session) => {
+      if (!params || !params.source || params.source === 'none' || params.depthMap) return params;
+      let src = params.source;
+      if (src === 'alpha') {
+        const ch = (app.doc?.channels ?? []).find((c) => c.name === params.channel) ?? app.doc?.channels?.[0];
+        src = ch ? `channel:${ch.id}` : null;
+      }
+      return src ? { ...params, depthMap: depthMapFor(app, session, src) } : params;
+    },
   });
 }
