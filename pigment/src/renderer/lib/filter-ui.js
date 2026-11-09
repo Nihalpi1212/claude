@@ -199,17 +199,19 @@ export function install(app) {
     'filter:last': {
       enabled: () => has() && !!app.settings.lastFilter?.kind,
       label: () => (app.settings.lastFilter?.name ? `Last Filter: ${app.settings.lastFilter.name}` : 'Last Filter'),
-      run: () => {
+      run: (_arg, ctx) => {
         const l = app.settings.lastFilter;
-        if (l?.kind) run(l.kind, l.params ?? {}, { dialog: false });
+        // the promise is returned so callers (actions, tests) can await the commit
+        return l?.kind ? run(l.kind, l.params ?? {}, { dialog: false, ctx }) : undefined;
       },
     },
     'filter:last-dialog': {
       enabled: () => has() && !!app.settings.lastFilter?.kind,
-      run: () => {
+      run: (_arg, ctx) => {
         const l = app.settings.lastFilter;
-        if (l?.kind) run(l.kind);
+        return l?.kind ? run(l.kind, undefined, { ctx }) : undefined;
       },
+      dialog: true,
     },
   };
   const dialogKind = (k) => !FILTERS[k].direct && (FILTERS[k].ui === 'custom' || fieldsFor(k).length > 0);
