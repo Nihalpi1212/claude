@@ -10,6 +10,18 @@ import { resolvePattern } from './patterns.js';
 
 const SIMPLE_OVER = new Set(['normal', 'pass-through']);
 
+/**
+ * Image modes (lib/modes.js): a renderer per document mode runs on every composite's output canvas
+ * (the view, exports, thumbnails, smart-object hosts) so duotone inks, indexed colour tables and
+ * bitmap thresholds show as the document mode defines them while pixels stay RGBA.
+ * fn(doc, canvas, rect, opts) edits the canvas in place; rect is the document region it holds.
+ */
+const MODE_RENDERERS = new Map();
+export function registerModeRenderer(mode, fn) {
+  if (fn) MODE_RENDERERS.set(mode, fn);
+  else MODE_RENDERERS.delete(mode);
+}
+
 export class Compositor {
   constructor() {
     this.styleCache = new WeakMap(); // layer -> { version, canvas, x, y }
@@ -20,11 +32,11 @@ export class Compositor {
   /**
    * Composites `doc` (or just `rect` of it) and returns a canvas of rect size whose (0,0) is rect.x/y.
    * @param {import('./document.js').Document} doc
-   * @param {{ rect?: object, skip?: Set<object>, until?: object, hideSelection?: boolean, target?: HTMLCanvasElement }} opts
+   * @param {{ rect?: object, skip?: Set<object>, until?: object, hideSelection?: boolean, target?: HTMLCanvasElement, rawMode?: boolean }} opts rawMode skips the document-mode renderer
    */
   composite(doc, opts = {}) {
     const rect = opts.rect ? intersectRect(opts.rect, doc.bounds) ?? { x: 0, y: 0, width: 1, height: 1 } : doc.bounds;
-    const isFull = !opts.rect && !opts.skip && !opts.until && !opts.target;
+    const isFull = !opts.rect && !opts.skip && !opts.until && !opts.target && !opts.rawMode;
     // layer.touch() bumps the root's version without a document change event (brush strokes), so both count
     if (isFull && this.full && this.full.version === doc.version && this.full.rootVersion === doc.root.version && this.full.canvas.width === doc.width && this.full.canvas.height === doc.height) return this.full.canvas;
     const canvas = opts.target ?? createCanvas(rect.width, rect.height);
@@ -35,6 +47,9 @@ export class Compositor {
     ctx.translate(-rect.x, -rect.y);
     this.drawChildren(ctx, doc.root, rect, doc, opts);
     ctx.restore();
+    // image modes other than RGB post-process the output (registerModeRenderer); mode changes bump doc.version
+    const modeRender = doc.mode && doc.mode !== 'rgb' ? MODE_RENDERERS.get(doc.mode) : null;
+    if (modeRender && !opts.rawMode) modeRender(doc, canvas, rect, opts);
     if (isFull) this.full = { version: doc.version, rootVersion: doc.root.version, canvas };
     return canvas;
   }

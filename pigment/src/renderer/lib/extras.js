@@ -94,8 +94,15 @@ function createFromOptions(app, o) {
   const name = (o.name ?? '').trim() || `Untitled-${++untitledCount}`;
   const m = /^Untitled-(\d+)$/.exec(name);
   if (m) untitledCount = Math.max(untitledCount, Number(m[1]));
-  return app.newDocument({ width, height, dpi, name, background, backgroundColor });
+  // image mode and depth (lib/modes.js, lib/depth.js): bitmap is stored as 8-bit black/white, CMYK and Lab stop at 16
+  const mode = MODES.some(([id]) => id === o.mode) ? o.mode : 'rgb';
+  let depth = [8, 16, 32].includes(Number(o.depth)) ? Number(o.depth) : 8;
+  if (mode === 'bitmap') depth = 8;
+  else if ((mode === 'cmyk' || mode === 'lab') && depth > 16) depth = 16;
+  return app.newDocument({ width, height, dpi, name, background, backgroundColor, mode, depth });
 }
+const MODES = [['rgb', 'RGB Color'], ['grayscale', 'Grayscale'], ['cmyk', 'CMYK Color'], ['lab', 'Lab Color'], ['bitmap', 'Bitmap']];
+const DEPTHS = [[8, '8 bit'], [16, '16 bit'], [32, '32 bit']];
 
 async function newDocumentDialog(app, arg) {
   if (arg && typeof arg === 'object' && Number(arg.width) > 0 && Number(arg.height) > 0) return createFromOptions(app, arg);
@@ -114,6 +121,8 @@ async function newDocumentDialog(app, arg) {
     unit: p0?.unit ?? (UNITS.some(([u]) => u === last.unit) ? last.unit : 'px'),
     background: ['white', 'black', 'background', 'transparent', 'custom'].includes(last.background) ? last.background : 'white',
     backgroundColor: normHex(last.backgroundColor ?? '#ffffff'),
+    mode: MODES.some(([id]) => id === last.mode) ? last.mode : 'rgb',
+    depth: [8, 16, 32].includes(last.depth) ? last.depth : 8,
   };
   let sizeNode = null;
   let summary = null;
@@ -185,6 +194,8 @@ async function newDocumentDialog(app, arg) {
       sync: (_values, node) => node?.show?.(),
     },
     { key: 'dpi', label: 'Resolution', type: 'number', min: 1, max: 10000, step: 1, unit: 'ppi', width: 90 },
+    { key: 'mode', label: 'Color mode', type: 'select', options: MODES },
+    { key: 'depth', label: 'Bit depth', type: 'select', options: DEPTHS, when: (v) => v.mode !== 'bitmap' },
     { key: 'background', label: 'Background contents', type: 'select', options: [['white', 'White'], ['black', 'Black'], ['background', 'Background color'], ['transparent', 'Transparent'], ['custom', 'Custom color…']] },
     { key: 'backgroundColor', label: 'Custom color', type: 'color', when: (v) => v.background === 'custom' },
     {
@@ -236,8 +247,8 @@ async function newDocumentDialog(app, arg) {
     },
   });
   if (!result) return null;
-  const opts = { width: Math.round(result.width), height: Math.round(result.height), dpi: Math.round(Number(result.dpi) || 72), background: result.background, backgroundColor: normHex(result.backgroundColor), name: result.name, unit: result.unit };
-  app.saveSettingsSoon({ newDocPreset: { width: opts.width, height: opts.height, dpi: opts.dpi, background: opts.background, backgroundColor: opts.backgroundColor, unit: opts.unit, preset: result.preset === 'clipboard' ? 'custom' : result.preset, name: 'Untitled' } });
+  const opts = { width: Math.round(result.width), height: Math.round(result.height), dpi: Math.round(Number(result.dpi) || 72), background: result.background, backgroundColor: normHex(result.backgroundColor), name: result.name, unit: result.unit, mode: result.mode, depth: Number(result.depth) || 8 };
+  app.saveSettingsSoon({ newDocPreset: { width: opts.width, height: opts.height, dpi: opts.dpi, background: opts.background, backgroundColor: opts.backgroundColor, unit: opts.unit, preset: result.preset === 'clipboard' ? 'custom' : result.preset, name: 'Untitled', mode: opts.mode, depth: opts.depth } });
   return createFromOptions(app, opts);
 }
 

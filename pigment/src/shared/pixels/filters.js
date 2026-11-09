@@ -28,10 +28,18 @@ import {
 } from './core.js';
 import { parseColor } from './color.js';
 import { blendImages } from './blend.js';
+import { num, clampNum, round8, smoothstep, DEG, TAU, merge, freezeDeep, region, defineFilter, mergeTables } from './filter-def.js';
+import { FILTERS_MORE_A } from './filters-more-a.js';
+import { FILTERS_MORE_B } from './filters-more-b.js';
+import { BLUR_GALLERY } from './blur-gallery.js';
+import { GALLERY_ARTISTIC } from './gallery-artistic.js';
+import { GALLERY_SKETCH } from './gallery-sketch.js';
+import { LENS_FILTERS } from './lens.js';
 
 /** @typedef {import('./core.js').ImageDataLike} ImageDataLike */
 /** @typedef {import('./core.js').Rect} Rect */
-/** @typedef {'blur'|'sharpen'|'noise'|'pixelate'|'distort'|'stylize'|'render'|'other'} FilterCategory */
+/** @typedef {'blur'|'blur-gallery'|'distort'|'noise'|'pixelate'|'render'|'sharpen'|'stylize'|'video'|'other'|'gallery'|'special'} FilterCategory */
+// 'gallery' kinds are reached through the Filter Gallery (GALLERY_GROUPS); 'special' kinds sit at the top of the Filter menu (Filter Gallery, Lens Correction)
 /**
  * @typedef {'gaussian-blur'|'box-blur'|'motion-blur'|'radial-blur'|'surface-blur'|
  *   'sharpen'|'unsharp-mask'|'smart-sharpen'|'high-pass'|
@@ -42,40 +50,12 @@ import { blendImages } from './blend.js';
  *   'clouds'|'difference-clouds'|'lens-flare'|'vignette'|
  *   'maximum'|'minimum'|'custom'|'invert-alpha'} FilterKind
  */
-/** @typedef {{ name: string, category: FilterCategory, defaults: object, apply: (img: ImageDataLike, params?: object, rect?: Rect | null) => ImageDataLike }} FilterDef */
+/** @typedef {{ name: string, category: FilterCategory, defaults: object, apply: (img: ImageDataLike, params?: object, rect?: Rect | null) => ImageDataLike, fields?: object[], margin?: number | ((p: object) => number), direct?: boolean, ui?: 'custom', gallery?: string, placeholder?: boolean, smart?: boolean }} FilterDef */
 
 // ---------------------------------------------------------------------------------------------
 // Small helpers (module private)
 
-/** Finite number or fallback. */
-const num = (v, fallback) => (typeof v === 'number' && Number.isFinite(v) ? v : fallback);
-const clampNum = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
-/** Rounds half up into 0..255 (Uint8ClampedArray assignment would round half to even). */
-const round8 = (v) => (v <= 0 ? 0 : v >= 255 ? 255 : (v + 0.5) | 0);
-/** Hermite smoothstep; e0 > e1 gives the falling edge. */
-const smoothstep = (e0, e1, x) => {
-  const t = clampNum((x - e0) / (e1 - e0), 0, 1);
-  return t * t * (3 - 2 * t);
-};
-const DEG = Math.PI / 180;
-const TAU = Math.PI * 2;
-
-/** Shallow merge that ignores undefined values in params (so `{ radius: undefined }` keeps the default). */
-function merge(defaults, params) {
-  const out = { ...defaults };
-  if (params) for (const k in params) if (params[k] !== undefined) out[k] = params[k];
-  return out;
-}
-
-const freezeDeep = (o) => {
-  if (o && typeof o === 'object') {
-    for (const k of Object.keys(o)) freezeDeep(o[k]);
-    Object.freeze(o);
-  }
-  return o;
-};
-
-const region = (img, rect) => clampRect(rect, img.width, img.height);
+// num, clampNum, round8, smoothstep, DEG, TAU, merge, freezeDeep and region come from filter-def.js (shared with the 0.3 tables)
 const isEmpty = (r) => r.width <= 0 || r.height <= 0;
 /** rect inflated by px on every side, clipped to the image (the pixels a neighbourhood filter reads). */
 const grow = (img, r, px) => clampRect(inflateRect(r, Math.ceil(px)), img.width, img.height);
@@ -2159,16 +2139,8 @@ function invertAlpha(img, _p, rect) {
 // ---------------------------------------------------------------------------------------------
 // Catalogue
 
-function kind(name, category, defaults, fn) {
-  const frozen = freezeDeep(defaults);
-  return Object.freeze({
-    name,
-    category,
-    defaults: frozen,
-    apply(img, params, rect = null) {
-      return fn(img, merge(frozen, params), rect);
-    },
-  });
+function kind(name, category, defaults, fn, extra = {}) {
+  return defineFilter(name, category, defaults, fn, extra);
 }
 
 /**
@@ -2229,7 +2201,7 @@ function kind(name, category, defaults, fn) {
  * - invert-alpha {}: alpha -> 255 - alpha.
  * @type {Readonly<Record<FilterKind, FilterDef>>}
  */
-export const FILTERS = Object.freeze({
+const BUILTIN_FILTERS = Object.freeze({
   // blur
   'gaussian-blur': kind('Gaussian Blur', 'blur', { radius: 2 }, gaussianBlur),
   'box-blur': kind('Box Blur', 'blur', { radius: 3 }, boxBlur),
@@ -2242,7 +2214,7 @@ export const FILTERS = Object.freeze({
     unsharp(img, rect, clampNum(num(p.amount, 100), 0, 500), clampNum(num(p.radius, 1), 0, 1000), clampNum(num(p.threshold, 0), 0, 255), null)),
   'smart-sharpen': kind('Smart Sharpen', 'sharpen', { amount: 100, radius: 1, reduceNoise: 10 }, (img, p, rect) =>
     unsharp(img, rect, clampNum(num(p.amount, 100), 0, 500), clampNum(num(p.radius, 1), 0, 1000), 0, clampNum(num(p.reduceNoise, 10), 0, 100))),
-  'high-pass': kind('High Pass', 'sharpen', { radius: 10 }, highPass),
+  'high-pass': kind('High Pass', 'other', { radius: 10 }, highPass),
   // noise
   'add-noise': kind('Add Noise', 'noise', { amount: 12.5, distribution: 'uniform', monochromatic: false, seed: 1 }, addNoise),
   median: kind('Median', 'noise', { radius: 1 }, median),
@@ -2263,7 +2235,7 @@ export const FILTERS = Object.freeze({
   zigzag: kind('ZigZag', 'distort', { amount: 10, ridges: 5, edge: 'transparent' }, zigzag),
   polar: kind('Polar Coordinates', 'distort', { toPolar: true, edge: 'transparent' }, polar),
   shear: kind('Shear', 'distort', { points: [[0, 0], [1, 0]], edge: 'transparent' }, shear),
-  offset: kind('Offset', 'distort', { dx: 0, dy: 0, wrap: true, edge: 'transparent' }, offset),
+  offset: kind('Offset', 'other', { dx: 0, dy: 0, wrap: true, edge: 'transparent' }, offset),
   // stylize
   emboss: kind('Emboss', 'stylize', { angle: 135, height: 3, amount: 100 }, emboss),
   'find-edges': kind('Find Edges', 'stylize', {}, (img, _p, rect) => sobelFilter(img, rect, 1, 1, true)),
@@ -2271,7 +2243,7 @@ export const FILTERS = Object.freeze({
   diffuse: kind('Diffuse', 'stylize', { mode: 'normal', seed: 1 }, diffuse),
   'oil-paint': kind('Oil Paint', 'stylize', { radius: 4, levels: 20 }, oilPaint),
   'glowing-edges': kind('Glowing Edges', 'stylize', { width: 2, brightness: 6 }, (img, p, rect) =>
-    sobelFilter(img, rect, Math.max(1, Math.round(clampNum(num(p.width, 2), 1, 100) / 2)), clampNum(num(p.brightness, 6), 0, 20) / 4, false)),
+    sobelFilter(img, rect, Math.max(1, Math.round(clampNum(num(p.width, 2), 1, 100) / 2)), clampNum(num(p.brightness, 6), 0, 20) / 4, false), { gallery: 'Stylize' }),
   // render
   clouds: kind('Clouds', 'render', { seed: 1, scale: 128, colors: ['#000000', '#ffffff'] }, clouds),
   'difference-clouds': kind('Difference Clouds', 'render', { seed: 1, scale: 128, colors: ['#000000', '#ffffff'] }, differenceClouds),
@@ -2284,26 +2256,40 @@ export const FILTERS = Object.freeze({
   'invert-alpha': kind('Invert Alpha', 'other', {}, invertAlpha),
 });
 
-/** Every kind id, in menu order. @type {readonly FilterKind[]} */
+/**
+ * The registry: the built-in kinds above merged with the 0.3 tables (filters-more-a/b.js, blur-gallery.js,
+ * gallery-artistic.js, gallery-sketch.js). A kind defined in two tables is an error.
+ * @type {Readonly<Record<string, FilterDef>>}
+ */
+export const FILTERS = mergeTables(BUILTIN_FILTERS, FILTERS_MORE_A, FILTERS_MORE_B, BLUR_GALLERY, GALLERY_ARTISTIC, GALLERY_SKETCH, LENS_FILTERS);
+
+/** Every kind id (registry order). @type {readonly string[]} */
 export const FILTER_KINDS = Object.freeze(Object.keys(FILTERS));
 
+/** Filter menu groups in Photoshop's order; kinds are listed alphabetically inside a group, as Photoshop does. */
 const CATEGORY_NAMES = [
-  ['blur', 'Blur'], ['sharpen', 'Sharpen'], ['noise', 'Noise'], ['pixelate', 'Pixelate'],
-  ['distort', 'Distort'], ['stylize', 'Stylize'], ['render', 'Render'], ['other', 'Other'],
+  ['blur', 'Blur'], ['blur-gallery', 'Blur Gallery'], ['distort', 'Distort'], ['noise', 'Noise'], ['pixelate', 'Pixelate'],
+  ['render', 'Render'], ['sharpen', 'Sharpen'], ['stylize', 'Stylize'], ['video', 'Video'], ['other', 'Other'],
 ];
+const byName = (a, b) => FILTERS[a].name.localeCompare(FILTERS[b].name, 'en');
 
 /**
- * Filter menu groups in order: { id, name, kinds } (kinds in menu order). Every kind appears once.
- * @type {ReadonlyArray<Readonly<{ id: FilterCategory, name: string, kinds: readonly FilterKind[] }>>}
+ * Filter menu groups in order: { id, name, kinds }. Every non-gallery kind appears once; kinds whose category
+ * is 'gallery' are reached through GALLERY_GROUPS (the Filter Gallery dialog) and 'special' kinds are listed at the top of the menu.
+ * @type {ReadonlyArray<Readonly<{ id: FilterCategory, name: string, kinds: readonly string[] }>>}
  */
 export const FILTER_CATEGORIES = Object.freeze(CATEGORY_NAMES.map(([id, name]) =>
-  Object.freeze({ id, name, kinds: Object.freeze(FILTER_KINDS.filter((k) => FILTERS[k].category === id)) })));
+  Object.freeze({ id, name, kinds: Object.freeze(FILTER_KINDS.filter((k) => FILTERS[k].category === id).sort(byName)) })));
+
+/** Filter Gallery groups in Photoshop's order: { id, name, kinds } (kinds alphabetical). Glowing Edges belongs to both the Stylize menu and the gallery. */
+export const GALLERY_GROUPS = Object.freeze([['artistic', 'Artistic'], ['brush-strokes', 'Brush Strokes'], ['distort', 'Distort'], ['sketch', 'Sketch'], ['stylize', 'Stylize'], ['texture', 'Texture']].map(([id, name]) =>
+  Object.freeze({ id, name, kinds: Object.freeze(FILTER_KINDS.filter((k) => FILTERS[k].gallery === name).sort(byName)) })));
 
 /**
  * Applies one filter in place and returns img. params are merged over the kind's defaults.
  * Throws a RangeError for an unknown kind (or a malformed custom kernel).
  * @param {ImageDataLike} img
- * @param {FilterKind} kind
+ * @param {string} kind
  * @param {object} [params]
  * @param {Rect | null} [rect] default: the whole image
  * @returns {ImageDataLike}

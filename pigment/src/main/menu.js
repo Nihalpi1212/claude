@@ -1,22 +1,31 @@
-// Native application menu (File, Edit, Image, Layer, Select, Filter, View, Window, Help). Every
+// Native application menu (File, Edit, Image, Layer, Select, Filter, AI, View, Window, Help). Every
 // item runs a renderer command (see ARCHITECTURE.md "Commands"); the renderer decides what the
-// command means in its current state and ignores it when it does not apply.
+// command means in its current state and ignores it when it does not apply. Items whose command is
+// still a stub (state.stubs, see lib/stub.js) or whose registry kind is a placeholder are disabled.
 import { MENU_KEYS } from '../shared/keymap.js';
 import { ADJUSTMENTS } from '../shared/pixels/adjust.js';
-import { FILTERS, FILTER_CATEGORIES } from '../shared/pixels/filters.js';
+import { FILTERS, FILTER_CATEGORIES, GALLERY_GROUPS } from '../shared/pixels/filters.js';
 import { STYLE_KEYS } from '../shared/pixels/styles.js';
 
 /** Kinds offered as adjustment layers, in Photoshop's order. */
-const LAYER_ADJUSTMENTS = ['brightness-contrast', 'levels', 'curves', 'exposure', null, 'vibrance', 'hue-saturation', 'color-balance', 'black-white', 'photo-filter', 'channel-mixer', null, 'invert', 'posterize', 'threshold', 'gradient-map', 'selective-color'];
-const IMAGE_ADJUSTMENTS = [...LAYER_ADJUSTMENTS, null, 'shadows-highlights', null, 'desaturate', 'equalize'];
+const LAYER_ADJUSTMENTS = ['brightness-contrast', 'levels', 'curves', 'exposure', null, 'vibrance', 'hue-saturation', 'color-balance', 'black-white', 'photo-filter', 'channel-mixer', 'color-lookup', null, 'invert', 'posterize', 'threshold', 'gradient-map', 'selective-color'];
+/** Image > Adjustments, in Photoshop's order. */
+const IMAGE_ADJUSTMENTS = [...LAYER_ADJUSTMENTS, null, 'shadows-highlights', 'hdr-toning', null, 'desaturate', 'match-color', 'replace-color', 'equalize'];
 const NO_DIALOG = new Set(['invert', 'desaturate', 'equalize']);
-/** Filters that apply without a dialog. */
+/** Filters that apply without a dialog (kinds may also say so with `direct: true`). */
 const DIRECT_FILTERS = new Set(['despeckle', 'fragment', 'find-edges', 'solarize', 'invert-alpha']);
+/** Image > Mode, in Photoshop's order: [id, label, bit depths it allows]. */
+export const IMAGE_MODES = [
+  ['bitmap', 'Bitmap…', [1]], ['grayscale', 'Grayscale', [8, 16, 32]], ['duotone', 'Duotone…', [8]], ['indexed', 'Indexed Color…', [8]],
+  ['rgb', 'RGB Color', [8, 16, 32]], ['cmyk', 'CMYK Color', [8, 16]], ['lab', 'Lab Color', [8, 16]], ['multichannel', 'Multichannel', [8, 16]],
+];
+/** Layer > Smart Objects > Stack Mode, in Photoshop's order. */
+export const STACK_MODES = [['none', 'None'], ['entropy', 'Entropy'], ['kurtosis', 'Kurtosis'], ['maximum', 'Maximum'], ['mean', 'Mean'], ['median', 'Median'], ['minimum', 'Minimum'], ['range', 'Range'], ['skewness', 'Skewness'], ['standard-deviation', 'Standard Deviation'], ['summation', 'Summation'], ['variance', 'Variance']];
 
 export const PANELS = [
   ['color', 'Color'], ['swatches', 'Swatches'], ['brushes', 'Brushes'], null,
   ['properties', 'Properties'], ['adjustments', 'Adjustments'], ['character', 'Character'], ['paths', 'Paths'], null,
-  ['layers', 'Layers'], ['channels', 'Channels'], ['history', 'History'], ['navigator', 'Navigator'], ['info', 'Info'], null,
+  ['layers', 'Layers'], ['channels', 'Channels'], ['history', 'History'], ['actions', 'Actions'], ['navigator', 'Navigator'], ['info', 'Info'], null,
   ['assistant', 'AI Assistant'],
 ];
 
@@ -33,17 +42,21 @@ export function buildMenuTemplate({ platform, state = {}, recent = [], run, isPa
   const has = !!state.hasDocument;
   const sel = has && !!state.hasSelection;
   const layer = has && !!state.hasLayer;
+  const smart = layer && state.layerType === 'smart';
+  const stubs = new Set(typeof state.stubs === 'string' ? state.stubs.split(',').filter(Boolean) : []);
   const sep = { type: 'separator' };
   const item = (label, cmd, extra = {}) => ({
     label,
     accelerator: 'accelerator' in extra ? extra.accelerator : MENU_KEYS[cmd],
     click: () => run(cmd, extra.arg),
-    enabled: extra.enabled ?? true,
+    enabled: (extra.enabled ?? true) && !stubs.has(cmd),
     ...(extra.type ? { type: extra.type, checked: !!extra.checked } : {}),
   });
   const doc = (label, cmd, extra = {}) => item(label, cmd, { enabled: has, ...extra });
   const lyr = (label, cmd, extra = {}) => item(label, cmd, { enabled: layer, ...extra });
   const sub = (label, submenu, enabled = true) => ({ label, submenu, enabled });
+  const filterItem = (k) => lyr(`${FILTERS[k].name}${DIRECT_FILTERS.has(k) || FILTERS[k].direct ? '' : '…'}`, `filter:${k}`, { enabled: layer && !FILTERS[k].placeholder });
+  const adjustItem = (k) => lyr(`${ADJUSTMENTS[k].name}${NO_DIALOG.has(k) ? '' : '…'}`, `image:adjust-${k}`, { enabled: layer && !ADJUSTMENTS[k].placeholder });
 
   const recentItems = recent.length
     ? [
@@ -56,23 +69,52 @@ export function buildMenuTemplate({ platform, state = {}, recent = [], run, isPa
   const fileMenu = sub('&File', [
     item('&New…', 'file:new'),
     item('&Open…', 'file:open'),
+    item('Open as Smart Object…', 'file:open-smart'),
     sub('Open &Recent', recentItems),
     sep,
     doc('&Close', 'file:close'),
     doc('Close All', 'file:close-all'),
+    doc('Close Others', 'file:close-others'),
     sep,
     doc('&Save', 'file:save'),
     doc('Save &As…', 'file:save-as'),
     doc('Save a Cop&y…', 'file:save-copy'),
     doc('Re&vert', 'file:revert', { enabled: has && !!state.path && !!state.dirty }),
     sep,
-    sub('&Export', [doc('Quick Export as PNG', 'file:export-quick'), doc('Export As…', 'file:export'), sep, doc('Layers to Files…', 'file:export-layers')], has),
+    sub('&Export', [
+      doc('Quick Export as PNG', 'file:export-quick'),
+      doc('Export As…', 'file:export'),
+      doc('Save for Web (Legacy)…', 'file:save-for-web'),
+      sep,
+      doc('Layers to Files…', 'file:export-layers'),
+      doc('Color Lookup Tables…', 'file:export-luts'),
+    ], has),
     sep,
     doc('&Place Image as Layer…', 'file:place'),
     sep,
+    sub('Automate', [
+      item('Batch…', 'file:automate-batch'),
+      item('Crop and Straighten Photos', 'file:automate-crop-straighten', { enabled: layer }),
+      item('Contact Sheet…', 'file:automate-contact-sheet'),
+      item('Conditional Mode Change…', 'file:automate-conditional-mode', { enabled: has }),
+      item('Fit Image…', 'file:automate-fit-image', { enabled: has }),
+      item('Merge to HDR…', 'file:automate-merge-hdr'),
+      item('Photomerge…', 'file:automate-photomerge'),
+    ]),
+    sub('Scripts', [
+      item('Image Processor…', 'file:script-image-processor'),
+      sep,
+      doc('Delete All Empty Layers', 'file:script-delete-empty-layers'),
+      doc('Flatten All Layer Effects', 'file:script-flatten-effects'),
+      doc('Flatten All Masks', 'file:script-flatten-masks'),
+      sep,
+      item('Load Files into Stack…', 'file:script-load-stack'),
+      item('Statistics…', 'file:script-statistics'),
+    ]),
+    sep,
     doc('&Print…', 'file:print'),
     sep,
-    doc('Document &Properties…', 'file:properties'),
+    doc('File &Info…', 'file:properties'),
     doc(mac ? 'Reveal in Finder' : platform === 'win32' ? 'Show in Explorer' : 'Show in File Manager', 'file:reveal', { enabled: has && !!state.path }),
     ...(mac ? [] : [sep, { role: 'quit', label: platform === 'win32' ? 'E&xit' : '&Quit' }]),
   ]);
@@ -96,6 +138,9 @@ export function buildMenuTemplate({ platform, state = {}, recent = [], run, isPa
     lyr('Content-A&ware Fill', 'edit:content-aware-fill', { enabled: layer && sel }),
     lyr('&Stroke…', 'edit:stroke', { enabled: sel }),
     sep,
+    lyr('Content-Aware Scale', 'edit:content-aware-scale'),
+    lyr('Puppet Warp', 'edit:puppet-warp'),
+    lyr('Perspective Warp', 'edit:perspective-warp'),
     lyr('Free &Transform', 'edit:free-transform'),
     sub('Transfor&m', [
       lyr('Again', 'edit:transform-again'),
@@ -114,18 +159,37 @@ export function buildMenuTemplate({ platform, state = {}, recent = [], run, isPa
       lyr('Flip Horizontal', 'edit:transform-flip-h'),
       lyr('Flip Vertical', 'edit:transform-flip-v'),
     ], layer),
-    lyr('Puppet Warp', 'edit:puppet-warp'),
-    lyr('Perspective Warp', 'edit:perspective-warp'),
+    doc('Auto-Align Layers…', 'edit:auto-align'),
+    doc('Auto-Blend Layers…', 'edit:auto-blend'),
     sep,
     doc('Define &Pattern', 'edit:define-pattern'),
+    sep,
+    sub('Purge', [
+      doc('Undo', 'edit:purge', { arg: 'undo' }),
+      item('Clipboard', 'edit:purge', { arg: 'clipboard' }),
+      doc('Histories', 'edit:purge', { arg: 'histories' }),
+      item('All', 'edit:purge', { arg: 'all' }),
+    ]),
     sep,
     item('&Keyboard Shortcuts…', 'help:shortcuts', { accelerator: undefined }),
     ...(mac ? [] : [item('Pre&ferences…', 'edit:preferences')]),
   ]);
 
-  const adjustmentItems = (cmdFor) => IMAGE_ADJUSTMENTS.map((k) => (k ? cmdFor(k) : sep));
+  const mode = state.mode ?? 'rgb';
+  const depth = state.depth ?? 8;
+  const adjustmentItems = IMAGE_ADJUSTMENTS.map((k) => (k ? adjustItem(k) : sep));
   const imageMenu = sub('&Image', [
-    sub('&Adjustments', adjustmentItems((k) => lyr(`${ADJUSTMENTS[k].name}${NO_DIALOG.has(k) ? '' : '…'}`, `image:adjust-${k}`)), layer),
+    sub('&Mode', [
+      ...IMAGE_MODES.map(([id, label]) => doc(label, 'image:mode', { arg: id, type: 'radio', checked: mode === id })),
+      sep,
+      doc('8 Bits/Channel', 'image:depth', { arg: 8, type: 'radio', checked: depth === 8 || mode === 'bitmap' }),
+      doc('16 Bits/Channel', 'image:depth', { arg: 16, type: 'radio', checked: depth === 16, enabled: has && mode !== 'bitmap' && mode !== 'indexed' && mode !== 'duotone' }),
+      doc('32 Bits/Channel', 'image:depth', { arg: 32, type: 'radio', checked: depth === 32, enabled: has && (mode === 'rgb' || mode === 'grayscale') }),
+      sep,
+      doc('Color Table…', 'image:color-table', { enabled: has && mode === 'indexed' }),
+    ], has),
+    sep,
+    sub('&Adjustments', adjustmentItems, layer),
     sep,
     lyr('Auto &Tone', 'image:auto-tone'),
     lyr('Auto &Contrast', 'image:auto-contrast'),
@@ -147,14 +211,29 @@ export function buildMenuTemplate({ platform, state = {}, recent = [], run, isPa
     doc('Reveal &All', 'image:reveal-all'),
     sep,
     doc('&Duplicate…', 'image:duplicate'),
+    lyr('Apply Image…', 'image:apply-image'),
+    doc('Calculations…', 'image:calculations'),
+    sep,
+    doc('Trap…', 'image:trap', { enabled: has && mode === 'cmyk' }),
   ]);
 
   const layerMenu = sub('&Layer', [
-    sub('&New', [doc('Layer…', 'layer:new'), doc('Group', 'layer:new-group'), sep, lyr('Layer via Copy', 'layer:via-copy'), lyr('Layer via Cut', 'layer:via-cut')], has),
+    sub('&New', [
+      doc('Layer…', 'layer:new'),
+      lyr(state.backgroundLayer ? 'Layer from Background…' : 'Background from Layer', 'layer:from-background'),
+      doc('Group', 'layer:new-group'),
+      lyr('Group from Layers…', 'layer:group-from-layers'),
+      sep,
+      lyr('Layer via Copy', 'layer:via-copy'),
+      lyr('Layer via Cut', 'layer:via-cut'),
+    ], has),
     lyr('&Duplicate Layer', 'layer:duplicate'),
-    lyr('De&lete Layer', 'layer:delete'),
-    lyr('Rena&me Layer…', 'layer:rename'),
+    sub('De&lete', [lyr('Layer', 'layer:delete'), doc('Hidden Layers', 'layer:delete-hidden')], has),
     sep,
+    lyr('Quick Export as PNG', 'layer:export-quick'),
+    lyr('Export As…', 'layer:export-as'),
+    sep,
+    lyr('Rena&me Layer…', 'layer:rename'),
     sub('Layer St&yle', [
       lyr('Blending Options…', 'layer:style', { arg: 'dialog' }),
       sep,
@@ -166,9 +245,13 @@ export function buildMenuTemplate({ platform, state = {}, recent = [], run, isPa
       sep,
       doc('Global Light…', 'layer:global-light'),
     ], layer),
+    sub('Smart &Filter', [
+      lyr('Enable / Disable Smart Filters', 'layer:smart-filters-toggle', { enabled: smart }),
+      lyr('Clear Smart Filters', 'layer:smart-filters-clear', { enabled: smart }),
+    ], layer),
     sep,
     sub('New Fi&ll Layer', [doc('Solid Color…', 'layer:new-fill', { arg: 'solid' }), doc('Gradient…', 'layer:new-fill', { arg: 'gradient' }), doc('Pattern…', 'layer:new-fill', { arg: 'pattern' })], has),
-    sub('New &Adjustment Layer', LAYER_ADJUSTMENTS.map((k) => (k ? doc(`${ADJUSTMENTS[k].name}…`, 'layer:new-adjustment', { arg: k }) : sep)), has),
+    sub('New &Adjustment Layer', LAYER_ADJUSTMENTS.map((k) => (k ? doc(`${ADJUSTMENTS[k].name}…`, 'layer:new-adjustment', { arg: k, enabled: has && !ADJUSTMENTS[k].placeholder }) : sep)), has),
     lyr('Layer Content &Options…', 'layer:properties'),
     sep,
     sub('Layer &Mask', [
@@ -187,31 +270,22 @@ export function buildMenuTemplate({ platform, state = {}, recent = [], run, isPa
     ], layer),
     lyr('Create Clipping Mask', 'layer:clip'),
     sep,
-    lyr('&Group Layers', 'layer:group'),
-    lyr('&Ungroup Layers', 'layer:ungroup'),
-    lyr('&Hide / Show Layers', 'layer:visibility'),
-    sep,
-    sub('A&rrange', [lyr('Bring to Front', 'layer:arrange-front'), lyr('Bring Forward', 'layer:arrange-forward'), lyr('Send Backward', 'layer:arrange-backward'), lyr('Send to Back', 'layer:arrange-back')], layer),
-    sub('Ali&gn', [
-      lyr('Left Edges', 'layer:align', { arg: 'left' }), lyr('Horizontal Centers', 'layer:align', { arg: 'hcenter' }), lyr('Right Edges', 'layer:align', { arg: 'right' }), sep,
-      lyr('Top Edges', 'layer:align', { arg: 'top' }), lyr('Vertical Centers', 'layer:align', { arg: 'vcenter' }), lyr('Bottom Edges', 'layer:align', { arg: 'bottom' }),
-    ], layer),
-    sub('Distri&bute', [lyr('Horizontally', 'layer:distribute', { arg: 'horizontal' }), lyr('Vertically', 'layer:distribute', { arg: 'vertical' })], layer),
-    sub('Loc&k Layer', [lyr('All', 'layer:lock', { arg: 'all' }), lyr('Image Pixels', 'layer:lock', { arg: 'pixels' }), lyr('Position', 'layer:lock', { arg: 'position' }), lyr('Transparent Pixels', 'layer:lock', { arg: 'transparency' })], layer),
-    sep,
     sub('Smart &Objects', [
       lyr('Convert to Smart Object', 'layer:smart-convert'),
-      lyr('New Smart Object via Copy', 'layer:smart-via-copy', { enabled: layer && state.layerType === 'smart' }),
+      lyr('New Smart Object via Copy', 'layer:smart-via-copy', { enabled: smart }),
       sep,
-      lyr('Edit Contents', 'layer:smart-edit', { enabled: layer && state.layerType === 'smart' }),
-      lyr('Replace Contents…', 'layer:smart-replace', { enabled: layer && state.layerType === 'smart' }),
-      lyr('Export Contents…', 'layer:smart-export', { enabled: layer && state.layerType === 'smart' }),
-      lyr('Reset Transform', 'layer:smart-reset', { enabled: layer && state.layerType === 'smart' }),
+      lyr('Edit Contents', 'layer:smart-edit', { enabled: smart }),
+      lyr('Replace Contents…', 'layer:smart-replace', { enabled: smart }),
+      lyr('Export Contents…', 'layer:smart-export', { enabled: smart }),
+      lyr('Reset Transform', 'layer:smart-reset', { enabled: smart }),
       sep,
-      lyr('Enable / Disable Smart Filters', 'layer:smart-filters-toggle', { enabled: layer && state.layerType === 'smart' }),
-      lyr('Clear Smart Filters', 'layer:smart-filters-clear', { enabled: layer && state.layerType === 'smart' }),
+      sub('Stack Mode', STACK_MODES.map(([id, label]) => lyr(label, 'layer:stack-mode', { arg: id, type: 'radio', checked: (state.stackMode ?? 'none') === id, enabled: smart })), smart),
+      lyr('Convert to Layers', 'layer:smart-to-layers', { enabled: smart }),
       sep,
-      lyr('Rasterize', 'layer:smart-rasterize', { enabled: layer && state.layerType === 'smart' }),
+      lyr('Enable / Disable Smart Filters', 'layer:smart-filters-toggle', { enabled: smart }),
+      lyr('Clear Smart Filters', 'layer:smart-filters-clear', { enabled: smart }),
+      sep,
+      lyr('Rasterize', 'layer:smart-rasterize', { enabled: smart }),
     ], layer),
     sub('&Type', [
       lyr('Text on Path', 'text:on-path', { enabled: layer && state.layerType === 'text' }),
@@ -230,12 +304,33 @@ export function buildMenuTemplate({ platform, state = {}, recent = [], run, isPa
       sep,
       lyr('Merge Shape Components', 'path:merge-components'),
     ], layer && state.layerType === 'shape'),
-    sub('Rasteri&ze', [lyr('Layer', 'layer:rasterize'), lyr('Layer Style', 'layer:rasterize-style')], layer),
+    sub('Rasteri&ze', [lyr('Layer', 'layer:rasterize'), lyr('Layer Style', 'layer:rasterize-style'), sep, doc('All Layers', 'layer:rasterize-all')], layer),
     lyr('Edit &Text', 'layer:edit-text', { enabled: layer && state.layerType === 'text' }),
+    sep,
+    lyr('&Group Layers', 'layer:group'),
+    lyr('&Ungroup Layers', 'layer:ungroup'),
+    lyr('&Hide / Show Layers', 'layer:visibility'),
+    sep,
+    sub('A&rrange', [lyr('Bring to Front', 'layer:arrange-front'), lyr('Bring Forward', 'layer:arrange-forward'), lyr('Send Backward', 'layer:arrange-backward'), lyr('Send to Back', 'layer:arrange-back')], layer),
+    sub('Ali&gn', [
+      lyr('Left Edges', 'layer:align', { arg: 'left' }), lyr('Horizontal Centers', 'layer:align', { arg: 'hcenter' }), lyr('Right Edges', 'layer:align', { arg: 'right' }), sep,
+      lyr('Top Edges', 'layer:align', { arg: 'top' }), lyr('Vertical Centers', 'layer:align', { arg: 'vcenter' }), lyr('Bottom Edges', 'layer:align', { arg: 'bottom' }),
+    ], layer),
+    sub('Distri&bute', [lyr('Horizontally', 'layer:distribute', { arg: 'horizontal' }), lyr('Vertically', 'layer:distribute', { arg: 'vertical' })], layer),
+    sub('Loc&k Layer', [lyr('All', 'layer:lock', { arg: 'all' }), lyr('Image Pixels', 'layer:lock', { arg: 'pixels' }), lyr('Position', 'layer:lock', { arg: 'position' }), lyr('Transparent Pixels', 'layer:lock', { arg: 'transparency' })], layer),
+    lyr('Link Layers', 'layer:link'),
+    lyr('Select Linked Layers', 'layer:select-linked'),
     sep,
     lyr('Merge Do&wn', 'layer:merge-down'),
     doc('Merge &Visible', 'layer:merge-visible'),
     doc('&Flatten Image', 'image:flatten'),
+    sep,
+    sub('Matting', [
+      lyr('Color Decontaminate…', 'layer:matting', { arg: 'decontaminate' }),
+      lyr('Defringe…', 'layer:matting', { arg: 'defringe' }),
+      lyr('Remove Black Matte', 'layer:matting', { arg: 'remove-black' }),
+      lyr('Remove White Matte', 'layer:matting', { arg: 'remove-white' }),
+    ], layer),
   ]);
 
   const selectMenu = sub('&Select', [
@@ -245,8 +340,16 @@ export function buildMenuTemplate({ platform, state = {}, recent = [], run, isPa
     doc('&Inverse', 'select:inverse', { enabled: sel }),
     sep,
     doc('All &Layers', 'layer:select-all'),
+    doc('Deselect Layers', 'select:deselect-layers'),
+    doc('Find Layers', 'select:find-layers'),
+    doc('Isolate Layers', 'select:isolate-layers', { type: 'checkbox', checked: !!state.isolated }),
     sep,
     doc('&Color Range…', 'select:color-range'),
+    lyr('Focus Area…', 'select:focus-area'),
+    lyr('Subject', 'select:subject'),
+    lyr('Sky', 'select:sky'),
+    sep,
+    doc('Select and &Mask…', 'select:select-mask'),
     sep,
     sub('&Modify', [
       doc('Border…', 'select:border', { enabled: sel }),
@@ -266,13 +369,20 @@ export function buildMenuTemplate({ platform, state = {}, recent = [], run, isPa
     lyr('Layer &Transparency as Selection', 'select:from-layer'),
   ]);
 
+  // the gallery groups appear in the menu when the preference says so (Photoshop: "Show all Filter Gallery groups and names")
+  const galleryMenus = state.showGalleryInMenu ? GALLERY_GROUPS.filter((g) => g.kinds.length).map((g) => sub(g.name, g.kinds.map(filterItem), layer)) : [];
   const filterMenu = sub('Fil&ter', [
     lyr(state.lastFilter ? `Last Filter: ${state.lastFilter}` : 'Last Filter', 'filter:last', { enabled: layer && !!state.lastFilter }),
     sep,
+    lyr('Convert for Smart Filters', 'layer:smart-convert', { enabled: layer && !smart }),
+    sep,
+    filterItem('filter-gallery'),
+    filterItem('lens-correction'),
     lyr('&Liquify…', 'filter:liquify'),
     lyr('Camera &Raw Filter…', 'filter:camera-raw'),
     sep,
-    ...FILTER_CATEGORIES.map((cat) => sub(cat.name, cat.kinds.map((k) => lyr(`${FILTERS[k].name}${DIRECT_FILTERS.has(k) ? '' : '…'}`, `filter:${k}`)), layer)),
+    ...FILTER_CATEGORIES.map((cat) => sub(cat.name, cat.kinds.map(filterItem), layer)),
+    ...(galleryMenus.length ? [sep, ...galleryMenus] : []),
   ]);
 
   const viewMenu = sub('&View', [

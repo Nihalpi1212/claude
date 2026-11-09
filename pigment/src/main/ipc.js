@@ -3,7 +3,7 @@
 // sandboxed and untrusted by design.
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
-import { basename, dirname } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { addRecent, removeRecent } from './recent.js';
 import { OPEN_DIALOG_FILTERS } from '../shared/formats.js';
 import { writeClipboardText, writeClipboardImage, readClipboardImage } from './clipboard.js';
@@ -113,6 +113,31 @@ export function registerIpc(ctx) {
     assertString(path, 'path');
     const stat = await fs.stat(path);
     return { path, name: basename(path), dir: dirname(path), size: stat.size, mtimeMs: stat.mtimeMs };
+  });
+
+  // Batch, Image Processor, Photomerge and Load Files into Stack (lib/automate.js, lib/align-blend.js) read folders
+  handle('listDir', async (path) => {
+    assertString(path, 'path');
+    const entries = await fs.readdir(path, { withFileTypes: true });
+    const out = [];
+    for (const e of entries) {
+      if (e.name.startsWith('.')) continue;
+      const full = join(path, e.name);
+      let stat = null;
+      try {
+        stat = await fs.stat(full);
+      } catch {
+        continue; // broken symlink or vanished file
+      }
+      out.push({ name: e.name, path: full, isDir: stat.isDirectory(), size: stat.size, mtimeMs: stat.mtimeMs });
+    }
+    return out.sort((a, b) => (a.isDir === b.isDir ? a.name.localeCompare(b.name, undefined, { numeric: true }) : a.isDir ? -1 : 1));
+  });
+
+  handle('makeDir', async (path) => {
+    assertString(path, 'path');
+    await fs.mkdir(path, { recursive: true });
+    return path;
   });
 
   on('showItemInFolder', (path) => {

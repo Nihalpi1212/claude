@@ -118,6 +118,9 @@ export class RasterLayer extends Layer {
     this.x = props.x ?? 0;
     this.y = props.y ?? 0;
     this.canvas = props.canvas ?? createCanvas(props.width ?? 1, props.height ?? 1);
+    // 16/32-bit documents (lib/depth.js): the high-precision pixels, straight RGBA, same size as the canvas;
+    // the canvas is the 8-bit proxy everything else paints and composites. { type: 'u16'|'f32', data: Uint16Array|Float32Array }
+    this.deep = props.deep ?? null;
   }
   get width() {
     return this.canvas.width;
@@ -493,7 +496,7 @@ export function intersectRect(a, b) {
 
 export class Document {
   /**
-   * @param {{ width: number, height: number, dpi?: number, name?: string, path?: string|null }} opts
+   * @param {{ width: number, height: number, dpi?: number, name?: string, path?: string|null, mode?: string, depth?: number, colorTable?: number[][]|null, duotone?: object|null }} opts
    */
   constructor(opts) {
     this.id = newId('D');
@@ -516,6 +519,12 @@ export class Document {
     this.listeners = new Set();
     this.meta = {}; // author, description, exif copied on import
     this.thumbnail = null;
+    // Image > Mode (lib/modes.js): pixels are always stored as RGBA canvases; the mode constrains edits and the
+    // compositor's final pass (registerModeRenderer in compositor.js). 'rgb'|'grayscale'|'bitmap'|'duotone'|'indexed'|'cmyk'|'lab'|'multichannel'
+    this.mode = opts.mode ?? 'rgb';
+    this.depth = opts.depth ?? 8; // bits per channel: 8 | 16 | 32 (lib/depth.js keeps RasterLayer.deep in step)
+    this.colorTable = opts.colorTable ?? null; // indexed mode: [[r, g, b], ...] up to 256 entries (+ transparentIndex in duotone/indexed options)
+    this.duotone = opts.duotone ?? null; // { type: 'monotone'|'duotone'|'tritone'|'quadtone', inks: [{ name, color: '#rrggbb', curve: [[x, y], ...] }] }
   }
 
   onChange(fn) {
@@ -659,7 +668,7 @@ export class Document {
     const saved = (l) => !l.quickMask && !l.preview;
     const walk = (layer) => {
       const d = layer.describe();
-      if (layer.type === 'raster') Object.assign(d, { x: layer.x, y: layer.y, width: layer.canvas.width, height: layer.canvas.height });
+      if (layer.type === 'raster') Object.assign(d, { x: layer.x, y: layer.y, width: layer.canvas.width, height: layer.canvas.height, deep: layer.deep?.type ?? null });
       if (layer.type === 'group') Object.assign(d, { expanded: layer.expanded, children: layer.children.filter(saved).map(walk) });
       if (layer.type === 'text') Object.assign(d, { x: layer.x, y: layer.y, width: layer.width, text: layer.text, font: { ...layer.font }, rotation: layer.rotation, transform: layer.transform ? layer.transform.slice() : null, pathText: layer.pathText ? JSON.parse(JSON.stringify(layer.pathText)) : null });
       const registered = LAYER_TYPES.get(layer.type);
@@ -670,11 +679,15 @@ export class Document {
       return d;
     };
     return {
-      version: 1,
+      version: 2,
       app: 'pigment',
       width: this.width,
       height: this.height,
       dpi: this.dpi,
+      mode: this.mode ?? 'rgb',
+      depth: this.depth ?? 8,
+      colorTable: this.colorTable ? this.colorTable.map((c) => [...c]) : null,
+      duotone: this.duotone ? JSON.parse(JSON.stringify(this.duotone)) : null,
       name: this.name,
       active: this.active?.id ?? null,
       guides: this.guides.map((g) => ({ ...g })),
@@ -689,8 +702,8 @@ export class Document {
 }
 
 /** Creates a new document with a background layer filled with `background` ('white'|'transparent'|'background'|hex). */
-export function createDocument({ width, height, dpi = 72, name = 'Untitled', background = 'white', backgroundColor = '#ffffff' }) {
-  const doc = new Document({ width, height, dpi, name });
+export function createDocument({ width, height, dpi = 72, name = 'Untitled', background = 'white', backgroundColor = '#ffffff', mode = 'rgb', depth = 8 }) {
+  const doc = new Document({ width, height, dpi, name, mode, depth });
   const layer = new RasterLayer({ name: 'Background', width, height });
   if (background !== 'transparent') {
     const ctx = layer.canvas.getContext('2d');

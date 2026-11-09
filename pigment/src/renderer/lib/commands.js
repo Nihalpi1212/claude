@@ -15,7 +15,8 @@ export class CommandRegistry {
 
   /**
    * @param {string} id
-   * @param {{ run: (arg?: any) => any, enabled?: () => boolean, checked?: () => boolean, label?: string }} def
+   * @param {{ run: (arg?: any, ctx?: { setReplayArg(v: any): void, cancel(): void }) => any, enabled?: () => boolean, checked?: () => boolean, label?: string | (() => string), dialog?: boolean }} def
+   *   dialog: true marks a command that asks the user something when run without an argument (actions record it only through ctx)
    */
   register(id, def) {
     if (typeof def === 'function') def = { run: def };
@@ -80,12 +81,18 @@ export class CommandRegistry {
       tt.commit();
     }
     if (!this.isEnabled(id)) return undefined;
+    // The context lets a command with a dialog report what it finally did (lib/actions.js records
+    // `command:done` events to build actions): setReplayArg(params) names the argument that re-runs the
+    // command without a dialog, cancel() marks a dismissed dialog so nothing is recorded.
+    const ctx = { id, source, replayArg: undefined, cancelled: false, setReplayArg: (v) => { ctx.replayArg = v; }, cancel: () => { ctx.cancelled = true; } };
+    const done = (result) => this.app.emit('command:done', { id, arg: ctx.replayArg !== undefined ? ctx.replayArg : arg, source, result, cancelled: ctx.cancelled, replayable: ctx.replayArg !== undefined || arg !== undefined || !def.dialog });
     try {
-      const result = def.run(arg);
+      const result = def.run(arg, ctx);
       if (result && typeof result.then === 'function') {
-        result.catch((err) => this.app.reportError(err, `Command ${id} failed`)).finally(() => this.app.emit('commands:changed'));
+        result.then(done, (err) => this.app.reportError(err, `Command ${id} failed`)).finally(() => this.app.emit('commands:changed'));
       } else {
         this.app.emit('commands:changed');
+        done(result);
       }
       return result;
     } catch (err) {

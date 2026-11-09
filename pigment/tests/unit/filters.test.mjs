@@ -41,17 +41,22 @@ const channelSum = (img, c) => {
 };
 
 test('catalogue: every contract kind, categories, applyFilter', () => {
-  assert.deepEqual([...FILTER_KINDS].sort(), [...CONTRACT_KINDS].sort());
+  // 0.3 merges more tables (filters-more-a/b, blur gallery, Filter Gallery) into the registry; the 0.1 kinds stay
+  for (const k of CONTRACT_KINDS) assert.ok(FILTER_KINDS.includes(k), k);
   const seen = [];
-  assert.deepEqual(FILTER_CATEGORIES.map((c) => c.id), ['blur', 'sharpen', 'noise', 'pixelate', 'distort', 'stylize', 'render', 'other']);
+  assert.deepEqual(FILTER_CATEGORIES.map((c) => c.id), ['blur', 'blur-gallery', 'distort', 'noise', 'pixelate', 'render', 'sharpen', 'stylize', 'video', 'other']);
   for (const cat of FILTER_CATEGORIES) {
     assert.equal(typeof cat.name, 'string');
+    // Photoshop lists the kinds of a group alphabetically
+    assert.deepEqual([...cat.kinds], [...cat.kinds].sort((a, b) => FILTERS[a].name.localeCompare(FILTERS[b].name, 'en')), cat.id);
     for (const k of cat.kinds) {
       assert.equal(FILTERS[k].category, cat.id, k);
       seen.push(k);
     }
   }
-  assert.deepEqual(seen.sort(), [...CONTRACT_KINDS].sort(), 'each kind in exactly one category');
+  const menuKinds = FILTER_KINDS.filter((k) => FILTERS[k].category !== 'gallery' && FILTERS[k].category !== 'special');
+  assert.deepEqual(seen.sort(), [...menuKinds].sort(), 'each non-gallery kind in exactly one category');
+  for (const k of FILTER_KINDS) if (FILTERS[k].category === 'gallery') assert.equal(typeof FILTERS[k].gallery, 'string', `${k} names its gallery group`);
   for (const k of FILTER_KINDS) {
     const f = FILTERS[k];
     assert.equal(typeof f.name, 'string', k);

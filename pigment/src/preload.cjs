@@ -19,6 +19,8 @@ const api = {
   readFile: (path) => invoke('readFile', path),
   writeFile: (path, data) => invoke('writeFile', path, data),
   pathInfo: (path) => invoke('pathInfo', path),
+  listDir: (path) => invoke('listDir', path),
+  makeDir: (path) => invoke('makeDir', path),
   pathForFile: (file) => {
     try {
       return webUtils.getPathForFile(file) || null;

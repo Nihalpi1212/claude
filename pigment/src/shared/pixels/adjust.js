@@ -12,36 +12,23 @@
 
 import { clampRect, makeLut, applyLut, clamp255 } from './core.js';
 import { hslToRgb, parseColor } from './color.js';
+import { num, clampNum, round8, lumaInt, srgbToLinear, linearToSrgb, merge, freezeDeep, region, applyLuts, lutKind, pixelKind, mergeTables } from './adjust-def.js';
+import { ADJUSTMENTS_MORE } from './adjust-more.js';
 
 /** @typedef {import('./core.js').ImageDataLike} ImageDataLike */
 /** @typedef {import('./core.js').Rect} Rect */
 /**
  * @typedef {'brightness-contrast'|'levels'|'curves'|'exposure'|'vibrance'|'hue-saturation'|
  *   'color-balance'|'black-white'|'photo-filter'|'channel-mixer'|'invert'|'posterize'|'threshold'|
- *   'gradient-map'|'selective-color'|'desaturate'|'equalize'|'shadows-highlights'} AdjustmentKind
+ *   'gradient-map'|'selective-color'|'desaturate'|'equalize'|'shadows-highlights'|'color-lookup'|'hdr-toning'|'match-color'|'replace-color'} AdjustmentKind
  */
 /** @typedef {[Uint8ClampedArray, Uint8ClampedArray, Uint8ClampedArray]} LutTriple */
 
 // ---------------------------------------------------------------------------------------------
 // Small helpers (module private)
 
-const srgbToLinear = (c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
-const linearToSrgb = (c) => (c <= 0.0031308 ? 12.92 * c : 1.055 * c ** (1 / 2.4) - 0.055);
-
-/** Finite number or fallback. */
-const num = (v, fallback) => (typeof v === 'number' && Number.isFinite(v) ? v : fallback);
-const clampNum = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
-/** Rounds half up into 0..255 (Uint8ClampedArray assignment would round half to even). */
-const round8 = (v) => (v <= 0 ? 0 : v >= 255 ? 255 : (v + 0.5) | 0);
-/** Integer Rec. 601 luma of 8-bit channels. */
-const lumaInt = (r, g, b) => (0.299 * r + 0.587 * g + 0.114 * b + 0.5) | 0;
-
-/** Shallow merge that ignores undefined values in params (so `{ hue: undefined }` keeps the default). */
-function merge(defaults, params) {
-  const out = { ...defaults };
-  if (params) for (const k in params) if (params[k] !== undefined) out[k] = params[k];
-  return out;
-}
+// num, clampNum, round8, lumaInt, srgbToLinear, linearToSrgb, merge, freezeDeep, region, applyLuts, lutKind and
+// pixelKind come from adjust-def.js (shared with adjust-more.js)
 
 /** [a, b, c] of finite numbers from an array-like, else the fallback. */
 function vec3(v, fallback = [0, 0, 0]) {
@@ -49,26 +36,6 @@ function vec3(v, fallback = [0, 0, 0]) {
   return [num(v[0], fallback[0]), num(v[1], fallback[1]), num(v[2], fallback[2])];
 }
 
-const region = (img, rect) => clampRect(rect, img.width, img.height);
-
-/**
- * Applies per-channel LUTs to RGB inside rect with plain loops (core.js applyLut walks a rect
- * through a per-pixel callback); alpha is never touched.
- */
-function applyLuts(img, lr, lg, lb, rect) {
-  if (!rect) return applyLut(img, lr, lg, lb);
-  const r = region(img, rect);
-  if (!r.width) return img;
-  const d = img.data, w = img.width;
-  for (let y = r.y, ye = r.y + r.height; y < ye; y++) {
-    for (let i = (y * w + r.x) * 4, e = i + r.width * 4; i < e; i += 4) {
-      d[i] = lr[d[i]];
-      d[i + 1] = lg[d[i + 1]];
-      d[i + 2] = lb[d[i + 2]];
-    }
-  }
-  return img;
-}
 
 // Scratch outputs of the allocation-free HSL -> RGB conversion used in per-pixel loops (same maths
 // as color.js hslToRgb, which allocates a result array and is used here only to build tables).
@@ -838,38 +805,6 @@ function shadowsHighlights(img, p, rect) {
 // ---------------------------------------------------------------------------------------------
 // The registry
 
-/** Builds a LUT kind: apply() is applyLut over lut(params). */
-function lutKind(name, defaults, build) {
-  const lut = (params) => build(merge(defaults, params));
-  return Object.freeze({
-    name,
-    defaults,
-    lut,
-    apply(img, params, rect = null) {
-      const [lr, lg, lb] = lut(params);
-      return applyLuts(img, lr, lg, lb, rect);
-    },
-  });
-}
-
-/** Builds a per-pixel kind. */
-function pixelKind(name, defaults, fn) {
-  return Object.freeze({
-    name,
-    defaults,
-    apply(img, params, rect = null) {
-      return fn(img, merge(defaults, params), rect);
-    },
-  });
-}
-
-const freezeDeep = (o) => {
-  if (o && typeof o === 'object') {
-    for (const k of Object.keys(o)) freezeDeep(o[k]);
-    Object.freeze(o);
-  }
-  return o;
-};
 
 /**
  * Every adjustment kind, keyed by its id: { name, defaults, apply(img, params, rect?), lut?(params) }.
@@ -907,7 +842,7 @@ const freezeDeep = (o) => {
  * gradient-map, black-white, desaturate and equalize change the image by definition.
  * @type {Readonly<Record<AdjustmentKind, { name: string, defaults: object, apply: (img: ImageDataLike, params?: object, rect?: Rect | null) => ImageDataLike, lut?: (params?: object) => LutTriple }>>}
  */
-export const ADJUSTMENTS = Object.freeze({
+const BUILTIN_ADJUSTMENTS = Object.freeze({
   'brightness-contrast': lutKind('Brightness/Contrast', freezeDeep({ brightness: 0, contrast: 0, legacy: false }), (p) => {
     const l = brightnessContrastLut(p);
     return [l, l, l];
@@ -949,7 +884,14 @@ export const ADJUSTMENTS = Object.freeze({
   'shadows-highlights': pixelKind('Shadows/Highlights', freezeDeep({ shadows: 0, highlights: 0, radius: 30 }), shadowsHighlights),
 });
 
-/** Every kind id, in menu order. @type {readonly AdjustmentKind[]} */
+/**
+ * The registry: the built-in kinds above merged with adjust-more.js (Color Lookup, HDR Toning, Match Color,
+ * Replace Color). Entries may carry pure metadata read by the renderer: fields (dialog field specs), layer
+ * (offered as an adjustment layer), placeholder (not implemented yet), smart (false: no smart filter).
+ */
+export const ADJUSTMENTS = mergeTables(BUILTIN_ADJUSTMENTS, ADJUSTMENTS_MORE);
+
+/** Every kind id (registry order). @type {readonly string[]} */
 export const ADJUSTMENT_KINDS = Object.freeze(Object.keys(ADJUSTMENTS));
 
 /**

@@ -48,6 +48,20 @@ const MODULES = [
   'lib/ai/features.js',
   'lib/ai/assistant.js',
   'lib/panels/assistant.js',
+  // 0.3 feature modules (stubs until their builders land; see ARCHITECTURE.md "0.3 features (contracts)")
+  'lib/modes.js',
+  'lib/depth.js',
+  'lib/adjust-more-ui.js',
+  'lib/filter-gallery.js',
+  'lib/blur-gallery-ui.js',
+  'lib/lens-correction.js',
+  'lib/content-aware-scale.js',
+  'lib/select-mask.js',
+  'lib/layers-extras.js',
+  'lib/align-blend.js',
+  'lib/automate.js',
+  'lib/actions.js',
+  'lib/panels/actions.js',
   'lib/panels/color.js',
   'lib/panels/swatches.js',
   'lib/panels/brushes.js',
@@ -72,8 +86,15 @@ export class App extends EventTarget {
     this.commands = new CommandRegistry(this);
     this.dialogs = new Dialogs(this);
     this.statusbar = new Statusbar();
-    this.ui = { editingMask: false, showMaskOverlay: false };
+    this.ui = { editingMask: false, showMaskOverlay: false, isolated: false };
     this.uiState = {};
+    this.stubbed = []; // command ids whose module has not landed (lib/stub.js); the menu greys them out
+    // hooks 0.3 modules install: colorConstraint(hex, doc) -> hex (image modes snap picked colours),
+    // pixelConstraint(doc, img, layer) -> img (modes snap edited pixels, see adjust-ui.js beginPixelEdit),
+    // isBackgroundLayer(layer) -> boolean (Layer > New > Background from Layer)
+    this.colorConstraint = null;
+    this.pixelConstraint = null;
+    this.isBackgroundLayer = null;
     this.saveTimer = null;
     this.pendingSettings = {};
   }
@@ -189,6 +210,14 @@ export class App extends EventTarget {
       textOrientation: d?.active?.type === 'text' ? d.active.font?.orientation ?? 'horizontal' : null,
       proofColors: !!this.settings.proofColors,
       gamutWarning: !!this.settings.gamutWarning,
+      // 0.3: image mode and depth (Image > Mode radios), isolation, background layer label, stack mode, gallery groups in the menu
+      mode: d?.mode ?? 'rgb',
+      depth: d?.depth ?? 8,
+      isolated: !!this.ui.isolated,
+      backgroundLayer: !!(d?.active && this.isBackgroundLayer?.(d.active)),
+      stackMode: d?.active?.stackMode ?? 'none',
+      showGalleryInMenu: !!this.settings.showGalleryInMenu,
+      stubs: this.stubbed.join(','),
     };
     const changed = Object.keys(state).some((k) => this.uiState[k] !== state[k]);
     if (!changed) return;
@@ -202,6 +231,8 @@ export class App extends EventTarget {
     const patch = {};
     if (foreground) patch.foreground = rgbaToHex(parseColor(foreground));
     if (background) patch.background = rgbaToHex(parseColor(background));
+    // image modes (lib/modes.js): grayscale, bitmap and indexed documents only paint colours they can hold
+    if (this.colorConstraint) for (const k of ['foreground', 'background']) if (patch[k]) patch[k] = this.colorConstraint(patch[k], this.doc) ?? patch[k];
     this.saveSettingsSoon(patch);
     this.emit('color:changed', { fg: this.settings.foreground, bg: this.settings.background });
   }

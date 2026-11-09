@@ -10,7 +10,7 @@ const EDGE = { key: 'edge', label: 'Undefined areas', type: 'select', options: [
 const SEED = { key: 'seed', label: 'Seed', type: 'number', min: 0, max: 99999 };
 const CENTER = [S('center.x', 'Center X', 0, 1, 0.01), S('center.y', 'Center Y', 0, 1, 0.01)];
 
-/** Field specs per filter kind (keys are parameter paths). Kinds without an entry apply directly. */
+/** Field specs per filter kind (keys are parameter paths). Kinds without an entry here, a registered table or `fields` metadata apply directly. */
 const FIELDS = {
   'gaussian-blur': [S('radius', 'Radius', 0.1, 250, 0.1, { unit: 'px' })],
   'box-blur': [S('radius', 'Radius', 1, 500, 1, { unit: 'px' })],
@@ -54,8 +54,19 @@ const FIELDS = {
   ],
 };
 
+/**
+ * Custom openers and extra field tables registered by 0.3 modules (app.filterEditor.register): blur gallery pins,
+ * the Filter Gallery dialog, Lens Correction. { fields?, margin?, open?(kind, { params, def, ctx }) -> Promise<params|null> }
+ */
+const REGISTERED = new Map();
+/** Dialog fields of a kind: the table above, a registered table, or the kind's own `fields` metadata. */
+export const fieldsFor = (kind) => FIELDS[kind] ?? REGISTERED.get(kind)?.fields ?? FILTERS[kind]?.fields ?? [];
+
 /** Neighbourhood size a filter reads around each pixel (so the selection edge blends). */
 function marginFor(kind, p) {
+  const own = REGISTERED.get(kind)?.margin ?? FILTERS[kind]?.margin;
+  if (typeof own === 'function') return Math.max(0, Math.ceil(own(p) || 0));
+  if (typeof own === 'number') return Math.max(0, Math.ceil(own));
   const r = Number(p.radius ?? p.distance ?? p.size ?? 0) || 0;
   if (['twirl', 'pinch', 'spherize', 'polar', 'shear', 'lens-flare', 'vignette', 'clouds', 'difference-clouds', 'offset', 'radial-blur'].includes(kind)) return 0;
   if (kind === 'gaussian-blur' || kind === 'unsharp-mask' || kind === 'high-pass' || kind === 'smart-sharpen') return Math.ceil(r * 3);
@@ -80,7 +91,7 @@ function toRun(kind, params) {
 }
 
 function filterEditor(kind, params, onChange) {
-  const fields = FIELDS[kind] ?? [];
+  const fields = fieldsFor(kind);
   const values = {};
   for (const f of fields) {
     if (!f.key) continue;
@@ -109,25 +120,45 @@ export function install(app) {
   const has = () => !!app.doc?.active;
   const saved = () => (app.settings.filterParams ??= {});
 
-  async function run(kind, arg, { dialog = true } = {}) {
+  async function run(kind, arg, { dialog = true, ctx = null } = {}) {
     const def = FILTERS[kind];
     if (!def) return;
+    if (def.placeholder) {
+      ctx?.cancel();
+      return app.dialogs.toast(`${def.name} is not available yet`, { kind: 'error' });
+    }
     app.tools.active?.commit?.();
     const d = app.doc;
-    if (!d) return;
+    if (!d) return ctx?.cancel();
     const direct = arg && typeof arg === 'object' ? arg : null;
     // smart objects (lib/smart-object.js): a filter on a smart layer becomes a smart filter, not a pixel edit
-    if (app.smartFilters?.intercept(d.active, kind, direct, def.name)) return;
-    const hasFields = !!FIELDS[kind]?.length;
+    if (def.smart !== false && app.smartFilters?.intercept(d.active, kind, direct, def.name)) return;
+    const custom = REGISTERED.get(kind)?.open;
+    if (def.ui === 'custom' && !direct && dialog) {
+      // kinds with an on-canvas session (blur gallery, Filter Gallery, Lens Correction) open their own UI
+      if (!custom) {
+        ctx?.cancel();
+        return app.dialogs.toast(`${def.name} is not available yet`, { kind: 'error' });
+      }
+      const used = await custom(kind, { params: paramsFor(app, kind, saved()[kind]), def, ctx });
+      if (used) {
+        saved()[kind] = used;
+        remember(kind, used);
+        ctx?.setReplayArg(clone(used));
+      } else ctx?.cancel();
+      return;
+    }
+    const hasFields = fieldsFor(kind).length > 0 && !def.direct;
     if (direct || !hasFields || !dialog) {
       const params = direct ?? paramsFor(app, kind, saved()[kind]);
       const session = beginPixelEdit(app, { label: def.name, margin: marginFor(kind, params) });
-      if (!session) return;
+      if (!session) return ctx?.cancel();
       try {
         const img = await app.busy(`${def.name}…`, async () => processed(session, (x) => applyFilter(x, kind, toRun(kind, params))));
-        session.commit(def.name, img);
+        session.commit(def.name, img, { filter: { kind, params: clone(toRun(kind, params)) } });
       } catch (err) {
         session.cancel();
+        ctx?.cancel();
         return app.reportError(err, `${def.name} failed`);
       }
       remember(kind, params);
@@ -141,11 +172,13 @@ export function install(app) {
       editor: (onChange) => filterEditor(kind, start, onChange),
       run: (img, params) => applyFilter(img, kind, toRun(kind, params)),
       width: kind === 'custom' ? 360 : 440,
+      meta: (params) => ({ filter: { kind, params: clone(toRun(kind, params)) } }),
     });
     if (used) {
       saved()[kind] = used;
       remember(kind, used);
-    }
+      ctx?.setReplayArg(clone(used));
+    } else ctx?.cancel();
   }
 
   function remember(kind, params) {
@@ -157,7 +190,7 @@ export function install(app) {
   }
 
   const cmds = {
-    'filter:apply': { enabled: has, run: (arg) => (typeof arg === 'string' ? run(arg) : arg?.kind ? run(arg.kind, arg.params ?? null) : null) },
+    'filter:apply': { enabled: has, run: (arg, ctx) => (typeof arg === 'string' ? run(arg, undefined, { ctx }) : arg?.kind ? run(arg.kind, arg.params ?? null, { ctx }) : null), dialog: true },
     'filter:last': {
       enabled: () => has() && !!app.settings.lastFilter?.kind,
       label: () => (app.settings.lastFilter?.name ? `Last Filter: ${app.settings.lastFilter.name}` : 'Last Filter'),
@@ -174,11 +207,25 @@ export function install(app) {
       },
     },
   };
-  for (const k of FILTER_KINDS) cmds[`filter:${k}`] = { enabled: has, run: (arg) => run(k, arg && typeof arg === 'object' ? arg : null), label: `${FILTERS[k].name}${FIELDS[k]?.length ? '…' : ''}` };
+  const dialogKind = (k) => !FILTERS[k].direct && (FILTERS[k].ui === 'custom' || fieldsFor(k).length > 0);
+  for (const k of FILTER_KINDS) cmds[`filter:${k}`] = { enabled: () => has() && !FILTERS[k].placeholder, run: (arg, ctx) => run(k, arg && typeof arg === 'object' ? arg : null, { ctx }), label: () => `${FILTERS[k].name}${dialogKind(k) ? '…' : ''}`, dialog: dialogKind(k) };
   app.commands.registerAll(cmds);
   app.filterCategories = FILTER_CATEGORIES;
   // smart objects (lib/smart-object.js) re-use the filter dialogs' editors for smart filters
   /** [min, max] per numeric field of a kind (what the dialog's sliders allow), for callers that clamp model-supplied params. */
-  const ranges = (kind) => Object.fromEntries((FIELDS[kind] ?? []).filter((f) => typeof f.min === 'number' && typeof f.max === 'number').map((f) => [f.key, [f.min, f.max]]));
-  app.filterEditor = { editor: (kind, params, onChange) => filterEditor(kind, params, onChange), defaults: (kind) => paramsFor(app, kind, saved()[kind]), hasFields: (kind) => !!FIELDS[kind]?.length, toRun, ranges };
+  const ranges = (kind) => Object.fromEntries(fieldsFor(kind).filter((f) => typeof f.min === 'number' && typeof f.max === 'number').map((f) => [f.key, [f.min, f.max]]));
+  app.filterEditor = {
+    editor: (kind, params, onChange) => filterEditor(kind, params, onChange),
+    defaults: (kind) => paramsFor(app, kind, saved()[kind]),
+    hasFields: (kind) => fieldsFor(kind).length > 0,
+    fields: fieldsFor,
+    toRun,
+    ranges,
+    /** 0.3 modules register field tables, margins and custom openers for their kinds (see REGISTERED). */
+    register: (kind, def) => REGISTERED.set(kind, { ...(REGISTERED.get(kind) ?? {}), ...def }),
+    /** Runs a kind directly with params (what the custom openers call after their own session committed is not needed: they commit themselves). */
+    run: (kind, params, opts) => run(kind, params, opts),
+    remember,
+    marginFor,
+  };
 }

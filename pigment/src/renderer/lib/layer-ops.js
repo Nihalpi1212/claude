@@ -118,6 +118,7 @@ export function cloneLayer(layer, { name } = {}) {
   switch (layer.type) {
     case 'raster':
       copy = new RasterLayer({ ...props, canvas: copyCanvas(layer.canvas), x: layer.x, y: layer.y });
+      if (layer.deep) copy.deep = { type: layer.deep.type, data: layer.deep.data.slice() }; // 16/32-bit pixels (lib/depth.js)
       break;
     case 'group':
       copy = new GroupLayer({ ...props, expanded: layer.expanded });

@@ -139,6 +139,24 @@ function createBrowserBridge() {
       if (path.startsWith('download:/')) download(path.slice('download:/'.length), bytes);
       else test.files[path] = bytes;
     },
+    /** Folders are synthetic in the browser: every stored file whose path starts with `${dir}/` is listed (one level). */
+    async listDir(dir) {
+      const prefix = dir.endsWith('/') ? dir : `${dir}/`;
+      const seen = new Map();
+      for (const path of Object.keys({ ...test.files, ...test.written })) {
+        if (!path.startsWith(prefix)) continue;
+        const rest = path.slice(prefix.length);
+        const slash = rest.indexOf('/');
+        const name = slash >= 0 ? rest.slice(0, slash) : rest;
+        if (!name || seen.has(name)) continue;
+        const bytes = slash >= 0 ? null : test.files[path] ?? test.written[path];
+        seen.set(name, { name, path: prefix + name, isDir: slash >= 0, size: bytes?.byteLength ?? 0, mtimeMs: Date.now() });
+      }
+      return [...seen.values()].sort((a, b) => (a.isDir === b.isDir ? a.name.localeCompare(b.name, undefined, { numeric: true }) : a.isDir ? -1 : 1));
+    },
+    async makeDir(path) {
+      return path;
+    },
     async pathInfo(path) {
       const name = path.split(/[\\/]/).pop();
       const bytes = test.files[path] ?? test.written[path];

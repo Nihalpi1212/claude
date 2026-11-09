@@ -18,8 +18,18 @@ export const ADJUSTMENT_ICONS = {
   equalize: 'adjust', 'shadows-highlights': 'adjust',
 };
 
-/** Kinds that make sense as adjustment layers (Photoshop's list). */
-export const LAYER_KINDS = ['brightness-contrast', 'levels', 'curves', 'exposure', 'vibrance', 'hue-saturation', 'color-balance', 'black-white', 'photo-filter', 'channel-mixer', 'invert', 'posterize', 'threshold', 'gradient-map', 'selective-color'];
+/** Kinds that make sense as adjustment layers (Photoshop's list), plus registry kinds flagged `layer: true` once implemented (Color Lookup). */
+const BASE_LAYER_KINDS = ['brightness-contrast', 'levels', 'curves', 'exposure', 'vibrance', 'hue-saturation', 'color-balance', 'black-white', 'photo-filter', 'channel-mixer', 'invert', 'posterize', 'threshold', 'gradient-map', 'selective-color'];
+export const LAYER_KINDS = [...BASE_LAYER_KINDS, ...ADJUSTMENT_KINDS.filter((k) => ADJUSTMENTS[k].layer && !ADJUSTMENTS[k].placeholder && !BASE_LAYER_KINDS.includes(k))];
+// Color Lookup sits after Channel Mixer in Photoshop's lists
+if (LAYER_KINDS.includes('color-lookup')) LAYER_KINDS.splice(LAYER_KINDS.indexOf('channel-mixer') + 1, 0, ...LAYER_KINDS.splice(LAYER_KINDS.indexOf('color-lookup'), 1));
+
+/**
+ * Custom adjustment editors (0.3): lib/adjust-more-ui.js registers { editor(kind, params, onChange, { source }) ->
+ * { element }, width?, start?(app) -> params } for kinds whose dialog is more than a list of fields (Color Lookup,
+ * HDR Toning, Match Color, Replace Color). buildAdjustmentEditor() and the Image > Adjustments dialogs consult it.
+ */
+export const ADJUST_EDITORS = new Map();
 /** Destructive-only kinds (no adjustment layer). */
 const DIRECT_ONLY = ['desaturate', 'equalize', 'shadows-highlights'];
 const NO_PARAMS = new Set(['invert', 'desaturate', 'equalize']);
@@ -128,7 +138,8 @@ function fieldSpecs(kind, params) {
     case 'shadows-highlights':
       return [S('shadows', 'Shadows amount', 0, 100), S('highlights', 'Highlights amount', 0, 100), S('radius', 'Tonal width (radius)', 0, 250)];
     default:
-      return [];
+      // registry kinds may declare their dialog fields as data (adjust-def.js `fields`)
+      return ADJUSTMENTS[kind]?.fields ? clone(ADJUSTMENTS[kind].fields) : [];
   }
 }
 
@@ -477,6 +488,8 @@ function curvesEditor(params, onChange, source) {
  */
 export function buildAdjustmentEditor(kind, params, onChange, { source = null } = {}) {
   const base = { ...clone(ADJUSTMENTS[kind]?.defaults ?? {}), ...clone(params ?? {}) };
+  const custom = ADJUST_EDITORS.get(kind);
+  if (custom?.editor) return custom.editor(kind, base, onChange, { source });
   if (kind === 'levels') return levelsEditor(base, onChange, source);
   if (kind === 'curves') return curvesEditor(base, onChange, source);
   const fields = fieldSpecs(kind, base);
@@ -585,6 +598,8 @@ export function beginPixelEdit(app, { quiet = false, label = 'Edit', margin = 0 
     rect: docRect,
     local,
     show(img) {
+      // image modes (lib/modes.js) snap edited colours to the mode: grey, black/white or the colour table
+      if (!isMask && app.pixelConstraint) img = app.pixelConstraint(d, img, t.layer) ?? img;
       ctx.putImageData(compose(img), local.x, local.y);
       shown = true;
       t.layer.touch();
@@ -600,8 +615,12 @@ export function beginPixelEdit(app, { quiet = false, label = 'Edit', margin = 0 
     cancel() {
       session.restore();
     },
-    /** Records the current (shown) state as one undo entry; img (optional) is applied first. */
-    commit(entryLabel = label, img = null) {
+    /**
+     * Records the current (shown) state as one undo entry; img (optional) is applied first. `meta` describes
+     * the edit for listeners of 'pixels:committed' ({ adjustment: { kind, params } } or { filter: { kind, params } }),
+     * which lib/depth.js uses to redo the edit on 16/32-bit pixels instead of taking the 8-bit result.
+     */
+    commit(entryLabel = label, img = null, meta = {}) {
       if (img) session.show(img);
       if (!shown) return null;
       const after = ctx.getImageData(local.x, local.y, local.width, local.height);
@@ -615,6 +634,7 @@ export function beginPixelEdit(app, { quiet = false, label = 'Edit', margin = 0 
       d.changed('history');
       app.lastPixelEdit = { doc: d, entry, label: entryLabel, canvas, local, original, after, layer: t.layer, isMask };
       app.commands.invalidate();
+      app.emit('pixels:committed', { doc: d, layer: t.layer, rect: docRect, local, isMask, original, after, entry, meta: meta ?? {} });
       return after;
     },
   };
@@ -632,7 +652,7 @@ export function processed(session, fn) {
  * Generic dialog driving a pixel edit: editor(onChange) -> { element }, run(img, params) edits img in place.
  * Resolves with the params (committed) or null.
  */
-export async function pixelEditDialog(app, { title, label = title, params, editor, run, width = 420, extraButtons, margin = 0 }) {
+export async function pixelEditDialog(app, { title, label = title, params, editor, run, width = 420, extraButtons, margin = 0, meta = null }) {
   const session = beginPixelEdit(app, { label, margin });
   if (!session) return null;
   let current = params;
@@ -682,7 +702,7 @@ export async function pixelEditDialog(app, { title, label = title, params, edito
   }
   try {
     const img = await app.busy(`${title}…`, async () => processed(session, (x) => run(x, current)));
-    session.commit(label, img);
+    session.commit(label, img, typeof meta === 'function' ? meta(current) : meta ?? {});
   } catch (err) {
     session.cancel();
     app.reportError(err, `${title} failed`);
@@ -697,39 +717,50 @@ export function install(app) {
   const has = () => !!app.doc?.active;
   app.adjustments = Object.fromEntries(ADJUSTMENT_KINDS.map((k) => [k, { name: ADJUSTMENTS[k].name, defaults: startParams(k) }]));
   app.buildAdjustmentEditor = buildAdjustmentEditor;
+  /** 0.3 modules register custom editors here (see ADJUST_EDITORS). */
+  app.adjustEditors = { register: (kind, def) => ADJUST_EDITORS.set(kind, def), get: (kind) => ADJUST_EDITORS.get(kind) ?? null };
   app.beginPixelEdit = (opts) => beginPixelEdit(app, opts);
   app.pixelEditDialog = (opts) => pixelEditDialog(app, opts);
 
   const lastParams = () => (app.settings.adjustLast ??= {});
 
-  async function adjust(kind, arg) {
+  async function adjust(kind, arg, ctx = null) {
     const def = ADJUSTMENTS[kind];
     if (!def) return;
+    if (def.placeholder) {
+      ctx?.cancel();
+      return app.dialogs.toast(`${def.name} is not available yet`, { kind: 'error' });
+    }
     const d = app.doc;
     // smart objects (lib/smart-object.js): an adjustment on a smart layer becomes a smart filter, not a pixel edit
-    if (app.smartFilters?.intercept(d?.active, `adjust:${kind}`, arg && typeof arg === 'object' ? arg : null, def.name)) return;
+    if (def.smart !== false && app.smartFilters?.intercept(d?.active, `adjust:${kind}`, arg && typeof arg === 'object' ? arg : null, def.name)) return;
     if (d?.active?.type === 'adjustment' && !app.ui.editingMask) {
+      ctx?.cancel();
       return app.dialogs.toast('Select a pixel layer (or add an adjustment layer from the Layers panel)', { kind: 'error' });
     }
     if (NO_PARAMS.has(kind) || (arg && typeof arg === 'object')) {
       const session = beginPixelEdit(app, { label: def.name });
-      if (!session) return;
-      const img = processed(session, (x) => applyAdjustment(x, kind, arg && typeof arg === 'object' ? arg : {}));
-      session.commit(def.name, img);
+      if (!session) return ctx?.cancel();
+      const params = arg && typeof arg === 'object' ? arg : {};
+      const img = processed(session, (x) => applyAdjustment(x, kind, params));
+      session.commit(def.name, img, { adjustment: { kind, params: clone(params) } });
       return;
     }
-    const start = clone(lastParams()[kind] ?? startParams(kind));
+    const custom = ADJUST_EDITORS.get(kind);
+    const start = clone(lastParams()[kind] ?? (custom?.start ? custom.start(app) : null) ?? startParams(kind));
     const used = await pixelEditDialog(app, {
       title: def.name,
       params: start,
-      width: kind === 'curves' ? 320 : 420,
+      width: custom?.width ?? (kind === 'curves' ? 320 : 420),
       editor: (onChange, session) => buildAdjustmentEditor(kind, start, onChange, { source: session.base }),
       run: (img, params) => applyAdjustment(img, kind, params),
+      meta: (params) => ({ adjustment: { kind, params: clone(params) } }),
     });
     if (used) {
       lastParams()[kind] = used;
       app.saveSettingsSoon();
-    }
+      ctx?.setReplayArg(clone(used));
+    } else ctx?.cancel();
   }
 
   function auto(kind) {
@@ -940,7 +971,7 @@ export function install(app) {
   ];
 
   const cmds = {
-    'image:adjust': { enabled: has, run: (kind) => adjust(kind) },
+    'image:adjust': { enabled: has, run: (kind, ctx) => adjust(kind, undefined, ctx), dialog: true },
     'image:auto-tone': { enabled: has, run: () => auto('tone'), label: 'Auto Tone' },
     'image:auto-contrast': { enabled: has, run: () => auto('contrast'), label: 'Auto Contrast' },
     'image:auto-color': { enabled: has, run: () => auto('color'), label: 'Auto Color' },
@@ -948,7 +979,7 @@ export function install(app) {
     'layer:edit-adjustment': { enabled: () => app.doc?.active?.type === 'adjustment', run: editAdjustmentLayer },
     'layer:edit-fill': { enabled: () => app.doc?.active?.type === 'fill', run: editFillLayer },
   };
-  for (const k of ADJUSTMENT_KINDS) cmds[`image:adjust-${k}`] = { enabled: has, run: (arg) => adjust(k, arg), label: `${ADJUSTMENTS[k].name}${NO_PARAMS.has(k) ? '' : '…'}` };
+  for (const k of ADJUSTMENT_KINDS) cmds[`image:adjust-${k}`] = { enabled: () => has() && !ADJUSTMENTS[k].placeholder, run: (arg, ctx) => adjust(k, arg, ctx), label: `${ADJUSTMENTS[k].name}${NO_PARAMS.has(k) ? '' : '…'}`, dialog: !NO_PARAMS.has(k) };
   app.commands.registerAll(cmds);
   void DIRECT_ONLY;
   void levelsLut;

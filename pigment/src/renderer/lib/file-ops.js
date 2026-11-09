@@ -7,6 +7,11 @@ import { renderLayersFlat } from './layer-ops.js';
 
 const formatSize = (n) => (n > 1048576 ? `${(n / 1048576).toFixed(2)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
 
+/** [id, name] of every flat (non-layered) export format, built-ins first and registered ones after. */
+const exportFormatOptions = () => Object.entries(SAVE_FORMATS).filter(([, info]) => !info.layered).map(([id, info]) => [id, info.name.replace(/ image$/, '')]);
+
+const MODE_NAMES = { rgb: 'RGB Color', grayscale: 'Grayscale', bitmap: 'Bitmap', duotone: 'Duotone', indexed: 'Indexed Color', cmyk: 'CMYK Color', lab: 'Lab Color', multichannel: 'Multichannel' };
+
 export function install(app) {
   const has = () => !!app.doc;
 
@@ -28,12 +33,23 @@ export function install(app) {
           if (mine === token) sizeInfo.textContent = err.message;
         }
       }, 250);
-      const toExport = (v) => ({ format: v.format, quality: v.quality / 100, width: v.width, height: v.height, background: v.background === 'transparent' || (v.background === 'auto' && v.format !== 'jpeg') ? null : v.background === 'auto' ? '#ffffff' : v.color });
+      // formats registered by 0.3 modules (GIF, PNG-8, 16-bit PNG, TIFF ...) bring their own option fields, shown for their format only
+      const extraFields = Object.entries(SAVE_FORMATS).flatMap(([id, info]) => (info.options ?? []).map((f) => ({ ...f, when: (v) => v.format === id && (!f.when || f.when(v)) })));
+      const extraKeys = new Set(extraFields.map((f) => f.key));
+      const toExport = (v) => ({
+        format: v.format,
+        quality: v.quality / 100,
+        width: v.width,
+        height: v.height,
+        background: v.background === 'transparent' || (v.background === 'auto' && !SAVE_FORMATS[v.format]?.opaque && v.format !== 'jpeg') ? null : v.background === 'auto' ? '#ffffff' : v.color,
+        ...Object.fromEntries([...extraKeys].filter((k) => (SAVE_FORMATS[v.format]?.options ?? []).some((f) => f.key === k)).map((k) => [k, v[k]])),
+      });
       const values = await formDialog(app, {
         title: 'Export As',
         fields: [
-          { key: 'format', label: 'Format', type: 'select', value: last.format ?? 'png', options: [['png', 'PNG'], ['jpeg', 'JPEG'], ['webp', 'WebP']] },
-          { key: 'quality', label: 'Quality', type: 'slider', value: Math.round((last.quality ?? 0.9) * 100), min: 1, max: 100, unit: '%', when: (v) => v.format !== 'png' },
+          { key: 'format', label: 'Format', type: 'select', value: SAVE_FORMATS[last.format] && !SAVE_FORMATS[last.format].layered ? last.format : 'png', options: exportFormatOptions() },
+          { key: 'quality', label: 'Quality', type: 'slider', value: Math.round((last.quality ?? 0.9) * 100), min: 1, max: 100, unit: '%', when: (v) => !!SAVE_FORMATS[v.format]?.lossy },
+          ...extraFields,
           { key: 'width', label: 'Width', type: 'number', value: d.width, min: 1, max: 30000, unit: 'px' },
           { key: 'height', label: 'Height', type: 'number', value: d.height, min: 1, max: 30000, unit: 'px' },
           { key: 'scale', label: 'Scale', type: 'select', value: 1, options: [[0.25, '25%'], [0.5, '50%'], [1, '100%'], [2, '200%'], [3, '300%']] },
@@ -95,7 +111,7 @@ export function install(app) {
       title: 'Export Layers to Files',
       intro: 'Each top-level layer or group is exported as its own image, named after the layer.',
       fields: [
-        { key: 'format', label: 'Format', type: 'select', value: 'png', options: [['png', 'PNG'], ['jpeg', 'JPEG'], ['webp', 'WebP']] },
+        { key: 'format', label: 'Format', type: 'select', value: 'png', options: exportFormatOptions() },
         { key: 'visibleOnly', label: 'Visible layers only', type: 'checkbox', value: true },
         { key: 'trim', label: 'Trim to layer content', type: 'checkbox', value: false },
         { key: 'prefix', label: 'File name prefix', type: 'text', value: `${baseName(d.name)}_` },
@@ -145,6 +161,7 @@ export function install(app) {
       title: 'Document Properties',
       intro: [
         `${d.width} × ${d.height} px at ${d.dpi} ppi (${((d.width / d.dpi) * 2.54).toFixed(1)} × ${((d.height / d.dpi) * 2.54).toFixed(1)} cm)`,
+        `${MODE_NAMES[d.mode] ?? d.mode ?? 'RGB'}, ${d.mode === 'bitmap' ? 1 : d.depth ?? 8} bit${d.mode === 'bitmap' ? '' : 's/channel'}`,
         `${layers.length} layer${layers.length === 1 ? '' : 's'}, about ${formatSize(bytes)} of pixels in memory`,
         d.path ? d.path : 'Not saved yet',
       ].join(' · '),

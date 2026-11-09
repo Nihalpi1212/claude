@@ -63,7 +63,9 @@ function px(rgba, kind, params = {}) {
 const lumaOf = (p) => luminance(p[0], p[1], p[2]);
 
 test('ADJUSTMENTS lists every kind of the contract with name, defaults and apply', () => {
-  assert.deepEqual([...ADJUSTMENT_KINDS].sort(), [...EXPECTED_KINDS].sort());
+  // 0.3 merges adjust-more.js (Color Lookup, HDR Toning, Match Color, Replace Color) into the registry; the 0.1 kinds stay
+  for (const k of EXPECTED_KINDS) assert.ok(ADJUSTMENT_KINDS.includes(k), k);
+  for (const k of ['color-lookup', 'hdr-toning', 'match-color', 'replace-color']) assert.ok(ADJUSTMENT_KINDS.includes(k), k);
   for (const kind of EXPECTED_KINDS) {
     const def = ADJUSTMENTS[kind];
     assert.equal(typeof def.name, 'string', kind);

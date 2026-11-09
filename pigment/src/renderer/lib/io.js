@@ -17,14 +17,56 @@ export const OPEN_FILTERS = [
   { name: 'All files', extensions: ['*'] },
 ];
 export const SAVE_FORMATS = {
-  pigment: { name: 'Pigment document', ext: 'pigment', layered: true },
-  psd: { name: 'Photoshop document', ext: 'psd', layered: true },
-  png: { name: 'PNG image', ext: 'png', mime: 'image/png' },
-  jpeg: { name: 'JPEG image', ext: 'jpg', mime: 'image/jpeg', lossy: true },
-  webp: { name: 'WebP image', ext: 'webp', mime: 'image/webp', lossy: true },
+  pigment: { name: 'Pigment document', ext: 'pigment', extensions: ['pigment'], layered: true },
+  psd: { name: 'Photoshop document', ext: 'psd', extensions: ['psd'], layered: true },
+  png: { name: 'PNG image', ext: 'png', extensions: ['png'], mime: 'image/png' },
+  jpeg: { name: 'JPEG image', ext: 'jpg', extensions: ['jpg', 'jpeg'], mime: 'image/jpeg', lossy: true },
+  webp: { name: 'WebP image', ext: 'webp', extensions: ['webp'], mime: 'image/webp', lossy: true },
 };
 
 initializeCanvas?.((w, h) => createCanvas(w, h));
+
+// ---- format registries (0.3) --------------------------------------------------------------------------------
+// Modules add readers and writers without editing this file: lib/depth.js (16-bit PNG, TIFF), lib/modes.js
+// (GIF, PNG-8), later RAW and PDF importers. Built-in readers run after the registered ones.
+
+/** @type {{ id: string, name: string, extensions: string[], test?: (bytes: Uint8Array, name: string) => boolean, read: (bytes: Uint8Array, info: { name: string, path: string|null }) => Promise<Document> }[]} */
+export const OPEN_READERS = [];
+
+/**
+ * Registers a document reader. `test(bytes, name)` decides whether the reader takes the file (default: the
+ * extension is one of `extensions`); `read` returns a Document (name/path/format are filled in afterwards).
+ */
+export function registerOpenFormat(def) {
+  if (!def?.id || typeof def.read !== 'function') throw new Error('registerOpenFormat needs an id and read()');
+  const existing = OPEN_READERS.findIndex((r) => r.id === def.id);
+  if (existing >= 0) OPEN_READERS.splice(existing, 1);
+  OPEN_READERS.push(def);
+  for (const ext of def.extensions ?? []) if (!OPEN_EXTENSIONS.includes(ext)) OPEN_EXTENSIONS.push(ext);
+  if (def.name && def.extensions?.length) {
+    const all = OPEN_FILTERS.find((f) => f.name === 'All supported images');
+    if (all) for (const ext of def.extensions) if (!all.extensions.includes(ext)) all.extensions.push(ext);
+    if (!OPEN_FILTERS.some((f) => f.name === def.name)) OPEN_FILTERS.splice(Math.max(1, OPEN_FILTERS.length - 1), 0, { name: def.name, extensions: [...def.extensions] });
+  }
+}
+
+/**
+ * Registers an export/save format: SAVE_FORMATS[id] = { name, ext, extensions?, mime?, lossy?, layered?,
+ * encode(doc, opts, compositor) -> Promise<Uint8Array>, options?: lib/form.js field specs shown in Export As
+ * when the format is chosen (their values arrive in opts) }. encodeForPath() routes by extension.
+ */
+export function registerExportFormat(id, def) {
+  if (!id || typeof def?.encode !== 'function' || !def.ext) throw new Error('registerExportFormat needs an id, ext and encode()');
+  SAVE_FORMATS[id] = { ...def, id, extensions: def.extensions ?? [def.ext] };
+  for (const ext of SAVE_FORMATS[id].extensions) if (!WRITE_EXTENSIONS.includes(ext)) WRITE_EXTENSIONS.push(ext);
+}
+
+/** The export format whose extension matches the path, or null. */
+export function exportFormatForPath(path) {
+  const ext = extOf(path);
+  for (const [id, info] of Object.entries(SAVE_FORMATS)) if ((info.extensions ?? [info.ext]).includes(ext)) return { id, ...info };
+  return null;
+}
 
 export const extOf = (name) => (/\.([a-z0-9]+)$/i.exec(name ?? '')?.[1] ?? '').toLowerCase();
 /** Extensions Pigment can write (anything else is read-only: saving must go through Save As). */
@@ -73,7 +115,10 @@ function sniffType(b) {
 export async function openDocument(bytes, { name = 'Untitled', path = null } = {}) {
   const ext = extOf(name);
   let doc;
-  if (ext === 'pigment' || (bytes[0] === 0x50 && bytes[1] === 0x4b)) doc = await readPigment(bytes);
+  // registered readers (16-bit PNG, TIFF, GIF with a colour table, ...) take precedence over the built-ins
+  const reader = OPEN_READERS.find((r) => (r.test ? r.test(bytes, name) : (r.extensions ?? []).includes(ext)));
+  if (reader) doc = await reader.read(bytes, { name, path });
+  else if (ext === 'pigment' || (bytes[0] === 0x50 && bytes[1] === 0x4b)) doc = await readPigment(bytes);
   else if (ext === 'psd' || ext === 'psb' || (bytes[0] === 0x38 && bytes[1] === 0x42 && bytes[2] === 0x50 && bytes[3] === 0x53)) doc = readPsdDocument(bytes);
   else {
     const canvas = await decodeImage(bytes, name);
@@ -119,6 +164,8 @@ export async function writePigment(doc) {
   markRefs(description.layers);
   for (const layer of layers) {
     if (layer.type === 'raster') entries.push({ name: `layers/${layer.id}.png`, data: await canvasToPng(layer.canvas) });
+    // 16/32-bit pixels (lib/depth.js): raw little-endian samples next to the 8-bit proxy, deflated by the container
+    if (layer.type === 'raster' && layer.deep?.data) entries.push({ name: `layers/${layer.id}.${layer.deep.type}`, data: new Uint8Array(layer.deep.data.buffer, layer.deep.data.byteOffset, layer.deep.data.byteLength), compress: true });
     if (layer.mask?.canvas) entries.push({ name: `masks/${layer.id}.png`, data: await canvasToPng(layer.mask.canvas) });
     if (layer.type === 'fill' && layer.paint?.type === 'pattern' && layer.paint.pattern?.canvas) entries.push({ name: `patterns/${layer.id}.png`, data: await canvasToPng(layer.paint.pattern.canvas) });
     // smart objects (lib/smart-object.js): a document source is a nested .pigment, an image source a PNG
@@ -145,7 +192,9 @@ export async function readPigment(bytes) {
   if (!json) throw new Error('This is not a Pigment document (document.json is missing)');
   const d = JSON.parse(new TextDecoder().decode(json.data));
   if (d.app !== 'pigment') throw new Error('This is not a Pigment document');
-  const doc = new Document({ width: d.width, height: d.height, dpi: d.dpi, name: d.name });
+  const doc = new Document({ width: d.width, height: d.height, dpi: d.dpi, name: d.name, mode: typeof d.mode === 'string' ? d.mode : 'rgb', depth: [8, 16, 32].includes(d.depth) ? d.depth : 8 });
+  if (Array.isArray(d.colorTable)) doc.colorTable = d.colorTable.filter((c) => Array.isArray(c) && c.length >= 3).map((c) => c.slice(0, 3).map((v) => Math.max(0, Math.min(255, Math.round(Number(v) || 0)))));
+  if (d.duotone && Array.isArray(d.duotone.inks)) doc.duotone = JSON.parse(JSON.stringify(d.duotone));
   doc.guides = Array.isArray(d.guides) ? d.guides : [];
   doc.paths = Array.isArray(d.paths) ? d.paths : [];
   doc.meta = d.meta ?? {};
@@ -163,6 +212,15 @@ export async function readPigment(bytes) {
       layer.canvas = canvas ?? createCanvas(desc.width ?? 1, desc.height ?? 1);
       layer.x = desc.x ?? 0;
       layer.y = desc.y ?? 0;
+      if (desc.deep === 'u16' || desc.deep === 'f32') {
+        const e = findEntry(entries, `layers/${desc.id}.${desc.deep}`);
+        const n = layer.canvas.width * layer.canvas.height * 4;
+        const bytes = desc.deep === 'u16' ? 2 : 4;
+        if (e && e.data.byteLength === n * bytes) {
+          const buf = e.data.buffer.slice(e.data.byteOffset, e.data.byteOffset + e.data.byteLength); // aligned copy
+          layer.deep = { type: desc.deep, data: desc.deep === 'u16' ? new Uint16Array(buf) : new Float32Array(buf) };
+        }
+      }
     }
     if (layer.type === 'fill') {
       layer.docWidth = doc.width;
@@ -541,6 +599,8 @@ export function writePsdDocument(doc, compositor) {
 export async function exportImage(doc, opts = {}, compositor) {
   const format = opts.format ?? 'png';
   const info = SAVE_FORMATS[format] ?? SAVE_FORMATS.png;
+  // formats added by registerExportFormat (GIF, PNG-8, 16-bit PNG, TIFF ...) bring their own encoder
+  if (info.encode) return info.encode(doc, { ...opts, format }, compositor);
   let canvas = opts.canvas ?? flattenDocument(doc, compositor);
   const w = Math.max(1, Math.round(opts.width ?? canvas.width * (opts.scale ?? 1)));
   const h = Math.max(1, Math.round(opts.height ?? canvas.height * (opts.scale ?? 1)));
@@ -567,13 +627,15 @@ export async function encodeForPath(doc, path, compositor, exportOpts = {}) {
   if (ext === 'pigment') return writePigment(doc);
   if (ext === 'psd') return writePsdDocument(doc, compositor);
   if (!canWritePath(path)) throw new Error(`Pigment cannot write .${ext || '?'} files. Save as .pigment, .psd, .png, .jpg or .webp instead.`);
-  const format = ext === 'jpg' || ext === 'jpeg' ? 'jpeg' : ext === 'webp' ? 'webp' : 'png';
+  const registered = exportFormatForPath(path);
+  if (registered?.layered && registered.encode) return registered.encode(doc, { ...exportOpts, format: registered.id }, compositor);
+  const format = registered?.id ?? (ext === 'jpg' || ext === 'jpeg' ? 'jpeg' : ext === 'webp' ? 'webp' : 'png');
   return exportImage(doc, { ...exportOpts, format }, compositor);
 }
 
 /** True when saving to this path keeps all layers. */
 export function isLayeredPath(path) {
-  return ['pigment', 'psd'].includes(extOf(path));
+  return !!exportFormatForPath(path)?.layered;
 }
 
 export { canvasIsBlank };
