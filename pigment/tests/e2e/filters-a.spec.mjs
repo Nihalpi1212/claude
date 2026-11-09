@@ -80,7 +80,7 @@ test('dialog kinds preview on the canvas, commit one entry, remember their param
   await setNumber(page, 'radius', 4);
   await expect.poll(() => layerPixel(page, 50, 50)).toEqual([0, 0, 0, 255]);
   await confirmDialog(page);
-  expect(await historyLength(page)).toBe(++n);
+  await expect.poll(() => historyLength(page)).toBe(++n);
   expect(await settings(page, 'filterParams.smart-blur.mode')).toBe('edge-only');
   expect(await settings(page, 'filterParams.smart-blur.radius')).toBe(4);
   expect(await settings(page, 'lastFilter.kind')).toBe('smart-blur');
@@ -98,7 +98,7 @@ test('dialog kinds preview on the canvas, commit one entry, remember their param
   await run(page, 'filter:hsb-hsl');
   await expect(page.locator('.dialog-backdrop')).toBeVisible();
   await confirmDialog(page);
-  expect(await historyLength(page)).toBe(++n);
+  await expect.poll(() => historyLength(page)).toBe(++n);
   expect(await layerPixel(page, 50, 50)).toEqual([0, 255, 255, 255]);
   await runAwait(page, 'edit:undo');
   n--;
@@ -108,7 +108,7 @@ test('dialog kinds preview on the canvas, commit one entry, remember their param
   await page.locator('.dialog select[data-key="shape"]').selectOption('star');
   await setNumber(page, 'radius', 6);
   await confirmDialog(page);
-  expect(await historyLength(page)).toBe(++n);
+  await expect.poll(() => historyLength(page)).toBe(++n);
   const starEdge = await layerPixel(page, 20, 50);
   expect(starEdge[3]).toBeGreaterThan(0);
   expect(starEdge[3]).toBeLessThan(255);
@@ -123,7 +123,7 @@ test('dialog kinds preview on the canvas, commit one entry, remember their param
     await expect(page.locator('.dialog-backdrop')).toBeVisible();
     if (change) await change();
     await confirmDialog(page);
-    expect(await historyLength(page), k).toBe(++n);
+    await expect.poll(() => historyLength(page), k).toBe(++n);
   }
   expect(await settings(page, 'filterParams.mezzotint.type')).toBe('long-lines');
   expect(await settings(page, 'filterParams.shake-reduction.traceBounds')).toBe(20);
@@ -135,7 +135,7 @@ test('dialog kinds preview on the canvas, commit one entry, remember their param
   await runAwait(page, 'edit:undo');
   n -= 3;
   await runAwait(page, 'filter:de-interlace', { eliminate: 'even', method: 'duplication' });
-  expect(await historyLength(page)).toBe(++n);
+  await expect.poll(() => historyLength(page)).toBe(++n);
   expect((await layerPixel(page, 50, 20))[3]).toBe(0);
   expect(await layerPixel(page, 50, 21)).toEqual([255, 0, 0, 255]);
   expect(errors).toEqual([]);
@@ -156,7 +156,7 @@ test('Lens Blur: depth map from the layer transparency or a saved channel, one e
   await expect.poll(async () => (await layerPixel(page, 20, 50))[3]).toBeLessThan(255);
   expect((await layerPixel(page, 15, 50))[3]).toBe(0);
   await confirmDialog(page);
-  expect(await historyLength(page)).toBe(++n);
+  await expect.poll(() => historyLength(page)).toBe(++n);
   const edge = await layerPixel(page, 20, 50);
   expect(edge[3]).toBeGreaterThan(0);
   expect(edge[3]).toBeLessThan(255);
@@ -186,7 +186,7 @@ test('Lens Blur: depth map from the layer transparency or a saved channel, one e
   await source.selectOption('channel:depth-1');
   await setNumber(page, 'radius', 8);
   await confirmDialog(page);
-  expect(await historyLength(page)).toBe(++n);
+  await expect.poll(() => historyLength(page)).toBe(++n);
   // rows above 50 are in focus (depth 0): the top edge of the square stays hard; the bottom edge (depth 255) blurs
   expect(await layerPixel(page, 50, 20)).toEqual([255, 0, 0, 255]);
   expect((await layerPixel(page, 50, 19))[3]).toBe(0);

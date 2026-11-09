@@ -103,20 +103,23 @@ function pass121(f, t, w, h) {
 // ---------------------------------------------------------------------------------------------
 // Average, Blur, Blur More
 
+/**
+ * The alpha-weighted mean colour of the whole image, written into rect (the shared rect convention:
+ * geometry is the image). The filter dialog hands over the selection bounds as the image, so from the
+ * menu this averages the selection, as Photoshop does.
+ */
 function average(img, _p, rect) {
   const r = region(img, rect);
   if (isEmpty(r)) return img;
   const d = img.data, W = img.width;
   let sr = 0, sg = 0, sb = 0, sa = 0;
-  for (let y = r.y; y < r.y + r.height; y++) {
-    for (let x = r.x, i = (y * W + r.x) * 4; x < r.x + r.width; x++, i += 4) {
-      const a = d[i + 3];
-      if (a === 0) continue;
-      sr += d[i] * a;
-      sg += d[i + 1] * a;
-      sb += d[i + 2] * a;
-      sa += a;
-    }
+  for (let i = 0; i < d.length; i += 4) {
+    const a = d[i + 3];
+    if (a === 0) continue;
+    sr += d[i] * a;
+    sg += d[i + 1] * a;
+    sb += d[i + 2] * a;
+    sa += a;
   }
   if (sa === 0) return img;
   const R = round8(sr / sa), G = round8(sg / sa), B = round8(sb / sa);

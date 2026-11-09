@@ -170,8 +170,7 @@ test('average: the region becomes its alpha-weighted mean colour, alpha kept, re
   const part = applyFilter(patternImage(12, 10), 'average', {}, rect);
   const ref = patternImage(12, 10);
   assert.deepEqual(px(part, 0, 0), px(ref, 0, 0), 'outside rect untouched');
-  assert.deepEqual(px(part, 2, 2).slice(0, 3), px(part, 5, 4).slice(0, 3), 'inside rect flat');
-  assert.notDeepEqual(px(part, 2, 2).slice(0, 3), mean, 'the rect mean is the rect, not the image');
+  assert.deepEqual(px(part, 2, 2).slice(0, 3), mean, 'the rect takes the image mean (the dialog crops to the selection)');
 });
 
 test('lens-blur: a polygon kernel of the right area, bokeh boost, depth map focus, noise after the blur', () => {
