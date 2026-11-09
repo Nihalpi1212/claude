@@ -202,7 +202,9 @@ test('Liquify pushes pixels with the forward warp brush and is one undo step', a
   await run(page, 'filter:liquify');
   const canvas = page.locator('.liquify-canvas');
   await expect(canvas).toBeVisible();
-  await page.waitForTimeout(200);
+  // the dialog lays out and draws its preview asynchronously; under load (the full suite) 200 ms was not always enough
+  await expect.poll(async () => (await canvas.boundingBox())?.width ?? 0).toBeGreaterThan(50);
+  await page.waitForTimeout(400);
   const box = await canvas.boundingBox();
   // drag from the square's right edge (x=80) to the right
   const at = (x, y) => ({ x: box.x + (x / 200) * box.width, y: box.y + (y / 150) * box.height });

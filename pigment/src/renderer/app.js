@@ -51,6 +51,9 @@ const MODULES = [
   // 0.3 feature modules (stubs until their builders land; see ARCHITECTURE.md "0.3 features (contracts)")
   'lib/modes.js',
   'lib/depth.js',
+  'lib/filters-a-ui.js',
+  'lib/filters-b-ui.js',
+  'lib/gallery-b-ui.js',
   'lib/adjust-more-ui.js',
   'lib/filter-gallery.js',
   'lib/blur-gallery-ui.js',
