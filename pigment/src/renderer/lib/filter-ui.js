@@ -134,13 +134,15 @@ export function install(app) {
     // smart objects (lib/smart-object.js): a filter on a smart layer becomes a smart filter, not a pixel edit
     if (def.smart !== false && app.smartFilters?.intercept(d.active, kind, direct, def.name)) return;
     const custom = REGISTERED.get(kind)?.open;
-    if (def.ui === 'custom' && !direct && dialog) {
+    // a replayed custom kind whose params lack what only its opener can supply (Displace without its map) asks again
+    const incomplete = direct && custom && dialog && typeof def.incomplete === 'function' && def.incomplete(direct);
+    if (def.ui === 'custom' && (!direct || incomplete) && dialog) {
       // kinds with an on-canvas session (blur gallery, Filter Gallery, Lens Correction) open their own UI
       if (!custom) {
         ctx?.cancel();
         return app.dialogs.toast(`${def.name} is not available yet`, { kind: 'error' });
       }
-      const used = await custom(kind, { params: paramsFor(app, kind, saved()[kind]), def, ctx });
+      const used = await custom(kind, { params: incomplete ? { ...paramsFor(app, kind, saved()[kind]), ...direct } : paramsFor(app, kind, saved()[kind]), def, ctx });
       if (used) {
         saved()[kind] = used;
         remember(kind, used);

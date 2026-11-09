@@ -1411,6 +1411,7 @@ export const FILTERS_MORE_B = Object.freeze({
   // distort
   displace: defineFilter('Displace', 'distort', { horizontalScale: 10, verticalScale: 10, mapMode: 'stretch', edge: 'repeat', map: null }, displace, {
     ui: 'custom', // lib/filters-b-ui.js adds the displacement map chooser above these fields
+    incomplete: (p) => !p?.map, // a replay without its map (Last Filter, actions) re-opens the chooser instead of a no-op
     fields: [
       S('horizontalScale', 'Horizontal scale', -999, 999, 1, { unit: '%' }),
       S('verticalScale', 'Vertical scale', -999, 999, 1, { unit: '%' }),
