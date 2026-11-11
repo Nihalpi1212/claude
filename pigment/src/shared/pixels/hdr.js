@@ -22,7 +22,6 @@
 // outside the image, means are alpha-weighted so transparent pixels never bleed in.
 
 import { clampRect } from './core.js';
-import { curveLut } from './adjust.js'; // used at call time only (adjust.js imports adjust-more.js, which imports this module)
 
 /** @typedef {import('./core.js').ImageDataLike} ImageDataLike */
 /** @typedef {import('./core.js').Rect} Rect */
@@ -198,6 +197,68 @@ function normalise(params) {
 }
 
 /**
+ * Toning curve as a 256-entry table: a monotone cubic through the points (Fritsch-Carlson slopes),
+ * flat outside the first and last point; the same curve as adjust.js curveLut() (restated here so
+ * this module does not import adjust.js, see adjust-more.js).
+ * @param {Array<[number, number]>} points 0..255, any order
+ */
+export function toneCurve(points) {
+  const pts = [];
+  for (const p of Array.isArray(points) ? points : []) {
+    const x = Array.isArray(p) ? p[0] : p?.x, y = Array.isArray(p) ? p[1] : p?.y;
+    if (typeof x !== 'number' || typeof y !== 'number' || !Number.isFinite(x) || !Number.isFinite(y)) continue;
+    pts.push([clampNum(x, 0, 255), clampNum(y, 0, 255)]);
+  }
+  pts.sort((a, b) => a[0] - b[0]);
+  const xs = [], ys = [];
+  for (const p of pts) {
+    if (xs.length && xs[xs.length - 1] === p[0]) ys[ys.length - 1] = p[1];
+    else {
+      xs.push(p[0]);
+      ys.push(p[1]);
+    }
+  }
+  const n = xs.length;
+  const lut = new Uint8ClampedArray(256);
+  if (n < 2) {
+    for (let v = 0; v < 256; v++) lut[v] = v;
+    return lut;
+  }
+  const delta = new Float64Array(n - 1), m = new Float64Array(n);
+  for (let k = 0; k < n - 1; k++) delta[k] = (ys[k + 1] - ys[k]) / (xs[k + 1] - xs[k]);
+  m[0] = delta[0];
+  m[n - 1] = delta[n - 2];
+  for (let k = 1; k < n - 1; k++) m[k] = delta[k - 1] * delta[k] <= 0 ? 0 : (delta[k - 1] + delta[k]) / 2;
+  for (let k = 0; k < n - 1; k++) {
+    if (delta[k] === 0) {
+      m[k] = 0;
+      m[k + 1] = 0;
+      continue;
+    }
+    const a = m[k] / delta[k], b = m[k + 1] / delta[k];
+    const s = a * a + b * b;
+    if (s > 9) {
+      const tau = 3 / Math.sqrt(s);
+      m[k] = tau * a * delta[k];
+      m[k + 1] = tau * b * delta[k];
+    }
+  }
+  let k = 0;
+  for (let v = 0; v < 256; v++) {
+    let y;
+    if (v <= xs[0]) y = ys[0];
+    else if (v >= xs[n - 1]) y = ys[n - 1];
+    else {
+      while (k < n - 2 && xs[k + 1] <= v) k++;
+      const h = xs[k + 1] - xs[k], t = (v - xs[k]) / h, t2 = t * t, t3 = t2 * t;
+      y = (2 * t3 - 3 * t2 + 1) * ys[k] + (t3 - 2 * t2 + t) * h * m[k] + (-2 * t3 + 3 * t2) * ys[k + 1] + (t3 - t2) * h * m[k + 1];
+    }
+    lut[v] = Math.round(y < 0 ? 0 : y > 255 ? 255 : y);
+  }
+  return lut;
+}
+
+/**
  * Shadow / highlight tone curve on display luma 0..1 as a 1025-entry table. Shadow moves the lower
  * tones (L ± L(1-L)³), highlight the upper ones (L ± (1-L)L³); both stay monotonic at ±100.
  */
@@ -313,12 +374,12 @@ function toneMap(lin, alpha, w, h, params, rect, out) {
   const tone = p.shadow !== 0 || p.highlight !== 0 ? shadowHighlightTable(p.shadow, p.highlight) : null;
   const sat = 1 + p.saturation / 100, vib = p.vibrance / 100;
   const colour = sat !== 1 || vib !== 0;
-  const curve = p.curve ? curveLut(p.curve) : null;
+  const curve = p.curve ? toneCurve(p.curve) : null;
   for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
     const q = y * w + x, i = q * 3, o = q * 4;
     const b = base[q];
     const Lout = pivot + (b - pivot) * compress + (L[q] - b) * detailGain;
-    const k = 2 ** (Lout - L[q]);
+    const k = Math.exp((Lout - L[q]) * Math.LN2); // 2^x; exp is several times faster than ** in a hot loop
     // the LOG_EPS offset rides along so black scales like its neighbours instead of staying at zero
     let R = lookup(transfer, ((lin[i] + LOG_EPS) * k - LOG_EPS) * gain);
     let G = lookup(transfer, ((lin[i + 1] + LOG_EPS) * k - LOG_EPS) * gain);
@@ -537,12 +598,14 @@ function pyrUp(src, sw, sh, w, h) {
  * normalised values (something moved between the frames) loses its weight.
  *
  * The result is display-referred (0..255 sRGB): the best exposed version of every region, not a
- * radiance map. `float: true` returns { width, height, data: Float32Array RGBA } with linear RGB
- * (sRGB-decoded fusion result) for 16/32-bit documents.
+ * radiance map. The blend itself runs in floats, so two other outputs keep what 8 bits would round
+ * away: `depth: 16` returns { width, height, data: Uint16Array RGBA } (sRGB-encoded, 0..65535, the
+ * layout of RasterLayer.deep 'u16') and `float: true` returns { width, height, data: Float32Array
+ * RGBA } with linear RGB (the fusion result sRGB-decoded) and alpha 0..1.
  * @param {ImageDataLike[]} images
- * @param {{ contrast?: number, saturation?: number, exposedness?: number, removeGhosts?: boolean, float?: boolean }} [options] weight exponents (default 1)
+ * @param {{ contrast?: number, saturation?: number, exposedness?: number, removeGhosts?: boolean, float?: boolean, depth?: 8 | 16 }} [options] weight exponents (default 1)
  */
-export function exposureFusion(images, { contrast = 1, saturation = 1, exposedness = 1, removeGhosts = false, float = false } = {}) {
+export function exposureFusion(images, { contrast = 1, saturation = 1, exposedness = 1, removeGhosts = false, float = false, depth = 8 } = {}) {
   if (!images?.length) throw new Error('exposureFusion needs at least one image');
   const w = images[0].width, h = images[0].height, n = w * h;
   for (const im of images) if (im.width !== w || im.height !== h) throw new Error('exposureFusion: all images must have the same size');
@@ -656,6 +719,14 @@ export function exposureFusion(images, { contrast = 1, saturation = 1, exposedne
         data[i + c] = v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
       }
       data[i + 3] = alpha[q] / 255;
+    }
+    return { width: w, height: h, data };
+  }
+  if (depth === 16) {
+    const data = new Uint16Array(n * 4);
+    for (let q = 0, i = 0; q < n; q++, i += 4) {
+      for (let c = 0; c < 3; c++) data[i + c] = Math.round(clampNum(result[c][q], 0, 255) * 257);
+      data[i + 3] = alpha[q] * 257;
     }
     return { width: w, height: h, data };
   }

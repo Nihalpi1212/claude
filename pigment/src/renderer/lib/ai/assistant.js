@@ -6,6 +6,7 @@
 // ids, kinds, numeric ranges) so a confused model cannot put the document into a bad state.
 import { ADJUSTMENTS, ADJUSTMENT_KINDS } from '../../../shared/pixels/adjust.js';
 import { FILTERS, FILTER_KINDS } from '../../../shared/pixels/filters.js';
+import { LUT_PRESET_NAMES } from '../../../shared/pixels/lut.js';
 import { parseColor, rgbaToHex } from '../../../shared/pixels/color.js';
 import { RasterLayer, TextLayer, BLEND_LABELS } from '../document.js';
 import { structural, setLayerProps, nextLayerName } from '../layer-ops.js';
@@ -187,6 +188,7 @@ export function install(app) {
       'Edits apply to the active layer (image adjustments and filters are destructive on it); add a new layer first when the user wants a separate layer. Coordinates are document pixels with the origin at the top left.',
       `Adjustment kinds (params with defaults): ${kindList(ADJUSTMENTS, ADJUSTMENT_KINDS)}.`,
       `Filter kinds (params with defaults): ${kindList(FILTERS, FILTER_KINDS)}.`,
+      `color-lookup presets: ${LUT_PRESET_NAMES.join(', ')}. match-color needs statistics of another image and is best left to its dialog.`,
       `Blend modes: ${Object.keys(BLEND_LABELS).join(', ')}.`,
       `Commands for run_command (ids; most take no argument): ${commandList()}. Also image:adjust-<kind> (params object) and filter:<kind> (params object), which apply_adjustment and apply_filter wrap.`,
     ].join('\n\n');

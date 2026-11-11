@@ -2,8 +2,11 @@
 // Toning, Match Color and Replace Color. Built with pixelKind() from adjust-def.js and merged into
 // ADJUSTMENTS by adjust.js; same conventions (in place, rect limits writes, alpha kept).
 //
-// Import ADJUSTMENTS from './adjust.js' only for use inside apply() (never at module top level):
-// adjust.js imports this table, so the modules form a cycle that is safe at call time only.
+// This module (and lut.js, hdr.js) deliberately imports nothing from './adjust.js': adjust.js imports
+// this table, and a cycle would make the import order matter (loading this file first would read
+// ADJUSTMENTS_MORE before it exists). The two pieces of adjust.js these kinds need are small and
+// restated here and in hdr.js: the master Hue/Saturation shift (Replace Color) and the monotone
+// curve (HDR Toning). tests/unit/adjust-more.test.mjs checks both against adjust.js.
 //
 //   color-lookup   { preset, lut, dither }: `lut` (a parsed table, see lut.js) wins over `preset` (a name
 //                  from LUT_PRESETS or 'none'); both empty is the identity.
@@ -12,12 +15,10 @@
 //                  transfer in Lab. `source` / `target` are { mean: [L, a, b], std: [L, a, b] }; without
 //                  `target` the statistics of the edited pixels are used, without `source` nothing is
 //                  transferred and only luminance, colour intensity and neutralize act.
-//   replace-color  { colors, exclude?, fuzziness, localized, positions?, range?, hue, saturation, lightness }:
+//   replace-color  { colors, exclude?, fuzziness, localized, positions?, positionsSize?, range?, hue, saturation, lightness }:
 //                  Hue/Saturation through a Color Range mask around the sampled colours.
 
-import { pixelKind, num, clampNum, region } from './adjust-def.js';
-import { ADJUSTMENTS } from './adjust.js'; // call time only, see above
-import { colorRange } from './selection-ops.js';
+import { pixelKind, num, clampNum, round8, region } from './adjust-def.js';
 import { applyLut3d, presetLut, isLut } from './lut.js';
 import { hdrToning } from './hdr.js';
 
@@ -163,29 +164,76 @@ function matchColor(img, p, rect) {
 // ---------------------------------------------------------------------------------------------
 // Replace Color
 
-const colourList = (v) => (Array.isArray(v) ? v.filter((c) => Array.isArray(c) && c.length >= 3 && c.slice(0, 3).every((n) => Number.isFinite(+n))).map((c) => [+c[0], +c[1], +c[2], 1]) : []);
+const colourList = (v) => (Array.isArray(v) ? v.filter((c) => Array.isArray(c) && c.length >= 3 && c.slice(0, 3).every((n) => Number.isFinite(+n))).map((c) => [+c[0], +c[1], +c[2]]) : []);
+
+/**
+ * Colour Range coverage without the alpha weighting of selection-ops.js colorRange(): 255 while the
+ * largest channel difference to the nearest of `colors` is at most fuzziness / 2, fading linearly to
+ * 0 at `fuzziness`. A half-transparent pixel of a sampled colour is fully covered (its colour is
+ * replaced, its alpha stays); fully transparent pixels have no colour and are never covered.
+ */
+function rangeCoverage(img, colors, fuzziness, r, out) {
+  const d = img.data, w = img.width, n = colors.length;
+  const half = fuzziness / 2;
+  const lut = new Uint8ClampedArray(256);
+  for (let dist = 0; dist < 256; dist++) lut[dist] = fuzziness <= 0 ? (dist === 0 ? 255 : 0) : dist <= half ? 255 : dist >= fuzziness ? 0 : (255 * (fuzziness - dist)) / half;
+  const cs = new Int32Array(n * 3);
+  for (let k = 0; k < n; k++) {
+    cs[k * 3] = Math.round(colors[k][0]);
+    cs[k * 3 + 1] = Math.round(colors[k][1]);
+    cs[k * 3 + 2] = Math.round(colors[k][2]);
+  }
+  for (let y = r.y, ye = r.y + r.height; y < ye; y++) {
+    let q = y * w + r.x, i = q * 4;
+    for (let x = 0; x < r.width; x++, q++, i += 4) {
+      if (d[i + 3] === 0) continue;
+      const pr = d[i], pg = d[i + 1], pb = d[i + 2];
+      let best = 255;
+      for (let k = 0; k < cs.length; k += 3) {
+        let m = pr - cs[k];
+        if (m < 0) m = -m;
+        let t = pg - cs[k + 1];
+        if (t < 0) t = -t;
+        if (t > m) m = t;
+        t = pb - cs[k + 2];
+        if (t < 0) t = -t;
+        if (t > m) m = t;
+        if (m < best) best = m;
+      }
+      out[q] = lut[best];
+    }
+  }
+  return out;
+}
 
 /**
  * The selection Replace Color works through (0..255 per pixel, w*h): Color Range coverage around
- * `colors` (255 within fuzziness/2, fading to 0 at fuzziness, scaled by alpha), minus the coverage
- * of `exclude` (the subtract eyedropper), and with `localized` weighted by the distance to the
- * nearest sampled position (full within half of `range` % of the longer image side, none beyond it).
+ * `colors` (255 within fuzziness/2, fading to 0 at fuzziness; not weighted by alpha, see
+ * rangeCoverage), minus the coverage of `exclude` (the subtract eyedropper), and with `localized`
+ * weighted by the distance to the nearest sampled position (full within half of `range` % of the
+ * longer image side, none beyond it).
  * @param {ImageDataLike} img @param {object} p @param {Rect | null} [rect] @returns {Uint8ClampedArray}
  */
 export function replaceColorMask(img, p, rect = null) {
   const w = img.width, h = img.height;
   const colors = colourList(p?.colors);
-  if (!colors.length) return new Uint8ClampedArray(w * h);
-  const fuzziness = clampNum(num(p.fuzziness, 40), 0, 200);
+  const mask = new Uint8ClampedArray(w * h);
   const r = region(img, rect);
-  const mask = colorRange(img, colors, { fuzziness }, rect);
+  if (!colors.length || !r.width) return mask;
+  const fuzziness = clampNum(num(p.fuzziness, 40), 0, 200);
+  rangeCoverage(img, colors, fuzziness, r, mask);
   const exclude = colourList(p.exclude);
   if (exclude.length) {
-    const ex = colorRange(img, exclude, { fuzziness }, rect);
+    const ex = rangeCoverage(img, exclude, fuzziness, r, new Uint8ClampedArray(w * h));
     for (let i = 0; i < mask.length; i++) if (ex[i]) mask[i] = Math.min(mask[i], 255 - ex[i]);
   }
   const pos = p.localized && Array.isArray(p.positions) ? p.positions.filter((q) => Array.isArray(q) && Number.isFinite(+q[0]) && Number.isFinite(+q[1])) : [];
   if (pos.length && r.width) {
+    // positions are pixels of the image they were sampled in; positionsSize ([w, h] of that image) lets them follow
+    // an image of another size (a smart filter edited on a reduced preview, a replay on another layer)
+    const from = Array.isArray(p.positionsSize) && p.positionsSize[0] > 0 && p.positionsSize[1] > 0 ? p.positionsSize : null;
+    const sx = from ? w / from[0] : 1, sy = from ? h / from[1] : 1;
+    for (let k = 0; k < pos.length; k++) pos[k] = [pos[k][0] * sx, pos[k][1] * sy];
     const radius = Math.max(1, (clampNum(num(p.range, 50), 1, 100) / 100) * Math.max(w, h));
     const inner = radius / 2, r2 = radius * radius, i2 = inner * inner;
     for (let y = r.y, ye = r.y + r.height; y < ye; y++) {
@@ -205,31 +253,81 @@ export function replaceColorMask(img, p, rect = null) {
   return mask;
 }
 
+const hue2rgb = (p, q, t) => {
+  if (t < 0) t += 1;
+  else if (t > 1) t -= 1;
+  if (t < 1 / 6) return p + (q - p) * 6 * t;
+  if (t < 0.5) return q;
+  if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+  return p;
+};
+
 function replaceColor(img, p, rect) {
   const r = region(img, rect);
   if (!r.width) return img;
-  const hue = clampNum(num(p.hue, 0), -180, 180), saturation = clampNum(num(p.saturation, 0), -100, 100), lightness = clampNum(num(p.lightness, 0), -100, 100);
-  if (hue === 0 && saturation === 0 && lightness === 0) return img;
+  const hue = clampNum(num(p.hue, 0), -180, 180), sat = clampNum(num(p.saturation, 0), -100, 100), light = clampNum(num(p.lightness, 0), -100, 100);
+  if (hue === 0 && sat === 0 && light === 0) return img;
   const mask = replaceColorMask(img, p, r);
   const d = img.data, w = img.width;
-  // Hue/Saturation on a copy, then through the mask
-  const shifted = { width: w, height: img.height, data: new Uint8ClampedArray(d) };
-  ADJUSTMENTS['hue-saturation'].apply(shifted, { hue, saturation, lightness }, r);
-  const s = shifted.data;
+  const satF = sat / 100, lightF = light / 100;
   for (let y = r.y, ye = r.y + r.height; y < ye; y++) {
     let q = y * w + r.x, i = q * 4;
     for (let x = 0; x < r.width; x++, q++, i += 4) {
       const m = mask[q];
       if (!m) continue;
+      // Hue/Saturation, master range: the same maths as adjust.js hueSaturation()
+      let rr = d[i], gg = d[i + 1], bb = d[i + 2];
+      const max = rr > gg ? (rr > bb ? rr : bb) : gg > bb ? gg : bb;
+      const min = rr < gg ? (rr < bb ? rr : bb) : gg < bb ? gg : bb;
+      const l = (max + min) / 510;
+      const delta = max - min;
+      let s = 0, h = 0;
+      if (delta > 0) {
+        s = l > 0.5 ? delta / (510 - max - min) : delta / (max + min);
+        if (max === rr) h = ((gg - bb) / delta + (gg < bb ? 6 : 0)) * 60;
+        else if (max === gg) h = ((bb - rr) / delta + 2) * 60;
+        else h = ((rr - gg) / delta + 4) * 60;
+      }
+      if (hue !== 0 && delta > 0) {
+        const qq = l < 0.5 ? l * (1 + s) : l + s - l * s, pp = 2 * l - qq;
+        let H = (h + hue) / 360;
+        H -= Math.floor(H);
+        rr = hue2rgb(pp, qq, H + 1 / 3) * 255;
+        gg = hue2rgb(pp, qq, H) * 255;
+        bb = hue2rgb(pp, qq, H - 1 / 3) * 255;
+      }
+      if (sat !== 0 && delta > 0) {
+        // chroma scaled about the luma: -100 is exactly Desaturate, positive values push the HSL saturation towards 1
+        const target = satF > 0 ? s + (1 - s) * satF : s * (1 + satF);
+        const k = target / s;
+        const L = 0.299 * rr + 0.587 * gg + 0.114 * bb;
+        rr = L + (rr - L) * k;
+        gg = L + (gg - L) * k;
+        bb = L + (bb - L) * k;
+      }
+      if (light !== 0) {
+        if (lightF > 0) {
+          rr += (255 - rr) * lightF;
+          gg += (255 - gg) * lightF;
+          bb += (255 - bb) * lightF;
+        } else {
+          rr *= 1 + lightF;
+          gg *= 1 + lightF;
+          bb *= 1 + lightF;
+        }
+      }
+      rr = round8(rr);
+      gg = round8(gg);
+      bb = round8(bb);
       if (m === 255) {
-        d[i] = s[i];
-        d[i + 1] = s[i + 1];
-        d[i + 2] = s[i + 2];
+        d[i] = rr;
+        d[i + 1] = gg;
+        d[i + 2] = bb;
       } else {
         const t = m / 255;
-        d[i] += (s[i] - d[i]) * t;
-        d[i + 1] += (s[i + 1] - d[i + 1]) * t;
-        d[i + 2] += (s[i + 2] - d[i + 2]) * t;
+        d[i] += (rr - d[i]) * t;
+        d[i + 1] += (gg - d[i + 1]) * t;
+        d[i + 2] += (bb - d[i + 2]) * t;
       }
     }
   }

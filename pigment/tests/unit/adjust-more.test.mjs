@@ -1,12 +1,11 @@
 // Unit tests for the 0.3 adjustments group (builder "adjust-more"): lut.js, adjust-more.js, hdr.js,
-// matting.js and channel-math.js. adjust.js is imported first on purpose: adjust-more.js and hdr.js
-// import it back for call-time use (see the header of adjust-more.js).
+// matting.js and channel-math.js.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ADJUSTMENTS, applyAdjustment } from '../../src/shared/pixels/adjust.js';
+import { ADJUSTMENTS, applyAdjustment, curveLut } from '../../src/shared/pixels/adjust.js';
 import { labStatistics, replaceColorMask, colorLookupTable } from '../../src/shared/pixels/adjust-more.js';
 import { parseCube, parse3dl, parseLook, parseCsp, parseLut, lutFormat, writeCube, write3dl, applyLut3d, makeLut3d, identityLut3d, sampleLut, resampleLut, compactLut, isLut, LUT_PRESETS, LUT_PRESET_NAMES, presetLut } from '../../src/shared/pixels/lut.js';
-import { hdrToning, hdrToningFloat, exposureFusion, estimateExposures, guidedBase } from '../../src/shared/pixels/hdr.js';
+import { hdrToning, hdrToningFloat, exposureFusion, estimateExposures, guidedBase, toneCurve } from '../../src/shared/pixels/hdr.js';
 import { defringe, removeMatte, decontaminate, nearestSource } from '../../src/shared/pixels/matting.js';
 import { applyImage, calculations, extractChannel } from '../../src/shared/pixels/channel-math.js';
 import { blendImages } from '../../src/shared/pixels/blend.js';
@@ -438,6 +437,11 @@ test('replace-color: several colours, the subtract list, lightness / saturation,
   assert.ok(Math.abs(local[37] - 255 * (13 / 25)) <= 1, `falloff ${local[37]}`);
   assert.equal(local[50], 0);
   assert.equal(local[90], 0);
+  // positionsSize: the same click on an image twice as large reaches twice as far
+  const wide = createImage(200, 1, [255, 0, 0, 1]);
+  const scaled = replaceColorMask(wide, { colors: [[255, 0, 0]], localized: true, positions: [[0, 0]], positionsSize: [100, 1], range: 50 });
+  assert.equal(scaled[50], 255);
+  assert.equal(scaled[100], 0);
   // without positions "localized" has nothing to measure from and selects by colour alone
   assert.equal(replaceColorMask(strip, { colors: [[255, 0, 0]], localized: true })[90], 255);
   const part = cloneImage(strip);
@@ -445,9 +449,34 @@ test('replace-color: several colours, the subtract list, lightness / saturation,
   assert.deepEqual(px(part, 9, 0), [255, 0, 0, 255]);
   assert.deepEqual(px(part, 12, 0), [0, 255, 0, 255]);
   assert.deepEqual(px(part, 15, 0), [255, 0, 0, 255]);
-  // transparent pixels are never selected
-  const clear = createImage(1, 1, [255, 0, 0, 0]);
-  assert.equal(replaceColorMask(clear, { colors: [[255, 0, 0]] })[0], 0);
+  // transparent pixels are never selected; half-transparent ones are fully covered (their colour is replaced, not half of it)
+  const clear = createImage(2, 1, [255, 0, 0, 0]);
+  clear.data[7] = 128;
+  assert.deepEqual(Array.from(replaceColorMask(clear, { colors: [[255, 0, 0]] })), [0, 255]);
+  applyAdjustment(clear, 'replace-color', { colors: [[255, 0, 0]], hue: 120 });
+  assert.deepEqual(px(clear, 0, 0), [255, 0, 0, 0]);
+  assert.deepEqual(px(clear, 1, 0), [0, 255, 0, 128]);
+});
+
+test('the restated pieces of adjust.js stay identical: Replace Color through a full mask is Hue/Saturation, toneCurve is curveLut', () => {
+  // every pixel within fuzziness of the one sampled colour (fuzziness 200 covers distances up to 100 fully)
+  const img = createImage(64, 64);
+  const rnd = randomSeeded(91);
+  for (let i = 0; i < img.data.length; i += 4) {
+    img.data[i] = 60 + Math.floor(rnd() * 140);
+    img.data[i + 1] = 60 + Math.floor(rnd() * 140);
+    img.data[i + 2] = 60 + Math.floor(rnd() * 140);
+    img.data[i + 3] = 255;
+  }
+  for (const [hue, saturation, lightness] of [[120, 0, 0], [-75, 0, 0], [0, 60, 0], [0, -100, 0], [0, -35, 0], [0, 0, 40], [0, 0, -40], [33, 50, -20], [180, -60, 25], [-180, 100, 100]]) {
+    const a = cloneImage(img), b = cloneImage(img);
+    applyAdjustment(a, 'replace-color', { colors: [[130, 130, 130]], fuzziness: 200, hue, saturation, lightness });
+    applyAdjustment(b, 'hue-saturation', { hue, saturation, lightness });
+    assert.equal(maxDiff(a.data, b.data), 0, `hue ${hue} saturation ${saturation} lightness ${lightness}`);
+  }
+  for (const pts of [[[0, 0], [255, 255]], [[0, 0], [128, 160], [255, 255]], [[0, 255], [255, 0]], [[0, 0], [64, 32], [192, 224], [255, 255]], [[40, 10], [200, 250]], [[0, 30], [100, 30], [101, 200], [255, 190]], [[255, 255], [0, 0], [128, 90]], [[10, 10]], []]) {
+    assert.deepEqual(Array.from(toneCurve(pts)), Array.from(curveLut(pts)), JSON.stringify(pts));
+  }
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -864,6 +893,16 @@ test('exposureFusion keeps the well exposed parts of each frame', () => {
   const single = exposureFusion([dark]);
   assert.ok(maxDiff(single.data, dark.data) <= 1);
   assert.throws(() => exposureFusion([dark, createImage(4, 4)]), /same size/);
+  // 16-bit output: the same picture with the fractions 8 bits round away (sRGB-encoded, 0..65535)
+  const deep = exposureFusion([dark, bright], { depth: 16 });
+  assert.ok(deep.data instanceof Uint16Array && deep.data.length === fused.data.length);
+  let fractional = 0;
+  for (let i = 0; i < deep.data.length; i += 4) {
+    assert.ok(Math.abs(deep.data[i] / 257 - fused.data[i]) <= 0.5 + 1e-6);
+    assert.equal(deep.data[i + 3], 65535);
+    if (deep.data[i] % 257 !== 0) fractional++;
+  }
+  assert.ok(fractional > deep.data.length / 16, 'the 16-bit result holds in-between values');
   // float output is linear
   const f = exposureFusion([dark], { float: true });
   assert.ok(f.data instanceof Float32Array);

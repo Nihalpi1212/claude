@@ -49,3 +49,27 @@
   .fg-root { grid-template-columns: minmax(0, 1fr) 236px; }
   .fg-side { grid-column: 1 / -1; flex-direction: row; flex-wrap: wrap; }
 }
+
+/* blur gallery */
+/* the session's panel takes the place of the panel dock; the toolbox and the tabs are inert until it ends */
+body.blur-gallery-active #panels { display: none; }
+body.blur-gallery-active #toolbox, body.blur-gallery-active #tabbar { pointer-events: none; opacity: 0.45; }
+.bg-panel { width: 300px; min-width: 0; display: flex; flex-direction: column; border-left: 1px solid var(--border); background: var(--bg-elevated); font-size: 12px; min-height: 0; }
+.bg-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px 8px; }
+.bg-title { font-size: 14px; font-weight: 600; }
+.bg-tabs { display: flex; gap: 2px; padding: 0 8px; border-bottom: 1px solid var(--border); }
+.bg-tabs [role="tab"] { border: 0; background: none; color: var(--fg-muted); padding: 7px 10px; font-size: 12px; border-bottom: 2px solid transparent; margin-bottom: -1px; cursor: pointer; }
+.bg-tabs [role="tab"]:hover { color: var(--fg); }
+.bg-tabs [role="tab"][aria-selected="true"] { color: var(--fg); border-bottom-color: var(--accent); font-weight: 600; }
+.bg-body { flex: 1; min-height: 0; overflow: auto; padding: 12px; }
+.bg-body section[hidden] { display: none; }
+.bg-body .dialog-form { grid-template-columns: minmax(0, 1fr); min-width: 0; gap: 8px; }
+.bg-body .dialog-form .slider-field input[type="range"] { flex: 1; min-width: 0; }
+.bg-body .dialog-form .slider-field .input { width: 62px; height: 26px; font-size: 12px; padding: 0 6px; flex: none; }
+.bg-pins { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+.bg-pin-label { color: var(--fg-muted); }
+.bg-global-form:not(:empty) { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+.bg-hint { margin: 14px 0 0; font-size: 11px; line-height: 1.45; }
+.bg-foot { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--border); }
+.bg-foot .checkbox { display: inline-flex; align-items: center; gap: 6px; }
+.bg-spacer { flex: 1; }

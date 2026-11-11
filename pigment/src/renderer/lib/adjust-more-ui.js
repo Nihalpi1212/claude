@@ -590,7 +590,7 @@ function replaceColorEditor(app) {
     );
     root.append(top, canvas, swatches, form.element);
 
-    const current = () => ({ colors: clone(p.colors), exclude: clone(p.exclude), fuzziness: p.fuzziness, localized: p.localized, positions: clone(p.positions), range: p.range, hue: p.hue, saturation: p.saturation, lightness: p.lightness });
+    const current = () => ({ colors: clone(p.colors), exclude: clone(p.exclude), fuzziness: p.fuzziness, localized: p.localized, positions: clone(p.positions), positionsSize: source ? [source.width, source.height] : null, range: p.range, hue: p.hue, saturation: p.saturation, lightness: p.lightness });
 
     const draw = frameThrottle(() => {
       const ctx = canvas.getContext('2d');
@@ -600,7 +600,7 @@ function replaceColorEditor(app) {
         ctx.putImageData(new ImageData(new Uint8ClampedArray(small.data), pw, ph), 0, 0);
         return;
       }
-      const mask = replaceColorMask(small, { ...current(), positions: p.positions.map(([x, y]) => [x * scale, y * scale]) });
+      const mask = replaceColorMask(small, current()); // positionsSize scales the sampled positions to the reduced preview
       const out = new ImageData(pw, ph);
       for (let q = 0, i = 0; q < mask.length; q++, i += 4) {
         out.data[i] = out.data[i + 1] = out.data[i + 2] = mask[q];
@@ -1128,10 +1128,12 @@ export function install(app) {
     for (const l of layers) {
       const opacity = Math.max(0, Math.min(1, l.opacity ?? 1));
       if (opacity <= 0 || !ADJUSTMENTS[l.kind]) continue;
-      if (opacity >= 1) applyAdjustment(img, l.kind, l.params);
+      // dither is noise for pictures, not part of the colour mapping
+      const params = l.kind === 'color-lookup' ? { ...l.params, dither: false } : l.params;
+      if (opacity >= 1) applyAdjustment(img, l.kind, params);
       else {
         const copy = { width: img.width, height: img.height, data: new Uint8ClampedArray(d) };
-        applyAdjustment(copy, l.kind, l.params);
+        applyAdjustment(copy, l.kind, params);
         for (let i = 0; i < d.length; i += 4) {
           d[i] += (copy.data[i] - d[i]) * opacity;
           d[i + 1] += (copy.data[i + 1] - d[i + 1]) * opacity;
@@ -1228,7 +1230,7 @@ export function install(app) {
         title: 'Merge to HDR',
         width: 460,
         okLabel: 'Merge',
-        intro: 'Blends the best exposed parts of each frame (exposure fusion) into a new 8-bit document and opens HDR Toning on it. This is not a 32-bit radiance map.',
+        intro: `Blends the best exposed parts of each frame (exposure fusion) into a new ${app.deep ? '16-bit' : '8-bit'} document and opens HDR Toning on it. This is not a 32-bit radiance map.`,
         fields,
       });
       if (!v) return ctx?.cancel();
@@ -1277,10 +1279,15 @@ export function install(app) {
           }
         }
         const exposures = estimateExposures(images);
-        return { image: exposureFusion(images, { removeGhosts: !!o.removeGhosts }), exposures };
+        // with 16 Bits/Channel support present (lib/depth.js installs app.deep) the fusion keeps its fractions
+        const fused = exposureFusion(images, { removeGhosts: !!o.removeGhosts, depth: app.deep ? 16 : 8 });
+        if (!(fused.data instanceof Uint16Array)) return { image: fused, deep: null, exposures };
+        const proxy = new Uint8ClampedArray(fused.data.length);
+        for (let i = 0; i < proxy.length; i++) proxy[i] = (fused.data[i] + 128) / 257;
+        return { image: { width: w, height: h, data: proxy }, deep: { type: 'u16', data: fused.data }, exposures };
       });
-      const doc = new Document({ width: w, height: h, dpi: 72, name: 'Merged HDR' });
-      const layer = new RasterLayer({ name: 'Background', width: w, height: h });
+      const doc = new Document({ width: w, height: h, dpi: 72, name: 'Merged HDR', depth: result.deep ? 16 : 8 });
+      const layer = new RasterLayer({ name: 'Background', width: w, height: h, deep: result.deep });
       layer.canvas.getContext('2d').putImageData(new ImageData(result.image.data, w, h), 0, 0);
       layer.parent = doc.root;
       doc.root.children.push(layer);
