@@ -108,7 +108,7 @@ const forcedColors = (kind) => (kind === 'web' ? webPalette() : FORCED[kind] ?? 
 function toRgb(c) {
   if (!c) return null;
   if (Array.isArray(c) || ArrayBuffer.isView(c)) return [clampByte(Math.round(c[0])), clampByte(Math.round(c[1])), clampByte(Math.round(c[2]))];
-  const m = /^#?([0-9a-f]{3}|[0-9a-f]{6})/i.exec(String(c).trim());
+  const m = /^#?([0-9a-f]{6}|[0-9a-f]{3})(?:[0-9a-f]{2})?$/i.exec(String(c).trim());
   if (!m) return null;
   const h = m[1].length === 3 ? m[1].split('').map((x) => x + x).join('') : m[1];
   return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
@@ -496,7 +496,8 @@ export function buildPalette(prepared, { colors = 256, palette = 'adaptive', for
   }
   if (base) {
     if (!base.length) base = [[0, 0, 0], [255, 255, 255]];
-    return trimToUsage(prepared, dedupe(base), Math.min(256 - reserve, palette === 'uniform' ? max : 256));
+    // a fixed palette asked for with fewer colours keeps the entries the image uses most; a custom table is kept whole
+    return trimToUsage(prepared, dedupe(base), palette === 'custom' ? 256 - reserve : max);
   }
   const force = dedupe(forcedColors(forced)).slice(0, max);
   const hist = colorHistogram(prepared);

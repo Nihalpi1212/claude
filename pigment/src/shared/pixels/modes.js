@@ -104,7 +104,7 @@ const encodeSrgb = (v) => (v <= 0.0031308 ? 12.92 * v : 1.055 * v ** (1 / 2.4) -
 
 function toRgb(c, fallback = [0, 0, 0]) {
   if (Array.isArray(c) || ArrayBuffer.isView(c)) return [c[0], c[1], c[2]];
-  const m = /^#?([0-9a-f]{3}|[0-9a-f]{6})/i.exec(String(c ?? '').trim());
+  const m = /^#?([0-9a-f]{6}|[0-9a-f]{3})(?:[0-9a-f]{2})?$/i.exec(String(c ?? '').trim());
   if (!m) return fallback;
   const h = m[1].length === 3 ? m[1].split('').map((x) => x + x).join('') : m[1];
   return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
@@ -707,6 +707,13 @@ export function convertPixels(img, from, to, options = {}) {
   if (!path) throw new Error(`Cannot convert ${from} to ${to}`);
   let out = { width: img.width, height: img.height, data: new Uint8ClampedArray(img.data), mode: from };
   let source = options.source ?? {};
+  if (path.length === 1) {
+    // nothing to convert: the copy keeps what its mode needs
+    if (source.colorTable) Object.assign(out, { colorTable: source.colorTable, transparentIndex: source.transparentIndex ?? -1 });
+    if (source.duotone) out.duotone = source.duotone;
+    if (source.multichannel) out.multichannel = source.multichannel;
+    return out;
+  }
   for (let s = 1; s < path.length; s++) {
     out = convertStep(out, path[s - 1], path[s], options, source);
     // the next step of a chain converts what this step produced

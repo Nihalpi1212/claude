@@ -1,7 +1,758 @@
-// STUB (0.3): 16 and 32 bits per channel (RasterLayer.deep), 16-bit PNG and TIFF/TGA formats.
-// Replaced by its builder; the contract is in ARCHITECTURE.md "0.3 features (contracts)".
-import { stubCommands } from './stub.js';
+// 16 and 32 bits per channel (see ARCHITECTURE.md "16 and 32 bits per channel").
+//
+// A raster layer of a deep document keeps its real pixels in `layer.deep` ({ type: 'u16'|'f32', data },
+// straight RGBA, the size of the layer canvas) and the canvas is their 8-bit proxy: everything that
+// paints, composites and previews keeps working on canvases, and this module keeps the two in step.
+//
+//  - Image > Mode > 8/16/32 Bits/Channel (`image:depth`) allocates or drops the deep pixels, one undo entry.
+//  - An adjustment committed through a pixel-edit session ('pixels:committed' with meta.adjustment) is run again
+//    on the deep pixels (pixels/deep.js: exact float maths for most kinds) and the proxy is regenerated from them.
+//  - Every other pixel change (brush strokes, filters, transforms, fills: 8-bit work) is taken over from the
+//    proxy by the sync pass: only the pixels whose proxy no longer matches the deep samples change, so the
+//    rest of the layer keeps its precision. The pass is content based (it compares pixels, not events), which
+//    makes it independent of who changed the canvas and how: undo and redo simply bring the proxy back, and the
+//    deep samples that proxy used to stand for are put back from a small per-layer stash.
+//  - 16-bit PNG, TIFF and TGA open and export through lib/io.js's registries; .pigment stores `layer.deep` itself.
+//
+// Masks stay 8-bit (Photoshop keeps 16-bit masks; Pigment does not). 32-bit samples are display-referred
+// floats (1 = white, more is HDR headroom the proxy clamps), not linear light as in Photoshop.
+import { ADJUSTMENTS } from '../../shared/pixels/adjust.js';
+import {
+  DEEP_TYPES, fromCanvasData, toCanvasData, convertDepth, createDeep, extractRect, mixRect, hasPrecision, syncFromProxy,
+  applyAdjustmentDeep, isExactKind, blendDeep, resampleDeep, statistics, DEEP_BLEND_MODES, q8u16, q8f32, toPs16,
+} from '../../shared/pixels/deep.js';
+import { encodePng, decodePng, toRgba16, isPng, pngInfo } from '../../shared/pixels/png.js';
+import { encodeTiff, decodeTiff, toRgba, isTiff } from '../../shared/pixels/tiff.js';
+import { encodeTga, decodeTga } from '../../shared/pixels/tga.js';
+import { parseColor } from '../../shared/pixels/color.js';
+import { Document, RasterLayer, createCanvas } from './document.js';
+import { flattenDocument } from './compositor.js';
+import { registerExportFormat, registerOpenFormat, baseName, extOf } from './io.js';
+import { SAVE_FILTERS } from './documents.js';
+import { bridge } from './bridge.js';
+
+const SYNC_DELAY = 150; // ms of quiet after the last change before the deep pixels follow the proxy
+const STASH_PATCHES = 12; // precise patches remembered per canvas for undo/redo ...
+const STASH_BYTES = 192 * 1024 * 1024; // ... and their memory bound
+const RETIRED_CANVASES = 6; // canvases swapped out by transforms whose deep pixels stay for an undo
+const DEPTH_NAMES = { 8: '8 Bits/Channel', 16: '16 Bits/Channel', 32: '32 Bits/Channel' };
+// Image > Mode: bitmap, indexed and duotone are 8-bit only; 32 bits need RGB or Grayscale (the menu greys the rest out)
+const allowedDepths = (mode) => (['bitmap', 'indexed', 'duotone'].includes(mode) ? [8] : ['rgb', 'grayscale'].includes(mode ?? 'rgb') ? [8, 16, 32] : [8, 16]);
+
+const isDeepLayer = (l) => l.type === 'raster' && !l.quickMask && !l.preview;
+const ctx2d = (canvas) => canvas.getContext('2d', { willReadFrequently: true });
+const planesOf = (layer) => ({ type: layer.deep.type, data: layer.deep.data, width: layer.canvas.width, height: layer.canvas.height });
 
 export function install(app) {
-  stubCommands(app, ['image:depth']);
+  // ---- keeping deep pixels in step ------------------------------------------------------------------------------
+  // canvas -> { deep, version, stash }: `version` is the layer version the deep pixels were last checked at;
+  // `stash` holds precise patches the proxy has overwritten (newest first) so an undo can bring them back.
+  // Keyed by canvas because history swaps whole canvases (Free Transform, Image Size, layers growing under a brush).
+  const states = new WeakMap();
+  const retired = []; // strong references to the last few states whose canvas left its layer
+
+  function remember(layer) {
+    const st = { deep: layer.deep, version: layer.version, stash: [], bytes: 0 };
+    states.set(layer.canvas, st);
+    return st;
+  }
+
+  function stashPatch(st, patch) {
+    if (!patch || !hasPrecision(patch)) return; // 8-bit values are rebuilt from the proxy anyway
+    st.stash.unshift(patch);
+    st.bytes += patch.data.byteLength;
+    while (st.stash.length > STASH_PATCHES || (st.bytes > STASH_BYTES && st.stash.length > 1)) st.bytes -= st.stash.pop().data.byteLength;
+  }
+
+  /** Keeps the state of a canvas that is no longer on its layer alive for a while (undo puts the canvas back). */
+  function retire(canvas, st) {
+    const i = retired.findIndex((r) => r.canvas === canvas);
+    if (i >= 0) retired.splice(i, 1);
+    retired.unshift({ canvas, st });
+    while (retired.length > RETIRED_CANVASES) states.delete(retired.pop().canvas);
+  }
+
+  /**
+   * Makes one raster layer's deep pixels describe its canvas. `override` ({ rect, img }) reads that part of the
+   * proxy from `img` instead of the canvas (the state before a pixel-edit session, to redo the edit at full depth).
+   */
+  function syncLayer(doc, layer, override = null) {
+    const type = DEEP_TYPES[doc.depth];
+    const canvas = layer.canvas;
+    const w = canvas.width, h = canvas.height, n = w * h * 4;
+    let st = states.get(canvas);
+    let external = false;
+    if (layer.deep && layer.deep.data?.length === n) {
+      if (layer.deep.type !== type) {
+        const c = convertDepth(planesOf(layer), type);
+        layer.deep = { type, data: c.data };
+        st = null;
+      }
+      if (st && st.deep.data === layer.deep.data) {
+        if (st.version === layer.version && !override) return;
+        st.deep = layer.deep;
+      } else {
+        // deep pixels this module has not seen on this canvas: a file just read, a cloned layer, a merged HDR result
+        st = remember(layer);
+        external = true;
+      }
+    } else if (st && st.deep.type === type && st.deep.data.length === n) {
+      // the canvas came back (undo of a transform): so do the deep pixels it had
+      layer.deep = st.deep;
+    } else st = null;
+    const img = ctx2d(canvas).getImageData(0, 0, w, h);
+    if (override) {
+      const { rect, img: part } = override;
+      for (let y = 0; y < rect.height; y++) img.data.set(part.data.subarray(y * rect.width * 4, (y + 1) * rect.width * 4), ((rect.y + y) * w + rect.x) * 4);
+    }
+    if (!st) {
+      // a layer without deep pixels yet (new, pasted, resized): they start as the proxy's
+      layer.deep = { type, data: fromCanvasData(img, type).data };
+      remember(layer).version = override ? -1 : layer.version;
+      return;
+    }
+    const planes = planesOf(layer);
+    const res = syncFromProxy(planes, img, { restore: st.stash, loose: external, backup: true });
+    if (res.before && res.bounds) stashPatch(st, extractRect({ type, data: res.before, width: w, height: h }, res.bounds));
+    if (external && res.loosePixels) {
+      // a proxy rounded another way than ours: the deep pixels are the truth, the canvas is rewritten from them
+      const proxy = toCanvasData(planes);
+      ctx2d(canvas).putImageData(new ImageData(proxy.data, w, h), 0, 0);
+      layer.touch();
+      doc.view?.invalidate?.();
+    }
+    st.version = override ? -1 : layer.version;
+  }
+
+  /** Brings every raster layer of the document in step with its depth (drops deep pixels of 8-bit documents). */
+  function syncNow(doc) {
+    if (!doc?.root) return;
+    clearTimeout(timers.get(doc));
+    timers.delete(doc);
+    const deep = doc.depth === 16 || doc.depth === 32;
+    for (const layer of doc.layers()) {
+      if (layer.type !== 'raster') continue;
+      if (!deep || !isDeepLayer(layer)) {
+        if (layer.deep) layer.deep = null; // a layer that came from a deep document into an 8-bit one
+        continue;
+      }
+      // a canvas this layer had before (and its deep pixels) may come back with an undo
+      const prev = lastCanvas.get(layer);
+      if (prev && prev !== layer.canvas && states.has(prev)) retire(prev, states.get(prev));
+      lastCanvas.set(layer, layer.canvas);
+      try {
+        syncLayer(doc, layer);
+      } catch (err) {
+        console.warn('depth: could not sync a layer', err);
+      }
+    }
+  }
+
+  const timers = new WeakMap(); // doc -> timeout id
+  const lastCanvas = new WeakMap(); // layer -> the canvas its state was last checked on
+
+  function schedule(doc) {
+    if (!doc || !(doc.depth > 8) || timers.has(doc)) return;
+    timers.set(doc, setTimeout(function run() {
+      timers.delete(doc);
+      if (!app.docs?.docs?.includes(doc)) return;
+      // a stroke in progress repaints the canvas on every pointer move: wait for it to end
+      if (doc.history?.stroke) return schedule(doc);
+      syncNow(doc);
+    }, SYNC_DELAY));
+  }
+
+  app.on('doc:opened', (doc) => {
+    if (doc?.depth > 8 || doc?.layers?.().some((l) => l.deep)) syncNow(doc);
+  });
+  app.on('doc:change', (e) => {
+    const doc = e?.doc;
+    if (!doc || !(doc.depth > 8)) return;
+    if (e.kind === 'pixels' || e.kind === 'tree' || e.kind === 'canvas' || e.kind === 'history') schedule(doc);
+  });
+
+  /** Selection coverage (0..255) of a layer-local rect, the way a pixel-edit session blends its result. */
+  function selectionAlpha(doc, docRect) {
+    const sel = doc.selection && !doc.selection.isEmpty ? doc.selection : null;
+    if (!sel) return null;
+    const out = new Uint8ClampedArray(docRect.width * docRect.height);
+    for (let y = 0; y < docRect.height; y++) {
+      const sy = docRect.y + y;
+      if (sy < 0 || sy >= doc.height) continue;
+      for (let x = 0; x < docRect.width; x++) {
+        const sx = docRect.x + x;
+        if (sx >= 0 && sx < doc.width) out[y * docRect.width + x] = sel.mask[sy * doc.width + sx];
+      }
+    }
+    return out;
+  }
+
+  // an adjustment committed at 8 bits is run again on the deep pixels; anything else is picked up by the sync pass
+  app.on('pixels:committed', (e) => {
+    const { doc, layer, rect, local, isMask, original, after, meta } = e ?? {};
+    if (!doc || !(doc.depth > 8) || isMask || !layer || !isDeepLayer(layer)) return;
+    const adj = meta?.adjustment;
+    const def = adj && Object.prototype.hasOwnProperty.call(ADJUSTMENTS, adj.kind) ? ADJUSTMENTS[adj.kind] : null;
+    if (!def || def.placeholder || !local || !original || layer.canvas.width < local.x + local.width || layer.canvas.height < local.y + local.height) return schedule(doc);
+    try {
+      // the deep pixels as they were when the session began (previews may have been taken over in between)
+      syncLayer(doc, layer, { rect: local, img: original });
+      const st = states.get(layer.canvas);
+      const planes = planesOf(layer);
+      const before = extractRect(planes, local);
+      applyAdjustmentDeep(planes, adj.kind, adj.params ?? {}, local);
+      // image modes that constrain pixels to grey (lib/modes.js) do so on the 8-bit result; mirror it
+      if (doc.mode === 'grayscale') applyAdjustmentDeep(planes, 'desaturate', {}, local);
+      const alpha = selectionAlpha(doc, rect);
+      if (alpha) mixRect(planes, before, alpha);
+      stashPatch(st, before);
+      // the proxy and the undo entry's "after" pixels become the quantised deep result, so redo shows exactly this
+      const proxy = toCanvasData(planes, { rect: local });
+      ctx2d(layer.canvas).putImageData(new ImageData(proxy.data, local.width, local.height), local.x, local.y);
+      if (after?.data?.length === proxy.data.length) after.data.set(proxy.data);
+      layer.touch();
+      st.version = layer.version;
+      doc.changed('pixels', { layer, rect });
+    } catch (err) {
+      console.warn('depth: the adjustment was kept at 8 bits', err);
+      schedule(doc);
+    }
+  });
+
+  // ---- Image > Mode > Bits/Channel ------------------------------------------------------------------------------
+  function setDepth(doc, depth, { dither = app.settings.depthDither !== false } = {}) {
+    const from = doc.depth ?? 8;
+    if (depth === from) return false;
+    syncNow(doc);
+    const type = DEEP_TYPES[depth] ?? null;
+    const records = [];
+    let bytes = 0;
+    for (const layer of doc.layers()) {
+      if (!isDeepLayer(layer)) continue;
+      const canvas = layer.canvas, w = canvas.width, h = canvas.height;
+      const rec = { layer, canvas, before: layer.deep, after: null, pixelsBefore: null, pixelsAfter: null };
+      if (type) rec.after = layer.deep ? { type, data: convertDepth(planesOf(layer), type).data } : { type, data: fromCanvasData(ctx2d(canvas).getImageData(0, 0, w, h), type).data };
+      else if (dither && layer.deep && hasPrecision(layer.deep)) {
+        // going down to 8 bits: in-between values become noise instead of bands
+        const img = toCanvasData(planesOf(layer), { dither: true });
+        rec.pixelsBefore = ctx2d(canvas).getImageData(0, 0, w, h);
+        rec.pixelsAfter = new ImageData(img.data, w, h);
+        bytes += w * h * 8;
+      }
+      bytes += (rec.before?.data.byteLength ?? 0) + (rec.after?.data.byteLength ?? 0);
+      records.push(rec);
+    }
+    const apply = (to, which) => {
+      doc.depth = to;
+      for (const rec of records) {
+        const { layer, canvas } = rec;
+        if (layer.canvas !== canvas) {
+          // the canvas was swapped since (it cannot be, with a linear history; be safe): the sync pass rebuilds this layer
+          if (to === 8) layer.deep = null;
+          continue;
+        }
+        const pixels = which === 'after' ? rec.pixelsAfter : rec.pixelsBefore;
+        if (pixels) {
+          ctx2d(canvas).putImageData(pixels, 0, 0);
+          layer.touch();
+        }
+        layer.deep = which === 'after' ? rec.after : rec.before;
+        if (layer.deep) remember(layer);
+        else states.delete(canvas);
+      }
+      doc.changed('props');
+      app.syncUiState();
+      app.commands.invalidate();
+      schedule(doc);
+    };
+    doc.history.run(DEPTH_NAMES[depth], () => {
+      apply(depth, 'after');
+      return { undo: () => apply(from, 'before'), redo: () => apply(depth, 'after') };
+    }, { bytes });
+    return true;
+  }
+
+  function depthCommand(arg) {
+    const doc = app.doc;
+    if (!doc) return;
+    const depth = Number(arg && typeof arg === 'object' ? arg.depth : arg);
+    if (![8, 16, 32].includes(depth)) return;
+    if (!allowedDepths(doc.mode).includes(depth)) {
+      app.dialogs.toast(`${DEPTH_NAMES[depth]} is not available in this image mode`, { kind: 'error' });
+      return;
+    }
+    const lostHdr = doc.depth === 32 && depth < 32;
+    const changed = setDepth(doc, depth, arg && typeof arg === 'object' && 'dither' in arg ? { dither: !!arg.dither } : undefined);
+    if (changed && lostHdr) app.dialogs.toast('Highlights brighter than white were clipped', { timeout: 2600 });
+  }
+
+  app.commands.registerAll({
+    'image:depth': { enabled: () => !!app.doc, run: depthCommand, label: 'Bits/Channel' },
+  });
+  // the module replaces a stub that listed this id as unavailable
+  if (Array.isArray(app.stubbed)) {
+    const i = app.stubbed.indexOf('image:depth');
+    if (i >= 0) app.stubbed.splice(i, 1);
+  }
+
+  // ---- flattening at full depth ---------------------------------------------------------------------------------
+  const styled = (layer) => !!layer.styles && Object.values(layer.styles).some((s) => s?.enabled);
+
+  /**
+   * How the document can be composited in float: the layers in drawing order, or the reason it cannot (then the
+   * 8-bit composite is scaled up). Float covers raster, text, shape, fill and smart layers with the Normal,
+   * Multiply and Screen blend modes, opacity, fill opacity and masks, Pass Through groups, and adjustment layers
+   * whose kind has deep maths.
+   */
+  function planFlatten(doc) {
+    const steps = [];
+    let reason = null;
+    const walk = (group) => {
+      const kids = group.children;
+      for (let i = 0; i < kids.length && !reason; i++) {
+        const layer = kids[i];
+        if (!layer.visible) continue;
+        const name = `“${layer.name}”`;
+        if (layer.clip && kids.slice(0, i).some((k) => !k.clip)) reason = `${name} is a clipping mask`;
+        else if (layer.type === 'adjustment') {
+          const def = Object.prototype.hasOwnProperty.call(ADJUSTMENTS, layer.kind) ? ADJUSTMENTS[layer.kind] : null;
+          if (!def || !(isExactKind(layer.kind) || typeof def.lut === 'function')) reason = `the ${def?.name ?? layer.kind} adjustment layer works at 8 bits`;
+          else steps.push({ adjust: layer });
+        } else if (layer.isGroup) {
+          if (layer.blend === 'pass-through' && layer.opacity >= 1 && !layer.mask?.enabled && !styled(layer)) walk(layer);
+          else reason = `the group ${name} is not a plain Pass Through group`;
+        } else if (styled(layer)) reason = `${name} has layer effects`;
+        else if (!DEEP_BLEND_MODES.includes(layer.blend)) reason = `${name} uses the ${String(layer.blend).replace(/-/g, ' ')} blend mode`;
+        else steps.push({ layer });
+      }
+    };
+    if (doc.depth > 8) {
+      if (doc.mode === 'duotone' || doc.mode === 'indexed' || doc.mode === 'bitmap') reason = 'this image mode is rendered at 8 bits';
+      else walk(doc.root);
+    } else reason = 'the document is 8 bits/channel';
+    return reason ? { exact: false, reason } : { exact: true, steps };
+  }
+
+  function maskOf(layer) {
+    if (!layer.mask?.enabled || !layer.mask.canvas) return null;
+    const c = layer.mask.canvas;
+    // mask canvases sit at the document origin; their alpha is the coverage
+    return { data: ctx2d(c).getImageData(0, 0, c.width, c.height).data, width: c.width, height: c.height, x: 0, y: 0, channels: 4, offset: 3 };
+  }
+
+  /**
+   * The flattened document as deep planes ({ type, width, height, data } plus exact and reason): composited in
+   * float when planFlatten allows it, else the 8-bit composite scaled up (exact: false, reason says why).
+   */
+  function flattenDeep(doc, { type = doc.depth === 32 ? 'f32' : 'u16', compositor = doc.view?.compositor } = {}) {
+    syncNow(doc);
+    const plan = planFlatten(doc);
+    if (!plan.exact) {
+      const flat = flattenDocument(doc, compositor);
+      const planes = fromCanvasData(ctx2d(flat).getImageData(0, 0, flat.width, flat.height), type);
+      return { ...planes, exact: false, reason: plan.reason };
+    }
+    const acc = createDeep(doc.width, doc.height, type);
+    for (const step of plan.steps) {
+      if (step.adjust) {
+        const layer = step.adjust;
+        const mask = maskOf(layer);
+        const opacity = Math.max(0, Math.min(1, layer.opacity ?? 1));
+        if (!(opacity > 0)) continue;
+        const partial = opacity < 1 || mask;
+        const before = partial ? extractRect(acc) : null;
+        applyAdjustmentDeep(acc, layer.kind, layer.params ?? {});
+        if (partial) {
+          const alpha = new Uint8ClampedArray(doc.width * doc.height);
+          for (let y = 0; y < doc.height; y++) {
+            for (let x = 0; x < doc.width; x++) {
+              const m = mask ? (x < mask.width && y < mask.height ? mask.data[(y * mask.width + x) * 4 + 3] : 0) : 255;
+              alpha[y * doc.width + x] = m * opacity;
+            }
+          }
+          mixRect(acc, before, alpha);
+        }
+        continue;
+      }
+      const layer = step.layer;
+      let src, x, y;
+      if (layer.type === 'raster' && layer.deep) {
+        src = planesOf(layer);
+        x = layer.x;
+        y = layer.y;
+      } else {
+        // text, shapes, fills and smart objects render at 8 bits; they still blend in float
+        const s = layer.type === 'raster' ? { canvas: layer.canvas, x: layer.x, y: layer.y } : compositor?.layerSource?.(layer) ?? (typeof layer.render === 'function' ? layer.render() : null);
+        if (!s?.canvas?.width) continue;
+        src = fromCanvasData(ctx2d(s.canvas).getImageData(0, 0, s.canvas.width, s.canvas.height), 'u16');
+        x = s.x ?? 0;
+        y = s.y ?? 0;
+      }
+      blendDeep(acc, src, { alpha: (layer.opacity ?? 1) * (layer.fillOpacity ?? 1), mode: layer.blend, x, y, mask: maskOf(layer) });
+    }
+    // Grayscale documents show (and export) the luma of the composite, so coloured layers cannot leak colour
+    if (doc.mode === 'grayscale') applyAdjustmentDeep(acc, 'desaturate');
+    return { ...acc, exact: true, reason: null };
+  }
+
+  // ---- export ---------------------------------------------------------------------------------------------------
+  /** The flattened image as deep planes at the export size and over the export background. */
+  function exportPlanes(doc, opts, compositor, type) {
+    let flat;
+    if (opts.canvas) {
+      // a ready-made canvas (Export Layers to Files renders each layer on its own): 8-bit pixels
+      flat = { ...fromCanvasData(ctx2d(opts.canvas).getImageData(0, 0, opts.canvas.width, opts.canvas.height), type), exact: false };
+    } else flat = flattenDeep(doc, { type, compositor });
+    const { exact } = flat;
+    let planes = { type: flat.type, width: flat.width, height: flat.height, data: flat.data };
+    if (opts.background) {
+      const [r, g, b] = parseColor(opts.background, [255, 255, 255, 1]);
+      const k = type === 'f32' ? 1 / 255 : 257;
+      const bg = createDeep(planes.width, planes.height, type);
+      const white = type === 'f32' ? 1 : 65535;
+      for (let i = 0; i < bg.data.length; i += 4) {
+        bg.data[i] = r * k;
+        bg.data[i + 1] = g * k;
+        bg.data[i + 2] = b * k;
+        bg.data[i + 3] = white;
+      }
+      planes = blendDeep(bg, planes);
+    }
+    const w = Math.max(1, Math.round(opts.width ?? planes.width * (opts.scale ?? 1)));
+    const h = Math.max(1, Math.round(opts.height ?? planes.height * (opts.scale ?? 1)));
+    if (w !== planes.width || h !== planes.height) planes = resampleDeep(planes, w, h);
+    return { planes, exact };
+  }
+
+  /** Drops the alpha channel when every pixel is opaque (smaller files, and what other programs expect). */
+  function packChannels(planes, depth) {
+    const { width, height, data } = planes;
+    const white = depth === 32 ? 1 : depth === 16 ? 65535 : 255;
+    let opaque = true;
+    for (let i = 3; i < data.length && opaque; i += 4) if (data[i] < white) opaque = false;
+    if (!opaque) return { width, height, channels: 4, depth, data };
+    const n = width * height;
+    const out = new data.constructor(n * 3);
+    for (let i = 0; i < n; i++) {
+      out[i * 3] = data[i * 4];
+      out[i * 3 + 1] = data[i * 4 + 1];
+      out[i * 3 + 2] = data[i * 4 + 2];
+    }
+    return { width, height, channels: 3, depth, data: out };
+  }
+
+  /** The 8-bit flattened image at the export size (the sizing and background rules of io.js exportImage). */
+  function exportImageData(doc, opts, compositor) {
+    let canvas = opts.canvas ?? flattenDocument(doc, compositor);
+    const w = Math.max(1, Math.round(opts.width ?? canvas.width * (opts.scale ?? 1)));
+    const h = Math.max(1, Math.round(opts.height ?? canvas.height * (opts.scale ?? 1)));
+    if (w !== canvas.width || h !== canvas.height || opts.background) {
+      const out = createCanvas(w, h);
+      const ctx = out.getContext('2d');
+      if (opts.background) {
+        ctx.fillStyle = opts.background;
+        ctx.fillRect(0, 0, w, h);
+      }
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(canvas, 0, 0, w, h);
+      canvas = out;
+    }
+    return ctx2d(canvas).getImageData(0, 0, canvas.width, canvas.height);
+  }
+
+  async function encodePng16(doc, opts = {}, compositor) {
+    const { planes } = exportPlanes(doc, opts, compositor, 'u16');
+    return encodePng(packChannels(planes, 16), { dpi: doc.dpi });
+  }
+
+  async function encodeTiffDocument(doc, opts = {}, compositor) {
+    const asked = Number(opts.tiffDepth);
+    const depth = [8, 16, 32].includes(asked) ? asked : opts.canvas ? 8 : doc.depth ?? 8;
+    const compression = ['none', 'lzw', 'packbits', 'deflate'].includes(opts.compression) ? opts.compression : 'lzw';
+    let planes;
+    if (depth === 8) {
+      const img = exportImageData(doc, opts, compositor);
+      planes = packChannels({ width: img.width, height: img.height, data: img.data }, 8);
+    } else planes = packChannels(exportPlanes(doc, opts, compositor, depth === 32 ? 'f32' : 'u16').planes, depth);
+    return encodeTiff(planes, { compression, dpi: doc.dpi });
+  }
+
+  async function encodeTgaDocument(doc, opts = {}, compositor) {
+    const img = exportImageData(doc, opts, compositor);
+    return encodeTga({ width: img.width, height: img.height, data: img.data }, { rle: opts.tgaRle !== false });
+  }
+
+  /** A line under the format's options that says whether the file gets a true 16-bit composite. */
+  function depthNote(wantsDeep = () => true) {
+    return (values, _set, form) => {
+      const el = document.createElement('div');
+      el.className = 'muted depth-note';
+      const update = (v) => {
+        const doc = app.doc;
+        if (!doc) return;
+        if (!wantsDeep(v, doc)) el.textContent = '8 bits/channel.';
+        else {
+          const plan = planFlatten(doc);
+          el.textContent = plan.exact
+            ? `Composited at ${doc.depth} bits/channel.`
+            : doc.depth > 8
+              ? `8-bit composite: ${plan.reason}, so the file holds the 8-bit result at a higher bit depth.`
+              : '8-bit composite: the document is 8 bits/channel, so the file holds the same pixels at a higher bit depth.';
+        }
+        el.dataset.exact = String(wantsDeep(v, doc) && planFlatten(doc).exact);
+      };
+      update(values);
+      // the form only re-syncs a custom field when its own key is set: follow the other fields through their events
+      form?.element?.addEventListener('change', () => update(form.values));
+      return el;
+    };
+  }
+  const note = (key, wantsDeep) => ({ key, type: 'custom', render: depthNote(wantsDeep) });
+
+  registerExportFormat('png16', {
+    name: 'PNG 16-bit',
+    ext: 'png',
+    extensions: [], // .png keeps routing to the 8-bit PNG; this format is chosen in Export As (and for deep documents on Save)
+    mime: 'image/png',
+    encode: encodePng16,
+    options: [note('png16Note')],
+  });
+  const tiffDeep = (v, doc) => (Number(v?.tiffDepth) || doc.depth || 8) > 8;
+  registerExportFormat('tiff', {
+    name: 'TIFF image',
+    ext: 'tif',
+    extensions: ['tif', 'tiff'],
+    mime: 'image/tiff',
+    encode: encodeTiffDocument,
+    options: [
+      { key: 'tiffDepth', label: 'Depth', type: 'select', value: 0, options: [[0, 'Same as the document'], [8, '8 bits/channel'], [16, '16 bits/channel'], [32, '32 bits/channel (float)']] },
+      { key: 'compression', label: 'Compression', type: 'select', value: 'lzw', options: [['lzw', 'LZW'], ['deflate', 'ZIP (Deflate)'], ['packbits', 'PackBits'], ['none', 'None']] },
+      note('tiffNote', tiffDeep),
+    ],
+  });
+  registerExportFormat('tga', {
+    name: 'Targa image',
+    ext: 'tga',
+    extensions: ['tga'],
+    mime: 'image/x-tga',
+    encode: encodeTgaDocument,
+    options: [{ key: 'tgaRle', label: 'Compress (RLE)', type: 'checkbox', value: true }],
+  });
+  // Save As lists the flat formats this module writes (documents.js reads the array when the dialog opens)
+  for (const f of [{ name: 'TIFF image', extensions: ['tif', 'tiff'] }, { name: 'Targa image', extensions: ['tga'] }]) {
+    if (!SAVE_FILTERS.some((s) => s.name === f.name)) SAVE_FILTERS.push(f);
+  }
+
+  // ---- open -----------------------------------------------------------------------------------------------------
+  /** A one-layer document from RGBA planes at their own depth ({ width, height, depth, data }). */
+  function documentFromPlanes(img, { name, dpi }) {
+    const { width, height, depth, data } = img;
+    const doc = new Document({ width, height, dpi: dpi > 0 ? Math.round(dpi) : 72, name: baseName(name), depth });
+    const layer = new RasterLayer({ name: 'Background', width, height });
+    const proxy = depth === 8 ? data : toCanvasData({ type: DEEP_TYPES[depth], data, width, height }).data;
+    layer.canvas.getContext('2d').putImageData(new ImageData(proxy instanceof Uint8ClampedArray ? proxy : new Uint8ClampedArray(proxy), width, height), 0, 0);
+    if (depth > 8) layer.deep = { type: DEEP_TYPES[depth], data };
+    doc.root.children.push(layer);
+    layer.parent = doc.root;
+    doc.active = layer;
+    doc.selected.add(layer);
+    return doc;
+  }
+
+  registerOpenFormat({
+    id: 'png16',
+    // 8-bit PNGs keep the browser's decoder; only files that really carry 16-bit samples come here
+    test: (bytes) => {
+      try {
+        return isPng(bytes) && pngInfo(bytes).bitDepth === 16;
+      } catch {
+        return false;
+      }
+    },
+    read: async (bytes, { name }) => {
+      const dec = await decodePng(bytes);
+      const rgba = toRgba16(dec);
+      // a copy: decodePng may hand out its own buffer, and the layer owns its samples
+      return documentFromPlanes({ width: rgba.width, height: rgba.height, depth: 16, data: new Uint16Array(rgba.data) }, { name, dpi: dec.dpi });
+    },
+  });
+  registerOpenFormat({
+    id: 'tiff',
+    name: 'TIFF images',
+    extensions: ['tif', 'tiff'],
+    test: (bytes, name) => isTiff(bytes) || ['tif', 'tiff'].includes(extOf(name)),
+    read: async (bytes, { name }) => {
+      const dec = await decodeTiff(bytes);
+      const doc = documentFromPlanes(toRgba(dec), { name, dpi: dec.dpi });
+      if (dec.pages > 1) doc.meta.note = `This TIFF holds ${dec.pages} images; Pigment opened the first one.`;
+      return doc;
+    },
+  });
+  registerOpenFormat({
+    id: 'tga',
+    name: 'Targa images',
+    extensions: ['tga'],
+    read: async (bytes, { name }) => {
+      const img = decodeTga(bytes);
+      return documentFromPlanes({ width: img.width, height: img.height, depth: 8, data: img.data }, { name });
+    },
+  });
+  app.on('doc:opened', (doc) => {
+    if (doc?.meta?.note && /^This TIFF holds/.test(doc.meta.note)) {
+      app.dialogs.toast(doc.meta.note, { timeout: 4000 });
+      delete doc.meta.note;
+    }
+  });
+
+  // ---- saving ---------------------------------------------------------------------------------------------------
+  // Deep pixels must describe the canvas before they are written (.pigment stores layer.deep as it is), a deep
+  // document saved to .png keeps its depth (the registry routes .png to the 8-bit encoder), and PSD cannot hold
+  // them: say so once per document. documents.js has no "about to save" event, so writeTo is wrapped here.
+  const warnedPsd = new WeakSet();
+  const docs = app.docs;
+  if (docs && typeof docs.writeTo === 'function') {
+    const writeTo = docs.writeTo.bind(docs);
+    docs.writeTo = async (doc, path, opts = {}) => {
+      if (!doc || !(doc.depth > 8)) return writeTo(doc, path, opts);
+      app.tools?.active?.commit?.();
+      syncNow(doc);
+      const ext = extOf(path);
+      if (ext === 'png') {
+        try {
+          const bytes = await app.busy(`Saving ${path.split(/[\\/]/).pop()}…`, () => encodePng16(doc, {}, doc.view.compositor));
+          await bridge.writeFile(path, bytes);
+          if (!opts.copy) doc.history.markSaved(flattenDocument(doc, doc.view.compositor));
+          app.dialogs.toast(`Saved ${path.split(/[\\/]/).pop()} (16 bits/channel)`, { kind: 'success', timeout: 1600 });
+          app.emit('doc:saved', doc);
+          return true;
+        } catch (err) {
+          app.reportError(err, 'Could not save');
+          return false;
+        }
+      }
+      const ok = await writeTo(doc, path, opts);
+      if (ok && ext === 'psd' && !warnedPsd.has(doc)) {
+        warnedPsd.add(doc);
+        app.dialogs.toast(`PSD files are written at 8 bits/channel. Save as .pigment, TIFF or PNG to keep ${doc.depth} bits.`, { timeout: 6000 });
+      } else if (ok && ['jpg', 'jpeg', 'webp', 'tga'].includes(ext) && !warnedPsd.has(doc)) {
+        warnedPsd.add(doc);
+        app.dialogs.toast(`${ext.toUpperCase()} files hold 8 bits/channel. Save as .pigment, TIFF or PNG to keep ${doc.depth} bits.`, { timeout: 6000 });
+      }
+      return ok;
+    };
+  }
+
+  // ---- Info panel -----------------------------------------------------------------------------------------------
+  /**
+   * The deep value under a document pixel: { depth, values: [r, g, b, a], text: [..], precise }. The composite is
+   * 8-bit, so the readout takes the deep samples of the topmost layer whose pixel is what the composite shows there
+   * (precise: true) and falls back to the composite's 8-bit value scaled up. 16-bit values are shown on
+   * Photoshop's 0..32768 scale (settings.info16Range = 65535 shows raw samples), 32-bit ones as floats.
+   */
+  function readout(doc, x, y) {
+    if (!doc || !(doc.depth > 8) || x < 0 || y < 0 || x >= doc.width || y >= doc.height) return null;
+    let rgba;
+    try {
+      const comp = doc.view.compositor.composite(doc);
+      rgba = ctx2d(comp).getImageData(x, y, 1, 1).data;
+    } catch {
+      return null;
+    }
+    const f32 = doc.depth === 32;
+    const q = f32 ? q8f32 : q8u16;
+    let values = null;
+    const layers = doc.layers();
+    for (let i = layers.length - 1; i >= 0 && !values; i--) {
+      const l = layers[i];
+      if (!l.visible || !isDeepLayer(l) || !l.deep) continue;
+      const lx = x - l.x, ly = y - l.y;
+      if (lx < 0 || ly < 0 || lx >= l.canvas.width || ly >= l.canvas.height || l.deep.data.length !== l.canvas.width * l.canvas.height * 4) continue;
+      const o = (ly * l.canvas.width + lx) * 4, d = l.deep.data;
+      if (q(d[o]) === rgba[0] && q(d[o + 1]) === rgba[1] && q(d[o + 2]) === rgba[2] && q(d[o + 3]) > 0) values = [d[o], d[o + 1], d[o + 2], d[o + 3]];
+    }
+    const precise = !!values;
+    if (!values) values = f32 ? [rgba[0] / 255, rgba[1] / 255, rgba[2] / 255, rgba[3] / 255] : [rgba[0] * 257, rgba[1] * 257, rgba[2] * 257, rgba[3] * 257];
+    const raw = app.settings.info16Range === 65535;
+    const text = values.map((v, i) => (i === 3 ? `${Math.round((f32 ? Math.min(1, v) : v / 65535) * 100)}%` : f32 ? v.toFixed(4) : String(raw ? v : toPs16(v))));
+    return { depth: doc.depth, values, text, precise };
+  }
+
+  let infoBlock = null;
+  let pointer = null;
+  let infoFrame = 0;
+  function infoElement() {
+    if (infoBlock?.isConnected) return infoBlock;
+    const panel = app.panels?.panels?.get('info')?.panel?.element;
+    const anchor = panel?.querySelector('.info-pointer');
+    if (!anchor) return null;
+    infoBlock = document.createElement('div');
+    infoBlock.className = 'info-block info-deep';
+    infoBlock.hidden = true;
+    infoBlock.innerHTML = `
+      <div class="info-title muted" data-k="deep-title">16-bit</div>
+      <div class="info-grid info-deep-grid">
+        <span class="k">R</span><span data-k="deep-r">—</span>
+        <span class="k">G</span><span data-k="deep-g">—</span>
+        <span class="k">B</span><span data-k="deep-b">—</span>
+        <span class="k">A</span><span data-k="deep-a">—</span>
+      </div>`;
+    anchor.after(infoBlock);
+    return infoBlock;
+  }
+  function renderInfo() {
+    infoFrame = 0;
+    const doc = app.doc;
+    const deep = !!doc && doc.depth > 8;
+    if (!deep && !infoBlock) return; // nothing to show and nothing shown: leave the panel alone
+    const el = infoElement();
+    if (!el) return;
+    el.hidden = !deep;
+    if (!deep) return;
+    const p = pointer && pointer.doc === doc ? pointer : null;
+    const r = p ? readout(doc, Math.floor(p.x), Math.floor(p.y)) : null;
+    const set = (k, v) => {
+      el.querySelector(`[data-k="deep-${k}"]`).textContent = v;
+    };
+    set('title', `${doc.depth}-bit${doc.depth === 16 ? (app.settings.info16Range === 65535 ? ' (0–65535)' : ' (0–32768)') : ' (float)'}${r && !r.precise ? ' · from 8-bit' : ''}`);
+    ['r', 'g', 'b', 'a'].forEach((k, i) => set(k, r ? r.text[i] : '—'));
+  }
+  const scheduleInfo = () => {
+    if (infoFrame) return;
+    infoFrame = requestAnimationFrame(renderInfo);
+  };
+  app.on('pointer:moved', ({ view, x, y }) => {
+    pointer = { doc: view?.doc ?? app.doc, x, y };
+    if ((app.doc?.depth > 8 || infoBlock) && app.panels?.isVisible?.('info')) scheduleInfo();
+  });
+  app.on('doc:activated', () => {
+    pointer = null;
+    scheduleInfo();
+  });
+  app.on('doc:change', (e) => {
+    if (e?.doc === app.doc && (e.kind === 'props' || e.kind === 'pixels' || e.kind === 'history') && (app.doc?.depth > 8 || infoBlock)) scheduleInfo();
+  });
+
+  // ---- for other modules and tests ------------------------------------------------------------------------------
+  app.deep = {
+    /** Brings the deep pixels of a document in step with its canvases now (the debounced pass does it otherwise). */
+    sync: (doc = app.doc) => syncNow(doc),
+    setDepth: (doc, depth, opts) => setDepth(doc, depth, opts),
+    allowedDepths,
+    /** A float copy of a raster layer's pixels: { width, height, data: Float32Array RGBA, 0..1 }. */
+    toFloat(layer) {
+      if (!layer || layer.type !== 'raster') return null;
+      const w = layer.canvas.width, h = layer.canvas.height;
+      const doc = app.docs?.docs?.find((d) => d.layers().includes(layer));
+      if (doc?.depth > 8) syncNow(doc);
+      const planes = layer.deep?.data?.length === w * h * 4 ? planesOf(layer) : fromCanvasData(ctx2d(layer.canvas).getImageData(0, 0, w, h), 'f32');
+      return { width: w, height: h, data: planes.type === 'f32' ? planes.data.slice() : convertDepth(planes, 'f32').data };
+    },
+    /** Deep planes of a layer ({ type, data, width, height }, the live arrays) or null. */
+    planes: (layer) => (layer?.deep ? planesOf(layer) : null),
+    flatten: (doc = app.doc, opts) => flattenDeep(doc, opts),
+    plan: (doc = app.doc) => planFlatten(doc),
+    readout,
+    statistics: (layer, rect) => (layer?.deep ? statistics(planesOf(layer), rect) : null),
+  };
 }

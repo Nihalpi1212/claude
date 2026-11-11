@@ -1,10 +1,15 @@
-// Channels panel (bottom group): the composite and its Red / Green / Blue channels (thumbnails of the
-// flattened image), the active layer's mask, and saved alpha channels (doc.channels).
+// Channels panel (bottom group): the channels of the document's image mode (lib/modes.js) as thumbnails of the
+// flattened image, the active layer's mask, and saved alpha channels (doc.channels).
+//   RGB: the composite and Red / Green / Blue        CMYK: the composite and Cyan / Magenta / Yellow / Black
+//   Lab: the composite and Lightness / a / b         Grayscale, Bitmap, Duotone, Indexed Color: one channel
+//   Multichannel: the spot channels the conversion made (saved channels flagged `spot`), nothing else
+// CMYK and Lab channels are derived planes (shared/pixels/modes.js channelPlanes): the document stores RGBA.
 // Ctrl/Cmd-click a thumbnail loads that channel as a selection (+Shift adds, +Alt subtracts).
 // Single-channel viewing is not implemented: the canvas always shows the composite.
 import { icon } from '../icons.js';
 import { createCanvas } from '../document.js';
 import { Selection } from '../selection.js';
+import { MODES, channelPlanes } from '../../../shared/pixels/modes.js';
 
 const TW = 34, TH = 26;
 
@@ -26,7 +31,7 @@ export function install(app) {
   let selectedId = null; // saved alpha channel id
   let pending = 0;
   let thumbTimer = 0;
-  let thumbs = null; // { key, rgb, r, g, b } canvases
+  let thumbs = null; // { key, rgb: composite canvas, planes: { channel id: canvas } }
   const alphaThumbs = new WeakMap(); // channel object -> canvas
   const maskThumbs = new WeakMap(); // layer -> { version, canvas }
 
@@ -42,8 +47,22 @@ export function install(app) {
     return { w: Math.max(1, Math.round(doc.width * s)), h: Math.max(1, Math.round(doc.height * s)) };
   }
 
+  /**
+   * The rows a mode puts above the mask and the saved channels: `composite` (RGB, CMYK, Lab) and the mode's
+   * colour channels. A single-channel mode has no separate composite: its one channel is the picture.
+   */
+  function modeRows(doc) {
+    const info = MODES[doc.mode] ?? MODES.rgb;
+    const single = !info.composite && info.channels.length === 1;
+    return {
+      // `rgb` stays the id of the RGB composite; other composites are named after their mode
+      composite: info.composite ? { type: doc.mode === 'rgb' ? 'rgb' : doc.mode, label: info.composite } : single ? { type: info.channels[0].id, label: info.channels[0].name } : null,
+      channels: single ? [] : info.channels.map((c) => ({ type: c.id, label: c.name, plane: c.id })),
+    };
+  }
+
   function compositeThumbs(doc) {
-    const key = `${doc.id}:${doc.version}`;
+    const key = `${doc.id}:${doc.version}:${doc.mode}`;
     if (thumbs?.key === key) return thumbs;
     const { w, h } = thumbSize(doc);
     const rgb = createCanvas(w, h);
@@ -55,19 +74,19 @@ export function install(app) {
       console.warn('channel thumbnails', err);
     }
     const img = ctx.getImageData(0, 0, w, h);
-    const make = (offset) => {
+    const planes = {};
+    for (const plane of modeRows(doc).channels.length ? channelPlanes(img, doc.mode) : []) {
       const c = createCanvas(w, h);
       const out = new ImageData(w, h);
-      const s = img.data, d = out.data;
-      for (let i = 0; i < s.length; i += 4) {
-        const v = (s[i + offset] * s[i + 3]) / 255;
-        d[i] = d[i + 1] = d[i + 2] = v;
+      const d = out.data, s = plane.data;
+      for (let p = 0, i = 0; p < s.length; p++, i += 4) {
+        d[i] = d[i + 1] = d[i + 2] = s[p];
         d[i + 3] = 255;
       }
       c.getContext('2d').putImageData(out, 0, 0);
-      return c;
-    };
-    thumbs = { key, rgb, r: make(0), g: make(1), b: make(2) };
+      planes[plane.id] = c;
+    }
+    thumbs = { key, rgb, planes };
     return thumbs;
   }
 
@@ -125,17 +144,16 @@ export function install(app) {
       return out;
     }
     const comp = doc.view.compositor.composite(doc);
-    const data = comp.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, doc.width, doc.height).data;
-    const out = new Uint8ClampedArray(doc.width * doc.height);
-    for (let i = 0, j = 0; i < out.length; i++, j += 4) {
-      const a = data[j + 3] / 255;
-      let v;
-      if (which.type === 'r') v = data[j];
-      else if (which.type === 'g') v = data[j + 1];
-      else if (which.type === 'b') v = data[j + 2];
-      else v = 0.299 * data[j] + 0.587 * data[j + 1] + 0.114 * data[j + 2];
-      out[i] = v * a;
+    const img = comp.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, doc.width, doc.height);
+    // a colour channel of the mode (Red, Cyan, Lightness ...): its plane as the panel shows it, white = selected
+    if (which.plane) {
+      const plane = channelPlanes(img, doc.mode).find((p) => p.id === which.plane);
+      if (plane) return plane.data;
     }
+    // the composite (or the one channel of a grey mode): its luminosity
+    const data = img.data;
+    const out = new Uint8ClampedArray(doc.width * doc.height);
+    for (let i = 0, j = 0; i < out.length; i++, j += 4) out[i] = (0.299 * data[j] + 0.587 * data[j + 1] + 0.114 * data[j + 2]) * (data[j + 3] / 255);
     return out;
   }
 
@@ -182,6 +200,7 @@ export function install(app) {
     const doc = app.doc;
     const ch = doc?.channels.find((c) => c.id === id);
     if (!ch) return;
+    // the copy of a spot channel is a plain alpha channel: it prints nothing
     const copy = { id: `C${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`, name: `${ch.name} copy`, mask: new Uint8ClampedArray(ch.mask) };
     setChannels(doc, [...doc.channels, copy], 'Duplicate channel');
     selectedId = copy.id;
@@ -196,7 +215,7 @@ export function install(app) {
   }
 
   // ---- rendering --------------------------------------------------------------------------------------------
-  function channelRow({ label, canvas, which, selected, onClick, onDblClick, menu, hint }) {
+  function channelRow({ label, canvas, which, selected, onClick, onDblClick, menu, hint, ink }) {
     const li = document.createElement('li');
     li.className = 'channel-row' + (selected ? ' selected' : '');
     li.setAttribute('role', 'option');
@@ -205,6 +224,14 @@ export function install(app) {
     const t = thumbBox(canvas);
     t.title = 'Ctrl/Cmd-click: load as selection (Shift adds, Alt subtracts)';
     li.appendChild(t);
+    if (ink) {
+      // spot channels (Multichannel) carry the colour of their ink
+      const chip = document.createElement('span');
+      chip.className = 'channel-ink';
+      chip.style.background = `rgb(${ink.join(',')})`;
+      chip.title = 'Spot channel';
+      li.appendChild(chip);
+    }
     const name = document.createElement('span');
     name.className = 'layer-name';
     name.textContent = label;
@@ -247,10 +274,10 @@ export function install(app) {
       app.setEditingMask(false);
       schedule();
     };
-    list.appendChild(channelRow({ label: 'RGB', canvas: t.rgb, which: { type: 'rgb' }, selected: compositeOn, onClick: pick }));
-    list.appendChild(channelRow({ label: 'Red', canvas: t.r, which: { type: 'r' }, selected: compositeOn, onClick: pick }));
-    list.appendChild(channelRow({ label: 'Green', canvas: t.g, which: { type: 'g' }, selected: compositeOn, onClick: pick }));
-    list.appendChild(channelRow({ label: 'Blue', canvas: t.b, which: { type: 'b' }, selected: compositeOn, onClick: pick }));
+    const rows = modeRows(doc);
+    list.dataset.mode = doc.mode;
+    if (rows.composite) list.appendChild(channelRow({ label: rows.composite.label, canvas: t.rgb, which: { type: rows.composite.type }, selected: compositeOn, onClick: pick }));
+    for (const c of rows.channels) list.appendChild(channelRow({ label: c.label, canvas: t.planes[c.plane] ?? t.rgb, which: { type: c.type, plane: c.plane }, selected: compositeOn, onClick: pick }));
     if (layer?.mask?.canvas) {
       list.appendChild(channelRow({
         label: `${layer.name} Mask`,
@@ -270,6 +297,7 @@ export function install(app) {
         label: ch.name,
         canvas: alphaThumb(doc, ch),
         which: { type: 'alpha', channel: ch },
+        ink: ch.spot ? ch.spot.color ?? [128, 128, 128] : null,
         selected: selectedId === ch.id,
         onClick: () => {
           selectedId = ch.id;
@@ -304,6 +332,7 @@ export function install(app) {
   app.on('mask:editing', schedule);
   app.on('selection:changed', schedule);
   app.on('channels:changed', schedule);
+  app.on('mode:changed', schedule);
   app.on('doc:change', (e) => {
     if (['tree', 'active', 'canvas', 'channels', 'props', 'history', 'mask-edit'].includes(e.kind)) {
       clearTimeout(thumbTimer);
