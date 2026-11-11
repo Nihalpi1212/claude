@@ -103,7 +103,7 @@ test('the gallery stacks two effects, reorders them, commits one entry that the 
   expect(await stackKinds(page)).toEqual(['film-grain', 'poster-edges']);
   await confirmDialog(page);
   // one history entry, pixels changed, params remembered in order
-  expect(await historyLength(page)).toBe(n0 + 1);
+  await expect.poll(() => historyLength(page)).toBe(n0 + 1); // the commit runs under app.busy after the dialog closes
   const h1 = await layerHash(page);
   expect(h1).not.toBe(h0);
   const params = await settings(page, 'filterParams.filter-gallery');
@@ -117,7 +117,7 @@ test('the gallery stacks two effects, reorders them, commits one entry that the 
   expect(await layerHash(page)).toBe(h0);
   await runAwait(page, 'filter:filter-gallery', params);
   await expect(page.locator('.dialog-backdrop')).toHaveCount(0);
-  expect(await historyLength(page)).toBe(n0 + 1);
+  await expect.poll(() => historyLength(page)).toBe(n0 + 1); // the commit runs under app.busy after the dialog closes
   expect(await layerHash(page)).toBe(h1);
   // the other order gives a different result
   await runAwait(page, 'edit:undo');
@@ -128,7 +128,7 @@ test('the gallery stacks two effects, reorders them, commits one entry that the 
   // Last Filter re-runs the stack
   await runAwait(page, 'edit:undo');
   await runAwait(page, 'filter:last');
-  expect(await historyLength(page)).toBe(n0 + 1);
+  await expect.poll(() => historyLength(page)).toBe(n0 + 1); // the commit runs under app.busy after the dialog closes
   expect(errors).toEqual([]);
 });
 
@@ -158,7 +158,7 @@ test('Cancel restores the layer; delete empties the stack; the menu option is a 
   // the transparent background of shapes.png stays transparent after an effect
   await runAwait(page, 'filter:filter-gallery', { effects: [{ kind: 'poster-edges', params: {}, enabled: true }] });
   expect((await layerPixel(page, 5, 5))[3]).toBe(0);
-  expect(await historyLength(page)).toBe(n0 + 1);
+  await expect.poll(() => historyLength(page)).toBe(n0 + 1); // the commit runs under app.busy after the dialog closes
   expect(errors).toEqual([]);
 });
 
