@@ -45,6 +45,14 @@ function limitSize(w, h) {
   return { width, height };
 }
 
+/** The alpha channel of a canvas (a layer mask keeps its values there). */
+function canvasAlpha(canvas) {
+  const d = canvasData(canvas).data;
+  const out = new Uint8ClampedArray(canvas.width * canvas.height);
+  for (let i = 0, j = 3; i < out.length; i++, j += 4) out[i] = d[j];
+  return out;
+}
+
 const sameRect = (a, b) => a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
 
 /** The part of a document-sized mask under rect, as a rect-sized mask (outside the document: 0). */
@@ -311,7 +319,14 @@ class ContentAwareScaleTool extends Tool {
     s.raf = 0;
     if (!this.changed) return this.finish({ switchBack });
     const { width: tw, height: th } = s.rect;
-    const work = () => ({ image: s.full.scale(tw, th, s.amount), mask: s.selAlpha ? s.full.scaleMask(s.selAlpha, tw, th, s.amount) : null });
+    // a linked layer mask goes with the whole layer's pixels through the same seams (Free Transform takes it along too);
+    // with a selection only the selected pixels move, and the mask stays as it is
+    const maskCanvas = !s.selection && s.layer.mask?.canvas && s.layer.mask.linked !== false ? s.layer.mask.canvas : null;
+    const work = () => ({
+      image: s.full.scale(tw, th, s.amount),
+      mask: s.selAlpha ? s.full.scaleMask(s.selAlpha, tw, th, s.amount) : null,
+      layerMask: maskCanvas ? s.full.scaleMask(cropMask(canvasAlpha(maskCanvas), maskCanvas.width, maskCanvas.height, s.box), tw, th, s.amount) : null,
+    });
     const result = Math.max(s.box.width * s.box.height, tw * th) > SYNC_PIXELS ? await app.busy(`${LABEL}…`, async () => work()) : work();
     if (this.session !== s) return;
     const out = this.compose(dataCanvas(result.image), s.rect);
@@ -320,6 +335,32 @@ class ContentAwareScaleTool extends Tool {
     try {
       d.history.group(LABEL, () => {
         d.history.replaceCanvas(LABEL, s.layer, () => out);
+        if (maskCanvas && result.layerMask) {
+          // the mask outside the old box stays; the old box takes the mask's background value, the carved piece lands in the new box
+          const c = createCanvas(maskCanvas.width, maskCanvas.height);
+          const ctx = c.getContext('2d', { willReadFrequently: true });
+          ctx.drawImage(maskCanvas, 0, 0);
+          ctx.clearRect(s.box.x, s.box.y, s.box.width, s.box.height);
+          const bg = maskCanvas.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, 1, 1).data[3];
+          if (bg > 0) {
+            ctx.fillStyle = `rgba(255,255,255,${bg / 255})`;
+            ctx.fillRect(s.box.x, s.box.y, s.box.width, s.box.height);
+          }
+          const img = new ImageData(tw, th);
+          for (let i = 0, p = 0; i < result.layerMask.length; i++, p += 4) {
+            img.data[p] = img.data[p + 1] = img.data[p + 2] = 255;
+            img.data[p + 3] = result.layerMask[i];
+          }
+          ctx.putImageData(img, s.rect.x, s.rect.y);
+          const layer = s.layer, before = layer.mask, after = { ...before, canvas: c };
+          const set = (v) => {
+            layer.mask = v;
+            layer.touch();
+            d.changed('pixels', { layer });
+          };
+          set(after);
+          d.history.push({ label: 'Transform mask', undo: () => set(before), redo: () => set(after), bytes: c.width * c.height * 4, at: Date.now() });
+        }
         if (s.selection && result.mask) {
           // the selection follows its pixels through the same seams
           const mask = new Uint8ClampedArray(d.width * d.height);
