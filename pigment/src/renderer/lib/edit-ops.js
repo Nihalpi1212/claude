@@ -199,9 +199,9 @@ export function install(app) {
   // ---- fill / stroke --------------------------------------------------------------------------------------
   const BLEND_OPTIONS = BLEND_MODES.filter(Boolean);
 
-  async function fillDialog(arg) {
+  async function fillDialog(arg, ctx = null) {
     const t = pixelTarget();
-    if (!t) return;
+    if (!t) return ctx?.cancel(); // actions (lib/actions.js)
     let opts = arg && typeof arg === 'object' ? arg : null;
     if (!opts) {
       opts = await formDialog(app, {
@@ -215,7 +215,8 @@ export function install(app) {
           { key: 'preserve', label: 'Preserve transparency', type: 'checkbox', value: !!t.layer.locked.transparency },
         ],
       });
-      if (!opts) return;
+      if (!opts) return ctx?.cancel(); // actions (lib/actions.js)
+      ctx?.setReplayArg({ ...opts }); // actions (lib/actions.js): the dialog's options replay the fill
     }
     const d = doc();
     if ((opts.use ?? 'foreground') === 'content-aware') {
@@ -254,12 +255,14 @@ export function install(app) {
     }, { layer: t.layer, kind: t.mask ? 'mask' : 'pixels' });
   }
 
-  async function strokeDialog() {
+  async function strokeDialog(arg = null, ctx = null) {
     const d = doc();
+    if (!hasSel() || !pixelTarget()) ctx?.cancel(); // actions (lib/actions.js): nothing to stroke, nothing to record
     if (!hasSel()) return app.dialogs.toast('Make a selection to stroke', { kind: 'error' });
     const t = pixelTarget();
     if (!t) return;
-    const opts = await formDialog(app, {
+    // actions (lib/actions.js): recorded options ({ width, color, location, blend, opacity }) skip the dialog
+    const opts = arg && typeof arg === 'object' ? arg : await formDialog(app, {
       title: 'Stroke',
       fields: [
         { key: 'width', label: 'Width', type: 'number', value: 3, min: 1, max: 250, unit: 'px' },
@@ -269,7 +272,8 @@ export function install(app) {
         { key: 'opacity', label: 'Opacity', type: 'slider', value: 100, min: 1, max: 100, unit: '%' },
       ],
     });
-    if (!opts) return;
+    if (!opts) return ctx?.cancel(); // actions (lib/actions.js)
+    ctx?.setReplayArg({ ...opts }); // actions (lib/actions.js)
     const sel = d.selection;
     const w = opts.width;
     const inner = opts.location === 'inside' ? w : opts.location === 'center' ? w / 2 : 0;
@@ -307,13 +311,14 @@ export function install(app) {
   }
 
   // ---- place --------------------------------------------------------------------------------------------------
-  async function place(pathArg) {
+  async function place(pathArg, ctx = null) {
     const d = doc();
     if (!d) return;
     let path = pathArg;
     if (!path) {
       [path] = await bridge.openFileDialog({ filters: OPEN_FILTERS, title: 'Place' });
-      if (!path) return;
+      if (!path) return ctx?.cancel(); // actions (lib/actions.js)
+      ctx?.setReplayArg(path); // actions (lib/actions.js): the chosen file replays the command
     }
     try {
       if (window.__pigmentTest?.pending?.[path]) await window.__pigmentTest.pending[path];
@@ -341,22 +346,27 @@ export function install(app) {
   }
 
   // ---- selection commands ----------------------------------------------------------------------------------------
-  async function modify(kind) {
+  async function modify(kind, arg = null, ctx = null) {
     const d = doc();
-    if (!hasSel()) return;
+    if (!hasSel()) return ctx?.cancel();
     const labels = { border: 'Border', smooth: 'Smooth', expand: 'Expand', contract: 'Contract', feather: 'Feather' };
-    const v = await app.dialogs.prompt(`${labels[kind]} by (pixels)`, { title: `${labels[kind]} Selection`, type: 'number', value: kind === 'feather' ? '5' : '2', min: 1, max: 500 });
-    if (v === null) return;
+    if (!labels[kind]) return ctx?.cancel();
+    // actions (lib/actions.js): a recorded amount (a number or { amount }) skips the prompt
+    const amount = typeof arg === 'number' ? arg : arg?.amount;
+    const v = amount !== undefined ? String(amount) : await app.dialogs.prompt(`${labels[kind]} by (pixels)`, { title: `${labels[kind]} Selection`, type: 'number', value: kind === 'feather' ? '5' : '2', min: 1, max: 500 });
+    if (v === null) return ctx?.cancel(); // actions (lib/actions.js)
     const n = Math.max(0.1, Number(v) || 1);
+    ctx?.setReplayArg(ctx.id === 'select:modify' ? { kind, amount: n } : { amount: n }); // actions (lib/actions.js)
     const s = d.selection;
     const next = kind === 'feather' ? s.feather(n) : kind === 'expand' ? s.expand(Math.round(n)) : kind === 'contract' ? s.contract(Math.round(n)) : kind === 'border' ? s.border(Math.round(n)) : s.smooth(Math.round(n));
     app.applySelection(next, 'replace', `${labels[kind]} selection`);
   }
 
-  async function colorRange() {
+  async function colorRange(arg = null, ctx = null) {
     const d = doc();
     const img = flattenDocument(d, d.view.compositor).getContext('2d', { willReadFrequently: true }).getImageData(0, 0, d.width, d.height);
-    const opts = await formDialog(app, {
+    // actions (lib/actions.js): recorded options ({ select, color, fuzziness, invert }) skip the dialog
+    const opts = arg && typeof arg === 'object' ? arg : await formDialog(app, {
       title: 'Color Range',
       fields: [
         { key: 'select', label: 'Select', type: 'select', value: 'sampled', options: [['sampled', 'Foreground color'], ['reds', 'Reds'], ['yellows', 'Yellows'], ['greens', 'Greens'], ['cyans', 'Cyans'], ['blues', 'Blues'], ['magentas', 'Magentas'], ['highlights', 'Highlights'], ['midtones', 'Midtones'], ['shadows', 'Shadows']] },
@@ -378,7 +388,8 @@ export function install(app) {
         return c;
       },
     });
-    if (!opts) return;
+    if (!opts) return ctx?.cancel(); // actions (lib/actions.js)
+    ctx?.setReplayArg({ ...opts }); // actions (lib/actions.js)
     let mask = rangeMask(img, opts);
     if (opts.invert) mask = selectionOps.invertMask(mask);
     app.applySelection(Selection.fromMask(d.width, d.height, mask), 'replace', 'Color range');
@@ -551,10 +562,10 @@ export function install(app) {
         clearPixels();
       },
     },
-    'edit:fill': { enabled: has, run: (arg) => fillDialog(arg) },
+    'edit:fill': { enabled: has, dialog: true, run: (arg, ctx) => fillDialog(arg, ctx) }, // actions (lib/actions.js)
     'edit:fill-foreground': { enabled: has, run: () => fillDialog({ use: 'foreground', opacity: 100, blend: 'normal', preserve: false }) },
     'edit:fill-background': { enabled: has, run: () => fillDialog({ use: 'background', opacity: 100, blend: 'normal', preserve: false }) },
-    'edit:stroke': { enabled: hasSel, run: () => strokeDialog() },
+    'edit:stroke': { enabled: hasSel, dialog: true, run: (arg, ctx) => strokeDialog(arg, ctx) }, // actions (lib/actions.js)
     'edit:define-pattern': {
       enabled: has,
       run: () => {
@@ -565,8 +576,8 @@ export function install(app) {
         app.dialogs.toast(`Pattern defined (${data.canvas.width} × ${data.canvas.height})`, { kind: 'success', timeout: 1800 });
       },
     },
-    'file:place': { enabled: has, run: (path) => place(typeof path === 'string' ? path : null) },
-    'file:import-image': { enabled: has, run: () => place(null) },
+    'file:place': { enabled: has, dialog: true, run: (path, ctx) => place(typeof path === 'string' ? path : null, ctx) }, // actions (lib/actions.js)
+    'file:import-image': { enabled: has, dialog: true, run: (path, ctx) => place(typeof path === 'string' ? path : null, ctx) }, // actions (lib/actions.js)
 
     'select:all': {
       enabled: has,
@@ -586,13 +597,14 @@ export function install(app) {
       run: () => app.applySelection(doc().savedSelection.clone(), 'replace', 'Reselect'),
     },
     'select:inverse': { enabled: has, run: () => app.applySelection(hasSel() ? doc().selection.invert() : Selection.all(doc().width, doc().height), 'replace', 'Inverse') },
-    'select:modify': { enabled: hasSel, run: (kind) => modify(kind) },
-    'select:feather': { enabled: hasSel, run: () => modify('feather') },
-    'select:expand': { enabled: hasSel, run: () => modify('expand') },
-    'select:contract': { enabled: hasSel, run: () => modify('contract') },
-    'select:border': { enabled: hasSel, run: () => modify('border') },
-    'select:smooth': { enabled: hasSel, run: () => modify('smooth') },
-    'select:color-range': { enabled: has, run: () => colorRange() },
+    // actions (lib/actions.js): the Modify and Color Range dialogs report their values and replay with them
+    'select:modify': { enabled: hasSel, dialog: true, run: (arg, ctx) => modify(arg?.kind ?? arg, arg, ctx) },
+    'select:feather': { enabled: hasSel, dialog: true, run: (arg, ctx) => modify('feather', arg, ctx) },
+    'select:expand': { enabled: hasSel, dialog: true, run: (arg, ctx) => modify('expand', arg, ctx) },
+    'select:contract': { enabled: hasSel, dialog: true, run: (arg, ctx) => modify('contract', arg, ctx) },
+    'select:border': { enabled: hasSel, dialog: true, run: (arg, ctx) => modify('border', arg, ctx) },
+    'select:smooth': { enabled: hasSel, dialog: true, run: (arg, ctx) => modify('smooth', arg, ctx) },
+    'select:color-range': { enabled: has, dialog: true, run: (arg, ctx) => colorRange(arg, ctx) },
     'select:grow': {
       enabled: hasSel,
       run: () => {
@@ -621,10 +633,12 @@ export function install(app) {
     },
     'select:save': {
       enabled: hasSel,
-      run: async () => {
+      dialog: true, // actions (lib/actions.js)
+      run: async (arg, ctx) => {
         const d = doc();
-        const name = await app.dialogs.prompt('Channel name', { title: 'Save Selection', value: `Alpha ${d.channels.length + 1}` });
-        if (!name) return;
+        const name = arg?.name ?? (await app.dialogs.prompt('Channel name', { title: 'Save Selection', value: `Alpha ${d.channels.length + 1}` }));
+        if (!name) return ctx?.cancel(); // actions (lib/actions.js)
+        ctx?.setReplayArg({ name }); // actions (lib/actions.js)
         const ch = { id: `C${Date.now().toString(36)}`, name, mask: new Uint8ClampedArray(d.selection.mask) };
         const before = d.channels.slice();
         const set = (list) => {
@@ -638,11 +652,14 @@ export function install(app) {
     },
     'select:load': {
       enabled: () => !!app.doc?.channels.length,
-      run: async (id) => {
+      dialog: true, // actions (lib/actions.js)
+      run: async (id, ctx) => {
         const d = doc();
+        // actions (lib/actions.js): a recorded step names the channel ({ name, invert, mode }): ids differ between documents
+        const rec = id && typeof id === 'object' ? id : null;
         let ch = d.channels.find((c) => c.id === id);
         if (!ch) {
-          const opts = await formDialog(app, {
+          const opts = rec ? { channel: d.channels.find((c) => c.name === rec.name)?.id, invert: !!rec.invert, mode: rec.mode ?? 'replace' } : await formDialog(app, {
             title: 'Load Selection',
             fields: [
               { key: 'channel', label: 'Channel', type: 'select', value: d.channels[0].id, options: d.channels.map((c) => [c.id, c.name]) },
@@ -650,8 +667,13 @@ export function install(app) {
               { key: 'mode', label: 'Operation', type: 'select', value: 'replace', options: [['replace', 'New selection'], ['add', 'Add to selection'], ['subtract', 'Subtract from selection'], ['intersect', 'Intersect with selection']] },
             ],
           });
-          if (!opts) return;
+          if (!opts) return ctx?.cancel(); // actions (lib/actions.js)
           ch = d.channels.find((c) => c.id === opts.channel);
+          if (!ch) {
+            ctx?.cancel();
+            return app.dialogs.toast(`There is no channel named “${rec?.name ?? ''}” in this document`, { kind: 'error' });
+          }
+          ctx?.setReplayArg({ name: ch.name, invert: !!opts.invert, mode: opts.mode }); // actions (lib/actions.js)
           let sel = Selection.fromMask(d.width, d.height, new Uint8ClampedArray(ch.mask));
           if (opts.invert) sel = sel.invert();
           return app.applySelection(sel, opts.mode, 'Load selection');

@@ -1,1 +1,61 @@
-/* actions (0.3): styles of lib/actions*.js; filled in by its builder */
+/* Actions panel (lib/panels/actions.js) and the engine's dialogs (lib/actions/dialogs.js). */
+.actions-panel { display: flex; flex-direction: column; min-height: 0; height: 100%; }
+.actions-tree { flex: 1 1 auto; min-height: 60px; overflow: auto; outline: none; }
+.actions-tree:focus-visible { box-shadow: inset 0 0 0 1px var(--accent); }
+
+.act-row { display: flex; align-items: center; gap: 4px; min-height: 24px; padding: 0 6px 0 4px; border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent); cursor: default; user-select: none; font-size: 12px; position: relative; }
+.act-row:hover { background: var(--accent-soft); }
+.act-row.selected { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.act-row > svg { width: 14px; height: 14px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; color: var(--fg-muted); }
+.act-set { font-weight: 600; background: color-mix(in srgb, var(--bg-sunken) 60%, transparent); }
+.act-action .act-twisty { margin-left: 10px; }
+.act-step .act-twisty { margin-left: 24px; }
+.act-step.off .act-name, .act-step.off .act-summary { opacity: 0.45; }
+.act-row.dragging { opacity: 0.4; }
+.act-row.drop-above { box-shadow: inset 0 2px 0 var(--accent); }
+.act-row.drop-below { box-shadow: inset 0 -2px 0 var(--accent); }
+/* the step that is playing, the action that is recording: an edge bar plus a tint, never colour alone */
+.act-row.playing { box-shadow: inset 3px 0 0 var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.act-action.recording { box-shadow: inset 3px 0 0 var(--danger); }
+.act-action.recording .act-name::after { content: " — recording"; color: var(--danger); font-weight: 400; }
+.act-action.has-color { box-shadow: inset 3px 0 0 var(--act-color); }
+
+.act-check { flex: none; width: 13px; height: 13px; margin: 0; accent-color: var(--accent); }
+.act-dialog, .act-twisty { flex: none; width: 18px; height: 18px; padding: 0; border: 0; background: none; color: var(--fg-muted); border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; }
+button.act-dialog, button.act-twisty { cursor: pointer; }
+button.act-dialog:hover, button.act-twisty:hover { background: var(--hover); color: var(--fg); }
+.act-dialog svg, .act-twisty svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+/* off: a faint outline of the dialog glyph; on: the accent; mixed (some steps of an action): dashed */
+.act-dialog[aria-pressed="false"] { opacity: 0.3; }
+.act-dialog[aria-pressed="true"] { color: var(--accent); }
+.act-dialog[aria-pressed="mixed"] { color: var(--accent); opacity: 0.7; }
+.act-dialog[aria-pressed="mixed"] svg { stroke-dasharray: 2 2; }
+
+.act-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.act-name.act-stop { color: var(--danger); }
+.act-name.act-cond, .act-name.act-menu { font-style: italic; }
+.act-summary { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.act-fkey { margin-left: auto; flex: none; font-size: 10px; padding: 1px 5px; border-radius: 4px; border: 1px solid var(--border); color: var(--fg-muted); background: var(--bg-elevated); }
+.act-details { padding: 3px 8px 5px 76px; font-size: 11px; color: var(--fg-muted); border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent); overflow-wrap: anywhere; user-select: text; }
+.act-details .act-key { color: var(--fg); }
+
+.actions-footer .act-record.recording { color: var(--danger); background: color-mix(in srgb, var(--danger) 16%, transparent); }
+.actions-footer .act-record.recording svg { fill: currentColor; }
+
+/* Button mode: the action's colour is a bar and a tint behind normal text, so every colour stays readable in both themes */
+.actions-buttons { flex: 1 1 auto; min-height: 60px; overflow: auto; padding: 6px; display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 5px; align-content: start; }
+.act-button { display: flex; align-items: center; gap: 6px; min-height: 28px; padding: 3px 8px; border: 1px solid var(--border); border-radius: 5px; background: var(--bg-elevated); color: var(--fg); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.act-button:hover { border-color: var(--accent); }
+.act-button:focus-visible { box-shadow: var(--focus-ring); outline: none; }
+.act-button:disabled { opacity: 0.55; cursor: default; }
+.act-button.has-color { border-left: 4px solid var(--act-color); background: color-mix(in srgb, var(--act-color) 18%, var(--bg-elevated)); }
+.act-button.playing { box-shadow: inset 0 0 0 2px var(--accent); }
+.act-button .act-name { flex: 1 1 auto; }
+
+/* dialogs */
+.actions-menu-item { display: flex; flex-direction: column; gap: 8px; }
+.actions-menu-item p { margin: 0; }
+.actions-command-list { height: auto; min-height: 220px; padding: 2px; }
+.actions-json textarea { font-family: var(--mono); font-size: 12px; min-height: 160px; }
+.actions-stop-message .dialog-message { white-space: pre-wrap; }
+.actions-key-note:empty { display: none; }

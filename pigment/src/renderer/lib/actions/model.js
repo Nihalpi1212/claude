@@ -116,12 +116,8 @@ export function stepKind(step) {
 
 /** Readable name of a command id when nothing better is known: 'layer:via-copy' -> 'Layer Via Copy'. */
 export function humanizeCommand(id) {
-  const rest = String(id).replace(/^(file|edit|image|layer|select|filter|ai|text|path):/, '');
-  const group = /^([a-z]+):/.exec(String(id))?.[1] ?? '';
-  const words = rest.replace(/^(adjust|automate|script|style)-/, '').replace(/[:_-]+/g, ' ').trim();
-  const title = words.replace(/\b\w/g, (c) => c.toUpperCase());
-  const prefix = { select: 'Select', layer: 'Layer', ai: 'AI', text: 'Type', path: 'Path' }[group];
-  return prefix && !title.startsWith(prefix) && ['select', 'layer', 'ai', 'text', 'path'].includes(group) && words.split(' ').length < 2 ? `${prefix} ${title}` : title;
+  const words = String(id).replace(/^[a-z]+:/, '').replace(/^(adjust|automate|script|style)-/, '').replace(/[:_-]+/g, ' ').trim();
+  return words.replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 const cleanLabel = (s) => String(s).replace(/…$/, '').replace(/\.\.\.$/, '').trim();
