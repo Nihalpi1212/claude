@@ -1,6 +1,6 @@
 // File formats Pigment opens and saves (shared by the main process and the renderer).
 export const LAYERED_EXTENSIONS = ['pigment', 'psd', 'psb'];
-export const IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'jfif', 'webp', 'gif', 'bmp', 'ico', 'avif', 'svg'];
+export const IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'jfif', 'webp', 'gif', 'bmp', 'ico', 'avif', 'svg', 'tif', 'tiff', 'tga'];
 export const OPEN_EXTENSIONS = [...LAYERED_EXTENSIONS, ...IMAGE_EXTENSIONS];
 
 export const OPEN_DIALOG_FILTERS = [

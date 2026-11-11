@@ -1283,7 +1283,7 @@ export function install(app) {
         const fused = exposureFusion(images, { removeGhosts: !!o.removeGhosts, depth: app.deep ? 16 : 8 });
         if (!(fused.data instanceof Uint16Array)) return { image: fused, deep: null, exposures };
         const proxy = new Uint8ClampedArray(fused.data.length);
-        for (let i = 0; i < proxy.length; i++) proxy[i] = (fused.data[i] + 128) / 257;
+        for (let i = 0; i < proxy.length; i++) proxy[i] = Math.floor((fused.data[i] + 128) / 257);
         return { image: { width: w, height: h, data: proxy }, deep: { type: 'u16', data: fused.data }, exposures };
       });
       const doc = new Document({ width: w, height: h, dpi: 72, name: 'Merged HDR', depth: result.deep ? 16 : 8 });

@@ -38,7 +38,7 @@
   "build": {
     "appId": "com.pigmentapp.app",
     "productName": "Pigment",
-    "copyright": "Copyright © 2026 Pigment contributors",
+    "copyright": "Copyright \u00a9 2026 Pigment contributors",
     "directories": {
       "output": "dist",
       "buildResources": "build"
@@ -90,6 +90,21 @@
       {
         "ext": "bmp",
         "name": "Bitmap Image",
+        "role": "Editor"
+      },
+      {
+        "ext": "tif",
+        "name": "TIFF Image",
+        "role": "Editor"
+      },
+      {
+        "ext": "tiff",
+        "name": "TIFF Image",
+        "role": "Editor"
+      },
+      {
+        "ext": "tga",
+        "name": "Targa Image",
         "role": "Editor"
       }
     ],

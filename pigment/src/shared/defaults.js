@@ -29,6 +29,9 @@ export const DEFAULT_SETTINGS = Object.freeze({
   newDocPreset: { width: 1920, height: 1080, dpi: 72, background: 'white', name: 'Untitled' },
   exportDefaults: { format: 'png', quality: 0.92, scale: 1 },
   saveQuality: 0.92,
+  // 16/32-bit documents (lib/depth.js): dither when going down to 8 bits; the Info panel's 16-bit scale (32768 like Photoshop, or 65535 raw)
+  depthDither: true,
+  info16Range: 32768,
   // AI: model preferences chosen in the AI Accounts dialog and the per-installation host id of Sign in with ChatGPT
   ai: { openaiChat: null, openaiImage: null, geminiChat: null, geminiImage: null, defaultProvider: 'openai' },
   aiHostId: null,

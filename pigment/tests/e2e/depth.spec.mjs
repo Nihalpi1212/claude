@@ -330,6 +330,14 @@ test('crop, flips, quarter turns and Flatten Image keep the 16-bit samples; setP
   expect((await deepState(page)).proxyMatches).toBe(true);
   await runAwait(page, 'edit:undo');
   expect(await deepAt(page, 120, 50)).toEqual(sample);
+  // Image > Duplicate gives a document of the same depth with the same samples
+  await runAwait(page, 'image:duplicate', { name: 'Deep copy' });
+  expect(await page.evaluate(() => [window.pigmentApp.doc.name, window.pigmentApp.doc.depth, window.pigmentApp.docs.list().length])).toEqual(['Deep copy', 16, 2]);
+  await page.evaluate(() => {
+    const d = window.pigmentApp.doc;
+    d.setActive(d.root.children[0]);
+  });
+  expect(await deepAt(page, 120, 50)).toEqual(sample);
   expect(errors).toEqual([]);
 });
 
