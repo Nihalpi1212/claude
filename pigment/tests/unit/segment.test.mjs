@@ -175,6 +175,13 @@ test('selectSky: the blue gradient top half is the sky, the textured ground is n
   let hit = 0;
   for (let y = 0; y < 60; y++) for (let x = 0; x < w; x++) hit += mg[y * w + x] >= 128 ? 1 : 0;
   assert.ok(hit > 60 * w * 0.95 && count(mg) < 60 * w * 1.05, `overcast sky: ${hit} of ${60 * w}, ${count(mg)} selected`);
+  // a white page around an object reaches the bottom of the frame: a backdrop, not a sky
+  const page = discImage(w, h, 100, 80, 40, [200, 30, 40], [255, 255, 255]);
+  assert.equal(count(selectSky(page.img)), 0, 'a white backdrop is not an overcast sky');
+  // a blue sky may fill the frame around a subject
+  const bird = discImage(w, h, 100, 80, 20, [60, 50, 40], [90, 150, 235]);
+  const mb = selectSky(bird.img);
+  assert.ok(count(mb) > w * h * 0.9 && mb[80 * w + 100] === 0, `sky around a bird: ${count(mb)} of ${w * h}, bird ${mb[80 * w + 100]}`);
 });
 
 /** Noise texture, sharp on the left half and blurred on the right. */

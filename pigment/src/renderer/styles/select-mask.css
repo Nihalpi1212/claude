@@ -1,1 +1,34 @@
-/* select-mask (0.3): styles of lib/select-mask*.js; filled in by its builder */
+/* Select and Mask workspace, Focus Area dialog (lib/select-mask.js, lib/select-mask/*.js). */
+
+/* While the workspace is open its tool strip and Properties panel take the place of the toolbox and the
+   panel dock; the document tabs are inert (the workspace owns the document until OK or Cancel). */
+body.select-mask-active #toolbox, body.select-mask-active #panels { display: none; }
+body.select-mask-active #tabbar { pointer-events: none; opacity: 0.45; }
+
+.sm-tools { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 4px; width: 44px; border-right: 1px solid var(--border); background: var(--bg-elevated); overflow-y: auto; }
+.sm-tools .tool-icon { display: inline-flex; }
+
+.sm-panel { width: 300px; min-width: 0; min-height: 0; display: flex; flex-direction: column; border-left: 1px solid var(--border); background: var(--bg-elevated); font-size: 12px; }
+.sm-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px 8px; border-bottom: 1px solid var(--border); }
+.sm-title { font-size: 14px; font-weight: 600; }
+.sm-body { flex: 1; min-height: 0; overflow: auto; padding: 8px 12px 12px; }
+.sm-body .dialog-form { grid-template-columns: minmax(0, 1fr); min-width: 0; gap: 6px; }
+.sm-body .dialog-form .field > label { font-size: 11px; }
+.sm-body .dialog-form .slider-field input[type="range"] { flex: 1; min-width: 0; }
+.sm-body .dialog-form .slider-field .input { width: 62px; height: 26px; font-size: 12px; padding: 0 6px; flex: none; }
+.sm-body .dialog-form .slider-field .opt-unit { width: 14px; flex: none; }
+.sm-body .dialog-form .select { height: 28px; font-size: 12px; }
+.sm-body .dialog-form input[type="color"] { width: 36px; height: 26px; padding: 0; border: 1px solid var(--border); border-radius: 4px; background: none; flex: none; }
+.sm-body .dialog-form .checkbox { margin: 2px 0; }
+.sm-body .opt-segment { align-self: flex-start; }
+.sm-body .opt-segment .seg-button { padding: 4px 10px; font-size: 12px; }
+.sm-buttons { display: flex; gap: 8px; margin-top: 2px; }
+.sm-status { margin: 0; padding: 6px 12px; min-height: 28px; font-size: 11px; line-height: 1.4; border-top: 1px solid var(--border); }
+.sm-foot { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--border); }
+.sm-spacer, .sm-bar-spacer { flex: 1; }
+
+/* Focus Area: the canvas behind the dialog shows the result, so the dialog stays narrow and to the side */
+.dialog.focus-area-dialog { justify-self: end; margin-right: 28px; }
+.focus-area-dialog .dialog-form { grid-template-columns: minmax(0, 1fr); min-width: 0; }
+.focus-area-dialog .dialog-form .field .muted { font-size: 11px; }
+.focus-area-info { margin: 10px 0 0; font-size: 12px; min-height: 18px; }

@@ -1009,7 +1009,7 @@ export function selectSky(img, opts = {}) {
   if (!W || !H) return out;
   const S = reduce(img, Math.max(16, opts.scale ?? 640));
   const w = S.width, h = S.height, n = w * h, rgb = S.rgb;
-  const lum = new Float32Array(n), grad = new Float32Array(n), col = new Float32Array(n);
+  const lum = new Float32Array(n), grad = new Float32Array(n), col = new Float32Array(n), bluish = new Uint8Array(n);
   for (let p = 0, i = 0; p < n; p++, i += 3) lum[p] = 0.299 * rgb[i] + 0.587 * rgb[i + 1] + 0.114 * rgb[i + 2];
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
     const p = y * w + x;
@@ -1033,14 +1033,26 @@ export function selectSky(img, opts = {}) {
       const white = 0.6 * smoothstep(0.72, 0.9, val) * (1 - smoothstep(0.1, 0.25, sat));
       const c = Math.max(blue, white);
       col[p] = c;
+      if (blue > white) bluish[p] = 1;
       prior[p] = S.alpha[p] < 0.5 ? 0 : c * Math.exp(-((grad[p] / 14) ** 2)) * pos;
     }
   }
   // only what reaches the top tenth of the frame is sky
-  const cand = new Uint8Array(n);
+  const cand = new Uint8Array(n), limit = Math.max(1, Math.round(h * 0.1));
   for (let p = 0; p < n; p++) cand[p] = prior[p] > 0.3 ? 1 : 0;
+  // A bright colourless area that runs unbroken from the top of the frame to its bottom is a backdrop (a white
+  // page, a studio wall), not an overcast sky: a sky ends at a horizon. Blue may fill the frame (a bird against the sky).
+  const pale = new Uint8Array(n);
+  for (let p = 0; p < n; p++) pale[p] = !bluish[p] && col[p] > 0.3 && S.alpha[p] >= 0.5 ? 1 : 0;
+  const pc = components(pale, w, h, 1);
+  const reach = new Uint8Array(pc.sizes.length); // bit 0: touches the top tenth, bit 1: the bottom tenth
+  for (let y = 0; y < h; y++) {
+    const bit = y < limit ? 1 : y >= h - limit ? 2 : 0;
+    if (bit) for (let x = 0; x < w; x++) if (pc.id[y * w + x] >= 0) reach[pc.id[y * w + x]] |= bit;
+  }
+  for (let p = 0; p < n; p++) if (pc.id[p] >= 0 && reach[pc.id[p]] === 3) cand[p] = 0;
   const cc = components(cand, w, h, 1);
-  const top = new Uint8Array(cc.sizes.length), limit = Math.max(1, Math.round(h * 0.1));
+  const top = new Uint8Array(cc.sizes.length);
   for (let y = 0; y < limit; y++) for (let x = 0; x < w; x++) if (cc.id[y * w + x] >= 0) top[cc.id[y * w + x]] = 1;
   let area = 0;
   const sky = new Float32Array(n);
