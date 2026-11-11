@@ -39,14 +39,15 @@ export const MODE_IDS = Object.freeze(Object.keys(MODES));
 // The conversions Photoshop's Image > Mode menu offers directly. Bitmap is only reachable from (and
 // only leaves to) Grayscale, Duotone needs Grayscale, Indexed Color needs RGB or Grayscale.
 const DIRECT = {
+  // listed with RGB first: when a pair needs two steps the detour keeps colour whenever it can
   bitmap: ['grayscale'],
-  grayscale: ['bitmap', 'duotone', 'indexed', 'rgb', 'cmyk', 'lab', 'multichannel'],
-  duotone: ['grayscale', 'rgb', 'cmyk', 'lab', 'multichannel'],
-  indexed: ['grayscale', 'rgb', 'cmyk', 'lab'],
+  grayscale: ['rgb', 'bitmap', 'duotone', 'indexed', 'cmyk', 'lab', 'multichannel'],
+  duotone: ['rgb', 'grayscale', 'cmyk', 'lab', 'multichannel'],
+  indexed: ['rgb', 'grayscale', 'cmyk', 'lab'],
   rgb: ['grayscale', 'indexed', 'cmyk', 'lab', 'multichannel'],
-  cmyk: ['grayscale', 'rgb', 'lab', 'multichannel'],
-  lab: ['grayscale', 'rgb', 'cmyk', 'multichannel'],
-  multichannel: ['grayscale', 'rgb', 'cmyk', 'lab'],
+  cmyk: ['rgb', 'grayscale', 'lab', 'multichannel'],
+  lab: ['rgb', 'grayscale', 'cmyk', 'multichannel'],
+  multichannel: ['rgb', 'grayscale', 'cmyk', 'lab'],
 };
 
 /** True when Photoshop converts `from` to `to` in one step. */

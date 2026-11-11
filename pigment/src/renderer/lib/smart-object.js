@@ -118,26 +118,61 @@ export function applySmartFilter(img, f) {
   return img;
 }
 
-/** Pixels a chain of filters can spread beyond the layer's content (blurs, maxima, offsets). */
-/** Filters whose result depends on where the image centre and edges are: they must see the whole object, not the host-clipped part. */
-const GEOMETRIC_FILTERS = new Set(['twirl', 'pinch', 'spherize', 'ripple', 'wave', 'zigzag', 'polar', 'shear', 'radial-blur', 'lens-flare', 'vignette', 'clouds', 'difference-clouds', 'offset', 'camera-raw']);
-export const isGeometricFilter = (f) => GEOMETRIC_FILTERS.has(f.kind) || !!EXTRA_KINDS.get(f.kind)?.geometric;
+/**
+ * Filters whose result at a pixel depends only on a bounded neighbourhood, wherever the image's edges are: for
+ * them the host-clipped part of the object is enough. Every other registry kind is treated as geometric and sees
+ * the whole object: distortions, generators (Tree, Flame, Picture Frame, Fibers, Lighting Effects), anything laid
+ * out in fractions of the image (Blur Gallery pins, Lens Correction, Displace maps), whole-image statistics
+ * (Average, Shake Reduction), row parity (De-Interlace) and the Filter Gallery's position-stable textures.
+ */
+const LOCAL_FILTERS = new Set([
+  'gaussian-blur', 'box-blur', 'motion-blur', 'surface-blur', 'sharpen', 'unsharp-mask', 'smart-sharpen', 'high-pass', 'add-noise', 'median', 'despeckle',
+  'dust-scratches', 'reduce-noise', 'mosaic', 'crystallize', 'pointillize', 'fragment', 'emboss', 'find-edges', 'solarize', 'diffuse', 'oil-paint',
+  'glowing-edges', 'maximum', 'minimum', 'custom', 'invert-alpha',
+  // 0.3
+  'blur', 'blur-more', 'smart-blur', 'shape-blur', 'lens-blur', 'sharpen-edges', 'sharpen-more', 'facet', 'ntsc-colors', 'hsb-hsl', 'trace-contour',
+]);
+/** Kinds registered by other modules that need the whole object (Camera Raw's vignette is centred on it). */
+const GEOMETRIC_FILTERS = new Set(['camera-raw']);
+/** Adjustments computed from the statistics of the whole image. */
+const GLOBAL_ADJUSTMENTS = new Set(['equalize']);
+export const isGeometricFilter = (f) => {
+  if (f.kind.startsWith('adjust:')) return GLOBAL_ADJUSTMENTS.has(f.kind.slice(7));
+  if (EXTRA_KINDS.has(f.kind)) return GEOMETRIC_FILTERS.has(f.kind) || !!EXTRA_KINDS.get(f.kind).geometric;
+  return GEOMETRIC_FILTERS.has(f.kind) || !LOCAL_FILTERS.has(f.kind);
+};
 /** The largest render a smart object may allocate (pixels, and per side): a 40× scale must never ask for gigabytes. */
 const RENDER_BUDGET = 25_000_000;
 const RENDER_MAX_SIDE = 16_384;
 
+/** Pixels a chain of filters can spread beyond the layer's content (blurs, maxima, offsets). */
 export function filterPadding(filters) {
   let pad = 0;
   for (const f of filters) {
     if (f.enabled === false || f.kind.startsWith('adjust:')) continue;
     const p = f.params ?? {};
     const r = Number(p.radius ?? p.distance ?? p.size ?? 0) || 0;
+    const def = FILTERS[f.kind];
     let n = 0;
     if (['gaussian-blur', 'unsharp-mask', 'high-pass', 'smart-sharpen'].includes(f.kind)) n = Math.ceil(r * 3);
     else if (['box-blur', 'motion-blur', 'surface-blur', 'median', 'dust-scratches', 'maximum', 'minimum', 'mosaic', 'crystallize', 'pointillize', 'oil-paint', 'diffuse', 'emboss', 'glowing-edges'].includes(f.kind)) n = Math.ceil(r * 2 + 2);
     else if (f.kind === 'offset') n = Math.ceil(Math.max(Math.abs(p.dx ?? 0), Math.abs(p.dy ?? 0)));
     else if (['twirl', 'pinch', 'spherize', 'ripple', 'wave', 'zigzag', 'polar', 'shear', 'radial-blur'].includes(f.kind)) n = 64;
     else if (EXTRA_KINDS.get(f.kind)?.padding) n = EXTRA_KINDS.get(f.kind).padding(p);
+    else if (def && LOCAL_FILTERS.has(f.kind)) {
+      // 0.3 neighbourhood kinds declare how far they read around a pixel (filter-def.js `margin`): that is also how
+      // far they spread. Geometric kinds get no padding: their pins, centres, frames and maps are laid out on the
+      // object's own bounds, and a padded image would shift them.
+      let own = def.margin;
+      if (typeof own === 'function') {
+        try {
+          own = own({ ...def.defaults, ...p });
+        } catch {
+          own = 0;
+        }
+      }
+      n = Math.ceil(Number(own) || 0);
+    }
     pad = Math.max(pad, Math.min(400, n));
   }
   return pad;
