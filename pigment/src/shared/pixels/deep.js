@@ -250,10 +250,26 @@ export function mixRect(deep, before, alpha) {
 // Keeping planes in step with the 8-bit proxy
 
 /**
+ * Whether a proxy pixel that is not opaque (s0..s3) stands for the samples at a[o..o+3]. A canvas
+ * stores colour multiplied by alpha at 8 bits, so what it hands back for a translucent pixel is
+ * not the colour that was put there but the nearest one that survives the multiplication (and for
+ * alpha 0 no colour at all). The comparison is therefore made the way the canvas stores pixels:
+ * equal alpha, premultiplied colours within one step (its rounding is the browser's business).
+ */
+function translucentMatch(q, a, o, s0, s1, s2, s3) {
+  if (q(a[o + 3]) !== s3) return false;
+  if (s3 === 0) return true;
+  const k = s3 / 255;
+  return Math.abs(Math.round(q(a[o]) * k) - Math.round(s0 * k)) <= 1 && Math.abs(Math.round(q(a[o + 1]) * k) - Math.round(s1 * k)) <= 1 && Math.abs(Math.round(q(a[o + 2]) * k) - Math.round(s2 * k)) <= 1;
+}
+
+/**
  * Makes the planes agree with the proxy pixels in rect, changing only samples whose quantisation
  * differs from the proxy: an 8-bit edit (a brush stroke, a filter, a transform) is taken over where
  * it changed pixels and the precise samples everywhere else stay. Pixels are handled whole (all
- * four channels) so a restored pixel is never a mix of two states.
+ * four channels) so a restored pixel is never a mix of two states. Translucent pixels are compared
+ * as a canvas stores them (see translucentMatch), so reading the proxy back from a canvas does not
+ * count as an edit.
  *
  * `restore` is a list of patches (extractRect results, newest first) of samples these planes held
  * before: when the proxy at a pixel equals the quantisation of such a sample, the precise sample
@@ -286,7 +302,7 @@ export function syncFromProxy(deep, img, { rect = null, restore = null, loose = 
     let i = (py * width + r.x) * 4, j = y * r.width * 4;
     for (let x = 0; x < r.width; x++, i += 4, j += 4) {
       const s0 = s[j], s1 = s[j + 1], s2 = s[j + 2], s3 = s[j + 3];
-      if (q(d[i]) === s0 && q(d[i + 1]) === s1 && q(d[i + 2]) === s2 && q(d[i + 3]) === s3) continue;
+      if (s3 === 255 ? q(d[i]) === s0 && q(d[i + 1]) === s1 && q(d[i + 2]) === s2 && q(d[i + 3]) === 255 : translucentMatch(q, d, i, s0, s1, s2, s3)) continue;
       if (loose) {
         const k = f32 ? 255 : 1 / 257;
         if (Math.abs(d[i] * k - s0) < 1 && Math.abs(d[i + 1] * k - s1) < 1 && Math.abs(d[i + 2] * k - s2) < 1 && Math.abs(d[i + 3] * k - s3) < 1) {
@@ -303,7 +319,7 @@ export function syncFromProxy(deep, img, { rect = null, restore = null, loose = 
           const p = patches[k];
           if (px < p.x || py < p.y || px >= p.x + p.width || py >= p.y + p.height) continue;
           const o = ((py - p.y) * p.width + (px - p.x)) * 4, pd = p.data;
-          if (q(pd[o]) === s0 && q(pd[o + 1]) === s1 && q(pd[o + 2]) === s2 && q(pd[o + 3]) === s3) {
+          if (s3 === 255 ? q(pd[o]) === s0 && q(pd[o + 1]) === s1 && q(pd[o + 2]) === s2 && q(pd[o + 3]) === 255 : translucentMatch(q, pd, o, s0, s1, s2, s3)) {
             d[i] = pd[o];
             d[i + 1] = pd[o + 1];
             d[i + 2] = pd[o + 2];
@@ -1192,4 +1208,154 @@ export function resampleDeep(deep, width, height) {
     d[i + 3] = u16 ? round16(a * 65535) : a;
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Carrying deep pixels over to a new canvas
+
+/** Whether proxy pixel j of img8 is what a canvas shows for the (already quantised) pixel i of old8. */
+function proxyPixelMatches(a, i, b, j) {
+  const alpha = a[i + 3];
+  if (alpha !== b[j + 3]) return false;
+  if (alpha === 255) return a[i] === b[j] && a[i + 1] === b[j + 1] && a[i + 2] === b[j + 2];
+  if (alpha === 0) return true;
+  const k = alpha / 255;
+  return Math.abs(Math.round(a[i] * k) - Math.round(b[j] * k)) <= 1 && Math.abs(Math.round(a[i + 1] * k) - Math.round(b[j + 1] * k)) <= 1 && Math.abs(Math.round(a[i + 2] * k) - Math.round(b[j + 2] * k)) <= 1;
+}
+
+/**
+ * The row (or column) of an image with the most colour changes, i.e. the most recognisable one,
+ * looking at up to 16 of them: { index, density } with density = changes per pixel.
+ */
+function busiestLine(img, vertical) {
+  const { width: w, height: h, data: d } = img;
+  const lines = vertical ? w : h, length = vertical ? h : w;
+  const hop = (vertical ? w : 1) * 4;
+  let best = 0, bestScore = -1;
+  const step = Math.max(1, Math.floor(lines / 16));
+  for (let l = Math.floor(step / 2); l < lines; l += step) {
+    let score = 0;
+    let i = (vertical ? l : l * w) * 4 + hop;
+    for (let k = 1; k < length; k++, i += hop) if (d[i] !== d[i - hop] || d[i + 1] !== d[i - hop + 1] || d[i + 2] !== d[i - hop + 2] || d[i + 3] !== d[i - hop + 3]) score++;
+    if (score > bestScore) {
+      bestScore = score;
+      best = l;
+    }
+  }
+  return { index: best, density: length > 1 ? bestScore / (length - 1) : 0 };
+}
+
+/**
+ * Where the small image sits inside the big one: { x, y } of its top-left corner, or null. One
+ * row (or, with `vertical`, one column) of the small image is looked for in every position of the
+ * big one; comparisons stop at the first differing pixel and `budget` bounds the work on images
+ * that repeat themselves.
+ */
+function findInside(small, big, vertical, budget = 4e7) {
+  const sw = small.width, sh = small.height, bw = big.width, bh = big.height;
+  if (sw > bw || sh > bh) return null;
+  const line = busiestLine(small, vertical).index;
+  const s = small.data, b = big.data;
+  const length = vertical ? sh : sw;
+  const sHop = (vertical ? sw : 1) * 4, bHop = (vertical ? bw : 1) * 4;
+  const s0 = (vertical ? line : line * sw) * 4;
+  let work = 0;
+  // (px, py): where the first pixel of the probe line would be in the big image
+  const x0 = vertical ? line : 0, x1 = vertical ? bw - sw + line : bw - sw;
+  const y0 = vertical ? 0 : line, y1 = vertical ? bh - sh : bh - sh + line;
+  for (let py = y0; py <= y1; py++) {
+    for (let px = x0; px <= x1; px++) {
+      let i = s0, j = (py * bw + px) * 4, n = 0;
+      while (n < length && proxyPixelMatches(s, i, b, j)) {
+        n++;
+        i += sHop;
+        j += bHop;
+      }
+      work += n + 1;
+      if (n === length) return vertical ? { x: px - line, y: py } : { x: px, y: py - line };
+      if (work > budget) return null;
+    }
+  }
+  return null;
+}
+
+/**
+ * Deep planes for a new canvas whose pixels came from a canvas that had deep planes: a crop, a
+ * canvas that grew (a layer extended under a brush, Canvas Size), a flip or a quarter-turn move
+ * pixels without changing them, so their precise samples can move along instead of being rebuilt
+ * from the 8-bit proxy. The arrangement is found from the pixels themselves: the hinted offset
+ * (same document position), then flips and quarter turns when the sizes allow, then a search
+ * for one image inside the other. Whatever is tried, a sample is only carried to a pixel whose
+ * proxy it quantises to, so a wrong guess cannot put wrong pixels anywhere; everything else
+ * starts from the proxy.
+ * @param {ImageDataLike} img the new canvas's pixels
+ * @param {DeepPlanes} old the planes of the old canvas (width/height required)
+ * @param {{ dx?: number, dy?: number, type?: 'u16'|'f32' }} [hint] dx, dy: position of the old canvas's corner in the new canvas
+ * @returns {{ planes: DeepPlanes, carried: number, how: string | null }} carried: pixels that kept their deep samples
+ */
+export function carryOver(img, old, { dx = null, dy = null, type = old.type } = {}) {
+  assertPlanes(old);
+  const source = old.type === type ? old : convertDepth(old, type);
+  const w = img.width, h = img.height, ow = old.width, oh = old.height;
+  const planes = fromCanvasData(img, type);
+  if (!(ow > 0 && oh > 0) || old.data.length !== ow * oh * 4) return { planes, carried: 0, how: null };
+  const old8 = toCanvasData(source);
+  const a = old8.data, b = img.data;
+  // each candidate maps a pixel of the new canvas to one of the old canvas (or outside it)
+  const offset = (ox, oy) => (x, y) => [x - ox, y - oy];
+  const candidates = [];
+  if (Number.isFinite(dx) && Number.isFinite(dy)) candidates.push(['offset', offset(Math.round(dx), Math.round(dy))]);
+  if (w === ow && h === oh) {
+    if (!(dx === 0 && dy === 0)) candidates.push(['offset', offset(0, 0)]);
+    candidates.push(['flip-h', (x, y) => [ow - 1 - x, y]], ['flip-v', (x, y) => [x, oh - 1 - y]], ['rotate-180', (x, y) => [ow - 1 - x, oh - 1 - y]]);
+  }
+  if (w === oh && h === ow) {
+    candidates.push(['rotate-90', (x, y) => [y, oh - 1 - x]], ['rotate--90', (x, y) => [ow - 1 - y, x]], ['transpose', (x, y) => [y, x]], ['transverse', (x, y) => [ow - 1 - y, oh - 1 - x]]);
+  }
+  // crop: the new canvas inside the old one; growth: the old canvas inside the new one. The probe is a row or a
+  // column, whichever is more recognisable (a vertical gradient has identical rows); the other is the second try
+  const columnFirst = busiestLine(img, true).density > busiestLine(img, false).density;
+  for (const vertical of [columnFirst, !columnFirst]) {
+    candidates.push(['search', () => {
+      const found = findInside(img, old8, vertical);
+      return found ? offset(-found.x, -found.y) : null;
+    }], ['search', () => {
+      const found = findInside(old8, img, vertical);
+      return found ? offset(found.x, found.y) : null;
+    }]);
+  }
+  const samples = Math.min(4096, w * h);
+  const stride = Math.max(1, Math.floor((w * h) / samples));
+  for (let [how, map] of candidates) {
+    if (how === 'search') {
+      map = map();
+      if (!map) continue;
+      how = 'offset';
+    }
+    let inside = 0, hits = 0;
+    for (let p = Math.floor(stride / 2); p < w * h; p += stride) {
+      const o = map(p % w, Math.floor(p / w));
+      if (o[0] < 0 || o[1] < 0 || o[0] >= ow || o[1] >= oh) continue;
+      inside++;
+      if (proxyPixelMatches(a, (o[1] * ow + o[0]) * 4, b, p * 4)) hits++;
+    }
+    if (!inside || hits < inside * 0.9) continue;
+    const s = source.data, d = planes.data;
+    let carried = 0;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const o = map(x, y);
+        if (o[0] < 0 || o[1] < 0 || o[0] >= ow || o[1] >= oh) continue;
+        const i = (o[1] * ow + o[0]) * 4, j = (y * w + x) * 4;
+        if (!proxyPixelMatches(a, i, b, j)) continue;
+        d[j] = s[i];
+        d[j + 1] = s[i + 1];
+        d[j + 2] = s[i + 2];
+        d[j + 3] = s[i + 3];
+        carried++;
+      }
+    }
+    return { planes, carried, how };
+  }
+  return { planes, carried: 0, how: null };
 }

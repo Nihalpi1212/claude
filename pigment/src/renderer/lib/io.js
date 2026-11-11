@@ -629,6 +629,8 @@ export async function encodeForPath(doc, path, compositor, exportOpts = {}) {
   if (!canWritePath(path)) throw new Error(`Pigment cannot write .${ext || '?'} files. Save as .pigment, .psd, .png, .jpg or .webp instead.`);
   const registered = exportFormatForPath(path);
   if (registered?.layered && registered.encode) return registered.encode(doc, { ...exportOpts, format: registered.id }, compositor);
+  // an Indexed Color document saved to .png stays a palette PNG when the PNG-8 writer is registered (lib/modes/formats.js)
+  if (ext === 'png' && doc.mode === 'indexed' && SAVE_FORMATS.png8?.encode && !exportOpts.format) return exportImage(doc, { ...exportOpts, format: 'png8' }, compositor);
   const format = registered?.id ?? (ext === 'jpg' || ext === 'jpeg' ? 'jpeg' : ext === 'webp' ? 'webp' : 'png');
   return exportImage(doc, { ...exportOpts, format }, compositor);
 }

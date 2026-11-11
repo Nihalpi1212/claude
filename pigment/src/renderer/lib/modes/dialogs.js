@@ -78,6 +78,16 @@ export function flattenChoice(app, modeName) {
   return app.dialogs.open({ title: modeName, content, width: 440, buttons: [{ label: 'Cancel', value: null }, { label: "Don't Flatten", value: 'keep' }, { label: 'Flatten', value: 'flatten', primary: true }] });
 }
 
+/** Asks for a mode to convert to (image:mode run without one). Resolves the mode id or null. */
+export async function modeChoice(app, current) {
+  const v = await formDialog(app, {
+    title: 'Mode',
+    width: 340,
+    fields: [{ key: 'mode', label: 'Convert to', type: 'select', value: current === 'rgb' ? 'grayscale' : 'rgb', options: MODE_IDS.filter((m) => m !== current || m === 'duotone').map((m) => [m, MODES[m].name]), span: true }],
+  });
+  return v?.mode ?? null;
+}
+
 // ---- Bitmap ---------------------------------------------------------------------------------------------------
 
 /** Built-in threshold tiles for Bitmap's Custom Pattern (greys are thresholds: dark pixels turn black first). */
@@ -228,8 +238,10 @@ function inkCurveDialog(app, ink) {
   };
   canvas.addEventListener('pointerdown', (e) => {
     const [x, y] = pos(e);
-    selected = curve.findIndex((p) => Math.abs(p[0] - x) < 4 && Math.abs(p[1] - y) < 4);
-    if (selected < 0) {
+    // a curve has one value per grey: a click above or below an existing point takes hold of that point
+    selected = curve.findIndex((p) => Math.abs(p[0] - x) < 4);
+    if (selected >= 0) curve[selected] = [curve[selected][0], Math.abs(curve[selected][1] - y) < 4 ? curve[selected][1] : y];
+    else {
       curve.push([x, y]);
       curve.sort((a, b) => a[0] - b[0]);
       selected = curve.findIndex((p) => p[0] === x && p[1] === y);
@@ -423,7 +435,8 @@ function matteColor(app, kind, custom) {
 export function indexedOptions(app, v) {
   const o = {
     palette: v.palette,
-    colors: Math.round(v.colors),
+    // Exact keeps every colour of the image, whatever the Colors field last held
+    colors: v.palette === 'exact' ? 256 : Math.round(v.colors),
     forced: v.forced,
     transparency: !!v.transparency,
     matte: matteColor(app, v.matteKind, v.matteColor),
@@ -476,18 +489,37 @@ export async function indexedDialog(app, doc, last = {}) {
   // an image that already has few colours keeps them exactly, as Photoshop proposes; one with more cannot
   if (distinct <= 256 && !['custom', 'web', 'system-mac', 'system-win', 'uniform'].includes(start.palette)) start.palette = 'exact';
   else if (start.palette === 'exact') start.palette = 'adaptive';
+  // Quantising a large image takes most of a second: the preview works on a reduced copy (shown enlarged, so its
+  // dither is coarser than the real one) and stays responsive; OK converts the full image.
+  const LIMIT = 700000;
+  let small = source;
+  if (source.width * source.height > LIMIT) {
+    const k = Math.sqrt(LIMIT / (source.width * source.height));
+    const c = createCanvas(Math.max(1, Math.round(source.width * k)), Math.max(1, Math.round(source.height * k)));
+    const cctx = c.getContext('2d', { willReadFrequently: true });
+    cctx.imageSmoothingQuality = 'high';
+    cctx.drawImage(canvasFromImage(source), 0, 0, c.width, c.height);
+    small = cctx.getImageData(0, 0, c.width, c.height);
+  }
   let closed = false, wanted = false;
   const run = debounce((v) => {
     if (closed || !wanted) return; // a pending preview must not come back after the dialog is gone or Preview was unticked
     try {
-      const q = quantize(source, indexedOptions(app, v));
-      info.textContent = `${q.palette.length - (q.transparentIndex >= 0 ? 1 : 0)} colors${q.transparentIndex >= 0 ? ' + transparency' : ''}${distinct <= 256 ? ` (the image has ${distinct})` : ''}`;
-      const img = indicesToImage(q.indices, q.palette, source.width, source.height, q.transparentIndex);
-      preview.show(canvasFromImage(img));
+      const q = quantize(small, indexedOptions(app, v));
+      info.textContent = `${q.palette.length - (q.transparentIndex >= 0 ? 1 : 0)} colors${q.transparentIndex >= 0 ? ' + transparency' : ''}${distinct <= 256 ? ` (the image has ${distinct})` : ''}${small === source ? '' : ' — reduced preview'}`;
+      let shown = canvasFromImage(indicesToImage(q.indices, q.palette, small.width, small.height, q.transparentIndex));
+      if (small !== source) {
+        const full = createCanvas(source.width, source.height);
+        const fctx = full.getContext('2d');
+        fctx.imageSmoothingEnabled = false;
+        fctx.drawImage(shown, 0, 0, full.width, full.height);
+        shown = full;
+      }
+      preview.show(shown);
     } catch (err) {
       info.textContent = err.message;
     }
-  }, source.width * source.height > 600000 ? 220 : 60);
+  }, small === source ? 60 : 140);
   const values = await formDialog(app, {
     title: 'Indexed Color',
     width: 460,

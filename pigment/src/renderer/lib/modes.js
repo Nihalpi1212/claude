@@ -19,9 +19,9 @@ import { RasterLayer, createCanvas, newId } from './document.js';
 import { snapshotTree, restoreTree } from './layer-ops.js';
 import { Selection } from './selection.js';
 import { parseColor, rgbaToHex } from '../../shared/pixels/color.js';
-import { MODES, FLATTENING_MODES, convertPixels, renderMode, constrainImage, constrainColor, normalizeDuotone, trap, splitChannels } from '../../shared/pixels/modes.js';
+import { MODES, FLATTENING_MODES, DUOTONE_PRESETS, convertPixels, renderMode, constrainImage, constrainColor, normalizeDuotone, trap, splitChannels } from '../../shared/pixels/modes.js';
 import { createMapper } from '../../shared/pixels/quantize.js';
-import { bitmapDialog, duotoneDialog, indexedDialog, colorTableDialog, trapDialog, conditionalDialog, flattenChoice, bitmapPatternTile } from './modes/dialogs.js';
+import { bitmapDialog, duotoneDialog, indexedDialog, colorTableDialog, trapDialog, conditionalDialog, flattenChoice, modeChoice, bitmapPatternTile } from './modes/dialogs.js';
 import { installFormats } from './modes/formats.js';
 import { saveForWeb } from './modes/save-for-web.js';
 
@@ -301,7 +301,9 @@ export function install(app) {
       opts.dpi = outDpi;
       if (opts.method === 'custom-pattern') opts.pattern = bitmapPatternTile(opts.pattern);
     }
-    const next = { colorTable: null, duotone: null, extra: {}, channels: doc.channels.filter((c) => !c.spot) };
+    // the inks belong to the document, whether or not it has a raster layer to convert
+    const next = { colorTable: null, duotone: to === 'duotone' ? normalizeDuotone(opts.duotone ?? DUOTONE_PRESETS[0]) : null, extra: {}, channels: doc.channels.filter((c) => !c.spot) };
+    if (next.duotone) opts.duotone = next.duotone;
     const rasters = doc.layers().filter((l) => l.type === 'raster' && !l.preview && !l.quickMask);
     const pixelsChange = !(FREE.has(from) && FREE.has(to));
     for (const layer of rasters) {
@@ -327,7 +329,6 @@ export function install(app) {
         next.colorTable = out.colorTable.map((c) => [c[0], c[1], c[2]]);
         if (out.transparentIndex >= 0) next.extra.transparentIndex = out.transparentIndex;
       }
-      if (out.duotone) next.duotone = out.duotone;
       if (out.channels) {
         const spots = {};
         const made = out.channels.map((c) => {
@@ -449,8 +450,15 @@ export function install(app) {
    */
   async function modeCommand(arg, ctx = null) {
     const doc = app.doc;
-    const req = typeof arg === 'string' ? { mode: arg } : arg && typeof arg === 'object' ? { ...arg } : null;
-    if (!doc || !req || !MODES[req.mode]) return ctx?.cancel();
+    if (!doc) return ctx?.cancel();
+    let req = typeof arg === 'string' ? { mode: arg } : arg && typeof arg === 'object' ? { ...arg } : null;
+    if (!req) {
+      // no mode named (an action step set to show its dialog, Insert Menu Item): ask which
+      const mode = await modeChoice(app, doc.mode);
+      if (!mode) return ctx?.cancel();
+      req = { mode };
+    } else if (ctx?.source === 'action' && req.silent === undefined) req.silent = true; // a played action does not stop to ask
+    if (!MODES[req.mode] || !app.docs.docs.includes(doc)) return ctx?.cancel();
     const to = req.mode, from = doc.mode;
     if (to === from) {
       // Photoshop opens Duotone Options again on a duotone document; every other mode has nothing to ask
@@ -485,7 +493,7 @@ export function install(app) {
       if (req.silent) options = lastOptions(to);
       else if (to === 'bitmap') options = await bitmapDialog(app, doc, lastOptions(to));
       else if (to === 'duotone') options = await duotoneDialog(app, doc, { duotone: lastOptions(to).duotone, title: 'Duotone Options' });
-      else if (to === 'indexed') options = await indexedDialog(app, doc, lastOptions(to), { flatten });
+      else if (to === 'indexed') options = await indexedDialog(app, doc, lastOptions(to));
       else options = {};
       if (!options) return ctx?.cancel();
     }

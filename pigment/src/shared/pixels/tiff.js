@@ -587,7 +587,13 @@ export async function encodeTiff(img, { compression = 'lzw', predictor = true, d
   const rowsPerStrip = Math.max(1, Math.min(height, Math.floor(65536 / rowBytes) || 1));
   const stripCount = Math.ceil(height / rowsPerStrip);
   const strips = [];
+  let breath = Date.now();
   for (let s = 0; s < stripCount; s++) {
+    // megapixels of LZW take a noticeable while: give the event loop a turn every 40 ms (the UI stays alive)
+    if (Date.now() - breath > 40) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      breath = Date.now();
+    }
     const y0 = s * rowsPerStrip, rows = Math.min(rowsPerStrip, height - y0);
     const buf = new Uint8Array(rows * rowBytes);
     const dv = new DataView(buf.buffer);

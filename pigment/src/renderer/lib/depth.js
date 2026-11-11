@@ -18,8 +18,8 @@
 // floats (1 = white, more is HDR headroom the proxy clamps), not linear light as in Photoshop.
 import { ADJUSTMENTS } from '../../shared/pixels/adjust.js';
 import {
-  DEEP_TYPES, fromCanvasData, toCanvasData, convertDepth, createDeep, extractRect, mixRect, hasPrecision, syncFromProxy,
-  applyAdjustmentDeep, isExactKind, blendDeep, resampleDeep, statistics, DEEP_BLEND_MODES, q8u16, q8f32, toPs16,
+  DEEP_TYPES, DEEP_BITS, fromCanvasData, toCanvasData, convertDepth, createDeep, extractRect, mixRect, hasPrecision, syncFromProxy,
+  applyAdjustmentDeep, isExactKind, blendDeep, resampleDeep, carryOver, statistics, DEEP_BLEND_MODES, q8u16, q8f32, toPs16,
 } from '../../shared/pixels/deep.js';
 import { encodePng, decodePng, toRgba16, isPng, pngInfo } from '../../shared/pixels/png.js';
 import { encodeTiff, decodeTiff, toRgba, isTiff } from '../../shared/pixels/tiff.js';
@@ -32,9 +32,9 @@ import { SAVE_FILTERS } from './documents.js';
 import { bridge } from './bridge.js';
 
 const SYNC_DELAY = 150; // ms of quiet after the last change before the deep pixels follow the proxy
-const STASH_PATCHES = 12; // precise patches remembered per canvas for undo/redo ...
-const STASH_BYTES = 192 * 1024 * 1024; // ... and their memory bound
-const RETIRED_CANVASES = 6; // canvases swapped out by transforms whose deep pixels stay for an undo
+const STASH_PATCHES = 8; // precise patches remembered per canvas for undo/redo ...
+const STASH_BYTES = 128 * 1024 * 1024; // ... and their memory bound
+const DETACHED_BYTES = 384 * 1024 * 1024; // deep pixels kept for layers that only live in the undo history
 const DEPTH_NAMES = { 8: '8 Bits/Channel', 16: '16 Bits/Channel', 32: '32 Bits/Channel' };
 // Image > Mode: bitmap, indexed and duotone are 8-bit only; 32 bits need RGB or Grayscale (the menu greys the rest out)
 const allowedDepths = (mode) => (['bitmap', 'indexed', 'duotone'].includes(mode) ? [8] : ['rgb', 'grayscale'].includes(mode ?? 'rgb') ? [8, 16, 32] : [8, 16]);
@@ -47,13 +47,29 @@ export function install(app) {
   // ---- keeping deep pixels in step ------------------------------------------------------------------------------
   // canvas -> { deep, version, stash }: `version` is the layer version the deep pixels were last checked at;
   // `stash` holds precise patches the proxy has overwritten (newest first) so an undo can bring them back.
-  // Keyed by canvas because history swaps whole canvases (Free Transform, Image Size, layers growing under a brush).
+  // Keyed by canvas because history swaps whole canvases (Free Transform, Image Size, layers growing under a brush)
+  // and puts them back on undo: the deep pixels of a canvas stay with it.
   const states = new WeakMap();
-  const retired = []; // strong references to the last few states whose canvas left its layer
+  // deep sample array -> { canvas, width, height, x, y, ... }: which canvas an array describes and where that canvas
+  // sat. Image-wide commands clone layer objects (the clone still points at the old array) and layers swap their
+  // canvas under a brush: an array that belongs to another canvas is never written to, it is where the new canvas's
+  // pixels are carried over from (pixels/deep.js carryOver).
+  const owners = new WeakMap();
+  const ledger = []; // every array this module keeps, newest first: the bound on what undo history may hold on to
 
   function remember(layer) {
+    const canvas = layer.canvas;
     const st = { deep: layer.deep, version: layer.version, stash: [], bytes: 0 };
-    states.set(layer.canvas, st);
+    states.set(canvas, st);
+    const data = layer.deep.data;
+    let rec = owners.get(data);
+    if (!rec) {
+      rec = { data: new WeakRef(data), bytes: data.byteLength, layers: [] };
+      owners.set(data, rec);
+      ledger.unshift(rec);
+    }
+    Object.assign(rec, { canvas: new WeakRef(canvas), width: canvas.width, height: canvas.height, x: layer.x, y: layer.y });
+    if (!rec.layers.some((r) => r.deref() === layer)) rec.layers.push(new WeakRef(layer));
     return st;
   }
 
@@ -64,12 +80,34 @@ export function install(app) {
     while (st.stash.length > STASH_PATCHES || (st.bytes > STASH_BYTES && st.stash.length > 1)) st.bytes -= st.stash.pop().data.byteLength;
   }
 
-  /** Keeps the state of a canvas that is no longer on its layer alive for a while (undo puts the canvas back). */
-  function retire(canvas, st) {
-    const i = retired.findIndex((r) => r.canvas === canvas);
-    if (i >= 0) retired.splice(i, 1);
-    retired.unshift({ canvas, st });
-    while (retired.length > RETIRED_CANVASES) states.delete(retired.pop().canvas);
+  /**
+   * Deep pixels of layers that are no longer in a document (they wait in the undo history: before a crop, a
+   * flatten, a transform) are kept so an undo gets them back, newest first up to DETACHED_BYTES; older ones are
+   * dropped, and a layer that returns without them starts again from its 8-bit proxy.
+   */
+  function prune() {
+    const live = new Set();
+    for (const doc of app.docs?.docs ?? []) for (const l of doc.layers()) if (l.deep?.data) live.add(l.deep.data);
+    let detached = 0;
+    for (let i = 0; i < ledger.length; i++) {
+      const rec = ledger[i];
+      const data = rec.data.deref();
+      if (!data) {
+        ledger.splice(i--, 1);
+        continue;
+      }
+      if (live.has(data)) continue;
+      detached += rec.bytes;
+      if (detached <= DETACHED_BYTES) continue;
+      const canvas = rec.canvas?.deref();
+      if (canvas && states.get(canvas)?.deep.data === data) states.delete(canvas);
+      for (const ref of rec.layers) {
+        const l = ref.deref();
+        if (l?.deep?.data === data) l.deep = null;
+      }
+      owners.delete(data);
+      ledger.splice(i--, 1);
+    }
   }
 
   /**
@@ -81,33 +119,39 @@ export function install(app) {
     const canvas = layer.canvas;
     const w = canvas.width, h = canvas.height, n = w * h * 4;
     let st = states.get(canvas);
+    if (st && (st.deep.type !== type || st.deep.data.length !== n)) st = null;
+    const given = layer.deep?.data ? layer.deep : null;
+    const owner = given ? owners.get(given.data) : null;
     let external = false;
-    if (layer.deep && layer.deep.data?.length === n) {
-      if (layer.deep.type !== type) {
-        const c = convertDepth(planesOf(layer), type);
-        layer.deep = { type, data: c.data };
-        st = null;
+    let from = null; // planes of another canvas these pixels may have come from
+    if (given && !owner && given.data.length === n) {
+      // deep pixels this module has not seen: a file just read, a cloned layer, a merged HDR result. They are the truth
+      if (given.type !== type) layer.deep = { type, data: convertDepth({ type: given.type, data: given.data }, type).data };
+      st = remember(layer);
+      external = true;
+    } else if (st) {
+      // the canvas is known; when the layer points at another canvas's pixels (an undo put this canvas back), take its own
+      if (given?.data !== st.deep.data) layer.deep = st.deep;
+      const rec = owners.get(st.deep.data);
+      if (rec) {
+        rec.x = layer.x;
+        rec.y = layer.y;
+        if (!rec.layers.some((r) => r.deref() === layer)) rec.layers.push(new WeakRef(layer));
       }
-      if (st && st.deep.data === layer.deep.data) {
-        if (st.version === layer.version && !override) return;
-        st.deep = layer.deep;
-      } else {
-        // deep pixels this module has not seen on this canvas: a file just read, a cloned layer, a merged HDR result
-        st = remember(layer);
-        external = true;
-      }
-    } else if (st && st.deep.type === type && st.deep.data.length === n) {
-      // the canvas came back (undo of a transform): so do the deep pixels it had
-      layer.deep = st.deep;
-    } else st = null;
+      if (st.version === layer.version && !override) return;
+    } else if (owner && owner.width * owner.height * 4 === given.data.length) {
+      from = { type: given.type, data: given.data, width: owner.width, height: owner.height, x: owner.x, y: owner.y };
+    }
     const img = ctx2d(canvas).getImageData(0, 0, w, h);
     if (override) {
       const { rect, img: part } = override;
       for (let y = 0; y < rect.height; y++) img.data.set(part.data.subarray(y * rect.width * 4, (y + 1) * rect.width * 4), ((rect.y + y) * w + rect.x) * 4);
     }
     if (!st) {
-      // a layer without deep pixels yet (new, pasted, resized): they start as the proxy's
-      layer.deep = { type, data: fromCanvasData(img, type).data };
+      // a canvas without deep pixels yet. Pixels that only moved here from another canvas (a crop, a flip, a layer that
+      // grew under a brush) bring their samples along; the rest (new, pasted, resampled) starts as the proxy's
+      const data = from ? carryOver(img, from, { dx: from.x - layer.x, dy: from.y - layer.y, type }).planes.data : fromCanvasData(img, type).data;
+      layer.deep = { type, data };
       remember(layer).version = override ? -1 : layer.version;
       return;
     }
@@ -136,24 +180,22 @@ export function install(app) {
         if (layer.deep) layer.deep = null; // a layer that came from a deep document into an 8-bit one
         continue;
       }
-      // a canvas this layer had before (and its deep pixels) may come back with an undo
-      const prev = lastCanvas.get(layer);
-      if (prev && prev !== layer.canvas && states.has(prev)) retire(prev, states.get(prev));
-      lastCanvas.set(layer, layer.canvas);
       try {
         syncLayer(doc, layer);
       } catch (err) {
         console.warn('depth: could not sync a layer', err);
       }
     }
+    if (deep) prune();
   }
 
   const timers = new WeakMap(); // doc -> timeout id
-  const lastCanvas = new WeakMap(); // layer -> the canvas its state was last checked on
 
+  /** Syncs the document once it has been quiet for SYNC_DELAY (slider drags and strokes change pixels many times a second). */
   function schedule(doc) {
-    if (!doc || !(doc.depth > 8) || timers.has(doc)) return;
-    timers.set(doc, setTimeout(function run() {
+    if (!doc || !(doc.depth > 8)) return;
+    clearTimeout(timers.get(doc));
+    timers.set(doc, setTimeout(() => {
       timers.delete(doc);
       if (!app.docs?.docs?.includes(doc)) return;
       // a stroke in progress repaints the canvas on every pointer move: wait for it to end
@@ -163,7 +205,18 @@ export function install(app) {
   }
 
   app.on('doc:opened', (doc) => {
-    if (doc?.depth > 8 || doc?.layers?.().some((l) => l.deep)) syncNow(doc);
+    if (!doc?.layers) return;
+    if (!(doc.depth > 8)) {
+      // Image > Duplicate (lib/image-ops.js) clones the layers, deep pixels included, into a document it creates
+      // without a depth: a new document whose raster layers all carry deep pixels of one type is a deep document
+      const rasters = doc.layers().filter(isDeepLayer);
+      const type = rasters[0]?.deep?.type;
+      if (DEEP_BITS[type] && rasters.every((l) => l.deep?.type === type && l.deep.data?.length === l.canvas.width * l.canvas.height * 4)) {
+        doc.depth = DEEP_BITS[type];
+        app.syncUiState();
+      }
+    }
+    if (doc.depth > 8 || doc.layers().some((l) => l.deep)) syncNow(doc);
   });
   app.on('doc:change', (e) => {
     const doc = e?.doc;
@@ -395,6 +448,85 @@ export function install(app) {
     return { ...acc, exact: true, reason: null };
   }
 
+  // Image > Flatten Image composites on canvases (8 bits). In a deep document the same composite is made in float
+  // first and handed to the flattened layer, so flattening before an export does not cost the extra bits. The
+  // command of lib/layer-ops.js is wrapped: its undo entry holds the layer object, which carries the deep pixels.
+  const flattenBase = app.commands.commands.get('image:flatten');
+  if (flattenBase) {
+    /** The float composite over white (Flatten Image fills what is transparent with white), or null when 8 bits will do. */
+    const floatFlat = (d) => {
+      if (!(d?.depth > 8)) return null;
+      try {
+        const f = flattenDeep(d);
+        if (!f.exact) return null;
+        const white = createDeep(f.width, f.height, f.type);
+        white.data.fill(f.type === 'f32' ? 1 : 65535);
+        return blendDeep(white, f);
+      } catch (err) {
+        console.warn('depth: flattening at 8 bits', err);
+        return null;
+      }
+    };
+    /** Hands the float composite to the flattened layer when that layer really shows the same picture. */
+    const adopt = (d, flat) => {
+      const layer = d?.root.children.length === 1 ? d.root.children[0] : null;
+      if (!flat || layer?.type !== 'raster' || layer.x !== 0 || layer.y !== 0 || layer.canvas.width !== flat.width || layer.canvas.height !== flat.height) return;
+      const proxy = toCanvasData(flat);
+      const shown = ctx2d(layer.canvas).getImageData(0, 0, flat.width, flat.height).data;
+      // canvas blending rounds differently from float by a level or two; anything further off is another picture
+      const step = Math.max(4, (Math.floor(shown.length / 4 / 2048) || 1) * 4);
+      let off = 0, checked = 0;
+      for (let i = 0; i < shown.length; i += step, checked++) if (Math.abs(shown[i] - proxy.data[i]) > 3 || Math.abs(shown[i + 1] - proxy.data[i + 1]) > 3 || Math.abs(shown[i + 2] - proxy.data[i + 2]) > 3) off++;
+      if (off > checked * 0.02) return;
+      layer.deep = { type: flat.type, data: flat.data };
+      ctx2d(layer.canvas).putImageData(new ImageData(proxy.data, flat.width, flat.height), 0, 0);
+      layer.touch();
+      remember(layer);
+      d.changed('pixels', { layer });
+    };
+    app.commands.register('image:flatten', {
+      ...flattenBase,
+      // synchronous like the command it wraps: callers (mode conversions) go on in the same tick
+      run: (arg, ctx) => {
+        const d = app.doc;
+        const flat = floatFlat(d);
+        const result = flattenBase.run(arg, ctx);
+        if (result && typeof result.then === 'function') return result.then((r) => (adopt(d, flat), r));
+        adopt(d, flat);
+        return result;
+      },
+    });
+  }
+
+  /**
+   * Gives a raster layer of a deep document new deep pixels (a Uint16Array or Float32Array of its canvas size) and
+   * the proxy that shows them, as one undo step: how other modules hand over results they computed in float.
+   */
+  function setPixels(doc, layer, data, label = 'Edit') {
+    const type = DEEP_TYPES[doc?.depth];
+    const canvas = layer?.canvas;
+    if (!type || !canvas || !isDeepLayer(layer) || data?.length !== canvas.width * canvas.height * 4) return false;
+    syncNow(doc);
+    const w = canvas.width, h = canvas.height;
+    const given = { type: data instanceof Float32Array ? 'f32' : 'u16', data };
+    const deep = { type, data: (given.type === type ? given : convertDepth(given, type)).data };
+    const before = { deep: layer.deep, pixels: ctx2d(canvas).getImageData(0, 0, w, h) };
+    const after = { deep, pixels: new ImageData(toCanvasData({ ...deep, width: w, height: h }).data, w, h) };
+    const apply = (state) => {
+      if (layer.canvas !== canvas) return; // the sync pass sorts out a layer whose canvas was swapped
+      ctx2d(canvas).putImageData(state.pixels, 0, 0);
+      layer.deep = state.deep;
+      layer.touch();
+      if (layer.deep) remember(layer);
+      doc.changed('pixels', { layer });
+    };
+    doc.history.run(label, () => {
+      apply(after);
+      return { undo: () => apply(before), redo: () => apply(after) };
+    }, { bytes: w * h * 8 + deep.data.byteLength + (before.deep?.data.byteLength ?? 0) });
+    return true;
+  }
+
   // ---- export ---------------------------------------------------------------------------------------------------
   /** The flattened image as deep planes at the export size and over the export background. */
   function exportPlanes(doc, opts, compositor, type) {
@@ -461,9 +593,14 @@ export function install(app) {
     return ctx2d(canvas).getImageData(0, 0, canvas.width, canvas.height);
   }
 
+  /** Lets the page breathe between the slow halves of an export (Export As also encodes for its size estimate). */
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+
   async function encodePng16(doc, opts = {}, compositor) {
     const { planes } = exportPlanes(doc, opts, compositor, 'u16');
-    return encodePng(packChannels(planes, 16), { dpi: doc.dpi });
+    await tick();
+    // trying all five row filters on megapixels of 16-bit samples blocks for a second and saves about 1%
+    return encodePng(packChannels(planes, 16), { dpi: doc.dpi, adaptive: planes.width * planes.height <= 1e6 });
   }
 
   async function encodeTiffDocument(doc, opts = {}, compositor) {
@@ -475,6 +612,7 @@ export function install(app) {
       const img = exportImageData(doc, opts, compositor);
       planes = packChannels({ width: img.width, height: img.height, data: img.data }, 8);
     } else planes = packChannels(exportPlanes(doc, opts, compositor, depth === 32 ? 'f32' : 'u16').planes, depth);
+    await tick();
     return encodeTiff(planes, { compression, dpi: doc.dpi });
   }
 
@@ -684,10 +822,11 @@ export function install(app) {
   function infoElement() {
     if (infoBlock?.isConnected) return infoBlock;
     const panel = app.panels?.panels?.get('info')?.panel?.element;
-    const anchor = panel?.querySelector('.info-pointer');
+    // the pointer block's second column (X, Y) has room under it, next to the 8-bit RGB values
+    const anchor = panel?.querySelectorAll('.info-pointer .info-col')[1];
     if (!anchor) return null;
     infoBlock = document.createElement('div');
-    infoBlock.className = 'info-block info-deep';
+    infoBlock.className = 'info-deep';
     infoBlock.hidden = true;
     infoBlock.innerHTML = `
       <div class="info-title muted" data-k="deep-title">16-bit</div>
@@ -697,7 +836,7 @@ export function install(app) {
         <span class="k">B</span><span data-k="deep-b">—</span>
         <span class="k">A</span><span data-k="deep-a">—</span>
       </div>`;
-    anchor.after(infoBlock);
+    anchor.appendChild(infoBlock);
     return infoBlock;
   }
   function renderInfo() {
@@ -748,6 +887,8 @@ export function install(app) {
       const planes = layer.deep?.data?.length === w * h * 4 ? planesOf(layer) : fromCanvasData(ctx2d(layer.canvas).getImageData(0, 0, w, h), 'f32');
       return { width: w, height: h, data: planes.type === 'f32' ? planes.data.slice() : convertDepth(planes, 'f32').data };
     },
+    /** Replaces a layer's pixels with deep samples computed elsewhere (one undo step); false when it does not apply. */
+    setPixels: (layer, data, label) => setPixels(app.docs?.docs?.find((d) => d.layers().includes(layer)) ?? app.doc, layer, data, label),
     /** Deep planes of a layer ({ type, data, width, height }, the live arrays) or null. */
     planes: (layer) => (layer?.deep ? planesOf(layer) : null),
     flatten: (doc = app.doc, opts) => flattenDeep(doc, opts),

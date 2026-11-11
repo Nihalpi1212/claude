@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { deflateSync, inflateSync } from 'node:zlib';
 import {
   fromCanvasData, toCanvasData, convertDepth, createDeep, cloneDeep, extractRect, writeRect, mixRect, hasPrecision, syncFromProxy,
-  applyLutDeep, applyAdjustmentDeep, applyVia8Bit, curveFn, blendDeep, statistics, EXACT_KINDS, isExactKind, q8u16, q8f32, toPs16,
+  applyLutDeep, applyAdjustmentDeep, applyVia8Bit, curveFn, blendDeep, resampleDeep, carryOver, statistics, EXACT_KINDS, isExactKind, q8u16, q8f32, toPs16,
 } from '../../src/shared/pixels/deep.js';
 import { applyAdjustment, levelsLut, curveLut, ADJUSTMENTS } from '../../src/shared/pixels/adjust.js';
 import { encodePng, decodePng, toRgba16, pngInfo } from '../../src/shared/pixels/png.js';
@@ -186,6 +186,103 @@ test('syncFromProxy takes over 8-bit edits, leaves precise samples alone and res
   assert.deepEqual([lr.loosePixels, lr.changed], [1, 1]);
   assert.ok(Math.abs(f.data[0] - 0.5039) < 1e-6);
   assert.ok(Math.abs(f.data[4] - 10 / 255) < 1e-6);
+});
+
+test('syncFromProxy: translucent pixels read back from a canvas are not edits; resampleDeep averages and interpolates', () => {
+  // a canvas stores premultiplied 8-bit colour: (200, 100, 50) at alpha 10 comes back as (204, 102, 51)
+  const deep = { type: 'u16', width: 3, height: 1, data: new Uint16Array([51400, 25700, 12850, 2570, 40000, 30000, 20000, 0, 3007, 13003, 12345, 30000]) };
+  const before = Array.from(deep.data);
+  const canvasSays = { width: 3, height: 1, data: new Uint8ClampedArray([204, 102, 51, 10, 0, 0, 0, 0, 13, 51, 48, 117]) };
+  const same = syncFromProxy(deep, canvasSays, { backup: true });
+  assert.deepEqual([same.changed, same.before], [0, null]);
+  assert.deepEqual(Array.from(deep.data), before);
+  // a real edit of a translucent pixel (another alpha, or a colour further away than the canvas rounding) is taken over
+  const edited = { width: 3, height: 1, data: new Uint8ClampedArray([204, 102, 51, 11, 0, 0, 0, 0, 200, 51, 48, 117]) };
+  const res = syncFromProxy(deep, edited, { backup: true });
+  assert.equal(res.changed, 2);
+  assert.deepEqual(Array.from(res.before), before, 'the backup is the state before the call');
+  assert.deepEqual(Array.from(deep.data), [204 * 257, 102 * 257, 51 * 257, 11 * 257, 40000, 30000, 20000, 0, 200 * 257, 51 * 257, 48 * 257, 117 * 257]);
+
+  // halving a 4 x 2 image averages 2 x 2 blocks at full precision (transparent pixels carry no colour)
+  const src = createDeep(4, 2, 'u16');
+  const px = [[1000, 0, 0, 65535], [2001, 0, 0, 65535], [60000, 0, 0, 65535], [9, 9, 9, 0], [3000, 0, 0, 65535], [4000, 0, 0, 65535], [60000, 0, 0, 65535], [9, 9, 9, 0]];
+  px.forEach((p, i) => src.data.set(p, i * 4));
+  const half = resampleDeep(src, 2, 1);
+  assert.deepEqual([half.width, half.height, half.type], [2, 1, 'u16']);
+  assert.equal(half.data[0], Math.round((1000 + 2001 + 3000 + 4000) / 4));
+  assert.equal(half.data[3], 65535);
+  assert.equal(half.data[4], 60000, 'the transparent half of the block adds no colour');
+  assert.ok(Math.abs(half.data[7] - 32768) <= 1);
+  // doubling a ramp interpolates between samples: 16-bit in-between values appear
+  const ramp = createDeep(3, 1, 'u16');
+  [0, 30000, 60000].forEach((v, i) => ramp.data.set([v, v, v, 65535], i * 4));
+  const big = resampleDeep(ramp, 6, 1);
+  const reds = Array.from({ length: 6 }, (_, i) => big.data[i * 4]);
+  assert.deepEqual(reds, [0, 7500, 22500, 37500, 52500, 60000]);
+  // float planes keep values above white; the same size is a copy
+  const f = { type: 'f32', width: 2, height: 1, data: new Float32Array([3, 1, 0, 1, 1, 1, 0, 1]) };
+  const one = resampleDeep(f, 1, 1);
+  assert.deepEqual(Array.from(one.data), [2, 1, 0, 1]);
+  const copy = resampleDeep(f, 2, 1);
+  assert.notEqual(copy.data, f.data);
+  assert.deepEqual(Array.from(copy.data), Array.from(f.data));
+});
+
+test('carryOver moves deep samples to a cropped, grown, flipped or turned canvas and nowhere they do not belong', () => {
+  const W = 40, H = 30;
+  const old = createDeep(W, H, 'u16');
+  const rnd = rng(21);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) old.data.set([x * 1500 + Math.floor(rnd() * 250), y * 2000 + 77, 20000 + x * y, x === 5 ? 20000 : 65535], (y * W + x) * 4);
+  const proxy = toCanvasData(old);
+  const at = (planes, x, y) => Array.from(planes.data.subarray((y * planes.width + x) * 4, (y * planes.width + x) * 4 + 4));
+  const oldAt = (x, y) => Array.from(old.data.subarray((y * W + x) * 4, (y * W + x) * 4 + 4));
+  /** A new w x h image whose pixel (x, y) is the old proxy's pixel at src(x, y), or `fill` outside it. */
+  const remap = (w, h, src, fill = [0, 0, 0, 0]) => {
+    const data = new Uint8ClampedArray(w * h * 4);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const [ox, oy] = src(x, y);
+      data.set(ox >= 0 && oy >= 0 && ox < W && oy < H ? proxy.data.subarray((oy * W + ox) * 4, (oy * W + ox) * 4 + 4) : fill, (y * w + x) * 4);
+    }
+    return { width: w, height: h, data };
+  };
+  // a crop, found without any hint
+  const crop = carryOver(remap(20, 12, (x, y) => [x + 7, y + 9]), old);
+  assert.deepEqual([crop.how, crop.carried, crop.planes.type, crop.planes.width], ['offset', 240, 'u16', 20]);
+  assert.deepEqual(at(crop.planes, 3, 4), oldAt(10, 13));
+  // a canvas that grew around the old one (transparent margin), with the document-position hint and without
+  const grown = remap(50, 36, (x, y) => [x - 6, y - 4]);
+  for (const hint of [{ dx: 6, dy: 4 }, {}]) {
+    const g = carryOver(grown, old, hint);
+    assert.equal(g.carried, W * H);
+    assert.deepEqual(at(g.planes, 16, 14), oldAt(10, 10));
+    assert.deepEqual(at(g.planes, 2, 2), [0, 0, 0, 0]);
+  }
+  // flips and quarter turns
+  const cases = [
+    ['flip-h', W, H, (x, y) => [W - 1 - x, y]], ['flip-v', W, H, (x, y) => [x, H - 1 - y]], ['rotate-180', W, H, (x, y) => [W - 1 - x, H - 1 - y]],
+    ['rotate-90', H, W, (x, y) => [y, H - 1 - x]], ['rotate--90', H, W, (x, y) => [W - 1 - y, x]],
+  ];
+  for (const [name, w, h, src] of cases) {
+    const r = carryOver(remap(w, h, src), old, { dx: 0, dy: 0 });
+    assert.deepEqual([r.how, r.carried], [name, W * H], name);
+    const [ox, oy] = src(3, 8);
+    assert.deepEqual(at(r.planes, 3, 8), oldAt(ox, oy), name);
+  }
+  // the same canvas with a painted stripe: untouched pixels keep their samples, painted ones take the proxy
+  const painted = remap(W, H, (x, y) => [x, y]);
+  for (let x = 0; x < W; x++) painted.data.set([255, 0, 0, 255], (10 * W + x) * 4);
+  const p = carryOver(painted, old, { dx: 0, dy: 0 });
+  assert.equal(p.carried, W * (H - 1));
+  assert.deepEqual(at(p.planes, 4, 10), [65535, 0, 0, 65535]);
+  assert.deepEqual(at(p.planes, 4, 11), oldAt(4, 11));
+  // unrelated pixels: nothing is carried, the planes are the proxy's; a float target converts on the way
+  const noise = { width: 20, height: 20, data: new Uint8ClampedArray(1600).map(() => rnd() * 256) };
+  const none = carryOver(noise, old);
+  assert.deepEqual([none.how, none.carried], [null, 0]);
+  assert.equal(none.planes.data[0], noise.data[0] * 257);
+  const f = carryOver(remap(20, 12, (x, y) => [x + 7, y + 9]), old, { type: 'f32' });
+  assert.equal(f.planes.type, 'f32');
+  assert.ok(Math.abs(f.planes.data[0] - old.data[(9 * W + 7) * 4] / 65535) < 1e-7);
 });
 
 // ---- adjustments -----------------------------------------------------------------------------

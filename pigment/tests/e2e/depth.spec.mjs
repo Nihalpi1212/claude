@@ -51,9 +51,16 @@ const deepState = (page) =>
     const q = l.deep.type === 'f32' ? (v) => (v >= 1 ? 255 : v > 0 ? Math.floor(v * 255 + 0.5) : 0) : (v) => Math.floor((v + 128) / 257);
     let mismatches = 0;
     const seen = new Set();
-    for (let i = 0; i < d.length; i++) {
-      if (q(d[i]) !== img[i]) mismatches++;
-      if (i % 4 === 0) seen.add(d[i]);
+    for (let i = 0; i < d.length; i += 4) {
+      seen.add(d[i]);
+      const a = img[i + 3];
+      if (q(d[i + 3]) !== a) mismatches++;
+      else if (a === 255) {
+        if (q(d[i]) !== img[i] || q(d[i + 1]) !== img[i + 1] || q(d[i + 2]) !== img[i + 2]) mismatches++;
+      } else if (a > 0) {
+        // translucent pixels: a canvas keeps premultiplied 8-bit colour, so compare what it can hold
+        for (let c = 0; c < 3; c++) if (Math.abs(Math.round((q(d[i + c]) * a) / 255) - Math.round((img[i + c] * a) / 255)) > 1) mismatches++;
+      }
     }
     return { type: l.deep.type, length: d.length, proxyMatches: mismatches === 0, distinct: seen.size };
   });
@@ -141,22 +148,31 @@ test('Levels through its dialog commits at full depth; a selection limits the de
   await run(page, 'image:adjust-curves');
   await expect(page.locator('.dialog')).toBeVisible();
   await confirmDialog(page); // the default curve is the identity: nothing moves, deep data stays put
+  await expect.poll(() => historyLength(page)).toBe(1); // the commit follows the dialog
   expect(await deepAt(page, 300)).toEqual(right);
   await runAwait(page, 'image:adjust-invert');
   expect(await deepAt(page, 100)).toEqual(left);
   expect(await deepAt(page, 300)).toEqual([65535 - right[0], 65535 - right[1], 65535 - right[2], 65535]);
   expect((await deepState(page)).proxyMatches).toBe(true);
   await runAwait(page, 'select:none');
-  // Brightness/Contrast through the real dialog: move the slider, OK
+  // give the layer values only 16 bits can hold, then Brightness/Contrast through the real dialog: move the slider, OK
+  await runAwait(page, 'image:adjust-levels', { rgb: { inBlack: 0, inWhite: 255, gamma: 1.37, outBlack: 0, outWhite: 255 } });
+  const n = await historyLength(page);
   await run(page, 'image:adjust-brightness-contrast');
-  const input = page.locator('.dialog input[type="number"]').first();
+  const input = page.locator('.dialog input[type="number"][data-key="brightness"]');
   await input.fill('60');
   await input.dispatchEvent('change');
+  await page.waitForTimeout(250); // let the debounced sync take over the 8-bit preview: the commit must still be 16-bit
   await confirmDialog(page);
-  const lit = await deepAt(page, 100);
-  expect(lit[0]).toBeGreaterThan(left[0] + 1000);
-  expect(lit[0] % 257).not.toBe(0);
+  await expect.poll(() => historyLength(page)).toBe(n + 1);
+  const lit = [await deepAt(page, 100), await deepAt(page, 37), await deepAt(page, 333)];
+  expect(lit[0][0]).toBeGreaterThan(left[0] + 1000);
+  expect(lit[0][0] % 257).not.toBe(0);
   expect((await deepState(page)).proxyMatches).toBe(true);
+  // the dialog's result is the adjustment of the 16-bit pixels: the same as running it directly, without previews
+  await runAwait(page, 'edit:undo');
+  await runAwait(page, 'image:adjust-brightness-contrast', { brightness: 60, contrast: 0, legacy: false });
+  expect([await deepAt(page, 100), await deepAt(page, 37), await deepAt(page, 333)]).toEqual(lit);
   expect(errors).toEqual([]);
 });
 
@@ -204,6 +220,119 @@ test('8-bit edits are taken over where they changed pixels, the rest keeps its p
   expect(errors).toEqual([]);
 });
 
+test('crop, flips, quarter turns and Flatten Image keep the 16-bit samples; setPixels hands over float results', async ({ page }) => {
+  const errors = await openApp(page);
+  await newDoc(page, { width: 300, height: 200, depth: 16 });
+  // a ramp in x with a little y in it, so every pixel is its own
+  await page.evaluate(() => {
+    const app = window.pigmentApp, d = app.doc, l = d.active;
+    const img = new ImageData(300, 200);
+    for (let y = 0; y < 200; y++) for (let x = 0; x < 300; x++) img.data.set([Math.round((x / 299) * 255), y, 90, 255], (y * 300 + x) * 4);
+    l.canvas.getContext('2d').putImageData(img, 0, 0);
+    l.touch();
+    d.changed('pixels', { layer: l });
+    app.deep.sync(d);
+  });
+  await runAwait(page, 'image:adjust-curves', { rgb: [[0, 0], [128, 150], [255, 255]] });
+  const sample = await deepAt(page, 120, 50);
+  expect(sample[0] % 257).not.toBe(0);
+  // crop to a selection: the pixel moves to (20, 10) with its samples
+  await page.evaluate(async () => {
+    const d = window.pigmentApp.doc;
+    const { Selection } = await import('./lib/selection.js');
+    d.selection = Selection.fromRect(d.width, d.height, { x: 100, y: 40, width: 100, height: 80 });
+    d.changed('selection');
+  });
+  await runAwait(page, 'image:crop');
+  expect(await page.evaluate(() => [window.pigmentApp.doc.width, window.pigmentApp.doc.height])).toEqual([100, 80]);
+  expect(await deepAt(page, 20, 10)).toEqual(sample);
+  expect((await deepState(page)).proxyMatches).toBe(true);
+  await runAwait(page, 'edit:undo');
+  expect(await deepAt(page, 120, 50)).toEqual(sample);
+  await runAwait(page, 'select:none');
+  // flip and rotate the canvas
+  await runAwait(page, 'image:rotate', 'flip-h');
+  expect(await deepAt(page, 299 - 120, 50)).toEqual(sample);
+  await runAwait(page, 'image:rotate', 'flip-v');
+  expect(await deepAt(page, 299 - 120, 199 - 50)).toEqual(sample);
+  await runAwait(page, 'image:rotate', 180);
+  expect(await deepAt(page, 120, 50)).toEqual(sample);
+  await runAwait(page, 'image:rotate', 90);
+  expect(await page.evaluate(() => [window.pigmentApp.doc.width, window.pigmentApp.doc.height])).toEqual([200, 300]);
+  expect(await deepAt(page, 199 - 50, 120)).toEqual(sample);
+  await runAwait(page, 'image:rotate', -90);
+  expect(await deepAt(page, 120, 50)).toEqual(sample);
+  expect((await deepState(page)).proxyMatches).toBe(true);
+  // Flatten Image with a 50% white layer on top: the float composite, not the 8-bit one
+  await runAwait(page, 'layer:new', { name: 'Veil' });
+  await page.evaluate(() => {
+    const d = window.pigmentApp.doc, l = d.active;
+    const ctx = l.canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, l.canvas.width, l.canvas.height);
+    l.opacity = 0.5;
+    l.touch();
+    d.changed('pixels', { layer: l });
+  });
+  await runAwait(page, 'image:flatten');
+  expect(await page.evaluate(() => window.pigmentApp.doc.root.children.length)).toBe(1);
+  const flat = await deepAt(page, 120, 50);
+  expect(flat).toEqual([Math.round((sample[0] + 65535) / 2), Math.round((sample[1] + 65535) / 2), Math.round((sample[2] + 65535) / 2), 65535]);
+  expect((await deepState(page)).proxyMatches).toBe(true);
+  await runAwait(page, 'edit:undo');
+  expect(await page.evaluate(() => window.pigmentApp.doc.root.children.length)).toBe(2);
+  await page.evaluate(() => {
+    const d = window.pigmentApp.doc;
+    d.setActive(d.root.children[0]);
+  });
+  expect(await deepAt(page, 120, 50)).toEqual(sample);
+  // a small layer that grows (as under a brush stroke that leaves its bounds) keeps the samples it had
+  const grown = await page.evaluate(async () => {
+    const app = window.pigmentApp, d = app.doc;
+    const { RasterLayer } = await import('./lib/document.js');
+    const layer = new RasterLayer({ name: 'Small', width: 50, height: 40, x: 100, y: 60 });
+    const img = new ImageData(50, 40);
+    for (let i = 0; i < 2000; i++) img.data.set([i % 50 * 5, 80, 200, 255], i * 4);
+    layer.canvas.getContext('2d').putImageData(img, 0, 0);
+    d.add(layer);
+    d.setActive(layer);
+    await app.commands.run('image:adjust-levels', { rgb: { inBlack: 0, inWhite: 255, gamma: 1.21, outBlack: 0, outWhite: 255 } }, 'api');
+    const before = Array.from(layer.deep.data.subarray((10 * 50 + 20) * 4, (10 * 50 + 20) * 4 + 4));
+    layer.ensureCovers({ x: 80, y: 40, width: 120, height: 100 });
+    layer.touch();
+    d.changed('pixels', { layer });
+    app.deep.sync(d);
+    const w = layer.canvas.width;
+    const at = (x, y) => Array.from(layer.deep.data.subarray((y * w + x) * 4, (y * w + x) * 4 + 4));
+    return { before, size: [layer.x, layer.y, w, layer.canvas.height], after: at(20 + 20, 10 + 20), margin: at(2, 2), length: layer.deep.data.length };
+  });
+  expect(grown.size).toEqual([80, 40, 120, 100]);
+  expect(grown.length).toBe(120 * 100 * 4);
+  expect(grown.before[0] % 257).not.toBe(0);
+  expect(grown.after).toEqual(grown.before);
+  expect(grown.margin).toEqual([0, 0, 0, 0]);
+  await page.evaluate(() => {
+    const d = window.pigmentApp.doc;
+    d.remove(d.active);
+    d.setActive(d.root.children[0]);
+  });
+  // another module's float result goes in through app.deep.setPixels, as one undo step
+  const n = await historyLength(page);
+  const ok = await page.evaluate(() => {
+    const app = window.pigmentApp, l = app.doc.active;
+    const f = app.deep.toFloat(l);
+    for (let i = 0; i < f.data.length; i += 4) f.data[i] = 0.123456;
+    return app.deep.setPixels(l, f.data, 'Float edit');
+  });
+  expect(ok).toBe(true);
+  expect(await historyLength(page)).toBe(n + 1);
+  expect((await deepAt(page, 120, 50))[0]).toBe(Math.round(0.123456 * 65535));
+  expect((await deepState(page)).proxyMatches).toBe(true);
+  await runAwait(page, 'edit:undo');
+  expect(await deepAt(page, 120, 50)).toEqual(sample);
+  expect(errors).toEqual([]);
+});
+
 test('Image > Mode > 8 Bits drops the deep data (dithered), undo brings it back; 32 bits keeps highlights', async ({ page }) => {
   const errors = await openApp(page);
   await newDoc(page, { width: 512, height: 32 });
@@ -245,14 +374,14 @@ test('Image > Mode > 8 Bits drops the deep data (dithered), undo brings it back;
     return new Set(Array.from(l.canvas.getContext('2d').getImageData(230, 0, 1, l.canvas.height).data.filter((_, i) => i % 4 === 0))).size;
   })).toBe(1);
   await runAwait(page, 'edit:undo');
-  // 32 bits: +2 stops pushes highlights above white, -2 brings them back; the same at 16 bits clips them
+  // 32 bits: +4 stops pushes the greys above white, -4 brings them back (16 bits would have clipped them)
   await runAwait(page, 'image:depth', 32);
   expect((await deepState(page)).type).toBe('f32');
   const f0 = await deepAt(page, 480);
-  await runAwait(page, 'image:adjust-exposure', { exposure: 2, offset: 0, gamma: 1 });
+  await runAwait(page, 'image:adjust-exposure', { exposure: 4, offset: 0, gamma: 1 });
   expect((await deepAt(page, 480))[0]).toBeGreaterThan(1);
   expect((await deepState(page)).proxyMatches).toBe(true); // the proxy clamps
-  await runAwait(page, 'image:adjust-exposure', { exposure: -2, offset: 0, gamma: 1 });
+  await runAwait(page, 'image:adjust-exposure', { exposure: -4, offset: 0, gamma: 1 });
   expect(Math.abs((await deepAt(page, 480))[0] - f0[0])).toBeLessThan(1e-4);
   await runAwait(page, 'image:depth', 16);
   await expect(page.locator('.toast').last()).toBeVisible();
@@ -401,7 +530,7 @@ test('TIFF: export by document depth with LZW, reopen at 16 bits; open big-endia
   const tga = await written(page, 'mem:/out.tga');
   expect(tgaInfo(tga)).toMatchObject({ width: w, height: h, rle: true });
   const tgaBack = decodeTga(tga);
-  expect(Array.from(tgaBack.data.subarray(0, 4))).toEqual([0, 0, 0, 255]);
+  expect(Array.from(tgaBack.data.subarray(0, 4))).toEqual([0, 9, 17, 255]); // the float document's first pixel (0, 1/30, 2/30) at 8 bits
   const img = { width: 12, height: 9, data: new Uint8ClampedArray(12 * 9 * 4) };
   for (let i = 0; i < 12 * 9; i++) img.data.set([i * 2, 255 - i, 40, i < 12 ? 128 : 255], i * 4);
   await putFile(page, 'mem:/alpha.tga', encodeTga(img, { rle: false }));
@@ -410,8 +539,8 @@ test('TIFF: export by document depth with LZW, reopen at 16 bits; open big-endia
   expect(await page.evaluate(() => {
     const d = window.pigmentApp.doc;
     const px = (x, y) => Array.from(d.active.canvas.getContext('2d').getImageData(x, y, 1, 1).data);
-    return [d.width, d.height, d.depth, px(3, 0), px(3, 2)];
-  })).toEqual([12, 9, 8, [6, 252, 40, 128], [54, 228, 40, 255]]);
+    return [d.width, d.height, d.depth, px(3, 0)[3], px(3, 2)]; // (the translucent pixel's colour is whatever the canvas keeps of it)
+  })).toEqual([12, 9, 8, 128, [54, 228, 40, 255]]);
   // a file that only claims to be a TIFF fails with a message, not a broken document
   const count = await page.evaluate(() => window.pigmentApp.docs.list().length);
   await putFile(page, 'mem:/broken.tif', new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]));

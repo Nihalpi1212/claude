@@ -15,23 +15,24 @@ const saved = (page, path) => page.evaluate((p) => window.__pigmentTest.written[
 
 test('Save never overwrites a format Pigment cannot write; Save As to such a name writes a PNG', async ({ page }) => {
   const errors = await openApp(page);
-  // a "GIF" (PNG bytes under a .gif name decode fine, only the extension matters here)
+  // a "BMP" (PNG bytes under a .bmp name decode fine, only the extension matters here).
+  // modes (lib/modes.js): this test used .gif until GIF became a format Pigment writes (0.3 GIF export)
   await page.evaluate(async () => {
     const res = await fetch('/fixtures/gradient.png');
-    window.__pigmentTest.files['mem:/pic.gif'] = new Uint8Array(await res.arrayBuffer());
+    window.__pigmentTest.files['mem:/pic.bmp'] = new Uint8Array(await res.arrayBuffer());
   });
-  await runAwait(page, 'file:open-paths', ['mem:/pic.gif']);
-  await expect.poll(() => page.evaluate(() => window.pigmentApp.doc?.path)).toBe('mem:/pic.gif');
+  await runAwait(page, 'file:open-paths', ['mem:/pic.bmp']);
+  await expect.poll(() => page.evaluate(() => window.pigmentApp.doc?.path)).toBe('mem:/pic.bmp');
   await page.evaluate(() => {
     const l = window.pigmentApp.doc.active;
     l.canvas.getContext('2d').fillRect(0, 0, 5, 5);
     l.touch();
     window.pigmentApp.doc.changed('pixels', { layer: l });
-    window.__pigmentTest.nextSavePath = 'mem:/typed.gif';
+    window.__pigmentTest.nextSavePath = 'mem:/typed.bmp';
   });
-  await runAwait(page, 'file:save'); // opens Save As (the dialog answers with the typed .gif name)
+  await runAwait(page, 'file:save'); // opens Save As (the dialog answers with the typed .bmp name)
   await expect.poll(() => page.evaluate(() => Object.keys(window.__pigmentTest.written))).toEqual(['mem:/typed.png']);
-  expect(await saved(page, 'mem:/pic.gif')).toBeNull();
+  expect(await saved(page, 'mem:/pic.bmp')).toBeNull();
   expect(Array.from((await saved(page, 'mem:/typed.png')).slice(0, 4))).toEqual([0x89, 0x50, 0x4e, 0x47]);
   expect(await page.evaluate(() => [window.pigmentApp.doc.path, window.pigmentApp.doc.name])).toEqual(['mem:/typed.png', 'typed']);
   expect(errors).toEqual([]);

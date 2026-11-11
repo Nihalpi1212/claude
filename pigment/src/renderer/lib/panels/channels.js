@@ -276,7 +276,10 @@ export function install(app) {
     };
     const rows = modeRows(doc);
     list.dataset.mode = doc.mode;
-    if (rows.composite) list.appendChild(channelRow({ label: rows.composite.label, canvas: t.rgb, which: { type: rows.composite.type }, selected: compositeOn, onClick: pick }));
+    // the Index channel of an indexed document stands for its colour table: the row says how many colours it has
+    // and opens the Color Table editor
+    const table = doc.mode === 'indexed' ? { hint: `${doc.colorTable?.length ?? 0} colors`, onDblClick: () => app.commands.run('image:color-table', undefined, 'panel'), menu: [{ label: 'Color Table…', icon: 'grid-add', onSelect: () => app.commands.run('image:color-table', undefined, 'panel') }] } : {};
+    if (rows.composite) list.appendChild(channelRow({ label: rows.composite.label, canvas: t.rgb, which: { type: rows.composite.type }, selected: compositeOn, onClick: pick, ...table }));
     for (const c of rows.channels) list.appendChild(channelRow({ label: c.label, canvas: t.planes[c.plane] ?? t.rgb, which: { type: c.type, plane: c.plane }, selected: compositeOn, onClick: pick }));
     if (layer?.mask?.canvas) {
       list.appendChild(channelRow({

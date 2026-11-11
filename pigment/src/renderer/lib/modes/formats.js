@@ -1,13 +1,13 @@
-// GIF and PNG-8 (lib/modes.js): export formats registered with lib/io.js and the GIF reader that keeps
-// the file's colour table, so a GIF opens as an Indexed Color document instead of the RGBA picture a
-// browser decode gives. Save for Web uses the same helpers for its optimised preview.
+// GIF and PNG-8 (lib/modes.js): export formats registered with lib/io.js and the readers that keep a
+// file's colour table, so a GIF or a palette PNG opens as an Indexed Color document instead of the
+// RGBA picture a browser decode gives. Save for Web uses the same helpers for its optimised preview.
 import { registerExportFormat, registerOpenFormat, decodeImage, baseName } from '../io.js';
 import { SAVE_FILTERS } from '../documents.js';
 import { Document, RasterLayer, createCanvas } from '../document.js';
 import { flattenDocument } from '../compositor.js';
 import { quantize, createMapper } from '../../../shared/pixels/quantize.js';
 import { encodeGif, decodeGif, isGif, gifFrameImage } from '../../../shared/pixels/gif.js';
-import { encodePng } from '../../../shared/pixels/png.js';
+import { encodePng, decodePng, toRgba8, isPng, pngInfo } from '../../../shared/pixels/png.js';
 
 /** The option fields Export As shows for GIF and PNG-8 (lib/form.js specs; their values arrive in the encoder's opts). */
 const indexedFields = () => [
@@ -152,14 +152,59 @@ export function installFormats(app, { modeState }) {
         table = frame.palette.map((c) => [c[0], c[1], c[2]]);
         ti = frame.transparentIndex >= 0 && frame.transparentIndex < table.length ? frame.transparentIndex : -1;
       } else canvas = await decodeImage(bytes, name);
-      const doc = new Document({ width: canvas.width, height: canvas.height, name: baseName(name), mode: table ? 'indexed' : 'rgb', colorTable: table });
-      const layer = new RasterLayer({ name: 'Background', canvas, x: 0, y: 0 });
-      doc.root.children.push(layer);
-      layer.parent = doc.root;
-      doc.active = layer;
-      doc.selected.add(layer);
-      if (ti >= 0) doc.meta = { ...doc.meta, imageMode: { transparentIndex: ti } };
-      return doc;
+      return indexedDocument(canvas, name, table, ti);
     },
   });
+
+  // Palette PNGs (PNG-8) open as Indexed Color too, as in Photoshop. A palette whose entries are partly
+  // transparent has no single transparent index: such files open as RGB through the browser decoder.
+  registerOpenFormat({
+    id: 'png8',
+    extensions: [],
+    test: (bytes) => {
+      try {
+        return isPng(bytes) && pngInfo(bytes).colorType === 3;
+      } catch {
+        return false;
+      }
+    },
+    async read(bytes, { name }) {
+      try {
+        const png = await decodePng(bytes);
+        const count = Math.floor((png.palette?.length ?? 0) / 3);
+        const alpha = png.transparency ?? [];
+        let ti = -1, soft = false;
+        for (let i = 0; i < alpha.length && i < count; i++) {
+          if (alpha[i] === 255) continue;
+          if (alpha[i] !== 0 || ti >= 0) soft = true;
+          ti = i;
+        }
+        if (count && !soft) {
+          const img = toRgba8(png);
+          const canvas = createCanvas(img.width, img.height);
+          canvas.getContext('2d').putImageData(new ImageData(img.data instanceof Uint8ClampedArray ? img.data : new Uint8ClampedArray(img.data), img.width, img.height), 0, 0);
+          const table = [];
+          for (let i = 0; i < count; i++) table.push([png.palette[i * 3], png.palette[i * 3 + 1], png.palette[i * 3 + 2]]);
+          const doc = indexedDocument(canvas, name, table, ti);
+          if (png.dpi > 0) doc.dpi = Math.round(png.dpi);
+          return doc;
+        }
+      } catch (err) {
+        console.warn('PNG palette reader failed; using the browser decoder', err);
+      }
+      return indexedDocument(await decodeImage(bytes, name), name, null, -1);
+    },
+  });
+}
+
+/** A one-layer document for a decoded picture; with a colour table it is an Indexed Color document. */
+function indexedDocument(canvas, name, table, transparentIndex) {
+  const doc = new Document({ width: canvas.width, height: canvas.height, name: baseName(name), mode: table ? 'indexed' : 'rgb', colorTable: table });
+  const layer = new RasterLayer({ name: 'Background', canvas, x: 0, y: 0 });
+  doc.root.children.push(layer);
+  layer.parent = doc.root;
+  doc.active = layer;
+  doc.selected.add(layer);
+  if (table && transparentIndex >= 0) doc.meta = { ...doc.meta, imageMode: { transparentIndex } };
+  return doc;
 }

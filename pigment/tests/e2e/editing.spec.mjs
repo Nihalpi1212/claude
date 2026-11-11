@@ -214,6 +214,8 @@ test('Liquify pushes pixels with the forward warp brush and is one undo step', a
   await page.mouse.move(b.x, b.y, { steps: 15 });
   await page.mouse.up();
   await confirmDialog(page);
+  // OK closes the dialog first; the full-size render and the commit follow under app.busy
+  await expect.poll(async () => (await pixel(page, 95, 50))[0]).toBeGreaterThan(200);
   const pushed = await pixel(page, 95, 50);
   expect(pushed[0]).toBeGreaterThan(200);
   expect(pushed[3]).toBeGreaterThan(200);

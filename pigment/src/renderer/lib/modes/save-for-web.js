@@ -120,7 +120,9 @@ export async function saveForWeb(app, arg, ctx = null) {
     const s = settingsOf(app, v);
     info.optimized.textContent = 'Optimizing…';
     try {
-      const result = await encodeForWeb(app, doc, s, cache);
+      // the real file is encoded (its size is the point of the dialog); for a large image that takes long enough to say so
+      const heavy = s.width * s.height > 500000;
+      const result = heavy ? await app.busy('Optimizing…', () => encodeForWeb(app, doc, s, cache)) : await encodeForWeb(app, doc, s, cache);
       if (mine !== token || closed) return;
       current = { bytes: result.bytes, settings: s };
       draw(canvases.optimized, result.preview);

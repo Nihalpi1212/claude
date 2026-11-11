@@ -314,6 +314,19 @@ test('Duotone shows the ink colours in the composite and saves and reopens as du
   await runAwait(page, 'edit:undo');
   expect(await pixel(page, 150, 10)).toEqual(mid);
 
+  // merging layers keeps grey pixels: the inks are a way of looking at them and must not be baked in twice
+  await runAwait(page, 'layer:new', { name: 'Top' });
+  await paint(page, [[250, 50, 50, 50, 'rgb(128,128,128)']]);
+  expect(await pixel(page, 260, 60)).toEqual(mid);
+  await runAwait(page, 'image:flatten');
+  expect(await page.evaluate(() => window.pigmentApp.doc.layers().length)).toBe(1);
+  expect(await layerPixel(page, 260, 60)).toEqual([128, 128, 128, 255]);
+  expect(await pixel(page, 260, 60)).toEqual(mid);
+  expect(await pixel(page, 150, 10)).toEqual(mid);
+  await runAwait(page, 'edit:undo');
+  await runAwait(page, 'edit:undo');
+  expect(await page.evaluate(() => window.pigmentApp.doc.layers().length)).toBe(1);
+
   // save as .pigment and reopen: still duotone, same inks, same picture
   await page.evaluate(() => (window.__pigmentTest.nextSavePath = 'browser:/duo/inks.pigment'));
   await runAwait(page, 'file:save-as');
@@ -443,6 +456,18 @@ test('GIF and PNG-8 export formats, transparency, and a GIF with a transparent i
   const flat = decodeGif(Uint8Array.from(await written(page, 'browser:/out/b.gif'))).frames[0];
   expect(flat.transparentIndex).toBe(-1);
   expect(flat.palette[flat.indices[60]]).toEqual([0, 255, 0]);
+
+  // the PNG-8 opens as Indexed Color as well, with its palette and its transparent entry
+  await runAwait(page, 'file:open-paths', ['browser:/out/a.png']);
+  await expect.poll(() => page.evaluate(() => window.pigmentApp.doc?.path ?? null)).toBe('browser:/out/a.png');
+  const opened = await page.evaluate(() => ({ mode: window.pigmentApp.doc.mode, table: window.pigmentApp.doc.colorTable, ti: window.pigmentApp.modes.state(window.pigmentApp.doc).transparentIndex }));
+  expect(opened.mode).toBe('indexed');
+  expect(opened.table.slice(0, 2).map((c) => c.join(',')).sort()).toEqual(['0,0,255', '255,0,0']);
+  expect(opened.ti).toBe(2);
+  expect(await pixel(page, 2, 2)).toEqual([255, 0, 0, 255]);
+  expect((await pixel(page, 60, 2))[3]).toBe(0);
+  await runAwait(page, 'file:close');
+  await expect.poll(() => page.evaluate(() => window.pigmentApp.doc?.name ?? null)).toBe('Test');
 
   // Export As offers both formats and shows their option fields only for them
   await run(page, 'file:export');
@@ -626,6 +651,22 @@ test('Conditional Mode Change converts only from the chosen source modes and rep
   expect(await mode(page)).toBe('indexed');
   expect(await page.evaluate(() => window.pigmentApp.doc.layers().length)).toBe(1);
 
+  // a played action never stops to ask: a layered document is converted layer by layer, a flattening mode flattens
+  await runAwait(page, 'image:mode', 'rgb');
+  await runAwait(page, 'layer:new', { name: 'Top' });
+  expect(await page.evaluate(() => window.pigmentApp.commands.run('image:mode', 'grayscale', 'action'))).toBe(true);
+  await expectNoDialog(page);
+  expect(await page.evaluate(() => [window.pigmentApp.doc.mode, window.pigmentApp.doc.layers().length])).toEqual(['grayscale', 2]);
+  expect(await page.evaluate(() => window.pigmentApp.commands.run('image:mode', 'bitmap', 'action'))).toBe(true);
+  await expectNoDialog(page);
+  expect(await page.evaluate(() => [window.pigmentApp.doc.mode, window.pigmentApp.doc.layers().length])).toEqual(['bitmap', 1]);
+  // without a mode the command asks for one
+  await run(page, 'image:mode');
+  await expect(dialog(page).locator('select[data-key="mode"]')).toBeVisible();
+  await dialog(page).locator('select[data-key="mode"]').selectOption('grayscale');
+  await confirmDialog(page);
+  await expect.poll(() => mode(page)).toBe('grayscale');
+
   // image:mode reports a replayable argument too, so recorded actions convert without asking
   const replay = page.evaluate(() => new Promise((resolve) => {
     const off = window.pigmentApp.on('command:done', (e) => {
@@ -636,5 +677,159 @@ test('Conditional Mode Change converts only from the chosen source modes and rep
   }));
   await runAwait(page, 'image:mode', 'rgb');
   expect(await replay).toEqual({ mode: 'rgb', flatten: false, options: {} });
+  expect(errors).toEqual([]);
+});
+
+/** Types a hex colour into the open colour picker and confirms it. */
+const pickHex = async (page, hex) => {
+  const dlg = page.locator('.color-picker-dialog').last();
+  const red = String(parseInt(hex.slice(1, 3), 16));
+  // the picker settles its fields a frame after opening: type until the colour has taken
+  await expect(async () => {
+    await dlg.locator('[data-f="hex"]').fill(hex.replace('#', ''));
+    await dlg.locator('[data-f="hex"]').blur(); // commits the field (Enter would also press OK)
+    await expect(dlg.locator('[data-f="hex"]')).toHaveValue(hex.replace('#', ''), { timeout: 500 });
+    await expect(dlg.locator('[data-f="r"]')).toHaveValue(red, { timeout: 500 });
+  }).toPass({ timeout: 10000 });
+  await dlg.locator('.dialog-buttons .btn.primary').click();
+};
+const cellColor = (page, index) => page.locator(`.ct-cell[data-index="${index}"]`).evaluate((c) => getComputedStyle(c).backgroundColor.match(/\d+/g).slice(0, 3).map(Number));
+
+test('Color Table editor: click to change, drag a range for a gradient, add a colour, pick the transparent entry', async ({ page }) => {
+  const errors = await openApp(page);
+  await newDoc(page);
+  await quadrants(page);
+  await runAwait(page, 'image:mode', { mode: 'indexed', options: { palette: 'custom', custom: [[255, 0, 0], [0, 255, 0], [0, 0, 255], [255, 255, 0]], dither: 'none' } });
+  expect(await page.evaluate(() => window.pigmentApp.doc.colorTable)).toEqual([[255, 0, 0], [0, 255, 0], [0, 0, 255], [255, 255, 0]]);
+  await run(page, 'image:color-table');
+  const table = page.locator('.color-table-dialog');
+  await expect(table.locator('.ct-cell.filled')).toHaveCount(4);
+  // hovering describes the entry
+  await table.locator('.ct-cell[data-index="2"]').hover();
+  await expect(table.locator('.ct-info')).toContainText('Index 2: #0000ff');
+  // click: the colour picker changes one entry
+  await table.locator('.ct-cell[data-index="0"]').click();
+  await pickHex(page, '#102030');
+  await expect.poll(() => cellColor(page, 0)).toEqual([16, 32, 48]);
+  await expect(table.locator('select[data-key="ct-preset"]')).toHaveValue('custom');
+  // drag over entries 0..3: two pickers (first and last colour), then a gradient between them
+  const a = await table.locator('.ct-cell[data-index="0"]').boundingBox();
+  const b = await table.locator('.ct-cell[data-index="3"]').boundingBox();
+  await page.mouse.move(a.x + a.width / 2, a.y + a.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 6 });
+  await expect(table.locator('.ct-cell.in-range')).toHaveCount(4);
+  await page.mouse.up();
+  await expect(page.locator('.color-picker-dialog')).toContainText('Select first color');
+  await pickHex(page, '#000000');
+  await expect(page.locator('.color-picker-dialog')).toContainText('Select last color');
+  await pickHex(page, '#ffffff');
+  await expect.poll(() => cellColor(page, 1)).toEqual([85, 85, 85]);
+  expect(await cellColor(page, 0)).toEqual([0, 0, 0]);
+  expect(await cellColor(page, 2)).toEqual([170, 170, 170]);
+  expect(await cellColor(page, 3)).toEqual([255, 255, 255]);
+  // the first empty cell adds a colour
+  await table.locator('.ct-cell[data-index="4"]').click();
+  await pickHex(page, '#ff00ff');
+  await expect(table.locator('.ct-cell.filled')).toHaveCount(5);
+  // the Transparency eyedropper marks an entry; clicking it again clears it
+  await table.locator('[data-act="transparency"]').click();
+  await table.locator('.ct-cell[data-index="1"]').click();
+  await expect(table.locator('.ct-cell.transparent')).toHaveAttribute('data-index', '1');
+  await table.locator('[data-act="transparency"]').click();
+  await table.locator('.ct-cell[data-index="1"]').click();
+  await expect(table.locator('.ct-cell.transparent')).toHaveCount(0);
+  await table.locator('[data-act="transparency"]').click();
+  await table.locator('.ct-cell[data-index="1"]').click();
+  await expect(table.locator('.ct-cell.transparent')).toHaveCount(1);
+  await confirmDialog(page);
+  await expect.poll(() => page.evaluate(() => window.pigmentApp.doc.colorTable)).toEqual([[0, 0, 0], [85, 85, 85], [170, 170, 170], [255, 255, 255], [255, 0, 255]]);
+  expect(await page.evaluate(() => window.pigmentApp.modes.state(window.pigmentApp.doc).transparentIndex)).toBe(1);
+  // pixels kept their index: red (0) is black now, green (1) is transparent, blue (2) and yellow (3) are greys
+  expect(await pixel(page, 10, 10)).toEqual([0, 0, 0, 255]);
+  expect((await pixel(page, 300, 10))[3]).toBe(0);
+  expect(await pixel(page, 10, 200)).toEqual([170, 170, 170, 255]);
+  expect(await pixel(page, 300, 200)).toEqual([255, 255, 255, 255]);
+  expect(await historyLength(page)).toBe(2);
+  await runAwait(page, 'edit:undo');
+  expect(await pixel(page, 300, 10)).toEqual([0, 255, 0, 255]);
+  expect(errors).toEqual([]);
+});
+
+test('Indexed Color with a custom table edited in the dialog, and a duotone ink curve shaped by hand', async ({ page }) => {
+  const errors = await openApp(page);
+  await newDoc(page);
+  await quadrants(page);
+  await run(page, 'image:mode', 'indexed');
+  // four flat colours: Photoshop proposes the exact palette
+  await expect(dialog(page).locator('select[data-key="palette"]')).toHaveValue('exact');
+  await expect(dialog(page).locator('input[data-key="colors"]')).toBeDisabled();
+  await dialog(page).locator('select[data-key="palette"]').selectOption('custom');
+  await dialog(page).locator('[data-act="edit-table"]').click();
+  const table = page.locator('.color-table-dialog');
+  await expect(table).toContainText('Custom Color Table');
+  await table.locator('select[data-key="ct-preset"]').selectOption('grayscale');
+  await table.locator('.dialog-buttons .btn.primary').click();
+  await expect(page.locator('.color-table-dialog')).toHaveCount(0);
+  await expect(dialog(page)).toContainText('256 colors');
+  await dialog(page).locator('select[data-key="dither"]').selectOption('none');
+  await confirmDialog(page);
+  await expect.poll(() => mode(page)).toBe('indexed');
+  const info = await page.evaluate(() => ({ n: window.pigmentApp.doc.colorTable.length, grey: window.pigmentApp.doc.colorTable.every((c) => c[0] === c[1] && c[1] === c[2]) }));
+  expect(info).toEqual({ n: 256, grey: true });
+  const red = await pixel(page, 10, 10);
+  expect(red[0] === red[1] && red[1] === red[2]).toBe(true);
+  await runAwait(page, 'edit:undo');
+
+  // Duotone: a monotone whose curve is pulled up prints more ink in the mid tones
+  await paint(page, [[0, 0, 400, 300, 'rgb(128,128,128)']]);
+  await run(page, 'image:mode', 'duotone');
+  await dialog(page).locator('select[data-key="type"]').selectOption('monotone');
+  await expect(dialog(page).locator('.duotone-ink.off')).toHaveCount(3);
+  await dialog(page).locator('.duotone-curve-thumb').first().click();
+  const editor = page.locator('.duotone-curve-editor');
+  const box = await editor.boundingBox();
+  // a new point at grey 50% → ink 90%
+  await page.mouse.click(box.x + box.width * 0.5, box.y + box.height * 0.1);
+  await expect(dialog(page).locator('input[data-key="curve-in"]')).toHaveValue('50');
+  await expect(dialog(page).locator('input[data-key="curve-out"]')).toHaveValue('90');
+  await dialog(page).locator('.dialog-buttons .btn.primary').click(); // the curve
+  await expect(page.locator('.duotone-curve-editor')).toHaveCount(0);
+  await confirmDialog(page); // Duotone Options
+  await expect.poll(() => mode(page)).toBe('duotone');
+  const curve = await page.evaluate(() => window.pigmentApp.doc.duotone.inks[0].curve);
+  expect(curve.length).toBe(3);
+  expect(Math.abs(curve[1][0] - 50)).toBeLessThanOrEqual(1);
+  expect(Math.abs(curve[1][1] - 90)).toBeLessThanOrEqual(1);
+  // black ink at ~90% coverage on mid grey: about 10% of paper white
+  const p = await pixel(page, 100, 100);
+  expect(p[0]).toBeLessThan(40);
+  expect(p[0]).toBeGreaterThan(15);
+  expect(await layerPixel(page, 100, 100)).toEqual([128, 128, 128, 255]);
+  expect(errors).toEqual([]);
+});
+
+test('the Index channel of an indexed document shows the table size and opens the Color Table', async ({ page }) => {
+  const errors = await openApp(page);
+  await newDoc(page);
+  await quadrants(page);
+  await runAwait(page, 'image:mode', { mode: 'indexed', options: { palette: 'exact', dither: 'none' } });
+  await runAwait(page, 'window:panel-channels');
+  const row = page.locator('.channel-list .channel-row').first();
+  await expect(row.locator('.layer-name')).toHaveText('Index');
+  await expect(row).toContainText('4 colors');
+  await expect(page.locator('.channel-list')).toHaveAttribute('data-mode', 'indexed');
+  // Ctrl-click still loads the channel: the luminosity of what is shown (yellow is light, blue is dark)
+  await row.click({ modifiers: ['Control'] });
+  const sel = await page.evaluate(() => {
+    const m = window.pigmentApp.doc.selection.mask;
+    return [m[200 * 400 + 300], m[200 * 400 + 100]];
+  });
+  expect(sel[0]).toBeGreaterThan(200);
+  expect(sel[1]).toBeLessThan(60);
+  await row.dblclick();
+  await expect(page.locator('.color-table-dialog .ct-cell.filled')).toHaveCount(4);
+  await page.locator('.color-table-dialog .dialog-buttons .btn', { hasText: 'Cancel' }).click();
+  await expectNoDialog(page);
   expect(errors).toEqual([]);
 });

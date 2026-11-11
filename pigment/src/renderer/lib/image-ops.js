@@ -737,9 +737,20 @@ export function install(app) {
       });
       if (!opts) return;
     }
-    const copy = new Document({ width: d.width, height: d.height, dpi: d.dpi, name: opts.name || `${d.name} copy` });
+    // the copy keeps the image mode and depth (0.3): a duplicate of a grayscale, duotone or indexed document is one too
+    const copy = new Document({
+      width: d.width,
+      height: d.height,
+      dpi: d.dpi,
+      name: opts.name || `${d.name} copy`,
+      mode: d.mode ?? 'rgb',
+      depth: d.depth ?? 8,
+      colorTable: d.colorTable ? d.colorTable.map((c) => [...c]) : null,
+      duotone: d.duotone ? JSON.parse(JSON.stringify(d.duotone)) : null,
+    });
     if (opts.merged) {
-      const flat = copyCanvas(flattenDocument(d, d.view.compositor));
+      // the copy is in the same image mode, so it takes the stored pixels: the mode's display pass (duotone inks, colour table) must not be baked in twice
+      const flat = copyCanvas(d.mode && d.mode !== 'rgb' ? d.view.compositor.composite(d, { rawMode: true }) : flattenDocument(d, d.view.compositor));
       const layer = new RasterLayer({ name: 'Background', canvas: flat });
       layer.parent = copy.root;
       copy.root.children.push(layer);
