@@ -111,6 +111,8 @@ const P = {
   'lasso-magnetic': '<path d="M7 17c-3-1.5-4-4-4-6 0-4 4-7 9-7s9 3 9 7-4 7-9 7"/><path d="M14 14v4a2 2 0 0 0 4 0v-4M14 16h4"/>',
   wand: '<path d="m4 20 11-11"/><path d="m15 9 2 2"/><path d="M17 3v3M20.5 5.5l-2 2M21 9h-3M14 3.5l1 2"/>',
   'quick-select': '<circle cx="9" cy="10" r="5" stroke-dasharray="3 2"/><path d="m13 14 7 7"/><path d="m16 21 4-4"/>',
+  // Object Selection tool (lib/tools/object-select.js): a dashed region with the pointer that picks the object in it
+  'object-select': '<rect x="3" y="3" width="13" height="13" rx="1.5" stroke-dasharray="3 2"/><path d="m11 11 9 3.5-3.6 1.4L20 20l-1.6 1.6-3.7-3.7-1.4 3.6z" fill="currentColor" stroke="none"/>',
   brush: '<path d="M9.5 14.5 18 6a2 2 0 0 1 3 3l-8.5 8.5"/><path d="M9.5 14.5c-2 0-3.5 1.5-3.5 3.5 0 1.5-1 2.5-3 2.5 2 1 7 1.5 8.5-1 .8-1.4.7-3-.5-4.5z"/>',
   pencil: '<path d="m4 20 1-5L16 4l4 4L9 19z"/><path d="m14 6 4 4"/><path d="M4 20l3-1"/>',
   'color-sampler': '<path d="m12 12 7-7 2 2-7 7"/><path d="m4 20 8-8 2 2-8 8H4z"/><circle cx="18" cy="18" r="3"/>',

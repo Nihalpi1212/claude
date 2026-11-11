@@ -295,8 +295,9 @@ async function openLens(app, { params, def, previous = null }) {
   }
   showTab(prefs.tab === 'auto' ? 'auto' : 'custom');
 
-  // -- preview rendering (one frame at most per change)
-  const refresh = frameThrottle(() => {
+  // -- preview rendering (one frame at most per change); data-pending marks a change the preview does not show yet
+  const render = frameThrottle(() => {
+    delete root.dataset.pending;
     if (done) return;
     try {
       const p = effective();
@@ -310,6 +311,10 @@ async function openLens(app, { params, def, previous = null }) {
     }
     paint();
   });
+  const refresh = () => {
+    root.dataset.pending = '1';
+    render();
+  };
 
   // -- preview view: zoom is image px -> css px; pan is the css offset of the image's top-left
   let zoom = 1, fit = true, panX = 0, panY = 0;
@@ -567,7 +572,7 @@ async function openLens(app, { params, def, previous = null }) {
     },
   });
   done = true;
-  refresh.cancel();
+  render.cancel();
   observer?.disconnect();
   app.lensCorrection.session = null;
   const used = effective();

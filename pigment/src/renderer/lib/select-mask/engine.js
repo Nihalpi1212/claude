@@ -1,7 +1,7 @@
 // Client of the segmentation worker (worker.js). The steps behind Select Subject and friends take
-// 0.3 - 2.5 s on a 2000 x 1500 layer (see the timings in ARCHITECTURE.md / the builder's report), so
-// they run in a module worker: the window keeps painting, the busy cursor spins and sliders stay
-// live. The page is served from a real origin (pigment://app or http://127.0.0.1), so a module
+// 0.25 - 2.7 s on a 2000 x 1500 layer (Select Subject 0.9 - 2.7 s, Sky and Focus Area about 0.5 s, an
+// object 0.6 s, a refinement 0.25 - 0.7 s), so they run in a module worker: the window keeps
+// painting (no frame longer than about 60 ms), the busy cursor spins and sliders stay live. The page is served from a real origin (pigment://app or http://127.0.0.1), so a module
 // worker from a URL fits the CSP (worker-src 'self'). If the worker cannot be started or dies, the
 // same operations run on the main thread (ops.js is imported lazily), one at a time.
 //

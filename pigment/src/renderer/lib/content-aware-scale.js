@@ -242,10 +242,8 @@ class ContentAwareScaleTool extends Tool {
     }
     // Only the seam part of the change is computed here (Amount of the way to the box, at most twice the
     // size); the plain scaling that makes up the rest is the stretch show() draws with anyway.
-    const k = s.amount / 100, bw = s.pv.width, bh = s.pv.height;
-    const pw = Math.max(1, Math.min(bw * 2, Math.round(bw + (s.rect.width * s.pvScale - bw) * k)));
-    const ph = Math.max(1, Math.min(bh * 2, Math.round(bh + (s.rect.height * s.pvScale - bh) * k)));
-    const key = `${pw}x${ph}`;
+    const key = this.previewKey();
+    const [pw, ph] = key.split('x').map(Number);
     if (key !== s.pvKey) {
       if (s.pv.prepare(pw, ph, 100, FRAME_BUDGET)) {
         s.pvCanvas = dataCanvas(s.pv.scale(pw, ph, 100));
@@ -253,6 +251,21 @@ class ContentAwareScaleTool extends Tool {
       } else this.scheduleUpdate(); // the maps are not there yet: meanwhile the last result is stretched
     }
     this.show(s.pvCanvas ?? s.pieceCanvas, s.rect);
+  }
+
+  /** True when the layer shows the carved preview for the current box (not a stretched stand-in while maps are built). */
+  get previewCurrent() {
+    const s = this.session;
+    return !!s && !s.raf && (this.changed ? s.shown && s.pvKey !== '' && s.pvKey === this.previewKey() : !s.shown);
+  }
+
+  /** The seam-carved size of the preview copy for the current box and Amount, as the key update() caches by. */
+  previewKey() {
+    const s = this.session;
+    const k = s.amount / 100, bw = s.pv.width, bh = s.pv.height;
+    const pw = Math.max(1, Math.min(bw * 2, Math.round(bw + (s.rect.width * s.pvScale - bw) * k)));
+    const ph = Math.max(1, Math.min(bh * 2, Math.round(bh + (s.rect.height * s.pvScale - bh) * k)));
+    return `${pw}x${ph}`;
   }
 
   /** The layer's pixels with `src` drawn into rect: { canvas, x, y } (what the preview shows and what is committed). */

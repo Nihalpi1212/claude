@@ -1,7 +1,7 @@
 // What a mask made by Select Subject / Sky / Focus Area / Select and Mask becomes: a selection, a
 // layer mask, a new layer (with or without a mask) or a new document — always one history entry in
 // the document it changes. Also the pixels those features look at.
-import { Document, RasterLayer, createCanvas, copyCanvas } from '../document.js';
+import { Document, RasterLayer, createCanvas } from '../document.js';
 import { flattenDocument } from '../compositor.js';
 import { Selection, selectionOps } from '../selection.js';
 import { structural, setLayerProps, cloneLayer } from '../layer-ops.js';
@@ -196,5 +196,3 @@ export function outputMask(app, { mask, output = 'selection', label = 'Select an
   }
   throw new Error(`Unknown output: ${output}`);
 }
-
-export { copyCanvas };

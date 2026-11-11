@@ -99,6 +99,8 @@ const setBarField = async (page, key, value) => {
   await expect(input).not.toBeFocused();
   expect(await cas(page)).not.toBeNull();
 };
+/** Waits until the layer shows the carved preview for the current box (not the stretched stand-in shown while maps are built). */
+const casSettled = (page) => expect.poll(() => page.evaluate(() => window.pigmentApp.contentAwareScale.previewCurrent)).toBe(true);
 const casEnded = (page) => expect.poll(() => page.evaluate(() => !window.pigmentApp.contentAwareScale.session)).toBe(true);
 
 test('edit:content-aware-scale is a live command with an options bar session', async ({ page }) => {
@@ -148,6 +150,7 @@ test('Content-Aware Scale shrinks a layer with a protected circle: the circle ke
   await startCas(page);
   await setBarField(page, 'w', 300);
   await expect.poll(() => layerBox(page)).toEqual({ x: 0, y: 0, width: 300, height: 300 });
+  await casSettled(page);
   const unprotected = await discSize(page);
   expect(unprotected.width).toBeLessThan(40);
   await page.keyboard.press('Escape');
@@ -162,8 +165,10 @@ test('Content-Aware Scale shrinks a layer with a protected circle: the circle ke
   await drag(page, [400, 150], [300, 150]);
   await expect(page.locator('#options-bar input[data-key="w"]')).toHaveValue('300');
   expect((await cas(page)).rect).toEqual({ x: 0, y: 0, width: 300, height: 300 });
-  // the preview already shows the carved layer
+  // the preview already shows the carved layer: the disc is whole in it
   await expect.poll(() => layerBox(page)).toEqual({ x: 0, y: 0, width: 300, height: 300 });
+  await casSettled(page);
+  expect((await discSize(page)).width).toBe(100);
   await page.keyboard.press('Enter');
   await casEnded(page);
   expect(await historyLength(page)).toBe(1);
@@ -371,8 +376,12 @@ test('a large layer previews on a reduced copy and applies at full size', async 
   expect(s.pvScale).toBeLessThan(0.7);
   await page.locator('#options-bar select[data-key="protect"]').selectOption({ label: 'Disc' });
   await setBarField(page, 'w', 900);
-  // the reduced preview is stretched to the box
+  // the reduced preview is stretched to the box, and it already keeps the disc round (within the reduction's blur)
   await expect.poll(() => layerBox(page)).toEqual({ x: 0, y: 0, width: 900, height: 900 });
+  await casSettled(page);
+  const previewDisc = await discSize(page);
+  expect(Math.abs(previewDisc.width - 300)).toBeLessThanOrEqual(8);
+  expect(Math.abs(previewDisc.height - 300)).toBeLessThanOrEqual(8);
   await page.keyboard.press('Enter');
   await casEnded(page);
   expect(await historyLength(page)).toBe(1);
@@ -392,23 +401,92 @@ test('a large layer previews on a reduced copy and applies at full size', async 
   expect(errors).toEqual([]);
 });
 
+test('widening inserts seams around the protected disc, and a linked layer mask is carved along with the pixels', async ({ page }) => {
+  const errors = await openApp(page);
+  await newDoc(page);
+  await paintDisc(page);
+  const before = await layerHash(page);
+  // wider: the new columns come from the cheapest seams, spread over the background, never through the disc
+  await startCas(page);
+  await page.locator('#options-bar select[data-key="protect"]').selectOption({ label: 'Disc' });
+  await drag(page, [400, 150], [520, 150]);
+  expect((await cas(page)).rect).toEqual({ x: 0, y: 0, width: 520, height: 300 });
+  await page.keyboard.press('Enter');
+  await casEnded(page);
+  expect(await layerBox(page)).toEqual({ x: 0, y: 0, width: 520, height: 300 });
+  const disc = await discSize(page);
+  expect(disc.width).toBe(100);
+  expect(disc.height).toBe(100);
+  expect(disc.count).toBe(await page.evaluate(() => window.pigmentApp.doc.channels[0].mask.reduce((n, v) => n + (v ? 1 : 0), 0)));
+  // the disc moved right by its share of the columns inserted on its left (they spread, so not all 120 are on one side)
+  const left = await page.evaluate(() => {
+    const l = window.pigmentApp.doc.active, W = l.canvas.width;
+    const d = l.canvas.getContext('2d').getImageData(0, 150, W, 1).data;
+    for (let x = 0; x < W; x++) if (d[x * 4] > 230 && d[x * 4 + 1] < 30 && d[x * 4 + 2] < 30) return x;
+    return -1;
+  });
+  expect(left).toBeGreaterThan(160);
+  expect(left).toBeLessThan(260);
+  await runAwait(page, 'edit:undo');
+  expect(await layerHash(page)).toBe(before);
+
+  // a linked mask that hides the right half: after a plain (Amount 0) scale to half the width its edge sits at half the place
+  await page.evaluate(async () => {
+    const { createCanvas } = await import('/lib/document.js');
+    const d = window.pigmentApp.doc, l = d.active;
+    const m = createCanvas(d.width, d.height);
+    m.getContext('2d').fillStyle = '#fff';
+    m.getContext('2d').fillRect(0, 0, 200, d.height); // shows x < 200
+    l.mask = { canvas: m, enabled: true, linked: true };
+    l.touch();
+    d.changed('props', { layer: l });
+  });
+  const maskAlpha = (x, y) => page.evaluate(([px, py]) => window.pigmentApp.doc.active.mask.canvas.getContext('2d').getImageData(px, py, 1, 1).data[3], [x, y]);
+  expect(await maskAlpha(190, 150)).toBe(255);
+  expect(await maskAlpha(210, 150)).toBe(0);
+  const h0 = await historyLength(page);
+  const used = await runAwait(page, 'edit:content-aware-scale', { width: 50, unit: 'percent', amount: 0 });
+  expect(used).toMatchObject({ width: 50, height: 100, amount: 0 });
+  expect(await historyLength(page)).toBe(h0 + 1);
+  expect(await layerBox(page)).toEqual({ x: 0, y: 0, width: 200, height: 300 });
+  expect(await maskAlpha(95, 150)).toBe(255);
+  expect(await maskAlpha(105, 150)).toBe(0);
+  expect(await maskAlpha(300, 150)).toBe(255); // what the box vacated takes the mask's background value (its corner), as with Free Transform
+  expect((await page.evaluate(() => {
+    const d = window.pigmentApp.doc;
+    const ctx = d.view.compositor.composite(d).getContext('2d');
+    return [ctx.getImageData(90, 150, 1, 1).data[3], ctx.getImageData(110, 150, 1, 1).data[3]];
+  }))).toEqual([255, 0]);
+  // one undo brings back the pixels and the mask
+  await runAwait(page, 'edit:undo');
+  expect(await layerHash(page)).toBe(before);
+  expect(await maskAlpha(190, 150)).toBe(255);
+  expect(await maskAlpha(105, 150)).toBe(255);
+  expect(await historyLength(page)).toBe(h0);
+  expect(errors).toEqual([]);
+});
+
 // ---- Lens Correction ---------------------------------------------------------------------------------------------
 
 const lens = (page) => page.locator('.lens-dialog');
 const lensParams = (page) => page.evaluate(() => JSON.parse(document.querySelector('.lens-dialog .lc-root')?.dataset.params ?? 'null'));
-const lensRenders = (page) => page.evaluate(() => Number(document.querySelector('.lens-dialog .lc-root')?.dataset.renders ?? 0));
+/** Waits until the dialog's preview shows its current settings (no render is pending). */
+const settled = (page) => expect.poll(() => page.evaluate(() => {
+  const r = document.querySelector('.lens-dialog .lc-root');
+  return !!r && Number(r.dataset.renders ?? 0) > 0 && !r.dataset.pending;
+})).toBe(true);
 const openLens = async (page) => {
   await run(page, 'filter:lens-correction');
   await expect(lens(page)).toBeVisible();
-  await expect.poll(() => lensRenders(page)).toBeGreaterThan(0);
+  await settled(page);
 };
 /** Sets a field of the dialog and waits until the preview has rendered with it. */
 const setLens = async (page, key, value) => {
-  const n = await lensRenders(page);
   const input = lens(page).locator(`input[data-key="${key}"]`).last();
   await input.fill(String(value));
   await input.press('Tab');
-  await expect.poll(() => lensRenders(page)).toBeGreaterThan(n);
+  await settled(page);
+  expect((await lensParams(page))[key]).toBe(Number(value));
 };
 const showTab = (page, id) => lens(page).locator(`.dialog-tab[data-tab="${id}"]`).click();
 /** Hash and opaque share of what the dialog's preview canvas shows. */
@@ -480,13 +558,11 @@ test('the Lens Correction dialog previews, OK commits one entry that Last Filter
   expect(await layerHash(page)).toBe(original);
   // Preview off shows the original again, on brings the correction back
   const corrected = await previewState(page);
-  let n = await lensRenders(page);
   await lens(page).locator('input[data-key="__preview"]').uncheck();
-  await expect.poll(() => lensRenders(page)).toBeGreaterThan(n);
+  await settled(page);
   expect((await previewState(page)).hash).toBe(neutral.hash);
-  n = await lensRenders(page);
   await lens(page).locator('input[data-key="__preview"]').check();
-  await expect.poll(() => lensRenders(page)).toBeGreaterThan(n);
+  await settled(page);
   expect((await previewState(page)).hash).toBe(corrected.hash);
   // grid and zoom do not touch the parameters
   await lens(page).locator('input[data-key="__grid"]').check();
@@ -538,9 +614,8 @@ test('the Lens Correction dialog previews, OK commits one entry that Last Filter
   // Cancel: nothing recorded. The next dialog starts neutral again; Previous brings the last correction back
   await openLens(page);
   expect(await lensParams(page)).toMatchObject({ distortion: 0, angle: 0, vignette: 0 });
-  n = await lensRenders(page);
   await lens(page).locator('button[data-action="previous"]').click();
-  await expect.poll(() => lensRenders(page)).toBeGreaterThan(n);
+  await settled(page);
   expect(await lensParams(page)).toMatchObject({ distortion: 60, vignette: -60, angle: 4 });
   await expect(lens(page).locator('input[data-key="distortion"]')).toHaveValue('60');
   await page.keyboard.press('Escape');
@@ -551,9 +626,8 @@ test('the Lens Correction dialog previews, OK commits one entry that Last Filter
   // Reset makes the correction neutral, and OK on a neutral correction is not an edit
   await openLens(page);
   await setLens(page, 'scale', 120);
-  n = await lensRenders(page);
   await lens(page).locator('button[data-action="reset"]').click();
-  await expect.poll(() => lensRenders(page)).toBeGreaterThan(n);
+  await settled(page);
   expect(await lensParams(page)).toMatchObject({ scale: 100, distortion: 0 });
   await expect(lens(page).locator('input[data-key="scale"]')).toHaveValue('100');
   await confirmDialog(page);
@@ -573,25 +647,23 @@ test('the straighten tool turns a drawn line into the angle', async ({ page }) =
   const box = await lens(page).locator('.lc-viewport').boundingBox();
   const x0 = box.x + box.width * 0.2, x1 = box.x + box.width * 0.8, yc = box.y + box.height / 2;
   const rise = (x1 - x0) * Math.tan((6 * Math.PI) / 180);
-  const n = await lensRenders(page);
   await page.mouse.move(x0, yc - rise / 2);
   await page.mouse.down();
   await page.mouse.move((x0 + x1) / 2, yc, { steps: 5 });
   await page.mouse.move(x1, yc + rise / 2, { steps: 5 });
   await page.mouse.up();
-  await expect.poll(() => lensRenders(page)).toBeGreaterThan(n);
+  await settled(page);
   const angle = (await lensParams(page)).angle;
   expect(Math.abs(angle + 6)).toBeLessThan(0.3);
   expect(Math.abs(Number(await lens(page).locator('input[data-key="angle"]').inputValue()) - angle)).toBeLessThan(0.01);
   await expect(lens(page).locator('.lc-status')).toContainText('angle set to');
   // a second line on the corrected preview adds to the angle: now tilted 2° the other way
   const rise2 = (x1 - x0) * Math.tan((2 * Math.PI) / 180);
-  const n2 = await lensRenders(page);
   await page.mouse.move(x0, yc + rise2 / 2);
   await page.mouse.down();
   await page.mouse.move(x1, yc - rise2 / 2, { steps: 6 });
   await page.mouse.up();
-  await expect.poll(() => lensRenders(page)).toBeGreaterThan(n2);
+  await settled(page);
   expect(Math.abs((await lensParams(page)).angle + 4)).toBeLessThan(0.4);
   // back to 6° and apply: the horizon is level in the layer (the same row is sky on the left and on the right)
   await setLens(page, 'angle', -6);
@@ -613,17 +685,15 @@ test('Auto Correction: Straighten horizon, the correction checkboxes, auto scale
   await showTab(page, 'auto');
   await expect(lens(page).locator('.lc-note')).toContainText('no lens profile database');
   // the horizon detector sets the angle that levels it
-  let n = await lensRenders(page);
   await lens(page).locator('button[data-action="straighten-horizon"]').click();
-  await expect.poll(() => lensRenders(page)).toBeGreaterThan(n);
+  await settled(page);
   const angle = (await lensParams(page)).angle;
   expect(Math.abs(angle - 4)).toBeLessThan(0.5);
   await expect(lens(page).locator('.lc-status')).toContainText('Horizon tilted');
   // turning leaves empty corners; Auto Scale Image hides them
   const turned = await previewState(page);
-  n = await lensRenders(page);
   await lens(page).locator('input[data-key="autoScale"]').check();
-  await expect.poll(() => lensRenders(page)).toBeGreaterThan(n);
+  await settled(page);
   expect(await lensParams(page)).toMatchObject({ autoScale: true });
   expect((await previewState(page)).opaque).toBeGreaterThan(turned.opaque);
   // the correction checkboxes switch a group off without losing its values
@@ -633,17 +703,15 @@ test('Auto Correction: Straighten horizon, the correction checkboxes, auto scale
   await setLens(page, 'vignette', 25);
   await showTab(page, 'auto');
   for (const [key, off] of [['__geo', { distortion: 0, chromaRC: 40, vignette: 25 }], ['__chroma', { distortion: 0, chromaRC: 0, vignette: 25 }], ['__vig', { distortion: 0, chromaRC: 0, vignette: 0 }]]) {
-    n = await lensRenders(page);
     await lens(page).locator(`input[data-key="${key}"]`).uncheck();
-    await expect.poll(() => lensRenders(page)).toBeGreaterThan(n);
+    await settled(page);
     expect(await lensParams(page)).toMatchObject(off);
   }
   await showTab(page, 'custom');
   await expect(lens(page).locator('input[data-key="distortion"]')).toHaveValue('-30');
   await showTab(page, 'auto');
-  n = await lensRenders(page);
   await lens(page).locator('input[data-key="__geo"]').check();
-  await expect.poll(() => lensRenders(page)).toBeGreaterThan(n);
+  await settled(page);
   expect(await lensParams(page)).toMatchObject({ distortion: -30, chromaRC: 0, vignette: 0 });
   // edge: the background colour is named in the params so the result does not depend on later colour changes
   await lens(page).locator('select[data-key="edge"]').selectOption('background');
@@ -679,21 +747,19 @@ test('the Remove Distortion tool, a selection, and a smart object', async ({ pag
   await lens(page).locator('button[data-tool="distort"]').click();
   const box = await lens(page).locator('.lc-viewport').boundingBox();
   const cx = box.x + box.width / 2, cy = box.y + box.height / 2;
-  let n = await lensRenders(page);
   await page.mouse.move(cx + 200, cy);
   await page.mouse.down();
   await page.mouse.move(cx + 120, cy, { steps: 6 });
   await page.mouse.up();
-  await expect.poll(() => lensRenders(page)).toBeGreaterThan(n);
+  await settled(page);
   const towards = (await lensParams(page)).distortion;
   expect(towards).toBeGreaterThan(5);
   await expect(lens(page).locator('input[data-key="distortion"]')).toHaveValue(String(towards));
-  n = await lensRenders(page);
   await page.mouse.move(cx + 80, cy + 20);
   await page.mouse.down();
   await page.mouse.move(cx + 260, cy + 20, { steps: 6 });
   await page.mouse.up();
-  await expect.poll(() => lensRenders(page)).toBeGreaterThan(n);
+  await settled(page);
   expect((await lensParams(page)).distortion).toBeLessThan(towards - 10);
   await page.keyboard.press('Escape');
   await expect(lens(page)).toHaveCount(0);

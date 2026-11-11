@@ -167,10 +167,6 @@ export class SelectMaskTool extends Tool {
 
   // ---- lifecycle --------------------------------------------------------------------------------------------------
 
-  canOpen() {
-    return !!this.app.doc && !this.session;
-  }
-
   /**
    * Opens the workspace. Resolves with what OK produced ({ output, layer?, doc?, params }) or null (Cancel).
    * @param {{ mask?: Uint8ClampedArray, params?: object }} [opts] mask: start from this selection (Focus Area hands
