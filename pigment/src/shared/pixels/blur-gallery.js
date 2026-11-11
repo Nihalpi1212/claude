@@ -535,21 +535,32 @@ function hash3(x, y, z) {
 const grainValue = (h, gaussian) =>
   gaussian ? (((h & 255) + ((h >>> 8) & 255) + ((h >>> 16) & 255) + (h >>> 24)) / 255 - 2) * 0.866 : h / 2147483648 - 1;
 
-/** Grain of cell size `size` at (x, y): white noise for size 1, bilinear value noise above. */
-function grainAt(x, y, size, seed, gaussian) {
-  if (size <= 1) return grainValue(hash3(x, y, seed), gaussian);
-  const u = x / size, v = y / size;
-  const x0 = Math.floor(u), y0 = Math.floor(v), fx = u - x0, fy = v - y0;
-  const a = grainValue(hash3(x0, y0, seed), gaussian), b = grainValue(hash3(x0 + 1, y0, seed), gaussian);
-  const c = grainValue(hash3(x0, y0 + 1, seed), gaussian), e = grainValue(hash3(x0 + 1, y0 + 1, seed), gaussian);
+/**
+ * One stream of value noise: the four lattice values of the cell last asked about are kept, so
+ * walking along a row costs four hashes per cell instead of per pixel. The value depends on the
+ * seed and the position only.
+ */
+const grainStream = (seed, gaussian) => ({ seed, gaussian, cx: NaN, cy: NaN, a: 0, b: 0, c: 0, e: 0 });
+
+/** Value of a stream in cell (x0, y0) at the fractions (fx, fy): bilinear between the cell's corners. */
+function grainCell(st, x0, y0, fx, fy) {
+  if (x0 !== st.cx || y0 !== st.cy) {
+    st.cx = x0;
+    st.cy = y0;
+    st.a = grainValue(hash3(x0, y0, st.seed), st.gaussian);
+    st.b = grainValue(hash3(x0 + 1, y0, st.seed), st.gaussian);
+    st.c = grainValue(hash3(x0, y0 + 1, st.seed), st.gaussian);
+    st.e = grainValue(hash3(x0 + 1, y0 + 1, st.seed), st.gaussian);
+  }
   // bilinear mixing lowers the variance between lattice points; 1.5 brings the average back
-  return (a + (b - a) * fx + (c - a + (a - b - c + e) * fx) * fy) * 1.5;
+  return (st.a + (st.b - st.a) * fx + (st.c - st.a + (st.a - st.b - st.c + st.e) * fx) * fy) * 1.5;
 }
 
 /**
  * Adds grain inside r, weighted by how much each pixel was blurred (`amount` holds that in px per
- * pixel of `mr`). noise: { amount 0..100, size 1..100, roughness 0..100, color 0..100 (0 = mono),
- * highlights 0..100 (how much grain the highlights keep), distribution 'uniform' | 'gaussian', seed }.
+ * pixel of `mr`). noise: { amount 0..100, size 1..100 (cell size: white noise at 1, soft clumps
+ * above), roughness 0..100 (patchiness), color 0..100 (0 = mono), highlights 0..100 (how much
+ * grain the highlights keep), distribution 'uniform' | 'gaussian', seed }.
  */
 function addGrain(img, r, noise, amount, mr) {
   const level = clampNum(num(noise?.amount, 0), 0, 100) / 100;
@@ -560,28 +571,44 @@ function addGrain(img, r, noise, amount, mr) {
   const keep = clampNum(num(noise.highlights, 0), 0, 100) / 100;
   const gaussian = noise.distribution !== 'uniform';
   const seed = num(noise.seed, 1) | 0;
-  const A = level * GRAIN_LEVELS;
+  const A = level * GRAIN_LEVELS, white = size <= 1;
+  const mono = grainStream(seed, gaussian), patch = grainStream(seed + 101, false);
+  const red = grainStream(seed + 17, gaussian), green = grainStream(seed + 31, gaussian), blue = grainStream(seed + 47, gaussian);
+  // lattice cell and fraction of every column, for the grain and for the (four times coarser) patches
+  const cellX = new Int32Array(r.width), fracX = new Float32Array(r.width), patchX = new Int32Array(r.width), patchFx = new Float32Array(r.width);
+  for (let x = 0; x < r.width; x++) {
+    const u = (r.x + x) / size, w = u / 4;
+    cellX[x] = Math.floor(u);
+    fracX[x] = u - cellX[x];
+    patchX[x] = Math.floor(w);
+    patchFx[x] = w - patchX[x];
+  }
   const d = img.data, W = img.width;
   for (let y = r.y; y < r.y + r.height; y++) {
     let p = (y - mr.y) * mr.width + (r.x - mr.x);
     let i = (y * W + r.x) * 4;
-    for (let x = r.x; x < r.x + r.width; x++, p++, i += 4) {
+    const v = y / size, y0 = Math.floor(v), fy = v - y0, py = Math.floor(v / 4), pfy = v / 4 - py;
+    for (let k = 0; k < r.width; k++, p++, i += 4) {
       const blur = amount[p];
       if (!(blur > EPS) || d[i + 3] === 0) continue;
-      let k = A * (blur >= 1.5 ? 1 : smoothstep(0, 1.5, blur));
-      if (rough > 0) k *= 1 - rough + 2 * rough * (grainAt(x, y, size * 4, seed + 101, false) * 0.5 + 0.5);
+      const x = r.x + k;
+      let g = A * (blur >= 1.5 ? 1 : smoothstep(0, 1.5, blur));
+      if (rough > 0) g *= Math.max(0, 1 - rough + 2 * rough * (grainCell(patch, patchX[k], py, patchFx[k], pfy) * 0.5 + 0.5));
       if (keep < 1) {
         const L = (d[i] * 77 + d[i + 1] * 150 + d[i + 2] * 29) >> 8;
-        if (L > 128) k *= 1 - (1 - keep) * smoothstep(128, 255, L);
+        if (L > 128) g *= 1 - (1 - keep) * smoothstep(128, 255, L);
       }
-      const n0 = grainAt(x, y, size, seed, gaussian);
+      const n0 = white ? grainValue(hash3(x, y, seed), gaussian) : grainCell(mono, cellX[k], y0, fracX[k], fy);
       if (color > 0) {
         const m = n0 * (1 - color);
-        d[i] = round8(d[i] + k * (m + color * grainAt(x, y, size, seed + 17, gaussian)));
-        d[i + 1] = round8(d[i + 1] + k * (m + color * grainAt(x, y, size, seed + 31, gaussian)));
-        d[i + 2] = round8(d[i + 2] + k * (m + color * grainAt(x, y, size, seed + 47, gaussian)));
+        const nr = white ? grainValue(hash3(x, y, seed + 17), gaussian) : grainCell(red, cellX[k], y0, fracX[k], fy);
+        const ng = white ? grainValue(hash3(x, y, seed + 31), gaussian) : grainCell(green, cellX[k], y0, fracX[k], fy);
+        const nb = white ? grainValue(hash3(x, y, seed + 47), gaussian) : grainCell(blue, cellX[k], y0, fracX[k], fy);
+        d[i] = round8(d[i] + g * (m + color * nr));
+        d[i + 1] = round8(d[i + 1] + g * (m + color * ng));
+        d[i + 2] = round8(d[i + 2] + g * (m + color * nb));
       } else {
-        const n = k * n0;
+        const n = g * n0;
         d[i] = round8(d[i] + n);
         d[i + 1] = round8(d[i + 1] + n);
         d[i + 2] = round8(d[i + 2] + n);
@@ -656,8 +683,12 @@ function irisRadius(pins, W, H, r) {
         const e = es[k];
         const dx = cx - e.cx, dy = cy - e.cy;
         const u = Math.abs(e.cos * dx + e.sin * dy) / e.rx, v = Math.abs(-e.sin * dx + e.cos * dy) / e.ry;
-        const rho = e.n === 2 ? Math.sqrt(u * u + v * v) : Math.pow(Math.pow(u, e.n) + Math.pow(v, e.n), 1 / e.n);
-        const b = rho >= 1 ? e.blur : rho <= e.feather ? 0 : e.blur * smoothstep(e.feather, 1, rho);
+        let b = e.blur;
+        // outside the shape's bounding box the blur is full whatever the exponent (and no pow is needed)
+        if (u < 1 && v < 1) {
+          const rho = e.n === 2 ? Math.sqrt(u * u + v * v) : Math.pow(Math.pow(u, e.n) + Math.pow(v, e.n), 1 / e.n);
+          if (rho < 1) b = rho <= e.feather ? 0 : e.blur * smoothstep(e.feather, 1, rho);
+        }
         if (b < best) best = b;
       }
       map[p] = best;

@@ -508,6 +508,48 @@ test('a large layer previews on a reduced copy while dragging and at full qualit
   expect(errors).toEqual([]);
 });
 
+test('Escape while a reduced preview is on a large layer restores every pixel; the controls can be hidden with H', async ({ page }) => {
+  const errors = await openApp(page);
+  await newDoc(page, { width: 1200, height: 900 });
+  await paintPattern(page);
+  const h0 = await historyLength(page), hash0 = await layerHash(page);
+  for (const kind of ['field-blur', 'spin-blur']) {
+    await open(page, kind);
+    await expect.poll(async () => (await state(page)).shown, { timeout: 30_000 }).toEqual({ full: true, current: true });
+    // several reduced previews in a row (they are scaled straight into the layer), then out while one is up
+    const a = await at(page, 600, 450), b = await at(page, 300, 250);
+    await page.mouse.move(a.x, a.y);
+    await page.mouse.down();
+    await page.mouse.move(b.x, b.y, { steps: 6 });
+    await expect.poll(async () => (await state(page)).shown).toEqual({ full: false, current: true });
+    expect(await layerHash(page)).not.toBe(hash0);
+    await page.mouse.up();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.bg-panel')).toHaveCount(0);
+    expect(await layerHash(page)).toBe(hash0);
+    expect(await historyLength(page)).toBe(h0);
+  }
+  // P (preview off) puts the original back too, and on again shows the blur; H hides the pins without ending anything
+  await open(page, 'field-blur');
+  await expect.poll(async () => (await state(page)).shown, { timeout: 30_000 }).toEqual({ full: true, current: true });
+  await drag(page, [600, 450], [500, 400]);
+  await page.keyboard.press('p');
+  await expect.poll(() => layerHash(page)).toBe(hash0);
+  await page.keyboard.press('p');
+  await expect.poll(async () => (await state(page)).shown, { timeout: 30_000 }).toEqual({ full: true, current: true });
+  expect(await engineDiff(page, 'field-blur', (await state(page)).params)).toBe(0);
+  await page.keyboard.press('h');
+  const q = await at(page, 200, 200);
+  await page.mouse.click(q.x, q.y); // hidden controls take no clicks: no pin is added
+  expect((await state(page)).params.pins.length).toBe(1);
+  await page.keyboard.press('h');
+  await page.mouse.click(q.x, q.y);
+  expect((await state(page)).params.pins.length).toBe(2);
+  await page.keyboard.press('Escape');
+  expect(await layerHash(page)).toBe(hash0);
+  expect(errors).toEqual([]);
+});
+
 test('the session owns the document: other commands and tool shortcuts wait until it ends', async ({ page }) => {
   const errors = await openApp(page);
   await newDoc(page);

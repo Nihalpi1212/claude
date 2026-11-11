@@ -66,6 +66,7 @@ body.blur-gallery-active #toolbox, body.blur-gallery-active #tabbar { pointer-ev
 .bg-body .dialog-form { grid-template-columns: minmax(0, 1fr); min-width: 0; gap: 8px; }
 .bg-body .dialog-form .slider-field input[type="range"] { flex: 1; min-width: 0; }
 .bg-body .dialog-form .slider-field .input { width: 62px; height: 26px; font-size: 12px; padding: 0 6px; flex: none; }
+.bg-body .opt-segment { align-self: flex-start; }
 .bg-pins { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
 .bg-pin-label { color: var(--fg-muted); }
 .bg-global-form:not(:empty) { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }

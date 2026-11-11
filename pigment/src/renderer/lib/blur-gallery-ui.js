@@ -29,7 +29,7 @@ const DEG = Math.PI / 180;
 
 const TOOL_ID = 'blur-gallery';
 const PREVIEW_PIXELS = 170_000; // size of the copy the blur runs on while something is dragged (about 60-90 ms a frame)
-const SYNC_PIXELS = 400_000; // a full-quality render above this size runs under app.busy
+const SYNC_PIXELS = 300_000; // a full-quality render above this size runs under app.busy
 const SETTLE_MS = 300; // pause after the last change before the full-quality render of a large layer
 const HIT = 9; // screen px around a handle
 const RING = 30; // screen radius of the blur ring
@@ -198,7 +198,7 @@ class BlurGalleryTool extends Tool {
     const s = {
       kind, def, doc: app.doc, edit, params: start,
       sel: kind === 'path-blur' ? { path: start.paths.length ? 0 : -1, point: -1 } : { pin: start.pins.length ? 0 : -1 },
-      drag: null, hover: null, previewOn: true, hidden: false, tab: 'blur',
+      drag: null, previewOn: true, hidden: false, tab: 'blur',
       shown: { key: null, full: false }, busy: false, timer: 0, raf: 0, reduced: null, resolve: null, panel: null,
     };
     // layers clearly larger than the preview size are blurred on a reduced copy while something is dragged
@@ -242,7 +242,8 @@ class BlurGalleryTool extends Tool {
 
   deactivate() {
     // another tool was activated behind the session's back: nothing may stay half applied
-    if (this.session && !this.ending) this.finish(null);
+    // (that tool is on its way in, so the previous one is not brought back)
+    if (this.session && !this.ending) this.finish(null, { switchBack: false });
   }
 
   /** Escape. */
@@ -285,7 +286,7 @@ class BlurGalleryTool extends Tool {
   }
 
   /** Ends the session: result is the committed params or null (cancel: the pixels are restored). */
-  finish(result) {
+  finish(result, { switchBack = true } = {}) {
     const s = this.session;
     if (!s) return;
     const app = this.app;
@@ -300,7 +301,7 @@ class BlurGalleryTool extends Tool {
     if (s.doc.view) s.doc.view.hideAnts = s.hideAnts;
     this.ending = true;
     try {
-      if (app.tools.active === this) app.tools.activate(app.tools.get(this.returnTo) ? this.returnTo : 'move');
+      if (switchBack && app.tools.active === this) app.tools.activate(app.tools.get(this.returnTo) ? this.returnTo : 'move');
     } finally {
       this.ending = false;
       app.tools.tools.delete(TOOL_ID);
@@ -331,6 +332,7 @@ class BlurGalleryTool extends Tool {
     if (!s.previewOn) {
       s.edit.restore();
       s.shown = { key: null, full: false };
+      s.inPlace = false;
       return;
     }
     const key = JSON.stringify(s.params);
@@ -348,11 +350,7 @@ class BlurGalleryTool extends Tool {
         const img = { width: r.image.width, height: r.image.height, data: new Uint8ClampedArray(r.image.data) };
         applyFilter(img, s.kind, scaleBlurParams(s.kind, s.params, r.scale));
         r.small.getContext('2d').putImageData(new ImageData(img.data, img.width, img.height), 0, 0);
-        const uctx = r.up.getContext('2d', { willReadFrequently: true });
-        uctx.globalCompositeOperation = 'copy';
-        uctx.imageSmoothingQuality = 'medium';
-        uctx.drawImage(r.small, 0, 0, r.up.width, r.up.height);
-        s.edit.show(uctx.getImageData(0, 0, r.up.width, r.up.height));
+        this.showReduced();
         s.shown = { key, full: false };
       }
     } catch (err) {
@@ -361,6 +359,40 @@ class BlurGalleryTool extends Tool {
     }
     // full quality once nothing is being dragged any more
     if (!s.shown.full && !s.drag) s.timer = setTimeout(() => this.settle(), SETTLE_MS);
+  }
+
+  /**
+   * Puts the reduced result (s.reduced.small) on the layer. The edit session's show() needs the
+   * pixels at full size, and reading 12 million of them back for every frame of a drag is what makes
+   * dragging on a big layer sluggish. Once the session holds the region (something was shown through
+   * it, so its restore / cancel puts the original back) the canvas scales the preview straight into
+   * the layer instead; a selection, a mask or an image mode still go through show(), which blends
+   * and constrains.
+   */
+  showReduced() {
+    const s = this.session, r = s.reduced, t = s.edit.target, loc = s.edit.local;
+    const plain = !t.mask && !(s.doc.selection && !s.doc.selection.isEmpty) && !this.app.pixelConstraint;
+    if (s.inPlace && plain) {
+      const ctx = t.canvas.getContext('2d');
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(loc.x, loc.y, loc.width, loc.height);
+      ctx.clip();
+      ctx.globalCompositeOperation = 'copy';
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'medium';
+      ctx.drawImage(r.small, loc.x, loc.y, loc.width, loc.height);
+      ctx.restore();
+      t.layer.touch();
+      s.doc.changed('pixels', { layer: t.layer, rect: s.edit.rect });
+      return;
+    }
+    const uctx = r.up.getContext('2d', { willReadFrequently: true });
+    uctx.globalCompositeOperation = 'copy';
+    uctx.imageSmoothingQuality = 'medium';
+    uctx.drawImage(r.small, 0, 0, r.up.width, r.up.height);
+    s.edit.show(uctx.getImageData(0, 0, r.up.width, r.up.height));
+    s.inPlace = true;
   }
 
   /** Full-quality render after a reduced preview (under app.busy when the layer is large); a change made meanwhile starts over. */
@@ -560,7 +592,6 @@ class BlurGalleryTool extends Tool {
     if (!s) return;
     if (!dragging || !s.drag) {
       const h = this.hit(p);
-      s.hover = h;
       const inside = (() => {
         const f = this.toFrac(p.x, p.y);
         return f.x >= 0 && f.x <= 1 && f.y >= 0 && f.y <= 1;
