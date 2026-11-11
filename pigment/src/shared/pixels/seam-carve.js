@@ -248,8 +248,10 @@ export function createSeamMap(img, dir = 'vertical', opts = {}) {
   const dirty = new Uint8Array(n);
   const M = new Float64Array(n);
   const used = new Uint16Array(n); // 0 = free, k = pixel of the batch's k-th seam
-  const path = new Int32Array(h);
   const cand = new Int32Array(w);
+  // per seam of a batch: current column, cost so far, the batch sorted by cost, and each seam's place among the accepted ones (-1 = dropped)
+  const cap = Math.max(1, Math.min(0xfffe, Math.ceil(w / 8)));
+  const cur = new Int32Array(cap), byCost = new Int32Array(cap), cost = new Float64Array(cap), rankOf = new Int32Array(cap + 1);
   let cw = w;
 
   function step() {
@@ -267,69 +269,82 @@ export function createSeamMap(img, dir = 'vertical', opts = {}) {
         M[row] = E[row] + M[prev];
         continue;
       }
-      M[row] = E[row] + (M[prev] <= M[prev + 1] ? M[prev] : M[prev + 1]);
+      let l = M[prev], c = M[prev + 1];
+      M[row] = E[row] + (l <= c ? l : c);
       for (let x = 1; x < last; x++) {
-        const q = prev + x;
-        let m = M[q];
-        if (M[q - 1] < m) m = M[q - 1];
-        if (M[q + 1] < m) m = M[q + 1];
+        const r = M[prev + x + 1];
+        let m = c;
+        if (l < m) m = l;
+        if (r < m) m = r;
         M[row + x] = E[row + x] + m;
+        l = c;
+        c = r;
       }
-      M[row + last] = E[row + last] + (M[prev + last] <= M[prev + last - 1] ? M[prev + last] : M[prev + last - 1]);
+      M[row + last] = E[row + last] + (c <= l ? c : l);
     }
     // seam ends on the bottom row, cheapest first
     const bottom = (h - 1) * w;
     for (let x = 0; x < cw; x++) cand[x] = x;
     const ends = cand.subarray(0, cw);
     ends.sort((a, b) => M[bottom + a] - M[bottom + b] || a - b);
-    // A batch: the best seam, then every disjoint seam that costs about the same. At least 1/64 of the
-    // width goes per pass (so a whole map is a bounded number of passes) and at most 1/8 (seams found from
-    // one sweep get worse the more of them are taken). A seam through protected pixels never rides along
-    // with unprotected ones: it waits until nothing else is left.
-    const minBatch = Math.max(1, Math.ceil(cw / 64)), maxBatch = Math.max(1, Math.min(0xfffe, Math.ceil(cw / 8)));
+    // A batch of seams from this one sweep. The cheapest ends (up to 1/8 of the width: seams found from one
+    // sweep get worse the more of them are taken) climb together, one row at a time, which keeps every read
+    // inside two rows (that is what makes this fast on large layers). They keep their left-to-right order:
+    // the best seam moves first and takes the cheapest of the three pixels above it, then its neighbours
+    // follow outwards, each taking the cheapest pixel above that the seam before it left free and that
+    // leaves room for the seams still to come. So no seam is ever boxed in and no two share a pixel.
+    const maxBatch = Math.max(1, Math.min(cap, Math.ceil(cw / 8)));
     const cut = PROTECT_WEIGHT * 0.5;
-    let count = 0, soft = 0, bestProtected = false;
-    for (let c = 0; c < cw && count < maxBatch; c++) {
-      let x = ends[c];
-      if (count > 0 && count >= minBatch && M[bottom + x] > soft) break; // a seam ending here cannot cost less than M
-      if (count > 0 && !bestProtected && M[bottom + x] >= cut) break;
-      if (used[bottom + x]) continue;
-      const tag = count + 1;
-      let cost = 0, ok = true, y = h - 1;
-      for (; y >= 0; y--) {
-        const p = y * w + x;
-        used[p] = tag;
-        path[y] = x;
-        cost += E[p];
-        if (y === 0) break;
-        // the cheapest free neighbour above: straight first on ties, so seams through flat areas stay straight
-        const q = p - w;
-        let bx = -1, bm = Infinity;
-        if (!used[q]) {
-          bx = x;
-          bm = M[q];
-        }
-        if (x > 0 && !used[q - 1] && M[q - 1] < bm) {
-          bx = x - 1;
-          bm = M[q - 1];
-        }
-        if (x < last && !used[q + 1] && M[q + 1] < bm) bx = x + 1;
-        if (bx < 0) {
-          ok = false;
-          break;
-        }
-        x = bx;
-      }
-      if (ok) {
-        if (count === 0) {
-          soft = cost + Math.abs(cost) * 0.3 + h * 2;
-          bestProtected = cost >= cut;
-        } else if (!(cost <= soft || (count < minBatch && (bestProtected || cost < cut)))) ok = false;
-      }
-      if (ok) count++;
-      else for (let yy = h - 1; yy >= (y < 0 ? 0 : y); yy--) used[yy * w + path[yy]] = 0; // boxed in by earlier seams or too costly: give its pixels back
+    const lowest = M[bottom + ends[0]];
+    let K = 1;
+    // Ends whose cheapest path already crosses protected pixels wait until nothing else is left. While
+    // pixels marked for removal remain, seams go one per pass: there the exact path matters more than speed.
+    if (lowest > -REMOVE_WEIGHT * 0.5) while (K < cw && K < maxBatch && !(lowest < cut && M[bottom + ends[K]] >= cut)) K++;
+    for (let k = 0; k < K; k++) cur[k] = ends[k];
+    cur.subarray(0, K).sort();
+    let pivot = 0;
+    for (let k = 0; k < K; k++) {
+      const p = bottom + cur[k];
+      if (cur[k] === ends[0]) pivot = k;
+      cost[k] = E[p];
+      used[p] = k + 1;
+      byCost[k] = k;
     }
-    // rank the batch and close the gaps
+    for (let y = h - 1; y > 0; y--) {
+      const prev = (y - 1) * w;
+      // k = pivot, pivot + 1 .. K - 1, then pivot - 1 .. 0; [a, b] is what seam k may take
+      for (let i = 0, k = pivot; i < K; i++, k = i <= K - 1 - pivot ? pivot + i : K - 1 - i) {
+        const x = cur[k];
+        let a = x - 1, b = x + 1;
+        const lo = k > pivot ? cur[k - 1] + 1 : k, hi = k < pivot ? cur[k + 1] - 1 : last - (K - 1 - k);
+        if (a < lo) a = lo;
+        if (b > hi) b = hi;
+        // straight up when it is free and as cheap as the rest, so seams through flat areas stay straight
+        let bx = x >= a && x <= b ? x : a, bm = M[prev + bx];
+        for (let c = a; c <= b; c++) {
+          if (M[prev + c] < bm) {
+            bm = M[prev + c];
+            bx = c;
+          }
+        }
+        cur[k] = bx;
+        cost[k] += E[prev + bx];
+        used[prev + bx] = k + 1;
+      }
+    }
+    // Keep the cheapest seam and those that cost about the same; about 1/64 of the width goes per pass
+    // even when the rest costs more (so a whole map is a bounded number of passes), but a seam pushed into
+    // protected pixels is never taken while unprotected ones exist. The others give their pixels back.
+    const picks = byCost.subarray(0, K);
+    picks.sort((i, j) => cost[i] - cost[j] || i - j);
+    const minBatch = Math.max(1, Math.ceil(cw / 64));
+    const least = cost[picks[0]];
+    const soft = least + Math.abs(least) * 0.3 + h * 2;
+    let count = 0;
+    for (let i = 0; i < K; i++) {
+      const k = picks[i], c = cost[k];
+      rankOf[k + 1] = i === 0 || ((c < cut || least >= cut) && (c <= soft || count < minBatch)) ? count++ : -1;
+    }
     // rank the batch and close the gaps; the pixels around each gap (in its row and the rows above and
     // below, where the columns have just shifted against each other) get a fresh gradient next pass
     const base = map.ranked, ncw = cw - count;
@@ -338,9 +353,9 @@ export function createSeamMap(img, dir = 'vertical', opts = {}) {
       let out = row;
       for (let x = 0, p = row; x < cw; x++, p++) {
         const t = used[p];
-        if (t) {
-          order[row + idx[p]] = base + t - 1;
-          used[p] = 0;
+        if (t) used[p] = 0;
+        if (t && rankOf[t] >= 0) {
+          order[row + idx[p]] = base + rankOf[t];
           const o = out - row;
           const x0 = o - 2 < 0 ? 0 : o - 2, x1 = o + 1 >= ncw ? ncw - 1 : o + 1;
           for (let yy = y > 0 ? y - 1 : 0, y1 = y < h - 1 ? y + 1 : y; yy <= y1; yy++) for (let xx = x0, q = yy * w + x0; xx <= x1; xx++, q++) dirty[q] = 1;
@@ -581,9 +596,7 @@ export function createContentAwareScaler(img, opts = {}) {
     st.mapH ??= createSeamMap(st.image, 'horizontal', st.opts);
     const need = Math.abs(seamH - H);
     if (st.mapH.ranked >= need) return true;
-    const left = budgetMs - (now() - t0);
-    if (left <= 0) return false;
-    return st.mapH.ensure(need, left);
+    return st.mapH.ensure(need, Math.max(0, budgetMs - (now() - t0))); // at least one pass, so every call gets somewhere
   }
 
   function scale(width, height, amount = 100) {

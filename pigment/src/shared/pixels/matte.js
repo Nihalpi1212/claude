@@ -68,9 +68,40 @@ export function boxMean(src, w, h, r, dst = new Float32Array(w * h), tmp = new F
   return dst;
 }
 
-/** Gaussian blur of a plane (three box passes sized for sigma), in place. */
+/**
+ * Gaussian blur of a plane, in place. Small sigmas use the kernel itself (three boxes cannot be made
+ * that narrow: a 1 px feather would do nothing), larger ones three box passes sized for sigma. The
+ * kernel is renormalised where the border clips it.
+ */
 export function gaussianBlur(plane, w, h, sigma, tmp = new Float32Array(w * h)) {
   if (!(sigma > 0.05)) return plane;
+  if (sigma < 2.5) {
+    const r = Math.max(1, Math.ceil(sigma * 3)), k = new Float32Array(r + 1);
+    for (let i = 0; i <= r; i++) k[i] = Math.exp(-(i * i) / (2 * sigma * sigma));
+    for (let y = 0; y < h; y++) {
+      const row = y * w;
+      for (let x = 0; x < w; x++) {
+        let sum = plane[row + x] * k[0], norm = k[0];
+        for (let i = 1; i <= r; i++) {
+          if (x - i >= 0) (sum += plane[row + x - i] * k[i]), (norm += k[i]);
+          if (x + i < w) (sum += plane[row + x + i] * k[i]), (norm += k[i]);
+        }
+        tmp[row + x] = sum / norm;
+      }
+    }
+    for (let y = 0; y < h; y++) {
+      const row = y * w;
+      for (let x = 0; x < w; x++) {
+        let sum = tmp[row + x] * k[0], norm = k[0];
+        for (let i = 1; i <= r; i++) {
+          if (y - i >= 0) (sum += tmp[row + x - i * w] * k[i]), (norm += k[i]);
+          if (y + i < h) (sum += tmp[row + x + i * w] * k[i]), (norm += k[i]);
+        }
+        plane[row + x] = sum / norm;
+      }
+    }
+    return plane;
+  }
   // box widths whose three-fold convolution has the variance of the Gaussian (Kovesi's "fast almost-Gaussian")
   const ideal = Math.sqrt((12 * sigma * sigma) / 3 + 1);
   let wl = Math.floor(ideal);
@@ -559,7 +590,7 @@ export function refineEdge(img, mask, opts = {}) {
   const alpha = radius > 0 || opts.extra ? detectEdge(img, mask, opts) : Float32Array.from(mask, (v) => v / 255);
   globalRefine(alpha, w, h, { smooth: opts.smooth, feather: opts.feather, contrast: opts.contrast, shift: opts.shift, band: radius });
   const out = new Uint8ClampedArray(w * h);
-  for (let p = 0; p < out.length; p++) out[p] = alpha[p] * 255 + 0.5;
+  for (let p = 0; p < out.length; p++) out[p] = alpha[p] * 255; // the clamped array rounds
   return out;
 }
 
@@ -609,9 +640,9 @@ export function decontaminate(img, alpha, amount = 1) {
     const s = near[p];
     if (s < 0) continue;
     const f = a / 255, t = amt * (1 - f * f), j = s * 4;
-    o[i] = d[i] + (d[j] - d[i]) * t + 0.5;
-    o[i + 1] = d[i + 1] + (d[j + 1] - d[i + 1]) * t + 0.5;
-    o[i + 2] = d[i + 2] + (d[j + 2] - d[i + 2]) * t + 0.5;
+    o[i] = d[i] + (d[j] - d[i]) * t;
+    o[i + 1] = d[i + 1] + (d[j + 1] - d[i + 1]) * t;
+    o[i + 2] = d[i + 2] + (d[j + 2] - d[i + 2]) * t;
   }
   return out;
 }

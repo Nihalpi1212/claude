@@ -547,8 +547,11 @@ function gmmComponent(m, c, r, g, b) {
   return m.coef[c] * Math.exp(-0.5 * q);
 }
 
-/** Smoothness arcs: lambda * exp(-beta |colour difference|²) / distance, beta from the mean difference (GrabCut). */
-function smoothnessArcs(S, lambda) {
+/**
+ * Smoothness arcs: lambda * exp(-beta |colour difference|²) / distance, beta from the mean difference
+ * (GrabCut). `isolate` (a flag per pixel) leaves out the arcs between pixels whose flags differ.
+ */
+function smoothnessArcs(S, lambda, isolate = null) {
   const w = S.width, h = S.height, n = w * h, rgb = S.rgb;
   const DX = [1, 1, 0, -1], DY = [0, 1, 1, 1];
   const diff = new Float32Array(n * 4);
@@ -575,6 +578,7 @@ function smoothnessArcs(S, lambda) {
       for (let d = 0; d < 4; d++) {
         const nx = x + DX[d], ny = y + DY[d];
         if (nx < 0 || nx >= w || ny >= h) continue;
+        if (isolate && isolate[p] !== isolate[ny * w + nx]) continue; // no smoothness across the fence
         const c = Math.max(1, Math.round(((lambda * Math.exp(-beta * diff[p * 4 + d])) / (d & 1 ? Math.SQRT2 : 1)) * CAP_SCALE));
         cap[p * 8 + d] = c;
         cap[(ny * w + nx) * 8 + (d ^ 4)] = c;
@@ -588,10 +592,12 @@ function smoothnessArcs(S, lambda) {
  * GrabCut on a reduced copy. labels (GC_* per pixel) are updated in place: the probable ones end up
  * on the side the last cut put them. `prior` (probability of foreground per pixel) adds
  * priorWeight * -log(prior) to the data term; colorWeight 0 leaves the colour models out (one cut
- * of the prior with the smoothness term).
+ * of the prior with the smoothness term). `isolate`: flags per pixel; pixels with different flags are
+ * not tied by the smoothness term (the outside of an Object Selection region teaches the background
+ * model but must not drag the part of an object that the region cuts through to its side).
  * @returns {Uint8Array} 1 = foreground
  */
-function cutReduced(S, labels, { iterations = 5, gmmComponents = 5, lambda = 50, prior = null, priorWeight = 1, colorWeight = 1, stats = null } = {}) {
+function cutReduced(S, labels, { iterations = 5, gmmComponents = 5, lambda = 50, prior = null, priorWeight = 1, colorWeight = 1, isolate = null, stats = null } = {}) {
   const w = S.width, h = S.height, n = w * h, rgb = S.rgb;
   const out = new Uint8Array(n);
   for (let p = 0; p < n; p++) if (S.alpha[p] < 0.5) labels[p] = GC_BGD;
@@ -603,7 +609,7 @@ function cutReduced(S, labels, { iterations = 5, gmmComponents = 5, lambda = 50,
   };
   if (!nf || !nb) return fin();
   const t0 = now();
-  const arcs = smoothnessArcs(S, lambda), cap = new Int32Array(n * 8), tcap = new Int32Array(n);
+  const arcs = smoothnessArcs(S, lambda, isolate), cap = new Int32Array(n * 8), tcap = new Int32Array(n);
   const useColor = colorWeight > 0, K = Math.max(1, Math.min(8, gmmComponents | 0));
   const comp = new Uint8Array(n);
   let fgModel = null, bgModel = null;
@@ -849,11 +855,7 @@ function clipRect(r, w, h) {
 function saliencyReduced(S) {
   const w = S.width, h = S.height, n = w * h;
   const { L, A, B } = toLab(S);
-  const tmp = new Float32Array(n);
-  const br = Math.max(1, Math.round(Math.min(w, h) / 160));
-  boxMean(L, w, h, br, L, tmp);
-  boxMean(A, w, h, br, A, tmp);
-  boxMean(B, w, h, br, B, tmp);
+  const tmp = new Float32Array(n), sal = new Float32Array(n);
   let ml = 0, ma = 0, mb = 0, cnt = 0;
   for (let p = 0; p < n; p++) if (S.alpha[p] >= 0.5) {
     ml += L[p];
@@ -861,11 +863,20 @@ function saliencyReduced(S) {
     mb += B[p];
     cnt++;
   }
-  const sal = new Float32Array(n);
   if (!cnt) return sal;
   ml /= cnt;
   ma /= cnt;
   mb /= cnt;
+  // transparent pixels have no colour: give them the mean, or the blur would bleed black into their neighbours
+  if (cnt < n) for (let p = 0; p < n; p++) if (S.alpha[p] < 0.5) {
+    L[p] = ml;
+    A[p] = ma;
+    B[p] = mb;
+  }
+  const br = Math.max(1, Math.round(Math.min(w, h) / 160));
+  boxMean(L, w, h, br, L, tmp);
+  boxMean(A, w, h, br, A, tmp);
+  boxMean(B, w, h, br, B, tmp);
   // border colours: k-means of a frame a few pixels wide; small clusters are a subject crossing the frame
   const ring = Math.max(2, Math.round(Math.min(w, h) * 0.04));
   const pts = [];
@@ -887,31 +898,22 @@ function saliencyReduced(S) {
     const big = clusters.filter((c) => c.share >= 0.15);
     clusters = big.length ? big : [clusters.reduce((a, b) => (b.share > a.share ? b : a))];
   }
-  const ft = new Float32Array(n), bd = new Float32Array(n);
-  let ftMax = 0, bdMax = 0;
-  for (let p = 0; p < n; p++) {
-    if (S.alpha[p] < 0.5) continue;
-    const f = Math.sqrt((L[p] - ml) ** 2 + (A[p] - ma) ** 2 + (B[p] - mb) ** 2);
-    ft[p] = f;
-    if (f > ftMax) ftMax = f;
-    let d = Infinity;
-    for (const c of clusters) {
-      const v = Math.max(0, Math.sqrt((L[p] - c.l) ** 2 + (A[p] - c.a) ** 2 + (B[p] - c.b) ** 2) - 1.5 * c.sd);
-      if (v < d) d = v;
-    }
-    if (d === Infinity) d = f;
-    bd[p] = d;
-    if (d > bdMax) bdMax = d;
-  }
-  // a difference below a few Lab units is noise: do not stretch it to full scale
-  ftMax = Math.max(ftMax, 12);
-  bdMax = Math.max(bdMax, 12);
+  // Differences saturate: a colour 40 Lab units from the background is as much "not background" as one
+  // 100 away, so a vivid part of the subject does not push its paler parts down the scale.
   let max = 0;
   for (let y = 0; y < h; y++) {
     const dy = (y + 0.5) / h - 0.5;
     for (let x = 0; x < w; x++) {
       const p = y * w + x, dx = (x + 0.5) / w - 0.5;
-      const v = (0.35 * (ft[p] / ftMax) + 0.65 * (bd[p] / bdMax)) * (0.7 + 0.3 * Math.exp(-(dx * dx + dy * dy) / 0.32));
+      if (S.alpha[p] < 0.5) continue;
+      const f = Math.sqrt((L[p] - ml) ** 2 + (A[p] - ma) ** 2 + (B[p] - mb) ** 2);
+      let d = Infinity;
+      for (const c of clusters) {
+        const v = Math.max(0, Math.sqrt((L[p] - c.l) ** 2 + (A[p] - c.a) ** 2 + (B[p] - c.b) ** 2) - 1.5 * c.sd);
+        if (v < d) d = v;
+      }
+      if (d === Infinity) d = f;
+      const v = (0.35 * (1 - Math.exp(-f / 25)) + 0.65 * (1 - Math.exp(-d / 18))) * (0.7 + 0.3 * Math.exp(-(dx * dx + dy * dy) / 0.32));
       sal[p] = v;
       if (v > max) max = v;
     }
@@ -919,7 +921,9 @@ function saliencyReduced(S) {
   boxMean(sal, w, h, br, sal, tmp);
   max = 0;
   for (let p = 0; p < n; p++) if (sal[p] > max) max = sal[p];
-  if (max > 0) for (let p = 0; p < n; p++) sal[p] = S.alpha[p] < 0.5 ? 0 : sal[p] / max;
+  // an image whose most different pixel is still close to the rest has no subject: keep its saliency low
+  max = Math.max(max, 0.25);
+  for (let p = 0; p < n; p++) sal[p] = S.alpha[p] < 0.5 ? 0 : sal[p] / max;
   return sal;
 }
 
@@ -934,7 +938,7 @@ export function saliency(img, { size = 320 } = {}) {
   if (!W || !H) return out;
   const S = reduce(img, Math.max(8, Math.min(320, size)));
   const up = resizePlane(saliencyReduced(S), S.width, S.height, W, H);
-  for (let p = 0; p < out.length; p++) out[p] = up[p] * 255 + 0.5;
+  for (let p = 0; p < out.length; p++) out[p] = up[p] * 255;
   return out;
 }
 
@@ -953,10 +957,12 @@ export function selectSubject(img, opts = {}) {
   const ob = W && H ? opaqueBounds(img) : null;
   if (!ob) return out;
   const t0 = now();
-  if (ob.holes > 0.1) {
+  const opaque = () => {
     for (let p = 0, i = 3; p < out.length; p++, i += 4) out[p] = img.data[i];
     return out;
-  }
+  };
+  if (ob.holes > 0.1) return opaque();
+  const partial = ob.holes > 0 || ob.rect.width < W || ob.rect.height < H;
   const S = reduce(img, Math.max(16, opts.scale ?? 640), ob.rect);
   const w = S.width, h = S.height, n = w * h;
   const small = reduce(img, 320, ob.rect);
@@ -982,6 +988,8 @@ export function selectSubject(img, opts = {}) {
     for (let p = 0; p < n; p++) if (start[p] & 1) (bin[p] = 1), area++;
     cleanLabels(bin, w, h, { keep: 0.12, minArea: 4 });
   }
+  // nothing stands out inside a layer that has transparency around or in it: the layer's own shape is the subject
+  if (!area && partial) return opaque();
   cleanLabels(bin, w, h, { keep: 0, hole: Math.max(16, area * 0.03) });
   return finish(img, S, bin, out, opts);
 }
@@ -1205,10 +1213,14 @@ export function objectSelect(img, region, opts = {}) {
   for (let p = 0; p < n; p++) labels[p] = reg[p] ? GC_PR_FGD : GC_BGD;
   if (n - inCount < Math.max(64, n * 0.08)) {
     // hardly any outside: the rim of the region is the best guess at the background
-    const rim = boxMean(reg, w, h, Math.max(2, Math.round(Math.min(w, h) * 0.05)), new Float32Array(n));
-    for (let p = 0; p < n; p++) if (reg[p] && rim[p] < 0.999) labels[p] = GC_PR_BGD;
+    const t = Math.max(2, Math.round(Math.min(w, h) * 0.05));
+    const rim = boxMean(reg, w, h, t, new Float32Array(n));
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const p = y * w + x;
+      if (reg[p] && (rim[p] < 0.999 || x < t || y < t || x >= w - t || y >= h - t)) labels[p] = GC_PR_BGD;
+    }
   }
-  const bin = cutReduced(S, labels, { iterations: opts.iterations ?? 5, stats: opts.stats });
+  const bin = cutReduced(S, labels, { iterations: opts.iterations ?? 5, isolate: reg, stats: opts.stats });
   let area = 0;
   for (let p = 0; p < n; p++) {
     if (!reg[p]) bin[p] = 0;
