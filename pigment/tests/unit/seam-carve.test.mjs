@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import {
   energy, findSeam, skinMask, createSeamMap, applySeamMap, applySeamMapToMask, removeSeams, insertSeams,
   contentAwareScale, createContentAwareScaler, PROTECT_WEIGHT, REMOVE_WEIGHT, SKIN_WEIGHT, UNRANKED,
+  reduceImage, reduceMask, applySeamMapScaled, applySeamMapToMaskScaled,
 } from '../../src/shared/pixels/seam-carve.js';
 import { createImage, setPixel, randomSeeded, meanAbsDiff } from '../../src/shared/pixels/core.js';
 import { resize } from '../../src/shared/pixels/transform.js';
@@ -418,6 +419,201 @@ test('edge cases: tiny and empty images, counts beyond the size', () => {
   assert.equal(removeSeams(img, -4).width, 20);
   // masks of the wrong size are ignored rather than read out of range
   assert.equal(removeSeams(img, 3, 'vertical', { protect: new Uint8ClampedArray(7) }).width, 17);
+});
+
+test('inserted pixels are exact averages: a flat image with odd values stays flat', () => {
+  const flat = createImage(10, 4, [201, 77, 33, 1]);
+  const wide = insertSeams(flat, 3);
+  assert.equal(wide.width, 13);
+  for (let i = 0; i < wide.data.length; i += 4) assert.deepEqual(Array.from(wide.data.subarray(i, i + 4)), [201, 77, 33, 255]);
+  const tall = insertSeams(flat, 2, 'horizontal');
+  for (let i = 0; i < tall.data.length; i += 4) assert.deepEqual(Array.from(tall.data.subarray(i, i + 4)), [201, 77, 33, 255]);
+  // two neighbours of different colour: the new pixel is their mean
+  const two = createImage(2, 1);
+  setPixel(two, 0, 0, [100, 0, 50, 1]);
+  setPixel(two, 1, 0, [201, 0, 51, 1]);
+  const three = insertSeams(two, 1);
+  const colours = [px(three, 0, 0), px(three, 1, 0), px(three, 2, 0)].map((p) => p.join(','));
+  assert.ok(colours.includes('100,0,50,255') && colours.includes('201,0,51,255'));
+  const mid = [px(three, 0, 0), px(three, 1, 0), px(three, 2, 0)].find((p) => p[0] !== 100 && p[0] !== 201) ?? px(three, 1, 0);
+  assert.ok(mid[0] === 100 || mid[0] === 201 || Math.abs(mid[0] - 150.5) <= 0.5, `the inserted pixel ${mid}`);
+});
+
+test('reduceImage averages blocks (alpha weighted, short last blocks) and reduceMask keeps the strongest value', () => {
+  const img = createImage(5, 3);
+  // first block (2x2): two opaque pixels 100 and 200, two transparent
+  setPixel(img, 0, 0, [100, 10, 0, 1]);
+  setPixel(img, 1, 1, [200, 30, 0, 1]);
+  // second block: all four opaque with the same colour
+  for (const [x, y] of [[2, 0], [3, 0], [2, 1], [3, 1]]) setPixel(img, x, y, [7, 9, 11, 1]);
+  // last column block (1 wide): one opaque of two
+  setPixel(img, 4, 0, [50, 60, 70, 1]);
+  // last row (1 high)
+  setPixel(img, 0, 2, [1, 2, 3, 1]);
+  setPixel(img, 1, 2, [3, 4, 5, 1]);
+  const r = reduceImage(img, 2);
+  assert.equal(r.width, 3);
+  assert.equal(r.height, 2);
+  assert.deepEqual(px(r, 0, 0), [150, 20, 0, 128], 'transparent pixels do not darken the average');
+  assert.deepEqual(px(r, 1, 0), [7, 9, 11, 255]);
+  assert.deepEqual(px(r, 2, 0), [50, 60, 70, 128]);
+  assert.deepEqual(px(r, 0, 1), [2, 3, 4, 255]);
+  assert.deepEqual(px(r, 1, 1), [0, 0, 0, 0]);
+  assert.deepEqual(Array.from(reduceImage(img, 1).data), Array.from(img.data));
+  assert.notEqual(reduceImage(img, 1).data, img.data);
+  const mask = new Uint8ClampedArray(5 * 3);
+  mask[1 * 5 + 1] = 200;
+  mask[0 * 5 + 4] = 90;
+  mask[2 * 5 + 3] = 255;
+  assert.deepEqual(Array.from(reduceMask(mask, 5, 3, 2)), [200, 0, 90, 0, 255, 0]);
+  assert.deepEqual(Array.from(reduceMask(mask, 5, 3, 1)), Array.from(mask));
+});
+
+test('band seams: a map built on a reduced copy removes exactly n pixels per line, only where the copy says', () => {
+  // the band image at twice the size: noise with a flat green band in columns [40, 72)
+  const img = bandImage(120, 60, 40, 72, 5);
+  const small = reduceImage(img, 2);
+  assert.equal(small.width, 60);
+  const map = createSeamMap(small, 'vertical');
+  for (const n of [20, 7, 1, 28]) {
+    const out = applySeamMapScaled(img, map, 120 - n, 2);
+    assert.equal(out.width, 120 - n);
+    assert.equal(out.height, 60);
+    // only band pixels went: every row keeps its noise, in order, and loses n greens
+    assert.deepEqual(greenPerRow(out), new Array(60).fill(32 - n), `${n} pixels`);
+    for (const y of [0, 17, 59]) {
+      for (let x = 0; x < 40; x++) assert.deepEqual(px(out, x, y), px(img, x, y));
+      for (let x = 72; x < 120; x++) assert.deepEqual(px(out, x - n, y), px(img, x, y));
+    }
+  }
+  // factor 1 is the plain lookup
+  const plain = createSeamMap(img, 'vertical');
+  assert.deepEqual(Array.from(applySeamMapScaled(img, plain, 100, 1).data), Array.from(applySeamMap(img, plain, 100).data));
+  // widening stretches bands of the flat area: 20 more greens per row, the noise untouched
+  const wide = applySeamMapScaled(img, map, 140, 2);
+  assert.equal(wide.width, 140);
+  assert.deepEqual(greenPerRow(wide), new Array(60).fill(52));
+  for (const y of [3, 40]) {
+    for (let x = 0; x < 40; x++) assert.deepEqual(px(wide, x, y), px(img, x, y));
+    for (let x = 72; x < 120; x++) assert.deepEqual(px(wide, x + 20, y), px(img, x, y));
+  }
+  // at most twice the size, at least one pixel
+  assert.equal(applySeamMapScaled(img, map, 1000, 2).width, 240);
+  assert.equal(applySeamMapScaled(img, map, 0, 2).width, 1);
+  assert.throws(() => applySeamMapScaled(createImage(50, 60), map, 40, 2), /another image size/);
+});
+
+test('band seams work on sizes that are no multiple of the factor, in both directions, and masks follow', () => {
+  const rnd = randomSeeded(21);
+  const W = 61, H = 35, f = 3;
+  const img = createImage(W, H);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) setPixel(img, x, y, [Math.floor(rnd() * 256), Math.floor(rnd() * 256), x, 1]);
+  const mapV = createSeamMap(reduceImage(img, f), 'vertical');
+  assert.equal(mapV.width, 21);
+  assert.equal(mapV.height, 12);
+  // a mask that tags every pixel with its column, carried through the same bands
+  const cols = new Uint8ClampedArray(W * H);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) cols[y * W + x] = x;
+  for (const n of [1, 2, 3, 10, 31, 60]) {
+    const out = applySeamMapScaled(img, mapV, W - n, f);
+    assert.equal(out.width, W - n, `${n} removed`);
+    const m = applySeamMapToMaskScaled(cols, W, H, mapV, W - n, f);
+    assert.equal(m.length, (W - n) * H);
+    for (let y = 0; y < H; y++) {
+      // every row is a subsequence of the original row: the blue channel holds the source column
+      let last = -1;
+      for (let x = 0; x < W - n; x++) {
+        const p = px(out, x, y);
+        assert.ok(p[2] > last, `row ${y} keeps its order`);
+        last = p[2];
+        assert.deepEqual(p, px(img, p[2], y));
+        assert.equal(m[y * (W - n) + x], p[2], 'the mask lost the same pixels');
+      }
+    }
+  }
+  // widening by any amount up to the double lands on the exact size
+  for (const n of [1, 5, 33, 61]) assert.equal(applySeamMapScaled(img, mapV, W + n, f).width, W + n);
+  assert.equal(applySeamMapToMaskScaled(cols, W, H, mapV, W + 17, f).length, (W + 17) * H);
+  // horizontal: rows go; a row-tag mask shows which
+  const mapH = createSeamMap(reduceImage(img, f), 'horizontal');
+  const rows = new Uint8ClampedArray(W * H);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) rows[y * W + x] = y;
+  for (const n of [1, 4, 20]) {
+    const out = applySeamMapScaled(img, mapH, H - n, f);
+    assert.equal(out.height, H - n);
+    assert.equal(out.width, W);
+    const m = applySeamMapToMaskScaled(rows, W, H, mapH, H - n, f);
+    for (const x of [0, 30, 60]) {
+      let last = -1;
+      for (let y = 0; y < H - n; y++) {
+        const sy = m[y * W + x];
+        assert.ok(sy > last);
+        last = sy;
+        assert.deepEqual(px(out, x, y), px(img, x, sy));
+      }
+    }
+  }
+  assert.throws(() => applySeamMapToMaskScaled(cols, W, H, mapH, 20, 2), /does not match/);
+  assert.throws(() => applySeamMapToMaskScaled(new Uint8ClampedArray(5), W, H, mapV, 20, f), /does not match/);
+});
+
+test('a scaler with a map budget carves a large image through a reduced map: exact sizes, protection, masks', () => {
+  // noise with a flat red block: without protection the block is what goes
+  const rnd = randomSeeded(31);
+  const W = 240, H = 160;
+  const img = createImage(W, H);
+  const protect = new Uint8ClampedArray(W * H);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const inside = x >= 80 && x < 160 && y >= 40 && y < 120;
+    if (inside) protect[y * W + x] = 255;
+    setPixel(img, x, y, inside ? [255, 0, 0, 1] : [Math.floor(rnd() * 120), 100 + Math.floor(rnd() * 155), 100 + Math.floor(rnd() * 155), 1]);
+  }
+  const reds = (im) => {
+    let n = 0;
+    for (let i = 0; i < im.data.length; i += 4) if (im.data[i] === 255 && im.data[i + 1] === 0 && im.data[i + 2] === 0) n++;
+    return n;
+  };
+  assert.equal(createContentAwareScaler(img).factor, 1);
+  assert.equal(createContentAwareScaler(img, {}, { maxMapPixels: W * H }).factor, 1);
+  const open = createContentAwareScaler(img, {}, { maxMapPixels: (W * H) / 4 });
+  assert.equal(open.factor, 2);
+  assert.equal(createContentAwareScaler(img, {}, { maxMapPixels: (W * H) / 5 }).factor, 3);
+  const loose = open.scale(190, 160);
+  assert.equal(loose.width, 190);
+  assert.equal(loose.height, 160);
+  assert.ok(reds(loose) < 80 * 80 * 0.6, `unprotected, the flat block shrinks (${reds(loose)} of 6400 left)`);
+  const guarded = createContentAwareScaler(img, { protect }, { maxMapPixels: (W * H) / 4 });
+  for (const [tw, th] of [[190, 160], [240, 110], [171, 123], [300, 200], [239, 159]]) {
+    const out = guarded.scale(tw, th);
+    assert.equal(out.width, tw);
+    assert.equal(out.height, th);
+    assert.equal(reds(out), 6400, `${tw}x${th}: the protected block is whole`);
+    // and still an 80 x 80 square
+    let x0 = tw, x1 = -1, y0 = th, y1 = -1;
+    for (let y = 0; y < th; y++) for (let x = 0; x < tw; x++) {
+      const p = (y * tw + x) * 4;
+      if (out.data[p] === 255 && out.data[p + 1] === 0 && out.data[p + 2] === 0) {
+        if (x < x0) x0 = x;
+        if (x > x1) x1 = x;
+        if (y < y0) y0 = y;
+        if (y > y1) y1 = y;
+      }
+    }
+    assert.deepEqual([x1 - x0 + 1, y1 - y0 + 1], [80, 80]);
+    // a mask of the block follows it exactly
+    const m = guarded.scaleMask(protect, tw, th);
+    assert.equal(m.length, tw * th);
+    for (let i = 0, p = 0; i < m.length; i++, p += 4) assert.equal(m[i] === 255, out.data[p] === 255 && out.data[p + 1] === 0 && out.data[p + 2] === 0, `mask at ${i}`);
+  }
+  // budgeted preparation finishes, and the result is the same as the one-shot function's
+  const stepped = createContentAwareScaler(img, { protect }, { maxMapPixels: (W * H) / 4 });
+  let calls = 0;
+  while (!stepped.prepare(180, 130, 100, 1)) assert.ok(++calls < 500);
+  assert.deepEqual(Array.from(stepped.scale(180, 130).data), Array.from(contentAwareScale(img, { width: 180, height: 130, protect, maxMapPixels: (W * H) / 4 }).data));
+  // amount blends with plain scaling as before
+  const halfway = guarded.scale(180, 160, 50);
+  assert.equal(halfway.width, 180);
+  assert.ok(reds(halfway) < 6400 && reds(halfway) > 4000);
 });
 
 test('a map pass on a 2000x1500 layer stays within an interactive step and a lookup is fast', () => {

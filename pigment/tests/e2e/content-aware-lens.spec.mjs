@@ -367,28 +367,31 @@ test('the session owns the document: other commands wait, undo cancels, non-pixe
   expect(errors).toEqual([]);
 });
 
-test('a large layer previews on a reduced copy and applies at full size', async ({ page }) => {
+test('a large layer previews on a reduced copy and applies at full size (maps from a reduced copy, pixels untouched)', async ({ page }) => {
   const errors = await openApp(page);
-  await newDoc(page, { width: 1200, height: 900 });
-  await paintDisc(page, { width: 1200, height: 900, cx: 600, cy: 450, r: 150 });
+  await newDoc(page, { width: 3000, height: 2100 });
+  await paintDisc(page, { width: 3000, height: 2100, cx: 1500, cy: 1050, r: 400 });
   await startCas(page);
   const s = await cas(page);
-  expect(s.pvScale).toBeLessThan(0.7);
+  expect(s.pvScale).toBeLessThan(0.3);
+  // 6.3 megapixels: the full-size maps come from a copy reduced by 2 (band seams)
+  expect(await page.evaluate(() => window.pigmentApp.contentAwareScale.session.full.factor)).toBe(2);
   await page.locator('#options-bar select[data-key="protect"]').selectOption({ label: 'Disc' });
-  await setBarField(page, 'w', 900);
+  await setBarField(page, 'w', 2400);
   // the reduced preview is stretched to the box, and it already keeps the disc round (within the reduction's blur)
-  await expect.poll(() => layerBox(page)).toEqual({ x: 0, y: 0, width: 900, height: 900 });
+  await expect.poll(() => layerBox(page)).toEqual({ x: 0, y: 0, width: 2400, height: 2100 });
   await casSettled(page);
   const previewDisc = await discSize(page);
-  expect(Math.abs(previewDisc.width - 300)).toBeLessThanOrEqual(8);
-  expect(Math.abs(previewDisc.height - 300)).toBeLessThanOrEqual(8);
+  expect(Math.abs(previewDisc.width - 800)).toBeLessThanOrEqual(20);
+  expect(Math.abs(previewDisc.height - 800)).toBeLessThanOrEqual(20);
   await page.keyboard.press('Enter');
-  await casEnded(page);
+  await expect.poll(() => page.evaluate(() => !window.pigmentApp.contentAwareScale.session), { timeout: 60000 }).toBe(true);
   expect(await historyLength(page)).toBe(1);
-  expect(await layerBox(page)).toEqual({ x: 0, y: 0, width: 900, height: 900 });
+  expect(await layerBox(page)).toEqual({ x: 0, y: 0, width: 2400, height: 2100 });
   const disc = await discSize(page);
-  expect(disc.width).toBe(300);
-  expect(disc.height).toBe(300);
+  expect(disc.width).toBe(800);
+  expect(disc.height).toBe(800);
+  expect(disc.count).toBe(await page.evaluate(() => window.pigmentApp.doc.channels[0].mask.reduce((n, v) => n + (v ? 1 : 0), 0)));
   // full-size pixels, not the stretched preview: the noise is still pixel sharp
   const sharp = await page.evaluate(() => {
     const l = window.pigmentApp.doc.active;
@@ -398,6 +401,8 @@ test('a large layer previews on a reduced copy and applies at full size', async 
     return sum / 199;
   });
   expect(sharp).toBeGreaterThan(35);
+  await runAwait(page, 'edit:undo');
+  expect(await layerBox(page)).toEqual({ x: 0, y: 0, width: 3000, height: 2100 });
   expect(errors).toEqual([]);
 });
 

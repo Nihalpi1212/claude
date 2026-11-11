@@ -13,6 +13,8 @@
 // interactive. The map itself is built in passes: one dynamic-programming sweep yields a batch of disjoint
 // low-cost seams (not just one), so a full map costs a few dozen sweeps instead of `width` of them, and
 // each pass is one bounded step (about 50 ms on 2000x1500), so the caller can interleave them with frames.
+// Images too large for a map of their own (createContentAwareScaler's maxMapPixels) take their seams from a
+// map of a reduced copy, each seam standing for a band of pixels at full size ("Band seams" below).
 
 import { createImage } from './core.js';
 import { resize } from './transform.js';
@@ -389,16 +391,19 @@ export function createSeamMap(img, dir = 'vertical', opts = {}) {
   return map;
 }
 
-/** Straight-alpha average of two RGBA pixels (colours weighted by alpha), written at d[o]. */
+/**
+ * Straight-alpha average of two RGBA pixels (colours weighted by alpha), written at d[o]. d is a
+ * Uint8ClampedArray, which rounds to the nearest value itself (adding 0.5 first would push odd values up by one).
+ */
 function average(s, a, b, d, o) {
   const aa = s[a + 3], ab = s[b + 3], sum = aa + ab;
   if (!sum) {
     d[o] = d[o + 1] = d[o + 2] = d[o + 3] = 0;
     return;
   }
-  d[o] = (s[a] * aa + s[b] * ab) / sum + 0.5;
-  d[o + 1] = (s[a + 1] * aa + s[b + 1] * ab) / sum + 0.5;
-  d[o + 2] = (s[a + 2] * aa + s[b + 2] * ab) / sum + 0.5;
+  d[o] = (s[a] * aa + s[b] * ab) / sum;
+  d[o + 1] = (s[a + 1] * aa + s[b + 1] * ab) / sum;
+  d[o + 2] = (s[a + 2] * aa + s[b + 2] * ab) / sum;
   d[o + 3] = (sum + 1) >> 1;
 }
 
@@ -487,6 +492,185 @@ export function applySeamMapToMask(mask, map, target) {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Band seams: a map built on a reduced copy, applied at full size
+//
+// A seam map costs about 25 bytes per pixel while it is built, which a 24 megapixel photo cannot afford
+// twice. So for large images the map is built on a copy reduced by an integer factor f (reduceImage) and
+// every seam of it stands for a band f pixels wide at full size: removing n pixels per line takes the
+// first seams whole and as many pixels of the next one as are still missing, so every line loses exactly n.
+// The pixels themselves are never resampled when shrinking; when widening, a band is stretched linearly.
+
+/**
+ * img averaged over factor x factor blocks (colours alpha weighted; the last column and row of blocks may
+ * be narrower): the copy a band seam map is built on. Size ceil(width / factor) x ceil(height / factor).
+ */
+export function reduceImage(img, factor) {
+  const f = Math.max(1, Math.round(factor));
+  const W = img.width, H = img.height;
+  if (f === 1) return { width: W, height: H, data: new Uint8ClampedArray(img.data) };
+  const w = Math.ceil(W / f), h = Math.ceil(H / f);
+  const out = createImage(w, h), s = img.data, d = out.data;
+  for (let y = 0; y < h; y++) {
+    const y0 = y * f, y1 = Math.min(H, y0 + f);
+    for (let x = 0; x < w; x++) {
+      const x0 = x * f, x1 = Math.min(W, x0 + f);
+      let r = 0, g = 0, b = 0, a = 0;
+      for (let yy = y0; yy < y1; yy++) {
+        for (let xx = x0, p = (yy * W + x0) << 2; xx < x1; xx++, p += 4) {
+          const al = s[p + 3];
+          r += s[p] * al;
+          g += s[p + 1] * al;
+          b += s[p + 2] * al;
+          a += al;
+        }
+      }
+      if (!a) continue;
+      const o = (y * w + x) << 2;
+      d[o] = r / a;
+      d[o + 1] = g / a;
+      d[o + 2] = b / a;
+      d[o + 3] = a / ((y1 - y0) * (x1 - x0));
+    }
+  }
+  return out;
+}
+
+/** A width*height mask reduced like reduceImage, each block taking its strongest value (thin protection survives). */
+export function reduceMask(mask, width, height, factor) {
+  const f = Math.max(1, Math.round(factor));
+  if (f === 1) return new Uint8ClampedArray(mask);
+  const w = Math.ceil(width / f), h = Math.ceil(height / f);
+  const out = new Uint8ClampedArray(w * h);
+  for (let y = 0; y < height; y++) {
+    const row = Math.floor(y / f) * w;
+    for (let x = 0, p = y * width; x < width; x++, p++) {
+      const o = row + Math.floor(x / f);
+      if (mask[p] > out[o]) out[o] = mask[p];
+    }
+  }
+  return out;
+}
+
+/** Seams of a reduced map that removing or adding n pixels per full-size line can touch (the short last band may be one of them). */
+const bandRanks = (blocks, n, f) => Math.min(blocks, Math.ceil(n / f) + 1);
+
+/**
+ * How many pixels every band of every reduced line gives up (or gains): the bands go in the order of their
+ * seams, whole, until n pixels are accounted for; the last one involved only in part. Int32Array per
+ * reduced line and band.
+ */
+function bandPlan(map, len, n, f) {
+  const blocks = map.length, rl = map.lines;
+  const lastWidth = len - (blocks - 1) * f;
+  const need = bandRanks(blocks, n, f);
+  map.ensure(need);
+  const take = new Int32Array(rl * blocks);
+  const byRank = new Int32Array(need);
+  const order = map.order;
+  for (let l = 0; l < rl; l++) {
+    const ob = l * blocks;
+    for (let i = 0; i < blocks; i++) if (order[ob + i] < need) byRank[order[ob + i]] = i;
+    let left = n;
+    for (let r = 0; r < need && left > 0; r++) {
+      const i = byRank[r], wd = i === blocks - 1 ? lastWidth : f;
+      const k = wd < left ? wd : left;
+      take[ob + i] = k;
+      left -= k;
+    }
+  }
+  return take;
+}
+
+/**
+ * The band lookup on raw data: `c` channels per pixel (4: RGBA with alpha-weighted interpolation, 1: a mask).
+ * Lines are rows (vertical seams) or columns (horizontal seams) of a W x H buffer; returns the buffer at the
+ * new size (t along the axis).
+ */
+function applyBands(src, W, H, c, map, t, f) {
+  const vertical = map.dir === 'vertical';
+  const len = vertical ? W : H, lines = vertical ? H : W;
+  const blocks = map.length, rl = map.lines;
+  const shrink = t < len;
+  const take = bandPlan(map, len, Math.abs(t - len), f);
+  const outW = vertical ? t : W, outH = vertical ? H : t;
+  const out = new Uint8ClampedArray(outW * outH * c);
+  const sStep = (vertical ? 1 : W) * c, dStep = (vertical ? 1 : outW) * c;
+  for (let L = 0; L < lines; L++) {
+    const sBase = (vertical ? L * W : L) * c, dBase = (vertical ? L * outW : L) * c;
+    const ob = Math.min(rl - 1, Math.floor(L / f)) * blocks;
+    let o = dBase;
+    for (let i = 0; i < blocks; i++) {
+      const x0 = i * f, x1 = x0 + f < len ? x0 + f : len;
+      const k = take[ob + i];
+      if (shrink || k === 0) {
+        // the band without its first k pixels
+        for (let x = shrink ? x0 + k : x0; x < x1; x++, o += dStep) {
+          const p = sBase + x * sStep;
+          for (let ch = 0; ch < c; ch++) out[o + ch] = src[p + ch];
+        }
+        continue;
+      }
+      // the band stretched from wd to wd + k pixels, reading into its neighbours at the ends
+      const wd = x1 - x0, nw = wd + k;
+      for (let j = 0; j < nw; j++, o += dStep) {
+        const u = x0 + ((j + 0.5) * wd) / nw - 0.5;
+        let a = Math.floor(u);
+        const frac = u - a;
+        let b = a + 1;
+        if (a < 0) a = 0;
+        if (b > len - 1) b = len - 1;
+        const pa = sBase + a * sStep, pb = sBase + b * sStep;
+        if (c === 1) out[o] = src[pa] + (src[pb] - src[pa]) * frac;
+        else {
+          const wa = src[pa + 3] * (1 - frac), wb = src[pb + 3] * frac, sum = wa + wb;
+          if (sum > 0) {
+            out[o] = (src[pa] * wa + src[pb] * wb) / sum;
+            out[o + 1] = (src[pa + 1] * wa + src[pb + 1] * wb) / sum;
+            out[o + 2] = (src[pa + 2] * wa + src[pb + 2] * wb) / sum;
+            out[o + 3] = sum;
+          }
+        }
+      }
+    }
+  }
+  return out;
+}
+
+const bandMapFits = (map, W, H, f) => map.width === Math.ceil(W / f) && map.height === Math.ceil(H / f);
+
+/**
+ * applySeamMap for a map that was built on reduceImage(img, factor): scales img along the map's axis to
+ * `target` pixels (1 .. twice the length), every seam of the map standing for a band `factor` pixels wide.
+ * With factor 1 this is applySeamMap.
+ */
+export function applySeamMapScaled(img, map, target, factor = 1) {
+  const f = Math.max(1, Math.round(factor));
+  if (f === 1) return applySeamMap(img, map, target);
+  const W = img.width, H = img.height;
+  if (!bandMapFits(map, W, H, f)) throw new Error('The seam map was built for another image size');
+  const len = map.dir === 'vertical' ? W : H;
+  const t = Math.max(Math.min(1, len), Math.min(len * 2, Math.round(target)));
+  if (t === len || !W || !H) return { width: W, height: H, data: new Uint8ClampedArray(img.data) };
+  const data = applyBands(img.data, W, H, 4, map, t, f);
+  return map.dir === 'vertical' ? { width: t, height: H, data } : { width: W, height: t, data };
+}
+
+/** applySeamMapToMask for a map built on a copy reduced by `factor`: a width*height mask carried through the same bands. */
+export function applySeamMapToMaskScaled(mask, width, height, map, target, factor = 1) {
+  const f = Math.max(1, Math.round(factor));
+  if (mask.length !== width * height) throw new Error('The mask does not match the image');
+  if (f === 1) {
+    if (map.width !== width || map.height !== height) throw new Error('The mask does not match the seam map');
+    return applySeamMapToMask(mask, map, target);
+  }
+  if (!bandMapFits(map, width, height, f)) throw new Error('The mask does not match the seam map');
+  const len = map.dir === 'vertical' ? width : height;
+  const t = Math.max(Math.min(1, len), Math.min(len * 2, Math.round(target)));
+  if (t === len || !width || !height) return new Uint8ClampedArray(mask);
+  return applyBands(mask, width, height, 1, map, t, f);
+}
+
+// ---------------------------------------------------------------------------------------------
 // One-shot operations
 
 const axisLength = (img, dir) => (dir === 'horizontal' ? img.height : img.width);
@@ -553,6 +737,10 @@ function resizeMask(mask, w, h, newW, newH) {
  * rest is plain bicubic scaling (0 = an ordinary resize, 100 = seams only). Sizes beyond twice the original
  * are reached by plain scaling too.
  *
+ * `maxMapPixels` bounds the memory of the maps: an image with more pixels gets its maps from a copy reduced
+ * by the smallest integer factor that fits (`factor` in the result), applied as band seams
+ * (applySeamMapScaled). The pixels are still the full-size ones.
+ *
  * - prepare(width, height, amount, budgetMs): does at most about budgetMs of map building for that target and
  *   returns true when scale() would have nothing left to compute (call it per frame until it is true)
  * - scale(width, height, amount): the scaled image (finishes any missing map work first)
@@ -560,13 +748,35 @@ function resizeMask(mask, w, h, newW, newH) {
  *
  * @param {ImageDataLike} img
  * @param {SeamOptions} [opts]
+ * @param {{ maxMapPixels?: number }} [limits]
  */
-export function createContentAwareScaler(img, opts = {}) {
+export function createContentAwareScaler(img, opts = {}, { maxMapPixels = Infinity } = {}) {
   const W = img.width, H = img.height, N = W * H;
+  const f = N > maxMapPixels && maxMapPixels > 0 ? Math.max(2, Math.ceil(Math.sqrt(N / maxMapPixels))) : 1;
   const base = { protect: maskOk(opts.protect, N) ? opts.protect : null, remove: maskOk(opts.remove, N) ? opts.remove : null, skin: !!opts.skin };
   let mapV = null;
   /** The stage after the width pass: { seamW, image, opts, mapH }. */
   let stage = null;
+
+  /** A map of image for one axis: built on the image itself, or on its reduced copy when the image is too large. */
+  const mapFor = (image, o, dir) => {
+    if (f === 1) return createSeamMap(image, dir, o);
+    const n = image.width * image.height;
+    return createSeamMap(reduceImage(image, f), dir, {
+      protect: maskOk(o.protect, n) ? reduceMask(o.protect, image.width, image.height, f) : null,
+      remove: maskOk(o.remove, n) ? reduceMask(o.remove, image.width, image.height, f) : null,
+      skin: !!o.skin,
+    });
+  };
+  /** Seams of a map that a change of n pixels needs. */
+  const ranksFor = (map, n) => (f === 1 ? n : bandRanks(map.length, n, f));
+  /** The protection masks of an image carried through one axis of scaling. */
+  const carry = (o, w, h, map, target) => {
+    const out = { skin: !!o.skin };
+    if (maskOk(o.protect, w * h)) out.protect = applySeamMapToMaskScaled(o.protect, w, h, map, target, f);
+    if (maskOk(o.remove, w * h)) out.remove = applySeamMapToMaskScaled(o.remove, w, h, map, target, f);
+    return out;
+  };
 
   const plan = (width, height, amount) => {
     const k = Math.max(0, Math.min(100, Number.isFinite(amount) ? amount : 100)) / 100;
@@ -579,7 +789,7 @@ export function createContentAwareScaler(img, opts = {}) {
   function stageFor(seamW) {
     if (stage && stage.seamW === seamW) return stage;
     if (seamW === W) stage = { seamW, image: img, opts: base, mapH: null };
-    else stage = { seamW, image: applySeamMap(img, mapV, seamW), opts: carryMasks(base, mapV, seamW), mapH: null };
+    else stage = { seamW, image: applySeamMapScaled(img, mapV, seamW, f), opts: carry(base, W, H, mapV, seamW), mapH: null };
     return stage;
   }
 
@@ -588,13 +798,13 @@ export function createContentAwareScaler(img, opts = {}) {
     const { seamW, seamH } = plan(width, height, amount);
     const t0 = now();
     if (seamW !== W) {
-      mapV ??= createSeamMap(img, 'vertical', base);
-      if (!mapV.ensure(Math.abs(seamW - W), budgetMs)) return false;
+      mapV ??= mapFor(img, base, 'vertical');
+      if (!mapV.ensure(ranksFor(mapV, Math.abs(seamW - W)), budgetMs)) return false;
     }
     if (seamH === H) return true;
     const st = stageFor(seamW);
-    st.mapH ??= createSeamMap(st.image, 'horizontal', st.opts);
-    const need = Math.abs(seamH - H);
+    st.mapH ??= mapFor(st.image, st.opts, 'horizontal');
+    const need = ranksFor(st.mapH, Math.abs(seamH - H));
     if (st.mapH.ranked >= need) return true;
     return st.mapH.ensure(need, Math.max(0, budgetMs - (now() - t0))); // at least one pass, so every call gets somewhere
   }
@@ -604,7 +814,7 @@ export function createContentAwareScaler(img, opts = {}) {
     if (!N) return createImage(tw, th);
     prepare(width, height, amount, Infinity);
     const st = stageFor(seamW);
-    let out = seamH === H ? st.image : applySeamMap(st.image, st.mapH, seamH);
+    let out = seamH === H ? st.image : applySeamMapScaled(st.image, st.mapH, seamH, f);
     if (out.width !== tw || out.height !== th) out = resize(out, tw, th, { method: 'bicubic' });
     else if (out === st.image) out = { width: out.width, height: out.height, data: new Uint8ClampedArray(out.data) }; // never hand out the cached stage
     return out;
@@ -616,21 +826,21 @@ export function createContentAwareScaler(img, opts = {}) {
     if (!N) return new Uint8ClampedArray(tw * th);
     prepare(width, height, amount, Infinity);
     const st = stageFor(seamW);
-    let m = seamW === W ? mask : applySeamMapToMask(mask, mapV, seamW);
-    if (seamH !== H) m = applySeamMapToMask(m, st.mapH, seamH);
+    let m = seamW === W ? mask : applySeamMapToMaskScaled(mask, W, H, mapV, seamW, f);
+    if (seamH !== H) m = applySeamMapToMaskScaled(m, seamW, H, st.mapH, seamH, f);
     return resizeMask(m, seamW, seamH, tw, th);
   }
 
-  return { width: W, height: H, prepare, scale, scaleMask };
+  return { width: W, height: H, factor: f, prepare, scale, scaleMask };
 }
 
 /**
  * Content-aware scale to width x height.
  * @param {ImageDataLike} img
- * @param {{ width?: number, height?: number, amount?: number, protect?: Uint8ClampedArray | null, remove?: Uint8ClampedArray | null, skin?: boolean }} [opts]
- *   amount 0..100 blends between plain scaling (0) and seam carving (100, default)
+ * @param {{ width?: number, height?: number, amount?: number, protect?: Uint8ClampedArray | null, remove?: Uint8ClampedArray | null, skin?: boolean, maxMapPixels?: number }} [opts]
+ *   amount 0..100 blends between plain scaling (0) and seam carving (100, default); maxMapPixels as for createContentAwareScaler
  * @returns {ImageDataLike}
  */
-export function contentAwareScale(img, { width = img.width, height = img.height, amount = 100, protect = null, remove = null, skin = false } = {}) {
-  return createContentAwareScaler(img, { protect, remove, skin }).scale(width, height, amount);
+export function contentAwareScale(img, { width = img.width, height = img.height, amount = 100, protect = null, remove = null, skin = false, maxMapPixels = Infinity } = {}) {
+  return createContentAwareScaler(img, { protect, remove, skin }, { maxMapPixels }).scale(width, height, amount);
 }

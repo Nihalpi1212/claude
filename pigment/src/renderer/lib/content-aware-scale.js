@@ -10,7 +10,9 @@
 // What makes the drag interactive is the seam map: the order in which seams go is computed once per axis and
 // any size is then a lookup (createContentAwareScaler). Large layers preview on a reduced copy whose maps are
 // built in slices of a frame's budget while the pointer moves; applying runs the full-size layer under
-// app.busy and records one history entry through history.replaceCanvas.
+// app.busy and records one history entry through history.replaceCanvas. Above 6 megapixels the full-size
+// maps come from a reduced copy (band seams), which keeps a 24 megapixel photo within a few hundred megabytes.
+// A linked layer mask and the selection are carried through the same seams as the pixels.
 import { Tool } from './tools.js';
 import { createCanvas, copyCanvas, intersectRect, unionRect } from './document.js';
 import { Selection } from './selection.js';
@@ -25,8 +27,13 @@ const LABEL = 'Content-Aware Scale';
 const PREVIEW_PIXELS = 360000;
 /** Pieces up to this size are applied without the busy state (their maps take a few dozen milliseconds). */
 const SYNC_PIXELS = 400000;
-/** A seam map needs about 25 bytes per pixel and two are held: beyond this the layer is refused. */
-const MAX_PIXELS = 24e6;
+/**
+ * A seam map needs about 25 bytes per pixel while it is built and two are held, so pieces above this size
+ * get their maps from a reduced copy (band seams, see seam-carve.js): the pixels stay full size.
+ */
+const MAP_PIXELS = 6e6;
+/** Beyond this the piece itself (and the copies a scale makes of it) is too much to hold: the layer is refused. */
+const MAX_PIXELS = 40e6;
 /** The box cannot grow beyond this side length or this many pixels (a typo in W must not allocate gigabytes). */
 const MAX_SIDE = 16384, MAX_RESULT_PIXELS = 64e6;
 /** Map building per frame while previewing (ms). */
@@ -194,7 +201,7 @@ class ContentAwareScaleTool extends Tool {
     const s = this.session;
     const channel = s.protectId ? s.doc.channels.find((c) => c.id === s.protectId) : null;
     const protect = channel ? cropMask(channel.mask, s.doc.width, s.doc.height, s.box) : null;
-    s.full = createContentAwareScaler(s.piece, { protect, skin: s.skin });
+    s.full = createContentAwareScaler(s.piece, { protect, skin: s.skin }, { maxMapPixels: MAP_PIXELS });
     if (s.small) {
       s.pvScale = s.small.width / s.box.width;
       s.pv = createContentAwareScaler(s.small, { protect: protect ? reduceMask(protect, s.box.width, s.box.height, s.small.width, s.small.height) : null, skin: s.skin });
