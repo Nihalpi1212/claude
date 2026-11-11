@@ -257,7 +257,7 @@ export function install(app) {
 
   async function strokeDialog(arg = null, ctx = null) {
     const d = doc();
-    if (!hasSel() || !pixelTarget()) ctx?.cancel(); // actions (lib/actions.js): nothing to stroke, nothing to record
+    if (!hasSel() || !pixelTarget({ quiet: true })) ctx?.cancel(); // actions (lib/actions.js): nothing to stroke, nothing to record
     if (!hasSel()) return app.dialogs.toast('Make a selection to stroke', { kind: 'error' });
     const t = pixelTarget();
     if (!t) return;
