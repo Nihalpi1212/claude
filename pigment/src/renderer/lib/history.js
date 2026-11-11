@@ -55,6 +55,23 @@ export class History {
     return entry;
   }
 
+  /**
+   * Remembers the undo stack so a temporary session can be discarded without a trace (lib/smart-object.js runs a
+   * pixel-editing dialog on a throw-away copy of a smart object and keeps only the parameters it resolved with).
+   */
+  mark() {
+    return { entries: this.entries.slice(), index: this.index, savedIndex: this.savedIndex };
+  }
+
+  /** Restores the stack captured by mark(): entries pushed since then are dropped without running their undo. */
+  rollback(mark) {
+    this.entries = mark.entries.slice();
+    this.index = mark.index;
+    this.savedIndex = mark.savedIndex;
+    this.stroke = null;
+    this.onChange();
+  }
+
   /** Refreshes the entry at the current index for a merged change (a slider drag): any redo entries are dropped. */
   merge(redo) {
     const last = this.entries[this.index];

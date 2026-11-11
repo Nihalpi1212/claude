@@ -650,8 +650,75 @@ export function install(app) {
     rememberLastFilter(kind, params);
   }
 
+  /**
+   * Smart filters whose kind has its own session (Filter Gallery, Blur Gallery, Lens Correction, Lens Blur ...).
+   * Those openers edit pixels, so the session runs on a temporary raster copy of the smart object as it looks
+   * below the filter being added or edited (filters stacked above it do not preview, as in Photoshop). Nothing
+   * of the session stays: the copy and its undo entries are dropped, and the parameters the opener resolved
+   * with become the smart filter.
+   */
+  async function customFilterDialog(layer, kind, index = -1, params = null) {
+    const opener = app.filterEditor?.opener?.(kind);
+    const d = docOf(layer);
+    if (!opener || !d) return null;
+    const def = FILTERS[kind];
+    const original = layer.filters;
+    const start = params ?? (index >= 0 ? original[index]?.params : app.filterEditor.defaults(kind)) ?? {};
+    const before = index >= 0 ? original.slice(0, index) : original;
+    const after = index >= 0 ? original.slice(index + 1) : [];
+    let rendered;
+    layer.filters = before;
+    layer.touch();
+    try {
+      rendered = layer.render({ full: true });
+    } finally {
+      layer.filters = original;
+      layer.touch();
+    }
+    const proxy = new RasterLayer({ name: layer.name, canvas: copyCanvas(rendered.canvas), x: rendered.x, y: rendered.y, opacity: layer.opacity, fillOpacity: layer.fillOpacity, blend: layer.blend, clip: layer.clip, styles: layer.styles });
+    proxy.preview = true; // never saved and never part of tree snapshots
+    if (layer.mask) proxy.mask = layer.mask;
+    const parent = layer.parent;
+    const state = { visible: layer.visible, active: d.active, selected: new Set(d.selected), selection: d.selection, editingMask: app.ui.editingMask };
+    const mark = d.history.mark();
+    parent.children.splice(parent.children.indexOf(layer) + 1, 0, proxy);
+    proxy.parent = parent;
+    layer.visible = false;
+    // a smart filter covers the whole object (there are no per-filter masks), so the session must not be limited either
+    d.selection = null;
+    app.ui.editingMask = false;
+    d.active = proxy;
+    d.selected = new Set([proxy]);
+    d.changed('tree');
+    d.changed('selection');
+    let used = null;
+    try {
+      used = await opener(kind, { params: start, def, ctx: null, smart: { layer, index } });
+    } finally {
+      const i = parent.children.indexOf(proxy);
+      if (i >= 0) parent.children.splice(i, 1);
+      layer.visible = state.visible;
+      d.selection = state.selection;
+      app.ui.editingMask = state.editingMask;
+      d.active = state.active;
+      d.selected = state.selected;
+      d.history.rollback(mark);
+      layer.touch();
+      d.changed('tree');
+      d.changed('selection');
+    }
+    if (!used) return null;
+    // the params are kept as the opener returned them (not JSON-cloned): a displacement map or a loaded texture lives
+    // in memory only and would not survive a clone
+    const entry = { kind, params: used, enabled: index >= 0 ? original[index]?.enabled !== false : true };
+    setFilters(layer, [...before, entry, ...after], `${index >= 0 ? 'Edit smart filter' : 'Smart filter'}: ${def.name}`);
+    if (index < 0) rememberLastFilter(kind, used);
+    return used;
+  }
+
   /** Dialog adding (index < 0) or re-editing a smart filter, previewing live on the layer. */
   async function filterDialog(layer, kind, index = -1, params = null) {
+    if (!params && FILTERS[kind]?.ui === 'custom' && app.filterEditor?.opener?.(kind)) return customFilterDialog(layer, kind, index, params);
     const def = describeKind(kind);
     if (!def) return null;
     const d = docOf(layer);
@@ -721,20 +788,29 @@ export function install(app) {
 
   app.smartFilters = {
     /**
-     * Called by filter-ui.js / adjust-ui.js before a pixel edit: true when the layer is a smart object
-     * and the edit was taken over as a smart filter (with a dialog when params is null).
+     * Called by filter-ui.js / adjust-ui.js before a pixel edit: false when the edit is not a smart filter, else
+     * { done: Promise<params | null> } once the layer is a smart object and the edit was taken over as a smart
+     * filter (with a dialog, or the kind's own session, when params is null).
      */
     intercept(layer, kind, params, label) {
       if (!isSmart(layer)) return false;
       if (app.ui.editingMask && layer.mask) return false; // the mask is ordinary pixels
       if (!describeKind(kind)) return false;
+      // handled: the caller gets { done } resolving with the smart filter's params (null when nothing was added)
       if (layer.locked.all || layer.locked.pixels) {
         app.dialogs.toast(`"${layer.name}" is locked`, { kind: 'error' });
-        return true;
+        return { done: Promise.resolve(null) };
       }
-      if (params && typeof params === 'object') addFilter(layer, kind, params, label);
-      else filterDialog(layer, kind, -1, null).catch((err) => app.reportError(err, `${label ?? kind} failed`));
-      return true;
+      if (params && typeof params === 'object') {
+        addFilter(layer, kind, params, label);
+        return { done: Promise.resolve(params) };
+      }
+      return {
+        done: filterDialog(layer, kind, -1, null).catch((err) => {
+          app.reportError(err, `${label ?? kind} failed`);
+          return null;
+        }),
+      };
     },
     /** Other modules (Camera Raw) make their filter kind available as a smart filter. */
     registerKind(kind, def) {

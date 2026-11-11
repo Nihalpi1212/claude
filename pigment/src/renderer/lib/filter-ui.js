@@ -132,7 +132,14 @@ export function install(app) {
     if (!d) return ctx?.cancel();
     const direct = arg && typeof arg === 'object' ? arg : null;
     // smart objects (lib/smart-object.js): a filter on a smart layer becomes a smart filter, not a pixel edit
-    if (def.smart !== false && app.smartFilters?.intercept(d.active, kind, direct, def.name)) return;
+    const smart = def.smart !== false ? app.smartFilters?.intercept(d.active, kind, direct, def.name) : null;
+    if (smart) {
+      // the smart filter dialog (or the kind's own session on a copy of the smart object) resolves with the params
+      const used = await smart.done;
+      if (used) ctx?.setReplayArg(clone(used));
+      else ctx?.cancel();
+      return;
+    }
     const custom = REGISTERED.get(kind)?.open;
     // a replayed custom kind whose params lack what only its opener can supply (Displace without its map) asks again
     const incomplete = direct && custom && dialog && typeof def.incomplete === 'function' && def.incomplete(direct);
@@ -230,6 +237,8 @@ export function install(app) {
     ranges,
     /** 0.3 modules register field tables, margins, custom openers and prepare(params, session) hooks for their kinds (see REGISTERED). */
     register: (kind, def) => REGISTERED.set(kind, { ...(REGISTERED.get(kind) ?? {}), ...def }),
+    /** The custom opener of a kind (lib/smart-object.js runs it on a copy of a smart object), or null. */
+    opener: (kind) => REGISTERED.get(kind)?.open ?? null,
     /** Runs a kind directly with params (what the custom openers call after their own session committed is not needed: they commit themselves). */
     run: (kind, params, opts) => run(kind, params, opts),
     remember,

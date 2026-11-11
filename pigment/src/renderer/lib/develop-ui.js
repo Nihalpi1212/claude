@@ -200,8 +200,8 @@ export function install(app) {
     // smart objects: the smart-object module owns the dialog flow (params null opens its dialog
     // with the editor registered below) and appends a smart filter instead of editing pixels
     if (layer.type === 'smart' && typeof app.smartFilters?.intercept === 'function') {
-      const handled = await app.smartFilters.intercept(layer, 'camera-raw', explicit ? start : null, LABEL);
-      if (handled !== false) return handled;
+      const handled = app.smartFilters.intercept(layer, 'camera-raw', explicit ? start : null, LABEL);
+      if (handled) return handled.done; // resolves with the smart filter's params (null when cancelled)
     }
     const used = await pixelEditDialog(app, {
       title: 'Camera Raw Filter',

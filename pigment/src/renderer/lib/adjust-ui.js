@@ -733,7 +733,13 @@ export function install(app) {
     }
     const d = app.doc;
     // smart objects (lib/smart-object.js): an adjustment on a smart layer becomes a smart filter, not a pixel edit
-    if (def.smart !== false && app.smartFilters?.intercept(d?.active, `adjust:${kind}`, arg && typeof arg === 'object' ? arg : null, def.name)) return;
+    const smart = def.smart !== false ? app.smartFilters?.intercept(d?.active, `adjust:${kind}`, arg && typeof arg === 'object' ? arg : null, def.name) : null;
+    if (smart) {
+      const used = await smart.done;
+      if (used) ctx?.setReplayArg(clone(used));
+      else ctx?.cancel();
+      return;
+    }
     if (d?.active?.type === 'adjustment' && !app.ui.editingMask) {
       ctx?.cancel();
       return app.dialogs.toast('Select a pixel layer (or add an adjustment layer from the Layers panel)', { kind: 'error' });
