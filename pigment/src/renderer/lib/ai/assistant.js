@@ -104,9 +104,11 @@ const paramNames = (defaults) => Object.keys(defaults ?? {});
 
 /** One line per adjustment / filter kind with its parameter names and defaults, for the instructions. */
 function kindList(table, kinds) {
-  return kinds.map((k) => {
+  // kinds whose implementation has not landed (registry placeholders) are not offered to the model
+  return kinds.filter((k) => !table[k].placeholder).map((k) => {
     const d = table[k].defaults ?? {};
-    const names = paramNames(d);
+    // null defaults are document state a dialog supplies (a displacement map, a texture image): not something to type
+    const names = paramNames(d).filter((n) => d[n] !== null);
     return names.length ? `${k} (${names.map((n) => `${n}=${JSON.stringify(d[n])}`).join(', ')})` : k;
   }).join('; ');
 }
@@ -292,14 +294,14 @@ export function install(app) {
       return `Active layer: ${l.name} (${l.id})`;
     },
     apply_adjustment: async (d, { kind, params }) => {
-      if (!ADJUSTMENTS[kind]) throw new Error(`Unknown adjustment "${kind}"`);
+      if (!ADJUSTMENTS[kind] || ADJUSTMENTS[kind].placeholder) throw new Error(`Unknown adjustment "${kind}"`);
       needRaster(d);
       const p = withDefaults(app.adjustments?.[kind]?.defaults ?? ADJUSTMENTS[kind].defaults, sanitizeParams(objectArg(params, 'params'), ADJUST_RANGES));
       await runCommand(`image:adjust-${kind}`, p);
       return `Applied ${ADJUSTMENTS[kind].name} to "${d.active.name}"`;
     },
     apply_filter: async (d, { kind, params }) => {
-      if (!FILTERS[kind]) throw new Error(`Unknown filter "${kind}"`);
+      if (!FILTERS[kind] || FILTERS[kind].placeholder) throw new Error(`Unknown filter "${kind}"`);
       needRaster(d);
       // the dialog's field ranges for this kind win over the shared table (vignette's size is 0..1, mosaic's 2..200)
       const ranges = { ...FILTER_RANGES, ...(app.filterEditor?.ranges?.(kind) ?? {}) };
