@@ -801,7 +801,20 @@ export const GALLERY_ARTISTIC = Object.freeze({
       if (def && def.category === 'gallery' && !def.placeholder && e.enabled !== false) def.apply(img, e.params ?? {}, rect);
     }
     return img;
-  }, { ui: 'custom', margin: 64 }),
+  }, {
+    ui: 'custom',
+    // each effect reads its own neighbourhood from the previous one's output: the stack reads the sum (bounded)
+    margin: (p) => {
+      let m = 0;
+      for (const e of Array.isArray(p.effects) ? p.effects : []) {
+        const def = e && typeof e.kind === 'string' ? FILTERS[e.kind] : null;
+        if (!def || def.category !== 'gallery' || e.enabled === false) continue;
+        const own = typeof def.margin === 'function' ? def.margin({ ...def.defaults, ...(e.params ?? {}) }) : def.margin;
+        m += Number(own) || 0;
+      }
+      return Math.min(400, Math.max(8, Math.ceil(m)));
+    },
+  }),
 
   'colored-pencil': A('Colored Pencil', { pencilWidth: 4, strokePressure: 8, paperBrightness: 25 }, coloredPencil, {
     fields: [S('pencilWidth', 'Pencil width', 1, 24), S('strokePressure', 'Stroke pressure', 0, 15), S('paperBrightness', 'Paper brightness', 0, 50)],
@@ -846,6 +859,7 @@ export const GALLERY_ARTISTIC = Object.freeze({
   'rough-pastels': A('Rough Pastels', { strokeLength: 6, strokeDetail: 4, texture: 'canvas', scaling: 100, relief: 20, lightDirection: 'bottom', invert: false }, roughPastels, {
     fields: [S('strokeLength', 'Stroke length', 0, 40), S('strokeDetail', 'Stroke detail', 1, 20), ...TEXTURE_FIELDS],
     margin: (p) => clampNum(num(p.strokeLength, 6), 0, 40) + 2,
+    ui: 'custom', // lib/gallery-b-ui.js adds "Load Texture…" (a file as params.textureImage) to the field dialog
   }),
   'smudge-stick': A('Smudge Stick', { strokeLength: 2, highlightArea: 0, intensity: 10 }, smudgeStick, {
     fields: [S('strokeLength', 'Stroke length', 0, 10), S('highlightArea', 'Highlight area', 0, 20), S('intensity', 'Intensity', 0, 10)],
@@ -858,6 +872,7 @@ export const GALLERY_ARTISTIC = Object.freeze({
   underpainting: A('Underpainting', { brushSize: 6, textureCoverage: 16, texture: 'canvas', scaling: 100, relief: 4, lightDirection: 'top', invert: false }, underpainting, {
     fields: [S('brushSize', 'Brush size', 0, 40), S('textureCoverage', 'Texture coverage', 0, 40), ...TEXTURE_FIELDS],
     margin: (p) => clampNum(num(p.brushSize, 6), 0, 40) * 0.4 + 2,
+    ui: 'custom', // lib/gallery-b-ui.js adds "Load Texture…" (a file as params.textureImage) to the field dialog
   }),
   watercolor: A('Watercolor', { brushDetail: 9, shadowIntensity: 1, texture: 1 }, watercolor, {
     fields: [S('brushDetail', 'Brush detail', 1, 14), S('shadowIntensity', 'Shadow intensity', 0, 10), S('texture', 'Texture', 1, 3)],

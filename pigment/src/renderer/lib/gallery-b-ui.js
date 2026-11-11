@@ -29,6 +29,9 @@ function textureImageFrom(canvas, label) {
   return img;
 }
 
+/** Kinds whose dialog offers "Load Texture…": the Texture/Sketch/Distort ones plus the two Artistic kinds that light a texture. */
+const FILE_KINDS = [...TEXTURE_FILE_KINDS, 'rough-pastels', 'underpainting'];
+
 export function install(app) {
   if (!app.filterEditor?.register) return; // filter-ui.js installs first (app.js MODULES order)
 
@@ -54,7 +57,7 @@ export function install(app) {
       if (kind === 'stained-glass') start.borderColor = app.settings.foreground;
       else start.colors = [app.settings.foreground, app.settings.background];
     }
-    const withFile = TEXTURE_FILE_KINDS.includes(kind);
+    const withFile = FILE_KINDS.includes(kind);
     let textureImage = withFile && start.textureImage?.data ? start.textureImage : null;
     if (withFile && !textureImage && typeof start.textureFile === 'string' && start.textureFile) {
       // the previous session's texture came from a file: reload it quietly (a missing file means the procedural texture)
@@ -153,7 +156,7 @@ export function install(app) {
     return used;
   }
 
-  for (const kind of new Set([...COLOR_KINDS, ...TEXTURE_FILE_KINDS])) {
+  for (const kind of new Set([...COLOR_KINDS, ...FILE_KINDS])) {
     if (FILTERS[kind]?.ui === 'custom') app.filterEditor.register(kind, { open });
   }
 }
