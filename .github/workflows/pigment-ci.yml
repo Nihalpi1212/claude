@@ -18,7 +18,10 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # Pinned: the pinned Playwright release has no browser build for the image ubuntu-latest
+    # now points to (Ubuntu 26.04), so `playwright install` fails there. Move this forward
+    # together with @playwright/test.
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     defaults:
       run:
