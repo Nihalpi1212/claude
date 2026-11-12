@@ -16,10 +16,26 @@ const docHash = (page) =>
     return `${c.width}x${c.height}:${(h >>> 0).toString(16)}`;
   });
 
+/**
+ * A dialog focuses its first field one frame after it opens; typing that starts before would land in
+ * that field instead of the one being filled.
+ */
+const dialogReady = (page) => page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
+
 const setNumber = async (page, key, value) => {
+  await dialogReady(page);
   const input = page.locator(`.dialog input[type="number"][data-key="${key}"]`);
   await input.fill(String(value));
   await input.dispatchEvent('change');
+};
+
+/** Waits until no command is running any more (a dialog command goes on working after its dialog has closed). */
+const settled = (page) => expect.poll(() => page.evaluate(() => window.pigmentApp.actions.frames.length)).toBe(0);
+
+/** Confirms the dialog of a command started with run() and waits for the command to finish. */
+const confirmAndSettle = async (page) => {
+  await confirmDialog(page);
+  await settled(page);
 };
 
 const showPanel = async (page) => {
@@ -31,6 +47,7 @@ const showPanel = async (page) => {
 async function recordNewAction(page, name) {
   await page.locator('.actions-footer [data-cmd="actions:new-action"]').click();
   await expect(page.locator('.dialog')).toContainText('New Action');
+  await dialogReady(page);
   await page.locator('.dialog input[data-key="name"]').fill(name);
   await confirmDialog(page); // "Record"
   await expect.poll(() => page.evaluate(() => window.pigmentApp.actions.recording?.action.name ?? null)).toBe(name);
@@ -102,15 +119,17 @@ test('records Levels, Gaussian Blur and Invert from their dialogs and plays the 
 
   await run(page, 'image:adjust-levels');
   await setNumber(page, 'inBlack', 60);
-  await confirmDialog(page);
+  await confirmAndSettle(page);
   await run(page, 'filter:gaussian-blur');
   await setNumber(page, 'radius', 3);
-  await confirmDialog(page);
+  await confirmAndSettle(page);
   await page.keyboard.press('Control+i');
   // a cancelled dialog and a view command leave no step
   await run(page, 'filter:gaussian-blur');
+  await expect(page.locator('.dialog')).toContainText('Gaussian Blur');
   await page.keyboard.press('Escape');
   await expect(page.locator('.dialog-backdrop')).toHaveCount(0);
+  await settled(page);
   await runAwait(page, 'view:zoom-in');
   await stopRecording(page);
 
@@ -157,6 +176,7 @@ test('Insert Stop pauses playback: Stop leaves the next step selected, Continue 
   // Insert Stop through the panel menu and its dialog
   await page.locator('.actions-footer [data-act="menu"]').click();
   await page.locator('.popover-item', { hasText: 'Insert Stop' }).click();
+  await dialogReady(page);
   await page.locator('.dialog textarea[data-key="message"]').fill('Check the image before going on');
   await confirmDialog(page);
   await page.evaluate(async () => {
@@ -241,11 +261,13 @@ test('step checkboxes, dialog toggles and the JSON argument editor change what p
   await rows.nth(2).dblclick();
   const json = page.locator('.dialog textarea[data-key="json"]');
   await expect(json).toHaveValue(/"levels": 4/);
+  await dialogReady(page);
   await json.fill('{ "levels": 2 }');
   await confirmDialog(page);
   expect((await stepsOf(page, 'Three'))[2].arg).toEqual({ levels: 2 });
   // invalid JSON keeps the dialog open
   await rows.nth(2).dblclick();
+  await dialogReady(page);
   await json.fill('{ levels: ');
   await page.locator('.dialog-backdrop .dialog-buttons .btn.primary').click();
   await expect(page.locator('.dialog-backdrop')).toHaveCount(1);
@@ -264,7 +286,7 @@ test('Insert Menu Item asks on playback, Insert Conditional plays another action
   await newDoc(page, { width: 300, height: 200, background: 'white' });
   await showPanel(page);
   await makeAction(page, 'Landscape Work', [['image:adjust-invert', null]]);
-  await makeAction(page, 'Portrait Work', [['image:rotate', 'cw']]);
+  await makeAction(page, 'Portrait Work', [['image:rotate-90', null]]);
   await makeAction(page, 'Decide', []);
 
   // conditional through the dialog
@@ -290,6 +312,7 @@ test('Insert Menu Item asks on playback, Insert Conditional plays another action
   await page.locator('.act-row.act-action', { hasText: 'Decide' }).click();
   await page.locator('.actions-footer [data-act="menu"]').click();
   await page.locator('.popover-item', { hasText: 'Insert Menu Item' }).click();
+  await dialogReady(page);
   await page.locator('.dialog input[type="search"]').fill('posterize');
   await expect(page.locator('.dialog select.actions-command-list option')).toHaveCount(1);
   await confirmDialog(page);
@@ -313,6 +336,7 @@ test('function keys and Button Mode play actions; Action Options sets name, key 
   // Action Options through a double-click on the action
   await page.locator('.act-row.act-action', { hasText: 'Flip It' }).dblclick();
   await expect(page.locator('.dialog')).toContainText('Action Options');
+  await dialogReady(page);
   await page.locator('.dialog input[data-key="name"]').fill('Negative');
   await page.locator('.dialog select[data-key="key"]').selectOption('F9');
   await page.locator('.dialog input[data-key="shift"]').check();
@@ -397,7 +421,6 @@ test('Save Actions and Load Actions round-trip a set; Clear, Reset and the store
   await runAwait(page, 'actions:new-set', 'Kept');
   await makeAction(page, 'Keeper', [['image:adjust-invert', null]]);
   await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('pigment.settings') ?? '{}').actions?.sets?.map((s) => s.name) ?? [])).toEqual(['Default Actions', 'Kept']);
-  await page.evaluate(() => (window.__keepStorage = true));
   const stored = await page.evaluate(() => localStorage.getItem('pigment.settings'));
   await page.addInitScript((s) => localStorage.setItem('pigment.settings', s), stored);
   await page.reload();
@@ -422,7 +445,7 @@ test('recording follows Undo, records tool selections and Free Transform, and sk
   await page.keyboard.press('Control+z');
 
   // a marquee drag is recorded as the selection it made
-  await page.evaluate(() => window.pigmentApp.tools.activate('marquee'));
+  await page.evaluate(() => window.pigmentApp.tools.activate('marquee-rect'));
   await drag(page, [20, 20], [100, 80]);
   let steps = await stepsOf(page, 'Mixed');
   expect(steps.map((s) => s.command)).toEqual(['image:adjust-invert', 'actions:set-selection']);
@@ -459,33 +482,35 @@ test('dialog commands record their settings and replay silently (replayability a
 
   await run(page, 'image:size');
   await expect(page.locator('.dialog')).toContainText('Image Size');
-  await confirmDialog(page);
+  await confirmAndSettle(page);
   await run(page, 'image:canvas-size');
   await expect(page.locator('.dialog')).toContainText('Canvas Size');
-  await confirmDialog(page);
-  await run(page, 'layer:new');
-  await confirmDialog(page);
+  await confirmAndSettle(page);
+  await run(page, 'layer:new', { dialog: true });
+  await confirmAndSettle(page);
   await runAwait(page, 'select:all');
   await run(page, 'edit:fill');
   await expect(page.locator('.dialog')).toContainText('Fill');
-  await confirmDialog(page);
+  await confirmAndSettle(page);
   await run(page, 'edit:stroke');
   await expect(page.locator('.dialog')).toContainText('Stroke');
-  await confirmDialog(page);
+  await confirmAndSettle(page);
   await run(page, 'select:feather');
+  await dialogReady(page);
   await page.locator('.dialog input').first().fill('4');
-  await confirmDialog(page);
+  await confirmAndSettle(page);
   await run(page, 'select:contract');
+  await dialogReady(page);
   await page.locator('.dialog input').first().fill('6');
-  await confirmDialog(page);
+  await confirmAndSettle(page);
   await run(page, 'image:rotate-arbitrary');
   await setNumber(page, 'angle', 10);
-  await confirmDialog(page);
+  await confirmAndSettle(page);
   await run(page, 'layer:style');
   await expect(page.locator('.dialog')).toContainText('Layer Style');
-  await confirmDialog(page);
+  await confirmAndSettle(page);
   await run(page, 'image:duplicate');
-  await confirmDialog(page);
+  await confirmAndSettle(page);
   await stopRecording(page);
 
   const steps = await stepsOf(page, 'Dialogs');
@@ -501,7 +526,6 @@ test('dialog commands record their settings and replay silently (replayability a
   const layers = await page.evaluate(() => window.pigmentApp.doc.layers().length);
 
   // replay on a fresh document: no dialog opens, the result is the same
-  await page.evaluate(() => window.pigmentApp.docs.closeAll?.());
   await page.evaluate(async () => {
     for (const d of [...window.pigmentApp.docs.docs]) await window.pigmentApp.docs.close(d, { force: true });
   });
@@ -524,7 +548,7 @@ test('the built-in Default Actions play to the end', async ({ page }) => {
     'Custom RGB to Grayscale', 'Molten Lead', 'Sepia Toning (layer)', 'Quadrant Colors', 'Gradient Map',
   ]);
   for (const name of names) {
-    await openFixture(page, 'shapes.png');
+    await openFixture(page, 'gradient.png');
     if (/selection/.test(name)) {
       await page.evaluate(async () => {
         const { Selection } = await import('/lib/selection.js');
@@ -532,12 +556,39 @@ test('the built-in Default Actions play to the end', async ({ page }) => {
         window.pigmentApp.applySelection(Selection.fromRect(d.width, d.height, { x: 30, y: 30, width: 100, height: 80 }), 'replace', 'sel');
       });
     }
+    if (/type/.test(name)) {
+      await page.evaluate(async () => {
+        const { TextLayer } = await import('/lib/document.js');
+        const d = window.pigmentApp.doc;
+        const layer = new TextLayer({ name: 'Title', text: 'Pigment', x: 40, y: 50, font: { family: 'Arial', size: 48, color: '#c02020', weight: 700 } });
+        d.add(layer);
+        d.setActive(layer);
+        d.changed('structure');
+      });
+    }
     const before = await docHash(page);
     const outcome = await play(page, name);
     expect(outcome, name).toEqual({ ok: true });
     expect(await docHash(page), name).not.toBe(before);
+    if (/type/.test(name)) {
+      // the type layer itself stays editable: the effect is a rasterized copy
+      expect(await page.evaluate(() => window.pigmentApp.doc.layers().map((l) => l.type).sort())).toEqual(['raster', 'raster', 'text']);
+    }
     await closeDoc(page);
   }
+  // on a pixel layer the optional "Rasterize Layer" step is skipped without a question
+  await newDoc(page, { background: 'transparent' });
+  await page.evaluate(() => {
+    const l = window.pigmentApp.doc.active;
+    const ctx = l.canvas.getContext('2d');
+    ctx.fillStyle = '#208040';
+    ctx.fillRect(100, 60, 120, 80);
+    l.touch();
+    window.pigmentApp.doc.changed('pixels');
+  });
+  expect(await play(page, 'Cast Shadow (type)')).toEqual({ ok: true });
+  await expect(page.locator('.dialog-backdrop')).toHaveCount(0);
+  expect(await page.evaluate(() => window.pigmentApp.doc.layers().length)).toBe(2);
   expect(errors).toEqual([]);
 });
 
@@ -557,8 +608,11 @@ test('Batch runs an action over browser:/batch/ and writes serial-numbered files
   await page.locator('.dialog select[data-key="destination"]').selectOption('folder');
   await page.evaluate(() => (window.__pigmentTest.nextDirectory = 'browser:/out'));
   await page.locator('.dialog [data-choose="destFolder"]').click();
+  await dialogReady(page);
   await page.locator('.dialog [data-naming="0"]').fill('photo_');
+  await dialogReady(page);
   await page.locator('.dialog [data-naming="1"]').fill('3 Digit Serial Number');
+  await dialogReady(page);
   await page.locator('.dialog [data-naming="2"]').fill('extension');
   await expect(page.locator('.dialog .automate-example')).toHaveText('Example: photo_001.png');
   await setNumber(page, 'startSerial', 7);
@@ -614,6 +668,7 @@ test('Image Processor resizes to fit, saves JPEG and PNG copies and can run an a
   await setNumber(page, 'jpegWidth', 100);
   await setNumber(page, 'jpegHeight', 100);
   await page.locator('.dialog input[data-key="png"]').check();
+  await dialogReady(page);
   await page.locator('.dialog input[data-key="copyright"]').fill('© Test');
   await page.locator('.dialog-backdrop .dialog-buttons .btn.primary').last().click();
   await expect.poll(() => page.evaluate(() => Object.keys(window.__pigmentTest.written).filter((p) => p.startsWith('browser:/done/')).sort())).toEqual([
@@ -654,7 +709,7 @@ test('Fit Image scales inside a box through its dialog, is undoable and is recor
   await expect(page.locator('.dialog')).toContainText('Fit Image');
   await setNumber(page, 'width', 100);
   await setNumber(page, 'height', 100);
-  await confirmDialog(page);
+  await confirmAndSettle(page);
   await expect.poll(() => page.evaluate(() => [window.pigmentApp.doc.width, window.pigmentApp.doc.height])).toEqual([100, 75]);
   await stopRecording(page);
   expect(await stepsOf(page, 'Fit')).toMatchObject([{ command: 'file:automate-fit-image', arg: { width: 100, height: 100, dontEnlarge: false } }]);
@@ -811,5 +866,122 @@ test('Crop and Straighten Photos separates the photos of a scan; Contact Sheet l
   expect(thumbs[0][0] / thumbs[0][1]).toBeCloseTo(2, 1);
   expect(thumbs[1][0] / thumbs[1][1]).toBeCloseTo(1, 1);
   expect(thumbs.map((t) => t[2])).toEqual([true, false]);
+  expect(errors).toEqual([]);
+});
+
+test('Batch walks subfolders, overrides Save As steps with its own names and can be cancelled', async ({ page }) => {
+  const errors = await openApp(page);
+  await makeFiles(page, { 'browser:/tree/a.png': [40, 30, '#ff0000'], 'browser:/tree/sub/b.png': [40, 30, '#00ff00'], 'browser:/tree/sub/deep/c.png': [40, 30, '#0000ff'] });
+  await makeAction(page, 'Save JPEG', [['image:adjust-invert', null], ['actions:save-as', { path: 'browser:/elsewhere/fixed.jpg', quality: 0.9 }]]);
+  const base = { set: 'Default Actions', action: 'Save JPEG', source: 'folder', folder: 'browser:/tree', destination: 'folder', destFolder: 'browser:/treeout', naming: ['name-upper', '-', 'serial-2', 'ext'], startSerial: 1 };
+  const written = () => page.evaluate(() => Object.keys(window.__pigmentTest.written).sort());
+
+  // without subfolders only the top level is processed
+  let summary = await runAwait(page, 'file:automate-batch', { ...base, overrideSave: true });
+  expect(summary.processed).toBe(1);
+  expect(await written()).toEqual(['browser:/treeout/A-01.jpg']);
+
+  // with subfolders: three files; the Save As step decides the format (JPEG), the batch the folder and the names
+  await page.evaluate(() => {
+    for (const k of Object.keys(window.__pigmentTest.written)) delete window.__pigmentTest.written[k];
+  });
+  summary = await runAwait(page, 'file:automate-batch', { ...base, subfolders: true, overrideSave: true });
+  expect(summary.processed).toBe(3);
+  expect(summary.errors).toEqual([]);
+  expect(await written()).toEqual(['browser:/treeout/A-01.jpg', 'browser:/treeout/B-02.jpg', 'browser:/treeout/C-03.jpg']);
+  const b = await writtenImage(page, 'browser:/treeout/B-02.jpg');
+  expect([b.width, b.height]).toEqual([40, 30]);
+  expect(b.center[0]).toBeGreaterThan(235); // green inverted: magenta
+  expect(b.center[1]).toBeLessThan(20);
+  expect(await page.evaluate(() => window.pigmentApp.docs.docs.length)).toBe(0);
+
+  // Override Action "Open" Commands: an Open step in the action is skipped, the batch file is the one processed
+  await makeAction(page, 'Open Then Invert', [['file:open-paths', ['browser:/tree/a.png']], ['image:adjust-invert', null]]);
+  await page.evaluate(() => {
+    for (const k of Object.keys(window.__pigmentTest.written)) delete window.__pigmentTest.written[k];
+  });
+  summary = await runAwait(page, 'file:automate-batch', { ...base, action: 'Open Then Invert', folder: 'browser:/tree/sub', overrideOpen: true, naming: ['name', 'ext'] });
+  expect(summary.errors).toEqual([]);
+  expect(await written()).toEqual(['browser:/treeout/b.png']);
+  expect((await writtenImage(page, 'browser:/treeout/b.png')).center).toEqual([255, 0, 255, 255]);
+
+  // Cancel in the progress dialog ends the batch after the file in work
+  await runAwait(page, 'actions:playback-options', { mode: 'pause', pauseSeconds: 0.5 });
+  await page.evaluate(() => {
+    for (const k of Object.keys(window.__pigmentTest.written)) delete window.__pigmentTest.written[k];
+  });
+  await page.evaluate((o) => {
+    window.__batch = window.pigmentApp.commands.run('file:automate-batch', o, 'api');
+  }, { ...base, subfolders: true, overrideSave: true });
+  await expect(page.locator('.automate-progress')).toBeVisible();
+  await expect(page.locator('.automate-progress .dialog-message')).toContainText('of 3');
+  await page.locator('.dialog-backdrop .dialog-buttons .btn', { hasText: 'Cancel' }).click();
+  summary = await page.evaluate(() => window.__batch);
+  expect(summary.cancelled).toBe(true);
+  expect(summary.processed).toBeLessThan(3);
+  expect((await written()).length).toBe(summary.processed);
+  await expect(page.locator('.dialog-backdrop')).toHaveCount(0);
+  expect(await page.evaluate(() => document.body.classList.contains('busy'))).toBe(false);
+  expect(errors).toEqual([]);
+});
+
+test('the panel: sets and actions through its buttons and menus, duplicate, delete, reorder by dragging', async ({ page }) => {
+  const errors = await openApp(page);
+  await newDoc(page, { background: 'white' });
+  await showPanel(page);
+  const tree = () => page.evaluate(() => window.pigmentApp.actions.sets.map((s) => [s.name, s.actions.map((a) => [a.name, a.steps.map((st) => st.label)])]));
+
+  // New Set through the footer button and its prompt
+  await page.locator('.actions-footer [data-cmd="actions:new-set"]').click();
+  await dialogReady(page);
+  await page.locator('.dialog input').first().fill('Workshop');
+  await confirmDialog(page);
+  await expect(page.locator('.act-row.act-set.selected')).toContainText('Workshop');
+  await makeAction(page, 'First', [['image:adjust-invert', null], ['filter:gaussian-blur', { radius: 2 }], ['image:adjust-posterize', { levels: 4 }]]);
+  await makeAction(page, 'Second', [['image:adjust-desaturate', null]]);
+  expect((await tree())[1]).toEqual(['Workshop', [['First', ['Invert', 'Gaussian Blur', 'Posterize']], ['Second', ['Desaturate']]]]);
+
+  // the context menu of a row offers the panel's commands and acts on that row
+  await page.locator('.act-row.act-action', { hasText: 'First' }).click({ button: 'right' });
+  await expect(page.locator('.popover-item')).toContainText(['Button Mode', 'New Action…', 'New Set…', 'Duplicate', 'Delete', 'Play', 'Start Recording', 'Insert Menu Item…', 'Insert Stop…', 'Insert Conditional…', 'Action Options…', 'Playback Options…', 'Clear All Actions', 'Reset Actions', 'Load Actions…', 'Save Actions…']);
+  await page.locator('.popover-item', { hasText: 'Duplicate' }).click();
+  expect((await tree())[1][1].map((a) => a[0])).toEqual(['First', 'First copy', 'Second']);
+
+  // Delete asks for an action, not for a step
+  await page.locator('.act-row.act-action', { hasText: 'First copy' }).click();
+  await page.locator('.actions-footer [data-cmd="actions:delete"]').click();
+  await expect(page.locator('.dialog')).toContainText('Delete the action “First copy”?');
+  await confirmDialog(page);
+  await expect(page.locator('.act-row.act-action', { hasText: 'First copy' })).toHaveCount(0);
+  await page.locator('.act-row.act-step', { hasText: 'Posterize' }).click();
+  await page.locator('.actions-footer [data-cmd="actions:delete"]').click();
+  await expect(page.locator('.dialog-backdrop')).toHaveCount(0);
+  expect((await tree())[1]).toEqual(['Workshop', [['First', ['Invert', 'Gaussian Blur']], ['Second', ['Desaturate']]]]);
+
+  // dragging: a step to another position, a step into another action, an action above another
+  await page.locator('.act-row.act-step', { hasText: 'Gaussian Blur' }).dragTo(page.locator('.act-row.act-step', { hasText: 'Invert' }), { targetPosition: { x: 80, y: 3 } });
+  expect((await tree())[1][1][0]).toEqual(['First', ['Gaussian Blur', 'Invert']]);
+  await page.locator('.act-row.act-step', { hasText: 'Invert' }).dragTo(page.locator('.act-row.act-step', { hasText: 'Desaturate' }), { targetPosition: { x: 80, y: 20 } });
+  expect((await tree())[1][1]).toEqual([['First', ['Gaussian Blur']], ['Second', ['Desaturate', 'Invert']]]);
+  await page.locator('.act-row.act-action', { hasText: 'Second' }).dragTo(page.locator('.act-row.act-action', { hasText: 'First' }), { targetPosition: { x: 80, y: 3 } });
+  expect((await tree())[1][1].map((a) => a[0])).toEqual(['Second', 'First']);
+
+  // folding a set hides its rows; Playback Options through its dialog
+  await page.locator('.act-row.act-set', { hasText: 'Workshop' }).locator('button.act-twisty').click();
+  await expect(page.locator('.act-row.act-action', { hasText: 'Second' })).toHaveCount(0);
+  await page.locator('.actions-footer [data-act="menu"]').click();
+  await page.locator('.popover-item', { hasText: 'Playback Options' }).click();
+  await page.locator('.dialog select[data-key="mode"]').selectOption('pause');
+  await setNumber(page, 'pauseSeconds', 2);
+  await confirmDialog(page);
+  expect(await page.evaluate(() => window.pigmentApp.actions.playback)).toEqual({ mode: 'pause', pauseSeconds: 2 });
+
+  // keyboard: arrows move the selection, Delete removes the selected step
+  await page.locator('.act-row.act-set', { hasText: 'Workshop' }).locator('button.act-twisty').click();
+  await page.locator('.act-row.act-step', { hasText: 'Desaturate' }).click();
+  await page.keyboard.press('ArrowDown');
+  expect(await page.evaluate(() => window.pigmentApp.actions.selectedStep?.label)).toBe('Invert');
+  await page.keyboard.press('Delete');
+  expect((await tree())[1][1][0]).toEqual(['Second', ['Desaturate']]);
   expect(errors).toEqual([]);
 });

@@ -513,3 +513,85 @@ test('transparent surroundings count as background', () => {
   assert.equal(photos.length, 1);
   assert.deepEqual(photos[0].bounds, { x: 10, y: 20, width: 60, height: 40 });
 });
+
+// ---- built-in set, optional steps, Liquify mesh data ----------------------------------------------------------
+
+test('the Default Actions set holds the ten built-in actions as ordinary, serialisable steps', async () => {
+  const { defaultActionSets, DEFAULT_SET_NAME } = await import('../../src/renderer/lib/actions/defaults.js');
+  const sets = defaultActionSets();
+  assert.equal(sets.length, 1);
+  assert.equal(sets[0].name, DEFAULT_SET_NAME);
+  assert.equal(sets[0].builtin, true);
+  assert.deepEqual(sets[0].actions.map((a) => a.name), [
+    'Vignette (selection)', 'Frame Channel – 50 pixel', 'Wood Frame – 50 pixel', 'Cast Shadow (type)', 'Water Reflection (type)',
+    'Custom RGB to Grayscale', 'Molten Lead', 'Sepia Toning (layer)', 'Quadrant Colors', 'Gradient Map',
+  ]);
+  const steps = sets[0].actions.flatMap((a) => a.steps);
+  assert.ok(steps.length >= 40);
+  for (const s of steps) {
+    assert.match(s.command, /^[a-z]+:[a-z0-9-]+$/, s.label);
+    assert.ok(M.isPlainData(s.arg), s.label);
+    assert.equal(s.enabled, true);
+    assert.equal(s.dialog, false);
+    assert.equal(M.isIgnoredCommand(s.command) && !s.command.startsWith('actions:'), false, `${s.command} would not be recordable`);
+  }
+  // ids are unique across the set, and a second call gives an independent copy
+  const ids = [sets[0].id, ...sets[0].actions.map((a) => a.id), ...steps.map((s) => s.id)];
+  assert.equal(new Set(ids).size, ids.length);
+  assert.notEqual(defaultActionSets()[0].actions[0].id, sets[0].actions[0].id);
+  // the set survives the settings file and an actions file unchanged in substance
+  const again = M.parseActionsFile(M.serializeSets(M.normalizeSets(JSON.parse(JSON.stringify(sets)))));
+  assert.deepEqual(again[0].actions.map((a) => a.steps.map((s) => [s.command, s.arg ?? null, s.label, !!s.optional])), sets[0].actions.map((a) => a.steps.map((s) => [s.command, s.arg ?? null, s.label, !!s.optional])));
+  // "Rasterize Layer" in the two type actions is optional: on a pixel layer it is skipped, not asked about
+  const optional = sets[0].actions.filter((a) => a.steps.some((s) => s.optional)).map((a) => a.name);
+  assert.deepEqual(optional, ['Cast Shadow (type)', 'Water Reflection (type)']);
+});
+
+test('the optional flag is kept only on command steps', () => {
+  const [set] = M.normalizeSets([{ name: 'S', actions: [{ name: 'A', steps: [{ command: 'layer:rasterize', optional: true }, { stop: { message: 'x' }, optional: true }, { command: 'image:adjust-invert' }] }] }]);
+  assert.deepEqual(set.actions[0].steps.map((s) => !!s.optional), [true, false, false]);
+  const file = JSON.parse(M.serializeSets([set]));
+  assert.deepEqual(file.sets[0].actions[0].steps.map((s) => s.optional ?? null), [true, null, null]);
+});
+
+test('a Liquify mesh is stored sparsely, restores within 1/16 px and scales to another image size', async () => {
+  const { encodeSparse, decodeSparse, encodeField, decodeField } = await import('../../src/renderer/lib/actions/mesh-data.js');
+  const values = new Float32Array(400);
+  values[37] = 2.5;
+  values[38] = -1.26;
+  values[41] = 0.01; // below the quantisation step: dropped
+  values[300] = 7;
+  const packed = encodeSparse(values);
+  assert.ok(packed.length < 16, `sparse data has ${packed.length} numbers`);
+  const back = decodeSparse(packed, 400);
+  for (let i = 0; i < 400; i++) assert.ok(Math.abs(back[i] - values[i]) <= 1 / 16, `value ${i}`);
+  assert.equal(back[37], 2.5);
+  assert.equal(back[300], 7);
+  assert.deepEqual(Array.from(decodeSparse(encodeSparse(new Float32Array(50)), 50)), new Array(50).fill(0));
+
+  class Field {
+    constructor(w, h, cell) {
+      this.w = w;
+      this.h = h;
+      this.cell = cell;
+      this.gw = Math.ceil(w / cell) + 1;
+      this.gh = Math.ceil(h / cell) + 1;
+      this.dx = new Float32Array(this.gw * this.gh);
+      this.dy = new Float32Array(this.gw * this.gh);
+    }
+  }
+  const f = new Field(80, 40, 8);
+  f.dx[2 * f.gw + 5] = 6; // a push at grid (5, 2) = image (40, 16)
+  f.dy[2 * f.gw + 5] = -3;
+  const data = JSON.parse(JSON.stringify(encodeField(f)));
+  const same = decodeField(data, Field, 80, 40, 8);
+  assert.deepEqual(Array.from(same.dx), Array.from(f.dx));
+  assert.deepEqual(Array.from(same.dy), Array.from(f.dy));
+  // twice the size: the push is at the same relative place and twice as long
+  const big = decodeField(data, Field, 160, 80, 8);
+  assert.equal(big.dx[4 * big.gw + 10], 12);
+  assert.equal(big.dy[4 * big.gw + 10], -6);
+  assert.equal(big.dx[0], 0);
+  // no data: an identity field
+  assert.equal(decodeField(null, Field, 16, 16, 8).dx.every((v) => v === 0), true);
+});

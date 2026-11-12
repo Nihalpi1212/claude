@@ -24,6 +24,8 @@ import { encodeSelection, selectionMask } from './actions/selection-data.js';
 /** Enter / Escape only finish what a tool started: what they trigger is recorded as if the user ran it directly. */
 const TRANSPARENT = /^app:(enter|escape)$/;
 const MAX_DEPTH = 12;
+/** Sources of commands that code runs (lib/automate.js, other commands, playback), as opposed to user gestures. */
+const PROGRAMMATIC = /^(api|action)$/;
 const GROUP_NAMES = { file: 'File', edit: 'Edit', image: 'Image', layer: 'Layer', select: 'Select', filter: 'Filter', ai: 'AI', text: 'Type', path: 'Shape', view: 'View', tool: 'Colors' };
 
 const frame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r)));
@@ -340,7 +342,8 @@ class ActionsEngine {
   async loadFile(path) {
     let file = typeof path === 'string' ? path : null;
     if (!file) {
-      const picked = await bridge.openFileDialog({ title: 'Load Actions', filters: [{ name: 'Pigment actions', extensions: [M.FILE_EXTENSION, 'json'] }] });
+      // Photoshop's .atn files are a binary format Pigment does not read: the file type list says so
+      const picked = await bridge.openFileDialog({ title: 'Load Actions', filters: [{ name: 'Pigment actions (Photoshop .atn files are not supported)', extensions: [M.FILE_EXTENSION, 'json'] }] });
       file = Array.isArray(picked) ? picked[0] : picked;
       if (!file) return null;
     }
@@ -409,11 +412,15 @@ class ActionsEngine {
     if (!set) return false;
     delete target.collapsed;
     delete set.collapsed;
-    this.recording = { set, action: target, marks: new Map(), redo: [], lastSelection: new WeakMap(), seen: new WeakSet(), colors: { fg: this.app.settings.foreground, bg: this.app.settings.background } };
+    this.recording = {
+      set, action: target, marks: new Map(), redo: [], lastSelection: new WeakMap(), seen: new WeakSet(),
+      lastActive: new WeakMap(), layers: new WeakSet(), colors: { fg: this.app.settings.foreground, bg: this.app.settings.background },
+    };
     // history entries that exist now are not part of the recording; later ones made outside commands are tool work
     for (const d of this.app.docs?.docs ?? []) {
       for (const entry of d.history?.entries ?? []) this.recording.seen.add(entry);
       this.recording.lastSelection.set(d, currentSelection(d));
+      this.noteLayers(d);
     }
     this.warned.clear();
     this.selection = { set: set.id, action: target.id, step: null };
@@ -456,13 +463,44 @@ class ActionsEngine {
     this.app.dialogs.toast(message, { kind: 'info', timeout: 4500 });
   }
 
+  /** Remembers a document's layers and its active layer, so a later click on another layer is known as a change. */
+  noteLayers(d) {
+    const rec = this.recording;
+    if (!rec || !d?.layers) return;
+    for (const l of d.layers()) rec.layers.add(l);
+    rec.lastActive.set(d, d.active ?? null);
+  }
+
+  /**
+   * The active layer changed. The Layers panel and the Move tool's auto-select pick layers without a
+   * command, so the pick itself is recorded ("Select layer"), by name: ids differ between documents.
+   * Layers a command made active, and layers a tool has just created, are not picks.
+   */
+  onLayerActivated({ doc: d, layer } = {}) {
+    const rec = this.recording;
+    if (!rec || !d) return;
+    const before = rec.lastActive.get(d) ?? null;
+    const known = !!layer && rec.layers.has(layer);
+    this.noteLayers(d);
+    if (this.playing || this.frames.length || d !== this.app.doc || !layer || layer === before || !known) return;
+    const steps = rec.action.steps;
+    const last = steps[steps.length - 1];
+    // clicking through several layers: the step keeps the last one
+    if (last?.command === 'actions:select-layer' && rec.marks.get(last.id)?.pick) steps.pop();
+    this.appendRecorded(M.makeStep('actions:select-layer', { name: layer.name, index: d.layers().indexOf(layer) }, `Select layer “${layer.name}”`), { pick: true });
+  }
+
   /** 'command:done' while recording. `fr` is the wrapper's frame of this run (null for transparent commands). */
   onCommandDone(e, fr) {
     const rec = this.recording;
-    if (!rec || !fr) return;
+    if (!rec) return;
     const d = this.app.doc;
-    // whatever the command did to the selection is its own doing, not a tool's (see onHistoryChanged)
-    if (d) rec.lastSelection.set(d, currentSelection(d));
+    // whatever the command did to the selection or the layers is its own doing, not a tool's (see onHistoryChanged)
+    if (d) {
+      rec.lastSelection.set(d, currentSelection(d));
+      this.noteLayers(d);
+    }
+    if (!fr) return;
     if (!fr.nested && e.source !== 'action' && /^edit:(undo|redo|step-backward|step-forward)$/.test(e.id)) return this.followUndo(d);
     let event = { ...e, nested: fr.nested };
     // commands whose own form cannot be replayed are recorded as the equivalent that can
@@ -736,6 +774,7 @@ class ActionsEngine {
     // a running transform is applied first, as it would be when the command ran from the menu
     if (app.transformTool?.session && !app.transformTool.committing) app.transformTool.commit();
     if (!app.commands.isEnabled(id)) {
+      if (step.optional) return { ok: true };
       const message = `the command “${step.label}” is not currently available`;
       if (quiet) return { ok: false, reason: 'unavailable', message };
       return (await D.unavailableDialog(app, step.label)) ? { ok: true } : { ok: false, reason: 'stop', stopped: true };
@@ -743,6 +782,12 @@ class ActionsEngine {
     const r = await this.runCommand(id, kind === 'dialog' ? undefined : step.arg);
     if (r.error) return { ok: false, reason: 'error', message: r.error };
     if (r.cancelled) return { ok: false, reason: 'cancelled', stopped: true, message: `“${step.label}” was cancelled` };
+    // the engine's own step commands say when they could not do their work (a Play step whose action
+    // stopped, a layer that does not exist in this document)
+    if (id.startsWith('actions:') && r.result && typeof r.result === 'object' && r.result.ok === false) {
+      if (id === 'actions:play') return { ok: false, reason: r.result.reason ?? 'error', stopped: r.result.stopped, message: r.result.message ?? `the action “${step.label}” did not finish` };
+      return { ok: false, reason: 'unavailable', message: r.result.message ?? `“${step.label}” could not run` };
+    }
     return { ok: true };
   }
 
@@ -772,21 +817,29 @@ class ActionsEngine {
     const registry = this.app.commands;
     const base = registry.run.bind(registry);
     const frames = this.frames;
+    let sync = 0; // commands whose run() is on the call stack right now
     registry.run = (id, arg, source = 'api') => {
       if (TRANSPARENT.test(id) || !registry.commands.has(id)) return base(id, arg, source);
       const d = this.app.doc;
-      const fr = { id, source, nested: frames.length > 0, hadTransform: !!this.app.transformTool?.session, doc: d, histEntry: d?.history?.entries[d.history.index] ?? null, guides: d?.guides?.length ?? 0, done: false };
+      // A command is part of another one when it starts inside that command's run(), or from code ('api')
+      // while that command still waits (Fit Image runs Image Size after its dialog). A key, menu or panel
+      // gesture made while a slow command is pending (an AI request) is the user's own next step.
+      const nested = sync > 0 || (frames.length > 0 && PROGRAMMATIC.test(source));
+      const fr = { id, source, nested, hadTransform: !!this.app.transformTool?.session, doc: d, histEntry: d?.history?.entries[d.history.index] ?? null, guides: d?.guides?.length ?? 0, done: false };
       frames.push(fr);
       const release = () => {
         const i = frames.indexOf(fr);
         if (i >= 0) frames.splice(i, 1);
       };
       let result;
+      sync++;
       try {
         result = base(id, arg, source);
       } catch (err) {
         release();
         throw err;
+      } finally {
+        sync--;
       }
       if (result && typeof result.then === 'function') result.then(release, release);
       else release();
@@ -843,19 +896,16 @@ function selectLayerByName(app, arg) {
   const named = layers.filter((l) => l.name === arg.name);
   // the name decides; the recorded position only chooses between layers that share it
   const layer = named.length > 1 && layers[arg.index]?.name === arg.name ? layers[arg.index] : named[0] ?? (arg.name === undefined ? layers[arg.index] : null);
-  if (!layer) {
-    app.dialogs.toast(`There is no layer named “${arg.name}” in this document`, { kind: 'error' });
-    return false;
-  }
+  if (!layer) return { ok: false, message: `there is no layer named “${arg.name}” in this document` };
   d.setActive(layer);
-  return true;
+  return { ok: true };
 }
 
 async function saveAs(app, engine, arg) {
   const d = app.doc;
   if (!d) return false;
   if (!arg?.path) return app.docs.saveAs(d);
-  if (engine.batch?.overrideSave) return engine.batch.overrideSave(d, arg);
+  if (engine.batch?.overrideSave) return (await engine.batch.overrideSave(d, arg)) ? { ok: true } : { ok: false, message: `${String(arg.path).split(/[\\/]/).pop()} could not be saved` };
   const ext = extOf(arg.path);
   if (arg.quality && ['jpg', 'jpeg', 'webp'].includes(ext)) d.saveOpts = { format: ext, quality: arg.quality };
   const ok = await app.docs.writeTo(d, arg.path);
@@ -867,7 +917,7 @@ async function saveAs(app, engine, arg) {
     app.docs.renderTabs();
     app.syncUiState();
   }
-  return ok;
+  return ok ? { ok: true } : { ok: false, message: `${String(arg.path).split(/[\\/]/).pop()} could not be saved` };
 }
 
 /** Function keys that built-in shortcuts already use, for the note in Action Options. */
@@ -894,7 +944,11 @@ export function install(app) {
   app.on('transform:committed', (t) => engine.onTransformCommitted(t));
   app.on('history:changed', (d) => engine.onHistoryChanged(d));
   app.on('color:changed', (c) => engine.onColorChanged(c ?? {}));
-  app.on('doc:opened', (d) => engine.recording?.lastSelection.set(d, currentSelection(d)));
+  app.on('layer:activated', (e) => engine.onLayerActivated(e));
+  app.on('doc:opened', (d) => {
+    engine.recording?.lastSelection.set(d, currentSelection(d));
+    engine.noteLayers(d);
+  });
   app.on('doc:closed', () => {
     // marks hold documents: drop those of closed ones so Undo tracking never touches a dead history
     const rec = engine.recording;
@@ -980,7 +1034,7 @@ export function install(app) {
     'actions:stop': { label: 'Stop Playing/Recording', enabled: () => !!engine.recording || !!engine.playing, run: () => engine.stop() },
     'actions:play': {
       label: 'Play',
-      enabled: () => idle() && (hasAction() || true),
+      enabled: idle,
       run: async (arg, ctx) => {
         const found = engine.resolve(arg && typeof arg === 'object' && !arg.steps ? (arg.id ? { id: arg.id } : arg.action ? arg : null) : arg);
         if (!found) {

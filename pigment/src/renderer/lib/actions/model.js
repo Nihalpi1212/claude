@@ -266,6 +266,8 @@ function normalizeStep(raw) {
     step.dialog = true;
   }
   if (raw.arg !== undefined && raw.arg !== null && isPlainData(raw.arg)) step.arg = cloneData(raw.arg);
+  // optional: skipped without a question when its command is not available (Rasterize on a pixel layer)
+  if (raw.optional && step.command) step.optional = true;
   step.label = typeof raw.label === 'string' && raw.label ? raw.label : step.stop ? 'Stop' : step.conditional ? `If ${conditionLabel(step.conditional.test)}` : commandLabel(step.command, step.arg);
   return step;
 }
@@ -320,6 +322,7 @@ export function serializeSets(sets) {
         if (s.stop) o.stop = s.stop;
         if (s.conditional) o.conditional = s.conditional;
         if (s.menuItem) o.menuItem = s.menuItem;
+        if (s.optional) o.optional = true;
         return o;
       }),
     })),

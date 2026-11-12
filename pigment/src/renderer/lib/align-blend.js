@@ -40,6 +40,25 @@ const breathe = () => new Promise((r) => setTimeout(r));
 // ---- registration -------------------------------------------------------------------------------------------
 
 /**
+ * R.alignImages() in steps: features image by image, matches pair by pair, a pause after each, so the busy
+ * cursor and label keep painting while a dozen large photographs are registered.
+ */
+async function alignStepwise(images, opts) {
+  const feats = [];
+  for (const img of images) {
+    feats.push(R.detectFeatures(img));
+    await breathe();
+  }
+  const edges = [];
+  for (const [a, b] of R.candidatePairs(images.length)) {
+    const e = R.registerPair(feats[a], feats[b]);
+    if (e) edges.push({ a, b, ...e });
+    await breathe();
+  }
+  return R.solveAlignment(images.map((img) => ({ width: img.width, height: img.height })), edges, opts);
+}
+
+/**
  * Registers images (ImageData) and applies the optional lens corrections. Returns { images (the corrected
  * pixels, the input objects where nothing changed), corrected: boolean[], result (alignImages), notes }.
  */
@@ -47,8 +66,7 @@ async function registerImages(images, { projection = 'auto', reference = undefin
   const notes = [];
   let imgs = images;
   const corrected = images.map(() => false);
-  let result = R.alignImages(imgs, { projection, reference });
-  await breathe();
+  let result = await alignStepwise(imgs, { projection, reference });
   if (distortion) {
     const sizes = imgs.map((i) => ({ width: i.width, height: i.height }));
     const est = R.estimateDistortion(sizes, result.samples());
@@ -57,7 +75,7 @@ async function registerImages(images, { projection = 'auto', reference = undefin
       corrected.fill(true);
       await breathe();
       // the features moved with the pixels: register the corrected images
-      result = R.alignImages(imgs, { projection, reference });
+      result = await alignStepwise(imgs, { projection, reference });
       notes.push(`geometric distortion corrected (${est.k < 0 ? 'barrel' : 'pincushion'}, k = ${est.k.toFixed(3)})`);
     } else notes.push('geometric distortion was not corrected: the matches show none that could be measured');
   }
@@ -77,11 +95,12 @@ async function registerImages(images, { projection = 'auto', reference = undefin
  * image, or null when the model cannot be drawn (a corner behind the camera, an absurd size).
  */
 function place(canvas, t) {
-  if (t.warp) {
-    const warped = R.warpProjection(canvasData(canvas), t.warp);
-    return { canvas: dataCanvas(warped.image), x: t.bounds.x, y: t.bounds.y };
-  }
   const w = canvas.width, h = canvas.height;
+  if (t.warp) {
+    // cylindrical / spherical: the pure projection draws the image onto the surface around the reference camera
+    if (t.bounds.width > MAX_SIDE || t.bounds.height > MAX_SIDE || t.bounds.width * t.bounds.height > Math.min(MAX_PIXELS, 16 * w * h)) return null;
+    return { canvas: dataCanvas(R.projectImage(canvasData(canvas), t)), x: t.bounds.x, y: t.bounds.y };
+  }
   if (t.matrix) {
     const m = t.matrix;
     // a pure shift moves the layer: its pixels are not resampled
@@ -103,6 +122,37 @@ function place(canvas, t) {
   const bw = Math.max(...xs) - Math.min(...xs), bh = Math.max(...ys) - Math.min(...ys);
   if (bw > MAX_SIDE || bh > MAX_SIDE || bw * bh > MAX_PIXELS || bw * bh > 16 * w * h) return null;
   return perspectiveCanvas(canvas, 0, 0, quad, { quality: 'bilinear' });
+}
+
+/**
+ * The linked mask of a layer that Auto-Align moves, taken through the same model `t`, so that it keeps hiding
+ * the same pixels. Masks are document-sized: the part over the layer is cut out, placed like the layer and
+ * drawn into a new mask of the same size whose remaining area keeps the old mask's background (its corner).
+ * null when the model cannot be drawn.
+ */
+function placeMask(layer, t, origin) {
+  const mask = layer.mask.canvas;
+  const white = mask.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, 1, 1).data[3] >= 128;
+  const local = createCanvas(layer.canvas.width, layer.canvas.height);
+  const lc = local.getContext('2d');
+  if (white) {
+    // a revealing mask is carried as its complement (what it hides): resampling then leaves "reveal" around it
+    lc.fillStyle = '#fff';
+    lc.fillRect(-layer.x, -layer.y, mask.width, mask.height);
+    lc.globalCompositeOperation = 'destination-out';
+  }
+  lc.drawImage(mask, -layer.x, -layer.y);
+  const p = place(local, t);
+  if (!p) return null;
+  const out = createCanvas(mask.width, mask.height);
+  const oc = out.getContext('2d');
+  if (white) {
+    oc.fillStyle = '#fff';
+    oc.fillRect(0, 0, out.width, out.height);
+    oc.globalCompositeOperation = 'destination-out';
+  }
+  oc.drawImage(p.canvas, p.x + origin.x, p.y + origin.y);
+  return out;
 }
 
 /** A layer mask canvas (white, alpha = the mask value) from a plane of 0..255 values. */
@@ -147,13 +197,19 @@ const gainMatters = (g) => g.some((v) => Math.abs(v - 1) > 0.004);
  * Seam masks (and gains) for layers given as frames of one size. method 'panorama' cuts each overlap along
  * its middle; 'stack' gives every pixel to the sharpest layer (focus stacking).
  */
-function blendPlan(frames, w, h, { method = 'panorama', seamless = true } = {}) {
+async function blendPlan(frames, w, h, { method = 'panorama', seamless = true } = {}) {
   const gains = seamless ? R.gainCompensation(frames) : frames.map(() => [1, 1, 1]);
   const alphas = frames.map(alphaPlane);
+  await breathe();
   let seams;
   if (method === 'stack') {
     const radius = Math.max(2, Math.round(Math.min(w, h) / 160));
-    seams = R.seamMasks(alphas, w, h, { weights: frames.map((f) => R.focusMeasure(f, radius)), feather: Math.max(2, Math.min(12, Math.round(Math.min(w, h) / 120))) });
+    const weights = [];
+    for (const f of frames) {
+      weights.push(R.focusMeasure(f, radius));
+      await breathe();
+    }
+    seams = R.seamMasks(alphas, w, h, { weights, feather: Math.max(2, Math.min(12, Math.round(Math.min(w, h) / 120))) });
   } else seams = R.seamMasks(alphas, w, h);
   return { gains, masks: seams.masks, feather: seams.feather, overlap: seams.overlap, alphas };
 }
@@ -327,14 +383,17 @@ export function install(app) {
             skipped.push(layer.name);
             return;
           }
-          placed.push({ layer, canvas: p.canvas, x: p.x + origin.x, y: p.y + origin.y });
+          placed.push({ layer, canvas: p.canvas, x: p.x + origin.x, y: p.y + origin.y, model: t });
         });
         await breathe();
         let moved = 0;
         await asOneEntry(d, 'Auto-Align Layers', async () => {
           for (const p of placed) {
             if (p.canvas === p.layer.canvas && p.x === p.layer.x && p.y === p.layer.y) continue;
+            // a linked mask goes with its layer (as under Free Transform); it is mapped before the layer moves
+            const mask = p.layer.mask?.canvas && p.layer.mask.linked !== false ? placeMask(p.layer, p.model, origin) : null;
             d.history.replaceCanvas('Auto-Align Layers', p.layer, () => ({ canvas: p.canvas, x: p.x, y: p.y }));
+            if (mask) setLayerProps(app, p.layer, { mask: { ...p.layer.mask, canvas: mask } }, 'Auto-Align Layers');
             moved++;
           }
           if (projection === 'reposition' || !moved) return;
@@ -350,11 +409,11 @@ export function install(app) {
           if (width !== d.width || height !== d.height) await canvasSize.run({ width, height, anchor: 'nw', color: null });
         });
         reselect(d, ids);
-        return { moved, skipped, projection: reg.result.projection, notes: reg.notes };
+        return { moved, aligned: placed.length, skipped, projection: reg.result.projection, notes: reg.notes };
       });
       app.view?.invalidate();
       const parts = [];
-      if (outcome.moved) parts.push(`Aligned ${plural(outcome.moved + 1, 'layer')} (${PROJECTION_NAMES[outcome.projection]})`);
+      if (outcome.moved) parts.push(`Aligned ${plural(outcome.aligned, 'layer')} (${PROJECTION_NAMES[outcome.projection]})`);
       else if (!outcome.skipped.length) parts.push('The layers are already aligned');
       if (outcome.skipped.length) parts.push(`${outcome.skipped.map((n) => `"${n}"`).join(', ')} could not be aligned: no common content was found`);
       parts.push(...outcome.notes);
@@ -410,7 +469,7 @@ export function install(app) {
         const w = d.width, h = d.height;
         const frames = layers.map((l) => layerFrame(l, w, h));
         await breathe();
-        const plan = blendPlan(frames, w, h, { method, seamless: o.seamless !== false });
+        const plan = await blendPlan(frames, w, h, { method, seamless: o.seamless !== false });
         await breathe();
         const { holes, count } = o.fill ? holesOf(plan.alphas, w, h) : { holes: null, count: 0 };
         let toned = 0, filled = false;
@@ -463,7 +522,7 @@ export function install(app) {
   }
   const sourceOf = (v, open) => (v.source === 'documents' ? { source: 'documents', documents: open.filter((d) => v[`doc:${d.id}`]).map((d) => d.id) } : { source: 'files' });
 
-  /** [{ name, canvas }] for a source choice; null when the file dialog was dismissed. Remembers the paths in `o`. */
+  /** [{ name, canvas, dpi }] for a source choice; null when the file dialog was dismissed. Remembers the paths in `o`. */
   async function loadFrames(o, title) {
     if (o.source === 'files') {
       let paths = Array.isArray(o.paths) ? o.paths : null;
@@ -475,7 +534,7 @@ export function install(app) {
         for (const path of paths) {
           const name = fileName(path);
           const doc = await openDocument(await bridge.readFile(path), { name, path });
-          out.push({ name: baseName(name), canvas: flattenDocument(doc) });
+          out.push({ name: baseName(name), canvas: flattenDocument(doc), dpi: doc.dpi });
         }
         return out;
       });
@@ -484,7 +543,7 @@ export function install(app) {
     const ids = Array.isArray(o.documents) ? o.documents : open.map((d) => d.id);
     // replayed from an action the document ids are gone: all open documents are used then
     const chosen = open.filter((d) => ids.includes(d.id));
-    return (chosen.length >= 2 ? chosen : open).map((d) => ({ name: baseName(d.name), canvas: copyCanvas(flattenDocument(d, d.view?.compositor)) }));
+    return (chosen.length >= 2 ? chosen : open).map((d) => ({ name: baseName(d.name), canvas: copyCanvas(flattenDocument(d, d.view?.compositor)), dpi: d.dpi }));
   }
 
   /** Adds a finished layer to a document that is not shown yet (no history exists for it). */
@@ -548,7 +607,7 @@ export function install(app) {
           box = box ? unionRect(box, r) : r;
         }
         if (box.width > MAX_SIDE || box.height > MAX_SIDE || box.width * box.height > MAX_PIXELS) return { error: `The merged image would be ${box.width} × ${box.height} px, which is too large: try the Cylindrical layout or smaller images` };
-        const doc = new Document({ width: box.width, height: box.height, dpi: 72, name: 'Panorama' });
+        const doc = new Document({ width: box.width, height: box.height, dpi: frames[0].dpi || 72, name: 'Panorama' });
         const layers = placed.map((p) => {
           // a layer keeps its own canvas: a file's flattened image may be shared with nothing else, an open document's was copied
           const layer = new RasterLayer({ name: p.name, canvas: p.canvas, x: p.x - box.x, y: p.y - box.y });
@@ -563,7 +622,7 @@ export function install(app) {
         if (o.blend !== false || o.fill) {
           const layerFrames = layers.map((l) => layerFrame(l, w, h));
           if (o.blend !== false) {
-            const plan = blendPlan(layerFrames, w, h, { method: 'panorama', seamless: true });
+            const plan = await blendPlan(layerFrames, w, h, { method: 'panorama', seamless: true });
             layers.forEach((layer, i) => {
               if (gainMatters(plan.gains[i])) layer.canvas = gainCanvas(layer.canvas, plan.gains[i]);
               layer.mask = { canvas: maskCanvas(plan.masks[i], w, h), enabled: true, linked: true };
@@ -618,7 +677,7 @@ export function install(app) {
   async function buildStack(frames, { align = false, name = 'Stack' } = {}) {
     const w = Math.max(...frames.map((f) => f.canvas.width)), h = Math.max(...frames.map((f) => f.canvas.height));
     if (w > MAX_SIDE || h > MAX_SIDE) throw new Error('The images are too large to stack');
-    const doc = new Document({ width: w, height: h, dpi: 72, name });
+    const doc = new Document({ width: w, height: h, dpi: frames[0].dpi || 72, name });
     let positions = frames.map((f) => ({ canvas: f.canvas, x: 0, y: 0 }));
     const notes = [];
     const lost = [];
@@ -750,7 +809,10 @@ export function install(app) {
         app.syncUiState();
         return toast('A stack mode needs a smart object that holds two or more layers (File › Scripts › Load Files into Stack makes one)', { kind: 'error', timeout: 5000 });
       }
-      if (layer.locked.all) return toast(`"${layer.name}" is locked`, { kind: 'error' });
+      if (layer.locked.all) {
+        app.syncUiState();
+        return toast(`"${layer.name}" is locked`, { kind: 'error' });
+      }
       const probe = { stackMode: mode, source: layer.source };
       await app.busy(`Stack Mode: ${stackModeName(mode)}…`, async () => stackRender(probe));
     }
@@ -777,7 +839,7 @@ export function install(app) {
      */
     async alignImages(images, { projection = 'auto' } = {}) {
       if (!Array.isArray(images) || images.length < 2) return images;
-      const result = R.alignImages(images, { projection });
+      const result = await alignStepwise(images, { projection });
       const ref = images[result.reference];
       const rect = { x: 0, y: 0, width: ref.width, height: ref.height };
       return images.map((img, i) => {

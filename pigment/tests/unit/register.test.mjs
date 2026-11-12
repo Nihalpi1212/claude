@@ -236,6 +236,86 @@ test('alignImages chains through a middle image, reports unmatched images and ho
   }
 });
 
+test('the phases of alignImages (features, pairs, solve) give the same answer when run one by one', () => {
+  // every pair for a few images; only neighbours in shooting order for many
+  assert.deepEqual(R.candidatePairs(3), [[0, 1], [0, 2], [1, 2]]);
+  assert.equal(R.candidatePairs(12).length, 66);
+  const many = R.candidatePairs(20);
+  assert.equal(many.length, 16 * 4 + 3 + 2 + 1);
+  assert.ok(many.every(([a, b]) => a < b && b - a <= 4));
+  assert.deepEqual(R.candidatePairs(1), []);
+
+  const big = scene(640, 420, 21, 420);
+  const origins = [[10, 60], [130, 40], [260, 75]];
+  const crops = origins.map(([x, y]) => crop(big, x, y, 300, 260));
+  const feats = crops.map((c) => R.detectFeatures(c));
+  const edges = [];
+  for (const [a, b] of R.candidatePairs(3)) {
+    const e = R.registerPair(feats[a], feats[b]);
+    if (e) edges.push({ a, b, ...e });
+  }
+  // the neighbours share 180 px and are found as pure shifts
+  const e01 = edges.find((e) => e.a === 0 && e.b === 1);
+  assert.ok(e01 && e01.matches > 50 && e01.T.inliers.length > 0.9 * e01.matches, `pair 0-1: ${e01?.matches} matches, ${e01?.T.inliers.length} inliers`);
+  assert.ok(Math.abs(e01.T.dx + 120) <= 1 && Math.abs(e01.T.dy - 20) <= 1, `shift ${e01.T.dx}, ${e01.T.dy}`); // a point of 0 is 120 px further left and 20 px lower in 1
+  assert.ok(e01.H.H && e01.S.matrix);
+  const stepwise = R.solveAlignment(crops.map((c) => ({ width: c.width, height: c.height })), edges, { projection: 'auto' });
+  const whole = R.alignImages(crops);
+  assert.equal(stepwise.projection, whole.projection);
+  assert.equal(stepwise.reference, whole.reference);
+  assert.deepEqual(stepwise.bounds, whole.bounds);
+  stepwise.forEach((t, i) => {
+    assert.deepEqual(t.homography, whole[i].homography);
+    assert.deepEqual(t.bounds, whole[i].bounds);
+    assert.equal(t.parent, whole[i].parent);
+  });
+  assert.equal(stepwise.samples().length, 2);
+  // two unrelated pictures are no pair; without edges nothing is matched and everything stays in place
+  const alien = R.registerPair(feats[0], R.detectFeatures(scene(300, 260, 999)));
+  // (a few chance matches may survive the ratio test; no model gathers enough of them to count as an overlap)
+  assert.ok(alien === null || (alien.T.inliers.length < 8 && alien.S.inliers.length < 10 && alien.H.inliers.length < 12), `chance inliers: ${alien?.T.inliers.length}, ${alien?.S.inliers.length}, ${alien?.H.inliers.length}`);
+  assert.equal(R.registerPair(feats[0], { keypoints: [], descriptors: new Uint32Array(0), count: 0, scale: 1 }), null);
+  const none = R.solveAlignment([{ width: 300, height: 260 }, { width: 200, height: 100 }], [], { projection: 'auto' });
+  assert.equal(none.projection, 'reposition');
+  assert.deepEqual(none.map((t) => t.matched), [true, false].map((v, i) => i === none.reference ? true : false));
+  assert.deepEqual(none[1 - none.reference].bounds, { x: 0, y: 0, ...(none.reference === 0 ? { width: 200, height: 100 } : { width: 300, height: 260 }) });
+});
+
+test('a weakly supported pair never short-cuts a chain of well supported neighbours', () => {
+  // four images in a row, 100 px apart; hand-made pair models (pure shifts) with a given number of inliers
+  const sizes = [0, 1, 2, 3].map(() => ({ width: 300, height: 200 }));
+  const edge = (a, b, dx, dy, inliers) => {
+    const idx = Array.from({ length: inliers }, (_, k) => k);
+    const pts = idx.map((k) => ({ x1: 10 + k, y1: 20, x2: 10 + k + dx, y2: 20 + dy }));
+    return { a, b, pts, matches: inliers + 30, threshold: 3, T: { dx, dy, matrix: [1, 0, 0, 1, dx, dy], inliers: idx }, S: { matrix: [1, 0, 0, 1, dx, dy], inliers: idx }, H: { H: [1, 0, dx, 0, 1, dy, 0, 0, 1], inliers: idx } };
+  };
+  const chainEdges = [edge(0, 1, -100, 0, 120), edge(1, 2, -100, 0, 90), edge(2, 3, -100, 0, 150)];
+  // a chance agreement between the two ends, which do not overlap: 9 inliers on a wrong shift
+  const chance = edge(0, 3, 40, -70, 9);
+  for (const projection of ['reposition', 'collage']) {
+    const r = R.solveAlignment(sizes, [chance, ...chainEdges], { projection, reference: 0 });
+    assert.deepEqual(r.map((t) => t.parent), [-1, 0, 1, 2], projection);
+    assert.deepEqual(r.map((t) => [t.matrix[4], t.matrix[5]]), [[0, 0], [100, 0], [200, 0], [300, 0]], projection);
+    assert.deepEqual(r.map((t) => t.inliers), [0, 120, 90, 150]);
+    assert.deepEqual(r.bounds, { x: 0, y: 0, width: 600, height: 200 });
+  }
+  // the same weak pair is taken when it is the only way to an image ...
+  const alone = R.solveAlignment(sizes, [chance, chainEdges[0], chainEdges[1]], { projection: 'reposition', reference: 0 });
+  assert.equal(alone[3].parent, 0);
+  assert.deepEqual([alone[3].matrix[4], alone[3].matrix[5]], [-40, 70]);
+  assert.equal(alone[3].matched, true);
+  // ... and a pair below the minimum is no pair at all
+  const none = R.solveAlignment(sizes, [edge(0, 3, 40, -70, 7), chainEdges[0], chainEdges[1]], { projection: 'reposition', reference: 0 });
+  assert.equal(none[3].matched, false);
+  assert.deepEqual(none[3].homography, R.IDENTITY3);
+  // among well supported pairs the fewest hops win, and the better supported parent among equals
+  const direct = R.solveAlignment(sizes, [...chainEdges, edge(0, 2, -200, 0, 40), edge(1, 3, -200, 0, 60), edge(0, 3, -300, 0, 30)], { projection: 'reposition', reference: 0 });
+  assert.deepEqual(direct.map((t) => t.parent), [-1, 0, 0, 0]);
+  const tie = R.solveAlignment(sizes, [chainEdges[0], edge(0, 2, -200, 0, 40), edge(1, 3, -200, 0, 60), edge(2, 3, -100, 0, 150)], { projection: 'reposition', reference: 0 });
+  assert.equal(tie[3].parent, 2); // through 1 or through 2 is two hops either way: 150 inliers beat 60
+  assert.equal(tie[3].matrix[4], 300);
+});
+
 test('alignImages recovers a perspective view and Auto chooses perspective for it', () => {
   const big = scene(420, 320, 44, 360);
   const quad = [[0, 0], [420, 0], [420, 320], [0, 320]];

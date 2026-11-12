@@ -5,6 +5,8 @@ import { mergeStyles } from '../../../shared/pixels/styles.js';
 import { makeSet, makeAction, makeStep, cloneData } from './model.js';
 
 const step = (command, arg, label) => makeStep(command, arg === undefined ? undefined : cloneData(arg), label);
+/** A step that is skipped when its command is not available (see `optional` in actions/model.js). */
+const optional = (command, arg, label) => ({ ...step(command, arg, label), optional: true });
 
 /** A complete layer-styles object with the named effects switched on. */
 function styles(effects) {
@@ -52,7 +54,7 @@ export function defaultActions() {
     // for a type layer (works on any layer): a slanted, flattened, blurred black copy behind it
     makeAction('Cast Shadow (type)', [
       step('layer:duplicate', undefined, 'Duplicate Layer'),
-      step('layer:rasterize', undefined, 'Rasterize Layer'),
+      optional('layer:rasterize', undefined, 'Rasterize Layer'),
       step('edit:fill', { use: 'black', blend: 'normal', opacity: 100, preserve: true }, 'Fill: black, preserve transparency'),
       // half height and slanted, with the base line kept in place (the shifts are fractions of the layer's height)
       step('actions:transform', { matrix: [1, 0, -0.8, 0.5, 0, 0], shift: [0, 0], relShift: { x: [0, 0.4], y: [0, 0.25] } }, 'Free Transform: slant and flatten'),
@@ -63,9 +65,9 @@ export function defaultActions() {
     // for a type layer (works on any layer): a rippled, faded mirror image below it
     makeAction('Water Reflection (type)', [
       step('layer:duplicate', undefined, 'Duplicate Layer'),
-      step('layer:rasterize', undefined, 'Rasterize Layer'),
+      optional('layer:rasterize', undefined, 'Rasterize Layer'),
       step('actions:transform', { matrix: [1, 0, 0, -1, 0, 0], shift: [0, 0], relShift: { x: [0, 0], y: [0, 1] } }, 'Free Transform: flip below'),
-      step('filter:ripple', { amount: 120, size: 'medium', edge: 'transparent' }, 'Ripple'),
+      step('filter:ripple', { amount: 20, size: 'large', edge: 'transparent' }, 'Ripple'),
       step('filter:gaussian-blur', { radius: 1 }, 'Gaussian Blur'),
       step('layer:opacity', 45, 'Set Layer Opacity: 45%'),
     ]),

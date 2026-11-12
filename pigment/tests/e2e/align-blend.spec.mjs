@@ -304,6 +304,132 @@ test('Auto-Align registers a rotated, scaled copy (Collage) and a perspective vi
   expect(errors).toEqual([]);
 });
 
+test('Auto-Align carries a linked layer mask with its layer; an unlinked mask stays', async ({ page }) => {
+  const errors = await openApp(page);
+  await installHelpers(page);
+  await newDoc(page, { width: 400, height: 300 });
+  // mask helpers: a document-sized mask canvas (white, alpha = value) and the centroid / extremes of what it holds
+  await page.evaluate(() => {
+    const ab = window.__ab;
+    ab.setMask = (layer, draw, { reveal = true, linked = true } = {}) => {
+      const d = window.pigmentApp.doc;
+      const c = ab.canvasOf(d.width, d.height);
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = '#fff';
+      if (reveal) ctx.fillRect(0, 0, d.width, d.height);
+      draw(ctx);
+      layer.mask = { canvas: c, enabled: true, linked };
+      layer.touch();
+      d.changed('props', { layer });
+    };
+    /** Centroid and count of the mask pixels that hide (hidden: true) or reveal (hidden: false). */
+    ab.maskBlob = (layer, hidden) => {
+      const c = layer.mask.canvas;
+      const data = c.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, c.width, c.height).data;
+      let sx = 0, sy = 0, n = 0;
+      for (let y = 0; y < c.height; y++) for (let x = 0; x < c.width; x++) {
+        const a = data[(y * c.width + x) * 4 + 3];
+        if (hidden ? a < 128 : a >= 128) {
+          sx += x;
+          sy += y;
+          n++;
+        }
+      }
+      return { x: n ? sx / n : -1, y: n ? sy / n : -1, n, size: [c.width, c.height] };
+    };
+  });
+  const shifted = () => page.evaluate(async () => {
+    const ab = window.__ab, app = window.pigmentApp, d = app.doc;
+    while (d.layers().length > 1) {
+      d.setActive(d.layers().at(-1));
+      await app.commands.run('layer:delete', undefined, 'api');
+    }
+    const scene = ab.scene(600, 420);
+    const bg = d.layers()[0];
+    ab.setLayer(bg, ab.paint(400, 300, (ctx) => ctx.drawImage(scene, -50, -40)));
+    const top = await ab.addLayer('Shifted', ab.paint(400, 300, (ctx) => ctx.drawImage(scene, -50 - 23, -40 + 14)));
+    ab.select([bg, top]);
+  });
+  const blob = (hidden) => page.evaluate((h) => window.__ab.maskBlob(window.pigmentApp.doc.layers()[1], h), hidden);
+
+  // a revealing mask with a 40 × 30 hole at (100, 100): the hole moves by the layer's (+23, −14)
+  await shifted();
+  await page.evaluate(() => {
+    window.__ab.setMask(window.pigmentApp.doc.layers()[1], (ctx) => ctx.clearRect(100, 100, 40, 30));
+  });
+  const n = await historyLength(page);
+  expect(await blob(true)).toMatchObject({ x: 119.5, y: 114.5, n: 1200 });
+  await runAwait(page, 'edit:auto-align', { projection: 'reposition' });
+  expect((await info(page)).layers[1]).toMatchObject({ x: 23, y: -14, mask: true });
+  expect(await blob(true)).toEqual({ x: 142.5, y: 100.5, n: 1200, size: [400, 300] });
+  // the area the move uncovered keeps the mask's background: it reveals
+  expect(await page.evaluate(() => window.__ab.maskAt(window.pigmentApp.doc.layers()[1], 5, 295))).toBe(255);
+  expect(await historyLength(page)).toBe(n + 1);
+  await runAwait(page, 'edit:undo');
+  expect(await blob(true)).toMatchObject({ x: 119.5, y: 114.5, n: 1200 });
+  await runAwait(page, 'edit:redo');
+  expect(await blob(true)).toMatchObject({ x: 142.5, y: 100.5, n: 1200 });
+  await runAwait(page, 'edit:undo');
+
+  // with Auto the canvas grows by 23 × 14 (the top layer ends at (23, 0)): the mask is document-sized and follows
+  await runAwait(page, 'edit:auto-align', { projection: 'auto' });
+  expect((await info(page)).size).toEqual([423, 314]);
+  expect(await blob(true)).toEqual({ x: 142.5, y: 114.5, n: 1200, size: [423, 314] });
+  expect(await historyLength(page)).toBe(n + 1);
+  await runAwait(page, 'edit:undo');
+  expect(await blob(true)).toEqual({ x: 119.5, y: 114.5, n: 1200, size: [400, 300] });
+
+  // an unlinked mask belongs to the document, not to the layer: it stays
+  await page.evaluate(() => {
+    const top = window.pigmentApp.doc.layers()[1];
+    top.mask = { ...top.mask, linked: false };
+    top.touch();
+  });
+  await runAwait(page, 'edit:auto-align', { projection: 'reposition' });
+  expect((await info(page)).layers[1]).toMatchObject({ x: 23, y: -14 });
+  expect(await blob(true)).toMatchObject({ x: 119.5, y: 114.5, n: 1200 });
+
+  // a hiding mask with a revealing disc, on a layer that is turned and scaled into place (Collage)
+  await page.evaluate(async () => {
+    const ab = window.__ab, app = window.pigmentApp, d = app.doc;
+    d.setActive(d.layers().at(-1));
+    await app.commands.run('layer:delete', undefined, 'api');
+    const scene = ab.scene(400, 300, 31);
+    const bg = d.layers()[0];
+    ab.setLayer(bg, ab.paint(400, 300, (ctx) => ctx.drawImage(scene, 0, 0)));
+    // the view shows scene point (191, 155) at its centre (200, 150)
+    const top = await ab.addLayer('View', ab.paint(400, 300, (ctx) => {
+      ctx.translate(200, 150);
+      ctx.rotate((6 * Math.PI) / 180);
+      ctx.scale(1.05, 1.05);
+      ctx.translate(-200 + 9, -150 - 5);
+      ctx.drawImage(scene, 0, 0);
+    }));
+    ab.setMask(top, (ctx) => {
+      ctx.beginPath();
+      ctx.arc(200, 150, 21, 0, Math.PI * 2);
+      ctx.fill();
+    }, { reveal: false });
+    // the reference is the locked background, so the disc must land on scene point (191, 155)
+    bg.locked = { ...bg.locked, position: true };
+    ab.select([bg, top]);
+  });
+  const disc = await blob(false);
+  expect(Math.abs(disc.x - 199.5)).toBeLessThan(0.6);
+  await runAwait(page, 'edit:auto-align', { projection: 'collage' });
+  await expect(lastToast(page)).toContainText('Aligned 2 layers (Collage)');
+  const [bx, by] = await page.evaluate(() => {
+    const bg = window.pigmentApp.doc.layers()[0];
+    return [bg.x, bg.y];
+  });
+  const moved = await blob(false);
+  expect(Math.abs(moved.x - (bx + 190.5)), `disc x ${moved.x}`).toBeLessThan(1.5);
+  expect(Math.abs(moved.y - (by + 154.5)), `disc y ${moved.y}`).toBeLessThan(1.5);
+  // scaled down by 1.05: its area shrinks by 1.05²
+  expect(Math.abs(moved.n - disc.n / (1.05 * 1.05))).toBeLessThan(disc.n * 0.04);
+  expect(errors).toEqual([]);
+});
+
 test('Auto-Blend adds seam masks, matches tones, focus-stacks and fills transparent areas, each as one undo step', async ({ page }) => {
   const errors = await openApp(page);
   await installHelpers(page);

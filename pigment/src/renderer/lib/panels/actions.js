@@ -89,7 +89,8 @@ export function install(app) {
     const cb = document.createElement('input');
     cb.type = 'checkbox';
     cb.className = 'act-check';
-    cb.checked = state !== false;
+    // mixed (some steps on) shows as indeterminate and unchecked, so a click switches every step on
+    cb.checked = state === true;
     cb.indeterminate = state === null;
     cb.title = title;
     cb.setAttribute('aria-label', title);
@@ -421,6 +422,11 @@ export function install(app) {
   // keyboard: arrows walk the visible rows, Delete removes, Enter edits, Space plays
   tree.addEventListener('keydown', (e) => {
     if (e.target !== tree) return;
+    // the rows on screen may be a frame behind the selection (a click just before the key): draw them first
+    if (pending) {
+      cancelAnimationFrame(pending);
+      render();
+    }
     const rows = [...tree.querySelectorAll('.act-row')];
     const at = rows.findIndex((r) => r.classList.contains('selected'));
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
