@@ -74,6 +74,14 @@ test('starts, opens an image from the command line, has the native menu and save
     // and it comes back through the preload bridge as PNG bytes
     const back = await window.evaluate(async () => Array.from((await window.pigment.readClipboardImage())?.slice(0, 4) ?? []));
     expect(back).toEqual([0x89, 0x50, 0x4e, 0x47]);
+
+    // module workers load from the app protocol under the page's CSP (Select and Mask would
+    // otherwise fall back to the main thread and freeze while it computes)
+    const engineMode = await window.evaluate(async () => {
+      const { SegmentEngine } = await import('./lib/select-mask/engine.js');
+      return new SegmentEngine().start();
+    });
+    expect(engineMode).toBe('worker');
   } finally {
     await close();
   }
