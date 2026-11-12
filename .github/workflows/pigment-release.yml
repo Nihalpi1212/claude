@@ -104,10 +104,18 @@ jobs:
             Free, open-source image editor for Windows, macOS and Linux: layers, groups, masks and
             clipping masks, smart objects with smart filters, 27 blend modes, adjustment and fill
             layers, layer styles, brushes, retouching (healing, clone, patch, dodge/burn), selections
-            (marquee, lasso, magic wand, quick selection, color range, quick mask), 18 adjustments,
-            the Camera Raw filter, 40+ filters, free transform, Warp, Perspective Warp and Puppet
-            Warp, text (on a path, stacked vertical), shapes with path operations and the pen tool,
-            printing, CMYK proof colours, PSD import/export. See pigment/README.md.
+            (marquee, lasso, magic wand, quick selection, color range, quick mask), free transform,
+            Warp, Perspective Warp and Puppet Warp, text (on a path, stacked vertical), shapes with
+            path operations and the pen tool, printing, PSD import/export. See pigment/README.md.
+
+            **New in 0.3**: the rest of Photoshop's Filter menu (71 filters) and the Filter Gallery
+            (47 effects), the Blur Gallery, Lens Correction, Color Lookup, HDR Toning, Match Color,
+            Replace Color, Apply Image and Calculations, Matting; image modes (Bitmap, Grayscale,
+            Duotone, Indexed Color, RGB, CMYK, Lab, Multichannel) and 8/16/32 bits per channel; GIF,
+            PNG-8, 16-bit PNG, TIFF and Targa files and Save for Web; Select Subject, Sky and Focus
+            Area, Select and Mask and the Object Selection tool; Actions with Batch, Image Processor
+            and the other Automate and Scripts commands; Auto-Align, Auto-Blend, Photomerge and stack
+            modes; Content-Aware Scale and Perspective Crop; Find, Isolate and Link Layers, File Info.
 
             **AI (optional)**: sign in with ChatGPT (uses your Plus/Pro plan) or add an OpenAI or
             Google Gemini API key in AI › AI Accounts for Generative Fill / Expand, Generate Image,
