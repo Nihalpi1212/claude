@@ -82,6 +82,9 @@ export async function drag(page, from, to, { steps = 12, modifiers = [] } = {}) 
 export async function confirmDialog(page) {
   await page.locator('.dialog-backdrop .dialog-buttons .btn.primary').last().click();
   await expect(page.locator('.dialog-backdrop')).toHaveCount(0);
+  // most dialogs do their full-size work and commit under app.busy right after closing (body.busy is set in the
+  // same task that removes the dialog): wait for it, so a caller can read pixels, history or settings at once
+  await page.waitForFunction(() => !document.body.classList.contains('busy'));
 }
 
 export const historyLength = (page) => page.evaluate(() => window.pigmentApp.doc.history.index + 1);

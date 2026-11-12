@@ -28,8 +28,15 @@ export const newId = (prefix = 'a') => `${prefix}${Date.now().toString(36)}${(co
 
 /** Command groups that never change an image: viewing, panels, help, tool switching, the actions' own commands. */
 const IGNORED_GROUPS = /^(view|window|help|tool|app|actions):/;
-/** ...except these, which Photoshop records too (guides, the colour swatches). */
-const RECORDED_ANYWAY = new Set(['view:new-guide', 'view:clear-guides', 'tool:fg-color', 'tool:bg-color', 'tool:swap-colors', 'tool:default-colors']);
+/**
+ * ...except these, which Photoshop records too (guides, the colour swatches), and the engine's own step
+ * commands: playing another action, and the replayable forms recorded in place of Save As, a layer
+ * picked by id, a tool-made selection and Free Transform.
+ */
+const RECORDED_ANYWAY = new Set([
+  'view:new-guide', 'view:clear-guides', 'tool:fg-color', 'tool:bg-color', 'tool:swap-colors', 'tool:default-colors',
+  'actions:play', 'actions:save-as', 'actions:select-layer', 'actions:set-selection', 'actions:transform',
+]);
 /** Commands outside those groups that are about the application, not the image. */
 const IGNORED_COMMANDS = new Set([
   'edit:undo', 'edit:redo', 'edit:step-backward', 'edit:step-forward', 'edit:preferences', 'edit:purge',

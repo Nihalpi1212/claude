@@ -112,7 +112,8 @@ test('Edit Contents opens the source in a tab; File › Save writes it back into
     const d = window.pigmentApp.doc;
     return { name: d.name, host: d.smartHost?.hostDoc?.id ?? null, layers: d.layers().length, dirty: d.history.dirty };
   });
-  expect(edit).toEqual({ name: 'Layer 2 (smart object)', host: hostId, layers: 2, dirty: false });
+  // actions (lib/actions.js): layer:new honours { name } since the replayability audit, so twoLayers() really names its layer "B"
+  expect(edit).toEqual({ name: 'B (smart object)', host: hostId, layers: 2, dirty: false });
   await paint(page, '#00ff00', [0, 0, 60, 60]);
   expect(await page.evaluate(() => window.pigmentApp.doc.history.dirty)).toBe(true);
   // the host is untouched until Save
@@ -136,7 +137,7 @@ test('Edit Contents opens the source in a tab; File › Save writes it back into
   // a second Edit Contents brings the open tab back instead of opening another one
   await runAwait(page, 'layer:smart-edit');
   await expect(page.locator('.tab')).toHaveCount(2);
-  expect(await page.evaluate(() => window.pigmentApp.doc.name)).toBe('Layer 2 (smart object)');
+  expect(await page.evaluate(() => window.pigmentApp.doc.name)).toBe('B (smart object)'); // actions (lib/actions.js): see above
   await runAwait(page, 'file:close');
   await expect(page.locator('.tab')).toHaveCount(1);
   expect(await page.evaluate(() => window.__pigmentTest.messages?.length ?? 0)).toBe(0);

@@ -71,6 +71,11 @@ class ActionsEngine {
     this.app.commands.invalidate();
   }
 
+  /** The playback options under the name the contract uses ({ mode, pauseSeconds }). */
+  get playbackOptions() {
+    return this.playback;
+  }
+
   get selectedSet() {
     return this.sets.find((s) => s.id === this.selection.set) ?? null;
   }
@@ -298,7 +303,7 @@ class ActionsEngine {
   menuCommands() {
     const out = [];
     for (const id of this.app.commands.commands.keys()) {
-      if (M.isIgnoredCommand(id) || /^(layer:select$|layer:move-to|layer:smart-filter$|image:crop-rect|file:open-paths|edit:transform$|filter:apply$|image:adjust$)/.test(id)) continue;
+      if (M.isIgnoredCommand(id) || /^(actions:|layer:select$|layer:move-to|layer:smart-filter$|image:crop-rect|file:open-paths|edit:transform$|filter:apply$|image:adjust$)/.test(id)) continue;
       if (this.app.stubbed?.includes(id)) continue;
       const group = GROUP_NAMES[/^([a-z]+):/.exec(id)?.[1]] ?? 'Other';
       out.push({ id, label: this.labelFor(id), group });
@@ -502,14 +507,38 @@ class ActionsEngine {
     }
     if (!fr) return;
     if (!fr.nested && e.source !== 'action' && /^edit:(undo|redo|step-backward|step-forward)$/.test(e.id)) return this.followUndo(d);
-    let event = { ...e, nested: fr.nested };
+    const entryNow = d?.history?.entries[d.history.index] ?? null;
+    if (fr.nested && fr.parent) {
+      // Part of another command. Should that command end up cancelled (Focus Area hands over to Select and
+      // Mask and cancels itself), what this one did is the step: it is kept with the parent until then.
+      if (e.cancelled) fr.parent.children.push(...fr.children);
+      else if (e.source !== 'action') fr.parent.children.push({ e, fr, doc: d, entry: fr.doc === d && entryNow !== fr.histEntry ? entryNow : null });
+      return;
+    }
+    if (e.cancelled && fr.children.length) {
+      for (const child of fr.children) {
+        // only work that is still there: a command that undid its own steps before cancelling left nothing to record
+        const at = child.entry ? child.doc?.history?.entries.indexOf(child.entry) ?? -1 : -1;
+        if (at < 0 || at > child.doc.history.index) continue;
+        this.recordEvent({ ...child.e, nested: false }, { ...child.fr, nested: false }, child);
+      }
+      return;
+    }
+    this.recordEvent({ ...e, nested: fr.nested }, fr, null);
+  }
+
+  /** Turns a finished top-level command into a step, or says why it cannot be one. */
+  recordEvent(e, fr, made) {
+    const rec = this.recording;
+    const d = this.app.doc;
+    let event = e;
     // commands whose own form cannot be replayed are recorded as the equivalent that can
     const sub = !fr.nested && !e.cancelled && e.source !== 'action' ? this.substitute(e, fr) : null;
     if (sub === false) return;
     if (sub) event = { ...event, ...sub, replayable: true };
     const decision = M.recordDecision(event, { label: sub?.label ?? this.labelFor(event.id, event.arg) });
     if (decision.record) {
-      const entry = d?.history?.entries[d.history.index];
+      const entry = made ? made.entry : d?.history?.entries[d.history.index];
       this.appendRecorded(decision.step, entry && fr.doc === d && entry !== fr.histEntry ? { doc: d, entry } : null);
     } else if (decision.reason === 'unreplayable') this.warnOnce(`u:${e.id}`, `${decision.label} could not be recorded: it has no replayable form`);
     else if (decision.reason === 'data') this.warnOnce(`d:${e.id}`, `${decision.label} could not be recorded: its settings cannot be stored in an action`);
@@ -769,6 +798,13 @@ class ActionsEngine {
       return this.play(found.action, { quiet, depth: depth + 1 });
     }
     const id = step.command;
+    if (id === 'actions:play' && kind === 'command') {
+      // a recorded "Play action" step: played here, as part of this playback (the command itself only starts one)
+      const found = step.arg && typeof step.arg === 'object' ? this.resolve(step.arg) : null;
+      if (!found) return { ok: false, reason: 'unavailable', message: `the action “${step.arg?.action ?? step.label}” does not exist` };
+      if (found.action === action) return { ok: false, reason: 'error', message: 'An action cannot play itself' };
+      return this.play(found.action, { quiet, depth: depth + 1 });
+    }
     if (this.batch?.overrideOpen && /^file:open(-paths)?$/.test(id)) return { ok: true }; // Batch: Override Action "Open" Commands
     if (!app.commands.has(id) || app.stubbed?.includes(id)) return { ok: false, reason: 'unavailable', message: `the command “${step.label}” does not exist in this version of Pigment` };
     // a running transform is applied first, as it would be when the command ran from the menu
@@ -782,10 +818,9 @@ class ActionsEngine {
     const r = await this.runCommand(id, kind === 'dialog' ? undefined : step.arg);
     if (r.error) return { ok: false, reason: 'error', message: r.error };
     if (r.cancelled) return { ok: false, reason: 'cancelled', stopped: true, message: `“${step.label}” was cancelled` };
-    // the engine's own step commands say when they could not do their work (a Play step whose action
-    // stopped, a layer that does not exist in this document)
+    // the engine's own step commands say when they could not do their work (a layer that does not exist
+    // in this document, a file that could not be saved)
     if (id.startsWith('actions:') && r.result && typeof r.result === 'object' && r.result.ok === false) {
-      if (id === 'actions:play') return { ok: false, reason: r.result.reason ?? 'error', stopped: r.result.stopped, message: r.result.message ?? `the action “${step.label}” did not finish` };
       return { ok: false, reason: 'unavailable', message: r.result.message ?? `“${step.label}” could not run` };
     }
     return { ok: true };
@@ -825,7 +860,8 @@ class ActionsEngine {
       // while that command still waits (Fit Image runs Image Size after its dialog). A key, menu or panel
       // gesture made while a slow command is pending (an AI request) is the user's own next step.
       const nested = sync > 0 || (frames.length > 0 && PROGRAMMATIC.test(source));
-      const fr = { id, source, nested, hadTransform: !!this.app.transformTool?.session, doc: d, histEntry: d?.history?.entries[d.history.index] ?? null, guides: d?.guides?.length ?? 0, done: false };
+      const parent = nested ? frames[frames.length - 1] ?? null : null;
+      const fr = { id, source, nested, parent, children: [], hadTransform: !!this.app.transformTool?.session, doc: d, histEntry: d?.history?.entries[d.history.index] ?? null, guides: d?.guides?.length ?? 0, done: false };
       frames.push(fr);
       const release = () => {
         const i = frames.indexOf(fr);
@@ -1041,6 +1077,12 @@ export function install(app) {
           ctx?.cancel();
           app.dialogs.toast(arg ? 'The action was not found' : 'Select an action to play', { kind: 'error' });
           return { ok: false, reason: 'missing' };
+        }
+        if (engine.recording?.action === found.action) {
+          // an action cannot play (or record a step that plays) itself
+          ctx?.cancel();
+          app.dialogs.toast('Stop recording before playing this action', { kind: 'error' });
+          return { ok: false, reason: 'recording' };
         }
         // recorded (while another action is being recorded) by names, so the step survives saving and loading
         ctx?.setReplayArg({ set: found.set?.name ?? null, action: found.action.name });

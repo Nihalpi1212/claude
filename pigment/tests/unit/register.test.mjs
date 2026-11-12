@@ -304,6 +304,8 @@ test('a weakly supported pair never short-cuts a chain of well supported neighbo
   assert.equal(alone[3].parent, 0);
   assert.deepEqual([alone[3].matrix[4], alone[3].matrix[5]], [-40, 70]);
   assert.equal(alone[3].matched, true);
+  // … and the entry says how far it can be trusted
+  assert.deepEqual(alone.map((t) => t.sound), [true, true, true, false]);
   // ... and a pair below the minimum is no pair at all
   const none = R.solveAlignment(sizes, [edge(0, 3, 40, -70, 7), chainEdges[0], chainEdges[1]], { projection: 'reposition', reference: 0 });
   assert.equal(none[3].matched, false);
@@ -365,30 +367,215 @@ test('focal length from a rotation homography, and the cylinder / sphere project
     // the centre stays, the sides are pulled in
     assert.deepEqual(R.projectPoint(type, 500, 200, 150, 200, 150), [0, 0]);
     assert.ok(Math.abs(u) < 120 && u > 0);
-    const img = scene(400, 300, 8, 120);
-    const warped = R.warpProjection(img, { type, focal: 500 });
-    assert.ok(warped.image.width < 400 && warped.image.width > 360, `${type} width ${warped.image.width}`);
-    // the output pixel at the origin samples the image centre (between four pixels: their mean)
-    const o = (-warped.y * warped.image.width - warped.x) * 4;
-    const mean = (img.data[(149 * 400 + 199) * 4] + img.data[(149 * 400 + 200) * 4] + img.data[(150 * 400 + 199) * 4] + img.data[(150 * 400 + 200) * 4]) / 4;
-    assert.ok(Math.abs(warped.image.data[o] - mean) <= 1 && warped.image.data[o + 3] === 255, `${warped.image.data[o]} vs ${mean}`);
-    // the top edge bows: the corner of the bounding box is empty, the middle of the second row is not
-    assert.equal(warped.image.data[3], 0);
-    assert.equal(warped.image.data[(2 * warped.image.width - warped.x) * 4 + 3], 255);
   }
-  // a rotating camera: Auto falls back to the cylinder when the plane would stretch without limit; forcing
-  // cylindrical gives translations
-  const big = scene(700, 300, 61, 480);
-  const crops = [crop(big, 0, 0, 320, 300), crop(big, 190, 0, 320, 300), crop(big, 380, 0, 320, 300)];
-  const cyl = R.alignImages(crops, { projection: 'cylindrical', focal: 4000 });
-  assert.equal(cyl.projection, 'cylindrical');
-  assert.equal(cyl.focal, 4000);
-  cyl.forEach((t) => {
-    assert.ok(t.matched && t.warp && t.warp.type === 'cylindrical' && t.matrix);
+});
+
+/** The 3 × 3 rotation of a camera that pans by `yaw`, tilts by `tilt` and rolls by `roll` (degrees). */
+function cameraRotation(yaw, tilt = 0, roll = 0) {
+  const r = Math.PI / 180;
+  const cy = Math.cos(yaw * r), sy = Math.sin(yaw * r), cx = Math.cos(tilt * r), sx = Math.sin(tilt * r), cz = Math.cos(roll * r), sz = Math.sin(roll * r);
+  return R.multiply3([cz, -sz, 0, sz, cz, 0, 0, 0, 1], R.multiply3([1, 0, 0, 0, cx, -sx, 0, sx, cx], [cy, 0, sy, 0, 1, 0, -sy, 0, cy]));
+}
+
+test('camera rotation from matched points: exact on clean data, close under noise, and its homography', () => {
+  const f = 900, ca = [399.5, 299.5], cb = [399.5, 299.5];
+  const Rt = cameraRotation(17, -3, 2);
+  const Ht = R.rotationHomography(Rt, f, ca, cb);
+  // K·R·K⁻¹: the principal point of a goes where the rotated axis points
+  const axis = [Rt[2] / Rt[8], Rt[5] / Rt[8]];
+  const [px, py] = R.applyH(Ht, ca[0], ca[1]);
+  assert.ok(Math.abs(px - (cb[0] + f * axis[0])) < 1e-9 && Math.abs(py - (cb[1] + f * axis[1])) < 1e-9);
+  const rnd = randomSeeded(12);
+  const gauss = () => Math.sqrt(-2 * Math.log(Math.max(1e-9, rnd()))) * Math.cos(2 * Math.PI * rnd());
+  const pairs = (noise) => Array.from({ length: 120 }, () => {
+    const x1 = 300 + rnd() * 480, y1 = 20 + rnd() * 560; // a strip on one side: the overlap of two panorama frames
+    const [x2, y2] = R.applyH(Ht, x1, y1);
+    return { x1, y1, x2: x2 + gauss() * noise, y2: y2 + gauss() * noise };
   });
-  // with a long lens the cylinder is almost flat: the translations are the shifts
-  assert.ok(Math.abs(cyl[0].matrix[4] + 190) < 3 && Math.abs(cyl[2].matrix[4] - 190) < 3, `${cyl[0].matrix[4]}, ${cyl[2].matrix[4]}`);
-  assert.ok(Math.abs(cyl[2].bounds.x - cyl[1].bounds.x - 190) <= 3);
+  const exact = R.fitRotation(pairs(0), null, f, ca, cb);
+  for (let i = 0; i < 9; i++) assert.ok(Math.abs(exact[i] - Rt[i]) < 1e-9, `element ${i}: ${exact[i]} for ${Rt[i]}`);
+  // a rotation: orthonormal, determinant 1
+  const RtR = R.multiply3([exact[0], exact[3], exact[6], exact[1], exact[4], exact[7], exact[2], exact[5], exact[8]], exact);
+  for (let i = 0; i < 9; i++) assert.ok(Math.abs(RtR[i] - (i % 4 === 0 ? 1 : 0)) < 1e-12);
+  // with half a pixel of noise the far side of the image, where there were no matches, is still within a pixel
+  const noisy = R.fitRotation(pairs(0.5), null, f, ca, cb);
+  const Hn = R.rotationHomography(noisy, f, ca, cb);
+  for (const [x, y] of [[0, 0], [0, 599], [799, 0], [799, 599], [100, 300]]) {
+    const [ex, ey] = R.applyH(Ht, x, y), [ax, ay] = R.applyH(Hn, x, y);
+    assert.ok(Math.hypot(ex - ax, ey - ay) < 1, `point ${x},${y} is off by ${Math.hypot(ex - ax, ey - ay).toFixed(2)} px`);
+  }
+  // a free homography through the same noisy strip bends away where the rotation does not
+  const Hfree = R.fitHomography(pairs(0.5));
+  const off = (H) => Math.hypot(...R.applyH(H, 0, 300).map((v, k) => v - R.applyH(Ht, 0, 300)[k]));
+  assert.ok(off(Hn) < off(Hfree), `rotation ${off(Hn).toFixed(2)} px, homography ${off(Hfree).toFixed(2)} px`);
+  // a start homography is honoured, an index list selects pairs, too few pairs give nothing
+  const started = R.fitRotation(pairs(0), [0, 5, 9, 33, 70], f, ca, cb, Ht);
+  for (let i = 0; i < 9; i++) assert.ok(Math.abs(started[i] - Rt[i]) < 1e-9);
+  assert.equal(R.fitRotation(pairs(0).slice(0, 1), null, f, ca, cb), null);
+});
+
+/** What a camera of focal length f sees of a far scene `master` (centred on its axis) after turning by Rm. */
+function cameraView(master, Rm, f, W, H) {
+  const out = createImage(W, H);
+  const mw = master.width, mh = master.height, md = master.data;
+  const Hc = R.multiply3([f, 0, 0, 0, f, 0, 0, 0, 1], R.multiply3(Rm, [1 / f, 0, 0, 0, 1 / f, 0, 0, 0, 1]));
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const [u, v] = R.applyH(Hc, x - (W - 1) / 2, y - (H - 1) / 2);
+    const mx = u + (mw - 1) / 2, my = v + (mh - 1) / 2;
+    const x0 = Math.floor(mx), y0 = Math.floor(my);
+    if (x0 < 0 || y0 < 0 || x0 >= mw - 1 || y0 >= mh - 1) continue;
+    const tx = mx - x0, ty = my - y0, i = (y0 * mw + x0) * 4, o = (y * W + x) * 4;
+    for (let k = 0; k < 3; k++) out.data[o + k] = (md[i + k] * (1 - tx) + md[i + 4 + k] * tx) * (1 - ty) + (md[i + mw * 4 + k] * (1 - tx) + md[i + mw * 4 + 4 + k] * tx) * ty;
+    out.data[o + 3] = 255;
+  }
+  return out;
+}
+
+test('a turning camera: Auto picks the cylinder for a wide pan, the cylinder and the sphere register tilt and roll too', () => {
+  const f = 500, W = 480, H = 360;
+  const master = scene(1500, 700, 61, 2400);
+  const turns = [[-24, 1.5, 1], [0, 0, 0], [23, -2, -1.2]];
+  const views = turns.map((t) => cameraView(master, cameraRotation(...t), f, W, H));
+  // neither a shift nor a similarity explains a turning camera; the outer frames reach 49° off the axis, where
+  // a plane draws them more than twice as wide, so Auto wraps the three on a cylinder
+  const auto = R.alignImages(views);
+  assert.equal(auto.projection, 'cylindrical');
+  assert.equal(auto.reference, 1);
+  assert.ok(auto.every((t) => t.matched && t.warp));
+  const plane = R.alignImages(views, { projection: 'perspective' });
+  // 98° of view: 2·f·tan(49°) = 1150 px on the plane, f·98° = 855 px on the cylinder
+  assert.ok(Math.abs(plane.bounds.width - 1150) < 40 && plane.bounds.height > 1.35 * H, `plane: ${plane.bounds.width} × ${plane.bounds.height}`);
+  assert.ok(Math.abs(auto.bounds.width - 855) < 25 && auto.bounds.height < 1.15 * H, `cylinder: ${auto.bounds.width} × ${auto.bounds.height}`);
+  // the reference is the frame in the middle of the panorama, wherever it is in the list (the outer two share a
+  // sliver at most: no pair to build on)
+  const shuffled = R.alignImages([views[1], views[0], views[2]], { projection: 'cylindrical' });
+  assert.equal(shuffled.reference, 0);
+  assert.ok(shuffled[1].bounds.x < -150 && shuffled[2].bounds.x > 150);
+  // a small turn stays on the plane
+  const small = R.alignImages([cameraView(master, cameraRotation(-5, 0.5, 0.4), f, W, H), views[1], cameraView(master, cameraRotation(6, -0.4, -0.3), f, W, H)]);
+  assert.equal(small.projection, 'perspective');
+  assert.ok(small.every((t) => t.matched && !t.warp && (t.index === small.reference) === !!t.matrix));
+  for (const type of ['cylindrical', 'spherical']) {
+    const r = R.alignImages(views, { projection: type });
+    assert.equal(r.projection, type);
+    assert.equal(r.reference, 1);
+    // the focal length comes out of the homographies
+    assert.ok(Math.abs(r.focal - f) < f * 0.03, `${type}: focal ${r.focal}`);
+    r.forEach((t, i) => {
+      assert.ok(t.matched, `${type}: image ${i}`);
+      assert.deepEqual(t.warp, { type, focal: r.focal, cx: (W - 1) / 2, cy: (H - 1) / 2 });
+      assert.equal(t.matrix, null);
+    });
+    // the reference stays centred and gets narrower (the surface pulls its sides in): half its width is f·atan(W / 2f)
+    const half = r.focal * Math.atan(W / 2 / r.focal);
+    assert.ok(Math.abs(r[1].bounds.x - ((W - 1) / 2 - half)) <= 2.5 && Math.abs(r[1].bounds.width - 2 * half) <= 5, `${type}: reference ${JSON.stringify(r[1].bounds)} for half ${half.toFixed(1)}`);
+    assert.ok(r[0].bounds.x < -150 && r[2].bounds.x > 150);
+    const arc = (24 + 23) * (Math.PI / 180) * f; // the pan between the outer frames, on the cylinder
+    assert.ok(Math.abs(r[2].bounds.x - r[0].bounds.x - arc) < 12, `${type}: ${r[2].bounds.x - r[0].bounds.x} for ${arc.toFixed(1)}`);
+    // rendered onto the surface the three agree where they overlap, although the camera was tilted and rolled
+    const rect = r.bounds;
+    const drawn = r.map((t, i) => R.applyAlignment(views[i], t, rect));
+    for (const [a, b] of [[0, 1], [1, 2]]) {
+      let diff = 0, count = 0;
+      for (let i = 0; i < drawn[a].data.length; i += 4 * 3) {
+        if (drawn[a].data[i + 3] !== 255 || drawn[b].data[i + 3] !== 255) continue;
+        diff += Math.abs(drawn[a].data[i] - drawn[b].data[i]);
+        count++;
+      }
+      // (rectangle edges resampled twice differ by a few levels; out of register the mean is above 30)
+      assert.ok(count > 8000 && diff / count < 9, `${type} ${a}-${b}: mean difference ${(diff / count).toFixed(2)} over ${count}`);
+    }
+    // projectImage fills the entry's bounds and nothing of the image is lost
+    const own = R.projectImage(views[0], r[0]);
+    assert.equal(own.width, r[0].bounds.width);
+    assert.equal(own.height, r[0].bounds.height);
+    let filled = 0;
+    for (let i = 3; i < own.data.length; i += 4) if (own.data[i] === 255) filled++;
+    assert.ok(filled > 0.8 * W * H, `${type}: ${filled} pixels drawn`);
+    // the corners of the bounding box are empty: the image's edges bow on the surface
+    assert.equal(own.data[3], 0);
+  }
+  // the centre of the reference is the surface's point of contact: that pixel is unchanged
+  const cyl = R.alignImages(views, { projection: 'cylindrical' });
+  const ref = R.applyAlignment(views[1], cyl[1], { x: 239, y: 179, width: 2, height: 2 });
+  const mean = (img, x, y) => (img.data[(y * W + x) * 4] + img.data[(y * W + x + 1) * 4] + img.data[((y + 1) * W + x) * 4] + img.data[((y + 1) * W + x + 1) * 4]) / 4;
+  assert.ok(Math.abs((ref.data[0] + ref.data[4] + ref.data[8] + ref.data[12]) / 4 - mean(views[1], 239, 179)) <= 6);
+  // a given focal length is used as it is; shifted crops of a flat picture are no rotation and keep their shift
+  const flat = scene(700, 300, 61, 480);
+  const crops = [crop(flat, 0, 0, 320, 300), crop(flat, 190, 0, 320, 300), crop(flat, 380, 0, 320, 300)];
+  const long = R.alignImages(crops, { projection: 'cylindrical', focal: 4000 });
+  assert.equal(long.focal, 4000);
+  assert.ok(long.every((t) => t.matched && t.warp.type === 'cylindrical'));
+  // with a long lens the cylinder is almost flat: the frames sit a shift apart
+  assert.ok(Math.abs(long[2].bounds.x - long[1].bounds.x - 190) <= 3 && Math.abs(long[1].bounds.x - long[0].bounds.x - 190) <= 3, `${long.map((t) => t.bounds.x)}`);
+  const [hx, hy] = R.applyH(long[2].homography, 100, 100);
+  assert.ok(Math.hypot(hx - 290, hy - 100) < 1.5, `${hx}, ${hy}`);
+});
+
+test('guided matching and the picture check: many more matches under a model, and no agreement with a wrong one', () => {
+  const big = scene(700, 420, 71, 600);
+  const a = crop(big, 0, 30, 400, 300), b = crop(big, 150, 50, 400, 300); // a point of a is 150 px further left and 20 px higher in b
+  const fa = R.detectFeatures(a), fb = R.detectFeatures(b);
+  assert.ok(fa.thumb && fa.thumb.width === 160 && fa.thumb.height === 120);
+  const right = [1, 0, -150, 0, 1, -20, 0, 0, 1];
+  const first = R.matchDescriptors(fa, fb);
+  const guided = R.guidedMatches(fa, fb, right, { radius: 4 });
+  const pts = R.matchedPoints(fa, fb, guided);
+  // every guided match lies where the model says, each feature of b is used once
+  assert.ok(pts.every((p) => Math.hypot(p.x2 - p.x1 + 150, p.y2 - p.y1 + 20) <= 4));
+  assert.equal(new Set(guided.map((m) => m.b)).size, guided.length);
+  assert.ok(guided.length > first.length * 0.9 && guided.length > 150, `${guided.length} guided, ${first.length} first`);
+  // under a wrong model far less is found (look-alike corners near any position: what `share` and the picture check are for)
+  const wrong = [1, 0, -90, 0, 1, 40, 0, 0, 1];
+  assert.ok(R.guidedMatches(fa, fb, wrong, { radius: 4 }).length < guided.length / 5);
+  assert.ok(R.guidedMatches(fa, fb, wrong, { radius: 4, maxDistance: 40 }).length < guided.length / 30);
+  // the pictures agree under the right model and not under the wrong one, whatever the exposure
+  const brighter = { width: b.width, height: b.height, data: b.data.map((v, i) => (i % 4 === 3 ? v : Math.min(255, v * 1.25 + 10))) };
+  const fbr = R.detectFeatures(brighter);
+  assert.ok(R.pictureAgreement(fa, fb, right) > 0.85, `${R.pictureAgreement(fa, fb, right)}`);
+  assert.ok(R.pictureAgreement(fa, fbr, right) > 0.8, `${R.pictureAgreement(fa, fbr, right)}`);
+  assert.ok(Math.abs(R.pictureAgreement(fa, fb, wrong)) < 0.2, `${R.pictureAgreement(fa, fb, wrong)}`);
+  // no verdict without an overlap
+  assert.equal(R.pictureAgreement(fa, fb, [1, 0, 5000, 0, 1, 0, 0, 0, 1]), null);
+  // registerPair reports how much of the overlap its models explain and what the pictures say
+  const e = R.registerPair(fa, fb);
+  assert.ok(e.matches > first.length * 0.9);
+  assert.ok(e.T.inliers.length > 0.9 * e.matches && e.T.share > 0.6 && e.T.share <= 1.05, `share ${e.T.share}`);
+  assert.ok(e.agreement > 0.85 && !e.ambiguous);
+  assert.ok(e.T.tight > 0.9 * e.T.inliers.length);
+  // the first round alone finds fewer
+  const seedOnly = R.registerPair(fa, fb, { guided: false });
+  assert.equal(seedOnly.matches, first.length);
+  assert.equal(seedOnly.agreement, undefined);
+});
+
+test('pairs the pictures do not agree with, or that fit in two ways, are no overlaps', () => {
+  const sizes = [0, 1, 2].map(() => ({ width: 300, height: 200 }));
+  const edge = (a, b, dx, inliers, extra = {}) => {
+    const idx = Array.from({ length: inliers }, (_, k) => k);
+    const pts = idx.map((k) => ({ x1: 10 + k, y1: 20, x2: 10 + k + dx, y2: 20 }));
+    const part = () => ({ inliers: idx, share: 0.6, tight: inliers });
+    return { a, b, pts, matches: inliers + 30, threshold: 3, T: { dx, dy: 0, matrix: [1, 0, 0, 1, dx, 0], ...part() }, S: { matrix: [1, 0, 0, 1, dx, 0], ...part() }, H: { H: [1, 0, dx, 0, 1, 0, 0, 0, 1], ...part() }, agreement: 0.9, ...extra };
+  };
+  const solve = (edges) => R.solveAlignment(sizes, edges, { projection: 'reposition', reference: 0 });
+  assert.deepEqual(solve([edge(0, 1, -100, 80), edge(1, 2, -100, 80)]).map((t) => t.matched), [true, true, true]);
+  // many inliers, but the pictures disagree (a row of windows fitted onto another row of windows)
+  assert.deepEqual(solve([edge(0, 1, -100, 80), edge(1, 2, -100, 80, { agreement: 0.2 })]).map((t) => t.matched), [true, true, false]);
+  // … or two placements fit about equally well
+  assert.deepEqual(solve([edge(0, 1, -100, 80), edge(1, 2, -100, 80, { ambiguous: true })]).map((t) => t.matched), [true, true, false]);
+  // … or the model explains only a sliver of what the two share
+  const thin = edge(1, 2, -100, 80);
+  for (const k of ['T', 'S', 'H']) thin[k].share = 0.05;
+  assert.deepEqual(solve([edge(0, 1, -100, 80), thin]).map((t) => t.matched), [true, true, false]);
+  // where the pictures cannot be compared (a flat overlap) the features decide alone
+  assert.deepEqual(solve([edge(0, 1, -100, 80), edge(1, 2, -100, 80, { agreement: null })]).map((t) => t.matched), [true, true, true]);
+  // a half-agreed pair is used, but never in place of a chain of sound ones
+  const iffy = solve([edge(0, 1, -100, 80), edge(1, 2, -100, 80), edge(0, 2, -170, 80, { agreement: 0.6 })]);
+  assert.equal(iffy[2].parent, 1);
+  assert.equal(iffy[2].matrix[4], 200);
+  const alone = solve([edge(0, 1, -100, 80), edge(0, 2, -170, 80, { agreement: 0.6 })]);
+  assert.equal(alone[2].parent, 0);
+  assert.equal(alone[2].matrix[4], 170);
 });
 
 test('seam masks split the overlap in the middle, feather the seam and leave no holes', () => {

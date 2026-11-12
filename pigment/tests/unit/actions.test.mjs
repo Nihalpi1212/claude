@@ -533,7 +533,7 @@ test('the Default Actions set holds the ten built-in actions as ordinary, serial
     assert.ok(M.isPlainData(s.arg), s.label);
     assert.equal(s.enabled, true);
     assert.equal(s.dialog, false);
-    assert.equal(M.isIgnoredCommand(s.command) && !s.command.startsWith('actions:'), false, `${s.command} would not be recordable`);
+    assert.equal(M.isIgnoredCommand(s.command), false, `${s.command} would not be recordable`);
   }
   // ids are unique across the set, and a second call gives an independent copy
   const ids = [sets[0].id, ...sets[0].actions.map((a) => a.id), ...steps.map((s) => s.id)];
@@ -594,4 +594,15 @@ test('a Liquify mesh is stored sparsely, restores within 1/16 px and scales to a
   assert.equal(big.dx[0], 0);
   // no data: an identity field
   assert.equal(decodeField(null, Field, 16, 16, 8).dx.every((v) => v === 0), true);
+});
+
+test('the engine\'s own step commands are recorded; its panel commands are not', () => {
+  for (const id of ['actions:play', 'actions:save-as', 'actions:select-layer', 'actions:set-selection', 'actions:transform']) {
+    assert.equal(M.isIgnoredCommand(id), false, id);
+    assert.equal(M.recordDecision(done(id, { action: 'Other' })).record, true, id);
+  }
+  for (const id of ['actions:record', 'actions:stop', 'actions:new-set', 'actions:new-action', 'actions:insert-stop', 'actions:toggle-step', 'actions:button-mode', 'actions:load', 'actions:save']) {
+    assert.equal(M.isIgnoredCommand(id), true, id);
+    assert.equal(M.recordDecision(done(id)).reason, 'ignored', id);
+  }
 });

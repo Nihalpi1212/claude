@@ -148,6 +148,7 @@ export async function buildContactSheets(app, o) {
           layer.parent = doc.root;
           doc.root.children.push(layer);
         };
+        let placed = 0; // an image that cannot be read leaves no hole in the grid
         for (let i = 0; i < pages[p].length; i++) {
           if (progress.cancelled) {
             result.cancelled = true;
@@ -156,7 +157,7 @@ export async function buildContactSheets(app, o) {
           const item = pages[p][i];
           progress.update(done, items.length, `Thumbnail ${done + 1} of ${items.length}`, item.name);
           await new Promise((r) => setTimeout(r)); // lets the dialog repaint and Cancel register between images
-          const cell = layout.cells[i];
+          const cell = layout.cells[placed];
           try {
             const src = await sourceImage(item);
             const place = placeThumbnail(cell, src.width, src.height, { rotate: o.rotate });
@@ -166,6 +167,7 @@ export async function buildContactSheets(app, o) {
               add(new TextLayer({ name: label, text: label, x: cell.x, y: cell.captionY + Math.round(fontPx * 0.15), width: cell.width, font: { ...font } }));
             }
             result.images++;
+            placed++;
           } catch (err) {
             result.errors.push({ file: item.path ?? item.name, message: err?.message ?? String(err) });
           }

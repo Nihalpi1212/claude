@@ -244,6 +244,7 @@ export function install(app) {
       if (Object.keys(step.arg).length > 14) lines.push(['…', `${Object.keys(step.arg).length - 14} more`]);
     } else if (step.arg !== undefined) lines.push(['Value', describeArg(step.arg, 64)]);
     else lines.push(['Settings', 'none']);
+    if (step.optional) lines.push(['Optional', 'skipped when the command is not available']);
     for (const [k, v] of lines) {
       const line = document.createElement('div');
       const key = document.createElement('span');

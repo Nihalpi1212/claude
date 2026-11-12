@@ -137,7 +137,7 @@ export function install(app) {
 
   const styled = (l) => !!l.styles && Object.values(l.styles).some((s) => s?.enabled);
 
-  function flattenEffects() {
+  async function flattenEffects() {
     const d = app.doc;
     if (!d) return 0;
     app.tools.active?.commit?.();
@@ -147,7 +147,9 @@ export function install(app) {
       return 0;
     }
     // rendered before the tree changes: each layer's effects are baked as they look now
-    const baked = layers.map((l) => [l, rasterizeLayer(l, d, { bakeStyles: true })]).filter(([, r]) => r);
+    // (about 0.2 s per styled 2000 × 1500 layer, so the whole job shows as busy)
+    const baked = await app.busy('Flattening layer effects…', async () => layers.map((l) => [l, rasterizeLayer(l, d, { bakeStyles: true })]).filter(([, r]) => r));
+    if (app.doc !== d) return 0;
     structural(app, 'Flatten all layer effects', () => {
       for (const [layer, r] of baked) {
         const parent = layer.parent, i = parent.children.indexOf(layer);

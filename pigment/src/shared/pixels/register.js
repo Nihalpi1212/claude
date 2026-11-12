@@ -1,11 +1,15 @@
 // Image registration for Auto-Align Layers, Photomerge and Load Files into Stack, plus the seam and
 // gain maths of Auto-Blend Layers (see ARCHITECTURE.md "Auto-Align, Auto-Blend, Photomerge, stacks").
 //
-// The pipeline is the classic feature one: FAST-9 corners on a reduced greyscale copy, an
-// orientation from the intensity centroid, a 256-bit rotated BRIEF descriptor (ORB), brute-force
-// Hamming matching with Lowe's ratio test and a cross check, then RANSAC for the motion model the
-// projection asks for (translation, similarity, homography). alignImages() chains the pairwise
-// models through the match graph to a reference image.
+// The pipeline is the classic feature one: FAST-9 corners on a small pyramid of a reduced greyscale
+// copy, an orientation from the intensity centroid, a 256-bit rotated BRIEF descriptor (ORB),
+// brute-force Hamming matching with Lowe's ratio test and a cross check, then RANSAC for the motion
+// model (translation, similarity, homography). Descriptors alone are not enough where a picture
+// repeats itself or the view changed a lot, so a pair is registered in two rounds (registerPair): the
+// first models guide a second matching by position, and a pair only counts as an overlap when its
+// model explains a fair share of the features there and the pictures themselves agree under it.
+// alignImages() chains the pairwise models through the match graph to a reference image; for the
+// cylindrical and spherical layouts the pairs are fitted as camera rotations.
 //
 // Everything is pure: typed arrays, plain loops, deterministic (seeded sampling) and DOM-free, so
 // it runs in Node unit tests. Coordinates are pixel indices (the centre of pixel (x, y) is (x, y)),
@@ -286,7 +290,7 @@ export const briefDescriptors = (gray, corners, opts = {}) => orbDescriptors(gra
  * The strongest corners are kept with a per-cell cap so they spread over the picture instead of crowding one
  * busy area.
  */
-export function detectFeatures(img, { maxSize = 1000, maxFeatures = 1500, levels = 3, scaleFactor = 1.3, threshold = 20, rotate = true } = {}) {
+export function detectFeatures(img, { maxSize = 1000, maxFeatures = 1500, levels = 5, scaleFactor = 1.3, threshold = 20, rotate = true } = {}) {
   const full = toGray(img);
   const scale = Math.min(1, maxSize / Math.max(full.width, full.height));
   const keypoints = [];
@@ -329,9 +333,9 @@ const THUMB_SIZE = 160;
 /**
  * How well two pictures agree under a model a -> b, judged on their thumbnails and independent of the features:
  * the correlation (−1 … 1) of the brightness steps between neighbouring thumbnail pixels where the two overlap.
- * Steps, not brightness, so that exposure and a sky-above-land layout do not count as agreement. A right model
- * scores 0.6 – 1; a wrong one that guided matching fell for (rows of identical windows that fit a row of other
- * windows) scores about 0. null when the overlap is too small or too flat to say.
+ * Steps, not brightness, so that exposure and a sky-above-land layout do not count as agreement; clipped areas
+ * are left out. A right model scores 0.6 – 1; a wrong one that guided matching fell for (rows of identical
+ * windows that fit a row of other windows) scores about 0. null when the overlap is too small or too flat to say.
  */
 export function pictureAgreement(fa, fb, H) {
   const ta = fa.thumb, tb = fb.thumb;
@@ -363,7 +367,10 @@ export function pictureAgreement(fa, fb, H) {
     const o = y * wb + x;
     const v = warped[o], r = warped[o + 1], d = warped[o + wb];
     if (v !== v || r !== r || d !== d) continue;
-    const ax = r - v, ay = d - v, bx = db[o + 1] - db[o], by = db[o + wb] - db[o];
+    // blown-out and blocked-up areas have no steps in one picture whatever the other shows (exposure brackets)
+    const bv = db[o], br = db[o + 1], bd = db[o + wb];
+    if (v < 5 || r < 5 || d < 5 || v > 250 || r > 250 || d > 250 || bv < 5 || br < 5 || bd < 5 || bv > 250 || br > 250 || bd > 250) continue;
+    const ax = r - v, ay = d - v, bx = br - bv, by = bd - bv;
     sab += ax * bx + ay * by;
     saa += ax * ax + ay * ay;
     sbb += bx * bx + by * by;
@@ -1045,11 +1052,19 @@ const STRONG = 3;
 const MIN_SEED = 6;
 /**
  * Two images overlap when one of their models, after guided matching, explains at least this share of the
- * features either image has in the claimed overlap. A real overlap scores 0.5 – 0.9; a chance model that guided
- * matching inflated (it will find look-alikes near any position in a busy picture, and whole rows of them where
- * windows or tiles repeat) stays below 0.12, because everything else in the "overlap" finds no partner.
+ * features either image has in the claimed overlap. A real overlap scores 0.3 – 0.9; a chance model that guided
+ * matching inflated (it will find look-alikes near any position in a busy picture) stays below 0.08, because
+ * everything else in the "overlap" finds no partner …
  */
-const MIN_SHARE = 0.18;
+const MIN_SHARE = 0.12;
+/**
+ * … and the pictures must agree under that model where they can be compared (pictureAgreement: right models
+ * score 0.6 – 1, wrong ones below 0.3). This is what catches a row of windows fitted onto another row of
+ * windows, which the features alone cannot tell from an overlap.
+ */
+const MIN_AGREEMENT = 0.5;
+/** Below this agreement a pair is used like a weakly supported one: only where nothing better reaches an image. */
+const SOLID_AGREEMENT = 0.75;
 
 /**
  * Registers images against a reference. `images` are ImageDataLike (or feature sets from detectFeatures with
@@ -1058,14 +1073,15 @@ const MIN_SHARE = 0.18;
  * the list), maxSize / maxFeatures (feature detection), focal (pixels, overrides the estimate), seed.
  *
  * Returns an array with one entry per image:
- *   { index, matched, homography: number[9], matrix: [a, b, c, d, e, f] | null, warp: { type, focal, cx, cy } | null,
- *     bounds: { x, y, width, height }, parent, inliers }
+ *   { index, matched, sound, homography: number[9], matrix: [a, b, c, d, e, f] | null,
+ *     warp: { type, focal, cx, cy } | null, bounds: { x, y, width, height }, parent, inliers }
  * in the pixel space of the reference image (its top-left pixel is (0, 0)). `homography` takes the image's pixels
  * to the plane of the reference image; `matrix` is the same model when it is affine (reposition, collage). The
  * cylindrical and spherical layouts set `warp`: the image is drawn by projectImage() onto a cylinder / sphere
  * around the reference camera (radius `focal`, touching the reference image at its centre (cx, cy)) and fills
  * `bounds` there. An image that could not be connected to the reference has matched: false and stays where it
- * is. The array also carries `projection` (the one used: 'auto' resolves to one of the others), `reference`,
+ * is; `sound` is false when the pair that connects it is thinly supported (few inliers, or pictures that only
+ * half agree). The array also carries `projection` (the one used: 'auto' resolves to one of the others), `reference`,
  * `bounds` (the union), `focal`, `pairs` ([{ a, b, matches, inliers }]) and `samples()` (the matched points of
  * the pairs that were used).
  *
@@ -1100,24 +1116,6 @@ export function candidatePairs(n) {
   const out = [];
   for (let a = 0; a < n; a++) for (let b = a + 1; b < n && b - a <= window; b++) out.push([a, b]);
   return out;
-}
-
-/**
- * A homography among matches of which only a small share is right (a wide-angle pair seen from two
- * directions, repeating structures): four random matches are then almost never all right, but two are, so a
- * similarity with a loose threshold gathers the right ones first and the homography is drawn from those.
- */
-function seedHomography(pts, threshold, seed) {
-  let best = ransacHomography(pts, { threshold, seed });
-  if (best.inliers.length >= 0.4 * pts.length) return best;
-  const loose = ransacSimilarity(pts, { threshold: threshold * 4, seed });
-  if (loose.inliers.length < 8) return best;
-  const sub = loose.inliers.map((k) => pts[k]);
-  const h = ransacHomography(sub, { threshold, seed });
-  if (!h.H) return best;
-  const all = polish(pts, h.H, { size: 4, threshold, error: errH, refit: (idx) => fitHomography(pts, idx) });
-  if (all.model && all.inliers.length > best.inliers.length) best = { H: all.model, inliers: all.inliers };
-  return best;
 }
 
 /**
@@ -1182,70 +1180,121 @@ export function guidedMatches(fa, fb, H, { radius = 4, maxDistance = 80 } = {}) 
 
 /**
  * Matches two feature sets (detectFeatures) and fits the three motion models a -> b:
- * { pts, matches, threshold, T, S, H } (ransacTranslation / ransacSimilarity / ransacHomography results), or
- * null when the two have too few matches to be the same scene.
+ * { pts, matches, threshold, T, S, H, agreement } (ransacTranslation / ransacSimilarity / ransacHomography
+ * results, each with `share` and `tight`: see MIN_SHARE and solveAlignment), or null when the two have too
+ * few matches to be the same scene.
  *
- * Two rounds. The descriptors alone give the first matches and models (the seed); the best seed then guides
- * a second matching by position (guidedMatches), which finds several times as many correspondences, spread
- * over the whole overlap, and the models are fitted again on those. `guided: false` stops after the seed.
+ * Two rounds. The descriptors alone give the first matches and a few candidate models (the seeds). Each seed
+ * then guides a second matching by position (guidedMatches), which finds several times as many
+ * correspondences, spread over the whole overlap, and the models are fitted again on those. The candidate the
+ * pictures themselves agree with (pictureAgreement) wins. `guided: false` stops after the seeds.
  */
 export function registerPair(fa, fb, { seed = 1, guided = true } = {}) {
   const matches = matchDescriptors(fa, fb);
   if (matches.length < MIN_SEED) return null;
-  let pts = matchedPoints(fa, fb, matches);
+  const pts = matchedPoints(fa, fb, matches);
   // features found on a reduced copy are only that precise in full-size pixels
   const threshold = 3 / Math.min(1, fa.scale ?? 1, fb.scale ?? 1);
-  let T = ransacTranslation(pts, { threshold, seed });
-  let S = ransacSimilarity(pts, { threshold, seed });
-  let H = pts.length >= 8 ? seedHomography(pts, threshold, seed) : { H: null, inliers: [] };
-  let count = matches.length;
-  if (guided) {
-    // the seed with the most support, the simpler model when they are close (it extrapolates better)
-    const nt = T.inliers.length, ns = S.inliers.length, nh = H.H ? H.inliers.length : 0;
-    let model = null;
-    if (nh >= MIN_SEED && nh > 1.15 * Math.max(nt, ns)) model = H.H;
-    else if (ns >= MIN_SEED && ns > 1.15 * nt) model = matrixToH(S.matrix);
-    else if (nt >= MIN_SEED) model = matrixToH(T.matrix);
-    else if (ns >= MIN_SEED) model = matrixToH(S.matrix);
-    else if (nh >= MIN_SEED) model = H.H;
-    if (!model) return null;
-    // a wide search first (a seed from a corner of the overlap is off at the other end), then a close one
-    for (const radius of [4 * threshold, 2 * threshold]) {
-      const again = guidedMatches(fa, fb, model, { radius });
-      if (again.length < MIN_SEED) return null;
-      pts = matchedPoints(fa, fb, again);
-      count = again.length;
-      T = ransacTranslation(pts, { threshold, seed });
-      S = ransacSimilarity(pts, { threshold, seed });
-      H = pts.length >= 8 ? ransacHomography(pts, { threshold, seed }) : { H: null, inliers: [] };
-      if (H.H && H.inliers.length >= Math.max(T.inliers.length, S.inliers.length)) model = H.H;
-      else if (S.matrix && S.inliers.length >= T.inliers.length) model = matrixToH(S.matrix);
-      else if (T.matrix) model = matrixToH(T.matrix);
-      else return null;
-    }
+  const T = ransacTranslation(pts, { threshold, seed });
+  const S = ransacSimilarity(pts, { threshold, seed });
+  const H = pts.length >= 8 ? ransacHomography(pts, { threshold, seed }) : { H: null, inliers: [] };
+  if (!guided) return { pts, matches: matches.length, threshold, T, S, H };
+
+  // Seeds, best supported first. Where look-alikes abound (windows, tiles) or the view changed a lot, only a
+  // few matches in a hundred are right: four random ones are then never all right, but two often are, so a
+  // similarity with a loose threshold gathers them and a homography is drawn from what it gathered.
+  const seeds = [];
+  const add = (model, support) => {
+    if (model && support >= MIN_SEED) seeds.push({ model, support });
+  };
+  add(H.H, H.inliers.length);
+  add(S.matrix && matrixToH(S.matrix), S.inliers.length);
+  add(T.matrix && matrixToH(T.matrix), T.inliers.length);
+  const loose = ransacSimilarity(pts, { threshold: threshold * 4, iterations: 4000, seed });
+  if (loose.matrix && loose.inliers.length >= MIN_SEED) {
+    const sub = loose.inliers.map((k) => pts[k]);
+    const h = sub.length >= 8 ? ransacHomography(sub, { threshold, seed }) : { H: null, inliers: [] };
+    if (h.H && h.inliers.length >= MIN_SEED) add(h.H, h.inliers.length);
+    // the similarity itself too: it is loosely held, but it does not bend away outside the matches it was drawn from
+    seeds.push({ model: matrixToH(loose.matrix), support: loose.inliers.length / 2 });
   }
-  const edge = { pts, matches: count, threshold, T, S, H };
-  if (guided) {
-    // how much of what the two images share each model explains (see MIN_SHARE), and how many matches it fits closely
-    const fill = (r, model, error) => {
-      if (!model) return;
-      const hm = model.length === 9 ? model : matrixToH(model);
-      const inv = invert3(hm);
-      const seen = Math.max(featuresInside(fa, fb, hm), inv ? featuresInside(fb, fa, inv) : 0);
-      r.share = r.inliers.length / Math.max(1, seen);
-      const t2 = (threshold * threshold) / 4;
-      let tight = 0;
-      for (const p of pts) if (error(model, p) <= t2) tight++;
-      r.tight = tight;
-    };
-    fill(T, T.matrix, errM);
-    fill(S, S.matrix, errM);
-    fill(H, H.H, errH);
-    // and what the pictures themselves say about the best supported model
-    const top = H.H && H.inliers.length >= Math.max(T.inliers.length, S.inliers.length) ? H.H : S.matrix && S.inliers.length >= T.inliers.length ? matrixToH(S.matrix) : T.matrix ? matrixToH(T.matrix) : null;
-    edge.agreement = top ? pictureAgreement(fa, fb, top) : null;
+  seeds.sort((p, q) => q.support - p.support);
+
+  let best = null;
+  const tried = [], found = [];
+  const cx = (fa.width ?? 0) / 2, cy = (fa.height ?? 0) / 2;
+  const middle = (m) => applyH(m, cx, cy);
+  for (const s of seeds) {
+    // two seeds that put the middle of the image in the same place are the same hypothesis
+    const [mx, my] = middle(s.model);
+    if (!Number.isFinite(mx) || !Number.isFinite(my) || tried.some(([x, y]) => Math.hypot(x - mx, y - my) <= 2 * threshold)) continue;
+    tried.push([mx, my]);
+    const c = guidedCandidate(fa, fb, s.model, threshold, seed);
+    if (!c) continue;
+    c.sure = c.agreement !== null && c.agreement >= MIN_AGREEMENT;
+    c.at = middle(c.model);
+    found.push(c);
+    if (!best || (c.sure && !best.sure) || (c.sure === best.sure && c.support > best.support)) best = c;
+    // plainly right: the other seeds would only find it again
+    if (c.sure && c.agreement >= SOLID_AGREEMENT && c.top.share >= 2 * MIN_SHARE) break;
   }
-  return edge;
+  if (!best) return null;
+  // Two different placements with much the same support: the pictures repeat (a facade, a fence, tiles) and
+  // the features cannot say which repeat belongs to which. Such a pair is reported, but as no overlap.
+  const ambiguous = found.some((c) => c !== best && c.support >= 0.7 * best.support && Math.hypot(c.at[0] - best.at[0], c.at[1] - best.at[1]) > 8 * threshold);
+  return { pts: best.pts, matches: best.pts.length, threshold, T: best.T, S: best.S, H: best.H, agreement: best.agreement, ambiguous };
+}
+
+/**
+ * One seed taken through guided matching: the three models fitted on the matches found by position, with how
+ * much of the overlap each explains (`share`), how many matches it fits closely (`tight`), and what the pictures
+ * say about the best of them (`agreement`). null when the seed leads nowhere.
+ */
+function guidedCandidate(fa, fb, start, threshold, seed) {
+  let model = start;
+  let pts = null, T = null, S = null, H = null;
+  // A wide search first (a seed drawn from one corner of the overlap is off at the other end), then closer ones.
+  // Each round refits the model on what it found, so the fit spreads from where the seed was right over the
+  // whole overlap; it stops once a round finds little more.
+  let support = 0;
+  const radii = [4, 3, 2, 2, 2, 2];
+  for (let round = 0; round < radii.length; round++) {
+    const again = guidedMatches(fa, fb, model, { radius: radii[round] * threshold });
+    if (again.length < MIN_SEED) return null;
+    pts = matchedPoints(fa, fb, again);
+    T = ransacTranslation(pts, { threshold, seed });
+    S = ransacSimilarity(pts, { threshold, seed });
+    H = pts.length >= 8 ? ransacHomography(pts, { threshold, seed }) : { H: null, inliers: [] };
+    let now;
+    if (H.H && H.inliers.length >= Math.max(T.inliers.length, S.inliers.length)) {
+      model = H.H;
+      now = H.inliers.length;
+    } else if (S.matrix && S.inliers.length >= T.inliers.length) {
+      model = matrixToH(S.matrix);
+      now = S.inliers.length;
+    } else if (T.matrix) {
+      model = matrixToH(T.matrix);
+      now = T.inliers.length;
+    } else return null;
+    if (round >= 2 && now <= support * 1.05) break;
+    support = now;
+  }
+  const fill = (r, m, error) => {
+    if (!m) return;
+    const hm = m.length === 9 ? m : matrixToH(m);
+    const inv = invert3(hm);
+    const seen = Math.max(featuresInside(fa, fb, hm), inv ? featuresInside(fb, fa, inv) : 0);
+    r.share = r.inliers.length / Math.max(1, seen);
+    const t2 = (threshold * threshold) / 4;
+    let tight = 0;
+    for (const p of pts) if (error(m, p) <= t2) tight++;
+    r.tight = tight;
+  };
+  fill(T, T.matrix, errM);
+  fill(S, S.matrix, errM);
+  fill(H, H.H, errH);
+  const top = H.H && H.inliers.length >= Math.max(T.inliers.length, S.inliers.length) ? H : S.matrix && S.inliers.length >= T.inliers.length ? S : T;
+  return { pts, T, S, H, top, model, support: top.inliers.length, agreement: pictureAgreement(fa, fb, model) };
 }
 
 /** How many features of A a model a -> b puts inside image B (inside the border within which B can have features). */
@@ -1276,8 +1325,10 @@ export function solveAlignment(sizes, edges, opts = {}) {
   const part = (e, kind) => (kind === 'translation' ? e.T : kind === 'similarity' ? e.S : e.H);
   const count = (e, kind) => part(e, kind).inliers.length;
   const KINDS = ['translation', 'similarity', 'homography'];
-  // a real overlap: some model has enough inliers and explains enough of it (pairs without `share` were not guided)
-  const real = new Map(edges.map((e) => [e, KINDS.some((k) => count(e, k) >= MIN_INLIERS[k] && (part(e, k).share === undefined || part(e, k).share >= MIN_SHARE))]));
+  // a real overlap: some model has enough inliers and explains enough of it, and the pictures agree where they
+  // can be compared (pairs without `share` / `agreement` were not guided, or were made by hand)
+  const agrees = (e) => !e.ambiguous && (e.agreement === undefined || e.agreement === null || e.agreement >= MIN_AGREEMENT);
+  const real = new Map(edges.map((e) => [e, agrees(e) && KINDS.some((k) => count(e, k) >= MIN_INLIERS[k] && (part(e, k).share === undefined || part(e, k).share >= MIN_SHARE))]));
   const valid = (e, kind) => real.get(e) && count(e, kind) >= MIN_INLIERS[kind] && (kind !== 'homography' || !!e.H.H);
 
   // ---- which projection ----
@@ -1297,7 +1348,11 @@ export function solveAlignment(sizes, edges, opts = {}) {
   const solve = (proj) => {
     const kind = proj === 'reposition' ? 'translation' : proj === 'collage' ? 'similarity' : 'homography';
     const usable = edges.filter((e) => valid(e, kind));
-    const reference = pickReference(n, usable, opts.reference);
+    // a pair is sound when it has plenty of inliers and the pictures agree well; anything less is "weak": used only
+    // to reach an image that nothing sound reaches (see MIN_INLIERS)
+    const strongAt = STRONG * MIN_INLIERS[kind];
+    const solid = (e) => e.agreement === undefined || e.agreement === null || e.agreement >= SOLID_AGREEMENT;
+    const reference = pickReference(n, usable.map((e) => ({ a: e.a, b: e.b, inliers: count(e, kind), weak: count(e, kind) < strongAt || !solid(e) })), opts.reference);
     let focal = null;
     const models = new Map(); // edge -> { forward: H (a -> b), backward: H (b -> a), inliers }
     const curved = proj === 'cylindrical' || proj === 'spherical';
@@ -1319,6 +1374,7 @@ export function solveAlignment(sizes, edges, opts = {}) {
         my /= e.H.inliers.length;
         let forward = e.H.H[6] * mx + e.H.H[7] * my + e.H.H[8] < 0 ? e.H.H.map((v) => -v) : e.H.H;
         let inliers = e.H.inliers.length;
+        let turned = false; // the pair is a camera rotation (for that focal length)
         let rot = fitRotation(e.pts, e.H.inliers, focal, ca, cb, forward);
         const t2 = e.threshold * e.threshold * 2.25; // a lens is no pinhole: half as much again as for the free model
         for (let round = 0; rot && round < 2; round++) {
@@ -1328,10 +1384,11 @@ export function solveAlignment(sizes, edges, opts = {}) {
           if (idx.length < 0.8 * e.H.inliers.length) break;
           forward = Hr;
           inliers = idx.length;
+          turned = true;
           rot = round ? null : fitRotation(e.pts, idx, focal, ca, cb, Hr);
         }
         const backward = inverse3(forward);
-        if (backward) models.set(e, { forward, backward, inliers });
+        if (backward) models.set(e, { forward, backward, inliers, turned });
       }
     } else {
       for (const e of usable) {
@@ -1343,12 +1400,13 @@ export function solveAlignment(sizes, edges, opts = {}) {
     // shortest paths from the reference: the fewest chained models (each adds its error), the best supported
     // parent among equals. A weak model costs more than any chain of strong ones: it may be a chance agreement
     // between two images that do not overlap at all, and must not short-cut a real chain of neighbours.
-    const strongAt = STRONG * MIN_INLIERS[kind];
     const chain = new Array(n).fill(null);
     const parent = new Array(n).fill(-1);
     const support = new Array(n).fill(0);
     const cost = new Array(n).fill(Infinity);
     const settled = new Array(n).fill(false);
+    const via = new Array(n).fill(null);
+    const weak = new Array(n).fill(false);
     chain[reference] = IDENTITY3.slice();
     cost[reference] = 0;
     for (;;) {
@@ -1359,11 +1417,14 @@ export function solveAlignment(sizes, edges, opts = {}) {
       for (const [e, m] of models) {
         const other = e.a === p ? e.b : e.b === p ? e.a : -1;
         if (other < 0 || settled[other]) continue;
-        const c = cost[p] + 1 + (m.inliers >= strongAt ? 0 : n);
+        const sound = m.inliers >= strongAt && solid(e);
+        const c = cost[p] + 1 + (sound ? 0 : n);
         if (c < cost[other] || (c === cost[other] && m.inliers > support[other])) {
           cost[other] = c;
           parent[other] = p;
           support[other] = m.inliers;
+          via[other] = m;
+          weak[other] = !sound;
           const H = multiply3(chain[p], e.a === other ? m.forward : m.backward); // other -> p -> reference
           chain[other] = curved ? rescale3(H) : normalise3(H);
         }
@@ -1384,19 +1445,35 @@ export function solveAlignment(sizes, edges, opts = {}) {
         bounds = bounds ?? { x: 0, y: 0, width: w, height: h };
       }
       const affine = !warp && Math.abs(H[6]) < 1e-12 && Math.abs(H[7]) < 1e-12;
-      out.push({ index: i, matched, homography: H, matrix: affine ? hToMatrix(H) : null, warp: warp ? { ...warp } : null, bounds, parent: parent[i], inliers: support[i] });
+      out.push({ index: i, matched, sound: matched && !weak[i], homography: H, matrix: affine ? hToMatrix(H) : null, warp: warp ? { ...warp } : null, bounds, parent: parent[i], inliers: support[i] });
       union = unionBounds(union, bounds);
     }
-    return { out, union, reference, focal, degenerate };
+    // for Auto: is this a camera turning on the spot, and how far off the reference axis does the picture reach
+    const turning = curved && via.some(Boolean) && via.every((m) => !m || m.turned);
+    const reach = curved && union ? [Math.max(Math.abs(union.x - warp.cx), Math.abs(union.x + union.width - 1 - warp.cx)) / focal, Math.max(Math.abs(union.y - warp.cy), Math.abs(union.y + union.height - 1 - warp.cy)) / focal] : null;
+    return { out, union, reference, focal, degenerate, turning, reach };
   };
 
   let solved = solve(projection);
-  // a wide panorama stretches without limit on a plane: Auto falls back to the cylinder then
+  // A wide panorama stretches without limit on a plane: Auto goes to the cylinder then. That is when the plane
+  // cannot hold it at all, or needs far more canvas than the images have, or when the camera turned on the spot
+  // and its frames reach more than 45° off the reference axis (where a plane draws them twice as wide). A
+  // panorama that also reaches 45° up or down goes on the sphere, which does not stretch towards the poles.
   if (wanted === 'auto' && projection === 'perspective') {
     const area = sizes.reduce((s, z) => s + z.width * z.height, 0);
-    if (solved.degenerate || solved.union.width * solved.union.height > 2.5 * area) {
+    let wide = solved.degenerate || solved.union.width * solved.union.height > 2.5 * area;
+    let cylinder = null;
+    if (!wide) {
+      cylinder = solve('cylindrical');
+      wide = cylinder.turning && !cylinder.degenerate && cylinder.reach[0] > Math.PI / 4;
+    }
+    if (wide) {
       projection = 'cylindrical';
-      solved = solve(projection);
+      solved = cylinder ?? solve('cylindrical');
+      if (solved.turning && solved.reach[1] > 1) {
+        projection = 'spherical';
+        solved = solve('spherical');
+      }
     }
   }
   const result = solved.out;
@@ -1421,29 +1498,40 @@ export function solveAlignment(sizes, edges, opts = {}) {
   return result;
 }
 
-/** The reference image: the asked one, else the centre of the match graph (ties: nearest to the middle of the list). */
+/**
+ * The reference image: the asked one, else the centre of the match graph. `edges` are [{ a, b, inliers, weak }].
+ * The centre reaches the most images, over the shortest longest chain (a weak pair counts as longer than any
+ * chain of sound ones), with the best supported pairs of its own; ties go to the middle of the list.
+ */
 function pickReference(n, edges, asked) {
   if (Number.isInteger(asked) && asked >= 0 && asked < n) return asked;
   const adj = Array.from({ length: n }, () => []);
+  const own = new Array(n).fill(0);
   for (const e of edges) {
-    adj[e.a].push(e.b);
-    adj[e.b].push(e.a);
+    adj[e.a].push([e.b, e.weak ? n + 1 : 1]);
+    adj[e.b].push([e.a, e.weak ? n + 1 : 1]);
+    own[e.a] += e.inliers;
+    own[e.b] += e.inliers;
   }
   const mid = (n - 1) / 2;
   let best = Math.floor(mid), bestKey = null;
   for (let s = 0; s < n; s++) {
-    const dist = new Array(n).fill(-1);
+    // shortest paths from s (a handful of images: the plain quadratic search)
+    const dist = new Array(n).fill(Infinity);
+    const done = new Array(n).fill(false);
     dist[s] = 0;
-    const queue = [s];
-    let reached = 1, far = 0;
-    for (let q = 0; q < queue.length; q++) for (const o of adj[queue[q]]) if (dist[o] < 0) {
-      dist[o] = dist[queue[q]] + 1;
-      far = Math.max(far, dist[o]);
+    let reached = 0, far = 0;
+    for (;;) {
+      let p = -1;
+      for (let i = 0; i < n; i++) if (!done[i] && dist[i] < Infinity && (p < 0 || dist[i] < dist[p])) p = i;
+      if (p < 0) break;
+      done[p] = true;
       reached++;
-      queue.push(o);
+      far = Math.max(far, dist[p]);
+      for (const [o, w] of adj[p]) if (dist[p] + w < dist[o]) dist[o] = dist[p] + w;
     }
-    // most images reached, then the shortest longest chain, then the middle of the list
-    const key = [-reached, far, Math.abs(s - mid), s];
+    // (support in half-octave steps: a few inliers more or less must not decide between images that overlap alike)
+    const key = [-reached, far, -Math.round(Math.log2(own[s] + 1) * 2), Math.abs(s - mid), s];
     let better = !bestKey;
     for (let i = 0; !better && i < key.length; i++) {
       if (key[i] === bestKey[i]) continue;

@@ -435,6 +435,12 @@ test('recording follows Undo, records tool selections and Free Transform, and sk
   await showPanel(page);
   await recordNewAction(page, 'Mixed');
   await runAwait(page, 'image:adjust-invert');
+  // Fade has no replayable form: recording says so (once) instead of storing a step that would ask again
+  await run(page, 'edit:fade');
+  await expect(page.locator('.dialog')).toContainText('Fade');
+  await confirmAndSettle(page);
+  await expect(page.locator('.toast', { hasText: 'Fade could not be recorded: it has no replayable form' })).toBeVisible();
+  expect((await stepsOf(page, 'Mixed')).map((s) => s.command)).toEqual(['image:adjust-invert']);
   await runAwait(page, 'filter:gaussian-blur', { radius: 2 });
   expect((await stepsOf(page, 'Mixed')).map((s) => s.command)).toEqual(['image:adjust-invert', 'filter:gaussian-blur']);
   // Undo takes the step back out, Redo returns it
@@ -464,6 +470,25 @@ test('recording follows Undo, records tool selections and Free Transform, and sk
   steps = await stepsOf(page, 'Mixed');
   expect(steps.map((s) => s.command)).toEqual(['image:adjust-invert', 'actions:set-selection', 'select:none', 'actions:transform']);
   expect(steps[3].arg.shift).toEqual([30, 10]);
+
+  // a command that hands its work to another one and cancels itself: the other one is the step,
+  // unless the first took the work back before it cancelled
+  await page.evaluate(() => {
+    const app = window.pigmentApp;
+    app.commands.register('test:hand-over', { dialog: true, run: async (arg, ctx) => {
+      await app.commands.run('image:adjust-posterize', { levels: 3 }, 'api');
+      ctx.cancel();
+    } });
+    app.commands.register('test:take-back', { dialog: true, run: async (arg, ctx) => {
+      await app.commands.run('image:adjust-posterize', { levels: 2 }, 'api');
+      app.doc.history.undo();
+      ctx.cancel();
+    } });
+  });
+  await runAwait(page, 'test:hand-over');
+  await runAwait(page, 'test:take-back');
+  steps = await stepsOf(page, 'Mixed');
+  expect(steps.map((s) => [s.command, s.arg?.levels ?? null]).slice(4)).toEqual([['image:adjust-posterize', 3]]);
   await stopRecording(page);
   const recorded = await docHash(page);
   await closeDoc(page);
@@ -506,6 +531,11 @@ test('dialog commands record their settings and replay silently (replayability a
   await run(page, 'image:rotate-arbitrary');
   await setNumber(page, 'angle', 10);
   await confirmAndSettle(page);
+  // View > New Guide asks for a position and reports nothing: the step is the guide it added
+  await run(page, 'view:new-guide');
+  await dialogReady(page);
+  await page.locator('.dialog input').first().fill('h40');
+  await confirmAndSettle(page);
   await run(page, 'layer:style');
   await expect(page.locator('.dialog')).toContainText('Layer Style');
   await confirmAndSettle(page);
@@ -515,13 +545,14 @@ test('dialog commands record their settings and replay silently (replayability a
 
   const steps = await stepsOf(page, 'Dialogs');
   expect(steps.map((s) => s.command)).toEqual([
-    'image:size', 'image:canvas-size', 'layer:new', 'select:all', 'edit:fill', 'edit:stroke', 'select:feather', 'select:contract', 'image:rotate-arbitrary', 'layer:style', 'image:duplicate',
+    'image:size', 'image:canvas-size', 'layer:new', 'select:all', 'edit:fill', 'edit:stroke', 'select:feather', 'select:contract', 'image:rotate-arbitrary', 'view:new-guide', 'layer:style', 'image:duplicate',
   ]);
   // every dialog step carries the settings its dialog was closed with
   for (const s of steps) if (s.command !== 'select:all') expect(s.arg, s.command).toBeTruthy();
   expect(steps[6].arg).toEqual({ amount: 4 });
   expect(steps[7].arg).toEqual({ amount: 6 });
   expect(steps[8].arg).toEqual({ angle: 10 });
+  expect(steps[9].arg).toEqual({ axis: 'y', pos: 40 });
   const recorded = await docHash(page);
   const layers = await page.evaluate(() => window.pigmentApp.doc.layers().length);
 
@@ -536,6 +567,7 @@ test('dialog commands record their settings and replay silently (replayability a
   expect(await docHash(page)).toBe(recorded);
   expect(await page.evaluate(() => window.pigmentApp.doc.layers().length)).toBe(layers);
   expect(await page.evaluate(() => window.pigmentApp.docs.docs.length)).toBe(2); // Duplicate made the second
+  expect(await page.evaluate(() => window.pigmentApp.docs.docs[0].guides)).toEqual([{ axis: 'y', pos: 40 }]);
   expect(errors).toEqual([]);
 });
 
@@ -649,6 +681,17 @@ test('Batch runs an action over browser:/batch/ and writes serial-numbered files
   expect(log).toContain('browser:/batch/a.png');
   expect(log).toContain('Stroke');
   expect(await page.evaluate(() => window.pigmentApp.docs.docs.length)).toBe(0);
+  // Stop for Errors: the batch ends at the first file that fails, says which, and leaves it open to look at
+  await page.evaluate(() => {
+    window.__batch = window.pigmentApp.commands.run('file:automate-batch', { set: 'Default Actions', action: 'Needs Selection', source: 'folder', folder: 'browser:/batch', destination: 'folder', destFolder: 'browser:/out3', errors: 'stop' }, 'api');
+  });
+  await expect(page.locator('.dialog', { hasText: 'Batch stopped at a.png' })).toBeVisible();
+  await confirmDialog(page);
+  const stopped = await page.evaluate(() => window.__batch);
+  expect(stopped.stopped).toBe(true);
+  expect(stopped.processed).toBe(1);
+  expect(stopped.saved).toEqual([]);
+  expect(await page.evaluate(() => window.pigmentApp.docs.docs.map((d) => d.path))).toEqual(['browser:/batch/a.png']);
   expect(errors).toEqual([]);
 });
 
@@ -983,5 +1026,78 @@ test('the panel: sets and actions through its buttons and menus, duplicate, dele
   expect(await page.evaluate(() => window.pigmentApp.actions.selectedStep?.label)).toBe('Invert');
   await page.keyboard.press('Delete');
   expect((await tree())[1][1][0]).toEqual(['Second', ['Desaturate']]);
+  expect(errors).toEqual([]);
+});
+
+test('records layer picks, colours, guides, Save As and playing another action; replay names what is missing', async ({ page }) => {
+  const errors = await openApp(page);
+  await newDoc(page, { width: 200, height: 100, background: 'white' });
+  await runAwait(page, 'layer:new', { name: 'Top' });
+  await showPanel(page);
+  await makeAction(page, 'Helper', [['image:adjust-invert', null]]);
+  await recordNewAction(page, 'Session');
+
+  // a click on a layer in the Layers panel is a step, by the layer's name
+  await runAwait(page, 'window:panel-layers');
+  await page.locator('[data-panel="layers"].panel .layer-row', { hasText: 'Background' }).click();
+  await expect.poll(() => page.evaluate(() => window.pigmentApp.doc.active.name)).toBe('Background');
+  await runAwait(page, 'image:adjust-posterize', { levels: 4 });
+  await runAwait(page, 'layer:new', { name: 'Made' }); // the command makes it active: not a pick
+  await page.evaluate(() => {
+    window.pigmentApp.setColors({ foreground: '#123456' });
+    window.pigmentApp.setColors({ foreground: '#654321' }); // dragging in the colour field: one step
+  });
+  await runAwait(page, 'view:new-guide', { axis: 'x', pos: 50 });
+  await runAwait(page, 'actions:play', { action: 'Helper' });
+  await page.evaluate(() => (window.__pigmentTest.nextSavePath = 'browser:/saved/out.png'));
+  await run(page, 'file:save-as');
+  await expect(page.locator('.dialog')).toContainText('flat image');
+  await confirmAndSettle(page);
+  await showPanel(page); // Layers and Actions share a panel group
+  await stopRecording(page);
+
+  const steps = await stepsOf(page, 'Session');
+  expect(steps.map((s) => [s.command, s.arg ?? null])).toEqual([
+    ['actions:select-layer', { name: 'Background', index: 0 }],
+    ['image:adjust-posterize', { levels: 4 }],
+    ['layer:new', { name: 'Made' }],
+    ['tool:fg-color', '#654321'],
+    ['view:new-guide', { axis: 'x', pos: 50 }],
+    ['actions:play', { set: 'Default Actions', action: 'Helper' }],
+    ['actions:save-as', { path: 'browser:/saved/out.png' }],
+  ]);
+  expect(steps[0].label).toBe('Select layer “Background”');
+  expect(steps[6].label).toBe('Save As: out.png');
+
+  // replay on another document with the same layer names
+  await page.evaluate(() => {
+    delete window.__pigmentTest.written['browser:/saved/out.png'];
+    window.pigmentApp.setColors({ foreground: '#000000' });
+  });
+  await newDoc(page, { width: 200, height: 100, background: 'white' });
+  await runAwait(page, 'layer:new', { name: 'Top' });
+  expect(await play(page, 'Session')).toEqual({ ok: true });
+  expect(await page.evaluate(() => window.pigmentApp.doc.layers().map((l) => l.name))).toEqual(['Background', 'Made', 'Top']);
+  expect(await page.evaluate(() => window.pigmentApp.doc.guides)).toEqual([{ axis: 'x', pos: 50 }]);
+  expect(await page.evaluate(() => window.pigmentApp.settings.foreground)).toBe('#654321');
+  expect(await page.evaluate(() => [window.pigmentApp.doc.path, !!window.__pigmentTest.written['browser:/saved/out.png']])).toEqual(['browser:/saved/out.png', true]);
+
+  // a document without that layer: playback stops at the step and says why
+  await newDoc(page, { width: 200, height: 100, background: 'white' });
+  await page.evaluate(() => (window.pigmentApp.doc.active.name = 'Other'));
+  const outcome = await play(page, 'Session');
+  expect(outcome.ok).toBe(false);
+  expect(outcome.reason).toBe('unavailable');
+  expect(outcome.index).toBe(0);
+  await expect(page.locator('.toast', { hasText: 'there is no layer named “Background”' })).toBeVisible();
+  expect(await historyLength(page)).toBe(0);
+
+  // an action cannot be played into itself while it records
+  await page.locator('.act-row.act-action', { hasText: 'Session' }).click();
+  await page.locator('.actions-footer [data-cmd="actions:record"]').click();
+  await expect.poll(() => page.evaluate(() => window.pigmentApp.actions.recording?.action.name ?? null)).toBe('Session');
+  await runAwait(page, 'actions:play', { action: 'Session' });
+  await stopRecording(page);
+  expect((await stepsOf(page, 'Session')).length).toBe(7);
   expect(errors).toEqual([]);
 });

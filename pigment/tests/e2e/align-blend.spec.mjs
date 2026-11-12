@@ -649,12 +649,28 @@ test('Photomerge of two overlapping files gives a wider document with two masked
     await runAwait(page, 'file:automate-photomerge', { source: 'files', paths, layout, blend: true });
     state = await info(page);
     expect(state.layers.length, layout).toBe(2);
-    expect(Math.abs(state.size[0] - 480), `${layout} width ${state.size[0]}`).toBeLessThanOrEqual(layout === 'cylindrical' || layout === 'spherical' ? 60 : 3);
     expect(state.layers.every((l) => l.mask), layout).toBe(true);
     await expect(lastToast(page)).toContainText(`(${layout.charAt(0).toUpperCase()}${layout.slice(1)}, blended`);
+    // whatever the surface, the two layers show the same thing where they overlap
+    const overlap = await page.evaluate(() => {
+      const d = window.pigmentApp.doc, [a, b] = d.layers();
+      return window.__ab.layerDiff(a, b, { x: 0, y: 0, width: d.width, height: d.height });
+    });
+    expect(overlap.count, layout).toBeGreaterThan(15000);
+    expect(overlap.mean, `${layout} overlap difference`).toBeLessThan(8);
     if (layout === 'perspective' || layout === 'collage') {
+      expect(Math.abs(state.size[0] - 480), `${layout} width ${state.size[0]}`).toBeLessThanOrEqual(3);
       const dd = await page.evaluate(() => window.__ab.flatDiff(window.__scene, 0, 0, { x: 20, y: 30, width: 440, height: 200 }));
       expect(dd.mean, layout).toBeLessThan(6);
+    } else {
+      // A cylinder / sphere around the first image's camera. Shifted crops of a flat picture say nothing about
+      // the lens, so the focal length is the assumed 0.8 × 300 px: the plane wraps onto a tight surface and the
+      // far end of the second image, 54° off the axis, is drawn much narrower than on the plane.
+      expect(state.size[0], `${layout} width`).toBeGreaterThan(340);
+      expect(state.size[0], `${layout} width`).toBeLessThan(400);
+      expect(state.layers[0], layout).toMatchObject({ name: 'left' });
+      expect(state.layers[0].w, `${layout} left layer`).toBeLessThan(300); // the reference: its sides are pulled in
+      expect(state.layers[1].x, layout).toBeGreaterThan(state.layers[0].x + 120);
     }
   }
 
@@ -663,6 +679,111 @@ test('Photomerge of two overlapping files gives a wider document with two masked
   await runAwait(page, 'file:automate-photomerge', { source: 'files', paths: ['browser:/pano/left.png', 'browser:/pano/alien.png'], layout: 'auto' });
   await expect(lastToast(page)).toContainText('No overlap was found');
   expect(await page.evaluate(() => window.pigmentApp.docs.list().length)).toBe(count);
+  expect(errors).toEqual([]);
+});
+
+test('a camera turning on the spot: Photomerge wraps the frames on a cylinder, Auto-Align on a sphere, tilt and roll included', async ({ page }) => {
+  const errors = await openApp(page);
+  await installHelpers(page);
+  // three frames of a far scene from a camera (focal length 500 px) that pans by about 24° between them and
+  // does not stay level
+  await page.evaluate(async () => {
+    const ab = window.__ab;
+    const master = ab.scene(1500, 700, 61, 2400);
+    const MW = 1500, MH = 700, W = 480, H = 360, f = 500;
+    const md = master.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, MW, MH).data;
+    const mul = (A, B) => {
+      const o = new Array(9);
+      for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) o[r * 3 + c] = A[r * 3] * B[c] + A[r * 3 + 1] * B[3 + c] + A[r * 3 + 2] * B[6 + c];
+      return o;
+    };
+    const frame = (yaw, tilt, roll) => {
+      const k = Math.PI / 180;
+      const Ry = [Math.cos(yaw * k), 0, Math.sin(yaw * k), 0, 1, 0, -Math.sin(yaw * k), 0, Math.cos(yaw * k)];
+      const Rx = [1, 0, 0, 0, Math.cos(tilt * k), -Math.sin(tilt * k), 0, Math.sin(tilt * k), Math.cos(tilt * k)];
+      const Rz = [Math.cos(roll * k), -Math.sin(roll * k), 0, Math.sin(roll * k), Math.cos(roll * k), 0, 0, 0, 1];
+      const Hc = mul([f, 0, 0, 0, f, 0, 0, 0, 1], mul(mul(Rz, mul(Rx, Ry)), [1 / f, 0, 0, 0, 1 / f, 0, 0, 0, 1]));
+      const c = ab.canvasOf(W, H);
+      const img = new ImageData(W, H);
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+        const px = x - (W - 1) / 2, py = y - (H - 1) / 2;
+        const w = Hc[6] * px + Hc[7] * py + Hc[8];
+        const mx = (Hc[0] * px + Hc[1] * py + Hc[2]) / w + (MW - 1) / 2, my = (Hc[3] * px + Hc[4] * py + Hc[5]) / w + (MH - 1) / 2;
+        const x0 = Math.floor(mx), y0 = Math.floor(my);
+        if (x0 < 0 || y0 < 0 || x0 >= MW - 1 || y0 >= MH - 1) continue;
+        const tx = mx - x0, ty = my - y0, i = (y0 * MW + x0) * 4, o = (y * W + x) * 4;
+        for (let ch = 0; ch < 3; ch++) img.data[o + ch] = (md[i + ch] * (1 - tx) + md[i + 4 + ch] * tx) * (1 - ty) + (md[i + MW * 4 + ch] * (1 - tx) + md[i + MW * 4 + 4 + ch] * tx) * ty;
+        img.data[o + 3] = 255;
+      }
+      c.getContext('2d').putImageData(img, 0, 0);
+      return c;
+    };
+    window.__frames = [frame(-24, 1.5, 1), frame(0, 0, 0), frame(23, -2, -1.2)];
+    const names = ['left', 'middle', 'right'];
+    for (let k = 0; k < 3; k++) await ab.png(`browser:/turn/${names[k]}.png`, window.__frames[k]);
+  });
+  const paths = ['left', 'middle', 'right'].map((n) => `browser:/turn/${n}.png`);
+  /** Mean difference of two layers where both have pixels, over the whole document. */
+  const overlap = (i, j) => page.evaluate(([a, b]) => {
+    const d = window.pigmentApp.doc, layers = d.layers();
+    return window.__ab.layerDiff(layers[a], layers[b], { x: 0, y: 0, width: d.width, height: d.height });
+  }, [i, j]);
+
+  // Auto: the outer frames reach 49° off the axis, too wide for a plane
+  await runAwait(page, 'file:automate-photomerge', { source: 'files', paths, layout: 'auto', blend: true });
+  await expect(lastToast(page)).toContainText('Merged 3 images (Cylindrical, blended with masks)');
+  let state = await info(page);
+  expect(state.layers.map((l) => [l.name, l.mask])).toEqual([['left', true], ['middle', true], ['right', true]]);
+  // 98° of view at a radius of 500 px is 855 px of cylinder (a plane would need 1150)
+  expect(Math.abs(state.size[0] - 855)).toBeLessThan(30);
+  expect(state.size[1]).toBeLessThan(420);
+  // in register, although the camera was tilted and rolled between the frames
+  for (const [a, b] of [[0, 1], [1, 2]]) {
+    const d = await overlap(a, b);
+    expect(d.count, `${a}-${b}`).toBeGreaterThan(20000);
+    expect(d.mean, `${a}-${b} difference`).toBeLessThan(9);
+  }
+  // one picture from end to end along the middle
+  const mid = Math.round(state.size[1] / 2);
+  for (const x of [20, 200, 430, 650, state.size[0] - 20]) expect((await pixel(page, x, mid))[3], `x = ${x}`).toBe(255);
+  // on a plane the same three are in register too, on a much wider canvas
+  await runAwait(page, 'file:automate-photomerge', { source: 'files', paths, layout: 'perspective', blend: false });
+  state = await info(page);
+  expect(state.size[0]).toBeGreaterThan(1100);
+  expect((await overlap(0, 1)).mean).toBeLessThan(9);
+
+  // Auto-Align Layers with the same frames as layers: Spherical, one undo step, the canvas grows to hold them
+  await newDoc(page, { width: 480, height: 360 });
+  await page.evaluate(async () => {
+    const ab = window.__ab, d = window.pigmentApp.doc;
+    const bg = d.active;
+    ab.setLayer(bg, window.__frames[1]);
+    const left = await ab.addLayer('Left', window.__frames[0]);
+    const right = await ab.addLayer('Right', window.__frames[2]);
+    ab.select([bg, left, right]);
+  });
+  const n = await historyLength(page);
+  const before = (await overlap(0, 1)).mean;
+  expect(before).toBeGreaterThan(30);
+  await runAwait(page, 'edit:auto-align', { projection: 'spherical' });
+  await expect(lastToast(page)).toContainText('Aligned 3 layers (Spherical)');
+  expect(await historyLength(page)).toBe(n + 1);
+  state = await info(page);
+  // (the canvas keeps its old area too, which the narrower reference no longer fills: a little more than the 855 px)
+  expect(state.size[0]).toBeGreaterThan(840);
+  expect(state.size[0]).toBeLessThan(900);
+  expect(state.layers[1].x).toBeLessThan(5); // "Left" at the left end
+  expect(state.layers[2].x).toBeGreaterThan(350);
+  for (const [a, b] of [[0, 1], [0, 2]]) {
+    const d = await overlap(a, b);
+    expect(d.count, `${a}-${b}`).toBeGreaterThan(20000);
+    expect(d.mean, `${a}-${b} difference`).toBeLessThan(9);
+  }
+  await runAwait(page, 'edit:undo');
+  state = await info(page);
+  expect(state.size).toEqual([480, 360]);
+  expect(state.layers.map((l) => [l.x, l.y, l.w, l.h])).toEqual([[0, 0, 480, 360], [0, 0, 480, 360], [0, 0, 480, 360]]);
+  expect((await overlap(0, 1)).mean).toBeCloseTo(before, 5);
   expect(errors).toEqual([]);
 });
 
@@ -860,6 +981,37 @@ test('Load Files into Stack: alignment, a smart object, the dialogs; the alignme
   });
   expect(d).toEqual([0, 0]);
 
+  // a burst of six: each frame is registered on the first one directly (no need to match every pair), and a
+  // frame that shares nothing with the first is still placed through its neighbours
+  const burst = await page.evaluate(async () => {
+    const ab = window.__ab;
+    const wide = ab.scene(900, 300, 52, 700);
+    window.__wide = wide;
+    const shifts = [[0, 0], [7, -4], [-6, 9], [12, 5], [-10, -8], [330, 3], [640, -2]];
+    const out = [];
+    for (let k = 0; k < shifts.length; k++) out.push(await ab.png(`browser:/burst/f${k}.png`, ab.paint(250, 240, (ctx) => ctx.drawImage(wide, -20 - shifts[k][0], -30 - shifts[k][1]))));
+    return out;
+  });
+  await runAwait(page, 'file:script-load-stack', { source: 'files', paths: burst.slice(0, 5), align: true, smart: false });
+  state = await info(page);
+  expect(state.layers.map((l) => [l.name, l.x, l.y])).toEqual([['f0', 0, 0], ['f1', 7, -4], ['f2', -6, 9], ['f3', 12, 5], ['f4', -10, -8]]);
+  // f5 and f6 lie 330 and 640 px away from f0 (the frames are 250 px wide) and share nothing with it or with each
+  // other: they are reported and stay put
+  await runAwait(page, 'file:script-load-stack', { source: 'files', paths: [burst[0], burst[1], burst[2], burst[5], burst[6]], align: true, smart: false });
+  state = await info(page);
+  expect(state.layers.map((l) => [l.name, l.x, l.y])).toEqual([['f0', 0, 0], ['f1', 7, -4], ['f2', -6, 9], ['f5', 0, 0], ['f6', 0, 0]]);
+  await expect(lastToast(page)).toContainText('"f5", "f6" could not be aligned');
+  // with frames that bridge the gap the chain is found (the pairs that do not involve the first frame are matched then)
+  const bridge = await page.evaluate(async () => {
+    const ab = window.__ab;
+    const out = [];
+    for (const [k, dx] of [[0, 170], [1, 480]]) out.push(await ab.png(`browser:/burst/b${k}.png`, ab.paint(250, 240, (ctx) => ctx.drawImage(window.__wide, -20 - dx, -30))));
+    return out;
+  });
+  await runAwait(page, 'file:script-load-stack', { source: 'files', paths: [burst[0], burst[1], bridge[0], burst[5], bridge[1], burst[6]], align: true, smart: false });
+  state = await info(page);
+  expect(state.layers.map((l) => [l.name, l.x, l.y])).toEqual([['f0', 0, 0], ['f1', 7, -4], ['b0', 170, 0], ['f5', 330, 3], ['b1', 480, 0], ['f6', 640, -2]]);
+
   // as a smart object: one layer holding the three; a stack mode then works on it
   await runAwait(page, 'file:script-load-stack', { source: 'files', paths, align: true, smart: true });
   expect(await page.evaluate(() => {
@@ -900,7 +1052,9 @@ test('Load Files into Stack: alignment, a smart object, the dialogs; the alignme
     const grab = (dx, dy) => ab.paint(300, 240, (ctx) => ctx.drawImage(window.__scene, -40 - dx, -30 - dy)).getContext('2d').getImageData(0, 0, 300, 240);
     const images = [grab(0, 0), grab(12, -7), grab(-6, 4)];
     const out = await window.pigmentApp.alignBlend.alignImages(images);
-    const ref = out[1]; // the middle image is the reference
+    // the reference comes back as it went in; with three images that overlap alike it is the middle one of the list
+    const r = out.findIndex((o, i) => o === images[i]);
+    const ref = out[r];
     const diff = (a, b) => {
       let s = 0, n = 0;
       for (let y = 30; y < 210; y++) for (let x = 30; x < 270; x++) {
@@ -910,10 +1064,11 @@ test('Load Files into Stack: alignment, a smart object, the dialogs; the alignme
       }
       return s / n;
     };
-    return { sizes: out.map((o) => [o.width, o.height, o.data.length]), same: out[1] === images[1], before: diff(images[0], images[1]), after: [diff(out[0], ref), diff(out[2], ref)] };
+    return { sizes: out.map((o) => [o.width, o.height, o.data.length]), reference: r, unchanged: out.filter((o, i) => o === images[i]).length, before: diff(images[0], images[1]), after: out.filter((o) => o !== ref).map((o) => diff(o, ref)) };
   });
   expect(hook.sizes).toEqual([[300, 240, 288000], [300, 240, 288000], [300, 240, 288000]]);
-  expect(hook.same).toBe(true);
+  expect(hook.reference).toBe(1);
+  expect(hook.unchanged).toBe(1);
   expect(hook.before).toBeGreaterThan(20);
   expect(hook.after).toEqual([0, 0]);
   expect(errors).toEqual([]);

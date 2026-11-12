@@ -49,13 +49,28 @@ async function alignStepwise(images, opts) {
     feats.push(R.detectFeatures(img));
     await breathe();
   }
+  const sizes = images.map((img) => ({ width: img.width, height: img.height }));
   const edges = [];
-  for (const [a, b] of R.candidatePairs(images.length)) {
-    const e = R.registerPair(feats[a], feats[b]);
-    if (e) edges.push({ a, b, ...e });
-    await breathe();
+  const match = async (pairs) => {
+    for (const [a, b] of pairs) {
+      const e = R.registerPair(feats[a], feats[b]);
+      if (e) edges.push({ a, b, ...e });
+      await breathe();
+    }
+  };
+  let pairs = R.candidatePairs(images.length);
+  const ref = opts.reference;
+  if (Number.isInteger(ref) && images.length > 3) {
+    // With a given reference (a stack on its first image, a locked layer) the pairs with that image usually
+    // settle everything; the others, most of the work for a large stack, are matched only if an image is left
+    // without a sound pair.
+    await match(pairs.filter(([a, b]) => a === ref || b === ref));
+    const direct = R.solveAlignment(sizes, edges, opts);
+    if (direct.every((t) => t.sound || t.index === direct.reference)) return direct;
+    pairs = pairs.filter(([a, b]) => a !== ref && b !== ref);
   }
-  return R.solveAlignment(images.map((img) => ({ width: img.width, height: img.height })), edges, opts);
+  await match(pairs);
+  return R.solveAlignment(sizes, edges, opts);
 }
 
 /**
@@ -346,7 +361,7 @@ export function install(app) {
       const v = await formDialog(app, {
         title: 'Auto-Align Layers',
         width: 440,
-        intro: `Registers the ${layers.length} selected layers on their common content. ${locked.length ? `"${locked[0].name}" is locked and stays where it is.` : 'The layer in the middle of the set stays where it is.'}`,
+        intro: `Registers the ${layers.length} selected layers on their common content. ${locked.length ? `"${locked[0].name}" is locked and stays where it is.` : 'The layer the others overlap best (the middle one of a row of frames) stays where it is.'}`,
         fields: [
           { key: 'projection', label: 'Projection', type: 'select', value: PROJECTION_NAMES[saved.projection] ? saved.projection : 'auto', options: PROJECTION_OPTIONS },
           { type: 'custom', render: () => el('p', 'muted', 'Auto picks the simplest motion that fits: a move, a move with rotation and scale (Collage), a perspective, or a cylinder for wide panoramas. Reposition only moves the layers and keeps the canvas; the others grow the canvas to hold every layer.') },
