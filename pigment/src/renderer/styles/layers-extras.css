@@ -1,0 +1,42 @@
+/* Layer, Select and File extras (lib/layers-extras.js): the Find Layers filter bar and the isolation
+   strip of the Layers panel, colour label tints, the linked-layers badge, File Info. Loaded by the module. */
+
+/* ---- colour labels: a tint across the row and a solid strip under the eye ------------------------------- */
+.layer-row[data-color] { --label: transparent; background-image: linear-gradient(90deg, color-mix(in srgb, var(--label) 55%, transparent) 0, color-mix(in srgb, var(--label) 55%, transparent) 26px, color-mix(in srgb, var(--label) 14%, transparent) 26px); }
+.layer-row[data-color='red'] { --label: #e5534b; }
+.layer-row[data-color='orange'] { --label: #e8913a; }
+.layer-row[data-color='yellow'] { --label: #e3c93c; }
+.layer-row[data-color='green'] { --label: #57ab5a; }
+.layer-row[data-color='blue'] { --label: #4f81ff; }
+.layer-row[data-color='violet'] { --label: #986ee2; }
+.layer-row[data-color='gray'] { --label: #8b949e; }
+
+.layer-linked-badge { display: inline-flex; color: var(--accent); }
+
+/* ---- Find Layers ------------------------------------------------------------------------------------------ */
+.layer-filter-bar { display: flex; align-items: center; gap: 4px; padding: 4px 6px; border-bottom: 1px solid var(--border); flex: none; background: color-mix(in srgb, var(--bg-sunken) 60%, transparent); }
+.layer-filter-bar[hidden], .layer-isolation-bar[hidden] { display: none; }
+.layer-filter-bar .select { height: 24px; font-size: 12px; padding: 0 20px 0 6px; flex: none; max-width: 104px; }
+.layer-filter-controls { display: flex; align-items: center; gap: 2px; flex: 1; min-width: 0; }
+.layer-filter-controls .input, .layer-filter-controls .select { height: 24px; font-size: 12px; flex: 1; min-width: 0; max-width: none; }
+.layer-filter-controls .input { padding: 0 6px; }
+.layer-filter-kind.active { color: var(--accent-fg); background: var(--accent); }
+.layer-filter-kind.active:hover { color: var(--accent-fg); background: var(--accent); }
+.layer-filter-switch { width: 30px; flex: none; position: relative; }
+.layer-filter-switch::before { content: ''; position: absolute; left: 3px; right: 3px; top: 6px; bottom: 6px; border-radius: 999px; background: color-mix(in srgb, var(--fg-muted) 45%, transparent); }
+.layer-filter-switch[aria-checked='true']::before { background: #e5534b; }
+.layer-filter-knob { position: absolute; top: 7px; left: 4px; width: 10px; height: 10px; border-radius: 50%; background: #fff; box-shadow: 0 0 1px rgba(0, 0, 0, 0.5); transition: left 0.12s; }
+.layer-filter-switch[aria-checked='true'] .layer-filter-knob { left: 16px; }
+
+/* ---- Isolate Layers --------------------------------------------------------------------------------------- */
+.layer-isolation-bar { display: flex; align-items: center; gap: 6px; padding: 3px 6px 3px 8px; border-bottom: 1px solid var(--border); flex: none; font-size: 11px; color: var(--fg); background: color-mix(in srgb, #e5534b 16%, transparent); }
+.layer-isolation-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---- File Info ---------------------------------------------------------------------------------------------- */
+.file-info-camera { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; font-size: 12px; margin: 0; }
+.file-info-camera dt { color: var(--fg-muted); }
+.file-info-camera dd { margin: 0; overflow-wrap: anywhere; }
+.file-info-rating { display: inline-flex; gap: 2px; }
+.file-info-rating button { border: 0; background: none; padding: 0 1px; font-size: 18px; line-height: 1; cursor: pointer; color: color-mix(in srgb, var(--fg-muted) 50%, transparent); }
+.file-info-rating button.on { color: #e3a008; }
+.file-info-rating button:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: 3px; }

@@ -556,9 +556,11 @@ export function install(app) {
     }
     const open = app.docs.list();
     const ids = Array.isArray(o.documents) ? o.documents : open.map((d) => d.id);
-    // replayed from an action the document ids are gone: all open documents are used then
     const chosen = open.filter((d) => ids.includes(d.id));
-    return (chosen.length >= 2 ? chosen : open).map((d) => ({ name: baseName(d.name), canvas: copyCanvas(flattenDocument(d, d.view?.compositor)), dpi: d.dpi }));
+    // replayed from an action the documents it was recorded with may be gone: all open documents are used then.
+    // A choice made in the dialog is taken as it is, also when it is too small (the command says so)
+    const stale = chosen.length < ids.length && chosen.length < 2;
+    return (stale ? open : chosen).map((d) => ({ name: baseName(d.name), canvas: copyCanvas(flattenDocument(d, d.view?.compositor)), dpi: d.dpi }));
   }
 
   /** Adds a finished layer to a document that is not shown yet (no history exists for it). */
@@ -746,6 +748,10 @@ export function install(app) {
     try {
       const frames = await loadFrames(o, 'Load Files into Stack: choose the images');
       if (!frames) return ctx?.cancel();
+      if (!frames.length) {
+        ctx?.cancel();
+        return toast('Load Files into Stack needs at least one image', { kind: 'error' });
+      }
       const built = await app.busy('Loading the stack…', async () => {
         const stack = await buildStack(frames, { align: !!o.align, name: frames.length ? `${frames[0].name} stack` : 'Stack' });
         if (!o.smart) return stack;
@@ -818,15 +824,15 @@ export function install(app) {
     const mode = STACK_MODE_IDS.includes(arg) ? arg : 'none';
     const current = layer.stackMode ?? 'none';
     if (mode === current) return;
+    if (layer.locked.all) {
+      // the native menu's radio already moved: put it back
+      app.syncUiState();
+      return toast(`"${layer.name}" is locked`, { kind: 'error' });
+    }
     if (mode !== 'none') {
       if (layer.source?.kind !== 'document' || stackableLayers(layer.source.doc) < 2) {
-        // the native menu's radio already moved: put it back
         app.syncUiState();
         return toast('A stack mode needs a smart object that holds two or more layers (File › Scripts › Load Files into Stack makes one)', { kind: 'error', timeout: 5000 });
-      }
-      if (layer.locked.all) {
-        app.syncUiState();
-        return toast(`"${layer.name}" is locked`, { kind: 'error' });
       }
       const probe = { stackMode: mode, source: layer.source };
       await app.busy(`Stack Mode: ${stackModeName(mode)}…`, async () => stackRender(probe));

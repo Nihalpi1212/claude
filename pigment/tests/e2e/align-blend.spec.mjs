@@ -834,6 +834,19 @@ test('Photomerge dialog: open documents as the source, the layout options, files
   });
   await runAwait(page, 'file:automate-photomerge', { source: 'files', layout: 'auto' });
   expect(await page.evaluate(() => window.pigmentApp.docs.list().length)).toBe(4);
+  // a choice of open documents is taken as it is: one document is not enough, none loads nothing
+  const west = await page.evaluate(() => window.pigmentApp.docs.list().find((d) => d.name === 'west').id);
+  await runAwait(page, 'file:automate-photomerge', { source: 'documents', documents: [west], layout: 'auto' });
+  await expect(lastToast(page)).toContainText('Photomerge needs at least two overlapping images');
+  await runAwait(page, 'file:script-statistics', { source: 'documents', documents: [west], mode: 'mean' });
+  await expect(lastToast(page)).toContainText('Statistics needs at least two images');
+  await runAwait(page, 'file:script-load-stack', { source: 'documents', documents: [] });
+  await expect(lastToast(page)).toContainText('Load Files into Stack needs at least one image');
+  expect(await page.evaluate(() => window.pigmentApp.docs.list().length)).toBe(4);
+  // replayed from an action whose documents are gone, the open documents are used
+  await runAwait(page, 'file:script-load-stack', { source: 'documents', documents: ['gone-1', 'gone-2'] });
+  expect(await page.evaluate(() => window.pigmentApp.docs.list().length)).toBe(5);
+  expect((await info(page)).layers.map((l) => l.name)).toEqual(['west', 'east', 'Panorama', 'Panorama']);
   expect(errors).toEqual([]);
 });
 
@@ -931,6 +944,20 @@ test('Load Files into Stack and Statistics: median removes the noise; Stack Mode
   expect((await smart()).ui).toBe('none');
   expect(await error()).toBeCloseTo(noisy, 5);
   await runAwait(page, 'layer:stack-mode', 'median');
+  // a locked smart object keeps its mode, "None" included
+  await page.evaluate(() => {
+    const l = window.pigmentApp.doc.active;
+    l.locked = { ...l.locked, all: true };
+  });
+  await runAwait(page, 'layer:stack-mode', 'none');
+  await expect(lastToast(page)).toContainText('is locked');
+  await runAwait(page, 'layer:stack-mode', 'mean');
+  expect((await smart()).mode).toBe('median');
+  expect((await smart()).ui).toBe('median');
+  await page.evaluate(() => {
+    const l = window.pigmentApp.doc.active;
+    l.locked = { ...l.locked, all: false };
+  });
 
   // saved in .pigment and read back
   await page.evaluate(() => {

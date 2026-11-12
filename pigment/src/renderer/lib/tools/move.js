@@ -37,6 +37,7 @@ export class MoveTool extends Tool {
       if (hit) doc.setActive(hit);
     }
     const chosen = doc.selectedLayers().filter((l) => !l.locked.position && !l.locked.all);
+    if (this.app.linkedLayers && chosen.length) return this.app.linkedLayers(chosen).filter((l) => !l.locked.position && !l.locked.all); // layers-extras (lib/layers-extras.js): linked layers move together
     if (chosen.length) return chosen;
     if (doc.active && !doc.active.locked.position && !doc.active.locked.all) return [doc.active];
     return [];

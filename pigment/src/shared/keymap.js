@@ -144,7 +144,7 @@ export const SHORTCUT_GROUPS = [
 
 export const COMMAND_LABELS = {
   'file:new': 'New document', 'file:open': 'Open', 'file:save': 'Save', 'file:save-as': 'Save as', 'file:export': 'Export as', 'file:export-quick': 'Quick export as PNG',
-  'file:close': 'Close', 'file:close-all': 'Close all', 'file:close-others': 'Close others', 'file:properties': 'Document info', 'file:print': 'Print',
+  'file:close': 'Close', 'file:close-all': 'Close all', 'file:close-others': 'Close others', 'file:properties': 'File info', 'file:print': 'Print',
   'filter:liquify': 'Liquify', 'filter:camera-raw': 'Camera Raw filter', 'filter:lens-correction': 'Lens Correction', 'view:gamut': 'Gamut warning',
   'edit:content-aware-scale': 'Content-Aware Scale', 'select:select-mask': 'Select and Mask', 'select:find-layers': 'Find layers', 'window:panel-actions': 'Actions panel',
   'layer:smart-convert': 'Convert to smart object', 'layer:smart-edit': 'Edit smart object contents', 'layer:smart-rasterize': 'Rasterize smart object',

@@ -115,6 +115,7 @@ export function install(app) {
     const walk = (group, depth) => {
       for (let i = group.children.length - 1; i >= 0; i--) {
         const layer = group.children[i];
+        if (app.layerFilter?.(layer) === false) continue; // layers-extras (lib/layers-extras.js): Find Layers / Isolate Layers hide the rows that do not match
         rows.push({ layer, depth });
         // smart objects (lib/smart-object.js): their smart filters are listed under the layer
         if (layer.type === 'smart' && layer.filters?.length) rows.push({ layer, depth, filters: true });
@@ -303,6 +304,7 @@ export function install(app) {
       li.classList.remove('drop-above', 'drop-below', 'drop-into');
       app.commands.run('layer:move-to', { id: dragLayer.id, target: layer.id, mode, duplicate: e.altKey }, 'panel');
     });
+    app.decorateLayerRow?.(li, layer); // layers-extras (lib/layers-extras.js): colour label tint (data-color) and the linked-layers badge
     return li;
   }
 

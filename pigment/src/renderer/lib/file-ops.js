@@ -155,38 +155,115 @@ export function install(app) {
     app.dialogs.toast(`Exported ${n} layer${n === 1 ? '' : 's'}`, { kind: 'success' });
   }
 
-  async function properties() {
+  /**
+   * File › File Info: the document's descriptive metadata (title, author, keywords, rating, copyright, origin)
+   * and its resolution, with the camera data of a photograph shown read-only. Stored in doc.meta (saved in
+   * .pigment files; lib/file-info.js turns it into the XMP packet other formats carry) as one undo step.
+   * arg (actions): an object of the fields skips the dialog.
+   */
+  async function properties(arg, ctx = null) {
     const d = app.doc;
+    const info = await import('./file-info.js'); // loaded on demand: only this function of file-ops.js belongs to File Info
     const layers = d.layers();
     const bytes = layers.reduce((s, l) => s + (l.canvas ? l.canvas.width * l.canvas.height * 4 : 0) + (l.mask?.canvas ? d.width * d.height * 4 : 0), 0);
     const meta = d.meta ?? {};
-    const o = await formDialog(app, {
-      title: 'Document Properties',
-      intro: [
-        `${d.width} × ${d.height} px at ${d.dpi} ppi (${((d.width / d.dpi) * 2.54).toFixed(1)} × ${((d.height / d.dpi) * 2.54).toFixed(1)} cm)`,
-        `${MODE_NAMES[d.mode] ?? d.mode ?? 'RGB'}, ${d.mode === 'bitmap' ? 1 : d.depth ?? 8} bit${d.mode === 'bitmap' ? '' : 's/channel'}`,
-        `${layers.length} layer${layers.length === 1 ? '' : 's'}, about ${formatSize(bytes)} of pixels in memory`,
-        d.path ? d.path : 'Not saved yet',
-      ].join(' · '),
-      fields: [
-        { key: 'title', label: 'Title', type: 'text', value: meta.title ?? '' },
-        { key: 'author', label: 'Author', type: 'text', value: meta.author ?? '' },
-        { key: 'description', label: 'Description', type: 'textarea', value: meta.description ?? '' },
-        { key: 'copyright', label: 'Copyright', type: 'text', value: meta.copyright ?? '' },
-        { key: 'dpi', label: 'Resolution (pixels/inch)', type: 'number', value: d.dpi, min: 1, max: 10000 },
-      ],
-      width: 520,
-    });
-    if (!o) return;
+    const current = info.normaliseInfo(meta);
+    let o = arg && typeof arg === 'object' ? { ...current, keywords: current.keywords.join('; '), dpi: d.dpi, ...arg } : null;
+    if (!o) {
+      const camera = info.describeExif(meta.exif);
+      const stars = (values, set) => {
+        const box = document.createElement('span');
+        box.className = 'file-info-rating';
+        box.setAttribute('role', 'radiogroup');
+        box.setAttribute('aria-label', 'Rating');
+        const paint = () => {
+          for (const b of box.children) b.classList.toggle('on', Number(b.dataset.star) <= values.rating);
+        };
+        for (let i = 1; i <= 5; i++) {
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.dataset.star = String(i);
+          b.title = `${i} star${i === 1 ? '' : 's'} (click again to clear)`;
+          b.textContent = '★';
+          b.addEventListener('click', () => {
+            set('rating', values.rating === i ? 0 : i); // the same star again takes the rating away
+            paint();
+          });
+          box.appendChild(b);
+        }
+        paint();
+        return box;
+      };
+      o = await formDialog(app, {
+        title: 'File Info',
+        intro: [
+          `${d.width} × ${d.height} px at ${d.dpi} ppi (${((d.width / d.dpi) * 2.54).toFixed(1)} × ${((d.height / d.dpi) * 2.54).toFixed(1)} cm)`,
+          `${MODE_NAMES[d.mode] ?? d.mode ?? 'RGB'}, ${d.mode === 'bitmap' ? 1 : d.depth ?? 8} bit${d.mode === 'bitmap' ? '' : 's/channel'}`,
+          `${layers.length} layer${layers.length === 1 ? '' : 's'}, about ${formatSize(bytes)} of pixels in memory`,
+          d.path ? d.path : 'Not saved yet',
+        ].join(' · '),
+        fields: [
+          { key: 'title', label: 'Title', type: 'text', value: current.title },
+          { key: 'author', label: 'Author', type: 'text', value: current.author },
+          { key: 'description', label: 'Description', type: 'textarea', value: current.description, rows: 3 },
+          { key: 'keywords', label: 'Keywords', type: 'text', value: current.keywords.join('; '), placeholder: 'Separate keywords with semicolons or commas', span: true },
+          { key: 'rating', label: 'Rating', type: 'custom', value: current.rating, render: stars },
+          { type: 'section', label: 'Copyright' },
+          { key: 'copyrightStatus', label: 'Copyright status', type: 'select', value: current.copyrightStatus, options: info.COPYRIGHT_STATUS },
+          { key: 'copyright', label: 'Copyright notice', type: 'text', value: current.copyright },
+          { key: 'copyrightUrl', label: 'Copyright info URL', type: 'text', value: current.copyrightUrl, placeholder: 'https://' },
+          { type: 'section', label: 'Origin' },
+          { key: 'credit', label: 'Credit', type: 'text', value: current.credit },
+          { key: 'source', label: 'Source', type: 'text', value: current.source },
+          { type: 'section', label: 'Document' },
+          { key: 'dpi', label: 'Resolution (pixels/inch)', type: 'number', value: d.dpi, min: 1, max: 10000 },
+          ...(camera.length
+            ? [
+                { type: 'section', label: 'Camera Data' },
+                {
+                  key: 'camera',
+                  type: 'custom',
+                  render: () => {
+                    // read-only: what the camera recorded is shown, never edited
+                    const dl = document.createElement('dl');
+                    dl.className = 'file-info-camera';
+                    for (const [label, text] of camera) {
+                      const dt = document.createElement('dt');
+                      dt.textContent = label;
+                      const dd = document.createElement('dd');
+                      dd.textContent = text;
+                      dl.append(dt, dd);
+                    }
+                    return dl;
+                  },
+                },
+              ]
+            : []),
+        ],
+        validate: (v) => {
+          if (!v.copyrightUrl || /^(https?:\/\/|www\.)\S+$/i.test(String(v.copyrightUrl).trim())) return true;
+          app.dialogs.toast('The copyright info URL should be a web address (https://…)', { kind: 'error', timeout: 2600 });
+          return false; // keeps the dialog open
+        },
+        width: 560,
+      });
+      if (!o) return ctx?.cancel(); // actions (lib/actions.js)
+    }
+    const next = info.normaliseInfo(o);
+    const dpi = Math.max(1, Math.min(10000, Math.round(Number(o.dpi) || d.dpi)));
+    ctx?.setReplayArg({ ...next, dpi }); // actions (lib/actions.js): the fields replay without the dialog
     const before = { meta: { ...meta }, dpi: d.dpi };
-    const after = { meta: { ...meta, title: o.title, author: o.author, description: o.description, copyright: o.copyright }, dpi: o.dpi };
+    const after = { meta: { ...meta, ...next }, dpi };
+    if (dpi === d.dpi && JSON.stringify(current) === JSON.stringify(next)) return; // OK without a change records nothing
     const set = (v) => {
-      d.meta = { ...v.meta };
+      // only the File Info fields move with undo: whatever other modules keep in doc.meta stays as it is now
+      d.meta = { ...(d.meta ?? {}), ...Object.fromEntries(Object.keys(next).map((k) => [k, v.meta[k]])) };
+      for (const k of Object.keys(next)) if (d.meta[k] === undefined) delete d.meta[k];
       d.dpi = v.dpi;
       d.changed('props');
     };
     set(after);
-    d.history.push({ label: 'Document properties', undo: () => set(before), redo: () => set(after), bytes: 0, at: Date.now() });
+    d.history.push({ label: 'File info', undo: () => set(before), redo: () => set(after), bytes: 0, at: Date.now() });
     d.changed('history');
   }
 
@@ -194,6 +271,6 @@ export function install(app) {
     'file:export': { enabled: has, run: exportAs, label: 'Export As…', dialog: true }, // actions (lib/actions.js)
     'file:export-quick': { enabled: has, run: quickExport, label: 'Quick Export as PNG' },
     'file:export-layers': { enabled: has, run: exportLayers, label: 'Export Layers to Files…', dialog: true }, // actions (lib/actions.js)
-    'file:properties': { enabled: has, run: properties, label: 'Document Properties…' },
+    'file:properties': { enabled: has, run: properties, label: 'File Info…' },
   });
 }
