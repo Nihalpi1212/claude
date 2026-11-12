@@ -4,6 +4,7 @@
 // through a pixel-edit session (so the selection limits it and it is one undo step).
 import { icon } from './icons.js';
 import { beginPixelEdit } from './adjust-ui.js';
+import { encodeField, decodeField } from './actions/mesh-data.js'; // actions (lib/actions.js): the mesh as step data
 
 const TOOLS = [
   ['warp', 'Forward Warp', 'smudge', 'W'],
@@ -126,13 +127,15 @@ export class DisplacementField {
 }
 
 export function install(app) {
-  async function liquify() {
+  async function liquify(arg = null, cmd = null) {
     const session = beginPixelEdit(app, { label: 'Liquify' });
-    if (!session) return;
+    if (!session) return cmd?.cancel(); // actions (lib/actions.js)
     const base = session.base;
     const w = base.width, h = base.height;
     const cell = Math.max(2, Math.ceil(Math.max(w, h) / 512));
-    let field = new DisplacementField(w, h, cell);
+    // actions (lib/actions.js): a recorded mesh ({ mesh }) is applied without opening the dialog
+    const recorded = arg && typeof arg === 'object' && arg.mesh ? decodeField(arg.mesh, DisplacementField, w, h, cell) : null;
+    let field = recorded ?? new DisplacementField(w, h, cell);
     const undo = [];
     let tool = 'warp';
     let size = Math.round(Math.min(200, Math.max(20, Math.min(w, h) / 6)));
@@ -305,7 +308,7 @@ export function install(app) {
     };
     root.addEventListener('keydown', onKey);
 
-    const ok = await app.dialogs.open({
+    const ok = recorded ? true : await app.dialogs.open({
       title: 'Liquify',
       content: root,
       className: 'full liquify-dialog',
@@ -315,7 +318,7 @@ export function install(app) {
     clearInterval(timer);
     if (!ok || field.isIdentity()) {
       session.cancel();
-      return;
+      return cmd?.cancel(); // actions (lib/actions.js)
     }
     try {
       const out = await app.busy('Liquify…', async () => {
@@ -324,11 +327,12 @@ export function install(app) {
         return result;
       });
       session.commit('Liquify', out);
+      if (!recorded) cmd?.setReplayArg({ mesh: encodeField(field) }); // actions (lib/actions.js)
     } catch (err) {
       session.cancel();
       app.reportError(err, 'Liquify failed');
     }
   }
 
-  app.commands.register('filter:liquify', { enabled: () => !!app.doc?.active, run: liquify, label: 'Liquify…' });
+  app.commands.register('filter:liquify', { enabled: () => !!app.doc?.active, run: liquify, label: 'Liquify…', dialog: true }); // actions (lib/actions.js)
 }

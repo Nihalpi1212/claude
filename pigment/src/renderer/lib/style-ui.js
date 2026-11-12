@@ -89,10 +89,12 @@ export function install(app) {
     return !!l && !l.isGroup && l.type !== 'adjustment';
   };
 
-  async function styleDialog(initialKey = null) {
+  async function styleDialog(initialKey = null, ctx = null) {
     const d = app.doc;
     const layer = d?.active;
-    if (!layer || layer.type === 'adjustment') return;
+    if (!layer || layer.type === 'adjustment') return ctx?.cancel();
+    // actions (lib/actions.js): a recorded step is the dialog's result ({ styles, opacity?, fillOpacity?, blend? }) and applies without it
+    if (initialKey && typeof initialKey === 'object') return setLayerProps(app, layer, clone(initialKey), 'Layer style');
     const before = { styles: clone(layer.styles), opacity: layer.opacity, fillOpacity: layer.fillOpacity, blend: layer.blend };
     const styles = mergeStyles(layer.styles);
     // pattern overlays default to the current pattern
@@ -245,13 +247,17 @@ export function install(app) {
     layer.touch();
     if (ok) setLayerProps(app, layer, after, 'Layer style');
     else d.changed('props', { layer });
+    // actions (lib/actions.js): the styles always replay; opacity and blend mode only when the dialog changed them
+    if (ok) ctx?.setReplayArg(Object.fromEntries(Object.entries(after).filter(([k, v]) => k === 'styles' || v !== before[k])));
+    else ctx?.cancel();
   }
 
-  async function globalLightDialog() {
+  async function globalLightDialog(arg = null, ctx = null) {
     const d = app.doc;
     if (!d) return;
     const gl = d.globalLight ?? { angle: 120, altitude: 30 };
-    const o = await formDialog(app, {
+    // actions (lib/actions.js): a recorded { angle, altitude } skips the dialog
+    const o = Number.isFinite(arg?.angle) && Number.isFinite(arg?.altitude) ? arg : await formDialog(app, {
       title: 'Global Light',
       fields: [S('angle', 'Angle', -180, 180, 1, { unit: '°', value: gl.angle }), S('altitude', 'Altitude', 0, 90, 1, { unit: '°', value: gl.altitude })],
       live: {
@@ -265,8 +271,9 @@ export function install(app) {
         },
       },
     });
-    if (!o) return;
+    if (!o) return ctx?.cancel?.(); // actions (lib/actions.js)
     const before = gl, after = { angle: o.angle, altitude: o.altitude };
+    ctx?.setReplayArg?.(after); // actions (lib/actions.js)
     const set = (v) => {
       d.globalLight = v;
       d.changed('props');
@@ -302,13 +309,14 @@ export function install(app) {
   app.commands.registerAll({
     'layer:style': {
       enabled: hasStyleable,
-      run: (kind) => {
-        if (!kind || kind === 'dialog') return styleDialog(null);
-        if (typeof kind === 'string' && STYLE_KEYS.some((s) => s.key === kind)) return styleDialog(kind);
+      dialog: true, // actions (lib/actions.js)
+      run: (kind, ctx) => {
+        if (!kind || kind === 'dialog') return styleDialog(null, ctx);
+        if (typeof kind === 'object' || (typeof kind === 'string' && STYLE_KEYS.some((s) => s.key === kind))) return styleDialog(kind, ctx);
       },
     },
     'layer:style-toggle': { enabled: hasStyleable, run: (key) => toggleEffect(key) },
-    'layer:global-light': { enabled: () => !!app.doc, run: globalLightDialog },
+    'layer:global-light': { enabled: () => !!app.doc, dialog: true, run: globalLightDialog }, // actions (lib/actions.js)
   });
-  for (const { key, name } of STYLE_KEYS) app.commands.register(`layer:style-${key}`, { enabled: hasStyleable, run: () => styleDialog(key), label: `${name}…` });
+  for (const { key, name } of STYLE_KEYS) app.commands.register(`layer:style-${key}`, { enabled: hasStyleable, dialog: true, run: (arg, ctx) => styleDialog(arg && typeof arg === 'object' ? arg : key, ctx), label: `${name}…` }); // actions (lib/actions.js)
 }

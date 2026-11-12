@@ -271,13 +271,14 @@ export function install(app) {
   app.commands.registerAll({
     'layer:new': {
       enabled: has,
-      run: async (arg) => {
+      run: async (arg, ctx) => {
         const d = doc();
-        let name = nextLayerName(d);
+        let name = arg?.name ?? nextLayerName(d);
         if (arg?.dialog) {
           const n = await app.dialogs.prompt('Name', { title: 'New Layer', value: name, okLabel: 'Create' });
-          if (n === null) return;
+          if (n === null) return ctx?.cancel(); // actions (lib/actions.js)
           name = n || name;
+          ctx?.setReplayArg({ name }); // actions (lib/actions.js): the chosen name replays without the prompt
         }
         const layer = newRaster(name);
         structural(app, 'New layer', () => {
@@ -334,14 +335,17 @@ export function install(app) {
     },
     'layer:rename': {
       enabled: hasLayer,
-      run: async (arg) => {
+      dialog: true, // actions (lib/actions.js)
+      run: async (arg, ctx) => {
         const d = doc();
-        const layer = arg?.id ? d.find(arg.id) : d.active;
-        if (!layer) return;
+        // actions (lib/actions.js): a recorded { id, name } replays on the active layer of another document
+        const layer = arg?.id ? d.find(arg.id) ?? (ctx?.source === 'action' ? d.active : null) : d.active;
+        if (!layer) return ctx?.cancel();
         let name = arg?.name;
         if (!name) {
           name = await app.dialogs.prompt('Layer name', { title: 'Rename Layer', value: layer.name });
-          if (!name) return;
+          if (!name) return ctx?.cancel(); // actions (lib/actions.js)
+          ctx?.setReplayArg({ name }); // actions (lib/actions.js)
         }
         setLayerProps(app, layer, { name }, 'Rename layer');
       },
@@ -586,14 +590,18 @@ export function install(app) {
     'layer:select-all': { enabled: has, run: () => app.commands.run('layer:select', 'all', 'api') },
     'layer:properties': {
       enabled: hasLayer,
-      run: async (id) => {
+      dialog: true, // actions (lib/actions.js)
+      run: async (id, ctx) => {
         const d = doc();
         const layer = (typeof id === 'string' && d.find(id)) || d.active;
-        if (!layer) return;
+        if (!layer) return ctx?.cancel();
         if (layer.type === 'adjustment') return app.commands.run('layer:edit-adjustment', layer.id, 'api');
         if (layer.type === 'fill') return app.commands.run('layer:edit-fill', layer.id, 'api');
-        const name = await app.dialogs.prompt('Name', { title: 'Layer Properties', value: layer.name });
-        if (name && name !== layer.name) setLayerProps(app, layer, { name }, 'Rename layer');
+        // actions (lib/actions.js): a recorded step carries { name } and skips the prompt
+        const name = id?.name ?? (await app.dialogs.prompt('Name', { title: 'Layer Properties', value: layer.name }));
+        if (!name || name === layer.name) return ctx?.cancel(); // actions (lib/actions.js)
+        ctx?.setReplayArg({ name }); // actions (lib/actions.js)
+        setLayerProps(app, layer, { name }, 'Rename layer');
       },
     },
     'layer:copy-style': {
@@ -618,12 +626,17 @@ export function install(app) {
     },
     'layer:new-fill': {
       enabled: has,
-      run: async (kind = 'solid') => {
+      dialog: true, // actions (lib/actions.js)
+      run: async (arg = 'solid', ctx) => {
         const d = doc();
+        // actions (lib/actions.js): a recorded step is { kind, paint } and makes the layer without asking
+        const kind = arg && typeof arg === 'object' ? arg.kind : arg;
+        const recorded = arg && typeof arg === 'object' && arg.paint ? JSON.parse(JSON.stringify(arg.paint)) : null;
         let paint;
-        if (kind === 'solid') {
+        if (recorded) paint = recorded;
+        else if (kind === 'solid') {
           const color = await app.pickColor?.(app.settings.foreground, { title: 'Solid Color Fill' });
-          if (!color) return;
+          if (!color) return ctx?.cancel(); // actions (lib/actions.js)
           paint = { type: 'solid', color };
         } else if (kind === 'gradient') paint = { type: 'gradient', gradient: { kind: 'linear', stops: [{ pos: 0, color: app.settings.foreground }, { pos: 1, color: app.settings.background }], from: [0, d.height / 2], to: [d.width, d.height / 2] } };
         else {
@@ -636,16 +649,19 @@ export function install(app) {
           d.add(layer);
           d.setActive(layer);
         });
-        if (kind === 'gradient') app.commands.run('layer:edit-fill', layer.id, 'api');
+        if (kind === 'gradient' && !recorded) await app.commands.run('layer:edit-fill', layer.id, 'api');
+        if (kind !== 'pattern') ctx?.setReplayArg({ kind, paint: JSON.parse(JSON.stringify(layer.paint)) }); // actions (lib/actions.js): patterns replay from the current pattern
       },
     },
     'layer:new-adjustment': {
       enabled: has,
-      run: (kind) => {
+      run: (arg) => {
         const d = doc();
+        // actions (lib/actions.js): besides a kind, { kind, params } makes the layer with settings (recorded and built-in actions)
+        const kind = arg && typeof arg === 'object' ? arg.kind : arg;
         const def = app.adjustments?.[kind];
         if (!def) return;
-        const layer = new AdjustmentLayer({ name: def.name, kind, params: JSON.parse(JSON.stringify(def.defaults ?? {})) });
+        const layer = new AdjustmentLayer({ name: def.name, kind, params: JSON.parse(JSON.stringify({ ...(def.defaults ?? {}), ...(arg?.params ?? {}) })) });
         layer.mask = { canvas: d.selection && !d.selection.isEmpty ? maskFromSelection(d) : solidMask(d, true), enabled: true, linked: true };
         structural(app, `New ${def.name} layer`, () => {
           d.add(layer);

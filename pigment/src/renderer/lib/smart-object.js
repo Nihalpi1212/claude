@@ -194,6 +194,8 @@ export class SmartLayer extends Layer {
     this.transform = Array.isArray(props.transform) && props.transform.length === 6 ? props.transform.map(Number) : null;
     this.filters = Array.isArray(props.filters) ? props.filters.map(normaliseFilter) : [];
     this.filtersEnabled = props.filtersEnabled !== false;
+    // align-blend (lib/align-blend.js): Layer > Smart Objects > Stack Mode; null = the normal composite
+    this.stackMode = props.stackMode ?? null;
     this.source = resolveSource(props.source);
     this._cache = null;
   }
@@ -201,6 +203,8 @@ export class SmartLayer extends Layer {
   static previewing = null;
   /** Set at install: (layer) => the open Document holding the layer, for render clipping when the WeakMap has no entry. */
   static findHost = null;
+  /** align-blend (lib/align-blend.js) sets this: (layer) => canvas of the source's layers under layer.stackMode, or null. */
+  static stackRender = null;
 
   // The Move tool and alignment offset layers through x/y: for a smart object they are the
   // translation part of its matrix (base space maps to document space through `transform`).
@@ -250,6 +254,9 @@ export class SmartLayer extends Layer {
   sourceCanvas() {
     const s = this.source;
     if (s.kind !== 'document') return s.canvas;
+    // align-blend (lib/align-blend.js): a stack mode draws a statistic of the source's layers instead of their composite
+    const stacked = this.stackMode ? SmartLayer.stackRender?.(this) : null;
+    if (stacked) return stacked;
     let c = compositors.get(this);
     if (!c) {
       c = new Compositor();
@@ -278,7 +285,7 @@ export class SmartLayer extends Layer {
     const withinBudget = rect.width * rect.height <= RENDER_BUDGET && rect.width <= RENDER_MAX_SIDE && rect.height <= RENDER_MAX_SIDE;
     const whole = (full || filters.some(isGeometricFilter)) && withinBudget;
     // not keyed on layer.version: opacity, visibility or mask edits must not re-rasterise the source
-    const key = `${this.sourceVersion()}|${m.join(',')}|${filters.length ? JSON.stringify(filters) : ''}|${whole ? 'whole' : 'clipped'}`;
+    const key = `${this.sourceVersion()}|${m.join(',')}|${filters.length ? JSON.stringify(filters) : ''}|${whole ? 'whole' : 'clipped'}|${this.stackMode ?? ''}`; // + stack mode (align-blend)
     if (this._cache?.key === key) return this._cache;
     // only what can reach the host canvas is rendered: a 40× scale must not allocate a gigantic canvas. The host is
     // learnt from tree changes; after a whole-document remap (Image Size, Crop, ...) the layer objects are new, so it is
@@ -317,6 +324,7 @@ registerLayerType('smart', SmartLayer, {
     transform: l.transform ? l.transform.slice() : null,
     filters: clone(l.filters),
     filtersEnabled: l.filtersEnabled !== false,
+    stackMode: l.stackMode ?? null, // align-blend (lib/align-blend.js)
     source: { kind: l.source.kind, width: l.sourceWidth, height: l.sourceHeight, name: l.source.name ?? null },
   }),
 });
@@ -558,14 +566,15 @@ export function install(app) {
     return makeSource({ kind: 'image', canvas: await decodeImage(bytes, path), name: baseName(path) });
   }
 
-  async function replaceContents(pathArg) {
+  async function replaceContents(pathArg, ctx = null) {
     const d = doc();
     const layer = active();
-    if (!isSmart(layer)) return;
+    if (!isSmart(layer)) return ctx?.cancel();
     let path = pathArg;
     if (!path) {
       [path] = await bridge.openFileDialog({ filters: OPEN_FILTERS, title: 'Replace Contents' });
-      if (!path) return;
+      if (!path) return ctx?.cancel(); // actions (lib/actions.js)
+      ctx?.setReplayArg(path); // actions (lib/actions.js)
     }
     try {
       const source = await app.busy('Replacing contents…', () => sourceFromFile(path));
@@ -575,18 +584,20 @@ export function install(app) {
     }
   }
 
-  async function exportContents() {
+  async function exportContents(arg = null, ctx = null) {
     const layer = active();
-    if (!isSmart(layer)) return;
+    if (!isSmart(layer)) return ctx?.cancel();
     const src = layer.source;
     const isDoc = src.kind === 'document';
-    const target = await bridge.saveFileDialog({
+    // actions (lib/actions.js): a recorded path skips the save dialog
+    const target = typeof arg === 'string' ? arg : await bridge.saveFileDialog({
       defaultPath: `${layer.name.replace(/[\\/:*?"<>|]+/g, '_')}.${isDoc ? 'pigment' : 'png'}`,
       filters: isDoc ? [{ name: 'Pigment document', extensions: ['pigment'] }, { name: 'PNG image', extensions: ['png'] }] : [{ name: 'PNG image', extensions: ['png'] }, { name: 'Pigment document', extensions: ['pigment'] }],
       title: 'Export Contents',
     });
-    if (!target) return;
+    if (!target) return ctx?.cancel(); // actions (lib/actions.js)
     const path = extOf(target) ? target : `${target}.${isDoc ? 'pigment' : 'png'}`;
+    ctx?.setReplayArg(path); // actions (lib/actions.js)
     try {
       const bytes = await app.busy('Exporting contents…', async () => {
         if (extOf(path) === 'pigment') return writePigment(isDoc ? src.doc : documentFromImage(src, layer.name));
@@ -601,13 +612,14 @@ export function install(app) {
 
   // ---- place as a smart object ------------------------------------------------------------------------------
   const rasterPlace = app.commands.commands.get('file:place'); // edit-ops.js: places a raster layer
-  async function place(pathArg) {
+  async function place(pathArg, ctx = null) {
     const d = doc();
     if (!d) return;
     let path = pathArg;
     if (!path) {
       [path] = await bridge.openFileDialog({ filters: OPEN_FILTERS, title: 'Place' });
-      if (!path) return;
+      if (!path) return ctx?.cancel(); // actions (lib/actions.js)
+      ctx?.setReplayArg(path); // actions (lib/actions.js): the chosen file replays the command
     }
     try {
       const source = await app.busy('Placing…', () => sourceFromFile(path));
@@ -883,8 +895,8 @@ export function install(app) {
     'layer:smart-convert': { enabled: () => !!active() && active() !== doc()?.root, run: convert, label: 'Convert to Smart Object' },
     'layer:smart-via-copy': { enabled: hasSmart, run: viaCopy, label: 'New Smart Object via Copy' },
     'layer:smart-edit': { enabled: hasSmart, run: (id) => editContents(id), label: 'Edit Contents' },
-    'layer:smart-replace': { enabled: hasSmart, run: (path) => replaceContents(typeof path === 'string' ? path : null), label: 'Replace Contents…' },
-    'layer:smart-export': { enabled: hasSmart, run: exportContents, label: 'Export Contents…' },
+    'layer:smart-replace': { enabled: hasSmart, dialog: true, run: (path, ctx) => replaceContents(typeof path === 'string' ? path : null, ctx), label: 'Replace Contents…' }, // actions (lib/actions.js)
+    'layer:smart-export': { enabled: hasSmart, dialog: true, run: exportContents, label: 'Export Contents…' }, // actions (lib/actions.js)
     'layer:smart-reset': {
       enabled: () => hasSmart() && !!active().transform,
       run: (id) => {
@@ -924,7 +936,8 @@ export function install(app) {
     // File › Place creates a smart object unless Preferences turned that off (settings.placeAsSmart)
     'file:place': {
       enabled: () => !!doc(),
-      run: (path) => (app.settings.placeAsSmart === false && rasterPlace ? rasterPlace.run(path) : place(typeof path === 'string' ? path : null)),
+      dialog: true, // actions (lib/actions.js)
+      run: (path, ctx) => (app.settings.placeAsSmart === false && rasterPlace ? rasterPlace.run(path, ctx) : place(typeof path === 'string' ? path : null, ctx)),
       label: 'Place…',
     },
   });

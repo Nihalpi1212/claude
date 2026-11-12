@@ -43,6 +43,15 @@ const IGNORED_COMMANDS = new Set([
 const SESSION_COMMANDS = /^(edit:free-transform|edit:transform-(scale|rotate|skew|distort|perspective|warp)|edit:perspective-warp|edit:puppet-warp|select:transform|select:quick-mask)$/;
 const SESSION_TRANSFORM_KINDS = new Set(['free', 'scale', 'rotate', 'skew', 'distort', 'perspective', 'warp']);
 
+/**
+ * Commands that cannot replay: they work on one particular layer or smart filter by id (a drag in the
+ * Layers panel, editing an adjustment or fill layer in place), or their dialog does not report what it did
+ * (Fade lives in lib/adjust-ui.js and has no replay argument yet). Recording says so instead of storing a
+ * step that would do nothing, or ask again, on another document.
+ */
+const UNREPLAYABLE = new Set(['layer:move-to', 'layer:smart-filter', 'layer:smart-edit', 'layer:edit-adjustment', 'layer:edit-fill', 'edit:fade']);
+export const isUnreplayableCommand = (id) => UNREPLAYABLE.has(id);
+
 export function isIgnoredCommand(id) {
   if (RECORDED_ANYWAY.has(id)) return false;
   return IGNORED_GROUPS.test(id) || IGNORED_COMMANDS.has(id);
@@ -84,7 +93,7 @@ export function recordDecision(event, { label } = {}) {
   if (isIgnoredCommand(id)) return { record: false, reason: 'ignored' };
   if (isSessionCommand(id, arg)) return { record: false, reason: 'session' };
   const name = label ?? commandLabel(id, arg);
-  if (event.replayable === false) return { record: false, reason: 'unreplayable', label: name };
+  if (event.replayable === false || UNREPLAYABLE.has(id)) return { record: false, reason: 'unreplayable', label: name };
   if (!isPlainData(arg)) return { record: false, reason: 'data', label: name };
   const copy = cloneData(arg);
   if (copy !== undefined && JSON.stringify(copy).length > MAX_ARG_BYTES) return { record: false, reason: 'data', label: name };

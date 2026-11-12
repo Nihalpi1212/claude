@@ -15,7 +15,7 @@ const MODE_NAMES = { rgb: 'RGB Color', grayscale: 'Grayscale', bitmap: 'Bitmap',
 export function install(app) {
   const has = () => !!app.doc;
 
-  async function exportAs(arg) {
+  async function exportAs(arg, ctx = null) {
     const d = app.doc;
     const last = app.settings.exportDefaults ?? {};
     let opts = arg && typeof arg === 'object' && arg.path ? arg : null;
@@ -68,12 +68,13 @@ export function install(app) {
         },
         okLabel: 'Export…',
       });
-      if (!values) return;
+      if (!values) return ctx?.cancel(); // actions (lib/actions.js)
       const info = SAVE_FORMATS[values.format];
       const dir = d.path ? d.path.slice(0, d.path.lastIndexOf(pathSep) + 1) : '';
       const path = await bridge.saveFileDialog({ title: 'Export As', defaultPath: `${dir}${baseName(d.name)}.${info.ext}`, filters: [{ name: info.name, extensions: [info.ext] }] });
-      if (!path) return;
+      if (!path) return ctx?.cancel(); // actions (lib/actions.js)
       opts = { path, ...toExport(values) };
+      ctx?.setReplayArg({ ...opts }); // actions (lib/actions.js): path and settings replay the export
       app.settings.exportDefaults = { ...(app.settings.exportDefaults ?? {}), format: values.format, quality: values.quality / 100 };
       app.saveSettingsSoon();
     }
@@ -86,7 +87,7 @@ export function install(app) {
     }
   }
 
-  async function quickExport() {
+  async function quickExport(_arg, ctx = null) {
     const d = app.doc;
     let path;
     if (d.path) {
@@ -101,13 +102,14 @@ export function install(app) {
       }
       if (exists) path = await bridge.saveFileDialog({ title: 'Quick Export as PNG', defaultPath: path, filters: [{ name: 'PNG image', extensions: ['png'] }] });
     } else path = await bridge.saveFileDialog({ title: 'Quick Export as PNG', defaultPath: `${baseName(d.name)}.png`, filters: [{ name: 'PNG image', extensions: ['png'] }] });
-    if (!path) return;
+    if (!path) return ctx?.cancel(); // actions (lib/actions.js)
     return exportAs({ path, format: 'png' });
   }
 
-  async function exportLayers() {
+  async function exportLayers(arg, ctx = null) {
     const d = app.doc;
-    const o = await formDialog(app, {
+    // actions (lib/actions.js): recorded options ({ format, visibleOnly, trim, prefix, folder }) skip the dialog and the folder chooser
+    const o = arg && typeof arg === 'object' ? arg : await formDialog(app, {
       title: 'Export Layers to Files',
       intro: 'Each top-level layer or group is exported as its own image, named after the layer.',
       fields: [
@@ -118,10 +120,11 @@ export function install(app) {
       ],
       okLabel: 'Choose Folder…',
     });
-    if (!o) return;
-    const dir = await bridge.openDirectoryDialog?.({ title: 'Export layers into' });
+    if (!o) return ctx?.cancel(); // actions (lib/actions.js)
+    const dir = o.folder ?? (await bridge.openDirectoryDialog?.({ title: 'Export layers into' }));
     const folder = Array.isArray(dir) ? dir[0] : dir;
-    if (!folder) return;
+    if (!folder) return ctx?.cancel(); // actions (lib/actions.js)
+    ctx?.setReplayArg({ format: o.format, visibleOnly: !!o.visibleOnly, trim: !!o.trim, prefix: o.prefix, folder }); // actions (lib/actions.js)
     const info = SAVE_FORMATS[o.format];
     const layers = d.root.children.filter((l) => (!o.visibleOnly || l.visible) && l.type !== 'adjustment');
     let n = 0;
@@ -188,9 +191,9 @@ export function install(app) {
   }
 
   app.commands.registerAll({
-    'file:export': { enabled: has, run: exportAs, label: 'Export As…' },
+    'file:export': { enabled: has, run: exportAs, label: 'Export As…', dialog: true }, // actions (lib/actions.js)
     'file:export-quick': { enabled: has, run: quickExport, label: 'Quick Export as PNG' },
-    'file:export-layers': { enabled: has, run: exportLayers, label: 'Export Layers to Files…' },
+    'file:export-layers': { enabled: has, run: exportLayers, label: 'Export Layers to Files…', dialog: true }, // actions (lib/actions.js)
     'file:properties': { enabled: has, run: properties, label: 'Document Properties…' },
   });
 }

@@ -409,7 +409,7 @@ class ActionsEngine {
     if (!set) return false;
     delete target.collapsed;
     delete set.collapsed;
-    this.recording = { set, action: target, marks: new Map(), redo: [], lastSelection: new WeakMap(), seen: new WeakSet() };
+    this.recording = { set, action: target, marks: new Map(), redo: [], lastSelection: new WeakMap(), seen: new WeakSet(), colors: { fg: this.app.settings.foreground, bg: this.app.settings.background } };
     // history entries that exist now are not part of the recording; later ones made outside commands are tool work
     for (const d of this.app.docs?.docs ?? []) {
       for (const entry of d.history?.entries ?? []) this.recording.seen.add(entry);
@@ -499,6 +499,19 @@ class ActionsEngine {
       case 'file:save-copy':
         this.warnOnce('u:file:save-copy', 'Save a Copy could not be recorded: use Save As or Export As while recording');
         return false;
+      case 'view:new-guide': {
+        // run from the menu it asks for the position and reports nothing: the guide it added is the argument
+        if (e.arg && typeof e.arg === 'object') return null;
+        const g = d && fr.doc === d && d.guides.length > fr.guides ? d.guides[d.guides.length - 1] : null;
+        return g ? { id: e.id, arg: { axis: g.axis, pos: g.pos }, label: `New Guide: ${g.axis === 'y' ? 'horizontal' : 'vertical'} at ${g.pos} px` } : false;
+      }
+      case 'layer:visibility':
+      case 'layer:properties':
+      case 'select:from-layer':
+        // the Layers panel passes the layer's id; the active layer needs none, so the step works in any document
+        return typeof e.arg === 'string' && fr.doc?.active?.id === e.arg ? { id: e.id, arg: undefined } : null;
+      case 'layer:rename':
+        return e.arg?.id && e.arg?.name ? { id: e.id, arg: { name: e.arg.name } } : null;
       case 'layer:select': {
         if (['all', 'none', 'next', 'prev'].includes(e.arg)) return null;
         const layer = fr.doc?.find?.(e.arg) ?? d?.find?.(e.arg);
@@ -537,6 +550,30 @@ class ActionsEngine {
     if (changed) {
       this.selection = { set: rec.set.id, action: rec.action.id, step: steps[steps.length - 1]?.id ?? null };
       this.changed('recorded');
+    }
+  }
+
+  /**
+   * The foreground or background colour changed. The colour panel, the swatches, the eyedropper and the
+   * colour picker set colours without a command, so the change itself is recorded ("Set Foreground Color");
+   * Swap and Default Colors are commands and record themselves.
+   */
+  onColorChanged({ fg, bg }) {
+    const rec = this.recording;
+    if (!rec) return;
+    const before = rec.colors;
+    rec.colors = { fg, bg };
+    if (this.playing || this.frames.some((f) => !/^tool:pick-(fg|bg)$/.test(f.id))) return;
+    const steps = rec.action.steps;
+    for (const [key, command, label] of [['fg', 'tool:fg-color', 'Set Foreground Color'], ['bg', 'tool:bg-color', 'Set Background Color']]) {
+      const value = key === 'fg' ? fg : bg;
+      if (!value || value === before[key]) continue;
+      // dragging in a colour field fires many changes: the step keeps the last one
+      const last = steps[steps.length - 1];
+      if (last?.command === command && rec.marks.get(last.id)?.color) {
+        last.arg = value;
+        this.changed('recorded');
+      } else this.appendRecorded(M.makeStep(command, value, label), { color: true });
     }
   }
 
@@ -738,7 +775,7 @@ class ActionsEngine {
     registry.run = (id, arg, source = 'api') => {
       if (TRANSPARENT.test(id) || !registry.commands.has(id)) return base(id, arg, source);
       const d = this.app.doc;
-      const fr = { id, source, nested: frames.length > 0, hadTransform: !!this.app.transformTool?.session, doc: d, histEntry: d?.history?.entries[d.history.index] ?? null, done: false };
+      const fr = { id, source, nested: frames.length > 0, hadTransform: !!this.app.transformTool?.session, doc: d, histEntry: d?.history?.entries[d.history.index] ?? null, guides: d?.guides?.length ?? 0, done: false };
       frames.push(fr);
       const release = () => {
         const i = frames.indexOf(fr);
@@ -784,7 +821,10 @@ function applyTransform(app, arg) {
     const m = arg.matrix, shift = arg.shift ?? [0, 0];
     const cx = x + width / 2, cy = y + height / 2;
     const px = m[0] * cx + m[2] * cy, py = m[1] * cx + m[3] * cy;
-    const tx = cx - px + shift[0], ty = cy - py + shift[1];
+    // relShift (built-in actions): a shift in fractions of the box, x and y each as [of its width, of its height]
+    const rel = arg.relShift ?? {};
+    const tx = cx - px + shift[0] + (rel.x?.[0] ?? 0) * width + (rel.x?.[1] ?? 0) * height;
+    const ty = cy - py + shift[1] + (rel.y?.[0] ?? 0) * width + (rel.y?.[1] ?? 0) * height;
     s.quad = corners.map(([qx, qy]) => [m[0] * qx + m[2] * qy + tx, m[1] * qx + m[3] * qy + ty]);
   } else if (Array.isArray(arg.quad) && arg.quad.length === 4) {
     s.quad = arg.quad.map(([u, v]) => [x + u * width, y + v * height]);
@@ -853,6 +893,7 @@ export function install(app) {
   engine.wrapCommands();
   app.on('transform:committed', (t) => engine.onTransformCommitted(t));
   app.on('history:changed', (d) => engine.onHistoryChanged(d));
+  app.on('color:changed', (c) => engine.onColorChanged(c ?? {}));
   app.on('doc:opened', (d) => engine.recording?.lastSelection.set(d, currentSelection(d)));
   app.on('doc:closed', () => {
     // marks hold documents: drop those of closed ones so Undo tracking never touches a dead history

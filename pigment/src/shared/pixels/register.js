@@ -1168,13 +1168,15 @@ function boxLuma(img, x, y, r = 3) {
 /**
  * Estimates the lens vignette shared by the images from the brightness of matched points: the same scene point
  * is darker in the image where it sits further from the centre. Model: observed = scene / (1 + v·ρ²), ρ = the
- * distance from the image centre over the half diagonal. `samples` is alignImages().samples(). Returns
+ * distance from the image centre over the half diagonal. `images` is the array alignImages() was given (or a
+ * function index -> image, to load them on demand); `samples` is alignImages().samples(). Returns
  * { amount: v (0 when it could not be estimated), samples: the number of point pairs used }.
  */
 export function estimateVignette(images, samples) {
   let num = 0, den = 0, used = 0;
+  const imageAt = typeof images === 'function' ? images : (i) => images[i];
   for (const s of samples) {
-    const A = images[s.a], B = images[s.b];
+    const A = imageAt(s.a), B = imageAt(s.b);
     const ra2 = (A.width * A.width + A.height * A.height) / 4, rb2 = (B.width * B.width + B.height * B.height) / 4;
     const rows = [];
     let sumA = 0, sumB = 0;
@@ -1380,6 +1382,32 @@ function blurMap(map, w, h, radius) {
   return map;
 }
 
+/** The size seamMasks() works at for a frame of width × height: { width, height, scale }. */
+export function seamWorkSize(width, height, maxPixels = 1.5e6) {
+  const scale = Math.min(1, Math.sqrt(maxPixels / Math.max(1, width * height)));
+  return { width: Math.max(1, Math.round(width * scale)), height: Math.max(1, Math.round(height * scale)), scale };
+}
+
+/**
+ * Area-averaged reduction of a one-channel plane from width × height to w × h. With `asCover` the result is a
+ * Uint8Array of 0 / 1 (1 where the mean is at least 128), else a Float32Array of means.
+ */
+export function reducePlane(plane, width, height, w, h, asCover = false) {
+  const out = asCover ? new Uint8Array(w * h) : new Float32Array(w * h);
+  const kx = width / w, ky = height / h;
+  for (let y = 0; y < h; y++) {
+    const ya = Math.floor(y * ky), yb = Math.max(ya + 1, Math.min(height, Math.floor((y + 1) * ky)));
+    for (let x = 0; x < w; x++) {
+      const xa = Math.floor(x * kx), xb = Math.max(xa + 1, Math.min(width, Math.floor((x + 1) * kx)));
+      let sum = 0;
+      for (let yy = ya; yy < yb; yy++) for (let xx = xa; xx < xb; xx++) sum += plane[yy * width + xx];
+      const mean = sum / ((yb - ya) * (xb - xa));
+      out[y * w + x] = asCover ? (mean >= 128 ? 1 : 0) : mean;
+    }
+  }
+  return out;
+}
+
 /**
  * Layer masks for Auto-Blend. `alphas` are the layers' alpha planes (Uint8, width × height, bottom layer
  * first) in one common frame. Every covered pixel is given to the layer with the largest weight there (by
@@ -1387,29 +1415,17 @@ function blurMap(map, w, h, radius) {
  * are then feathered and the result is turned into masks for normal ("over") compositing: the lowest layer
  * covering a pixel is opaque, each layer above it carries its share, so the blend has no holes.
  *
- * Options: feather (pixels; default 10% of the widest overlap, 1..64), weights (Float32Array per layer,
- * larger wins: Stack Images passes local sharpness), maxPixels (the seam is computed on a reduced copy above
+ * Options: feather (pixels; default 10% of the widest overlap, 1..64), weights (Float32Array per layer, at
+ * the frame's size or at seamWorkSize(); larger wins: Stack Images passes local sharpness), maxPixels (the seam is computed on a reduced copy above
  * this size and scaled back up). Returns { masks: Uint8ClampedArray[] (0..255), feather, overlap (px), labels }.
  */
 export function seamMasks(alphas, width, height, { feather = null, weights = null, maxPixels = 1.5e6 } = {}) {
   const n = alphas.length;
-  const s = Math.min(1, Math.sqrt(maxPixels / Math.max(1, width * height)));
-  const w = Math.max(1, Math.round(width * s)), h = Math.max(1, Math.round(height * s));
+  const { width: w, height: h, scale: s } = seamWorkSize(width, height, maxPixels);
   const kx = width / w, ky = height / h;
   const reduce = (plane, asCover) => {
-    if (w === width && h === height && !asCover) return plane;
-    const out = asCover ? new Uint8Array(w * h) : new Float32Array(w * h);
-    for (let y = 0; y < h; y++) {
-      const ya = Math.floor(y * ky), yb = Math.max(ya + 1, Math.min(height, Math.floor((y + 1) * ky)));
-      for (let x = 0; x < w; x++) {
-        const xa = Math.floor(x * kx), xb = Math.max(xa + 1, Math.min(width, Math.floor((x + 1) * kx)));
-        let sum = 0;
-        for (let yy = ya; yy < yb; yy++) for (let xx = xa; xx < xb; xx++) sum += plane[yy * width + xx];
-        const mean = sum / ((yb - ya) * (xb - xa));
-        out[y * w + x] = asCover ? (mean >= 128 ? 1 : 0) : mean;
-      }
-    }
-    return out;
+    if (!asCover && plane.length === w * h) return plane; // same size, or reduced by the caller already
+    return reducePlane(plane, width, height, w, h, asCover);
   };
   const cover = alphas.map((a) => reduce(a, true));
   const dist = cover.map((c) => distanceToEdge(c, w, h));

@@ -6,7 +6,7 @@
 // a smart layer the smart-object module turns it into a smart filter through app.smartFilters.
 import { develop, developDefaults, autoTone, HSL_RANGES } from '../../shared/pixels/develop.js';
 import { buildForm } from './form.js';
-import { pixelEditDialog, getPath, setPath } from './adjust-ui.js';
+import { pixelEditDialog, getPath, setPath, beginPixelEdit, processed } from './adjust-ui.js';
 
 const LABEL = 'Camera Raw';
 const clone = (v) => JSON.parse(JSON.stringify(v));
@@ -190,11 +190,11 @@ export function developEditor(start, onChange, { onAuto = null } = {}) {
 export function install(app) {
   const has = () => !!app.doc?.active;
 
-  async function cameraRaw(arg) {
+  async function cameraRaw(arg, ctx = null) {
     app.tools.active?.commit?.();
     const d = app.doc;
     const layer = d?.active;
-    if (!layer) return;
+    if (!layer) return ctx?.cancel();
     const explicit = arg && typeof arg === 'object' ? clone(arg) : null;
     const start = { ...developDefaults(), ...(explicit ?? {}) };
     // smart objects: the smart-object module owns the dialog flow (params null opens its dialog
@@ -202,6 +202,13 @@ export function install(app) {
     if (layer.type === 'smart' && typeof app.smartFilters?.intercept === 'function') {
       const handled = app.smartFilters.intercept(layer, 'camera-raw', explicit ? start : null, LABEL);
       if (handled) return handled.done; // resolves with the smart filter's params (null when cancelled)
+    }
+    // actions (lib/actions.js): a played step applies its recorded settings without the dialog
+    if (explicit && ctx?.source === 'action') {
+      const session = beginPixelEdit(app, { label: LABEL, margin: 48 });
+      if (!session) return ctx.cancel();
+      session.commit(LABEL, await app.busy(`${LABEL}…`, async () => processed(session, (img) => develop(img, start))));
+      return start;
     }
     const used = await pixelEditDialog(app, {
       title: 'Camera Raw Filter',
@@ -234,6 +241,7 @@ export function install(app) {
   registerSmartKind();
   app.on('app:ready', registerSmartKind);
   app.commands.registerAll({
-    'filter:camera-raw': { enabled: has, label: 'Camera Raw Filter…', run: (arg) => cameraRaw(arg) },
+    // actions (lib/actions.js): the dialog's settings (or null when cancelled) decide what is recorded
+    'filter:camera-raw': { enabled: has, label: 'Camera Raw Filter…', dialog: true, run: (arg, ctx) => cameraRaw(arg, ctx).then((used) => (used ? ctx?.setReplayArg(clone(used)) : ctx?.cancel(), used)) },
   });
 }

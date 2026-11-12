@@ -104,7 +104,7 @@ function createFromOptions(app, o) {
 const MODES = [['rgb', 'RGB Color'], ['grayscale', 'Grayscale'], ['cmyk', 'CMYK Color'], ['lab', 'Lab Color'], ['bitmap', 'Bitmap']];
 const DEPTHS = [[8, '8 bit'], [16, '16 bit'], [32, '32 bit']];
 
-async function newDocumentDialog(app, arg) {
+async function newDocumentDialog(app, arg, ctx = null) {
   if (arg && typeof arg === 'object' && Number(arg.width) > 0 && Number(arg.height) > 0) return createFromOptions(app, arg);
   const last = { ...DEFAULT_SETTINGS.newDocPreset, ...(app.settings.newDocPreset ?? {}) };
   const clip = await clipboardSize(app);
@@ -246,9 +246,14 @@ async function newDocumentDialog(app, arg) {
       return ok;
     },
   });
-  if (!result) return null;
+  if (!result) {
+    ctx?.cancel(); // actions (lib/actions.js)
+    return null;
+  }
   const opts = { width: Math.round(result.width), height: Math.round(result.height), dpi: Math.round(Number(result.dpi) || 72), background: result.background, backgroundColor: normHex(result.backgroundColor), name: result.name, unit: result.unit, mode: result.mode, depth: Number(result.depth) || 8 };
   app.saveSettingsSoon({ newDocPreset: { width: opts.width, height: opts.height, dpi: opts.dpi, background: opts.background, backgroundColor: opts.backgroundColor, unit: opts.unit, preset: result.preset === 'clipboard' ? 'custom' : result.preset, name: 'Untitled', mode: opts.mode, depth: opts.depth } });
+  // actions (lib/actions.js): the settings replay the command; an automatic "Untitled-n" name is left to each run
+  ctx?.setReplayArg({ ...opts, name: /^Untitled(-\d+)?$/.test(opts.name ?? '') ? undefined : opts.name });
   return createFromOptions(app, opts);
 }
 
@@ -489,7 +494,9 @@ async function resetAllSettings(app) {
 }
 
 export function install(app) {
-  app.newDocumentDialog = (arg) => newDocumentDialog(app, arg);
+  app.newDocumentDialog = (arg, ctx) => newDocumentDialog(app, arg, ctx);
+  // actions (lib/actions.js): File > New is a dialog command that reports its settings (app.js registers it without ctx)
+  app.commands.register('file:new', { dialog: true, run: (arg, ctx) => newDocumentDialog(app, arg, ctx) });
   app.pickColor = (initial, opts) => pickColor(app, initial, opts);
   app.preferencesDialog = () => preferencesDialog(app);
 }

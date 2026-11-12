@@ -406,8 +406,14 @@ export function install(app) {
     return layers;
   }
 
-  async function generativeFill(opts = null) {
+  // actions (lib/actions.js): the AI dialogs report their values (prompt, provider, model and the dialog's own
+  // fields); a recorded step passes them back as the argument and runs without the dialog
+  const replayOf = (values) => JSON.parse(JSON.stringify(values));
+  const recordedValues = (arg) => (arg && typeof arg === 'object' && typeof arg.prompt === 'string' && arg.provider && arg.model ? arg : null);
+
+  async function generativeFill(opts = null, ctx = null) {
     const d = doc();
+    if (!d || !hasSel()) ctx?.cancel(); // actions (lib/actions.js)
     if (!d || !hasSel()) return app.dialogs.toast('Make a selection first', { kind: 'error' });
     let values = opts;
     if (!values) {
@@ -418,7 +424,8 @@ export function install(app) {
         promptDefault: ai().prefs().lastFillPrompt ?? '',
         extra: [{ key: 'variations', label: 'Variations', type: 'slider', value: 1, min: 1, max: 3 }],
       });
-      if (!values) return;
+      if (!values) return ctx?.cancel(); // actions (lib/actions.js)
+      ctx?.setReplayArg(replayOf(values)); // actions (lib/actions.js)
       ai().setPrefs({ lastFillPrompt: values.prompt });
     } else {
       const c = await connected('image');
@@ -432,19 +439,20 @@ export function install(app) {
     const n = Math.max(1, Math.min(3, Math.round(values.variations ?? 1)));
     try {
       const layers = await aiTask(app, n > 1 ? `Generating ${n} fills…` : 'Generative Fill…', (state) => fillThroughMask(d, mask, region, { ...values, variations: n, name: 'Generative Fill' }, state));
-      if (!layers.length) return;
+      if (!layers.length) return ctx?.cancel(); // actions (lib/actions.js)
       addLayers(d, layers, 'Generative Fill');
       return layers.map((l) => l.id);
     } catch (err) {
+      ctx?.cancel(); // actions (lib/actions.js)
       reportAiError(app, err, 'Generative Fill failed');
     }
   }
 
-  async function generativeExpand() {
+  async function generativeExpand(arg = null, ctx = null) {
     const d = doc();
-    if (!d) return;
+    if (!d) return ctx?.cancel();
     const already = !!transparentAreaMask(composite(d));
-    const values = await optionsDialog({
+    const values = recordedValues(arg) ?? await optionsDialog({
       title: 'Generative Expand',
       intro: already
         ? 'Fills the transparent area around the image (enlarge the canvas further here if you like). Describe what should appear there, or leave a short hint such as "continue the scene".'
@@ -457,7 +465,8 @@ export function install(app) {
         { key: 'anchor', label: 'Keep the image', type: 'select', value: 'c', options: ANCHORS },
       ],
     });
-    if (!values) return;
+    if (!values) return ctx?.cancel(); // actions (lib/actions.js)
+    ctx?.setReplayArg(replayOf(values)); // actions (lib/actions.js)
     ai().setPrefs({ lastExpandPrompt: values.prompt });
     const W = Math.max(d.width, Math.round(values.width) || d.width), H = Math.max(d.height, Math.round(values.height) || d.height);
     // the canvas grows here with a transparent extension (Canvas Size fills an opaque Background by default)
@@ -478,9 +487,10 @@ export function install(app) {
     const region = { x: 0, y: 0, width: d.width, height: d.height };
     try {
       const layers = await aiTask(app, 'Generative Expand…', (state) => fillThroughMask(d, mask, region, { ...values, variations: 1, name: 'Generative Expand' }, state));
-      if (!layers.length) return undoResize();
+      if (!layers.length) return (ctx?.cancel(), undoResize()); // actions (lib/actions.js)
       addLayers(d, layers, 'Generative Expand');
     } catch (err) {
+      ctx?.cancel(); // actions (lib/actions.js)
       undoResize();
       reportAiError(app, err, 'Generative Expand failed');
     }
@@ -488,10 +498,10 @@ export function install(app) {
 
   // ---- generate image ---------------------------------------------------------------------------------------------------
 
-  async function generateImage() {
+  async function generateImage(arg = null, ctx = null) {
     const d = doc();
     const preset = app.settings.newDocPreset ?? {};
-    const values = await optionsDialog({
+    const values = recordedValues(arg) ?? await optionsDialog({
       title: 'Generate Image',
       promptLabel: 'Describe the image',
       promptDefault: ai().prefs().lastGeneratePrompt ?? '',
@@ -502,7 +512,8 @@ export function install(app) {
         { key: 'transparent', label: 'Transparent background', type: 'checkbox', value: false, when: (v) => !/^dall-e/.test(String(v.model ?? '')), help: 'gpt-image models return real transparency; Gemini models are asked for a plain white background, which is keyed out afterwards.' },
       ],
     });
-    if (!values) return;
+    if (!values) return ctx?.cancel(); // actions (lib/actions.js)
+    ctx?.setReplayArg(replayOf(values)); // actions (lib/actions.js)
     ai().setPrefs({ lastGeneratePrompt: values.prompt });
     const toDoc = values.target === 'document' || !d;
     const width = toDoc ? Math.round(values.width) : d.width;
@@ -523,6 +534,7 @@ export function install(app) {
       addLayers(d, [layer], 'Generate Image');
       return layer.id;
     } catch (err) {
+      ctx?.cancel(); // actions (lib/actions.js)
       reportAiError(app, err, 'Generate Image failed');
     }
   }
@@ -580,16 +592,17 @@ export function install(app) {
     }
   }
 
-  async function replaceBackground() {
+  async function replaceBackground(arg = null, ctx = null) {
     const d = doc();
-    if (!d || !hasLayer()) return;
-    const values = await optionsDialog({
+    if (!d || !hasLayer()) return ctx?.cancel();
+    const values = recordedValues(arg) ?? await optionsDialog({
       title: 'Replace Background',
       intro: 'The subject of the active layer is kept; everything around it is regenerated from your description.',
       promptLabel: 'Describe the new background',
       promptDefault: ai().prefs().lastBackgroundPrompt ?? '',
     });
-    if (!values) return;
+    if (!values) return ctx?.cancel(); // actions (lib/actions.js)
+    ctx?.setReplayArg(replayOf(values)); // actions (lib/actions.js)
     ai().setPrefs({ lastBackgroundPrompt: values.prompt });
     try {
       const layers = await aiTask(app, 'Replacing background…', async (state) => {
@@ -598,32 +611,35 @@ export function install(app) {
         const region = { x: 0, y: 0, width: d.width, height: d.height };
         return fillThroughMask(d, mask, region, { ...values, variations: 1, name: 'Replace Background' }, state);
       });
-      if (!layers.length) return;
+      if (!layers.length) return ctx?.cancel(); // actions (lib/actions.js)
       addLayers(d, layers, 'Replace Background');
     } catch (err) {
+      ctx?.cancel(); // actions (lib/actions.js)
       reportAiError(app, err, 'Replace Background failed');
     }
   }
 
-  async function replaceSky() {
+  async function replaceSky(arg = null, ctx = null) {
     const d = doc();
-    if (!d || !hasLayer()) return;
-    const values = await optionsDialog({
+    if (!d || !hasLayer()) return ctx?.cancel();
+    const values = recordedValues(arg) ?? await optionsDialog({
       title: 'Replace Sky',
       intro: hasSel() ? 'The selection marks the sky.' : 'The bright area at the top of the image is treated as the sky (make a selection to mark it yourself).',
       promptLabel: 'Describe the new sky',
       promptDefault: ai().prefs().lastSkyPrompt ?? 'A dramatic sunset sky with warm clouds',
     });
-    if (!values) return;
+    if (!values) return ctx?.cancel(); // actions (lib/actions.js)
+    ctx?.setReplayArg(replayOf(values)); // actions (lib/actions.js)
     ai().setPrefs({ lastSkyPrompt: values.prompt });
     const mask = hasSel() ? selectionMaskCanvas(d, { x: 0, y: 0, width: d.width, height: d.height }, 1) : skyMask(composite(d));
     if (!mask) return app.dialogs.toast('No sky was found at the top of the image; select the sky area and try again', { kind: 'error', timeout: 6000 });
     const region = { x: 0, y: 0, width: d.width, height: d.height };
     try {
       const layers = await aiTask(app, 'Replacing sky…', (state) => fillThroughMask(d, mask, region, { ...values, variations: 1, name: 'Replace Sky' }, state));
-      if (!layers.length) return;
+      if (!layers.length) return ctx?.cancel(); // actions (lib/actions.js)
       addLayers(d, layers, 'Replace Sky');
     } catch (err) {
+      ctx?.cancel(); // actions (lib/actions.js)
       reportAiError(app, err, 'Replace Sky failed');
     }
   }
@@ -685,12 +701,13 @@ export function install(app) {
   app.aiFeatures = { generativeFill, generativeExpand, generateImage, removeBackground, replaceBackground, replaceSky, describe, task: (label, fn) => aiTask(app, label, fn) };
 
   app.commands.registerAll({
-    'ai:generative-fill': { enabled: () => hasLayer() && hasSel(), run: () => generativeFill(), label: 'Generative Fill…' },
-    'ai:generative-expand': { enabled: hasLayer, run: generativeExpand, label: 'Generative Expand…' },
-    'ai:generate-image': { run: generateImage, label: 'Generate Image…' },
+    // actions (lib/actions.js): dialog commands; their recorded values replay them
+    'ai:generative-fill': { enabled: () => hasLayer() && hasSel(), dialog: true, run: (arg, ctx) => generativeFill(recordedValues(arg), ctx), label: 'Generative Fill…' },
+    'ai:generative-expand': { enabled: hasLayer, dialog: true, run: generativeExpand, label: 'Generative Expand…' },
+    'ai:generate-image': { dialog: true, run: generateImage, label: 'Generate Image…' },
     'ai:remove-background': { enabled: hasLayer, run: removeBackground, label: 'Remove Background' },
-    'ai:replace-background': { enabled: hasLayer, run: replaceBackground, label: 'Replace Background…' },
-    'ai:replace-sky': { enabled: hasLayer, run: replaceSky, label: 'Replace Sky…' },
+    'ai:replace-background': { enabled: hasLayer, dialog: true, run: replaceBackground, label: 'Replace Background…' },
+    'ai:replace-sky': { enabled: hasLayer, dialog: true, run: replaceSky, label: 'Replace Sky…' },
     'ai:describe': { enabled: has, run: describe, label: 'Describe Image' },
   });
   void makeCanvas;

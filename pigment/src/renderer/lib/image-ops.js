@@ -402,9 +402,11 @@ export function install(app) {
   const has = () => !!app.doc;
   const doc = () => app.doc;
 
-  async function imageSize(arg) {
+  async function imageSize(arg, ctx = null) {
     const d = doc();
     let opts = arg && typeof arg === 'object' ? arg : null;
+    // actions (lib/actions.js): a size recorded in percent replays as a scale of whatever document it runs on
+    if (opts?.scale) opts = { ...opts, width: d.width * opts.scale[0], height: d.height * opts.scale[1] };
     if (!opts) {
       let pxW = d.width, pxH = d.height, dpi = d.dpi;
       const unit0 = app.settings.imageSizeUnit ?? 'px';
@@ -480,7 +482,8 @@ export function install(app) {
           return true;
         },
       });
-      if (!opts) return;
+      if (!opts) return ctx?.cancel(); // actions (lib/actions.js)
+      const percent = opts.unit === 'percent' && opts.resample;
       app.settings.imageSizeUnit = opts.unit;
       app.settings.resampleMethod = opts.method;
       app.saveSettingsSoon();
@@ -490,6 +493,7 @@ export function install(app) {
         pxH = d.height;
       }
       opts = { width: Math.round(pxW), height: Math.round(pxH), dpi, method: opts.resample ? opts.method : null, scaleStyles: opts.scaleStyles };
+      ctx?.setReplayArg(percent ? { scale: [pxW / d.width, pxH / d.height], dpi, method: opts.method, scaleStyles: opts.scaleStyles } : { ...opts }); // actions (lib/actions.js)
     }
     const W = Math.max(1, Math.round(opts.width)), H = Math.max(1, Math.round(opts.height));
     if (W === d.width && H === d.height) {
@@ -546,9 +550,11 @@ export function install(app) {
     return { background: app.settings.background, foreground: app.settings.foreground, white: '#ffffff', black: '#000000', grey: '#808080', custom, transparent: null }[kind] ?? null;
   }
 
-  async function canvasSize(arg) {
+  async function canvasSize(arg, ctx = null) {
     const d = doc();
     let opts = arg && typeof arg === 'object' ? arg : null;
+    // actions (lib/actions.js): a recorded relative size ({ relative, width, height }) grows whatever document it runs on
+    if (opts?.relative) opts = { ...opts, width: d.width + opts.width, height: d.height + opts.height };
     const opaqueBg = hasOpaqueBackground(d);
     if (!opts) {
       const unit0 = app.settings.canvasSizeUnit ?? 'px';
@@ -573,7 +579,8 @@ export function install(app) {
           }
         },
       });
-      if (!opts) return;
+      if (!opts) return ctx?.cancel(); // actions (lib/actions.js)
+      const relative = !!opts.relative;
       app.settings.canvasSizeUnit = opts.unit;
       app.saveSettingsSoon();
       let W = toPx(opts.width, opts.unit, d.dpi, d.width), H = toPx(opts.height, opts.unit, d.dpi, d.height);
@@ -586,6 +593,7 @@ export function install(app) {
         H += d.height;
       }
       opts = { width: Math.round(W), height: Math.round(H), anchor: opts.anchor, color: opaqueBg ? extensionColor(opts.extend, opts.custom) : null };
+      ctx?.setReplayArg(relative ? { ...opts, relative: true, width: opts.width - d.width, height: opts.height - d.height } : { ...opts }); // actions (lib/actions.js)
     }
     const W = Math.round(opts.width), H = Math.round(opts.height);
     if (W < 1 || H < 1 || W > 30000 || H > 30000) return app.dialogs.toast('The canvas must be between 1 and 30,000 pixels', { kind: 'error' });
@@ -620,7 +628,7 @@ export function install(app) {
     return true;
   }
 
-  async function rotateCanvas(kind) {
+  async function rotateCanvas(kind, ctx = null) {
     const d = doc();
     const W = d.width, H = d.height;
     if (kind && typeof kind === 'object') {
@@ -636,7 +644,8 @@ export function install(app) {
           { key: 'dir', label: 'Direction', type: 'segment', value: 'cw', options: [['cw', 'Clockwise'], ['ccw', 'Counter-clockwise']] },
         ],
       });
-      if (!o || !o.angle) return;
+      if (!o || !o.angle) return ctx?.cancel(); // actions (lib/actions.js)
+      ctx?.setReplayArg({ angle: o.dir === 'ccw' ? -o.angle : o.angle }); // actions (lib/actions.js): replays through the { angle } form above
       return rotateArbitrary(o.dir === 'ccw' ? -o.angle : o.angle);
     }
     const specs = {
@@ -667,7 +676,7 @@ export function install(app) {
     cropRect({ rect: b, deletePixels: true, label: 'Crop' });
   }
 
-  async function trim(arg) {
+  async function trim(arg, ctx = null) {
     const d = doc();
     let opts = arg && typeof arg === 'object' ? arg : null;
     if (!opts) {
@@ -682,7 +691,8 @@ export function install(app) {
           { key: 'right', label: 'Right', type: 'checkbox', value: true },
         ],
       });
-      if (!opts) return;
+      if (!opts) return ctx?.cancel(); // actions (lib/actions.js)
+      ctx?.setReplayArg({ ...opts }); // actions (lib/actions.js)
     }
     const flat = flattenDocument(d, d.view.compositor);
     const data = canvasData(flat).data;
@@ -724,7 +734,7 @@ export function install(app) {
     remapDocument(app, 'Reveal all', { width: b.width, height: b.height, matrix: [1, 0, 0, 1, -b.x, -b.y], mode: 'translate' });
   }
 
-  async function duplicate(arg) {
+  async function duplicate(arg, ctx = null) {
     const d = doc();
     let opts = arg && typeof arg === 'object' ? arg : null;
     if (!opts) {
@@ -735,7 +745,8 @@ export function install(app) {
           { key: 'merged', label: 'Duplicate merged layers only', type: 'checkbox', value: false },
         ],
       });
-      if (!opts) return;
+      if (!opts) return ctx?.cancel(); // actions (lib/actions.js)
+      ctx?.setReplayArg({ merged: !!opts.merged }); // actions (lib/actions.js): the name is left to each document it replays on
     }
     // the copy keeps the image mode and depth (0.3): a duplicate of a grayscale, duotone or indexed document is one too
     const copy = new Document({
@@ -788,20 +799,21 @@ export function install(app) {
   app.transformTool = transformTool;
 
   app.commands.registerAll({
-    'image:size': { enabled: has, run: imageSize, label: 'Image Size…' },
-    'image:canvas-size': { enabled: has, run: canvasSize, label: 'Canvas Size…' },
-    'image:rotate': { enabled: has, run: (k) => rotateCanvas(k ?? 90) },
+    // actions (lib/actions.js): the dialog commands below are marked `dialog` and report their settings through ctx
+    'image:size': { enabled: has, run: imageSize, label: 'Image Size…', dialog: true },
+    'image:canvas-size': { enabled: has, run: canvasSize, label: 'Canvas Size…', dialog: true },
+    'image:rotate': { enabled: has, run: (k, ctx) => rotateCanvas(k ?? 90, ctx) },
     'image:rotate-90': { enabled: has, run: () => rotateCanvas(90), label: 'Rotate 90° Clockwise' },
     'image:rotate--90': { enabled: has, run: () => rotateCanvas(-90), label: 'Rotate 90° Counter Clockwise' },
     'image:rotate-180': { enabled: has, run: () => rotateCanvas(180), label: 'Rotate 180°' },
-    'image:rotate-arbitrary': { enabled: has, run: () => rotateCanvas('arbitrary'), label: 'Arbitrary…' },
+    'image:rotate-arbitrary': { enabled: has, run: (arg, ctx) => rotateCanvas(arg && typeof arg === 'object' ? arg : 'arbitrary', ctx), label: 'Arbitrary…', dialog: true },
     'image:flip-h': { enabled: has, run: () => rotateCanvas('flip-h'), label: 'Flip Canvas Horizontal' },
     'image:flip-v': { enabled: has, run: () => rotateCanvas('flip-v'), label: 'Flip Canvas Vertical' },
     'image:crop': { enabled: () => !!app.doc?.selection && !app.doc.selection.isEmpty, run: cropToSelection, label: 'Crop' },
     'image:crop-rect': { enabled: has, run: cropRect },
-    'image:trim': { enabled: has, run: trim, label: 'Trim…' },
+    'image:trim': { enabled: has, run: trim, label: 'Trim…', dialog: true },
     'image:reveal-all': { enabled: has, run: revealAll, label: 'Reveal All' },
-    'image:duplicate': { enabled: has, run: duplicate, label: 'Duplicate…' },
+    'image:duplicate': { enabled: has, run: duplicate, label: 'Duplicate…', dialog: true },
     'edit:free-transform': { enabled: () => transformTool.canStart(), run: (arg) => transformTool.start({ mode: 'free', ...(arg ?? {}) }), label: 'Free Transform' },
     'edit:transform': {
       enabled: () => transformTool.canStart(),
@@ -1233,6 +1245,8 @@ export class TransformTool extends Tool {
         this.lastMatrix = m;
         this.lastShift = [c1[0] - c0[0], c1[1] - c0[1]];
       }
+      // actions (lib/actions.js): a committed transform is recorded as a step (the session, not the command that opened it)
+      app.emit('transform:committed', { matrix: m && !warp ? m : null, shift: m && !warp ? this.lastShift : null, box: s.box, quad: s.quad, selectionOnly: !!s.selectionOnly, exact: !!s.exact, warp: !!warp });
     } catch (err) {
       app.reportError(err, 'Could not apply the transform');
     } finally {
