@@ -559,7 +559,15 @@ test('the session owns the document: other commands and tool shortcuts wait unti
   await open(page, 'field-blur');
   await setField(page, 'blur', 25);
   await expect.poll(() => layerHash(page)).not.toBe(hash0);
-  const preview = await layerHash(page);
+  // the preview settles to full quality a moment after the change: take the hash once it stops moving
+  let preview = await layerHash(page);
+  await expect.poll(async () => {
+    await page.waitForTimeout(450);
+    const next = await layerHash(page);
+    const same = next === preview;
+    preview = next;
+    return same;
+  }, { timeout: 15000 }).toBe(true);
   // undo, another filter, a tool command, a tool key, a new layer: none of them runs
   await runAwait(page, 'edit:undo');
   await runAwait(page, 'filter:gaussian-blur', { radius: 9 });

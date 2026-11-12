@@ -175,7 +175,11 @@ test('the status bar follows the resolution set in Document Properties (and its 
   const errors = await openApp(page);
   await newDoc(page);
   await run(page, 'file:properties');
-  await page.locator('.dialog input[data-key="dpi"]').fill('300');
+  // wait for the form to hold the document's value before typing, and for the typed value before confirming
+  const dpi = page.locator('.dialog input[data-key="dpi"]');
+  await expect(dpi).toHaveValue('72');
+  await dpi.fill('300');
+  await expect(dpi).toHaveValue('300');
   await confirmDialog(page);
   await expect(page.locator('#statusbar')).toContainText('300 ppi');
   await runAwait(page, 'edit:undo');
