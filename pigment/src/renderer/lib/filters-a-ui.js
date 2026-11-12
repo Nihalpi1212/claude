@@ -57,13 +57,19 @@ function depthMapFor(app, session, source) {
 }
 
 /** Dialog opener: open(kind, { params, def, ctx }) -> params | null (the contract of app.filterEditor.register). */
-async function openLensBlur(app, { params, def }) {
+async function openLensBlur(app, { params, def, smart = null }) {
   const doc = app.doc;
   if (!doc) return null;
   const layer = doc.active;
-  const sources = [['none', 'None'], ['transparency', 'Transparency']];
-  if (layer?.mask) sources.push(['mask', 'Layer Mask']);
-  for (const ch of doc.channels ?? []) sources.push([`channel:${ch.id}`, ch.name]);
+  // On a smart object (lib/smart-object.js runs this dialog on a temporary copy) what stays is a smart filter that
+  // is re-run from its params alone, and the depth map is document state the params only name: the smart filter
+  // would blur uniformly whatever the dialog had previewed. So no map is offered there, and the preview is what stays.
+  const sources = [['none', 'None']];
+  if (!smart) {
+    sources.push(['transparency', 'Transparency']);
+    if (layer?.mask) sources.push(['mask', 'Layer Mask']);
+    for (const ch of doc.channels ?? []) sources.push([`channel:${ch.id}`, ch.name]);
+  }
   const fields = def.fields.map((f) => (f.key === 'source' ? { ...f, options: sources } : f));
   // the remembered params name the source as the contract spells it ('alpha' + channel name); map it onto the select
   const start = { ...clone({ ...params, depthMap: undefined }), depthMap: null };
@@ -97,6 +103,15 @@ async function openLensBlur(app, { params, def }) {
       });
       // a remembered depth-map source previews with its map from the first frame
       if (start.source !== 'none') onChange(withMap(clone(start)));
+      if (smart) {
+        const box = document.createElement('div');
+        const note = document.createElement('p');
+        note.className = 'muted';
+        note.dataset.key = '__smart-depth-note';
+        note.textContent = 'A smart filter cannot keep a depth map. Rasterize the layer to blur by its transparency, its mask or a channel.';
+        box.append(form.element, note);
+        return { element: box };
+      }
       return { element: form.element };
     },
     run: (img, p) => applyFilter(img, KIND, p),

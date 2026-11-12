@@ -160,14 +160,19 @@ export class App extends EventTarget {
     this.dialogs.toast(context ? `${context}: ${message}` : message, { kind: 'error', timeout: 6000 });
   }
 
-  /** Runs a slow task with a busy cursor and status text. */
+  /**
+   * Runs a slow task with a busy cursor and status text. While one runs (busyDepth > 0) the command registry
+   * refuses menu, key, toolbar and panel gestures that would change the document the task is computing on.
+   */
   async busy(label, fn) {
     this.statusbar.set('busy', label);
     document.body.classList.add('busy');
-    await new Promise((r) => requestAnimationFrame(() => setTimeout(r)));
+    this.busyDepth = (this.busyDepth ?? 0) + 1;
     try {
+      await new Promise((r) => requestAnimationFrame(() => setTimeout(r)));
       return await fn();
     } finally {
+      this.busyDepth--;
       document.body.classList.remove('busy');
       this.statusbar.clear('busy');
     }
@@ -307,8 +312,18 @@ function registerCoreCommands(app) {
     'file:save': { enabled: has, run: () => app.docs.save() },
     'file:save-as': { enabled: has, run: () => app.docs.saveAs() },
     'file:save-copy': { enabled: has, run: () => app.docs.saveAs(app.doc, { copy: true }) },
-    'file:close': { enabled: has, run: () => app.docs.close() },
-    'file:close-all': { enabled: has, run: () => app.docs.closeAll() },
+    'file:close': {
+      enabled: has,
+      // { save: true | false } answers "Save changes?" without asking. An answer given in the prompt is reported as
+      // the replay argument, so a recorded Close step (lib/actions.js) closes every file of a batch the same way
+      run: async (arg, ctx) => {
+        const doc = app.doc;
+        const closed = await app.docs.close(doc, typeof arg?.save === 'boolean' ? { save: arg.save } : {});
+        if (closed && doc.closeAnswer) ctx?.setReplayArg({ save: doc.closeAnswer === 'save' });
+        return closed;
+      },
+    },
+    'file:close-all': { enabled: has, run: (arg) => app.docs.closeAll(typeof arg?.save === 'boolean' ? { save: arg.save } : {}) },
     'file:revert': {
       enabled: () => !!app.doc?.path && !!app.doc?.history?.dirty,
       run: async () => {
@@ -583,7 +598,10 @@ function setupStatusbar(app) {
 // ---- host events ----------------------------------------------------------------------------------------------
 function setupHostEvents(app) {
   bridge.on('command', (cmd, arg) => app.commands.run(cmd, arg, 'menu'));
-  bridge.on('open-files', (paths) => app.commands.run('file:open-paths', paths, 'api'));
+  // A file opened from the OS is the user's own gesture, not code ('api'): while an on-canvas session owns the
+  // document (Blur Gallery, Select and Mask, Content-Aware Scale refuse commands) it gets their "finish first" hint
+  // instead of vanishing without a word.
+  bridge.on('open-files', (paths) => app.commands.run('file:open-paths', paths, 'os'));
   bridge.on('theme', ({ dark }) => {
     if (app.settings.theme === 'system') {
       document.documentElement.dataset.theme = dark ? 'dark' : 'light';
@@ -595,6 +613,15 @@ function setupHostEvents(app) {
   bridge.on('before-close', async ({ quitting } = {}) => {
     bridge.closeAck?.();
     try {
+      // A dialog that previews on the canvas (a filter or an adjustment on a layer, a smart filter, a kind's own
+      // session on the temporary copy of a smart object) is dismissed like Escape first, and its session gets a
+      // turn to put the document back: nothing the user has not confirmed may reach the saved file. The on-canvas
+      // sessions (Blur Gallery, Content-Aware Scale, Select and Mask) cancel themselves on this event.
+      for (let i = 0; i < 4 && app.dialogs.isOpen; i++) {
+        app.dialogs.closeAll();
+        await new Promise((r) => setTimeout(r));
+      }
+      await new Promise((r) => setTimeout(r));
       for (const d of app.docs.list()) {
         if (!(await app.docs.confirmDiscard(d))) {
           bridge.respondClose(false, !!quitting);
@@ -643,10 +670,10 @@ function setupDragAndDrop(app) {
     const files = [...e.dataTransfer.files];
     const paths = files.map((f) => bridge.pathForFile(f)).filter(Boolean);
     if (e.shiftKey && app.doc) {
-      for (const p of paths) await app.commands.run('file:place', p, 'api');
+      for (const p of paths) await app.commands.run('file:place', p, 'drop');
       return;
     }
-    app.commands.run('file:open-paths', paths, 'api');
+    app.commands.run('file:open-paths', paths, 'drop'); // the user's gesture: a session that refuses it says why
   });
 }
 

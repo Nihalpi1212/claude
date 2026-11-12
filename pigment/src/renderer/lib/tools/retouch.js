@@ -8,7 +8,7 @@
 import { Tool, BRUSH_OPTIONS } from '../tools.js';
 import { StrokeTool } from './paint.js';
 import { createCanvas, intersectRect } from '../document.js';
-import { flattenDocument } from '../compositor.js';
+import { flattenStored } from '../compositor.js';
 import { Selection } from '../selection.js';
 import { parseColor } from '../../../shared/pixels/color.js';
 import { floodFill } from '../../../shared/pixels/selection-ops.js';
@@ -360,7 +360,7 @@ class HealingBrushTool extends DabTool {
     super.onPointerDown(p);
   }
   beforeStroke(p, layer) {
-    this.src = this.opt('sampleAll') ? { canvas: flattenDocument(this.doc, this.doc.view.compositor), x: 0, y: 0 } : { canvas: copyOf(layer.canvas), x: layer.x, y: layer.y };
+    this.src = this.opt('sampleAll') ? { canvas: flattenStored(this.doc, this.doc.view.compositor), x: 0, y: 0 } : { canvas: copyOf(layer.canvas), x: layer.x, y: layer.y };
   }
   process(img, rect, dab, info) {
     const source = regionFrom(this.src, info.rectDoc.x + this.offset.x, info.rectDoc.y + this.offset.y, rect.width, rect.height);
@@ -483,7 +483,7 @@ class SpotHealingTool extends DabTool {
     super.drawOverlay(ctx, view);
   }
   beforeStroke(p, layer) {
-    this.src = this.opt('sampleAll') ? { canvas: flattenDocument(this.doc, this.doc.view.compositor), x: 0, y: 0 } : { canvas: copyOf(layer.canvas), x: layer.x, y: layer.y };
+    this.src = this.opt('sampleAll') ? { canvas: flattenStored(this.doc, this.doc.view.compositor), x: 0, y: 0 } : { canvas: copyOf(layer.canvas), x: layer.x, y: layer.y };
   }
   process(img, rect, dab, info) {
     const w = rect.width, h = rect.height;
@@ -731,7 +731,7 @@ class MagicEraserTool extends Tool {
     if (layer.type !== 'raster') return this.app.rasterizePrompt(layer);
     if (layer.locked.transparency) return this.app.dialogs.toast('The layer has transparency locked', { kind: 'error' });
     const sampleAll = this.opt('sampleAll');
-    const src = sampleAll ? flattenDocument(doc, doc.view.compositor) : layer.canvas;
+    const src = sampleAll ? flattenStored(doc, doc.view.compositor) : layer.canvas;
     const ox = sampleAll ? 0 : layer.x, oy = sampleAll ? 0 : layer.y;
     const sx = Math.floor(p.x - ox), sy = Math.floor(p.y - oy);
     if (sx < 0 || sy < 0 || sx >= src.width || sy >= src.height) return;
@@ -799,7 +799,7 @@ class CloneStampTool extends StrokeTool {
   strokeSettings(p, layer, target) {
     const doc = this.doc;
     const all = this.opt('sampleAll');
-    const comp = all ? flattenDocument(doc, doc.view.compositor) : null;
+    const comp = all ? flattenStored(doc, doc.view.compositor) : null;
     const snapshot = all ? null : copyOf(target.canvas);
     const off = this.offset;
     return {

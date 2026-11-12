@@ -3,7 +3,7 @@
 // Tree edits go through structural() (one undo entry each, exact restore); property edits through
 // setLayerProps().
 import { RasterLayer, GroupLayer, createCanvas, copyCanvas, BLEND_MODES } from '../document.js';
-import { structural, setLayerProps, cloneLayer, rasterizeLayer, renderLayersFlat, releaseOrphanClips, nextLayerName } from '../layer-ops.js';
+import { structural, setLayerProps, cloneLayer, relinkCopies, rasterizeLayer, renderLayersFlat, releaseOrphanClips, nextLayerName } from '../layer-ops.js';
 import { affineCanvas } from '../image-ops.js';
 import { formDialog } from '../form.js';
 import * as T from '../../../shared/pixels/transform.js';
@@ -338,10 +338,11 @@ export function installStructure(app) {
         result.mask = mask;
       } else {
         const kids = src.doc.root.children.filter((c) => !c.quickMask && !c.preview).map((c) => {
-          const copy = cloneLayer(c, { name: c.name });
+          const copy = cloneLayer(c, { name: c.name, relink: false });
           copy.locked = { ...c.locked };
           return mapLayerAffine(copy, m, d.width, d.height, { width: src.doc.width, height: src.doc.height });
         });
+        relinkCopies(kids); // layers that were linked inside the smart object come out linked
         if (kids.length === 1 && neutral) {
           // one layer and nothing on the smart object to keep: the layer itself takes its place
           result = kids[0];

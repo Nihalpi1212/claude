@@ -6,6 +6,12 @@ const DEDUPE_MS = 40;
 /** The warp commands switch modes inside the running session (lib/warp.js), so they must not commit it first. */
 const SAFE_DURING_TRANSFORM = /^(view:|window:|help:|app:enter$|app:escape$|tool:brush-|edit:free-transform$|edit:transform-warp$|edit:perspective-warp$|edit:puppet-warp$)/;
 
+/** Where a user gesture comes from (code runs commands as 'api', playback as 'action', the assistant as 'assistant'). */
+const GESTURE_SOURCES = new Set(['menu', 'key', 'toolbar', 'panel']);
+/** Commands that never change a document: they stay available while a slow operation runs (app.busy). */
+const SAFE_WHILE_BUSY = /^(view:(?!new-guide|clear-guides)|window:|help:)/;
+const BUSY_NOTICE_MS = 2500;
+
 export class CommandRegistry {
   constructor(app) {
     this.app = app;
@@ -71,6 +77,16 @@ export class CommandRegistry {
     this.lastRun.set(id, { at: now, source, arg });
     // menus stay live in the native menu bar while a modal dialog previews on the canvas: ignore them
     if (source === 'menu' && this.app.dialogs?.isOpen) return undefined;
+    // A slow operation (app.busy: Auto-Align, opening a file…) works on the document as it was when it started and
+    // commits when it is done: a gesture that deletes its layers or undoes under it would leave a result that fits
+    // nothing. Gestures wait; what a dialog offers while busy (Batch shows one) is that dialog's business.
+    if (this.app.busyDepth > 0 && GESTURE_SOURCES.has(source) && !this.app.dialogs?.isOpen && !SAFE_WHILE_BUSY.test(id)) {
+      if (now - (this.busyNoticeAt ?? -Infinity) > BUSY_NOTICE_MS) {
+        this.busyNoticeAt = now;
+        this.app.dialogs?.toast('Pigment is still working: try again when it has finished', { kind: 'info', timeout: 2200 });
+      }
+      return undefined;
+    }
     // a running Free Transform is applied before anything else touches the document (undo/redo cancel it)
     const tt = this.app.transformTool;
     if (tt?.session && !tt.committing && !SAFE_DURING_TRANSFORM.test(id)) {

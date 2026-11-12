@@ -131,8 +131,13 @@ export function install(app) {
     const d = app.doc;
     if (!d) return ctx?.cancel();
     const direct = arg && typeof arg === 'object' ? arg : null;
+    const custom = REGISTERED.get(kind)?.open;
+    // A replayed custom kind whose params lack what only its opener can supply (Displace without its map) asks
+    // again, with or without `dialog`: Last Filter and action steps are exactly the replays that come without
+    // the map, and running them as they are would add a history state (or a smart filter) that changes nothing.
+    const incomplete = !!direct && !!custom && typeof def.incomplete === 'function' && !!def.incomplete(direct);
     // smart objects (lib/smart-object.js): a filter on a smart layer becomes a smart filter, not a pixel edit
-    const smart = def.smart !== false ? app.smartFilters?.intercept(d.active, kind, direct, def.name) : null;
+    const smart = def.smart !== false ? app.smartFilters?.intercept(d.active, kind, incomplete ? null : direct, def.name, incomplete ? { start: direct } : undefined) : null;
     if (smart) {
       // the smart filter dialog (or the kind's own session on a copy of the smart object) resolves with the params
       const used = await smart.done;
@@ -140,10 +145,7 @@ export function install(app) {
       else ctx?.cancel();
       return;
     }
-    const custom = REGISTERED.get(kind)?.open;
-    // a replayed custom kind whose params lack what only its opener can supply (Displace without its map) asks again
-    const incomplete = direct && custom && dialog && typeof def.incomplete === 'function' && def.incomplete(direct);
-    if (def.ui === 'custom' && (!direct || incomplete) && dialog) {
+    if (def.ui === 'custom' && (incomplete || (!direct && dialog))) {
       // kinds with an on-canvas session (blur gallery, Filter Gallery, Lens Correction) open their own UI
       if (!custom) {
         ctx?.cancel();
@@ -206,10 +208,17 @@ export function install(app) {
     'filter:last': {
       enabled: () => has() && !!app.settings.lastFilter?.kind,
       label: () => (app.settings.lastFilter?.name ? `Last Filter: ${app.settings.lastFilter.name}` : 'Last Filter'),
-      run: (_arg, ctx) => {
-        const l = app.settings.lastFilter;
+      run: (arg, ctx) => {
+        // A step recorded from Last Filter carries the filter it ran ({ kind, params }): lib/actions.js records
+        // that as the filter's own command, and a replay never depends on whichever filter was used most recently.
+        const l = arg && typeof arg === 'object' && FILTERS[arg.kind] ? arg : app.settings.lastFilter;
+        if (!l?.kind) return undefined;
+        const params = l.params ?? {};
+        ctx?.setReplayArg({ kind: l.kind, params: clone(params) });
+        // run() reports the params it ended up with (a smart filter, a re-opened chooser): keep the kind with them
+        const inner = ctx ? { ...ctx, setReplayArg: (v) => ctx.setReplayArg({ kind: l.kind, params: v }), cancel: () => ctx.cancel() } : null;
         // the promise is returned so callers (actions, tests) can await the commit
-        return l?.kind ? run(l.kind, l.params ?? {}, { dialog: false, ctx }) : undefined;
+        return run(l.kind, params, { dialog: false, ctx: inner });
       },
     },
     'filter:last-dialog': {

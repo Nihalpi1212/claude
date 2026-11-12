@@ -347,7 +347,9 @@ Filters that need explaining:
 - **Lens Blur** blurs like a lens, with an iris shape (triangle to octagon, Blade Curvature,
   Rotation), Specular Highlights that bloom into bokeh, and Noise. Depth Map Source makes the blur
   vary across the image: Transparency, the Layer Mask, or any saved alpha channel. Blur Focal
-  Distance (0–255) is the map value that stays sharp; Invert swaps near and far.
+  Distance (0–255) is the map value that stays sharp; Invert swaps near and far. On a smart object
+  Lens Blur becomes a smart filter, which cannot keep a depth map: the blur is uniform there
+  (rasterize the layer to use a map).
 - **Displace** shifts pixels by a second image, the map. The dialog lists the other open documents,
   the layers of this document, or File… for any image Pigment opens. The map's red channel moves
   pixels horizontally and green vertically (a grey map moves both): 128 is no shift, white and

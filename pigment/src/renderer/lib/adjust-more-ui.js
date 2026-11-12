@@ -16,7 +16,7 @@ import { applyImage, calculations, extractChannel } from '../../shared/pixels/ch
 import { BLEND_MODES, Document, RasterLayer, createCanvas } from './document.js';
 import { buildForm, formDialog, frameThrottle } from './form.js';
 import { buildAdjustmentEditor, beginPixelEdit, pixelEditDialog, processed } from './adjust-ui.js';
-import { flattenDocument } from './compositor.js';
+import { flattenDocument, flattenStored } from './compositor.js';
 import { renderLayersFlat } from './layer-ops.js';
 import { bridge } from './bridge.js';
 import { openDocument } from './io.js';
@@ -115,10 +115,14 @@ function layerCanvas(doc, layer) {
   return renderLayersFlat(doc, [layer]);
 }
 
-/** Document-sized ImageData of 'merged' (the visible composite) or of one layer (by id). */
-function readImage(doc, layerId) {
+/**
+ * Document-sized ImageData of 'merged' (the visible composite) or of one layer (by id). `stored` reads the
+ * composite without the image mode's display pass: for pixels that go back into the same document (duotone inks
+ * would otherwise be applied to them twice).
+ */
+function readImage(doc, layerId, { stored = false } = {}) {
   const layer = layerId && layerId !== 'merged' ? doc.find(layerId) : null;
-  return imageDataOf(layer ? layerCanvas(doc, layer) : flattenDocument(doc, doc.view?.compositor));
+  return imageDataOf(layer ? layerCanvas(doc, layer) : (stored ? flattenStored : flattenDocument)(doc, doc.view?.compositor));
 }
 
 /** Channels offered for a document / layer pair; `colour` adds the composite RGB entry (Apply Image). */
@@ -732,7 +736,7 @@ export function install(app) {
       if (!images.has(key)) {
         // reading this document while the preview is on the layer would feed the preview back in
         if (doc === target) session.restore?.();
-        images.set(key, readImage(doc, layerId));
+        images.set(key, readImage(doc, layerId, { stored: doc === target }));
       }
       return images.get(key);
     };

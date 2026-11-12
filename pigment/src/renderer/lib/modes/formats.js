@@ -73,6 +73,12 @@ function indexWithTable(img, table, transparentIndex) {
   return { palette, indices, transparentIndex: needsTransparent || transparentIndex >= 0 ? ti : -1 };
 }
 
+function hasTransparentPixels(img) {
+  const d = img.data;
+  for (let i = 3; i < d.length; i += 4) if (d[i] < 255) return true;
+  return false;
+}
+
 /**
  * Quantises an export image. An Indexed Color document at its own size keeps its colour table (same entries,
  * same order) unless the options ask for a palette of their own or for fewer colours than the table has.
@@ -82,7 +88,9 @@ function indexWithTable(img, table, transparentIndex) {
 export function quantizeForExport(img, opts = {}, { doc = null, state = null, resized = false } = {}) {
   const colors = Math.max(2, Math.min(256, Math.round(Number(opts.colors) || 256)));
   const table = doc?.mode === 'indexed' ? state?.colorTable : null;
-  if (table?.length && !resized && !opts.palette && !opts.background && colors >= table.length) {
+  // with Transparency off the transparent pixels take the Matte colour, which the table need not hold: quantise then
+  const matted = opts.transparency === false && hasTransparentPixels(img);
+  if (table?.length && !resized && !opts.palette && !opts.background && colors >= table.length && !matted) {
     const kept = indexWithTable(img, table, state.transparentIndex ?? -1);
     if (kept) return kept;
   }
@@ -140,6 +148,9 @@ export function installFormats(app, { modeState }) {
         gif = decodeGif(bytes, { firstFrameOnly: true });
         if (gif.width * gif.height > 30000 * 30000) throw new Error('The GIF is too large');
       } catch (err) {
+        // a file that lost part of its picture is refused: the browser's decoder would show the rows that are left
+        // as if they were the whole image (and Save would write that over the original)
+        if (/truncated|damaged/.test(String(err?.message))) throw err;
         console.warn('GIF colour table reader failed; using the browser decoder', err);
         gif = null;
       }

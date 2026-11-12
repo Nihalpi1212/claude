@@ -6,6 +6,7 @@ import { CanvasView } from './canvas-view.js';
 import { flattenDocument } from './compositor.js';
 import { openDocument, encodeForPath, isLayeredPath, canWritePath, extOf, baseName, OPEN_FILTERS } from './io.js';
 import { formDialog } from './form.js';
+import { MODES } from '../../shared/pixels/modes.js';
 
 export const SAVE_FILTERS = [
   { name: 'Pigment document (layers)', extensions: ['pigment'] },
@@ -22,6 +23,7 @@ export class DocumentManager {
     this.active = null;
     this.host = document.getElementById('canvas-host');
     this.tabbar = document.getElementById('tabbar');
+    this.modeNoticed = new WeakSet(); // documents already told that a PSD does not keep their image mode
   }
 
   list() {
@@ -197,6 +199,12 @@ export class DocumentManager {
       await bridge.writeFile(path, bytes);
       if (!copy) doc.history.markSaved(flattenDocument(doc, doc.view.compositor));
       this.app.dialogs.toast(`Saved ${path.split(/[\\/]/).pop()}`, { kind: 'success', timeout: 1600 });
+      // a PSD is written as RGB (io.js bakes in what Duotone and Multichannel show): the mode itself, with its inks,
+      // colour table or spot channels, is not in the file. Said once per document, like the bit depth notice of lib/depth.js
+      if (extOf(path) === 'psd' && doc.mode && doc.mode !== 'rgb' && MODES[doc.mode] && !this.modeNoticed.has(doc)) {
+        this.modeNoticed.add(doc);
+        this.app.dialogs.toast(`PSD files are written as RGB. Save as .pigment to keep the document in ${MODES[doc.mode].name} mode.`, { timeout: 6000 });
+      }
       this.app.emit('doc:saved', doc);
       return true;
     } catch (err) {
@@ -218,13 +226,24 @@ export class DocumentManager {
       cancelId: 2,
     });
     if (response === 2) return false;
+    // remembered for a Close step being recorded (lib/actions.js): the step replays the answer instead of asking
+    doc.closeAnswer = response === 0 ? 'save' : 'discard';
     if (response === 0) return this.save(doc);
     return true;
   }
 
-  async close(doc = this.active, { force = false } = {}) {
+  /**
+   * Closes a document. Unsaved changes ask first, unless the answer comes along: `save: true` saves them,
+   * `save: false` drops them (a recorded Close step, so a batch does not stop at every file), `force` closes as it is.
+   */
+  async close(doc = this.active, { force = false, save = null } = {}) {
     if (!doc) return true;
-    if (!force && !(await this.confirmDiscard(doc))) return false;
+    delete doc.closeAnswer;
+    if (force || save === false) {
+      // nothing to ask
+    } else if (save === true) {
+      if (doc.history?.dirty && !(await this.save(doc))) return false;
+    } else if (!(await this.confirmDiscard(doc))) return false;
     const i = this.docs.indexOf(doc);
     this.docs.splice(i, 1);
     doc.view.destroy();
@@ -245,8 +264,8 @@ export class DocumentManager {
     return true;
   }
 
-  async closeAll() {
-    for (const doc of this.docs.slice()) if (!(await this.close(doc))) return false;
+  async closeAll(opts = {}) {
+    for (const doc of this.docs.slice()) if (!(await this.close(doc, opts))) return false;
     return true;
   }
 

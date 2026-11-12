@@ -45,7 +45,8 @@ export class MoveTool extends Tool {
   /** Topmost visible layer with an opaque pixel under p. */
   hitTest(p) {
     const doc = this.doc;
-    const layers = doc.layers().filter((l) => l.visible && !l.isGroup && l.type !== 'adjustment').reverse();
+    // layers that Select › Isolate Layers keeps off the canvas cannot be clicked: nobody sees what would move
+    const layers = doc.layers().filter((l) => l.visible && !l.isGroup && l.type !== 'adjustment' && !this.app.isolationHides?.(l, doc)).reverse();
     for (const l of layers) {
       const src = l.type === 'raster' ? { canvas: l.canvas, x: l.x, y: l.y } : l.render?.();
       if (!src) continue;

@@ -1,6 +1,6 @@
 // Navigation tools: hand (pan), rotate view, zoom; and the eyedropper / colour sampler.
 import { Tool } from '../tools.js';
-import { flattenDocument } from '../compositor.js';
+import { flattenStored } from '../compositor.js';
 import { rgbaToHex } from '../../../shared/pixels/color.js';
 
 export class HandTool extends Tool {
@@ -136,7 +136,7 @@ export class EyedropperTool extends Tool {
       canvas = src.canvas;
       ox = src.x;
       oy = src.y;
-    } else canvas = flattenDocument(doc, this.view.compositor);
+    } else canvas = flattenStored(doc, this.view.compositor); // the colour is painted back: in a Duotone document that is the stored grey, not its ink colour
     const x = Math.floor(p.x) - ox - half, y = Math.floor(p.y) - oy - half;
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     const x1 = Math.max(0, x), y1 = Math.max(0, y), x2 = Math.min(canvas.width, x + n), y2 = Math.min(canvas.height, y + n);

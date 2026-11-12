@@ -4,9 +4,9 @@
 import { bridge } from './bridge.js';
 import { RasterLayer, createCanvas, copyCanvas, intersectRect } from './document.js';
 import { Selection, selectionOps } from './selection.js';
-import { flattenDocument } from './compositor.js';
+import { flattenDocument, flattenStored } from './compositor.js';
 import { structural, nextLayerName } from './layer-ops.js';
-import { decodeImage, baseName, OPEN_FILTERS } from './io.js';
+import { decodeImage, decodeImageFile, baseName, OPEN_FILTERS } from './io.js';
 import { drawBlended, drawOnMask } from './brush.js';
 import { BLEND_MODES } from './document.js';
 import { formDialog } from './form.js';
@@ -60,15 +60,26 @@ export function install(app) {
         sy = r.y;
       }
     }
-    const canvas = createCanvas(area.width, area.height);
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(src, sx - area.x, sy - area.y);
-    if (sel) {
-      ctx.globalCompositeOperation = 'destination-in';
-      ctx.drawImage(sel.toCanvas(), -area.x, -area.y);
-    }
-    return { canvas, x: area.x, y: area.y };
+    const cut = (from) => {
+      const canvas = createCanvas(area.width, area.height);
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(from, sx - area.x, sy - area.y);
+      if (sel) {
+        ctx.globalCompositeOperation = 'destination-in';
+        ctx.drawImage(sel.toCanvas(), -area.x, -area.y);
+      }
+      return canvas;
+    };
+    const data = { canvas: cut(src), x: area.x, y: area.y };
+    // A merged copy holds what the document shows (other programs get that). In an image mode that shows its pixels
+    // through a renderer (duotone inks) the stored pixels go along: pasted back into a document of the same mode they
+    // look the same, where the displayed ones would be mapped through the inks a second time.
+    if (merged && d.mode && d.mode !== 'rgb') data.stored = { canvas: cut(flattenStored(d, d.view.compositor)), key: modeKey(d) };
+    return data;
   }
+
+  /** What decides how a document's mode shows stored pixels: two documents with the same key show them alike. */
+  const modeKey = (d) => JSON.stringify([d.mode ?? 'rgb', d.duotone ?? null, d.colorTable ?? null, d.meta?.imageMode ?? null]);
 
   async function toSystemClipboard(canvas) {
     try {
@@ -155,7 +166,7 @@ export function install(app) {
     const internal = app.clipboard;
     // prefer our own clipboard when the system one holds the same image we copied (keeps the position)
     if (internal && (!system || (system.width === internal.canvas.width && system.height === internal.canvas.height && Date.now() - internal.at < 10 * 60 * 1000))) {
-      canvas = copyCanvas(internal.canvas);
+      canvas = copyCanvas(d && internal.stored?.key === modeKey(d) ? internal.stored.canvas : internal.canvas);
       x = internal.x;
       y = internal.y;
     } else if (system) {
@@ -323,7 +334,7 @@ export function install(app) {
     try {
       if (window.__pigmentTest?.pending?.[path]) await window.__pigmentTest.pending[path];
       const bytes = await bridge.readFile(path);
-      const canvas = await decodeImage(bytes, path);
+      const canvas = await decodeImageFile(bytes, path); // every type the dialog offers, TIFF and TGA included
       let c = canvas;
       // fit inside the canvas when larger, like Photoshop's Place
       const scale = Math.min(1, d.width / canvas.width, d.height / canvas.height);

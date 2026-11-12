@@ -3,7 +3,7 @@
 // Rotate 90°/180°, Flip). Whole-document operations build a new layer tree from the old one so the
 // structural snapshot in layer-ops.js undoes them exactly; old layers are never mutated.
 import { RasterLayer, createCanvas, copyCanvas, intersectRect, unionRect, Document } from './document.js';
-import { structural, setLayerProps, cloneLayer } from './layer-ops.js';
+import { structural, setLayerProps, cloneLayer, relinkCopies } from './layer-ops.js';
 import { formDialog } from './form.js';
 import { Selection } from './selection.js';
 import { Tool } from './tools.js';
@@ -772,11 +772,12 @@ export function install(app) {
         if (src.isGroup) src.children.forEach((sc, i) => dst.children[i] && keepLocks(sc, dst.children[i]));
       };
       for (const l of d.root.children) {
-        const c = cloneLayer(l, { name: l.name });
+        const c = cloneLayer(l, { name: l.name, relink: false });
         keepLocks(l, c); // a duplicate image is an exact copy: Duplicate Layer's unlocking does not apply
         c.parent = copy.root;
         copy.root.children.push(c);
       }
+      relinkCopies(copy.root.children); // linked layers are linked in the copy as well (colour labels come with cloneLayer)
       copy.active = copy.root.children[copy.root.children.length - 1] ?? null;
     }
     copy.selected = new Set(copy.active ? [copy.active] : []);
@@ -784,6 +785,7 @@ export function install(app) {
     copy.channels = d.channels.map((c) => ({ ...c, mask: new Uint8ClampedArray(c.mask) }));
     copy.paths = d.paths.map((p) => JSON.parse(JSON.stringify(p)));
     copy.meta = { ...(d.meta ?? {}) };
+    delete copy.meta.layerTags; // keyed by the layer ids of the original: lib/layers-extras/tags.js writes them anew from the copies
     if (d.globalLight) copy.globalLight = { ...d.globalLight };
     if (d.selection) copy.selection = Selection.fromMask(d.width, d.height, new Uint8ClampedArray(d.selection.mask));
     app.docs.add(copy);

@@ -143,6 +143,9 @@ export class Dialogs {
       entry.dialogs = this;
 
       requestAnimationFrame(() => {
+        // a field that was reached before this frame (a quick click, a script) keeps the focus: moving it now
+        // would send the typing that follows into the first field
+        if (closed || (dialog.contains(document.activeElement) && document.activeElement !== dialog)) return;
         const auto = dialog.querySelector('[autofocus]');
         const target = auto ?? dialog.querySelector('input, textarea, select') ?? primaryButton ?? dialog.querySelector('button');
         target?.focus?.();

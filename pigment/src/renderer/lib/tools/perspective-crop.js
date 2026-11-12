@@ -111,14 +111,36 @@ function shallow(layer, over = {}) {
 }
 
 const nextFrame = () => new Promise((r) => setTimeout(r));
+// The crop is written as a generator that yields between layers: a command run from the menu or an action lets the
+// busy text paint at each yield, the tool's own commit runs it to the end in one go (see perspectiveCrop).
+const drain = (it) => {
+  let s;
+  while (!(s = it.next()).done);
+  return s.value;
+};
+const drive = async (it) => {
+  let s;
+  while (!(s = it.next()).done) await nextFrame();
+  return s.value;
+};
 
 // ---- the crop ---------------------------------------------------------------------------------------------------
 
 /**
  * Crops the active document to `quad` (four document points, any order) straightened to width × height.
  * resolution (pixels/inch) is optional. Resolves true when the document changed.
+ *
+ * sync: true does the whole crop before returning (true/false, no promise). The tool commits this way: everything
+ * that calls tools.active.commit() as a step of its own work (saving, a filter, a History click, a rotate) goes on
+ * with the document at once, so a crop that landed a few frames later would be missing from the saved file while
+ * the document is marked saved, or would replace the layers a filter had just changed.
  */
-export async function perspectiveCrop(app, { quad, width = 0, height = 0, resolution = 0 } = {}) {
+export function perspectiveCrop(app, arg = {}, { sync = false } = {}) {
+  const r = cropDocument(app, arg, sync);
+  return sync ? r : Promise.resolve(r);
+}
+
+function cropDocument(app, { quad, width = 0, height = 0, resolution = 0 } = {}, sync = false) {
   const d = app.doc;
   if (!d || !Array.isArray(quad) || quad.length !== 4) return false;
   const q = orderQuad(quad);
@@ -135,12 +157,13 @@ export async function perspectiveCrop(app, { quad, width = 0, height = 0, resolu
     // no perspective: an affine remap keeps type, shapes and smart objects editable
     const m = [Hf[0], Hf[3], Hf[1], Hf[4], Hf[2], Hf[5]];
     const exact = Math.abs(m[0] - 1) < 1e-9 && Math.abs(m[3] - 1) < 1e-9 && Math.abs(m[1]) < 1e-9 && Math.abs(m[2]) < 1e-9 && Number.isInteger(Math.round(m[4] * 1e6) / 1e6) && Number.isInteger(Math.round(m[5] * 1e6) / 1e6);
-    await app.busy('Cropping…', async () => {
+    const remap = () => {
       app.remapDocument('Perspective crop', exact
         ? { width: W, height: H, matrix: [1, 0, 0, 1, Math.round(m[4]), Math.round(m[5])], mode: 'translate', clip: true, keepSelection: false, dpi: dpi || undefined }
         : { width: W, height: H, matrix: m, mode: 'affine', clip: true, keepSelection: false, dpi: dpi || undefined });
-    });
-    return true;
+      return true;
+    };
+    return sync ? remap() : app.busy('Cropping…', async () => remap());
   }
 
   const point = (x, y) => T.applyHomography(Hf, x, y);
@@ -149,14 +172,14 @@ export async function perspectiveCrop(app, { quad, width = 0, height = 0, resolu
   const inter = W < natural.width * 0.75 || H < natural.height * 0.75 ? { width: Math.max(W, natural.width), height: Math.max(H, natural.height) } : { width: W, height: H };
   let rasterized = 0;
 
-  const mapLayer = async (layer) => {
+  const mapLayer = function* (layer) {
     let out;
     if (layer.isGroup) {
       out = shallow(layer);
       out.children = [];
       for (const c of layer.children) {
         if (c.preview || c.quickMask) continue;
-        const cc = await mapLayer(c);
+        const cc = yield* mapLayer(c);
         cc.parent = out;
         out.children.push(cc);
       }
@@ -167,7 +190,7 @@ export async function perspectiveCrop(app, { quad, width = 0, height = 0, resolu
         src = rasterizeLayer(layer, d) ?? null;
         if (src) rasterized++;
       }
-      await nextFrame();
+      yield;
       const r = src ? warpCanvas(src.canvas, src.x, src.y, q, W, H, inter, 'bicubic') : null;
       const props = { canvas: r?.canvas ?? createCanvas(1, 1), x: r?.x ?? 0, y: r?.y ?? 0, deep: null };
       if (layer.type === 'raster') out = shallow(layer, props);
@@ -184,7 +207,7 @@ export async function perspectiveCrop(app, { quad, width = 0, height = 0, resolu
       out = shallow(layer, g?.from && g?.to ? { paint: { ...layer.paint, gradient: { ...g, from: point(...g.from), to: point(...g.to) } } } : {});
     } else out = shallow(layer);
     if (layer.mask?.canvas) {
-      await nextFrame();
+      yield;
       out.mask = { ...layer.mask, canvas: warpMask(layer.mask.canvas, q, W, H, inter) };
     }
     return out;
@@ -204,12 +227,11 @@ export async function perspectiveCrop(app, { quad, width = 0, height = 0, resolu
     return out;
   };
 
-  let changed = false;
-  await app.busy('Cropping…', async () => {
+  const work = function* () {
     // an open text edit must land in the tree before every layer is replaced
     const active = app.tools?.active;
     if (active?.session && typeof active.id === 'string' && active.id.startsWith('type-')) active.commit?.();
-    const root = await mapLayer(d.root);
+    const root = yield* mapLayer(d.root);
     root.parent = null;
     const channels = d.channels.map((ch) => ({ ...ch, mask: alphaThroughCrop(ch.mask) }));
     const paths = d.paths.map((p) => ({ ...p, path: mapPath(p.path, point) }));
@@ -226,12 +248,18 @@ export async function perspectiveCrop(app, { quad, width = 0, height = 0, resolu
       if (dpi) d.dpi = dpi;
       d.replaceTree(root, { width: W, height: H });
     }, d, { bytes });
-    changed = true;
-  });
-  app.view?.center?.();
-  app.view?.invalidate();
-  if (rasterized) app.dialogs.toast(`${rasterized} type or smart object layer${rasterized === 1 ? ' was' : 's were'} rasterized: a perspective cannot stay editable`, { timeout: 3600 });
-  return changed;
+  };
+  const finish = () => {
+    app.view?.center?.();
+    app.view?.invalidate();
+    if (rasterized) app.dialogs.toast(`${rasterized} type or smart object layer${rasterized === 1 ? ' was' : 's were'} rasterized: a perspective cannot stay editable`, { timeout: 3600 });
+    return true;
+  };
+  if (sync) {
+    drain(work());
+    return finish();
+  }
+  return app.busy('Cropping…', () => drive(work())).then(finish);
 }
 
 // ---- the tool -------------------------------------------------------------------------------------------------
@@ -376,6 +404,7 @@ export class PerspectiveCropTool extends Tool {
     const arg = { quad: q, width: size.width, height: size.height, resolution: Number(this.opt('resolution')) || 0 };
     this.points = [];
     this.view?.invalidate();
+    // source 'tool' makes the command crop before it returns (see perspectiveCrop: callers of commit() go straight on)
     this.app.commands.run('image:perspective-crop', arg, 'tool');
     return true;
   }
@@ -487,7 +516,7 @@ export function installPerspectiveCrop(app) {
   const tool = app.tools.register(new PerspectiveCropTool(app), 'crop');
   app.commands.register('image:perspective-crop', {
     enabled: () => !!app.doc,
-    run: (arg) => perspectiveCrop(app, arg ?? {}),
+    run: (arg, ctx) => perspectiveCrop(app, arg ?? {}, { sync: ctx?.source === 'tool' }),
     label: 'Perspective Crop',
   });
   return tool;

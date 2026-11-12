@@ -229,6 +229,30 @@ function readTiffExif(bytes, base) {
 }
 
 /** Camera data of a JPEG or TIFF file ({ make, model, lens, exposureTime, fNumber, iso, focalLength, ... }), or null. */
+/**
+ * Adds an XMP packet to JPEG bytes as an APP1 segment behind the JFIF / EXIF headers (where readers look for it).
+ * Bytes that are no JPEG, that already carry a packet, or a packet above the 64 KB of one segment come back
+ * untouched (the same array).
+ */
+export function injectJpegXmp(bytes, packet) {
+  if (!packet || !bytes || bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) return bytes;
+  if (findXmp(bytes)) return bytes;
+  const head = new TextEncoder().encode('http://ns.adobe.com/xap/1.0/\0');
+  const body = new TextEncoder().encode(packet);
+  const length = 2 + head.length + body.length;
+  if (length > 0xffff) return bytes;
+  let at = 2;
+  while (at + 4 <= bytes.length && bytes[at] === 0xff && (bytes[at + 1] === 0xe0 || bytes[at + 1] === 0xe1)) at += 2 + ((bytes[at + 2] << 8) | bytes[at + 3]);
+  if (at > bytes.length) return bytes;
+  const out = new Uint8Array(bytes.length + 2 + length);
+  out.set(bytes.subarray(0, at));
+  out.set([0xff, 0xe1, length >> 8, length & 0xff], at);
+  out.set(head, at + 4);
+  out.set(body, at + 4 + head.length);
+  out.set(bytes.subarray(at), at + 2 + length);
+  return out;
+}
+
 export function readExif(bytes) {
   try {
     if (!bytes || bytes.length < 12) return null;
@@ -340,5 +364,19 @@ export function installFileInfo(app) {
       return ok;
     };
   }
-  app.fileInfo = { read: readFileInfo, stampPsd };
+  /**
+   * Encoded bytes of a document with its File Info added, for writers that do not go through docs.writeTo (the
+   * Image Processor): PSD as Save As does, and JPEG, so the Copyright Info typed there reaches its outputs.
+   */
+  function withInfo(doc, path, bytes) {
+    if (!hasInfo(doc?.meta)) return bytes;
+    try {
+      if (/\.(psd|psb)$/i.test(path)) return injectPsdXmp(bytes, xmpPacket(doc.meta));
+      if (/\.jpe?g$/i.test(path)) return injectJpegXmp(bytes, xmpPacket(doc.meta));
+    } catch (err) {
+      console.warn('File Info could not be added', err); // the image itself is complete and valid
+    }
+    return bytes;
+  }
+  app.fileInfo = { read: readFileInfo, stampPsd, withInfo };
 }

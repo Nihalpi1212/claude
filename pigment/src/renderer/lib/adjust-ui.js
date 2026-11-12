@@ -562,6 +562,15 @@ export function beginPixelEdit(app, { quiet = false, label = 'Edit', margin = 0 
   };
   const base = toWork(original);
   let shown = false;
+  // While a preview sits on the canvas the document counts it in `previewHolds`: those pixels are not an edit yet.
+  // lib/depth.js waits for the count to reach zero before it lets 16/32-bit samples follow the 8-bit canvas, or
+  // a session left open for a moment would round the samples under the preview for good, even when cancelled.
+  let held = false;
+  const hold = (on) => {
+    if (held === on) return;
+    held = on;
+    d.previewHolds = Math.max(0, (d.previewHolds ?? 0) + (on ? 1 : -1));
+  };
   const compose = (img) => {
     const out = new ImageData(local.width, local.height);
     const o = out.data, src = original.data, res = img.data;
@@ -600,6 +609,7 @@ export function beginPixelEdit(app, { quiet = false, label = 'Edit', margin = 0 
     show(img) {
       // image modes (lib/modes.js) snap edited colours to the mode: grey, black/white or the colour table
       if (!isMask && app.pixelConstraint) img = app.pixelConstraint(d, img, t.layer) ?? img;
+      hold(true);
       ctx.putImageData(compose(img), local.x, local.y);
       shown = true;
       t.layer.touch();
@@ -609,6 +619,7 @@ export function beginPixelEdit(app, { quiet = false, label = 'Edit', margin = 0 
       if (!shown) return;
       ctx.putImageData(original, local.x, local.y);
       shown = false;
+      hold(false);
       t.layer.touch();
       d.changed(isMask ? 'mask' : 'pixels', { layer: t.layer, rect: docRect });
     },
@@ -623,7 +634,15 @@ export function beginPixelEdit(app, { quiet = false, label = 'Edit', margin = 0 
     commit(entryLabel = label, img = null, meta = {}) {
       if (img) session.show(img);
       if (!shown) return null;
+      hold(false); // what is on the canvas is the edit now
       const after = ctx.getImageData(local.x, local.y, local.width, local.height);
+      // An image mode that snaps pixels (lib/modes.js) can take the whole edit back: Levels on a Bitmap document ends
+      // as the same black and white. Nothing changed, so nothing is recorded and the document is not marked modified
+      // (16/32-bit documents excepted: their samples can move where the 8-bit proxy does not).
+      if (!isMask && app.pixelConstraint && !(d.depth > 8) && samePixels(after.data, original.data)) {
+        shown = false;
+        return null;
+      }
       const apply = (data) => {
         canvas.getContext('2d').putImageData(data, local.x, local.y);
         t.layer.touch();
@@ -639,6 +658,13 @@ export function beginPixelEdit(app, { quiet = false, label = 'Edit', margin = 0 
     },
   };
   return session;
+}
+
+function samePixels(a, b) {
+  if (a.length !== b.length) return false;
+  const x = new Uint32Array(a.buffer, a.byteOffset, a.length >> 2), y = new Uint32Array(b.buffer, b.byteOffset, b.length >> 2);
+  for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return false;
+  return true;
 }
 
 /** Runs fn(img) on a copy of the session base and returns it. */
@@ -790,10 +816,23 @@ export function install(app) {
     const render = (opacity, mode) => {
       const w = e.local.width, h = e.local.height;
       if (mode === 'normal') {
-        // straight interpolation between before and after (alpha included)
+        // interpolation between before and after, alpha included. Colour is weighted by alpha (premultiplied): where
+        // the filter made a pixel transparent (Lens Correction's edge, a distortion) its "after" colour is an empty
+        // 0,0,0 that must not darken the faded pixel, only make it more transparent
         const A = e.original.data, B = e.after.data;
         const img = new ImageData(w, h);
-        for (let i = 0; i < A.length; i++) img.data[i] = A[i] + (B[i] - A[i]) * opacity;
+        const o = img.data;
+        for (let i = 0; i < A.length; i += 4) {
+          const aa = A[i + 3], ba = B[i + 3];
+          if (aa === ba) {
+            for (let c = 0; c < 3; c++) o[i + c] = A[i + c] + (B[i + c] - A[i + c]) * opacity;
+            o[i + 3] = aa;
+            continue;
+          }
+          const wa = aa * (1 - opacity), wb = ba * opacity, sum = wa + wb;
+          for (let c = 0; c < 3; c++) o[i + c] = sum > 0 ? (A[i + c] * wa + B[i + c] * wb) / sum : A[i + c];
+          o[i + 3] = sum;
+        }
         return img;
       }
       if (!CANVAS_BLEND[mode]) {

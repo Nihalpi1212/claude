@@ -1107,7 +1107,7 @@ export function install(app) {
   // While a session is open it owns the document like a modal dialog would: commands that could change
   // the document (or the tool, the layer, the tab) are refused with a hint instead of running half way.
   const run = app.commands.run.bind(app.commands);
-  let warned = 0;
+  let warned = -Infinity; // when the hint was last shown (it is not repeated within 2.5 s)
   app.commands.run = (id, arg, source) => {
     if (tool.session && !tool.ending && !SAFE_COMMANDS.test(id)) {
       if (source !== 'api' && performance.now() - warned > 2500) {

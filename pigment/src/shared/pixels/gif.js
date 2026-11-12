@@ -191,8 +191,11 @@ export function encodeGif(frames, width, height, { loop = null } = {}) {
   return out.done();
 }
 
-/** Undoes GIF LZW: `data` is the concatenated sub-blocks, `count` the number of indices expected. */
-export function lzwDecode(data, minCodeSize, count) {
+/**
+ * Undoes GIF LZW: `data` is the concatenated sub-blocks, `count` the number of indices expected. A stream that
+ * ends (or goes wrong) before `count` indices leaves the rest at index 0, or throws with `strict`.
+ */
+export function lzwDecode(data, minCodeSize, count, { strict = false } = {}) {
   const out = new Uint8Array(count);
   const clear = 1 << minCodeSize, eoi = clear + 1;
   const prefix = new Int16Array(4096), suffix = new Uint8Array(4096), stack = new Uint8Array(4097);
@@ -231,7 +234,10 @@ export function lzwDecode(data, minCodeSize, count) {
       code = prev;
     }
     while (code >= clear) {
-      if (sp >= 4096) return out; // corrupt chain
+      if (sp >= 4096) {
+        if (strict) throw new Error('The GIF file is damaged: part of its image data is missing');
+        return out; // corrupt chain
+      }
       stack[sp++] = suffix[code];
       code = prefix[code];
     }
@@ -249,6 +255,7 @@ export function lzwDecode(data, minCodeSize, count) {
     prev = incoming;
     while (sp > 0 && o < count) out[o++] = stack[--sp];
   }
+  if (strict && o < count) throw new Error('The GIF file is truncated: part of its image data is missing');
   return out;
 }
 
@@ -345,7 +352,8 @@ export function decodeGif(bytes, { firstFrameOnly = false } = {}) {
       o += n;
       p += n;
     }
-    let indices = lzwDecode(data, minCode, w * h);
+    // a frame cut short would show as blank rows: an error, not an image
+    let indices = lzwDecode(data, minCode, w * h, { strict: true });
     const interlaced = !!(f & 0x40);
     if (interlaced) {
       const out = new Uint8Array(w * h);

@@ -39,8 +39,10 @@ export function isTiff(bytes) {
 // ---------------------------------------------------------------------------------------------
 // Compression schemes
 
-/** PackBits (Apple RLE) -> `expected` bytes; a truncated stream leaves zeros. */
-export function unpackBits(src, expected) {
+const TRUNCATED = 'The TIFF file is truncated or damaged: part of its image data is missing';
+
+/** PackBits (Apple RLE) -> `expected` bytes; a truncated stream leaves zeros, or throws with `strict`. */
+export function unpackBits(src, expected, { strict = false } = {}) {
   const out = new Uint8Array(expected);
   let sp = 0, op = 0;
   while (sp < src.length && op < expected) {
@@ -52,11 +54,13 @@ export function unpackBits(src, expected) {
       op += len;
     } else if (n > 128) {
       const len = Math.min(257 - n, expected - op);
+      if (sp >= src.length) break; // the run's value is missing
       const v = src[sp++];
       out.fill(v, op, op + len);
       op += len;
     }
   }
+  if (strict && op < expected) throw new Error(TRUNCATED);
   return out;
 }
 
@@ -89,8 +93,8 @@ export function packBitsRow(row, out = []) {
   return out;
 }
 
-/** TIFF LZW (MSB-first codes, 9..12 bits, "early change") -> `expected` bytes. */
-export function lzwDecode(src, expected) {
+/** TIFF LZW (MSB-first codes, 9..12 bits, "early change") -> `expected` bytes; a stream that ends early leaves zeros, or throws with `strict`. */
+export function lzwDecode(src, expected, { strict = false } = {}) {
   const out = new Uint8Array(expected);
   const prefix = new Uint16Array(4096), suffix = new Uint8Array(4096), length = new Uint16Array(4096);
   for (let i = 0; i < 256; i++) {
@@ -100,7 +104,10 @@ export function lzwDecode(src, expected) {
   let op = 0, sp = 0, bitBuf = 0, bitCnt = 0, width = 9, next = 258, old = -1;
   while (op < expected) {
     while (bitCnt < width) {
-      if (sp >= src.length) return out;
+      if (sp >= src.length) {
+        if (strict) throw new Error(TRUNCATED);
+        return out;
+      }
       bitBuf = ((bitBuf << 8) | src[sp++]) >>> 0;
       bitCnt += 8;
     }
@@ -144,6 +151,7 @@ export function lzwDecode(src, expected) {
     }
     old = code;
   }
+  if (strict && op < expected) throw new Error(TRUNCATED);
   return out;
 }
 
@@ -250,20 +258,30 @@ function reader(bytes) {
   };
 }
 
-/** Reads one IFD into a Map tag -> number[] (ASCII fields become one string). Returns { tags, next }. */
+/**
+ * Reads one IFD into a Map tag -> number[] (ASCII fields become one string). Returns { tags, next, missing }:
+ * `missing` lists the tags whose values lie outside the file (-1 stands for entries cut off with the directory).
+ */
 function readIfd(bytes, rd, offset) {
   if (offset + 2 > bytes.length) throw new Error('TIFF directory is outside the file');
   const count = rd.u16(offset);
   const tags = new Map();
+  const missing = new Set();
   for (let i = 0; i < count; i++) {
     const e = offset + 2 + i * 12;
-    if (e + 12 > bytes.length) break;
+    if (e + 12 > bytes.length) {
+      missing.add(-1);
+      break;
+    }
     const tag = rd.u16(e), type = rd.u16(e + 2), n = rd.u32(e + 4);
     const size = TYPE_SIZE[type];
     if (!size) continue;
     const total = size * n;
     const at = total <= 4 ? e + 8 : rd.u32(e + 8);
-    if (at + total > bytes.length) continue;
+    if (at + total > bytes.length) {
+      missing.add(tag);
+      continue;
+    }
     if (type === 2) {
       let s = '';
       for (let k = 0; k < n; k++) {
@@ -279,7 +297,7 @@ function readIfd(bytes, rd, offset) {
     tags.set(tag, values);
   }
   const nextAt = offset + 2 + count * 12;
-  return { tags, next: nextAt + 4 <= bytes.length ? rd.u32(nextAt) : 0 };
+  return { tags, next: nextAt + 4 <= bytes.length ? rd.u32(nextAt) : 0, missing };
 }
 
 /** Header fields of a TIFF without decoding pixels: { width, height, bitDepth, samples, compression, littleEndian }. */
@@ -357,7 +375,25 @@ function unpredictFloatRow(row, stride, bytesPer, le) {
  *   channels: 1 grey, 2 grey + alpha, 3 RGB, 4 RGBA; depth 8 for 1..8-bit files (palettes are expanded),
  *   16 for 16-bit (and 32-bit integer) files, 32 for float files.
  */
-export async function decodeTiff(bytes, { inflate = zlibCodecs.inflate } = {}) {
+export async function decodeTiff(bytes, codecs = {}) {
+  try {
+    return await decodeTiffImage(bytes, codecs);
+  } catch (err) {
+    // a damaged directory sends offsets and sizes anywhere: say what is wrong with the file, not with a typed array
+    if (err instanceof RangeError && /alloc|length|size/i.test(err.message)) throw new Error('The TIFF image is too large to open', { cause: err });
+    if (err instanceof RangeError || err instanceof TypeError) throw new Error('The TIFF file is damaged', { cause: err });
+    throw err;
+  }
+}
+
+// The most a compressed byte can stand for: PackBits turns 2 bytes into 128, Deflate reaches 1032:1 and a 12-bit
+// LZW code can stand for a string of 4094 bytes. An image that needs more than its strips could ever hold has a
+// damaged size field (or lost its data), which is found before any memory is asked for.
+const MAX_RATIO = { 1: 1, 32773: 64, 8: 1032, 32946: 1032, 5: 4096 };
+/** Pixels of the largest image decodeTiff accepts by default (a 16384 x 16384 canvas, the most a browser can show). */
+export const TIFF_MAX_PIXELS = 2 ** 28;
+
+async function decodeTiffImage(bytes, { inflate = zlibCodecs.inflate, maxPixels = TIFF_MAX_PIXELS } = {}) {
   if (!isTiff(bytes)) {
     if (bytes && bytes.length >= 4 && (bytes[2] === 0x2b || bytes[3] === 0x2b)) throw new Error('BigTIFF files are not supported');
     throw new Error('Not a TIFF file');
@@ -374,10 +410,16 @@ export async function decodeTiff(bytes, { inflate = zlibCodecs.inflate } = {}) {
       break;
     }
   }
+  // a tag that says how the pixels are stored and has lost its values would be read as its default (1 bit per
+  // sample, no predictor, ...) and decode to noise; the resolution and text tags can go missing without harm
+  const STRUCTURE = [-1, TAG.width, TAG.height, TAG.bits, TAG.compression, TAG.photometric, TAG.stripOffsets, TAG.samples, TAG.rowsPerStrip, TAG.stripCounts, TAG.planar, TAG.predictor, TAG.colorMap, TAG.tileWidth, TAG.tileHeight, TAG.tileOffsets, TAG.tileCounts, TAG.extraSamples, TAG.sampleFormat];
+  if (STRUCTURE.some((t) => first.missing.has(t))) throw new Error(TRUNCATED);
   const one = (t, d) => tags.get(t)?.[0] ?? d;
   const width = one(TAG.width, 0), height = one(TAG.height, 0);
   if (!(width > 0 && height > 0)) throw new Error('TIFF has an empty image');
+  if (width * height > maxPixels) throw new Error(`The TIFF image is too large to open (${width} × ${height} pixels)`);
   const samples = one(TAG.samples, 1);
+  if (!(samples >= 1 && samples <= 64)) throw new Error('The TIFF file is damaged (samples per pixel)');
   const bitsList = tags.get(TAG.bits) ?? [1];
   const bits = bitsList[0];
   if (bitsList.some((b) => b !== bits)) throw new Error('TIFF files with different bit depths per sample are not supported');
@@ -411,6 +453,11 @@ export async function decodeTiff(bytes, { inflate = zlibCodecs.inflate } = {}) {
   const planes = planar === 2 ? samples : 1;
   const spp = planar === 2 ? 1 : samples; // samples per pixel inside one block
   const rowBytes = Math.ceil((blockW * spp * bits) / 8);
+  // every strip or tile must be there, and together they must be able to hold the image they are said to hold
+  if (offsets.length < planes * perPlane) throw new Error(TRUNCATED);
+  let stored = 0;
+  for (let i = 0; i < planes * perPlane; i++) stored += Math.max(0, Math.min(counts?.[i] ?? bytes.length, bytes.length - offsets[i]));
+  if (planes * across * rowBytes * (tiled ? down * blockH : height) > stored * (MAX_RATIO[compression] ?? 1)) throw new Error(TRUNCATED);
 
   // decoded samples of the whole image as numbers, sample-interleaved: one typed array for every case
   const total = width * height * samples;
@@ -420,22 +467,29 @@ export async function decodeTiff(bytes, { inflate = zlibCodecs.inflate } = {}) {
   for (let plane = 0; plane < planes; plane++) {
     for (let k = 0; k < perPlane; k++) {
       const idx = plane * perPlane + k;
-      if (idx >= offsets.length) break;
       const bx = (k % across) * blockW, by = Math.floor(k / across) * blockH;
       const rows = tiled ? blockH : Math.min(blockH, height - by);
       const expected = rows * rowBytes;
       const at = offsets[idx];
       const len = counts?.[idx] ?? (compression === 1 ? expected : bytes.length - at);
-      if (at >= bytes.length) continue;
+      // a piece that is cut short would leave part of the picture blank: that is an error, not an image
+      if (!(at < bytes.length)) throw new Error(TRUNCATED);
       const src = bytes.subarray(at, Math.min(bytes.length, at + len));
       let data;
       if (compression === 1) {
+        if (src.length < expected) throw new Error(TRUNCATED);
         data = new Uint8Array(expected);
         data.set(src.subarray(0, expected));
-      } else if (compression === 5) data = lzwDecode(src, expected);
-      else if (compression === 32773) data = unpackBits(src, expected);
+      } else if (compression === 5) data = lzwDecode(src, expected, { strict: true });
+      else if (compression === 32773) data = unpackBits(src, expected, { strict: true });
       else {
-        const inflated = await inflate(src);
+        let inflated;
+        try {
+          inflated = await inflate(src);
+        } catch {
+          throw new Error(TRUNCATED);
+        }
+        if (inflated.length < expected) throw new Error(TRUNCATED);
         data = new Uint8Array(expected);
         data.set(inflated.subarray(0, expected));
       }

@@ -2,7 +2,7 @@
 // Action Options, New Set, the JSON editor of a step's argument, the Stop message shown on playback).
 // Every function resolves with plain values or null when cancelled; lib/actions.js applies them.
 import { formDialog } from '../form.js';
-import { ACTION_COLORS, FUNCTION_KEYS, CONDITIONS, functionKeyLabel, isPlainData } from './model.js';
+import { ACTION_COLORS, FUNCTION_KEYS, CONDITIONS, functionKeyLabel, isPlainData, cloneData, MAX_ARG_BYTES, MAX_NAME_LENGTH } from './model.js';
 
 const actionOptions = (set, none = 'None') => [['', none], ...(set?.actions ?? []).map((a) => [a.name, a.name])];
 
@@ -204,6 +204,7 @@ export async function stepArgDialog(app, step) {
       if (!text) return true;
       try {
         if (!isPlainData(JSON.parse(text))) throw new Error('not plain data');
+        if (JSON.stringify(JSON.parse(text)).length > MAX_ARG_BYTES) throw new Error(`a step holds at most ${MAX_ARG_BYTES / 1024} KB`);
         return true;
       } catch (err) {
         app.dialogs.toast(`The argument is not valid JSON: ${err.message}`, { kind: 'error', timeout: 5000 });
@@ -213,5 +214,6 @@ export async function stepArgDialog(app, step) {
   });
   if (!o) return null;
   const text = String(o.json ?? '').trim();
-  return { label: String(o.label ?? '').trim() || step.label, arg: text ? JSON.parse(text) : undefined };
+  // cloneData: "__proto__" and "constructor" keys typed into the box never reach a command
+  return { label: (String(o.label ?? '').trim() || step.label).slice(0, MAX_NAME_LENGTH), arg: text ? cloneData(JSON.parse(text)) : undefined };
 }

@@ -6,13 +6,13 @@
 // setLayerProps() (or one explicit history entry where a source object cannot be cloned).
 import { Layer, Document, RasterLayer, createCanvas, copyCanvas, registerLayerType, intersectRect, unionRect, newId } from './document.js';
 import { Compositor, flattenDocument } from './compositor.js';
-import { structural, setLayerProps, cloneLayer, releaseOrphanClips } from './layer-ops.js';
+import { structural, setLayerProps, cloneLayer, relinkCopies, releaseOrphanClips } from './layer-ops.js';
 import { applyFilter, FILTERS } from '../../shared/pixels/filters.js';
 import { applyAdjustment, ADJUSTMENTS } from '../../shared/pixels/adjust.js';
 import { transformBounds, IDENTITY } from '../../shared/pixels/transform.js';
 import { stylePadding } from '../../shared/pixels/styles.js';
 import { bridge } from './bridge.js';
-import { decodeImage, openDocument, writePigment, baseName, extOf, OPEN_FILTERS, canvasToPng } from './io.js';
+import { decodeImageFile, openDocument, writePigment, baseName, extOf, OPEN_FILTERS, canvasToPng } from './io.js';
 import { buildAdjustmentEditor } from './adjust-ui.js';
 import { frameThrottle } from './form.js';
 
@@ -64,10 +64,11 @@ export function cloneDocument(doc) {
   const out = new Document({ width: doc.width, height: doc.height, dpi: doc.dpi, name: doc.name });
   for (const child of doc.root.children) {
     if (child.quickMask || child.preview) continue;
-    const c = cloneLayer(child, { name: child.name });
+    const c = cloneLayer(child, { name: child.name, relink: false });
     c.locked = { ...child.locked };
     out.add(c, out.root, out.root.children.length);
   }
+  relinkCopies(out.root.children); // layer links hold between the copies
   out.guides = clone(doc.guides ?? []);
   out.paths = clone(doc.paths ?? []);
   out.meta = clone(doc.meta ?? {});
@@ -176,6 +177,26 @@ export function filterPadding(filters) {
     pad = Math.max(pad, Math.min(400, n));
   }
   return pad;
+}
+
+/** Kinds laid out on the image they are given and that spread nothing: they run on the object's bounds, never on padding. */
+const laidOutOnBounds = (f) => isGeometricFilter(f) && filterPadding([f]) === 0;
+
+/**
+ * Runs one smart filter on a sub-rectangle of img (in place). The rest of img is left alone, or, with `around`
+ * (an earlier filter spread a halo out there), goes through the filter as part of the whole image: outside the
+ * object only the filter's colour matters, not where its pins sit.
+ */
+function applyToRegion(img, r, f, around = false) {
+  const sub = { width: r.width, height: r.height, data: new Uint8ClampedArray(r.width * r.height * 4) };
+  const row = r.width * 4;
+  for (let y = 0; y < r.height; y++) {
+    const at = ((r.y + y) * img.width + r.x) * 4;
+    sub.data.set(img.data.subarray(at, at + row), y * row);
+  }
+  applySmartFilter(sub, f);
+  if (around) applySmartFilter(img, f);
+  for (let y = 0; y < r.height; y++) img.data.set(sub.data.subarray(y * row, (y + 1) * row), ((r.y + y) * img.width + r.x) * 4);
 }
 
 const normaliseFilter = (f) => ({ kind: String(f.kind), params: clone(f.params ?? {}) ?? {}, enabled: f.enabled !== false });
@@ -311,7 +332,17 @@ export class SmartLayer extends Layer {
     if (filters.length) {
       const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
       const work = { width: img.width, height: img.height, data: img.data };
-      for (const f of filters) applySmartFilter(work, f);
+      // The render is padded for the filter of the stack that spreads furthest. A kind that lays itself out on the
+      // image it is given (Blur Gallery pins and ellipses, a vignette, a flare: fractions of the object's bounds)
+      // must not see that padding, or adding a blur to the stack would move its pins: it runs on the object's own
+      // bounds inside the padded render.
+      const own = pad > 0 ? intersectRect({ x: out.x - rect.x, y: out.y - rect.y, width: out.width, height: out.height }, { x: 0, y: 0, width: work.width, height: work.height }) : null;
+      let spilled = false; // a filter earlier in the stack has spread pixels into the padding
+      for (const f of filters) {
+        if (own && laidOutOnBounds(f)) applyToRegion(work, own, f, spilled);
+        else applySmartFilter(work, f);
+        if (filterPadding([f]) > 0) spilled = true;
+      }
       ctx.putImageData(img, 0, 0);
     }
     this._cache = { key, canvas, x: rect.x, y: rect.y, version: this.version };
@@ -464,11 +495,12 @@ export function install(app) {
     const box = contentBox(layers, d);
     const src = new Document({ width: box.width, height: box.height, dpi: d.dpi, name: top.name });
     for (const l of layers) {
-      const c = cloneLayer(l, { name: l.name });
+      const c = cloneLayer(l, { name: l.name, relink: false });
       c.locked = { ...l.locked };
       shiftLayer(c, -box.x, -box.y, box.width, box.height);
       src.add(c, src.root, src.root.children.length);
     }
+    relinkCopies(src.root.children); // layers converted together stay linked inside the smart object
     releaseOrphanClips(src);
     src.active = src.root.children[src.root.children.length - 1] ?? null;
     src.selected = new Set(src.active ? [src.active] : []);
@@ -481,6 +513,7 @@ export function install(app) {
     const run = layers.every((l, i) => l.parent === bottom.parent && l.clip && siblings.indexOf(l) === bi + i);
     const keepClip = run && bi > 0 && !layers.includes(siblings[bi - 1]);
     const smart = new SmartLayer({ name: top.name, clip: keepClip, source: makeSource({ kind: 'document', doc: src, name: top.name }), transform: box.x || box.y ? [1, 0, 0, 1, box.x, box.y] : null });
+    smart.color = top.color ?? null; // the colour label (lib/layers-extras/tags.js) stays on the row, like the name
     hosts.set(smart, d);
     structural(app, layers.length > 1 ? 'Convert layers to smart object' : 'Convert to smart object', () => {
       // the smart object takes the top layer's place, or sits right above its clip base when it stays clipped
@@ -563,7 +596,7 @@ export function install(app) {
       const d = await openDocument(bytes, { name: path.split(/[\\/]/).pop(), path: null });
       return makeSource({ kind: 'document', doc: d, name: baseName(path) });
     }
-    return makeSource({ kind: 'image', canvas: await decodeImage(bytes, path), name: baseName(path) });
+    return makeSource({ kind: 'image', canvas: await decodeImageFile(bytes, path), name: baseName(path) });
   }
 
   async function replaceContents(pathArg, ctx = null) {
@@ -722,6 +755,14 @@ export function install(app) {
       layer.filters = original;
       layer.touch();
     }
+    // The copy is the object's own bounds: filters below may have padded the render (a blur spreads past the
+    // object), and an opener that lays pins or a frame on its layer must see what the smart filter will run on.
+    const own = intersectRect(layer.bounds(), { x: rendered.x, y: rendered.y, width: rendered.canvas.width, height: rendered.canvas.height });
+    if (own && (own.width !== rendered.canvas.width || own.height !== rendered.canvas.height) && laidOutOnBounds({ kind, params: start })) {
+      const crop = createCanvas(own.width, own.height);
+      crop.getContext('2d').drawImage(rendered.canvas, rendered.x - own.x, rendered.y - own.y);
+      rendered = { canvas: crop, x: own.x, y: own.y };
+    }
     const proxy = new RasterLayer({ name: layer.name, canvas: copyCanvas(rendered.canvas), x: rendered.x, y: rendered.y, opacity: layer.opacity, fillOpacity: layer.fillOpacity, blend: layer.blend, clip: layer.clip, styles: layer.styles });
     proxy.preview = true; // never saved and never part of tree snapshots
     if (layer.mask) proxy.mask = layer.mask;
@@ -837,9 +878,9 @@ export function install(app) {
     /**
      * Called by filter-ui.js / adjust-ui.js before a pixel edit: false when the edit is not a smart filter, else
      * { done: Promise<params | null> } once the layer is a smart object and the edit was taken over as a smart
-     * filter (with a dialog, or the kind's own session, when params is null).
+     * filter (with a dialog, or the kind's own session, when params is null; that session starts from `start`).
      */
-    intercept(layer, kind, params, label) {
+    intercept(layer, kind, params, label, { start = null } = {}) {
       if (!isSmart(layer)) return false;
       if (app.ui.editingMask && layer.mask) return false; // the mask is ordinary pixels
       if (!describeKind(kind)) return false;
@@ -852,8 +893,10 @@ export function install(app) {
         addFilter(layer, kind, params, label);
         return { done: Promise.resolve(params) };
       }
+      // `start`: params of a replay that only the kind's own opener can complete (Displace without its map)
+      const session = start && FILTERS[kind]?.ui === 'custom' && app.filterEditor?.opener?.(kind) ? customFilterDialog(layer, kind, -1, { ...app.filterEditor.defaults(kind), ...start }) : filterDialog(layer, kind, -1, null);
       return {
-        done: filterDialog(layer, kind, -1, null).catch((err) => {
+        done: session.catch((err) => {
           app.reportError(err, `${label ?? kind} failed`);
           return null;
         }),

@@ -4,6 +4,7 @@ import { formDialog, debounce } from './form.js';
 import { exportImage, baseName, SAVE_FORMATS } from './io.js';
 import { createCanvas } from './document.js';
 import { renderLayersFlat } from './layer-ops.js';
+import { modeRendererFor } from './compositor.js';
 
 const formatSize = (n) => (n > 1048576 ? `${(n / 1048576).toFixed(2)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
 
@@ -135,6 +136,9 @@ export function install(app) {
         layer.visible = true;
         let canvas = renderLayersFlat(d, [layer]);
         layer.visible = wasVisible;
+        // a composite of some layers skips the image mode's display pass (it usually becomes layer pixels again); a
+        // file must show the layer as the document does: grey, or in its duotone inks
+        modeRendererFor(d.mode)?.(d, canvas, d.bounds, {});
         if (o.trim) {
           const b = layer.bounds();
           const r = b && { x: Math.max(0, b.x), y: Math.max(0, b.y), width: Math.min(d.width, b.x + b.width) - Math.max(0, b.x), height: Math.min(d.height, b.y + b.height) - Math.max(0, b.y) };

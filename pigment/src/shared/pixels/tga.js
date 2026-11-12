@@ -59,10 +59,13 @@ export function decodeTga(bytes) {
   const size = bpp === 15 ? 2 : bpp >> 3;
   if (type === 1 && (!mapType || size !== 1)) throw new Error('This colour-mapped TGA is not supported');
   let at = 18 + idLength;
+  // a file that ends before its last pixel would open with blank rows: that is an error, not an image
+  const truncated = () => new Error('The TGA file is truncated: part of its image data is missing');
   // the colour map (BGR(A) entries) becomes RGBA
   let map = null;
   if (mapType === 1) {
     const esize = mapBits === 15 ? 2 : mapBits >> 3;
+    if (at + mapLength * esize > bytes.length) throw truncated();
     if (type === 1) {
       map = new Uint8ClampedArray(mapLength * 4);
       for (let i = 0; i < mapLength && at + (i + 1) * esize <= bytes.length; i++) readColour(bytes, at + i * esize, esize, map, i * 4, esize === 4 ? 8 : esize === 2 ? 0 : 0);
@@ -70,15 +73,21 @@ export function decodeTga(bytes) {
     at += mapLength * esize;
   }
   const n = width * height;
+  // a run-length packet (1 + size bytes) stands for at most 128 pixels: a size the rest of the file could never
+  // fill is a damaged header, found before memory is asked for
+  if (rle && n > Math.ceil(Math.max(0, bytes.length - at) / (1 + size)) * 128) throw truncated();
   // unpack to n stored pixels of `size` bytes
   const stored = new Uint8Array(n * size);
-  if (!rle) stored.set(bytes.subarray(at, Math.min(bytes.length, at + n * size)));
-  else {
+  if (!rle) {
+    if (at + n * size > bytes.length) throw truncated();
+    stored.set(bytes.subarray(at, at + n * size));
+  } else {
     let op = 0;
     while (op < stored.length && at < bytes.length) {
       const head = bytes[at++];
       const count = (head & 127) + 1;
       if (head & 128) {
+        if (at + size > bytes.length) throw truncated();
         for (let k = 0; k < count && op < stored.length; k++) for (let s = 0; s < size; s++) stored[op++] = bytes[at + s] ?? 0;
         at += size;
       } else {
@@ -88,6 +97,7 @@ export function decodeTga(bytes) {
         at += count * size;
       }
     }
+    if (op < stored.length) throw truncated();
   }
   const data = new Uint8ClampedArray(n * 4);
   const topDown = !!(descriptor & 0x20), rightLeft = !!(descriptor & 0x10);

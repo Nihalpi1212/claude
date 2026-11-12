@@ -187,6 +187,32 @@ test('the status bar follows the resolution set in Document Properties (and its 
   expect(errors).toEqual([]);
 });
 
+test('a dialog focuses its first field, but not when another field was reached before its first frame', async ({ page }) => {
+  const errors = await openApp(page);
+  await newDoc(page);
+  const focused = () => page.evaluate(() => document.activeElement?.dataset?.key ?? null);
+  await run(page, 'file:properties');
+  await expect.poll(focused).toBe('title');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.dialog')).toHaveCount(0);
+  // focus the resolution field in the task that inserts the dialog, ahead of the frame in which the dialog would
+  // focus its first field: typing must not land in Title
+  const kept = await page.evaluate(() => new Promise((resolve) => {
+    const seen = new MutationObserver(() => {
+      const input = document.querySelector('.dialog input[data-key="dpi"]');
+      if (!input) return;
+      seen.disconnect();
+      input.focus();
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve(document.activeElement?.dataset?.key ?? null)));
+    });
+    seen.observe(document.body, { childList: true, subtree: true });
+    window.pigmentApp.commands.run('file:properties', undefined, 'api');
+  }));
+  expect(kept).toBe('dpi');
+  await page.keyboard.press('Escape');
+  expect(errors).toEqual([]);
+});
+
 // ---- type tool ----
 
 test('Undo while typing does not throw the text session away', async ({ page }) => {

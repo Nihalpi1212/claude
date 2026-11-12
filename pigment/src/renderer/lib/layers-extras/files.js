@@ -2,7 +2,7 @@
 import { bridge } from '../bridge.js';
 import { Document } from '../document.js';
 import { flattenDocument } from '../compositor.js';
-import { openDocument, decodeImage, baseName, extOf, OPEN_FILTERS } from '../io.js';
+import { openDocument, decodeImageFile, baseName, extOf, OPEN_FILTERS } from '../io.js';
 import { SmartLayer, makeSource, attachHost } from '../smart-object.js';
 
 const PURGE_TARGETS = { undo: 'the undo history of this document', clipboard: 'the clipboard', histories: 'the undo histories of all open documents', all: 'the clipboard and the undo histories of all open documents' };
@@ -17,7 +17,7 @@ export function installFiles(app) {
       const d = await openDocument(bytes, { name, path: null });
       return { source: makeSource({ kind: 'document', doc: d, name: baseName(path) }), width: d.width, height: d.height, dpi: d.dpi };
     }
-    const canvas = await decodeImage(bytes, path);
+    const canvas = await decodeImageFile(bytes, path);
     return { source: makeSource({ kind: 'image', canvas, name: baseName(path) }), width: canvas.width, height: canvas.height, dpi: 72 };
   }
 
@@ -96,7 +96,8 @@ export function installFiles(app) {
     if (!PURGE_TARGETS[what]) return ctx?.cancel();
     if ((what === 'undo' || what === 'histories') && !app.doc) return ctx?.cancel();
     app.tools?.active?.commit?.();
-    if (arg?.confirm !== false && ctx?.source !== 'action') {
+    // also when an action runs it: Purge is never recorded (actions/model.js), so no action has a say in this
+    if (arg?.confirm !== false) {
       const ok = await app.dialogs.confirm(`Purge ${PURGE_TARGETS[what]}?`, { title: 'Purge', detail: 'This frees memory and cannot be undone.', okLabel: 'Purge', danger: true });
       if (!ok) return ctx?.cancel();
     }

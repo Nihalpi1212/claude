@@ -5,7 +5,8 @@ import { readPsd, writePsdUint8Array, initializeCanvas } from 'ag-psd';
 import { writeZip, readZip, findEntry, streamCodecs } from '../../shared/zip.js';
 import { Document, RasterLayer, GroupLayer, TextLayer, AdjustmentLayer, createCanvas, layerFromDescription, canvasIsBlank, textExtensionFor } from './document.js';
 import { parseColor } from '../../shared/pixels/color.js';
-import { flattenDocument } from './compositor.js';
+import { MODES } from '../../shared/pixels/modes.js';
+import { flattenDocument, modeRendererFor } from './compositor.js';
 import { Selection } from './selection.js';
 
 export const OPEN_EXTENSIONS = ['pigment', 'psd', 'psb', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'avif', 'svg', 'ico'];
@@ -101,6 +102,19 @@ export async function decodeImage(bytes, name = '') {
   return c;
 }
 
+/**
+ * Decodes any flat image File > Open can read to one canvas: the formats of the registered readers (TIFF, TGA,
+ * 16-bit PNG, GIF with its colour table) as well as the browser's. Place, Import Image, Open as Smart Object and
+ * Replace Contents list the same file types as Open, so they decode through here.
+ */
+export async function decodeImageFile(bytes, name = '') {
+  const ext = extOf(name);
+  const reader = OPEN_READERS.find((r) => (r.test ? r.test(bytes, name) : (r.extensions ?? []).includes(ext)));
+  if (!reader) return decodeImage(bytes, name);
+  const doc = await reader.read(bytes, { name, path: null });
+  return flattenDocument(doc); // what the document shows (a colour table applied, 16 bits as their 8-bit proxy)
+}
+
 function sniffType(b) {
   if (b[0] === 0x89 && b[1] === 0x50) return 'image/png';
   if (b[0] === 0xff && b[1] === 0xd8) return 'image/jpeg';
@@ -192,12 +206,17 @@ export async function readPigment(bytes) {
   if (!json) throw new Error('This is not a Pigment document (document.json is missing)');
   const d = JSON.parse(new TextDecoder().decode(json.data));
   if (d.app !== 'pigment') throw new Error('This is not a Pigment document');
-  const doc = new Document({ width: d.width, height: d.height, dpi: d.dpi, name: d.name, mode: typeof d.mode === 'string' ? d.mode : 'rgb', depth: [8, 16, 32].includes(d.depth) ? d.depth : 8 });
+  // a mode this version does not know (a damaged or newer file) opens as RGB, as an unknown depth opens as 8 bits
+  const mode = typeof d.mode === 'string' && Object.prototype.hasOwnProperty.call(MODES, d.mode) ? d.mode : 'rgb';
+  const doc = new Document({ width: d.width, height: d.height, dpi: d.dpi, name: d.name, mode, depth: [8, 16, 32].includes(d.depth) ? d.depth : 8 });
   if (Array.isArray(d.colorTable)) doc.colorTable = d.colorTable.filter((c) => Array.isArray(c) && c.length >= 3).map((c) => c.slice(0, 3).map((v) => Math.max(0, Math.min(255, Math.round(Number(v) || 0)))));
   if (d.duotone && Array.isArray(d.duotone.inks)) doc.duotone = JSON.parse(JSON.stringify(d.duotone));
   doc.guides = Array.isArray(d.guides) ? d.guides : [];
   doc.paths = Array.isArray(d.paths) ? d.paths : [];
   doc.meta = d.meta ?? {};
+  // a mode that lost what it shows its pixels with (the colour table, the spot channel state) is plain RGB: the
+  // layers hold RGBA either way
+  if ((doc.mode === 'indexed' && !doc.colorTable?.length) || (doc.mode === 'multichannel' && !doc.meta?.imageMode?.multichannel)) doc.mode = 'rgb';
   if (d.workPath?.subpaths) doc.workPath = d.workPath;
   if (d.globalLight && Number.isFinite(d.globalLight.angle)) doc.globalLight = { angle: d.globalLight.angle, altitude: d.globalLight.altitude ?? 30 };
   const smartSources = new Map(); // sourceRef -> the source shared by every instance that names it
@@ -545,6 +564,24 @@ export function writePsdDocument(doc, compositor) {
     g.getContext('2d').putImageData(img, 0, 0);
     return { left: 0, top: 0, canvas: g, defaultColor: 0, disabled: !layer.mask.enabled };
   };
+  // A PSD written here is always RGB. Duotone and Multichannel documents keep other pixels than they show (greys
+  // under the ink curves, the picture before spot channels were removed) and a Grayscale one may hold coloured
+  // fill, shape or text layers it shows grey, so each layer is written the way the mode shows it, as Image > Mode >
+  // RGB Color would convert it: the file opens looking like the document did.
+  const modeRender = ['duotone', 'multichannel', 'grayscale'].includes(doc.mode) ? modeRendererFor(doc.mode) : null;
+  // text stays editable only when its own colour is what the document displays: grey text in a Grayscale document
+  const textAsShown = (layer) => {
+    if (!modeRender) return true;
+    const [r, g, b] = parseColor(layer.font?.color ?? '#000000');
+    return doc.mode === 'grayscale' && r === g && g === b;
+  };
+  const shown = (canvas, x, y) => {
+    if (!modeRender || !canvas?.width || !canvas.height) return canvas;
+    const c = createCanvas(canvas.width, canvas.height);
+    c.getContext('2d').drawImage(canvas, 0, 0);
+    modeRender(doc, c, { x, y, width: c.width, height: c.height }, {});
+    return c;
+  };
   const toPsd = (layer) => {
     const lk = layer.locked ?? {};
     const base = {
@@ -575,9 +612,10 @@ export function writePsdDocument(doc, compositor) {
       x = r.x;
       y = r.y;
     }
-    const out = { ...base, left: x, top: y, canvas };
-    // text on a path / stacked text (lib/text-path.js) has no PSD equivalent: it exports rasterised
-    if (layer.type === 'text' && !textExtensionFor(layer)) out.text = textToPsd(layer);
+    const out = { ...base, left: x, top: y, canvas: shown(canvas, x, y) };
+    // text on a path / stacked text (lib/text-path.js) has no PSD equivalent: it exports rasterised (and so does
+    // text shown through inks or made grey by the mode: its own colour is not what the document displays)
+    if (layer.type === 'text' && !textExtensionFor(layer) && textAsShown(layer)) out.text = textToPsd(layer);
     return out;
   };
   const psd = {

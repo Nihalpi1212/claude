@@ -95,6 +95,12 @@ export function installFind(app) {
     return matchesFilter(layer, filter) || hasDescendant(layer, (c) => matchesFilter(c, filter));
   }
 
+  /** True for a layer the canvas does not draw while its document is isolated (tools must not hit what cannot be seen). */
+  app.isolationHides = (layer, d = app.doc) => {
+    const state = iso(d);
+    return !!state && !isoShows(state, layer);
+  };
+
   app.layerFilter = (layer) => {
     const state = iso();
     if (!state && !filter.on) return null;
@@ -209,7 +215,12 @@ export function installFind(app) {
   function setFilter(patch, opts) {
     if (patch.kinds) patch = { ...patch, kinds: patch.kinds.filter((k) => KINDS.some(([id]) => id === k)) };
     if (patch.type && !FILTER_TYPES.some(([id]) => id === patch.type)) patch = { ...patch, type: 'kind' };
-    Object.assign(filter, patch);
+    // only the filter's own fields: the argument may come from an action step or the assistant, and a stray key
+    // ("__proto__", "constructor") copied onto the live filter would change what every later lookup finds
+    for (const key of Object.keys(filter)) {
+      if (!Object.hasOwn(patch, key) || patch[key] === undefined) continue;
+      filter[key] = typeof filter[key] === 'string' ? String(patch[key]) : typeof filter[key] === 'boolean' ? !!patch[key] : patch[key];
+    }
     if (filter.on) filter.shown = true;
     syncBar(opts);
     rerender();

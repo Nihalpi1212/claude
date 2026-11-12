@@ -591,6 +591,9 @@ export async function runImageProcessor(app, o) {
           else app.docs.activate(doc);
           // everything done to an open document is undone again: the processor only writes copies
           const start = doc.history.index;
+          const startEntry = doc.history.entries[start] ?? null;
+          const mark = doc.history.mark();
+          const savedImage = doc.history.savedImage;
           const metaBefore = doc.meta;
           if (o.copyright) doc.meta = { ...(doc.meta ?? {}), copyright: o.copyright };
           if (action) {
@@ -621,8 +624,9 @@ export async function runImageProcessor(app, o) {
                 const name = uniqueFileName(`${splitName(file.name).name || baseName(doc.name)}.${type.ext}`, taken.get(dir));
                 taken.get(dir).add(name.toLowerCase());
                 const path = joinPath(dir, name);
+                // the File Info (with the Copyright Info typed into the dialog) goes into the formats that hold XMP
                 const bytes = await encodeForPath(doc, path, doc.view.compositor, type.opts);
-                await bridge.writeFile(path, bytes);
+                await bridge.writeFile(path, app.fileInfo?.withInfo?.(doc, path, bytes) ?? bytes);
                 summary.saved.push(path);
                 if (doc.history.index !== afterAction) doc.history.goTo(afterAction);
                 errors.push(...capture.take());
@@ -632,7 +636,17 @@ export async function runImageProcessor(app, o) {
           if (stillOpen(app, doc)) {
             if (opened) await app.docs.close(doc, { force: true });
             else {
-              if (doc.history.index !== start) doc.history.goTo(start);
+              // back to the state the run started from, unless that state has dropped out of a full history
+              const reachable = !startEntry || doc.history.entries.includes(startEntry);
+              if (reachable && doc.history.index !== start) doc.history.goTo(start);
+              if (reachable && doc.history.index === start) {
+                // ...and without a trace: the resize and the action's steps are no Redo of the user's (their own
+                // redo steps, cut off by the first entry pushed here, come back)
+                const resaved = doc.history.savedImage !== savedImage; // the action saved the file: it differs from this state
+                doc.history.rollback(mark);
+                if (resaved) doc.history.savedIndex = -2;
+                doc.changed('history');
+              }
               doc.meta = metaBefore;
             }
           }

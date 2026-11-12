@@ -63,6 +63,36 @@ function dropLoneLinks(doc) {
   for (const l of doc.layers()) if (l.linked && count.get(l.linked) < 2) l.linked = null;
 }
 
+/**
+ * Keeps link sets whole while the tree changes. A layer whose partners are gone (deleted, merged, converted to a
+ * smart object) is not linked to anything: its link is taken off, and remembered (layer.loneLink), because the
+ * change was not this module's to record: when Undo brings a partner back, the remembered link returns with it
+ * (set ids are never reused, so nothing but Undo can make a remembered set whole again).
+ * Returns true when a layer changed.
+ */
+export function settleLinks(doc) {
+  if (!doc?.root) return false;
+  const layers = doc.layers();
+  const count = new Map();
+  for (const l of layers) {
+    const id = l.linked || l.loneLink;
+    if (id) count.set(id, (count.get(id) ?? 0) + 1);
+  }
+  let changed = false;
+  for (const l of layers) {
+    if (l.linked && count.get(l.linked) < 2) {
+      l.loneLink = l.linked;
+      l.linked = null;
+      changed = true;
+    } else if (!l.linked && l.loneLink && count.get(l.loneLink) >= 2) {
+      l.linked = l.loneLink;
+      l.loneLink = null;
+      changed = true;
+    }
+  }
+  return changed;
+}
+
 const docOf = (app, layer) => {
   let root = layer;
   while (root?.parent) root = root.parent;
@@ -169,9 +199,17 @@ export function installTags(app) {
   });
 
   // persistence through doc.meta (see the header)
-  app.on('doc:opened', (d) => applyTags(d));
+  app.on('doc:opened', (d) => {
+    applyTags(d);
+    // a document built from copies (Image › Duplicate) has its labels and links on the layers, under new ids
+    settleLinks(d);
+    syncTags(d);
+  });
   app.on('doc:change', (e) => {
-    if (e.kind === 'tree' || e.kind === 'props' || e.kind === 'canvas' || e.kind === 'history') syncTags(e.doc);
+    if (e.kind !== 'tree' && e.kind !== 'props' && e.kind !== 'canvas' && e.kind !== 'history') return;
+    // a delete, merge or conversion may have left one layer of a link set behind
+    if (settleLinks(e.doc)) app.commands.invalidate();
+    syncTags(e.doc);
   });
   for (const d of app.docs?.docs ?? []) applyTags(d);
 }

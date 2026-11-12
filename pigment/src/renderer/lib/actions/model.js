@@ -82,10 +82,39 @@ export function isPlainData(value, depth = 0) {
   return Object.values(value).every((v) => isPlainData(v, depth + 1));
 }
 
-export const cloneData = (value) => (value === undefined ? undefined : JSON.parse(JSON.stringify(value)));
+/**
+ * Keys no step argument needs and no command may receive: JSON.parse makes "__proto__" an own property, and a
+ * command that copies its argument onto live state (Object.assign) would swap that object's prototype with it.
+ */
+const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+const dropUnsafeKeys = (key, value) => (UNSAFE_KEYS.has(key) ? undefined : value);
+
+/** Deep copy of plain data, without the keys above (a step argument from a file, the settings or the JSON editor). */
+export const cloneData = (value) => (value === undefined ? undefined : JSON.parse(JSON.stringify(value), dropUnsafeKeys));
 
 /** Largest serialised argument a step may carry: actions live in the settings file ("a few KB"). */
 export const MAX_ARG_BYTES = 256 * 1024;
+/**
+ * Limits of stored and imported actions. The whole panel is written into the settings on every change, and the
+ * panel draws every step: an action file must not be able to make either of them unusable.
+ */
+export const MAX_NAME_LENGTH = 200; // set and action names, step labels, command ids
+export const MAX_MESSAGE_LENGTH = 2000; // the text of a Stop step
+export const MAX_ITEMS = 5000; // sets + actions + steps in the panel
+export const MAX_SETS_BYTES = 1024 * 1024; // all sets, serialised
+export const MAX_FILE_BYTES = 4 * MAX_SETS_BYTES; // an actions file as written (indented JSON)
+
+/** Why these sets are more than the panel holds (the end of a sentence), or null when they fit. */
+export function limitError(sets) {
+  let items = 0;
+  for (const set of sets ?? []) {
+    items += 1 + (set.actions?.length ?? 0);
+    for (const action of set.actions ?? []) items += action.steps?.length ?? 0;
+  }
+  if (items > MAX_ITEMS) return `more than ${MAX_ITEMS} actions and steps`;
+  if (JSON.stringify(sets ?? []).length > MAX_SETS_BYTES) return `more than ${MAX_SETS_BYTES / 1024 / 1024} MB of actions`;
+  return null;
+}
 
 /**
  * Decides what a finished command (a 'command:done' event) adds to the action being recorded.
@@ -260,28 +289,50 @@ export function functionKeyOwner(sets, fk, except = null) {
 export const makeSet = (name, actions = []) => ({ id: newId('set'), name: String(name || 'Set'), actions });
 export const makeAction = (name, steps = [], extra = {}) => ({ id: newId('act'), name: String(name || 'Action'), steps, ...extra });
 
-function normalizeStep(raw) {
+const clip = (text, max = MAX_NAME_LENGTH) => {
+  const s = String(text);
+  return s.length > max ? s.slice(0, max) : s;
+};
+const commandId = (value) => (typeof value === 'string' && value && value.length <= MAX_NAME_LENGTH ? value : null);
+
+/**
+ * `report` counts what was left out: `refused` steps run a command that recording never records (Purge, Quit,
+ * Undo, Preferences, the panels…: an action only does what a user could have recorded), `oversized` steps carry
+ * an argument above MAX_ARG_BYTES.
+ */
+function normalizeStep(raw, report = {}) {
   if (!raw || typeof raw !== 'object') return null;
-  const step = { id: typeof raw.id === 'string' && raw.id ? raw.id : newId('s'), command: typeof raw.command === 'string' && raw.command ? raw.command : null, label: '', enabled: raw.enabled !== false, dialog: !!raw.dialog };
-  if (raw.stop && typeof raw.stop === 'object') step.stop = { message: String(raw.stop.message ?? ''), allowContinue: !!raw.stop.allowContinue };
+  const step = { id: typeof raw.id === 'string' && raw.id ? clip(raw.id) : newId('s'), command: commandId(raw.command), label: '', enabled: raw.enabled !== false, dialog: !!raw.dialog };
+  if (raw.stop && typeof raw.stop === 'object') step.stop = { message: clip(raw.stop.message ?? '', MAX_MESSAGE_LENGTH), allowContinue: !!raw.stop.allowContinue };
   else if (raw.conditional && typeof raw.conditional === 'object') {
-    step.conditional = { test: String(raw.conditional.test ?? ''), thenAction: raw.conditional.thenAction ? String(raw.conditional.thenAction) : null, elseAction: raw.conditional.elseAction ? String(raw.conditional.elseAction) : null };
+    step.conditional = { test: clip(raw.conditional.test ?? ''), thenAction: raw.conditional.thenAction ? clip(raw.conditional.thenAction) : null, elseAction: raw.conditional.elseAction ? clip(raw.conditional.elseAction) : null };
   } else if (!step.command) return null; // a step that does nothing is dropped
-  if (typeof raw.menuItem === 'string' && raw.menuItem) {
+  if (commandId(raw.menuItem)) {
     step.menuItem = raw.menuItem;
     step.command = raw.menuItem;
     step.dialog = true;
   }
-  if (raw.arg !== undefined && raw.arg !== null && isPlainData(raw.arg)) step.arg = cloneData(raw.arg);
+  if (step.command && isIgnoredCommand(step.command)) {
+    report.refused = (report.refused ?? 0) + 1;
+    return null;
+  }
+  if (raw.arg !== undefined && raw.arg !== null && isPlainData(raw.arg)) {
+    const arg = cloneData(raw.arg);
+    if (JSON.stringify(arg).length > MAX_ARG_BYTES) {
+      report.oversized = (report.oversized ?? 0) + 1;
+      return null;
+    }
+    step.arg = arg;
+  }
   // optional: skipped without a question when its command is not available (Rasterize on a pixel layer)
   if (raw.optional && step.command) step.optional = true;
-  step.label = typeof raw.label === 'string' && raw.label ? raw.label : step.stop ? 'Stop' : step.conditional ? `If ${conditionLabel(step.conditional.test)}` : commandLabel(step.command, step.arg);
+  step.label = typeof raw.label === 'string' && raw.label ? clip(raw.label) : step.stop ? 'Stop' : step.conditional ? `If ${conditionLabel(step.conditional.test)}` : commandLabel(step.command, step.arg);
   return step;
 }
 
-function normalizeAction(raw) {
+function normalizeAction(raw, report) {
   if (!raw || typeof raw !== 'object') return null;
-  const action = { id: typeof raw.id === 'string' && raw.id ? raw.id : newId('act'), name: String(raw.name || 'Action'), steps: (Array.isArray(raw.steps) ? raw.steps : []).map(normalizeStep).filter(Boolean) };
+  const action = { id: typeof raw.id === 'string' && raw.id ? clip(raw.id) : newId('act'), name: clip(raw.name || 'Action'), steps: (Array.isArray(raw.steps) ? raw.steps : []).map((s) => normalizeStep(s, report)).filter(Boolean) };
   const fk = normalizeFunctionKey(raw.functionKey);
   if (fk) action.functionKey = fk;
   if (typeof raw.color === 'string' && colorOf(raw.color)) action.color = raw.color;
@@ -290,7 +341,7 @@ function normalizeAction(raw) {
 }
 
 /** Cleans stored or imported sets: every set, action and step gets an id, a name / label and only known fields. */
-export function normalizeSets(raw) {
+export function normalizeSets(raw, report = {}) {
   const seen = new Set();
   const unique = (obj) => {
     if (seen.has(obj.id)) obj.id = newId('n');
@@ -300,7 +351,7 @@ export function normalizeSets(raw) {
   const out = [];
   for (const s of Array.isArray(raw) ? raw : []) {
     if (!s || typeof s !== 'object') continue;
-    const set = unique({ id: typeof s.id === 'string' && s.id ? s.id : newId('set'), name: String(s.name || 'Set'), actions: (Array.isArray(s.actions) ? s.actions : []).map(normalizeAction).filter(Boolean) });
+    const set = unique({ id: typeof s.id === 'string' && s.id ? clip(s.id) : newId('set'), name: clip(s.name || 'Set'), actions: (Array.isArray(s.actions) ? s.actions : []).map((a) => normalizeAction(a, report)).filter(Boolean) });
     if (s.collapsed) set.collapsed = true;
     if (s.builtin) set.builtin = true;
     for (const a of set.actions) {
@@ -344,10 +395,13 @@ export function looksLikeAtn(bytes) {
 
 /**
  * Parses a *.pigment-actions file (text or bytes). Throws an Error with a readable message for anything
- * else; ids are regenerated so loading a file twice gives two independent copies.
+ * else; ids are regenerated so loading a file twice gives two independent copies. Files above the limits
+ * (MAX_FILE_BYTES, MAX_ITEMS, MAX_SETS_BYTES, a step argument above MAX_ARG_BYTES) are refused; `report.refused`
+ * counts the steps that were left out because actions may not run their command (see normalizeStep).
  */
-export function parseActionsFile(input) {
+export function parseActionsFile(input, report = {}) {
   let text = input;
+  if ((input?.length ?? 0) > MAX_FILE_BYTES) throw new Error(`This actions file is too large (${(input.length / 1024 / 1024).toFixed(1)} MB; action files hold at most ${MAX_FILE_BYTES / 1024 / 1024} MB).`);
   if (typeof input !== 'string') {
     if (looksLikeAtn(input)) throw new Error('Photoshop .atn action files cannot be read. Pigment loads its own .pigment-actions files (JSON).');
     text = new TextDecoder('utf-8', { fatal: false }).decode(input);
@@ -361,8 +415,12 @@ export function parseActionsFile(input) {
   if (!data || typeof data !== 'object' || data.format !== FILE_FORMAT || !Array.isArray(data.sets)) throw new Error('This is not a Pigment actions file.');
   if (Number(data.version) > FILE_VERSION) throw new Error(`This actions file was written by a newer version of Pigment (format ${data.version}).`);
   const strip = (sets) => sets.map((s) => ({ ...s, id: undefined, actions: (Array.isArray(s?.actions) ? s.actions : []).map((a) => ({ ...a, id: undefined, steps: (Array.isArray(a?.steps) ? a.steps : []).map((st) => ({ ...st, id: undefined })) })) }));
-  const sets = normalizeSets(strip(data.sets.filter((s) => s && typeof s === 'object')));
+  const sets = normalizeSets(strip(data.sets.filter((s) => s && typeof s === 'object')), report);
   if (!sets.length) throw new Error('The actions file holds no action sets.');
+  // a file is loaded whole or not at all: an action that lost its largest steps would do something else
+  if (report.oversized) throw new Error(`The actions file cannot be loaded: ${report.oversized === 1 ? 'a step carries' : `${report.oversized} steps carry`} more than ${MAX_ARG_BYTES / 1024} KB of settings.`);
+  const over = limitError(sets);
+  if (over) throw new Error(`The actions file cannot be loaded: it holds ${over}.`);
   return sets;
 }
 

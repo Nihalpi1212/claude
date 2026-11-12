@@ -21,6 +21,8 @@ export function registerModeRenderer(mode, fn) {
   if (fn) MODE_RENDERERS.set(mode, fn);
   else MODE_RENDERERS.delete(mode);
 }
+/** The renderer registered for a document mode, or null (lib/io.js bakes what a mode shows into the layers of a PSD). */
+export const modeRendererFor = (mode) => MODE_RENDERERS.get(mode) ?? null;
 
 export class Compositor {
   constructor() {
@@ -302,6 +304,17 @@ export function flattenDocument(doc, compositor = new Compositor()) {
   const out = createCanvas(doc.width, doc.height);
   out.getContext('2d').drawImage(c, 0, 0);
   return out;
+}
+
+/**
+ * The flattened document as its layers store it: without the image mode's display pass (duotone inks, the spot
+ * channels left of a multichannel image). Whatever is read to become pixels of the same document again (a merged
+ * copy pasted back, Select and Mask's new layer, a clone source, the eyedropper's colour) must come from here: the
+ * mode shows stored pixels through its renderer, so displayed pixels written back would be mapped a second time.
+ */
+export function flattenStored(doc, compositor = new Compositor()) {
+  if (!doc.mode || doc.mode === 'rgb' || !MODE_RENDERERS.has(doc.mode)) return flattenDocument(doc, compositor);
+  return compositor.composite(doc, { rawMode: true }); // never cached: a canvas of its own
 }
 
 export { unionRect };

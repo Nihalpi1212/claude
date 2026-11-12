@@ -18,7 +18,7 @@
 // floats (1 = white, more is HDR headroom the proxy clamps), not linear light as in Photoshop.
 import { ADJUSTMENTS } from '../../shared/pixels/adjust.js';
 import {
-  DEEP_TYPES, DEEP_BITS, fromCanvasData, toCanvasData, convertDepth, createDeep, extractRect, mixRect, hasPrecision, syncFromProxy,
+  DEEP_TYPES, DEEP_BITS, fromCanvasData, toCanvasData, convertDepth, createDeep, extractRect, writeRect, mixRect, hasPrecision, syncFromProxy,
   applyAdjustmentDeep, isExactKind, blendDeep, resampleDeep, carryOver, statistics, DEEP_BLEND_MODES, q8u16, q8f32, toPs16,
 } from '../../shared/pixels/deep.js';
 import { encodePng, decodePng, toRgba16, isPng, pngInfo } from '../../shared/pixels/png.js';
@@ -198,8 +198,11 @@ export function install(app) {
     timers.set(doc, setTimeout(() => {
       timers.delete(doc);
       if (!app.docs?.docs?.includes(doc)) return;
-      // a stroke in progress repaints the canvas on every pointer move: wait for it to end
-      if (doc.history?.stroke) return schedule(doc);
+      // a stroke in progress repaints the canvas on every pointer move: wait for it to end. The same goes for a
+      // preview a dialog or an on-canvas session shows on a layer (lib/adjust-ui.js counts them in previewHolds):
+      // it is not an edit until it is committed, and taking it over would round the samples under it even when
+      // the session is cancelled (the stash that brings samples back only holds a few patches)
+      if (doc.history?.stroke || doc.previewHolds > 0) return schedule(doc);
       syncNow(doc);
     }, SYNC_DELAY));
   }
@@ -240,9 +243,23 @@ export function install(app) {
     return out;
   }
 
+  /**
+   * Writes a patch of deep samples back into the canvas they were taken from (undo and redo of an adjustment). The
+   * content-based pass cannot do this: it only looks at samples whose 8-bit value differs from the proxy, so after
+   * the undo of a subtle edit (or of any edit to float values above white, which the proxy clamps) it would find
+   * the proxy "in step" with the edited samples and leave them in place.
+   */
+  function putPatch(layer, canvas, patch) {
+    const st = states.get(canvas);
+    if (layer.canvas !== canvas || !st || st.deep.type !== patch.type || st.deep.data.length !== canvas.width * canvas.height * 4) return;
+    writeRect({ type: st.deep.type, data: st.deep.data, width: canvas.width, height: canvas.height }, patch);
+    layer.deep = st.deep;
+    st.version = layer.version;
+  }
+
   // an adjustment committed at 8 bits is run again on the deep pixels; anything else is picked up by the sync pass
   app.on('pixels:committed', (e) => {
-    const { doc, layer, rect, local, isMask, original, after, meta } = e ?? {};
+    const { doc, layer, rect, local, isMask, original, after, entry, meta } = e ?? {};
     if (!doc || !(doc.depth > 8) || isMask || !layer || !isDeepLayer(layer)) return;
     const adj = meta?.adjustment;
     const def = adj && Object.prototype.hasOwnProperty.call(ADJUSTMENTS, adj.kind) ? ADJUSTMENTS[adj.kind] : null;
@@ -265,6 +282,15 @@ export function install(app) {
       if (after?.data?.length === proxy.data.length) after.data.set(proxy.data);
       layer.touch();
       st.version = layer.version;
+      if (entry) {
+        // the undo entry only holds 8-bit pixels: it also puts the deep samples of the rect back, exactly
+        const canvas = layer.canvas;
+        const result = extractRect(planes, local);
+        const { undo, redo } = entry;
+        entry.undo = () => (undo(), putPatch(layer, canvas, before));
+        entry.redo = () => (redo(), putPatch(layer, canvas, result));
+        entry.bytes = (entry.bytes ?? 0) + before.data.byteLength + result.data.byteLength;
+      }
       doc.changed('pixels', { layer, rect });
     } catch (err) {
       console.warn('depth: the adjustment was kept at 8 bits', err);
@@ -355,9 +381,10 @@ export function install(app) {
    * How the document can be composited in float: the layers in drawing order, or the reason it cannot (then the
    * 8-bit composite is scaled up). Float covers raster, text, shape, fill and smart layers with the Normal,
    * Multiply and Screen blend modes, opacity, fill opacity and masks, Pass Through groups, and adjustment layers
-   * whose kind has deep maths.
+   * whose kind has deep maths. `layers` limits the plan to those layers (a merge); `neutral` is the layer a merge
+   * draws at full opacity in Normal mode (Merge Down hands the lower layer's blend mode and opacity to the result).
    */
-  function planFlatten(doc) {
+  function planFlatten(doc, layers = null, neutral = null) {
     const steps = [];
     let reason = null;
     const walk = (group) => {
@@ -375,13 +402,13 @@ export function install(app) {
           if (layer.blend === 'pass-through' && layer.opacity >= 1 && !layer.mask?.enabled && !styled(layer)) walk(layer);
           else reason = `the group ${name} is not a plain Pass Through group`;
         } else if (styled(layer)) reason = `${name} has layer effects`;
-        else if (!DEEP_BLEND_MODES.includes(layer.blend)) reason = `${name} uses the ${String(layer.blend).replace(/-/g, ' ')} blend mode`;
+        else if (layer !== neutral && !DEEP_BLEND_MODES.includes(layer.blend)) reason = `${name} uses the ${String(layer.blend).replace(/-/g, ' ')} blend mode`;
         else steps.push({ layer });
       }
     };
     if (doc.depth > 8) {
       if (doc.mode === 'duotone' || doc.mode === 'indexed' || doc.mode === 'bitmap') reason = 'this image mode is rendered at 8 bits';
-      else walk(doc.root);
+      else walk(layers ? { children: layers } : doc.root);
     } else reason = 'the document is 8 bits/channel';
     return reason ? { exact: false, reason } : { exact: true, steps };
   }
@@ -396,11 +423,14 @@ export function install(app) {
   /**
    * The flattened document as deep planes ({ type, width, height, data } plus exact and reason): composited in
    * float when planFlatten allows it, else the 8-bit composite scaled up (exact: false, reason says why).
+   * With `layers` (and `neutral`, see planFlatten) only those layers are composited, the way a merge renders them:
+   * without the mode's display pass, and with no 8-bit fallback (exact: false then comes without pixels).
    */
-  function flattenDeep(doc, { type = doc.depth === 32 ? 'f32' : 'u16', compositor = doc.view?.compositor } = {}) {
+  function flattenDeep(doc, { type = doc.depth === 32 ? 'f32' : 'u16', compositor = doc.view?.compositor, layers = null, neutral = null } = {}) {
     syncNow(doc);
-    const plan = planFlatten(doc);
+    const plan = planFlatten(doc, layers, neutral);
     if (!plan.exact) {
+      if (layers) return { exact: false, reason: plan.reason };
       const flat = flattenDocument(doc, compositor);
       const planes = fromCanvasData(ctx2d(flat).getImageData(0, 0, flat.width, flat.height), type);
       return { ...planes, exact: false, reason: plan.reason };
@@ -441,10 +471,11 @@ export function install(app) {
         x = s.x ?? 0;
         y = s.y ?? 0;
       }
-      blendDeep(acc, src, { alpha: (layer.opacity ?? 1) * (layer.fillOpacity ?? 1), mode: layer.blend, x, y, mask: maskOf(layer) });
+      const plain = layer === neutral;
+      blendDeep(acc, src, { alpha: (plain ? 1 : layer.opacity ?? 1) * (layer.fillOpacity ?? 1), mode: plain ? 'normal' : layer.blend, x, y, mask: maskOf(layer) });
     }
     // Grayscale documents show (and export) the luma of the composite, so coloured layers cannot leak colour
-    if (doc.mode === 'grayscale') applyAdjustmentDeep(acc, 'desaturate');
+    if (doc.mode === 'grayscale' && !layers) applyAdjustmentDeep(acc, 'desaturate');
     return { ...acc, exact: true, reason: null };
   }
 
@@ -467,16 +498,19 @@ export function install(app) {
         return null;
       }
     };
-    /** Hands the float composite to the flattened layer when that layer really shows the same picture. */
-    const adopt = (d, flat) => {
-      const layer = d?.root.children.length === 1 ? d.root.children[0] : null;
+    /** Hands the float composite to the flattened (or merged) layer when that layer really shows the same picture. */
+    const adopt = (d, flat, layer = d?.root.children.length === 1 ? d.root.children[0] : null) => {
       if (!flat || layer?.type !== 'raster' || layer.x !== 0 || layer.y !== 0 || layer.canvas.width !== flat.width || layer.canvas.height !== flat.height) return;
       const proxy = toCanvasData(flat);
       const shown = ctx2d(layer.canvas).getImageData(0, 0, flat.width, flat.height).data;
       // canvas blending rounds differently from float by a level or two; anything further off is another picture
       const step = Math.max(4, (Math.floor(shown.length / 4 / 2048) || 1) * 4);
       let off = 0, checked = 0;
-      for (let i = 0; i < shown.length; i += step, checked++) if (Math.abs(shown[i] - proxy.data[i]) > 3 || Math.abs(shown[i + 1] - proxy.data[i + 1]) > 3 || Math.abs(shown[i + 2] - proxy.data[i + 2]) > 3) off++;
+      for (let i = 0; i < shown.length; i += step, checked++) {
+        // coverage counts too (a merged layer may be translucent); a canvas keeps little colour under thin coverage
+        if (Math.abs(shown[i + 3] - proxy.data[i + 3]) > 3) off++;
+        else if (shown[i + 3] >= 128 && (Math.abs(shown[i] - proxy.data[i]) > 3 || Math.abs(shown[i + 1] - proxy.data[i + 1]) > 3 || Math.abs(shown[i + 2] - proxy.data[i + 2]) > 3)) off++;
+      }
       if (off > checked * 0.02) return;
       layer.deep = { type: flat.type, data: flat.data };
       ctx2d(layer.canvas).putImageData(new ImageData(proxy.data, flat.width, flat.height), 0, 0);
@@ -496,6 +530,84 @@ export function install(app) {
         return result;
       },
     });
+
+    // The merges of lib/layer-ops.js composite on canvases as well, which would rebuild the whole merged layer from
+    // 8 bits (256 levels, float highlights clipped at white) even when an empty layer is merged down. They are wrapped
+    // the same way: the layers about to be merged are composited in float first, and the merged layer adopts that.
+    const inOrder = (d, list) => {
+      const order = d.layers();
+      // a layer inside a selected group is drawn by that group
+      return list.filter((l) => !list.some((o) => o !== l && isInside(l, o))).sort((a, b) => order.indexOf(a) - order.indexOf(b));
+    };
+    const isInside = (layer, group) => {
+      for (let p = layer.parent; p; p = p.parent) if (p === group) return true;
+      return false;
+    };
+    const MERGES = {
+      'layer:merge-down': (d) => {
+        const top = d.active;
+        const below = top?.parent?.children[top.parent.children.indexOf(top) - 1];
+        return below ? { layers: [below, top], neutral: below } : null;
+      },
+      'layer:merge-selected': (d) => (d.selected.size > 1 ? { layers: inOrder(d, [...d.selected].filter((l) => l !== d.root)) } : null),
+      'layer:merge-visible': (d) => ({ layers: d.root.children.filter((l) => l.visible) }),
+    };
+    for (const [id, pick] of Object.entries(MERGES)) {
+      const base = app.commands.commands.get(id);
+      if (!base) continue;
+      app.commands.register(id, {
+        ...base,
+        run: (arg, ctx) => {
+          const d = app.doc;
+          let flat = null, merging = null;
+          if (d?.depth > 8) {
+            try {
+              merging = pick(d);
+              // every layer must be shown: the merge refuses hidden ones (and Merge Visible never gets any)
+              const f = merging && merging.layers.length > 1 && merging.layers.every((l) => l.visible) ? flattenDeep(d, merging) : null;
+              if (f?.exact) flat = f;
+            } catch (err) {
+              console.warn('depth: merging at 8 bits', err);
+            }
+          }
+          const result = base.run(arg, ctx);
+          // the merged layer is the new active one; a merge that was refused leaves the old layers in the document
+          const finish = (r) => {
+            const merged = d?.active;
+            if (flat && merged && !merging.layers.includes(merged) && !merging.layers.some((l) => d.layers().includes(l))) adopt(d, flat, merged);
+            return r;
+          };
+          return result && typeof result.then === 'function' ? result.then(finish) : finish(result);
+        },
+      });
+    }
+
+    // Image > Duplicate with "merged layers only" builds its one layer from the 8-bit composite: give it the float one
+    const duplicateBase = app.commands.commands.get('image:duplicate');
+    if (duplicateBase) {
+      app.commands.register('image:duplicate', {
+        ...duplicateBase,
+        run: async (arg, ctx) => {
+          const d = app.doc;
+          const result = await duplicateBase.run(arg, ctx);
+          const copy = app.doc;
+          try {
+            const layer = copy && copy !== d && copy.root.children.length === 1 ? copy.root.children[0] : null;
+            if (d?.depth > 8 && copy.depth === d.depth && app.docs.docs.includes(d) && layer?.type === 'raster') {
+              syncNow(copy);
+              // layers cloned one by one bring their samples along; only a layer that has none to speak of is replaced
+              if (layer.deep && !hasPrecision(layer.deep)) {
+                const f = flattenDeep(d);
+                if (f.exact) adopt(copy, f, layer);
+              }
+            }
+          } catch (err) {
+            console.warn('depth: the duplicate was kept at 8 bits', err);
+          }
+          return result;
+        },
+      });
+    }
   }
 
   /**
@@ -686,6 +798,8 @@ export function install(app) {
   /** A one-layer document from RGBA planes at their own depth ({ width, height, depth, data }). */
   function documentFromPlanes(img, { name, dpi }) {
     const { width, height, depth, data } = img;
+    // no canvas can hold more (32767 px a side, 16384 x 16384 in all): refuse it instead of opening a blank document
+    if (!(width > 0 && height > 0) || width > 32767 || height > 32767 || width * height > 2 ** 28) throw new Error(`The image is too large to open (${width} × ${height} pixels)`);
     const doc = new Document({ width, height, dpi: dpi > 0 ? Math.round(dpi) : 72, name: baseName(name), depth });
     const layer = new RasterLayer({ name: 'Background', width, height });
     const proxy = depth === 8 ? data : toCanvasData({ type: DEEP_TYPES[depth], data, width, height }).data;
@@ -773,7 +887,8 @@ export function install(app) {
       if (ok && ext === 'psd' && !warnedPsd.has(doc)) {
         warnedPsd.add(doc);
         app.dialogs.toast(`PSD files are written at 8 bits/channel. Save as .pigment, TIFF or PNG to keep ${doc.depth} bits.`, { timeout: 6000 });
-      } else if (ok && ['jpg', 'jpeg', 'webp', 'tga'].includes(ext) && !warnedPsd.has(doc)) {
+      } else if (ok && !['pigment', 'psd', 'tif', 'tiff'].includes(ext) && !warnedPsd.has(doc)) {
+        // every other format a document can be saved to (JPEG, WebP, TGA, GIF and whatever registers later) is 8-bit
         warnedPsd.add(doc);
         app.dialogs.toast(`${ext.toUpperCase()} files hold 8 bits/channel. Save as .pigment, TIFF or PNG to keep ${doc.depth} bits.`, { timeout: 6000 });
       }

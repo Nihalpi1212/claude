@@ -326,6 +326,11 @@ export function install(app) {
   const settingsOf = (key) => (app.settings[key] && typeof app.settings[key] === 'object' ? app.settings[key] : (app.settings[key] = {}));
   const remembered = () => settingsOf('alignBlend');
   const toast = (message, opts) => app.dialogs.toast(message, opts);
+  /** A document built here exists nowhere on disk: closing it asks to save (as Contact Sheet and Image › Duplicate do). */
+  const neverSaved = (doc) => {
+    doc.history.savedIndex = -2;
+    doc.history.onChange(); // the tab shows the unsaved dot at once
+  };
 
   // smart-object.js asks this hook for the pixels of a smart object that has a stack mode
   SmartLayer.stackRender = stackRender;
@@ -339,6 +344,18 @@ export function install(app) {
     d.selected = new Set(found);
     if (!found.includes(d.active)) d.active = found[found.length - 1];
     d.changed('active', { layer: d.active });
+  };
+
+  /**
+   * The registration and the blend plan are computed from the layers as they are when the command starts, over
+   * several frames. Returns a test for "the document is not that document any more" (an undo, an edit, a deleted
+   * layer, a closed tab): the result is then dropped instead of being applied to layers it was not made for.
+   */
+  const staleCheck = (d, layers) => {
+    const top = () => d.history.entries[d.history.index] ?? null;
+    const at = top();
+    const canvases = layers.map((l) => l.canvas);
+    return () => !app.docs.docs.includes(d) || top() !== at || layers.some((l, i) => d.find(l.id) !== l || l.canvas !== canvases[i]);
   };
 
   // ---- Auto-Align Layers ------------------------------------------------------------------------------------
@@ -377,11 +394,13 @@ export function install(app) {
     }
     const projection = PROJECTION_NAMES[o.projection] ? o.projection : 'auto';
     const ids = layers.map((l) => l.id);
+    const stale = staleCheck(d, layers);
     try {
       const outcome = await app.busy('Aligning layers…', async () => {
         const images = layers.map((l) => canvasData(l.canvas));
         const reference = locked.length ? layers.indexOf(locked[0]) : undefined;
         const reg = await registerImages(images, { projection, reference, vignette: !!o.vignette, distortion: !!o.distortion });
+        if (stale()) return { stale: true };
         const ref = layers[reg.result.reference];
         const origin = { x: ref.x, y: ref.y };
         const skipped = [];
@@ -426,6 +445,10 @@ export function install(app) {
         reselect(d, ids);
         return { moved, aligned: placed.length, skipped, projection: reg.result.projection, notes: reg.notes };
       });
+      if (outcome.stale) {
+        ctx?.cancel();
+        return toast('The document changed while its layers were being aligned: nothing was aligned', { kind: 'error', timeout: 5000 });
+      }
       app.view?.invalidate();
       const parts = [];
       if (outcome.moved) parts.push(`Aligned ${plural(outcome.aligned, 'layer')} (${PROJECTION_NAMES[outcome.projection]})`);
@@ -479,6 +502,7 @@ export function install(app) {
     }
     const method = o.method === 'stack' ? 'stack' : 'panorama';
     const ids = layers.map((l) => l.id);
+    const stale = staleCheck(d, layers);
     try {
       const outcome = await app.busy('Blending layers…', async () => {
         const w = d.width, h = d.height;
@@ -487,6 +511,7 @@ export function install(app) {
         const plan = await blendPlan(frames, w, h, { method, seamless: o.seamless !== false });
         await breathe();
         const { holes, count } = o.fill ? holesOf(plan.alphas, w, h) : { holes: null, count: 0 };
+        if (stale()) return { stale: true };
         let toned = 0, filled = false;
         await asOneEntry(d, 'Auto-Blend Layers', async () => {
           layers.forEach((layer, i) => {
@@ -510,6 +535,10 @@ export function install(app) {
         if (!filled) reselect(d, ids);
         return { toned, filled, holes: count, feather: plan.feather };
       });
+      if (outcome.stale) {
+        ctx?.cancel();
+        return toast('The document changed while its layers were being blended: nothing was blended', { kind: 'error', timeout: 5000 });
+      }
       app.view?.invalidate();
       const parts = [`Blended ${plural(layers.length, 'layer')} with masks (${method === 'stack' ? 'sharpest layer per area' : `seams feathered by ${Math.max(1, Math.round(outcome.feather))} px`})`];
       if (outcome.toned) parts.push(`tones matched on ${plural(outcome.toned, 'layer')}`);
@@ -671,6 +700,7 @@ export function install(app) {
         built.doc.history.clear?.();
         built.doc.changed('history');
       }
+      neverSaved(built.doc);
       const parts = [`Merged ${plural(built.count, 'image')} (${PROJECTION_NAMES[built.projection]}${o.blend !== false ? ', blended with masks' : ''})`];
       if (built.lost.length) parts.push(`${built.lost.map((f) => `"${f.name}"`).join(', ')} could not be placed and ${built.lost.length === 1 ? 'was' : 'were'} added hidden`);
       if (o.fill) parts.push(filled ? 'transparent areas filled on a merged layer' : built.holeCount ? 'the transparent areas could not be filled' : 'there were no transparent areas to fill');
@@ -759,6 +789,7 @@ export function install(app) {
       });
       const doc = built.host ?? built.doc;
       app.docs.add(doc);
+      neverSaved(doc);
       toast(sentence([`Loaded ${plural(frames.length, 'image')} into ${o.smart ? 'a smart object' : 'layers'}`, ...built.notes]), { timeout: 4000 });
       ctx?.setReplayArg(clone(o));
       return doc;
@@ -805,6 +836,7 @@ export function install(app) {
         return { ...stack, ...wrapped };
       });
       app.docs.add(built.host);
+      neverSaved(built.host);
       toast(sentence([`${stackModeName(mode)} of ${plural(frames.length, 'image')} in a smart object`, ...built.notes]), { timeout: 4000 });
       ctx?.setReplayArg(clone({ ...o, mode }));
       return built.host;

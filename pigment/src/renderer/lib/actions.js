@@ -321,6 +321,10 @@ class ActionsEngine {
       this.app.dialogs.toast(`Unknown command: ${id}`, { kind: 'error' });
       return null;
     }
+    if (M.isIgnoredCommand(id)) {
+      this.app.dialogs.toast(`${this.labelFor(id)} cannot be part of an action`, { kind: 'error' });
+      return null;
+    }
     const step = M.makeMenuItemStep(id, this.labelFor(id));
     this.insertStep(step, action);
     return step;
@@ -353,10 +357,14 @@ class ActionsEngine {
       if (!file) return null;
     }
     let sets;
+    const report = {};
     try {
       if (/\.atn$/i.test(file)) throw new Error('Photoshop .atn action files cannot be read. Pigment loads its own .pigment-actions files (JSON).');
       if (window.__pigmentTest?.pending?.[file]) await window.__pigmentTest.pending[file];
-      sets = M.parseActionsFile(await bridge.readFile(file));
+      sets = M.parseActionsFile(await bridge.readFile(file), report);
+      // the panel as a whole is what the settings hold: it stays inside the same limits as one file
+      const over = M.limitError([...this.sets, ...sets]);
+      if (over) throw new Error(`With this file the Actions panel would hold ${over}. Delete some action sets first.`);
     } catch (err) {
       this.app.reportError(err, 'Could not load the actions');
       return null;
@@ -370,6 +378,8 @@ class ActionsEngine {
     this.selection = { set: sets[0].id, action: sets[0].actions[0]?.id ?? null, step: null };
     this.changed('load');
     this.app.dialogs.toast(`Loaded ${sets.length === 1 ? `“${sets[0].name}”` : `${sets.length} action sets`}`, { kind: 'success', timeout: 2200 });
+    // steps that run what recording never records (Purge, Quit, Undo, Preferences…) are not part of any action
+    if (report.refused) this.app.dialogs.toast(`${report.refused} step${report.refused === 1 ? ' was' : 's were'} left out: actions cannot run application commands such as Purge, Undo or Quit`, { kind: 'info', timeout: 6000 });
     return sets;
   }
 
@@ -419,7 +429,7 @@ class ActionsEngine {
     delete set.collapsed;
     this.recording = {
       set, action: target, marks: new Map(), redo: [], lastSelection: new WeakMap(), seen: new WeakSet(),
-      lastActive: new WeakMap(), layers: new WeakSet(), colors: { fg: this.app.settings.foreground, bg: this.app.settings.background },
+      lastActive: new WeakMap(), lastPicked: new WeakMap(), layers: new WeakSet(), colors: { fg: this.app.settings.foreground, bg: this.app.settings.background },
     };
     // history entries that exist now are not part of the recording; later ones made outside commands are tool work
     for (const d of this.app.docs?.docs ?? []) {
@@ -456,6 +466,15 @@ class ActionsEngine {
     const rec = this.recording;
     if (!rec) return;
     rec.action.steps.push(step);
+    // the panel has a size (M.limitError, the same one Load Actions keeps): recording ends there instead of
+    // growing the settings until they can no longer be written
+    const over = M.limitError(this.sets);
+    if (over) {
+      rec.action.steps.pop();
+      this.stopRecording();
+      this.app.dialogs.toast(`Recording stopped: the Actions panel would hold ${over}`, { kind: 'error', timeout: 6000 });
+      return;
+    }
     if (mark) rec.marks.set(step.id, mark);
     rec.redo.length = 0;
     this.selection = { set: rec.set.id, action: rec.action.id, step: step.id };
@@ -474,25 +493,36 @@ class ActionsEngine {
     if (!rec || !d?.layers) return;
     for (const l of d.layers()) rec.layers.add(l);
     rec.lastActive.set(d, d.active ?? null);
+    rec.lastPicked.set(d, new Set(d.selected ?? []));
   }
 
   /**
-   * The active layer changed. The Layers panel and the Move tool's auto-select pick layers without a
-   * command, so the pick itself is recorded ("Select layer"), by name: ids differ between documents.
-   * Layers a command made active, and layers a tool has just created, are not picks.
+   * The active layer or the set of selected layers changed. The Layers panel and the Move tool's auto-select
+   * pick layers without a command, so the pick itself is recorded ("Select layer"), by name: ids differ
+   * between documents. Layers a command made active, and layers a tool has just created, are not picks.
+   * Several layers picked together (Ctrl/Shift-click) are recorded together: Link Layers, Auto-Align,
+   * Auto-Blend and Group from Layers work on the whole selection.
    */
   onLayerActivated({ doc: d, layer } = {}) {
     const rec = this.recording;
     if (!rec || !d) return;
     const before = rec.lastActive.get(d) ?? null;
+    const picked = rec.lastPicked.get(d) ?? null;
     const known = !!layer && rec.layers.has(layer);
     this.noteLayers(d);
-    if (this.playing || this.frames.length || d !== this.app.doc || !layer || layer === before || !known) return;
+    if (this.playing || this.frames.length || d !== this.app.doc || !layer || !known) return;
+    const samePick = !!picked && picked.size === d.selected.size && [...d.selected].every((l) => picked.has(l));
+    if (layer === before && samePick) return;
     const steps = rec.action.steps;
     const last = steps[steps.length - 1];
-    // clicking through several layers: the step keeps the last one
+    // clicking through several layers: the step keeps the last pick
     if (last?.command === 'actions:select-layer' && rec.marks.get(last.id)?.pick) steps.pop();
-    this.appendRecorded(M.makeStep('actions:select-layer', { name: layer.name, index: d.layers().indexOf(layer) }, `Select layer “${layer.name}”`), { pick: true });
+    const order = d.layers();
+    const ref = (l) => ({ name: l.name, index: order.indexOf(l) });
+    const others = d.selectedLayers().filter((l) => l !== layer && rec.layers.has(l));
+    const arg = others.length ? { ...ref(layer), also: others.map(ref) } : ref(layer);
+    const label = others.length ? `Select layers ${[layer, ...others].map((l) => `“${l.name}”`).join(', ')}` : `Select layer “${layer.name}”`;
+    this.appendRecorded(M.makeStep('actions:select-layer', arg, label), { pick: true });
   }
 
   /** 'command:done' while recording. `fr` is the wrapper's frame of this run (null for transparent commands). */
@@ -555,8 +585,11 @@ class ActionsEngine {
         return e.result?.path ? { id: 'file:open-paths', arg: [e.result.path], label: `Open: ${baseName(e.result.path)}` } : false;
       case 'file:open-paths':
         return Array.isArray(e.arg) && e.arg.length ? { id: e.id, arg: e.arg, label: `Open: ${e.arg.map((p) => String(p).split(/[\\/]/).pop()).join(', ')}` } : false;
-      case 'file:save':
       case 'file:close':
+        if (e.result === false) return false;
+        // the answer given to "Save changes?" is part of the step (file:close reports it), and shown in its name
+        return typeof e.arg?.save === 'boolean' ? { id: e.id, arg: { save: e.arg.save }, label: e.arg.save ? 'Close: save changes' : 'Close: don’t save' } : null;
+      case 'file:save':
       case 'file:close-all':
       case 'file:revert':
         return e.result === false ? false : null;
@@ -579,6 +612,12 @@ class ActionsEngine {
         return typeof e.arg === 'string' && fr.doc?.active?.id === e.arg ? { id: e.id, arg: undefined } : null;
       case 'layer:rename':
         return e.arg?.id && e.arg?.name ? { id: e.id, arg: { name: e.arg.name } } : null;
+      case 'filter:last': {
+        // Last Filter reports the filter it ran (lib/filter-ui.js): the step is that filter with its settings, so
+        // the action repeats it whatever filter happens to be the last one when it is played
+        const id = e.arg?.kind ? `filter:${e.arg.kind}` : null;
+        return id && this.app.commands.has(id) ? { id, arg: e.arg.params ?? {}, label: this.labelFor(id) } : null;
+      }
       case 'layer:select': {
         if (['all', 'none', 'next', 'prev'].includes(e.arg)) return null;
         const layer = fr.doc?.find?.(e.arg) ?? d?.find?.(e.arg);
@@ -805,6 +844,9 @@ class ActionsEngine {
       if (found.action === action) return { ok: false, reason: 'error', message: 'An action cannot play itself' };
       return this.play(found.action, { quiet, depth: depth + 1 });
     }
+    // only what recording could have recorded: a step built by hand must not purge histories, quit or undo under
+    // a harmless label (files and stored sets are cleaned by normalizeSets; this covers steps made in code)
+    if (M.isIgnoredCommand(id)) return { ok: false, reason: 'unavailable', message: `the command “${id}” cannot be run by an action` };
     if (this.batch?.overrideOpen && /^file:open(-paths)?$/.test(id)) return { ok: true }; // Batch: Override Action "Open" Commands
     if (!app.commands.has(id) || app.stubbed?.includes(id)) return { ok: false, reason: 'unavailable', message: `the command “${step.label}” does not exist in this version of Pigment` };
     // a running transform is applied first, as it would be when the command ran from the menu
@@ -929,11 +971,25 @@ function selectLayerByName(app, arg) {
   const d = app.doc;
   if (!d || !arg) return false;
   const layers = d.layers();
-  const named = layers.filter((l) => l.name === arg.name);
   // the name decides; the recorded position only chooses between layers that share it
-  const layer = named.length > 1 && layers[arg.index]?.name === arg.name ? layers[arg.index] : named[0] ?? (arg.name === undefined ? layers[arg.index] : null);
+  const pick = (ref) => {
+    const named = layers.filter((l) => l.name === ref?.name);
+    return named.length > 1 && layers[ref.index]?.name === ref.name ? layers[ref.index] : named[0] ?? (ref?.name === undefined ? layers[ref?.index] : null);
+  };
+  const layer = pick(arg);
   if (!layer) return { ok: false, message: `there is no layer named “${arg.name}” in this document` };
+  // layers that were selected together with it (see onLayerActivated): the whole selection comes back
+  const others = [];
+  for (const ref of Array.isArray(arg.also) ? arg.also : []) {
+    const other = pick(ref);
+    if (!other) return { ok: false, message: `there is no layer named “${ref?.name}” in this document` };
+    if (other !== layer) others.push(other);
+  }
   d.setActive(layer);
+  if (others.length) {
+    for (const l of others) d.selected.add(l);
+    d.changed('active', { layer });
+  }
   return { ok: true };
 }
 

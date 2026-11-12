@@ -1203,7 +1203,7 @@ export function installWorkspace(app, engine) {
   // The workspace owns the document like a modal dialog would. Undo and Redo step through its own
   // strokes; Select All / Deselect / Inverse act on its selection; everything else waits.
   const run = app.commands.run.bind(app.commands);
-  let warned = 0;
+  let warned = -Infinity; // when the hint was last shown (it is not repeated within 2.5 s)
   app.commands.run = (id, arg, source) => {
     if (tool.session && !tool.ending && !SAFE_COMMANDS.test(id)) {
       if (id === 'edit:undo' || id === 'edit:step-backward') tool.undo();

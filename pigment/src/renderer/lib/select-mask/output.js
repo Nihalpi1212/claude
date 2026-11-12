@@ -2,7 +2,7 @@
 // layer mask, a new layer (with or without a mask) or a new document — always one history entry in
 // the document it changes. Also the pixels those features look at.
 import { Document, RasterLayer, createCanvas } from '../document.js';
-import { flattenDocument } from '../compositor.js';
+import { flattenStored } from '../compositor.js';
 import { Selection, selectionOps } from '../selection.js';
 import { structural, setLayerProps, cloneLayer } from '../layer-ops.js';
 
@@ -32,7 +32,8 @@ export function sourceImage(app, { sampleAll = false } = {}) {
   const layer = doc.active;
   const W = doc.width, H = doc.height;
   if (sampleAll || !hasOwnPixels(layer)) {
-    const flat = flattenDocument(doc, doc.view.compositor);
+    // the pixels may become a new layer or document in the same image mode: stored pixels, not the inks shown
+    const flat = flattenStored(doc, doc.view.compositor);
     return { img: flat.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, W, H), layer, merged: true };
   }
   const c = createCanvas(W, H);
@@ -188,6 +189,9 @@ export function outputMask(app, { mask, output = 'selection', label = 'Select an
     copy.active = l;
     copy.selected = new Set([l]);
     copy.meta = { ...(doc.meta ?? {}) };
+    // a Multichannel image is shown through its spot channels (meta.imageMode names them by id): without them the
+    // copy would print no ink at all and show white
+    copy.channels = doc.channels.filter((c) => c.spot).map((c) => ({ ...c, spot: { ...c.spot }, mask: new Uint8ClampedArray(c.mask) }));
     app.docs.add(copy);
     copy.history.markSaved();
     copy.history.savedIndex = -2; // never saved: closing asks

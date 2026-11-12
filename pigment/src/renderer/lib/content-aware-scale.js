@@ -326,6 +326,7 @@ class ContentAwareScaleTool extends Tool {
     if (!s) return false;
     if (s.applying) return true;
     s.applying = true;
+    s.confirmed = true; // ended by Enter / Apply (or by leaving the tool), not by Escape: see the command below
     s.done = this.apply(switchBack).catch((err) => {
       this.app.reportError(err, `${LABEL} failed`);
       if (this.session === s) this.finish({ switchBack });
@@ -437,6 +438,15 @@ class ContentAwareScaleTool extends Tool {
     } finally {
       this.ending = false;
       app.tools.tools.delete(TOOL_ID);
+    }
+    // Ended through deactivate(): when another tool was chosen, that tool is the active one by now. When the
+    // document tab was switched (lib/documents.js deactivates and re-activates the active tool) nobody chose one,
+    // and this tool, no longer registered, would stay behind as the other document's tool: no toolbox button lit,
+    // the scale's options in the bar, a canvas that ignores the pointer. Hand over to the previous tool, as Enter does.
+    if (!switchBack) {
+      queueMicrotask(() => {
+        if (app.tools.active === this && !this.session) app.tools.activate(app.tools.get(this.returnTo) ? this.returnTo : 'move');
+      });
     }
     app.statusbar?.set('hint', app.tools.active?.hint ?? '');
     app.commands.invalidate();
@@ -705,7 +715,7 @@ export function install(app) {
   // would: commands that could change it (or the tool, the layer, the tab) are refused with a hint, undo and
   // redo cancel the scale as they do for Free Transform. (lib/blur-gallery-ui.js guards its sessions the same way.)
   const run = app.commands.run.bind(app.commands);
-  let warned = 0;
+  let warned = -Infinity; // when the hint was last shown (it is not repeated within 2.5 s)
   app.commands.run = (id, arg, source) => {
     if (tool.session && !tool.ending && !tool.committing && !SAFE_COMMANDS.test(id)) {
       if (/^edit:(undo|redo|step-backward|step-forward)$/.test(id)) tool.cancel();
@@ -747,7 +757,10 @@ export function install(app) {
         }
         return s.ended.then((used) => {
           if (used) ctx?.setReplayArg(used);
-          else ctx?.cancel();
+          // Enter on a box that was never changed applies nothing. As a step of a playing action (its dialog toggle
+          // is on) that is still the user's go-ahead: the step is done and the action carries on. Only Escape
+          // stops it, and outside an action there is nothing to record either way.
+          else if (!(s.confirmed && ctx?.source === 'action')) ctx?.cancel();
           return used;
         });
       },

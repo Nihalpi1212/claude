@@ -1,7 +1,7 @@
 // Layer commands (Layer menu, Layers panel buttons, shortcuts). Structural changes record a
 // snapshot of the tree so undo restores it exactly; layer pixels are never mutated by structural
 // operations (merges create new layers), so the snapshots stay valid.
-import { RasterLayer, GroupLayer, FillLayer, AdjustmentLayer, createCanvas, copyCanvas, intersectRect, unionRect, BLEND_LABELS } from './document.js';
+import { RasterLayer, GroupLayer, FillLayer, AdjustmentLayer, createCanvas, copyCanvas, intersectRect, unionRect, BLEND_LABELS, newId } from './document.js';
 import { Compositor } from './compositor.js';
 import { contentBounds } from '../../shared/pixels/core.js';
 import { offsetEach } from './layer-move.js';
@@ -112,8 +112,39 @@ export function nextLayerName(doc, base = 'Layer') {
 }
 
 /** Deep copy of a layer (pixels, mask, styles, children). */
-export function cloneLayer(layer, { name } = {}) {
-  const props = { name: name ?? `${layer.name} copy`, visible: layer.visible, opacity: layer.opacity, fillOpacity: layer.fillOpacity, blend: layer.blend, locked: { ...layer.locked, all: false }, clip: layer.clip, styles: layer.styles ? JSON.parse(JSON.stringify(layer.styles)) : null };
+/** The Photoshop "Background": the bottom layer of the document, a raster layer named Background (lib/layers-extras/structure.js). */
+const isBackground = (layer) => layer.type === 'raster' && layer.name === 'Background' && !!layer.parent && !layer.parent.parent && layer.parent.children[0] === layer;
+
+/**
+ * Layer links (layer.linked, lib/layers-extras/tags.js) of layers that were copied together: the copies are linked
+ * to each other under new set ids, never to their originals; a copy whose partners were not copied is not linked.
+ */
+export function relinkCopies(copies) {
+  const all = [];
+  const walk = (l) => {
+    all.push(l);
+    if (l.isGroup) l.children.forEach(walk);
+  };
+  copies.forEach(walk);
+  const count = new Map();
+  for (const l of all) if (l.linked) count.set(l.linked, (count.get(l.linked) ?? 0) + 1);
+  const fresh = new Map();
+  for (const l of all) {
+    if (!l.linked) continue;
+    if (count.get(l.linked) < 2) l.linked = null;
+    else l.linked = fresh.get(l.linked) ?? fresh.set(l.linked, newId('K')).get(l.linked);
+  }
+  return copies;
+}
+
+/**
+ * @param {{ name?: string, relink?: boolean }} opts  relink: false when several layers are cloned as one set; the
+ *   caller then passes all the copies to relinkCopies() so links between them survive
+ */
+export function cloneLayer(layer, { name, relink = true } = {}) {
+  // a copy of the Background is an ordinary layer: it does not inherit the locks that pin the Background down
+  const locked = isBackground(layer) ? { ...layer.locked, position: false, transparency: false, all: false } : { ...layer.locked, all: false };
+  const props = { name: name ?? `${layer.name} copy`, visible: layer.visible, opacity: layer.opacity, fillOpacity: layer.fillOpacity, blend: layer.blend, locked, clip: layer.clip, styles: layer.styles ? JSON.parse(JSON.stringify(layer.styles)) : null };
   let copy;
   switch (layer.type) {
     case 'raster':
@@ -123,7 +154,7 @@ export function cloneLayer(layer, { name } = {}) {
     case 'group':
       copy = new GroupLayer({ ...props, expanded: layer.expanded });
       for (const c of layer.children) {
-        const cc = cloneLayer(c, { name: c.name });
+        const cc = cloneLayer(c, { name: c.name, relink: false });
         cc.parent = copy;
         copy.children.push(cc);
       }
@@ -136,6 +167,11 @@ export function cloneLayer(layer, { name } = {}) {
     }
   }
   if (layer.mask) copy.mask = { ...layer.mask, canvas: copyCanvas(layer.mask.canvas) };
+  // the colour label and the link set (lib/layers-extras/tags.js) are not constructor properties
+  copy.color = layer.color ?? null;
+  copy.linked = layer.linked ?? null;
+  copy.loneLink = null; // tags.js' memory of a dissolved link belongs to the original alone
+  if (relink) relinkCopies([copy]);
   return copy;
 }
 
@@ -310,10 +346,11 @@ export function install(app) {
         const layers = selectedOrActive(d);
         structural(app, layers.length > 1 ? 'Duplicate layers' : 'Duplicate layer', () => {
           const copies = layers.map((l) => {
-            const c = cloneLayer(l);
+            const c = cloneLayer(l, { relink: false });
             d.add(c, l.parent, l.parent.children.indexOf(l) + 1);
             return c;
           });
+          relinkCopies(copies); // linked layers duplicated together stay linked, to each other
           d.selected.clear();
           copies.forEach((c) => d.selected.add(c));
           d.active = copies[0];
@@ -521,7 +558,10 @@ export function install(app) {
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(0, 0, d.width, d.height);
         ctx.drawImage(flat, 0, 0);
-        const layer = new RasterLayer({ name: 'Background', canvas: bg, x: 0, y: 0 });
+        // a Background that cannot move or turn transparent (Background from Layer) stays one when the image is flattened
+        const bottom = d.root.children[0];
+        const locked = bottom && isBackground(bottom) ? { position: !!bottom.locked.position, transparency: !!bottom.locked.transparency } : {};
+        const layer = new RasterLayer({ name: 'Background', canvas: bg, x: 0, y: 0, locked });
         structural(app, 'Flatten image', () => {
           for (const l of d.root.children.slice()) d.remove(l);
           d.add(layer, d.root, 0);
@@ -805,7 +845,9 @@ export function install(app) {
       }
     }
     // clipped layers merged among themselves stay clipped to their base; merging onto the base releases the clip
-    const merged = new RasterLayer({ name: name ?? top.name, canvas: flat, x: 0, y: 0, clip: layers.every((l) => l.clip), blend: keep.blend, opacity: keep.opacity });
+    // a result that carries on as the lowest layer (Merge Down, Merge Visible: `name` is that layer's) keeps its
+    // locks too: the Background made by Background from Layer still cannot move or turn transparent afterwards
+    const merged = new RasterLayer({ name: name ?? top.name, canvas: flat, x: 0, y: 0, clip: layers.every((l) => l.clip), blend: keep.blend, opacity: keep.opacity, ...(name === base.name ? { locked: { ...base.locked } } : {}) });
     structural(app, label, () => {
       const parent = top.parent;
       const index = parent.children.indexOf(top);
