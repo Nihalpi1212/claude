@@ -1228,24 +1228,25 @@ test('adjustment margin: a kind keyed on ctx.origin with margin 4 gives the same
         return img;
       },
     });
-    try {
-      d.add(new AdjustmentLayer({ name: 'Test', kind: 'test-margin', params: {} }));
-      const rect = { x: 17, y: 9, width: 21, height: 13 };
-      const read = (canvas, x, y, w, h) => Array.from(canvas.getContext('2d').getImageData(x, y, w, h).data);
-      const full = read(new Compositor().composite(d), rect.x, rect.y, rect.width, rect.height);
-      const part = read(new Compositor().composite(d, { rect }), 0, 0, rect.width, rect.height);
-      // without the margin the edges of the sub-rectangle see fewer neighbours: the growth is what makes them equal
-      margin = 0;
-      const bare = read(new Compositor().composite(d, { rect }), 0, 0, rect.width, rect.height);
-      let diff = 0, bareDiff = 0;
-      for (let i = 0; i < full.length; i++) {
-        diff = Math.max(diff, Math.abs(full[i] - part[i]));
-        bareDiff = Math.max(bareDiff, Math.abs(full[i] - bare[i]));
-      }
-      return { diff, bareDiff, n: full.length, top: d.layers().at(-1).kind };
-    } finally {
-      registerTestAdjustment('test-margin', null);
+    // The kind stays registered for the rest of this page: the document keeps the layer, and the app repaints it
+    // (canvas, panels) after this evaluate returns. Unregistering here made that repaint throw "Unknown adjustment"
+    // whenever it ran before the test read the errors (it did on the CI runner).
+    d.add(new AdjustmentLayer({ name: 'Test', kind: 'test-margin', params: {} }));
+    const rect = { x: 17, y: 9, width: 21, height: 13 };
+    const read = (canvas, x, y, w, h) => Array.from(canvas.getContext('2d').getImageData(x, y, w, h).data);
+    const full = read(new Compositor().composite(d), rect.x, rect.y, rect.width, rect.height);
+    const part = read(new Compositor().composite(d, { rect }), 0, 0, rect.width, rect.height);
+    // without the margin the edges of the sub-rectangle see fewer neighbours: the growth is what makes them equal
+    margin = 0;
+    const bare = read(new Compositor().composite(d, { rect }), 0, 0, rect.width, rect.height);
+    let diff = 0, bareDiff = 0;
+    for (let i = 0; i < full.length; i++) {
+      diff = Math.max(diff, Math.abs(full[i] - part[i]));
+      bareDiff = Math.max(bareDiff, Math.abs(full[i] - bare[i]));
     }
+    // let the app's own repaint of the new layers run before the errors are read
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    return { diff, bareDiff, n: full.length, top: d.layers().at(-1).kind };
   });
   expect(r.n).toBe(21 * 13 * 4);
   expect(r.diff).toBe(0);
