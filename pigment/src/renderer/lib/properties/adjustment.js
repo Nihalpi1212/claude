@@ -1,21 +1,32 @@
-// Properties section 'adjustment' of an adjustment layer (ARCHITECTURE.md "0.4 features", L.1): the toolbar (clip,
-// reset, visibility, delete) and the layer's editor inside the adjustment frame in panel mode (I.1), sampling the
-// full-resolution composite below the layer. Edits are live and undoable, consecutive edits merging into one entry.
-// Moved out of panels/properties.js by the 0.4 skeleton, unchanged in output; owned by adjust-color afterwards.
+// Properties section 'adjustment' of an adjustment layer (ARCHITECTURE.md "0.4 features", L.1; owned by adjust-color):
+// the toolbar (clip, view previous state, reset, visibility, delete) and the layer's editor inside the adjustment frame
+// in panel mode (I.1): presets, eyedroppers and the on-image tool sampling the full-resolution composite below the
+// layer, Auto computing from that composite. Edits are live and undoable, consecutive edits merging into one entry.
 //
 // While the layer, its kind and its params object stay the same (our own edits keep `params` identical), the section
 // returns the element it built last time, so a drag in the editor survives the re-render setLayerProps causes.
+//
+// View previous state (Photoshop's button, and its "\" key while the panel has focus): shows the layer with the settings
+// it had when it was selected, without a history entry, until pressed again, an edit, or the section goes away.
 import { icon } from '../icons.js';
 import { buildAdjustmentEditor, adjustmentSource } from '../adjust-ui.js';
 import { setLayerProps } from '../layer-ops.js';
 import { ADJUSTMENTS } from '../../../shared/pixels/adjust.js';
 import { buildAdjustmentFrame, sampleBelow } from '../adjust/frame.js';
 import { h, button } from './ui.js';
+import { registerIcons } from '../icons.js';
+
+registerIcons({
+  'previous-state': '<path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 8v4l3 2"/>',
+});
 
 const clone = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
-const FRAMES = new WeakMap(); // element -> frame
+const FRAMES = new WeakMap(); // element -> { frame, end() }
+/** The settings each adjustment layer had when the section first showed it (its "previous state"). */
+const INITIAL = new WeakMap(); // layer -> { params, docVersion }
 
 let built = null; // { element, toolbar, docId, layerId, kind, params }
+let lastLayer = null;
 
 function render(layer, doc, { app, keep }) {
   const same = keep(`${doc.id}:${layer.id}:${layer.kind}`) && built && built.params === layer.params;
@@ -25,6 +36,9 @@ function render(layer, doc, { app, keep }) {
     if (eye) eye.innerHTML = icon(layer.visible ? 'eye' : 'eye-off');
     return built.element;
   }
+  // a layer selected anew starts a new "previous state"
+  if (lastLayer !== layer || !INITIAL.has(layer)) INITIAL.set(layer, { params: clone(layer.params) });
+  lastLayer = layer;
   const element = h('div', 'props-adjust-section');
   const toolbar = h('div', 'panel-toolbar props-adjust-bar');
   const tb = (act, ic, title, fn) => {
@@ -33,43 +47,99 @@ function render(layer, doc, { app, keep }) {
     toolbar.appendChild(b);
     return b;
   };
+  const state = { element, toolbar, docId: doc.id, layerId: layer.id, kind: layer.kind, params: layer.params };
+  // ---- view previous state (no history: the layer shows other params for a moment)
+  let previewing = null; // { current } while the previous state is shown
+  const endPrevious = () => {
+    if (!previewing) return;
+    const { current: cur, shown } = previewing;
+    previewing = null;
+    prevBtn.setAttribute('aria-pressed', 'false');
+    prevBtn.classList.remove('active');
+    // only while the layer still shows the previous state (an undo meanwhile replaced it: keep what the undo set)
+    if (layer.params === shown) {
+      layer.params = cur;
+      state.params = cur;
+      layer.touch();
+      doc.changed('props', { layer });
+    }
+  };
+  const startPrevious = () => {
+    const init = INITIAL.get(layer)?.params;
+    if (!init || previewing) return;
+    const shown = clone(init);
+    previewing = { current: layer.params, shown };
+    prevBtn.setAttribute('aria-pressed', 'true');
+    prevBtn.classList.add('active');
+    state.params = shown; // keep this element through the re-render
+    layer.params = shown;
+    layer.touch();
+    doc.changed('props', { layer });
+  };
   tb('clip', 'link', 'Clip to the layer below (only it is affected)', () => app.commands.run('layer:clip', undefined, 'panel')).classList.toggle('active', !!layer.clip);
+  const prevBtn = tb('previous', 'previous-state', 'View previous state (\\)', () => (previewing ? endPrevious() : startPrevious()));
+  prevBtn.setAttribute('aria-pressed', 'false');
   tb('reset', 'refresh', 'Reset to adjustment defaults', () => {
+    endPrevious();
     setLayerProps(app, layer, { params: clone(ADJUSTMENTS[layer.kind]?.defaults ?? {}) }, `Reset ${layer.name}`);
   });
   tb('eye', layer.visible ? 'eye' : 'eye-off', 'Toggle layer visibility', () => app.commands.run('layer:visibility', layer.id, 'panel'));
   toolbar.appendChild(h('span', 'props-spacer'));
-  tb('delete', 'trash', 'Delete this adjustment layer', () => app.commands.run('layer:delete', undefined, 'panel'));
+  tb('delete', 'trash', 'Delete this adjustment layer', () => {
+    endPrevious();
+    app.commands.run('layer:delete', undefined, 'panel');
+  });
   element.appendChild(toolbar);
+  element.tabIndex = -1;
+  element.addEventListener('keydown', (e) => {
+    if (e.key !== '\\' || e.ctrlKey || e.metaKey || e.altKey || e.target?.matches?.('input, select, textarea')) return;
+    e.preventDefault();
+    if (previewing) endPrevious();
+    else startPrevious();
+  });
   let source = null;
   try {
     if (layer.kind === 'levels' || layer.kind === 'curves') source = adjustmentSource(app, layer);
   } catch (err) {
     console.warn('adjustment histogram unavailable', err);
   }
-  const state = { element, toolbar, docId: doc.id, layerId: layer.id, kind: layer.kind, params: layer.params };
+  // Auto of the other kinds computes from the composite below on demand (it costs a composite)
+  const autoSource = () => {
+    if (source) return source;
+    try {
+      return adjustmentSource(app, layer);
+    } catch {
+      return null;
+    }
+  };
+  let frame = null;
   const commit = (params, label = `Edit ${layer.name}`) => {
     if (app.doc !== doc || doc.active !== layer) return;
+    endPrevious();
     setLayerProps(app, layer, { params: clone(params) }, label, { merge: true });
     state.params = layer.params; // our own edit: keep the editor (and the user's drag) alive
+    frame?.paramsChanged?.(params);
   };
   const editor = buildAdjustmentEditor(layer.kind, layer.params, (params) => commit(params), { source, app });
-  const frame = buildAdjustmentFrame(app, layer.kind, editor, {
+  frame = buildAdjustmentFrame(app, layer.kind, editor, {
     mode: 'panel',
     sample: sampleBelow(app, layer),
-    source,
+    source: autoSource,
     getParams: () => clone(layer.params),
     setParams: (params) => {
       editor.setParams?.(params);
       commit(params);
       if (!editor.setParams) state.params = null; // the editor cannot show new params: rebuild it on the next render
     },
-    onReset: () => setLayerProps(app, layer, { params: clone(ADJUSTMENTS[layer.kind]?.defaults ?? {}) }, `Reset ${layer.name}`),
+    onReset: () => {
+      endPrevious();
+      setLayerProps(app, layer, { params: clone(ADJUSTMENTS[layer.kind]?.defaults ?? {}) }, `Reset ${layer.name}`);
+    },
   });
   const body = h('div', 'props-adjust');
   body.appendChild(frame.element);
   element.appendChild(body);
-  FRAMES.set(element, frame);
+  FRAMES.set(element, { frame, end: endPrevious });
   built = state;
   return element;
 }
@@ -83,7 +153,10 @@ export const adjustmentSection = {
   keepWhileTyping: false,
   render,
   dispose(element) {
-    FRAMES.get(element)?.dispose();
+    const f = FRAMES.get(element);
+    // the previous state is only shown: put the layer's own settings back before the section goes
+    f?.end?.();
+    f?.frame?.dispose();
     FRAMES.delete(element);
     if (built?.element === element) built = null;
   },

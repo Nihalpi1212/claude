@@ -10,12 +10,17 @@
 // Colour maths: 8-bit straight alpha in and out, Rec. 601 luma from core.js. "Desaturate" and
 // every "saturation -100" path produce that luma, so they agree with each other exactly.
 
-import { makeLut, applyLut, clamp255 } from './core.js';
+import { makeLut, applyLut } from './core.js';
 import { num, clampNum, round8, lumaInt, srgbToLinear, linearToSrgb, merge, freezeDeep, region, applyLuts, applyLutKeepLuma, lutKind, pixelKind, mergeTables } from './adjust-def.js';
 import { ADJUSTMENTS_MORE } from './adjust-more.js';
 // the colour kinds (Hue/Saturation, Black & White, Photo Filter, Channel Mixer, Gradient Map, Shadows/Highlights and
 // the 0.4 placeholders) live in adjust-color.js since 0.4 (owned by adjust-color; this file by adjust-tonal)
 import { ADJUSTMENTS_COLOR } from './adjust-color.js';
+// Levels and Curves in every channel space, drawn curves, Auto, eyedroppers and the clipping display (0.4,
+// adjust-tonal): adjust-tonal.js; the tables are re-exported here for 0.3's importers
+import { DEFAULT_LEVELS, levelsLut, curveLut, applyTonal, tonalDeepExact, tonalLuts, tonalRgbLuts } from './adjust-tonal.js';
+
+export { levelsLut, curveLut, tonalLuts };
 
 /** @typedef {import('./core.js').ImageDataLike} ImageDataLike */
 /** @typedef {import('./core.js').Rect} Rect */
@@ -41,121 +46,6 @@ function vec3(v, fallback = [0, 0, 0]) {
 
 // ---------------------------------------------------------------------------------------------
 // LUT builders (exported ones are reused by the UI to draw curves / levels previews)
-
-const DEFAULT_LEVELS = Object.freeze({ inBlack: 0, inWhite: 255, gamma: 1, outBlack: 0, outWhite: 255 });
-
-/**
- * Photoshop Levels as a 256-entry LUT: input black/white points (0..255), midtone gamma
- * (0.01..9.99, > 1 lightens: gamma 2 maps 128 to ~181) and output black/white points.
- * inWhite <= inBlack is treated as inBlack + 1 (a hard threshold).
- * @param {{ inBlack?: number, inWhite?: number, gamma?: number, outBlack?: number, outWhite?: number }} [levels]
- * @returns {Uint8ClampedArray}
- */
-export function levelsLut(levels) {
-  const p = merge(DEFAULT_LEVELS, levels);
-  const inB = clampNum(num(p.inBlack, 0), 0, 255);
-  let inW = clampNum(num(p.inWhite, 255), 0, 255);
-  if (inW <= inB) inW = inB + 1;
-  const gamma = clampNum(num(p.gamma, 1), 0.01, 9.99);
-  const outB = clampNum(num(p.outBlack, 0), 0, 255), outW = clampNum(num(p.outWhite, 255), 0, 255);
-  const invG = 1 / gamma, range = inW - inB, outRange = outW - outB;
-  return makeLut((v) => {
-    let t = (v - inB) / range;
-    t = t < 0 ? 0 : t > 1 ? 1 : t;
-    if (gamma !== 1) t = Math.pow(t, invG);
-    return outB + t * outRange;
-  });
-}
-
-/** Sorted, de-duplicated [x, y] pairs (0..255) from [[x, y]] or [{ x, y }] input. */
-function normalisePoints(points) {
-  const out = [];
-  if (Array.isArray(points)) {
-    for (const p of points) {
-      if (!p) continue;
-      const x = Array.isArray(p) ? p[0] : p.x, y = Array.isArray(p) ? p[1] : p.y;
-      if (typeof x !== 'number' || typeof y !== 'number' || !Number.isFinite(x) || !Number.isFinite(y)) continue;
-      out.push([clampNum(x, 0, 255), clampNum(y, 0, 255)]);
-    }
-  }
-  out.sort((a, b) => a[0] - b[0]);
-  const dedup = [];
-  for (const p of out) {
-    if (dedup.length && dedup[dedup.length - 1][0] === p[0]) dedup[dedup.length - 1] = p;
-    else dedup.push(p);
-  }
-  return dedup;
-}
-
-/**
- * Photoshop Curves as a 256-entry LUT: a monotone cubic Hermite spline (Fritsch–Carlson slopes)
- * through the given points, so the curve passes through every point and never overshoots
- * between them; flat outside the first and last point. Fewer than two distinct points gives
- * the identity, and two points give a straight line.
- * @param {Array<[number, number] | { x: number, y: number }>} points 0..255 (any order)
- * @returns {Uint8ClampedArray}
- */
-export function curveLut(points) {
-  const pts = normalisePoints(points);
-  const n = pts.length;
-  if (n < 2) return makeLut((v) => v);
-  const xs = new Float64Array(n), ys = new Float64Array(n);
-  for (let k = 0; k < n; k++) {
-    xs[k] = pts[k][0];
-    ys[k] = pts[k][1];
-  }
-  const delta = new Float64Array(n - 1), m = new Float64Array(n);
-  for (let k = 0; k < n - 1; k++) delta[k] = (ys[k + 1] - ys[k]) / (xs[k + 1] - xs[k]);
-  m[0] = delta[0];
-  m[n - 1] = delta[n - 2];
-  for (let k = 1; k < n - 1; k++) m[k] = delta[k - 1] * delta[k] <= 0 ? 0 : (delta[k - 1] + delta[k]) / 2;
-  for (let k = 0; k < n - 1; k++) {
-    if (delta[k] === 0) {
-      m[k] = 0;
-      m[k + 1] = 0;
-      continue;
-    }
-    const a = m[k] / delta[k], b = m[k + 1] / delta[k];
-    const s = a * a + b * b;
-    if (s > 9) {
-      const tau = 3 / Math.sqrt(s);
-      m[k] = tau * a * delta[k];
-      m[k + 1] = tau * b * delta[k];
-    }
-  }
-  const lut = new Uint8ClampedArray(256);
-  let k = 0;
-  for (let v = 0; v < 256; v++) {
-    let y;
-    if (v <= xs[0]) y = ys[0];
-    else if (v >= xs[n - 1]) y = ys[n - 1];
-    else {
-      while (k < n - 2 && xs[k + 1] <= v) k++;
-      const h = xs[k + 1] - xs[k], t = (v - xs[k]) / h, t2 = t * t, t3 = t2 * t;
-      y = (2 * t3 - 3 * t2 + 1) * ys[k] + (t3 - 2 * t2 + t) * h * m[k] + (-2 * t3 + 3 * t2) * ys[k + 1] + (t3 - t2) * h * m[k + 1];
-    }
-    lut[v] = Math.round(clamp255(y));
-  }
-  return lut;
-}
-
-/** lut[v] = outer[inner[v]]. */
-function composeLut(outer, inner) {
-  const out = new Uint8ClampedArray(256);
-  for (let v = 0; v < 256; v++) out[v] = outer[inner[v]];
-  return out;
-}
-
-/** Per-channel then composite ("rgb") tables for levels and curves. */
-function perChannelLuts(p, build, usePerChannel) {
-  const master = build(p.rgb);
-  const out = [master, master, master];
-  if (usePerChannel) {
-    const chans = [p.r, p.g, p.b];
-    for (let c = 0; c < 3; c++) if (chans[c]) out[c] = composeLut(master, build(chans[c]));
-  }
-  return out;
-}
 
 function brightnessContrastLut(p) {
   const b = clampNum(num(p.brightness, 0), -150, 150), c = clampNum(num(p.contrast, 0), -100, 100);
@@ -369,18 +259,29 @@ function selectiveColor(img, p, rect) {
   return img;
 }
 
-function equalize(img, rect) {
+/**
+ * Equalize: the luma histogram of the pixels (or `given`, 256 counts: Photoshop's "Equalize entire image based on
+ * selected area" measures the selection and maps the whole layer) is flattened; hue and saturation are kept.
+ */
+function equalize(img, rect, given = null) {
   const r = region(img, rect);
   if (!r.width) return img;
   const d = img.data, w = img.width;
-  const hist = new Uint32Array(256);
+  const hist = new Float64Array(256);
   let count = 0;
-  for (let y = r.y, ye = r.y + r.height; y < ye; y++) {
-    let i = (y * w + r.x) * 4;
-    for (let x = 0; x < r.width; x++, i += 4) {
-      if (d[i + 3] === 0) continue;
-      hist[lumaInt(d[i], d[i + 1], d[i + 2])]++;
-      count++;
+  if (Array.isArray(given) && given.length === 256) {
+    for (let v = 0; v < 256; v++) {
+      hist[v] = Math.max(0, num(given[v], 0));
+      count += hist[v];
+    }
+  } else {
+    for (let y = r.y, ye = r.y + r.height; y < ye; y++) {
+      let i = (y * w + r.x) * 4;
+      for (let x = 0; x < r.width; x++, i += 4) {
+        if (d[i + 3] === 0) continue;
+        hist[lumaInt(d[i], d[i + 1], d[i + 2])]++;
+        count++;
+      }
     }
   }
   if (!count) return img;
@@ -426,6 +327,9 @@ function equalize(img, rect) {
  * - levels { perChannel?, rgb, r?, g?, b? } each { inBlack, inWhite, gamma, outBlack, outWhite }:
  *   r/g/b tables (used when given, unless perChannel === false) are applied before rgb.
  * - curves { rgb: [[x, y]...], r?, g?, b? }: monotone cubic through the points; r/g/b before rgb.
+ *   0.4 (J.9): both take `space` ('rgb' | 'gray' | 'cmyk' | 'lab', see adjust-tonal.js) and a Curves channel may be
+ *   a drawn curve { table: number[256] }.
+ * - equalize: `hist` (256 luma counts) optional, measured elsewhere (the selection) and applied here.
  * - exposure { exposure -20..20 (stops, linear light), offset -0.5..0.5 (linear), gamma 0.01..9.99 (> 1 lightens) }.
  * - vibrance { vibrance -100..100 (boosts muted colours most, protects skin), saturation -100..100 }: chroma about luma.
  * - hue-saturation { hue, saturation, lightness, colorize?, colorizeHue, colorizeSat, colorizeLight, range }:
@@ -450,14 +354,23 @@ function equalize(img, rect) {
  * gradient-map, black-white, desaturate and equalize change the image by definition.
  * @type {Readonly<Record<AdjustmentKind, { name: string, defaults: object, apply: (img: ImageDataLike, params?: object, rect?: Rect | null) => ImageDataLike, lut?: (params?: object) => LutTriple }>>}
  */
+/** Levels / Curves: apply in the params' space, `lut` as RGB tables, deepExact for RGB without drawn curves. */
+function tonalKind(kind, name, defaults) {
+  const base = pixelKind(name, freezeDeep(defaults), (img, p, rect) => applyTonal(kind, img, p, rect), { deepExact: (p) => tonalDeepExact(kind, p) });
+  return Object.freeze({ ...base, lut: (params) => tonalRgbLuts(kind, merge(base.defaults, params)) });
+}
+
 const BUILTIN_ADJUSTMENTS = Object.freeze({
   'brightness-contrast': lutKind('Brightness/Contrast', freezeDeep({ brightness: 0, contrast: 0, legacy: false }), (p) => {
     const l = brightnessContrastLut(p);
     return [l, l, l];
   }),
-  levels: lutKind('Levels', freezeDeep({ perChannel: true, rgb: { ...DEFAULT_LEVELS }, r: null, g: null, b: null }), (p) =>
-    perChannelLuts(p, levelsLut, p.perChannel !== false)),
-  curves: lutKind('Curves', freezeDeep({ rgb: [[0, 0], [255, 255]], r: null, g: null, b: null }), (p) => perChannelLuts(p, curveLut, true)),
+  // Levels and Curves apply through adjust-tonal.js since 0.4: in RGB (and Gray) they are exactly 0.3's per-channel
+  // tables, which `lut` still gives; in the CMYK and Lab spaces (J.9) a pixel's channels depend on each other, so
+  // `apply` converts per pixel and `lut` (read by deep.js when deepExact is false) can only give the tables of the
+  // grey axis, exact for neutral pixels (tonalRgbLuts).
+  levels: tonalKind('levels', 'Levels', { perChannel: true, rgb: { ...DEFAULT_LEVELS }, r: null, g: null, b: null }),
+  curves: tonalKind('curves', 'Curves', { rgb: [[0, 0], [255, 255]], r: null, g: null, b: null }),
   exposure: lutKind('Exposure', freezeDeep({ exposure: 0, offset: 0, gamma: 1 }), (p) => {
     const l = exposureLut(p);
     return [l, l, l];
@@ -479,7 +392,7 @@ const BUILTIN_ADJUSTMENTS = Object.freeze({
     selectiveColor,
   ),
   desaturate: pixelKind('Desaturate', freezeDeep({}), (img, _p, rect) => desaturate(img, rect)),
-  equalize: pixelKind('Equalize', freezeDeep({}), (img, _p, rect) => equalize(img, rect)),
+  equalize: pixelKind('Equalize', freezeDeep({}), (img, p, rect) => equalize(img, rect, p.hist)),
 });
 
 /**

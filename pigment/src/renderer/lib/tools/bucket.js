@@ -2,15 +2,17 @@
 // around a click with the foreground colour (Alt: the background colour) or a pattern. Registered after the Gradient
 // tool in the same toolbox slot (MODULES puts this file right after tools/fill.js).
 //
-// The 'pattern' source paints the `pattern` option (a PatternRef, H: the `pattern` widget) when one is set, else the
-// current pattern of app.patterns (L.6), as 0.3 painted app.currentPattern. With no pattern at all it fills with the
-// colour, as 0.3 did.
+// The 'pattern' source paints the `pattern` option (a PatternRef chosen in the options bar's `pattern` widget) when one
+// is set, else the current pattern of app.patterns (L.6), as 0.3 painted app.currentPattern. With no pattern at all it
+// fills with the colour, as 0.3 did. The tiles start at the document origin (Photoshop's rule; 0.3 started them at the
+// filled area's corner), so fills next to each other join without a seam. Owned by the patterns package.
 import { Tool } from '../tools.js';
 import { Selection, selectionOps } from '../selection.js';
 import { createCanvas } from '../document.js';
 import { drawBlended, drawOnMask } from '../brush.js';
 import { BLEND_OPTIONS } from './fill.js';
 import { sampleMerged } from '../sample.js';
+import '../pattern-widget.js'; // the `pattern` widget of the options bar (registers itself before any bar is built)
 
 export class BucketTool extends Tool {
   constructor(app) {
@@ -81,8 +83,12 @@ export class BucketTool extends Tool {
     doc.history.pixels('Paint bucket', target.canvas, local, (ctx) => {
       const fillCanvas = createCanvas(b.width, b.height);
       const fctx = fillCanvas.getContext('2d');
-      if (pattern) fctx.fillStyle = fctx.createPattern(pattern, 'repeat');
-      else fctx.fillStyle = color;
+      if (pattern) {
+        // document-anchored tiles: the pattern's (0, 0) sits on the document's (0, 0)
+        const pat = fctx.createPattern(pattern, 'repeat');
+        pat.setTransform(new DOMMatrix().translate(-b.x, -b.y));
+        fctx.fillStyle = pat;
+      } else fctx.fillStyle = color;
       fctx.fillRect(0, 0, b.width, b.height);
       fctx.globalCompositeOperation = 'destination-in';
       fctx.drawImage(sel.toCanvas(), -b.x, -b.y);
@@ -94,4 +100,5 @@ export class BucketTool extends Tool {
 
 export function install(app) {
   app.tools.register(new BucketTool(app), 'fill');
+  app.patterns?.ready?.(); // the library loads in the background, so the current pattern is there for the first click
 }

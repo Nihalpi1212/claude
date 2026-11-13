@@ -1,6 +1,8 @@
-// Adjustments panel (middle group): one button per adjustment-layer kind; each adds a new adjustment
-// layer above the active layer (limited to the selection, if any) and opens it in Properties.
+// Adjustments panel (middle group): Photoshop's adjustment presets (groups of ready-made adjustment layers,
+// lib/panels/adjustment-presets.js; adjust-color), then one button per adjustment-layer kind; each adds a new
+// adjustment layer above the active layer (limited to the selection, if any) and opens it in Properties.
 import { icon } from '../icons.js';
+import { adjustmentPresetsSection } from './adjustment-presets.js';
 import { LAYER_KINDS, ADJUSTMENT_ICONS } from '../adjust-ui.js';
 import { ADJUSTMENTS } from '../../../shared/pixels/adjust.js';
 
@@ -36,7 +38,8 @@ export function install(app) {
     b.addEventListener('click', () => app.commands.run('layer:new-fill', kind, 'panel'));
     fillGrid.appendChild(b);
   }
-  el.append(intro, grid, fills, fillGrid);
+  const presets = adjustmentPresetsSection(app);
+  el.append(presets, intro, grid, fills, fillGrid);
 
   const update = () => {
     const enabled = !!app.doc;

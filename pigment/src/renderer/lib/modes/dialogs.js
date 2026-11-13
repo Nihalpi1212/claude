@@ -7,6 +7,8 @@
 import { bridge } from '../bridge.js';
 import { formDialog, debounce } from '../form.js';
 import { createCanvas } from '../document.js';
+import { resolvePattern, decodePattern } from '../patterns.js';
+import '../pattern-widget.js'; // the Custom Pattern picker (the `pattern` widget)
 import { Compositor } from '../compositor.js';
 import { parseColor, rgbaToHex } from '../../../shared/pixels/color.js';
 import { curveLut } from '../../../shared/pixels/adjust.js';
@@ -102,9 +104,18 @@ export const BITMAP_PATTERNS = [
 ];
 
 const TILES = new Map();
-/** The ImageDataLike tile of a pattern id (an ImageDataLike passes through). */
+/**
+ * The ImageDataLike tile of a pattern: an ImageDataLike passes through; a PatternRef from the pattern library (the
+ * `pattern` widget, { dataUrl }) or its data URL gives its decoded pixels (the dialog decodes them before it returns;
+ * a replay in a new session whose pixels are still decoding falls back to the fine dither); else a built-in tile id.
+ */
 export function bitmapPatternTile(pattern) {
   if (pattern && typeof pattern === 'object' && pattern.data) return pattern;
+  const url = typeof pattern === 'string' && pattern.startsWith('data:') ? pattern : pattern?.dataUrl ?? null;
+  if (url) {
+    const data = resolvePattern(url);
+    if (data) return data;
+  }
   const id = BITMAP_PATTERNS.some(([p]) => p === pattern) ? pattern : 'bayer4';
   if (TILES.has(id)) return TILES.get(id);
   const size = id === 'bayer4' ? 4 : id === 'noise' ? 32 : 8;
@@ -139,9 +150,15 @@ export async function bitmapDialog(app, doc, last = {}) {
   const optionsOf = (v) => {
     const o = { method: v.method, dpi: Math.round(v.dpi) };
     if (v.method === 'halftone-screen') Object.assign(o, { frequency: v.frequency, angle: v.angle, shape: v.shape });
-    if (v.method === 'custom-pattern') o.pattern = v.pattern;
+    if (v.method === 'custom-pattern') o.pattern = v.pattern === 'library' ? v.libraryPattern ?? null : v.pattern;
     return o;
   };
+  // Custom Pattern: a pattern of the library (the `pattern` widget) or one of 0.3's threshold tiles; a library pattern
+  // used last time is decoded before the preview first needs it
+  const lastRef = last.pattern && typeof last.pattern === 'object' && last.pattern.dataUrl ? last.pattern : null;
+  if (lastRef) await decodePattern(lastRef.dataUrl);
+  const current = app.patterns?.current?.();
+  const libraryDefault = lastRef ?? (current ? app.patterns.ref(current) : null);
   const values = await formDialog(app, {
     title: 'Bitmap',
     width: 420,
@@ -154,7 +171,8 @@ export async function bitmapDialog(app, doc, last = {}) {
       { key: 'frequency', label: 'Frequency', type: 'number', value: last.frequency ?? 12, min: 1, max: 999, step: 0.1, unit: 'lines/inch', when: (v) => v.method === 'halftone-screen' },
       { key: 'angle', label: 'Angle', type: 'number', value: last.angle ?? 45, min: -180, max: 180, unit: '°', when: (v) => v.method === 'halftone-screen' },
       { key: 'shape', label: 'Shape', type: 'select', value: HALFTONE_SHAPES.includes(last.shape) ? last.shape : 'round', options: HALFTONE_SHAPES.map((s) => [s, s[0].toUpperCase() + s.slice(1)]), when: (v) => v.method === 'halftone-screen' },
-      { key: 'pattern', label: 'Custom pattern', type: 'select', value: BITMAP_PATTERNS.some(([p]) => p === last.pattern) ? last.pattern : 'crosshatch', options: BITMAP_PATTERNS, when: (v) => v.method === 'custom-pattern' },
+      { key: 'pattern', label: 'Custom pattern', type: 'select', value: lastRef ? 'library' : BITMAP_PATTERNS.some(([p]) => p === last.pattern) ? last.pattern : 'crosshatch', options: [...BITMAP_PATTERNS, ['library', 'From the pattern library']], when: (v) => v.method === 'custom-pattern' },
+      { key: 'libraryPattern', label: 'Pattern', type: 'pattern', value: libraryDefault, when: (v) => v.method === 'custom-pattern' && v.pattern === 'library' },
     ],
     live: {
       apply(v) {

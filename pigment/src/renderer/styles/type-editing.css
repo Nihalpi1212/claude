@@ -1,1 +1,23 @@
-/* type-editing (ARCHITECTURE.md "0.4 features", rule 6): this package's styles. Empty until the package lands. */
+/* type-editing (ARCHITECTURE.md "0.4 features", rule 6): the Type tool editor's hidden input.
+   It sits at the caret (so an IME places its candidate window next to the text) and is never seen: the editor draws
+   the caret, the selection and the composition underline on the canvas itself. */
+.type-input {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 2px;
+  height: 1em;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  outline: none;
+  resize: none;
+  overflow: hidden;
+  white-space: pre;
+  opacity: 0;
+  color: transparent;
+  background: transparent;
+  caret-color: transparent;
+  pointer-events: none;
+  z-index: 1;
+}

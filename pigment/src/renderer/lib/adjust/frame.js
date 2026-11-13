@@ -1,6 +1,8 @@
 // Adjustment frame (ARCHITECTURE.md "0.4 features", I.1; E8). pixelEditDialog (dialog mode) and the Properties
-// adjustment section (panel mode) wrap an adjustment editor in it. Stub by the 0.4 skeleton, complete in behaviour
-// with the plain `preset` widget; owned by adjust-tonal, which keeps these exports.
+// adjustment section (panel mode) wrap an adjustment editor in it. Owned by adjust-tonal (the skeleton's stub had the
+// same API): the real `preset` widget (lib/adjust/preset-widget.js, with Load / Save files, Delete and "Default"),
+// eyedroppers that average the Eyedropper tool's Sample Size, Escape to put an armed eyedropper down, and
+// paramsChanged() so the preset menu shows "Custom" once the settings are edited.
 //
 // Rows, top to bottom, each shown only when the editor offers it (I.2): the preset menu (the `preset` widget of the
 // kind's preset kind), the editor element, the eyedropper buttons and the on-image tool button (an armed one pushes
@@ -10,12 +12,17 @@
 import { createWidget } from '../fields.js';
 import { adjustmentPresetKind } from './presets.js';
 import { icon } from '../icons.js';
+import { ADJUSTMENTS } from '../../../shared/pixels/adjust.js';
+import { sampleArea, sampleSizeOf } from './eyedroppers.js';
+import './preset-widget.js'; // registers the real `preset` widget before any frame builds one
 
 const clone = (v) => (v === undefined || v === null ? v : JSON.parse(JSON.stringify(v)));
 
 /**
  * buildAdjustmentFrame(app, kind, editor, { mode, sample(x, y), getParams(), setParams(params), onReset(),
- *   source?, preview? }) -> { element, dispose() }
+ *   source?, preview? }) -> { element, dispose(), disarm(), paramsChanged(params) }
+ * paramsChanged(params) (adjust-tonal): the host reports the editor's edits, so the preset menu shows "Custom" when
+ * they leave the picked preset.
  * `source` (an addition): the ImageDataLike Auto computes from (the session base in a dialog, the composite below in
  * a panel), or a function returning it. `preview` (an addition, dialog mode): { checked, onChange(on) } for the
  * Preview checkbox, which keeps 0.3's markup (input[data-key="__preview"]).
@@ -32,11 +39,14 @@ export function buildAdjustmentFrame(app, kind, editor, opts = {}) {
   const presetKindId = adjustmentPresetKind(kind, editor);
   let presetWidget = null;
   if (presetKindId) {
+    const def = ADJUSTMENTS[kind];
     presetWidget = createWidget('preset', {
       kind: presetKindId,
       onPick: (preset) => opts.setParams?.(clone(preset.data)),
       getData: () => opts.getParams?.(),
-      defaultName: 'Preset',
+      defaults: def ? () => clone(def.defaults) : undefined,
+      defaultName: `${def?.name ?? 'Adjustment'} Preset`,
+      title: def?.name,
     }, { app });
     const r = document.createElement('div');
     r.className = 'adjust-frame-row adjust-frame-presets';
@@ -56,14 +66,21 @@ export function buildAdjustmentFrame(app, kind, editor, opts = {}) {
     if (a.dialog) app.dialogs?.setCanvasThrough?.(a.dialog, false);
     a.button?.setAttribute('aria-pressed', 'false');
   };
-  const rgbaAt = (p) => (typeof opts.sample === 'function' ? opts.sample(Math.floor(p.x), Math.floor(p.y)) : null);
+  // the Eyedropper tool's Sample Size (Photoshop's adjustment eyedroppers follow it)
+  const rgbaAt = (p) => (typeof opts.sample === 'function' ? sampleArea(opts.sample, p.x, p.y, sampleSizeOf(app)) : null);
   const arm = (id, button, handler) => {
     const again = armed?.id === id;
     disarm();
     if (again || !app.canvasCapture) return; // a second click on the armed button disarms it
     const dialog = mode === 'dialog' ? root.closest('.dialog') : null;
     if (dialog) app.dialogs?.setCanvasThrough?.(dialog, true);
-    const release = app.canvasCapture.push({ id: `adjust-frame:${id}`, cursor: handler.cursor ?? 'crosshair', ...handler });
+    // Escape puts the armed tool down (the dialog stays open)
+    const key = (e) => {
+      if (e.key !== 'Escape' || armed?.id !== id) return false;
+      disarm();
+      return true;
+    };
+    const release = app.canvasCapture.push({ id: `adjust-frame:${id}`, cursor: handler.cursor ?? 'crosshair', key, ...handler });
     armed = { id, release, dialog, button };
     button.setAttribute('aria-pressed', 'true');
   };
@@ -107,7 +124,10 @@ export function buildAdjustmentFrame(app, kind, editor, opts = {}) {
       const src = typeof opts.source === 'function' ? opts.source() : opts.source;
       if (!src) return;
       const params = editor.auto.run(src);
-      if (params) opts.setParams?.(params);
+      if (params) {
+        opts.setParams?.(params);
+        presetWidget?.set?.(null); // Auto's settings are no preset: the menu says Custom
+      }
     });
     tools.push(b);
   }
@@ -140,6 +160,9 @@ export function buildAdjustmentFrame(app, kind, editor, opts = {}) {
   return {
     element: root,
     disarm,
+    paramsChanged(params) {
+      presetWidget?.changed?.(params);
+    },
     dispose() {
       if (disposed) return;
       disposed = true;

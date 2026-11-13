@@ -1,1 +1,51 @@
-/* patterns (ARCHITECTURE.md "0.4 features", rule 6): this package's styles. Empty until the package lands. */
+/* patterns (ARCHITECTURE.md "0.4 features", rule 6): the pattern widget, the pattern picker, the Pattern Fill section
+   and dialog, the Pattern Name preview and the Patterns panel. */
+
+/* ---- widget ---------------------------------------------------------------------------------------------------- */
+.pw { display: inline-flex; flex-direction: column; gap: 6px; min-width: 0; }
+.pw-main { display: inline-flex; align-items: stretch; }
+.pw-swatch { display: inline-flex; padding: 1px; border: 1px solid var(--border); border-radius: 3px 0 0 3px; background: var(--bg-sunken); cursor: pointer; }
+.pw-swatch canvas { display: block; border-radius: 2px; }
+.pw-swatch canvas.pw-current { opacity: 0.85; }
+.pw-swatch:hover:not(:disabled), .pw-more:hover:not(:disabled) { border-color: var(--accent); }
+.pw-more { width: 18px; padding: 0; border: 1px solid var(--border); border-left: 0; border-radius: 0 3px 3px 0; background: var(--bg-elevated); color: var(--fg); font-size: 10px; cursor: pointer; }
+.pw-name { font-size: 12px; color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; }
+.pw-inline { display: flex; flex-direction: column; gap: 6px; }
+.pw-inline-picker { max-height: 180px; overflow: auto; padding: 6px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-elevated); }
+.pw-popover { padding: 6px; }
+.pw-pop-picker { width: 280px; max-height: 320px; overflow: auto; }
+.pw-tools { display: flex; gap: 6px; padding-top: 4px; }
+/* in the options bar the widget sits on one line */
+.opt .pw { flex-direction: row; align-items: center; }
+.opt .pw-swatch canvas { width: 22px; height: 22px; }
+
+/* ---- picker ---------------------------------------------------------------------------------------------------- */
+.pattern-picker { display: flex; flex-direction: column; gap: 2px; }
+.pp-group-head { display: flex; align-items: center; gap: 6px; width: 100%; padding: 3px 4px; border: 0; border-radius: 3px; background: none; color: var(--fg); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.pp-group-head:hover { background: var(--accent-soft); }
+.pp-caret { width: 10px; color: var(--fg-muted); font-size: 10px; }
+.pp-group-name { flex: 1; }
+.pp-count { font-size: 11px; }
+.pp-grid { display: flex; flex-wrap: wrap; gap: 4px; padding: 2px 4px 6px 20px; }
+.pp-loose { padding-left: 4px; }
+.pp-swatch { display: inline-flex; align-items: center; gap: 8px; padding: 1px; border: 1px solid var(--border); border-radius: 3px; background: none; color: var(--fg); font: inherit; font-size: 12px; cursor: pointer; }
+.pp-swatch canvas { display: block; border-radius: 2px; background: var(--bg-sunken); }
+.pp-swatch:hover { border-color: var(--fg-muted); }
+.pp-swatch[aria-selected="true"] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.pp-swatch.pp-missing { opacity: 0.5; cursor: not-allowed; }
+.pattern-picker[data-view="list"] .pp-grid { flex-direction: column; flex-wrap: nowrap; }
+.pattern-picker[data-view="list"] .pp-swatch { width: 100%; border-color: transparent; }
+.pattern-picker[data-view="list"] .pp-swatch[aria-selected="true"] { border-color: var(--accent); }
+.pp-empty { padding: 8px; font-size: 12px; }
+
+/* ---- Pattern Fill section, dialog and Pattern Name ------------------------------------------------------------- */
+.pattern-fill-section { display: flex; flex-direction: column; gap: 4px; }
+.pattern-fill-flags { display: flex; align-items: center; gap: 12px; }
+.pattern-fill-section .numeric-field { display: inline-flex; align-items: center; gap: 4px; }
+.define-pattern-preview { display: flex; align-items: center; gap: 12px; }
+.define-pattern-preview canvas { border: 1px solid var(--border); border-radius: 2px; }
+
+/* ---- panel ----------------------------------------------------------------------------------------------------- */
+.patterns-panel { display: flex; flex-direction: column; min-height: 0; }
+.patterns-body { flex: 1; min-height: 0; overflow: auto; padding: 6px; }
+.patterns-hint { font-size: 11px; }

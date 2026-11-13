@@ -1,14 +1,23 @@
-// Type tools: Horizontal Type and Vertical Type. Click for point text, drag for a paragraph box,
-// click a text layer to edit it. Editing happens in place: a transparent <textarea> is laid over
-// the layer with the same font, size (× zoom), line height and letter spacing, and only its caret
-// and selection highlight show, while the layer itself re-renders live underneath. One history
-// entry per editing session (creating a layer and typing into it is a single entry).
+// Type tools: Horizontal Type and Vertical Type. Click for point text, drag for a paragraph box, Alt-click for a box
+// of a size typed in, click a text layer to edit it. One history entry per editing session (creating a layer and
+// typing into it is a single entry).
 //
-// Vertical type is horizontal text rotated 90° clockwise through the layer's `transform` (letters
-// sideways, lines running right to left), flagged with font.orientation = 'vertical'. Stacked
-// upright glyphs would need a vertical layout in TextLayer (lib/document.js).
+// Editing (0.4, type-editing; ARCHITECTURE.md "0.4 features" B.8) runs on lib/type/editor.js: the editor draws its own
+// caret and selection over the layer's layout and a hidden <textarea> receives what is typed (IME and dead keys
+// included). While editing: the eight handles of a paragraph box set its width and height (a dragged box keeps its
+// height: text beyond it is hidden and the bottom-right handle shows +); holding Ctrl/Cmd shows the transform box
+// (its handles run Free Transform, then editing goes on); Ctrl/Cmd-drag, or a drag that starts outside the text,
+// moves the layer; a click outside commits.
+//
+// Vertical type is horizontal text rotated 90° clockwise through the layer's `transform` (letters sideways, lines
+// running right to left), flagged with typeOptions.orientation = 'vertical'.
+//
+// The stable surface of B.8 (other modules and the specs import it): FALLBACK_FONTS, fontFamilies, onFontsChanged,
+// loadSystemFonts, STYLES, styleOf, styleToFont, textTargets, typeSession, applyTypeStyle; typeSession(app) is the
+// tool whose `session` is { layer, doc, isNew, textarea } (textarea: the editor's hidden input, its value the plain
+// text and its selection the editor's).
 import { Tool } from '../tools.js';
-import { TextLayer, cssFont, measureContext, DEFAULT_TEXT_STYLE, applyLegacyFont } from '../document.js';
+import { TextLayer, measureContext, DEFAULT_TEXT_STYLE, applyLegacyFont } from '../document.js';
 import { structural, setLayerProps } from '../layer-ops.js';
 import { bridge } from '../bridge.js';
 import { icon } from '../icons.js';
@@ -17,8 +26,10 @@ import { parseColor, rgbaToHex } from '../../../shared/pixels/color.js';
 import { hitSegment, isEmptyPath, clonePath, visibleTargets } from './vector.js';
 import { pathOffsetAt } from '../text-path.js';
 import * as M from '../type/model.js';
-import { setSelectionProvider, selectionChanged, applyChar as targetApplyChar, applyPara as targetApplyPara, applyTypeOptions as targetApplyTypeOptions, editTypeLayers } from '../type/target.js';
+import * as typeApi from '../type/api.js';
+import { applyChar as targetApplyChar, applyPara as targetApplyPara, applyTypeOptions as targetApplyTypeOptions, editTypeLayers } from '../type/target.js';
 import { fontsChanged } from '../type/api.js';
+import { TypeEditor, autoName, boxSizeDialog, PLACEHOLDER_POINT, PLACEHOLDER_PARAGRAPH } from '../type/editor.js';
 
 // type-on-path (lib/text-path.js): an I-beam crossing a curve, shown when the pointer is over a path
 const PATH_CURSOR = `url("data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"><path d="M3 17q9-12 18-2" fill="none" stroke="#fff" stroke-width="3"/><path d="M3 17q9-12 18-2" fill="none" stroke="#000" stroke-width="1.5"/><path d="M9 4h6M12 4v16M9 20h6" stroke="#fff" stroke-width="3" fill="none"/><path d="M9 4h6M12 4v16M9 20h6" stroke="#000" stroke-width="1.2" fill="none"/></svg>')}") 12 12, text`;
@@ -129,7 +140,6 @@ export function styleToFont(style) {
 }
 
 const hex6 = (c) => rgbaToHex(parseColor(c ?? '#000000')).slice(0, 7);
-const autoName = (text) => String(text ?? '').split('\n')[0].slice(0, 30) || 'Text';
 // the rich-text content (immutable) and its layer options, so cancel and undo restore formatting exactly
 const snapshot = (layer) => ({ content: layer.content, typeOptions: layer.typeOptions, width: layer.width, height: layer.height ?? null, name: layer.name, x: layer.x, y: layer.y, pathText: layer.pathText ? JSON.parse(JSON.stringify(layer.pathText)) : null });
 function restore(layer, snap) {
@@ -167,6 +177,12 @@ export function textTargets(doc) {
   return doc.active?.type === 'text' && !doc.active.locked.all ? [doc.active] : [];
 }
 
+// the eight handles of a box: [name, u, v] with u, v the position across the box (0 = left/top, 1 = right/bottom)
+const BOX_HANDLES = [['nw', 0, 0], ['n', 0.5, 0], ['ne', 1, 0], ['e', 1, 0.5], ['se', 1, 1], ['s', 0.5, 1], ['sw', 0, 1], ['w', 0, 0.5]];
+const HANDLE_CURSORS = { nw: 'nwse-resize', se: 'nwse-resize', ne: 'nesw-resize', sw: 'nesw-resize', n: 'ns-resize', s: 'ns-resize', e: 'ew-resize', w: 'ew-resize' };
+/** Screen px a press may start beyond the text box and still move the text instead of committing it. */
+const MOVE_SLOP = 3;
+
 // ---- the tools ----------------------------------------------------------------------------------------------
 
 function typeOptions() {
@@ -190,13 +206,15 @@ export class TypeTool extends Tool {
       name: vertical ? 'Vertical Type Tool' : 'Horizontal Type Tool',
       icon: vertical ? 'text-vertical' : 'text',
       cursor: vertical ? 'vertical-text' : 'text',
-      hint: 'Click to add point text, drag to make a paragraph box, click text to edit it. Ctrl/Cmd+Enter or ✓ commits, Esc cancels.',
+      hint: 'Click to add point text, drag to make a paragraph box (Alt-click to type its size), click text to edit it. While editing: drag a box handle to resize, hold Ctrl/Cmd to transform or drag to move. Ctrl/Cmd+Enter or ✓ commits, Esc cancels.',
       options: typeOptions(),
     });
     this.vertical = vertical;
     this.session = null;
     this.drag = null;
-    this.baselineCache = new Map();
+    // tool traits (L.12): the type tools never paint; Ctrl/Cmd is theirs (transform box, move while editing)
+    this.paints = false;
+    this.claimsModifiers = new Set(['ctrl']);
   }
   get sibling() {
     return this.app.tools.get(this.vertical ? 'type-horizontal' : 'type-vertical');
@@ -228,8 +246,18 @@ export class TypeTool extends Tool {
   /** Shows a text layer's font in the options bar (silently, without applying anything). */
   syncFromLayer(layer = this.session?.layer ?? (this.doc?.active?.type === 'text' ? this.doc.active : null)) {
     const tm = this.app.tools;
-    const values = layer
-      ? { family: layer.font.family, style: styleOf(layer.font), size: Math.round(layer.font.size * 100) / 100, align: layer.font.align ?? 'left', color: hex6(layer.font.color) }
+    let font = null;
+    if (layer) {
+      // while editing, the options bar shows the style at the caret or the start of the selection
+      const ed = this.session?.layer === layer ? this.session.editor : null;
+      if (ed) {
+        const [a] = ed.range();
+        const st = M.charStyleAt(layer.content, a > 0 && ed.sel.anchor === ed.sel.focus ? a - 1 : a);
+        font = { family: st.fontFamily, weight: st.fontWeight, italic: st.fontItalic, size: st.size, color: st.color, align: M.paraAttrs(layer.content, a, a).align };
+      } else font = layer.font;
+    }
+    const values = font
+      ? { family: font.family, style: styleOf(font), size: Math.round(font.size * 100) / 100, align: alignOf(font.align), color: hex6(font.color) }
       : { color: hex6(this.app.settings.foreground) };
     let rerender = false;
     for (const [k, v] of Object.entries(values)) {
@@ -250,16 +278,25 @@ export class TypeTool extends Tool {
     if (!make) return;
     if (this.session || textTargets(this.doc).length) this.applyFont(make(value), { merge: key === 'size' || key === 'color' });
     else if (key === 'color') this.app.setColors({ foreground: value });
-    if (this.session) setTimeout(() => this.session?.textarea.focus({ preventScroll: true }), 0);
+    if (this.session) setTimeout(() => this.session?.editor.focus(), 0);
   }
-  /** Applies a font patch: live to the layer being edited, else (undoably) to the targeted text layers. */
+  /**
+   * Applies a font patch: while editing, to the selected range (or, with a caret, the whole text, as 0.3's options
+   * bar did) as one step of the session; else (undoably) to the targeted text layers.
+   */
   applyFont(patch, { label = 'Character', merge = true } = {}) {
     const s = this.session;
     if (s) {
-      s.layer.font = { ...s.layer.font, ...patch };
-      s.layer.touch();
-      s.doc.changed('props', { layer: s.layer });
-      this.layoutEditor();
+      const ed = s.editor;
+      const [a, b] = ed.range();
+      if (a !== b) {
+        applyTypeStyle(this.app, patch, { label, merge });
+        return;
+      }
+      ed.typeSession().edit((content) => {
+        const r = applyLegacyFont(content, s.layer.typeOptions, { ...legacyFontOf(content, s.layer.typeOptions), ...patch });
+        return { content: r.content, typeOptions: r.typeOptions };
+      }, { label, merge });
       return;
     }
     const doc = this.doc;
@@ -300,8 +337,10 @@ export class TypeTool extends Tool {
     this.syncFromLayer();
   }
   deactivate() {
+    // a Ctrl-drag hands the pointer to Free Transform; the session was committed before that
     this.commitSession();
     this.drag = null;
+    this.gesture = null;
   }
   commit() {
     if (!this.session) return false;
@@ -314,14 +353,10 @@ export class TypeTool extends Tool {
       this.offsetDrag = null;
       return true;
     }
-    if (this.resize) {
-      const r = this.resize;
-      this.resize = null;
-      r.layer.x = r.x;
-      r.layer.width = r.width;
-      r.layer.touch();
-      this.session?.doc.changed('props', { layer: r.layer });
-      this.layoutEditor();
+    const g = this.gesture;
+    if (g && (g.kind === 'resize' || g.kind === 'move')) {
+      this.gesture = null;
+      this.session?.editor.restore(g.before);
       return true;
     }
     if (!this.session) return false;
@@ -354,22 +389,44 @@ export class TypeTool extends Tool {
       return null;
     }
   }
-  /** Which corner handle of the session's paragraph box is under the document point p (screen tolerance). */
-  hitBoxHandle(p) {
-    const s = this.session;
-    const l = s?.layer;
-    if (!l || l.width === null || !this.view) return null;
+  /** The eight handles of the session's paragraph box on screen: [name, screen point]. */
+  boxHandles() {
+    const l = this.session?.layer;
+    if (!l || l.width === null || !this.view) return [];
     const lay = l.layout();
-    if (lay.glyphs) return null; // text on a path / stacked text has no resizable box
-    const w = l.width, h = l.height ?? Math.max(lay.height, lay.lineHeight);
-    const sp = this.view.toScreen(p.x, p.y);
-    const corners = { nw: [l.x, l.y], ne: [l.x + w, l.y], se: [l.x + w, l.y + h], sw: [l.x, l.y + h] };
-    for (const [name, [x, y]] of Object.entries(corners)) {
+    if (lay.glyphs) return []; // text on a path / stacked text has no resizable box
+    const b = textBox(l, lay);
+    return BOX_HANDLES.map(([name, u, v]) => {
+      const x = b.x + u * b.width, y = b.y + v * b.height;
       const [dx, dy] = l.transform ? applyMatrix(l.transform, x, y) : [x, y];
-      const c = this.view.toScreen(dx, dy);
-      if (Math.abs(c.x - sp.x) <= 6 && Math.abs(c.y - sp.y) <= 6) return name;
-    }
+      return [name, this.view.toScreen(dx, dy)];
+    });
+  }
+  /** Which handle of the session's paragraph box is under the document point p (screen tolerance). */
+  hitBoxHandle(p) {
+    if (!this.view) return null;
+    const sp = this.view.toScreen(p.x, p.y);
+    for (const [name, c] of this.boxHandles()) if (Math.abs(c.x - sp.x) <= 6 && Math.abs(c.y - sp.y) <= 6) return name;
     return null;
+  }
+  /** The transform box Ctrl/Cmd shows (Free Transform's box: the layer's bounds) as eight screen points. */
+  transformHandles() {
+    const l = this.session?.layer;
+    if (!l || !this.view) return [];
+    const b = l.bounds();
+    return BOX_HANDLES.map(([name, u, v]) => [name, this.view.toScreen(b.x + u * b.width, b.y + v * b.height)]);
+  }
+  /** 'handle' (a transform handle), 'near' (just outside the box: rotate) or null, for a Ctrl/Cmd press at p. */
+  hitTransform(p) {
+    if (!this.view || !this.session) return null;
+    const sp = this.view.toScreen(p.x, p.y);
+    const hs = this.transformHandles();
+    if (hs.some(([, c]) => Math.hypot(c.x - sp.x, c.y - sp.y) < 8)) return 'handle';
+    const xs = hs.map(([, c]) => c.x), ys = hs.map(([, c]) => c.y);
+    const inside = sp.x >= Math.min(...xs) && sp.x <= Math.max(...xs) && sp.y >= Math.min(...ys) && sp.y <= Math.max(...ys);
+    if (inside) return null;
+    const near = sp.x >= Math.min(...xs) - 40 && sp.x <= Math.max(...xs) + 40 && sp.y >= Math.min(...ys) - 40 && sp.y <= Math.max(...ys) + 40;
+    return near ? 'near' : null;
   }
   /** A visible path (active shape layer, chosen path, work path) under the document point p, for type-on-path. */
   pathHit(p) {
@@ -397,43 +454,78 @@ export class TypeTool extends Tool {
   onPointerDown(p) {
     const s = this.session;
     if (s) {
+      const ed = s.editor;
+      if (p.ctrl || p.meta) {
+        // Ctrl/Cmd: the transform box's handles transform the text (Free Transform), inside it a drag moves it
+        const t = this.hitTransform(p);
+        if (t) {
+          this.transformWhileEditing(p);
+          return;
+        }
+        if (this.hitTextLayer(p) === s.layer) {
+          this.gesture = { kind: 'move', start: { x: p.x, y: p.y }, before: ed.snapshot(), x: s.layer.x, y: s.layer.y, moved: false };
+          ed.focus();
+          return;
+        }
+      }
       const handle = this.hitBoxHandle(p);
       if (handle) {
         const q = this.toLocal(s.layer, p) ?? p;
-        this.resize = { layer: s.layer, handle, start: q, x: s.layer.x, width: s.layer.width };
+        const lay = s.layer.layout();
+        const b = textBox(s.layer, lay);
+        this.gesture = { kind: 'resize', handle, start: q, before: ed.snapshot(), x: s.layer.x, y: s.layer.y, width: s.layer.width, height: s.layer.height ?? b.height };
+        ed.focus();
         return;
       }
       if (this.hitOffsetHandle(p)) {
-        this.offsetDrag = { layer: s.layer };
+        this.offsetDrag = { layer: s.layer, before: ed.snapshot() };
         return;
       }
       const hit = this.hitTextLayer(p);
       if (hit === s.layer) {
-        const i = this.caretIndex(hit, p);
-        s.textarea.focus({ preventScroll: true });
-        s.textarea.setSelectionRange(i, i);
+        this.gesture = { kind: 'select' };
+        ed.pointerDown(p);
         return;
       }
-      this.commitSession();
-      if (hit) this.beginEdit(hit, { at: p });
+      if (hit) {
+        this.commitSession();
+        this.beginEdit(hit, { at: p });
+        return;
+      }
+      // outside the text: a drag moves it (Photoshop's move cursor there), a click commits on release
+      this.gesture = { kind: 'outside', start: { x: p.x, y: p.y }, screen: { x: p.screenX, y: p.screenY }, before: ed.snapshot(), x: s.layer.x, y: s.layer.y, moved: false };
+      ed.focus();
       return;
     }
     const hit = this.hitTextLayer(p);
-    if (hit) {
+    if (hit && !p.alt) {
       this.beginEdit(hit, { at: p });
       return;
     }
-    const onPath = this.pathHit(p);
+    const onPath = p.alt ? null : this.pathHit(p);
     if (onPath) {
       this.beginNew({ x: p.x, y: p.y }, null, { path: onPath.path });
       return;
     }
-    this.drag = { start: { x: p.x, y: p.y }, current: { x: p.x, y: p.y }, moved: false };
+    this.drag = { start: { x: p.x, y: p.y }, current: { x: p.x, y: p.y }, moved: false, alt: !!p.alt };
   }
   onPointerMove(p, dragging) {
-    if (!dragging && !this.session && !this.drag) this.view?.setCursor(this.pathHit(p) ? PATH_CURSOR : this.cursorStyle);
+    const s = this.session;
+    if (!dragging) {
+      if (!s && !this.drag) this.view?.setCursor(this.pathHit(p) ? PATH_CURSOR : this.cursorStyle);
+      else if (s) {
+        // Ctrl/Cmd held over the canvas shows the transform box even while the hidden input has no focus
+        const ctrl = !!(p.ctrl || p.meta);
+        if (s.editor.ctrlHeld !== ctrl) {
+          s.editor.ctrlHeld = ctrl;
+          s.editor.invalidate();
+        }
+        this.view?.setCursor(this.hoverCursor(p));
+      }
+      return;
+    }
     const od = this.offsetDrag;
-    if (dragging && od && this.session?.layer === od.layer) {
+    if (od && s?.layer === od.layer) {
       // dragging the I-beam slides the text along its path (part of the editing session's entry)
       const l = od.layer;
       const q = this.toLocal(l, p) ?? p;
@@ -442,101 +534,227 @@ export class TypeTool extends Tool {
       const startOffset = Math.round((l.pathText.flip ? 1 - raw : raw) * 1000) / 1000;
       l.pathText = { ...l.pathText, startOffset };
       l.touch();
-      this.session.doc.changed('props', { layer: l });
-      this.layoutEditor();
+      s.doc.changed('props', { layer: l });
+      s.editor.placeInput();
       return;
     }
-    const r = this.resize;
-    if (dragging && r && this.session?.layer === r.layer) {
-      const sp = this.app.snap?.point(p, { source: 'type-box', pointer: p, exclude: [r.layer], view: this.view }) ?? p; // snap (lib/snap.js)
-      const q = this.toLocal(r.layer, { ...p, x: sp.x, y: sp.y }) ?? p;
-      const dx = q.x - r.start.x;
-      const min = r.layer.font.size;
-      if (r.handle === 'ne' || r.handle === 'se') r.layer.width = Math.max(min, Math.round((r.width + dx) * 100) / 100);
-      else {
-        const w = Math.max(min, r.width - dx);
-        r.layer.x = Math.round((r.x + (r.width - w)) * 100) / 100;
-        r.layer.width = Math.round(w * 100) / 100;
+    const g = this.gesture;
+    if (g && s) {
+      if (g.kind === 'select') {
+        s.editor.pointerMove(p);
+        return;
       }
-      r.layer.touch();
-      this.session.doc.changed('props', { layer: r.layer });
-      this.layoutEditor();
+      if (g.kind === 'resize') return this.resizeTo(g, p);
+      if (g.kind === 'outside' && !g.moved && Math.hypot(p.screenX - g.screen.x, p.screenY - g.screen.y) > MOVE_SLOP) g.moved = true;
+      if (g.kind === 'move' || (g.kind === 'outside' && g.moved)) return this.moveTo(g, p);
       return;
     }
-    if (!dragging || !this.drag) return;
+    if (!this.drag) return;
     const sp = this.app.snap?.point(p, { source: 'type-box', pointer: p, view: this.view }) ?? p; // snap (lib/snap.js)
     this.drag.current = { x: sp.x, y: sp.y };
     if (Math.hypot(p.x - this.drag.start.x, p.y - this.drag.start.y) * this.view.zoom > 4) this.drag.moved = true;
   }
+  /** A box handle drag: width and height in the layer's base space; the box keeps the height it is dragged to. */
+  resizeTo(g, p) {
+    const s = this.session;
+    const l = s.layer;
+    const sp = this.app.snap?.point(p, { source: 'type-box', pointer: p, exclude: [l], view: this.view }) ?? p; // snap (lib/snap.js)
+    const q = this.toLocal(l, { ...p, x: sp.x, y: sp.y }) ?? p;
+    const dx = q.x - g.start.x, dy = q.y - g.start.y;
+    const min = Math.max(1, M.charStyleAt(l.content, 0).size);
+    const r2 = (n) => Math.round(n * 100) / 100;
+    const h = g.handle;
+    if (h.includes('e')) l.width = r2(Math.max(min, g.width + dx));
+    if (h.includes('w')) {
+      const wv = Math.max(min, g.width - dx);
+      l.x = r2(g.x + (g.width - wv));
+      l.width = r2(wv);
+    }
+    if (h.includes('s') || h.includes('n')) {
+      if (h.includes('s')) l.height = r2(Math.max(min, g.height + dy));
+      else {
+        const hv = Math.max(min, g.height - dy);
+        l.y = r2(g.y + (g.height - hv));
+        l.height = r2(hv);
+      }
+    }
+    l.touch();
+    s.doc.changed('props', { layer: l });
+    s.editor.placeInput();
+    s.editor.invalidate();
+  }
+  /** Moves the text being edited (Ctrl/Cmd-drag inside it, or a drag that starts outside it). */
+  moveTo(g, p) {
+    const s = this.session;
+    const l = s.layer;
+    let dx = p.x - g.start.x, dy = p.y - g.start.y;
+    // snap (lib/snap.js): the moved text's bounds meet guides and the document like a Move tool drag
+    const b = l.bounds();
+    const box = { x: b.x + (g.x - l.x) + dx, y: b.y + (g.y - l.y) + dy, width: b.width, height: b.height };
+    const sn = this.app.snap?.box(box, { source: 'move', pointer: p, exclude: [l], view: this.view }); // snap (lib/snap.js)
+    if (sn) {
+      dx += sn.dx ?? 0;
+      dy += sn.dy ?? 0;
+    }
+    // a document move is a base-space move through the inverse of the layer's linear transform
+    let bx = dx, by = dy;
+    const t = l.transform;
+    if (t) {
+      try {
+        const inv = invertMatrix([t[0], t[1], t[2], t[3], 0, 0]);
+        [bx, by] = applyMatrix(inv, dx, dy);
+      } catch {
+        return;
+      }
+    }
+    const r2 = (n) => Math.round(n * 100) / 100;
+    l.x = r2(g.x + bx);
+    l.y = r2(g.y + by);
+    g.moved = true;
+    l.touch();
+    s.doc.changed('props', { layer: l });
+    s.editor.placeInput();
+    s.editor.invalidate();
+  }
+  hoverCursor(p) {
+    const s = this.session;
+    if (p.ctrl || p.meta) {
+      if (this.hitTransform(p)) return 'nwse-resize';
+      return this.hitTextLayer(p) === s.layer ? 'move' : 'default';
+    }
+    const h = this.hitBoxHandle(p);
+    if (h) return HANDLE_CURSORS[h];
+    const hit = this.hitTextLayer(p);
+    if (hit) return this.cursorStyle;
+    return 'move';
+  }
   onPointerUp(p) {
-    if (this.resize || this.offsetDrag) {
-      this.resize = null;
+    const s = this.session;
+    if (this.offsetDrag) {
+      const od = this.offsetDrag;
       this.offsetDrag = null;
-      this.session?.textarea.focus({ preventScroll: true });
+      if (s?.layer === od.layer) s.editor.recordFrom(od.before, 'path-offset');
+      s?.editor.focus();
+      return;
+    }
+    const g = this.gesture;
+    this.gesture = null;
+    if (g && s) {
+      if (g.kind === 'select') s.editor.pointerUp(p);
+      else if (g.kind === 'resize' || (g.kind === 'move' && g.moved) || (g.kind === 'outside' && g.moved)) {
+        if (p.cancelled) s.editor.restore(g.before);
+        else s.editor.recordFrom(g.before, g.kind === 'resize' ? 'box' : 'move');
+        s.editor.focus();
+      } else if (g.kind === 'outside' && !p.cancelled) this.commitSession();
+      else s.editor.focus();
       return;
     }
     const d = this.drag;
     this.drag = null;
     if (!d || p.cancelled || !this.doc) return;
     const r2 = (n) => Math.round(n * 100) / 100;
+    if (d.alt) {
+      // Alt-click (or Alt-drag): the size of the paragraph box typed in (Photoshop's Paragraph Text Size)
+      const at = { x: r2(Math.min(d.start.x, d.current.x)), y: r2(Math.min(d.start.y, d.current.y)) };
+      const size = d.moved ? { width: Math.abs(d.current.x - d.start.x), height: Math.abs(d.current.y - d.start.y) } : {};
+      this.askBoxSize(at, size);
+      return;
+    }
     if (d.moved) {
       const x1 = Math.min(d.start.x, d.current.x), y1 = Math.min(d.start.y, d.current.y);
       this.beginNew(d.start, { x: r2(x1), y: r2(y1), width: r2(Math.abs(d.current.x - d.start.x)), height: r2(Math.abs(d.current.y - d.start.y)) });
     } else this.beginNew({ x: r2(d.start.x), y: r2(d.start.y) }, null);
   }
-  /** Index into layer.text nearest to the document point p. */
+  /** The internal type:box-size (M.7): asks for a box size, then starts paragraph text there. */
+  async askBoxSize(at, size) {
+    const v = await boxSizeDialog(this.app, size);
+    if (!v || !this.doc || this.app.tools.active !== this) return;
+    this.beginNew(at, { x: at.x, y: at.y, width: v.width, height: v.height });
+  }
+  onDoubleClick() {
+    // multi-click selection is counted on pointerdown (lib/type/editor.js); the native dblclick adds nothing
+  }
+  /** Keys pressed while the editor is open but its input does not have focus go to the text. */
+  onKeyDown(e) {
+    const s = this.session;
+    if (!s || e.ctrlKey || e.metaKey || e.altKey) return false;
+    const ed = s.editor;
+    if (e.key.length === 1) {
+      ed.focus();
+      ed.insert(e.key);
+      return true;
+    }
+    if (e.key === 'Backspace' || e.key === 'Delete') {
+      ed.focus();
+      const [a, b] = ed.range();
+      const t = ed.text;
+      if (a === b) {
+        const from = e.key === 'Backspace' ? Math.max(0, a - 1) : a, to = e.key === 'Backspace' ? a : Math.min(t.length, b + 1);
+        ed.select(from, to, { seal: false });
+      }
+      ed.insert('', { kind: 'delete' });
+      return true;
+    }
+    if (/^(Arrow|Home$|End$|Page)/.test(e.key)) {
+      ed.focus();
+      ed.navigate(e);
+      return true;
+    }
+    return false;
+  }
+  /** Index into layer.text nearest to the document point p (lib/type/api.js hitTest). */
   caretIndex(layer, p) {
     const q = this.toLocal(layer, p);
     if (!q) return layer.text.length;
-    const lay = layer.layout();
-    if (lay.glyphs) {
-      // text on a path / stacked text: the nearest glyph, before or after its centre along its baseline
-      let best = null, bestD = Infinity;
-      for (const g of lay.glyphs) {
-        if (g.hidden) continue;
-        const d = Math.hypot(g.x - q.x, g.y - q.y);
-        if (d < bestD) {
-          bestD = d;
-          best = g;
-        }
-      }
-      if (!best) return layer.text.length;
-      const along = (q.x - best.x) * Math.cos(best.angle) + (q.y - best.y) * Math.sin(best.angle);
-      return Math.min(layer.text.length, best.index + (along > 0 ? 1 : 0));
+    return Math.min(layer.text.length, typeApi.hitTest(layer, q.x, q.y).index);
+  }
+
+  /**
+   * Ctrl/Cmd on the transform box while editing: the text is committed, Free Transform (app.transformTool) takes the
+   * drag, and when the button is released the transform is applied and editing goes on with the same selection.
+   */
+  transformWhileEditing(p) {
+    const s = this.session;
+    const tt = this.app.transformTool;
+    if (!s || !tt) return;
+    const { layer, doc } = s;
+    const sel = { ...s.editor.sel };
+    this.commitSession();
+    if (!layer.parent || doc.find(layer.id) !== layer) return;
+    if (doc.active !== layer) doc.setActive(layer);
+    if (doc.selectedLayers().some((l) => l !== layer)) doc.selected?.clear?.();
+    tt.start({ mode: 'free' });
+    if (!tt.session) {
+      this.beginEdit(layer, { sel });
+      return;
     }
-    const ctx = measureContext();
-    ctx.font = cssFont(layer.font);
-    const starts = [];
-    let pos = 0;
-    for (const line of lay.lines) {
-      starts.push(pos);
-      pos += line.text.length;
-      if (layer.text[pos] === ' ' || layer.text[pos] === '\n') pos++;
-    }
-    const li = Math.max(0, Math.min(lay.lines.length - 1, Math.floor((q.y - layer.y) / lay.lineHeight)));
-    const line = lay.lines[li];
-    let x0 = layer.x;
-    if (layer.font.align === 'center') x0 += (lay.width - line.width) / 2;
-    else if (layer.font.align === 'right') x0 += lay.width - line.width;
-    const spacing = layer.font.letterSpacing ?? 0;
-    let best = 0, bestD = Infinity;
-    for (let k = 0; k <= line.text.length; k++) {
-      const w = ctx.measureText(line.text.slice(0, k)).width + k * spacing;
-      const dd = Math.abs(x0 + w - q.x);
-      if (dd < bestD) {
-        bestD = dd;
-        best = k;
-      }
-    }
-    return Math.min(layer.text.length, starts[li] + best);
+    // Ctrl in Free Transform means distort or skew: the press that summoned it is a plain one
+    tt.onPointerDown({ ...p, ctrl: false, meta: false });
+    const done = () => {
+      window.removeEventListener('pointerup', done);
+      window.removeEventListener('pointercancel', done);
+      // after Free Transform's own pointerup (the canvas's listener runs before this one on window)
+      setTimeout(() => {
+        if (tt.session && !tt.committing) tt.commit();
+        if (this.app.tools.active !== this) this.app.tools.activate(this.id);
+        if (layer.parent && this.app.doc === doc) this.beginEdit(layer, { sel });
+      }, 0);
+    };
+    window.addEventListener('pointerup', done);
+    window.addEventListener('pointercancel', done);
   }
 
   // ---- sessions ----
+  /** Placeholder text for a new layer (settings.type.placeholder), or ''. */
+  placeholderFor(box) {
+    if (this.app.settings?.type?.placeholder === false) return '';
+    return box ? PLACEHOLDER_PARAGRAPH : PLACEHOLDER_POINT;
+  }
   beginNew(at, box, { path = null } = {}) {
     const doc = this.doc;
     const font = this.fontFromOptions();
-    const ascent = font.size * 0.8; // TextLayer.layout() puts the first baseline at y + 0.8 × size
-    let x, y, width = null, transform = null, pathText = null;
+    const ascent = font.size * 0.8; // the first baseline is at y + 0.8 × size (A, "First baseline")
+    let x, y, width = null, height = null, transform = null, pathText = null;
     if (path) {
       // type on a path (lib/text-path.js): the text starts where the path was clicked; the path is
       // stored in document space, so the layer's offset is zero
@@ -551,6 +769,7 @@ export class TypeTool extends Tool {
         qx = box.x + box.width;
         qy = box.y;
         width = Math.max(font.size, box.height);
+        height = Math.max(font.size, box.width);
       } else {
         qx = at.x + (font.size * font.lineHeight) / 2;
         qy = at.y;
@@ -562,23 +781,45 @@ export class TypeTool extends Tool {
       x = box.x;
       y = box.y;
       width = Math.max(font.size, box.width);
+      // a dragged box is a fixed box: text beyond its height is hidden and the bottom-right handle shows +
+      height = Math.max(font.size, box.height);
     } else {
       x = at.x;
       y = at.y - ascent;
     }
-    const layer = new TextLayer({ x: Math.round(x * 100) / 100, y: Math.round(y * 100) / 100, width, text: '', font, transform, pathText });
+    const r2 = (n) => Math.round(n * 100) / 100;
+    const text = path ? this.placeholderFor(false) : this.placeholderFor(!!box);
+    const layer = new TextLayer({ x: r2(x), y: r2(y), width: width === null ? null : r2(width), text, font, transform, pathText });
+    if (height !== null) layer.height = r2(height);
+    if (text) layer.name = autoName(text);
     structural(this.app, this.name, () => {
       doc.add(layer);
       doc.setActive(layer);
     });
     const entry = doc.history.entries[doc.history.index];
-    this.session = { doc, layer, isNew: true, entry, before: snapshot(layer), autoName: true };
+    this.session = this.makeSession({ doc, layer, isNew: true, entry, before: snapshot(layer), autoName: true });
+    this.session.placeholder = !!text;
     this.openEditor();
+    // the placeholder is selected, so the first key typed replaces it
+    if (text) this.session.editor.select(0, text.length);
   }
-  beginEdit(layer, { at = null, selectAll = false } = {}) {
+  makeSession(s) {
+    const session = { ...s, editor: null };
+    // B.8: `textarea` is the editor's hidden input (its value the plain text, its selection the editor's)
+    Object.defineProperty(session, 'textarea', { enumerable: true, get: () => session.editor?.input ?? null });
+    session.editor = new TypeEditor(this, session);
+    return session;
+  }
+  /**
+   * Starts editing a text layer: { at } puts the caret at a document point, { selectAll } selects the text,
+   * { sel } restores a selection ({ anchor, focus }).
+   */
+  beginEdit(layer, { at = null, selectAll = false, sel = null } = {}) {
     if (this.session?.layer === layer) {
-      this.session.textarea.focus({ preventScroll: true });
-      if (selectAll) this.session.textarea.select();
+      const ed = this.session.editor;
+      ed.focus();
+      if (selectAll) ed.selectAll();
+      else if (at) ed.select(ed.indexAt(at).index);
       return;
     }
     if (this.session) this.commitSession();
@@ -589,307 +830,48 @@ export class TypeTool extends Tool {
       return;
     }
     if (doc.active !== layer) doc.setActive(layer);
-    this.session = { doc, layer, isNew: false, before: snapshot(layer), autoName: layer.name === autoName(layer.text) };
+    this.session = this.makeSession({ doc, layer, isNew: false, before: snapshot(layer), autoName: layer.name === autoName(layer.text) });
     this.openEditor();
-    const ta = this.session.textarea;
-    if (selectAll) ta.select();
-    else {
-      const i = at ? this.caretIndex(layer, at) : layer.text.length;
-      ta.setSelectionRange(i, i);
-    }
+    const ed = this.session.editor;
+    const n = layer.text.length;
+    if (selectAll) ed.select(0, n);
+    else if (sel) ed.select(Math.min(sel.anchor, n), Math.min(sel.focus, n));
+    else if (at) {
+      const { index, affinity } = ed.indexAt(at);
+      ed.select(index, index, { affinity });
+    } else ed.select(n);
   }
   openEditor() {
     const s = this.session;
-    const ta = document.createElement('textarea');
-    ta.className = 'text-editor type-editor';
-    ta.spellcheck = false;
-    ta.autocomplete = 'off';
-    ta.setAttribute('autocapitalize', 'off');
-    ta.setAttribute('aria-label', 'Text');
-    ta.value = s.layer.text;
-    s.textarea = ta;
-    s.doc.view.area.appendChild(ta);
-    ta.addEventListener('input', () => this.onInput());
-    ta.addEventListener('keydown', (e) => this.onEditorKey(e));
-    // the type target (lib/type/target.js) follows the textarea's selection; a moved caret drops its insertion style
-    const moved = () => {
-      const st = this.session;
-      if (st?.textarea !== ta) return;
-      if (st.insertion && (ta.selectionStart !== st.insertionAt || ta.selectionEnd !== st.insertionAt)) st.insertion = null;
-      selectionChanged(this.app);
-    };
-    for (const type of ['select', 'keyup', 'pointerup']) ta.addEventListener(type, moved);
-    // the editor covers the text box, so its corner handles are grabbed here and driven like a canvas drag
-    ta.addEventListener('pointerdown', (e) => {
-      if (e.button !== 0 || !this.session) return;
-      const view = this.session.doc.view;
-      const toDoc = (ev) => {
-        const r = view.canvas.getBoundingClientRect();
-        const d = view.toDoc(ev.clientX - r.left, ev.clientY - r.top);
-        return { x: d.x, y: d.y, shift: ev.shiftKey, alt: ev.altKey, ctrl: ev.ctrlKey, meta: ev.metaKey, button: ev.button, buttons: ev.buttons, pointerType: ev.pointerType, pressure: 1, original: ev };
-      };
-      const p = toDoc(e);
-      if (!this.hitBoxHandle(p) && !this.hitOffsetHandle(p)) return;
-      e.preventDefault();
-      this.onPointerDown(p);
-      ta.setPointerCapture(e.pointerId);
-      const move = (ev) => this.onPointerMove(toDoc(ev), true);
-      const up = (ev) => {
-        ta.removeEventListener('pointermove', move);
-        ta.removeEventListener('pointerup', up);
-        ta.removeEventListener('pointercancel', up);
-        this.onPointerUp({ ...toDoc(ev), cancelled: ev.type === 'pointercancel' });
-      };
-      ta.addEventListener('pointermove', move);
-      ta.addEventListener('pointerup', up);
-      ta.addEventListener('pointercancel', up);
-    });
-    ta.addEventListener('scroll', () => {
-      ta.scrollTop = 0;
-      ta.scrollLeft = 0;
-    });
-    // the canvas area is overflow:hidden but still scrollable: the browser would scroll it (and the
-    // canvas with it) to reveal a caret that is off screen
-    const area = s.doc.view.area;
-    s.unpinArea = () => area.removeEventListener('scroll', s.pinArea);
-    s.pinArea = () => {
-      area.scrollTop = 0;
-      area.scrollLeft = 0;
-    };
-    area.addEventListener('scroll', s.pinArea);
-    ta.addEventListener('wheel', (e) => {
-      e.preventDefault();
-      s.doc.view.canvas.dispatchEvent(new WheelEvent('wheel', e));
-    }, { passive: false });
-    this.layoutEditor();
-    const focus = () => {
-      if (this.session?.textarea !== ta) return;
-      ta.focus({ preventScroll: true });
-    };
-    focus();
-    requestAnimationFrame(focus);
+    s.editor.open();
     this.syncFromLayer(s.layer);
     if (this.app.tools.active === this) this.app.tools.renderOptions();
     this.app.emit('type:session', { layer: s.layer });
+    this.app.syncUiState?.();
     s.doc.view.invalidate();
   }
   closeEditor() {
     const s = this.session;
     if (!s) return null;
     this.session = null;
-    s.unpinArea?.();
-    s.textarea.remove();
-    s.pinArea?.();
+    this.gesture = null;
+    s.editor.close();
     s.doc.view?.invalidate();
     if (this.app.tools.active === this) this.app.tools.renderOptions();
     this.app.emit('type:session', { layer: null });
+    this.app.syncUiState?.();
     return s;
   }
-  onInput() {
-    const s = this.session;
-    if (!s) return;
-    const layer = s.layer;
-    const old = layer.text;
-    layer.text = s.textarea.value; // model replacePlain: the formatting outside the changed span stays
-    if (s.insertion) {
-      // a caret's insertion style (lib/type/target.js applyChar with a caret) formats what was just typed
-      const next = layer.text;
-      let a = 0;
-      while (a < old.length && a < next.length && old[a] === next[a]) a++;
-      let e = 0;
-      while (e < old.length - a && e < next.length - a && old[old.length - 1 - e] === next[next.length - 1 - e]) e++;
-      if (next.length - e > a) layer.content = M.applyChar(layer.content, a, next.length - e, s.insertion);
-      s.insertionAt = s.textarea.selectionEnd;
-    }
-    if (s.autoName) layer.name = autoName(layer.text);
-    layer.touch();
-    s.doc.changed('props', { layer });
-    this.layoutEditor();
-    selectionChanged(this.app);
-  }
-  /** The stub TypeSession of lib/type/target.js over this textarea session (B.7). */
+  /** The TypeSession of lib/type/target.js over this tool's editing session (B.7). */
   typeSessionApi() {
-    const s = this.session;
-    if (!s) return null;
-    const ta = s.textarea;
-    const tool = this;
-    const from = Math.min(ta.selectionStart, ta.selectionEnd), to = Math.max(ta.selectionStart, ta.selectionEnd);
-    const caretStyle = M.charAttrs(s.layer.content, from, from);
-    return {
-      layer: s.layer,
-      from,
-      to,
-      insertionStyle: s.insertion && s.insertionAt === from ? M.resolveChar({ ...caretStyle, ...s.insertion }) : caretStyle,
-      edit(fn, { label, merge } = {}) {
-        void label;
-        void merge; // the session is one history entry when it is committed
-        const r = fn(s.layer.content, from, to) ?? {};
-        if (r.content) s.layer.content = r.content;
-        if (r.typeOptions) s.layer.typeOptions = r.typeOptions;
-        if ('width' in r) s.layer.width = r.width;
-        if ('height' in r) s.layer.height = r.height;
-        s.layer.touch();
-        s.doc.changed('props', { layer: s.layer });
-        if (ta.value !== s.layer.text) ta.value = s.layer.text;
-        ta.setSelectionRange(r.from ?? from, r.to ?? to);
-        tool.layoutEditor();
-        selectionChanged(tool.app);
-      },
-      setInsertionStyle(patch) {
-        s.insertion = { ...(s.insertionAt === from ? s.insertion ?? {} : {}), ...patch };
-        s.insertionAt = from;
-        selectionChanged(tool.app);
-      },
-    };
+    return this.session?.editor.typeSession() ?? null;
   }
-  onEditorKey(e) {
-    const mod = e.ctrlKey || e.metaKey;
-    const stop = () => {
-      e.preventDefault();
-      e.stopPropagation();
-    };
-    if (e.key === 'Escape') {
-      stop();
-      this.cancelSession();
-      return;
-    }
-    if (e.key === 'Enter' && (mod || e.code === 'NumpadEnter')) {
-      stop();
-      this.commitSession();
-      return;
-    }
-    if (e.key === 'Tab') {
-      stop();
-      return;
-    }
-    // text on a path / stacked text: the editor box wraps visually, but Home / End go to the logical line ends
-    const glyphText = !!this.session.layer.pathText || this.session.layer.font.orientation === 'vertical-stacked';
-    if (glyphText && (e.key === 'Home' || e.key === 'End') && !mod && !e.altKey) {
-      stop();
-      const ta = this.session.textarea;
-      const v = ta.value;
-      const backward = ta.selectionDirection === 'backward';
-      const pos = backward ? ta.selectionStart : ta.selectionEnd;
-      const anchor = backward ? ta.selectionEnd : ta.selectionStart;
-      const nl = v.indexOf('\n', pos);
-      const target = e.key === 'Home' ? v.lastIndexOf('\n', pos - 1) + 1 : nl === -1 ? v.length : nl;
-      if (e.shiftKey) ta.setSelectionRange(Math.min(anchor, target), Math.max(anchor, target), target < anchor ? 'backward' : 'forward');
-      else ta.setSelectionRange(target, target);
-      return;
-    }
-    if (!mod || e.altKey) return;
-    const k = e.key.toLowerCase();
-    const f = this.session.layer.font;
-    if (e.shiftKey && (e.code === 'Period' || k === '>' || e.code === 'Comma' || k === '<')) {
-      stop();
-      const up = e.code === 'Period' || k === '>';
-      this.applyFont({ size: Math.max(1, Math.round(f.size + (up ? 2 : -2))) });
-      this.syncFromLayer();
-      return;
-    }
-    if (k === 'b' || k === 'i' || k === 'u') {
-      stop();
-      if (k === 'b') this.applyFont({ weight: (f.weight ?? 400) >= 600 ? 400 : 700 });
-      if (k === 'i') this.applyFont({ italic: !f.italic });
-      if (k === 'u') this.applyFont({ underline: !f.underline });
-      this.syncFromLayer();
-      return;
-    }
-    // keep app shortcuts (filters, adjustments...) from acting on the layer while typing
-    if (/^[a-z]$/.test(k) && !['z', 'y', 'x', 'c', 'v', 'a', 's'].includes(k)) e.preventDefault();
-  }
-  /** Keys pressed while the editor is open but not focused go to the text. */
-  onKeyDown(e) {
-    const s = this.session;
-    if (!s || e.ctrlKey || e.metaKey || e.altKey) return false;
-    const ta = s.textarea;
-    const edit = (text, from, to) => {
-      ta.focus({ preventScroll: true });
-      ta.setRangeText(text, from, to, 'end');
-      this.onInput();
-      return true;
-    };
-    const a = ta.selectionStart, b = ta.selectionEnd;
-    if (e.key.length === 1) return edit(e.key, a, b);
-    if (e.key === 'Backspace') return edit('', a === b ? Math.max(0, a - 1) : a, b);
-    if (e.key === 'Delete') return edit('', a, a === b ? Math.min(ta.value.length, b + 1) : b);
-    if (e.key.startsWith('Arrow') || e.key === 'Home' || e.key === 'End') {
-      ta.focus({ preventScroll: true });
-      return true;
-    }
-    return false;
-  }
-  /** Positions the textarea exactly over the layer's text (font metrics, zoom, rotation, transform). */
+  /** Repositions what the editor shows after the view or the layer changed. */
   layoutEditor() {
-    const s = this.session;
-    if (!s) return;
-    const { layer, doc, textarea: ta } = s;
-    const view = doc.view;
-    const z = view.zoom;
-    const font = layer.font;
-    const lay = layer.layout();
-    const fs = font.size * z;
-    const lh = font.size * font.lineHeight * z;
-    const fontCss = cssFont({ ...font, size: fs });
-    ta.style.font = fontCss;
-    ta.style.lineHeight = `${lh}px`;
-    ta.style.letterSpacing = `${(font.letterSpacing ?? 0) * z}px`;
-    ta.style.textAlign = font.align ?? 'left';
-    ta.style.caretColor = hex6(font.color);
-    let m = view.matrix();
-    if (layer.transform) m = m.multiply(new DOMMatrix(layer.transform));
-    if (lay.glyphs) {
-      // text on a path / stacked text: the editor is a plain box over the glyphs (the layer draws them)
-      const b = textBox(layer, lay);
-      // the glyphs are laid out by the layer; the editor box soft-wraps so its caret stays visible, and
-      // Home / End are handled in onEditorKey so they still follow logical lines
-      ta.wrap = 'soft';
-      ta.style.whiteSpace = 'pre-wrap';
-      ta.style.textAlign = 'left';
-      ta.style.width = `${Math.max(b.width * z, fs * 2, 40)}px`;
-      ta.style.height = `${Math.max(b.height * z, lh)}px`;
-      m = m.translate(b.x, b.y).scale(1 / z);
-      ta.style.transform = `matrix(${m.a}, ${m.b}, ${m.c}, ${m.d}, ${m.e}, ${m.f})`;
-      ta.scrollTop = 0;
-      ta.scrollLeft = 0;
-      s.pinArea?.();
-      view.invalidate();
-      return;
-    }
-    const point = layer.width === null;
-    ta.wrap = point ? 'off' : 'soft';
-    ta.style.whiteSpace = point ? 'pre' : 'pre-wrap';
-    const extra = point ? Math.max(fs * 2, 40) : 0; // room for the next characters before the next layout
-    const w = (point ? lay.width : layer.width) * z + (point ? extra : 1);
-    const lines = Math.max(1, lay.lines.length);
-    ta.style.width = `${w}px`;
-    ta.style.height = `${lines * lh}px`;
-    const align = font.align ?? 'left';
-    const shiftX = point ? (align === 'center' ? -extra / 2 : align === 'right' ? -extra : 0) : 0;
-    const dy = lay.ascent * z - this.cssBaseline(fontCss, lh, ta.parentElement);
-    m = m.translate(layer.x, layer.y).scale(1 / z).translate(shiftX, dy);
-    ta.style.transform = `matrix(${m.a}, ${m.b}, ${m.c}, ${m.d}, ${m.e}, ${m.f})`;
-    ta.scrollTop = 0;
-    ta.scrollLeft = 0;
-    s.pinArea?.();
-    view.invalidate();
-  }
-  /** Distance from the top of a CSS line box to its baseline (measured, so it matches the textarea). */
-  cssBaseline(fontCss, lineHeight, parent) {
-    const key = `${fontCss}|${lineHeight}`;
-    const cached = this.baselineCache.get(key);
-    if (cached !== undefined) return cached;
-    const probe = document.createElement('div');
-    probe.style.cssText = 'position:absolute;left:0;top:0;visibility:hidden;white-space:pre;padding:0;margin:0;border:0;pointer-events:none';
-    probe.style.font = fontCss;
-    probe.style.lineHeight = `${lineHeight}px`;
-    probe.innerHTML = 'Xg<span style="display:inline-block;width:0;height:0;vertical-align:baseline"></span>';
-    parent.appendChild(probe);
-    const value = probe.lastChild.getBoundingClientRect().top - probe.getBoundingClientRect().top;
-    probe.remove();
-    if (this.baselineCache.size > 64) this.baselineCache.clear();
-    this.baselineCache.set(key, value);
-    return value;
+    const ed = this.session?.editor;
+    if (!ed) return;
+    ed.placeInput();
+    ed.invalidate();
   }
   /** Ends the session and records it (one history entry). */
   commitSession() {
@@ -900,6 +882,7 @@ export class TypeTool extends Tool {
     if (s.isNew) {
       if (!layer.text.trim()) this.dropNew(s);
       else {
+        // the creation entry holds the layer object, which now has its text: one entry for creating and typing
         layer.touch();
         doc.changed('props', { layer });
       }
@@ -976,13 +959,39 @@ export class TypeTool extends Tool {
       ctx.strokeStyle = 'rgba(30,136,255,0.9)';
       ctx.lineWidth = 1;
       ctx.stroke();
-      if (l.width !== null && !b.glyphs) {
-        ctx.setLineDash([]);
+      ctx.setLineDash([]);
+      // the eight handles of a paragraph box; + in the bottom-right one when text overflows the box
+      for (const [name, c] of this.boxHandles()) {
+        const x = Math.round(c.x), y = Math.round(c.y);
+        const big = name === 'se' && lay.overflow;
+        const r = big ? 5 : 3;
         ctx.fillStyle = '#fff';
         ctx.strokeStyle = 'rgba(30,136,255,0.9)';
-        for (const c of corners) {
-          ctx.fillRect(Math.round(c.x) - 3, Math.round(c.y) - 3, 6, 6);
-          ctx.strokeRect(Math.round(c.x) - 2.5, Math.round(c.y) - 2.5, 6, 6);
+        ctx.fillRect(x - r, y - r, r * 2, r * 2);
+        ctx.strokeRect(x - r + 0.5, y - r + 0.5, r * 2, r * 2);
+        if (big) {
+          ctx.strokeStyle = '#d00';
+          ctx.beginPath();
+          ctx.moveTo(x - 3, y + 0.5);
+          ctx.lineTo(x + 4, y + 0.5);
+          ctx.moveTo(x + 0.5, y - 3);
+          ctx.lineTo(x + 0.5, y + 4);
+          ctx.stroke();
+        }
+      }
+      if (s.editor.ctrlHeld && !this.gesture) {
+        // Ctrl/Cmd: Free Transform's box around the layer, drawn before it takes over
+        const hs = this.transformHandles();
+        const at = Object.fromEntries(hs);
+        ctx.strokeStyle = 'rgba(30,136,255,1)';
+        ctx.beginPath();
+        ['nw', 'ne', 'se', 'sw'].forEach((n, i) => (i ? ctx.lineTo(at[n].x, at[n].y) : ctx.moveTo(at[n].x, at[n].y)));
+        ctx.closePath();
+        ctx.stroke();
+        for (const [, c] of hs) {
+          ctx.fillStyle = '#fff';
+          ctx.fillRect(Math.round(c.x) - 3.5, Math.round(c.y) - 3.5, 7, 7);
+          ctx.strokeRect(Math.round(c.x) - 3, Math.round(c.y) - 3, 7, 7);
         }
       }
       if (lay.anchor) {
@@ -993,7 +1002,6 @@ export class TypeTool extends Tool {
         ctx.save();
         ctx.translate(c.x, c.y);
         ctx.rotate(a.angle + (view.rotation * Math.PI) / 180);
-        ctx.setLineDash([]);
         ctx.lineWidth = 3;
         ctx.strokeStyle = '#fff';
         ctx.beginPath();
@@ -1005,9 +1013,21 @@ export class TypeTool extends Tool {
         ctx.stroke();
         ctx.restore();
       }
+      s.editor.draw(ctx, view);
     }
     ctx.restore();
   }
+}
+
+/** The 0.3 flat font of content (memoised by document.js through a TextLayer; here for content in flight). */
+function legacyFontOf(content, typeOptions) {
+  return M.legacyFont(content, typeOptions);
+}
+/** The options bar's three alignments: a justify alignment shows its last-line alignment. */
+function alignOf(a) {
+  if (a === 'center' || a === 'justify-center') return 'center';
+  if (a === 'right' || a === 'justify-right') return 'right';
+  return 'left';
 }
 
 /** The type tool with an open editing session, if any. */
@@ -1048,13 +1068,16 @@ function legacyPatch(layer, patch, from) {
  */
 export function applyTypeStyle(app, patch, opts = {}) {
   const tool = typeSession(app);
-  const ta = tool?.session?.textarea;
-  if (tool && ta && ta.selectionStart !== ta.selectionEnd) {
-    const { char, para, typeOptions } = legacyPatch(tool.session.layer, patch, Math.min(ta.selectionStart, ta.selectionEnd));
-    if (Object.keys(char).length) targetApplyChar(app, char, opts);
-    if (Object.keys(para).length) targetApplyPara(app, para, opts);
-    if (typeOptions) targetApplyTypeOptions(app, typeOptions, opts);
-    return;
+  const ed = tool?.session?.editor;
+  if (ed) {
+    const [a, b] = ed.range();
+    if (a !== b) {
+      const { char, para, typeOptions } = legacyPatch(tool.session.layer, patch, a);
+      if (Object.keys(char).length) targetApplyChar(app, char, opts);
+      if (Object.keys(para).length) targetApplyPara(app, para, opts);
+      if (typeOptions) targetApplyTypeOptions(app, typeOptions, opts);
+      return;
+    }
   }
   (tool ?? app.tools.get('type-horizontal'))?.applyFont(patch, opts);
 }
@@ -1066,18 +1089,6 @@ export function install(app) {
   app.tools.register(v, 'text');
   const tools = [h, v];
 
-  // While text is being typed, Edit > Undo / Redo step inside the text instead of throwing the session away
-  // (app.historyStep asks app.sessions). type-editing replaces this entry with its editor's session (B.8).
-  const nativeStep = (dir) => {
-    const t = typeSession(app);
-    if (!t) return false;
-    t.session.textarea?.focus({ preventScroll: true });
-    bridge.nativeEdit(dir);
-    return true;
-  };
-  // the stub selection provider of the type target (B.7): type-editing installs its editor's instead
-  setSelectionProvider({ active: (a) => typeSession(a)?.typeSessionApi() ?? null });
-
   // the options bar's panel button: the Character panel, and the Paragraph panel once a package registers it (M.6)
   app.commands.register('type:toggle-panels', {
     label: 'Toggle the Character and Paragraph Panels',
@@ -1087,14 +1098,23 @@ export function install(app) {
     },
   });
 
+  // B.8: the type session. Another command commits the text first ('commit'); the editor's input owns focus, so
+  // app.isTextTarget() is false for it and Edit > Undo reaches the session; `handle` answers undo, the clipboard and
+  // Select All itself, and the type keys that share an accelerator with a menu command (lib/type/editor.js)
+  const editor = () => typeSession(app)?.session.editor ?? null;
   app.sessions?.register({
     id: 'type',
-    policy: 'observe',
+    policy: 'commit',
     label: 'Type',
     active: () => !!typeSession(app),
-    undo: () => nativeStep('undo'),
-    redo: () => nativeStep('redo'),
-    onClose: 'keep',
+    ownsFocus: (el) => !!el && el === editor()?.input,
+    allow: /^(view:|window:|help:|app:|type:|text:orientation$)/,
+    handle: (id, arg, source) => editor()?.handle(id, arg, source),
+    undo: () => editor()?.undo() ?? false,
+    redo: () => editor()?.redo() ?? false,
+    commit: () => typeSession(app)?.commitSession(),
+    cancel: () => typeSession(app)?.cancelSession(),
+    onClose: 'commit',
   });
 
   loadSystemFonts();
@@ -1142,7 +1162,11 @@ export function install(app) {
       if (!s || s.doc !== e.doc) continue;
       if (!s.layer.parent || s.doc.find(s.layer.id) !== s.layer) t.closeEditor();
       else if (e.kind === 'props' || e.kind === 'history' || e.kind === 'canvas') {
-        if (s.textarea.value !== s.layer.text) s.textarea.value = s.layer.text;
+        // the text may have changed under the editor (history, the assistant): keep the selection inside it
+        const ed = s.editor;
+        const n = s.layer.text.length;
+        if (ed.sel.anchor > n || ed.sel.focus > n) ed.sel = { anchor: Math.min(ed.sel.anchor, n), focus: Math.min(ed.sel.focus, n), affinity: 'leading' };
+        ed.syncInput();
         t.layoutEditor();
       }
     }

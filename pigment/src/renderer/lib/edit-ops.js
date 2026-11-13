@@ -10,6 +10,8 @@ import { decodeImage, decodeImageFile, baseName, OPEN_FILTERS } from './io.js';
 import { drawBlended, drawOnMask } from './brush.js';
 import { BLEND_MODES } from './document.js';
 import { formDialog } from './form.js';
+import { patternThumbnail } from './patterns.js';
+import { SCRIPTS, scriptDef, scriptPlacements, drawPlacements } from './scripted-patterns.js';
 
 export function install(app) {
   const has = () => !!app.doc;
@@ -210,6 +212,90 @@ export function install(app) {
   // ---- fill / stroke --------------------------------------------------------------------------------------
   const BLEND_OPTIONS = BLEND_MODES.filter(Boolean);
 
+  // ---- Define Pattern ----------------------------------------------------------------------------------------------
+
+  /**
+   * Edit > Define Pattern: what the document shows inside the selection (all of it without one) becomes a pattern of
+   * the library and the current pattern. From the menu, a key or with { dialog: true } the Pattern Name dialog asks
+   * for its name first; with a name ({ name } or a string) or from code it does not. Resolves to the library entry.
+   */
+  async function definePattern(arg, ctx = null) {
+    const data = copyPixels(true);
+    if (!data) return null;
+    let name = typeof arg === 'string' ? arg : arg?.name ?? null;
+    const asks = !name && (['menu', 'menu-key', 'key'].includes(ctx?.source) || arg?.dialog === true);
+    if (!name) name = `Pattern ${(app.patterns?.list?.().filter((e) => !e.builtin).length ?? 0) + 1}`;
+    if (asks) {
+      const v = await formDialog(app, {
+        title: 'Pattern Name',
+        width: 380,
+        fields: [
+          {
+            key: 'preview',
+            type: 'custom',
+            render: () => {
+              const box = document.createElement('div');
+              box.className = 'define-pattern-preview';
+              box.appendChild(patternThumbnail(data.canvas, 64, 64));
+              const size = document.createElement('span');
+              size.className = 'muted';
+              size.textContent = `${data.canvas.width} × ${data.canvas.height} px`;
+              box.appendChild(size);
+              return box;
+            },
+          },
+          { key: 'name', label: 'Name', type: 'text', value: name, autofocus: true },
+        ],
+      });
+      if (!v || !String(v.name ?? '').trim()) {
+        ctx?.cancel(); // actions (lib/actions.js)
+        return null;
+      }
+      name = String(v.name).trim();
+    }
+    ctx?.setReplayArg({ name }); // actions (lib/actions.js): a recorded step defines the same pattern without asking
+    const entry = await app.patterns.define(data.canvas, { name });
+    app.dialogs.toast(`Pattern “${name}” defined (${data.canvas.width} × ${data.canvas.height})`, { kind: 'success', timeout: 1800 });
+    return entry;
+  }
+
+  /** The current pattern as a ref (the Fill dialog's default), or null. */
+  function currentPatternRef() {
+    const cur = app.patterns?.current?.();
+    return cur ? app.patterns.ref(cur) : null;
+  }
+
+  /** The options of a scripted pattern (its own dialog, as in Photoshop), with a fresh seed; null when cancelled. */
+  async function scriptDialog(script) {
+    if (script.needsPath && !(await pathPolylines())?.length) {
+      app.dialogs.toast(`${script.name} needs a path: draw one with the Pen tool or pick one in the Paths panel`, { kind: 'error' });
+      return null;
+    }
+    const v = await formDialog(app, { title: script.name, fields: script.fields.map((f) => ({ ...f })) });
+    if (!v) return null;
+    return { ...v, seed: Math.floor(Math.random() * 0x7fffffff) + 1 };
+  }
+
+  /** The polylines of the path Place Along Path follows (the chosen path, else the work path), in document px. */
+  async function pathPolylines() {
+    const { currentPathTarget, flattenPath } = await import('./tools/vector.js');
+    const target = currentPathTarget(app);
+    return target ? flattenPath(target.get(), 0.5) : [];
+  }
+
+  /** Draws a scripted pattern over `area` into fctx (whose (0, 0) is the area's corner). False when it cannot run. */
+  async function scriptedFill(fctx, pattern, scriptId, options, area) {
+    const tile = pattern.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, pattern.width, pattern.height);
+    const paths = scriptDef(scriptId)?.needsPath ? await pathPolylines() : [];
+    if (scriptDef(scriptId)?.needsPath && !paths.length) {
+      app.dialogs.toast('Place Along Path needs a path', { kind: 'error' });
+      return false;
+    }
+    const placements = scriptPlacements(scriptId, { area, tile, options, paths });
+    drawPlacements(fctx, placements, tile, { origin: [area.x, area.y], makeCanvas: createCanvas });
+    return true;
+  }
+
   async function fillDialog(arg, ctx = null) {
     const t = pixelTarget();
     if (!t) return ctx?.cancel(); // actions (lib/actions.js)
@@ -221,12 +307,28 @@ export function install(app) {
         fields: [
           { key: 'use', label: 'Contents', type: 'select', value: 'foreground', options: [['foreground', 'Foreground Color'], ['background', 'Background Color'], ['color', 'Color…'], ['content-aware', 'Content-Aware'], ['pattern', 'Pattern'], ['black', 'Black'], ['grey', '50% Gray'], ['white', 'White'], ['history', 'History (last saved state)']] },
           { key: 'color', label: 'Color', type: 'color', value: app.settings.foreground, when: (v) => v.use === 'color' },
+          // Pattern: the Custom Pattern picker (the `pattern` widget) and Scripted Patterns (lib/scripted-patterns.js)
+          { key: 'pattern', label: 'Custom Pattern', type: 'pattern', value: currentPatternRef(), when: (v) => v.use === 'pattern' },
+          { key: 'script', label: 'Scripted Patterns', type: 'checkbox', value: false, when: (v) => v.use === 'pattern' },
+          { key: 'scriptName', label: 'Script', type: 'select', value: 'brick-fill', options: SCRIPTS.map((x) => [x.id, x.name]), when: (v) => v.use === 'pattern' && v.script },
           { key: 'blend', label: 'Mode', type: 'select', value: 'normal', options: BLEND_OPTIONS },
           { key: 'opacity', label: 'Opacity', type: 'slider', value: 100, min: 1, max: 100, unit: '%' },
           { key: 'preserve', label: 'Preserve transparency', type: 'checkbox', value: !!t.layer.locked.transparency },
         ],
       });
       if (!opts) return ctx?.cancel(); // actions (lib/actions.js)
+      if (opts.use === 'pattern') {
+        // the script's own options dialog follows, as in Photoshop; its seed makes a recorded fill replay exactly
+        const script = opts.script ? scriptDef(opts.scriptName) : null;
+        if (script) {
+          const so = await scriptDialog(script);
+          if (!so) return ctx?.cancel(); // actions (lib/actions.js)
+          opts = { ...opts, script: script.id, scriptOptions: so };
+        } else opts = { ...opts, script: null };
+        delete opts.scriptName;
+      } else {
+        for (const k of ['pattern', 'script', 'scriptName']) delete opts[k];
+      }
       ctx?.setReplayArg({ ...opts }); // actions (lib/actions.js): the dialog's options replay the fill
     }
     const d = doc();
@@ -242,12 +344,20 @@ export function install(app) {
     const fctx = fill.getContext('2d');
     const use = opts.use ?? 'foreground';
     if (use === 'pattern') {
-      const pattern = app.patterns?.current()?.canvas;
+      // the chosen pattern (a recorded fill carries its pixels), else the current one (0.3's recorded fills)
+      await app.patterns?.ready?.();
+      const pattern = opts.pattern ? await app.patterns.canvasOf(opts.pattern) : app.patterns?.current()?.canvas;
       if (!pattern) return app.dialogs.toast('Define a pattern first (Edit › Define Pattern)', { kind: 'error' });
-      fctx.translate(-area.x, -area.y);
-      fctx.fillStyle = fctx.createPattern(pattern, 'repeat');
-      fctx.fillRect(area.x, area.y, area.width, area.height);
-      fctx.setTransform(1, 0, 0, 1, 0, 0);
+      if (opts.script && scriptDef(opts.script)) {
+        const ok = await app.busy('Filling with a scripted pattern…', () => scriptedFill(fctx, pattern, opts.script, opts.scriptOptions ?? {}, area));
+        if (!ok) return;
+      } else {
+        // the tiles start at the document origin, so neighbouring fills join without a seam
+        fctx.translate(-area.x, -area.y);
+        fctx.fillStyle = fctx.createPattern(pattern, 'repeat');
+        fctx.fillRect(area.x, area.y, area.width, area.height);
+        fctx.setTransform(1, 0, 0, 1, 0, 0);
+      }
     } else if (use === 'history') {
       const snap = d.history.savedSnapshot?.() ?? null;
       if (!snap) return app.dialogs.toast('No saved state to fill from', { kind: 'error' });
@@ -578,16 +688,7 @@ export function install(app) {
     'edit:fill-foreground': { enabled: has, run: () => fillDialog({ use: 'foreground', opacity: 100, blend: 'normal', preserve: false }) },
     'edit:fill-background': { enabled: has, run: () => fillDialog({ use: 'background', opacity: 100, blend: 'normal', preserve: false }) },
     'edit:stroke': { enabled: hasSel, dialog: true, run: (arg, ctx) => strokeDialog(arg, ctx) }, // actions (lib/actions.js)
-    'edit:define-pattern': {
-      enabled: has,
-      run: () => {
-        const data = copyPixels(true);
-        if (!data) return;
-        const defined = app.patterns.define(data.canvas, {});
-        app.dialogs.toast(`Pattern defined (${data.canvas.width} × ${data.canvas.height})`, { kind: 'success', timeout: 1800 });
-        return defined;
-      },
-    },
+    'edit:define-pattern': { enabled: has, run: (arg, ctx) => definePattern(arg, ctx) },
     'file:place': { enabled: has, dialog: true, run: (path, ctx) => place(typeof path === 'string' ? path : null, ctx) }, // actions (lib/actions.js)
     'file:import-image': { enabled: has, dialog: true, run: (path, ctx) => place(typeof path === 'string' ? path : null, ctx) }, // actions (lib/actions.js)
 

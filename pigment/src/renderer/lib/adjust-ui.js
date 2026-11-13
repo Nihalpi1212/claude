@@ -2,7 +2,8 @@
 // Fade, adjustment-layer editors (shared with the Properties panel) and fill-layer editing.
 // Destructive edits run through a "pixel edit session" (also used by filter-ui.js) that limits
 // the change to the selection, previews in place and records one undo entry.
-import { ADJUSTMENTS, ADJUSTMENT_KINDS, applyAdjustment, histogram, autoLevels, autoContrast, autoColor, curveLut, levelsLut } from '../../shared/pixels/adjust.js';
+import { ADJUSTMENTS, ADJUSTMENT_KINDS, applyAdjustment, autoLevels, autoContrast, autoColor } from '../../shared/pixels/adjust.js';
+import { tonalSpace, clippingView, weightedHistogram, autoLevelsParams, autoOptions } from '../../shared/pixels/adjust-tonal.js';
 import { CANVAS_BLEND, blendImages } from '../../shared/pixels/blend.js';
 import { BLEND_MODES, createCanvas, intersectRect } from './document.js';
 import { buildForm, formDialog, frameThrottle } from './form.js';
@@ -35,6 +36,12 @@ export const ADJUST_EDITORS = new Map();
 /** Destructive-only kinds (no adjustment layer). */
 const DIRECT_ONLY = ['desaturate', 'equalize', 'shadows-highlights'];
 const NO_PARAMS = new Set(['invert', 'desaturate', 'equalize']);
+/**
+ * Dialogs that open with their last settings, as in Photoshop (and 0.3): Shadows/Highlights, Replace Color, Match
+ * Color, HDR Toning, Color Lookup. The others open with the defaults since 0.4; Alt+Ctrl+L / M / U / B reopen Levels,
+ * Curves, Hue/Saturation and Color Balance with the last values (adjust-tonal).
+ */
+const REMEMBERS_LAST = new Set(['shadows-highlights', 'replace-color', 'match-color', 'hdr-toning', 'color-lookup']);
 /** Where Photoshop's dialogs start (the engine's defaults are the identity). */
 const START_VALUES = { 'photo-filter': { density: 25 }, 'shadows-highlights': { shadows: 35 } };
 const startParams = (kind) => ({ ...clone(ADJUSTMENTS[kind].defaults), ...(START_VALUES[kind] ?? {}) });
@@ -172,330 +179,18 @@ function paramsFromForm(kind, base, values, fields) {
   return p;
 }
 
-// ---- histogram drawing -------------------------------------------------------------------------------------
-
-function drawHistogram(canvas, hist, channel = 'l') {
-  const ctx = canvas.getContext('2d');
-  const w = canvas.width, h = canvas.height;
-  ctx.clearRect(0, 0, w, h);
-  const data = hist?.[channel];
-  if (!data) return;
-  let max = 0;
-  const sorted = Array.from(data).sort((a, b) => b - a);
-  max = sorted[2] || sorted[0] || 1; // ignore a couple of spikes
-  ctx.fillStyle = { r: 'rgba(220,60,60,0.8)', g: 'rgba(60,170,60,0.8)', b: 'rgba(60,100,230,0.8)', l: 'rgba(140,140,140,0.85)' }[channel];
-  for (let i = 0; i < 256; i++) {
-    const v = Math.min(1, data[i] / max);
-    const x = (i / 256) * w;
-    ctx.fillRect(x, h - v * h, Math.ceil(w / 256), v * h);
-  }
-}
-
-function sourceHistogram(source) {
-  if (!source) return null;
-  try {
-    return histogram(source);
-  } catch {
-    return null;
-  }
-}
-
-// ---- Levels editor ---------------------------------------------------------------------------------------------
-
-const LEVEL_DEFAULT = { inBlack: 0, inWhite: 255, gamma: 1, outBlack: 0, outWhite: 255 };
-
-function levelsEditor(params, onChange, source) {
-  const p = clone(params);
-  p.rgb = { ...LEVEL_DEFAULT, ...(p.rgb ?? {}) };
-  const hist = sourceHistogram(source);
-  const el = document.createElement('div');
-  el.className = 'levels-editor';
-  let channel = 'rgb';
-  const form = () => {
-    const lv = { ...LEVEL_DEFAULT, ...(p[channel] ?? {}) };
-    return lv;
-  };
-  const top = document.createElement('div');
-  top.className = 'prop-row';
-  top.innerHTML = '<span>Channel</span>';
-  const sel = document.createElement('select');
-  sel.className = 'select';
-  for (const [v, l] of [['rgb', 'RGB'], ['r', 'Red'], ['g', 'Green'], ['b', 'Blue']]) sel.add(new Option(l, v));
-  top.appendChild(sel);
-  const auto = document.createElement('button');
-  auto.type = 'button';
-  auto.className = 'btn small';
-  auto.textContent = 'Auto';
-  top.appendChild(auto);
-  el.appendChild(top);
-  const canvas = document.createElement('canvas');
-  canvas.className = 'histogram';
-  canvas.width = 256;
-  canvas.height = 80;
-  el.appendChild(canvas);
-  const grid = document.createElement('div');
-  el.appendChild(grid);
-  let ui = null;
-  const rebuild = () => {
-    drawHistogram(canvas, hist, channel === 'rgb' ? 'l' : channel);
-    const lv = form();
-    ui = buildForm(
-      [
-        { type: 'section', label: 'Input levels' },
-        S('inBlack', 'Shadows', 0, 253),
-        S('gamma', 'Midtones (gamma)', 0.1, 9.99, 0.01),
-        S('inWhite', 'Highlights', 2, 255),
-        { type: 'section', label: 'Output levels' },
-        S('outBlack', 'Black', 0, 255),
-        S('outWhite', 'White', 0, 255),
-      ],
-      {
-        values: lv,
-        onChange: (v) => {
-          if (v.inWhite <= v.inBlack + 1) v.inWhite = Math.min(255, v.inBlack + 2);
-          p[channel] = { inBlack: v.inBlack, inWhite: v.inWhite, gamma: v.gamma, outBlack: v.outBlack, outWhite: v.outWhite };
-          if (channel !== 'rgb') p.perChannel = true;
-          onChange(clone(p));
-        },
-      },
-    );
-    grid.replaceChildren(ui.element);
-  };
-  sel.addEventListener('change', () => {
-    channel = sel.value;
-    rebuild();
-  });
-  auto.addEventListener('click', () => {
-    if (!hist) return;
-    const clip = (h) => {
-      const n = hist.count * 0.001;
-      let lo = 0, hi = 255, cum = 0;
-      for (let i = 0; i < 256; i++) if ((cum += h[i]) > n) {
-        lo = i;
-        break;
-      }
-      cum = 0;
-      for (let i = 255; i >= 0; i--) if ((cum += h[i]) > n) {
-        hi = i;
-        break;
-      }
-      return hi > lo ? { ...LEVEL_DEFAULT, inBlack: lo, inWhite: hi } : { ...LEVEL_DEFAULT };
-    };
-    p.rgb = { ...LEVEL_DEFAULT };
-    p.r = clip(hist.r);
-    p.g = clip(hist.g);
-    p.b = clip(hist.b);
-    p.perChannel = true;
-    rebuild();
-    onChange(clone(p));
-  });
-  rebuild();
-  return { element: el };
-}
-
-// ---- Curves editor --------------------------------------------------------------------------------------------
-
-const CURVE_PRESETS = {
-  linear: [[0, 0], [255, 255]],
-  contrast: [[0, 0], [64, 48], [192, 208], [255, 255]],
-  'strong-contrast': [[0, 0], [64, 32], [192, 224], [255, 255]],
-  lighter: [[0, 0], [128, 160], [255, 255]],
-  darker: [[0, 0], [128, 96], [255, 255]],
-  negative: [[0, 255], [255, 0]],
-};
-
-function curvesEditor(params, onChange, source) {
-  const p = clone(params);
-  p.rgb = p.rgb?.length ? p.rgb : [[0, 0], [255, 255]];
-  const hist = sourceHistogram(source);
-  let channel = 'rgb';
-  let selected = -1;
-  const el = document.createElement('div');
-  el.className = 'curves-editor';
-  const top = document.createElement('div');
-  top.className = 'prop-row';
-  top.innerHTML = '<span>Channel</span>';
-  const sel = document.createElement('select');
-  sel.className = 'select';
-  for (const [v, l] of [['rgb', 'RGB'], ['r', 'Red'], ['g', 'Green'], ['b', 'Blue']]) sel.add(new Option(l, v));
-  top.appendChild(sel);
-  const preset = document.createElement('select');
-  preset.className = 'select';
-  preset.add(new Option('Preset…', ''));
-  for (const [k, l] of [['linear', 'Linear'], ['contrast', 'Medium contrast'], ['strong-contrast', 'Strong contrast'], ['lighter', 'Lighter'], ['darker', 'Darker'], ['negative', 'Negative']]) preset.add(new Option(l, k));
-  top.appendChild(preset);
-  el.appendChild(top);
-  const canvas = document.createElement('canvas');
-  canvas.className = 'curve-editor';
-  canvas.width = 256;
-  canvas.height = 256;
-  canvas.tabIndex = 0;
-  el.appendChild(canvas);
-  const info = document.createElement('div');
-  info.className = 'prop-row';
-  info.innerHTML = '<span>Input / Output</span>';
-  const inIn = document.createElement('input');
-  inIn.className = 'input num';
-  inIn.type = 'number';
-  inIn.min = '0';
-  inIn.max = '255';
-  const outIn = inIn.cloneNode();
-  info.append(inIn, outIn);
-  el.appendChild(info);
-  const hint = document.createElement('div');
-  hint.className = 'muted';
-  hint.style.fontSize = '11px';
-  hint.textContent = 'Click to add a point, drag to shape the curve, drag a point off the graph (or press Delete) to remove it.';
-  el.appendChild(hint);
-
-  const pts = () => {
-    if (!p[channel]?.length) p[channel] = [[0, 0], [255, 255]];
-    return p[channel];
-  };
-  const emit = () => onChange(clone(p));
-  const draw = () => {
-    const ctx = canvas.getContext('2d');
-    const css = getComputedStyle(canvas);
-    const fg = css.color || '#ddd';
-    ctx.clearRect(0, 0, 256, 256);
-    if (hist) {
-      const tmp = document.createElement('canvas');
-      tmp.width = 256;
-      tmp.height = 256;
-      drawHistogram(tmp, hist, channel === 'rgb' ? 'l' : channel);
-      ctx.globalAlpha = 0.35;
-      ctx.drawImage(tmp, 0, 0);
-      ctx.globalAlpha = 1;
-    }
-    ctx.strokeStyle = 'rgba(128,128,128,0.35)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    for (let i = 1; i < 4; i++) {
-      ctx.moveTo(i * 64 + 0.5, 0);
-      ctx.lineTo(i * 64 + 0.5, 256);
-      ctx.moveTo(0, i * 64 + 0.5);
-      ctx.lineTo(256, i * 64 + 0.5);
-    }
-    ctx.moveTo(0, 256);
-    ctx.lineTo(256, 0);
-    ctx.stroke();
-    const lut = curveLut(pts());
-    ctx.strokeStyle = { rgb: fg, r: '#e04040', g: '#30b040', b: '#3070f0' }[channel];
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    for (let x = 0; x < 256; x++) {
-      const y = 255 - lut[x];
-      if (x) ctx.lineTo(x + 0.5, y + 0.5);
-      else ctx.moveTo(0.5, y + 0.5);
-    }
-    ctx.stroke();
-    pts().forEach(([x, y], i) => {
-      ctx.fillStyle = i === selected ? ctx.strokeStyle : '#ffffff';
-      ctx.strokeStyle = '#000';
-      ctx.lineWidth = 1;
-      ctx.fillRect(x - 3.5, 255 - y - 3.5, 7, 7);
-      ctx.strokeRect(x - 3.5, 255 - y - 3.5, 7, 7);
-    });
-    const s = pts()[selected];
-    inIn.value = s ? String(Math.round(s[0])) : '';
-    outIn.value = s ? String(Math.round(s[1])) : '';
-  };
-  const toLocal = (e) => {
-    const r = canvas.getBoundingClientRect();
-    return [Math.max(0, Math.min(255, ((e.clientX - r.left) / r.width) * 256)), Math.max(0, Math.min(255, 255 - ((e.clientY - r.top) / r.height) * 256))];
-  };
-  let dragging = false;
-  canvas.addEventListener('pointerdown', (e) => {
-    const [x, y] = toLocal(e);
-    const list = pts();
-    let idx = list.findIndex(([px, py]) => Math.hypot(px - x, py - y) < 8);
-    if (idx < 0) {
-      list.push([Math.round(x), Math.round(y)]);
-      list.sort((a, b) => a[0] - b[0]);
-      idx = list.findIndex(([px, py]) => px === Math.round(x) && py === Math.round(y));
-      emit();
-    }
-    selected = idx;
-    dragging = true;
-    canvas.setPointerCapture(e.pointerId);
-    draw();
-  });
-  canvas.addEventListener('pointermove', (e) => {
-    if (!dragging || selected < 0) return;
-    const list = pts();
-    const r = canvas.getBoundingClientRect();
-    const outside = e.clientY < r.top - 20 || e.clientY > r.bottom + 20 || e.clientX < r.left - 20 || e.clientX > r.right + 20;
-    if (outside && list.length > 2) {
-      list.splice(selected, 1);
-      selected = -1;
-      dragging = false;
-      draw();
-      emit();
-      return;
-    }
-    let [x, y] = toLocal(e);
-    const prev = list[selected - 1], next = list[selected + 1];
-    if (prev) x = Math.max(prev[0] + 1, x);
-    if (next) x = Math.min(next[0] - 1, x);
-    list[selected] = [Math.round(x), Math.round(y)];
-    draw();
-    emit();
-  });
-  canvas.addEventListener('pointerup', () => (dragging = false));
-  canvas.addEventListener('keydown', (e) => {
-    const list = pts();
-    if ((e.key === 'Delete' || e.key === 'Backspace') && selected >= 0 && list.length > 2) {
-      list.splice(selected, 1);
-      selected = -1;
-      e.preventDefault();
-      e.stopPropagation();
-      draw();
-      emit();
-    }
-  });
-  const numEdit = () => {
-    const list = pts();
-    if (selected < 0) return;
-    const x = Math.max(0, Math.min(255, Number(inIn.value))), y = Math.max(0, Math.min(255, Number(outIn.value)));
-    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
-    list[selected] = [x, y];
-    list.sort((a, b) => a[0] - b[0]);
-    selected = list.findIndex((q) => q[0] === x && q[1] === y);
-    draw();
-    emit();
-  };
-  inIn.addEventListener('change', numEdit);
-  outIn.addEventListener('change', numEdit);
-  sel.addEventListener('change', () => {
-    channel = sel.value;
-    selected = -1;
-    draw();
-  });
-  preset.addEventListener('change', () => {
-    if (!preset.value) return;
-    p[channel] = clone(CURVE_PRESETS[preset.value]);
-    preset.value = '';
-    selected = -1;
-    draw();
-    emit();
-  });
-  requestAnimationFrame(draw);
-  draw();
-  return { element: el };
-}
-
 /**
  * Editor element for an adjustment's parameters. onChange(params) fires on every edit.
- * source: ImageDataLike used for histograms (Levels, Curves).
+ * source: ImageDataLike used for histograms (Levels, Curves). Further options reach registered editors unchanged
+ * (adjust-tonal: `clip(which | null)`, the dialog's clipping display).
  */
-export function buildAdjustmentEditor(kind, params, onChange, { source = null, app = null } = {}) {
+export function buildAdjustmentEditor(kind, params, onChange, { source = null, app = null, ...rest } = {}) {
   const base = { ...clone(ADJUSTMENTS[kind]?.defaults ?? {}), ...clone(params ?? {}) };
   const custom = ADJUST_EDITORS.get(kind);
   // a registered editor may return, besides `element`, the capabilities of I.2 (setParams, presetKind, eyedroppers,
-  // onImage, auto, dispose): the adjustment frame (lib/adjust/frame.js) offers them
-  if (custom?.editor) return custom.editor(kind, base, onChange, { source, app });
-  if (kind === 'levels') return levelsEditor(base, onChange, source);
-  if (kind === 'curves') return curvesEditor(base, onChange, source);
+  // onImage, auto, dispose): the adjustment frame (lib/adjust/frame.js) offers them. Levels, Curves, Exposure,
+  // Threshold and Brightness/Contrast are registered by lib/adjust/tonal.js (adjust-tonal).
+  if (custom?.editor) return custom.editor(kind, base, onChange, { source, app, ...rest });
   const fields = fieldSpecs(kind, base);
   if (!fields.length) {
     const el = document.createElement('p');
@@ -522,13 +217,14 @@ export function buildAdjustmentEditor(kind, params, onChange, { source = null, a
  * copy of the affected region (colour for layers, grey for masks); show() previews a processed
  * copy of base in place.
  */
-export function beginPixelEdit(app, { quiet = false, label = 'Edit', margin = 0 } = {}) {
+export function beginPixelEdit(app, { quiet = false, label = 'Edit', margin = 0, ignoreSelection = false } = {}) {
   const d = app.doc;
   if (!d) return null;
   const t = app.pixelTarget?.({ quiet });
   if (!t) return null;
   const canvas = t.canvas;
-  const sel = d.selection && !d.selection.isEmpty ? d.selection : null;
+  // ignoreSelection (adjust-tonal): the whole layer (Equalize entire image based on selected area)
+  const sel = !ignoreSelection && d.selection && !d.selection.isEmpty ? d.selection : null;
   const layerRect = { x: t.x, y: t.y, width: canvas.width, height: canvas.height };
   // neighbourhood filters read a margin around the selection so its edges blend with the surroundings
   const selRect = sel && margin > 0 ? { x: sel.bounds.x - margin, y: sel.bounds.y - margin, width: sel.bounds.width + margin * 2, height: sel.bounds.height + margin * 2 } : sel?.bounds;
@@ -685,8 +381,9 @@ export function processed(session, fn) {
 }
 
 /**
- * Generic dialog driving a pixel edit: editor(onChange) -> { element }, run(img, params) edits img in place.
- * Resolves with the params (committed) or null. `frame: { kind }` (0.4, I.1) wraps the editor in the adjustment
+ * Generic dialog driving a pixel edit: editor(onChange, session, { refresh }) -> { element }, run(img, params,
+ * session, { preview }) edits img in place (`preview` is false for the committed result; refresh() redraws the
+ * preview). Resolves with the params (committed) or null. `frame: { kind }` (0.4, I.1) wraps the editor in the adjustment
  * frame (preset menu, eyedroppers, on-image tool, Auto, Preview: each row only when the editor offers it); the filter
  * dialogs pass none and look as in 0.3.
  */
@@ -700,15 +397,17 @@ export async function pixelEditDialog(app, { title, label = title, params, edito
     if (done) return;
     if (!preview) return session.restore();
     try {
-      session.show(processed(session, (img) => run(img, current, session)));
+      session.show(processed(session, (img) => run(img, current, session, { preview: true })));
     } catch (err) {
       console.error(err);
     }
   });
+  let built = null;
   const ed = editor((p) => {
     current = p;
+    built?.paramsChanged?.(p);
     refresh();
-  }, session);
+  }, session, { refresh: () => refresh() });
   const setPreview = (on) => {
     preview = on;
     app.settings.dialogPreview = preview;
@@ -716,7 +415,6 @@ export async function pixelEditDialog(app, { title, label = title, params, edito
     refresh();
   };
   let content;
-  let built = null;
   let onReset;
   if (frame?.kind) {
     // the adjustment frame (lib/adjust/frame.js, I.1): it samples the session base (the pixels before the edit)
@@ -773,7 +471,7 @@ export async function pixelEditDialog(app, { title, label = title, params, edito
     return null;
   }
   try {
-    const img = await app.busy(`${title}…`, async () => processed(session, (x) => run(x, current, session)));
+    const img = await app.busy(`${title}…`, async () => processed(session, (x) => run(x, current, session, { preview: false })));
     session.commit(label, img, typeof meta === 'function' ? meta(current) : meta ?? {});
   } catch (err) {
     session.cancel();
@@ -796,7 +494,68 @@ export function install(app) {
 
   const lastParams = () => (app.settings.adjustLast ??= {});
 
-  async function adjust(kind, arg, ctx = null) {
+  /**
+   * The edit's description for 'pixels:committed' (lib/depth.js redoes it on 16/32-bit pixels): only when deep.js can
+   * redo it faithfully. Levels and Curves in the CMYK and Lab spaces cannot go through its tables (`lut` is exact
+   * on the grey axis only), so the sync pass takes the 8-bit result over instead.
+   */
+  const editMeta = (kind, params) => {
+    if ((kind === 'levels' || kind === 'curves') && ['cmyk', 'lab'].includes(tonalSpace(params))) return {};
+    return { adjustment: { kind, params: clone(params) } };
+  };
+
+  /** Selection weights (one byte per pixel of a session's base) for the area the session covers. */
+  const selectionWeights = (session, sel, d) => {
+    if (!sel) return null;
+    const { x: rx, y: ry } = session.rect, w = session.base.width, h = session.base.height;
+    const out = new Uint8Array(w * h);
+    for (let y = 0; y < h; y++) {
+      const sy = ry + y;
+      if (sy < 0 || sy >= d.height) continue;
+      for (let x = 0; x < w; x++) {
+        const sx = rx + x;
+        if (sx >= 0 && sx < d.width) out[y * w + x] = sel.mask[sy * d.width + sx];
+      }
+    }
+    return out;
+  };
+
+  /**
+   * Equalize with a selection asks Photoshop's question: the selected area only, or the entire image based on the
+   * selected area (its histogram, applied to the whole layer). arg { scope: 'selection' | 'image' } answers it
+   * (actions record it); without a selection Equalize runs as in 0.3.
+   */
+  async function equalize(arg, ctx) {
+    const d = app.doc;
+    const sel = d?.selection && !d.selection.isEmpty ? d.selection : null;
+    let scope = arg && typeof arg === 'object' ? arg.scope ?? null : null;
+    if (sel && !scope) {
+      const v = await formDialog(app, {
+        title: 'Equalize',
+        width: 380,
+        fields: [{ key: 'scope', label: 'Equalize', type: 'segment', value: 'selection', span: true, options: [['selection', 'Selected area only'], ['image', 'Entire image based on selected area']] }],
+      });
+      if (!v) return ctx?.cancel();
+      scope = v.scope;
+    }
+    const session = beginPixelEdit(app, { label: 'Equalize', ignoreSelection: !!sel && scope === 'image' });
+    if (!session) return ctx?.cancel();
+    let params = {};
+    if (sel) {
+      // the histogram of the selected pixels only: the session's rect (the selection's bounds, or the whole layer for
+      // 'image') also holds unselected ones
+      params = { hist: Array.from(weightedHistogram(session.base, null, selectionWeights(session, sel, d)).l) };
+    }
+    const img = processed(session, (x) => applyAdjustment(x, 'equalize', params, null, editCtx(app, session)));
+    session.commit('Equalize', img, editMeta('equalize', params));
+    if (sel) ctx?.setReplayArg({ scope });
+  }
+
+  /**
+   * Image > Adjustments > <kind>: a dialog (opens with the defaults; `last: true`, the Alt+Ctrl commands, with the
+   * last-used values: Photoshop's behaviour since 0.4), or with an object argument the adjustment at once (replays).
+   */
+  async function adjust(kind, arg, ctx = null, { last = false } = {}) {
     const def = ADJUSTMENTS[kind];
     if (!def) return;
     if (def.placeholder) {
@@ -819,37 +578,69 @@ export function install(app) {
       ctx?.cancel();
       return app.dialogs.toast('Select a pixel layer (or add an adjustment layer from the Layers panel)', { kind: 'error' });
     }
+    if (kind === 'equalize') return equalize(arg, ctx);
     if (NO_PARAMS.has(kind) || (arg && typeof arg === 'object')) {
       const session = beginPixelEdit(app, { label: def.name });
       if (!session) return ctx?.cancel();
       const params = arg && typeof arg === 'object' ? arg : {};
       const img = processed(session, (x) => applyAdjustment(x, kind, params, null, editCtx(app, session)));
-      session.commit(def.name, img, { adjustment: { kind, params: clone(params) } });
+      session.commit(def.name, img, editMeta(kind, params));
+      if (last && arg && typeof arg === 'object') ctx?.setReplayCommand?.(`image:adjust-${kind}`, clone(params));
       return;
     }
     const custom = ADJUST_EDITORS.get(kind);
-    const start = clone(lastParams()[kind] ?? (custom?.start ? custom.start(app) : null) ?? startParams(kind));
+    const fresh = () => (custom?.start ? custom.start(app) : null) ?? startParams(kind);
+    // Photoshop's adjustment dialogs open with the defaults, except those that keep their last settings (an editor
+    // registration may say so with `remember`)
+    const remember = last || (custom?.remember ?? REMEMBERS_LAST.has(kind));
+    const start = clone((remember ? lastParams()[kind] : null) ?? fresh());
+    let clipMode = null; // Levels / Curves: the clipping display while a black or white point is Alt-dragged
     const used = await pixelEditDialog(app, {
       title: def.name,
       params: start,
-      width: custom?.width ?? (kind === 'curves' ? 320 : 420),
-      editor: (onChange, session) => buildAdjustmentEditor(kind, start, onChange, { source: session.base, app }),
-      run: (img, params, session) => applyAdjustment(img, kind, params, null, editCtx(app, session)),
-      meta: (params) => ({ adjustment: { kind, params: clone(params) } }),
+      width: custom?.width ?? 420,
+      editor: (onChange, session, { refresh } = {}) => buildAdjustmentEditor(kind, start, onChange, {
+        source: session.base,
+        app,
+        clip: (which) => {
+          clipMode = which;
+          refresh?.();
+        },
+      }),
+      run: (img, params, session, { preview = false } = {}) => {
+        if (preview && clipMode) clippingView(img, kind, params, clipMode);
+        else applyAdjustment(img, kind, params, null, editCtx(app, session));
+      },
+      meta: (params) => editMeta(kind, params),
       frame: { kind },
     });
     if (used) {
       lastParams()[kind] = used;
       app.saveSettingsSoon();
-      ctx?.setReplayArg(clone(used));
+      // an action records the plain command with the values (the Alt+Ctrl variants only choose where the dialog starts)
+      if (last && ctx?.setReplayCommand) ctx.setReplayCommand(`image:adjust-${kind}`, clone(used));
+      else ctx?.setReplayArg(clone(used));
     } else ctx?.cancel();
   }
+  app.adjustDialog = (kind, arg, ctx, opts) => adjust(kind, arg, ctx, opts);
 
+  /**
+   * Image > Auto Tone / Auto Contrast / Auto Color. Until options are saved as the defaults (Auto Color Correction
+   * Options), 0.3's recipes (0.1 % clipping); then Photoshop's: the command's algorithm (Per Channel Contrast,
+   * Monochromatic Contrast, Find Dark & Light Colors with Snap Neutral Midtones) with the saved clipping and targets.
+   */
   function auto(kind) {
     const fn = { tone: autoLevels, contrast: autoContrast, color: autoColor }[kind];
     const label = { tone: 'Auto Tone', contrast: 'Auto Contrast', color: 'Auto Color' }[kind];
     const session = beginPixelEdit(app, { label });
     if (!session) return;
+    const saved = app.settings.adjust?.autoOptions;
+    if (saved) {
+      const algorithm = { tone: 'perChannel', contrast: 'mono', color: 'darkLight' }[kind];
+      const params = autoLevelsParams(session.base, { ...autoOptions(saved), algorithm, snap: kind === 'color' });
+      session.commit(label, processed(session, (img) => applyAdjustment(img, 'levels', params, null, editCtx(app, session))), editMeta('levels', params));
+      return;
+    }
     session.commit(label, processed(session, (img) => fn(img, { clip: 0.1 })));
   }
 
@@ -997,7 +788,6 @@ export function install(app) {
   for (const k of ADJUSTMENT_KINDS) cmds[`image:adjust-${k}`] = { enabled: () => has() && !ADJUSTMENTS[k].placeholder, run: (arg, ctx) => adjust(k, arg, ctx), label: `${ADJUSTMENTS[k].name}${NO_PARAMS.has(k) ? '' : '…'}`, dialog: !NO_PARAMS.has(k) };
   app.commands.registerAll(cmds);
   void DIRECT_ONLY;
-  void levelsLut;
 }
 
 /** Composite of everything below an adjustment layer (for its histogram). */

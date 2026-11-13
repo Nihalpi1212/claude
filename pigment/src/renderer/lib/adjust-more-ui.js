@@ -256,9 +256,10 @@ function colorLookupEditor(app) {
 const HDR_METHOD_OPTIONS = [['local-adaptation', 'Local Adaptation'], ['equalize-histogram', 'Equalize Histogram'], ['exposure-gamma', 'Exposure and Gamma'], ['highlight-compression', 'Highlight Compression']];
 const isIdentityCurve = (pts) => !Array.isArray(pts) || pts.length < 2 || (pts.length === 2 && pts[0][0] === 0 && pts[0][1] === 0 && pts[1][0] === 255 && pts[1][1] === 255);
 
-function hdrToningEditor(kind, params, onChange) {
+function hdrToningEditor(kind, params, onChange, { app = null } = {}) {
   const defaults = ADJUSTMENTS['hdr-toning'].defaults;
   let curve = isIdentityCurve(params?.curve) ? null : clone(params.curve);
+  let curveEd = null;
   const local = (v) => v.method === 'local-adaptation';
   const S = (key, label, min, max, step, extra = {}) => ({ key, label, type: 'slider', min, max, step, ...extra });
   let form = null;
@@ -288,7 +289,8 @@ function hdrToningEditor(kind, params, onChange) {
         const ed = buildAdjustmentEditor('curves', { rgb: curve ?? [[0, 0], [255, 255]] }, (c) => {
           curve = isIdentityCurve(c.rgb) ? null : c.rgb;
           emit();
-        });
+        }, { app });
+        curveEd = ed;
         // one curve for all channels: the channel chooser of the Curves editor does not apply here
         const top = ed.element.querySelector('.prop-row');
         const channel = top?.querySelector('select');
@@ -307,7 +309,17 @@ function hdrToningEditor(kind, params, onChange) {
   const values = {};
   for (const f of fields) if (f.key) values[f.key] = params?.[f.key] ?? defaults[f.key];
   form = buildForm(fields, { values, onChange: emit });
-  return { element: form.element, form };
+  return {
+    element: form.element,
+    form,
+    // presets (adjust-color: the frame's preset menu) and Reset update the dialog in place
+    setParams(next) {
+      const p = { ...defaults, ...(next ?? {}) };
+      for (const f of fields) if (f.key) form.set(f.key, p[f.key], { silent: true });
+      curve = isIdentityCurve(p.curve) ? null : clone(p.curve);
+      curveEd?.setParams?.({ rgb: curve ?? [[0, 0], [255, 255]] });
+    },
+  };
 }
 
 // ---- Match Color editor ---------------------------------------------------------------------------------------
@@ -669,6 +681,21 @@ function replaceColorEditor(app) {
   };
 }
 
+/**
+ * HDR Toning's prepare hook (I.2; adjust-color moved it here from 0.3's command wrapper, rule 3): a layered document is
+ * flattened first, after a confirmation, or silently when an action replays the step with its settings.
+ */
+async function hdrPrepare(app, arg) {
+  const d = app.doc;
+  const layered = d && (d.root.children.length !== 1 || d.root.children[0].type !== 'raster');
+  if (!layered) return true;
+  const replay = !!arg && typeof arg === 'object';
+  const ok = replay || (await app.dialogs.confirm('HDR Toning works on a flattened image. Flatten the document?', { title: 'HDR Toning', detail: 'All layers are merged into one. You can undo this.', okLabel: 'Flatten' }));
+  if (!ok) return false;
+  await app.commands.run('image:flatten', undefined, 'api');
+  return true;
+}
+
 // ---- install ------------------------------------------------------------------------------------------------
 
 export function install(app) {
@@ -677,7 +704,9 @@ export function install(app) {
 
   if (app.adjustEditors?.register) {
     app.adjustEditors.register('color-lookup', { editor: colorLookupEditor(app), width: 420 });
-    app.adjustEditors.register('hdr-toning', { editor: hdrToningEditor, width: 480 });
+    // HDR Toning works on the flattened image (as in Photoshop): its prepare hook (I.2) flattens a layered document
+    // first, after a confirmation (silently when an action replays it); false cancels the command
+    app.adjustEditors.register('hdr-toning', { editor: hdrToningEditor, width: 480, prepare: hdrPrepare });
     app.adjustEditors.register('match-color', { editor: matchColorEditor(app), width: 460 });
     app.adjustEditors.register('replace-color', {
       editor: replaceColorEditor(app),
@@ -702,26 +731,6 @@ export function install(app) {
       last['match-color'] = { ...rest, source: null };
     }
   });
-
-  // HDR Toning works on the flattened image (as in Photoshop): the command registered by adjust-ui.js is wrapped
-  // so a layered document is flattened first, after a confirmation (silently when an action replays it).
-  const hdrBase = app.commands.commands.get('image:adjust-hdr-toning');
-  if (hdrBase) {
-    app.commands.register('image:adjust-hdr-toning', {
-      ...hdrBase,
-      run: async (arg, ctx) => {
-        const d = app.doc;
-        const layered = d && (d.root.children.length !== 1 || d.root.children[0].type !== 'raster');
-        if (layered) {
-          const replay = arg && typeof arg === 'object';
-          const ok = replay || (await app.dialogs.confirm('HDR Toning works on a flattened image. Flatten the document?', { title: 'HDR Toning', detail: 'All layers are merged into one. You can undo this.', okLabel: 'Flatten' }));
-          if (!ok) return ctx?.cancel();
-          await app.commands.run('image:flatten', undefined, 'api');
-        }
-        return hdrBase.run(arg, ctx);
-      },
-    });
-  }
 
   // ---- Apply Image ------------------------------------------------------------------------------------------
 
