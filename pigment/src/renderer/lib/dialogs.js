@@ -142,16 +142,25 @@ export class Dialogs {
       }
       entry.dialogs = this;
 
+      let proposed; // the text the autofocus field proposes (read after onOpen, which may fill it in)
       requestAnimationFrame(() => {
         // a field that was reached before this frame (a quick click, a script) keeps the focus: moving it now
         // would send the typing that follows into the first field
-        if (closed || (dialog.contains(document.activeElement) && document.activeElement !== dialog)) return;
+        if (closed) return;
         const auto = dialog.querySelector('[autofocus]');
         const target = auto ?? dialog.querySelector('input, textarea, select') ?? primaryButton ?? dialog.querySelector('button');
+        const active = document.activeElement;
+        if (dialog.contains(active) && active !== dialog) {
+          // ...but the browser itself focuses the first [autofocus] field it sees: that is the dialog's own
+          // target, whose proposed text is still selected so that typing replaces it (unless typing began already)
+          if (active === target && target.tagName === 'INPUT' && target.value === proposed) target.select();
+          return;
+        }
         target?.focus?.();
         if (target && target.select && (target.tagName === 'INPUT')) target.select();
       });
       opts.onOpen?.(dialog, close);
+      proposed = dialog.querySelector('[autofocus]')?.value;
     });
   }
 

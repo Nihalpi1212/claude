@@ -123,3 +123,57 @@ test('injectJpegXmp adds the File Info packet behind the JFIF header and leaves 
   assert.equal(injectJpegXmp(jpeg, ''), jpeg);
   assert.equal(injectJpegXmp(jpeg, `<x:xmpmeta>${'k'.repeat(70_000)}</x:xmpmeta>`), jpeg);
 });
+
+// ---- review of the hunt fixes -----------------------------------------------------------------------------------
+
+test('Save Actions writes a file that Load Actions accepts for any set the panel holds (long selection runs)', () => {
+  // eight recorded selections of about 26 600 run numbers each: within MAX_ARG_BYTES per step and MAX_SETS_BYTES in
+  // all, but one indented line per number would make the file several times MAX_FILE_BYTES
+  const runs = Array.from({ length: 26_602 }, (_, i) => (i % 2 ? (i * 7) % 300 : (i * 13) % 256));
+  const steps = [];
+  for (let i = 0; i < 8; i++) {
+    steps.push(M.makeStep('actions:set-selection', { width: 4000, height: 3000, units: 'px', runs }, 'Set Selection'));
+    steps.push(M.makeStep('image:adjust-levels', { black: 10, white: 240, gamma: 1.1 }, 'Levels'));
+  }
+  const sets = [M.makeSet('Retouch', [M.makeAction('Eight ovals', steps)])];
+  assert.equal(M.limitError(sets), null);
+  const text = M.serializeSets(sets);
+  assert.ok(new TextEncoder().encode(text).length <= M.MAX_FILE_BYTES);
+  const back = M.parseActionsFile(new TextEncoder().encode(text));
+  assert.equal(back[0].actions[0].steps.length, 16);
+  assert.deepEqual(back[0].actions[0].steps[0].arg.runs, runs);
+  // a small set stays indented for people who read it
+  assert.match(M.serializeSets([M.makeSet('S', [M.makeAction('A', [M.makeStep('image:adjust-invert')])])]), /\n {2}"format"/);
+});
+
+test('settleLinks remembers every dissolved link set, so Undo past two of them makes the first whole again', async () => {
+  const { settleLinks } = await import('../../src/renderer/lib/layers-extras/tags.js');
+  const A = { name: 'A', linked: 'K1' }, B = { name: 'B', linked: 'K1' }, C = { name: 'C', linked: null };
+  let layers = [A, B, C];
+  const doc = { root: {}, layers: () => layers };
+  // B deleted: A is left alone in K1
+  layers = [A, C];
+  assert.equal(settleLinks(doc), true);
+  assert.equal(A.linked, null);
+  // A and C linked (K2), then C deleted: A remembers both sets
+  A.linked = C.linked = 'K2';
+  assert.equal(settleLinks(doc), false);
+  layers = [A];
+  settleLinks(doc);
+  assert.equal(A.linked, null);
+  // Undo: C comes back (K2 whole again), the Link of A and C is undone, B comes back (K1 whole again)
+  layers = [A, C];
+  settleLinks(doc);
+  assert.equal(A.linked, 'K2');
+  A.linked = C.linked = null;
+  settleLinks(doc);
+  layers = [A, B, C];
+  assert.equal(settleLinks(doc), true);
+  assert.deepEqual(layers.map((l) => l.linked ?? null), ['K1', 'K1', null]);
+  // a layer linked elsewhere does not keep a remembered set alive for a returning partner
+  const D = { name: 'D', linked: 'K9' }, E = { name: 'E', linked: 'K3', loneLink: ['K9'] };
+  layers = [D, E];
+  settleLinks(doc);
+  assert.equal(D.linked, null);
+  assert.equal(E.linked, null);
+});

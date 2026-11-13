@@ -48,8 +48,10 @@ export function aiTask(app, label, fn) {
   // the real work keeps running after a cancel (nothing can abort the bridge call); its late result is dropped
   const work = Promise.resolve().then(() => fn(state));
   work.catch(() => {});
+  // the request only waits (its result is added when it arrives, the toast cancels it): commands are not held back
+  // meanwhile (app.busy's gate), so Save, Undo and the panels keep working through a long request
   return app
-    .busy(label, () => Promise.race([work, cancel]))
+    .busy(label, () => Promise.race([work, cancel]), { gate: false })
     .finally(() => remove());
 }
 

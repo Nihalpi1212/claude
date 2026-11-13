@@ -68,25 +68,35 @@ function dropLoneLinks(doc) {
  * smart object) is not linked to anything: its link is taken off, and remembered (layer.loneLink), because the
  * change was not this module's to record: when Undo brings a partner back, the remembered link returns with it
  * (set ids are never reused, so nothing but Undo can make a remembered set whole again).
+ * layer.loneLink is a list: a layer can lose a second set (linked again, then that partner deleted too) while the
+ * first is still remembered, and Undo walking back past both must find the first one again.
  * Returns true when a layer changed.
  */
 export function settleLinks(doc) {
   if (!doc?.root) return false;
   const layers = doc.layers();
+  const remembered = (l) => (Array.isArray(l.loneLink) ? l.loneLink : l.loneLink ? [l.loneLink] : []);
+  // members of a set: the layers linked to it, and the unlinked ones that remember it (they can take it back)
   const count = new Map();
+  const add = (id) => count.set(id, (count.get(id) ?? 0) + 1);
   for (const l of layers) {
-    const id = l.linked || l.loneLink;
-    if (id) count.set(id, (count.get(id) ?? 0) + 1);
+    if (l.linked) add(l.linked);
+    else for (const id of new Set(remembered(l))) add(id);
   }
   let changed = false;
   for (const l of layers) {
+    const lone = remembered(l);
     if (l.linked && count.get(l.linked) < 2) {
-      l.loneLink = l.linked;
+      l.loneLink = [...lone.filter((id) => id !== l.linked), l.linked];
       l.linked = null;
       changed = true;
-    } else if (!l.linked && l.loneLink && count.get(l.loneLink) >= 2) {
-      l.linked = l.loneLink;
-      l.loneLink = null;
+    } else if (!l.linked && lone.length) {
+      // the most recently dissolved set that is whole again
+      const back = lone.findLast((id) => count.get(id) >= 2);
+      if (!back) continue;
+      l.linked = back;
+      const rest = lone.filter((id) => id !== back);
+      l.loneLink = rest.length ? rest : null;
       changed = true;
     }
   }
@@ -207,8 +217,11 @@ export function installTags(app) {
   });
   app.on('doc:change', (e) => {
     if (e.kind !== 'tree' && e.kind !== 'props' && e.kind !== 'canvas' && e.kind !== 'history') return;
-    // a delete, merge or conversion may have left one layer of a link set behind
-    if (settleLinks(e.doc)) app.commands.invalidate();
+    // a delete, merge or conversion may have left one layer of a link set behind. Not while a history group is
+    // open (Link / Unlink set one layer after the other): settling between them would take a partner's link off
+    // before its own change records it, and Undo would restore that wrong 'before'. The group's closing 'history'
+    // change settles
+    if (!e.doc.history?.batch && settleLinks(e.doc)) app.commands.invalidate();
     syncTags(e.doc);
   });
   for (const d of app.docs?.docs ?? []) applyTags(d);

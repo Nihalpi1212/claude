@@ -1,7 +1,7 @@
 {
   "name": "pigment",
   "productName": "Pigment",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Free, open-source image editor for Windows and macOS: layers, masks, brushes, selections, adjustments, filters, text, vector shapes, PSD import and export.",
   "main": "src/main/main.js",
   "type": "module",

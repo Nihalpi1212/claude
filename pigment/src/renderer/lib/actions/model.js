@@ -102,7 +102,7 @@ export const MAX_NAME_LENGTH = 200; // set and action names, step labels, comman
 export const MAX_MESSAGE_LENGTH = 2000; // the text of a Stop step
 export const MAX_ITEMS = 5000; // sets + actions + steps in the panel
 export const MAX_SETS_BYTES = 1024 * 1024; // all sets, serialised
-export const MAX_FILE_BYTES = 4 * MAX_SETS_BYTES; // an actions file as written (indented JSON)
+export const MAX_FILE_BYTES = 4 * MAX_SETS_BYTES; // an actions file as read (serializeSets keeps what it writes below)
 
 /** Why these sets are more than the panel holds (the end of a sentence), or null when they fit. */
 export function limitError(sets) {
@@ -396,7 +396,12 @@ export function serializeSets(sets) {
       }),
     })),
   }));
-  return JSON.stringify({ format: FILE_FORMAT, version: FILE_VERSION, sets: clean }, null, 2);
+  const data = { format: FILE_FORMAT, version: FILE_VERSION, sets: clean };
+  // indented for people who read it, unless that takes the file past what Load Actions accepts: a recorded
+  // selection's runs take one indented line per number, many times their compact size. Written compact, sets
+  // within the panel's limits (MAX_SETS_BYTES, measured compact) always load again
+  const text = JSON.stringify(data, null, 2);
+  return new TextEncoder().encode(text).length <= MAX_FILE_BYTES ? text : JSON.stringify(data);
 }
 
 /** Photoshop .atn files start with a 4-byte version (16) and a set name in UTF-16: recognised only to say why they fail. */

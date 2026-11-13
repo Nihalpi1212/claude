@@ -6,7 +6,7 @@ import { writeZip, readZip, findEntry, streamCodecs } from '../../shared/zip.js'
 import { Document, RasterLayer, GroupLayer, TextLayer, AdjustmentLayer, createCanvas, layerFromDescription, canvasIsBlank, textExtensionFor } from './document.js';
 import { parseColor } from '../../shared/pixels/color.js';
 import { MODES, duotoneLut } from '../../shared/pixels/modes.js';
-import { flattenDocument, modeRendererFor } from './compositor.js';
+import { Compositor, flattenDocument, modeRendererFor } from './compositor.js';
 import { Selection } from './selection.js';
 
 export const OPEN_EXTENSIONS = ['pigment', 'psd', 'psb', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'avif', 'svg', 'ico'];
@@ -574,13 +574,37 @@ export function writePsdDocument(doc, compositor) {
   // them (the luma weights, to the percent) does what the mode does to the composite.
   const adjusts = (group) => group.children.some((l) => l.visible && (l.type === 'adjustment' || (l.isGroup && adjusts(l))));
   const greyOnTop = doc.mode === 'grayscale' && adjusts(doc.root);
+  const render = !greyOnTop && ['duotone', 'multichannel', 'grayscale'].includes(doc.mode) ? modeRendererFor(doc.mode) : null;
+  const inkedCache = new Map(); // source canvas -> the same pixels the way the mode shows them
+  const inked = (canvas, x, y) => {
+    if (!render || !canvas?.width || !canvas.height) return canvas;
+    if (!inkedCache.has(canvas)) {
+      const c = createCanvas(canvas.width, canvas.height);
+      c.getContext('2d').drawImage(canvas, 0, 0);
+      render(doc, c, { x, y, width: c.width, height: c.height }, {});
+      inkedCache.set(canvas, c);
+    }
+    return inkedCache.get(canvas);
+  };
   // Duotone inks are a curve of the composite's grey, not of each layer's: inked one by one, a translucent layer over
-  // another (or an anti-aliased edge) blends two ink colours where the document inks the blended grey, up to 15
-  // levels off. As soon as layers meet, they are written as stored (grey) and a Gradient Map on top, one stop per
-  // grey level (the same luma), prints the composite through the inks.
+  // a different one (or an adjustment layer) blends or adjusts ink colours where the document inks the blended grey,
+  // up to 15 levels off. When the layers inked one by one do not composite to the picture, they are written as
+  // stored (grey) and a Gradient Map on top, one stop per grey level (the same luma), prints the composite through
+  // the inks.
   const content = (group) => group.children.reduce((n, l) => n + (!l.visible || l.quickMask || l.preview || l.type === 'adjustment' ? 0 : l.isGroup ? content(l) : 1), 0);
-  const inksOnTop = doc.mode === 'duotone' && doc.duotone?.inks?.length > 0 && (adjusts(doc.root) || content(doc.root) > 1);
-  const modeRender = !greyOnTop && !inksOnTop && ['duotone', 'multichannel', 'grayscale'].includes(doc.mode) ? modeRendererFor(doc.mode) : null;
+  const layerByLayerIsShown = () => {
+    const probe = new Compositor();
+    probe.layerSource = (layer) => {
+      const src = Compositor.prototype.layerSource.call(probe, layer);
+      return src && { ...src, canvas: inked(src.canvas, src.x, src.y) };
+    };
+    const read = (c) => c.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, doc.width, doc.height).data;
+    const a = read(probe.composite(doc, { rawMode: true })), b = read(flattenDocument(doc, compositor));
+    for (let i = 0; i < a.length; i++) if (Math.abs(a[i] - b[i]) > 2) return false;
+    return true;
+  };
+  const inksOnTop = doc.mode === 'duotone' && doc.duotone?.inks?.length > 0 && (adjusts(doc.root) || content(doc.root) > 1) && !layerByLayerIsShown();
+  const modeRender = inksOnTop ? null : render;
   const inks = () => {
     const lut = duotoneLut(doc.duotone);
     const hex = (v) => `#${[0, 1, 2].map((c) => lut[v * 3 + c].toString(16).padStart(2, '0')).join('')}`;
@@ -592,13 +616,7 @@ export function writePsdDocument(doc, compositor) {
     const [r, g, b] = parseColor(layer.font?.color ?? '#000000');
     return doc.mode === 'grayscale' && r === g && g === b;
   };
-  const shown = (canvas, x, y) => {
-    if (!modeRender || !canvas?.width || !canvas.height) return canvas;
-    const c = createCanvas(canvas.width, canvas.height);
-    c.getContext('2d').drawImage(canvas, 0, 0);
-    modeRender(doc, c, { x, y, width: c.width, height: c.height }, {});
-    return c;
-  };
+  const shown = (canvas, x, y) => (modeRender ? inked(canvas, x, y) : canvas);
   const toPsd = (layer) => {
     const lk = layer.locked ?? {};
     const base = {

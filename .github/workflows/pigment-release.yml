@@ -117,6 +117,13 @@ jobs:
             and the other Automate and Scripts commands; Auto-Align, Auto-Blend, Photomerge and stack
             modes; Content-Aware Scale and Perspective Crop; Find, Isolate and Link Layers, File Info.
 
+            **Fixed in 0.3.1**: about 60 bugs found by testing the 0.3 features against each other,
+            among them a pending Perspective Crop missing from the saved file, unconfirmed filter
+            previews saved when the window was closed, 16/32-bit undo, merges and duplicates,
+            damaged TIFF, TGA and GIF files that opened half blank, action files that could run
+            commands no recording makes, and Batch and Image Processor edge cases.
+            pigment/docs/PARITY.md compares Pigment with Photoshop feature by feature.
+
             **AI (optional)**: sign in with ChatGPT (uses your Plus/Pro plan) or add an OpenAI or
             Google Gemini API key in AI › AI Accounts for Generative Fill / Expand, Generate Image,
             Remove / Replace Background, Replace Sky, Describe Image and the AI Assistant panel.

@@ -606,3 +606,16 @@ test('the engine\'s own step commands are recorded; its panel commands are not',
     assert.equal(M.recordDecision(done(id)).reason, 'ignored', id);
   }
 });
+
+test('a Close step that answers "Save changes?" is named by its answer, whatever an actions file calls it', () => {
+  const file = (steps) => JSON.stringify({ format: 'pigment-actions', version: 1, sets: [{ name: 'S', actions: [{ name: 'A', steps }] }] });
+  const sets = M.parseActionsFile(file([
+    { label: 'Sharpen More', command: 'file:close', arg: { save: false } },
+    { label: 'Sharpen', command: 'file:close', arg: { save: true }, dialog: true },
+    { label: 'Tidy up', command: 'file:close' },
+  ]));
+  assert.deepEqual(sets[0].actions[0].steps.map((s) => s.label), ['Close: don’t save', 'Close: save changes', 'Tidy up']);
+  // stored sets go through the same cleaning
+  assert.equal(M.normalizeSets([{ name: 'S', actions: [{ name: 'A', steps: [{ label: 'Invert', command: 'file:close', arg: { save: false } }] }] }])[0].actions[0].steps[0].label, 'Close: don’t save');
+  assert.equal(M.closeStepLabel({ command: 'file:close', arg: { save: 'no' } }), null);
+});

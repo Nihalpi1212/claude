@@ -326,7 +326,6 @@ class ContentAwareScaleTool extends Tool {
     if (!s) return false;
     if (s.applying) return true;
     s.applying = true;
-    s.confirmed = true; // ended by Enter / Apply (or by leaving the tool), not by Escape: see the command below
     s.done = this.apply(switchBack).catch((err) => {
       this.app.reportError(err, `${LABEL} failed`);
       if (this.session === s) this.finish({ switchBack });
@@ -338,7 +337,12 @@ class ContentAwareScaleTool extends Tool {
     const s = this.session, app = this.app, d = s.doc;
     cancelAnimationFrame(s.raf);
     s.raf = 0;
-    if (!this.changed) return this.finish({ switchBack });
+    if (!this.changed) {
+      // Enter / Apply on a box that was never changed: the user's go-ahead for a playing action (see the command
+      // below). Leaving the tool (a tab switch: deactivate) is not one, and neither is a scale that failed
+      if (switchBack) s.confirmed = true;
+      return this.finish({ switchBack });
+    }
     const { width: tw, height: th } = s.rect;
     // a linked layer mask goes with the whole layer's pixels through the same seams (Free Transform takes it along too);
     // with a selection only the selected pixels move, and the mask stays as it is

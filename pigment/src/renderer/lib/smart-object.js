@@ -15,6 +15,7 @@ import { bridge } from './bridge.js';
 import { decodeImageFile, openDocument, writePigment, baseName, extOf, OPEN_FILTERS, canvasToPng } from './io.js';
 import { buildAdjustmentEditor } from './adjust-ui.js';
 import { frameThrottle } from './form.js';
+import { applyTags, syncTags } from './layers-extras/tags.js';
 
 const clone = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
 
@@ -31,6 +32,13 @@ const forgetSource = typeof FinalizationRegistry === 'function' ? new Finalizati
 export function makeSource({ kind, doc = null, canvas = null, name = null }) {
   if (kind === 'document' && !(doc instanceof Document)) throw new Error('A document source needs a Document');
   if (kind !== 'document' && !canvas) throw new Error('An image source needs a canvas');
+  if (kind === 'document') {
+    // colour labels and links of the inner layers live in doc.meta.layerTags in a .pigment file, and an embedded
+    // document never goes through the app's doc:opened / doc:change handlers that keep that mirror (tags.js):
+    // a document read from a file gets them back on its layers, a converted or cloned one has them written down
+    applyTags(doc);
+    syncTags(doc);
+  }
   const src = { kind: kind === 'document' ? 'document' : 'image', doc: kind === 'document' ? doc : null, canvas: kind === 'document' ? null : canvas, name, id: newId('S'), version: 0 };
   Object.defineProperty(src, 'toJSON', { value: () => ({ kind: src.kind, ref: src.id, width: sourceWidth(src), height: sourceHeight(src), name: src.name }), enumerable: false });
   SOURCES.set(src.id, new WeakRef(src));

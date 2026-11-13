@@ -203,6 +203,10 @@ npm run dist:mac  # or dist:win / dist:linux: installers in dist/
 
 ## What it does not do (yet)
 
+For a feature-by-feature comparison with Photoshop (1,432 entries, each marked done, partial,
+approximate, missing or not feasible, with the release that plans it), see
+[docs/PARITY.md](docs/PARITY.md).
+
 Missing features:
 
 - Several styles inside one text layer (one font, size and colour per layer); text on a path follows

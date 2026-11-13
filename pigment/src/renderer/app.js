@@ -163,16 +163,18 @@ export class App extends EventTarget {
   /**
    * Runs a slow task with a busy cursor and status text. While one runs (busyDepth > 0) the command registry
    * refuses menu, key, toolbar and panel gestures that would change the document the task is computing on.
+   * `gate: false` is for a task that only waits (an AI request with its own Cancel, which adds its result when it
+   * arrives): the user goes on working meanwhile, saving and undoing included, as before 0.3.1.
    */
-  async busy(label, fn) {
+  async busy(label, fn, { gate = true } = {}) {
     this.statusbar.set('busy', label);
     document.body.classList.add('busy');
-    this.busyDepth = (this.busyDepth ?? 0) + 1;
+    if (gate) this.busyDepth = (this.busyDepth ?? 0) + 1;
     try {
       await new Promise((r) => requestAnimationFrame(() => setTimeout(r)));
       return await fn();
     } finally {
-      this.busyDepth--;
+      if (gate) this.busyDepth--;
       document.body.classList.remove('busy');
       this.statusbar.clear('busy');
     }
@@ -618,17 +620,24 @@ function setupHostEvents(app) {
   bridge.on('before-close', async ({ quitting } = {}) => {
     bridge.closeAck?.();
     try {
-      // A dialog that previews on the canvas (a filter or an adjustment on a layer, a smart filter, a kind's own
-      // session on the temporary copy of a smart object) is dismissed like Escape first, and its session gets a
-      // turn to put the document back: nothing the user has not confirmed may reach the saved file. The on-canvas
-      // sessions (Blur Gallery, Content-Aware Scale, Select and Mask) cancel themselves on this event.
-      for (let i = 0; i < 4 && app.dialogs.isOpen; i++) {
-        app.dialogs.closeAll();
+      // Before the first save, a dialog that previews on the canvas (a filter or an adjustment on a layer, a smart
+      // filter, a kind's own session on the temporary copy of a smart object) is dismissed like Escape, and its
+      // session gets a turn to put the document back: nothing the user has not confirmed may reach the saved file.
+      // Not sooner: who answers Cancel finds the dialog they were working in as they left it. A progress dialog
+      // (Batch, Image Processor: not dismissible) stays in any case, it holds the only Cancel of its run. The
+      // on-canvas sessions (Blur Gallery, Content-Aware Scale, Select and Mask) cancel themselves on this event.
+      let settled = false;
+      const settle = async () => {
+        if (settled) return;
+        settled = true;
+        const dismissible = (opts) => opts?.dismissible !== false;
+        for (let i = 0; i < 4 && app.dialogs.closeAll(dismissible); i++) await new Promise((r) => setTimeout(r));
         await new Promise((r) => setTimeout(r));
-      }
-      await new Promise((r) => setTimeout(r));
+      };
       for (const d of app.docs.list()) {
-        if (!(await app.docs.confirmDiscard(d))) {
+        const answer = await app.docs.askSave(d);
+        if (answer === 'save') await settle();
+        if (answer === 'cancel' || (answer === 'save' && !(await app.docs.save(d)))) {
           bridge.respondClose(false, !!quitting);
           return;
         }
