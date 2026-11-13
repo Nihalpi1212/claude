@@ -5,6 +5,8 @@
 import { RasterLayer, GroupLayer, createCanvas, copyCanvas, BLEND_MODES } from '../document.js';
 import { structural, setLayerProps, cloneLayer, relinkCopies, rasterizeLayer, renderLayersFlat, releaseOrphanClips, nextLayerName } from '../layer-ops.js';
 import { affineCanvas } from '../image-ops.js';
+import { mapShapeGeometry } from '../path-ops.js';
+import { scaleEffects } from '../../../shared/pixels/styles.js';
 import { formDialog } from '../form.js';
 import * as T from '../../../shared/pixels/transform.js';
 import { labelOptions, normaliseLabel, labelOf } from './tags.js';
@@ -72,14 +74,10 @@ function mapMask(mask, m, W, H, bounded = false) {
   return c;
 }
 
+/** Scale Effects for Convert to Layers: styles.js scaleEffects (every instance, J.6) on a deep copy. */
 function scaleStyles(styles, s) {
   if (!styles || Math.abs(s - 1) < 1e-6) return styles;
-  const out = clone(styles);
-  for (const v of Object.values(out)) {
-    if (!v || typeof v !== 'object') continue;
-    for (const k of ['size', 'distance', 'width']) if (typeof v[k] === 'number') v[k] *= s;
-  }
-  return out;
+  return scaleEffects(clone(styles), s);
 }
 
 /** Moves a freshly cloned layer (and its children) from a smart object's source space into the host document. */
@@ -106,7 +104,11 @@ export function mapLayerAffine(layer, m, W, H, src = null) {
       if (layer.pathText?.path) layer.pathText = { ...layer.pathText, path: mapPath(layer.pathText.path, point) };
     } else layer.transform = T.multiplyMatrix(m, layer.transform ?? T.IDENTITY);
   } else if (layer.type === 'shape') {
-    layer.path = mapPath(layer.path, point);
+    // the path, live parameters and document-space paints through path-ops.js (shapes-live, J.2)
+    const g = mapShapeGeometry(layer, point, { matrix: m });
+    Object.assign(layer, { path: g.path, shapeKind: g.shapeKind, shapeProps: g.shapeProps });
+    if (g.fill) layer.fill = g.fill;
+    if (g.stroke) layer.stroke = g.stroke;
     if (layer.stroke && !translation) layer.stroke = { ...layer.stroke, width: layer.stroke.width * scale };
   } else if (layer.type === 'fill') {
     const g = layer.paint?.gradient;
@@ -125,6 +127,8 @@ export function mapLayerAffine(layer, m, W, H, src = null) {
     }
     layer.mask = { enabled: true, linked: true, ...(layer.mask ?? {}), canvas: mapMask(mask, m, W, H, true) };
   } else if (layer.mask?.canvas) layer.mask = { ...layer.mask, canvas: mapMask(layer.mask.canvas, m, W, H) };
+  // a vector mask is source-document geometry: it moves into the host with its layer
+  if (layer.vectorMask) layer.vectorMask = { ...layer.vectorMask, path: mapPath(layer.vectorMask.path, point) };
   if (layer.styles && !translation) layer.styles = scaleStyles(layer.styles, scale);
   layer._cache = null;
   layer.touch();
@@ -142,6 +146,19 @@ export function installStructure(app) {
   const hasBackground = (d) => isBackgroundLayer(d.root.children[0]);
 
   app.isBackgroundLayer = isBackgroundLayer;
+  // Background rules (ARCHITECTURE.md "0.4 features", L.13; E30): stub with 0.3 behaviour (anything may go anywhere,
+  // nothing is locked); finish-layer-menu completes it (the Background stays at the bottom, its blend mode, opacity,
+  // masks, styles and position locked). The Background is recognised as in 0.3 (isBackgroundLayer).
+  app.backgroundRules = {
+    canPlace: (doc, layers, target, mode) => {
+      void doc, layers, target, mode;
+      return true;
+    },
+    lockedProps: (layer) => {
+      void layer;
+      return [];
+    },
+  };
 
   // ---- Background from Layer / Layer from Background ----------------------------------------------------------
   async function fromBackground(arg, ctx = null) {

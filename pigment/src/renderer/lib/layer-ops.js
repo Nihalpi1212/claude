@@ -6,6 +6,8 @@ import { Compositor } from './compositor.js';
 import { contentBounds } from '../../shared/pixels/core.js';
 import { offsetEach } from './layer-move.js';
 import { Selection } from './selection.js';
+import { maskCanvasFor } from './mask-render.js';
+import { createPaint, resolvePaint, paintEditor } from './paint-editors.js';
 
 // ---- snapshots ----------------------------------------------------------------------------------------------
 
@@ -52,7 +54,7 @@ export function restoreTree(doc, snap) {
  */
 export function structural(app, label, mutate, doc = app.doc, { bytes = 0 } = {}) {
   const before = snapshotTree(doc);
-  const extras = () => ({ selection: doc.selection, savedSelection: doc.savedSelection ?? null, guides: doc.guides.slice(), channels: doc.channels.slice(), paths: doc.paths.slice(), workPath: doc.workPath ?? null, dpi: doc.dpi });
+  const extras = () => ({ selection: doc.selection, savedSelection: doc.savedSelection ?? null, store: doc.store.snapshot(), channels: doc.channels.slice(), paths: doc.paths.slice(), workPath: doc.workPath ?? null, dpi: doc.dpi });
   const extraBefore = extras();
   const result = mutate();
   if (result === false) return false;
@@ -62,7 +64,7 @@ export function structural(app, label, mutate, doc = app.doc, { bytes = 0 } = {}
     restoreTree(doc, snap);
     doc.selection = extra.selection;
     doc.savedSelection = extra.savedSelection;
-    doc.guides = extra.guides.slice();
+    doc.store.restore(extra.store);
     doc.channels = extra.channels.slice();
     doc.paths = extra.paths.slice();
     doc.workPath = extra.workPath;
@@ -75,29 +77,73 @@ export function structural(app, label, mutate, doc = app.doc, { bytes = 0 } = {}
   return result;
 }
 
-/** Undoable property change on a layer: patch is { key: value } (nested objects replaced whole). */
+// a text layer's 0.3 views (`text`, `font`) and the 0.4 fields they are computed from (ARCHITECTURE.md "0.4", A)
+/** Layer > Distribute's edge arguments (finish-layer-menu); 0.3 knows only 'horizontal' and 'vertical'. */
+const DISTRIBUTE_EDGES = new Set(['top', 'vcenter', 'bottom', 'left', 'hcenter', 'right']);
+const TEXT_VIEWS = new Set(['font', 'text', 'content']);
+const TEXT_FIELDS = new Set(['font', 'text', 'content', 'typeOptions', 'height']);
+
+/**
+ * Undoable property change on a layer: patch is { key: value } (nested objects replaced whole). A text layer patch
+ * with `font`, `text` or `content` records `content`, `typeOptions` and `height` before and after, so undo restores
+ * the formatting exactly whatever the patch was (assigning `font` or `text` rewrites the content).
+ */
 export function setLayerProps(app, layer, patch, label = 'Layer properties', { merge = false } = {}) {
   const doc = app.doc;
+  const keys = Object.keys(patch);
+  const textual = layer.type === 'text' && keys.some((k) => TEXT_VIEWS.has(k));
+  const recorded = textual ? [...keys.filter((k) => !TEXT_FIELDS.has(k)), 'content', 'typeOptions', 'height'] : keys;
   const before = {};
-  for (const k of Object.keys(patch)) before[k] = clone(layer[k]);
+  for (const k of recorded) before[k] = clone(layer[k]);
   const apply = (values) => {
     for (const [k, v] of Object.entries(values)) layer[k] = clone(v);
     layer.touch();
     doc.changed('props', { layer });
   };
   apply(patch);
+  let after = patch;
+  if (textual) {
+    after = {};
+    for (const k of recorded) after[k] = clone(layer[k]);
+  }
   // consecutive changes of the same property (slider drags) merge into one entry
+  const key = `${layer.id}:${keys.join(',')}`;
   const last = doc.history.entries[doc.history.index];
-  if (merge && last?.mergeKey === `${layer.id}:${Object.keys(patch).join(',')}` && Date.now() - last.at < 1500) {
-    doc.history.merge(() => apply(patch));
+  if (merge && last?.mergeKey === key && Date.now() - last.at < 1500) {
+    doc.history.merge(() => apply(after));
     return;
   }
-  doc.history.push({ label, undo: () => apply(before), redo: () => apply(patch), bytes: 0, at: Date.now(), mergeKey: `${layer.id}:${Object.keys(patch).join(',')}` });
+  doc.history.push({ label, undo: () => apply(before), redo: () => apply(after), bytes: 0, at: Date.now(), mergeKey: key });
+}
+
+/**
+ * The same property change on several layers (M.3): one history entry. patchOrFn is a patch or (layer) -> patch.
+ * Landed by the 0.4 skeleton as a loop of setLayerProps inside history.group; finish-layer-menu makes it one entry whose
+ * merge key is the sorted ids plus the patch keys (a scrubby Opacity drag over three layers merges).
+ */
+export function setLayersProps(app, layers, patchOrFn, label = 'Layer properties', { merge = false } = {}) {
+  const doc = app.doc;
+  const list = (layers ?? []).filter(Boolean);
+  if (!doc || !list.length) return;
+  const patchFor = (l) => (typeof patchOrFn === 'function' ? patchOrFn(l) : patchOrFn);
+  if (list.length === 1) {
+    const patch = patchFor(list[0]);
+    if (patch) setLayerProps(app, list[0], patch, label, { merge });
+    return;
+  }
+  doc.history.group(label, () => {
+    for (const l of list) {
+      const patch = patchFor(l);
+      if (patch) setLayerProps(app, l, patch, label);
+    }
+  });
 }
 
 function clone(v) {
   if (v === null || typeof v !== 'object') return v;
   if (v instanceof HTMLCanvasElement) return v;
+  // frozen values (the rich-text content of a text layer) are immutable: shared, never copied
+  if (Object.isFrozen(v)) return v;
   if (Array.isArray(v)) return v.map(clone);
   const out = {};
   for (const [k, x] of Object.entries(v)) out[k] = x instanceof HTMLCanvasElement ? x : clone(x);
@@ -144,7 +190,9 @@ export function relinkCopies(copies) {
 export function cloneLayer(layer, { name, relink = true } = {}) {
   // a copy of the Background is an ordinary layer: it does not inherit the locks that pin the Background down
   const locked = isBackground(layer) ? { ...layer.locked, position: false, transparency: false, all: false } : { ...layer.locked, all: false };
-  const props = { name: name ?? `${layer.name} copy`, visible: layer.visible, opacity: layer.opacity, fillOpacity: layer.fillOpacity, blend: layer.blend, locked, clip: layer.clip, styles: layer.styles ? JSON.parse(JSON.stringify(layer.styles)) : null };
+  const props = { name: name ?? `${layer.name} copy`, visible: layer.visible, opacity: layer.opacity, fillOpacity: layer.fillOpacity, blend: layer.blend, locked, clip: layer.clip, styles: layer.styles ? JSON.parse(JSON.stringify(layer.styles)) : null,
+    // 0.4 fields (J.1): deep copies, so editing the copy's vector mask or blending never reaches the original
+    vectorMask: layer.vectorMask ? JSON.parse(JSON.stringify(layer.vectorMask)) : null, blending: layer.blending ? JSON.parse(JSON.stringify(layer.blending)) : null };
   let copy;
   switch (layer.type) {
     case 'raster':
@@ -181,19 +229,20 @@ export function rasterizeLayer(layer, doc, { bakeStyles = false } = {}) {
   if (layer.isGroup || bakeStyles) {
     // styles are baked with neutral opacity/blend (those stay live on the new layer); the mask shapes the
     // effects, so it is rendered in and not kept
-    const saved = { opacity: layer.opacity, blend: layer.blend };
+    // the bake renders the raster mask only (K.1 parts 'raster'): the vector mask stays live on the result // mask (K.1)
+    const saved = { opacity: layer.opacity, blend: layer.blend, vectorMask: layer.vectorMask ?? null };
     if (!layer.isGroup) {
       layer.opacity = 1;
       layer.blend = 'normal';
-      layer.touch();
     }
+    layer.vectorMask = null;
+    layer.touch();
     try {
       canvas = renderLayersFlat(doc, [layer], { dest: layer.parent });
     } finally {
-      if (!layer.isGroup) {
-        Object.assign(layer, saved);
-        layer.touch();
-      }
+      if (!layer.isGroup) Object.assign(layer, saved);
+      else layer.vectorMask = saved.vectorMask;
+      layer.touch();
     }
     x = 0;
     y = 0;
@@ -210,6 +259,8 @@ export function rasterizeLayer(layer, doc, { bakeStyles = false } = {}) {
   } else return null;
   const out = new RasterLayer({ name: layer.name, canvas, x, y, opacity: layer.isGroup ? 1 : layer.opacity, blend: layer.isGroup ? 'normal' : layer.blend, visible: layer.visible, clip: layer.clip, styles: bakeStyles ? null : layer.styles, fillOpacity: bakeStyles ? 1 : layer.fillOpacity });
   if (layer.mask && !layer.isGroup && !bakeStyles) out.mask = { ...layer.mask, canvas: copyCanvas(layer.mask.canvas) };
+  // the vector mask stays live, also when the styles and the raster mask are baked (K.1: bakes use parts 'raster')
+  if (layer.vectorMask) out.vectorMask = JSON.parse(JSON.stringify(layer.vectorMask));
   return out;
 }
 
@@ -239,14 +290,15 @@ export function renderLayersFlat(doc, layers, { dest = null } = {}) {
     return k[i] ?? null;
   };
   const orphans = [...set].filter((l) => l.clip && !ancestors.includes(l) && !set.has(baseOf(l)));
-  const saved = ancestors.map((g) => ({ g, opacity: g.opacity, blend: g.blend, mask: g.mask, styles: g.styles }));
-  for (const g of ancestors) Object.assign(g, { opacity: 1, blend: 'pass-through', mask: null, styles: null });
+  // the 0.4 vector mask and blending options of those groups keep applying too (J.1)
+  const saved = ancestors.map((g) => ({ g, opacity: g.opacity, blend: g.blend, mask: g.mask, styles: g.styles, vectorMask: g.vectorMask, blending: g.blending }));
+  for (const g of ancestors) Object.assign(g, { opacity: 1, blend: 'pass-through', mask: null, styles: null, vectorMask: null, blending: null });
   for (const l of orphans) l.clip = false;
   try {
     const skip = new Set(doc.layers().filter((l) => !set.has(l)));
     return copyCanvas(new Compositor().composite(doc, { skip }));
   } finally {
-    for (const s of saved) Object.assign(s.g, { opacity: s.opacity, blend: s.blend, mask: s.mask, styles: s.styles });
+    for (const s of saved) Object.assign(s.g, { opacity: s.opacity, blend: s.blend, mask: s.mask, styles: s.styles, vectorMask: s.vectorMask, blending: s.blending });
     for (const l of orphans) l.clip = true;
   }
 }
@@ -302,6 +354,22 @@ export function install(app) {
   const newRaster = (name) => {
     const d = doc();
     return new RasterLayer({ name: name ?? nextLayerName(d), width: d.width, height: d.height, x: 0, y: 0 });
+  };
+
+  // 0.3's Merge Down, shared by layer:merge-down and the skeleton's layer:merge (Ctrl+E)
+  const mergeDown = {
+    enabled: () => {
+      const l = doc()?.active;
+      return !!l && l.parent && l.parent.children.indexOf(l) > 0;
+    },
+    run: () => {
+      const d = doc();
+      const top = d.active;
+      const below = top.parent.children[top.parent.children.indexOf(top) - 1];
+      if (!below || below.type === 'adjustment') return app.dialogs.toast('Nothing to merge into: the layer below is an adjustment layer', { kind: 'error' });
+      if (!top.visible || !below.visible) return app.dialogs.toast('Show both layers before merging', { kind: 'error' });
+      mergeLayers([below, top], below.name, 'Merge down', { keepBase: true });
+    },
   };
 
   app.commands.registerAll({
@@ -503,39 +571,58 @@ export function install(app) {
     'layer:arrange-back': { enabled: hasLayer, run: () => arrange('back') },
     'layer:move-to': {
       enabled: has,
-      run: ({ id, target, mode, duplicate } = {}) => {
+      // { id, target, mode, duplicate } (0.3) or { ids: [...], target, mode, duplicate } (0.4, M.3: several layers in one
+      // entry, their stacking order kept)
+      run: ({ id, ids, target, mode, duplicate } = {}) => {
         const d = doc();
-        const layer = d.find(id), t = d.find(target);
-        if (!layer || !t || layer === t) return;
-        if (isDescendant(t, layer)) return app.dialogs.toast('A group cannot be moved into itself', { kind: 'error' });
-        structural(app, duplicate ? 'Duplicate layer' : 'Move layer', () => {
-          const subject = duplicate ? cloneLayer(layer) : layer;
-          if (duplicate) d.add(subject, layer.parent, layer.parent.children.length);
-          if (mode === 'into' && t.isGroup) d.move(subject, t, t.children.length);
-          else {
-            const parent = t.parent;
-            const idx = parent.children.indexOf(t) + (mode === 'above' ? 1 : 0);
-            d.move(subject, parent, idx);
+        const t = d.find(target);
+        if (!t) return;
+        const order = d.layers();
+        const wanted = (Array.isArray(ids) ? ids : [id]).map((x) => d.find(x)).filter((l) => l && l !== t);
+        // a layer inside another moved group moves with it; bottom first, so the stack keeps its order
+        const layers = [...new Set(wanted)].filter((l) => !wanted.some((o) => o !== l && isDescendant(l, o))).sort((a, b) => order.indexOf(a) - order.indexOf(b));
+        if (!layers.length) return;
+        if (layers.some((l) => isDescendant(t, l))) return app.dialogs.toast('A group cannot be moved into itself', { kind: 'error' });
+        const several = layers.length > 1;
+        structural(app, duplicate ? (several ? 'Duplicate layers' : 'Duplicate layer') : several ? 'Move layers' : 'Move layer', () => {
+          const subjects = layers.map((layer) => {
+            const subject = duplicate ? cloneLayer(layer) : layer;
+            if (duplicate) d.add(subject, layer.parent, layer.parent.children.length);
+            return subject;
+          });
+          // each subject goes right above the one placed before it (the first: above, below or into the target)
+          const into = mode === 'into' && t.isGroup;
+          const parent = into ? t : t.parent;
+          let anchor = null;
+          for (const subject of subjects) {
+            const at = into ? t.children.length : anchor ? parent.children.indexOf(anchor) + 1 : parent.children.indexOf(t) + (mode === 'above' ? 1 : 0);
+            d.move(subject, parent, at);
+            anchor = subject;
           }
           releaseOrphanClips(d);
-          d.setActive(subject);
+          d.setActive(subjects[subjects.length - 1]);
+          if (several) for (const s of subjects) d.selected.add(s);
         });
       },
     },
     'layer:align': { enabled: hasLayer, run: (edge) => align(edge) },
-    'layer:distribute': { enabled: () => (doc()?.selected.size ?? 0) > 2, run: (axis) => distribute(axis) },
-    'layer:merge-down': {
-      enabled: () => {
-        const l = doc()?.active;
-        return !!l && l.parent && l.parent.children.indexOf(l) > 0;
+    'layer:distribute': {
+      enabled: () => (doc()?.selected.size ?? 0) > 2,
+      run: (axis) => {
+        // the edge arguments of the 0.4 menu belong to finish-layer-menu; until it lands they must not fall
+        // through to 0.3's horizontal-centres default (M.3)
+        if (DISTRIBUTE_EDGES.has(axis)) return app.dialogs.toast('Not available yet', { timeout: 2000 });
+        return distribute(axis);
       },
-      run: () => {
-        const d = doc();
-        const top = d.active;
-        const below = top.parent.children[top.parent.children.indexOf(top) - 1];
-        if (!below || below.type === 'adjustment') return app.dialogs.toast('Nothing to merge into: the layer below is an adjustment layer', { kind: 'error' });
-        if (!top.visible || !below.visible) return app.dialogs.toast('Show both layers before merging', { kind: 'error' });
-        mergeLayers([below, top], below.name, 'Merge down', { keepBase: true });
+    },
+    'layer:merge-down': mergeDown,
+    // Ctrl+E (M.6): the skeleton's working placeholder runs Merge Down and reports it, so actions record
+    // layer:merge-down; finish-layer-menu re-registers it to dispatch by context (Merge Layers, Merge Group)
+    'layer:merge': {
+      enabled: () => mergeDown.enabled(),
+      run: (_arg, ctx) => {
+        ctx?.setReplayCommand?.('layer:merge-down');
+        return mergeDown.run();
       },
     },
     'layer:merge-selected': { enabled: () => (doc()?.selected.size ?? 0) > 1, run: () => mergeLayers(selectedOrActive(doc()), null, 'Merge layers') },
@@ -672,24 +759,18 @@ export function install(app) {
         // actions (lib/actions.js): a recorded step is { kind, paint } and makes the layer without asking
         const kind = arg && typeof arg === 'object' ? arg.kind : arg;
         const recorded = arg && typeof arg === 'object' && arg.paint ? JSON.parse(JSON.stringify(arg.paint)) : null;
-        let paint;
-        if (recorded) paint = recorded;
-        else if (kind === 'solid') {
-          const color = await app.pickColor?.(app.settings.foreground, { title: 'Solid Color Fill' });
-          if (!color) return ctx?.cancel(); // actions (lib/actions.js)
-          paint = { type: 'solid', color };
-        } else if (kind === 'gradient') paint = { type: 'gradient', gradient: { kind: 'linear', stops: [{ pos: 0, color: app.settings.foreground }, { pos: 1, color: app.settings.background }], from: [0, d.height / 2], to: [d.width, d.height / 2] } };
-        else {
-          if (!app.currentPattern) return app.dialogs.toast('Define a pattern first (Edit › Define Pattern)', { kind: 'error' });
-          paint = { type: 'pattern', pattern: { canvas: app.currentPattern, scale: 1 } };
-        }
+        // the first dialog is the paint editor's (lib/paint-editors.js, G.5); a recorded paint is resolved too, as
+        // createPaint resolves what it returns: stored data never holds colour references (G.1)
+        const paint = recorded ? resolvePaint(app, recorded) : await createPaint(app, kind, { doc: d });
+        if (!paint) return ctx?.cancel(); // actions (lib/actions.js)
         const layer = new FillLayer({ name: nextLayerName(d, kind === 'solid' ? 'Color Fill' : kind === 'gradient' ? 'Gradient Fill' : 'Pattern Fill'), paint, docWidth: d.width, docHeight: d.height });
         if (d.selection && !d.selection.isEmpty) layer.mask = { canvas: maskFromSelection(d), enabled: true, linked: true };
         structural(app, 'New fill layer', () => {
           d.add(layer);
           d.setActive(layer);
         });
-        if (kind === 'gradient' && !recorded) await app.commands.run('layer:edit-fill', layer.id, 'api');
+        // 0.3's Gradient Fill flow: the new layer is edited live on the canvas (editAfterCreate, paint-editors.js)
+        if (!recorded && paintEditor(kind)?.editAfterCreate) await app.commands.run('layer:edit-fill', layer.id, 'api');
         if (kind !== 'pattern') ctx?.setReplayArg({ kind, paint: JSON.parse(JSON.stringify(layer.paint)) }); // actions (lib/actions.js): patterns replay from the current pattern
       },
     },
@@ -935,8 +1016,10 @@ export function install(app) {
         if (!layer.mask || layer.type !== 'raster') return;
         const canvas = copyCanvas(layer.canvas);
         const ctx = canvas.getContext('2d');
+        // Photoshop applies only the pixel mask (density and feather included); the vector mask stays on the layer
+        const maskCanvas = maskCanvasFor(layer, d, { purpose: 'bake', parts: 'raster' }) ?? layer.mask.canvas; // mask (K.1)
         ctx.globalCompositeOperation = 'destination-in';
-        ctx.drawImage(layer.mask.canvas, -layer.x, -layer.y);
+        ctx.drawImage(maskCanvas, -layer.x, -layer.y);
         const before = { canvas: layer.canvas, mask: layer.mask };
         const after = { canvas, mask: null };
         const apply = (s) => {

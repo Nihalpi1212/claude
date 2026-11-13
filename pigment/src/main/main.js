@@ -11,6 +11,7 @@ import { registerIpc } from './ipc.js';
 import { buildMenuTemplate } from './menu.js';
 import { filesFromArgv } from './startup-files.js';
 import { withDefaults } from '../shared/defaults.js';
+import { RENDERER_KEYS, parseAccelerator, eventMatches } from '../shared/keymap.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const RENDERER_DIR = join(here, '..', 'renderer');
@@ -78,7 +79,12 @@ const watcher = new FileWatcher((path) => mainWindow?.webContents.send('pigment:
 const uiState = { current: {} };
 
 // ---- menu --------------------------------------------------------------------------------------------
-function runCommand(cmd, arg) {
+/**
+ * Sends a menu command to the renderer. The third value tells the renderer where it came from (M.1, O):
+ * true for the item's accelerator (source 'menu-key'), false for a mouse click ('menu'), 'key' for a key
+ * main.js intercepted before the page saw it (Shift+Alt+letter on Windows and Linux).
+ */
+function runCommand(cmd, arg, via = false) {
   const hasWindow = mainWindow && !mainWindow.isDestroyed();
   if (cmd === 'help:devtools') {
     if (hasWindow) mainWindow.webContents.toggleDevTools();
@@ -89,18 +95,33 @@ function runCommand(cmd, arg) {
     // getStartupFiles delivers it once the renderer listens (the load event fires before the
     // renderer has attached its handlers). Recent files go through the file queue.
     if (cmd === 'file:open-recent' && typeof arg === 'string') queueFiles([arg]);
-    else startup.commands.push({ cmd, arg });
+    else startup.commands.push({ cmd, arg, via });
     if (!hasWindow && app.isReady()) createWindow();
     return;
   }
-  mainWindow.webContents.send('pigment:event:command', cmd, arg);
+  mainWindow.webContents.send('pigment:event:command', cmd, arg, via);
+}
+
+// Shift+Alt+letter (the blend-mode keys) and Shift+Alt+[ / ] share Alt with the menu mnemonics on Windows and
+// Linux (&File, &Edit, …): Chromium would open a menu instead of delivering the key. main.js takes these keys
+// before the page and the menu see them and runs their command as a key (O).
+const SHIFT_ALT_KEYS = Object.entries(RENDERER_KEYS).flatMap(([cmd, list]) => list.map((accel) => ({ cmd, desc: parseAccelerator(accel) })))
+  .filter(({ desc }) => desc.shift && desc.alt && !desc.ctrl && !desc.meta && !desc.cmdOrCtrl);
+
+function interceptShiftAlt(event, input) {
+  if (IS_MAC || input.type !== 'keyDown' || !input.shift || !input.alt || input.control || input.meta) return;
+  const ev = { key: input.key, code: input.code, location: input.location ?? 0, shiftKey: true, altKey: true, ctrlKey: false, metaKey: false };
+  const hit = SHIFT_ALT_KEYS.find(({ desc }) => eventMatches(ev, desc, false));
+  if (!hit) return;
+  event.preventDefault();
+  if (!input.isAutoRepeat) runCommand(hit.cmd, undefined, 'key');
 }
 
 let menuTimer = null;
 function updateMenu() {
   clearTimeout(menuTimer);
   menuTimer = setTimeout(() => {
-    const template = buildMenuTemplate({ platform: process.platform, state: uiState.current, recent: recent.get(), run: runCommand, isPackaged: app.isPackaged });
+    const template = buildMenuTemplate({ platform: process.platform, state: uiState.current, recent: recent.get(), run: (cmd, arg, viaKey) => runCommand(cmd, arg, !!viaKey), isPackaged: app.isPackaged });
     Menu.setApplicationMenu(Menu.buildFromTemplate(template));
   }, 30);
 }
@@ -163,6 +184,7 @@ async function createWindow() {
       openExternalSafely(url);
     }
   });
+  win.webContents.on('before-input-event', interceptShiftAlt);
   win.webContents.setWindowOpenHandler(({ url }) => {
     openExternalSafely(url);
     return { action: 'deny' };

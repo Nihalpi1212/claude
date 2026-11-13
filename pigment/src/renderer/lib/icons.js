@@ -209,3 +209,15 @@ export function iconEl(name) {
 }
 
 export const ICON_NAMES = Object.keys(P);
+
+/**
+ * Adds icons from a package's own files (ARCHITECTURE.md "0.4 features", rule 6): { name: '<svg body: paths>' } in the
+ * 24x24 stroke style. A name that already exists is not replaced.
+ */
+export function registerIcons(map) {
+  for (const [name, body] of Object.entries(map ?? {})) {
+    if (typeof body !== 'string' || Object.prototype.hasOwnProperty.call(P, name)) continue;
+    P[name] = body;
+    ICON_NAMES.push(name);
+  }
+}

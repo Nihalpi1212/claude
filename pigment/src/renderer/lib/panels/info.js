@@ -2,6 +2,7 @@
 // pointer position, document size, selection size, active layer bounds and the colour sampler
 // points placed with the Color Sampler tool (doc.samplers).
 import { layerContentBounds } from './properties.js';
+import { sampleMerged } from '../sample.js';
 import { rgbaToHex, rgbToCmyk, rgbToLab, rgbToHsv } from '../../../shared/pixels/color.js';
 
 // the secondary readout (settings.infoSecondary): label -> rows of [key, text]
@@ -76,19 +77,12 @@ export function install(app) {
 
   const visible = () => app.panels.isVisible('info');
 
+  // ruler (lib/rulers.js): the second readout in ruler units (none for pixels), counted from the ruler origin
   function fmtUnit(px, axis, doc) {
-    const unit = app.settings.rulerUnit ?? 'px';
-    if (unit === 'px' || !doc) return null;
-    const dpi = doc.dpi || 72;
-    let v;
-    if (unit === 'in') v = px / dpi;
-    else if (unit === 'cm') v = (px / dpi) * 2.54;
-    else if (unit === 'mm') v = (px / dpi) * 25.4;
-    else if (unit === 'pt') v = (px / dpi) * 72;
-    else if (unit === 'percent') v = (px / (axis === 'x' ? doc.width : doc.height)) * 100;
-    else return null;
-    return `${Math.round(v * 100) / 100} ${UNIT_LABEL[unit] ?? unit}`;
+    if (!doc || !app.rulers || app.rulers.unit(doc) === 'px') return null;
+    return app.rulers.format(doc, axis, px);
   }
+  void UNIT_LABEL;
 
   /** RGBA of the composite at a document pixel (cached per document version and position). */
   function sampleAt(doc, x, y) {
@@ -97,7 +91,7 @@ export function install(app) {
     if (last.key === key) return last.rgba;
     let rgba = null;
     try {
-      const comp = doc.view.compositor.composite(doc);
+      const comp = sampleMerged(app, doc); // sample (lib/sample.js): what the canvas shows, isolation honoured
       const d = comp.getContext('2d', { willReadFrequently: true }).getImageData(x, y, 1, 1).data;
       rgba = [d[0], d[1], d[2], d[3]];
     } catch (err) {
@@ -113,8 +107,9 @@ export function install(app) {
     const p = pointer && pointer.doc === doc ? pointer : null;
     const inside = !!(doc && p && p.x >= 0 && p.y >= 0 && p.x < doc.width && p.y < doc.height);
     const x = p ? Math.floor(p.x) : 0, y = p ? Math.floor(p.y) : 0;
-    $('x').textContent = p ? `${x} px` : '—';
-    $('y').textContent = p ? `${y} px` : '—';
+    const o = doc && app.rulers ? app.rulers.origin(doc) : { x: 0, y: 0 }; // ruler (lib/rulers.js)
+    $('x').textContent = p ? `${x - o.x} px` : '—';
+    $('y').textContent = p ? `${y - o.y} px` : '—';
     const ux = p ? fmtUnit(x, 'x', doc) : null, uy = p ? fmtUnit(y, 'y', doc) : null;
     $('units').textContent = ux ? `${ux} · ${uy}` : '';
     const rgba = inside ? sampleAt(doc, x, y) : null;

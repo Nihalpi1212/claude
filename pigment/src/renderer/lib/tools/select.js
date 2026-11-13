@@ -4,6 +4,7 @@ import { Tool } from '../tools.js';
 import { Selection } from '../selection.js';
 import { selectionOps } from '../selection.js';
 import { flattenDocument } from '../compositor.js';
+import { sampleMerged } from '../sample.js';
 import { cropImage, clampRect } from '../../../shared/pixels/core.js';
 
 const COMBINE_OPTION = { kind: 'segment', key: 'combine', label: '', options: [['replace', 'New selection', 'sel-new'], ['add', 'Add to selection (Shift)', 'sel-add'], ['subtract', 'Subtract (Alt)', 'sel-sub'], ['intersect', 'Intersect (Shift+Alt)', 'sel-int']], default: 'replace' };
@@ -54,6 +55,8 @@ export class MarqueeTool extends Tool {
     // with a selection, Shift/Alt held at mouse-down only choose the combine mode; pressed later
     // (or without a selection) they constrain to a square / draw from the centre
     const hasSel = !!this.doc.selection && !this.doc.selection.isEmpty;
+    const sp = this.app.snap?.point(p, { source: 'marquee', pointer: p, view: this.view }) ?? p; // snap (lib/snap.js)
+    p = { ...p, x: sp.x, y: sp.y };
     this.drag = { start: { x: p.x, y: p.y }, current: { x: p.x, y: p.y }, mode: combineMode(this, p), fromCenter: p.alt && !p.shift && !hasSel, square: p.shift && !hasSel, latch: { shift: p.shift && hasSel, alt: p.alt && hasSel }, moved: false };
     if (this.opt('style') === 'size') {
       this.drag.current = { x: p.x + this.opt('fixedW'), y: p.y + this.opt('fixedH') };
@@ -67,7 +70,8 @@ export class MarqueeTool extends Tool {
       this.drag.current = { x: p.x + this.opt('fixedW'), y: p.y + this.opt('fixedH') };
       return;
     }
-    this.drag.current = { x: p.x, y: p.y };
+    const sp = this.app.snap?.point(p, { source: 'marquee', pointer: p, view: this.view }) ?? p; // snap (lib/snap.js)
+    this.drag.current = { x: sp.x, y: sp.y };
     this.drag.moved = true;
     const latch = this.drag.latch;
     if (!p.shift) latch.shift = false;
@@ -337,7 +341,7 @@ export class WandTool extends Tool {
   sourceImage() {
     const doc = this.doc;
     if (this.opt('sampleMerged') || !doc.active || doc.active.isGroup) {
-      const c = flattenDocument(doc, this.view.compositor);
+      const c = sampleMerged(this.app, doc); // sample (lib/sample.js)
       return c.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, doc.width, doc.height);
     }
     const layer = doc.active;

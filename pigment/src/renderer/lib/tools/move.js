@@ -140,30 +140,21 @@ export class MoveTool extends Tool {
         dy = Math.sign(dy) * m;
       }
     }
-    if (this.app.settings.snap) [dx, dy] = this.snapDelta(dx, dy);
+    // snap (lib/snap.js): the stub is 0.3's snapping (document edges and centre, guides); Ctrl/Cmd held turns it off
+    const first = this.drag.origin[0];
+    const fb = first.l.bounds();
+    if (fb && this.app.snap) {
+      const axis = p.shift ? (dy === 0 && dx !== 0 ? 'x' : dx === 0 && dy !== 0 ? 'y' : undefined) : undefined;
+      const s = this.app.snap.box({ x: first.x + dx, y: first.y + dy, width: fb.width, height: fb.height }, { source: 'move', pointer: p, exclude: this.drag.layers, axis, view: this.view });
+      dx += s.dx;
+      dy += s.dy;
+    }
     if (dx === this.drag.dx && dy === this.drag.dy) return;
     this.drag.dx = dx;
     this.drag.dy = dy;
     this.drag.moved = true;
     if (!this.drag.session) this.drag.session = beginLayerMove(this.doc, this.drag.origin.map((o) => o.l));
     this.drag.session.set(dx, dy);
-  }
-  snapDelta(dx, dy) {
-    const doc = this.doc;
-    const tol = 6 / this.view.zoom;
-    const first = this.drag.origin[0];
-    const b = first.l.bounds();
-    if (!b) return [dx, dy];
-    const targetsX = [0, doc.width / 2, doc.width, ...doc.guides.filter((g) => g.axis === 'x').map((g) => g.pos)];
-    const targetsY = [0, doc.height / 2, doc.height, ...doc.guides.filter((g) => g.axis === 'y').map((g) => g.pos)];
-    const edgesX = [first.x + dx, first.x + dx + b.width / 2, first.x + dx + b.width];
-    const edgesY = [first.y + dy, first.y + dy + b.height / 2, first.y + dy + b.height];
-    for (const e of edgesX) for (const t of targetsX) if (Math.abs(e - t) <= tol) return this.snapDelta2(dx + Math.round(t - e), dy, edgesY, targetsY, tol);
-    return this.snapDelta2(dx, dy, edgesY, targetsY, tol);
-  }
-  snapDelta2(dx, dy, edgesY, targetsY, tol) {
-    for (const e of edgesY) for (const t of targetsY) if (Math.abs(e - t) <= tol) return [dx, dy + Math.round(t - e)];
-    return [dx, dy];
   }
   onPointerUp(p) {
     const d = this.drag;
@@ -246,7 +237,10 @@ export class MoveTool extends Tool {
     }
     ctx.restore();
   }
-  onDoubleClick() {
+  onDoubleClick(p) {
+    // L.7: a layer type's double-click action (type-editing: edit the text at the click) before Free Transform
+    const hit = p ? this.hitTest(p) : null;
+    if (hit && this.app.layerDoubleClick?.(hit, p)) return;
     this.app.commands.run('edit:free-transform');
   }
 }
@@ -333,6 +327,9 @@ export class CropTool extends Tool {
     }
     if (!this.drag) return;
     const d = this.drag;
+    // snap (lib/snap.js): the box's handles and edges (the stub leaves the point as it is)
+    const sp = this.app.snap?.point(p, { source: 'crop', pointer: p, view: this.view }) ?? p;
+    p = { ...p, x: sp.x, y: sp.y };
     const dx = p.x - d.start.x, dy = p.y - d.start.y;
     let b = { ...d.box };
     if (d.handle === 'new') {

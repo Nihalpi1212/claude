@@ -59,7 +59,18 @@ const SESSION_TRANSFORM_KINDS = new Set(['free', 'scale', 'rotate', 'skew', 'dis
 const UNREPLAYABLE = new Set(['layer:move-to', 'layer:smart-filter', 'layer:smart-edit', 'layer:edit-adjustment', 'layer:edit-fill', 'edit:fade']);
 export const isUnreplayableCommand = (id) => UNREPLAYABLE.has(id);
 
-export function isIgnoredCommand(id) {
+/**
+ * True when actions never record (or run) the command. A definition (optional: the lists below decide alone without
+ * one) may say so itself (0.4, E31): `record: false` never, `record: true` always, `undoLike` never (it is followed
+ * like Edit > Undo), `changesDocument` always (a view: command that edits the document, as the guide commands).
+ */
+export function isIgnoredCommand(id, def = null) {
+  if (def) {
+    if (def.record === false) return true;
+    if (def.record === true) return false;
+    if (def.undoLike) return true;
+    if (def.changesDocument) return false;
+  }
   if (RECORDED_ANYWAY.has(id)) return false;
   return IGNORED_GROUPS.test(id) || IGNORED_COMMANDS.has(id);
 }
@@ -121,12 +132,12 @@ export function limitError(sets) {
  * @param {{ id: string, arg: any, source: string, cancelled: boolean, replayable: boolean, nested?: boolean }} event
  * @returns {{ record: true, step: object } | { record: false, reason: 'cancelled'|'playback'|'nested'|'ignored'|'session'|'unreplayable'|'data', label?: string }}
  */
-export function recordDecision(event, { label } = {}) {
+export function recordDecision(event, { label, def = null } = {}) {
   const { id, arg } = event;
   if (event.cancelled) return { record: false, reason: 'cancelled' };
   if (event.source === 'action') return { record: false, reason: 'playback' };
   if (event.nested) return { record: false, reason: 'nested' };
-  if (isIgnoredCommand(id)) return { record: false, reason: 'ignored' };
+  if (isIgnoredCommand(id, def)) return { record: false, reason: 'ignored' };
   if (isSessionCommand(id, arg)) return { record: false, reason: 'session' };
   const name = label ?? commandLabel(id, arg);
   if (event.replayable === false || UNREPLAYABLE.has(id)) return { record: false, reason: 'unreplayable', label: name };

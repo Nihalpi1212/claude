@@ -9,6 +9,7 @@ import { Tool } from '../tools.js';
 import { Selection } from '../selection.js';
 import { ICON_NAMES } from '../icons.js';
 import { sourceImage } from '../select-mask/output.js';
+import { sampleMerged } from '../sample.js';
 import { segmentEngine } from '../select-mask/engine.js';
 
 const COMBINE_OPTION = { kind: 'segment', key: 'combine', label: '', options: [['replace', 'New selection', 'sel-new'], ['add', 'Add to selection (Shift)', 'sel-add'], ['subtract', 'Subtract (Alt)', 'sel-sub'], ['intersect', 'Intersect (Shift+Alt)', 'sel-int']], default: 'replace' };
@@ -126,7 +127,10 @@ export class ObjectSelectTool extends Tool {
       app.applySelection(this.plain(region, doc), 'subtract', 'Object selection');
       return;
     }
-    const src = sourceImage(app, { sampleAll: !!this.opt('sampleMerged') });
+    // sample (lib/sample.js): Sample All Layers reads the stored merged image, as select-mask/output.js did
+    const src = this.opt('sampleMerged')
+      ? { img: sampleMerged(app, doc, { stored: true }).getContext('2d', { willReadFrequently: true }).getImageData(0, 0, doc.width, doc.height), layer: doc.active, merged: true }
+      : sourceImage(app, { sampleAll: false });
     this.working = region;
     this.view?.invalidate();
     let result;

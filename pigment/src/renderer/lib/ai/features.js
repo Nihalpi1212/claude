@@ -8,6 +8,7 @@
 import { RasterLayer, createCanvas, copyCanvas, createDocument } from '../document.js';
 import { structural, setLayerProps, nextLayerName, cloneLayer, rasterizeLayer } from '../layer-ops.js';
 import { flattenDocument } from '../compositor.js';
+import { maskCanvasFor } from '../mask-render.js';
 import { formDialog } from '../form.js';
 import { bridge } from '../bridge.js';
 import { PROVIDERS, makeCanvas, cropCanvas, resampleTo, imageDataOf, canvasFromImageData, isOpaque, keyWhiteBorder } from './providers.js';
@@ -382,7 +383,8 @@ export function install(app) {
     if (!layer || layer.isGroup) return null;
     if (layer.type === 'raster') {
       let canvas = layer.canvas;
-      if (layer.mask?.canvas && layer.mask.enabled !== false) canvas = throughMask(layer.canvas, cropCanvas(layer.mask.canvas, layer.x, layer.y, layer.canvas.width, layer.canvas.height));
+      const maskCanvas = maskCanvasFor(layer, d, { purpose: 'composite' }); // mask (K.1)
+      if (maskCanvas) canvas = throughMask(layer.canvas, cropCanvas(maskCanvas, layer.x, layer.y, layer.canvas.width, layer.canvas.height));
       return { layer, canvas, x: layer.x, y: layer.y };
     }
     const r = rasterizeLayer(layer, d);

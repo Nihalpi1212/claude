@@ -16,6 +16,7 @@
 // multichannel ones. Spot channels are ordinary saved channels (doc.channels) flagged `spot`.
 import { registerModeRenderer, Compositor } from './compositor.js';
 import { RasterLayer, createCanvas, newId } from './document.js';
+import { hasEnabledStyles } from '../../shared/pixels/styles.js';
 import { snapshotTree, restoreTree } from './layer-ops.js';
 import { Selection } from './selection.js';
 import { parseColor, rgbaToHex } from '../../shared/pixels/color.js';
@@ -66,7 +67,7 @@ export function isSimple(doc) {
   const kids = doc.root.children.filter((l) => !l.preview && !l.quickMask);
   if (kids.length !== 1) return false;
   const l = kids[0];
-  const styled = !!l.styles && Object.values(l.styles).some((s) => s?.enabled);
+  const styled = hasEnabledStyles(l.styles);
   return l.type === 'raster' && l.visible && l.opacity >= 1 && (l.fillOpacity ?? 1) >= 1 && l.blend === 'normal' && !l.mask && !styled && l.x === 0 && l.y === 0 && l.canvas.width === doc.width && l.canvas.height === doc.height;
 }
 

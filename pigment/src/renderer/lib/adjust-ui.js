@@ -8,6 +8,8 @@ import { BLEND_MODES, createCanvas, intersectRect } from './document.js';
 import { buildForm, formDialog, frameThrottle } from './form.js';
 import { flattenDocument } from './compositor.js';
 import { setLayerProps } from './layer-ops.js';
+import { editPaint } from './paint-editors.js';
+import { buildAdjustmentFrame } from './adjust/frame.js';
 
 const clone = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
 
@@ -486,10 +488,12 @@ function curvesEditor(params, onChange, source) {
  * Editor element for an adjustment's parameters. onChange(params) fires on every edit.
  * source: ImageDataLike used for histograms (Levels, Curves).
  */
-export function buildAdjustmentEditor(kind, params, onChange, { source = null } = {}) {
+export function buildAdjustmentEditor(kind, params, onChange, { source = null, app = null } = {}) {
   const base = { ...clone(ADJUSTMENTS[kind]?.defaults ?? {}), ...clone(params ?? {}) };
   const custom = ADJUST_EDITORS.get(kind);
-  if (custom?.editor) return custom.editor(kind, base, onChange, { source });
+  // a registered editor may return, besides `element`, the capabilities of I.2 (setParams, presetKind, eyedroppers,
+  // onImage, auto, dispose): the adjustment frame (lib/adjust/frame.js) offers them
+  if (custom?.editor) return custom.editor(kind, base, onChange, { source, app });
   if (kind === 'levels') return levelsEditor(base, onChange, source);
   if (kind === 'curves') return curvesEditor(base, onChange, source);
   const fields = fieldSpecs(kind, base);
@@ -667,6 +671,12 @@ function samePixels(a, b) {
   return true;
 }
 
+/** The adjustment ctx (I.4) of a pixel edit session: its base image starts at the document point session.rect. */
+export function editCtx(app, session) {
+  const d = app.doc;
+  return session?.rect ? { origin: { x: session.rect.x, y: session.rect.y }, docWidth: d?.width ?? session.rect.width, docHeight: d?.height ?? session.rect.height, scale: 1 } : null;
+}
+
 /** Runs fn(img) on a copy of the session base and returns it. */
 export function processed(session, fn) {
   const img = { width: session.base.width, height: session.base.height, data: new Uint8ClampedArray(session.base.data) };
@@ -676,9 +686,11 @@ export function processed(session, fn) {
 
 /**
  * Generic dialog driving a pixel edit: editor(onChange) -> { element }, run(img, params) edits img in place.
- * Resolves with the params (committed) or null.
+ * Resolves with the params (committed) or null. `frame: { kind }` (0.4, I.1) wraps the editor in the adjustment
+ * frame (preset menu, eyedroppers, on-image tool, Auto, Preview: each row only when the editor offers it); the filter
+ * dialogs pass none and look as in 0.3.
  */
-export async function pixelEditDialog(app, { title, label = title, params, editor, run, width = 420, extraButtons, margin = 0, meta = null }) {
+export async function pixelEditDialog(app, { title, label = title, params, editor, run, width = 420, extraButtons, margin = 0, meta = null, frame = null }) {
   const session = beginPixelEdit(app, { label, margin });
   if (!session) return null;
   let current = params;
@@ -688,7 +700,7 @@ export async function pixelEditDialog(app, { title, label = title, params, edito
     if (done) return;
     if (!preview) return session.restore();
     try {
-      session.show(processed(session, (img) => run(img, current)));
+      session.show(processed(session, (img) => run(img, current, session)));
     } catch (err) {
       console.error(err);
     }
@@ -697,22 +709,51 @@ export async function pixelEditDialog(app, { title, label = title, params, edito
     current = p;
     refresh();
   }, session);
-  const content = document.createElement('div');
-  content.appendChild(ed.element);
-  const pv = document.createElement('label');
-  pv.className = 'checkbox';
-  const pvInput = document.createElement('input');
-  pvInput.type = 'checkbox';
-  pvInput.checked = preview;
-  pvInput.dataset.key = '__preview';
-  pvInput.addEventListener('change', () => {
-    preview = pvInput.checked;
+  const setPreview = (on) => {
+    preview = on;
     app.settings.dialogPreview = preview;
     app.saveSettingsSoon();
     refresh();
-  });
-  pv.append(pvInput, document.createTextNode('Preview'));
-  content.appendChild(pv);
+  };
+  let content;
+  let built = null;
+  if (frame?.kind) {
+    // the adjustment frame (lib/adjust/frame.js, I.1): it samples the session base (the pixels before the edit)
+    const base = session.base, rect = session.rect;
+    const start = clone(params);
+    const setParams = (p) => {
+      current = clone(p);
+      ed.setParams?.(current);
+      refresh();
+    };
+    built = buildAdjustmentFrame(app, frame.kind, ed, {
+      mode: 'dialog',
+      sample: (x, y) => {
+        const ix = x - rect.x, iy = y - rect.y;
+        if (ix < 0 || iy < 0 || ix >= base.width || iy >= base.height) return null;
+        const i = (iy * base.width + ix) * 4;
+        return [base.data[i], base.data[i + 1], base.data[i + 2], base.data[i + 3]];
+      },
+      source: base,
+      getParams: () => clone(current),
+      setParams,
+      onReset: () => setParams(start),
+      preview: { checked: preview, onChange: setPreview },
+    });
+    content = built.element;
+  } else {
+    content = document.createElement('div');
+    content.appendChild(ed.element);
+    const pv = document.createElement('label');
+    pv.className = 'checkbox';
+    const pvInput = document.createElement('input');
+    pvInput.type = 'checkbox';
+    pvInput.checked = preview;
+    pvInput.dataset.key = '__preview';
+    pvInput.addEventListener('change', () => setPreview(pvInput.checked));
+    pv.append(pvInput, document.createTextNode('Preview'));
+    content.appendChild(pv);
+  }
   const result = await app.dialogs.open({
     title,
     content,
@@ -722,12 +763,13 @@ export async function pixelEditDialog(app, { title, label = title, params, edito
   });
   done = true;
   refresh.cancel();
+  built?.dispose();
   if (!result) {
     session.cancel();
     return null;
   }
   try {
-    const img = await app.busy(`${title}…`, async () => processed(session, (x) => run(x, current)));
+    const img = await app.busy(`${title}…`, async () => processed(session, (x) => run(x, current, session)));
     session.commit(label, img, typeof meta === 'function' ? meta(current) : meta ?? {});
   } catch (err) {
     session.cancel();
@@ -757,6 +799,9 @@ export function install(app) {
       ctx?.cancel();
       return app.dialogs.toast(`${def.name} is not available yet`, { kind: 'error' });
     }
+    // I.2: an editor's prepare runs before the dialog opens and before a replayed step applies; false cancels
+    const prep = ADJUST_EDITORS.get(kind)?.prepare;
+    if (prep && !(await prep(app, arg, ctx))) return ctx?.cancel();
     const d = app.doc;
     // smart objects (lib/smart-object.js): an adjustment on a smart layer becomes a smart filter, not a pixel edit
     const smart = def.smart !== false ? app.smartFilters?.intercept(d?.active, `adjust:${kind}`, arg && typeof arg === 'object' ? arg : null, def.name) : null;
@@ -774,7 +819,7 @@ export function install(app) {
       const session = beginPixelEdit(app, { label: def.name });
       if (!session) return ctx?.cancel();
       const params = arg && typeof arg === 'object' ? arg : {};
-      const img = processed(session, (x) => applyAdjustment(x, kind, params));
+      const img = processed(session, (x) => applyAdjustment(x, kind, params, null, editCtx(app, session)));
       session.commit(def.name, img, { adjustment: { kind, params: clone(params) } });
       return;
     }
@@ -784,9 +829,10 @@ export function install(app) {
       title: def.name,
       params: start,
       width: custom?.width ?? (kind === 'curves' ? 320 : 420),
-      editor: (onChange, session) => buildAdjustmentEditor(kind, start, onChange, { source: session.base }),
-      run: (img, params) => applyAdjustment(img, kind, params),
+      editor: (onChange, session) => buildAdjustmentEditor(kind, start, onChange, { source: session.base, app }),
+      run: (img, params, session) => applyAdjustment(img, kind, params, null, editCtx(app, session)),
       meta: (params) => ({ adjustment: { kind, params: clone(params) } }),
+      frame: { kind },
     });
     if (used) {
       lastParams()[kind] = used;
@@ -917,102 +963,12 @@ export function install(app) {
     }
   }
 
-  async function editFillLayer(id) {
+  // Layer Content Options of a fill layer: the paint editors of lib/paint-editors.js (G.5, E21)
+  function editFillLayer(id) {
     const d = app.doc;
-    const layer = (typeof id === 'string' && d.find(id)) || d.active;
+    const layer = (typeof id === 'string' && d?.find(id)) || d?.active;
     if (!layer || layer.type !== 'fill') return;
-    const paint = layer.paint;
-    if (paint.type === 'solid') {
-      const c = await app.pickColor?.(paint.color, { title: 'Solid Color Fill', live: (color) => {
-        layer.paint = { type: 'solid', color };
-        layer.touch();
-        d.changed('props', { layer });
-      } });
-      layer.paint = paint;
-      layer.touch();
-      if (c && c !== paint.color) setLayerProps(app, layer, { paint: { type: 'solid', color: c } }, 'Edit fill');
-      else d.changed('props', { layer });
-      return;
-    }
-    if (paint.type === 'pattern') {
-      const o = await formDialog(app, {
-        title: 'Pattern Fill',
-        fields: [{ key: 'scale', label: 'Scale', type: 'slider', value: Math.round((paint.pattern?.scale ?? 1) * 100), min: 1, max: 1000, unit: '%' }],
-        live: {
-          apply: (v) => {
-            layer.paint = { ...paint, pattern: { ...paint.pattern, scale: v.scale / 100 } };
-            layer.touch();
-            d.changed('props', { layer });
-          },
-          revert: () => {
-            layer.paint = paint;
-            layer.touch();
-            d.changed('props', { layer });
-          },
-        },
-      });
-      if (o) setLayerProps(app, layer, { paint: { ...paint, pattern: { ...paint.pattern, scale: o.scale / 100 } } }, 'Edit fill');
-      return;
-    }
-    // gradient
-    const g = paint.gradient ?? {};
-    const stops = g.stops ?? [];
-    // read angle, scale and offset back from the stored end points (inverse of build() below)
-    const radialNow = g.kind === 'radial' || g.kind === 'diamond' || g.kind === 'angle';
-    let angleNow = 0, scaleNow = 100, offXNow = 0, offYNow = 0;
-    if (g.from && g.to) {
-      const vx = (g.to[0] - g.from[0]) / (radialNow ? 1 : 2), vy = (g.to[1] - g.from[1]) / (radialNow ? 1 : 2);
-      const rad = Math.atan2(-vy, vx);
-      angleNow = Math.round((rad * 180) / Math.PI);
-      const half0 = (Math.abs(Math.cos(rad)) * d.width + Math.abs(Math.sin(rad)) * d.height) / 2 || 1;
-      scaleNow = Math.round((Math.hypot(vx, vy) / half0) * 100);
-      const cx = radialNow ? g.from[0] : (g.from[0] + g.to[0]) / 2, cy = radialNow ? g.from[1] : (g.from[1] + g.to[1]) / 2;
-      offXNow = Math.round(((cx - d.width / 2) / d.width) * 100);
-      offYNow = Math.round(((cy - d.height / 2) / d.height) * 100);
-    }
-    const build = (v) => {
-      const rad = (v.angle * Math.PI) / 180;
-      const cx = d.width / 2 + (v.offsetX / 100) * d.width, cy = d.height / 2 + (v.offsetY / 100) * d.height;
-      const half = (Math.abs(Math.cos(rad)) * d.width + Math.abs(Math.sin(rad)) * d.height) / 2 * (v.scale / 100);
-      const dx = Math.cos(rad) * half, dy = -Math.sin(rad) * half;
-      const radial = v.kind === 'radial' || v.kind === 'diamond' || v.kind === 'angle';
-      return {
-        type: 'gradient',
-        gradient: {
-          kind: v.kind,
-          stops: [{ pos: 0, color: v.c0 }, ...stops.slice(1, -1), { pos: 1, color: v.c1 }],
-          reverse: v.reverse,
-          from: radial ? [cx, cy] : [cx - dx, cy - dy],
-          to: [cx + dx, cy + dy],
-        },
-      };
-    };
-    const o = await formDialog(app, {
-      title: 'Gradient Fill',
-      fields: [
-        { key: 'kind', label: 'Style', type: 'select', value: g.kind ?? 'linear', options: [['linear', 'Linear'], ['radial', 'Radial'], ['angle', 'Angle'], ['reflected', 'Reflected'], ['diamond', 'Diamond']] },
-        { key: 'c0', label: 'Start color', type: 'color', value: stops[0]?.color ?? '#000000' },
-        { key: 'c1', label: 'End color', type: 'color', value: stops[stops.length - 1]?.color ?? '#ffffff' },
-        { key: 'angle', label: 'Angle', type: 'slider', value: angleNow, min: -180, max: 180, unit: '°' },
-        { key: 'scale', label: 'Scale', type: 'slider', value: Math.min(1000, Math.max(10, scaleNow)), min: 10, max: 1000, unit: '%' },
-        { key: 'offsetX', label: 'Offset X', type: 'slider', value: Math.min(100, Math.max(-100, offXNow)), min: -100, max: 100, unit: '%' },
-        { key: 'offsetY', label: 'Offset Y', type: 'slider', value: Math.min(100, Math.max(-100, offYNow)), min: -100, max: 100, unit: '%' },
-        { key: 'reverse', label: 'Reverse', type: 'checkbox', value: !!g.reverse },
-      ],
-      live: {
-        apply: (v) => {
-          layer.paint = build(v);
-          layer.touch();
-          d.changed('props', { layer });
-        },
-        revert: () => {
-          layer.paint = paint;
-          layer.touch();
-          d.changed('props', { layer });
-        },
-      },
-    });
-    if (o) setLayerProps(app, layer, { paint: build(o) }, 'Edit gradient fill');
+    return editPaint(app, layer);
   }
 
   app.adjustmentLayerMenu = () => [

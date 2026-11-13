@@ -57,6 +57,26 @@ export const DEFAULT_SETTINGS = Object.freeze({
   transformInterpolation: 'bicubic', // free transform: bicubic | bilinear | nearest
   transformProportional: false, // true: transform handles keep proportions unless Shift is held
   transformScalesStrokes: false,
+  // 0.4 (ARCHITECTURE.md "0.4 features", J.7): one namespace object per package. A package may add sub-keys to its
+  // own object without editing this file (withDefaults merges objects one level deep; read
+  // settings.<ns>.<key> ?? <default>). gridSize, gridSubdivisions, snap, showGuides, showGrid and rulerUnit stay flat.
+  // type: type-character-panel writes unit and char, type-paragraph-panel para, type-editing placeholder
+  // (char and para hold only the attributes the type tools' options bar does not have)
+  type: { unit: 'px', char: {}, para: {}, placeholder: true },
+  guides: {
+    color: '#1ec8ff', style: 'lines', smartColor: '#ff00ff', gridColor: '#508cff', gridStyle: 'lines', gridUnit: 'px',
+    snapTo: { guides: true, grid: true, layers: true, bounds: true, artboards: true, slices: true },
+    smartGuides: true, lock: false,
+  }, // guides-snapping
+  masks: { overlayColor: '#ff0000', overlayOpacity: 0.5 }, // masks-vector-masks
+  adjust: { autoOptions: null }, // adjust-tonal (adjust-color reads it); 0.3's adjustLast key stays where it is
+  gradients: {}, // gradients
+  patterns: { current: null }, // patterns: the current pattern's preset id
+  styles: {}, // layer-style-effects
+  shapes: {}, // shapes-live
+  layersPanel: { thumbSize: 'medium', thumbBounds: 'layer', showEffects: true, expandEffects: true, fillDefaultMasks: true, addCopy: true }, // layers-panel-depth
+  layerMenu: {}, // finish-layer-menu
+  conventions: { toolSwitchWithShift: true, springLoaded: true, dialogPositions: {} }, // conventions-shortcuts-fields
 });
 
 /** The Swatches panel's default palette (used until the user edits it; see swatchesEdited). */

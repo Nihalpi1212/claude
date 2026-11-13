@@ -6,7 +6,8 @@ import os from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { addRecent, removeRecent } from './recent.js';
 import { OPEN_DIALOG_FILTERS } from '../shared/formats.js';
-import { writeClipboardText, writeClipboardImage, readClipboardImage } from './clipboard.js';
+import { writeClipboardText, writeClipboardImage, readClipboardImage, readClipboardText } from './clipboard.js';
+import { presetFiles } from './preset-files.js';
 import { createAi } from './ai.js';
 import { printImage } from './print.js';
 
@@ -176,7 +177,16 @@ export function registerIpc(ctx) {
   handle('getSettings', async () => settings.get());
   handle('setSettings', async (patch) => {
     if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw new Error('Settings patch must be an object');
-    const next = await settings.patch(patch);
+    let next;
+    try {
+      next = await settings.patch(patch);
+    } catch (err) {
+      // N: the renderer reports a failed write once (app.reportWriteFailure); IPC keeps only the message of an error,
+      // so the code travels in it too
+      const e = new Error(`[write-failed] ${err?.message ?? err}`);
+      e.code = 'write-failed';
+      throw e;
+    }
     if (typeof patch.theme === 'string') nativeTheme.themeSource = ['light', 'dark'].includes(patch.theme) ? patch.theme : 'system';
     updateMenu();
     return next;
@@ -217,7 +227,7 @@ export function registerIpc(ctx) {
     const pending = Array.isArray(startup.commands) ? startup.commands.splice(0) : [];
     if (pending.length) {
       setImmediate(() => {
-        for (const { cmd, arg } of pending) if (!event.sender.isDestroyed()) event.sender.send('pigment:event:command', cmd, arg);
+        for (const { cmd, arg, via } of pending) if (!event.sender.isDestroyed()) event.sender.send('pigment:event:command', cmd, arg, via ?? false);
       });
     }
     return files;
@@ -305,6 +315,15 @@ export function registerIpc(ctx) {
     writeClipboardText(clipboard, text).catch((err) => console.warn('clipboard text write failed', err));
   });
   handle('readClipboardImage', async () => readClipboardImage(clipboard, nativeImage));
+  handle('readClipboardText', async () => readClipboardText(clipboard));
+
+  // ---- presets (ARCHITECTURE.md "0.4 features", C): files under <userData>/presets, validated in preset-files.js
+  const presets = presetFiles(join(app.getPath('userData'), 'presets'));
+  handle('presetsRead', (kind) => presets.read(kind));
+  handle('presetsWrite', (kind, json) => presets.write(kind, json));
+  handle('presetsReadBlob', (kind, name) => presets.readBlob(kind, name));
+  handle('presetsWriteBlob', (kind, name, bytes) => presets.writeBlob(kind, name, bytes));
+  handle('presetsRemoveBlob', (kind, name) => presets.removeBlob(kind, name));
 
   on('writeClipboardImage', (dataUrl) => {
     writeClipboardImage(clipboard, nativeImage, dataUrl).catch((err) => console.warn('clipboard image write failed', err));

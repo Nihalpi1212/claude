@@ -1,8 +1,15 @@
-// Layer › Layer Style: Blending Options plus the ten effects (Drop Shadow ... Stroke), edited live
-// on the layer and recorded as one undo entry; also the fx menu of the Layers panel and the
+// Layer › Layer Style: the pages (Blending Options, from lib/blending-options.js) plus the ten effects (Drop Shadow
+// ... Stroke), edited live on the layer and recorded as one undo entry; also the fx menu of the Layers panel and the
 // document's global light.
-import { STYLE_KEYS, mergeStyles } from '../../shared/pixels/styles.js';
-import { BLEND_MODES } from './document.js';
+//
+// Pages (ARCHITECTURE.md "0.4 features", L.3; E13): app.layerStyle.registerPage({ id, title, order, render(ctx) })
+// adds an entry above the effects. ctx: { layer, styles, opacity, fillOpacity, blend (opacity and fill opacity
+// 0..1), advanced (the draft of layer.blending, never null here), apply(), select(id), globalLight() }. The dialog
+// snapshots, live-applies, restores on Cancel and commits on OK `blending` together with the styles, opacity, fill
+// opacity and blend mode, in one setLayerProps entry; it stores null when the draft is the default.
+import { STYLE_KEYS, mergeStyles, hasEnabledStyles } from '../../shared/pixels/styles.js';
+import { BLEND_MODES, DEFAULT_BLENDING, isDefaultBlending } from './document.js';
+import { isStyleable } from './blending-options.js';
 import { buildForm, formDialog } from './form.js';
 import { setLayerProps } from './layer-ops.js';
 import { patternFromCanvas, patternCanvas } from './patterns.js';
@@ -83,10 +90,21 @@ function fromForm(key, fx, values) {
   return out;
 }
 
+/** True when some effect is on, Hide All Effects aside (the dialog keeps a hidden style). */
+const anyEffectOn = (styles) => !!styles && hasEnabledStyles({ ...styles, hidden: false });
+const sameJson = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+
 export function install(app) {
-  const hasStyleable = () => {
-    const l = app.doc?.active;
-    return !!l && !l.isGroup && l.type !== 'adjustment';
+  // lib/blending-options.js (layer-style-blending) decides which layers take styles
+  const hasStyleable = () => isStyleable(app.doc?.active, app);
+  const pages = new Map();
+  app.layerStyle = {
+    registerPage(page) {
+      if (!page || typeof page.id !== 'string' || typeof page.render !== 'function') throw new Error('registerPage: a page needs an id and render()');
+      pages.set(page.id, page);
+    },
+    pages: () => [...pages.values()].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
+    globalLight: () => globalLightDialog(),
   };
 
   async function styleDialog(initialKey = null, ctx = null) {
@@ -95,18 +113,32 @@ export function install(app) {
     if (!layer || layer.type === 'adjustment') return ctx?.cancel();
     // actions (lib/actions.js): a recorded step is the dialog's result ({ styles, opacity?, fillOpacity?, blend? }) and applies without it
     if (initialKey && typeof initialKey === 'object') return setLayerProps(app, layer, clone(initialKey), 'Layer style');
-    const before = { styles: clone(layer.styles), opacity: layer.opacity, fillOpacity: layer.fillOpacity, blend: layer.blend };
+    const before = { styles: clone(layer.styles), opacity: layer.opacity, fillOpacity: layer.fillOpacity, blend: layer.blend, blending: clone(layer.blending ?? null) };
     const styles = mergeStyles(layer.styles);
     // pattern overlays default to the current pattern
-    if (!styles.patternOverlay.pattern && app.currentPattern) styles.patternOverlay.pattern = patternFromCanvas(app.currentPattern);
-    let current = initialKey && styles[initialKey] ? initialKey : 'blending';
-    const blending = { opacity: Math.round(layer.opacity * 100), fillOpacity: Math.round(layer.fillOpacity * 100), blend: layer.blend };
+    const currentPattern = app.patterns?.current()?.canvas ?? null;
+    if (!styles.patternOverlay.pattern && currentPattern) styles.patternOverlay.pattern = patternFromCanvas(currentPattern);
+    const pageList = app.layerStyle.pages();
+    let current = initialKey && styles[initialKey] ? initialKey : pageList.some((pg) => pg.id === 'blending') ? 'blending' : pageList[0]?.id ?? STYLE_KEYS[0].key;
 
+    // the page context (L.3): the pages edit opacity, fill opacity, blend and the advanced draft, then call apply()
+    const ctx2 = {
+      layer,
+      styles,
+      opacity: layer.opacity,
+      fillOpacity: layer.fillOpacity,
+      blend: layer.blend,
+      advanced: clone(layer.blending ?? DEFAULT_BLENDING),
+      apply: () => apply(),
+      select: (id) => select(id),
+      globalLight: () => globalLightDialog().then(apply),
+    };
     const apply = () => {
-      layer.styles = Object.values(styles).some((s) => s?.enabled) ? clone(styles) : null;
-      layer.opacity = blending.opacity / 100;
-      layer.fillOpacity = blending.fillOpacity / 100;
-      layer.blend = blending.blend;
+      layer.styles = anyEffectOn(styles) ? clone(styles) : null;
+      layer.opacity = ctx2.opacity;
+      layer.fillOpacity = ctx2.fillOpacity;
+      layer.blend = ctx2.blend;
+      layer.blending = isDefaultBlending(ctx2.advanced) ? null : clone(ctx2.advanced);
       layer.touch();
       d.changed('props', { layer });
     };
@@ -147,7 +179,7 @@ export function install(app) {
       });
       list.appendChild(label);
     };
-    addRow('blending', 'Blending Options', false);
+    for (const pg of pageList) addRow(pg.id, pg.title, false);
     for (const { key, name } of STYLE_KEYS) addRow(key, name, true);
 
     const select = (key) => {
@@ -157,31 +189,16 @@ export function install(app) {
       const h = document.createElement('h3');
       h.style.margin = '0 0 10px';
       h.style.fontSize = '13px';
-      h.textContent = key === 'blending' ? 'Blending Options' : STYLE_KEYS.find((s) => s.key === key).name;
+      const page = pages.get(key);
+      h.textContent = page ? page.title : STYLE_KEYS.find((s) => s.key === key).name;
       pane.appendChild(h);
-      if (key === 'blending') {
-        const form = buildForm(
-          [
-            { key: 'blend', label: 'Blend mode', type: 'select', options: layer.isGroup ? [['pass-through', 'Pass Through'], ...BLENDS] : BLENDS },
-            S('opacity', 'Opacity', 0, 100, 1, { unit: '%' }),
-            S('fillOpacity', 'Fill opacity', 0, 100, 1, { unit: '%' }),
-          ],
-          {
-            values: blending,
-            onChange: (v) => {
-              Object.assign(blending, v);
-              apply();
-            },
-          },
-        );
-        pane.appendChild(form.element);
-        const gl = document.createElement('button');
-        gl.type = 'button';
-        gl.className = 'btn small';
-        gl.style.marginTop = '12px';
-        gl.textContent = 'Global Light…';
-        gl.addEventListener('click', () => globalLightDialog().then(apply));
-        pane.appendChild(gl);
+      if (page) {
+        try {
+          const body = page.render(ctx2);
+          if (body) pane.appendChild(body);
+        } catch (err) {
+          console.error(`Layer Style page ${key} failed`, err);
+        }
         return;
       }
       const fx = styles[key];
@@ -208,10 +225,11 @@ export function install(app) {
         pick.type = 'button';
         pick.className = 'btn small';
         pick.textContent = 'Use current pattern';
-        pick.disabled = !app.currentPattern;
-        pick.title = app.currentPattern ? '' : 'Define a pattern first (Edit › Define Pattern)';
+        const current = app.patterns?.current()?.canvas ?? null;
+        pick.disabled = !current;
+        pick.title = current ? '' : 'Define a pattern first (Edit › Define Pattern)';
         pick.addEventListener('click', () => {
-          styles.patternOverlay.pattern = patternFromCanvas(app.currentPattern);
+          styles.patternOverlay.pattern = patternFromCanvas(app.patterns.current().canvas);
           styles.patternOverlay.enabled = true;
           rows.get('patternOverlay').cb.checked = true;
           apply();
@@ -242,13 +260,14 @@ export function install(app) {
       className: 'style-dialog',
       buttons: [{ label: 'Cancel', value: null }, { label: 'OK', value: true, primary: true }],
     });
-    const after = { styles: layer.styles ? clone(layer.styles) : null, opacity: layer.opacity, fillOpacity: layer.fillOpacity, blend: layer.blend };
-    Object.assign(layer, { styles: before.styles, opacity: before.opacity, fillOpacity: before.fillOpacity, blend: before.blend });
+    const after = { styles: layer.styles ? clone(layer.styles) : null, opacity: layer.opacity, fillOpacity: layer.fillOpacity, blend: layer.blend, blending: clone(layer.blending ?? null) };
+    Object.assign(layer, { styles: before.styles, opacity: before.opacity, fillOpacity: before.fillOpacity, blend: before.blend, blending: before.blending });
     layer.touch();
     if (ok) setLayerProps(app, layer, after, 'Layer style');
     else d.changed('props', { layer });
-    // actions (lib/actions.js): the styles always replay; opacity and blend mode only when the dialog changed them
-    if (ok) ctx?.setReplayArg(Object.fromEntries(Object.entries(after).filter(([k, v]) => k === 'styles' || v !== before[k])));
+    // actions (lib/actions.js): the styles always replay; opacity, blend mode and the blending options only when the
+    // dialog changed them
+    if (ok) ctx?.setReplayArg(Object.fromEntries(Object.entries(after).filter(([k, v]) => k === 'styles' || (k === 'blending' ? !sameJson(v, before.blending) : v !== before[k]))));
     else ctx?.cancel();
   }
 
@@ -287,7 +306,7 @@ export function install(app) {
     if (!layer) return;
     const styles = mergeStyles(layer.styles);
     styles[key].enabled = !styles[key].enabled;
-    setLayerProps(app, layer, { styles: Object.values(styles).some((s) => s.enabled) ? styles : null }, `${styles[key].enabled ? 'Add' : 'Hide'} ${STYLE_KEYS.find((s) => s.key === key).name}`);
+    setLayerProps(app, layer, { styles: anyEffectOn(styles) ? styles : null }, `${styles[key].enabled ? 'Add' : 'Hide'} ${STYLE_KEYS.find((s) => s.key === key).name}`);
   }
 
   app.layerStyleMenu = () => {

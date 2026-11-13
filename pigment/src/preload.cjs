@@ -60,6 +60,16 @@ const api = {
   writeClipboardText: (text) => send('writeClipboardText', text),
   writeClipboardImage: (dataUrl) => send('writeClipboardImage', dataUrl),
   readClipboardImage: () => invoke('readClipboardImage'),
+  readClipboardText: () => invoke('readClipboardText'),
+
+  // the preset store's files (lib/presets.js backend): write(kind, null) deletes the kind's file
+  presets: {
+    read: (kind) => invoke('presetsRead', kind),
+    write: (kind, json) => invoke('presetsWrite', kind, json),
+    readBlob: (kind, name) => invoke('presetsReadBlob', kind, name),
+    writeBlob: (kind, name, bytes) => invoke('presetsWriteBlob', kind, name, bytes),
+    removeBlob: (kind, name) => invoke('presetsRemoveBlob', kind, name),
+  },
 
   watchFile: (path) => invoke('watchFile', path),
   unwatchFile: (path) => invoke('unwatchFile', path),

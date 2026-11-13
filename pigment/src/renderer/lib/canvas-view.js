@@ -3,6 +3,7 @@
 // routes pointer events to the tool. One instance per open document; app.view is the active one.
 import { Compositor } from './compositor.js';
 import { intersectRect } from './document.js';
+import { paintMaskView } from './mask-view.js';
 
 const ZOOM_STEPS = [0.01, 0.02, 0.03, 0.05, 0.0667, 0.08, 0.1, 0.125, 0.167, 0.2, 0.25, 0.333, 0.5, 0.667, 1, 1.5, 2, 3, 4, 5, 6, 8, 12, 16, 24, 32, 48, 64];
 export const MIN_ZOOM = 0.01, MAX_ZOOM = 64;
@@ -53,6 +54,8 @@ export class CanvasView {
       if (e.kind === 'canvas') this.compositor.invalidate();
       this.invalidate();
     });
+    // snap (lib/snap.js): a tool change ends whatever gesture showed smart-guide overlays
+    this.offToolChanged = app.on?.('tool:changed', () => app.snap?.end());
     this.checker = null;
     this.resize();
   }
@@ -61,6 +64,7 @@ export class CanvasView {
     cancelAnimationFrame(this.raf);
     this.resizeObserver.disconnect();
     this.unsubscribe?.();
+    this.offToolChanged?.();
     this.el.remove();
   }
 
@@ -254,26 +258,19 @@ export class CanvasView {
     // colour proofing (lib/color-modes.js) may hand back a processed copy to draw instead of the composite
     const shown = (this.postProcess && this.postProcess(composite, this)) || composite;
     ctx.drawImage(shown, 0, 0);
-    if (this.maskView && this.doc.active?.mask?.canvas) {
-      ctx.fillStyle = '#000';
-      ctx.fillRect(0, 0, this.doc.width, this.doc.height);
-      ctx.drawImage(this.doc.active.mask.canvas, 0, 0);
-    } else if (this.doc.active?.mask?.canvas && this.app.ui?.showMaskOverlay) {
+    // the mask channel view and the red overlay: lib/mask-view.js (K.1b, masks-vector-masks)
+    paintMaskView(ctx, this, this.doc.active);
+    ctx.restore(); // clip
+    // view underlays (app.viewUnderlays, L.5): document space, after the composite, before the grid, unclipped
+    for (const fn of this.app.viewUnderlays ?? []) {
       ctx.save();
-      ctx.globalAlpha = 0.5;
-      ctx.globalCompositeOperation = 'source-over';
-      const inv = document.createElement('canvas');
-      inv.width = this.doc.width;
-      inv.height = this.doc.height;
-      const ictx = inv.getContext('2d');
-      ictx.fillStyle = '#ff0000';
-      ictx.fillRect(0, 0, inv.width, inv.height);
-      ictx.globalCompositeOperation = 'destination-out';
-      ictx.drawImage(this.doc.active.mask.canvas, 0, 0);
-      ctx.drawImage(inv, 0, 0);
+      try {
+        fn(ctx, this);
+      } catch (err) {
+        console.warn('view underlay failed', err);
+      }
       ctx.restore();
     }
-    ctx.restore(); // clip
     this.paintGrid(ctx);
     ctx.restore(); // view transform
 
@@ -296,6 +293,7 @@ export class CanvasView {
     try {
       tool?.drawOverlay?.(ctx, this);
       for (const fn of this.overlayFns) fn(ctx, this);
+      this.app.canvasCapture?.top()?.overlay?.(ctx, this); // canvas capture (lib/canvas-capture.js, I.3)
     } catch (err) {
       console.warn('overlay failed', err);
     }
@@ -489,17 +487,23 @@ export class CanvasView {
       const r = canvas.getBoundingClientRect();
       const sx = e.clientX - r.left, sy = e.clientY - r.top;
       const d = this.toDoc(sx, sy);
-      return { x: d.x, y: d.y, screenX: sx, screenY: sy, pressure: e.pointerType === 'pen' && e.pressure > 0 ? e.pressure : 1, tiltX: e.tiltX, tiltY: e.tiltY, buttons: e.buttons, button: e.button, shift: e.shiftKey, alt: e.altKey, ctrl: e.ctrlKey, meta: e.metaKey, pointerType: e.pointerType, original: e };
+      // temporary: the modifier that summoned a temporary tool (view.tempToolVia, set with view.tempTool by
+      // conventions' temp-tools.js), so snap.js does not read that held Ctrl as "do not snap" (F)
+      return { x: d.x, y: d.y, screenX: sx, screenY: sy, pressure: e.pointerType === 'pen' && e.pressure > 0 ? e.pressure : 1, tiltX: e.tiltX, tiltY: e.tiltY, buttons: e.buttons, button: e.button, shift: e.shiftKey, alt: e.altKey, ctrl: e.ctrlKey, meta: e.metaKey, pointerType: e.pointerType, temporary: this.tempTool ? this.tempToolVia ?? null : null, original: e };
     };
     let dragging = false;
     let handDrag = null;
+    let capturing = null; // the canvas-capture handler that took the current drag (lib/canvas-capture.js, I.3)
     const currentTool = () => this.tempTool ?? this.app.tools?.active;
+    const capture = () => this.app.canvasCapture?.top() ?? null;
     // dragging out of a ruler creates a guide (released over the canvas) at the pointer position
     for (const [ruler, axis] of [[this.rulerH, 'y'], [this.rulerV, 'x']]) {
       const docPos = (e) => {
         const r = canvas.getBoundingClientRect();
         const d = this.toDoc(e.clientX - r.left, e.clientY - r.top);
-        return Math.round(d[axis] * 100) / 100;
+        // snap (lib/snap.js): a guide dragged from a ruler snaps along its own axis
+        const s = this.app.snap?.point(d, { source: 'guide', axis, pointer: { x: d.x, y: d.y, shift: e.shiftKey, alt: e.altKey, ctrl: e.ctrlKey, meta: e.metaKey, temporary: null }, view: this }) ?? d;
+        return Math.round(s[axis] * 100) / 100;
       };
       ruler.style.cursor = axis === 'y' ? 'row-resize' : 'col-resize';
       ruler.addEventListener('pointerdown', (e) => {
@@ -522,6 +526,7 @@ export class CanvasView {
         const r = canvas.getBoundingClientRect();
         const over = e.type === 'pointerup' && e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
         if (over) this.app.commands.run('view:new-guide', { axis, pos: docPos(e) }, 'api');
+        this.app.snap?.end();
         this.invalidate();
       };
       ruler.addEventListener('pointerup', finish);
@@ -538,6 +543,22 @@ export class CanvasView {
         return;
       }
       if (e.button !== 0 && e.button !== 2) return;
+      // a canvas-capture handler (an armed eyedropper, a dialog letting the canvas through) takes the click before
+      // the active tool; panning stays first
+      const cap = e.button === 0 ? capture() : null;
+      if (cap) {
+        capturing = cap;
+        dragging = true;
+        canvas.setPointerCapture(e.pointerId);
+        e.preventDefault();
+        try {
+          cap.down(p, this);
+        } catch (err) {
+          console.warn('canvas capture failed', err);
+        }
+        this.invalidate();
+        return;
+      }
       dragging = true;
       canvas.setPointerCapture(e.pointerId);
       e.preventDefault();
@@ -558,6 +579,11 @@ export class CanvasView {
           handDrag = { x: ce.clientX, y: ce.clientY };
           continue;
         }
+        const cap = capturing ?? capture();
+        if (cap) {
+          cap.move?.(p, this, dragging);
+          continue;
+        }
         currentTool()?.onPointerMove?.(p, dragging);
       }
       this.app.emit('pointer:moved', { view: this, x: this.pointer.x, y: this.pointer.y });
@@ -571,15 +597,30 @@ export class CanvasView {
       }
       if (!dragging) return;
       dragging = false;
+      if (capturing) {
+        const cap = capturing;
+        capturing = null;
+        cap.up?.(p, this);
+        this.invalidate();
+        return;
+      }
       if (e.button === 2) return;
       currentTool()?.onPointerUp?.(p);
+      this.app.snap?.end(); // snap (lib/snap.js): the gesture is over
       this.invalidate();
     };
     canvas.addEventListener('pointerup', up);
     canvas.addEventListener('pointercancel', (e) => {
       if (dragging) {
         dragging = false;
-        currentTool()?.onPointerCancel?.(norm(e));
+        if (capturing) {
+          const cap = capturing;
+          capturing = null;
+          cap.up?.({ ...norm(e), cancelled: true }, this);
+        } else {
+          currentTool()?.onPointerCancel?.(norm(e));
+          this.app.snap?.end(); // snap (lib/snap.js)
+        }
       }
       handDrag = null;
     });
@@ -589,7 +630,23 @@ export class CanvasView {
         this.invalidate();
       }
     });
-    canvas.addEventListener('dblclick', (e) => currentTool()?.onDoubleClick?.(norm(e)));
+    canvas.addEventListener('dblclick', (e) => {
+      if (capture()) return; // a captured canvas: the tool never sees the double-click
+      currentTool()?.onDoubleClick?.(norm(e));
+    });
+    // drop (E25): in-app drags (a gradient or a pattern from a panel) dropped on the canvas
+    canvas.addEventListener('dragover', (e) => {
+      if (this.app.dropHandlerFor?.(e.dataTransfer, 'canvas')) e.preventDefault(); // drop (E25)
+    });
+    canvas.addEventListener('drop', (e) => {
+      const found = this.app.dropHandlerFor?.(e.dataTransfer, 'canvas'); // drop (E25)
+      if (!found) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const r = canvas.getBoundingClientRect();
+      const d = this.toDoc(e.clientX - r.left, e.clientY - r.top);
+      found.handler.canvas(e.dataTransfer.getData(found.mime), { x: d.x, y: d.y }, e);
+    });
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
     canvas.addEventListener(
       'wheel',

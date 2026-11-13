@@ -18,7 +18,7 @@ import { createCanvas, copyCanvas, intersectRect, unionRect } from './document.j
 import { Selection } from './selection.js';
 import { contentRect, dataCanvas, canvasData } from './image-ops.js';
 import { icon } from './icons.js';
-import { bridge } from './bridge.js';
+import { UNDO_LIKE } from './sessions.js';
 import { createContentAwareScaler } from '../../shared/pixels/seam-carve.js';
 
 const TOOL_ID = 'content-aware-scale';
@@ -717,22 +717,17 @@ export function install(app) {
 
   // While the box is up the layer shows a preview, so the session owns the document like a modal dialog
   // would: commands that could change it (or the tool, the layer, the tab) are refused with a hint, undo and
-  // redo cancel the scale as they do for Free Transform. (lib/blur-gallery-ui.js guards its sessions the same way.)
-  const run = app.commands.run.bind(app.commands);
-  let warned = -Infinity; // when the hint was last shown (it is not repeated within 2.5 s)
-  app.commands.run = (id, arg, source) => {
-    if (tool.session && !tool.ending && !tool.committing && !SAFE_COMMANDS.test(id)) {
-      if (/^edit:(undo|redo|step-backward|step-forward)$/.test(id)) tool.cancel();
-      else if (source !== 'api' && performance.now() - warned > 2500) {
-        warned = performance.now();
-        app.dialogs.toast(`Finish ${LABEL} first: Enter applies it, Esc cancels`, { timeout: 2200 });
-      }
-      return undefined;
-    }
-    return run(id, arg, source);
-  };
-  // closing the window asks about unsaved documents: the preview must be off the layer before anything is saved
-  bridge.on?.('before-close', () => tool.cancel());
+  // redo cancel the scale as they do for Free Transform (lib/sessions.js; Blur Gallery is guarded the same way).
+  // Closing the window cancels it before anything is saved: the preview must be off the layer.
+  app.sessions.register({
+    id: 'content-aware-scale',
+    policy: 'modal',
+    label: LABEL,
+    active: () => !!tool.session && !tool.ending && !tool.committing,
+    allow: SAFE_COMMANDS,
+    handle: (id) => (UNDO_LIKE.test(id) ? (tool.cancel(), {}) : undefined),
+    cancel: () => tool.cancel(),
+  });
 
   app.commands.registerAll({
     'edit:content-aware-scale': {

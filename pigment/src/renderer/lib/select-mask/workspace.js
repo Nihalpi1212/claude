@@ -21,7 +21,6 @@ import { Tool } from '../tools.js';
 import { buildForm } from '../form.js';
 import { icon } from '../icons.js';
 import { createCanvas } from '../document.js';
-import { bridge } from '../bridge.js';
 import { selectionOps, Selection } from '../selection.js';
 import { cropImage, clampRect } from '../../../shared/pixels/core.js';
 import { MaskPreview, VIEW_MODES, VIEW_KEYS } from './preview.js';
@@ -1145,7 +1144,7 @@ export class SelectMaskTool extends Tool {
     });
     // Enter or Escape in a number field confirms the field and hands the keys back to the canvas
     el.addEventListener('keydown', (e) => {
-      if (e.target.tagName !== 'INPUT' || e.target.type !== 'number' || (e.key !== 'Enter' && e.key !== 'Escape')) return;
+      if (!e.target.matches?.('input[type=number], input[data-numeric]') || (e.key !== 'Enter' && e.key !== 'Escape')) return;
       e.preventDefault();
       e.stopPropagation();
       e.target.blur();
@@ -1200,27 +1199,27 @@ export class SelectMaskTool extends Tool {
 export function installWorkspace(app, engine) {
   const tool = new SelectMaskTool(app, engine);
 
-  // The workspace owns the document like a modal dialog would. Undo and Redo step through its own
-  // strokes; Select All / Deselect / Inverse act on its selection; everything else waits.
-  const run = app.commands.run.bind(app.commands);
-  let warned = -Infinity; // when the hint was last shown (it is not repeated within 2.5 s)
-  app.commands.run = (id, arg, source) => {
-    if (tool.session && !tool.ending && !SAFE_COMMANDS.test(id)) {
-      if (id === 'edit:undo' || id === 'edit:step-backward') tool.undo();
-      else if (id === 'edit:redo' || id === 'edit:step-forward') tool.redo();
-      else if (id === 'select:all') tool.selectAll();
-      else if (id === 'select:none') tool.clear();
-      else if (id === 'select:inverse') tool.invert();
-      else if (source !== 'api' && performance.now() - warned > 2500) {
-        warned = performance.now();
-        app.dialogs.toast(`Finish ${LABEL} first: Enter applies it, Esc cancels`, { timeout: 2200 });
-      }
-      return undefined;
-    }
-    return run(id, arg, source);
+  // The workspace owns the document like a modal dialog would (lib/sessions.js). Undo and Redo step through
+  // its own strokes; Select All / Deselect / Inverse act on its selection; everything else waits. Closing the
+  // window removes the workspace before anything is saved.
+  const own = {
+    'edit:undo': () => tool.undo(),
+    'edit:step-backward': () => tool.undo(),
+    'edit:toggle-last-state': () => tool.undo(),
+    'edit:redo': () => tool.redo(),
+    'edit:step-forward': () => tool.redo(),
+    'select:all': () => tool.selectAll(),
+    'select:none': () => tool.clear(),
+    'select:inverse': () => tool.invert(),
   };
-
-  // closing the window asks about unsaved documents: the workspace must be gone before anything is saved
-  bridge.on?.('before-close', () => tool.cancel({ force: true }));
+  app.sessions.register({
+    id: 'select-mask',
+    policy: 'modal',
+    label: LABEL,
+    active: () => !!tool.session && !tool.ending,
+    allow: SAFE_COMMANDS,
+    handle: (id) => (own[id] ? (own[id](), {}) : undefined),
+    cancel: () => tool.cancel({ force: true }),
+  });
   return tool;
 }

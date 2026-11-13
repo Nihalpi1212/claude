@@ -141,7 +141,7 @@ test('filters: Gaussian Blur dialog, Last Filter (Ctrl+F) and a selection-limite
   expect(edge[3]).toBeLessThan(255);
   expect(await page.evaluate(() => window.pigmentApp.settings.lastFilter?.kind)).toBe('gaussian-blur');
   const n = await page.evaluate(() => window.pigmentApp.doc.history.entries.length);
-  await page.keyboard.press('Control+f');
+  await page.keyboard.press('Control+Alt+f');
   await expect.poll(() => page.evaluate(() => window.pigmentApp.doc.history.entries.length)).toBe(n + 1);
   // a filter inside a selection leaves the outside untouched
   await page.evaluate(async () => {

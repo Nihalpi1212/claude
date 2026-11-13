@@ -17,6 +17,8 @@
 // Masks stay 8-bit (Photoshop keeps 16-bit masks; Pigment does not). 32-bit samples are display-referred
 // floats (1 = white, more is HDR headroom the proxy clamps), not linear light as in Photoshop.
 import { ADJUSTMENTS } from '../../shared/pixels/adjust.js';
+import { hasEnabledStyles } from '../../shared/pixels/styles.js';
+import { maskCanvasFor, hasEffectiveMask } from './mask-render.js';
 import {
   DEEP_TYPES, DEEP_BITS, fromCanvasData, toCanvasData, convertDepth, createDeep, extractRect, writeRect, mixRect, hasPrecision, syncFromProxy,
   applyAdjustmentDeep, isExactKind, blendDeep, resampleDeep, carryOver, statistics, DEEP_BLEND_MODES, q8u16, q8f32, toPs16,
@@ -276,7 +278,8 @@ export function install(app) {
       const st = states.get(layer.canvas);
       const planes = planesOf(layer);
       const before = extractRect(planes, local);
-      applyAdjustmentDeep(planes, adj.kind, adj.params ?? {}, local);
+      // ctx (I.4): the planes are the layer's, whose (0, 0) is the layer position in the document
+      applyAdjustmentDeep(planes, adj.kind, adj.params ?? {}, local, { origin: { x: layer.x, y: layer.y }, docWidth: doc.width, docHeight: doc.height, scale: 1 });
       // image modes that constrain pixels to grey (lib/modes.js) do so on the 8-bit result; mirror it
       if (doc.mode === 'grayscale') applyAdjustmentDeep(planes, 'desaturate', {}, local);
       const alpha = selectionAlpha(doc, rect);
@@ -391,7 +394,7 @@ export function install(app) {
   }
 
   // ---- flattening at full depth ---------------------------------------------------------------------------------
-  const styled = (layer) => !!layer.styles && Object.values(layer.styles).some((s) => s?.enabled);
+  const styled = (layer) => hasEnabledStyles(layer.styles);
 
   /**
    * How the document can be composited in float: the layers in drawing order, or the reason it cannot (then the
@@ -412,10 +415,10 @@ export function install(app) {
         if (layer.clip && kids.slice(0, i).some((k) => !k.clip)) reason = `${name} is a clipping mask`;
         else if (layer.type === 'adjustment') {
           const def = Object.prototype.hasOwnProperty.call(ADJUSTMENTS, layer.kind) ? ADJUSTMENTS[layer.kind] : null;
-          if (!def || !(isExactKind(layer.kind) || typeof def.lut === 'function')) reason = `the ${def?.name ?? layer.kind} adjustment layer works at 8 bits`;
+          if (!def || !(isExactKind(layer.kind, layer.params ?? {}) || typeof def.lut === 'function')) reason = `the ${def?.name ?? layer.kind} adjustment layer works at 8 bits`;
           else steps.push({ adjust: layer });
         } else if (layer.isGroup) {
-          if (layer.blend === 'pass-through' && layer.opacity >= 1 && !layer.mask?.enabled && !styled(layer)) walk(layer);
+          if (layer.blend === 'pass-through' && layer.opacity >= 1 && !hasEffectiveMask(layer) && !styled(layer)) walk(layer); // mask (K.1)
           else reason = `the group ${name} is not a plain Pass Through group`;
         } else if (styled(layer)) reason = `${name} has layer effects`;
         else if (layer !== neutral && !DEEP_BLEND_MODES.includes(layer.blend)) reason = `${name} uses the ${String(layer.blend).replace(/-/g, ' ')} blend mode`;
@@ -429,9 +432,9 @@ export function install(app) {
     return reason ? { exact: false, reason } : { exact: true, steps };
   }
 
-  function maskOf(layer) {
-    if (!layer.mask?.enabled || !layer.mask.canvas) return null;
-    const c = layer.mask.canvas;
+  function maskOf(layer, doc) {
+    const c = maskCanvasFor(layer, doc, { purpose: 'bake' }); // mask (K.1)
+    if (!c) return null;
     // mask canvases sit at the document origin; their alpha is the coverage
     return { data: ctx2d(c).getImageData(0, 0, c.width, c.height).data, width: c.width, height: c.height, x: 0, y: 0, channels: 4, offset: 3 };
   }
@@ -455,7 +458,7 @@ export function install(app) {
     for (const step of plan.steps) {
       if (step.adjust) {
         const layer = step.adjust;
-        const mask = maskOf(layer);
+        const mask = maskOf(layer, doc);
         const opacity = Math.max(0, Math.min(1, layer.opacity ?? 1));
         if (!(opacity > 0)) continue;
         const partial = opacity < 1 || mask;
@@ -488,7 +491,7 @@ export function install(app) {
         y = s.y ?? 0;
       }
       const plain = layer === neutral;
-      blendDeep(acc, src, { alpha: (plain ? 1 : layer.opacity ?? 1) * (layer.fillOpacity ?? 1), mode: plain ? 'normal' : layer.blend, x, y, mask: maskOf(layer) });
+      blendDeep(acc, src, { alpha: (plain ? 1 : layer.opacity ?? 1) * (layer.fillOpacity ?? 1), mode: plain ? 'normal' : layer.blend, x, y, mask: maskOf(layer, doc) });
     }
     // Grayscale documents show (and export) the luma of the composite, so coloured layers cannot leak colour
     if (doc.mode === 'grayscale' && !layers) applyAdjustmentDeep(acc, 'desaturate');

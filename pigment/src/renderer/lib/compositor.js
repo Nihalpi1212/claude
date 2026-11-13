@@ -4,9 +4,10 @@
 // only touches the dirty rectangle.
 import { createCanvas, intersectRect, unionRect } from './document.js';
 import { CANVAS_BLEND, blendImages } from '../../shared/pixels/blend.js';
-import { applyAdjustment } from '../../shared/pixels/adjust.js';
-import { applyStyles, stylePadding } from '../../shared/pixels/styles.js';
-import { resolvePattern } from './patterns.js';
+import { applyAdjustment, ADJUSTMENTS } from '../../shared/pixels/adjust.js';
+import { applyStyles, stylePadding, hasEnabledStyles } from '../../shared/pixels/styles.js';
+import { maskCanvasFor, applyLayerMask, hasEffectiveMask, maskCacheKey } from './mask-render.js';
+import { prepareStyles } from './style-prepare.js';
 
 const SIMPLE_OVER = new Set(['normal', 'pass-through']);
 
@@ -38,6 +39,21 @@ export class Compositor {
    */
   composite(doc, opts = {}) {
     const rect = opts.rect ? intersectRect(opts.rect, doc.bounds) ?? { x: 0, y: 0, width: 1, height: 1 } : doc.bounds;
+    // adjustment margins (I.4): kinds that read a neighbourhood see the same pixels in a partial repaint as in a full
+    // one, so the work rect grows by their margins (clamped to the document) and the requested rect is cut out
+    const margin = opts.rect && !opts.noMargin ? adjustmentMargin(doc) : 0;
+    if (margin > 0) {
+      const grown = intersectRect({ x: rect.x - margin, y: rect.y - margin, width: rect.width + margin * 2, height: rect.height + margin * 2 }, doc.bounds);
+      if (grown && (grown.width > rect.width || grown.height > rect.height)) {
+        const big = this.composite(doc, { ...opts, rect: grown, target: null, noMargin: true });
+        const out = opts.target ?? createCanvas(rect.width, rect.height);
+        const octx = out.getContext('2d', { willReadFrequently: true });
+        octx.setTransform(1, 0, 0, 1, 0, 0);
+        octx.clearRect(0, 0, out.width, out.height);
+        octx.drawImage(big, grown.x - rect.x, grown.y - rect.y);
+        return out;
+      }
+    }
     const isFull = !opts.rect && !opts.skip && !opts.until && !opts.target && !opts.rawMode;
     // layer.touch() bumps the root's version without a document change event (brush strokes), so both count
     if (isFull && this.full && this.full.version === doc.version && this.full.rootVersion === doc.root.version && this.full.canvas.width === doc.width && this.full.canvas.height === doc.height) return this.full.canvas;
@@ -84,7 +100,7 @@ export class Compositor {
     if (layer.isGroup) {
       // only Pass Through lets the children blend with what is below the group; Normal isolates them
       const passThrough = layer.blend === 'pass-through' && !clipped.length && !layer.styles;
-      if (passThrough && layer.opacity >= 1 && !layer.mask?.enabled) return this.drawChildren(ctx, layer, rect, doc, opts);
+      if (passThrough && layer.opacity >= 1 && !hasEffectiveMask(layer)) return this.drawChildren(ctx, layer, rect, doc, opts); // mask (K.1)
       if (passThrough) {
         // pass through with opacity or a mask: the children blend with the backdrop, then the result is
         // faded back towards that backdrop (so an adjustment layer inside keeps working at 50%)
@@ -94,7 +110,7 @@ export class Compositor {
         tctx.translate(-rect.x, -rect.y);
         const stop = this.drawChildren(tctx, layer, rect, doc, opts);
         tctx.setTransform(1, 0, 0, 1, 0, 0);
-        this.lerpInto(ctx, tmp, rect, layer.opacity, layer.mask?.enabled ? layer.mask.canvas : null);
+        this.lerpInto(ctx, tmp, rect, layer.opacity, maskCanvasFor(layer, doc, { purpose: 'composite' })); // mask (K.1)
         return stop;
       }
       const tmp = createCanvas(rect.width, rect.height);
@@ -140,7 +156,7 @@ export class Compositor {
       cctx.drawImage(canvas, 0, 0);
       work = copy;
     }
-    const styled = !!layer.styles && Object.values(layer.styles).some((s) => s?.enabled);
+    const styled = hasEnabledStyles(layer.styles);
     if (layer.fillOpacity < 1 && !layer.isGroup && !styled) {
       const faded = createCanvas(work.width, work.height);
       const fctx = faded.getContext('2d');
@@ -149,19 +165,13 @@ export class Compositor {
       work = faded;
     }
     // the mask shapes the layer before its effects (Photoshop's default: a stroke or shadow follows the mask edge)
-    const masked = !!(layer.mask?.enabled && layer.mask.canvas);
-    if (masked) {
-      const m = createCanvas(work.width, work.height);
-      const mctx = m.getContext('2d');
-      mctx.drawImage(work, 0, 0);
-      mctx.globalCompositeOperation = 'destination-in';
-      mctx.drawImage(layer.mask.canvas, -wx, -wy);
-      work = m;
-    }
+    // (K.3: layer-style-blending splits the parts around the styles for the two "hides effects" boxes)
+    const masked = hasEffectiveMask(layer); // mask (K.1)
+    if (masked) work = applyLayerMask(work, wx, wy, layer, doc); // mask (K.1)
     if (styled) {
       // edits on clipped layers only bump their own versions: they are part of the style cache key
       const clipKey = clipped.length ? clipped.map((c) => `${c.id}:${c.version}`).join(',') : '';
-      const out = this.styledCanvas(layer, work, wx, wy, doc, { masked, clipKey });
+      const out = this.styledCanvas(layer, work, wx, wy, doc, { masked, clipKey, maskKey: maskCacheKey(layer) }); // mask (K.1)
       if (out) {
         work = out.canvas;
         wx = out.x;
@@ -207,29 +217,22 @@ export class Compositor {
     return null;
   }
 
-  styledCanvas(layer, canvas, x, y, doc = null, { masked = false, clipKey = '' } = {}) {
+  styledCanvas(layer, canvas, x, y, doc = null, { masked = false, clipKey = '', maskKey = '' } = {}) {
     const cached = this.styleCache.get(layer);
     const angle = doc?.globalLight?.angle ?? 120, altitude = doc?.globalLight?.altitude ?? 30;
     // a masked source is a fresh canvas every time: mask edits touch the layer, so its version is the key then
     const sameSource = cached && (cached.source === canvas || (masked && cached.masked && cached.x0 === x && cached.y0 === y && cached.w === canvas.width && cached.h === canvas.height));
-    if (cached && cached.version === layer.version && sameSource && cached.clipKey === clipKey && cached.angle === angle && cached.altitude === altitude) return cached;
+    if (cached && cached.version === layer.version && sameSource && cached.clipKey === clipKey && cached.maskKey === maskKey && cached.angle === angle && cached.altitude === altitude) return cached;
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    let styles = layer.styles;
-    const po = styles.patternOverlay;
-    if (po?.enabled && typeof po.pattern === 'string') {
-      const data = resolvePattern(po.pattern, () => {
-        layer.touch();
-        doc?.changed('pixels', { layer });
-      });
-      styles = { ...styles, patternOverlay: { ...po, pattern: data, enabled: !!data } };
-    }
+    // stored styles -> what applyStyles takes (pattern references decoded): lib/style-prepare.js (K.2)
+    const { styles, ready } = prepareStyles(layer, doc);
     const out = applyStyles(img, styles, { fillOpacity: layer.fillOpacity ?? 1, globalAngle: angle, globalAltitude: altitude });
     const result = createCanvas(out.image.width, out.image.height);
     result.getContext('2d').putImageData(new ImageData(out.image.data, out.image.width, out.image.height), 0, 0);
-    const entry = { version: layer.version, source: canvas, masked, clipKey, x0: x, y0: y, w: canvas.width, h: canvas.height, canvas: result, x: x + out.offsetX, y: y + out.offsetY, angle, altitude };
+    const entry = { version: layer.version, source: canvas, masked, clipKey, maskKey, x0: x, y0: y, w: canvas.width, h: canvas.height, canvas: result, x: x + out.offsetX, y: y + out.offsetY, angle, altitude };
     // a pattern still decoding must not be cached as "no pattern"
-    if (!(styles.patternOverlay?.enabled === false && layer.styles.patternOverlay?.enabled)) this.styleCache.set(layer, entry);
+    if (ready) this.styleCache.set(layer, entry);
     return entry;
   }
 
@@ -238,10 +241,11 @@ export class Compositor {
     const r = rect;
     const below = ctx.getImageData(0, 0, r.width, r.height); // getImageData ignores the transform; the target canvas is rect-sized
     const img = { width: below.width, height: below.height, data: new Uint8ClampedArray(below.data) };
-    applyAdjustment(img, layer.kind, layer.params);
+    // ctx (I.4): where the target's (0, 0) is in the document (a clipped adjustment: its base layer's sub-rect)
+    applyAdjustment(img, layer.kind, layer.params, null, { origin: { x: r.x, y: r.y }, docWidth: doc?.width ?? r.width, docHeight: doc?.height ?? r.height, scale: 1 });
     // the adjusted pixels replace the originals (a lerp by opacity × mask): drawing them over would re-composite
     // partially transparent pixels onto themselves and change their alpha
-    this.lerpPixels(ctx, below, img.data, r, layer.opacity, layer.mask?.enabled ? layer.mask.canvas : null);
+    this.lerpPixels(ctx, below, img.data, r, layer.opacity, maskCanvasFor(layer, doc, { purpose: 'composite' })); // mask (K.1)
   }
 
   /** Replaces what ctx holds within rect by a lerp towards `after` (a rect-sized canvas) by opacity × mask. */
@@ -296,6 +300,23 @@ export class Compositor {
   invalidate() {
     this.full = null;
   }
+}
+
+/** The px a partial composite grows by: the margins (I.4) of the visible adjustment layers whose kind declares one. */
+function adjustmentMargin(doc) {
+  let m = 0;
+  const walk = (group) => {
+    for (const l of group.children) {
+      if (!l.visible) continue;
+      if (l.isGroup) walk(l);
+      else if (l.type === 'adjustment') {
+        const def = Object.prototype.hasOwnProperty.call(ADJUSTMENTS, l.kind) ? ADJUSTMENTS[l.kind] : null;
+        if (typeof def?.margin === 'function') m += Math.max(0, Math.ceil(Number(def.margin(l.params ?? {})) || 0));
+      }
+    }
+  };
+  walk(doc.root);
+  return m;
 }
 
 /** Flattens a document to a new canvas (what export uses). */

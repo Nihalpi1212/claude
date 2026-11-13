@@ -1,4 +1,6 @@
 // Declarative forms for dialogs (Fill, Stroke, filters, adjustments, image size...).
+import { hasWidget, createWidget } from './fields.js';
+import { numericField } from './numeric-field.js';
 //
 // formDialog(app, { title, fields, okLabel, preview, live, width, className, buttons }) resolves with
 // the form values, or null when cancelled.
@@ -6,6 +8,8 @@
 // Field: { key, label, type, value, options, min, max, step, unit, when(values), span, help }
 //   type: 'select' | 'color' | 'slider' | 'number' | 'checkbox' | 'segment' | 'text' | 'textarea'
 //         | 'section' (heading, no key) | 'custom' ({ render(values, set, form) -> HTMLElement })
+//         | any type registered with lib/fields.js registerWidget (gradient, pattern, contour, preset, paint,
+//           numeric, ...: ARCHITECTURE.md "0.4 features", H); label, when, disabled and help stay the form's
 //   options: ['a', 'b'] or [['value', 'Label'], ...] or [{ value, label }]
 // preview(values) -> HTMLCanvasElement | null   shown in a thumbnail box next to the form
 // live: { apply(values), revert() }             previews on the canvas while the dialog is open
@@ -35,13 +39,13 @@ function clamp(v, min, max) {
  * Builds a form element. Returns { element, values, set(key, value), refresh() }.
  * onChange(values, key) fires on every edit (input events, so sliders update live).
  */
-export function buildForm(fields, { onChange, values: initial } = {}) {
+export function buildForm(fields, { onChange, values: initial, app = null } = {}) {
   const values = {};
   for (const f of fields) if (f.key) values[f.key] = initial?.[f.key] ?? (typeof f.value === 'function' ? f.value() : f.value);
   const element = document.createElement('div');
   element.className = 'dialog-form';
   const rows = [];
-  const form = { element, values, set, refresh, fields };
+  const form = { element, values, set, refresh, fields, app };
 
   function set(key, value, { silent = false } = {}) {
     values[key] = value;
@@ -232,16 +236,8 @@ function buildField(f, values, changed, form) {
         range.setAttribute('aria-label', f.label ?? f.key);
         wrap.appendChild(range);
       }
-      const num = document.createElement('input');
-      num.className = 'input';
-      num.type = 'number';
-      num.id = id;
-      num.dataset.key = f.key;
-      if (f.min !== undefined) num.min = String(f.min);
-      if (f.max !== undefined) num.max = String(f.max);
-      num.step = String(step);
-      num.value = fmt(values[f.key], step);
-      if (f.type === 'number') num.style.width = f.width ? `${f.width}px` : '90px';
+      // the number box is the numeric field of lib/numeric-field.js (conventions-shortcuts-fields completes it)
+      const num = numericField({ id, key: f.key, min: f.min, max: f.max, step, value: fmt(values[f.key], step), width: f.type === 'number' ? (f.width ? `${f.width}px` : '90px') : null }).input;
       wrap.appendChild(num);
       if (f.unit) {
         const u = document.createElement('span');
@@ -291,6 +287,27 @@ function buildField(f, values, changed, form) {
       break;
     }
     default: {
+      if (hasWidget(f.type)) {
+        // a registered widget (lib/fields.js, H): the form keeps the label, `when`, `disabled` and `help`
+        addLabel();
+        const widget = createWidget(f.type, { ...f, id }, {
+          app: form.app,
+          value: values[f.key],
+          onInput: (v) => {
+            values[f.key] = v;
+            changed(f.key);
+          },
+          onChange: (v) => {
+            values[f.key] = v;
+            changed(f.key);
+          },
+        });
+        widget.element.dataset.widget = f.type;
+        if (f.key && !widget.element.dataset.key) widget.element.dataset.key = f.key;
+        el.appendChild(widget.element);
+        sync = () => widget.set(values[f.key], { silent: true });
+        break;
+      }
       // text
       addLabel();
       const input = document.createElement('input');
@@ -404,6 +421,7 @@ export async function formDialog(app, opts) {
     : null;
 
   const form = buildForm(fields, {
+    app,
     values: opts.values,
     onChange: (values, key) => {
       opts.onChange?.(values, key, form);

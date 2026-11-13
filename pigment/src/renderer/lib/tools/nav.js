@@ -1,6 +1,6 @@
 // Navigation tools: hand (pan), rotate view, zoom; and the eyedropper / colour sampler.
 import { Tool } from '../tools.js';
-import { flattenDocument } from '../compositor.js';
+import { sampleMerged } from '../sample.js';
 import { intersectRect } from '../document.js';
 import { rgbaToHex } from '../../../shared/pixels/color.js';
 
@@ -143,10 +143,10 @@ export class EyedropperTool extends Tool {
       // the few pixels that are read, not the whole document
       const rect = intersectRect({ x: Math.floor(p.x) - half, y: Math.floor(p.y) - half, width: n, height: n }, doc.bounds);
       if (!rect) return null;
-      canvas = this.view.compositor.composite(doc, { rawMode: true, rect });
+      canvas = sampleMerged(this.app, doc, { stored: true, rect }); // sample (lib/sample.js)
       ox = rect.x;
       oy = rect.y;
-    } else canvas = flattenDocument(doc, this.view.compositor);
+    } else canvas = sampleMerged(this.app, doc); // sample (lib/sample.js)
     const x = Math.floor(p.x) - ox - half, y = Math.floor(p.y) - oy - half;
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     const x1 = Math.max(0, x), y1 = Math.max(0, y), x2 = Math.min(canvas.width, x + n), y2 = Math.min(canvas.height, y + n);

@@ -8,7 +8,7 @@
 //    Proof Colors uses) is handed a composite of the isolated layers to draw instead.
 import { BLEND_MODES, canvasIsBlank } from '../document.js';
 import { Compositor } from '../compositor.js';
-import { STYLE_KEYS } from '../../../shared/pixels/styles.js';
+import { STYLE_KEYS, hasEnabledStyles, effectInstances } from '../../../shared/pixels/styles.js';
 import { icon } from '../icons.js';
 import { debounce } from '../form.js';
 import { LABEL_COLORS, labelOf } from './tags.js';
@@ -54,7 +54,7 @@ export function matchesFilter(layer, f) {
   switch (f.type) {
     case 'kind': return !f.kinds.length || f.kinds.includes(kindOf(layer));
     case 'name': return !f.name.trim() || layer.name.toLowerCase().includes(f.name.trim().toLowerCase());
-    case 'effect': return !!layer.styles?.[f.effect]?.enabled;
+    case 'effect': return !layer.styles?.hidden && effectInstances(layer.styles, f.effect).some((fx) => fx.enabled);
     case 'mode': return layer.blend === f.mode;
     case 'color': return labelOf(layer) === f.color;
     case 'attribute':
@@ -66,7 +66,7 @@ export function matchesFilter(layer, f) {
         case 'linked': return !!layer.linked;
         case 'clipped': return !!layer.clip;
         case 'mask': return !!layer.mask;
-        case 'effects': return !!layer.styles && Object.values(layer.styles).some((s) => s?.enabled);
+        case 'effects': return hasEnabledStyles(layer.styles);
         default: return true;
       }
     default: return true;

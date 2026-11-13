@@ -2,6 +2,8 @@
 import { icon } from './icons.js';
 import { RENDERER_KEYS, describeAccelerator } from '../../shared/keymap.js';
 import { isMac } from './bridge.js';
+import { hasWidget, createWidget } from './fields.js';
+import { numericField } from './numeric-field.js';
 
 /** Base class for tools; subclasses override the pointer handlers. */
 export class Tool {
@@ -304,13 +306,8 @@ export class ToolManager {
       case 'number': {
         const box = document.createElement('span');
         box.className = 'opt-number';
-        const input = document.createElement('input');
-        input.type = 'number';
-        input.className = 'input';
-        input.min = spec.min ?? '';
-        input.max = spec.max ?? '';
-        input.step = spec.step ?? 1;
-        input.value = String(value ?? spec.default ?? 0);
+        // the numeric field of lib/numeric-field.js (no data-key on the input: the wrapping label carries it)
+        const input = numericField({ min: spec.min ?? '', max: spec.max ?? '', step: spec.step ?? 1, value: String(value ?? spec.default ?? 0) }).input;
         input.addEventListener('change', () => set(clampNum(Number(input.value), spec)));
         box.appendChild(input);
         if (spec.unit) {
@@ -421,8 +418,14 @@ export class ToolManager {
         control = { span: s };
         break;
       }
-      default:
-        return null;
+      default: {
+        // a kind registered with lib/fields.js (H): font-size, gradient, pattern, paint, ...; unknown kinds are not drawn
+        if (!hasWidget(spec.kind)) return null;
+        const widget = createWidget(spec.kind, spec, { app: this.app, value, onInput: (v) => set(v), onChange: (v) => set(v) });
+        wrap.appendChild(widget.element);
+        control = { widget };
+        break;
+      }
     }
     this.optionsControls.set(spec.key, { spec, control, wrap });
     return wrap;
@@ -440,6 +443,7 @@ export class ToolManager {
     if (control.input && spec.kind === 'checkbox') control.input.checked = !!value;
     if (control.select) control.select.value = String(value);
     if (control.seg) for (const b of control.seg.children) b.setAttribute('aria-pressed', String(b.dataset.value === String(value)));
+    control.widget?.set(value, { silent: true });
     control.render?.();
     for (const entry of this.optionsControls.values()) if (entry !== c) entry.control.render?.();
   }

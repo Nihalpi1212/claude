@@ -567,7 +567,7 @@ test('dialog commands record their settings and replay silently (replayability a
   expect(await docHash(page)).toBe(recorded);
   expect(await page.evaluate(() => window.pigmentApp.doc.layers().length)).toBe(layers);
   expect(await page.evaluate(() => window.pigmentApp.docs.docs.length)).toBe(2); // Duplicate made the second
-  expect(await page.evaluate(() => window.pigmentApp.docs.docs[0].guides)).toEqual([{ axis: 'y', pos: 40 }]);
+  expect(await page.evaluate(() => window.pigmentApp.docs.docs[0].guides)).toMatchObject([{ axis: 'y', pos: 40 }]);
   expect(errors).toEqual([]);
 });
 
@@ -1078,7 +1078,7 @@ test('records layer picks, colours, guides, Save As and playing another action; 
   await runAwait(page, 'layer:new', { name: 'Top' });
   expect(await play(page, 'Session')).toEqual({ ok: true });
   expect(await page.evaluate(() => window.pigmentApp.doc.layers().map((l) => l.name))).toEqual(['Background', 'Made', 'Top']);
-  expect(await page.evaluate(() => window.pigmentApp.doc.guides)).toEqual([{ axis: 'x', pos: 50 }]);
+  expect(await page.evaluate(() => window.pigmentApp.doc.guides)).toMatchObject([{ axis: 'x', pos: 50 }]);
   expect(await page.evaluate(() => window.pigmentApp.settings.foreground)).toBe('#654321');
   expect(await page.evaluate(() => [window.pigmentApp.doc.path, !!window.__pigmentTest.written['browser:/saved/out.png']])).toEqual(['browser:/saved/out.png', true]);
 

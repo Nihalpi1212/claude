@@ -10,6 +10,16 @@ export async function writeClipboardText(clipboard, text) {
   await clipboard.writeText(text);
 }
 
+/** The clipboard's plain text ('' when it holds none): Paste Without Formatting from the menu (O). */
+export async function readClipboardText(clipboard) {
+  try {
+    const text = await clipboard.readText();
+    return typeof text === 'string' ? text : '';
+  } catch {
+    return '';
+  }
+}
+
 /** Writes a PNG/JPEG data URL to the clipboard as an image. */
 export async function writeClipboardImage(clipboard, nativeImage, dataUrl) {
   if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) return;

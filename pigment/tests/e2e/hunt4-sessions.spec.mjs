@@ -361,7 +361,7 @@ test('Last Filter is recorded in an action as the filter it ran', async ({ page 
     app.actions.record(window.__action);
   });
   const states = await historyLength(page);
-  await page.keyboard.press('Control+f');
+  await page.keyboard.press('Control+Alt+f');
   await expect.poll(() => historyLength(page)).toBe(states + 1);
   await idle(page);
   const steps = await page.evaluate(() => {
@@ -418,12 +418,12 @@ test('Displace: Last Filter and a recorded step open the map chooser again, on a
   const first = await state();
   expect(first.changed).toBe(true);
   // Ctrl+F: the map is not kept with the settings, so the chooser comes back; Escape adds no state
-  await page.keyboard.press('Control+f');
+  await page.keyboard.press('Control+Alt+f');
   await expect(page.locator('.dialog select[data-key="__map"]')).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(page.locator('.dialog-backdrop')).toHaveCount(0);
   expect((await state()).states).toBe(first.states);
-  await page.keyboard.press('Control+f');
+  await page.keyboard.press('Control+Alt+f');
   await chooseDisplaceMap(page);
   await expect.poll(async () => (await state()).states).toBe(first.states + 1);
 
@@ -438,7 +438,7 @@ test('Displace: Last Filter and a recorded step open the map chooser again, on a
   await expect.poll(async () => (await state()).filters).toEqual(['displace:map']);
   expect(await page.evaluate(() => (window.pigmentApp.actions.stopRecording(), window.__action.steps.map((s) => s.command)))).toEqual(['filter:displace']);
   const smart = await state();
-  await page.keyboard.press('Control+f');
+  await page.keyboard.press('Control+Alt+f');
   await expect(page.locator('.dialog select[data-key="__map"]')).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(page.locator('.dialog-backdrop')).toHaveCount(0);

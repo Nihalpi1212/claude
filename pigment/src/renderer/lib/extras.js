@@ -384,7 +384,70 @@ function pickColor(app, initial, { title = 'Color Picker', live } = {}) {
 }
 
 // ---- preferences ---------------------------------------------------------------------------------------------
-const PREF_KEYS = ['theme', 'zoomWithWheel', 'rulerUnit', 'historyLimit', 'historyMemoryMB', 'checkerboardSize', 'checkerboardLight', 'checkerboardDark', 'gridSize', 'pixelGrid', 'showSelectionEdges', 'cursorStyle', 'resampleMethod', 'transformInterpolation', 'transformProportional', 'transformScalesStrokes', 'placeAsSmart'];
+// Preferences are a registry of sections (ARCHITECTURE.md "0.4 features", L.2; E20), shown in order as one form (0.3's
+// look): app.preferences.registerSection({ id, title, order, fields: FieldSpec[], read(settings) -> values,
+// write(values, settings) -> patch }); the later registration of an id wins. Field keys are shared by the whole form,
+// so each section uses keys of its own. Built in: 0.3's four sections and 'guides' (Guides, Grid & Slices: the grid
+// field moved out of Canvas), which guides-snapping replaces; type-editing, masks-vector-masks and
+// conventions-shortcuts-fields register theirs. preferences-dialog (0.8) re-homes them all.
+
+/** A section over plain settings keys: read the stored value (or the default), write what changed. */
+function keySection(id, title, order, fields) {
+  const keys = fields.filter((f) => f.key).map((f) => f.key);
+  return {
+    id,
+    title,
+    order,
+    fields,
+    read(s) {
+      const values = Object.fromEntries(keys.map((k) => [k, s[k] ?? DEFAULT_SETTINGS[k]]));
+      for (const k of ['checkerboardLight', 'checkerboardDark']) if (k in values) values[k] = normHex(values[k]);
+      if ('checkerboardSize' in values) values.checkerboardSize = Number(values.checkerboardSize);
+      return values;
+    },
+    write(values, s) {
+      const patch = {};
+      for (const k of keys) {
+        let v = values[k];
+        if (typeof DEFAULT_SETTINGS[k] === 'number') v = Number(v);
+        if (typeof DEFAULT_SETTINGS[k] === 'number' && !Number.isFinite(v)) continue;
+        if (k === 'checkerboardLight' || k === 'checkerboardDark') v = normHex(v);
+        if (v !== s[k]) patch[k] = v;
+      }
+      return patch;
+    },
+  };
+}
+
+const BUILTIN_PREF_SECTIONS = [
+  keySection('interface', 'Interface', 10, [
+    { key: 'theme', label: 'Theme', type: 'select', options: [['system', 'Match the system'], ['light', 'Light'], ['dark', 'Dark']] },
+    { key: 'rulerUnit', label: 'Ruler units', type: 'select', options: [['px', 'Pixels'], ['in', 'Inches'], ['cm', 'Centimeters'], ['mm', 'Millimeters'], ['pt', 'Points'], ['percent', 'Percent']] },
+    { key: 'zoomWithWheel', label: 'Zoom with the scroll wheel (Ctrl/Cmd + wheel always zooms)', type: 'checkbox', span: true },
+  ]),
+  keySection('tools', 'Cursors and tools', 20, [
+    { key: 'cursorStyle', label: 'Painting cursor', type: 'select', options: [['outline', 'Brush outline'], ['precise', 'Precise (crosshair)'], ['dot', 'Dot']] },
+    { key: 'transformInterpolation', label: 'Transform interpolation', type: 'select', options: [['bicubic', 'Bicubic'], ['bilinear', 'Bilinear'], ['nearest', 'Nearest neighbor']] },
+    { key: 'resampleMethod', label: 'Image Size resampling', type: 'select', options: [['bicubic', 'Bicubic (smooth gradients)'], ['lanczos', 'Lanczos (sharper)'], ['bilinear', 'Bilinear'], ['area', 'Area average (reduction)'], ['nearest', 'Nearest neighbor (hard edges)']] },
+    { key: 'transformProportional', label: 'Keep proportions while transforming (Shift releases)', type: 'checkbox', span: true },
+    { key: 'transformScalesStrokes', label: 'Scale shape strokes with transforms', type: 'checkbox', span: true },
+    { key: 'placeAsSmart', label: 'Place files as smart objects', type: 'checkbox', span: true },
+  ]),
+  keySection('canvas', 'Canvas', 30, [
+    { key: 'checkerboardSize', label: 'Transparency grid size', type: 'select', options: [[4, 'Small'], [8, 'Medium'], [16, 'Large']] },
+    { key: 'checkerboardLight', label: 'Grid colour (light)', type: 'color' },
+    { key: 'checkerboardDark', label: 'Grid colour (dark)', type: 'color' },
+    { key: 'pixelGrid', label: 'Show the pixel grid at high zoom', type: 'checkbox', span: true },
+    { key: 'showSelectionEdges', label: 'Show selection edges (marching ants)', type: 'checkbox', span: true },
+  ]),
+  keySection('guides', 'Guides, Grid & Slices', 40, [
+    { key: 'gridSize', label: 'Grid spacing', type: 'number', min: 2, max: 2000, unit: 'px' },
+  ]),
+  keySection('performance', 'Performance', 50, [
+    { key: 'historyLimit', label: 'History states', type: 'number', min: 1, max: 1000, help: 'Older states are dropped first' },
+    { key: 'historyMemoryMB', label: 'History memory', type: 'number', min: 64, max: 16384, unit: 'MB', help: 'Per document' },
+  ]),
+];
 
 /**
  * app.saveSettings() replaces app.settings with what the store returns, which drops changes still
@@ -418,34 +481,22 @@ function applyRuntimeSettings(app) {
 
 async function preferencesDialog(app) {
   const s = app.settings;
-  const values = Object.fromEntries(PREF_KEYS.map((k) => [k, s[k] ?? DEFAULT_SETTINGS[k]]));
-  values.checkerboardLight = normHex(values.checkerboardLight);
-  values.checkerboardDark = normHex(values.checkerboardDark);
-  const fields = [
-    { type: 'section', label: 'Interface' },
-    { key: 'theme', label: 'Theme', type: 'select', options: [['system', 'Match the system'], ['light', 'Light'], ['dark', 'Dark']] },
-    { key: 'rulerUnit', label: 'Ruler units', type: 'select', options: [['px', 'Pixels'], ['in', 'Inches'], ['cm', 'Centimeters'], ['mm', 'Millimeters'], ['pt', 'Points'], ['percent', 'Percent']] },
-    { key: 'zoomWithWheel', label: 'Zoom with the scroll wheel (Ctrl/Cmd + wheel always zooms)', type: 'checkbox', span: true },
-    { type: 'section', label: 'Cursors and tools' },
-    { key: 'cursorStyle', label: 'Painting cursor', type: 'select', options: [['outline', 'Brush outline'], ['precise', 'Precise (crosshair)'], ['dot', 'Dot']] },
-    { key: 'transformInterpolation', label: 'Transform interpolation', type: 'select', options: [['bicubic', 'Bicubic'], ['bilinear', 'Bilinear'], ['nearest', 'Nearest neighbor']] },
-    { key: 'resampleMethod', label: 'Image Size resampling', type: 'select', options: [['bicubic', 'Bicubic (smooth gradients)'], ['lanczos', 'Lanczos (sharper)'], ['bilinear', 'Bilinear'], ['area', 'Area average (reduction)'], ['nearest', 'Nearest neighbor (hard edges)']] },
-    { key: 'transformProportional', label: 'Keep proportions while transforming (Shift releases)', type: 'checkbox', span: true },
-    { key: 'transformScalesStrokes', label: 'Scale shape strokes with transforms', type: 'checkbox', span: true },
-    { key: 'placeAsSmart', label: 'Place files as smart objects', type: 'checkbox', span: true },
-    { type: 'section', label: 'Canvas' },
-    { key: 'checkerboardSize', label: 'Transparency grid size', type: 'select', options: [[4, 'Small'], [8, 'Medium'], [16, 'Large']] },
-    { key: 'gridSize', label: 'Grid spacing', type: 'number', min: 2, max: 2000, unit: 'px' },
-    { key: 'checkerboardLight', label: 'Grid colour (light)', type: 'color' },
-    { key: 'checkerboardDark', label: 'Grid colour (dark)', type: 'color' },
-    { key: 'pixelGrid', label: 'Show the pixel grid at high zoom', type: 'checkbox', span: true },
-    { key: 'showSelectionEdges', label: 'Show selection edges (marching ants)', type: 'checkbox', span: true },
-    { type: 'section', label: 'Performance' },
-    { key: 'historyLimit', label: 'History states', type: 'number', min: 1, max: 1000, help: 'Older states are dropped first' },
-    { key: 'historyMemoryMB', label: 'History memory', type: 'number', min: 64, max: 16384, unit: 'MB', help: 'Per document' },
-  ];
-  if (![4, 8, 16].includes(Number(values.checkerboardSize))) fields.find((f) => f.key === 'checkerboardSize').options.push([Number(values.checkerboardSize), `${values.checkerboardSize} px`]);
-  values.checkerboardSize = Number(values.checkerboardSize);
+  const sections = app.preferences.sections();
+  const values = {};
+  const fields = [];
+  for (const sec of sections) {
+    let read = {};
+    try {
+      read = sec.read?.(s) ?? {};
+    } catch (err) {
+      console.warn(`preferences section ${sec.id} read failed`, err);
+    }
+    Object.assign(values, read);
+    fields.push({ type: 'section', label: sec.title }, ...(sec.fields ?? []).map((f) => ({ ...f, options: Array.isArray(f.options) ? f.options.slice() : f.options })));
+  }
+  // a transparency grid size typed into settings by hand is offered as it is
+  const size = fields.find((f) => f.key === 'checkerboardSize');
+  if (size && ![4, 8, 16].includes(Number(values.checkerboardSize))) size.options.push([Number(values.checkerboardSize), `${values.checkerboardSize} px`]);
   const result = await formDialog(app, {
     title: 'Preferences',
     fields,
@@ -459,12 +510,12 @@ async function preferencesDialog(app) {
   if (!result) return false;
   if (result.__button === 'reset-all') return resetAllSettings(app);
   const patch = {};
-  for (const k of PREF_KEYS) {
-    let v = result[k];
-    if (typeof DEFAULT_SETTINGS[k] === 'number') v = Number(v);
-    if (typeof DEFAULT_SETTINGS[k] === 'number' && !Number.isFinite(v)) continue;
-    if (k === 'checkerboardLight' || k === 'checkerboardDark') v = normHex(v);
-    if (v !== s[k]) patch[k] = v;
+  for (const sec of sections) {
+    try {
+      Object.assign(patch, sec.write?.(result, app.settings) ?? {});
+    } catch (err) {
+      console.warn(`preferences section ${sec.id} write failed`, err);
+    }
   }
   if (Object.keys(patch).length) {
     await saveSettingsNow(app, patch);
@@ -498,5 +549,14 @@ export function install(app) {
   // actions (lib/actions.js): File > New is a dialog command that reports its settings (app.js registers it without ctx)
   app.commands.register('file:new', { dialog: true, run: (arg, ctx) => newDocumentDialog(app, arg, ctx) });
   app.pickColor = (initial, opts) => pickColor(app, initial, opts);
+  const prefSections = new Map();
+  app.preferences = {
+    registerSection(sec) {
+      if (!sec || typeof sec.id !== 'string') throw new Error('registerSection: a section needs an id');
+      prefSections.set(sec.id, sec);
+    },
+    sections: () => [...prefSections.values()].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
+  };
+  for (const sec of BUILTIN_PREF_SECTIONS) app.preferences.registerSection(sec);
   app.preferencesDialog = () => preferencesDialog(app);
 }

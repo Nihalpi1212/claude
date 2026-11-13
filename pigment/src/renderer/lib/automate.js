@@ -11,6 +11,8 @@
 // ctx.setReplayArg, so actions record and replay it without the dialog.
 import { createCanvas, copyCanvas, canvasIsBlank, Document, RasterLayer } from './document.js';
 import { flattenDocument } from './compositor.js';
+import { maskCanvasFor } from './mask-render.js';
+import { hasEnabledStyles } from '../../shared/pixels/styles.js';
 import { structural, rasterizeLayer } from './layer-ops.js';
 import { formDialog } from './form.js';
 import { baseName } from './io.js';
@@ -135,7 +137,7 @@ export function install(app) {
     return empty.length;
   }
 
-  const styled = (l) => !!l.styles && Object.values(l.styles).some((s) => s?.enabled);
+  const styled = (l) => hasEnabledStyles(l.styles);
 
   async function flattenEffects() {
     const d = app.doc;
@@ -176,9 +178,11 @@ export function install(app) {
     const changes = layers.map((layer) => {
       const canvas = copyCanvas(layer.canvas);
       const ctx = canvas.getContext('2d');
-      if (layer.mask.enabled !== false) {
+      // what Apply does: the pixel mask only (parts 'raster'); a vector mask stays on the layer
+      const maskCanvas = maskCanvasFor(layer, d, { purpose: 'bake', parts: 'raster' }); // mask (K.1)
+      if (maskCanvas) {
         ctx.globalCompositeOperation = 'destination-in';
-        ctx.drawImage(layer.mask.canvas, -layer.x, -layer.y);
+        ctx.drawImage(maskCanvas, -layer.x, -layer.y);
       }
       return { layer, before: { canvas: layer.canvas, mask: layer.mask }, after: { canvas, mask: null } };
     });
