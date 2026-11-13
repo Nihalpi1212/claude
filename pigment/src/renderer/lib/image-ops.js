@@ -793,6 +793,8 @@ export function install(app) {
     // a duplicate has never been saved: mark it dirty so closing asks
     copy.history.savedIndex = -2;
     app.syncUiState();
+    // lib/depth.js gives a merged copy of a 16/32-bit document the float composite (a copy with its layers has their samples)
+    app.emit('image:duplicated', { source: d, copy, merged: !!opts.merged });
   }
 
   // ---- free transform -------------------------------------------------------------------------------------------

@@ -18,6 +18,9 @@ export class History {
     this.snapshots = [];
     this.stroke = null;
     this.batch = null;
+    // while set, trim() drops nothing: a temporary session that ends in rollback() (the Image Processor working on
+    // an open document) must still find every state it started from, however many entries it pushes meanwhile
+    this.hold = false;
   }
 
   get canUndo() {
@@ -85,6 +88,7 @@ export class History {
   }
 
   trim() {
+    if (this.hold) return;
     let bytes = this.entries.reduce((n, e) => n + (e.bytes ?? 0), 0);
     while (this.entries.length > this.limit || (bytes > this.memoryLimit && this.entries.length > 1)) {
       const dropped = this.entries.shift();

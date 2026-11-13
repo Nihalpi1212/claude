@@ -155,8 +155,14 @@ export class Dialogs {
     });
   }
 
-  closeAll() {
-    for (const entry of [...this.stack]) entry.close(null);
+  /**
+   * Dismisses open dialogs as Escape would; with `which`, only those whose open() options it accepts. Returns how
+   * many it closed.
+   */
+  closeAll(which = null) {
+    const entries = this.stack.filter((entry) => !which || which(entry.opts));
+    for (const entry of entries) entry.close(null);
+    return entries.length;
   }
 
   alert(message, { title = 'Pigment', detail } = {}) {

@@ -1,6 +1,7 @@
 // Navigation tools: hand (pan), rotate view, zoom; and the eyedropper / colour sampler.
 import { Tool } from '../tools.js';
-import { flattenStored } from '../compositor.js';
+import { flattenDocument } from '../compositor.js';
+import { intersectRect } from '../document.js';
 import { rgbaToHex } from '../../../shared/pixels/color.js';
 
 export class HandTool extends Tool {
@@ -136,7 +137,16 @@ export class EyedropperTool extends Tool {
       canvas = src.canvas;
       ox = src.x;
       oy = src.y;
-    } else canvas = flattenStored(doc, this.view.compositor); // the colour is painted back: in a Duotone document that is the stored grey, not its ink colour
+    } else if (doc.mode && doc.mode !== 'rgb') {
+      // the colour is painted back: in a Duotone document that is the stored grey, not its ink colour. The stored
+      // composite (flattenStored) is not cached, and a sample comes with every pointer move of a drag: composite
+      // the few pixels that are read, not the whole document
+      const rect = intersectRect({ x: Math.floor(p.x) - half, y: Math.floor(p.y) - half, width: n, height: n }, doc.bounds);
+      if (!rect) return null;
+      canvas = this.view.compositor.composite(doc, { rawMode: true, rect });
+      ox = rect.x;
+      oy = rect.y;
+    } else canvas = flattenDocument(doc, this.view.compositor);
     const x = Math.floor(p.x) - ox - half, y = Math.floor(p.y) - oy - half;
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     const x1 = Math.max(0, x), y1 = Math.max(0, y), x2 = Math.min(canvas.width, x + n), y2 = Math.min(canvas.height, y + n);

@@ -134,20 +134,28 @@ export class DocumentManager {
       .catch(() => {});
   }
 
-  /** Saves to the document's path; flattened formats ask before discarding layers. */
-  async save(doc = this.active) {
+  /**
+   * Saves to the document's path; flattened formats ask before discarding layers. `askOptions: false` writes a
+   * JPEG / WebP without the options dialog (see lossyOptions).
+   */
+  async save(doc = this.active, { askOptions = true } = {}) {
     if (!doc) return false;
     // formats Pigment can only read (GIF, SVG, BMP, ...) go through Save As: the original file is never overwritten with other bytes
     if (!doc.path || doc.path.startsWith('browser:/') || !canWritePath(doc.path) || !isLayeredPath(doc.path) && doc.layers().length > 1 && !doc.flattenOk) return this.saveAs(doc);
-    return this.writeTo(doc, doc.path);
+    return this.writeTo(doc, doc.path, { askOptions });
   }
 
-  /** JPEG/WebP quality for this document: asked once (JPEG Options), then reused by later saves. */
-  async lossyOptions(doc, path) {
+  /**
+   * JPEG/WebP quality for this document: asked once (JPEG Options), then reused by later saves. With `ask: false`
+   * (a save nobody is there to answer for: a recorded "Close: save changes" step replayed over a folder) a document
+   * that has no quality yet takes the last one chosen, as Batch's own Save and Close does.
+   */
+  async lossyOptions(doc, path, { ask = true } = {}) {
     const ext = extOf(path);
     if (!['jpg', 'jpeg', 'webp'].includes(ext)) return {};
     if (doc.saveOpts?.format === ext) return doc.saveOpts;
     const last = this.app.settings.saveQuality ?? 0.92;
+    if (!ask) return (doc.saveOpts = { format: ext, quality: last });
     const o = await formDialog(this.app, {
       title: `${ext === 'webp' ? 'WebP' : 'JPEG'} Options`,
       fields: [{ key: 'quality', label: 'Quality', type: 'slider', value: Math.round(last * 100), min: 1, max: 100, unit: '%' }],
@@ -190,10 +198,10 @@ export class DocumentManager {
     return written;
   }
 
-  async writeTo(doc, path, { copy = false } = {}) {
+  async writeTo(doc, path, { copy = false, askOptions = true } = {}) {
     try {
       this.app.tools?.active?.commit?.();
-      const opts = await this.lossyOptions(doc, path);
+      const opts = await this.lossyOptions(doc, path, { ask: askOptions });
       if (!opts) return false;
       const bytes = await this.app.busy(`Saving ${path.split(/[\\/]/).pop()}…`, () => encodeForPath(doc, path, doc.view.compositor, opts));
       await bridge.writeFile(path, bytes);
@@ -215,7 +223,18 @@ export class DocumentManager {
 
   /** Asks to save unsaved changes. Resolves true when it is fine to close. */
   async confirmDiscard(doc) {
-    if (!doc.history?.dirty) return true;
+    const answer = await this.askSave(doc);
+    if (answer === 'cancel') return false;
+    if (answer === 'save') return this.save(doc);
+    return true;
+  }
+
+  /**
+   * Only the question of confirmDiscard: 'save' | 'discard' | 'cancel', or null when there is nothing to ask. Closing
+   * the window (app.js) asks first and prepares the document for saving only once the answer is Save.
+   */
+  async askSave(doc) {
+    if (!doc.history?.dirty) return null;
     this.activate(doc);
     const { response } = await bridge.showMessage({
       type: 'question',
@@ -225,11 +244,10 @@ export class DocumentManager {
       defaultId: 0,
       cancelId: 2,
     });
-    if (response === 2) return false;
+    if (response === 2) return 'cancel';
     // remembered for a Close step being recorded (lib/actions.js): the step replays the answer instead of asking
     doc.closeAnswer = response === 0 ? 'save' : 'discard';
-    if (response === 0) return this.save(doc);
-    return true;
+    return doc.closeAnswer;
   }
 
   /**
@@ -242,7 +260,8 @@ export class DocumentManager {
     if (force || save === false) {
       // nothing to ask
     } else if (save === true) {
-      if (doc.history?.dirty && !(await this.save(doc))) return false;
+      // the answer came with the call, so the save does not stop at JPEG Options either
+      if (doc.history?.dirty && !(await this.save(doc, { askOptions: false }))) return false;
     } else if (!(await this.confirmDiscard(doc))) return false;
     const i = this.docs.indexOf(doc);
     this.docs.splice(i, 1);
@@ -264,8 +283,9 @@ export class DocumentManager {
     return true;
   }
 
-  async closeAll(opts = {}) {
-    for (const doc of this.docs.slice()) if (!(await this.close(doc, opts))) return false;
+  /** Closes every document; each one with unsaved changes asks (there is no answer to pass along, see close()). */
+  async closeAll() {
+    for (const doc of this.docs.slice()) if (!(await this.close(doc))) return false;
     return true;
   }
 

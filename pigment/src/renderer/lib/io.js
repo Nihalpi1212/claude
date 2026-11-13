@@ -5,7 +5,7 @@ import { readPsd, writePsdUint8Array, initializeCanvas } from 'ag-psd';
 import { writeZip, readZip, findEntry, streamCodecs } from '../../shared/zip.js';
 import { Document, RasterLayer, GroupLayer, TextLayer, AdjustmentLayer, createCanvas, layerFromDescription, canvasIsBlank, textExtensionFor } from './document.js';
 import { parseColor } from '../../shared/pixels/color.js';
-import { MODES } from '../../shared/pixels/modes.js';
+import { MODES, duotoneLut } from '../../shared/pixels/modes.js';
 import { flattenDocument, modeRendererFor } from './compositor.js';
 import { Selection } from './selection.js';
 
@@ -568,7 +568,24 @@ export function writePsdDocument(doc, compositor) {
   // under the ink curves, the picture before spot channels were removed) and a Grayscale one may hold coloured
   // fill, shape or text layers it shows grey, so each layer is written the way the mode shows it, as Image > Mode >
   // RGB Color would convert it: the file opens looking like the document did.
-  const modeRender = ['duotone', 'multichannel', 'grayscale'].includes(doc.mode) ? modeRendererFor(doc.mode) : null;
+  // Layer by layer is not the same picture under an adjustment layer in a Grayscale document: Photo Filter, Color
+  // Balance or a Gradient Map put colour on the grey pixels below, which the mode shows grey again and an RGB file
+  // would show coloured. Then the layers are written as they are stored, and a monochrome Channel Mixer on top of
+  // them (the luma weights, to the percent) does what the mode does to the composite.
+  const adjusts = (group) => group.children.some((l) => l.visible && (l.type === 'adjustment' || (l.isGroup && adjusts(l))));
+  const greyOnTop = doc.mode === 'grayscale' && adjusts(doc.root);
+  // Duotone inks are a curve of the composite's grey, not of each layer's: inked one by one, a translucent layer over
+  // another (or an anti-aliased edge) blends two ink colours where the document inks the blended grey, up to 15
+  // levels off. As soon as layers meet, they are written as stored (grey) and a Gradient Map on top, one stop per
+  // grey level (the same luma), prints the composite through the inks.
+  const content = (group) => group.children.reduce((n, l) => n + (!l.visible || l.quickMask || l.preview || l.type === 'adjustment' ? 0 : l.isGroup ? content(l) : 1), 0);
+  const inksOnTop = doc.mode === 'duotone' && doc.duotone?.inks?.length > 0 && (adjusts(doc.root) || content(doc.root) > 1);
+  const modeRender = !greyOnTop && !inksOnTop && ['duotone', 'multichannel', 'grayscale'].includes(doc.mode) ? modeRendererFor(doc.mode) : null;
+  const inks = () => {
+    const lut = duotoneLut(doc.duotone);
+    const hex = (v) => `#${[0, 1, 2].map((c) => lut[v * 3 + c].toString(16).padStart(2, '0')).join('')}`;
+    return adjustmentToPsd('gradient-map', { stops: Array.from({ length: 256 }, (_, v) => ({ offset: v / 255, color: hex(v) })) });
+  };
   // text stays editable only when its own colour is what the document displays: grey text in a Grayscale document
   const textAsShown = (layer) => {
     if (!modeRender) return true;
@@ -621,7 +638,11 @@ export function writePsdDocument(doc, compositor) {
   const psd = {
     width: doc.width,
     height: doc.height,
-    children: doc.root.children.filter((l) => !l.quickMask && !l.preview).map(toPsd),
+    children: [
+      ...doc.root.children.filter((l) => !l.quickMask && !l.preview).map(toPsd),
+      ...(greyOnTop ? [{ name: 'Grayscale', opacity: 1, blendMode: 'normal', adjustment: adjustmentToPsd('channel-mixer', { monochrome: true, gray: { r: 30, g: 59, b: 11, constant: 0 } }) }] : []),
+      ...(inksOnTop ? [{ name: 'Duotone', opacity: 1, blendMode: 'normal', adjustment: inks() }] : []),
+    ],
     canvas: flattenDocument(doc, compositor),
     imageResources: { resolutionInfo: { horizontalResolution: doc.dpi, horizontalResolutionUnit: 'PPI', widthUnit: 'Inches', verticalResolution: doc.dpi, verticalResolutionUnit: 'PPI', heightUnit: 'Inches' } },
   };

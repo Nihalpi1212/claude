@@ -142,6 +142,13 @@ export function makeStep(command, arg, label) {
   return step;
 }
 
+/** Name of a Close step that carries the answer to "Save changes?" (recording and loading use it), else null. */
+export function closeStepLabel(step) {
+  // with its dialog toggle on the step asks instead, but the panel can turn that off again: named by the answer anyway
+  if (step?.command !== 'file:close' || typeof step.arg?.save !== 'boolean') return null;
+  return step.arg.save ? 'Close: save changes' : 'Close: don’t save';
+}
+
 export const makeStopStep = (message, allowContinue = false) => ({ id: newId('s'), command: null, label: 'Stop', enabled: true, dialog: false, stop: { message: String(message ?? ''), allowContinue: !!allowContinue } });
 
 export const makeMenuItemStep = (command, label) => ({ id: newId('s'), command, label: label ?? commandLabel(command), enabled: true, dialog: true, menuItem: command });
@@ -327,6 +334,10 @@ function normalizeStep(raw, report = {}) {
   // optional: skipped without a question when its command is not available (Rasterize on a pixel layer)
   if (raw.optional && step.command) step.optional = true;
   step.label = typeof raw.label === 'string' && raw.label ? clip(raw.label) : step.stop ? 'Stop' : step.conditional ? `If ${conditionLabel(step.conditional.test)}` : commandLabel(step.command, step.arg);
+  // a Close step that answers "Save changes?" by itself is always named by its answer, whatever a file calls it:
+  // "Don't save" drops the document's changes unasked, and the panel must not show that step as "Sharpen"
+  const closeLabel = closeStepLabel(step);
+  if (closeLabel) step.label = closeLabel;
   return step;
 }
 

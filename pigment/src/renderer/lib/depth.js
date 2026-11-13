@@ -249,13 +249,19 @@ export function install(app) {
    * the undo of a subtle edit (or of any edit to float values above white, which the proxy clamps) it would find
    * the proxy "in step" with the edited samples and leave them in place.
    */
-  function putPatch(layer, canvas, patch) {
+  function putPatch(layer, canvas, patch, inStep) {
     const st = states.get(canvas);
     if (layer.canvas !== canvas || !st || st.deep.type !== patch.type || st.deep.data.length !== canvas.width * canvas.height * 4) return;
     writeRect({ type: st.deep.type, data: st.deep.data, width: canvas.width, height: canvas.height }, patch);
     layer.deep = st.deep;
-    st.version = layer.version;
+    // The patch only covers its own rect. When the samples were not in step before this entry ran (the entry next to
+    // it in the history was undone or redone in the same breath: a click in the History panel, two quick Ctrl+Z),
+    // the pass that change scheduled must still run for the rest of the canvas: it leaves the patch alone, because
+    // the proxy shows exactly its 8-bit value.
+    if (inStep) st.version = layer.version;
   }
+  /** Whether a layer's deep samples describe its canvas right now (nothing is waiting for the sync pass). */
+  const inStep = (layer, canvas) => layer.canvas === canvas && states.get(canvas)?.version === layer.version;
 
   // an adjustment committed at 8 bits is run again on the deep pixels; anything else is picked up by the sync pass
   app.on('pixels:committed', (e) => {
@@ -287,9 +293,19 @@ export function install(app) {
         const canvas = layer.canvas;
         const result = extractRect(planes, local);
         const { undo, redo } = entry;
-        entry.undo = () => (undo(), putPatch(layer, canvas, before));
-        entry.redo = () => (redo(), putPatch(layer, canvas, result));
+        const step = (run, patch) => () => {
+          const was = inStep(layer, canvas);
+          run();
+          putPatch(layer, canvas, patch, was);
+        };
+        entry.undo = step(undo, before);
+        entry.redo = step(redo, result);
         entry.bytes = (entry.bytes ?? 0) + before.data.byteLength + result.data.byteLength;
+        // the entry was pushed (and the history trimmed to its memory bound) before it grew by the two patches
+        if (doc.history.entries.includes(entry)) {
+          doc.history.trim();
+          doc.history.onChange();
+        }
       }
       doc.changed('pixels', { layer, rect });
     } catch (err) {
@@ -543,6 +559,22 @@ export function install(app) {
       for (let p = layer.parent; p; p = p.parent) if (p === group) return true;
       return false;
     };
+    /**
+     * Whether the float composite of the layers is the picture the canvas merge makes. lib/layer-ops.js
+     * (renderLayersFlat) bakes in every group around a merged layer that will not be around the result as well: its
+     * opacity, mask, blend mode and effects, and a hidden group hides the layer. planFlatten only walks the merged
+     * layers themselves, so the float path is for merges where such groups change nothing.
+     */
+    const likeCanvasMerge = (layers) => {
+      const kept = new Set(); // the groups the result stays inside of (it takes the topmost layer's place): they go on applying
+      for (let p = layers[layers.length - 1].parent; p; p = p.parent) kept.add(p);
+      for (const l of layers) {
+        for (let p = l.parent; p && !kept.has(p); p = p.parent) {
+          if (!p.visible || p.clip || p.blend !== 'pass-through' || p.opacity < 1 || p.mask?.enabled || p.styles) return false;
+        }
+      }
+      return true;
+    };
     const MERGES = {
       'layer:merge-down': (d) => {
         const top = d.active;
@@ -564,7 +596,7 @@ export function install(app) {
             try {
               merging = pick(d);
               // every layer must be shown: the merge refuses hidden ones (and Merge Visible never gets any)
-              const f = merging && merging.layers.length > 1 && merging.layers.every((l) => l.visible) ? flattenDeep(d, merging) : null;
+              const f = merging && merging.layers.length > 1 && merging.layers.every((l) => l.visible) && likeCanvasMerge(merging.layers) ? flattenDeep(d, merging) : null;
               if (f?.exact) flat = f;
             } catch (err) {
               console.warn('depth: merging at 8 bits', err);
@@ -582,32 +614,24 @@ export function install(app) {
       });
     }
 
-    // Image > Duplicate with "merged layers only" builds its one layer from the 8-bit composite: give it the float one
-    const duplicateBase = app.commands.commands.get('image:duplicate');
-    if (duplicateBase) {
-      app.commands.register('image:duplicate', {
-        ...duplicateBase,
-        run: async (arg, ctx) => {
-          const d = app.doc;
-          const result = await duplicateBase.run(arg, ctx);
-          const copy = app.doc;
-          try {
-            const layer = copy && copy !== d && copy.root.children.length === 1 ? copy.root.children[0] : null;
-            if (d?.depth > 8 && copy.depth === d.depth && app.docs.docs.includes(d) && layer?.type === 'raster') {
-              syncNow(copy);
-              // layers cloned one by one bring their samples along; only a layer that has none to speak of is replaced
-              if (layer.deep && !hasPrecision(layer.deep)) {
-                const f = flattenDeep(d);
-                if (f.exact) adopt(copy, f, layer);
-              }
-            }
-          } catch (err) {
-            console.warn('depth: the duplicate was kept at 8 bits', err);
+    // Image > Duplicate with "merged layers only" builds its one layer from the 8-bit composite: give it the float one.
+    // lib/image-ops.js says which kind of duplicate it made. A copy with its layers kept is left alone: cloned layers
+    // bring their own samples, and the composite is not what such a layer holds (pixels its mask hides, its opacity).
+    app.on('image:duplicated', ({ source: d, copy, merged } = {}) => {
+      try {
+        const layer = merged && copy && copy !== d && copy.root.children.length === 1 ? copy.root.children[0] : null;
+        if (d?.depth > 8 && copy.depth === d.depth && app.docs.docs.includes(d) && layer?.type === 'raster') {
+          syncNow(copy);
+          // nothing to gain when the 8-bit composite already holds all there is
+          if (layer.deep && !hasPrecision(layer.deep)) {
+            const f = flattenDeep(d);
+            if (f.exact) adopt(copy, f, layer);
           }
-          return result;
-        },
-      });
-    }
+        }
+      } catch (err) {
+        console.warn('depth: the duplicate was kept at 8 bits', err);
+      }
+    });
   }
 
   /**
@@ -798,8 +822,9 @@ export function install(app) {
   /** A one-layer document from RGBA planes at their own depth ({ width, height, depth, data }). */
   function documentFromPlanes(img, { name, dpi }) {
     const { width, height, depth, data } = img;
-    // no canvas can hold more (32767 px a side, 16384 x 16384 in all): refuse it instead of opening a blank document
-    if (!(width > 0 && height > 0) || width > 32767 || height > 32767 || width * height > 2 ** 28) throw new Error(`The image is too large to open (${width} × ${height} pixels)`);
+    // no canvas can hold more (Chromium: 65535 px a side, 16384 x 16384 in all): refuse it instead of opening a blank
+    // document. A long strip or panorama inside those bounds opens like the same picture as an 8-bit PNG does
+    if (!(width > 0 && height > 0) || width > 65535 || height > 65535 || width * height > 2 ** 28) throw new Error(`The image is too large to open (${width} × ${height} pixels)`);
     const doc = new Document({ width, height, dpi: dpi > 0 ? Math.round(dpi) : 72, name: baseName(name), depth });
     const layer = new RasterLayer({ name: 'Background', width, height });
     const proxy = depth === 8 ? data : toCanvasData({ type: DEEP_TYPES[depth], data, width, height }).data;

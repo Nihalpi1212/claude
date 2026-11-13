@@ -585,14 +585,19 @@ export async function runImageProcessor(app, o) {
         const file = files[i];
         progress.update(i, files.length, `Processing ${i + 1} of ${files.length}`, file.name);
         const errors = [];
-        let doc = file.doc ?? null, opened = false;
+        let doc = file.doc ?? null, opened = false, held = null;
         try {
           if (!doc) ({ doc, opened } = await openSource(app, file));
           else app.docs.activate(doc);
           // everything done to an open document is undone again: the processor only writes copies
           const start = doc.history.index;
-          const startEntry = doc.history.entries[start] ?? null;
           const mark = doc.history.mark();
+          // ...so until then no state may drop out of a full history: trimming would shift `start` onto a later
+          // state (the document stayed resized while the History panel showed the user's untouched states)
+          if (!opened) {
+            held = doc.history;
+            held.hold = true;
+          }
           const savedImage = doc.history.savedImage;
           const metaBefore = doc.meta;
           if (o.copyright) doc.meta = { ...(doc.meta ?? {}), copyright: o.copyright };
@@ -636,8 +641,9 @@ export async function runImageProcessor(app, o) {
           if (stillOpen(app, doc)) {
             if (opened) await app.docs.close(doc, { force: true });
             else {
-              // back to the state the run started from, unless that state has dropped out of a full history
-              const reachable = !startEntry || doc.history.entries.includes(startEntry);
+              // back to the state the run started from, unless the action itself replaced it (it undid further back
+              // and went on from there): then the history keeps showing what was done, for the user to undo
+              const reachable = mark.entries.slice(0, start + 1).every((e, at) => doc.history.entries[at] === e);
               if (reachable && doc.history.index !== start) doc.history.goTo(start);
               if (reachable && doc.history.index === start) {
                 // ...and without a trace: the resize and the action's steps are no Redo of the user's (their own
@@ -653,6 +659,14 @@ export async function runImageProcessor(app, o) {
         } catch (err) {
           errors.push(...capture.take(), err?.message ?? String(err));
           if (opened && doc && stillOpen(app, doc)) await app.docs.close(doc, { force: true });
+        } finally {
+          if (held) {
+            // whatever is left in the history (nothing, unless the run stopped half-way) obeys the limits again
+            held.hold = false;
+            const before = held.entries.length;
+            held.trim();
+            if (held.entries.length !== before) held.onChange();
+          }
         }
         summary.processed++;
         for (const message of new Set(errors)) summary.errors.push({ file: file.path ?? file.name, message });

@@ -183,9 +183,18 @@ export function filterPadding(filters) {
 const laidOutOnBounds = (f) => isGeometricFilter(f) && filterPadding([f]) === 0;
 
 /**
+ * Of those, the kinds that only give the pixels they find another colour (a tone curve, a histogram, the mean
+ * colour) and draw nothing of their own. Only these also run on a halo that an earlier filter of the stack spread
+ * beyond the bounds, so it takes the object's new colour. Every other kind draws or lays something out (a frame, a
+ * tree, clouds, tiles, a vignette, blur pins): run on the padded render as well, it would show a second time around
+ * the object, laid out for a larger image, so the halo is left as the earlier filters made it.
+ */
+const RECOLOUR_ONLY = new Set(['camera-raw', 'adjust:equalize', 'average']);
+
+/**
  * Runs one smart filter on a sub-rectangle of img (in place). The rest of img is left alone, or, with `around`
- * (an earlier filter spread a halo out there), goes through the filter as part of the whole image: outside the
- * object only the filter's colour matters, not where its pins sit.
+ * (an earlier filter spread a halo out there and the kind is one of RECOLOUR_ONLY), goes through the filter as part
+ * of the whole image.
  */
 function applyToRegion(img, r, f, around = false) {
   const sub = { width: r.width, height: r.height, data: new Uint8ClampedArray(r.width * r.height * 4) };
@@ -339,7 +348,7 @@ export class SmartLayer extends Layer {
       const own = pad > 0 ? intersectRect({ x: out.x - rect.x, y: out.y - rect.y, width: out.width, height: out.height }, { x: 0, y: 0, width: work.width, height: work.height }) : null;
       let spilled = false; // a filter earlier in the stack has spread pixels into the padding
       for (const f of filters) {
-        if (own && laidOutOnBounds(f)) applyToRegion(work, own, f, spilled);
+        if (own && laidOutOnBounds(f)) applyToRegion(work, own, f, spilled && RECOLOUR_ONLY.has(f.kind));
         else applySmartFilter(work, f);
         if (filterPadding([f]) > 0) spilled = true;
       }
@@ -585,7 +594,7 @@ export function install(app) {
   // Save (and the "save before closing" question) of an edit tab writes back instead of asking for a file
   const docs = app.docs;
   const baseSave = docs.save.bind(docs);
-  docs.save = (d = docs.active) => (d?.smartHost ? Promise.resolve(writeBack(d)) : baseSave(d));
+  docs.save = (d = docs.active, ...rest) => (d?.smartHost ? Promise.resolve(writeBack(d)) : baseSave(d, ...rest));
 
   // ---- replace / export ------------------------------------------------------------------------------------
   async function sourceFromFile(path) {

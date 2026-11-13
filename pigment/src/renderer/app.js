@@ -315,15 +315,20 @@ function registerCoreCommands(app) {
     'file:close': {
       enabled: has,
       // { save: true | false } answers "Save changes?" without asking. An answer given in the prompt is reported as
-      // the replay argument, so a recorded Close step (lib/actions.js) closes every file of a batch the same way
+      // the replay argument, so a recorded Close step (lib/actions.js) closes every file of a batch the same way.
+      // Dropping the changes unasked is a played step's answer only (its label says so, see normalizeStep in
+      // lib/actions/model.js): code or the assistant passing { save: false } still gets the question
       run: async (arg, ctx) => {
         const doc = app.doc;
-        const closed = await app.docs.close(doc, typeof arg?.save === 'boolean' ? { save: arg.save } : {});
+        const save = arg?.save === true || (arg?.save === false && ctx?.source === 'action') ? arg.save : null;
+        const closed = await app.docs.close(doc, save === null ? {} : { save });
         if (closed && doc.closeAnswer) ctx?.setReplayArg({ save: doc.closeAnswer === 'save' });
         return closed;
       },
     },
-    'file:close-all': { enabled: has, run: (arg) => app.docs.closeAll(typeof arg?.save === 'boolean' ? { save: arg.save } : {}) },
+    // takes no answer: only the single recorded Close step replays one. Close All asks for every document with
+    // unsaved changes, whoever runs it (an action file must not be able to drop the work in all open documents)
+    'file:close-all': { enabled: has, run: () => app.docs.closeAll() },
     'file:revert': {
       enabled: () => !!app.doc?.path && !!app.doc?.history?.dirty,
       run: async () => {

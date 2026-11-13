@@ -808,6 +808,16 @@ export function install(app) {
     const e = app.lastPixelEdit, d = app.doc;
     return !!e && !!d && e.doc === d && d.history.entries[d.history.index] === e.entry;
   }
+  // The record holds the edit's pixels before and after (and, through the entry, the 16/32-bit patches lib/depth.js
+  // hangs on it): megabytes that Purge and closing the document are meant to free. Once the entry has left its
+  // history (purged, trimmed by the memory bound, replaced by a new edit after an undo) it can never be faded again.
+  app.on('doc:change', (e) => {
+    const last = app.lastPixelEdit;
+    if (last && e?.doc === last.doc && !last.doc.history.entries.includes(last.entry)) app.lastPixelEdit = null;
+  });
+  app.on('doc:closed', (id) => {
+    if (app.lastPixelEdit?.doc.id === id) app.lastPixelEdit = null;
+  });
 
   async function fade() {
     const e = app.lastPixelEdit;

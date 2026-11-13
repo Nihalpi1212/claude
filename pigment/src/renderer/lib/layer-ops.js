@@ -826,7 +826,13 @@ export function install(app) {
     const order = d.layers();
     layers = layers.filter(Boolean).sort((a, b) => order.indexOf(a) - order.indexOf(b));
     if (layers.length < 2) return;
-    if (layers.some((l) => !l.visible)) return app.dialogs.toast('Hidden layers cannot be merged: show or deselect them first', { kind: 'error' });
+    // a layer inside a hidden group is hidden as well: the composite skips the group with everything in it, so the
+    // merge would swap the layers for an empty one
+    const hidden = (l) => {
+      for (let p = l; p && p !== d.root; p = p.parent) if (!p.visible) return true;
+      return false;
+    };
+    if (layers.some(hidden)) return app.dialogs.toast('Hidden layers cannot be merged: show or deselect them first', { kind: 'error' });
     const top = layers[layers.length - 1];
     // Merge Down keeps the lower layer's blend mode and opacity (rendered neutral, applied by the result)
     const base = layers[0];

@@ -8,8 +8,12 @@ const SAFE_DURING_TRANSFORM = /^(view:|window:|help:|app:enter$|app:escape$|tool
 
 /** Where a user gesture comes from (code runs commands as 'api', playback as 'action', the assistant as 'assistant'). */
 const GESTURE_SOURCES = new Set(['menu', 'key', 'toolbar', 'panel']);
-/** Commands that never change a document: they stay available while a slow operation runs (app.busy). */
-const SAFE_WHILE_BUSY = /^(view:(?!new-guide|clear-guides)|window:|help:)/;
+/**
+ * Commands that never change a document: they stay available while a slow operation runs (app.busy). The Actions
+ * panel's Stop is one of them: it only marks the playing action as cancelled (it ends after the step that runs), and
+ * a step that filters or computes keeps the operation busy for nearly all of its time, so a refused Stop never lands.
+ */
+const SAFE_WHILE_BUSY = /^(view:(?!new-guide|clear-guides)|window:|help:|actions:stop$)/;
 const BUSY_NOTICE_MS = 2500;
 
 export class CommandRegistry {
