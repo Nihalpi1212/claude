@@ -28,7 +28,8 @@
     "ag-psd": "31.0.3",
     "electron": "44.9.0",
     "electron-builder": "26.15.3",
-    "esbuild": "0.25.10"
+    "esbuild": "0.25.10",
+    "harfbuzzjs": "1.6.4"
   },
   "repository": {
     "type": "git",
@@ -38,7 +39,7 @@
   "build": {
     "appId": "com.pigmentapp.app",
     "productName": "Pigment",
-    "copyright": "Copyright \u00a9 2026 Pigment contributors",
+    "copyright": "Copyright © 2026 Pigment contributors",
     "directories": {
       "output": "dist",
       "buildResources": "build"
