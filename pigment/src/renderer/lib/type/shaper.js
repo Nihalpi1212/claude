@@ -413,12 +413,14 @@ function shapeSegment(text, seg, dr, st, env, rec, size, sx, features, units) {
     const s = seg.map ? seg.str.slice(seg.map.indexOf(a), lastIndexOf(seg.map, b - 1) + 1) : text.slice(a, b);
     units.push({ index: a, end: b, advance: pen * k * sx, kind: color ? 'color' : 'glyphs', glyphs, str: s, size, rtl: dr.rtl });
   }
-  // characters HarfBuzz gave no glyph to (default ignorables removed): zero-width units keep the cover complete
-  for (const s0 of starts) if (!units.some((u) => u.index <= s0 && s0 < u.end)) units.push({ index: s0, end: nextStart(starts, s0, to), advance: 0, kind: 'glyphs', glyphs: [], str: '', size, rtl: dr.rtl });
-  units.sort((p, r) => p.index - r.index);
+  // units cover [keys[0], to) without a gap (each runs to the next one's start); characters before the first glyph
+  // (default ignorables HarfBuzz removed) become zero-width units so the cover is complete
+  const first = keys.length ? keys[0] : to;
+  const lead = [];
+  for (let q = 0; q < starts.length && starts[q] < first; q++) lead.push({ index: starts[q], end: Math.min(first, starts[q + 1] ?? to), advance: 0, kind: 'glyphs', glyphs: [], str: '', size, rtl: dr.rtl });
+  if (lead.length) units.splice(units.length - keys.length, 0, ...lead);
 }
 
-const nextStart = (starts, s, to) => starts.find((x) => x > s) ?? to;
 function lastIndexOf(arr, v) {
   for (let i = arr.length - 1; i >= 0; i--) if (arr[i] <= v) return i;
   return arr.length - 1;

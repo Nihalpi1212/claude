@@ -74,9 +74,15 @@ export function registerFontProvider(p) {
 }
 export function registerKerner(mode, fn) {
   kerners.set(mode, fn);
+  relayoutAll();
+}
+/** The kerner registered for an autoKern mode ('optical'), or null (engines then kern with the font's metrics). */
+export function kerner(mode) {
+  return kerners.get(mode) ?? null;
 }
 export function registerListFormatter(fn) {
   listFormatters.push(fn);
+  relayoutAll();
 }
 /** The registered font provider (the stub until type-engine-core lands). */
 export const fonts = {
@@ -446,6 +452,11 @@ function stubListFormatter(paras, index) {
   const m = list.marker;
   const label = m === 'lower-alpha' ? alpha(n) : m === 'upper-alpha' ? alpha(n).toUpperCase() : m === 'lower-roman' ? roman(n) : m === 'upper-roman' ? roman(n).toUpperCase() : String(n);
   return `${label}.`;
+}
+
+/** The list marker text of paragraph `index` (the newest formatter that answers, else the stub's). */
+export function listMarkerText(paras, index) {
+  return listMarker(paras, index);
 }
 
 function listMarker(paras, index) {

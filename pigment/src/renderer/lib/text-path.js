@@ -10,7 +10,10 @@
 // flattenSubpath) and sampled by arc length: each glyph sits with its centre on the path, rotated to
 // the tangent; `flip` reverses the direction of travel, which puts the text on the other side of the
 // path. The layer's x/y are an offset added to the path, so Move and Free Transform keep working.
-import { textExtensions, createCanvas, cssFont, measureContext, unionRect } from './document.js';
+import { textExtensions, createCanvas, cssFont, measureContext } from './document.js';
+import { glyphRuns } from './type/api.js';
+import { runsIn, charStyleAt, tidyNumber } from './type/model.js';
+import { drawUnitAtOrigin } from './type/render.js';
 import { flattenSubpath, clonePath, isEmptyPath, activePathTarget } from './tools/vector.js';
 import { setLayerProps } from './layer-ops.js';
 import { parseColor, rgbaToHex } from '../../shared/pixels/color.js';
@@ -107,20 +110,27 @@ function samplerFor(layer) {
 
 // ---- layouts ------------------------------------------------------------------------------------------------------
 
-const ascentOf = (font) => font.size * 0.8; // TextLayer.layout() puts the first baseline at y + 0.8 × size
-const descentOf = (font) => font.size * 0.25;
+// Path text takes its glyphs from the type engine (0.4, B.5): shapeText() lays the text out straight on one line per
+// paragraph, and each shaping cluster is placed on the path by arc length. So kerning, ligatures, marks and emoji
+// sequences survive on a path, every run keeps its own size and colour, and the extension never asks layoutText()
+// (which would come back here). With the stub engine the clusters are 0.3's characters, measured as 0.3 measured them.
 
-function glyphCorners(g, font) {
-  const asc = ascentOf(font), desc = descentOf(font), hw = g.width / 2;
+const ascentOf = (size) => size * 0.8; // TextLayer.layout() puts the first baseline at y + 0.8 × size
+const descentOf = (size) => size * 0.25;
+/** 0.3's letter spacing of a resolved style in px (as TextLayer.font reports it). */
+const spacingOf = (st) => (st.tracking ? tidyNumber((st.tracking * st.size) / 1000) : 0);
+
+function glyphCorners(g, size) {
+  const asc = ascentOf(size), desc = descentOf(size), hw = g.width / 2;
   const c = Math.cos(g.angle), s = Math.sin(g.angle);
   return [[-hw, -asc], [hw, -asc], [hw, desc], [-hw, desc]].map(([x, y]) => [g.x + x * c - y * s, g.y + x * s + y * c]);
 }
 
-function glyphUnion(glyphs, font) {
+function glyphUnion(glyphs, fallbackSize) {
   let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
   for (const g of glyphs) {
     if (g.hidden) continue;
-    for (const [x, y] of glyphCorners(g, font)) {
+    for (const [x, y] of glyphCorners(g, g.size ?? fallbackSize)) {
       if (x < x1) x1 = x;
       if (x > x2) x2 = x;
       if (y < y1) y1 = y;
@@ -130,16 +140,47 @@ function glyphUnion(glyphs, font) {
   return x1 === Infinity ? null : { x: x1, y: y1, width: Math.max(1, x2 - x1), height: Math.max(1, y2 - y1) };
 }
 
-function layoutOnPath(layer, ctx) {
+/**
+ * The text of a layer as one sequence of items in content order: { index, ch, width, spacing, run, unit? }. An item is
+ * a shaping unit of the HarfBuzz engine (a ligature or an emoji sequence is one) or a grapheme cluster of the stub's;
+ * characters no line draws (paragraph ends, forced breaks) are zero-width hidden items, as 0.3 kept its '\n' glyphs.
+ */
+function pathItems(layer) {
+  const text = layer.text ?? '';
+  const items = [];
+  const covered = new Uint8Array(text.length + 1);
+  for (const run of glyphRuns(layer, { width: null, height: null })) {
+    const sp = spacingOf(run.style);
+    if (run.units?.length) {
+      for (const u of run.units) {
+        // the unit's advance holds its tracking (none after a line's last): the glyph is the advance without it
+        items.push({ index: u.index, ch: text.slice(u.index, u.end), width: Math.max(0, u.advance - (u.trk ?? 0)), spacing: sp, run, unit: u });
+        for (let i = u.index; i < u.end; i++) covered[i] = 1;
+      }
+    } else {
+      run.clusters.forEach((c, k) => {
+        const end = run.clusters[k + 1]?.index ?? run.to;
+        // the stub's clusters carry 0.3's spacing in their advance
+        items.push({ index: c.index, ch: text.slice(c.index, end), width: Math.max(0, c.advance - sp), spacing: sp, run });
+        for (let i = c.index; i < end; i++) covered[i] = 1;
+      });
+    }
+  }
+  for (let i = 0; i < text.length; i++) {
+    if (covered[i]) continue;
+    const st = charStyleAt(layer.content, i);
+    items.push({ index: i, ch: text[i], width: 0, spacing: spacingOf(st), run: null, hidden: true, size: st.size });
+  }
+  return items.sort((a, b) => a.index - b.index);
+}
+
+function layoutOnPath(layer) {
   const font = layer.font;
   const pt = layer.pathText;
-  ctx.font = cssFont(font);
   const sampler = samplerFor(layer);
-  const spacing = font.letterSpacing ?? 0;
   const text = layer.text ?? '';
-  const chars = [];
-  for (let i = 0; i < text.length; i++) chars.push({ ch: text[i], index: i, width: text[i] === '\n' ? 0 : ctx.measureText(text[i]).width });
-  const total = chars.reduce((n, c) => n + c.width + spacing, 0) - (chars.length ? spacing : 0);
+  const items = pathItems(layer);
+  const total = items.reduce((n, c) => n + c.width + c.spacing, 0) - (items.length ? items[items.length - 1].spacing : 0);
   let cursor = (pt.startOffset ?? 0) * sampler.length;
   // the live alignment (Character panel, options bar) wins; pathText.align is what it was when attached
   const align = font.align ?? pt.align ?? 'left';
@@ -147,30 +188,47 @@ function layoutOnPath(layer, ctx) {
   if (align === 'center') cursor -= total / 2;
   else if (align === 'right') cursor -= total;
   const shift = pt.baselineShift ?? 0;
-  const glyphs = chars.map((c) => {
+  const glyphs = items.map((c) => {
     const mid = cursor + c.width / 2;
     const p = sampler.at(mid);
-    cursor += c.width + spacing;
-    // the baseline offset moves the glyph along the normal (local "up" is (sin θ, −cos θ))
-    const x = p.x + Math.sin(p.angle) * shift, y = p.y - Math.cos(p.angle) * shift;
+    cursor += c.width + c.spacing;
+    // the baseline offset moves the glyph along the normal (local "up" is (sin θ, −cos θ)); a run's own baseline
+    // shift and super/subscript offset add to it
+    const runShift = c.run ? Math.max(-1e4, Math.min(1e4, -(c.run.baseline - lineBaseline(c.run)))) : 0;
+    const off = shift + runShift;
+    const x = p.x + Math.sin(p.angle) * off, y = p.y - Math.cos(p.angle) * off;
     // text longer than the path is hidden at its end; on a closed path it must not wrap round over its own start
     // (on a closed path the glyph's far edge counts, so the last visible glyph never overlaps the first)
-    const hidden = c.ch === '\n' || (sampler.closed ? mid + c.width / 2 - s0 > sampler.length + 1e-6 : mid < 0 || mid > sampler.length);
-    return { ch: c.ch, x, y, angle: p.angle, width: c.width, index: c.index, hidden };
+    const hidden = !!c.hidden || c.ch === '\n' || (sampler.closed ? mid + c.width / 2 - s0 > sampler.length + 1e-6 : mid < 0 || mid > sampler.length);
+    const g = { ch: c.ch, x, y, angle: p.angle, width: c.width, index: c.index, hidden, size: c.run?.style.size ?? c.size ?? font.size };
+    // drawing data for renderBase (not enumerable: the layout's glyphs keep 0.3's plain shape for JSON and tests)
+    Object.defineProperty(g, 'item', { value: c, enumerable: false });
+    return g;
   });
   const start = sampler.at((pt.startOffset ?? 0) * sampler.length);
-  const box = glyphUnion(glyphs, font) ?? { x: start.x, y: start.y - ascentOf(font), width: Math.max(2, font.size / 2), height: font.size };
+  const box = glyphUnion(glyphs, font.size) ?? { x: start.x, y: start.y - ascentOf(font.size), width: Math.max(2, font.size / 2), height: font.size };
   return {
     lines: [{ text: text.replace(/\n/g, ' '), width: total }],
     lineHeight: font.size * (font.lineHeight ?? 1.2),
     width: Math.ceil(box.width),
     height: Math.ceil(box.height),
-    ascent: ascentOf(font),
+    ascent: ascentOf(font.size),
     glyphs,
     box,
     anchor: { x: start.x, y: start.y, angle: start.angle },
   };
 }
+
+/** The baseline of the line a run sits on (a run's own baseline includes its shift). */
+const lineBaseline = (run) => run.baseline + baselineShiftOf(run.style);
+const baselineShiftOf = (st) => (Number(st.baselineShift) || 0) + (st.position === 'super' ? st.size * 0.333 : st.position === 'sub' ? -st.size * 0.333 : 0);
+
+let segmenter = null;
+const graphemes = (s) => {
+  if (typeof Intl === 'undefined' || !Intl.Segmenter) return [...s];
+  segmenter ??= new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+  return [...segmenter.segment(s)].map((g) => g.segment);
+};
 
 function layoutStacked(layer, ctx) {
   const font = layer.font;
@@ -178,8 +236,9 @@ function layoutStacked(layer, ctx) {
   const size = font.size;
   const pitch = size * (font.lineHeight ?? 1.2); // column pitch: leading runs sideways
   const advance = size + (font.letterSpacing ?? 0); // glyphs stack one em apart (+ tracking)
-  const paras = (layer.text ?? '').split('\n');
-  const counts = paras.map((p) => [...p].length);
+  // grapheme clusters: an emoji sequence or a letter with its marks is one stacked glyph
+  const paras = (layer.text ?? '').split('\n').map(graphemes);
+  const counts = paras.map((p) => p.length);
   const height = Math.max(1, ...counts) * advance;
   const glyphs = [];
   let index = 0;
@@ -190,7 +249,7 @@ function layoutStacked(layer, ctx) {
     const top = font.align === 'center' ? free / 2 : font.align === 'right' ? free : 0;
     let k = 0;
     for (const ch of para) {
-      glyphs.push({ ch, x: colX, y: layer.y + top + ascentOf(font) + k * advance, angle: 0, width: ctx.measureText(ch).width, index });
+      glyphs.push({ ch, x: colX, y: layer.y + top + ascentOf(size) + k * advance, angle: 0, width: ctx.measureText(ch).width, index });
       index += ch.length;
       k++;
     }
@@ -198,11 +257,11 @@ function layoutStacked(layer, ctx) {
   });
   const width = paras.length * pitch;
   return {
-    lines: paras.map((p) => ({ text: p, width: pitch })),
+    lines: paras.map((p) => ({ text: p.join(''), width: pitch })),
     lineHeight: pitch,
     width: Math.ceil(width),
     height: Math.ceil(height),
-    ascent: ascentOf(font),
+    ascent: ascentOf(size),
     glyphs,
     box: { x: layer.x, y: layer.y, width, height },
   };
@@ -220,16 +279,22 @@ function paintGlyph(ctx, ch, x, y, font) {
   if (font.underline) ctx.fillRect(x, y + font.size * 0.12, ctx.measureText(ch).width, Math.max(1, font.size / 16));
 }
 
+/** 0.3's flat font of a resolved character style (paintGlyph's fields). */
+const flatFont = (st) => ({ size: st.size, stroke: st.stroke, underline: st.underline });
+
 const isPathText = (layer) => !!layer.pathText && !!usableSubpath(layer.pathText.path);
 
 export const textPathExtension = {
   test: (layer) => layer.type === 'text' && (isPathText(layer) || layer.font?.orientation === 'vertical-stacked'),
   layout(layer, ctx = measureContext()) {
-    return isPathText(layer) ? layoutOnPath(layer, ctx) : layoutStacked(layer, ctx);
+    return isPathText(layer) ? layoutOnPath(layer) : layoutStacked(layer, ctx);
   },
   baseBounds(layer) {
     const l = this.layout(layer);
-    const pad = Math.ceil(layer.font.size * 0.3) + (layer.font.stroke?.width ?? 0);
+    const runs = isPathText(layer) ? runsIn(layer.content, 0, Infinity).map((r) => r.style) : [];
+    const size = Math.max(layer.font.size, ...runs.map((s) => s.size));
+    const stroke = Math.max(layer.font.stroke?.width ?? 0, ...runs.map((s) => s.stroke?.width ?? 0));
+    const pad = Math.ceil(size * 0.3) + stroke;
     return { x: Math.floor(l.box.x - pad), y: Math.floor(l.box.y - pad), width: Math.ceil(l.box.width + pad * 2), height: Math.ceil(l.box.height + pad * 2) };
   },
   renderBase(layer) {
@@ -245,7 +310,16 @@ export const textPathExtension = {
       ctx.save();
       ctx.translate(g.x - b.x, g.y - b.y);
       if (g.angle) ctx.rotate(g.angle);
-      paintGlyph(ctx, g.ch, -g.width / 2, 0, layer.font);
+      const item = g.item;
+      if (item?.unit) {
+        // a HarfBuzz unit: its glyphs drawn from the pen start, half the glyph's width before its centre
+        ctx.translate(-g.width / 2, 0);
+        drawUnitAtOrigin(ctx, item.run, item.unit);
+      } else if (item?.run) {
+        ctx.font = item.run.css;
+        ctx.fillStyle = rgbaToHex(parseColor(item.run.style.color), true);
+        paintGlyph(ctx, g.ch, -g.width / 2, 0, flatFont(item.run.style));
+      } else paintGlyph(ctx, g.ch, -g.width / 2, 0, layer.font);
       ctx.restore();
     }
     return { canvas, x: b.x, y: b.y };

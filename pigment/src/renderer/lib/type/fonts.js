@@ -140,6 +140,19 @@ const absent = new Set(); // families the installed fonts do not have (asked whe
 
 const isElectron = () => typeof window !== 'undefined' && !!window.pigment;
 
+// Metric-compatible substitutes (fontconfig's 30-metric-aliases): when a family is not installed, Canvas text on Linux
+// is drawn with its substitute, so the engine takes the same faces and lines break where the stub's would.
+const METRIC_ALIASES = {
+  arial: ['liberation sans', 'arimo'],
+  helvetica: ['liberation sans', 'arimo'],
+  'times new roman': ['liberation serif', 'tinos'],
+  times: ['liberation serif', 'tinos'],
+  'courier new': ['liberation mono', 'cousine'],
+  courier: ['liberation mono', 'cousine'],
+  calibri: ['carlito'],
+  cambria: ['caladea'],
+};
+
 async function localFontIndex() {
   if (localIndex) return localIndex;
   if (typeof window === 'undefined' || typeof window.queryLocalFonts !== 'function') return null;
@@ -183,10 +196,21 @@ export function requestFamily(family) {
   const p = (async () => {
     const idx = await localFontIndex();
     if (!idx) return false;
-    const list = idx.get(key);
+    let list = idx.get(key);
+    let alias = null;
+    if (!list?.length) {
+      alias = (METRIC_ALIASES[key] ?? []).find((a) => idx.get(a)?.length) ?? null;
+      list = alias ? idx.get(alias) : null;
+    }
     if (!list?.length) {
       absent.add(key);
       return false;
+    }
+    if (alias && families.has(alias)) {
+      // the substitute is loaded already: the family shares its faces
+      families.set(key, families.get(alias));
+      notify();
+      return true;
     }
     await loadHarfBuzz();
     const recs = [];
@@ -208,6 +232,7 @@ export function requestFamily(family) {
       absent.add(key);
       return false;
     }
+    if (alias) families.set(key, families.get(alias) ?? recs);
     await registerCss(recs);
     notify();
     return true;
