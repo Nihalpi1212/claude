@@ -152,9 +152,15 @@ test('Lens Blur: depth map from the layer transparency or a saved channel, one e
   expect(await source.locator('option').allTextContents()).toEqual(['None', 'Transparency']);
   await source.selectOption('transparency');
   await setNumber(page, 'radius', 10);
-  // depth = alpha, focal distance 0: the transparent surroundings stay in focus (untouched), the opaque square blurs
-  await expect.poll(async () => (await layerPixel(page, 20, 50))[3]).toBeLessThan(255);
-  expect((await layerPixel(page, 15, 50))[3]).toBe(0);
+  // depth = alpha, focal distance 0: the transparent surroundings stay in focus (untouched), the opaque square blurs.
+  // Wait for that preview itself: under load the dialog's first preview (a uniform blur, source None) can still be
+  // on the layer when the edge has started to soften
+  await expect
+    .poll(async () => {
+      const [edge, outside] = [await layerPixel(page, 20, 50), await layerPixel(page, 15, 50)];
+      return edge[3] < 255 && outside[3] === 0;
+    })
+    .toBe(true);
   await confirmDialog(page);
   await expect.poll(() => historyLength(page)).toBe(++n);
   const edge = await layerPixel(page, 20, 50);
