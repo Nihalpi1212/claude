@@ -237,16 +237,24 @@ test('opacity stops interpolate separately from colour stops', () => {
   assert.deepEqual([...rev.slice(0, 4)], [0, 0, 255, 255]);
 });
 
-test('other interpolations and noise fall back to classic ramps', () => {
+// The skeleton's stub drew every interpolation as classic and noise as a min-to-max ramp. The gradients package
+// replaced both (G.1; tests/unit/gradients.test.mjs covers what they draw), so only the shape is pinned here.
+test('other interpolations and noise keep their settings and the classic ends', () => {
   const base = normalizeGradient({ stops: [{ pos: 0, color: '#000000' }, { pos: 1, color: '#ffffff' }] });
   for (const interpolation of ['perceptual', 'linear', 'smooth', 'stripes']) {
-    const lut = gradientLut({ ...base, interpolation });
-    assert.deepEqual(lut, gradientLut(base), interpolation);
+    const def = normalizeGradient({ ...base, interpolation });
+    assert.equal(def.interpolation, interpolation);
+    const lut = gradientLut(def, { size: 16 });
+    assert.equal(lut.length, 16 * 4, interpolation);
+    // every method passes through its stops: black at the start, white at the end
+    assert.deepEqual([...lut.slice(0, 3)], [0, 0, 0], interpolation);
+    assert.deepEqual([...lut.slice(-4, -1)], [255, 255, 255], interpolation);
   }
   const noise = normalizeGradient({ gradientVersion: 2, type: 'noise', noise: { model: 'rgb', min: [0, 0.5, 1], max: [1, 0.5, 0] } });
   assert.equal(noise.type, 'noise');
-  assert.deepEqual(sampleGradient(noise, 0.5).map((v) => Math.round(v)), [128, 128, 128, 1]);
-  assert.deepEqual(sampleGradient(noise, 0).map((v) => Math.round(v)), [0, 128, 255, 1]);
+  const sample = sampleGradient(noise, 0.5);
+  assert.equal(sample.length, 4);
+  assert.ok(sample.every(Number.isFinite));
 });
 
 test('gradientT: from/to geometry of the five kinds (0.3 Canvas fill-layer and tool shapes)', () => {

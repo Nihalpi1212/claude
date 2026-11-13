@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { buildMenuTemplate } from '../../src/shared/menu-template.js';
 import * as reexport from '../../src/main/menu.js';
 import { parseAccelerator } from '../../src/shared/keymap.js';
+import { ADJUSTMENTS } from '../../src/shared/pixels/adjust.js';
 
 const FULL = { hasDocument: true, hasLayer: true, hasSelection: true, hasVectorMask: true, layerType: 'text', lastFilter: 'Gaussian Blur' };
 const build = (platform = 'linux', state = FULL, run = () => {}) => buildMenuTemplate({ platform, state, recent: [], run, isPackaged: false });
@@ -151,7 +152,11 @@ test('every item of M.2 and M.3 is present with its command and argument', () =>
 test('items whose command is a stub or a placeholder kind are disabled', () => {
   const all = commands('linux', { ...FULL, stubs: 'edit:search,layer:vector-mask' });
   for (const x of all.filter((y) => y.cmd === 'edit:search' || y.cmd === 'layer:vector-mask')) assert.equal(x.item.enabled, false, x.path.join(' > '));
-  for (const x of all.filter((y) => /^image:adjust-(color-vibrance|clarity-dehaze|grain)$/.test(y.cmd) || (y.cmd === 'layer:new-adjustment' && ['color-vibrance', 'clarity-dehaze', 'grain'].includes(y.arg)))) assert.equal(x.item.enabled, false, x.path.join(' > '));
+  // a placeholder kind's items are disabled; once adjust-color makes the kind real they follow the layer state again
+  const kindOf = (y) => (y.cmd === 'layer:new-adjustment' ? y.arg : y.cmd.replace(/^image:adjust-/, ''));
+  for (const x of all.filter((y) => /^image:adjust-(color-vibrance|clarity-dehaze|grain)$/.test(y.cmd) || (y.cmd === 'layer:new-adjustment' && ['color-vibrance', 'clarity-dehaze', 'grain'].includes(y.arg)))) {
+    assert.equal(x.item.enabled, !ADJUSTMENTS[kindOf(x)].placeholder, x.path.join(' > '));
+  }
   // Rasterize kinds only for their layer kind
   const shape = commands('linux', { ...FULL, layerType: 'shape', hasVectorMask: false });
   const ras = (label) => shape.find((x) => x.path.join(' > ') === `Layer > Rasterize > ${label}`).item.enabled;

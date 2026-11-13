@@ -22,12 +22,14 @@ test('the colour kinds live in adjust-color.js, which imports nothing from adjus
   for (const fn of ['function hueSaturation', 'function blackWhite', 'function gradientMap', 'function shadowsHighlights', 'function channelMixer', 'function photoFilter(']) assert.ok(!tonal.includes(fn), `${fn} moved out`);
 });
 
-test('the 0.4 placeholders are registered disabled, as adjustment-layer kinds, with identity apply', () => {
+// adjust-color replaces these placeholders with real kinds (I.2), so the test holds before and after it lands: each
+// kind is an adjustment-layer kind with its name, and while it is still a placeholder it applies as the identity.
+test('the 0.4 adjustment kinds are registered as adjustment-layer kinds; a placeholder applies as the identity', () => {
   for (const [k, name] of [['color-vibrance', 'Color and Vibrance'], ['clarity-dehaze', 'Clarity and Dehaze'], ['grain', 'Grain']]) {
     assert.ok(ADJUSTMENT_KINDS.includes(k), k);
     assert.equal(ADJUSTMENTS[k].name, name);
-    assert.equal(ADJUSTMENTS[k].placeholder, true);
     assert.equal(ADJUSTMENTS[k].layer, true);
+    if (!ADJUSTMENTS[k].placeholder) continue; // the real kind has its own tests (tests/unit/adjust-color.test.mjs)
     const img = { width: 1, height: 1, data: new Uint8ClampedArray([10, 20, 30, 255]) };
     applyAdjustment(img, k, {});
     assert.deepEqual([...img.data], [10, 20, 30, 255]);
