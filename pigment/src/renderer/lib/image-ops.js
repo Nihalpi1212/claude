@@ -9,7 +9,15 @@ import { Selection } from './selection.js';
 import { Tool } from './tools.js';
 import { icon } from './icons.js';
 import { flattenDocument } from './compositor.js';
+import { mapShapeGeometry } from './path-ops.js';
+import { maskCanvasFor } from './mask-render.js';
+import { scaleEffects } from '../../shared/pixels/styles.js';
+import { scaleContent } from './type/model.js';
 import * as T from '../../shared/pixels/transform.js';
+
+/** Commands that leave a running Free Transform alone (viewing, panels, Enter/Escape handled by the tool). The warp
+ *  commands switch modes inside the running session (lib/warp.js), so they must not commit it first. */
+const SAFE_DURING_TRANSFORM = /^(view:|window:|help:|app:enter$|app:escape$|tool:brush-|edit:free-transform$|edit:transform-warp$|edit:perspective-warp$|edit:puppet-warp$)/;
 
 // ---- pixel helpers --------------------------------------------------------------------------------------------
 
@@ -165,7 +173,8 @@ function transformMaskCanvas(mask, m, newW, newH, { smooth = true, resizeMethod 
   return c;
 }
 
-function mapPath(path, f) {
+/** PathData through f(x, y) -> [x, y]: anchors and handles (J.2: vector masks, saved paths, text paths). */
+export function mapPath(path, f) {
   return {
     ...path,
     subpaths: (path.subpaths ?? []).map((sp) => ({
@@ -181,11 +190,32 @@ function mapPath(path, f) {
   };
 }
 
+/**
+ * The layer's raster mask with its vector mask rendered in (K.1, parts 'vector'): what a warp or a perspective crop,
+ * which cannot keep a vector mask, leaves on the layer. Returns the new mask object (the current one when the vector
+ * part masks nothing, as with the skeleton's stub).
+ */
+export function bakeVectorMask(layer, doc) {
+  const vec = maskCanvasFor(layer, doc, { purpose: 'bake', parts: 'vector' }); // mask (K.1)
+  if (!vec) return layer.mask;
+  const c = createCanvas(doc.width, doc.height);
+  const ctx = c.getContext('2d');
+  // a disabled raster mask does not show, so the result is the vector part alone (what the layer showed)
+  if (layer.mask?.canvas && layer.mask.enabled) ctx.drawImage(layer.mask.canvas, 0, 0);
+  else {
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, c.width, c.height);
+  }
+  ctx.globalCompositeOperation = 'destination-in';
+  ctx.drawImage(vec, 0, 0);
+  return { ...(layer.mask ?? { linked: true }), canvas: c, enabled: true };
+}
+
 /** Copy of a layer object sharing immutable data; the copy is safe to change without touching the original. */
 function shallow(layer, over = {}) {
   const c = Object.assign(Object.create(Object.getPrototypeOf(layer)), layer);
   c.locked = { ...layer.locked };
-  if (layer.font) c.font = { ...layer.font, stroke: layer.font.stroke ? { ...layer.font.stroke } : null };
+  // a text layer's content is immutable and copied by reference (Object.assign above); its font is a view of it
   if (layer.mask) c.mask = { ...layer.mask };
   if ('_cache' in layer) c._cache = null;
   c.parent = null;
@@ -252,17 +282,23 @@ function remapDocument(app, label, spec) {
         if (mode === 'translate' && !layer.transform) out = shallow(layer, { x: layer.x + m[4], y: layer.y + m[5] });
         else if (mode === 'scale' && uniform && !layer.transform) {
           const s = sx;
-          const font = { ...layer.font, size: layer.font.size * s, letterSpacing: (layer.font.letterSpacing ?? 0) * s };
-          if (font.stroke) font.stroke = { ...font.stroke, width: font.stroke.width * s };
+          // every length of the rich text (sizes, px leading, shifts, stroke widths, indents, spaces) scales; tracking
+          // is in em and follows the size (0.3 scaled the px letter spacing: the same result)
+          const content = scaleContent(layer.content, s);
           // text on a path: the path is document coordinates, so it scales with the document
           const pathText = layer.pathText ? { pathText: { ...layer.pathText, path: mapPath(layer.pathText.path, point), ...(layer.pathText.baselineShift ? { baselineShift: layer.pathText.baselineShift * s } : {}) } } : {};
-          out = shallow(layer, { x: layer.x * s, y: layer.y * s, width: layer.width === null ? null : layer.width * s, font, ...pathText });
+          out = shallow(layer, { x: layer.x * s, y: layer.y * s, width: layer.width === null ? null : layer.width * s, height: layer.height == null ? null : layer.height * s, content, ...pathText });
         } else out = shallow(layer, { transform: T.multiplyMatrix(m, layer.transform ?? T.IDENTITY) });
         break;
       }
       case 'shape': {
-        const over = { path: mapPath(layer.path, point) };
-        if (layer.stroke && mode !== 'translate' && spec.scaleStyles !== false) over.stroke = { ...layer.stroke, width: layer.stroke.width * Math.sqrt(Math.abs(m[0] * m[3] - m[1] * m[2])) };
+        // the path, the live parameters and document-space paints through path-ops.js (shapes-live, J.2)
+        const g = mapShapeGeometry(layer, point, { matrix: m });
+        const over = { path: g.path, shapeKind: g.shapeKind, shapeProps: g.shapeProps };
+        if (g.fill) over.fill = g.fill;
+        const stroke = g.stroke ?? layer.stroke;
+        if (stroke && mode !== 'translate' && spec.scaleStyles !== false) over.stroke = { ...stroke, width: stroke.width * Math.sqrt(Math.abs(m[0] * m[3] - m[1] * m[2])) };
+        else if (g.stroke) over.stroke = g.stroke;
         out = shallow(layer, over);
         break;
       }
@@ -282,6 +318,8 @@ function remapDocument(app, label, spec) {
         canvas: mode === 'scale' ? transformMaskCanvas(layer.mask.canvas, m, W, H, { resizeMethod: 'bilinear' }) : transformMaskCanvas(layer.mask.canvas, m, W, H, { smooth: mode !== 'exact' && mode !== 'translate' }),
       };
     }
+    // a vector mask is document geometry: it follows the whole-document remap, linked or not
+    if (layer.vectorMask) out.vectorMask = { ...layer.vectorMask, path: mapPath(layer.vectorMask.path, point) };
     if (out.styles && spec.scaleStyles && mode === 'scale') out.styles = scaleStyles(out.styles, Math.sqrt(sx * sy));
     return out;
   };
@@ -290,14 +328,6 @@ function remapDocument(app, label, spec) {
     const c = alphaCanvas(mask, d.width, d.height);
     const nc = mode === 'scale' ? transformMaskCanvas(c, m, W, H, { resizeMethod: 'bilinear' }) : transformMaskCanvas(c, m, W, H, { smooth: mode === 'affine', background: 0 });
     return canvasAlpha(nc);
-  };
-
-  const mapGuide = (g) => {
-    const dir = g.axis === 'x' ? [m[2], m[3]] : [m[0], m[1]];
-    if (Math.abs(dir[0]) > 1e-9 && Math.abs(dir[1]) > 1e-9) return null;
-    const p = g.axis === 'x' ? point(g.pos, 0) : point(0, g.pos);
-    const axis = Math.abs(dir[0]) > Math.abs(dir[1]) ? 'y' : 'x';
-    return { ...g, axis, pos: Math.round((axis === 'x' ? p[0] : p[1]) * 100) / 100 };
   };
 
   const keptBytes = () => {
@@ -319,7 +349,8 @@ function remapDocument(app, label, spec) {
     const saved = d.savedSelection;
     d.savedSelection = saved && !saved.isEmpty && saved.width === d.width && saved.height === d.height ? Selection.fromMask(W, H, mapAlpha(saved.mask)) : null;
     if (d.savedSelection?.isEmpty) d.savedSelection = null;
-    d.guides = d.guides.map(mapGuide).filter(Boolean);
+    // guides (0.3's mapGuide), the ruler origin and every other document collection follow the geometry
+    d.store.transformAll(m, spec);
     d.channels = d.channels.map((ch) => ({ ...ch, mask: mapAlpha(ch.mask) }));
     d.paths = d.paths.map((p) => ({ ...p, path: mapPath(p.path, point) }));
     if (d.workPath?.subpaths?.length) d.workPath = mapPath(d.workPath, point);
@@ -330,15 +361,9 @@ function remapDocument(app, label, spec) {
   app.view?.invalidate();
 }
 
+/** Image Size's Scale Styles: styles.js scaleEffects (every instance, J.6) on a deep copy. */
 function scaleStyles(styles, s) {
-  const out = JSON.parse(JSON.stringify(styles));
-  const scaleKeys = ['size', 'distance', 'width', 'range', 'spread'];
-  for (const v of Object.values(out)) {
-    if (!v || typeof v !== 'object') continue;
-    for (const k of ['size', 'distance', 'width']) if (typeof v[k] === 'number') v[k] *= s;
-  }
-  void scaleKeys;
-  return out;
+  return scaleEffects(JSON.parse(JSON.stringify(styles)), s);
 }
 
 /** True when the bottom layer is an opaque raster covering the whole canvas (a Photoshop "Background"). */
@@ -781,7 +806,7 @@ export function install(app) {
       copy.active = copy.root.children[copy.root.children.length - 1] ?? null;
     }
     copy.selected = new Set(copy.active ? [copy.active] : []);
-    copy.guides = d.guides.map((g) => ({ ...g }));
+    copy.store = d.store.clone(copy);
     copy.channels = d.channels.map((c) => ({ ...c, mask: new Uint8ClampedArray(c.mask) }));
     copy.paths = d.paths.map((p) => JSON.parse(JSON.stringify(p)));
     copy.meta = { ...(d.meta ?? {}) };
@@ -801,6 +826,17 @@ export function install(app) {
   const transformTool = new TransformTool(app);
   app.tools.tools.set(transformTool.id, transformTool);
   app.transformTool = transformTool;
+  // A running Free Transform is applied before another command touches the document; undo-like commands cancel
+  // it instead (lib/sessions.js, policy 'commit'; 0.3 kept this rule in commands.js)
+  app.sessions?.register({
+    id: 'transform',
+    policy: 'commit',
+    label: 'Free Transform',
+    active: () => !!transformTool.session && !transformTool.committing,
+    allow: SAFE_DURING_TRANSFORM,
+    commit: () => transformTool.commit(),
+    cancel: () => transformTool.cancel(),
+  });
 
   app.commands.registerAll({
     // actions (lib/actions.js): the dialog commands below are marked `dialog` and report their settings through ctx
@@ -886,7 +922,10 @@ export class TransformTool extends Tool {
       if (['raster', 'text', 'shape'].includes(l.type) || l.usesMatrixTransform) out.push(l);
     };
     const sel = d.selectedLayers();
-    (sel.length ? sel : d.active ? [d.active] : []).forEach(add);
+    const base = sel.length ? sel : d.active ? [d.active] : [];
+    // links (layers-extras/tags.js): linked layers transform together, as they move together
+    const picked = this.app.linkedLayers ? this.app.linkedLayers(base) : base;
+    picked.forEach(add);
     const locked = out.filter((l) => l.locked.all || l.locked.position);
     if (locked.length && !quiet) this.app.dialogs.toast(`"${locked[0].name}" is locked`, { kind: 'error' });
     return out.filter((l) => !(l.locked.all || l.locked.position));
@@ -940,7 +979,7 @@ export class TransformTool extends Tool {
         }
         if (!box) return app.dialogs.toast('The layer is empty', { kind: 'error' });
         s.box = box;
-        s.orig = layers.map((l) => ({ layer: l, canvas: l.canvas, x: l.x, y: l.y, transform: l.transform ?? null, path: l.path, mask: l.mask, stroke: l.stroke }));
+        s.orig = layers.map((l) => ({ layer: l, canvas: l.canvas, x: l.x, y: l.y, transform: l.transform ?? null, path: l.path, mask: l.mask, stroke: l.stroke, fill: l.fill, shapeKind: l.shapeKind, shapeProps: l.shapeProps, vectorMask: l.vectorMask ?? null }));
         // crop raster sources to their content so the transform box hugs the pixels
         s.sources = new Map();
         for (const o of s.orig) {
@@ -956,6 +995,8 @@ export class TransformTool extends Tool {
     s.hasText = s.targets.some((l) => l.type === 'text');
     // linked masks of selected groups move with the group's children (the Move tool does the same)
     s.groupMasks = s.floating ? [] : d.selectedLayers().filter((l) => l.isGroup && l.mask?.canvas && l.mask.linked !== false && !l.locked.all && !l.locked.position);
+    // linked vector masks of selected groups too (J.2): { layer, vectorMask } as they were
+    s.groupVectorMasks = s.floating ? [] : d.selectedLayers().filter((l) => l.isGroup && l.vectorMask && l.vectorMask.linked !== false && !l.locked.all && !l.locked.position).map((l) => ({ layer: l, vectorMask: l.vectorMask }));
     s.quad = quadFromMatrix(s.box, T.IDENTITY);
     s.pivot = [s.box.x + s.box.width / 2, s.box.y + s.box.height / 2];
     s.interp = app.settings.transformInterpolation ?? 'bicubic';
@@ -1062,10 +1103,21 @@ export class TransformTool extends Tool {
           // text and smart objects keep their source and carry a matrix
           if (m) l.transform = T.multiplyMatrix(m, o.transform ?? T.IDENTITY);
         } else if (l.type === 'shape') {
-          const H = m ? null : T.homography(quadFromMatrix(s.box, T.IDENTITY), s.quad);
-          l.path = mapPath(o.path, m ? (x, y) => T.applyMatrix(m, x, y) : (x, y) => T.applyHomography(H, x, y));
+          const g = mapShapeGeometry({ path: o.path, shapeKind: o.shapeKind, shapeProps: o.shapeProps, fill: o.fill, stroke: o.stroke }, this.pointFn(), { matrix: m, homography: m ? null : this.homography() });
+          l.path = g.path;
+          l.shapeKind = g.shapeKind;
+          l.shapeProps = g.shapeProps;
+          if (g.fill) l.fill = g.fill;
+          if (g.stroke) l.stroke = g.stroke;
         }
+        // a linked vector mask follows the same matrix (a warp shows the raster pixels only; commit bakes it)
+        if (o.vectorMask && o.vectorMask.linked !== false && !warp && (m || (l.type !== 'text' && !l.usesMatrixTransform))) l.vectorMask = { ...o.vectorMask, path: mapPath(o.vectorMask.path, this.pointFn()) };
         l.touch();
+      }
+      for (const g of s.groupVectorMasks ?? []) {
+        if (warp) continue;
+        g.layer.vectorMask = { ...g.vectorMask, path: mapPath(g.vectorMask.path, this.pointFn()) };
+        g.layer.touch();
       }
     }
     s.doc.changed('pixels');
@@ -1094,9 +1146,27 @@ export class TransformTool extends Tool {
         l.x = o.x;
         l.y = o.y;
       } else if (l.type === 'text' || l.usesMatrixTransform) l.transform = o.transform;
-      else if (l.type === 'shape') l.path = o.path;
+      else if (l.type === 'shape') Object.assign(l, { path: o.path, shapeKind: o.shapeKind, shapeProps: o.shapeProps, fill: o.fill, stroke: o.stroke });
+      if ('vectorMask' in o) l.vectorMask = o.vectorMask;
       l.touch();
     }
+    for (const g of s.groupVectorMasks ?? []) {
+      g.layer.vectorMask = g.vectorMask;
+      g.layer.touch();
+    }
+  }
+
+  /** The current transform as a point function (document -> document): the matrix, else the quad's homography. */
+  pointFn() {
+    const m = this.matrix;
+    if (m) return (x, y) => T.applyMatrix(m, x, y);
+    const H = this.homography();
+    return (x, y) => T.applyHomography(H, x, y);
+  }
+
+  homography() {
+    const s = this.session;
+    return T.homography(quadFromMatrix(s.box, T.IDENTITY), s.quad);
   }
 
   end() {
@@ -1141,6 +1211,7 @@ export class TransformTool extends Tool {
       return true;
     }
     this.committing = true;
+    let bakedVector = 0;
     try {
       const quality = s.interp;
       const render = (canvas, x, y) => {
@@ -1231,16 +1302,32 @@ export class TransformTool extends Tool {
               if (m) setLayerProps(app, l, { transform: T.multiplyMatrix(m, o.transform ?? T.IDENTITY) }, 'Transform');
               else app.dialogs.toast(`Distort and perspective need a rasterized ${l.type === 'text' ? 'text' : 'smart object'} layer`, { kind: 'error' });
             } else if (l.type === 'shape') {
-              const H = m ? null : T.homography(quadFromMatrix(s.box, T.IDENTITY), s.quad);
-              const f = m ? (x, y) => T.applyMatrix(m, x, y) : (x, y) => T.applyHomography(H, x, y);
-              const patch = { path: mapPath(o.path, f) };
-              if (l.stroke && m && app.settings.transformScalesStrokes) patch.stroke = { ...l.stroke, width: l.stroke.width * Math.sqrt(Math.abs(m[0] * m[3] - m[1] * m[2])) };
+              // the path, live parameters and document-space paints through path-ops.js (shapes-live, J.2)
+              const g = mapShapeGeometry(l, this.pointFn(), { matrix: m, homography: m ? null : this.homography() });
+              const patch = { path: g.path, shapeKind: g.shapeKind, shapeProps: g.shapeProps };
+              if (g.fill) patch.fill = g.fill;
+              const stroke = g.stroke ?? l.stroke;
+              if (stroke && m && app.settings.transformScalesStrokes) patch.stroke = { ...stroke, width: stroke.width * Math.sqrt(Math.abs(m[0] * m[3] - m[1] * m[2])) };
+              else if (g.stroke) patch.stroke = g.stroke;
               setLayerProps(app, l, patch, 'Transform');
+            }
+            const vm = l.vectorMask;
+            if (vm && vm.linked !== false) {
+              if (warp) {
+                // a warp has no vector form: the vector mask is rendered into the raster mask, which then warps
+                setLayerProps(app, l, { mask: bakeVectorMask(l, d), vectorMask: null }, 'Rasterize vector mask');
+                bakedVector++;
+              } else if (m || (l.type !== 'text' && !l.usesMatrixTransform)) setLayerProps(app, l, { vectorMask: { ...vm, path: mapPath(vm.path, this.pointFn()) } }, 'Transform');
             }
             if (l.mask?.canvas && l.mask.linked !== false) transformMask(l);
           }
           for (const g of s.groupMasks ?? []) if (g.mask?.canvas) transformMask(g);
+          for (const { layer: g } of s.groupVectorMasks ?? []) {
+            if (warp) continue; // warps take raster layers only (lib/warp.js), never a group
+            setLayerProps(app, g, { vectorMask: { ...g.vectorMask, path: mapPath(g.vectorMask.path, this.pointFn()) } }, 'Transform');
+          }
         });
+        if (bakedVector) app.dialogs.toast(`${bakedVector} vector mask${bakedVector === 1 ? ' was' : 's were'} rasterized into the layer mask: a warp cannot keep a vector mask`, { timeout: 3600 });
       }
       if (m && !warp) {
         // Transform Again replays the linear part about the new box centre plus the centre's displacement (a plain move included)
@@ -1327,6 +1414,17 @@ export class TransformTool extends Tool {
       return;
     }
     const dr = this.drag;
+    // snap (lib/snap.js): handle drags snap the pointer, the box move snaps the moved box (identity in the stub)
+    const exclude = s.targets ?? [];
+    if (dr.op === 'move' && this.app.snap) {
+      const xs = dr.quad.map((q) => q[0]), ys = dr.quad.map((q) => q[1]);
+      const box = { x: Math.min(...xs) + p.x - dr.start.x, y: Math.min(...ys) + p.y - dr.start.y, width: Math.max(...xs) - Math.min(...xs), height: Math.max(...ys) - Math.min(...ys) };
+      const sb = this.app.snap.box(box, { source: 'transform', pointer: p, exclude, view: this.view });
+      p = { ...p, x: p.x + sb.dx, y: p.y + sb.dy };
+    } else if (dr.op !== 'pivot' && dr.op !== 'rotate' && this.app.snap) {
+      const sp = this.app.snap.point(p, { source: 'transform', pointer: p, exclude, view: this.view });
+      p = { ...p, x: sp.x, y: sp.y };
+    }
     const dx = p.x - dr.start.x, dy = p.y - dr.start.y;
     const M0 = dr.matrix;
     switch (dr.op) {
@@ -1587,16 +1685,21 @@ export class TransformTool extends Tool {
       const M = [lin[0], lin[1], lin[2], lin[3], s.pivot[0] - p[0], s.pivot[1] - p[1]];
       s.quad = quadFromMatrix(b, M);
     };
+    // ruler (lib/rulers.js): X and Y count from the ruler origin (the stub's origin is the document corner)
+    const origin = () => (this.app.doc && this.app.rulers ? this.app.rulers.origin(this.app.doc) : { x: 0, y: 0 });
     add('x', 'X', 'px', (v) => withMatrix((s, m) => {
       const c = T.applyMatrix(m, s.box.x + s.box.width / 2, s.box.y + s.box.height / 2);
-      s.quad = s.quad.map(([x, y]) => [x + v - c[0], y]);
-      s.pivot = [s.pivot[0] + v - c[0], s.pivot[1]];
+      const to = v + origin().x;
+      s.quad = s.quad.map(([x, y]) => [x + to - c[0], y]);
+      s.pivot = [s.pivot[0] + to - c[0], s.pivot[1]];
     }));
     add('y', 'Y', 'px', (v) => withMatrix((s, m) => {
       const c = T.applyMatrix(m, s.box.x + s.box.width / 2, s.box.y + s.box.height / 2);
-      s.quad = s.quad.map(([x, y]) => [x, y + v - c[1]]);
-      s.pivot = [s.pivot[0], s.pivot[1] + v - c[1]];
+      const to = v + origin().y;
+      s.quad = s.quad.map(([x, y]) => [x, y + to - c[1]]);
+      s.pivot = [s.pivot[0], s.pivot[1] + to - c[1]];
     }));
+    this.rulerOrigin = origin;
     add('w', 'W', '%', (v) => withMatrix((s, m) => rebuild(s, { ...decompose(m), sx: v / 100 })));
     add('h', 'H', '%', (v) => withMatrix((s, m) => rebuild(s, { ...decompose(m), sy: v / 100 })));
     add('angle', '∠', '°', (v) => withMatrix((s, m) => rebuild(s, { ...decompose(m), rot: (v * Math.PI) / 180 })));
@@ -1650,8 +1753,9 @@ export class TransformTool extends Tool {
     }
     const c = T.applyMatrix(m, s.box.x + s.box.width / 2, s.box.y + s.box.height / 2);
     const p = this.decompose(m);
-    set('x', c[0]);
-    set('y', c[1]);
+    const o = this.rulerOrigin?.() ?? { x: 0, y: 0 }; // ruler (lib/rulers.js)
+    set('x', c[0] - o.x);
+    set('y', c[1] - o.y);
     set('w', p.sx * 100);
     set('h', p.sy * 100);
     set('angle', (p.rot * 180) / Math.PI);

@@ -12,6 +12,8 @@
 import { Tool } from '../tools.js';
 import { createCanvas } from '../document.js';
 import { structural, rasterizeLayer } from '../layer-ops.js';
+import { bakeVectorMask } from '../image-ops.js';
+import { mapShapeGeometry } from '../path-ops.js';
 import * as T from '../../../shared/pixels/transform.js';
 import { orderQuad, isConvexQuad, naturalSize, outputSize, isParallelogram, MAX_SIDE } from './perspective-quad.js';
 
@@ -170,7 +172,7 @@ function cropDocument(app, { quad, width = 0, height = 0, resolution = 0 } = {},
   const natural = naturalSize(q);
   // shrinking by more than a quarter: warp at the quad's own size first, then resize with a proper filter
   const inter = W < natural.width * 0.75 || H < natural.height * 0.75 ? { width: Math.max(W, natural.width), height: Math.max(H, natural.height) } : { width: W, height: H };
-  let rasterized = 0;
+  let rasterized = 0, bakedVector = 0;
 
   const mapLayer = function* (layer) {
     let out;
@@ -201,14 +203,25 @@ function cropDocument(app, { quad, width = 0, height = 0, resolution = 0 } = {},
         if (layer.linked) out.linked = layer.linked;
         out.mask = layer.mask ? { ...layer.mask } : null;
       }
-    } else if (layer.type === 'shape') out = shallow(layer, { path: mapPath(layer.path, point) });
+    } else if (layer.type === 'shape') {
+      // shapes keep their vectors through the homography (path-ops.js mapShapeGeometry, shapes-live, J.2)
+      const g = mapShapeGeometry(layer, point, { homography: Hf });
+      out = shallow(layer, { path: g.path, shapeKind: g.shapeKind, shapeProps: g.shapeProps, ...(g.fill ? { fill: g.fill } : {}), ...(g.stroke ? { stroke: g.stroke } : {}) });
+    }
     else if (layer.type === 'fill') {
       const g = layer.paint?.gradient;
       out = shallow(layer, g?.from && g?.to ? { paint: { ...layer.paint, gradient: { ...g, from: point(...g.from), to: point(...g.to) } } } : {});
     } else out = shallow(layer);
-    if (layer.mask?.canvas) {
+    // a vector mask cannot stay a vector through a perspective: it is rendered into the raster mask, as type is
+    let mask = layer.mask;
+    if (layer.vectorMask) {
+      mask = bakeVectorMask(layer, d);
+      out.vectorMask = null;
+      bakedVector++;
+    }
+    if (mask?.canvas) {
       yield;
-      out.mask = { ...layer.mask, canvas: warpMask(layer.mask.canvas, q, W, H, inter) };
+      out.mask = { ...mask, canvas: warpMask(mask.canvas, q, W, H, inter) };
     }
     return out;
   };
@@ -253,6 +266,7 @@ function cropDocument(app, { quad, width = 0, height = 0, resolution = 0 } = {},
     app.view?.center?.();
     app.view?.invalidate();
     if (rasterized) app.dialogs.toast(`${rasterized} type or smart object layer${rasterized === 1 ? ' was' : 's were'} rasterized: a perspective cannot stay editable`, { timeout: 3600 });
+    if (bakedVector) app.dialogs.toast(`${bakedVector} vector mask${bakedVector === 1 ? ' was' : 's were'} rasterized into the layer mask: a perspective cannot stay a vector`, { timeout: 3600 });
     return true;
   };
   if (sync) {
@@ -357,7 +371,11 @@ export class PerspectiveCropTool extends Tool {
     if (!d.moved && Math.hypot(p.screenX - d.start.screenX, p.screenY - d.start.screenY) < 3) return;
     d.moved = true;
     const o = d.origin;
-    if (d.corner !== undefined) this.points[d.corner] = { x: o[d.corner].x + dx, y: o[d.corner].y + dy };
+    if (d.corner !== undefined) {
+      const c = { x: o[d.corner].x + dx, y: o[d.corner].y + dy };
+      const sp = this.app.snap?.point(c, { source: 'perspective-crop', pointer: p, view: this.view }) ?? c; // snap (lib/snap.js)
+      this.points[d.corner] = { x: sp.x, y: sp.y };
+    }
     else if (d.edge !== undefined) {
       for (const i of [d.edge, (d.edge + 1) % 4]) this.points[i] = { x: o[i].x + dx, y: o[i].y + dy };
     } else if (d.move) this.points = o.map((pt) => ({ x: pt.x + dx, y: pt.y + dy }));

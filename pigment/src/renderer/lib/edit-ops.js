@@ -242,9 +242,10 @@ export function install(app) {
     const fctx = fill.getContext('2d');
     const use = opts.use ?? 'foreground';
     if (use === 'pattern') {
-      if (!app.currentPattern) return app.dialogs.toast('Define a pattern first (Edit › Define Pattern)', { kind: 'error' });
+      const pattern = app.patterns?.current()?.canvas;
+      if (!pattern) return app.dialogs.toast('Define a pattern first (Edit › Define Pattern)', { kind: 'error' });
       fctx.translate(-area.x, -area.y);
-      fctx.fillStyle = fctx.createPattern(app.currentPattern, 'repeat');
+      fctx.fillStyle = fctx.createPattern(pattern, 'repeat');
       fctx.fillRect(area.x, area.y, area.width, area.height);
       fctx.setTransform(1, 0, 0, 1, 0, 0);
     } else if (use === 'history') {
@@ -582,9 +583,9 @@ export function install(app) {
       run: () => {
         const data = copyPixels(true);
         if (!data) return;
-        app.currentPattern = data.canvas;
-        app.patterns = [...(app.patterns ?? []), data.canvas].slice(-24);
+        const defined = app.patterns.define(data.canvas, {});
         app.dialogs.toast(`Pattern defined (${data.canvas.width} × ${data.canvas.height})`, { kind: 'success', timeout: 1800 });
+        return defined;
       },
     },
     'file:place': { enabled: has, dialog: true, run: (path, ctx) => place(typeof path === 'string' ? path : null, ctx) }, // actions (lib/actions.js)

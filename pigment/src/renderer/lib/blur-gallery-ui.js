@@ -21,7 +21,6 @@ import { buildForm } from './form.js';
 import { icon } from './icons.js';
 import { createCanvas } from './document.js';
 import { processed, getPath, setPath } from './adjust-ui.js';
-import { bridge } from './bridge.js';
 
 const clone = (v) => JSON.parse(JSON.stringify(v));
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
@@ -1020,7 +1019,7 @@ class BlurGalleryTool extends Tool {
     // Enter or Escape in a number field confirms the field and hands the keys back to the canvas
     // (so the next Enter applies and Delete removes the pin instead of editing the field)
     el.addEventListener('keydown', (e) => {
-      if (e.target.tagName !== 'INPUT' || e.target.type !== 'number' || (e.key !== 'Enter' && e.key !== 'Escape')) return;
+      if (!e.target.matches?.('input[type=number], input[data-numeric]') || (e.key !== 'Enter' && e.key !== 'Escape')) return;
       e.preventDefault();
       e.stopPropagation();
       e.target.blur();
@@ -1105,22 +1104,16 @@ export function install(app) {
   for (const kind of BLUR_GALLERY_KINDS) app.filterEditor?.register(kind, { open: (k, opts) => tool.open(k, opts ?? {}) });
 
   // While a session is open it owns the document like a modal dialog would: commands that could change
-  // the document (or the tool, the layer, the tab) are refused with a hint instead of running half way.
-  const run = app.commands.run.bind(app.commands);
-  let warned = -Infinity; // when the hint was last shown (it is not repeated within 2.5 s)
-  app.commands.run = (id, arg, source) => {
-    if (tool.session && !tool.ending && !SAFE_COMMANDS.test(id)) {
-      if (source !== 'api' && performance.now() - warned > 2500) {
-        warned = performance.now();
-        app.dialogs.toast(`Finish ${tool.session.def.name} first: Enter applies it, Esc cancels`, { timeout: 2200 });
-      }
-      return undefined;
-    }
-    return run(id, arg, source);
-  };
-
-  // closing the window asks about unsaved documents: the preview must be off the layer before anything is saved
-  bridge.on?.('before-close', () => tool.cancel());
+  // the document (or the tool, the layer, the tab) are refused with a hint instead of running half way
+  // (lib/sessions.js). Closing the window cancels it before anything is saved: the preview must be off the layer.
+  app.sessions.register({
+    id: 'blur-gallery',
+    policy: 'modal',
+    label: () => tool.session?.def?.name ?? 'Blur Gallery',
+    active: () => !!tool.session && !tool.ending,
+    allow: SAFE_COMMANDS,
+    cancel: () => tool.cancel(),
+  });
 
   /** For other modules and tests: the running session's state (params are a copy). */
   app.blurGallery = {

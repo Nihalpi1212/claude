@@ -1,6 +1,7 @@
 // Minimal static file server for the renderer, used by the Playwright e2e tests and `npm run dev:web`.
 // Serves src/renderer at / (so index.html, lib/, styles/, vendor/ resolve exactly like under pigment://app/),
-// src/shared at /shared/, build/ at /build/ and tests/fixtures/out at /fixtures/. No dependencies.
+// src/shared at /shared/, build/ at /build/, tests/fixtures/fonts at /fixtures/fonts/ (0.4: type-engine-core's test
+// font) and tests/fixtures/out at /fixtures/. No dependencies.
 import { createServer } from 'node:http';
 import { createReadStream, promises as fs } from 'node:fs';
 import { dirname, extname, join, normalize, resolve, sep } from 'node:path';
@@ -12,6 +13,7 @@ const RENDERER = join(root, 'src', 'renderer');
 const SHARED = join(root, 'src', 'shared');
 const BUILD = join(root, 'build');
 const FIXTURES = join(root, 'tests', 'fixtures', 'out');
+const FONTS = join(root, 'tests', 'fixtures', 'fonts');
 
 export const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -41,6 +43,10 @@ export const MIME = {
 
 function resolveFile(urlPath) {
   const clean = decodeURIComponent(urlPath.split('?')[0]);
+  if (clean.startsWith('/fixtures/fonts/')) {
+    const file = normalize(join(FONTS, clean.slice('/fixtures/fonts/'.length)));
+    return file.startsWith(FONTS + sep) ? file : null;
+  }
   if (clean.startsWith('/fixtures/')) {
     const file = normalize(join(FIXTURES, clean.slice('/fixtures/'.length)));
     return file.startsWith(FIXTURES + sep) ? file : null;

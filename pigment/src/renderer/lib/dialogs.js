@@ -25,6 +25,7 @@ export class Dialogs {
    * @param {boolean} [opts.dismissible]   Escape/backdrop closes (default true)
    * @param {(dialog: HTMLElement, close: (value:any)=>void) => void} [opts.onOpen]
    * @param {(value:any) => boolean|Promise<boolean>} [opts.validate]  return false to keep the dialog open
+   * @param {() => void} [opts.onReset]  reserved (0.4, I.3): Alt turns Cancel into Reset (conventions-shortcuts-fields)
    */
   open(opts = {}) {
     return new Promise((resolve) => {
@@ -130,6 +131,8 @@ export class Dialogs {
         }
         closed = true;
         document.removeEventListener('keydown', onDocKey, true);
+        entry.through?.();
+        entry.through = null;
         backdrop.remove();
         const i = entry.dialogs?.stack.indexOf(entry);
         if (entry.dialogs) entry.dialogs.stack.splice(i, 1);
@@ -162,6 +165,40 @@ export class Dialogs {
       opts.onOpen?.(dialog, close);
       proposed = dialog.querySelector('[autofocus]')?.value;
     });
+  }
+
+  /**
+   * Lets the canvas under an open dialog take pointer input (I.3): the backdrop stops catching pointer events, and a
+   * swallowing canvas-capture handler keeps canvas clicks that no armed handler takes away from the active tool.
+   * Off: the backdrop catches again (a click on it is Cancel, as in 0.3). The dialog's close turns it off.
+   */
+  setCanvasThrough(dialogEl, on) {
+    const entry = this.stack.find((e) => e.backdrop.contains(dialogEl));
+    if (!entry) return;
+    const dialog = entry.backdrop.querySelector('.dialog');
+    if (on) {
+      if (entry.through) return;
+      entry.backdrop.classList.add('canvas-through');
+      entry.backdrop.style.pointerEvents = 'none';
+      if (dialog) dialog.style.pointerEvents = 'auto';
+      entry.through = this.app.canvasCapture?.push({ id: 'dialog-through', cursor: 'default', down() {} }) ?? (() => {});
+    } else {
+      if (!entry.through) return;
+      entry.through();
+      entry.through = null;
+      entry.backdrop.classList.remove('canvas-through');
+      entry.backdrop.style.pointerEvents = '';
+      if (dialog) dialog.style.pointerEvents = '';
+    }
+  }
+
+  /**
+   * Whether a native menu command ('menu' / 'menu-key') runs while a dialog is open (commands.js, E step 3). Stub:
+   * never, 0.3's rule; conventions-shortcuts-fields lets view navigation through under its movable dialogs.
+   */
+  passesMenu(id) {
+    void id;
+    return false;
   }
 
   /**

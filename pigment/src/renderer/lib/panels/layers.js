@@ -2,7 +2,9 @@
 // locks, drag-and-drop reordering and grouping, rename, context menu and the footer buttons.
 import { icon } from '../icons.js';
 import { BLEND_MODES } from '../document.js';
+import { hasEnabledStyles } from '../../../shared/pixels/styles.js';
 import { Selection } from '../selection.js';
+import { vectorMaskThumb } from '../mask-view.js';
 
 const THUMB_W = 36, THUMB_H = 30;
 
@@ -201,6 +203,33 @@ export function install(app) {
       });
       li.appendChild(m);
     }
+    if (layer.vectorMask) {
+      // L.15: the vector mask after the raster mask: a link icon and its thumbnail (lib/mask-view.js vectorMaskThumb);
+      // clicks run masks-vector-masks' layer:vector-mask
+      const vm = layer.vectorMask;
+      const vlink = document.createElement('span');
+      vlink.className = 'layer-link layer-vector-link';
+      vlink.textContent = vm.linked !== false ? '⛓' : '';
+      vlink.title = 'Link layer and vector mask';
+      vlink.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (doc.active !== layer) doc.setActive(layer);
+        app.commands.run('layer:vector-mask', 'link', 'panel');
+      });
+      li.appendChild(vlink);
+      const v = document.createElement('span');
+      v.className = 'layer-thumb vector-mask-thumb';
+      v.title = 'Vector mask: click to edit its path, Shift-click to disable, Ctrl/Cmd-click to load as a selection';
+      v.appendChild(vectorMaskThumb(layer, 32, 24, doc));
+      if (vm.enabled === false) v.style.opacity = '0.4';
+      v.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (doc.active !== layer) doc.setActive(layer);
+        const op = e.shiftKey ? 'toggle' : e.ctrlKey || e.metaKey ? 'select' : 'target';
+        app.commands.run('layer:vector-mask', op, 'panel');
+      });
+      li.appendChild(v);
+    }
     const name = document.createElement('span');
     name.className = 'layer-name';
     name.textContent = layer.name;
@@ -208,7 +237,7 @@ export function install(app) {
     li.appendChild(name);
     const badges = document.createElement('span');
     badges.className = 'layer-badges';
-    if (layer.styles && Object.values(layer.styles).some((s) => s?.enabled)) {
+    if (hasEnabledStyles(layer.styles)) {
       const fx = document.createElement('span');
       fx.className = 'layer-fx';
       fx.textContent = 'fx';
@@ -288,6 +317,7 @@ export function install(app) {
       for (const r of list.querySelectorAll('.drop-above,.drop-below,.drop-into')) r.classList.remove('drop-above', 'drop-below', 'drop-into');
     });
     li.addEventListener('dragover', (e) => {
+      if (!dragLayer && app.dropHandlerFor?.(e.dataTransfer, 'layer')) return e.preventDefault(); // drop (E25)
       if (!dragLayer || dragLayer === layer) return;
       e.preventDefault();
       const r = li.getBoundingClientRect();
@@ -299,7 +329,13 @@ export function install(app) {
     li.addEventListener('dragleave', () => li.classList.remove('drop-above', 'drop-below', 'drop-into'));
     li.addEventListener('drop', (e) => {
       e.preventDefault();
-      if (!dragLayer || dragLayer === layer) return;
+      if (!dragLayer) {
+        // drop (E25): a gradient or a pattern dragged from a panel onto this row
+        const found = app.dropHandlerFor?.(e.dataTransfer, 'layer');
+        if (found) found.handler.layer(e.dataTransfer.getData(found.mime), layer, e);
+        return;
+      }
+      if (dragLayer === layer) return;
       const mode = li.classList.contains('drop-into') ? 'into' : li.classList.contains('drop-above') ? 'above' : 'below';
       li.classList.remove('drop-above', 'drop-below', 'drop-into');
       app.commands.run('layer:move-to', { id: dragLayer.id, target: layer.id, mode, duplicate: e.altKey }, 'panel');

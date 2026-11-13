@@ -5,7 +5,7 @@
 import { icon } from '../icons.js';
 import { pathToPath2D, createCanvas } from '../document.js';
 import { pathAreaCanvas, hasPathOps } from '../path-ops.js';
-import { activePathTarget, setActivePath, isEmptyPath } from '../tools/vector.js';
+import { activePathTarget, setActivePath, isEmptyPath, pathTargetKinds } from '../tools/vector.js';
 
 const TW = 40, TH = 30;
 
@@ -44,6 +44,14 @@ export function install(app) {
     if (doc.workPath && !isEmptyPath(doc.workPath)) out.push({ key: 'work', ap: { kind: 'work' }, name: 'Work Path', path: doc.workPath, italic: true });
     for (const p of doc.paths) out.push({ key: `saved:${p.id}`, ap: { kind: 'saved', id: p.id }, name: p.name, path: p.path, id: p.id });
     if (doc.active?.type === 'shape') out.push({ key: `shape:${doc.active.id}`, ap: { kind: 'shape', layerId: doc.active.id }, name: `${doc.active.name} Shape Path`, path: doc.active.path, italic: true });
+    // rows of the registered path target kinds (L.4: the vector mask of the active layer)
+    for (const [, def] of pathTargetKinds()) {
+      try {
+        for (const r of def.rows?.(app, doc) ?? []) if (r?.key && r.ap && r.path) out.push(r);
+      } catch (err) {
+        console.warn('path rows failed', err);
+      }
+    }
     return out;
   }
 

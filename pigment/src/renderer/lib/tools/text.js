@@ -8,7 +8,7 @@
 // sideways, lines running right to left), flagged with font.orientation = 'vertical'. Stacked
 // upright glyphs would need a vertical layout in TextLayer (lib/document.js).
 import { Tool } from '../tools.js';
-import { TextLayer, cssFont, measureContext, DEFAULT_TEXT_STYLE } from '../document.js';
+import { TextLayer, cssFont, measureContext, DEFAULT_TEXT_STYLE, applyLegacyFont } from '../document.js';
 import { structural, setLayerProps } from '../layer-ops.js';
 import { bridge } from '../bridge.js';
 import { icon } from '../icons.js';
@@ -16,6 +16,9 @@ import { invertMatrix, applyMatrix } from '../../../shared/pixels/transform.js';
 import { parseColor, rgbaToHex } from '../../../shared/pixels/color.js';
 import { hitSegment, isEmptyPath, clonePath, visibleTargets } from './vector.js';
 import { pathOffsetAt } from '../text-path.js';
+import * as M from '../type/model.js';
+import { setSelectionProvider, selectionChanged, applyChar as targetApplyChar, applyPara as targetApplyPara, applyTypeOptions as targetApplyTypeOptions, editTypeLayers } from '../type/target.js';
+import { fontsChanged } from '../type/api.js';
 
 // type-on-path (lib/text-path.js): an I-beam crossing a curve, shown when the pointer is over a path
 const PATH_CURSOR = `url("data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"><path d="M3 17q9-12 18-2" fill="none" stroke="#fff" stroke-width="3"/><path d="M3 17q9-12 18-2" fill="none" stroke="#000" stroke-width="1.5"/><path d="M9 4h6M12 4v16M9 20h6" stroke="#fff" stroke-width="3" fill="none"/><path d="M9 4h6M12 4v16M9 20h6" stroke="#000" stroke-width="1.2" fill="none"/></svg>')}") 12 12, text`;
@@ -127,11 +130,13 @@ export function styleToFont(style) {
 
 const hex6 = (c) => rgbaToHex(parseColor(c ?? '#000000')).slice(0, 7);
 const autoName = (text) => String(text ?? '').split('\n')[0].slice(0, 30) || 'Text';
-const snapshot = (layer) => ({ text: layer.text, font: JSON.parse(JSON.stringify(layer.font)), width: layer.width, name: layer.name, x: layer.x, y: layer.y, pathText: layer.pathText ? JSON.parse(JSON.stringify(layer.pathText)) : null });
+// the rich-text content (immutable) and its layer options, so cancel and undo restore formatting exactly
+const snapshot = (layer) => ({ content: layer.content, typeOptions: layer.typeOptions, width: layer.width, height: layer.height ?? null, name: layer.name, x: layer.x, y: layer.y, pathText: layer.pathText ? JSON.parse(JSON.stringify(layer.pathText)) : null });
 function restore(layer, snap) {
-  layer.text = snap.text;
-  layer.font = JSON.parse(JSON.stringify(snap.font));
+  layer.content = snap.content;
+  layer.typeOptions = snap.typeOptions;
   layer.width = snap.width;
+  layer.height = snap.height ?? null;
   layer.name = snap.name;
   if (snap.x !== undefined) layer.x = snap.x;
   if (snap.y !== undefined) layer.y = snap.y;
@@ -139,12 +144,14 @@ function restore(layer, snap) {
   layer.touch();
 }
 /**
- * The text box in the layer's base space: the paragraph/point box for plain text, the glyph union
- * (`layout().box`) for text on a path and stacked text (lib/text-path.js).
+ * The text box in the layer's base space: the paragraph/point box for plain text (the layout's frame: a fixed
+ * height when set, else the lines), the glyph union (`layout().box`, only text extensions set it) for text on a
+ * path and stacked text (lib/text-path.js).
  */
 function textBox(layer, lay = layer.layout()) {
   if (lay.box) return { x: lay.box.x, y: lay.box.y, width: lay.box.width, height: lay.box.height, glyphs: true };
-  return { x: layer.x, y: layer.y, width: layer.width ?? lay.width, height: Math.max(lay.height, lay.lineHeight), glyphs: false };
+  const frame = lay.frame ?? { width: layer.width, height: null };
+  return { x: layer.x, y: layer.y, width: frame.width ?? lay.width, height: frame.height ?? Math.max(lay.height, lay.lineHeight), glyphs: false };
 }
 /** False when the layer or any group above it is hidden. */
 const shown = (layer) => {
@@ -166,10 +173,11 @@ function typeOptions() {
   return [
     { kind: 'select', key: 'family', label: '', options: fontFamilies().map((f) => [f, f]), default: 'Arial' },
     { kind: 'select', key: 'style', label: '', options: STYLES, default: '400' },
-    { kind: 'number', key: 'size', label: 'Size', min: 1, max: 1296, step: 1, default: 48, unit: 'px' },
+    // kind font-size (lib/fields.js; type-character-panel adds units and the preset list): today's px field
+    { kind: 'font-size', key: 'size', label: 'Size', min: 1, max: 1296, step: 1, default: 48, unit: 'px' },
     { kind: 'segment', key: 'align', label: '', options: [['left', 'Left align text', 'align-left'], ['center', 'Center text', 'align-hcenter'], ['right', 'Right align text', 'align-right']], default: 'left' },
     { kind: 'color', key: 'color', label: '', default: '#000000' },
-    { kind: 'button', key: 'charPanel', label: '', icon: 'character', onClick: (t) => t.app.commands.run('window:panel-character', undefined, 'toolbar') },
+    { kind: 'button', key: 'charPanel', label: '', icon: 'character', onClick: (t) => t.app.commands.run('type:toggle-panels', undefined, 'toolbar') },
   ];
 }
 
@@ -261,27 +269,9 @@ export class TypeTool extends Tool {
       setLayerProps(this.app, targets[0], { font: { ...targets[0].font, ...patch } }, label, { merge });
       return;
     }
-    // several layers: consecutive changes of the same property (a colour-picker drag) merge into one entry
-    const key = `text:${targets.map((l) => l.id).join('+')}:${Object.keys(patch).join(',')}`;
-    const h = doc.history;
-    const last = h.entries[h.index];
-    const apply = (fonts) => {
-      targets.forEach((l, i) => {
-        l.font = { ...fonts[i] };
-        l.touch();
-        doc.changed('props', { layer: l });
-      });
-    };
-    const after = targets.map((l) => ({ ...l.font, ...patch }));
-    if (merge && last?.mergeKey === key && Date.now() - last.at < 1500) {
-      apply(after);
-      h.merge(() => apply(after));
-      return;
-    }
-    const before = targets.map((l) => ({ ...l.font }));
-    apply(after);
-    h.push({ label, undo: () => apply(before), redo: () => apply(after), bytes: 0, at: Date.now(), mergeKey: key });
-    doc.changed('history');
+    // several layers (lib/type/target.js): one entry with 0.3's merge key, so consecutive changes of the same
+    // property (a colour-picker drag) merge; undo restores each layer's formatting exactly
+    editTypeLayers(this.app, targets, (l) => applyLegacyFont(l.content, l.typeOptions, { ...l.font, ...patch }), { label, merge, keys: Object.keys(patch) });
   }
   renderOptions(bar) {
     if (!this.session) return;
@@ -371,7 +361,7 @@ export class TypeTool extends Tool {
     if (!l || l.width === null || !this.view) return null;
     const lay = l.layout();
     if (lay.glyphs) return null; // text on a path / stacked text has no resizable box
-    const w = l.width, h = Math.max(lay.height, lay.lineHeight);
+    const w = l.width, h = l.height ?? Math.max(lay.height, lay.lineHeight);
     const sp = this.view.toScreen(p.x, p.y);
     const corners = { nw: [l.x, l.y], ne: [l.x + w, l.y], se: [l.x + w, l.y + h], sw: [l.x, l.y + h] };
     for (const [name, [x, y]] of Object.entries(corners)) {
@@ -458,7 +448,8 @@ export class TypeTool extends Tool {
     }
     const r = this.resize;
     if (dragging && r && this.session?.layer === r.layer) {
-      const q = this.toLocal(r.layer, p) ?? p;
+      const sp = this.app.snap?.point(p, { source: 'type-box', pointer: p, exclude: [r.layer], view: this.view }) ?? p; // snap (lib/snap.js)
+      const q = this.toLocal(r.layer, { ...p, x: sp.x, y: sp.y }) ?? p;
       const dx = q.x - r.start.x;
       const min = r.layer.font.size;
       if (r.handle === 'ne' || r.handle === 'se') r.layer.width = Math.max(min, Math.round((r.width + dx) * 100) / 100);
@@ -473,7 +464,8 @@ export class TypeTool extends Tool {
       return;
     }
     if (!dragging || !this.drag) return;
-    this.drag.current = { x: p.x, y: p.y };
+    const sp = this.app.snap?.point(p, { source: 'type-box', pointer: p, view: this.view }) ?? p; // snap (lib/snap.js)
+    this.drag.current = { x: sp.x, y: sp.y };
     if (Math.hypot(p.x - this.drag.start.x, p.y - this.drag.start.y) * this.view.zoom > 4) this.drag.moved = true;
   }
   onPointerUp(p) {
@@ -619,6 +611,14 @@ export class TypeTool extends Tool {
     s.doc.view.area.appendChild(ta);
     ta.addEventListener('input', () => this.onInput());
     ta.addEventListener('keydown', (e) => this.onEditorKey(e));
+    // the type target (lib/type/target.js) follows the textarea's selection; a moved caret drops its insertion style
+    const moved = () => {
+      const st = this.session;
+      if (st?.textarea !== ta) return;
+      if (st.insertion && (ta.selectionStart !== st.insertionAt || ta.selectionEnd !== st.insertionAt)) st.insertion = null;
+      selectionChanged(this.app);
+    };
+    for (const type of ['select', 'keyup', 'pointerup']) ta.addEventListener(type, moved);
     // the editor covers the text box, so its corner handles are grabbed here and driven like a canvas drag
     ta.addEventListener('pointerdown', (e) => {
       if (e.button !== 0 || !this.session) return;
@@ -689,11 +689,58 @@ export class TypeTool extends Tool {
     const s = this.session;
     if (!s) return;
     const layer = s.layer;
-    layer.text = s.textarea.value;
+    const old = layer.text;
+    layer.text = s.textarea.value; // model replacePlain: the formatting outside the changed span stays
+    if (s.insertion) {
+      // a caret's insertion style (lib/type/target.js applyChar with a caret) formats what was just typed
+      const next = layer.text;
+      let a = 0;
+      while (a < old.length && a < next.length && old[a] === next[a]) a++;
+      let e = 0;
+      while (e < old.length - a && e < next.length - a && old[old.length - 1 - e] === next[next.length - 1 - e]) e++;
+      if (next.length - e > a) layer.content = M.applyChar(layer.content, a, next.length - e, s.insertion);
+      s.insertionAt = s.textarea.selectionEnd;
+    }
     if (s.autoName) layer.name = autoName(layer.text);
     layer.touch();
     s.doc.changed('props', { layer });
     this.layoutEditor();
+    selectionChanged(this.app);
+  }
+  /** The stub TypeSession of lib/type/target.js over this textarea session (B.7). */
+  typeSessionApi() {
+    const s = this.session;
+    if (!s) return null;
+    const ta = s.textarea;
+    const tool = this;
+    const from = Math.min(ta.selectionStart, ta.selectionEnd), to = Math.max(ta.selectionStart, ta.selectionEnd);
+    const caretStyle = M.charAttrs(s.layer.content, from, from);
+    return {
+      layer: s.layer,
+      from,
+      to,
+      insertionStyle: s.insertion && s.insertionAt === from ? M.resolveChar({ ...caretStyle, ...s.insertion }) : caretStyle,
+      edit(fn, { label, merge } = {}) {
+        void label;
+        void merge; // the session is one history entry when it is committed
+        const r = fn(s.layer.content, from, to) ?? {};
+        if (r.content) s.layer.content = r.content;
+        if (r.typeOptions) s.layer.typeOptions = r.typeOptions;
+        if ('width' in r) s.layer.width = r.width;
+        if ('height' in r) s.layer.height = r.height;
+        s.layer.touch();
+        s.doc.changed('props', { layer: s.layer });
+        if (ta.value !== s.layer.text) ta.value = s.layer.text;
+        ta.setSelectionRange(r.from ?? from, r.to ?? to);
+        tool.layoutEditor();
+        selectionChanged(tool.app);
+      },
+      setInsertionStyle(patch) {
+        s.insertion = { ...(s.insertionAt === from ? s.insertion ?? {} : {}), ...patch };
+        s.insertionAt = from;
+        selectionChanged(tool.app);
+      },
+    };
   }
   onEditorKey(e) {
     const mod = e.ctrlKey || e.metaKey;
@@ -861,7 +908,7 @@ export class TypeTool extends Tool {
     const after = snapshot(layer);
     if (JSON.stringify(after) === JSON.stringify(s.before)) return true;
     restore(layer, s.before);
-    if (!after.text.trim()) {
+    if (!M.plainText(after.content).trim()) {
       if (this.app.doc === doc) structural(this.app, 'Delete Type Layer', () => doc.remove(layer));
       return true;
     }
@@ -972,10 +1019,44 @@ export function typeSession(app) {
   return null;
 }
 
-/** Applies a font patch from the Character panel: to the text being edited, else to the targeted text layers. */
-export function applyTypeStyle(app, patch, opts) {
-  const tool = typeSession(app) ?? app.tools.get('type-horizontal');
-  tool?.applyFont(patch, opts);
+/**
+ * A 0.3 font patch as model attributes for a range: { char, para, typeOptions } (letterSpacing in px becomes
+ * tracking at the size being set, lineHeight auto leading of the paragraphs).
+ */
+function legacyPatch(layer, patch, from) {
+  const char = {}, para = {};
+  let typeOptions = null;
+  const size = Number.isFinite(patch.size) && patch.size > 0 ? patch.size : M.charStyleAt(layer.content, from).size;
+  const map = { family: 'fontFamily', weight: 'fontWeight', italic: 'fontItalic', size: 'size', color: 'color', underline: 'underline' };
+  for (const [k, v] of Object.entries(patch)) {
+    if (map[k]) char[map[k]] = k === 'italic' || k === 'underline' ? !!v : v;
+    else if (k === 'stroke') char.stroke = v ? { color: v.color, width: v.width } : null;
+    else if (k === 'letterSpacing') char.tracking = Number.isFinite(v) && v ? (v * 1000) / size : undefined;
+    else if (k === 'align') para.align = v;
+    else if (k === 'lineHeight' && Number.isFinite(v)) {
+      char.leading = undefined;
+      para.justification = { ...M.paraAttrs(layer.content, from, from).justification, autoLeading: M.tidyNumber(v * 100) };
+    } else if (k === 'orientation') typeOptions = { orientation: v ?? 'horizontal' };
+  }
+  return { char, para, typeOptions };
+}
+
+/**
+ * Applies a 0.3 font patch from the Character panel through the type target (lib/type/target.js): a selected range
+ * of the text being edited gets it as model attributes; while editing with a caret the whole text changes (as in
+ * 0.3); otherwise the targeted text layers change as a whole, with 0.3's merge rule.
+ */
+export function applyTypeStyle(app, patch, opts = {}) {
+  const tool = typeSession(app);
+  const ta = tool?.session?.textarea;
+  if (tool && ta && ta.selectionStart !== ta.selectionEnd) {
+    const { char, para, typeOptions } = legacyPatch(tool.session.layer, patch, Math.min(ta.selectionStart, ta.selectionEnd));
+    if (Object.keys(char).length) targetApplyChar(app, char, opts);
+    if (Object.keys(para).length) targetApplyPara(app, para, opts);
+    if (typeOptions) targetApplyTypeOptions(app, typeOptions, opts);
+    return;
+  }
+  (tool ?? app.tools.get('type-horizontal'))?.applyFont(patch, opts);
 }
 
 export function install(app) {
@@ -985,8 +1066,41 @@ export function install(app) {
   app.tools.register(v, 'text');
   const tools = [h, v];
 
+  // While text is being typed, Edit > Undo / Redo step inside the text instead of throwing the session away
+  // (app.historyStep asks app.sessions). type-editing replaces this entry with its editor's session (B.8).
+  const nativeStep = (dir) => {
+    const t = typeSession(app);
+    if (!t) return false;
+    t.session.textarea?.focus({ preventScroll: true });
+    bridge.nativeEdit(dir);
+    return true;
+  };
+  // the stub selection provider of the type target (B.7): type-editing installs its editor's instead
+  setSelectionProvider({ active: (a) => typeSession(a)?.typeSessionApi() ?? null });
+
+  // the options bar's panel button: the Character panel, and the Paragraph panel once a package registers it (M.6)
+  app.commands.register('type:toggle-panels', {
+    label: 'Toggle the Character and Paragraph Panels',
+    run: () => {
+      app.commands.run('window:panel-character', undefined, 'api');
+      if (app.commands.has('window:panel-paragraph') && !app.stubbed?.includes('window:panel-paragraph')) app.commands.run('window:panel-paragraph', undefined, 'api');
+    },
+  });
+
+  app.sessions?.register({
+    id: 'type',
+    policy: 'observe',
+    label: 'Type',
+    active: () => !!typeSession(app),
+    undo: () => nativeStep('undo'),
+    redo: () => nativeStep('redo'),
+    onClose: 'keep',
+  });
+
   loadSystemFonts();
   onFontsChanged((list) => {
+    // the type facade redraws every text layer with the faces that arrived (B.4)
+    fontsChanged();
     for (const t of tools) t.setFamilyOptions(list);
     if (tools.includes(app.tools.active) && !document.activeElement?.closest?.('#options-bar')) app.tools.renderOptions();
   });

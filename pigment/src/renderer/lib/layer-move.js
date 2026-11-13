@@ -1,23 +1,12 @@
 // Moving layers by an offset, undoably. Positions are captured once and every move is applied
 // from that original state (no accumulated drift), covering raster x/y, text positions and
-// transforms, shape paths, group children and linked masks (masks are document-sized canvases,
-// so a moved mask is a new shifted canvas; the original is kept for undo).
+// transforms, shape geometry, group children and linked masks (masks are document-sized canvases,
+// so a moved mask is a new shifted canvas; the original is kept for undo). A linked vector mask (0.4) moves
+// with its layer; shapes move through path-ops.js mapShapeGeometry (J.2), so their live parameters follow.
 import { createCanvas } from './document.js';
+import { mapShapeGeometry, mapPathPoints } from './path-ops.js';
 
 const clone = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
-
-function shiftPath(path, dx, dy) {
-  const p = clone(path);
-  for (const sp of p.subpaths ?? []) for (const pt of sp.points ?? []) {
-    pt.x += dx;
-    pt.y += dy;
-    if (pt.inX !== undefined) pt.inX += dx;
-    if (pt.inY !== undefined) pt.inY += dy;
-    if (pt.outX !== undefined) pt.outX += dx;
-    if (pt.outY !== undefined) pt.outY += dy;
-  }
-  return p;
-}
 
 /** The mask moved by (dx, dy); uncovered areas take the mask's background (its corner pixel). */
 function shiftedMask(src, dx, dy) {
@@ -45,8 +34,12 @@ function captureState(l) {
     s.y = l.y;
   }
   if (l.type === 'text') s.transform = l.transform ? l.transform.slice() : null;
-  if (l.type === 'shape') s.path = clone(l.path);
+  if (l.type === 'shape') {
+    s.path = clone(l.path);
+    s.shape = { shapeKind: l.shapeKind, shapeProps: clone(l.shapeProps), fill: l.fill, stroke: l.stroke };
+  }
   if (l.mask?.canvas) s.mask = l.mask;
+  if (l.vectorMask) s.vectorMask = l.vectorMask;
   return s;
 }
 
@@ -61,8 +54,15 @@ function shiftedState(s, dx, dy) {
     n.x = s.x + dx;
     n.y = s.y + dy;
   }
-  if (l.type === 'shape' && s.path) n.path = shiftPath(s.path, dx, dy);
+  const shift = (x, y) => [x + dx, y + dy];
+  if (l.type === 'shape' && s.path) {
+    // mapShapeGeometry (path-ops.js, shapes-live) maps the path, the live parameters and any document-space paint
+    const g = mapShapeGeometry({ ...s.shape, path: s.path }, shift, { matrix: [1, 0, 0, 1, dx, dy] });
+    n.path = g.path;
+    n.shape = { shapeKind: g.shapeKind, shapeProps: g.shapeProps, fill: g.fill ?? s.shape.fill, stroke: g.stroke ?? s.shape.stroke };
+  }
   if (s.mask && s.mask.linked !== false && (dx || dy)) n.mask = { ...s.mask, canvas: shiftedMask(s.mask.canvas, dx, dy) };
+  if (s.vectorMask && s.vectorMask.linked !== false && (dx || dy)) n.vectorMask = { ...s.vectorMask, path: mapPathPoints(s.vectorMask.path, shift) };
   return n;
 }
 
@@ -74,7 +74,14 @@ function applyState(s) {
   }
   if ('transform' in s) l.transform = s.transform ? s.transform.slice() : null;
   if (s.path) l.path = clone(s.path);
+  if (s.shape) {
+    l.shapeKind = s.shape.shapeKind;
+    l.shapeProps = clone(s.shape.shapeProps);
+    l.fill = s.shape.fill;
+    l.stroke = s.shape.stroke;
+  }
   if (s.mask) l.mask = s.mask;
+  if (s.vectorMask) l.vectorMask = s.vectorMask;
   l.touch();
 }
 
@@ -88,7 +95,7 @@ function collect(layers) {
   };
   layers.forEach(walk);
   // fill and adjustment layers have no position of their own; only their (linked) masks move
-  return [...out].filter((l) => !(l.type === 'fill' || l.type === 'adjustment' || l.isGroup) || l.mask?.canvas);
+  return [...out].filter((l) => !(l.type === 'fill' || l.type === 'adjustment' || l.isGroup) || l.mask?.canvas || l.vectorMask);
 }
 
 /**

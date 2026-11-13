@@ -2,20 +2,29 @@
 // feature modules, then opens startup files or shows the welcome screen.
 import { bridge, isElectron, isMac, platform } from './lib/bridge.js';
 import { CommandRegistry } from './lib/commands.js';
+import { SessionRegistry, SAFE_WHILE_BUSY } from './lib/sessions.js';
 import { Dialogs } from './lib/dialogs.js';
 import { Statusbar } from './lib/statusbar.js';
 import { ToolManager } from './lib/tools.js';
 import { PanelDock } from './lib/panels.js';
 import { DocumentManager } from './lib/documents.js';
 import { createDocument } from './lib/document.js';
+// the type facade sets the text backend of document.js when it is evaluated: before any document opens (B.1)
+import { attachApp as attachTypeFacade } from './lib/type/api.js';
+import { attachSections as attachTypeSections } from './lib/type/sections.js';
+import { installPatterns } from './lib/patterns.js';
+import { installSnap } from './lib/snap.js';
+import { installRulers } from './lib/rulers.js';
+import { installSample } from './lib/sample.js';
+import { installCanvasCapture } from './lib/canvas-capture.js';
+import { PresetStore } from './lib/presets.js';
 import { Selection } from './lib/selection.js';
 import { icon } from './lib/icons.js';
 import { withDefaults } from '../shared/defaults.js';
 import { openDocument } from './lib/io.js';
 import { flattenDocument } from './lib/compositor.js';
-import { typeSession } from './lib/tools/text.js';
 import { parseColor, rgbaToHex } from '../shared/pixels/color.js';
-import { MENU_KEYS, RENDERER_KEYS, SHORTCUT_GROUPS, COMMAND_LABELS, describeAccelerator } from '../shared/keymap.js';
+import { MENU_KEYS, RENDERER_KEYS, TYPE_KEYS, SHORTCUT_GROUPS, COMMAND_LABELS, describeAccelerator } from '../shared/keymap.js';
 
 // Feature modules installed after the core, in this order. A module that fails to load is skipped
 // with a warning so the rest of the app keeps working.
@@ -30,6 +39,7 @@ const MODULES = [
   'lib/tools/paint.js',
   'lib/tools/retouch.js',
   'lib/tools/fill.js',
+  'lib/tools/bucket.js', // the Paint Bucket (patterns), after the Gradient tool in the same slot
   'lib/tools/text.js',
   'lib/tools/vector.js',
   'lib/tools/nav.js',
@@ -65,6 +75,21 @@ const MODULES = [
   'lib/automate.js',
   'lib/actions.js',
   'lib/panels/actions.js',
+  // 0.4 entry modules (stubs until their packages land; ARCHITECTURE.md "0.4 features (contracts)", in package
+  // order; the four panel modules come after lib/panels/info.js, the Paint Bucket after lib/tools/fill.js)
+  'lib/type/layout.js', // type-engine-core
+  'lib/type/editor.js', // type-editing
+  'lib/type/char-format.js', // type-character-panel
+  'lib/blending-options.js', // layer-style-blending: the Blending Options page of the Layer Style dialog (L.3)
+  'lib/contour-editor.js', // layer-style-effects
+  'lib/adjust/tonal.js', // adjust-tonal
+  'lib/adjust/color.js', // adjust-color
+  'lib/guides.js', // guides-snapping
+  'lib/vector-mask.js', // masks-vector-masks
+  'lib/shape-props.js', // shapes-live
+  'lib/layer-dialogs.js', // finish-layer-menu
+  'lib/conventions.js', // conventions-shortcuts-fields
+  'lib/stubs-later.js', // ids of later releases the 0.4 menus show (edit:menus)
   'lib/panels/color.js',
   'lib/panels/swatches.js',
   'lib/panels/brushes.js',
@@ -77,6 +102,11 @@ const MODULES = [
   'lib/panels/history.js',
   'lib/panels/navigator.js',
   'lib/panels/info.js',
+  // 0.4 panel modules, after the existing panels so their tabs follow the existing ones
+  'lib/panels/paragraph.js', // type-paragraph-panel
+  'lib/panels/gradients.js', // gradients
+  'lib/panels/patterns.js', // patterns
+  'lib/panels/layers-menu.js', // layers-panel-depth
   'lib/extras.js',
   'lib/welcome.js',
 ];
@@ -87,9 +117,12 @@ export class App extends EventTarget {
     this.bridge = bridge;
     this.settings = withDefaults({});
     this.commands = new CommandRegistry(this);
+    // on-canvas sessions, Free Transform, slow operations and the type session (lib/sessions.js, E)
+    this.sessions = new SessionRegistry(this);
     this.dialogs = new Dialogs(this);
     this.statusbar = new Statusbar();
-    this.ui = { editingMask: false, showMaskOverlay: false, isolated: false };
+    // patternPreview: View > Pattern Preview (patterns sets it; ui state, not a setting: it is off at every start)
+    this.ui = { editingMask: false, showMaskOverlay: false, isolated: false, patternPreview: false };
     this.uiState = {};
     this.stubbed = []; // command ids whose module has not landed (lib/stub.js); the menu greys them out
     // hooks 0.3 modules install: colorConstraint(hex, doc) -> hex (image modes snap picked colours),
@@ -100,6 +133,55 @@ export class App extends EventTarget {
     this.isBackgroundLayer = null;
     this.saveTimer = null;
     this.pendingSettings = {};
+    // 0.4 registries (ARCHITECTURE.md "0.4 features"): view underlays (L.5), layer double-click actions (L.7), drop
+    // handlers for in-app drags (L.9)
+    this.viewUnderlays = new Set();
+    this.layerDoubleClicks = new Map();
+    this.dropHandlers = new Map();
+    // Preferences (L.2) and Properties (L.1) section registries exist before MODULES, so a package can register from
+    // install(); lib/extras.js and lib/panels/properties.js (late in MODULES) add their built-ins with
+    // { builtin: true }, which never replaces a section a package registered first. The Properties host attaches
+    // itself when it mounts; until then render() does nothing.
+    this.preferences = sectionRegistry((sec) => {
+      if (!sec || typeof sec.id !== 'string') throw new Error('registerSection: a section needs an id');
+      return sec;
+    });
+    this.properties = sectionRegistry((spec) => {
+      if (!spec || typeof spec.id !== 'string' || typeof spec.render !== 'function') throw new Error('registerSection: a section needs an id and render()');
+      return { order: 0, region: 'main', test: () => true, ...spec, region: spec.region === 'mask' ? 'mask' : 'main' };
+    });
+  }
+
+  /** L.7: what double-clicking a layer of `type` with the Move tool does; fn(layer, p) returns true when it acted. */
+  registerLayerDoubleClick(type, fn) {
+    this.layerDoubleClicks.set(type, fn);
+  }
+  /** Runs the double-click action of the layer's type: true when one acted (the Move tool then does nothing else). */
+  layerDoubleClick(layer, p) {
+    const fn = layer ? this.layerDoubleClicks.get(layer.type) : null;
+    if (!fn) return false;
+    try {
+      return !!fn(layer, p);
+    } catch (err) {
+      console.error('layer double-click failed', err);
+      return false;
+    }
+  }
+
+  /**
+   * L.9 (E25): app.registerDropHandler(mime, { canvas?(data, docPoint, e), layer?(data, layer, e) }) for in-app drags
+   * (a panel's dataTransfer.setData(mime, JSON)); the canvas and the Layers panel rows call it. Later wins.
+   */
+  registerDropHandler(mime, handler) {
+    this.dropHandlers.set(mime, handler);
+  }
+  /** The first registered handler for one of the drag's types that handles `where` ('canvas' | 'layer'), or null. */
+  dropHandlerFor(dataTransfer, where) {
+    for (const type of dataTransfer?.types ?? []) {
+      const handler = this.dropHandlers.get(type);
+      if (typeof handler?.[where] === 'function') return { mime: type, handler };
+    }
+    return null;
   }
 
   get doc() {
@@ -107,6 +189,10 @@ export class App extends EventTarget {
   }
   get view() {
     return this.doc?.view ?? null;
+  }
+  /** 0.3's current pattern (a canvas), for 0.3 code: the pattern library's current entry (lib/patterns.js, L.6). */
+  get currentPattern() {
+    return this.patterns?.current()?.canvas ?? null;
   }
 
   emit(name, detail) {
@@ -129,7 +215,7 @@ export class App extends EventTarget {
     try {
       this.settings = withDefaults(await bridge.setSettings(full));
     } catch (err) {
-      console.warn('Could not persist settings', err);
+      this.reportWriteFailure('settings', err);
     }
     this.emit('settings:changed', patch);
     if (patch && 'theme' in patch) await this.applyTheme();
@@ -149,9 +235,26 @@ export class App extends EventTarget {
       const p = this.pendingAll ? { ...this.settings, ...this.pendingSettings } : this.pendingSettings;
       this.pendingSettings = {};
       this.pendingAll = false;
-      bridge.setSettings(p).catch((err) => console.warn('Could not persist settings', err));
+      bridge.setSettings(p).catch((err) => this.reportWriteFailure('settings', err));
     }, 400);
     this.emit('settings:changed', patch ?? {});
+  }
+
+  /**
+   * A settings or presets write failed (N): one error toast per area and code per session, a 'settings:write-failed'
+   * event { area, code } and a console warning. The in-memory state stays, so the session keeps working.
+   */
+  reportWriteFailure(area, err) {
+    const code = err?.code ?? /\[(write-failed|storage-quota|storage-unavailable)\]/.exec(String(err?.message ?? ''))?.[1] ?? 'write-failed';
+    console.warn(`Could not save ${area}`, err);
+    this.emit('settings:write-failed', { area, code });
+    this.writeFailures ??= new Set();
+    const key = `${area}:${code}`;
+    if (this.writeFailures.has(key)) return;
+    this.writeFailures.add(key);
+    const why = code === 'storage-quota' ? 'the browser storage is full' : code === 'storage-unavailable' ? 'the browser storage is not available' : 'the file could not be written';
+    const what = area === 'presets' ? 'Presets could not be saved' : area === 'settings' ? 'Settings could not be saved' : `${area[0].toUpperCase()}${area.slice(1)} could not be saved`;
+    this.dialogs?.toast(`${what} (${why}). Changes made now are lost when Pigment closes.`, { kind: 'error', timeout: 8000 });
   }
 
   reportError(err, context) {
@@ -161,23 +264,56 @@ export class App extends EventTarget {
   }
 
   /**
-   * Runs a slow task with a busy cursor and status text. While one runs (busyDepth > 0) the command registry
-   * refuses menu, key, toolbar and panel gestures that would change the document the task is computing on.
+   * Runs a slow task with a busy cursor and status text. While one runs (a 'busy' session, busyDepth > 0) the command
+   * registry refuses menu, key, toolbar and panel gestures that would change the document the task is computing on.
    * `gate: false` is for a task that only waits (an AI request with its own Cancel, which adds its result when it
    * arrives): the user goes on working meanwhile, saving and undoing included, as before 0.3.1.
    */
   async busy(label, fn, { gate = true } = {}) {
     this.statusbar.set('busy', label);
     document.body.classList.add('busy');
-    if (gate) this.busyDepth = (this.busyDepth ?? 0) + 1;
+    const session = gate ? this.sessions.begin({ id: 'busy', policy: 'busy', label, allow: SAFE_WHILE_BUSY, onClose: 'keep' }) : null;
     try {
       await new Promise((r) => requestAnimationFrame(() => setTimeout(r)));
       return await fn();
     } finally {
-      if (gate) this.busyDepth--;
+      session?.end();
       document.body.classList.remove('busy');
       this.statusbar.clear('busy');
     }
+  }
+
+  /** Number of slow operations running (0.3 compatibility: the busy sessions of app.sessions). */
+  get busyDepth() {
+    return this.sessions?.busyDepth ?? 0;
+  }
+
+  /**
+   * True when el takes typed text (a text input, a textarea, editable content): Edit > Undo goes to its native undo.
+   * False for an element an active session owns (the 0.4 type editor's hidden input), whose session answers instead.
+   */
+  isTextTarget(el = document.activeElement) {
+    if (!el) return false;
+    const text = (el.tagName === 'INPUT' && !['checkbox', 'radio', 'range', 'button', 'color'].includes(el.type)) || el.tagName === 'TEXTAREA' || el.isContentEditable;
+    return !!text && !this.sessions.ownsFocus(el);
+  }
+
+  /**
+   * Edit > Undo / Redo and the history steps (0.3's order): a text field undoes its own typing, else a session that
+   * claims undo (the type session) does, else (undo only) the active tool cancels what it is doing, else the
+   * document history moves. dir: 'undo' | 'redo' | { goTo: index }.
+   */
+  historyStep(dir) {
+    if (dir === 'undo' || dir === 'redo') {
+      if (this.isTextTarget()) return bridge.nativeEdit(dir);
+      if (dir === 'undo' ? this.sessions.undo() : this.sessions.redo()) return undefined;
+      if (dir === 'undo' && this.tools?.active?.cancel?.()) return undefined;
+      if (dir === 'undo') this.doc?.history.undo();
+      else this.doc?.history.redo();
+      return undefined;
+    }
+    if (dir && Number.isFinite(dir.goTo)) this.doc?.history.goTo(dir.goTo);
+    return undefined;
   }
 
   async applyTheme() {
@@ -227,6 +363,16 @@ export class App extends EventTarget {
       backgroundLayer: !!(d?.active && this.isBackgroundLayer?.(d.active)),
       stackMode: d?.active?.stackMode ?? 'none',
       showGalleryInMenu: !!this.settings.showGalleryInMenu,
+      // 0.4 (M.5): menu labels and checkmarks of the new items
+      selectedCount: d?.selected?.size ?? 0,
+      effectsHidden: !!d?.active?.styles?.hidden,
+      hasVectorMask: !!d?.active?.vectorMask,
+      vectorMaskEnabled: !!d?.active?.vectorMask && d.active.vectorMask.enabled !== false,
+      typeEditing: this.sessions.list().some((s) => s.id === 'type'),
+      smartGuides: this.settings.guides?.smartGuides !== false,
+      lockGuides: !!this.settings.guides?.lock,
+      snapTo: Object.entries(this.settings.guides?.snapTo ?? {}).filter(([, on]) => on).map(([k]) => k).join(','),
+      patternPreview: !!this.ui.patternPreview,
       stubs: this.stubbed.join(','),
     };
     const changed = Object.keys(state).some((k) => this.uiState[k] !== state[k]);
@@ -293,12 +439,32 @@ export class App extends EventTarget {
 }
 
 // ---- core commands ------------------------------------------------------------------------------------------
+/**
+ * A section registry (L.1, L.2): registerSection(spec, { builtin }) where the later registration of an id wins, except
+ * that a built-in never replaces an id that is already registered; sections() in `order`; render() asks the attached
+ * host to redraw. attachHost({ changed(id, old), render() }) is for the host module only.
+ */
+function sectionRegistry(normalize) {
+  const map = new Map();
+  let host = null;
+  return {
+    registerSection(spec, { builtin = false } = {}) {
+      const sec = normalize(spec);
+      if (builtin && map.has(sec.id)) return;
+      const old = map.get(sec.id) ?? null;
+      map.set(sec.id, sec);
+      host?.changed?.(sec.id, old);
+    },
+    sections: () => [...map.values()].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
+    render: () => host?.render?.(),
+    attachHost(h) {
+      host = h;
+    },
+  };
+}
+
 function registerCoreCommands(app) {
   const has = () => !!app.doc;
-  const isTextTarget = () => {
-    const el = document.activeElement;
-    return !!el && ((el.tagName === 'INPUT' && !['checkbox', 'radio', 'range', 'button', 'color'].includes(el.type)) || el.tagName === 'TEXTAREA' || el.isContentEditable);
-  };
   app.commands.registerAll({
     // files
     'file:new': { run: (arg) => app.newDocumentDialog?.(arg) },
@@ -357,30 +523,10 @@ function registerCoreCommands(app) {
     'file:quit': { run: () => bridge.closeWindow() },
 
     // history
-    'edit:undo': {
-      run: () => {
-        if (isTextTarget()) return bridge.nativeEdit('undo');
-        // while text is being typed, Undo steps back inside the text instead of throwing the session away
-        const typing = typeSession(app);
-        if (typing) {
-          typing.session.textarea.focus({ preventScroll: true });
-          return bridge.nativeEdit('undo');
-        }
-        if (app.tools?.active?.cancel?.()) return;
-        app.doc?.history.undo();
-      },
-    },
-    'edit:redo': {
-      run: () => {
-        if (isTextTarget()) return bridge.nativeEdit('redo');
-        const typing = typeSession(app);
-        if (typing) {
-          typing.session.textarea.focus({ preventScroll: true });
-          return bridge.nativeEdit('redo');
-        }
-        app.doc?.history.redo();
-      },
-    },
+    // while text is being typed, Undo steps back inside the text instead of throwing the session away (the type
+    // session of tools/text.js claims it through app.sessions)
+    'edit:undo': { run: () => app.historyStep('undo') },
+    'edit:redo': { run: () => app.historyStep('redo') },
     'edit:step-backward': { enabled: () => !!app.doc?.history.canUndo, run: () => app.doc.history.undo() },
     'edit:step-forward': { enabled: () => !!app.doc?.history.canRedo, run: () => app.doc.history.redo() },
     'edit:preferences': { run: () => app.preferencesDialog?.() },
@@ -400,8 +546,10 @@ function registerCoreCommands(app) {
     'view:pixel-grid': { checked: () => app.settings.pixelGrid !== false, run: () => toggleSetting('pixelGrid', true) },
     'view:snap': { checked: () => app.settings.snap !== false, run: () => toggleSetting('snap', true) },
     'view:extras': { checked: () => app.settings.showSelectionEdges !== false, run: () => toggleSetting('showSelectionEdges', true) },
+    // placeholders until guides-snapping registers both from lib/guides.js (0.4 rule 3)
     'view:new-guide': {
       enabled: has,
+      changesDocument: true,
       run: async (arg) => {
         let g = arg;
         if (!g) {
@@ -416,6 +564,7 @@ function registerCoreCommands(app) {
     },
     'view:clear-guides': {
       enabled: () => !!app.doc?.guides.length,
+      changesDocument: true,
       run: () => {
         const d = app.doc;
         const before = d.guides.slice();
@@ -532,10 +681,10 @@ function shortcutsDialog(app) {
   table.className = 'kbd-table';
   for (const group of SHORTCUT_GROUPS) {
     const head = document.createElement('tr');
-    head.innerHTML = `<th colspan="2">${group.title}</th>`;
+    head.innerHTML = `<th colspan="2">${group.title}${group.type ? ' (while editing text)' : ''}</th>`;
     table.appendChild(head);
     for (const cmd of group.commands) {
-      const keys = [MENU_KEYS[cmd], ...(RENDERER_KEYS[cmd] ?? [])].filter(Boolean);
+      const keys = group.type ? [TYPE_KEYS[cmd]].filter(Boolean) : [MENU_KEYS[cmd], ...(RENDERER_KEYS[cmd] ?? [])].filter(Boolean);
       if (!keys.length) continue;
       const tr = document.createElement('tr');
       const a = document.createElement('td');
@@ -604,7 +753,19 @@ function setupStatusbar(app) {
 
 // ---- host events ----------------------------------------------------------------------------------------------
 function setupHostEvents(app) {
-  bridge.on('command', (cmd, arg) => app.commands.run(cmd, arg, 'menu'));
+  // the native menu reports how a command arrived (M.1, O): its accelerator ('menu-key'), a mouse click ('menu'),
+  // or a key main.js took before the page saw it ('key': Shift+Alt+letter on Windows and Linux)
+  bridge.on('command', (cmd, arg, via) => {
+    // a key main.js took is treated as shortcuts.js treats the same key on the page: nothing while a text field has
+    // focus or a dialog is open (the blend-mode keys never act while typing, M.4). That includes the input of a
+    // session that owns focus (the type editor): isTextTarget() leaves those out for undo, not for these keys.
+    if (via === 'key') {
+      const el = document.activeElement;
+      const typing = app.isTextTarget(el) || (!!el && el !== document.body && app.sessions.ownsFocus(el));
+      return typing || app.dialogs?.isOpen ? undefined : app.commands.run(cmd, arg, 'key');
+    }
+    return app.commands.run(cmd, arg, via ? 'menu-key' : 'menu');
+  });
   // A file opened from the OS is the user's own gesture, not code ('api'): while an on-canvas session owns the
   // document (Blur Gallery, Select and Mask, Content-Aware Scale refuse commands) it gets their "finish first" hint
   // instead of vanishing without a word.
@@ -620,12 +781,16 @@ function setupHostEvents(app) {
   bridge.on('before-close', async ({ quitting } = {}) => {
     bridge.closeAck?.();
     try {
+      // the on-canvas sessions (Blur Gallery, Content-Aware Scale, Select and Mask, Free Transform) are cancelled, or
+      // committed when they say so, before anything else: their previews must be off the layers before a save
+      await app.sessions.cancelAll('close');
+      // preset edits are written 300 ms after the change: write what is still pending before the window goes
+      await app.presets?.flush().catch((err) => console.warn('presets flush', err));
       // Before the first save, a dialog that previews on the canvas (a filter or an adjustment on a layer, a smart
       // filter, a kind's own session on the temporary copy of a smart object) is dismissed like Escape, and its
       // session gets a turn to put the document back: nothing the user has not confirmed may reach the saved file.
       // Not sooner: who answers Cancel finds the dialog they were working in as they left it. A progress dialog
-      // (Batch, Image Processor: not dismissible) stays in any case, it holds the only Cancel of its run. The
-      // on-canvas sessions (Blur Gallery, Content-Aware Scale, Select and Mask) cancel themselves on this event.
+      // (Batch, Image Processor: not dismissible) stays in any case, it holds the only Cancel of its run.
       let settled = false;
       const settle = async () => {
         if (settled) return;
@@ -705,6 +870,22 @@ async function start() {
   app.tools = new ToolManager(app);
   app.panels = new PanelDock(app);
   app.docs = new DocumentManager(app);
+  attachTypeFacade(app); // relayout on 'type:fonts-changed' (B.4)
+  attachTypeSections(app);
+  // services the modules use from install() on (ARCHITECTURE.md "0.4 features"): their owners keep these exports
+  installPatterns(app); // app.patterns (L.6)
+  installSnap(app); // app.snap (F)
+  installRulers(app); // app.rulers (L.10)
+  installSample(app); // sampleMerged and app.sampleSkip (L.11)
+  installCanvasCapture(app); // app.canvasCapture (I.3)
+  // the preset store (C): files under <userData>/presets (IndexedDB in the browser build), the 0.4 kinds registered
+  try {
+    (await import('./lib/preset-kinds.js')).registerPresetKinds04();
+  } catch (err) {
+    console.error('Preset kinds failed to load', err);
+  }
+  app.presets = new PresetStore({ backend: bridge.presets ?? null, onWriteError: (err) => app.reportWriteFailure('presets', err) });
+  app.presets.addEventListener('change', (e) => app.emit('presets:changed', e.detail));
   registerCoreCommands(app);
   setupStatusbar(app);
   setupHostEvents(app);

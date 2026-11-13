@@ -26,6 +26,7 @@ import { clampRect } from './core.js';
 import { parseColor } from './color.js';
 import { num, clampNum, srgbToLinear, linearToSrgb, merge } from './adjust-def.js';
 import { ADJUSTMENTS } from './adjust.js';
+import { normalizeGradient, gradientSampler } from './gradient-model.js';
 
 /** @typedef {{ type: 'u16' | 'f32', data: Uint16Array | Float32Array, width?: number, height?: number }} DeepPlanes */
 /** @typedef {import('./core.js').ImageDataLike} ImageDataLike */
@@ -671,33 +672,6 @@ function rangeWeight(h, centre) {
   return dh <= 15 ? 1 : dh >= 45 ? 0 : (45 - dh) / 30;
 }
 
-/** Gradient stops as a function t (0..1) -> scratch RGB, linear between sorted stops. */
-function gradientFn(stops, reverse) {
-  let list = [];
-  if (Array.isArray(stops)) {
-    for (const s of stops) {
-      if (!s) continue;
-      const offset = Array.isArray(s) ? s[0] : s.offset ?? s.position ?? s.pos;
-      const color = Array.isArray(s) ? s[1] : s.color;
-      if (typeof offset !== 'number' || !Number.isFinite(offset)) continue;
-      list.push({ offset: reverse ? 1 - clampNum(offset, 0, 1) : clampNum(offset, 0, 1), color: parseColor(color, [0, 0, 0, 1]) });
-    }
-  }
-  if (!list.length) list = [{ offset: 0, color: [0, 0, 0, 1] }, { offset: 1, color: [255, 255, 255, 1] }];
-  list.sort((a, b) => a.offset - b.offset);
-  const last = list.length - 1;
-  return (t) => {
-    let k = 0;
-    while (k < last - 1 && list[k + 1].offset <= t) k++;
-    const a = list[k], b = list[Math.min(k + 1, last)];
-    const span = b.offset - a.offset;
-    const f = span <= 0 ? (t >= b.offset ? 1 : 0) : clampNum((t - a.offset) / span, 0, 1);
-    R = a.color[0] + (b.color[0] - a.color[0]) * f;
-    G = a.color[1] + (b.color[1] - a.color[1]) * f;
-    B = a.color[2] + (b.color[2] - a.color[2]) * f;
-  };
-}
-
 const MIXER_IDENTITY = Object.freeze({
   r: Object.freeze({ r: 100, g: 0, b: 0, constant: 0 }),
   g: Object.freeze({ r: 0, g: 100, b: 0, constant: 0 }),
@@ -731,8 +705,16 @@ const PIXEL_KINDS = {
     };
   },
   'gradient-map': (p) => {
-    const grad = gradientFn(p.stops, !!p.reverse);
-    return (r, g, b) => grad(clampNum(luma(r, g, b) / 255, 0, 1));
+    // through the gradient model (G.4, J.9): a v2 def stays exact at 16 and 32 bits like 0.3's stops
+    const sample = gradientSampler(normalizeGradient(p));
+    const reverse = !!p.reverse;
+    return (r, g, b) => {
+      const t = clampNum(luma(r, g, b) / 255, 0, 1);
+      const c = sample(reverse ? 1 - t : t);
+      R = c[0];
+      G = c[1];
+      B = c[2];
+    };
   },
   vibrance: (p) => {
     const vib = clampNum(num(p.vibrance, 0), -100, 100) / 100, sat = clampNum(num(p.saturation, 0), -100, 100) / 100;
@@ -866,7 +848,17 @@ const PIXEL_KINDS = {
 export const EXACT_KINDS = Object.freeze([...Object.keys(CHANNEL_KINDS), ...Object.keys(PIXEL_KINDS)]);
 
 /** True when the kind has an exact deep implementation (the others go through 8 bits). */
-export const isExactKind = (kind) => Object.prototype.hasOwnProperty.call(CHANNEL_KINDS, kind) || Object.prototype.hasOwnProperty.call(PIXEL_KINDS, kind);
+/**
+ * True when applyAdjustmentDeep evaluates this kind with these params in floating point: a kind with float maths
+ * whose registry entry does not refuse the params (`deepExact(params) === false`: shapes the float code does not
+ * know, such as Hue/Saturation ranges or Curves in Lab; I.4, J.9).
+ */
+export function isExactKind(kind, params = {}) {
+  if (!Object.prototype.hasOwnProperty.call(CHANNEL_KINDS, kind) && !Object.prototype.hasOwnProperty.call(PIXEL_KINDS, kind)) return false;
+  const def = Object.prototype.hasOwnProperty.call(ADJUSTMENTS, kind) ? ADJUSTMENTS[kind] : null;
+  return deepExactFor(def, params ?? {});
+}
+const deepExactFor = (def, params) => (typeof def?.deepExact === 'function' ? def.deepExact(merge(def.defaults, params)) !== false : true);
 
 function applyChannelFns(deep, r, { fns, keepLuma }) {
   const { width } = dims(deep);
@@ -1000,18 +992,20 @@ export function applyVia8Bit(deep, op, rect = null) {
  * @param {Rect | null} [rect]
  * @returns {{ exact: boolean }}
  */
-export function applyAdjustmentDeep(deep, kind, params = {}, rect = null) {
+export function applyAdjustmentDeep(deep, kind, params = {}, rect = null, ctx = null) {
   assertPlanes(deep);
   const def = Object.prototype.hasOwnProperty.call(ADJUSTMENTS, kind) ? ADJUSTMENTS[kind] : null;
   if (!def) throw new RangeError(`Unknown adjustment: ${String(kind)}`);
   const r = region(deep, rect);
-  if (!r.width) return { exact: isExactKind(kind) };
+  if (!r.width) return { exact: isExactKind(kind, params) };
   const p = merge(def.defaults, params);
-  if (Object.prototype.hasOwnProperty.call(CHANNEL_KINDS, kind)) {
+  // the kind's own verdict first (deepExact, I.4): float code written for 0.3's params must not run on new shapes
+  const exactOk = deepExactFor(def, params ?? {});
+  if (exactOk && Object.prototype.hasOwnProperty.call(CHANNEL_KINDS, kind)) {
     applyChannelFns(deep, r, CHANNEL_KINDS[kind](p, deep.type === 'f32'));
     return { exact: true };
   }
-  if (Object.prototype.hasOwnProperty.call(PIXEL_KINDS, kind)) {
+  if (exactOk && Object.prototype.hasOwnProperty.call(PIXEL_KINDS, kind)) {
     const fn = PIXEL_KINDS[kind](p);
     if (fn) applyPixelFn(deep, r, fn);
     return { exact: true };
@@ -1020,7 +1014,9 @@ export function applyAdjustmentDeep(deep, kind, params = {}, rect = null) {
     applyLutDeep(deep, def.lut(params), r);
     return { exact: false };
   }
-  applyVia8Bit(deep, (img) => def.apply(img, params, null), r);
+  // the 8-bit fallback sees the rect only: its ctx origin moves to the rect's corner (I.4)
+  const subCtx = ctx ? { ...ctx, origin: { x: (ctx.origin?.x ?? 0) + r.x, y: (ctx.origin?.y ?? 0) + r.y } } : r.x || r.y ? { origin: { x: r.x, y: r.y }, docWidth: dims(deep).width, docHeight: dims(deep).height, scale: 1 } : null;
+  applyVia8Bit(deep, (img) => def.apply(img, params, null, subCtx), r);
   return { exact: false };
 }
 

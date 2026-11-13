@@ -36,6 +36,7 @@
 import { createImage, pasteImage, clampRect, intersectRect, unionRect, inflateRect, isEmptyRect, fullRect, clamp01 } from './core.js';
 import { parseColor } from './color.js';
 import { blendImages, isBlendMode } from './blend.js';
+import { normalizeGradient, gradientLut as modelGradientLut } from './gradient-model.js';
 
 /** @typedef {import('./core.js').ImageDataLike} ImageDataLike */
 /** @typedef {import('./core.js').Rect} Rect */
@@ -110,10 +111,37 @@ export const STYLE_KEYS = deepFreeze([
   { key: 'stroke', name: 'Stroke' },
 ]);
 
+/** Keys Photoshop allows several instances of (an array of effect objects, at most MAX_INSTANCES). */
+export const INSTANCE_KEYS = Object.freeze(['dropShadow', 'innerShadow', 'colorOverlay', 'gradientOverlay', 'stroke']);
+export const MAX_INSTANCES = 10;
+
+/**
+ * What the skeleton's styles.js really implements (ARCHITECTURE.md "0.4 features", J.6): the
+ * applyStyles options interiorAsGroup, transparencyShapes and split are accepted and ignored (split
+ * returns the merged image as `layer`), and only the first enabled instance of an array is drawn.
+ * layer-style-effects implements them and sets the flags; specs that need them skip while false.
+ */
+export const STYLE_FEATURES = { instances: false, interiorAsGroup: false, transparencyShapes: false, split: false };
+
+function mergeEffect(key, p) {
+  const def = DEFAULT_STYLES[key];
+  const fx = { ...def };
+  if (p && typeof p === 'object') {
+    for (const k of Object.keys(p)) if (p[k] !== undefined) fx[k] = p[k];
+  }
+  if (key === 'gradientOverlay') {
+    fx.stops = (Array.isArray(fx.stops) ? fx.stops : def.stops).map((s) => ({ ...s }));
+    if (fx.gradient && typeof fx.gradient === 'object') fx.gradient = JSON.parse(JSON.stringify(fx.gradient));
+  }
+  return fx;
+}
+
 /**
  * Full style object: every effect key present, each effect's missing (or undefined) fields filled
  * from DEFAULT_STYLES. Returns fresh objects (gradient stops are copied, a pattern is kept by
- * reference); unknown top-level keys are dropped; partial is not modified.
+ * reference); unknown top-level keys are dropped; partial is not modified. An array of instances
+ * (INSTANCE_KEYS) stays an array, each element merged with the key's defaults, and `hidden` (Hide
+ * All Effects) is kept.
  * @param {object | null} [partial]
  * @returns {Record<string, any>}
  */
@@ -121,23 +149,105 @@ export function mergeStyles(partial = null) {
   const src = partial && typeof partial === 'object' ? partial : {};
   const out = {};
   for (const key of EFFECT_KEYS) {
-    const def = DEFAULT_STYLES[key];
-    const fx = { ...def };
     const p = src[key];
-    if (p && typeof p === 'object') {
-      for (const k of Object.keys(p)) if (p[k] !== undefined) fx[k] = p[k];
-    }
-    if (key === 'gradientOverlay') fx.stops = (Array.isArray(fx.stops) ? fx.stops : def.stops).map((s) => ({ ...s }));
-    out[key] = fx;
+    if (Array.isArray(p)) {
+      const list = p.filter((x) => x && typeof x === 'object');
+      if (INSTANCE_KEYS.includes(key) && list.length) out[key] = list.slice(0, MAX_INSTANCES).map((x) => mergeEffect(key, x));
+      else out[key] = mergeEffect(key, list[0]);
+    } else out[key] = mergeEffect(key, p);
+  }
+  if (typeof src.hidden === 'boolean') out.hidden = src.hidden;
+  return out;
+}
+
+/** The instances of an effect key, top first ([] when absent). */
+export function effectInstances(styles, key) {
+  const v = styles && typeof styles === 'object' ? styles[key] : null;
+  if (Array.isArray(v)) return v.filter((x) => x && typeof x === 'object');
+  return v && typeof v === 'object' ? [v] : [];
+}
+
+/** Every effect instance in the Layer Style dialog's order: { key, index, name, fx }. */
+export function effectEntries(styles) {
+  const out = [];
+  for (const { key, name } of STYLE_KEYS) effectInstances(styles, key).forEach((fx, index) => out.push({ key, index, name, fx }));
+  return out;
+}
+
+/** Writes an array only when there is more than one instance; none removes the key. */
+function storeInstances(out, key, list) {
+  if (!list.length) delete out[key];
+  else out[key] = list.length === 1 ? list[0] : list.slice(0, MAX_INSTANCES);
+}
+
+/**
+ * A copy of styles with instance `index` of `key` patched (index === its count appends one), or
+ * removed with patch null.
+ */
+export function setEffect(styles, key, index, patch) {
+  const out = { ...(styles && typeof styles === 'object' ? styles : {}) };
+  const list = effectInstances(out, key).map((fx) => ({ ...fx }));
+  if (patch === null) list.splice(index, 1);
+  else if (index >= list.length) list.push({ ...patch });
+  else list[index] = { ...list[index], ...patch };
+  storeInstances(out, key, list);
+  return out;
+}
+
+/** A copy of styles with fn(fx, key, index) -> fx applied to every instance (other keys kept). */
+export function mapEffects(styles, fn) {
+  const out = { ...(styles && typeof styles === 'object' ? styles : {}) };
+  for (const key of EFFECT_KEYS) {
+    if (!(key in out)) continue;
+    const list = effectInstances(out, key).map((fx, i) => fn({ ...fx }, key, i) ?? fx);
+    if (Array.isArray(out[key])) out[key] = list;
+    else if (list.length) out[key] = list[0];
   }
   return out;
 }
 
-/** True when at least one effect of styles is enabled. */
+/** Pixel fields Scale Effects scales (0.3's Image Size also scaled `width`). */
+const SCALED_FIELDS = ['size', 'distance', 'spread', 'choke', 'soften', 'width'];
+
+/**
+ * Layer > Layer Style > Scale Effects and Image Size: every instance's pixel fields (size,
+ * distance, spread, choke, soften), the pattern overlay's and the bevel texture's scale, times k.
+ */
+export function scaleEffects(styles, k) {
+  const f = Number.isFinite(k) ? k : 1;
+  return mapEffects(styles, (fx, key) => {
+    for (const field of SCALED_FIELDS) if (typeof fx[field] === 'number') fx[field] *= f;
+    if (key === 'patternOverlay' && typeof fx.scale === 'number') fx.scale *= f;
+    if (fx.texture && typeof fx.texture === 'object' && typeof fx.texture.scale === 'number') fx.texture = { ...fx.texture, scale: fx.texture.scale * f };
+    return fx;
+  });
+}
+
+/** True when at least one effect of styles is enabled and they are not hidden. */
 export function hasEnabledStyles(styles) {
-  if (!styles || typeof styles !== 'object') return false;
-  for (const key of EFFECT_KEYS) if (styles[key] && styles[key].enabled) return true;
+  if (!styles || typeof styles !== 'object' || styles.hidden === true) return false;
+  for (const key of EFFECT_KEYS) {
+    const v = styles[key];
+    if (Array.isArray(v) ? v.some((x) => x && x.enabled) : v && v.enabled) return true;
+  }
   return false;
+}
+
+/**
+ * What the skeleton renders: no effect while hidden, the first enabled instance of an array (the
+ * first instance when none is enabled).
+ */
+function renderable(styles) {
+  if (!styles || typeof styles !== 'object') return styles;
+  if (styles.hidden === true) return {};
+  let flat = null;
+  for (const key of EFFECT_KEYS) {
+    const v = styles[key];
+    if (!Array.isArray(v)) continue;
+    flat ??= { ...styles };
+    flat[key] = v.find((x) => x && x.enabled) ?? v.find((x) => x && typeof x === 'object') ?? undefined;
+  }
+  return flat ?? styles;
 }
 
 const num = (v, def = 0) => {
@@ -158,7 +268,7 @@ const RAD = Math.PI / 180;
  */
 export function stylePadding(styles) {
   if (!hasEnabledStyles(styles)) return 0;
-  const s = mergeStyles(styles);
+  const s = mergeStyles(renderable(styles));
   let pad = 0;
   const ds = s.dropShadow;
   if (ds.enabled) pad = Math.max(pad, nonNeg(ds.size, 5) + Math.abs(num(ds.distance, 5)) + nonNeg(ds.spread));
@@ -795,45 +905,14 @@ function colorOverlay(ctx, fx) {
 
 const LUT_SIZE = 1024;
 
-/** 1024-entry straight RGBA lookup of a gradient (colour and opacity interpolated independently). */
-function gradientLut(stops) {
-  let list = (Array.isArray(stops) ? stops : []).filter((s) => s && typeof s === 'object').map((s) => {
-    const c = parseColor(s.color);
-    const op = s.opacity === undefined ? 1 : clamp01(num(s.opacity, 1));
-    return { pos: clamp01(num(s.pos ?? s.position, 0)), r: c[0], g: c[1], b: c[2], a: c[3] * op };
-  });
-  if (!list.length) list = [{ pos: 0, r: 0, g: 0, b: 0, a: 1 }, { pos: 1, r: 255, g: 255, b: 255, a: 1 }];
-  list.sort((p, q) => p.pos - q.pos);
-  const lut = new Uint8ClampedArray(LUT_SIZE * 4);
-  const last = list.length - 1;
-  let k = 0;
-  for (let i = 0; i < LUT_SIZE; i++) {
-    const t = i / (LUT_SIZE - 1);
-    let s0, s1, f = 0;
-    if (t <= list[0].pos) s0 = s1 = list[0];
-    else if (t >= list[last].pos) s0 = s1 = list[last];
-    else {
-      // list[k].pos < t < list[last].pos here, and t only grows, so k only moves forward
-      while (k < last - 1 && list[k + 1].pos < t) k++;
-      s0 = list[k];
-      s1 = list[k + 1];
-      f = s1.pos > s0.pos ? (t - s0.pos) / (s1.pos - s0.pos) : 1;
-    }
-    const p = i * 4;
-    lut[p] = s0.r + (s1.r - s0.r) * f;
-    lut[p + 1] = s0.g + (s1.g - s0.g) * f;
-    lut[p + 2] = s0.b + (s1.b - s0.b) * f;
-    lut[p + 3] = (s0.a + (s1.a - s0.a) * f) * 255;
-  }
-  return lut;
-}
-
 const GRADIENT_KINDS = { linear: 0, reflected: 1, radial: 2, diamond: 3, angle: 4 };
 
 function gradientOverlay(ctx, fx) {
   const alpha = clamp01(num(fx.opacity, 1));
   if (alpha <= 0) return;
-  const lut = gradientLut(fx.stops);
+  // 0.4: through the gradient model (a v2 `gradient` def, else 0.3's stops, which upgrade to the
+  // same table)
+  const lut = modelGradientLut(normalizeGradient(fx.gradient && typeof fx.gradient === 'object' ? fx.gradient : { stops: fx.stops }), { size: LUT_SIZE });
   const { cb, w } = ctx, d = ctx.fx.data;
   const kind = GRADIENT_KINDS[fx.kind] ?? 0;
   const a = num(fx.angle, 90) * RAD;
@@ -1094,7 +1173,8 @@ function copyRect(src, rect, dst, dx, dy) {
  *
  * @param {ImageDataLike} img layer pixels, straight alpha; not modified
  * @param {object | null} styles partial styles (see DEFAULT_STYLES); missing fields use defaults
- * @param {{ pad?: number, rect?: Rect, fillOpacity?: number, globalAngle?: number, globalAltitude?: number }} [opts]
+ * @param {{ pad?: number, rect?: Rect, fillOpacity?: number, globalAngle?: number, globalAltitude?: number,
+ *   interiorAsGroup?: boolean, transparencyShapes?: boolean, split?: boolean }} [opts]
  *   pad: border to add (default stylePadding(styles)); a smaller pad clips the effects.
  *   rect: output region of img (clipped to it, default the whole image): the output covers the
  *     rect grown by pad, offsets rect.x - pad, rect.y - pad, and matches the whole-image result
@@ -1102,11 +1182,20 @@ function copyRect(src, rect, dst, dx, dy) {
  *   fillOpacity: Photoshop's Fill (0..1, default 1): fades the layer's own pixels but not its
  *     effects (a 0 fill with a stroke or overlay keeps only the effect).
  *   globalAngle / globalAltitude: used by effects that set useGlobalLight: true.
+ *   interiorAsGroup (Blend Interior Effects as Group), transparencyShapes (Transparency Shapes Layer)
+ *     and split (the exterior effects, the layer with its interior effects and what lies over it
+ *     apart: { below, layer, above, offsetX, offsetY }) are 0.4 names; this version ignores the
+ *     first two and returns the merged image as `layer` for split (STYLE_FEATURES).
+ * Styles may hold arrays of instances (the first enabled one is drawn) and `hidden: true` (no effect).
  * @returns {{ image: ImageDataLike, offsetX: number, offsetY: number }}
  */
 export function applyStyles(img, styles, opts = {}) {
   const o = opts || {};
-  const s = mergeStyles(styles);
+  if (o.split) {
+    const r = applyStyles(img, styles, { ...o, split: false });
+    return { below: null, layer: r.image, above: null, offsetX: r.offsetX, offsetY: r.offsetY };
+  }
+  const s = mergeStyles(renderable(styles));
   const need = stylePadding(s);
   const pad = Math.max(0, Math.floor(num(o.pad, need)));
   const r = o.rect ? clampRect(o.rect, img.width, img.height) : fullRect(img);
@@ -1163,4 +1252,42 @@ export function applyStyles(img, styles, opts = {}) {
   }
   copyRect(res, { x: R.x - win.x, y: R.y - win.y, width: R.width, height: R.height }, out, R.x - offsetX, R.y - offsetY);
   return { image: out, offsetX, offsetY };
+}
+
+/** Exterior effects (drawn below the layer by Create Layers), bottom first. */
+const EXTERIOR_KEYS = ['dropShadow', 'outerGlow'];
+/** Interior effects (clipped above the layer), bottom first. */
+const INTERIOR_KEYS = ['patternOverlay', 'gradientOverlay', 'colorOverlay', 'satin', 'innerGlow', 'innerShadow', 'bevel'];
+
+/**
+ * Layer > Layer Style > Create Layers: every enabled effect instance as its own image, in stacking
+ * order, bottom first: exterior effects (drop shadow, outer glow, an outside or centred stroke)
+ * below the layer (clip: false), interior effects (overlays, satin, inner glow, inner shadow,
+ * bevel, an inside stroke) clipped above it (clip: true). Each image is the effect alone at full
+ * opacity with Normal blending on a layer of zero fill; its blend mode and opacity are returned
+ * beside it. Skeleton version: exact for exterior effects and close for interior ones
+ * (layer-style-effects makes it exact). x, y place the image relative to img's top-left.
+ * @returns {{ key: string, index: number, image: ImageDataLike, x: number, y: number, blend: string, opacity: number, clip: boolean }[]}
+ */
+export function splitEffects(img, styles, opts = {}) {
+  if (!hasEnabledStyles(styles)) return [];
+  const out = [];
+  const one = (key, index, fx, clip) => {
+    const solo = { ...fx, enabled: true, opacity: 1, blend: 'normal' };
+    if (key === 'bevel') {
+      solo.highlightBlend = 'normal';
+      solo.shadowBlend = 'normal';
+    }
+    const r = applyStyles(img, { [key]: solo }, { ...opts, fillOpacity: 0, split: false });
+    out.push({ key, index, image: r.image, x: r.offsetX, y: r.offsetY, blend: blendOf(fx.blend), opacity: clamp01(num(fx.opacity, 1)), clip });
+  };
+  const each = (key, pick, clip) => {
+    const list = effectInstances(styles, key);
+    for (let i = list.length - 1; i >= 0; i--) if (list[i].enabled && pick(list[i])) one(key, i, list[i], clip);
+  };
+  for (const key of EXTERIOR_KEYS) each(key, () => true, false);
+  each('stroke', (fx) => fx.position !== 'inside', false);
+  for (const key of INTERIOR_KEYS) each(key, () => true, true);
+  each('stroke', (fx) => fx.position === 'inside', true);
+  return out;
 }

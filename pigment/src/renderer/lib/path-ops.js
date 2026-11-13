@@ -4,7 +4,7 @@
 // canvas (combine = source-over, subtract = destination-out, intersect = destination-in, exclude =
 // xor), the fill paint is drawn through that area and the stroke follows every subpath outline
 // (inside / outside alignment is clipped against the combined area).
-import { createCanvas, pathToPath2D, makePaint } from './document.js';
+import { createCanvas, pathToPath2D, pathBounds, makePaint } from './document.js';
 
 export const PATH_OPS = Object.freeze(['combine', 'subtract', 'intersect', 'exclude']);
 const COMPOSITE = { combine: 'source-over', subtract: 'destination-out', intersect: 'destination-in', exclude: 'xor' };
@@ -104,6 +104,18 @@ export function hitPathArea(path, x, y) {
   return ctx.getImageData(0, 0, 1, 1).data[3] > 0;
 }
 
+/**
+ * The box a ShapeLayer renders into (document px), padded for its stroke; null for an empty path. ShapeLayer.bounds()
+ * delegates here (J.5). Stub by the skeleton: 0.3's padding (the stroke width + 1 px on every side, whatever the
+ * alignment); shapes-live pads for outside strokes, miters and arrowheads.
+ */
+export function shapeBounds(layer) {
+  const b = pathBounds(layer.path ?? { subpaths: [] });
+  if (!b) return null;
+  const pad = Math.ceil((layer.stroke?.width ?? 0) + 1);
+  return { x: Math.floor(b.x) - pad, y: Math.floor(b.y) - pad, width: Math.ceil(b.width) + pad * 2 + 1, height: Math.ceil(b.height) + pad * 2 + 1 };
+}
+
 /** Renders a ShapeLayer into `canvas` whose top-left is the document point (b.x, b.y). */
 export function renderShapeLayer(layer, canvas, b) {
   const ctx = canvas.getContext('2d');
@@ -151,6 +163,95 @@ export function renderShapeLayer(layer, canvas, b) {
     if (strokeCanvas !== canvas) ctx.drawImage(strokeCanvas, 0, 0);
   }
   return canvas;
+}
+
+// ---- live shapes: reading 0.3 parameters and mapping shape geometry (ARCHITECTURE.md "0.4 features", J.5) -----------
+// Owned by shapes-live; the skeleton lands the reading table and a stub of the mapping that keeps 0.3 behaviour.
+
+const num = (v, d = 0) => (Number.isFinite(v) ? v : d);
+const ARROW_03 = Object.freeze({ width: 500, length: 500, concavity: 0 }); // 0.3's head: max(6 px, 5 x weight)
+const arrowOf = (a) => (a === true ? { ...ARROW_03 } : a && typeof a === 'object' ? { width: num(a.width, 500), length: num(a.length, 500), concavity: num(a.concavity, 0) } : null);
+const box = (p) => ({ x: num(p.x), y: num(p.y), width: num(p.width), height: num(p.height), angle: num(p.angle) });
+
+/**
+ * The live parameters of a shape layer as 0.4 reads them: { kind, props }. 0.3 files store box-based props
+ * ({ x, y, width, height, radius } rectangles, polygons with `star` / `inset`, lines with boolean arrows); they are
+ * read here lazily and rewritten only when the user edits the shape, so 0.3 files stay byte-stable. Kind 'path' is
+ * not live (every reshaped shape, and custom shapes, which 0.3 cannot tell from an edited one).
+ */
+export function normalizeShapeProps(layer) {
+  const kind = layer?.shapeKind ?? 'path';
+  const p = layer?.shapeProps && typeof layer.shapeProps === 'object' ? layer.shapeProps : {};
+  switch (kind) {
+    case 'rect': {
+      const r = num(p.radius);
+      const radii = Array.isArray(p.radii) && p.radii.length === 4 ? p.radii.map((v) => num(v)) : [r, r, r, r];
+      return { kind, props: { ...box(p), radii } };
+    }
+    case 'ellipse': return { kind, props: box(p) };
+    case 'triangle': return { kind, props: { ...box(p), radius: num(p.radius) } };
+    case 'polygon': return {
+      kind,
+      props: {
+        ...box(p),
+        sides: Math.max(3, Math.round(num(p.sides, 5))),
+        starRatio: Number.isFinite(p.starRatio) ? p.starRatio : p.star ? 100 - num(p.inset, 50) : 100,
+        smoothCorners: !!p.smoothCorners,
+        smoothIndents: !!p.smoothIndents,
+        cornerRadius: num(p.cornerRadius),
+      },
+    };
+    case 'line': return { kind, props: { x1: num(p.x1), y1: num(p.y1), x2: num(p.x2), y2: num(p.y2), weight: num(p.weight, 1), arrowStart: arrowOf(p.arrowStart), arrowEnd: arrowOf(p.arrowEnd) } };
+    case 'custom': return { kind, props: { ...box(p), shape: p.shape ?? null } };
+    default: return { kind: 'path', props: { ...p } };
+  }
+}
+
+/** PathData through pointFn(x, y) -> [x, y] (anchors and handles). */
+export function mapPathPoints(path, f) {
+  return {
+    ...path,
+    subpaths: (path?.subpaths ?? []).map((sp) => ({
+      ...sp,
+      points: (sp.points ?? []).map((pt) => {
+        const q = { ...pt };
+        [q.x, q.y] = f(pt.x, pt.y);
+        if (pt.inX !== undefined) [q.inX, q.inY] = f(pt.inX, pt.inY);
+        if (pt.outX !== undefined) [q.outX, q.outY] = f(pt.outX, pt.outY);
+        return q;
+      }),
+    })),
+  };
+}
+
+const X_KEYS = ['x', 'x1', 'x2', 'cx'], Y_KEYS = ['y', 'y1', 'y2', 'cy'];
+const mapPaint = (paint, f) => {
+  const g = paint?.type === 'gradient' ? paint.gradient : null;
+  if (!g?.from || !g?.to) return paint;
+  return { ...paint, gradient: { ...g, from: f(...g.from), to: f(...g.to) } };
+};
+
+/**
+ * What a move or transform of a shape layer assigns: { path, shapeKind, shapeProps, fill?, stroke? } (fill and stroke
+ * only when a paint carried document-space from / to). `pointFn` maps a document point; `matrix` (affine) or
+ * `homography` say what it is. Stub (skeleton): the path is mapped as 0.3 did; the numeric props are shifted for a
+ * pure translation (0.3's offsetShapeProps keys) and kept otherwise (0.3: display only). shapes-live replaces it
+ * (rotation into `angle`, scale into the sizes and radii, skew or perspective to shapeKind 'path').
+ */
+export function mapShapeGeometry(layer, pointFn, { matrix = null, homography = null } = {}) {
+  void homography;
+  const out = { path: mapPathPoints(layer.path ?? { subpaths: [] }, pointFn), shapeKind: layer.shapeKind ?? 'path', shapeProps: { ...(layer.shapeProps ?? {}) } };
+  let shift = null;
+  if (matrix && matrix[0] === 1 && matrix[1] === 0 && matrix[2] === 0 && matrix[3] === 1) shift = [matrix[4], matrix[5]];
+  if (shift && (shift[0] || shift[1])) {
+    for (const k of X_KEYS) if (typeof out.shapeProps[k] === 'number') out.shapeProps[k] += shift[0];
+    for (const k of Y_KEYS) if (typeof out.shapeProps[k] === 'number') out.shapeProps[k] += shift[1];
+  }
+  const fill = mapPaint(layer.fill, pointFn);
+  if (fill !== layer.fill) out.fill = fill;
+  const strokePaint = layer.stroke?.paint ? mapPaint(layer.stroke.paint, pointFn) : null;
+  if (strokePaint && strokePaint !== layer.stroke.paint) out.stroke = { ...layer.stroke, paint: strokePaint };
+  return out;
 }
 
 export { createCanvas };

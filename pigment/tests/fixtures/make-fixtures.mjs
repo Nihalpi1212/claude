@@ -1,5 +1,5 @@
 // Generates the test images into tests/fixtures/out (PNG via zlib, PSD via ag-psd). No canvas needed.
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, renameSync, writeFileSync } from 'node:fs';
 import { deflateSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -51,12 +51,22 @@ export function image(width, height, fn) {
   return { width, height, data };
 }
 
+// Test runs can overlap (two engineers run suites side by side, each on its own port), and every run rewrites the
+// fixtures first: write each one under a temporary name and rename it, so a running test never reads a fixture
+// another run has half written.
+function writeFixture(name, data) {
+  const file = join(OUT_DIR, name);
+  const tmp = `${file}.${process.pid}.tmp`;
+  writeFileSync(tmp, data);
+  renameSync(tmp, file);
+}
+
 export async function makeAll() {
   mkdirSync(OUT_DIR, { recursive: true });
   // 320x200 colour gradient (opaque)
-  writeFileSync(join(OUT_DIR, 'gradient.png'), encodePng(image(320, 200, (x, y) => [Math.round((x / 319) * 255), Math.round((y / 199) * 255), 128, 255])));
+  writeFixture('gradient.png', encodePng(image(320, 200, (x, y) => [Math.round((x / 319) * 255), Math.round((y / 199) * 255), 128, 255])));
   // 200x150 transparent background with a red square and a half-transparent blue circle
-  writeFileSync(join(OUT_DIR, 'shapes.png'), encodePng(image(200, 150, (x, y) => {
+  writeFixture('shapes.png', encodePng(image(200, 150, (x, y) => {
     if (x >= 20 && x < 80 && y >= 20 && y < 80) return [255, 0, 0, 255];
     if ((x - 140) ** 2 + (y - 90) ** 2 < 40 ** 2) return [0, 0, 255, 128];
     return [0, 0, 0, 0];
@@ -73,7 +83,7 @@ export async function makeAll() {
       { name: 'Hidden green', left: 60, top: 40, hidden: true, imageData: image(30, 20, () => [0, 200, 0, 255]) },
     ],
   };
-  writeFileSync(join(OUT_DIR, 'layers.psd'), Buffer.from(agpsd.writePsdUint8Array(psd, { generateThumbnail: false })));
+  writeFixture('layers.psd', Buffer.from(agpsd.writePsdUint8Array(psd, { generateThumbnail: false })));
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) makeAll().then(() => console.log(`fixtures written to ${OUT_DIR}`));

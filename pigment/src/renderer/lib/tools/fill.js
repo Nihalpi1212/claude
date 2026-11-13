@@ -1,13 +1,10 @@
-// Paint bucket and gradient tools.
+// Gradient tool (the Paint Bucket moved to lib/tools/bucket.js, owned by patterns; 0.4 skeleton).
 import { Tool } from '../tools.js';
-import { Selection } from '../selection.js';
-import { selectionOps } from '../selection.js';
-import { flattenDocument } from '../compositor.js';
 import { createCanvas, makeGradient } from '../document.js';
 import { BLEND_MODES } from '../document.js';
 import { drawBlended, drawOnMask } from '../brush.js';
 
-const BLEND_OPTIONS = BLEND_MODES.filter(Boolean).filter(([id]) => id !== 'dissolve').map(([id, label]) => [id, label]);
+export const BLEND_OPTIONS = BLEND_MODES.filter(Boolean).filter(([id]) => id !== 'dissolve').map(([id, label]) => [id, label]);
 
 export const GRADIENT_PRESETS = [
   { name: 'Foreground to background', stops: 'fgbg' },
@@ -24,69 +21,6 @@ export function resolveStops(preset, fg, bg) {
   if (preset.stops === 'fgbg') return [{ pos: 0, color: fg }, { pos: 1, color: bg }];
   if (preset.stops === 'fgt') return [{ pos: 0, color: fg }, { pos: 1, color: fg + '00' }];
   return preset.stops;
-}
-
-export class BucketTool extends Tool {
-  constructor(app) {
-    super(app, {
-      id: 'bucket',
-      name: 'Paint Bucket Tool',
-      icon: 'bucket',
-      cursor: 'crosshair',
-      hint: 'Click to fill similar pixels with the foreground colour (Alt: background colour).',
-      options: [
-        { kind: 'select', key: 'source', label: 'Fill', options: [['foreground', 'Foreground colour'], ['pattern', 'Pattern']], default: 'foreground' },
-        { kind: 'select', key: 'blend', label: 'Mode', options: BLEND_OPTIONS, default: 'normal' },
-        { kind: 'slider', key: 'opacity', label: 'Opacity', min: 0.01, max: 1, step: 0.01, default: 1 },
-        { kind: 'number', key: 'tolerance', label: 'Tolerance', min: 0, max: 255, default: 32 },
-        { kind: 'checkbox', key: 'antialias', label: 'Anti-alias', default: true },
-        { kind: 'checkbox', key: 'contiguous', label: 'Contiguous', default: true },
-        { kind: 'checkbox', key: 'sampleMerged', label: 'All layers', default: false },
-      ],
-    });
-  }
-  onPointerDown(p) {
-    const doc = this.doc;
-    const layer = this.paintableLayer();
-    if (!layer) return;
-    if (layer.type !== 'raster' && !(this.app.ui.editingMask && layer.mask)) {
-      this.app.rasterizePrompt(layer).then((ok) => ok && this.onPointerDown(p));
-      return;
-    }
-    const x = Math.floor(p.x), y = Math.floor(p.y);
-    if (x < 0 || y < 0 || x >= doc.width || y >= doc.height) return;
-    // sample image (merged or the layer in document space)
-    let img;
-    const mask = this.app.ui.editingMask && layer.mask?.canvas;
-    if (mask) img = layer.mask.canvas.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, doc.width, doc.height);
-    else if (this.opt('sampleMerged')) img = flattenDocument(doc, this.view.compositor).getContext('2d', { willReadFrequently: true }).getImageData(0, 0, doc.width, doc.height);
-    else {
-      const tmp = createCanvas(doc.width, doc.height);
-      tmp.getContext('2d').drawImage(layer.canvas, layer.x, layer.y);
-      img = tmp.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, doc.width, doc.height);
-    }
-    let region = selectionOps.floodFill(img, x, y, { tolerance: this.opt('tolerance') ?? 32, contiguous: this.opt('contiguous') !== false, antialias: this.opt('antialias') !== false });
-    if (doc.selection && !doc.selection.isEmpty) region = selectionOps.combineMasks(region, doc.selection.mask, 'intersect');
-    const sel = Selection.fromMask(doc.width, doc.height, region);
-    const b = sel.bounds;
-    if (!b) return;
-    const color = p.alt ? this.app.settings.background : this.app.settings.foreground;
-    if (!mask) layer.ensureCovers(b); // may replace layer.canvas: build the target after it
-    const target = mask ? { canvas: layer.mask.canvas, x: 0, y: 0 } : { canvas: layer.canvas, x: layer.x, y: layer.y };
-    const local = { x: b.x - target.x, y: b.y - target.y, width: b.width, height: b.height };
-    doc.history.pixels('Paint bucket', target.canvas, local, (ctx) => {
-      const fillCanvas = createCanvas(b.width, b.height);
-      const fctx = fillCanvas.getContext('2d');
-      if (this.opt('source') === 'pattern' && this.app.currentPattern) {
-        fctx.fillStyle = fctx.createPattern(this.app.currentPattern, 'repeat');
-      } else fctx.fillStyle = color;
-      fctx.fillRect(0, 0, b.width, b.height);
-      fctx.globalCompositeOperation = 'destination-in';
-      fctx.drawImage(sel.toCanvas(), -b.x, -b.y);
-      if (mask) drawOnMask(ctx, fillCanvas, local.x, local.y, this.opt('opacity') ?? 1);
-      else drawBlended(ctx, fillCanvas, local.x, local.y, this.opt('blend') ?? 'normal', this.opt('opacity') ?? 1, { lockTransparency: !!layer.locked.transparency });
-    }, { layer, kind: mask ? 'mask' : 'pixels' });
-  }
 }
 
 export class GradientTool extends Tool {
@@ -122,11 +56,13 @@ export class GradientTool extends Tool {
       this.app.rasterizePrompt(layer); // a gradient is a drag: start it again once rasterized
       return;
     }
-    this.drag = { from: { x: p.x, y: p.y }, to: { x: p.x, y: p.y }, layer };
+    const sp = this.app.snap?.point(p, { source: 'gradient', pointer: p, view: this.view }) ?? p; // snap (lib/snap.js)
+    this.drag = { from: { x: sp.x, y: sp.y }, to: { x: sp.x, y: sp.y }, layer };
   }
   onPointerMove(p, dragging) {
     if (!dragging || !this.drag) return;
-    let to = { x: p.x, y: p.y };
+    const sp = this.app.snap?.point(p, { source: 'gradient', pointer: p, view: this.view }) ?? p; // snap (lib/snap.js)
+    let to = { x: sp.x, y: sp.y };
     if (p.shift) {
       const dx = to.x - this.drag.from.x, dy = to.y - this.drag.from.y;
       const ang = Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * (Math.PI / 4);
@@ -207,5 +143,4 @@ function dither(canvas) {
 
 export function install(app) {
   app.tools.register(new GradientTool(app), 'fill');
-  app.tools.register(new BucketTool(app), 'fill');
 }

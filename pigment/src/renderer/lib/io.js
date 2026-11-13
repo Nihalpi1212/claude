@@ -3,11 +3,15 @@
 // plus one PNG per raster layer and mask).
 import { readPsd, writePsdUint8Array, initializeCanvas } from 'ag-psd';
 import { writeZip, readZip, findEntry, streamCodecs } from '../../shared/zip.js';
+import { DocStore } from './doc-store.js';
 import { Document, RasterLayer, GroupLayer, TextLayer, AdjustmentLayer, createCanvas, layerFromDescription, canvasIsBlank, textExtensionFor } from './document.js';
 import { parseColor } from '../../shared/pixels/color.js';
 import { MODES, duotoneLut } from '../../shared/pixels/modes.js';
 import { Compositor, flattenDocument, modeRendererFor } from './compositor.js';
 import { Selection } from './selection.js';
+import { maskCanvasFor } from './mask-render.js';
+import { isUniform, nonDefaultKeys, charStyleAt, paragraphs } from './type/model.js';
+import { isGradientV2, normalizeGradient } from '../../shared/pixels/gradient-model.js';
 
 export const OPEN_EXTENSIONS = ['pigment', 'psd', 'psb', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'avif', 'svg', 'ico'];
 export const OPEN_FILTERS = [
@@ -211,7 +215,8 @@ export async function readPigment(bytes) {
   const doc = new Document({ width: d.width, height: d.height, dpi: d.dpi, name: d.name, mode, depth: [8, 16, 32].includes(d.depth) ? d.depth : 8 });
   if (Array.isArray(d.colorTable)) doc.colorTable = d.colorTable.filter((c) => Array.isArray(c) && c.length >= 3).map((c) => c.slice(0, 3).map((v) => Math.max(0, Math.min(255, Math.round(Number(v) || 0)))));
   if (d.duotone && Array.isArray(d.duotone.inks)) doc.duotone = JSON.parse(JSON.stringify(d.duotone));
-  doc.guides = Array.isArray(d.guides) ? d.guides : [];
+  // version 3 keeps the document collections in `store`; a version 2 file's guides come in through the legacy array
+  doc.store = DocStore.fromJSON(doc, d.store, { guides: Array.isArray(d.guides) ? d.guides : [] });
   doc.paths = Array.isArray(d.paths) ? d.paths : [];
   doc.meta = d.meta ?? {};
   // a mode that lost what it shows its pixels with (the colour table, the spot channel state) is plain RGB: the
@@ -249,6 +254,10 @@ export async function readPigment(bytes) {
     if (desc.hasMask) {
       const canvas = await image(`masks/${desc.id}.png`);
       if (canvas) layer.mask = { canvas, enabled: desc.maskEnabled !== false, linked: desc.maskLinked !== false };
+      // 0.4: density and feather (non-destructive, K.1) travel next to the mask; vectorMask and blending came in
+      // through layerFromDescription
+      if (layer.mask && Number.isFinite(desc.maskDensity)) layer.mask.density = Math.max(0, Math.min(1, desc.maskDensity));
+      if (layer.mask && Number.isFinite(desc.maskFeather)) layer.mask.feather = Math.max(0, desc.maskFeather);
     }
     if (layer.type === 'smart' && typeof layer.setSource === 'function') {
       // smart objects (lib/smart-object.js): the layer was built from its description; its source follows. Instances
@@ -446,36 +455,91 @@ function textLayerFromPsd(pl, common, left, top) {
   return new TextLayer(props);
 }
 
+/**
+ * The rich-text attributes textToPsd writes (J.8), by model key, with the ag-psd field each becomes (checked against
+ * the vendored ag-psd typings: TextStyle and ParagraphStyle). A uniform text layer whose other non-default attributes
+ * do not change its look stays editable text in a PSD; anything else is written as pixels.
+ */
+export const PSD_TEXT_KEYS = Object.freeze({
+  char: Object.freeze({
+    fontFamily: 'font.name', fontWeight: 'fauxBold', fontItalic: 'fauxItalic', size: 'fontSize', color: 'fillColor',
+    underline: 'underline', strike: 'strikethrough', leading: 'leading / autoLeading', tracking: 'tracking',
+    caps: 'fontCaps', baselineShift: 'baselineShift', scaleX: 'horizontalScale', scaleY: 'verticalScale',
+    autoKern: 'autoKerning', fauxBold: 'fauxBold', fauxItalic: 'fauxItalic',
+  }),
+  para: Object.freeze({ align: 'justification' }),
+});
+// attributes that do not change what a paragraph looks like (language: hyphenation and spelling; the composer and
+// breaker rules of 0.3 paragraphs)
+const LOOK_NEUTRAL_CHAR = new Set(['language', 'noBreak', 'fractionalWidths']);
+const LOOK_NEUTRAL_PARA = new Set(['composer', 'breakRules']);
+
+/** True when PSD text (as textToPsd writes it) can hold the layer's formatting (J.8). */
+export function psdExpressible(layer) {
+  const c = layer.content;
+  if (!c || !isUniform(c)) return false;
+  const ch = charStyleAt(c, 0);
+  const para = paragraphs(c)[0].style;
+  const { char, para: paraKeys } = nonDefaultKeys(c);
+  for (const k of char) {
+    if (LOOK_NEUTRAL_CHAR.has(k)) continue;
+    if (!(k in PSD_TEXT_KEYS.char)) return false;
+    if (k === 'autoKern' && ch.autoKern === 'optical') return false;
+  }
+  const justifies = para.align.startsWith('justify');
+  for (const k of paraKeys) {
+    if (LOOK_NEUTRAL_PARA.has(k) || k in PSD_TEXT_KEYS.para) continue;
+    if (k === 'hyphenation' && !para.hyphenate) continue;
+    // auto leading is written as the leading; word, letter and glyph spacing matter only to justified lines
+    if (k === 'justification' && !justifies) continue;
+    return false;
+  }
+  return true;
+}
+
 /** PSD text data for a Pigment text layer (placed on the first baseline like Photoshop). */
 function textToPsd(layer) {
-  const f = layer.font, ascent = f.size * 0.8;
-  const base = [1, 0, 0, 1, layer.x, layer.y + ascent];
+  const f = layer.font, ch = charStyleAt(layer.content, 0);
+  const para = paragraphs(layer.content)[0].style;
+  const lay = layer.layout();
+  // the first baseline from the layout (every engine puts it at y + 0.8 x the first line's largest size)
+  const baseline = lay.lines[0]?.baseline ?? layer.y + f.size * 0.8;
+  const ascent = baseline - layer.y;
+  const base = [1, 0, 0, 1, layer.x, baseline];
   let transform = base;
   if (layer.transform) {
     const [a, b, c, d, e, g] = layer.transform;
     transform = [a, b, c, d, a * base[4] + c * base[5] + e, b * base[4] + d * base[5] + g];
   }
+  const style = {
+    font: { name: f.family },
+    fontSize: f.size,
+    fillColor: psdColor(f.color),
+    fauxBold: !!ch.fauxBold || (f.weight ?? 400) >= 600,
+    fauxItalic: !!ch.fauxItalic || !!f.italic,
+    underline: !!f.underline,
+    autoLeading: Math.abs((f.lineHeight ?? 1.2) - 1.2) < 1e-6,
+    leading: f.size * (f.lineHeight ?? 1.2),
+    tracking: f.size ? Math.round(((f.letterSpacing ?? 0) / f.size) * 1000) : 0,
+  };
+  // 0.4 attributes, written only when set so a 0.3 layer's text data stays what 0.3 wrote
+  if (ch.strike) style.strikethrough = true;
+  if (ch.caps !== 'normal') style.fontCaps = ch.caps === 'small' ? 1 : 2;
+  if (ch.baselineShift) style.baselineShift = ch.baselineShift;
+  if (ch.scaleX !== 100) style.horizontalScale = ch.scaleX / 100;
+  if (ch.scaleY !== 100) style.verticalScale = ch.scaleY / 100;
+  if (ch.autoKern === 'none') style.autoKerning = false;
   const out = {
     text: layer.text,
     orientation: f.orientation === 'vertical' ? 'vertical' : 'horizontal',
     transform,
     shapeType: layer.width === null ? 'point' : 'box',
-    style: {
-      font: { name: f.family },
-      fontSize: f.size,
-      fillColor: psdColor(f.color),
-      fauxBold: (f.weight ?? 400) >= 600,
-      fauxItalic: !!f.italic,
-      underline: !!f.underline,
-      autoLeading: Math.abs((f.lineHeight ?? 1.2) - 1.2) < 1e-6,
-      leading: f.size * (f.lineHeight ?? 1.2),
-      tracking: f.size ? Math.round(((f.letterSpacing ?? 0) / f.size) * 1000) : 0,
-    },
-    paragraphStyle: { justification: ['left', 'right', 'center'].includes(f.align) ? f.align : 'left' },
+    style,
+    paragraphStyle: { justification: ['left', 'right', 'center', 'justify-left', 'justify-right', 'justify-center', 'justify-all'].includes(para.align) ? para.align : 'left' },
   };
   if (layer.width !== null) {
-    const lay = layer.layout();
-    out.boxBounds = [0, -ascent, layer.width, Math.max(lay.height, lay.lineHeight) - ascent];
+    const h = typeof layer.height === 'number' ? layer.height : Math.max(lay.height, lay.lineHeight);
+    out.boxBounds = [0, -ascent, layer.width, h - ascent];
   }
   return out;
 }
@@ -511,6 +575,11 @@ export function adjustmentToPsd(kind, p = {}) {
     case 'posterize': return { type: 'posterize', levels: p.levels ?? 4 };
     case 'threshold': return { type: 'threshold', level: p.level ?? 128 };
     case 'gradient-map': {
+      // a v2 def (G.1) is normalised: its colour stops with their midpoints and its opacity stops (0.3 stops as 0.3 wrote them)
+      if (isGradientV2(p)) {
+        const g = normalizeGradient(p);
+        return { type: 'gradient map', name: 'Gradient', gradientType: 'solid', reverse: !!p.reverse, dither: !!p.dither, smoothness: g.smoothness, colorStops: g.stops.map((s) => ({ location: s.pos, midpoint: s.mid, color: psdColor(s.color) })), opacityStops: g.opacityStops.map((s) => ({ location: s.pos, midpoint: s.mid, opacity: s.opacity })) };
+      }
       const stops = (p.stops?.length ? p.stops : [{ offset: 0, color: '#000000' }, { offset: 1, color: '#ffffff' }]).map((s) => ({ location: s.offset ?? s.pos ?? 0, midpoint: 0.5, color: psdColor(s.color) }));
       return { type: 'gradient map', name: 'Gradient', gradientType: 'solid', reverse: !!p.reverse, dither: false, smoothness: 1, colorStops: stops, opacityStops: [{ location: 0, midpoint: 0.5, opacity: 1 }, { location: 1, midpoint: 0.5, opacity: 1 }] };
     }
@@ -550,9 +619,13 @@ export function adjustmentFromPsd(a) {
 
 /** Writes a document as PSD (raster pixels for every layer; groups, masks, opacity, blend, clipping kept). */
 export function writePsdDocument(doc, compositor) {
-  // alpha mask -> greyscale PSD mask
+  // alpha mask -> greyscale PSD mask. An enabled raster mask or an enabled vector mask is written as the effective
+  // mask (density, feather and a linked vector mask baked into one raster mask: J.8), so Photoshop shows what Pigment
+  // shows; a disabled raster mask without a vector mask is written as it is, disabled (0.3)
   const maskOf = (layer) => {
-    const m = layer.mask.canvas;
+    const effective = layer.mask?.enabled || layer.vectorMask?.enabled ? maskCanvasFor(layer, doc, { purpose: 'bake', parts: 'all' }) : null; // mask (K.1)
+    if (!effective && !layer.mask?.canvas) return null;
+    const m = effective ?? layer.mask.canvas;
     const ctx = m.getContext('2d', { willReadFrequently: true });
     const img = ctx.getImageData(0, 0, m.width, m.height);
     for (let i = 0; i < img.data.length; i += 4) {
@@ -562,7 +635,7 @@ export function writePsdDocument(doc, compositor) {
     }
     const g = createCanvas(m.width, m.height);
     g.getContext('2d').putImageData(img, 0, 0);
-    return { left: 0, top: 0, canvas: g, defaultColor: 0, disabled: !layer.mask.enabled };
+    return { left: 0, top: 0, canvas: g, defaultColor: 0, disabled: !effective };
   };
   // A PSD written here is always RGB. Duotone and Multichannel documents keep other pixels than they show (greys
   // under the ink curves, the picture before spot channels were removed) and a Grayscale one may hold coloured
@@ -617,6 +690,7 @@ export function writePsdDocument(doc, compositor) {
     return doc.mode === 'grayscale' && r === g && g === b;
   };
   const shown = (canvas, x, y) => (modeRender ? inked(canvas, x, y) : canvas);
+  let pixelText = 0; // text layers written as pixels because PSD text cannot hold their formatting (J.8)
   const toPsd = (layer) => {
     const lk = layer.locked ?? {};
     const base = {
@@ -628,7 +702,10 @@ export function writePsdDocument(doc, compositor) {
       clipping: layer.clip,
       protected: { transparency: !!(lk.transparency || lk.all), composite: !!(lk.pixels || lk.all), position: !!(lk.position || lk.all) },
     };
-    if (layer.mask?.canvas) base.mask = maskOf(layer);
+    if (layer.mask?.canvas || layer.vectorMask) {
+      const mask = maskOf(layer);
+      if (mask) base.mask = mask;
+    }
     if (layer.isGroup) return { ...base, opened: layer.expanded, children: layer.children.map(toPsd) };
     if (layer.type === 'adjustment') {
       const adjustment = adjustmentToPsd(layer.kind, layer.params);
@@ -649,8 +726,12 @@ export function writePsdDocument(doc, compositor) {
     }
     const out = { ...base, left: x, top: y, canvas: shown(canvas, x, y) };
     // text on a path / stacked text (lib/text-path.js) has no PSD equivalent: it exports rasterised (and so does
-    // text shown through inks or made grey by the mode: its own colour is not what the document displays)
-    if (layer.type === 'text' && !textExtensionFor(layer) && textAsShown(layer)) out.text = textToPsd(layer);
+    // text shown through inks or made grey by the mode: its own colour is not what the document displays, and
+    // formatting PSD text cannot hold yet, J.8)
+    if (layer.type === 'text' && !textExtensionFor(layer) && textAsShown(layer)) {
+      if (psdExpressible(layer)) out.text = textToPsd(layer);
+      else pixelText++;
+    }
     return out;
   };
   const psd = {
@@ -664,7 +745,9 @@ export function writePsdDocument(doc, compositor) {
     canvas: flattenDocument(doc, compositor),
     imageResources: { resolutionInfo: { horizontalResolution: doc.dpi, horizontalResolutionUnit: 'PPI', widthUnit: 'Inches', verticalResolution: doc.dpi, verticalResolutionUnit: 'PPI', heightUnit: 'Inches' } },
   };
-  return writePsdUint8Array(psd, { generateThumbnail: true, noBackground: true });
+  const bytes = writePsdUint8Array(psd, { generateThumbnail: true, noBackground: true });
+  if (pixelText) doc.view?.app?.dialogs?.toast(`${pixelText} text layer${pixelText === 1 ? '' : 's'} with formatting PSD text cannot hold yet ${pixelText === 1 ? 'was' : 'were'} saved as pixels`, { timeout: 4000 });
+  return bytes;
 }
 
 // ---- export -------------------------------------------------------------------------------------------------

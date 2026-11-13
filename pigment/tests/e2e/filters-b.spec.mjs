@@ -170,7 +170,7 @@ test('Flame refuses without a path and renders along a drawn work path', async (
   // Last Filter replays it without a dialog
   await runAwait(page, 'edit:undo');
   expect((await layerPixel(page, 200, 180))[3]).toBe(0);
-  await page.keyboard.press('Control+f');
+  await page.keyboard.press('Control+Alt+f');
   await expect.poll(() => layerPixel(page, 200, 180).then((p) => p[3])).toBeGreaterThan(100);
   expect(errors).toEqual([]);
 });

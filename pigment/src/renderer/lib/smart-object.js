@@ -6,6 +6,7 @@
 // setLayerProps() (or one explicit history entry where a source object cannot be cloned).
 import { Layer, Document, RasterLayer, createCanvas, copyCanvas, registerLayerType, intersectRect, unionRect, newId } from './document.js';
 import { Compositor, flattenDocument } from './compositor.js';
+import { mapShapeGeometry } from './path-ops.js';
 import { structural, setLayerProps, cloneLayer, relinkCopies, releaseOrphanClips } from './layer-ops.js';
 import { applyFilter, FILTERS } from '../../shared/pixels/filters.js';
 import { applyAdjustment, ADJUSTMENTS } from '../../shared/pixels/adjust.js';
@@ -112,12 +113,12 @@ function runParams(kind, params) {
   return p;
 }
 
-/** Applies one smart filter entry to img in place. */
-export function applySmartFilter(img, f) {
+/** Applies one smart filter entry to img in place; ctx (I.4) says where img sits in the document (adjustments read it). */
+export function applySmartFilter(img, f, ctx = null) {
   const kind = f.kind;
   if (kind.startsWith('adjust:')) {
     const k = kind.slice(7);
-    if (ADJUSTMENTS[k]) return applyAdjustment(img, k, f.params ?? {});
+    if (ADJUSTMENTS[k]) return applyAdjustment(img, k, f.params ?? {}, null, ctx);
   } else if (EXTRA_KINDS.has(kind)) return EXTRA_KINDS.get(kind).apply(img, f.params ?? {});
   else if (FILTERS[kind]) return applyFilter(img, kind, runParams(kind, f.params));
   if (!warned.has(kind)) {
@@ -204,15 +205,15 @@ const RECOLOUR_ONLY = new Set(['camera-raw', 'adjust:equalize', 'average']);
  * (an earlier filter spread a halo out there and the kind is one of RECOLOUR_ONLY), goes through the filter as part
  * of the whole image.
  */
-function applyToRegion(img, r, f, around = false) {
+function applyToRegion(img, r, f, around = false, ctx = null) {
   const sub = { width: r.width, height: r.height, data: new Uint8ClampedArray(r.width * r.height * 4) };
   const row = r.width * 4;
   for (let y = 0; y < r.height; y++) {
     const at = ((r.y + y) * img.width + r.x) * 4;
     sub.data.set(img.data.subarray(at, at + row), y * row);
   }
-  applySmartFilter(sub, f);
-  if (around) applySmartFilter(img, f);
+  applySmartFilter(sub, f, ctx ? { ...ctx, origin: { x: ctx.origin.x + r.x, y: ctx.origin.y + r.y } } : null);
+  if (around) applySmartFilter(img, f, ctx);
   for (let y = 0; y < r.height; y++) img.data.set(sub.data.subarray(y * row, (y + 1) * row), ((r.y + y) * img.width + r.x) * 4);
 }
 
@@ -355,9 +356,11 @@ export class SmartLayer extends Layer {
       // bounds inside the padded render.
       const own = pad > 0 ? intersectRect({ x: out.x - rect.x, y: out.y - rect.y, width: out.width, height: out.height }, { x: 0, y: 0, width: work.width, height: work.height }) : null;
       let spilled = false; // a filter earlier in the stack has spread pixels into the padding
+      // adjustment ctx (I.4): the render's (0, 0) is the document point (rect.x, rect.y)
+      const actx = { origin: { x: rect.x, y: rect.y }, docWidth: host?.width ?? rect.width, docHeight: host?.height ?? rect.height, scale: 1 };
       for (const f of filters) {
-        if (own && laidOutOnBounds(f)) applyToRegion(work, own, f, spilled && RECOLOUR_ONLY.has(f.kind));
-        else applySmartFilter(work, f);
+        if (own && laidOutOnBounds(f)) applyToRegion(work, own, f, spilled && RECOLOUR_ONLY.has(f.kind), actx);
+        else applySmartFilter(work, f, actx);
         if (filterPadding([f]) > 0) spilled = true;
       }
       ctx.putImageData(img, 0, 0);
@@ -411,8 +414,13 @@ function shiftLayer(l, dx, dy, w, h) {
       l.y += dy;
     }
     if (l.pathText?.path) l.pathText = { ...l.pathText, path: shiftPath(l.pathText.path, dx, dy) };
-  } else if (l.type === 'shape') l.path = shiftPath(l.path, dx, dy);
-  else if (l.type === 'fill') {
+  } else if (l.type === 'shape') {
+    // the path, live parameters and document-space paints through path-ops.js (shapes-live, J.2)
+    const g = mapShapeGeometry(l, (x, y) => [x + dx, y + dy], { matrix: [1, 0, 0, 1, dx, dy] });
+    Object.assign(l, { path: g.path, shapeKind: g.shapeKind, shapeProps: g.shapeProps });
+    if (g.fill) l.fill = g.fill;
+    if (g.stroke) l.stroke = g.stroke;
+  } else if (l.type === 'fill') {
     const g = l.paint?.gradient;
     if (g?.from && g?.to) l.paint = { ...l.paint, gradient: { ...g, from: [g.from[0] + dx, g.from[1] + dy], to: [g.to[0] + dx, g.to[1] + dy] } };
   } else if (l.type === 'raster' || l.type === 'smart') {
@@ -436,6 +444,8 @@ function shiftLayer(l, dx, dy, w, h) {
     ctx.drawImage(l.mask.canvas, dx, dy);
     l.mask = { ...l.mask, canvas: m };
   }
+  // a vector mask is document geometry: it moves with the layer into the new canvas
+  if (l.vectorMask) l.vectorMask = { ...l.vectorMask, path: shiftPath(l.vectorMask.path, dx, dy) };
   l._cache = null;
   l.touch();
 }

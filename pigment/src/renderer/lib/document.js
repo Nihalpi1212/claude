@@ -1,9 +1,11 @@
 // Document and layer model (see ARCHITECTURE.md "Documents, layers, selection"). Layers hold
 // pixels (raster) or parameters (text, shape, fill, adjustment); every mutation bumps `version`
 // so the compositor can cache. Mutations happen through lib/history.js so they are undoable.
-import { parseColor, rgbaToHex } from '../../shared/pixels/color.js';
 import { transformBounds } from '../../shared/pixels/transform.js';
-import { renderShapeLayer } from './path-ops.js';
+import { renderShapeLayer, shapeBounds } from './path-ops.js';
+import { paintStyle } from './paint.js';
+import { DocStore } from './doc-store.js';
+import { fromLegacy, legacyFont, plainText, replacePlain, normalize, normalizeTypeOptions, mapChar, mapPara, tidyNumber } from './type/model.js';
 
 // ---- extension points (see ARCHITECTURE.md "0.2 features") -------------------------------------------------
 /**
@@ -58,6 +60,75 @@ export function canvasIsBlank(canvas) {
   return true;
 }
 
+// ---- 0.4 layer fields: vector masks and advanced blending (ARCHITECTURE.md "0.4 features", J.1) -------------------
+
+const deepFreeze = (o) => {
+  if (o && typeof o === 'object' && !Object.isFrozen(o)) {
+    Object.freeze(o);
+    for (const v of Object.values(o)) deepFreeze(v);
+  }
+  return o;
+};
+const jsonCopy = (v) => (v === undefined || v === null ? null : JSON.parse(JSON.stringify(v)));
+
+/**
+ * A vector mask: `path` is PathData in document space; `initialFill` is what the mask starts from before the path's
+ * components are combined into it ('hide': the path's inside shows; 'reveal': everything shows, subtract hides).
+ * Density (0..1) and feather (px) are non-destructive. The K.1 hook (lib/mask-render.js) decides what it masks.
+ */
+export const DEFAULT_VECTOR_MASK = deepFreeze({ path: { subpaths: [] }, enabled: true, linked: true, density: 1, feather: 0, initialFill: 'hide' });
+
+const BLEND_IF_RANGE = [0, 0, 255, 255];
+/**
+ * Layer Style > Blending Options beyond opacity, fill and mode (layer-style-blending renders them, K.3). `blendIf`
+ * ranges are [black0, black1, white0, white1] in 0..255 (a split slider is two values). `layer.blending === null`
+ * means all of these defaults; nothing renders differently until a field differs from them.
+ */
+export const DEFAULT_BLENDING = deepFreeze({
+  channels: { r: true, g: true, b: true },
+  knockout: 'none',
+  interiorAsGroup: false,
+  clippedAsGroup: true,
+  transparencyShapes: true,
+  maskHidesEffects: false,
+  vectorMaskHidesEffects: false,
+  blendIf: Object.fromEntries(['gray', 'r', 'g', 'b'].map((c) => [c, { this: BLEND_IF_RANGE, under: BLEND_IF_RANGE }])),
+});
+
+/** The full blending options of `b` (null or partial): every missing field from DEFAULT_BLENDING; a fresh object. */
+function fullBlending(b) {
+  const d = DEFAULT_BLENDING;
+  const src = b && typeof b === 'object' ? b : {};
+  const range = (v, def) => (Array.isArray(v) && v.length === 4 && v.every(Number.isFinite) ? v.slice() : def.slice());
+  const blendIf = {};
+  for (const c of Object.keys(d.blendIf)) {
+    const s = src.blendIf?.[c] ?? {};
+    blendIf[c] = { this: range(s.this, d.blendIf[c].this), under: range(s.under, d.blendIf[c].under) };
+  }
+  const out = { ...jsonCopy(d), ...jsonCopy(src), channels: { ...d.channels, ...(src.channels ?? {}) }, blendIf };
+  return out;
+}
+
+/** True when `b` (null, partial or full) renders exactly like the defaults. */
+export function isDefaultBlending(b) {
+  if (b === null || b === undefined) return true;
+  return JSON.stringify(fullBlending(b)) === JSON.stringify(fullBlending(null));
+}
+
+/** The blending options a layer renders with (DEFAULT_BLENDING itself, frozen, when the layer has none). */
+export function effectiveBlending(layer) {
+  const b = layer?.blending;
+  return b ? fullBlending(b) : DEFAULT_BLENDING;
+}
+
+/** A vector mask with every missing field from DEFAULT_VECTOR_MASK (null stays null); a fresh object. */
+function fullVectorMask(vm) {
+  if (!vm || typeof vm !== 'object') return null;
+  const out = { ...jsonCopy(DEFAULT_VECTOR_MASK), ...jsonCopy(vm) };
+  if (!out.path || !Array.isArray(out.path.subpaths)) out.path = { subpaths: [] };
+  return out;
+}
+
 // ---- layers ---------------------------------------------------------------------------------------------------
 
 export class Layer {
@@ -71,7 +142,11 @@ export class Layer {
     this.blend = props.blend ?? 'normal';
     this.locked = { pixels: false, position: false, transparency: false, all: false, ...(props.locked ?? {}) };
     this.clip = props.clip ?? false;
-    this.mask = props.mask ?? null; // { canvas, enabled, linked }
+    this.mask = props.mask ?? null; // { canvas, enabled, linked, density? (0..1, default 1), feather? (px, default 0) }
+    // 0.4: { path, enabled, linked, density, feather, initialFill } (DEFAULT_VECTOR_MASK) or null
+    this.vectorMask = fullVectorMask(props.vectorMask);
+    // 0.4: advanced blending options (DEFAULT_BLENDING), null = all defaults
+    this.blending = props.blending && typeof props.blending === 'object' ? jsonCopy(props.blending) : null;
     this.styles = props.styles ?? null;
     this.parent = null;
     this.version = 0;
@@ -94,7 +169,7 @@ export class Layer {
   }
   /** Shallow description for the Layers panel and serialization (pixels handled by io.js). */
   describe() {
-    return {
+    const d = {
       id: this.id,
       type: this.type,
       name: this.name,
@@ -108,7 +183,13 @@ export class Layer {
       maskEnabled: this.mask?.enabled ?? false,
       maskLinked: this.mask?.linked ?? true,
       styles: this.styles ? JSON.parse(JSON.stringify(this.styles)) : null,
+      vectorMask: this.vectorMask ? jsonCopy(this.vectorMask) : null,
+      blending: isDefaultBlending(this.blending) ? null : jsonCopy(this.blending),
     };
+    // written only when set, so a 0.3 mask describes as it did
+    if (this.mask && this.mask.density !== undefined) d.maskDensity = this.mask.density;
+    if (this.mask && this.mask.feather !== undefined) d.maskFeather = this.mask.feather;
+    return d;
   }
 }
 
@@ -168,14 +249,83 @@ export class GroupLayer extends Layer {
 
 export const DEFAULT_TEXT_STYLE = { family: 'Arial', size: 48, weight: 400, italic: false, underline: false, color: '#000000', align: 'left', lineHeight: 1.2, letterSpacing: 0, stroke: null };
 
+/**
+ * Text backend (ARCHITECTURE.md "0.4 features", B.1): lib/type/api.js sets it when evaluated (app.js imports it
+ * statically), and TextLayer.layout() / baseBounds() / renderBase() go to it: { layout(layer), bounds(layer),
+ * render(layer) }.
+ */
+let textBackend = null;
+export function setTextBackend(backend) {
+  textBackend = backend;
+}
+function backend() {
+  if (!textBackend) throw new Error('The type facade (lib/type/api.js) is not loaded');
+  return textBackend;
+}
+
+const CHAR_OF_FONT = { family: 'fontFamily', weight: 'fontWeight', italic: 'fontItalic', size: 'size', color: 'color', underline: 'underline' };
+const sameValue = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+const setKeys = (style, patch) => {
+  const out = { ...style };
+  for (const [k, v] of Object.entries(patch)) {
+    if (v === undefined) delete out[k];
+    else out[k] = v;
+  }
+  return out;
+};
+
+/**
+ * The content and type options after assigning a 0.3 font object (A, "Compatibility"): only the fields that differ
+ * from the current flat font are applied, to the whole text (an empty text's insertion style too); letterSpacing and
+ * lineHeight are converted with the size being set. A missing `orientation` means horizontal (0.3 code deletes it).
+ */
+export function applyLegacyFont(content, typeOptions, f) {
+  const font = f && typeof f === 'object' ? f : {};
+  const cur = legacyFont(content, typeOptions);
+  const size = Number.isFinite(font.size) && font.size > 0 ? font.size : cur.size;
+  const char = {};
+  for (const [k, key] of Object.entries(CHAR_OF_FONT)) {
+    if (!(k in font) || sameValue(font[k], cur[k])) continue;
+    char[key] = k === 'italic' || k === 'underline' ? !!font[k] : font[k];
+  }
+  if ('stroke' in font && !sameValue(font.stroke, cur.stroke)) char.stroke = font.stroke ? { color: font.stroke.color, width: font.stroke.width } : null;
+  if ('letterSpacing' in font && !sameValue(font.letterSpacing, cur.letterSpacing)) char.tracking = Number.isFinite(font.letterSpacing) && font.letterSpacing ? (font.letterSpacing * 1000) / size : undefined;
+  const para = {};
+  if ('align' in font && font.align !== cur.align) para.align = font.align;
+  let next = content;
+  if ('lineHeight' in font && Number.isFinite(font.lineHeight) && !sameValue(font.lineHeight, cur.lineHeight)) {
+    // 0.3's line height is proportional to the size: auto leading at lineHeight x 100 %
+    char.leading = undefined;
+    next = mapPara(next, (style, r) => ({ ...style, justification: { ...r.justification, autoLeading: tidyNumber(font.lineHeight * 100) } }));
+  }
+  if (Object.keys(char).length) next = mapChar(next, (style) => setKeys(style, char));
+  if (Object.keys(para).length) next = mapPara(next, (style) => setKeys(style, para));
+  const orientation = font.orientation && font.orientation !== 'horizontal' ? font.orientation : 'horizontal';
+  const options = (typeOptions?.orientation ?? 'horizontal') === orientation ? typeOptions : normalizeTypeOptions({ ...typeOptions, orientation });
+  return { content: next, typeOptions: options };
+}
+
+const fontMemo = new WeakMap(); // content -> { typeOptions, font }
+
 export class TextLayer extends Layer {
+  /**
+   * props: the 0.4 fields { content, typeOptions, height } or 0.3's { text, font } (upgraded through fromLegacy), plus
+   * x, y, width (null: point text), rotation, transform, pathText.
+   */
   constructor(props = {}) {
-    super('text', { name: props.text?.split('\n')[0]?.slice(0, 30) || 'Text', ...props });
+    let content, typeOptions;
+    if (props.content && typeof props.content === 'object') {
+      content = Object.isFrozen(props.content) ? props.content : normalize(props.content);
+      typeOptions = normalizeTypeOptions(props.typeOptions ?? (props.font?.orientation ? { orientation: props.font.orientation } : {}));
+    } else ({ content, typeOptions } = fromLegacy({ text: props.text ?? '', font: { ...DEFAULT_TEXT_STYLE, ...(props.font ?? {}) } }));
+    super('text', { name: plainText(content).split('\n')[0]?.slice(0, 30) || 'Text', ...props });
     this.x = props.x ?? 0;
     this.y = props.y ?? 0;
     this.width = props.width ?? null; // null: point text (grows), number: paragraph box
-    this.text = props.text ?? '';
-    this.font = { ...DEFAULT_TEXT_STYLE, ...(props.font ?? {}) };
+    this.height = props.height ?? null; // null: the box grows with the text, number: a fixed box (0.4)
+    // the rich-text model (lib/type/model.js): the truth; `text` and `font` below are 0.3's flat views of it
+    this.content = content;
+    this.typeOptions = typeOptions;
     this.rotation = props.rotation ?? 0;
     // optional affine matrix [a, b, c, d, e, f] in document space (free transform keeps text editable)
     this.transform = props.transform ?? null;
@@ -183,42 +333,35 @@ export class TextLayer extends Layer {
     this.pathText = props.pathText ?? null;
     this._cache = null;
   }
-  /** Lines after wrapping, with their measured widths. */
-  layout(ctx = measureContext()) {
-    const ext = textExtensionFor(this);
-    if (ext) return ext.layout(this, ctx);
-    ctx.font = cssFont(this.font);
-    const lineHeight = this.font.size * this.font.lineHeight;
-    const words = this.text.split('\n');
-    const lines = [];
-    const spacing = this.font.letterSpacing;
-    const widthOf = (s) => ctx.measureText(s).width + Math.max(0, s.length - 1) * spacing;
-    for (const para of words) {
-      if (this.width === null || !para) {
-        lines.push({ text: para, width: widthOf(para) });
-        continue;
-      }
-      let line = '';
-      for (const word of para.split(' ')) {
-        const next = line ? `${line} ${word}` : word;
-        if (widthOf(next) <= this.width || !line) line = next;
-        else {
-          lines.push({ text: line, width: widthOf(line) });
-          line = word;
-        }
-      }
-      lines.push({ text: line, width: widthOf(line) });
+  /** The plain text; assigning keeps the formatting outside the changed span (model replacePlain). */
+  get text() {
+    return plainText(this.content);
+  }
+  set text(s) {
+    this.content = replacePlain(this.content, typeof s === 'string' ? s : String(s ?? ''));
+  }
+  /** 0.3's flat TextStyle of the first character (a new object; mutating it changes nothing). */
+  get font() {
+    let m = fontMemo.get(this.content);
+    if (!m || m.typeOptions !== this.typeOptions) {
+      m = { typeOptions: this.typeOptions, font: legacyFont(this.content, this.typeOptions) };
+      fontMemo.set(this.content, m);
     }
-    const width = this.width ?? Math.max(1, ...lines.map((l) => l.width));
-    return { lines, lineHeight, width: Math.ceil(width), height: Math.ceil(lines.length * lineHeight), ascent: this.font.size * 0.8 };
+    return { ...m.font, stroke: m.font.stroke ? { ...m.font.stroke } : null };
+  }
+  /** Applies the fields that differ from the current font to the whole text (flattens that attribute on mixed text). */
+  set font(f) {
+    const r = applyLegacyFont(this.content, this.typeOptions, f);
+    this.content = r.content;
+    this.typeOptions = r.typeOptions;
+  }
+  /** The displayed layout (lib/type/api.js: a text extension, else the engine). */
+  layout() {
+    return backend().layout(this);
   }
   /** Bounds before the free-transform matrix. */
   baseBounds() {
-    const ext = textExtensionFor(this);
-    if (ext) return ext.baseBounds(this);
-    const l = this.layout();
-    const pad = Math.ceil(this.font.size * 0.3) + (this.font.stroke?.width ?? 0);
-    return { x: Math.floor(this.x - pad), y: Math.floor(this.y - pad), width: Math.ceil(l.width + pad * 2), height: Math.ceil(l.height + pad * 2) };
+    return backend().bounds(this);
   }
   bounds() {
     const b = this.baseBounds();
@@ -243,45 +386,7 @@ export class TextLayer extends Layer {
   }
   /** Renders the text without the transform matrix: { canvas, x, y }. */
   renderBase() {
-    const ext = textExtensionFor(this);
-    if (ext) return ext.renderBase(this);
-    const l = this.layout();
-    const b = this.baseBounds();
-    const canvas = createCanvas(b.width, b.height);
-    const ctx = canvas.getContext('2d');
-    ctx.font = cssFont(this.font);
-    ctx.textBaseline = 'alphabetic';
-    ctx.fillStyle = rgbaToHex(parseColor(this.font.color), true);
-    const ox = this.x - b.x, oy = this.y - b.y;
-    l.lines.forEach((line, i) => {
-      let x = ox;
-      if (this.font.align === 'center') x = ox + (l.width - line.width) / 2;
-      else if (this.font.align === 'right') x = ox + l.width - line.width;
-      const y = oy + l.ascent + i * l.lineHeight;
-      drawSpaced(ctx, line.text, x, y, this.font.letterSpacing, this.font.stroke);
-      if (this.font.underline) {
-        ctx.fillRect(x, y + this.font.size * 0.12, line.width, Math.max(1, this.font.size / 16));
-      }
-    });
-    return { canvas, x: b.x, y: b.y };
-  }
-}
-
-function drawSpaced(ctx, text, x, y, spacing, stroke) {
-  const paint = (t, px) => {
-    if (stroke && stroke.width > 0) {
-      ctx.lineWidth = stroke.width;
-      ctx.strokeStyle = stroke.color ?? '#000';
-      ctx.lineJoin = 'round';
-      ctx.strokeText(t, px, y);
-    }
-    ctx.fillText(t, px, y);
-  };
-  if (!spacing) return paint(text, x);
-  let cx = x;
-  for (const ch of text) {
-    paint(ch, cx);
-    cx += ctx.measureText(ch).width + spacing;
+    return backend().render(this);
   }
 }
 
@@ -332,79 +437,17 @@ export function pathBounds(path) {
   return x1 === Infinity ? null : { x: x1, y: y1, width: Math.max(1, x2 - x1), height: Math.max(1, y2 - y1) };
 }
 
+/**
+ * 0.3-compatible delegates of lib/paint.js (G.3): `rect` is the placement box in ctx space and from / to are in that
+ * same space (origin [0, 0]). FillLayer, path-ops.js renderShapeLayer and the Gradient tool draw through them.
+ */
 export function makePaint(ctx, paint, rect) {
-  if (!paint) return 'transparent';
-  if (paint.type === 'solid') return rgbaToHex(parseColor(paint.color), true);
-  if (paint.type === 'gradient') return makeGradient(ctx, paint.gradient, rect);
-  if (paint.type === 'pattern' && paint.pattern?.canvas) {
-    const p = ctx.createPattern(paint.pattern.canvas, 'repeat');
-    if (p && paint.pattern.scale && paint.pattern.scale !== 1) p.setTransform(new DOMMatrix().scale(paint.pattern.scale));
-    return p ?? 'transparent';
-  }
-  return 'transparent';
+  return paintStyle(ctx, paint, rect, { origin: [0, 0] });
 }
 
 /** Builds a canvas gradient; `from`/`to` are in the same space as rect (absolute), defaulting to rect's left->right. */
 export function makeGradient(ctx, g, rect) {
-  const from = g.from ?? [rect.x, rect.y + rect.height / 2];
-  const to = g.to ?? [rect.x + rect.width, rect.y + rect.height / 2];
-  let grad;
-  const kind = g.kind ?? 'linear';
-  if (kind === 'radial' || kind === 'diamond') {
-    const r = Math.hypot(to[0] - from[0], to[1] - from[1]) || 1;
-    grad = ctx.createRadialGradient(from[0], from[1], 0, from[0], from[1], r);
-  } else if (kind === 'angle') {
-    grad = ctx.createConicGradient(Math.atan2(to[1] - from[1], to[0] - from[0]), from[0], from[1]);
-  } else if (kind === 'reflected') {
-    const dx = to[0] - from[0], dy = to[1] - from[1];
-    grad = ctx.createLinearGradient(from[0] - dx, from[1] - dy, to[0], to[1]);
-  } else grad = ctx.createLinearGradient(from[0], from[1], to[0], to[1]);
-  const stops = (g.stops?.length ? g.stops : [{ pos: 0, color: '#000000' }, { pos: 1, color: '#ffffff' }]).slice().sort((a, b) => a.pos - b.pos);
-  const list = g.reverse ? stops.map((s) => ({ pos: 1 - s.pos, color: s.color })).sort((a, b) => a.pos - b.pos) : stops;
-  if (kind === 'diamond') return diamondPattern(ctx, list, from, to, rect);
-  if (kind === 'reflected') {
-    // mirror the stops around the middle
-    const half = list.map((s) => ({ pos: 0.5 + s.pos / 2, color: s.color }));
-    const mirrored = list.map((s) => ({ pos: 0.5 - s.pos / 2, color: s.color }));
-    for (const s of [...mirrored, ...half].sort((a, b) => a.pos - b.pos)) grad.addColorStop(Math.min(1, Math.max(0, s.pos)), rgbaToHex(parseColor(s.color), true));
-  } else for (const s of list) grad.addColorStop(Math.min(1, Math.max(0, s.pos)), rgbaToHex(parseColor(s.color), true));
-  return grad;
-}
-
-/** Canvas 2D has no diamond gradient: render it per pixel (L1 distance in the drag frame) as a pattern. */
-function diamondPattern(ctx, stops, from, to, rect) {
-  const lutCanvas = createCanvas(256, 1);
-  const lctx = lutCanvas.getContext('2d');
-  const lg = lctx.createLinearGradient(0, 0, 256, 0);
-  for (const s of stops) lg.addColorStop(Math.min(1, Math.max(0, s.pos)), rgbaToHex(parseColor(s.color), true));
-  lctx.fillStyle = lg;
-  lctx.fillRect(0, 0, 256, 1);
-  const lut = lctx.getImageData(0, 0, 256, 1).data;
-  const w = Math.max(1, Math.ceil(rect.width)), h = Math.max(1, Math.ceil(rect.height));
-  const c = createCanvas(w, h);
-  const cctx = c.getContext('2d');
-  const img = cctx.createImageData(w, h);
-  const dx = to[0] - from[0], dy = to[1] - from[1];
-  const len = Math.hypot(dx, dy) || 1;
-  const ux = dx / len, uy = dy / len;
-  const d = img.data;
-  for (let y = 0; y < h; y++) {
-    const py = rect.y + y + 0.5 - from[1];
-    for (let x = 0; x < w; x++) {
-      const px = rect.x + x + 0.5 - from[0];
-      const u = px * ux + py * uy, v = -px * uy + py * ux;
-      const t = Math.min(255, Math.round(((Math.abs(u) + Math.abs(v)) / len) * 255));
-      const o = (y * w + x) * 4, l = t * 4;
-      d[o] = lut[l];
-      d[o + 1] = lut[l + 1];
-      d[o + 2] = lut[l + 2];
-      d[o + 3] = lut[l + 3];
-    }
-  }
-  cctx.putImageData(img, 0, 0);
-  const pattern = ctx.createPattern(c, 'no-repeat');
-  pattern.setTransform(new DOMMatrix().translate(rect.x, rect.y));
-  return pattern;
+  return paintStyle(ctx, { type: 'gradient', gradient: g }, rect, { origin: [0, 0] });
 }
 
 export class ShapeLayer extends Layer {
@@ -417,11 +460,9 @@ export class ShapeLayer extends Layer {
     this.shapeProps = props.shapeProps ?? {};
     this._cache = null;
   }
+  /** The rendered box, padded for the stroke (path-ops.js shapeBounds, J.5: shapes-live pads every stroke option). */
   bounds() {
-    const b = pathBounds(this.path);
-    if (!b) return null;
-    const pad = Math.ceil((this.stroke?.width ?? 0) + 1);
-    return { x: Math.floor(b.x) - pad, y: Math.floor(b.y) - pad, width: Math.ceil(b.width) + pad * 2 + 1, height: Math.ceil(b.height) + pad * 2 + 1 };
+    return shapeBounds(this);
   }
   render() {
     if (this._cache && this._cache.version === this.version) return this._cache;
@@ -511,7 +552,9 @@ export class Document {
     this.selected = new Set();
     this.selection = null; // Selection (lib/selection.js)
     this.savedSelection = null;
-    this.guides = [];
+    // document-level collections saved in .pigment (guides, the ruler origin, ...): lib/doc-store.js. doc.guides is
+    // an accessor on it (below)
+    this.store = new DocStore(this);
     this.channels = []; // saved alpha channels { id, name, mask: Uint8ClampedArray }
     this.paths = []; // saved vector paths { id, name, path }
     this.history = null; // set by lib/history.js
@@ -525,6 +568,14 @@ export class Document {
     this.depth = opts.depth ?? 8; // bits per channel: 8 | 16 | 32 (lib/depth.js keeps RasterLayer.deep in step)
     this.colorTable = opts.colorTable ?? null; // indexed mode: [[r, g, b], ...] up to 256 entries (+ transparentIndex in duotone/indexed options)
     this.duotone = opts.duotone ?? null; // { type: 'monotone'|'duotone'|'tritone'|'quadtone', inks: [{ name, color: '#rrggbb', curve: [[x, y], ...] }] }
+  }
+
+  /** The guides (a frozen array of { id, axis, pos, color? }); assigning a list stores it without history. */
+  get guides() {
+    return this.store.get('guides');
+  }
+  set guides(list) {
+    this.store.setRaw('guides', list);
   }
 
   onChange(fn) {
@@ -670,7 +721,8 @@ export class Document {
       const d = layer.describe();
       if (layer.type === 'raster') Object.assign(d, { x: layer.x, y: layer.y, width: layer.canvas.width, height: layer.canvas.height, deep: layer.deep?.type ?? null });
       if (layer.type === 'group') Object.assign(d, { expanded: layer.expanded, children: layer.children.filter(saved).map(walk) });
-      if (layer.type === 'text') Object.assign(d, { x: layer.x, y: layer.y, width: layer.width, text: layer.text, font: { ...layer.font }, rotation: layer.rotation, transform: layer.transform ? layer.transform.slice() : null, pathText: layer.pathText ? JSON.parse(JSON.stringify(layer.pathText)) : null });
+      // version 3: the rich-text content is the truth; `text` and `font` are written for Pigment 0.3 readers (the first run)
+      if (layer.type === 'text') Object.assign(d, { x: layer.x, y: layer.y, width: layer.width, height: layer.height ?? null, rotation: layer.rotation, transform: layer.transform ? layer.transform.slice() : null, pathText: layer.pathText ? JSON.parse(JSON.stringify(layer.pathText)) : null, content: JSON.parse(JSON.stringify(layer.content)), typeOptions: { ...layer.typeOptions }, text: layer.text, font: layer.font });
       const registered = LAYER_TYPES.get(layer.type);
       if (registered?.describe) Object.assign(d, registered.describe(layer));
       if (layer.type === 'shape') Object.assign(d, { path: JSON.parse(JSON.stringify(layer.path)), fill: layer.fill, stroke: layer.stroke, shapeKind: layer.shapeKind, shapeProps: layer.shapeProps });
@@ -679,7 +731,7 @@ export class Document {
       return d;
     };
     return {
-      version: 2,
+      version: 3,
       app: 'pigment',
       width: this.width,
       height: this.height,
@@ -690,7 +742,9 @@ export class Document {
       duotone: this.duotone ? JSON.parse(JSON.stringify(this.duotone)) : null,
       name: this.name,
       active: this.active?.id ?? null,
-      guides: this.guides.map((g) => ({ ...g })),
+      // the store is the truth (version 3); the plain guides are written too, for Pigment 0.3 readers
+      store: this.store.toJSON(),
+      guides: this.guides.map((g) => ({ axis: g.axis, pos: g.pos })),
       channels: this.channels.map((c) => ({ id: c.id, name: c.name })),
       paths: this.paths.map((p) => ({ id: p.id, name: p.name, path: p.path })),
       workPath: this.workPath?.subpaths?.length ? JSON.parse(JSON.stringify(this.workPath)) : null,

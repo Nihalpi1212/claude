@@ -516,6 +516,58 @@ export function shapeTarget(app, layer) {
   };
 }
 
+// ---- path target kinds and path buttons (ARCHITECTURE.md "0.4 features", L.4; E19) --------------------------------
+// Landed by the 0.4 skeleton; shapes-live keeps these registries and the createShapeLayer export.
+//   registerPathTargetKind(kind, { fromRef(app, ref) -> target | null, fromActive(app, doc) -> target | null,
+//     rows?(app, doc) -> PathsPanelRow[] ({ key, ap, name, path, italic? }), remove?(app, target),
+//     rename?(app, target, name), toSaved?(app, target) -> { name, path } })
+// A target is { kind, key, label, doc, get(), valid(), commit(path, label) } and may define preview(draft) and
+// endPreview(original); without them the vector tools draw the draft as an overlay (the work path's behaviour).
+// activePathTarget, visibleTargets, currentPathTarget, path:delete, path:save, path:rename and the Paths panel
+// consult the registered kinds after the built-ins (work, saved, shape).
+const PATH_KINDS = new Map();
+const BUILTIN_KINDS = new Set(['work', 'saved', 'shape']);
+
+export function registerPathTargetKind(kind, def) {
+  if (typeof kind !== 'string' || BUILTIN_KINDS.has(kind) || !def || typeof def.fromRef !== 'function') throw new Error('registerPathTargetKind(kind, { fromRef, fromActive, ... })');
+  PATH_KINDS.set(kind, def);
+}
+
+/** The registered path target kinds: [kind, def][] in registration order. */
+export function pathTargetKinds() {
+  return [...PATH_KINDS.entries()];
+}
+
+const kindCall = (fn, ...args) => {
+  try {
+    return fn?.(...args) ?? null;
+  } catch (err) {
+    console.warn('path target kind failed', err);
+    return null;
+  }
+};
+
+/** Buttons added after Selection / Fill / Stroke in the path tools' options bar: key -> { key, label, icon, run(app), when?(tool) }. */
+const PATH_BUTTON_SPECS = new Map();
+const PATH_BUTTON_TOOLS = new Set();
+const pathButtonOption = (b) => ({ kind: 'button', key: b.key, label: b.label, icon: b.icon, onClick: (t) => b.run(t.app), ...(b.when ? { when: b.when } : {}), pathButton: true });
+
+/** Inserts or replaces the registered buttons in a tool's options (after the built-in path buttons). */
+function placePathButtons(tool) {
+  tool.options = tool.options.filter((o) => !o.pathButton);
+  const at = tool.options.findIndex((o) => o.key === 'strokePath');
+  tool.options.splice(at < 0 ? tool.options.length : at + 1, 0, ...[...PATH_BUTTON_SPECS.values()].map(pathButtonOption));
+}
+
+export function registerPathButton(b) {
+  if (!b || typeof b.key !== 'string' || typeof b.run !== 'function') throw new Error('registerPathButton({ key, label, icon, run, when? })');
+  PATH_BUTTON_SPECS.set(b.key, b);
+  for (const tool of PATH_BUTTON_TOOLS) {
+    placePathButtons(tool);
+    if (tool.app.tools?.active === tool) tool.app.tools.renderOptions();
+  }
+}
+
 /** The path chosen in the Paths panel (app.ui.activePath) for the current document, or null. */
 export function activePathTarget(app) {
   const doc = app.doc;
@@ -530,12 +582,14 @@ export function activePathTarget(app) {
     const l = doc.find(ap.layerId);
     return l?.type === 'shape' && l === doc.active ? shapeTarget(app, l) : null;
   }
-  return null;
+  const def = PATH_KINDS.get(ap.kind);
+  const t = def ? kindCall(def.fromRef, app, ap) : null;
+  return t && t.valid?.() !== false ? t : null;
 }
 
-/** Selects a path in the Paths panel: null | { kind: 'work' } | { kind: 'saved', id } | { kind: 'shape', layerId }. */
+/** Selects a path in the Paths panel: null | { kind: 'work' } | { kind: 'saved', id } | { kind: 'shape', layerId } | a registered kind's ref. */
 export function setActivePath(app, ap) {
-  app.ui.activePath = ap && app.doc ? { kind: ap.kind, id: ap.id, layerId: ap.layerId, doc: app.doc.id } : null;
+  app.ui.activePath = ap && app.doc ? { ...ap, kind: ap.kind, id: ap.id, layerId: ap.layerId, doc: app.doc.id } : null;
   app.emit('path:selected', app.ui.activePath);
   app.view?.invalidate();
   app.commands.invalidate();
@@ -556,6 +610,7 @@ export function visibleTargets(app) {
   if (doc.active?.type === 'shape') add(shapeTarget(app, doc.active));
   add(activePathTarget(app));
   if (doc.workPath && !isEmptyPath(doc.workPath)) add(workTarget(doc));
+  for (const [, def] of PATH_KINDS) add(kindCall(def.fromActive, app, doc));
   return out;
 }
 
@@ -567,13 +622,20 @@ export function currentPathTarget(app) {
   if (ap && !isEmptyPath(ap.get())) return ap;
   if (doc.workPath && !isEmptyPath(doc.workPath)) return workTarget(doc);
   if (doc.active?.type === 'shape' && !isEmptyPath(doc.active.path)) return shapeTarget(app, doc.active);
+  for (const [, def] of PATH_KINDS) {
+    const t = kindCall(def.fromActive, app, doc);
+    if (t && !isEmptyPath(t.get())) return t;
+  }
   return null;
 }
 
 const pathOf = (t) => (state.preview?.key === t.key ? state.preview.path : t.get());
 
 function showPreview(app, target, draft) {
-  if (target.kind === 'shape') {
+  if (typeof target.preview === 'function') {
+    target.preview(draft);
+    app.view?.invalidate();
+  } else if (target.kind === 'shape') {
     target.layer.path = draft;
     target.layer.touch();
     app.doc.changed('pixels', { layer: target.layer });
@@ -584,7 +646,8 @@ function showPreview(app, target, draft) {
 }
 
 function endPreview(app, target, original) {
-  if (target.kind === 'shape') {
+  if (typeof target.endPreview === 'function') target.endPreview(original);
+  else if (target.kind === 'shape') {
     target.layer.path = original;
     target.layer.touch();
     app.doc.changed('pixels', { layer: target.layer });
@@ -636,7 +699,8 @@ function shapeStyle(tool) {
   return { fill: fill ?? (stroke ? null : { type: 'solid', color: app.settings.foreground }), stroke };
 }
 
-function createShapeLayer(app, path, { name, label, style, kind = 'path', props = {} }) {
+/** Adds a shape layer (one history entry) above the active layer and makes it active. Exported for path:make-shape (L.4). */
+export function createShapeLayer(app, path, { name, label, style, kind = 'path', props = {} }) {
   const doc = app.doc;
   const layer = new ShapeLayer({ name: nextLayerName(doc, name), path: clonePath(path), fill: style.fill, stroke: style.stroke, shapeKind: kind, shapeProps: props });
   // the Move tool keeps a shape's offset in x/y (see report): start them at 0
@@ -942,6 +1006,12 @@ const PATH_BUTTONS = [
   { kind: 'button', key: 'strokePath', label: 'Stroke', icon: 'brush', onClick: (t) => t.app.commands.run('path:stroke', {}, 'toolbar') },
 ];
 
+/**
+ * `exclude` of the snap calls below (F): the shape layer being drawn into or edited, so a drag never snaps to its own
+ * moving bounds. No `axis`: Shift in these tools constrains by angle (45°) or proportion, not to one axis.
+ */
+const snapExclude = (target) => (target?.layer ? [target.layer] : []);
+
 class VectorTool extends Tool {
   constructor(app, def) {
     super(app, { cursor: 'crosshair', ...def });
@@ -1072,12 +1142,14 @@ export class ShapeTool extends VectorTool {
     this.drag = null;
   }
   onPointerDown(p) {
-    this.drag = { start: { x: p.x, y: p.y }, current: { x: p.x, y: p.y }, shift: p.shift, alt: p.alt, moved: false };
+    const sp = this.app.snap?.point(p, { source: 'shape', pointer: p, exclude: snapExclude(this.drawTarget()), view: this.view }) ?? p; // snap (lib/snap.js)
+    this.drag = { start: { x: sp.x, y: sp.y }, current: { x: sp.x, y: sp.y }, shift: p.shift, alt: p.alt, moved: false };
   }
   onPointerMove(p, dragging) {
     if (!dragging || !this.drag) return;
     const d = this.drag;
-    d.current = { x: p.x, y: p.y };
+    const sp = this.app.snap?.point(p, { source: 'shape', pointer: p, exclude: snapExclude(this.drawTarget()), view: this.view }) ?? p; // snap (lib/snap.js)
+    d.current = { x: sp.x, y: sp.y };
     d.shift = p.shift;
     d.alt = p.alt;
     if (Math.hypot(p.x - d.start.x, p.y - d.start.y) * this.view.zoom >= 3) d.moved = true;
@@ -1289,6 +1361,8 @@ export class PenTool extends VectorTool {
       }
       let q = { x: p.x, y: p.y };
       if (p.shift) q = snap45(last, q);
+      const sq = this.app.snap?.point(q, { source: 'pen', pointer: p, exclude: snapExclude(d.target), view: this.view }) ?? q; // snap (lib/snap.js)
+      q = { x: sq.x, y: sq.y };
       sp.points.push(rp(q));
       d.drag = { index: sp.points.length - 1, moved: false };
       this.preview();
@@ -1777,6 +1851,8 @@ export class PathSelectionTool extends SelectionToolBase {
       hint: 'Click a path to select it and drag to move it (Shift adds, Alt-drag duplicates). Arrow keys nudge, Delete removes.',
       options: [...PATH_BUTTONS],
     });
+    PATH_BUTTON_TOOLS.add(this);
+    placePathButtons(this);
     this.reshapes = false;
   }
   /** Moving every subpath keeps a live shape parametric; moving some of them turns it into a path. */
@@ -1840,6 +1916,8 @@ export class PathSelectionTool extends SelectionToolBase {
   onPointerMove(p, dragging) {
     const d = this.drag;
     if (!dragging || !d) return;
+    const sp = this.app.snap?.point(p, { source: 'path', pointer: p, exclude: snapExclude(d.target), view: this.view }) ?? p; // snap (lib/snap.js)
+    p = { ...p, x: sp.x, y: sp.y };
     let dx = p.x - d.start.x, dy = p.y - d.start.y;
     if (!d.moved && Math.hypot(dx, dy) * this.view.zoom < 2) return;
     if (p.shift) {
@@ -1882,6 +1960,8 @@ export class DirectSelectionTool extends SelectionToolBase {
       hint: 'Click or drag around anchor points to select them, drag to move them or their handles (Alt-drag a handle to break the symmetry). Drag a curve to reshape it.',
       options: [...PATH_BUTTONS],
     });
+    PATH_BUTTON_TOOLS.add(this);
+    placePathButtons(this);
     this.reshapes = true;
     this.marquee = null;
   }
@@ -2178,8 +2258,25 @@ async function pathFromSelection(app, arg) {
   setActivePath(app, { kind: 'work' });
 }
 
+/** A registered kind's target chosen in the Paths panel that can be saved as a path (toSaved), or null. */
+function savableKindTarget(app) {
+  const t = activePathTarget(app);
+  return t && !BUILTIN_KINDS.has(t.kind) && PATH_KINDS.get(t.kind)?.toSaved ? t : null;
+}
+
 async function savePath(app, arg) {
   const doc = app.doc;
+  const kt = (!doc.workPath || isEmptyPath(doc.workPath)) ? savableKindTarget(app) : null;
+  if (kt) {
+    // a registered kind (the vector mask) saves a copy of its path: the target itself stays
+    const saved = kindCall(PATH_KINDS.get(kt.kind).toSaved, app, kt);
+    if (!saved?.path || isEmptyPath(saved.path)) return;
+    const name = (typeof arg === 'string' ? arg : arg?.name) || saved.name || nextPathName(doc);
+    const id = newId('P');
+    recordPaths(doc, 'Save Path', { paths: [...doc.paths, { id, name: String(name).trim(), path: clonePath(saved.path) }] });
+    setActivePath(app, { kind: 'saved', id });
+    return;
+  }
   if (!doc.workPath || isEmptyPath(doc.workPath)) return app.dialogs.toast('There is no work path to save', { kind: 'error' });
   let name = typeof arg === 'string' ? arg : arg?.name;
   if (!name) {
@@ -2203,6 +2300,7 @@ function newPath(app, arg) {
 function deletableTarget(app) {
   const t = activePathTarget(app);
   if (t?.kind === 'saved' || (t?.kind === 'work' && app.doc.workPath)) return t;
+  if (t && !BUILTIN_KINDS.has(t.kind) && PATH_KINDS.get(t.kind)?.remove) return t;
   if (!t && app.doc?.workPath && !isEmptyPath(app.doc.workPath)) return workTarget(app.doc);
   return null;
 }
@@ -2211,14 +2309,21 @@ function deletePath(app) {
   const doc = app.doc;
   const t = deletableTarget(app);
   if (!t) return app.dialogs.toast('Select a saved path or the work path to delete', { kind: 'error' });
-  if (t.kind === 'saved') recordPaths(doc, 'Delete Path', { paths: doc.paths.filter((p) => p.id !== t.id) });
+  if (!BUILTIN_KINDS.has(t.kind)) kindCall(PATH_KINDS.get(t.kind)?.remove, app, t);
+  else if (t.kind === 'saved') recordPaths(doc, 'Delete Path', { paths: doc.paths.filter((p) => p.id !== t.id) });
   else recordPaths(doc, 'Delete Work Path', { workPath: null });
   setActivePath(app, null);
   clearSel();
 }
 
-function renamePath(app, { id, name } = {}) {
+function renamePath(app, { id, name, kind } = {}) {
   const doc = app.doc;
+  if (doc && name?.trim() && kind && !BUILTIN_KINDS.has(kind)) {
+    // a registered kind's target: the chosen one (rename is offered on the row of the chosen target)
+    const t = activePathTarget(app);
+    if (t?.kind === kind) kindCall(PATH_KINDS.get(kind)?.rename, app, t, name.trim());
+    return;
+  }
   if (!doc || !name?.trim() || !doc.paths.some((p) => p.id === id)) return;
   recordPaths(doc, 'Rename Path', { paths: doc.paths.map((p) => (p.id === id ? { ...p, name: name.trim() } : p)) });
 }
@@ -2300,7 +2405,7 @@ export function install(app) {
     'path:fill': { enabled: hasPath, label: 'Fill Path…', run: (arg) => fillPathCommand(app, arg) },
     'path:stroke': { enabled: hasPath, label: 'Stroke Path…', run: (arg) => strokePathCommand(app, arg) },
     'path:from-selection': { enabled: () => !!app.doc?.selection && !app.doc.selection.isEmpty, label: 'Make Work Path…', run: (arg) => pathFromSelection(app, arg) },
-    'path:save': { enabled: () => !!app.doc?.workPath && !isEmptyPath(app.doc.workPath), label: 'Save Path…', run: (arg) => savePath(app, arg) },
+    'path:save': { enabled: () => (!!app.doc?.workPath && !isEmptyPath(app.doc.workPath)) || !!(app.doc && savableKindTarget(app)), label: 'Save Path…', run: (arg) => savePath(app, arg) },
     'path:new': { enabled: has, label: 'New Path', run: (arg) => newPath(app, arg) },
     'path:delete': { enabled: () => !!app.doc && !!deletableTarget(app), label: 'Delete Path', run: () => deletePath(app) },
     'path:rename': { enabled: has, run: (arg) => renamePath(app, arg) },

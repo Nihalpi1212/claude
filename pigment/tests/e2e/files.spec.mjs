@@ -41,7 +41,7 @@ test('saves a .pigment document and reopens it with layers, masks and styles int
     red.touch();
     d.setActive(red);
     app.commands.run('layer:mask', 'reveal-all', 'api');
-    d.guides.push({ axis: 'x', pos: 33 });
+    d.guides = [...d.guides, { axis: 'x', pos: 33 }];
     window.__pigmentTest.nextSavePath = 'mem:/saved.pigment';
   });
   await runAwait(page, 'file:save-as');

@@ -2,7 +2,7 @@
 //
 // - app.actions is the engine: sets › actions › steps (shape in actions/model.js), kept in
 //   settings.actions; the built-in "Default Actions" set is re-created when no set is left.
-// - Recording listens to 'command:done' (lib/commands.js). A thin wrapper around commands.run tracks
+// - Recording listens to 'command:done' (lib/commands.js). A command observer (commands.observe) tracks
 //   which commands are running so that only the outermost command becomes a step: a command that runs
 //   others (Edit > Transform > Flip runs edit:transform; Enter commits a crop through image:crop-rect)
 //   would otherwise be recorded twice. Free Transform is recorded when its session commits
@@ -12,8 +12,10 @@
 //   another action of the set depending on the document state.
 // The panel is lib/panels/actions.js; Batch and the other File > Automate commands are lib/automate.js.
 import { COMMAND_LABELS, MENU_KEYS, RENDERER_KEYS, parseAccelerator } from '../../shared/keymap.js';
+import { UNDO_LIKE } from './sessions.js';
 import { bridge, isMac } from './bridge.js';
 import { canvasIsBlank } from './document.js';
+import { hasEnabledStyles } from '../../shared/pixels/styles.js';
 import { Selection } from './selection.js';
 import { baseName, extOf, isLayeredPath } from './io.js';
 import * as M from './actions/model.js';
@@ -132,7 +134,7 @@ class ActionsEngine {
             mask: !!l.mask,
             visible: !!l.visible,
             locked: !!(l.locked?.all || l.locked?.pixels || l.locked?.position || l.locked?.transparency),
-            styles: !!l.styles && Object.values(l.styles).some((s) => s?.enabled),
+            styles: hasEnabledStyles(l.styles),
             group: !!l.isGroup,
             clip: !!l.clip,
             empty: l.type === 'raster' && canvasIsBlank(l.canvas),
@@ -303,7 +305,7 @@ class ActionsEngine {
   menuCommands() {
     const out = [];
     for (const id of this.app.commands.commands.keys()) {
-      if (M.isIgnoredCommand(id) || /^(actions:|layer:select$|layer:move-to|layer:smart-filter$|image:crop-rect|file:open-paths|edit:transform$|filter:apply$|image:adjust$)/.test(id)) continue;
+      if (M.isIgnoredCommand(id, this.app.commands.commands.get(id)) || /^(actions:|layer:select$|layer:move-to|layer:smart-filter$|image:crop-rect|file:open-paths|edit:transform$|filter:apply$|image:adjust$)/.test(id)) continue;
       if (this.app.stubbed?.includes(id)) continue;
       const group = GROUP_NAMES[/^([a-z]+):/.exec(id)?.[1]] ?? 'Other';
       out.push({ id, label: this.labelFor(id), group });
@@ -321,7 +323,7 @@ class ActionsEngine {
       this.app.dialogs.toast(`Unknown command: ${id}`, { kind: 'error' });
       return null;
     }
-    if (M.isIgnoredCommand(id)) {
+    if (M.isIgnoredCommand(id, this.app.commands.commands.get(id))) {
       this.app.dialogs.toast(`${this.labelFor(id)} cannot be part of an action`, { kind: 'error' });
       return null;
     }
@@ -536,7 +538,7 @@ class ActionsEngine {
       this.noteLayers(d);
     }
     if (!fr) return;
-    if (!fr.nested && e.source !== 'action' && /^edit:(undo|redo|step-backward|step-forward)$/.test(e.id)) return this.followUndo(d);
+    if (!fr.nested && e.source !== 'action' && (UNDO_LIKE.test(e.id) || this.app.commands.commands.get(e.id)?.undoLike)) return this.followUndo(d);
     const entryNow = d?.history?.entries[d.history.index] ?? null;
     if (fr.nested && fr.parent) {
       // Part of another command. Should that command end up cancelled (Focus Area hands over to Select and
@@ -561,12 +563,13 @@ class ActionsEngine {
   recordEvent(e, fr, made) {
     const rec = this.recording;
     const d = this.app.doc;
-    let event = e;
+    // ctx.setReplayCommand: the command did what another one does (layer:merge records layer:merge-down)
+    let event = e.replayId ? { ...e, id: e.replayId, arg: e.replayArg, replayable: true } : e;
     // commands whose own form cannot be replayed are recorded as the equivalent that can
-    const sub = !fr.nested && !e.cancelled && e.source !== 'action' ? this.substitute(e, fr) : null;
+    const sub = !fr.nested && !e.cancelled && e.source !== 'action' ? this.substitute(event, fr) : null;
     if (sub === false) return;
     if (sub) event = { ...event, ...sub, replayable: true };
-    const decision = M.recordDecision(event, { label: sub?.label ?? this.labelFor(event.id, event.arg) });
+    const decision = M.recordDecision(event, { label: sub?.label ?? this.labelFor(event.id, event.arg), def: this.app.commands.commands.get(event.id) });
     if (decision.record) {
       const entry = made ? made.entry : d?.history?.entries[d.history.index];
       this.appendRecorded(decision.step, entry && fr.doc === d && entry !== fr.histEntry ? { doc: d, entry } : null);
@@ -603,7 +606,7 @@ class ActionsEngine {
         // run from the menu it asks for the position and reports nothing: the guide it added is the argument
         if (e.arg && typeof e.arg === 'object') return null;
         const g = d && fr.doc === d && d.guides.length > fr.guides ? d.guides[d.guides.length - 1] : null;
-        return g ? { id: e.id, arg: { axis: g.axis, pos: g.pos }, label: `New Guide: ${g.axis === 'y' ? 'horizontal' : 'vertical'} at ${g.pos} px` } : false;
+        return g ? { id: e.id, arg: { axis: g.axis, pos: g.pos, ...(g.color ? { color: g.color } : {}) }, label: `New Guide: ${g.axis === 'y' ? 'horizontal' : 'vertical'} at ${g.pos} px` } : false;
       }
       case 'layer:visibility':
       case 'layer:properties':
@@ -846,7 +849,7 @@ class ActionsEngine {
     }
     // only what recording could have recorded: a step built by hand must not purge histories, quit or undo under
     // a harmless label (files and stored sets are cleaned by normalizeSets; this covers steps made in code)
-    if (M.isIgnoredCommand(id)) return { ok: false, reason: 'unavailable', message: `the command “${id}” cannot be run by an action` };
+    if (M.isIgnoredCommand(id, app.commands.commands.get(id))) return { ok: false, reason: 'unavailable', message: `the command “${id}” cannot be run by an action` };
     if (this.batch?.overrideOpen && /^file:open(-paths)?$/.test(id)) return { ok: true }; // Batch: Override Action "Open" Commands
     if (!app.commands.has(id) || app.stubbed?.includes(id)) return { ok: false, reason: 'unavailable', message: `the command “${step.label}” does not exist in this version of Pigment` };
     // a running transform is applied first, as it would be when the command ran from the menu
@@ -889,40 +892,40 @@ class ActionsEngine {
   }
 
   // ---- command bookkeeping ------------------------------------------------------------------------------------
-  /** Wraps commands.run so the engine knows which commands are running (see the header). */
+  /**
+   * Observes commands.run so the engine knows which commands are running (see the header): a frame per running
+   * command, from before() until its result settles; a command a session answered or a guard refused leaves none.
+   */
   wrapCommands() {
     const registry = this.app.commands;
-    const base = registry.run.bind(registry);
     const frames = this.frames;
     let sync = 0; // commands whose run() is on the call stack right now
-    registry.run = (id, arg, source = 'api') => {
-      if (TRANSPARENT.test(id) || !registry.commands.has(id)) return base(id, arg, source);
-      const d = this.app.doc;
-      // A command is part of another one when it starts inside that command's run(), or from code ('api')
-      // while that command still waits (Fit Image runs Image Size after its dialog). A key, menu or panel
-      // gesture made while a slow command is pending (an AI request) is the user's own next step.
-      const nested = sync > 0 || (frames.length > 0 && PROGRAMMATIC.test(source));
-      const parent = nested ? frames[frames.length - 1] ?? null : null;
-      const fr = { id, source, nested, parent, children: [], hadTransform: !!this.app.transformTool?.session, doc: d, histEntry: d?.history?.entries[d.history.index] ?? null, guides: d?.guides?.length ?? 0, done: false };
-      frames.push(fr);
-      const release = () => {
-        const i = frames.indexOf(fr);
-        if (i >= 0) frames.splice(i, 1);
-      };
-      let result;
-      sync++;
-      try {
-        result = base(id, arg, source);
-      } catch (err) {
-        release();
-        throw err;
-      } finally {
-        sync--;
-      }
-      if (result && typeof result.then === 'function') result.then(release, release);
-      else release();
-      return result;
+    const release = (fr) => {
+      const i = frames.indexOf(fr);
+      if (i >= 0) frames.splice(i, 1);
     };
+    registry.observe({
+      before: (id, arg, source = 'api') => {
+        if (TRANSPARENT.test(id) || !registry.commands.has(id)) return null;
+        const d = this.app.doc;
+        // A command is part of another one when it starts inside that command's run(), or from code ('api')
+        // while that command still waits (Fit Image runs Image Size after its dialog). A key, menu or panel
+        // gesture made while a slow command is pending (an AI request) is the user's own next step.
+        const nested = sync > 0 || (frames.length > 0 && PROGRAMMATIC.test(source));
+        const parent = nested ? frames[frames.length - 1] ?? null : null;
+        const fr = { id, source, nested, parent, children: [], hadTransform: !!this.app.transformTool?.session, doc: d, histEntry: d?.history?.entries[d.history.index] ?? null, guides: d?.guides?.length ?? 0, done: false };
+        frames.push(fr);
+        sync++;
+        return fr;
+      },
+      after: (fr, result, info) => {
+        if (!fr) return;
+        sync--;
+        if (info?.handledBy || info?.refused) release(fr);
+        else if (result && typeof result.then === 'function') result.then(() => release(fr), () => release(fr));
+        else release(fr);
+      },
+    });
     this.app.on('command:done', (e) => {
       let fr = null;
       for (let i = frames.length - 1; i >= 0; i--) {
