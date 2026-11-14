@@ -22,7 +22,8 @@ jobs:
     # now points to (Ubuntu 26.04), so `playwright install` fails there. Move this forward
     # together with @playwright/test.
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    # The browser suite alone takes about 16 minutes at 0.4 (533 tests); leave room for a slow runner.
+    timeout-minutes: 45
     defaults:
       run:
         working-directory: pigment
