@@ -44,7 +44,7 @@ const MAX_TAB_POSITION: f64 = 100_000.0;
 /// it take the default stops, with a warning.
 const MAX_STORY_TABS: usize = 1 << 20;
 /// The warning when [`MAX_STORY_TABS`] leaves tab stops out.
-const TABS_LEFT_OUT: &str = "tab stops past VectorCraft's limits were left out";
+const TABS_LEFT_OUT: &str = "tab stops past Nib's limits were left out";
 /// Most values read before one operator in a re-encoding section.
 const MAX_ENCODING_VALUES: usize = 1024;
 /// Most text paths read in one text object (its linked areas); the frames of others are left out,
@@ -55,7 +55,7 @@ const MAX_TEXT_PATHS: usize = 4096;
 /// warning.
 const MAX_THREAD_WORK: usize = MAX_CHARS;
 /// The warning when [`MAX_TEXT_PATHS`] or [`MAX_THREAD_WORK`] leaves frames of linked areas out.
-const LINKED_AREAS_LEFT_OUT: &str = "linked type areas past VectorCraft's limits were left out";
+const LINKED_AREAS_LEFT_OUT: &str = "linked type areas past Nib's limits were left out";
 /// The warning when type set in a mask rendering mode can't be a clipping path: type in linked
 /// areas (several frames), in wraparound text or in a compound path doesn't clip.
 const MASK_NOT_CLIPPED: &str = "type used as a mask in linked areas, wraparound text or a compound path doesn't clip";

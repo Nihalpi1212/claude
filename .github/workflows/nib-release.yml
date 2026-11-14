@@ -1,16 +1,24 @@
 # Nib release builds.
 #
-# Builds the installers with electron-builder on each platform's own runner:
-#   macos-latest   -> universal (Apple silicon + Intel) .dmg and .zip
-#   windows-latest -> NSIS installer (x64 + arm64) and a portable .exe
-#   ubuntu-latest  -> AppImage
+# Builds Nib (nib/, a Rust workspace based on VectorCraft) with its own packaging scripts on each
+# platform's runner:
+#   macos-15       nib-<v>-macos-universal.dmg (Nib.app, Apple silicon + Intel, joined with lipo)
+#                  and nib-cli-<v>-macos-universal.zip
+#   windows-latest nib-<v>-windows-x64.msi (WiX) and nib-<v>-windows-x64-portable.zip
+#   ubuntu-22.04   nib-<v>-linux-x86_64.AppImage, .deb and .tar.gz (glibc 2.35 or newer)
 #
-# Runs on tags named nib-v* and on demand. A tag push, or a manual run with the `tag` input set,
-# also creates (or updates) the GitHub Release for that tag with the installers attached; a manual
-# run without `tag` only uploads workflow artifacts. The release notes are read from
-# nib/docs/RELEASE-NOTES-<version>.md (the tag without "nib-v"), so each release documents itself.
-# The builds are NOT code-signed (no certificates in this repository), so macOS Gatekeeper and
-# Windows SmartScreen show a warning on first launch; see nib/README.md.
+# The steps follow VectorCraft's release (storytold/craft-common-actions' release.yml), written out
+# here instead of calling that reusable workflow, without its signing, notarization, update feeds
+# and the platforms Nib does not ship yet. The version comes from [workspace.package] version in
+# nib/Cargo.toml (the packaging scripts read it there).
+#
+# Runs on tags named nib-v<version> and on demand. A tag push, or a manual run with the `tag` input
+# set, also creates (or updates) the GitHub Release for that tag; the tag must name the version in
+# nib/Cargo.toml. A manual run without `tag` only builds and uploads workflow artifacts. The notes
+# come from nib/docs/RELEASE-NOTES-<version>.md.
+#
+# The builds are NOT code-signed (this repository holds no certificates): macOS gets an ad-hoc
+# signature so the app starts on Apple silicon, and the release notes say how to open it.
 
 name: Nib release
 
@@ -21,7 +29,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag to publish, e.g. nib-v0.1.0 (leave empty to only build the installers)'
+        description: 'Release tag to publish, e.g. nib-v0.1.0 (leave empty to only build the packages)'
         required: false
         type: string
         default: ''
@@ -29,101 +37,362 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: nib-release-${{ inputs.tag || github.ref }}
+  cancel-in-progress: false
+
+env:
+  # Keep in step with nib-ci.yml.
+  RUST_TOOLCHAIN: '1.97.0'
+  # storytold/craft-fonts at VectorCraft's pinned commit (craft-common-actions' release.yml). The
+  # release binaries embed its OFL fonts; the packages carry their licences as OFL-<family>.txt.
+  CRAFT_FONTS_REF: bfcbf714e45a3ea8e98f88ab2b7971372a576414
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  CARGO_NET_RETRY: 10
+  RUST_BACKTRACE: 1
+
 jobs:
-  build:
-    name: Build (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: macos-latest
-            args: --mac dmg zip --universal
-          - os: windows-latest
-            args: --win nsis portable
-          - os: ubuntu-latest
-            args: --linux AppImage
+  version:
+    name: Version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+      date: ${{ steps.version.outputs.date }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          sparse-checkout: nib/Cargo.toml
+          sparse-checkout-cone-mode: false
+
+      - name: Read the version
+        id: version
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version=$(awk '
+            /^\[/ { in_pkg = ($0 == "[workspace.package]"); next }
+            in_pkg && $1 == "version" { gsub(/[" ]/, "", $3); print $3; exit }
+          ' nib/Cargo.toml)
+          semver='[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?'
+          if ! [[ "$version" =~ ^${semver}$ ]]; then
+            echo "::error file=nib/Cargo.toml::could not read [workspace.package] version (got '$version')"
+            exit 1
+          fi
+          tag=""
+          if [ -n "$INPUT_TAG" ]; then
+            tag="$INPUT_TAG"
+          elif [ "$REF_TYPE" = tag ]; then
+            tag="$REF_NAME"
+          fi
+          if [ -n "$tag" ]; then
+            if ! [[ "$tag" =~ ^nib-v${semver}$ ]]; then
+              echo "::error::release tag '$tag' is not nib-v<version>"
+              exit 1
+            fi
+            if [ "${tag#nib-v}" != "$version" ]; then
+              echo "::error::tag $tag does not match version $version in nib/Cargo.toml; bump it with 'cargo xtask version set ${tag#nib-v}' first"
+              exit 1
+            fi
+          fi
+          # 0.x versions and versions with a pre-release suffix are published as pre-releases.
+          prerelease=false
+          if [[ "$version" == 0.* || "$version" == *-* ]]; then prerelease=true; fi
+          {
+            echo "version=$version"
+            echo "tag=$tag"
+            echo "prerelease=$prerelease"
+            echo "date=$(date -u +%Y-%m-%d)"
+          } >>"$GITHUB_OUTPUT"
+          echo "Nib $version, tag '${tag:-none: build only}', prerelease $prerelease"
+
+  macos:
+    name: macOS universal
+    needs: version
+    runs-on: macos-15
+    timeout-minutes: 180
     defaults:
       run:
         working-directory: nib
     env:
-      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      VECTORCRAFT_BUILD_SHA: ${{ github.sha }}
+      VECTORCRAFT_BUILD_DATE: ${{ needs.version.outputs.date }}
+      CRAFT_FONTS_DIR: ${{ github.workspace }}/craft-fonts
+      CRAFT_FONTS_REQUIRED: '1'
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
         with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: nib/package-lock.json
+          persist-credentials: false
 
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Unit tests
-        run: npm test
-
-      - name: Build installers
-        run: npx electron-builder ${{ matrix.args }} --publish never
-
-      - name: List artifacts
-        shell: bash
-        run: ls -la dist | grep -v -E "builder-|\.yml$|\.blockmap$" || true
-
-      - name: Upload installers
-        uses: actions/upload-artifact@v4
+      - name: Check out craft-fonts
+        uses: actions/checkout@v4
         with:
-          name: nib-${{ matrix.os }}
-          path: |
-            nib/dist/*.dmg
-            nib/dist/*.zip
-            nib/dist/*.exe
-            nib/dist/*.AppImage
+          repository: storytold/craft-fonts
+          ref: ${{ env.CRAFT_FONTS_REF }}
+          path: craft-fonts
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: nib
+          key: release-macos-universal
+
+      # No MACOS_SIGN_IDENTITY: package.sh signs ad hoc (codesign -s -), which Apple silicon needs
+      # to start the app at all, and skips notarization.
+      - name: Build and package (Nib.app on a DMG, CLI zip)
+        run: packaging/macos/package.sh --arch universal
+
+      - name: Check the packages
+        run: |
+          set -euo pipefail
+          ls -l dist/release
+          for f in dist/release/nib-*-macos-universal.dmg dist/release/nib-cli-*-macos-universal.zip; do
+            test -s "$f"
+          done
+          for arch in x86_64 arm64; do
+            lipo -info target/macos-package/bin/nib | grep -qw "$arch"
+            lipo -info target/macos-package/bin/nib-cli | grep -qw "$arch"
+          done
+          codesign --verify --strict --deep --verbose=2 target/macos-package/Nib.app
+          target/macos-package/Nib.app/Contents/MacOS/Nib --version
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nib-macos-universal
+          path: nib/dist/release/*
+          if-no-files-found: error
+
+  windows:
+    name: Windows x64
+    needs: version
+    runs-on: windows-latest
+    timeout-minutes: 150
+    defaults:
+      run:
+        working-directory: nib
+    env:
+      VECTORCRAFT_BUILD_SHA: ${{ github.sha }}
+      VECTORCRAFT_BUILD_DATE: ${{ needs.version.outputs.date }}
+      CRAFT_FONTS_DIR: ${{ github.workspace }}/craft-fonts
+      CRAFT_FONTS_REQUIRED: '1'
+      WIX_VERSION: 5.0.2
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Check out craft-fonts
+        uses: actions/checkout@v4
+        with:
+          repository: storytold/craft-fonts
+          ref: ${{ env.CRAFT_FONTS_REF }}
+          path: craft-fonts
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: x86_64-pc-windows-msvc
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: nib
+          key: release-windows-x64
+
+      # WiX v5 and the UI and Util extensions the installer uses (as craft-common-actions'
+      # install-wix).
+      - name: Install WiX
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version $env:WIX_VERSION
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          wix extension add -g "WixToolset.UI.wixext/$env:WIX_VERSION" "WixToolset.Util.wixext/$env:WIX_VERSION"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          wix --version
+
+      # No WINDOWS_CERTIFICATE or AZURE_* secrets: sign.ps1 warns and leaves the files unsigned.
+      - name: Build and package (MSI, portable zip)
+        shell: pwsh
+        run: ./packaging/windows/package.ps1 -Arch x64
+
+      - name: Check the packages
+        shell: pwsh
+        run: |
+          Get-ChildItem dist/release | Format-Table Name, Length
+          foreach ($pattern in 'nib-*-windows-x64.msi', 'nib-*-windows-x64-portable.zip') {
+            if (-not (Get-ChildItem dist/release -Filter $pattern)) { throw "missing $pattern" }
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nib-windows-x64
+          path: nib/dist/release/*
+          if-no-files-found: error
+
+  linux:
+    name: Linux x86_64
+    needs: version
+    # The oldest GitHub-hosted image, so the binaries need only glibc 2.35 (Ubuntu 22.04+,
+    # Debian 12+, Fedora 36+).
+    runs-on: ubuntu-22.04
+    timeout-minutes: 150
+    defaults:
+      run:
+        working-directory: nib
+    env:
+      VECTORCRAFT_BUILD_SHA: ${{ github.sha }}
+      VECTORCRAFT_BUILD_DATE: ${{ needs.version.outputs.date }}
+      CRAFT_FONTS_DIR: ${{ github.workspace }}/craft-fonts
+      CRAFT_FONTS_REQUIRED: '1'
+      NFPM_VERSION: 2.48.0
+      NFPM_SHA256: 787af76e172dd5fc7cedf4d7c5a090a2f62be9001557a4db1103e270f90ddefd
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Check out craft-fonts
+        uses: actions/checkout@v4
+        with:
+          repository: storytold/craft-fonts
+          ref: ${{ env.CRAFT_FONTS_REF }}
+          path: craft-fonts
+          persist-credentials: false
+
+      # The build's libraries and the packaging tools (craft-common-actions' install-linux-deps):
+      # desktop-file-validate and appstreamcli check the desktop entry and metainfo, file is used
+      # by appimagetool. appimagetool and the AppImage runtime are downloaded, pinned and
+      # SHA-256 checked, by package.sh itself.
+      - name: Install build and packaging dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libxkbcommon-dev libwayland-dev libx11-dev libxrandr-dev libxi-dev libgl1-mesa-dev \
+            libasound2-dev pkg-config desktop-file-utils appstream file
+
+      - name: Install nfpm (pinned, SHA-256 checked)
+        run: |
+          set -euo pipefail
+          deb="$RUNNER_TEMP/nfpm.deb"
+          curl --proto '=https' --proto-redir '=https' -fsSL -o "$deb" \
+            "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_amd64.deb"
+          echo "$NFPM_SHA256  $deb" | sha256sum -c -
+          sudo dpkg -i "$deb"
+          nfpm --version
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: nib
+          key: release-linux-x86_64
+
+      - name: Build and package (AppImage, deb, tar.gz)
+        run: packaging/linux/package.sh --formats "appimage deb tar"
+
+      - name: Check the packages
+        run: |
+          set -euo pipefail
+          ls -l dist/release
+          dpkg-deb --info dist/release/nib-*-linux-x86_64.deb
+          dpkg-deb --contents dist/release/nib-*-linux-x86_64.deb | grep -E 'usr/bin/|metainfo|applications|OFL-'
+          tar -tzf dist/release/nib-*-linux-x86_64.tar.gz | grep -E '/bin/nib(-cli)?$'
+          ldd target/release/nib
+          appimage=$(ls dist/release/nib-*-linux-x86_64.AppImage)
+          chmod +x "$appimage"
+          APPIMAGE_EXTRACT_AND_RUN=1 "$appimage" --version
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nib-linux-x86_64
+          path: nib/dist/release/*
           if-no-files-found: error
 
   release:
     name: Publish GitHub Release
-    needs: build
-    if: startsWith(github.ref, 'refs/tags/nib-v') || inputs.tag != ''
-    runs-on: ubuntu-latest
+    needs: [version, macos, windows, linux]
+    # A tag push, or a manual run with `tag` set (the version job checked it against Cargo.toml).
+    if: needs.version.outputs.tag != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     env:
-      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+      VERSION: ${{ needs.version.outputs.version }}
+      RELEASE_TAG: ${{ needs.version.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
         with:
+          persist-credentials: false
           sparse-checkout: nib/docs
 
       - uses: actions/download-artifact@v4
         with:
-          path: installers
+          pattern: nib-*
+          path: packages
           merge-multiple: true
 
-      - name: Release notes
-        shell: bash
+      - name: Checksums
+        working-directory: packages
         run: |
-          version="${RELEASE_TAG#nib-v}"
-          notes="nib/docs/RELEASE-NOTES-${version}.md"
-          {
-            echo "Free, open-source vector graphics editor for Windows, macOS and Linux. See nib/README.md."
-            echo
-            if [ -f "$notes" ]; then cat "$notes"; else echo "Release notes: see nib/docs/."; fi
-            echo
-            echo "**Downloads**"
-            echo "- Windows: \`nib-*-win-x64.exe\` (installer) or \`nib-*-win-portable.exe\` (no install)"
-            echo "- macOS: \`nib-*-mac-universal.dmg\` (Apple silicon and Intel)"
-            echo "- Linux: \`nib-*-linux-x86_64.AppImage\`"
-            echo
-            echo "These builds are not code-signed. On macOS, right-click the app and choose Open the first"
-            echo "time (or run \`xattr -dr com.apple.quarantine /Applications/Nib.app\`). On Windows,"
-            echo "choose \"More info\" then \"Run anyway\" in the SmartScreen prompt."
-          } > release-body.md
+          set -euo pipefail
+          ls -l
+          sha256sum -- * >../SHA256SUMS.txt
+          mv ../SHA256SUMS.txt .
+          cat SHA256SUMS.txt
 
-      - name: Create release
+      - name: Release notes
+        run: |
+          set -euo pipefail
+          notes="nib/docs/RELEASE-NOTES-${VERSION}.md"
+          v="$VERSION"
+          {
+            echo "Nib $v: a free, open-source vector graphics editor for macOS, Windows and Linux, based on [VectorCraft](https://github.com/storytold/vectorcraft)."
+            echo
+            if [ -f "$notes" ]; then
+              cat "$notes"
+            else
+              echo "::warning file=$notes::$notes is missing; the release has no notes of its own" >&2
+              echo "See [nib/README.md](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_SHA}/nib/README.md)."
+            fi
+            echo
+            echo "## Downloads"
+            echo
+            echo "| Platform | File |"
+            echo "|---|---|"
+            echo "| macOS 11+ (Apple silicon and Intel) | \`nib-$v-macos-universal.dmg\` (app), \`nib-cli-$v-macos-universal.zip\` (command line) |"
+            echo "| Windows 10/11 x64 | \`nib-$v-windows-x64.msi\` (installer), \`nib-$v-windows-x64-portable.zip\` (no install) |"
+            echo "| Linux x86_64 (glibc 2.35+) | \`nib-$v-linux-x86_64.AppImage\`, \`nib-$v-linux-x86_64.deb\`, \`nib-$v-linux-x86_64.tar.gz\` |"
+            echo
+            echo "\`SHA256SUMS.txt\` lists the SHA-256 of every file (\`sha256sum -c SHA256SUMS.txt --ignore-missing\`)."
+            echo
+            echo "## First launch: these builds are not code-signed"
+            echo
+            echo "- **macOS:** the app is not notarized. Drag Nib to Applications, then right-click (or Control-click) it and choose **Open**, and **Open** again in the dialog. Or run \`xattr -dr com.apple.quarantine /Applications/Nib.app\` once in Terminal."
+            echo "- **Windows:** SmartScreen may say \"Windows protected your PC\". Choose **More info**, then **Run anyway**."
+            echo "- **Linux:** make the AppImage executable (\`chmod +x nib-$v-linux-x86_64.AppImage\`) and run it, or install the \`.deb\` with \`sudo apt install ./nib-$v-linux-x86_64.deb\`."
+          } >release-body.md
+          cat release-body.md
+
+      - name: Create or update the release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.RELEASE_TAG }}
           target_commitish: ${{ github.sha }}
-          name: Nib ${{ env.RELEASE_TAG }}
+          name: Nib ${{ env.VERSION }}
           body_path: release-body.md
-          files: installers/*
+          prerelease: ${{ needs.version.outputs.prerelease == 'true' }}
+          fail_on_unmatched_files: true
+          files: packages/*

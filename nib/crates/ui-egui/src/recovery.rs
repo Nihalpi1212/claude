@@ -141,7 +141,7 @@ fn write(app: &mut VectorcraftApp, store: &Arc<dyn RecoveryStore>, pick: impl Fn
             // A store the host installed has no folder to name: the job's own line.
             (Err(e), None) => {
                 app.status(format!("{saving} failed: {e}"));
-                log::warn!("vectorcraft: {}", app.ui.status);
+                log::warn!("nib: {}", app.ui.status);
                 Ok(Value::Null)
             }
         };
@@ -170,7 +170,7 @@ fn failed(app: &mut VectorcraftApp, place: Option<&(String, bool)>, e: &str) {
     if let Some((folder, _)) = place {
         named(app, folder);
     }
-    log::warn!("vectorcraft: {}", app.ui.status);
+    log::warn!("nib: {}", app.ui.status);
 }
 
 /// [`failed`] for the copy of document `title` that couldn't be written to folder `place`.
@@ -184,7 +184,7 @@ fn copy_failed(app: &mut VectorcraftApp, title: &str, place: &(String, bool), e:
         )),
     }
     named(app, &place.0);
-    log::warn!("vectorcraft: {}", app.ui.status);
+    log::warn!("nib: {}", app.ui.status);
 }
 
 /// Record that the status text named recovery folder `folder` ([`Timer::named`]).

@@ -1321,7 +1321,7 @@ impl Plot {
         if self.unknown > 0 {
             let n = self.unknown;
             self.warnings.push(format!(
-                "{n} instruction{} of kinds VectorCraft doesn't read {} skipped",
+                "{n} instruction{} of kinds Nib doesn't read {} skipped",
                 if n == 1 { "" } else { "s" },
                 if n == 1 { "was" } else { "were" }
             ));

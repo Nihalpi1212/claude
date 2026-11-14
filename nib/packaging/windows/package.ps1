@@ -1,11 +1,11 @@
 <#
 .SYNOPSIS
-  Build, sign and package VectorCraft for Windows.
+  Build, sign and package Nib for Windows.
 
 .DESCRIPTION
   Produces, in $env:DIST (default: dist/release):
-    vectorcraft-<version>-windows-<arch>.msi            per-machine installer (WiX v5)
-    vectorcraft-<version>-windows-<arch>-portable.zip   vectorcraft.exe + vectorcraft-cli.exe + portable.txt
+    nib-<version>-windows-<arch>.msi            per-machine installer (WiX v5)
+    nib-<version>-windows-<arch>-portable.zip   nib.exe + nib-cli.exe + portable.txt
 
   The binaries link the C runtime statically (+crt-static), so neither the MSI nor the portable
   zip needs the Visual C++ redistributable. Signing is delegated to sign.ps1 (skipped with a
@@ -54,7 +54,7 @@ New-Item -ItemType Directory -Force -Path $Dist | Out-Null
 if (-not $env:VECTORCRAFT_BUILD_SHA) { $env:VECTORCRAFT_BUILD_SHA = (git -C $Root rev-parse HEAD 2>$null) }
 if (-not $env:VECTORCRAFT_BUILD_DATE) { $env:VECTORCRAFT_BUILD_DATE = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd') }
 
-Write-Output "VectorCraft $Version for Windows $Arch ($Target)"
+Write-Output "Nib $Version for Windows $Arch ($Target)"
 
 if (-not $SkipBuild) {
   # Static CRT: no VC++ redistributable needed. Scoped to the target so host build scripts and
@@ -78,7 +78,7 @@ function Get-PeHeader([string] $Path) {
   return @{ Machine = [BitConverter]::ToUInt16($bytes, $pe + 4); Subsystem = [BitConverter]::ToUInt16($bytes, $pe + 0x5C) }
 }
 $Machine = switch ($Arch) { 'x64' { 0x8664 } 'x86' { 0x14C } 'arm64' { 0xAA64 } }
-foreach ($check in @(@('vectorcraft.exe', 2), @('vectorcraft-cli.exe', 3))) {
+foreach ($check in @(@('nib.exe', 2), @('nib-cli.exe', 3))) {
   $h = Get-PeHeader (Join-Path $Bin $check[0])
   if ($h.Machine -ne $Machine) { throw "$($check[0]) is for machine 0x$('{0:X}' -f $h.Machine), expected 0x$('{0:X}' -f $Machine) ($Arch)" }
   if ($h.Subsystem -ne $check[1]) { throw "$($check[0]) has PE subsystem $($h.Subsystem), expected $($check[1])" }
@@ -87,9 +87,9 @@ foreach ($check in @(@('vectorcraft.exe', 2), @('vectorcraft-cli.exe', 3))) {
 $Stage = Join-Path $TargetDir "windows-package\$Arch"
 Remove-Item -Recurse -Force $Stage -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $Stage | Out-Null
-Copy-Item (Join-Path $Bin 'vectorcraft.exe'), (Join-Path $Bin 'vectorcraft-cli.exe') $Stage
+Copy-Item (Join-Path $Bin 'nib.exe'), (Join-Path $Bin 'nib-cli.exe') $Stage
 
-& (Join-Path $PSScriptRoot 'sign.ps1') (Join-Path $Stage 'vectorcraft.exe') (Join-Path $Stage 'vectorcraft-cli.exe')
+& (Join-Path $PSScriptRoot 'sign.ps1') (Join-Path $Stage 'nib.exe') (Join-Path $Stage 'nib-cli.exe')
 
 # Documentation and dependency licences shared by the MSI and portable ZIP.
 $Docs = Join-Path $Stage 'docs'
@@ -109,7 +109,7 @@ if (Test-Path (Join-Path $Root 'licenses')) {
 }
 
 # ---- MSI ---------------------------------------------------------------------------------------
-# The setup wizard's art, drawn here from the app icon so the MSI shows VectorCraft rather than
+# The setup wizard's art, drawn here from the app icon so the MSI shows Nib rather than
 # WiX's stock bitmaps: a 493x58 banner across the top of the inner pages (the page title is drawn
 # over its left side, so that stays white) and a 493x312 backdrop for the Welcome and Finish pages
 # (their text sits on the right; the left 164 px are ours). Both must be 24-bit BMPs.
@@ -144,14 +144,14 @@ function New-InstallerArt([string] $IconPng, [string] $BannerOut, [string] $Dial
 }
 $Banner = Join-Path $Stage 'installer-banner.bmp'
 $Dialog = Join-Path $Stage 'installer-dialog.bmp'
-New-InstallerArt (Join-Path $Root 'assets\app-icon\hicolor\256x256\apps\ai.storyteller.vectorcraft.png') $Banner $Dialog
+New-InstallerArt (Join-Path $Root 'assets\app-icon\hicolor\256x256\apps\io.github.nihalpi1212.nib.png') $Banner $Dialog
 
-$Msi = Join-Path $Dist "vectorcraft-$Version-windows-$Arch.msi"
+$Msi = Join-Path $Dist "nib-$Version-windows-$Arch.msi"
 Invoke-Native 'wix build' {
-  wix build (Join-Path $PSScriptRoot 'vectorcraft.wxs') -arch $Arch `
+  wix build (Join-Path $PSScriptRoot 'nib.wxs') -arch $Arch `
     -ext WixToolset.UI.wixext -ext WixToolset.Util.wixext `
-    -culture en-US -loc (Join-Path $PSScriptRoot 'vectorcraft.en-us.wxl') `
-    -d "Version=$MsiVersion" -d "DisplayVersion=$Version" -d "BinDir=$Stage" -d "IconPath=$(Join-Path $Root 'assets\app-icon\vectorcraft.ico')" `
+    -culture en-US -loc (Join-Path $PSScriptRoot 'nib.en-us.wxl') `
+    -d "Version=$MsiVersion" -d "DisplayVersion=$Version" -d "BinDir=$Stage" -d "IconPath=$(Join-Path $Root 'assets\app-icon\nib.ico')" `
     -d "DocsDir=$Docs" -d "BannerBmp=$Banner" -d "DialogBmp=$Dialog" `
     -o $Msi
 }
@@ -162,15 +162,15 @@ Remove-Item -Force -ErrorAction SilentlyContinue ([IO.Path]::ChangeExtension($Ms
 & (Join-Path $PSScriptRoot 'sign.ps1') $Msi
 
 # ---- portable zip ------------------------------------------------------------------------------
-$Portable = Join-Path $TargetDir "windows-package\vectorcraft-$Version-windows-$Arch-portable"
+$Portable = Join-Path $TargetDir "windows-package\nib-$Version-windows-$Arch-portable"
 Remove-Item -Recurse -Force $Portable -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $Portable | Out-Null
 Copy-Item (Join-Path $Stage '*.exe') $Portable
 Copy-Item -Recurse (Join-Path $Docs '*') $Portable
-# portable.txt beside vectorcraft.exe switches on portable mode: settings, libraries, recovery
-# files and logs go to VectorCraftData\ next to the exe instead of %APPDATA% (#1366; see profile.rs).
+# portable.txt beside nib.exe switches on portable mode: settings, libraries, recovery
+# files and logs go to NibData\ next to the exe instead of %APPDATA% (#1366; see profile.rs).
 Copy-Item (Join-Path $PSScriptRoot 'portable.txt') $Portable
-$Zip = Join-Path $Dist "vectorcraft-$Version-windows-$Arch-portable.zip"
+$Zip = Join-Path $Dist "nib-$Version-windows-$Arch-portable.zip"
 Remove-Item -Force $Zip -ErrorAction SilentlyContinue
 Compress-Archive -Path $Portable -DestinationPath $Zip
 
@@ -178,8 +178,8 @@ Compress-Archive -Path $Portable -DestinationPath $Zip
 # here; .github/workflows/windows-arm64.yml installs and runs it on ARM64 instead.
 $HostArch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLowerInvariant()
 if ($Arch -ne 'arm64' -or $HostArch -eq 'arm64') {
-  Invoke-Native 'vectorcraft-cli --version' { & (Join-Path $Stage 'vectorcraft-cli.exe') --version }
+  Invoke-Native 'nib-cli --version' { & (Join-Path $Stage 'nib-cli.exe') --version }
 } else {
-  Write-Output "skipping vectorcraft-cli --version: an $Arch build doesn't run on this $HostArch machine"
+  Write-Output "skipping nib-cli --version: an $Arch build doesn't run on this $HostArch machine"
 }
 Get-Item $Msi, $Zip | Format-Table Name, Length

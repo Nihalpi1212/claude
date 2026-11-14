@@ -64,7 +64,7 @@ const MODES: &str = "art drawn in transfer modes other than a copy is drawn as a
 const FRAMED_REGIONS: &str = "framed regions are outlined rectangle by rectangle";
 const BIG_REGIONS: &str = "regions larger than one picture may hold were left out";
 const CODECS: &str = "QuickTime images in formats other than JPEG were left out";
-const NOTHING: &str = "the picture draws nothing VectorCraft reads";
+const NOTHING: &str = "the picture draws nothing Nib reads";
 
 /// Big-endian reads from a slice, never past its end.
 struct Be<'a> {

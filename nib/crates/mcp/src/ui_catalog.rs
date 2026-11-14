@@ -171,12 +171,7 @@ pub const UI_COMMANDS: &[(&str, &str, &str, &str)] = &[
     ("shortcuts.list", "List Keyboard Shortcuts", "", "{query?} → [{id, label, group, shortcut, default, overridden}]"),
     ("shortcuts.conflicts", "Keyboard Shortcut Conflicts", "", "{} → [{shortcut, ids}]"),
     ("shortcuts.reset", "Reset Keyboard Shortcuts", "", "{}"),
-    (
-        "shortcuts.preset",
-        "Keyboard Shortcut Set",
-        "",
-        "{name: \"VectorCraft Defaults\" | \"Classic Defaults\"} (names of earlier versions are accepted)",
-    ),
+    ("shortcuts.preset", "Keyboard Shortcut Set", "", "{name: \"Nib Defaults\" | \"Classic Defaults\"} (names of earlier versions are accepted)"),
     ("shortcuts.export", "Export Keyboard Shortcuts…", "", "{path?}"),
     (
         "shortcuts.exportText",
@@ -815,14 +810,14 @@ pub const UI_COMMANDS: &[(&str, &str, &str, &str)] = &[
         "",
         "{} opens the Save PDF dialog; with params = document.exportPdf options written to path (asked when missing; viewAfterSaving opens the file) → {path, bytes, warnings}",
     ),
-    ("help.about", "About VectorCraft", "", "{}"),
+    ("help.about", "About Nib", "", "{}"),
     ("help.checkForUpdates", "Check for Updates…", "", "{}"),
     ("help.commandPalette", "Search Commands…", "Cmd+Shift+/", "{}"),
     (
         "help.safeMode",
         "Safe Mode…",
         "",
-        "{} open the Safe Mode dialog (dialog `safeMode`): whether VectorCraft is in Safe Mode, and the disabled plug-ins, each with Enable on Re-launch (engine: plugin.setEnabled). Closing it leaves Safe Mode as it is; Safe Mode is chosen at launch (--safe-mode, or the choice after a launch that stopped while a plug-in was loading, dialog `pluginStopped`)",
+        "{} open the Safe Mode dialog (dialog `safeMode`): whether Nib is in Safe Mode, and the disabled plug-ins, each with Enable on Re-launch (engine: plugin.setEnabled). Closing it leaves Safe Mode as it is; Safe Mode is chosen at launch (--safe-mode, or the choice after a launch that stopped while a plug-in was loading, dialog `pluginStopped`)",
     ),
     (
         "help.copyTroubleshootingInfo",
@@ -830,7 +825,7 @@ pub const UI_COMMANDS: &[(&str, &str, &str, &str)] = &[
         "",
         "{} put text for a bug report on the clipboard: the version, and in the desktop app the platform, the window system, the graphics processor, the commands and frame times of the last few frames, and the hang reports of this session and the session before (no document contents or file paths) → {chars}",
     ),
-    ("app.quit", "Quit VectorCraft", "Cmd+Q", "{}"),
+    ("app.quit", "Quit Nib", "Cmd+Q", "{}"),
     (
         "ui.swatchOptions",
         "Swatch Options…",
@@ -859,7 +854,7 @@ pub const UI_COMMANDS: &[(&str, &str, &str, &str)] = &[
         "ui.sampleScreenColor",
         "Sample Color from Screen",
         "",
-        "{} or {stroke?: bool (default: the active proxy), picker?: bool (the open Color Picker instead)} show the system's color sampler (macOS; Linux through the XDG desktop portal's PickColor; browsers with an EyeDropper) and answer at once; the color the person picks anywhere on the screen then runs paint.setFill / paint.setStroke (one undo step) or becomes the Color Picker's color (field `color`), converted from display sRGB into the working RGB space; a cancel (Escape on macOS and in browsers) leaves the colors as they were. ui.inspect reports `screenSampler: true` until it answers; on Linux, a session without a portal that has PickColor, a portal that does not return from the call within 25 seconds (VectorCraft's own limit) or leaves the bus before it answers, and a portal that ends the request another way end the wait with a status message. An error without a sampler, while one is open, or with `picker` and no Color Picker open",
+        "{} or {stroke?: bool (default: the active proxy), picker?: bool (the open Color Picker instead)} show the system's color sampler (macOS; Linux through the XDG desktop portal's PickColor; browsers with an EyeDropper) and answer at once; the color the person picks anywhere on the screen then runs paint.setFill / paint.setStroke (one undo step) or becomes the Color Picker's color (field `color`), converted from display sRGB into the working RGB space; a cancel (Escape on macOS and in browsers) leaves the colors as they were. ui.inspect reports `screenSampler: true` until it answers; on Linux, a session without a portal that has PickColor, a portal that does not return from the call within 25 seconds (Nib's own limit) or leaves the bus before it answers, and a portal that ends the request another way end the wait with a status message. An error without a sampler, while one is open, or with `picker` and no Color Picker open",
     ),
     (
         "ui.newBrush",
@@ -1360,7 +1355,7 @@ pub const UI_COMMANDS: &[(&str, &str, &str, &str)] = &[
         "ui.pdfPresetDialog",
         "PDF Preset",
         "",
-        "{name?: a saved preset to edit | preset?: the preset a new one starts from (default VectorCraft Default)} open the preset editor (dialog `pdfPreset`: the Save PDF dialog's option fields plus `name` and `description`); OK runs pdf.preset.save and returns to PDF Presets",
+        "{name?: a saved preset to edit | preset?: the preset a new one starts from (default Nib Default)} open the preset editor (dialog `pdfPreset`: the Save PDF dialog's option fields plus `name` and `description`); OK runs pdf.preset.save and returns to PDF Presets",
     ),
     ("file.openRecent11", "Open Recent File 11", "", "{}"),
     ("file.openRecent12", "Open Recent File 12", "", "{}"),
@@ -1495,7 +1490,7 @@ pub const UI_COMMANDS: &[(&str, &str, &str, &str)] = &[
         "ui.action.playbackOptions",
         "Playback Options",
         "",
-        "{speed?: accelerated|step|pause, seconds?: 1-60} set how the Actions panel plays actions: accelerated (the default) plays every step at once, step plays one step at a time and draws the window after each, and pause waits seconds (a whole number, 1 to 60, VectorCraft's own range) between steps. A param left out keeps its value; the setting is kept with the UI preferences. Any other speed or seconds is an error and changes nothing. The panel menu's Playback Options… (dialog `actionPlayback` with speed and seconds) runs this on OK → {speed, seconds}",
+        "{speed?: accelerated|step|pause, seconds?: 1-60} set how the Actions panel plays actions: accelerated (the default) plays every step at once, step plays one step at a time and draws the window after each, and pause waits seconds (a whole number, 1 to 60, Nib's own range) between steps. A param left out keeps its value; the setting is kept with the UI preferences. Any other speed or seconds is an error and changes nothing. The panel menu's Playback Options… (dialog `actionPlayback` with speed and seconds) runs this on OK → {speed, seconds}",
     ),
     (
         "ui.action.record",
@@ -1519,7 +1514,7 @@ pub const UI_COMMANDS: &[(&str, &str, &str, &str)] = &[
         "ui.action.insertMenuItem",
         "Insert Menu Item",
         "",
-        "{set?: index, action?: index, step?: index, command, params?: object} insert the command of a menu item as a step, without running it; the step plays as choosing the item runs it. command and params (default {}) must be those of a menu item that can be a step: one that runs an engine command, whose label does not end with \"…\", outside the VectorCraft, File, Window and Help menus, and that is not Undo, Redo, a Paste, a batch (command.batch), a preference (prefs.*) or action (action.*) command, an Object › Align item, Image Trace's Make or Make and Expand, Pattern's Make or Edit Pattern, a saved selection, saved view or recent font item, or a plug-in's item. The place is as ui.action.insertStop takes it: with set and action, after step, else after the action's last step; without them, the recording in progress. The new step becomes the panel's selected step, and its action and set become the selected ones. A command and params that no such menu item has, a param of another type, params that are not an object, no action and no recording, or a step that would give the action more than 10,000 steps or its set's file more than 8 MiB, counting the steps that the recording in progress adds to the set, is an error and changes nothing. The panel menu's Insert Menu Item… (dialog `actionInsertMenuItem` with find, command, params, set, action and step) runs this on OK → {set, action, step}, or {recording: true}",
+        "{set?: index, action?: index, step?: index, command, params?: object} insert the command of a menu item as a step, without running it; the step plays as choosing the item runs it. command and params (default {}) must be those of a menu item that can be a step: one that runs an engine command, whose label does not end with \"…\", outside the Nib, File, Window and Help menus, and that is not Undo, Redo, a Paste, a batch (command.batch), a preference (prefs.*) or action (action.*) command, an Object › Align item, Image Trace's Make or Make and Expand, Pattern's Make or Edit Pattern, a saved selection, saved view or recent font item, or a plug-in's item. The place is as ui.action.insertStop takes it: with set and action, after step, else after the action's last step; without them, the recording in progress. The new step becomes the panel's selected step, and its action and set become the selected ones. A command and params that no such menu item has, a param of another type, params that are not an object, no action and no recording, or a step that would give the action more than 10,000 steps or its set's file more than 8 MiB, counting the steps that the recording in progress adds to the set, is an error and changes nothing. The panel menu's Insert Menu Item… (dialog `actionInsertMenuItem` with find, command, params, set, action and step) runs this on OK → {set, action, step}, or {recording: true}",
     ),
     (
         "ui.action.insertSelectPath",

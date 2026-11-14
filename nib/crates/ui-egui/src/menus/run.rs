@@ -118,6 +118,10 @@ pub fn run_ui_command(app: &mut VectorcraftApp, id: &str, p: &Value) -> Option<R
     {
         return Some(r);
     }
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(r) = crate::ai::command(app, id, p) {
+        return Some(r);
+    }
     run_ui_part1(app, id, p)
         .or_else(|| run_ui_part2(app, id, p))
         .or_else(|| run_ui_part3(app, id, p))

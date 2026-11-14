@@ -220,7 +220,7 @@ mod tests {
             assert!(vectorcraft_engine::find_command(item.command).is_some() != in_app, "{item:?}");
             assert!(!in_app || item.path[0] == "View", "{item:?}");
             assert!(!item.label.ends_with('…'), "{item:?}");
-            assert!(!["VectorCraft", "File", "Window", "Help"].contains(&item.path[0]), "{item:?}");
+            assert!(!["Nib", "File", "Window", "Help"].contains(&item.path[0]), "{item:?}");
             assert!(item.params.is_object(), "{item:?}");
         }
         let has = |command: &str| items.iter().any(|i| i.command == command);

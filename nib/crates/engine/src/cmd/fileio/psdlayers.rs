@@ -722,11 +722,11 @@ impl Notes {
             out.push(format!("{} layers clipped to fill layers that weren't drawn were left out", self.clipped_out));
         }
         if !self.merged.is_empty() {
-            out.push(format!("layers in blend modes VectorCraft doesn't have ({}) were merged with the layers below them", self.merged.join(", ")));
+            out.push(format!("layers in blend modes Nib doesn't have ({}) were merged with the layers below them", self.merged.join(", ")));
         }
         if self.unmerged > 0 {
             out.push(format!(
-                "{} in blend modes VectorCraft doesn't have came in as Normal: the merge needs more memory than allowed",
+                "{} in blend modes Nib doesn't have came in as Normal: the merge needs more memory than allowed",
                 layers(self.unmerged)
             ));
         }

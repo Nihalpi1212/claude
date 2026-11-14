@@ -177,7 +177,7 @@ fn the_file_type_picked_in_the_save_dialog_decides_the_format() {
 fn the_suggested_names_extension_in_another_case_gets_the_picked_types() {
     for (cmd, answer, expected) in [
         ("file.save", &["/art/Untitled-1.VECTORCRAFT", "ai"][..], "/art/Untitled-1.ai"),
-        ("file.save", &["/art/Untitled-1.VectorCraft", "svg"], "/art/Untitled-1.svg"),
+        ("file.save", &["/art/Untitled-1.Nib", "svg"], "/art/Untitled-1.svg"),
         ("file.saveAsTemplate", &["/art/Untitled-1.VCTemplate", "ait"], "/art/Untitled-1.ait"),
     ] {
         let (mut app, shown, written) = portal_app();

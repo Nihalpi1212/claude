@@ -91,7 +91,7 @@
 	A lower value follows the stroke closely; a higher one gives fewer points and smoother curves.	Ett lägre värde följer konturen noga; ett högre ger färre punkter och jämnare kurvor.
 	A new preset starting from the selected one	En ny förinställning baserad på den markerade
 	A saved copy of the selected preset	En sparad kopia av den markerade förinställningen
-	About VectorCraft	Om VectorCraft
+	About Nib	Om Nib
 	above	ovanför
 	Absolute Position	Absolut position
 	Accurate	Exakt
@@ -201,7 +201,7 @@ font-technology	Variable	Variabla
 	Appearance Panel	Utseendepanel
 	Appearance panel	Utseendepanelen
 	Applies when the linked file is relinked or updated.	Gäller när den länkade filen länkas om eller uppdateras.
-	Applies the next time VectorCraft starts.	Gäller nästa gång VectorCraft startas.
+	Applies the next time Nib starts.	Gäller nästa gång Nib startas.
 	Apply	Använd
 	Apply Brush	Använd pensel
 	Apply Character Style	Använd teckenstil
@@ -239,8 +239,6 @@ font-technology	Variable	Variabla
 	Artboard {number}	Rityta {number}
 	Artboard:	Rityta:
 	Artboards	Ritytor
-	ArtCraft Website	ArtCrafts webbplats
-	ArtCraft website	ArtCrafts webbplats
 	Artwork Colors	Färger i grafiken
 	As Multiple Assets	Som flera resurser
 	As Single Asset	Som en enda resurs
@@ -412,7 +410,7 @@ font-technology	Variable	Variabla
 	Check Script	Kontrollera skript
 	Check Script…	Kontrollera skript…
 	Copy Report	Kopiera rapport
-	VectorCraft read this script without running it.	VectorCraft läste skriptet utan att köra det.
+	Nib read this script without running it.	Nib läste skriptet utan att köra det.
 	Needs nothing beyond plain JavaScript	Kräver inget utöver vanlig JavaScript
 	Needs the script language's own objects or directives	Kräver skriptspråkets egna objekt eller direktiv
 	Needs the document model	Kräver dokumentmodellen
@@ -829,7 +827,6 @@ font-technology	Variable	Variabla
 	Discard Empty Type	Släng tom text
 	Discard Recovered Documents	Släng återställda dokument
 	Discard White Overprint in Output	Släng vit övertryckning i utdata
-	Discord	Discord
 	Discretionary Hyphen	Mjukt bindestreck
 	Discretionary Ligatures	Valfria ligaturer
 	Display All Blacks Accurately	Visa alla svarta korrekt
@@ -1698,9 +1695,6 @@ font-technology	Variable	Variabla
 	Italian	Italienska
 	Japanese	Japanska
 	Join	Foga samman
-	Join Our Discord	Gå med i vår Discord
-	Join our Discord	Gå med i vår Discord
-	Join the ArtCraft community on Discord (discord.gg/artcraft)	Gå med i ArtCraft-gemenskapen på Discord (discord.gg/artcraft)
 	Join the lines of each paragraph	Foga samman raderna i varje stycke
 	Join Tool	Sammanfogningsverktyg
 	Justification…	Justering…
@@ -1727,7 +1721,7 @@ font-technology	Variable	Variabla
 	Keyboard Shortcuts…	Kortkommandon…
 	Import Shortcut Set	Importera kortkommandouppsättning
 	Import Shortcut Set…	Importera kortkommandouppsättning…
-	Each entry of the file is matched to a VectorCraft tool, command or panel. Check the matches and answer what is left.	Varje post i filen matchas mot ett verktyg, kommando eller en panel i VectorCraft. Kontrollera matchningarna och besvara det som återstår.
+	Each entry of the file is matched to a Nib tool, command or panel. Check the matches and answer what is left.	Varje post i filen matchas mot ett verktyg, kommando eller en panel i Nib. Kontrollera matchningarna och besvara det som återstår.
 	Keys	Tangenter
 	The file writes keys and modifiers as codes. Check the proposed meanings and answer the codes that are not known yet.	Filen anger tangenter och modifieringstangenter som koder. Kontrollera de föreslagna betydelserna och besvara de koder som ännu inte är kända.
 	Click, then press the key this code stands for (Esc cancels)	Klicka och tryck sedan på tangenten som koden står för (Esc avbryter)
@@ -1737,7 +1731,7 @@ font-technology	Variable	Variabla
 	not known yet	ännu okänt
 	Shortcuts	Kortkommandon
 	In the File	I filen
-	In VectorCraft	I VectorCraft
+	In Nib	I Nib
 	Needs Attention Only	Endast de som kräver åtgärd
 	Ready	Klar
 	Needs a choice	Kräver ett val
@@ -1746,7 +1740,7 @@ font-technology	Variable	Variabla
 	Tools take a single key (optionally with Shift)	Verktyg använder en enda tangent (eventuellt med Shift)
 	A later row takes this shortcut	En senare rad använder detta kortkommando
 	Same item as a later row	Samma objekt som en senare rad
-	Start from VectorCraft Defaults	Utgå från standardvärdena i VectorCraft
+	Start from Nib Defaults	Utgå från standardvärdena i Nib
 	Add to the Current Shortcuts	Lägg till i aktuella kortkommandon
 	Remember My Choices	Kom ihåg mina val
 	{ready} of {total} ready	{ready} av {total} klara
@@ -2437,7 +2431,6 @@ font-technology	Variable	Variabla
 	Paragraph Style Options	Alternativ för styckestil
 	Paragraph Styles	Styckestilar
 	Paragraph Symbol	Styckesymbol
-	Part of ArtCraft. MIT OR Apache-2.0. Fonts: Source Sans 3, Inter, JetBrains Mono (OFL). Icons: Lucide (ISC) + VectorCraft.	Del av ArtCraft. MIT OR Apache-2.0. Typsnitt: Source Sans 3, Inter, JetBrains Mono (OFL). Ikoner: Lucide (ISC) + VectorCraft.
 	Password	Lösenord
 	Paste	Klistra in
 	Paste in Back	Klistra in bakom
@@ -2636,7 +2629,7 @@ digits	Malayalam	Malayalam
 	Quarter Space	Fjärdedels blanksteg
 	Quick Actions	Snabbåtgärder
 	Quickly start a new file	Skapa snabbt en ny fil
-	Quit VectorCraft	Avsluta VectorCraft
+	Quit Nib	Avsluta Nib
 	Radar Graph Tool	Verktyget Radardiagram
 	Radial	Radiell
 	Radial Glows	Radiellt sken
@@ -2775,7 +2768,7 @@ digits	Malayalam	Malayalam
 @plural	{n} folder or file couldn't be read|{n} folders or files couldn't be read	{n} mapp eller fil kunde inte läsas|{n} mappar eller filer kunde inte läsas
 	The search stopped at its limit: search a smaller folder.	Sökningen stoppades vid sin gräns: sök i en mindre mapp.
 	Copy only fonts you own or are licensed to install.	Kopiera bara typsnitt som du äger eller har licens att installera.
-	VectorCraft copies the fonts to {folder}.	VectorCraft kopierar typsnitten till {folder}.
+	Nib copies the fonts to {folder}.	Nib kopierar typsnitten till {folder}.
 	Registered Trademark Symbol	Symbol för registrerat varumärke
 	Registration marks	Passmärken
 	Registry name:	Registernamn:
@@ -2917,9 +2910,9 @@ digits	Malayalam	Malayalam
 	Revert	Återgå
 	Revert to the saved version of “{name}”?	Vill du återgå till den sparade versionen av ”{name}”?
 	Replace “{name}”, the file this document was opened from?	Vill du ersätta ”{name}”, filen som dokumentet öppnades från?
-	Opening it left out what VectorCraft can't read yet ({what}), so replacing it loses that for good. Save under another name to keep it.	När filen öppnades utelämnades det som VectorCraft inte kan läsa än ({what}), så om du ersätter den förloras det för gott. Spara under ett annat namn för att behålla det.
+	Opening it left out what Nib can't read yet ({what}), so replacing it loses that for good. Save under another name to keep it.	När filen öppnades utelämnades det som Nib inte kan läsa än ({what}), så om du ersätter den förloras det för gott. Spara under ett annat namn för att behålla det.
 	“{name}” already exists. Replace it?	”{name}” finns redan. Vill du ersätta den?
-	The name in the save panel was “{typed}”; VectorCraft added the file type's extension. Replacing the file overwrites its contents.	Namnet i sparpanelen var ”{typed}”, och VectorCraft lade till filtypens filändelse. Om du ersätter filen skrivs innehållet över.
+	The name in the save panel was “{typed}”; Nib added the file type's extension. Replacing the file overwrites its contents.	Namnet i sparpanelen var ”{typed}”, och Nib lade till filtypens filändelse. Om du ersätter filen skrivs innehållet över.
 	Revolve…	Rotera runt axel…
 	RGB Color	RGB-färg
 	Right	Höger
@@ -3885,12 +3878,10 @@ digits	Malayalam	Malayalam
 	Vector Halftone	Vektorrastrering
 	Vector Halftone…	Vektorrastrering…
 	Vector illustration — fast, open, scriptable.	Vektorillustration – snabb, öppen, skriptbar.
-	VectorCraft didn't quit normally last time. These documents had unsaved changes:	VectorCraft avslutades inte normalt förra gången. De här dokumenten hade osparade ändringar:
-	VectorCraft Help…	VectorCraft-hjälp…
-	VectorCraft on getartcraft.com	VectorCraft på getartcraft.com
-	VectorCraft on GitHub	VectorCraft på GitHub
+	Nib didn't quit normally last time. These documents had unsaved changes:	Nib avslutades inte normalt förra gången. De här dokumenten hade osparade ändringar:
+	Nib Help…	Nib-hjälp…
+	Nib on GitHub	Nib på GitHub
 	Vectors	Vektorer
-	Version {version} — open-source vector illustration in pure Rust.	Version {version} – vektorillustration med öppen källkod i ren Rust.
 	Version:	Version:
 	Vertical	Vertikal
 	Vertical %	Vertikal %
@@ -3928,7 +3919,7 @@ digits	Malayalam	Malayalam
 	Web Snap:	Fäst mot webbfärger:
 	Weight	Tjocklek
 	Weight:	Tjocklek:
-	Welcome to VectorCraft	Välkommen till VectorCraft
+	Welcome to Nib	Välkommen till Nib
 	When pasting text	När text klistras in
 	White	Vit
 	Widget Position:	Widgetens position:
@@ -4356,7 +4347,7 @@ axis	Both	Båda
 @msg	Split Into Grid: select paths large enough for the grid	Dela upp i rutnät: markera banor som är tillräckligt stora för rutnätet
 @msg	Targa files are RGB: colorModel rgb	Targa-filer är RGB: colorModel rgb
 @msg	Text Wrap: select a wrap object	Textombrytning: markera ett ombrytningsobjekt
-@msg	This shortcut file is in a form VectorCraft can't read.	Den här kortkommandofilen har ett format som VectorCraft inte kan läsa.
+@msg	This shortcut file is in a form Nib can't read.	Den här kortkommandofilen har ett format som Nib inte kan läsa.
 @msg	`antiAlias` must be "none", "sharp", "crisp" or "strong"	`antiAlias` måste vara "none", "sharp", "crisp" eller "strong"
 @msg	`aspect` must be a number (%)	`aspect` måste vara ett tal (%)
 @msg	`at` must be [x, y]	`at` måste vara [x, y]
@@ -4489,7 +4480,7 @@ axis	Both	Båda
 @msg	can't encode the document: {0}	kan inte koda dokumentet: {0}
 @msg	can't parse shortcut `{c}`	kan inte tolka kortkommandot `{c}`
 @msg	can't parse shortcut `{s}` for `{k}`	kan inte tolka kortkommandot `{s}` för `{k}`
-@msg	can't save version {0}: VectorCraft writes versions {MIN_VERSION} to {VERSION}	kan inte spara version {0}: VectorCraft skriver version {MIN_VERSION} till {VERSION}
+@msg	can't save version {0}: Nib writes versions {MIN_VERSION} to {VERSION}	kan inte spara version {0}: Nib skriver version {MIN_VERSION} till {VERSION}
 @msg	can't write .{ext} images	kan inte skriva .{ext}-bilder
 @msg	cannot distort a zero-size bounding box	kan inte förvränga en avgränsningsram med storleken noll
 @msg	cannot read PDF: {0}	kan inte läsa PDF: {0}
@@ -4517,7 +4508,7 @@ axis	Both	Båda
 @msg	empty brush stroke	tomt penseldrag
 @msg	empty cutter	tom klippform
 @msg	empty path	tom bana
-@msg	file version {0} is newer than this VectorCraft supports ({VERSION})	filversion {0} är nyare än vad denna version av VectorCraft stöder ({VERSION})
+@msg	file version {0} is newer than this Nib supports ({VERSION})	filversion {0} är nyare än vad denna version av Nib stöder ({VERSION})
 @msg	freeform point {i} needs `at` [x, y] and a valid `color`	fri punkt {i} behöver `at` [x, y] och en giltig `color`
 @msg	freeform line {i} must be an array of point indices	fri linje {i} måste vara en lista med punktindex
 @msg	give both `start` and `end` [x, y] (or neither)	ange både `start` och `end` [x, y] (eller ingen av dem)
@@ -4545,9 +4536,9 @@ axis	Both	Båda
 @msg	{label} files hold real numbers up to {max}, and the page of artboard {n}, {side} pt long, needs larger ones: choose PDF 1.6 or later without a PDF/X standard, or a smaller artboard	{label}-filer rymmer reella tal upp till {max}, och sidan för rityta {n}, {side} pt lång, behöver större: välj PDF 1.6 eller senare utan PDF/X-standard, eller en mindre rityta
 @msg	invalid image data for `{0}`	ogiltiga bilddata för `{0}`
 @msg	invalid parameters for `{cmd}`: {msg}	ogiltiga parametrar för `{cmd}`: {msg}
-@msg	is not an image VectorCraft reads	är inte en bild som VectorCraft kan läsa
-@msg	it uses `{at}`, which VectorCraft's PostScript reader doesn't know	den använder `{at}`, som VectorCrafts PostScript-läsare inte känner till
-@msg	it uses `{at}`, which VectorCraft's PostScript reader doesn't know, in {procs}	den använder `{at}`, som VectorCrafts PostScript-läsare inte känner till, i {procs}
+@msg	is not an image Nib reads	är inte en bild som Nib kan läsa
+@msg	it uses `{at}`, which Nib's PostScript reader doesn't know	den använder `{at}`, som Nibs PostScript-läsare inte känner till
+@msg	it uses `{at}`, which Nib's PostScript reader doesn't know, in {procs}	den använder `{at}`, som Nibs PostScript-läsare inte känner till, i {procs}
 @msg	its Windows metafile preview was opened instead, which may simplify the art	filens förhandsgranskning som Windows-metafil öppnades i stället, vilket kan förenkla bilden
 @msg	its preview was placed instead, at screen resolution	dess förhandsgranskning placerades i stället, i skärmupplösning
 @msg	join needs open paths	foga samman kräver öppna banor
@@ -4604,7 +4595,7 @@ axis	Both	Båda
 @msg	no file system here	inget filsystem här
 @msg	no file writer	ingen filskrivare
 @msg	no files to place	inga filer att placera
-@msg	`{file}` isn't a VectorCraft document, a PDF or a PDF-compatible .ai file	`{file}` är inte ett VectorCraft-dokument, en PDF eller en PDF-kompatibel .ai-fil
+@msg	`{file}` isn't a Nib document, a PDF or a PDF-compatible .ai file	`{file}` är inte ett Nib-dokument, en PDF eller en PDF-kompatibel .ai-fil
 @msg	no format to export to	inget format att exportera till
 @msg	no free recovery area	inget ledigt återställningsområde
 @msg	no gradient stop or freeform point is selected	inget gradientstopp eller fri punkt är markerad
@@ -4649,7 +4640,7 @@ axis	Both	Båda
 @msg	the action set file is larger than 8 MiB	filen med åtgärdsuppsättningen är större än 8 MiB
 @msg	`{ID}`: the reference would be larger than {MAX_BYTES} bytes	`{ID}`: referensen skulle bli större än {MAX_BYTES} byte
 @msg	the action set file holds more than 1,000 actions	filen med åtgärdsuppsättningen innehåller fler än 1 000 åtgärder
-@msg	the action set file needs a later version of VectorCraft	filen med åtgärdsuppsättningen kräver en nyare version av VectorCraft
+@msg	the action set file needs a later version of Nib	filen med åtgärdsuppsättningen kräver en nyare version av Nib
 @msg	an action in the action set file has more than 10,000 steps	en åtgärd i filen med åtgärdsuppsättningen har fler än 10 000 steg
 @msg	no such anchor	ankaret finns inte
 @msg	no such artboard	ritytan finns inte
@@ -4681,8 +4672,8 @@ axis	Both	Båda
 @msg	node {_1} is not text	nod {_1} är inte text
 @msg	node {_1} is on a locked artboard	nod {_1} ligger på en låst rityta
 @msg	not a DXF drawing	inte en DXF-ritning
-@msg	not a VectorCraft file: {0}	inte en VectorCraft-fil: {0}
-@msg	not a VectorCraft shortcut set (missing `overrides`)	inte en kortkommandouppsättning för VectorCraft (`overrides` saknas)
+@msg	not a Nib file: {0}	inte en Nib-fil: {0}
+@msg	not a Nib shortcut set (missing `overrides`)	inte en kortkommandouppsättning för Nib (`overrides` saknas)
 @msg	not a blend	inte en blandning
 @msg	not a graphic style library (format `{_1}`)	inte ett bibliotek med grafiska stilar (format `{_1}`)
 @msg	not a shortcut set: the text doesn't start with a slash name and an opening brace	inte en kortkommandouppsättning: texten börjar inte med ett namn med snedstreck och en öppnande klammerparentes
@@ -4898,7 +4889,7 @@ axis	Both	Båda
 @msg	not a preferences file: no `format`	inte en inställningsfil: inget `format`
 @msg	not a preferences file: no `version`	inte en inställningsfil: ingen `version`
 @msg	not a preferences file: no `prefs`	inte en inställningsfil: ingen `prefs`
-@msg	the file was saved by a newer version of VectorCraft (version {v})	filen sparades av en nyare version av VectorCraft (version {v})
+@msg	the file was saved by a newer version of Nib (version {v})	filen sparades av en nyare version av Nib (version {v})
 @msg	the file holds no preferences	filen innehåller inga inställningar
 @msg	`{key}` names a folder, which preferences files leave out	`{key}` anger en mapp, och inställningsfiler innehåller inga mappar
 @msg	the file is larger than 1 MB	filen är större än 1 MB
@@ -5001,11 +4992,11 @@ axis	Both	Båda
 @msg	Sent to {_1}	Skickat till {_1}
 @msg	{_1} files	{_1}-filer
 @msg	The graphics were lost and have been restarted	Grafiken förlorades och har startats om
-@msg	The graphics processor tried first couldn't show the window, so VectorCraft started again on {summary}	Grafikprocessorn som prövades först kunde inte visa fönstret, så VectorCraft startade om med {summary}
-@msg	The last start of VectorCraft ended on {name} before its window appeared, so it started on {summary}. To try that graphics processor again, change Preferences › Performance › Graphics Processor or start with WGPU_BACKEND set	Den senaste starten av VectorCraft avbröts på {name} innan fönstret visades, så det startade med {summary}. Om du vill prova den grafikprocessorn igen ändrar du Inställningar › Prestanda › Grafikprocessor eller startar med WGPU_BACKEND angiven
-@msg	The last start of VectorCraft ended while it listed the graphics processors, so it started on {summary} with OpenGL alone. To try the other graphics backends again, change Preferences › Performance › Graphics Processor or start with WGPU_BACKEND set	Den senaste starten av VectorCraft avbröts medan grafikprocessorerna listades, så det startade med {summary} med enbart OpenGL. Om du vill prova de andra grafikgränssnitten igen ändrar du Inställningar › Prestanda › Grafikprocessor eller startar med WGPU_BACKEND angiven
-@msg	Loading VectorCraft…	Läser in VectorCraft…
-@msg	VectorCraft failed to start: {e}	VectorCraft kunde inte starta: {e}
+@msg	The graphics processor tried first couldn't show the window, so Nib started again on {summary}	Grafikprocessorn som prövades först kunde inte visa fönstret, så Nib startade om med {summary}
+@msg	The last start of Nib ended on {name} before its window appeared, so it started on {summary}. To try that graphics processor again, change Preferences › Performance › Graphics Processor or start with WGPU_BACKEND set	Den senaste starten av Nib avbröts på {name} innan fönstret visades, så det startade med {summary}. Om du vill prova den grafikprocessorn igen ändrar du Inställningar › Prestanda › Grafikprocessor eller startar med WGPU_BACKEND angiven
+@msg	The last start of Nib ended while it listed the graphics processors, so it started on {summary} with OpenGL alone. To try the other graphics backends again, change Preferences › Performance › Graphics Processor or start with WGPU_BACKEND set	Den senaste starten av Nib avbröts medan grafikprocessorerna listades, så det startade med {summary} med enbart OpenGL. Om du vill prova de andra grafikgränssnitten igen ändrar du Inställningar › Prestanda › Grafikprocessor eller startar med WGPU_BACKEND angiven
+@msg	Loading Nib…	Läser in Nib…
+@msg	Nib failed to start: {e}	Nib kunde inte starta: {e}
 @msg	A browser with WebGPU or WebGL2 is required.	En webbläsare med WebGPU eller WebGL2 krävs.
 @msg	The graphics were lost and couldn't be restarted.	Grafiken förlorades och kunde inte startas om.
 @msg	Your unsaved changes are kept in this browser: reload the page to get them back.	Dina osparade ändringar finns kvar i den här webbläsaren: läs in sidan igen för att få tillbaka dem.
@@ -5036,21 +5027,21 @@ axis	Both	Båda
 @msg	it has more than {MAX_NODES} objects	den har fler än {MAX_NODES} objekt
 @msg	it has no layers	den har inga lager
 @msg	it has too many values in a row	den har för många värden på en rad
-@msg	it has {_1}, which VectorCraft doesn't read from it yet	den innehåller {_1}, som VectorCraft inte kan läsa från den än
+@msg	it has {_1}, which Nib doesn't read from it yet	den innehåller {_1}, som Nib inte kan läsa från den än
 @msg	its objects are nested too deeply	dess objekt är för djupt kapslade
 @msg	its section ending with `%{end}` doesn't end	dess avsnitt som slutar med `%{end}` avslutas aldrig
-@msg	brushes VectorCraft can't read yet were left out of the Brushes panel ({_1})	penslar som VectorCraft ännu inte kan läsa utelämnades från panelen Penslar ({_1})
+@msg	brushes Nib can't read yet were left out of the Brushes panel ({_1})	penslar som Nib ännu inte kan läsa utelämnades från panelen Penslar ({_1})
 @msg	objects with several fills or strokes, variable-width strokes, effects or brushes came in as their drawn look ({_1}): their appearance isn't editable yet	objekt med flera fyllningar eller konturer, konturer med variabel bredd, effekter eller penslar importerades som sitt ritade utseende ({_1}): deras utseende går inte att redigera än
 @msg	the name `{name}` isn't UTF-8 and was read as {label}: if it looks wrong, open the file with another legacyNameEncoding	namnet `{name}` är inte UTF-8 och lästes som {label}: om det ser fel ut, öppna filen med en annan legacyNameEncoding
 @msg	the name `{name}` isn't UTF-8, and parts of it aren't valid {label} either: open the file with another legacyNameEncoding	namnet `{name}` är inte UTF-8, och delar av det är inte heller giltig {label}: öppna filen med en annan legacyNameEncoding
 @msg	more names that aren't UTF-8 were read as {label} ({count})	fler namn som inte är UTF-8 lästes som {label} ({count})
 @msg	gradient “{name}” isn't defined in the file: a plain colour stands in for it	gradienten ”{name}” är inte definierad i filen: en enfärgad fyllning används i stället
-@msg	an image VectorCraft can't read was left out	en bild som VectorCraft inte kan läsa utelämnades
+@msg	an image Nib can't read was left out	en bild som Nib inte kan läsa utelämnades
 @msg	graphs come in as plain art, without their data or settings	diagram läses in som vanlig grafik, utan sina data och inställningar
 @msg	an image whose data is cut short was left out	en bild med avkortade data utelämnades
 @msg	an embedded image of {_1} × {_2} pixels was reduced to {_3} × {_4} pixels to keep the layers	en inbäddad bild på {_1} × {_2} pixlar förminskades till {_3} × {_4} pixlar för att behålla lagren
 @msg	linked pictures show the low-resolution preview saved in the file until their files are found: relink them in the Links panel	länkade bilder visar förhandsgranskningen med låg upplösning som sparats i filen tills deras filer hittas: länka om dem i panelen Länkar
-@msg	linked type areas past VectorCraft's limits were left out	länkade textområden utöver VectorCrafts gränser utelämnades
+@msg	linked type areas past Nib's limits were left out	länkade textområden utöver Nibs gränser utelämnades
 @msg	the Line Breaking setting of legacy type was left out	inställningen för radbrytning i text i det gamla formatet utelämnades
 @msg	the Japanese layout rules of legacy type were left out	de japanska layoutreglerna för text i det gamla formatet utelämnades
 @msg	type that changes writing direction inside a text object opens in the direction of its first character	text som byter skrivriktning inuti ett textobjekt öppnas i riktningen för sitt första tecken
@@ -5061,13 +5052,13 @@ axis	Both	Båda
 @msg	this file was saved without PDF compatibility, and its editing data can't be read ({why})	den här filen sparades utan PDF-kompatibilitet och dess redigeringsdata kan inte läsas ({why})
 @msg	the PDF part couldn't be read ({_1}): the file opened from its editing data	PDF-delen kunde inte läsas ({_1}): filen öppnades från dess redigeringsdata
 @msg	No fonts are missing in this document	Inga typsnitt saknas i det här dokumentet
-@msg	VectorCraft doesn't search other apps' or the system's folders: {path}	VectorCraft söker inte i andra appars eller systemets mappar: {path}
-@msg	VectorCraft doesn't search the Shared or Public folder in Users: {path}	VectorCraft söker inte i mappen Shared eller Public under Users: {path}
+@msg	Nib doesn't search other apps' or the system's folders: {path}	Nib söker inte i andra appars eller systemets mappar: {path}
+@msg	Nib doesn't search the Shared or Public folder in Users: {path}	Nib söker inte i mappen Shared eller Public under Users: {path}
 @msg	{path} is not a folder	{path} är inte en mapp
 @msg	the search couldn't start: try again in a moment	sökningen kunde inte starta: försök igen om en stund
 @msg	searching a folder isn't available on the web	sökning i en mapp är inte tillgänglig på webben
 @msg	every search thread stopped on an internal error (please report this bug)	alla söktrådar stoppades av ett internt fel (rapportera gärna felet)
-@msg	VectorCraft's Fonts folder isn't set here: the desktop app and vectorcraft-cli set it	VectorCrafts mapp Fonts anges inte här: den anges av skrivbordsappen och vectorcraft-cli
+@msg	Nib's Fonts folder isn't set here: the desktop app and nib-cli set it	Nibs mapp Fonts anges inte här: den anges av skrivbordsappen och nib-cli
 @msg	choose the font files to add	välj de typsnittsfiler som ska läggas till
 @msg	not a file	inte en fil
 @msg	not a font file	inte en typsnittsfil
@@ -5080,7 +5071,7 @@ axis	Both	Båda
 @msg	No linked files to look for	Inga länkade filer att leta efter
 @msg	The link is inside a symbol, graph design, pattern or opacity mask and has no place on the canvas	Länken finns i en symbol, en diagramdesign, ett mönster eller en opacitetsmask och har ingen plats på arbetsytan
 	Services	Tjänster
-	Hide VectorCraft	Göm VectorCraft
+	Hide Nib	Göm Nib
 	Zoom	Zoom
 	Bring All to Front	Lägg alla överst
 	Settings	Inställningar
@@ -5088,7 +5079,7 @@ axis	Both	Båda
 	On: one locked object showing the document, updated when it changes.	På: ett låst objekt som visar dokumentet och uppdateras när det ändras.
 	Off: an editable copy of its art, embedded in this document.	Av: en redigerbar kopia av grafiken, inbäddad i det här dokumentet.
 	Images: link to the file instead of only embedding it.	Bilder: länka till filen i stället för att bara bädda in den.
-	VectorCraft documents: one locked object, updated when the file changes.	VectorCraft-dokument: ett låst objekt som uppdateras när filen ändras.
+	Nib documents: one locked object, updated when the file changes.	Nib-dokument: ett låst objekt som uppdateras när filen ändras.
 	A file dialog is open: choose there first	En fildialog är öppen: välj där först
 	The document was closed while its file dialog was open	Dokumentet stängdes medan dess fildialogruta var öppen
 	The dialog was closed before its file dialog answered	Dialogrutan stängdes innan dess fildialogruta svarade
@@ -5236,10 +5227,10 @@ axis	Both	Båda
 effect	Soft	Mjuk
 	Edge	Kant
 	System Title Bar	Systemets namnlist
-	VectorCraft Title Bar on Every Desktop	VectorCrafts namnlist på alla skrivbord
+	Nib Title Bar on Every Desktop	Nibs namnlist på alla skrivbord
 	The VECTORCRAFT_TITLEBAR environment variable chooses the title bar while it is set.	Miljövariabeln VECTORCRAFT_TITLEBAR väljer namnlisten så länge den är angiven.
 	System Title Bar takes precedence over this option while it is on.	Systemets namnlist har företräde framför det här alternativet så länge den är på.
-	This desktop draws the window's title bar with this option on or off while VectorCraft Title Bar on Every Desktop is off.	Så länge VectorCrafts namnlist på alla skrivbord är av ritar det här skrivbordet fönstrets namnlist, oavsett om det här alternativet är på eller av.
+	This desktop draws the window's title bar with this option on or off while Nib Title Bar on Every Desktop is off.	Så länge Nibs namnlist på alla skrivbord är av ritar det här skrivbordet fönstrets namnlist, oavsett om det här alternativet är på eller av.
 	Value Axis	Värdeaxel
 	On Left Side	På vänster sida
 	On Right Side	På höger sida
@@ -5391,7 +5382,7 @@ lighting	Light	Ljus
 	Edge Intensity	Kantintensitet
 	Posterization	Posterisering
 	Highlight Area	Högdagerområde
-@msg	the compressed file unpacks to more than VectorCraft reads ({_1} MB of document, {_2} MB per image)	den komprimerade filen packas upp till mer än VectorCraft läser ({_1} MB dokument, {_2} MB per bild)
+@msg	the compressed file unpacks to more than Nib reads ({_1} MB of document, {_2} MB per image)	den komprimerade filen packas upp till mer än Nib läser ({_1} MB dokument, {_2} MB per bild)
 @msg	the document is too large to save compressed ({0}): save it with Use Compression off	dokumentet är för stort för att sparas komprimerat ({0}): spara det med Använd komprimering avstängt
 @msg	the file stopped being read (please report this bug)	läsningen av filen avbröts (rapportera gärna den här buggen)
 	Concentric Dividers:	Koncentriska avdelare:
@@ -5608,7 +5599,7 @@ lighting	Light	Ljus
 	DWG (use DXF)	DWG (använd DXF)
 	Default Graphic Style	Standardgrafikstil
 	Diamond (open)	Romb (öppen)
-	Differences from VectorCraft Default:	Skillnader från VectorCraft-standard:
+	Differences from Nib Default:	Skillnader från Nib-standard:
 	Differences from [Default]:	Skillnader från [Standard]:
 	Diffusion	Diffusion
 	Direct Selection	Direktmarkering
@@ -5676,7 +5667,7 @@ lighting	Light	Ljus
 	Inserting, deleting and rotating pages	Infoga, radera och rotera sidor
 	Joins:	Hörn:
 	Justify	Marginaljustera
-	Keeps the document editable: VectorCraft reopens the PDF with nothing lost. For files you'll edit again.	Håller dokumentet redigerbart: VectorCraft öppnar PDF-filen igen utan att något går förlorat. För filer du ska redigera igen.
+	Keeps the document editable: Nib reopens the PDF with nothing lost. For files you'll edit again.	Håller dokumentet redigerbart: Nib öppnar PDF-filen igen utan att något går förlorat. För filer du ska redigera igen.
 	Keyboard Shortcuts	Kortkommandon
 	Kite	Drake
 	LF (macOS, Linux)	LF (macOS, Linux)
@@ -5726,7 +5717,6 @@ lighting	Light	Ljus
 	PDF/X-4:2010	PDF/X-4:2010
 	PRs	PR:er
 	Page Cover 1640×624	Sidomslag 1640×624
-	Part of ArtCraft. MIT OR Apache-2.0. Fonts: Source Sans 3, Inter, JetBrains Mono, Noto Sans SC (OFL). Icons: Lucide (ISC) + VectorCraft.	Del av ArtCraft. MIT OR Apache-2.0. Typsnitt: Source Sans 3, Inter, JetBrains Mono, Noto Sans SC (OFL). Ikoner: Lucide (ISC) + VectorCraft.
 	Pattern Swatches	Mönsterfärgrutor
 	Pen	Penna
 	Pentagram	Pentagram
@@ -5866,10 +5856,10 @@ lighting	Light	Ljus
 	Up (right reading)	Upp (rättläst)
 	Use Default	Använd standard
 	Variation	Variation
-	VectorCraft Default	VectorCraft-standard
-	VectorCraft Defaults	VectorCraft-standardvärden
+	Nib Default	Nib-standard
+	Nib Defaults	Nib-standardvärden
 	VectorCraft Generic CMYK (SWOP-like)	VectorCraft allmän CMYK (SWOP-liknande)
-	VectorCraft Swatches (.vcswatches)	VectorCraft-färgrutor (.vcswatches)
+	Nib Swatches (.vcswatches)	Nib-färgrutor (.vcswatches)
 	Vertical Align	Vertikal justering
 	Vertical Area Type	Vertikal områdestext
 	Vertical Type	Vertikal text
@@ -5906,7 +5896,7 @@ lighting	Light	Ljus
 	[PDF/X-4:2010]	[PDF/X-4:2010]
 	[Press Quality]	[Tryckkvalitet]
 	[Smallest File Size]	[Minsta filstorlek]
-	[VectorCraft Default]	[VectorCraft-standard]
+	[Nib Default]	[Nib-standard]
 	of	av
 	sRGB IEC61966-2.1	sRGB IEC61966-2.1
 	x Height	x-höjd
@@ -5936,7 +5926,7 @@ file-filter	Export presets	Exportförinställningar
 file-filter	SVG Compressed	SVG komprimerad
 file-filter	Swatch libraries	Färgrutebibliotek
 file-filter	Templates	Mallar
-file-filter	VectorCraft Template	VectorCraft-mall
+file-filter	Nib Template	Nib-mall
 gradient-kind	Radial	Radiell
 mark-style	Japanese	Japanska
 theme	Appearance	Utseende
@@ -6992,7 +6982,7 @@ anchor	Points:	Punkter:
 	Right-click an item to move it into this group.	Högerklicka på ett objekt för att flytta det till den här gruppen.
 	Tracing the colors…	Vektoriserar färgerna…
 	Units & Scale	Enheter & skala
-	VectorCraft Updates	Uppdateringar för VectorCraft
+	Nib Updates	Uppdateringar för Nib
 	Yonroku-ban	Yonroku-ban
 @msg	image '{key}' has no pixels and was left out	bilden '{key}' har inga pixlar och utelämnades
 @msg	not an RTF file: it doesn't start with {{\\rtf	inte en RTF-fil: den börjar inte med {{\\rtf
@@ -7489,7 +7479,7 @@ digits	Hindi	Hindi
 @msg	`{_1}` is built in and always listed	`{_1}` är inbyggd och listas alltid
 @msg	`{_1}` is not a font file the last text.findFontFiles search found	`{_1}` är inte en typsnittsfil som den senaste sökningen med text.findFontFiles hittade
 @msg	`{_1}` would be overwritten by the package: choose a different folder or name	`{_1}` skulle skrivas över av paketet: välj en annan mapp eller ett annat namn
-@msg	`{f}` belongs to a VectorCraft that is running	`{f}` tillhör en VectorCraft-instans som körs
+@msg	`{f}` belongs to a Nib that is running	`{f}` tillhör en Nib-instans som körs
 @msg	`{f}` is the copy of a document open now	`{f}` är kopian av ett dokument som är öppet nu
 @msg	`{file}` has no art to place	`{file}` har ingen grafik att placera
 @msg	`{file}` is over {_1} MB	`{file}` är större än {_1} MB
@@ -7845,8 +7835,8 @@ digits	Hindi	Hindi
 @msg	can't linearise the PDF: {why}	kan inte linjärisera PDF-filen: {why}
 @msg	can't open `{_1}`: {_2}	kan inte öppna `{_1}`: {_2}
 @msg	can't open `{_1}`: {e}	kan inte öppna `{_1}`: {e}
-@msg	can't open `{name}`: not a format VectorCraft reads (see document.formats)	kan inte öppna `{name}`: VectorCraft kan inte läsa formatet (se document.formats)
-@msg	can't place `{name}`: not a format VectorCraft reads (see document.formats)	kan inte placera `{name}`: VectorCraft kan inte läsa formatet (se document.formats)
+@msg	can't open `{name}`: not a format Nib reads (see document.formats)	kan inte öppna `{name}`: Nib kan inte läsa formatet (se document.formats)
+@msg	can't place `{name}`: not a format Nib reads (see document.formats)	kan inte placera `{name}`: Nib kan inte läsa formatet (se document.formats)
 @msg	can't read back the written PDF: {e}	kan inte läsa in den skrivna PDF-filen igen: {e}
 @msg	can't read this Word document: {why}	kan inte läsa det här Word-dokumentet: {why}
 @msg	can't write .{e} images: use .png, .jpg, .gif, .webp, .tif or .bmp	kan inte skriva .{e}-bilder: använd .png, .jpg, .gif, .webp, .tif eller .bmp
@@ -8118,7 +8108,7 @@ digits	Hindi	Hindi
 @msg	line {line}: value for `{var}` must match its variable kind	rad {line}: värdet för `{var}` måste matcha variabelns typ
 @msg	lineEndings `{other}`: lf or crlf	lineEndings `{other}`: lf eller crlf
 @msg	loading profiles from disk isn't available in the browser	det går inte att läsa in profiler från disk i webbläsaren
-@msg	Lock Workspace is not available in VectorCraft	Lås arbetslayout är inte tillgängligt i VectorCraft
+@msg	Lock Workspace is not available in Nib	Lås arbetslayout är inte tillgängligt i Nib
 @msg	manifest is {_1} bytes (limit {MAX_MANIFEST_BYTES})	manifestet är {_1} byte (gränsen är {MAX_MANIFEST_BYTES})
 @msg	manifest is not UTF-8	manifestet är inte UTF-8
 @msg	manifest is too long (limit {MAX_MANIFEST_BYTES} bytes)	manifestet är för långt (gränsen är {MAX_MANIFEST_BYTES} byte)
@@ -8322,7 +8312,7 @@ digits	Hindi	Hindi
 @msg	not a Word document: its main part is not a WordprocessingML document	inte ett Word-dokument: dess huvuddel är inte ett WordprocessingML-dokument
 @msg	not a Word document: its package has no main document part	inte ett Word-dokument: dess paket saknar huvuddokumentdel
 @msg	not a Word document: its WordDocument stream doesn't start with a file information block	inte ett Word-dokument: dess WordDocument-ström börjar inte med ett filinformationsblock
-@msg	not an image VectorCraft reads (see document.formats)	inte en bild som VectorCraft kan läsa (se document.formats)
+@msg	not an image Nib reads (see document.formats)	inte en bild som Nib kan läsa (se document.formats)
 @msg	not area type (text in a frame) outside perspective	inte områdestext (text i en ram) utanför perspektivet
 @msg	not editing an opacity mask	redigerar inte en opacitetsmask
 @msg	not JSON: {e}	inte JSON: {e}
@@ -8677,8 +8667,8 @@ digits	Hindi	Hindi
 @msg	the Word document has too much text to place as type (at most {_1} MB)	Word-dokumentet har för mycket text för att placeras som text (högst {_1} MB)
 @msg	the Word document is encrypted or protected with a password; save it without one to place it	Word-dokumentet är krypterat eller lösenordsskyddat. Spara det utan lösenord för att placera det
 @msg	the Word document is too large to place (its {name} stream holds more than {_1} MB)	Word-dokumentet är för stort för att placeras (dess {name}-ström innehåller mer än {_1} MB)
-@msg	the Word document was last saved with fast save, which VectorCraft doesn't read; save it again with fast save turned off	Word-dokumentet sparades senast med snabbsparning, som VectorCraft inte kan läsa. Spara det igen med snabbsparning avstängd
-@msg	the Word document was saved by Word 6.0 or Word 95, which VectorCraft doesn't read; save it as a Word 97-2003 document	Word-dokumentet sparades med Word 6.0 eller Word 95, som VectorCraft inte kan läsa. Spara det som ett Word 97-2003-dokument
+@msg	the Word document was last saved with fast save, which Nib doesn't read; save it again with fast save turned off	Word-dokumentet sparades senast med snabbsparning, som Nib inte kan läsa. Spara det igen med snabbsparning avstängd
+@msg	the Word document was saved by Word 6.0 or Word 95, which Nib doesn't read; save it as a Word 97-2003 document	Word-dokumentet sparades med Word 6.0 eller Word 95, som Nib inte kan läsa. Spara det som ett Word 97-2003-dokument
 @msg	the Word document's text is made of more than {MAX_PIECES} pieces, too many to place	Word-dokumentets text består av fler än {MAX_PIECES} delar, för många för att placeras
 @msg	the written PDF has no catalog	den skrivna PDF-filen saknar katalog
 @msg	the written PDF has no cross-reference table	den skrivna PDF-filen saknar korsreferenstabell
@@ -8827,21 +8817,21 @@ digits	Hindi	Hindi
 # Copy Troubleshooting Info
 	Copy Troubleshooting Info	Kopiera felsökningsinformation
 @msg	Copied the troubleshooting info	Kopierade felsökningsinformationen
-@msg	The last session of VectorCraft stopped responding before it closed. Help › Copy Troubleshooting Info copies the details for a bug report	Den senaste VectorCraft-sessionen slutade svara innan den stängdes. Hjälp › Kopiera felsökningsinformation kopierar detaljerna till en felrapport
+@msg	The last session of Nib stopped responding before it closed. Help › Copy Troubleshooting Info copies the details for a bug report	Den senaste Nib-sessionen slutade svara innan den stängdes. Hjälp › Kopiera felsökningsinformation kopierar detaljerna till en felrapport
 
 # Safe Mode
 	Safe Mode…	Felsäkert läge…
 	Safe Mode	Felsäkert läge
 	Help › Safe Mode…	Hjälp › Felsäkert läge…
 	Enable on Re-launch	Aktivera vid nästa start
-	The last launch of VectorCraft stopped while the plug-in {name} was loading. It may not be what stopped it.	Den senaste starten av VectorCraft stoppades medan pluginet {name} lästes in. Det är kanske inte orsaken.
+	The last launch of Nib stopped while the plug-in {name} was loading. It may not be what stopped it.	Den senaste starten av Nib stoppades medan pluginet {name} lästes in. Det är kanske inte orsaken.
 	Disable and Continue	Inaktivera och fortsätt
 	Start Normally	Starta normalt
 	Start in Safe Mode	Starta i felsäkert läge
-	VectorCraft is in Safe Mode: no plug-ins load or run until it starts normally.	VectorCraft är i felsäkert läge: inga plugins läses in eller körs förrän programmet startas normalt.
+	Nib is in Safe Mode: no plug-ins load or run until it starts normally.	Nib är i felsäkert läge: inga plugins läses in eller körs förrän programmet startas normalt.
 	Disabled plug-ins	Inaktiverade plugins
 	No plug-ins are disabled.	Inga plugins är inaktiverade.
-@msg	Safe Mode is on: plug-ins don't load or run until VectorCraft starts normally	Felsäkert läge är på: plugins läses inte in eller körs förrän VectorCraft startas normalt
+@msg	Safe Mode is on: plug-ins don't load or run until Nib starts normally	Felsäkert läge är på: plugins läses inte in eller körs förrän Nib startas normalt
 @msg	give `id` or `file` (see plugin.safeMode)	ange `id` eller `file` (se plugin.safeMode)
 @msg	that plug-in isn't disabled (see plugin.safeMode)	det pluginet är inte inaktiverat (se plugin.safeMode)
 @msg	Couldn't save the disabled plug-ins for the next launch	De inaktiverade pluginen kunde inte sparas till nästa start
@@ -8974,3 +8964,11 @@ digits	Hindi	Hindi
 	Grommets	Öljetter
 	Grommet Inset	Öljetternas avstånd från kanten
 	Diameter	Diameter
+	Report an Issue	Rapportera ett problem
+	Report an issue	Rapportera ett problem
+	Report a problem or suggest an idea on Nib's GitHub	Rapportera ett problem eller föreslå en idé på Nibs GitHub
+	Nib Releases	Nib-versioner
+	VectorCraft (upstream project)	VectorCraft (ursprungsprojekt)
+	Nib is based on VectorCraft by the ArtCraft team and the VectorCraft contributors (MIT OR Apache-2.0)	Nib bygger på VectorCraft av ArtCraft-teamet och VectorCraft-bidragsgivarna (MIT OR Apache-2.0)
+	Fonts: Source Sans 3, Inter, JetBrains Mono (OFL). Icons: Lucide (ISC) + VectorCraft.	Typsnitt: Source Sans 3, Inter, JetBrains Mono (OFL). Ikoner: Lucide (ISC) + VectorCraft.
+	Open-source vector illustration in pure Rust.	Vektorillustration med öppen källkod i ren Rust.

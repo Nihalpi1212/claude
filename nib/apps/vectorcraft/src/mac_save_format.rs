@@ -221,7 +221,7 @@ mod tests {
     use super::*;
 
     fn filters() -> Vec<Filter> {
-        FilePick::filters([("VectorCraft", &["vectorcraft"][..]), ("SVG", &["svg"]), ("PDF", &["pdf"])])
+        FilePick::filters([("Nib", &["nibart"][..]), ("SVG", &["svg"]), ("PDF", &["pdf"])])
     }
 
     /// Save, Save As and Save a Copy list every save format with the default first; a panel with one
@@ -230,7 +230,7 @@ mod tests {
     fn save_panels_with_several_formats_get_the_menu() {
         let save = menu_formats(&FilePick::filters(fileio::save_filters("vectorcraft")));
         assert!(save.len() >= 2, "{save:?}");
-        assert_eq!(save.first().map(|(_, e)| e.as_slice()), Some(&["vectorcraft".to_owned()][..]));
+        assert_eq!(save.first().map(|(_, e)| e.as_slice()), Some(&["nibart".to_owned()][..]));
         assert!(menu_formats(&FilePick::filters(fileio::save_filters("svg"))).first().is_some_and(|(_, e)| e.iter().any(|e| e == "svg")));
         assert!(menu_formats(&FilePick::filters(fileio::template_filters("template"))).len() >= 2);
         assert!(menu_formats(&FilePick::filters([("PDF", &["pdf"][..])])).is_empty());
@@ -265,10 +265,10 @@ mod tests {
     /// type. The others stay allowed.
     #[test]
     fn the_chosen_format_is_the_first_allowed_type() {
-        assert_eq!(allowed_types(&filters(), 0), ["vectorcraft", "svg", "pdf"]);
-        assert_eq!(allowed_types(&filters(), 1), ["svg", "vectorcraft", "pdf"]);
-        assert_eq!(allowed_types(&filters(), 2), ["pdf", "vectorcraft", "svg"]);
-        assert_eq!(allowed_types(&filters(), 9), ["vectorcraft", "svg", "pdf"]);
+        assert_eq!(allowed_types(&filters(), 0), ["nibart", "svg", "pdf"]);
+        assert_eq!(allowed_types(&filters(), 1), ["svg", "nibart", "pdf"]);
+        assert_eq!(allowed_types(&filters(), 2), ["pdf", "nibart", "svg"]);
+        assert_eq!(allowed_types(&filters(), 9), ["nibart", "svg", "pdf"]);
     }
 
     /// A nil AppKit panel must be `None`, not a panic. `NSSavePanel::savePanel` used to panic here

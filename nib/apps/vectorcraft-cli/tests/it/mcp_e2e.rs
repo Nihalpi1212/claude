@@ -21,7 +21,7 @@ impl Mcp {
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
-            .expect("spawn vectorcraft-cli");
+            .expect("spawn nib-cli");
         let stdin = child.stdin.take();
         let stdout = BufReader::new(child.stdout.take().unwrap());
         Self { child, stdin, stdout, next: 1 }
@@ -78,7 +78,7 @@ impl Mcp {
         let v =
             self.request("initialize", json!({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "e2e", "version": "0"}}));
         let r = &v["result"];
-        assert_eq!(r["serverInfo"]["name"], "vectorcraft");
+        assert_eq!(r["serverInfo"]["name"], "nib");
         assert!(r["protocolVersion"].is_string());
         assert!(r["capabilities"]["tools"].is_object());
         self.notify("notifications/initialized");

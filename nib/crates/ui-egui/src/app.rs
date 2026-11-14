@@ -159,6 +159,8 @@ impl VectorcraftApp {
             plugin_runs: Default::default(),
             placing: Default::default(),
             trace_runs: Default::default(),
+            #[cfg(not(target_arch = "wasm32"))]
+            ai: Default::default(),
             recovery: Default::default(),
             host_modifiers: Default::default(),
             forwarded: Vec::new(),
@@ -253,6 +255,8 @@ impl VectorcraftApp {
         plugin_runs::poll(self);
         trace_runs::poll(self);
         placing::poll(self);
+        #[cfg(not(target_arch = "wasm32"))]
+        crate::ai::poll(self);
     }
 
     /// The language the UI is drawn in: the Preferences dialog's choice while it is open (so a
@@ -616,6 +620,8 @@ impl VectorcraftApp {
         export_progress::show(self, &ctx);
         plugin_runs::show(self, &ctx);
         trace_runs::show(self, &ctx);
+        #[cfg(not(target_arch = "wasm32"))]
+        crate::ai::show(self, &ctx);
         opening::show(self, &ctx);
         palette::show(self, &ctx);
         // After every panel had its chance to draw in this pass.

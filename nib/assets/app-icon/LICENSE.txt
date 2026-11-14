@@ -1,8 +1,9 @@
-VectorCraft app icon (vectorcraft.svg, vectorcraft-small.svg and every file derived from them in this
-directory: vectorcraft-1024.png, vectorcraft-macos-512.png, vectorcraft.icns, vectorcraft.ico, hicolor/).
+Nib app icon (nib.svg, nib-small.svg and every file derived from them in this directory:
+nib-1024.png, nib-macos-512.png, nib.icns, nib.ico, hicolor/).
 
-Original artwork made for this project by the project owner, drawn in ArtCraft and vectorised for
-VectorCraft (no third-party material). Licensed like the rest of VectorCraft, under either of
+Original artwork drawn by hand for Nib by the Nib contributors (a stylised fountain-pen nib
+drawing a vector curve; no third-party material, nothing traced or copied from other icons).
+Licensed like the rest of Nib, under either of
 
   * Apache License, Version 2.0 (https://www.apache.org/licenses/LICENSE-2.0)
   * MIT license (https://opensource.org/licenses/MIT)

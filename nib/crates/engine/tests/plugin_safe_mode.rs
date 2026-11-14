@@ -382,7 +382,7 @@ fn in_safe_mode_the_plug_in_folder_and_commands_load_and_run_nothing() {
     vectorcraft_engine::cmd::plugin::start_in_safe_mode();
     let mut s = launch(&dir);
     assert!(!installed("test.sm.s"), "stored plug-ins don't load");
-    let safe = "Safe Mode is on: plug-ins don't load or run until VectorCraft starts normally";
+    let safe = "Safe Mode is on: plug-ins don't load or run until Nib starts normally";
     let install = s.execute("plugin.install", &json!({"dataBase64": vectorcraft_format::base64_encode(&filter("test.sm.t"))}));
     assert!(install.unwrap_err().to_string().contains(safe));
     let reload = s.execute("plugin.reload", &json!({"path": extra.to_string_lossy()}));

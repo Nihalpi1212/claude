@@ -23,17 +23,16 @@
 	Paste Design	Vložit návrh
 	Select Unused	Vybrat nepoužité
 	Glowing Edges…	Zářící okraje…
-	About VectorCraft	O aplikaci VectorCraft
+	About Nib	O aplikaci Nib
 	Align to Path	Zarovnat k cestě
 	Cut Path at Selected Anchor Points	Rozdělit cestu ve vybraných kotevních bodech
-	Join Our Discord	Připojit se k našemu Discordu
 	Language	Jazyk
 	UI Brightness	Jas rozhraní
 	Dark	Tmavý
 	Medium Dark	Středně tmavý
 	Medium Light	Středně světlý
 	Light	Světlý
-	Quit VectorCraft	Ukončit VectorCraft
+	Quit Nib	Ukončit Nib
 # Artwork drag between document tabs.
 	Drop Artwork	Umístit grafiku
 @msg	{key} must be [x, y] with finite coordinates	{key} musí být [x, y] s konečnými souřadnicemi
@@ -126,7 +125,7 @@
 # Import Shortcut Set (Keyboard Shortcuts › Import…, File › Open of a .kys file) and its commands.
 	Import Shortcut Set	Importovat sadu klávesových zkratek
 	Import Shortcut Set…	Importovat sadu klávesových zkratek…
-	Each entry of the file is matched to a VectorCraft tool, command or panel. Check the matches and answer what is left.	Každá položka souboru je přiřazena k nástroji, příkazu nebo panelu VectorCraftu. Zkontrolujte přiřazení a doplňte, co zbývá.
+	Each entry of the file is matched to a Nib tool, command or panel. Check the matches and answer what is left.	Každá položka souboru je přiřazena k nástroji, příkazu nebo panelu Nibu. Zkontrolujte přiřazení a doplňte, co zbývá.
 	Keys	Klávesy
 	The file writes keys and modifiers as codes. Check the proposed meanings and answer the codes that are not known yet.	Soubor ukládá klávesy a modifikátory jako kódy. Zkontrolujte navržené významy a doplňte ty, které zatím nejsou známé.
 	Click, then press the key this code stands for (Esc cancels)	Klikněte a stiskněte klávesu, kterou tento kód označuje (Esc zruší)
@@ -136,7 +135,7 @@
 	not known yet	zatím není známo
 	Shortcuts	Zkratky
 	In the File	V souboru
-	In VectorCraft	Ve VectorCraftu
+	In Nib	Ve Nibu
 	Needs Attention Only	Jen řádky vyžadující pozornost
 	Ready	Připraveno
 	Needs a choice	Vyžaduje volbu
@@ -145,7 +144,7 @@
 	Tools take a single key (optionally with Shift)	Nástroje používají jedinou klávesu (volitelně se Shift)
 	A later row takes this shortcut	Tuto zkratku přebírá pozdější řádek
 	Same item as a later row	Stejná položka jako v pozdějším řádku
-	Start from VectorCraft Defaults	Vycházet z výchozích zkratek VectorCraftu
+	Start from Nib Defaults	Vycházet z výchozích zkratek Nibu
 	Add to the Current Shortcuts	Přidat k aktuálním zkratkám
 	Remember My Choices	Zapamatovat si moje volby
 	{ready} of {total} ready	Připraveno {ready} z {total}
@@ -160,7 +159,7 @@
 	Forget Import Matches	Zapomenout přiřazení z importů
 @plural	agrees with {n} default shortcut|agrees with {n} default shortcuts	shoduje se s {n} výchozí zkratkou|shoduje se s {n} výchozími zkratkami|shoduje se s {n} výchozími zkratkami
 @plural	{n} part of the file wasn't read|{n} parts of the file weren't read	{n} část souboru nebyla přečtena|{n} části souboru nebyly přečteny|{n} částí souboru nebylo přečteno
-@msg	This shortcut file is in a form VectorCraft can't read.	Tento soubor klávesových zkratek je ve formátu, který VectorCraft neumí přečíst.
+@msg	This shortcut file is in a form Nib can't read.	Tento soubor klávesových zkratek je ve formátu, který Nib neumí přečíst.
 @msg	not a shortcut set: the text doesn't start with a slash name and an opening brace	nejde o sadu klávesových zkratek: text nezačíná názvem s lomítkem a otevírací složenou závorkou
 	Preferences…	Předvolby…
 	Object	Objekt
@@ -871,11 +870,9 @@
 	Save Swatch Library…	Uložit knihovnu vzorníku…
 	Symbol Libraries	Knihovny symbolů
 	Help	Nápověda
-	ArtCraft Website	Web ArtCraft
-	VectorCraft on getartcraft.com	VectorCraft na getartcraft.com
-	VectorCraft on GitHub	VectorCraft na GitHubu
+	Nib on GitHub	Nib na GitHubu
 	Search Commands…	Hledat příkazy…
-	VectorCraft Help…	Nápověda VectorCraft…
+	Nib Help…	Nápověda Nib…
 	Auto Color	Automatická barva
 	Automatic	Automaticky
 	Isolate Selected Group	Izolovat vybranou skupinu
@@ -943,7 +940,7 @@
 
 # The macOS menu bar (native_menu): the app and Window menus' system items, Settings pages.
 	Services	Služby
-	Hide VectorCraft	Skrýt VectorCraft
+	Hide Nib	Skrýt Nib
 	Hide Others	Skrýt ostatní
 	Minimize	Minimalizovat
 	Zoom	Zvětšení
@@ -1000,10 +997,10 @@
 	Stained Glass…	Vitráž…
 	Texturizer…	Texturovač…
 	System Title Bar	Systémové záhlaví okna
-	VectorCraft Title Bar on Every Desktop	Záhlaví okna VectorCraftu v každém desktopovém prostředí
+	Nib Title Bar on Every Desktop	Záhlaví okna Nibu v každém desktopovém prostředí
 	The VECTORCRAFT_TITLEBAR environment variable chooses the title bar while it is set.	Dokud je proměnná prostředí VECTORCRAFT_TITLEBAR nastavena, záhlaví okna volí ona.
 	System Title Bar takes precedence over this option while it is on.	Dokud je Systémové záhlaví okna zapnuté, má přednost před touto volbou.
-	This desktop draws the window's title bar with this option on or off while VectorCraft Title Bar on Every Desktop is off.	Dokud je Záhlaví okna VectorCraftu v každém desktopovém prostředí vypnuté, toto desktopové prostředí kreslí záhlaví okna bez ohledu na to, zda je tato volba zapnutá.
+	This desktop draws the window's title bar with this option on or off while Nib Title Bar on Every Desktop is off.	Dokud je Záhlaví okna Nibu v každém desktopovém prostředí vypnuté, toto desktopové prostředí kreslí záhlaví okna bez ohledu na to, zda je tato volba zapnutá.
 	Exit	Ukončit
 	Distort	Zkreslení
 	Diffuse Glow…	Rozptýlená záře…
@@ -2327,9 +2324,6 @@ digits	Malayalam	Malajálamské
 
 # Dialogs
 	Graphics: {adapter}	Grafika: {adapter}
-	Part of ArtCraft. MIT OR Apache-2.0. Fonts: Source Sans 3, Inter, JetBrains Mono (OFL). Icons: Lucide (ISC) + VectorCraft.	Součást ArtCraft. MIT OR Apache-2.0. Písma: Source Sans 3, Inter, JetBrains Mono (OFL). Ikony: Lucide (ISC) + VectorCraft.
-	Part of ArtCraft. MIT OR Apache-2.0. Fonts: Source Sans 3, Inter, JetBrains Mono, Noto Sans SC (OFL). Icons: Lucide (ISC) + VectorCraft.	Součást ArtCraft. MIT OR Apache-2.0. Písma: Source Sans 3, Inter, JetBrains Mono, Noto Sans SC (OFL). Ikony: Lucide (ISC) + VectorCraft.
-	Version {version} — open-source vector illustration in pure Rust.	Verze {version} — open-source vektorová ilustrace v čistém Rustu.
 	Align to Page	Zarovnat ke stránce
 	Smooth Color	Plynulá barva
 	Specified Distance	Zadaná vzdálenost
@@ -2679,7 +2673,7 @@ digits	Malayalam	Malajálamské
 @plural	{n} folder or file couldn't be read|{n} folders or files couldn't be read	Nepodařilo se přečíst {n} složku nebo soubor|Nepodařilo se přečíst {n} složky nebo soubory|Nepodařilo se přečíst {n} složek nebo souborů
 	The search stopped at its limit: search a smaller folder.	Hledání se zastavilo na limitu: prohledejte menší složku.
 	Copy only fonts you own or are licensed to install.	Kopírujte jen písma, která vlastníte nebo máte licenci instalovat.
-	VectorCraft copies the fonts to {folder}.	VectorCraft zkopíruje písma do {folder}.
+	Nib copies the fonts to {folder}.	Nib zkopíruje písma do {folder}.
 @plural	Apply to All ({n} more missing)|Apply to All ({n} more missing)	Použít na všechny (chybí ještě {n})|Použít na všechny (chybí ještě {n})|Použít na všechny (chybí ještě {n})
 	Ignore	Ignorovat
 	Linked File Not Found	Propojený soubor nebyl nalezen
@@ -2769,7 +2763,7 @@ digits	Malayalam	Malajálamské
 	On: one locked object showing the document, updated when it changes.	Zapnuto: jeden zamčený objekt zobrazující dokument, aktualizovaný při jeho změně.
 	Off: an editable copy of its art, embedded in this document.	Vypnuto: upravitelná kopie jeho kresby vložená do tohoto dokumentu.
 	Images: link to the file instead of only embedding it.	Obrázky: propojit se souborem místo pouhého vložení.
-	VectorCraft documents: one locked object, updated when the file changes.	Dokumenty VectorCraft: jeden zamčený objekt, aktualizovaný při změně souboru.
+	Nib documents: one locked object, updated when the file changes.	Dokumenty Nib: jeden zamčený objekt, aktualizovaný při změně souboru.
 	Alignment:	Zarovnání:
 	Applies when the linked file is relinked or updated.	Platí při opětovném propojení nebo aktualizaci propojeného souboru.
 	Bounds (Fill Proportionally)	Hranice (vyplnit proporcionálně)
@@ -2859,7 +2853,7 @@ digits	Malayalam	Malajálamské
 	A new preset starting from the selected one	Nové přednastavení vycházející z vybraného
 	Differences from {preset}:	Rozdíly oproti {preset}:
 	Differences from [Default]:	Rozdíly oproti [Výchozí]:
-	Differences from VectorCraft Default:	Rozdíly oproti přednastavení Výchozí VectorCraft:
+	Differences from Nib Default:	Rozdíly oproti přednastavení Výchozí Nib:
 	Edit…	Upravit…
 	None.	Žádné.
 	Presets:	Přednastavení:
@@ -2918,7 +2912,7 @@ digits	Malayalam	Malajálamské
 	3 Color Job	Zakázka se 3 barvami
 	Recover Documents	Obnovit dokumenty
 	Restored documents open unsaved: save them to keep them.	Obnovené dokumenty se otevřou neuložené: pokud je chcete zachovat, uložte je.
-	VectorCraft didn't quit normally last time. These documents had unsaved changes:	VectorCraft se minule neukončil normálně. Tyto dokumenty měly neuložené změny:
+	Nib didn't quit normally last time. These documents had unsaved changes:	Nib se minule neukončil normálně. Tyto dokumenty měly neuložené změny:
 	Do you want to save the changes you made to “{name}”?	Chcete uložit změny provedené v dokumentu „{name}“?
 	Don't Save	Neukládat
 	Your changes will be lost if you don't save them.	Pokud změny neuložíte, budou ztraceny.
@@ -2988,7 +2982,7 @@ antiAlias	Sharp	Ostré
 	Color images	Barevné obrazy
 	Compatibility:	Kompatibilita:
 	PDF 1.7	PDF 1.7
-	VectorCraft Default	Výchozí VectorCraft
+	Nib Default	Výchozí Nib
 	High Quality Print	Tisk ve vysoké kvalitě
 	[High Quality Print]	[Tisk ve vysoké kvalitě]
 	Press Quality	Kvalita pro tiskový stroj
@@ -3001,7 +2995,7 @@ antiAlias	Sharp	Ostré
 	[PDF/X-3:2002]	[PDF/X-3:2002]
 	PDF/X-4:2010	PDF/X-4:2010
 	[PDF/X-4:2010]	[PDF/X-4:2010]
-	Keeps the document editable: VectorCraft reopens the PDF with nothing lost. For files you'll edit again.	Zachová možnost úprav dokumentu: VectorCraft znovu otevře PDF bez ztráty dat. Pro soubory, které budete znovu upravovat.
+	Keeps the document editable: Nib reopens the PDF with nothing lost. For files you'll edit again.	Zachová možnost úprav dokumentu: Nib znovu otevře PDF bez ztráty dat. Pro soubory, které budete znovu upravovat.
 	Compress text and line art	Komprimovat text a perokresbu
 	Compression	Komprese
 	Compression › Color › Above Ppi	Komprese › Barevné › Nad ppi
@@ -3080,14 +3074,14 @@ antiAlias	Sharp	Ostré
 	A File…	Soubor…
 	GPL palettes keep solid colours only, as RGB.	Palety GPL uchovávají pouze plné barvy, a to jako RGB.
 	Save Swatch Library	Uložit knihovnu vzorníku
-	VectorCraft Swatches (.vcswatches)	Vzorník VectorCraft (.vcswatches)
+	Nib Swatches (.vcswatches)	Vzorník Nib (.vcswatches)
 	Save To:	Uložit do:
 	Saved to User Defined: {}	Uloženo do uživatelských knihoven: {}
 	Selected Swatches Only	Pouze vybrané položky vzorníku
 	Selected Swatches Only (0)	Pouze vybrané položky vzorníku (0)
 	User Defined Libraries	Uživatelské knihovny
 	Copy Report	Kopírovat zprávu
-	VectorCraft read this script without running it.	VectorCraft tento skript přečetl, aniž by ho spustil.
+	Nib read this script without running it.	Nib tento skript přečetl, aniž by ho spustil.
 	Needs nothing beyond plain JavaScript	Nepotřebuje nic kromě běžného JavaScriptu
 	Needs the script language's own objects or directives	Potřebuje vlastní objekty nebo direktivy skriptovacího jazyka
 	Needs the document model	Potřebuje model dokumentu
@@ -4159,7 +4153,7 @@ axis	Both	Obě
 	Print as Bitmap	Tisknout jako bitmapu
 	Draft	Koncept
 	Default	Výchozí
-	[VectorCraft Default]	[Výchozí VectorCraft]
+	[Nib Default]	[Výchozí Nib]
 	Magenta	Purpurová
 	Page	Stránka
 	Print Tiling	Dlaždice tisku
@@ -4269,11 +4263,7 @@ effect	Regular	Pravidelný
 	Quickly start a new file	Rychle začít nový soubor
 	Recent Files	Nedávné soubory
 	Vector illustration — fast, open, scriptable.	Vektorová ilustrace — rychlá, otevřená, skriptovatelná.
-	Welcome to VectorCraft	Vítejte ve VectorCraftu
-	ArtCraft website	Web ArtCraft
-	Discord	Discord
-	Join our Discord	Připojit se k našemu Discordu
-	Join the ArtCraft community on Discord (discord.gg/artcraft)	Připojte se ke komunitě ArtCraft na Discordu (discord.gg/artcraft)
+	Welcome to Nib	Vítejte ve Nibu
 	Source code on GitHub	Zdrojový kód na GitHubu
 	All Tools	Všechny nástroje
 	Draw	Kresba
@@ -4318,9 +4308,9 @@ font-technology	Variable	Variabilní
 	Installed plug-in {}	Nainstalován zásuvný modul {}
 	Revert to the saved version of “{name}”?	Vrátit se k uložené verzi dokumentu „{name}“?
 	Replace “{name}”, the file this document was opened from?	Nahradit „{name}“, soubor, ze kterého byl tento dokument otevřen?
-	Opening it left out what VectorCraft can't read yet ({what}), so replacing it loses that for good. Save under another name to keep it.	Při otevírání bylo vynecháno, co VectorCraft zatím neumí přečíst ({what}), takže nahrazením se to nenávratně ztratí. Chcete-li to zachovat, uložte dokument pod jiným názvem.
+	Opening it left out what Nib can't read yet ({what}), so replacing it loses that for good. Save under another name to keep it.	Při otevírání bylo vynecháno, co Nib zatím neumí přečíst ({what}), takže nahrazením se to nenávratně ztratí. Chcete-li to zachovat, uložte dokument pod jiným názvem.
 	“{name}” already exists. Replace it?	„{name}“ již existuje. Nahradit?
-	The name in the save panel was “{typed}”; VectorCraft added the file type's extension. Replacing the file overwrites its contents.	Název v panelu ukládání byl „{typed}“ a VectorCraft přidal příponu typu souboru. Nahrazením souboru se přepíše jeho obsah.
+	The name in the save panel was “{typed}”; Nib added the file type's extension. Replacing the file overwrites its contents.	Název v panelu ukládání byl „{typed}“ a Nib přidal příponu typu souboru. Nahrazením souboru se přepíše jeho obsah.
 	Saved {path}	Uloženo: {path}
 	Saving	Ukládání
 	Saving {}	Ukládání {}
@@ -4328,7 +4318,7 @@ font-technology	Variable	Variabilní
 	Dashed Line	Čárkovaná čára
 	Panel menu	Nabídka panelu
 	Unembed…	Zrušit vložení…
-	Applies the next time VectorCraft starts.	Projeví se při příštím spuštění VectorCraftu.
+	Applies the next time Nib starts.	Projeví se při příštím spuštění Nibu.
 	Enable Contextual Task Bar	Povolit kontextový panel úloh
 	Next	Další
 	OK	OK
@@ -4899,7 +4889,7 @@ imageTrace	Outline	Obrys
 @msg	can't encode the document: {0}	dokument nelze zakódovat: {0}
 @msg	can't parse shortcut `{c}`	klávesovou zkratku `{c}` nelze analyzovat
 @msg	can't parse shortcut `{s}` for `{k}`	klávesovou zkratku `{s}` pro `{k}` nelze analyzovat
-@msg	can't save version {0}: VectorCraft writes versions {MIN_VERSION} to {VERSION}	verzi {0} nelze uložit: VectorCraft zapisuje verze {MIN_VERSION} až {VERSION}
+@msg	can't save version {0}: Nib writes versions {MIN_VERSION} to {VERSION}	verzi {0} nelze uložit: Nib zapisuje verze {MIN_VERSION} až {VERSION}
 @msg	can't write .{ext} images	obrázky .{ext} nelze zapisovat
 @msg	cannot distort a zero-size bounding box	ohraničovací rámeček nulové velikosti nelze deformovat
 @msg	cannot read PDF: {0}	PDF nelze přečíst: {0}
@@ -4927,7 +4917,7 @@ imageTrace	Outline	Obrys
 @msg	empty brush stroke	prázdný tah štětcem
 @msg	empty cutter	prázdný řezací objekt
 @msg	empty path	prázdná cesta
-@msg	file version {0} is newer than this VectorCraft supports ({VERSION})	verze souboru {0} je novější, než tento VectorCraft podporuje ({VERSION})
+@msg	file version {0} is newer than this Nib supports ({VERSION})	verze souboru {0} je novější, než tento Nib podporuje ({VERSION})
 @msg	freeform point {i} needs `at` [x, y] and a valid `color`	volný bod {i} potřebuje `at` [x, y] a platnou `color`
 @msg	freeform line {i} must be an array of point indices	volná čára {i} musí být pole indexů bodů
 @msg	give both `start` and `end` [x, y] (or neither)	zadejte `start` i `end` [x, y] (nebo ani jedno)
@@ -4955,9 +4945,9 @@ imageTrace	Outline	Obrys
 @msg	{label} files hold real numbers up to {max}, and the page of artboard {n}, {side} pt long, needs larger ones: choose PDF 1.6 or later without a PDF/X standard, or a smaller artboard	soubory {label} pojmou reálná čísla nejvýše {max} a stránka pracovní plochy {n}, dlouhá {side} pt, potřebuje větší: zvolte PDF 1.6 nebo novější bez standardu PDF/X, nebo menší pracovní plochu
 @msg	invalid image data for `{0}`	neplatná obrazová data pro `{0}`
 @msg	invalid parameters for `{cmd}`: {msg}	neplatné parametry pro `{cmd}`: {msg}
-@msg	is not an image VectorCraft reads	není obraz, který VectorCraft umí přečíst
-@msg	it uses `{at}`, which VectorCraft's PostScript reader doesn't know	používá `{at}`, které čtečka PostScriptu ve VectorCraftu nezná
-@msg	it uses `{at}`, which VectorCraft's PostScript reader doesn't know, in {procs}	používá `{at}`, které čtečka PostScriptu ve VectorCraftu nezná, v {procs}
+@msg	is not an image Nib reads	není obraz, který Nib umí přečíst
+@msg	it uses `{at}`, which Nib's PostScript reader doesn't know	používá `{at}`, které čtečka PostScriptu ve Nibu nezná
+@msg	it uses `{at}`, which Nib's PostScript reader doesn't know, in {procs}	používá `{at}`, které čtečka PostScriptu ve Nibu nezná, v {procs}
 @msg	its Windows metafile preview was opened instead, which may simplify the art	místo něj byl otevřen jeho náhled ve formátu Windows metafile, který může kresbu zjednodušit
 @msg	its preview was placed instead, at screen resolution	místo něj byl umístěn jeho náhled v rozlišení obrazovky
 @msg	join needs open paths	spojení vyžaduje otevřené cesty
@@ -5014,7 +5004,7 @@ imageTrace	Outline	Obrys
 @msg	no file system here	zde není souborový systém
 @msg	no file writer	chybí zápis souborů
 @msg	no files to place	žádné soubory k umístění
-@msg	`{file}` isn't a VectorCraft document, a PDF or a PDF-compatible .ai file	`{file}` není dokument VectorCraft, PDF ani soubor .ai kompatibilní s PDF
+@msg	`{file}` isn't a Nib document, a PDF or a PDF-compatible .ai file	`{file}` není dokument Nib, PDF ani soubor .ai kompatibilní s PDF
 @msg	no format to export to	žádný formát pro export
 @msg	no free recovery area	žádná volná oblast pro obnovení
 @msg	no gradient stop or freeform point is selected	není vybrána žádná zarážka přechodu ani volný bod
@@ -5059,7 +5049,7 @@ imageTrace	Outline	Obrys
 @msg	the action set file is larger than 8 MiB	soubor sady akcí je větší než 8 MiB
 @msg	`{ID}`: the reference would be larger than {MAX_BYTES} bytes	`{ID}`: reference by byla větší než {MAX_BYTES} bajtů
 @msg	the action set file holds more than 1,000 actions	soubor sady akcí obsahuje více než 1 000 akcí
-@msg	the action set file needs a later version of VectorCraft	soubor sady akcí vyžaduje novější verzi aplikace VectorCraft
+@msg	the action set file needs a later version of Nib	soubor sady akcí vyžaduje novější verzi aplikace Nib
 @msg	an action in the action set file has more than 10,000 steps	akce v souboru sady akcí má více než 10 000 kroků
 @msg	no such anchor	takový kotevní bod neexistuje
 @msg	no such artboard	taková pracovní plocha neexistuje
@@ -5091,8 +5081,8 @@ imageTrace	Outline	Obrys
 @msg	node {_1} is not text	uzel {_1} není text
 @msg	node {_1} is on a locked artboard	uzel {_1} je na zamčené pracovní ploše
 @msg	not a DXF drawing	nejde o výkres DXF
-@msg	not a VectorCraft file: {0}	nejde o soubor VectorCraft: {0}
-@msg	not a VectorCraft shortcut set (missing `overrides`)	nejde o sadu klávesových zkratek VectorCraft (chybí `overrides`)
+@msg	not a Nib file: {0}	nejde o soubor Nib: {0}
+@msg	not a Nib shortcut set (missing `overrides`)	nejde o sadu klávesových zkratek Nib (chybí `overrides`)
 @msg	not a blend	nejde o prolnutí
 @msg	not a graphic style library (format `{_1}`)	nejde o knihovnu grafických stylů (formát `{_1}`)
 @msg	not a stored central record	nejde o uložený centrální záznam
@@ -5314,7 +5304,7 @@ imageTrace	Outline	Obrys
 @msg	not a preferences file: no `format`	nejde o soubor předvoleb: chybí `format`
 @msg	not a preferences file: no `version`	nejde o soubor předvoleb: chybí `version`
 @msg	not a preferences file: no `prefs`	nejde o soubor předvoleb: chybí `prefs`
-@msg	the file was saved by a newer version of VectorCraft (version {v})	soubor byl uložen novější verzí aplikace VectorCraft (verze {v})
+@msg	the file was saved by a newer version of Nib (version {v})	soubor byl uložen novější verzí aplikace Nib (verze {v})
 @msg	the file holds no preferences	soubor neobsahuje žádné předvolby
 @msg	`{key}` names a folder, which preferences files leave out	`{key}` určuje složku a soubory předvoleb složky neobsahují
 @msg	the file is larger than 1 MB	soubor je větší než 1 MB
@@ -5417,11 +5407,11 @@ imageTrace	Outline	Obrys
 @msg	Sent to {_1}	Odesláno do {_1}
 @msg	{_1} files	Soubory {_1}
 @msg	The graphics were lost and have been restarted	Grafika byla ztracena a byla restartována
-@msg	The graphics processor tried first couldn't show the window, so VectorCraft started again on {summary}	Grafický procesor zkoušený jako první nedokázal zobrazit okno, proto se VectorCraft znovu spustil na {summary}
-@msg	The last start of VectorCraft ended on {name} before its window appeared, so it started on {summary}. To try that graphics processor again, change Preferences › Performance › Graphics Processor or start with WGPU_BACKEND set	Poslední spuštění aplikace VectorCraft skončilo na {name} dřív, než se zobrazilo okno, proto se spustila na {summary}. Chcete-li tento grafický procesor zkusit znovu, změňte Předvolby › Výkon › Grafický procesor nebo ji spusťte s nastavenou proměnnou WGPU_BACKEND
-@msg	The last start of VectorCraft ended while it listed the graphics processors, so it started on {summary} with OpenGL alone. To try the other graphics backends again, change Preferences › Performance › Graphics Processor or start with WGPU_BACKEND set	Poslední spuštění aplikace VectorCraft skončilo během zjišťování grafických procesorů, proto se spustila na {summary} jen s OpenGL. Chcete-li znovu zkusit ostatní grafická rozhraní, změňte Předvolby › Výkon › Grafický procesor nebo ji spusťte s nastavenou proměnnou WGPU_BACKEND
-@msg	Loading VectorCraft…	Načítání VectorCraftu…
-@msg	VectorCraft failed to start: {e}	VectorCraft se nepodařilo spustit: {e}
+@msg	The graphics processor tried first couldn't show the window, so Nib started again on {summary}	Grafický procesor zkoušený jako první nedokázal zobrazit okno, proto se Nib znovu spustil na {summary}
+@msg	The last start of Nib ended on {name} before its window appeared, so it started on {summary}. To try that graphics processor again, change Preferences › Performance › Graphics Processor or start with WGPU_BACKEND set	Poslední spuštění aplikace Nib skončilo na {name} dřív, než se zobrazilo okno, proto se spustila na {summary}. Chcete-li tento grafický procesor zkusit znovu, změňte Předvolby › Výkon › Grafický procesor nebo ji spusťte s nastavenou proměnnou WGPU_BACKEND
+@msg	The last start of Nib ended while it listed the graphics processors, so it started on {summary} with OpenGL alone. To try the other graphics backends again, change Preferences › Performance › Graphics Processor or start with WGPU_BACKEND set	Poslední spuštění aplikace Nib skončilo během zjišťování grafických procesorů, proto se spustila na {summary} jen s OpenGL. Chcete-li znovu zkusit ostatní grafická rozhraní, změňte Předvolby › Výkon › Grafický procesor nebo ji spusťte s nastavenou proměnnou WGPU_BACKEND
+@msg	Loading Nib…	Načítání Nibu…
+@msg	Nib failed to start: {e}	Nib se nepodařilo spustit: {e}
 @msg	A browser with WebGPU or WebGL2 is required.	Je potřeba prohlížeč s WebGPU nebo WebGL2.
 @msg	The graphics were lost and couldn't be restarted.	Grafika byla ztracena a nepodařilo se ji restartovat.
 @msg	Your unsaved changes are kept in this browser: reload the page to get them back.	Vaše neuložené změny zůstávají v tomto prohlížeči: obnovte stránku a získáte je zpět.
@@ -5452,21 +5442,21 @@ imageTrace	Outline	Obrys
 @msg	it has more than {MAX_NODES} objects	má více než {MAX_NODES} objektů
 @msg	it has no layers	nemá žádné vrstvy
 @msg	it has too many values in a row	má příliš mnoho hodnot v řadě
-@msg	it has {_1}, which VectorCraft doesn't read from it yet	obsahuje {_1}, což z něj VectorCraft zatím nečte
+@msg	it has {_1}, which Nib doesn't read from it yet	obsahuje {_1}, což z něj Nib zatím nečte
 @msg	its objects are nested too deeply	jeho objekty jsou vnořené příliš hluboko
 @msg	its section ending with `%{end}` doesn't end	jeho oddíl končící `%{end}` nemá konec
-@msg	brushes VectorCraft can't read yet were left out of the Brushes panel ({_1})	štětce, které VectorCraft zatím neumí načíst, byly vynechány z panelu Štětce ({_1})
+@msg	brushes Nib can't read yet were left out of the Brushes panel ({_1})	štětce, které Nib zatím neumí načíst, byly vynechány z panelu Štětce ({_1})
 @msg	objects with several fills or strokes, variable-width strokes, effects or brushes came in as their drawn look ({_1}): their appearance isn't editable yet	objekty s více výplněmi nebo tahy, tahy s proměnnou šířkou, efekty či štětci byly načteny jako vykreslený vzhled ({_1}): jejich vzhled zatím nelze upravovat
 @msg	the name `{name}` isn't UTF-8 and was read as {label}: if it looks wrong, open the file with another legacyNameEncoding	název `{name}` není v UTF-8 a byl načten jako {label}: pokud vypadá špatně, otevřete soubor s jiným legacyNameEncoding
 @msg	the name `{name}` isn't UTF-8, and parts of it aren't valid {label} either: open the file with another legacyNameEncoding	název `{name}` není v UTF-8 a jeho části nejsou platné ani v {label}: otevřete soubor s jiným legacyNameEncoding
 @msg	more names that aren't UTF-8 were read as {label} ({count})	další názvy, které nejsou v UTF-8, byly načteny jako {label} ({count})
 @msg	gradient “{name}” isn't defined in the file: a plain colour stands in for it	přechod „{name}“ není v souboru definován: zastupuje ho plná barva
-@msg	an image VectorCraft can't read was left out	obrázek, který VectorCraft neumí přečíst, byl vynechán
+@msg	an image Nib can't read was left out	obrázek, který Nib neumí přečíst, byl vynechán
 @msg	graphs come in as plain art, without their data or settings	grafy se načtou jako obyčejná grafika, bez svých dat a nastavení
 @msg	an image whose data is cut short was left out	obrázek s useknutými daty byl vynechán
 @msg	an embedded image of {_1} × {_2} pixels was reduced to {_3} × {_4} pixels to keep the layers	vložený obrázek o rozměrech {_1} × {_2} pixelů byl zmenšen na {_3} × {_4} pixelů, aby se zachovaly vrstvy
 @msg	linked pictures show the low-resolution preview saved in the file until their files are found: relink them in the Links panel	propojené obrázky se zobrazují jako náhled v nízkém rozlišení uložený v souboru, dokud se nenajdou jejich soubory: znovu je propojte v panelu Propojení
-@msg	linked type areas past VectorCraft's limits were left out	propojené textové oblasti nad limity aplikace VectorCraft byly vynechány
+@msg	linked type areas past Nib's limits were left out	propojené textové oblasti nad limity aplikace Nib byly vynechány
 @msg	the Line Breaking setting of legacy type was left out	nastavení zalamování řádků textu ve starém formátu bylo vynecháno
 @msg	the Japanese layout rules of legacy type were left out	japonská pravidla sazby textu ve starém formátu byla vynechána
 @msg	type that changes writing direction inside a text object opens in the direction of its first character	text, který mění směr psaní uvnitř textového objektu, se otevře ve směru svého prvního znaku
@@ -5477,13 +5467,13 @@ imageTrace	Outline	Obrys
 @msg	this file was saved without PDF compatibility, and its editing data can't be read ({why})	tento soubor byl uložen bez kompatibility s PDF a jeho data pro úpravy nelze přečíst ({why})
 @msg	the PDF part couldn't be read ({_1}): the file opened from its editing data	část PDF nelze přečíst ({_1}): soubor byl otevřen z jeho dat pro úpravy
 @msg	No fonts are missing in this document	V tomto dokumentu nechybí žádná písma
-@msg	VectorCraft doesn't search other apps' or the system's folders: {path}	VectorCraft neprohledává složky jiných aplikací ani systému: {path}
-@msg	VectorCraft doesn't search the Shared or Public folder in Users: {path}	VectorCraft neprohledává složku Shared ani Public ve složce Users: {path}
+@msg	Nib doesn't search other apps' or the system's folders: {path}	Nib neprohledává složky jiných aplikací ani systému: {path}
+@msg	Nib doesn't search the Shared or Public folder in Users: {path}	Nib neprohledává složku Shared ani Public ve složce Users: {path}
 @msg	{path} is not a folder	{path} není složka
 @msg	the search couldn't start: try again in a moment	hledání nelze spustit: zkuste to za chvíli znovu
 @msg	searching a folder isn't available on the web	prohledávání složky není na webu k dispozici
 @msg	every search thread stopped on an internal error (please report this bug)	všechna vlákna hledání se zastavila na vnitřní chybě (nahlaste prosím tuto chybu)
-@msg	VectorCraft's Fonts folder isn't set here: the desktop app and vectorcraft-cli set it	složka Fonts VectorCraftu zde není nastavena: nastavuje ji desktopová aplikace a vectorcraft-cli
+@msg	Nib's Fonts folder isn't set here: the desktop app and nib-cli set it	složka Fonts Nibu zde není nastavena: nastavuje ji desktopová aplikace a nib-cli
 @msg	choose the font files to add	vyberte soubory písem, které chcete přidat
 @msg	not a file	nejde o soubor
 @msg	not a font file	nejde o soubor písma
@@ -5652,7 +5642,7 @@ imageTrace	Outline	Obrys
 	All shortcuts reset to defaults.	Všechny zkratky byly obnoveny na výchozí hodnoty.
 	Imported. Press OK to keep the imported set.	Importováno. Importovanou sadu zachováte stisknutím OK.
 	⚠ {chord} was already used by {names} — it has been removed there.	Pozor: zkratka {chord} už byla použita pro {names} — tam byla odebrána.
-	VectorCraft Defaults	Výchozí VectorCraft
+	Nib Defaults	Výchozí Nib
 @plural	{n} shortcut is assigned more than once|{n} shortcuts are assigned more than once	{n} zkratka je přiřazena více než jednou|{n} zkratky jsou přiřazeny více než jednou|{n} zkratek je přiřazeno více než jednou
 # Print dialog: overprints note and choice labels
 	Simulate prints overprints as Overprint Preview shows them; separations always keep them. A preset flattens transparency before printing (PostScript files always flatten it).	Možnost Simulovat vytiskne přetisky tak, jak je ukazuje Náhled přetisků; separace je vždy zachovávají. Přednastavení před tiskem sloučí průhlednost (soubory PostScript ji sloučí vždy).
@@ -5911,7 +5901,7 @@ file-filter	Preferences	Předvolby
 file-filter	Export presets	Přednastavení exportu
 file-filter	SVG Compressed	Komprimované SVG
 file-filter	PDF-compatible .ai	.ai kompatibilní s PDF
-file-filter	VectorCraft Template	Šablona VectorCraft
+file-filter	Nib Template	Šablona Nib
 file-filter	Templates	Šablony
 diagnostics	render	vykreslení
 diagnostics	ui	rozhraní
@@ -5922,7 +5912,7 @@ diagnostics	ui	rozhraní
 @plural	{n} commit|{n} commits	{n} commit|{n} commity|{n} commitů
 gradient-kind	Radial	Kruhový
 mark-style	Japanese	Japonské
-@msg	the compressed file unpacks to more than VectorCraft reads ({_1} MB of document, {_2} MB per image)	komprimovaný soubor se rozbalí na více, než VectorCraft přečte ({_1} MB dokumentu, {_2} MB na obrázek)
+@msg	the compressed file unpacks to more than Nib reads ({_1} MB of document, {_2} MB per image)	komprimovaný soubor se rozbalí na více, než Nib přečte ({_1} MB dokumentu, {_2} MB na obrázek)
 @msg	the document is too large to save compressed ({0}): save it with Use Compression off	dokument je příliš velký pro komprimované uložení ({0}): uložte ho s vypnutou volbou Použít kompresi
 @msg	the file stopped being read (please report this bug)	čtení souboru se přerušilo (nahlaste prosím tuto chybu)
 	Concentric Dividers:	Soustředné dělicí čáry:
@@ -7389,21 +7379,21 @@ breakText	Glyphs	Glyfy
 # Copy Troubleshooting Info
 	Copy Troubleshooting Info	Kopírovat informace pro řešení potíží
 @msg	Copied the troubleshooting info	Informace pro řešení potíží zkopírovány
-@msg	The last session of VectorCraft stopped responding before it closed. Help › Copy Troubleshooting Info copies the details for a bug report	Poslední relace VectorCraftu přestala odpovídat, než se zavřela. Nápověda › Kopírovat informace pro řešení potíží zkopíruje podrobnosti pro hlášení chyby
+@msg	The last session of Nib stopped responding before it closed. Help › Copy Troubleshooting Info copies the details for a bug report	Poslední relace Nibu přestala odpovídat, než se zavřela. Nápověda › Kopírovat informace pro řešení potíží zkopíruje podrobnosti pro hlášení chyby
 
 # Safe Mode
 	Safe Mode…	Nouzový režim…
 	Safe Mode	Nouzový režim
 	Help › Safe Mode…	Nápověda › Nouzový režim…
 	Enable on Re-launch	Povolit při příštím spuštění
-	The last launch of VectorCraft stopped while the plug-in {name} was loading. It may not be what stopped it.	Poslední spuštění aplikace VectorCraft se zastavilo během načítání zásuvného modulu {name}. Tento modul nemusí být příčinou.
+	The last launch of Nib stopped while the plug-in {name} was loading. It may not be what stopped it.	Poslední spuštění aplikace Nib se zastavilo během načítání zásuvného modulu {name}. Tento modul nemusí být příčinou.
 	Disable and Continue	Zakázat a pokračovat
 	Start Normally	Spustit normálně
 	Start in Safe Mode	Spustit v nouzovém režimu
-	VectorCraft is in Safe Mode: no plug-ins load or run until it starts normally.	VectorCraft je v nouzovém režimu: zásuvné moduly se nenačítají ani nespouštějí, dokud se aplikace nespustí normálně.
+	Nib is in Safe Mode: no plug-ins load or run until it starts normally.	Nib je v nouzovém režimu: zásuvné moduly se nenačítají ani nespouštějí, dokud se aplikace nespustí normálně.
 	Disabled plug-ins	Zakázané zásuvné moduly
 	No plug-ins are disabled.	Žádné zásuvné moduly nejsou zakázány.
-@msg	Safe Mode is on: plug-ins don't load or run until VectorCraft starts normally	Nouzový režim je zapnutý: zásuvné moduly se nenačítají ani nespouštějí, dokud se VectorCraft nespustí normálně
+@msg	Safe Mode is on: plug-ins don't load or run until Nib starts normally	Nouzový režim je zapnutý: zásuvné moduly se nenačítají ani nespouštějí, dokud se Nib nespustí normálně
 @msg	give `id` or `file` (see plugin.safeMode)	zadejte `id` nebo `file` (viz plugin.safeMode)
 @msg	that plug-in isn't disabled (see plugin.safeMode)	tento zásuvný modul není zakázán (viz plugin.safeMode)
 @msg	Couldn't save the disabled plug-ins for the next launch	Zakázané zásuvné moduly nebylo možné uložit pro příští spuštění
@@ -7547,7 +7537,7 @@ breakText	Glyphs	Glyfy
 @msg	JSON.stringify cannot write a structure that contains itself	JSON.stringify nemůže zapsat strukturu, která obsahuje sama sebe
 @msg	Join: a subpath went missing	Spojit: jedna dílčí cesta se ztratila
 @msg	Line Gap must be a number	Mezera řádků musí být číslo
-@msg	Lock Workspace is not available in VectorCraft	Zamknout pracovní prostor není ve VectorCraft dostupné
+@msg	Lock Workspace is not available in Nib	Zamknout pracovní prostor není ve Nib dostupné
 @msg	Move Panel to New Window is not available: floating panels stay in the main window	Přesunout panel do nového okna není dostupné: plovoucí panely zůstávají v hlavním okně
 @msg	Namespace.prototype.toString needs a Namespace	Namespace.prototype.toString vyžaduje Namespace
 @msg	New Document profiles need the preferences folder, which this run doesn't have	Profily nového dokumentu vyžadují složku předvoleb, kterou toto spuštění nemá
@@ -7815,7 +7805,7 @@ breakText	Glyphs	Glyfy
 @msg	`{base}` is not in the DCS file's folder	`{base}` není ve složce souboru DCS
 @msg	`{file}` has no art to place	`{file}` nemá žádnou kresbu k umístění
 @msg	`{file}` is over {_1} MB	`{file}` má více než {_1} MB
-@msg	`{f}` belongs to a VectorCraft that is running	`{f}` patří běžící aplikaci VectorCraft
+@msg	`{f}` belongs to a Nib that is running	`{f}` patří běžící aplikaci Nib
 @msg	`{f}` is the copy of a document open now	`{f}` je kopie právě otevřeného dokumentu
 @msg	`{id}` is no writable format (see document.formats)	`{id}` není formát, který lze zapisovat (viz document.formats)
 @msg	`{id}` isn't a loaded library	`{id}` není načtená knihovna
@@ -8081,8 +8071,8 @@ breakText	Glyphs	Glyfy
 @msg	can't linearise the PDF: {why}	PDF nelze linearizovat: {why}
 @msg	can't open `{_1}`: {_2}	`{_1}` nelze otevřít: {_2}
 @msg	can't open `{_1}`: {e}	`{_1}` nelze otevřít: {e}
-@msg	can't open `{name}`: not a format VectorCraft reads (see document.formats)	`{name}` nelze otevřít: nejde o formát, který VectorCraft čte (viz document.formats)
-@msg	can't place `{name}`: not a format VectorCraft reads (see document.formats)	`{name}` nelze umístit: nejde o formát, který VectorCraft čte (viz document.formats)
+@msg	can't open `{name}`: not a format Nib reads (see document.formats)	`{name}` nelze otevřít: nejde o formát, který Nib čte (viz document.formats)
+@msg	can't place `{name}`: not a format Nib reads (see document.formats)	`{name}` nelze umístit: nejde o formát, který Nib čte (viz document.formats)
 @msg	can't read back the written PDF: {e}	zapsané PDF nelze znovu načíst: {e}
 @msg	can't read this Word document: {why}	tento dokument Word nelze přečíst: {why}
 @msg	can't write .{e} images: use .png, .jpg, .gif, .webp, .tif or .bmp	obrázky .{e} nelze zapisovat: použijte .png, .jpg, .gif, .webp, .tif nebo .bmp
@@ -8619,7 +8609,7 @@ breakText	Glyphs	Glyfy
 @msg	not a valid SVGZ file: {e}	nejde o platný soubor SVGZ: {e}
 @msg	not an RTF file: it doesn't start with {\rtf	nejde o soubor RTF: nezačíná na {\rtf
 @msg	not an action set: the text doesn't start with /version and a number	nejde o sadu akcí: text nezačíná na /version a číslo
-@msg	not an image VectorCraft reads (see document.formats)	nejde o obrázek, který VectorCraft čte (viz document.formats)
+@msg	not an image Nib reads (see document.formats)	nejde o obrázek, který Nib čte (viz document.formats)
 @msg	not area type (text in a frame) outside perspective	nejde o text v oblasti (text v rámci) mimo perspektivu
 @msg	not editing an opacity mask	maska krytí se neupravuje
 @msg	not type on a path outside perspective	nejde o text na cestě mimo perspektivu
@@ -8894,8 +8884,8 @@ breakText	Glyphs	Glyfy
 @msg	the Word document has too much text to place as type (at most {_1} MB)	dokument Word má příliš mnoho textu na umístění jako text (nejvýše {_1} MB)
 @msg	the Word document is encrypted or protected with a password; save it without one to place it	dokument Word je zašifrovaný nebo chráněný heslem; chcete-li ho umístit, uložte ho bez hesla
 @msg	the Word document is too large to place (its {name} stream holds more than {_1} MB)	dokument Word je příliš velký na umístění (jeho proud {name} obsahuje více než {_1} MB)
-@msg	the Word document was last saved with fast save, which VectorCraft doesn't read; save it again with fast save turned off	dokument Word byl naposledy uložen rychlým ukládáním, které VectorCraft nečte; uložte ho znovu s vypnutým rychlým ukládáním
-@msg	the Word document was saved by Word 6.0 or Word 95, which VectorCraft doesn't read; save it as a Word 97-2003 document	dokument Word byl uložen ve Wordu 6.0 nebo Wordu 95, což VectorCraft nečte; uložte ho jako dokument Word 97-2003
+@msg	the Word document was last saved with fast save, which Nib doesn't read; save it again with fast save turned off	dokument Word byl naposledy uložen rychlým ukládáním, které Nib nečte; uložte ho znovu s vypnutým rychlým ukládáním
+@msg	the Word document was saved by Word 6.0 or Word 95, which Nib doesn't read; save it as a Word 97-2003 document	dokument Word byl uložen ve Wordu 6.0 nebo Wordu 95, což Nib nečte; uložte ho jako dokument Word 97-2003
 @msg	the Word document's text is made of more than {MAX_PIECES} pieces, too many to place	text dokumentu Word se skládá z více než {MAX_PIECES} částí, což je na umístění příliš mnoho
 @msg	the XML operation needs an XML or XMLList value	operace XML vyžaduje hodnotu XML nebo XMLList
 @msg	the XPath expression does not evaluate to a node-set	výraz XPath se nevyhodnotí na množinu uzlů
@@ -9312,3 +9302,11 @@ breakText	Glyphs	Glyfy
 @msg	turn on at least one side	zapněte alespoň jednu stranu
 @msg	with no hem and no grommets there is nothing to mark	bez lemu a bez průchodek není co označit
 @msg	{saving} failed: {e}	{saving} se nezdařilo: {e}
+	Report an Issue	Nahlásit problém
+	Report an issue	Nahlásit problém
+	Report a problem or suggest an idea on Nib's GitHub	Nahlaste problém nebo navrhněte nápad na GitHubu Nibu
+	Nib Releases	Vydání Nibu
+	VectorCraft (upstream project)	VectorCraft (původní projekt)
+	Nib is based on VectorCraft by the ArtCraft team and the VectorCraft contributors (MIT OR Apache-2.0)	Nib vychází z VectorCraftu od týmu ArtCraft a přispěvatelů VectorCraftu (MIT OR Apache-2.0)
+	Fonts: Source Sans 3, Inter, JetBrains Mono (OFL). Icons: Lucide (ISC) + VectorCraft.	Písma: Source Sans 3, Inter, JetBrains Mono (OFL). Ikony: Lucide (ISC) + VectorCraft.
+	Open-source vector illustration in pure Rust.	Open-source vektorová ilustrace v čistém Rustu.

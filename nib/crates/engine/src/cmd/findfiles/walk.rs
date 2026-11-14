@@ -26,8 +26,8 @@ const INTERNAL: &str = "every search thread stopped on an internal error (please
 /// Why a search couldn't start, without the folder's path ([`Progress::failure`]).
 const UNREADABLE: &str = "the folder can't be read";
 const NOT_A_FOLDER: &str = "the path isn't a folder";
-const SHARED: &str = "VectorCraft doesn't search the Shared or Public folder in Users";
-const APPS: &str = "VectorCraft doesn't search other apps' or the system's folders";
+const SHARED: &str = "Nib doesn't search the Shared or Public folder in Users";
+const APPS: &str = "Nib doesn't search other apps' or the system's folders";
 const UNLISTED: &str = "the folder can't be listed";
 
 /// What a search looks for.
@@ -442,8 +442,8 @@ impl Shared {
             Ok(folder) if !folder.is_dir() => (Err(format!("{path} is not a folder")), NOT_A_FOLDER),
             Ok(folder) => match rules.refusal(&folder) {
                 None => (Ok(folder), INTERNAL),
-                Some(Refusal::Shared) => (Err(format!("VectorCraft doesn't search the Shared or Public folder in Users: {path}")), SHARED),
-                Some(Refusal::Apps) => (Err(format!("VectorCraft doesn't search other apps' or the system's folders: {path}")), APPS),
+                Some(Refusal::Shared) => (Err(format!("Nib doesn't search the Shared or Public folder in Users: {path}")), SHARED),
+                Some(Refusal::Apps) => (Err(format!("Nib doesn't search other apps' or the system's folders: {path}")), APPS),
             },
         };
         let mut w = self.lock();

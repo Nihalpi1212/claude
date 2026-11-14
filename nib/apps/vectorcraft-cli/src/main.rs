@@ -65,27 +65,27 @@ fn stdout_failed(e: std::io::Error) -> ! {
     if e.kind() == std::io::ErrorKind::BrokenPipe {
         std::process::exit(0);
     }
-    eprintln!("vectorcraft-cli: can't write to stdout: {e}");
+    eprintln!("nib-cli: can't write to stdout: {e}");
     std::process::exit(1);
 }
 
 const USAGE: &str = "\
-vectorcraft-cli — VectorCraft automation
+nib-cli — Nib automation
 
 USAGE:
-  vectorcraft-cli --safe-mode SUBCOMMAND ...
+  nib-cli --safe-mode SUBCOMMAND ...
       Run any subcommand without plug-ins: none loads or runs, and plug-in commands report that
       Safe Mode is on. Plug-ins stay installed. `--safe-mode mcp` serves a headless session and
       does not take --connect.
 
-  vectorcraft-cli mcp [--connect ADDR | --headless] [--automation-read-root DIR]... [--automation-write-root DIR]... [--allow-plugin-grants]
+  nib-cli mcp [--connect ADDR | --headless] [--automation-read-root DIR]... [--automation-write-root DIR]... [--allow-plugin-grants]
       Run the MCP server on stdio. Default: connect to a running app at 127.0.0.1:7979
-      (vectorcraft --control 7979), falling back to a headless in-process session.
+      (nib --control 7979), falling back to a headless in-process session.
       --automation-read-root / --automation-write-root confine the files the agent's commands read
       (open, place, relink, library loads…) and write (save, export, package, library saves…) to
       DIR, links followed; each may be given more than once, a path inside any of its folders being
       allowed, and a kind left out grants none of its access. They imply --headless: a running app
-      enforces its own (vectorcraft --control PORT --automation-read-root DIR …).
+      enforces its own (nib --control PORT --automation-read-root DIR …).
       --allow-plugin-grants lets plugin.install's grant and allowHeavy take effect in this session,
       so whoever sends the commands can give a plug-in the permissions it lists, and a heavy budget,
       with nobody approving them. Without it they are refused, and a plug-in that lists permissions
@@ -97,7 +97,7 @@ USAGE:
       heavy budget does not install there. With VECTORCRAFT_NO_PREFS set there is no store either,
       and a grant accepted under this flag lasts for that session only.
 
-  vectorcraft-cli run [--in FILE] [--cmd ID [--params JSON] | --commands FILE|-]... [--export FILE]... [--scale N] [--ppi N] [--allow-plugin-grants]
+  nib-cli run [--in FILE] [--cmd ID [--params JSON] | --commands FILE|-]... [--export FILE]... [--scale N] [--ppi N] [--allow-plugin-grants]
       Headless batch: open FILE (any readable format) or start a new document, run commands in
       order, export each FILE in the format its extension picks (see Writable formats; a .ait FILE
       is a template, written as file.saveAsTemplate writes it). Raster exports use the document's
@@ -110,10 +110,10 @@ USAGE:
       --allow-plugin-grants lets plugin.install's grant and allowHeavy take effect in this run, as
       for mcp.
 
-  vectorcraft-cli commands
+  nib-cli commands
       Print the command catalogue as JSON.
 
-  vectorcraft-cli convert IN OUT [--scale N] [--ppi N] [--artboard I | --range R] [--outline-text] [--decimals N] [--replace-lossy] [--editing-data] [--legacy-name-encoding ENC] [--preserve-editing] [--ai-version 7|pdf] [--hidden-objects layer|omit|visible] [--transparent-images flatten|omit]
+  nib-cli convert IN OUT [--scale N] [--ppi N] [--artboard I | --range R] [--outline-text] [--decimals N] [--replace-lossy] [--editing-data] [--legacy-name-encoding ENC] [--preserve-editing] [--ai-version 7|pdf] [--hidden-objects layer|omit|visible] [--transparent-images flatten|omit]
       Open IN (any readable format) and export OUT in the format its extension picks (see Writable
       formats). Raster resolution: --ppi, else 72 times --scale, else the document's raster effects
       resolution; other formats leave them out. --artboard is 0-based, --range 1-based (\"1-3,5\"); a PDF gets every artboard
@@ -140,16 +140,16 @@ USAGE:
       visible), --transparent-images (default flatten, with the art under them; omit) and
       --outline-text (type as outlines instead of text).
 
-  vectorcraft-cli info FILE
+  nib-cli info FILE
       Print a JSON summary: the import warnings (what didn't come in as it was, such as an EPS
       read from its preview and why), title, colour mode, units, artboards, object counts by
       kind, fonts.
 
-  vectorcraft-cli bench FILE [--size WxH] [--iters N]
+  nib-cli bench FILE [--size WxH] [--iters N]
       Render FILE (any readable format) fitted to WxH (default 2880x1800) and print ms per frame
       (warm), multithreaded and single-threaded.
 
-  vectorcraft-cli perf [--paths N] [--deep] [--native-io [--artboards 1..4]]
+  nib-cli perf [--paths N] [--deep] [--native-io [--artboards 1..4]]
       Check the performance budgets (render, pan, hit test, save/load, SVG, Pathfinder, handle
       and segment drags) on a synthetic N-path document (default 50000). Exits non-zero if a
       budget is exceeded, unless the report says the machine is busy. --deep also times work with
@@ -221,7 +221,7 @@ fn main() -> ExitCode {
         Some("perf") => perf::run(&args[1..]),
         Some("-h" | "--help" | "help") | None => help(),
         Some("-V" | "--version") => {
-            outln!("vectorcraft-cli {}", env!("CARGO_PKG_VERSION"));
+            outln!("{}", vectorcraft_format::brand::version_line());
             Ok(())
         }
         Some(other) => Err(format!("unknown subcommand `{other}`\n\n{}", usage())),
@@ -229,7 +229,7 @@ fn main() -> ExitCode {
     match r {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("vectorcraft-cli: {e}");
+            eprintln!("nib-cli: {e}");
             ExitCode::FAILURE
         }
     }
@@ -298,19 +298,22 @@ fn mcp(args: &[String], safe_mode: bool) -> Result<(), String> {
         return Err("--allow-plugin-grants can't be used with --automation-read-root or --automation-write-root: a server confined to folders has no plug-in store to record a grant in".into());
     }
     if safe_mode && connect.is_some() {
-        return Err("--safe-mode runs a headless session without plug-ins; a running app loads its own: start it with `vectorcraft --safe-mode --control <port>`".into());
+        return Err(
+            "--safe-mode runs a headless session without plug-ins; a running app loads its own: start it with `nib --safe-mode --control <port>`"
+                .into(),
+        );
     }
     let read: Vec<&Path> = read_roots.iter().map(Path::new).collect();
     let write: Vec<&Path> = write_roots.iter().map(Path::new).collect();
     let roots = AutomationRoots::new(&read, &write)?;
     if roots.is_some() && connect.is_some() {
-        return Err("--automation-read-root and --automation-write-root confine the headless server; a running app enforces its own roots: start it with `vectorcraft --control <port> --automation-read-root <dir> --automation-write-root <dir>`"
+        return Err("--automation-read-root and --automation-write-root confine the headless server; a running app enforces its own roots: start it with `nib --control <port> --automation-read-root <dir> --automation-write-root <dir>`"
             .into());
     }
     let backend: Box<dyn Backend> = if let Some(roots) = roots {
         // Every thread of this process, not only the server's: nothing reaches past the roots.
         file_access::confine_process(roots.clone());
-        eprintln!("vectorcraft-cli: files confined: {}", roots.describe());
+        eprintln!("nib-cli: files confined: {}", roots.describe());
         Box::new(accepting_grants(Headless::with_document().with_automation_roots(Some(roots)), allow_grants))
     } else if headless || safe_mode || allow_grants {
         Box::new(accepting_grants(with_stores(Headless::with_document()), allow_grants))
@@ -323,7 +326,7 @@ fn mcp(args: &[String], safe_mode: bool) -> Result<(), String> {
             Err(_) => Box::new(with_stores(Headless::with_document())),
         }
     };
-    eprintln!("vectorcraft-cli: MCP server on stdio ({})", backend.describe());
+    eprintln!("nib-cli: MCP server on stdio ({})", backend.describe());
     // The binary owns the logger, not the library: installing one here keeps an embedder that
     // uses `vectorcraft_mcp` free to bring its own. Silent until a client sends logging/setLevel.
     vectorcraft_mcp::logging::install();
@@ -456,7 +459,7 @@ fn convert(args: &[String]) -> Result<(), String> {
         let skipped = vectorcraft_engine::cmd::fileio::pdf::EDITING_NEEDS_EVERY_ARTBOARD;
         let embedded = !obj.get("warnings").and_then(Value::as_array).is_some_and(|w| w.iter().any(|w| w.as_str() == Some(skipped)));
         if embedded {
-            let note = "The PDF embeds the native VectorCraft document as an attachment (preserveEditing).";
+            let note = "The PDF embeds the native Nib document as an attachment (preserveEditing).";
             if let Some(Value::Array(w)) = obj.get_mut("warnings") {
                 if !w.iter().any(|w| w.as_str() == Some(note)) {
                     w.push(json!(note));

@@ -586,7 +586,7 @@ pub(super) fn finish_brushes_within(
 
 /// The note for brushes [`finish_brushes`] left out.
 pub(super) fn left_out_note(n: usize) -> String {
-    format!("brushes VectorCraft can't read yet were left out of the Brushes panel ({n})")
+    format!("brushes Nib can't read yet were left out of the Brushes panel ({n})")
 }
 
 /// Is `n` a frame: an unnamed, unpainted rectangle with nothing of its own (shown, unlocked, at full

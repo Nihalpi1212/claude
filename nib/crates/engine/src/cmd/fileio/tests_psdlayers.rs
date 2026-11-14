@@ -500,7 +500,7 @@ fn a_merge_past_the_memory_allowed_leaves_the_layer_normal() {
     let (doc, warnings) = psdlayers::import(&f, false, 128, cms).unwrap().unwrap();
     let got: Vec<(&str, BlendMode)> = doc.layers.iter().map(|l| (name(l), l.blend)).collect();
     assert_eq!(got, [("Bottom", BlendMode::Normal), ("Dodge", BlendMode::Normal)]);
-    assert_eq!(warnings, ["1 layer in blend modes VectorCraft doesn't have came in as Normal: the merge needs more memory than allowed"]);
+    assert_eq!(warnings, ["1 layer in blend modes Nib doesn't have came in as Normal: the merge needs more memory than allowed"]);
     // With room for it, the merge is made.
     let (doc, _) = psdlayers::import(&f, false, 1 << 20, cms).unwrap().unwrap();
     assert_eq!(doc.layers.iter().map(|l| name(l)).collect::<Vec<_>>(), ["Bottom + Dodge"]);
@@ -514,7 +514,7 @@ fn a_merge_past_the_memory_allowed_leaves_the_layer_normal() {
     let f = file(4, 4, &layers, 8, false, false);
     let (doc, warnings) = psdlayers::import(&f, false, 300, cms).unwrap().unwrap();
     assert_eq!(doc.layers.iter().map(|l| name(l)).collect::<Vec<_>>(), ["Bottom", "Corner", "Dodge"]);
-    assert_eq!(warnings, ["1 layer in blend modes VectorCraft doesn't have came in as Normal: the merge needs more memory than allowed"]);
+    assert_eq!(warnings, ["1 layer in blend modes Nib doesn't have came in as Normal: the merge needs more memory than allowed"]);
     let (doc, _) = psdlayers::import(&f, false, 1 << 20, cms).unwrap().unwrap();
     assert_eq!(doc.layers.iter().map(|l| name(l)).collect::<Vec<_>>(), ["Bottom + Corner + Dodge"]);
     // A group below whose layers each fit, but whose canvas (4 × 4 with both 1 × 1 layers held, 288
@@ -531,7 +531,7 @@ fn a_merge_past_the_memory_allowed_leaves_the_layer_normal() {
     let got: Vec<(&str, BlendMode)> = doc.layers.iter().map(|l| (name(l), l.blend)).collect();
     assert_eq!(got, [("Pair", BlendMode::Normal), ("Dodge", BlendMode::Normal)]);
     assert_eq!(doc.layers[0].children().unwrap().iter().map(|c| name(c)).collect::<Vec<_>>(), ["Left", "Right"]);
-    assert_eq!(warnings, ["1 layer in blend modes VectorCraft doesn't have came in as Normal: the merge needs more memory than allowed"]);
+    assert_eq!(warnings, ["1 layer in blend modes Nib doesn't have came in as Normal: the merge needs more memory than allowed"]);
     let (doc, _) = psdlayers::import(&f, false, 1 << 20, cms).unwrap().unwrap();
     assert_eq!(doc.layers.iter().map(|l| name(l)).collect::<Vec<_>>(), ["Pair + Dodge"]);
     // A layer below whose pixels fit (128 bytes) but whose canvas (16 bytes a pixel, 256) doesn't
@@ -541,7 +541,7 @@ fn a_merge_past_the_memory_allowed_leaves_the_layer_normal() {
     let (doc, warnings) = psdlayers::import(&f, false, 200, cms).unwrap().unwrap();
     let got: Vec<(&str, BlendMode)> = doc.layers.iter().map(|l| (name(l), l.blend)).collect();
     assert_eq!(got, [("Big", BlendMode::Normal), ("Dodge", BlendMode::Normal)]);
-    assert_eq!(warnings, ["1 layer in blend modes VectorCraft doesn't have came in as Normal: the merge needs more memory than allowed"]);
+    assert_eq!(warnings, ["1 layer in blend modes Nib doesn't have came in as Normal: the merge needs more memory than allowed"]);
     // A clipped layer whose merge doesn't fit (the base's canvas and its transparency, 20 bytes a
     // pixel, beside the clipped layer's canvas, 16: 576 bytes, past 300) comes in unclipped.
     let layers = [layer("Base", [0, 0, 4, 4], [255, 0, 0, 255]), L { clipped: true, ..layer("Clipped", [0, 0, 4, 4], [0, 0, 255, 255]) }];
@@ -574,8 +574,8 @@ fn a_merge_that_cant_be_made_counts_only_itself() {
     assert_eq!(
         warnings,
         [
-            "layers in blend modes VectorCraft doesn't have (Linear Dodge) were merged with the layers below them",
-            "1 layer in blend modes VectorCraft doesn't have came in as Normal: the merge needs more memory than allowed",
+            "layers in blend modes Nib doesn't have (Linear Dodge) were merged with the layers below them",
+            "1 layer in blend modes Nib doesn't have came in as Normal: the merge needs more memory than allowed",
         ]
     );
 }

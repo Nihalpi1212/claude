@@ -353,8 +353,8 @@ const fn reader(id: &'static str, label: &'static str, extensions: &'static [&'s
 pub const FORMATS: &[Format] = &[
     Format {
         id: "vectorcraft",
-        label: "VectorCraft",
-        extensions: &[vectorcraft_format::EXTENSION, vectorcraft_format::LEGACY_EXTENSION],
+        label: "Nib",
+        extensions: &[vectorcraft_format::brand::EXTENSION, vectorcraft_format::EXTENSION, vectorcraft_format::LEGACY_EXTENSION],
         mime: "application/json",
         read: true,
         write: true,
@@ -457,7 +457,7 @@ pub const FORMATS: &[Format] = &[
     Format { id: "bmp", label: "BMP", extensions: &["bmp"], mime: "image/bmp", read: true, write: true, raster: true, options: BMP_OPTIONS },
     Format {
         id: "template",
-        label: "VectorCraft Template",
+        label: "Nib Template",
         extensions: &["vctemplate"],
         mime: "application/json",
         read: true,
@@ -526,6 +526,7 @@ pub const FORMATS: &[Format] = &[
 
 /// Every extension `document.open` reads (the "All readable files" filter of open dialogs).
 pub const OPEN_EXTS: &[&str] = &[
+    vectorcraft_format::brand::EXTENSION,
     "vectorcraft",
     "drawcraft",
     "svg",
@@ -623,6 +624,7 @@ const WORD_EXTS: &[&str] = &["docx", "doc"];
 /// Every extension File → Place reads: [`OPEN_EXTS`], [`TEXT_EXTS`], [`RTF_EXTS`],
 /// [`DOCX_EXTS`] and [`DOC_EXTS`].
 pub const PLACE_EXTS: &[&str] = &[
+    vectorcraft_format::brand::EXTENSION,
     "vectorcraft",
     "drawcraft",
     "svg",

@@ -118,7 +118,7 @@ fn a_bad_preferences_file_is_refused_and_nothing_changes() {
         (json!({"data": "{\"format\": \"vcprintpresets\", \"version\": 1, \"prefs\": {}}"}), "(format `vcprintpresets`)"),
         (json!({"data": "{\"format\": \"vectorcraft-preferences\", \"prefs\": {\"uiAccent\": \"blue\"}}"}), "no `version`"),
         (json!({"data": "{\"format\": \"vectorcraft-preferences\", \"version\": 0, \"prefs\": {\"uiAccent\": \"blue\"}}"}), "no `version`"),
-        (json!({"data": file(json!({"uiAccent": "blue"})).replace("\"version\":1", "\"version\":2")}), "newer version of VectorCraft (version 2)"),
+        (json!({"data": file(json!({"uiAccent": "blue"})).replace("\"version\":1", "\"version\":2")}), "newer version of Nib (version 2)"),
         (json!({"data": "{\"format\": \"vectorcraft-preferences\", \"version\": 1}"}), "no `prefs`"),
         (json!({"data": file(json!({}))}), "holds no preferences"),
         (json!({"data": file(json!({"uiAccent": "blue", "noSuchPreference": 1}))}), "unknown preference `noSuchPreference`"),

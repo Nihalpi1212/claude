@@ -152,9 +152,7 @@ impl Headless {
                 self.session.check_params(id, params).map_err(|e| e.to_string())?;
             }
             None if crate::ui_catalog::UI_COMMANDS.iter().any(|(cid, ..)| *cid == id) => {
-                return Err(format!(
-                    "`{id}` is a desktop UI command (`ui: true`); start `vectorcraft --control 7979` and use `vectorcraft-cli mcp --connect`"
-                ));
+                return Err(format!("`{id}` is a desktop UI command (`ui: true`); start `nib --control 7979` and use `nib-cli mcp --connect`"));
             }
             None => self.session.check_params(id, params).map_err(|e| e.to_string())?,
         }
@@ -425,9 +423,7 @@ impl Headless {
             "app.save" => self.save(p),
             "app.export" => self.export(p),
             "app.quit" => Ok(Value::Null),
-            m if m.starts_with("ui.") => {
-                Err(format!("`{m}` needs the desktop app (start `vectorcraft --control 7979` and use `vectorcraft-cli mcp --connect`)"))
-            }
+            m if m.starts_with("ui.") => Err(format!("`{m}` needs the desktop app (start `nib --control 7979` and use `nib-cli mcp --connect`)")),
             other => Err(format!("unknown method `{other}`")),
         }
     }

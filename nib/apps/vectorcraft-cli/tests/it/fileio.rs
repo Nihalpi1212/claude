@@ -145,7 +145,7 @@ fn help_lists_readable_formats() {
 fn help_lists_perf_deep() {
     let out = ok(&["--help"]);
     assert!(
-        out.contains("vectorcraft-cli perf [--paths N] [--deep]") && out.contains("--deep also times") && out.contains("with the peak so far on"),
+        out.contains("nib-cli perf [--paths N] [--deep]") && out.contains("--deep also times") && out.contains("with the peak so far on"),
         "{out}"
     );
 }

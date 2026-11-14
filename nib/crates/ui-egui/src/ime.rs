@@ -91,7 +91,7 @@ pub(crate) fn install_hooks(ctx: &Context) {
         return;
     }
     ctx.on_begin_pass(
-        "VectorCraft IME pass begin",
+        "Nib IME pass begin",
         std::sync::Arc::new(|ui| {
             let ctx = ui.ctx();
             let id = mode_id(ctx.viewport_id());
@@ -99,7 +99,7 @@ pub(crate) fn install_hooks(ctx: &Context) {
         }),
     );
     ctx.on_end_pass(
-        "VectorCraft IME pass end",
+        "Nib IME pass end",
         std::sync::Arc::new(|ui| {
             let ctx = ui.ctx();
             let id = mode_id(ctx.viewport_id());

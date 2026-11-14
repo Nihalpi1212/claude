@@ -100,8 +100,8 @@ impl Writer {
         let info = &doc.metadata;
         let given = |s: &str| Some(s.trim()).filter(|s| !s.is_empty()).map(str::to_string);
         let metadata = Metadata {
-            creator: "VectorCraft".into(),
-            producer: "VectorCraft".into(),
+            creator: "Nib".into(),
+            producer: "Nib".into(),
             title: Some(title.to_owned()),
             authors: given(&info.author).into_iter().collect(),
             description: given(&info.description),

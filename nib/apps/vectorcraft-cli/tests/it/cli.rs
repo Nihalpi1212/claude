@@ -328,7 +328,7 @@ fn help_later_in_the_line_prints_the_usage() {
 fn help_as_an_option_value_goes_to_the_option() {
     let out = Command::new(crate::bin()).args(["run", "--cmd", "-h"]).output().unwrap();
     let err = String::from_utf8_lossy(&out.stderr);
-    assert!(!out.status.success() && err.contains("vectorcraft-cli: step 0 (-h):") && out.stdout.is_empty(), "{err}");
+    assert!(!out.status.success() && err.contains("nib-cli: step 0 (-h):") && out.stdout.is_empty(), "{err}");
     let out = Command::new(crate::bin()).args(["convert", "in.svg", "--range", "-h"]).output().unwrap();
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(!out.status.success() && err.contains("convert needs IN and OUT") && out.stdout.is_empty(), "{err}");
@@ -354,7 +354,7 @@ fn mcp_headless_over_stdio() {
     assert!(out.status.success());
     let replies: Vec<Value> = String::from_utf8(out.stdout).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect();
     assert_eq!(replies.iter().map(|r| r["id"].as_u64().unwrap()).collect::<Vec<_>>(), [1, 2, 3, 4]);
-    assert_eq!(replies[0]["result"]["serverInfo"]["name"], "vectorcraft");
+    assert_eq!(replies[0]["result"]["serverInfo"]["name"], "nib");
     assert_eq!(replies[2]["result"]["isError"], false);
     assert_eq!(replies[3]["result"]["content"][0]["type"], "image");
 }
@@ -471,7 +471,7 @@ fn automation_roots(base: &std::path::Path) {
     fails(&["mcp", "--automation-write-root"], "needs a folder");
     fails(
         &["mcp", "--connect", "127.0.0.1:1", &format!("--automation-write-root={}", dir("out"))],
-        "a running app enforces its own roots: start it with `vectorcraft --control <port>",
+        "a running app enforces its own roots: start it with `nib --control <port>",
     );
 
     let mut child = Command::new(crate::bin())
@@ -583,7 +583,7 @@ fn exercise_mcp_core(
         json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"0"}}}),
     );
     let r = mcp_recv(lines, notes, 1);
-    assert_eq!(r["result"]["serverInfo"]["name"], "vectorcraft");
+    assert_eq!(r["result"]["serverInfo"]["name"], "nib");
     assert!(r["result"]["capabilities"]["prompts"].is_object(), "{r}");
     mcp_send(stdin, json!({"jsonrpc":"2.0","method":"notifications/initialized"}));
 

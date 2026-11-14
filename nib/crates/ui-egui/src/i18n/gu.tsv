@@ -104,7 +104,7 @@
 	A saved copy of the selected preset	પસંદ કરેલા પ્રીસેટની સાચવેલી નકલ
 	A script can change the open documents and can write files through the commands it runs. Run only scripts you trust.	સ્ક્રિપ્ટ ખુલ્લા દસ્તાવેજો બદલી શકે છે અને તે ચલાવે છે તે આદેશો દ્વારા ફાઇલો લખી શકે છે. ફક્ત વિશ્વસનીય સ્ક્રિપ્ટ ચલાવો.
 	About	વિશે
-	About VectorCraft	VectorCraft વિશે
+	About Nib	Nib વિશે
 	Absolute	સંપૂર્ણ
 	Absolute Position	સંપૂર્ણ સ્થાન
 	Accelerated	પ્રવેગિત
@@ -241,7 +241,7 @@
 	Appearance Panel	દેખાવ પેનલ
 	Appearance of Black	કાળાનો દેખાવ
 	Appearance panel	દેખાવ પેનલ
-	Applies the next time VectorCraft starts.	VectorCraft આગલી વખતે શરૂ થશે ત્યારે લાગુ થશે.
+	Applies the next time Nib starts.	Nib આગલી વખતે શરૂ થશે ત્યારે લાગુ થશે.
 	Applies when the linked file is relinked or updated.	લિંક કરેલી ફાઇલ ફરી લિંક અથવા અપડેટ થાય ત્યારે લાગુ થાય છે.
 	Apply	લાગુ કરો
 	Apply Brush	બ્રશ લાગુ કરો
@@ -297,8 +297,6 @@
 	Art Brush Options	આર્ટ બ્રશ વિકલ્પો
 	Art Ribbons	આર્ટ રિબન
 	Art using a deleted global swatch keeps its colour.	કાઢી નાખેલો ગ્લોબલ સ્વેચ વાપરતી આર્ટ પોતાનો રંગ જાળવે છે.
-	ArtCraft Website	ArtCraft વેબસાઇટ
-	ArtCraft website	ArtCraft વેબસાઇટ
 	Artboard	આર્ટબોર્ડ
 	Artboard Guides with Cmd/Ctrl + Ruler Drag	Cmd/Ctrl + રૂલર ખેંચીને આર્ટબોર્ડ ગાઇડ
 	Artboard Options	આર્ટબોર્ડ વિકલ્પો
@@ -1622,7 +1620,7 @@
 	Hide Thumbnail	થંબનેલ છુપાવો
 	Hide Thumbnails	થંબનેલ્સ છુપાવો
 	Hide Transparency Grid	પારદર્શિતા ગ્રિડ છુપાવો
-	Hide VectorCraft	VectorCraft છુપાવો
+	Hide Nib	Nib છુપાવો
 	Hide Video Rulers	વિડિઓ રૂલર છુપાવો
 	High Performance (discrete)	ઉચ્ચ પર્ફોર્મન્સ (અલગ)
 	Highlight	હાઇલાઇટ
@@ -1723,7 +1721,7 @@
 	Import…	આયાત કરો…
 	In Merge Mode, Clicking Stroke Splits the Path	મર્જ મોડમાં, સ્ટ્રોક પર ક્લિક કરવાથી પાથ વિભાજિત થાય છે
 	In Tangent Handles	ટેન્જન્ટ હેન્ડલમાં
-	In VectorCraft	VectorCraft માં
+	In Nib	Nib માં
 	In the File	ફાઇલમાં
 	In the selected objects	પસંદ કરેલી ઑબ્જેક્ટ્સમાં
 	Inches	ઇંચ
@@ -1804,11 +1802,8 @@
 	JavaScript Files	JavaScript ફાઇલો
 	JavaScript:	JavaScript:
 	Join	જોડો
-	Join Our Discord	અમારા Discord માં જોડાઓ
 	Join Point Text	જોઇન્ટ પોઇન્ટ ટેક્સ્ટ
 	Join Tool	જોઇન ટૂલ
-	Join our Discord	અમારા Discord માં જોડાઓ
-	Join the ArtCraft community on Discord (discord.gg/artcraft)	Discord (discord.gg/artcraft) પર ArtCraft સમુદાયમાં જોડાઓ
 	Join the lines of each paragraph	દરેક ફકરાની લાઇનો જોડો
 	Justification	જસ્ટિફિકેશન
 	Justification…	જસ્ટિફિકેશન…
@@ -2454,7 +2449,7 @@
 	Open this setting's help page	આ સેટિંગનું મદદ પેજ ખોલો
 	OpenType	OpenType
 	OpenType Features	OpenType ફીચર્સ
-	Opening it left out what VectorCraft can't read yet ({what}), so replacing it loses that for good. Save under another name to keep it.	ખોલતી વખતે VectorCraft હજી વાંચી ન શકે તે ({what}) છોડી દેવાયું, તેથી તેને બદલવાથી તે કાયમ માટે ખોવાઈ જશે. તેને રાખવા માટે બીજા નામથી સાચવો.
+	Opening it left out what Nib can't read yet ({what}), so replacing it loses that for good. Save under another name to keep it.	ખોલતી વખતે Nib હજી વાંચી ન શકે તે ({what}) છોડી દેવાયું, તેથી તેને બદલવાથી તે કાયમ માટે ખોવાઈ જશે. તેને રાખવા માટે બીજા નામથી સાચવો.
 	Opens files in other apps	અન્ય ઍપમાં ફાઇલો ખોલે છે
 	Opens network connections	નેટવર્ક કનેક્શન ખોલે છે
 	Open…	ખોલો…
@@ -2757,7 +2752,7 @@
 	Quarter Space	ચોથા ભાગની જગ્યા
 	Quick Actions	ઝડપી ક્રિયાઓ
 	Quickly start a new file	નવી ફાઇલ ઝડપથી શરૂ કરો
-	Quit VectorCraft	VectorCraft બંધ કરો
+	Quit Nib	Nib બંધ કરો
 	RECENT	તાજેતરનાં
 	RGB Color	RGB રંગ
 	RGB Images	RGB છબીઓ
@@ -3638,7 +3633,7 @@
 	Start Normally	સામાન્ય રીતે શરૂ કરો
 	Start Tile	શરૂઆતની ટાઇલ
 	Start arrowhead	શરૂઆતનું એરોહેડ
-	Start from VectorCraft Defaults	VectorCraft ડિફૉલ્ટથી શરૂ કરો
+	Start from Nib Defaults	Nib ડિફૉલ્ટથી શરૂ કરો
 	Start in Safe Mode	સેફ મોડમાં શરૂ કરો
 	Start:	શરૂ:
 	Static Symbol	સ્ટેટિક સિમ્બોલ
@@ -3801,8 +3796,8 @@
 	The edge of the paper the printer can't reach: the art goes inside it, and the preview shows it dashed.	પ્રિન્ટર પહોંચી ન શકે તે કાગળની કિનારી: આર્ટ તેની અંદર જાય છે, અને પૂર્વાવલોકનમાં તે ડૅશ સાથે દેખાય છે.
 	The file is too large to read in full, so only its first part is listed.	ફાઇલ પૂરી વાંચવા માટે ખૂબ મોટી છે, તેથી તેનો માત્ર પહેલો ભાગ દર્શાવ્યો છે.
 	The key color becomes the stroke color. The other colors shift their hue by the same amount and keep their saturation and brightness.	મુખ્ય રંગ સ્ટ્રોક રંગ બને છે. બીજા રંગોનો હ્યુ એટલો જ બદલાય છે અને તેમની સંતૃપ્તિ તથા તેજ જળવાય છે.
-	The last launch of VectorCraft stopped while the plug-in {name} was loading. It may not be what stopped it.	છેલ્લી વખત VectorCraft શરૂ થતાં પ્લગ-ઇન {name} લોડ થતું હતું ત્યારે બંધ પડ્યું. તે કારણ ન પણ હોય.
-	The name in the save panel was “{typed}”; VectorCraft added the file type's extension. Replacing the file overwrites its contents.	સાચવો પેનલમાં નામ “{typed}” હતું; VectorCraft એ ફાઇલ પ્રકારનું એક્સ્ટેન્શન ઉમેર્યું. ફાઇલ બદલવાથી તેની સામગ્રી ઓવરરાઇટ થશે.
+	The last launch of Nib stopped while the plug-in {name} was loading. It may not be what stopped it.	છેલ્લી વખત Nib શરૂ થતાં પ્લગ-ઇન {name} લોડ થતું હતું ત્યારે બંધ પડ્યું. તે કારણ ન પણ હોય.
+	The name in the save panel was “{typed}”; Nib added the file type's extension. Replacing the file overwrites its contents.	સાચવો પેનલમાં નામ “{typed}” હતું; Nib એ ફાઇલ પ્રકારનું એક્સ્ટેન્શન ઉમેર્યું. ફાઇલ બદલવાથી તેની સામગ્રી ઓવરરાઇટ થશે.
 	The page as it prints	છાપતી વખતે પૃષ્ઠ જેવું દેખાય છે
 	The plug-in is computing…	પ્લગ-ઇન ગણતરી કરી રહ્યું છે…
 	The plug-in writes the whole document.	પ્લગ-ઇન આખો દસ્તાવેજ લખે છે.
@@ -4077,21 +4072,19 @@
 	Vector Halftone	વેક્ટર હાફટોન
 	Vector Halftone…	વેક્ટર હાફટોન…
 	Vector illustration — fast, open, scriptable.	વેક્ટર ઇલસ્ટ્રેશન — ઝડપી, ખુલ્લું, સ્ક્રિપ્ટેબલ.
-	VectorCraft	VectorCraft
-	VectorCraft Help…	VectorCraft મદદ…
-	VectorCraft Title Bar on Every Desktop	દરેક ડેસ્કટૉપ પર VectorCraft ટાઇટલ બાર
-	VectorCraft Updates	VectorCraft અપડેટ્સ
-	VectorCraft copies the fonts to {folder}.	VectorCraft ફૉન્ટ્સ {folder} માં કૉપિ કરે છે.
-	VectorCraft didn't quit normally last time. These documents had unsaved changes:	છેલ્લી વખત VectorCraft સામાન્ય રીતે બંધ થયું નહોતું. આ દસ્તાવેજોમાં સાચવ્યા વગરના ફેરફારો હતા:
-	VectorCraft documents: one locked object, updated when the file changes.	VectorCraft દસ્તાવેજો: એક લૉક ઑબ્જેક્ટ, ફાઇલ બદલાય ત્યારે અપડેટ થાય છે.
-	VectorCraft is in Safe Mode: no plug-ins load or run until it starts normally.	VectorCraft સેફ મોડમાં છે: સામાન્ય રીતે શરૂ ન થાય ત્યાં સુધી કોઈ પ્લગ-ઇન લોડ કે ચાલતા નથી.
-	VectorCraft on GitHub	GitHub પર VectorCraft
-	VectorCraft on getartcraft.com	getartcraft.com પર VectorCraft
-	VectorCraft read this script without running it.	VectorCraft એ સ્ક્રિપ્ટ ચલાવ્યા વગર વાંચી.
+	Nib	Nib
+	Nib Help…	Nib મદદ…
+	Nib Title Bar on Every Desktop	દરેક ડેસ્કટૉપ પર Nib ટાઇટલ બાર
+	Nib Updates	Nib અપડેટ્સ
+	Nib copies the fonts to {folder}.	Nib ફૉન્ટ્સ {folder} માં કૉપિ કરે છે.
+	Nib didn't quit normally last time. These documents had unsaved changes:	છેલ્લી વખત Nib સામાન્ય રીતે બંધ થયું નહોતું. આ દસ્તાવેજોમાં સાચવ્યા વગરના ફેરફારો હતા:
+	Nib documents: one locked object, updated when the file changes.	Nib દસ્તાવેજો: એક લૉક ઑબ્જેક્ટ, ફાઇલ બદલાય ત્યારે અપડેટ થાય છે.
+	Nib is in Safe Mode: no plug-ins load or run until it starts normally.	Nib સેફ મોડમાં છે: સામાન્ય રીતે શરૂ ન થાય ત્યાં સુધી કોઈ પ્લગ-ઇન લોડ કે ચાલતા નથી.
+	Nib on GitHub	GitHub પર Nib
+	Nib read this script without running it.	Nib એ સ્ક્રિપ્ટ ચલાવ્યા વગર વાંચી.
 	VectorCraft {release} and later (version {n})	VectorCraft {release} અને પછીનાં (સંસ્કરણ {n})
 	Vectors	વેક્ટર્સ
 	Version	સંસ્કરણ
-	Version {version} — open-source vector illustration in pure Rust.	સંસ્કરણ {version} — શુદ્ધ Rust માં ઓપન-સોર્સ વેક્ટર ઇલસ્ટ્રેશન.
 	Version:	સંસ્કરણ:
 	Version: {version}	સંસ્કરણ: {version}
 	Vertical	ઊભું
@@ -4136,7 +4129,7 @@
 	Web Snap:	વેબ સ્નૅપ:
 	Weight	જાડાઈ
 	Weight:	જાડાઈ:
-	Welcome to VectorCraft	VectorCraft માં સ્વાગત છે
+	Welcome to Nib	Nib માં સ્વાગત છે
 	When pasting text	ટેક્સ્ટ ચોંટાડતી વખતે
 	White	સફેદ
 	Wide Blurry	પહોળું ઝાંખું
@@ -4624,7 +4617,7 @@ file-filter	Print presets	પ્રિન્ટ પ્રીસેટ્સ
 file-filter	SVG Compressed	સંકુચિત SVG
 file-filter	Swatch libraries	સ્વેચ લાઇબ્રેરીઓ
 file-filter	Templates	ટેમ્પ્લેટ્સ
-file-filter	VectorCraft Template	VectorCraft ટેમ્પ્લેટ
+file-filter	Nib Template	Nib ટેમ્પ્લેટ
 gradient-kind	Radial	રેડિયલ
 lighting	Light	લાઇટ
 mark-style	Japanese	જાપાનીઝ
@@ -4680,3 +4673,10 @@ swatch	[Registration]	[રજિસ્ટ્રેશન]
 	Repeat Objects	પુનરાવર્તિત ઑબ્જેક્ટ્સ
 @msg	`{path}` must be one of {_1}, not {got}	`{path}` એ {_1}માંથી એક હોવું જોઈએ, {got} નહીં
 	Path Length	પાથની લંબાઈ
+	Report an Issue	સમસ્યાની જાણ કરો
+	Report an issue	સમસ્યાની જાણ કરો
+	Report a problem or suggest an idea on Nib's GitHub	Nib ના GitHub પર સમસ્યાની જાણ કરો અથવા વિચાર સૂચવો
+	Nib Releases	Nib રિલીઝ
+	VectorCraft (upstream project)	VectorCraft (મૂળ પ્રોજેક્ટ)
+	Nib is based on VectorCraft by the ArtCraft team and the VectorCraft contributors (MIT OR Apache-2.0)	Nib એ ArtCraft ટીમ અને VectorCraft યોગદાનકર્તાઓના VectorCraft પર આધારિત છે (MIT OR Apache-2.0)
+	Open-source vector illustration in pure Rust.	શુદ્ધ Rust માં ઓપન-સોર્સ વેક્ટર ઇલસ્ટ્રેશન.

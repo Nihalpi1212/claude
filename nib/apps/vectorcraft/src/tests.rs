@@ -173,7 +173,7 @@ fn the_system_title_bar_preference_keeps_the_window_decorations() {
     let desktop = Frame::Desktop;
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
-        assert!(super::custom_titlebar_from(&app, false), "GNOME/Wayland: VectorCraft draws its own");
+        assert!(super::custom_titlebar_from(&app, false), "GNOME/Wayland: Nib draws its own");
         assert!(!super::custom_titlebar_from(&app, true), "System Title Bar preference forces native");
         assert!(!super::custom_titlebar_from(&desktop, false), "KDE/X11/…: keep the compositor's frame");
         assert!(!super::custom_titlebar_from(&desktop, true));
@@ -401,13 +401,14 @@ fn the_macos_bundle_opens_every_readable_format() {
     assert!(!plist.contains("<key>NSDocumentClass</key>"), "not an NSDocument app: AppKit would refuse the files");
     let types = plist.matches("<key>CFBundleTypeName</key>").count();
     assert!(types > 1 && plist.matches("<key>LSHandlerRank</key>").count() == types, "every document type has a rank");
-    assert_eq!(plist.matches("<string>Owner</string>").count(), 2, "only VectorCraft documents and templates are owned");
+    assert_eq!(plist.matches("<string>Owner</string>").count(), 2, "only Nib documents and templates are owned");
 }
 
 /// The MIME types a Linux desktop gives each extension in `OPEN_EXTS` but `UNASSOCIATED_EXTS`
-/// (one row per type): shared-mime-info's, or one that `ai.storyteller.vectorcraft.mime.xml`
+/// (one row per type): shared-mime-info's, or one that `io.github.nihalpi1212.nib.mime.xml`
 /// declares.
 const LINUX_TYPES: &[(&str, &str)] = &[
+    ("nibart", "application/x-nib-art"),
     ("vectorcraft", "application/x-vectorcraft"),
     ("drawcraft", "application/x-vectorcraft"),
     ("svg", "image/svg+xml"),
@@ -465,8 +466,8 @@ const LINUX_BY_CONTENT: &[(&str, &str)] = &[(
 /// have.
 #[test]
 fn the_linux_desktop_entry_opens_every_readable_format() {
-    let desktop = include_str!("../../../packaging/linux/ai.storyteller.vectorcraft.desktop");
-    let mime = include_str!("../../../packaging/linux/ai.storyteller.vectorcraft.mime.xml");
+    let desktop = include_str!("../../../packaging/linux/io.github.nihalpi1212.nib.desktop");
+    let mime = include_str!("../../../packaging/linux/io.github.nihalpi1212.nib.mime.xml");
     let listed: Vec<&str> =
         desktop.lines().find_map(|l| l.strip_prefix("MimeType=")).unwrap_or_default().split(';').filter(|t| !t.is_empty()).collect();
     // Each type the MIME package declares, with the extensions of its globs and its `<magic>`

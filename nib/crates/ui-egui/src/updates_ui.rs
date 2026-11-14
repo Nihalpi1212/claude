@@ -1,4 +1,8 @@
-//! Software updates, background check at startup, and startup prompt modal.
+//! Help › Check for Updates. Nib never downloads or installs updates by itself and makes no
+//! network request for them: the command opens Nib's releases page in the browser
+//! (`help.appPage`, see docs/FORK.md). The craft-update machinery VectorCraft uses (startup
+//! check, prompt and installer) stays here, pointed at Nib's repository but never started, so
+//! upstream changes to this file still merge; its dialogs only show in tests.
 
 use serde_json::Value;
 
@@ -13,14 +17,9 @@ use craft_update::{CheckResultDialog, CheckResultResponse};
 pub(crate) struct Runtime {
     #[cfg(not(target_arch = "wasm32"))]
     updater: Updater,
-    /// The desktop app turns the check at start on; tests and the web build leave it off.
+    /// VectorCraft's check at start. Nib never acts on it: no update check runs at start.
     #[cfg(not(target_arch = "wasm32"))]
     startup_check: bool,
-    #[cfg(not(target_arch = "wasm32"))]
-    check_requested: bool,
-    /// The context of the last frame, to wake the UI when a check is queued from a menu callback.
-    #[cfg(not(target_arch = "wasm32"))]
-    repaint: Option<egui::Context>,
     /// Whether an update dialog held the input in the last frame.
     #[cfg(not(target_arch = "wasm32"))]
     was_blocking: bool,
@@ -34,18 +33,12 @@ pub(crate) struct Runtime {
 #[cfg(not(target_arch = "wasm32"))]
 impl Default for Runtime {
     fn default() -> Self {
-        Self {
-            updater: Updater::new(&crate::UPDATE_APP, env!("CARGO_PKG_VERSION")),
-            startup_check: false,
-            check_requested: false,
-            repaint: None,
-            was_blocking: false,
-        }
+        Self { updater: Updater::new(&crate::UPDATE_APP, env!("CARGO_PKG_VERSION")), startup_check: false, was_blocking: false }
     }
 }
 
 impl VectorcraftApp {
-    /// Whether the app asks for a newer release when it starts (off until the desktop app turns it on).
+    /// VectorCraft's check for a newer release at start. Nib keeps the setting but never checks.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn set_startup_update_check(&mut self, on: bool) {
         self.updates_rt.startup_check = on;
@@ -60,34 +53,23 @@ impl VectorcraftApp {
     }
 }
 
+/// Help › Check for Updates: opens Nib's releases page, where each release (`nib-vX.Y.Z`) lists
+/// what changed and its downloads. Nothing is fetched or installed.
 pub(crate) fn check(app: &mut VectorcraftApp) -> Result<Value, String> {
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        app.updates_rt.check_requested = true;
-        if let Some(ctx) = &app.updates_rt.repaint {
-            ctx.request_repaint();
-        }
-        Ok(Value::Null)
+    let url = app.session.execute("help.appPage", &serde_json::json!({})).map_err(|e| e.to_string())?["url"].as_str().unwrap_or_default().to_string();
+    if url.is_empty() {
+        return Err("no releases page".into());
     }
-    #[cfg(target_arch = "wasm32")]
-    {
-        app.updates_rt.manual_window_open = true;
-        app.updates_rt.status_message = Some("Update check is not supported in the web browser.".into());
-        Ok(Value::Null)
-    }
+    app.open_url(&url);
+    Ok(serde_json::json!({ "url": url }))
 }
 
 pub(crate) fn tick(app: &mut VectorcraftApp, ctx: &egui::Context) {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let rt = &mut app.updates_rt;
-        rt.repaint = Some(ctx.clone());
-        if std::mem::take(&mut rt.check_requested) {
-            rt.updater.check_now(ctx);
-        } else if rt.startup_check {
-            rt.updater.check_at_start(ctx);
-        }
-        rt.updater.tick(ctx);
+        // No check is ever started here (not at start, not from the menu): the updater only
+        // advances what a test put in it.
+        app.updates_rt.updater.tick(ctx);
     }
     #[cfg(target_arch = "wasm32")]
     let _ = (app, ctx);
@@ -173,7 +155,7 @@ pub(crate) fn show(app: &mut VectorcraftApp, ctx: &egui::Context) {
     #[cfg(target_arch = "wasm32")]
     if app.updates_rt.manual_window_open {
         let mut open = true;
-        egui::Window::new(tl!("VectorCraft Updates"))
+        egui::Window::new(tl!("Nib Updates"))
             .open(&mut open)
             .collapsible(false)
             .resizable(false)
@@ -240,10 +222,10 @@ mod tests {
     pub(super) fn offer(app: &mut VectorcraftApp) {
         app.updates_rt.updater = isolated_updater(env!("CARGO_PKG_VERSION"), "prompt");
         app.updates_rt.updater.offer(craft_update::Release {
-            tag: "v99.0.0".into(),
+            tag: "nib-v99.0.0".into(),
             version: craft_update::parse_version("99.0.0"),
-            name: "VectorCraft 99.0.0".into(),
-            html_url: "https://github.com/storytold/vectorcraft/releases/tag/v99.0.0".into(),
+            name: "Nib 99.0.0".into(),
+            html_url: "https://github.com/Nihalpi1212/claude/releases/tag/nib-v99.0.0".into(),
             ..Default::default()
         });
     }
@@ -337,10 +319,10 @@ mod tests {
         let mut app = VectorcraftApp::new(Session::new(), Default::default());
         let ctx = egui::Context::default();
         let release = craft_update::Release {
-            tag: "v99.0.0".into(),
+            tag: "nib-v99.0.0".into(),
             version: craft_update::parse_version("99.0.0"),
-            name: "VectorCraft 99.0.0".into(),
-            html_url: "https://github.com/storytold/vectorcraft/releases/tag/v99.0.0".into(),
+            name: "Nib 99.0.0".into(),
+            html_url: "https://github.com/Nihalpi1212/claude/releases/tag/nib-v99.0.0".into(),
             ..Default::default()
         };
         app.updates_rt.updater.offer(release);

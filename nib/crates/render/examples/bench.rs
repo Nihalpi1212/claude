@@ -46,7 +46,7 @@ fn main() {
         let id = d.alloc_id();
         let t = vectorcraft_doc::TextObject::point(
             Point::new(x, y),
-            &format!("Label {i} — VectorCraft"),
+            &format!("Label {i} — Nib"),
             vectorcraft_doc::CharStyle { size: 10.0 + (i % 5) as f64 * 4.0, ..Default::default() },
         );
         d.insert(Some(l), usize::MAX, Node::new(id, vectorcraft_doc::NodeKind::Text(Box::new(t)))).unwrap();

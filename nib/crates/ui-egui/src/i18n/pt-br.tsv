@@ -113,7 +113,7 @@
 	A lower value follows the stroke closely; a higher one gives fewer points and smoother curves.	Um valor menor segue o traço de perto; um valor maior gera menos pontos e curvas mais suaves.
 	A new preset starting from the selected one	Um novo predefinido a partir do selecionado
 	A saved copy of the selected preset	Uma cópia salva do predefinido selecionado
-	About VectorCraft	Sobre o VectorCraft
+	About Nib	Sobre o Nib
 	Absolute Position	Posição Absoluta
 	Accurate	Preciso
 	Abutting	Contíguo
@@ -209,7 +209,7 @@ antiAlias	Sharp	Nítido
 	Appearance Panel	Painel Aparência
 	Appearance of Black	Aparência do Preto
 	Appearance panel	Painel de Aparência
-	Applies the next time VectorCraft starts.	Aplica na próxima inicialização do VectorCraft.
+	Applies the next time Nib starts.	Aplica na próxima inicialização do Nib.
 	Applies when the linked file is relinked or updated.	Aplica quando o arquivo vinculado é revinculado ou atualizado.
 	Apply Brush	Aplicar Pincel
 	Apply Character Style	Aplicar Estilo de Caractere
@@ -238,8 +238,6 @@ antiAlias	Sharp	Nítido
 	Arrange: Bring to Front	Organizar: Trazer para Frente
 	Arrowheads:	Pontas de Seta:
 	Art using a deleted global swatch keeps its colour.	A arte que usa uma amostra global excluída mantém sua cor.
-	ArtCraft Website	Site do ArtCraft
-	ArtCraft website	Site do ArtCraft
 	Artboard Options	Opções de Mesa de Trabalho
 	Artboard Options…	Opções de Mesa de Trabalho…
 	Artboard Tool	Ferramenta Mesa de Trabalho
@@ -392,7 +390,7 @@ antiAlias	Sharp	Nítido
 	Check Script	Verificar Script
 	Check Script…	Verificar Script…
 	Copy Report	Copiar Relatório
-	VectorCraft read this script without running it.	O VectorCraft leu este script sem executá-lo.
+	Nib read this script without running it.	O Nib leu este script sem executá-lo.
 	Needs nothing beyond plain JavaScript	Precisa apenas de JavaScript simples
 	Needs the script language's own objects or directives	Precisa de objetos ou diretivas próprios da linguagem do script
 	Needs the document model	Precisa do modelo de documento
@@ -1536,10 +1534,7 @@ antiAlias	Sharp	Nítido
 	Isolate Selected Object	Isolar Objeto Selecionado
 	Italian	Italiano
 	Join	Unir
-	Join Our Discord	Junte-se ao nosso Discord
 	Join Tool	Ferramenta Unir
-	Join our Discord	Junte-se ao nosso Discord
-	Join the ArtCraft community on Discord (discord.gg/artcraft)	Junte-se à comunidade do ArtCraft no Discord (discord.gg/artcraft)
 	Join the lines of each paragraph	Junte as linhas de cada parágrafo
 	Justification…	Justificação…
 	Keep Formatting	Manter Formatação
@@ -2258,7 +2253,7 @@ digits	Malayalam	Malaiala
 	Quarter Space	Espaço de Quarto
 	Quick Actions	Ações Rápidas
 	Quickly start a new file	Começar rapidamente um novo arquivo
-	Quit VectorCraft	Sair do VectorCraft
+	Quit Nib	Sair do Nib
 	RECENT	RECENTES
 	RGB Color	Cor RGB
 	Radar Graph Tool	Ferramenta Gráfico de Radar
@@ -2383,7 +2378,7 @@ digits	Malayalam	Malaiala
 @plural	{n} folder or file couldn't be read|{n} folders or files couldn't be read	{n} pasta ou arquivo não pôde ser lido|{n} pastas ou arquivos não puderam ser lidos
 	The search stopped at its limit: search a smaller folder.	A pesquisa parou no limite: pesquise uma pasta menor.
 	Copy only fonts you own or are licensed to install.	Copie apenas fontes que sejam suas ou que você tenha licença para instalar.
-	VectorCraft copies the fonts to {folder}.	O VectorCraft copia as fontes para {folder}.
+	Nib copies the fonts to {folder}.	O Nib copia as fontes para {folder}.
 	Registered Trademark Symbol	Símbolo de Marca Registrada
 	Registry name:	Nome do registro:
 	Release	Liberar
@@ -2512,9 +2507,9 @@ digits	Malayalam	Malaiala
 	Revert	Reverter
 	Revert to the saved version of “{name}”?	Reverter para a versão salva de “{name}”?
 	Replace “{name}”, the file this document was opened from?	Substituir “{name}”, o arquivo do qual este documento foi aberto?
-	Opening it left out what VectorCraft can't read yet ({what}), so replacing it loses that for good. Save under another name to keep it.	Ao abri-lo, ficou de fora o que o VectorCraft ainda não consegue ler ({what}), então substituí-lo perde isso para sempre. Salve com outro nome para mantê-lo.
+	Opening it left out what Nib can't read yet ({what}), so replacing it loses that for good. Save under another name to keep it.	Ao abri-lo, ficou de fora o que o Nib ainda não consegue ler ({what}), então substituí-lo perde isso para sempre. Salve com outro nome para mantê-lo.
 	“{name}” already exists. Replace it?	“{name}” já existe. Substituir?
-	The name in the save panel was “{typed}”; VectorCraft added the file type's extension. Replacing the file overwrites its contents.	O nome no painel de salvamento era “{typed}”, e o VectorCraft adicionou a extensão do tipo de arquivo. Substituir o arquivo sobrescreve o conteúdo.
+	The name in the save panel was “{typed}”; Nib added the file type's extension. Replacing the file overwrites its contents.	O nome no painel de salvamento era “{typed}”, e o Nib adicionou a extensão do tipo de arquivo. Substituir o arquivo sobrescreve o conteúdo.
 	Revolve…	Revolver…
 	Right Grid:	Grade Direita:
 	Right Indent	Recuo Direito
@@ -3267,12 +3262,10 @@ digits	Malayalam	Malaiala
 	Vector Halftone	Meio-tom Vetorial
 	Vector Halftone…	Meio-tom Vetorial…
 	Vector illustration — fast, open, scriptable.	Ilustração vetorial — rápida, aberta, scriptável.
-	VectorCraft Help…	Ajuda do VectorCraft…
-	VectorCraft didn't quit normally last time. These documents had unsaved changes:	O VectorCraft não fechou normalmente da última vez. Estes documentos tinham alterações não salvas:
-	VectorCraft on GitHub	VectorCraft no GitHub
-	VectorCraft on getartcraft.com	VectorCraft em getartcraft.com
+	Nib Help…	Ajuda do Nib…
+	Nib didn't quit normally last time. These documents had unsaved changes:	O Nib não fechou normalmente da última vez. Estes documentos tinham alterações não salvas:
+	Nib on GitHub	Nib no GitHub
 	Vectors	Vetores
-	Version {version} — open-source vector illustration in pure Rust.	Versão {version} — ilustração vetorial de código aberto em Rust puro.
 	Version:	Versão:
 	Vertical	Vertical
 	Vertical Align Bottom	Alinhar Inferior Verticalmente
@@ -3301,7 +3294,7 @@ digits	Malayalam	Malaiala
 	Web Shift	Web Shift
 	Web Snap:	Web Snap:
 	Weight:	Peso:
-	Welcome to VectorCraft	Bem-vindo ao VectorCraft
+	Welcome to Nib	Bem-vindo ao Nib
 	When pasting text	Ao colar texto
 	White	Branco
 	Widget Position:	Posição do Widget:
@@ -3444,7 +3437,7 @@ imageTrace	Outline	Contorno
 	Dock Control Bar	Encaixar Barra de Controle
 	Float Tool Group	Flutuar Grupo de Ferramentas
 	Services	Serviços
-	Hide VectorCraft	Ocultar o VectorCraft
+	Hide Nib	Ocultar o Nib
 	Hide Others	Ocultar Outros
 	Zoom	Zoom
 	Bring All to Front	Trazer Todas para a Frente
@@ -3453,7 +3446,7 @@ imageTrace	Outline	Contorno
 	On: one locked object showing the document, updated when it changes.	Ativado: um objeto bloqueado que mostra o documento, atualizado quando ele muda.
 	Off: an editable copy of its art, embedded in this document.	Desativado: uma cópia editável da arte, incorporada neste documento.
 	Images: link to the file instead of only embedding it.	Imagens: vincular ao arquivo em vez de apenas incorporá-lo.
-	VectorCraft documents: one locked object, updated when the file changes.	Documentos do VectorCraft: um objeto bloqueado, atualizado quando o arquivo muda.
+	Nib documents: one locked object, updated when the file changes.	Documentos do Nib: um objeto bloqueado, atualizado quando o arquivo muda.
 	A file dialog is open: choose there first	Há uma caixa de diálogo de arquivos aberta: escolha nela primeiro
 	The document was closed while its file dialog was open	O documento foi fechado enquanto sua caixa de diálogo de arquivos estava aberta
 	The dialog was closed before its file dialog answered	O diálogo foi fechado antes que sua caixa de diálogo de arquivos respondesse
@@ -3490,10 +3483,10 @@ imageTrace	Outline	Contorno
 	Stained Glass…	Vitral…
 	Texturizer…	Texturizador…
 	System Title Bar	Barra de título do sistema
-	VectorCraft Title Bar on Every Desktop	Barra de título do VectorCraft em todas as áreas de trabalho
+	Nib Title Bar on Every Desktop	Barra de título do Nib em todas as áreas de trabalho
 	The VECTORCRAFT_TITLEBAR environment variable chooses the title bar while it is set.	Enquanto estiver definida, a variável de ambiente VECTORCRAFT_TITLEBAR escolhe a barra de título.
 	System Title Bar takes precedence over this option while it is on.	Enquanto estiver ativada, Barra de título do sistema tem prioridade sobre esta opção.
-	This desktop draws the window's title bar with this option on or off while VectorCraft Title Bar on Every Desktop is off.	Enquanto Barra de título do VectorCraft em todas as áreas de trabalho estiver desativada, esta área de trabalho desenha a barra de título da janela com esta opção ativada ou desativada.
+	This desktop draws the window's title bar with this option on or off while Nib Title Bar on Every Desktop is off.	Enquanto Barra de título do Nib em todas as áreas de trabalho estiver desativada, esta área de trabalho desenha a barra de título da janela com esta opção ativada ou desativada.
 	Exit	Sair
 	Distort	Distorcer
 	Diffuse Glow…	Brilho difuso…
@@ -4044,7 +4037,7 @@ axis	Both	Ambos
 @msg	can't encode the document: {0}	não foi possível codificar o documento: {0}
 @msg	can't parse shortcut `{c}`	não foi possível interpretar o atalho `{c}`
 @msg	can't parse shortcut `{s}` for `{k}`	não foi possível interpretar o atalho `{s}` de `{k}`
-@msg	can't save version {0}: VectorCraft writes versions {MIN_VERSION} to {VERSION}	não foi possível salvar a versão {0}: o VectorCraft grava as versões {MIN_VERSION} a {VERSION}
+@msg	can't save version {0}: Nib writes versions {MIN_VERSION} to {VERSION}	não foi possível salvar a versão {0}: o Nib grava as versões {MIN_VERSION} a {VERSION}
 @msg	can't write .{ext} images	não é possível gravar imagens .{ext}
 @msg	cannot distort a zero-size bounding box	não é possível distorcer uma caixa delimitadora de tamanho zero
 @msg	cannot read PDF: {0}	não foi possível ler o PDF: {0}
@@ -4072,7 +4065,7 @@ axis	Both	Ambos
 @msg	empty brush stroke	traço de pincel vazio
 @msg	empty cutter	cortador vazio
 @msg	empty path	traçado vazio
-@msg	file version {0} is newer than this VectorCraft supports ({VERSION})	a versão {0} do arquivo é mais recente do que este VectorCraft suporta ({VERSION})
+@msg	file version {0} is newer than this Nib supports ({VERSION})	a versão {0} do arquivo é mais recente do que este Nib suporta ({VERSION})
 @msg	freeform point {i} needs `at` [x, y] and a valid `color`	o ponto {i} de forma livre precisa de `at` [x, y] e de uma `color` válida
 @msg	freeform line {i} must be an array of point indices	a linha {i} de forma livre deve ser uma matriz de índices de pontos
 @msg	give both `start` and `end` [x, y] (or neither)	informe `start` e `end` [x, y] (ou nenhum dos dois)
@@ -4099,9 +4092,9 @@ axis	Both	Ambos
 @msg	{label} files hold real numbers up to {max}, and the page of artboard {n}, {side} pt long, needs larger ones: choose PDF 1.6 or later without a PDF/X standard, or a smaller artboard	os arquivos {label} aceitam números reais de até {max}, e a página da prancheta {n}, com {side} pt, precisa de números maiores: escolha PDF 1.6 ou posterior sem padrão PDF/X, ou uma prancheta menor
 @msg	invalid image data for `{0}`	dados de imagem inválidos para `{0}`
 @msg	invalid parameters for `{cmd}`: {msg}	parâmetros inválidos para `{cmd}`: {msg}
-@msg	is not an image VectorCraft reads	não é uma imagem que o VectorCraft lê
-@msg	it uses `{at}`, which VectorCraft's PostScript reader doesn't know	usa `{at}`, que o leitor de PostScript do VectorCraft não conhece
-@msg	it uses `{at}`, which VectorCraft's PostScript reader doesn't know, in {procs}	usa `{at}`, que o leitor de PostScript do VectorCraft não conhece, em {procs}
+@msg	is not an image Nib reads	não é uma imagem que o Nib lê
+@msg	it uses `{at}`, which Nib's PostScript reader doesn't know	usa `{at}`, que o leitor de PostScript do Nib não conhece
+@msg	it uses `{at}`, which Nib's PostScript reader doesn't know, in {procs}	usa `{at}`, que o leitor de PostScript do Nib não conhece, em {procs}
 @msg	its Windows metafile preview was opened instead, which may simplify the art	a visualização em metarquivo do Windows foi aberta no lugar, o que pode simplificar a arte
 @msg	its preview was placed instead, at screen resolution	a visualização foi inserida no lugar, em resolução de tela
 @msg	join needs open paths	unir exige traçados abertos
@@ -4158,7 +4151,7 @@ axis	Both	Ambos
 @msg	no file system here	nenhum sistema de arquivos aqui
 @msg	no file writer	sem gravador de arquivos
 @msg	no files to place	nenhum arquivo para inserir
-@msg	`{file}` isn't a VectorCraft document, a PDF or a PDF-compatible .ai file	`{file}` não é um documento do VectorCraft, um PDF nem um arquivo .ai compatível com PDF
+@msg	`{file}` isn't a Nib document, a PDF or a PDF-compatible .ai file	`{file}` não é um documento do Nib, um PDF nem um arquivo .ai compatível com PDF
 @msg	no format to export to	nenhum formato para exportar
 @msg	no free recovery area	nenhuma área de recuperação livre
 @msg	no gradient stop or freeform point is selected	nenhuma parada de gradiente ou ponto de forma livre selecionado
@@ -4203,7 +4196,7 @@ axis	Both	Ambos
 @msg	the action set file is larger than 8 MiB	o arquivo de conjunto de ações tem mais de 8 MiB
 @msg	`{ID}`: the reference would be larger than {MAX_BYTES} bytes	`{ID}`: a referência teria mais de {MAX_BYTES} bytes
 @msg	the action set file holds more than 1,000 actions	o arquivo de conjunto de ações contém mais de 1.000 ações
-@msg	the action set file needs a later version of VectorCraft	o arquivo de conjunto de ações requer uma versão mais recente do VectorCraft
+@msg	the action set file needs a later version of Nib	o arquivo de conjunto de ações requer uma versão mais recente do Nib
 @msg	an action in the action set file has more than 10,000 steps	uma ação do arquivo de conjunto de ações tem mais de 10.000 etapas
 @msg	no such anchor	âncora inexistente
 @msg	no such artboard	prancheta inexistente
@@ -4235,8 +4228,8 @@ axis	Both	Ambos
 @msg	node {_1} is not text	o nó {_1} não é texto
 @msg	node {_1} is on a locked artboard	o nó {_1} está em uma prancheta bloqueada
 @msg	not a DXF drawing	não é um desenho DXF
-@msg	not a VectorCraft file: {0}	não é um arquivo do VectorCraft: {0}
-@msg	not a VectorCraft shortcut set (missing `overrides`)	não é um conjunto de atalhos do VectorCraft (falta `overrides`)
+@msg	not a Nib file: {0}	não é um arquivo do Nib: {0}
+@msg	not a Nib shortcut set (missing `overrides`)	não é um conjunto de atalhos do Nib (falta `overrides`)
 @msg	not a blend	não é uma mesclagem
 @msg	not a graphic style library (format `{_1}`)	não é uma biblioteca de estilos gráficos (formato `{_1}`)
 @msg	not a stored central record	não é um registro central armazenado
@@ -4457,7 +4450,7 @@ axis	Both	Ambos
 @msg	not a preferences file: no `format`	não é um arquivo de preferências: falta `format`
 @msg	not a preferences file: no `version`	não é um arquivo de preferências: falta `version`
 @msg	not a preferences file: no `prefs`	não é um arquivo de preferências: falta `prefs`
-@msg	the file was saved by a newer version of VectorCraft (version {v})	o arquivo foi salvo por uma versão mais recente do VectorCraft (versão {v})
+@msg	the file was saved by a newer version of Nib (version {v})	o arquivo foi salvo por uma versão mais recente do Nib (versão {v})
 @msg	the file holds no preferences	o arquivo não contém preferências
 @msg	`{key}` names a folder, which preferences files leave out	`{key}` indica uma pasta, e os arquivos de preferências não incluem pastas
 @msg	the file is larger than 1 MB	o arquivo tem mais de 1 MB
@@ -4559,11 +4552,11 @@ axis	Both	Ambos
 @msg	Sent to {_1}	Enviado para {_1}
 @msg	{_1} files	{_1} arquivos
 @msg	The graphics were lost and have been restarted	Os gráficos foram perdidos e reiniciados
-@msg	The graphics processor tried first couldn't show the window, so VectorCraft started again on {summary}	O processador gráfico tentado primeiro não conseguiu exibir a janela, então o VectorCraft reiniciou em {summary}
-@msg	The last start of VectorCraft ended on {name} before its window appeared, so it started on {summary}. To try that graphics processor again, change Preferences › Performance › Graphics Processor or start with WGPU_BACKEND set	A última inicialização do VectorCraft terminou em {name} antes de a janela aparecer, então o VectorCraft iniciou em {summary}. Para tentar esse processador gráfico novamente, altere Preferências › Desempenho › Processador Gráfico ou inicie com a variável WGPU_BACKEND definida
-@msg	The last start of VectorCraft ended while it listed the graphics processors, so it started on {summary} with OpenGL alone. To try the other graphics backends again, change Preferences › Performance › Graphics Processor or start with WGPU_BACKEND set	A última inicialização do VectorCraft terminou enquanto listava os processadores gráficos, então o VectorCraft iniciou em {summary} apenas com OpenGL. Para tentar as outras interfaces gráficas novamente, altere Preferências › Desempenho › Processador Gráfico ou inicie com a variável WGPU_BACKEND definida
-@msg	Loading VectorCraft…	Carregando o VectorCraft…
-@msg	VectorCraft failed to start: {e}	Falha ao iniciar o VectorCraft: {e}
+@msg	The graphics processor tried first couldn't show the window, so Nib started again on {summary}	O processador gráfico tentado primeiro não conseguiu exibir a janela, então o Nib reiniciou em {summary}
+@msg	The last start of Nib ended on {name} before its window appeared, so it started on {summary}. To try that graphics processor again, change Preferences › Performance › Graphics Processor or start with WGPU_BACKEND set	A última inicialização do Nib terminou em {name} antes de a janela aparecer, então o Nib iniciou em {summary}. Para tentar esse processador gráfico novamente, altere Preferências › Desempenho › Processador Gráfico ou inicie com a variável WGPU_BACKEND definida
+@msg	The last start of Nib ended while it listed the graphics processors, so it started on {summary} with OpenGL alone. To try the other graphics backends again, change Preferences › Performance › Graphics Processor or start with WGPU_BACKEND set	A última inicialização do Nib terminou enquanto listava os processadores gráficos, então o Nib iniciou em {summary} apenas com OpenGL. Para tentar as outras interfaces gráficas novamente, altere Preferências › Desempenho › Processador Gráfico ou inicie com a variável WGPU_BACKEND definida
+@msg	Loading Nib…	Carregando o Nib…
+@msg	Nib failed to start: {e}	Falha ao iniciar o Nib: {e}
 @msg	A browser with WebGPU or WebGL2 is required.	É necessário um navegador com WebGPU ou WebGL2.
 @msg	The graphics were lost and couldn't be restarted.	Os gráficos foram perdidos e não puderam ser reiniciados.
 @msg	Your unsaved changes are kept in this browser: reload the page to get them back.	Suas alterações não salvas ficam neste navegador: recarregue a página para recuperá-las.
@@ -4594,16 +4587,16 @@ axis	Both	Ambos
 @msg	it has more than {MAX_NODES} objects	tem mais de {MAX_NODES} objetos
 @msg	it has no layers	não tem camadas
 @msg	it has too many values in a row	tem valores demais em sequência
-@msg	it has {_1}, which VectorCraft doesn't read from it yet	tem {_1}, que o VectorCraft ainda não lê desse arquivo
+@msg	it has {_1}, which Nib doesn't read from it yet	tem {_1}, que o Nib ainda não lê desse arquivo
 @msg	its objects are nested too deeply	seus objetos estão aninhados com profundidade excessiva
 @msg	its section ending with `%{end}` doesn't end	sua seção que termina com `%{end}` não termina
-@msg	brushes VectorCraft can't read yet were left out of the Brushes panel ({_1})	os pincéis que o VectorCraft ainda não consegue ler ficaram fora do painel Pincéis ({_1})
+@msg	brushes Nib can't read yet were left out of the Brushes panel ({_1})	os pincéis que o Nib ainda não consegue ler ficaram fora do painel Pincéis ({_1})
 @msg	objects with several fills or strokes, variable-width strokes, effects or brushes came in as their drawn look ({_1}): their appearance isn't editable yet	objetos com vários preenchimentos ou traços, traços de largura variável, efeitos ou pincéis entraram com a aparência desenhada ({_1}): sua aparência ainda não é editável
 @msg	the name `{name}` isn't UTF-8 and was read as {label}: if it looks wrong, open the file with another legacyNameEncoding	o nome `{name}` não está em UTF-8 e foi lido como {label}: se parecer errado, abra o arquivo com outro legacyNameEncoding
 @msg	the name `{name}` isn't UTF-8, and parts of it aren't valid {label} either: open the file with another legacyNameEncoding	o nome `{name}` não está em UTF-8, e partes dele também não são {label} válido: abra o arquivo com outro legacyNameEncoding
 @msg	more names that aren't UTF-8 were read as {label} ({count})	mais nomes que não estão em UTF-8 foram lidos como {label} ({count})
 @msg	gradient “{name}” isn't defined in the file: a plain colour stands in for it	o gradiente “{name}” não está definido no arquivo: uma cor sólida o substitui
-@msg	an image VectorCraft can't read was left out	uma imagem que o VectorCraft não consegue ler foi omitida
+@msg	an image Nib can't read was left out	uma imagem que o Nib não consegue ler foi omitida
 @msg	graphs come in as plain art, without their data or settings	os gráficos são importados como arte comum, sem seus dados nem configurações
 @msg	an image whose data is cut short was left out	uma imagem com dados incompletos foi omitida
 @msg	an embedded image of {_1} × {_2} pixels was reduced to {_3} × {_4} pixels to keep the layers	uma imagem incorporada de {_1} × {_2} pixels foi reduzida para {_3} × {_4} pixels para manter as camadas
@@ -4611,13 +4604,13 @@ axis	Both	Ambos
 @msg	this file was saved without PDF compatibility, and its editing data can't be read ({why})	este arquivo foi salvo sem compatibilidade com PDF e seus dados de edição não podem ser lidos ({why})
 @msg	the PDF part couldn't be read ({_1}): the file opened from its editing data	não foi possível ler a parte PDF ({_1}): o arquivo foi aberto a partir dos seus dados de edição
 @msg	No fonts are missing in this document	Nenhuma fonte está ausente neste documento
-@msg	VectorCraft doesn't search other apps' or the system's folders: {path}	O VectorCraft não pesquisa pastas de outros aplicativos nem do sistema: {path}
-@msg	VectorCraft doesn't search the Shared or Public folder in Users: {path}	O VectorCraft não pesquisa a pasta Compartilhado ou Público em Usuários: {path}
+@msg	Nib doesn't search other apps' or the system's folders: {path}	O Nib não pesquisa pastas de outros aplicativos nem do sistema: {path}
+@msg	Nib doesn't search the Shared or Public folder in Users: {path}	O Nib não pesquisa a pasta Compartilhado ou Público em Usuários: {path}
 @msg	{path} is not a folder	{path} não é uma pasta
 @msg	the search couldn't start: try again in a moment	não foi possível iniciar a pesquisa: tente novamente em instantes
 @msg	searching a folder isn't available on the web	pesquisar em uma pasta não está disponível na web
 @msg	every search thread stopped on an internal error (please report this bug)	todos os processos de pesquisa pararam por um erro interno (relate este bug)
-@msg	VectorCraft's Fonts folder isn't set here: the desktop app and vectorcraft-cli set it	A pasta Fontes do VectorCraft não está definida aqui: o aplicativo para desktop e o vectorcraft-cli a definem
+@msg	Nib's Fonts folder isn't set here: the desktop app and nib-cli set it	A pasta Fontes do Nib não está definida aqui: o aplicativo para desktop e o nib-cli a definem
 @msg	choose the font files to add	escolha os arquivos de fonte a adicionar
 @msg	not a file	não é um arquivo
 @msg	not a font file	não é um arquivo de fonte
@@ -4746,7 +4739,7 @@ axis	Both	Ambos
 	Posterization	Posterização
 	Grain	Grão
 	Highlight Area	Área de realces
-@msg	the compressed file unpacks to more than VectorCraft reads ({_1} MB of document, {_2} MB per image)	o arquivo compactado se expande para mais do que o VectorCraft lê ({_1} MB de documento, {_2} MB por imagem)
+@msg	the compressed file unpacks to more than Nib reads ({_1} MB of document, {_2} MB per image)	o arquivo compactado se expande para mais do que o Nib lê ({_1} MB de documento, {_2} MB por imagem)
 @msg	the document is too large to save compressed ({0}): save it with Use Compression off	o documento é grande demais para ser salvo compactado ({0}): salve-o com Usar Compressão desativado
 @msg	the file stopped being read (please report this bug)	a leitura do arquivo foi interrompida (informe este erro)
 	Concentric Dividers:	Divisórias concêntricas:
@@ -4906,7 +4899,6 @@ axis	Both	Ambos
 	Delete Layer	Excluir Camada
 	Delete these {n} graphic styles?	Excluir estes {n} estilos gráficos?
 	Delete this {n} graphic style?	Excluir este {n} estilo gráfico?
-	Discord	Discord
 	Do Not Move	Não Mover
 	Document profile	Perfil do documento
 	Document Swatches	Amostras do Documento
@@ -4999,7 +4991,7 @@ axis	Both	Ambos
 	Keep:	Manter:
 	Import Shortcut Set	Importar Conjunto de Atalhos
 	Import Shortcut Set…	Importar Conjunto de Atalhos…
-	Each entry of the file is matched to a VectorCraft tool, command or panel. Check the matches and answer what is left.	Cada entrada do arquivo é associada a uma ferramenta, comando ou painel do VectorCraft. Confira as correspondências e resolva o que sobrar.
+	Each entry of the file is matched to a Nib tool, command or panel. Check the matches and answer what is left.	Cada entrada do arquivo é associada a uma ferramenta, comando ou painel do Nib. Confira as correspondências e resolva o que sobrar.
 	Keys	Teclas
 	The file writes keys and modifiers as codes. Check the proposed meanings and answer the codes that are not known yet.	O arquivo grava teclas e modificadores como códigos. Confira os significados propostos e informe os códigos que ainda não são conhecidos.
 	Click, then press the key this code stands for (Esc cancels)	Clique e depois pressione a tecla que este código representa (Esc cancela)
@@ -5009,7 +5001,7 @@ axis	Both	Ambos
 	not known yet	ainda não conhecido
 	Shortcuts	Atalhos
 	In the File	No Arquivo
-	In VectorCraft	No VectorCraft
+	In Nib	No Nib
 	Needs Attention Only	Somente os que Precisam de Atenção
 	Ready	Pronto
 	Needs a choice	Precisa de uma escolha
@@ -5018,7 +5010,7 @@ axis	Both	Ambos
 	Tools take a single key (optionally with Shift)	Ferramentas usam uma única tecla (opcionalmente com Shift)
 	A later row takes this shortcut	Uma linha posterior usa este atalho
 	Same item as a later row	Mesmo item de uma linha posterior
-	Start from VectorCraft Defaults	Começar com os Padrões do VectorCraft
+	Start from Nib Defaults	Começar com os Padrões do Nib
 	Add to the Current Shortcuts	Adicionar aos Atalhos Atuais
 	Remember My Choices	Lembrar Minhas Escolhas
 	{ready} of {total} ready	{ready} de {total} prontos
@@ -5113,7 +5105,6 @@ axis	Both	Ambos
 @plural	Packaged {n} file {note} in {folder}|Packaged {n} files {note} in {folder}	{n} arquivo empacotado em {folder} {note}|{n} arquivos empacotados em {folder} {note}
 	Page information	Informações da página
 	Paragraph Style	Estilo de Parágrafo
-	Part of ArtCraft. MIT OR Apache-2.0. Fonts: Source Sans 3, Inter, JetBrains Mono (OFL). Icons: Lucide (ISC) + VectorCraft.	Parte do ArtCraft. MIT OR Apache-2.0. Fontes: Source Sans 3, Inter, JetBrains Mono (OFL). Ícones: Lucide (ISC) + VectorCraft.
 	Perspective grid presets	Predefinidos de grade de perspectiva
 	Phone 390×844	Celular 390×844
 	Place onto a new locked, dimmed template layer below the current layer	Colocar em uma nova camada de modelo bloqueada e esmaecida abaixo da camada atual
@@ -5405,7 +5396,7 @@ axis	Both	Ambos
 @msg	there is no script engine named {name}	não há nenhum mecanismo de script chamado {name}
 @msg	Running a script	Executando um script
 @msg	Copied the script report	Relatório do script copiado
-@msg	This shortcut file is in a form VectorCraft can't read.	Este arquivo de atalhos está em um formato que o VectorCraft não consegue ler.
+@msg	This shortcut file is in a form Nib can't read.	Este arquivo de atalhos está em um formato que o Nib não consegue ler.
 @msg	axis must be "vertical", "horizontal" or an angle in degrees, not `{v}`	axis deve ser "vertical", "horizontal" ou um ângulo em graus, não `{v}`
 @msg	give corners of the path: anchors where its sides meet at an angle	informe os cantos do caminho: pontos de ancoragem onde os lados se encontram em ângulo
 @msg	give horizontal or vertical	informe horizontal ou vertical
@@ -5413,7 +5404,7 @@ axis	Both	Ambos
 @msg	object {id} is not a selected top-level object	o objeto {id} não é um objeto selecionado de nível superior
 @msg	{path}: not a file	{path}: não é um arquivo
 @msg	linked pictures show the low-resolution preview saved in the file until their files are found: relink them in the Links panel	as imagens vinculadas mostram a visualização de baixa resolução salva no arquivo até que seus arquivos sejam encontrados: revincule-as no painel Links
-@msg	linked type areas past VectorCraft's limits were left out	as áreas de texto encadeadas além dos limites do VectorCraft foram omitidas
+@msg	linked type areas past Nib's limits were left out	as áreas de texto encadeadas além dos limites do Nib foram omitidas
 @msg	the Line Breaking setting of legacy type was left out	a configuração de quebra de linha do texto no formato antigo foi omitida
 @msg	the Japanese layout rules of legacy type were left out	as regras de composição japonesa do texto no formato antigo foram omitidas
 @msg	type that changes writing direction inside a text object opens in the direction of its first character	o texto que muda de direção de escrita dentro de um objeto de texto abre na direção do primeiro caractere
@@ -5590,7 +5581,7 @@ effect	Regular	Regular
 	All shortcuts reset to defaults.	Todos os atalhos foram redefinidos para os padrões.
 	Imported. Press OK to keep the imported set.	Importado. Pressione OK para manter o conjunto importado.
 	⚠ {chord} was already used by {names} — it has been removed there.	Atenção: {chord} já era usado por {names}; foi removido de lá.
-	VectorCraft Defaults	Padrões do VectorCraft
+	Nib Defaults	Padrões do Nib
 @plural	{n} shortcut is assigned more than once|{n} shortcuts are assigned more than once	{n} atalho está atribuído mais de uma vez|{n} atalhos estão atribuídos mais de uma vez
 	Simulate prints overprints as Overprint Preview shows them; separations always keep them. A preset flattens transparency before printing (PostScript files always flatten it).	Simular imprime as sobreimpressões como a Visualização de Sobreimpressão as mostra; as separações sempre as mantêm. Um predefinido achata a transparência antes de imprimir (arquivos PostScript sempre a achatam).
 	Preserve	Preservar
@@ -5791,7 +5782,7 @@ file-filter	Preferences	Preferências
 file-filter	Export presets	Predefinições de exportação
 file-filter	SVG Compressed	SVG Compactado
 file-filter	PDF-compatible .ai	.ai compatível com PDF
-file-filter	VectorCraft Template	Modelo do VectorCraft
+file-filter	Nib Template	Modelo do Nib
 file-filter	Templates	Modelos
 diagnostics	render	renderização
 diagnostics	ui	interface
@@ -5833,7 +5824,7 @@ mark-style	Japanese	Japonesas
 	High Fidelity Photo	Foto de Alta Fidelidade
 	Image Trace (Make and Expand)	Rastreamento de Imagem (Criar e Expandir)
 	Joins:	Junções:
-	Keeps the document editable: VectorCraft reopens the PDF with nothing lost. For files you'll edit again.	Mantém o documento editável: o VectorCraft reabre o PDF sem perder nada. Para arquivos que você vai editar de novo.
+	Keeps the document editable: Nib reopens the PDF with nothing lost. For files you'll edit again.	Mantém o documento editável: o Nib reabre o PDF sem perder nada. Para arquivos que você vai editar de novo.
 	Lab Spot Colors	Cores Spot Lab
 	Lasso	Laço
 	Length:	Comprimento:
@@ -5872,9 +5863,9 @@ mark-style	Japanese	Japonesas
 	Touch Type	Texto de Toque
 	UTF-16 (Unicode)	UTF-16 (Unicode)
 	Variation	Variação
-	VectorCraft Default	Padrão do VectorCraft
+	Nib Default	Padrão do Nib
 	VectorCraft Generic CMYK (SWOP-like)	CMYK Genérico do VectorCraft (tipo SWOP)
-	VectorCraft Swatches (.vcswatches)	Amostras do VectorCraft (.vcswatches)
+	Nib Swatches (.vcswatches)	Amostras do Nib (.vcswatches)
 	Vertical Area Type	Texto de Área Vertical
 	Vertical Type	Texto Vertical
 	Vertical Type on a Path	Texto Vertical em um Caminho
@@ -7203,7 +7194,7 @@ swatch	[None]	[Nenhum]
 	[Press Quality]	[Qualidade para gráfica]
 swatch	[Registration]	[Registro]
 	[Smallest File Size]	[Menor tamanho de arquivo]
-	[VectorCraft Default]	[Padrão do VectorCraft]
+	[Nib Default]	[Padrão do Nib]
 swatch	Amber	Âmbar
 	Angular	Angular
 swatch	Aqua	Água
@@ -7234,7 +7225,7 @@ swatch	Copper	Cobre
 swatch	Cyan	Ciano
 swatch	Cyan Green	Verde-ciano
 	Differences from [Default]:	Diferenças em relação a [Padrão]:
-	Differences from VectorCraft Default:	Diferenças em relação ao padrão do VectorCraft:
+	Differences from Nib Default:	Diferenças em relação ao padrão do Nib:
 	Dimension Lines	Linhas de cota
 	Dimension Text	Texto da cota
 	Display	Exibição
@@ -7283,7 +7274,6 @@ shape	Open	Aberta
 swatch	Orange	Laranja
 swatch	Orange Red	Vermelho-alaranjado
 	Overlay Edge	Sobreposição de bordas
-	Part of ArtCraft. MIT OR Apache-2.0. Fonts: Source Sans 3, Inter, JetBrains Mono, Noto Sans SC (OFL). Icons: Lucide (ISC) + VectorCraft.	Parte do ArtCraft. MIT OR Apache-2.0. Fontes: Source Sans 3, Inter, JetBrains Mono, Noto Sans SC (OFL). Ícones: Lucide (ISC) + VectorCraft.
 	Path Length	Comprimento do caminho
 	PDF/X-1a:2001	PDF/X-1a:2001
 	PDF/X-3:2002	PDF/X-3:2002
@@ -7332,7 +7322,7 @@ swatch	Teal	Verde-azulado
 	Units & Scale	Unidades e escala
 @msg	Unknown dimension style	Estilo de cota desconhecido
 @msg	Unknown unit	Unidade desconhecida
-	VectorCraft Updates	Atualizações do VectorCraft
+	Nib Updates	Atualizações do Nib
 	Video 1920×1080	Vídeo 1920×1080
 	Video 3840×2160	Vídeo 3840×2160
 swatch	Violet	Violeta
@@ -7462,21 +7452,21 @@ swatch	Yellow Green	Verde-amarelado
 # Copy Troubleshooting Info
 	Copy Troubleshooting Info	Copiar informações de solução de problemas
 @msg	Copied the troubleshooting info	Informações de solução de problemas copiadas
-@msg	The last session of VectorCraft stopped responding before it closed. Help › Copy Troubleshooting Info copies the details for a bug report	A última sessão do VectorCraft parou de responder antes de fechar. Ajuda › Copiar informações de solução de problemas copia os detalhes para um relatório de bug
+@msg	The last session of Nib stopped responding before it closed. Help › Copy Troubleshooting Info copies the details for a bug report	A última sessão do Nib parou de responder antes de fechar. Ajuda › Copiar informações de solução de problemas copia os detalhes para um relatório de bug
 
 # Safe Mode
 	Safe Mode…	Modo de Segurança…
 	Safe Mode	Modo de Segurança
 	Help › Safe Mode…	Ajuda › Modo de Segurança…
 	Enable on Re-launch	Ativar na Próxima Inicialização
-	The last launch of VectorCraft stopped while the plug-in {name} was loading. It may not be what stopped it.	A última inicialização do VectorCraft parou enquanto o plug-in {name} era carregado. Ele pode não ser a causa.
+	The last launch of Nib stopped while the plug-in {name} was loading. It may not be what stopped it.	A última inicialização do Nib parou enquanto o plug-in {name} era carregado. Ele pode não ser a causa.
 	Disable and Continue	Desativar e Continuar
 	Start Normally	Iniciar Normalmente
 	Start in Safe Mode	Iniciar no Modo de Segurança
-	VectorCraft is in Safe Mode: no plug-ins load or run until it starts normally.	O VectorCraft está no Modo de Segurança: nenhum plug-in é carregado ou executado até que ele seja iniciado normalmente.
+	Nib is in Safe Mode: no plug-ins load or run until it starts normally.	O Nib está no Modo de Segurança: nenhum plug-in é carregado ou executado até que ele seja iniciado normalmente.
 	Disabled plug-ins	Plug-ins desativados
 	No plug-ins are disabled.	Nenhum plug-in está desativado.
-@msg	Safe Mode is on: plug-ins don't load or run until VectorCraft starts normally	O Modo de Segurança está ativado: os plug-ins não são carregados nem executados até que o VectorCraft seja iniciado normalmente
+@msg	Safe Mode is on: plug-ins don't load or run until Nib starts normally	O Modo de Segurança está ativado: os plug-ins não são carregados nem executados até que o Nib seja iniciado normalmente
 @msg	give `id` or `file` (see plugin.safeMode)	informe `id` ou `file` (veja plugin.safeMode)
 @msg	that plug-in isn't disabled (see plugin.safeMode)	esse plug-in não está desativado (veja plugin.safeMode)
 @msg	Couldn't save the disabled plug-ins for the next launch	Não foi possível salvar os plug-ins desativados para a próxima inicialização
@@ -7614,7 +7604,7 @@ swatch	Yellow Green	Verde-amarelado
 @msg	JSON.stringify cannot write a structure that contains itself	JSON.stringify não pode gravar uma estrutura que contém a si mesma
 @msg	Join: a subpath went missing	Unir: um subcaminho deixou de existir
 @msg	Line Gap must be a number	O Espaço entre Linhas deve ser um número
-@msg	Lock Workspace is not available in VectorCraft	Bloquear Espaço de Trabalho não está disponível no VectorCraft
+@msg	Lock Workspace is not available in Nib	Bloquear Espaço de Trabalho não está disponível no Nib
 @msg	Move Panel to New Window is not available: floating panels stay in the main window	Mover Painel para Nova Janela não está disponível: os painéis flutuantes ficam na janela principal
 @msg	Namespace.prototype.toString needs a Namespace	Namespace.prototype.toString precisa de um Namespace
 @msg	New Document profiles need the preferences folder, which this run doesn't have	Os perfis de Novo Documento precisam da pasta de preferências, que esta execução não tem
@@ -7882,7 +7872,7 @@ swatch	Yellow Green	Verde-amarelado
 @msg	`{base}` is not in the DCS file's folder	`{base}` não está na pasta do arquivo DCS
 @msg	`{file}` has no art to place	`{file}` não tem arte para colocar
 @msg	`{file}` is over {_1} MB	`{file}` tem mais de {_1} MB
-@msg	`{f}` belongs to a VectorCraft that is running	`{f}` pertence a um VectorCraft em execução
+@msg	`{f}` belongs to a Nib that is running	`{f}` pertence a um Nib em execução
 @msg	`{f}` is the copy of a document open now	`{f}` é a cópia de um documento aberto agora
 @msg	`{id}` is no writable format (see document.formats)	`{id}` não é um formato gravável (veja document.formats)
 @msg	`{id}` isn't a loaded library	`{id}` não é uma biblioteca carregada
@@ -8148,8 +8138,8 @@ swatch	Yellow Green	Verde-amarelado
 @msg	can't linearise the PDF: {why}	não é possível linearizar o PDF: {why}
 @msg	can't open `{_1}`: {_2}	não é possível abrir `{_1}`: {_2}
 @msg	can't open `{_1}`: {e}	não é possível abrir `{_1}`: {e}
-@msg	can't open `{name}`: not a format VectorCraft reads (see document.formats)	não é possível abrir `{name}`: não é um formato que o VectorCraft lê (veja document.formats)
-@msg	can't place `{name}`: not a format VectorCraft reads (see document.formats)	não é possível colocar `{name}`: não é um formato que o VectorCraft lê (veja document.formats)
+@msg	can't open `{name}`: not a format Nib reads (see document.formats)	não é possível abrir `{name}`: não é um formato que o Nib lê (veja document.formats)
+@msg	can't place `{name}`: not a format Nib reads (see document.formats)	não é possível colocar `{name}`: não é um formato que o Nib lê (veja document.formats)
 @msg	can't read back the written PDF: {e}	não é possível reler o PDF gravado: {e}
 @msg	can't read this Word document: {why}	não é possível ler este documento do Word: {why}
 @msg	can't write .{e} images: use .png, .jpg, .gif, .webp, .tif or .bmp	não é possível gravar imagens .{e}: use .png, .jpg, .gif, .webp, .tif ou .bmp
@@ -8685,7 +8675,7 @@ swatch	Yellow Green	Verde-amarelado
 @msg	not a stored or deflated central record	não é um registro central armazenado nem compactado com deflate
 @msg	not a valid SVGZ file: {e}	não é um arquivo SVGZ válido: {e}
 @msg	not an action set: the text doesn't start with /version and a number	não é um conjunto de ações: o texto não começa com /version e um número
-@msg	not an image VectorCraft reads (see document.formats)	não é uma imagem que o VectorCraft lê (veja document.formats)
+@msg	not an image Nib reads (see document.formats)	não é uma imagem que o Nib lê (veja document.formats)
 @msg	not area type (text in a frame) outside perspective	não é texto de área (texto em uma moldura) fora da perspectiva
 @msg	not editing an opacity mask	nenhuma máscara de opacidade está em edição
 @msg	not type on a path outside perspective	não é texto em um caminho fora da perspectiva
@@ -8960,8 +8950,8 @@ swatch	Yellow Green	Verde-amarelado
 @msg	the Word document has too much text to place as type (at most {_1} MB)	o documento do Word tem texto demais para ser colocado como texto (no máximo {_1} MB)
 @msg	the Word document is encrypted or protected with a password; save it without one to place it	o documento do Word está criptografado ou protegido por senha; salve-o sem senha para colocá-lo
 @msg	the Word document is too large to place (its {name} stream holds more than {_1} MB)	o documento do Word é grande demais para colocar (o fluxo {name} dele contém mais de {_1} MB)
-@msg	the Word document was last saved with fast save, which VectorCraft doesn't read; save it again with fast save turned off	o documento do Word foi salvo pela última vez com salvamento rápido, que o VectorCraft não lê; salve-o novamente com o salvamento rápido desativado
-@msg	the Word document was saved by Word 6.0 or Word 95, which VectorCraft doesn't read; save it as a Word 97-2003 document	o documento do Word foi salvo pelo Word 6.0 ou pelo Word 95, que o VectorCraft não lê; salve-o como um documento do Word 97-2003
+@msg	the Word document was last saved with fast save, which Nib doesn't read; save it again with fast save turned off	o documento do Word foi salvo pela última vez com salvamento rápido, que o Nib não lê; salve-o novamente com o salvamento rápido desativado
+@msg	the Word document was saved by Word 6.0 or Word 95, which Nib doesn't read; save it as a Word 97-2003 document	o documento do Word foi salvo pelo Word 6.0 ou pelo Word 95, que o Nib não lê; salve-o como um documento do Word 97-2003
 @msg	the Word document's text is made of more than {MAX_PIECES} pieces, too many to place	o texto do documento do Word é formado por mais de {MAX_PIECES} partes, demais para colocar
 @msg	the XML operation needs an XML or XMLList value	a operação XML precisa de um valor XML ou XMLList
 @msg	the XPath expression does not evaluate to a node-set	a expressão XPath não resulta em um conjunto de nós
@@ -9384,3 +9374,11 @@ swatch	Yellow Green	Verde-amarelado
 @msg	turn on at least one side	ative pelo menos um lado
 @msg	with no hem and no grommets there is nothing to mark	sem bainha e sem ilhoses não há nada para marcar
 @msg	{saving} failed: {e}	{saving} falhou: {e}
+	Report an Issue	Relatar um problema
+	Report an issue	Relatar um problema
+	Report a problem or suggest an idea on Nib's GitHub	Relate um problema ou sugira uma ideia no GitHub do Nib
+	Nib Releases	Versões do Nib
+	VectorCraft (upstream project)	VectorCraft (projeto original)
+	Nib is based on VectorCraft by the ArtCraft team and the VectorCraft contributors (MIT OR Apache-2.0)	O Nib é baseado no VectorCraft, da equipe ArtCraft e dos colaboradores do VectorCraft (MIT OR Apache-2.0)
+	Fonts: Source Sans 3, Inter, JetBrains Mono (OFL). Icons: Lucide (ISC) + VectorCraft.	Fontes: Source Sans 3, Inter, JetBrains Mono (OFL). Ícones: Lucide (ISC) + VectorCraft.
+	Open-source vector illustration in pure Rust.	Ilustração vetorial de código aberto em Rust puro.

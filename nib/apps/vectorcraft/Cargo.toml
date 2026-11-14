@@ -4,7 +4,13 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish = false
-default-run = "vectorcraft"
+default-run = "nib"
+autobins = false
+
+# The shipped binary is `nib` (the package keeps VectorCraft's name so upstream changes merge).
+[[bin]]
+name = "nib"
+path = "src/main.rs"
 
 [lints]
 workspace = true
@@ -18,6 +24,7 @@ accessibility = ["eframe/accesskit"]
 vectorcraft-engine = { workspace = true, features = ["bundled-fonts", "heif"] }
 vectorcraft-ui-egui = { workspace = true }
 vectorcraft-text = { workspace = true }
+vectorcraft-format = { workspace = true }
 # Shared across the Craft suite: decides who draws the window frame per desktop (compositor vs app)
 # so VectorCraft matches the rest on Linux. `egui` adds `craft_window::decorate`. See #217.
 craft-window = { workspace = true }
@@ -38,7 +45,6 @@ winit = { version = "0.30", default-features = false }
 craft-print = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
-craft-update = { workspace = true }
 clipboard-win = { workspace = true }
 # Which GPU drives which display (EnumDisplayDevices, src/gpu.rs), so the window is drawn on the
 # GPU that shows it: drawing on a GPU without a monitor reset the display driver. Safe wrappers over

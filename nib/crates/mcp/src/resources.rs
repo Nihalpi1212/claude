@@ -314,7 +314,7 @@ mod tests {
         assert_eq!(read.mime, MARKDOWN);
         let direct = b.call("engine.execute", json!({"command": "engine.apiReference", "params": {}})).unwrap();
         assert_eq!(read.text, direct["markdown"].as_str().unwrap());
-        assert!(read.text.starts_with("# VectorCraft command API reference\n"), "{}", read.text);
+        assert!(read.text.starts_with("# Nib command API reference\n"), "{}", read.text);
         assert_eq!(read_contents(b.as_mut(), REFERENCE_URI).unwrap(), read);
         let commands = read_contents(b.as_mut(), COMMANDS_URI).unwrap();
         assert_eq!(commands.mime, JSON);

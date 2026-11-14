@@ -166,7 +166,7 @@ pub(super) const STOPPED_SPEC: DialogSpec = DialogSpec {
         let t = Tokens::get(ui.ctx());
         let name = item_of(d.fields.get("item").unwrap_or(&Value::Null)).label();
         let text = crate::i18n::fmt(
-            tl!("The last launch of VectorCraft stopped while the plug-in {name} was loading. It may not be what stopped it."),
+            tl!("The last launch of Nib stopped while the plug-in {name} was loading. It may not be what stopped it."),
             &[("name", &name)],
         );
         ui.label(egui::RichText::new(text).color(t.text));
@@ -186,7 +186,7 @@ pub(super) const SPEC: DialogSpec = DialogSpec {
     body: |_, ui, d| {
         let t = Tokens::get(ui.ctx());
         if safe_mode::active() {
-            ui.label(egui::RichText::new(tl!("VectorCraft is in Safe Mode: no plug-ins load or run until it starts normally.")).color(t.text));
+            ui.label(egui::RichText::new(tl!("Nib is in Safe Mode: no plug-ins load or run until it starts normally.")).color(t.text));
             ui.add_space(8.0);
         }
         ui.label(egui::RichText::new(tl!("Disabled plug-ins")).color(t.text_dim));

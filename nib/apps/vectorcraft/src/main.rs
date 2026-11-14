@@ -140,9 +140,9 @@ struct App {
 
 /// `vectorcraft --help`. Headless work (convert, run, MCP) is `vectorcraft-cli`'s.
 const USAGE: &str = "\
-Usage: vectorcraft [options] [files…]
+Usage: nib [options] [files…]
 
-Opens the VectorCraft desktop app with the given files.
+Opens the Nib desktop app with the given files.
 
 Options:
   --control <port>               Start the localhost JSON-lines control server on <port>
@@ -153,10 +153,10 @@ Options:
                                  (may be given more than once)
   --in-window-menus              Keep the menus inside the window on macOS
                                  (or VECTORCRAFT_IN_WINDOW_MENUS=1)
-  --new-instance                 Open the files in a new window even when VectorCraft
+  --new-instance                 Open the files in a new window even when Nib
                                  already runs (Windows and Linux)
   --safe-mode                    Start without plug-ins: none loads or runs until
-                                 VectorCraft starts normally (Help › Safe Mode); the
+                                 Nib starts normally (Help › Safe Mode); the
                                  files open in a new window, as with --new-instance
   --version                     Print the version and exit
   -h, --help                     Print this help and exit
@@ -164,8 +164,8 @@ Options:
 
 Any other argument starting with '-' is an error.
 
-Without a window (converting, scripting, the MCP server), use vectorcraft-cli:
-  vectorcraft-cli --help
+Without a window (converting, scripting, the MCP server), use nib-cli:
+  nib-cli --help
 ";
 
 /// The command line's options other than the automation roots and the control port.
@@ -200,7 +200,7 @@ fn read_command_line(
             Ok(true) => continue,
             Ok(false) => {}
             Err(e) => {
-                eprintln!("vectorcraft: {e}");
+                eprintln!("nib: {e}");
                 return Err(std::process::ExitCode::FAILURE);
             }
         }
@@ -209,7 +209,7 @@ fn read_command_line(
             "--new-instance" => new_instance = true,
             "--safe-mode" => safe_mode = true,
             "--version" => {
-                println!("vectorcraft {}", env!("CARGO_PKG_VERSION"));
+                println!("{}", vectorcraft_format::brand::version_line());
                 return Err(std::process::ExitCode::SUCCESS);
             }
             // Before anything starts, like `--version`: from a terminal or an agent's shell the app
@@ -232,18 +232,15 @@ fn read_command_line(
         }
     }
     if let Some(a) = unknown {
-        eprintln!("vectorcraft: unknown option {a}; see vectorcraft --help, or put -- before a file whose name starts with '-'");
+        eprintln!("nib: unknown option {a}; see nib --help, or put -- before a file whose name starts with '-'");
         return Err(std::process::ExitCode::FAILURE);
     }
     Ok(CommandLine { files, in_window_menus, new_instance, safe_mode })
 }
 
 fn main() -> std::process::ExitCode {
-    // Windows: the update helper is a copy of this program started with `--finish-update`.
-    #[cfg(windows)]
-    if let Some(result) = craft_update::self_update::finish(&vectorcraft_ui_egui::UPDATE_APP, &std::env::args_os().skip(1).collect::<Vec<_>>()) {
-        std::process::exit(i32::from(result.is_err()));
-    }
+    // Nib never updates itself: VectorCraft's Windows update helper (`--finish-update`) is not
+    // wired in (see docs/FORK.md), so that flag is an unknown option like any other.
     // Before any thread starts: the pointer must find a cursor theme on Wayland (#2450).
     #[cfg(target_os = "linux")]
     cursor_theme::apply();
@@ -265,7 +262,7 @@ fn main() -> std::process::ExitCode {
         None => match automation_args::env_control_port(std::env::var_os("VECTORCRAFT_CONTROL_PORT")) {
             Ok(port) => port,
             Err(e) => {
-                eprintln!("vectorcraft: {e}");
+                eprintln!("nib: {e}");
                 return std::process::ExitCode::FAILURE;
             }
         },
@@ -299,7 +296,7 @@ fn main() -> std::process::ExitCode {
     if let Some(logger) = logger {
         match log_dir().filter(|_| prefs_enabled()) {
             Some(dir) => match logger.attach_dir(&dir) {
-                Ok(path) => log::info!("VectorCraft {}, log file {}", env!("CARGO_PKG_VERSION"), path.display()),
+                Ok(path) => log::info!("{}, log file {}", vectorcraft_format::brand::version_line(), path.display()),
                 // Standard error only by now (`attach_dir` gave up on the file); unlike `eprintln!`, never panics.
                 Err(e) => log::warn!("no log file: {e}"),
             },
@@ -325,7 +322,7 @@ fn main() -> std::process::ExitCode {
             Ok(roots) => roots,
             Err(e) => {
                 log::error!("{e}");
-                eprintln!("vectorcraft: {e}");
+                eprintln!("nib: {e}");
                 return std::process::ExitCode::FAILURE;
             }
         }
@@ -474,11 +471,11 @@ fn main() -> std::process::ExitCode {
     let run = |options: eframe::NativeOptions, app_creator: eframe::AppCreator<'_>| {
         #[cfg(target_os = "linux")]
         {
-            linux_stylus::run_native("VectorCraft", options, app_creator)
+            linux_stylus::run_native("Nib", options, app_creator)
         }
         #[cfg(not(target_os = "linux"))]
         {
-            eframe::run_native("VectorCraft", options, app_creator)
+            eframe::run_native("Nib", options, app_creator)
         }
     };
     let outcome = vectorcraft_engine::guard::catch_panic(|| {
@@ -500,7 +497,7 @@ fn main() -> std::process::ExitCode {
                 prefs_dir::attach_scripts_dir(&mut session);
                 prefs_dir::attach_new_doc_profiles(&mut session);
                 let mut app = VectorcraftApp::new(session, services(cc.winit_window().cloned(), cc.egui_ctx.clone()));
-                app.set_startup_update_check(true);
+                // No update check at start: Nib makes no network request on its own.
                 load_prefs(&mut app, saved);
                 safe_mode::after_start(&mut app, stopped);
                 // The saved PDF presets live in their own folder (also read by vectorcraft-cli),
@@ -556,16 +553,14 @@ fn main() -> std::process::ExitCode {
                         } else {
                             ""
                         };
-                        app.status(format!(
-                            "The graphics processor tried first couldn't show the window, so VectorCraft started again on {summary}{hint}"
-                        ));
+                        app.status(format!("The graphics processor tried first couldn't show the window, so Nib started again on {summary}{hint}"));
                     } else if let Some(crash) = &crash {
                         app.status(match crash {
                             gpu::Crash::Adapter { name, .. } => format!(
-                                "The last start of VectorCraft ended on {name} before its window appeared, so it started on {summary}. To try that graphics processor again, change Preferences › Performance › Graphics Processor or start with WGPU_BACKEND set"
+                                "The last start of Nib ended on {name} before its window appeared, so it started on {summary}. To try that graphics processor again, change Preferences › Performance › Graphics Processor or start with WGPU_BACKEND set"
                             ),
                             gpu::Crash::Listing => format!(
-                                "The last start of VectorCraft ended while it listed the graphics processors, so it started on {summary} with OpenGL alone. To try the other graphics backends again, change Preferences › Performance › Graphics Processor or start with WGPU_BACKEND set"
+                                "The last start of Nib ended while it listed the graphics processors, so it started on {summary} with OpenGL alone. To try the other graphics backends again, change Preferences › Performance › Graphics Processor or start with WGPU_BACKEND set"
                             ),
                         });
                     }
@@ -670,7 +665,7 @@ fn main() -> std::process::ExitCode {
     match outcome {
         Ok(()) => std::process::ExitCode::SUCCESS,
         Err(e) => {
-            log::error!("VectorCraft stopped: {e}");
+            log::error!("Nib stopped: {e}");
             std::process::ExitCode::FAILURE
         }
     }

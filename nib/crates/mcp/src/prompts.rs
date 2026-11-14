@@ -156,7 +156,7 @@ pub static PROMPTS: &[PromptDef] = &[
             },
         ],
         text: "\
-Design a poster in VectorCraft.
+Design a poster in Nib.
 
 Brief: {brief}
 Palette: {palette}
@@ -208,7 +208,7 @@ rasterise unless the brief asks for it.",
             },
         ],
         text: "\
-Draw a set of {count} icons of {subject} in VectorCraft, {detail}.
+Draw a set of {count} icons of {subject} in Nib, {detail}.
 
 Coordinates are points in document space (y down, origin at the first artboard's
 top-left).
@@ -251,7 +251,7 @@ Return the ids of the icons in a grid, and leave them as separate objects on one
             },
         ],
         text: "\
-Recolour the current selection in VectorCraft with {palette}, using the `{method}` recolour method.
+Recolour the current selection in Nib with {palette}, using the `{method}` recolour method.
 
 Method:
 1. inspect_document to see what is selected and what colours it actually uses.
@@ -289,7 +289,7 @@ One undo step covers the whole change; gradients and linked swatches stay linked
             },
         ],
         text: "\
-Trace the image at {path} in VectorCraft with the \"{preset}\" preset, then style the result
+Trace the image at {path} in Nib with the \"{preset}\" preset, then style the result
 with the {effect} effect.
 
 Method:
@@ -350,7 +350,7 @@ The trace is real geometry: every traced shape stays selectable and editable.",
             },
         ],
         text: "\
-Export the document in VectorCraft to {formats}, into {directory}, at {scale} pixels per
+Export the document in Nib to {formats}, into {directory}, at {scale} pixels per
 point for the raster formats.
 
 Method:
@@ -395,7 +395,7 @@ and text stays text unless you pass outlineText.",
             },
         ],
         text: "\
-Check spelling in VectorCraft for {scope}, then {action}.
+Check spelling in Nib for {scope}, then {action}.
 
 Method:
 1. inspect_document to see the selection and type objects.
@@ -428,7 +428,7 @@ Desktop-only Auto Spell Check is edit.autoSpellCheck (ui: true); use --connect f
             },
         ],
         text: "\
-Set up {kind} variables in VectorCraft from {source}.
+Set up {kind} variables in Nib from {source}.
 
 Method:
 1. inspect_document and variable.list (or the Variables panel commands) to see what exists.
@@ -458,7 +458,7 @@ Method:
             ]),
         }],
         text: "\
-Perform this Path Tools task in VectorCraft: {task}.
+Perform this Path Tools task in Nib: {task}.
 
 Method:
 1. command_list with filter \"addon.pathtools\" for the command ids (extend, close, addPoints,

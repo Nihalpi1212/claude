@@ -27,7 +27,7 @@ pub fn menu_bar(app: &mut VectorcraftApp, ui: &mut egui::Ui) -> f32 {
     let tree = menu_tree_named(app.session.prefs.font_names_in_english);
     // No application menu in the window (as in Illustrator): the bar starts at File on every
     // platform. The VectorCraft menu stays in the tree: the native Mac bar takes it from there.
-    let tree: Vec<(&str, Vec<Item>)> = tree.into_iter().filter(|(title, _)| *title != "VectorCraft").collect();
+    let tree: Vec<(&str, Vec<Item>)> = tree.into_iter().filter(|(title, _)| *title != "Nib").collect();
     // A menu bar for its layout and menu-button style, but the titles use `Popup::menu` directly:
     // egui 0.37's `MenuButton` opens the title under a resting pointer while another menu is open,
     // and the app switches titles on movement only (`switch_on_hover`, the native behaviour).
@@ -197,6 +197,10 @@ fn render_row(app: &VectorcraftApp, ui: &mut egui::Ui, row: &Row, checks: bool, 
 
 /// Why a dimmed menu item is dimmed, for the ones that say.
 fn disabled_hint(app: &VectorcraftApp, id: &str) -> Option<&'static str> {
+    #[cfg(not(target_arch = "wasm32"))]
+    if id.starts_with("ai.") {
+        return crate::ai::disabled_hint(app, id);
+    }
     match id {
         "ui.expandDialog" if vectorcraft_engine::cmd::expand::has_appearance(&app.session) => Some(crate::dialogs::expand::appearance_first()),
         _ => None,

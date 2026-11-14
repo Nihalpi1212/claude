@@ -220,7 +220,7 @@ fn temp_folder() -> Result<String, String> {
 /// The name of a folder that a preview made in the temporary folder, beside a `VectorCraft Save
 /// for Web` it couldn't use, before the process id and the count.
 #[cfg(not(target_arch = "wasm32"))]
-const BESIDE: &str = "VectorCraft Save for Web ";
+const BESIDE: &str = "Nib Save for Web ";
 
 /// A new folder for a browser preview in the temporary folder `tmp`: inside `VectorCraft Save for
 /// Web` ([`preview_folder`]), or, when that folder can't be used, directly in `tmp`, named
@@ -230,8 +230,8 @@ const BESIDE: &str = "VectorCraft Save for Web ";
 #[cfg(not(target_arch = "wasm32"))]
 pub(super) fn preview_folder_in(tmp: &std::path::Path, keep: std::time::Duration) -> Result<String, String> {
     remove_old(tmp, BESIDE, keep);
-    preview_folder(&tmp.join("VectorCraft Save for Web"), keep).or_else(|e| {
-        log::warn!("vectorcraft: Preview in Browser can't use {e}, so the preview goes to a new folder of its own");
+    preview_folder(&tmp.join("Nib Save for Web"), keep).or_else(|e| {
+        log::warn!("nib: Preview in Browser can't use {e}, so the preview goes to a new folder of its own");
         new_folder(tmp, BESIDE)
     })
 }

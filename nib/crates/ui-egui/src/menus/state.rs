@@ -4,6 +4,10 @@ use super::{Brightness, Value, VectorcraftApp};
 
 /// Checked state for toggle items.
 pub fn checked(app: &VectorcraftApp, id: &str, p: &Value) -> Option<bool> {
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(on) = crate::ai::checked(app, id) {
+        return Some(on);
+    }
     if id == "app.language" {
         let lang = p.get("lang").and_then(Value::as_str).unwrap_or("");
         let pref = app.session.prefs.interface_language.as_str();
@@ -210,6 +214,10 @@ pub fn enabled(app: &VectorcraftApp, id: &str) -> bool {
         && let Some(facts) = crate::panels::artboards::open_menu_facts(app)
     {
         return facts.any_empty;
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(on) = crate::ai::enabled(app, id) {
+        return on;
     }
     if let Some(c) = vectorcraft_engine::find_command(id) {
         // The system clipboard's contents can be pasted with an empty internal clipboard.

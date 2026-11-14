@@ -27,9 +27,7 @@ pub(super) fn need_ui(b: &dyn Backend, tool: &str) -> Result<(), String> {
     if b.has_ui() {
         Ok(())
     } else {
-        Err(format!(
-            "`{tool}` needs the desktop app: run `vectorcraft --control 7979` and start the server with `vectorcraft-cli mcp --connect 127.0.0.1:7979`"
-        ))
+        Err(format!("`{tool}` needs the desktop app: run `nib --control 7979` and start the server with `nib-cli mcp --connect 127.0.0.1:7979`"))
     }
 }
 

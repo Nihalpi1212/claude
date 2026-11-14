@@ -128,7 +128,7 @@ fn send(method: &str, params: Value) -> Pin<Box<dyn Future<Output = Value>>> {
     let ticket = req.ticket();
     let sent = TX.with(|t| t.borrow().as_ref().is_some_and(|tx| tx.send(req).is_ok()));
     if !sent {
-        return Box::pin(async { json!({"ok": false, "error": "VectorCraft is not running yet"}) });
+        return Box::pin(async { json!({"ok": false, "error": "Nib is not running yet"}) });
     }
     repaint();
     let mut waiting = Waiting { reply: rx, ticket, answered: false };

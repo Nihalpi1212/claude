@@ -1,30 +1,31 @@
-//! Community and project links: the Discord button (header, About, Home) and the link list.
-//! Icons are Lucide's (ISC); Discord's own logo is a trademark, so the button uses a chat icon
-//! on Discord's colour with the word "Discord".
+//! Project links: the Report an Issue button (About, Home) and the link list (Nib's repository and
+//! releases, and the upstream VectorCraft project in About). Icons are Lucide's (ISC). The
+//! function names are VectorCraft's (`discord_*`), kept so upstream changes merge; the button now
+//! opens Nib's issue tracker (`help.discord`, see docs/FORK.md).
 
 use egui::{Color32, CornerRadius, Sense, Ui, vec2};
 
 use crate::theme::{self, Tokens};
 use crate::{VectorcraftApp, icons};
 
-/// Discord's brand colour (a colour, not a logo).
-const DISCORD: Color32 = Color32::from_rgb(0x58, 0x65, 0xF2);
+/// The compact button's icon colour: Nib's accent (the icon's aqua).
+const DISCORD: Color32 = Color32::from_rgb(0x2a, 0xa8, 0x9a);
 
-/// The Discord button's label, height and width.
+/// The Report an Issue button's label, height and width.
 fn discord_layout(ui: &Ui, large: bool) -> (std::sync::Arc<egui::Galley>, f32, f32) {
     let (h, font, label) =
-        if large { (36.0, theme::semibold(14.0), tl!("Join our Discord")) } else { (24.0, egui::FontId::proportional(12.0), "Discord") };
+        if large { (36.0, theme::semibold(14.0), tl!("Report an issue")) } else { (24.0, egui::FontId::proportional(12.0), tl!("Report an Issue")) };
     let galley = ui.painter().layout_no_wrap(label.to_string(), font, Color32::PLACEHOLDER);
     let w = galley.size().x + h * 0.55 + h * 0.9;
     (galley, h, w)
 }
 
-/// The Discord button's width (the app bar drops it when space runs out).
+/// The Report an Issue button's width (the app bar drops it when space runs out).
 pub fn discord_width(ui: &Ui, large: bool) -> f32 {
     discord_layout(ui, large).2
 }
 
-/// The Discord button: compact and quiet for the app bar, large for About / Home.
+/// The Report an Issue button: compact and quiet for the app bar, large for About / Home.
 pub fn discord_button(app: &mut VectorcraftApp, ui: &mut Ui, large: bool) -> egui::Response {
     let (galley, h, w) = discord_layout(ui, large);
     let icon = h * 0.55;
@@ -40,13 +41,13 @@ pub fn discord_button(app: &mut VectorcraftApp, ui: &mut Ui, large: bool) -> egu
         icons::paint(ui, "message-circle", ir, Color32::WHITE);
         ui.painter().galley(egui::pos2(ir.right() + h * 0.2, at.y), galley, Color32::WHITE);
     } else {
-        // In the app bar it stays quiet: a soft button with Discord's colour on its icon alone.
+        // In the app bar it stays quiet: a soft button with the accent on its icon alone.
         let t = Tokens::get(ui.ctx());
         ui.painter().rect_filled(r, CornerRadius::same(6), if resp.hovered() { t.hover } else { t.button });
         icons::paint(ui, "message-circle", ir, DISCORD);
         ui.painter().galley(egui::pos2(ir.right() + h * 0.2, at.y), galley, if resp.hovered() { t.text_strong } else { t.text });
     }
-    let resp = resp.on_hover_text(tl!("Join the ArtCraft community on Discord (discord.gg/artcraft)"));
+    let resp = resp.on_hover_text(tl!("Report a problem or suggest an idea on Nib's GitHub"));
     if resp.clicked() {
         app.open_link("help.discord");
     }
@@ -72,13 +73,13 @@ fn link(app: &mut VectorcraftApp, ui: &mut Ui, icon: &str, label: &str, cmd: &st
     }
 }
 
-/// The Discord button and the website / app page / GitHub links.
+/// The Report an Issue button and the links, with the upstream project (About).
 pub fn links(app: &mut VectorcraftApp, ui: &mut Ui) {
     links_in(app, ui, false);
 }
 
-/// [`links`] for a centred column (the Home screen's, as PhotoCraft's, #4684): the Discord button
-/// and the links, each in the middle.
+/// [`links`] for a centred column (the Home screen's, #4684): the Report an Issue button and Nib's
+/// links, each in the middle.
 pub fn links_centered(app: &mut VectorcraftApp, ui: &mut Ui) {
     links_in(app, ui, true);
 }
@@ -88,9 +89,12 @@ fn links_in(app: &mut VectorcraftApp, ui: &mut Ui, centered: bool) {
     ui.add_space(8.0);
     let l = app.session.execute("help.links", &serde_json::json!({})).unwrap_or_default();
     let s = |k: &str| l[k].as_str().unwrap_or("").to_string();
-    link(app, ui, "globe", tl!("ArtCraft website"), "help.website", &s("website"), centered);
-    link(app, ui, "external-link", tl!("VectorCraft on getartcraft.com"), "help.appPage", &s("appPage"), centered);
     link(app, ui, "git-branch", tl!("Source code on GitHub"), "help.github", &s("github"), centered);
+    link(app, ui, "external-link", tl!("Nib Releases"), "help.appPage", &s("appPage"), centered);
+    // The upstream project, in About (the Home screen's column is centred).
+    if !centered {
+        link(app, ui, "globe", tl!("VectorCraft (upstream project)"), "help.website", &s("website"), centered);
+    }
 }
 
 #[cfg(test)]
@@ -110,15 +114,15 @@ mod tests {
         assert_eq!(
             *opened.lock().unwrap(),
             [
-                "https://discord.gg/artcraft",
-                "https://getartcraft.com",
-                "https://getartcraft.com/apps/vectorcraft",
-                "https://github.com/storytold/vectorcraft"
+                "https://github.com/Nihalpi1212/claude/issues",
+                "https://github.com/storytold/vectorcraft",
+                "https://github.com/Nihalpi1212/claude/releases",
+                "https://github.com/Nihalpi1212/claude"
             ]
         );
         // The control channel / MCP path returns the URL without opening a browser.
         let v = app.run("help.discord", serde_json::json!({})).unwrap();
-        assert_eq!(v["url"], "https://discord.gg/artcraft");
+        assert_eq!(v["url"], "https://github.com/Nihalpi1212/claude/issues");
         assert_eq!(opened.lock().unwrap().len(), 4);
         let ctx = egui::Context::default();
         theme::install_fonts(&ctx);

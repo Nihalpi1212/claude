@@ -415,7 +415,7 @@ const MAX_TAB_POSITION: f64 = 100_000.0;
 /// every paragraph that has them. The paragraphs past it take the default stops, with a warning.
 const MAX_STORY_TABS: usize = 1 << 20;
 /// The warning when [`MAX_STORY_TABS`] leaves tab stops out.
-pub(crate) const TABS_LEFT_OUT: &str = "tab stops past VectorCraft's limits were left out";
+pub(crate) const TABS_LEFT_OUT: &str = "tab stops past Nib's limits were left out";
 
 /// The text of one story, in the units of the text document.
 #[derive(Debug)]

@@ -37,7 +37,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "PDF Presets",
             [],
             None,
-            "{} → {presets: [{name, builtIn, supported (the writer produces its standard), description, settings (as document.pdfSettings)}]} the built-in presets (VectorCraft Default first), then the saved ones; any of these names works as `preset` wherever PDF options are taken",
+            "{} → {presets: [{name, builtIn, supported (the writer produces its standard), description, settings (as document.pdfSettings)}]} the built-in presets (Nib Default first), then the saved ones; any of these names works as `preset` wherever PDF options are taken",
             always,
             list
         ),
@@ -46,7 +46,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Save PDF Preset",
             [],
             None,
-            "{name?: (default: a new \"PDF Preset N\"), newName?: rename it, description?, preset?: the preset to start from (default: the saved preset `name`, else VectorCraft Default), …options of document.exportPdf} create or change a saved preset (built-in presets are read-only; passwords are never stored) → {name, created, settings}. A key PDF doesn't take, and an unknown key inside one of the option objects, are refused",
+            "{name?: (default: a new \"PDF Preset N\"), newName?: rename it, description?, preset?: the preset to start from (default: the saved preset `name`, else Nib Default), …options of document.exportPdf} create or change a saved preset (built-in presets are read-only; passwords are never stored) → {name, created, settings}. A key PDF doesn't take, and an unknown key inside one of the option objects, are refused",
             always,
             save
         ),

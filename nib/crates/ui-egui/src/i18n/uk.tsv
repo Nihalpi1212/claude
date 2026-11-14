@@ -97,7 +97,7 @@
 	A lower value follows the stroke closely; a higher one gives fewer points and smoother curves.	Менше значення точніше відтворює обведення; більше дає менше точок і плавніші криві.
 	A new preset starting from the selected one	Новий набір на основі вибраного
 	A saved copy of the selected preset	Збережена копія вибраного набору
-	About VectorCraft	Про програму VectorCraft
+	About Nib	Про програму Nib
 	above	зверху
 	Absolute Position	Абсолютна позиція
 	Accurate	Точний
@@ -207,7 +207,7 @@ font-technology	Variable	Варіативні
 	Appearance Panel	Панель «Оформлення»
 	Appearance panel	Панель «Оформлення»
 	Applies when the linked file is relinked or updated.	Використовується при повторній прив’язці або оновленні пов’язаного файлу.
-	Applies the next time VectorCraft starts.	Застосовується при наступному запуску VectorCraft.
+	Applies the next time Nib starts.	Застосовується при наступному запуску Nib.
 	Apply	Застосувати
 	Apply Brush	Застосувати пензель
 	Apply Character Style	Застосувати стиль символу
@@ -244,8 +244,6 @@ font-technology	Variable	Варіативні
 	Artboard {number}	Монтажна область {number}
 	Artboard:	Монтажна область:
 	Artboards	Монтажні області
-	ArtCraft Website	Веб-сайт ArtCraft
-	ArtCraft website	Веб-сайт ArtCraft
 	Artwork Colors	Кольори малюнка
 	As Multiple Assets	Як кілька ресурсів
 	As Single Asset	Як один ресурс
@@ -418,7 +416,7 @@ font-technology	Variable	Варіативні
 	Check Script	Перевірити сценарій
 	Check Script…	Перевірити сценарій…
 	Copy Report	Копіювати звіт
-	VectorCraft read this script without running it.	VectorCraft прочитав цей сценарій, не запускаючи його.
+	Nib read this script without running it.	Nib прочитав цей сценарій, не запускаючи його.
 	Needs nothing beyond plain JavaScript	Потрібен лише звичайний JavaScript
 	Needs the script language's own objects or directives	Потрібні власні об’єкти або директиви мови сценаріїв
 	Needs the document model	Потрібна модель документа
@@ -844,7 +842,6 @@ font-technology	Variable	Варіативні
 	Discard Empty Type	Видалити порожній текст
 	Discard Recovered Documents	Відкинути відновлені документи
 	Discard White Overprint in Output	Скасувати накладення білого під час виведення
-	Discord	Discord
 	Discretionary Hyphen	М’яке перенесення
 	Discretionary Ligatures	Дискреційні лігатури
 	Display All Blacks Accurately	Відображати всі чорні точно
@@ -1320,7 +1317,7 @@ file-filter	Preferences	Налаштування
 file-filter	Export presets	Набори параметрів експорту
 file-filter	SVG Compressed	Стиснутий SVG
 file-filter	PDF-compatible .ai	.ai, сумісний з PDF
-file-filter	VectorCraft Template	Шаблон VectorCraft
+file-filter	Nib Template	Шаблон Nib
 file-filter	Templates	Шаблони
 	Flattener Preview	Попередній перегляд зведення
 	Flip Across	Відобразити поперек
@@ -1772,9 +1769,6 @@ file-filter	Templates	Шаблони
 	Italian	Італійська
 	Japanese	Японська
 	Join	З’єднати
-	Join Our Discord	Приєднуйтесь до нашого Discord
-	Join our Discord	Приєднуйтесь до нашого Discord
-	Join the ArtCraft community on Discord (discord.gg/artcraft)	Приєднуйтесь до спільноти ArtCraft Discord (discord.gg/artcraft)
 	Join the lines of each paragraph	Поєднувати рядки кожного абзацу
 	Join Tool	Інструмент «З’єднання»
 	Justification…	Вирівнювання за шириною…
@@ -1802,7 +1796,7 @@ file-filter	Templates	Шаблони
 # Import Shortcut Set (Keyboard Shortcuts › Import…, File › Open of a .kys file) and its commands.
 	Import Shortcut Set	Імпорт набору сполучень клавіш
 	Import Shortcut Set…	Імпортувати набір сполучень клавіш…
-	Each entry of the file is matched to a VectorCraft tool, command or panel. Check the matches and answer what is left.	Кожен запис файлу зіставляється з інструментом, командою або панеллю VectorCraft. Перевірте зіставлення й дайте відповідь на решту.
+	Each entry of the file is matched to a Nib tool, command or panel. Check the matches and answer what is left.	Кожен запис файлу зіставляється з інструментом, командою або панеллю Nib. Перевірте зіставлення й дайте відповідь на решту.
 	Keys	Клавіші
 	The file writes keys and modifiers as codes. Check the proposed meanings and answer the codes that are not known yet.	Файл записує клавіші та модифікатори як коди. Перевірте запропоновані значення й укажіть коди, які ще невідомі.
 	Click, then press the key this code stands for (Esc cancels)	Клацніть, потім натисніть клавішу, яку позначає цей код (Esc скасовує)
@@ -1813,7 +1807,7 @@ file-filter	Templates	Шаблони
 	Shortcuts	Сполучення клавіш
 	Shortcut	Сполучення клавіш
 	In the File	У файлі
-	In VectorCraft	У VectorCraft
+	In Nib	У Nib
 	Needs Attention Only	Лише ті, що потребують уваги
 	Ready	Готово
 	Needs a choice	Потрібен вибір
@@ -1822,7 +1816,7 @@ file-filter	Templates	Шаблони
 	Tools take a single key (optionally with Shift)	Інструментам призначається одна клавіша (можна із Shift)
 	A later row takes this shortcut	Це сполучення забирає рядок нижче
 	Same item as a later row	Той самий елемент, що й у рядку нижче
-	Start from VectorCraft Defaults	Почати зі значень VectorCraft за промовчанням
+	Start from Nib Defaults	Почати зі значень Nib за промовчанням
 	Add to the Current Shortcuts	Додати до поточних сполучень клавіш
 	Remember My Choices	Запам’ятати мій вибір
 	{ready} of {total} ready	Готово: {ready} з {total}
@@ -2529,7 +2523,6 @@ file-filter	Templates	Шаблони
 	Paragraph Style Options	Параметри стилю абзацу
 	Paragraph Styles	Стилі абзаців
 	Paragraph Symbol	Символ абзацу
-	Part of ArtCraft. MIT OR Apache-2.0. Fonts: Source Sans 3, Inter, JetBrains Mono (OFL). Icons: Lucide (ISC) + VectorCraft.	Частина ArtCraft. MIT OR Apache-2.0. Шрифти: Source Sans 3, Inter, JetBrains Mono (OFL). Значки: Lucide (ISC) + VectorCraft.
 	Password	Пароль
 	Paste	Вставити
 	Paste in Back	Вставити позаду
@@ -2733,7 +2726,7 @@ digits	Malayalam	Малаялам
 	Quarter Space	Четверта шпація
 	Quick Actions	Швидкі дії
 	Quickly start a new file	Швидко створити новий файл
-	Quit VectorCraft	Вийти з VectorCraft
+	Quit Nib	Вийти з Nib
 	Radar Graph Tool	Інструмент «Пелюсткова діаграма»
 	Radial	Радіальний
 	Radial Glows	Радіальні світіння
@@ -2873,7 +2866,7 @@ digits	Malayalam	Малаялам
 @plural	{n} folder or file couldn't be read|{n} folders or files couldn't be read	Не вдалося прочитати папок або файлів: {n}|Не вдалося прочитати папок або файлів: {n}|Не вдалося прочитати папок або файлів: {n}
 	The search stopped at its limit: search a smaller folder.	Пошук зупинився на межі: виберіть меншу папку.
 	Copy only fonts you own or are licensed to install.	Копіюйте лише шрифти, які належать вам або які ви маєте право встановлювати за ліцензією.
-	VectorCraft copies the fonts to {folder}.	VectorCraft копіює шрифти в {folder}.
+	Nib copies the fonts to {folder}.	Nib копіює шрифти в {folder}.
 	Registered Trademark Symbol	Символ зареєстрованого товарного знаку
 	Registration marks	Мітки поєднання
 	Registry name:	Ім’я у реєстрі:
@@ -3016,9 +3009,9 @@ digits	Malayalam	Малаялам
 	Revert	Повернути
 	Revert to the saved version of “{name}”?	Повернутися до збереженої версії «{name}»?
 	Replace “{name}”, the file this document was opened from?	Замінити «{name}» — файл, з якого відкрито цей документ?
-	Opening it left out what VectorCraft can't read yet ({what}), so replacing it loses that for good. Save under another name to keep it.	При відкритті було пропущено те, що VectorCraft поки що не вміє читати ({what}), тому заміна файлу втратить це назавжди. Щоб зберегти це, збережіть документ під іншим ім’ям.
+	Opening it left out what Nib can't read yet ({what}), so replacing it loses that for good. Save under another name to keep it.	При відкритті було пропущено те, що Nib поки що не вміє читати ({what}), тому заміна файлу втратить це назавжди. Щоб зберегти це, збережіть документ під іншим ім’ям.
 	“{name}” already exists. Replace it?	«{name}» уже існує. Замінити?
-	The name in the save panel was “{typed}”; VectorCraft added the file type's extension. Replacing the file overwrites its contents.	Назва у вікні збереження була «{typed}», а VectorCraft додав розширення типу файлу. Заміна файлу перезапише його вміст.
+	The name in the save panel was “{typed}”; Nib added the file type's extension. Replacing the file overwrites its contents.	Назва у вікні збереження була «{typed}», а Nib додав розширення типу файлу. Заміна файлу перезапише його вміст.
 	Revolve…	Обертання…
 	RGB Color	Колір RGB
 	Right	Праворуч
@@ -4004,12 +3997,10 @@ effect	Points	Точки
 	Vector Halftone	Векторний напівтон
 	Vector Halftone…	Векторний напівтон…
 	Vector illustration — fast, open, scriptable.	Векторне малювання — швидке, відкрите, кероване сценаріями.
-	VectorCraft didn't quit normally last time. These documents had unsaved changes:	VectorCraft не завершився нормально минулого разу. У цих документах були незбережені зміни:
-	VectorCraft Help…	Довідка VectorCraft…
-	VectorCraft on getartcraft.com	VectorCraft на getartcraft.com
-	VectorCraft on GitHub	VectorCraft на GitHub
+	Nib didn't quit normally last time. These documents had unsaved changes:	Nib не завершився нормально минулого разу. У цих документах були незбережені зміни:
+	Nib Help…	Довідка Nib…
+	Nib on GitHub	Nib на GitHub
 	Vectors	Вектори
-	Version {version} — open-source vector illustration in pure Rust.	Версія {version} — векторне малювання з відкритим кодом, написане на Rust.
 	Version:	Версія:
 	Vertical	Вертикально
 	Vertical %	По вертикалі, %
@@ -4047,7 +4038,7 @@ effect	Points	Точки
 	Web Snap:	Прив’язка до web:
 	Weight	Товщина
 	Weight:	Товщина:
-	Welcome to VectorCraft	Ласкаво просимо до VectorCraft
+	Welcome to Nib	Ласкаво просимо до Nib
 	When pasting text	При вставці тексту
 	White	Білий
 	Widget Position:	Положення віджету:
@@ -4483,7 +4474,7 @@ axis	Both	Обидві
 @msg	Split Into Grid: select paths large enough for the grid	Поділ на сітку: виділіть контури, досить великі для сітки
 @msg	Targa files are RGB: colorModel rgb	Файли Targa є RGB: colorModel rgb
 @msg	Text Wrap: select a wrap object	Обтікання текстом: виділіть об’єкт обтікання
-@msg	This shortcut file is in a form VectorCraft can't read.	Цей файл сполучень клавіш записано у форматі, який VectorCraft не може прочитати.
+@msg	This shortcut file is in a form Nib can't read.	Цей файл сполучень клавіш записано у форматі, який Nib не може прочитати.
 @msg	`antiAlias` must be "none", "sharp", "crisp" or "strong"	`antiAlias` має бути "none", "sharp", "crisp" або "strong"
 @msg	`aspect` must be a number (%)	`aspect` має бути числом (%)
 @msg	`at` must be [x, y]	`at` має бути [x, y]
@@ -4625,7 +4616,7 @@ axis	Both	Обидві
 @msg	can't encode the document: {0}	не вдалося закодувати документ: {0}
 @msg	can't parse shortcut `{c}`	не вдалося розібрати поєднання `{c}`
 @msg	can't parse shortcut `{s}` for `{k}`	не вдалося розібрати поєднання `{s}` для `{k}`
-@msg	can't save version {0}: VectorCraft writes versions {MIN_VERSION} to {VERSION}	не вдалося зберегти версію {0}: VectorCraft записує версії від {MIN_VERSION} до {VERSION}
+@msg	can't save version {0}: Nib writes versions {MIN_VERSION} to {VERSION}	не вдалося зберегти версію {0}: Nib записує версії від {MIN_VERSION} до {VERSION}
 @msg	can't write .{ext} images	не вдалося записати зображення .{ext}
 @msg	cannot distort a zero-size bounding box	не можна спотворити обмежувальну рамку нульового розміру
 @msg	cannot read PDF: {0}	не вдалося прочитати PDF: {0}
@@ -4653,7 +4644,7 @@ axis	Both	Обидві
 @msg	empty brush stroke	порожній мазок пензля
 @msg	empty cutter	порожній різак
 @msg	empty path	порожній контур
-@msg	file version {0} is newer than this VectorCraft supports ({VERSION})	версія файлу {0} новіша, ніж підтримує цей VectorCraft ({VERSION})
+@msg	file version {0} is newer than this Nib supports ({VERSION})	версія файлу {0} новіша, ніж підтримує цей Nib ({VERSION})
 @msg	freeform point {i} needs `at` [x, y] and a valid `color`	довільній точці {i} потрібні `at` [x, y] та допустимий `color`
 @msg	freeform line {i} must be an array of point indices	довільна лінія {i} має бути масивом індексів точок
 @msg	give both `start` and `end` [x, y] (or neither)	вкажіть `start`, `end` [x, y] (або жодного)
@@ -4681,9 +4672,9 @@ axis	Both	Обидві
 @msg	{label} files hold real numbers up to {max}, and the page of artboard {n}, {side} pt long, needs larger ones: choose PDF 1.6 or later without a PDF/X standard, or a smaller artboard	файли {label} вміщують дійсні числа до {max}, а сторінці монтажної області {n} завдовжки {side} pt потрібні більші: виберіть PDF 1.6 або новіший без стандарту PDF/X чи меншу монтажну область
 @msg	invalid image data for `{0}`	неприпустимі дані зображення для `{0}`
 @msg	invalid parameters for `{cmd}`: {msg}	неприпустимі параметри для `{cmd}`: {msg}
-@msg	is not an image VectorCraft reads	не є зображенням, яке читає VectorCraft
-@msg	it uses `{at}`, which VectorCraft's PostScript reader doesn't know	використовує `{at}`, яке не знає читач PostScript у VectorCraft
-@msg	it uses `{at}`, which VectorCraft's PostScript reader doesn't know, in {procs}	використовує `{at}`, яке не знає читач PostScript у VectorCraft, у {procs}
+@msg	is not an image Nib reads	не є зображенням, яке читає Nib
+@msg	it uses `{at}`, which Nib's PostScript reader doesn't know	використовує `{at}`, яке не знає читач PostScript у Nib
+@msg	it uses `{at}`, which Nib's PostScript reader doesn't know, in {procs}	використовує `{at}`, яке не знає читач PostScript у Nib, у {procs}
 @msg	its Windows metafile preview was opened instead, which may simplify the art	натомість було відкрито його попереднє подання метафайлу Windows, що може спростити малюнок
 @msg	its preview was placed instead, at screen resolution	замість цього було вміщено його попереднє подання у роздільній здатності екрану
 @msg	join needs open paths	з’єднання вимагає відкритих контурів
@@ -4740,7 +4731,7 @@ axis	Both	Обидві
 @msg	no file system here	тут немає файлової системи
 @msg	no file writer	немає засобу запису файлів
 @msg	no files to place	немає файлів для розміщення
-@msg	`{file}` isn't a VectorCraft document, a PDF or a PDF-compatible .ai file	`{file}` не є документом VectorCraft, PDF або файлом .ai, сумісним із PDF
+@msg	`{file}` isn't a Nib document, a PDF or a PDF-compatible .ai file	`{file}` не є документом Nib, PDF або файлом .ai, сумісним із PDF
 @msg	no format to export to	немає формату для експорту
 @msg	no free recovery area	немає вільної області відновлення
 @msg	no gradient stop or freeform point is selected	не виділено ні точку переходу градієнта, ні довільну точку
@@ -4785,7 +4776,7 @@ axis	Both	Обидві
 @msg	the action set file is larger than 8 MiB	файл набору дій більший за 8 MiB
 @msg	`{ID}`: the reference would be larger than {MAX_BYTES} bytes	`{ID}`: довідник був би більшим за {MAX_BYTES} байтів
 @msg	the action set file holds more than 1,000 actions	файл набору дій містить понад 1000 дій
-@msg	the action set file needs a later version of VectorCraft	для файлу набору дій потрібна новіша версія VectorCraft
+@msg	the action set file needs a later version of Nib	для файлу набору дій потрібна новіша версія Nib
 @msg	an action in the action set file has more than 10,000 steps	у файлі набору дій є дія з понад 10 000 кроків
 @msg	no such anchor	такої опорної точки немає
 @msg	no such artboard	такої монтажної області немає
@@ -4817,8 +4808,8 @@ axis	Both	Обидві
 @msg	node {_1} is not text	вузол {_1} не є текстом
 @msg	node {_1} is on a locked artboard	вузол {_1} розташований на заблокованій монтажній області
 @msg	not a DXF drawing	не є кресленням DXF
-@msg	not a VectorCraft file: {0}	не є файлом VectorCraft: {0}
-@msg	not a VectorCraft shortcut set (missing `overrides`)	не є набором поєднань клавіш VectorCraft (відсутнє `overrides`)
+@msg	not a Nib file: {0}	не є файлом Nib: {0}
+@msg	not a Nib shortcut set (missing `overrides`)	не є набором поєднань клавіш Nib (відсутнє `overrides`)
 @msg	not a blend	це не перехід
 @msg	not a graphic style library (format `{_1}`)	не є бібліотекою графічних стилів (формат `{_1}`)
 @msg	not a shortcut set: the text doesn't start with a slash name and an opening brace	це не набір сполучень клавіш: текст не починається з імені зі скісною рискою та відкривної фігурної дужки
@@ -5041,7 +5032,7 @@ axis	Both	Обидві
 @msg	not a preferences file: no `format`	не є файлом налаштувань: немає `format`
 @msg	not a preferences file: no `version`	не є файлом налаштувань: немає `version`
 @msg	not a preferences file: no `prefs`	не є файлом налаштувань: немає `prefs`
-@msg	the file was saved by a newer version of VectorCraft (version {v})	файл збережено новішою версією VectorCraft (версія {v})
+@msg	the file was saved by a newer version of Nib (version {v})	файл збережено новішою версією Nib (версія {v})
 @msg	the file holds no preferences	файл не містить налаштувань
 @msg	`{key}` names a folder, which preferences files leave out	`{key}` вказує теку, а файли налаштувань не містять тек
 @msg	the file is larger than 1 MB	файл більший за 1 МБ
@@ -5144,11 +5135,11 @@ axis	Both	Обидві
 @msg	Sent to {_1}	Відправлено до {_1}
 @msg	{_1} files	{_1} файлів
 @msg	The graphics were lost and have been restarted	Графіка була втрачена та перезапущена
-@msg	The graphics processor tried first couldn't show the window, so VectorCraft started again on {summary}	Графічний процесор, обраний першим, не зміг показати вікно, тому VectorCraft запустився знову на {summary}
-@msg	The last start of VectorCraft ended on {name} before its window appeared, so it started on {summary}. To try that graphics processor again, change Preferences › Performance › Graphics Processor or start with WGPU_BACKEND set	Попередній запуск VectorCraft завершився на {name} до появи вікна, тому VectorCraft запустився на {summary}. Щоб знову спробувати цей графічний процесор, змініть Налаштування › Продуктивність › Графічний процесор або запустіть застосунок із заданою змінною WGPU_BACKEND
-@msg	The last start of VectorCraft ended while it listed the graphics processors, so it started on {summary} with OpenGL alone. To try the other graphics backends again, change Preferences › Performance › Graphics Processor or start with WGPU_BACKEND set	Попередній запуск VectorCraft завершився під час переліку графічних процесорів, тому VectorCraft запустився на {summary} лише з OpenGL. Щоб знову спробувати інші графічні інтерфейси, змініть Налаштування › Продуктивність › Графічний процесор або запустіть застосунок із заданою змінною WGPU_BACKEND
-@msg	Loading VectorCraft…	Завантаження VectorCraft…
-@msg	VectorCraft failed to start: {e}	VectorCraft не вдалося запустити: {e}
+@msg	The graphics processor tried first couldn't show the window, so Nib started again on {summary}	Графічний процесор, обраний першим, не зміг показати вікно, тому Nib запустився знову на {summary}
+@msg	The last start of Nib ended on {name} before its window appeared, so it started on {summary}. To try that graphics processor again, change Preferences › Performance › Graphics Processor or start with WGPU_BACKEND set	Попередній запуск Nib завершився на {name} до появи вікна, тому Nib запустився на {summary}. Щоб знову спробувати цей графічний процесор, змініть Налаштування › Продуктивність › Графічний процесор або запустіть застосунок із заданою змінною WGPU_BACKEND
+@msg	The last start of Nib ended while it listed the graphics processors, so it started on {summary} with OpenGL alone. To try the other graphics backends again, change Preferences › Performance › Graphics Processor or start with WGPU_BACKEND set	Попередній запуск Nib завершився під час переліку графічних процесорів, тому Nib запустився на {summary} лише з OpenGL. Щоб знову спробувати інші графічні інтерфейси, змініть Налаштування › Продуктивність › Графічний процесор або запустіть застосунок із заданою змінною WGPU_BACKEND
+@msg	Loading Nib…	Завантаження Nib…
+@msg	Nib failed to start: {e}	Nib не вдалося запустити: {e}
 @msg	A browser with WebGPU or WebGL2 is required.	Потрібен браузер із WebGPU або WebGL2.
 @msg	The graphics were lost and couldn't be restarted.	Графіку було втрачено, і її не вдалося перезапустити.
 @msg	Your unsaved changes are kept in this browser: reload the page to get them back.	Ваші незбережені зміни зберігаються у цьому браузері: перезавантажте сторінку, щоб повернути їх.
@@ -5179,21 +5170,21 @@ axis	Both	Обидві
 @msg	it has more than {MAX_NODES} objects	в них більше {MAX_NODES} об’єктів
 @msg	it has no layers	у них немає шарів
 @msg	it has too many values in a row	у них занадто багато значень поспіль
-@msg	it has {_1}, which VectorCraft doesn't read from it yet	у них є {_1}, які VectorCraft поки не читає
+@msg	it has {_1}, which Nib doesn't read from it yet	у них є {_1}, які Nib поки не читає
 @msg	its objects are nested too deeply	об’єкти в них вкладені надто глибоко
 @msg	its section ending with `%{end}` doesn't end	розділ, що закінчується на `%{end}`, не закінчується
-@msg	brushes VectorCraft can't read yet were left out of the Brushes panel ({_1})	пензлі, які VectorCraft поки не вміє читати, не додано до панелі «Пензлі» ({_1})
+@msg	brushes Nib can't read yet were left out of the Brushes panel ({_1})	пензлі, які Nib поки не вміє читати, не додано до панелі «Пензлі» ({_1})
 @msg	objects with several fills or strokes, variable-width strokes, effects or brushes came in as their drawn look ({_1}): their appearance isn't editable yet	об’єкти з кількома заливками або обведеннями, обведеннями змінної ширини, ефектами або пензлями імпортовані в намальованому вигляді ({_1}): їх оформлення поки що не можна редагувати
 @msg	the name `{name}` isn't UTF-8 and was read as {label}: if it looks wrong, open the file with another legacyNameEncoding	назва `{name}` не в UTF-8 і прочитана як {label}: якщо вона виглядає неправильно, відкрийте файл з іншим legacyNameEncoding
 @msg	the name `{name}` isn't UTF-8, and parts of it aren't valid {label} either: open the file with another legacyNameEncoding	назва `{name}` не в UTF-8, і її частини недійсні також у {label}: відкрийте файл з іншим legacyNameEncoding
 @msg	more names that aren't UTF-8 were read as {label} ({count})	інші назви не в UTF-8 прочитано як {label} ({count})
 @msg	gradient “{name}” isn't defined in the file: a plain colour stands in for it	градієнт «{name}» не визначено у файлі: замість нього використовується суцільний колір
-@msg	an image VectorCraft can't read was left out	зображення, яке VectorCraft не може прочитати, пропущено
+@msg	an image Nib can't read was left out	зображення, яке Nib не може прочитати, пропущено
 @msg	graphs come in as plain art, without their data or settings	діаграми імпортуються як звичайна графіка, без їхніх даних і налаштувань
 @msg	an image whose data is cut short was left out	зображення з обрізаними даними пропущено
 @msg	an embedded image of {_1} × {_2} pixels was reduced to {_3} × {_4} pixels to keep the layers	вбудоване зображення {_1} × {_2} пікселів зменшено до {_3} × {_4} пікселів, щоб зберегти шари
 @msg	linked pictures show the low-resolution preview saved in the file until their files are found: relink them in the Links panel	пов’язані зображення показуються як збережений у файлі перегляд низької роздільності, доки їхні файли не знайдено: відновіть зв’язки на панелі «Зв’язки»
-@msg	linked type areas past VectorCraft's limits were left out	пов’язані текстові області понад обмеження VectorCraft пропущено
+@msg	linked type areas past Nib's limits were left out	пов’язані текстові області понад обмеження Nib пропущено
 @msg	the Line Breaking setting of legacy type was left out	налаштування розриву рядків тексту старого формату пропущено
 @msg	the Japanese layout rules of legacy type were left out	японські правила верстки тексту старого формату пропущено
 @msg	type that changes writing direction inside a text object opens in the direction of its first character	текст, що змінює напрямок письма всередині текстового об’єкта, відкривається в напрямку свого першого символу
@@ -5204,13 +5195,13 @@ axis	Both	Обидві
 @msg	this file was saved without PDF compatibility, and its editing data can't be read ({why})	цей файл збережений без сумісності з PDF, і його дані редагування не вдається прочитати ({why})
 @msg	the PDF part couldn't be read ({_1}): the file opened from its editing data	не вдалося прочитати PDF-частину ({_1}): файл відкрито з його даних для редагування
 @msg	No fonts are missing in this document	У цьому документі немає відсутніх шрифтів
-@msg	VectorCraft doesn't search other apps' or the system's folders: {path}	VectorCraft не шукає в папках інших програм і системи: {path}
-@msg	VectorCraft doesn't search the Shared or Public folder in Users: {path}	VectorCraft не шукає в папках Shared і Public у Users: {path}
+@msg	Nib doesn't search other apps' or the system's folders: {path}	Nib не шукає в папках інших програм і системи: {path}
+@msg	Nib doesn't search the Shared or Public folder in Users: {path}	Nib не шукає в папках Shared і Public у Users: {path}
 @msg	{path} is not a folder	{path} не є папкою
 @msg	the search couldn't start: try again in a moment	не вдалося почати пошук: спробуйте ще раз за мить
 @msg	searching a folder isn't available on the web	пошук у папці недоступний у веб-версії
 @msg	every search thread stopped on an internal error (please report this bug)	усі потоки пошуку зупинилися через внутрішню помилку (повідомте про цю помилку)
-@msg	VectorCraft's Fonts folder isn't set here: the desktop app and vectorcraft-cli set it	Папку Fonts VectorCraft тут не задано: її задають настільна програма та vectorcraft-cli
+@msg	Nib's Fonts folder isn't set here: the desktop app and nib-cli set it	Папку Fonts Nib тут не задано: її задають настільна програма та nib-cli
 @msg	choose the font files to add	виберіть файли шрифтів для додавання
 @msg	not a file	не файл
 @msg	not a font file	не файл шрифту
@@ -5223,7 +5214,7 @@ axis	Both	Обидві
 @msg	No linked files to look for	Немає пов’язаних файлів для пошуку
 @msg	The link is inside a symbol, graph design, pattern or opacity mask and has no place on the canvas	Зв’язок міститься в символі, дизайні діаграми, візерунку або масці непрозорості й не має місця на полотні
 	Services	Служби
-	Hide VectorCraft	Приховати VectorCraft
+	Hide Nib	Приховати Nib
 	Zoom	Масштаб
 	Bring All to Front	Усі вікна на передній план
 	Settings	Налаштування
@@ -5231,7 +5222,7 @@ axis	Both	Обидві
 	On: one locked object showing the document, updated when it changes.	Увімк.: один заблокований об’єкт, який показує документ і оновлюється під час його зміни.
 	Off: an editable copy of its art, embedded in this document.	Вимк.: редагована копія графіки, вбудована в цей документ.
 	Images: link to the file instead of only embedding it.	Зображення: пов’язувати із файлом замість простого впровадження.
-	VectorCraft documents: one locked object, updated when the file changes.	Документи VectorCraft: один заблокований об’єкт, який оновлюється під час зміни файлу.
+	Nib documents: one locked object, updated when the file changes.	Документи Nib: один заблокований об’єкт, який оновлюється під час зміни файлу.
 	A file dialog is open: choose there first	Відкрито вікно вибору файлу: спочатку зробіть вибір у ньому
 	The document was closed while its file dialog was open	Документ було закрито, поки було відкрито його вікно вибору файлу
 	The dialog was closed before its file dialog answered	Діалогове вікно було закрито раніше, ніж відповіло його вікно вибору файлу
@@ -5360,10 +5351,10 @@ axis	Both	Обидві
 	Bottom Right	Знизу праворуч
 	Edge	Край
 	System Title Bar	Системний рядок заголовка
-	VectorCraft Title Bar on Every Desktop	Рядок заголовка VectorCraft на будь-якій стільниці
+	Nib Title Bar on Every Desktop	Рядок заголовка Nib на будь-якій стільниці
 	The VECTORCRAFT_TITLEBAR environment variable chooses the title bar while it is set.	Поки змінну середовища VECTORCRAFT_TITLEBAR задано, рядок заголовка вибирає вона.
 	System Title Bar takes precedence over this option while it is on.	Поки ввімкнено «Системний рядок заголовка», він має пріоритет над цим параметром.
-	This desktop draws the window's title bar with this option on or off while VectorCraft Title Bar on Every Desktop is off.	Поки «Рядок заголовка VectorCraft на будь-якій стільниці» вимкнено, ця стільниця малює рядок заголовка вікна незалежно від того, чи ввімкнено цей параметр.
+	This desktop draws the window's title bar with this option on or off while Nib Title Bar on Every Desktop is off.	Поки «Рядок заголовка Nib на будь-якій стільниці» вимкнено, ця стільниця малює рядок заголовка вікна незалежно від того, чи ввімкнено цей параметр.
 	Value Axis	Вісь значень
 	On Left Side	Ліворуч
 	On Right Side	Праворуч
@@ -5518,7 +5509,7 @@ lighting	Light	Світло
 	Edge Intensity	Інтенсивність країв
 	Posterization	Постеризація
 	Highlight Area	Область світлих тонів
-@msg	the compressed file unpacks to more than VectorCraft reads ({_1} MB of document, {_2} MB per image)	стислий файл розпаковується в обсяг більший, ніж читає VectorCraft ({_1} МБ документа, {_2} МБ на зображення)
+@msg	the compressed file unpacks to more than Nib reads ({_1} MB of document, {_2} MB per image)	стислий файл розпаковується в обсяг більший, ніж читає Nib ({_1} МБ документа, {_2} МБ на зображення)
 @msg	the document is too large to save compressed ({0}): save it with Use Compression off	документ завеликий для збереження зі стиском ({0}): збережіть його з вимкненим параметром «Використовувати стиск»
 @msg	the file stopped being read (please report this bug)	читання файлу перервалося (будь ласка, повідомте про цю помилку)
 	Concentric Dividers:	Концентричні розділювачі:
@@ -6999,21 +6990,21 @@ breakText	Glyphs	Гліфи
 # Copy Troubleshooting Info
 	Copy Troubleshooting Info	Копіювати відомості для усунення несправностей
 @msg	Copied the troubleshooting info	Відомості для усунення несправностей скопійовано
-@msg	The last session of VectorCraft stopped responding before it closed. Help › Copy Troubleshooting Info copies the details for a bug report	Останній сеанс VectorCraft перестав відповідати перед закриттям. Довідка › Копіювати відомості для усунення несправностей копіює подробиці для звіту про помилку
+@msg	The last session of Nib stopped responding before it closed. Help › Copy Troubleshooting Info copies the details for a bug report	Останній сеанс Nib перестав відповідати перед закриттям. Довідка › Копіювати відомості для усунення несправностей копіює подробиці для звіту про помилку
 
 # Safe Mode
 	Safe Mode…	Безпечний режим…
 	Safe Mode	Безпечний режим
 	Help › Safe Mode…	Довідка › Безпечний режим…
 	Enable on Re-launch	Увімкнути під час наступного запуску
-	The last launch of VectorCraft stopped while the plug-in {name} was loading. It may not be what stopped it.	Останній запуск VectorCraft зупинився під час завантаження модуля {name}. Можливо, причина не в ньому.
+	The last launch of Nib stopped while the plug-in {name} was loading. It may not be what stopped it.	Останній запуск Nib зупинився під час завантаження модуля {name}. Можливо, причина не в ньому.
 	Disable and Continue	Вимкнути й продовжити
 	Start Normally	Запустити у звичайному режимі
 	Start in Safe Mode	Запустити в безпечному режимі
-	VectorCraft is in Safe Mode: no plug-ins load or run until it starts normally.	VectorCraft працює в безпечному режимі: модулі не завантажуються й не виконуються, доки програму не буде запущено у звичайному режимі.
+	Nib is in Safe Mode: no plug-ins load or run until it starts normally.	Nib працює в безпечному режимі: модулі не завантажуються й не виконуються, доки програму не буде запущено у звичайному режимі.
 	Disabled plug-ins	Вимкнені модулі
 	No plug-ins are disabled.	Немає вимкнених модулів.
-@msg	Safe Mode is on: plug-ins don't load or run until VectorCraft starts normally	Безпечний режим увімкнено: модулі не завантажуються й не виконуються, доки VectorCraft не буде запущено у звичайному режимі
+@msg	Safe Mode is on: plug-ins don't load or run until Nib starts normally	Безпечний режим увімкнено: модулі не завантажуються й не виконуються, доки Nib не буде запущено у звичайному режимі
 @msg	give `id` or `file` (see plugin.safeMode)	укажіть `id` або `file` (див. plugin.safeMode)
 @msg	that plug-in isn't disabled (see plugin.safeMode)	цей модуль не вимкнено (див. plugin.safeMode)
 @msg	Couldn't save the disabled plug-ins for the next launch	Не вдалося зберегти вимкнені модулі для наступного запуску
@@ -7155,7 +7146,7 @@ breakText	Glyphs	Гліфи
 @msg	JSON.parse: {why} (at offset {at})	JSON.parse: {why} (зі зміщенням {at})
 @msg	JSON.stringify cannot write a structure that contains itself	JSON.stringify не може записати структуру, яка містить саму себе
 @msg	Join: a subpath went missing	З’єднання: вкладений контур зник
-@msg	Lock Workspace is not available in VectorCraft	Блокування робочого середовища недоступне у VectorCraft
+@msg	Lock Workspace is not available in Nib	Блокування робочого середовища недоступне у Nib
 @msg	Move Panel to New Window is not available: floating panels stay in the main window	Переміщення панелі в нове вікно недоступне: плаваючі панелі залишаються в головному вікні
 @msg	Namespace.prototype.toString needs a Namespace	Для Namespace.prototype.toString потрібен Namespace
 @msg	New Document profiles need the preferences folder, which this run doesn't have	Профілям нових документів потрібна папка налаштувань, якої в цьому запуску немає
@@ -7417,7 +7408,7 @@ breakText	Glyphs	Гліфи
 @msg	`{base}` is not in the DCS file's folder	`{base}` немає в папці файлу DCS
 @msg	`{file}` has no art to place	`{file}` не містить графіки для розміщення
 @msg	`{file}` is over {_1} MB	`{file}` перевищує {_1} МБ
-@msg	`{f}` belongs to a VectorCraft that is running	`{f}` належить запущеному екземпляру VectorCraft
+@msg	`{f}` belongs to a Nib that is running	`{f}` належить запущеному екземпляру Nib
 @msg	`{f}` is the copy of a document open now	`{f}` — це копія документа, відкритого зараз
 @msg	`{id}` is no writable format (see document.formats)	`{id}` не є форматом, доступним для запису (див. document.formats)
 @msg	`{id}` isn't a loaded library	`{id}` не є завантаженою бібліотекою
@@ -7682,8 +7673,8 @@ breakText	Glyphs	Гліфи
 @msg	can't linearise the PDF: {why}	не вдалося лінеаризувати PDF: {why}
 @msg	can't open `{_1}`: {_2}	не вдалося відкрити `{_1}`: {_2}
 @msg	can't open `{_1}`: {e}	не вдалося відкрити `{_1}`: {e}
-@msg	can't open `{name}`: not a format VectorCraft reads (see document.formats)	не вдалося відкрити `{name}`: VectorCraft не читає цей формат (див. document.formats)
-@msg	can't place `{name}`: not a format VectorCraft reads (see document.formats)	не вдалося помістити `{name}`: VectorCraft не читає цей формат (див. document.formats)
+@msg	can't open `{name}`: not a format Nib reads (see document.formats)	не вдалося відкрити `{name}`: Nib не читає цей формат (див. document.formats)
+@msg	can't place `{name}`: not a format Nib reads (see document.formats)	не вдалося помістити `{name}`: Nib не читає цей формат (див. document.formats)
 @msg	can't read back the written PDF: {e}	не вдалося прочитати записаний PDF: {e}
 @msg	can't read this Word document: {why}	не вдалося прочитати цей документ Word: {why}
 @msg	can't write .{e} images: use .png, .jpg, .gif, .webp, .tif or .bmp	не можна записувати зображення .{e}: скористайтеся .png, .jpg, .gif, .webp, .tif або .bmp
@@ -8219,7 +8210,7 @@ breakText	Glyphs	Гліфи
 @msg	not a valid SVGZ file: {e}	це не припустимий файл SVGZ: {e}
 @msg	not an RTF file: it doesn't start with {\\rtf	це не файл RTF: він не починається з {\\rtf
 @msg	not an action set: the text doesn't start with /version and a number	це не набір дій: текст не починається з /version і числа
-@msg	not an image VectorCraft reads (see document.formats)	це не зображення, яке читає VectorCraft (див. document.formats)
+@msg	not an image Nib reads (see document.formats)	це не зображення, яке читає Nib (див. document.formats)
 @msg	not area type (text in a frame) outside perspective	це не текст в області (текст у рамці) поза перспективою
 @msg	not editing an opacity mask	маска непрозорості не редагується
 @msg	not type on a path outside perspective	це не текст за контуром поза перспективою
@@ -8492,8 +8483,8 @@ breakText	Glyphs	Гліфи
 @msg	the Word document has too much text to place as type (at most {_1} MB)	документ Word містить забагато тексту, щоб помістити його як текст (не більше {_1} МБ)
 @msg	the Word document is encrypted or protected with a password; save it without one to place it	документ Word зашифровано або захищено паролем; збережіть його без пароля, щоб помістити
 @msg	the Word document is too large to place (its {name} stream holds more than {_1} MB)	документ Word завеликий для розміщення (його потік {name} містить понад {_1} МБ)
-@msg	the Word document was last saved with fast save, which VectorCraft doesn't read; save it again with fast save turned off	документ Word востаннє збережено зі швидким збереженням, яке VectorCraft не читає; збережіть його ще раз, вимкнувши швидке збереження
-@msg	the Word document was saved by Word 6.0 or Word 95, which VectorCraft doesn't read; save it as a Word 97-2003 document	документ Word збережено у Word 6.0 або Word 95, а такі файли VectorCraft не читає; збережіть його як документ Word 97-2003
+@msg	the Word document was last saved with fast save, which Nib doesn't read; save it again with fast save turned off	документ Word востаннє збережено зі швидким збереженням, яке Nib не читає; збережіть його ще раз, вимкнувши швидке збереження
+@msg	the Word document was saved by Word 6.0 or Word 95, which Nib doesn't read; save it as a Word 97-2003 document	документ Word збережено у Word 6.0 або Word 95, а такі файли Nib не читає; збережіть його як документ Word 97-2003
 @msg	the Word document's text is made of more than {MAX_PIECES} pieces, too many to place	текст документа Word складається з понад {MAX_PIECES} частин, це забагато для розміщення
 @msg	the XML operation needs an XML or XMLList value	для операції XML потрібне значення XML або XMLList
 @msg	the XPath expression does not evaluate to a node-set	результат виразу XPath не є набором вузлів
@@ -8920,3 +8911,11 @@ breakText	Glyphs	Гліфи
 @msg	turn on at least one side	увімкніть принаймні одну сторону
 @msg	with no hem and no grommets there is nothing to mark	без підгину й люверсів немає чого розмічати
 @msg	{saving} failed: {e}	{saving}: не вдалося: {e}
+	Report an Issue	Повідомити про проблему
+	Report an issue	Повідомити про проблему
+	Report a problem or suggest an idea on Nib's GitHub	Повідомте про проблему або запропонуйте ідею на GitHub Nib
+	Nib Releases	Випуски Nib
+	VectorCraft (upstream project)	VectorCraft (вихідний проєкт)
+	Nib is based on VectorCraft by the ArtCraft team and the VectorCraft contributors (MIT OR Apache-2.0)	Nib базується на VectorCraft від команди ArtCraft і учасників VectorCraft (MIT OR Apache-2.0)
+	Fonts: Source Sans 3, Inter, JetBrains Mono (OFL). Icons: Lucide (ISC) + VectorCraft.	Шрифти: Source Sans 3, Inter, JetBrains Mono (OFL). Значки: Lucide (ISC) + VectorCraft.
+	Open-source vector illustration in pure Rust.	Векторне малювання з відкритим кодом, написане на Rust.

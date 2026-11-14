@@ -69,7 +69,7 @@ impl Builder {
             Blend::Color => BlendMode::Color,
             Blend::Luminosity => BlendMode::Luminosity,
             _ => {
-                self.warn("blend modes VectorCraft doesn't have (Add, Linear Light, Vivid Light, Pin Light, Hard Mix, Subtract, Darker/Lighter Colour, Average, Negation, Reflect, Glow, Erase) import as Normal");
+                self.warn("blend modes Nib doesn't have (Add, Linear Light, Vivid Light, Pin Light, Hard Mix, Subtract, Darker/Lighter Colour, Average, Negation, Reflect, Glow, Erase) import as Normal");
                 BlendMode::Normal
             }
         }
@@ -112,14 +112,14 @@ impl Builder {
         if let Some(b) = af::kind_bounds(&n.kind) {
             let r = to_doc.transform_rect_bbox(rect_of(b));
             if ![r.x0, r.y0, r.x1, r.y1].iter().all(|v| v.is_finite() && v.abs() <= crate::MAX_COORD) {
-                self.warn("objects beyond the document range VectorCraft supports (left out)");
+                self.warn("objects beyond the document range Nib supports (left out)");
                 return None;
             }
         }
         // So must its vector mask, which becomes a clipping path: every control point, not just
         // the finite ones a bounding box takes.
         if n.mask.as_ref().is_some_and(|m| !path_in_range(m, to_doc)) {
-            self.warn("objects beyond the document range VectorCraft supports (left out)");
+            self.warn("objects beyond the document range Nib supports (left out)");
             return None;
         }
         let n = &*self.overlaid(n);

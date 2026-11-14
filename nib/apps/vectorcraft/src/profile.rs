@@ -20,9 +20,9 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 /// Files in the install folder that switch on portable mode (either one; contents are ignored).
-pub const PORTABLE_MARKERS: [&str; 2] = ["portable.txt", "VectorCraft.portable"];
+pub const PORTABLE_MARKERS: [&str; 2] = ["portable.txt", "Nib.portable"];
 /// The settings folder created in the install folder in portable mode.
-pub const PORTABLE_DATA_DIR: &str = "VectorCraftData";
+pub const PORTABLE_DATA_DIR: &str = "NibData";
 
 pub fn prefs_path(legacy: bool) -> Option<PathBuf> {
     prefs_path_with(std::env::consts::OS, legacy, |key| std::env::var_os(key), portable_dir)
@@ -45,9 +45,13 @@ fn prefs_path_with(os: &str, legacy: bool, env: impl Fn(&str) -> Option<OsString
     platform_dir(os, legacy, &env).map(|p| p.join("ui.json"))
 }
 
-/// The platform's settings folder of VectorCraft, or of DrawCraft (`legacy`).
+/// The platform's settings folder of Nib. Nib keeps its own folder (`Nib`, `nib` on Linux) and
+/// reads nothing from VectorCraft's or DrawCraft's (`legacy`: none), see docs/FORK.md.
 fn platform_dir(os: &str, legacy: bool, env: &impl Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
-    let (name, lower) = if legacy { ("DrawCraft", "drawcraft") } else { ("VectorCraft", "vectorcraft") };
+    if legacy {
+        return None;
+    }
+    let (name, lower) = ("Nib", "nib");
     match os {
         "macos" => env("HOME").map(|p| PathBuf::from(p).join("Library/Application Support").join(name)),
         "windows" => env("APPDATA").map(|p| PathBuf::from(p).join(name)),
@@ -242,22 +246,22 @@ mod tests {
     }
 
     #[test]
-    fn unset_override_keeps_platform_paths_and_legacy_migration() {
-        assert_eq!(prefs_path_with("macos", false, environment, installed), Some("/user/Library/Application Support/VectorCraft/ui.json".into()));
-        assert_eq!(prefs_path_with("macos", true, environment, installed), Some("/user/Library/Application Support/DrawCraft/ui.json".into()));
-        assert_eq!(prefs_path_with("windows", false, environment, installed), Some("/roaming/VectorCraft/ui.json".into()));
-        assert_eq!(prefs_path_with("linux", false, environment, installed), Some("/xdg-config/vectorcraft/ui.json".into()));
-        assert_eq!(
-            prefs_path_with("linux", true, |key| if key == "HOME" { environment(key) } else { None }, installed),
-            Some("/user/.config/drawcraft/ui.json".into())
-        );
+    fn unset_override_keeps_platform_paths_and_never_reads_an_older_app() {
+        assert_eq!(prefs_path_with("macos", false, environment, installed), Some("/user/Library/Application Support/Nib/ui.json".into()));
+        assert_eq!(prefs_path_with("windows", false, environment, installed), Some("/roaming/Nib/ui.json".into()));
+        assert_eq!(prefs_path_with("linux", false, environment, installed), Some("/xdg-config/nib/ui.json".into()));
+        // Nib never migrates DrawCraft's or VectorCraft's settings.
+        for os in ["macos", "windows", "linux"] {
+            assert_eq!(prefs_path_with(os, true, environment, installed), None, "{os}");
+        }
+        assert_eq!(prefs_path_with("linux", true, |key| if key == "HOME" { environment(key) } else { None }, installed), None);
     }
 
     #[test]
     fn portable_mode_keeps_the_settings_beside_the_executable_and_skips_the_drawcraft_profile() {
-        let portable = || Some(PathBuf::from("/usb/VectorCraft/VectorCraftData"));
+        let portable = || Some(PathBuf::from("/usb/Nib/NibData"));
         for os in ["macos", "windows", "linux"] {
-            assert_eq!(prefs_path_with(os, false, environment, portable), Some("/usb/VectorCraft/VectorCraftData/ui.json".into()), "{os}");
+            assert_eq!(prefs_path_with(os, false, environment, portable), Some("/usb/Nib/NibData/ui.json".into()), "{os}");
             // A portable copy is self-contained: the one-time read of DrawCraft's old settings is skipped.
             assert_eq!(prefs_path_with(os, true, environment, portable), None, "{os}");
         }
@@ -275,24 +279,24 @@ mod tests {
     fn a_run_without_preferences_never_looks_for_the_portable_folder() {
         let env = |key: &str| if key == "VECTORCRAFT_NO_PREFS" { Some("1".into()) } else { environment(key) };
         let portable = || -> Option<PathBuf> { panic!("the portable folder is not looked for under VECTORCRAFT_NO_PREFS") };
-        assert_eq!(prefs_path_with("windows", false, env, portable), Some("/roaming/VectorCraft/ui.json".into()));
-        assert_eq!(prefs_path_with("windows", true, env, portable), Some("/roaming/DrawCraft/ui.json".into()));
+        assert_eq!(prefs_path_with("windows", false, env, portable), Some("/roaming/Nib/ui.json".into()));
+        assert_eq!(prefs_path_with("windows", true, env, portable), None);
     }
 
     #[test]
     fn on_macos_the_marker_is_looked_for_beside_the_app_bundle() {
-        let bundled = Path::new("/Apps/VectorCraft.app/Contents/MacOS/vectorcraft");
+        let bundled = Path::new("/Apps/Nib.app/Contents/MacOS/vectorcraft");
         assert_eq!(install_dir("macos", bundled, &environment), Some("/Apps".into()));
         // A bare executable (the CLI zip) and other platforms: the executable's own folder.
         assert_eq!(install_dir("macos", Path::new("/Apps/vectorcraft-cli"), &environment), Some("/Apps".into()));
-        assert_eq!(install_dir("windows", bundled, &environment), Some("/Apps/VectorCraft.app/Contents/MacOS".into()));
-        assert_eq!(install_dir("linux", bundled, &environment), Some("/Apps/VectorCraft.app/Contents/MacOS".into()));
+        assert_eq!(install_dir("windows", bundled, &environment), Some("/Apps/Nib.app/Contents/MacOS".into()));
+        assert_eq!(install_dir("linux", bundled, &environment), Some("/Apps/Nib.app/Contents/MacOS".into()));
     }
 
     #[test]
     fn an_appimage_looks_for_the_marker_beside_the_appimage_file() {
         let mounted = Path::new("/tmp/.mount_vc/usr/bin/vectorcraft");
-        let appimage = |key: &str| if key == "APPIMAGE" { Some("/home/user/Apps/VectorCraft.AppImage".into()) } else { environment(key) };
+        let appimage = |key: &str| if key == "APPIMAGE" { Some("/home/user/Apps/Nib.AppImage".into()) } else { environment(key) };
         assert_eq!(install_dir("linux", mounted, &appimage), Some("/home/user/Apps".into()));
         assert_eq!(install_dir("linux", mounted, &environment), Some("/tmp/.mount_vc/usr/bin".into()));
         let empty = |key: &str| if key == "APPIMAGE" { Some(OsString::new()) } else { environment(key) };
@@ -322,7 +326,7 @@ mod tests {
     #[test]
     fn a_fake_app_bundle_keeps_the_marker_and_the_data_outside_the_bundle() {
         let folder = temp("bundle");
-        let exe = folder.join("VectorCraft.app/Contents/MacOS/vectorcraft");
+        let exe = folder.join("Nib.app/Contents/MacOS/vectorcraft");
         std::fs::create_dir_all(exe.parent().unwrap()).unwrap();
         std::fs::write(folder.join("portable.txt"), b"").unwrap();
         let install = install_dir("macos", &exe, &environment).unwrap();

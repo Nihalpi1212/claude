@@ -1,38 +1,38 @@
 {
-  "id": "vectorcraft",
-  "name": "VectorCraft",
-  "upgradeCode": "601C6437-08AE-4645-ADCC-27F036C2EA2F",
+  "id": "nib",
+  "name": "Nib",
+  "upgradeCode": "521C1411-3286-4824-9597-0C2D4EECC5C7",
   "sources": [
-    "vectorcraft.wxs"
+    "nib.wxs"
   ],
-  "icon": "assets/app-icon/vectorcraft.ico",
+  "icon": "assets/app-icon/nib.ico",
   "localization": [
-    "vectorcraft.en-us.wxl"
+    "nib.en-us.wxl"
   ],
   "extensions": [
     "UI",
     "Util"
   ],
   "payloads": [
-    "vectorcraft-cli.exe",
-    "vectorcraft.exe"
+    "nib-cli.exe",
+    "nib.exe"
   ],
   "registry": [
     [
       "-1",
-      "Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\vectorcraft.exe",
+      "Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\nib.exe",
       "",
       "[#VectorcraftExe]"
     ],
     [
       "-1",
-      "Software\\VectorCraft",
+      "Software\\Nib",
       "InstallDir",
       "[INSTALLFOLDER]"
     ],
     [
       "-1",
-      "Software\\VectorCraft",
+      "Software\\Nib",
       "DesktopShortcut",
       "#1"
     ]

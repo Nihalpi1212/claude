@@ -88,7 +88,7 @@ fn the_report_names_the_stage_the_activity_the_commands_and_the_platform() {
     let s = Sample { step: 9, stage: Stage::Interface, activity: Activity::ClipboardRead };
     let text = report(UNIX_EPOCH + Duration::from_secs(1_794_385_145), ms(3_240), s, &beacon, Duration::from_secs(754), &facts());
     for want in [
-        "VectorCraft hang report, 2026-11-11T08:19:05.000Z",
+        "Nib hang report, 2026-11-11T08:19:05.000Z",
         "has not moved on for 3.2 s",
         "Stage: running the interface",
         "Waiting on: reading the system clipboard",
@@ -166,13 +166,13 @@ fn the_next_launch_takes_a_left_report_once_and_keeps_a_copy() {
     let dir = tempfile::tempdir().unwrap();
     assert_eq!(take_previous(dir.path()), None);
     let left = dir.path().join(format!("{REPORT_PREFIX}4242.txt"));
-    std::fs::write(&left, "VectorCraft hang report, then\n").unwrap();
+    std::fs::write(&left, "Nib hang report, then\n").unwrap();
     // Other files in the log folder are not reports.
     std::fs::write(dir.path().join(format!("{REPORT_PREFIX}notes.txt")), "x").unwrap();
     std::fs::write(dir.path().join(format!("{REPORT_PREFIX}17.txt")), "").unwrap();
-    assert_eq!(take_previous(dir.path()).as_deref(), Some("VectorCraft hang report, then\n"));
+    assert_eq!(take_previous(dir.path()).as_deref(), Some("Nib hang report, then\n"));
     assert!(!left.exists());
-    assert_eq!(std::fs::read_to_string(dir.path().join(PREVIOUS_FILE)).unwrap(), "VectorCraft hang report, then\n");
+    assert_eq!(std::fs::read_to_string(dir.path().join(PREVIOUS_FILE)).unwrap(), "Nib hang report, then\n");
     assert_eq!(take_previous(dir.path()), None);
     // An empty file may be one being written: it stays.
     assert!(dir.path().join(format!("{REPORT_PREFIX}17.txt")).exists());
@@ -259,12 +259,12 @@ fn an_oversized_report_file_is_not_read() {
 
 #[test]
 fn troubleshooting_info_holds_both_sessions_reports() {
-    let shared = shared(Some("VectorCraft hang report, last session\n".to_string()));
-    *shared.last.lock().unwrap() = Some("VectorCraft hang report, this session\n".to_string());
+    let shared = shared(Some("Nib hang report, last session\n".to_string()));
+    *shared.last.lock().unwrap() = Some("Nib hang report, this session\n".to_string());
     let beacon = Beacon::new();
     let text = troubleshooting(&shared, &beacon, UNIX_EPOCH);
-    assert!(text.starts_with("VectorCraft troubleshooting info, 1970-01-01T00:00:00.000Z\n"));
-    assert!(text.contains("This session's last hang report:\nVectorCraft hang report, this session\n"));
-    assert!(text.contains("(it was closed while it did not answer):\nVectorCraft hang report, last session\n"));
+    assert!(text.starts_with("Nib troubleshooting info, 1970-01-01T00:00:00.000Z\n"));
+    assert!(text.contains("This session's last hang report:\nNib hang report, this session\n"));
+    assert!(text.contains("(it was closed while it did not answer):\nNib hang report, last session\n"));
     assert!(text.contains("Recent commands, oldest first: none"));
 }

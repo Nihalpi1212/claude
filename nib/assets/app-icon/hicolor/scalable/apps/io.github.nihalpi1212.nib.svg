@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Nib app icon: a fountain-pen nib drawing a vector curve, on a deep-teal rounded tile.
+       Original artwork by the Nib contributors, MIT OR Apache-2.0. -->
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0.35" y2="1">
+      <stop offset="0" stop-color="#16707a"/>
+      <stop offset="1" stop-color="#0a2f3a"/>
+    </linearGradient>
+    <linearGradient id="nib" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#fbf3df"/>
+      <stop offset="1" stop-color="#e9d6a8"/>
+    </linearGradient>
+    <clipPath id="round"><rect width="512" height="512" rx="112"/></clipPath>
+  </defs>
+  <g clip-path="url(#round)">
+    <rect width="512" height="512" fill="url(#tile)"/>
+    <!-- the curve the nib draws, with its end anchor -->
+    <path d="M148 372 C 196 468, 326 468, 398 386" fill="none" stroke="#62e3d1" stroke-width="28" stroke-linecap="round"/>
+    <rect x="374" y="358" width="50" height="50" rx="9" fill="#0b3440" stroke="#62e3d1" stroke-width="12"/>
+    <!-- the nib, tip down-left, touching the start of the curve -->
+    <g transform="translate(148 372) rotate(44) scale(1.13) translate(-256 -436)">
+      <path d="M256 436 C 228 380, 172 304, 170 252 C 169 230, 180 214, 190 204 L 196 96 L 316 96 L 322 204 C 332 214, 343 230, 342 252 C 340 304, 284 380, 256 436 Z" fill="url(#nib)"/>
+      <path d="M256 436 C 284 380, 340 304, 342 252 C 343 230, 332 214, 322 204 L 316 96 L 256 96 Z" fill="#d9c08a" opacity="0.55"/>
+      <path d="M196 96 L 316 96 L 317.6 126 L 194.4 126 Z" fill="#0a2f3a" opacity="0.22"/>
+      <path d="M256 268 L 256 432" stroke="#0d3e48" stroke-width="13" stroke-linecap="round"/>
+      <circle cx="256" cy="250" r="23" fill="#0d3e48"/>
+    </g>
+  </g>
+</svg>

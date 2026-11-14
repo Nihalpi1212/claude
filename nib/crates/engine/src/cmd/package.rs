@@ -492,7 +492,7 @@ impl Package {
 fn collect_and_write(package: Package, write: &mut dyn FnMut(&str, &[u8]) -> Result<()>) -> Result<Value> {
     let Package { o, doc_path, links_from, stem, name, root, info, doc: original } = package;
     let mut doc = (*original).clone();
-    let doc_name = format!("{stem}.{}", vectorcraft_format::EXTENSION);
+    let doc_name = format!("{stem}.{}", vectorcraft_format::brand::EXTENSION);
     let base = LinkBase { doc: Some(&doc_path), relative: Some(&links_from) };
     // After a save in another folder, links found away from their paths take the paths where they
     // were found, as a copy of the document has them.

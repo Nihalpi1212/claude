@@ -138,7 +138,7 @@ impl Facts {
     pub fn lines(&self) -> String {
         let or_unknown = |v: &Option<String>| v.clone().unwrap_or_else(|| "unknown".to_string());
         format!(
-            "VectorCraft {} on {} {}\nWindow system: {}; desktop: {}; session type: {}; Flatpak: {}\nGraphics: {}; {}\n",
+            "Nib {} on {} {}\nWindow system: {}; desktop: {}; session type: {}; Flatpak: {}\nGraphics: {}; {}\n",
             env!("CARGO_PKG_VERSION"),
             std::env::consts::OS,
             std::env::consts::ARCH,
@@ -185,7 +185,7 @@ fn activity_lines(beacon: &Beacon, uptime: Duration) -> String {
 pub fn report(at: SystemTime, stalled: Duration, sample: Sample, beacon: &Beacon, uptime: Duration, facts: &Facts) -> String {
     let waiting = sample.activity.describe().map(|a| format!("Waiting on: {a}\n")).unwrap_or_default();
     format!(
-        "VectorCraft hang report, {}\nThe interface thread has not moved on for {:.1} s.\nStage: {}\n{waiting}{}{}No native stack is recorded: the stage and the activity are what the app marks.\n",
+        "Nib hang report, {}\nThe interface thread has not moved on for {:.1} s.\nStage: {}\n{waiting}{}{}No native stack is recorded: the stage and the activity are what the app marks.\n",
         timestamp(at),
         stalled.as_secs_f64(),
         sample.stage.describe(),
@@ -208,7 +208,7 @@ pub struct Shared {
 pub fn troubleshooting(shared: &Shared, beacon: &Beacon, at: SystemTime) -> String {
     let last = shared.last.lock().unwrap_or_else(PoisonError::into_inner).clone();
     format!(
-        "VectorCraft troubleshooting info, {}\n{}{}\nThis session's last hang report:\n{}\nThe hang report the last session left (it was closed while it did not answer):\n{}\n",
+        "Nib troubleshooting info, {}\n{}{}\nThis session's last hang report:\n{}\nThe hang report the last session left (it was closed while it did not answer):\n{}\n",
         timestamp(at),
         shared.facts.lines(),
         activity_lines(beacon, shared.started.elapsed()),

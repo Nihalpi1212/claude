@@ -180,7 +180,7 @@ impl Files {
                     None => {
                         let read = file.clone().and_then(|file| opts.read.and_then(|read| read(&file)));
                         let source = match read {
-                            Some((bytes, link)) => files.source(bytes, link).ok_or("is not an image VectorCraft reads"),
+                            Some((bytes, link)) => files.source(bytes, link).ok_or("is not an image Nib reads"),
                             None => Err("not found"),
                         };
                         if let Some(file) = file {

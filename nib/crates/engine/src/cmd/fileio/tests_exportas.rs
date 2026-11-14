@@ -193,7 +193,7 @@ fn an_option_only_another_format_reads_gets_a_note() {
     let r = s.execute("document.export", &json!({"format": "pdf", "preserveEditing": false, "range": "1"})).unwrap();
     assert!(notes(&r).is_empty(), "{r}");
     let r = s.execute("document.export", &json!({"format": "vectorcraft", "artboard": 0})).unwrap();
-    assert_eq!(notes(&r), ["`artboard` was not used: VectorCraft files don't read it"], "{r}");
+    assert_eq!(notes(&r), ["`artboard` was not used: Nib files don't read it"], "{r}");
 }
 
 /// A legacy `.ai` file reads its own options and the artboards to write, not the other `.ai`
@@ -246,7 +246,7 @@ fn an_export_notes_the_options_that_only_a_save_reads() {
     let (mut s, notes) = (with_art(), unused);
     let r = s.execute("document.export", &json!({"format": "ai", "separateArtboards": true, "range": "1"})).unwrap();
     assert_eq!(notes(&r), ["`separateArtboards` was not used: PDF-compatible .ai files don't read it"], "{r}");
-    for (format, label) in [("vectorcraft", "VectorCraft"), ("template", "VectorCraft Template")] {
+    for (format, label) in [("vectorcraft", "Nib"), ("template", "Nib Template")] {
         let r = s.execute("document.export", &json!({"format": format, "separateArtboards": true, "range": "1", "compress": true})).unwrap();
         assert_eq!(
             notes(&r),
@@ -327,7 +327,7 @@ fn a_save_notes_the_ai_options_its_file_does_not_read() {
 fn a_save_notes_an_option_beside_the_path_that_only_another_save_format_takes() {
     let (mut s, notes) = (with_art(), unused);
     let r = s.execute("file.saveCopy", &json!({"format": "vectorcraft", "marks": {"trim": true}, "svg": {"minify": true}})).unwrap();
-    assert_eq!(notes(&r), ["`marks` was not used: VectorCraft files don't read it", "`svg` was not used: VectorCraft files don't read it"], "{r}");
+    assert_eq!(notes(&r), ["`marks` was not used: Nib files don't read it", "`svg` was not used: Nib files don't read it"], "{r}");
 }
 
 /// The `.ai` options a save's file doesn't read keep the values the document's last save in that

@@ -1,0 +1,40 @@
+[package]
+name = "nib-genai"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Nib generative AI: the user's own OpenAI or Google Gemini key, called from the user's machine (docs/generative-ai.md)"
+
+[lints]
+workspace = true
+
+[dependencies]
+vectorcraft-engine = { workspace = true }
+vectorcraft-doc = { workspace = true }
+vectorcraft-geom = { workspace = true }
+vectorcraft-color = { workspace = true }
+vectorcraft-format = { workspace = true }
+vectorcraft-trace = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+log = { workspace = true }
+thiserror = { workspace = true }
+image = { workspace = true }
+# The SVG a model writes is parsed and rebuilt from an allowlist before the importer sees it.
+roxmltree = "0.21"
+
+# Native only: the browser build has no AI commands (docs/generative-ai.md › Platforms). Same ureq
+# features as craft-update's, already in Cargo.lock: rustls on ring, the OS trust store.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+ureq = { version = "3.4", default-features = false, features = ["rustls-no-provider", "_ring", "gzip", "platform-verifier"] }
+
+# API keys live in the OS credential store where keyring has a native one without C libraries:
+# the macOS Keychain and the Windows Credential Manager. Elsewhere a 0600 file (keys.rs).
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3.6", default-features = false, features = ["apple-native"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring = { version = "3.6", default-features = false, features = ["windows-native"] }
+
+[dev-dependencies]
+vectorcraft-engine = { workspace = true, features = ["bundled-fonts", "heif"] }

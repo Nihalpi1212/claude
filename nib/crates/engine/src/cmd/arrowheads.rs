@@ -55,7 +55,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Reload Arrowheads",
             [],
             None,
-            "{} read the arrowheads file again (a save of it from VectorCraft does this already; under automation read roots, a file outside them is an error and is not read) → {count, skipped: [{name, reason}]}",
+            "{} read the arrowheads file again (a save of it from Nib does this already; under automation read roots, a file outside them is an error and is not read) → {count, skipped: [{name, reason}]}",
             has_file,
             reload
         ),

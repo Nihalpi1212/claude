@@ -59,7 +59,7 @@ fn lines_of_text_in_installed_fonts_come_in_as_point_type() {
     assert!((st.size - 24.0).abs() < 0.01);
     let origin = first.xf * kurbo::Point::ZERO;
     assert!((origin.x - 20.0).abs() < 0.01 && (origin.y - 50.0).abs() < 0.01, "on the PDF's baseline: {origin:?}");
-    assert!(st.tracking.abs() <= 1.0, "set as VectorCraft sets it: {}", st.tracking);
+    assert!(st.tracking.abs() <= 1.0, "set as Nib sets it: {}", st.tracking);
     assert!(t.iter().any(|t| t.plain_text() == "Hall A" && (t.first_style().size - 12.0).abs() < 0.01));
     assert!(!r.warnings.iter().any(|w| w.contains("outlines")), "{:?}", r.warnings);
 }

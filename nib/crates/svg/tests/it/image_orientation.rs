@@ -256,7 +256,7 @@ fn a_tiff_with_more_strips_than_can_be_counted_is_refused() {
     let f = dir.to_string_lossy();
     let (d, w) =
         import_with(&svg(r#"<image href="huge.tif" width="20" height="40"/>"#), &ImportOptions { folder: Some(&f), read: Some(&read) }).unwrap();
-    assert!(w.iter().any(|w| w.contains("huge.tif") && w.contains("is not an image VectorCraft reads")), "{w:?}");
+    assert!(w.iter().any(|w| w.contains("huge.tif") && w.contains("is not an image Nib reads")), "{w:?}");
     let [(_, im)] = images(&d)[..] else { panic!("{} images", images(&d).len()) };
     assert!(d.images[&im.key].is_proxy(), "a placeholder");
     let data = format!("data:image/tiff;base64,{}", base64_encode(&tif));

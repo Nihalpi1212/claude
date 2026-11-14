@@ -27,7 +27,7 @@ impl GraphicsLoss {
     /// second report before then adds nothing.
     pub fn report(&self, ctx: &egui::Context, why: impl Into<String>) {
         let why = why.into();
-        log::error!("vectorcraft: the graphics device was lost: {why}");
+        log::error!("nib: the graphics device was lost: {why}");
         self.0.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert(why);
         ctx.request_repaint();
     }
@@ -95,7 +95,7 @@ impl VectorcraftApp {
     /// every modified document has an up-to-date copy (none modified counts).
     pub fn graphics_lost(&mut self, why: &str) -> bool {
         if let Err(e) = self.session.execute("file.recovery.save", &serde_json::json!({})) {
-            log::warn!("vectorcraft: no recovery copies after losing the graphics ({why}): {e}");
+            log::warn!("nib: no recovery copies after losing the graphics ({why}): {e}");
         }
         self.session.documents().iter().filter(|st| st.is_dirty()).all(|st| st.recovery.as_ref().is_some_and(|c| st.same_content(&c.doc)))
     }
@@ -110,7 +110,7 @@ impl VectorcraftApp {
             return;
         }
         if self.context != 0 {
-            log::info!("vectorcraft: new graphics context: uploading the UI again");
+            log::info!("nib: new graphics context: uploading the UI again");
             forget_textures();
             // The IME tracker's pass numbers are per context. A new context starts at pass 0; only
             // an explicit teardown guarantees it cannot look continuous with the old context's

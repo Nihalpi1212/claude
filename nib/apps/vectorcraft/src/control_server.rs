@@ -62,11 +62,11 @@ pub fn start(port: u16, ctx: egui::Context) -> Receiver<ControlRequest> {
     let listener = match TcpListener::bind(("127.0.0.1", port)) {
         Ok(l) => l,
         Err(e) => {
-            eprintln!("vectorcraft: control server failed to bind 127.0.0.1:{port}: {e}");
+            eprintln!("nib: control server failed to bind 127.0.0.1:{port}: {e}");
             return rx;
         }
     };
-    eprintln!("vectorcraft: control server listening on 127.0.0.1:{port}");
+    eprintln!("nib: control server listening on 127.0.0.1:{port}");
     #[cfg(target_os = "macos")]
     keep_answering();
     std::thread::spawn(move || accept_loop(listener, tx, ctx));
@@ -104,7 +104,7 @@ fn accept_loop(listener: TcpListener, tx: Sender<ControlRequest>, ctx: egui::Con
             continue;
         };
         if let Err(e) = spawn_connection(stream, tx.clone(), ctx.clone(), slot, ConnectionTimeouts::default()) {
-            eprintln!("vectorcraft: control worker failed to start: {e}");
+            eprintln!("nib: control worker failed to start: {e}");
         }
     }
 }

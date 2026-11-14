@@ -51,12 +51,12 @@ fn prints_usage(args: &[&str], env: &[(&str, &str)]) {
     let stdout = String::from_utf8(out.stdout).unwrap();
     assert!(out.status.success(), "{args:?}: {}", String::from_utf8_lossy(&out.stderr));
     assert!(out.stderr.is_empty(), "{args:?}: {}", String::from_utf8_lossy(&out.stderr));
-    assert!(stdout.starts_with("Usage: vectorcraft "), "{args:?}: {stdout}");
+    assert!(stdout.starts_with("Usage: nib "), "{args:?}: {stdout}");
     for flag in ["--control", "--automation-read-root", "--automation-write-root", "--in-window-menus", "--safe-mode", "--version", "--help"] {
         assert!(stdout.contains(flag), "{args:?}: usage doesn't mention {flag}: {stdout}");
     }
     // Headless work is the CLI's: the usage says where to go.
-    assert!(stdout.contains("vectorcraft-cli"), "{args:?}: {stdout}");
+    assert!(stdout.contains("nib-cli"), "{args:?}: {stdout}");
 }
 
 #[test]
@@ -85,7 +85,7 @@ fn an_unknown_option_is_an_error_and_not_a_file() {
         let unknown = args.iter().find(|a| a.starts_with('-')).unwrap();
         assert_eq!(
             stderr,
-            format!("vectorcraft: unknown option {unknown}; see vectorcraft --help, or put -- before a file whose name starts with '-'\n"),
+            format!("nib: unknown option {unknown}; see nib --help, or put -- before a file whose name starts with '-'\n"),
             "{args:?}"
         );
     }

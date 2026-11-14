@@ -224,7 +224,7 @@ mod tests {
         let unique: std::collections::BTreeSet<_> = names.iter().collect();
         assert_eq!(unique.len(), tools.len(), "{names:?}");
         for name in &names {
-            assert!(name.starts_with("dc-"), "{name} is drawn for VectorCraft");
+            assert!(name.starts_with("dc-"), "{name} is drawn for Nib");
             assert!(exists(name), "{name}");
         }
     }

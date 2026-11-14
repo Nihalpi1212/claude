@@ -293,11 +293,11 @@ fn object_tags_without_an_object_before_them_tag_nothing() {
     }
     for bad in ["(x) (y) XT\n", "/id 3 XT\n", "XT\n"] {
         let err = read(stream7(&layer7("L", &format!("{a}f\n{bad}"))).as_bytes()).unwrap_err();
-        assert!(err.contains("operators VectorCraft doesn't know"), "{bad}: {err}");
+        assert!(err.contains("operators Nib doesn't know"), "{bad}: {err}");
     }
     // Outside any layer too.
     let err = read(stream7(&format!("(x) (y) XT\n{}", layer7("L", &format!("{a}f\n")))).as_bytes()).unwrap_err();
-    assert!(err.contains("operators VectorCraft doesn't know"), "{err}");
+    assert!(err.contains("operators Nib doesn't know"), "{err}");
 }
 
 /// A filled clipping path's tags are its own, and a clip group's tags after `Q` are the group's.
@@ -2888,7 +2888,7 @@ fn images_with_alpha_channels() {
 fn image_left_out_with_a_warning(data: &[u8]) {
     let r = read(data).unwrap();
     assert!(art(&r.doc).is_empty(), "{:#?}", art(&r.doc));
-    let left_out = r.warnings.iter().filter(|w| *w == "an image VectorCraft can't read was left out").count();
+    let left_out = r.warnings.iter().filter(|w| *w == "an image Nib can't read was left out").count();
     assert_eq!(left_out, 1, "{:?}", r.warnings);
 }
 
@@ -3035,7 +3035,7 @@ fn a_version_7_linked_image_without_its_file_name_is_left_out_with_a_warning() {
         let a = art(&r.doc);
         assert_eq!(a.len(), body.matches(" XI\n").count(), "{what}: {:?}", r.warnings);
         assert!(a.iter().all(|n| matches!(&n.kind, NodeKind::Image(im) if im.link.is_none())), "{what}: the embedded images only");
-        let left_out = r.warnings.iter().filter(|w| *w == "an image VectorCraft can't read was left out").count();
+        let left_out = r.warnings.iter().filter(|w| *w == "an image Nib can't read was left out").count();
         assert_eq!(left_out, 1, "{what}: {:?}", r.warnings);
         assert!(!r.warnings.iter().any(|w| w == read::LINKED_PLACEHOLDERS), "{what}: {:?}", r.warnings);
     }
@@ -4270,7 +4270,7 @@ fn legacy_tab_stops_copied_into_paragraphs_are_capped() {
     assert!(paras[..1024].iter().all(|p| p.tabs.len() == 1024));
     assert!(paras[1024..].iter().all(|p| p.tabs.is_empty()));
     assert_eq!((paras[2046].justify, paras[2047].justify), (vectorcraft_doc::Justify::Left, vectorcraft_doc::Justify::Center));
-    assert_eq!(r.warnings, ["tab stops past VectorCraft's limits were left out"]);
+    assert_eq!(r.warnings, ["tab stops past Nib's limits were left out"]);
 }
 
 /// `Te` (end render, §22.6) reads in a text object with no operands and with four, inside a tab
@@ -4710,11 +4710,11 @@ fn legacy_linked_area_frames_cap_their_copied_tab_stops() {
     let stops: Vec<usize> = frames.iter().map(|(_, f)| f.para_at(0).tabs.len()).collect();
     assert_eq!(stops.iter().filter(|&&n| n == 1024).count(), 1025);
     assert_eq!(stops.iter().filter(|&&n| n == 0).count(), 3071);
-    assert_eq!(r.warnings, ["tab stops past VectorCraft's limits were left out"]);
+    assert_eq!(r.warnings, ["tab stops past Nib's limits were left out"]);
 }
 
 /// The warning when linked areas are left out.
-const LINKED_AREAS_LEFT_OUT: &str = "linked type areas past VectorCraft's limits were left out";
+const LINKED_AREAS_LEFT_OUT: &str = "linked type areas past Nib's limits were left out";
 const DIRECTION_CHANGE_LEFT_OUT: &str = "type that changes writing direction inside a text object opens in the direction of its first character";
 
 /// The frames of linked areas times the characters of their story are kept to the reader's
@@ -5851,7 +5851,7 @@ fn an_undefined_highlight_is_a_gradient_without_one() {
 #[test]
 fn an_undefined_number_anywhere_else_is_still_an_operator_the_reader_doesnt_know() {
     let err = read(stream(&layer(&format!("{RED}-- 5 m\n0 10 L\n10 10 L\nf\n"))).as_bytes()).unwrap_err();
-    assert!(err.contains("operators VectorCraft doesn't know (`--`)"), "{err}");
+    assert!(err.contains("operators Nib doesn't know (`--`)"), "{err}");
 }
 
 #[test]
@@ -9755,7 +9755,7 @@ fn a_files_brushes_come_in_with_their_values_in_the_panels_order() {
     let lib = vectorcraft_brush::library(&r.doc);
     let names: Vec<&str> = lib.iter().map(|b| b.name.as_str()).collect();
     assert_eq!(names, ["Mop", "Nib", "Spray", "Ribbon"], "{:?}", r.warnings);
-    assert!(r.warnings.iter().any(|w| w == "brushes VectorCraft can't read yet were left out of the Brushes panel (1)"), "{:?}", r.warnings);
+    assert!(r.warnings.iter().any(|w| w == "brushes Nib can't read yet were left out of the Brushes panel (1)"), "{:?}", r.warnings);
     use vectorcraft_brush::{BrushKind, Variation};
     let BrushKind::Calligraphic(c) = brush_named(&lib, "Nib") else { panic!("calligraphic") };
     assert_eq!((c.angle, c.roundness, c.size), (-10.0, 50.0, 4.0));
@@ -10827,7 +10827,7 @@ fn a_graphs_settings_paint_nothing_and_its_drawn_art_paints_as_usual() {
 fn graph_operators_outside_a_graph_are_unknown() {
     for stray in ["Gs\n", "Go\n", "1 2 Gc\n"] {
         let err = read(stream7(&layer7("L", &format!("{}{stray}", rect_path(0.0, 0.0, 5.0, 5.0)))).as_bytes()).unwrap_err();
-        assert!(err.contains("operators VectorCraft doesn't know"), "{stray}: {err}");
+        assert!(err.contains("operators Nib doesn't know"), "{stray}: {err}");
     }
     for (stray, op) in [("%_2 0 0 0 Go\n", "`Go`"), ("%_GS\n", "`GS`"), ("%_1 2 Gc\n", "`Gc`")] {
         let r = read(stream7(&layer7("L", &format!("{}f\n{stray}", rect_path(0.0, 0.0, 5.0, 5.0)))).as_bytes()).unwrap();

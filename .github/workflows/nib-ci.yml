@@ -1,5 +1,13 @@
-# Nib CI: unit tests (node:test) and browser end-to-end tests (Playwright) on every change
-# under nib/, plus tests that launch the real Electron app under Xvfb.
+# Nib CI: the quality gate for the Rust workspace in nib/ (Nib is based on VectorCraft).
+#
+# The steps follow VectorCraft's own gate (`cargo xtask ci`, run by storytold/craft-common-actions'
+# gate.yml), written out here instead of calling that reusable workflow: rustfmt, clippy with
+# warnings as errors, the workspace tests and doctests, the repository checks xtask provides, and a
+# smoke test of the nib-cli binary. Left out from upstream's gate: the wasm check (the web app is
+# not part of Nib's releases) and the builds without bundled fonts (an embedder configuration).
+#
+# The tests need neither secrets nor network access; craft-fonts is not checked out because the
+# tests that use its fonts skip without it (releases embed it, see nib-release.yml).
 
 name: Nib CI
 
@@ -16,46 +24,110 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: nib-ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # The Rust release Nib is built and linted with. The workspace's minimum (rust-version in
+  # nib/Cargo.toml) is 1.95; move this forward deliberately, together with nib-release.yml, since a
+  # new clippy can bring new warnings.
+  RUST_TOOLCHAIN: '1.97.0'
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  CARGO_NET_RETRY: 10
+  RUST_BACKTRACE: 1
+  # As upstream's gate: line tables are enough for backtraces and keep the target dir small.
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+
 jobs:
-  test:
-    # Pinned: the pinned Playwright release has no browser build for the image ubuntu-latest
-    # now points to (Ubuntu 26.04), so `playwright install` fails there. Move this forward
-    # together with @playwright/test.
+  gate:
+    name: fmt, clippy, test
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 120
     defaults:
       run:
         working-directory: nib
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
         with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: nib/package-lock.json
+          persist-credentials: false
 
-      - name: Install dependencies
-        run: npm ci
+      # Nothing waits on it: the space is free before the build needs it.
+      - name: Free disk space
+        run: |
+          nohup sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL </dev/null >/dev/null 2>&1 &
 
-      - name: Unit tests
-        run: npm test
+      # The Linux build's system libraries (craft-common-actions' install-linux-deps).
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libxkbcommon-dev libwayland-dev libx11-dev libxrandr-dev libxi-dev libgl1-mesa-dev \
+            libasound2-dev pkg-config
 
-      - name: Install Playwright browser
-        run: npx playwright install --with-deps chromium
-
-      - name: End-to-end tests
-        run: npm run test:e2e
-
-      - name: Electron app tests
-        run: xvfb-run -a npm run test:electron
-
-      - name: Upload test artifacts
-        if: failure()
-        uses: actions/upload-artifact@v4
+      - uses: dtolnay/rust-toolchain@master
         with:
-          name: nib-e2e-artifacts
-          path: |
-            nib/tests/e2e/.artifacts
-            nib/tests/electron/.artifacts
-          if-no-files-found: ignore
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: nib
+          # Pull requests read the cache but never write it.
+          save-if: ${{ github.event_name != 'pull_request' }}
+          cache-on-failure: true
+
+      - name: Lockfile is current
+        run: cargo metadata --locked --format-version 1 >/dev/null
+
+      - name: Format
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked --keep-going -- -D warnings
+
+      # Unit and integration tests without the examples (clippy has checked those), as upstream's
+      # `cargo xtask test` does, then the doctests.
+      - name: Tests
+        run: cargo test --workspace --locked --no-fail-fast --lib --bins --tests
+
+      - name: Doctests
+        run: cargo test --workspace --locked --no-fail-fast --doc
+
+      # The repository checks of upstream's gate that need no extra toolchain.
+      - name: Repository checks (assets, brands, PDF deps, layers, UI command catalogue)
+        run: |
+          set -euo pipefail
+          cargo xtask assets
+          cargo xtask brands
+          cargo xtask pdf-deps
+          cargo xtask layers
+          cargo xtask ui-commands --check
+          cargo xtask cursors
+
+      - name: CLI smoke test
+        run: |
+          set -euo pipefail
+          cargo build --locked -p vectorcraft-cli
+          cli=target/debug/nib-cli
+          out="$RUNNER_TEMP/nib-smoke"
+          mkdir -p "$out"
+          "$cli" --version | tee "$out/version.txt"
+          grep -q '^Nib ' "$out/version.txt"
+          for ext in png svg pdf nibart; do
+            "$cli" convert examples/dusk-poster.vectorcraft "$out/dusk.$ext"
+            test -s "$out/dusk.$ext"
+          done
+          file "$out"/dusk.*
+          head -c 8 "$out/dusk.png" | od -An -c | grep -q 'P   N   G'
+          head -c 5 "$out/dusk.pdf" | grep -q '%PDF-'
+          grep -q '<svg' "$out/dusk.svg"
+          # The native file round-trips through the reader.
+          "$cli" info "$out/dusk.nibart" >"$out/info.json"
+          grep -q '"artboards"' "$out/info.json"
+
+      # A build or test must not have changed Cargo.lock.
+      - name: Lockfile unchanged
+        run: git diff --exit-code -- Cargo.lock

@@ -355,7 +355,7 @@ pub const PREF_SPECS: &[PrefSpec] = &[
     p!("openDocumentsAsTabs", "User Interface", "", "Open Documents As Tabs", bool),
     p!("largeTabs", "User Interface", "", "Large Tabs", bool),
     p!("systemTitleBar", "User Interface", "", "System Title Bar", bool),
-    p!("appTitleBar", "User Interface", "", "VectorCraft Title Bar on Every Desktop", bool),
+    p!("appTitleBar", "User Interface", "", "Nib Title Bar on Every Desktop", bool),
     p!("uiScaling", "User Interface", "UI Scaling", "Scale", num(0.75, 2.0, "×")),
     p!("scaleCursorWithUi", "User Interface", "UI Scaling", "Scale Cursor Proportional to UI", bool),
     // `auto` or a language code the shell registers (`zh-hant`); the shell shows it as a dropdown.
@@ -872,7 +872,7 @@ fn read_prefs_file(bytes: &[u8]) -> std::result::Result<Map<String, Value>, Stri
         None => return Err("not a preferences file: no `format`".into()),
     }
     match file.get("version").and_then(Value::as_u64) {
-        Some(v) if v > PREFS_VERSION => return Err(format!("the file was saved by a newer version of VectorCraft (version {v})")),
+        Some(v) if v > PREFS_VERSION => return Err(format!("the file was saved by a newer version of Nib (version {v})")),
         Some(1..) => {}
         _ => return Err("not a preferences file: no `version`".into()),
     }

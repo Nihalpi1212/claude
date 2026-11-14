@@ -39,7 +39,7 @@ fn rejects_with_env(args: &[&str], env: &[(&str, &str)], message: &str) {
     assert!(out.stdout.is_empty(), "{args:?}: {:?}", out.stdout);
     // Exact stderr excludes unrelated startup warnings or display errors that could otherwise
     // make a malformed invocation fail for an unrelated reason.
-    assert_eq!(String::from_utf8(out.stderr).unwrap(), format!("vectorcraft: {message}\n"), "{args:?}");
+    assert_eq!(String::from_utf8(out.stderr).unwrap(), format!("nib: {message}\n"), "{args:?}");
 }
 
 #[test]
@@ -62,7 +62,7 @@ fn repeated_roots_are_accepted_for_both_spellings() {
     for flag in ["--automation-read-root", "--automation-write-root"] {
         let out = Command::new(crate::bin()).args([flag, ".", format!("{flag}=.").as_str(), flag, "./", "--version"]).output().unwrap();
         assert!(out.status.success(), "{flag}: {}", String::from_utf8_lossy(&out.stderr));
-        assert_eq!(String::from_utf8(out.stdout).unwrap(), format!("vectorcraft {}\n", env!("CARGO_PKG_VERSION")));
+        assert_eq!(String::from_utf8(out.stdout).unwrap(), format!("Nib {} (based on VectorCraft 0.24.1)\n", env!("CARGO_PKG_VERSION")));
         assert!(out.stderr.is_empty());
         rejects(&[flag, ".", flag, ""], &format!("{flag} needs a non-empty folder"));
         rejects(&[&format!("{flag}=."), flag], &format!("{flag} needs a folder"));
@@ -74,7 +74,7 @@ fn explicit_dash_folder_does_not_consume_version() {
     let out =
         Command::new(crate::bin()).args(["--automation-read-root=-folder", "--automation-write-root", "./-folder", "--version"]).output().unwrap();
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-    assert_eq!(String::from_utf8(out.stdout).unwrap(), format!("vectorcraft {}\n", env!("CARGO_PKG_VERSION")));
+    assert_eq!(String::from_utf8(out.stdout).unwrap(), format!("Nib {} (based on VectorCraft 0.24.1)\n", env!("CARGO_PKG_VERSION")));
     assert!(out.stderr.is_empty());
 }
 
@@ -96,5 +96,5 @@ fn control_without_a_valid_port_fails_before_startup() {
 fn version_wins_over_a_bad_control_port_variable() {
     let out = Command::new(crate::bin()).arg("--version").env("VECTORCRAFT_CONTROL_PORT", "abc").output().unwrap();
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-    assert_eq!(String::from_utf8(out.stdout).unwrap(), format!("vectorcraft {}\n", env!("CARGO_PKG_VERSION")));
+    assert_eq!(String::from_utf8(out.stdout).unwrap(), format!("Nib {} (based on VectorCraft 0.24.1)\n", env!("CARGO_PKG_VERSION")));
 }

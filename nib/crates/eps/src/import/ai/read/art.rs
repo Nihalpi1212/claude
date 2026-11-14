@@ -434,18 +434,18 @@ impl<'a> Reader<'a> {
         self.image_link = None;
         let space = self.raster.as_ref().and_then(|r| r.space.clone()).unwrap_or_default();
         let Some((m, n)) = Self::image_operands(&vals) else {
-            self.image_left_out("an image VectorCraft can't read was left out");
+            self.image_left_out("an image Nib can't read was left out");
             return Ok(());
         };
         let [_, _, _, _, w, h, bits, kind, alpha, _, binary, rest @ ..] = n.as_slice() else {
-            self.image_left_out("an image VectorCraft can't read was left out");
+            self.image_left_out("an image Nib can't read was left out");
             return Ok(());
         };
         // ImageMask 1: the image is transparent and takes a color (version 7 specification §8.1).
         let image_mask = rest.first() == Some(&1.0);
         let (w, h) = (*w as u64, *h as u64);
         if w == 0 || h == 0 || ![1.0, 8.0].contains(bits) {
-            self.image_left_out("an image VectorCraft can't read was left out");
+            self.image_left_out("an image Nib can't read was left out");
             return Ok(());
         }
         let channels = channels(&space, *kind);
@@ -545,12 +545,12 @@ impl<'a> Reader<'a> {
             }
         }
         let Some(img) = image::RgbaImage::from_raw(w as u32, h as u32, rgba) else {
-            self.image_left_out("an image VectorCraft can't read was left out");
+            self.image_left_out("an image Nib can't read was left out");
             return Ok(());
         };
         let mut png = vec![];
         if img.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).is_err() {
-            self.image_left_out("an image VectorCraft can't read was left out");
+            self.image_left_out("an image Nib can't read was left out");
             return Ok(());
         }
         self.add_raster(ImageBlob::new("image/png", png), None, &m, (w as u32, h as u32), None)
@@ -580,7 +580,7 @@ impl<'a> Reader<'a> {
         let mut png = vec![];
         let written = image::GrayImage::from_raw(w, h, gray).map(|img| img.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png));
         if !matches!(written, Some(Ok(()))) {
-            self.image_left_out("an image VectorCraft can't read was left out");
+            self.image_left_out("an image Nib can't read was left out");
             return Ok(());
         }
         self.add_raster(ImageBlob::new("image/png", png), alpha, m, (w, h), Some(paint))
@@ -606,29 +606,29 @@ impl<'a> Reader<'a> {
         let path = self.image_link.take();
         let operands = Self::image_operands(&vals);
         let (Some(path), Some((m, n))) = (path, operands) else {
-            self.image_left_out("an image VectorCraft can't read was left out");
+            self.image_left_out("an image Nib can't read was left out");
             return Ok(());
         };
         let (&[a, b, c, d, tx, ty], &[_, _, _, _, w, h, bits, ..]) = (m.as_slice(), n.as_slice()) else {
-            self.image_left_out("an image VectorCraft can't read was left out");
+            self.image_left_out("an image Nib can't read was left out");
             return Ok(());
         };
         if !(1.0..=MAX_SIDE).contains(&w) || !(1.0..=MAX_SIDE).contains(&h) || ![1.0, 8.0].contains(&bits) {
-            self.image_left_out("an image VectorCraft can't read was left out");
+            self.image_left_out("an image Nib can't read was left out");
             return Ok(());
         }
         let (w, h) = (w as u32, h as u32);
         let Some(to_doc) = self.image_space() else {
-            self.image_left_out("an image VectorCraft can't read was left out");
+            self.image_left_out("an image Nib can't read was left out");
             return Ok(());
         };
         let xf = to_doc * Affine::new([a, b, c, d, tx, ty]) * FLIP;
         if !xf.as_coeffs().iter().all(|v| v.is_finite()) || xf.determinant().abs() < 1e-12 {
-            self.image_left_out("an image VectorCraft can't read was left out");
+            self.image_left_out("an image Nib can't read was left out");
             return Ok(());
         }
         let Some(png) = missing_placeholder() else {
-            self.image_left_out("an image VectorCraft can't read was left out");
+            self.image_left_out("an image Nib can't read was left out");
             return Ok(());
         };
         // The placeholder is all the document has of the file: what a missing link shows.
@@ -705,7 +705,7 @@ impl<'a> Reader<'a> {
             return Ok(());
         }
         let [a, b, c, d, tx, ty] = m else {
-            self.image_left_out("an image VectorCraft can't read was left out");
+            self.image_left_out("an image Nib can't read was left out");
             return Ok(());
         };
         let xf = self.space() * Affine::new([*a, *b, *c, *d, *tx, *ty]) * FLIP;
@@ -722,16 +722,16 @@ impl<'a> Reader<'a> {
         // downwards, (u, -v): pixels → (u, -v) → art space. Flipping the matrix's result instead
         // gives the same place only when the image isn't rotated (b = c = 0).
         let [a, b, c, d, tx, ty] = m else {
-            self.image_left_out("an image VectorCraft can't read was left out");
+            self.image_left_out("an image Nib can't read was left out");
             return Ok(());
         };
         let Some(to_doc) = self.image_space() else {
-            self.image_left_out("an image VectorCraft can't read was left out");
+            self.image_left_out("an image Nib can't read was left out");
             return Ok(());
         };
         let xf = to_doc * Affine::new([*a, *b, *c, *d, *tx, *ty]) * FLIP;
         if !xf.as_coeffs().iter().all(|v| v.is_finite()) || xf.determinant().abs() < 1e-12 {
-            self.image_left_out("an image VectorCraft can't read was left out");
+            self.image_left_out("an image Nib can't read was left out");
             return Ok(());
         }
         let mask = alpha.and_then(|a| self.alpha_mask(a, w, h, xf));

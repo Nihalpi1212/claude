@@ -962,7 +962,7 @@ fn unreadable_placed_document_is_copied_unchanged_with_warning() {
     let dir = Folder::new("package-unreadable-placed");
     let mut parent = poster_with_placed_document(&dir);
     let damaged = dir.file("art/part.vectorcraft");
-    let bytes = b"not a parseable VectorCraft file".to_vec();
+    let bytes = b"not a parseable Nib file".to_vec();
     write(&damaged, &bytes);
 
     let result = run(&mut parent, "file.package", json!({ "folder": dir.file("delivery") }));

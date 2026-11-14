@@ -14,13 +14,13 @@ pub const COPIED: &str = "Copied the troubleshooting info";
 /// The status message at launch when the last session stopped responding and was closed before it
 /// answered again.
 pub const LAST_SESSION_STOPPED: &str =
-    "The last session of VectorCraft stopped responding before it closed. Help › Copy Troubleshooting Info copies the details for a bug report";
+    "The last session of Nib stopped responding before it closed. Help › Copy Troubleshooting Info copies the details for a bug report";
 
 /// The text the command copies.
 pub fn text(app: &VectorcraftApp) -> String {
     match &app.services.troubleshooting {
         Some(text) => text(),
-        None => format!("VectorCraft {}\n", env!("CARGO_PKG_VERSION")),
+        None => format!("Nib {}\n", env!("CARGO_PKG_VERSION")),
     }
 }
 
@@ -59,7 +59,7 @@ mod tests {
     fn without_the_service_the_version_is_copied() {
         let mut app = VectorcraftApp::new(Session::new(), Default::default());
         app.run("help.copyTroubleshootingInfo", json!({})).unwrap();
-        assert_eq!(app.clipboard_out, Some(format!("VectorCraft {}\n", env!("CARGO_PKG_VERSION"))));
+        assert_eq!(app.clipboard_out, Some(format!("Nib {}\n", env!("CARGO_PKG_VERSION"))));
     }
 
     #[test]

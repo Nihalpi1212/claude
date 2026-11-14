@@ -274,7 +274,7 @@ fn home_scrolls_in_a_short_window() {
     let size = (800.0, 300.0);
     let has = |texts: &[(String, egui::Rect)], s: &str| texts.iter().any(|(t, _)| t == s);
     let texts = visible_home_texts(&mut app, &ctx, size, 0.0, vec![]);
-    assert!(has(&texts, "Welcome to VectorCraft"), "{texts:?}");
+    assert!(has(&texts, "Welcome to Nib"), "{texts:?}");
     assert!(!has(&texts, "Community"), "below the fold at first");
     let at = egui::pos2(400.0, 150.0);
     let wheel = egui::Event::MouseWheel {
@@ -290,7 +290,7 @@ fn home_scrolls_in_a_short_window() {
         texts = visible_home_texts(&mut app, &ctx, size, f64::from(i) * 0.1, vec![]);
     }
     assert!(has(&texts, "Community"), "the wheel reaches the bottom: {texts:?}");
-    assert!(!has(&texts, "Welcome to VectorCraft"), "the top scrolled away");
+    assert!(!has(&texts, "Welcome to Nib"), "the top scrolled away");
     // The last preset card, scrolled into view, still takes a click.
     let card = texts.iter().find(|(t, _)| t.starts_with("Social Square Post")).map(|(_, r)| r.center()).unwrap();
     let press = |pressed| egui::Event::PointerButton { pos: card, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
@@ -551,14 +551,14 @@ fn text_centre_x(app: &mut VectorcraftApp, text: &str) -> Option<(f32, f32)> {
 #[test]
 fn home_welcome_and_community_are_centred() {
     let mut app = VectorcraftApp::new(vectorcraft_engine::Session::new(), crate::Services::default());
-    for text in ["Welcome to VectorCraft", "Community", "ArtCraft website", "VectorCraft on getartcraft.com", "Source code on GitHub"] {
+    for text in ["Welcome to Nib", "Community", "Source code on GitHub", "Nib Releases"] {
         let (x, centre) = text_centre_x(&mut app, text).unwrap_or_else(|| panic!("{text} is drawn"));
         assert!((x - centre).abs() < 6.0, "{text} is centred: {x} vs {centre}");
     }
-    // The Discord button is centred; its label lies right of its icon, 0.375 of the button's 36 pt
-    // height right of the middle.
-    let (x, centre) = text_centre_x(&mut app, "Join our Discord").unwrap();
-    assert!((x - centre - 0.375 * 36.0).abs() < 2.0, "the Discord button is centred: label at {x} about {centre}");
+    // The Report an Issue button is centred; its label lies right of its icon, 0.375 of the
+    // button's 36 pt height right of the middle.
+    let (x, centre) = text_centre_x(&mut app, "Report an issue").unwrap();
+    assert!((x - centre - 0.375 * 36.0).abs() < 2.0, "the Report an Issue button is centred: label at {x} about {centre}");
     // The two buttons (a label's width plus 32, at least 72, each) lie symmetrically about the
     // centre: the first one's left edge and the second one's right edge are equally far from it.
     let width = |label: &str| {

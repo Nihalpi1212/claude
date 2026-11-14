@@ -1,33 +1,42 @@
-//! Help → community and project links (the ArtCraft Discord, website, this app's page and its
-//! GitHub repository). The commands return the URL; the frontend opens it.
+//! Help → project links: Nib's repository, its issues and releases, and the upstream VectorCraft
+//! project Nib is based on. The commands return the URL; the frontend opens it. The command ids
+//! are VectorCraft's (`help.discord`, `help.website`, `help.appPage`, `help.github`), kept so
+//! upstream changes merge; Nib points them at its own pages (see docs/FORK.md).
 
 use serde_json::{Value, json};
 
 use super::{CommandSpec, Result, always, cmd};
 
-/// The app's id on getartcraft.com and GitHub.
-pub const APP_ID: &str = "vectorcraft";
-pub const DISCORD_URL: &str = "https://discord.gg/artcraft";
-pub const WEBSITE_URL: &str = "https://getartcraft.com";
+/// Nib's source repository.
+pub const REPOSITORY_URL: &str = "https://github.com/Nihalpi1212/claude";
+/// Where Nib's bugs and ideas are reported.
+pub const ISSUES_URL: &str = "https://github.com/Nihalpi1212/claude/issues";
+/// Nib's releases (tags `nib-vX.Y.Z`, assets `nib-*`).
+pub const RELEASES_URL: &str = "https://github.com/Nihalpi1212/claude/releases";
+/// The upstream project Nib is based on.
+pub const UPSTREAM_URL: &str = "https://github.com/storytold/vectorcraft";
 
-/// This app's page on the website.
+/// Nib's releases page (Help › Check for Updates opens it).
 pub fn app_page_url() -> String {
-    format!("{WEBSITE_URL}/apps/{APP_ID}")
+    RELEASES_URL.into()
 }
 
-/// This app's source repository.
+/// Nib's source repository.
 pub fn github_url() -> String {
-    format!("https://github.com/storytold/{APP_ID}")
+    REPOSITORY_URL.into()
 }
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
-        cmd!(query "help.discord", "Join Our Discord", ["Help"], None, "{} → {url} the ArtCraft community Discord", always, |_, _| url(DISCORD_URL.into())),
-        cmd!(query "help.website", "ArtCraft Website", ["Help"], None, "{} → {url}", always, |_, _| url(WEBSITE_URL.into())),
-        cmd!(query "help.appPage", "VectorCraft on getartcraft.com", ["Help"], None, "{} → {url} this app's page", always, |_, _| url(app_page_url())),
-        cmd!(query "help.github", "VectorCraft on GitHub", ["Help"], None, "{} → {url} source code, issues and releases", always, |_, _| url(github_url())),
-        cmd!(query "help.links", "Links", [], None, "{} → {discord, website, appPage, github}", always, |_, _| {
-            Ok(json!({ "discord": DISCORD_URL, "website": WEBSITE_URL, "appPage": app_page_url(), "github": github_url() }))
+        cmd!(query "help.discord", "Report an Issue", ["Help"], None, "{} → {url} Nib's issue tracker", always, |_, _| url(ISSUES_URL.into())),
+        cmd!(query "help.website", "VectorCraft (upstream project)", ["Help"], None, "{} → {url} the project Nib is based on", always, |_, _| url(UPSTREAM_URL.into())),
+        cmd!(query "help.appPage", "Nib Releases", ["Help"], None, "{} → {url} Nib's releases", always, |_, _| url(app_page_url())),
+        cmd!(query "help.github", "Nib on GitHub", ["Help"], None, "{} → {url} source code, issues and releases", always, |_, _| url(github_url())),
+        cmd!(query "help.links", "Links", [], None, "{} → {issues, upstream, releases, github} (also as discord, website, appPage)", always, |_, _| {
+            Ok(json!({
+                "issues": ISSUES_URL, "upstream": UPSTREAM_URL, "releases": RELEASES_URL, "github": github_url(),
+                "discord": ISSUES_URL, "website": UPSTREAM_URL, "appPage": app_page_url(),
+            }))
         }),
     ]
 }
@@ -44,9 +53,10 @@ mod tests {
     #[test]
     fn links() {
         let mut s = Session::new();
-        assert_eq!(s.execute("help.discord", &json!({})).unwrap()["url"], "https://discord.gg/artcraft");
-        assert_eq!(s.execute("help.appPage", &json!({})).unwrap()["url"], "https://getartcraft.com/apps/vectorcraft");
-        assert_eq!(s.execute("help.github", &json!({})).unwrap()["url"], "https://github.com/storytold/vectorcraft");
-        assert_eq!(s.execute("help.links", &json!({})).unwrap()["website"], "https://getartcraft.com");
+        assert_eq!(s.execute("help.discord", &json!({})).unwrap()["url"], "https://github.com/Nihalpi1212/claude/issues");
+        assert_eq!(s.execute("help.appPage", &json!({})).unwrap()["url"], "https://github.com/Nihalpi1212/claude/releases");
+        assert_eq!(s.execute("help.github", &json!({})).unwrap()["url"], "https://github.com/Nihalpi1212/claude");
+        assert_eq!(s.execute("help.website", &json!({})).unwrap()["url"], "https://github.com/storytold/vectorcraft");
+        assert_eq!(s.execute("help.links", &json!({})).unwrap()["upstream"], "https://github.com/storytold/vectorcraft");
     }
 }

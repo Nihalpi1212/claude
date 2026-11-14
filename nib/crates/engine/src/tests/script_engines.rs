@@ -44,7 +44,7 @@ fn a_named_engine_keeps_its_globals_and_functions_between_runs() {
     assert_eq!(log(&mut s, "#targetengine 'session'\nvc.log(n);"), json!([1]), "single quotes name the same engine");
     assert_eq!(log(&mut s, "#targetengine Session\nvc.log(typeof n);"), json!(["undefined"]), "names are matched as written");
     assert_eq!(log(&mut s, "#targetengine other\nvc.log(typeof f);"), json!(["undefined"]));
-    assert_eq!(log(&mut s, "vc.log(typeof n, $.engineName);\nvc.log($.engineName);"), json!(["undefined", "VectorCraft"]));
+    assert_eq!(log(&mut s, "vc.log(typeof n, $.engineName);\nvc.log($.engineName);"), json!(["undefined", "Nib"]));
     // `main` is new for each run, as a script without the line is.
     log(&mut s, "#targetengine main\nvar m = 1;");
     assert_eq!(log(&mut s, "#targetengine main\nvc.log(typeof m, $.engineName);\nvc.log($.engineName);"), json!(["undefined", "main"]));

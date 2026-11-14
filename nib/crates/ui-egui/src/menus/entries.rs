@@ -142,7 +142,7 @@ pub struct InsertableItem {
 
 /// The menus whose items are not added to actions: the application menu, File (documents and
 /// files), Window (panels and workspaces) and Help.
-const NOT_INSERTED_MENUS: [&str; 4] = ["VectorCraft", "File", "Window", "Help"];
+const NOT_INSERTED_MENUS: [&str; 4] = ["Nib", "File", "Window", "Help"];
 
 /// Commands whose menu items do more than run the command, which action playback does not do:
 /// Object › Image Trace › Make and Make and Expand trace off the UI thread with progress and Cancel

@@ -6,24 +6,27 @@
 
 fn main() -> Result<(), String> {
     println!("cargo:rerun-if-changed=build.rs");
-    println!("cargo:rerun-if-changed=../../assets/app-icon/vectorcraft.ico");
+    println!("cargo:rerun-if-changed=../../assets/app-icon/nib.ico");
     println!("cargo:rerun-if-env-changed=VECTORCRAFT_REQUIRE_WINRES");
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
         return Ok(());
     }
     let mut res = winresource::WindowsResource::new();
-    res.set_icon("../../assets/app-icon/vectorcraft.ico")
-        .set("ProductName", "VectorCraft")
-        .set("FileDescription", "VectorCraft vector illustration editor")
-        .set("CompanyName", "Learning Machines LLC")
-        .set("LegalCopyright", "Copyright (c) the VectorCraft authors. MIT OR Apache-2.0.")
-        .set("OriginalFilename", "vectorcraft.exe")
-        .set("InternalName", "vectorcraft");
+    res.set_icon("../../assets/app-icon/nib.ico")
+        .set("ProductName", "Nib")
+        .set("FileDescription", "Nib vector illustration editor")
+        .set("CompanyName", "Nib contributors")
+        .set(
+            "LegalCopyright",
+            "Copyright (c) 2026 Nib contributors; based on VectorCraft (c) ArtCraft Team and the VectorCraft contributors. MIT OR Apache-2.0.",
+        )
+        .set("OriginalFilename", "nib.exe")
+        .set("InternalName", "nib");
     if let Err(e) = res.compile() {
         if std::env::var_os("VECTORCRAFT_REQUIRE_WINRES").is_some() {
             return Err(format!("embedding Windows resources failed: {e}"));
         }
-        println!("cargo:warning=vectorcraft.exe built without icon/version resources: {e}");
+        println!("cargo:warning=nib.exe built without icon/version resources: {e}");
     }
     Ok(())
 }

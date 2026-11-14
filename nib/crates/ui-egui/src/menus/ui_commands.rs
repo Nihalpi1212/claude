@@ -172,12 +172,7 @@ pub const UI_COMMANDS: &[(&str, &str, &str, &str)] = &[
     ("shortcuts.list", "List Keyboard Shortcuts", "", "{query?} → [{id, label, group, shortcut, default, overridden}]"),
     ("shortcuts.conflicts", "Keyboard Shortcut Conflicts", "", "{} → [{shortcut, ids}]"),
     ("shortcuts.reset", "Reset Keyboard Shortcuts", "", "{}"),
-    (
-        "shortcuts.preset",
-        "Keyboard Shortcut Set",
-        "",
-        "{name: \"VectorCraft Defaults\" | \"Classic Defaults\"} (names of earlier versions are accepted)",
-    ),
+    ("shortcuts.preset", "Keyboard Shortcut Set", "", "{name: \"Nib Defaults\" | \"Classic Defaults\"} (names of earlier versions are accepted)"),
     ("shortcuts.export", "Export Keyboard Shortcuts…", "", "{path?}"),
     (
         "shortcuts.exportText",
@@ -816,14 +811,14 @@ pub const UI_COMMANDS: &[(&str, &str, &str, &str)] = &[
         "",
         "{} opens the Save PDF dialog; with params = document.exportPdf options written to path (asked when missing; viewAfterSaving opens the file) → {path, bytes, warnings}",
     ),
-    ("help.about", "About VectorCraft", "", "{}"),
+    ("help.about", "About Nib", "", "{}"),
     ("help.checkForUpdates", "Check for Updates…", "", "{}"),
     ("help.commandPalette", "Search Commands…", "Cmd+Shift+/", "{}"),
     (
         "help.safeMode",
         "Safe Mode…",
         "",
-        "{} open the Safe Mode dialog (dialog `safeMode`): whether VectorCraft is in Safe Mode, and the disabled plug-ins, each with Enable on Re-launch (engine: plugin.setEnabled). Closing it leaves Safe Mode as it is; Safe Mode is chosen at launch (--safe-mode, or the choice after a launch that stopped while a plug-in was loading, dialog `pluginStopped`)",
+        "{} open the Safe Mode dialog (dialog `safeMode`): whether Nib is in Safe Mode, and the disabled plug-ins, each with Enable on Re-launch (engine: plugin.setEnabled). Closing it leaves Safe Mode as it is; Safe Mode is chosen at launch (--safe-mode, or the choice after a launch that stopped while a plug-in was loading, dialog `pluginStopped`)",
     ),
     (
         "help.copyTroubleshootingInfo",
@@ -831,7 +826,7 @@ pub const UI_COMMANDS: &[(&str, &str, &str, &str)] = &[
         "",
         "{} put text for a bug report on the clipboard: the version, and in the desktop app the platform, the window system, the graphics processor, the commands and frame times of the last few frames, and the hang reports of this session and the session before (no document contents or file paths) → {chars}",
     ),
-    ("app.quit", "Quit VectorCraft", "Cmd+Q", "{}"),
+    ("app.quit", "Quit Nib", "Cmd+Q", "{}"),
     (
         "ui.swatchOptions",
         "Swatch Options…",
@@ -860,7 +855,7 @@ pub const UI_COMMANDS: &[(&str, &str, &str, &str)] = &[
         "ui.sampleScreenColor",
         "Sample Color from Screen",
         "",
-        "{} or {stroke?: bool (default: the active proxy), picker?: bool (the open Color Picker instead)} show the system's color sampler (macOS; Linux through the XDG desktop portal's PickColor; browsers with an EyeDropper) and answer at once; the color the person picks anywhere on the screen then runs paint.setFill / paint.setStroke (one undo step) or becomes the Color Picker's color (field `color`), converted from display sRGB into the working RGB space; a cancel (Escape on macOS and in browsers) leaves the colors as they were. ui.inspect reports `screenSampler: true` until it answers; on Linux, a session without a portal that has PickColor, a portal that does not return from the call within 25 seconds (VectorCraft's own limit) or leaves the bus before it answers, and a portal that ends the request another way end the wait with a status message. An error without a sampler, while one is open, or with `picker` and no Color Picker open",
+        "{} or {stroke?: bool (default: the active proxy), picker?: bool (the open Color Picker instead)} show the system's color sampler (macOS; Linux through the XDG desktop portal's PickColor; browsers with an EyeDropper) and answer at once; the color the person picks anywhere on the screen then runs paint.setFill / paint.setStroke (one undo step) or becomes the Color Picker's color (field `color`), converted from display sRGB into the working RGB space; a cancel (Escape on macOS and in browsers) leaves the colors as they were. ui.inspect reports `screenSampler: true` until it answers; on Linux, a session without a portal that has PickColor, a portal that does not return from the call within 25 seconds (Nib's own limit) or leaves the bus before it answers, and a portal that ends the request another way end the wait with a status message. An error without a sampler, while one is open, or with `picker` and no Color Picker open",
     ),
     (
         "ui.newBrush",
@@ -1361,7 +1356,7 @@ pub const UI_COMMANDS: &[(&str, &str, &str, &str)] = &[
         "ui.pdfPresetDialog",
         "PDF Preset",
         "",
-        "{name?: a saved preset to edit | preset?: the preset a new one starts from (default VectorCraft Default)} open the preset editor (dialog `pdfPreset`: the Save PDF dialog's option fields plus `name` and `description`); OK runs pdf.preset.save and returns to PDF Presets",
+        "{name?: a saved preset to edit | preset?: the preset a new one starts from (default Nib Default)} open the preset editor (dialog `pdfPreset`: the Save PDF dialog's option fields plus `name` and `description`); OK runs pdf.preset.save and returns to PDF Presets",
     ),
     ("file.openRecent11", "Open Recent File 11", "", "{}"),
     ("file.openRecent12", "Open Recent File 12", "", "{}"),
@@ -1496,7 +1491,7 @@ pub const UI_COMMANDS: &[(&str, &str, &str, &str)] = &[
         crate::panels::actions::PLAYBACK_OPTIONS,
         "Playback Options",
         "",
-        "{speed?: accelerated|step|pause, seconds?: 1-60} set how the Actions panel plays actions: accelerated (the default) plays every step at once, step plays one step at a time and draws the window after each, and pause waits seconds (a whole number, 1 to 60, VectorCraft's own range) between steps. A param left out keeps its value; the setting is kept with the UI preferences. Any other speed or seconds is an error and changes nothing. The panel menu's Playback Options… (dialog `actionPlayback` with speed and seconds) runs this on OK → {speed, seconds}",
+        "{speed?: accelerated|step|pause, seconds?: 1-60} set how the Actions panel plays actions: accelerated (the default) plays every step at once, step plays one step at a time and draws the window after each, and pause waits seconds (a whole number, 1 to 60, Nib's own range) between steps. A param left out keeps its value; the setting is kept with the UI preferences. Any other speed or seconds is an error and changes nothing. The panel menu's Playback Options… (dialog `actionPlayback` with speed and seconds) runs this on OK → {speed, seconds}",
     ),
     (
         crate::panels::actions::START_RECORDING,
@@ -1520,7 +1515,7 @@ pub const UI_COMMANDS: &[(&str, &str, &str, &str)] = &[
         crate::panels::actions::INSERT_MENU_ITEM,
         "Insert Menu Item",
         "",
-        "{set?: index, action?: index, step?: index, command, params?: object} insert the command of a menu item as a step, without running it; the step plays as choosing the item runs it. command and params (default {}) must be those of a menu item that can be a step: one that runs an engine command, whose label does not end with \"…\", outside the VectorCraft, File, Window and Help menus, and that is not Undo, Redo, a Paste, a batch (command.batch), a preference (prefs.*) or action (action.*) command, an Object › Align item, Image Trace's Make or Make and Expand, Pattern's Make or Edit Pattern, a saved selection, saved view or recent font item, or a plug-in's item. The place is as ui.action.insertStop takes it: with set and action, after step, else after the action's last step; without them, the recording in progress. The new step becomes the panel's selected step, and its action and set become the selected ones. A command and params that no such menu item has, a param of another type, params that are not an object, no action and no recording, or a step that would give the action more than 10,000 steps or its set's file more than 8 MiB, counting the steps that the recording in progress adds to the set, is an error and changes nothing. The panel menu's Insert Menu Item… (dialog `actionInsertMenuItem` with find, command, params, set, action and step) runs this on OK → {set, action, step}, or {recording: true}",
+        "{set?: index, action?: index, step?: index, command, params?: object} insert the command of a menu item as a step, without running it; the step plays as choosing the item runs it. command and params (default {}) must be those of a menu item that can be a step: one that runs an engine command, whose label does not end with \"…\", outside the Nib, File, Window and Help menus, and that is not Undo, Redo, a Paste, a batch (command.batch), a preference (prefs.*) or action (action.*) command, an Object › Align item, Image Trace's Make or Make and Expand, Pattern's Make or Edit Pattern, a saved selection, saved view or recent font item, or a plug-in's item. The place is as ui.action.insertStop takes it: with set and action, after step, else after the action's last step; without them, the recording in progress. The new step becomes the panel's selected step, and its action and set become the selected ones. A command and params that no such menu item has, a param of another type, params that are not an object, no action and no recording, or a step that would give the action more than 10,000 steps or its set's file more than 8 MiB, counting the steps that the recording in progress adds to the set, is an error and changes nothing. The panel menu's Insert Menu Item… (dialog `actionInsertMenuItem` with find, command, params, set, action and step) runs this on OK → {set, action, step}, or {recording: true}",
     ),
     (
         crate::panels::actions::INSERT_SELECT_PATH,
@@ -1829,5 +1824,58 @@ pub const UI_COMMANDS: &[(&str, &str, &str, &str)] = &[
         "Perspective Plane Options…",
         "",
         "{plane?: left|right|ground (default: the active plane)} open the plane's options, as double-clicking its plane widget does (dialog `perspectivePlane`: location (pt along the plane's normal), objects: none|move|copy): OK runs perspective.plane.move",
+    ),
+    // Nib's generative AI (crate `nib-genai`, docs/generative-ai.md; native only, the web build
+    // leaves them out of its menus and palette). Nothing is sent before Generate.
+    (
+        "ai.textToVector",
+        "Text to Vector Graphic…",
+        "",
+        "{prompt?} Object › Generative: show the Generate window on Text to Vector Graphic (prompt, type subject|scene|icon|pattern, detail, method Vector|Image + Trace, variations 1–4, style reference) with `prompt` filled in; nothing is sent until ai.generate → {feature}",
+    ),
+    (
+        "ai.shapeFill",
+        "Generative Shape Fill…",
+        "",
+        "{prompt?} Object › Generative: show the Generate window on Generative Shape Fill for the one selected closed path (error otherwise) → {feature}",
+    ),
+    (
+        "ai.pattern",
+        "Generative Pattern…",
+        "",
+        "{prompt?} Object › Generative: show the Generate window on Generative Pattern (a new pattern swatch; tile size, fill the selection) → {feature}",
+    ),
+    (
+        "ai.expand",
+        "Generative Expand…",
+        "",
+        "{prompt?} Object › Generative: show the Generate window on Generative Expand for the one selected placed image (points to add on each side, or fill the artboard) → {feature}",
+    ),
+    (
+        "ai.recolor",
+        "Generative Recolor…",
+        "",
+        "{prompt?} Edit › Edit Colors: show the Generate window on Generative Recolor for the selected artwork (palettes from a description) → {feature}",
+    ),
+    ("ai.rewrite", "Rewrite Text…", "", "{} Type: show the Generate window on Rewrite Text for the one selected type object (tone, variations) → {feature}"),
+    ("ai.generatePanel", "Generate", "", "{} Window › Generate: show or hide the Generate window on Text to Vector Graphic → {open}"),
+    (
+        "ai.accounts",
+        "AI Accounts…",
+        "",
+        "{} open AI Accounts: the person's OpenAI or Google Gemini key (typed there only; never taken or returned by any command), Test Connection, default provider, models, timeout and the agreement that requests go to the provider",
+    ),
+    (
+        "ai.generate",
+        "Generate with AI",
+        "",
+        "{} the Generate window's Generate: send its request to the AI provider on a worker thread → {job, feature}; error without a key, without the agreement in AI Accounts, for a selection that doesn't suit or an empty prompt",
+    ),
+    ("ai.cancel", "Stop Generating", "", "{} the Generate window's Stop: cancel the request running → {cancelled}"),
+    (
+        "ai.place",
+        "Place Generated Result",
+        "",
+        "{variation?: index (0)} place a result of the Generate window's last request, as clicking it does: one undo step named after the feature → {ids, swatch?}",
     ),
 ];

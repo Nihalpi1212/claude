@@ -1215,6 +1215,6 @@ fn missing_fonts_says_why_the_folder_picked_wasnt_searched() {
     }
     assert_eq!(app.ui.dialog.as_ref().map(|d| d.str("state")).as_deref(), Some("failed"));
     let text = crate::tests_labels::painted_text(&mut app, |app, ui| crate::dialogs::show(app, ui.ctx()));
-    assert!(text.contains("VectorCraft doesn't search other apps' or the system's folders"), "{text}");
+    assert!(text.contains("Nib doesn't search other apps' or the system's folders"), "{text}");
     assert!(!text.contains("Not found"), "the folder wasn't searched: {text}");
 }

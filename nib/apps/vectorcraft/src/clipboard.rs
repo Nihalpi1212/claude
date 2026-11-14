@@ -1189,7 +1189,7 @@ mod portable {
                         if self.logged.swap(true, Ordering::Relaxed) {
                             log::debug!("the system clipboard is still unavailable ({why}); next try in {wait:?}");
                         } else {
-                            log::warn!("the system clipboard is unavailable ({why}): Copy and Paste stay inside VectorCraft");
+                            log::warn!("the system clipboard is unavailable ({why}): Copy and Paste stay inside Nib");
                         }
                         self.failed = Some(Failed { at: now, wait });
                     }

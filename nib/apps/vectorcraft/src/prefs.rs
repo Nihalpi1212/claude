@@ -3,7 +3,7 @@ use super::{VectorcraftApp, fileio, prefs_dir};
 /// Where UI preferences live: ~/Library/Application Support/VectorCraft (macOS),
 /// %APPDATA%\VectorCraft (Windows), $XDG_CONFIG_HOME or ~/.config/vectorcraft (Linux).
 pub(crate) fn prefs_path() -> Option<std::path::PathBuf> {
-    prefs_dir::prefs_path_for("VectorCraft", "vectorcraft")
+    prefs_dir::prefs_path_for("Nib", "nib")
 }
 
 /// The same place under the project's former name (DrawCraft): read once if there are no

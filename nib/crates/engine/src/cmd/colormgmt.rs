@@ -36,7 +36,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Color Settings…",
             ["Edit"],
             Some("Cmd+Shift+K"),
-            "{rgb?: profile, cmyk?: profile, intent?: \"perceptual\"|\"relative\"|\"saturation\"|\"absolute\", bpc?: bool} set the working spaces → {rgb, cmyk, intent, bpc, profiles: [{name, kind, builtin}]}. The desktop app and vectorcraft-cli keep them in `Color Settings.json` next to the preferences and use them again at the next start (not with VECTORCRAFT_NO_PREFS); saved settings naming a profile that is gone leave the defaults",
+            "{rgb?: profile, cmyk?: profile, intent?: \"perceptual\"|\"relative\"|\"saturation\"|\"absolute\", bpc?: bool} set the working spaces → {rgb, cmyk, intent, bpc, profiles: [{name, kind, builtin}]}. The desktop app and nib-cli keep them in `Color Settings.json` next to the preferences and use them again at the next start (not with VECTORCRAFT_NO_PREFS); saved settings naming a profile that is gone leave the defaults",
             always,
             color_settings
         ),
@@ -45,7 +45,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Load Color Profile…",
             [],
             None,
-            "{path: .icc/.icm file of at most 32 MB} register an ICC profile (native only). The desktop app and vectorcraft-cli keep a copy of the file in the `Color Profiles` folder next to the preferences and register it again at every start (not with VECTORCRAFT_NO_PREFS, or in a confined `mcp --automation-*-root` server: there it lasts until the process ends) → {name, kind, remembered: whether a copy was kept}",
+            "{path: .icc/.icm file of at most 32 MB} register an ICC profile (native only). The desktop app and nib-cli keep a copy of the file in the `Color Profiles` folder next to the preferences and register it again at every start (not with VECTORCRAFT_NO_PREFS, or in a confined `mcp --automation-*-root` server: there it lasts until the process ends) → {name, kind, remembered: whether a copy was kept}",
             always,
             load_profile
         ),

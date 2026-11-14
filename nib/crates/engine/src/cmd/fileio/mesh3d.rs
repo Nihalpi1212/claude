@@ -180,7 +180,7 @@ fn gltf(stem: &str, parts: &[SolidMesh]) -> String {
         })
         .collect();
     let doc = json!({
-        "asset": { "version": "2.0", "generator": "VectorCraft" },
+        "asset": { "version": "2.0", "generator": "Nib" },
         "scene": 0,
         "scenes": [{ "nodes": [0] }],
         "nodes": [{ "name": stem, "mesh": 0 }],

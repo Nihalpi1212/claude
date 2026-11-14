@@ -284,8 +284,8 @@ fn a_picked_folder_inside_other_apps_folders_is_refused() {
     let briefs = [
         ("missing", "the folder can't be read"),
         ("file.ttf", "the path isn't a folder"),
-        ("refused", "VectorCraft doesn't search other apps' or the system's folders"),
-        ("Users/Public/x", "VectorCraft doesn't search the Shared or Public folder in Users"),
+        ("refused", "Nib doesn't search other apps' or the system's folders"),
+        ("Users/Public/x", "Nib doesn't search the Shared or Public folder in Users"),
     ];
     for (picked, why) in briefs {
         assert_eq!(search(&root, picked, Limits::default(), 1, &[]).failure(), Some(why), "{picked}");

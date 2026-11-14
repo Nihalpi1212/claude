@@ -1219,7 +1219,7 @@ fn a_row_option_only_another_format_reads_gets_a_note() {
     assert_eq!(unused(&r), ["`settings.ai.editingData` was not used: legacy .ai (version 7) files don't read it"], "{r}");
     // An export writes one file per row and item: a native row doesn't read `separateArtboards`.
     let r = export(&mut s, json!({"formats": [{"format": "vectorcraft", "separateArtboards": true}]}));
-    assert_eq!(unused(&r), ["`formats[0].separateArtboards` was not used: VectorCraft files don't read it"], "{r}");
+    assert_eq!(unused(&r), ["`formats[0].separateArtboards` was not used: Nib files don't read it"], "{r}");
 }
 
 /// The Asset Export panel's export notes the options of its request, not those of the settings

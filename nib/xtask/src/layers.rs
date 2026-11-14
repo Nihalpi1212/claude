@@ -65,6 +65,8 @@ pub const TABLE: &[(&str, Class)] = &[
     ("scriptcheck", Class::Standalone),
     ("js", Class::Standalone),
     ("apischema", Class::Standalone),
+    // Nib's generative AI (docs/generative-ai.md): drives the engine's commands, no UI toolkit.
+    ("nib-genai", Class::Layer(6)),
 ];
 
 /// Explicit orderings *within* a layer (earlier may be used by later).
@@ -88,6 +90,9 @@ pub const INTRA_LAYER_ORDER: &[&[&str]] = &[
     // Outline Object on an image's fill or stroke follows the outline Image Trace makes of its
     // opaque area.
     &["trace", "effects"],
+    // The AI commands of the app and of the MCP server run through nib-genai.
+    &["nib-genai", "ui-egui"],
+    &["nib-genai", "mcp"],
 ];
 
 fn intra_layer_allowed(from: &str, to: &str) -> bool {

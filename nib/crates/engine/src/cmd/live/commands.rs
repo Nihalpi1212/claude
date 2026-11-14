@@ -154,7 +154,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Make with Warp…",
             ["Object", "Envelope Distort"],
             Some("Cmd+Alt+Shift+W"),
-            "{ids?, style?: arc|arcLower|arcUpper|arch|bulge|shellLower|shellUpper|flag|wave|fish|rise|fisheye|inflate|squeeze|twist (arc), bend?: % -100..100 (50), h?: horizontal distortion % -100..100 (0), v?: vertical distortion % (0), horizontal?: bool (true) | orientation?: horizontal|vertical, horizontalDistortion?: as h, verticalDistortion?: as v, version?: 0|1 (1: each style bends the bounds as one Bézier patch; 0: VectorCraft's earlier map)} envelope the selected objects with a warp (Envelope Options from object.envelope.options with nothing selected; type maps from its glyph outline bounds) → {id}",
+            "{ids?, style?: arc|arcLower|arcUpper|arch|bulge|shellLower|shellUpper|flag|wave|fish|rise|fisheye|inflate|squeeze|twist (arc), bend?: % -100..100 (50), h?: horizontal distortion % -100..100 (0), v?: vertical distortion % (0), horizontal?: bool (true) | orientation?: horizontal|vertical, horizontalDistortion?: as h, verticalDistortion?: as v, version?: 0|1 (1: each style bends the bounds as one Bézier patch; 0: Nib's earlier map)} envelope the selected objects with a warp (Envelope Options from object.envelope.options with nothing selected; type maps from its glyph outline bounds) → {id}",
             has_selection,
             env_make_warp
         ),

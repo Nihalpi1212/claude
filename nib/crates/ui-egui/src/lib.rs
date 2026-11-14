@@ -5,13 +5,16 @@
 //! shortcuts, the ⌘K palette and the control channel ([`control`]).
 #![forbid(unsafe_code)]
 
-/// VectorCraft as craft-update knows it, with its 128 px icon and accent colour: the update
-/// prompt shows both, and an AppImage's menu entry gets the icon.
+/// Nib as craft-update knows it: Nib's own repository, ids and icon, never VectorCraft's, so
+/// nothing could ever fetch or install a VectorCraft release. Nib starts no update check or
+/// install (see `updates_ui`); this only names the app for the dormant update dialogs.
 #[cfg(not(target_arch = "wasm32"))]
 pub const UPDATE_APP: craft_update::app::App = craft_update::app::App {
-    icon_png: Some(include_bytes!("../../../assets/app-icon/hicolor/128x128/apps/ai.storyteller.vectorcraft.png")),
-    accent: Some([0xe8, 0x57, 0x3f]),
-    ..craft_update::suite::VECTORCRAFT
+    icon_png: Some(include_bytes!("../../../assets/app-icon/hicolor/128x128/apps/io.github.nihalpi1212.nib.png")),
+    accent: Some([0x16, 0x70, 0x7a]),
+    developer: "Nib contributors",
+    bundle_id_override: Some("io.github.nihalpi1212.nib"),
+    ..craft_update::app::App::new("nib", "Nib", "Vector illustration", "Nihalpi1212/claude")
 };
 
 /// Translate a UI string literal into the language the UI is drawn in (see [`i18n`]).
@@ -23,6 +26,8 @@ macro_rules! tl {
 }
 
 pub mod addons;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod ai;
 pub mod background;
 mod brand;
 pub mod canvas;
@@ -290,6 +295,10 @@ pub struct VectorcraftApp {
     pub placing: placing::Placing,
     /// Image Traces running off the UI thread ([`trace_runs`]).
     pub trace_runs: trace_runs::TraceRuns,
+    /// The generative AI commands: accounts, requests running, the Generate window and AI
+    /// Accounts ([`ai`]). Not part of [`UiState`], so nothing of it is saved with the preferences.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub ai: ai::AiUi,
     /// Data Recovery's timer and startup question ([`recovery`]).
     pub recovery: recovery::Timer,
     /// Modifiers the keyboard holds (from the host's input), given back after synthetic input.

@@ -133,7 +133,7 @@ fn timestamps_are_utc_with_milliseconds() {
 fn a_line_carries_time_level_thread_target_and_message() {
     assert_eq!(
         format_line("2026-10-08T07:59:17.728Z", log::Level::Info, "main", "vectorcraft", "rendering with Mesa (Vulkan, IntegratedGpu)"),
-        "2026-10-08T07:59:17.728Z INFO  [main] vectorcraft: rendering with Mesa (Vulkan, IntegratedGpu)\n"
+        "2026-10-08T07:59:17.728Z INFO  [main] nib: rendering with Mesa (Vulkan, IntegratedGpu)\n"
     );
     // A multi-line message keeps its lines; the record still ends in one newline.
     assert!(format_line("t", log::Level::Error, "w", "x", "a\nb\n").ends_with("x: a\nb\n"));
@@ -149,9 +149,9 @@ fn rotation_keeps_the_previous_logs_and_starts_an_empty_file() {
         std::fs::write(&path, format!("run {run}")).expect("write");
     }
     assert_eq!(read(&dir.join(LOG_FILE)), "run 4");
-    assert_eq!(read(&dir.join("vectorcraft.1.log")), "run 3");
-    assert_eq!(read(&dir.join("vectorcraft.2.log")), "run 2");
-    assert!(!dir.join("vectorcraft.3.log").exists(), "only {KEEP} old logs are kept");
+    assert_eq!(read(&dir.join("nib.1.log")), "run 3");
+    assert_eq!(read(&dir.join("nib.2.log")), "run 2");
+    assert!(!dir.join("nib.3.log").exists(), "only {KEEP} old logs are kept");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -250,14 +250,14 @@ fn the_logger_filters_records_and_writes_them_to_the_attached_file() {
     let text = read(&path);
     let lines: Vec<&str> = text.lines().collect();
     assert_eq!(lines.len(), 3, "{text}");
-    assert!(lines[0].contains(" INFO  [") && lines[0].ends_with("vectorcraft: before the settings directory"), "{text}");
+    assert!(lines[0].contains(" INFO  [") && lines[0].ends_with("nib: before the settings directory"), "{text}");
     assert!(lines[1].ends_with("wgpu_hal::vulkan: a real warning"), "{text}");
     assert!(lines[2].contains(" ERROR [") && lines[2].ends_with("vectorcraft_engine::guard: recovered from a panic: boom"), "{text}");
     assert!(logger.enabled(&log::Metadata::builder().level(log::Level::Info).target("vectorcraft_ui_egui").build()));
     assert!(!logger.enabled(&log::Metadata::builder().level(log::Level::Info).target("naga").build()));
     // Attaching again rotates: the first log becomes `.1`.
     logger.attach_dir(&dir).expect("attach again");
-    assert_eq!(read(&dir.join("vectorcraft.1.log")), text);
+    assert_eq!(read(&dir.join("nib.1.log")), text);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -282,7 +282,7 @@ fn records_from_many_threads_are_whole_lines() {
     }
     let text = read(&path);
     assert_eq!(text.lines().count(), 800);
-    assert!(text.lines().all(|l| l.contains(" vectorcraft: thread ")), "{text}");
+    assert!(text.lines().all(|l| l.contains(" nib: thread ")), "{text}");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -314,6 +314,6 @@ fn a_poisoned_sink_still_logs() {
     assert!(logger.sink.is_poisoned());
     let path = logger.attach_dir(&dir).expect("attach");
     logger.log(&log::Record::builder().level(log::Level::Warn).target("vectorcraft").args(format_args!("after the poison")).build());
-    assert!(read(&path).contains("vectorcraft: after the poison"));
+    assert!(read(&path).contains("nib: after the poison"));
     let _ = std::fs::remove_dir_all(&dir);
 }

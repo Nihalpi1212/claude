@@ -84,7 +84,7 @@ fn start_at(path: &Path, new_instance: bool, safe_mode: bool, files: &[String]) 
         Ok(()) if send.is_empty() => Start::Running(None),
         Ok(()) => Start::Forwarded,
         Err(e) => {
-            log::debug!("no running VectorCraft to hand files to ({e})");
+            log::debug!("no running Nib to hand files to ({e})");
             Start::Running(listen(path, queue))
         }
     }
@@ -131,7 +131,7 @@ pub fn take_for_frame(safe_mode: bool, launch: impl FnOnce(&[String]) -> io::Res
     match launch(&files) {
         Ok(()) => Vec::new(),
         Err(e) => {
-            log::warn!("couldn't start VectorCraft with plug-ins for the files another launch opened: {e}");
+            log::warn!("couldn't start Nib with plug-ins for the files another launch opened: {e}");
             files
         }
     }
@@ -201,7 +201,7 @@ fn forward(path: &Path, files: &[String]) -> io::Result<()> {
     stream.set_write_timeout(Some(CLIENT_TIMEOUT))?;
     // The token and the paths go only to a listener that knows the greeting.
     if !same(read_message(&stream)?.get("hello"), &endpoint.hello) {
-        return Err(invalid("the listener isn't VectorCraft"));
+        return Err(invalid("the listener isn't Nib"));
     }
     write_message(&stream, &json!({ "token": endpoint.token, "files": files }))?;
     match read_message(&stream)?.get("ok") {
@@ -213,7 +213,7 @@ fn forward(path: &Path, files: &[String]) -> io::Result<()> {
 /// Listen for later launches and record this app at `path`; each launch's files go to `deliver`.
 /// `None` when that fails (logged): the app then runs on its own, as before.
 fn listen(path: &Path, deliver: impl Fn(Vec<String>) + Send + 'static) -> Option<Primary> {
-    try_listen(path, deliver).inspect_err(|e| log::warn!("files opened while VectorCraft runs will open in another window: {e}")).ok()
+    try_listen(path, deliver).inspect_err(|e| log::warn!("files opened while Nib runs will open in another window: {e}")).ok()
 }
 
 fn try_listen(path: &Path, deliver: impl Fn(Vec<String>) + Send + 'static) -> io::Result<Primary> {

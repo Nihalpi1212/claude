@@ -316,7 +316,7 @@ pub fn had_input(raw: &egui::RawInput) -> bool {
 /// ([`hands_off`]), before egui passes them on; the main window's are read at the frame's end.
 pub fn watch_input(beacon: &'static Beacon, ctx: &egui::Context) {
     ctx.on_begin_pass(
-        "VectorCraft hang report input",
+        "Nib hang report input",
         std::sync::Arc::new(move |ui| {
             if ui.ctx().input(|i| had_input(&i.raw)) {
                 beacon.input();
@@ -324,7 +324,7 @@ pub fn watch_input(beacon: &'static Beacon, ctx: &egui::Context) {
         }),
     );
     ctx.on_end_pass(
-        "VectorCraft hang report hand-off",
+        "Nib hang report hand-off",
         std::sync::Arc::new(move |ui| {
             if ui.ctx().viewport_id() != egui::ViewportId::ROOT && ui.ctx().viewport(|vp| hands_off(&vp.commands)) {
                 beacon.hand_off(ui.ctx().viewport_id());

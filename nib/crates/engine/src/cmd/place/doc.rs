@@ -206,10 +206,7 @@ impl Fib {
         }
         let field = |at: usize| u16_at(wd, at).ok_or_else(|| damaged(cmd, "its file information block is cut short"));
         if field(2)? < 0x00C1 {
-            return Err(bad(
-                cmd,
-                "the Word document was saved by Word 6.0 or Word 95, which VectorCraft doesn't read; save it as a Word 97-2003 document",
-            ));
+            return Err(bad(cmd, "the Word document was saved by Word 6.0 or Word 95, which Nib doesn't read; save it as a Word 97-2003 document"));
         }
         let flags = field(10)?;
         // fEncrypted (fObfuscated only says how).
@@ -218,10 +215,7 @@ impl Fib {
         }
         // fComplex: the last save was an incremental (fast) save.
         if flags & 0x0004 != 0 {
-            return Err(bad(
-                cmd,
-                "the Word document was last saved with fast save, which VectorCraft doesn't read; save it again with fast save turned off",
-            ));
+            return Err(bad(cmd, "the Word document was last saved with fast save, which Nib doesn't read; save it again with fast save turned off"));
         }
         // csw (14 16-bit values) and cslw (22 32-bit values) are fixed.
         if field(32)? != 0x000E || field(62)? != 0x0016 {

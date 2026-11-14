@@ -156,9 +156,9 @@ impl App {
             // eframe can't give a window a new device: the user saves and starts again.
             self.graphics_lost = self.app.graphics_lost(&why);
             self.app.status(if self.graphics_lost {
-                "The graphics device was lost: unsaved changes are kept for Data Recovery. Save your documents and restart VectorCraft"
+                "The graphics device was lost: unsaved changes are kept for Data Recovery. Save your documents and restart Nib"
             } else {
-                "The graphics device was lost: save your documents and restart VectorCraft"
+                "The graphics device was lost: save your documents and restart Nib"
             });
         }
         if self.graphics_lost && ctx.input(|i| i.viewport().close_requested()) {
@@ -256,7 +256,7 @@ pub(crate) fn open_or_hold(app: &mut VectorcraftApp, files: Vec<String>) -> Vec<
 pub(crate) fn open_files(app: &mut VectorcraftApp, files: Vec<String>) {
     for f in files {
         if let Err(e) = vectorcraft_ui_egui::io::open_reporting(app, &f) {
-            eprintln!("vectorcraft: {f}: {e}");
+            eprintln!("nib: {f}: {e}");
         }
     }
 }
