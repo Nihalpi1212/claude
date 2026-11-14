@@ -4,6 +4,7 @@
 // only touches the dirty rectangle.
 import { createCanvas, intersectRect, unionRect, effectiveBlending, isDefaultBlending } from './document.js';
 import { CANVAS_BLEND, blendImages } from '../../shared/pixels/blend.js';
+import { cropImage } from '../../shared/pixels/core.js';
 import { compositeAdvanced, maskPartsAround, restrictsChannels, isDefaultBlendIf, alphaBox, adjustmentMix, mixAdjustment } from '../../shared/pixels/blend-if.js';
 import { applyAdjustment, adjustmentDef } from '../../shared/pixels/adjust.js';
 import { applyStyles, stylePadding, hasEnabledStyles, exteriorBlends, interiorBlends } from '../../shared/pixels/styles.js';
@@ -1321,8 +1322,14 @@ export class Compositor {
       const place = (list) => list.map((p) => ({ canvas: toCanvas(p.image), x: ox + p.x, y: oy + p.y, blend: p.blend, opacity: p.opacity }));
       parts = place(out.parts);
       if (out.inner) inner = place(out.inner);
-      // the exterior effects merged into one image, for a layer whose effects all draw as Normal (exteriorParts)
-      if (out.below && !exteriorApart(layer)) below = { canvas: toCanvas(out.below), x: ox, y: oy, blend: 'normal', opacity: 1, merged: true };
+      // the exterior effects merged into one image, for a layer whose effects all draw as Normal (exteriorParts),
+      // cropped to its pixels as the parts are, so that drawPixels reads only where the layer and its effects draw
+      if (out.below && !exteriorApart(layer)) {
+        const bb = alphaBox(out.below);
+        below = bb
+          ? { canvas: toCanvas(cropImage(out.below, bb)), x: ox + bb.x, y: oy + bb.y, blend: 'normal', opacity: 1, merged: true }
+          : { canvas: createCanvas(1, 1), x: ox, y: oy, blend: 'normal', opacity: 1, merged: true };
+      }
       const b = alphaBox(out.layer);
       layerBox = b ? { x: ox + b.x, y: oy + b.y, width: b.width, height: b.height } : { x: ox, y: oy, width: 0, height: 0 };
     }
