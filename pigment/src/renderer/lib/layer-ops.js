@@ -5,7 +5,7 @@ import { RasterLayer, GroupLayer, FillLayer, AdjustmentLayer, createCanvas, copy
 import { Compositor } from './compositor.js';
 import { contentBounds } from '../../shared/pixels/core.js';
 import { isDefaultBlendIf, restrictsChannels } from '../../shared/pixels/blend-if.js';
-import { hasEnabledStyles } from '../../shared/pixels/styles.js';
+import { hasEnabledStyles, exteriorBlends, stylePadding } from '../../shared/pixels/styles.js';
 import { offsetEach, positionLocked } from './layer-move.js';
 import { Selection } from './selection.js';
 import { maskCanvasFor } from './mask-render.js';
@@ -345,6 +345,48 @@ export function renderLayersFlat(doc, layers, { dest = null } = {}) {
   }
 }
 
+/**
+ * The look of the document where `layers` draw, before a bake that renders them on their own (Rasterize Layer Style,
+ * Convert to Smart Object): { box, data } or null when nothing can change. An exterior effect (drop shadow, outer
+ * glow, outer bevel, outer stroke) blends with the layers below in its own mode, which a render against transparency
+ * cannot see; the baked pixels are then drawn in the layer's mode. Where the two modes differ the bake can only keep
+ * the look approximately (a black Multiply shadow on a Normal layer is kept exactly; a Screen glow is not), so the
+ * caller compares the composite afterwards (lookChanged) and says so when it changed.
+ */
+export function lookBefore(doc, layers) {
+  let box = null, risky = false;
+  const walk = (l) => {
+    if (!l.visible) return;
+    if (hasEnabledStyles(l.styles)) {
+      const own = l.isGroup && l.blend === 'pass-through' ? 'normal' : l.blend ?? 'normal';
+      if (exteriorBlends(l.styles).some((m) => m !== own)) risky = true;
+    }
+    if (l.isGroup) l.children.forEach(walk);
+    const b = l.bounds?.();
+    if (!b) return;
+    const pad = l.styles ? stylePadding(l.styles) : 0;
+    const r = { x: Math.floor(b.x - pad), y: Math.floor(b.y - pad), width: Math.ceil(b.width + pad * 2), height: Math.ceil(b.height + pad * 2) };
+    box = box ? unionRect(box, r) : r;
+  };
+  layers.forEach(walk);
+  const r = risky && box ? intersectRect(box, { x: 0, y: 0, width: doc.width, height: doc.height }) : null;
+  if (!r) return null;
+  return { box: r, data: lookAt(doc, r) };
+}
+
+/** True when the composite over look.box (from lookBefore) now differs from what it was by more than 2 levels. */
+export function lookChanged(doc, look) {
+  if (!look) return false;
+  const a = look.data, b = lookAt(doc, look.box);
+  for (let i = 0; i < a.length; i++) if (Math.abs(a[i] - b[i]) > 2) return true;
+  return false;
+}
+
+function lookAt(doc, r) {
+  const comp = doc.view?.compositor ?? new Compositor();
+  return comp.composite(doc, { rect: r }).getContext('2d', { willReadFrequently: true }).getImageData(0, 0, r.width, r.height).data;
+}
+
 /** Clears the clip flag of layers that no longer have a base below them (Photoshop releases such clipping masks). */
 export function releaseOrphanClips(doc) {
   const walk = (group) => {
@@ -373,10 +415,22 @@ export function lockedProp(app, layer, prop) {
   return !!layer && (app.backgroundRules?.lockedProps?.(layer) ?? []).includes(prop);
 }
 
-/** True when the layer has effects or blending options that differ from a plain layer's (what Copy Layer Style takes). */
+/**
+ * True when the layer has effects or blending options that differ from a plain layer's (what Copy Layer Style takes).
+ * An adjustment layer has no effects but takes Blending Options (mode, Fill, the channels, Blend If), as in Photoshop.
+ */
 function hasLayerStyle(layer) {
-  if (!layer || layer.type === 'adjustment') return false;
-  return !!layer.styles || (layer.fillOpacity ?? 1) < 1 || !isDefaultBlending(layer.blending) || !['normal', 'pass-through'].includes(layer.blend ?? 'normal');
+  if (!layer) return false;
+  return (layer.type !== 'adjustment' && !!layer.styles) || (layer.fillOpacity ?? 1) < 1 || !isDefaultBlending(layer.blending) || !['normal', 'pass-through'].includes(layer.blend ?? 'normal');
+}
+
+/** The part of blending options an adjustment layer uses (Blend If and the channels; knockout and the check boxes act on effects and pixels it has none of), or null. */
+function adjustmentBlending(b) {
+  if (!b) return null;
+  const out = {};
+  if (b.blendIf) out.blendIf = clone(b.blendIf);
+  if (b.channels) out.channels = { ...b.channels };
+  return isDefaultBlending(out) ? null : out;
 }
 
 /** Where the layer dialogs open (M.3): only from the menu or a key without an argument, or with { dialog: true }. */
@@ -400,8 +454,9 @@ export function install(app) {
   const has = () => !!app.doc;
   const hasLayer = () => !!app.doc?.active;
   const doc = () => app.doc;
-  // which layers take effects and blending options (blending-options.js isStyleable: not adjustment layers, not the Background)
-  const takesStyle = (l) => !!l?.parent && l.type !== 'adjustment' && !lockedProp(app, l, 'styles');
+  // which layers take a pasted style (blending-options.js isStyleable with { page: 'blending' }): not the Background or
+  // a Lock All layer; adjustment layers take its Blending Options without the effects
+  const takesStyle = (l) => !!l?.parent && !lockedProp(app, l, 'styles');
 
   app.duplicateLayer = (layer, { select = true } = {}) => {
     const d = doc();
@@ -847,6 +902,9 @@ export function install(app) {
       run: () => {
         const d = doc();
         const layer = d.active;
+        // as Photoshop does, the effects are merged into the layer's pixels and the layer keeps its blend mode: an
+        // exterior effect in a mode of its own keeps its look only where that comes out the same (lookBefore)
+        const look = lookBefore(d, [layer]);
         const r = rasterizeLayer(layer, d, { bakeStyles: true });
         structural(app, 'Rasterize layer style', () => {
           const parent = layer.parent, i = parent.children.indexOf(layer);
@@ -858,6 +916,8 @@ export function install(app) {
         const bl = layer.blending;
         if (bl && (!isDefaultBlendIf(bl.blendIf) || (bl.knockout && bl.knockout !== 'none' && layer.fillOpacity < 1))) {
           app.dialogs.toast('The layer keeps its Blend If and knockout settings, which now also act on the rasterized effects, so the image can change', { timeout: 4000 });
+        } else if (lookChanged(d, look)) {
+          app.dialogs.toast('Some effects blend with the layers below in a mode of their own, which one layer cannot keep, so the image changed', { timeout: 4000 });
         }
       },
     },
@@ -917,15 +977,17 @@ export function install(app) {
       enabled: () => !!app.copiedStyle && hasLayer() && selectedOrActive(doc()).some(takesStyle),
       run: () => {
         const d = doc();
-        // the Background (Background rules) and adjustment layers take no style: skipped, as effect-row drags do
+        // the Background (Background rules) and Lock All layers take no style: skipped, as effect-row drags do
         const targets = selectedOrActive(d).filter(takesStyle);
-        if (!targets.length) return app.dialogs.toast('The Background, adjustment layers and locked layers cannot take a layer style', { kind: 'error', timeout: 2500 });
+        if (!targets.length) return app.dialogs.toast('The Background and locked layers cannot take a layer style', { kind: 'error', timeout: 2500 });
         const c = app.copiedStyle;
         d.history.group('Paste layer style', () => {
           for (const l of targets) {
             // Pass Through is a group's mode only
             const blend = c.blend === 'pass-through' && !l.isGroup ? 'normal' : c.blend ?? l.blend;
-            setLayerProps(app, l, { styles: clone(c.styles ?? null), blend, fillOpacity: c.fillOpacity ?? 1, blending: clone(c.blending ?? null) }, 'Paste layer style');
+            // an adjustment layer takes the Blending Options and leaves the effects out (it has none, as in Photoshop)
+            if (l.type === 'adjustment') setLayerProps(app, l, { blend, fillOpacity: c.fillOpacity ?? 1, blending: adjustmentBlending(c.blending) }, 'Paste layer style');
+            else setLayerProps(app, l, { styles: clone(c.styles ?? null), blend, fillOpacity: c.fillOpacity ?? 1, blending: clone(c.blending ?? null) }, 'Paste layer style');
           }
         });
       },

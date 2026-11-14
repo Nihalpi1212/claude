@@ -25,13 +25,22 @@ let appRef = null;
 
 /**
  * True when the Layer Style dialog may open on the layer: raster, text, shape, fill, smart object and group layers,
- * not adjustment layers, and not a layer whose Background rules lock its styles (L.13).
+ * and not a layer whose Background rules lock its styles (L.13). Adjustment layers take Blending Options but no
+ * effects, as in Photoshop: they count only with `{ page: 'blending' }` (the dialog, which then shows that page
+ * alone, Blending Options… and Copy, Paste and Clear Layer Style).
+ * @param {object} layer
+ * @param {object} [app]
+ * @param {{ page?: 'effects' | 'blending' }} [opts]
  */
-export function isStyleable(layer, app = appRef) {
-  if (!layer || layer.type === 'adjustment' || !layer.parent) return false;
+export function isStyleable(layer, app = appRef, { page = 'effects' } = {}) {
+  if (!layer || !layer.parent) return false;
+  if (layer.type === 'adjustment' && page !== 'blending') return false;
   const locked = app?.backgroundRules?.lockedProps?.(layer) ?? [];
   return !locked.includes('styles');
 }
+
+/** True when the layer takes Blending Options (the Layer Style dialog): what isStyleable allows, adjustment layers too. */
+export const takesBlendingOptions = (layer, app = appRef) => isStyleable(layer, app, { page: 'blending' });
 
 /** True when some effect of the styles is switched on, whether Hide All Effects is on or not. */
 export function hasEffects(styles) {
@@ -235,6 +244,9 @@ export const blendingPage = {
     const wrap = document.createElement('div');
     wrap.className = 'blending-page';
     const isGroup = !!ctx.layer.isGroup;
+    // an adjustment layer has no pixels or effects of its own: knockout and the five check boxes act on those, so
+    // its page is the blend mode, Opacity, Fill, the channels and Blend If (Photoshop's page for it)
+    const adjustment = ctx.layer.type === 'adjustment';
     const values = {
       blend: ctx.blend,
       opacity: Math.round(ctx.opacity * 100),
@@ -254,12 +266,14 @@ export const blendingPage = {
         section('Advanced Blending'),
         S('fillOpacity', 'Fill opacity', 0, 100, 1, { unit: '%' }),
         { type: 'custom', label: 'Channels', render: () => channelBoxes(adv, () => ctx.apply()) },
-        { key: 'knockout', label: 'Knockout', type: 'select', options: [['none', 'None'], ['shallow', 'Shallow'], ['deep', 'Deep']] },
-        check('interiorAsGroup', 'Blend Interior Effects as Group'),
-        check('clippedAsGroup', 'Blend Clipped Layers as Group'),
-        check('transparencyShapes', 'Transparency Shapes Layer'),
-        check('maskHidesEffects', 'Layer Mask Hides Effects'),
-        check('vectorMaskHidesEffects', 'Vector Mask Hides Effects'),
+        ...(adjustment ? [] : [
+          { key: 'knockout', label: 'Knockout', type: 'select', options: [['none', 'None'], ['shallow', 'Shallow'], ['deep', 'Deep']] },
+          check('interiorAsGroup', 'Blend Interior Effects as Group'),
+          check('clippedAsGroup', 'Blend Clipped Layers as Group'),
+          check('transparencyShapes', 'Transparency Shapes Layer'),
+          check('maskHidesEffects', 'Layer Mask Hides Effects'),
+          check('vectorMaskHidesEffects', 'Vector Mask Hides Effects'),
+        ]),
       ],
       {
         app: appRef,
@@ -268,14 +282,18 @@ export const blendingPage = {
           ctx.blend = v.blend;
           ctx.opacity = v.opacity / 100;
           ctx.fillOpacity = v.fillOpacity / 100;
-          adv.knockout = v.knockout;
-          for (const k of ['interiorAsGroup', 'clippedAsGroup', 'transparencyShapes', 'maskHidesEffects', 'vectorMaskHidesEffects']) adv[k] = !!v[k];
+          if (!adjustment) {
+            adv.knockout = v.knockout;
+            for (const k of ['interiorAsGroup', 'clippedAsGroup', 'transparencyShapes', 'maskHidesEffects', 'vectorMaskHidesEffects']) adv[k] = !!v[k];
+          }
           ctx.apply();
         },
       },
     );
     wrap.appendChild(form.element);
     wrap.appendChild(blendIfControl(adv, () => ctx.apply()));
+    // the Global Light is for effects
+    if (adjustment) return wrap;
     const gl = document.createElement('button');
     gl.type = 'button';
     gl.className = 'btn small';
@@ -368,14 +386,16 @@ function effectLayers(layer, doc) {
 
 /**
  * True when the created layers cannot draw what the effects drew: Photoshop then warns "Some aspects of the Effects
- * cannot be reproduced with layers". Knockout reaches through the new layers; the layer's opacity and mode applied to
- * its effects as one image; fill opacity faded the layer under its interior effects.
+ * cannot be reproduced with layers". Knockout reaches through the new layers; the layer's opacity faded the layer and
+ * its exterior effects as one (each new layer is faded on its own, and a shadow knocked out by the layer shows through
+ * it); fill opacity faded the layer under its interior effects. The modes are no reason: each exterior effect blends
+ * with the layers below in its own mode and the layer's content in the layer's, which the new layers do as well.
  */
 function inexactLayers(layer, made) {
   const bl = effectiveBlending(layer);
   const exterior = made.some((m) => !m.interior), interior = made.some((m) => m.interior);
   if (bl.knockout === 'shallow' || bl.knockout === 'deep') return true;
-  if (exterior && ((layer.opacity ?? 1) < 1 || !['normal', 'pass-through'].includes(layer.blend ?? 'normal'))) return true;
+  if (exterior && (layer.opacity ?? 1) < 1) return true;
   return interior && (layer.fillOpacity ?? 1) < 1;
 }
 

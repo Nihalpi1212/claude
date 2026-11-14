@@ -891,7 +891,8 @@ export function install(app) {
       mixed: sel.length > 1 && sel.some((l) => l.blend !== layer?.blend),
     });
     opacity.setDisabled(off('opacity'));
-    fill.setDisabled(off('fillOpacity') || !!layer?.isGroup || layer?.type === 'adjustment');
+    // groups have no Fill; an adjustment layer's Fill scales it as Opacity does (Photoshop)
+    fill.setDisabled(off('fillOpacity') || !!layer?.isGroup);
     for (const b of el.querySelectorAll('[data-lock]')) {
       b.disabled = !layer;
       const k = b.dataset.lock;

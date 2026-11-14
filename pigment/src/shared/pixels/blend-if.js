@@ -215,16 +215,60 @@ export function alphaBox(img) {
 }
 
 /**
+ * Fades `dst` back towards `before` (the same pixels before the layer was drawn): dst = lerp(before, dst, opacity),
+ * in premultiplied space so a transparent side contributes no colour. Layer Opacity in Photoshop's model: the layer,
+ * its effects and its knockout are faded as one from the backdrop.
+ * @param {{ data: Uint8ClampedArray }} dst modified in place
+ * @param {{ data: Uint8ClampedArray }} before same size
+ * @param {number} opacity 0..1
+ */
+export function fadeFrom(dst, before, opacity) {
+  const t = Math.max(0, Math.min(1, Number.isFinite(opacity) ? opacity : 1));
+  if (t >= 1) return dst;
+  const d = dst.data, b = before.data;
+  for (let p = 0; p < d.length; p += 4) {
+    const a1 = d[p + 3], a0 = b[p + 3];
+    if (a0 === a1) {
+      if (d[p] === b[p] && d[p + 1] === b[p + 1] && d[p + 2] === b[p + 2]) continue;
+      d[p] = b[p] + (d[p] - b[p]) * t;
+      d[p + 1] = b[p + 1] + (d[p + 1] - b[p + 1]) * t;
+      d[p + 2] = b[p + 2] + (d[p + 2] - b[p + 2]) * t;
+      continue;
+    }
+    const w0 = (a0 / 255) * (1 - t), w1 = (a1 / 255) * t;
+    const an = w0 + w1;
+    if (an <= 0) {
+      d[p] = d[p + 1] = d[p + 2] = d[p + 3] = 0;
+      continue;
+    }
+    // Uint8ClampedArray rounds on assignment
+    d[p] = (b[p] * w0 + d[p] * w1) / an;
+    d[p + 1] = (b[p + 1] * w0 + d[p + 1] * w1) / an;
+    d[p + 2] = (b[p + 2] * w0 + d[p + 2] * w1) / an;
+    d[p + 3] = an * 255;
+  }
+  return dst;
+}
+
+/**
  * The per-pixel step of a layer whose blending options are not the defaults, on one region (every image the same
- * size, aligned):
- *   1. `below` (the exterior effects, when the layer was split) blends onto dst with the layer's mode and opacity;
+ * size, aligned), in Photoshop's order:
+ *   1. `parts` (the exterior effects, when the layer was split: drop shadows, outer glows, the outer bevel and the
+ *      outer stroke, bottom first) blend onto dst one by one, each with its own mode and opacity. Blend If does not
+ *      weigh them: it acts on the layer's own pixels (and its interior effects), as in Photoshop, where a shadow
+ *      stays whole when Blend If hides part of the layer;
  *   2. knockout: dst is replaced by `knock` (null = transparency) under the layer's shape (`shape`, alpha 0..255
- *      per pixel), by the shape alpha times the opacity;
- *   3. `layer` (the layer at its fill opacity with its interior effects) blends onto dst with its mode and opacity,
- *      its alpha weighted by Blend If (This Layer reads `layer`, Underlying Layer reads dst as it was before step 1);
- *   4. the channels switched off keep what dst held before step 1.
+ *      per pixel);
+ *   3. `layer` (the layer at its fill opacity with its interior effects) blends onto dst with the layer's mode, its
+ *      alpha weighted by Blend If (This Layer reads `layer`, Underlying Layer reads dst as it was before step 1);
+ *   4. the channels switched off keep what dst held before step 1;
+ *   5. the layer's opacity fades all of that as one from dst before step 1 (Dissolve instead speckles the layer at
+ *      its opacity and draws the parts at theirs times it).
+ * Without parts and knockout, steps 3 and 5 are one blendImages at the opacity, which is the same thing.
+ * `below` (one image drawn with the layer's own mode before the knockout) is still taken as a single part.
  * @param {{
- *   dst: object, layer: object | null, below?: object | null, knock?: object | null, shape?: Uint8ClampedArray | null,
+ *   dst: object, layer: object | null, parts?: { image: object, blend?: string, opacity?: number }[] | null,
+ *   below?: object | null, knock?: object | null, shape?: Uint8ClampedArray | null,
  *   knockout?: 'none' | 'shallow' | 'deep', blendIf?: object | null, channels?: object | null,
  *   mode?: string, opacity?: number, seed?: number }} o
  * @returns {object} dst
@@ -234,10 +278,22 @@ export function compositeAdvanced(o) {
   const mode = o.mode === 'pass-through' || !isBlendMode(o.mode) ? 'normal' : o.mode;
   const opacity = Number.isFinite(o.opacity) ? Math.max(0, Math.min(1, o.opacity)) : 1;
   const restrict = restrictsChannels(o.channels);
-  const needUnder = restrict || !isDefaultBlendIf(o.blendIf);
-  const before = needUnder ? { width: dst.width, height: dst.height, data: new Uint8ClampedArray(dst.data) } : null;
-  if (o.below) blendImages(mode, o.below, dst, opacity, null, o.seed ?? 1);
-  if (o.knockout && o.knockout !== 'none' && o.shape) knockoutInto(dst, o.knock ?? null, o.shape, opacity);
+  const parts = o.parts?.length ? o.parts : o.below ? [{ image: o.below, blend: mode, opacity: 1 }] : null;
+  const knocks = !!(o.knockout && o.knockout !== 'none' && o.shape);
+  const stacked = !!parts || knocks;
+  const needBefore = restrict || !isDefaultBlendIf(o.blendIf) || (stacked && opacity < 1);
+  const before = needBefore ? { width: dst.width, height: dst.height, data: new Uint8ClampedArray(dst.data) } : null;
+  const seed = o.seed ?? 1;
+  // stacked: everything at full strength, then one fade by the opacity; else the layer alone at its opacity
+  const dissolve = mode === 'dissolve';
+  const inner = !stacked || dissolve ? opacity : 1;
+  if (parts) {
+    for (const p of parts) {
+      const op = (Number.isFinite(p.opacity) ? Math.max(0, Math.min(1, p.opacity)) : 1) * (dissolve ? opacity : 1);
+      if (op > 0 && p.image) blendImages(isBlendMode(p.blend) ? p.blend : 'normal', p.image, dst, op, null, seed);
+    }
+  }
+  if (knocks) knockoutInto(dst, o.knock ?? null, o.shape, dissolve ? opacity : 1);
   if (layer) {
     const w = blendIfWeights(layer, before, o.blendIf);
     let src = layer;
@@ -246,8 +302,115 @@ export function compositeAdvanced(o) {
       for (let i = 0, p = 3; i < w.length; i++, p += 4) if (w[i] < 1) d[p] = d[p] * w[i];
       src = { width: layer.width, height: layer.height, data: d };
     }
-    blendImages(mode, src, dst, opacity, null, o.seed ?? 1);
+    blendImages(mode, src, dst, inner, null, seed);
   }
   if (restrict) restrictChannels(dst, before, o.channels);
+  if (stacked && !dissolve && opacity < 1) fadeFrom(dst, before, opacity);
+  return dst;
+}
+
+// ---- adjustment layers -----------------------------------------------------------------------------------------
+
+/**
+ * The part of an adjustment layer's blending that changes how it mixes, or null when it mixes as 0.3 did (a lerp
+ * towards the adjusted pixels by opacity × mask): Normal mode, Fill 100 %, no Blend If and all three channels.
+ * Photoshop gives an adjustment layer the blend mode, Opacity, Fill, the channels and Blend If of Blending Options;
+ * knockout and the five check boxes act on a layer's own pixels and effects, which an adjustment layer has none of.
+ * @param {{ blend?: string, opacity?: number, fillOpacity?: number }} layer
+ * @param {{ blendIf?: object | null, channels?: object | null } | null} blending the layer's (partial) blending options
+ * @returns {{ mode: string, opacity: number, blendIf: object | null, channels: object | null } | null}
+ *   opacity: the layer's opacity times its fill opacity (Fill scales an adjustment as Opacity does)
+ */
+export function adjustmentMix(layer, blending) {
+  const mode = !layer?.blend || layer.blend === 'pass-through' || !isBlendMode(layer.blend) ? 'normal' : layer.blend;
+  const fill = Number.isFinite(layer?.fillOpacity) ? Math.max(0, Math.min(1, layer.fillOpacity)) : 1;
+  const blendIf = blending && !isDefaultBlendIf(blending.blendIf) ? blending.blendIf : null;
+  const channels = blending && restrictsChannels(blending.channels) ? blending.channels : null;
+  if (mode === 'normal' && fill >= 1 && !blendIf && !channels) return null;
+  const opacity = Number.isFinite(layer?.opacity) ? Math.max(0, Math.min(1, layer.opacity)) : 1;
+  return { mode, opacity: opacity * fill, blendIf, channels };
+}
+
+/** A noise value in [0, 1) for document pixel (x, y): Dissolve's speckles stay put whatever rect is repainted. */
+function pixelNoise(seed, x, y) {
+  let h = Math.imul((seed | 0) ^ 0x9e3779b9, 0x85ebca6b) ^ Math.imul(x + 0x632be5ab, 0xc2b2ae35) ^ Math.imul(y + 0x27d4eb2f, 0x165667b1);
+  h = Math.imul(h ^ (h >>> 16), 0x7feb352d);
+  h = Math.imul(h ^ (h >>> 15), 0x846ca68b);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+
+/**
+ * Mixes an adjustment layer's result into the backdrop, in place, the way Photoshop composites an adjustment layer:
+ * its "pixels" are the adjusted backdrop, blended onto the backdrop in the layer's mode at full strength (Normal:
+ * the adjusted colour itself), then mixed in by
+ *   opacity (layer opacity × fill opacity) × coverage (mask, and a clipping base's shape) × Blend If,
+ * where Blend If's This Layer reads the adjusted pixels and Underlying Layer the backdrop. The channels switched off
+ * keep the backdrop's values. Dissolve keeps the adjusted colour where a position-stable noise value falls below that
+ * weight and the backdrop elsewhere. ImageData is straight alpha: where the two alphas differ the mix is
+ * premultiplied, as compositor.js lerpPixels does; with Normal, no Blend If and all channels it is that lerp exactly.
+ * @param {{ width: number, height: number, data: Uint8ClampedArray }} dst the backdrop, replaced by the result
+ * @param {{ width: number, height: number, data: Uint8ClampedArray }} adjusted the adjustment run on a copy of dst
+ * @param {{ mode?: string, opacity?: number, coverage?: ArrayLike<number> | null, blendIf?: object | null,
+ *   channels?: object | null, seed?: number, x?: number, y?: number }} [o] coverage: one value per pixel, 0..255
+ *   (null: everywhere); x, y: where dst's (0, 0) is in the document (Dissolve's noise)
+ * @returns {object} dst
+ */
+export function mixAdjustment(dst, adjusted, o = {}) {
+  const mode = !o.mode || o.mode === 'pass-through' || !isBlendMode(o.mode) ? 'normal' : o.mode;
+  const op = Number.isFinite(o.opacity) ? Math.max(0, Math.min(1, o.opacity)) : 1;
+  if (!(op > 0)) return dst;
+  const d = dst.data, a = adjusted.data, cov = o.coverage ?? null;
+  const w = blendIfWeights(adjusted, dst, o.blendIf);
+  const keep = restrictsChannels(o.channels) ? [o.channels.r === false, o.channels.g === false, o.channels.b === false] : null;
+  const dissolve = mode === 'dissolve';
+  const plain = mode === 'normal' || dissolve;
+  // the blended colour per mode: separable modes through their table, the others pixel by pixel (blendImages over an
+  // opaque copy: the full-strength blend of the adjusted colour onto the backdrop's colour)
+  let blended = null;
+  if (!plain) {
+    const n = dst.width * dst.height;
+    const src = new Uint8ClampedArray(a), back = new Uint8ClampedArray(d);
+    for (let p = 3; p < n * 4; p += 4) src[p] = back[p] = 255;
+    blendImages(mode, { width: dst.width, height: dst.height, data: src }, { width: dst.width, height: dst.height, data: back }, 1);
+    blended = back;
+  }
+  const W = dst.width, x0 = o.x ?? 0, y0 = o.y ?? 0, seed = o.seed ?? 1;
+  const C = [0, 0, 0];
+  for (let i = 0, p = 0; p < d.length; i++, p += 4) {
+    let t = op * (cov ? cov[i] / 255 : 1) * (w ? w[i] : 1);
+    if (!(t > 0)) continue;
+    if (dissolve) {
+      if (pixelNoise(seed, x0 + (i % W), y0 + ((i / W) | 0)) >= t) continue;
+      t = 1;
+    }
+    const src = blended ?? a;
+    C[0] = keep?.[0] ? d[p] : src[p];
+    C[1] = keep?.[1] ? d[p + 1] : src[p + 1];
+    C[2] = keep?.[2] ? d[p + 2] : src[p + 2];
+    const ca = a[p + 3];
+    if (t >= 1) {
+      d[p] = C[0];
+      d[p + 1] = C[1];
+      d[p + 2] = C[2];
+      d[p + 3] = ca;
+    } else if (d[p + 3] === ca) {
+      // Uint8ClampedArray rounds on assignment: the same expression as lerpPixels, so a Fill-only mix matches it
+      d[p] += (C[0] - d[p]) * t;
+      d[p + 1] += (C[1] - d[p + 1]) * t;
+      d[p + 2] += (C[2] - d[p + 2]) * t;
+    } else {
+      const a0 = d[p + 3] / 255, a1 = ca / 255;
+      const w0 = a0 * (1 - t), w1 = a1 * t;
+      const an = w0 + w1;
+      if (an <= 0) {
+        d[p] = d[p + 1] = d[p + 2] = d[p + 3] = 0;
+        continue;
+      }
+      d[p] = (d[p] * w0 + C[0] * w1) / an;
+      d[p + 1] = (d[p + 1] * w0 + C[1] * w1) / an;
+      d[p + 2] = (d[p + 2] * w0 + C[2] * w1) / an;
+      d[p + 3] = an * 255;
+    }
+  }
   return dst;
 }

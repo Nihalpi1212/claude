@@ -202,8 +202,9 @@ export function install(app) {
   function digit(prop, d, ctx) {
     const document = doc();
     if (!document?.active || paints(app.tools?.active)) return;
-    // groups and adjustment layers have no Fill (the Layers panel disables it for them): the fill keys skip them
-    const noFill = (l) => prop === 'fillOpacity' && (l.isGroup || l.type === 'adjustment');
+    // groups have no Fill (the Layers panel disables it for them): the fill keys skip them; an adjustment layer's
+    // Fill scales its adjustment as Opacity does, as in Photoshop
+    const noFill = (l) => prop === 'fillOpacity' && l.isGroup;
     const layers = selectedOrActive(document).filter((l) => !lockedProp(app, l, prop) && !noFill(l));
     if (!layers.length) return;
     const ids = layers.map((l) => l.id).sort().join(',');

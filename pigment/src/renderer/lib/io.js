@@ -4,7 +4,8 @@
 import { readPsd, writePsdUint8Array, initializeCanvas } from 'ag-psd';
 import { writeZip, readZip, findEntry, streamCodecs } from '../../shared/zip.js';
 import { DocStore } from './doc-store.js';
-import { Document, RasterLayer, GroupLayer, TextLayer, AdjustmentLayer, createCanvas, layerFromDescription, canvasIsBlank, textExtensionFor, isDefaultBlending } from './document.js';
+import { Document, RasterLayer, GroupLayer, TextLayer, AdjustmentLayer, createCanvas, layerFromDescription, canvasIsBlank, textExtensionFor, isDefaultBlending, effectiveBlending } from './document.js';
+import { isDefaultBlendIf, normalizeRange } from '../../shared/pixels/blend-if.js';
 import { hasEnabledStyles } from '../../shared/pixels/styles.js';
 import { parseColor } from '../../shared/pixels/color.js';
 import { MODES, duotoneLut } from '../../shared/pixels/modes.js';
@@ -303,6 +304,35 @@ const BLEND_TO_PSD = { 'pass-through': 'pass through' };
 const psdBlend = (m) => PSD_TO_BLEND[m] ?? (m ? m.replace(/ /g, '-') : 'normal');
 const toPsdBlend = (m) => BLEND_TO_PSD[m] ?? m.replace(/-/g, ' ');
 
+/**
+ * Blend If as PSD's blending ranges (the layer record's blending ranges data, which ag-psd reads and writes as
+ * `blendingRanges`): the composite gray source (This Layer) and destination (Underlying Layer) ranges, then a source
+ * and destination pair per colour channel, R, G, B. A range is [black low, black high, white low, white high], the
+ * 0..255 slider halves, as in Pigment's blendIf. Null when nothing is hidden (the record then stays as 0.3 wrote it).
+ */
+export function blendIfToPsd(blendIf) {
+  if (isDefaultBlendIf(blendIf)) return null;
+  const r = (c, which) => normalizeRange(blendIf?.[c]?.[which]);
+  return {
+    compositeGrayBlendSource: r('gray', 'this'),
+    compositeGraphBlendDestinationRange: r('gray', 'under'),
+    ranges: ['r', 'g', 'b'].map((c) => ({ sourceRange: r(c, 'this'), destRange: r(c, 'under') })),
+  };
+}
+
+/** Pigment's blendIf from PSD blending ranges (blendIfToPsd's inverse), or null when they hide nothing. */
+export function blendIfFromPsd(ranges) {
+  if (!ranges || typeof ranges !== 'object') return null;
+  const ok = (v) => Array.isArray(v) && v.length === 4 && v.every(Number.isFinite);
+  const pair = (src, dst) => ({ this: ok(src) ? normalizeRange(src) : [0, 0, 255, 255], under: ok(dst) ? normalizeRange(dst) : [0, 0, 255, 255] });
+  const blendIf = { gray: pair(ranges.compositeGrayBlendSource, ranges.compositeGraphBlendDestinationRange) };
+  ['r', 'g', 'b'].forEach((c, i) => {
+    const e = Array.isArray(ranges.ranges) ? ranges.ranges[i] : null;
+    blendIf[c] = pair(e?.sourceRange, e?.destRange);
+  });
+  return isDefaultBlendIf(blendIf) ? null : blendIf;
+}
+
 /** Reads PSD/PSB bytes into a Document (layers, groups, masks, opacity, blend modes, clipping, text). */
 export function readPsdDocument(bytes) {
   const psd = readPsd(bytes, { skipThumbnail: true, skipLinkedFilesData: true });
@@ -323,6 +353,9 @@ export function readPsdDocument(bytes) {
       clip: !!pl.clipping,
       locked: { transparency: !!pl.protected?.transparency, pixels: !!pl.protected?.composite, position: !!pl.protected?.position, all: false },
     };
+    // Blend If (the blending ranges of the layer record): adjustment layers take it too
+    const blendIf = blendIfFromPsd(pl.blendingRanges);
+    if (blendIf) common.blending = { blendIf };
     if (pl.children) {
       layer = new GroupLayer({ ...common, expanded: !!pl.opened });
       if (layer.blend === 'normal' && pl.blendMode === 'pass through') layer.blend = 'pass-through';
@@ -583,6 +616,13 @@ const SELECTIVE = ['reds', 'yellows', 'greens', 'cyans', 'blues', 'magentas', 'w
 // ag-psd writes each location times the smoothness ('Intr' = smoothness x 4096), but Photoshop reads locations out of
 // 4096 whatever the smoothness, and smoothness 0 would write every location as 0 (read back as 0 / 0). So the
 // smoothness is kept at 1 / 4096 or more and the locations are divided by it first: the file holds location x 4096
+// The Gradient Map's interpolation method in a grdm block (version 3): Photoshop's 4-character codes. The vendored
+// ag-psd reads and writes them as `methodCode` (scripts/vendor-entries/ag-psd-grdm.js); a block without one (version
+// 1: Photoshop before CC, older Pigment) is Classic. Photoshop's Stripes method has no code here: it is written
+// as Classic, the nearest
+const GRDM_CODES = Object.freeze({ classic: 'Gcls', perceptual: 'Perc', linear: 'Lnr ', smooth: 'Smoo' });
+const GRDM_METHODS = Object.freeze(Object.fromEntries(Object.entries(GRDM_CODES).map(([k, v]) => [v, k])));
+
 const psdGradientStops = (smoothness, colorStops, opacityStops) => {
   const sm = Math.max(1, Math.round(Math.max(0, Math.min(1, smoothness ?? 1)) * 4096)) / 4096;
   const scale = (s) => ({ ...s, location: s.location / sm });
@@ -617,16 +657,14 @@ export function adjustmentToPsd(kind, p = {}) {
     case 'posterize': return { type: 'posterize', levels: p.levels ?? 4 };
     case 'threshold': return { type: 'threshold', level: p.level ?? 128 };
     case 'gradient-map': {
-      // a v2 def (G.1) is normalised: its colour stops with their midpoints and its opacity stops. 0.3 stops are linear,
-      // which is smoothness 0. The method is not written: ag-psd writes grdm version 3's method as a descriptor enum
-      // ('gradientInterpolationMethodType.Gcls') where the file wants a 4-character code, and reads any code back as
-      // Perceptual, so a file with it would be broken for Photoshop
+      // a v2 def (G.1) is normalised: its colour stops with their midpoints and its opacity stops, and its method (as
+      // Photoshop's code, see GRDM_CODES). 0.3 stops are linear, which is Classic at smoothness 0
       if (isGradientV2(p)) {
         const g = normalizeGradient(p);
-        return { type: 'gradient map', name: 'Gradient', gradientType: 'solid', reverse: !!p.reverse, dither: !!p.dither, ...psdGradientStops(g.smoothness, g.stops.map((s) => ({ location: s.pos, midpoint: s.mid, color: psdColor(s.color) })), g.opacityStops.map((s) => ({ location: s.pos, midpoint: s.mid, opacity: s.opacity }))) };
+        return { type: 'gradient map', name: 'Gradient', gradientType: 'solid', methodCode: GRDM_CODES[g.interpolation] ?? GRDM_CODES.classic, reverse: !!p.reverse, dither: !!p.dither, ...psdGradientStops(g.smoothness, g.stops.map((s) => ({ location: s.pos, midpoint: s.mid, color: psdColor(s.color) })), g.opacityStops.map((s) => ({ location: s.pos, midpoint: s.mid, opacity: s.opacity }))) };
       }
       const stops = (p.stops?.length ? p.stops : [{ offset: 0, color: '#000000' }, { offset: 1, color: '#ffffff' }]).map((s) => ({ location: s.offset ?? s.pos ?? 0, midpoint: 0.5, color: psdColor(s.color) }));
-      return { type: 'gradient map', name: 'Gradient', gradientType: 'solid', reverse: !!p.reverse, dither: false, ...psdGradientStops(0, stops, [{ location: 0, midpoint: 0.5, opacity: 1 }, { location: 1, midpoint: 0.5, opacity: 1 }]) };
+      return { type: 'gradient map', name: 'Gradient', gradientType: 'solid', methodCode: GRDM_CODES.classic, reverse: !!p.reverse, dither: false, ...psdGradientStops(0, stops, [{ location: 0, midpoint: 0.5, opacity: 1 }, { location: 1, midpoint: 0.5, opacity: 1 }]) };
     }
     case 'selective-color': return { type: 'selective color', mode: p.relative === false ? 'absolute' : 'relative', ...Object.fromEntries(SELECTIVE.map((k) => [k, cmyk(p[k])])) };
     default: return null;
@@ -671,11 +709,11 @@ export function adjustmentFromPsd(a) {
       const cpos = loc(colorStops), opos = loc(opacityStops);
       const mid = (s) => Math.max(0.05, Math.min(0.95, Number.isFinite(s.midpoint) ? s.midpoint : 0.5));
       const smoothness = sm * 4096 <= 1 ? 0 : sm; // adjustmentToPsd writes smoothness 0 as 1 / 4096
-      // a.method is not trusted: ag-psd decodes every grdm version 3 method as Perceptual (see adjustmentToPsd)
-      const interpolation = 'classic';
-      const plain = smoothness === 0 && colorStops.every((s, i) => i === 0 || mid(s) === 0.5) && opacityStops.every((s) => (s.opacity ?? 1) >= 1);
+      // only the raw code is trusted (`method` of an ag-psd without the fix reads every code as Perceptual); none is Classic
+      const interpolation = GRDM_METHODS[a.methodCode] ?? 'classic';
+      const plain = interpolation === 'classic' && smoothness === 0 && colorStops.every((s, i) => i === 0 || mid(s) === 0.5) && opacityStops.every((s) => (s.opacity ?? 1) >= 1);
       if (colorStops.length >= 2 && !plain) {
-        // midpoints, transparency or smoothness: a v2 def (G.1) keeps them
+        // midpoints, transparency, smoothness or another method: a v2 def (G.1) keeps them
         return { kind: 'gradient-map', params: { gradientVersion: 2, type: 'solid', interpolation, smoothness, stops: colorStops.map((s, i) => ({ pos: cpos[i], mid: mid(s), color: rgbFromPsd(s.color) })), opacityStops: opacityStops.length ? opacityStops.map((s, i) => ({ pos: opos[i], mid: mid(s), opacity: Math.max(0, Math.min(1, s.opacity ?? 1)) })) : [{ pos: 0, mid: 0.5, opacity: 1 }, { pos: 1, mid: 0.5, opacity: 1 }], reverse: !!a.reverse, dither: !!a.dither } };
       }
       const stops = colorStops.map((s, i) => ({ offset: cpos[i], color: rgbFromPsd(s.color) }));
@@ -761,13 +799,15 @@ export function writePsdDocument(doc, compositor) {
   const shown = (canvas, x, y) => (modeRender ? inked(canvas, x, y) : canvas);
   let pixelText = 0; // text layers written as pixels because PSD text cannot hold their formatting (J.8)
   let otherSpace = 0; // Levels / Curves in a Gray, CMYK or Lab channel space: PSD gets their RGB channels only (J.8)
-  let styled = 0; // layers whose effects or advanced blending options (Blend If, knockout, channels) PSD does not get
+  let styled = 0; // layers whose effects or advanced blending options (knockout, the channels, the check boxes) PSD does not get
   const noPsd = new Map(); // adjustment name -> count: kinds PSD has no layer for (written as hidden placeholders)
   let colorized = 0; // Hue/Saturation layers set to Colorize: PSD gets their Master and ranges only
   const toPsd = (layer) => {
     const lk = layer.locked ?? {};
-    // no effects or advanced blending are written yet: the layer opens bare in Photoshop or Pigment
-    if (hasEnabledStyles(layer.styles) || !isDefaultBlending(layer.blending)) styled++;
+    // Blend If goes into the layer record's blending ranges; no effects or other advanced blending options (knockout,
+    // the channels, the check boxes) are written yet: the layer opens without them in Photoshop or Pigment
+    const blendIf = layer.blending ? blendIfToPsd(effectiveBlending(layer).blendIf) : null;
+    if (hasEnabledStyles(layer.styles) || !isDefaultBlending(layer.blending ? { ...layer.blending, blendIf: null } : null)) styled++;
     const base = {
       name: layer.name,
       hidden: !layer.visible,
@@ -776,6 +816,7 @@ export function writePsdDocument(doc, compositor) {
       blendMode: toPsdBlend(layer.blend === 'pass-through' && !layer.isGroup ? 'normal' : layer.blend),
       clipping: layer.clip,
       protected: { transparency: !!(lk.transparency || lk.all), composite: !!(lk.pixels || lk.all), position: !!(lk.position || lk.all) },
+      ...(blendIf ? { blendingRanges: blendIf } : {}),
     };
     if (layer.mask?.canvas || layer.vectorMask) {
       const mask = maskOf(layer);

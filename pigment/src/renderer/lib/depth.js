@@ -19,15 +19,18 @@
 import { ADJUSTMENTS } from '../../shared/pixels/adjust.js';
 import { hasEnabledStyles } from '../../shared/pixels/styles.js';
 import { maskCanvasFor, hasEffectiveMask } from './mask-render.js';
+import { clippedAbove } from './layer-menu-model.js';
+import { adjustmentMix } from '../../shared/pixels/blend-if.js';
 import {
   DEEP_TYPES, DEEP_BITS, fromCanvasData, toCanvasData, convertDepth, createDeep, extractRect, writeRect, mixRect, hasPrecision, syncFromProxy,
   applyAdjustmentDeep, isExactKind, lutCovers, blendDeep, resampleDeep, carryOver, statistics, DEEP_BLEND_MODES, q8u16, q8f32, toPs16,
+  cloneDeep, cutToAlpha, cutToMask, adjustLayerDeep, clipGroupDeep,
 } from '../../shared/pixels/deep.js';
 import { encodePng, decodePng, toRgba16, isPng, pngInfo } from '../../shared/pixels/png.js';
 import { encodeTiff, decodeTiff, toRgba, isTiff } from '../../shared/pixels/tiff.js';
 import { encodeTga, decodeTga } from '../../shared/pixels/tga.js';
 import { parseColor } from '../../shared/pixels/color.js';
-import { Document, RasterLayer, createCanvas, isDefaultBlending } from './document.js';
+import { Document, RasterLayer, createCanvas, isDefaultBlending, effectiveBlending } from './document.js';
 import { flattenDocument } from './compositor.js';
 import { registerExportFormat, registerOpenFormat, baseName, extOf } from './io.js';
 import { SAVE_FILTERS } from './documents.js';
@@ -396,39 +399,108 @@ export function install(app) {
   // ---- flattening at full depth ---------------------------------------------------------------------------------
   const styled = (layer) => hasEnabledStyles(layer.styles);
 
+  /** An adjustment layer's Blending Options as deep.js adjustLayerDeep takes them, or null for 0.3's plain lerp. */
+  const adjustMixOf = (layer) => adjustmentMix(layer, layer.blending);
+
+  /** The nearest layer below a clipped layer that is not clipped itself: its clipping base (null at the bottom). */
+  const baseOf = (layer) => {
+    const kids = layer.parent?.children ?? [];
+    let i = kids.indexOf(layer) - 1;
+    while (i >= 0 && kids[i].clip) i--;
+    return kids[i] ?? null;
+  };
+
   /**
-   * How the document can be composited in float: the layers in drawing order, or the reason it cannot (then the
+   * How the document can be composited in float: the steps in drawing order, or the reason it cannot (then the
    * 8-bit composite is scaled up). Float covers raster, text, shape, fill and smart layers with the Normal,
-   * Multiply and Screen blend modes, opacity, fill opacity and masks, Pass Through groups, and adjustment layers
-   * whose kind has deep maths. `layers` limits the plan to those layers (a merge); `neutral` is the layer a merge
-   * draws at full opacity in Normal mode (Merge Down hands the lower layer's blend mode and opacity to the result).
+   * Multiply and Screen blend modes, opacity, fill opacity and masks, Pass Through groups, isolated groups,
+   * clipping masks (Blend Clipped Layers as Group on or off) and adjustment layers whose kind has deep maths.
+   * `layers` limits the plan to those layers (a merge); `neutral` is the layer a merge draws at full opacity in
+   * Normal mode (Merge Down hands the lower layer's blend mode and opacity to the result), and with
+   * `neutralBlending` (Merge Clipping Mask) without its Blend If and channels, which stay live on the result.
+   *
+   * Steps: { layer } a layer drawn on its own; { adjust } an adjustment layer; { group, steps } a group composited
+   * on its own first (isolated); { clip, clipped, grouped } a clipping base (a { layer } or { group } step) with the
+   * layers clipped to it, the way lib/compositor.js clipGroup and finishAdvanced draw them.
    */
-  function planFlatten(doc, layers = null, neutral = null) {
-    const steps = [];
+  function planFlatten(doc, layers = null, neutral = null, { neutralBlending = false } = {}) {
     let reason = null;
-    const walk = (group) => {
-      const kids = group.children;
+    const listed = layers ? new Set(layers) : null;
+    const top = layers ? { children: layers } : doc.root;
+    /** Blending options float can draw: the defaults; Blend Clipped Layers as Group only decides how clipping draws. */
+    const blendingOk = (layer) => {
+      const b = layer.blending;
+      if (!b) return true;
+      const plain = { ...b, clippedAsGroup: true };
+      if (layer === neutral && neutralBlending) Object.assign(plain, { blendIf: null, channels: null });
+      return isDefaultBlending(plain);
+    };
+    const adjustStep = (layer) => {
+      const def = Object.prototype.hasOwnProperty.call(ADJUSTMENTS, layer.kind) ? ADJUSTMENTS[layer.kind] : null;
+      if (!def || !(isExactKind(layer.kind, layer.params ?? {}) || lutCovers(layer.kind, layer.params ?? {}))) reason = `the ${def?.name ?? layer.kind} adjustment layer works at 8 bits`;
+      // its Blending Options (deep.js adjustLayerDeep): Blend If, Fill and the channels in float, and the modes
+      // blendDeep has; the others composite at 8 bits
+      else if (!DEEP_BLEND_MODES.includes(adjustMixOf(layer)?.mode ?? 'normal')) reason = `“${layer.name}” uses the ${String(layer.blend).replace(/-/g, ' ')} blend mode`;
+      return { adjust: layer };
+    };
+    /** A step that draws `layer` and its content with its own opacity, mask and blend mode (no clipped layers). */
+    const drawn = (layer, { role = 'layer' } = {}) => {
+      const name = `“${layer.name}”`;
+      if (!blendingOk(layer)) reason = `${name} has advanced blending options`; // knockout, Blend If, channels (K.3)
+      else if (styled(layer)) reason = layer.isGroup ? `the group ${name} has layer effects` : `${name} has layer effects`;
+      else if (layer.isGroup) {
+        // a group that lets its layers blend with what is below it is walked in place; a group with clipped layers,
+        // a clipped group and a group in another mode composite their layers on their own first (compositor.js)
+        const passThrough = layer.blend === 'pass-through';
+        if (passThrough && role === 'layer' && layer !== neutral) {
+          if (layer.opacity >= 1 && !hasEffectiveMask(layer)) return { inline: walk(layer.children, false) }; // mask (K.1)
+          reason = `the group ${name} is not a plain Pass Through group`;
+        } else if (!passThrough && layer !== neutral && !DEEP_BLEND_MODES.includes(layer.blend)) reason = `the group ${name} uses the ${String(layer.blend).replace(/-/g, ' ')} blend mode`;
+        else return { group: layer, steps: walk(layer.children, false) };
+      } else if (layer !== neutral && !DEEP_BLEND_MODES.includes(layer.blend)) reason = `${name} uses the ${String(layer.blend).replace(/-/g, ' ')} blend mode`;
+      return { layer };
+    };
+    /** The steps of a list of sibling layers; `atTop`: the list a merge was given (it may hold any layers). */
+    function walk(kids, atTop) {
+      const steps = [];
       for (let i = 0; i < kids.length && !reason; i++) {
         const layer = kids[i];
         if (!layer.visible) continue;
-        const name = `“${layer.name}”`;
-        if (layer.clip && kids.slice(0, i).some((k) => !k.clip)) reason = `${name} is a clipping mask`;
-        else if (layer.type === 'adjustment') {
-          const def = Object.prototype.hasOwnProperty.call(ADJUSTMENTS, layer.kind) ? ADJUSTMENTS[layer.kind] : null;
-          if (!def || !(isExactKind(layer.kind, layer.params ?? {}) || lutCovers(layer.kind, layer.params ?? {}))) reason = `the ${def?.name ?? layer.kind} adjustment layer works at 8 bits`;
-          else steps.push({ adjust: layer });
-        } else if (!isDefaultBlending(layer.blending)) reason = `${name} has advanced blending options`; // knockout, Blend If, channels (K.3)
-        else if (layer.isGroup) {
-          if (layer.blend === 'pass-through' && layer.opacity >= 1 && !hasEffectiveMask(layer) && !styled(layer)) walk(layer); // mask (K.1)
-          else reason = `the group ${name} is not a plain Pass Through group`;
-        } else if (styled(layer)) reason = `${name} has layer effects`;
-        else if (layer !== neutral && !DEEP_BLEND_MODES.includes(layer.blend)) reason = `${name} uses the ${String(layer.blend).replace(/-/g, ' ')} blend mode`;
-        else steps.push({ layer });
+        // a clipped layer is drawn with its base; without a base below it (or, in a merge, without its base among the
+        // merged layers: lib/layer-ops.js renderLayersFlat draws such a layer unclipped) it is an ordinary layer
+        const base = layer.clip ? baseOf(layer) : null;
+        if (base && (!atTop || !listed || listed.has(base))) continue;
+        const clipped = [];
+        if (!layer.clip) {
+          const sibs = layer.parent?.children ?? kids;
+          for (let j = sibs.indexOf(layer) + 1; j < sibs.length && sibs[j].clip; j++) {
+            const c = sibs[j];
+            if (c.visible && (!atTop || !listed || listed.has(c))) clipped.push(c);
+          }
+        }
+        if (layer.type === 'adjustment') {
+          // the compositor draws an adjustment layer and leaves out what is clipped to it
+          if (clipped.length) reason = `“${clipped[0].name}” is clipped to an adjustment layer`;
+          else steps.push(adjustStep(layer));
+          continue;
+        }
+        if (!clipped.length) {
+          const step = drawn(layer);
+          if (step.inline) steps.push(...step.inline);
+          else steps.push(step);
+          continue;
+        }
+        const grouped = effectiveBlending(layer).clippedAsGroup !== false;
+        const baseStep = drawn(layer, { role: 'base' });
+        const parts = clipped.map((c) => (c.type === 'adjustment' ? adjustStep(c) : drawn(c, { role: 'clipped' })));
+        steps.push({ clip: baseStep, clipped: parts, grouped });
       }
-    };
+      return steps;
+    }
+    let steps = null;
     if (doc.depth > 8) {
       if (doc.mode === 'duotone' || doc.mode === 'indexed' || doc.mode === 'bitmap') reason = 'this image mode is rendered at 8 bits';
-      else walk(layers ? { children: layers } : doc.root);
+      else steps = walk(top.children, !!layers);
     } else reason = 'the document is 8 bits/channel';
     return reason ? { exact: false, reason } : { exact: true, steps };
   }
@@ -439,61 +511,128 @@ export function install(app) {
     // mask canvases sit at the document origin; their alpha is the coverage
     return { data: ctx2d(c).getImageData(0, 0, c.width, c.height).data, width: c.width, height: c.height, x: 0, y: 0, channels: 4, offset: 3 };
   }
+  /** A document-placed mask moved onto planes whose (0, 0) is at (x, y) of the document. */
+  const maskAtOrigin = (mask, x, y) => (mask ? { ...mask, x: mask.x - x, y: mask.y - y } : null);
 
   /**
    * The flattened document as deep planes ({ type, width, height, data } plus exact and reason): composited in
    * float when planFlatten allows it, else the 8-bit composite scaled up (exact: false, reason says why).
-   * With `layers` (and `neutral`, see planFlatten) only those layers are composited, the way a merge renders them:
-   * without the mode's display pass, and with no 8-bit fallback (exact: false then comes without pixels).
+   * With `layers` (and `neutral` and `neutralBlending`, see planFlatten) only those layers are composited, the way
+   * a merge renders them: without the mode's display pass, and with no 8-bit fallback (exact: false then comes
+   * without pixels).
    */
-  function flattenDeep(doc, { type = doc.depth === 32 ? 'f32' : 'u16', compositor = doc.view?.compositor, layers = null, neutral = null } = {}) {
+  function flattenDeep(doc, { type = doc.depth === 32 ? 'f32' : 'u16', compositor = doc.view?.compositor, layers = null, neutral = null, neutralBlending = false } = {}) {
     syncNow(doc);
-    const plan = planFlatten(doc, layers, neutral);
+    const plan = planFlatten(doc, layers, neutral, { neutralBlending });
     if (!plan.exact) {
       if (layers) return { exact: false, reason: plan.reason };
       const flat = flattenDocument(doc, compositor);
       const planes = fromCanvasData(ctx2d(flat).getImageData(0, 0, flat.width, flat.height), type);
       return { ...planes, exact: false, reason: plan.reason };
     }
-    const acc = createDeep(doc.width, doc.height, type);
-    for (const step of plan.steps) {
-      if (step.adjust) {
-        const layer = step.adjust;
-        const mask = maskOf(layer, doc);
-        const opacity = Math.max(0, Math.min(1, layer.opacity ?? 1));
-        if (!(opacity > 0)) continue;
-        const partial = opacity < 1 || mask;
-        const before = partial ? extractRect(acc) : null;
-        applyAdjustmentDeep(acc, layer.kind, layer.params ?? {});
-        if (partial) {
-          const alpha = new Uint8ClampedArray(doc.width * doc.height);
-          for (let y = 0; y < doc.height; y++) {
-            for (let x = 0; x < doc.width; x++) {
-              const m = mask ? (x < mask.width && y < mask.height ? mask.data[(y * mask.width + x) * 4 + 3] : 0) : 255;
-              alpha[y * doc.width + x] = m * opacity;
-            }
+    const ctxAt = (x, y) => ({ origin: { x, y }, docWidth: doc.width, docHeight: doc.height, scale: 1 });
+
+    /** An adjustment layer over the whole of `acc` (document-sized, at the origin). */
+    const adjustAcc = (acc, layer) => {
+      const mask = maskOf(layer, doc);
+      const opacity = Math.max(0, Math.min(1, layer.opacity ?? 1));
+      if (!(opacity > 0)) return;
+      // Blending Options (compositor.js mixAdjusted): the mix of deep.js adjustLayerDeep; without them 0.3's lerp below
+      const mix = adjustMixOf(layer);
+      if (mix) {
+        adjustLayerDeep(acc, layer.kind, layer.params ?? {}, { ...mix, mask, ctx: ctxAt(0, 0) });
+        return;
+      }
+      const partial = opacity < 1 || mask;
+      const before = partial ? extractRect(acc) : null;
+      applyAdjustmentDeep(acc, layer.kind, layer.params ?? {});
+      if (partial) {
+        const alpha = new Uint8ClampedArray(doc.width * doc.height);
+        for (let y = 0; y < doc.height; y++) {
+          for (let x = 0; x < doc.width; x++) {
+            const m = mask ? (x < mask.width && y < mask.height ? mask.data[(y * mask.width + x) * 4 + 3] : 0) : 255;
+            alpha[y * doc.width + x] = m * opacity;
           }
-          mixRect(acc, before, alpha);
         }
-        continue;
+        mixRect(acc, before, alpha);
+      }
+    };
+
+    /** The pixels a { layer } or { group } step draws ({ src, x, y } in document coordinates), or null. */
+    const sourceOf = (step) => {
+      if (step.group) {
+        // the group's layers on their own, over transparency (compositor.js renders them into a fresh canvas)
+        const buf = createDeep(doc.width, doc.height, type);
+        drawSteps(buf, step.steps);
+        return { src: buf, x: 0, y: 0 };
       }
       const layer = step.layer;
-      let src, x, y;
-      if (layer.type === 'raster' && layer.deep) {
-        src = planesOf(layer);
-        x = layer.x;
-        y = layer.y;
-      } else {
-        // text, shapes, fills and smart objects render at 8 bits; they still blend in float
-        const s = layer.type === 'raster' ? { canvas: layer.canvas, x: layer.x, y: layer.y } : compositor?.layerSource?.(layer) ?? (typeof layer.render === 'function' ? layer.render() : null);
-        if (!s?.canvas?.width) continue;
-        src = fromCanvasData(ctx2d(s.canvas).getImageData(0, 0, s.canvas.width, s.canvas.height), 'u16');
-        x = s.x ?? 0;
-        y = s.y ?? 0;
-      }
+      if (layer.type === 'raster' && layer.deep) return { src: planesOf(layer), x: layer.x, y: layer.y };
+      // text, shapes, fills and smart objects render at 8 bits; they still blend in float
+      const s = layer.type === 'raster' ? { canvas: layer.canvas, x: layer.x, y: layer.y } : compositor?.layerSource?.(layer) ?? (typeof layer.render === 'function' ? layer.render() : null);
+      if (!s?.canvas?.width) return null;
+      return { src: fromCanvasData(ctx2d(s.canvas).getImageData(0, 0, s.canvas.width, s.canvas.height), 'u16'), x: s.x ?? 0, y: s.y ?? 0 };
+    };
+    /** How a step's own layer draws: opacity × fill opacity (groups have none) and blend mode, neutral in a merge. */
+    const drawOf = (step) => {
+      const layer = step.group ?? step.layer;
       const plain = layer === neutral;
-      blendDeep(acc, src, { alpha: (plain ? 1 : layer.opacity ?? 1) * (layer.fillOpacity ?? 1), mode: plain ? 'normal' : layer.blend, x, y, mask: maskOf(layer, doc) });
+      const fill = layer.isGroup ? 1 : layer.fillOpacity ?? 1;
+      const mode = plain || layer.blend === 'pass-through' ? 'normal' : layer.blend;
+      return { alpha: (plain ? 1 : layer.opacity ?? 1) * fill, mode };
+    };
+
+    function drawSteps(acc, steps) {
+      for (const step of steps) {
+        if (step.adjust) {
+          adjustAcc(acc, step.adjust);
+          continue;
+        }
+        if (!step.clip) {
+          const s = sourceOf(step);
+          if (s) blendDeep(acc, s.src, { ...drawOf(step), x: s.x, y: s.y, mask: maskOf(step.group ?? step.layer, doc) });
+          continue;
+        }
+        const base = sourceOf(step.clip);
+        if (!base) continue; // a base without pixels shows nothing, and nothing clipped to it
+        const baseLayer = step.clip.group ?? step.clip.layer;
+        const baseMask = maskOf(baseLayer, doc);
+        if (step.grouped) {
+          // Blend Clipped Layers as Group: the clipped layers on the opaque base, cut to its alpha; then the whole
+          // group takes the base's fill opacity, mask, opacity and blend mode (compositor.js finishLayer, clipGroup)
+          const items = [];
+          for (const c of step.clipped) {
+            if (c.adjust) {
+              const l = c.adjust;
+              items.push({ adjust: l.kind, params: l.params ?? {}, opacity: l.opacity ?? 1, ...(adjustMixOf(l) ?? {}), mask: maskAtOrigin(maskOf(l, doc), base.x, base.y), ctx: ctxAt(base.x, base.y) });
+              continue;
+            }
+            const s = sourceOf(c);
+            if (s) items.push({ src: s.src, x: s.x - base.x, y: s.y - base.y, ...drawOf(c), mask: maskAtOrigin(maskOf(c.group ?? c.layer, doc), base.x, base.y) });
+          }
+          blendDeep(acc, clipGroupDeep(base.src, items), { ...drawOf(step.clip), x: base.x, y: base.y, mask: baseMask });
+          continue;
+        }
+        // off: the base draws as usual and each clipped layer blends with the backdrop in its own mode, cut to the
+        // base's shape (its alpha and mask; its fill opacity does not fade them: compositor.js finishAdvanced)
+        blendDeep(acc, base.src, { ...drawOf(step.clip), x: base.x, y: base.y, mask: baseMask });
+        const shape = cutToMask(cloneDeep(base.src), maskAtOrigin(baseMask, base.x, base.y));
+        for (const c of step.clipped) {
+          if (c.adjust) {
+            const l = c.adjust;
+            adjustLayerDeep(acc, l.kind, l.params ?? {}, { opacity: l.opacity ?? 1, ...(adjustMixOf(l) ?? {}), mask: maskOf(l, doc), shape: { planes: shape, x: base.x, y: base.y }, ctx: ctxAt(0, 0) });
+            continue;
+          }
+          const s = sourceOf(c);
+          if (!s) continue;
+          const cut = cutToAlpha(c.group ? s.src : cloneDeep(s.src), shape, { x: base.x - s.x, y: base.y - s.y });
+          blendDeep(acc, cut, { ...drawOf(c), x: s.x, y: s.y, mask: maskOf(c.group ?? c.layer, doc) });
+        }
+      }
     }
+
+    const acc = createDeep(doc.width, doc.height, type);
+    drawSteps(acc, plan.steps);
     // Grayscale documents show (and export) the luma of the composite, so coloured layers cannot leak colour
     if (doc.mode === 'grayscale' && !layers) applyAdjustmentDeep(acc, 'desaturate');
     return { ...acc, exact: true, reason: null };
@@ -587,6 +726,11 @@ export function install(app) {
       },
       'layer:merge-selected': (d) => (d.selected.size > 1 ? { layers: inOrder(d, [...d.selected].filter((l) => l !== d.root)) } : null),
       'layer:merge-visible': (d) => ({ layers: d.root.children.filter((l) => l.visible) }),
+      // the base renders neutral; its Blend If and channels stay live on the result (layer-ops.js keepBlending)
+      'layer:merge-clipping': (d) => {
+        const base = d.active, clipped = clippedAbove(base);
+        return clipped.length && base.type !== 'adjustment' ? { layers: [base, ...clipped], neutral: base, neutralBlending: true } : null;
+      },
     };
     for (const [id, pick] of Object.entries(MERGES)) {
       const base = app.commands.commands.get(id);
@@ -617,6 +761,65 @@ export function install(app) {
         },
       });
     }
+
+    // The stamps of lib/layers-extras/stamp.js merge the same way but keep the layers they read: the one layer the
+    // command adds to the document is the merged picture (Stamp Down puts it in the lower layer's place).
+    const hiddenIn = (d, l) => {
+      for (let p = l; p && p !== d.root; p = p.parent) if (!p.visible) return true;
+      return false;
+    };
+    const STAMPS = {
+      'layer:stamp-visible': (d) => ({ layers: d.root.children.filter((l) => l.visible && !l.preview && !l.quickMask) }),
+      'layer:stamp-selected': (d) => {
+        const picked = d.selectedLayers().filter((l) => l !== d.root);
+        const layers = inOrder(d, picked.length ? picked : d.active ? [d.active] : []);
+        if (layers.length > 1) {
+          // the stamp renders the shown ones into the group of the topmost selected layer
+          const shown = layers.filter((l) => !hiddenIn(d, l));
+          return shown.length > 1 && shown[shown.length - 1] === layers[layers.length - 1] ? { layers: shown } : null;
+        }
+        const top = layers[0];
+        const below = top?.parent?.children[top.parent.children.indexOf(top) - 1];
+        return below?.type === 'raster' ? { layers: [below, top], neutral: below } : null;
+      },
+    };
+    const wrapStamp = (id, pick) => {
+      const base = app.commands.commands.get(id);
+      if (!base || base.stub || base.deepStamp) return;
+      app.commands.register(id, {
+        ...base,
+        deepStamp: true,
+        run: (arg, ctx) => {
+          const d = app.doc;
+          let flat = null, before = null;
+          if (d?.depth > 8) {
+            try {
+              const stamping = pick(d);
+              const f = stamping && stamping.layers.length > 0 && stamping.layers.every((l) => !hiddenIn(d, l)) && likeCanvasMerge(stamping.layers) ? flattenDeep(d, stamping) : null;
+              if (f?.exact) {
+                flat = f;
+                before = new Set(d.layers());
+              }
+            } catch (err) {
+              console.warn('depth: stamping at 8 bits', err);
+            }
+          }
+          const result = base.run(arg, ctx);
+          const finish = (r) => {
+            const added = flat ? d.layers().filter((l) => !before.has(l)) : [];
+            if (added.length === 1) adopt(d, flat, added[0]);
+            return r;
+          };
+          return result && typeof result.then === 'function' ? result.then(finish) : finish(result);
+        },
+      });
+    };
+    // lib/layer-dialogs.js, which registers the stamps, installs after this module
+    const wrapStamps = () => {
+      for (const [id, pick] of Object.entries(STAMPS)) wrapStamp(id, pick);
+    };
+    wrapStamps();
+    app.on('app:ready', wrapStamps);
 
     // Image > Duplicate with "merged layers only" builds its one layer from the 8-bit composite: give it the float one.
     // lib/image-ops.js says which kind of duplicate it made. A copy with its layers kept is left alone: cloned layers

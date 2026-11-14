@@ -242,14 +242,19 @@ export class BrushStroke {
     }
     ctx.restore();
     this.layer?.touch();
-    this.onDirty?.({ x: rect.x + this.target.x, y: rect.y + this.target.y, width: rect.width, height: rect.height });
+    // the layer goes along so the view's compositor repaints only this rect (canvas-view.js invalidate)
+    this.onDirty?.({ x: rect.x + this.target.x, y: rect.y + this.target.y, width: rect.width, height: rect.height }, this.layer);
   }
 
   end() {
     if (this.ended) return null;
     this.ended = true;
     this.flush(true);
-    return this.history.endStroke(this.dirty);
+    const entry = this.history.endStroke(this.dirty);
+    // endStroke touches the layer without changing a pixel: an empty dirty rect says so, or the next repaint would
+    // composite the layer's whole box again
+    this.onDirty?.({ x: 0, y: 0, width: 0, height: 0 }, this.layer);
+    return entry;
   }
 
   cancel() {

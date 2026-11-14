@@ -217,18 +217,26 @@ export class History {
     const doc = this.doc;
     const { canvas, layer, kind } = s;
     const reattach = attacher(layer, canvas);
+    // the view's compositor repaints only the stroke's box (canvas-view.js invalidate, Compositor.hintPixels): the
+    // layer's canvas sits at the layer's offset, a mask canvas at the document's origin
+    const hint = () => {
+      const at = canvas === layer?.canvas ? { x: layer.x, y: layer.y } : canvas === layer?.mask?.canvas ? { x: 0, y: 0 } : null;
+      if (at) doc.view?.invalidate?.({ x: r.x + at.x, y: r.y + at.y, width: r.width, height: r.height }, layer);
+    };
     const entry = this.push({
       label: s.label,
       undo: () => {
         reattach();
         canvas.getContext('2d').putImageData(before, r.x, r.y);
         layer?.touch();
+        hint();
         doc.changed(kind, { layer, rect: r });
       },
       redo: () => {
         reattach();
         canvas.getContext('2d').putImageData(after, r.x, r.y);
         layer?.touch();
+        hint();
         doc.changed(kind, { layer, rect: r });
       },
       bytes: before.data.length * 2,

@@ -76,7 +76,7 @@ export class AdjustmentBrushTool extends StrokeTool {
     }
     const target = { canvas: layer.mask.canvas, x: 0, y: 0, mask: true };
     const settings = { ...this.baseSettings(layer, target), mode: 'mask', maskValue: subtract ? 0 : 1, lockTransparency: false, label: 'Adjustment Brush' };
-    this.stroke = new BrushStroke({ target, layer, settings, selection: d.selection?.isEmpty === false ? d.selection : null, history: d.history, onDirty: (rect) => this.view?.invalidate(rect) });
+    this.stroke = new BrushStroke({ target, layer, settings, selection: d.selection?.isEmpty === false ? d.selection : null, history: d.history, onDirty: (rect, layer) => this.view?.invalidate(rect, layer) });
     this.stroke.begin(p);
   }
 

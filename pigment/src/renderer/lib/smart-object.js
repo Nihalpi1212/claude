@@ -7,7 +7,7 @@
 import { Layer, Document, RasterLayer, createCanvas, copyCanvas, registerLayerType, intersectRect, unionRect, newId } from './document.js';
 import { Compositor, flattenDocument } from './compositor.js';
 import { mapShapeGeometry } from './path-ops.js';
-import { structural, setLayerProps, cloneLayer, relinkCopies, releaseOrphanClips } from './layer-ops.js';
+import { structural, setLayerProps, cloneLayer, relinkCopies, releaseOrphanClips, lookBefore, lookChanged } from './layer-ops.js';
 import { applyFilter, FILTERS } from '../../shared/pixels/filters.js';
 import { applyAdjustment, ADJUSTMENTS } from '../../shared/pixels/adjust.js';
 import { transformBounds, IDENTITY } from '../../shared/pixels/transform.js';
@@ -527,6 +527,9 @@ export function install(app) {
     // like Photoshop, the smart object's canvas is the box around the converted layers (effects included),
     // so the transform box hugs the content; the matrix puts it back where it was
     const box = contentBox(layers, d);
+    // the smart object composites its layers on their own: an exterior effect in a mode of its own (a Screen glow, a
+    // coloured Multiply shadow) loses what it did to the layers below (lookBefore); the notice below says so
+    const look = lookBefore(d, layers);
     const src = new Document({ width: box.width, height: box.height, dpi: d.dpi, name: top.name });
     for (const l of layers) {
       const c = cloneLayer(l, { name: l.name, relink: false });
@@ -560,6 +563,7 @@ export function install(app) {
       d.setActive(smart);
     });
     app.setEditingMask(false);
+    if (lookChanged(d, look)) app.dialogs?.toast?.('Some effects blend with the layers below in a mode of their own, which the smart object cannot keep, so the image changed', { timeout: 4000 });
   }
 
   function viaCopy() {

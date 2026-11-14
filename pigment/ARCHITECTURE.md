@@ -186,17 +186,23 @@ renders the tree bottom-up:
    consecutive `clip` layers above it) is flattened into one canvas limited to the base's alpha, then
    layer styles (`pixels/styles.js`, cached per version) are applied producing a possibly larger
    canvas with an offset, then the mask (`destination-in` with `mask.canvas` at the layer offset)
-   and finally the result is drawn into the target with `globalAlpha = opacity` and the blend mode:
+   and finally the result is drawn into the target with `globalAlpha = opacity` and the blend mode
+   (0.4: a layer whose exterior effects or own mode are not Normal draws its effects apart, each in
+   its own mode: see "Effect blend modes" at the end of this file):
    Canvas 2D `globalCompositeOperation` when it exists (normal→source-over, multiply, screen,
    overlay, darken, lighten, color-dodge, color-burn, hard-light, soft-light, difference,
    exclusion, hue, saturation, color, luminosity, linear-dodge→lighter), otherwise the per-pixel
    fallback in `pixels/blend.js` on the affected rect.
 3. An adjustment layer takes the current target pixels (its "below"), runs
-   `pixels/adjust.js` on a copy, and blends the result back through its mask and opacity.
+   `pixels/adjust.js` on a copy, and blends the result back through its mask and opacity
+   (0.4: with its blend mode, Fill, channels and Blend If when it has them: see "Blending Options
+   on adjustment layers" at the end of this file).
    `dissolve` is implemented as per-pixel random alpha in the fallback.
 4. Caches: `layerCanvas` per layer version; group results per (group version, child versions); the
    full composite per document version. `rect` limits all work to that document rectangle (brush
-   strokes repaint only the dirty rect).
+   strokes repaint only the dirty rect). (0.4: a full composite goes through the repaint caches, which
+   reuse it, repaint the edit's box, or start above a cached composite of the layers below the edit;
+   consecutive adjustment layers share one pass: see "Repaint caches" at the end of this file.)
 
 `flatten(doc)` = composite with `forExport: true` (no selection, no guides).
 
@@ -556,7 +562,7 @@ the module came to be. The user-facing description is in `docs/USER-GUIDE.md`.
 - *Modes, smaller*: flattening happens inside the conversion (one history entry), not through `image:flatten`; indirect conversions chain through Grayscale; multichannel spot channels are not regenerated after edits; Bitmap is stored as 8-bit black/white RGBA and its output resolution does not rescale saved paths; PNG-8 always writes 8-bit indices; state that `document.js` does not carry lives in `doc.meta.imageMode`.
 - *Save for Web*: 2-up only, no slices, metadata options or animation. GIF read and write are single-frame.
 - *Deep pixels*: `layer.deep` is rebuilt from the 8-bit proxy (precision lost on the touched pixels) for filters, painting, Image Size, arbitrary rotation, Free Transform, warps, merges, the Auto commands and Fade; adjustment kinds without float maths run at 8 bits and add their delta. Masks stay 8-bit. 32-bit is display-referred sRGB float, not linear light.
-- *Deep flatten*: `flattenDeep` falls back to the 8-bit composite for clipping masks, layer effects, blend modes other than Normal / Multiply / Screen, non-pass-through groups and constrained modes. Deep stash and history memory (128 MB per canvas, 384 MB for history-only layers) are not counted in `historyMemoryMB`.
+- *Deep flatten*: `flattenDeep` falls back to the 8-bit composite for layer effects, blend modes other than Normal / Multiply / Screen, advanced blending options other than Blend Clipped Layers as Group, pass-through groups with opacity or a mask, layers clipped to an adjustment layer and constrained modes. Clipping masks (as a group: the clipped layers on the base made opaque, cut to its alpha once, `deep.js clipGroupDeep`; not as a group: each clipped layer cut to the base's shape, `cutToAlpha`, `adjustLayerDeep`) and isolated groups (a group base, a clipped group, a group in Normal / Multiply / Screen) composite in float, as `compositor.js clipGroup` / `finishAdvanced` draw them. The merges (Merge Down, Merge Layers, Merge Visible, Merge Clipping Mask), Stamp Visible / Stamp Layers and Flatten Image hand the float composite to their result. Deep stash and history memory (128 MB per canvas, 384 MB for history-only layers) are not counted in `historyMemoryMB`.
 - *TIFF / TGA / PNG*: the TIFF reader rejects JPEG-in-TIFF, CCITT, YCbCr, Lab, BigTIFF and half-float, ignores Orientation, and opens the first page; grey TIFF and 16-bit grey PNG open as RGB. PNG-16 above 1 MP uses one fixed row filter. `tga.js` is its own module. The Info panel's deep readout is a DOM block appended by `lib/depth.js`.
 - *Select Subject / Sky / Focus Area*: graph-cut and saliency heuristics, no learned model. Focus Area has no Add / Subtract brushes. The workspace has no reduced preview (refinement runs at full size in the worker, on the main thread when no worker starts), its Quick Selection is the flood-in-a-window of the existing tool, and replaying `select:select-mask` re-applies settings without the strokes. The module worker has not been verified in a packaged (asar) build.
 - *Actions*: `edit:fade` is not replayable (it is in `UNREPLAYABLE` in `lib/actions/model.js`); tool strokes, Move drags, `layer:move-to`, the three warp sessions and in-place edits of adjustment, fill and smart-filter layers are not recorded. A step with its dialog toggle on opens the dialog with the command's own start values. `.atn` files are refused. Engine API names are `loadFile` / `saveFile` and `engine.playback`; steps may carry `optional: true`. Whether an action's function key beats a native menu accelerator under Electron is unverified.
@@ -2233,7 +2239,11 @@ registers `'text'` (start editing at the clicked index).
 
 **L.8 Vendor steps.** `scripts/build-vendor.mjs` keeps the ag-psd bundle and then imports every
 `scripts/vendor/*.mjs` and awaits its `build({ root, out, esbuild })`. A step that fails prints a warning and the
-others still run.
+others still run. The ag-psd bundle's entry (`scripts/vendor-entries/ag-psd.js`) also imports `ag-psd-grdm.js`, which
+wraps ag-psd's own `grdm` handler (no text patching of the bundle) so the Gradient Map's interpolation method is read
+and written as Photoshop's 4-character code (`methodCode`: `Gcls`, `Perc`, `Lnr `, `Smoo`; version 1 blocks without
+one are Classic); `lib/io.js` uses only `methodCode`, which an unfixed ag-psd ignores. Node tests import the module to
+fix the `node_modules` copy the same way.
 
 **L.9 Drop handlers (`app.registerDropHandler(mime, h)`, app.js).**
 
@@ -3124,7 +3134,8 @@ integration; the user-facing side is in `docs/0.4/<package>.md` and the user gui
   Background or transparency. A pass-through group with effects or non-default options is drawn isolated; groups
   ignore Fill unless styled. `styledCanvas` passes `origin`, `docWidth`, `docHeight`, `interiorAsGroup` and
   `transparencyShapes` for every layer. Extra export `hasEffects(styles)`. 16/32-bit flattening falls back to the
-  8-bit composite for a layer with non-default blending options (`depth.js planFlatten`, integration).
+  8-bit composite for a layer with non-default blending options other than Blend Clipped Layers as Group, which the
+  float clipping composite follows (`depth.js planFlatten`).
 - **layer-style-effects** (`styles.js`, `contour.js`, `styles-more.js`, `lib/contour-editor.js`,
   `lib/style-canvas-drag.js`, `lib/style-prepare.js`). `STYLE_FEATURES` is all true. With `split: true`, `above` is
   always `null` and `layer` drawn Normal over `below` gives the merged image exactly. `splitEffects` entries carry
@@ -3213,3 +3224,143 @@ integration; the user-facing side is in `docs/0.4/<package>.md` and the user gui
   integration), so `type` (type-editing) and `type-units` (type-character-panel) keep each other's keys.
 - **Labels**: `COMMAND_LABELS` names the ids added beyond M.7 (`view:move-guide`, `view:ruler-origin`,
   `layer:mask-properties`, `layer:shape-properties`, `layer:effect`, `layer:adjustment-preset`).
+
+### Effect blend modes against the backdrop (0.4, after the hunt)
+
+Photoshop's model, which the compositor follows for every layer that has effects (raster, text, shape, fill, smart
+object, styled group, a clipping base, a clipped layer):
+
+1. Each exterior effect (drop shadow, outer glow, the outer part of an Outer Bevel, Emboss or Pillow Emboss, the
+   outer part of an outside or centred stroke) is composited onto the backdrop (what lies below the layer) with its
+   own mode and opacity, bottom first.
+2. The layer's content with its interior effects (overlays, satin, inner glow, inner shadow, an inner bevel, an
+   inside stroke), which are blended onto the content in their own modes and clipped to it, is composited with the
+   layer's mode. Fill opacity fades the content (and the interior effects with Blend Interior Effects as Group).
+3. The layer's opacity fades all of that as one lerp from the backdrop. (Dissolve speckles the content at the layer's
+   opacity instead and draws the parts at theirs times it.)
+
+Code:
+- `styles.js`: `exteriorBlends(styles)` lists the modes of the exterior effects that draw. `applyStyles(..., { split:
+  true })` returns `{ image, layer, parts, below, above, offsetX, offsetY }`: `image` is the merged render as before,
+  `layer` the content with its interior effects, `parts` the exterior effects one by one (`{ key, index, part?, image,
+  x, y, blend, opacity }`, cropped to their pixels; a Dissolve one comes speckled, as Normal).
+- `compositor.js`: `needsSplit(layer)` is true when the layer has exterior effects and one of their modes or the
+  layer's own is not Normal. Then `styledCanvas` caches the parts as canvases (`entry.parts`, `entry.layer`,
+  `entry.layerBox`) and `drawStack` composites them: straight onto the target at opacity 1, on a copy of the
+  backdrop that is lerped back (`lighter` of backdrop × (1 − opacity) and result × opacity) below 1. When every mode
+  is Normal, Normal over Normal is one source-over, so the merged image is drawn exactly as before (the fast path,
+  same pixels, same cost). A clipped layer outside its group (`clipTo`) and the mask parts after the effects cut the
+  parts as they cut the content.
+- Blending Options (`finishAdvanced`, `drawPixels`, `blend-if.js compositeAdvanced({ parts })`): the per-pixel path
+  always takes the parts apart. Order: parts in their modes, then the knockout (it cuts through to the Background or
+  the group's backdrop under the layer's shape), then the content in the layer's mode weighted by Blend If, then the
+  channel restriction against the backdrop, then one fade by the opacity (`fadeFrom`). Blend If acts on the content
+  and its interior effects (This Layer reads the content with them, Underlying the backdrop before the parts); it
+  does not hide the exterior effects, as in Photoshop, where a shadow is computed from the layer's transparency and
+  stays whole when Blend If hides some of the layer's pixels. The channel restriction applies to the parts too.
+  Without parts or knockout, content-at-opacity is one `blendImages`, as before.
+- Groups: a Pass Through group's children composite onto the real backdrop; a Normal (isolated) group's children see
+  the group's transparency, so a Multiply shadow inside it multiplies with nothing (Photoshop does the same). A styled
+  group is an isolated group whose own effects follow the model.
+- 16 and 32 bits: `depth.js planFlatten` still sends styled layers to the 8-bit composite, which follows the model.
+- Bakes. Create Layers (`blending-options.js`) makes each exterior part a layer below with its mode and opacity, so
+  the picture is unchanged at layer opacity 100 % whatever the modes; it warns (Photoshop's "Some aspects of the
+  Effects cannot be reproduced with layers") for knockout, layer opacity below 100 % with exterior effects (the shadow
+  is knocked out by the layer as one image, which separate layers cannot do) and reduced fill with interior effects.
+  Rasterize Layer Style and Convert to Smart Object render against transparency, as Photoshop's do: the parts are
+  merged into the layer, which keeps its mode, so an exterior effect in another mode keeps its look only where it
+  comes out the same (a black Multiply shadow does; a Screen glow does not). `layer-ops.js lookBefore` /
+  `lookChanged` compare the composite over the layer's box before and after, and a notice says when it changed.
+  Merge Down, Merge Visible, Stamp Visible and Flatten composite through the compositor, so they match the canvas
+  wherever what they composite onto is what the canvas shows (Merge Down onto an opaque lower layer).
+
+### Blending Options on adjustment layers (0.4, after the hunt)
+
+Photoshop gives an adjustment layer the blend mode, Opacity, Fill, the channels and Blend If of Blending Options
+(knockout and the five check boxes act on a layer's own pixels and effects, which it has none of). Its "pixels" are
+the adjusted backdrop:
+
+1. The adjustment runs on a copy of the backdrop (what lies below it; in a clipping group, the base made opaque with
+   the clipped layers below it).
+2. The adjusted colour is blended onto the backdrop's colour in the layer's mode at full strength (Normal: the
+   adjusted colour itself; the alpha stays the backdrop's).
+3. The channels switched off keep the backdrop's values.
+4. That is mixed back into the backdrop by opacity × fill opacity × mask (× the base's shape for a clipped adjustment
+   outside its group) × Blend If, where This Layer reads the adjusted pixels and Underlying Layer the backdrop. Fill
+   scales an adjustment exactly as Opacity does. Dissolve keeps the adjusted pixel where a noise value that depends
+   on the document position falls below that weight.
+
+Code:
+- `blend-if.js`: `adjustmentMix(layer, blending)` is null when nothing changes the mix (Normal, Fill 100 %, no Blend
+  If, all channels); then 0.3's lerp by opacity × mask runs unchanged (same pixels). Otherwise it gives `{ mode,
+  opacity (× fill), blendIf, channels }` for `mixAdjustment(dst, adjusted, { ..., coverage, x, y })`, which does steps
+  2 to 4 on ImageData (the same rounding as `compositor.js lerpPixels` where they coincide).
+- `compositor.js`: `drawAdjustment` and `drawClippedAdjustment` hand the adjusted pixels to `mixAdjusted`, which
+  picks one or the other. Merge Down (an adjustment layer onto the layer below), Merge Visible, Stamp Visible and
+  Flatten composite through the compositor, so they keep the look wherever the merge renders what the canvas shows.
+- 16 and 32 bits: `deep.js adjustLayerDeep(..., { mode, blendIf, channels })` does the same mix in float (Normal,
+  Multiply and Screen; Blend If reads the samples on the 0..255 scale without rounding, float above 1 as 255);
+  `depth.js` passes the options from `flattenDeep` (`adjustAcc`), the clipping groups (`clipGroupDeep` items) and
+  the clipped adjustments outside their group. `planFlatten` sends an adjustment layer in another mode to the 8-bit
+  composite.
+- UI: `blending-options.js isStyleable(layer, app, { page: 'blending' })` (`takesBlendingOptions`) admits adjustment
+  layers; the effects keep `isStyleable(layer)`, which does not. The Layer Style dialog shows the Blending Options page
+  alone for them (no knockout, check boxes or Global Light), and the fx menu lists Blending Options and Copy, Paste and
+  Clear Layer Style. The Layers panel's Fill field and the Shift+digit keys work on them. Paste Layer Style gives an
+  adjustment layer the mode, Fill, Blend If and channels of the copied style and leaves its effects and knockout out.
+- Files: `.pigment` stores `fillOpacity` and `blending` for every layer already. PSD: Blend If of every layer goes to
+  the layer record's blending ranges (`io.js blendIfToPsd` / `blendIfFromPsd`: composite gray, then R, G, B; ag-psd's
+  `blendingRanges`) and Fill to `iOpa`, both read back. The channel restriction is not written (ag-psd's `brst`
+  reader drops the last channel), so saving says the Blending Options of such a layer were not kept.
+
+### Repaint caches (0.4, after the hunt)
+
+A large document repaints only what an edit can reach, and none of it changes a pixel: every path below gives the
+pixels of a plain full composite (tests/e2e/repaint-speed.spec.mjs compares them after every kind of edit). Each step is
+a switch in `compositor.js REPAINT` (`reuse`, `region`, `prefix`, `chain`), so a test or a measurement can turn one
+off; the preview while a pointer is held is the one switch `canvas-view.js PREVIEW`.
+
+- **The plan** (`Compositor.planOf`, `lib/repaint-plan.js`). A full composite (`composite(doc)` with no options, the
+  view's and every flatten's) first describes the root's draw units: a layer `drawChildren` draws, with the clipped
+  layers it takes along. Each unit has an `id` (its layers), a `pkey` (what the compositor reads from them, by value or
+  by object identity: visibility, opacity, Fill, mode, clip, the `blending` and `styles` objects, `maskCacheKey`, a
+  raster's canvas and position, an adjustment's kind and `params` object, a rendered layer's cached render canvas), a
+  `vkey` (their versions) and a `box` (where the unit can change the backdrop: a raster's content box, measured once
+  per canvas and version on large canvases; a render's box; a styled layer's padded box and cached render; a group's
+  children; ALL for an adjustment layer or a group holding one). The document's size, mode, depth, global light and
+  Background layer make the plan's `global`. `diffPlans` compares the plan with the last full composite's: **same**
+  (selecting a layer, guides, history, the selection: the last composite stands), **region** (the union of the changed
+  units' old and new boxes), or **full** from the lowest changed unit (an adjustment layer, a layer added, deleted or
+  moved, a document-wide change).
+- **Region.** The changed box grows by the margins of the adjustment layers (I.4: Clarity above a shape carries its
+  change that far), is composited with `composite(doc, { rect })` and pasted into a copy of the last composite. It is
+  used when it covers at most 45 % of the document, when the document holds no Dissolve layer (its noise follows the
+  repaint rect), no adjustment kind that measures the whole image (`LOCAL_KINDS`: Equalize, Match Color, HDR Toning,
+  Replace Color and a dithered Color Lookup are not local), and no mode renderer. After compositing, the boxes are
+  measured again from the fresh caches; a change outside the region redoes the whole composite. A partial composite
+  relies on a canvas giving back an unchanged pixel unchanged through getImageData and putImageData (tested).
+- **Brush hints.** A brush dab touches its layer without a document event. `BrushStroke` passes its dirty rect and
+  layer to `view.invalidate(rect, layer)`, which hands them to `Compositor.hintPixels`. A unit whose layers only moved
+  version, every touch covered by a hint of the layer's current version, repaints the hinted rects (a unit with
+  effects, a feathered mask or a clipped adjustment takes its box instead). The end of a stroke touches the layer with
+  an empty hint, so the history step repaints nothing.
+- **Prefix.** A full composite starts from a cached composite of the units below the lowest change when one matches
+  them (`samePrefix`), and keeps a new one just below that unit (on a view's compositor that has composited before; up
+  to two, least recently used out). An edit high in the stack skips everything below it; a region repaint patches the
+  prefixes it reaches, so they stay good. Cached prefixes are taken before the mode renderer runs.
+- **Chain.** Consecutive adjustment layers (at any level) share one getImageData and one putImageData of the target;
+  between two of them the data goes through `roundtrip`, a table of what the canvas gives back for each colour at each
+  alpha, measured once, so translucent pixels round as the unchained passes rounded them. An adjustment layer's mask
+  that is opaque white over the rect (a new adjustment layer's) is not read: it weighs every pixel by 1.
+- **Preview** (`canvas-view.js PREVIEW`, as Photoshop draws while dragging). While a pointer is held anywhere in the
+  window and the view's last composite that did work took more than `slowMs`, the view draws the last full composite
+  with `Compositor.preview` over it: the changed region (or the visible rect) composited at full resolution, except the
+  root's adjustment layers from the changed unit up, which run on a copy scaled to the view's resolution
+  (`zoom × devicePixelRatio`). A region of at most 600 × 600 px is composited exactly instead. A preview never becomes
+  the full composite, the plan or a prefix of anything but exact pixels; when the pointer is released the view
+  composites at full resolution. Every other reader (export, history, panels, merges) calls `composite` and gets full
+  resolution. Kinds that read around a pixel read a wider neighbourhood in the preview; `ctx.scale` carries the scale
+  to them.
+- **Memory.** A view's compositor keeps the full composite, a spare buffer (so the canvas a caller was handed stays as
+  it was until the composite after next) and up to two prefixes: four document-sized canvases. Other compositors keep
+  the full composite only.

@@ -40,7 +40,7 @@ export class StrokeTool extends Tool {
     const target = this.strokeTarget(layer);
     const settings = this.strokeSettings(p, layer, target);
     if (!settings) return;
-    this.stroke = new BrushStroke({ target, layer, settings, selection: this.doc.selection?.isEmpty === false ? this.doc.selection : null, history: this.doc.history, onDirty: (rect) => this.view?.invalidate(rect) });
+    this.stroke = new BrushStroke({ target, layer, settings, selection: this.doc.selection?.isEmpty === false ? this.doc.selection : null, history: this.doc.history, onDirty: (rect, layer) => this.view?.invalidate(rect, layer) });
     this.stroke.begin(p);
   }
   onPointerMove(p, dragging) {

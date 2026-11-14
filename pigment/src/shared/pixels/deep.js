@@ -27,6 +27,7 @@ import { parseColor } from './color.js';
 import { num, clampNum, srgbToLinear, linearToSrgb, merge } from './adjust-def.js';
 import { ADJUSTMENTS } from './adjust.js';
 import { normalizeGradient, gradientSampler } from './gradient-model.js';
+import { BLEND_IF_CHANNELS, normalizeRange, isFullRange, rangeWeight as blendIfWeight, isDefaultBlendIf, restrictsChannels } from './blend-if.js';
 
 /** @typedef {{ type: 'u16' | 'f32', data: Uint16Array | Float32Array, width?: number, height?: number }} DeepPlanes */
 /** @typedef {import('./core.js').ImageDataLike} ImageDataLike */
@@ -1086,6 +1087,180 @@ export function blendDeep(dst, src, { alpha = 1, mode = 'normal', x = 0, y = 0, 
     }
   }
   return dst;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Clipping masks in float (what lib/compositor.js clipGroup and finishAdvanced do on canvases)
+
+/** Coverage 0..1 of a blendDeep-style mask at (px, py) of the planes it is positioned on (1 without one). */
+function maskAt(mask, px, py) {
+  if (!mask) return 1;
+  const ux = px - (mask.x ?? 0), uy = py - (mask.y ?? 0);
+  if (ux < 0 || uy < 0 || ux >= mask.width || uy >= mask.height) return 0;
+  return mask.data[(uy * mask.width + ux) * (mask.channels ?? 1) + (mask.offset ?? 0)] / 255;
+}
+
+/**
+ * A copy of the planes where every pixel with any alpha is fully opaque, colour kept: the backdrop the clipped
+ * layers of a clipping group blend with. They blend with the base's colour at full strength and the group takes
+ * the base's alpha once, afterwards (cutToAlpha); on the translucent base the alpha would count twice.
+ */
+export function opaqueDeep(deep) {
+  assertPlanes(deep);
+  const out = cloneDeep(deep);
+  const d = out.data, full = deep.type === 'f32' ? 1 : 65535;
+  for (let i = 3; i < d.length; i += 4) if (d[i] > 0) d[i] = full;
+  return out;
+}
+
+/**
+ * Multiplies the alpha of `deep` by the alpha of `shape` (planes placed at x, y of `deep`; outside them the
+ * alpha becomes 0), in place: the canvas's destination-in in straight alpha (colour stays). Float alpha above 1
+ * counts as 1. Both need width/height.
+ */
+export function cutToAlpha(deep, shape, { x = 0, y = 0 } = {}) {
+  assertPlanes(deep);
+  assertPlanes(shape);
+  const w = deep.width, h = deep.height, sw = shape.width, sh = shape.height;
+  const d = deep.data, s = shape.data;
+  const sk = shape.type === 'u16' ? 1 / 65535 : 1, out16 = deep.type === 'u16';
+  for (let py = 0; py < h; py++) {
+    const sy = py - y;
+    for (let px = 0, i = py * w * 4 + 3; px < w; px++, i += 4) {
+      const sx = px - x;
+      const a = sx >= 0 && sy >= 0 && sx < sw && sy < sh ? Math.min(1, s[(sy * sw + sx) * 4 + 3] * sk) : 0;
+      if (a === 1) continue;
+      d[i] = out16 ? round16(d[i] * a) : d[i] * a;
+    }
+  }
+  return deep;
+}
+
+/** Multiplies the alpha of `deep` by a blendDeep-style mask positioned on it (a layer mask on the base's shape), in place. */
+export function cutToMask(deep, mask) {
+  assertPlanes(deep);
+  if (!mask) return deep;
+  const w = deep.width, h = deep.height, d = deep.data, out16 = deep.type === 'u16';
+  for (let py = 0; py < h; py++) {
+    for (let px = 0, i = py * w * 4 + 3; px < w; px++, i += 4) {
+      const m = maskAt(mask, px, py);
+      if (m === 1) continue;
+      d[i] = out16 ? round16(d[i] * m) : d[i] * m;
+    }
+  }
+  return deep;
+}
+
+/**
+ * Runs an adjustment layer on the planes, in place: the result replaces what is there by a lerp by opacity ×
+ * mask × shape (compositor.js drawAdjustment, and drawClippedAdjustment when `shape` is the base of a clipping
+ * mask that does not blend its clipped layers as a group).
+ * With Blending Options (blend-if.js mixAdjustment at 8 bits): `mode` blends the adjusted colour onto the backdrop
+ * first (Normal, Multiply and Screen in float; the others are refused, lib/depth.js planFlatten composites those at
+ * 8 bits), `blendIf` weighs the lerp (This Layer reads the adjusted samples, Underlying Layer the backdrop, both on
+ * the 0..255 scale, unrounded) and the `channels` switched off keep the backdrop. `opacity` is the layer's opacity
+ * times its fill opacity. Without them the 0.3 lerp runs unchanged.
+ * @param {DeepPlanes} deep needs width/height
+ * @param {{ opacity?: number, mask?: object | null, shape?: { planes: DeepPlanes, x?: number, y?: number } | null, ctx?: object | null,
+ *   mode?: string, blendIf?: object | null, channels?: object | null }} [options]
+ *   mask as blendDeep's, positioned on `deep`; shape: planes placed at x, y of `deep` whose alpha limits the change
+ */
+export function adjustLayerDeep(deep, kind, params = {}, { opacity = 1, mask = null, shape = null, ctx = null, mode = 'normal', blendIf = null, channels = null } = {}) {
+  assertPlanes(deep);
+  const m = mode === 'pass-through' || !mode ? 'normal' : mode;
+  if (!DEEP_BLEND_MODES.includes(m)) throw new RangeError(`adjustLayerDeep cannot do ${String(mode)}`);
+  const k = Math.max(0, Math.min(1, opacity));
+  if (!(k > 0)) return deep;
+  const bif = blendIf && !isDefaultBlendIf(blendIf) ? blendIf : null;
+  const keep = restrictsChannels(channels) ? [channels.r === false, channels.g === false, channels.b === false] : null;
+  const mixed = m !== 'normal' || bif || keep;
+  const partial = k < 1 || mask || shape || mixed;
+  const before = partial ? extractRect(deep) : null;
+  applyAdjustmentDeep(deep, kind, params, null, ctx);
+  if (!partial) return deep;
+  const w = deep.width, h = deep.height;
+  const d = deep.data, b = before.data, u16 = deep.type === 'u16';
+  const one = u16 ? 65535 : 1;
+  if (m !== 'normal' || keep) {
+    // the adjusted samples become the colour that is mixed in: blended onto the backdrop, restricted channels kept
+    for (let i = 0; i < d.length; i += 4) {
+      for (let c = 0; c < 3; c++) {
+        if (keep?.[c]) {
+          d[i + c] = b[i + c];
+          continue;
+        }
+        if (m === 'normal') continue;
+        const s = d[i + c] / one, u = b[i + c] / one;
+        const v = m === 'multiply' ? s * u : s + u - s * u;
+        d[i + c] = u16 ? round16(v * 65535) : v;
+      }
+    }
+  }
+  const weights = bif ? deepBlendIfWeights(deep, before, bif) : null;
+  // fractional 0..255 weights: mixRect takes them as they are, so a 16-bit base edge keeps its precision
+  const alpha = new Float32Array(w * h);
+  const sp = shape?.planes, sx0 = shape?.x ?? 0, sy0 = shape?.y ?? 0, sk = sp?.type === 'u16' ? 1 / 65535 : 1;
+  for (let py = 0; py < h; py++) {
+    for (let px = 0; px < w; px++) {
+      let a = k * maskAt(mask, px, py);
+      if (sp && a > 0) {
+        const sx = px - sx0, sy = py - sy0;
+        a *= sx >= 0 && sy >= 0 && sx < sp.width && sy < sp.height ? Math.min(1, sp.data[(sy * sp.width + sx) * 4 + 3] * sk) : 0;
+      }
+      if (weights && a > 0) a *= weights[py * w + px];
+      alpha[py * w + px] = a * 255;
+    }
+  }
+  return mixRect(deep, before, alpha);
+}
+
+/**
+ * Blend If weights of every pixel in float (blend-if.js blendIfWeights at 8 bits): the sliders keep their 0..255
+ * scale and the samples are read on it without rounding, so a split slider ramps smoothly; float samples above 1
+ * read as 255. Gray is the Rec. 601 luma.
+ */
+function deepBlendIfWeights(src, under, blendIf) {
+  const n = src.data.length >> 2;
+  const w = new Float32Array(n).fill(1);
+  const to8 = src.type === 'u16' ? 255 / 65535 : 255;
+  const v8 = (x) => {
+    const v = x * to8;
+    return v > 255 ? 255 : v > 0 ? v : 0;
+  };
+  const s = src.data, u = under.data;
+  for (const c of BLEND_IF_CHANNELS) {
+    const ch = blendIf[c];
+    if (!ch) continue;
+    const thisR = ch.this && !isFullRange(ch.this) ? normalizeRange(ch.this) : null;
+    const underR = ch.under && !isFullRange(ch.under) ? normalizeRange(ch.under) : null;
+    if (!thisR && !underR) continue;
+    const off = c === 'r' ? 0 : c === 'g' ? 1 : c === 'b' ? 2 : -1;
+    for (let i = 0, p = 0; i < n; i++, p += 4) {
+      if (thisR) w[i] *= blendIfWeight(off < 0 ? v8(s[p]) * 0.299 + v8(s[p + 1]) * 0.587 + v8(s[p + 2]) * 0.114 : v8(s[p + off]), thisR);
+      if (underR) w[i] *= blendIfWeight(off < 0 ? v8(u[p]) * 0.299 + v8(u[p + 1]) * 0.587 + v8(u[p + 2]) * 0.114 : v8(u[p + off]), underR);
+    }
+  }
+  return w;
+}
+
+/**
+ * A clipping group with Blend Clipped Layers as Group on (compositor.js clipGroup): the clipped layers composite in
+ * order onto the base made opaque, and the result takes the base's alpha. The caller then draws it with the base's
+ * opacity, fill opacity, mask and blend mode. Returns new planes the size of the base.
+ * @param {DeepPlanes} base needs width/height
+ * @param {Array<{ src: DeepPlanes, x?: number, y?: number, alpha?: number, mode?: string, mask?: object | null }
+ *   | { adjust: string, params?: object, opacity?: number, mask?: object | null, ctx?: object | null, mode?: string,
+ *   blendIf?: object | null, channels?: object | null }>} clipped
+ *   positions and masks relative to the base's (0, 0); `adjust` items are clipped adjustment layers (with their
+ *   Blending Options, as adjustLayerDeep takes them)
+ */
+export function clipGroupDeep(base, clipped = []) {
+  const group = opaqueDeep(base);
+  for (const c of clipped) {
+    if (c.adjust) adjustLayerDeep(group, c.adjust, c.params ?? {}, { opacity: c.opacity ?? 1, mask: c.mask ?? null, ctx: c.ctx ?? null, mode: c.mode ?? 'normal', blendIf: c.blendIf ?? null, channels: c.channels ?? null });
+    else blendDeep(group, c.src, { alpha: c.alpha ?? 1, mode: c.mode ?? 'normal', x: c.x ?? 0, y: c.y ?? 0, mask: c.mask ?? null });
+  }
+  return cutToAlpha(group, base);
 }
 
 /**

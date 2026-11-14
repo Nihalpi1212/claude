@@ -20,7 +20,7 @@ import {
 import { normalizeGradient, PLACEMENT_KEYS } from '../../shared/pixels/gradient-model.js';
 import { isLinearContour } from '../../shared/pixels/contour.js';
 import { BLEND_MODES, DEFAULT_BLENDING, isDefaultBlending } from './document.js';
-import { isStyleable } from './blending-options.js';
+import { isStyleable, takesBlendingOptions } from './blending-options.js';
 import { buildForm, formDialog } from './form.js';
 import { setLayerProps } from './layer-ops.js';
 import { patternFromCanvas } from './patterns.js';
@@ -239,6 +239,8 @@ export { EFFECT_FIELDS };
 export function install(app) {
   // lib/blending-options.js (layer-style-blending) decides which layers take styles
   const hasStyleable = () => isStyleable(app.doc?.active, app);
+  // Blending Options also open on adjustment layers (their page alone: they take no effects, as in Photoshop)
+  const takesBlending = () => takesBlendingOptions(app.doc?.active, app);
   const pages = new Map();
   app.layerStyle = {
     registerPage(page) {
@@ -259,12 +261,15 @@ export function install(app) {
   async function styleDialog(initialKey = null, ctx = null) {
     const d = app.doc;
     const layer = d?.active;
-    if (!layer || layer.type === 'adjustment') return ctx?.cancel();
+    if (!layer || (layer.type === 'adjustment' && !takesBlendingOptions(layer, app))) return ctx?.cancel();
+    // an adjustment layer: the Blending Options page only, and no effects are stored on it
+    const adjustment = layer.type === 'adjustment';
     // actions (lib/actions.js): a recorded step is the dialog's result ({ styles, opacity?, fillOpacity?, blend? }) and applies without it
     // { key, index } opens the page of that effect instance (an effect row of the Layers panel)
     const opening = initialKey && typeof initialKey === 'object' && !('styles' in initialKey) && typeof initialKey.key === 'string' ? initialKey : null;
     if (initialKey && typeof initialKey === 'object' && !opening) {
       const { globalLight: gl, ...props } = clone(initialKey);
+      if (adjustment) delete props.styles;
       if (!gl) return setLayerProps(app, layer, props, 'Layer style');
       const glWas = d.globalLight ?? null;
       return d.history.group('Layer style', () => {
@@ -292,12 +297,12 @@ export function install(app) {
       if (hidden !== undefined) out.hidden = hidden;
       return out;
     };
-    const pageList = app.layerStyle.pages();
+    const pageList = app.layerStyle.pages().filter((pg) => !adjustment || pg.id === 'blending');
     const firstPage = pageList.some((pg) => pg.id === 'blending') ? 'blending' : pageList[0]?.id ?? null;
     // the selection: a page id, or an effect key with the instance index (the bevel's sub-pages too)
     const startKey = opening ? opening.key : initialKey;
     const startIndex = opening && Number.isInteger(opening.index) ? Math.max(0, opening.index) : 0;
-    let current = startKey && draft[startKey] ? { key: startKey, index: Math.min(startIndex, draft[startKey].length - 1) } : firstPage ? { key: firstPage, index: 0 } : { key: STYLE_KEYS[0].key, index: 0 };
+    let current = startKey && draft[startKey] && !adjustment ? { key: startKey, index: Math.min(startIndex, draft[startKey].length - 1) } : firstPage ? { key: firstPage, index: 0 } : { key: STYLE_KEYS[0].key, index: 0 };
 
     // the page context (L.3): the pages edit opacity, fill opacity, blend and the advanced draft, then call apply()
     const ctx2 = {
@@ -318,7 +323,7 @@ export function install(app) {
     const apply = () => {
       const st = stored();
       ctx2.styles = st;
-      layer.styles = anyEffectOn(st) ? clone(st) : null;
+      layer.styles = adjustment ? before.styles : anyEffectOn(st) ? clone(st) : null;
       layer.opacity = ctx2.opacity;
       layer.fillOpacity = ctx2.fillOpacity;
       layer.blend = ctx2.blend;
@@ -357,6 +362,7 @@ export function install(app) {
     const upBtn = toolButton('up', '▲', 'Move the effect up');
     const downBtn = toolButton('down', '▼', 'Move the effect down');
     const delBtn = toolButton('delete', '✕', 'Delete the effect');
+    if (adjustment) tools.hidden = true;
 
     const isEffect = (key) => !!draft[key];
     const effectOf = (sel) => {
@@ -415,6 +421,7 @@ export function install(app) {
       list.replaceChildren();
       rows.length = 0;
       for (const pg of pageList) addRow({ key: pg.id, index: 0 }, pg.title);
+      if (adjustment) return markCurrent();
       for (const { key, name } of STYLE_KEYS) {
         draft[key].forEach((fx, index) => {
           addRow({ key, index }, name, { get: () => !!draft[key][index].enabled, set: (on) => (draft[key][index].enabled = on) }, { add: INSTANCE_KEYS.includes(key) });
@@ -689,14 +696,21 @@ export function install(app) {
   app.layerStyleMenu = () => {
     const layer = app.doc?.active;
     const on = (k) => effectInstances(layer?.styles, k).some((fx) => fx.enabled);
+    const styleCommands = [
+      { label: 'Copy Layer Style', disabled: !app.commands.isEnabled('layer:copy-style'), onSelect: () => app.commands.run('layer:copy-style', undefined, 'panel') },
+      { label: 'Paste Layer Style', disabled: !app.commands.isEnabled('layer:paste-style'), onSelect: () => app.commands.run('layer:paste-style', undefined, 'panel') },
+      { label: 'Clear Layer Style', disabled: !app.commands.isEnabled('layer:clear-style'), onSelect: () => app.commands.run('layer:clear-style', undefined, 'panel') },
+    ];
+    // an adjustment layer takes Blending Options but no effects (Photoshop shows no effects for it either)
+    if (layer?.type === 'adjustment') {
+      return [{ label: 'Blending Options…', disabled: !takesBlending(), onSelect: () => app.commands.run('layer:style', 'dialog', 'panel') }, { type: 'separator' }, ...styleCommands];
+    }
     return [
       { label: 'Blending Options…', onSelect: () => app.commands.run('layer:style', 'dialog', 'panel') },
       { type: 'separator' },
       ...STYLE_KEYS.map(({ key, name }) => ({ label: `${name}…`, checked: on(key), onSelect: () => styleDialog(key) })),
       { type: 'separator' },
-      { label: 'Copy Layer Style', disabled: !app.commands.isEnabled('layer:copy-style'), onSelect: () => app.commands.run('layer:copy-style', undefined, 'panel') },
-      { label: 'Paste Layer Style', disabled: !app.commands.isEnabled('layer:paste-style'), onSelect: () => app.commands.run('layer:paste-style', undefined, 'panel') },
-      { label: 'Clear Layer Style', disabled: !app.commands.isEnabled('layer:clear-style'), onSelect: () => app.commands.run('layer:clear-style', undefined, 'panel') },
+      ...styleCommands,
       { label: 'Rasterize Layer Style', disabled: !layer?.styles, onSelect: () => app.commands.run('layer:rasterize-style', undefined, 'panel') },
       { label: 'Global Light…', onSelect: globalLightDialog },
     ];
@@ -704,7 +718,7 @@ export function install(app) {
 
   app.commands.registerAll({
     'layer:style': {
-      enabled: hasStyleable,
+      enabled: takesBlending,
       dialog: true, // actions (lib/actions.js)
       run: (kind, ctx) => {
         if (!kind || kind === 'dialog') return styleDialog(null, ctx);

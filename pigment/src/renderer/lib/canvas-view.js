@@ -7,6 +7,16 @@ import { paintMaskView } from './mask-view.js';
 import { guideSettings, guideColor, selectedGuides } from './guides.js';
 import { UNITS, UNIT_NAMES } from './rulers.js';
 
+/**
+ * The view-scale preview while a gesture runs (ARCHITECTURE.md "Repaint caches"), as Photoshop does: while a pointer
+ * is held (a brush stroke, a slider or field scrub in a panel, a Move drag) and the last repaint that composited
+ * anything took longer than `slowMs`, the view shows Compositor.preview: the visible region with the adjustment layers
+ * run at the view's resolution. When the pointer is released the view composites at full resolution. The document,
+ * exports and every other reader of the compositor only ever get full-resolution pixels. `enabled: false` turns the
+ * preview off.
+ */
+export const PREVIEW = { enabled: true, slowMs: 200 };
+
 const ZOOM_STEPS = [0.01, 0.02, 0.03, 0.05, 0.0667, 0.08, 0.1, 0.125, 0.167, 0.2, 0.25, 0.333, 0.5, 0.667, 1, 1.5, 2, 3, 4, 5, 6, 8, 12, 16, 24, 32, 48, 64];
 export const MIN_ZOOM = 0.01, MAX_ZOOM = 64;
 const RULER_SIZE = 20;
@@ -21,7 +31,7 @@ export class CanvasView {
     this.app = app;
     this.doc = doc;
     this.host = host;
-    this.compositor = new Compositor();
+    this.compositor = new Compositor({ view: true });
     this.zoom = 1;
     this.panX = 0; // screen position (CSS px, in the canvas area) of document (0,0)
     this.panY = 0;
@@ -44,6 +54,11 @@ export class CanvasView {
     this.guideMove = null;
     this.originDrag = null;
     this.overlayFns = new Set();
+    // PREVIEW: a pointer held anywhere in the window, whether the last composite that did work was slow, and whether
+    // what is on screen is a preview (then the release repaints at full resolution)
+    this.gesture = false;
+    this.slow = false;
+    this.previewShown = false;
     this.cssWidth = 1;
     this.cssHeight = 1;
 
@@ -56,6 +71,18 @@ export class CanvasView {
     this.rulerV = this.el.querySelector('.ruler-v');
     this.ctx = this.canvas.getContext('2d');
     host.appendChild(this.el);
+
+    this.onGestureStart = (e) => {
+      if (e.isPrimary !== false) this.gesture = true;
+    };
+    this.onGestureEnd = () => {
+      this.gesture = false;
+      if (this.previewShown) this.invalidate();
+    };
+    window.addEventListener('pointerdown', this.onGestureStart, true);
+    window.addEventListener('pointerup', this.onGestureEnd, true);
+    window.addEventListener('pointercancel', this.onGestureEnd, true);
+    window.addEventListener('blur', this.onGestureEnd);
 
     this.resizeObserver = new ResizeObserver(() => this.resize());
     this.resizeObserver.observe(this.area);
@@ -73,6 +100,10 @@ export class CanvasView {
   destroy() {
     cancelAnimationFrame(this.raf);
     this.resizeObserver.disconnect();
+    window.removeEventListener('pointerdown', this.onGestureStart, true);
+    window.removeEventListener('pointerup', this.onGestureEnd, true);
+    window.removeEventListener('pointercancel', this.onGestureEnd, true);
+    window.removeEventListener('blur', this.onGestureEnd);
     this.unsubscribe?.();
     this.offToolChanged?.();
     this.el.remove();
@@ -209,7 +240,12 @@ export class CanvasView {
 
   // ---- rendering -----------------------------------------------------------------------------------------------
 
-  invalidate() {
+  /**
+   * Schedules a repaint. `rect` and `layer` together say that only `rect` (document coordinates) of the layer's
+   * pixels changed (a brush dab): the compositor then composites that rect alone (Compositor.hintPixels).
+   */
+  invalidate(rect = null, layer = null) {
+    if (rect && layer) this.compositor.hintPixels(layer, rect);
     this.dirty = true;
     if (!this.raf) this.raf = requestAnimationFrame(() => this.paint());
   }
@@ -262,12 +298,14 @@ export class CanvasView {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.fillRect(0, 0, this.cssWidth, this.cssHeight);
     ctx.restore();
-    const composite = this.compositor.composite(this.doc);
+    const preview = this.previewFrame();
+    const composite = preview ? this.compositor.full.canvas : this.composite();
     ctx.imageSmoothingEnabled = this.zoom < 4;
     ctx.imageSmoothingQuality = 'high';
     // colour proofing (lib/color-modes.js) may hand back a processed copy to draw instead of the composite
     const shown = (this.postProcess && this.postProcess(composite, this)) || composite;
     ctx.drawImage(shown, 0, 0);
+    if (preview?.canvas) ctx.drawImage((this.postProcess && this.postProcess(preview.canvas, this)) || preview.canvas, preview.x, preview.y);
     // the mask channel view and the red overlay: lib/mask-view.js (K.1b, masks-vector-masks)
     paintMaskView(ctx, this, this.doc.active);
     ctx.restore(); // clip
@@ -320,6 +358,26 @@ export class CanvasView {
         this.paint();
       });
     }
+  }
+
+  /** The full-resolution composite for the view; notes whether it was slow (PREVIEW). */
+  composite() {
+    const c = this.compositor;
+    const runs = c.fullRuns + c.regionRuns;
+    const t0 = performance.now();
+    const out = c.composite(this.doc);
+    if (c.fullRuns + c.regionRuns !== runs) this.slow = performance.now() - t0 > PREVIEW.slowMs;
+    this.previewShown = false;
+    return out;
+  }
+
+  /** The gesture preview for this frame ({ canvas, x, y } over the last full composite), or null to composite fully. */
+  previewFrame() {
+    if (!PREVIEW.enabled || !this.gesture || !this.slow) return null;
+    const scale = Math.min(1, this.zoom * this.dpr);
+    const p = this.compositor.preview(this.doc, { rect: this.visibleRect(), scale });
+    if (p) this.previewShown = p.changed;
+    return p;
   }
 
   paintGrid(ctx) {

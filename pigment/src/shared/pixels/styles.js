@@ -26,8 +26,10 @@
 // choke and soften are in pixels; opacities are 0..1; depth is a percentage. Colours are any
 // string parseColor() accepts (its alpha multiplies the opacity). Straight alpha in and out.
 //
-// Limitation of a standalone image: effects blend with each other and with the layer, not with
-// the document underneath; the compositor draws the whole result with the layer's blend mode.
+// A standalone image has no backdrop: the merged result blends the effects with each other and
+// with the layer only. In Photoshop each exterior effect blends with the layers below in its own
+// mode and the layer's mode applies to its content and interior effects only, so the compositor
+// takes the parts apart (applyStyles' `split`, exteriorBlends) whenever a mode is not Normal.
 //
 // Every output pixel is what an unbounded canvas would show there: the work window always holds
 // the layer content the pixel depends on plus the full reach of every intermediate buffer, so the
@@ -271,6 +273,31 @@ export function hasEnabledStyles(styles) {
     if (Array.isArray(v) ? v.some((x) => x && x.enabled) : v && v.enabled) return true;
   }
   return false;
+}
+
+/**
+ * The blend modes of the exterior effects that draw (drop shadows, outer glows, the outer part of an Outer Bevel,
+ * Emboss or Pillow Emboss, the outer part of an outside or centred stroke), bottom first. These are composited onto
+ * the layers below the layer, each with its own mode, while the layer's own mode applies to its content and interior
+ * effects: the compositor asks applyStyles for the parts apart (`split`) only when one of these modes, or the layer's
+ * own, is not Normal, since Normal over Normal is one source-over and the merged image draws the same pixels.
+ * @param {object | null} styles partial or full styles
+ * @returns {string[]}
+ */
+export function exteriorBlends(styles) {
+  if (!hasEnabledStyles(styles)) return [];
+  const s = mergeStyles(renderable(styles));
+  const out = [];
+  const visible = (fx, def) => clamp01(num(fx.opacity, def)) > 0;
+  for (const { fx } of drawn(s, 'dropShadow')) if (visible(fx, 0.75)) out.push(blendOf(fx.blend));
+  for (const { fx } of drawn(s, 'outerGlow')) if (visible(fx, 0.75)) out.push(blendOf(fx.blend));
+  const bevel = drawn(s, 'bevel')[0];
+  if (bevel && (BEVEL_STYLES[bevel.fx.style] ?? 0) !== 0) {
+    if (clamp01(num(bevel.fx.highlightOpacity, 0.75)) > 0) out.push(blendOf(bevel.fx.highlightBlend || 'screen'));
+    if (clamp01(num(bevel.fx.shadowOpacity, 0.75)) > 0) out.push(blendOf(bevel.fx.shadowBlend || 'multiply'));
+  }
+  for (const { fx } of drawn(s, 'stroke')) if (fx.position !== 'inside' && visible(fx, 1)) out.push(blendOf(fx.blend));
+  return out;
 }
 
 /** What is drawn: nothing while hidden (Hide All Effects). */
@@ -829,6 +856,8 @@ function composite(ctx, target, mode, opacity, rect, tag = null) {
     m = 'normal';
     opacity = 1;
   }
+  // split: each exterior effect apart, as it is blended (a dissolved one already speckled, then drawn Normal)
+  if (ctx.parts && target === ctx.B) recordPart(ctx, rect, m, opacity, tag);
   if (target === ctx.B && ctx.bEmpty) {
     const s = ctx.fx.data, d = target.data, w = ctx.w;
     const r = rect || ctx.full;
@@ -1324,6 +1353,44 @@ function recordEffect(ctx, target, mode, opacity, rect, tag) {
   ctx.record.push({ ...tag, below: target === ctx.B, rect: { ...r }, data, blend: blendOf(mode), opacity });
 }
 
+/** applyStyles' split: an exterior effect's own pixels at full strength, with the mode and opacity it blends with. */
+function recordPart(ctx, rect, mode, opacity, tag) {
+  const r = rect || ctx.full;
+  const data = new Uint8ClampedArray(r.width * r.height * 4);
+  const s = ctx.fx.data, w = ctx.w;
+  for (let y = 0; y < r.height; y++) {
+    const o = ((r.y + y) * w + r.x) * 4;
+    data.set(s.subarray(o, o + r.width * 4), y * r.width * 4);
+  }
+  ctx.parts.push({ ...(tag || {}), rect: { ...r }, data, blend: mode, opacity: opacity > 1 ? 1 : opacity });
+}
+
+/**
+ * A recorded part ({ rect, data } in window coordinates) cut to the output region (crop, window coordinates) and to
+ * where it is not transparent: { image, x, y } with x, y in window coordinates, or null when nothing is left.
+ */
+function cropRecorded(e, crop) {
+  const x0 = Math.max(e.rect.x, crop.x), y0 = Math.max(e.rect.y, crop.y);
+  const x1 = Math.min(e.rect.x + e.rect.width, crop.x + crop.width), y1 = Math.min(e.rect.y + e.rect.height, crop.y + crop.height);
+  let bx0 = Infinity, by0 = Infinity, bx1 = -1, by1 = -1;
+  for (let y = y0; y < y1; y++) {
+    for (let x = x0, p = ((y - e.rect.y) * e.rect.width + (x0 - e.rect.x)) * 4 + 3; x < x1; x++, p += 4) {
+      if (!e.data[p]) continue;
+      if (x < bx0) bx0 = x;
+      if (x > bx1) bx1 = x;
+      if (y < by0) by0 = y;
+      by1 = y;
+    }
+  }
+  if (bx1 < 0) return null;
+  const image = createImage(bx1 - bx0 + 1, by1 - by0 + 1);
+  for (let y = by0; y <= by1; y++) {
+    const s = ((y - e.rect.y) * e.rect.width + (bx0 - e.rect.x)) * 4;
+    image.data.set(e.data.subarray(s, s + image.width * 4), (y - by0) * image.width * 4);
+  }
+  return { image, x: bx0, y: by0 };
+}
+
 /** Grouped interior effects (Blend Interior Effects as Group) are faded with the fill here. */
 function fadeInterior(ctx) {
   const Id = ctx.I.data, f = ctx.fill;
@@ -1430,6 +1497,7 @@ function run(img, styles, o, record = null) {
     place: place && { x: place.x, y: place.y, width: Number.isFinite(place.width) ? place.width : img.width, height: Number.isFinite(place.height) ? place.height : img.height },
   });
   ctx.record = record;
+  ctx.parts = o.split ? [] : null;
   render(ctx, s, o);
   return { ...geom, ctx, R, win };
 }
@@ -1460,15 +1528,21 @@ function run(img, styles, o, record = null) {
  *     are blended into the layer at full fill and faded with it as a group.
  *   transparencyShapes (Transparency Shapes Layer, default true): false lets the interior effects
  *     cover the layer's whole content box instead of its alpha.
- *   split: returns { below, layer, above, offsetX, offsetY } instead: the effects drawn under the
- *     layer (exterior effects, null when none), the layer with its interior effects, and what is
- *     drawn over it (always null here: every effect lies below the layer or inside it). `layer`
- *     drawn with Normal over `below` gives the merged image exactly.
+ *   split: also returns the layer apart from its exterior effects: { image, layer, parts, below,
+ *     above, offsetX, offsetY }. `image` is the merged render (as without split); `layer` is the
+ *     layer with its interior effects at its fill; `parts` are the exterior effects one by one,
+ *     bottom first, each { key, index, part?, image, x, y, blend, opacity }: its own pixels at full
+ *     strength cropped to where it is not transparent, x, y placing it in the output, and the mode
+ *     and opacity it is drawn with (a Dissolve one comes speckled, as Normal at its full opacity).
+ *     Photoshop composites each part onto the layers below with its own mode, then `layer` with
+ *     the layer's mode: blending the parts in order onto a transparent image and `layer` with
+ *     Normal over them gives `image`. `below` is that merge of the parts (null when none) and
+ *     `above` is always null (every effect lies below the layer or inside it).
  *   origin, docWidth, docHeight: the document position of img's (0, 0) and the document size,
  *     for Link with Layer off (patterns) and Align with Layer off (gradients); without them the
  *     `_place` that lib/style-prepare.js adds to the styles, else img is the document.
  * Styles may hold arrays of instances (all drawn, the bottom one first) and `hidden: true` (no effect).
- * @returns {{ image: ImageDataLike, offsetX: number, offsetY: number }}
+ * @returns {{ image: ImageDataLike, offsetX: number, offsetY: number, layer?: ImageDataLike, parts?: object[], below?: ImageDataLike | null, above?: null }}
  */
 export function applyStyles(img, styles, opts = {}) {
   const o = opts || {};
@@ -1476,17 +1550,27 @@ export function applyStyles(img, styles, opts = {}) {
   const { W, H, offsetX, offsetY } = res;
   const out = createImage(W, H);
   if (res.plain) pasteImage(out, img, -offsetX, -offsetY);
-  if (!res.ctx) return o.split ? { below: null, layer: out, above: null, offsetX, offsetY } : { image: out, offsetX, offsetY };
+  if (!res.ctx) return o.split ? { image: out, below: null, layer: out, above: null, parts: [], offsetX, offsetY } : { image: out, offsetX, offsetY };
   const { ctx, R, win } = res;
   const crop = { x: R.x - win.x, y: R.y - win.y, width: R.width, height: R.height };
+  let split = null;
   if (o.split) {
-    copyRect(ctx.I, crop, out, R.x - offsetX, R.y - offsetY);
+    const layer = createImage(W, H);
+    copyRect(ctx.I, crop, layer, R.x - offsetX, R.y - offsetY);
     let below = null;
     if (!ctx.bEmpty) {
       below = createImage(W, H);
       copyRect(ctx.B, crop, below, R.x - offsetX, R.y - offsetY);
     }
-    return { below, layer: out, above: null, offsetX, offsetY };
+    const parts = [];
+    for (const e of ctx.parts) {
+      const c = cropRecorded(e, crop);
+      if (!c) continue;
+      const part = { key: e.key, index: e.index, image: c.image, x: c.x + win.x - offsetX, y: c.y + win.y - offsetY, blend: e.blend, opacity: e.opacity };
+      if (e.part) part.part = e.part;
+      parts.push(part);
+    }
+    split = { below, layer, above: null, parts };
   }
   // Nothing below the layer: the clipped interior is the result (what blendImages would produce).
   let img2 = ctx.I;
@@ -1495,7 +1579,7 @@ export function applyStyles(img, styles, opts = {}) {
     img2 = ctx.B;
   }
   copyRect(img2, crop, out, R.x - offsetX, R.y - offsetY);
-  return { image: out, offsetX, offsetY };
+  return split ? { image: out, ...split, offsetX, offsetY } : { image: out, offsetX, offsetY };
 }
 
 const PART_NAMES = {
@@ -1532,26 +1616,12 @@ export function splitEffects(img, styles, opts = {}) {
   const { R, win } = res;
   const parts = [...record.filter((e) => e.below), ...record.filter((e) => !e.below)];
   const out = [];
+  const crop = { x: R.x - win.x, y: R.y - win.y, width: R.width, height: R.height };
   for (const e of parts) {
     // the part's pixels inside the output region, cropped to where it is not transparent
-    const x0 = Math.max(e.rect.x, R.x - win.x), y0 = Math.max(e.rect.y, R.y - win.y);
-    const x1 = Math.min(e.rect.x + e.rect.width, R.x - win.x + R.width), y1 = Math.min(e.rect.y + e.rect.height, R.y - win.y + R.height);
-    let bx0 = Infinity, by0 = Infinity, bx1 = -1, by1 = -1;
-    for (let y = y0; y < y1; y++) {
-      for (let x = x0, p = ((y - e.rect.y) * e.rect.width + (x0 - e.rect.x)) * 4 + 3; x < x1; x++, p += 4) {
-        if (!e.data[p]) continue;
-        if (x < bx0) bx0 = x;
-        if (x > bx1) bx1 = x;
-        if (y < by0) by0 = y;
-        by1 = y;
-      }
-    }
-    if (bx1 < 0) continue;
-    const image = createImage(bx1 - bx0 + 1, by1 - by0 + 1);
-    for (let y = by0; y <= by1; y++) {
-      const s = ((y - e.rect.y) * e.rect.width + (bx0 - e.rect.x)) * 4;
-      image.data.set(e.data.subarray(s, s + image.width * 4), (y - by0) * image.width * 4);
-    }
+    const c = cropRecorded(e, crop);
+    if (!c) continue;
+    const { image } = c, bx0 = c.x, by0 = c.y;
     const stroke = e.key === 'stroke';
     const name = e.key === 'bevel' ? BEVEL_PART_NAMES[e.part] : stroke ? (e.part === 'inner' ? 'Inner Stroke' : 'Outer Stroke') : PART_NAMES[e.key];
     const item = { key: e.key, index: e.index, name, image, x: bx0 + win.x, y: by0 + win.y, blend: e.blend, opacity: e.opacity, clip: !e.below };
