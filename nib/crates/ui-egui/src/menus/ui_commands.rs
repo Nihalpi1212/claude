@@ -1825,8 +1825,6 @@ pub const UI_COMMANDS: &[(&str, &str, &str, &str)] = &[
         "",
         "{plane?: left|right|ground (default: the active plane)} open the plane's options, as double-clicking its plane widget does (dialog `perspectivePlane`: location (pt along the plane's normal), objects: none|move|copy): OK runs perspective.plane.move",
     ),
-    // Nib's generative AI (crate `nib-genai`, docs/generative-ai.md; native only, the web build
-    // leaves them out of its menus and palette). Nothing is sent before Generate.
     (
         "ai.textToVector",
         "Text to Vector Graphic…",
