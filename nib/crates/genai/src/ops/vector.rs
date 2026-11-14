@@ -377,12 +377,13 @@ pub(crate) fn apply(s: &mut Session, r: &VectorResult, i: usize) -> Result<Appli
             exec(s, "select.set", json!({ "ids": [id] }))?;
             Ok(Applied { ids: vec![id], swatch: None })
         }
-        Placement::Shape { shape, target, detail } => {
-            if node_bounds(s, *shape).is_none() {
+        Placement::Shape { shape, target: _, detail } => {
+            // The shape's bounds now: it may have been moved or scaled while the art was made.
+            let Some(target) = node_bounds(s, *shape) else {
                 return Err(AiError::document("The shape to fill is gone."));
-            }
+            };
             let id = place_art(s, art, VectorKind::Scene, *detail)?;
-            fit_into(s, id, *target, FitMode::Cover)?;
+            fit_into(s, id, target, FitMode::Cover)?;
             move_below(s, id, *shape)?;
             let clip = exec(s, "object.clippingMask.make", json!({ "ids": [shape.0, id] }))?;
             let group = id_of(&clip).ok_or_else(|| AiError::document("The clipping group could not be made."))?;

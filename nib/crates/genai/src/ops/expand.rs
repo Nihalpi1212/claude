@@ -139,6 +139,23 @@ pub(crate) fn run(p: &Prepared, job: &ExpandJob, provider: &dyn Provider, cancel
     Ok(ExpandResult { doc_uid: p.doc_uid, image: job.image, key: job.key.clone(), png: encode_png(&out)?, offset: (plan.ox, plan.oy) })
 }
 
+/// The expanded image `new` takes over what the person set on `old`: its name, and its appearance
+/// (effects such as a drop shadow, opacity and blend mode) through the Eyedropper's copy, told to
+/// copy the whole appearance whatever the Eyedropper Options say. That copy also sets the paint
+/// defaults for new art, which are put back.
+fn keep_attributes(s: &mut Session, old: NodeId, new: u64) -> Result<()> {
+    let name = s.doc().ok().and_then(|d| d.doc.node(old).and_then(|n| n.name.clone()));
+    let paint = s.paint.clone();
+    let all = json!({ "appearance": true });
+    let copied = exec(s, "appearance.copyFrom", json!({ "source": old.0, "ids": [new], "pickUp": all, "apply": all }));
+    s.paint = paint;
+    copied?;
+    if let Some(name) = name {
+        exec(s, "layer.setProps", json!({ "ids": [new], "name": name }))?;
+    }
+    Ok(())
+}
+
 pub(crate) fn apply(s: &mut Session, r: &ExpandResult) -> Result<Applied> {
     let old = NodeId(r.image);
     let Some(NodeKind::Image(img)) = super::kind_of(s, old) else {
@@ -160,6 +177,7 @@ pub(crate) fn apply(s: &mut Session, r: &ExpandResult) -> Result<Applied> {
     }
     exec(s, "object.transform", json!({ "ids": [new], "matrix": m.as_coeffs() }))?;
     move_below(s, new, old)?;
+    keep_attributes(s, old, new)?;
     exec(s, "edit.clear", json!({ "ids": [old.0] }))?;
     exec(s, "select.set", json!({ "ids": [new] }))?;
     Ok(Applied { ids: vec![new], swatch: None })

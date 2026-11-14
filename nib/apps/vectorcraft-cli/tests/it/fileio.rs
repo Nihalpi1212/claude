@@ -138,7 +138,7 @@ fn raster_export_rejects_invalid_ppi() {
 #[test]
 fn help_lists_readable_formats() {
     let out = ok(&["--help"]);
-    assert!(out.contains("Readable formats: .vectorcraft") && out.contains(".ait") && out.contains(".webp"), "{out}");
+    assert!(out.contains("Readable formats: .nibart") && out.contains(".ait") && out.contains(".webp"), "{out}");
 }
 
 #[test]

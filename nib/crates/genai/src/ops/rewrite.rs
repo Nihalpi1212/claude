@@ -92,6 +92,9 @@ pub(crate) fn prepare(s: &mut Session, spec: &RewriteSpec) -> Result<Prepared> {
 /// The rewritten runs in a model's answer.
 pub fn parse_rewrite(text: &str, runs: &[(String, Value)]) -> Result<Vec<(String, Value)>> {
     let json = extract_json(text).ok_or_else(|| AiError::bad_response("The model's answer has no JSON in it."))?;
+    if crate::provider::json_value_bound(json.as_bytes()) > crate::provider::MAX_JSON_VALUES {
+        return Err(AiError::bad_response("The model's JSON has too many values."));
+    }
     let v: Value = serde_json::from_str(json).map_err(|_| AiError::bad_response("The model's JSON is not valid."))?;
     let first_style = runs.first().map(|(_, s)| s.clone()).unwrap_or(Value::Null);
     let segments: Option<Vec<String>> =

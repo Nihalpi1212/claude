@@ -142,6 +142,16 @@ fn gemini_parsing() {
     assert!(words.message.contains("text instead of an image"), "{words}");
 }
 
+/// An answer with no text says so once, naming the finish reason only when there is one.
+#[test]
+fn gemini_empty_answers_say_why_once() {
+    let none = gemini::parse_text(&json!({"candidates": []})).unwrap_err();
+    assert_eq!(none.kind, ErrorKind::BadResponse);
+    assert_eq!(none.message, "Gemini answered with no text.");
+    let max = gemini::parse_text(&json!({"candidates": [{"finishReason": "MAX_TOKENS", "content": {"parts": []}}]})).unwrap_err();
+    assert_eq!(max.message, "Gemini answered with no text (MAX_TOKENS).");
+}
+
 #[test]
 fn error_translation() {
     let t = |kind, status, body: serde_json::Value| translate_error(kind, status, body.to_string().as_bytes());
@@ -318,4 +328,21 @@ fn base_urls_must_be_https_or_loopback() {
     for u in ["https://api.openai.com/v1", "http://127.0.0.1.evil.com/", "http://localhost@evil.com/", "ftp://localhost/"] {
         assert!(!nib_genai::provider::is_loopback(u), "{u}");
     }
+}
+
+/// A huge array of tiny values is refused before it is parsed: its size, not its byte count, is
+/// what would exhaust memory.
+#[test]
+fn an_answer_with_millions_of_values_is_refused_unparsed() {
+    use nib_genai::provider::{MAX_JSON_VALUES, json_value_bound};
+    assert_eq!(json_value_bound(br#"{"a":[1,2,{"b":"x,[{"}],"c":"\",["}"#), 7, "commas and brackets inside strings don't count");
+    let mut body = b"[0".to_vec();
+    body.extend(std::iter::repeat_n(&b",0"[..], MAX_JSON_VALUES).flatten());
+    body.push(b']');
+    let server = MockServer::start(move |_| Reply { status: 200, body: body.clone(), delay: Duration::ZERO });
+    let e = provider(ProviderKind::OpenAi, &server.base()).list_models(&CancelToken::new()).unwrap_err();
+    assert_eq!(e.kind, ErrorKind::BadResponse);
+    assert!(e.message.contains("too many values"), "{e}");
+    // An image answer, one long string, is not affected.
+    assert_eq!(json_value_bound(format!("{{\"data\":[{{\"b64_json\":\"{}\"}}]}}", "A,".repeat(1_000_000)).as_bytes()), 4);
 }

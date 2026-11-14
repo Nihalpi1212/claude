@@ -365,9 +365,14 @@ fn the_key_never_appears_in_what_is_drawn_or_saved() {
         .count()
     };
     assert_eq!(shows_key(&h), 0, "the field is masked");
+    // The field's egui state (whose undo history holds the typed text) is forgotten once the field
+    // is empty again, so Undo can't put the key back.
+    let key_field = egui::Id::new("nib-ai-accounts-key");
+    assert!(egui::TextEdit::load_state(&h.ctx, key_field).is_some(), "the field keeps state while typing");
     h.get_by_role_and_label(Role::Button, "Save Key").click();
     h.run_steps(3);
     assert!(h.state().ai.connected(ProviderKind::OpenAi), "stored");
+    assert!(egui::TextEdit::load_state(&h.ctx, key_field).is_none(), "no undo history of the key is left");
     h.get_by_label_contains("Key saved (ends in …WXYZ)");
     assert_eq!(shows_key(&h), 0);
     // The agreement and a default provider are saved to ai.json, without the key.
@@ -402,4 +407,142 @@ fn test_connection_reports_the_models() {
     until_done(&mut h);
     h.get_by_label_contains("Connected to OpenAI: 2 models available.");
     assert_eq!(server.paths.lock().unwrap().as_slice(), ["/v1/models"]);
+}
+
+/// Run the Generate window's request to its end without drawing (as a script does).
+fn generate_now(app: &mut VectorcraftApp) {
+    app.run(ai::GENERATE, json!({})).unwrap();
+    assert!(ai::wait(app, Duration::from_secs(20)), "the request ended");
+    assert!(menus::enabled(app, ai::PLACE), "a result came back");
+}
+
+fn colors(app: &mut VectorcraftApp, ids: &[&Value]) -> Vec<String> {
+    let v = app.run("recolor.colors", json!({"ids": ids})).unwrap();
+    // The rectangles' black strokes aside.
+    let mut out: Vec<String> =
+        v["colors"].as_array().unwrap().iter().map(|c| c["hex"].as_str().unwrap().to_string()).filter(|c| c != "#000000").collect();
+    out.sort();
+    out
+}
+
+/// Trying a feature's results one after the other on the object it changes in place swaps them:
+/// the second palette recolours the original art (it used to recolour nothing and still say it
+/// was placed), and Undo then goes back to the original in one step.
+#[test]
+fn another_recolor_result_replaces_the_one_placed() {
+    let palettes = json!({"palettes": [
+        {"name": "Sea", "colors": ["#003049", "#fcbf49"]},
+        {"name": "Forest", "colors": ["#1b4332", "#95d5b2"]}
+    ]});
+    let server = mock(openai_text(&palettes.to_string()));
+    let mut app = app_with(&server);
+    let a = app.run("shape.rectangle", json!({"x": 10, "y": 10, "width": 50, "height": 50})).unwrap()["id"].clone();
+    app.run("paint.setFill", json!({"ids": [a], "color": "#ff0000"})).unwrap();
+    let b = app.run("shape.rectangle", json!({"x": 100, "y": 10, "width": 50, "height": 50})).unwrap()["id"].clone();
+    app.run("paint.setFill", json!({"ids": [b], "color": "#00ff00"})).unwrap();
+    app.run("select.set", json!({"ids": [a, b]})).unwrap();
+    let original = colors(&mut app, &[&a, &b]);
+    app.run(ai::RECOLOR, json!({"prompt": "the sea"})).unwrap();
+    generate_now(&mut app);
+    let steps = undo_steps(&app);
+    app.run(ai::PLACE, json!({"variation": 0})).unwrap();
+    assert_eq!(colors(&mut app, &[&a, &b]), ["#003049", "#fcbf49"]);
+    app.run(ai::PLACE, json!({"variation": 1})).unwrap();
+    assert_eq!(colors(&mut app, &[&a, &b]), ["#1b4332", "#95d5b2"], "the second palette recolours the art");
+    assert_eq!(undo_steps(&app), steps + 1, "the second result replaced the first");
+    app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(colors(&mut app, &[&a, &b]), original);
+    // After an Undo there is nothing to swap: the next result is placed as usual.
+    app.run(ai::PLACE, json!({"variation": 0})).unwrap();
+    assert_eq!(colors(&mut app, &[&a, &b]), ["#003049", "#fcbf49"]);
+    assert_eq!(undo_steps(&app), steps + 1);
+}
+
+/// Generative Shape Fill's second result fills the shape in place of the first one, instead of
+/// clipping the first result's clip group again (a nested clip group holding both).
+#[test]
+fn another_shape_fill_result_replaces_the_one_placed() {
+    let server = mock(openai_text(SVG));
+    let mut app = app_with(&server);
+    let shape = app.run("shape.ellipse", json!({"x": 10, "y": 10, "width": 200, "height": 100})).unwrap()["id"].clone();
+    select(&mut app, &shape);
+    app.run(ai::SHAPE_FILL, json!({"prompt": "leaves"})).unwrap();
+    generate_now(&mut app);
+    let (count, steps) = (object_count(&app), undo_steps(&app));
+    app.run(ai::PLACE, json!({"variation": 0})).unwrap();
+    let placed = object_count(&app);
+    assert!(placed > count);
+    app.run(ai::PLACE, json!({"variation": 1})).unwrap();
+    assert_eq!(object_count(&app), placed, "one clip group, holding one result");
+    assert_eq!(undo_steps(&app), steps + 1);
+    app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(object_count(&app), count, "Undo leaves the shape as it was");
+}
+
+/// A request whose document is closed while it runs is stopped (the provider would bill an answer
+/// nothing can place), and the window says why.
+#[test]
+fn closing_the_document_stops_its_request() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let base = format!("http://{}/v1", listener.local_addr().unwrap());
+    let held = Arc::new(Mutex::new(vec![]));
+    let keep = held.clone();
+    std::thread::spawn(move || {
+        for s in listener.incoming().flatten() {
+            keep.lock().unwrap().push(s);
+        }
+    });
+    let mut app = app_with(&Mock { base, paths: Arc::new(Mutex::new(vec![])) });
+    app.run(ai::TEXT_TO_VECTOR, json!({"prompt": "a fox"})).unwrap();
+    app.run(ai::GENERATE, json!({})).unwrap();
+    assert!(menus::enabled(&app, ai::CANCEL));
+    app.run("file.close", json!({})).unwrap();
+    assert!(app.session.documents().is_empty());
+    let mut h = harness(app);
+    h.run_steps(2);
+    assert!(!menus::enabled(h.state(), ai::CANCEL), "the request was stopped");
+    assert!(h.state().ai.genai.jobs.running().is_empty());
+    h.get_by_label_contains("The document was closed, so its request was stopped.");
+}
+
+/// Test Connection counts one model in the singular.
+#[test]
+fn test_connection_with_one_model() {
+    let server = mock(json!({"object": "list", "data": [{"id": "gpt-5.1", "object": "model"}]}));
+    let mut app = app_with(&server);
+    app.run(ai::ACCOUNTS, json!({})).unwrap();
+    let mut h = harness(app);
+    h.get_by_role_and_label(Role::Button, "Test Connection").click();
+    until_done(&mut h);
+    h.get_by_label_contains("Connected to OpenAI: 1 model available.");
+}
+
+/// The provider picked in the Generate window loses its key in AI Accounts: Generate goes to the
+/// provider that still has one, instead of staying dimmed ("Add an API key") with the Provider row,
+/// shown only while both have a key, gone.
+#[test]
+fn a_picked_provider_whose_key_is_removed_falls_back_to_the_other() {
+    let server = mock(openai_text(SVG));
+    let mut app = app_with(&server);
+    app.ai.genai.accounts.set_key(ProviderKind::Gemini, "AIzaTest0123456789abcdefQRST").unwrap();
+    app.ai.genai.accounts.set_base_url(ProviderKind::Gemini, &server.base).unwrap();
+    app.ai.refresh();
+    app.run(ai::TEXT_TO_VECTOR, json!({"prompt": "a fox"})).unwrap();
+    let mut h = harness(app);
+    h.get_by_label("Google Gemini").click();
+    h.run_steps(2);
+    // Gemini is picked: its request goes out (and the OpenAI-shaped answer is refused).
+    h.state_mut().run(ai::GENERATE, json!({})).unwrap();
+    until_done(&mut h);
+    assert!(server.paths.lock().unwrap().iter().all(|p| p.contains(":generateContent")), "{:?}", server.paths.lock().unwrap());
+    server.paths.lock().unwrap().clear();
+    h.state_mut().ai.genai.accounts.clear_key(ProviderKind::Gemini).unwrap();
+    h.state_mut().ai.refresh();
+    h.run_steps(2);
+    assert!(menus::enabled(h.state(), ai::GENERATE), "{:?}", ai::disabled_hint(h.state(), ai::GENERATE));
+    h.state_mut().run(ai::GENERATE, json!({})).unwrap();
+    until_done(&mut h);
+    assert!(menus::enabled(h.state(), ai::PLACE));
+    let paths = server.paths.lock().unwrap().clone();
+    assert!(!paths.is_empty() && paths.iter().all(|p| p == "/v1/responses"), "{paths:?}");
 }

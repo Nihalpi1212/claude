@@ -150,8 +150,10 @@ pub fn parse_text(v: &Value) -> Result<String> {
     }
     let text = text_of(&parts(v));
     if text.trim().is_empty() {
-        let reason = v.pointer("/candidates/0/finishReason").and_then(Value::as_str).unwrap_or("no text");
-        return Err(AiError::bad_response(format!("Gemini answered with no text ({reason}).")));
+        return Err(AiError::bad_response(match v.pointer("/candidates/0/finishReason").and_then(Value::as_str) {
+            Some(reason) => format!("Gemini answered with no text ({reason})."),
+            None => "Gemini answered with no text.".to_string(),
+        }));
     }
     Ok(text)
 }

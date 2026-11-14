@@ -212,6 +212,54 @@ fn generative_shape_fill() {
     undoes_to(&mut s, &before, steps);
 }
 
+/// The art fills the shape where it is when the result is placed, not where it was asked for.
+#[test]
+fn shape_fill_covers_a_shape_moved_meanwhile() {
+    let server = MockServer::replies(vec![Reply::ok(openai_text(SVG))]);
+    let mut g = genai(&server);
+    let mut s = session();
+    let shape = rect(&mut s, 10.0, 10.0, 60.0, 30.0, "#884422");
+    select(&mut s, &[shape]);
+    let id = g
+        .start(&mut s, &FeatureRequest::ShapeFill(ShapeFillSpec { prompt: "leaves".into(), ..Default::default() }), Some(ProviderKind::OpenAi))
+        .unwrap();
+    assert!(g.wait(id, Duration::from_secs(60)).unwrap().result.is_ok());
+    exec(&mut s, "object.transform", json!({"ids": [shape], "matrix": [2.0, 0.0, 0.0, 2.0, 200.0, 100.0]}));
+    let moved = bounds(&s, shape);
+    let applied = g.apply(&mut s, id, 0).unwrap();
+    let NodeKind::Group { children, .. } = node(&s, applied.ids[0]).kind else { panic!("a clip group") };
+    let art = children.iter().map(|c| c.geometric_bounds().unwrap()).find(|b| (b.x0 - moved.x0).abs() > 1e-6 || (b.x1 - moved.x1).abs() > 1e-6);
+    let art = art.unwrap_or(moved);
+    assert!(
+        art.x0 <= moved.x0 + 1e-6 && art.y0 <= moved.y0 + 1e-6 && art.x1 >= moved.x1 - 1e-6 && art.y1 >= moved.y1 - 1e-6,
+        "{art:?} covers {moved:?}"
+    );
+}
+
+/// A palette maps the colours the artwork had when it was asked for: once they change, placing it
+/// is refused instead of silently missing them.
+#[test]
+fn recolor_refuses_artwork_whose_colours_changed() {
+    let palettes = json!({"palettes": [{"name": "Ember", "colors": ["#330000", "#ffcc99"]}]});
+    let server = MockServer::replies(vec![Reply::ok(openai_text(&palettes.to_string()))]);
+    let mut g = genai(&server);
+    let mut s = session();
+    let a = rect(&mut s, 0.0, 0.0, 50.0, 50.0, "#ff0000");
+    let b = rect(&mut s, 60.0, 0.0, 50.0, 50.0, "#0000ff");
+    select(&mut s, &[a, b]);
+    let id =
+        g.start(&mut s, &FeatureRequest::Recolor(RecolorSpec { prompt: "fire".into(), ..Default::default() }), Some(ProviderKind::OpenAi)).unwrap();
+    assert!(g.wait(id, Duration::from_secs(30)).unwrap().result.is_ok());
+    exec(&mut s, "paint.setFill", json!({"ids": [a], "color": "#00ff00"}));
+    let e = g.apply(&mut s, id, 0).unwrap_err();
+    assert_eq!(e.kind, ErrorKind::Document, "{e:?}");
+    assert_eq!(colors(&mut s, &[a, b]), vec!["#0000ff", "#00ff00"], "nothing was recoloured");
+    // Back to the colours it was asked for, it places.
+    exec(&mut s, "paint.setFill", json!({"ids": [a], "color": "#ff0000"}));
+    g.apply(&mut s, id, 0).unwrap();
+    assert_eq!(colors(&mut s, &[a, b]), vec!["#330000", "#ffcc99"]);
+}
+
 #[test]
 fn shape_fill_needs_one_closed_path() {
     let server = MockServer::replies(vec![Reply::ok(openai_text(SVG))]);
@@ -295,6 +343,29 @@ fn generative_expand() {
     assert_eq!(px.get_pixel(10 + 7, 3).0, [70, 0, 0, 255]);
     assert_eq!(px.get_pixel(2, 3).0, [0, 160, 0, 255]);
     undoes_to(&mut s, &before, steps);
+}
+
+/// The expanded image keeps what was set on the original: name, opacity, blend mode and effects.
+#[test]
+fn expand_keeps_the_images_name_transparency_and_effects() {
+    let server = MockServer::replies(vec![Reply::ok(openai_image(&png(1024, 1024, |_, _| [0, 160, 0, 255])))]);
+    let mut g = genai(&server);
+    let mut s = session();
+    let image = place_png(&mut s, &png(20, 20, |_, _| [200, 0, 0, 255]));
+    exec(&mut s, "layer.setProps", json!({"ids": [image], "name": "Sky"}));
+    exec(&mut s, "transparency.set", json!({"ids": [image], "opacity": 50, "blend": "multiply"}));
+    exec(&mut s, "effect.apply", json!({"ids": [image], "effect": "stylize.dropShadow"}));
+    let paint = s.paint.clone();
+    select(&mut s, &[image]);
+    let spec = ExpandSpec { prompt: "more".into(), margins: [10.0, 10.0, 10.0, 10.0], fill_artboard: false };
+    let applied = generate_and_apply(&mut g, &mut s, &FeatureRequest::Expand(spec), ProviderKind::OpenAi);
+    let new = node(&s, applied.ids[0]);
+    assert!(matches!(new.kind, NodeKind::Image(_)));
+    assert_eq!(new.name.as_deref(), Some("Sky"));
+    assert!((new.opacity - 0.5).abs() < 1e-6, "{}", new.opacity);
+    assert_eq!(format!("{:?}", new.blend).to_ascii_lowercase(), "multiply");
+    assert_eq!(new.appearance.effects.len(), 1, "the drop shadow is kept");
+    assert_eq!(s.paint, paint, "the paint defaults for new art are left as they were");
 }
 
 #[test]

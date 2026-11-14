@@ -3,7 +3,10 @@
 //! prompt and the feature's options, **Generate** / **Stop** with a spinner and the elapsed time,
 //! the error of the last request with what fixes it, and the results as thumbnails, palettes or
 //! texts: a click on one places it (`ai.panel.place`) as one undo step, and another click (after Undo, or
-//! on another result) places again.
+//! on another result) places again. The features that change the selected object in place (Generative
+//! Shape Fill, Expand, Recolor, Rewrite Text) swap results instead: while the last result placed is
+//! still the newest undo step, a click on another one undoes it before placing that one, so trying
+//! the variations one after the other leaves only the one chosen.
 //!
 //! The window doesn't block the app: the request runs on a worker thread and editing goes on.
 
@@ -102,6 +105,10 @@ pub(crate) struct Panel {
     pub error: Option<AiError>,
     /// What happened last ("Placed result 2", "Stopped").
     pub note: Option<String>,
+    /// The last result placed: its request, its document, the undo step it made
+    /// (`History::step`) and its variation, so another result of a feature that changes the
+    /// selected object in place replaces it ([`place`]).
+    pub placed: Option<(JobId, u64, u64, usize)>,
 }
 
 impl Default for Panel {
@@ -127,6 +134,7 @@ impl Default for Panel {
             result: None,
             error: None,
             note: None,
+            placed: None,
         }
     }
 }
@@ -203,7 +211,7 @@ pub(crate) fn show_feature(app: &mut VectorcraftApp, feature: Feature) {
     app.ai.generate.open = true;
 }
 
-fn forget_result(app: &mut VectorcraftApp) {
+pub(crate) fn forget_result(app: &mut VectorcraftApp) {
     if let Some(shown) = app.ai.generate.result.take() {
         app.ai.genai.discard(shown.job);
     }
@@ -226,11 +234,9 @@ pub(crate) fn blocked(app: &VectorcraftApp) -> Option<&'static str> {
     if g.job.is_some() {
         return Some(tl!("A request is running. Stop it to start another."));
     }
-    let keyed = match g.provider {
-        Some(kind) => ai.connected(kind),
-        None => ai.has_key(),
-    };
-    if !keyed {
+    // The provider picked in the window is only used while it has a key ([`provider`]); else the
+    // default one is.
+    if !ai.has_key() {
         return Some(tl!("Add an API key in AI Accounts first."));
     }
     if !ai.consented() {
@@ -248,6 +254,13 @@ pub(crate) fn blocked(app: &VectorcraftApp) -> Option<&'static str> {
     None
 }
 
+/// The provider picked in the window's Provider row, while it still has a key; `None`: the default
+/// one. A key removed in AI Accounts after picking its provider here doesn't leave Generate dimmed
+/// with the row (shown only while both providers have a key) gone.
+fn provider(app: &VectorcraftApp) -> Option<ProviderKind> {
+    app.ai.generate.provider.filter(|k| app.ai.connected(*k))
+}
+
 /// Generate: send the request the window describes (`ai.panel.generate`).
 pub(crate) fn start(app: &mut VectorcraftApp) -> Result<Value, String> {
     if let Some(why) = blocked(app) {
@@ -255,7 +268,7 @@ pub(crate) fn start(app: &mut VectorcraftApp) -> Result<Value, String> {
     }
     forget_result(app);
     let request = app.ai.generate.request();
-    let provider = app.ai.generate.provider;
+    let provider = provider(app);
     let started = app.ai.genai.start(&mut app.session, &request, provider);
     let g = &mut app.ai.generate;
     g.note = None;
@@ -309,10 +322,42 @@ pub(crate) fn place(app: &mut VectorcraftApp, i: usize) -> Result<Value, String>
         return Err(format!("there is no result {} (there are {})", i + 1, shown.items.len()));
     }
     let job = shown.job;
+    // A feature that changes the selected object in place: placing another result over the one
+    // just placed would work on what that one made (a shape already clipped, an image already
+    // replaced, a text already rewritten, colours already changed), so take that one back first.
+    let swap = if replaces_target(shown.feature) {
+        app.ai
+            .generate
+            .placed
+            .filter(|&(j, uid, step, _)| j == job && app.session.active().is_some_and(|st| st.uid == uid && st.history.step().0 == step))
+    } else {
+        None
+    };
+    if swap.is_some()
+        && let Err(e) = app.session.execute("edit.undo", &json!({}))
+    {
+        return Err(e.to_string());
+    }
     let applied = app.ai.genai.apply(&mut app.session, job, i);
+    if let Some((_, _, step, previous)) = swap
+        && applied.is_err()
+    {
+        // Put the result that was there back: Redo it or, when the failed apply's first edit had
+        // already cleared the redo steps (its own step was dropped, not the cleared ones), place it
+        // again. The second placing is its own undo step, as the first was.
+        let _ = app.session.execute("edit.redo", &json!({}));
+        let redone = app.session.active().is_some_and(|st| st.history.step().0 == step);
+        if !redone {
+            let again = app.ai.genai.apply(&mut app.session, job, previous);
+            let now = app.session.active().map(|st| (st.uid, st.history.step().0));
+            app.ai.generate.placed = again.ok().and(now).map(|(uid, step)| (job, uid, step, previous));
+        }
+    }
+    let step = app.session.active().map(|st| (st.uid, st.history.step().0));
     let g = &mut app.ai.generate;
     match applied {
         Ok(a) => {
+            g.placed = step.map(|(uid, step)| (job, uid, step, i));
             g.error = None;
             g.note = Some(crate::i18n::fmt(tl!("Placed result {n}. Edit › Undo takes it back."), &[("n", (i + 1).to_string().as_str())]));
             Ok(serde_json::to_value(&a).unwrap_or(Value::Null))
@@ -323,6 +368,12 @@ pub(crate) fn place(app: &mut VectorcraftApp, i: usize) -> Result<Value, String>
             Err(m)
         }
     }
+}
+
+/// Whether `feature` changes the selected object in place (its results swap, see [`place`]) rather
+/// than adding new art or a swatch.
+fn replaces_target(feature: Feature) -> bool {
+    matches!(feature, Feature::ShapeFill | Feature::Expand | Feature::Recolor | Feature::Rewrite)
 }
 
 /// What the window shows of `g`'s variations.
@@ -583,7 +634,7 @@ fn provider_row(app: &mut VectorcraftApp, ui: &mut egui::Ui) {
     if !ProviderKind::ALL.iter().all(|k| app.ai.connected(*k)) {
         return;
     }
-    let chosen = app.ai.generate.provider.or(app.ai.default_provider());
+    let chosen = provider(app).or(app.ai.default_provider());
     ui.horizontal(|ui| {
         ui.label(tl!("Provider:"));
         for kind in ProviderKind::ALL {

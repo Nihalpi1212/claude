@@ -37,6 +37,7 @@ pub(crate) struct RecolorJob {
     variations: usize,
     rows: Vec<Row>,
     ids: Vec<u64>,
+    keys: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -47,6 +48,24 @@ pub struct RecolorResult {
     pub rows: Vec<Row>,
     /// The objects recoloured.
     pub ids: Vec<u64>,
+    /// The artwork's colours (`recolor.colors` keys) when the job started: a palette maps these,
+    /// so it is refused once they have changed.
+    pub keys: Vec<String>,
+}
+
+/// The colours of `ids` (`recolor.colors` keys), sorted.
+fn color_keys(s: &mut Session, ids: &[u64]) -> Result<Vec<String>> {
+    let listed = exec(s, "recolor.colors", json!({ "ids": ids }))?;
+    let mut keys: Vec<String> = listed
+        .get("colors")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|c| c.get("key").and_then(Value::as_str))
+        .map(str::to_string)
+        .collect();
+    keys.sort();
+    Ok(keys)
 }
 
 pub(crate) fn prepare(s: &mut Session, spec: &RecolorSpec) -> Result<Prepared> {
@@ -67,6 +86,7 @@ pub(crate) fn prepare(s: &mut Session, spec: &RecolorSpec) -> Result<Prepared> {
     if rows.is_empty() {
         return Err(AiError::document("The selected artwork has no colours to recolor."));
     }
+    let keys = color_keys(s, &ids)?;
     let current: Vec<String> = rows.iter().map(|r| r.hex.clone()).collect();
     let variations = super::clamp_variations(spec.variations);
     let request = TextRequest {
@@ -76,7 +96,11 @@ pub(crate) fn prepare(s: &mut Session, spec: &RecolorSpec) -> Result<Prepared> {
         json: true,
         max_output_tokens: Some(4_000),
     };
-    Ok(Prepared { feature: Feature::Recolor, doc_uid: super::active_uid(s)?, inputs: Inputs::Recolor(RecolorJob { request, variations, rows, ids }) })
+    Ok(Prepared {
+        feature: Feature::Recolor,
+        doc_uid: super::active_uid(s)?,
+        inputs: Inputs::Recolor(RecolorJob { request, variations, rows, ids, keys }),
+    })
 }
 
 /// The rows of a `recolor.reduce` answer, each with the hex of its first colour.
@@ -98,7 +122,7 @@ pub(crate) fn run(p: &Prepared, job: &RecolorJob, provider: &dyn Provider, cance
     let text = provider.generate_text(&job.request, cancel)?;
     let mut palettes = parse_palettes(&text)?;
     palettes.truncate(job.variations.max(1));
-    Ok(RecolorResult { doc_uid: p.doc_uid, palettes, rows: job.rows.clone(), ids: job.ids.clone() })
+    Ok(RecolorResult { doc_uid: p.doc_uid, palettes, rows: job.rows.clone(), ids: job.ids.clone(), keys: job.keys.clone() })
 }
 
 /// The `recolor.apply` parameters of palette `i` (also for a live preview through
@@ -119,6 +143,9 @@ pub(crate) fn apply(s: &mut Session, r: &RecolorResult, i: usize) -> Result<Appl
     let live: Vec<u64> = r.ids.iter().copied().filter(|id| super::node_bounds(s, vectorcraft_doc::NodeId(*id)).is_some()).collect();
     if live.is_empty() {
         return Err(AiError::document("The artwork to recolor is gone."));
+    }
+    if live.len() != r.ids.len() || color_keys(s, &live)? != r.keys {
+        return Err(AiError::document("The artwork changed while the palettes were made. Recolor it again."));
     }
     exec(s, "select.set", json!({ "ids": live }))?;
     exec(s, "recolor.apply", params)?;

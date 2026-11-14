@@ -138,9 +138,16 @@ impl FileStore {
         if meta.len() > MAX_FILE {
             return Err(store_error("read", "the key file is too large"));
         }
+        // A key file others can read (copied by hand, restored from a backup) is made owner-only
+        // before it is read, best effort: the key still works where the file system has no modes.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if meta.permissions().mode() & 0o077 != 0 {
+                let _ = std::fs::set_permissions(&self.path, std::fs::Permissions::from_mode(0o600));
+            }
+        }
         let text = std::fs::read_to_string(&self.path).map_err(|e| store_error("read", e))?;
-        // A file someone else made readable is still read (the key works), and the next write
-        // restores 0600.
         Ok(serde_json::from_str(&text).unwrap_or_default())
     }
 

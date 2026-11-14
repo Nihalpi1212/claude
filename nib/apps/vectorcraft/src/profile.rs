@@ -9,7 +9,9 @@
 //!    the `.AppImage` file (`$APPIMAGE`; the executable runs from a read-only mount). The Windows
 //!    portable zip ships with `portable.txt`; the MSI doesn't. The first time `VectorCraftData` is
 //!    created, the settings in the user's profile are copied into it, so a portable zip that gains
-//!    the marker keeps its users' settings. If the folder can't be written (read-only medium,
+//!    the marker keeps its users' settings. Secrets are not copied: the generative AI key file
+//!    ([`PRIVATE_FILES`]) stays in the user's profile, so a marker beside a copy on a USB stick
+//!    never carries the user's API keys onto it. If the folder can't be written (read-only medium,
 //!    Program Files), a warning is logged and the platform folder is used. A portable copy never
 //!    reads the old DrawCraft profile, and a run without preferences (`VECTORCRAFT_NO_PREFS`) never
 //!    looks for the marker.
@@ -23,6 +25,19 @@ use std::sync::OnceLock;
 pub const PORTABLE_MARKERS: [&str; 2] = ["portable.txt", "Nib.portable"];
 /// The settings folder created in the install folder in portable mode.
 pub const PORTABLE_DATA_DIR: &str = "NibData";
+/// Files of the user's settings folder that the first portable start does not copy: the
+/// generative AI key file (Linux and the BSDs keep keys there; elsewhere they are in the OS
+/// credential store). A portable folder often lives on removable media without file permissions.
+/// The name is `nib_genai::keys::KEY_FILE` (this file is also built into the CLI, which doesn't
+/// link the AI crate; genai's key tests check the name).
+pub const PRIVATE_FILES: [&str; 1] = ["ai-keys.json"];
+
+/// Whether `name`, a top-level entry of the settings folder, is a secret the portable copy skips:
+/// one of [`PRIVATE_FILES`] or a key file's temporary twin (`.<file>.<pid>.tmp`).
+fn is_private(name: &std::ffi::OsStr) -> bool {
+    let Some(name) = name.to_str() else { return false };
+    PRIVATE_FILES.iter().any(|file| name == *file || name.strip_prefix('.').is_some_and(|rest| rest.starts_with(&format!("{file}."))))
+}
 
 pub fn prefs_path(legacy: bool) -> Option<PathBuf> {
     prefs_path_with(std::env::consts::OS, legacy, |key| std::env::var_os(key), portable_dir)
@@ -143,7 +158,7 @@ fn ensure_writable(dir: &Path) -> std::io::Result<()> {
 fn copy_dir(from: &Path, to: &Path) -> Result<(), String> {
     let mut skipped = 0usize;
     let mut first: Option<String> = None;
-    copy_dir_into(from, to, &mut |why| {
+    copy_dir_into(from, to, true, &mut |why| {
         skipped += 1;
         first.get_or_insert(why);
     });
@@ -162,7 +177,8 @@ fn private_dir(dir: &Path) -> std::io::Result<()> {
     builder.create(dir)
 }
 
-fn copy_dir_into(from: &Path, to: &Path, skip: &mut impl FnMut(String)) {
+/// `top` is true for the settings folder itself, where [`PRIVATE_FILES`] are left out.
+fn copy_dir_into(from: &Path, to: &Path, top: bool, skip: &mut impl FnMut(String)) {
     let entries = match std::fs::read_dir(from) {
         Ok(entries) => entries,
         Err(e) => return skip(format!("{}: {e}", from.display())),
@@ -175,13 +191,16 @@ fn copy_dir_into(from: &Path, to: &Path, skip: &mut impl FnMut(String)) {
                 continue;
             }
         };
+        if top && is_private(&entry.file_name()) {
+            continue;
+        }
         let (src, dst) = (entry.path(), to.join(entry.file_name()));
         // A symbolic link is copied as what it points to, or skipped when that is a folder.
         let copied = match entry.file_type() {
             // The copy keeps the folder's permissions (a private recovery folder stays private):
             // owner-only while it fills, then the source's.
             Ok(kind) if kind.is_dir() => private_dir(&dst).and_then(|()| {
-                copy_dir_into(&src, &dst, skip);
+                copy_dir_into(&src, &dst, false, skip);
                 std::fs::set_permissions(&dst, std::fs::metadata(&src)?.permissions())
             }),
             Ok(_) => std::fs::copy(&src, &dst).map(|_| ()),
@@ -385,6 +404,30 @@ mod tests {
         assert_eq!(portable_dir_in(&exe, Some(&previous)), Ok(Some(data.clone())));
         assert_eq!(std::fs::read(data.join("ui.json")).unwrap(), b"{\"theme\":\"light\"}", "the portable settings are not overwritten");
         assert!(!data.join("later.txt").exists(), "nothing is copied after the first start");
+
+        let _ = std::fs::remove_dir_all(&exe);
+        let _ = std::fs::remove_dir_all(&previous);
+    }
+
+    #[test]
+    fn the_first_start_leaves_the_ai_key_file_in_the_user_profile() {
+        let exe = temp("keys");
+        std::fs::write(exe.join("portable.txt"), b"").unwrap();
+        let previous = temp("keys-profile");
+        std::fs::write(previous.join("ui.json"), b"{}").unwrap();
+        std::fs::write(previous.join("ai-keys.json"), b"{\"openai\":\"sk-secret\"}").unwrap();
+        std::fs::write(previous.join(".ai-keys.json.42.tmp"), b"{\"openai\":\"sk-secret\"}").unwrap();
+        std::fs::create_dir_all(previous.join("Swatches")).unwrap();
+        // Only the settings folder's own key file is private; a same-named file deeper down is not.
+        std::fs::write(previous.join("Swatches/ai-keys.json"), b"[]").unwrap();
+
+        let data = portable_dir_in(&exe, Some(&previous)).unwrap().unwrap();
+        assert!(data.join("ui.json").is_file(), "the settings are copied");
+        assert!(!data.join("ai-keys.json").exists(), "the key file is not copied");
+        assert!(!data.join(".ai-keys.json.42.tmp").exists(), "nor its temporary file");
+        assert!(data.join("Swatches/ai-keys.json").is_file());
+        assert!(previous.join("ai-keys.json").is_file(), "the source is left as it is");
+        assert_eq!(PRIVATE_FILES, ["ai-keys.json"]);
 
         let _ = std::fs::remove_dir_all(&exe);
         let _ = std::fs::remove_dir_all(&previous);

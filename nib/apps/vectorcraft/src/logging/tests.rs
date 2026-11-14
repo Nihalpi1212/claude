@@ -132,7 +132,7 @@ fn timestamps_are_utc_with_milliseconds() {
 #[test]
 fn a_line_carries_time_level_thread_target_and_message() {
     assert_eq!(
-        format_line("2026-10-08T07:59:17.728Z", log::Level::Info, "main", "vectorcraft", "rendering with Mesa (Vulkan, IntegratedGpu)"),
+        format_line("2026-10-08T07:59:17.728Z", log::Level::Info, "main", "nib", "rendering with Mesa (Vulkan, IntegratedGpu)"),
         "2026-10-08T07:59:17.728Z INFO  [main] nib: rendering with Mesa (Vulkan, IntegratedGpu)\n"
     );
     // A multi-line message keeps its lines; the record still ends in one newline.
@@ -240,7 +240,7 @@ fn the_logger_filters_records_and_writes_them_to_the_attached_file() {
     let record = |level, target: &'static str, msg: &'static str| {
         logger.log(&log::Record::builder().level(level).target(target).args(format_args!("{msg}")).build());
     };
-    record(log::Level::Info, "vectorcraft", "before the settings directory");
+    record(log::Level::Info, "nib", "before the settings directory");
     record(log::Level::Info, "wgpu_core::device", "too chatty");
     let path = logger.attach_dir(&dir).expect("attach");
     assert_eq!(path, dir.join(LOG_FILE));
@@ -272,7 +272,7 @@ fn records_from_many_threads_are_whole_lines() {
             let l = std::sync::Arc::clone(&logger);
             std::thread::spawn(move || {
                 for i in 0..100 {
-                    l.log(&log::Record::builder().level(log::Level::Info).target("vectorcraft").args(format_args!("thread {t} record {i}")).build());
+                    l.log(&log::Record::builder().level(log::Level::Info).target("nib").args(format_args!("thread {t} record {i}")).build());
                 }
             })
         })
@@ -313,7 +313,7 @@ fn a_poisoned_sink_still_logs() {
     .join();
     assert!(logger.sink.is_poisoned());
     let path = logger.attach_dir(&dir).expect("attach");
-    logger.log(&log::Record::builder().level(log::Level::Warn).target("vectorcraft").args(format_args!("after the poison")).build());
+    logger.log(&log::Record::builder().level(log::Level::Warn).target("nib").args(format_args!("after the poison")).build());
     assert!(read(&path).contains("nib: after the poison"));
     let _ = std::fs::remove_dir_all(&dir);
 }

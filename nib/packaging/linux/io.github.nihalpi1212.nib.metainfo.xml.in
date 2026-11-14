@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- AppStream metadata (software centres, Flathub). Template: package.sh and the Flatpak
-     manifest substitute @VERSION@ and @DATE@ from Cargo.toml and the build date. -->
+     manifest substitute @VERSION@ and @DATE@ from Cargo.toml and the build date. The screenshot
+     is read from the release tag nib-v@VERSION@, which holds this file. -->
 <component type="desktop-application">
   <id>io.github.nihalpi1212.nib</id>
   <metadata_license>CC0-1.0</metadata_license>
@@ -40,7 +41,7 @@
   <screenshots>
     <screenshot type="default">
       <caption>Editing the Neon Drive poster with a live glow effect in the Appearance panel</caption>
-      <image>https://raw.githubusercontent.com/Nihalpi1212/claude/main/nib/docs/images/shot-1-neon.png</image>
+      <image>https://raw.githubusercontent.com/Nihalpi1212/claude/nib-v@VERSION@/nib/docs/images/shot-1-neon.png</image>
     </screenshot>
   </screenshots>
   <branding>

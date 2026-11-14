@@ -275,6 +275,24 @@ pub fn poll(app: &mut VectorcraftApp) {
     for e in events {
         handle(app, e);
     }
+    drop_closed_documents(app);
+}
+
+/// The Generate window's request, or the result it shows, is for a document that has been closed:
+/// stop the request (the provider would bill an answer nothing can use) and forget the result
+/// (it could never be placed).
+fn drop_closed_documents(app: &mut VectorcraftApp) {
+    let open = |app: &VectorcraftApp, uid: u64| app.session.documents().iter().any(|d| d.uid == uid);
+    let running_for = app.ai.generate.job.and_then(|(job, _)| app.ai.genai.jobs.running().into_iter().find(|i| i.id == job)).map(|i| i.doc_uid);
+    let shown_for = app.ai.generate.result.as_ref().and_then(|r| app.ai.genai.result(r.job)).map(|g| g.doc_uid());
+    if running_for.is_some_and(|uid| !open(app, uid)) {
+        generate::cancel(app);
+        app.ai.generate.note = Some(tl!("The document was closed, so its request was stopped.").to_string());
+    }
+    if shown_for.is_some_and(|uid| !open(app, uid)) {
+        generate::forget_result(app);
+        app.ai.generate.note = Some(tl!("The document the results were for was closed.").to_string());
+    }
 }
 
 /// Wait up to `timeout` for the Generate window's request to end and take its result, as [`poll`]

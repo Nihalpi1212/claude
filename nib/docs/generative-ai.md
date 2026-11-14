@@ -169,7 +169,11 @@ quote the key; any message that contains the key in use has it replaced by `[red
   `io.github.nihalpi1212.nib.ai`, account `openai` / `gemini`.
 * **Linux, BSD**: `ai-keys.json` in Nib's config folder (`~/.config/nib/`), created 0600 and
   replaced atomically (temporary 0600 file, then rename); the file is removed with the last key.
-  keyring's Secret Service backends need the D-Bus C library or an async runtime, which this
+  A key file others can read is made 0600 when it is next read. In portable mode (a
+  `portable.txt` or `Nib.portable` beside the app) the settings folder is `NibData` beside the
+  app: the first portable start copies the user's settings there but **not** `ai-keys.json`, and
+  keys saved in a portable copy live in `NibData/ai-keys.json` on that medium, where a file
+  system without permissions (FAT, exFAT) cannot keep the file private. keyring's Secret Service backends need the D-Bus C library or an async runtime, which this
   pure-Rust build doesn't take; a Secret Service store can replace the file later behind the same
   `SecretStore` trait.
 * `ApiKey` is the only type that holds a key: `Debug` prints `ApiKey([redacted])`, it has no
@@ -194,7 +198,8 @@ quote the key; any message that contains the key in use has it replaced by `[red
 5. Logs say which feature ran with which provider and how it ended (kind and status), never the
    prompt, the key or the answer.
 6. Hostile answers are expected: SVG is sanitized, JSON is parsed strictly with bounded counts,
-   images decode with size and allocation limits, and every value is checked before use.
+   images decode with size and allocation limits, and every value is checked before use. A JSON
+   answer (or the JSON a model wrote) with more than 1,000,000 values is refused before parsing.
 
 ### SVG sanitizer
 
@@ -203,7 +208,9 @@ writes a new SVG from an allowlist: `svg g defs path rect circle ellipse line po
 linearGradient radialGradient stop clipPath use symbol text tspan`, `a`/`switch` unwrapped, with
 presentation attributes only. Dropped: `script`, `foreignObject`, `image`, `style`, animation, event
 handlers, every `href` other than `use href="#id"`, every `url()` other than `url(#id)`, values with
-control characters or `javascript:`. Limits: 2 MiB of text, 20,000 elements, depth 32, root
+control characters or `javascript:`. Limits: 2 MiB of text, 20,000 elements both as written
+and as drawn (each `use` counts what it repeats, so nested `use`s can't multiply a small SVG;
+a `use` that refers to itself is refused), depth 32 (64 through `use` chains), root
 `width`/`height`/`viewBox` finite and within 100,000. An SVG with nothing to draw is refused.
 
 ## Public API (for the UI, control protocol and MCP)
@@ -326,7 +333,17 @@ Text to Vector Graphic. It shows the feature's name and what it sends, then:
   refused key and **Try Again** for network, timeout, quota, server and bad-answer errors;
 * the **results**: SVG drawn through Nib's importer and renderer, PNGs decoded with the core's
   limits, palettes as colour strips, rewrites as text; each a button named "Result n" with the
-  tooltip "Click to place" ("Click to apply" for Recolor and Rewrite);
+  tooltip "Click to place" ("Click to apply" for Recolor and Rewrite). Text to Vector Graphic and
+  Generative Pattern add art or a swatch on every click. Shape Fill, Expand, Recolor and Rewrite
+  change the selected object in place, so their results swap: while the last result placed is still
+  the newest undo step, a click on another one undoes it first, and one Undo then goes back to the
+  original;
+* a request whose document is closed is stopped, and a result whose document is closed is
+  forgotten (neither could be placed);
+* stopping a request (Stop, closing the window or the document) stops Nib waiting for it and
+  discards its answer, but a request already sent is not withdrawn: the provider still finishes
+  (and bills) that generation, and its worker thread ends when the answer arrives or the timeout
+  passes (the blocking HTTP client can't abort a request in flight from another thread);
 * a line saying that the prompt and what the feature works on go to the provider when Generate is
   pressed.
 
@@ -427,3 +444,4 @@ environment).
 |---|---|---|
 | 2026-11-14 | major | First version: `nib-genai` (providers, HTTP, key storage, the six operations, jobs, `GenAi`), tests, and the UI, control-protocol, MCP and CLI contract. |
 | 2026-11-14 | minor | The UI: `ai.*` commands in Object › Generative, Edit › Edit Colors, Type, Window and Edit, the Generate window, AI Accounts, task bar items, tests (`crates/ui-egui/tests/ai.rs`); deviations from the plan listed under UI surface. |
+| 2026-11-14 | patch | Bug hunt in the running app: results of the features that change the selection in place swap instead of stacking (a second Recolor palette did nothing, a second Rewrite, Expand or Shape Fill result failed or nested clip groups); closing a document stops its request; "1 model available"; Gemini's empty-answer message. |

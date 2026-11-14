@@ -68,6 +68,9 @@ pub fn extract_json(text: &str) -> Option<&str> {
 /// none at all is an error.
 pub fn parse_palettes(text: &str) -> Result<Vec<Palette>> {
     let json = extract_json(text).ok_or_else(|| AiError::bad_response("The model's answer has no palette JSON in it."))?;
+    if crate::provider::json_value_bound(json.as_bytes()) > crate::provider::MAX_JSON_VALUES {
+        return Err(AiError::bad_response("The model's JSON has too many values."));
+    }
     let v: Value = serde_json::from_str(json).map_err(|_| AiError::bad_response("The model's palette JSON is not valid."))?;
     let list = match &v {
         Value::Array(a) => a.clone(),

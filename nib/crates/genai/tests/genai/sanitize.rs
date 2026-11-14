@@ -106,6 +106,31 @@ fn bounds_nesting_and_element_count() {
     assert!(sanitize_svg(&huge).is_err(), "over the size cap");
 }
 
+/// Nested `<use>`s multiply: 5 levels of 10 uses each is 100,000 drawn elements from a 1 KB SVG.
+#[test]
+fn bounds_what_use_references_expand_to() {
+    let svg = |levels: usize, fan: usize| {
+        let mut s = String::from("<svg xmlns=\"http://www.w3.org/2000/svg\"><defs><rect id=\"L0\" width=\"1\" height=\"1\"/>");
+        for k in 1..=levels {
+            s.push_str(&format!("<g id=\"L{k}\">{}</g>", format!("<use href=\"#L{}\"/>", k - 1).repeat(fan)));
+        }
+        s.push_str(&format!("</defs><use href=\"#L{levels}\"/></svg>"));
+        s
+    };
+    assert!(sanitize_svg(&svg(2, 10)).is_ok(), "a few repeats are fine");
+    let err = sanitize_svg(&svg(5, 10)).unwrap_err();
+    assert!(err.message.contains("too many elements"), "{}", err.message);
+    // A reference to itself, directly or through an ancestor, is refused.
+    let cycle = r##"<svg xmlns="http://www.w3.org/2000/svg"><g id="a"><rect width="1" height="1"/><use href="#a"/></g></svg>"##;
+    assert!(sanitize_svg(cycle).unwrap_err().message.contains("refers to itself"));
+    let chain = (0..MAX_DEPTH * 3).map(|k| format!("<g id=\"c{k}\"><use href=\"#c{}\"/></g>", k + 1)).collect::<String>();
+    let chain = format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\"><defs>{chain}<rect id=\"c{}\" width=\"1\" height=\"1\"/></defs><use href=\"#c0\"/></svg>",
+        MAX_DEPTH * 3
+    );
+    assert!(sanitize_svg(&chain).unwrap_err().message.contains("nested"), "a long chain of uses");
+}
+
 #[test]
 fn refuses_what_is_not_svg_or_draws_nothing() {
     assert!(sanitize_svg("<svg xmlns=\"http://www.w3.org/2000/svg\"><g/></svg>").unwrap_err().message.contains("nothing to draw"));

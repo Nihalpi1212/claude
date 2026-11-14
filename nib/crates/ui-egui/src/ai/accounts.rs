@@ -68,10 +68,26 @@ impl Form {
 }
 
 impl Drop for Form {
-    /// The typed key doesn't outlive the dialog in memory more than it must.
+    /// The typed key doesn't outlive the dialog in memory more than it must: its bytes are
+    /// overwritten, not only forgotten (copies egui or the key store made are out of reach).
     fn drop(&mut self) {
-        self.key.clear();
+        wipe(&mut self.key);
     }
+}
+
+/// Overwrite `s`'s bytes with zeros and empty it.
+pub(crate) fn wipe(s: &mut String) {
+    let mut bytes = std::mem::take(s).into_bytes();
+    bytes.fill(0);
+    // Keep the zeroing from being optimized away as a store to memory about to be freed.
+    std::hint::black_box(&bytes);
+}
+
+/// The key field's widget id. Its egui state (cursor and undo history, which holds earlier texts
+/// of the field) is forgotten whenever the field is empty, so Undo after Save Key can't bring the
+/// key back and closing the dialog leaves no copy in egui's memory.
+pub(crate) fn key_field_id() -> egui::Id {
+    egui::Id::new("nib-ai-accounts-key")
 }
 
 /// Open AI Accounts (`ai.accounts`).
@@ -101,9 +117,9 @@ fn note(app: &mut VectorcraftApp, error: bool, text: String) {
 fn save_key(app: &mut VectorcraftApp) {
     let Some(f) = app.ai.accounts.as_mut() else { return };
     let kind = f.provider;
-    let typed = std::mem::take(&mut f.key);
+    let mut typed = std::mem::take(&mut f.key);
     let r = app.ai.genai.accounts.set_key(kind, &typed);
-    drop(typed);
+    wipe(&mut typed);
     app.ai.refresh();
     match r {
         Ok(()) => note(app, false, crate::i18n::fmt(tl!("Key saved for {provider}."), &[("provider", kind.label())])),
@@ -146,7 +162,10 @@ pub(crate) fn tested(app: &mut VectorcraftApp, job: JobId, result: nib_genai::Re
             f.catalog.insert(kind, models);
             f.message = Some((
                 false,
-                crate::i18n::fmt(tl!("Connected to {provider}: {n} models available."), &[("provider", kind.label()), ("n", n.to_string().as_str())]),
+                crate::i18n::fmt(
+                    &crate::i18n::tn(n as u64, "Connected to {provider}: {n} model available.", "Connected to {provider}: {n} models available."),
+                    &[("provider", kind.label())],
+                ),
             ));
         }
         Ok(Outcome::Generated(_)) => {}
@@ -255,6 +274,9 @@ pub(crate) fn show(app: &mut VectorcraftApp, ctx: &egui::Context) {
             Act::Close => close(app),
         }
     }
+    if app.ai.accounts.as_ref().is_none_or(|f| f.key.is_empty()) {
+        ctx.data_mut(|d| d.remove::<egui::text_edit::TextEditState>(key_field_id()));
+    }
 }
 
 fn body(app: &mut VectorcraftApp, ui: &mut egui::Ui, acts: &mut Vec<Act>) {
@@ -313,7 +335,8 @@ fn key_rows(app: &mut VectorcraftApp, ui: &mut egui::Ui, acts: &mut Vec<Act>) {
     ui.horizontal(|ui| {
         let label = ui.label(tl!("API key"));
         // Masked and never filled in: a saved key is not shown again.
-        ui.add(egui::TextEdit::singleline(&mut f.key).password(true).desired_width(220.0).hint_text(tl!("Paste your key"))).labelled_by(label.id);
+        ui.add(egui::TextEdit::singleline(&mut f.key).id(key_field_id()).password(true).desired_width(220.0).hint_text(tl!("Paste your key")))
+            .labelled_by(label.id);
         if widgets::primary_button_enabled(ui, tl!("Save Key"), !f.key.trim().is_empty()).clicked() {
             acts.push(Act::SaveKey);
         }

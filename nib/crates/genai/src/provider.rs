@@ -238,14 +238,45 @@ pub fn build(cfg: ProviderConfig, key: ApiKey) -> Result<Arc<dyn Provider>> {
     })
 }
 
+/// Most JSON values an answer may hold. A real answer has a few hundred (a model list) or a few big
+/// strings (an image); without a bound, a 64 MiB `[0,0,…]` from a hostile endpoint would build
+/// tens of millions of `Value`s (about 1 GB) before anything looked at it.
+pub const MAX_JSON_VALUES: usize = 1_000_000;
+
+/// An upper bound on the values in JSON text `body`: every value but the first follows a `,`, `[`
+/// or `{` outside a string.
+pub fn json_value_bound(body: &[u8]) -> usize {
+    let (mut count, mut in_string, mut escaped) = (1usize, false, false);
+    for &b in body {
+        if in_string {
+            match b {
+                _ if escaped => escaped = false,
+                b'\\' => escaped = true,
+                b'"' => in_string = false,
+                _ => {}
+            }
+        } else {
+            match b {
+                b'"' => in_string = true,
+                b',' | b'[' | b'{' => count += 1,
+                _ => {}
+            }
+        }
+    }
+    count
+}
+
 /// The JSON of an answer body, or a readable error.
 pub(crate) fn parse_json(body: &[u8]) -> Result<Value> {
+    if json_value_bound(body) > MAX_JSON_VALUES {
+        return Err(AiError::bad_response("The provider's answer has too many values."));
+    }
     serde_json::from_slice(body).map_err(|_| AiError::bad_response("The provider's answer was not valid JSON."))
 }
 
 /// The error a non-2xx answer means. `body` is the provider's error JSON (or anything else).
 pub fn translate_error(kind: ProviderKind, status: u16, body: &[u8]) -> AiError {
-    let v: Value = serde_json::from_slice(body).unwrap_or(Value::Null);
+    let v: Value = if json_value_bound(body) > MAX_JSON_VALUES { Value::Null } else { serde_json::from_slice(body).unwrap_or(Value::Null) };
     let e = v.get("error").filter(|e| e.is_object()).unwrap_or(&v);
     let field = |k: &str| e.get(k).and_then(Value::as_str).unwrap_or_default().to_string();
     let (code, ty, gstatus) = (field("code"), field("type"), field("status"));

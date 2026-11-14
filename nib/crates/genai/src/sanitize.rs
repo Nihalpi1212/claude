@@ -10,7 +10,9 @@ use crate::{AiError, Result};
 
 /// Longest SVG text accepted from a model.
 pub const MAX_SVG_BYTES: usize = 2 * 1024 * 1024;
-/// Most elements kept.
+/// Most elements kept, counted both as written and as drawn: each `<use>` counts the element it
+/// repeats again (with everything in it), so nested `<use>`s can't multiply a small SVG into
+/// hundreds of thousands of objects.
 pub const MAX_ELEMENTS: usize = 20_000;
 /// Deepest nesting kept.
 pub const MAX_DEPTH: usize = 32;
@@ -161,7 +163,66 @@ pub fn sanitize_svg(text: &str) -> Result<String> {
     if w.drawn == 0 {
         return Err(AiError::bad_response("The model's SVG has nothing to draw."));
     }
+    check_expansion(&w.out)?;
     Ok(w.out)
+}
+
+/// Refuse `svg` (sanitized output) when its `<use>` references expand past [`MAX_ELEMENTS`]
+/// elements, chain past twice [`MAX_DEPTH`] levels, or refer to themselves.
+fn check_expansion(svg: &str) -> Result<()> {
+    let opts = roxmltree::ParsingOptions { allow_dtd: false, nodes_limit: (MAX_ELEMENTS * 4) as u32, entity_resolver: None };
+    let doc = roxmltree::Document::parse_with_options(svg, opts)
+        .map_err(|e| AiError::bad_response(format!("The model's SVG is not well-formed XML ({e}).")))?;
+    let mut ids = std::collections::HashMap::new();
+    for n in doc.descendants().filter(roxmltree::Node::is_element) {
+        if let Some(id) = n.attribute("id") {
+            ids.entry(id).or_insert(n);
+        }
+    }
+    let mut x = Expansion { ids, done: std::collections::HashMap::new(), active: std::collections::HashSet::new() };
+    let (count, _) = x.measure(doc.root_element(), 0)?;
+    if count > MAX_ELEMENTS {
+        return Err(AiError::bad_response("The model's SVG has too many elements."));
+    }
+    Ok(())
+}
+
+/// Memoized size of each element as drawn: (elements, levels below it, `<use>` hops included).
+struct Expansion<'a, 'input> {
+    ids: std::collections::HashMap<&'a str, roxmltree::Node<'a, 'input>>,
+    done: std::collections::HashMap<roxmltree::NodeId, (usize, usize)>,
+    active: std::collections::HashSet<roxmltree::NodeId>,
+}
+
+impl<'a, 'input> Expansion<'a, 'input> {
+    fn measure(&mut self, n: roxmltree::Node<'a, 'input>, depth: usize) -> Result<(usize, usize)> {
+        let too_deep = || AiError::bad_response("The model's SVG is nested too deeply.");
+        if depth > 2 * MAX_DEPTH {
+            return Err(too_deep());
+        }
+        if let Some(&(count, height)) = self.done.get(&n.id()) {
+            return if depth + height > 2 * MAX_DEPTH { Err(too_deep()) } else { Ok((count, height)) };
+        }
+        if !self.active.insert(n.id()) {
+            return Err(AiError::bad_response("The model's SVG refers to itself."));
+        }
+        let mut count = 1usize;
+        let mut height = 0usize;
+        let target = (n.tag_name().name() == "use")
+            .then(|| n.attribute("href").and_then(|h| h.trim().strip_prefix('#')).and_then(|id| self.ids.get(id).copied()))
+            .flatten();
+        for c in n.children().filter(roxmltree::Node::is_element).chain(target) {
+            let (c_count, c_height) = self.measure(c, depth + 1)?;
+            count = count.saturating_add(c_count);
+            height = height.max(c_height + 1);
+            if count > MAX_ELEMENTS {
+                return Err(AiError::bad_response("The model's SVG has too many elements."));
+            }
+        }
+        self.active.remove(&n.id());
+        self.done.insert(n.id(), (count, height));
+        Ok((count, height))
+    }
 }
 
 struct Writer {

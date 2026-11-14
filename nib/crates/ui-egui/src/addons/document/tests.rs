@@ -36,12 +36,12 @@ fn files(dir: &PathBuf) -> Vec<String> {
 fn save_a_timestamped_copy_writes_beside_the_document() {
     let dir = folder("beside");
     let mut app = app();
-    app.run("document.save", json!({"path": dir.join("card.vectorcraft")})).unwrap();
+    app.run("document.save", json!({"path": dir.join("card.nibart")})).unwrap();
     assert_eq!(menus::menu_entries(&app).iter().find(|e| e.label == "Save a Timestamped Copy").and_then(|e| e.command.as_deref()), Some(SAVE_COPY));
     click(&mut app, "Save a Timestamped Copy");
     let names = files(&dir);
     assert_eq!(names.len(), 2, "{names:?}");
-    assert!(names.iter().any(|n| n.starts_with("card_20") && n.ends_with(".vectorcraft")), "{names:?}");
+    assert!(names.iter().any(|n| n.starts_with("card_20") && n.ends_with(".nibart")), "{names:?}");
     assert!(app.ui.status.starts_with("Saved "), "{}", app.ui.status);
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -148,7 +148,7 @@ fn export_all_open_documents_writes_each_to_the_folder_picked() {
     let dir = folder("export-all");
     let mut app = app();
     app.run("shape.rectangle", json!({"x": 10, "y": 10, "width": 50, "height": 40})).unwrap();
-    app.run("document.save", json!({"path": dir.join("card.vectorcraft")})).unwrap();
+    app.run("document.save", json!({"path": dir.join("card.nibart")})).unwrap();
     app.run("file.new", json!({"width": 200, "height": 100, "name": "card"})).unwrap();
     app.run("file.new", json!({"width": 200, "height": 100})).unwrap();
     let untitled = app.session.doc().unwrap().doc.title.clone();
@@ -168,7 +168,7 @@ fn export_all_open_documents_writes_each_to_the_folder_picked() {
     assert!(std::fs::read(out.join("card.pdf")).unwrap().starts_with(b"%PDF"));
     assert_eq!(app.session.active_index(), active, "the active document stays active");
     assert!(
-        app.session.documents().iter().all(|d| d.path.as_ref().is_none_or(|p| p.ends_with("card.vectorcraft"))),
+        app.session.documents().iter().all(|d| d.path.as_ref().is_none_or(|p| p.ends_with("card.nibart"))),
         "no document takes a copy's path"
     );
     assert!(app.ui.status.starts_with("Exported 3 documents"), "{}", app.ui.status);
@@ -196,7 +196,7 @@ fn batch_trace_folder_asks_for_both_folders() {
     let mut picks = vec![out.to_string_lossy().into_owned(), src.to_string_lossy().into_owned()];
     app.services.pick_folder = Some(Box::new(move || picks.pop()));
     click(&mut app, "Batch Trace Folder");
-    assert!(out.join("a.vectorcraft").exists(), "{}", app.ui.status);
+    assert!(out.join("a.nibart").exists(), "{}", app.ui.status);
     assert_eq!(app.ui.status, "Traced 1 image; not traced: 1");
     let de = crate::i18n::Lang::from_code("de").unwrap();
     assert_eq!(crate::i18n::message(de, &app.ui.status), "1 Bild nachgezeichnet; nicht nachgezeichnet: 1");

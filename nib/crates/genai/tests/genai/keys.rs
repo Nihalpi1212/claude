@@ -27,6 +27,9 @@ fn keys_are_checked_and_never_printed() {
 #[test]
 fn the_key_file_is_private_and_atomic() {
     let dir = temp_dir("file");
+    // The desktop app's portable mode leaves this file out of the settings it copies
+    // (`PRIVATE_FILES` in apps/vectorcraft/src/profile.rs names it).
+    assert_eq!(KEY_FILE, "ai-keys.json");
     let store = FileStore::new(dir.join(KEY_FILE));
     assert!(store.get(ProviderKind::OpenAi).unwrap().is_none());
     store.set(ProviderKind::OpenAi, &ApiKey::new(OPENAI_KEY).unwrap()).unwrap();
@@ -49,6 +52,20 @@ fn the_key_file_is_private_and_atomic() {
     // A damaged file reads as no keys rather than failing.
     std::fs::write(store.path(), "{oops").unwrap();
     assert!(store.get(ProviderKind::OpenAi).unwrap().is_none());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_key_file_others_can_read_is_made_private_when_read() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = temp_dir("loose");
+    let store = FileStore::new(dir.join(KEY_FILE));
+    std::fs::write(store.path(), format!("{{\"openai\":\"{OPENAI_KEY}\"}}")).unwrap();
+    std::fs::set_permissions(store.path(), std::fs::Permissions::from_mode(0o644)).unwrap();
+    assert_eq!(store.get(ProviderKind::OpenAi).unwrap(), Some(ApiKey::new(OPENAI_KEY).unwrap()), "the key still works");
+    let mode = std::fs::metadata(store.path()).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600, "{mode:o}");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
