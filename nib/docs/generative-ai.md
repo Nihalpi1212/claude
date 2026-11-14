@@ -1,6 +1,6 @@
 # Generative AI
 
-> **Last updated:** 2026-11-14 · **Change:** major (first version: the `nib-genai` crate, its providers, key storage, the six operations and their tests; the UI, control-protocol and MCP surface specified for the next step).
+> **Last updated:** 2026-11-14 · **Change:** minor (the UI in `ui-egui`: the Generate window, AI Accounts, the `ai.*` commands and their tests; the control-protocol and MCP surface is still the next step).
 
 Nib's generative features run with **the user's own OpenAI or Google Gemini API key**, called
 directly from the user's machine. Nib has no server, no account, no proxy and no telemetry in
@@ -255,38 +255,119 @@ genai.discard(job);                            // dialog closed
   "styleReference": false}`; other features as listed in [Features](#features). Results:
   `Generated::summary()` → `{feature, variations, previews: [...]}`; errors: `AiError::to_json()`.
 
-## UI surface (next step)
+## UI surface
 
-Built in `ui-egui` (depending on `nib-genai` as a **native-only** dependency:
-`[target.'cfg(not(target_arch = "wasm32"))'.dependencies]`, and the code that uses it under
-`#[cfg(not(target_arch = "wasm32"))]`; the web build has no AI menu). The layering rule that lets
-`ui-egui` and `mcp` use it is already in `xtask/src/layers.rs`. The app owns one `GenAi`, created
-with Nib's config folder.
+Built in `ui-egui` ([`src/ai.rs`](../crates/ui-egui/src/ai.rs), `src/ai/generate.rs`,
+`src/ai/accounts.rs`), depending on `nib-genai` as a **native-only** dependency
+(`[target.'cfg(not(target_arch = "wasm32"))'.dependencies]`; the module and every call into it are
+`#[cfg(not(target_arch = "wasm32"))]`, and the browser build drops the `ai.*` items from its menus,
+command palette and command list). The app holds one `ai::AiUi` (`VectorcraftApp::ai`, not part of
+`UiState`, so nothing of it is saved with the preferences or shown by `ui.inspect`): the `GenAi`, the
+accounts' status as last read (the menus ask every frame; reading a key may touch the disk or the
+OS store), the Generate window and AI Accounts. The desktop app calls `ai::use_config_dir` with
+Nib's settings folder at start-up; runs without preferences (`VECTORCRAFT_NO_PREFS`) and tests keep
+keys and settings in memory.
 
-* **Menu `AI`** (between Effect and View, or under Object › Generative in a narrow layout), as
-  `UI_COMMANDS` in `crates/ui-egui/src/menus.rs`:
-  `ai.textToVector` (Text to Vector Graphic…), `ai.recolor` (Generative Recolor…),
-  `ai.shapeFill` (Generative Shape Fill…), `ai.pattern` (Generative Pattern…),
-  `ai.expand` (Generative Expand…), `ai.rewrite` (Rewrite Text…), separator, `ai.accounts`
-  (AI Accounts…). Each feature's `enabled` mirrors its prepare check (one closed path, one image,
-  one type object, any art) so the menu greys out with a reason, and every item is disabled with
-  "Add an API key in AI Accounts" when no provider has a key.
-  Context menu: Rewrite Text on type, Generative Expand on an image, Generative Shape Fill on a
-  closed path. Recolor Artwork dialog: a "Generate" field that runs Generative Recolor.
-* **Generative panel / dialog** (one floating panel, its feature chosen by the command): prompt
-  field (multi-line), the feature's options (kind segmented control, detail slider with three stops,
-  method, variations 1–4, palette chips from swatches, style reference toggle, tone, margins with
-  a preset row "to artboard"), provider picker (defaults to the default provider), **Generate** /
-  **Stop** (spinner and elapsed time from `JobInfo::started`), a grid of variation thumbnails,
-  **Place** (apply the selected one; may be pressed again after Undo for another), error line with
-  the action for its kind (Open AI Accounts / Try Again).
-* **AI Accounts** dialog: per provider a row with status (connected …abcd / not connected, where
-  keys are kept: `AccountStatus::backend`), a password field (masked, never prefilled), Save,
-  Remove, **Test Connection** (job; shows model count or the error), text and image model pickers
-  (filled from the test's catalog), default provider radio, request timeout, and the one-time
-  consent text with an "I agree" checkbox. Links: where to get a key (OpenAI and Google AI Studio
-  key pages, opened only on click).
-* Strings go into all 28 catalogues like the rest of the UI.
+### Commands and where they are
+
+| Command | Label | Menus | Enabled when |
+|---|---|---|---|
+| `ai.textToVector {prompt?}` | Text to Vector Graphic… | Object › Generative; task bar "Generate Vectors" on a blank canvas | a document is open |
+| `ai.shapeFill {prompt?}` | Generative Shape Fill… | Object › Generative; task bar on one closed shape | one closed path or compound path selected |
+| `ai.pattern {prompt?}` | Generative Pattern… | Object › Generative | a document is open |
+| `ai.expand {prompt?}` | Generative Expand… | Object › Generative; task bar on one image | one placed image selected |
+| `ai.recolor {prompt?}` | Generative Recolor… | Edit › Edit Colors | selected art with colours |
+| `ai.rewrite` | Rewrite Text… | Type | one type object selected |
+| `ai.generatePanel` | Generate | Window (checked while shown) | always |
+| `ai.accounts` | AI Accounts… | Edit (above Preferences…), Preferences' **AI Accounts…** button, links in the Generate window | always |
+| `ai.panel.generate` | Generate with AI | the Generate window's **Generate** | a key, the agreement, a suitable selection, a prompt |
+| `ai.panel.stop` | Stop Generating | its **Stop** | a request is running |
+| `ai.panel.place {variation?}` | Place Generated Result | a click on a result | there is a result |
+
+All are `UI_COMMANDS` (`crates/ui-egui/src/menus/ui_commands.rs`), so the command palette lists them
+and the control channel and scripts can run them. A dimmed item says why in its tooltip
+(`ai::unsuitable`: "Select one closed path (a shape) to fill." …).
+
+Deviations from the first plan, and why:
+
+* **No `AI` menu.** The features sit where a person looks for them (Object › Generative, Edit › Edit
+  Colors, Type, Window), and AI Accounts beside Preferences. The core's messages say "AI › AI
+  Accounts"; the UI shows them as "Edit › AI Accounts" (`ai::message`).
+* **A missing key doesn't dim the menu items.** They follow the selection only, so the window can
+  open and say how to add a key (a notice with an **Open AI Accounts…** link); its **Generate**
+  button is what is dimmed, with the reason as its tooltip: no key, no agreement yet, a selection
+  that doesn't suit, an empty prompt.
+* **Contextual Task Bar** items show only once a provider has a key, so the bar stays as it was for
+  people who don't use AI. No canvas context-menu items and no "Generate" field in Recolor Artwork
+  yet.
+* **Results are placed by clicking them** (no separate Place button); each click is one undo step,
+  and another result (or the same one after Undo) can be placed again.
+* The **window commands** are `ai.panel.*`, apart from the planned control methods
+  (`ai.generate {request}` …), which stay to be built.
+
+### The Generate window
+
+One floating, non-modal window (`egui::Window`, closable; closing it stops a running request and
+forgets its result), its feature chosen by the command that opened it; Window › Generate shows
+Text to Vector Graphic. It shows the feature's name and what it sends, then:
+
+* the **prompt** (multi-line; optional for Expand; Rewrite Text has a **tone** row instead:
+  Shorter, Longer, More Formal, More Casual, Fix Spelling, Custom with an instruction field);
+* the feature's options: **Type** (Subject, Scene, Icon, Pattern) for Text to Vector Graphic;
+  **Detail** (Low, Medium, High), **Method** (Vector, Image + Trace) and **Variations** (1–4) for the
+  vector features; **Use the selection as a style reference**; **Use the shape's colours**; Pattern's
+  **Tile size** and **Fill the selection with the pattern**; Expand's **Add on each side** (points)
+  or **Expand to fill the artboard**; variations for Recolor and Rewrite;
+* **Provider** (only when both providers have a key; else the default one);
+* **Generate**, or while a request runs **Stop** with a spinner and the seconds elapsed (the job runs
+  on a worker thread; `ai::poll` takes its result once per frame and the job's waker repaints the
+  window, so the app stays responsive);
+* the error of the last request, in the core's words, with **Open AI Accounts…** for a missing or
+  refused key and **Try Again** for network, timeout, quota, server and bad-answer errors;
+* the **results**: SVG drawn through Nib's importer and renderer, PNGs decoded with the core's
+  limits, palettes as colour strips, rewrites as text; each a button named "Result n" with the
+  tooltip "Click to place" ("Click to apply" for Recolor and Rewrite);
+* a line saying that the prompt and what the feature works on go to the provider when Generate is
+  pressed.
+
+### AI Accounts
+
+A modal dialog (above Preferences when opened from there):
+
+* a plain note: the commands use the person's own OpenAI or Google Gemini account; requests go
+  straight from this computer to the chosen provider, with no Nib server in between; the provider
+  bills the account; what is sent (the prompt and, when a feature uses it, a rendering of the
+  selection, its colours, the selected text or image; never the key or files);
+* **OpenAI | Google Gemini** tabs; the key's state ("Key saved (ends in …abcd), kept in the …" with
+  the store's name, or "No key saved");
+* **API key**: a masked field (egui masks it in what is drawn and in the accessibility tree), never
+  filled in; **Save Key** stores it (`AiAccounts::set_key`) and clears the field, which lives in
+  `ai::accounts::Form`, never in a dialog's fields (`ui.dialog.get`) or `UiState`;
+* **Test Connection** (a job listing the models; "Connected to OpenAI: 57 models available." or the
+  error), **Remove Key**, **Get a key…** (the provider's key page, opened only on click);
+* **Use this provider for the AI commands**; **Text model** and **Image model** fields (defaults from
+  the core; **Use Suggested** picks from the tested catalog with `provider::pick_model`, **Default**
+  goes back), saved when the field loses focus or the dialog closes;
+* **Request timeout** (10–600 s) and the one-time agreement checkbox ("I agree that the AI commands
+  send my prompt and, where a feature needs it, the selected artwork, image or text to the provider
+  I chose.").
+
+### Strings
+
+English, through the i18n system (`tl!`, `i18n::fmt`, `i18n::trn`). The 28 catalogues have no rows
+for the AI strings yet, so every language shows them in English (gaps never fail the catalog tests;
+`cargo xtask i18n-report` lists them).
+
+### Tests
+
+`crates/ui-egui/tests/ai.rs` (kittest, a local `TcpListener` mock provider, no real network):
+each command opens the window on its feature and is dimmed with a reason for a selection that
+doesn't suit; without a key Generate is dimmed and the window links to AI Accounts, which also opens
+from Edit and Preferences; a key without the agreement still dims Generate; typing a prompt and
+pressing Generate sends nothing before the press, then the results show, a click places one as one
+undo step, Undo takes it back and another result places again; Stop cancels a request that never
+answers; Test Connection reports the models; the key typed in AI Accounts never appears in the
+accessibility tree, the preferences, `ai.json`, `ui.inspect`, the command list or the status.
 
 ## Control protocol and MCP (next step)
 
@@ -345,3 +426,4 @@ environment).
 | Date | Change | Summary |
 |---|---|---|
 | 2026-11-14 | major | First version: `nib-genai` (providers, HTTP, key storage, the six operations, jobs, `GenAi`), tests, and the UI, control-protocol, MCP and CLI contract. |
+| 2026-11-14 | minor | The UI: `ai.*` commands in Object › Generative, Edit › Edit Colors, Type, Window and Edit, the Generate window, AI Accounts, task bar items, tests (`crates/ui-egui/tests/ai.rs`); deviations from the plan listed under UI surface. |

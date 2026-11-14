@@ -238,7 +238,8 @@ fn wrap(r: Result<Value, String>) -> Outcome {
 
 pub fn all_commands(app: &VectorcraftApp) -> Value {
     let mut v: Vec<Value> = app.session.commands().into_iter().map(|c| serde_json::to_value(c).unwrap_or_default()).collect();
-    for (id, label, sc, params) in crate::menus::UI_COMMANDS {
+    // The browser build has no AI commands (`ai.*`).
+    for (id, label, sc, params) in crate::menus::UI_COMMANDS.iter().filter(|c| cfg!(not(target_arch = "wasm32")) || !c.0.starts_with("ai.")) {
         v.push(json!({"id": id, "label": label, "shortcut": sc, "params": params, "enabled": crate::menus::enabled(app, id), "ui": true}));
     }
     Value::Array(v)

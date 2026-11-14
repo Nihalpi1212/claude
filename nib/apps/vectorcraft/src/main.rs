@@ -499,6 +499,13 @@ fn main() -> std::process::ExitCode {
                 let mut app = VectorcraftApp::new(session, services(cc.winit_window().cloned(), cc.egui_ctx.clone()));
                 // No update check at start: Nib makes no network request on its own.
                 load_prefs(&mut app, saved);
+                // The AI commands' keys (the OS key store, else a 0600 file) and settings (ai.json)
+                // live next to the preferences; runs without preferences keep them for the session.
+                if prefs_enabled()
+                    && let Some(dir) = prefs_path().and_then(|p| Some(p.parent()?.to_path_buf()))
+                {
+                    vectorcraft_ui_egui::ai::use_config_dir(&mut app, &dir);
+                }
                 safe_mode::after_start(&mut app, stopped);
                 // The saved PDF presets live in their own folder (also read by vectorcraft-cli),
                 // which takes over from the copy the preferences file used to hold.

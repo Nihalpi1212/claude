@@ -120,6 +120,11 @@ after the rebrand (counts of matches, 2026-11-14):
   Connection after agreeing once in AI Accounts. See [generative-ai.md](generative-ai.md). A merge
   of upstream never touches it; check that the engine commands it drives (listed there) keep their
   parameters.
+- **Generative AI UI** (`crates/ui-egui/src/ai.rs`, `src/ai/`, `tests/ai.rs`, new files): the
+  Generate window and AI Accounts. Hooks into upstream files are small and marked
+  `#[cfg(not(target_arch = "wasm32"))]`: the `ai` field and module in `lib.rs`, `app.rs` (poll and
+  draw), `menus/{run,state,bar,tree,ui_commands}.rs`, `canvas/task_bar.rs`, `prefs_dialog.rs`,
+  `palette.rs` and `control.rs`; on a merge, keep them.
 
 ## Keeping the rebrand: `scripts/nib-rebrand.py`
 

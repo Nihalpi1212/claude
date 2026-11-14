@@ -54,6 +54,9 @@ log = { workspace = true }
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 craft-ui = { workspace = true, features = ["native-windows"] }
 craft-update = { workspace = true }
+# Nib's generative AI (docs/generative-ai.md): the AI commands, the Generate window and AI
+# Accounts (src/ai.rs). Native only: the browser build has no AI commands.
+nib-genai = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 # `now_ms` (src/lib.rs) reads the page's `performance.now()` with this crate in the web build. It is

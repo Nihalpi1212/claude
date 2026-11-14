@@ -9,9 +9,9 @@
 
 use std::collections::BTreeMap;
 
+use nib_genai::ProviderKind;
 use nib_genai::jobs::{JobId, Outcome};
 use nib_genai::provider::{ModelInfo, ModelKind, pick_model};
-use nib_genai::ProviderKind;
 
 use super::message;
 use crate::VectorcraftApp;
@@ -144,8 +144,10 @@ pub(crate) fn tested(app: &mut VectorcraftApp, job: JobId, result: nib_genai::Re
         Ok(Outcome::Models(models)) => {
             let n = models.len();
             f.catalog.insert(kind, models);
-            f.message =
-                Some((false, crate::i18n::fmt(tl!("Connected to {provider}: {n} models available."), &[("provider", kind.label()), ("n", n.to_string().as_str())])));
+            f.message = Some((
+                false,
+                crate::i18n::fmt(tl!("Connected to {provider}: {n} models available."), &[("provider", kind.label()), ("n", n.to_string().as_str())]),
+            ));
         }
         Ok(Outcome::Generated(_)) => {}
         Err(e) => f.message = Some((true, message(&e))),
@@ -224,7 +226,7 @@ pub(crate) fn show(app: &mut VectorcraftApp, ctx: &egui::Context) {
     if app.ai.accounts.is_none() {
         return;
     }
-    let id = egui::Id::new("nib-ai-accounts");
+    let id = egui::Id::unique("nib-ai-accounts");
     let mut acts = vec![];
     let shown = crate::dialogs::modal::show(ctx, tl!("AI Accounts"), id, 0.0, 22, |ui| {
         ui.set_width(440.0);
@@ -359,7 +361,7 @@ fn model_rows(app: &mut VectorcraftApp, ui: &mut egui::Ui, acts: &mut Vec<Act>) 
             (tl!("Image model"), &mut f.image_model, ModelKind::Image, kind.default_image_model()),
         ] {
             let l = ui.label(label);
-            let r = ui.add(egui::TextEdit::singleline(field).desired_width(200.0).hint_text(default).char_limit(120)).labelled_by(l.id);
+            let r = ui.add_sized(egui::vec2(220.0, 22.0), egui::TextEdit::singleline(field).hint_text(default).char_limit(120)).labelled_by(l.id);
             if r.lost_focus() {
                 acts.push(Act::SaveModels);
             }
@@ -396,7 +398,9 @@ fn general_rows(app: &mut VectorcraftApp, ui: &mut egui::Ui, acts: &mut Vec<Act>
     let mut agreed = app.ai.genai.accounts.settings.consented;
     let r = ui.checkbox(
         &mut agreed,
-        tl!("I agree that the AI commands send my prompt and, where a feature needs it, the selected artwork, image or text to the provider I chose."),
+        tl!(
+            "I agree that the AI commands send my prompt and, where a feature needs it, the selected artwork, image or text to the provider I chose."
+        ),
     );
     if r.changed() {
         acts.push(Act::Consent(agreed));

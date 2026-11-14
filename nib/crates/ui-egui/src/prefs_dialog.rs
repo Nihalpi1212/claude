@@ -417,6 +417,12 @@ pub fn show(app: &mut VectorcraftApp, ctx: &egui::Context) {
             {
                 import_preferences(app, &mut d);
             }
+            // The AI commands' keys and settings are kept apart from the preferences (crate::ai).
+            #[cfg(not(target_arch = "wasm32"))]
+            if widgets::secondary_button(ui, tl!("AI Accounts…")).on_hover_text(tl!("Your OpenAI or Google Gemini key for the AI commands")).clicked()
+            {
+                crate::ai::accounts::open(app);
+            }
         });
         ui.add_space(8.0);
         ui.horizontal(|ui| {

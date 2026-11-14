@@ -2,7 +2,7 @@
 //! the command that opened it (Window › Generate shows Text to Vector Graphic). It holds the
 //! prompt and the feature's options, **Generate** / **Stop** with a spinner and the elapsed time,
 //! the error of the last request with what fixes it, and the results as thumbnails, palettes or
-//! texts: a click on one places it (`ai.place`) as one undo step, and another click (after Undo, or
+//! texts: a click on one places it (`ai.panel.place`) as one undo step, and another click (after Undo, or
 //! on another result) places again.
 //!
 //! The window doesn't block the app: the request runs on a worker thread and editing goes on.
@@ -10,9 +10,7 @@
 use std::time::Instant;
 
 use nib_genai::jobs::{JobId, Outcome};
-use nib_genai::ops::{
-    ExpandSpec, Generated, PatternSpec, Preview, RecolorSpec, RewriteSpec, ShapeFillSpec, TextToVectorSpec, VectorMethod,
-};
+use nib_genai::ops::{ExpandSpec, Generated, PatternSpec, Preview, RecolorSpec, RewriteSpec, ShapeFillSpec, TextToVectorSpec, VectorMethod};
 use nib_genai::prompts::{Detail, Tone, VectorKind};
 use nib_genai::{AiError, ErrorKind, Feature, FeatureRequest, ProviderKind};
 use serde_json::{Value, json};
@@ -44,7 +42,8 @@ pub(crate) enum ToneChoice {
 }
 
 impl ToneChoice {
-    const ALL: [ToneChoice; 6] = [ToneChoice::Shorter, ToneChoice::Longer, ToneChoice::Formal, ToneChoice::Casual, ToneChoice::FixSpelling, ToneChoice::Custom];
+    const ALL: [ToneChoice; 6] =
+        [ToneChoice::Shorter, ToneChoice::Longer, ToneChoice::Formal, ToneChoice::Casual, ToneChoice::FixSpelling, ToneChoice::Custom];
 
     fn label(self) -> &'static str {
         match self {
@@ -249,7 +248,7 @@ pub(crate) fn blocked(app: &VectorcraftApp) -> Option<&'static str> {
     None
 }
 
-/// Generate: send the request the window describes (`ai.generate`).
+/// Generate: send the request the window describes (`ai.panel.generate`).
 pub(crate) fn start(app: &mut VectorcraftApp) -> Result<Value, String> {
     if let Some(why) = blocked(app) {
         return Err(why.to_string());
@@ -274,7 +273,7 @@ pub(crate) fn start(app: &mut VectorcraftApp) -> Result<Value, String> {
     }
 }
 
-/// Stop: the running request is cancelled and whatever it still sends is dropped (`ai.cancel`).
+/// Stop: the running request is cancelled and whatever it still sends is dropped (`ai.panel.stop`).
 pub(crate) fn cancel(app: &mut VectorcraftApp) -> bool {
     let Some((job, _)) = app.ai.generate.job.take() else { return false };
     app.ai.genai.cancel(job);
@@ -292,7 +291,8 @@ pub(crate) fn finished(app: &mut VectorcraftApp, job: JobId, result: nib_genai::
             let panel = &mut app.ai.generate;
             panel.result = Some(shown);
             panel.error = None;
-            panel.note = Some(crate::i18n::trn(crate::i18n::current(), n as u64, "{n} result. Click it to place it.", "{n} results. Click one to place it."));
+            panel.note =
+                Some(crate::i18n::trn(crate::i18n::current(), n as u64, "{n} result. Click it to place it.", "{n} results. Click one to place it."));
         }
         Ok(Outcome::Models(_)) => {}
         Err(e) if e.kind == ErrorKind::Cancelled => {
@@ -302,7 +302,7 @@ pub(crate) fn finished(app: &mut VectorcraftApp, job: JobId, result: nib_genai::
     }
 }
 
-/// Place result `i` of the last request (`ai.place`): one undo step named after the feature.
+/// Place result `i` of the last request (`ai.panel.place`): one undo step named after the feature.
 pub(crate) fn place(app: &mut VectorcraftApp, i: usize) -> Result<Value, String> {
     let Some(shown) = &app.ai.generate.result else { return Err(tl!("There is no result to place yet. Generate first.").to_string()) };
     if i >= shown.items.len() {
@@ -386,7 +386,7 @@ pub(crate) fn show(app: &mut VectorcraftApp, ctx: &egui::Context) {
     let mut open = true;
     let mut act = None;
     egui::Window::new(tl!("Generate"))
-        .id(egui::Id::new("nib-ai-generate"))
+        .id(egui::Id::unique("nib-ai-generate"))
         .open(&mut open)
         .collapsible(false)
         .resizable(false)
@@ -433,7 +433,11 @@ fn body(app: &mut VectorcraftApp, ui: &mut egui::Ui) -> Option<Act> {
     }
     act = results(app, ui).or(act);
     ui.add_space(4.0);
-    ui.label(egui::RichText::new(tl!("Your prompt, and what this feature works on, go to your AI provider when you press Generate.")).color(t.text_dim).small());
+    ui.label(
+        egui::RichText::new(tl!("Your prompt, and what this feature works on, go to your AI provider when you press Generate."))
+            .color(t.text_dim)
+            .small(),
+    );
     act
 }
 
@@ -481,7 +485,9 @@ fn prompt_field(app: &mut VectorcraftApp, ui: &mut egui::Ui) {
         Feature::Rewrite => return,
     };
     let label = ui.label(tl!("Prompt"));
-    let r = ui.add(egui::TextEdit::multiline(&mut g.prompt).desired_rows(3).desired_width(WIDTH).hint_text(hint).char_limit(MAX_PROMPT)).labelled_by(label.id);
+    let r = ui
+        .add(egui::TextEdit::multiline(&mut g.prompt).desired_rows(3).desired_width(WIDTH).hint_text(hint).char_limit(MAX_PROMPT))
+        .labelled_by(label.id);
     let _ = r;
 }
 
@@ -536,7 +542,12 @@ fn options(app: &mut VectorcraftApp, ui: &mut egui::Ui) {
 fn kind_row(ui: &mut egui::Ui, kind: &mut VectorKind) {
     ui.horizontal(|ui| {
         ui.label(tl!("Type:"));
-        for (k, label) in [(VectorKind::Subject, tl!("Subject")), (VectorKind::Scene, tl!("Scene")), (VectorKind::Icon, tl!("Icon")), (VectorKind::Pattern, tl!("Pattern"))] {
+        for (k, label) in [
+            (VectorKind::Subject, tl!("Subject")),
+            (VectorKind::Scene, tl!("Scene")),
+            (VectorKind::Icon, tl!("Icon")),
+            (VectorKind::Pattern, tl!("Pattern")),
+        ] {
             ui.selectable_value(kind, k, label);
         }
     });
@@ -552,7 +563,8 @@ fn vector_rows(ui: &mut egui::Ui, detail: &mut Detail, method: &mut VectorMethod
     ui.horizontal(|ui| {
         ui.label(tl!("Method:"));
         ui.selectable_value(method, VectorMethod::Svg, tl!("Vector")).on_hover_text(tl!("The model draws SVG, imported as paths"));
-        ui.selectable_value(method, VectorMethod::ImageTrace, tl!("Image + Trace")).on_hover_text(tl!("The model paints an image, which Image Trace turns into paths"));
+        ui.selectable_value(method, VectorMethod::ImageTrace, tl!("Image + Trace"))
+            .on_hover_text(tl!("The model paints an image, which Image Trace turns into paths"));
     });
     variations_row(ui, variations);
 }
@@ -610,7 +622,6 @@ fn action_row(app: &VectorcraftApp, ui: &mut egui::Ui) -> Option<Act> {
 /// The last request's error, with what fixes it.
 fn error_line(app: &VectorcraftApp, ui: &mut egui::Ui) -> Option<Act> {
     let e = app.ai.generate.error.as_ref()?;
-    let t = Tokens::get(ui.ctx());
     let mut act = None;
     ui.add_space(4.0);
     ui.label(egui::RichText::new(message(e)).color(ui.visuals().error_fg_color));
@@ -677,7 +688,13 @@ fn result_tile(ui: &mut egui::Ui, thumb: &mut Thumb, name: &str) -> egui::Respon
                 let x = rect.left() + 4.0 + w * i as f32;
                 painter.rect_filled(egui::Rect::from_min_size(egui::pos2(x, rect.top() + 4.0), egui::vec2(w, 22.0)), 0.0, *c);
             }
-            painter.text(rect.left_bottom() + egui::vec2(4.0, -4.0), egui::Align2::LEFT_BOTTOM, title.as_str(), egui::FontId::proportional(11.0), egui::Color32::BLACK);
+            painter.text(
+                rect.left_bottom() + egui::vec2(4.0, -4.0),
+                egui::Align2::LEFT_BOTTOM,
+                title.as_str(),
+                egui::FontId::proportional(11.0),
+                egui::Color32::BLACK,
+            );
         }
         Thumb::Blank | Thumb::Text(_) => {
             painter.text(rect.center(), egui::Align2::CENTER_CENTER, name, egui::FontId::proportional(11.0), egui::Color32::DARK_GRAY);

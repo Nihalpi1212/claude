@@ -181,6 +181,9 @@ pub(super) fn task_bar(app: &mut VectorcraftApp, ui: &mut Ui, xf: &Xf) {
         // Draw (Pencil) switches to the Pencil tool; Place Image picks files for the Place dialog.
         items.push((tl!("Draw (Pencil)"), "pencil", "tool.select", json!({"tool": "pencil"})));
         items.push((tl!("Place Image"), "image", "file.place", none()));
+        // Generate Vectors, once an AI provider has a key (crate::ai).
+        #[cfg(not(target_arch = "wasm32"))]
+        crate::ai::task_bar_items(app, &mut items, true, false, false);
     } else if !typing {
         // The selection tools' object actions. A Type tool's bar leaves them out, Create Outlines
         // and the type conversions included.
@@ -273,6 +276,10 @@ pub(super) fn task_bar(app: &mut VectorcraftApp, ui: &mut Ui, xf: &Xf) {
             items.push((tl!("Offset Path"), "square-dashed", "object.path.offsetPath", none()));
             items.push((tl!("Simplify"), "spline", "object.path.simplify", none()));
         }
+        // Generative Expand for an image and Generative Shape Fill for a closed shape, once an AI
+        // provider has a key (crate::ai).
+        #[cfg(not(target_arch = "wasm32"))]
+        crate::ai::task_bar_items(app, &mut items, false, n == 1 && is_image, n == 1 && !anchors && !is_group && text.is_none());
         items.push((tl!("Duplicate"), "copy", "edit.duplicate", none()));
     }
     let paints = chip_paints(app, ui.ctx());

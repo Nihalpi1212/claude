@@ -6,11 +6,11 @@
 //! * Commands (`ai.*`, [`crate::menus::UI_COMMANDS`]) open the Generate window on a feature; the
 //!   menus, the command palette and the Contextual Task Bar run them. Each is enabled when the
 //!   selection suits its feature, and says why not ([`unsuitable`]).
-//! * Nothing goes to a provider before the person presses **Generate** (or runs `ai.generate`):
+//! * Nothing goes to a provider before the person presses **Generate** (or runs `ai.panel.generate`):
 //!   opening a window, typing a prompt or saving a key sends nothing. The request runs on a worker
 //!   thread ([`nib_genai::Jobs`]); the window shows a spinner, the elapsed time and **Stop**, and
 //!   the app keeps drawing and editing meanwhile ([`poll`] once per frame).
-//! * A result is placed when the person clicks one of its variations (`ai.place`): one undo step
+//! * A result is placed when the person clicks one of its variations (`ai.panel.place`): one undo step
 //!   named after the feature.
 //! * Keys are typed only into AI Accounts' masked field, which is kept here, never in
 //!   [`crate::UiState`] (saved as the preferences and read by `ui.inspect`) nor in a dialog's
@@ -24,7 +24,7 @@ pub(crate) mod generate;
 use std::path::Path;
 
 pub use nib_genai;
-use nib_genai::jobs::{JobKind, Outcome};
+use nib_genai::jobs::JobKind;
 use nib_genai::{AccountStatus, AiAccounts, AiError, ErrorKind, Feature, GenAi, JobEvent, ProviderKind};
 use serde_json::{Value, json};
 use vectorcraft_doc::NodeKind;
@@ -48,11 +48,11 @@ pub const PANEL: &str = "ai.generatePanel";
 /// Edit › AI Accounts… (also Preferences' AI Accounts… button).
 pub const ACCOUNTS: &str = "ai.accounts";
 /// The Generate window's Generate button.
-pub const GENERATE: &str = "ai.generate";
+pub const GENERATE: &str = "ai.panel.generate";
 /// The Generate window's Stop button.
-pub const CANCEL: &str = "ai.cancel";
+pub const CANCEL: &str = "ai.panel.stop";
 /// A click on one of the Generate window's results.
-pub const PLACE: &str = "ai.place";
+pub const PLACE: &str = "ai.panel.place";
 
 /// The command that opens the Generate window on `feature`.
 pub fn command_of(feature: Feature) -> &'static str {
@@ -147,6 +147,11 @@ impl AiUi {
     pub fn accounts_open(&self) -> bool {
         self.accounts.is_some()
     }
+
+    /// AI Accounts' Test Connection is running.
+    pub fn testing(&self) -> bool {
+        self.accounts.as_ref().is_some_and(|f| f.test.is_some())
+    }
 }
 
 /// Keep AI keys and settings in Nib's config folder `dir` (the desktop app, at start-up): keys in
@@ -178,7 +183,9 @@ pub fn unsuitable(app: &VectorcraftApp, feature: Feature) -> Option<&'static str
             Some(NodeKind::Image(_)) => None,
             _ => Some(tl!("Select one placed image to expand.")),
         },
-        Feature::Recolor => (selected.is_empty() || !crate::canvas::has_colors(&st.doc, &st.selection.objects)).then(|| tl!("Select the artwork to recolor.")),
+        Feature::Recolor => {
+            (selected.is_empty() || !crate::canvas::has_colors(&st.doc, &st.selection.objects)).then(|| tl!("Select the artwork to recolor."))
+        }
         Feature::Rewrite => match one {
             Some(NodeKind::Text(_)) => None,
             _ => Some(tl!("Select one type object to rewrite.")),
@@ -330,21 +337,21 @@ pub(crate) fn retryable(e: &AiError) -> bool {
     matches!(e.kind, ErrorKind::Network | ErrorKind::Timeout | ErrorKind::Server | ErrorKind::Quota | ErrorKind::BadResponse)
 }
 
-/// The Contextual Task Bar's AI actions for the selection, as (label, icon, command): shown only
-/// once a provider has a key, so the bar stays as it was for people who don't use them.
-pub(crate) fn task_bar_items(app: &VectorcraftApp, blank: bool, image: bool, closed_shape: bool) -> Vec<(&'static str, &'static str, &'static str)> {
+/// Add the Contextual Task Bar's AI actions for the selection to `items` (label, icon, command,
+/// params): Generate Vectors on a blank canvas, Generative Expand for one image, Generative Shape
+/// Fill for one closed shape. Only once a provider has a key, so the bar stays as it was for people
+/// who don't use them.
+pub(crate) fn task_bar_items<'a>(app: &VectorcraftApp, items: &mut Vec<(&'a str, &'a str, &'a str, Value)>, blank: bool, image: bool, shape: bool) {
     if !app.ai.has_key() {
-        return vec![];
+        return;
     }
-    let mut v = vec![];
     if blank {
-        v.push((tl!("Generate Vectors"), "sparkles", TEXT_TO_VECTOR));
+        items.push((tl!("Generate Vectors"), "sparkles", TEXT_TO_VECTOR, json!({})));
     }
     if image {
-        v.push((tl!("Generative Expand"), "maximize-2", EXPAND));
+        items.push((tl!("Generative Expand"), "maximize-2", EXPAND, json!({})));
     }
-    if closed_shape && unsuitable(app, Feature::ShapeFill).is_none() {
-        v.push((tl!("Generative Shape Fill"), "sparkles", SHAPE_FILL));
+    if shape && unsuitable(app, Feature::ShapeFill).is_none() {
+        items.push((tl!("Generative Shape Fill"), "sparkles", SHAPE_FILL, json!({})));
     }
-    v
 }

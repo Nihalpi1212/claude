@@ -37,7 +37,9 @@ pub fn items() -> Vec<(String, String, String)> {
     // `plugin.dialog` runs nothing without an id: [`build`] lists each filter instead. A script of
     // the Scripts folder runs from File › Scripts, by its path. A UI command that wraps an engine
     // command takes that command's menu path, so a search for the path still finds it.
-    for c in menus::UI_COMMANDS.iter().filter(|c| c.0 != "plugin.dialog" && c.0 != crate::scripts_menu::COMMAND) {
+    // The browser build has no AI commands (`ai.*`).
+    let available = |id: &str| cfg!(not(target_arch = "wasm32")) || !id.starts_with("ai.");
+    for c in menus::UI_COMMANDS.iter().filter(|c| c.0 != "plugin.dialog" && c.0 != crate::scripts_menu::COMMAND && available(c.0)) {
         let engine = WRAPPED.iter().find(|(_, ui)| *ui == c.0).and_then(|(engine, _)| vectorcraft_engine::find_command(engine));
         let label = engine.map_or_else(|| c.1.to_string(), |e| labeled(e.menu, c.1));
         items.push((label, c.0.to_string(), menus::shortcut_of(c.0).unwrap_or("").to_string()));

@@ -1831,7 +1831,7 @@ pub const UI_COMMANDS: &[(&str, &str, &str, &str)] = &[
         "ai.textToVector",
         "Text to Vector Graphic…",
         "",
-        "{prompt?} Object › Generative: show the Generate window on Text to Vector Graphic (prompt, type subject|scene|icon|pattern, detail, method Vector|Image + Trace, variations 1–4, style reference) with `prompt` filled in; nothing is sent until ai.generate → {feature}",
+        "{prompt?} Object › Generative: show the Generate window on Text to Vector Graphic (prompt, type subject|scene|icon|pattern, detail, method Vector|Image + Trace, variations 1–4, style reference) with `prompt` filled in; nothing is sent until ai.panel.generate → {feature}",
     ),
     (
         "ai.shapeFill",
@@ -1857,7 +1857,12 @@ pub const UI_COMMANDS: &[(&str, &str, &str, &str)] = &[
         "",
         "{prompt?} Edit › Edit Colors: show the Generate window on Generative Recolor for the selected artwork (palettes from a description) → {feature}",
     ),
-    ("ai.rewrite", "Rewrite Text…", "", "{} Type: show the Generate window on Rewrite Text for the one selected type object (tone, variations) → {feature}"),
+    (
+        "ai.rewrite",
+        "Rewrite Text…",
+        "",
+        "{} Type: show the Generate window on Rewrite Text for the one selected type object (tone, variations) → {feature}",
+    ),
     ("ai.generatePanel", "Generate", "", "{} Window › Generate: show or hide the Generate window on Text to Vector Graphic → {open}"),
     (
         "ai.accounts",
@@ -1866,14 +1871,14 @@ pub const UI_COMMANDS: &[(&str, &str, &str, &str)] = &[
         "{} open AI Accounts: the person's OpenAI or Google Gemini key (typed there only; never taken or returned by any command), Test Connection, default provider, models, timeout and the agreement that requests go to the provider",
     ),
     (
-        "ai.generate",
+        "ai.panel.generate",
         "Generate with AI",
         "",
         "{} the Generate window's Generate: send its request to the AI provider on a worker thread → {job, feature}; error without a key, without the agreement in AI Accounts, for a selection that doesn't suit or an empty prompt",
     ),
-    ("ai.cancel", "Stop Generating", "", "{} the Generate window's Stop: cancel the request running → {cancelled}"),
+    ("ai.panel.stop", "Stop Generating", "", "{} the Generate window's Stop: cancel the request running → {cancelled}"),
     (
-        "ai.place",
+        "ai.panel.place",
         "Place Generated Result",
         "",
         "{variation?: index (0)} place a result of the Generate window's last request, as clicking it does: one undo step named after the feature → {ids, swatch?}",
