@@ -101,28 +101,35 @@ jobs:
           target_commitish: ${{ github.sha }}
           name: Pigment ${{ env.RELEASE_TAG }}
           body: |
-            Free, open-source image editor for Windows, macOS and Linux: layers, groups, masks and
-            clipping masks, smart objects with smart filters, 27 blend modes, adjustment and fill
-            layers, layer styles, brushes, retouching (healing, clone, patch, dodge/burn), selections
-            (marquee, lasso, magic wand, quick selection, color range, quick mask), free transform,
-            Warp, Perspective Warp and Puppet Warp, text (on a path, stacked vertical), shapes with
-            path operations and the pen tool, printing, PSD import/export. See pigment/README.md.
+            Free, open-source image editor for Windows, macOS and Linux: layers, groups, masks, vector
+            masks and clipping masks, smart objects with smart filters, 27 blend modes, adjustment and
+            fill layers, layer styles with Blending Options, brushes, retouching (healing, clone, patch,
+            dodge/burn), selections (marquee, lasso, magic wand, quick selection, color range, quick
+            mask), free transform, Warp, Perspective Warp and Puppet Warp, multi-style text shaped by
+            HarfBuzz (on a path, stacked vertical), live shapes with path operations and the pen tool,
+            gradients and patterns, guides and Smart Guides, printing, PSD import/export, with
+            Photoshop's default shortcuts. See pigment/README.md.
 
-            **New in 0.3**: the rest of Photoshop's Filter menu (71 filters) and the Filter Gallery
-            (47 effects), the Blur Gallery, Lens Correction, Color Lookup, HDR Toning, Match Color,
-            Replace Color, Apply Image and Calculations, Matting; image modes (Bitmap, Grayscale,
-            Duotone, Indexed Color, RGB, CMYK, Lab, Multichannel) and 8/16/32 bits per channel; GIF,
-            PNG-8, 16-bit PNG, TIFF and Targa files and Save for Web; Select Subject, Sky and Focus
-            Area, Select and Mask and the Object Selection tool; Actions with Batch, Image Processor
-            and the other Automate and Scripts commands; Auto-Align, Auto-Blend, Photomerge and stack
-            modes; Content-Aware Scale and Perspective Crop; Find, Isolate and Link Layers, File Info.
-
-            **Fixed in 0.3.1**: about 60 bugs found by testing the 0.3 features against each other,
-            among them a pending Perspective Crop missing from the saved file, unconfirmed filter
-            previews saved when the window was closed, 16/32-bit undo, merges and duplicates,
-            damaged TIFF, TGA and GIF files that opened half blank, action files that could run
-            commands no recording makes, and Batch and Image Processor edge cases.
+            **New in 0.4**: several fonts, sizes and styles in one text layer, shaped by HarfBuzz, with
+            on-canvas editing and the Character and Paragraph panels (kerning, tracking, scales, baseline
+            shift, caps, justification, composers, hyphenation in eight languages, lists); Blending
+            Options with knockout and Blend If, layer styles on groups and every field of the ten effects,
+            with contours and several instances of an effect; finished Levels, Curves, Hue/Saturation and
+            the other adjustment dialogs with presets and eyedroppers, Color and Vibrance, Clarity and
+            Dehaze, Grain, the Adjustments panel presets and the Adjustment Brush; the Gradient Editor,
+            Gradients and Patterns panels, live gradients and Scripted Patterns; guides with colours,
+            rulers with units and origin, Snap To and Smart Guides; vector masks and mask density and
+            feather; live shapes with corner radii, gradient and pattern fills and dashed strokes; the
+            Layers panel's effect rows, scrubby fields and drag gestures, and the rest of the Layer menu
+            (New Layer and Duplicate dialogs, Distribute, Lock Layers, Merge Group, Stamp Visible, the
+            Background rules); Photoshop's default shortcuts, Search, spring-loaded tools, numeric fields
+            with arithmetic and units, and movable dialogs. Some keys moved to Photoshop's meanings:
+            Ctrl+F is Search (Last Filter is Alt+Ctrl+F), Alt+Ctrl+Z is Toggle Last State, Ctrl+Y is
+            Proof Colors. PSD files do not yet carry most of the new layer features (0.5); the merged image is
+            right. pigment/docs/RELEASE-NOTES-0.4.md lists every change and known gap, and
             pigment/docs/PARITY.md compares Pigment with Photoshop feature by feature.
+
+            **From 0.3**: the Filter menu and Filter Gallery, Blur Gallery, image modes, 16/32 bits, Actions.
 
             **AI (optional)**: sign in with ChatGPT (uses your Plus/Pro plan) or add an OpenAI or
             Google Gemini API key in AI › AI Accounts for Generative Fill / Expand, Generate Image,
