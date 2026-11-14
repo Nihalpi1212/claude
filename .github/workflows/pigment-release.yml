@@ -112,21 +112,26 @@ jobs:
 
             **New in 0.4**: several fonts, sizes and styles in one text layer, shaped by HarfBuzz, with
             on-canvas editing and the Character and Paragraph panels (kerning, tracking, scales, baseline
-            shift, caps, justification, composers, hyphenation in eight languages, lists); Blending
-            Options with knockout and Blend If, layer styles on groups and every field of the ten effects,
-            with contours and several instances of an effect; finished Levels, Curves, Hue/Saturation and
-            the other adjustment dialogs with presets and eyedroppers, Color and Vibrance, Clarity and
-            Dehaze, Grain, the Adjustments panel presets and the Adjustment Brush; the Gradient Editor,
-            Gradients and Patterns panels, live gradients and Scripted Patterns; guides with colours,
-            rulers with units and origin, Snap To and Smart Guides; vector masks and mask density and
-            feather; live shapes with corner radii, gradient and pattern fills and dashed strokes; the
-            Layers panel's effect rows, scrubby fields and drag gestures, and the rest of the Layer menu
-            (New Layer and Duplicate dialogs, Distribute, Lock Layers, Merge Group, Stamp Visible, the
-            Background rules); Photoshop's default shortcuts, Search, spring-loaded tools, numeric fields
-            with arithmetic and units, and movable dialogs. Some keys moved to Photoshop's meanings:
-            Ctrl+F is Search (Last Filter is Alt+Ctrl+F), Alt+Ctrl+Z is Toggle Last State, Ctrl+Y is
-            Proof Colors. PSD files do not yet carry most of the new layer features (0.5); the merged image is
-            right. pigment/docs/RELEASE-NOTES-0.4.md lists every change and known gap, and
+            shift, caps, justification, composers, hyphenation in eight languages, lists); Blending Options
+            with knockout and Blend If (adjustment layers get them too, without knockout), layer styles on groups and the ten
+            effects with contours, noise, textures, gradient and pattern strokes and several instances of an
+            effect; finished Levels, Curves, Hue/Saturation and the other adjustment dialogs with presets
+            and eyedroppers, Color and Vibrance, Clarity and Dehaze, Grain, the Adjustments panel presets
+            and the Adjustment Brush; the Gradient Editor, Gradients and Patterns panels, live gradients and
+            Scripted Patterns; guides with colours, rulers with units and origin, Snap To and Smart Guides;
+            vector masks and mask density and feather; live shapes with corner radii, gradient and pattern
+            fills and dashed strokes; the Layers panel's effect rows, scrubby fields and drag gestures, and
+            the rest of the Layer menu (New Layer and Duplicate dialogs, Distribute, Lock Layers, Merge
+            Group, Stamp Visible, the Background rules); Photoshop's default shortcuts, Search,
+            spring-loaded tools, numeric fields with arithmetic and units, and movable dialogs. Layer
+            effects now blend with the layers below in their own blend modes, as in Photoshop (a Multiply
+            shadow darkens, a Screen glow lightens), so documents with such effects can look different from
+            0.3. Testing fixed several dozen problems where features meet (Merge Clipping Mask on Ctrl+E,
+            Lock All, Flatten asking about hidden layers, PSD text, Hue/Saturation ranges, Gradient Maps and
+            guides), and large documents repaint much faster. Some keys moved to Photoshop's meanings:
+            Ctrl+F is Search (Last Filter is Alt+Ctrl+F), Alt+Ctrl+Z is Toggle Last State, Ctrl+Y is Proof
+            Colors. PSD files do not yet carry layer effects and most of the new layer features (0.5); the
+            merged image is right. pigment/docs/RELEASE-NOTES-0.4.md lists every change and known gap, and
             pigment/docs/PARITY.md compares Pigment with Photoshop feature by feature.
 
             **From 0.3**: the Filter menu and Filter Gallery, Blur Gallery, image modes, 16/32 bits, Actions.

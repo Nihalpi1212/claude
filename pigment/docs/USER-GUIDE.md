@@ -1168,8 +1168,9 @@ Style dialog on its first page.
   the group, so what is under the group shows; a Pass Through group: to what was under the group). **Deep** goes down
   to the Background layer (to transparency when the document has no Background). For a layer that is not in a group,
   Shallow works like Deep.
-- **Blend Interior Effects as Group:** Inner Glow, Satin and the three overlays are blended into the layer first and
-  fade with its Fill, instead of keeping their full strength.
+- **Blend Interior Effects as Group:** Inner Glow, Satin and the three overlays are blended into the layer first: they
+  take the layer's blend mode and fade with its Fill. Off (the default), the interior effects keep their own blend
+  modes over the layer and their full strength, so at Fill 0 % an Overlay colour overlay blends with the image below.
 - **Blend Clipped Layers as Group** (on by default): the layers clipped to this one are blended into it first and the
   result takes this layer's blend mode. Off: each clipped layer blends with what is below in its own mode, inside this
   layer's shape (this layer's Fill does not fade them).
@@ -1192,9 +1193,11 @@ shadows, outer glows, the outer part of a bevel or a stroke) whole: a layer hidd
 **How effects blend.** As in Photoshop, each exterior effect (Drop Shadow, Outer Glow, the outer part of Bevel &
 Emboss, the outer part of an outside or centred Stroke) blends with the layers below in the blend mode and opacity set
 on its own page. A coloured Multiply shadow darkens what it falls on; a Screen glow does not show on white. The layer's
-blend mode (General Blending) acts on its content and its interior effects (Inner Shadow, Inner Glow, Satin, the
-overlays, an inside stroke); a Normal stroke on a Multiply layer stays Normal. The layer's **Opacity** fades the layer
-and all its effects together, as one.
+blend mode (General Blending) acts on its content; a Normal stroke on a Multiply layer stays Normal. The interior
+effects (Inner Shadow, Inner Glow, Satin, the overlays, the inner part of a bevel or a stroke) are drawn over the
+content in their own modes, unless **Blend Interior Effects as Group** is on, which blends them into the layer first
+so that the layer's mode applies to them too. The layer's **Opacity** fades the layer and all its effects together, as
+one.
 
 **Adjustment layers** take Blending Options too: Layer › Layer Style › Blending Options…, the fx button's menu or the
 Layers panel menu opens the dialog on an adjustment layer with this page only (the blend mode, Opacity, Fill, the

@@ -798,8 +798,11 @@ documented behaviour, together with two items deferred from the packages.
   centred stroke) now blends with the layers below in its own blend mode and opacity, as in Photoshop. A coloured
   Multiply drop shadow darkens what it falls on, and a Screen outer glow does not show on white. Before, the effects
   were blended with the layer first, so a Multiply shadow over grey drew in Normal.
-- The layer's own blend mode acts on its content and its interior effects only: a Normal stroke on a Multiply layer
-  stays Normal.
+- The layer's own blend mode acts on its content: a Normal stroke on a Multiply layer stays Normal.
+- With Blend Interior Effects as Group off (the default), the interior effects (Color, Gradient and Pattern Overlay,
+  Satin, Inner Glow, Inner Shadow, the inner part of a bevel or a stroke) keep their own blend modes over the layer and
+  are not faded by Fill: a layer at Fill 0 % with an Overlay or Multiply overlay blends that overlay with the image
+  below. Turn the option on to blend them into the layer first, so that the layer's mode applies to them too.
 - Layer Opacity fades the layer and its effects together, as one, from what lies below.
 - Blend If hides the layer's own pixels and its interior effects but leaves the drop shadow, outer glow, outer bevel and
   outer stroke whole. Knockout cuts through for the layer's content after the exterior effects are drawn.
@@ -807,14 +810,19 @@ documented behaviour, together with two items deferred from the packages.
   and clipped layers, and in 16-bit documents.
 - Layer › Layer Style › Create Layers keeps the picture unchanged when effects use other blend modes, and no longer
   warns because the layer's own mode is not Normal. It still warns for knockout, a layer opacity below 100 % with
-  exterior effects, and a Fill below 100 % with interior effects.
+  exterior effects, and a Fill below 100 % with interior effects. Where the interior effects keep their own modes, it
+  turns Blend Clipped Layers as Group off on the base (in the same History step), so the picture stays the same.
 - Rasterize Layer Style and Convert to Smart Object keep the look where one layer can (all Normal, or a black Multiply
   shadow). Where they cannot, they say so: 'Some effects blend with the layers below in a mode of their own, which one
   layer cannot keep, so the image changed' (or '…which the smart object cannot keep…').
 - Merge Down onto an opaque layer, Merge Visible, Stamp Visible and Flatten Image give exactly what the canvas shows.
-- **Changed look:** documents whose effects use other modes than Normal (the default Drop Shadow is Multiply, the
-  default Outer Glow Screen) can look different from earlier 0.4 builds and from 0.3; the new look is Photoshop's.
-  Documents whose effects and layers are all Normal render exactly as before.
+- Knockout with Transparency Shapes Layer off knocks out the layer's whole content box, in exports and in the view,
+  also for layers that reach past the canvas and inside groups.
+- **Changed look:** documents whose effects use modes other than Normal can look different from earlier 0.4 builds and
+  from 0.3 (a coloured Multiply shadow, the default pale yellow Outer Glow in Screen, an overlay on a layer whose own
+  mode is not Normal); the new look is Photoshop's. These render exactly as before: Photoshop's default black Multiply
+  drop shadow and the default bevel, documents whose effects and layers are all Normal, and layers with Blend If,
+  knockout or a channel restriction whose effects are Normal.
 
 ### Blending Options on adjustment layers
 
@@ -868,6 +876,7 @@ documented behaviour, together with two items deferred from the packages.
   files, exports, merges and History always use full resolution. Proof Colors and Gamut Warning stay correct during
   the preview.
 - The image is exactly the same as a full repaint in every case.
+- A document in a background tab keeps only its composite, not the repaint caches, so open documents use less memory.
 
 ### Still open
 
