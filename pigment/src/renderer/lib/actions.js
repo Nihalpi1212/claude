@@ -744,8 +744,38 @@ class ActionsEngine {
    */
   onTypeSession({ layer = null, isNew = false } = {}) {
     const rec = this.recording;
-    if (!rec || !layer || this.playing || this.frames.length) return;
-    rec.typeSession = isNew ? { layer, before: new Set(rec.action.steps) } : null;
+    // (not this.frames: Escape, or another command, may close the session from inside its run)
+    if (!rec || this.playing) return;
+    if (layer) {
+      rec.typeSession = isNew ? { layer, doc: this.app.doc, before: new Set(rec.action.steps) } : null;
+      return;
+    }
+    // closed: a commit reports the layer right away (onLayerMade); a cancelled or emptied new text is removed
+    // instead, and the formatting done inside it went with it
+    const ts = rec.typeSession;
+    if (ts) queueMicrotask(() => {
+      if (this.recording === rec && rec.typeSession === ts && ts.doc?.find?.(ts.layer.id) !== ts.layer) {
+        rec.typeSession = null;
+        this.dropSessionSteps(rec, ts);
+      }
+    });
+  }
+
+  /** Takes the type commands recorded during the Type session `ts` back out of the recording. */
+  dropSessionSteps(rec, ts) {
+    const steps = rec.action.steps;
+    let dropped = false;
+    for (let i = steps.length - 1; i >= 0; i--) {
+      if (ts.before.has(steps[i]) || !/^type:/.test(steps[i].command)) continue;
+      rec.marks.delete(steps[i].id);
+      steps.splice(i, 1);
+      dropped = true;
+    }
+    if (dropped) {
+      const last = steps[steps.length - 1];
+      this.selection = { set: rec.set.id, action: rec.action.id, step: last?.id ?? null };
+      this.changed('recorded');
+    }
   }
 
   /**
@@ -775,13 +805,7 @@ class ActionsEngine {
     const ts = rec.typeSession;
     if (ts?.layer === layer) {
       rec.typeSession = null;
-      const own = (s) => !ts.before.has(s) && /^type:/.test(s.command);
-      const steps = rec.action.steps;
-      for (let i = steps.length - 1; i >= 0; i--) {
-        if (!own(steps[i])) continue;
-        rec.marks.delete(steps[i].id);
-        steps.splice(i, 1);
-      }
+      this.dropSessionSteps(rec, ts);
     }
     const label = `Make ${layer.type === 'text' ? 'Text' : 'Shape'} Layer “${layer.name}”`;
     const at = entry ? d.history.entries.indexOf(entry) : -1;

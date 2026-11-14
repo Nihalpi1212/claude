@@ -133,6 +133,7 @@ function render(layer, doc, { app, keep }) {
   const commit = (params, label = `Edit ${layer.name}`) => {
     if (app.doc !== doc || doc.active !== layer) return;
     endPrevious();
+    if (canonical(params) === canonical(layer.params)) return; // nothing changed (a field's change after its input)
     const top = doc.history.entries[doc.history.index];
     const start = { mark: doc.history.mark(), params: canonical(layer.params) };
     setLayerProps(app, layer, { params: clone(params) }, label, { merge: !discrete && !!lastEdit && top === lastEdit });

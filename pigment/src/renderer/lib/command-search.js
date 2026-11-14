@@ -79,8 +79,9 @@ export function scoreEntry(entry, queryWords) {
 }
 
 /**
- * Entries matching `query`, best first (ties: the item nearer the top of the menus, so Window > Layers comes before
- * View > Snap To > Layers; then the shorter label, then the original order). Empty query: none.
+ * Entries matching `query`, best first. Ties: the shorter name (a trailing '…' only says a dialog opens, so Filter >
+ * Blur > Blur comes before the Blur Tool and Gradient… before the Gradients panel); then the item nearer the top of
+ * the menus, so Window > Layers comes before View > Snap To > Layers; then the original order. Empty query: none.
  */
 export function searchEntries(entries, query, limit = 60) {
   const q = words(query);
@@ -91,7 +92,8 @@ export function searchEntries(entries, query, limit = 60) {
     if (s > 0) scored.push({ e, s, i });
   });
   const depth = (e) => (e.path ?? []).length;
-  scored.sort((a, b) => b.s - a.s || depth(a.e) - depth(b.e) || a.e.label.length - b.e.label.length || a.i - b.i);
+  const name = (e) => String(e.label).replace(/(\u2026|\.\.\.)$/, '').length;
+  scored.sort((a, b) => b.s - a.s || name(a.e) - name(b.e) || depth(a.e) - depth(b.e) || a.i - b.i);
   return scored.slice(0, limit).map((x) => x.e);
 }
 

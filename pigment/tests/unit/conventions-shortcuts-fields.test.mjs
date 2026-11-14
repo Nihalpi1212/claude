@@ -104,3 +104,21 @@ test('Search: on a tie the item nearer the top of the menus wins (Window > Layer
   assert.deepEqual(searchEntries(entries, 'layers').map((e) => e.id).slice(0, 2), ['window:panel-layers', 'view:snap-to']);
   assert.deepEqual(searchEntries(entries, 'new layer').map((e) => e.id), ['layer:new']);
 });
+
+test('Search: a tool or panel of a longer name does not beat the menu command of that name (review 5)', () => {
+  // the palette's entries: the menus as they are, the tools and the panels the menus do not list (collectEntries)
+  const tools = ['Blur Tool', 'Sharpen Tool', 'Rotate View Tool', 'Gradient Tool'].map((label) => ({ id: `tool:${label}`, label, path: ['Tools'], kind: 'tool' }));
+  const entries = [...menuEntries({ platform: 'linux' }), ...tools];
+  const top = (q) => {
+    const e = searchEntries(entries, q, 1)[0];
+    return e && [...e.path, e.label].join(' > ');
+  };
+  assert.equal(top('blur'), 'Filter > Blur > Blur');
+  assert.equal(top('sharpen'), 'Filter > Sharpen > Sharpen…');
+  assert.equal(top('rotate'), 'Edit > Transform > Rotate');
+  assert.equal(top('gradient'), 'Layer > New Fill Layer > Gradient…');
+  assert.equal(top('pattern'), 'Layer > New Fill Layer > Pattern…');
+  assert.equal(top('mask'), 'Layer > Layer Mask > Edit Mask');
+  // the hunt's case still holds: the Layers panel before View > Snap To > Layers
+  assert.equal(top('layers'), 'Window > Layers');
+});

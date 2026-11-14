@@ -215,7 +215,7 @@ export class Compositor {
     // K.3: advanced blending options take the per-pixel path; the defaults keep 0.3's order and Canvas fast path
     if (bl) return this.finishAdvanced(ctx, layer, canvas, x, y, clipped, rect, doc, opts, bl, clipTo);
     let work = canvas, wx = x, wy = y;
-    if (clipped.length) work = this.clipGroup(work, wx, wy, clipped, doc, opts);
+    if (clipped.length) work = this.clipGroup(work, wx, wy, clipped, doc, opts, layer);
     const styled = hasEnabledStyles(layer.styles);
     if (layer.fillOpacity < 1 && !layer.isGroup && !styled) {
       const faded = createCanvas(work.width, work.height);
@@ -266,16 +266,13 @@ export class Compositor {
   }
 
   /** The base composited with its clipped layers (Blend Clipped Layers as Group, 0.3's clipping), cut to its alpha. */
-  clipGroup(work, wx, wy, clipped, doc, opts) {
+  clipGroup(work, wx, wy, clipped, doc, opts, base = null) {
     // composite clipped layers onto a copy limited to the base alpha
     const copy = createCanvas(work.width, work.height);
     const cctx = copy.getContext('2d', { willReadFrequently: true });
-    cctx.drawImage(work, 0, 0);
     // the clipped layers blend with the base's colour at full strength and the group then takes the base's alpha
     // once: on the base as it is, its alpha would count twice (a 50 % edge pixel drawn at 25 % where nothing covers it)
-    const opaque = cctx.getImageData(0, 0, copy.width, copy.height);
-    for (let p = 3; p < opaque.data.length; p += 4) if (opaque.data[p]) opaque.data[p] = 255;
-    cctx.putImageData(opaque, 0, 0);
+    cctx.drawImage(this.opaqueBase(work, base), 0, 0);
     cctx.translate(-wx, -wy);
     const sub = { x: wx, y: wy, width: work.width, height: work.height };
     for (const c of clipped) {
@@ -295,6 +292,26 @@ export class Compositor {
   }
 
   /**
+   * `work` (the base's pixels) with every pixel that has any alpha made opaque, for clipGroup. A pass over every pixel
+   * is too slow for each composite of a large document (a stroke on a clipped layer recomposites the base each time):
+   * it is cached on the canvas and the base layer's version, as styledCanvas is, so only an edit of the base itself
+   * redoes it. A fresh canvas (a group, a faded source) is measured each time and its entry is dropped with it.
+   */
+  opaqueBase(work, base) {
+    const cache = this.opaque ?? (this.opaque = new WeakMap()); // base canvas -> { layer, version, w, h, canvas }
+    const hit = cache.get(work);
+    if (hit && base && hit.layer === base && hit.version === base.version && hit.w === work.width && hit.h === work.height) return hit.canvas;
+    const out = createCanvas(work.width, work.height);
+    const octx = out.getContext('2d', { willReadFrequently: true });
+    octx.drawImage(work, 0, 0);
+    const img = octx.getImageData(0, 0, out.width, out.height);
+    for (let p = 3; p < img.data.length; p += 4) if (img.data[p]) img.data[p] = 255;
+    octx.putImageData(img, 0, 0);
+    if (base) cache.set(work, { layer: base, version: base.version, w: work.width, h: work.height, canvas: out });
+    return out;
+  }
+
+  /**
    * K.3: a layer whose blending options are not the defaults. Clipped layers (as a group, or each over the backdrop
    * cut to the base's shape), the mask parts before the effects, fill opacity, the effects with Blend Interior Effects
    * as Group and Transparency Shapes Layer, the mask parts after them; then knockout, Blend If and the channels per
@@ -303,7 +320,7 @@ export class Compositor {
   finishAdvanced(ctx, layer, canvas, x, y, clipped, rect, doc, opts, bl, clipTo) {
     let work = canvas, wx = x, wy = y;
     const grouped = bl.clippedAsGroup !== false;
-    if (clipped.length && grouped) work = this.clipGroup(work, wx, wy, clipped, doc, opts);
+    if (clipped.length && grouped) work = this.clipGroup(work, wx, wy, clipped, doc, opts, layer);
     const styled = hasEnabledStyles(layer.styles);
     const parts = maskPartsAround(bl);
     // the mask parts whose "hides effects" box is off shape the layer before its effects (K.1 parts of K.3)
