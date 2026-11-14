@@ -388,3 +388,5 @@ Status: **Missing** (no code yet) or **Not feasible** (needs Adobe's servers, li
 | Image Trace tool entry | Image Trace is a panel and Contextual Task Bar action, not a tool (29.0 enhanced: gradients, shapes, transparency, auto grouping) (v). | Covered in Object/Image Trace area. | Missing | XL | next |
 | Global Edit (?) | Select similar objects and edit them together (Select > Start Global Edit). | Covered in Select area. | Missing | M | later |
 | Snap and Smart Guides while using tools (v) | Tools snap to anchors, paths, grid, pixel grid, glyphs; 30.x adds Snap to Tangent, snapping restricted to the active artboard, and Smart Guides on rotated objects. | Shared snapping engine consulted by all tools (View area holds the settings). | Missing | L | core |
+
+Counts: 285 rows. By status: Missing 275, Not feasible 10. By tier: core 90, next 87, later 98, n/a 10.
