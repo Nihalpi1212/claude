@@ -78,8 +78,13 @@ export class ToolManager {
     this.active = null;
     this.previous = null;
     this.toolbox = document.getElementById('toolbox');
+    // 0.5 (S9.4): the tooltips show the keys as bound now
+    app.on?.('keymap:changed', () => {
+      if (this.toolboxBuilt) this.renderToolbox();
+    });
     this.optionsBar = document.getElementById('options-bar');
     this.optionsControls = new Map();
+    this.cursorFilter = null; // S3.2: applied by CanvasView.setCursor to every cursor
     app.on('color:changed', () => this.renderColors());
     app.on('settings:changed', () => this.renderColors());
   }
@@ -143,8 +148,22 @@ export class ToolManager {
     this.app.statusbar.set('hint', tool.hint ?? '');
   }
 
+  /** The first renderer key of cmd in the effective keymap. keymap (lib/keymap-store.js) */
+  rendererKey(cmd) {
+    return this.app.keymap ? this.app.keymap.keysFor(cmd, 'renderer')[0] ?? null : RENDERER_KEYS[cmd]?.[0] ?? null;
+  }
+
   updateCursor() {
     this.app.view?.setCursor(this.active?.cursorStyle);
+  }
+
+  /**
+   * S3.2: one filter (the later wins) through which CanvasView.setCursor passes every cursor, fn(css, { tool, view }) →
+   * css: Other Cursors (Precise) and Caps Lock (brush-painting-behaviours). null removes it.
+   */
+  setCursorFilter(fn) {
+    this.cursorFilter = typeof fn === 'function' ? fn : null;
+    this.updateCursor();
   }
 
   // ---- options (persisted per tool) ----------------------------------------------------------------------------
@@ -248,7 +267,7 @@ export class ToolManager {
       const slot = this.slots.find((s) => s.id === btn.dataset.slot);
       const tool = this.tools.get(slot.current);
       btn.querySelector('.tool-icon').innerHTML = icon(tool.icon);
-      const key = RENDERER_KEYS[`tool:${slot.id}`]?.[0] ?? RENDERER_KEYS[`tool:${tool.id}`]?.[0];
+      const key = this.rendererKey(`tool:${slot.id}`) ?? this.rendererKey(`tool:${tool.id}`);
       btn.title = key ? `${tool.name} (${describeAccelerator(key, isMac)})` : tool.name;
       btn.setAttribute('aria-pressed', String(this.active?.id === tool.id));
       btn.classList.toggle('active', this.active?.id === tool.id);
@@ -268,7 +287,7 @@ export class ToolManager {
    * slot's current tool; Shift+key (or the key alone, with "Use Shift Key for Tool Switch" off) steps through them.
    */
   showFlyout(slot, anchor) {
-    const key = RENDERER_KEYS[`tool:${slot.id}`]?.[0];
+    const key = this.rendererKey(`tool:${slot.id}`);
     const items = slot.tools.map((id) => {
       const t = this.tools.get(id);
       return { label: t.name, icon: t.icon, checked: this.active?.id === id, shortcut: key, onSelect: () => this.activate(id) };
@@ -412,9 +431,19 @@ export class ToolManager {
         break;
       }
       case 'brush': {
+        // the Brushes panel's picker draws the button when it can (app.brushPicker.renderButton, brush-settings-panel);
+        // else 0.4's button
         const b = document.createElement('button');
         b.type = 'button';
         b.className = 'btn small opt-brush';
+        if (typeof this.app.brushPicker?.renderButton === 'function') {
+          const render = () => this.app.brushPicker.renderButton(b, tool);
+          render();
+          b.addEventListener('click', () => this.app.brushPicker?.show(b, tool));
+          wrap.appendChild(b);
+          control = { button: b, render };
+          break;
+        }
         const render = () => {
           const size = this.opt(tool.id, 'size') ?? 24;
           const hard = this.opt(tool.id, 'hardness') ?? 0.8;
@@ -472,14 +501,5 @@ function clampNum(n, spec) {
   return n;
 }
 
-/** Shared option specs. */
-export const BRUSH_OPTIONS = [
-  { kind: 'brush', key: 'preset', label: '' },
-  { kind: 'slider', key: 'size', label: 'Size', min: 1, max: 1000, step: 1, default: 24, unit: 'px' },
-  { kind: 'slider', key: 'hardness', label: 'Hardness', min: 0, max: 1, step: 0.01, default: 0.8 },
-  { kind: 'slider', key: 'opacity', label: 'Opacity', min: 0.01, max: 1, step: 0.01, default: 1 },
-  { kind: 'slider', key: 'flow', label: 'Flow', min: 0.01, max: 1, step: 0.01, default: 1 },
-  { kind: 'slider', key: 'smoothing', label: 'Smoothing', min: 0, max: 0.95, step: 0.05, default: 0.2 },
-  { kind: 'checkbox', key: 'pressureSize', label: 'Pen pressure → size', default: true },
-  { kind: 'checkbox', key: 'pressureOpacity', label: 'Pressure → opacity', default: false },
-];
+// Shared option specs: lib/brush/options.js (brush-engine-core's, S12.1) holds them; re-exported for 0.4's importers.
+export { BRUSH_OPTIONS, BRUSH_SIZE, PAINT_BLEND_OPTIONS } from './brush/options.js';

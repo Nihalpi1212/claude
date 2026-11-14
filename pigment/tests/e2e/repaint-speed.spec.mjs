@@ -416,6 +416,48 @@ test('a brush stroke under adjustment layers repaints its dabs only, and the end
   expect(errors).toEqual([]);
 });
 
+// S2.8 (0.5): the cost of a 2500 px textured stroke, gated on brush-engine-core (the classic 0.4 engine has no texture
+// and is not held to this budget; rule 11)
+test('a 2500 px soft stroke with Texture on a 4000 × 4000 document costs under 25 ms per dab, with no full repaint', async ({ page }) => {
+  const errors = await openApp(page);
+  const classic = await page.evaluate(async () => (await import('/lib/brush.js')).ENGINE.id === 'classic-0.4');
+  test.skip(classic, 'the classic 0.4 engine (brush-engine-core has not landed) has no texture');
+  await newDoc(page, { width: 4000, height: 4000, background: 'white' });
+  await kit(page);
+  await page.evaluate(async () => {
+    const app = window.pigmentApp;
+    const { setToolBrush } = await import('/lib/brush/tool-brush.js');
+    const { normalizeBrush } = await import('/lib/brush/preset.js');
+    const tile = window.__rp.box(64, 64, '#808080');
+    const g = tile.getContext('2d');
+    g.fillStyle = '#ffffff';
+    g.fillRect(0, 0, 32, 32);
+    g.fillRect(32, 32, 32, 32);
+    const preset = await app.patterns.define(tile, { name: 'Checks' });
+    app.tools.activate('brush');
+    setToolBrush(app, 'brush', normalizeBrush({ tip: { size: 2500, hardness: 0, spacing: 0.05 }, texture: { enabled: true, pattern: { presetId: preset.id, name: 'Checks' }, scale: 1, depth: 1, eachTip: true } }), { includeTool: false });
+    app.doc.view.setZoom(0.15);
+    app.doc.view.paint();
+  });
+  const before = await page.evaluate(() => window.__rp.runs());
+  const from = [600, 600], to = [3400, 3400];
+  // dabs placed along the drag: one at the press, then one every 5 % of 2500 px
+  const dabs = 1 + Math.floor(Math.hypot(to[0] - from[0], to[1] - from[1]) / (2500 * 0.05));
+  const t0 = Date.now();
+  await drag(page, from, to, { steps: 10 });
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+  const elapsed = Date.now() - t0;
+  const r = await page.evaluate(() => {
+    const d = window.pigmentApp.doc;
+    d.view.paint();
+    return { runs: window.__rp.runs(), entries: d.history.entries.length };
+  });
+  expect(r.runs.full - before.full).toBe(0);
+  expect(r.entries).toBeGreaterThan(0);
+  expect(elapsed / dabs).toBeLessThan(25);
+  expect(errors).toEqual([]);
+});
+
 test('while a pointer is held on a slow document the view shows a preview; the release, exports and readers get full resolution', async ({ page }) => {
   const errors = await openApp(page);
   await newDoc(page, { width: 600, height: 400, background: 'white' });

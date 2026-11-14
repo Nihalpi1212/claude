@@ -9,6 +9,8 @@ import { registerPresetKind } from './presets.js';
 import { normalizeGradient } from '../../shared/pixels/gradient-model.js';
 import { GRADIENT_PRESETS } from './tools/fill.js';
 import { CUSTOM_SHAPES, customPath } from './tools/vector.js';
+import { BUILTIN_BRUSHES } from './panels/brushes.js';
+import { normalizeBrush, brushFromLegacy, blobsOf, withoutSampleData } from './brush/preset.js';
 
 const slug = (name) => name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 const isObject = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
@@ -67,5 +69,21 @@ export function registerPresetKinds04() {
     version: 1,
     builtins: () => ({ presets: [] }),
     normalize: (data) => (isObject(data) && typeof data.tool === 'string' ? data : null),
+  });
+}
+
+/**
+ * The preset kinds of 0.5 (ARCHITECTURE.md "0.5 features", S10.5), registered with registerPresetKinds04() in
+ * start(). Their owners re-register them with their full definitions. Step 4 of the skeleton registers `brushes`;
+ * step 10 adds the others.
+ */
+export function registerPresetKinds05() {
+  registerPresetKind('brushes', {
+    title: 'Brushes',
+    version: 1,
+    // 0.4's Brushes panel presets under their 0.4 ids (a preset's flow is its tool flow, S1.1)
+    builtins: () => ({ presets: BUILTIN_BRUSHES.map((b) => ({ id: b.id, name: b.name, data: withoutSampleData(brushFromLegacy(b)) })) }),
+    normalize: (data) => (isObject(data) ? withoutSampleData(normalizeBrush(data)) : null),
+    blobs: (data) => blobsOf(data),
   });
 }

@@ -5,7 +5,7 @@
 // "Dab" tools read the pixels under each dab, process them with src/shared/pixels/retouch.js and
 // write them back (one undo entry per stroke through history.beginStroke/endStroke). Stamp tools
 // paint through the brush engine with a sampler.
-import { Tool, BRUSH_OPTIONS } from '../tools.js';
+import { Tool, BRUSH_OPTIONS } from '../tools.js'; // BRUSH_OPTIONS: lib/brush/options.js (5000 px); SIZE below stays 1000 (S2.7)
 import { StrokeTool } from './paint.js';
 import { createCanvas, intersectRect } from '../document.js';
 import { sampleMerged } from '../sample.js';
@@ -66,7 +66,7 @@ class DabTool extends StrokeTool {
     super(app, def);
     this.spacing = def.spacing ?? 0.25;
   }
-  onPointerDown(p) {
+  strokeDown(p) {
     const layer = this.paintableLayer();
     if (!layer) return;
     if (this.app.ui.editingMask) {
@@ -88,7 +88,7 @@ class DabTool extends StrokeTool {
     this.carry = 0;
     this.dabAt(p.x, p.y, p);
   }
-  onPointerMove(p, dragging) {
+  strokeMove(p, dragging) {
     if (!dragging || !this.active) return;
     const size = this.opt('size') ?? 40;
     const step = Math.max(1, size * this.spacing);
@@ -105,7 +105,7 @@ class DabTool extends StrokeTool {
     this.carry = placed ? dist - (t - step) : this.carry + dist;
     this.last = { x: p.x, y: p.y };
   }
-  onPointerUp() {
+  strokeUp() {
     if (!this.active) return;
     this.active = false;
     this.doc.history.endStroke();
@@ -213,9 +213,9 @@ class DodgeTool extends DabTool {
   constructor(app) {
     super(app, { id: 'dodge', name: 'Dodge Tool', icon: 'dodge', hint: 'Paint to lighten. Alt swaps to Burn.', options: [SIZE, HARD, RANGE, EXPOSURE] });
   }
-  onPointerDown(p) {
+  strokeDown(p) {
     this.alt = p.alt;
-    super.onPointerDown(p);
+    super.strokeDown(p);
   }
   process(img, rect, dab) {
     const opts = { range: this.opt('range') ?? 'midtones', exposure: (this.opt('exposure') ?? 0.5) * 0.25 };
@@ -227,9 +227,9 @@ class BurnTool extends DabTool {
   constructor(app) {
     super(app, { id: 'burn', name: 'Burn Tool', icon: 'burn', hint: 'Paint to darken. Alt swaps to Dodge.', options: [SIZE, HARD, RANGE, EXPOSURE] });
   }
-  onPointerDown(p) {
+  strokeDown(p) {
     this.alt = p.alt;
-    super.onPointerDown(p);
+    super.strokeDown(p);
   }
   process(img, rect, dab) {
     const opts = { range: this.opt('range') ?? 'midtones', exposure: (this.opt('exposure') ?? 0.5) * 0.25 };
@@ -344,7 +344,7 @@ class HealingBrushTool extends DabTool {
     this.source = null; // { x, y } document point
     this.offset = null;
   }
-  onPointerDown(p) {
+  strokeDown(p) {
     if (p.alt) {
       this.source = { x: p.x, y: p.y };
       this.offset = null;
@@ -357,7 +357,7 @@ class HealingBrushTool extends DabTool {
       return;
     }
     if (!this.offset || !this.opt('aligned')) this.offset = { x: this.source.x - p.x, y: this.source.y - p.y };
-    super.onPointerDown(p);
+    super.strokeDown(p);
   }
   beforeStroke(p, layer) {
     this.src = this.opt('sampleAll') ? { canvas: sampleMerged(this.app, this.doc, { stored: true }), x: 0, y: 0 } : { canvas: copyOf(layer.canvas), x: layer.x, y: layer.y }; // sample (lib/sample.js)
@@ -407,8 +407,8 @@ class SpotHealingTool extends DabTool {
   get contentAware() {
     return (this.opt('type') ?? 'content-aware') === 'content-aware' && !!this.app.contentAwareFill;
   }
-  onPointerDown(p) {
-    if (!this.contentAware) return super.onPointerDown(p);
+  strokeDown(p) {
+    if (!this.contentAware) return super.strokeDown(p);
     const layer = this.paintableLayer();
     if (!layer) return;
     if (this.app.ui.editingMask) return this.app.dialogs.toast('Spot healing works on layer pixels, not masks', { kind: 'error', timeout: 2000 });
@@ -429,8 +429,8 @@ class SpotHealingTool extends DabTool {
     const y0 = Math.max(0, Math.floor(cy - r)), y1 = Math.min(d.height - 1, Math.ceil(cy + r));
     for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) if ((x + 0.5 - cx) ** 2 + (y + 0.5 - cy) ** 2 <= r * r) this.caMask[y * d.width + x] = 255;
   }
-  onPointerMove(p, dragging) {
-    if (!this.caMask) return super.onPointerMove(p, dragging);
+  strokeMove(p, dragging) {
+    if (!this.caMask) return super.strokeMove(p, dragging);
     if (!dragging) return;
     const [lx, ly] = this.caPts[this.caPts.length - 1];
     const step = Math.max(1, (this.opt('size') ?? 30) / 4);
@@ -440,8 +440,8 @@ class SpotHealingTool extends DabTool {
     this.caPts.push([p.x, p.y]);
     this.view.invalidate();
   }
-  onPointerUp() {
-    if (!this.caMask) return super.onPointerUp();
+  strokeUp() {
+    if (!this.caMask) return super.strokeUp();
     const d = this.doc;
     const mask = this.caMask;
     this.caMask = null;
@@ -781,7 +781,7 @@ class CloneStampTool extends StrokeTool {
     this.source = null;
     this.offset = null;
   }
-  onPointerDown(p) {
+  strokeDown(p) {
     if (p.alt) {
       this.source = { x: p.x, y: p.y };
       this.offset = null;
@@ -794,7 +794,7 @@ class CloneStampTool extends StrokeTool {
       return;
     }
     if (!this.offset || !this.opt('aligned')) this.offset = { x: this.source.x - p.x, y: this.source.y - p.y };
-    super.onPointerDown(p);
+    super.strokeDown(p);
   }
   strokeSettings(p, layer, target) {
     const doc = this.doc;
@@ -839,14 +839,14 @@ class PatternStampTool extends StrokeTool {
     }
     return this.app.patterns?.current()?.canvas ?? null;
   }
-  onPointerDown(p) {
+  strokeDown(p) {
     this.strokePattern = this.patternCanvas();
     if (!this.strokePattern) {
       this.app.dialogs.toast('Define a pattern first (Edit › Define Pattern)', { kind: 'error' });
       return;
     }
     this.strokeOrigin = this.opt('aligned') !== false ? { x: 0, y: 0 } : { x: p.x, y: p.y };
-    super.onPointerDown(p);
+    super.strokeDown(p);
   }
   strokeSettings(p, layer, target) {
     const pat = this.strokePattern ?? this.app.patterns.current().canvas;
@@ -875,7 +875,7 @@ class HistoryBrushTool extends StrokeTool {
       options: [...BRUSH_OPTIONS],
     });
   }
-  onPointerDown(p) {
+  strokeDown(p) {
     const snap = this.doc?.history.savedSnapshot?.();
     if (!snap) {
       this.app.dialogs.toast('Nothing to paint from yet: save or reopen the document first', { kind: 'error', timeout: 2400 });
@@ -885,7 +885,7 @@ class HistoryBrushTool extends StrokeTool {
       this.app.dialogs.toast('The canvas size changed since the saved state', { kind: 'error' });
       return;
     }
-    super.onPointerDown(p);
+    super.strokeDown(p);
   }
   strokeSettings(p, layer, target) {
     const snap = this.doc.history.savedSnapshot();

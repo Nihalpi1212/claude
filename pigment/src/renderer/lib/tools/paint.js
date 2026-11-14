@@ -1,53 +1,87 @@
 // Painting tools: brush, pencil, eraser (and the shared stroke plumbing used by clone/heal/retouch).
-import { Tool, BRUSH_OPTIONS } from '../tools.js';
-import { BrushStroke } from '../brush.js';
-import { BLEND_MODES } from '../document.js';
+//
+// 0.5 (ARCHITECTURE.md "0.5 features", S1.3, S3): the pointer handlers go through `this.gesture`
+// (lib/tools/paint-gesture.js, brush-painting-behaviours'), which calls strokeDown / strokeMove / strokeUp, 0.4's
+// handler bodies; the stroke settings come from the tool's brush (lib/brush/tool-brush.js); the cursor is
+// lib/brush-cursor.js'. Subclasses spread baseSettings and override keys exactly as in 0.4.
+import { Tool } from '../tools.js';
+import { BRUSH_OPTIONS, PAINT_BLEND_OPTIONS, PENCIL_SIZE } from '../brush/options.js';
+import { BrushStroke, strokeReach } from '../brush.js';
+import { toolBrush } from '../brush/tool-brush.js';
+import { legacyTip } from '../brush/preset.js';
+import { PaintGesture } from './paint-gesture.js';
+import { drawBrushCursor, brushCursorCss } from '../brush-cursor.js';
 
-const BLEND_OPTIONS = BLEND_MODES.filter(Boolean).filter(([id]) => id !== 'dissolve').map(([id, label]) => [id, label]);
+const BLEND_OPTIONS = PAINT_BLEND_OPTIONS;
 
 /** Common pointer plumbing for dab-based tools. Subclasses implement strokeSettings(point). */
 export class StrokeTool extends Tool {
   constructor(app, def) {
     super(app, { cursor: 'none', ...def });
     this.stroke = null;
+    this.gesture = new PaintGesture(this);
   }
   get cursorStyle() {
-    return this.app.settings.cursorStyle === 'precise' ? 'crosshair' : 'none';
+    return brushCursorCss(this);
+  }
+  // S3.1: the gesture layer owns the pointer; 0.4's handler bodies are strokeDown / strokeMove / strokeUp
+  claimsPress(p) {
+    return this.gesture.claims(p);
+  }
+  onPointerDown(p) {
+    this.gesture.down(p);
+  }
+  onPointerMove(p, dragging) {
+    this.gesture.move(p, dragging);
+  }
+  onPointerUp(p) {
+    this.gesture.up(p);
+  }
+  onContextMenu(p) {
+    return this.gesture.contextDown(p);
   }
   /** Target canvas: the active layer's mask when mask editing is on, else the layer canvas. */
   strokeTarget(layer) {
     if (this.app.ui.editingMask && layer.mask?.canvas) return { canvas: layer.mask.canvas, x: 0, y: 0, mask: true };
     return { canvas: layer.canvas, x: layer.x, y: layer.y, mask: false };
   }
-  ensureCoverage(layer, point) {
+  /** How far from the pointer this tool's stroke can put pixels (the tip size, plus what modifiers add, S2.6). */
+  strokeReach() {
+    const { preset, paint } = toolBrush(this.app, this.id);
+    return strokeReach(preset, paint);
+  }
+  ensureCoverage(layer, point, reach = this.strokeReach()) {
     if (this.app.ui.editingMask && layer.mask?.canvas) return;
     if (layer.type !== 'raster') return;
-    const size = this.opt('size') ?? 24;
+    // brush (lib/brush.js): the layer grows by the stroke's reach (0.4: the tool's size)
+    const size = reach;
     const r = { x: point.x - size, y: point.y - size, width: size * 2, height: size * 2 };
     // keep painting inside the document bounds only (layers never need to exceed the canvas)
     const d = this.doc.bounds;
     const clipped = { x: Math.max(d.x, r.x), y: Math.max(d.y, r.y), width: Math.min(d.x + d.width, r.x + r.width) - Math.max(d.x, r.x), height: Math.min(d.y + d.height, r.y + r.height) - Math.max(d.y, r.y) };
     if (clipped.width > 0 && clipped.height > 0) layer.ensureCovers(clipped);
   }
-  onPointerDown(p) {
+  strokeDown(p) {
     const layer = this.paintableLayer();
     if (!layer) return;
     if (layer.type !== 'raster' && !(this.app.ui.editingMask && layer.mask)) {
       this.app.rasterizePrompt(layer); // the button is up by the time it is answered: paint again
       return;
     }
-    this.ensureCoverage(layer, p);
+    // the reach is read once per stroke: it does not change while the pointer is down
+    this.reach = this.strokeReach();
+    this.ensureCoverage(layer, p, this.reach);
     const target = this.strokeTarget(layer);
     const settings = this.strokeSettings(p, layer, target);
     if (!settings) return;
     this.stroke = new BrushStroke({ target, layer, settings, selection: this.doc.selection?.isEmpty === false ? this.doc.selection : null, history: this.doc.history, onDirty: (rect, layer) => this.view?.invalidate(rect, layer) });
     this.stroke.begin(p);
   }
-  onPointerMove(p, dragging) {
+  strokeMove(p, dragging) {
     if (dragging && this.stroke) {
       if (this.stroke.layer.type === 'raster' && !this.stroke.target.mask) {
         const before = { x: this.stroke.layer.x, y: this.stroke.layer.y, w: this.stroke.layer.canvas.width, h: this.stroke.layer.canvas.height };
-        this.ensureCoverage(this.stroke.layer, p);
+        this.ensureCoverage(this.stroke.layer, p, this.reach ?? this.strokeReach());
         const l = this.stroke.layer;
         if (l.canvas !== this.stroke.canvas) {
           // the layer canvas grew: migrate the stroke buffers to the new geometry
@@ -57,15 +91,10 @@ export class StrokeTool extends Tool {
       this.stroke.extend(p);
     }
   }
-  onPointerUp(p) {
+  strokeUp(p) {
     if (!this.stroke) return;
-    if (p && !p.cancelled && Number.isFinite(p.x)) {
-      // smoothing lags behind the pointer: finish the stroke at the release point
-      const smoothing = this.stroke.s.smoothing;
-      this.stroke.s.smoothing = 0;
-      this.stroke.extend(p);
-      this.stroke.s.smoothing = smoothing;
-    }
+    // smoothing lags behind the pointer: finish the stroke at the release point
+    if (p && !p.cancelled && Number.isFinite(p.x)) this.stroke.finish(p);
     this.stroke.end();
     this.stroke = null;
   }
@@ -78,51 +107,33 @@ export class StrokeTool extends Tool {
     return false;
   }
   drawOverlay(ctx, view) {
-    if (!view.pointer || this.app.settings.cursorStyle === 'precise') return;
-    const size = (this.opt('size') ?? 24) * view.zoom;
-    const p = view.toScreen(view.pointer.x, view.pointer.y);
-    ctx.save();
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    if (this.app.settings.cursorStyle === 'dot' || size < 4) {
-      ctx.arc(p.x, p.y, 2, 0, Math.PI * 2);
-      ctx.fillStyle = '#000';
-      ctx.fill();
-    } else {
-      ctx.arc(p.x, p.y, size / 2, 0, Math.PI * 2);
-      ctx.strokeStyle = 'rgba(0,0,0,0.85)';
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, size / 2 + 1, 0, Math.PI * 2);
-      ctx.strokeStyle = 'rgba(255,255,255,0.75)';
-      ctx.stroke();
-    }
-    ctx.restore();
+    drawBrushCursor(ctx, view, this);
   }
   /** Document position of a point given in the stroke canvas's coordinates (the canvas grows during a stroke). */
   docPoint(lx, ly, fallback) {
     const t = this.stroke?.target ?? fallback;
     return [lx + t.x, ly + t.y];
   }
+  /**
+   * 0.4's flat stroke settings, built from the tool's brush (S1.3): the tip keys, the ToolPaint fields, the preset.
+   * Subclasses spread it and override keys as in 0.4; the flat keys win over the preset (S2.2). brush
+   * (lib/brush/tool-brush.js)
+   */
   baseSettings(layer, target) {
     const s = this.app.settings;
     const maskValue = this.app.ui.editingMask ? luminanceOf(s.foreground) : 1;
+    const { preset, paint } = toolBrush(this.app, this.id);
     return {
-      size: this.opt('size') ?? 24,
-      hardness: this.opt('hardness') ?? 0.8,
-      opacity: this.opt('opacity') ?? 1,
-      flow: this.opt('flow') ?? 1,
-      smoothing: this.opt('smoothing') ?? 0.2,
-      spacing: s.brush?.spacing ?? 0.12,
-      pressureSize: this.opt('pressureSize') ?? true,
-      pressureOpacity: this.opt('pressureOpacity') ?? false,
-      blend: this.opt('blend') ?? 'normal',
-      angle: this.opt('angle') ?? 0,
-      roundness: this.opt('roundness') ?? 1,
+      ...legacyTip(preset),
+      ...paint,
+      preset,
       color: s.foreground,
+      background: s.background,
       mode: target.mask ? 'mask' : 'paint',
       maskValue,
       lockTransparency: !target.mask && (layer.locked.transparency || this.opt('lockAlpha')),
+      antialias: true,
+      view: this.view,
     };
   }
 }
@@ -132,38 +143,6 @@ function luminanceOf(hex) {
   const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
   return (0.299 * r + 0.587 * g + 0.114 * b) / 255;
 }
-
-// migrate strokes when the layer canvas grows (new canvas + offset)
-BrushStroke.prototype.migrate = function migrate(target, before) {
-  const dx = before.x - target.x, dy = before.y - target.y; // old canvas origin inside the new canvas
-  const grow = (old) => {
-    const c = document.createElement('canvas');
-    c.width = target.canvas.width;
-    c.height = target.canvas.height;
-    c.getContext('2d').drawImage(old, dx, dy);
-    return c;
-  };
-  this.buffer = grow(this.buffer);
-  this.bctx = this.buffer.getContext('2d');
-  this.backup = grow(this.backup);
-  if (this.history.stroke) {
-    this.history.stroke.canvas = target.canvas;
-    this.history.stroke.backup = this.backup;
-  }
-  if (this.last) {
-    this.last.x += dx;
-    this.last.y += dy;
-  }
-  if (this.smoothed) {
-    this.smoothed.x += dx;
-    this.smoothed.y += dy;
-  }
-  const shift = (r) => (r ? { x: r.x + dx, y: r.y + dy, width: r.width, height: r.height } : r);
-  this.dirty = shift(this.dirty);
-  this.frameDirty = shift(this.frameDirty);
-  this.canvas = target.canvas;
-  this.target = target;
-};
 
 export class BrushTool extends StrokeTool {
   constructor(app) {
@@ -175,9 +154,9 @@ export class BrushTool extends StrokeTool {
       options: [...BRUSH_OPTIONS, { kind: 'select', key: 'blend', label: 'Mode', options: BLEND_OPTIONS, default: 'normal' }, { kind: 'checkbox', key: 'lockAlpha', label: 'Lock alpha', default: false }],
     });
   }
-  onPointerDown(p) {
+  strokeDown(p) {
     if (p.alt) return this.app.tools.get('eyedropper')?.sampleAt(p, { setForeground: true });
-    super.onPointerDown(p);
+    super.strokeDown(p);
   }
   strokeSettings(p, layer, target) {
     return { ...this.baseSettings(layer, target), label: 'Brush' };
@@ -192,16 +171,16 @@ export class PencilTool extends StrokeTool {
       icon: 'pencil',
       hint: 'Hard-edged, aliased strokes in the foreground colour.',
       options: [
-        { kind: 'slider', key: 'size', label: 'Size', min: 1, max: 500, step: 1, default: 3, unit: 'px' },
+        { ...PENCIL_SIZE },
         { kind: 'slider', key: 'opacity', label: 'Opacity', min: 0.01, max: 1, step: 0.01, default: 1 },
         { kind: 'select', key: 'blend', label: 'Mode', options: BLEND_OPTIONS, default: 'normal' },
         { kind: 'checkbox', key: 'autoErase', label: 'Auto erase', default: false },
       ],
     });
   }
-  onPointerDown(p) {
+  strokeDown(p) {
     if (p.alt) return this.app.tools.get('eyedropper')?.sampleAt(p, { setForeground: true });
-    super.onPointerDown(p);
+    super.strokeDown(p);
   }
   strokeSettings(p, layer, target) {
     const base = this.baseSettings(layer, target);

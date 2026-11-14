@@ -18,6 +18,8 @@ import { installRulers } from './lib/rulers.js';
 import { installSample } from './lib/sample.js';
 import { installCanvasCapture } from './lib/canvas-capture.js';
 import { PresetStore } from './lib/presets.js';
+import { installToolBrush } from './lib/brush/tool-brush.js';
+import { BRUSH_SIZE } from './lib/brush/options.js';
 import { Selection } from './lib/selection.js';
 import { icon } from './lib/icons.js';
 import { withDefaults } from '../shared/defaults.js';
@@ -627,7 +629,9 @@ function registerCoreCommands(app) {
     const v = tool.opt(key);
     if (key === 'size') {
       const step = v < 10 ? 1 : v < 50 ? 5 : v < 100 ? 10 : v < 300 ? 25 : 50;
-      tool.setOpt('size', Math.max(1, Math.min(2500, v + dir * step)));
+      // 5000 px (S2.8), or the tool's own cap (the DabTools stop at 1000 px until 0.7, S2.7)
+      const max = Math.min(BRUSH_SIZE.max, tool.options.find((o) => o.key === 'size')?.max ?? BRUSH_SIZE.max);
+      tool.setOpt('size', Math.max(1, Math.min(max, v + dir * step)));
     } else tool.setOpt('hardness', Math.round(Math.max(0, Math.min(1, v + dir * 0.25)) * 100) / 100);
   }
 }
@@ -844,12 +848,16 @@ async function start() {
   installCanvasCapture(app); // app.canvasCapture (I.3)
   // the preset store (C): files under <userData>/presets (IndexedDB in the browser build), the 0.4 kinds registered
   try {
-    (await import('./lib/preset-kinds.js')).registerPresetKinds04();
+    const kinds = await import('./lib/preset-kinds.js');
+    kinds.registerPresetKinds04();
+    kinds.registerPresetKinds05(); // 0.5 (S10.5): `brushes` (step 4 of the skeleton) and the other 0.5 kinds
   } catch (err) {
     console.error('Preset kinds failed to load', err);
   }
   app.presets = new PresetStore({ backend: bridge.presets ?? null, onWriteError: (err) => app.reportWriteFailure('presets', err) });
   app.presets.addEventListener('change', (e) => app.emit('presets:changed', e.detail));
+  // 0.5 (S1.3): each painting tool's brush, the `brushes` migration and tool:brush-preset
+  installToolBrush(app);
   registerCoreCommands(app);
   setupStatusbar(app);
   setupHostEvents(app);

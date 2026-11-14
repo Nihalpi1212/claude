@@ -1,0 +1,2522 @@
+{
+ "recordedFrom": "Pigment 0.4.0 (commit 99dbdee) by tests/e2e/record-goldens.spec.mjs; cases and page code in tests/e2e/goldens.mjs",
+ "canvas": {
+  "width": 160,
+  "height": 120
+ },
+ "bases": {
+  "empty": "transparent",
+  "pattern": "rows 0..79 opaque, 90..99 alpha 128, else transparent; r = round(x * 255 / (W - 1)), g = 128 + round(60 * sin(y / 9)), b = 255 - r",
+  "mask": "the layer mask canvas filled #ffffff opaque (reveal all); the stroke targets it with mask: true"
+ },
+ "drive": "new BrushStroke({ target, layer, settings, selection, history: doc.history }); begin(samples[0]); extend(each later sample); then 0.4's StrokeTool.onPointerUp finish: s.smoothing = 0, extend(the last sample), smoothing restored; end()",
+ "sampler": {
+  "clone": "a snapshot of the target canvas before the stroke; sampler = (tctx, lx, ly, w, h) => tctx.drawImage(snapshot, Math.round(lx + offset.x), Math.round(ly + offset.y), w, h, 0, 0, w, h)"
+ },
+ "selection": {
+  "ellipse": "Selection.fromEllipse(W, H, rect) (antialiased), passed as the stroke's selection"
+ },
+ "png": "straight RGBA of the target's getImageData after end(), encoded by shared/pixels/png.js encodeRgba8; decode with decodePng + toRgba8",
+ "dabs": "dabs.json: { [case id]: [{ x, y, pressure, size: effectiveSize(pressure), flow }] } in call order, stroke-canvas px",
+ "cases": [
+  {
+   "id": "hard-line",
+   "what": "hard 20 px line",
+   "base": "empty",
+   "settings": {
+    "size": 20,
+    "hardness": 1,
+    "opacity": 1,
+    "flow": 1,
+    "smoothing": 0.2,
+    "spacing": 0.12,
+    "pressureSize": true,
+    "pressureOpacity": false,
+    "blend": "normal",
+    "angle": 0,
+    "roundness": 1,
+    "color": "#d02040",
+    "mode": "paint",
+    "maskValue": 1,
+    "lockTransparency": false,
+    "antialias": true,
+    "label": "Brush"
+   },
+   "samples": [
+    {
+     "x": 20,
+     "y": 60
+    },
+    {
+     "x": 26.735,
+     "y": 60
+    },
+    {
+     "x": 29.553,
+     "y": 60
+    },
+    {
+     "x": 33.38,
+     "y": 60
+    },
+    {
+     "x": 40.865,
+     "y": 60
+    },
+    {
+     "x": 46.397,
+     "y": 60
+    },
+    {
+     "x": 48.775,
+     "y": 60
+    },
+    {
+     "x": 53.918,
+     "y": 60
+    },
+    {
+     "x": 61.504,
+     "y": 60
+    },
+    {
+     "x": 65.694,
+     "y": 60
+    },
+    {
+     "x": 68.318,
+     "y": 60
+    },
+    {
+     "x": 74.739,
+     "y": 60
+    },
+    {
+     "x": 81.75,
+     "y": 60
+    },
+    {
+     "x": 84.81,
+     "y": 60
+    },
+    {
+     "x": 88.299,
+     "y": 60
+    },
+    {
+     "x": 95.628,
+     "y": 60
+    },
+    {
+     "x": 101.539,
+     "y": 60
+    },
+    {
+     "x": 103.975,
+     "y": 60
+    },
+    {
+     "x": 108.725,
+     "y": 60
+    },
+    {
+     "x": 116.353,
+     "y": 60
+    },
+    {
+     "x": 120.926,
+     "y": 60
+    },
+    {
+     "x": 123.408,
+     "y": 60
+    },
+    {
+     "x": 129.484,
+     "y": 60
+    },
+    {
+     "x": 136.725,
+     "y": 60
+    },
+    {
+     "x": 140,
+     "y": 60
+    }
+   ],
+   "png": "hard-line.png",
+   "dirty": {
+    "x": 8,
+    "y": 48,
+    "width": 145,
+    "height": 25
+   },
+   "dabCount": 51
+  },
+  {
+   "id": "soft-s-curve",
+   "what": "soft 40 px S curve, flow 0.5, opacity 0.8",
+   "base": "empty",
+   "settings": {
+    "size": 40,
+    "hardness": 0,
+    "opacity": 0.8,
+    "flow": 0.5,
+    "smoothing": 0.2,
+    "spacing": 0.12,
+    "pressureSize": true,
+    "pressureOpacity": false,
+    "blend": "normal",
+    "angle": 0,
+    "roundness": 1,
+    "color": "#d02040",
+    "mode": "paint",
+    "maskValue": 1,
+    "lockTransparency": false,
+    "antialias": true,
+    "label": "Brush"
+   },
+   "samples": [
+    {
+     "x": 20,
+     "y": 60
+    },
+    {
+     "x": 23,
+     "y": 55.307
+    },
+    {
+     "x": 26,
+     "y": 50.729
+    },
+    {
+     "x": 29,
+     "y": 46.38
+    },
+    {
+     "x": 32,
+     "y": 42.366
+    },
+    {
+     "x": 35,
+     "y": 38.787
+    },
+    {
+     "x": 38,
+     "y": 35.729
+    },
+    {
+     "x": 41,
+     "y": 33.27
+    },
+    {
+     "x": 44,
+     "y": 31.468
+    },
+    {
+     "x": 47,
+     "y": 30.369
+    },
+    {
+     "x": 50,
+     "y": 30
+    },
+    {
+     "x": 53,
+     "y": 30.369
+    },
+    {
+     "x": 56,
+     "y": 31.468
+    },
+    {
+     "x": 59,
+     "y": 33.27
+    },
+    {
+     "x": 62,
+     "y": 35.729
+    },
+    {
+     "x": 65,
+     "y": 38.787
+    },
+    {
+     "x": 68,
+     "y": 42.366
+    },
+    {
+     "x": 71,
+     "y": 46.38
+    },
+    {
+     "x": 74,
+     "y": 50.729
+    },
+    {
+     "x": 77,
+     "y": 55.307
+    },
+    {
+     "x": 80,
+     "y": 60
+    },
+    {
+     "x": 83,
+     "y": 64.693
+    },
+    {
+     "x": 86,
+     "y": 69.271
+    },
+    {
+     "x": 89,
+     "y": 73.62
+    },
+    {
+     "x": 92,
+     "y": 77.634
+    },
+    {
+     "x": 95,
+     "y": 81.213
+    },
+    {
+     "x": 98,
+     "y": 84.271
+    },
+    {
+     "x": 101,
+     "y": 86.73
+    },
+    {
+     "x": 104,
+     "y": 88.532
+    },
+    {
+     "x": 107,
+     "y": 89.631
+    },
+    {
+     "x": 110,
+     "y": 90
+    },
+    {
+     "x": 113,
+     "y": 89.631
+    },
+    {
+     "x": 116,
+     "y": 88.532
+    },
+    {
+     "x": 119,
+     "y": 86.73
+    },
+    {
+     "x": 122,
+     "y": 84.271
+    },
+    {
+     "x": 125,
+     "y": 81.213
+    },
+    {
+     "x": 128,
+     "y": 77.634
+    },
+    {
+     "x": 131,
+     "y": 73.62
+    },
+    {
+     "x": 134,
+     "y": 69.271
+    },
+    {
+     "x": 137,
+     "y": 64.693
+    },
+    {
+     "x": 140,
+     "y": 60
+    }
+   ],
+   "png": "soft-s-curve.png",
+   "dirty": {
+    "x": -2,
+    "y": 8,
+    "width": 163,
+    "height": 104
+   },
+   "dabCount": 37
+  },
+  {
+   "id": "angle-roundness",
+   "what": "angle 45, roundness 0.3",
+   "base": "empty",
+   "settings": {
+    "size": 30,
+    "hardness": 0.8,
+    "opacity": 1,
+    "flow": 1,
+    "smoothing": 0.2,
+    "spacing": 0.12,
+    "pressureSize": true,
+    "pressureOpacity": false,
+    "blend": "normal",
+    "angle": 45,
+    "roundness": 0.3,
+    "color": "#d02040",
+    "mode": "paint",
+    "maskValue": 1,
+    "lockTransparency": false,
+    "antialias": true,
+    "label": "Brush"
+   },
+   "samples": [
+    {
+     "x": 20,
+     "y": 30
+    },
+    {
+     "x": 28.082,
+     "y": 34.041
+    },
+    {
+     "x": 31.463,
+     "y": 35.732
+    },
+    {
+     "x": 36.056,
+     "y": 38.028
+    },
+    {
+     "x": 45.038,
+     "y": 42.519
+    },
+    {
+     "x": 51.677,
+     "y": 45.838
+    },
+    {
+     "x": 54.53,
+     "y": 47.265
+    },
+    {
+     "x": 60.702,
+     "y": 50.351
+    },
+    {
+     "x": 69.804,
+     "y": 54.902
+    },
+    {
+     "x": 74.833,
+     "y": 57.417
+    },
+    {
+     "x": 77.981,
+     "y": 58.991
+    },
+    {
+     "x": 85.687,
+     "y": 62.844
+    },
+    {
+     "x": 94.1,
+     "y": 67.05
+    },
+    {
+     "x": 97.772,
+     "y": 68.886
+    },
+    {
+     "x": 101.959,
+     "y": 70.98
+    },
+    {
+     "x": 110.754,
+     "y": 75.377
+    },
+    {
+     "x": 117.846,
+     "y": 78.923
+    },
+    {
+     "x": 120.77,
+     "y": 80.385
+    },
+    {
+     "x": 126.47,
+     "y": 83.235
+    },
+    {
+     "x": 135.624,
+     "y": 87.812
+    },
+    {
+     "x": 140,
+     "y": 90
+    }
+   ],
+   "png": "angle-roundness.png",
+   "dirty": {
+    "x": 3,
+    "y": 13,
+    "width": 154,
+    "height": 94
+   },
+   "dabCount": 38
+  },
+  {
+   "id": "pencil",
+   "what": "Pencil 3 px (0.4 PencilTool overrides)",
+   "base": "empty",
+   "aliased": true,
+   "settings": {
+    "size": 3,
+    "hardness": 1,
+    "opacity": 1,
+    "flow": 1,
+    "smoothing": 0,
+    "spacing": 0.12,
+    "pressureSize": false,
+    "pressureOpacity": false,
+    "blend": "normal",
+    "angle": 0,
+    "roundness": 1,
+    "color": "#d02040",
+    "mode": "paint",
+    "maskValue": 1,
+    "lockTransparency": false,
+    "antialias": false,
+    "label": "Pencil"
+   },
+   "samples": [
+    {
+     "x": 15,
+     "y": 100
+    },
+    {
+     "x": 20.837,
+     "y": 96.408
+    },
+    {
+     "x": 23.279,
+     "y": 94.905
+    },
+    {
+     "x": 26.596,
+     "y": 92.864
+    },
+    {
+     "x": 33.083,
+     "y": 88.872
+    },
+    {
+     "x": 37.878,
+     "y": 85.921
+    },
+    {
+     "x": 39.939,
+     "y": 84.653
+    },
+    {
+     "x": 44.396,
+     "y": 81.91
+    },
+    {
+     "x": 50.97,
+     "y": 77.865
+    },
+    {
+     "x": 54.602,
+     "y": 75.63
+    },
+    {
+     "x": 56.875,
+     "y": 74.231
+    },
+    {
+     "x": 62.441,
+     "y": 70.806
+    },
+    {
+     "x": 68.516,
+     "y": 67.067
+    },
+    {
+     "x": 71.169,
+     "y": 65.435
+    },
+    {
+     "x": 74.193,
+     "y": 63.574
+    },
+    {
+     "x": 80.545,
+     "y": 59.665
+    },
+    {
+     "x": 85.667,
+     "y": 56.513
+    },
+    {
+     "x": 87.778,
+     "y": 55.213
+    },
+    {
+     "x": 91.895,
+     "y": 52.68
+    },
+    {
+     "x": 98.506,
+     "y": 48.612
+    },
+    {
+     "x": 102.469,
+     "y": 46.173
+    },
+    {
+     "x": 104.62,
+     "y": 44.849
+    },
+    {
+     "x": 109.886,
+     "y": 41.608
+    },
+    {
+     "x": 116.161,
+     "y": 37.747
+    },
+    {
+     "x": 119.062,
+     "y": 35.962
+    },
+    {
+     "x": 121.823,
+     "y": 34.263
+    },
+    {
+     "x": 127.994,
+     "y": 30.465
+    },
+    {
+     "x": 133.426,
+     "y": 27.122
+    },
+    {
+     "x": 135.638,
+     "y": 25.761
+    },
+    {
+     "x": 139.419,
+     "y": 23.434
+    },
+    {
+     "x": 145,
+     "y": 20
+    }
+   ],
+   "png": "pencil.png",
+   "dirty": {
+    "x": 11,
+    "y": 16,
+    "width": 138,
+    "height": 88
+   },
+   "dabCount": 306
+  },
+  {
+   "id": "soft-eraser",
+   "what": "soft Eraser on the pattern",
+   "base": "pattern",
+   "settings": {
+    "size": 30,
+    "hardness": 0,
+    "opacity": 1,
+    "flow": 1,
+    "smoothing": 0.2,
+    "spacing": 0.12,
+    "pressureSize": true,
+    "pressureOpacity": false,
+    "blend": "normal",
+    "angle": 0,
+    "roundness": 1,
+    "color": "#d02040",
+    "mode": "erase",
+    "maskValue": 1,
+    "lockTransparency": false,
+    "antialias": true,
+    "label": "Eraser"
+   },
+   "samples": [
+    {
+     "x": 20,
+     "y": 40
+    },
+    {
+     "x": 27.348,
+     "y": 43.368
+    },
+    {
+     "x": 30.421,
+     "y": 44.776
+    },
+    {
+     "x": 34.596,
+     "y": 46.69
+    },
+    {
+     "x": 42.761,
+     "y": 50.432
+    },
+    {
+     "x": 48.797,
+     "y": 53.199
+    },
+    {
+     "x": 51.391,
+     "y": 54.388
+    },
+    {
+     "x": 57.002,
+     "y": 56.959
+    },
+    {
+     "x": 65.277,
+     "y": 60.752
+    },
+    {
+     "x": 69.848,
+     "y": 62.847
+    },
+    {
+     "x": 72.71,
+     "y": 64.159
+    },
+    {
+     "x": 79.716,
+     "y": 67.37
+    },
+    {
+     "x": 87.363,
+     "y": 70.875
+    },
+    {
+     "x": 90.702,
+     "y": 72.405
+    },
+    {
+     "x": 94.508,
+     "y": 74.15
+    },
+    {
+     "x": 102.504,
+     "y": 77.814
+    },
+    {
+     "x": 108.951,
+     "y": 80.769
+    },
+    {
+     "x": 111.609,
+     "y": 81.988
+    },
+    {
+     "x": 116.791,
+     "y": 84.363
+    },
+    {
+     "x": 125.113,
+     "y": 88.177
+    },
+    {
+     "x": 130.101,
+     "y": 90.463
+    },
+    {
+     "x": 132.809,
+     "y": 91.704
+    },
+    {
+     "x": 140,
+     "y": 95
+    }
+   ],
+   "png": "soft-eraser.png",
+   "dirty": {
+    "x": 3,
+    "y": 23,
+    "width": 152,
+    "height": 88
+   },
+   "dabCount": 37
+  },
+  {
+   "id": "mask-black",
+   "what": "black on a layer mask",
+   "base": "mask",
+   "target": "mask",
+   "settings": {
+    "size": 24,
+    "hardness": 0.8,
+    "opacity": 1,
+    "flow": 1,
+    "smoothing": 0.2,
+    "spacing": 0.12,
+    "pressureSize": true,
+    "pressureOpacity": false,
+    "blend": "normal",
+    "angle": 0,
+    "roundness": 1,
+    "color": "#000000",
+    "mode": "mask",
+    "maskValue": 0,
+    "lockTransparency": false,
+    "antialias": true,
+    "label": "Brush"
+   },
+   "samples": [
+    {
+     "x": 20,
+     "y": 60
+    },
+    {
+     "x": 24,
+     "y": 54.802
+    },
+    {
+     "x": 28,
+     "y": 49.832
+    },
+    {
+     "x": 32,
+     "y": 45.305
+    },
+    {
+     "x": 36,
+     "y": 41.421
+    },
+    {
+     "x": 40,
+     "y": 38.349
+    },
+    {
+     "x": 44,
+     "y": 36.224
+    },
+    {
+     "x": 48,
+     "y": 35.137
+    },
+    {
+     "x": 52,
+     "y": 35.137
+    },
+    {
+     "x": 56,
+     "y": 36.224
+    },
+    {
+     "x": 60,
+     "y": 38.349
+    },
+    {
+     "x": 64,
+     "y": 41.421
+    },
+    {
+     "x": 68,
+     "y": 45.305
+    },
+    {
+     "x": 72,
+     "y": 49.832
+    },
+    {
+     "x": 76,
+     "y": 54.802
+    },
+    {
+     "x": 80,
+     "y": 60
+    },
+    {
+     "x": 84,
+     "y": 65.198
+    },
+    {
+     "x": 88,
+     "y": 70.168
+    },
+    {
+     "x": 92,
+     "y": 74.695
+    },
+    {
+     "x": 96,
+     "y": 78.579
+    },
+    {
+     "x": 100,
+     "y": 81.651
+    },
+    {
+     "x": 104,
+     "y": 83.776
+    },
+    {
+     "x": 108,
+     "y": 84.863
+    },
+    {
+     "x": 112,
+     "y": 84.863
+    },
+    {
+     "x": 116,
+     "y": 83.776
+    },
+    {
+     "x": 120,
+     "y": 81.651
+    },
+    {
+     "x": 124,
+     "y": 78.579
+    },
+    {
+     "x": 128,
+     "y": 74.695
+    },
+    {
+     "x": 132,
+     "y": 70.168
+    },
+    {
+     "x": 136,
+     "y": 65.198
+    },
+    {
+     "x": 140,
+     "y": 60
+    }
+   ],
+   "png": "mask-black.png",
+   "dirty": {
+    "x": 6,
+    "y": 21,
+    "width": 147,
+    "height": 78
+   },
+   "dabCount": 56
+  },
+  {
+   "id": "pressure-size",
+   "what": "pressure ramp 0.1 to 1 with pressureSize",
+   "base": "empty",
+   "settings": {
+    "size": 30,
+    "hardness": 0.8,
+    "opacity": 1,
+    "flow": 1,
+    "smoothing": 0.2,
+    "spacing": 0.12,
+    "pressureSize": true,
+    "pressureOpacity": false,
+    "blend": "normal",
+    "angle": 0,
+    "roundness": 1,
+    "color": "#d02040",
+    "mode": "paint",
+    "maskValue": 1,
+    "lockTransparency": false,
+    "antialias": true,
+    "label": "Brush"
+   },
+   "samples": [
+    {
+     "x": 20,
+     "y": 60,
+     "pressure": 0.1
+    },
+    {
+     "x": 26.735,
+     "y": 60,
+     "pressure": 0.138
+    },
+    {
+     "x": 29.553,
+     "y": 60,
+     "pressure": 0.175
+    },
+    {
+     "x": 33.38,
+     "y": 60,
+     "pressure": 0.213
+    },
+    {
+     "x": 40.865,
+     "y": 60,
+     "pressure": 0.25
+    },
+    {
+     "x": 46.397,
+     "y": 60,
+     "pressure": 0.288
+    },
+    {
+     "x": 48.775,
+     "y": 60,
+     "pressure": 0.325
+    },
+    {
+     "x": 53.918,
+     "y": 60,
+     "pressure": 0.363
+    },
+    {
+     "x": 61.504,
+     "y": 60,
+     "pressure": 0.4
+    },
+    {
+     "x": 65.694,
+     "y": 60,
+     "pressure": 0.438
+    },
+    {
+     "x": 68.318,
+     "y": 60,
+     "pressure": 0.475
+    },
+    {
+     "x": 74.739,
+     "y": 60,
+     "pressure": 0.513
+    },
+    {
+     "x": 81.75,
+     "y": 60,
+     "pressure": 0.55
+    },
+    {
+     "x": 84.81,
+     "y": 60,
+     "pressure": 0.588
+    },
+    {
+     "x": 88.299,
+     "y": 60,
+     "pressure": 0.625
+    },
+    {
+     "x": 95.628,
+     "y": 60,
+     "pressure": 0.663
+    },
+    {
+     "x": 101.539,
+     "y": 60,
+     "pressure": 0.7
+    },
+    {
+     "x": 103.975,
+     "y": 60,
+     "pressure": 0.738
+    },
+    {
+     "x": 108.725,
+     "y": 60,
+     "pressure": 0.775
+    },
+    {
+     "x": 116.353,
+     "y": 60,
+     "pressure": 0.813
+    },
+    {
+     "x": 120.926,
+     "y": 60,
+     "pressure": 0.85
+    },
+    {
+     "x": 123.408,
+     "y": 60,
+     "pressure": 0.888
+    },
+    {
+     "x": 129.484,
+     "y": 60,
+     "pressure": 0.925
+    },
+    {
+     "x": 136.725,
+     "y": 60,
+     "pressure": 0.963
+    },
+    {
+     "x": 140,
+     "y": 60,
+     "pressure": 1
+    }
+   ],
+   "png": "pressure-size.png",
+   "dirty": {
+    "x": 16,
+    "y": 43,
+    "width": 140,
+    "height": 35
+   },
+   "dabCount": 77
+  },
+  {
+   "id": "pressure-opacity",
+   "what": "pressure ramp 0.1 to 1 with pressureOpacity (0.4 scales the flow)",
+   "base": "empty",
+   "settings": {
+    "size": 30,
+    "hardness": 0.8,
+    "opacity": 1,
+    "flow": 1,
+    "smoothing": 0.2,
+    "spacing": 0.12,
+    "pressureSize": false,
+    "pressureOpacity": true,
+    "blend": "normal",
+    "angle": 0,
+    "roundness": 1,
+    "color": "#d02040",
+    "mode": "paint",
+    "maskValue": 1,
+    "lockTransparency": false,
+    "antialias": true,
+    "label": "Brush"
+   },
+   "samples": [
+    {
+     "x": 20,
+     "y": 60,
+     "pressure": 0.1
+    },
+    {
+     "x": 26.735,
+     "y": 60,
+     "pressure": 0.138
+    },
+    {
+     "x": 29.553,
+     "y": 60,
+     "pressure": 0.175
+    },
+    {
+     "x": 33.38,
+     "y": 60,
+     "pressure": 0.213
+    },
+    {
+     "x": 40.865,
+     "y": 60,
+     "pressure": 0.25
+    },
+    {
+     "x": 46.397,
+     "y": 60,
+     "pressure": 0.288
+    },
+    {
+     "x": 48.775,
+     "y": 60,
+     "pressure": 0.325
+    },
+    {
+     "x": 53.918,
+     "y": 60,
+     "pressure": 0.363
+    },
+    {
+     "x": 61.504,
+     "y": 60,
+     "pressure": 0.4
+    },
+    {
+     "x": 65.694,
+     "y": 60,
+     "pressure": 0.438
+    },
+    {
+     "x": 68.318,
+     "y": 60,
+     "pressure": 0.475
+    },
+    {
+     "x": 74.739,
+     "y": 60,
+     "pressure": 0.513
+    },
+    {
+     "x": 81.75,
+     "y": 60,
+     "pressure": 0.55
+    },
+    {
+     "x": 84.81,
+     "y": 60,
+     "pressure": 0.588
+    },
+    {
+     "x": 88.299,
+     "y": 60,
+     "pressure": 0.625
+    },
+    {
+     "x": 95.628,
+     "y": 60,
+     "pressure": 0.663
+    },
+    {
+     "x": 101.539,
+     "y": 60,
+     "pressure": 0.7
+    },
+    {
+     "x": 103.975,
+     "y": 60,
+     "pressure": 0.738
+    },
+    {
+     "x": 108.725,
+     "y": 60,
+     "pressure": 0.775
+    },
+    {
+     "x": 116.353,
+     "y": 60,
+     "pressure": 0.813
+    },
+    {
+     "x": 120.926,
+     "y": 60,
+     "pressure": 0.85
+    },
+    {
+     "x": 123.408,
+     "y": 60,
+     "pressure": 0.888
+    },
+    {
+     "x": 129.484,
+     "y": 60,
+     "pressure": 0.925
+    },
+    {
+     "x": 136.725,
+     "y": 60,
+     "pressure": 0.963
+    },
+    {
+     "x": 140,
+     "y": 60,
+     "pressure": 1
+    }
+   ],
+   "png": "pressure-opacity.png",
+   "dirty": {
+    "x": 3,
+    "y": 43,
+    "width": 153,
+    "height": 35
+   },
+   "dabCount": 34
+  },
+  {
+   "id": "multiply",
+   "what": "Multiply on the pattern",
+   "base": "pattern",
+   "settings": {
+    "size": 30,
+    "hardness": 0.6,
+    "opacity": 1,
+    "flow": 1,
+    "smoothing": 0.2,
+    "spacing": 0.12,
+    "pressureSize": true,
+    "pressureOpacity": false,
+    "blend": "multiply",
+    "angle": 0,
+    "roundness": 1,
+    "color": "#40c060",
+    "mode": "paint",
+    "maskValue": 1,
+    "lockTransparency": false,
+    "antialias": true,
+    "label": "Brush"
+   },
+   "samples": [
+    {
+     "x": 20,
+     "y": 60
+    },
+    {
+     "x": 23.333,
+     "y": 53.922
+    },
+    {
+     "x": 26.667,
+     "y": 48.029
+    },
+    {
+     "x": 30,
+     "y": 42.5
+    },
+    {
+     "x": 33.333,
+     "y": 37.502
+    },
+    {
+     "x": 36.667,
+     "y": 33.188
+    },
+    {
+     "x": 40,
+     "y": 29.689
+    },
+    {
+     "x": 43.333,
+     "y": 27.111
+    },
+    {
+     "x": 46.667,
+     "y": 25.532
+    },
+    {
+     "x": 50,
+     "y": 25
+    },
+    {
+     "x": 53.333,
+     "y": 25.532
+    },
+    {
+     "x": 56.667,
+     "y": 27.111
+    },
+    {
+     "x": 60,
+     "y": 29.689
+    },
+    {
+     "x": 63.333,
+     "y": 33.188
+    },
+    {
+     "x": 66.667,
+     "y": 37.502
+    },
+    {
+     "x": 70,
+     "y": 42.5
+    },
+    {
+     "x": 73.333,
+     "y": 48.029
+    },
+    {
+     "x": 76.667,
+     "y": 53.922
+    },
+    {
+     "x": 80,
+     "y": 60
+    },
+    {
+     "x": 83.333,
+     "y": 66.078
+    },
+    {
+     "x": 86.667,
+     "y": 71.971
+    },
+    {
+     "x": 90,
+     "y": 77.5
+    },
+    {
+     "x": 93.333,
+     "y": 82.498
+    },
+    {
+     "x": 96.667,
+     "y": 86.812
+    },
+    {
+     "x": 100,
+     "y": 90.311
+    },
+    {
+     "x": 103.333,
+     "y": 92.889
+    },
+    {
+     "x": 106.667,
+     "y": 94.468
+    },
+    {
+     "x": 110,
+     "y": 95
+    },
+    {
+     "x": 113.333,
+     "y": 94.468
+    },
+    {
+     "x": 116.667,
+     "y": 92.889
+    },
+    {
+     "x": 120,
+     "y": 90.311
+    },
+    {
+     "x": 123.333,
+     "y": 86.812
+    },
+    {
+     "x": 126.667,
+     "y": 82.498
+    },
+    {
+     "x": 130,
+     "y": 77.5
+    },
+    {
+     "x": 133.333,
+     "y": 71.971
+    },
+    {
+     "x": 136.667,
+     "y": 66.078
+    },
+    {
+     "x": 140,
+     "y": 60
+    }
+   ],
+   "png": "multiply.png",
+   "dirty": {
+    "x": 3,
+    "y": 8,
+    "width": 153,
+    "height": 104
+   },
+   "dabCount": 53
+  },
+  {
+   "id": "vivid-light",
+   "what": "Vivid Light on the pattern (a per-pixel blend)",
+   "base": "pattern",
+   "settings": {
+    "size": 30,
+    "hardness": 0.6,
+    "opacity": 0.9,
+    "flow": 1,
+    "smoothing": 0.2,
+    "spacing": 0.12,
+    "pressureSize": true,
+    "pressureOpacity": false,
+    "blend": "vivid-light",
+    "angle": 0,
+    "roundness": 1,
+    "color": "#e0a020",
+    "mode": "paint",
+    "maskValue": 1,
+    "lockTransparency": false,
+    "antialias": true,
+    "label": "Brush"
+   },
+   "samples": [
+    {
+     "x": 20,
+     "y": 60
+    },
+    {
+     "x": 23.333,
+     "y": 53.922
+    },
+    {
+     "x": 26.667,
+     "y": 48.029
+    },
+    {
+     "x": 30,
+     "y": 42.5
+    },
+    {
+     "x": 33.333,
+     "y": 37.502
+    },
+    {
+     "x": 36.667,
+     "y": 33.188
+    },
+    {
+     "x": 40,
+     "y": 29.689
+    },
+    {
+     "x": 43.333,
+     "y": 27.111
+    },
+    {
+     "x": 46.667,
+     "y": 25.532
+    },
+    {
+     "x": 50,
+     "y": 25
+    },
+    {
+     "x": 53.333,
+     "y": 25.532
+    },
+    {
+     "x": 56.667,
+     "y": 27.111
+    },
+    {
+     "x": 60,
+     "y": 29.689
+    },
+    {
+     "x": 63.333,
+     "y": 33.188
+    },
+    {
+     "x": 66.667,
+     "y": 37.502
+    },
+    {
+     "x": 70,
+     "y": 42.5
+    },
+    {
+     "x": 73.333,
+     "y": 48.029
+    },
+    {
+     "x": 76.667,
+     "y": 53.922
+    },
+    {
+     "x": 80,
+     "y": 60
+    },
+    {
+     "x": 83.333,
+     "y": 66.078
+    },
+    {
+     "x": 86.667,
+     "y": 71.971
+    },
+    {
+     "x": 90,
+     "y": 77.5
+    },
+    {
+     "x": 93.333,
+     "y": 82.498
+    },
+    {
+     "x": 96.667,
+     "y": 86.812
+    },
+    {
+     "x": 100,
+     "y": 90.311
+    },
+    {
+     "x": 103.333,
+     "y": 92.889
+    },
+    {
+     "x": 106.667,
+     "y": 94.468
+    },
+    {
+     "x": 110,
+     "y": 95
+    },
+    {
+     "x": 113.333,
+     "y": 94.468
+    },
+    {
+     "x": 116.667,
+     "y": 92.889
+    },
+    {
+     "x": 120,
+     "y": 90.311
+    },
+    {
+     "x": 123.333,
+     "y": 86.812
+    },
+    {
+     "x": 126.667,
+     "y": 82.498
+    },
+    {
+     "x": 130,
+     "y": 77.5
+    },
+    {
+     "x": 133.333,
+     "y": 71.971
+    },
+    {
+     "x": 136.667,
+     "y": 66.078
+    },
+    {
+     "x": 140,
+     "y": 60
+    }
+   ],
+   "png": "vivid-light.png",
+   "dirty": {
+    "x": 3,
+    "y": 8,
+    "width": 153,
+    "height": 104
+   },
+   "dabCount": 53
+  },
+  {
+   "id": "lock-transparency",
+   "what": "Lock Transparency on the pattern",
+   "base": "pattern",
+   "settings": {
+    "size": 36,
+    "hardness": 0.5,
+    "opacity": 1,
+    "flow": 1,
+    "smoothing": 0.2,
+    "spacing": 0.12,
+    "pressureSize": true,
+    "pressureOpacity": false,
+    "blend": "normal",
+    "angle": 0,
+    "roundness": 1,
+    "color": "#2040e0",
+    "mode": "paint",
+    "maskValue": 1,
+    "lockTransparency": true,
+    "antialias": true,
+    "label": "Brush"
+   },
+   "samples": [
+    {
+     "x": 80,
+     "y": 10
+    },
+    {
+     "x": 80,
+     "y": 17.072
+    },
+    {
+     "x": 80,
+     "y": 20.03
+    },
+    {
+     "x": 80,
+     "y": 24.049
+    },
+    {
+     "x": 80,
+     "y": 31.908
+    },
+    {
+     "x": 80,
+     "y": 37.717
+    },
+    {
+     "x": 80,
+     "y": 40.214
+    },
+    {
+     "x": 80,
+     "y": 45.614
+    },
+    {
+     "x": 80,
+     "y": 53.579
+    },
+    {
+     "x": 80,
+     "y": 57.979
+    },
+    {
+     "x": 80,
+     "y": 60.733
+    },
+    {
+     "x": 80,
+     "y": 67.476
+    },
+    {
+     "x": 80,
+     "y": 74.837
+    },
+    {
+     "x": 80,
+     "y": 78.05
+    },
+    {
+     "x": 80,
+     "y": 81.714
+    },
+    {
+     "x": 80,
+     "y": 89.41
+    },
+    {
+     "x": 80,
+     "y": 95.616
+    },
+    {
+     "x": 80,
+     "y": 98.174
+    },
+    {
+     "x": 80,
+     "y": 103.162
+    },
+    {
+     "x": 80,
+     "y": 111.171
+    },
+    {
+     "x": 80,
+     "y": 115
+    }
+   ],
+   "png": "lock-transparency.png",
+   "dirty": {
+    "x": 60,
+    "y": -10,
+    "width": 41,
+    "height": 144
+   },
+   "dabCount": 25
+  },
+  {
+   "id": "clone-stamp",
+   "what": "Clone Stamp sampler, offset (-40, 0)",
+   "base": "pattern",
+   "settings": {
+    "size": 28,
+    "hardness": 0.7,
+    "opacity": 1,
+    "flow": 1,
+    "smoothing": 0.2,
+    "spacing": 0.12,
+    "pressureSize": true,
+    "pressureOpacity": false,
+    "blend": "normal",
+    "angle": 0,
+    "roundness": 1,
+    "color": "#d02040",
+    "mode": "paint",
+    "maskValue": 1,
+    "lockTransparency": false,
+    "antialias": true,
+    "label": "Clone stamp"
+   },
+   "sampler": {
+    "kind": "clone",
+    "offset": {
+     "x": -40,
+     "y": 0
+    }
+   },
+   "samples": [
+    {
+     "x": 70,
+     "y": 20
+    },
+    {
+     "x": 75.239,
+     "y": 23.742
+    },
+    {
+     "x": 77.43,
+     "y": 25.307
+    },
+    {
+     "x": 80.407,
+     "y": 27.433
+    },
+    {
+     "x": 86.228,
+     "y": 31.591
+    },
+    {
+     "x": 90.531,
+     "y": 34.665
+    },
+    {
+     "x": 92.381,
+     "y": 35.986
+    },
+    {
+     "x": 96.381,
+     "y": 38.843
+    },
+    {
+     "x": 102.281,
+     "y": 43.058
+    },
+    {
+     "x": 105.54,
+     "y": 45.386
+    },
+    {
+     "x": 107.58,
+     "y": 46.843
+    },
+    {
+     "x": 112.575,
+     "y": 50.411
+    },
+    {
+     "x": 118.027,
+     "y": 54.305
+    },
+    {
+     "x": 120.408,
+     "y": 56.005
+    },
+    {
+     "x": 123.122,
+     "y": 57.944
+    },
+    {
+     "x": 128.822,
+     "y": 62.016
+    },
+    {
+     "x": 133.419,
+     "y": 65.299
+    },
+    {
+     "x": 135.314,
+     "y": 66.653
+    },
+    {
+     "x": 140,
+     "y": 70
+    }
+   ],
+   "png": "clone-stamp.png",
+   "dirty": {
+    "x": 54,
+    "y": 4,
+    "width": 101,
+    "height": 81
+   },
+   "dabCount": 26
+  },
+  {
+   "id": "spacing-0.5",
+   "what": "spacing 0.5",
+   "base": "empty",
+   "settings": {
+    "size": 24,
+    "hardness": 0.9,
+    "opacity": 1,
+    "flow": 1,
+    "smoothing": 0.2,
+    "spacing": 0.5,
+    "pressureSize": true,
+    "pressureOpacity": false,
+    "blend": "normal",
+    "angle": 0,
+    "roundness": 1,
+    "color": "#d02040",
+    "mode": "paint",
+    "maskValue": 1,
+    "lockTransparency": false,
+    "antialias": true,
+    "label": "Brush"
+   },
+   "samples": [
+    {
+     "x": 20,
+     "y": 60
+    },
+    {
+     "x": 26.735,
+     "y": 60
+    },
+    {
+     "x": 29.553,
+     "y": 60
+    },
+    {
+     "x": 33.38,
+     "y": 60
+    },
+    {
+     "x": 40.865,
+     "y": 60
+    },
+    {
+     "x": 46.397,
+     "y": 60
+    },
+    {
+     "x": 48.775,
+     "y": 60
+    },
+    {
+     "x": 53.918,
+     "y": 60
+    },
+    {
+     "x": 61.504,
+     "y": 60
+    },
+    {
+     "x": 65.694,
+     "y": 60
+    },
+    {
+     "x": 68.318,
+     "y": 60
+    },
+    {
+     "x": 74.739,
+     "y": 60
+    },
+    {
+     "x": 81.75,
+     "y": 60
+    },
+    {
+     "x": 84.81,
+     "y": 60
+    },
+    {
+     "x": 88.299,
+     "y": 60
+    },
+    {
+     "x": 95.628,
+     "y": 60
+    },
+    {
+     "x": 101.539,
+     "y": 60
+    },
+    {
+     "x": 103.975,
+     "y": 60
+    },
+    {
+     "x": 108.725,
+     "y": 60
+    },
+    {
+     "x": 116.353,
+     "y": 60
+    },
+    {
+     "x": 120.926,
+     "y": 60
+    },
+    {
+     "x": 123.408,
+     "y": 60
+    },
+    {
+     "x": 129.484,
+     "y": 60
+    },
+    {
+     "x": 136.725,
+     "y": 60
+    },
+    {
+     "x": 140,
+     "y": 60
+    }
+   ],
+   "png": "spacing-0.5.png",
+   "dirty": {
+    "x": 6,
+    "y": 46,
+    "width": 149,
+    "height": 29
+   },
+   "dabCount": 11
+  },
+  {
+   "id": "airbrush-soft-65",
+   "what": "\"Airbrush Soft 65 (low flow)\" (BUILTIN_BRUSHES id airbrush)",
+   "base": "empty",
+   "preset": "airbrush",
+   "settings": {
+    "size": 65,
+    "hardness": 0,
+    "opacity": 1,
+    "flow": 0.12,
+    "smoothing": 0.2,
+    "spacing": 0.08,
+    "pressureSize": true,
+    "pressureOpacity": false,
+    "blend": "normal",
+    "angle": 0,
+    "roundness": 1,
+    "color": "#d02040",
+    "mode": "paint",
+    "maskValue": 1,
+    "lockTransparency": false,
+    "antialias": true,
+    "label": "Brush"
+   },
+   "samples": [
+    {
+     "x": 20,
+     "y": 60
+    },
+    {
+     "x": 23,
+     "y": 56.871
+    },
+    {
+     "x": 26,
+     "y": 53.82
+    },
+    {
+     "x": 29,
+     "y": 50.92
+    },
+    {
+     "x": 32,
+     "y": 48.244
+    },
+    {
+     "x": 35,
+     "y": 45.858
+    },
+    {
+     "x": 38,
+     "y": 43.82
+    },
+    {
+     "x": 41,
+     "y": 42.18
+    },
+    {
+     "x": 44,
+     "y": 40.979
+    },
+    {
+     "x": 47,
+     "y": 40.246
+    },
+    {
+     "x": 50,
+     "y": 40
+    },
+    {
+     "x": 53,
+     "y": 40.246
+    },
+    {
+     "x": 56,
+     "y": 40.979
+    },
+    {
+     "x": 59,
+     "y": 42.18
+    },
+    {
+     "x": 62,
+     "y": 43.82
+    },
+    {
+     "x": 65,
+     "y": 45.858
+    },
+    {
+     "x": 68,
+     "y": 48.244
+    },
+    {
+     "x": 71,
+     "y": 50.92
+    },
+    {
+     "x": 74,
+     "y": 53.82
+    },
+    {
+     "x": 77,
+     "y": 56.871
+    },
+    {
+     "x": 80,
+     "y": 60
+    },
+    {
+     "x": 83,
+     "y": 63.129
+    },
+    {
+     "x": 86,
+     "y": 66.18
+    },
+    {
+     "x": 89,
+     "y": 69.08
+    },
+    {
+     "x": 92,
+     "y": 71.756
+    },
+    {
+     "x": 95,
+     "y": 74.142
+    },
+    {
+     "x": 98,
+     "y": 76.18
+    },
+    {
+     "x": 101,
+     "y": 77.82
+    },
+    {
+     "x": 104,
+     "y": 79.021
+    },
+    {
+     "x": 107,
+     "y": 79.754
+    },
+    {
+     "x": 110,
+     "y": 80
+    },
+    {
+     "x": 113,
+     "y": 79.754
+    },
+    {
+     "x": 116,
+     "y": 79.021
+    },
+    {
+     "x": 119,
+     "y": 77.82
+    },
+    {
+     "x": 122,
+     "y": 76.18
+    },
+    {
+     "x": 125,
+     "y": 74.142
+    },
+    {
+     "x": 128,
+     "y": 71.756
+    },
+    {
+     "x": 131,
+     "y": 69.08
+    },
+    {
+     "x": 134,
+     "y": 66.18
+    },
+    {
+     "x": 137,
+     "y": 63.129
+    },
+    {
+     "x": 140,
+     "y": 60
+    }
+   ],
+   "png": "airbrush-soft-65.png",
+   "dirty": {
+    "x": -15,
+    "y": 5,
+    "width": 188,
+    "height": 110
+   },
+   "dabCount": 29
+  },
+  {
+   "id": "selection-clip",
+   "what": "clipped by an elliptical selection",
+   "base": "empty",
+   "settings": {
+    "size": 30,
+    "hardness": 0.5,
+    "opacity": 1,
+    "flow": 1,
+    "smoothing": 0.2,
+    "spacing": 0.12,
+    "pressureSize": true,
+    "pressureOpacity": false,
+    "blend": "normal",
+    "angle": 0,
+    "roundness": 1,
+    "color": "#d02040",
+    "mode": "paint",
+    "maskValue": 1,
+    "lockTransparency": false,
+    "antialias": true,
+    "label": "Brush"
+   },
+   "selection": {
+    "kind": "ellipse",
+    "rect": {
+     "x": 30,
+     "y": 20,
+     "width": 100,
+     "height": 80
+    }
+   },
+   "samples": [
+    {
+     "x": 10,
+     "y": 60
+    },
+    {
+     "x": 17.254,
+     "y": 60
+    },
+    {
+     "x": 20.288,
+     "y": 60
+    },
+    {
+     "x": 24.409,
+     "y": 60
+    },
+    {
+     "x": 32.47,
+     "y": 60
+    },
+    {
+     "x": 38.428,
+     "y": 60
+    },
+    {
+     "x": 40.989,
+     "y": 60
+    },
+    {
+     "x": 46.527,
+     "y": 60
+    },
+    {
+     "x": 54.696,
+     "y": 60
+    },
+    {
+     "x": 59.209,
+     "y": 60
+    },
+    {
+     "x": 62.034,
+     "y": 60
+    },
+    {
+     "x": 68.95,
+     "y": 60
+    },
+    {
+     "x": 76.5,
+     "y": 60
+    },
+    {
+     "x": 79.795,
+     "y": 60
+    },
+    {
+     "x": 83.553,
+     "y": 60
+    },
+    {
+     "x": 91.446,
+     "y": 60
+    },
+    {
+     "x": 97.811,
+     "y": 60
+    },
+    {
+     "x": 100.435,
+     "y": 60
+    },
+    {
+     "x": 105.55,
+     "y": 60
+    },
+    {
+     "x": 113.765,
+     "y": 60
+    },
+    {
+     "x": 118.689,
+     "y": 60
+    },
+    {
+     "x": 121.363,
+     "y": 60
+    },
+    {
+     "x": 127.906,
+     "y": 60
+    },
+    {
+     "x": 135.704,
+     "y": 60
+    },
+    {
+     "x": 139.307,
+     "y": 60
+    },
+    {
+     "x": 142.738,
+     "y": 60
+    },
+    {
+     "x": 150,
+     "y": 60
+    }
+   ],
+   "png": "selection-clip.png",
+   "dirty": {
+    "x": -7,
+    "y": 43,
+    "width": 171,
+    "height": 35
+   },
+   "dabCount": 39
+  }
+ ],
+ "toolSettings": {
+  "what": "tool.strokeSettings(point, layer, tool.strokeTarget(layer)) on a raster layer (no mask, not locked) after app.tools.setOpt of `options`, with the Brushes panel's 0.4 angle/roundness hook installed; functions as \"[function]\", objects as \"[object]\"",
+  "foreground": "#d02040",
+  "background": "#20a040",
+  "spacing": 0.2,
+  "point": {
+   "x": 60,
+   "y": 40,
+   "pressure": 1
+  },
+  "tools": [
+   {
+    "id": "brush",
+    "tool": "brush",
+    "options": {
+     "size": 30,
+     "hardness": 0.6,
+     "opacity": 0.7,
+     "flow": 0.8,
+     "smoothing": 0.3,
+     "pressureSize": false,
+     "pressureOpacity": true,
+     "blend": "multiply",
+     "angle": 30,
+     "roundness": 0.5,
+     "lockAlpha": false
+    },
+    "settings": {
+     "size": 30,
+     "hardness": 0.6,
+     "opacity": 0.7,
+     "flow": 0.8,
+     "smoothing": 0.3,
+     "spacing": 0.2,
+     "pressureSize": false,
+     "pressureOpacity": true,
+     "blend": "multiply",
+     "angle": 30,
+     "roundness": 0.5,
+     "color": "#d02040",
+     "mode": "paint",
+     "maskValue": 1,
+     "lockTransparency": false,
+     "label": "Brush"
+    }
+   },
+   {
+    "id": "pencil",
+    "tool": "pencil",
+    "options": {
+     "size": 5,
+     "opacity": 0.9,
+     "blend": "screen",
+     "autoErase": false
+    },
+    "settings": {
+     "size": 5,
+     "hardness": 1,
+     "opacity": 0.9,
+     "flow": 1,
+     "smoothing": 0,
+     "spacing": 0.2,
+     "pressureSize": false,
+     "pressureOpacity": false,
+     "blend": "screen",
+     "angle": 0,
+     "roundness": 1,
+     "color": "#d02040",
+     "mode": "paint",
+     "maskValue": 1,
+     "antialias": false,
+     "label": "Pencil"
+    }
+   },
+   {
+    "id": "eraser-brush",
+    "tool": "eraser",
+    "options": {
+     "size": 26,
+     "hardness": 0.4,
+     "opacity": 0.6,
+     "flow": 0.7,
+     "smoothing": 0.1,
+     "pressureSize": true,
+     "eraseToHistory": false,
+     "mode": "brush"
+    },
+    "settings": {
+     "size": 26,
+     "hardness": 0.4,
+     "opacity": 0.6,
+     "flow": 0.7,
+     "smoothing": 0.1,
+     "spacing": 0.2,
+     "pressureSize": true,
+     "pressureOpacity": false,
+     "blend": "normal",
+     "angle": 0,
+     "roundness": 1,
+     "color": "#d02040",
+     "mode": "erase",
+     "maskValue": 1,
+     "label": "Eraser"
+    }
+   },
+   {
+    "id": "eraser-pencil",
+    "tool": "eraser",
+    "options": {
+     "size": 26,
+     "hardness": 0.4,
+     "opacity": 0.6,
+     "flow": 0.7,
+     "smoothing": 0.1,
+     "pressureSize": true,
+     "eraseToHistory": false,
+     "mode": "pencil"
+    },
+    "settings": {
+     "size": 26,
+     "hardness": 1,
+     "opacity": 0.6,
+     "flow": 1,
+     "smoothing": 0,
+     "spacing": 0.2,
+     "pressureSize": true,
+     "pressureOpacity": false,
+     "blend": "normal",
+     "angle": 0,
+     "roundness": 1,
+     "color": "#d02040",
+     "mode": "erase",
+     "maskValue": 1,
+     "label": "Eraser",
+     "antialias": false
+    }
+   },
+   {
+    "id": "eraser-block",
+    "tool": "eraser",
+    "options": {
+     "size": 26,
+     "hardness": 0.4,
+     "opacity": 0.6,
+     "flow": 0.7,
+     "smoothing": 0.1,
+     "pressureSize": true,
+     "eraseToHistory": false,
+     "mode": "block"
+    },
+    "settings": {
+     "size": 16,
+     "hardness": 1,
+     "opacity": 0.6,
+     "flow": 1,
+     "smoothing": 0,
+     "spacing": 0.2,
+     "pressureSize": false,
+     "pressureOpacity": false,
+     "blend": "normal",
+     "angle": 0,
+     "roundness": 1,
+     "color": "#d02040",
+     "mode": "erase",
+     "maskValue": 1,
+     "label": "Eraser",
+     "antialias": false
+    }
+   },
+   {
+    "id": "clone",
+    "tool": "clone",
+    "options": {
+     "size": 22,
+     "hardness": 0.5,
+     "opacity": 0.8,
+     "flow": 0.9,
+     "smoothing": 0.25,
+     "pressureSize": false,
+     "pressureOpacity": false,
+     "aligned": true,
+     "sampleAll": false
+    },
+    "settings": {
+     "size": 22,
+     "hardness": 0.5,
+     "opacity": 0.8,
+     "flow": 0.9,
+     "smoothing": 0.25,
+     "spacing": 0.2,
+     "pressureSize": false,
+     "pressureOpacity": false,
+     "blend": "normal",
+     "angle": 0,
+     "roundness": 1,
+     "color": "#d02040",
+     "mode": "paint",
+     "maskValue": 1,
+     "label": "Clone stamp",
+     "sampler": "[function]"
+    }
+   }
+  ]
+ }
+}

@@ -1,0 +1,269 @@
+{
+ "width": 120,
+ "height": 90,
+ "channels": 3,
+ "bitsPerChannel": 8,
+ "colorMode": 3,
+ "imageResources": {
+  "resolutionInfo": {
+   "horizontalResolution": 72,
+   "horizontalResolutionUnit": "PPI",
+   "widthUnit": "Inches",
+   "verticalResolution": 72,
+   "verticalResolutionUnit": "PPI",
+   "heightUnit": "Inches"
+  }
+ },
+ "children": [
+  {
+   "top": 0,
+   "left": 0,
+   "bottom": 90,
+   "right": 120,
+   "blendMode": "normal",
+   "opacity": 1,
+   "clipping": false,
+   "transparencyProtected": false,
+   "hidden": false,
+   "name": "Background",
+   "protected": {
+    "transparency": false,
+    "composite": false,
+    "position": false
+   },
+   "fillOpacity": 1,
+   "linkGroup": 0,
+   "linkGroupEnabled": true
+  },
+  {
+   "top": 22,
+   "left": 2,
+   "bottom": 67,
+   "right": 96,
+   "blendMode": "normal",
+   "opacity": 1,
+   "clipping": false,
+   "transparencyProtected": false,
+   "hidden": false,
+   "name": "Point",
+   "text": {
+    "transform": [
+     1,
+     0,
+     0,
+     1,
+     10,
+     49.2
+    ],
+    "left": null,
+    "top": null,
+    "right": null,
+    "bottom": null,
+    "text": "Golden",
+    "index": 0,
+    "gridding": "none",
+    "antiAlias": "sharp",
+    "orientation": "horizontal",
+    "warp": {
+     "style": "none",
+     "value": 0,
+     "perspective": 0,
+     "perspectiveOther": 0,
+     "rotate": "horizontal"
+    },
+    "useFractionalGlyphWidths": true,
+    "superscriptSize": 0.583,
+    "superscriptPosition": 0.333,
+    "subscriptSize": 0.583,
+    "subscriptPosition": 0.333,
+    "smallCapSize": 0.7,
+    "shapeType": "point",
+    "pointBase": [
+     0,
+     0
+    ],
+    "paragraphStyle": {
+     "justification": "left",
+     "firstLineIndent": 0,
+     "startIndent": 0,
+     "endIndent": 0,
+     "spaceBefore": 0,
+     "spaceAfter": 0,
+     "autoHyphenate": true,
+     "hyphenatedWordSize": 6,
+     "preHyphen": 2,
+     "postHyphen": 2,
+     "consecutiveHyphens": 8,
+     "zone": 36,
+     "wordSpacing": [
+      0.8,
+      1,
+      1.33
+     ],
+     "letterSpacing": [
+      0,
+      0,
+      0
+     ],
+     "glyphSpacing": [
+      1,
+      1,
+      1
+     ],
+     "autoLeading": 1.2,
+     "leadingType": 0,
+     "hanging": false,
+     "burasagari": false,
+     "kinsokuOrder": 0,
+     "everyLineComposer": false
+    },
+    "style": {
+     "font": {
+      "name": "Arial",
+      "script": 0,
+      "type": 0,
+      "synthetic": 0
+     },
+     "fontSize": 24,
+     "fauxBold": false,
+     "fauxItalic": false,
+     "autoLeading": true,
+     "leading": 28.8,
+     "tracking": 0,
+     "autoKerning": true,
+     "kerning": 0,
+     "underline": false,
+     "fillColor": {
+      "r": 31.99995,
+      "g": 31.99995,
+      "b": 95.99985000000001
+     }
+    }
+   },
+   "protected": {
+    "transparency": false,
+    "composite": false,
+    "position": false
+   },
+   "fillOpacity": 1,
+   "linkGroup": 0,
+   "linkGroupEnabled": true
+  },
+  {
+   "top": 45,
+   "left": 5,
+   "bottom": 89,
+   "right": 105,
+   "blendMode": "normal",
+   "opacity": 1,
+   "clipping": false,
+   "transparencyProtected": false,
+   "hidden": false,
+   "name": "Box",
+   "text": {
+    "transform": [
+     1,
+     0,
+     0,
+     1,
+     10,
+     61.2
+    ],
+    "left": null,
+    "top": null,
+    "right": null,
+    "bottom": null,
+    "text": "Box text that wraps",
+    "index": 0,
+    "gridding": "none",
+    "antiAlias": "sharp",
+    "orientation": "horizontal",
+    "warp": {
+     "style": "none",
+     "value": 0,
+     "perspective": 0,
+     "perspectiveOther": 0,
+     "rotate": "horizontal"
+    },
+    "useFractionalGlyphWidths": true,
+    "superscriptSize": 0.583,
+    "superscriptPosition": 0.333,
+    "subscriptSize": 0.583,
+    "subscriptPosition": 0.333,
+    "smallCapSize": 0.7,
+    "shapeType": "box",
+    "boxBounds": [
+     0,
+     -11.2,
+     90,
+     22.8
+    ],
+    "paragraphStyle": {
+     "justification": "center",
+     "firstLineIndent": 0,
+     "startIndent": 0,
+     "endIndent": 0,
+     "spaceBefore": 0,
+     "spaceAfter": 0,
+     "autoHyphenate": true,
+     "hyphenatedWordSize": 6,
+     "preHyphen": 2,
+     "postHyphen": 2,
+     "consecutiveHyphens": 8,
+     "zone": 36,
+     "wordSpacing": [
+      0.8,
+      1,
+      1.33
+     ],
+     "letterSpacing": [
+      0,
+      0,
+      0
+     ],
+     "glyphSpacing": [
+      1,
+      1,
+      1
+     ],
+     "autoLeading": 1.2,
+     "leadingType": 0,
+     "hanging": false,
+     "burasagari": false,
+     "kinsokuOrder": 0,
+     "everyLineComposer": false
+    },
+    "style": {
+     "font": {
+      "name": "Arial",
+      "script": 0,
+      "type": 0,
+      "synthetic": 0
+     },
+     "fontSize": 14,
+     "fauxBold": false,
+     "fauxItalic": false,
+     "autoLeading": true,
+     "leading": 16.8,
+     "tracking": 50,
+     "autoKerning": true,
+     "kerning": 0,
+     "underline": false,
+     "fillColor": {
+      "r": 0,
+      "g": 0,
+      "b": 0
+     }
+    }
+   },
+   "protected": {
+    "transparency": false,
+    "composite": false,
+    "position": false
+   },
+   "fillOpacity": 1,
+   "linkGroup": 0,
+   "linkGroupEnabled": true
+  }
+ ]
+}

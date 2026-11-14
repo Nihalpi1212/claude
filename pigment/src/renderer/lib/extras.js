@@ -404,6 +404,7 @@ function keySection(id, title, order, fields) {
       const values = Object.fromEntries(keys.map((k) => [k, s[k] ?? DEFAULT_SETTINGS[k]]));
       for (const k of ['checkerboardLight', 'checkerboardDark']) if (k in values) values[k] = normHex(values[k]);
       if ('checkerboardSize' in values) values.checkerboardSize = Number(values.checkerboardSize);
+      if (values.cursorStyle === 'dot') values.cursorStyle = 'standard'; // 0.4's Dot is 0.5's Standard (S3.2)
       return values;
     },
     write(values, s) {
@@ -427,7 +428,8 @@ const BUILTIN_PREF_SECTIONS = [
     { key: 'zoomWithWheel', label: 'Zoom with the scroll wheel (Ctrl/Cmd + wheel always zooms)', type: 'checkbox', span: true },
   ]),
   keySection('tools', 'Cursors and tools', 20, [
-    { key: 'cursorStyle', label: 'Painting cursor', type: 'select', options: [['outline', 'Brush outline'], ['precise', 'Precise (crosshair)'], ['dot', 'Dot']] },
+    // S3.2: Photoshop's four painting cursors (lib/brush-cursor.js draws them)
+    { key: 'cursorStyle', label: 'Painting cursor', type: 'select', options: [['standard', 'Standard'], ['precise', 'Precise'], ['outline', 'Normal Brush Tip'], ['full', 'Full Size Brush Tip']] },
     { key: 'transformInterpolation', label: 'Transform interpolation', type: 'select', options: [['bicubic', 'Bicubic'], ['bilinear', 'Bilinear'], ['nearest', 'Nearest neighbor']] },
     { key: 'resampleMethod', label: 'Image Size resampling', type: 'select', options: [['bicubic', 'Bicubic (smooth gradients)'], ['lanczos', 'Lanczos (sharper)'], ['bilinear', 'Bilinear'], ['area', 'Area average (reduction)'], ['nearest', 'Nearest neighbor (hard edges)']] },
     { key: 'transformProportional', label: 'Keep proportions while transforming (Shift releases)', type: 'checkbox', span: true },
