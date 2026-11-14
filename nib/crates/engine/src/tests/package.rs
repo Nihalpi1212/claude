@@ -814,8 +814,7 @@ fn package_keeps_distinct_linked_documents_with_colliding_file_names() {
     assert_eq!(result["links"], 4, "{result}");
     assert_eq!(result["missingLinks"], json!([]));
     let folder = dir.0.join("delivery/poster Folder");
-    let packaged: Vec<_> =
-        result["files"].as_array().unwrap().iter().filter_map(Value::as_str).filter(|name| name.ends_with(".nibart")).collect();
+    let packaged: Vec<_> = result["files"].as_array().unwrap().iter().filter_map(Value::as_str).filter(|name| name.ends_with(".nibart")).collect();
     assert_eq!(packaged.len(), 3, "both nested documents must be retained: {packaged:?}");
     std::fs::remove_dir_all(dir.0.join("art1")).unwrap();
     std::fs::remove_dir_all(dir.0.join("art2")).unwrap();
@@ -883,12 +882,8 @@ fn identical_stale_paths_in_different_nested_documents_keep_separate_assets() {
     }
     assert_eq!(actual.len(), 2, "stale source paths must not cause asset deduplication");
     assert_ne!(actual[0], actual[1], "different original illustrations must keep different pixels");
-    for filename in result["files"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter_map(Value::as_str)
-        .filter(|name| name.starts_with("Links/") && name.ends_with(".nibart"))
+    for filename in
+        result["files"].as_array().unwrap().iter().filter_map(Value::as_str).filter(|name| name.starts_with("Links/") && name.ends_with(".nibart"))
     {
         let mut nested = session();
         let opened = open(&mut nested, &folder.join(filename).to_string_lossy());
