@@ -851,7 +851,7 @@ export class TypeTool extends Tool {
     s.editor.open();
     this.syncFromLayer(s.layer);
     if (this.app.tools.active === this) this.app.tools.renderOptions();
-    this.app.emit('type:session', { layer: s.layer });
+    this.app.emit('type:session', { layer: s.layer, isNew: !!s.isNew });
     this.app.syncUiState?.();
     s.doc.view.invalidate();
   }

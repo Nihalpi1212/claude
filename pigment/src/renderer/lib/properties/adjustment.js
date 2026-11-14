@@ -125,13 +125,22 @@ function render(layer, doc, { app, keep }) {
   let frame = null;
   // Only a run of this section's own continuous edits (a drag, typing) merges into one entry: not into a Reset or
   // another entry on top, and an eyedropper pick, a preset or Auto (`discrete`) is a step of its own
-  let lastEdit = null, discrete = false;
+  // A run that ends where it began (a value typed and taken back with Escape) leaves no entry: `run` is the history
+  // as it was before the run's entry and the params it started from
+  let lastEdit = null, discrete = false, run = null;
   const commit = (params, label = `Edit ${layer.name}`) => {
     if (app.doc !== doc || doc.active !== layer) return;
     endPrevious();
     const top = doc.history.entries[doc.history.index];
+    const start = { mark: doc.history.mark(), params: JSON.stringify(layer.params ?? null) };
     setLayerProps(app, layer, { params: clone(params) }, label, { merge: !discrete && !!lastEdit && top === lastEdit });
-    lastEdit = discrete ? null : doc.history.entries[doc.history.index];
+    const now = doc.history.entries[doc.history.index];
+    if (now !== top) run = discrete ? null : start;
+    else if (run && JSON.stringify(layer.params ?? null) === run.params) {
+      doc.history.rollback(run.mark); // the layer already holds the params of before the run
+      run = null;
+    }
+    lastEdit = discrete || now !== doc.history.entries[doc.history.index] ? null : now;
     discrete = false;
     state.params = layer.params; // our own edit: keep the editor (and the user's drag) alive
     frame?.paramsChanged?.(params);

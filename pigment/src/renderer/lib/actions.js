@@ -738,6 +738,17 @@ class ActionsEngine {
   }
 
   /**
+   * A Type-tool session opened (or closed: no layer). The type commands run inside a session that makes a new text
+   * layer (Faux Bold, Size Up…) are part of the Make Text Layer step its commit records: the steps already there are
+   * remembered, so onLayerMade can tell the session's own ones.
+   */
+  onTypeSession({ layer = null, isNew = false } = {}) {
+    const rec = this.recording;
+    if (!rec || !layer || this.playing || this.frames.length) return;
+    rec.typeSession = isNew ? { layer, before: new Set(rec.action.steps) } : null;
+  }
+
+  /**
    * The Type tool committed a new text layer, or a shape tool drew a new shape layer (their 'layer:made' event):
    * recorded as Photoshop's Make Text Layer / Make Shape Layer, the layer's whole description (text and its
    * character and paragraph formats; geometry, fill and stroke), so later steps on that layer replay.
@@ -759,6 +770,19 @@ class ActionsEngine {
     delete desc.id;
     if (entry) rec.seen.add(entry);
     this.noteLayers(d);
+    // the type commands of the session that made this layer are in its description: as steps of their own they
+    // would replay before the layer exists (and refuse), or toggle its formatting off again after it
+    const ts = rec.typeSession;
+    if (ts?.layer === layer) {
+      rec.typeSession = null;
+      const own = (s) => !ts.before.has(s) && /^type:/.test(s.command);
+      const steps = rec.action.steps;
+      for (let i = steps.length - 1; i >= 0; i--) {
+        if (!own(steps[i])) continue;
+        rec.marks.delete(steps[i].id);
+        steps.splice(i, 1);
+      }
+    }
     const label = `Make ${layer.type === 'text' ? 'Text' : 'Shape'} Layer “${layer.name}”`;
     const at = entry ? d.history.entries.indexOf(entry) : -1;
     this.appendRecorded(M.makeStep('actions:make-layer', { layer: desc }, label), at >= 0 && at <= d.history.index ? { doc: d, entry } : null);
@@ -1084,6 +1108,7 @@ export function install(app) {
   app.on('history:changed', (d) => engine.onHistoryChanged(d));
   app.on('color:changed', (c) => engine.onColorChanged(c ?? {}));
   app.on('layer:activated', (e) => engine.onLayerActivated(e));
+  app.on('type:session', (e) => engine.onTypeSession(e ?? {}));
   app.on('layer:made', (e) => engine.onLayerMade(e));
   app.on('doc:opened', (d) => {
     engine.recording?.lastSelection.set(d, currentSelection(d));

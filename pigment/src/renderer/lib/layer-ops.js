@@ -1,10 +1,11 @@
 // Layer commands (Layer menu, Layers panel buttons, shortcuts). Structural changes record a
 // snapshot of the tree so undo restores it exactly; layer pixels are never mutated by structural
 // operations (merges create new layers), so the snapshots stay valid.
-import { RasterLayer, GroupLayer, FillLayer, AdjustmentLayer, createCanvas, copyCanvas, intersectRect, unionRect, BLEND_LABELS, newId, isDefaultBlending } from './document.js';
+import { RasterLayer, GroupLayer, FillLayer, AdjustmentLayer, createCanvas, copyCanvas, intersectRect, unionRect, BLEND_LABELS, newId, isDefaultBlending, effectiveBlending } from './document.js';
 import { Compositor } from './compositor.js';
 import { contentBounds } from '../../shared/pixels/core.js';
-import { isDefaultBlendIf } from '../../shared/pixels/blend-if.js';
+import { isDefaultBlendIf, restrictsChannels } from '../../shared/pixels/blend-if.js';
+import { hasEnabledStyles } from '../../shared/pixels/styles.js';
 import { offsetEach, positionLocked } from './layer-move.js';
 import { Selection } from './selection.js';
 import { maskCanvasFor } from './mask-render.js';
@@ -458,8 +459,21 @@ export function install(app) {
       const base = d.active;
       const clipped = clippedAbove(base);
       if (!clipped.length) return;
+      // an adjustment layer has no pixels to merge into: the merge would turn it into an empty layer and its
+      // adjustment would stop acting on the layers below (Merge Down refuses an adjustment layer below the same way)
+      if (base.type === 'adjustment') return app.dialogs.toast('Could not merge the clipping mask: the base layer is an adjustment layer', { kind: 'error', timeout: 2400 });
       if (pixelsLocked(base)) return app.dialogs.toast('Could not merge the clipping mask: the base layer is locked', { kind: 'error', timeout: 2400 });
-      return mergeLayers([base, ...clipped], base.name, 'Merge clipping mask', { keepBase: true });
+      // the base's knockout, Blend If and channels stay live on the result (mergeLayers keepBlending). They act on the
+      // whole clipping group already, so the picture stays the same, except where they also reach what the merge
+      // renders in: the exterior effects (which Blend If leaves alone), clipped layers blended outside the group, and
+      // a knockout under reduced fill
+      const bl = effectiveBlending(base);
+      const blendIf = !isDefaultBlendIf(bl.blendIf);
+      const outside = bl.clippedAsGroup === false && (blendIf || restrictsChannels(bl.channels));
+      const changes = outside || (blendIf && hasEnabledStyles(base.styles)) || (bl.knockout !== 'none' && (base.fillOpacity ?? 1) < 1);
+      mergeLayers([base, ...clipped], base.name, 'Merge clipping mask', { keepBase: true, keepBlending: true });
+      // (a refused merge, such as one with hidden layers, leaves the base active)
+      if (changes && d.active !== base) app.dialogs.toast('The merged layer keeps the Blend If, knockout and channel settings of the base, which now also act on the clipped layers and effects, so the image can change', { timeout: 4000 });
     },
   };
   /** A pixel lock (or Lock All) on the layer a merge would write into. */
@@ -1203,7 +1217,7 @@ export function install(app) {
     return merged;
   }
 
-  function mergeLayers(layers, name, label, { keepBase = false } = {}) {
+  function mergeLayers(layers, name, label, { keepBase = false, keepBlending = false } = {}) {
     const d = doc();
     const order = d.layers();
     layers = layers.filter(Boolean).sort((a, b) => order.indexOf(a) - order.indexOf(b));
@@ -1222,8 +1236,13 @@ export function install(app) {
     const intoBackground = isBackground(base);
     if (intoBackground) name = base.name;
     const keep = keepBase ? { blend: base.blend, opacity: base.opacity } : { blend: 'normal', opacity: 1 };
+    // keepBlending (Merge Clipping Mask): knockout, Blend If and the channels work against what lies below, which a
+    // render against transparency cannot see: left out of the render and kept live on the result, as rasterizeLayer
+    // does (the options the render consumes, such as Blend Clipped Layers as Group, stay in)
+    const blending = keepBase && keepBlending && !isDefaultBlending(base.blending) ? base.blending : null;
     if (keepBase) {
       Object.assign(base, { blend: 'normal', opacity: 1 });
+      if (blending) base.blending = { ...blending, knockout: 'none', blendIf: null, channels: null };
       base.touch();
     }
     let flat;
@@ -1232,13 +1251,14 @@ export function install(app) {
     } finally {
       if (keepBase) {
         Object.assign(base, keep);
+        if (blending) base.blending = blending;
         base.touch();
       }
     }
     // clipped layers merged among themselves stay clipped to their base; merging onto the base releases the clip
     // a result that carries on as the lowest layer (Merge Down, Merge Visible: `name` is that layer's) keeps its
     // locks too: the Background made by Background from Layer still cannot move or turn transparent afterwards
-    const merged = new RasterLayer({ name: name ?? top.name, canvas: flat, x: 0, y: 0, clip: !intoBackground && layers.every((l) => l.clip), blend: keep.blend, opacity: keep.opacity, ...(name === base.name ? { locked: { ...base.locked } } : {}) });
+    const merged = new RasterLayer({ name: name ?? top.name, canvas: flat, x: 0, y: 0, clip: !intoBackground && layers.every((l) => l.clip), blend: keep.blend, opacity: keep.opacity, blending: blending ? clone(blending) : null, ...(name === base.name ? { locked: { ...base.locked } } : {}) });
     structural(app, label, () => {
       const parent = intoBackground ? d.root : top.parent;
       const index = intoBackground ? 0 : parent.children.indexOf(top) + 1;

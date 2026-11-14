@@ -866,8 +866,11 @@ export function install(app) {
           ]
         : [{ label: 'Convert to Smart Object', onSelect: run('layer:smart-convert') }]),
       { type: 'separator' },
-      ...(layer.styles ? [{ label: 'Copy Layer Style', onSelect: run('layer:copy-style') }, { label: 'Clear Layer Style', onSelect: run('layer:clear-style') }] : []),
-      { label: 'Paste Layer Style', onSelect: run('layer:paste-style'), disabled: !app.copiedStyle },
+      // a layer style is the effects with the blending options: the commands decide (a layer with only a blend mode
+      // can be copied; the Background, adjustment layers and Lock All take no pasted style), as in Layer > Layer Style
+      { label: 'Copy Layer Style', disabled: !app.commands.isEnabled('layer:copy-style'), onSelect: run('layer:copy-style') },
+      { label: 'Paste Layer Style', disabled: !app.commands.isEnabled('layer:paste-style'), onSelect: run('layer:paste-style') },
+      { label: 'Clear Layer Style', disabled: !app.commands.isEnabled('layer:clear-style'), onSelect: run('layer:clear-style') },
       { type: 'separator' },
       { label: mergeLabel, disabled: !app.commands.isEnabled('layer:merge'), onSelect: run('layer:merge') },
       { label: 'Merge Visible', onSelect: run('layer:merge-visible') },

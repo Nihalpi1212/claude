@@ -256,7 +256,7 @@ function isNumericInput(el) {
 function stateOf(input) {
   let s = STATE.get(input);
   if (!s) {
-    s = { textMode: false, before: input.value, allSelected: false, ourDirty: false, width: null };
+    s = { textMode: false, before: input.value, allSelected: false, ourDirty: false, width: null, typed: false };
     STATE.set(input, s);
   }
   return s;
@@ -362,6 +362,7 @@ function commit(input) {
   show(input, r, opts);
   s.ourDirty = false;
   s.before = input.value;
+  s.typed = false;
   if (input.value !== before) fire(input, 'input', 'change');
 }
 
@@ -410,9 +411,16 @@ function onKeyDown(e) {
       return;
     case 'Escape':
       // Escape drops what was typed, plain digits as well as an expression: the field shows its value again and
-      // nothing is applied (setting the value also keeps the input's own change event from firing on blur)
+      // nothing is applied (setting the value also keeps the input's own change event from firing on blur).
+      // Typed digits have already reached the field's input listeners, and the owners that apply as you type (dialog
+      // forms, the Properties adjustment editors) applied them: they are told the old value, so they take it back
+      // too (an owner that applies on change only sees its own value again)
       leaveTextMode(input);
-      if (input.value !== s.before) input.value = s.before;
+      if (input.value !== s.before) {
+        input.value = s.before;
+        if (s.typed) fire(input, 'input', 'change');
+      }
+      s.typed = false;
       s.ourDirty = false;
       return;
     case 'ArrowUp':
@@ -454,7 +462,10 @@ function onInput(e) {
   if (!s) return;
   // what is typed in text mode is an expression ("100+"): listeners see the evaluated number when it is committed
   if (s.textMode) e.stopImmediatePropagation();
-  else s.ourDirty = false; // typed by hand: the input's own change event follows
+  else {
+    s.ourDirty = false; // typed by hand: the input's own change event follows
+    s.typed = true; // and the listeners have seen the typed value (Escape tells them the old one again)
+  }
 }
 
 function onChange(e) {
@@ -466,6 +477,7 @@ function onChange(e) {
   else {
     s.ourDirty = false;
     s.before = input.value; // typed digits committed (Enter, Tab, blur)
+    s.typed = false;
   }
 }
 
@@ -475,6 +487,7 @@ function onFocusIn(e) {
   const s = stateOf(input);
   s.before = input.value;
   s.ourDirty = false;
+  s.typed = false;
   // Tab selects the whole text, a click places the caret
   s.allSelected = performance.now() - lastTabAt < 300;
 }
@@ -740,7 +753,10 @@ export function numericField(spec = {}) {
     leaveTextMode(input);
     input.value = display(v);
     const st = STATE.get(input);
-    if (st) st.before = input.value; // what the app holds now is what Escape returns to
+    if (st) {
+      st.before = input.value; // what the app holds now is what Escape returns to
+      st.typed = false;
+    }
     if (!silent) {
       spec.onInput?.(get());
       spec.onChange?.(get());
