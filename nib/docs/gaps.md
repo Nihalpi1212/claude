@@ -837,9 +837,11 @@ macOS cursor delivery (#2292) is narrowed to a native host adapter using the exi
 - **Nib (2026-11-14):** decided: the user's own OpenAI or Google Gemini key, called from the user's
   machine. The core is in `crates/genai` (providers, key storage, Text to Vector Graphic, Generative
   Recolor, Shape Fill, Pattern, Expand and Rewrite Text as engine operations, each one undo step,
-  tested against a mock server); the menus, dialogs, AI Accounts, control methods and MCP tools are
-  specified in [generative-ai.md](generative-ai.md) and not built yet. Concept to Vector and Prompt
-  to Edit are not covered.
+  tested against a mock server), and the interface is built in `crates/ui-egui/src/ai` (the
+  commands in Object › Generative, Edit › Edit Colors and Type, the Generate window, AI Accounts).
+  The control methods, MCP tools and `nib-cli ai` commands are specified in
+  [generative-ai.md](generative-ai.md) and not built yet. Concept to Vector and Prompt to Edit are
+  not covered. Nib's summary: [PARITY.md](PARITY.md#nibs-changes-g18-generative-features).
 - **Estimate:** 30–60 h after that decision.
 
 ## G19 Accessibility

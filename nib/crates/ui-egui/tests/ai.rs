@@ -367,7 +367,7 @@ fn the_key_never_appears_in_what_is_drawn_or_saved() {
     assert_eq!(shows_key(&h), 0, "the field is masked");
     // The field's egui state (whose undo history holds the typed text) is forgotten once the field
     // is empty again, so Undo can't put the key back.
-    let key_field = egui::Id::new("nib-ai-accounts-key");
+    let key_field = egui::Id::unique("nib-ai-accounts-key");
     assert!(egui::TextEdit::load_state(&h.ctx, key_field).is_some(), "the field keeps state while typing");
     h.get_by_role_and_label(Role::Button, "Save Key").click();
     h.run_steps(3);

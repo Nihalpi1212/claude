@@ -87,7 +87,7 @@ pub(crate) fn wipe(s: &mut String) {
 /// of the field) is forgotten whenever the field is empty, so Undo after Save Key can't bring the
 /// key back and closing the dialog leaves no copy in egui's memory.
 pub(crate) fn key_field_id() -> egui::Id {
-    egui::Id::new("nib-ai-accounts-key")
+    egui::Id::unique("nib-ai-accounts-key")
 }
 
 /// Open AI Accounts (`ai.accounts`).

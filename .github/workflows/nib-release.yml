@@ -379,21 +379,25 @@ jobs:
               echo "See [nib/README.md](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_SHA}/nib/README.md)."
             fi
             echo
-            echo "## Downloads"
-            echo
-            echo "| Platform | File |"
-            echo "|---|---|"
-            echo "| macOS 11+ (Apple silicon and Intel) | \`nib-$v-macos-universal.dmg\` (app), \`nib-cli-$v-macos-universal.zip\` (command line) |"
-            echo "| Windows 10/11 x64 | \`nib-$v-windows-x64.msi\` (installer), \`nib-$v-windows-x64-portable.zip\` (no install) |"
-            echo "| Linux x86_64 (glibc 2.35+) | \`nib-$v-linux-x86_64.AppImage\`, \`nib-$v-linux-x86_64.deb\`, \`nib-$v-linux-x86_64.tar.gz\` |"
-            echo
-            echo "\`SHA256SUMS.txt\` lists the SHA-256 of every file (\`sha256sum -c SHA256SUMS.txt --ignore-missing\`)."
-            echo
-            echo "## First launch: these builds are not code-signed"
-            echo
-            echo "- **macOS:** the app is not notarized. Drag Nib to Applications, then right-click (or Control-click) it and choose **Open**, and **Open** again in the dialog. Or run \`xattr -dr com.apple.quarantine /Applications/Nib.app\` once in Terminal."
-            echo "- **Windows:** SmartScreen may say \"Windows protected your PC\". Choose **More info**, then **Run anyway**."
-            echo "- **Linux:** make the AppImage executable (\`chmod +x nib-$v-linux-x86_64.AppImage\`) and run it, or install the \`.deb\` with \`sudo apt install ./nib-$v-linux-x86_64.deb\`."
+            # Notes that carry their own downloads list (a "## Downloads" heading) replace the
+            # generic one and its first-launch steps.
+            if ! { [ -f "$notes" ] && grep -q '^## Downloads' "$notes"; }; then
+              echo "## Downloads"
+              echo
+              echo "| Platform | File |"
+              echo "|---|---|"
+              echo "| macOS 11+ (Apple silicon and Intel) | \`nib-$v-macos-universal.dmg\` (app), \`nib-cli-$v-macos-universal.zip\` (command line) |"
+              echo "| Windows 10/11 x64 | \`nib-$v-windows-x64.msi\` (installer), \`nib-$v-windows-x64-portable.zip\` (no install) |"
+              echo "| Linux x86_64 (glibc 2.35+) | \`nib-$v-linux-x86_64.AppImage\`, \`nib-$v-linux-x86_64.deb\`, \`nib-$v-linux-x86_64.tar.gz\` |"
+              echo
+              echo "\`SHA256SUMS.txt\` lists the SHA-256 of every file (\`sha256sum -c SHA256SUMS.txt --ignore-missing\`)."
+              echo
+              echo "## First launch: these builds are not code-signed"
+              echo
+              echo "- **macOS:** the app is not notarized. Drag Nib to Applications, then right-click (or Control-click) it and choose **Open**, and **Open** again in the dialog. Or run \`xattr -dr com.apple.quarantine /Applications/Nib.app\` once in Terminal."
+              echo "- **Windows:** SmartScreen may say \"Windows protected your PC\". Choose **More info**, then **Run anyway**."
+              echo "- **Linux:** make the AppImage executable (\`chmod +x nib-$v-linux-x86_64.AppImage\`) and run it, or install the \`.deb\` with \`sudo apt install ./nib-$v-linux-x86_64.deb\`."
+            fi
           } >release-body.md
           cat release-body.md
 

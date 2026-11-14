@@ -167,10 +167,7 @@ fn export_all_open_documents_writes_each_to_the_folder_picked() {
     assert_eq!(std::fs::read(out.join(format!("{untitled}.pdf"))).unwrap(), b"keep", "no file is replaced");
     assert!(std::fs::read(out.join("card.pdf")).unwrap().starts_with(b"%PDF"));
     assert_eq!(app.session.active_index(), active, "the active document stays active");
-    assert!(
-        app.session.documents().iter().all(|d| d.path.as_ref().is_none_or(|p| p.ends_with("card.nibart"))),
-        "no document takes a copy's path"
-    );
+    assert!(app.session.documents().iter().all(|d| d.path.as_ref().is_none_or(|p| p.ends_with("card.nibart"))), "no document takes a copy's path");
     assert!(app.ui.status.starts_with("Exported 3 documents"), "{}", app.ui.status);
     // Cancelled: nothing written.
     app.services.pick_folder = Some(Box::new(|| None));

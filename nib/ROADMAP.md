@@ -1,3 +1,41 @@
+# Roadmap
+
+> **This is VectorCraft's roadmap as of the revision Nib imported**
+> (`a47d7eec9120e6487a0049600aa34e22a530013b`, 2026-11-14, VectorCraft 0.24.1; see
+> [`UPSTREAM-REVISION`](UPSTREAM-REVISION)). Everything from "VectorCraft Roadmap" down is upstream's
+> text, kept unchanged so later upstream revisions merge cleanly: its stage, numbers and estimates are
+> VectorCraft's self-assessment, and "VectorCraft" there means the editor Nib is built on. Nib's own
+> plans are in [Nib roadmap](#nib-roadmap) just below; how Nib compares with Illustrator is in
+> [`docs/PARITY.md`](docs/PARITY.md). Links to `AGENTS.md` below mean
+> [`docs/upstream-agents.md`](docs/upstream-agents.md) in Nib.
+
+## Nib roadmap
+
+**0.1.0 (2026-11-14):** the rebrand of VectorCraft 0.24.1 and generative AI with the user's own
+OpenAI or Gemini key (Text to Vector Graphic, Generative Shape Fill, Pattern, Expand, Recolor and
+Rewrite Text). See [`docs/RELEASE-NOTES-0.1.0.md`](docs/RELEASE-NOTES-0.1.0.md).
+
+**0.2 candidates** (not yet scheduled or estimated):
+
+1. **Merge upstream updates:** bring in VectorCraft's later revisions with the procedure in
+   [`docs/FORK.md`](docs/FORK.md#merging-a-later-upstream-revision), and with them its fixes.
+2. **The interaction-fidelity pass** (upstream's G1): every tool's modifiers, cursors and small
+   behaviours checked against Illustrator's public documentation, working with upstream where it
+   does the same.
+3. **More generative features:** Prompt to Edit (change selected art from a prompt), Mockup (place
+   art on a product photo), Concept to Vector; the generative commands on the canvas right-click
+   menu and a Generate field inside Recolor Artwork.
+4. **AI from automation:** the `ai.*` control-protocol methods, MCP tools and `nib-cli ai` commands
+   specified in [`docs/generative-ai.md`](docs/generative-ai.md#control-protocol-and-mcp-next-step).
+5. **Pigment integration:** working together with Pigment, the image editor in the same repository
+   (`pigment/`): moving artwork between the two, and sharing AI provider settings.
+6. **Polish of 0.1.0's known issues:** translations of the AI strings, Nib's own accent colour and
+   screenshots, Stop that also withdraws a request where the provider allows it, a Secret Service key
+   store on Linux, code-signed builds once the project has certificates, and more platforms (ARM64,
+   Flatpak, RPM).
+
+---
+
 # VectorCraft Roadmap
 
 **Stage: alpha** · next: beta, ~13 points (ready for real work ~62% → ~75%, and reliable `.ai` exchange) and ~170–270 h away
