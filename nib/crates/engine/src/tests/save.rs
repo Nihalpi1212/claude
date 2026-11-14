@@ -56,7 +56,7 @@ fn a_confined_save_leaves_out_paths_outside_the_read_root() {
     let mut s = Session::new();
     s.execute("file.new", &json!({"width": 200, "height": 100, "artboards": 2})).unwrap();
     rect(&mut s);
-    let own = path(&outside, "doc.vectorcraft");
+    let own = path(&outside, "doc.nibart");
     s.execute("document.save", &json!({"path": own})).unwrap();
     let person = s.execute("document.save", &json!({"separateArtboards": true})).unwrap();
     let files: Vec<String> = person["files"].as_array().unwrap().iter().map(|f| f.as_str().unwrap().to_string()).collect();
@@ -79,7 +79,7 @@ fn a_confined_save_leaves_out_paths_outside_the_read_root() {
     assert_eq!(run(&mut s, &write_only, "document.save", json!({"path": own}))["path"], json!(own));
     // A save without a path known suggests the document's folder.
     let r = run(&mut s, &write_only, "file.saveCopy", json!({}));
-    assert!(r.get("folder").is_none() && r["name"] == "doc copy.vectorcraft" && r.get("dataBase64").is_some(), "{r}");
+    assert!(r.get("folder").is_none() && r["name"] == "doc copy.nibart" && r.get("dataBase64").is_some(), "{r}");
     assert_eq!(run(&mut s, &both, "file.saveCopy", json!({}))["folder"], json!(hidden));
     let _ = std::fs::remove_dir_all(d);
 }
@@ -99,7 +99,7 @@ fn pathless_save_rejection_hides_document_folder() {
     let mut s = Session::new();
     s.execute("file.new", &json!({"width": 200, "height": 100, "artboards": 2})).unwrap();
     rect(&mut s);
-    let own = path(&outside, "doc.vectorcraft");
+    let own = path(&outside, "doc.nibart");
     s.execute("document.save", &json!({"path": own})).unwrap();
     rect(&mut s);
     let roots = AutomationRoots::new(&[inside.as_path()], &[inside.as_path()]).unwrap();
@@ -108,25 +108,25 @@ fn pathless_save_rejection_hides_document_folder() {
     let mut refused = |id: &str, p: Value| confine(roots.as_ref(), || s.execute(id, &p)).unwrap_err().to_string();
 
     let e = refused("document.save", json!({}));
-    assert_eq!(e, format!("automation path rejected: outside the write root {root}: doc.vectorcraft"));
+    assert_eq!(e, format!("automation path rejected: outside the write root {root}: doc.nibart"));
     let e = refused("document.save", json!({"separateArtboards": true}));
     assert!(e.starts_with(&format!("automation path rejected: outside the write root {root}: ")) && !e.contains(&hidden), "{e}");
     let e = refused("file.revert", json!({}));
-    assert_eq!(e, format!("automation path rejected: outside the read root {root}: doc.vectorcraft"));
+    assert_eq!(e, format!("automation path rejected: outside the read root {root}: doc.nibart"));
     // Given by the client: whole.
     let e = refused("document.save", json!({"path": own}));
     assert_eq!(e, format!("automation path rejected: outside the write root {root}: {own}"));
     // Without read roots, a write refusal still names the file by its file name.
     let write_only = AutomationRoots::new(&[], &[inside.as_path()]).unwrap();
     let e = confine(write_only.as_ref(), || s.execute("document.save", &json!({}))).unwrap_err().to_string();
-    assert_eq!(e, format!("automation path rejected: outside the write root {root}: doc.vectorcraft"));
+    assert_eq!(e, format!("automation path rejected: outside the write root {root}: doc.nibart"));
     assert!(s.doc().unwrap().is_dirty(), "nothing was saved");
     // Read with losses from its own file: the refusal to write over it names the file by its file name.
     let st = s.doc_mut().unwrap();
     st.imported_from = Some(own.clone());
     st.import_losses = vec!["hidden text".into()];
     let e = confine(roots.as_ref(), || s.execute("document.save", &json!({}))).unwrap_err().to_string();
-    assert!(e.starts_with("invalid parameters for `document.save`: doc.vectorcraft is the file this document was read from"), "{e}");
+    assert!(e.starts_with("invalid parameters for `document.save`: doc.nibart is the file this document was read from"), "{e}");
     assert!(!e.contains(&hidden), "{e}");
     let e = confine(roots.as_ref(), || s.execute("document.save", &json!({"path": own}))).unwrap_err().to_string();
     assert!(e.contains(&format!("{own} is the file this document was read from")), "{e}");
@@ -199,7 +199,7 @@ fn a_new_document_offers_the_native_options_used_last() {
     let d = dir("lastnative");
     let mut s = session();
     let opts = json!({"preview": true, "embedProfiles": false, "pdfCompatible": true, "separateArtboards": true, "range": "1"});
-    s.execute("file.saveAs", &json!({"path": path(&d, "a.vectorcraft"), "options": opts})).unwrap();
+    s.execute("file.saveAs", &json!({"path": path(&d, "a.nibart"), "options": opts})).unwrap();
     s.execute("file.new", &json!({"width": 100, "height": 100})).unwrap();
     let o = s.execute("file.formatOptions", &json!({"format": "vectorcraft"})).unwrap();
     let value = |k: &str| o["options"][k]["value"].clone();
@@ -215,7 +215,7 @@ fn a_new_document_offers_the_native_options_used_last() {
 fn another_format_without_a_path_hands_the_bytes_back() {
     let d = dir("otherfmt");
     let mut s = session();
-    let native = path(&d, "a.vectorcraft");
+    let native = path(&d, "a.nibart");
     s.execute("document.save", &json!({"path": native})).unwrap();
     let r = s.execute("document.save", &json!({"format": "svg"})).unwrap();
     assert!(String::from_utf8(b64(&r)).unwrap().starts_with("<?xml"));
@@ -228,16 +228,16 @@ fn another_format_without_a_path_hands_the_bytes_back() {
 fn save_a_copy_keeps_the_path_title_and_modified_state() {
     let d = dir("copy");
     let mut s = session();
-    let native = path(&d, "poster.vectorcraft");
+    let native = path(&d, "poster.nibart");
     s.execute("document.save", &json!({"path": native})).unwrap();
     rect(&mut s);
     let r = s.execute("file.saveCopy", &json!({})).unwrap();
-    assert_eq!((r["name"].as_str(), r["folder"].as_str()), (Some("poster copy.vectorcraft"), Some(d.to_string_lossy().as_ref())));
+    assert_eq!((r["name"].as_str(), r["folder"].as_str()), (Some("poster copy.nibart"), Some(d.to_string_lossy().as_ref())));
     let copy = path(&d, "poster copy.svg");
     s.execute("file.saveCopy", &json!({"path": copy})).unwrap();
     assert!(std::fs::read_to_string(&copy).unwrap().starts_with("<?xml"));
     let st = s.doc().unwrap();
-    assert_eq!((st.path.as_deref(), st.format, st.title()), (Some(native.as_str()), "vectorcraft", "poster.vectorcraft".to_string()));
+    assert_eq!((st.path.as_deref(), st.format, st.title()), (Some(native.as_str()), "vectorcraft", "poster.nibart".to_string()));
     assert!(st.is_dirty(), "a copy leaves the document modified");
     let _ = std::fs::remove_dir_all(d);
 }
@@ -247,7 +247,7 @@ fn revert_reloads_the_saved_file_in_the_same_tab() {
     let d = dir("revert");
     let mut s = session();
     rect(&mut s);
-    let native = path(&d, "a.vectorcraft");
+    let native = path(&d, "a.nibart");
     s.execute("document.save", &json!({"path": native})).unwrap();
     assert!(s.execute("file.revert", &json!({})).is_err(), "nothing to revert");
     s.execute("file.new", &json!({})).unwrap();
@@ -279,7 +279,7 @@ fn revert_reloads_the_saved_file_in_the_same_tab() {
 fn templates_suggest_a_name_in_the_templates_folder_and_open_untitled() {
     let d = dir("tpl");
     let mut s = session();
-    let source = path(&d, "flyer.vectorcraft");
+    let source = path(&d, "flyer.nibart");
     s.execute("document.save", &json!({"path": source})).unwrap();
     s.prefs.templates_folder = path(&d, "Templates");
     let r = s.execute("file.saveAsTemplate", &json!({})).unwrap();
@@ -325,24 +325,24 @@ fn older_native_files_open_converted_and_save_under_a_new_name() {
     let d = dir("converted");
     let legacy = path(&d, "logo.drawcraft");
     std::fs::write(&legacy, old_file(true)).unwrap();
-    let v1 = path(&d, "badge.vectorcraft");
+    let v1 = path(&d, "badge.nibart");
     std::fs::write(&v1, old_file(false)).unwrap();
     let mut s = Session::new();
     s.execute("document.open", &json!({"path": legacy})).unwrap();
     assert_eq!(s.doc().unwrap().title(), "logo [Converted]");
-    // Save doesn't overwrite the old file: it asks for a .vectorcraft name.
+    // Save doesn't overwrite the old file: it asks for a .nibart name.
     let r = s.execute("document.save", &json!({})).unwrap();
-    assert_eq!((r["name"].as_str(), r.get("path")), (Some("logo.vectorcraft"), None));
+    assert_eq!((r["name"].as_str(), r.get("path")), (Some("logo.nibart"), None));
     assert_eq!(std::fs::read(&legacy).unwrap(), old_file(true));
     let r = s.execute("document.open", &json!({"path": v1})).unwrap();
     assert_eq!(r["title"], "badge [Converted]");
-    let saved = path(&d, "badge2.vectorcraft");
+    let saved = path(&d, "badge2.nibart");
     s.execute("file.saveAs", &json!({"path": saved})).unwrap();
-    assert_eq!(s.doc().unwrap().title(), "badge2.vectorcraft");
+    assert_eq!(s.doc().unwrap().title(), "badge2.nibart");
     assert!(!s.doc().unwrap().converted);
     // A current file isn't converted; with the preference off old files open as they are.
     s.execute("document.open", &json!({"path": saved})).unwrap();
-    assert_eq!(s.doc().unwrap().title(), "badge2.vectorcraft");
+    assert_eq!(s.doc().unwrap().title(), "badge2.nibart");
     s.prefs.append_converted = false;
     s.execute("document.open", &json!({"path": legacy})).unwrap();
     assert_eq!(s.doc().unwrap().title(), "logo.drawcraft");
@@ -357,7 +357,7 @@ fn the_saved_view_round_trips_without_dirtying() {
     let view = SavedView { name: String::new(), center: Point::new(40.0, 25.0), zoom: 3.0, rotation: 15.0 };
     s.doc_mut().unwrap().view = Some(view.clone());
     assert!(!s.doc().unwrap().is_dirty(), "the view isn't an edit");
-    let native = path(&d, "v.vectorcraft");
+    let native = path(&d, "v.nibart");
     s.execute("document.save", &json!({"path": native})).unwrap();
     assert_eq!(s.doc().unwrap().doc.last_view, None, "only the written file carries it");
     s.execute("document.open", &json!({"path": native})).unwrap();
@@ -382,7 +382,7 @@ fn open_layers_rows_round_trip_without_dirtying() {
     let g = NodeId(s.execute("object.group", &json!({})).unwrap()["id"].as_u64().unwrap());
     // A document starts with its top-level layers open, and a file keeps nothing for that.
     assert!(s.doc().unwrap().layers_open.contains(layer) && !s.doc().unwrap().layers_open.contains(g));
-    let native = path(&d, "rows.vectorcraft");
+    let native = path(&d, "rows.nibart");
     s.execute("document.save", &json!({"path": native})).unwrap();
     let bytes = std::fs::read(&native).unwrap();
     assert_eq!(vectorcraft_format::load(&bytes).unwrap().layers_open, None);
@@ -409,7 +409,7 @@ fn save_plans_suggest_names_and_folders() {
     s.execute("file.info", &json!({"title": "Map"})).unwrap();
     let plan = |s: &Session, mode, p: Value| save_plan(s, mode, &p).unwrap();
     let p = plan(&s, SaveMode::Save, json!({}));
-    assert_eq!((p.path, p.name.as_str(), p.format.id, p.folder), (None, "Map.vectorcraft", "vectorcraft", None));
+    assert_eq!((p.path, p.name.as_str(), p.format.id, p.folder), (None, "Map.nibart", "vectorcraft", None));
     assert_eq!(plan(&s, SaveMode::Copy, json!({"format": "pdf"})).name, "Map copy.pdf");
     assert_eq!(plan(&s, SaveMode::Template, json!({"format": "svg"})).format.id, "template", "a template is native or .ait");
     // A native template by default; .ait when the format, else the path, names it.
@@ -490,7 +490,7 @@ fn a_template_places_like_a_native_file() {
 fn transparency_grid_round_trips_without_dirtying() {
     let d = dir("transparency-grid");
     let mut s = session();
-    let native = path(&d, "grid.vectorcraft");
+    let native = path(&d, "grid.nibart");
     for on in [true, false] {
         s.execute("view.transparencyGrid", &json!({"on": on})).unwrap();
         assert!(!s.doc().unwrap().is_dirty(), "the grid is view state, not an edit");
@@ -509,7 +509,7 @@ fn transparency_grid_round_trips_without_dirtying() {
         }
     }
     // A native file written before this setting existed still opens with the grid hidden.
-    let old = path(&d, "old.vectorcraft");
+    let old = path(&d, "old.nibart");
     let bytes = vectorcraft_format::save(&Document::new(5.0, 5.0), false);
     assert!(!String::from_utf8_lossy(&bytes).contains("transparency_grid"));
     std::fs::write(&old, bytes).unwrap();
