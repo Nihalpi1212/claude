@@ -481,10 +481,85 @@ test('while a pointer is held on a slow document the view shows a preview; the r
     window.dispatchEvent(new PointerEvent('pointerup', { isPrimary: true }));
     PREVIEW.enabled = true;
     out.offDiff = rp.check();
+    // Proof Colors: the preview and the full composite under it are two canvases of one document version, each
+    // processed for itself
+    app.settings.proofColors = true;
+    try {
+      const a = rp.box(d.width, d.height, '#ff0000'), b = rp.box(d.width, d.height, '#0000ff');
+      const pa = v.postProcess(a, v), pb = v.postProcess(b, v), pa2 = v.postProcess(a, v);
+      const px = (c) => Array.from(c.getContext('2d').getImageData(5, 5, 1, 1).data);
+      out.proof = { differ: JSON.stringify(px(pa)) !== JSON.stringify(px(pb)), cached: pa2 === pa };
+    } finally {
+      app.settings.proofColors = false;
+    }
     return out;
   });
   expect(r.gesture).toBe(true);
   expect(r).toMatchObject({ preview: 1, fullDuring: 0, shown: true, fullKept: true, exportDiff: 0, releaseShown: false, releaseDiff: 0, offPreview: 0, offDiff: 0 });
   expect(r.afterRelease).toEqual({ gesture: false, dirty: true });
+  expect(r.proof).toEqual({ differ: true, cached: true });
+  expect(errors).toEqual([]);
+});
+
+test('a document-sized layer around a small subject repaints the subject\'s box, measured when idle or when it pays', async ({ page }) => {
+  const errors = await openApp(page);
+  await newDoc(page, { width: 1200, height: 900, background: 'white' });
+  await kit(page);
+  await page.evaluate(async () => {
+    const app = window.pigmentApp, d = app.doc, rp = window.__rp, D = rp.D;
+    const c = D.createCanvas(1200, 900);
+    const g = c.getContext('2d');
+    g.fillStyle = '#3060c0';
+    g.fillRect(300, 200, 100, 80);
+    const l = new D.RasterLayer({ name: 'Big', canvas: c, x: 0, y: 0 });
+    d.add(l, d.root, 1);
+    await app.commands.run('layer:new-adjustment', { kind: 'curves', params: { rgb: [[0, 0], [64, 40], [190, 220], [255, 255]] } }, 'api');
+    await app.commands.run('layer:new-adjustment', { kind: 'clarity-dehaze', params: { clarity: 30, dehaze: 0 } }, 'api');
+    d.setActive(l);
+    d.view.paint();
+    // a second composite gives the compositor a plan to measure against
+    l.opacity = 0.95;
+    l.touch();
+    d.changed('props', { layer: l });
+    d.view.paint();
+  });
+  // the user pauses: the layer's content box is measured while the app is idle
+  await page.waitForTimeout(1300);
+  const steps = await page.evaluate(async () => {
+    const app = window.pigmentApp, d = app.doc, rp = window.__rp, v = d.view;
+    const { setLayerProps } = await import('/lib/layer-ops.js');
+    const l = d.layers().find((x) => x.name === 'Big');
+    const out = [];
+    const step = (label, fn) => {
+      const r0 = rp.runs();
+      fn();
+      v.dirty = true;
+      v.paint();
+      const r1 = rp.runs();
+      out.push({ label, diff: rp.check(), full: r1.full - r0.full, region: r1.region - r0.region });
+    };
+    step('opacity', () => setLayerProps(app, l, { opacity: 0.7 }, 'o'));
+    step('pixels painted far off, no hint', () => {
+      l.canvas.getContext('2d').fillStyle = '#c03060';
+      l.canvas.getContext('2d').fillRect(700, 500, 60, 40);
+      l.touch();
+    });
+    step('a dab with a hint', () => {
+      l.canvas.getContext('2d').fillRect(320, 420, 20, 20);
+      l.touch();
+      v.invalidate({ x: 320, y: 420, width: 20, height: 20 }, l);
+    });
+    step('cleared', () => {
+      l.canvas.getContext('2d').clearRect(0, 0, 1200, 900);
+      l.touch();
+    });
+    return out;
+  });
+  expect(steps).toEqual([
+    { label: 'opacity', diff: 0, full: 0, region: 1 },
+    { label: 'pixels painted far off, no hint', diff: 0, full: 0, region: 1 },
+    { label: 'a dab with a hint', diff: 0, full: 0, region: 1 },
+    { label: 'cleared', diff: 0, full: 0, region: 1 },
+  ]);
   expect(errors).toEqual([]);
 });

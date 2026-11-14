@@ -8,8 +8,13 @@ import { createCanvas } from './document.js';
 
 export function install(app) {
   // the processed composite, kept until the document or the toggles change (paint() runs every
-  // frame while a selection's marching ants animate)
-  let cache = null;
+  // frame while a selection's marching ants animate). Two: while a gesture previews, the view draws the preview over
+  // the last full composite (canvas-view.js PREVIEW), two canvases of the same document version, so the key names
+  // the canvas too
+  let cache = [];
+  const ids = new WeakMap();
+  let nextId = 1;
+  const idOf = (c) => ids.get(c) ?? (ids.set(c, nextId), nextId++);
 
   const enabled = () => ({ proof: !!app.settings.proofColors, gamut: !!app.settings.gamutWarning });
 
@@ -18,15 +23,16 @@ export function install(app) {
     if (!proof && !gamut) return null;
     const doc = view?.doc ?? app.doc;
     // root.version moves with every layer.touch() (a brush stroke calls no doc.changed until it ends)
-    const key = `${doc?.id}:${doc?.version}:${doc?.root?.version}:${composite.width}x${composite.height}:${proof ? 'p' : ''}${gamut ? 'g' : ''}`;
-    if (cache?.key === key) return cache.canvas;
+    const key = `${doc?.id}:${doc?.version}:${doc?.root?.version}:${idOf(composite)}:${composite.width}x${composite.height}:${proof ? 'p' : ''}${gamut ? 'g' : ''}`;
+    const hit = cache.find((e) => e.key === key);
+    if (hit) return hit.canvas;
     try {
       const w = composite.width, h = composite.height;
       const img = composite.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, w, h);
       applyProof(img, { proof, gamut });
       const canvas = createCanvas(w, h);
       canvas.getContext('2d').putImageData(img, 0, 0);
-      cache = { key, canvas };
+      cache = [{ key, canvas }, ...cache].slice(0, 2);
       return canvas;
     } catch (err) {
       console.warn('proof colours', err);
@@ -45,7 +51,7 @@ export function install(app) {
   function toggle(key, label) {
     const value = !app.settings[key];
     app.saveSettings({ [key]: value }); // emits settings:changed -> syncUiState mirrors the menu check marks
-    cache = null;
+    cache = [];
     app.view?.invalidate();
     app.commands.invalidate();
     app.dialogs?.toast?.(`${label} ${value ? 'on' : 'off'}`, { timeout: 1200 });
@@ -58,7 +64,7 @@ export function install(app) {
 
   app.on('settings:changed', (patch) => {
     if (patch && ('proofColors' in patch || 'gamutWarning' in patch)) {
-      cache = null;
+      cache = [];
       app.view?.invalidate();
     }
   });

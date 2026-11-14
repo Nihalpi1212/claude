@@ -3325,8 +3325,10 @@ off; the preview while a pointer is held is the one switch `canvas-view.js PREVI
   layers it takes along. Each unit has an `id` (its layers), a `pkey` (what the compositor reads from them, by value or
   by object identity: visibility, opacity, Fill, mode, clip, the `blending` and `styles` objects, `maskCacheKey`, a
   raster's canvas and position, an adjustment's kind and `params` object, a rendered layer's cached render canvas), a
-  `vkey` (their versions) and a `box` (where the unit can change the backdrop: a raster's content box, measured once
-  per canvas and version on large canvases; a render's box; a styled layer's padded box and cached render; a group's
+  `vkey` (their versions) and a `box` (where the unit can change the backdrop: a raster's content box, which on a
+  large canvas is measured once per canvas and version: at once when the unit had a smaller box before (an opacity edit
+  of a document-sized layer around a small subject), else when the app is idle, its canvas box standing in until then;
+  brush hints grow it without measuring; a render's box; a styled layer's padded box and cached render; a group's
   children; ALL for an adjustment layer or a group holding one). The document's size, mode, depth, global light and
   Background layer make the plan's `global`. `diffPlans` compares the plan with the last full composite's: **same**
   (selecting a layer, guides, history, the selection: the last composite stands), **region** (the union of the changed
@@ -3362,5 +3364,5 @@ off; the preview while a pointer is held is the one switch `canvas-view.js PREVI
   resolution. Kinds that read around a pixel read a wider neighbourhood in the preview; `ctx.scale` carries the scale
   to them.
 - **Memory.** A view's compositor keeps the full composite, a spare buffer (so the canvas a caller was handed stays as
-  it was until the composite after next) and up to two prefixes: four document-sized canvases. Other compositors keep
-  the full composite only.
+  it was until the composite after next) and up to two prefixes: four document-sized canvases, and the preview's
+  buffer (the visible rect) once a gesture has previewed. Other compositors keep the full composite only.

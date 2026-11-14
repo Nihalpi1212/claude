@@ -544,8 +544,8 @@ export class Compositor {
     const angle = doc.globalLight?.angle ?? 120, altitude = doc.globalLight?.altitude ?? 30;
     const global = `${doc.width}x${doc.height}|${doc.mode ?? 'rgb'}|${doc.depth ?? 8}|${angle},${altitude}|${oid(backgroundOf(doc))}`;
     const prev = this.records?.global === global ? this.records : null;
-    // a first composite (an export's own compositor) is never compared with: its boxes need no measuring
-    this.measure = !!this.records;
+    // only a view's compositor compares plans, and a first composite has nothing to compare with: no measuring
+    this.measure = this.view && !!this.records;
     const units = [];
     const state = { regionOk: !(doc.mode && doc.mode !== 'rgb' && MODE_RENDERERS.has(doc.mode)) };
     let nonClip = false;
@@ -559,7 +559,10 @@ export class Compositor {
       const k = { p: '', v: '', layers: [] };
       for (let n = i; n < j; n++) keyOf(kids[n], k, base.visible && kids[n].visible, this, state);
       const id = kids.slice(i, j).map((l) => oid(l)).join(',');
-      const unit = { start: i, id, pkey: k.p, vkey: k.v, box: this.drawBox(base), hint: undefined };
+      // the unit's box when the last plan was made: a layer's content box is measured at once only where that can
+      // make the region smaller than the box it had
+      const before = prev?.units.find((u) => u.id === id)?.box ?? null;
+      const unit = { start: i, id, pkey: k.p, vkey: k.v, box: this.drawBox(base, doc, before), hint: undefined };
       unit.hint = this.hintFor(unit, k.layers, prev, base);
       units.push(unit);
     }
@@ -589,7 +592,7 @@ export class Compositor {
   }
 
   /** The document box outside which a layer leaves the backdrop alone (repaint-plan.js `box`). */
-  drawBox(layer) {
+  drawBox(layer, doc = null, before = null) {
     if (!layer.visible) return null;
     if (layer.type === 'adjustment') return ALL;
     let b = null;
@@ -597,12 +600,12 @@ export class Compositor {
       // a pass-through group's fade and an isolated group's per-pixel blend cover their whole repaint rect, but they
       // give the backdrop back unchanged wherever no child draws
       for (const c of layer.children) {
-        const cb = this.drawBox(c);
+        const cb = this.drawBox(c, doc, before);
         if (cb === ALL) return ALL;
         b = unionBox(b, cb);
       }
     } else if (layer.type === 'raster') {
-      b = this.contentBox(layer);
+      b = this.contentBox(layer, doc, before);
     } else {
       const src = this.layerSource(layer);
       if (src) b = { x: src.x, y: src.y, width: src.canvas.width, height: src.canvas.height };
@@ -632,16 +635,54 @@ export class Compositor {
    * per canvas and layer version: layers are often document-sized around a small subject, and transparent pixels
    * leave the backdrop alone in every mode and blending option, so an edit repaints the subject's box only.
    */
-  contentBox(layer) {
+  contentBox(layer, doc, before = null) {
     const c = layer.canvas;
-    if (c.width * c.height < 1 << 20 || !this.measure) return { x: layer.x, y: layer.y, width: c.width, height: c.height };
+    const whole = { x: layer.x, y: layer.y, width: c.width, height: c.height };
+    if (c.width * c.height < 1 << 20) return whole;
     const cache = this.boxes ?? (this.boxes = new WeakMap()); // canvas -> { version, box }
     let hit = cache.get(c);
-    if (!hit || hit.version !== layer.version) {
+    if ((!hit || hit.version !== layer.version) && this.measure && before && before !== ALL && before.width * before.height < c.width * c.height) {
+      // the unit had a smaller box before this change: measuring now can keep the repaint to the layer's subject
       hit = { version: layer.version, box: alphaBox(c.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, c.width, c.height)) };
       cache.set(c, hit);
     }
-    return hit.box ? { x: layer.x + hit.box.x, y: layer.y + hit.box.y, width: hit.box.width, height: hit.box.height } : null;
+    if (hit && hit.version === layer.version) return hit.box ? { x: layer.x + hit.box.x, y: layer.y + hit.box.y, width: hit.box.width, height: hit.box.height } : null;
+    // otherwise measured when the app is idle, not inside the repaint (reading a large canvas back costs about what
+    // compositing it does); the canvas box stands in until then
+    if (this.measure && doc) this.measureLater(layer, doc);
+    return whole;
+  }
+
+  /**
+   * Measures a large raster layer's content box at the next idle moment, and gives it to the units of the last plan
+   * that still describe the layer as it is (same keys, so the same pixels): the next edit of the layer repaints that
+   * box only.
+   */
+  measureLater(layer, doc) {
+    const pending = this.pendingBoxes ?? (this.pendingBoxes = new Set());
+    if (pending.has(layer)) return;
+    pending.add(layer);
+    if (pending.size > 1) return;
+    const run = () => {
+      const list = [...pending];
+      pending.clear();
+      const cache = this.boxes ?? (this.boxes = new WeakMap()); // canvas -> { version, box }
+      for (const l of list) {
+        const c = l.canvas;
+        if (cache.get(c)?.version === l.version) continue;
+        cache.set(c, { version: l.version, box: alphaBox(c.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, c.width, c.height)) });
+      }
+      const rec = this.records;
+      if (!rec) return;
+      const now = this.planOf(doc);
+      if (now.global !== rec.global) return;
+      for (let i = 0; i < rec.units.length && i < now.units.length; i++) {
+        const u = rec.units[i], v = now.units[i];
+        if (u.id === v.id && u.pkey === v.pkey && u.vkey === v.vkey) u.box = v.box;
+      }
+    };
+    if (typeof requestIdleCallback === 'function') requestIdleCallback(run, { timeout: 1000 });
+    else setTimeout(run, 50);
   }
 
   /** Renders the group's children into ctx (ctx already translated so document coordinates apply). `range` (the
