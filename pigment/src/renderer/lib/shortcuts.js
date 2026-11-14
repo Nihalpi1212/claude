@@ -5,12 +5,13 @@
 // 0.4 (conventions-shortcuts-fields): temporary tools (lib/temp-tools.js): Space pans, Ctrl+Space and Alt+Space zoom,
 // Ctrl springs to the Move tool and Alt to the Eyedropper, a held tool key springs back on release. While a dialog is
 // open the view navigation keys still work (zoom keys, Space to pan the canvas under the dialog), as in Photoshop.
-import { MENU_KEYS, RENDERER_KEYS, parseAccelerator, eventMatches } from '../../shared/keymap.js';
+import { MENU_KEYS, RENDERER_KEYS, parseAccelerator, eventMatches, TEXT_FIELD_EDIT_KEYS } from '../../shared/keymap.js';
 import { isMac } from './bridge.js';
 import { TempTools } from './temp-tools.js';
 import { DIALOG_NAV } from './dialogs.js';
 
-const NATIVE_IN_TEXT = new Set(['edit:undo', 'edit:redo', 'edit:cut', 'edit:copy', 'edit:paste', 'edit:select-all', 'select:all', 'edit:clear', 'view:zoom-in', 'view:zoom-out']);
+// the edit keys that go to a focused text field (shared with app.js's rule for the native menu's accelerators)
+const NATIVE_IN_TEXT = TEXT_FIELD_EDIT_KEYS;
 
 function isTextInput(el) {
   if (!el) return false;

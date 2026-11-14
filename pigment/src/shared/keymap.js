@@ -216,6 +216,17 @@ export const TYPE_KEYS = {
   'type:hide-selection': 'CmdOrCtrl+H',
 };
 
+/**
+ * Whether a key may run cmd while the focus is in a text field (M.4: a key that edits the text edits the text). The
+ * edit keys run because their commands hand the edit to the field (undo, the clipboard, select all, delete); file,
+ * view, help and window commands touch no layer. Everything else (Ctrl+E, Ctrl+J, Ctrl+I, …) waits. lib/shortcuts.js
+ * applies the same rule to the keys the page sees; app.js to the native menu's accelerators (Electron).
+ */
+export const TEXT_FIELD_EDIT_KEYS = new Set(['edit:undo', 'edit:redo', 'edit:cut', 'edit:copy', 'edit:paste', 'edit:select-all', 'select:all', 'edit:clear', 'view:zoom-in', 'view:zoom-out']);
+export function runsWhileTyping(cmd) {
+  return TEXT_FIELD_EDIT_KEYS.has(cmd) || /^(file:|view:|help:|window:)/.test(String(cmd));
+}
+
 /** Two accelerators name the same key combination (modifier order and spelling do not matter). */
 export function sameAccelerator(a, b) {
   const x = parseAccelerator(a), y = parseAccelerator(b);
@@ -310,7 +321,7 @@ export const COMMAND_LABELS = {
   'layer:mask-toggle-view': 'Show layer mask', 'path:make-mask': 'Make vector mask from path', 'path:make-shape': 'Make shape from path',
   'layer:copy-shape-attributes': 'Copy shape attributes', 'layer:paste-shape-attributes': 'Paste shape attributes',
   'layer:collapse-all-groups': 'Collapse all groups', 'layer:panel-options': 'Layers panel options',
-  'layer:merge': 'Merge layers', 'layer:merge-group': 'Merge group', 'layer:arrange-reverse': 'Reverse layer order',
+  'layer:merge': 'Merge layers', 'layer:merge-group': 'Merge group', 'layer:merge-clipping': 'Merge clipping mask', 'layer:arrange-reverse': 'Reverse layer order',
   'layer:lock-dialog': 'Lock layers', 'layer:lock-group': 'Lock all layers in group', 'layer:select-similar': 'Select similar layers',
   'layer:new-no-dialog': 'New layer (no dialog)', 'layer:stamp-visible': 'Stamp visible', 'layer:stamp-selected': 'Stamp selected layers',
   'layer:select-forward': 'Select layer above', 'layer:select-backward': 'Select layer below', 'layer:select-front': 'Select top layer',

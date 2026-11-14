@@ -365,12 +365,17 @@ export class TypeTool extends Tool {
   }
 
   // ---- pointer ----
-  /** Topmost visible text layer whose text box contains p (the active layer first). */
+  /**
+   * Topmost visible, editable text layer whose text box contains p (the active layer first). A fully locked layer is
+   * passed over like a hidden one, so a click there starts new text (Photoshop) instead of a refusal that leaves the
+   * next typed letters to run tool shortcuts.
+   */
   hitTextLayer(p) {
     const doc = this.doc;
     const zoom = this.view?.zoom ?? 1;
-    const list = doc.layers().filter((l) => l.type === 'text' && shown(l)).reverse();
-    if (doc.active?.type === 'text' && shown(doc.active)) list.unshift(doc.active);
+    const editable = (l) => l.type === 'text' && shown(l) && !l.locked?.all;
+    const list = doc.layers().filter(editable).reverse();
+    if (doc.active && editable(doc.active)) list.unshift(doc.active);
     for (const l of list) {
       const q = this.toLocal(l, p);
       if (!q) continue;
@@ -795,7 +800,7 @@ export class TypeTool extends Tool {
     structural(this.app, this.name, () => {
       doc.add(layer);
       doc.setActive(layer);
-    });
+    }, doc, { made: layer });
     const entry = doc.history.entries[doc.history.index];
     this.session = this.makeSession({ doc, layer, isNew: true, entry, before: snapshot(layer), autoName: true });
     this.session.placeholder = !!text;
@@ -885,6 +890,8 @@ export class TypeTool extends Tool {
         // the creation entry holds the layer object, which now has its text: one entry for creating and typing
         layer.touch();
         doc.changed('props', { layer });
+        // actions (lib/actions.js): a recording keeps the finished layer as a Make Text Layer step
+        this.app.emit('layer:made', { doc, layer, entry: s.entry });
       }
       return true;
     }

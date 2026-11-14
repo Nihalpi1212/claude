@@ -24,7 +24,7 @@ import { withDefaults } from '../shared/defaults.js';
 import { openDocument } from './lib/io.js';
 import { flattenDocument } from './lib/compositor.js';
 import { parseColor, rgbaToHex } from '../shared/pixels/color.js';
-import { MENU_KEYS, RENDERER_KEYS, TYPE_KEYS, SHORTCUT_GROUPS, COMMAND_LABELS, describeAccelerator } from '../shared/keymap.js';
+import { MENU_KEYS, RENDERER_KEYS, TYPE_KEYS, SHORTCUT_GROUPS, COMMAND_LABELS, describeAccelerator, runsWhileTyping } from '../shared/keymap.js';
 
 // Feature modules installed after the core, in this order. A module that fails to load is skipped
 // with a warning so the rest of the app keeps working.
@@ -365,6 +365,8 @@ export class App extends EventTarget {
       showGalleryInMenu: !!this.settings.showGalleryInMenu,
       // 0.4 (M.5): menu labels and checkmarks of the new items
       selectedCount: d?.selected?.size ?? 0,
+      // Ctrl+E is Merge Clipping Mask on the base of a clipping mask (one layer selected, clipped layers right above it)
+      clippingBase: !!d?.active && !d.active.clip && !!d.active.parent?.children[d.active.parent.children.indexOf(d.active) + 1]?.clip,
       effectsHidden: !!d?.active?.styles?.hidden,
       hasVectorMask: !!d?.active?.vectorMask,
       vectorMaskEnabled: !!d?.active?.vectorMask && d.active.vectorMask.enabled !== false,
@@ -721,6 +723,11 @@ function setupHostEvents(app) {
       const typing = app.isTextTarget(el) || (!!el && el !== document.body && app.sessions.ownsFocus(el));
       return typing || app.dialogs?.isOpen ? undefined : app.commands.run(cmd, arg, 'key');
     }
+    // a native menu accelerator (Electron) takes the key before the page: while the user types in a text field it may
+    // only run what shortcuts.js lets the same key run there (the edit keys hand the edit to the field), so Ctrl+E,
+    // Ctrl+J or Ctrl+, in a name or number field do not merge, duplicate or hide a layer. A session that owns the
+    // focus (the type editor) is not a text field here (isTextTarget), its keys go on reaching it.
+    if (via && app.isTextTarget() && !runsWhileTyping(cmd)) return undefined;
     return app.commands.run(cmd, arg, via ? 'menu-key' : 'menu');
   });
   // A file opened from the OS is the user's own gesture, not code ('api'): while an on-canvas session owns the

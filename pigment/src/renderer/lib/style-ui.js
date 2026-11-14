@@ -42,6 +42,8 @@ const check = (key, label, extra = {}) => ({ key, label, type: 'checkbox', ...ex
 const section = (label) => ({ type: 'section', label });
 const contour = (key = 'contour', label = 'Contour') => ({ key, label, type: 'contour' });
 const globalLight = check('useGlobalLight', 'Use global light');
+// the pages whose Angle (and Altitude) are the document's Global Light while Use Global Light is ticked
+const LIGHT_PAGES = new Set(['dropShadow', 'innerShadow', 'bevel']);
 const antiAlias = (key = 'antiAlias') => check(key, 'Anti-aliased');
 const isFill = (kind) => (v) => (v.fill ?? 'color') === kind;
 const fillChoice = (kinds) => ({ key: 'fill', label: 'Fill type', type: 'segment', options: kinds });
@@ -259,8 +261,23 @@ export function install(app) {
     const layer = d?.active;
     if (!layer || layer.type === 'adjustment') return ctx?.cancel();
     // actions (lib/actions.js): a recorded step is the dialog's result ({ styles, opacity?, fillOpacity?, blend? }) and applies without it
-    if (initialKey && typeof initialKey === 'object') return setLayerProps(app, layer, clone(initialKey), 'Layer style');
+    // { key, index } opens the page of that effect instance (an effect row of the Layers panel)
+    const opening = initialKey && typeof initialKey === 'object' && !('styles' in initialKey) && typeof initialKey.key === 'string' ? initialKey : null;
+    if (initialKey && typeof initialKey === 'object' && !opening) {
+      const { globalLight: gl, ...props } = clone(initialKey);
+      if (!gl) return setLayerProps(app, layer, props, 'Layer style');
+      const glWas = d.globalLight ?? null;
+      return d.history.group('Layer style', () => {
+        setLayerProps(app, layer, props, 'Layer style');
+        recordGlobalLight(glWas, gl);
+      });
+    }
     const before = { styles: clone(layer.styles), opacity: layer.opacity, fillOpacity: layer.fillOpacity, blend: layer.blend, blending: clone(layer.blending ?? null) };
+    // the document's Global Light as the dialog opened: an Angle or Altitude typed while Use Global Light is on edits
+    // it live (as Photoshop does), Cancel puts it back and OK records it with the style
+    let glBefore = d.globalLight ?? null;
+    const globalNow = () => d.globalLight ?? { angle: 120, altitude: 30 };
+    const usesGlobal = (key, fx) => LIGHT_PAGES.has(key) && !!fx?.useGlobalLight;
     const merged = mergeStyles(layer.styles);
     // the draft: every key as a list of instances (top first), each merged with the key's defaults
     const draft = {};
@@ -278,7 +295,9 @@ export function install(app) {
     const pageList = app.layerStyle.pages();
     const firstPage = pageList.some((pg) => pg.id === 'blending') ? 'blending' : pageList[0]?.id ?? null;
     // the selection: a page id, or an effect key with the instance index (the bevel's sub-pages too)
-    let current = initialKey && draft[initialKey] ? { key: initialKey, index: 0 } : firstPage ? { key: firstPage, index: 0 } : { key: STYLE_KEYS[0].key, index: 0 };
+    const startKey = opening ? opening.key : initialKey;
+    const startIndex = opening && Number.isInteger(opening.index) ? Math.max(0, opening.index) : 0;
+    let current = startKey && draft[startKey] ? { key: startKey, index: Math.min(startIndex, draft[startKey].length - 1) } : firstPage ? { key: firstPage, index: 0 } : { key: STYLE_KEYS[0].key, index: 0 };
 
     // the page context (L.3): the pages edit opacity, fill opacity, blend and the advanced draft, then call apply()
     const ctx2 = {
@@ -290,7 +309,11 @@ export function install(app) {
       advanced: clone(layer.blending ?? DEFAULT_BLENDING),
       apply: () => apply(),
       select: (id) => select({ key: id, index: 0 }),
-      globalLight: () => globalLightDialog().then(apply),
+      // the Global Light… button records its own step: what OK or Cancel compares with starts from there
+      globalLight: () => globalLightDialog().then(() => {
+        glBefore = d.globalLight ?? null;
+        apply();
+      }),
     };
     const apply = () => {
       const st = stored();
@@ -498,11 +521,29 @@ export function install(app) {
       const pageId = current.key;
       const fxKey = sub ? 'bevel' : current.key;
       const index = current.index;
+      const values = toForm(pageId, effectOf(current));
+      if (usesGlobal(pageId, effectOf(current))) {
+        values.angle = globalNow().angle;
+        if ('altitude' in values) values.altitude = globalNow().altitude;
+      }
       const form = buildForm(EFFECT_FIELDS[pageId], {
         app,
-        values: toForm(pageId, effectOf(current)),
+        values,
         onChange: (v, changedKey) => {
           let fx = fromForm(pageId, draft[fxKey][index], v);
+          if (usesGlobal(pageId, fx)) {
+            // the fields show the global light, not the effect's own angle, which it keeps for when the box is unticked
+            fx.angle = draft[fxKey][index].angle;
+            if ('altitude' in v) fx.altitude = draft[fxKey][index].altitude;
+            if (changedKey === 'angle' || changedKey === 'altitude') {
+              // the global light moves, and every effect using it with it
+              d.globalLight = { ...globalNow(), [changedKey]: v[changedKey] };
+              d.changed('props'); // other layers' effects follow the light too
+            } else if (changedKey === 'useGlobalLight') {
+              form.set('angle', globalNow().angle, { silent: true });
+              if ('altitude' in v) form.set('altitude', globalNow().altitude, { silent: true });
+            }
+          }
           // a pattern fill without a pattern takes the current one
           if (changedKey === 'fill' && fx.fill === 'pattern' && !fx.pattern) fx = { ...fx, pattern: currentPatternRef() };
           if (sub === 'Contour') fx.contourSub = { ...fx.contourSub, enabled: true };
@@ -554,7 +595,12 @@ export function install(app) {
         // dragging in the document places the shown effect (lib/style-canvas-drag.js)
         drag = armStyleDrag(app, dialogEl, {
           layer,
-          page: () => (DRAGGABLE.has(current.key) && effectOf(current) ? { key: current.key, fx: effectOf(current) } : null),
+          page: () => {
+            const fx = DRAGGABLE.has(current.key) ? effectOf(current) : null;
+            if (!fx) return null;
+            // a drag starts from the shadow as drawn: with Use Global Light, at the global angle
+            return { key: current.key, fx: usesGlobal(current.key, fx) ? { ...fx, angle: globalNow().angle } : fx };
+          },
           update: (key, patch, { done = false } = {}) => {
             const fxKey = key === 'bevel-texture' ? 'bevel' : key;
             const index = key === 'bevel-texture' ? 0 : current.index;
@@ -575,11 +621,20 @@ export function install(app) {
     const after = { styles: layer.styles ? clone(layer.styles) : null, opacity: layer.opacity, fillOpacity: layer.fillOpacity, blend: layer.blend, blending: clone(layer.blending ?? null) };
     Object.assign(layer, { styles: before.styles, opacity: before.opacity, fillOpacity: before.fillOpacity, blend: before.blend, blending: before.blending });
     layer.touch();
-    if (ok) setLayerProps(app, layer, after, 'Layer style');
+    const glAfter = d.globalLight ?? null;
+    const glChanged = !sameJson(glAfter, glBefore);
+    d.globalLight = glBefore;
+    if (glChanged && !ok) d.changed('props');
+    if (ok && glChanged) {
+      d.history.group('Layer style', () => {
+        setLayerProps(app, layer, after, 'Layer style');
+        recordGlobalLight(glBefore, glAfter);
+      });
+    } else if (ok) setLayerProps(app, layer, after, 'Layer style');
     else d.changed('props', { layer });
     // actions (lib/actions.js): the styles always replay; opacity, blend mode and the blending options only when the
     // dialog changed them
-    if (ok) ctx?.setReplayArg(Object.fromEntries(Object.entries(after).filter(([k, v]) => k === 'styles' || (k === 'blending' ? !sameJson(v, before.blending) : v !== before[k]))));
+    if (ok) ctx?.setReplayArg({ ...Object.fromEntries(Object.entries(after).filter(([k, v]) => k === 'styles' || (k === 'blending' ? !sameJson(v, before.blending) : v !== before[k]))), ...(glChanged ? { globalLight: clone(glAfter) } : {}) });
     else ctx?.cancel();
   }
 
@@ -603,8 +658,14 @@ export function install(app) {
       },
     });
     if (!o) return ctx?.cancel?.(); // actions (lib/actions.js)
-    const before = gl, after = { angle: o.angle, altitude: o.altitude };
+    const after = { angle: o.angle, altitude: o.altitude };
     ctx?.setReplayArg?.(after); // actions (lib/actions.js)
+    recordGlobalLight(gl, after);
+  }
+
+  /** Sets the document's Global Light to `after` as one undoable step back to `before`. */
+  function recordGlobalLight(before, after) {
+    const d = app.doc;
     const set = (v) => {
       d.globalLight = v;
       d.changed('props');
@@ -633,9 +694,9 @@ export function install(app) {
       { type: 'separator' },
       ...STYLE_KEYS.map(({ key, name }) => ({ label: `${name}…`, checked: on(key), onSelect: () => styleDialog(key) })),
       { type: 'separator' },
-      { label: 'Copy Layer Style', disabled: !layer?.styles, onSelect: () => app.commands.run('layer:copy-style', undefined, 'panel') },
-      { label: 'Paste Layer Style', disabled: !app.copiedStyle, onSelect: () => app.commands.run('layer:paste-style', undefined, 'panel') },
-      { label: 'Clear Layer Style', disabled: !layer?.styles, onSelect: () => app.commands.run('layer:clear-style', undefined, 'panel') },
+      { label: 'Copy Layer Style', disabled: !app.commands.isEnabled('layer:copy-style'), onSelect: () => app.commands.run('layer:copy-style', undefined, 'panel') },
+      { label: 'Paste Layer Style', disabled: !app.commands.isEnabled('layer:paste-style'), onSelect: () => app.commands.run('layer:paste-style', undefined, 'panel') },
+      { label: 'Clear Layer Style', disabled: !app.commands.isEnabled('layer:clear-style'), onSelect: () => app.commands.run('layer:clear-style', undefined, 'panel') },
       { label: 'Rasterize Layer Style', disabled: !layer?.styles, onSelect: () => app.commands.run('layer:rasterize-style', undefined, 'panel') },
       { label: 'Global Light…', onSelect: globalLightDialog },
     ];

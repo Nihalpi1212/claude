@@ -201,6 +201,9 @@ export class DocumentManager {
   async writeTo(doc, path, { copy = false, askOptions = true } = {}) {
     try {
       this.app.tools?.active?.commit?.();
+      // what only shows for a moment ends first (View previous state in Properties): a save not run as a command, such
+      // as Save in the quit prompt, writes the document's own state too
+      this.app.emit?.('doc:saving', { doc });
       const opts = await this.lossyOptions(doc, path, { ask: askOptions });
       if (!opts) return false;
       const bytes = await this.app.busy(`Saving ${path.split(/[\\/]/).pop()}…`, () => encodeForPath(doc, path, doc.view.compositor, opts));

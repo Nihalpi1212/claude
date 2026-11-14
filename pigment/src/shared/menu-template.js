@@ -356,8 +356,8 @@ export function buildMenuTemplate({ platform, state = {}, recent = [], run, isPa
     lyr('Link Layers', 'layer:link'),
     lyr('Select Linked Layers', 'layer:select-linked'),
     sep,
-    // layer:merge dispatches by context (M.3): several selected layers, a group, or the layer below
-    lyr((state.selectedCount ?? 0) > 1 ? 'Merge &Layers' : state.layerType === 'group' ? 'Merge &Group' : 'Merge Do&wn', 'layer:merge'),
+    // layer:merge dispatches by context (M.3): several selected layers, a group, a clipping base, or the layer below
+    lyr((state.selectedCount ?? 0) > 1 ? 'Merge &Layers' : state.layerType === 'group' ? 'Merge &Group' : state.clippingBase ? 'Merge Clipping &Mask' : 'Merge Do&wn', 'layer:merge'),
     doc('Merge &Visible', 'layer:merge-visible'),
     doc('&Flatten Image', 'image:flatten'),
     sep,

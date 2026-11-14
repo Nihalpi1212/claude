@@ -5,14 +5,14 @@
 // same origin in the same unit. The origin lives in the document store (`rulerOrigin`, a 'value' collection in
 // document px, D): it is saved with the document, undoable, and Image Size / Canvas Size / Crop move it with the image.
 //
-// Units: px, in, cm, mm and pt are converted at the document resolution (72 ppi when it has none); percent is a
+// Units: px, in, cm, mm, pt and picas (12 pt, Photoshop's Picas) are converted at the document resolution (72 ppi when it has none); percent is a
 // percentage of the document's width (x) or height (y). The pure helpers below are what the unit tests check.
 
 import { registerCollection, collectionSpec } from './doc-store.js';
 
-export const UNITS = ['px', 'in', 'cm', 'mm', 'pt', 'percent'];
-export const UNIT_LABEL = { px: 'px', in: 'in', cm: 'cm', mm: 'mm', pt: 'pt', percent: '%' };
-export const UNIT_NAMES = { px: 'Pixels', in: 'Inches', cm: 'Centimeters', mm: 'Millimeters', pt: 'Points', percent: 'Percent' };
+export const UNITS = ['px', 'in', 'cm', 'mm', 'pt', 'pica', 'percent'];
+export const UNIT_LABEL = { px: 'px', in: 'in', cm: 'cm', mm: 'mm', pt: 'pt', pica: 'pc', percent: '%' };
+export const UNIT_NAMES = { px: 'Pixels', in: 'Inches', cm: 'Centimeters', mm: 'Millimeters', pt: 'Points', pica: 'Picas', percent: 'Percent' };
 
 /** Document px per unit along an axis (pure). */
 export function perUnitFor(unit, doc, axis) {
@@ -22,12 +22,13 @@ export function perUnitFor(unit, doc, axis) {
     case 'cm': return dpi / 2.54;
     case 'mm': return dpi / 25.4;
     case 'pt': return dpi / 72;
+    case 'pica': return dpi / 6; // 1 pc = 12 pt
     case 'percent': return ((axis === 'y' ? doc?.height : doc?.width) || 1) / 100;
     default: return 1;
   }
 }
 
-/** The unit a typed suffix names ('px', 'in', '"', 'cm', 'mm', 'pt', '%', 'percent'), or null. */
+/** The unit a typed suffix names ('px', 'in', '"', 'cm', 'mm', 'pt', 'pc', '%', 'percent'), or null. */
 export function unitFromSuffix(s) {
   const t = String(s ?? '').trim().toLowerCase();
   if (!t) return null;
@@ -36,6 +37,7 @@ export function unitFromSuffix(s) {
   if (t === 'px' || t === 'pixel' || t === 'pixels') return 'px';
   if (t === 'cm' || t === 'mm' || t === 'pt') return t;
   if (t === 'point' || t === 'points') return 'pt';
+  if (t === 'pc' || t === 'pica' || t === 'picas') return 'pica';
   return null;
 }
 
@@ -65,7 +67,7 @@ export class Rulers {
     this.app = app;
   }
 
-  /** 'px' | 'in' | 'cm' | 'mm' | 'pt' | 'percent' (settings.rulerUnit). */
+  /** 'px' | 'in' | 'cm' | 'mm' | 'pt' | 'pica' | 'percent' (settings.rulerUnit). */
   unit(doc) {
     void doc;
     const u = this.app.settings?.rulerUnit ?? 'px';

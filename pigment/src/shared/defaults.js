@@ -2,7 +2,7 @@
 // else reads settings through withDefaults() so missing or malformed stored values never surface.
 export const DEFAULT_SETTINGS = Object.freeze({
   theme: 'system',
-  rulerUnit: 'px', // px | in | cm | mm | pt | percent
+  rulerUnit: 'px', // px | in | cm | mm | pt | pica | percent
   recentLimit: 20,
   restoreSession: false,
   lastSession: [],

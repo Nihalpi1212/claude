@@ -78,7 +78,10 @@ export function scoreEntry(entry, queryWords) {
   return score;
 }
 
-/** Entries matching `query`, best first (ties: shorter label, then the original order). Empty query: none. */
+/**
+ * Entries matching `query`, best first (ties: the item nearer the top of the menus, so Window > Layers comes before
+ * View > Snap To > Layers; then the shorter label, then the original order). Empty query: none.
+ */
 export function searchEntries(entries, query, limit = 60) {
   const q = words(query);
   if (!q.length) return [];
@@ -87,7 +90,8 @@ export function searchEntries(entries, query, limit = 60) {
     const s = scoreEntry(e, q);
     if (s > 0) scored.push({ e, s, i });
   });
-  scored.sort((a, b) => b.s - a.s || a.e.label.length - b.e.label.length || a.i - b.i);
+  const depth = (e) => (e.path ?? []).length;
+  scored.sort((a, b) => b.s - a.s || depth(a.e) - depth(b.e) || a.e.label.length - b.e.label.length || a.i - b.i);
   return scored.slice(0, limit).map((x) => x.e);
 }
 
@@ -95,7 +99,9 @@ export function searchEntries(entries, query, limit = 60) {
 
 /** Everything the palette offers right now: menu items, tools, panels. */
 export function collectEntries(app, { platform = 'linux' } = {}) {
-  const out = menuEntries({ platform, state: app.uiState ?? {}, recent: [], isPackaged: true });
+  // Undo and Redo are listed by their own names: the menu's "Undo <last step>" would match the step's words, and
+  // "new layer" + Enter would undo the new layer instead of making one
+  const out = menuEntries({ platform, state: { ...(app.uiState ?? {}), undoLabel: '', redoLabel: '' }, recent: [], isPackaged: true });
   const have = new Set(out.map((e) => `${e.id}\u0001${e.arg ?? ''}`));
   for (const tool of app.tools?.tools?.values?.() ?? []) {
     const id = `tool:${tool.id}`;

@@ -4,15 +4,18 @@
 import { readPsd, writePsdUint8Array, initializeCanvas } from 'ag-psd';
 import { writeZip, readZip, findEntry, streamCodecs } from '../../shared/zip.js';
 import { DocStore } from './doc-store.js';
-import { Document, RasterLayer, GroupLayer, TextLayer, AdjustmentLayer, createCanvas, layerFromDescription, canvasIsBlank, textExtensionFor } from './document.js';
+import { Document, RasterLayer, GroupLayer, TextLayer, AdjustmentLayer, createCanvas, layerFromDescription, canvasIsBlank, textExtensionFor, isDefaultBlending } from './document.js';
+import { hasEnabledStyles } from '../../shared/pixels/styles.js';
 import { parseColor } from '../../shared/pixels/color.js';
 import { MODES, duotoneLut } from '../../shared/pixels/modes.js';
 import { Compositor, flattenDocument, modeRendererFor } from './compositor.js';
 import { Selection } from './selection.js';
 import { maskCanvasFor } from './mask-render.js';
-import { isUniform, nonDefaultKeys, charStyleAt, paragraphs } from './type/model.js';
+import { isUniform, nonDefaultKeys, charStyleAt, paragraphs, applyChar, applyPara, contentLength } from './type/model.js';
 import { isGradientV2, normalizeGradient } from '../../shared/pixels/gradient-model.js';
 import { pointsFromTable } from '../../shared/pixels/adjust-tonal.js';
+import { HUE_BASES, DEFAULT_RANGE_BOUNDS, hueSatRanges, normalizeBounds } from '../../shared/pixels/adjust-color.js';
+import { adjustmentDef } from '../../shared/pixels/adjust.js';
 
 export const OPEN_EXTENSIONS = ['pigment', 'psd', 'psb', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'avif', 'svg', 'ico'];
 export const OPEN_FILTERS = [
@@ -306,6 +309,9 @@ export function readPsdDocument(bytes) {
   const doc = new Document({ width: psd.width, height: psd.height });
   const res = psd.imageResources?.resolutionInfo;
   if (res?.horizontalResolution) doc.dpi = Math.round(res.horizontalResolution);
+  // guides (image resource 1032): a horizontal guide sits at a y position (axis 'y')
+  const psdGuides = psd.imageResources?.gridAndGuidesInformation?.guides;
+  if (Array.isArray(psdGuides) && psdGuides.length) doc.guides = psdGuides.map((g) => ({ axis: g.direction === 'horizontal' ? 'y' : 'x', pos: g.location }));
   const convert = (pl, parent) => {
     let layer;
     const common = {
@@ -453,7 +459,21 @@ function textLayerFromPsd(pl, common, left, top) {
     props.y = oy - ascent;
     props.transform = [lin[0], lin[1], lin[2], lin[3], m[4], m[5]];
   }
-  return new TextLayer(props);
+  const layer = new TextLayer(props);
+  // the 0.4 attributes textToPsd writes (PSD_TEXT_KEYS) have no field in 0.3's flat font: put them on the rich text
+  // so a file Pigment saved as editable text reopens looking the same
+  const patch = {};
+  if (st.strikethrough) patch.strike = true;
+  if (st.fontCaps === 1 || st.fontCaps === 2) patch.caps = st.fontCaps === 1 ? 'small' : 'all';
+  if (st.baselineShift) patch.baselineShift = st.baselineShift * scale;
+  if (typeof st.horizontalScale === 'number' && st.horizontalScale > 0) patch.scaleX = Math.round(st.horizontalScale * 10000) / 100;
+  if (typeof st.verticalScale === 'number' && st.verticalScale > 0) patch.scaleY = Math.round(st.verticalScale * 10000) / 100;
+  if (st.autoKerning === false) patch.autoKern = 'none';
+  if (Object.keys(patch).length) layer.content = applyChar(layer.content, 0, contentLength(layer.content), patch);
+  // 0.3's font.align has no justified values; the paragraph model does
+  const just = t.paragraphStyle?.justification ?? t.paragraphStyleRuns?.[0]?.style?.justification;
+  if (typeof just === 'string' && just.startsWith('justify-')) layer.content = applyPara(layer.content, 0, contentLength(layer.content), { align: just });
+  return layer;
 }
 
 /**
@@ -560,6 +580,15 @@ const mixBack = (c, def) => ({ r: c?.red ?? def.r, g: c?.green ?? def.g, b: c?.b
 const cmyk = (v) => ({ c: v?.c ?? 0, m: v?.m ?? 0, y: v?.y ?? 0, k: v?.k ?? 0 });
 const SELECTIVE = ['reds', 'yellows', 'greens', 'cyans', 'blues', 'magentas', 'whites', 'neutrals', 'blacks'];
 
+// ag-psd writes each location times the smoothness ('Intr' = smoothness x 4096), but Photoshop reads locations out of
+// 4096 whatever the smoothness, and smoothness 0 would write every location as 0 (read back as 0 / 0). So the
+// smoothness is kept at 1 / 4096 or more and the locations are divided by it first: the file holds location x 4096
+const psdGradientStops = (smoothness, colorStops, opacityStops) => {
+  const sm = Math.max(1, Math.round(Math.max(0, Math.min(1, smoothness ?? 1)) * 4096)) / 4096;
+  const scale = (s) => ({ ...s, location: s.location / sm });
+  return { smoothness: sm, colorStops: colorStops.map(scale), opacityStops: opacityStops.map(scale) };
+};
+
 /** PSD adjustment data for a Pigment adjustment layer, or null when the kind has no PSD equivalent. */
 export function adjustmentToPsd(kind, p = {}) {
   switch (kind) {
@@ -569,7 +598,18 @@ export function adjustmentToPsd(kind, p = {}) {
     case 'curves': return { type: 'curves', rgb: cv(p.rgb ?? [[0, 0], [255, 255]]), red: cv(p.r), green: cv(p.g), blue: cv(p.b) };
     case 'exposure': return { type: 'exposure', exposure: p.exposure ?? 0, offset: p.offset ?? 0, gamma: p.gamma ?? 1 };
     case 'vibrance': return { type: 'vibrance', vibrance: p.vibrance ?? 0, saturation: p.saturation ?? 0 };
-    case 'hue-saturation': return { type: 'hue/saturation', master: hueCh(p), reds: ZERO_HUE, yellows: ZERO_HUE, greens: ZERO_HUE, cyans: ZERO_HUE, blues: ZERO_HUE, magentas: ZERO_HUE };
+    case 'hue-saturation': {
+      // Master and the colour ranges (J.9): PSD keeps one record per range in Photoshop's order, its bounds a..d in
+      // degrees with its three values; an unused range is written with its default bounds and no change, as Photoshop
+      // does. (0.3's single `range` comes through hueSatRanges as that one range.)
+      const { master, ranges } = hueSatRanges(p);
+      const slot = (base) => {
+        const r = ranges.find((x) => x.base === base);
+        const [a, b, c, d] = (r?.bounds ?? DEFAULT_RANGE_BOUNDS[base]).map(Math.round);
+        return { a, b, c, d, hue: Math.round(r?.hue ?? 0), saturation: Math.round(r?.saturation ?? 0), lightness: Math.round(r?.lightness ?? 0) };
+      };
+      return { type: 'hue/saturation', master: hueCh({ hue: Math.round(master.hue), saturation: Math.round(master.saturation), lightness: Math.round(master.lightness) }), ...Object.fromEntries(HUE_BASES.map((b) => [b, slot(b)])) };
+    }
     case 'color-balance': return { type: 'color balance', shadows: cb(p.shadows), midtones: cb(p.midtones), highlights: cb(p.highlights), preserveLuminosity: p.preserveLuminosity !== false };
     case 'black-white': return { type: 'black & white', reds: p.reds ?? 40, yellows: p.yellows ?? 60, greens: p.greens ?? 40, cyans: p.cyans ?? 60, blues: p.blues ?? 20, magentas: p.magentas ?? 80, useTint: !!p.tint, tintColor: psdColor(p.tint || '#e6c8a0') };
     case 'photo-filter': return { type: 'photo filter', color: psdColor(p.color ?? '#ec8a00'), density: p.density ?? 25, preserveLuminosity: p.preserveLuminosity !== false };
@@ -577,13 +617,16 @@ export function adjustmentToPsd(kind, p = {}) {
     case 'posterize': return { type: 'posterize', levels: p.levels ?? 4 };
     case 'threshold': return { type: 'threshold', level: p.level ?? 128 };
     case 'gradient-map': {
-      // a v2 def (G.1) is normalised: its colour stops with their midpoints and its opacity stops (0.3 stops as 0.3 wrote them)
+      // a v2 def (G.1) is normalised: its colour stops with their midpoints and its opacity stops. 0.3 stops are linear,
+      // which is smoothness 0. The method is not written: ag-psd writes grdm version 3's method as a descriptor enum
+      // ('gradientInterpolationMethodType.Gcls') where the file wants a 4-character code, and reads any code back as
+      // Perceptual, so a file with it would be broken for Photoshop
       if (isGradientV2(p)) {
         const g = normalizeGradient(p);
-        return { type: 'gradient map', name: 'Gradient', gradientType: 'solid', reverse: !!p.reverse, dither: !!p.dither, smoothness: g.smoothness, colorStops: g.stops.map((s) => ({ location: s.pos, midpoint: s.mid, color: psdColor(s.color) })), opacityStops: g.opacityStops.map((s) => ({ location: s.pos, midpoint: s.mid, opacity: s.opacity })) };
+        return { type: 'gradient map', name: 'Gradient', gradientType: 'solid', reverse: !!p.reverse, dither: !!p.dither, ...psdGradientStops(g.smoothness, g.stops.map((s) => ({ location: s.pos, midpoint: s.mid, color: psdColor(s.color) })), g.opacityStops.map((s) => ({ location: s.pos, midpoint: s.mid, opacity: s.opacity }))) };
       }
       const stops = (p.stops?.length ? p.stops : [{ offset: 0, color: '#000000' }, { offset: 1, color: '#ffffff' }]).map((s) => ({ location: s.offset ?? s.pos ?? 0, midpoint: 0.5, color: psdColor(s.color) }));
-      return { type: 'gradient map', name: 'Gradient', gradientType: 'solid', reverse: !!p.reverse, dither: false, smoothness: 1, colorStops: stops, opacityStops: [{ location: 0, midpoint: 0.5, opacity: 1 }, { location: 1, midpoint: 0.5, opacity: 1 }] };
+      return { type: 'gradient map', name: 'Gradient', gradientType: 'solid', reverse: !!p.reverse, dither: false, ...psdGradientStops(0, stops, [{ location: 0, midpoint: 0.5, opacity: 1 }, { location: 1, midpoint: 0.5, opacity: 1 }]) };
     }
     case 'selective-color': return { type: 'selective color', mode: p.relative === false ? 'absolute' : 'relative', ...Object.fromEntries(SELECTIVE.map((k) => [k, cmyk(p[k])])) };
     default: return null;
@@ -602,7 +645,16 @@ export function adjustmentFromPsd(a) {
     case 'vibrance': return { kind: 'vibrance', params: { vibrance: a.vibrance ?? 0, saturation: a.saturation ?? 0 } };
     case 'hue/saturation': {
       const m = a.master ?? a.channels?.[0] ?? {};
-      return { kind: 'hue-saturation', params: { hue: m.hue ?? 0, saturation: m.saturation ?? 0, lightness: m.lightness ?? 0, colorize: false, colorizeHue: 0, colorizeSat: 25, colorizeLight: 0, range: 'master' } };
+      // the colour ranges that change something (J.9), with their bounds (all zero in files 0.3 wrote: the defaults)
+      const ranges = [];
+      for (const base of HUE_BASES) {
+        const c = a[base];
+        if (!c || (!c.hue && !c.saturation && !c.lightness)) continue;
+        const raw = [c.a, c.b, c.c, c.d];
+        const bounds = raw.every((v) => !v) ? null : normalizeBounds(raw);
+        ranges.push({ base, bounds: bounds ?? [...DEFAULT_RANGE_BOUNDS[base]], hue: c.hue ?? 0, saturation: c.saturation ?? 0, lightness: c.lightness ?? 0 });
+      }
+      return { kind: 'hue-saturation', params: { hue: m.hue ?? 0, saturation: m.saturation ?? 0, lightness: m.lightness ?? 0, colorize: false, colorizeHue: 0, colorizeSat: 25, colorizeLight: 0, range: 'master', ranges } };
     }
     case 'color balance': return { kind: 'color-balance', params: { shadows: cbBack(a.shadows), midtones: cbBack(a.midtones), highlights: cbBack(a.highlights), preserveLuminosity: a.preserveLuminosity !== false } };
     case 'black & white': return { kind: 'black-white', params: { reds: a.reds ?? 40, yellows: a.yellows ?? 60, greens: a.greens ?? 40, cyans: a.cyans ?? 60, blues: a.blues ?? 20, magentas: a.magentas ?? 80, tint: a.useTint ? rgbFromPsd(a.tintColor, '#e6c8a0') : null } };
@@ -611,8 +663,23 @@ export function adjustmentFromPsd(a) {
     case 'posterize': return { kind: 'posterize', params: { levels: a.levels ?? 4 } };
     case 'threshold': return { kind: 'threshold', params: { level: a.level ?? 128 } };
     case 'gradient map': {
-      const stops = (a.colorStops ?? []).map((s) => ({ offset: Math.max(0, Math.min(1, s.location ?? 0)), color: rgbFromPsd(s.color) }));
-      return { kind: 'gradient-map', params: { stops: stops.length >= 2 ? stops : [{ offset: 0, color: '#000000' }, { offset: 1, color: '#ffffff' }], reverse: !!a.reverse } };
+      // ag-psd divides the locations by the smoothness ('Intr', 0..4096), Photoshop stores them out of 4096: multiply it
+      // back. Smoothness 0 leaves nothing to multiply (0 / 0): the stops are then spread evenly
+      const sm = Number.isFinite(a.smoothness) ? Math.max(0, Math.min(1, a.smoothness)) : 1;
+      const loc = (list) => list.map((s, i) => (sm > 0 && Number.isFinite(s.location) ? Math.max(0, Math.min(1, s.location * sm)) : list.length > 1 ? i / (list.length - 1) : 0));
+      const colorStops = a.colorStops ?? [], opacityStops = a.opacityStops ?? [];
+      const cpos = loc(colorStops), opos = loc(opacityStops);
+      const mid = (s) => Math.max(0.05, Math.min(0.95, Number.isFinite(s.midpoint) ? s.midpoint : 0.5));
+      const smoothness = sm * 4096 <= 1 ? 0 : sm; // adjustmentToPsd writes smoothness 0 as 1 / 4096
+      // a.method is not trusted: ag-psd decodes every grdm version 3 method as Perceptual (see adjustmentToPsd)
+      const interpolation = 'classic';
+      const plain = smoothness === 0 && colorStops.every((s, i) => i === 0 || mid(s) === 0.5) && opacityStops.every((s) => (s.opacity ?? 1) >= 1);
+      if (colorStops.length >= 2 && !plain) {
+        // midpoints, transparency or smoothness: a v2 def (G.1) keeps them
+        return { kind: 'gradient-map', params: { gradientVersion: 2, type: 'solid', interpolation, smoothness, stops: colorStops.map((s, i) => ({ pos: cpos[i], mid: mid(s), color: rgbFromPsd(s.color) })), opacityStops: opacityStops.length ? opacityStops.map((s, i) => ({ pos: opos[i], mid: mid(s), opacity: Math.max(0, Math.min(1, s.opacity ?? 1)) })) : [{ pos: 0, mid: 0.5, opacity: 1 }, { pos: 1, mid: 0.5, opacity: 1 }], reverse: !!a.reverse, dither: !!a.dither } };
+      }
+      const stops = colorStops.map((s, i) => ({ offset: cpos[i], color: rgbFromPsd(s.color) }));
+      return { kind: 'gradient-map', params: { stops: stops.length >= 2 ? stops : [{ offset: 0, color: '#000000' }, { offset: 1, color: '#ffffff' }], reverse: !!a.reverse, dither: !!a.dither } };
     }
     case 'selective color': return { kind: 'selective-color', params: { ...Object.fromEntries(SELECTIVE.map((k) => [k, cmyk(a[k])])), relative: a.mode !== 'absolute' } };
     default: return null;
@@ -694,8 +761,13 @@ export function writePsdDocument(doc, compositor) {
   const shown = (canvas, x, y) => (modeRender ? inked(canvas, x, y) : canvas);
   let pixelText = 0; // text layers written as pixels because PSD text cannot hold their formatting (J.8)
   let otherSpace = 0; // Levels / Curves in a Gray, CMYK or Lab channel space: PSD gets their RGB channels only (J.8)
+  let styled = 0; // layers whose effects or advanced blending options (Blend If, knockout, channels) PSD does not get
+  const noPsd = new Map(); // adjustment name -> count: kinds PSD has no layer for (written as hidden placeholders)
+  let colorized = 0; // Hue/Saturation layers set to Colorize: PSD gets their Master and ranges only
   const toPsd = (layer) => {
     const lk = layer.locked ?? {};
+    // no effects or advanced blending are written yet: the layer opens bare in Photoshop or Pigment
+    if (hasEnabledStyles(layer.styles) || !isDefaultBlending(layer.blending)) styled++;
     const base = {
       name: layer.name,
       hidden: !layer.visible,
@@ -713,6 +785,11 @@ export function writePsdDocument(doc, compositor) {
     if (layer.type === 'adjustment') {
       const adjustment = adjustmentToPsd(layer.kind, layer.params);
       if ((layer.kind === 'levels' || layer.kind === 'curves') && layer.params?.space && layer.params.space !== 'rgb') otherSpace++;
+      if (layer.kind === 'hue-saturation' && layer.params?.colorize) colorized++;
+      if (!adjustment) {
+        const what = adjustmentDef(layer.kind)?.name ?? layer.kind;
+        noPsd.set(what, (noPsd.get(what) ?? 0) + 1);
+      }
       if (adjustment) return { ...base, adjustment };
       // no PSD equivalent: keep an empty hidden placeholder so the layer order survives
       return { ...base, name: `${layer.name} (${layer.kind})`, hidden: true, left: 0, top: 0, canvas: createCanvas(1, 1) };
@@ -749,8 +826,26 @@ export function writePsdDocument(doc, compositor) {
     canvas: flattenDocument(doc, compositor),
     imageResources: { resolutionInfo: { horizontalResolution: doc.dpi, horizontalResolutionUnit: 'PPI', widthUnit: 'Inches', verticalResolution: doc.dpi, verticalResolutionUnit: 'PPI', heightUnit: 'Inches' } },
   };
+  // guides are image resource 1032 (positions in 1/32 px, unsigned: a guide left of or above the canvas cannot be
+  // written). The ruler origin has no resource PSD files from Pigment write: it is reported below
+  const guides = (doc.guides ?? []).filter((g) => g.pos >= 0 && g.pos * 32 < 2 ** 32);
+  if (guides.length) psd.imageResources.gridAndGuidesInformation = { guides: guides.map((g) => ({ location: g.pos, direction: g.axis === 'y' ? 'horizontal' : 'vertical' })) };
+  const lostGuides = (doc.guides?.length ?? 0) - guides.length;
+  const origin = doc.store?.get?.('rulerOrigin');
+  const movedOrigin = !!origin && (origin.x !== 0 || origin.y !== 0);
   const bytes = writePsdUint8Array(psd, { generateThumbnail: true, noBackground: true });
   if (otherSpace) doc.view?.app?.dialogs?.toast(`${otherSpace} Levels or Curves layer${otherSpace === 1 ? '' : 's'} in a Gray, CMYK or Lab channel space ${otherSpace === 1 ? 'was' : 'were'} saved without ${otherSpace === 1 ? 'its' : 'their'} settings: PSD keeps RGB channels only`, { timeout: 4000 });
+  if (styled) doc.view?.app?.dialogs?.toast(`${styled} layer${styled === 1 ? '' : 's'} with layer effects or Blending Options ${styled === 1 ? 'was' : 'were'} saved without them: PSD files from Pigment do not keep effects yet`, { timeout: 4000 });
+  // what changes the picture or the document without a PSD equivalent is said, as for text and channel spaces (J.8)
+  if (noPsd.size) {
+    const n = [...noPsd.values()].reduce((a, b) => a + b, 0);
+    doc.view?.app?.dialogs?.toast(`${n} adjustment layer${n === 1 ? '' : 's'} (${[...noPsd.keys()].join(', ')}) ${n === 1 ? 'has' : 'have'} no PSD equivalent and ${n === 1 ? 'was' : 'were'} saved as ${n === 1 ? 'a hidden empty layer' : 'hidden empty layers'}, without ${n === 1 ? 'its' : 'their'} settings`, { timeout: 5000 });
+  }
+  if (colorized) doc.view?.app?.dialogs?.toast(`${colorized} Hue/Saturation layer${colorized === 1 ? '' : 's'} set to Colorize ${colorized === 1 ? 'was' : 'were'} saved without Colorize`, { timeout: 4000 });
+  if (lostGuides > 0 || movedOrigin) {
+    const parts = [lostGuides > 0 ? `${lostGuides} guide${lostGuides === 1 ? '' : 's'} outside the canvas` : '', movedOrigin ? 'the ruler origin' : ''].filter(Boolean);
+    doc.view?.app?.dialogs?.toast(`PSD does not keep ${parts.join(' or ')}: ${parts.length > 1 || lostGuides > 1 ? 'they were' : 'it was'} not saved`, { timeout: 4000 });
+  }
   if (pixelText) doc.view?.app?.dialogs?.toast(`${pixelText} text layer${pixelText === 1 ? '' : 's'} with formatting PSD text cannot hold yet ${pixelText === 1 ? 'was' : 'were'} saved as pixels`, { timeout: 4000 });
   return bytes;
 }

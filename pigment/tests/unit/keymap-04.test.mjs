@@ -3,7 +3,7 @@
 // Step 10 of the skeleton completes it with the table checks of M.4, M.7 and M.8.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { MENU_KEYS, RENDERER_KEYS, TYPE_KEYS, COMMAND_LABELS, SHORTCUT_GROUPS, BLEND_MODE_KEYS, parseAccelerator, eventMatches, codeToKey, typeKeyFor, sameAccelerator } from '../../src/shared/keymap.js';
+import { MENU_KEYS, RENDERER_KEYS, TYPE_KEYS, COMMAND_LABELS, SHORTCUT_GROUPS, BLEND_MODE_KEYS, parseAccelerator, eventMatches, codeToKey, typeKeyFor, sameAccelerator, runsWhileTyping } from '../../src/shared/keymap.js';
 
 const ev = (o) => ({ key: '', code: '', ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, location: 0, ...o });
 
@@ -274,4 +274,10 @@ test('non-US layouts: a letter matches by the letter produced, never by the phys
   // symbols still fall back to the physical key with Shift (US Shift+1 gives "!") and with Option on macOS
   assert.ok(eventMatches(ev({ key: '!', code: 'Digit1', shiftKey: true }), parseAccelerator('Shift+1'), false));
   assert.ok(eventMatches(ev({ key: 'Ω', code: 'KeyZ', altKey: true, metaKey: true }), parseAccelerator('CmdOrCtrl+Alt+Z'), true));
+});
+
+test('runsWhileTyping: in a text field only the edit keys and file, view, help and window commands run', () => {
+  for (const id of ['edit:undo', 'edit:redo', 'edit:copy', 'edit:paste', 'edit:cut', 'select:all', 'edit:clear', 'file:save', 'view:zoom-in', 'window:panel-layers', 'help:shortcuts']) assert.equal(runsWhileTyping(id), true, id);
+  for (const id of ['layer:merge', 'layer:via-copy', 'layer:visibility', 'layer:lock-dialog', 'image:adjust-invert', 'edit:toggle-last-state', 'layer:blend-mode-multiply']) assert.equal(runsWhileTyping(id), false, id);
+  assert.equal(COMMAND_LABELS['layer:merge-clipping'], 'Merge clipping mask');
 });

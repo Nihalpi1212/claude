@@ -184,8 +184,26 @@ export function canPlaceWith(background, layers, target, mode) {
   return true;
 }
 
+/**
+ * The layers clipped to `layer` (the run of clipped layers right above it, bottom first), or [] when it is not the base
+ * of a clipping mask. Ctrl+E on such a base is Merge Clipping Mask (Photoshop), not Merge Down.
+ */
+export function clippedAbove(layer) {
+  const kids = layer?.parent?.children;
+  if (!kids || layer.clip) return [];
+  const out = [];
+  for (let i = kids.indexOf(layer) + 1; i < kids.length && kids[i].clip; i++) out.push(kids[i]);
+  return out;
+}
+
 /** The properties the Background's rules lock (L.13). */
 export const BACKGROUND_LOCKED_PROPS = Object.freeze(['blend', 'opacity', 'fillOpacity', 'mask', 'vectorMask', 'styles', 'position']);
+
+/**
+ * The properties Lock All locks besides the pixels (Photoshop disables the layer's Opacity, Fill and blend mode, and
+ * its effects cannot change); lockedProps() answers them for a layer whose locked.all is set.
+ */
+export const LOCK_ALL_PROPS = Object.freeze(['blend', 'opacity', 'fillOpacity', 'styles', 'position']);
 
 /** Which layer properties a property patch touches, in the vocabulary of lockedProps(). */
 export function patchProps(patch) {

@@ -7,7 +7,8 @@
 // returns the element it built last time, so a drag in the editor survives the re-render setLayerProps causes.
 //
 // View previous state (Photoshop's button, and its "\" key while the panel has focus): shows the layer with the settings
-// it had when it was selected, without a history entry, until pressed again, an edit, or the section goes away.
+// it had when it was selected, without a history entry, until pressed again, an edit, any command, or the section goes
+// away.
 import { icon } from '../icons.js';
 import { buildAdjustmentEditor, adjustmentSource } from '../adjust-ui.js';
 import { setLayerProps } from '../layer-ops.js';
@@ -52,8 +53,9 @@ function render(layer, doc, { app, keep }) {
   let previewing = null; // { current } while the previous state is shown
   const endPrevious = () => {
     if (!previewing) return;
-    const { current: cur, shown } = previewing;
+    const { current: cur, shown, unobserve } = previewing;
     previewing = null;
+    unobserve?.();
     prevBtn.setAttribute('aria-pressed', 'false');
     prevBtn.classList.remove('active');
     // only while the layer still shows the previous state (an undo meanwhile replaced it: keep what the undo set)
@@ -68,7 +70,15 @@ function render(layer, doc, { app, keep }) {
     const init = INITIAL.get(layer)?.params;
     if (!init || previewing) return;
     const shown = clone(init);
-    previewing = { current: layer.params, shown };
+    // the previous state is a display only: any command (Save, Duplicate, Merge, Undo...) first puts the layer's own
+    // settings back, so it never saves, copies or merges the settings that are only being shown
+    const offCommand = app.commands?.observe?.({ before: () => endPrevious() });
+    const offSaving = app.on?.('doc:saving', () => endPrevious()); // a save outside a command (the quit prompt)
+    const unobserve = () => {
+      offCommand?.();
+      offSaving?.();
+    };
+    previewing = { current: layer.params, shown, unobserve };
     prevBtn.setAttribute('aria-pressed', 'true');
     prevBtn.classList.add('active');
     state.params = shown; // keep this element through the re-render
@@ -113,10 +123,16 @@ function render(layer, doc, { app, keep }) {
     }
   };
   let frame = null;
+  // Only a run of this section's own continuous edits (a drag, typing) merges into one entry: not into a Reset or
+  // another entry on top, and an eyedropper pick, a preset or Auto (`discrete`) is a step of its own
+  let lastEdit = null, discrete = false;
   const commit = (params, label = `Edit ${layer.name}`) => {
     if (app.doc !== doc || doc.active !== layer) return;
     endPrevious();
-    setLayerProps(app, layer, { params: clone(params) }, label, { merge: true });
+    const top = doc.history.entries[doc.history.index];
+    setLayerProps(app, layer, { params: clone(params) }, label, { merge: !discrete && !!lastEdit && top === lastEdit });
+    lastEdit = discrete ? null : doc.history.entries[doc.history.index];
+    discrete = false;
     state.params = layer.params; // our own edit: keep the editor (and the user's drag) alive
     frame?.paramsChanged?.(params);
   };
@@ -126,8 +142,12 @@ function render(layer, doc, { app, keep }) {
     sample: sampleBelow(app, layer),
     source: autoSource,
     getParams: () => clone(layer.params),
+    onDiscrete: () => {
+      discrete = true; // an eyedropper pick: its edit is a step of its own
+    },
     setParams: (params) => {
       editor.setParams?.(params);
+      discrete = true;
       commit(params);
       if (!editor.setParams) state.params = null; // the editor cannot show new params: rebuild it on the next render
     },

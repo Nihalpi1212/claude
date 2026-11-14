@@ -193,16 +193,31 @@ export function gradientFillSection(app, layer, paint, onChange) {
     r.append(l, control);
     box.appendChild(r);
   };
-  // the Gradient Editor previews on the canvas through onInput (no history); OK commits through onChange
+  // the Gradient Editor previews on the canvas through onInput (no history); OK commits through onChange. The widget
+  // reports a final value through onInput too, so the paint the preview replaced is kept and put back before the
+  // commit: compared with the preview, OK (or a preset pick) would change nothing and add no history entry
+  let base = null;
+  const show = (paint) => {
+    layer.paint = paint;
+    layer.touch();
+    doc.changed('preview', { layer }); // a kind the panels ignore: the canvas repaints, the section stays
+  };
+  const endPreview = () => {
+    if (base) show(base);
+    base = null;
+  };
   const widget = gradientWidget({ placement: false, method: true, compact: true }, {
     app,
     value: defOnly(def),
     onInput: (next) => {
-      layer.paint = fillPaint(app, next, v, doc);
-      layer.touch();
-      doc.changed('preview', { layer }); // a kind the panels ignore: the canvas repaints, the section stays
+      const paint = fillPaint(app, next, v, doc);
+      // Cancel reports the committed gradient again: the preview ends
+      if (JSON.stringify(paint) === JSON.stringify(fillPaint(app, def, v, doc))) return endPreview();
+      if (!base) base = layer.paint;
+      show(paint);
     },
     onChange: (next) => {
+      endPreview();
       def = next;
       commit();
     },
@@ -262,10 +277,10 @@ export async function dropGradient(app, data, target = null) {
     return;
   }
   if (target) doc.setActive(target);
+  // a dropped preset is placed across this document: the document coordinates (from, to) an older preset may still
+  // hold belong to the document it was made in
   const v = { kind: def.kind ?? 'linear', reverse: !!def.reverse, dither: !!def.dither, angle: 0, scale: 100, offsetX: 0, offsetY: 0 };
-  const paint = def.from && def.to
-    ? resolvePaint(app, { type: 'gradient', gradient: { ...normalizeGradient(def, appColors(app)) } })
-    : fillPaint(app, def, v, doc);
+  const paint = fillPaint(app, def, v, doc);
   await app.commands.run('layer:new-fill', { kind: 'gradient', paint }, 'api');
 }
 

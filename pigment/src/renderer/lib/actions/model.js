@@ -35,7 +35,7 @@ const IGNORED_GROUPS = /^(view|window|help|tool|app|actions):/;
  */
 const RECORDED_ANYWAY = new Set([
   'view:new-guide', 'view:clear-guides', 'tool:fg-color', 'tool:bg-color', 'tool:swap-colors', 'tool:default-colors',
-  'actions:play', 'actions:save-as', 'actions:select-layer', 'actions:set-selection', 'actions:transform',
+  'actions:play', 'actions:save-as', 'actions:select-layer', 'actions:set-selection', 'actions:transform', 'actions:make-layer',
 ]);
 /** Commands outside those groups that are about the application, not the image. */
 const IGNORED_COMMANDS = new Set([

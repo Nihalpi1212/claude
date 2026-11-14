@@ -63,6 +63,8 @@ export function installStamp(app) {
     const below = top.parent?.children[top.parent.children.indexOf(top) - 1];
     if (!below || below.type !== 'raster') return app.dialogs.toast('Stamp Layers needs a pixel layer below the selected one, or several selected layers', { kind: 'error', timeout: 2600 });
     if (hiddenIn(d, top) || hiddenIn(d, below)) return app.dialogs.toast('Show both layers before stamping', { kind: 'error' });
+    // the stamp replaces the lower layer's pixels: a pixel lock on it refuses, as Merge Down and painting do
+    if (below.locked?.pixels || below.locked?.all) return app.dialogs.toast('Could not stamp: the layer below is locked', { kind: 'error', timeout: 2400 });
     // the layer below keeps its blend mode and opacity: it is rendered neutral and they stay live on the result
     const keep = { blend: below.blend, opacity: below.opacity };
     Object.assign(below, { blend: 'normal', opacity: 1 });

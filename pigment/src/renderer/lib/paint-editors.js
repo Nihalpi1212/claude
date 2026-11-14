@@ -45,6 +45,7 @@ export async function createPaint(app, type, { doc = app.doc } = {}) {
 /**
  * Edits a fill layer's paint ('layer:edit-fill'): the editor previews through `live(paint)` (null puts the stored
  * paint back) and returns the new paint, or null to keep the old one; a returned paint is one history entry.
+ * Resolves to true when the paint was changed, false when the editor was cancelled.
  */
 export async function editPaint(app, layer) {
   const d = app.doc;
@@ -66,6 +67,8 @@ export async function editPaint(app, layer) {
   }
   if (result) setLayerProps(app, layer, { paint: resolvePaint(app, result) }, original.type === 'gradient' ? 'Edit gradient fill' : 'Edit fill');
   else d.changed('props', { layer });
+  // false for a cancelled editor: New Fill Layer then takes its new layer back (layer-ops.js)
+  return !!result;
 }
 
 // ---- defaults: 0.3's editors --------------------------------------------------------------------------------------

@@ -259,6 +259,8 @@ function buildField(f, values, changed, form) {
         wrap.appendChild(u);
       }
       const commit = (raw, from) => {
+        // an emptied field is no entry (Number('') would be 0): the change handler puts the last value back
+        if (String(raw ?? '').trim() === '') return false;
         let v = Number(raw);
         if (!Number.isFinite(v)) return false;
         v = clamp(v, f.min, f.max);

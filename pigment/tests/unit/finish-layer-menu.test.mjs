@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   neutralFill, neutralName, digitPercent, cycleBlend, arrangeChildren, distributeMoves, panelRows, navigateRow,
-  canPlaceWith, BACKGROUND_LOCKED_PROPS, patchProps,
+  canPlaceWith, BACKGROUND_LOCKED_PROPS, patchProps, clippedAbove, LOCK_ALL_PROPS,
 } from '../../src/renderer/lib/layer-menu-model.js';
 
 test('neutral fills: white for darkening modes, black for lightening and difference modes, grey for contrast modes', () => {
@@ -121,4 +121,18 @@ test('Background rules: the Background never moves, nothing goes below it, every
   assert.equal(canPlaceWith(bg, [a], g, 'inside'), true);
   assert.deepEqual([...BACKGROUND_LOCKED_PROPS], ['blend', 'opacity', 'fillOpacity', 'mask', 'vectorMask', 'styles', 'position']);
   assert.deepEqual(patchProps({ opacity: 0.5, name: 'x', blend: 'multiply', visible: false }), ['opacity', 'blend']);
+});
+
+test('clippedAbove: the run of clipped layers right above a base (Ctrl+E is Merge Clipping Mask there); Lock All props', () => {
+  const root = { children: [] };
+  const mk = (name, clip = false) => ({ name, clip, parent: root });
+  const [bg, base, c1, c2, top, c3] = [mk('bg'), mk('base'), mk('c1', true), mk('c2', true), mk('top'), mk('c3', true)];
+  root.children.push(bg, base, c1, c2, top, c3);
+  assert.deepEqual(clippedAbove(base).map((l) => l.name), ['c1', 'c2']);
+  assert.deepEqual(clippedAbove(top).map((l) => l.name), ['c3']);
+  // a clipped layer is no base, nor is a layer with nothing clipped above it
+  assert.deepEqual(clippedAbove(c1), []);
+  assert.deepEqual(clippedAbove(bg), []);
+  assert.deepEqual(clippedAbove(null), []);
+  assert.deepEqual([...LOCK_ALL_PROPS].sort(), ['blend', 'fillOpacity', 'opacity', 'position', 'styles']);
 });

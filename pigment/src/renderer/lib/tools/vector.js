@@ -533,7 +533,10 @@ export function createShapeLayer(app, path, { name, label, style, kind = 'path',
   structural(app, label, () => {
     doc.add(layer);
     doc.setActive(layer);
-  });
+  }, doc, { made: layer });
+  // actions (lib/actions.js): a recording keeps the new layer as a Make Shape Layer step (inside a command, the
+  // command is the step and this is ignored)
+  app.emit('layer:made', { doc, layer, entry: doc.history.entries[doc.history.index] });
   return layer;
 }
 

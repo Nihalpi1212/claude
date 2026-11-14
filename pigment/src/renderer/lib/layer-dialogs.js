@@ -202,7 +202,9 @@ export function install(app) {
   function digit(prop, d, ctx) {
     const document = doc();
     if (!document?.active || paints(app.tools?.active)) return;
-    const layers = selectedOrActive(document).filter((l) => !lockedProp(app, l, prop));
+    // groups and adjustment layers have no Fill (the Layers panel disables it for them): the fill keys skip them
+    const noFill = (l) => prop === 'fillOpacity' && (l.isGroup || l.type === 'adjustment');
+    const layers = selectedOrActive(document).filter((l) => !lockedProp(app, l, prop) && !noFill(l));
     if (!layers.length) return;
     const ids = layers.map((l) => l.id).sort().join(',');
     const now = performance.now();

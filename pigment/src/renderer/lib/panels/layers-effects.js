@@ -64,6 +64,11 @@ function effectOp(app, arg) {
     setLayerProps(app, layer, { styles }, hidden ? 'Hide all effects' : 'Show all effects');
     return;
   }
+  // the eyes stay free (like a layer's own eye); removing or moving effects off a locked layer is refused
+  if (['delete', 'clear', 'move'].includes(op) && layer.styles && !isStyleable(layer, app)) {
+    app.dialogs.toast(`${layer.name} is locked: its effects cannot change`, { kind: 'error', timeout: 2400 });
+    return;
+  }
   if (op === 'delete') {
     if (!listedEffects(layer.styles).some((e) => e.key === key && e.index === index)) return;
     setLayerProps(app, layer, { styles: removeEffect(layer.styles, key, index) }, `Delete ${effectName(key)}`);
@@ -171,7 +176,7 @@ function wire(app, li, layer, entry, ctx) {
   li.addEventListener('dblclick', (e) => {
     if (e.target.closest('.eye')) return;
     if (d.active !== layer) d.setActive(layer);
-    app.commands.run('layer:style', entry ? entry.key : 'dialog', 'panel');
+    app.commands.run('layer:style', entry ? { key: entry.key, index: entry.index } : 'dialog', 'panel');
   });
   li.addEventListener('contextmenu', (e) => {
     e.preventDefault();
@@ -189,7 +194,7 @@ function effectMenu(app, layer, entry) {
   const items = [];
   if (entry) {
     items.push(
-      { label: `Edit ${entry.name}…`, onSelect: run('layer:style', entry.key) },
+      { label: `Edit ${entry.name}…`, onSelect: run('layer:style', { key: entry.key, index: entry.index }) },
       { label: entry.fx.enabled ? `Hide ${entry.name}` : `Show ${entry.name}`, onSelect: () => runEffect(app, { id: layer.id, op: 'toggle', key: entry.key, index: entry.index }) },
       { label: `Delete ${entry.name}`, onSelect: () => runEffect(app, { id: layer.id, op: 'delete', key: entry.key, index: entry.index }) },
       { type: 'separator' },

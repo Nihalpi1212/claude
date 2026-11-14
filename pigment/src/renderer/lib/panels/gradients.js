@@ -10,7 +10,7 @@
 import { icon } from '../icons.js';
 import { gradientPicker, gradientSettings, saveGradientSettings, editPresets, newGroup, renamePreset, resolvedPresetData, appColors } from '../gradient-picker.js';
 import { GRADIENT_KIND } from '../gradient-presets.js';
-import { importPresets, exportPresets } from '../gradient-editor.js';
+import { importPresets, exportPresets, defOnly } from '../gradient-editor.js';
 import { isLiveGradient } from '../tools/fill.js';
 import { setLayerProps } from '../layer-ops.js';
 import { normalizeGradient, PLACEMENT_KEYS } from '../../../shared/pixels/gradient-model.js';
@@ -27,17 +27,22 @@ export function applyGradientPreset(app, preset) {
     setLayerProps(app, layer, { paint: { type: 'gradient', gradient: { ...resolvedPresetData(app, preset), ...keep } } }, 'Apply gradient preset');
     return 'layer';
   }
-  app.tools.setOpt('gradient', 'gradient', JSON.parse(JSON.stringify(preset.data)));
+  // the tool keeps its own placement (an older preset may still hold a layer's from / to)
+  app.tools.setOpt('gradient', 'gradient', defOnly(JSON.parse(JSON.stringify(preset.data))));
   app.tools.setOpt('gradient', 'preset', preset.id);
   return 'tool';
 }
 
-/** The gradient a new preset is made from: the active Gradient Fill layer's, else the Gradient tool's. */
+/**
+ * The gradient a new preset is made from: the active Gradient Fill layer's, else the Gradient tool's. A preset holds
+ * the def only (G.1): the layer's style, reverse and document coordinates stay on the layer, or every later drop or
+ * pick would place the gradient where it sat in this document.
+ */
 function currentGradient(app) {
   const layer = app.doc?.active;
-  if (layer?.type === 'fill' && layer.paint?.type === 'gradient') return normalizeGradient(layer.paint.gradient, appColors(app));
+  if (layer?.type === 'fill' && layer.paint?.type === 'gradient') return defOnly(normalizeGradient(layer.paint.gradient, appColors(app)));
   const tool = app.tools?.tools?.get?.('gradient');
-  return normalizeGradient(tool?.currentGradient?.() ?? {}, { keepRefs: true });
+  return defOnly(normalizeGradient(tool?.currentGradient?.() ?? {}, { keepRefs: true }));
 }
 
 export function install(app) {

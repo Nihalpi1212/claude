@@ -14,7 +14,8 @@
 import { COMMAND_LABELS, MENU_KEYS, RENDERER_KEYS, parseAccelerator } from '../../shared/keymap.js';
 import { UNDO_LIKE } from './sessions.js';
 import { bridge, isMac } from './bridge.js';
-import { canvasIsBlank } from './document.js';
+import { canvasIsBlank, layerFromDescription } from './document.js';
+import { structural } from './layer-ops.js';
 import { hasEnabledStyles } from '../../shared/pixels/styles.js';
 import { Selection } from './selection.js';
 import { baseName, extOf, isLayeredPath } from './io.js';
@@ -720,6 +721,8 @@ class ActionsEngine {
     const before = rec.lastSelection.get(d) ?? null;
     const now = currentSelection(d);
     if (before === now) {
+      // a text or shape layer made by its tool is recorded as Make Text / Shape Layer (onLayerMade), not a stroke
+      if (entry.made) return;
       const label = entry.label ?? '';
       if (label && !/transform/i.test(label)) this.warnOnce('tool', `“${label}” was not recorded: actions record commands and selections, not tool strokes`);
       return;
@@ -732,6 +735,33 @@ class ActionsEngine {
     // the step stores the resulting selection, so consecutive tool selections collapse into the last one
     if (last?.command === 'actions:set-selection' && rec.marks.get(last.id)?.tool) steps.pop();
     this.appendRecorded(M.makeStep('actions:set-selection', arg, now ? 'Set Selection' : 'Deselect'), { doc: d, entry, tool: true });
+  }
+
+  /**
+   * The Type tool committed a new text layer, or a shape tool drew a new shape layer (their 'layer:made' event):
+   * recorded as Photoshop's Make Text Layer / Make Shape Layer, the layer's whole description (text and its
+   * character and paragraph formats; geometry, fill and stroke), so later steps on that layer replay.
+   */
+  onLayerMade({ doc: d, layer, entry = null } = {}) {
+    const rec = this.recording;
+    if (!rec || !layer || this.playing || this.frames.length || d !== this.app.doc) return;
+    if (layer.type !== 'text' && layer.type !== 'shape') return;
+    // the document's description holds the type's own fields (content, path, fill…); the layer's alone does not
+    const find = (list) => {
+      for (const l of list ?? []) {
+        const hit = l.id === layer.id ? l : find(l.children);
+        if (hit) return hit;
+      }
+      return null;
+    };
+    const desc = find(d.describe().layers);
+    if (!desc) return;
+    delete desc.id;
+    if (entry) rec.seen.add(entry);
+    this.noteLayers(d);
+    const label = `Make ${layer.type === 'text' ? 'Text' : 'Shape'} Layer “${layer.name}”`;
+    const at = entry ? d.history.entries.indexOf(entry) : -1;
+    this.appendRecorded(M.makeStep('actions:make-layer', { layer: desc }, label), at >= 0 && at <= d.history.index ? { doc: d, entry } : null);
   }
 
   // ---- playback -----------------------------------------------------------------------------------------------
@@ -942,6 +972,20 @@ class ActionsEngine {
 
 // ---- helper commands recorded in place of ones that cannot replay ---------------------------------------------
 
+/** Makes the text or shape layer a recorded Make Text / Shape Layer step describes, above the active layer. */
+function makeLayer(app, arg) {
+  const d = app.doc;
+  const desc = arg?.layer;
+  if (!d || !desc || (desc.type !== 'text' && desc.type !== 'shape')) return false;
+  // a fresh id: the recorded one belongs to the document it was recorded in
+  const layer = layerFromDescription({ ...JSON.parse(JSON.stringify(desc)), id: undefined, children: undefined });
+  structural(app, desc.type === 'text' ? 'Make Text Layer' : 'Make Shape Layer', () => {
+    d.add(layer);
+    d.setActive(layer);
+  });
+  return true;
+}
+
 /** Applies a recorded Free Transform to the current target: the same linear part about the new centre plus the recorded shift. */
 function applyTransform(app, arg) {
   const tt = app.transformTool;
@@ -1040,6 +1084,7 @@ export function install(app) {
   app.on('history:changed', (d) => engine.onHistoryChanged(d));
   app.on('color:changed', (c) => engine.onColorChanged(c ?? {}));
   app.on('layer:activated', (e) => engine.onLayerActivated(e));
+  app.on('layer:made', (e) => engine.onLayerMade(e));
   app.on('doc:opened', (d) => {
     engine.recording?.lastSelection.set(d, currentSelection(d));
     engine.noteLayers(d);
@@ -1242,6 +1287,7 @@ export function install(app) {
     // steps recorded in place of commands whose own form cannot replay (see substitute / onTransformCommitted)
     'actions:transform': { label: 'Free Transform', enabled: () => !!app.transformTool?.canStart(), run: (arg) => applyTransform(app, arg) },
     'actions:select-layer': { label: 'Select Layer', enabled: () => !!app.doc, run: (arg) => selectLayerByName(app, arg) },
+    'actions:make-layer': { label: 'Make Layer', enabled: () => !!app.doc, run: (arg) => makeLayer(app, arg) },
     'actions:save-as': { label: 'Save As', enabled: () => !!app.doc, run: (arg) => saveAs(app, engine, arg) },
     'actions:set-selection': {
       label: 'Set Selection',

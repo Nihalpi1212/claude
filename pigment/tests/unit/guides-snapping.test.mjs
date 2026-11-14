@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Snap, bestSnap, enabledKinds, gridLines, snapDisabled, EDGES, TOLERANCE_PX } from '../../src/renderer/lib/snap.js';
-import { Rulers, parseMeasure, perUnitFor, roundForUnit, unitFromSuffix } from '../../src/renderer/lib/rulers.js';
+import { Rulers, parseMeasure, perUnitFor, roundForUnit, unitFromSuffix, UNITS, UNIT_NAMES } from '../../src/renderer/lib/rulers.js';
 import { guideLayout, guidesFromBounds, mergeGuides, normalizeLayout, trackEdges } from '../../src/renderer/lib/guide-layout.js';
 import { alignmentLines, distances, spacingTargets, spacingMarks, boxEdges } from '../../src/renderer/lib/smart-guides.js';
 import { DocStore } from '../../src/renderer/lib/doc-store.js';
@@ -307,4 +307,21 @@ test('the ruler origin moves with the image (Image Size, crop) and is one undoab
   // the untouched origin stays on the corner (Canvas Size, Rotate Arbitrary)
   doc.store.transformAll([0.98, 0.17, -0.17, 0.98, 30, 12], { width: 150, height: 150 });
   assert.deepEqual(r.origin(doc), { x: 0, y: 0 });
+});
+
+test('the rulers have Picas (1 pc = 12 pt): a unit, a typed suffix and a readout', () => {
+  // hunt5 canvas-vector: view:ruler-unit 'pica' was ignored and '1pc' did not parse
+  assert.ok(UNITS.includes('pica'));
+  assert.equal(UNIT_NAMES.pica, 'Picas');
+  assert.equal(perUnitFor('pica', { dpi: 72 }, 'x'), 12);
+  assert.equal(perUnitFor('pica', { dpi: 300 }, 'y'), 50);
+  for (const t of ['pc', 'pica', 'Picas']) assert.equal(unitFromSuffix(t), 'pica');
+  assert.deepEqual(parseMeasure('1.5pc'), { value: 1.5, unit: 'pica' });
+  const doc = { width: 600, height: 600, dpi: 72, history: { push() {} }, changed() {} };
+  doc.store = new DocStore(doc);
+  const r = new Rulers({ settings: { rulerUnit: 'pica' } });
+  assert.equal(r.unit(doc), 'pica');
+  assert.equal(r.parse(doc, 'x', '2'), 24);
+  assert.equal(r.parse(doc, 'x', '1 pica'), 12);
+  assert.equal(r.format(doc, 'x', 30), '2.5 pc');
 });

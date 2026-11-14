@@ -28,6 +28,7 @@ import {
 } from './layers-model.js';
 import { effectHeaderRow, effectRow, runEffect } from './layers-effects.js';
 import { panelMenuItems, panelSettings } from './layers-menu.js';
+import { clippedAbove } from '../layer-menu-model.js';
 
 export function install(app) {
   const el = document.createElement('div');
@@ -83,8 +84,11 @@ export function install(app) {
   el.querySelector('.layers-blend-slot').replaceWith(blend.element);
 
   // a scrub of the label, the arrow keys and the popup slider apply live (merged into one history entry by
-  // setLayersProps); typed digits wait for Enter, Tab or leaving the field (the field's change event)
+  // setLayersProps); typed digits wait for Enter, Tab or leaving the field (the field's change event). Each gesture is
+  // its own history state: a committed entry starts a new one, and so does the first live step after a commit (the
+  // field's change event ends a scrub, a popup drag or a run of arrow steps)
   const percentField = (labelText, attr, commandId, prop, title) => {
+    let live = false;
     const field = numericField({
       label: labelText,
       scrubby: true,
@@ -95,7 +99,11 @@ export function install(app) {
       popup: true,
       width: 46,
       className: 'input num',
-      onChange: (v) => setPercent(commandId, prop, v),
+      // a change is a typed entry (its own state) or the end of a live gesture (its value is applied already)
+      onChange: (v) => {
+        setPercent(commandId, prop, v, false);
+        live = false;
+      },
     });
     field.input.dataset[attr] = '';
     field.input.title = title;
@@ -104,16 +112,18 @@ export function install(app) {
     field.input.addEventListener('input', (e) => {
       if (e.isTrusted && typeof InputEvent !== 'undefined' && e instanceof InputEvent) return; // typing
       const v = field.get();
-      if (v !== null) setPercent(commandId, prop, v);
+      if (v === null) return;
+      setPercent(commandId, prop, v, live);
+      live = true;
     });
     return field;
   };
-  const setPercent = (commandId, prop, v) => {
+  const setPercent = (commandId, prop, v, merge = false) => {
     const layers = free(prop);
     if (!layers.length || !Number.isFinite(v)) return;
     const value = Math.max(0, Math.min(100, Math.round(v)));
     if (layers.every((l) => Math.round((l[prop] ?? 1) * 100) === value)) return;
-    app.commands.run(commandId, { ids: layers.map((l) => l.id), value }, 'panel');
+    app.commands.run(commandId, { ids: layers.map((l) => l.id), value, ...(merge ? {} : { merge: false }) }, 'panel');
   };
   const opacity = percentField('Opacity', 'opacity', 'layer:opacity', 'opacity', 'Opacity: drag the label to scrub, Shift ten times faster');
   const fill = percentField('Fill', 'fill', 'layer:fill-opacity', 'fillOpacity', 'Fill opacity (excludes layer styles): drag the label to scrub');
@@ -819,7 +829,7 @@ export function install(app) {
     const run = (cmd, arg) => () => app.commands.run(cmd, arg, 'panel');
     const d = doc();
     const several = d.selected.size > 1;
-    const mergeLabel = several ? 'Merge Layers' : layer.isGroup ? 'Merge Group' : 'Merge Down';
+    const mergeLabel = several ? 'Merge Layers' : layer.isGroup ? 'Merge Group' : clippedAbove(layer).length ? 'Merge Clipping Mask' : 'Merge Down';
     const items = [
       { label: 'Layer Properties…', onSelect: run('layer:properties', layer.id) },
       { label: 'Blending Options / Layer Style…', onSelect: run('layer:style', 'dialog') },

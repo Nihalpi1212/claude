@@ -122,6 +122,22 @@ export function shapeBounds(layer) {
   return { x: Math.floor(b.x) - pad, y: Math.floor(b.y) - pad, width: Math.ceil(b.width) + pad * 2 + 1, height: Math.ceil(b.height) + pad * 2 + 1 };
 }
 
+/**
+ * The box a shape layer's drawn content occupies (document px, not rounded): the path bounds plus what the stroke
+ * covers outside the outline (half the width centred, the width outside, nothing inside), without shapeBounds' render
+ * padding. Align, Free Transform, quick Rotate/Flip and Reveal All use it: the padded box is 1 px wider on the left and
+ * 2 px on the right, so it put shapes 1 to 2 px off and moved the transform pivot by half a pixel, and every rotate or
+ * flip then shifted the shape. Miter spikes past the outline are left out, as Photoshop measures a shape by its edges.
+ */
+export function shapeContentBounds(layer) {
+  const b = pathBounds(layer.path ?? { subpaths: [] });
+  if (!b) return null;
+  const stroke = activeStroke(layer);
+  const w = stroke ? Number(stroke.width) || 0 : 0;
+  const out = !stroke ? 0 : stroke.align === 'inside' ? 0 : stroke.align === 'outside' ? w : w / 2;
+  return { x: b.x - out, y: b.y - out, width: b.width + out * 2, height: b.height + out * 2 };
+}
+
 /** The stroke a shape layer draws, or null (none, zero width or a null paint). */
 export function activeStroke(layer) {
   const s = layer?.stroke;

@@ -251,6 +251,8 @@ function isNumericInput(el) {
   return !!el && el.tagName === 'INPUT' && !el.disabled && !el.readOnly && el.matches(NUMERIC_SELECTOR) && (el.type === 'number' || el.type === 'text');
 }
 
+// `before` is the value the field last stood for (on focus, after a commit, a step or a scrub, or when the app set
+// it): Escape restores it, an invalid entry falls back to it, and `50%` means half of it
 function stateOf(input) {
   let s = STATE.get(input);
   if (!s) {
@@ -306,7 +308,7 @@ function enterTextMode(input, text) {
   const s = stateOf(input);
   if (s.textMode) return;
   s.textMode = true;
-  s.before = input.value;
+  // `before` stays the value from before the typing: digits typed ahead of the operator are part of the entry
   // keep the box as wide as it was: some stylesheets size input[type=number] only
   s.width = input.style.width;
   if (!input.style.width && input.offsetWidth) input.style.width = `${input.offsetWidth}px`;
@@ -359,6 +361,7 @@ function commit(input) {
   }
   show(input, r, opts);
   s.ourDirty = false;
+  s.before = input.value;
   if (input.value !== before) fire(input, 'input', 'change');
 }
 
@@ -379,6 +382,8 @@ function stepBy(input, dir, mult) {
   show(input, v, opts);
   if (input.value !== was) {
     s.ourDirty = true;
+    // a step applies at once (panels act on its input event): Escape no longer takes it back
+    s.before = input.value;
     fire(input, 'input');
   }
 }
@@ -404,10 +409,11 @@ function onKeyDown(e) {
       }
       return;
     case 'Escape':
-      if (s.textMode) {
-        leaveTextMode(input);
-        input.value = s.before;
-      }
+      // Escape drops what was typed, plain digits as well as an expression: the field shows its value again and
+      // nothing is applied (setting the value also keeps the input's own change event from firing on blur)
+      leaveTextMode(input);
+      if (input.value !== s.before) input.value = s.before;
+      s.ourDirty = false;
       return;
     case 'ArrowUp':
     case 'ArrowDown':
@@ -457,7 +463,10 @@ function onChange(e) {
   const s = STATE.get(input);
   if (!s) return;
   if (s.textMode) e.stopImmediatePropagation();
-  else s.ourDirty = false;
+  else {
+    s.ourDirty = false;
+    s.before = input.value; // typed digits committed (Enter, Tab, blur)
+  }
 }
 
 function onFocusIn(e) {
@@ -550,6 +559,7 @@ function onScrubMove(e) {
   show(s.input, v, s.opts);
   if (s.input.value !== s.last) {
     s.last = s.input.value;
+    stateOf(s.input).before = s.input.value; // applied live, as a step
     fire(s.input, 'input');
   }
 }
@@ -631,6 +641,7 @@ function showPopupSlider(anchor, input, opts) {
   range.addEventListener('input', () => {
     leaveTextMode(input);
     show(input, Number(range.value), opts);
+    stateOf(input).before = input.value; // applied live, as a step
     fire(input, 'input');
   });
   range.addEventListener('change', () => fire(input, 'change'));
@@ -728,6 +739,8 @@ export function numericField(spec = {}) {
   const set = (v, { silent = true } = {}) => {
     leaveTextMode(input);
     input.value = display(v);
+    const st = STATE.get(input);
+    if (st) st.before = input.value; // what the app holds now is what Escape returns to
     if (!silent) {
       spec.onInput?.(get());
       spec.onChange?.(get());

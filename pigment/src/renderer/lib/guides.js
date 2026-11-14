@@ -231,6 +231,7 @@ async function editGuidesDialog(app, doc, list) {
   const shared = list.every((g) => (g.color ?? null) === (list[0].color ?? null)) ? list[0].color ?? null : null;
   const col = colorFields(shared);
   const unit = r.unit(doc);
+  const shownPos = one ? String(roundForUnit(r.toRuler(doc, one.axis, one.pos), unit)) : '';
   const values = await formDialog(app, {
     title: 'Edit Selected Guides',
     className: 'guide-dialog',
@@ -242,13 +243,15 @@ async function editGuidesDialog(app, doc, list) {
       ] : []),
       ...col.fields,
     ],
-    values: { ...(one ? { position: String(roundForUnit(r.toRuler(doc, one.axis, one.pos), unit)), orientation: one.axis } : {}), ...col.values },
+    values: { ...(one ? { position: shownPos, orientation: one.axis } : {}), ...col.values },
     validate: (v) => !one || r.parse(doc, v.orientation, v.position) !== null,
   });
   if (!values) return null;
   const color = chosenColor(values);
   const out = { guides: list.map((g) => ({ id: g.id, axis: g.axis, pos: g.pos })), color };
-  if (one) {
+  // the position is shown rounded for the unit: re-parsing an untouched value would move the guide (0.337 in at 300
+  // dpi is 101.1 px, not 101), so a guide moves only when its Position or Orientation was changed
+  if (one && (String(values.position).trim() !== shownPos || values.orientation !== one.axis)) {
     const pos = r.parse(doc, values.orientation, values.position);
     if (pos !== null) out.to = { axis: values.orientation, pos: round2(pos) };
   }
@@ -487,7 +490,11 @@ export function install(app) {
     'view:ruler-unit': {
       label: 'Ruler Units',
       run: (unit) => {
-        if (!UNITS.includes(unit)) return false;
+        if (!UNITS.includes(unit)) {
+          // a script or action asking for a unit the rulers do not have is told so, not ignored
+          app.dialogs?.toast?.(`Unknown ruler unit: ${unit}. Use one of ${UNITS.join(', ')}`, { kind: 'error' });
+          return false;
+        }
         app.saveSettings({ rulerUnit: unit });
         app.view?.invalidate();
         return true;

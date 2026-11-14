@@ -89,7 +89,15 @@ export function editTypeLayers(app, layers, fn, { label, merge = false, keys = [
   if (layers.length === 1) {
     const l = layers[0];
     const patch = fn(l);
-    if (patch && Object.keys(patch).length) setLayerProps(app, l, patch, label, { merge });
+    if (!patch || !Object.keys(patch).length) return;
+    // setLayerProps keys its merge on the patched fields, and every type change patches `content`: merge only a repeat
+    // of the same change (label and attributes), as a session merges only a repeated command, so Font Size then Faux
+    // Bold stay two steps
+    const key = `text:${l.id}:${keys.join(',')}`;
+    const h = doc.history, top = h.entries[h.index];
+    setLayerProps(app, l, patch, label, { merge: merge && top?.typeKey === key && top.label === label });
+    const pushed = h.entries[h.index];
+    if (pushed && pushed !== top) pushed.typeKey = key;
     return;
   }
   const FIELDS = ['content', 'typeOptions', 'width', 'height'];

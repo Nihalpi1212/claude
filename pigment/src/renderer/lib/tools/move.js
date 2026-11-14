@@ -6,7 +6,7 @@
 // Guides cannot be picked while they are hidden or locked (View > Guides > Lock Guides). Holding Ctrl/Cmd over another
 // layer shows the distances between it and the active layer (Smart Guides), or to the canvas edges.
 import { Tool } from '../tools.js';
-import { beginLayerMove, offsetLayers } from '../layer-move.js';
+import { beginLayerMove, offsetLayers, positionLocked } from '../layer-move.js';
 import { createCanvas, RasterLayer } from '../document.js';
 import { applySelection } from './select.js';
 import { Selection } from '../selection.js';
@@ -48,10 +48,11 @@ export class MoveTool extends Tool {
       const hit = this.hitTest(p);
       if (hit) doc.setActive(hit);
     }
-    const chosen = doc.selectedLayers().filter((l) => !l.locked.position && !l.locked.all);
-    if (this.app.linkedLayers && chosen.length) return this.app.linkedLayers(chosen).filter((l) => !l.locked.position && !l.locked.all); // layers-extras (lib/layers-extras.js): linked layers move together
+    // a group with a position-locked layer inside does not move either (positionLocked)
+    const chosen = doc.selectedLayers().filter((l) => !positionLocked(l));
+    if (this.app.linkedLayers && chosen.length) return this.app.linkedLayers(chosen).filter((l) => !positionLocked(l)); // layers-extras (lib/layers-extras.js): linked layers move together
     if (chosen.length) return chosen;
-    if (doc.active && !doc.active.locked.position && !doc.active.locked.all) return [doc.active];
+    if (doc.active && !positionLocked(doc.active)) return [doc.active];
     return [];
   }
   /** Topmost visible layer with an opaque pixel under p. */

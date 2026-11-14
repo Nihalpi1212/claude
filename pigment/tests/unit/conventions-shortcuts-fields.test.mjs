@@ -93,3 +93,14 @@ test('Search: matching ranks label prefixes first and needs every word', () => {
   assert.equal(scoreEntry(entries[2], ['zzz']), 0);
   assert.deepEqual(searchEntries(entries, ''), []);
 });
+
+test('Search: on a tie the item nearer the top of the menus wins (Window > Layers before View > Snap To > Layers)', () => {
+  const entries = [
+    { id: 'view:snap-to', arg: 'layers', label: 'Layers', path: ['View', 'Snap To'] },
+    { id: 'window:panel-layers', label: 'Layers', path: ['Window'], kind: 'panel' },
+    { id: 'layer:new', label: 'Layer…', path: ['Layer', 'New'] },
+    { id: 'edit:undo', label: 'Undo', path: ['Edit'] },
+  ];
+  assert.deepEqual(searchEntries(entries, 'layers').map((e) => e.id).slice(0, 2), ['window:panel-layers', 'view:snap-to']);
+  assert.deepEqual(searchEntries(entries, 'new layer').map((e) => e.id), ['layer:new']);
+});

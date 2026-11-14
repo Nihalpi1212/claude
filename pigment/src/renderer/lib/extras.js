@@ -423,7 +423,7 @@ function keySection(id, title, order, fields) {
 const BUILTIN_PREF_SECTIONS = [
   keySection('interface', 'Interface', 10, [
     { key: 'theme', label: 'Theme', type: 'select', options: [['system', 'Match the system'], ['light', 'Light'], ['dark', 'Dark']] },
-    { key: 'rulerUnit', label: 'Ruler units', type: 'select', options: [['px', 'Pixels'], ['in', 'Inches'], ['cm', 'Centimeters'], ['mm', 'Millimeters'], ['pt', 'Points'], ['percent', 'Percent']] },
+    { key: 'rulerUnit', label: 'Ruler units', type: 'select', options: [['px', 'Pixels'], ['in', 'Inches'], ['cm', 'Centimeters'], ['mm', 'Millimeters'], ['pt', 'Points'], ['pica', 'Picas'], ['percent', 'Percent']] },
     { key: 'zoomWithWheel', label: 'Zoom with the scroll wheel (Ctrl/Cmd + wheel always zooms)', type: 'checkbox', span: true },
   ]),
   keySection('tools', 'Cursors and tools', 20, [

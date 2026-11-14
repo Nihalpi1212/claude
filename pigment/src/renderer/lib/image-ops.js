@@ -9,7 +9,7 @@ import { Selection } from './selection.js';
 import { Tool } from './tools.js';
 import { icon } from './icons.js';
 import { flattenDocument } from './compositor.js';
-import { mapShapeGeometry } from './path-ops.js';
+import { mapShapeGeometry, shapeContentBounds } from './path-ops.js';
 import { maskCanvasFor } from './mask-render.js';
 import { scaleEffects } from '../../shared/pixels/styles.js';
 import { scaleContent } from './type/model.js';
@@ -139,7 +139,13 @@ function cornerAlpha(canvas) {
   }
 }
 
-const isTranslation = (m) => m[0] === 1 && m[1] === 0 && m[2] === 0 && m[3] === 1;
+/** A fractional rect rounded out to whole pixels (the canvas Reveal All makes holds every covered pixel). */
+const pixelRect = (r) => {
+  if (!r) return null;
+  const x = Math.floor(r.x + 1e-6), y = Math.floor(r.y + 1e-6);
+  return { x, y, width: Math.ceil(r.x + r.width - 1e-6) - x, height: Math.ceil(r.y + r.height - 1e-6) - y };
+};
+const isTranslation = (m) =>m[0] === 1 && m[1] === 0 && m[2] === 0 && m[3] === 1;
 const isAxisAligned = (m) => (Math.abs(m[1]) < 1e-9 && Math.abs(m[2]) < 1e-9) || (Math.abs(m[0]) < 1e-9 && Math.abs(m[3]) < 1e-9);
 
 /** Transforms a document-sized mask canvas into a new document-sized mask (uncovered area = old background). */
@@ -758,7 +764,8 @@ export function install(app) {
     let b = { x: 0, y: 0, width: d.width, height: d.height };
     for (const l of d.layers()) {
       if (l.isGroup || l.type === 'fill' || l.type === 'adjustment') continue;
-      const lb = l.bounds();
+      // a shape counts by its drawn content, rounded out to whole pixels: its bounds() carry render padding
+      const lb = l.type === 'shape' ? pixelRect(shapeContentBounds(l)) : l.bounds();
       if (lb) b = unionRect(b, lb);
     }
     if (b.x === 0 && b.y === 0 && b.width === d.width && b.height === d.height) return app.dialogs.toast('All layer content is already visible', { timeout: 1600 });
@@ -980,7 +987,8 @@ export class TransformTool extends Tool {
         s.targets = layers;
         let box = null;
         for (const l of layers) {
-          const lb = l.type === 'raster' ? contentRect(l) : l.bounds();
+          // a shape transforms about its drawn content (path plus stroke), not its padded render box (bounds())
+          const lb = l.type === 'raster' ? contentRect(l) : l.type === 'shape' ? shapeContentBounds(l) : l.bounds();
           if (lb) box = box ? unionRect(box, lb) : lb;
         }
         if (!box) return app.dialogs.toast('The layer is empty', { kind: 'error' });

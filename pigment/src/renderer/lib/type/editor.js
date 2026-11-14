@@ -54,6 +54,9 @@ function commandForKey(e) {
 
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 const isGlyphLayout = (lay) => !!lay?.glyphs;
+// the arrow pressed in vertical type -> the key it means in the unrotated layout: down the column is the next
+// character, a column to the left is the next line
+const VERTICAL_KEYS = { ArrowUp: 'ArrowLeft', ArrowDown: 'ArrowRight', ArrowLeft: 'ArrowDown', ArrowRight: 'ArrowUp' };
 
 /** The type tool (horizontal or vertical) whose session is open, or null. */
 export function editingTool(app) {
@@ -617,8 +620,11 @@ export class TypeEditor {
 
   /** Arrow keys, Home, End, Page Up / Down; with Shift they extend the selection. True when handled. */
   navigate(e) {
-    const k = e.key;
+    let k = e.key;
     if (!/^(Arrow(Left|Right|Up|Down)|Home|End|PageUp|PageDown)$/.test(k) || e.altKey) return false;
+    // vertical type (rotated or stacked) runs its characters down and its lines right to left: turn the key into the
+    // layout's own direction, so the caret moves the way the arrow points (Photoshop)
+    if ((this.layer.typeOptions?.orientation ?? 'horizontal') !== 'horizontal') k = VERTICAL_KEYS[k] ?? k;
     const t = this.text;
     const mod = isMac ? e.metaKey : e.ctrlKey;
     const word = isMac ? false : e.ctrlKey;

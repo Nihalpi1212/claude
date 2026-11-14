@@ -95,6 +95,16 @@ function applyState(s) {
   l.touch();
 }
 
+/**
+ * True when the layer cannot move: it is locked in position (or locked all), or it is a group holding such a layer.
+ * A group moves its whole content, so Photoshop refuses to move a group with a position-locked layer inside.
+ */
+export function positionLocked(layer) {
+  if (!layer) return false;
+  if (layer.locked?.position || layer.locked?.all) return true;
+  return !!layer.isGroup && layer.children.some(positionLocked);
+}
+
 /** Every layer that moves with `layers` (groups contribute their descendants). */
 function collect(layers) {
   const out = new Set();

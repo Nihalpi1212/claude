@@ -102,7 +102,7 @@ nextDirectory, autoRespond, clipboardImage, uiState, ... }` for tests.
 
 ### Settings (`src/shared/defaults.js`)
 
-theme, language of units (`rulerUnit`: px|in|cm|mm|pt|percent), `recentLimit`, `restoreSession`,
+theme, language of units (`rulerUnit`: px|in|cm|mm|pt|pica|percent), `recentLimit`, `restoreSession`,
 `lastSession`, `windowBounds`, foreground/background colours, brush defaults (size, hardness, opacity,
 flow, spacing, smoothing), `swatches` (user palette), `brushPresets`, `panelLayout` (dock state),
 `showRulers`, `showGrid`, `gridSize`, `snap`, `pixelGrid`, `checkerboard` (size, colours),
@@ -2252,7 +2252,7 @@ the active layer), patterns the pattern MIME (a Pattern Fill layer).
 **L.10 Rulers (`app.rulers`, `lib/rulers.js`, stub by the skeleton; owned by guides-snapping).**
 
 ```ts
-app.rulers.unit(doc): 'px' | 'in' | 'cm' | 'mm' | 'pt' | 'percent'     // settings.rulerUnit
+app.rulers.unit(doc): 'px' | 'in' | 'cm' | 'mm' | 'pt' | 'pica' | 'percent'     // settings.rulerUnit
 app.rulers.origin(doc): { x, y }                                      // document px
 app.rulers.toRuler(doc, axis, px, { length = false }?): number        // length: no origin (widths, heights)
 app.rulers.fromRuler(doc, axis, value, { length = false }?): number

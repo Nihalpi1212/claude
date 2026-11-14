@@ -12,6 +12,7 @@
 import { formDialog } from '../form.js';
 import { registerEffectCommands } from './layers-effects.js';
 import { groupsIn } from './layers-model.js';
+import { clippedAbove } from '../layer-menu-model.js';
 
 export const PANEL_DEFAULTS = Object.freeze({ thumbSize: 'medium', thumbBounds: 'layer', showEffects: true, expandEffects: true, fillDefaultMasks: true, addCopy: true });
 
@@ -32,7 +33,7 @@ export function panelMenuItems(app) {
   const item = (label, id, arg) => ({ label, disabled: !app.commands.has(id) || !app.commands.isEnabled(id), onSelect: () => app.commands.run(id, arg, 'panel') });
   const layer = d?.active ?? null;
   const several = (state.selectedCount ?? d?.selected.size ?? 0) > 1;
-  const mergeLabel = several ? 'Merge Layers' : layer?.isGroup ? 'Merge Group' : 'Merge Down';
+  const mergeLabel = several ? 'Merge Layers' : layer?.isGroup ? 'Merge Group' : clippedAbove(layer).length ? 'Merge Clipping Mask' : 'Merge Down';
   return [
     item('New Layer…', 'layer:new', { dialog: true }),
     item(several ? 'Duplicate Layers…' : 'Duplicate Layer…', 'layer:duplicate', { dialog: true }),

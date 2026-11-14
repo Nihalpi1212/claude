@@ -10,7 +10,7 @@ import { scaleEffects } from '../../../shared/pixels/styles.js';
 import { formDialog } from '../form.js';
 import * as T from '../../../shared/pixels/transform.js';
 import { labelOptions, normaliseLabel, labelOf } from './tags.js';
-import { canPlaceWith, BACKGROUND_LOCKED_PROPS } from '../layer-menu-model.js';
+import { canPlaceWith, BACKGROUND_LOCKED_PROPS, LOCK_ALL_PROPS } from '../layer-menu-model.js';
 
 const isAncestor = (a, l) => {
   for (let p = l.parent; p; p = p.parent) if (p === a) return true;
@@ -159,7 +159,8 @@ export function installStructure(app) {
       const bottom = d?.root?.children?.[0];
       return canPlaceWith(isBackgroundLayer(bottom) ? bottom : null, layers, target, mode);
     },
-    lockedProps: (layer) => (isBackgroundLayer(layer) ? [...BACKGROUND_LOCKED_PROPS] : []),
+    // Lock All (layer.locked.all) locks the same controls on any layer: every user of these rules follows it
+    lockedProps: (layer) => (isBackgroundLayer(layer) ? [...BACKGROUND_LOCKED_PROPS] : layer?.locked?.all ? [...LOCK_ALL_PROPS] : []),
   };
 
   // ---- Background from Layer / Layer from Background ----------------------------------------------------------

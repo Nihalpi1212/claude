@@ -7,7 +7,7 @@ import {
   shapePath, rectPath, polygonPath, linePath, ellipsePath, roundedPolygon, clampRadii, mapLiveProps, fitAffine,
   strokeReach, arrowPx, normalizeAngle, triangleVertices, customPath,
 } from '../../src/renderer/lib/shape-geometry.js';
-import { normalizeShapeProps, mapShapeGeometry, shapeBounds, dashPattern, isLiveShape, regenerateShape, livePath } from '../../src/renderer/lib/path-ops.js';
+import { normalizeShapeProps, mapShapeGeometry, shapeBounds, shapeContentBounds, dashPattern, isLiveShape, regenerateShape, livePath } from '../../src/renderer/lib/path-ops.js';
 
 const close = (a, b, eps = 1e-6) => Math.abs(a - b) <= eps;
 const pt = (p) => [Math.round(p.x * 1e4) / 1e4, Math.round(p.y * 1e4) / 1e4];
@@ -249,4 +249,20 @@ test('shapeBounds pads for the stroke alignment, miters and caps; dashes are in 
   assert.deepEqual(dashPattern({ width: 4, dash: [] }), []);
   assert.deepEqual(dashPattern({ width: 4, dash: [0, 2], cap: 'round' }), [0.001, 8]);
   assert.equal(shapeBounds({ path: { subpaths: [] } }), null);
+});
+
+test('shapeContentBounds is the drawn box (path plus the stroke outside it), without the render padding', () => {
+  // hunt5 canvas-vector: Align, Free Transform, quick Rotate/Flip and Reveal All used the padded shapeBounds, so a
+  // shape aligned 1 to 2 px off and every rotate or flip moved it by a pixel
+  const path = rectPath(50, 50, 150, 100);
+  assert.deepEqual(shapeContentBounds({ path }), { x: 50, y: 50, width: 150, height: 100 });
+  assert.deepEqual(shapeBounds({ path }), { x: 49, y: 49, width: 153, height: 103 }); // the render box stays padded
+  const b = (stroke) => shapeContentBounds({ path, stroke });
+  assert.deepEqual(b({ width: 4, color: '#000', align: 'center' }), { x: 48, y: 48, width: 154, height: 104 });
+  assert.deepEqual(b({ width: 4, color: '#000', align: 'outside', join: 'miter', miterLimit: 10 }), { x: 46, y: 46, width: 158, height: 108 });
+  assert.deepEqual(b({ width: 4, color: '#000', align: 'inside' }), { x: 50, y: 50, width: 150, height: 100 });
+  assert.deepEqual(b({ width: 4, paint: null }), { x: 50, y: 50, width: 150, height: 100 }); // no stroke drawn
+  // fractional geometry stays fractional, so the centre (the quick Rotate/Flip pivot) is the shape's own centre
+  assert.deepEqual(shapeContentBounds({ path: rectPath(10.5, 20.25, 30, 40) }), { x: 10.5, y: 20.25, width: 30, height: 40 });
+  assert.equal(shapeContentBounds({ path: { subpaths: [] } }), null);
 });

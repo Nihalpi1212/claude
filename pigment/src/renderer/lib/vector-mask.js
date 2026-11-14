@@ -273,7 +273,9 @@ function maskProperties(app, arg) {
   if (arg.feather !== undefined) next.feather = maskFeather({ feather: arg.feather });
   if (next.density === maskDensity(m) && next.feather === maskFeather(m) && 'density' in m === 'density' in next && 'feather' in m === 'feather' in next) return;
   const what = arg.density !== undefined && arg.feather === undefined ? 'Density' : arg.feather !== undefined && arg.density === undefined ? 'Feather' : 'Properties';
-  setLayerProps(app, layer, { [key]: next }, `${part === 'vector' ? 'Vector Mask' : 'Mask'} ${what}`, { merge: !!arg.merge });
+  // the merge key names the setting: Add Vector Mask, a path edit and the other slider write the same `vectorMask`
+  // (or `mask`) property, and a slider drag must not fold into them (one Undo would revert both)
+  setLayerProps(app, layer, { [key]: next }, `${part === 'vector' ? 'Vector Mask' : 'Mask'} ${what}`, { merge: !!arg.merge, mergeKey: what });
 }
 
 /** Inverts the layer mask's pixels (Properties > Invert): one pixel entry. */

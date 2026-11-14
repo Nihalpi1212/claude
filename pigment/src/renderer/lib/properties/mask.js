@@ -29,10 +29,25 @@ function slider(label, key, { value, min, max, step, unit, scale = 1, disabled, 
   num.dataset.key = key;
   const u = h('span', 'muted mvm-unit', unit);
   range.disabled = num.disabled = !!disabled;
+  // the first move of a pointer drag (and each key press) starts its own history entry; only the later moves of the
+  // same drag merge into it, so a slider never folds into an earlier entry such as Add Vector Mask or a path move
+  let drag = null; // { moved } while the pointer is down on the slider
+  range.addEventListener('pointerdown', () => {
+    drag = { moved: false };
+    const end = () => {
+      drag = null;
+      window.removeEventListener('pointerup', end, true);
+      window.removeEventListener('pointercancel', end, true);
+    };
+    window.addEventListener('pointerup', end, true);
+    window.addEventListener('pointercancel', end, true);
+  });
   range.addEventListener('input', () => {
     num.value = range.value;
-    onValue(Number(range.value) / scale, true);
+    onValue(Number(range.value) / scale, !!drag?.moved);
+    if (drag) drag.moved = true;
   });
+  // the value an input event already applied: layer:mask-properties ignores an unchanged value
   range.addEventListener('change', () => onValue(Number(range.value) / scale, true));
   num.addEventListener('change', () => {
     const v = Math.min(max, Math.max(min, Number(num.value)));

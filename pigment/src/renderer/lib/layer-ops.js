@@ -1,15 +1,17 @@
 // Layer commands (Layer menu, Layers panel buttons, shortcuts). Structural changes record a
 // snapshot of the tree so undo restores it exactly; layer pixels are never mutated by structural
 // operations (merges create new layers), so the snapshots stay valid.
-import { RasterLayer, GroupLayer, FillLayer, AdjustmentLayer, createCanvas, copyCanvas, intersectRect, unionRect, BLEND_LABELS, newId } from './document.js';
+import { RasterLayer, GroupLayer, FillLayer, AdjustmentLayer, createCanvas, copyCanvas, intersectRect, unionRect, BLEND_LABELS, newId, isDefaultBlending } from './document.js';
 import { Compositor } from './compositor.js';
 import { contentBounds } from '../../shared/pixels/core.js';
-import { offsetEach } from './layer-move.js';
+import { isDefaultBlendIf } from '../../shared/pixels/blend-if.js';
+import { offsetEach, positionLocked } from './layer-move.js';
 import { Selection } from './selection.js';
 import { maskCanvasFor } from './mask-render.js';
 import { createPaint, resolvePaint, paintEditor } from './paint-editors.js';
 import { normaliseLabel } from './layers-extras/tags.js';
-import { neutralFill, arrangeChildren, distributeMoves } from './layer-menu-model.js';
+import { neutralFill, arrangeChildren, distributeMoves, clippedAbove } from './layer-menu-model.js';
+import { shapeContentBounds } from './path-ops.js';
 
 // ---- snapshots ----------------------------------------------------------------------------------------------
 
@@ -54,7 +56,9 @@ export function restoreTree(doc, snap) {
  * Runs a structural mutation as one undoable entry. opts.bytes (number or function evaluated after
  * the mutation) tells the history how much memory the entry keeps alive.
  */
-export function structural(app, label, mutate, doc = app.doc, { bytes = 0 } = {}) {
+// `made`: the layer a tool (not a command) made with this entry: the actions recorder then waits for the tool's
+// 'layer:made' event to record it as a step, instead of calling it a tool stroke (lib/actions.js)
+export function structural(app, label, mutate, doc = app.doc, { bytes = 0, made = null } = {}) {
   const before = snapshotTree(doc);
   const extras = () => ({ selection: doc.selection, savedSelection: doc.savedSelection ?? null, store: doc.store.snapshot(), channels: doc.channels.slice(), paths: doc.paths.slice(), workPath: doc.workPath ?? null, dpi: doc.dpi });
   const extraBefore = extras();
@@ -73,7 +77,7 @@ export function structural(app, label, mutate, doc = app.doc, { bytes = 0 } = {}
     doc.dpi = extra.dpi;
     doc.changed('selection');
   };
-  doc.history.push({ label, undo: () => apply(before, extraBefore), redo: () => apply(after, extraAfter), bytes: typeof bytes === 'function' ? bytes() : bytes, at: Date.now() });
+  doc.history.push({ label, undo: () => apply(before, extraBefore), redo: () => apply(after, extraAfter), bytes: typeof bytes === 'function' ? bytes() : bytes, at: Date.now(), ...(made ? { made } : {}) });
   restoreTree(doc, after);
   doc.changed('history');
   return result;
@@ -94,7 +98,7 @@ const TEXT_FIELDS = new Set(['font', 'text', 'content', 'typeOptions', 'height']
  * with `font`, `text` or `content` records `content`, `typeOptions` and `height` before and after, so undo restores
  * the formatting exactly whatever the patch was (assigning `font` or `text` rewrites the content).
  */
-export function setLayerProps(app, layer, patch, label = 'Layer properties', { merge = false } = {}) {
+export function setLayerProps(app, layer, patch, label = 'Layer properties', { merge = false, mergeKey = null } = {}) {
   const doc = app.doc;
   const keys = Object.keys(patch);
   const textual = layer.type === 'text' && keys.some((k) => TEXT_VIEWS.has(k));
@@ -112,8 +116,9 @@ export function setLayerProps(app, layer, patch, label = 'Layer properties', { m
     after = {};
     for (const k of recorded) after[k] = clone(layer[k]);
   }
-  // consecutive changes of the same property (slider drags) merge into one entry
-  const key = `${layer.id}:${keys.join(',')}`;
+  // consecutive changes of the same property (slider drags) merge into one entry; a caller whose patch key holds
+  // several settings (a mask's density, feather and path all live in `vectorMask`) names the setting in mergeKey
+  const key = `${layer.id}:${keys.join(',')}${mergeKey ? `:${mergeKey}` : ''}`;
   const last = doc.history.entries[doc.history.index];
   if (merge && !doc.history.batch && last?.mergeKey === key && Date.now() - last.at < 1500) {
     doc.history.merge(() => apply(after));
@@ -261,10 +266,13 @@ export function rasterizeLayer(layer, doc, { bakeStyles = false } = {}) {
     // styles are baked with neutral opacity/blend (those stay live on the new layer); the mask shapes the
     // effects, so it is rendered in and not kept
     // the bake renders the raster mask only (K.1 parts 'raster'): the vector mask stays live on the result // mask (K.1)
-    const saved = { opacity: layer.opacity, blend: layer.blend, vectorMask: layer.vectorMask ?? null };
+    const saved = { opacity: layer.opacity, blend: layer.blend, vectorMask: layer.vectorMask ?? null, blending: layer.blending ?? null };
     if (!layer.isGroup) {
       layer.opacity = 1;
       layer.blend = 'normal';
+      // knockout, Blend If and the channels work against what lies below, which a bake against transparency cannot
+      // see: they are left out of the bake and stay live on the result (the options the effects consume stay in)
+      if (layer.blending) layer.blending = { ...layer.blending, knockout: 'none', blendIf: null, channels: null };
     }
     layer.vectorMask = null;
     layer.touch();
@@ -288,7 +296,9 @@ export function rasterizeLayer(layer, doc, { bakeStyles = false } = {}) {
     x = r.x;
     y = r.y;
   } else return null;
-  const out = new RasterLayer({ name: layer.name, canvas, x, y, opacity: layer.isGroup ? 1 : layer.opacity, blend: layer.isGroup ? 'normal' : layer.blend, visible: layer.visible, clip: layer.clip, styles: bakeStyles ? null : layer.styles, fillOpacity: bakeStyles ? 1 : layer.fillOpacity });
+  // the advanced blending options stay with the layer (a group's are baked by renderLayersFlat, like its opacity)
+  const blending = layer.isGroup ? null : layer.blending;
+  const out = new RasterLayer({ name: layer.name, canvas, x, y, opacity: layer.isGroup ? 1 : layer.opacity, blend: layer.isGroup ? 'normal' : layer.blend, visible: layer.visible, clip: layer.clip, styles: bakeStyles ? null : layer.styles, fillOpacity: bakeStyles ? 1 : layer.fillOpacity, blending });
   if (layer.mask && !layer.isGroup && !bakeStyles) out.mask = { ...layer.mask, canvas: copyCanvas(layer.mask.canvas) };
   // the vector mask stays live, also when the styles and the raster mask are baked (K.1: bakes use parts 'raster')
   if (layer.vectorMask) out.vectorMask = JSON.parse(JSON.stringify(layer.vectorMask));
@@ -357,9 +367,15 @@ function topLevel(layers) {
   return layers.filter((l) => !layers.some((o) => o !== l && isAncestor(o, l)));
 }
 
-/** True when the Background rules (app.backgroundRules, L.13) lock `prop` on the layer. */
+/** True when the Background rules (app.backgroundRules, L.13) or Lock All lock `prop` on the layer. */
 export function lockedProp(app, layer, prop) {
   return !!layer && (app.backgroundRules?.lockedProps?.(layer) ?? []).includes(prop);
+}
+
+/** True when the layer has effects or blending options that differ from a plain layer's (what Copy Layer Style takes). */
+function hasLayerStyle(layer) {
+  if (!layer || layer.type === 'adjustment') return false;
+  return !!layer.styles || (layer.fillOpacity ?? 1) < 1 || !isDefaultBlending(layer.blending) || !['normal', 'pass-through'].includes(layer.blend ?? 'normal');
 }
 
 /** Where the layer dialogs open (M.3): only from the menu or a key without an argument, or with { dialog: true }. */
@@ -383,6 +399,8 @@ export function install(app) {
   const has = () => !!app.doc;
   const hasLayer = () => !!app.doc?.active;
   const doc = () => app.doc;
+  // which layers take effects and blending options (blending-options.js isStyleable: not adjustment layers, not the Background)
+  const takesStyle = (l) => !!l?.parent && l.type !== 'adjustment' && !lockedProp(app, l, 'styles');
 
   app.duplicateLayer = (layer, { select = true } = {}) => {
     const d = doc();
@@ -424,9 +442,28 @@ export function install(app) {
       const below = top.parent.children[top.parent.children.indexOf(top) - 1];
       if (!below || below.type === 'adjustment') return app.dialogs.toast('Nothing to merge into: the layer below is an adjustment layer', { kind: 'error' });
       if (!top.visible || !below.visible) return app.dialogs.toast('Show both layers before merging', { kind: 'error' });
+      // the result replaces the lower layer's pixels: a pixel lock on it refuses the merge (Photoshop: "the target layer
+      // is locked"), as painting, filters and Fill refuse it
+      if (pixelsLocked(below)) return app.dialogs.toast('Could not merge down: the layer below is locked', { kind: 'error', timeout: 2400 });
       mergeLayers([below, top], below.name, 'Merge down', { keepBase: true });
     },
   };
+
+  // Merge Clipping Mask (what Ctrl+E does on the base of a clipping mask): the base and the layers clipped to it become
+  // one layer in the base's place, keeping its name, blend mode and opacity, so the picture does not change
+  const mergeClipping = {
+    enabled: () => clippedAbove(doc()?.active).length > 0,
+    run: () => {
+      const d = doc();
+      const base = d.active;
+      const clipped = clippedAbove(base);
+      if (!clipped.length) return;
+      if (pixelsLocked(base)) return app.dialogs.toast('Could not merge the clipping mask: the base layer is locked', { kind: 'error', timeout: 2400 });
+      return mergeLayers([base, ...clipped], base.name, 'Merge clipping mask', { keepBase: true });
+    },
+  };
+  /** A pixel lock (or Lock All) on the layer a merge would write into. */
+  const pixelsLocked = (l) => !!(l?.locked?.pixels || l?.locked?.all);
 
   app.commands.registerAll({
     // New Layer, New Group and Duplicate Layer (M.3): their dialogs (lib/layer-dialogs.js) open only from the menu or a
@@ -701,6 +738,7 @@ export function install(app) {
       run: (axis) => distribute(axis ?? 'hcenter'),
     },
     'layer:merge-down': mergeDown,
+    'layer:merge-clipping': mergeClipping,
     // Ctrl+E (M.3, M.6): Merge Layers with several layers selected, Merge Group with a group, else Merge Down. The run
     // goes through the concrete command's current definition (lib/depth.js wraps them for 16/32 bits) and is reported
     // with setReplayCommand, so actions record layer:merge-selected, layer:merge-group or layer:merge-down.
@@ -736,23 +774,18 @@ export function install(app) {
     },
     'image:flatten': {
       enabled: has,
-      run: () => {
+      run: (_arg, ctx) => {
         const d = doc();
-        const flat = renderLayersFlat(d, d.root.children.filter((l) => l.visible));
-        const bg = createCanvas(d.width, d.height);
-        const ctx = bg.getContext('2d');
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, d.width, d.height);
-        ctx.drawImage(flat, 0, 0);
-        // a Background that cannot move or turn transparent (Background from Layer) stays one when the image is flattened
-        const bottom = d.root.children[0];
-        const locked = bottom && isBackground(bottom) ? { position: !!bottom.locked.position, transparency: !!bottom.locked.transparency } : {};
-        const layer = new RasterLayer({ name: 'Background', canvas: bg, x: 0, y: 0, locked });
-        structural(app, 'Flatten image', () => {
-          for (const l of d.root.children.slice()) d.remove(l);
-          d.add(layer, d.root, 0);
-          d.setActive(layer);
-        });
+        // hidden layers do not survive a flatten: asked by the user (menu, key, Layers panel), Photoshop asks first.
+        // Code and recorded steps flatten at once (callers rely on the synchronous run).
+        const asks = DIALOG_SOURCES.has(ctx?.source) || ctx?.source === 'panel';
+        if (asks && d.layers().some((l) => !l.visible)) {
+          return app.dialogs.confirm('Discard hidden layers?', { title: 'Flatten Image', okLabel: 'OK' }).then((ok) => {
+            if (!ok || doc() !== d) return ctx?.cancel?.();
+            return flattenImage(d);
+          });
+        }
+        return flattenImage(d);
       },
     },
     // Layer > Rasterize: 'type', 'shape', 'fill' (Type, Shape, Fill Content) rasterize the selected layers of that
@@ -809,6 +842,11 @@ export function install(app) {
           d.add(r, parent, i);
           d.setActive(r);
         });
+        // Blend If leaves live effects alone and knockout follows the fill; once baked, both act on the effects too
+        const bl = layer.blending;
+        if (bl && (!isDefaultBlendIf(bl.blendIf) || (bl.knockout && bl.knockout !== 'none' && layer.fillOpacity < 1))) {
+          app.dialogs.toast('The layer keeps its Blend If and knockout settings, which now also act on the rasterized effects, so the image can change', { timeout: 4000 });
+        }
       },
     },
     'layer:select': {
@@ -853,25 +891,40 @@ export function install(app) {
         setLayerProps(app, layer, renamePatch(layer, name), 'Rename layer');
       },
     },
+    // a layer style is the effects with the blending options (mode, fill opacity, advanced blending), as in Photoshop:
+    // app.copiedStyle is { styles, blend, fillOpacity, blending }
     'layer:copy-style': {
-      enabled: () => !!doc()?.active?.styles,
+      enabled: () => hasLayerStyle(doc()?.active),
       run: () => {
-        app.copiedStyle = JSON.parse(JSON.stringify(doc().active.styles));
+        const l = doc().active;
+        app.copiedStyle = { styles: clone(l.styles ?? null), blend: l.blend, fillOpacity: l.fillOpacity ?? 1, blending: clone(l.blending ?? null) };
         app.dialogs.toast('Layer style copied', { timeout: 1200 });
       },
     },
     'layer:paste-style': {
-      enabled: () => !!app.copiedStyle && hasLayer(),
+      enabled: () => !!app.copiedStyle && hasLayer() && selectedOrActive(doc()).some(takesStyle),
       run: () => {
         const d = doc();
+        // the Background (Background rules) and adjustment layers take no style: skipped, as effect-row drags do
+        const targets = selectedOrActive(d).filter(takesStyle);
+        if (!targets.length) return app.dialogs.toast('The Background, adjustment layers and locked layers cannot take a layer style', { kind: 'error', timeout: 2500 });
+        const c = app.copiedStyle;
         d.history.group('Paste layer style', () => {
-          for (const l of selectedOrActive(d)) setLayerProps(app, l, { styles: JSON.parse(JSON.stringify(app.copiedStyle)) });
+          for (const l of targets) {
+            // Pass Through is a group's mode only
+            const blend = c.blend === 'pass-through' && !l.isGroup ? 'normal' : c.blend ?? l.blend;
+            setLayerProps(app, l, { styles: clone(c.styles ?? null), blend, fillOpacity: c.fillOpacity ?? 1, blending: clone(c.blending ?? null) }, 'Paste layer style');
+          }
         });
       },
     },
     'layer:clear-style': {
-      enabled: () => !!doc()?.active?.styles,
-      run: () => setLayerProps(app, doc().active, { styles: null }, 'Clear layer style'),
+      // Lock All keeps the effects (lockedProp 'styles'), as it keeps the blend mode and Fill this also resets
+      enabled: () => hasLayerStyle(doc()?.active) && !lockedProp(app, doc().active, 'styles'),
+      run: () => {
+        const l = doc().active;
+        setLayerProps(app, l, { styles: null, blend: l.isGroup ? 'pass-through' : 'normal', fillOpacity: 1, blending: null }, 'Clear layer style');
+      },
     },
     // New Fill Layer: from the menu the New Layer dialog comes first (name, clipping, colour, mode, opacity; G.5),
     // then the paint editor (createPaint). A recorded step is { kind, paint, name?, clip?, color?, blend?, opacity? }
@@ -892,22 +945,32 @@ export function install(app) {
           props = layerFields(r);
         }
         // actions (lib/actions.js): a recorded step is { kind, paint } and makes the layer without asking
-        let recorded = o.paint ? JSON.parse(JSON.stringify(o.paint)) : null;
+        // a pattern paint holds a live canvas, which a JSON copy would turn into {} (a layer that draws nothing and
+        // cannot be saved): its canvas is kept, and one without a usable canvas is rebuilt from the library like `pattern`
+        const patternIn = o.paint?.type === 'pattern' ? o.paint.pattern ?? {} : null;
+        let recorded = patternIn ? (isDrawable(patternIn.canvas) ? patternPaintWith(patternIn) : await patternPaintFrom(patternIn)) : o.paint ? JSON.parse(JSON.stringify(o.paint)) : null;
         if (!recorded && kind === 'pattern' && o.pattern && typeof o.pattern === 'object') recorded = await patternPaintFrom(o.pattern);
         // the first dialog is the paint editor's (lib/paint-editors.js, G.5); a recorded paint is resolved too, as
         // createPaint resolves what it returns: stored data never holds colour references (G.1)
-        const paint = recorded ? (recorded.pattern?.canvas ? recorded : resolvePaint(app, recorded)) : await createPaint(app, kind, { doc: d });
+        const paint = recorded ? (isDrawable(recorded.pattern?.canvas) ? recorded : resolvePaint(app, recorded)) : await createPaint(app, kind, { doc: d });
         if (!paint) return ctx?.cancel(); // actions (lib/actions.js)
         const layer = new FillLayer({ name: props.name || nextLayerName(d, base), paint, docWidth: d.width, docHeight: d.height });
         applyLayerFields(layer, props);
         if (d.selection && !d.selection.isEmpty) layer.mask = { canvas: maskFromSelection(d), enabled: true, linked: true };
+        const mark = d.history.mark();
         structural(app, 'New fill layer', () => {
           d.add(layer);
           if (props.clip) layer.clip = layer.parent.children.indexOf(layer) > 0;
           d.setActive(layer);
         });
-        // 0.3's Gradient Fill flow: the new layer is edited live on the canvas (editAfterCreate, paint-editors.js)
-        if (!recorded && paintEditor(kind)?.editAfterCreate) await app.commands.run('layer:edit-fill', layer.id, 'api');
+        // 0.3's Gradient Fill flow: the new layer is edited live on the canvas (editAfterCreate, paint-editors.js).
+        // Cancel there cancels the whole New Fill Layer, as Cancel in the Solid Color picker does: the layer goes and
+        // leaves no history entry
+        if (!recorded && paintEditor(kind)?.editAfterCreate && (await app.commands.run('layer:edit-fill', layer.id, 'api')) === false) {
+          if (d.history.index > mark.index) d.history.undo();
+          d.history.rollback(mark);
+          return ctx?.cancel(); // actions (lib/actions.js)
+        }
         const fields = asks ? newLayerArg({ ...props, name: layer.name }) : {};
         delete fields.neutral;
         if (kind !== 'pattern') ctx?.setReplayArg({ kind, paint: JSON.parse(JSON.stringify(layer.paint)), ...fields }); // actions (lib/actions.js)
@@ -1020,11 +1083,13 @@ export function install(app) {
       return cb ? { x: l.x + cb.x, y: l.y + cb.y, width: cb.width, height: cb.height } : null;
     }
     if (l.isGroup) return l.children.map(layerBox).filter(Boolean).reduce((a, b) => (a ? unionRect(a, b) : b), null);
+    // a shape aligns by its drawn content (path plus stroke): bounds() is its render box, padded 1 px left/top, 2 right/bottom
+    if (l.type === 'shape') return shapeContentBounds(l);
     return l.bounds() ?? null;
   }
 
-  /** A layer Align and Distribute may move: not locked in position, not the Background (L.13). */
-  const movable = (l) => !l.locked.position && !l.locked.all && !lockedProp(app, l, 'position');
+  /** A layer Align and Distribute may move: not locked in position (nor a group holding such a layer), not the Background (L.13). */
+  const movable = (l) => !positionLocked(l) && !lockedProp(app, l, 'position');
 
   /**
    * The moves of the layers linked to the moved ones (lib/layers-extras/tags.js): a linked layer that was not picked
@@ -1048,10 +1113,12 @@ export function install(app) {
 
   function align(edge) {
     const d = doc();
-    const layers = topLevel(selectedOrActive(d)).filter((l) => movable(l) && layerBox(l));
+    const picked = topLevel(selectedOrActive(d)).filter((l) => layerBox(l));
+    const layers = picked.filter(movable);
     if (!layers.length) return;
     const sel = d.selection && !d.selection.isEmpty ? d.selection.bounds : null;
-    const ref = sel ?? (layers.length > 1 ? layers.map(layerBox).reduce(unionRect) : d.bounds);
+    // the locked layers among the picked ones stay where they are but still count in the box the others align to
+    const ref = sel ?? (picked.length > 1 ? picked.map(layerBox).reduce(unionRect) : d.bounds);
     const moves = layers.map((l) => {
       const b = layerBox(l);
       let dx = 0, dy = 0;
@@ -1076,12 +1143,33 @@ export function install(app) {
     offsetEach(d, withLinked(moves), 'Distribute');
   }
 
-  /** What Ctrl+E does now (M.3): Merge Layers, Merge Group or Merge Down. */
+  /** Flatten Image: the visible layers composited over white become the Background; hidden layers are dropped. */
+  function flattenImage(d) {
+    const flat = renderLayersFlat(d, d.root.children.filter((l) => l.visible));
+    const bg = createCanvas(d.width, d.height);
+    const ctx = bg.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, d.width, d.height);
+    ctx.drawImage(flat, 0, 0);
+    // a Background that cannot move or turn transparent (Background from Layer) stays one when the image is flattened
+    const bottom = d.root.children[0];
+    const locked = bottom && isBackground(bottom) ? { position: !!bottom.locked.position, transparency: !!bottom.locked.transparency } : {};
+    const layer = new RasterLayer({ name: 'Background', canvas: bg, x: 0, y: 0, locked });
+    structural(app, 'Flatten image', () => {
+      for (const l of d.root.children.slice()) d.remove(l);
+      d.add(layer, d.root, 0);
+      d.setActive(layer);
+    });
+  }
+
+  /** What Ctrl+E does now (M.3): Merge Layers, Merge Group, Merge Clipping Mask or Merge Down. */
   function mergeTarget() {
     const d = doc();
     if (!d) return 'layer:merge-down';
     if (d.selectedLayers().filter((l) => l !== d.root).length > 1) return 'layer:merge-selected';
     if (d.active?.isGroup) return 'layer:merge-group';
+    // a clipping base merges with its clipped layers: merging it down would leave them clipped to a bigger layer
+    if (clippedAbove(d.active).length) return 'layer:merge-clipping';
     return 'layer:merge-down';
   }
 
@@ -1315,10 +1403,12 @@ export function install(app) {
       for (const c of copies) target.selected.add(c);
     };
     if (dest === 'new') {
-      // a new document holds nothing but the copies: its own empty layer goes, and there is nothing to undo
+      // a new document holds nothing but the copies: its own empty layer goes, and there is nothing to undo. It was
+      // never saved, so closing it asks (as for New Document from a selection or Select and Mask's new document)
       for (const l of target.root.children.slice()) target.remove(l);
       place();
-      target.history.markSaved?.();
+      target.history.savedIndex = -2;
+      target.history.onChange?.();
     } else structural(app, layers.length > 1 ? 'Duplicate layers' : 'Duplicate layer', place, target);
     app.deep?.sync?.(target);
     target.view?.invalidate?.();
@@ -1365,6 +1455,18 @@ export function install(app) {
     return c;
   }
 
+  /** Whether `c` is something createPattern can draw (a canvas or a bitmap), not a JSON copy of one. */
+  function isDrawable(c) {
+    return !!c && (typeof c.getContext === 'function' || (typeof ImageBitmap !== 'undefined' && c instanceof ImageBitmap));
+  }
+
+  /** A copy of a pattern paint's fields (a fresh origin array) around the same canvas. */
+  function patternPaintWith(p) {
+    const origin = Array.isArray(p.origin) ? [Number(p.origin[0]) || 0, Number(p.origin[1]) || 0] : [0, 0];
+    const extra = JSON.parse(JSON.stringify({ ...p, canvas: undefined, origin: undefined }));
+    return { type: 'pattern', pattern: { ...extra, canvas: p.canvas, scale: Number(p.scale) || 1, angle: Number(p.angle) || 0, link: p.link !== false, origin } };
+  }
+
   /** A Pattern Fill's paint from a recorded { presetId, scale, angle, link, origin } (the library entry, else the current pattern). */
   async function patternPaintFrom(p) {
     const entry = p.presetId ? await app.patterns?.get?.(p.presetId).catch(() => null) : null;
@@ -1397,7 +1499,8 @@ export function install(app) {
     if (!free.length && layers.length && performance.now() - lockToastAt > 2500) {
       lockToastAt = performance.now();
       const what = { opacity: 'opacity', fillOpacity: 'fill opacity', blend: 'blend mode' }[prop] ?? prop;
-      app.dialogs.toast(`The Background layer's ${what} is locked: use Layer from Background to unlock it`, { kind: 'error', timeout: 2600 });
+      const background = layers.some(isBackground);
+      app.dialogs.toast(background ? `The Background layer's ${what} is locked: use Layer from Background to unlock it` : `The layer is locked: turn off Lock All to change its ${what}`, { kind: 'error', timeout: 2600 });
     }
     return free;
   }
@@ -1407,7 +1510,10 @@ export function install(app) {
     const v = clampPercent(value, NaN) / 100;
     if (!Number.isFinite(v)) return;
     const free = refuseLocked(layers, prop).filter((l) => l[prop] !== v);
-    setLayersProps(app, free, { [prop]: v }, label, { merge: true });
+    // consecutive changes merge (a slider drag) unless the caller says this one starts a new gesture ({ merge: false }:
+    // the Layers panel's typed entries and the first step of a scrub)
+    const merge = !(arg && typeof arg === 'object' && arg.merge === false);
+    setLayersProps(app, free, { [prop]: v }, label, { merge });
   }
 
   /** Renaming lifts the Background's locks (L.13): it becomes an ordinary layer, as with Layer from Background. */

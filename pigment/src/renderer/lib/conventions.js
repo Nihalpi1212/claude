@@ -45,22 +45,51 @@ export const conventionsPreferences = {
 };
 
 /**
- * Toggle Last State: Photoshop's Alt+Ctrl+Z. The first press undoes; a press right after a toggle (nothing else
- * changed the history in between) goes the other way, so pressing it repeatedly flips between the last two states.
+ * Follows where a document's history stands, so Toggle Last State knows the state the user came from. The steps of one
+ * gesture (History panel jump: several undos in a row) settle in a microtask, so the jump counts as one move.
+ * mark.docs: doc -> { cur, prev, pending }, a position being { index, entry } (the entry identifies the state).
+ */
+export function trackHistory(mark, doc) {
+  const h = doc?.history;
+  if (!h) return;
+  mark.docs ??= new WeakMap();
+  const here = () => ({ index: h.index, entry: h.entries[h.index] ?? null });
+  let st = mark.docs.get(doc);
+  if (!st) {
+    // the first change seen: a new entry (the usual case) came from the state below it
+    const cur = here();
+    st = { cur, prev: cur.index >= 0 ? { index: cur.index - 1, entry: h.entries[cur.index - 1] ?? null } : null, pending: null };
+    mark.docs.set(doc, st);
+    return;
+  }
+  if (st.pending) return;
+  st.pending = st.cur;
+  queueMicrotask(() => {
+    const from = st.pending;
+    st.pending = null;
+    const now = here();
+    if (now.index === from.index && now.entry === from.entry) return;
+    st.prev = from;
+    st.cur = now;
+  });
+}
+
+/**
+ * Toggle Last State: Photoshop's Alt+Ctrl+Z. It goes back to the history state the document was in before the
+ * current one: after an edit that is the state before it (an undo), after Undo or a History panel jump it is the
+ * state the user came from, so pressing it repeatedly flips between the last two states. When that state is gone
+ * (a new edit dropped it, or the history was trimmed) it undoes.
  */
 export function toggleLastState(app, mark) {
   const doc = app.doc;
   const h = doc?.history;
-  let dir = 'undo';
-  if (h && mark.last && mark.last.doc === doc && mark.last.index === h.index) {
-    const same = mark.last.dir === 'undo' ? h.entries[h.index + 1] === mark.last.entry : h.entries[h.index] === mark.last.entry;
-    if (same) dir = mark.last.dir === 'undo' ? 'redo' : 'undo';
-  }
-  if (dir === 'redo' && !h?.canRedo) dir = 'undo';
-  app.historyStep(dir);
-  if (h && doc === app.doc) {
-    mark.last = { doc, dir, index: h.index, entry: dir === 'undo' ? h.entries[h.index + 1] : h.entries[h.index] };
-  } else mark.last = null;
+  if (!h) return;
+  const st = mark.docs?.get(doc);
+  const prev = st && !st.pending && st.cur.index === h.index && st.cur.entry === (h.entries[h.index] ?? null) ? st.prev : null;
+  const reachable = !!prev && prev.index !== h.index && prev.index >= -1 && prev.index < h.entries.length && (prev.index === -1 || h.entries[prev.index] === prev.entry);
+  if (!reachable || prev.index === h.index - 1) return app.historyStep('undo');
+  if (prev.index === h.index + 1) return app.historyStep('redo');
+  return app.historyStep({ goTo: prev.index });
 }
 
 export function install(app) {
@@ -74,7 +103,8 @@ export function install(app) {
 
   app.preferences?.registerSection(conventionsPreferences);
 
-  const mark = { last: null };
+  const mark = { docs: new WeakMap() };
+  app.on('history:changed', (doc) => trackHistory(mark, doc));
   app.commands.registerAll({
     'edit:toggle-last-state': {
       label: 'Toggle Last State',

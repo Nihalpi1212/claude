@@ -271,6 +271,11 @@ export class Compositor {
     const copy = createCanvas(work.width, work.height);
     const cctx = copy.getContext('2d', { willReadFrequently: true });
     cctx.drawImage(work, 0, 0);
+    // the clipped layers blend with the base's colour at full strength and the group then takes the base's alpha
+    // once: on the base as it is, its alpha would count twice (a 50 % edge pixel drawn at 25 % where nothing covers it)
+    const opaque = cctx.getImageData(0, 0, copy.width, copy.height);
+    for (let p = 3; p < opaque.data.length; p += 4) if (opaque.data[p]) opaque.data[p] = 255;
+    cctx.putImageData(opaque, 0, 0);
     cctx.translate(-wx, -wy);
     const sub = { x: wx, y: wy, width: work.width, height: work.height };
     for (const c of clipped) {
@@ -367,6 +372,14 @@ export class Compositor {
   drawPixels(ctx, layer, { work, below, shape, wx, wy, knockout, bl }, rect, doc, opts) {
     let box = { x: wx, y: wy, width: work.width, height: work.height };
     if (knockout !== 'none') box = unionRect(box, { x: shape.x, y: shape.y, width: shape.canvas.width, height: shape.canvas.height });
+    else if (layer.blend !== 'dissolve') {
+      // without knockout nothing changes where the layer and its effects are transparent: a styled layer's cached
+      // render is cut to where it has alpha, so a small shape on a document-sized canvas is not read and blended pixel
+      // by pixel over the whole document on every composite (Dissolve's noise follows the pixel positions: left as is)
+      const tight = this.frozenBounds(work, wx, wy, below);
+      if (tight === null) return;
+      if (tight) box = tight;
+    }
     const r = intersectRect(box, rect);
     if (!r) return;
     const dst = ctx.getImageData(r.x - rect.x, r.y - rect.y, r.width, r.height);
@@ -382,6 +395,27 @@ export class Compositor {
       blendIf: bl.blendIf, channels: bl.channels, mode: layer.isGroup && layer.blend === 'pass-through' ? 'normal' : layer.blend, opacity: layer.opacity,
     });
     ctx.putImageData(dst, r.x - rect.x, r.y - rect.y);
+  }
+
+  /**
+   * The document box where `work` and `below` (canvases at x, y) have alpha, when both are renders of the style cache
+   * (they never change, so the box is measured once); null when they are wholly transparent, undefined otherwise.
+   */
+  frozenBounds(work, x, y, below) {
+    const frozen = this.frozen ?? (this.frozen = new WeakMap()); // style-cache canvas -> its alpha box (or null)
+    const boxOf = (c) => {
+      if (!frozen.has(c)) return undefined;
+      let b = frozen.get(c);
+      if (b === false) {
+        b = alphaBox(c.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, c.width, c.height));
+        frozen.set(c, b);
+      }
+      return b ? { x: x + b.x, y: y + b.y, width: b.width, height: b.height } : null;
+    };
+    const a = boxOf(work);
+    const b = below ? boxOf(below) : null;
+    if (a === undefined || b === undefined) return undefined;
+    return a && b ? unionRect(a, b) : a ?? b;
   }
 
   /** The layer's shape alpha (0..255 per pixel of r); with Transparency Shapes Layer off, its whole content box. */
@@ -535,6 +569,12 @@ export class Compositor {
     };
     const result = toCanvas(split ? out.layer : out.image);
     const below = split && out.below ? toCanvas(out.below) : null;
+    // renders that are never drawn into again: drawPixels may measure where they have alpha once (frozenBounds)
+    if (ready) {
+      const frozen = this.frozen ?? (this.frozen = new WeakMap());
+      frozen.set(result, false);
+      if (below) frozen.set(below, false);
+    }
     const entry = { version: layer.version, source: canvas, masked, clipKey, maskKey, optKey, x0: x, y0: y, w: canvas.width, h: canvas.height, canvas: result, below, x: x + out.offsetX, y: y + out.offsetY, angle, altitude };
     // a pattern still decoding must not be cached as "no pattern"
     if (ready) this.styleCache.set(layer, entry);

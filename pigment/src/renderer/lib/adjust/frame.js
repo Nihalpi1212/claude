@@ -20,7 +20,9 @@ const clone = (v) => (v === undefined || v === null ? v : JSON.parse(JSON.string
 
 /**
  * buildAdjustmentFrame(app, kind, editor, { mode, sample(x, y), getParams(), setParams(params), onReset(),
- *   source?, preview? }) -> { element, dispose(), disarm(), paramsChanged(params) }
+ *   source?, preview?, onDiscrete? }) -> { element, dispose(), disarm(), paramsChanged(params) }
+ * `onDiscrete()` (optional): called right before an eyedropper pick changes the params through the editor, so a host
+ * that merges consecutive edits can record the pick as its own step.
  * paramsChanged(params) (adjust-tonal): the host reports the editor's edits, so the preset menu shows "Custom" when
  * they leave the picked preset.
  * `source` (an addition): the ImageDataLike Auto computes from (the session base in a dialog, the composite below in
@@ -91,7 +93,9 @@ export function buildAdjustmentFrame(app, kind, editor, opts = {}) {
     b.addEventListener('click', () => arm(`eyedropper:${ed.id}`, b, {
       down: (p) => {
         const rgba = rgbaAt(p);
-        if (rgba) ed.pick(rgba, { x: p.x, y: p.y });
+        if (!rgba) return;
+        opts.onDiscrete?.(); // the host records the edit this pick makes as a step of its own
+        ed.pick(rgba, { x: p.x, y: p.y });
       },
     }));
     tools.push(b);

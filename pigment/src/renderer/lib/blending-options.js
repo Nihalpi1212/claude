@@ -13,7 +13,7 @@ import { Compositor } from './compositor.js';
 import { maskCanvasFor, applyLayerMask, hasEffectiveMask } from './mask-render.js';
 import { prepareStyles } from './style-prepare.js';
 import { hasEnabledStyles, splitEffects, scaleEffects } from '../../shared/pixels/styles.js';
-import { normalizeRange, maskPartsAround, BLEND_IF_CHANNELS } from '../../shared/pixels/blend-if.js';
+import { normalizeRange, maskPartsAround, restrictsChannels, BLEND_IF_CHANNELS } from '../../shared/pixels/blend-if.js';
 
 const BLENDS = BLEND_MODES.filter(Boolean);
 const S = (key, label, min, max, step = 1, extra = {}) => ({ key, label, type: 'slider', min, max, step, ...extra });
@@ -359,9 +359,24 @@ function effectLayers(layer, doc) {
     }
     // exterior parts are drawn at the layer's opacity in the merged render; clipped parts get it through their base
     const opacity = Math.max(0, Math.min(1, (p.opacity ?? 1) * (p.clip ? 1 : layer.opacity ?? 1)));
-    const made = new RasterLayer({ name: `${layer.name}'s ${p.name ?? p.key}`, canvas, x, y, blend: p.blend ?? 'normal', opacity, clip: p.clip || !!layer.clip });
+    // the channel restriction also applied to the exterior effects (clipped parts get it through their base)
+    const blending = !p.clip && restrictsChannels(bl.channels) ? { channels: { ...bl.channels } } : null;
+    const made = new RasterLayer({ name: `${layer.name}'s ${p.name ?? p.key}`, canvas, x, y, blend: p.blend ?? 'normal', opacity, clip: p.clip || !!layer.clip, blending });
     return { layer: made, interior: !!p.clip };
   });
+}
+
+/**
+ * True when the created layers cannot draw what the effects drew: Photoshop then warns "Some aspects of the Effects
+ * cannot be reproduced with layers". Knockout reaches through the new layers; the layer's opacity and mode applied to
+ * its effects as one image; fill opacity faded the layer under its interior effects.
+ */
+function inexactLayers(layer, made) {
+  const bl = effectiveBlending(layer);
+  const exterior = made.some((m) => !m.interior), interior = made.some((m) => m.interior);
+  if (bl.knockout === 'shallow' || bl.knockout === 'deep') return true;
+  if (exterior && ((layer.opacity ?? 1) < 1 || !['normal', 'pass-through'].includes(layer.blend ?? 'normal'))) return true;
+  return interior && (layer.fillOpacity ?? 1) < 1;
 }
 
 export function install(app) {
@@ -402,6 +417,7 @@ export function install(app) {
               d.setActive(layer);
             });
           });
+          if (inexactLayers(layer, made)) app.dialogs?.toast?.('Some aspects of the effects cannot be reproduced with layers, so the image may change', { timeout: 4000 });
           return made.length;
         });
       },
