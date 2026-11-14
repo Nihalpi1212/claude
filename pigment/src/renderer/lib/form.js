@@ -6,6 +6,9 @@ import { numericField } from './numeric-field.js';
 // the form values, or null when cancelled.
 //
 // Field: { key, label, type, value, options, min, max, step, unit, when(values), span, help }
+//   number and slider fields: their box is lib/numeric-field.js's numeric field (arithmetic such as 100+50, Shift+arrow,
+//   the wheel; the label scrubs it); `units`, `dpi`, `base` and `popup` go to it (typed units, 100 % base, a popup
+//   slider), see numeric-field.js
 //   type: 'select' | 'color' | 'slider' | 'number' | 'checkbox' | 'segment' | 'text' | 'textarea'
 //         | 'section' (heading, no key) | 'custom' ({ render(values, set, form) -> HTMLElement })
 //         | any type registered with lib/fields.js registerWidget (gradient, pattern, contour, preset, paint,
@@ -14,6 +17,8 @@ import { numericField } from './numeric-field.js';
 // preview(values) -> HTMLCanvasElement | null   shown in a thumbnail box next to the form
 // live: { apply(values), revert() }             previews on the canvas while the dialog is open
 //   (a "Preview" checkbox is added; revert() is called on cancel, and before the final result).
+// onReset(form)                                  Alt turns Cancel into Reset (Photoshop): by default every field goes back
+//   to the value the dialog opened with; a function given here runs instead.
 
 let fieldCounter = 0;
 
@@ -237,8 +242,16 @@ function buildField(f, values, changed, form) {
         wrap.appendChild(range);
       }
       // the number box is the numeric field of lib/numeric-field.js (conventions-shortcuts-fields completes it)
-      const num = numericField({ id, key: f.key, min: f.min, max: f.max, step, value: fmt(values[f.key], step), width: f.type === 'number' ? (f.width ? `${f.width}px` : '90px') : null }).input;
-      wrap.appendChild(num);
+      const numField = numericField({
+        id, key: f.key, min: f.min, max: f.max, step, value: fmt(values[f.key], step),
+        width: f.type === 'number' ? (f.width ? `${f.width}px` : '90px') : null,
+        unit: undefined, units: f.units, dpi: f.dpi, base: f.base, popup: !!f.popup,
+        format: (v) => fmt(v, step),
+      });
+      const num = numField.input;
+      // the field's own unit (for typed units such as 2in) without changing 0.3's markup: the unit label follows
+      if (f.unit) num.dataset.unit = f.unit;
+      wrap.appendChild(numField.element === num ? num : numField.element);
       if (f.unit) {
         const u = document.createElement('span');
         u.className = 'opt-unit';
@@ -430,6 +443,14 @@ export async function formDialog(app, opts) {
     },
   });
 
+  // Alt+Cancel = Reset: back to what the dialog opened with
+  const opened = { ...form.values };
+  const resetToOpened = () => {
+    for (const f of fields) if (f.key && f.key in opened) form.set(f.key, opened[f.key], { silent: true });
+    runPreview?.();
+    runLive();
+  };
+
   const content = document.createElement('div');
   if (intro) {
     const p = document.createElement('p');
@@ -479,6 +500,8 @@ export async function formDialog(app, opts) {
     width: width ?? (preview ? 660 : 440),
     className,
     buttons,
+    positionKey: opts.positionKey,
+    onReset: opts.onReset === false ? undefined : () => (typeof opts.onReset === 'function' ? opts.onReset(form) : resetToOpened()),
     onOpen: (dialog, close) => {
       opts.onOpen?.(dialog, form, close);
       runPreview?.flush();

@@ -2,14 +2,77 @@
 // most blending on the GPU; blend modes it lacks fall back to src/shared/pixels/blend.js on the
 // affected rectangle. Everything is cached per layer version so repainting during a brush stroke
 // only touches the dirty rectangle.
-import { createCanvas, intersectRect, unionRect } from './document.js';
+import { createCanvas, intersectRect, unionRect, effectiveBlending, isDefaultBlending } from './document.js';
 import { CANVAS_BLEND, blendImages } from '../../shared/pixels/blend.js';
+import { compositeAdvanced, maskPartsAround, restrictsChannels, isDefaultBlendIf, alphaBox } from '../../shared/pixels/blend-if.js';
 import { applyAdjustment, adjustmentDef } from '../../shared/pixels/adjust.js';
 import { applyStyles, stylePadding, hasEnabledStyles } from '../../shared/pixels/styles.js';
 import { maskCanvasFor, applyLayerMask, hasEffectiveMask, maskCacheKey } from './mask-render.js';
 import { prepareStyles } from './style-prepare.js';
 
 const SIMPLE_OVER = new Set(['normal', 'pass-through']);
+
+// Advanced blending (K.3, layer-style-blending): the full options of a layer whose blending is not the default, or
+// null. isDefaultBlending compares JSON, so the answer is kept per layer until its blending object or version changes.
+const BLENDING_CACHE = new WeakMap();
+function blendingOf(layer) {
+  const b = layer.blending;
+  if (!b) return null;
+  const c = BLENDING_CACHE.get(layer);
+  if (c && c.ref === b && c.version === layer.version) return c.full;
+  const full = isDefaultBlending(b) ? null : effectiveBlending(layer);
+  BLENDING_CACHE.set(layer, { ref: b, version: layer.version, full });
+  return full;
+}
+
+/** The document box a layer draws into, effects included (groups: their visible children); null when nothing. */
+function renderBounds(layer) {
+  let b = null;
+  if (layer.isGroup) {
+    for (const c of layer.children) {
+      if (!c.visible) continue;
+      const cb = renderBounds(c);
+      if (cb) b = b ? unionRect(b, cb) : cb;
+    }
+  } else b = layer.bounds();
+  if (!b) return null;
+  const pad = hasEnabledStyles(layer.styles) ? stylePadding(layer.styles) : 0;
+  return pad ? { x: b.x - pad, y: b.y - pad, width: b.width + pad * 2, height: b.height + pad * 2 } : { ...b };
+}
+
+/** What a styled group's children render depends on: their ids, versions, visibility and order, all levels. */
+function subtreeKey(group) {
+  let k = '';
+  for (const c of group.children) {
+    k += `${c.id}:${c.version}:${c.visible ? 1 : 0};`;
+    if (c.isGroup) k += `[${subtreeKey(c)}]`;
+  }
+  return k;
+}
+
+/** The Background layer (the bottom raster layer of the root named "Background", L.13), or null. */
+function backgroundOf(doc) {
+  const first = doc.root.children[0];
+  return first && first.type === 'raster' && first.name === 'Background' && first.visible ? first : null;
+}
+
+/** ImageData of `canvas` (placed at document x, y) over the document rect r; transparent outside it. */
+function readRegion(canvas, x, y, r) {
+  const c = createCanvas(r.width, r.height);
+  const g = c.getContext('2d', { willReadFrequently: true });
+  g.drawImage(canvas, x - r.x, y - r.y);
+  return g.getImageData(0, 0, r.width, r.height);
+}
+
+/** `work` (at document x, y) cut to the alpha of `clip` ({ canvas, x, y }): a clipped layer outside its group. */
+function clipToAlpha(work, x, y, clip) {
+  const m = createCanvas(work.width, work.height);
+  const g = m.getContext('2d');
+  g.drawImage(work, 0, 0);
+  g.globalCompositeOperation = 'destination-in';
+  g.drawImage(clip.canvas, clip.x - x, clip.y - y);
+  return m;
+}
 
 /**
  * Image modes (lib/modes.js): a renderer per document mode runs on every composite's output canvas
@@ -30,6 +93,10 @@ export class Compositor {
     this.styleCache = new WeakMap(); // layer -> { version, canvas, x, y }
     this.adjustCache = new WeakMap(); // layer -> { key, canvas }
     this.full = null; // { version, canvas } for the whole document
+    this.groupCache = new WeakMap(); // styled group -> { key, canvas, x, y } of its children (K.3)
+    this.styleRuns = 0; // applyStyles calls (tests check that a repaint next to a styled group runs none)
+    this.knockStack = new Map(); // pass-through group -> { data, rect }: the backdrop its shallow knockouts reveal
+    this.unready = false; // set while a styled render waits for a pattern (not cached)
   }
 
   /**
@@ -98,9 +165,11 @@ export class Compositor {
       return false;
     }
     if (layer.isGroup) {
-      // only Pass Through lets the children blend with what is below the group; Normal isolates them
-      const passThrough = layer.blend === 'pass-through' && !clipped.length && !layer.styles;
-      if (passThrough && layer.opacity >= 1 && !hasEffectiveMask(layer)) return this.drawChildren(ctx, layer, rect, doc, opts); // mask (K.1)
+      // only Pass Through lets the children blend with what is below the group; Normal isolates them. A pass-through
+      // group with effects or advanced blending composites as an isolated group, as Photoshop does (K.3)
+      const styled = hasEnabledStyles(layer.styles);
+      const passThrough = layer.blend === 'pass-through' && !clipped.length && !styled && !blendingOf(layer);
+      if (passThrough && layer.opacity >= 1 && !hasEffectiveMask(layer)) return this.drawGroupChildren(ctx, layer, rect, doc, opts); // mask (K.1)
       if (passThrough) {
         // pass through with opacity or a mask: the children blend with the backdrop, then the result is
         // faded back towards that backdrop (so an adjustment layer inside keeps working at 50%)
@@ -108,10 +177,16 @@ export class Compositor {
         const tctx = tmp.getContext('2d', { willReadFrequently: true });
         tctx.drawImage(ctx.canvas, 0, 0);
         tctx.translate(-rect.x, -rect.y);
-        const stop = this.drawChildren(tctx, layer, rect, doc, opts);
+        const stop = this.drawGroupChildren(tctx, layer, rect, doc, opts);
         tctx.setTransform(1, 0, 0, 1, 0, 0);
         this.lerpInto(ctx, tmp, rect, layer.opacity, maskCanvasFor(layer, doc, { purpose: 'composite' })); // mask (K.1)
         return stop;
+      }
+      if (styled) {
+        // effects need the whole content, not only the repaint rect: rendered once over it and cached (K.3)
+        const src = this.styledGroupSource(layer, doc, opts);
+        if (src) this.finishLayer(ctx, layer, src.canvas, src.x, src.y, clipped, rect, doc, opts);
+        return src?.stop ?? false;
       }
       const tmp = createCanvas(rect.width, rect.height);
       const tctx = tmp.getContext('2d', { willReadFrequently: true });
@@ -131,31 +206,16 @@ export class Compositor {
     return false;
   }
 
-  /** Applies clipping layers, styles, mask, opacity and blend mode, then draws into ctx. */
-  finishLayer(ctx, layer, canvas, x, y, clipped, rect, doc, opts) {
+  /**
+   * Applies clipping layers, styles, mask, opacity and blend mode, then draws into ctx. `clipTo` ({ canvas, x, y }:
+   * the base's shape) cuts the result when the layer is clipped to a base whose Blend Clipped Layers as Group is off.
+   */
+  finishLayer(ctx, layer, canvas, x, y, clipped, rect, doc, opts, clipTo = null) {
+    const bl = blendingOf(layer);
+    // K.3: advanced blending options take the per-pixel path; the defaults keep 0.3's order and Canvas fast path
+    if (bl) return this.finishAdvanced(ctx, layer, canvas, x, y, clipped, rect, doc, opts, bl, clipTo);
     let work = canvas, wx = x, wy = y;
-    if (clipped.length) {
-      // composite clipped layers onto a copy limited to the base alpha
-      const copy = createCanvas(work.width, work.height);
-      const cctx = copy.getContext('2d', { willReadFrequently: true });
-      cctx.drawImage(work, 0, 0);
-      cctx.translate(-wx, -wy);
-      const sub = { x: wx, y: wy, width: work.width, height: work.height };
-      for (const c of clipped) {
-        if (c.type === 'adjustment') {
-          this.drawAdjustment(cctx, c, sub, doc);
-          continue;
-        }
-        const cs = c.isGroup ? this.renderGroupCanvas(c, sub, doc, opts) : this.layerSource(c);
-        if (!cs) continue;
-        this.finishLayer(cctx, c, cs.canvas, cs.x, cs.y, [], sub, doc, opts);
-      }
-      cctx.setTransform(1, 0, 0, 1, 0, 0);
-      // keep only where the base had alpha
-      cctx.globalCompositeOperation = 'destination-in';
-      cctx.drawImage(canvas, 0, 0);
-      work = copy;
-    }
+    if (clipped.length) work = this.clipGroup(work, wx, wy, clipped, doc, opts);
     const styled = hasEnabledStyles(layer.styles);
     if (layer.fillOpacity < 1 && !layer.isGroup && !styled) {
       const faded = createCanvas(work.width, work.height);
@@ -165,7 +225,7 @@ export class Compositor {
       work = faded;
     }
     // the mask shapes the layer before its effects (Photoshop's default: a stroke or shadow follows the mask edge)
-    // (K.3: layer-style-blending splits the parts around the styles for the two "hides effects" boxes)
+    // (K.3: the advanced path splits the parts around the styles for the two "hides effects" boxes)
     const masked = hasEffectiveMask(layer); // mask (K.1)
     if (masked) work = applyLayerMask(work, wx, wy, layer, doc); // mask (K.1)
     if (styled) {
@@ -178,6 +238,12 @@ export class Compositor {
         wy = out.y;
       }
     }
+    if (clipTo) work = clipToAlpha(work, wx, wy, clipTo);
+    this.drawWork(ctx, layer, work, wx, wy, rect);
+  }
+
+  /** Draws a finished layer image with the layer's blend mode and opacity (Canvas when it can, else per pixel). */
+  drawWork(ctx, layer, work, wx, wy, rect) {
     const mode = layer.isGroup && layer.blend === 'pass-through' ? 'normal' : layer.blend;
     const op = CANVAS_BLEND[mode] ?? (SIMPLE_OVER.has(mode) ? 'source-over' : null);
     if (op) {
@@ -199,6 +265,226 @@ export class Compositor {
     ctx.putImageData(dst, overlap.x - rect.x, overlap.y - rect.y);
   }
 
+  /** The base composited with its clipped layers (Blend Clipped Layers as Group, 0.3's clipping), cut to its alpha. */
+  clipGroup(work, wx, wy, clipped, doc, opts) {
+    // composite clipped layers onto a copy limited to the base alpha
+    const copy = createCanvas(work.width, work.height);
+    const cctx = copy.getContext('2d', { willReadFrequently: true });
+    cctx.drawImage(work, 0, 0);
+    cctx.translate(-wx, -wy);
+    const sub = { x: wx, y: wy, width: work.width, height: work.height };
+    for (const c of clipped) {
+      if (c.type === 'adjustment') {
+        this.drawAdjustment(cctx, c, sub, doc);
+        continue;
+      }
+      const cs = c.isGroup ? this.clippedGroupSource(c, sub, doc, opts) : this.layerSource(c);
+      if (!cs) continue;
+      this.finishLayer(cctx, c, cs.canvas, cs.x, cs.y, [], sub, doc, opts);
+    }
+    cctx.setTransform(1, 0, 0, 1, 0, 0);
+    // keep only where the base had alpha
+    cctx.globalCompositeOperation = 'destination-in';
+    cctx.drawImage(work, 0, 0);
+    return copy;
+  }
+
+  /**
+   * K.3: a layer whose blending options are not the defaults. Clipped layers (as a group, or each over the backdrop
+   * cut to the base's shape), the mask parts before the effects, fill opacity, the effects with Blend Interior Effects
+   * as Group and Transparency Shapes Layer, the mask parts after them; then knockout, Blend If and the channels per
+   * pixel (blend-if.js compositeAdvanced) when one of them is set, else the ordinary draw.
+   */
+  finishAdvanced(ctx, layer, canvas, x, y, clipped, rect, doc, opts, bl, clipTo) {
+    let work = canvas, wx = x, wy = y;
+    const grouped = bl.clippedAsGroup !== false;
+    if (clipped.length && grouped) work = this.clipGroup(work, wx, wy, clipped, doc, opts);
+    const styled = hasEnabledStyles(layer.styles);
+    const parts = maskPartsAround(bl);
+    // the mask parts whose "hides effects" box is off shape the layer before its effects (K.1 parts of K.3)
+    const maskedBefore = !!parts.before && hasEffectiveMask(layer, parts.before); // mask (K.1)
+    if (maskedBefore) work = applyLayerMask(work, wx, wy, layer, doc, { parts: parts.before }); // mask (K.1)
+    // the layer's shape before its fill fades it: what knockout and Blend Clipped Layers outside the group use
+    let shape = { canvas: work, x: wx, y: wy };
+    if (layer.fillOpacity < 1 && !layer.isGroup && !styled) {
+      const faded = createCanvas(work.width, work.height);
+      const fctx = faded.getContext('2d');
+      fctx.globalAlpha = layer.fillOpacity;
+      fctx.drawImage(work, 0, 0);
+      work = faded;
+    }
+    const blendIf = !isDefaultBlendIf(bl.blendIf);
+    let below = null;
+    if (styled) {
+      const clipKey = clipped.length && grouped ? clipped.map((c) => `${c.id}:${c.version}`).join(',') : '';
+      // Blend If leaves the exterior effects alone: the styles come split (styles.js split option)
+      const out = this.styledCanvas(layer, work, wx, wy, doc, {
+        masked: maskedBefore, clipKey, maskKey: parts.before ? maskCacheKey(layer, parts.before) : 'none', // mask (K.1)
+        interiorAsGroup: !!bl.interiorAsGroup, transparencyShapes: bl.transparencyShapes !== false, split: blendIf,
+      });
+      if (out) {
+        work = out.canvas;
+        below = out.below ?? null;
+        wx = out.x;
+        wy = out.y;
+      }
+    }
+    // the parts whose box is on hide the effects too: applied to everything the layer draws (K.1 parts of K.3)
+    if (parts.after && hasEffectiveMask(layer, parts.after)) { // mask (K.1)
+      work = applyLayerMask(work, wx, wy, layer, doc, { parts: parts.after }); // mask (K.1)
+      if (below) below = applyLayerMask(below, wx, wy, layer, doc, { parts: parts.after }); // mask (K.1)
+      shape = { canvas: applyLayerMask(shape.canvas, shape.x, shape.y, layer, doc, { parts: parts.after }), x: shape.x, y: shape.y }; // mask (K.1)
+    }
+    if (clipTo) {
+      work = clipToAlpha(work, wx, wy, clipTo);
+      if (below) below = clipToAlpha(below, wx, wy, clipTo);
+      shape = { canvas: clipToAlpha(shape.canvas, shape.x, shape.y, clipTo), x: shape.x, y: shape.y };
+    }
+    const knockout = bl.knockout === 'shallow' || bl.knockout === 'deep' ? bl.knockout : 'none';
+    if (knockout === 'none' && !blendIf && !restrictsChannels(bl.channels)) {
+      if (below) this.drawWork(ctx, layer, below, wx, wy, rect);
+      this.drawWork(ctx, layer, work, wx, wy, rect);
+    } else {
+      this.drawPixels(ctx, layer, { work, below, shape, wx, wy, knockout, bl }, rect, doc, opts);
+    }
+    // Blend Clipped Layers as Group off: each clipped layer blends with the backdrop in its own mode, cut to the
+    // base's shape (the base's fill opacity does not fade them)
+    if (clipped.length && !grouped) {
+      const base = clipTo ?? shape;
+      for (const c of clipped) {
+        if (c.type === 'adjustment') {
+          this.drawClippedAdjustment(ctx, c, base, rect, doc);
+          continue;
+        }
+        const cs = c.isGroup ? this.clippedGroupSource(c, rect, doc, opts) : this.layerSource(c);
+        if (!cs) continue;
+        this.finishLayer(ctx, c, cs.canvas, cs.x, cs.y, [], rect, doc, opts, base);
+      }
+    }
+  }
+
+  /** The per-pixel step of finishAdvanced: knockout, Blend If and channel restriction on the visible region. */
+  drawPixels(ctx, layer, { work, below, shape, wx, wy, knockout, bl }, rect, doc, opts) {
+    let box = { x: wx, y: wy, width: work.width, height: work.height };
+    if (knockout !== 'none') box = unionRect(box, { x: shape.x, y: shape.y, width: shape.canvas.width, height: shape.canvas.height });
+    const r = intersectRect(box, rect);
+    if (!r) return;
+    const dst = ctx.getImageData(r.x - rect.x, r.y - rect.y, r.width, r.height);
+    const layerImg = readRegion(work, wx, wy, r);
+    const belowImg = below ? readRegion(below, wx, wy, r) : null;
+    let shapeAlpha = null, knock = null;
+    if (knockout !== 'none') {
+      shapeAlpha = this.shapeAlpha(shape, r, bl.transparencyShapes !== false);
+      knock = this.knockBackdrop(layer, knockout, r, doc, opts);
+    }
+    compositeAdvanced({
+      dst, layer: layerImg, below: belowImg, knock, shape: shapeAlpha, knockout,
+      blendIf: bl.blendIf, channels: bl.channels, mode: layer.isGroup && layer.blend === 'pass-through' ? 'normal' : layer.blend, opacity: layer.opacity,
+    });
+    ctx.putImageData(dst, r.x - rect.x, r.y - rect.y);
+  }
+
+  /** The layer's shape alpha (0..255 per pixel of r); with Transparency Shapes Layer off, its whole content box. */
+  shapeAlpha(shape, r, transparencyShapes) {
+    const out = new Uint8ClampedArray(r.width * r.height);
+    if (transparencyShapes) {
+      const d = readRegion(shape.canvas, shape.x, shape.y, r).data;
+      for (let i = 0, p = 3; i < out.length; i++, p += 4) out[i] = d[p];
+      return out;
+    }
+    const g = shape.canvas.getContext('2d', { willReadFrequently: true });
+    const b = alphaBox(g.getImageData(0, 0, shape.canvas.width, shape.canvas.height));
+    if (!b) return out;
+    const box = intersectRect({ x: shape.x + b.x, y: shape.y + b.y, width: b.width, height: b.height }, r);
+    if (!box) return out;
+    for (let y = box.y; y < box.y + box.height; y++) out.fill(255, (y - r.y) * r.width + (box.x - r.x), (y - r.y) * r.width + (box.x - r.x) + box.width);
+    return out;
+  }
+
+  /**
+   * What a knockout reveals over r: Shallow, the backdrop its group started from (transparency for an isolated
+   * group; for a layer of the root, as Deep); Deep, the Background layer alone (transparency without one).
+   */
+  knockBackdrop(layer, knockout, r, doc, opts) {
+    const parent = layer.parent;
+    if (knockout === 'shallow' && parent && parent !== doc.root) {
+      const snap = this.knockStack.get(parent);
+      if (!snap) return null;
+      const c = createCanvas(snap.rect.width, snap.rect.height);
+      c.getContext('2d').putImageData(snap.data, 0, 0);
+      return readRegion(c, snap.rect.x, snap.rect.y, r);
+    }
+    const bg = backgroundOf(doc);
+    if (!bg || bg === layer) return null;
+    const c = createCanvas(r.width, r.height);
+    const g = c.getContext('2d', { willReadFrequently: true });
+    g.translate(-r.x, -r.y);
+    this.drawLayer(g, bg, [], r, doc, { ...opts, until: null });
+    return g.getImageData(0, 0, r.width, r.height);
+  }
+
+  /** An adjustment layer clipped to a base outside the group (Blend Clipped Layers as Group off): cut to the base. */
+  drawClippedAdjustment(ctx, layer, base, rect, doc) {
+    const below = ctx.getImageData(0, 0, rect.width, rect.height);
+    const img = { width: below.width, height: below.height, data: new Uint8ClampedArray(below.data) };
+    applyAdjustment(img, layer.kind, layer.params, null, { origin: { x: rect.x, y: rect.y }, docWidth: doc?.width ?? rect.width, docHeight: doc?.height ?? rect.height, scale: 1 });
+    // the base's shape as the mask of the lerp, with the layer's own mask on top
+    const m = createCanvas(doc.width, doc.height);
+    const mg = m.getContext('2d');
+    mg.drawImage(base.canvas, base.x, base.y);
+    const own = maskCanvasFor(layer, doc, { purpose: 'composite' }); // mask (K.1)
+    if (own) {
+      mg.globalCompositeOperation = 'destination-in';
+      mg.drawImage(own, 0, 0);
+    }
+    this.lerpPixels(ctx, below, img.data, rect, layer.opacity, m);
+  }
+
+  /** drawChildren, recording the backdrop the group starts from when a child knocks out to it (Shallow). */
+  drawGroupChildren(ctx, group, rect, doc, opts) {
+    if (!group.children.some((c) => c.visible && c.blending?.knockout === 'shallow')) return this.drawChildren(ctx, group, rect, doc, opts);
+    this.knockStack.set(group, { data: ctx.getImageData(0, 0, rect.width, rect.height), rect });
+    try {
+      return this.drawChildren(ctx, group, rect, doc, opts);
+    } finally {
+      this.knockStack.delete(group);
+    }
+  }
+
+  /**
+   * A styled group's children over their whole content (effects reach across the repaint rect), cached on what they
+   * depend on: their versions and visibility, the global light, the document size (K.3). A brush dab next to the
+   * group touches neither, so its styles are not run again.
+   */
+  styledGroupSource(group, doc, opts) {
+    const content = renderBounds(group);
+    if (!content) return null;
+    const pad = stylePadding(group.styles);
+    const area = intersectRect(content, { x: -pad, y: -pad, width: doc.width + pad * 2, height: doc.height + pad * 2 });
+    if (!area) return null;
+    const angle = doc.globalLight?.angle ?? 120, altitude = doc.globalLight?.altitude ?? 30;
+    const plain = !opts.skip && !opts.until && !opts.rawMode;
+    const key = `${area.x},${area.y},${area.width},${area.height}|${angle},${altitude}|${doc.mode ?? ''}|${subtreeKey(group)}`;
+    const cached = this.groupCache.get(group);
+    if (plain && cached && cached.key === key) return cached;
+    const tmp = createCanvas(area.width, area.height);
+    const tctx = tmp.getContext('2d', { willReadFrequently: true });
+    tctx.translate(-area.x, -area.y);
+    const wasUnready = this.unready;
+    this.unready = false;
+    const stop = this.drawChildren(tctx, group, area, doc, opts);
+    tctx.setTransform(1, 0, 0, 1, 0, 0);
+    const entry = { key, canvas: tmp, x: area.x, y: area.y, stop };
+    if (plain && !this.unready) this.groupCache.set(group, entry);
+    this.unready = wasUnready || this.unready;
+    return entry;
+  }
+
+  /** A clipped group's pixels: a styled one over its whole content (cached, K.3), else over the rect. */
+  clippedGroupSource(group, rect, doc, opts) {
+    return hasEnabledStyles(group.styles) ? this.styledGroupSource(group, doc, opts) : this.renderGroupCanvas(group, rect, doc, opts);
+  }
+
   renderGroupCanvas(group, rect, doc, opts) {
     const tmp = createCanvas(rect.width, rect.height);
     const tctx = tmp.getContext('2d', { willReadFrequently: true });
@@ -217,22 +503,42 @@ export class Compositor {
     return null;
   }
 
-  styledCanvas(layer, canvas, x, y, doc = null, { masked = false, clipKey = '', maskKey = '' } = {}) {
+  /**
+   * The layer's pixels with its effects (applyStyles), cached on the layer version, the source, the clipped layers,
+   * the mask parts applied before, the global light and the blending options the styles read. `split` (Blend If)
+   * keeps the exterior effects apart: the entry then has `below` beside `canvas`, both at x, y.
+   */
+  styledCanvas(layer, canvas, x, y, doc = null, { masked = false, clipKey = '', maskKey = '', interiorAsGroup = false, transparencyShapes = true, split = false } = {}) {
     const cached = this.styleCache.get(layer);
     const angle = doc?.globalLight?.angle ?? 120, altitude = doc?.globalLight?.altitude ?? 30;
-    // a masked source is a fresh canvas every time: mask edits touch the layer, so its version is the key then
-    const sameSource = cached && (cached.source === canvas || (masked && cached.masked && cached.x0 === x && cached.y0 === y && cached.w === canvas.width && cached.h === canvas.height));
-    if (cached && cached.version === layer.version && sameSource && cached.clipKey === clipKey && cached.maskKey === maskKey && cached.angle === angle && cached.altitude === altitude) return cached;
+    const optKey = `${interiorAsGroup ? 1 : 0}${transparencyShapes ? 1 : 0}${split ? 1 : 0}`;
+    // a masked or clipped source is a fresh canvas every time: mask edits touch the layer and the clipped layers'
+    // versions are in clipKey, so the versions are the key then
+    const derived = (masked && cached?.masked) || clipKey !== '';
+    const sameSource = cached && (cached.source === canvas || (derived && cached.w === canvas.width && cached.h === canvas.height)) && cached.x0 === x && cached.y0 === y;
+    if (cached && cached.version === layer.version && sameSource && cached.clipKey === clipKey && cached.maskKey === maskKey && cached.angle === angle && cached.altitude === altitude && cached.optKey === optKey) return cached;
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
     // stored styles -> what applyStyles takes (pattern references decoded): lib/style-prepare.js (K.2)
     const { styles, ready } = prepareStyles(layer, doc);
-    const out = applyStyles(img, styles, { fillOpacity: layer.fillOpacity ?? 1, globalAngle: angle, globalAltitude: altitude });
-    const result = createCanvas(out.image.width, out.image.height);
-    result.getContext('2d').putImageData(new ImageData(out.image.data, out.image.width, out.image.height), 0, 0);
-    const entry = { version: layer.version, source: canvas, masked, clipKey, maskKey, x0: x, y0: y, w: canvas.width, h: canvas.height, canvas: result, x: x + out.offsetX, y: y + out.offsetY, angle, altitude };
+    this.styleRuns++;
+    // origin: where img's (0, 0) is in the document (patterns linked to the document, gradients aligned to it; a
+    // group has no position of its own)
+    const out = applyStyles(img, styles, {
+      fillOpacity: layer.fillOpacity ?? 1, globalAngle: angle, globalAltitude: altitude, interiorAsGroup, transparencyShapes, split,
+      origin: [x, y], docWidth: doc?.width, docHeight: doc?.height,
+    });
+    const toCanvas = (im) => {
+      const c = createCanvas(im.width, im.height);
+      c.getContext('2d').putImageData(new ImageData(im.data, im.width, im.height), 0, 0);
+      return c;
+    };
+    const result = toCanvas(split ? out.layer : out.image);
+    const below = split && out.below ? toCanvas(out.below) : null;
+    const entry = { version: layer.version, source: canvas, masked, clipKey, maskKey, optKey, x0: x, y0: y, w: canvas.width, h: canvas.height, canvas: result, below, x: x + out.offsetX, y: y + out.offsetY, angle, altitude };
     // a pattern still decoding must not be cached as "no pattern"
     if (ready) this.styleCache.set(layer, entry);
+    else this.unready = true;
     return entry;
   }
 

@@ -1,7 +1,8 @@
-// Paths panel: the Work Path, saved paths (doc.paths) and the active shape layer's path, each with a
-// thumbnail. Click selects (app.ui.activePath, drawn by the vector tools), double-click renames a
-// saved path or saves the work path, Ctrl/Cmd-click loads a path as a selection; footer buttons fill,
-// stroke, load as selection, make a work path from the selection, save, create and delete paths.
+// Paths panel: the Work Path, saved paths (doc.paths), the active shape layer's path and the active layer's vector
+// mask (the 'vector-mask' path target kind, lib/vector-mask.js; masks-vector-masks owns this file in 0.4), each with
+// a thumbnail. Click selects (app.ui.activePath, drawn and edited by the vector tools), double-click renames a saved
+// path or saves the work path, Ctrl/Cmd-click loads a path as a selection; footer buttons fill, stroke, load as
+// selection, make a work path from the selection, add a vector mask from the path, save, create and delete paths.
 import { icon } from '../icons.js';
 import { pathToPath2D, createCanvas } from '../document.js';
 import { pathAreaCanvas, hasPathOps } from '../path-ops.js';
@@ -19,6 +20,7 @@ export function install(app) {
       <button class="pbtn" data-cmd="path:stroke" title="Stroke path with brush (Alt-click for options)">${icon('brush')}</button>
       <button class="pbtn" data-cmd="path:make-selection" title="Load path as a selection (Alt-click for options)">${icon('marquee-rect')}</button>
       <button class="pbtn" data-cmd="path:from-selection" title="Make work path from selection (Alt-click for options)">${icon('pen')}</button>
+      <button class="pbtn" data-cmd="path:make-mask" title="Add a vector mask to the active layer from the path">${icon('mask')}</button>
       <span style="flex:1"></span>
       <button class="pbtn" data-cmd="path:save" title="Save the work path">${icon('save')}</button>
       <button class="pbtn" data-cmd="path:new" title="Create new path">${icon('plus')}</button>
@@ -149,6 +151,7 @@ export function install(app) {
     const name = document.createElement('span');
     name.className = 'path-name' + (r0.italic ? ' italic' : '');
     li.append(t, name);
+    if (r0.ap.kind === 'vector-mask') li.classList.add('vector-mask-row');
     Object.assign(e, { li, thumbEl: t, nameEl: name });
     li.addEventListener('click', (ev) => {
       ev.stopPropagation();
@@ -163,6 +166,11 @@ export function install(app) {
       ev.stopPropagation();
       if (e.r.ap.kind === 'saved') startRename(e.r, name);
       else if (e.r.ap.kind === 'work') app.commands.run('path:save', undefined, 'panel');
+      // the vector mask: Photoshop edits its path; make it the target and switch to a path tool
+      else if (e.r.ap.kind === 'vector-mask') {
+        app.commands.run('layer:vector-mask', 'target', 'panel');
+        if (!app.tools.active?.isVector) app.tools.activate('direct-selection');
+      }
     });
     li.addEventListener('contextmenu', (ev) => {
       ev.preventDefault();
@@ -172,10 +180,25 @@ export function install(app) {
       app.dialogs.popover(li, [
         ...(r.ap.kind === 'work' ? [{ label: 'Save Path…', onSelect: run('path:save') }] : []),
         ...(r.ap.kind === 'saved' ? [{ label: 'Rename Path…', onSelect: () => startRename(r, name) }] : []),
-        ...(r.ap.kind !== 'shape' ? [{ label: 'Delete Path', onSelect: run('path:delete') }, { type: 'separator' }] : []),
+        ...(r.ap.kind === 'vector-mask'
+          ? [
+              { label: 'Save Path…', onSelect: run('path:save') },
+              { label: 'Delete Vector Mask', onSelect: run('layer:vector-mask', 'delete') },
+              { label: 'Disable / Enable Vector Mask', onSelect: run('layer:vector-mask', 'toggle') },
+              { label: 'Rasterize Vector Mask', onSelect: run('layer:vector-mask', 'rasterize') },
+              { type: 'separator' },
+            ]
+          : r.ap.kind !== 'shape' ? [{ label: 'Delete Path', onSelect: run('path:delete') }, { type: 'separator' }] : []),
         { label: 'Make Selection…', onSelect: run('path:make-selection') },
         { label: 'Fill Path…', onSelect: run('path:fill') },
         { label: 'Stroke Path…', onSelect: run('path:stroke') },
+        ...(r.ap.kind !== 'vector-mask'
+          ? [
+              { type: 'separator' },
+              { label: 'Make Vector Mask', onSelect: run('path:make-mask'), disabled: !app.commands.isEnabled('path:make-mask') },
+              { label: 'Make Shape Layer', onSelect: run('path:make-shape') },
+            ]
+          : []),
       ], { at: { x: ev.clientX, y: ev.clientY } });
     });
     return e;

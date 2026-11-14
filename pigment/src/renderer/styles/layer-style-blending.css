@@ -1,1 +1,22 @@
-/* layer-style-blending (ARCHITECTURE.md "0.4 features", rule 6): this package's styles. Empty until the package lands. */
+/* layer-style-blending (ARCHITECTURE.md "0.4 features", rule 6): the Blending Options page of the Layer Style dialog. */
+.blending-page .blend-channels { display: flex; gap: 14px; }
+.blending-page .blend-channels .checkbox { display: inline-flex; align-items: center; gap: 4px; }
+
+/* Blend If: a channel menu and two split sliders */
+.bif { margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--border, rgba(127, 127, 127, 0.3)); }
+.bif-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.bif-head label { font-weight: 600; white-space: nowrap; }
+.bif-head .select { width: auto; flex: 0 0 140px; }
+.bif-row { display: grid; grid-template-columns: 1fr auto; grid-template-areas: 'title nums' 'bar bar'; gap: 4px 8px; margin-bottom: 14px; }
+.bif-title { grid-area: title; align-self: center; }
+.bif-nums { grid-area: nums; display: flex; gap: 4px; }
+.bif-num { width: 56px; padding: 2px 4px; }
+.bif-bar { grid-area: bar; position: relative; height: 26px; margin: 0 7px; touch-action: none; user-select: none; }
+.bif-track { position: absolute; left: 0; right: 0; top: 2px; height: 10px; border: 1px solid var(--border, rgba(127, 127, 127, 0.5)); }
+/* each half is a half triangle under the bar; an unsplit pair shows as one whole triangle */
+.bif-handle { position: absolute; top: 13px; width: 7px; height: 11px; cursor: ew-resize; outline: none; }
+.bif-handle.left { margin-left: -7px; clip-path: polygon(100% 0, 100% 100%, 0 100%); }
+.bif-handle.right { clip-path: polygon(0 0, 100% 100%, 0 100%); }
+.bif-handle.black { background: #111; border: 1px solid #888; }
+.bif-handle.white { background: #f4f4f4; border: 1px solid #666; }
+.bif-handle:focus-visible { filter: drop-shadow(0 0 2px var(--accent, #3b82f6)); }

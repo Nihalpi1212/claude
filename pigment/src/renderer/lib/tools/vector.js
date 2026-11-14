@@ -16,22 +16,26 @@ import { Selection } from '../selection.js';
 import { BrushStroke } from '../brush.js';
 import { formDialog } from '../form.js';
 import { parseColor } from '../../../shared/pixels/color.js';
-import { PATH_OPS, hasPathOps, pathAreaMask, hitPathArea, setSubpathOps } from '../path-ops.js';
+import { PATH_OPS, hasPathOps, pathAreaMask, hitPathArea, setSubpathOps, mapShapeGeometry, livePath } from '../path-ops.js';
+import { resolvePaint } from '../paint-editors.js';
+import { cornerWidgetAt, beginCornerDrag, drawCornerWidgets, createShapeDialog } from './shape-widgets.js';
+import '../shape-paint-ui.js'; // the shape-fill, shape-stroke and paint widgets of the options bar (H)
+import { registerIcons } from '../icons.js';
+
+// the Triangle tool's icon (rule 6: added through registerIcons, never replacing an existing name)
+registerIcons({ 'shape-triangle': '<path d="M12 4.5 21 19.5H3z"/>' });
+import {
+  clonePath, isEmptyPath, segmentCount, flattenSubpath, flattenPath, reverseSubpath,
+  rectPath, ellipsePath, polygonPath, linePath, parseSvgPath, CUSTOM_SHAPES, customPath,
+} from '../shape-geometry.js';
+
+// 0.3's path helpers and shape builders live in shape-geometry.js (pure, unit-tested); these exports stay here
+export { clonePath, isEmptyPath, flattenSubpath, flattenPath, reverseSubpath, rectPath, ellipsePath, polygonPath, linePath, parseSvgPath, CUSTOM_SHAPES, customPath };
 
 const ACCENT = '#1e88ff';
-const KAPPA = 0.5522847498307936;
 const EMPTY = Object.freeze({ subpaths: Object.freeze([]) });
 
 // ---- path geometry ------------------------------------------------------------------------------------------
-
-export function clonePath(path) {
-  // `op` (path operation, see lib/path-ops.js) rides along; combine is the default and stays implicit
-  return { subpaths: (path?.subpaths ?? []).map((sp) => ({ closed: !!sp.closed, points: sp.points.map((p) => ({ ...p })), ...(sp.op && sp.op !== 'combine' ? { op: sp.op } : {}) })) };
-}
-
-export function isEmptyPath(path) {
-  return !path?.subpaths?.some((sp) => sp.points.length > 0);
-}
 
 const hasIn = (p) => p.inX !== undefined && p.inY !== undefined;
 const hasOut = (p) => p.outX !== undefined && p.outY !== undefined;
@@ -44,71 +48,6 @@ const lerp2 = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
 function cubicAt(c, t) {
   const u = 1 - t, a = u * u * u, b = 3 * u * u * t, cc = 3 * u * t * t, d = t * t * t;
   return [a * c[0] + b * c[2] + cc * c[4] + d * c[6], a * c[1] + b * c[3] + cc * c[5] + d * c[7]];
-}
-
-function segmentCount(sp) {
-  return sp.closed ? sp.points.length : Math.max(0, sp.points.length - 1);
-}
-
-/** Polyline of one subpath; `tol` is the maximum chord deviation in document pixels. */
-export function flattenSubpath(sp, tol = 0.5) {
-  const pts = sp.points;
-  if (!pts.length) return [];
-  const out = [[pts[0].x, pts[0].y]];
-  const n = pts.length;
-  for (let i = 0; i < segmentCount(sp); i++) {
-    const a = pts[i], b = pts[(i + 1) % n];
-    if (isLine(a, b)) {
-      out.push([b.x, b.y]);
-      continue;
-    }
-    const c = segCtrl(a, b);
-    const ddx = Math.max(Math.abs(c[0] - 2 * c[2] + c[4]), Math.abs(c[2] - 2 * c[4] + c[6]));
-    const ddy = Math.max(Math.abs(c[1] - 2 * c[3] + c[5]), Math.abs(c[3] - 2 * c[5] + c[7]));
-    const steps = Math.min(400, Math.max(2, Math.ceil(Math.sqrt((6 * Math.hypot(ddx, ddy)) / (8 * tol)))));
-    for (let k = 1; k <= steps; k++) out.push(cubicAt(c, k / steps));
-  }
-  if (sp.closed && out.length > 1) {
-    const f = out[0], l = out[out.length - 1];
-    if (Math.abs(f[0] - l[0]) < 1e-9 && Math.abs(f[1] - l[1]) < 1e-9) out.pop();
-  }
-  return out;
-}
-
-export function flattenPath(path, tol = 0.5) {
-  return (path?.subpaths ?? []).map((sp) => ({ closed: sp.closed, points: flattenSubpath(sp, tol) })).filter((p) => p.points.length);
-}
-
-function signedArea(poly) {
-  let a = 0;
-  for (let i = 0; i < poly.length; i++) {
-    const p = poly[i], q = poly[(i + 1) % poly.length];
-    a += p[0] * q[1] - q[0] * p[1];
-  }
-  return a / 2;
-}
-
-/** Reverses a subpath's direction (anchors in reverse order, in/out handles swapped). */
-export function reverseSubpath(sp) {
-  const pts = sp.points.slice().reverse().map((p) => {
-    const q = { x: p.x, y: p.y };
-    if (hasOut(p)) {
-      q.inX = p.outX;
-      q.inY = p.outY;
-    }
-    if (hasIn(p)) {
-      q.outX = p.inX;
-      q.outY = p.inY;
-    }
-    return q;
-  });
-  if (sp.closed && pts.length > 1) pts.unshift(pts.pop()); // keep the same first anchor
-  return { closed: sp.closed, points: pts };
-}
-
-/** Makes a closed subpath run clockwise on screen (positive area with y down). */
-function clockwise(sp) {
-  return signedArea(flattenSubpath(sp, 1)) < 0 ? reverseSubpath(sp) : sp;
 }
 
 function mapPoints(path, fn) {
@@ -309,144 +248,6 @@ export function smoothSubpath(pts, closed, cornerDeg = 75) {
     Object.assign(out[i], { inX: x - (tx * l1) / 3, inY: y - (ty * l1) / 3, outX: x + (tx * l2) / 3, outY: y + (ty * l2) / 3 });
   }
   return { closed, points: out };
-}
-
-// ---- shape builders (closed subpaths run clockwise on screen) -----------------------------------------------
-
-export function rectPath(x, y, w, h, r = 0) {
-  r = Math.max(0, Math.min(r, w / 2, h / 2));
-  if (r <= 0.01) return { subpaths: [{ closed: true, points: [{ x, y }, { x: x + w, y }, { x: x + w, y: y + h }, { x, y: y + h }] }] };
-  const k = r * KAPPA;
-  const pts = [
-    { x: x + r, y, inX: x + r - k, inY: y },
-    { x: x + w - r, y, outX: x + w - r + k, outY: y },
-    { x: x + w, y: y + r, inX: x + w, inY: y + r - k },
-    { x: x + w, y: y + h - r, outX: x + w, outY: y + h - r + k },
-    { x: x + w - r, y: y + h, inX: x + w - r + k, inY: y + h },
-    { x: x + r, y: y + h, outX: x + r - k, outY: y + h },
-    { x, y: y + h - r, inX: x, inY: y + h - r + k },
-    { x, y: y + r, outX: x, outY: y + r - k },
-  ];
-  // corners whose radius eats the whole side leave duplicate anchors: merge them
-  const merged = [];
-  for (const p of pts) {
-    const last = merged[merged.length - 1];
-    if (last && Math.abs(last.x - p.x) < 1e-6 && Math.abs(last.y - p.y) < 1e-6) Object.assign(last, hasOut(p) ? { outX: p.outX, outY: p.outY } : {});
-    else merged.push(p);
-  }
-  const f = merged[0], l = merged[merged.length - 1];
-  if (merged.length > 1 && Math.abs(f.x - l.x) < 1e-6 && Math.abs(f.y - l.y) < 1e-6) {
-    merged.pop();
-    if (hasOut(l)) Object.assign(f, { outX: l.outX, outY: l.outY });
-  }
-  return { subpaths: [{ closed: true, points: merged }] };
-}
-
-export function ellipsePath(x, y, w, h) {
-  const rx = w / 2, ry = h / 2, cx = x + rx, cy = y + ry, kx = rx * KAPPA, ky = ry * KAPPA;
-  return {
-    subpaths: [{
-      closed: true,
-      points: [
-        { x: cx, y: cy - ry, inX: cx - kx, inY: cy - ry, outX: cx + kx, outY: cy - ry },
-        { x: cx + rx, y: cy, inX: cx + rx, inY: cy - ky, outX: cx + rx, outY: cy + ky },
-        { x: cx, y: cy + ry, inX: cx + kx, inY: cy + ry, outX: cx - kx, outY: cy + ry },
-        { x: cx - rx, y: cy, inX: cx - rx, inY: cy + ky, outX: cx - rx, outY: cy - ky },
-      ],
-    }],
-  };
-}
-
-export function polygonPath(x, y, w, h, sides = 5, star = false, inset = 50) {
-  const n = Math.max(3, Math.min(100, Math.round(sides)));
-  const rx = w / 2, ry = h / 2, cx = x + rx, cy = y + ry;
-  const inner = Math.max(0.01, Math.min(0.99, 1 - inset / 100));
-  const pts = [];
-  const count = star ? n * 2 : n;
-  for (let k = 0; k < count; k++) {
-    const a = -Math.PI / 2 + (k * Math.PI * 2) / count;
-    const f = star && k % 2 ? inner : 1;
-    pts.push({ x: cx + Math.cos(a) * rx * f, y: cy + Math.sin(a) * ry * f });
-  }
-  return { subpaths: [{ closed: true, points: pts }] };
-}
-
-export function linePath(x1, y1, x2, y2, weight = 2, arrowStart = false, arrowEnd = false) {
-  const len = Math.hypot(x2 - x1, y2 - y1);
-  if (len < 1e-6) return { subpaths: [] };
-  const ux = (x2 - x1) / len, uy = (y2 - y1) / len, nx = -uy, ny = ux;
-  const w = Math.max(0.5, weight) / 2;
-  const head = Math.max(6, weight * 5);
-  let ax = x1, ay = y1, bx = x2, by = y2;
-  const subpaths = [];
-  const tri = (tx, ty, dirX, dirY) => {
-    const baseX = tx - dirX * head, baseY = ty - dirY * head;
-    return clockwise({ closed: true, points: [{ x: tx, y: ty }, { x: baseX + nx * head / 2, y: baseY + ny * head / 2 }, { x: baseX - nx * head / 2, y: baseY - ny * head / 2 }] });
-  };
-  if (arrowEnd && len > head) {
-    subpaths.push(tri(x2, y2, ux, uy));
-    bx = x2 - ux * head * 0.9;
-    by = y2 - uy * head * 0.9;
-  }
-  if (arrowStart && len > head) {
-    subpaths.push(tri(x1, y1, -ux, -uy));
-    ax = x1 + ux * head * 0.9;
-    ay = y1 + uy * head * 0.9;
-  }
-  subpaths.unshift(clockwise({ closed: true, points: [{ x: ax + nx * w, y: ay + ny * w }, { x: bx + nx * w, y: by + ny * w }, { x: bx - nx * w, y: by - ny * w }, { x: ax - nx * w, y: ay - ny * w }] }));
-  return { subpaths };
-}
-
-/** Minimal SVG path parser (absolute M, L, C, Z) into Pigment path data. */
-export function parseSvgPath(d) {
-  const tokens = String(d).match(/[MLCZ]|-?\d*\.?\d+(?:e[-+]?\d+)?/gi) ?? [];
-  const subpaths = [];
-  let sp = null, cmd = null;
-  const num = () => Number(tokens.shift());
-  while (tokens.length) {
-    if (/^[MLCZ]$/i.test(tokens[0])) cmd = tokens.shift().toUpperCase();
-    if (cmd === 'M') {
-      sp = { closed: false, points: [{ x: num(), y: num() }] };
-      subpaths.push(sp);
-      cmd = 'L';
-    } else if (cmd === 'L') sp.points.push({ x: num(), y: num() });
-    else if (cmd === 'C') {
-      const last = sp.points[sp.points.length - 1];
-      last.outX = num();
-      last.outY = num();
-      const inX = num(), inY = num();
-      sp.points.push({ x: num(), y: num(), inX, inY });
-    } else if (cmd === 'Z') {
-      sp.closed = true;
-      const f = sp.points[0], l = sp.points[sp.points.length - 1];
-      if (sp.points.length > 1 && Math.abs(f.x - l.x) < 1e-6 && Math.abs(f.y - l.y) < 1e-6) {
-        sp.points.pop();
-        if (hasIn(l)) Object.assign(f, { inX: l.inX, inY: l.inY });
-      }
-      cmd = null;
-    } else tokens.shift();
-  }
-  return { subpaths };
-}
-
-/** Built-in custom shapes, drawn in a 100 × 100 box. */
-export const CUSTOM_SHAPES = {
-  heart: { name: 'Heart', d: 'M50 92 C35 80 0 58 0 30 C0 12 13 2 28 2 C39 2 46 9 50 17 C54 9 61 2 72 2 C87 2 100 12 100 30 C100 58 65 80 50 92 Z' },
-  arrow: { name: 'Arrow', d: 'M0 30 L55 30 L55 5 L100 50 L55 95 L55 70 L0 70 Z' },
-  star5: { name: 'Star (5 points)', build: () => polygonPath(0, 0, 100, 100, 5, true, 61.8) },
-  check: { name: 'Check mark', d: 'M4 52 L18 38 L38 58 L82 14 L96 28 L38 86 Z' },
-  bubble: { name: 'Speech bubble', d: 'M15 4 L85 4 C93 4 100 11 100 19 L100 56 C100 64 93 71 85 71 L46 71 L24 94 L28 71 L15 71 C7 71 0 64 0 56 L0 19 C0 11 7 4 15 4 Z' },
-  plus: { name: 'Plus', d: 'M35 0 L65 0 L65 35 L100 35 L100 65 L65 65 L65 100 L35 100 L35 65 L0 65 L0 35 L35 35 Z' },
-  bolt: { name: 'Lightning bolt', d: 'M60 0 L14 56 L45 56 L36 100 L86 38 L55 38 L68 0 Z' },
-  drop: { name: 'Drop', d: 'M50 0 C50 0 88 42 88 64 C88 85 71 100 50 100 C29 100 12 85 12 64 C12 42 50 0 50 0 Z' },
-};
-
-export function customPath(name, x, y, w, h) {
-  const def = CUSTOM_SHAPES[name] ?? CUSTOM_SHAPES.heart;
-  const base = def.build ? def.build() : parseSvgPath(def.d);
-  const path = clonePath(base);
-  path.subpaths = path.subpaths.map(clockwise);
-  return mapPoints(path, (px, py) => [x + (px / 100) * w, y + (py / 100) * h]);
 }
 
 // ---- targets ------------------------------------------------------------------------------------------------
@@ -672,31 +473,54 @@ function commitDraft(app, target, original, draft, label, { reshaped = true } = 
   endPreview(app, target, original);
   if (samePath(original, draft)) return false;
   if (target.kind === 'shape') {
-    const extra = reshaped ? { shapeKind: 'path' } : {};
-    if (!reshaped) extra.shapeProps = offsetShapeProps(target.layer.shapeProps, draft, original);
+    const extra = reshaped ? { shapeKind: 'path' } : movedShape(target.layer, draft, original);
     target.commit(draft, label, extra);
   } else target.commit(draft, label);
   return true;
 }
 
-/** Moves the numeric coordinates of shapeProps by the offset between two otherwise identical paths. */
-function offsetShapeProps(props, draft, original) {
+/**
+ * The live parameters of a shape whose whole path moved by the offset between two otherwise identical paths (Path
+ * Selection drags and nudges): mapShapeGeometry with that translation, so the shape stays live.
+ */
+function movedShape(layer, draft, original) {
   const a = original.subpaths[0]?.points[0], b = draft.subpaths[0]?.points[0];
-  if (!props || !a || !b || draft.subpaths.length !== original.subpaths.length) return props ?? {};
+  if (!a || !b || draft.subpaths.length !== original.subpaths.length) return { shapeKind: 'path' };
   const dx = b.x - a.x, dy = b.y - a.y;
-  const out = { ...props };
-  for (const k of ['x', 'x1', 'x2', 'cx']) if (typeof out[k] === 'number') out[k] += dx;
-  for (const k of ['y', 'y1', 'y2', 'cy']) if (typeof out[k] === 'number') out[k] += dy;
-  return out;
+  const g = mapShapeGeometry({ ...layer, path: original }, (x, y) => [x + dx, y + dy], { matrix: [1, 0, 0, 1, dx, dy] });
+  return { shapeKind: g.shapeKind, shapeProps: g.shapeProps, ...(g.fill ? { fill: g.fill } : {}), ...(g.stroke ? { stroke: g.stroke } : {}) };
 }
 
 // ---- styles and layer creation ------------------------------------------------------------------------------
 
-function shapeStyle(tool) {
+/**
+ * The fill and stroke a new shape gets from the tool options (shared by every vector tool): `fillPaint` (null = the
+ * foreground colour, 0.3's behaviour) unless `fillOn` is off, a stroke from `strokePaint` (null = `strokeColor`) and
+ * the stroke options. A shape is never drawn with neither: it then takes the foreground colour.
+ */
+export function shapeStyle(tool) {
   const app = tool.app;
-  const fill = tool.opt('fillOn') !== false ? { type: 'solid', color: app.settings.foreground } : null;
-  const stroke = tool.opt('strokeOn') ? { color: tool.opt('strokeColor') ?? '#000000', width: Number(tool.opt('strokeWidth') ?? 3), align: tool.opt('strokeAlign') ?? 'center', dash: [], join: 'miter', cap: 'butt' } : null;
-  return { fill: fill ?? (stroke ? null : { type: 'solid', color: app.settings.foreground }), stroke };
+  const fg = app.settings.foreground;
+  const fillPaint = tool.opt('fillPaint');
+  const fill = tool.opt('fillOn') !== false ? (fillPaint ? resolvePaint(app, fillPaint) : { type: 'solid', color: fg }) : null;
+  let stroke = null;
+  if (tool.opt('strokeOn')) {
+    const color = tool.opt('strokeColor') ?? '#000000';
+    const strokePaint = tool.opt('strokePaint');
+    const dash = tool.opt('strokeDash');
+    stroke = {
+      color,
+      paint: strokePaint ? resolvePaint(app, strokePaint) : { type: 'solid', color },
+      width: Number(tool.opt('strokeWidth') ?? 3),
+      align: tool.opt('strokeAlign') ?? 'center',
+      cap: tool.opt('strokeCap') ?? 'butt',
+      join: tool.opt('strokeJoin') ?? 'miter',
+      miterLimit: 4,
+      dash: Array.isArray(dash) ? dash.slice() : [],
+      dashOffset: 0,
+    };
+  }
+  return { fill: fill ?? (stroke ? null : { type: 'solid', color: fg }), stroke };
 }
 
 /** Adds a shape layer (one history entry) above the active layer and makes it active. Exported for path:make-shape (L.4). */
@@ -891,19 +715,33 @@ function strokeOutline(ctx, path, m, { width = 1, color = ACCENT, halo = true } 
   ctx.stroke();
 }
 
+/** Path Options of the geometry menu (settings.shapes): the thickness and colour paths are drawn with. */
+function pathLook(app) {
+  const s = app?.settings?.shapes ?? {};
+  const width = Number.isFinite(s.pathThickness) ? Math.max(1, Math.min(10, s.pathThickness)) : 1;
+  return { width, color: typeof s.pathColor === 'string' ? s.pathColor : ACCENT };
+}
+
+/** The colour a draft shows a paint in while it is being drawn (gradients and patterns: their first colour, grey). */
+const previewColor = (paint, fallback = '#000') => (paint?.type === 'solid' ? paint.color : paint?.type === 'gradient' ? paint.gradient?.stops?.[0]?.color ?? '#808080' : paint ? '#808080' : fallback);
+
 function fillPreview(ctx, path, m, style, zoom) {
   if (style.fill) {
     ctx.beginPath();
     addPath(ctx, path, m);
-    ctx.fillStyle = style.fill.color ?? '#000';
+    ctx.fillStyle = typeof previewColor(style.fill) === 'string' ? previewColor(style.fill) : '#808080';
     ctx.fill('nonzero');
   }
   if (style.stroke?.width > 0) {
     ctx.beginPath();
     addPath(ctx, path, m);
-    ctx.strokeStyle = style.stroke.color ?? '#000';
+    ctx.strokeStyle = previewColor(style.stroke.paint, style.stroke.color ?? '#000');
     ctx.lineWidth = style.stroke.width * zoom;
+    ctx.lineJoin = style.stroke.join ?? 'miter';
+    ctx.lineCap = style.stroke.cap ?? 'butt';
+    ctx.setLineDash((style.stroke.dash ?? []).map((v) => v * style.stroke.width * zoom));
     ctx.stroke();
+    ctx.setLineDash([]);
   }
 }
 
@@ -944,7 +782,7 @@ function drawTargets(ctx, view, app, spec = {}) {
   for (const t of visibleTargets(app)) {
     const path = pathOf(t);
     if (isEmptyPath(path)) continue;
-    strokeOutline(ctx, path, m);
+    strokeOutline(ctx, path, m, pathLook(app));
     const sel = state.sel.key === t.key ? state.sel : null;
     path.subpaths.forEach((sp, s) => {
       const subSelected = sel?.subpaths.has(s);
@@ -971,7 +809,7 @@ function drawChosenPath(ctx, view, app) {
   const path = t.get();
   if (isEmptyPath(path)) return;
   ctx.save();
-  strokeOutline(ctx, path, view.matrix(), { halo: false });
+  strokeOutline(ctx, path, view.matrix(), { ...pathLook(app), halo: false });
   ctx.restore();
 }
 
@@ -991,15 +829,31 @@ const isShapeMode = (t) => t.opt('mode') === 'shape';
 const PATH_OP_OPTIONS = [['new', 'New Layer'], ['combine', 'Combine Shapes'], ['subtract', 'Subtract Front Shape'], ['intersect', 'Intersect Shape Areas'], ['exclude', 'Exclude Overlapping Shapes']];
 const PATH_OP_LABELS = { combine: 'Combine Shapes', subtract: 'Subtract Front Shape', intersect: 'Intersect Shape Areas', exclude: 'Exclude Overlapping Shapes' };
 const PATH_OP_OPTION = { kind: 'select', key: 'pathOp', label: '', options: PATH_OP_OPTIONS, default: 'new', when: isShapeMode };
+/**
+ * Fill and stroke of the shape and pen tools in shape mode: Photoshop's Fill and Stroke swatches (lib/shape-paint-ui.js
+ * popups), the stroke width and the stroke options popup (lib/tools/shape-widgets.js). The 0.3 keys stay in the options
+ * store (`fillOn`, `strokeOn`, `strokeColor`, `strokeAlign`), with the stroke details the popups edit; kind 'hidden' is
+ * not drawn (no widget has that name).
+ */
 const STYLE_OPTIONS = [
-  { kind: 'checkbox', key: 'fillOn', label: 'Fill (foreground)', default: true, when: isShapeMode },
-  { kind: 'checkbox', key: 'strokeOn', label: 'Stroke', default: false, when: isShapeMode },
-  { kind: 'color', key: 'strokeColor', label: '', default: '#000000', when: (t) => isShapeMode(t) && !!t.opt('strokeOn') },
+  { kind: 'shape-fill', key: 'fillPaint', label: 'Fill', default: null, when: isShapeMode },
+  { kind: 'shape-stroke', key: 'strokePaint', label: 'Stroke', default: null, when: isShapeMode },
   { kind: 'number', key: 'strokeWidth', label: '', min: 0.5, max: 288, step: 0.5, default: 3, unit: 'px', when: (t) => isShapeMode(t) && !!t.opt('strokeOn') },
-  { kind: 'select', key: 'strokeAlign', label: '', options: [['inside', 'Inside'], ['center', 'Center'], ['outside', 'Outside']], default: 'center', when: (t) => isShapeMode(t) && !!t.opt('strokeOn') },
+  { kind: 'stroke-options', key: 'strokeStyle', label: '', when: (t) => isShapeMode(t) && !!t.opt('strokeOn') },
+  { kind: 'hidden', key: 'fillOn', default: true },
+  { kind: 'hidden', key: 'strokeOn', default: false },
+  { kind: 'hidden', key: 'strokeColor', default: '#000000' },
+  { kind: 'hidden', key: 'strokeAlign', default: 'center' },
+  { kind: 'hidden', key: 'strokeCap', default: 'butt' },
+  { kind: 'hidden', key: 'strokeJoin', default: 'miter' },
+  { kind: 'hidden', key: 'strokeDash', default: [] },
 ];
-const SHARED_KEYS = new Set(['fillOn', 'strokeOn', 'strokeColor', 'strokeWidth', 'strokeAlign', 'pathOp']);
-const RERENDER_KEYS = new Set(['mode', 'strokeOn', 'star', 'shape']);
+const STROKE_KEYS = ['strokeOn', 'strokeColor', 'strokePaint', 'strokeWidth', 'strokeAlign', 'strokeCap', 'strokeJoin', 'strokeDash'];
+const STYLE_KEYS = new Set(['fillOn', 'fillPaint', ...STROKE_KEYS]);
+const SHARED_KEYS = new Set([...STYLE_KEYS, 'pathOp']);
+const RERENDER_KEYS = new Set(['mode', 'strokeOn', 'fillOn', 'shape', 'constrain']);
+/** The pen, path and shape tools claim Ctrl and Alt (direct selection, convert point, from centre; L.12). */
+const CLAIMS = Object.freeze(['ctrl', 'alt']);
 const PATH_BUTTONS = [
   { kind: 'button', key: 'makeSel', label: 'Selection', icon: 'marquee-rect', onClick: (t) => t.app.commands.run('path:make-selection', undefined, 'toolbar') },
   { kind: 'button', key: 'fillPath', label: 'Fill', icon: 'fill', onClick: (t) => t.app.commands.run('path:fill', {}, 'toolbar') },
@@ -1016,6 +870,7 @@ class VectorTool extends Tool {
   constructor(app, def) {
     super(app, { cursor: 'crosshair', ...def });
     this.isVector = true;
+    this.claimsModifiers = new Set(CLAIMS);
   }
   activate() {
     this.syncStyleFromLayer();
@@ -1028,16 +883,25 @@ class VectorTool extends Tool {
     }
     if (RERENDER_KEYS.has(key)) this.app.tools.renderOptions();
   }
-  /** Changing fill/stroke options restyles the selected shape layer (as in Photoshop). */
+  /** Changing fill/stroke options restyles the selected shape layers (as in Photoshop), through layer:shape-properties. */
   applyStyleToLayer(key) {
-    if (!['fillOn', 'strokeOn', 'strokeColor', 'strokeWidth', 'strokeAlign'].includes(key)) return;
+    if (!STYLE_KEYS.has(key)) return;
     const layer = this.doc?.active;
     if (!layer || layer.type !== 'shape' || layer.locked.all || !isShapeMode(this)) return;
     const style = shapeStyle(this);
-    const patch = {};
-    if (key === 'fillOn') patch.fill = this.opt('fillOn') !== false ? layer.fill ?? style.fill ?? { type: 'solid', color: this.app.settings.foreground } : null;
-    else patch.stroke = style.stroke ? { ...(layer.stroke ?? {}), ...style.stroke, dash: layer.stroke?.dash ?? [] } : null;
-    setLayerProps(this.app, layer, patch, 'Shape Style', { merge: true });
+    const change = {};
+    if (key === 'fillOn' || key === 'fillPaint') change.fill = this.opt('fillOn') !== false ? (key === 'fillPaint' ? style.fill : layer.fill ?? style.fill ?? { type: 'solid', color: this.app.settings.foreground }) : null;
+    else if (!style.stroke) change.stroke = null;
+    else {
+      // only what this option says: the rest of the layer's stroke stays (its dashes when the colour changes, ...)
+      const s = style.stroke;
+      const pick = {
+        strokeOn: s, strokeWidth: { width: s.width }, strokeAlign: { align: s.align }, strokeCap: { cap: s.cap }, strokeJoin: { join: s.join },
+        strokeDash: { dash: s.dash }, strokeColor: { paint: s.paint }, strokePaint: { paint: s.paint },
+      }[key];
+      change.stroke = layer.stroke ? pick : s;
+    }
+    this.app.commands.run('layer:shape-properties', { id: layer.id, ...change, label: 'Shape Style', merge: true }, 'tool');
   }
   /** Shows the active shape layer's fill/stroke in the options bar. */
   syncStyleFromLayer() {
@@ -1046,11 +910,18 @@ class VectorTool extends Tool {
     const tm = this.app.tools;
     const set = (k, v) => tm.setOpt(this.id, k, v, { silent: true });
     set('fillOn', !!layer.fill);
+    if (layer.fill) set('fillPaint', layer.fill);
     set('strokeOn', !!layer.stroke);
     if (layer.stroke) {
+      const paint = layer.stroke.paint;
       if (typeof layer.stroke.color === 'string') set('strokeColor', layer.stroke.color.slice(0, 7));
+      else if (paint?.type === 'solid') set('strokeColor', paint.color.slice(0, 7));
+      set('strokePaint', paint && paint.type !== 'solid' ? paint : null);
       set('strokeWidth', layer.stroke.width);
       set('strokeAlign', layer.stroke.align ?? 'center');
+      set('strokeCap', layer.stroke.cap ?? 'butt');
+      set('strokeJoin', layer.stroke.join ?? 'miter');
+      set('strokeDash', Array.isArray(layer.stroke.dash) ? layer.stroke.dash.slice() : []);
     }
     if (tm.active === this) tm.renderOptions();
   }
@@ -1099,53 +970,97 @@ const SHAPE_DEFS = {
   rect: { name: 'Rectangle Tool', icon: 'shape-rect', layer: 'Rectangle', kind: 'rect', title: 'Create Rectangle' },
   rrect: { name: 'Rounded Rectangle Tool', icon: 'shape-rrect', layer: 'Rounded Rectangle', kind: 'rect', title: 'Create Rounded Rectangle' },
   ellipse: { name: 'Ellipse Tool', icon: 'shape-ellipse', layer: 'Ellipse', kind: 'ellipse', title: 'Create Ellipse' },
+  triangle: { name: 'Triangle Tool', icon: 'shape-triangle', layer: 'Triangle', kind: 'triangle', title: 'Create Triangle' },
   polygon: { name: 'Polygon Tool', icon: 'shape-polygon', layer: 'Polygon', kind: 'polygon', title: 'Create Polygon' },
   line: { name: 'Line Tool', icon: 'shape-line', layer: 'Line', kind: 'line', title: 'Create Line' },
-  custom: { name: 'Custom Shape Tool', icon: 'shape-custom', layer: 'Shape', kind: 'path', title: 'Create Custom Shape' },
+  custom: { name: 'Custom Shape Tool', icon: 'shape-custom', layer: 'Shape', kind: 'custom', title: 'Create Custom Shape' },
 };
+/** Photoshop's order in the shape slot (the Rounded Rectangle tool, gone from Photoshop, stays after the Rectangle). */
+const SHAPE_ORDER = ['rect', 'rrect', 'ellipse', 'triangle', 'polygon', 'line', 'custom'];
+
+/** The custom shapes to choose from: the 'shapes' presets (0.3's built-ins until the store has loaded). */
+export function customShapeChoices(app) {
+  const list = app?.presets?.list?.('shapes') ?? [];
+  return list.length ? list.map((p) => [p.id, p.name]) : Object.entries(CUSTOM_SHAPES).map(([k, v]) => [k, v.name]);
+}
+
+/** Bounds of a custom shape in its 0..1 box (its natural proportions; Defined Size is 100 px per unit). */
+function customUnitBounds(id) {
+  return pathBounds(livePath('custom', { x: 0, y: 0, width: 1, height: 1, angle: 0, shape: id }) ?? { subpaths: [] }) ?? { x: 0, y: 0, width: 1, height: 1 };
+}
+
+const sgn = (v) => Math.sign(v) || 1;
 
 export class ShapeTool extends VectorTool {
   constructor(app, shape) {
     const def = SHAPE_DEFS[shape];
+    const radius = (d) => ({ kind: 'number', key: 'radius', label: 'Radius', min: 0, max: 5000, default: d, unit: 'px' });
     const extra = {
-      rect: [],
-      rrect: [{ kind: 'number', key: 'radius', label: 'Radius', min: 0, max: 5000, default: 16, unit: 'px' }],
+      rect: [radius(0)],
+      rrect: [radius(16)],
       ellipse: [],
+      triangle: [radius(0)],
       polygon: [
         { kind: 'number', key: 'sides', label: 'Sides', min: 3, max: 100, default: 5 },
-        { kind: 'checkbox', key: 'star', label: 'Star', default: false },
-        { kind: 'number', key: 'inset', label: 'Indent', min: 1, max: 99, default: 50, unit: '%', when: (t) => !!t.opt('star') },
+        { kind: 'number', key: 'cornerRadius', label: 'Radius', min: 0, max: 5000, default: 0, unit: 'px' },
+        { kind: 'hidden', key: 'starRatio', default: 100 },
+        { kind: 'hidden', key: 'smoothCorners', default: false },
+        { kind: 'hidden', key: 'smoothIndents', default: false },
       ],
       line: [
         { kind: 'number', key: 'weight', label: 'Weight', min: 0.5, max: 1000, step: 0.5, default: 2, unit: 'px' },
-        { kind: 'checkbox', key: 'arrowStart', label: 'Arrow start', default: false },
-        { kind: 'checkbox', key: 'arrowEnd', label: 'Arrow end', default: false },
+        { kind: 'hidden', key: 'arrowStart', default: false },
+        { kind: 'hidden', key: 'arrowEnd', default: false },
+        { kind: 'hidden', key: 'arrowWidth', default: 500 },
+        { kind: 'hidden', key: 'arrowLength', default: 1000 },
+        { kind: 'hidden', key: 'arrowConcavity', default: 0 },
       ],
-      custom: [{ kind: 'select', key: 'shape', label: 'Shape', options: Object.entries(CUSTOM_SHAPES).map(([k, v]) => [k, v.name]), default: 'heart' }],
+      custom: [{ kind: 'select', key: 'shape', label: 'Shape', get options() { return customShapeChoices(app); }, default: 'heart' }],
     }[shape];
     super(app, {
       id: `shape-${shape}`,
       name: def.name,
       icon: def.icon,
-      hint: shape === 'line' ? 'Drag to draw a line; Shift constrains to 45°, Alt draws from the centre.' : 'Drag to draw; Shift keeps proportions, Alt draws from the centre. Click without dragging to enter a size.',
+      hint: shape === 'line'
+        ? 'Drag to draw a line; Shift constrains to 45°, Alt draws from the centre.'
+        : 'Drag to draw; Shift keeps proportions, Alt draws from the centre. Click without dragging to enter a size. Drag a corner widget to round the corners.',
       options: [
         { kind: 'select', key: 'mode', label: '', options: [...MODE_SHAPE_PATH, ['pixels', 'Pixels']], default: 'shape' },
         PATH_OP_OPTION,
         ...STYLE_OPTIONS,
         { kind: 'checkbox', key: 'antialias', label: 'Anti-alias', default: true, when: (t) => t.opt('mode') === 'pixels' },
         ...extra,
+        // the gear menu: Path Options, the drawing constraints and the shape's own options (lib/tools/shape-widgets.js)
+        { kind: 'shape-geometry', key: 'geometry', label: '' },
+        { kind: 'hidden', key: 'constrain', default: 'none' },
+        { kind: 'hidden', key: 'fixedW', default: 100 },
+        { kind: 'hidden', key: 'fixedH', default: 100 },
+        { kind: 'hidden', key: 'propW', default: 1 },
+        { kind: 'hidden', key: 'propH', default: 1 },
+        { kind: 'hidden', key: 'fromCenter', default: false },
         { kind: 'checkbox', key: 'alignEdges', label: 'Align edges', default: true, when: () => shape !== 'line' },
       ],
     });
     this.shape = shape;
     this.def = def;
     this.drag = null;
+    this.cornerDrag = null;
   }
   onPointerDown(p) {
+    // a live corner widget of the active shape (lib/tools/shape-widgets.js) wins over drawing a new shape
+    const handle = isShapeMode(this) ? cornerWidgetAt(this.app, this.view, p) : null;
+    if (handle) {
+      this.cornerDrag = beginCornerDrag(this.app, handle, p);
+      return;
+    }
     const sp = this.app.snap?.point(p, { source: 'shape', pointer: p, exclude: snapExclude(this.drawTarget()), view: this.view }) ?? p; // snap (lib/snap.js)
     this.drag = { start: { x: sp.x, y: sp.y }, current: { x: sp.x, y: sp.y }, shift: p.shift, alt: p.alt, moved: false };
   }
   onPointerMove(p, dragging) {
+    if (this.cornerDrag) {
+      if (dragging) this.cornerDrag.move(p);
+      return;
+    }
     if (!dragging || !this.drag) return;
     const d = this.drag;
     const sp = this.app.snap?.point(p, { source: 'shape', pointer: p, exclude: snapExclude(this.drawTarget()), view: this.view }) ?? p; // snap (lib/snap.js)
@@ -1155,32 +1070,74 @@ export class ShapeTool extends VectorTool {
     if (Math.hypot(p.x - d.start.x, p.y - d.start.y) * this.view.zoom >= 3) d.moved = true;
   }
   onPointerUp(p) {
+    if (this.cornerDrag) {
+      const c = this.cornerDrag;
+      this.cornerDrag = null;
+      if (p.cancelled) c.cancel();
+      else c.end();
+      return;
+    }
     const d = this.drag;
     this.drag = null;
     if (!d || p.cancelled) return;
     if (!d.moved) {
-      if (this.shape !== 'line') this.sizeDialog(d.start);
+      if (this.shape !== 'line') this.createDialog(d.start);
       return;
     }
     const g = this.geometry(d);
     if (g) this.create(g);
   }
   cancel() {
+    if (this.cornerDrag) {
+      this.cornerDrag.cancel();
+      this.cornerDrag = null;
+      return true;
+    }
     if (this.drag) {
       this.drag = null;
       return true;
     }
     return false;
   }
+  deactivate() {
+    if (this.cornerDrag) this.cancel();
+  }
+  /** Width / height of Fixed Size (Defined Size for custom shapes: 100 px per unit of the shape's own box). */
+  fixedSize() {
+    if (this.opt('constrain') === 'defined-size') {
+      const b = customUnitBounds(this.opt('shape') ?? 'heart');
+      return [b.width * 100, b.height * 100];
+    }
+    return [Math.max(1, Number(this.opt('fixedW')) || 100), Math.max(1, Number(this.opt('fixedH')) || 100)];
+  }
+  /** Width / height ratio of Proportional (Defined Proportions: the custom shape's own). */
+  ratio() {
+    if (this.shape === 'custom' && (this.opt('constrain') === 'defined-proportions' || this.opt('constrain') === 'none')) {
+      const b = customUnitBounds(this.opt('shape') ?? 'heart');
+      return b.width / b.height || 1;
+    }
+    const w = Number(this.opt('propW')) || 1, h = Number(this.opt('propH')) || 1;
+    return w / h;
+  }
   box(d) {
     let w = d.current.x - d.start.x, h = d.current.y - d.start.y;
-    if (d.shift) {
+    const c = this.opt('constrain') ?? 'none';
+    if (c === 'fixed' || c === 'defined-size') {
+      const [fw, fh] = this.fixedSize();
+      w = sgn(w) * fw;
+      h = sgn(h) * fh;
+    } else if (c === 'proportional' || c === 'defined-proportions' || (d.shift && this.shape === 'custom')) {
+      // Shift with the Custom Shape tool keeps the shape's own proportions (Photoshop)
+      const k = this.ratio();
+      if (Math.abs(w) / k >= Math.abs(h)) h = sgn(h) * (Math.abs(w) / k);
+      else w = sgn(w) * Math.abs(h) * k;
+    } else if (d.shift || c === 'square') {
       const m = Math.max(Math.abs(w), Math.abs(h));
-      w = (Math.sign(w) || 1) * m;
-      h = (Math.sign(h) || 1) * m;
+      w = sgn(w) * m;
+      h = sgn(h) * m;
     }
     let x = d.start.x, y = d.start.y;
-    if (d.alt) {
+    if (d.alt || this.opt('fromCenter')) {
       x -= w;
       y -= h;
       w *= 2;
@@ -1196,6 +1153,17 @@ export class ShapeTool extends VectorTool {
     }
     return r;
   }
+  /** The star ratio, reading 0.3's Star / Indent options when the tool has never stored a ratio. */
+  starRatio() {
+    const stored = this.app.settings.tools?.[this.id] ?? {};
+    if (!('starRatio' in stored) && stored.star) return Math.max(1, Math.min(99, 100 - (Number(stored.inset) || 50)));
+    return Math.max(1, Math.min(100, Number(this.opt('starRatio') ?? 100)));
+  }
+  /** The arrowheads of a new line from the gear menu (percent of the weight). */
+  arrows() {
+    const a = { width: Number(this.opt('arrowWidth') ?? 500), length: Number(this.opt('arrowLength') ?? 1000), concavity: Number(this.opt('arrowConcavity') ?? 0) };
+    return { arrowStart: this.opt('arrowStart') ? { ...a } : null, arrowEnd: this.opt('arrowEnd') ? { ...a } : null };
+  }
   /** { path, props } for the current drag. */
   geometry(d) {
     if (this.shape === 'line') {
@@ -1204,36 +1172,44 @@ export class ShapeTool extends VectorTool {
       if (d.alt) a = { x: 2 * a.x - b.x, y: 2 * a.y - b.y };
       a = rp(a);
       b = rp(b);
-      const weight = Number(this.opt('weight') ?? 2);
-      const path = linePath(a.x, a.y, b.x, b.y, weight, !!this.opt('arrowStart'), !!this.opt('arrowEnd'));
-      return isEmptyPath(path) ? null : { path, props: { x1: a.x, y1: a.y, x2: b.x, y2: b.y, weight, arrowStart: !!this.opt('arrowStart'), arrowEnd: !!this.opt('arrowEnd') } };
+      const props = { x1: a.x, y1: a.y, x2: b.x, y2: b.y, weight: Number(this.opt('weight') ?? 2), ...this.arrows() };
+      const path = livePath('line', props);
+      return !path || isEmptyPath(path) ? null : { path, props };
     }
     const r = this.box(d);
     if (r.width < 1 || r.height < 1) return null;
     return this.build(r);
   }
-  build(r) {
-    const { x, y, width: w, height: h } = r;
+  /** The live parameters of a shape in box r with the tool's options (J.5), and its path. */
+  propsFor(r, over = {}) {
+    const { x, y, width, height } = r;
+    const base = { x, y, width, height, angle: 0 };
     switch (this.shape) {
       case 'rect':
-        return { path: rectPath(x, y, w, h), props: { x, y, width: w, height: h, radius: 0 } };
       case 'rrect': {
-        const radius = Number(this.opt('radius') ?? 16);
-        return { path: rectPath(x, y, w, h, radius), props: { x, y, width: w, height: h, radius } };
+        const rad = Math.max(0, Number(this.opt('radius') ?? (this.shape === 'rrect' ? 16 : 0)));
+        return { ...base, radii: [rad, rad, rad, rad], ...over };
       }
-      case 'ellipse':
-        return { path: ellipsePath(x, y, w, h), props: { x, y, width: w, height: h } };
-      case 'polygon': {
-        const sides = Number(this.opt('sides') ?? 5), star = !!this.opt('star'), inset = Number(this.opt('inset') ?? 50);
-        return { path: polygonPath(x, y, w, h, sides, star, inset), props: { x, y, width: w, height: h, sides, star, inset } };
-      }
-      case 'custom': {
-        const name = this.opt('shape') ?? 'heart';
-        return { path: customPath(name, x, y, w, h), props: { custom: name, x, y, width: w, height: h } };
-      }
-      default:
-        return null;
+      case 'ellipse': return { ...base, ...over };
+      case 'triangle': return { ...base, radius: Math.max(0, Number(this.opt('radius') ?? 0)), ...over };
+      case 'polygon': return {
+        ...base,
+        sides: Math.max(3, Math.min(100, Math.round(Number(this.opt('sides') ?? 5)))),
+        starRatio: this.starRatio(),
+        smoothCorners: !!this.opt('smoothCorners'),
+        smoothIndents: !!this.opt('smoothIndents'),
+        cornerRadius: Math.max(0, Number(this.opt('cornerRadius') ?? 0)),
+        ...over,
+      };
+      case 'custom': return { ...base, shape: this.opt('shape') ?? 'heart', ...over };
+      default: return null;
     }
+  }
+  build(r, over) {
+    const props = this.propsFor(r, over);
+    if (!props) return null;
+    const path = livePath(this.def.kind, props);
+    return path ? { path, props } : null;
   }
   create({ path, props }) {
     const mode = this.opt('mode') ?? 'shape';
@@ -1261,29 +1237,16 @@ export class ShapeTool extends VectorTool {
     }
     createShapeLayer(this.app, path, { name: this.def.layer, label, style: shapeStyle(this), kind: this.def.kind, props });
   }
-  async sizeDialog(at) {
-    const fields = [
-      { key: 'width', label: 'Width', type: 'number', value: 100, min: 1, max: 30000, unit: 'px' },
-      { key: 'height', label: 'Height', type: 'number', value: 100, min: 1, max: 30000, unit: 'px' },
-    ];
-    if (this.shape === 'rrect') fields.push({ key: 'radius', label: 'Radius', type: 'number', value: Number(this.opt('radius') ?? 16), min: 0, max: 5000, unit: 'px' });
-    if (this.shape === 'polygon') fields.push({ key: 'sides', label: 'Sides', type: 'number', value: Number(this.opt('sides') ?? 5), min: 3, max: 100 });
-    fields.push({ key: 'center', label: 'From centre', type: 'checkbox', value: false });
-    const v = await formDialog(this.app, { title: this.def.title, fields });
+  /** Clicking the canvas: Photoshop's Create dialog of the shape (lib/tools/shape-widgets.js), then the shape. */
+  async createDialog(at) {
+    const v = await createShapeDialog(this, at);
     if (!v || !this.doc) return;
-    if (v.radius !== undefined) this.setOpt('radius', Number(v.radius));
-    if (v.sides !== undefined) this.setOpt('sides', Number(v.sides));
-    const w = Math.max(1, Number(v.width)), h = Math.max(1, Number(v.height));
-    const r = { x: v.center ? at.x - w / 2 : at.x, y: v.center ? at.y - h / 2 : at.y, width: w, height: h };
-    if (this.opt('alignEdges') !== false) {
-      r.x = Math.round(r.x);
-      r.y = Math.round(r.y);
-    }
-    const g = this.build(r);
+    const g = this.build(v.box, v.props);
     if (g) this.create(g);
   }
   drawOverlay(ctx, view) {
     drawTargets(ctx, view, this.app, {});
+    if (isShapeMode(this) && !this.drag?.moved) drawCornerWidgets(ctx, view, this.app);
     const d = this.drag;
     if (!d?.moved) return;
     const g = this.geometry(d);
@@ -1297,13 +1260,13 @@ export class ShapeTool extends VectorTool {
       ctx.globalAlpha = 1;
     } else if (mode === 'pixels') {
       ctx.globalAlpha = 0.85;
-      fillPreview(ctx, g.path, m, { fill: { color: this.app.settings.foreground } }, view.zoom);
+      fillPreview(ctx, g.path, m, { fill: { type: 'solid', color: this.app.settings.foreground } }, view.zoom);
       ctx.globalAlpha = 1;
     }
-    strokeOutline(ctx, g.path, m);
+    strokeOutline(ctx, g.path, m, pathLook(this.app));
     const b = pathBounds(g.path);
     if (b) {
-      const label = this.shape === 'line' ? `${Math.round(Math.hypot(g.props.x2 - g.props.x1, g.props.y2 - g.props.y1))} px` : `${Math.round(b.width)} × ${Math.round(b.height)}`;
+      const label = this.shape === 'line' ? `${Math.round(Math.hypot(g.props.x2 - g.props.x1, g.props.y2 - g.props.y1))} px` : `${Math.round(g.props.width)} × ${Math.round(g.props.height)}`;
       const q = view.toScreen(d.current.x, d.current.y);
       ctx.font = '11px system-ui, sans-serif';
       ctx.fillStyle = 'rgba(0,0,0,0.7)';
@@ -1879,6 +1842,12 @@ export class PathSelectionTool extends SelectionToolBase {
     return draft;
   }
   onPointerDown(p) {
+    // the live corner widgets of the active shape come first (lib/tools/shape-widgets.js)
+    const handle = cornerWidgetAt(this.app, this.view, p);
+    if (handle) {
+      this.cornerDrag = beginCornerDrag(this.app, handle, p);
+      return;
+    }
     const tol = 6 / this.view.zoom;
     let hit = null;
     for (const t of visibleTargets(this.app)) {
@@ -1914,6 +1883,10 @@ export class PathSelectionTool extends SelectionToolBase {
     d.base = d.original; // positions the selected subpaths move from (includes copies when duplicating)
   }
   onPointerMove(p, dragging) {
+    if (this.cornerDrag) {
+      if (dragging) this.cornerDrag.move(p);
+      return;
+    }
     const d = this.drag;
     if (!dragging || !d) return;
     const sp = this.app.snap?.point(p, { source: 'path', pointer: p, exclude: snapExclude(d.target), view: this.view }) ?? p; // snap (lib/snap.js)
@@ -1940,6 +1913,13 @@ export class PathSelectionTool extends SelectionToolBase {
     showPreview(this.app, d.target, d.draft);
   }
   onPointerUp(p) {
+    if (this.cornerDrag) {
+      const c = this.cornerDrag;
+      this.cornerDrag = null;
+      if (p.cancelled) c.cancel();
+      else c.end();
+      return;
+    }
     const d = this.drag;
     if (!d) return;
     if (p.cancelled || !d.moved) {
@@ -1947,6 +1927,18 @@ export class PathSelectionTool extends SelectionToolBase {
       return;
     }
     this.endDrag(d.duplicate ? 'Duplicate Path' : 'Move Path', { reshaped: !!d.duplicate || this.reshapesFor(d.draft) });
+  }
+  cancel() {
+    if (this.cornerDrag) {
+      this.cornerDrag.cancel();
+      this.cornerDrag = null;
+      return true;
+    }
+    return super.cancel();
+  }
+  drawOverlay(ctx, view) {
+    super.drawOverlay(ctx, view);
+    if (!this.drag) drawCornerWidgets(ctx, view, this.app);
   }
 }
 
@@ -2392,7 +2384,7 @@ export function install(app) {
   t.register(new ConvertPointTool(app), 'pen');
   t.register(new PathSelectionTool(app), 'path-select');
   t.register(new DirectSelectionTool(app), 'path-select');
-  for (const s of ['rect', 'rrect', 'ellipse', 'polygon', 'line', 'custom']) t.register(new ShapeTool(app, s), 'shape');
+  for (const s of SHAPE_ORDER) t.register(new ShapeTool(app, s), 'shape');
   // Photoshop order: Pen, Type, Path Selection, Shape (text.js registers its slot first)
   const slots = t.slots;
   const pi = slots.findIndex((s) => s.id === 'pen'), ti = slots.findIndex((s) => s.id === 'text');

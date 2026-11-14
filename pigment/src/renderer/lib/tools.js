@@ -203,11 +203,15 @@ export class ToolManager {
             this.showFlyout(slot, btn);
           }, 450);
         });
-        btn.addEventListener('pointerup', () => {
+        btn.addEventListener('pointerup', (e) => {
           if (pressTimer) {
             clearTimeout(pressTimer);
             pressTimer = null;
-            this.activate(slot.current);
+            // Alt-click steps through the slot's tools (Photoshop), a plain click picks the slot's current tool
+            if (e.altKey && slot.tools.length > 1) {
+              const i = slot.tools.indexOf(slot.tools.includes(this.active?.id) ? this.active.id : slot.current);
+              this.activate(slot.tools[(i + 1) % slot.tools.length]);
+            } else this.activate(slot.current);
           }
         });
         btn.addEventListener('pointerleave', () => {
@@ -259,13 +263,22 @@ export class ToolManager {
     if (bg) bg.style.background = this.app.settings.background;
   }
 
+  /**
+   * The slot's flyout (long press or right-click): every tool of the slot with the slot's key. The key picks the
+   * slot's current tool; Shift+key (or the key alone, with "Use Shift Key for Tool Switch" off) steps through them.
+   */
   showFlyout(slot, anchor) {
+    const key = RENDERER_KEYS[`tool:${slot.id}`]?.[0];
     const items = slot.tools.map((id) => {
       const t = this.tools.get(id);
-      const key = RENDERER_KEYS[`tool:${slot.id}`]?.[0];
       return { label: t.name, icon: t.icon, checked: this.active?.id === id, shortcut: key, onSelect: () => this.activate(id) };
     });
-    this.app.dialogs.popover(anchor, items, { align: 'left', side: 'right' });
+    if (key && slot.tools.length > 1) {
+      const shift = this.app.settings?.conventions?.toolSwitchWithShift !== false;
+      items.push({ type: 'separator' }, { type: 'title', label: `${shift ? 'Shift+' : ''}${key.toUpperCase()} steps through these tools` });
+    }
+    const pop = this.app.dialogs.popover(anchor, items, { align: 'left', side: 'right' });
+    pop?.classList.add('tool-flyout');
   }
 
   // ---- options bar -------------------------------------------------------------------------------------------------
@@ -306,10 +319,13 @@ export class ToolManager {
       case 'number': {
         const box = document.createElement('span');
         box.className = 'opt-number';
-        // the numeric field of lib/numeric-field.js (no data-key on the input: the wrapping label carries it)
-        const input = numericField({ min: spec.min ?? '', max: spec.max ?? '', step: spec.step ?? 1, value: String(value ?? spec.default ?? 0) }).input;
+        // the numeric field of lib/numeric-field.js (no data-key on the input: the wrapping label carries it, and
+        // dragging that label scrubs the value); `units`, `dpi`, `base` and `popup` on the option go to the field
+        const field = numericField({ min: spec.min ?? '', max: spec.max ?? '', step: spec.step ?? 1, value: String(value ?? spec.default ?? 0), units: spec.units, dpi: spec.dpi, base: spec.base, popup: !!spec.popup && spec.kind === 'number' });
+        const input = field.input;
+        if (spec.unit) input.dataset.unit = spec.unit;
         input.addEventListener('change', () => set(clampNum(Number(input.value), spec)));
-        box.appendChild(input);
+        box.appendChild(field.element === input ? input : field.element);
         if (spec.unit) {
           const u = document.createElement('span');
           u.className = 'opt-unit';

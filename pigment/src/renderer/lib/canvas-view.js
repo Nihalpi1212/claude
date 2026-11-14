@@ -4,6 +4,8 @@
 import { Compositor } from './compositor.js';
 import { intersectRect } from './document.js';
 import { paintMaskView } from './mask-view.js';
+import { guideSettings, guideColor, selectedGuides } from './guides.js';
+import { UNITS, UNIT_NAMES } from './rulers.js';
 
 const ZOOM_STEPS = [0.01, 0.02, 0.03, 0.05, 0.0667, 0.08, 0.1, 0.125, 0.167, 0.2, 0.25, 0.333, 0.5, 0.667, 1, 1.5, 2, 3, 4, 5, 6, 8, 12, 16, 24, 32, 48, 64];
 export const MIN_ZOOM = 0.01, MAX_ZOOM = 64;
@@ -33,6 +35,14 @@ export class CanvasView {
     this.quickMask = null;
     this.spaceHeld = false;
     this.tempTool = null;
+    // guides-snapping: selected guide ids (view state, the Move tool selects), the New Guide Layout preview, a guide
+    // dragged from a ruler (guideDrag), guides moved with the Move tool (guideMove), the ruler corner drag (originDrag)
+    this.selectedGuides = new Set();
+    this.guidePreview = null;
+    this.guidePreviewClears = false;
+    this.guideDrag = null;
+    this.guideMove = null;
+    this.originDrag = null;
     this.overlayFns = new Set();
     this.cssWidth = 1;
     this.cssHeight = 1;
@@ -293,6 +303,8 @@ export class CanvasView {
     try {
       tool?.drawOverlay?.(ctx, this);
       for (const fn of this.overlayFns) fn(ctx, this);
+      this.app.snap?.drawOverlay?.(ctx, this); // smart guides and Ctrl-hover distances (lib/snap.js)
+      this.paintOriginDrag(ctx);
       this.app.canvasCapture?.top()?.overlay?.(ctx, this); // canvas capture (lib/canvas-capture.js, I.3)
     } catch (err) {
       console.warn('overlay failed', err);
@@ -311,23 +323,7 @@ export class CanvasView {
 
   paintGrid(ctx) {
     const s = this.app.settings;
-    if (s.showGrid && s.gridSize > 0) {
-      const step = s.gridSize;
-      ctx.save();
-      ctx.lineWidth = 1 / this.zoom;
-      ctx.strokeStyle = 'rgba(80,140,255,0.35)';
-      ctx.beginPath();
-      for (let x = 0; x <= this.doc.width; x += step) {
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, this.doc.height);
-      }
-      for (let y = 0; y <= this.doc.height; y += step) {
-        ctx.moveTo(0, y);
-        ctx.lineTo(this.doc.width, y);
-      }
-      ctx.stroke();
-      ctx.restore();
-    }
+    if (s.showGrid) this.paintLayoutGrid(ctx);
     if (s.pixelGrid !== false && this.zoom >= 8) {
       const vis = this.visibleRect();
       if (!vis) return;
@@ -346,6 +342,61 @@ export class CanvasView {
       ctx.stroke();
       ctx.restore();
     }
+  }
+
+  /**
+   * View > Show > Grid (document space): Gridline Every in its unit, Subdivisions as fainter lines, from the ruler
+   * origin, in the preference colour and style (lines, dashed lines, dots). Only the visible part is drawn; lines
+   * closer than 4 screen px are left out.
+   */
+  paintLayoutGrid(ctx) {
+    const r = this.app.rulers;
+    const vis = this.visibleRect();
+    if (!r?.grid || !vis) return;
+    const gs = guideSettings(this.app);
+    const gx = r.grid(this.doc, 'x'), gy = r.grid(this.doc, 'y');
+    if (!(gx.major > 0) || !(gy.major > 0)) return;
+    const lines = (g, from, to, step) => {
+      const out = [];
+      if (!(step * this.zoom >= 4)) return out;
+      for (let k = Math.ceil((from - g.origin) / step - 1e-9); out.length < 5000; k++) {
+        const v = g.origin + k * step;
+        if (v > to + 1e-9) break;
+        out.push(v);
+      }
+      return out;
+    };
+    const x0 = vis.x, x1 = vis.x + vis.width, y0 = vis.y, y1 = vis.y + vis.height;
+    const minorOn = gx.subdivisions > 1;
+    ctx.save();
+    ctx.strokeStyle = gs.gridColor || '#508cff';
+    ctx.fillStyle = ctx.strokeStyle;
+    ctx.lineWidth = 1 / this.zoom;
+    if (gs.gridStyle === 'dashed') ctx.setLineDash([3 / this.zoom, 3 / this.zoom]);
+    const passes = [...(minorOn ? [{ sx: gx.minor, sy: gy.minor, alpha: 0.2 }] : []), { sx: gx.major, sy: gy.major, alpha: 0.55 }];
+    for (const { sx, sy, alpha } of passes) {
+      const xs = lines(gx, x0, x1, sx), ys = lines(gy, y0, y1, sy);
+      if (!xs.length && !ys.length) continue;
+      ctx.globalAlpha = alpha;
+      if (gs.gridStyle === 'dots') {
+        // a dot on each crossing (capped: a dense grid at low zoom draws its major crossings only)
+        if (xs.length * ys.length > 40000) continue;
+        const d = 1.5 / this.zoom;
+        for (const x of xs) for (const y of ys) ctx.fillRect(x - d / 2, y - d / 2, d, d);
+        continue;
+      }
+      ctx.beginPath();
+      for (const x of xs) {
+        ctx.moveTo(x, y0);
+        ctx.lineTo(x, y1);
+      }
+      for (const y of ys) {
+        ctx.moveTo(x0, y);
+        ctx.lineTo(x1, y);
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
   }
 
   paintSelection(ctx) {
@@ -367,19 +418,50 @@ export class CanvasView {
     ctx.restore();
   }
 
+  /**
+   * Guides in screen space: each in its own colour (else the preference colour) and the preference style; selected
+   * guides wider; the New Guide Layout preview dashed; a guide being dragged from a ruler or moved with the Move tool
+   * where the pointer is (faint while it would be deleted).
+   */
   paintGuides(ctx) {
     const s = this.app.settings;
-    if (!s.showGuides || !this.doc.guides.length) return;
+    const shown = s.showGuides !== false;
+    const preview = this.guidePreview;
+    const drag = this.guideDrag;
+    const move = this.guideMove;
+    if (!shown && !preview && !drag?.active) return;
+    const gs = guideSettings(this.app);
+    let list = shown ? this.doc.guides : [];
+    if (preview && this.guidePreviewClears) list = list.filter((g) => g.artboard);
+    const moving = move ? new Set(move.ids) : null;
+    const selected = this.selectedGuides?.size ? new Set(selectedGuides(this).map((g) => g.id)) : null;
     ctx.save();
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-    ctx.strokeStyle = '#1ec8ff';
-    ctx.lineWidth = 1;
-    const guides = this.guideDrag ? [...this.doc.guides, { axis: this.guideDrag.axis, pos: this.guideDrag.pos }] : this.doc.guides;
-    for (const g of guides) {
+    const stroke = (g, { width = 1, alpha = 1, dashed = gs.style === 'dashed' } = {}) => {
+      ctx.globalAlpha = alpha;
+      ctx.strokeStyle = guideColor(this.app, g);
+      ctx.lineWidth = width;
+      ctx.setLineDash(dashed ? [4, 3] : []);
       ctx.beginPath();
       this.guideLine(ctx, g);
       ctx.stroke();
+    };
+    for (const g of list) {
+      if (moving?.has(g.id)) continue;
+      if (selected?.has(g.id)) {
+        // a selected guide: a wide pale band under the line
+        stroke(g, { width: 5, alpha: 0.35, dashed: false });
+        stroke(g, { width: 1 });
+      } else stroke(g);
     }
+    for (const g of preview ?? []) stroke(g, { dashed: true, alpha: 0.9 });
+    if (move) {
+      for (const id of move.ids) {
+        const g = this.doc.guides.find((x) => x.id === id);
+        if (g) stroke({ ...g, pos: g.pos + move.delta }, { width: selected?.has(id) ? 2 : 1, alpha: move.outside ? 0.35 : 1 });
+      }
+    }
+    if (drag?.active) stroke({ axis: drag.axis, pos: drag.pos }, { alpha: 1 });
     ctx.restore();
   }
 
@@ -404,11 +486,25 @@ export class CanvasView {
     ctx.lineTo(a.x + ux * reach, a.y + uy * reach);
   }
 
+  /** The ruler of an axis: document px per unit, the labelled step and the minor step (units), the origin. */
+  rulerScale(horizontal) {
+    const r = this.app.rulers;
+    const axis = horizontal ? 'x' : 'y';
+    const unit = r ? r.unit(this.doc) : 'px';
+    const perUnit = r ? r.perUnit(this.doc, axis) : 1;
+    const pxPerUnit = perUnit * this.zoom;
+    // choose a tick step so labels are >= 50px apart
+    const candidates = unit === 'px' ? [1, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000] : [0.1, 0.25, 0.5, 1, 2, 5, 10, 25, 50, 100, 250, 500, 1000];
+    const major = candidates.find((s) => s * pxPerUnit >= 50) ?? candidates[candidates.length - 1];
+    const minor = major / (major % 5 === 0 || major >= 1 ? 5 : 2);
+    const origin = r ? r.origin(this.doc)[axis] : 0;
+    return { unit, perUnit, pxPerUnit, major, minor, origin };
+  }
+
+  /** Rulers in the current unit, counted from the ruler origin, with the pointer marked. */
   paintRulers() {
     if (!this.rulersVisible) return;
     const dpr = this.dpr;
-    const unit = this.app.settings.rulerUnit ?? 'px';
-    const perUnitFor = (horizontal) => ({ px: 1, in: this.doc.dpi, cm: this.doc.dpi / 2.54, mm: this.doc.dpi / 25.4, pt: this.doc.dpi / 72, percent: (horizontal ? this.doc.width : this.doc.height) / 100 }[unit] ?? 1);
     const style = getComputedStyle(this.el);
     const bg = style.getPropertyValue('--bg-elevated') || '#eee';
     const fg = style.getPropertyValue('--fg-muted') || '#666';
@@ -426,17 +522,13 @@ export class CanvasView {
       c.strokeStyle = fg;
       c.font = '9px system-ui, sans-serif';
       c.textBaseline = 'top';
-      const pxPerUnit = perUnitFor(horizontal) * this.zoom;
-      // choose a tick step so labels are >= 50px apart
-      const candidates = unit === 'px' ? [1, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000] : [0.1, 0.25, 0.5, 1, 2, 5, 10, 25, 50, 100, 250, 500, 1000];
-      const major = candidates.find((s) => s * pxPerUnit >= 50) ?? candidates[candidates.length - 1];
-      const minor = major / (major % 5 === 0 || major >= 1 ? 5 : 2);
-      const origin = horizontal ? this.toScreen(0, 0).x : this.toScreen(0, 0).y;
-      const start = Math.floor((0 - origin) / pxPerUnit / minor) * minor;
-      const end = (length - origin) / pxPerUnit;
+      const { pxPerUnit, major, minor, origin: o } = this.rulerScale(horizontal);
+      const zero = horizontal ? this.toScreen(o, 0).x : this.toScreen(0, o).y;
+      const start = Math.floor((0 - zero) / pxPerUnit / minor) * minor;
+      const end = (length - zero) / pxPerUnit;
       c.beginPath();
-      for (let u = start; u <= end; u += minor) {
-        const pos = Math.round(origin + u * pxPerUnit) + 0.5;
+      for (let i = 0, u = start; u <= end && i < 4000; i++, u = start + i * minor) {
+        const pos = Math.round(zero + u * pxPerUnit) + 0.5;
         const isMajor = Math.abs(u / major - Math.round(u / major)) < 1e-6;
         const len = isMajor ? RULER_SIZE : RULER_SIZE * 0.35;
         if (horizontal) {
@@ -447,7 +539,8 @@ export class CanvasView {
           c.lineTo(RULER_SIZE, pos);
         }
         if (isMajor) {
-          const label = String(Math.round(u * 100) / 100);
+          const v = Math.round(u * 100) / 100;
+          const label = String(Object.is(v, -0) ? 0 : v);
           if (horizontal) c.fillText(label, pos + 2, 1);
           else {
             c.save();
@@ -479,6 +572,40 @@ export class CanvasView {
     draw(this.rulerV, false);
   }
 
+  /** The crosshair of a ruler-corner drag (screen space): where the new ruler origin goes. */
+  paintOriginDrag(ctx) {
+    const o = this.originDrag;
+    if (!o?.active) return;
+    const p = this.toScreen(o.x, o.y);
+    ctx.save();
+    ctx.strokeStyle = '#000000';
+    ctx.setLineDash([3, 3]);
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(Math.round(p.x) + 0.5, 0);
+    ctx.lineTo(Math.round(p.x) + 0.5, this.cssHeight);
+    ctx.moveTo(0, Math.round(p.y) + 0.5);
+    ctx.lineTo(this.cssWidth, Math.round(p.y) + 0.5);
+    ctx.stroke();
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineDashOffset = 3;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /** The ruler's context menu: the units, and Reset Ruler Origin. */
+  rulerMenu(e) {
+    e.preventDefault();
+    const app = this.app;
+    const unit = app.rulers?.unit(this.doc) ?? 'px';
+    const run = (id, arg) => app.commands.run(id, arg, 'panel');
+    app.dialogs.popover(e.currentTarget, [
+      ...UNITS.map((u) => ({ label: UNIT_NAMES[u], checked: u === unit, onSelect: () => run('view:ruler-unit', u) })),
+      { type: 'separator' },
+      { label: 'Reset Ruler Origin', disabled: !app.commands.isEnabled('view:ruler-origin-reset'), onSelect: () => run('view:ruler-origin-reset') },
+    ], { at: { x: e.clientX, y: e.clientY } });
+  }
+
   // ---- pointer routing -----------------------------------------------------------------------------------------
 
   #bindPointer() {
@@ -496,41 +623,93 @@ export class CanvasView {
     let capturing = null; // the canvas-capture handler that took the current drag (lib/canvas-capture.js, I.3)
     const currentTool = () => this.tempTool ?? this.app.tools?.active;
     const capture = () => this.app.canvasCapture?.top() ?? null;
-    // dragging out of a ruler creates a guide (released over the canvas) at the pointer position
-    for (const [ruler, axis] of [[this.rulerH, 'y'], [this.rulerV, 'x']]) {
-      const docPos = (e) => {
-        const r = canvas.getBoundingClientRect();
-        const d = this.toDoc(e.clientX - r.left, e.clientY - r.top);
-        // snap (lib/snap.js): a guide dragged from a ruler snaps along its own axis
-        const s = this.app.snap?.point(d, { source: 'guide', axis, pointer: { x: d.x, y: d.y, shift: e.shiftKey, alt: e.altKey, ctrl: e.ctrlKey, meta: e.metaKey, temporary: null }, view: this }) ?? d;
-        return Math.round(s[axis] * 100) / 100;
+    const overCanvas = (e) => {
+      const r = canvas.getBoundingClientRect();
+      return e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+    };
+    const eventDoc = (e) => {
+      const r = canvas.getBoundingClientRect();
+      return this.toDoc(e.clientX - r.left, e.clientY - r.top);
+    };
+    // dragging out of a ruler creates a guide (released over the canvas) at the pointer position; Alt makes it the
+    // other orientation, Shift puts it on a ruler tick (else it snaps like any guide drag)
+    for (const [ruler, rulerAxis] of [[this.rulerH, 'y'], [this.rulerV, 'x']]) {
+      const place = (e) => {
+        const axis = e.altKey ? (rulerAxis === 'x' ? 'y' : 'x') : rulerAxis;
+        const d = eventDoc(e);
+        let pos;
+        if (e.shiftKey) {
+          const sc = this.rulerScale(axis === 'x');
+          const step = sc.minor * sc.perUnit;
+          pos = sc.origin + Math.round((d[axis] - sc.origin) / step) * step;
+        } else {
+          // snap (lib/snap.js): a guide dragged from a ruler snaps along its own axis
+          const s = this.app.snap?.point(d, { source: 'guide', axis, pointer: { x: d.x, y: d.y, shift: e.shiftKey, alt: e.altKey, ctrl: e.ctrlKey, meta: e.metaKey, temporary: null }, view: this }) ?? d;
+          pos = s[axis];
+        }
+        return { axis, pos: Math.round(pos * 100) / 100 };
       };
-      ruler.style.cursor = axis === 'y' ? 'row-resize' : 'col-resize';
+      ruler.style.cursor = rulerAxis === 'y' ? 'row-resize' : 'col-resize';
       ruler.addEventListener('pointerdown', (e) => {
         if (e.button !== 0) return;
         ruler.setPointerCapture(e.pointerId);
-        this.guideDrag = { axis, pos: docPos(e), active: false };
+        this.guideDrag = { ruler: rulerAxis, ...place(e), active: false };
         e.preventDefault();
       });
       ruler.addEventListener('pointermove', (e) => {
-        if (!this.guideDrag || this.guideDrag.axis !== axis) return;
-        const r = canvas.getBoundingClientRect();
-        this.guideDrag.active = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
-        this.guideDrag.pos = docPos(e);
+        if (!this.guideDrag || this.guideDrag.ruler !== rulerAxis) return;
+        Object.assign(this.guideDrag, place(e), { active: overCanvas(e) });
         this.invalidate();
       });
       const finish = (e) => {
         const g = this.guideDrag;
-        if (!g || g.axis !== axis) return;
+        if (!g || g.ruler !== rulerAxis) return;
         this.guideDrag = null;
-        const r = canvas.getBoundingClientRect();
-        const over = e.type === 'pointerup' && e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
-        if (over) this.app.commands.run('view:new-guide', { axis, pos: docPos(e) }, 'api');
+        const over = e.type === 'pointerup' && overCanvas(e);
+        if (over) {
+          const { axis, pos } = place(e);
+          this.app.commands.run('view:new-guide', { axis, pos }, 'panel');
+        }
         this.app.snap?.end();
         this.invalidate();
       };
       ruler.addEventListener('pointerup', finish);
       ruler.addEventListener('pointercancel', finish);
+      ruler.addEventListener('contextmenu', (e) => this.rulerMenu(e));
+    }
+    // the ruler corner: drag to move the ruler origin (where both rulers read 0), double-click to put it back
+    const corner = this.el.querySelector('.ruler-corner');
+    if (corner) {
+      corner.title = 'Drag to set the ruler origin; double-click to reset it';
+      const placeOrigin = (e) => {
+        const d = eventDoc(e);
+        // snap (lib/snap.js): the origin snaps like a guide does, on both axes
+        const s = e.shiftKey ? { x: Math.round(d.x), y: Math.round(d.y) } : this.app.snap?.point(d, { source: 'guide', pointer: { x: d.x, y: d.y, shift: e.shiftKey, alt: e.altKey, ctrl: e.ctrlKey, meta: e.metaKey, temporary: null }, view: this }) ?? d;
+        return { x: Math.round(s.x * 100) / 100, y: Math.round(s.y * 100) / 100 };
+      };
+      corner.addEventListener('pointerdown', (e) => {
+        if (e.button !== 0) return;
+        corner.setPointerCapture(e.pointerId);
+        this.originDrag = { ...placeOrigin(e), active: false };
+        e.preventDefault();
+      });
+      corner.addEventListener('pointermove', (e) => {
+        if (!this.originDrag) return;
+        Object.assign(this.originDrag, placeOrigin(e), { active: overCanvas(e) });
+        this.invalidate();
+      });
+      const done = (e) => {
+        const o = this.originDrag;
+        if (!o) return;
+        this.originDrag = null;
+        if (e.type === 'pointerup' && overCanvas(e)) this.app.commands.run('view:ruler-origin', placeOrigin(e), 'panel');
+        this.app.snap?.end();
+        this.invalidate();
+      };
+      corner.addEventListener('pointerup', done);
+      corner.addEventListener('pointercancel', done);
+      corner.addEventListener('dblclick', () => this.app.commands.run('view:ruler-origin-reset', undefined, 'panel'));
+      corner.addEventListener('contextmenu', (e) => this.rulerMenu(e));
     }
     canvas.addEventListener('pointerdown', (e) => {
       canvas.focus({ preventScroll: true });

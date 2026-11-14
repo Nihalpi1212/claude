@@ -1,8 +1,14 @@
-// Keyboard dispatch (see src/shared/keymap.js for the rules). Plain letters select tools; Shift +
-// the same letter cycles through the tools sharing a toolbox slot; Space temporarily switches to
-// the hand tool; the active tool gets first refusal on keys it handles itself (arrows, Backspace).
+// Keyboard dispatch (see src/shared/keymap.js for the rules). Plain letters select tools; Shift + the same letter
+// cycles through the tools sharing a toolbox slot (or the letter itself, with "Use Shift Key for Tool Switch" off);
+// the active tool gets first refusal on keys it handles itself (arrows, Backspace).
+//
+// 0.4 (conventions-shortcuts-fields): temporary tools (lib/temp-tools.js): Space pans, Ctrl+Space and Alt+Space zoom,
+// Ctrl springs to the Move tool and Alt to the Eyedropper, a held tool key springs back on release. While a dialog is
+// open the view navigation keys still work (zoom keys, Space to pan the canvas under the dialog), as in Photoshop.
 import { MENU_KEYS, RENDERER_KEYS, parseAccelerator, eventMatches } from '../../shared/keymap.js';
 import { isMac } from './bridge.js';
+import { TempTools } from './temp-tools.js';
+import { DIALOG_NAV } from './dialogs.js';
 
 const NATIVE_IN_TEXT = new Set(['edit:undo', 'edit:redo', 'edit:cut', 'edit:copy', 'edit:paste', 'edit:select-all', 'select:all', 'edit:clear', 'view:zoom-in', 'view:zoom-out']);
 
@@ -11,6 +17,14 @@ function isTextInput(el) {
   const tag = el.tagName;
   if (tag === 'INPUT') return !['button', 'checkbox', 'radio', 'range', 'submit', 'file', 'color'].includes(el.type);
   return tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable;
+}
+
+/** Where a typed space means a space (or presses a control) and must not pan: text entry, buttons, selects. */
+function spaceIsOwnedBy(el) {
+  if (!el) return false;
+  const tag = el.tagName;
+  if (tag === 'INPUT') return el.type !== 'number' && el.type !== 'range';
+  return tag === 'TEXTAREA' || tag === 'SELECT' || tag === 'BUTTON' || el.isContentEditable || el.getAttribute?.('role') === 'button';
 }
 
 export function install(app) {
@@ -32,19 +46,56 @@ export function install(app) {
     for (const a of accels) if (/^[a-z]$/.test(a)) toolKeys.set(a, cmd.slice(5));
   }
 
-  let spaceTool = null;
+  const temp = new TempTools(app);
+  app.tempTools = temp;
+  const shiftSwitch = () => app.settings?.conventions?.toolSwitchWithShift !== false;
+
+  let spaceTool = null; // 'pan' while Space pans (view.spaceHeld), 'zoom' while Ctrl/Alt+Space zooms
+  const spaceDown = (dialogOpen) => {
+    spaceTool = 'pan';
+    app.view.spaceHeld = true;
+    app.view.setCursor('grab');
+    // under a dialog the canvas takes the drag (the backdrop lets the pointer through while Space is held)
+    if (dialogOpen) app.dialogs?.setNavigationThrough?.(true);
+  };
+  const spaceUp = () => {
+    const was = spaceTool;
+    spaceTool = null;
+    app.dialogs?.setNavigationThrough?.(false);
+    if (was === 'zoom') temp.spaceUp();
+    if (app.view && was === 'pan') {
+      app.view.spaceHeld = false;
+      if (temp.current) app.view.setCursor(temp.current.adapter.cursorStyle);
+      else app.tools.updateCursor();
+    }
+  };
+
   document.addEventListener('keydown', (event) => {
     if (event.defaultPrevented || event.isComposing) return;
     const inText = isTextInput(event.target);
     const inDialog = !!app.dialogs?.isOpen || !!event.target.closest?.('.dialog-backdrop');
-    // Space: temporary hand tool
-    if (event.key === ' ' && !inText && !inDialog && app.view) {
+    if (event.key !== ' ') temp.otherKey(event);
+    // Space: pan (Ctrl / Cmd + Space zooms in, Alt + Space zooms out), also on the canvas under a dialog
+    if (event.key === ' ' && app.view && !(inDialog ? spaceIsOwnedBy(event.target) : inText)) {
+      if (inDialog && app.dialogs?.allowsNavigation?.() === false) return;
       event.preventDefault();
-      if (!event.repeat && !spaceTool) {
-        spaceTool = true;
-        app.view.spaceHeld = true;
-        app.view.setCursor('grab');
+      if (event.ctrlKey || event.metaKey || event.altKey) {
+        if (spaceTool === 'pan') {
+          app.view.spaceHeld = false;
+          spaceTool = null;
+        }
+        if (temp.zoomDown(event)) {
+          spaceTool = 'zoom';
+          if (inDialog) app.dialogs?.setNavigationThrough?.(true);
+        }
+        return;
       }
+      if (!event.repeat && !spaceTool) spaceDown(inDialog);
+      return;
+    }
+    // a modifier on its own: the temporary Move tool (Ctrl) or Eyedropper (Alt)
+    if ((event.key === 'Control' || event.key === 'Meta' || event.key === 'Alt') && !inText && !inDialog) {
+      temp.modifierDown(event);
       return;
     }
     // a focused slider keeps its own arrow keys (the options bar's Bend slider, for example)
@@ -58,6 +109,7 @@ export function install(app) {
       const slot = toolKeys.get(event.key.toLowerCase());
       if (slot && app.tools) {
         event.preventDefault();
+        if (event.repeat) return;
         const s = app.tools.slots.find((x) => x.id === slot);
         if (s) {
           const current = s.tools.includes(app.tools.active?.id) ? app.tools.active.id : s.current;
@@ -70,7 +122,16 @@ export function install(app) {
     for (const entry of table) {
       if (!eventMatches(event, entry.desc, isMac)) continue;
       const { cmd, plain } = entry;
-      if (inDialog && cmd !== 'app:escape') return;
+      if (inDialog) {
+        // the view under the dialog stays navigable: zoom keys pass, unless the focus is in a text entry
+        if (DIALOG_NAV.test(cmd) && !(isTextInput(event.target) && event.target.type !== 'number' && event.target.dataset?.numericText === undefined) && app.dialogs?.allowsNavigation?.()) {
+          event.preventDefault();
+          event.stopPropagation();
+          app.commands.run(cmd, undefined, 'key');
+          return;
+        }
+        if (cmd !== 'app:escape') return;
+      }
       if (inText) {
         if (plain || NATIVE_IN_TEXT.has(cmd) || cmd === 'app:enter' || cmd === 'window:toggle-panels') return;
         // while typing, only file, window and view commands may run (Ctrl+I must not invert the image)
@@ -81,18 +142,23 @@ export function install(app) {
           return;
         }
       }
-      if (plain && event.repeat && cmd !== 'tool:brush-size-up' && cmd !== 'tool:brush-size-down') return;
-      if (plain && !app.doc && cmd.startsWith('tool:') && !['tool:swap-colors', 'tool:default-colors'].includes(cmd)) {
-        // tools can still be chosen without a document
+      if (plain && event.repeat && cmd !== 'tool:brush-size-up' && cmd !== 'tool:brush-size-down') {
+        if (cmd.startsWith('tool:')) event.preventDefault();
+        return;
       }
       event.preventDefault();
       event.stopPropagation();
       if (plain && cmd.startsWith('tool:') && toolKeys.has(event.key.toLowerCase()) && app.tools) {
-        // a plain letter picks the slot's current tool and never cycles (Shift+letter cycles)
+        // a plain letter picks the slot's current tool; it cycles only with "Use Shift Key for Tool Switch" off and
+        // the slot's tool already active (Shift+letter always cycles)
         const slotId = toolKeys.get(event.key.toLowerCase());
         const slot = app.tools.slots.find((s) => s.id === slotId) ?? app.tools.slots.find((s) => s.tools.includes(slotId));
         if (slot) {
-          app.tools.activate(slot.current ?? slot.tools[0]);
+          const from = app.tools.active?.id ?? null;
+          let target = slot.current ?? slot.tools[0];
+          if (!shiftSwitch() && slot.tools.includes(from) && slot.tools.length > 1) target = slot.tools[(slot.tools.indexOf(from) + 1) % slot.tools.length];
+          app.tools.activate(target);
+          temp.toolKeyDown(event, from, app.tools.active?.id ?? null);
           return;
         }
       }
@@ -102,18 +168,18 @@ export function install(app) {
   });
   document.addEventListener('keyup', (event) => {
     if (event.key === ' ' && spaceTool) {
-      spaceTool = null;
-      if (app.view) {
-        app.view.spaceHeld = false;
-        app.tools.updateCursor();
-      }
+      spaceUp();
+      return;
     }
+    if (event.key === 'Control' || event.key === 'Meta' || event.key === 'Alt') {
+      temp.modifierUp(event);
+      // Ctrl released before Space: the zoom ends with the Space
+      return;
+    }
+    if (event.key.length === 1) temp.toolKeyUp(event);
   });
   window.addEventListener('blur', () => {
-    if (spaceTool && app.view) {
-      spaceTool = null;
-      app.view.spaceHeld = false;
-      app.tools.updateCursor();
-    }
+    if (spaceTool) spaceUp();
+    temp.reset();
   });
 }

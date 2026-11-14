@@ -1,1 +1,11 @@
-/* masks-vector-masks (ARCHITECTURE.md "0.4 features", rule 6): this package's styles. Empty until the package lands. */
+/* masks-vector-masks (ARCHITECTURE.md "0.4 features", rule 6): the Masks section of the Properties panel and the
+   vector mask row of the Paths panel. */
+.mvm-masks .panel-section + .panel-section { border-top: 1px solid var(--border, rgba(127, 127, 127, 0.25)); }
+.mvm-slider { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+.mvm-slider > span:first-child { flex: 0 0 52px; font-size: 11px; }
+.mvm-slider .mvm-range { flex: 1 1 auto; min-width: 60px; }
+.mvm-slider .mvm-num { width: 56px; flex: 0 0 56px; height: 22px; font-size: 11px; }
+.mvm-slider .mvm-unit { flex: 0 0 18px; font-size: 11px; }
+.mvm-vector-thumb canvas { display: block; }
+.mvm-overlay { padding: 0 10px 8px; }
+.mvm-overlay [aria-pressed="true"] { background: var(--accent-soft, rgba(80, 140, 255, 0.25)); }

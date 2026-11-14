@@ -10,6 +10,7 @@ import { scaleEffects } from '../../../shared/pixels/styles.js';
 import { formDialog } from '../form.js';
 import * as T from '../../../shared/pixels/transform.js';
 import { labelOptions, normaliseLabel, labelOf } from './tags.js';
+import { canPlaceWith, BACKGROUND_LOCKED_PROPS } from '../layer-menu-model.js';
 
 const isAncestor = (a, l) => {
   for (let p = l.parent; p; p = p.parent) if (p === a) return true;
@@ -53,7 +54,7 @@ function cornerAlpha(canvas) {
  * A source-document mask as a host-document mask: what the matrix does not cover keeps the mask's background,
  * or stays hidden when `bounded` (fill and adjustment layers reached no further than their source canvas).
  */
-function mapMask(mask, m, W, H, bounded = false) {
+export function mapMask(mask, m, W, H, bounded = false) {
   const c = createCanvas(W, H);
   const ctx = c.getContext('2d');
   const bg = bounded ? 0 : cornerAlpha(mask);
@@ -146,18 +147,19 @@ export function installStructure(app) {
   const hasBackground = (d) => isBackgroundLayer(d.root.children[0]);
 
   app.isBackgroundLayer = isBackgroundLayer;
-  // Background rules (ARCHITECTURE.md "0.4 features", L.13; E30): stub with 0.3 behaviour (anything may go anywhere,
-  // nothing is locked); finish-layer-menu completes it (the Background stays at the bottom, its blend mode, opacity,
-  // masks, styles and position locked). The Background is recognised as in 0.3 (isBackgroundLayer).
+  // Background rules (ARCHITECTURE.md "0.4 features", L.13; E30). The Background is recognised as in 0.3
+  // (isBackgroundLayer: the bottom raster layer of the root named "Background"). It stays at the bottom of the stack:
+  // it never moves or goes into a group and nothing is placed below it; its blend mode, opacity, fill opacity, masks,
+  // styles and position are locked. Layer from Background, and renaming it, make it an ordinary layer again.
+  // Users: layer-ops.js (every command that moves layers or sets those properties), the Layers panel's drop
+  // indicators and locked controls (layers-panel-depth), vector masks and mask settings (masks-vector-masks),
+  // isStyleable (layer-style-blending).
   app.backgroundRules = {
-    canPlace: (doc, layers, target, mode) => {
-      void doc, layers, target, mode;
-      return true;
+    canPlace: (d, layers, target, mode) => {
+      const bottom = d?.root?.children?.[0];
+      return canPlaceWith(isBackgroundLayer(bottom) ? bottom : null, layers, target, mode);
     },
-    lockedProps: (layer) => {
-      void layer;
-      return [];
-    },
+    lockedProps: (layer) => (isBackgroundLayer(layer) ? [...BACKGROUND_LOCKED_PROPS] : []),
   };
 
   // ---- Background from Layer / Layer from Background ----------------------------------------------------------
@@ -223,8 +225,12 @@ export function installStructure(app) {
     const d = doc();
     const picked = selectedOrActive(d);
     // a layer whose group is selected too moves with its group
-    const layers = picked.filter((l) => !picked.some((o) => o !== l && isAncestor(o, l)));
-    if (!layers.length) return ctx?.cancel();
+    // the Background never goes into a group (L.13): it stays where it is, the others are grouped
+    const layers = picked.filter((l) => !picked.some((o) => o !== l && isAncestor(o, l)) && !isBackgroundLayer(l));
+    if (!layers.length) {
+      if (picked.some(isBackgroundLayer)) app.dialogs.toast('The Background layer cannot go into a group: use Layer from Background first', { kind: 'error', timeout: 2600 });
+      return ctx?.cancel();
+    }
     let o = arg && typeof arg === 'object' ? arg : null;
     if (!o) {
       o = await formDialog(app, {

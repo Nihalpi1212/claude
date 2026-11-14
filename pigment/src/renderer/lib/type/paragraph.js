@@ -115,6 +115,31 @@ function spacing(style) {
  *   flagged (counts as a hyphenated line), penalty, wordStart? }
  */
 function candidates(ctx, { withHyphens, emergency }) {
+  // the passes of the Every-line Composer ask for the same lists again: build each once per paragraph segment
+  const key = `${withHyphens ? 1 : 0}${emergency ? 1 : 0}`;
+  let list = ctx.candCache.get(key);
+  if (!list) {
+    list = buildCandidates(ctx, { withHyphens, emergency });
+    ctx.candCache.set(key, list);
+  }
+  return list;
+}
+
+/** The words of the segment ([start, end) letter runs), found once. */
+function wordsOf(ctx) {
+  if (!ctx.words) {
+    const { from, to, text } = ctx;
+    const words = [];
+    LETTER_RUN.lastIndex = 0;
+    const seg = text.slice(from, to);
+    let m;
+    while ((m = LETTER_RUN.exec(seg))) words.push([from + m.index, from + m.index + m[0].length]);
+    ctx.words = words;
+  }
+  return ctx.words;
+}
+
+function buildCandidates(ctx, { withHyphens, emergency }) {
   const { from, to, text, input } = ctx;
   const out = [];
   for (const b of input.breaks ?? []) {
@@ -127,26 +152,14 @@ function candidates(ctx, { withHyphens, emergency }) {
     else out.push({ at: b.at, kind: b.kind === 'space' ? 'space' : 'other', hyphen: false, flagged: false, penalty: 0 });
   }
   const taken = new Set(out.map((c) => c.at));
-  const words = [];
-  if ((withHyphens && input.hyphenate) || emergency) {
-    LETTER_RUN.lastIndex = 0;
-    const seg = text.slice(from, to);
-    let m;
-    while ((m = LETTER_RUN.exec(seg))) words.push([from + m.index, from + m.index + m[0].length]);
-  }
+  const words = (withHyphens && input.hyphenate) || emergency ? wordsOf(ctx) : [];
   if (withHyphens && input.hyphenate) {
     const hy = ctx.style.hyphenation ?? {};
     const lastWord = words[words.length - 1];
     for (const [ws, we] of words) {
       // Hyphenate Last Word off: the paragraph's last word stays whole (only in the paragraph's last segment)
       if (hy.lastWord === false && lastWord && ws === lastWord[0] && ctx.lastSegment) continue;
-      let pos;
-      try {
-        pos = input.hyphenate(ws, we) ?? [];
-      } catch {
-        pos = [];
-      }
-      for (const p of pos) {
+      for (const p of hyphenPoints(ctx, ws, we)) {
         if (p <= ws || p >= we || taken.has(p)) continue;
         taken.add(p);
         out.push({ at: p, kind: 'auto', hyphen: true, flagged: true, penalty: HYPHEN_PENALTY, wordStart: ws });
@@ -170,6 +183,22 @@ function candidates(ctx, { withHyphens, emergency }) {
   return out;
 }
 const isLowSurrogate = (c) => c >= 0xdc00 && c <= 0xdfff;
+const MARK = /\p{M}/u;
+
+/** Hyphenation points of the word [ws, we) (the facade's filtered positions), asked once per segment. */
+function hyphenPoints(ctx, ws, we) {
+  const k = `${ws}:${we}`;
+  let pos = ctx.hyCache.get(k);
+  if (!pos) {
+    try {
+      pos = ctx.input.hyphenate(ws, we) ?? [];
+    } catch {
+      pos = [];
+    }
+    ctx.hyCache.set(k, pos);
+  }
+  return pos;
+}
 
 function makeContext(input, opts = {}) {
   const { from, to, text } = input;
@@ -192,34 +221,102 @@ function makeContext(input, opts = {}) {
   let space = 0;
   for (let i = from; i < to && !space; i++) if (text[i] === SPACE) space = Number(input.spaceWidth?.(i)) || 0;
   if (!space) space = Math.max(1, (Number(input.hyphenWidth?.(Math.min(to, from + 1))) || 4) * 0.9);
+  // prefix counts over the segment, so a line's glyph gaps, spaces and space widths cost O(1) whatever its length:
+  // glyphs[i] = code points in [from, from + i), spaces[i] = U+0020 in it, spaceSum[i] = their natural widths
+  const n = Math.max(0, to - from);
+  const glyphs = new Uint32Array(n + 1), spaces = new Uint32Array(n + 1), spaceSum = new Float64Array(n + 1);
+  let hasTab = false;
+  for (let i = 0; i < n; i++) {
+    const ch = text[from + i];
+    const isSpace = ch === SPACE;
+    if (ch === '\t') hasTab = true;
+    glyphs[i + 1] = glyphs[i] + (isLowSurrogate(text.charCodeAt(from + i)) ? 0 : 1);
+    spaces[i + 1] = spaces[i] + (isSpace ? 1 : 0);
+    spaceSum[i + 1] = spaceSum[i] + (isSpace ? Number(input.spaceWidth?.(from + i)) || space : 0);
+  }
   // a segment that ends with a forced line break (U+2028) is not the paragraph's end: its last line is justified as
   // the engines justify it (B.3: only a paragraph's last line keeps its alignment)
   const lastSegment = opts.lastSegment ?? text[to] !== '\u2028';
-  return { input, from, to, text, style, sp, justified, measure, space, lastSegment };
+  const ctx = { input, from, to, text, style, sp, justified, measure, space, lastSegment, glyphs, spaces, spaceSum, hasTab, candCache: new Map(), hyCache: new Map(), hyphenW: new Map(), words: null, fast: null };
+  // the line search measures lines by summing the pieces between break candidates (searchMeasure); the lines it
+  // chooses are measured again in one piece (lineRecord), so what the engine draws is set from exact widths
+  ctx.search = (a, b) => searchMeasure(ctx, a, b);
+  return ctx;
+}
+
+/** The end of a line [a, at): spaces at its end hang outside the measure. */
+function trimEnd(text, a, at) {
+  let e = at;
+  while (e > a && isTrailingSpace(text[e - 1])) e--;
+  return e;
+}
+
+/**
+ * Additive line widths for the search. The cut points are the segment start, every candidate break and the end of the
+ * line each would close (spaces trimmed); the width between two cut points is the sum of the exact pieces between
+ * them plus, at each cut inside, the join of the two characters around it (tracking, kerning and a ligature across the
+ * cut), so a sum matches a one-piece measurement up to shaping effects that span more than two characters. A range
+ * whose ends are not cut points, or a segment with tabs (their width depends on the line start), is measured exactly.
+ */
+function prepareSearch(ctx, cands) {
+  const { from, to, text } = ctx;
+  const set = new Set([from, to]);
+  for (const c of cands) {
+    if (c.at <= from || c.at > to) continue;
+    set.add(c.at);
+    set.add(trimEnd(text, from, c.at));
+  }
+  const pts = [...set].sort((x, y) => x - y);
+  const index = new Map(pts.map((p, k) => [p, k]));
+  const cum = new Float64Array(pts.length);
+  const join = new Float64Array(pts.length);
+  // the code point (with its marks) before and after a cut, kept inside the neighbouring pieces
+  const before = (k) => {
+    let q = pts[k] - 1;
+    while (q > pts[k - 1] && (isLowSurrogate(text.charCodeAt(q)) || MARK.test(text[q]))) q--;
+    return q;
+  };
+  const after = (k) => {
+    let q = pts[k] + 1;
+    while (q < pts[k + 1] && (isLowSurrogate(text.charCodeAt(q)) || MARK.test(text[q]))) q++;
+    return q;
+  };
+  for (let k = 1; k < pts.length - 1; k++) {
+    const q0 = before(k), q1 = after(k);
+    join[k] = ctx.measure(q0, q1) - ctx.measure(q0, pts[k]) - ctx.measure(pts[k], q1);
+  }
+  for (let k = 1; k < pts.length; k++) cum[k] = cum[k - 1] + ctx.measure(pts[k - 1], pts[k]) + (k - 1 >= 1 ? join[k - 1] : 0);
+  ctx.fast = { pts, index, cum, join, size: cands.length };
+}
+
+function searchMeasure(ctx, a, b) {
+  if (b <= a) return 0;
+  const f = ctx.fast;
+  if (!f || ctx.hasTab) return ctx.measure(a, b);
+  const ia = f.index.get(a), ib = f.index.get(b);
+  if (ia === undefined || ib === undefined) return ctx.measure(a, b);
+  return f.cum[ib] - f.cum[ia] - (ia >= 1 ? f.join[ia] : 0);
 }
 
 /**
  * What a line [a, c.at) needs: natural width (spaces at the end hang), the count of spaces and glyph gaps, its
  * available width (indents applied by the engine through lineWidth; hanging punctuation added), and its desired width
- * with stretch and shrink by the justification settings.
+ * with stretch and shrink by the justification settings. `exact`: measured in one piece (the lines finally set);
+ * otherwise by the search's additive widths.
  */
-function lineInfo(ctx, a, c, lineNo) {
-  const { text, input, sp, space } = ctx;
-  let e = c.at;
-  while (e > a && isTrailingSpace(text[e - 1])) e--;
-  const natural = ctx.measure(a, e);
-  const hyph = c.hyphen ? Number(input.hyphenWidth(c.at)) || 0 : 0;
-  let S = 0, spaceSum = 0, G = 0;
-  for (let i = a; i < e; i++) {
-    const code = text.charCodeAt(i);
-    if (isLowSurrogate(code)) continue;
-    G++;
-    if (text[i] === SPACE) {
-      S++;
-      spaceSum += Number(input.spaceWidth?.(i)) || space;
-    }
+function lineInfo(ctx, a, c, lineNo, exact = false) {
+  const { text, input, sp, space, from } = ctx;
+  const e = trimEnd(text, a, c.at);
+  const natural = exact ? ctx.measure(a, e) : ctx.search(a, e);
+  let hyph = 0;
+  if (c.hyphen) {
+    hyph = ctx.hyphenW.get(c.at);
+    if (hyph === undefined) ctx.hyphenW.set(c.at, (hyph = Number(input.hyphenWidth(c.at)) || 0));
   }
-  G = Math.max(0, G - 1);
+  const ra = Math.max(0, a - from), re = Math.max(ra, e - from);
+  const S = ctx.spaces[re] - ctx.spaces[ra];
+  const spaceSum = ctx.spaceSum[re] - ctx.spaceSum[ra];
+  const G = Math.max(0, ctx.glyphs[re] - ctx.glyphs[ra] - 1);
   const sw = S ? spaceSum / S : space; // the line's mean space width
   let hangStart = 0, hangEnd = 0;
   if (ctx.style.hangingPunctuation && e > a) {
@@ -329,7 +426,8 @@ export function setLine(ctx, info, justified) {
 }
 
 /** The B.3 line record of [a, c.at). */
-function lineRecord(ctx, info, c, last, lineNo) {
+function lineRecord(ctx, searched, c, last, lineNo) {
+  const info = lineInfo(ctx, searched.a, c, lineNo, true);
   const rec = { from: info.a, to: last ? ctx.to : c.at, hyphen: !!c.hyphen, textFrom: info.a, textTo: info.end, line: lineNo };
   const set = setLine(ctx, info, lineJustified(ctx, last));
   if (set.justify) rec.justify = set.justify;
@@ -349,6 +447,7 @@ export function composeSingle(input) {
   const style = input.style ?? {};
   if (isLegacyParagraph(style)) return legacyGreedy(input);
   const ctx = makeContext(input);
+  prepareSearch(ctx, candidates(ctx, { withHyphens: true, emergency: false }));
   const cands = candidates(ctx, { withHyphens: true, emergency: true });
   const hy = style.hyphenation ?? {};
   const limit = Number(hy.limit) || 0;
@@ -463,6 +562,7 @@ export function composeEvery(input) {
   const style = input.style ?? {};
   if (isLegacyParagraph(style)) return legacyGreedy(input);
   const ctx = makeContext(input);
+  prepareSearch(ctx, candidates(ctx, { withHyphens: true, emergency: false }));
   const passes = [
     { withHyphens: false, tolerance: PRETOLERANCE, emergency: false },
     { withHyphens: true, tolerance: TOLERANCE, emergency: false },
@@ -482,7 +582,7 @@ function knuthPlass(ctx, { withHyphens, tolerance, emergency }) {
   const limit = Number(hy.limit) || 0;
   const zone = Number(hy.zone) || 0;
   const ragStretch = (info) => 6 * info.sw;
-  const start = { at: ctx.from, line: 0, fitness: 1, hyphens: 0, demerits: 0, prev: null, cand: null, info: null };
+  const start = { at: ctx.from, line: 0, fitness: 1, hyphens: 0, demerits: 0, prev: null, cand: null };
   let active = [start];
   for (const c of cands) {
     const last = c.kind === 'end';
@@ -517,7 +617,7 @@ function knuthPlass(ctx, { withHyphens, tolerance, emergency }) {
       if (overfull) {
         const over = info.desired - info.shrink - info.L;
         const d = a.demerits + 1e8 + over * over;
-        if (!rescue || d < rescue.demerits) rescue = { a, info, demerits: d };
+        if (!rescue || d < rescue.demerits) rescue = { a, demerits: d };
         continue;
       }
       if (bad > tolerance) continue;
@@ -526,7 +626,7 @@ function knuthPlass(ctx, { withHyphens, tolerance, emergency }) {
       if (c.kind === 'auto' && !just && zone > 0 && c.wordStart !== undefined) {
         let e = c.wordStart;
         while (e > a.at && isTrailingSpace(ctx.text[e - 1])) e--;
-        if (e > a.at && info.L - ctx.measure(a.at, e) < zone) continue;
+        if (e > a.at && info.L - ctx.search(a.at, e) < zone) continue;
       }
       let dem = (LINE_PENALTY + bad) ** 2;
       if (c.penalty > 0 && Number.isFinite(c.penalty)) dem += c.penalty ** 2;
@@ -537,14 +637,14 @@ function knuthPlass(ctx, { withHyphens, tolerance, emergency }) {
       const total = a.demerits + dem;
       // Hyphen Limit counts lines that end with a drawn hyphen; explicit hyphens in the text do not count
       const hyphens = c.hyphen ? a.hyphens + 1 : 0;
-      const key = `${fitness}|${limit ? hyphens : c.flagged ? 1 : 0}`;
+      const key = fitness * 32 + (limit ? hyphens : c.flagged ? 1 : 0);
       const prev = best.get(key);
-      if (!prev || total < prev.demerits) best.set(key, { at: c.at, line: a.line + 1, fitness, hyphens, demerits: total, prev: a, cand: c, info });
+      if (!prev || total < prev.demerits) best.set(key, { at: c.at, line: a.line + 1, fitness, hyphens, demerits: total, prev: a, cand: c });
     }
     if (!best.size && emergency && rescue && !keep.some((k) => k.at < c.at)) {
       // nothing reaches this break without overflowing and no earlier break can go further: accept the overfull line
-      const { a, info } = rescue;
-      best.set('rescue', { at: c.at, line: a.line + 1, fitness: 1, hyphens: c.hyphen ? a.hyphens + 1 : 0, demerits: rescue.demerits, prev: a, cand: c, info });
+      const { a } = rescue;
+      best.set(-1, { at: c.at, line: a.line + 1, fitness: 1, hyphens: c.hyphen ? a.hyphens + 1 : 0, demerits: rescue.demerits, prev: a, cand: c });
     }
     active = forced ? [...best.values()] : [...keep, ...best.values()];
     if (!active.length) return null;
@@ -556,7 +656,7 @@ function knuthPlass(ctx, { withHyphens, tolerance, emergency }) {
   const chain = [];
   for (let node = end; node.prev; node = node.prev) chain.push(node);
   chain.reverse();
-  return chain.map((node, i) => lineRecord(ctx, node.info, node.cand, i === chain.length - 1, node.prev.line));
+  return chain.map((node, i) => lineRecord(ctx, { a: node.prev.at }, node.cand, i === chain.length - 1, node.prev.line));
 }
 
 /**

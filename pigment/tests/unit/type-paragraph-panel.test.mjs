@@ -306,3 +306,39 @@ test('a justify-all paragraph that hyphenates lays out with the Every-line Compo
   for (const l of layout.lines) assert.ok(Math.abs(l.width - 120) < 1e-6, `line "${l.text}" is ${l.width} wide`);
   assert.ok(layout.lines.some((l) => l.hyphen), 'some line ends with a hyphen');
 });
+
+test('the line search adds piece widths, but lines are set from one-piece widths: flush with tracking and kerning pairs', async () => {
+  await H.ensureLanguage('en-US');
+  const text = 'Typography is the art and technique of arranging type to make written language legible, readable and appealing when displayed. '.repeat(4).trim();
+  // not additive: 0.5 px tracking between characters (none after the last) and a −1.5 px kerning pair "Ty" / "ty"
+  let calls = 0;
+  const measure = (a, b) => {
+    calls++;
+    if (b <= a) return 0;
+    let s = 0;
+    for (let i = a; i < b; i++) s += text[i] === ' ' ? 5 : 9;
+    s += (b - a - 1) * 0.5;
+    for (let i = a; i + 1 < b; i++) if (/[Tt]/.test(text[i]) && text[i + 1] === 'y') s -= 1.5;
+    return s;
+  };
+  for (const align of ['justify-left', 'justify-all']) {
+    const style = M.resolvePara({ align, hyphenate: true });
+    const inp = { ...input(text, style, { width: 250, ch: 9, sp: 5 }), measure, spaceWidth: () => 5, hyphenWidth: () => 6, hyphenate: facadeHyphenate(text, 'en-US') };
+    calls = 0;
+    const lines = P.composeEvery(inp);
+    assert.ok(lines.length >= 8);
+    // far fewer measurements than candidate lines (≈ cut points × 4 plus one per line set)
+    assert.ok(calls < 2500, `${calls} measure calls`);
+    lines.forEach((l, k) => {
+      const last = k === lines.length - 1;
+      if (last && align !== 'justify-all') return;
+      const end = l.textTo;
+      const seg = text.slice(l.textFrom, end);
+      const S = [...seg].filter((c) => c === ' ').length;
+      const G = seg.length - 1;
+      const j = l.justify ?? { wordSpace: 0, letterSpace: 0, glyphScale: 1 };
+      const drawn = (measure(l.textFrom, end) + S * j.wordSpace + G * j.letterSpace) * j.glyphScale + (l.hyphen ? 6 : 0);
+      assert.ok(Math.abs(drawn - 250) < 1e-6, `line ${k} "${seg}" is ${drawn} wide`);
+    });
+  }
+});

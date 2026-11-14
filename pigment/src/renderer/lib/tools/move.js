@@ -1,10 +1,17 @@
 // Move tool: drags the active layer(s) (or the selected pixels), auto-select, alignment buttons,
-// arrow-key nudging; and the crop tool.
+// arrow-key nudging; picks, moves and deletes guides (guides-snapping); and the crop tool.
+//
+// Guides (guides-snapping): a click on a guide selects it (Shift adds or removes), a drag moves it and the other
+// selected guides of its orientation, and a drag out of the canvas deletes them; Delete clears the selected guides.
+// Guides cannot be picked while they are hidden or locked (View > Guides > Lock Guides). Holding Ctrl/Cmd over another
+// layer shows the distances between it and the active layer (Smart Guides), or to the canvas edges.
 import { Tool } from '../tools.js';
 import { beginLayerMove, offsetLayers } from '../layer-move.js';
 import { createCanvas, RasterLayer } from '../document.js';
 import { applySelection } from './select.js';
 import { Selection } from '../selection.js';
+import { layerContentBounds } from '../properties/ui.js';
+import { guideAt, guidesEditable, selectGuides, selectedGuides } from '../guides.js';
 
 export class MoveTool extends Tool {
   constructor(app) {
@@ -29,6 +36,11 @@ export class MoveTool extends Tool {
   }
   activate() {
     this.keyHandler = (e) => this.nudge(e);
+  }
+  deactivate() {
+    this.guideDrag = null;
+    if (this.view) this.view.guideMove = null;
+    this.app.snap?.end();
   }
   layersToMove(p) {
     const doc = this.doc;
@@ -57,8 +69,17 @@ export class MoveTool extends Tool {
     }
     return null;
   }
+  /** The guide under p when guides can be picked (shown, not locked; Ctrl/Cmd-click picks layers). */
+  pickGuide(p) {
+    if (!p || !this.view || !guidesEditable(this.app) || ((p.ctrl || p.meta) && p.temporary !== 'ctrl')) return null;
+    return guideAt(this.view, p);
+  }
   onPointerDown(p) {
     const doc = this.doc;
+    const guide = this.pickGuide(p);
+    if (guide) return this.beginGuideDrag(guide, p);
+    // a click elsewhere drops the guide selection
+    if (this.view?.selectedGuides?.size && !p.shift) selectGuides(this.app, this.view, []);
     const layers = this.layersToMove(p);
     if (!layers.length) {
       this.app.dialogs.toast('Nothing to move: the layer is locked or none is selected', { kind: 'error', timeout: 1800 });
@@ -66,6 +87,7 @@ export class MoveTool extends Tool {
     }
     const sel = doc.selection && !doc.selection.isEmpty ? doc.selection : null;
     this.drag = { start: p, layers, duplicate: p.alt, moved: false, sel, dx: 0, dy: 0, origin: layers.map((l) => ({ l, x: l.x, y: l.y })) };
+    this.drag.snapBox = null; // the moved content's box, read once the layers to move are final (lift, duplicate)
     if (sel && layers.length === 1 && layers[0].type === 'raster' && !this.app.ui.editingMask) {
       // move the selected pixels: lift them into a floating layer first
       this.liftSelection(layers[0], sel, p.alt);
@@ -128,8 +150,114 @@ export class MoveTool extends Tool {
       this.drag.origin = copies.map((l) => ({ l, x: l.x, y: l.y }));
     }
   }
+  // ---- guides -------------------------------------------------------------------------------------------------------
+  beginGuideDrag(guide, p) {
+    const view = this.view;
+    const sel = view.selectedGuides ?? new Set();
+    let ids;
+    if (p.shift) {
+      // Shift-click adds the guide to the selection, or takes it out
+      const next = new Set(sel);
+      if (next.has(guide.id)) next.delete(guide.id);
+      else next.add(guide.id);
+      selectGuides(this.app, view, [...next]);
+      ids = next.has(guide.id) ? [...next] : [];
+    } else {
+      if (!sel.has(guide.id)) selectGuides(this.app, view, [guide.id]);
+      ids = [...view.selectedGuides];
+    }
+    // the guides that move: the selected ones of the clicked guide's orientation
+    const moving = this.doc.guides.filter((g) => ids.includes(g.id) && g.axis === guide.axis);
+    this.guideDrag = moving.length ? { guide, ids: moving.map((g) => g.id), start: p, moved: false, delta: 0, outside: false } : null;
+  }
+  moveGuideDrag(p) {
+    const d = this.guideDrag;
+    const view = this.view;
+    const axis = d.guide.axis;
+    if (!d.moved && Math.hypot(p.screenX - d.start.screenX, p.screenY - d.start.screenY) < 3) return;
+    d.moved = true;
+    // snap (lib/snap.js): the guide being moved snaps along its own axis to everything but the guides moving with it
+    const s = this.app.snap?.point(p, { source: 'guide', pointer: p, axis, excludeGuides: d.ids, view }) ?? p;
+    const pos = Math.round(s[axis] * 100) / 100;
+    d.delta = pos - d.guide.pos;
+    // dragged out of the canvas (onto a ruler or past the edge of the window): released there, the guides go
+    d.outside = p.screenX < 0 || p.screenY < 0 || p.screenX > view.cssWidth || p.screenY > view.cssHeight;
+    view.guideMove = { ids: d.ids, delta: d.delta, outside: d.outside };
+    view.setCursor(axis === 'x' ? 'col-resize' : 'row-resize');
+  }
+  endGuideDrag(p) {
+    const d = this.guideDrag;
+    this.guideDrag = null;
+    const view = this.view;
+    if (view) view.guideMove = null;
+    if (!d?.moved || p?.cancelled) {
+      view?.invalidate();
+      return;
+    }
+    const doc = this.doc;
+    const list = doc.guides.filter((g) => d.ids.includes(g.id));
+    if (d.outside) {
+      this.app.commands.run('view:clear-selected-guides', { guides: list.map((g) => ({ id: g.id, axis: g.axis, pos: g.pos })) }, 'panel');
+    } else if (d.delta) {
+      this.app.commands.run('view:move-guide', { moves: list.map((g) => ({ id: g.id, axis: g.axis, from: g.pos, to: Math.round((g.pos + d.delta) * 100) / 100 })) }, 'panel');
+    }
+    view?.invalidate();
+  }
+  /** Edit > Clear (Delete) with guides selected deletes them instead of pixels or the layer. */
+  deleteSelection() {
+    if (!selectedGuides(this.view).length) return false;
+    this.app.commands.run('view:clear-selected-guides', undefined, 'api');
+    return true;
+  }
+  /** Hover: the guide cursor over a guide; Ctrl/Cmd held measures from the active layer (Smart Guides). */
+  hover(p) {
+    const view = this.view;
+    if (!view || view.spaceHeld) return;
+    // the guide cursor only while over a guide; leaving it gives the tool's cursor back (not over the Space hand)
+    const g = this.pickGuide(p);
+    const cursor = g ? (g.axis === 'x' ? 'col-resize' : 'row-resize') : null;
+    if (cursor !== this.guideCursor) {
+      this.guideCursor = cursor;
+      if (cursor) view.setCursor(cursor);
+      else this.app.tools.updateCursor?.();
+    }
+    const snap = this.app.snap;
+    if (!snap) return;
+    const measuring = (p.ctrl || p.meta) && this.app.settings.guides?.smartGuides !== false;
+    if (!measuring) {
+      if (snap.overlay?.measure) snap.end();
+      return;
+    }
+    const doc = this.doc;
+    const active = doc?.active;
+    const a = active && !active.isGroup ? layerContentBounds(active) : null;
+    if (!a) return snap.end();
+    const hit = this.hitTest(p);
+    const b = hit && hit !== active ? layerContentBounds(hit) : { x: 0, y: 0, width: doc.width, height: doc.height };
+    snap.measure(a, b, { view });
+  }
+  /** The box the snapping moves: the moved layers' visible content (their canvas when it is empty). */
+  moveBox() {
+    const d = this.drag;
+    if (d.snapBox !== null) return d.snapBox;
+    let box = null;
+    for (const o of d.origin) {
+      const b = layerContentBounds(o.l) ?? o.l.bounds?.();
+      if (!b) continue;
+      box = box ? union(box, b) : { ...b };
+    }
+    // relative to the first layer's position at the start, so the box follows dx / dy
+    const first = d.origin[0];
+    d.snapBox = box ? { ox: box.x - first.x, oy: box.y - first.y, width: box.width, height: box.height } : false;
+    return d.snapBox;
+  }
   onPointerMove(p, dragging) {
-    if (!dragging || !this.drag) return;
+    if (this.guideDrag) {
+      if (dragging) this.moveGuideDrag(p);
+      return;
+    }
+    if (!dragging) return this.hover(p);
+    if (!this.drag) return;
     let dx = Math.round(p.x - this.drag.start.x), dy = Math.round(p.y - this.drag.start.y);
     if (p.shift) {
       if (Math.abs(dx) > Math.abs(dy) * 2) dy = 0;
@@ -140,12 +268,13 @@ export class MoveTool extends Tool {
         dy = Math.sign(dy) * m;
       }
     }
-    // snap (lib/snap.js): the stub is 0.3's snapping (document edges and centre, guides); Ctrl/Cmd held turns it off
+    // snap (lib/snap.js): the moved content's box meets guides, the grid, other layers and the document (View > Snap
+    // To); a Shift-constrained drag snaps along its axis only; Ctrl/Cmd held turns snapping off
     const first = this.drag.origin[0];
-    const fb = first.l.bounds();
+    const fb = this.moveBox();
     if (fb && this.app.snap) {
       const axis = p.shift ? (dy === 0 && dx !== 0 ? 'x' : dx === 0 && dy !== 0 ? 'y' : undefined) : undefined;
-      const s = this.app.snap.box({ x: first.x + dx, y: first.y + dy, width: fb.width, height: fb.height }, { source: 'move', pointer: p, exclude: this.drag.layers, axis, view: this.view });
+      const s = this.app.snap.box({ x: first.x + dx + fb.ox, y: first.y + dy + fb.oy, width: fb.width, height: fb.height }, { source: 'move', pointer: p, exclude: this.drag.layers, axis, view: this.view });
       dx += s.dx;
       dy += s.dy;
     }
@@ -157,6 +286,7 @@ export class MoveTool extends Tool {
     this.drag.session.set(dx, dy);
   }
   onPointerUp(p) {
+    if (this.guideDrag) return this.endGuideDrag(p);
     const d = this.drag;
     this.drag = null;
     if (!d) return;
@@ -245,6 +375,11 @@ export class MoveTool extends Tool {
   }
 }
 
+function union(a, b) {
+  const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y);
+  return { x, y, width: Math.max(a.x + a.width, b.x + b.width) - x, height: Math.max(a.y + a.height, b.y + b.height) - y };
+}
+
 function shiftCanvas(canvas, dx, dy) {
   const copy = createCanvas(canvas.width, canvas.height);
   copy.getContext('2d').drawImage(canvas, 0, 0);
@@ -317,7 +452,12 @@ export class CropTool extends Tool {
     if (h === 'move' && this.pristine) h = null;
     this.pristine = false;
     if (h) this.drag = { handle: h, start: p, box: { ...this.box } };
-    else this.drag = { handle: 'new', start: p, box: { x: p.x, y: p.y, width: 0, height: 0 } };
+    else {
+      // snap (lib/snap.js): a new box starts on a guide, an edge or the grid like its far corner
+      const sp = this.app.snap?.point(p, { source: 'crop', pointer: p, view: this.view }) ?? p;
+      const start = { ...p, x: sp.x, y: sp.y };
+      this.drag = { handle: 'new', start, box: { x: start.x, y: start.y, width: 0, height: 0 } };
+    }
   }
   onPointerMove(p, dragging) {
     if (!dragging) {
@@ -327,9 +467,16 @@ export class CropTool extends Tool {
     }
     if (!this.drag) return;
     const d = this.drag;
-    // snap (lib/snap.js): the box's handles and edges (the stub leaves the point as it is)
-    const sp = this.app.snap?.point(p, { source: 'crop', pointer: p, view: this.view }) ?? p;
-    p = { ...p, x: sp.x, y: sp.y };
+    if (d.handle === 'move') {
+      // snap (lib/snap.js): the moved box's edges and centre meet the targets
+      const mx = p.x - d.start.x, my = p.y - d.start.y;
+      const sb = this.app.snap?.box({ x: d.box.x + mx, y: d.box.y + my, width: d.box.width, height: d.box.height }, { source: 'crop', pointer: p, view: this.view });
+      p = { ...p, x: p.x + (sb?.dx ?? 0), y: p.y + (sb?.dy ?? 0) };
+    } else {
+      // snap (lib/snap.js): the dragged handle (or the new box's corner) meets the targets
+      const sp = this.app.snap?.point(p, { source: 'crop', pointer: p, view: this.view }) ?? p;
+      p = { ...p, x: sp.x, y: sp.y };
+    }
     const dx = p.x - d.start.x, dy = p.y - d.start.y;
     let b = { ...d.box };
     if (d.handle === 'new') {
