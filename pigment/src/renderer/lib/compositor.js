@@ -6,7 +6,7 @@ import { createCanvas, intersectRect, unionRect, effectiveBlending, isDefaultBle
 import { CANVAS_BLEND, blendImages } from '../../shared/pixels/blend.js';
 import { compositeAdvanced, maskPartsAround, restrictsChannels, isDefaultBlendIf, alphaBox, adjustmentMix, mixAdjustment } from '../../shared/pixels/blend-if.js';
 import { applyAdjustment, adjustmentDef } from '../../shared/pixels/adjust.js';
-import { applyStyles, stylePadding, hasEnabledStyles, exteriorBlends } from '../../shared/pixels/styles.js';
+import { applyStyles, stylePadding, hasEnabledStyles, exteriorBlends, interiorBlends } from '../../shared/pixels/styles.js';
 import { maskCanvasFor, applyLayerMask, hasEffectiveMask, maskCacheKey } from './mask-render.js';
 import { prepareStyles } from './style-prepare.js';
 import { ALL, diffPlans, samePrefix, outerRect, unionRect as unionBox, intersectRect as intersectBox } from './repaint-plan.js';
@@ -108,20 +108,32 @@ function blendingOf(layer) {
   return full;
 }
 
+/**
+ * Knockout with Transparency Shapes Layer off knocks out the layer's whole content box (shapeAlpha), so the layer
+ * needs its whole source, not the part in the repaint rect: a crop or a rect-sized group render would measure a
+ * smaller box.
+ */
+function knocksBox(layer) {
+  const bl = blendingOf(layer);
+  return !!bl && (bl.knockout === 'shallow' || bl.knockout === 'deep') && bl.transparencyShapes === false;
+}
+
 /** The mode a layer's content is drawn with (a styled or faded Pass Through group composites as Normal). */
 const modeOf = (layer) => (layer.isGroup && layer.blend === 'pass-through' ? 'normal' : layer.blend ?? 'normal');
 
-// The modes of a layer's exterior effects (styles.js exteriorBlends), kept per styles object and layer version: a
-// repaint asks on every composite whether the layer needs its effects apart, and the merge of the styles is not free
+// The modes of a layer's exterior and interior effects as drawn (styles.js exteriorBlends, interiorBlends with
+// asDrawn: a black Multiply shadow counts as Normal), kept per styles object and layer version: a repaint asks on
+// every composite whether the layer needs its effects apart, and the merge of the styles is not free
 const EXTERIOR_CACHE = new WeakMap();
-function exteriorOf(layer) {
+function modesOf(layer) {
   const st = layer.styles;
   const c = EXTERIOR_CACHE.get(layer);
-  if (c && c.ref === st && c.version === layer.version) return c.modes;
-  const modes = exteriorBlends(st);
-  EXTERIOR_CACHE.set(layer, { ref: st, version: layer.version, modes });
-  return modes;
+  if (c && c.ref === st && c.version === layer.version) return c;
+  const entry = { ref: st, version: layer.version, exterior: exteriorBlends(st, { asDrawn: true }), interior: interiorBlends(st, { asDrawn: true }) };
+  EXTERIOR_CACHE.set(layer, entry);
+  return entry;
 }
+const exteriorOf = (layer) => modesOf(layer).exterior;
 
 /**
  * Photoshop composites each exterior effect onto the layers below with its own mode and the layer's content (with
@@ -129,13 +141,37 @@ function exteriorOf(layer) {
  * modes is Normal the merged render (effects and content as one image) draws the same pixels and is kept: that is
  * the fast path. Otherwise the effects come apart (styledCanvas split) and drawStack composites them one by one.
  */
-function needsSplit(layer) {
+function exteriorApart(layer) {
   const modes = exteriorOf(layer);
   if (!modes.length) return false;
   if (modeOf(layer) !== 'normal') return true;
   for (const m of modes) if (m !== 'normal') return true;
   return false;
 }
+
+/**
+ * With Blend Interior Effects as Group off (the default), Photoshop draws the content in the layer's mode and then
+ * each interior effect (overlays, satin, inner glow and shadow, the inner bevel and stroke) over it in its own mode,
+ * so the layer's mode does not reach them and a see-through fill lets them blend with the layers below. The merged
+ * render draws that only where the layer is Normal and the effects cover opaque content or are Normal themselves
+ * (styles.js splitsInterior); elsewhere they come apart too (styledCanvas interior).
+ */
+function interiorApart(layer, interiorAsGroup = false) {
+  if (interiorAsGroup) return false;
+  const modes = modesOf(layer).interior;
+  if (!modes.length) return false;
+  if (modeOf(layer) !== 'normal') return true;
+  return (layer.fillOpacity ?? 1) < 1 && modes.some((m) => m !== 'normal');
+}
+
+/** Whether a styled layer is drawn from its effects apart (drawStack) rather than its merged render. */
+const needsSplit = (layer, interiorAsGroup = false) => exteriorApart(layer) || interiorApart(layer, interiorAsGroup);
+
+/**
+ * The exterior parts of a split styled render (styledCanvas) to draw: one by one where a mode needs it, else merged
+ * into one Normal image as the merged render has them, which draws the same picture with its rounding.
+ */
+const exteriorParts = (layer, out) => (out.below && !exteriorApart(layer) ? [out.below] : out.parts);
 
 /** The document box a layer draws into, effects included (groups: their visible children); null when nothing. */
 function renderBounds(layer) {
@@ -229,6 +265,19 @@ export class Compositor {
    * @param {{ rect?: object, skip?: Set<object>, until?: object, hideSelection?: boolean, target?: HTMLCanvasElement, rawMode?: boolean }} opts rawMode skips the document-mode renderer
    */
   composite(doc, opts = {}) {
+    // drawStack's scratch pair serves the layers of one composite; between composites it would only hold memory
+    if (this.compositing) return this.compositeOnce(doc, opts);
+    this.compositing = true;
+    try {
+      return this.compositeOnce(doc, opts);
+    } finally {
+      this.compositing = false;
+      this.scratch = null;
+    }
+  }
+
+  /** composite's work (composite frees the scratch canvases once the outermost call returns). */
+  compositeOnce(doc, opts) {
     const rect = opts.rect ? intersectRect(opts.rect, doc.bounds) ?? { x: 0, y: 0, width: 1, height: 1 } : doc.bounds;
     // adjustment margins (I.4): kinds that read a neighbourhood see the same pixels in a partial repaint as in a full
     // one, so the work rect grows by their margins (clamped to the document) and the requested rect is cut out
@@ -783,8 +832,8 @@ export class Compositor {
     // a large source seen through a small rect (a repaint of a few pixels of a document-sized layer or fill): without
     // effects, which need the whole content, every later step (mask, fill, clipping, blend) is per pixel, so it runs
     // on the part in the rect only. A clipped adjustment or group reads the base's whole box (clipGroup), so a base
-    // with one keeps its source whole
-    const local = !hasEnabledStyles(layer.styles) && !clipped.some((c) => c.type === 'adjustment' || c.isGroup);
+    // with one keeps its source whole, and so does a knockout of the content box (knocksBox)
+    const local = !hasEnabledStyles(layer.styles) && !clipped.some((c) => c.type === 'adjustment' || c.isGroup) && !knocksBox(layer);
     if (local && vis.width * vis.height * 2 < srcRect.width * srcRect.height) {
       const part = createCanvas(vis.width, vis.height);
       part.getContext('2d').drawImage(src.canvas, src.x - vis.x, src.y - vis.y);
@@ -820,12 +869,13 @@ export class Compositor {
     if (styled) {
       // edits on clipped layers only bump their own versions: they are part of the style cache key
       const clipKey = clipped.length ? clipped.map((c) => `${c.id}:${c.version}`).join(',') : '';
-      const out = this.styledCanvas(layer, work, wx, wy, doc, { masked, clipKey, maskKey: maskCacheKey(layer), split: needsSplit(layer) }); // mask (K.1)
+      const out = this.styledCanvas(layer, work, wx, wy, doc, { masked, clipKey, maskKey: maskCacheKey(layer), split: needsSplit(layer), interior: interiorApart(layer) }); // mask (K.1)
       if (out?.parts) {
-        // the exterior effects blend with the backdrop in their own modes, the content in the layer's
-        const parts = clipTo ? out.parts.map((p) => ({ ...p, canvas: clipToAlpha(p.canvas, p.x, p.y, clipTo) })) : out.parts;
+        // the exterior effects blend with the backdrop in their own modes, the content in the layer's, then the
+        // interior effects (when apart) in theirs
+        const cut = (list) => (clipTo && list ? list.map((p) => ({ ...p, canvas: clipToAlpha(p.canvas, p.x, p.y, clipTo) })) : list);
         const content = clipTo ? clipToAlpha(out.layer, out.x, out.y, clipTo) : out.layer;
-        this.drawStack(ctx, layer, parts, content, out.x, out.y, rect, clipTo ? null : out.layerBox);
+        this.drawStack(ctx, layer, cut(exteriorParts(layer, out)), content, out.x, out.y, rect, clipTo ? null : out.layerBox, cut(out.inner));
         return;
       }
       if (out) {
@@ -844,13 +894,14 @@ export class Compositor {
    * opacity, then the content (the layer with its interior effects, at x, y) with the layer's mode, and the layer's
    * opacity fades the result from the backdrop as one (on a copy of the backdrop, which is then lerped back). Only the
    * box the layer draws into is touched; `box` (document coordinates) is where the content has alpha (null: unknown).
+   * `inner` (the interior effects apart, the same shape as parts) are composited after the content, each in its mode.
    */
-  drawStack(ctx, layer, parts, content, x, y, rect, box = null) {
+  drawStack(ctx, layer, parts, content, x, y, rect, box = null, inner = null) {
     const opacity = Math.max(0, Math.min(1, layer.opacity ?? 1));
     if (!(opacity > 0)) return;
     // box: null when unknown (the whole content canvas), empty when the content has no alpha (Fill 0 %)
     let area = !box ? { x, y, width: content.width, height: content.height } : box.width && box.height ? box : null;
-    for (const p of parts) {
+    for (const p of inner ? [...parts, ...inner] : parts) {
       const pr = { x: p.x, y: p.y, width: p.canvas.width, height: p.canvas.height };
       area = area ? unionRect(area, pr) : pr;
     }
@@ -863,6 +914,7 @@ export class Compositor {
       // nothing to fade: the parts and the content go straight onto the backdrop
       for (const p of parts) this.drawBlended(ctx, p.blend, p.opacity * (dissolve ? opacity : 1), p.canvas, p.x, p.y, rect);
       this.drawBlended(ctx, mode, dissolve ? opacity : 1, content, x, y, rect);
+      if (inner) for (const p of inner) this.drawBlended(ctx, p.blend, p.opacity * (dissolve ? opacity : 1), p.canvas, p.x, p.y, rect);
       return;
     }
     // two scratch canvases kept between calls (a repaint of ten faded styled layers would otherwise allocate twenty)
@@ -874,6 +926,7 @@ export class Compositor {
     g.translate(-r.x, -r.y);
     for (const p of parts) this.drawBlended(g, p.blend, p.opacity, p.canvas, p.x, p.y, r);
     this.drawBlended(g, mode, 1, content, x, y, r);
+    if (inner) for (const p of inner) this.drawBlended(g, p.blend, p.opacity, p.canvas, p.x, p.y, r);
     g.restore();
     // one lerp from the backdrop, in premultiplied space: backdrop × (1 - opacity) + result × opacity
     const m = result.getContext('2d', { willReadFrequently: true });
@@ -1003,17 +1056,19 @@ export class Compositor {
     const perPixel = knockout !== 'none' || blendIf || restrictsChannels(bl.channels);
     // the exterior effects apart (styles.js split) when they blend in modes of their own, and on the per-pixel path,
     // where Blend If leaves them alone and the knockout comes between them and the content
-    let fx = null, box = null;
+    let fx = null, inner = null, box = null;
     if (styled) {
       const clipKey = clipped.length && grouped ? clipped.map((c) => `${c.id}:${c.version}`).join(',') : '';
-      const split = exteriorOf(layer).length > 0 && (perPixel || needsSplit(layer));
+      const interior = interiorApart(layer, !!bl.interiorAsGroup);
+      const split = (exteriorOf(layer).length > 0 && perPixel) || needsSplit(layer, !!bl.interiorAsGroup);
       const out = this.styledCanvas(layer, work, wx, wy, doc, {
         masked: maskedBefore, clipKey, maskKey: parts.before ? maskCacheKey(layer, parts.before) : 'none', // mask (K.1)
-        interiorAsGroup: !!bl.interiorAsGroup, transparencyShapes: bl.transparencyShapes !== false, split,
+        interiorAsGroup: !!bl.interiorAsGroup, transparencyShapes: bl.transparencyShapes !== false, split, interior,
       });
       if (out) {
         work = out.parts ? out.layer : out.canvas;
-        fx = out.parts ?? null;
+        fx = out.parts ? exteriorParts(layer, out) : null;
+        inner = out.inner ?? null;
         box = out.parts ? out.layerBox : null;
         wx = out.x;
         wy = out.y;
@@ -1023,20 +1078,22 @@ export class Compositor {
     if (parts.after && hasEffectiveMask(layer, parts.after)) { // mask (K.1)
       work = applyLayerMask(work, wx, wy, layer, doc, { parts: parts.after }); // mask (K.1)
       if (fx) fx = fx.map((p) => ({ ...p, canvas: applyLayerMask(p.canvas, p.x, p.y, layer, doc, { parts: parts.after }) })); // mask (K.1)
+      if (inner) inner = inner.map((p) => ({ ...p, canvas: applyLayerMask(p.canvas, p.x, p.y, layer, doc, { parts: parts.after }) })); // mask (K.1)
       shape = { canvas: applyLayerMask(shape.canvas, shape.x, shape.y, layer, doc, { parts: parts.after }), x: shape.x, y: shape.y }; // mask (K.1)
       box = null;
     }
     if (clipTo) {
       work = clipToAlpha(work, wx, wy, clipTo);
       if (fx) fx = fx.map((p) => ({ ...p, canvas: clipToAlpha(p.canvas, p.x, p.y, clipTo) }));
+      if (inner) inner = inner.map((p) => ({ ...p, canvas: clipToAlpha(p.canvas, p.x, p.y, clipTo) }));
       shape = { canvas: clipToAlpha(shape.canvas, shape.x, shape.y, clipTo), x: shape.x, y: shape.y };
       box = null;
     }
     if (!perPixel) {
-      if (fx) this.drawStack(ctx, layer, fx, work, wx, wy, rect, box);
+      if (fx) this.drawStack(ctx, layer, fx, work, wx, wy, rect, box, inner);
       else this.drawWork(ctx, layer, work, wx, wy, rect);
     } else {
-      this.drawPixels(ctx, layer, { work, fx, shape, wx, wy, knockout, bl }, rect, doc, opts);
+      this.drawPixels(ctx, layer, { work, fx, inner, shape, wx, wy, knockout, bl }, rect, doc, opts);
     }
     // Blend Clipped Layers as Group off: each clipped layer blends with the backdrop in its own mode, cut to the
     // base's shape (the base's fill opacity does not fade them)
@@ -1055,7 +1112,7 @@ export class Compositor {
   }
 
   /** The per-pixel step of finishAdvanced: knockout, Blend If and channel restriction on the visible region. */
-  drawPixels(ctx, layer, { work, fx = null, shape, wx, wy, knockout, bl }, rect, doc, opts) {
+  drawPixels(ctx, layer, { work, fx = null, inner = null, shape, wx, wy, knockout, bl }, rect, doc, opts) {
     let box = { x: wx, y: wy, width: work.width, height: work.height };
     if (knockout !== 'none') box = unionRect(box, { x: shape.x, y: shape.y, width: shape.canvas.width, height: shape.canvas.height });
     else if (layer.blend !== 'dissolve') {
@@ -1063,23 +1120,27 @@ export class Compositor {
       // render is cut to where it has alpha, so a small shape on a document-sized canvas is not read and blended pixel
       // by pixel over the whole document on every composite (Dissolve's noise follows the pixel positions: left as is)
       const tight = this.frozenBounds(work, wx, wy);
-      if (tight === null && !fx?.length) return;
+      if (tight === null && !fx?.length && !inner?.length) return;
       if (tight !== undefined) box = tight;
     }
-    // the exterior parts are cropped to their pixels already
-    if (fx) for (const p of fx) box = box ? unionRect(box, { x: p.x, y: p.y, width: p.canvas.width, height: p.canvas.height }) : { x: p.x, y: p.y, width: p.canvas.width, height: p.canvas.height };
+    // the exterior and interior parts are cropped to their pixels already
+    for (const p of [...(fx ?? []), ...(inner ?? [])]) box = box ? unionRect(box, { x: p.x, y: p.y, width: p.canvas.width, height: p.canvas.height }) : { x: p.x, y: p.y, width: p.canvas.width, height: p.canvas.height };
     const r = box && intersectRect(box, rect);
     if (!r) return;
     const dst = ctx.getImageData(r.x - rect.x, r.y - rect.y, r.width, r.height);
     const layerImg = readRegion(work, wx, wy, r);
-    const partImgs = fx ? fx.map((p) => ({ image: readRegion(p.canvas, p.x, p.y, r), blend: p.blend, opacity: p.opacity })) : null;
+    const read = (list) => (list ? list.map((p) => ({ image: readRegion(p.canvas, p.x, p.y, r), blend: p.blend, opacity: p.opacity })) : null);
+    // the exterior effects merged (all Normal as drawn) go in as `below`, which keeps 0.3's order and rounding
+    const merged = fx?.length === 1 && fx[0].merged;
+    const partImgs = merged ? null : read(fx);
+    const below = merged ? readRegion(fx[0].canvas, fx[0].x, fx[0].y, r) : null;
     let shapeAlpha = null, knock = null;
     if (knockout !== 'none') {
       shapeAlpha = this.shapeAlpha(shape, r, bl.transparencyShapes !== false);
       knock = this.knockBackdrop(layer, knockout, r, doc, opts);
     }
     compositeAdvanced({
-      dst, layer: layerImg, parts: partImgs, knock, shape: shapeAlpha, knockout,
+      dst, layer: layerImg, parts: partImgs, below, inner: read(inner), knock, shape: shapeAlpha, knockout,
       blendIf: bl.blendIf, channels: bl.channels, mode: layer.isGroup && layer.blend === 'pass-through' ? 'normal' : layer.blend, opacity: layer.opacity,
     });
     ctx.putImageData(dst, r.x - rect.x, r.y - rect.y);
@@ -1226,10 +1287,11 @@ export class Compositor {
    * the merged `canvas`), `layerBox` (where it has alpha, document coordinates, or null) and `parts`, the exterior
    * effects bottom first as { canvas, x, y, blend, opacity } in document coordinates (drawStack, drawPixels).
    */
-  styledCanvas(layer, canvas, x, y, doc = null, { masked = false, clipKey = '', maskKey = '', interiorAsGroup = false, transparencyShapes = true, split = false } = {}) {
+  styledCanvas(layer, canvas, x, y, doc = null, { masked = false, clipKey = '', maskKey = '', interiorAsGroup = false, transparencyShapes = true, split = false, interior = false } = {}) {
     const cached = this.styleCache.get(layer);
     const angle = doc?.globalLight?.angle ?? 120, altitude = doc?.globalLight?.altitude ?? 30;
-    const optKey = `${interiorAsGroup ? 1 : 0}${transparencyShapes ? 1 : 0}${split ? 1 : 0}`;
+    interior = interior && split;
+    const optKey = `${interiorAsGroup ? 1 : 0}${transparencyShapes ? 1 : 0}${split ? 1 : 0}${interior ? 1 : 0}`;
     // a masked or clipped source is a fresh canvas every time: mask edits touch the layer and the clipped layers'
     // versions are in clipKey, so the versions are the key then
     const derived = (masked && cached?.masked) || clipKey !== '';
@@ -1243,7 +1305,7 @@ export class Compositor {
     // origin: where img's (0, 0) is in the document (patterns linked to the document, gradients aligned to it; a
     // group has no position of its own)
     const out = applyStyles(img, styles, {
-      fillOpacity: layer.fillOpacity ?? 1, globalAngle: angle, globalAltitude: altitude, interiorAsGroup, transparencyShapes, split,
+      fillOpacity: layer.fillOpacity ?? 1, globalAngle: angle, globalAltitude: altitude, interiorAsGroup, transparencyShapes, split, interior,
       origin: [x, y], docWidth: doc?.width, docHeight: doc?.height,
     });
     const toCanvas = (im) => {
@@ -1253,10 +1315,14 @@ export class Compositor {
     };
     const result = toCanvas(out.image);
     const ox = x + out.offsetX, oy = y + out.offsetY;
-    let content = null, parts = null, layerBox = null;
+    let content = null, parts = null, inner = null, below = null, layerBox = null;
     if (split) {
       content = toCanvas(out.layer);
-      parts = out.parts.map((p) => ({ canvas: toCanvas(p.image), x: ox + p.x, y: oy + p.y, blend: p.blend, opacity: p.opacity }));
+      const place = (list) => list.map((p) => ({ canvas: toCanvas(p.image), x: ox + p.x, y: oy + p.y, blend: p.blend, opacity: p.opacity }));
+      parts = place(out.parts);
+      if (out.inner) inner = place(out.inner);
+      // the exterior effects merged into one image, for a layer whose effects all draw as Normal (exteriorParts)
+      if (out.below && !exteriorApart(layer)) below = { canvas: toCanvas(out.below), x: ox, y: oy, blend: 'normal', opacity: 1, merged: true };
       const b = alphaBox(out.layer);
       layerBox = b ? { x: ox + b.x, y: oy + b.y, width: b.width, height: b.height } : { x: ox, y: oy, width: 0, height: 0 };
     }
@@ -1266,7 +1332,7 @@ export class Compositor {
       frozen.set(result, false);
       if (content) frozen.set(content, layerBox.width ? { x: layerBox.x - ox, y: layerBox.y - oy, width: layerBox.width, height: layerBox.height } : null);
     }
-    const entry = { version: layer.version, source: canvas, masked, clipKey, maskKey, optKey, x0: x, y0: y, w: canvas.width, h: canvas.height, canvas: result, layer: content, layerBox, parts, x: ox, y: oy, angle, altitude };
+    const entry = { version: layer.version, source: canvas, masked, clipKey, maskKey, optKey, x0: x, y0: y, w: canvas.width, h: canvas.height, canvas: result, layer: content, layerBox, parts, inner, below, x: ox, y: oy, angle, altitude };
     // a pattern still decoding must not be cached as "no pattern"
     if (ready) this.styleCache.set(layer, entry);
     else this.unready = true;
@@ -1413,6 +1479,18 @@ export class Compositor {
     this.snaps = [];
     this.hints.clear();
   }
+
+  /**
+   * Frees the canvases that only speed up the next edit (the spare buffer, the cached prefixes, the scratch and
+   * preview canvases), keeping the last full composite: documents.js calls it for a document that goes to the
+   * background, so each open document holds one document-sized canvas rather than up to six.
+   */
+  release() {
+    this.spare = null;
+    this.snaps = [];
+    this.scratch = null;
+    this.previewCanvas = null;
+  }
 }
 
 /** Writes ImageData at the target's (0, 0), whatever ctx's transform. */
@@ -1443,6 +1521,9 @@ function keyOf(l, k, shown, comp, state) {
   k.v += `${l.version},`;
   k.p += `${oid(l)}:${l.visible ? 1 : 0}${l.clip ? 1 : 0}:${l.opacity}:${l.fillOpacity}:${l.blend}:${oid(l.blending)}:${oid(l.styles)}:${maskCacheKey(l)}`;
   if (shown && l.blend === 'dissolve') state.regionOk = false; // its noise follows the repaint rect (drawBlended)
+  // an isolated group is rendered over the repaint rect only, so a knockout of its whole content box would be measured
+  // inside the region (shapeAlpha); a layer keeps its whole source for it (drawLayer)
+  if (shown && l.isGroup && knocksBox(l)) state.regionOk = false;
   if (l.type === 'raster') k.p += `:${oid(l.canvas)}:${l.canvas.width}x${l.canvas.height}@${l.x},${l.y}`;
   else if (l.type === 'adjustment') {
     k.p += `:${l.kind}:${oid(l.params)}`;

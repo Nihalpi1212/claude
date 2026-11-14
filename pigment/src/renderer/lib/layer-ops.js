@@ -5,7 +5,7 @@ import { RasterLayer, GroupLayer, FillLayer, AdjustmentLayer, createCanvas, copy
 import { Compositor } from './compositor.js';
 import { contentBounds } from '../../shared/pixels/core.js';
 import { isDefaultBlendIf, restrictsChannels } from '../../shared/pixels/blend-if.js';
-import { hasEnabledStyles, exteriorBlends, stylePadding } from '../../shared/pixels/styles.js';
+import { hasEnabledStyles, exteriorBlends, splitsInterior, stylePadding } from '../../shared/pixels/styles.js';
 import { offsetEach, positionLocked } from './layer-move.js';
 import { Selection } from './selection.js';
 import { maskCanvasFor } from './mask-render.js';
@@ -359,7 +359,9 @@ export function lookBefore(doc, layers) {
     if (!l.visible) return;
     if (hasEnabledStyles(l.styles)) {
       const own = l.isGroup && l.blend === 'pass-through' ? 'normal' : l.blend ?? 'normal';
-      if (exteriorBlends(l.styles).some((m) => m !== own)) risky = true;
+      if (exteriorBlends(l.styles, { asDrawn: true }).some((m) => m !== own)) risky = true;
+      // interior effects that blend apart from the content (Blend Interior Effects as Group off) cannot be kept either
+      if (splitsInterior(l.styles, { mode: own, fillOpacity: l.fillOpacity ?? 1, interiorAsGroup: !!effectiveBlending(l).interiorAsGroup })) risky = true;
     }
     if (l.isGroup) l.children.forEach(walk);
     const b = l.bounds?.();

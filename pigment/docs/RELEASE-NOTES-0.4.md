@@ -19,7 +19,7 @@
 | Alt+Shift+Ctrl+E | Quick Export as PNG | Stamp Visible |
 | Ctrl+/ | Keyboard Shortcuts | Lock Layers… (Keyboard Shortcuts is Alt+Shift+Ctrl+K, in the Edit menu) |
 | Cmd+, (macOS) | Settings… | Hide / Show Layers (Settings… is Cmd+K, as on Windows and Linux) |
-| Ctrl+E | Merge Down | Merge Down / Merge Layers / Merge Group, by what is selected |
+| Ctrl+E | Merge Down | Merge Down / Merge Layers / Merge Group / Merge Clipping Mask, by what is selected |
 | Ctrl+B / I / U, Ctrl+Shift+> / < while editing text | bold, italic, underline, size | Shift+Ctrl+B / I / U, Shift+Ctrl+. / , (and the rest of Photoshop's type keys) |
 | digits, Shift+digits, /, \\, Shift+=, Shift+-, Alt+[ ] , ., Shift+Alt+letters | (none) | layer opacity and fill, lock transparency, mask overlay, blend modes, layer navigation (they never act while a text field has focus) |
 | Alt+Shift+Ctrl+M, Alt+Shift+Ctrl+N, Alt+Ctrl+E, Alt+Ctrl+; | (none) | Menus…, New Layer without the dialog, Stamp Layers, Lock Guides |
@@ -77,14 +77,22 @@ no longer opens a menu by its mnemonic: Pigment takes the key for the blend-mode
 - Masks: a layer's raster mask is written with its density, feather and an enabled vector mask baked in, so Photoshop
   shows what Pigment shows; a layer with only a vector mask gets a raster mask. A disabled raster mask without a
   vector mask is written disabled, as in 0.3.
-- Blending options (knockout, Blend If, channels, the check boxes) are not written: the merged image is right, the layer
-  in Photoshop is not.
+- Fill opacity and Blend If (the layer record's blending ranges, for every layer, adjustment layers included) are
+  written and read. Knockout, the channel restriction and the five check boxes are not written, and layer effects are
+  not written at all (as in 0.3): the merged image is right, the layer in Photoshop is not. Saving says how many layers
+  lost their effects or Blending Options.
 - Text: besides 0.3's family, size, colour, underline, leading and tracking, PSD text gets faux bold and italic,
-  strikethrough, caps, baseline shift, scales, auto kerning, the justifications, the box size and the first baseline. A
+  strikethrough, caps, baseline shift, scales, auto kerning, the justifications, the box size and the first baseline,
+  and Pigment reads them back when it opens the file. A
   text layer with formatting PSD text cannot hold yet (several styles in one layer, a text stroke, attributes outside
   that list) is written as pixels, with one note per save ("N text layers with formatting PSD text cannot hold yet were
   saved as pixels"). 0.3 wrote a stroked text layer as text without its stroke.
-- Adjustments: as in 0.3, Hue/Saturation's Master only, Levels and Curves only in RGB.
+- Adjustments: Hue/Saturation with its colour ranges and their bounds (Colorize is not written, with a notice);
+  Gradient Map with its midpoints, transparency, smoothness, dither and interpolation method; Levels and Curves only in
+  RGB. Color and Vibrance, Clarity and Dehaze and Grain have no PSD adjustment: they are written as hidden empty
+  layers, and saving says so.
+- Guides are written and read (image resource 1032); the ruler origin and guides above or left of the canvas are not,
+  with a notice.
 
 ### Adjustment parameters that change shape
 
@@ -221,9 +229,6 @@ no longer opens a menu by its mnemonic: Pigment takes the key for the blend-mode
 
 ### Known gaps
 
-- The engines of 0.4 cannot narrow word spaces below their normal width (they clamp a composer's word spacing at 0), so
-  compressing a justified line below 100 % word spacing narrows the letter gaps instead; the line still ends at the
-  margin. Fixed when the engines accept negative word spacing (`SPACES_SHRINK` in `lib/type/paragraph.js`).
 - Letter spacing is spread over code points on the stub engine and over shaping units on the HarfBuzz engine; with
   ligatures and non-zero letter spacing a justified line can end a fraction of a pixel off the margin.
 - Hyphenate Across Column is stored but has no effect (Pigment has no text columns).
@@ -233,8 +238,8 @@ no longer opens a menu by its mnemonic: Pigment takes the key for the blend-mode
   fullwidth blocks; Japanese small kana follow the "strict" rule (no line starts with them).
 - Lists use the paragraph's left indent for the marker; there is no separate setting for the gap between marker and
   text. Numbering continues over the consecutive numbered paragraphs of one layer only.
-- PSD export writes 0.3's alignment only; justification, hyphenation, composer and list settings stay in .pigment files
-  until psd-text (0.5).
+- PSD export writes the alignment, including the justified ones; indents, spacing, justification settings,
+  hyphenation, composer and list settings stay in .pigment files until psd-text (0.5).
 
 ## Layer styles: Blending Options and styles on groups
 
@@ -250,13 +255,15 @@ no longer opens a menu by its mnemonic: Pigment takes the key for the blend-mode
 
 ### Known gaps
 
-- Blending options are not written to PSD (0.5, psd-layers); the merged image in the PSD is right.
-- 16 and 32 bits per channel: the float flatten does not know advanced blending options and composites such layers as
-  if they had none (the integrator adds a fallback to the 8-bit composite).
-- Create Layers on a layer with Fill below 100 %: the clipped effect layers are faded by the Fill along with the layer
-  (the clipping group in Pigment fades as a whole), so interior effects come out weaker than they were. Exterior effect
-  layers blend with the document below them in their own modes, where the style blended them with each other first:
-  the picture can change slightly where a shadow in Multiply lies over coloured layers (Photoshop warns about the same).
+- PSD keeps Fill and Blend If; knockout, the channel restriction and the check boxes are not written (0.5,
+  psd-layers), with a notice. The merged image in the PSD is right.
+- 16 and 32 bits per channel: a pixel layer with knockout, Blend If or a channel restriction, or with layer effects, is
+  composited through the 8-bit composite when the document is flattened, merged or exported at full depth (adjustment
+  layers with Blend If and the base of Merge Clipping Mask stay in float).
+- Create Layers cannot match the picture when the layer has knockout, an opacity below 100 % with exterior effects
+  (the knocked-out shadow cannot be faded on its own), or a Fill below 100 % with interior effects (the clipped effect
+  layers fade with the layer). It then says 'Some aspects of the effects cannot be reproduced with layers', as
+  Photoshop does.
 - Groups ignore Fill opacity unless they have effects (as 0.3).
 - Blend If and knockout run per pixel on the visible part of the layer; very large layers with these options repaint
   more slowly than plain ones (no cost for layers without them).
@@ -291,8 +298,8 @@ no longer opens a menu by its mnemonic: Pigment takes the key for the blend-mode
   is not offered there, as in Photoshop).
 - Contour presets are not yet imported from or exported to Photoshop's `.shc` files (preset-files-manager, 0.5).
 - The Layer Style dialog has no "Make Default" button and no Styles page (presets-panels, 0.5).
-- PSD export writes the effects as 0.3 did (one instance per effect; contours, textures and gradient strokes are not
-  written; the merged image is right). psd-layers (0.5) maps them.
+- PSD export does not write layer effects, as in 0.3 (the merged image is right, and saving says how many layers lost
+  them); PSD files are opened without their effects. psd-layers (0.5) maps them.
 
 ## Adjustments: Levels, Curves and the tonal dialogs
 
@@ -327,9 +334,8 @@ no longer opens a menu by its mnemonic: Pigment takes the key for the blend-mode
   the preview hook the dialog passes (`clip`). The integrator or adjust-color can pass it.
 - Levels' and Curves' output in the CMYK and Lab spaces is computed from the document's RGB pixels with Pigment's naive
   CMYK conversion and sRGB Lab, so it matches Photoshop only roughly (Pigment has no colour management).
-- In 16 and 32-bit documents, flattening or exporting at full depth applies a Levels or Curves *layer* in CMYK or Lab
-  space through tables exact for neutral pixels only (deep.js reads the kind's `lut`); destructive edits are exact
-  enough because the 8-bit result is taken over. Integrator item in PKG-adjust-tonal.md.
+- In 16 and 32-bit documents, a Levels or Curves layer in the CMYK or Lab space sends flattening, merging and
+  full-depth exports through the 8-bit composite.
 - Built-in preset values approximate Photoshop's (Adobe's numbers are not published).
 - Auto Color Correction Options cannot be opened from the menus without a dialog (Photoshop has none either).
 - The preset menu groups presets that come in groups (from a .pigment-presets file), but has no command to make a
@@ -370,7 +376,8 @@ no longer opens a menu by its mnemonic: Pigment takes the key for the blend-mode
 - The Adjustments panel presets are built-in only (no user presets), and hovering a preset does not preview it.
 - The Properties panel does not show Levels' and Curves' clipping display (adjust-tonal's editors offer it in the
   dialog).
-- PSD export of Hue/Saturation ranges and of the new kinds waits for psd-layers (0.5).
+- PSD has no adjustment for the three new kinds: they are saved as hidden empty layers, with a notice (psd-layers,
+  0.5). Hue/Saturation's Colorize is not saved to PSD either.
 
 ## Gradients
 
@@ -424,18 +431,12 @@ no longer opens a menu by its mnemonic: Pigment takes the key for the blend-mode
 
 ### Known gaps
 
-- `.pigment` files keep a Pattern Fill layer's pixels and scale, but not yet its Angle, Link with Layer and position:
-  the skeleton's `Document.describe()` writes only `scale` (J.1 lists the other fields). Reopened, such a layer shows
-  the pattern unturned at the document origin. (Integrator item; the e2e round trip test skips until it is fixed.)
-- Moving a Pattern Fill layer with Link with Layer on does not yet move its pattern: fill layers have no position of
-  their own in `layer-move.js` (skeleton), which would need to shift `paint.pattern.origin`.
-- An action that recorded Layer › New Fill Layer › Pattern replays with the current pattern at 100 %, as in 0.3
-  (`layer-ops.js` records no paint for patterns).
+- An action that recorded Layer › New Fill Layer › Pattern with a pattern that is no longer in the library replays
+  with the current pattern.
 - Bitmap › Custom Pattern replayed from an action in a new session, before the pattern's pixels have decoded, falls
   back to the fine dither (the conversion in `modes.js` reads the tile synchronously). The Bitmap dialog itself always
   decodes first.
 - Photoshop's `.pat` pattern files are not read yet (preset-files-manager, 0.5).
-- The Pattern Stamp tool has no pattern picker of its own yet (it paints the current pattern).
 - Scripted Patterns are Pigment's own placements modelled on Photoshop's scripts, not their exact output.
 
 ## Guides, rulers and snapping
@@ -496,8 +497,6 @@ no longer opens a menu by its mnemonic: Pigment takes the key for the blend-mode
 
 ### Known gaps
 
-- The Channels panel menu has no "Layer Mask Display Options…" entry yet (that panel is not this package's); the same
-  dialog is Overlay Options… in Properties.
 - Select and Mask from Properties starts the workspace from the layer mask and writes its result back as the layer
   mask; it is recorded as Select and Mask. Color Range from Properties makes two History steps (the selection, then the
   mask from it).
@@ -540,8 +539,6 @@ no longer opens a menu by its mnemonic: Pigment takes the key for the blend-mode
 
 ### Known gaps
 
-- Copy / Paste Shape Attributes are not in the Layers panel's context menu yet. That menu belongs to the Layers panel
-  work. Until then they are in the Properties panel (Copy Attributes, Paste Attributes).
 - Corner widgets show with the shape tools and the Path Selection tool, not yet with the Move tool's transform
   controls.
 - A non-uniform scale rounds corner radii by the smaller of the two factors, so the corners stay circular.
@@ -596,8 +593,8 @@ no longer opens a menu by its mnemonic: Pigment takes the key for the blend-mode
   asking, as before.
 - Opacity, Fill, blend mode, locks and Hide / Show Layers (new key **Ctrl+,**; macOS Cmd+, , which was Settings) act on
   every selected layer, as one History step. Before 0.4 they changed the active layer only.
-- **Ctrl+E** is Merge Down / Merge Layers / Merge Group by context (it was always Merge Down). `layer:merge-down` keeps
-  its meaning.
+- **Ctrl+E** is Merge Down / Merge Layers / Merge Group by context (it was always Merge Down), and Merge Clipping Mask
+  on the base of a clipping mask. `layer:merge-down` keeps its meaning.
 - New keys: digits and Shift+digits (opacity, fill), `/` (lock transparency), Shift+Alt+letters (blend modes),
   Shift+= / Shift+- (next / previous blend mode), Alt+[ ] , . and Shift+Alt+[ ] (layer navigation), Alt+Shift+Ctrl+E
   (Stamp Visible, was Quick Export), Alt+Ctrl+E (Stamp Layers), Alt+Shift+Ctrl+N (New Layer without the dialog),
@@ -616,9 +613,14 @@ no longer opens a menu by its mnemonic: Pigment takes the key for the blend-mode
 
 ### Known gaps
 
-- Stamps, Merge Group and the Background merges composite at 8 bits per channel (16/32-bit documents get their new
-  pixels from the 8-bit composite, as Merge Visible did in 0.3); Merge Down / Merge Layers / Merge Visible keep the
-  float path of lib/depth.js.
+- Merge Group composites at 8 bits per channel in 16/32-bit documents. Merge Down, Merge Layers, Merge Visible,
+  Merge Clipping Mask, the stamps and Flatten Image keep the float path of lib/depth.js, except for layers that need the
+  8-bit composite (layer effects, knockout, Blend If on a pixel layer, blend modes other than Normal, Multiply and
+  Screen, layers clipped to an adjustment layer).
+- `layer:merge-down` run by its command id (a script, an old action) on a clipping base still merges the base into the
+  layer below, its 0.3 meaning; Ctrl+E, the menus and the Layers panel run Merge Clipping Mask there.
+- The Move tool and Free Transform still move a new document's Background (Photoshop converts it to a layer first). A
+  two-digit opacity typed quickly is recorded by actions as two steps.
 - The digits, `/`, Shift+= / Shift+- and the blend-mode keys always act on layers; painting tools' own opacity, flow and
   mode keys come with brush-painting-behaviours (0.5). While a painting tool is active the digits do nothing.
 - Duplicate Layer into another document keeps the layer's position; it does not centre it in a document of another
@@ -644,8 +646,6 @@ no longer opens a menu by its mnemonic: Pigment takes the key for the blend-mode
 
 - Search does not list open documents, help topics beyond the Help menu's items, or Photoshop's Stock and Learn
   results.
-- The temporary Eyedropper does not draw its sampling ring (the canvas draws the active tool's overlay only;
-  `canvas-view.js` belongs to guides-snapping).
 - Typed units need a unit label the field declares (`unit`, `units`, or a `.opt-unit` label right after the input); a
   field without one reads `2in` as inches converted to pixels at the document's resolution.
 - Hand-built number inputs in other packages' files (Color, Brushes, Layers, Properties, Warp, Liquify, Lens
@@ -675,3 +675,219 @@ no longer opens a menu by its mnemonic: Pigment takes the key for the blend-mode
   merges through the 8-bit composite, and so do Levels and Curves in the CMYK or Lab space.
 - A smart object's contents keep the document's ruler origin.
 - Preferences: two sections that save to the same settings (Type and Type Units) no longer overwrite each other.
+
+## Fixed during testing
+
+A cross-feature bug hunt used the 0.4 features together, the way a Photoshop user would, and a review checked its
+fixes. What changed for users, by area:
+
+### Type
+
+- PSD files saved by Pigment now reopen with editable text that keeps strikethrough, All Caps / Small Caps, horizontal
+  and vertical scale, baseline shift, kerning 'none' and the justified alignments (Justify Last Left/Center/Right,
+  Justify All).
+- In vertical type, the arrow keys move the caret the way they point: Up and Down move along the column, Left and
+  Right to the next and previous column (Shift extends the selection the same way).
+- Type commands used without an open text session (Font Size up, Faux Bold, Underline and the like), and the same
+  commands on action playback, are each their own History step. Only a repeat of the same command within 1.5 s merges.
+- Clicking a fully locked text layer with a Type tool starts new text on top of it, as over a hidden layer, instead of
+  refusing, so the letters you type no longer run tool shortcuts such as Q for Quick Mask.
+- Actions: making a text layer with the Type tool and drawing a new shape layer with a shape tool are recorded, as Make
+  Text Layer and Make Shape Layer steps, and play back; later steps on that layer (Shape Properties, Character,
+  Paragraph, styles) work. Faux Bold, Underline, size changes and the other type commands used while typing the new
+  text are part of its Make Text Layer step; new text cancelled with Escape leaves no steps behind.
+
+### Layer styles and Blending Options
+
+- Rasterize Layer (type, shape, fill, smart object) keeps the layer's Blending Options (Blend If, channels, knockout),
+  so the image no longer changes.
+- Rasterize Layer Style keeps Blend If, knockout and the channel restriction live on the new layer. When Blend If or a
+  knockout under reduced fill will now also affect the baked effects, a notice says so.
+- Clipping masks: a clipped layer no longer thins the base's soft edges where it has no pixels, so text and soft shapes
+  keep their anti-aliasing. Painting on or editing a clipped layer is as fast as before that fix: the base is prepared
+  once per change of the base, not on every repaint.
+- Create Layers keeps restricted channels on the layers it makes, and is exact for interior effects on anti-aliased
+  content. Where layers cannot match the picture it warns ('Some aspects of the effects cannot be reproduced with
+  layers'); see "Compositing as in Photoshop" below for when that is.
+- Layer Style dialog: with Use Global Light ticked, Angle and Altitude show and change the document's Global Light, so
+  every effect that uses it moves. Cancel restores it, and OK records it with the style as one undo step.
+- Copy, Paste and Clear Layer Style include the blend mode, Fill and advanced blending (Blend If, knockout, channels)
+  with the effects, and a layer with only blending options can be copied. Paste Layer Style skips the Background and
+  Lock All layers and is disabled when nothing selected can take a style. The Layers panel's context menus offer Copy,
+  Paste and Clear Layer Style exactly when Layer › Layer Style does.
+- Double-clicking an effect instance in the Layers panel, or choosing Edit from its menu, opens that instance in the
+  Layer Style dialog, for example 'Drop Shadow (2 of 2)'.
+- Emptying a number field in a dialog form and pressing Tab or OK keeps the previous value instead of storing 0.
+- Saving as PSD says how many layers lost their layer effects or Blending Options.
+
+### Adjustments, gradients and fill layers
+
+- Gradient Maps saved as PSD keep their stop positions at every smoothness (Black to White, Spectrum and the other
+  smoothness-0 presets used to reopen as a grey map), and Photoshop reads the stop positions correctly.
+- Opening a PSD Gradient Map keeps its midpoints, transparency, smoothness and dither.
+- OK in the Gradient Editor (or a preset pick) in a Gradient Fill layer's Properties is an undoable 'Edit gradient fill'
+  step and marks the document as changed.
+- View Previous State in Properties is only a display: saving, duplicating or running any other command first puts the
+  layer's real settings back.
+- New gradient presets made from a Gradient Fill layer no longer store that layer's style, reverse or position.
+  Dropping a gradient preset on a document always places it across that document.
+- Cancel in the Gradient Fill or Pattern Fill dialog of Layer › New Fill Layer cancels the whole command: no layer and
+  no history entry are left, as with Solid Color.
+- In Properties, each adjustment eyedropper pick, preset and Auto is its own undo step; an edit no longer merges into
+  the preceding Reset.
+- Escape in a number field that applies as you type (Properties adjustment settings, dialog fields) takes back the
+  value you typed: the layer returns to its previous setting and no history step is left.
+- New Fill Layer from a script or the API with a pattern paint makes a working Pattern Fill. Before, it made a layer
+  that drew nothing, logged errors on every repaint and blocked saving the document.
+
+### Shapes, masks, guides and rulers
+
+- Shape layers align, distribute, Free Transform, quick Rotate/Flip and Reveal All by their drawn edges (the path plus
+  the stroke). Shapes no longer land 1 to 2 px off, and repeated rotates or flips no longer move them. Align and
+  Distribute place a shape by the whole pixels it covers, so an odd centred stroke (1 px, 3 px…) no longer ends half a
+  pixel past the canvas edge.
+- In Properties, mask Density and Feather changes each get their own History entry. A slider moved right after Add
+  Vector Mask or a path move no longer merges into that step.
+- Edit Selected Guides no longer moves a guide when you change only its colour.
+- Rulers can show Picas (1 pc = 12 pt), from the ruler context menu or Preferences, and position fields take 'pc' or
+  'pica'. Setting an unknown ruler unit from a script shows an error instead of being ignored.
+
+### Layers and the Layer menu
+
+- Ctrl+E (Layer › Merge) on the base of a clipping mask is Merge Clipping Mask: the base and its clipped layers become
+  one layer, and the picture does not change. The menus say 'Merge Clipping Mask' there. The base's Blend If and
+  channel settings stay on the merged layer; when that cannot match (Blend If with layer effects, or Blend Clipped
+  Layers as Group off), a notice says so. On an adjustment layer that is a clipping base, it refuses with a message
+  instead of turning the adjustment into an empty layer.
+- Merge Down and Stamp Layers refuse to write into a layer below whose pixels are locked.
+- Lock All also locks the layer's Opacity, Fill, blend mode and layer effects: the panel controls are disabled, and the
+  digit keys, the blend-mode keys, Paste and Clear Layer Style leave the layer alone.
+- A group that holds a layer locked in position can no longer be moved with the Move tool, the arrow keys or Align.
+  Align keeps locked layers in place and aligns the others to the whole selection.
+- Shift+digit (Fill) leaves groups alone; they have no Fill.
+- Flatten Image asks 'Discard hidden layers?' when the document has hidden layers.
+- Each committed change to the Layers panel's Opacity or Fill (Enter, Tab, one scrub) is its own history state. Escape
+  in a number field (the Layers panel's Opacity, for example) drops what you typed and shows the field's value again.
+- A document made by Duplicate Layer › Document: New asks to be saved when you close it.
+
+### Shortcuts, Search and history
+
+- In the desktop app, menu shortcuts such as Ctrl+E, Ctrl+J and Ctrl+, no longer act on the document while you type in
+  a text or number field. Undo, the clipboard keys, Select All and the view and file commands still work.
+- Toggle Last State (Alt+Ctrl+Z) after an Undo or a click in the History panel returns to the state you came from.
+- Search: typing a command's name and pressing Enter runs that command. 'new layer' no longer runs Undo, 'layers'
+  opens the Layers panel, and a menu command wins over a tool or panel with a longer name ('blur' runs Filter › Blur ›
+  Blur, 'rotate' Edit › Transform › Rotate, 'gradient' New Fill Layer › Gradient…).
+
+### Files
+
+- PSD: Hue/Saturation colour ranges (with their edited bounds) are saved and read back.
+- PSD: guides are saved in the file and come back when it is opened.
+- PSD: saving says which adjustment layers have no PSD equivalent (Color and Vibrance, Clarity and Dehaze, Grain) and
+  are saved as hidden empty layers. It also notes when Hue/Saturation Colorize, the ruler origin, or guides above or
+  left of the canvas are not saved.
+
+## Compositing as in Photoshop
+
+The hunt left three changes to the compositing model for a decision. They are done in 0.4, following Photoshop's
+documented behaviour, together with two items deferred from the packages.
+
+### Layer effects blend with the layers below
+
+- Each exterior effect (drop shadow, outer glow, the outer part of a bevel or emboss, the outer part of an outside or
+  centred stroke) now blends with the layers below in its own blend mode and opacity, as in Photoshop. A coloured
+  Multiply drop shadow darkens what it falls on, and a Screen outer glow does not show on white. Before, the effects
+  were blended with the layer first, so a Multiply shadow over grey drew in Normal.
+- The layer's own blend mode acts on its content and its interior effects only: a Normal stroke on a Multiply layer
+  stays Normal.
+- Layer Opacity fades the layer and its effects together, as one, from what lies below.
+- Blend If hides the layer's own pixels and its interior effects but leaves the drop shadow, outer glow, outer bevel and
+  outer stroke whole. Knockout cuts through for the layer's content after the exterior effects are drawn.
+- This holds for every kind of layer (pixel, type, shape, fill, smart object), for groups with effects, clipping bases
+  and clipped layers, and in 16-bit documents.
+- Layer › Layer Style › Create Layers keeps the picture unchanged when effects use other blend modes, and no longer
+  warns because the layer's own mode is not Normal. It still warns for knockout, a layer opacity below 100 % with
+  exterior effects, and a Fill below 100 % with interior effects.
+- Rasterize Layer Style and Convert to Smart Object keep the look where one layer can (all Normal, or a black Multiply
+  shadow). Where they cannot, they say so: 'Some effects blend with the layers below in a mode of their own, which one
+  layer cannot keep, so the image changed' (or '…which the smart object cannot keep…').
+- Merge Down onto an opaque layer, Merge Visible, Stamp Visible and Flatten Image give exactly what the canvas shows.
+- **Changed look:** documents whose effects use other modes than Normal (the default Drop Shadow is Multiply, the
+  default Outer Glow Screen) can look different from earlier 0.4 builds and from 0.3; the new look is Photoshop's.
+  Documents whose effects and layers are all Normal render exactly as before.
+
+### Blending Options on adjustment layers
+
+- Adjustment layers take Blending Options, as in Photoshop: Layer › Layer Style › Blending Options…, the fx button
+  and the Layers panel menu open the Layer Style dialog on an adjustment layer with only the Blending Options page: the
+  blend mode, Opacity, Fill, the R, G and B channels and Blend If. Knockout, the five check boxes and Global Light are
+  not shown there, and the fx menu lists no effects.
+- Blend If on an adjustment layer: This Layer reads the adjusted result and Underlying Layer the image below, with
+  split sliders for a smooth fade, so a Curves can act on the highlights only, for example.
+- Fill works on adjustment layers and scales the adjustment as Opacity does. Set it in the Layers panel's Fill field,
+  on the Blending Options page or with Shift+digit.
+- A channel switched off on the Blending Options page leaves that channel of the image unchanged.
+- An adjustment layer's blend mode now applies (Curves in Luminosity mode keeps the colours). Before, it could be set
+  but was ignored.
+- Copy Layer Style works on an adjustment layer that has blending options. Paste Layer Style on an adjustment layer
+  applies the blend mode, Fill, Blend If and channels and leaves the effects out (before, it skipped adjustment layers).
+- In 16 and 32-bit documents, Merge Down, Merge Visible, Stamp Visible and Flatten Image keep these settings at full
+  precision. An adjustment layer in a blend mode other than Normal, Multiply or Screen is composited at 8 bits there.
+- PSD files keep Blend If (written and read for every layer) and the Fill of adjustment layers. A channel restriction
+  is not saved to PSD, and the save notice says so.
+- Adjustment layers that use none of these settings look exactly as before.
+
+### Clipping masks and stamps in 16 and 32 bits
+
+- Clipping masks no longer drop a 16 or 32-bit image to 8 bits. Merge Clipping Mask (Ctrl+E on the base), Merge Down
+  of a clipped layer onto its base, Merge Layers, Merge Visible and Flatten Image keep the full precision of the clipped
+  layers and their base, with Blend Clipped Layers as Group on or off. In 32-bit documents, highlights above white
+  survive.
+- Stamp Visible and Stamp Layers keep 16 and 32-bit precision (before, they always made 8-bit pixels).
+- 16-bit PNG and TIFF exports of documents with clipping masks, or with groups in Normal, Multiply or Screen, are
+  composited at full depth; the export dialog no longer says '8-bit composite' for them.
+
+### Gradient Map interpolation in PSD
+
+- Gradient Map adjustment layers saved as PSD keep their interpolation method. Perceptual, Linear and Smooth maps used
+  to reopen as Classic. Pigment writes the codes Photoshop uses, so Photoshop opens them with the right method too.
+- PSD files from Photoshop with Perceptual, Linear or Smooth Gradient Maps open with that method. Older files without a
+  method open as Classic.
+
+### Faster repaints
+
+- On large documents, selecting another layer, adding a guide or stepping through History no longer recomposites the
+  image. An edit to one layer repaints only the area it can affect, and brush strokes (and their undo and redo) repaint
+  only the painted area, even under adjustment layers. On a 4000 × 3000 document with 30 layers, a text or shape edit
+  went from 5 to 7 s to about half a second, and selecting a layer to about 20 ms.
+- An edit high in the stack, such as an adjustment layer's settings, starts from a saved composite of the layers below
+  it. Consecutive adjustment layers are applied in one pass, and an all-white adjustment mask is skipped.
+- A layer with effects and Blend If is blended only where it has pixels.
+- While you drag on a large document (a brush stroke, a slider or field in a panel, a Move), the view shows a quick
+  preview at screen resolution and switches to full resolution when you release the mouse, as Photoshop does. Saved
+  files, exports, merges and History always use full resolution. Proof Colors and Gamut Warning stay correct during
+  the preview.
+- The image is exactly the same as a full repaint in every case.
+
+### Still open
+
+- The adjustment filters themselves are not faster: editing an adjustment layer's settings again on a 4000 × 3000
+  document still takes 1 to 5 s at full resolution (on release, after the preview), depending on the adjustments
+  above it. A styled layer on a document-sized canvas renders its effects again on every change (about 0.6 s there).
+  Opening and saving such a document take as long as before.
+- During the preview, Clarity, Shadows/Highlights and Grain size look slightly different from the final result (they
+  read their neighbourhood at screen scale).
+- The retouch tools (clone, healing, dodge and the like) and the vector tools repaint the layer's whole box, not only
+  where they paint. Partial repaints are off in documents with a Dissolve layer, a whole-image adjustment (Equalize,
+  Match Color, HDR Toning, Replace Color, a dithered Color Lookup) or a non-RGB image mode.
+- A view keeps up to four document-sized images for these caches (about 192 MB at 4000 × 3000).
+- In 16 and 32-bit documents, layers with effects still composite at 8 bits, and so does Merge Group.
+- Merge Down onto a lower layer that is transparent where the effects fall cannot keep an exterior effect in a mode of
+  its own (it merges the two layers on their own, as Photoshop does), and Merge Down of an adjustment layer onto a
+  layer below 100 % opacity bakes the adjustment and then fades it; neither shows a notice. Merge Down of a layer with
+  Blend If on the Underlying Layer and Fill 0 % can still change the picture.
+- With Blend Clipped Layers as Group off, Merge Clipping Mask can change soft edges of the base (by up to about 25
+  levels), at every bit depth.
+- PSD: the channel restriction of Blending Options is not saved (ag-psd drops a channel when reading it back);
+  Photoshop's Stripes Gradient Map method has no known code and is saved as Classic.
+- Create Layers on an effect in Dissolve mode makes the speckles again, in other places.

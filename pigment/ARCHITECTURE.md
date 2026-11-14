@@ -3233,28 +3233,44 @@ object, styled group, a clipping base, a clipped layer):
 1. Each exterior effect (drop shadow, outer glow, the outer part of an Outer Bevel, Emboss or Pillow Emboss, the
    outer part of an outside or centred stroke) is composited onto the backdrop (what lies below the layer) with its
    own mode and opacity, bottom first.
-2. The layer's content with its interior effects (overlays, satin, inner glow, inner shadow, an inner bevel, an
-   inside stroke), which are blended onto the content in their own modes and clipped to it, is composited with the
-   layer's mode. Fill opacity fades the content (and the interior effects with Blend Interior Effects as Group).
-3. The layer's opacity fades all of that as one lerp from the backdrop. (Dissolve speckles the content at the layer's
+2. The layer's content is composited with the layer's mode, faded by its fill opacity.
+3. The interior effects (overlays, satin, inner glow, inner shadow, an inner bevel, an inside stroke) are cut to the
+   layer's shape (its box with Transparency Shapes Layer off) and composited over that, each in its own mode: the
+   layer's mode does not reach them and the fill does not fade them, so a Fill 0 % layer with an Overlay gradient
+   blends the gradient with the image below. With Blend Interior Effects as Group on, Photoshop "applies the blending
+   mode of the layer to layer effects that modify opaque pixels": the interior effects are blended into the content,
+   faded with it by the fill and drawn with it in the layer's mode (steps 2 and 3 as one image).
+4. The layer's opacity fades all of that as one lerp from the backdrop. (Dissolve speckles the content at the layer's
    opacity instead and draws the parts at theirs times it.)
 
+A mode that gives the effect's own colour whatever the backdrop counts as Normal (`asDrawn`): Multiply, Darken and
+Linear Burn with black, Screen, Lighten and Linear Dodge with white. Photoshop's default drop shadow (black, Multiply)
+and default bevel (white Screen, black Multiply) therefore keep the fast path and its pixels.
+
 Code:
-- `styles.js`: `exteriorBlends(styles)` lists the modes of the exterior effects that draw. `applyStyles(..., { split:
-  true })` returns `{ image, layer, parts, below, above, offsetX, offsetY }`: `image` is the merged render as before,
-  `layer` the content with its interior effects, `parts` the exterior effects one by one (`{ key, index, part?, image,
-  x, y, blend, opacity }`, cropped to their pixels; a Dissolve one comes speckled, as Normal).
-- `compositor.js`: `needsSplit(layer)` is true when the layer has exterior effects and one of their modes or the
-  layer's own is not Normal. Then `styledCanvas` caches the parts as canvases (`entry.parts`, `entry.layer`,
-  `entry.layerBox`) and `drawStack` composites them: straight onto the target at opacity 1, on a copy of the
+- `styles.js`: `exteriorBlends(styles, { asDrawn })` and `interiorBlends` list the modes of the exterior and interior
+  effects that draw; `splitsInterior` says when the interior effects must come apart. `applyStyles(..., { split:
+  true })` returns `{ image, layer, parts, below, above, inner, offsetX, offsetY }`: `image` is the merged render as
+  before, `layer` the content with its interior effects, `parts` the exterior effects one by one (`{ key, index,
+  part?, image, x, y, blend, opacity }`, cropped to their pixels; a Dissolve one comes speckled, as Normal), `below`
+  those merged. With `interior: true` as well, `layer` is the content alone and `inner` the interior effects one by
+  one, cut to the shape (the merged interior is still built, since the knock-out of the exterior effects reads it).
+- `compositor.js`: `needsSplit(layer)` is true when the layer has exterior effects and one of their modes (as drawn) or
+  the layer's own is not Normal (`exteriorApart`), or when its interior effects must come apart (`interiorApart`: Blend
+  Interior Effects as Group off, and the layer is not Normal, or its fill is below 100 % under an interior effect that
+  is not Normal). Then `styledCanvas` caches the parts as canvases (`entry.parts`, `entry.inner`, `entry.below`,
+  `entry.layer`, `entry.layerBox`) and `drawStack` composites them: straight onto the target at opacity 1, on a copy of the
   backdrop that is lerped back (`lighter` of backdrop × (1 − opacity) and result × opacity) below 1. When every mode
   is Normal, Normal over Normal is one source-over, so the merged image is drawn exactly as before (the fast path,
   same pixels, same cost). A clipped layer outside its group (`clipTo`) and the mask parts after the effects cut the
   parts as they cut the content.
 - Blending Options (`finishAdvanced`, `drawPixels`, `blend-if.js compositeAdvanced({ parts })`): the per-pixel path
-  always takes the parts apart. Order: parts in their modes, then the knockout (it cuts through to the Background or
-  the group's backdrop under the layer's shape), then the content in the layer's mode weighted by Blend If, then the
-  channel restriction against the backdrop, then one fade by the opacity (`fadeFrom`). Blend If acts on the content
+  always takes the exterior effects apart from the content; when they all draw as Normal on a Normal layer they go in
+  merged (`below`, `exteriorParts`), which without knockout keeps 0.3's order and rounding (merged effects and content
+  each at the opacity: the effects are knocked out under the content, so that is the one fade). Order: parts in their
+  modes, then the knockout (it cuts through to the Background or the group's backdrop under the layer's shape), then
+  the content in the layer's mode weighted by Blend If, then the interior parts (`inner`) in their modes with the same
+  weights, then the channel restriction against the backdrop, then one fade by the opacity (`fadeFrom`). Blend If acts on the content
   and its interior effects (This Layer reads the content with them, Underlying the backdrop before the parts); it
   does not hide the exterior effects, as in Photoshop, where a shadow is computed from the layer's transparency and
   stays whole when Blend If hides some of the layer's pixels. The channel restriction applies to the parts too.
@@ -3266,7 +3282,12 @@ Code:
 - Bakes. Create Layers (`blending-options.js`) makes each exterior part a layer below with its mode and opacity, so
   the picture is unchanged at layer opacity 100 % whatever the modes; it warns (Photoshop's "Some aspects of the
   Effects cannot be reproduced with layers") for knockout, layer opacity below 100 % with exterior effects (the shadow
-  is knocked out by the layer as one image, which separate layers cannot do) and reduced fill with interior effects.
+  is knocked out by the layer as one image, which separate layers cannot do) and, with Blend Interior Effects as Group
+  on, reduced fill with interior effects. With it off on a layer that is not Normal or has a reduced fill, the interior
+  parts become clipped layers in their own modes and the base's Blend Clipped Layers as Group goes off (clipped layers
+  then blend with the backdrop in their own modes, cut to the base's shape and not faded by its fill, which is the
+  interior model); a base that already has clipped layers keeps the option and gets the warning, and so does a layer
+  below 100 % opacity or with Transparency Shapes Layer off.
   Rasterize Layer Style and Convert to Smart Object render against transparency, as Photoshop's do: the parts are
   merged into the layer, which keeps its mode, so an exterior effect in another mode keeps its look only where it
   comes out the same (a black Multiply shadow does; a Screen glow does not). `layer-ops.js lookBefore` /
@@ -3337,7 +3358,9 @@ off; the preview while a pointer is held is the one switch `canvas-view.js PREVI
 - **Region.** The changed box grows by the margins of the adjustment layers (I.4: Clarity above a shape carries its
   change that far), is composited with `composite(doc, { rect })` and pasted into a copy of the last composite. It is
   used when it covers at most 45 % of the document, when the document holds no Dissolve layer (its noise follows the
-  repaint rect), no adjustment kind that measures the whole image (`LOCAL_KINDS`: Equalize, Match Color, HDR Toning,
+  repaint rect), no shown group with knockout and Transparency Shapes Layer off (it knocks out its whole content box,
+  which a group rendered over the region alone would measure inside the region; a layer with that option keeps its
+  whole source in `drawLayer` instead of the crop to the rect), no adjustment kind that measures the whole image (`LOCAL_KINDS`: Equalize, Match Color, HDR Toning,
   Replace Color and a dithered Color Lookup are not local), and no mode renderer. After compositing, the boxes are
   measured again from the fresh caches; a change outside the region redoes the whole composite. A partial composite
   relies on a canvas giving back an unchanged pixel unchanged through getImageData and putImageData (tested).
@@ -3365,4 +3388,6 @@ off; the preview while a pointer is held is the one switch `canvas-view.js PREVI
   to them.
 - **Memory.** A view's compositor keeps the full composite, a spare buffer (so the canvas a caller was handed stays as
   it was until the composite after next) and up to two prefixes: four document-sized canvases, and the preview's
-  buffer (the visible rect) once a gesture has previewed. Other compositors keep the full composite only.
+  buffer (the visible rect) once a gesture has previewed. `drawStack`'s two scratch canvases live for one composite.
+  When a document goes to the background (`documents.js activate`), `Compositor.release` drops everything but its
+  full composite. Other compositors keep the full composite only.

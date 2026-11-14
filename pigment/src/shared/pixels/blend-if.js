@@ -261,13 +261,18 @@ export function fadeFrom(dst, before, opacity) {
  *      per pixel);
  *   3. `layer` (the layer at its fill opacity with its interior effects) blends onto dst with the layer's mode, its
  *      alpha weighted by Blend If (This Layer reads `layer`, Underlying Layer reads dst as it was before step 1);
+ *   3b. `inner` (the interior effects apart, Blend Interior Effects as Group off) blend onto dst one by one in their
+ *      own modes, weighted by the same Blend If as the layer;
  *   4. the channels switched off keep what dst held before step 1;
  *   5. the layer's opacity fades all of that as one from dst before step 1 (Dissolve instead speckles the layer at
  *      its opacity and draws the parts at theirs times it).
- * Without parts and knockout, steps 3 and 5 are one blendImages at the opacity, which is the same thing.
- * `below` (one image drawn with the layer's own mode before the knockout) is still taken as a single part.
+ * Without parts, inner parts and knockout, steps 3 and 5 are one blendImages at the opacity, which is the same thing.
+ * `below` (the exterior effects merged into one image, drawn with the layer's mode) without knockout keeps 0.3's
+ * order: it and the layer each at the opacity (where the layer covers the merged effects they are knocked out, so
+ * that is the one fade with 0.3's rounding); with knockout it is taken as a single part.
  * @param {{
  *   dst: object, layer: object | null, parts?: { image: object, blend?: string, opacity?: number }[] | null,
+ *   inner?: { image: object, blend?: string, opacity?: number }[] | null,
  *   below?: object | null, knock?: object | null, shape?: Uint8ClampedArray | null,
  *   knockout?: 'none' | 'shallow' | 'deep', blendIf?: object | null, channels?: object | null,
  *   mode?: string, opacity?: number, seed?: number }} o
@@ -278,31 +283,37 @@ export function compositeAdvanced(o) {
   const mode = o.mode === 'pass-through' || !isBlendMode(o.mode) ? 'normal' : o.mode;
   const opacity = Number.isFinite(o.opacity) ? Math.max(0, Math.min(1, o.opacity)) : 1;
   const restrict = restrictsChannels(o.channels);
-  const parts = o.parts?.length ? o.parts : o.below ? [{ image: o.below, blend: mode, opacity: 1 }] : null;
+  const merged = !o.parts?.length && !!o.below;
+  const parts = o.parts?.length ? o.parts : merged ? [{ image: o.below, blend: mode, opacity: 1 }] : null;
+  const inner = o.inner?.length ? o.inner : null;
   const knocks = !!(o.knockout && o.knockout !== 'none' && o.shape);
-  const stacked = !!parts || knocks;
+  const stacked = (!!parts && !merged) || knocks || !!inner;
   const needBefore = restrict || !isDefaultBlendIf(o.blendIf) || (stacked && opacity < 1);
   const before = needBefore ? { width: dst.width, height: dst.height, data: new Uint8ClampedArray(dst.data) } : null;
   const seed = o.seed ?? 1;
   // stacked: everything at full strength, then one fade by the opacity; else the layer alone at its opacity
   const dissolve = mode === 'dissolve';
-  const inner = !stacked || dissolve ? opacity : 1;
+  const strength = !stacked || dissolve ? opacity : 1;
   if (parts) {
     for (const p of parts) {
-      const op = (Number.isFinite(p.opacity) ? Math.max(0, Math.min(1, p.opacity)) : 1) * (dissolve ? opacity : 1);
+      const op = (Number.isFinite(p.opacity) ? Math.max(0, Math.min(1, p.opacity)) : 1) * (dissolve || !stacked ? opacity : 1);
       if (op > 0 && p.image) blendImages(isBlendMode(p.blend) ? p.blend : 'normal', p.image, dst, op, null, seed);
     }
   }
   if (knocks) knockoutInto(dst, o.knock ?? null, o.shape, dissolve ? opacity : 1);
-  if (layer) {
-    const w = blendIfWeights(layer, before, o.blendIf);
-    let src = layer;
-    if (w) {
-      const d = new Uint8ClampedArray(layer.data);
-      for (let i = 0, p = 3; i < w.length; i++, p += 4) if (w[i] < 1) d[p] = d[p] * w[i];
-      src = { width: layer.width, height: layer.height, data: d };
+  const weigh = (img, w) => {
+    if (!w) return img;
+    const d = new Uint8ClampedArray(img.data);
+    for (let i = 0, p = 3; i < w.length; i++, p += 4) if (w[i] < 1) d[p] = d[p] * w[i];
+    return { width: img.width, height: img.height, data: d };
+  };
+  const w = layer ? blendIfWeights(layer, before, o.blendIf) : null;
+  if (layer) blendImages(mode, weigh(layer, w), dst, strength, null, seed);
+  if (inner) {
+    for (const p of inner) {
+      const op = (Number.isFinite(p.opacity) ? Math.max(0, Math.min(1, p.opacity)) : 1) * (dissolve ? opacity : 1);
+      if (op > 0 && p.image) blendImages(isBlendMode(p.blend) ? p.blend : 'normal', weigh(p.image, w), dst, op, null, seed);
     }
-    blendImages(mode, src, dst, inner, null, seed);
   }
   if (restrict) restrictChannels(dst, before, o.channels);
   if (stacked && !dissolve && opacity < 1) fadeFrom(dst, before, opacity);

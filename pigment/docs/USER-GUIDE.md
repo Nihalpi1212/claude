@@ -13,7 +13,8 @@ keyboard shortcuts. This guide walks through each area. On macOS read **Ctrl** a
   one smart object.
 - **New from clipboard**: copy an image anywhere, then Edit › Paste (Ctrl+V) with no document open.
 - **Save**: File › Save (Ctrl+S). Layered work is saved as `.pigment` (everything is kept) or `.psd`
-  (for other apps: layers, groups, masks, locks, fill opacity, adjustment layers and editable text).
+  (for other apps: layers, groups, masks, locks, fill opacity, Blend If, adjustment layers, editable
+  text and guides; layer effects are not written yet, and saving says which layers lose them).
   Saving a flat format (PNG, JPEG, WebP, GIF, TIFF, Targa) asks before merging the layers; JPEG and
   WebP ask for their quality the first time. Formats Pigment can only read (BMP, SVG, AVIF, ICO) are
   never overwritten: Save opens Save As for them.
@@ -612,10 +613,13 @@ to 8 bits dithers to avoid banding. File › New can start a document at any dep
 
 - **Full precision**: Levels, Curves, Brightness/Contrast, Exposure, Vibrance, Hue/Saturation,
   Color Balance, Black & White, Photo Filter, Channel Mixer, Invert, Posterize, Threshold, Gradient
-  Map and Desaturate; crop, Canvas Size, flips, 90° rotations and Flatten Image.
+  Map and Desaturate; crop, Canvas Size, flips, 90° rotations; Flatten Image, Merge Down, Merge
+  Layers, Merge Visible, Merge Clipping Mask, Stamp Visible and Stamp Layers, clipping masks
+  included (a layer with effects, knockout or Blend If on its pixels, or a blend mode other than
+  Normal, Multiply and Screen, sends them through the 8-bit composite, and so does Merge Group).
 - **8-bit on the pixels they touch**: painting and retouching, fills, filters, the other
-  adjustments, Image Size, arbitrary rotation, Free Transform, the warps, Content-Aware Scale,
-  Merge Down and the Auto commands. The untouched pixels keep their precision; the changed ones
+  adjustments, Image Size, arbitrary rotation, Free Transform, the warps, Content-Aware Scale
+  and the Auto commands. The untouched pixels keep their precision; the changed ones
   come from 8-bit values. Masks are 8-bit.
 - **32 bits** keeps highlights above white (Exposure +2 then −2 loses nothing) and clips them when
   you go back down. Values are display-referred, not linear light as in Photoshop.
@@ -623,8 +627,9 @@ to 8 bits dithers to avoid banding. File › New can start a document at any dep
   32 bits; "from 8-bit" marks a value that comes from the 8-bit composite.
 - Files: `.pigment` keeps the deep pixels; 16-bit PNG and TIFF open and save at 16 bits; PSD, JPEG,
   WebP and Targa are written at 8 bits with a notice. Export As says whether a file is composited
-  at 16 bits or from the 8-bit composite, and why (layer effects, clipping masks and blend modes
-  other than Normal, Multiply and Screen force the 8-bit composite).
+  at 16 bits or from the 8-bit composite, and why (layer effects, knockout or Blend If on a pixel
+  layer, and blend modes other than Normal, Multiply and Screen force the 8-bit composite; clipping
+  masks and adjustment layers' Blending Options do not).
 
 ## Actions and automation
 
@@ -637,7 +642,9 @@ bottom panel group with Layers.
   colour), press the record button, do the work, press stop. Menu commands are recorded with the
   settings you confirmed in their dialogs. Also recorded: selections made with tools (as the
   resulting selection), Free Transform, layer picks (by name), foreground/background colour
-  changes, guides and Save As. Undo while recording removes the step.
+  changes, guides and Save As. Text made with the Type tool and shapes drawn with a shape tool are recorded as Make
+  Text Layer and Make Shape Layer steps (the formatting you apply while typing new text is part of that step). Undo
+  while recording removes the step.
 - **Not recorded**: brush, eraser and other tool strokes, Move tool drags, layer drag-reordering,
   Warp / Perspective Warp / Puppet Warp, Fade, and edits made in place to an adjustment, fill or
   smart filter. Pigment says so once when it happens.
@@ -684,7 +691,7 @@ bottom panel group with Layers.
 | Format | Open | Save / Export | Notes |
 |---|---|---|---|
 | `.pigment` | yes | yes | Everything: layers, masks, styles, smart objects, channels, paths, guides, mode, 16/32-bit pixels, File Info |
-| PSD / PSB | yes | PSD | Layers, groups, masks, adjustment layers, editable text; 8 bits; File Info as XMP |
+| PSD / PSB | yes | PSD | Layers, groups, masks, Fill and Blend If, adjustment layers, editable text, guides; no layer effects yet; 8 bits; File Info as XMP |
 | PNG | yes | yes | 8-bit; 16-bit when the document is 16-bit or with "PNG 16-bit" in Export As; palette PNGs open as Indexed Color |
 | PNG-8 | yes | Export As, Save for Web | Palette, dither, transparency; saving an Indexed Color document as `.png` also writes PNG-8 |
 | JPEG, WebP | yes | yes | Quality; WebP lossless |
@@ -807,7 +814,13 @@ Help › Keyboard Shortcuts shows every shortcut. The most used ones:
 
 ## New in Pigment 0.4
 
-Pigment 0.4 brings a new type engine with several character and paragraph formats in one text layer, the Character and Paragraph panels, deeper layer styles, adjustment dialogs with presets and eyedroppers, gradients and a pattern library, guides and snapping, vector masks, live shapes, a deeper Layers panel and Layer menu, and Photoshop's shortcuts and conventions. The sections below describe each area; the release notes list every changed default and key (docs/RELEASE-NOTES-0.4.md).
+Pigment 0.4 brings a new type engine with several character and paragraph formats in one text layer, the Character and Paragraph panels, deeper layer styles, adjustment dialogs with presets and eyedroppers, gradients and a pattern library, guides and snapping, vector masks, live shapes, a deeper Layers panel and Layer menu, and Photoshop's shortcuts and conventions. Layer effects now blend with the layers below in their own modes, and adjustment layers take Blending Options, both as in Photoshop. The sections below describe each area; the release notes list every changed default and key (docs/RELEASE-NOTES-0.4.md).
+
+**Large documents.** An edit repaints only what it can change: selecting a layer, adding a guide or stepping through
+History does not recomposite the image, and a brush stroke repaints only where it paints. While you drag on a document
+that is slow to repaint (a brush stroke, a slider or field in a panel, a Move), the view shows a quick preview at screen
+resolution and switches to full resolution when you release the mouse, as Photoshop does. Saved files, exports, merges
+and History always use full resolution.
 
 ### Type: the HarfBuzz type engine
 
@@ -866,7 +879,8 @@ each run keeps its own size and colour.
 Click with the Horizontal or Vertical Type tool to start point text, or drag to draw a paragraph box. A new text layer
 starts with placeholder text ("Lorem Ipsum", or a paragraph of it in a box), already selected: the first key you type
 replaces it. To start with an empty layer instead, turn off **Fill new type layers with placeholder text** in
-Preferences > Type. Click a text layer with a Type tool, or double-click it with the Move tool, to edit it.
+Preferences > Type. Click a text layer with a Type tool, or double-click it with the Move tool, to edit it. A click on
+a text layer that is locked (Lock All) starts new text on top of it instead.
 
 Pigment draws its own text cursor and selection on the canvas, over the text as it is laid out, so they follow every
 size, font and line of the layer. Input methods for Chinese, Japanese and Korean, and dead keys for accents, work as in
@@ -888,7 +902,8 @@ any text field: the text being composed appears in the layer, underlined, until 
 - The arrow keys move by character; **Ctrl+Left** / **Ctrl+Right** by word; **Home** / **End** go to the start and
   end of the line; **Ctrl+Home** / **Ctrl+End** to the start and end of the text; **Ctrl+Up** / **Ctrl+Down** by
   paragraph. Add Shift to extend the selection. On macOS, Cmd+Left / Right go to the line's start and end, and
-  Cmd+Up / Down to the text's start and end.
+  Cmd+Up / Down to the text's start and end. In vertical type the arrow keys move the way they point: Up and Down
+  along the column, Left and Right to the next and previous column.
 - **Ctrl+H** hides the selection highlight while you look at the formatting (press it again to show it).
 
 #### Undo while typing
@@ -1171,7 +1186,23 @@ light ones. Hold **Alt** while you drag a triangle to split it in two: between t
 instead of being cut off hard. A split triangle's halves move on their own. The four numbers next to each slider show
 and set its values (black left, black right, white left, white right). With a slider triangle focused, the arrow keys
 move it (Shift: by 10, Alt: one half). The settings of each channel are kept; the layer shows where every channel
-lets it through. Blend If leaves exterior effects (drop shadows, outer glows) alone.
+lets it through. Blend If hides the layer's own pixels and its interior effects but leaves its exterior effects (drop
+shadows, outer glows, the outer part of a bevel or a stroke) whole: a layer hidden by Blend If can still cast its shadow.
+
+**How effects blend.** As in Photoshop, each exterior effect (Drop Shadow, Outer Glow, the outer part of Bevel &
+Emboss, the outer part of an outside or centred Stroke) blends with the layers below in the blend mode and opacity set
+on its own page. A coloured Multiply shadow darkens what it falls on; a Screen glow does not show on white. The layer's
+blend mode (General Blending) acts on its content and its interior effects (Inner Shadow, Inner Glow, Satin, the
+overlays, an inside stroke); a Normal stroke on a Multiply layer stays Normal. The layer's **Opacity** fades the layer
+and all its effects together, as one.
+
+**Adjustment layers** take Blending Options too: Layer › Layer Style › Blending Options…, the fx button's menu or the
+Layers panel menu opens the dialog on an adjustment layer with this page only (the blend mode, Opacity, Fill, the
+channels and Blend If; knockout, the check boxes and Global Light do not apply to an adjustment layer). For an
+adjustment layer, Blend If's **This Layer** reads the adjusted result and **Underlying Layer** the image below, so a
+Curves with the Underlying Layer's black triangle split to 180/220 acts on the highlights only. Fill scales the
+adjustment as Opacity does; a channel switched off is left as it was; the blend mode applies to the adjusted colours
+(Curves in Luminosity mode keeps the colours).
 
 The **Global Light…** button sets the angle every effect with Use Global Light shares.
 
@@ -1181,14 +1212,18 @@ Cancel puts everything back; OK records the whole dialog as one step in the Hist
 
 Groups take layer styles like any layer: select a group and open Layer Style. The effects are drawn around everything
 the group shows, as one shape. A Pass Through group with effects (or with advanced blending options) is composited as
-an isolated group, as in Photoshop. The Background layer and adjustment layers take no styles.
+an isolated group, as in Photoshop. The Background layer takes no styles; adjustment layers take Blending Options but
+no effects.
 
 #### Layer › Layer Style commands
 
 - **Create Layers** turns each effect into a layer of its own: effects that lie outside the layer (Drop Shadow, Outer
   Glow, an outside stroke, the outer half of a bevel) become layers below it; effects inside it (the overlays, Satin,
-  Inner Glow, Inner Shadow, the inner half of a bevel, an inside stroke) become layers clipped to it above. The layer
-  keeps its pixels and loses its style. One undo step.
+  Inner Glow, Inner Shadow, the inner half of a bevel, an inside stroke) become layers clipped to it above. Each new
+  layer keeps its effect's blend mode, so the picture stays the same. The layer keeps its pixels and loses its style.
+  One undo step. Where separate layers cannot look the same (knockout, a layer opacity below 100 % with exterior
+  effects, a Fill below 100 % with interior effects), a notice says 'Some aspects of the effects cannot be reproduced
+  with layers', as in Photoshop.
 - **Hide All Effects / Show All Effects** hides every effect of the selected layers without removing them (the menu
   item says Show All Effects while they are hidden).
 - **Scale Effects…** scales the sizes, distances, spreads, chokes and pattern scales of every effect of the layer (1 to
@@ -1393,7 +1428,9 @@ channels in order.
   (bright colours may clip). Presets: the six "Black & White with … Filter" and Infrared mixes; .cha files.
 - **Selective Color**: presets and .asv files.
 - **Gradient Map**: the full gradient field: click the bar to open the Gradient Editor, the arrow for the gradient
-  presets; **Method** (the interpolation), **Reverse** and **Dither** (a little noise that hides banding).
+  presets; **Method** (the interpolation), **Reverse** and **Dither** (a little noise that hides banding). PSD files
+  keep the method (Perceptual, Linear, Smooth or Classic; Stripes is saved as Classic), the midpoints, transparency,
+  smoothness and dither, in both directions.
 
 #### Shadows/Highlights
 
@@ -1422,7 +1459,11 @@ Image > Adjustments and Layer > New Adjustment Layer (and the Adjustments panel)
 Besides the editor: the preset menu, the eyedroppers and the on-image tool (they sample the image below the layer at
 full resolution), Auto where the adjustment has one, and the toolbar's **View Previous State** button (also the `\`
 key while the panel has focus): it shows the layer with the settings it had when you selected it, until you press it
-again or change a setting. It adds nothing to the history.
+again or change a setting. It adds nothing to the history, and saving, duplicating or any other command first puts the
+layer's real settings back. Each eyedropper pick, preset and Auto is its own undo step.
+
+The Layers panel's Fill field and the Layer Style dialog's Blending Options page work on adjustment layers too (see
+"Blending Options"): Blend If, Fill, the channels and the blend mode decide where and how strongly the adjustment acts.
 
 #### Adjustments panel presets
 
@@ -1650,8 +1691,9 @@ every change is one step in the history.
 
 View › Rulers (Ctrl+R) shows the rulers.
 
-- **Units:** right-click a ruler for its menu (Pixels, Inches, Centimeters, Millimeters, Points, Percent). The units are
-  also in Preferences › Interface. Inches, centimetres, millimetres and points use the document resolution.
+- **Units:** right-click a ruler for its menu (Pixels, Inches, Centimeters, Millimeters, Points, Picas, Percent). The
+  units are also in Preferences › Interface. Inches, centimetres, millimetres, points and picas (1 pc = 12 pt) use the
+  document resolution; position fields take `pc` or `pica` too.
 - **Origin:** drag from the square where the rulers meet to the point that should read 0 on both rulers. It snaps
   like a guide (hold Shift to put it on a whole pixel). Double-click the square to put the origin back on the document
   corner. The origin is saved with the document and is one step in the history.
@@ -1870,7 +1912,9 @@ and `layer:paste-shape-attributes`.
 The **Opacity** and **Fill** fields act on every selected layer. Drag the word **Opacity** or **Fill** left or right
 to change the value (Shift: ten times faster, Alt: ten times slower); the canvas follows as you drag and the whole drag
 is one step in History. The arrow keys in the field step by 1 % (Shift: 10 %), and the small ▾ button opens a slider.
-A typed value (arithmetic such as `50+25` works) is applied with Enter or Tab.
+A typed value (arithmetic such as `50+25` works) is applied with Enter or Tab; Escape drops it and shows the field's
+value again. Each committed change (Enter, Tab, one scrub) is its own step in History. Groups have no Fill; on an
+adjustment layer Fill scales the adjustment as Opacity does.
 
 The **blend-mode menu** shows each mode on the canvas while the pointer rests on it, before you choose it; moving off
 the list shows the layers as they were. Click a mode (or press Enter) to apply it to every selected layer; Escape closes
@@ -1929,7 +1973,10 @@ way, above their layers.
   them (they replace the target's effects). Drop them on **Delete** to delete them. The Background and adjustment
   layers take no effects.
 - Right-click an effect for Edit, Hide or Show, Delete, Blending Options, Hide All Effects, Copy, Paste and Clear Layer
-  Style, Create Layers and Scale Effects.
+  Style, Create Layers and Scale Effects. Double-clicking an instance, or its Edit item, opens that instance (for
+  example 'Drop Shadow (2 of 2)').
+- On an adjustment layer the fx menu lists Blending Options…, Copy, Paste and Clear Layer Style, and no effects.
+  Pasting a style onto an adjustment layer gives it the blend mode, Fill, Blend If and channels only.
 
 #### The panel menu and Panel Options
 
@@ -1996,7 +2043,8 @@ opacity slider or scrubbing its label is one step, however many layers are selec
 #### Keys
 
 - **1 … 9** set the opacity of the selected layers to 10 % … 90 %, **0** to 100 %. Two digits typed quickly set the
-  exact value: 4 then 5 is 45 %, 0 then 5 is 5 %, 0 then 0 is 0 %. **Shift** with the digits sets Fill instead. While a
+  exact value: 4 then 5 is 45 %, 0 then 5 is 5 %, 0 then 0 is 0 %. **Shift** with the digits sets Fill instead (groups,
+  which have no Fill, are left alone; adjustment layers take it). While a
   painting tool (brush, pencil, eraser, stamps, gradient, bucket, dodge, burn, sponge, blur, sharpen, smudge) is
   active the digits leave the layer alone: those tools will use them for their own opacity.
 - **/** locks or unlocks the transparent pixels of the selected layers.
@@ -2008,7 +2056,9 @@ opacity slider or scrubbing its label is one step, however many layers are selec
 - **Alt+]** and **Alt+[** select the layer above and below (going round at the top and the bottom), **Alt+.** the top
   layer, **Alt+,** the bottom layer. **Shift+Alt+]** and **Shift+Alt+[** add the layer above or below to the
   selection. Layers inside a collapsed group are skipped, as in the panel.
-- None of these keys act while you type in a text field.
+- None of these keys act while you type in a text field. In the desktop app the menu shortcuts (Ctrl+E, Ctrl+J and
+  the like) do not act on the document either while you type; Undo, the clipboard keys, Select All and the view and
+  file commands still work.
 
 #### Arrange and Distribute
 
@@ -2020,12 +2070,16 @@ Horizontal Centers, Right Edges** spread that edge or centre evenly between the 
 **Horizontally** and **Vertically** make the gaps between the layers equal.
 
 **Linked layers** (Layer › Link Layers) move along when Align or Distribute moves one of their set, as they do with the
-Move tool and Free Transform. Layers locked in position, and the Background, are not moved.
+Move tool and Free Transform. Layers locked in position, and the Background, are not moved; the others are aligned to
+the box of the whole selection, locked layers included. A group that holds a layer locked in position cannot be moved.
+Shape layers are aligned by the pixels their path and stroke cover.
 
 #### Locks
 
 **Layer › Lock Layers…** (Ctrl+/) sets the locks of the selected layers: Transparency, Image, Position, All. **Lock All
-Layers in Group…** sets them on every layer inside the selected group.
+Layers in Group…** sets them on every layer inside the selected group. **All** also locks the layer's Opacity, Fill,
+blend mode and effects: their controls in the Layers panel are disabled, and the digit keys, the blend-mode keys and
+Paste and Clear Layer Style leave the layer alone.
 
 #### Merging and stamping
 
@@ -2033,15 +2087,31 @@ Layers in Group…** sets them on every layer inside the selected group.
 **Merge Group** with a group selected (the group becomes one layer with its name; its mode and opacity stay, its mask
 and effects are rendered in, hidden layers inside it are dropped). An action records the merge that happened.
 
+On the base of a clipping mask, Ctrl+E is **Merge Clipping Mask** (the menus say so): the base and the layers clipped
+to it become one layer, and the picture does not change. The base's Blend If and channel settings stay on the merged
+layer; when they cannot give the same picture there (Blend If with layer effects, or Blend Clipped Layers as Group off),
+a notice says so. An adjustment layer cannot be merged this way: Pigment says so and leaves the layers alone.
+
 **Alt+Shift+Ctrl+E** (**Stamp Visible**) puts everything visible, merged, on a new layer above the active one.
 **Alt+Ctrl+E** (**Stamp Layers**) merges a copy of the selected layers onto a new layer ("… (merged)"); with one layer
 selected it merges a copy of it into the pixel layer below. The layers that were read stay as they were.
 
+Merge Down and Stamp Layers refuse to write into a layer below whose pixels are locked. **Flatten Image** asks
+"Discard hidden layers?" when the document has hidden layers. Merges, stamps and Flatten give what the canvas shows,
+layer effects in their own modes included. In 16 and 32-bit documents they keep the full precision, clipping masks and
+adjustment layers' Blending Options included; layers with effects, knockout or Blend If on a pixel layer, and Merge
+Group, go through the 8-bit composite.
+
 #### Rasterize
 
 **Layer › Rasterize › Type, Shape, Fill Content** rasterize the selected layers of that kind; **Layer** rasterizes every
-selected layer that is not made of pixels yet. The layer mask, the vector mask (Fill Content keeps it), the locks, the
-colour label and the link stay.
+selected layer that is not made of pixels yet. The layer mask, the vector mask (Fill Content keeps it), the Blending
+Options, the locks, the colour label and the link stay.
+
+**Layer Style** (Layer › Rasterize › Layer Style) merges the effects into the layer's pixels. Blend If, knockout and the
+channel restriction stay on the layer, with a notice when they will now also act on the baked effects. An effect whose
+blend mode one layer cannot keep (a Screen glow, for example) changes the picture; a notice says so. Convert to Smart
+Object does the same for the smart object.
 
 #### Select › Similar Layers
 
@@ -2064,7 +2134,8 @@ The bottom layer of a new document, named "Background", follows Photoshop's rule
 #### Edit > Toggle Last State (Alt+Ctrl+Z)
 
 Undoes the last step. Pressed again right away, it redoes that step, so repeated presses flip between the last two
-states to compare them (Photoshop's Alt+Ctrl+Z). After any other change it undoes that change first. In a text field it
+states to compare them (Photoshop's Alt+Ctrl+Z). After any other change it undoes that change first. After an Undo or a
+click in the History panel it goes back to the state you came from. In a text field it
 undoes typing; in Select and Mask it is that workspace's own undo. It is never recorded into an action.
 
 #### Edit > Search… (Ctrl+F)
@@ -2072,7 +2143,8 @@ undoes typing; in Select and Mask it is that workspace's own undo. It is never r
 Opens a search box over the menus, the tools and the panels. Type a few letters of a command, a menu or a tool
 ("gaus blur", "adjust lev", "brush tool", "layers panel"); each result shows its menu path and shortcut, and results
 that cannot run right now are dimmed. Up and Down move through the results, Enter or a click runs the selected one
-(the search box closes first), Esc closes it. With nothing typed, the last ten choices are listed. A command run from
+(the search box closes first), Esc closes it. Typing a command's whole name and pressing Enter runs that command; when a
+tool or a panel has a longer name, the menu command comes first ('blur' runs Filter › Blur › Blur, not the Blur Tool). With nothing typed, the last ten choices are listed. A command run from
 Search is recorded into an action like the menu item itself; Search is not.
 
 #### Numeric fields everywhere
@@ -2080,7 +2152,8 @@ Search is recorded into an action like the menu item itself; Search is not.
 Every number field of the app (dialogs, panels, the options bar) takes:
 
 - **Arithmetic**: `100+50`, `200/4`, `3*12`, `(10+5)*2`. Type an operator after the number; Enter, Tab or clicking
-  elsewhere works it out. Esc while typing an expression puts back what the field had.
+  elsewhere works it out. Esc while typing puts back what the field had; in a field that applies as you type (the
+  Properties panel's adjustment settings), the layer goes back to that value and no History step is left.
 - **Percentages**: `50%` is half of what the field had (or, in fields that say so, half of a reference such as the
   document size). In a field measured in % it is just 50.
 - **Units**: in a field measured in pixels, `2in`, `5cm`, `30mm`, `72pt` are converted at the document's resolution

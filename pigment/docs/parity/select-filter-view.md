@@ -1,16 +1,16 @@
 # Parity: Select, Filter and View menus
 
-Part of [Pigment and Photoshop: feature parity](../PARITY.md), as of Pigment 0.3.1 (November 2026).
+Part of [Pigment and Photoshop: feature parity](../PARITY.md), as of Pigment 0.4 (November 2026). The rows planned for 0.4 ("0.4 · *package*") show their 0.4 status and the counts below include them; the other rows and the overview paragraph describe Pigment 0.3.1 as the audit found it.
 
 Verified in the code under /home/user/claude/pigment (menu: /home/user/claude/pigment/src/main/menu.js; no command in this area is stubbed, app.stubbed is empty). Select is the strongest part: every menu command except New 3D Extrusion exists, and Select and Mask is nearly complete (missing Refine Hair, presets, High Quality Preview), but Color Range is a thin form (no eyedroppers on the image, no Localized Color Clusters, Skin Tones, Out of Gamut, matte previews or .axt), Modify has no "apply effect at canvas bounds", Load/Save Selection lack document and channel-operation choices, there are no Quick Mask Options, and Subject / Sky / Focus Area are GrabCut and saliency heuristics rather than learned models. Filter has all the classic menu filters, the 47 Filter Gallery effects and the five Blur Gallery kinds, but many dialogs are simplified (Smart Sharpen, Reduce Noise, Wave, ZigZag, Spherize, Shear, Custom 3x3, Maximum/Minimum, Offset, Lens Flare, Lighting Effects with one light, Oil Paint on a different algorithm), smart filters have no masks, no per-filter blending options and no drag between layers, and Neural Filters, Adaptive Wide Angle, Vanishing Point, Filter > 3D and 8BF plug-ins are absent. Camera Raw Filter covers only Basic, a reduced Detail, HSL and a reduced Effects tab (no Curve, Color Grading, Optics, Geometry, Calibration, masking, healing, presets, snapshots, histogram or before/after); Liquify has five brushes and two sliders (no Smooth, Push Left, Freeze/Thaw, Face-Aware, meshes, view options, zoom, smart filter); Lens Correction lacks a profile database (Lensfun would be the honest substitute). View is the weakest menu: Proof Colors and Gamut Warning are a fixed generic CMYK simulation with no Proof Setup or ICC, guides can only be created and cleared all at once (no move, delete, lock, colours, Guide Layout, From Shape), snapping exists only in the Move tool (document edges and guides, no Snap To submenu, grid or layers, no Smart Guides), and Pixel Aspect Ratio, 32-bit Preview Options, Print Size, Actual Size, Fit Layer, Flip Horizontal view, Pattern Preview, real Screen Modes, the Extras master toggle with its Show submenu, ruler origin, bird's-eye view, flick panning and animated zoom (a dead setting, `void animate` in canvas-view.js) are missing. Features that depend on Adobe's trained models or data (Neural Filters, Adobe camera/lens profiles, ACR AI masks, Denoise and Lens Blur) are marked not-feasible with open-source or user-supplied substitutes named.
 
-72 missing · 54 partial · 18 approximate · 17 not feasible · 61 done · 222 entries
+62 missing · 47 partial · 18 approximate · 17 not feasible · 78 done · 222 entries
 
 ## view
 
 | Feature | Where in Photoshop | Status | In Pigment | Effort | Planned |
 |---|---|---|---|---|---|
-| Ruler origin | Drag from the ruler corner to set the zero point; double-click the corner to reset | Missing | The origin is always the document's top-left; the corner box is inert | S | 0.4 · guides-snapping |
+| Ruler origin | Drag from the ruler corner to set the zero point; double-click the corner to reset | Done | 0.4: drag from the ruler corner, double-click to reset; follows Image Size, Canvas Size, Rotate, Flip and Crop | S | 0.4 · guides-snapping |
 | Bird's-eye view | Hold H and drag while zoomed in | Missing | Not present | S | 0.6 · view-navigation |
 | Animated zoom | Preferences > Tools > Animated Zoom; continuous zoom while holding the Zoom tool | Missing | defaults.js has animatedZoom: true but nothing reads it and setZoom() discards its animate option (`void animate` in canvas-view.js); zoom always jumps | S | 0.6 · view-navigation |
 | Flick panning | Preferences > Tools > Enable Flick Panning | Missing | The Hand tool pans without inertia | S | 0.6 · view-navigation |
@@ -18,23 +18,23 @@ Verified in the code under /home/user/claude/pigment (menu: /home/user/claude/pi
 | Actual Size | View > Actual Size | Missing | Not present (needs the display's physical DPI) | S | 0.7 · screen-modes-extras |
 | Fit Layer(s) on Screen | View > Fit Layer(s) on Screen; Alt-click a layer thumbnail | Missing | Not present | S | 0.7 · screen-modes-extras |
 | Flip Horizontal (view only) | View > Flip Horizontal | Missing | Not present; the view matrix has zoom, pan and rotation only | M | 0.7 · screen-modes-extras |
-| Pattern Preview | View > Pattern Preview | Missing | Not present | M | 0.4 · patterns |
+| Pattern Preview | View > Pattern Preview | Done | 0.4: View › Pattern Preview | M | 0.4 · patterns |
 | Pixel Aspect Ratio and Pixel Aspect Ratio Correction | View > Pixel Aspect Ratio (Square, D1/DV NTSC, PAL, Anamorphic..., Custom, Delete, Reset); View > Pixel Aspect Ratio Correction | Missing | No non-square pixel support anywhere in the view or document model | M | 0.11 · render-video |
 | Print Size | View > Print Size | Missing | Not present | S | 0.7 · screen-modes-extras |
 | Show > All, None, Show Extras Options | View > Show | Missing | Not present | S | 0.7 · screen-modes-extras |
 | Show > Count, Slices, Notes | View > Show | Missing | The Count tool, slices and notes do not exist, so neither do their overlays | S | 0.10 · slices-web-export |
 | Show > Layer Edges | View > Show > Layer Edges | Missing | Not present | S | 0.7 · screen-modes-extras |
-| Show > Smart Guides | View > Show > Smart Guides | Missing | No smart guides at all (no alignment hints or distance measurements while moving) | M | 0.4 · guides-snapping |
+| Show > Smart Guides | View > Show > Smart Guides | Done | 0.4: alignment lines, equal spacing and Ctrl-hover distances; no Smart Guides while drawing paths | M | 0.4 · guides-snapping |
 | Show > Target Path | View > Show > Target Path (Shift+Ctrl+H) | Missing | No toggle | S | 0.7 · screen-modes-extras |
-| Snap To | View > Snap To > Guides, Grid, Layers, Slices, Document Bounds, All, None | Missing | No submenu; guides and document bounds are hard-wired in the Move tool, grid and layer snapping do not exist | M | 0.4 · guides-snapping |
+| Snap To | View > Snap To > Guides, Grid, Layers, Slices, Document Bounds, All, None | Done | 0.4: Guides, Grid, Layers, Document Bounds, All, None; Artboards and Slices have no targets yet | M | 0.4 · guides-snapping |
 | Zoom tool options: Resize Windows to Fit, Zoom All Windows | Zoom tool options bar | Missing | Only Zoom in/out, Fit on screen, 100 %, Fill screen and Scrubby zoom; documents are tabs in one window | S | 0.8 · document-windows |
 | Scroll-wheel and gesture zoom | Preferences > Tools: Zoom with Scroll Wheel; Alt+wheel; trackpad pinch | Partial | lib/canvas-view.js wheel handler: Ctrl/Cmd+wheel and pinch zoom, plain wheel scrolls (or zooms with the zoomWithWheel preference), Shift+wheel scrolls sideways. Alt+wheel, Photoshop's default zoom gesture, is not handled, and Ctrl+wheel zooms where Photoshop scrolls horizontally. | S | 0.6 · view-navigation |
-| Ruler units | Right-click a ruler; Preferences > Units & Rulers (Pixels, Inches, Centimeters, Millimeters, Points, Picas, Percent) | Partial | Units are set in Preferences only (px, in, cm, mm, pt, percent in /home/user/claude/pigment/src/renderer/lib/extras.js); no Picas, no right-click menu on the ruler, no double-click to open the preference | S | 0.4 · guides-snapping |
+| Ruler units | Right-click a ruler; Preferences > Units & Rulers (Pixels, Inches, Centimeters, Millimeters, Points, Picas, Percent) | Done | 0.4: Pixels, Inches, Centimeters, Millimeters, Points, Picas and Percent from the ruler menu or Preferences | S | 0.4 · guides-snapping |
 | Rotate View tool | Rotate View tool (R): drag, Shift for 15 degrees, Rotation Angle field, Reset View, Rotate All Windows | Partial | lib/tools/nav.js RotateViewTool: drag, Shift snaps to 15 degrees, Angle field and Reset view. No compass overlay while dragging and no Rotate All Windows (there is one view per document). R is shared with the Hand slot as the panels auditor notes. | S | 0.6 · view-navigation |
-| Temporary navigation keys | Space (Hand), Ctrl+Space / Alt+Space (Zoom in / out), hold R (Rotate View) | Partial | Space gives a temporary Hand (/home/user/claude/pigment/src/renderer/lib/shortcuts.js); no Ctrl+Space or Alt+Space zoom, no spring-loaded tools | S | 0.4 · conventions-shortcuts-fields |
+| Temporary navigation keys | Space (Hand), Ctrl+Space / Alt+Space (Zoom in / out), hold R (Rotate View) | Done | 0.4: Space, Ctrl+Space, Alt+Space, and a held tool key (R for Rotate View) | S | 0.4 · conventions-shortcuts-fields |
 | Extras (master toggle) | View > Extras (Ctrl+H) | Partial | view:extras (Ctrl+H) only toggles selection edges (settings.showSelectionEdges); guides, grid and paths stay | S | 0.7 · screen-modes-extras |
 | Show > Brush Preview, Mesh, Edit Pins | View > Show | Partial | Puppet Warp has its own 'Show mesh' checkbox (/home/user/claude/pigment/src/renderer/lib/warp.js); no View > Show entries, no pin toggle, no brush preview | S | 0.7 · screen-modes-extras |
-| Snap | View > Snap (Shift+Ctrl+;) | Partial | view:snap exists, but only the Move tool snaps (/home/user/claude/pigment/src/renderer/lib/tools/move.js snapDelta: document edges, centre and guides). Marquees, crop, shapes, pen, transforms and dragged guides do not snap | M | 0.4 · guides-snapping |
+| Snap | View > Snap (Shift+Ctrl+;) | Done | 0.4: View › Snap; every placing tool snaps, nearest target first; Ctrl while dragging turns it off | M | 0.4 · guides-snapping |
 | Status bar zoom field | Document window status bar: zoom percentage | Done | Editable zoom field in the status bar (app.js, view:set-zoom) |  |  |
 | 100% and 200% | View > 100% (Ctrl+1), 200% | Done | view:zoom-100, view:zoom-200 (Ctrl+2) |  |  |
 | Fit on Screen | View > Fit on Screen (Ctrl+0) | Done | view:zoom-fit (also resets the view rotation); extra Fill Screen item |  |  |
@@ -201,14 +201,14 @@ Verified in the code under /home/user/claude/pigment (menu: /home/user/claude/pi
 
 | Feature | Where in Photoshop | Status | In Pigment | Effort | Planned |
 |---|---|---|---|---|---|
-| Guide selection, colours and Edit Selected Guides | Click / Shift-click guides; View > Guides > Edit Selected Guides (orientation, position, colour) | Missing | Guides are { axis, pos } only: no selection, no per-guide colour | M | 0.4 · guides-snapping |
-| Move and delete individual guides | Move tool: drag a guide, drag it back to the ruler to delete | Missing | Guides cannot be picked, moved or removed singly after creation; only Clear Guides removes them (no guide hit-testing in move.js or canvas-view.js) | S | 0.4 · guides-snapping |
-| Clear Selected Guides / Clear Selected Artboard Guides / Clear Canvas Guides | View > Guides | Missing | Not present (no guide selection, no artboards) | S | 0.4 · guides-snapping |
-| Lock Guides | View > Guides > Lock Guides (Alt+Ctrl+;) | Missing | Not present | S | 0.4 · guides-snapping |
-| New Guide Layout | View > Guides > New Guide Layout (Columns, Rows, Gutter, Margin, Center Columns, presets, Target) | Missing | Not present | M | 0.4 · guides-snapping |
-| New Guides From Shape | View > Guides > New Guides From Shape | Missing | Not present | S | 0.4 · guides-snapping |
-| Create guides by dragging from a ruler | Drag from a ruler; Alt switches orientation; Shift snaps to ruler ticks | Partial | Dragging from a ruler creates a guide (canvas-view.js guideDrag); no Alt orientation switch, no Shift snapping | S | 0.4 · guides-snapping |
-| New Guide | View > Guides > New Guide (Orientation, Position with units, Color) | Partial | view:new-guide is one text prompt in pixels where an 'h' prefix means horizontal; no orientation radio, units or colour | S | 0.4 · guides-snapping |
+| Guide selection, colours and Edit Selected Guides | Click / Shift-click guides; View > Guides > Edit Selected Guides (orientation, position, colour) | Done | 0.4: click and Shift-click guides, a colour per guide, Edit Selected Guides | M | 0.4 · guides-snapping |
+| Move and delete individual guides | Move tool: drag a guide, drag it back to the ruler to delete | Done | 0.4: the Move tool selects and drags guides, a drag out of the canvas deletes them, Delete clears the selected ones | S | 0.4 · guides-snapping |
+| Clear Selected Guides / Clear Selected Artboard Guides / Clear Canvas Guides | View > Guides | Done | 0.4: all three in View › Guides (artboard guides wait for artboards) | S | 0.4 · guides-snapping |
+| Lock Guides | View > Guides > Lock Guides (Alt+Ctrl+;) | Done | 0.4: View › Guides › Lock Guides (Alt+Ctrl+;) | S | 0.4 · guides-snapping |
+| New Guide Layout | View > Guides > New Guide Layout (Columns, Rows, Gutter, Margin, Center Columns, presets, Target) | Done | 0.4: Columns, Rows, Gutter, Margin, Center Columns, presets | M | 0.4 · guides-snapping |
+| New Guides From Shape | View > Guides > New Guides From Shape | Done | 0.4: View › Guides › New Guides From Shape | S | 0.4 · guides-snapping |
+| Create guides by dragging from a ruler | Drag from a ruler; Alt switches orientation; Shift snaps to ruler ticks | Done | 0.4: Alt switches orientation, Shift snaps to ruler ticks, positions keep two decimals | S | 0.4 · guides-snapping |
+| New Guide | View > Guides > New Guide (Orientation, Position with units, Color) | Done | 0.4: orientation, position with units from the ruler origin, colour | S | 0.4 · guides-snapping |
 | Clear Guides | View > Guides > Clear Guides | Done | view:clear-guides (undoable) in /home/user/claude/pigment/src/renderer/app.js |  |  |
 
 ## smart-filters
@@ -282,8 +282,8 @@ Verified in the code under /home/user/claude/pigment (menu: /home/user/claude/pi
 
 | Feature | Where in Photoshop | Status | In Pigment | Effort | Planned |
 |---|---|---|---|---|---|
-| Find Layers (Layers panel filter bar) | Select > Find Layers (Alt+Shift+Ctrl+F); Layers panel filter row | Partial | /home/user/claude/pigment/src/renderer/lib/layers-extras/find.js has Kind, Name, Effect, Mode, Attribute, Color. Missing filter types Smart Object (linked/embedded/up to date...), Selected and Artboard; attributes lack Vector Mask, Advanced Blending and the 'Not ...' variants (only Not visible) | S | 0.4 · layers-panel-depth |
-| Isolate Layers | Select > Isolate Layers | Partial | select:isolate-layers in layers-extras/find.js hides other layers in the view only; sample-all-layers tools and Move auto-select still see the hidden layers (ARCHITECTURE.md Known gaps) | S | 0.4 · layers-panel-depth |
+| Find Layers (Layers panel filter bar) | Select > Find Layers (Alt+Shift+Ctrl+F); Layers panel filter row | Partial | 0.4: the filter bar with the Selected type and the Not locked, Vector mask and Advanced blending attributes; no Smart Object or Artboard filter | S | 0.4 · layers-panel-depth |
+| Isolate Layers | Select > Isolate Layers | Done | 0.4: the samplers and the Move tool see only the isolated layers | S | 0.4 · layers-panel-depth |
 | All Layers | Select > All Layers (Alt+Ctrl+A) | Done | layer:select-all in /home/user/claude/pigment/src/renderer/lib/layer-ops.js; no Alt+Ctrl+A accelerator in keymap.js |  |  |
 | Deselect Layers | Select > Deselect Layers | Done | select:deselect-layers in /home/user/claude/pigment/src/renderer/lib/layers-extras/structure.js |  |  |
 
@@ -291,7 +291,7 @@ Verified in the code under /home/user/claude/pigment (menu: /home/user/claude/pi
 
 | Feature | Where in Photoshop | Status | In Pigment | Effort | Planned |
 |---|---|---|---|---|---|
-| Guides, Grid & Slices preferences | Preferences > Guides, Grid & Slices (guide colour and style, grid colour, style, Gridline Every, Subdivisions) | Partial | Only grid spacing in pixels (Preferences 'Grid spacing'); grid and guide colours are fixed, no subdivisions, no line styles | S | 0.4 · guides-snapping |
+| Guides, Grid & Slices preferences | Preferences > Guides, Grid & Slices (guide colour and style, grid colour, style, Gridline Every, Subdivisions) | Done | 0.4: guide colour and style, Smart Guides colour, grid colour, style, Gridline Every and Subdivisions; the slice settings wait for slices | S | 0.4 · guides-snapping |
 | Overscroll | Preferences > Tools > Overscroll | Partial | Panning past the document edge always works (clampPan keeps a 40 px sliver on screen) but there is no Overscroll preference to turn it off; the string does not occur in the source. The file-edit auditor's 'missing' for the preference and the view auditor's 'done' for the behaviour are both right in part. | S | 0.6 · view-navigation |
 
 ## panels

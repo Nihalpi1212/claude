@@ -423,3 +423,105 @@ test('a 16-bit document, an undone mode change and a .pigment round trip keep th
   expect(r.roundTrip).toBe(0);
   expect(errors).toEqual([]);
 });
+
+test('Blend Interior Effects as Group: off, interior effects keep their own modes over the content; on, the layer\'s mode takes them', async ({ page }) => {
+  const errors = await openApp(page);
+  await greyDoc(page);
+  const r = await page.evaluate(async () => {
+    const app = window.pigmentApp;
+    const fx = window.__fx;
+    const d = app.doc;
+    const out = {};
+    // a white Multiply layer with a Normal red Color Overlay over grey (Photoshop's Blending Options: the option
+    // "applies the blending mode of the layer to layer effects that modify opaque pixels")
+    const l = fx.raster({ blend: 'multiply', color: '#ffffff', styles: { colorOverlay: { enabled: true, color: '#ff0000', blend: 'normal', opacity: 1 } } });
+    out.off = fx.px(80, 60);
+    l.blending = { interiorAsGroup: true };
+    l.touch();
+    out.on = fx.px(80, 60);
+    l.fillOpacity = 0.5;
+    l.touch();
+    out.onHalf = fx.px(80, 60);
+    l.blending = null;
+    l.touch();
+    out.offHalf = fx.px(80, 60);
+    // Fill 0 % with a white Overlay overlay brightens what is below (the merged render drew it plain white)
+    l.blend = 'normal';
+    l.fillOpacity = 0;
+    l.styles = { colorOverlay: { enabled: true, color: '#ffffff', blend: 'overlay', opacity: 1 } };
+    l.touch();
+    out.fill0Overlay = fx.px(80, 60);
+    // the same through the per-pixel path (Blend If on the layer): the interior effect stays in its mode
+    l.blend = 'multiply';
+    l.fillOpacity = 1;
+    l.styles = { colorOverlay: { enabled: true, color: '#ff0000', blend: 'normal', opacity: 1 } };
+    l.blending = { blendIf: { gray: { this: [0, 0, 255, 255], under: [0, 0, 250, 255] } } };
+    l.touch();
+    out.perPixel = fx.px(80, 60);
+    // Create Layers: the overlay becomes a clipped layer and the base's Blend Clipped Layers as Group goes off, so the
+    // picture stays; undo restores both
+    l.blending = null;
+    l.touch();
+    const before = fx.composite();
+    document.querySelectorAll('#toasts .toast').forEach((t) => t.remove());
+    await app.commands.run('layer:style-create-layers', undefined, 'api');
+    out.created = d.layers().slice(1).map((x) => `${x.name.replace("L's ", '')}:${x.blend}${x.clip ? ':clip' : ''}`);
+    out.clippedAsGroup = l.blending?.clippedAsGroup;
+    out.createdDiff = fx.maxDiff(before, fx.composite());
+    await app.commands.run('edit:undo', undefined, 'api');
+    out.undone = { layers: d.layers().length, blending: l.blending ?? null, diff: fx.maxDiff(before, fx.composite()) };
+    return out;
+  });
+  expect(r.off).toEqual([255, 0, 0, 255]);
+  expect(r.on).toEqual([128, 0, 0, 255]);
+  // on, Fill fades the layer with its overlay; off, it fades the content only and the overlay covers it
+  expect(r.onHalf.slice(0, 3).map((v, i) => Math.abs(v - [128, 64, 64][i]) <= 1)).toEqual([true, true, true]);
+  expect(r.offHalf).toEqual([255, 0, 0, 255]);
+  // white in Overlay over grey 128 gives 255
+  expect(r.fill0Overlay).toEqual([255, 255, 255, 255]);
+  expect(r.perPixel).toEqual([255, 0, 0, 255]);
+  expect(r.created).toEqual(['L:multiply', 'Color Fill:normal:clip']);
+  expect(r.clippedAsGroup).toBe(false);
+  expect(r.createdDiff).toBeLessThanOrEqual(2);
+  await expect(toast(page, 'cannot be reproduced with layers')).toHaveCount(0);
+  expect(r.undone).toEqual({ layers: 2, blending: null, diff: 0 });
+  // Rasterize Layer Style cannot keep an overlay that blends apart from a Multiply layer, and says so
+  await page.evaluate(async () => {
+    document.querySelectorAll('#toasts .toast').forEach((t) => t.remove());
+    await window.pigmentApp.commands.run('layer:rasterize-style', undefined, 'api');
+  });
+  await expect(toast(page, 'which one layer cannot keep')).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
+test('Photoshop\'s default black Multiply shadow keeps the merged fast path; Blend If with Normal effects keeps 0.3\'s pixels', async ({ page }) => {
+  const errors = await openApp(page);
+  await greyDoc(page);
+  const r = await page.evaluate(async () => {
+    const app = window.pigmentApp;
+    const fx = window.__fx;
+    const d = app.doc;
+    const out = {};
+    const shadow = (blend) => ({ dropShadow: { enabled: true, color: '#000000', blend, opacity: 0.75, distance: 8, size: 5 }, stroke: { enabled: true, size: 3, position: 'outside', color: '#000000', blend: 'darken' } });
+    const l = fx.raster({ opacity: 0.6, styles: shadow('multiply') }, { shape: 'ellipse' });
+    const multiply = fx.composite();
+    out.split = !!d.view.compositor.styleCache.get(l)?.parts;
+    l.styles = shadow('normal');
+    l.styles.stroke.blend = 'normal';
+    l.touch();
+    out.vsNormal = fx.maxDiff(multiply, fx.composite());
+    // Blend If and Normal effects: the merged effects go in as one image, so Rasterize Layer Style bakes exactly
+    // what the canvas shows
+    l.opacity = 1;
+    l.blending = { blendIf: { gray: { this: [0, 0, 255, 255], under: [0, 40, 255, 255] } } };
+    l.touch();
+    const before = fx.composite();
+    await app.commands.run('layer:rasterize-style', undefined, 'api');
+    out.rasterized = fx.maxDiff(before, fx.composite());
+    return out;
+  });
+  expect(r.split).toBe(false);
+  expect(r.vsNormal).toBe(0);
+  expect(r.rasterized).toBe(0);
+  expect(errors).toEqual([]);
+});

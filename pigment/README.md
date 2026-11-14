@@ -41,10 +41,11 @@ with [ag-psd](https://github.com/Agamnentzar/ag-psd) for Photoshop files and
   gradient and pattern overlay, stroke, with Photoshop's fields for each: contours (Contour Editor and
   built-in contours), noise, glow technique, Bevel & Emboss Contour and Texture, gradient and pattern
   strokes; several instances of Drop Shadow, Inner Shadow, Color Overlay, Gradient Overlay and Stroke;
-  drag in the document to place a shadow, satin, gradient or pattern; copy/paste styles; global light
+  drag in the document to place a shadow, satin, gradient or pattern; copy/paste styles; global light.
+  Each shadow, glow and outer stroke blends with the layers below in its own blend mode, as in Photoshop
 - **Blending Options**: fill opacity, channels, knockout (Shallow, Deep), Blend Interior Effects as
-  Group, Blend Clipped Layers as Group, the mask-hides-effects options and Blend If with split sliders;
-  layer styles on groups; Create Layers, Hide All Effects, Scale Effects
+  Group, Blend Clipped Layers as Group, the mask-hides-effects options and Blend If with split sliders,
+  also on adjustment layers; layer styles on groups; Create Layers, Hide All Effects, Scale Effects
 - **Layers panel**: effects listed under each layer with their own eyes (drag them between layers);
   Opacity and Fill as scrubby fields for every selected layer; blend-mode menu that previews on the
   canvas while you hover; drag several rows, Alt-drag to copy, drag down the eye column; Alt-click
@@ -314,23 +315,26 @@ Limits of what is there:
 - **16 and 32 bits**: Levels, Curves and the other tonal adjustments, crop, canvas size, flips, 90°
   turns and Flatten Image work at full precision. Painting, retouching, filters, Image Size, Free
   Transform and the warps work at 8 bits on the pixels they touch. Masks are 8-bit. 32-bit is
-  display-referred float (highlights above white are kept), not linear light. Layers with advanced
-  blending options, Merge Group and the stamps, and Levels or Curves in the CMYK or Lab space go
-  through the 8-bit composite. PSD files are written at 8 bits
-- **PSD export of 0.4's features waits for 0.5**: the merged image is right, but blending options,
-  more than one instance of an effect, contours, textures and gradient strokes, live shape parameters,
-  and Hue/Saturation ranges are not written, and the three new adjustments are written as hidden
-  placeholders; masks are written with density,
-  feather and the vector mask baked into a raster mask; a text layer with several styles or a stroke is
-  written as pixels. Vector masks are not read from PSD files
+  display-referred float (highlights above white are kept), not linear light. Merges, stamps and
+  clipping masks keep full precision, but layers with effects, knockout or Blend If on a pixel layer,
+  blend modes other than Normal, Multiply and Screen, Merge Group, and Levels or Curves in the CMYK or
+  Lab space go through the 8-bit composite. PSD files are written at 8 bits
+- **PSD export of 0.4's features waits for 0.5**: the merged image is right, and Fill, Blend If,
+  Hue/Saturation ranges, the Gradient Map's method and guides are written, but layer effects, knockout,
+  the channel restriction and the other advanced blending options, and live shape parameters are not
+  (saving says which layers lose them); the three new adjustments are written as hidden placeholders;
+  masks are written with density, feather and the vector mask baked into a raster mask; a text layer
+  with several styles or a stroke is written as pixels. Vector masks and layer effects are not read
+  from PSD files
 - **Type**: anti-aliasing methods are stored but text is drawn smooth; OpenType-SVG colour glyphs draw
   as plain outlines; variable fonts draw at their default instance; Hyphenate Across Column has no
   effect, only the eight bundled languages hyphenate, and East Asian Width is approximated in line
   breaking; converting paragraph to point text keeps each paragraph on one line; Reset Character keeps
   the font, size and colour. The vertical type modes keep 0.3's layout. In the browser build without the
   font permission, text is drawn by 0.3's Canvas engine (Optical kerning falls back to Metrics there)
-- **Layer styles**: Create Layers on a layer with Fill below 100 % fades the interior effect layers, and
-  Dissolve effects speckle differently once they are layers; Stroke has no Overprint; there is no Make
+- **Layer styles**: Create Layers cannot match the picture with knockout, a layer opacity below 100 % with
+  exterior effects, or a Fill below 100 % with interior effects (it warns, as Photoshop does), and Dissolve
+  effects speckle differently once they are layers; Stroke has no Overprint; there is no Make
   Default and no Styles page in the Layer Style dialog; dragging a shadow that uses global light sets
   its own angle instead of moving the global light
 - **Adjustments**: the Properties panel does not show the Levels and Curves clipping display; built-in

@@ -1,36 +1,36 @@
 # Parity: Type
 
-Part of [Pigment and Photoshop: feature parity](../PARITY.md), as of Pigment 0.3.1 (November 2026).
+Part of [Pigment and Photoshop: feature parity](../PARITY.md), as of Pigment 0.4 (November 2026). The rows planned for 0.4 ("0.4 · *package*") show their 0.4 status and the counts below include them; the other rows and the overview paragraph describe Pigment 0.3.1 as the audit found it.
 
 Pigment's type support is a single-style text layer drawn with Canvas fillText (src/renderer/lib/document.js TextLayer, lib/tools/text.js, lib/panels/character.js, lib/text-path.js): point text, a width-only paragraph box, text on a path, two vertical modes, family / weight / italic / size / leading / tracking / colour / underline / three alignments, in-place editing through a transparent textarea, and editable text in PSD import/export for the first style run only. Everything that needs a real type engine is absent: mixed formatting inside one layer (admitted in README), kerning control, horizontal/vertical scale, baseline shift, caps, super/subscript, strikethrough, every OpenType feature, anti-aliasing methods, variable-font axes, and the whole Paragraph panel (justification, indents, spacing, hyphenation, composers, lists). There is no Type menu (seven items live under Layer > Type), no Paragraph, Glyphs, Character Styles or Paragraph Styles panel, no Type Mask tools, no live Warp Text (the 15 warp presets exist but force rasterising), no Create Work Path / Convert to Shape, no Find and Replace, Check Spelling, Lorem Ipsum, missing-font handling or type preferences. The biggest single gap is the engine itself: a rich-text model (style runs and paragraph runs) with a shaper that reads font files (HarfBuzz/opentype.js via queryLocalFonts blob data) is the XL prerequisite for roughly two thirds of the missing entries, including faithful PSD round-trips (today PSD export writes the CSS family name instead of the PostScript name and marks real bold as faux bold). Genuinely not feasible offline are only Adobe Fonts (browse, activate, auto-resolve missing fonts), Match Font and Similar Fonts as Adobe's trained models, and Adobe's bundled licensed fonts; honest substitutes are user-installed fonts, PANOSE/OS/2-based similarity and bundled OFL families. Verified by reading the code at commit aa196d0 (0.3.1); the app was not run.
 
-87 missing · 22 partial · 15 approximate · 5 not feasible · 24 done · 153 entries
+55 missing · 15 partial · 7 approximate · 5 not feasible · 71 done · 153 entries
 
 ## character-panel
 
 | Feature | Where in Photoshop | Status | In Pigment | Effort | Planned |
 |---|---|---|---|---|---|
-| All Caps | Character panel button / menu | Missing | No option. | S | 0.4 · type-character-panel |
-| Small Caps | Character panel button / menu | Missing | No option (ctx.fontVariantCaps would give a quick version; real smcp needs the shaper). | S | 0.4 · type-character-panel |
-| Strikethrough | Character panel button / menu | Missing | No option. | S | 0.4 · type-character-panel |
-| Subscript | Character panel button / menu | Missing | No option; needs runs to be useful. | S | 0.4 · type-character-panel |
-| Superscript | Character panel button / menu | Missing | No option; needs runs to be useful. | S | 0.4 · type-character-panel |
-| Fractional Widths | Character panel menu | Missing | No toggle; advances are always fractional. | S | 0.4 · type-character-panel |
-| No Break | Character panel menu | Missing | No attribute; needs runs. A non-breaking space character does work because wrapping splits on U+0020 only. | S | 0.4 · type-character-panel |
-| Reset Character | Character panel menu | Missing | The panel has no menu; DEFAULT_TEXT_STYLE exists and could back it. | S | 0.4 · type-character-panel |
-| System Layout | Character panel menu | Missing | No toggle. | S | 0.4 · type-character-panel |
-| Character language (dictionary for hyphenation and spelling) | Character panel: language menu | Missing | No language attribute; nothing consumes one (no hyphenation, no spelling). | S | 0.4 · type-character-panel |
-| Character panel: baseline shift | Window > Character | Missing | No field (only the hidden pathText.baselineShift for text on a path). | S | 0.4 · type-character-panel |
-| Character panel: kerning (Metrics / Optical / manual values) | Window > Character | Missing | No kerning field. Font metric kerning is applied by Chromium only while tracking is 0; any tracking switches to per-glyph drawing with no kerning (drawSpaced in document.js). Metrics on/off is cheap (ctx.fontKerning and ctx.letterSpacing exist in Chromium); manual pair kerning needs runs; Optical needs glyph outlines and an own algorithm. | L | 0.4 · type-character-panel |
-| Character panel: scrubby sliders, unit entry and arithmetic in fields | Window > Character | Missing | Plain number inputs; no drag-on-label scrubbing, no unit suffixes, no maths. | S | 0.4 · type-character-panel |
-| Character panel: vertical scale and horizontal scale | Window > Character | Missing | No fields; glyphs can only be stretched by Free Transform on the whole layer. | S | 0.4 · type-character-panel |
-| Font size with units (pt, px, mm), preset size list and scrubby label | Options bar and Character panel: size | Partial | Number field 1 to 1296 in pixels only; no points or millimetres (so size is not tied to document resolution), no preset drop-down (6 to 72 pt), no scrubby drag on the label, no unit arithmetic. | S | 0.4 · type-character-panel |
+| All Caps | Character panel button / menu | Done | 0.4: Character panel button and menu | S | 0.4 · type-character-panel |
+| Small Caps | Character panel button / menu | Done | 0.4: the font's real small capitals on the HarfBuzz engine; faked on the Canvas engine | S | 0.4 · type-character-panel |
+| Strikethrough | Character panel button / menu | Done | 0.4: position and thickness from the font | S | 0.4 · type-character-panel |
+| Subscript | Character panel button / menu | Done | 0.4: from the font on the HarfBuzz engine | S | 0.4 · type-character-panel |
+| Superscript | Character panel button / menu | Done | 0.4: from the font on the HarfBuzz engine | S | 0.4 · type-character-panel |
+| Fractional Widths | Character panel menu | Done | 0.4: Character panel menu | S | 0.4 · type-character-panel |
+| No Break | Character panel menu | Done | 0.4: Character panel menu | S | 0.4 · type-character-panel |
+| Reset Character | Character panel menu | Partial | 0.4: in the panel menu; keeps the font, size and colour, which Photoshop resets too | S | 0.4 · type-character-panel |
+| System Layout | Character panel menu | Done | 0.4: Character panel menu | S | 0.4 · type-character-panel |
+| Character language (dictionary for hyphenation and spelling) | Character panel: language menu | Done | 0.4: language menu, used for hyphenation (eight bundled languages); spelling waits for the spelling checker | S | 0.4 · type-character-panel |
+| Character panel: baseline shift | Window > Character | Done | 0.4: per character | S | 0.4 · type-character-panel |
+| Character panel: kerning (Metrics / Optical / manual values) | Window > Character | Done | 0.4: Metrics, Optical (from the outlines on the HarfBuzz engine, Metrics elsewhere), 0 and manual values | L | 0.4 · type-character-panel |
+| Character panel: scrubby sliders, unit entry and arithmetic in fields | Window > Character | Done | 0.4: scrubby labels, units and arithmetic in every field | S | 0.4 · type-character-panel |
+| Character panel: vertical scale and horizontal scale | Window > Character | Done | 0.4: per character | S | 0.4 · type-character-panel |
+| Font size with units (pt, px, mm), preset size list and scrubby label | Options bar and Character panel: size | Done | 0.4: pixels, points or millimetres (Preferences › Type Units), the size list and a scrubby icon | S | 0.4 · type-character-panel |
 | Character panel: font family | Window > Character | Partial | Select of installed families (panels/character.js). No search, preview, favourites, recents or filters. | M | 0.5 · type-fonts |
-| Character panel: leading, including Auto | Window > Character | Partial | Leading in px, stored as a multiple of the size (lineHeight, default 1.2) and applied to every line. No explicit '(Auto)' choice, no adjustable auto-leading percentage, no per-line leading. PSD export marks 1.2 as autoLeading. | S | 0.4 · type-character-panel |
-| Faux Bold | Character panel button / menu | Approximate | No explicit toggle. Choosing Bold on a family without a bold face makes Chromium synthesise one, indistinguishable in the UI from a real bold. PSD export writes fauxBold for any weight of 600 or more, so a real Bold face opens in Photoshop as Regular plus Faux Bold. | S | 0.4 · type-character-panel |
-| Faux Italic | Character panel button / menu | Approximate | Same as Faux Bold: italic is a CSS flag, synthesised when the family has no italic, and always written to PSD as fauxItalic. | S | 0.4 · type-character-panel |
-| Underline | Character panel button / menu | Approximate | Checkbox for the whole layer; drawn as a rectangle at 0.12 em below the baseline, 1/16 em thick, not from the font's underline metrics; on a path it is drawn glyph by glyph. No Underline Left/Right for vertical type. | S | 0.4 · type-character-panel |
-| Character panel: tracking | Window > Character | Approximate | letterSpacing in pixels (-100 to 1000), not thousandths of an em (converted on PSD import/export). Non-zero tracking draws each code point separately, which removes kerning and ligatures and breaks Arabic/Indic shaping and emoji sequences. | S | 0.4 · type-engine-core |
+| Character panel: leading, including Auto | Window > Character | Done | 0.4: leading with Auto; mixed sizes follow Photoshop's leading rule | S | 0.4 · type-character-panel |
+| Faux Bold | Character panel button / menu | Done | 0.4: per character, any font | S | 0.4 · type-character-panel |
+| Faux Italic | Character panel button / menu | Done | 0.4: per character, any font | S | 0.4 · type-character-panel |
+| Underline | Character panel button / menu | Done | 0.4: position and thickness from the font | S | 0.4 · type-character-panel |
+| Character panel: tracking | Window > Character | Done | 0.4: tracking in 1/1000 em that keeps kerning, ligatures and complex scripts | S | 0.4 · type-engine-core |
 | Options bar: text colour swatch | Type tool options bar | Done | 'color' option; new text takes the foreground colour, editing a layer changes its colour (whole layer only). |  |  |
 | Character panel: colour | Window > Character | Done | Colour input for the whole layer; drags merge into one history entry. |  |  |
 
@@ -64,7 +64,7 @@ Pigment's type support is a single-style text layer drawn with Canvas fillText (
 | Manage Missing Fonts / Replace All Missing Fonts / Resolve Missing Fonts | Type > Manage Missing Fonts; missing fonts dialog on open | Missing | No detection: a family that is not installed silently renders in Chromium's fallback face, with no dialog, no layer badge and no substitution UI. The fallback font detector in text.js (detectFonts) could be reused to test availability. | M | 0.5 · type-fonts |
 | Font search by name | Font menu search field | Partial | Only the native select's type-ahead on the first letters; no substring search across family and style. | S | 0.5 · type-fonts |
 | Options bar: font family picker (search field, WYSIWYG list, filters) | Type tool options bar | Partial | A native select of family names (typeOptions 'family'). No text search field, no preview, no filters, no recent list; only the select's type-ahead. | M | 0.5 · type-fonts |
-| Colour, emoji and SVG fonts | Font menu; Glyphs panel (EmojiOne, Trajan Color) | Approximate | Whatever Chromium's canvas draws: system colour emoji and COLR/CBDT/sbix fonts render in colour in the whole-line path. OpenType-SVG fonts are not supported by Chromium. Emoji ZWJ sequences, flags and skin tones fall apart when tracking is non-zero, on a path (per UTF-16 unit) and in stacked text (per code point). No composite-glyph picker. | M | 0.4 · type-engine-core |
+| Colour, emoji and SVG fonts | Font menu; Glyphs panel (EmojiOne, Trajan Color) | Partial | 0.4: colour fonts and emoji drawn in colour, fallback to another installed font; OpenType-SVG glyphs draw as plain outlines | M | 0.4 · type-engine-core |
 | Font style list showing the family's real styles | Options bar and Character panel: font style | Approximate | Fixed list of ten entries (Light, Regular, Medium, Bold, Black, each with Italic; STYLES in text.js) mapped to CSS weight/italic, whatever the family contains. Styles such as Condensed, Semibold, Display or Oblique are unreachable, and absent weights are synthesised by Chromium without telling the user. queryLocalFonts already returns style and postscriptName per face but only .family is read. | M | 0.5 · type-fonts |
 | Missing glyph protection (automatic fallback font for unsupported characters) | Preferences > Type | Approximate | Always on implicitly: Chromium substitutes a system fallback face per character. Not switchable and the substituted font is not reported. | S | 0.5 · type-fonts |
 | Show Similar Fonts | Font menu filter | Not feasible | Absent. Photoshop uses Adobe's trained visual-similarity model. Honest substitute: similarity from PANOSE/OS-2 metrics and measured glyph proportions of installed fonts. |  |  |
@@ -77,17 +77,17 @@ Pigment's type support is a single-style text layer drawn with Canvas fillText (
 |---|---|---|---|---|---|
 | Check Spelling | Edit > Check Spelling | Missing | No command; the editor textarea sets spellcheck=false. Adobe's dictionaries are licensed; open Hunspell dictionaries (bundled, per language) with a Hunspell port are the offline substitute. Needs Ignore / Ignore All / Change / Change All / Add, Check All Layers and a per-text language. | M | 0.7 · type-styles-prefs |
 | Find and Replace Text | Edit > Find and Replace Text | Missing | No command or dialog (Find Next, Change, Change All, Change/Find; Search All Layers, Forward, Case Sensitive, Whole Word Only, Ignore Accents). | M | 0.7 · type-styles-prefs |
-| Double-click text with the Move tool to edit it | Move tool | Missing | tools/move.js has no text handling. | S | 0.4 · type-editing |
-| Placeholder text in new type layers (Lorem ipsum, pre-selected) | New type layer; Preferences > Type | Missing | New layers start empty; an empty layer is dropped on commit (dropNew). | S | 0.4 · type-editing |
-| Move the text while editing (Ctrl/Cmd-drag, or drag away from the text) | Type tool editing session | Missing | A click outside the layer's box commits the session (onPointerDown); there is no move gesture while editing. | S | 0.4 · type-editing |
-| Tab characters | Type tool editing session | Missing | Tab is swallowed (onEditorKey stops it) and no tab advance exists in layout. | S | 0.4 · type-editing |
-| Transform while editing (Ctrl/Cmd shows the transform box: scale, rotate, skew the text) | Type tool editing session | Missing | Not available in the session. After committing, Free Transform scales/rotates/skews text through layer.transform and keeps it editable. | M | 0.4 · type-editing |
-| Cut, copy and paste text, with formatting kept between type layers | Edit menu while editing | Partial | Plain-text clipboard through the textarea. There is no formatted clipboard because text has no runs. | S | 0.4 · type-editing |
-| Type keyboard shortcuts (size, leading, kerning/tracking, baseline, alignment, caps, super/subscript, scale reset) | Keyboard while editing | Partial | Present: Ctrl/Cmd+Shift+> and < (size by 2), Ctrl/Cmd+B, I, U (Photoshop uses Shift with these). Missing: Alt+arrows for kerning/tracking and leading, Shift+Alt+Up/Down baseline shift, Ctrl+Shift+L/C/R/J/F alignment, Ctrl+Shift+K all caps, +H small caps, super/subscript, Ctrl+Shift+X / Ctrl+Alt+Shift+X scale reset, Ctrl+Alt+Shift+A auto leading, Ctrl+H hide selection. | S | 0.4 · type-editing |
-| Resize the paragraph box while editing (eight handles) | Type tool editing session | Partial | Four corner handles change the width (and x) only (hitBoxHandle / onPointerMove); no side handles, no height. | S | 0.4 · type-editing |
-| Undo/redo inside an editing session | Edit > Undo while editing | Approximate | The textarea's own undo covers typing; font changes made during the session are not part of it; the committed session is a single 'Edit Type Layer' history entry. | S | 0.4 · type-editing |
-| IME and dead-key input (CJK, accents) | Type tool editing session | Approximate | Comes from the native textarea; the layer re-renders on each input event. The composition underline is invisible because the textarea text is transparent. | S | 0.4 · type-editing |
-| Selecting text: drag, double-click word, triple-click line, quadruple-click paragraph, five clicks / Ctrl+A all | Type tool editing session | Approximate | Native textarea behaviour under the transparent overlay: drag, double-click word, triple-click and Ctrl+A work; there is no four/five-click distinction. The selection is highlighted but formatting commands ignore it and restyle the whole layer. | M | 0.4 · type-editing |
+| Double-click text with the Move tool to edit it | Move tool | Done | 0.4 | S | 0.4 · type-editing |
+| Placeholder text in new type layers (Lorem ipsum, pre-selected) | New type layer; Preferences > Type | Done | 0.4: selected Lorem Ipsum, off in Preferences › Type | S | 0.4 · type-editing |
+| Move the text while editing (Ctrl/Cmd-drag, or drag away from the text) | Type tool editing session | Done | 0.4 | S | 0.4 · type-editing |
+| Tab characters | Type tool editing session | Done | 0.4: Tab types a tab, placed by the paragraph's tab spacing | S | 0.4 · type-editing |
+| Transform while editing (Ctrl/Cmd shows the transform box: scale, rotate, skew the text) | Type tool editing session | Done | 0.4: scale, rotate and skew with Free Transform's box; distort and perspective are not offered while editing | M | 0.4 · type-editing |
+| Cut, copy and paste text, with formatting kept between type layers | Edit menu while editing | Done | 0.4: formatted clipboard between type layers, Paste Without Formatting | S | 0.4 · type-editing |
+| Type keyboard shortcuts (size, leading, kerning/tracking, baseline, alignment, caps, super/subscript, scale reset) | Keyboard while editing | Done | 0.4: Photoshop's type keys | S | 0.4 · type-editing |
+| Resize the paragraph box while editing (eight handles) | Type tool editing session | Done | 0.4: eight handles; the box keeps its height and shows overflow | S | 0.4 · type-editing |
+| Undo/redo inside an editing session | Edit > Undo while editing | Done | 0.4: undo steps through typing and formatting runs; the commit is one History step | S | 0.4 · type-editing |
+| IME and dead-key input (CJK, accents) | Type tool editing session | Done | 0.4: input methods and dead keys, composed text drawn in the layer | S | 0.4 · type-editing |
+| Selecting text: drag, double-click word, triple-click line, quadruple-click paragraph, five clicks / Ctrl+A all | Type tool editing session | Done | 0.4: all of them; bidirectional text is selected in logical order | M | 0.4 · type-editing |
 | Double-click the T thumbnail to edit and select all text | Layers panel | Done | panels/layers.js line 270 runs layer:edit-text, which activates the tool and selects all. Properties panel has an Edit Text button. |  |  |
 | Click existing text to edit, caret at the click | Type tool | Done | hitTextLayer + caretIndex (works through the layer matrix, on a path and for stacked text). |  |  |
 | Editing overlay tracks zoom, canvas rotation and layer transform | Type tool at any zoom | Done | layoutEditor positions the textarea with the view matrix times the layer matrix and a measured CSS baseline; wheel events are forwarded so zooming while editing works. |  |  |
@@ -100,16 +100,16 @@ Pigment's type support is a single-style text layer drawn with Canvas fillText (
 
 | Feature | Where in Photoshop | Status | In Pigment | Effort | Planned |
 |---|---|---|---|---|---|
-| Overflow indicator (plus sign in the box handle) | Paragraph text box | Missing | The box has no height, so overflow cannot occur or be shown. Text on a path silently hides glyphs past the path end (hidden flag in layoutOnPath) with no indicator. | S | 0.4 · type-engine-core |
+| Overflow indicator (plus sign in the box handle) | Paragraph text box | Done | 0.4 | S | 0.4 · type-engine-core |
 | Anti-aliasing method (None, Sharp, Crisp, Strong, Smooth, Windows LCD, Windows) | Type > Anti-Alias; Type tool options bar; Character panel | Missing | No control anywhere and no field in the font object (DEFAULT_TEXT_STYLE in document.js). Canvas fillText always gives Chromium's greyscale anti-aliasing. None could be done by thresholding; Sharp/Crisp/Strong/Smooth are Adobe rasteriser variants and can only be approximated with an own glyph rasteriser (coverage gamma / emboldening). PSD import drops the antiAlias value. | M | 0.5 · type-menu-commands |
 | Warp Text (live, editable): 15 styles, Horizontal / Vertical, Bend, Horizontal Distortion, Vertical Distortion | Type > Warp Text; options bar Create Warped Text | Missing | No warp property on TextLayer. The 15 presets with Bend/H/V do exist for pixels (WARP_PRESETS and presetControls in lib/warp.js, bezierWarp in shared/pixels/warp.js) but Edit > Transform > Warp asks to rasterise a text layer first (warp.js line 1308). Missing: Horizontal/Vertical axis switch, storing the warp on the layer and re-applying it after each text render, PSD import/export of the warp. | M | 0.5 · type-menu-commands |
-| Several character formats inside one text layer (per-character font, style, size, colour, decoration) | Type layers | Missing | TextLayer has one font object for the whole layer (document.js line 178); README lists it as missing. Needs a run-based model, a multi-run line layout and renderer, a rich editing surface replacing the plain textarea, and run-aware panels, PSD I/O and history. | XL | 0.4 · type-engine-core |
-| Per-paragraph formatting inside one layer (alignment, indents, spacing per paragraph) | Type layers; Paragraph panel | Missing | One align value per layer; no paragraph model at all. | L | 0.4 · type-engine-core |
+| Several character formats inside one text layer (per-character font, style, size, colour, decoration) | Type layers | Done | 0.4: laid out and drawn by the HarfBuzz engine; PSD gets a layer with several styles as pixels until psd-text (0.5) | XL | 0.4 · type-engine-core |
+| Per-paragraph formatting inside one layer (alignment, indents, spacing per paragraph) | Type layers; Paragraph panel | Done | 0.4: alignment, indents, spacing and the other paragraph settings per paragraph | L | 0.4 · type-engine-core |
 | Text inside a closed shape or path (area type) | Type tool: click inside a closed path | Missing | Clicking a path always starts text on the path (pathHit in text.js); there is no in-shape line breaker. | L | 0.8 · type-on-path-area |
 | Text on a path: baseline shift to move text off the path | Character panel baseline shift on path type | Partial | layoutOnPath honours pathText.baselineShift and Image Size scales it, but no UI or command sets it. | S | 0.8 · type-on-path-area |
 | Text on a path: start and end brackets, drag to slide, drag across the path to flip | Path Selection / Direct Selection tool on type path | Partial | A start-offset I-beam can be dragged, but only inside a Type tool editing session (hitOffsetHandle); no end bracket; flipping is the menu command text:flip-path, not a drag across the path; the Path Selection tool does nothing to it. | M | 0.8 · type-on-path-area |
 | Text on a path: create by clicking a path, type along it | Type tool over a path | Partial | lib/text-path.js layoutOnPath: glyph-by-glyph placement on the flattened path, special cursor, Layer > Type > Text on Path to attach an existing layer. Limits: only the first subpath is used (admitted in ARCHITECTURE Known gaps), iteration is per UTF-16 unit so emoji and combining marks break, no kerning or ligatures, new lines are ignored, and the layer keeps a private copy of the path that cannot be reshaped with the Direct Selection or Pen tools afterwards (vector.js has no pathText target). | M | 0.8 · type-on-path-area |
-| Paragraph text in a bounding box (width and height) | Type tool: drag | Partial | Dragging makes a box but only its width is kept (beginNew stores width; the drag height is discarded for horizontal text). The box always grows downward with the text, so there is no fixed height and nothing can overflow. | M | 0.4 · type-engine-core |
+| Paragraph text in a bounding box (width and height) | Type tool: drag | Done | 0.4: width and height; text beyond the box is hidden | M | 0.4 · type-engine-core |
 | Type on high-resolution and zoomed canvases | Type layers | Done | Text is rasterised at document resolution and re-rendered live from parameters after Image Size (image-ops.js scales size, tracking, stroke and path) and Free Transform (matrix kept, text stays editable), as Photoshop does. Size limit 1296 px. |  |  |
 | Point text | Type tool: click | Done | TextLayer with width null; click sets the baseline (beginNew). |  |  |
 
@@ -117,16 +117,16 @@ Pigment's type support is a single-style text layer drawn with Canvas fillText (
 
 | Feature | Where in Photoshop | Status | In Pigment | Effort | Planned |
 |---|---|---|---|---|---|
-| Indent left margin, indent right margin, first-line indent | Paragraph panel | Missing | No fields or layout support. | S | 0.4 · type-paragraph-panel |
-| Justify last left / last centred / last right / justify all | Paragraph panel | Missing | No justification in layout. PSD import collapses the four justify values to left/center/right (JUSTIFY_TO_ALIGN in io.js). | M | 0.4 · type-paragraph-panel |
-| Space before / space after paragraph | Paragraph panel | Missing | No fields or layout support. | S | 0.4 · type-paragraph-panel |
-| Bulleted and numbered lists | Paragraph panel (recent Photoshop releases) | Missing | No list support. | M | 0.4 · type-paragraph-panel |
-| Hyphenate, and the Hyphenation settings dialog | Paragraph panel checkbox and menu | Missing | No hyphenation; a word longer than the box overflows it. Adobe's dictionaries are licensed; the open substitute is TeX hyphenation patterns per language, bundled. | M | 0.4 · type-paragraph-panel |
-| Reset Paragraph | Paragraph panel menu | Missing | No panel or command. | S | 0.4 · type-paragraph-panel |
-| Roman Hanging Punctuation | Paragraph panel menu | Missing | No option. | S | 0.4 · type-paragraph-panel |
-| Justification settings (word, letter and glyph spacing min/desired/max, auto leading) | Paragraph panel menu > Justification | Missing | No dialog; auto leading is fixed at 120 percent. | M | 0.4 · type-paragraph-panel |
-| Paragraph panel | Window > Paragraph | Missing | No panel. Alignment lives in the Character panel and options bar. | M | 0.4 · type-paragraph-panel |
-| Adobe Single-line Composer / Every-line Composer | Paragraph panel menu | Approximate | One greedy first-fit breaker (TextLayer.layout) that breaks at ASCII spaces only: no breaks after hyphens or dashes, none in CJK, no hyphenation. Close to Single-line for simple Latin text; Every-line is absent (Knuth-Plass is the public equivalent). The textarea overlay wraps by CSS rules, which can disagree with the layer's wrapping, so the caret can sit on a different line than the rendered text. | L | 0.4 · type-paragraph-panel |
+| Indent left margin, indent right margin, first-line indent | Paragraph panel | Done | 0.4: Paragraph panel | S | 0.4 · type-paragraph-panel |
+| Justify last left / last centred / last right / justify all | Paragraph panel | Done | 0.4: all four; PSD keeps them | M | 0.4 · type-paragraph-panel |
+| Space before / space after paragraph | Paragraph panel | Done | 0.4: Paragraph panel | S | 0.4 · type-paragraph-panel |
+| Bulleted and numbered lists | Paragraph panel (recent Photoshop releases) | Done | 0.4: bullets and numbering; the marker sits in the left indent and numbering runs within one layer | M | 0.4 · type-paragraph-panel |
+| Hyphenate, and the Hyphenation settings dialog | Paragraph panel checkbox and menu | Done | 0.4: TeX patterns in eight languages and the Hyphenation dialog; Hyphenate Across Column has no effect (no columns) | M | 0.4 · type-paragraph-panel |
+| Reset Paragraph | Paragraph panel menu | Done | 0.4: Paragraph panel menu | S | 0.4 · type-paragraph-panel |
+| Roman Hanging Punctuation | Paragraph panel menu | Done | 0.4: Paragraph panel menu | S | 0.4 · type-paragraph-panel |
+| Justification settings (word, letter and glyph spacing min/desired/max, auto leading) | Paragraph panel menu > Justification | Done | 0.4: the Justification dialog; justified lines close up word spaces down to the Minimum | M | 0.4 · type-paragraph-panel |
+| Paragraph panel | Window > Paragraph | Done | 0.4: Window › Paragraph and the Properties section | M | 0.4 · type-paragraph-panel |
+| Adobe Single-line Composer / Every-line Composer | Paragraph panel menu | Approximate | 0.4: both composers, with Unicode line breaking; Pigment's own Every-line algorithm, so lines can break differently from Photoshop's. East Asian Width is approximated | L | 0.4 · type-paragraph-panel |
 | Align left / centre / right | Paragraph panel | Done | font.align for the whole layer (TextLayer.renderBase, text on a path, stacked text). |  |  |
 | Options bar: alignment (left / centre / right, or top / centre / bottom for vertical) | Type tool options bar | Done | Segment control 'align' in typeOptions; applies to the whole layer; stacked vertical text maps it to top/middle/bottom (layoutStacked). |  |  |
 
@@ -138,9 +138,9 @@ Pigment's type support is a single-style text layer drawn with Canvas fillText (
 | Horizontal Type Mask tool | Toolbox: T group | Missing | No tool. Workaround today: make a text layer, Select > Layer Transparency as Selection (select:from-layer), delete the layer. A real tool needs the editing session to end in a selection instead of a layer, with the quick-mask overlay while typing. | M | 0.5 · type-menu-commands |
 | Vertical Type Mask tool | Toolbox: T group | Missing | No tool; same as the horizontal mask tool. | S | 0.5 · type-menu-commands |
 | Options bar: toggle text orientation button | Type tool options bar | Missing | Not in typeOptions(); orientation is changed from Layer > Type or the Character panel. | S | 0.5 · type-menu-commands |
-| Alt-click to enter paragraph box width and height numerically | Type tool: Alt/Option-click | Missing | No dialog; only the box width field in the Character panel after creation. | S | 0.4 · type-editing |
+| Alt-click to enter paragraph box width and height numerically | Type tool: Alt/Option-click | Done | 0.4: Alt-click asks for the box size | S | 0.4 · type-editing |
 | Shift+T cycles the type tools | Toolbox shortcut | Partial | Both tools share the 'text' slot and cycle with Shift+T (tools.js register); only two of Photoshop's four tools exist to cycle through. | S | 0.5 · type-menu-commands |
-| Options bar: toggle Character and Paragraph panels | Type tool options bar | Partial | Button opens the Character panel only (window:panel-character); there is no Paragraph panel. | S | 0.4 · type-paragraph-panel |
+| Options bar: toggle Character and Paragraph panels | Type tool options bar | Done | 0.4: the button toggles the panels | S | 0.4 · type-paragraph-panel |
 | Horizontal Type tool | Toolbox: T | Done | TypeTool 'type-horizontal' (lib/tools/text.js), shortcut T, click for point text, drag for a paragraph box, click existing text to edit. |  |  |
 
 ## type-menu
@@ -149,7 +149,7 @@ Pigment's type support is a single-style text layer drawn with Canvas fillText (
 |---|---|---|---|---|---|
 | Paste Lorem Ipsum | Type > Paste Lorem Ipsum | Missing | No command ('lorem' appears nowhere in src). | S | 0.5 · type-menu-commands |
 | Update All Text Layers | Type > Update All Text Layers | Missing | No command. Relevant after PSD import (Pigment always re-renders text with its own engine instead of keeping the stored pixels) and after fonts change. | S | 0.5 · type-menu-commands |
-| Type menu as a top-level menu | Menu bar: Type | Partial | No Type menu in src/main/menu.js (template is File, Edit, Image, Layer, Select, Filter, AI, View, Window, Help). Seven type commands sit under Layer > Type (Text on Path, Release from Path, Flip Text on Path, Horizontal, Vertical, Vertical Stacked) plus Layer > Edit Text. All other Type menu items are missing (listed separately). | S | 0.4 · skeleton-04 |
+| Type menu as a top-level menu | Menu bar: Type | Done | 0.4: Type menu between Layer and Select; some of its commands (Warp Text, Convert to Shape and others) come in 0.5 | S | 0.4 · skeleton-04 |
 | Convert to Point Text / Convert to Paragraph Text | Type > Convert to Point Text / Paragraph Text | Partial | Character panel 'Point text / Paragraph box' select plus box width (character.js setBox). No menu item. Paragraph to point just removes the width, so wrapped lines rejoin instead of becoming hard returns as in Photoshop. | S | 0.5 · type-menu-commands |
 | Type > Panels submenu (Character, Paragraph, Glyphs, Character Styles, Paragraph Styles) | Type > Panels | Partial | Only Window > Character exists (menu.js line 27, panels/character.js). No Paragraph, Glyphs, Character Styles or Paragraph Styles panel exists to list. | S | 0.7 · type-styles-prefs |
 
@@ -244,7 +244,7 @@ Pigment's type support is a single-style text layer drawn with Canvas fillText (
 
 | Feature | Where in Photoshop | Status | In Pigment | Effort | Planned |
 |---|---|---|---|---|---|
-| Properties panel for a type layer (transform, character, paragraph, type options) | Window > Properties | Partial | textSection in panels/properties.js is read-only: text preview, font, size, colour, plus 'Edit Text' and 'Character...' buttons. No editable controls. | M | 0.4 · type-character-panel |
+| Properties panel for a type layer (transform, character, paragraph, type options) | Window > Properties | Done | 0.4: editable transform, character and paragraph sections | M | 0.4 · type-character-panel |
 
 ## presets
 

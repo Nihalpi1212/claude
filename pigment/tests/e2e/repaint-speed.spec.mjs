@@ -563,3 +563,92 @@ test('a document-sized layer around a small subject repaints the subject\'s box,
   ]);
   expect(errors).toEqual([]);
 });
+
+test('knockout with Transparency Shapes Layer off knocks out the whole content box in every repaint path', async ({ page }) => {
+  const errors = await openApp(page);
+  await newDoc(page, { width: 400, height: 300, background: 'white' });
+  await kit(page);
+  const out = await page.evaluate(async () => {
+    const app = window.pigmentApp, rp = window.__rp, D = rp.D;
+    const px = (c, x, y) => Array.from(c.getContext('2d').getImageData(x, y, 1, 1).data).slice(0, 3);
+    const squares = (w, h, a, b) => {
+      const c = D.createCanvas(w, h);
+      const g = c.getContext('2d');
+      g.fillStyle = '#000';
+      g.fillRect(a[0], a[1], 60, 60);
+      g.fillRect(b[0], b[1], 60, 60);
+      return c;
+    };
+    const knock = { knockout: 'deep', transparencyShapes: false };
+    const result = {};
+    // a layer reaching past the document: its content box spans the gap between a square off the canvas and one on it
+    let d = app.doc;
+    d.add(new D.RasterLayer({ name: 'Red', canvas: rp.box(400, 300, '#ff0000'), x: 0, y: 0 }), d.root, 1);
+    d.add(new D.RasterLayer({ name: 'Knock', canvas: squares(1200, 300, [100, 100], [600, 100]), x: -400, y: 0, fillOpacity: 0, blending: knock }), d.root, 2);
+    result.wide = px(new rp.C.Compositor().composite(d), 100, 120);
+    // a document-sized knockout layer and an isolated knockout group, each with a small layer moved in the gap
+    for (const kind of ['layer', 'group']) {
+      await app.newDocument({ width: 1200, height: 900, name: kind, background: 'white' });
+      d = app.doc;
+      d.add(new D.RasterLayer({ name: 'Red', canvas: rp.box(1200, 900, '#ff0000'), x: 0, y: 0 }), d.root, 1);
+      if (kind === 'layer') {
+        d.add(new D.RasterLayer({ name: 'Knock', canvas: squares(1200, 900, [50, 400], [1050, 400]), x: 0, y: 0, fillOpacity: 0, blending: knock }), d.root, 2);
+      } else {
+        const G = new D.GroupLayer({ name: 'G', blend: 'normal', fillOpacity: 0, blending: knock });
+        d.add(G, d.root, 2);
+        d.add(new D.RasterLayer({ name: 'a', canvas: rp.box(60, 60, '#000'), x: 50, y: 400 }), G, 0);
+        d.add(new D.RasterLayer({ name: 'b', canvas: rp.box(60, 60, '#000'), x: 1050, y: 400 }), G, 1);
+      }
+      const T = new D.RasterLayer({ name: 'Small', canvas: rp.box(30, 30, '#00ff00'), x: 580, y: 415 });
+      d.add(T, d.root, 3);
+      d.view.paint();
+      T.x += 20;
+      T.touch();
+      d.view.dirty = true;
+      d.view.paint();
+      result[kind] = { diff: rp.check(), gap: px(d.view.compositor.composite(d), 590, 412) };
+    }
+    return result;
+  });
+  expect(out).toEqual({ wide: [255, 255, 255], layer: { diff: 0, gap: [255, 255, 255] }, group: { diff: 0, gap: [255, 255, 255] } });
+  expect(errors).toEqual([]);
+});
+
+test('a view keeps no scratch canvas between composites, and a document in the background keeps only its composite', async ({ page }) => {
+  const errors = await openApp(page);
+  await newDoc(page, { width: 800, height: 600, background: 'white' });
+  await kit(page);
+  const out = await page.evaluate(async () => {
+    const app = window.pigmentApp, rp = window.__rp, D = rp.D;
+    const first = app.doc, c = first.view.compositor;
+    // a faded layer whose effects blend in modes of their own: drawStack composites it on two scratch canvases
+    const l = new D.RasterLayer({ name: 'S', canvas: rp.box(300, 200, '#2080ff'), x: 100, y: 100, opacity: 0.5, styles: { outerGlow: { enabled: true, color: '#ffff00', blend: 'screen', opacity: 1, size: 10 } } });
+    first.add(l, first.root, 1);
+    const B = new D.RasterLayer({ name: 'B', canvas: rp.box(100, 100, '#00aa00'), x: 600, y: 400 });
+    first.add(B, first.root, 2);
+    first.view.paint();
+    for (const v of [0.4, 0.7, 0.3]) {
+      l.opacity = v;
+      l.touch();
+      first.view.dirty = true;
+      first.view.paint();
+      B.opacity = v;
+      B.touch();
+      first.view.dirty = true;
+      first.view.paint();
+    }
+    const held = { scratch: c.scratch ?? null, spare: !!c.spare, snaps: c.snaps.length, full: !!c.full };
+    await app.newDocument({ width: 200, height: 100, name: 'Other', background: 'white' });
+    const released = { scratch: c.scratch ?? null, spare: !!c.spare, snaps: c.snaps.length, full: !!c.full };
+    app.docs.activate(first);
+    first.view.dirty = true;
+    first.view.paint();
+    return { held, released, diff: rp.check(first) };
+  });
+  // the active view keeps its repaint caches (the spare buffer and a cached prefix); the scratch pair is gone
+  expect(out.held.scratch).toBe(null);
+  expect(out.held.full).toBe(true);
+  expect(out.released).toEqual({ scratch: null, spare: false, snaps: 0, full: true });
+  expect(out.diff).toBe(0);
+  expect(errors).toEqual([]);
+});

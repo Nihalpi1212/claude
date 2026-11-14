@@ -71,6 +71,8 @@ export class DocumentManager {
     const app = this.app;
     app.tools?.active?.deactivate?.();
     if (this.active?.frame) this.active.frame.hidden = true;
+    // a document in the background keeps its last composite only (the repaint caches are rebuilt on its next edits)
+    this.active?.view?.compositor?.release?.();
     this.active = doc;
     if (doc) {
       doc.frame.hidden = false;

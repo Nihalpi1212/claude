@@ -351,8 +351,26 @@ function effectSource(layer, doc) {
   return { canvas, x: src.x, y: src.y, after: parts.after };
 }
 
+/**
+ * Whether Create Layers turns the base's Blend Clipped Layers as Group off: with Blend Interior Effects as Group off,
+ * the canvas draws the content in the layer's mode and each interior effect over it in its own mode, not faded by the
+ * fill (compositor.js interiorApart), which is what clipped layers do with that option off. Where the layer is Normal
+ * at Fill 100 % both ways give the same picture, and the option is left as it is.
+ */
+function ungroupsInterior(layer) {
+  const bl = effectiveBlending(layer);
+  const mode = layer.isGroup && layer.blend === 'pass-through' ? 'normal' : layer.blend ?? 'normal';
+  return !bl.interiorAsGroup && (mode !== 'normal' || (layer.fillOpacity ?? 1) < 1);
+}
+
+/** Whether layer already has clipped layers right above it (a change of its Blend Clipped Layers reaches them too). */
+function hasClipped(layer) {
+  const kids = layer.parent?.children ?? [];
+  return !!kids[kids.indexOf(layer) + 1]?.clip;
+}
+
 /** One RasterLayer per effect part in stacking order, bottom first: { layer, interior } (interior parts clip to the base). */
-function effectLayers(layer, doc) {
+function effectLayers(layer, doc, ungroup = false) {
   const src = effectSource(layer, doc);
   if (!src) return [];
   const bl = effectiveBlending(layer);
@@ -375,8 +393,9 @@ function effectLayers(layer, doc) {
       g.globalCompositeOperation = 'destination-in';
       g.drawImage(afterMask, -x, -y);
     }
-    // exterior parts are drawn at the layer's opacity in the merged render; clipped parts get it through their base
-    const opacity = Math.max(0, Math.min(1, (p.opacity ?? 1) * (p.clip ? 1 : layer.opacity ?? 1)));
+    // exterior parts are drawn at the layer's opacity in the merged render; clipped parts get it through their base,
+    // unless they blend apart from it (ungroup)
+    const opacity = Math.max(0, Math.min(1, (p.opacity ?? 1) * (p.clip && !ungroup ? 1 : layer.opacity ?? 1)));
     // the channel restriction also applied to the exterior effects (clipped parts get it through their base)
     const blending = !p.clip && restrictsChannels(bl.channels) ? { channels: { ...bl.channels } } : null;
     const made = new RasterLayer({ name: `${layer.name}'s ${p.name ?? p.key}`, canvas, x, y, blend: p.blend ?? 'normal', opacity, clip: p.clip || !!layer.clip, blending });
@@ -388,15 +407,22 @@ function effectLayers(layer, doc) {
  * True when the created layers cannot draw what the effects drew: Photoshop then warns "Some aspects of the Effects
  * cannot be reproduced with layers". Knockout reaches through the new layers; the layer's opacity faded the layer and
  * its exterior effects as one (each new layer is faded on its own, and a shadow knocked out by the layer shows through
- * it); fill opacity faded the layer under its interior effects. The modes are no reason: each exterior effect blends
- * with the layers below in its own mode and the layer's content in the layer's, which the new layers do as well.
+ * it); with Blend Interior Effects as Group on, fill opacity faded the layer under its interior effects. The modes are
+ * no reason: each exterior effect blends with the layers below in its own mode and the layer's content in the layer's,
+ * which the new layers do as well, and the interior effects blend in theirs over the content as clipped layers with
+ * Blend Clipped Layers as Group off do (`ungroup`). Those are faded each on its own, though, and cut to the layer's
+ * alpha (Transparency Shapes Layer off spread them over its box); `blocked`: the base has clipped layers of its own,
+ * so the option could not be changed.
  */
-function inexactLayers(layer, made) {
+function inexactLayers(layer, made, { ungroup = false, blocked = false } = {}) {
   const bl = effectiveBlending(layer);
   const exterior = made.some((m) => !m.interior), interior = made.some((m) => m.interior);
   if (bl.knockout === 'shallow' || bl.knockout === 'deep') return true;
   if (exterior && (layer.opacity ?? 1) < 1) return true;
-  return interior && (layer.fillOpacity ?? 1) < 1;
+  if (!interior) return false;
+  if (blocked) return true;
+  if (ungroup) return (layer.opacity ?? 1) < 1 || bl.transparencyShapes === false;
+  return (layer.fillOpacity ?? 1) < 1;
 }
 
 export function install(app) {
@@ -420,13 +446,15 @@ export function install(app) {
         const d = doc();
         const layer = d.active;
         return app.busy('Creating layers…', () => {
-          const made = effectLayers(layer, d);
+          const wanted = ungroupsInterior(layer), blocked = wanted && hasClipped(layer);
+          const made = effectLayers(layer, d, wanted && !blocked);
           if (!made.length) {
             app.dialogs?.toast?.('The effects draw nothing to make layers from', { timeout: 1600 });
             return;
           }
+          const ungroup = wanted && !blocked && made.some((m) => m.interior);
           d.history.group('Create layers', () => {
-            setLayerProps(app, layer, { styles: null });
+            setLayerProps(app, layer, ungroup ? { styles: null, blending: { ...(layer.blending ?? {}), clippedAsGroup: false } } : { styles: null });
             structural(app, 'Create layers', () => {
               const parent = layer.parent;
               let i = parent.children.indexOf(layer);
@@ -437,7 +465,7 @@ export function install(app) {
               d.setActive(layer);
             });
           });
-          if (inexactLayers(layer, made)) app.dialogs?.toast?.('Some aspects of the effects cannot be reproduced with layers, so the image may change', { timeout: 4000 });
+          if (inexactLayers(layer, made, { ungroup, blocked: blocked && made.some((m) => m.interior) })) app.dialogs?.toast?.('Some aspects of the effects cannot be reproduced with layers, so the image may change', { timeout: 4000 });
           return made.length;
         });
       },

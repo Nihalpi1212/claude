@@ -4,7 +4,7 @@
 // fading all of it as one). These are the numbers the compositor's per-pixel path and its Canvas path both follow.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { applyStyles, exteriorBlends } from '../../src/shared/pixels/styles.js';
+import { applyStyles, exteriorBlends, interiorBlends, splitsInterior } from '../../src/shared/pixels/styles.js';
 import { compositeAdvanced, fadeFrom } from '../../src/shared/pixels/blend-if.js';
 import { blendImages } from '../../src/shared/pixels/blend.js';
 import { createImage, setPixel } from '../../src/shared/pixels/core.js';
@@ -176,4 +176,116 @@ test('fadeFrom lerps premultiplied: a transparent side gives no colour', () => {
   fadeFrom(dst, before, 0.25);
   assert.deepEqual(px(dst, 0, 0), [255, 0, 0, 64]);
   assert.deepEqual(px(dst, 1, 0), [64, 0, 191, 255]);
+});
+
+/** Places a cropped part ({ image, x, y } in the output) on a transparent image of the output's size. */
+function placed(p, W, H) {
+  const full = createImage(W, H);
+  for (let y = 0; y < p.image.height; y++) {
+    const s = y * p.image.width * 4;
+    full.data.set(p.image.data.subarray(s, s + p.image.width * 4), ((p.y + y) * W + p.x) * 4);
+  }
+  return { image: full, blend: p.blend, opacity: p.opacity };
+}
+
+test('Blend Interior Effects as Group off: a Normal Color Overlay on a Multiply layer is not multiplied; on, it is', () => {
+  // Photoshop's Blending Options: the option "applies the blending mode of the layer to layer effects that modify
+  // opaque pixels" such as Color Overlay; off (the default), the layer's mode applies to its content only
+  const img = square(40, 10, 20, [255, 255, 255, 1]);
+  const styles = { colorOverlay: { enabled: true, color: '#ff0000', blend: 'normal', opacity: 1 } };
+  for (const fill of [1, 0.5]) {
+    const out = applyStyles(img, styles, { split: true, interior: true, fillOpacity: fill });
+    const W = out.image.width, H = out.image.height;
+    assert.equal(out.inner.length, 1);
+    assert.equal(out.inner[0].key, 'colorOverlay');
+    // the content alone: white at the fill, no overlay in it
+    assert.deepEqual(px(out.layer, 20, 20), [255, 255, 255, Math.round(255 * fill)]);
+    const dst = solid(W, H, [128, 128, 128, 1]);
+    compositeAdvanced({ dst, layer: out.layer, inner: out.inner.map((p) => placed(p, W, H)), mode: 'multiply', opacity: 1 });
+    assert.deepEqual(px(dst, 20, 20), [255, 0, 0, 255], `fill ${fill}`);
+    // the merged render (the option on) is the overlay multiplied as part of the layer
+    const merged = applyStyles(img, styles, { interiorAsGroup: true, fillOpacity: fill });
+    const on = solid(W, H, [128, 128, 128, 1]);
+    blendImages('multiply', merged.image, on, 1);
+    assert.deepEqual(px(on, 20, 20), fill === 1 ? [128, 0, 0, 255] : [128, 64, 64, 255]);
+  }
+  // interior is ignored with the option on (the effects stay in the layer)
+  assert.equal(applyStyles(img, styles, { split: true, interior: true, interiorAsGroup: true }).inner, null);
+});
+
+test('Fill 0 % with an Overlay gradient blends the gradient with the image below; interior parts are cut to the shape', () => {
+  const img = square(40, 10, 20, [0, 0, 0, 1]);
+  const styles = { colorOverlay: { enabled: true, color: '#ffffff', blend: 'overlay', opacity: 1 } };
+  const out = applyStyles(img, styles, { split: true, interior: true, fillOpacity: 0 });
+  const W = out.image.width, H = out.image.height;
+  const dst = solid(W, H, [200, 100, 50, 1]);
+  compositeAdvanced({ dst, layer: out.layer, inner: out.inner.map((p) => placed(p, W, H)), mode: 'normal', opacity: 1 });
+  // white in Overlay over (200, 100, 50): 2·b where b is below the middle, else white: (255, 200, 100); the merged
+  // render drew the overlay against the empty content, which shows it as plain white
+  assert.deepEqual(px(dst, 20, 20), [255, 200, 100, 255]);
+  // outside the shape nothing changes
+  assert.deepEqual(px(dst, 5, 5), [200, 100, 50, 255]);
+  assert.equal(px(out.inner[0].image, 0, 0)[3], 255);
+  assert.ok(out.inner[0].image.width <= 20 && out.inner[0].image.height <= 20);
+});
+
+test('interiorBlends and splitsInterior: which layers draw their interior effects apart', () => {
+  const overlay = { colorOverlay: { enabled: true, color: '#ff0000', blend: 'normal' } };
+  assert.deepEqual(interiorBlends(overlay), ['normal']);
+  assert.deepEqual(interiorBlends({ innerShadow: { enabled: true }, bevel: { enabled: true, style: 'outer-bevel' } }), ['multiply']);
+  assert.deepEqual(interiorBlends({ bevel: { enabled: true, style: 'inner-bevel' }, stroke: { enabled: true, position: 'center' } }), ['screen', 'multiply', 'normal']);
+  assert.equal(splitsInterior(overlay, { mode: 'multiply' }), true);
+  assert.equal(splitsInterior(overlay, { mode: 'multiply', interiorAsGroup: true }), false);
+  assert.equal(splitsInterior(overlay, { mode: 'normal', fillOpacity: 0.5 }), false);
+  assert.equal(splitsInterior({ innerShadow: { enabled: true, color: '#3050a0' } }, { mode: 'normal', fillOpacity: 0.5 }), true);
+  // a black Multiply inner shadow draws as Normal: no need to split at a reduced fill
+  assert.equal(splitsInterior({ innerShadow: { enabled: true } }, { mode: 'normal', fillOpacity: 0.5 }), false);
+  assert.equal(splitsInterior({ dropShadow: { enabled: true } }, { mode: 'multiply' }), false);
+});
+
+test('exteriorBlends asDrawn: a black Multiply shadow and a white Screen glow draw as Normal, coloured ones do not', () => {
+  const st = {
+    dropShadow: { enabled: true, color: '#000000', blend: 'multiply' },
+    outerGlow: { enabled: true, color: '#ffffff', blend: 'screen' },
+    stroke: { enabled: true, position: 'outside', color: '#000000', blend: 'darken' },
+  };
+  assert.deepEqual(exteriorBlends(st), ['multiply', 'screen', 'darken']);
+  assert.deepEqual(exteriorBlends(st, { asDrawn: true }), ['normal', 'normal', 'normal']);
+  // Photoshop's default glow is pale yellow: Screen stays Screen; a gradient glow has no single colour
+  assert.deepEqual(exteriorBlends({ outerGlow: { enabled: true } }, { asDrawn: true }), ['screen']);
+  assert.deepEqual(exteriorBlends({ outerGlow: { enabled: true, color: '#ffffff', fill: 'gradient' } }, { asDrawn: true }), ['screen']);
+  assert.deepEqual(exteriorBlends({ dropShadow: { enabled: true, color: '#200000' } }, { asDrawn: true }), ['multiply']);
+  // the default bevel's highlight is white Screen and its shadow black Multiply: Normal both
+  assert.deepEqual(exteriorBlends({ bevel: { enabled: true, style: 'outer-bevel' } }, { asDrawn: true }), ['normal', 'normal']);
+  // and the same picture: black Multiply over grey equals black Normal at the same alpha
+  const a = solid(4, 1, [128, 128, 128, 1]), b = solid(4, 1, [128, 128, 128, 1]);
+  const shadow = solid(4, 1, [0, 0, 0, 0.6]);
+  blendImages('multiply', shadow, a, 0.75);
+  blendImages('normal', shadow, b, 0.75);
+  assert.deepEqual(Array.from(a.data), Array.from(b.data));
+});
+
+test('merged exterior effects (`below`) without knockout keep the order of 0.3: it and the layer each at the opacity', () => {
+  const img = square();
+  const st = hardShadow({ color: '#000000', blend: 'normal', opacity: 0.75 });
+  const out = applyStyles(img, st, { split: true });
+  const W = out.image.width, H = out.image.height;
+  const blendIf = { gray: { this: [0, 0, 255, 255], under: [0, 40, 255, 255] } };
+  for (const opacity of [1, 0.6]) {
+    const dst = solid(W, H, [90, 160, 220, 1]);
+    compositeAdvanced({ dst, layer: out.layer, below: out.below, blendIf, mode: 'normal', opacity });
+    // by hand, as 0.3 did it
+    const ref = solid(W, H, [90, 160, 220, 1]);
+    blendImages('normal', out.below, ref, opacity, null, 1);
+    const before = solid(W, H, [90, 160, 220, 1]);
+    const merged = { width: W, height: H, data: new Uint8ClampedArray(out.layer.data) };
+    compositeAdvanced({ dst: before, layer: null, blendIf, mode: 'normal', opacity: 1 });
+    const only = solid(W, H, [90, 160, 220, 1]);
+    blendImages('normal', out.below, only, opacity, null, 1);
+    const layerOnly = solid(W, H, [90, 160, 220, 1]);
+    compositeAdvanced({ dst: layerOnly, layer: merged, blendIf, mode: 'normal', opacity });
+    // the layer's pixels are where the shadow is knocked out: the two steps do not overlap there
+    assert.deepEqual(px(dst, -out.offsetX + 20, -out.offsetY + 20), px(layerOnly, -out.offsetX + 20, -out.offsetY + 20));
+    assert.deepEqual(px(dst, -out.offsetX + 20, -out.offsetY + 38), px(only, -out.offsetX + 20, -out.offsetY + 38));
+  }
 });

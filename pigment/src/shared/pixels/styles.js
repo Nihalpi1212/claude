@@ -281,23 +281,95 @@ export function hasEnabledStyles(styles) {
  * the layers below the layer, each with its own mode, while the layer's own mode applies to its content and interior
  * effects: the compositor asks applyStyles for the parts apart (`split`) only when one of these modes, or the layer's
  * own, is not Normal, since Normal over Normal is one source-over and the merged image draws the same pixels.
+ *
+ * With `asDrawn`, a mode that comes out as Normal for the effect's colour is given as 'normal': Multiply, Darken and
+ * Linear Burn with black, Screen, Lighten and Linear Dodge with white (B(backdrop, black) = black for the first three,
+ * B(backdrop, white) = white for the others, which is what Normal draws). Photoshop's default drop shadow is black in
+ * Multiply, so a document in the default style keeps the merged fast path and its pixels.
  * @param {object | null} styles partial or full styles
+ * @param {{ asDrawn?: boolean }} [opts]
  * @returns {string[]}
  */
-export function exteriorBlends(styles) {
+export function exteriorBlends(styles, { asDrawn = false } = {}) {
   if (!hasEnabledStyles(styles)) return [];
   const s = mergeStyles(renderable(styles));
   const out = [];
   const visible = (fx, def) => clamp01(num(fx.opacity, def)) > 0;
-  for (const { fx } of drawn(s, 'dropShadow')) if (visible(fx, 0.75)) out.push(blendOf(fx.blend));
-  for (const { fx } of drawn(s, 'outerGlow')) if (visible(fx, 0.75)) out.push(blendOf(fx.blend));
+  const mode = (m, color) => (asDrawn ? drawnMode(m, color) : blendOf(m));
+  for (const { fx } of drawn(s, 'dropShadow')) if (visible(fx, 0.75)) out.push(mode(fx.blend, fx.color));
+  for (const { fx } of drawn(s, 'outerGlow')) if (visible(fx, 0.75)) out.push(mode(fx.blend, fx.fill === 'gradient' ? null : fx.color));
   const bevel = drawn(s, 'bevel')[0];
   if (bevel && (BEVEL_STYLES[bevel.fx.style] ?? 0) !== 0) {
-    if (clamp01(num(bevel.fx.highlightOpacity, 0.75)) > 0) out.push(blendOf(bevel.fx.highlightBlend || 'screen'));
-    if (clamp01(num(bevel.fx.shadowOpacity, 0.75)) > 0) out.push(blendOf(bevel.fx.shadowBlend || 'multiply'));
+    if (clamp01(num(bevel.fx.highlightOpacity, 0.75)) > 0) out.push(mode(bevel.fx.highlightBlend || 'screen', bevel.fx.highlightColor));
+    if (clamp01(num(bevel.fx.shadowOpacity, 0.75)) > 0) out.push(mode(bevel.fx.shadowBlend || 'multiply', bevel.fx.shadowColor));
   }
-  for (const { fx } of drawn(s, 'stroke')) if (fx.position !== 'inside' && visible(fx, 1)) out.push(blendOf(fx.blend));
+  for (const { fx } of drawn(s, 'stroke')) if (fx.position !== 'inside' && visible(fx, 1)) out.push(mode(fx.blend, strokeColor(fx)));
   return out;
+}
+
+/**
+ * The blend modes of the interior effects that draw (the three overlays, satin, inner glow, inner shadow, the inner
+ * part of an Inner Bevel, Emboss or Pillow Emboss, the inner part of an inside or centred stroke), bottom first, as
+ * exteriorBlends gives them. With Blend Interior Effects as Group off (Photoshop's default) each of these blends with
+ * what lies under it, the layer's content drawn in the layer's mode over the layers below, in its own mode: the
+ * layer's mode does not apply to them. applyStyles' `interior` gives them apart for that.
+ * @param {object | null} styles partial or full styles
+ * @param {{ asDrawn?: boolean }} [opts]
+ * @returns {string[]}
+ */
+export function interiorBlends(styles, { asDrawn = false } = {}) {
+  if (!hasEnabledStyles(styles)) return [];
+  const s = mergeStyles(renderable(styles));
+  const out = [];
+  const visible = (fx, def) => clamp01(num(fx.opacity, def)) > 0;
+  const mode = (m, color) => (asDrawn ? drawnMode(m, color) : blendOf(m));
+  for (const { fx } of drawn(s, 'patternOverlay')) if (visible(fx, 1)) out.push(mode(fx.blend, null));
+  for (const { fx } of drawn(s, 'gradientOverlay')) if (visible(fx, 1)) out.push(mode(fx.blend, null));
+  for (const { fx } of drawn(s, 'colorOverlay')) if (visible(fx, 1)) out.push(mode(fx.blend, fx.color));
+  for (const { fx } of drawn(s, 'satin')) if (visible(fx, 0.5)) out.push(mode(fx.blend, fx.color));
+  for (const { fx } of drawn(s, 'innerGlow')) if (visible(fx, 0.75)) out.push(mode(fx.blend, fx.fill === 'gradient' ? null : fx.color));
+  for (const { fx } of drawn(s, 'innerShadow')) if (visible(fx, 0.75)) out.push(mode(fx.blend, fx.color));
+  const bevel = drawn(s, 'bevel')[0];
+  if (bevel && (BEVEL_STYLES[bevel.fx.style] ?? 0) !== 1) {
+    if (clamp01(num(bevel.fx.highlightOpacity, 0.75)) > 0) out.push(mode(bevel.fx.highlightBlend || 'screen', bevel.fx.highlightColor));
+    if (clamp01(num(bevel.fx.shadowOpacity, 0.75)) > 0) out.push(mode(bevel.fx.shadowBlend || 'multiply', bevel.fx.shadowColor));
+  }
+  for (const { fx } of drawn(s, 'stroke')) if (fx.position !== 'outside' && visible(fx, 1)) out.push(mode(fx.blend, strokeColor(fx)));
+  return out;
+}
+
+/**
+ * Whether a styled layer's interior effects blend apart from its content (applyStyles' `interior`): with Blend
+ * Interior Effects as Group off, when the layer's own mode is not Normal (its mode applies to the content only), or
+ * when its fill lets the layers below show through under an interior effect whose mode is not Normal (a Fill 0 %
+ * layer with an Overlay gradient blends the gradient with the image below). Otherwise the merged render draws the
+ * same pixels and is kept.
+ * @param {object | null} styles
+ * @param {{ mode?: string, fillOpacity?: number, interiorAsGroup?: boolean }} o mode: the mode the content is drawn with
+ * @returns {boolean}
+ */
+export function splitsInterior(styles, { mode = 'normal', fillOpacity = 1, interiorAsGroup = false } = {}) {
+  if (interiorAsGroup) return false;
+  const modes = interiorBlends(styles, { asDrawn: true });
+  if (!modes.length) return false;
+  if (mode !== 'normal') return true;
+  return fillOpacity < 1 && modes.some((m) => m !== 'normal');
+}
+
+// the colour a stroke is drawn in (null: a gradient or pattern fill)
+const strokeColor = (fx) => (fx.fill === 'gradient' || fx.fill === 'pattern' ? null : fx.color);
+
+const BLACK_AS_NORMAL = new Set(['multiply', 'darken', 'linear-burn']);
+const WHITE_AS_NORMAL = new Set(['screen', 'lighten', 'linear-dodge']);
+
+/** The mode an effect of one colour (null: several) is drawn in, Normal where its mode gives the colour itself. */
+function drawnMode(mode, color) {
+  const m = blendOf(mode);
+  if (color == null || (!BLACK_AS_NORMAL.has(m) && !WHITE_AS_NORMAL.has(m))) return m;
+  const c = parseColor(color);
+  if (BLACK_AS_NORMAL.has(m) && c[0] === 0 && c[1] === 0 && c[2] === 0) return 'normal';
+  if (WHITE_AS_NORMAL.has(m) && c[0] === 255 && c[1] === 255 && c[2] === 255) return 'normal';
+  return m;
 }
 
 /** What is drawn: nothing while hidden (Hide All Effects). */
@@ -709,6 +781,8 @@ function makeContext(src, win, cb, maxA, fill, mode = {}) {
     docX: place?.x ?? 0, docY: place?.y ?? 0, docW: place?.width ?? src.width, docH: place?.height ?? src.height,
     // splitEffects: every effect drawn is recorded here (null otherwise)
     record: null,
+    // applyStyles' interior: the interior effects one by one and the content without them (null otherwise)
+    inner: null, C: null,
   };
 }
 
@@ -857,7 +931,9 @@ function composite(ctx, target, mode, opacity, rect, tag = null) {
     opacity = 1;
   }
   // split: each exterior effect apart, as it is blended (a dissolved one already speckled, then drawn Normal)
-  if (ctx.parts && target === ctx.B) recordPart(ctx, rect, m, opacity, tag);
+  if (ctx.parts && target === ctx.B) recordPart(ctx, rect, m, opacity, tag, ctx.parts);
+  // interior: each interior effect apart too (still blended into the interior below, which the knock-outs read)
+  else if (ctx.inner && target === ctx.I) recordPart(ctx, rect, m, opacity, tag, ctx.inner);
   if (target === ctx.B && ctx.bEmpty) {
     const s = ctx.fx.data, d = target.data, w = ctx.w;
     const r = rect || ctx.full;
@@ -1353,8 +1429,8 @@ function recordEffect(ctx, target, mode, opacity, rect, tag) {
   ctx.record.push({ ...tag, below: target === ctx.B, rect: { ...r }, data, blend: blendOf(mode), opacity });
 }
 
-/** applyStyles' split: an exterior effect's own pixels at full strength, with the mode and opacity it blends with. */
-function recordPart(ctx, rect, mode, opacity, tag) {
+/** applyStyles' split: an effect's own pixels at full strength, with the mode and opacity it blends with, into list. */
+function recordPart(ctx, rect, mode, opacity, tag, list) {
   const r = rect || ctx.full;
   const data = new Uint8ClampedArray(r.width * r.height * 4);
   const s = ctx.fx.data, w = ctx.w;
@@ -1362,7 +1438,7 @@ function recordPart(ctx, rect, mode, opacity, tag) {
     const o = ((r.y + y) * w + r.x) * 4;
     data.set(s.subarray(o, o + r.width * 4), y * r.width * 4);
   }
-  ctx.parts.push({ ...(tag || {}), rect: { ...r }, data, blend: mode, opacity: opacity > 1 ? 1 : opacity });
+  list.push({ ...(tag || {}), rect: { ...r }, data, blend: mode, opacity: opacity > 1 ? 1 : opacity });
 }
 
 /**
@@ -1421,7 +1497,19 @@ function render(ctx, s, o) {
 
   // Clip the interior to the layer alpha (Transparency Shapes Layer off: to the layer box, where
   // the interior already holds the layer's own alpha).
-  const Id = ctx.I.data, A8 = ctx.A8;
+  clipInterior(ctx, ctx.I.data);
+  if (ctx.C) clipInterior(ctx, ctx.C.data);
+
+  // Below the layer, bottom to top (drawn once the interior is known, for the knock-out).
+  for (const { fx, index } of drawn(s, 'dropShadow')) dropShadow(ctx, fx, o, tag('dropShadow', index));
+  for (const { fx, index } of drawn(s, 'outerGlow')) outerGlow(ctx, fx, tag('outerGlow', index));
+  if (maps && maps.outer) bevelPart(ctx, bevel.fx, maps, true, tag('bevel', bevel.index));
+  for (const { fx, index, radii } of strokes) if (radii[1] > 0) strokeOuter(ctx, fx, radii[1], radii[0], tag('stroke', index));
+}
+
+/** Clips interior pixels (Id, window-sized) to the layer alpha, or with Transparency Shapes Layer off to its box. */
+function clipInterior(ctx, Id) {
+  const A8 = ctx.A8;
   if (!ctx.box) {
     for (let i = 0, p = 0; i < ctx.n; i++, p += 4) {
       const a = ((Id[p + 3] * A8[i]) / 255 + 0.5) | 0;
@@ -1438,12 +1526,6 @@ function render(ctx, s, o) {
       }
     }
   }
-
-  // Below the layer, bottom to top (drawn once the interior is known, for the knock-out).
-  for (const { fx, index } of drawn(s, 'dropShadow')) dropShadow(ctx, fx, o, tag('dropShadow', index));
-  for (const { fx, index } of drawn(s, 'outerGlow')) outerGlow(ctx, fx, tag('outerGlow', index));
-  if (maps && maps.outer) bevelPart(ctx, bevel.fx, maps, true, tag('bevel', bevel.index));
-  for (const { fx, index, radii } of strokes) if (radii[1] > 0) strokeOuter(ctx, fx, radii[1], radii[0], tag('stroke', index));
 }
 
 /** Copies rect of src into dst at (dx, dy) (rect inside src, destination inside dst). */
@@ -1498,6 +1580,11 @@ function run(img, styles, o, record = null) {
   });
   ctx.record = record;
   ctx.parts = o.split ? [] : null;
+  // interior apart: the content before any interior effect (clipped as the interior is) and the effects one by one
+  if (o.split && o.interior && !o.interiorAsGroup) {
+    ctx.inner = [];
+    ctx.C = { width: ctx.I.width, height: ctx.I.height, data: new Uint8ClampedArray(ctx.I.data) };
+  }
   render(ctx, s, o);
   return { ...geom, ctx, R, win };
 }
@@ -1515,7 +1602,7 @@ function run(img, styles, o, record = null) {
  * @param {ImageDataLike} img layer pixels, straight alpha; not modified
  * @param {object | null} styles partial styles (see DEFAULT_STYLES); missing fields use defaults
  * @param {{ pad?: number, rect?: Rect, fillOpacity?: number, globalAngle?: number, globalAltitude?: number,
- *   interiorAsGroup?: boolean, transparencyShapes?: boolean, split?: boolean,
+ *   interiorAsGroup?: boolean, transparencyShapes?: boolean, split?: boolean, interior?: boolean,
  *   origin?: [number, number], docWidth?: number, docHeight?: number }} [opts]
  *   pad: border to add (default stylePadding(styles)); a smaller pad clips the effects.
  *   rect: output region of img (clipped to it, default the whole image): the output covers the
@@ -1538,6 +1625,10 @@ function run(img, styles, o, record = null) {
  *     the layer's mode: blending the parts in order onto a transparent image and `layer` with
  *     Normal over them gives `image`. `below` is that merge of the parts (null when none) and
  *     `above` is always null (every effect lies below the layer or inside it).
+ *   interior (with split; ignored with interiorAsGroup): `layer` is the content alone, without its interior effects,
+ *     and `inner` lists the interior effects one by one, bottom first, like `parts` and each cut to the layer's shape
+ *     (to its box with Transparency Shapes Layer off). Blend Interior Effects as Group off: Photoshop draws the
+ *     content in the layer's mode and then each interior effect over it in its own mode (splitsInterior).
  *   origin, docWidth, docHeight: the document position of img's (0, 0) and the document size,
  *     for Link with Layer off (patterns) and Align with Layer off (gradients); without them the
  *     `_place` that lib/style-prepare.js adds to the styles, else img is the document.
@@ -1550,13 +1641,13 @@ export function applyStyles(img, styles, opts = {}) {
   const { W, H, offsetX, offsetY } = res;
   const out = createImage(W, H);
   if (res.plain) pasteImage(out, img, -offsetX, -offsetY);
-  if (!res.ctx) return o.split ? { image: out, below: null, layer: out, above: null, parts: [], offsetX, offsetY } : { image: out, offsetX, offsetY };
+  if (!res.ctx) return o.split ? { image: out, below: null, layer: out, above: null, parts: [], inner: o.interior ? [] : null, offsetX, offsetY } : { image: out, offsetX, offsetY };
   const { ctx, R, win } = res;
   const crop = { x: R.x - win.x, y: R.y - win.y, width: R.width, height: R.height };
   let split = null;
   if (o.split) {
     const layer = createImage(W, H);
-    copyRect(ctx.I, crop, layer, R.x - offsetX, R.y - offsetY);
+    copyRect(ctx.C ?? ctx.I, crop, layer, R.x - offsetX, R.y - offsetY);
     let below = null;
     if (!ctx.bEmpty) {
       below = createImage(W, H);
@@ -1570,7 +1661,28 @@ export function applyStyles(img, styles, opts = {}) {
       if (e.part) part.part = e.part;
       parts.push(part);
     }
-    split = { below, layer, above: null, parts };
+    split = { below, layer, above: null, parts, inner: null };
+    if (ctx.inner) {
+      // each interior effect cut to the layer's shape, as the merged interior is (clipInterior)
+      split.inner = [];
+      for (const e of ctx.inner) {
+        if (!ctx.box) {
+          const { x: rx, y: ry, width: rw, height: rh } = e.rect, d = e.data, A8 = ctx.A8;
+          for (let y = 0, p = 0; y < rh; y++) {
+            for (let x = 0, i = (ry + y) * ctx.w + rx; x < rw; x++, i++, p += 4) {
+              const a = ((d[p + 3] * A8[i]) / 255 + 0.5) | 0;
+              if (a) d[p + 3] = a;
+              else d[p] = d[p + 1] = d[p + 2] = d[p + 3] = 0;
+            }
+          }
+        }
+        const c = cropRecorded(e, crop);
+        if (!c) continue;
+        const part = { key: e.key, index: e.index, image: c.image, x: c.x + win.x - offsetX, y: c.y + win.y - offsetY, blend: e.blend, opacity: e.opacity };
+        if (e.part) part.part = e.part;
+        split.inner.push(part);
+      }
+    }
   }
   // Nothing below the layer: the clipped interior is the result (what blendImages would produce).
   let img2 = ctx.I;
