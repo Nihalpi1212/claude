@@ -1,0 +1,129 @@
+# Nib release builds.
+#
+# Builds the installers with electron-builder on each platform's own runner:
+#   macos-latest   -> universal (Apple silicon + Intel) .dmg and .zip
+#   windows-latest -> NSIS installer (x64 + arm64) and a portable .exe
+#   ubuntu-latest  -> AppImage
+#
+# Runs on tags named nib-v* and on demand. A tag push, or a manual run with the `tag` input set,
+# also creates (or updates) the GitHub Release for that tag with the installers attached; a manual
+# run without `tag` only uploads workflow artifacts. The release notes are read from
+# nib/docs/RELEASE-NOTES-<version>.md (the tag without "nib-v"), so each release documents itself.
+# The builds are NOT code-signed (no certificates in this repository), so macOS Gatekeeper and
+# Windows SmartScreen show a warning on first launch; see nib/README.md.
+
+name: Nib release
+
+on:
+  push:
+    tags:
+      - 'nib-v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to publish, e.g. nib-v0.1.0 (leave empty to only build the installers)'
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            args: --mac dmg zip --universal
+          - os: windows-latest
+            args: --win nsis portable
+          - os: ubuntu-latest
+            args: --linux AppImage
+    defaults:
+      run:
+        working-directory: nib
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: nib/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build installers
+        run: npx electron-builder ${{ matrix.args }} --publish never
+
+      - name: List artifacts
+        shell: bash
+        run: ls -la dist | grep -v -E "builder-|\.yml$|\.blockmap$" || true
+
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: nib-${{ matrix.os }}
+          path: |
+            nib/dist/*.dmg
+            nib/dist/*.zip
+            nib/dist/*.exe
+            nib/dist/*.AppImage
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/nib-v') || inputs.tag != ''
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: nib/docs
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: installers
+          merge-multiple: true
+
+      - name: Release notes
+        shell: bash
+        run: |
+          version="${RELEASE_TAG#nib-v}"
+          notes="nib/docs/RELEASE-NOTES-${version}.md"
+          {
+            echo "Free, open-source vector graphics editor for Windows, macOS and Linux. See nib/README.md."
+            echo
+            if [ -f "$notes" ]; then cat "$notes"; else echo "Release notes: see nib/docs/."; fi
+            echo
+            echo "**Downloads**"
+            echo "- Windows: \`nib-*-win-x64.exe\` (installer) or \`nib-*-win-portable.exe\` (no install)"
+            echo "- macOS: \`nib-*-mac-universal.dmg\` (Apple silicon and Intel)"
+            echo "- Linux: \`nib-*-linux-x86_64.AppImage\`"
+            echo
+            echo "These builds are not code-signed. On macOS, right-click the app and choose Open the first"
+            echo "time (or run \`xattr -dr com.apple.quarantine /Applications/Nib.app\`). On Windows,"
+            echo "choose \"More info\" then \"Run anyway\" in the SmartScreen prompt."
+          } > release-body.md
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          target_commitish: ${{ github.sha }}
+          name: Nib ${{ env.RELEASE_TAG }}
+          body_path: release-body.md
+          files: installers/*
