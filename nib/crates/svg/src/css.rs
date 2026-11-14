@@ -1,0 +1,875 @@
+//! CSS. SVG export's style attributes and sheets, and the CSS web pages style objects with
+//! ([`css_rules`]: the CSS Properties panel and its exports), write each property they share in
+//! the same way: the declarations of transparency, fonts and type spacing come from the functions
+//! here, colours are `#rrggbb` (or `rgba()` where CSS has no separate opacity), gradients take the
+//! stops SVG export writes, and numbers go through [`fmt_num`].
+
+use std::collections::{HashMap, HashSet};
+
+use serde::{Deserialize, Serialize};
+use vectorcraft_color::{BlendMode, Color, GradientGeom, GradientKind, GradientPaint, Paint};
+use vectorcraft_doc::{AppearanceItem, CharStyle, Document, Justify, LineCap, LiveShape, Node, NodeId, NodeKind, StrokeAlign, StrokeLayer, TextKind};
+use vectorcraft_effects::RasterFx;
+use vectorcraft_geom::shapes::{self, CornerKind};
+use vectorcraft_geom::{Affine, PathData, Point, Rect};
+
+use crate::export::sanitize_id;
+use crate::fmt_num;
+
+/// CSS declarations, in order: (property, value).
+pub(crate) type Props = Vec<(&'static str, String)>;
+
+/// A declaration block: `property:value;property:value`.
+pub(crate) fn declarations<'a>(props: impl IntoIterator<Item = &'a (&'static str, String)>) -> String {
+    props.into_iter().map(|(k, v)| format!("{k}:{v}")).collect::<Vec<_>>().join(";")
+}
+
+/// A CSS string.
+pub(crate) fn css_string(s: &str) -> String {
+    quoted(s, '"')
+}
+
+/// `s` as a CSS string in `quote`s. A backslash and the quote are escaped, and so are line breaks
+/// and other control characters (a newline would end the string and let the rest be rules) and
+/// `<` and `>` (which could end a `<style>` element), as hex escapes.
+fn quoted(s: &str, quote: char) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push(quote);
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            c if c == quote => {
+                out.push('\\');
+                out.push(c);
+            }
+            c if c.is_control() || matches!(c, '<' | '>') => out.push_str(&format!("\\{:x} ", u32::from(c))),
+            c => out.push(c),
+        }
+    }
+    out.push(quote);
+    out
+}
+
+pub(crate) fn blend_css(b: BlendMode) -> &'static str {
+    match b {
+        BlendMode::Normal => "normal",
+        BlendMode::Darken => "darken",
+        BlendMode::Multiply => "multiply",
+        BlendMode::ColorBurn => "color-burn",
+        BlendMode::Lighten => "lighten",
+        BlendMode::Screen => "screen",
+        BlendMode::ColorDodge => "color-dodge",
+        BlendMode::Overlay => "overlay",
+        BlendMode::SoftLight => "soft-light",
+        BlendMode::HardLight => "hard-light",
+        BlendMode::Difference => "difference",
+        BlendMode::Exclusion => "exclusion",
+        BlendMode::Hue => "hue",
+        BlendMode::Saturation => "saturation",
+        BlendMode::Color => "color",
+        BlendMode::Luminosity => "luminosity",
+    }
+}
+
+/// An object's opacity, blend mode and isolation, and `display: none` when it is hidden (written
+/// only when hidden objects are kept).
+pub(crate) fn transparency(n: &Node) -> Props {
+    let mut p = Props::new();
+    if !n.visible {
+        p.push(("display", "none".into()));
+    }
+    if n.opacity < 1.0 {
+        p.push(("opacity", fmt_num(n.opacity as f64, 3)));
+    }
+    if n.blend != BlendMode::Normal {
+        p.push(("mix-blend-mode", blend_css(n.blend).into()));
+    }
+    if n.isolate {
+        p.push(("isolation", "isolate".into()));
+    }
+    p
+}
+
+/// The weight and italic of the face style `st` asks for: what embedded fonts' `@font-face`
+/// rules and the characters using them say, so each face is told apart (Semibold from Bold). A
+/// Variable Font `wght` setting is the weight.
+pub(crate) fn font_descriptor(st: &CharStyle) -> (u16, bool) {
+    let fs = st.font_style.to_ascii_lowercase();
+    let weight =
+        st.font_axes.get("wght").copied().filter(|w| w.is_finite()).unwrap_or_else(|| f64::from(vectorcraft_text::style_weight(&st.font_style)));
+    (weight.round().clamp(1.0, 1000.0) as u16, fs.contains("italic") || fs.contains("oblique"))
+}
+
+/// The width character style `st` asks for, in percent of the normal width: its Variable Font
+/// `wdth` setting (an axis in those units), which `font-stretch` writes; `None` without one.
+pub(crate) fn font_stretch(st: &CharStyle) -> Option<f64> {
+    st.font_axes.get("wdth").copied().filter(|w| w.is_finite() && *w > 0.0)
+}
+
+/// The generic family to list after `family`, with its leading comma, so a viewer without the font draws
+/// the kind of face it was (the font's class, as the font menu's filters know it) rather than its default
+/// serif. Nothing when `family` is a generic family itself.
+fn generic_fallback(family: &str) -> &'static str {
+    const GENERIC: [&str; 5] = ["serif", "sans-serif", "monospace", "cursive", "fantasy"];
+    if GENERIC.iter().any(|g| family.trim().eq_ignore_ascii_case(g)) {
+        return "";
+    }
+    match vectorcraft_text::FontDb::global().family_traits(family).class {
+        vectorcraft_text::FontClass::Serif => ", serif",
+        vectorcraft_text::FontClass::Monospaced => ", monospace",
+        vectorcraft_text::FontClass::Script => ", cursive",
+        _ => ", sans-serif",
+    }
+}
+
+/// The font of character style `st`: family, size (the vertical scale; writers stretch the
+/// horizontal one), weight and style, and its Variable Font settings, lengths written by `len`.
+/// The weight is the style's number (600 for Semibold, 300 for Light) or the `wght` setting,
+/// `bold` for 700 and left out for 400. The settings are `font-variation-settings` (`"wght" 650`),
+/// and the `wdth` setting is `font-stretch` too ([`font_stretch`]).
+pub(crate) fn font_props(st: &CharStyle, len: &dyn Fn(f64) -> String) -> Props {
+    let mut p = Props::new();
+    // A quoted family escapes `\`, `'` and line breaks, which would otherwise end the string early.
+    // Only a plain identifier (no leading digit) can be written bare; anything else is quoted.
+    let bare = st.font_family.chars().next().is_some_and(|c| !c.is_ascii_digit() && c != '-')
+        && st.font_family.chars().all(|c| c.is_alphanumeric() || matches!(c, '-' | '_'));
+    let fam = if !bare { quoted(&st.font_family, '\'') } else { st.font_family.clone() };
+    p.push(("font-family", format!("{fam}{}", generic_fallback(&st.font_family))));
+    p.push(("font-size", len(st.size * st.v_scale / 100.0)));
+    let (weight, italic) = font_descriptor(st);
+    match weight {
+        400 => {}
+        700 => p.push(("font-weight", "bold".into())),
+        w => p.push(("font-weight", w.to_string())),
+    }
+    if italic {
+        p.push(("font-style", "italic".into()));
+    }
+    if let Some(w) = font_stretch(st) {
+        p.push(("font-stretch", format!("{}%", fmt_num(w, 3))));
+    }
+    let axes: Vec<String> =
+        st.font_axes.iter().filter(|(_, v)| v.is_finite()).map(|(tag, v)| format!("{} {}", css_string(tag), fmt_num(*v, 3))).collect();
+    if !axes.is_empty() {
+        p.push(("font-variation-settings", axes.join(", ")));
+    }
+    p
+}
+
+/// The spacing, kerning, OpenType features and decorations of character style `st`, lengths
+/// written by `len`.
+pub(crate) fn type_props(st: &CharStyle, len: &dyn Fn(f64) -> String) -> Props {
+    let mut p = Props::new();
+    // Tracking and manual kerning both add space after every character, in thousandths of the em
+    // of the font size written (the vertical scale, see `font_props`). The canvas spaces them by
+    // the horizontal scale: a uniform scale is the same, and `textLength` stretches type scaled
+    // horizontally alone, glyphs and spacing together, from the one to the other.
+    let spacing = st.tracking + st.kerning.unwrap_or(0.0);
+    if spacing != 0.0 {
+        p.push(("letter-spacing", len(spacing / 1000.0 * st.size * st.v_scale / 100.0)));
+    }
+    if st.kerning.is_some() {
+        // Manual kerning replaces the font's pair kerning.
+        p.push(("font-kerning", "none".into()));
+    }
+    let mut v: Vec<String> = st
+        .features
+        .iter()
+        .map(|t| match t.strip_prefix('-') {
+            Some(off) => (off, 0),
+            // `tag=N` picks the font's alternate N: CSS takes the number as the feature's value.
+            None => {
+                let on = t.strip_prefix('+').unwrap_or(t);
+                match on.split_once('=').map(|(tag, n)| (tag, n.parse::<u32>())) {
+                    Some((tag, Ok(n))) => (tag, n),
+                    _ => (on, 1),
+                }
+            }
+        })
+        // A feature tag is four letters or digits: anything else could end the CSS string.
+        .filter(|(tag, _)| tag.len() == 4 && tag.bytes().all(|b| b.is_ascii_alphanumeric()))
+        .map(|(tag, value)| format!("\"{tag}\" {value}"))
+        .collect();
+    // Proportional Metrics: `palt` (SVG writes vertical type as outlines).
+    if st.proportional_metrics {
+        v.push("\"palt\" 1".into());
+    }
+    if !v.is_empty() {
+        p.push(("font-feature-settings", v.join(", ")));
+    }
+    match (st.underline, st.strikethrough) {
+        (true, true) => p.push(("text-decoration", "underline line-through".into())),
+        (true, false) => p.push(("text-decoration", "underline".into())),
+        (false, true) => p.push(("text-decoration", "line-through".into())),
+        _ => {}
+    }
+    p
+}
+
+/// The decimals, at least `least` and at most 12, for numbers that place a period of length
+/// `period` repeated out to `reach` (in the same units): each period then rounds by at most
+/// 10^-decimals, and over the `reach / period` periods that adds up to at most a hundredth of one.
+fn period_decimals(period: f64, reach: f64, least: u8) -> u8 {
+    let d = (100.0 * reach / (period * period)).log10().ceil();
+    if d.is_nan() || d == f64::INFINITY { 12 } else { d.clamp(f64::from(least), 12.0) as u8 }
+}
+
+/// A colour at `opacity`: `#rrggbb` when opaque, else `rgba()`.
+fn color_css(c: &Color, opacity: f32) -> String {
+    if opacity >= 1.0 {
+        return c.to_hex();
+    }
+    let [r, g, b, _] = c.to_rgba8(1.0);
+    format!("rgba({r}, {g}, {b}, {})", fmt_num(opacity.clamp(0.0, 1.0) as f64, 3))
+}
+
+// ---------- CSS for objects ----------
+
+/// The units of the lengths [`css_rules`] writes (CSS Properties → Units). One CSS pixel is one
+/// point, as in SVG export; the other units keep the document's physical sizes (72 points to the
+/// inch).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CssUnits {
+    #[default]
+    Px,
+    Pt,
+    Mm,
+    Cm,
+    In,
+}
+
+impl CssUnits {
+    pub const ALL: [CssUnits; 5] = [CssUnits::Px, CssUnits::Pt, CssUnits::Mm, CssUnits::Cm, CssUnits::In];
+
+    /// The unit's CSS name.
+    pub fn name(self) -> &'static str {
+        match self {
+            CssUnits::Px => "px",
+            CssUnits::Pt => "pt",
+            CssUnits::Mm => "mm",
+            CssUnits::Cm => "cm",
+            CssUnits::In => "in",
+        }
+    }
+
+    /// `points` in these units (`0` without a unit).
+    fn len(self, points: f64) -> String {
+        self.len_to(points, 3)
+    }
+
+    /// One point in these units.
+    fn per_point(self) -> f64 {
+        match self {
+            CssUnits::Px | CssUnits::Pt => 1.0,
+            CssUnits::Mm => 25.4 / 72.0,
+            CssUnits::Cm => 2.54 / 72.0,
+            CssUnits::In => 1.0 / 72.0,
+        }
+    }
+
+    /// [`Self::len`] with `decimals` decimals.
+    fn len_to(self, points: f64, decimals: u8) -> String {
+        match fmt_num(points * self.per_point(), decimals) {
+            zero if zero == "0" => zero,
+            v => format!("{v}{}", self.name()),
+        }
+    }
+}
+
+/// What [`css_rules`] writes (CSS Properties → Export Options). Deserializes from camelCase JSON
+/// with every field optional.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct CssOptions {
+    pub units: CssUnits,
+    /// `position: absolute` with `left` and `top` from the top-left corner of the object's
+    /// artboard (the one its centre is on, its edges included, else the first).
+    pub position: bool,
+    /// `width` and `height`.
+    pub dimensions: bool,
+    /// Rules for unnamed objects too, named after their kind (`.rectangle`); else unnamed objects
+    /// are left out ([`CssSheet::skipped`]).
+    pub unnamed: bool,
+    /// Art CSS can't describe ([`CssRule::unsupported`]) as a `background-image` of its own
+    /// picture ([`CssRule::image`]); else it is described as the box it sits in.
+    pub rasterize: bool,
+}
+
+impl Default for CssOptions {
+    fn default() -> Self {
+        Self { units: CssUnits::Px, position: false, dimensions: true, unnamed: true, rasterize: false }
+    }
+}
+
+/// The CSS rule of one object.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CssRule {
+    pub id: NodeId,
+    /// `.name`: the object's name made a class name, else (unnamed) its kind's, unique in the sheet.
+    pub selector: String,
+    pub props: Vec<(&'static str, String)>,
+    /// Why CSS can't describe the object exactly (other shapes, images, patterns, live effects…).
+    pub unsupported: Option<&'static str>,
+    /// With [`CssOptions::rasterize`], the file name of the PNG `background-image` refers to for
+    /// unsupported art: the writer of the CSS file writes the object's picture under it (its
+    /// visual bounds at 1 px per point, which `left`/`top`/`width`/`height` then describe).
+    pub image: Option<String>,
+}
+
+impl CssRule {
+    /// The rule as written: `.name {` and one declaration a line.
+    pub fn text(&self) -> String {
+        let mut s = format!("{} {{\n", self.selector);
+        for (k, v) in &self.props {
+            s.push_str(&format!("  {k}: {v};\n"));
+        }
+        s.push('}');
+        s
+    }
+}
+
+/// The CSS of a set of objects.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct CssSheet {
+    pub rules: Vec<CssRule>,
+    /// Unnamed objects left out (without [`CssOptions::unnamed`]).
+    pub skipped: usize,
+    /// What the rules leave out or approximate (once each).
+    pub warnings: Vec<String>,
+}
+
+impl CssSheet {
+    /// The style sheet: the rules, a blank line between them.
+    pub fn text(&self) -> String {
+        self.rules.iter().map(CssRule::text).collect::<Vec<_>>().join("\n\n")
+    }
+}
+
+/// The CSS of objects `ids` of `doc` (back to front) as web pages style elements: one rule per
+/// object. Layers and unnamed groups without transparency or effects stand for the objects in
+/// them; hidden objects, guides and template layers are left out.
+///
+/// A rectangle, rounded rectangle or ellipse gives its fill as `background-color` (gradients as
+/// `linear-gradient()`/`radial-gradient()`), its stroke as `border` and its corners as
+/// `border-radius`; type gives its first character style's font, colour and spacing and its
+/// paragraph's alignment; shadows and glows give `box-shadow` (`text-shadow`), a Gaussian blur
+/// `filter: blur()`. Other art is described as its box (see [`CssOptions::rasterize`]).
+pub fn css_rules(doc: &Document, ids: &[NodeId], opts: &CssOptions) -> CssSheet {
+    let mut w = Rules { doc, opts, sheet: CssSheet::default(), seen: HashSet::new(), names: HashSet::new(), next_suffix: HashMap::new() };
+    for n in ids.iter().filter_map(|id| doc.node(*id)) {
+        w.object(n);
+    }
+    w.sheet
+}
+
+struct Rules<'a> {
+    doc: &'a Document,
+    opts: &'a CssOptions,
+    sheet: CssSheet,
+    /// Objects written (an object and a group holding it may both be asked for).
+    seen: HashSet<NodeId>,
+    /// Class names given, lower case.
+    names: HashSet<String>,
+    /// The next suffix to try for each base class name, lower case.
+    next_suffix: HashMap<String, usize>,
+}
+
+/// The CSS of one object's art, and why it is approximate.
+#[derive(Default)]
+struct Art {
+    props: Props,
+    unsupported: Option<&'static str>,
+}
+
+impl Art {
+    /// Note that CSS can't describe the art exactly (the first reason stays).
+    fn unsupported(&mut self, why: &'static str) {
+        self.unsupported.get_or_insert(why);
+    }
+}
+
+impl Rules<'_> {
+    fn len(&self, points: f64) -> String {
+        self.opts.units.len(points)
+    }
+
+    fn warn(&mut self, w: &str) {
+        if !self.sheet.warnings.iter().any(|x| x == w) {
+            self.sheet.warnings.push(w.to_string());
+        }
+    }
+
+    fn object(&mut self, n: &Node) {
+        if !n.visible {
+            return;
+        }
+        let plain_group =
+            n.name.is_none() && transparency(n).is_empty() && !n.appearance.effects.iter().any(|e| e.visible) && n.extras().mask.is_none();
+        match &n.kind {
+            NodeKind::Layer { template: true, .. } | NodeKind::Path { guide: true, .. } => {}
+            NodeKind::Layer { children, clip: false, .. } => children.iter().for_each(|c| self.object(c)),
+            NodeKind::Group { children, clip: false } if plain_group => children.iter().for_each(|c| self.object(c)),
+            _ => self.rule(n),
+        }
+    }
+
+    /// A class name for `name` (an object's, or its kind's), unique in the sheet.
+    fn class_name(&mut self, name: &str) -> String {
+        let base = sanitize_id(name).replace('.', "_");
+        if self.names.insert(base.to_lowercase()) {
+            return base;
+        }
+        // Each base goes on from the suffix it last gave: objects sharing a name take linear work.
+        let next = self.next_suffix.entry(base.to_lowercase()).or_insert(2);
+        loop {
+            let cand = format!("{base}-{next}");
+            *next += 1;
+            if self.names.insert(cand.to_lowercase()) {
+                return cand;
+            }
+        }
+    }
+
+    fn rule(&mut self, n: &Node) {
+        if !self.seen.insert(n.id) {
+            return;
+        }
+        let name = match n.name.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            Some(name) => name.to_string(),
+            None if self.opts.unnamed => n.kind_label().to_lowercase().replace(' ', "-"),
+            None => {
+                self.sheet.skipped += 1;
+                return;
+            }
+        };
+        let class = self.class_name(&name);
+        let art = self.art(n);
+        let image = art.unsupported.filter(|_| self.opts.rasterize).map(|_| format!("{class}.png"));
+        // A picture covers what the object paints.
+        let bounds = if image.is_some() { n.visual_bounds() } else { n.geometric_bounds() };
+        let mut props = self.box_props(bounds);
+        match &image {
+            Some(file) => {
+                props.push(("background-image", format!("url({file})")));
+                // The picture has the object's opacity; its blend mode stays a property.
+                props.extend(transparency(n).into_iter().filter(|(k, _)| *k != "opacity"));
+            }
+            None => {
+                props.extend(art.props);
+                props.extend(transparency(n));
+                if art.unsupported.is_some() {
+                    self.warn("art CSS can't describe exactly is written as its box (rasterize writes it as a picture)");
+                }
+            }
+        }
+        self.sheet.rules.push(CssRule { id: n.id, selector: format!(".{class}"), props, unsupported: art.unsupported, image });
+    }
+
+    /// Position and dimensions of a box (as the options ask), from its artboard's top-left.
+    fn box_props(&self, b: Option<Rect>) -> Props {
+        let mut p = Props::new();
+        let Some(b) = b else { return p };
+        if self.opts.position {
+            let c = b.center();
+            let ab = self.doc.artboard_holding(c, false).and_then(|i| self.doc.artboards.get(i)).or_else(|| self.doc.artboards.first());
+            let origin = ab.map_or(Point::ZERO, |a| Point::new(a.rect.x0, a.rect.y0));
+            p.push(("position", "absolute".into()));
+            p.push(("left", self.len(b.x0 - origin.x)));
+            p.push(("top", self.len(b.y0 - origin.y)));
+        }
+        if self.opts.dimensions {
+            p.push(("width", self.len(b.width())));
+            p.push(("height", self.len(b.height())));
+        }
+        p
+    }
+
+    /// The art of `n` as CSS: paints, corners, type and effects.
+    fn art(&mut self, n: &Node) -> Art {
+        let mut art = Art::default();
+        let mut radius = None;
+        let text = match &n.kind {
+            NodeKind::Path { path, live, .. } => {
+                match corners(path, live.as_deref()) {
+                    Some(Corners::Square) => {}
+                    Some(Corners::Round(r)) => radius = Some(r.iter().map(|r| self.len(*r)).collect::<Vec<_>>().join(" ")),
+                    Some(Corners::Ellipse) => radius = Some("50%".into()),
+                    None => art.unsupported("a shape other than a rectangle or an ellipse"),
+                }
+                false
+            }
+            NodeKind::Compound { .. } => {
+                art.unsupported("a compound path");
+                false
+            }
+            NodeKind::Text(t) => {
+                self.type_art(n, t, &mut art);
+                true
+            }
+            _ => {
+                art.unsupported("art other than shapes and type");
+                false
+            }
+        };
+        if !text {
+            self.paints(n, &mut art);
+        }
+        art.props.extend(radius.map(|r| ("border-radius", r)));
+        self.effects(n, text, &mut art);
+        if n.extras().mask.as_ref().is_some_and(|m| !m.disabled) {
+            art.unsupported("an opacity mask");
+        }
+        art
+    }
+
+    /// A shape's fill (`background-*`) and stroke (`border*`).
+    fn paints(&mut self, n: &Node, art: &mut Art) {
+        let bounds = n.geometric_bounds().unwrap_or_default();
+        let shown = |i: &&AppearanceItem| i.visible() && !i.paint().is_none() && !matches!(i, AppearanceItem::Stroke(s) if s.width <= 0.0);
+        let items: Vec<&AppearanceItem> = n.appearance.items.iter().filter(shown).collect();
+        let fills: Vec<_> = items.iter().filter_map(|i| if let AppearanceItem::Fill(f) = i { Some(f) } else { None }).collect();
+        let strokes: Vec<_> = items.iter().filter_map(|i| if let AppearanceItem::Stroke(s) = i { Some(s) } else { None }).collect();
+        if fills.len() > 1 || strokes.len() > 1 {
+            art.unsupported("several fills or strokes");
+        }
+        if items.iter().any(|i| i.blend() != BlendMode::Normal || i.effects().iter().any(|e| e.visible)) {
+            art.unsupported("blend modes or effects on a fill or stroke");
+        }
+        // The topmost of each, as the canvas shows it on top.
+        if let Some(f) = fills.last() {
+            match &f.paint {
+                Paint::Solid { color, .. } => art.props.push(("background-color", color_css(color, f.opacity))),
+                Paint::Gradient(g) => match self.gradient(g, bounds, f.opacity) {
+                    Some(css) => art.props.push(("background-image", css)),
+                    None => art.unsupported("a freeform gradient"),
+                },
+                Paint::Pattern { .. } => art.unsupported("a pattern"),
+                Paint::None => {}
+            }
+        }
+        if let Some(s) = strokes.last() {
+            self.border(s, bounds, art);
+        }
+    }
+
+    /// A stroke as a border: weight, style (dashed; dotted for round dots) and colour.
+    fn border(&mut self, s: &StrokeLayer, bounds: Rect, art: &mut Art) {
+        // Aligned strokes still draw as borders; arrowheads, profiles, brushes and fitted dashes don't.
+        if !vectorcraft_effects::stroke::is_plain(&StrokeLayer { align: StrokeAlign::Center, ..s.clone() }) {
+            art.unsupported("arrowheads, width profiles, brushes or dashes fitted to corners");
+        }
+        let style = match &s.dash {
+            Some(d) if d.is_dashed() && s.cap == LineCap::Round && d.pattern.first() == Some(&0.0) => "dotted",
+            Some(d) if d.is_dashed() => "dashed",
+            _ => "solid",
+        };
+        let width = self.len(s.width);
+        match &s.paint {
+            Paint::Solid { color, .. } => art.props.push(("border", format!("{width} {style} {}", color_css(color, s.opacity)))),
+            Paint::Gradient(g) => match self.gradient(g, s.paint_bounds(bounds), s.opacity) {
+                Some(css) => {
+                    art.props.push(("border", format!("{width} {style}")));
+                    art.props.push(("border-image", format!("{css} 1")));
+                }
+                None => art.unsupported("a freeform gradient"),
+            },
+            Paint::Pattern { .. } => art.unsupported("a pattern"),
+            Paint::None => {}
+        }
+    }
+
+    /// A linear, radial, conic or diamond gradient over `b` at `opacity`, with the stops SVG export
+    /// writes (midpoints as stops of their own). `None` for freeform gradients.
+    fn gradient(&mut self, g: &GradientPaint, b: Rect, opacity: f32) -> Option<String> {
+        let geom = g.resolve(b);
+        // A linear, radial or diamond gradient that repeats or reflects: a repeating gradient of
+        // one cycle (a run, or a run and its mirror) over that cycle's placement
+        // (https://www.w3.org/TR/css-images-3/#repeating-gradients). A conic one: its stops
+        // repeated around the turn.
+        let kind = g.gradient.kind;
+        let unrolled = g.gradient.unrolled();
+        let (gradient, geom, repeating) = match g.gradient.cycle() {
+            Some((cycle, runs)) if kind != GradientKind::Conic => {
+                // CSS radials start at their center: the cycle is scaled about it.
+                let centered = GradientGeom { focal: None, ..geom };
+                let cycle_geom = centered.period(kind, g.gradient.repeat_count()).levels_scaled(kind, f64::from(runs));
+                let geom = GradientGeom { focal: geom.focal, ..cycle_geom };
+                (std::borrow::Cow::Owned(cycle), geom, "repeating-")
+            }
+            _ => (unrolled, geom, ""),
+        };
+        // A repeating gradient's period is the span from its first stop to its last, repeated
+        // across the box (from 0% to `reach`%): its positions get at least four decimals, and more
+        // when the box holds so many periods that their rounding would add up to more than a
+        // hundredth of one ([`period_decimals`]).
+        let span = gradient.expanded().next().zip(gradient.expanded().last()).map(|(a, z)| (a.0, z.0));
+        let decimals = |pos: &dyn Fn(f32) -> f64, reach: f64| match span {
+            Some((a, z)) if !repeating.is_empty() => {
+                let (p0, p1) = (pos(a) * 100.0, pos(z) * 100.0);
+                period_decimals((p1 - p0).abs(), p0.abs().max((reach - p0).abs()), 4)
+            }
+            _ => 2,
+        };
+        let stops = |pos: &dyn Fn(f32) -> f64, decimals: u8| {
+            let stops: Vec<String> =
+                gradient.expanded().map(|(t, c, o, _)| format!("{} {}%", color_css(&c, o * opacity), fmt_num(pos(t) * 100.0, decimals))).collect();
+            stops.join(", ")
+        };
+        match g.gradient.kind {
+            GradientKind::Linear => {
+                // CSS runs the gradient along a line through the box's centre at its angle (0deg up,
+                // 90deg right), long enough for the corners: the stops are placed on it.
+                let v = geom.end - geom.start;
+                let length = v.hypot();
+                let (dir, angle) = if length > 1e-9 {
+                    (v / length, v.x.atan2(-v.y).to_degrees().rem_euclid(360.0))
+                } else {
+                    (vectorcraft_geom::Vec2::new(1.0, 0.0), 90.0)
+                };
+                let line = (b.width() * dir.x).abs() + (b.height() * dir.y).abs();
+                let from = (geom.start - b.center()).dot(dir);
+                let pos = |t: f32| if line > 1e-9 { (from + t as f64 * length) / line + 0.5 } else { t as f64 };
+                Some(format!("{repeating}linear-gradient({}deg, {})", fmt_num(angle, 2), stops(&pos, decimals(&pos, 100.0))))
+            }
+            // CSS has no diamond gradient: the ellipse through the square's corners stands in.
+            GradientKind::Radial | GradientKind::Diamond => {
+                let r = (geom.end - geom.start).hypot();
+                if g.gradient.kind == GradientKind::Diamond {
+                    self.warn("diamond gradients are written as radial gradients through their corners");
+                } else if geom.focal.is_some() {
+                    self.warn("radial gradients start at their centre (an off-centre focal point is left out)");
+                }
+                // The positions are a share of the radius, and the box reaches out to its farthest
+                // corner. A repeating gradient's period scales with its radius, so the radius gets
+                // the decimals that keep the periods in place out to that corner too.
+                let units = self.opts.units;
+                let small = r * geom.aspect.abs().min(1.0);
+                let far = [(b.x0, b.y0), (b.x1, b.y0), (b.x0, b.y1), (b.x1, b.y1)]
+                    .into_iter()
+                    .map(|(x, y)| (Point::new(x, y) - geom.start).hypot())
+                    .fold(0.0, f64::max);
+                let reach = if small > 1e-12 { 100.0 * far / small } else { 0.0 };
+                let pos = |t: f32| t as f64;
+                let len = match span {
+                    Some((a, z)) if !repeating.is_empty() => {
+                        period_decimals(small * f64::from(z - a).abs() * units.per_point(), far * units.per_point(), 3)
+                    }
+                    _ => 3,
+                };
+                let shape = if (geom.aspect - 1.0).abs() < 1e-9 {
+                    format!("circle {}", units.len_to(r, len))
+                } else {
+                    format!("ellipse {} {}", units.len_to(r, len), units.len_to(r * geom.aspect, len))
+                };
+                let at = format!("at {} {}", self.len(geom.start.x - b.x0), self.len(geom.start.y - b.y0));
+                Some(format!("{repeating}radial-gradient({shape} {at}, {})", stops(&pos, decimals(&pos, reach))))
+            }
+            GradientKind::Conic => {
+                // CSS sweeps clockwise from the `from` angle, 0deg straight up
+                // (https://www.w3.org/TR/css-images-4/#conic-gradients): the vector's direction is
+                // where the sweep starts. A mirrored sweep turns the other way, so its stops are
+                // written mirrored about the seam; CSS has no elliptical sweep.
+                let frame = geom.conic_frame();
+                let v = frame * Point::new(1.0, 0.0) - frame * Point::ORIGIN;
+                let from = v.x.atan2(-v.y).to_degrees().rem_euclid(360.0);
+                if (geom.aspect.abs() - 1.0).abs() > 1e-9 && geom.unit_frame().is_some() {
+                    self.warn("conic gradients are written circular (an elliptical sweep is left out)");
+                }
+                let mut stops: Vec<(f32, Color, f32)> = gradient.expanded().map(|(t, c, o, _)| (t, c, o)).collect();
+                if geom.is_mirrored() {
+                    stops.reverse();
+                    stops.iter_mut().for_each(|s| s.0 = 1.0 - s.0);
+                }
+                let stops: Vec<String> =
+                    stops.iter().map(|(t, c, o)| format!("{} {}%", color_css(c, o * opacity), fmt_num(f64::from(*t) * 100.0, 2))).collect();
+                let at = format!("at {} {}", self.len(geom.start.x - b.x0), self.len(geom.start.y - b.y0));
+                Some(format!("conic-gradient(from {}deg {at}, {})", fmt_num(from, 2), stops.join(", ")))
+            }
+            GradientKind::Freeform => None,
+        }
+    }
+
+    /// Type: its first character style's font, colour and spacing, its paragraph's alignment. The
+    /// font size is the em size the characters are drawn at
+    /// ([`vectorcraft_text::FontDb::font_heights_resolved`]).
+    fn type_art(&mut self, n: &Node, t: &vectorcraft_doc::TextObject, art: &mut Art) {
+        let resolved = vectorcraft_text::FontDb::global().font_heights_resolved(t);
+        let t = &*resolved;
+        if matches!(t.kind, TextKind::OnPath { .. }) {
+            art.unsupported("type on a path");
+        }
+        if n.appearance.items.iter().any(|i| i.visible() && !i.paint().is_none()) {
+            art.unsupported("fills or strokes on the type object");
+        }
+        // Type that Shrink Text to Fit or Dynamic Text scales is written in the styles it draws in.
+        let fitted = vectorcraft_text::drawn(t);
+        let t = &*fitted;
+        let st = t.first_style();
+        if t.runs.iter().any(|r| r.style != st) {
+            self.warn("type with several character styles is written in its first one");
+        }
+        let len = |v: f64| self.len(v);
+        art.props.extend(font_props(&st, &len));
+        match &st.fill {
+            Paint::Solid { color, .. } => art.props.push(("color", color.to_hex())),
+            Paint::None => art.props.push(("color", "transparent".into())),
+            _ => art.unsupported("type painted with a gradient or a pattern"),
+        }
+        if st.has_stroke() {
+            match &st.stroke {
+                Paint::Solid { color, .. } => art.props.push(("-webkit-text-stroke", format!("{} {}", self.len(st.stroke_width), color.to_hex()))),
+                _ => art.unsupported("type painted with a gradient or a pattern"),
+            }
+        }
+        art.props.extend(type_props(&st, &len));
+        if let Some(l) = st.leading {
+            art.props.push(("line-height", self.len(l)));
+        }
+        // One element: the first paragraph's alignment.
+        if (1..t.paragraph_count()).any(|i| t.para_at(i).justify != t.para.justify) {
+            art.unsupported("paragraphs aligned differently");
+        }
+        let align = match t.para.justify {
+            Justify::Auto | Justify::Left => None,
+            Justify::Center => Some("center"),
+            Justify::Right => Some("right"),
+            Justify::JustifyLeft | Justify::JustifyCenter | Justify::JustifyRight | Justify::JustifyAll => Some("justify"),
+        };
+        art.props.extend(align.map(|a| ("text-align", a.to_string())));
+        if st.all_caps {
+            art.props.push(("text-transform", "uppercase".into()));
+        }
+    }
+
+    /// Shadows and glows as `box-shadow` (type: `text-shadow`), a Gaussian blur as `filter`. A drop
+    /// shadow with Darkness is left out and the art marked unsupported.
+    fn effects(&mut self, n: &Node, text: bool, art: &mut Art) {
+        let fx = &n.appearance.effects;
+        if fx.iter().any(|e| e.visible && !vectorcraft_effects::is_raster(&e.id)) {
+            art.unsupported("live effects");
+        }
+        let mut shadows = vec![];
+        let mut filter = None;
+        for f in vectorcraft_effects::raster_effects(fx) {
+            match f {
+                RasterFx::DropShadow { darkness: Some(_), .. } => art.unsupported("drop shadows with Darkness"),
+                RasterFx::DropShadow { opacity, dx, dy, blur, color, .. } => {
+                    shadows.push(format!("{} {} {} {}", self.len(dx), self.len(dy), self.len(blur), color_css(&color, opacity)))
+                }
+                RasterFx::OuterGlow { opacity, blur, color, .. } => shadows.push(format!("0 0 {} {}", self.len(blur), color_css(&color, opacity))),
+                RasterFx::InnerGlow { opacity, blur, color, center: false, .. } if !text => {
+                    shadows.push(format!("inset 0 0 {} {}", self.len(blur), color_css(&color, opacity)))
+                }
+                RasterFx::GaussianBlur { radius, .. } => filter = Some(format!("blur({})", self.len(radius / 2.0))),
+                RasterFx::InnerGlow { .. } | RasterFx::Feather { .. } => art.unsupported("inner glows or feathering"),
+                RasterFx::Pixel(_) | RasterFx::Rasterize(_) => art.unsupported("pixel effects"),
+            }
+        }
+        if !shadows.is_empty() {
+            art.props.push((if text { "text-shadow" } else { "box-shadow" }, shadows.join(", ")));
+        }
+        art.props.extend(filter.map(|f| ("filter", f)));
+    }
+}
+
+/// How a box's corners round.
+enum Corners {
+    Square,
+    /// Top-left, top-right, bottom-right, bottom-left (one value when all are the same).
+    Round(Vec<f64>),
+    Ellipse,
+}
+
+/// The corners of a path that is an upright rectangle (a live one keeps its radii) or a whole,
+/// upright live ellipse; `None` for other shapes.
+fn corners(path: &PathData, live: Option<&LiveShape>) -> Option<Corners> {
+    let upright = |xf: &Affine| {
+        let [_, b, c, _, _, _] = xf.as_coeffs();
+        b.abs() < 1e-9 && c.abs() < 1e-9
+    };
+    // Sizes and radii in document units.
+    match live.map(LiveShape::folded).as_ref() {
+        // CSS rounds corners only: an inverted round or chamfered corner has no border radius.
+        Some(LiveShape::Rectangle { w, h, radii, kinds, radii_relative, xf })
+            if upright(xf) && radii.iter().zip(kinds).all(|(r, k)| *r <= 0.0 || *k == CornerKind::Round) =>
+        {
+            // The radii as drawn: no two neighbours' cuts add up to more than their side, so CSS
+            // draws them as they are.
+            let base = shapes::rectangle(vectorcraft_geom::Rect::new(0.0, 0.0, *w, *h));
+            let resolved = vectorcraft_doc::corners::resolve_stored_radii(&base, radii, *radii_relative);
+            let stored = std::array::from_fn(|i| resolved.get(i).copied().unwrap_or(0.0));
+            let radii = shapes::fitted_corner_radii(*w, *h, stored);
+            if radii.iter().all(|r| *r <= 0.0) {
+                Some(Corners::Square)
+            } else if radii.iter().all(|r| (r - radii[0]).abs() < 1e-9) {
+                Some(Corners::Round(vec![radii[0]]))
+            } else {
+                Some(Corners::Round(radii.to_vec()))
+            }
+        }
+        Some(LiveShape::Ellipse { pie, xf, .. }) if upright(xf) => {
+            let sweep = (pie.1 - pie.0).abs();
+            (sweep < 1e-6 || (sweep - 360.0).abs() < 1e-6).then_some(Corners::Ellipse)
+        }
+        Some(
+            LiveShape::Rectangle { .. } | LiveShape::Ellipse { .. } | LiveShape::Polygon { .. } | LiveShape::Line { .. } | LiveShape::Path { .. },
+        ) => None,
+        None => is_upright_rectangle(path).then_some(Corners::Square),
+    }
+}
+
+/// One closed subpath of four straight sides along the axes.
+fn is_upright_rectangle(path: &PathData) -> bool {
+    let ([sp], Some(b)) = (path.subpaths.as_slice(), path.bounds()) else { return false };
+    let corner = |p: Point| ((p.x - b.x0).abs() < 1e-6 || (p.x - b.x1).abs() < 1e-6) && ((p.y - b.y0).abs() < 1e-6 || (p.y - b.y1).abs() < 1e-6);
+    sp.closed
+        && sp.anchors.len() == 4
+        && (0..sp.segment_count()).all(|i| sp.segment_is_line(i))
+        && sp.anchors.iter().all(|a| corner(a.p))
+        && b.width() > 0.0
+        && b.height() > 0.0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn family(name: &str) -> String {
+        let st = CharStyle { font_family: name.into(), ..CharStyle::default() };
+        let p = font_props(&st, &|v| format!("{v}px"));
+        p.into_iter().find(|(k, _)| *k == "font-family").unwrap().1
+    }
+
+    #[test]
+    fn font_family_quoted_unless_plain_identifier() {
+        assert!(family("04b03").starts_with("'04b03'"), "{}", family("04b03"));
+        assert!(family("a;b").starts_with("'a;b'"));
+        assert!(family("a\"b").starts_with("'a\"b'"));
+        assert!(family("a(b").starts_with("'a(b'"));
+        assert!(family("Arial").starts_with("Arial,"));
+    }
+
+    #[test]
+    fn class_names_sharing_a_base_take_the_next_free_suffix() {
+        let doc = Document::new(10.0, 10.0);
+        let opts = CssOptions::default();
+        let mut w =
+            Rules { doc: &doc, opts: &opts, sheet: CssSheet::default(), seen: HashSet::new(), names: HashSet::new(), next_suffix: HashMap::new() };
+        assert_eq!(w.class_name("a-3"), "a-3");
+        let names: Vec<String> = (0..4).map(|_| w.class_name("A")).collect();
+        assert_eq!(names, ["A", "A-2", "A-4", "A-5"]);
+        // Many objects of one name: each suffix is tried once.
+        for _ in 0..20_000 {
+            w.class_name("b");
+        }
+        assert_eq!(w.next_suffix["b"], 20_001);
+    }
+
+    #[test]
+    fn line_breaks_and_tags_cannot_end_a_string() {
+        assert!(family("a\n} * {color:red").starts_with(r"'a\a } * {color:red'"), "{}", family("a\n} * {color:red"));
+        assert_eq!(css_string("w\r\"</style>"), r#""w\d \"\3c /style\3e ""#);
+        assert_eq!(css_string("wght"), "\"wght\"");
+    }
+}

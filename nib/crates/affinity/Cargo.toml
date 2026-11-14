@@ -1,0 +1,23 @@
+[package]
+name = "vectorcraft-affinity"
+description = "craft-affinity under its old name, for the corpus tests and fuzz targets"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+# Synthetic-container builders for tests and fuzz seeds; not an Affinity exporter.
+synth = ["craft-affinity/synth"]
+
+[dependencies]
+craft-affinity = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+# The tests build containers and decode previews.
+crc32fast = { workspace = true }
+image = { workspace = true }
