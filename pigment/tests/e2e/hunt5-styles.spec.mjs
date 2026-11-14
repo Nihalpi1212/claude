@@ -109,7 +109,20 @@ test('saving a PSD tells that layer effects and Blending Options are not kept', 
   await page.evaluate(() => (window.__pigmentTest.nextSavePath = 'mem:/styled.psd'));
   await runAwait(page, 'file:save-as');
   await expect.poll(() => page.evaluate(() => !!window.__pigmentTest.written['mem:/styled.psd'])).toBe(true);
-  await expect(page.locator('#toasts .toast', { hasText: '1 layer with layer effects or Blending Options was saved without them' })).toBeVisible();
+  // rule 11 (S14.2): 0.4's drop while psd-layers has not landed effects and advanced blending; then they come back
+  const psd = await page.evaluate(async () => {
+    const { psdFeatures } = await import('/lib/psd/registry.js');
+    const { readPsdDocument } = await import('/lib/io.js');
+    const f = psdFeatures();
+    const back = readPsdDocument(window.__pigmentTest.written['mem:/styled.psd']).layers().find((l) => l.type === 'raster' && l.styles);
+    return { landed: !!(f.effects && f.advancedBlending), shadow: !!back?.styles?.dropShadow?.enabled, knockout: back?.blending?.knockout ?? null };
+  });
+  const notice = page.locator('#toasts .toast', { hasText: '1 layer with layer effects or Blending Options was saved without them' });
+  if (!psd.landed) await expect(notice).toBeVisible();
+  else {
+    expect(psd).toMatchObject({ shadow: true, knockout: 'deep' });
+    await expect(notice).toHaveCount(0);
+  }
   expect(errors).toEqual([]);
 });
 

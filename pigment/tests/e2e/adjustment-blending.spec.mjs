@@ -373,6 +373,16 @@ test('a PSD keeps an adjustment layer\'s Blend If and says when its channel rest
     a.touch();
   });
   await save('mem:/adj.psd');
-  await expect(notice).toBeVisible();
+  // rule 11 (S14.2): 0.4's notice while psd-layers has not landed advanced blending; then the channels are written
+  const advanced = await page.evaluate(async () => !!(await import('/lib/psd/registry.js')).psdFeatures().advancedBlending);
+  if (!advanced) await expect(notice).toBeVisible();
+  else {
+    await expect(notice).toHaveCount(0);
+    const channels = await page.evaluate(async () => {
+      const { readPsdDocument } = await import('/lib/io.js');
+      return readPsdDocument(window.__pigmentTest.written['mem:/adj.psd']).layers().find((l) => l.type === 'adjustment')?.blending?.channels ?? null;
+    });
+    expect(channels).toMatchObject({ g: false });
+  }
   expect(errors).toEqual([]);
 });

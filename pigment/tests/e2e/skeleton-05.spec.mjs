@@ -6,10 +6,11 @@
 // runs only while the stub is in place, read from the capability flags of S15 (landed() below); the same test checks
 // the landed behaviour otherwise.
 import { test, expect } from '@playwright/test';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openApp, newDoc, runAwait } from './helpers.mjs';
+import { PSD_GOLDEN_DOCS, pagePsdGolden } from './goldens.mjs';
 
 const RENDERER = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'src', 'renderer');
 
@@ -539,5 +540,151 @@ test('brush: a sampled tip given only as a data URL paints after prepareBrush, a
   expect(r.round.corner).toBe(0);
   expect(r.sampled.centre).toBe(255);
   expect(r.blob).toBeGreaterThan(0);
+  expect(errors).toEqual([]);
+});
+
+// ---- step 5: PSD mapper registries (S4) ---------------------------------------------------------------------------
+
+const PSD_GOLDEN = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'psd-golden');
+// the psdFeatures() flags of the mappers that could write each golden document differently from 0.4 (S15): while all
+// are false the file must be 0.4's exactly; after, the document must read back
+const PSD_GOLDEN_FLAGS = {
+  text: ['textRuns', 'tags'],
+  adjustments: ['effects', 'fills', 'tags'],
+  masks: ['vectorMasks', 'effects', 'tags'],
+  styles: ['effects', 'advancedBlending', 'tags'],
+  guides: ['tags', 'globalLight'],
+  grayscale: ['textRuns', 'shapes', 'fills', 'tags'],
+};
+
+test('psd: the six PSD goldens are written as 0.4 wrote them while their mappers are stubs, and read back after', async ({ page }) => {
+  const errors = await openApp(page);
+  const features = await page.evaluate(async () => (await import('/lib/psd/registry.js')).psdFeatures());
+  await page.evaluate(async () => {
+    const { writePsdDocument } = await import('/lib/io.js');
+    window.__goldenWritePsd = (d) => (window.__goldenBytes = writePsdDocument(d, d.view.compositor));
+  });
+  for (const id of PSD_GOLDEN_DOCS) {
+    const json = await page.evaluate(pagePsdGolden, id);
+    const back = await page.evaluate(async () => {
+      const { readPsdDocument } = await import('/lib/io.js');
+      const d = window.pigmentApp.doc;
+      const names = (doc) => doc.layers().map((l) => l.name);
+      return { written: names(d), read: names(readPsdDocument(window.__goldenBytes)) };
+    });
+    // every layer comes back under its name, in order, whatever the mappers wrote
+    expect(back.read, id).toEqual(back.written);
+    if (!PSD_GOLDEN_FLAGS[id].some((f) => features[f])) expect(json, `${id}: 0.4's PSD`).toBe(readFileSync(join(PSD_GOLDEN, `${id}.json`), 'utf8').trimEnd());
+  }
+  expect(errors).toEqual([]);
+});
+
+test('psd: a fake shape kind writes natively in RGB and declines in Grayscale, where the shape stays grey pixels', async ({ page }) => {
+  const errors = await openApp(page);
+  const r = await page.evaluate(async () => {
+    const app = window.pigmentApp;
+    const { registerPsdLayerKind } = await import('/lib/psd/registry.js');
+    const { psdColor } = await import('/lib/psd/convert.js');
+    const { writePsdDocument } = await import('/lib/io.js');
+    const { ShapeLayer } = await import('/lib/document.js');
+    const { readPsd } = await import('ag-psd');
+    const seen = [];
+    // S4.2's mode rule: a kind that writes colours writes natively only when every colour passes asShown
+    const off = registerPsdLayerKind({
+      id: 'test-shape',
+      order: 340,
+      match: (layer) => layer.type === 'shape',
+      write(layer, ctx) {
+        const color = layer.fill?.color ?? '#000000';
+        seen.push({ modeRendered: ctx.modeRendered, asShown: ctx.asShown(color) });
+        if (!ctx.asShown(color)) return null;
+        ctx.claim(layer, 'shape');
+        const p = layer.render();
+        return { left: p.x, top: p.y, canvas: ctx.shown(p.canvas, p.x, p.y), vectorFill: { type: 'color', color: psdColor(color) } };
+      },
+    });
+    const rect = { subpaths: [{ closed: true, points: [[10, 10], [50, 10], [50, 40], [10, 40]].map(([x, y]) => ({ x, y, anchor: { x, y }, in: { x, y }, out: { x, y } })) }] };
+    const out = {};
+    try {
+      for (const mode of ['rgb', 'grayscale']) {
+        app.newDocument({ width: 60, height: 50, name: mode, mode });
+        const d = app.doc;
+        const shape = new ShapeLayer({ name: 'Red shape', path: rect, fill: { type: 'solid', color: '#ff0000' } });
+        d.add(shape);
+        const psd = readPsd(writePsdDocument(d, d.view.compositor), { skipThumbnail: true, skipCompositeImageData: true });
+        const rec = psd.children.find((c) => c.name === 'Red shape');
+        const px = rec.canvas.getContext('2d').getImageData(20 - rec.left, 20 - rec.top, 1, 1).data;
+        out[mode] = { vectorFill: rec.vectorFill?.color ? [rec.vectorFill.color.r, rec.vectorFill.color.g, rec.vectorFill.color.b].map(Math.round) : null, px: Array.from(px) };
+      }
+    } finally {
+      off();
+    }
+    return { out, seen };
+  });
+  expect(r.seen).toEqual([{ modeRendered: false, asShown: true }, { modeRendered: true, asShown: false }]);
+  expect(r.out.rgb.vectorFill).toEqual([255, 0, 0]);
+  expect(r.out.rgb.px).toEqual([255, 0, 0, 255]);
+  expect(r.out.grayscale.vectorFill).toBeNull();
+  const [gr, gg, gb, ga] = r.out.grayscale.px;
+  expect(gr).toBe(gg);
+  expect(gg).toBe(gb);
+  expect(ga).toBe(255);
+  expect(gr).toBeLessThan(200);
+  expect(errors).toEqual([]);
+});
+
+test('psd: without Maximize Compatibility the composite is blank, not real merged data, and there is no thumbnail', async ({ page }) => {
+  const errors = await openApp(page);
+  await newDoc(page, { width: 40, height: 30, background: 'white' });
+  const r = await page.evaluate(async () => {
+    const app = window.pigmentApp;
+    const d = app.doc;
+    const { RasterLayer, createCanvas } = await import('/lib/document.js');
+    const { writePsdDocument } = await import('/lib/io.js');
+    const { readPsd } = await import('ag-psd');
+    const c = createCanvas(40, 30);
+    c.getContext('2d').fillStyle = '#204080';
+    c.getContext('2d').fillRect(0, 0, 40, 30);
+    d.add(new RasterLayer({ name: 'Blue', canvas: c, x: 0, y: 0 }));
+    const info = (bytes) => {
+      const psd = readPsd(bytes, { skipLayerImageData: true });
+      return { thumbnail: !!psd.imageResources?.thumbnail, real: psd.imageResources?.versionInfo?.hasRealMergedData ?? null, px: Array.from(psd.canvas.getContext('2d').getImageData(5, 5, 1, 1).data), layers: psd.children.map((l) => l.name) };
+    };
+    const out = { on: info(writePsdDocument(d, d.view.compositor)), off: info(writePsdDocument(d, d.view.compositor, { maximizeCompatibility: false })) };
+    // without the option, the preference decides: 'never' is off, 'ask' and 'always' are on
+    const before = app.settings.psd.maximizeCompatibility;
+    app.settings.psd.maximizeCompatibility = 'never';
+    out.never = info(writePsdDocument(d, d.view.compositor));
+    app.settings.psd.maximizeCompatibility = 'ask';
+    out.ask = info(writePsdDocument(d, d.view.compositor));
+    app.settings.psd.maximizeCompatibility = before;
+    return out;
+  });
+  expect(r.on).toEqual({ thumbnail: true, real: null, px: [32, 64, 128, 255], layers: ['Background', 'Blue'] });
+  expect(r.off).toEqual({ thumbnail: false, real: false, px: [255, 255, 255, 255], layers: ['Background', 'Blue'] });
+  expect(r.never).toEqual(r.off);
+  expect(r.ask).toEqual(r.on);
+  expect(errors).toEqual([]);
+});
+
+test('psd: an open notice a mapper reports is shown after the file opens and kept on the document', async ({ page }) => {
+  const errors = await openApp(page);
+  await newDoc(page, { width: 40, height: 30 });
+  const notices = await page.evaluate(async () => {
+    const app = window.pigmentApp;
+    const { registerPsdAspect, registerPsdNotice } = await import('/lib/psd/registry.js');
+    const { writePsdDocument } = await import('/lib/io.js');
+    window.__pigmentTest.files['mem:/notice.psd'] = writePsdDocument(app.doc, app.doc.view.compositor);
+    window.__offNotice = [
+      registerPsdNotice('test-dropped', { when: 'open', text: (n, names) => `${n} layer effect${n === 1 ? '' : 's'} Pigment does not have ${n === 1 ? 'was' : 'were'} dropped: ${names.join(', ')}` }),
+      registerPsdAspect({ id: 'test-dropped', order: 450, read: (pl, layer, ctx) => ctx.report.add('test-dropped', `Satin on ${layer.name}`) }),
+    ];
+    await app.commands.run('file:open-paths', ['mem:/notice.psd'], 'api');
+    const list = app.doc.openNotices ?? null;
+    for (const off of window.__offNotice) off();
+    return list;
+  });
+  expect(notices).toEqual(['1 layer effect Pigment does not have was dropped: Satin on Background']);
+  await expect(page.locator('#toasts .toast', { hasText: '1 layer effect Pigment does not have was dropped' })).toBeVisible();
   expect(errors).toEqual([]);
 });

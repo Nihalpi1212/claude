@@ -112,6 +112,7 @@ export class DocumentManager {
         this.add(doc);
         doc.history.markSaved(flattenDocument(doc, doc.view.compositor));
         this.rememberRecent(doc);
+        this.showOpenNotices(doc); // psd (lib/psd/read.js)
         last = doc;
       } catch (err) {
         this.app.reportError(err, `Could not open "${path.split(/[\\/]/).pop()}"`);
@@ -120,6 +121,14 @@ export class DocumentManager {
       }
     }
     return last;
+  }
+
+  /**
+   * Shows `doc.openNotices` (S4.4): what the reader could not carry ("2 layer effects Pigment does not have were
+   * dropped: …"), one toast per line, once the document is open. The lines stay on the document, never in a file.
+   */
+  showOpenNotices(doc) {
+    for (const text of doc.openNotices ?? []) this.app.dialogs.toast(text, { timeout: 6000 });
   }
 
   async openDialog() {
