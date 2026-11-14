@@ -6,6 +6,7 @@ import { formDialog } from './form.js';
 import { createColorWidget, normHex } from './panels/color.js';
 import { parseColor, rgbaToHex, rgbToLab, labToRgb, rgbToCmyk, cmykToRgb } from '../../shared/pixels/color.js';
 import { DEFAULT_SETTINGS, DEFAULT_SWATCHES } from '../../shared/defaults.js';
+import { SRGB, profileById, profilesList } from './color/pipeline.js';
 
 const MAX_SIDE = 30000;
 const MAX_AREA = 250e6;
@@ -99,10 +100,16 @@ function createFromOptions(app, o) {
   let depth = [8, 16, 32].includes(Number(o.depth)) ? Number(o.depth) : 8;
   if (mode === 'bitmap') depth = 8;
   else if ((mode === 'cmyk' || mode === 'lab') && depth > 16) depth = 16;
-  return app.newDocument({ width, height, dpi, name, background, backgroundColor, mode, depth });
+  const doc = app.newDocument({ width, height, dpi, name, background, backgroundColor, mode, depth });
+  // color (lib/color/pipeline.js), S6.6: the chosen profile; sRGB (0.4) and "Don't Color Manage" are untagged (null)
+  if (doc && o.profile && o.profile !== SRGB.id && o.profile !== 'none') doc.profile = profileById(o.profile) ?? null;
+  return doc;
 }
 const MODES = [['rgb', 'RGB Color'], ['grayscale', 'Grayscale'], ['cmyk', 'CMYK Color'], ['lab', 'Lab Color'], ['bitmap', 'Bitmap']];
 const DEPTHS = [[8, '8 bit'], [16, '16 bit'], [32, '32 bit']];
+
+/** The New Document dialog's Color Profile choices (S6.6): every profile the pipeline lists, then untagged. */
+const profileOptions = () => [...profilesList().filter((p) => p.colorSpace === 'rgb' || p.colorSpace === 'gray').map((p) => [p.id, p.name]), ['none', "Don't Color Manage This Document"]];
 
 async function newDocumentDialog(app, arg, ctx = null) {
   if (arg && typeof arg === 'object' && Number(arg.width) > 0 && Number(arg.height) > 0) return createFromOptions(app, arg);
@@ -123,6 +130,7 @@ async function newDocumentDialog(app, arg, ctx = null) {
     backgroundColor: normHex(last.backgroundColor ?? '#ffffff'),
     mode: MODES.some(([id]) => id === last.mode) ? last.mode : 'rgb',
     depth: [8, 16, 32].includes(last.depth) ? last.depth : 8,
+    profile: profileOptions().some(([id]) => id === last.profile) ? last.profile : SRGB.id,
   };
   let sizeNode = null;
   let summary = null;
@@ -196,6 +204,8 @@ async function newDocumentDialog(app, arg, ctx = null) {
     { key: 'dpi', label: 'Resolution', type: 'number', min: 1, max: 10000, step: 1, unit: 'ppi', width: 90 },
     { key: 'mode', label: 'Color mode', type: 'select', options: MODES },
     { key: 'depth', label: 'Bit depth', type: 'select', options: DEPTHS, when: (v) => v.mode !== 'bitmap' },
+    // color (lib/color/pipeline.js), S6.6
+    { key: 'profile', label: 'Color Profile', type: 'select', options: profileOptions(), when: (v) => v.mode !== 'bitmap' },
     { key: 'background', label: 'Background contents', type: 'select', options: [['white', 'White'], ['black', 'Black'], ['background', 'Background color'], ['transparent', 'Transparent'], ['custom', 'Custom color…']] },
     { key: 'backgroundColor', label: 'Custom color', type: 'color', when: (v) => v.background === 'custom' },
     {
@@ -251,7 +261,10 @@ async function newDocumentDialog(app, arg, ctx = null) {
     return null;
   }
   const opts = { width: Math.round(result.width), height: Math.round(result.height), dpi: Math.round(Number(result.dpi) || 72), background: result.background, backgroundColor: normHex(result.backgroundColor), name: result.name, unit: result.unit, mode: result.mode, depth: Number(result.depth) || 8 };
-  app.saveSettingsSoon({ newDocPreset: { width: opts.width, height: opts.height, dpi: opts.dpi, background: opts.background, backgroundColor: opts.backgroundColor, unit: opts.unit, preset: result.preset === 'clipboard' ? 'custom' : result.preset, name: 'Untitled', mode: opts.mode, depth: opts.depth } });
+  // color (lib/color/pipeline.js): a profile other than sRGB (0.4's documents) goes into the arguments and the preset
+  const profile = result.profile && result.profile !== SRGB.id ? { profile: result.profile } : {};
+  Object.assign(opts, profile);
+  app.saveSettingsSoon({ newDocPreset: { width: opts.width, height: opts.height, dpi: opts.dpi, background: opts.background, backgroundColor: opts.backgroundColor, unit: opts.unit, preset: result.preset === 'clipboard' ? 'custom' : result.preset, name: 'Untitled', mode: opts.mode, depth: opts.depth, ...profile } });
   // actions (lib/actions.js): the settings replay the command; an automatic "Untitled-n" name is left to each run
   ctx?.setReplayArg({ ...opts, name: /^Untitled(-\d+)?$/.test(opts.name ?? '') ? undefined : opts.name });
   return createFromOptions(app, opts);

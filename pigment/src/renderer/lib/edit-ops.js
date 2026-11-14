@@ -7,6 +7,7 @@ import { Selection, selectionOps } from './selection.js';
 import { flattenDocument, flattenStored } from './compositor.js';
 import { structural, nextLayerName } from './layer-ops.js';
 import { decodeImage, decodeImageFile, baseName, OPEN_FILTERS } from './io.js';
+import { applyChunks, chunkProviders } from './io-chunks.js';
 import { drawBlended, drawOnMask } from './brush.js';
 import { BLEND_MODES } from './document.js';
 import { formDialog } from './form.js';
@@ -83,9 +84,18 @@ export function install(app) {
   /** What decides how a document's mode shows stored pixels: two documents with the same key show them alike. */
   const modeKey = (d) => JSON.stringify([d.mode ?? 'rgb', d.duotone ?? null, d.colorTable ?? null, d.meta?.imageMode ?? null]);
 
-  async function toSystemClipboard(canvas) {
+  async function toSystemClipboard(canvas, doc = null) {
+    // chunks (lib/io-chunks.js), S5: the copied PNG carries the providers' 'copy' chunks (the document's profile once
+    // icc-engine lands); without a provider the browser's PNG goes as it is, as in 0.4
+    const chunked = chunkProviders().length > 0;
+    const withChunks = async (blob) => {
+      const bytes = await applyChunks(doc, new Uint8Array(await blob.arrayBuffer()), 'png', { purpose: 'copy' });
+      return new Blob([bytes], { type: 'image/png' });
+    };
+    let blob = null;
     try {
-      const blob = await new Promise((r) => canvas.toBlob(r, 'image/png'));
+      blob = await new Promise((r) => canvas.toBlob(r, 'image/png'));
+      if (chunked && blob) blob = await withChunks(blob);
       if (navigator.clipboard?.write && typeof ClipboardItem !== 'undefined') {
         await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
         return;
@@ -94,7 +104,12 @@ export function install(app) {
       /* fall back to the bridge */
     }
     try {
-      bridge.writeClipboardImage(canvas.toDataURL('image/png'));
+      if (chunked && blob) {
+        const bytes = new Uint8Array(await blob.arrayBuffer());
+        let bin = '';
+        for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+        bridge.writeClipboardImage(`data:image/png;base64,${btoa(bin)}`);
+      } else bridge.writeClipboardImage(canvas.toDataURL('image/png'));
     } catch {
       /* ignore */
     }
@@ -127,7 +142,7 @@ export function install(app) {
     const data = copyPixels(merged);
     if (!data) return app.dialogs.toast('Nothing to copy on this layer', { kind: 'error' });
     app.clipboard = { ...data, docId: d.id, at: Date.now() };
-    await toSystemClipboard(data.canvas);
+    await toSystemClipboard(data.canvas, d);
     if (cut) clearPixels('Cut');
   }
 

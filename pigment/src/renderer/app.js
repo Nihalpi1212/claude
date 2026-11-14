@@ -19,6 +19,7 @@ import { installSample } from './lib/sample.js';
 import { installCanvasCapture } from './lib/canvas-capture.js';
 import { PresetStore } from './lib/presets.js';
 import { installToolBrush } from './lib/brush/tool-brush.js';
+import { attachColorPipeline, describe as describeProfile } from './lib/color/pipeline.js';
 import { BRUSH_SIZE } from './lib/brush/options.js';
 import { KeymapStore } from './lib/keymap-store.js';
 import { Selection } from './lib/selection.js';
@@ -500,8 +501,9 @@ function registerCoreCommands(app) {
     // files
     'file:new': { run: (arg) => app.newDocumentDialog?.(arg) },
     'file:open': { run: () => app.docs.openDialog() },
-    'file:open-paths': { run: (paths) => app.docs.openPaths(Array.isArray(paths) ? paths : [paths]) },
-    'file:open-recent': { run: (path) => app.docs.openPaths([path]) },
+    // open hooks (S12.6): a recorded Open replayed by an action is not interactive
+    'file:open-paths': { run: (paths, ctx) => app.docs.openPaths(Array.isArray(paths) ? paths : [paths], { interactive: ctx?.source !== 'action' }) },
+    'file:open-recent': { run: (path, ctx) => app.docs.openPaths([path], { interactive: ctx?.source !== 'action' }) },
     'file:clear-recent': {
       run: async () => {
         await bridge.clearRecent();
@@ -690,12 +692,21 @@ function setupStatusbar(app) {
       app.statusbar.clear('zoom');
       app.statusbar.clear('size');
       app.statusbar.clear('pos');
+      app.statusbar.clear('profile');
       return;
     }
     app.statusbar.set('zoom', zoom);
     if (document.activeElement !== input) input.value = String(Math.round(d.view.zoom * 1000) / 10);
     app.statusbar.set('size', `${d.width} × ${d.height} px · ${d.dpi} ppi · ${d.layers().length} layer${d.layers().length === 1 ? '' : 's'}`);
+    profile();
   };
+  // color (lib/color/pipeline.js), S6.6: the document profile, absent while describe() is '' (no engine)
+  const profile = () => {
+    const text = app.doc ? describeProfile(app.doc) : '';
+    if (text) app.statusbar.set('profile', text);
+    else app.statusbar.clear('profile');
+  };
+  app.on('color:display-changed', profile);
   app.on('view:changed', () => {
     update();
     app.docs.renderTabs();
@@ -848,6 +859,8 @@ async function start() {
   installCanvasCapture(app); // app.canvasCapture (I.3)
   // 0.5 (S9): the keymap store; lib/shortcuts.js, the first module, builds its key table from it
   app.keymap = new KeymapStore(app);
+  // 0.5 (S6): the colour pipeline (the engine slot; 'color:display-changed' once an engine is ready)
+  attachColorPipeline(app);
   // the preset store (C): files under <userData>/presets (IndexedDB in the browser build), the 0.4 kinds registered
   try {
     const kinds = await import('./lib/preset-kinds.js');

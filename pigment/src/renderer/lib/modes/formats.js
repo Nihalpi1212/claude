@@ -142,7 +142,7 @@ export function installFormats(app, { modeState }) {
     name: 'GIF images',
     extensions: ['gif'],
     test: (bytes) => isGif(bytes),
-    async read(bytes, { name }) {
+    async read(bytes, { name, colorSpaceConversion }) {
       let gif = null;
       try {
         gif = decodeGif(bytes, { firstFrameOnly: true });
@@ -162,7 +162,7 @@ export function installFormats(app, { modeState }) {
         const frame = gif.frames[0];
         table = frame.palette.map((c) => [c[0], c[1], c[2]]);
         ti = frame.transparentIndex >= 0 && frame.transparentIndex < table.length ? frame.transparentIndex : -1;
-      } else canvas = await decodeImage(bytes, name);
+      } else canvas = await decodeImage(bytes, name, { colorSpaceConversion }); // color (lib/color/pipeline.js), S6.3
       return indexedDocument(canvas, name, table, ti);
     },
   });
@@ -179,7 +179,7 @@ export function installFormats(app, { modeState }) {
         return false;
       }
     },
-    async read(bytes, { name }) {
+    async read(bytes, { name, colorSpaceConversion }) {
       try {
         const png = await decodePng(bytes);
         const count = Math.floor((png.palette?.length ?? 0) / 3);
@@ -203,7 +203,8 @@ export function installFormats(app, { modeState }) {
       } catch (err) {
         console.warn('PNG palette reader failed; using the browser decoder', err);
       }
-      return indexedDocument(await decodeImage(bytes, name), name, null, -1);
+      // a soft-alpha palette: the browser decodes it, with the engine's conversion (S6.3: never converted twice)
+      return indexedDocument(await decodeImage(bytes, name, { colorSpaceConversion }), name, null, -1);
     },
   });
 }

@@ -11,6 +11,8 @@ import { Selection } from './selection.js';
 import './psd/index.js'; // every PSD mapper registers (S4.1)
 import { readPsdDocument } from './psd/read.js';
 import { writePsdDocument } from './psd/write.js';
+import { readChunks, applyChunks, chunkFormatFor, sniffChunkFormat } from './io-chunks.js';
+import { colorEngine, profileById } from './color/pipeline.js';
 
 export const OPEN_EXTENSIONS = ['pigment', 'psd', 'psb', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'avif', 'svg', 'ico'];
 export const OPEN_FILTERS = [
@@ -78,8 +80,12 @@ export const WRITE_EXTENSIONS = ['pigment', 'psd', 'png', 'jpg', 'jpeg', 'webp']
 export const canWritePath = (path) => WRITE_EXTENSIONS.includes(extOf(path));
 export const baseName = (name) => String(name ?? 'Untitled').split(/[\\/]/).pop().replace(/\.[^.]+$/, '');
 
-/** Decodes encoded image bytes (PNG/JPEG/WebP/GIF/BMP/AVIF/SVG/ICO) to a canvas. */
-export async function decodeImage(bytes, name = '') {
+/**
+ * Decodes encoded image bytes (PNG/JPEG/WebP/GIF/BMP/AVIF/SVG/ICO) to a canvas. `colorSpaceConversion` is the
+ * engine's decodeConversion (S6.3): 'default' (0.4: the browser converts a tagged file to sRGB) or 'none' (the
+ * numbers as stored, for the engine to adopt the embedded profile).
+ */
+export async function decodeImage(bytes, name = '', { colorSpaceConversion = 'default' } = {}) {
   const ext = extOf(name);
   const type = { svg: 'image/svg+xml', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif', bmp: 'image/bmp', avif: 'image/avif', ico: 'image/x-icon' }[ext] ?? sniffType(bytes);
   const blob = new Blob([bytes], { type });
@@ -98,7 +104,7 @@ export async function decodeImage(bytes, name = '') {
       URL.revokeObjectURL(url);
     }
   }
-  const bitmap = await createImageBitmap(blob, { premultiplyAlpha: 'none', colorSpaceConversion: 'default' });
+  const bitmap = await createImageBitmap(blob, { premultiplyAlpha: 'none', colorSpaceConversion: colorSpaceConversion === 'none' ? 'none' : 'default' });
   const c = createCanvas(bitmap.width, bitmap.height);
   c.getContext('2d').drawImage(bitmap, 0, 0);
   bitmap.close?.();
@@ -128,17 +134,38 @@ function sniffType(b) {
   return 'application/octet-stream';
 }
 
+/** Waits for the colour engine (a launch with a file runs before the wasm is compiled), at most `ms`. */
+async function engineReady(ms = 3000) {
+  let timer = null;
+  try {
+    await Promise.race([Promise.resolve().then(() => colorEngine().ready?.()), new Promise((resolve) => (timer = setTimeout(resolve, ms)))]);
+  } catch {
+    /* an engine that failed to start answers as the stub */
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** Opens bytes as a Document according to the file name's extension (content sniffing as fallback). */
 export async function openDocument(bytes, { name = 'Untitled', path = null } = {}) {
   const ext = extOf(name);
   let doc;
+  // color (lib/color/pipeline.js), S6.3: the file's chunks are read first, and the engine decides before any reader
+  // runs whether the browser converts the pixels ('default', 0.4) or hands them over as stored ('none', adopted below)
+  await engineReady();
+  const format = chunkFormatFor(ext) ?? sniffChunkFormat(bytes);
+  const chunks = format ? await readChunks(bytes, format) : {};
+  let conv = 'default';
+  try {
+    conv = colorEngine().decodeConversion(chunks, format) === 'none' ? 'none' : 'default';
+  } catch {}
   // registered readers (16-bit PNG, TIFF, GIF with a colour table, ...) take precedence over the built-ins
   const reader = OPEN_READERS.find((r) => (r.test ? r.test(bytes, name) : (r.extensions ?? []).includes(ext)));
-  if (reader) doc = await reader.read(bytes, { name, path });
+  if (reader) doc = await reader.read(bytes, { name, path, colorSpaceConversion: conv });
   else if (ext === 'pigment' || (bytes[0] === 0x50 && bytes[1] === 0x4b)) doc = await readPigment(bytes);
   else if (ext === 'psd' || ext === 'psb' || (bytes[0] === 0x38 && bytes[1] === 0x42 && bytes[2] === 0x50 && bytes[3] === 0x53)) doc = readPsdDocument(bytes);
   else {
-    const canvas = await decodeImage(bytes, name);
+    const canvas = await decodeImage(bytes, name, { colorSpaceConversion: conv });
     doc = new Document({ width: canvas.width, height: canvas.height, name: baseName(name) });
     const layer = new RasterLayer({ name: 'Background', canvas, x: 0, y: 0 });
     doc.root.children.push(layer);
@@ -149,6 +176,14 @@ export async function openDocument(bytes, { name = 'Untitled', path = null } = {
   doc.name = baseName(name);
   doc.path = path;
   doc.format = ext === 'jpg' ? 'jpeg' : ext || 'png';
+  // what the engine adopts from the file (the embedded profile when it answered 'none'); nothing without an engine
+  if (format) {
+    try {
+      colorEngine().adoptOnOpen(doc, { chunks, format, conv });
+    } catch (err) {
+      console.warn('colour profile not adopted', err);
+    }
+  }
   return doc;
 }
 
@@ -193,6 +228,8 @@ export async function writePigment(doc) {
   }
   if (doc.selection && !doc.selection.isEmpty) entries.push({ name: 'selection.bin', data: doc.selection.mask, compress: true });
   for (const ch of doc.channels) entries.push({ name: `channels/${ch.id}.bin`, data: ch.mask, compress: true });
+  // color (lib/color/pipeline.js), S6.2: the document profile's bytes next to its description (0.4 readers ignore it)
+  if (doc.profile?.bytes?.length) entries.push({ name: 'profile.icc', data: doc.profile.bytes, compress: true });
   const flat = flattenDocument(doc);
   const scale = Math.min(1, 256 / Math.max(doc.width, doc.height));
   const thumb = createCanvas(Math.max(1, Math.round(doc.width * scale)), Math.max(1, Math.round(doc.height * scale)));
@@ -223,6 +260,15 @@ export async function readPigment(bytes) {
   if ((doc.mode === 'indexed' && !doc.colorTable?.length) || (doc.mode === 'multichannel' && !doc.meta?.imageMode?.multichannel)) doc.mode = 'rgb';
   if (d.workPath?.subpaths) doc.workPath = d.workPath;
   if (d.globalLight && Number.isFinite(d.globalLight.angle)) doc.globalLight = { angle: d.globalLight.angle, altitude: d.globalLight.altitude ?? 30 };
+  // color (lib/color/pipeline.js), S6.2: the document profile (a 0.4 file has none: untagged)
+  if (d.profile && typeof d.profile === 'object' && typeof d.profile.id === 'string') {
+    const icc = findEntry(entries, 'profile.icc')?.data ?? null;
+    let parsed = null;
+    try {
+      parsed = icc ? colorEngine().parse(icc) : null;
+    } catch {}
+    doc.profile = parsed ?? (!icc ? profileById(d.profile.id) : null) ?? { id: d.profile.id, name: String(d.profile.name ?? d.profile.id), bytes: icc ? new Uint8Array(icc) : null, colorSpace: d.profile.colorSpace ?? 'rgb', wellKnown: d.profile.wellKnown ?? null, source: 'embedded' };
+  }
   const smartSources = new Map(); // sourceRef -> the source shared by every instance that names it
   const image = async (name) => {
     const e = findEntry(entries, name);
@@ -310,8 +356,10 @@ export { psdExpressible, PSD_TEXT_KEYS, cssFamilyFromPsFont } from './psd/text.j
 export async function exportImage(doc, opts = {}, compositor) {
   const format = opts.format ?? 'png';
   const info = SAVE_FORMATS[format] ?? SAVE_FORMATS.png;
+  // chunks (lib/io-chunks.js), S5: exactly once per file, after any encoder (the bytes as they are without a provider)
+  const chunked = (bytes) => applyChunks(doc, bytes, info.ext ?? format, { purpose: opts.purpose ?? 'export', opts });
   // formats added by registerExportFormat (GIF, PNG-8, 16-bit PNG, TIFF ...) bring their own encoder
-  if (info.encode) return info.encode(doc, { ...opts, format }, compositor);
+  if (info.encode) return chunked(await info.encode(doc, { ...opts, format }, compositor));
   let canvas = opts.canvas ?? flattenDocument(doc, compositor);
   const w = Math.max(1, Math.round(opts.width ?? canvas.width * (opts.scale ?? 1)));
   const h = Math.max(1, Math.round(opts.height ?? canvas.height * (opts.scale ?? 1)));
@@ -329,21 +377,23 @@ export async function exportImage(doc, opts = {}, compositor) {
     canvas = out;
   }
   const blob = await new Promise((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error(`This system cannot encode ${info.name}`))), info.mime, info.lossy ? opts.quality ?? 0.92 : undefined));
-  return new Uint8Array(await blob.arrayBuffer());
+  return chunked(new Uint8Array(await blob.arrayBuffer()));
 }
 
 /** Saves a document in the format implied by the path's extension. */
 export async function encodeForPath(doc, path, compositor, exportOpts = {}) {
   const ext = extOf(path);
+  // .pigment keeps the profile in its own entry (S6.2); every other file gets the chunk providers' 'save' chunks once
   if (ext === 'pigment') return writePigment(doc);
-  if (ext === 'psd') return writePsdDocument(doc, compositor, exportOpts); // Maximize Compatibility resolved there (S4.4)
+  const saved = (bytes, format) => applyChunks(doc, bytes, format, { purpose: 'save', opts: exportOpts });
+  if (ext === 'psd') return saved(writePsdDocument(doc, compositor, exportOpts), 'psd'); // Maximize Compatibility resolved there (S4.4)
   if (!canWritePath(path)) throw new Error(`Pigment cannot write .${ext || '?'} files. Save as .pigment, .psd, .png, .jpg or .webp instead.`);
   const registered = exportFormatForPath(path);
-  if (registered?.layered && registered.encode) return registered.encode(doc, { ...exportOpts, format: registered.id }, compositor);
+  if (registered?.layered && registered.encode) return saved(await registered.encode(doc, { ...exportOpts, format: registered.id }, compositor), registered.ext ?? ext);
   // an Indexed Color document saved to .png stays a palette PNG when the PNG-8 writer is registered (lib/modes/formats.js)
-  if (ext === 'png' && doc.mode === 'indexed' && SAVE_FORMATS.png8?.encode && !exportOpts.format) return exportImage(doc, { ...exportOpts, format: 'png8' }, compositor);
+  if (ext === 'png' && doc.mode === 'indexed' && SAVE_FORMATS.png8?.encode && !exportOpts.format) return exportImage(doc, { ...exportOpts, format: 'png8', purpose: 'save' }, compositor);
   const format = registered?.id ?? (ext === 'jpg' || ext === 'jpeg' ? 'jpeg' : ext === 'webp' ? 'webp' : 'png');
-  return exportImage(doc, { ...exportOpts, format }, compositor);
+  return exportImage(doc, { ...exportOpts, format, purpose: 'save' }, compositor);
 }
 
 /** True when saving to this path keeps all layers. */

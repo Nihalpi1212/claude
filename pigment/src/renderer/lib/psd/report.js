@@ -2,7 +2,7 @@
 // (with an optional detail) for every feature they could not carry; the notices registered for those codes
 // (registry.js registerPsdNotice) turn the counts into the lines the user sees: toasts after a save, `doc.openNotices`
 // after an open. Node-safe.
-import { psdNotice, psdNotices } from './registry.js';
+import { psdNotices } from './registry.js';
 
 /** A fresh report: `add(code, detail?)`, `count(code)`, `details(code)`, `codes()`, `lines(when?)`. */
 export function createReport() {
@@ -52,4 +52,3 @@ export function toastSaveNotices(app, report) {
   for (const n of report.notices('save')) dialogs.toast(n.text, { timeout: n.timeout });
 }
 
-export { psdNotice };

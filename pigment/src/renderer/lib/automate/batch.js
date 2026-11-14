@@ -4,6 +4,8 @@
 import { bridge } from '../bridge.js';
 import { flattenDocument } from '../compositor.js';
 import { openDocument, encodeForPath, canWritePath, extOf, baseName, OPEN_EXTENSIONS, exportFormatForPath } from '../io.js';
+import { runOpenHooks } from '../documents.js';
+import { toSRGB } from '../color/pipeline.js';
 import { buildForm } from '../form.js';
 import { NAME_TOKENS, DEFAULT_NAMING, buildFileName, uniqueFileName, namingIsUnique, joinPath, dirName, fitSize, splitName } from './naming.js';
 
@@ -139,8 +141,11 @@ function captureErrors(app) {
   };
 }
 
-/** Opens a source file as a document tab; resolves { doc, opened } (opened: false when it was open already). */
-async function openSource(app, file) {
+/**
+ * Opens a source file as a document tab; resolves { doc, opened } (opened: false when it was open already). The open
+ * hooks run on a file it opens, not interactive (S12.6): their notices go to `notes` (the batch log).
+ */
+async function openSource(app, file, notes = null) {
   const existing = app.docs.findByPath(file.path);
   if (existing) {
     app.docs.activate(existing);
@@ -151,6 +156,8 @@ async function openSource(app, file) {
   const doc = await openDocument(bytes, { name: file.name, path: file.path });
   app.docs.add(doc);
   doc.history.markSaved(flattenDocument(doc, doc.view.compositor));
+  // open hooks (S12.6): nobody is there to answer a dialog; a notice is a line of the batch log
+  await runOpenHooks(doc, { path: file.path, format: doc.format, interactive: false, notice: (text) => text && notes?.push({ file: file.path ?? file.name, message: String(text) }) });
   return { doc, opened: true };
 }
 
@@ -312,7 +319,7 @@ export async function runBatch(app, o) {
   if (!found) throw new Error(`The action “${o.action}” does not exist`);
   let files = sourceList(app, o);
   if (!files) files = await listImages(o.folder, { recursive: o.subfolders, skip: o.destination === 'folder' && o.destFolder ? [o.destFolder] : [] });
-  const summary = { processed: 0, saved: [], errors: [], cancelled: false, stopped: false, total: files.length };
+  const summary = { processed: 0, saved: [], errors: [], notes: [], cancelled: false, stopped: false, total: files.length };
   if (!files.length) {
     app.dialogs.toast(o.source === 'open' ? 'No documents are open' : 'The source folder holds no images Pigment can open', { kind: 'error' });
     return summary;
@@ -343,7 +350,7 @@ export async function runBatch(app, o) {
         let doc = file.doc ?? null, opened = false, savedByAction = false;
         const errors = [];
         try {
-          if (!doc) ({ doc, opened } = await openSource(app, file));
+          if (!doc) ({ doc, opened } = await openSource(app, file, summary.notes));
           else app.docs.activate(doc);
           engine.batch = {
             overrideOpen: !!o.overrideOpen,
@@ -413,8 +420,9 @@ export async function runBatch(app, o) {
     capture.restore();
     progress.close();
   }
-  if (summary.errors.length && o.errors === 'log' && o.logFile) {
-    const lines = [`Pigment batch log — ${new Date().toLocaleString()}`, `Action: ${o.set} › ${o.action}`, '', ...summary.errors.map((e) => `${e.file}\n    ${e.message}`), ''];
+  // the open hooks' notices (S12.6) are lines of the log too, after the errors
+  if ((summary.errors.length || summary.notes.length) && o.errors === 'log' && o.logFile) {
+    const lines = [`Pigment batch log — ${new Date().toLocaleString()}`, `Action: ${o.set} › ${o.action}`, '', ...summary.errors.map((e) => `${e.file}\n    ${e.message}`), ...summary.notes.map((e) => `${e.file}\n    ${e.message}`), ''];
     try {
       await bridge.writeFile(o.logFile, new TextEncoder().encode(lines.join('\n')));
     } catch (err) {
@@ -560,7 +568,7 @@ export async function runImageProcessor(app, o) {
   if (o.runAction && !action) throw new Error(`The action “${o.action}” does not exist`);
   let files = sourceList(app, o);
   if (!files) files = await listImages(o.folder, { recursive: o.subfolders, skip: o.destination === 'folder' && o.destFolder ? [o.destFolder] : [] });
-  const summary = { processed: 0, saved: [], errors: [], cancelled: false, stopped: false, total: files.length };
+  const summary = { processed: 0, saved: [], errors: [], notes: [], cancelled: false, stopped: false, total: files.length };
   if (!files.length) {
     app.dialogs.toast(o.source === 'open' ? 'No documents are open' : 'The folder holds no images Pigment can open', { kind: 'error' });
     return summary;
@@ -587,7 +595,7 @@ export async function runImageProcessor(app, o) {
         const errors = [];
         let doc = file.doc ?? null, opened = false, held = null;
         try {
-          if (!doc) ({ doc, opened } = await openSource(app, file));
+          if (!doc) ({ doc, opened } = await openSource(app, file, summary.notes));
           else app.docs.activate(doc);
           // everything done to an open document is undone again: the processor only writes copies
           const start = doc.history.index;
@@ -629,8 +637,16 @@ export async function runImageProcessor(app, o) {
                 const name = uniqueFileName(`${splitName(file.name).name || baseName(doc.name)}.${type.ext}`, taken.get(dir));
                 taken.get(dir).add(name.toLowerCase());
                 const path = joinPath(dir, name);
+                // color (lib/color/pipeline.js): "Convert Profile to sRGB" converts a tagged document's JPEG (S6.3:
+                // then nothing, or sRGB, is embedded); untagged and sRGB documents go as they are
+                let opts = type.opts;
+                if (type.key === 'jpeg' && o.srgb && doc.profile) {
+                  const flat = flattenDocument(doc, doc.view.compositor);
+                  const converted = await toSRGB(flat, doc);
+                  if (converted !== flat) opts = { ...opts, canvas: converted, convertTo: 'srgb' };
+                }
                 // the File Info (with the Copyright Info typed into the dialog) goes into the formats that hold XMP
-                const bytes = await encodeForPath(doc, path, doc.view.compositor, type.opts);
+                const bytes = await encodeForPath(doc, path, doc.view.compositor, opts);
                 await bridge.writeFile(path, app.fileInfo?.withInfo?.(doc, path, bytes) ?? bytes);
                 summary.saved.push(path);
                 if (doc.history.index !== afterAction) doc.history.goTo(afterAction);

@@ -310,6 +310,37 @@ export function registerIpc(ctx) {
     return printers.map((p) => ({ name: p.name, displayName: p.displayName, isDefault: !!p.isDefault }));
   });
 
+  // ---- colour profiles (ARCHITECTURE.md "0.5 features", S6.6): the operating system's ICC profile folders, one
+  // level of subfolders deep; icc-engine reads the bytes of the ones it offers through readFile
+  handle('listColorProfiles', async () => {
+    const home = os.homedir();
+    const dirs = process.platform === 'darwin'
+      ? ['/Library/ColorSync/Profiles', join(home, 'Library', 'ColorSync', 'Profiles'), '/System/Library/ColorSync/Profiles']
+      : process.platform === 'win32'
+        ? [join(process.env.WINDIR || 'C:\\Windows', 'System32', 'spool', 'drivers', 'color')]
+        : ['/usr/share/color/icc', join(home, '.local', 'share', 'icc'), join(home, '.color', 'icc')];
+    const out = [];
+    const seen = new Set();
+    const scan = async (dir, depth) => {
+      let entries = [];
+      try {
+        entries = await fs.readdir(dir, { withFileTypes: true });
+      } catch {
+        return; // a folder that does not exist on this system
+      }
+      for (const e of entries) {
+        const path = join(dir, e.name);
+        if (e.isDirectory() && depth > 0) await scan(path, depth - 1);
+        else if (e.isFile() && /\.(icc|icm)$/i.test(e.name) && !seen.has(path)) {
+          seen.add(path);
+          out.push({ path, name: basename(e.name).replace(/\.(icc|icm)$/i, '') });
+        }
+      }
+    };
+    for (const dir of dirs) await scan(dir, 1);
+    return out.sort((a, b) => a.name.localeCompare(b.name));
+  });
+
   // ---- clipboard -------------------------------------------------------------------------------
   on('writeClipboardText', (text) => {
     writeClipboardText(clipboard, text).catch((err) => console.warn('clipboard text write failed', err));

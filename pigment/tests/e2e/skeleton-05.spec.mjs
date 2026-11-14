@@ -688,3 +688,332 @@ test('psd: an open notice a mapper reports is shown after the file opens and kep
   await expect(page.locator('#toasts .toast', { hasText: '1 layer effect Pigment does not have was dropped' })).toBeVisible();
   expect(errors).toEqual([]);
 });
+
+// ---- step 6: chunks, colour, saving and opening (S5, S6, S12.3, S12.6) --------------------------------------------
+
+/** In the page: a fake colour engine (icc-engine's role) that adopts any embedded profile and marks what it is asked. */
+async function fakeEngine(page, { space = 'srgb' } = {}) {
+  await page.evaluate(async (displaySpace) => {
+    const P = await import('/lib/color/pipeline.js');
+    const FAKE = (bytes) => ({ id: `fake-${bytes.length}`, name: 'Fake P3', bytes, colorSpace: 'rgb', wellKnown: null, source: 'embedded' });
+    const asked = (window.__engineAsked = { decode: [], adopt: [] });
+    P.setColorEngine({
+      id: 'fake', available: true, ready: () => Promise.resolve(),
+      parse: (bytes) => (bytes?.length ? FAKE(new Uint8Array(bytes)) : null),
+      builtins: () => [P.SRGB], profiles: async () => [P.SRGB],
+      transform: () => ({ identity: true, apply() {} }),
+      decodeConversion(chunks, format) {
+        asked.decode.push({ format, icc: !!chunks.icc });
+        return chunks.icc ? 'none' : 'default';
+      },
+      adoptOnOpen(doc, { chunks, format, conv }) {
+        asked.adopt.push({ format, conv });
+        if (conv === 'none' && chunks.icc) doc.profile = FAKE(chunks.icc);
+      },
+      displaySpace: () => displaySpace,
+    });
+    await new Promise((r) => setTimeout(r, 0));
+  }, space);
+}
+
+test('colour: every save and export of an untagged document is byte-identical to 0.4\'s (no chunk provider)', async ({ page }) => {
+  const errors = await openApp(page);
+  await newDoc(page, { width: 64, height: 48, background: 'white' });
+  const r = await page.evaluate(async () => {
+    const app = window.pigmentApp;
+    const d = app.doc;
+    const comp = d.view.compositor;
+    const io = await import('/lib/io.js');
+    const { flattenDocument } = await import('/lib/compositor.js');
+    const { chunkProviders, readChunks } = await import('/lib/io-chunks.js');
+    const { createCanvas } = await import('/lib/document.js');
+    // one layer, so Save As writes the PNG without asking to flatten
+    const g = d.active.canvas.getContext('2d');
+    g.fillStyle = '#c04020';
+    g.fillRect(8, 6, 40, 30);
+    g.fillStyle = 'rgba(20, 80, 200, 0.5)';
+    g.fillRect(18, 11, 20, 20);
+    d.active.touch();
+    const same = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
+    const blob = async (canvas, mime, q) => new Uint8Array(await (await new Promise((res) => canvas.toBlob(res, mime, q))).arrayBuffer());
+    // 0.4's exportImage for the built-in formats: the flattened document, JPEG on white, quality 0.92
+    const flat = flattenDocument(d, comp);
+    const onWhite = createCanvas(d.width, d.height);
+    onWhite.getContext('2d').fillStyle = '#ffffff';
+    onWhite.getContext('2d').fillRect(0, 0, d.width, d.height);
+    onWhite.getContext('2d').drawImage(flat, 0, 0);
+    const out = { providers: chunkProviders().length, profile: d.profile, described: d.describe().profile };
+    out.png = same(await io.encodeForPath(d, 'x.png', comp), await blob(flat, 'image/png'));
+    out.jpeg = same(await io.encodeForPath(d, 'x.jpg', comp, { quality: 0.92 }), await blob(onWhite, 'image/jpeg', 0.92));
+    out.webp = same(await io.exportImage(d, { format: 'webp' }, comp), await blob(flat, 'image/webp', 0.92));
+    out.psd = same(await io.encodeForPath(d, 'x.psd', comp), io.writePsdDocument(d, comp));
+    // the registered encoders (16-bit PNG, TIFF, TGA, GIF, PNG-8) through exportImage: what the encoder returned
+    out.registered = {};
+    for (const id of ['png16', 'tiff', 'tga', 'gif', 'png8']) {
+      const f = io.SAVE_FORMATS[id];
+      if (f?.encode) out.registered[id] = same(await io.exportImage(d, { format: id }, comp), await f.encode(d, { format: id }, comp));
+    }
+    // a save through the document manager writes the same PNG
+    window.__pigmentTest.nextSavePath = 'mem:/untagged.png';
+    await app.commands.run('file:save-as', undefined, 'api');
+    out.saved = same(window.__pigmentTest.written['mem:/untagged.png'], await blob(flat, 'image/png'));
+    out.savedChunks = Object.keys(await readChunks(window.__pigmentTest.written['mem:/untagged.png'], 'png'));
+    const { readZip } = await import('/shared/zip.js');
+    const { streamCodecs } = await import('/shared/zip.js');
+    const entries = await readZip(await io.writePigment(d), { inflate: streamCodecs.inflate });
+    out.pigmentEntries = entries.map((e) => e.name).filter((n) => /profile/.test(n));
+    return out;
+  });
+  expect(r.providers).toBe(0);
+  expect(r.profile).toBeNull();
+  expect(r.described).toBeNull();
+  expect(r).toMatchObject({ png: true, jpeg: true, webp: true, psd: true, saved: true });
+  expect(Object.values(r.registered).length).toBeGreaterThanOrEqual(3);
+  for (const [id, ok] of Object.entries(r.registered)) expect(ok, id).toBe(true);
+  expect(r.savedChunks).toEqual([]); // the browser's PNG carries no metadata chunk, and nothing was added
+  expect(r.pigmentEntries).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
+test('colour: with a fake engine a PNG\'s profile is adopted and re-embedded on save, Export As and copy; a soft-alpha palette PNG reaches its reader with the engine\'s conv', async ({ page }) => {
+  const errors = await openApp(page);
+  await fakeEngine(page);
+  const r = await page.evaluate(async () => {
+    const app = window.pigmentApp;
+    const T = window.__pigmentTest;
+    const { writeChunks, readChunks, registerChunkProvider } = await import('/lib/io-chunks.js');
+    const { encodePng } = await import('/shared/pixels/png.js');
+    const ICC = Uint8Array.from({ length: 700 }, (_, i) => (i * 11 + 5) & 255);
+    // the 'icc' provider as icc-engine registers it: the document's profile bytes, unless converted to sRGB
+    const purposes = [];
+    registerChunkProvider({ id: 'icc', order: 100, kinds: ['icc'], provide: (doc, { purpose, opts }) => (purposes.push(purpose), doc?.profile?.bytes && opts?.convertTo !== 'srgb' && opts?.embedProfile !== false ? { icc: doc.profile.bytes } : null) });
+    const c = document.createElement('canvas');
+    c.width = 30;
+    c.height = 20;
+    c.getContext('2d').fillStyle = '#3366cc';
+    c.getContext('2d').fillRect(0, 0, 30, 20);
+    const png = new Uint8Array(await (await new Promise((res) => c.toBlob(res, 'image/png'))).arrayBuffer());
+    T.files['mem:/tagged.png'] = await writeChunks(png, 'png', { icc: ICC });
+    // what the browser decoder is asked: the conversion openDocument chose
+    const bitmaps = [];
+    const create = window.createImageBitmap;
+    window.createImageBitmap = (src, ...rest) => {
+      const o = rest.find((x) => x && typeof x === 'object');
+      bitmaps.push(o?.colorSpaceConversion ?? null);
+      return create.call(window, src, ...rest);
+    };
+    await app.commands.run('file:open-paths', ['mem:/tagged.png'], 'api');
+    const d = app.doc;
+    const out = { adopted: d.profile?.name ?? null, bytes: d.profile?.bytes?.length ?? 0, asked: JSON.parse(JSON.stringify(window.__engineAsked)), bitmaps: bitmaps.slice() };
+    const has = async (bytes, f) => {
+      const ch = await readChunks(bytes, f);
+      return !!ch.icc && ch.icc.length === ICC.length && ch.icc.every((v, i) => v === ICC[i]);
+    };
+    T.nextSavePath = 'mem:/saved.png';
+    await app.commands.run('file:save-as', undefined, 'api');
+    out.saved = await has(T.written['mem:/saved.png'], 'png');
+    await app.commands.run('file:export', { path: 'mem:/exported.jpg', format: 'jpeg', quality: 0.9, width: 30, height: 20 }, 'api');
+    out.exported = await has(T.written['mem:/exported.jpg'], 'jpeg');
+    // a clipboard copy: the PNG handed to the system clipboard
+    let copied = null;
+    navigator.clipboard.write = async (items) => {
+      copied = new Uint8Array(await (await items[0].getType('image/png')).arrayBuffer());
+    };
+    await app.commands.run('edit:copy-merged', undefined, 'api');
+    out.copied = copied ? await has(copied, 'png') : null;
+    out.purposes = [...new Set(purposes)];
+    // a soft-alpha palette PNG (no single transparent index) opens through the browser decoder: once, with 'none'
+    bitmaps.length = 0;
+    window.__engineAsked.decode.length = 0;
+    const idx = await encodePng({ width: 2, height: 2, channels: 1, depth: 8, data: Uint8Array.of(0, 1, 1, 0), palette: Uint8Array.of(255, 0, 0, 0, 0, 255), transparency: Uint8Array.of(128, 200) }, { indexed: true });
+    T.files['mem:/soft.png'] = await writeChunks(idx, 'png', { icc: ICC });
+    await app.commands.run('file:open-paths', ['mem:/soft.png'], 'api');
+    out.soft = { bitmaps: bitmaps.slice(), decode: window.__engineAsked.decode.slice(), profile: !!app.doc.profile, mode: app.doc.mode };
+    window.createImageBitmap = create;
+    return out;
+  });
+  expect(r.adopted).toBe('Fake P3');
+  expect(r.bytes).toBe(700);
+  expect(r.asked.decode).toEqual([{ format: 'png', icc: true }]);
+  expect(r.asked.adopt).toEqual([{ format: 'png', conv: 'none' }]);
+  expect(r.bitmaps).toContain('none');
+  expect(r.bitmaps).not.toContain('default');
+  expect(r).toMatchObject({ saved: true, exported: true, copied: true });
+  expect(r.purposes).toEqual(expect.arrayContaining(['save', 'export', 'copy']));
+  expect(r.soft.decode).toEqual([{ format: 'png', icc: true }]);
+  expect(r.soft.bitmaps).toEqual(['none']);
+  expect(r.soft.profile).toBe(true);
+  expect(r.soft.mode).toBe('rgb');
+  expect(errors).toEqual([]);
+});
+
+test('colour: Assign Profile is one entry that undoes and survives .pigment; the status bar and Info show the profile only with an engine', async ({ page }) => {
+  const errors = await openApp(page);
+  await newDoc(page, { width: 40, height: 30 });
+  const before = await page.evaluate(() => ({ status: !!document.querySelector('#statusbar [data-key="profile"]:not([hidden])'), info: document.querySelector('.info-panel [data-k="profile"]')?.hidden ?? true }));
+  expect(before).toEqual({ status: false, info: true });
+  await fakeEngine(page);
+  const r = await page.evaluate(async () => {
+    const app = window.pigmentApp;
+    const d = app.doc;
+    const P = await import('/lib/color/pipeline.js');
+    const io = await import('/lib/io.js');
+    const profile = P.colorEngine().parse(Uint8Array.from({ length: 64 }, (_, i) => i));
+    const n = d.history.entries.length;
+    P.assignProfile(app, d, profile, 'Assign Profile');
+    const out = { entries: d.history.entries.length - n, label: d.history.entries.at(-1).label, after: d.profile?.id };
+    await new Promise((res) => setTimeout(res, 200));
+    out.status = document.querySelector('#statusbar [data-key="profile"]')?.textContent ?? null;
+    d.history.undo();
+    out.undone = d.profile;
+    d.history.redo();
+    out.redone = d.profile?.id;
+    const back = await io.readPigment(await io.writePigment(d));
+    out.pigment = { id: back.profile?.id, bytes: back.profile?.bytes?.length ?? 0, name: back.profile?.name };
+    const dup = await app.commands.run('image:duplicate', { name: 'Copy' }, 'api');
+    void dup;
+    out.duplicate = app.doc.profile?.id ?? null;
+    return out;
+  });
+  expect(r).toMatchObject({ entries: 1, label: 'Assign Profile', after: 'fake-64', undone: null, redone: 'fake-64', pigment: { id: 'fake-64', bytes: 64, name: 'Fake P3' }, duplicate: 'fake-64' });
+  expect(r.status).toBe('Fake P3');
+  expect(errors).toEqual([]);
+});
+
+test('colour: a display stage converts the damage only, and a sampleMerged call between two paints loses no region', async ({ page }) => {
+  const errors = await openApp(page);
+  await newDoc(page, { width: 200, height: 150, background: 'white' });
+  const r = await page.evaluate(async () => {
+    const app = window.pigmentApp;
+    const d = app.doc;
+    const view = d.view;
+    const P = await import('/lib/color/pipeline.js');
+    const frame = () => new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(res)));
+    // the stage inverts colours into a kept copy of the composite, converting only the damage it is handed
+    const calls = [];
+    let kept = null;
+    const convert = (src, rect) => {
+      const g = kept.getContext('2d', { willReadFrequently: true });
+      const img = src.getContext('2d', { willReadFrequently: true }).getImageData(rect.x, rect.y, rect.width, rect.height);
+      for (let i = 0; i < img.data.length; i += 4) for (let k = 0; k < 3; k++) img.data[i + k] = 255 - img.data[i + k];
+      g.putImageData(img, rect.x, rect.y);
+    };
+    const off = P.registerDisplayStage({
+      id: 'test-invert', order: 900, active: (v) => v === view,
+      apply(canvas, v, { damage, scratch }) {
+        calls.push(scratch ? 'scratch' : damage === 'full' ? 'full' : damage ? [damage.x, damage.y, damage.width, damage.height] : null);
+        if (scratch) return canvas;
+        if (!kept || kept.width !== canvas.width || kept.height !== canvas.height || damage === 'full') {
+          kept = document.createElement('canvas');
+          kept.width = canvas.width;
+          kept.height = canvas.height;
+          convert(canvas, { x: 0, y: 0, width: canvas.width, height: canvas.height });
+        } else if (damage) convert(canvas, damage);
+        return kept;
+      },
+    });
+    view.invalidate();
+    await frame();
+    const layer = d.active;
+    const paint = (x, y, color) => {
+      layer.canvas.getContext('2d').fillStyle = color;
+      layer.canvas.getContext('2d').fillRect(x, y, 10, 10);
+      layer.touch();
+      view.invalidate({ x, y, width: 10, height: 10 }, layer); // a brush dab's hint: a region repaint
+    };
+    paint(20, 20, '#ff0000');
+    await frame();
+    // A changes, someone composites (the Info panel's sampler) before the view paints, then B changes
+    paint(100, 60, '#00ff00');
+    app.sampleMerged(d);
+    paint(150, 100, '#0000ff');
+    await frame();
+    // the kept copy is the inverted composite everywhere
+    const comp = view.compositor.composite(d).getContext('2d', { willReadFrequently: true }).getImageData(0, 0, d.width, d.height).data;
+    const shown = kept.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, d.width, d.height).data;
+    let wrong = 0;
+    for (let i = 0; i < comp.length; i += 4) if (shown[i] !== 255 - comp[i] || shown[i + 1] !== 255 - comp[i + 1] || shown[i + 2] !== 255 - comp[i + 2]) wrong++;
+    off();
+    return { calls, wrong };
+  });
+  expect(r.calls[0]).toBe('full');
+  // after the first paint every conversion is a region: never the whole document again
+  const later = r.calls.slice(1).filter((c) => c !== null);
+  expect(later.length).toBeGreaterThanOrEqual(2);
+  for (const c of later) expect(Array.isArray(c), JSON.stringify(c)).toBe(true);
+  // the last one covers both changes after the first paint (A, composited by sampleMerged, and B)
+  const last = later.at(-1);
+  expect(last[0]).toBeLessThanOrEqual(100);
+  expect(last[0] + last[2]).toBeGreaterThanOrEqual(160);
+  expect(r.wrong).toBe(0);
+  expect(errors).toEqual([]);
+});
+
+test('colour: a display space change swaps the view canvas, which still takes pointer input', async ({ page }) => {
+  const errors = await openApp(page);
+  await newDoc(page, { width: 120, height: 90, background: 'white' });
+  const old = await page.evaluate(() => {
+    window.__oldCanvas = window.pigmentApp.view.canvas;
+    return window.pigmentApp.view.ctx.getContextAttributes().colorSpace;
+  });
+  expect(old).toBe('srgb');
+  await fakeEngine(page, { space: 'display-p3' });
+  const r = await page.evaluate(() => {
+    const v = window.pigmentApp.view;
+    return { swapped: v.canvas !== window.__oldCanvas, inDom: v.canvas.isConnected && !window.__oldCanvas.isConnected, space: v.ctx.getContextAttributes().colorSpace, cls: v.canvas.className };
+  });
+  expect(r).toEqual({ swapped: true, inDom: true, space: 'display-p3', cls: 'view' });
+  // the Brush paints through the new element
+  await runAwait(page, 'tool:brush');
+  await page.evaluate(() => window.pigmentApp.setColors({ foreground: '#000000' }));
+  const box = await page.locator('.doc-frame:not([hidden]) canvas.view').boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 20, box.y + box.height / 2, { steps: 5 });
+  await page.mouse.up();
+  expect(await page.evaluate(() => window.pigmentApp.doc.history.entries.at(-1).label)).toMatch(/Brush/);
+  expect(errors).toEqual([]);
+});
+
+test('colour: an open hook sees interactive from Open, not from Batch, and does not run for New or Duplicate', async ({ page }) => {
+  const errors = await openApp(page);
+  const r = await page.evaluate(async () => {
+    const app = window.pigmentApp;
+    const T = window.__pigmentTest;
+    const { registerOpenHook } = await import('/lib/documents.js');
+    const M = await import('/lib/actions/model.js');
+    const seen = [];
+    const off = registerOpenHook((doc, info) => {
+      seen.push({ name: doc.name, path: info.path, format: info.format, interactive: info.interactive });
+      if (!info.interactive) info.notice(`checked ${doc.name}`);
+    });
+    const png = async (color) => {
+      const c = document.createElement('canvas');
+      c.width = 8;
+      c.height = 6;
+      c.getContext('2d').fillStyle = color;
+      c.getContext('2d').fillRect(0, 0, 8, 6);
+      return new Uint8Array(await (await new Promise((res) => c.toBlob(res, 'image/png'))).arrayBuffer());
+    };
+    T.files['mem:/one.png'] = await png('#ff0000');
+    await app.commands.run('file:open-paths', ['mem:/one.png'], 'api');
+    app.newDocument({ width: 10, height: 10, name: 'New' });
+    await app.commands.run('image:duplicate', { name: 'Dup' }, 'api');
+    for (const n of ['a', 'b']) T.files[`mem:/batch/${n}.png`] = await png('#00ff00');
+    const set = M.makeSet('Hooks');
+    set.actions.push(M.makeAction('Flip', [M.makeStep('image:flip-h')]));
+    app.actions.sets.push(set);
+    const summary = await app.commands.run('file:automate-batch', { set: 'Hooks', action: 'Flip', source: 'folder', folder: 'mem:/batch', destination: 'none', errors: 'log', logFile: 'mem:/batch.log' }, 'api');
+    off();
+    return { seen, processed: summary?.processed, notes: summary?.notes, log: T.written['mem:/batch.log'] ? new TextDecoder().decode(T.written['mem:/batch.log']) : null };
+  });
+  expect(r.seen).toEqual([
+    { name: 'one', path: 'mem:/one.png', format: 'png', interactive: true },
+    { name: 'a', path: 'mem:/batch/a.png', format: 'png', interactive: false },
+    { name: 'b', path: 'mem:/batch/b.png', format: 'png', interactive: false },
+  ]);
+  expect(r.processed).toBe(2);
+  expect(r.notes.map((n) => n.message)).toEqual(['checked a', 'checked b']);
+  expect(r.log).toContain('checked a');
+  expect(errors).toEqual([]);
+});

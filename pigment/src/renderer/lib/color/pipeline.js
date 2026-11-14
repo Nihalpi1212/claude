@@ -337,11 +337,8 @@ export function displayCanvas(canvas, doc, { space = 'srgb' } = {}) {
  */
 export function attachColorPipeline(app) {
   hooks.app = app;
-  Promise.resolve()
-    .then(() => engine.ready?.())
-    .then(() => {
-      if (engine !== STUB_ENGINE) displayChanged();
-    })
-    .catch(() => {});
+  // an engine that became ready before the app attached told nobody: tell the app now (setColorEngine tells it
+  // itself for an engine still starting)
+  if (engine !== STUB_ENGINE && engineReady) displayChanged();
   return { colorEngine, describe, profilesList };
 }

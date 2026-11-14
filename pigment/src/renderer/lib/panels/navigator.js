@@ -3,6 +3,7 @@
 import { icon } from '../icons.js';
 import { createCanvas } from '../document.js';
 import { MIN_ZOOM, MAX_ZOOM } from '../canvas-view.js';
+import { displayCanvas } from '../color/pipeline.js';
 
 const MAX_H = 200;
 const LMIN = Math.log(MIN_ZOOM), LMAX = Math.log(MAX_ZOOM);
@@ -49,14 +50,15 @@ export function install(app) {
     if (!doc || !visible()) return;
     const dpr = window.devicePixelRatio || 1;
     const { w, h, scale } = layout(doc);
-    const key = `${doc.id}:${doc.version}:${w}x${h}:${dpr}`;
+    const key = `${doc.id}:${doc.version}:${w}x${h}:${dpr}:${doc.view?.space ?? 'srgb'}`;
     if (thumb.key !== key) {
       const c = thumb.canvas && thumb.canvas.width === Math.round(w * dpr) && thumb.canvas.height === Math.round(h * dpr) ? thumb.canvas : createCanvas(Math.round(w * dpr), Math.round(h * dpr));
       const ctx = c.getContext('2d');
       ctx.clearRect(0, 0, c.width, c.height);
       ctx.imageSmoothingQuality = 'medium';
       try {
-        ctx.drawImage(doc.view.compositor.composite(doc), 0, 0, c.width, c.height);
+        // color (lib/color/pipeline.js): as the display shows it (the composite itself without an engine)
+        ctx.drawImage(displayCanvas(doc.view.compositor.composite(doc), doc, { space: doc.view?.space ?? 'srgb' }), 0, 0, c.width, c.height);
       } catch (err) {
         console.warn('navigator thumbnail', err);
       }
