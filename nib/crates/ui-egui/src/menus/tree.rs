@@ -10,7 +10,34 @@ pub fn menu_tree() -> Vec<(&'static str, Vec<Item>)> {
     menu_tree_named(true)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn menu_tree_named(english_names: bool) -> Vec<(&'static str, Vec<Item>)> {
+    full_menu_tree(english_names)
+}
+
+/// [`menu_tree_named`] in the browser, without the AI commands.
+#[cfg(target_arch = "wasm32")]
+pub fn menu_tree_named(english_names: bool) -> Vec<(&'static str, Vec<Item>)> {
+    full_menu_tree(english_names).into_iter().map(|(title, items)| (title, without_ai(items))).collect()
+}
+
+/// The browser build has no AI commands: their items and the submenus left empty go.
+#[cfg(target_arch = "wasm32")]
+fn without_ai(items: Vec<Item>) -> Vec<Item> {
+    items
+        .into_iter()
+        .filter_map(|it| match it {
+            Item::Cmd(_, id, _) if id.starts_with("ai.") => None,
+            Item::Sub(label, children) => {
+                let children = without_ai(children);
+                (!children.is_empty()).then_some(Item::Sub(label, children))
+            }
+            other => Some(other),
+        })
+        .collect()
+}
+
+fn full_menu_tree(english_names: bool) -> Vec<(&'static str, Vec<Item>)> {
     let panel = |label: &'static str, id: &'static str| cp(label, "window.panel", json!({ "panel": id, "toggle": true }));
     vec![
         (
@@ -106,6 +133,7 @@ pub fn menu_tree_named(english_names: bool) -> Vec<(&'static str, Vec<Item>)> {
                     "Edit Colors",
                     vec![
                         c("Recolor Artwork…", "ui.recolorDialog"),
+                        c("Generative Recolor…", "ai.recolor"),
                         sub(
                             "Recolor with Preset",
                             vec![
@@ -143,6 +171,7 @@ pub fn menu_tree_named(english_names: bool) -> Vec<(&'static str, Vec<Item>)> {
                 c("Assign Profile…", "edit.assignProfile"),
                 Sep,
                 c("Keyboard Shortcuts…", "edit.keyboardShortcuts"),
+                c("AI Accounts…", "ai.accounts"),
                 c("Preferences…", "edit.preferences"),
             ],
         ),
@@ -325,6 +354,17 @@ pub fn menu_tree_named(english_names: bool) -> Vec<(&'static str, Vec<Item>)> {
                         c("Expand", "imageTrace.expand"),
                     ],
                 ),
+                // Nib's generative AI (docs/generative-ai.md); the web build leaves it out
+                // (`without_ai`).
+                sub(
+                    "Generative",
+                    vec![
+                        c("Text to Vector Graphic…", "ai.textToVector"),
+                        c("Generative Shape Fill…", "ai.shapeFill"),
+                        c("Generative Pattern…", "ai.pattern"),
+                        c("Generative Expand…", "ai.expand"),
+                    ],
+                ),
                 sub(
                     "Text Wrap",
                     vec![
@@ -424,6 +464,7 @@ pub fn menu_tree_named(english_names: bool) -> Vec<(&'static str, Vec<Item>)> {
                     ],
                 ),
                 c("Fit Headline", "text.fitHeadline"),
+                c("Rewrite Text…", "ai.rewrite"),
                 Sep,
                 c("Find Font…", "type.findFont"),
                 c("Composite Fonts…", crate::dialogs::composite_fonts::COMMAND),
@@ -668,6 +709,7 @@ pub fn menu_tree_named(english_names: bool) -> Vec<(&'static str, Vec<Item>)> {
                 panel("CSS Properties", crate::panels::css_properties::ID),
                 panel("Document Info", "docInfo"),
                 panel("Flattener Preview", crate::panels::flattener_preview::ID),
+                c("Generate", "ai.generatePanel"),
                 panel("Gradient", "gradient"),
                 panel("Graphic Styles", "graphicStyles"),
                 panel("History", "history"),
