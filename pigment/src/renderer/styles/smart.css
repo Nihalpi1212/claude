@@ -1,0 +1,9 @@
+/* Smart objects (lib/smart-object.js): the Layers panel badge and smart filter rows, filter dialog notes. */
+.layer-smart-badge { display: inline-flex; align-items: center; color: var(--accent); }
+.layer-smart-badge svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.75; }
+.layer-row.smart-filter-head, .layer-row.smart-filter-row { height: 24px; font-size: 11px; color: var(--fg-muted); background: color-mix(in srgb, var(--bg-sunken) 60%, transparent); }
+.layer-row.smart-filter-head .layer-name { font-weight: 600; letter-spacing: 0.02em; }
+.layer-row.smart-filter-row .layer-name { padding-left: 10px; }
+.layer-row.smart-filter-row.off .layer-name, .layer-row.smart-filter-head.off .layer-name { opacity: 0.5; text-decoration: line-through; }
+.layer-row.smart-filter-head.selected, .layer-row.smart-filter-row.selected { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.smart-filter-note { font-size: 11px; margin: 8px 0 0; }

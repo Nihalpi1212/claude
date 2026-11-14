@@ -1,0 +1,10 @@
+node_modules/
+dist/
+src/renderer/vendor/
+tests/e2e/.artifacts*/
+test-results/
+playwright-report/
+*.log
+.DS_Store
+tests/fixtures/out/
+tests/electron/.artifacts/

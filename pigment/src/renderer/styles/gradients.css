@@ -1,0 +1,84 @@
+/* gradients (ARCHITECTURE.md "0.4 features", rule 6): the gradient widget, picker, Gradient Editor, Gradient Fill
+   section and the Gradients panel. */
+
+/* ---- widget ---------------------------------------------------------------------------------------------------- */
+.gw { display: inline-flex; flex-direction: column; gap: 6px; min-width: 0; }
+.gw-main { display: inline-flex; align-items: stretch; }
+.gw-bar { display: inline-flex; padding: 1px; border: 1px solid var(--border); border-radius: 3px 0 0 3px; background: var(--bg-sunken); cursor: pointer; }
+.gw-bar:hover:not(:disabled), .gw-more:hover:not(:disabled) { border-color: var(--accent); }
+.gw-ramp { display: block; width: 160px; height: 18px; border-radius: 2px; }
+.gw-compact .gw-ramp { width: 96px; height: 16px; }
+.gw-more { width: 18px; padding: 0; border: 1px solid var(--border); border-left: 0; border-radius: 0 3px 3px 0; background: var(--bg-elevated); color: var(--fg); font-size: 10px; cursor: pointer; }
+.gw-fields { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.gw-row { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
+.gw-label { color: var(--fg-muted); }
+.gw-check { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; }
+.gw-inline-picker { max-height: 180px; overflow: auto; padding: 6px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-elevated); }
+.gw-popover { padding: 6px; }
+.gw-pop-picker { width: 280px; max-height: 340px; overflow: auto; }
+/* in the options bar the widget sits on one line */
+.opt .gw { flex-direction: row; align-items: center; }
+.opt .gw-fields { flex-wrap: nowrap; }
+
+/* ---- picker ---------------------------------------------------------------------------------------------------- */
+.gradient-picker { display: flex; flex-direction: column; gap: 2px; }
+.gp-group-head { display: flex; align-items: center; gap: 6px; width: 100%; padding: 3px 4px; border: 0; border-radius: 3px; background: none; color: var(--fg); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.gp-group-head:hover { background: var(--accent-soft); }
+.gp-caret { width: 10px; color: var(--fg-muted); font-size: 10px; }
+.gp-group-name { flex: 1; }
+.gp-count { font-size: 11px; }
+.gp-grid { display: flex; flex-wrap: wrap; gap: 4px; padding: 2px 4px 6px 20px; }
+.gp-loose { padding-left: 4px; }
+.gp-swatch { display: inline-flex; align-items: center; gap: 8px; padding: 1px; border: 1px solid var(--border); border-radius: 3px; background: none; color: var(--fg); font: inherit; font-size: 12px; cursor: pointer; }
+.gp-swatch canvas { display: block; border-radius: 2px; }
+.gp-swatch:hover { border-color: var(--fg-muted); }
+.gp-swatch[aria-selected="true"] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.gradient-picker[data-view="list"] .gp-grid { flex-direction: column; flex-wrap: nowrap; }
+.gradient-picker[data-view="list"] .gp-swatch { width: 100%; border-color: transparent; }
+.gradient-picker[data-view="list"] .gp-swatch[aria-selected="true"] { border-color: var(--accent); }
+.gp-empty { padding: 8px; font-size: 12px; }
+
+/* ---- Gradient Editor ------------------------------------------------------------------------------------------- */
+.gradient-editor { display: grid; grid-template-columns: 1fr auto; gap: 14px; outline: none; }
+.ge-main { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.ge-side { display: flex; flex-direction: column; gap: 6px; }
+.ge-presets .gradient-picker { max-height: 150px; overflow: auto; padding: 4px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-sunken); }
+.ge-label { font-size: 12px; color: var(--fg-muted); white-space: nowrap; }
+.ge-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ge-name { flex: 1; min-width: 120px; }
+.ge-ramp-box { position: relative; padding: 0 7px; user-select: none; }
+.ge-ramp { display: block; width: 100%; height: 28px; border: 1px solid var(--border); border-radius: 2px; }
+.ge-stop-row { position: relative; height: 18px; cursor: copy; }
+.ge-stop { position: absolute; top: 2px; width: 12px; height: 14px; margin-left: -6px; cursor: ew-resize; touch-action: none; }
+.ge-stop::before { content: ""; position: absolute; inset: 4px 1px 0; border: 1px solid #000; background: var(--stop); box-shadow: inset 0 0 0 1px #fff; }
+.ge-stop::after { content: ""; position: absolute; left: 50%; margin-left: -4px; border: 4px solid transparent; }
+.ge-color-stop::after { top: -4px; border-bottom-color: var(--fg); }
+.ge-opacity-stop::before { inset: 0 1px 4px; }
+.ge-opacity-stop::after { bottom: -4px; border-top-color: var(--fg); }
+.ge-stop[aria-selected="true"]::after { border-bottom-color: var(--accent); }
+.ge-opacity-stop[aria-selected="true"]::after { border-top-color: var(--accent); border-bottom-color: transparent; }
+.ge-ref-fg::before, .ge-ref-bg::before { box-shadow: inset 0 0 0 1px #fff, inset 0 0 0 3px var(--accent); }
+.ge-mid { position: absolute; top: 5px; width: 8px; height: 8px; margin-left: -4px; transform: rotate(45deg); border: 1px solid var(--fg); background: var(--bg-elevated); cursor: ew-resize; touch-action: none; }
+.ge-stops, .ge-noise { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius); }
+.ge-stops legend, .ge-noise legend { padding: 0 4px; font-size: 12px; color: var(--fg-muted); }
+.ge-color-chip { width: 34px; height: 22px; padding: 0; border: 1px solid var(--border); border-radius: 3px; cursor: pointer; }
+.ge-color-chip:disabled { opacity: 0.5; cursor: default; }
+.ge-channel { width: 14px; text-align: right; }
+.gradient-editor [hidden] { display: none !important; }
+
+/* ---- Gradient Fill section and dialog ------------------------------------------------------------------------- */
+.gradient-fill-section { display: flex; flex-direction: column; gap: 4px; }
+.gradient-fill-flags { display: flex; gap: 12px; }
+
+/* ---- panel ----------------------------------------------------------------------------------------------------- */
+.gradients-panel { display: flex; flex-direction: column; min-height: 0; }
+.gradients-body { flex: 1; min-height: 0; overflow: auto; padding: 6px; }
+.gradients-hint { font-size: 11px; }
+
+/* the base .input / .select take the full width: these rows size them to their content */
+.gradient-editor .select, .gradient-editor .input, .gw .select, .gw .input { width: auto; height: 26px; font-size: 12px; padding: 0 6px; }
+.gradient-editor .select { padding-right: 22px; }
+.gradient-editor .ge-name { flex: 1; width: auto; }
+.gw-fields .numeric-field, .ge-row .numeric-field { display: inline-flex; align-items: center; gap: 4px; }
+.opt .gw .select { height: 26px; }
+.prop-row .gw .select { flex: none; }

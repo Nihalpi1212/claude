@@ -1,0 +1,50 @@
+/* type-paragraph-panel (ARCHITECTURE.md "0.4 features", rule 6): the Paragraph panel, the Properties paragraph section
+   and the Hyphenation and Justification dialogs. */
+
+.para-panel { display: flex; flex-direction: column; }
+.para-head { display: flex; align-items: flex-start; gap: 6px; padding: 4px 8px 0; }
+.para-head .para-empty { flex: 1; margin: 0; padding: 4px 0; text-align: left; }
+.para-head .para-menu { margin-left: auto; }
+
+.para-controls { display: flex; flex-direction: column; gap: 6px; padding: 6px 8px 8px; }
+.para-row { display: flex; align-items: center; gap: 4px; min-width: 0; flex-wrap: wrap; }
+
+.para-aligns { display: flex; gap: 2px; flex-wrap: wrap; }
+.para-align, .para-list-btn {
+  width: 26px; height: 24px; padding: 0; display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border, #555); border-radius: 4px; background: transparent; color: inherit; cursor: pointer;
+}
+.para-align svg, .para-list-btn svg, .para-icon svg {
+  width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round;
+}
+.para-align[aria-pressed='true'], .para-list-btn[aria-pressed='true'] { background: var(--accent, #2d7ff9); border-color: var(--accent, #2d7ff9); color: #fff; }
+.para-list-btn[aria-pressed='mixed'] { background: color-mix(in srgb, var(--accent, #2d7ff9) 35%, transparent); }
+
+.para-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 8px; width: 100%; }
+.para-cell { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.para-icon { flex: none; display: inline-flex; color: var(--muted, #888); }
+.para-cell .numeric-field { flex: 1 1 0; display: flex; align-items: center; gap: 3px; min-width: 0; }
+.para-cell .numeric-field input.input, .para-cell > input.input { flex: 1 1 0; min-width: 0; width: auto; }
+.para-cell .opt-unit { flex: none; font-size: 11px; color: var(--muted, #888); }
+
+.para-hyphenate { display: inline-flex; align-items: center; gap: 6px; }
+.para-list-extras { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.para-list-extras .muted { font-size: 11px; }
+.para-list-extras select.select { max-width: 96px; }
+.para-list-extras input.input { width: 46px; }
+.para-sections:empty { display: none; }
+
+.para-v-properties { padding: 4px 0 0; }
+
+/* dialogs */
+.para-dialog { display: flex; flex-direction: column; gap: 8px; }
+.para-dialog-grid { display: grid; grid-template-columns: auto auto 1fr; gap: 6px 8px; align-items: center; }
+.para-dialog-label { font-size: 12px; text-align: right; white-space: nowrap; }
+.para-dialog-head { font-size: 11px; color: var(--muted, #888); text-align: center; }
+.para-dialog input.input { width: 64px; }
+.para-dialog input.input::placeholder { color: var(--muted, #888); font-style: italic; }
+.para-just-grid { display: grid; grid-template-columns: auto repeat(3, auto); gap: 6px 8px; align-items: center; justify-content: start; }
+.para-pct { display: inline-flex; align-items: center; gap: 3px; }
+.para-single-word { display: flex; align-items: center; gap: 8px; }
+.para-note { margin: 0; font-size: 11px; }
+.para-error { margin: 0; color: var(--danger, #e5534b); font-size: 12px; }

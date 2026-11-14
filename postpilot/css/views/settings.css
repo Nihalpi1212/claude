@@ -1,0 +1,144 @@
+/* Settings screen. Shared pieces (ConnectInstagram, WorkerSetup, .link-btn) live in onboarding.css. */
+
+.settings-layout {
+  display: grid;
+  grid-template-columns: 188px minmax(0, 1fr);
+  gap: var(--sp-5);
+  align-items: start;
+}
+
+.settings-nav {
+  position: sticky;
+  top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.settings-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  height: 34px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--r-md);
+  background: none;
+  color: var(--ink-2);
+  font: inherit;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.settings-nav-item > .icon { flex: none; color: var(--ink-3); }
+.settings-nav-item:hover { background: var(--surface-2); color: var(--ink); }
+.settings-nav-item.is-active {
+  background: var(--surface);
+  color: var(--ink);
+  font-weight: 500;
+  box-shadow: inset 2px 0 0 var(--accent), 0 0 0 1px var(--line);
+}
+.settings-nav-item.is-active > .icon { color: var(--accent); }
+.settings-nav-item:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+
+.settings-sections {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+  min-width: 0;
+}
+.settings-section { scroll-margin-top: 16px; }
+.settings-section:focus { outline: none; }
+.settings-section > .panel-body { padding: 16px 18px 18px; }
+
+.settings-sub {
+  margin-bottom: 8px;
+  font-family: var(--font-display);
+  font-stretch: 110%;
+  font-size: var(--fs-md);
+  font-weight: 650;
+}
+
+.settings-kv { font-size: var(--fs-md); }
+.settings-kv dd .row { gap: 6px; }
+.settings-narrow { max-width: 460px; }
+.settings-account-actions { margin-left: auto; }
+
+.settings-toggles {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 24px;
+}
+
+.settings-storage {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+
+.settings-quote { display: block; font-style: normal; color: var(--ink); }
+.settings-quote::before { content: '“'; }
+.settings-quote::after { content: '”'; }
+
+.settings-run-errors {
+  margin: 4px 0 0;
+  padding-left: 16px;
+  color: var(--bad-ink);
+  font-size: var(--fs-sm);
+}
+
+.settings-job-select { width: 170px; }
+.settings-log { border-top: 1px solid var(--line); }
+.settings-log-row { gap: 10px; padding: 8px 0; }
+.settings-log-time { flex: none; width: 150px; font-size: 12px; line-height: 1.7; }
+.settings-log-row .badge { flex: none; margin-top: 2px; }
+.settings-log-job {
+  flex: none;
+  width: 92px;
+  overflow: hidden;
+  color: var(--ink-2);
+  font-size: 12px;
+  line-height: 1.7;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.settings-log-msg { overflow-wrap: anywhere; }
+
+@media (max-width: 1023px) {
+  .settings-layout { grid-template-columns: minmax(0, 1fr); gap: var(--sp-4); }
+  .settings-nav {
+    position: static;
+    flex-direction: row;
+    gap: 4px;
+    overflow-x: auto;
+    padding-bottom: 4px;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .settings-nav::-webkit-scrollbar { display: none; }
+  .settings-nav-item { flex: none; height: 32px; border: 1px solid var(--line); background: var(--surface); }
+  .settings-nav-item.is-active { box-shadow: inset 0 -2px 0 var(--accent); border-color: var(--line-strong); }
+}
+
+@media (max-width: 759px) {
+  .settings-section > .panel-body { padding: 14px; }
+  .settings-toggles { grid-template-columns: minmax(0, 1fr); }
+  .settings-kv { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .settings-kv dt { margin-top: 8px; font-size: var(--fs-sm); }
+  .settings-kv dt:first-child { margin-top: 0; }
+  .settings-account-actions { margin-left: 0; }
+  .settings-log-row { flex-wrap: wrap; gap: 4px 8px; }
+  .settings-log-time { width: auto; }
+  .settings-log-msg { flex-basis: 100%; }
+  .settings-job-select { width: auto; flex: 1 1 140px; }
+}
+
+/* Groups inside a section. (Not .stack-lg: its --gap would leak into nested .stack elements.) */
+.settings-groups { display: flex; flex-direction: column; gap: var(--sp-5); min-width: 0; }
+.settings-groups > * { min-width: 0; }
+.stack > .settings-sub { margin-bottom: 0; }

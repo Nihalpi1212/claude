@@ -1,0 +1,32 @@
+/* layer-style-effects (ARCHITECTURE.md "0.4 features", rule 6): the Layer Style dialog's effect list, the contour
+   widget and the Contour Editor. */
+
+.style-dialog .style-side { display: flex; flex-direction: column; width: 190px; border-right: 1px solid var(--border); padding-right: 10px; margin-right: 10px; }
+.style-dialog .style-side .style-list { width: auto; border-right: 0; padding-right: 0; margin-right: 0; flex: 1; overflow-y: auto; max-height: 470px; }
+.style-dialog .style-list label { position: relative; }
+.style-dialog .style-list label .style-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.style-dialog .style-list label.style-sub { padding-left: 22px; }
+.style-dialog .style-add { border: 1px solid var(--border); background: var(--panel, transparent); color: inherit; border-radius: 3px; width: 18px; height: 18px; line-height: 14px; padding: 0; font-size: 13px; cursor: pointer; flex: none; }
+.style-dialog .style-add:disabled { opacity: 0.4; cursor: default; }
+.style-dialog .style-list-tools { display: flex; gap: 4px; padding-top: 8px; border-top: 1px solid var(--border); margin-top: 6px; }
+.style-dialog .style-list-tools .btn { min-width: 26px; padding: 2px 6px; }
+.style-dialog .style-pane { max-height: 520px; overflow-y: auto; padding-right: 4px; }
+
+.field-contour.cw { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; position: relative; }
+.cw .cw-preview { padding: 1px; border: 1px solid var(--border); background: #fff; border-radius: 3px; line-height: 0; cursor: pointer; }
+.cw .cw-preview canvas { display: block; }
+.cw .cw-more { border: 1px solid var(--border); background: transparent; color: inherit; border-radius: 3px; padding: 0 5px; height: 22px; cursor: pointer; }
+.cw .cw-name { font-size: 11px; color: var(--muted, inherit); }
+.cw .cw-picker { flex-basis: 100%; }
+.cw-grid { display: grid; grid-template-columns: repeat(6, 32px); gap: 4px; padding: 4px; }
+.cw-grid .cw-item { padding: 1px; border: 1px solid var(--border); background: #fff; border-radius: 3px; line-height: 0; cursor: pointer; }
+.cw-grid .cw-item.selected { outline: 2px solid var(--accent, #3b82f6); }
+.cw-grid .cw-item canvas { display: block; }
+
+.contour-editor { display: flex; gap: 14px; align-items: flex-start; }
+.contour-editor .ce-canvas { border: 1px solid var(--border); cursor: crosshair; touch-action: none; width: 240px; height: 240px; }
+.contour-editor .ce-right { display: flex; flex-direction: column; gap: 8px; min-width: 150px; }
+.contour-editor .ce-row { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.contour-editor .ce-row > span:first-child { width: 48px; }
+.contour-editor .ce-row .input[type=number] { width: 64px; }
+.contour-editor .ce-hint { font-size: 11px; max-width: 170px; margin: 4px 0 0; }

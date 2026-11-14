@@ -1,0 +1,76 @@
+/* gallery (0.3): styles of lib/gallery*.js; filled in by its builder */
+
+/* filter gallery */
+.dialog.gallery-dialog { width: min(1180px, calc(100vw - 32px)); height: min(780px, calc(100vh - 40px)); }
+.gallery-dialog .dialog-body { display: flex; flex-direction: column; overflow: hidden; padding: 10px 14px; }
+.fg-root { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 236px 280px; gap: 12px; }
+.fg-preview { display: flex; flex-direction: column; min-width: 0; min-height: 0; gap: 6px; }
+.fg-viewport { flex: 1; min-height: 240px; position: relative; overflow: hidden; border: 1px solid var(--border); border-radius: 6px; cursor: grab; touch-action: none;
+  background: repeating-conic-gradient(#cccccc 0% 25%, #ffffff 0% 50%) 50% / 16px 16px; }
+.fg-viewport.dragging { cursor: grabbing; }
+.fg-viewport canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.fg-zoombar { display: flex; align-items: center; gap: 6px; }
+.fg-zoombar .fg-zoom { width: 84px; }
+.fg-zoom-btn { width: 28px; height: 28px; padding: 0; display: grid; place-items: center; }
+.fg-note { font-size: 11px; margin-left: auto; }
+.fg-groups { overflow: auto; min-height: 0; border: 1px solid var(--border); border-radius: 6px; padding: 4px; display: flex; flex-direction: column; gap: 2px; }
+.fg-menu-option { margin: 4px 6px 8px; font-size: 12px; }
+.fg-group-head { width: 100%; display: flex; align-items: center; gap: 6px; border: 0; background: var(--bg-sunken); color: var(--fg); padding: 7px 8px; border-radius: 4px; font-weight: 600; font-size: 12px; text-align: left; }
+.fg-group-head:hover { background: var(--hover); }
+.fg-group-head svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.fg-thumbs { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; padding: 6px 2px 10px; }
+.fg-thumb { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 4px; border: 2px solid transparent; border-radius: 6px; background: transparent; color: var(--fg-muted); font-size: 10.5px; line-height: 1.2; text-align: center; }
+.fg-thumb canvas { width: 80px; height: 60px; border-radius: 3px; image-rendering: auto; }
+.fg-thumb:hover:not(:disabled) { background: var(--hover); color: var(--fg); }
+.fg-thumb[aria-pressed="true"] { border-color: var(--accent); color: var(--fg); }
+.fg-thumb:disabled { opacity: 0.4; }
+.fg-side { display: flex; flex-direction: column; min-height: 0; gap: 8px; }
+.fg-kind { width: 100%; }
+.fg-fields { flex: 1; min-height: 120px; overflow: auto; padding-right: 2px; }
+.fg-fields .dialog-form { grid-template-columns: 1fr; min-width: 0; }
+.fg-empty { font-size: 12px; margin: 8px 0; }
+.fg-stack-head { display: flex; align-items: center; justify-content: space-between; border-top: 1px solid var(--border); padding-top: 8px; }
+.fg-stack-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--fg-muted); }
+.fg-stack-buttons { display: flex; gap: 2px; }
+.fg-stack-btn { width: 26px; height: 26px; padding: 0; display: grid; place-items: center; }
+.fg-stack-btn svg { width: 16px; height: 16px; }
+.fg-stack { height: 150px; overflow: auto; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-sunken); }
+.fg-effect { display: flex; align-items: center; gap: 6px; padding: 5px 8px; font-size: 12px; cursor: default; border-bottom: 1px solid var(--border); user-select: none; }
+.fg-effect:last-child { border-bottom: 0; }
+.fg-effect[aria-selected="true"] { background: var(--accent-soft); }
+.fg-effect.disabled .fg-effect-name { color: var(--fg-muted); }
+.fg-effect.dragging { opacity: 0.5; }
+.fg-effect.drop-target { box-shadow: inset 0 2px 0 var(--accent); }
+.fg-eye { border: 0; background: transparent; color: var(--fg-muted); width: 22px; height: 22px; display: grid; place-items: center; border-radius: 4px; padding: 0; }
+.fg-eye[aria-pressed="true"] { color: var(--fg); }
+.fg-eye svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+.fg-eye:hover { background: var(--hover); }
+@media (max-width: 1000px) {
+  .fg-root { grid-template-columns: minmax(0, 1fr) 236px; }
+  .fg-side { grid-column: 1 / -1; flex-direction: row; flex-wrap: wrap; }
+}
+
+/* blur gallery */
+/* the session's panel takes the place of the panel dock; the toolbox and the tabs are inert until it ends */
+body.blur-gallery-active #panels { display: none; }
+body.blur-gallery-active #toolbox, body.blur-gallery-active #tabbar { pointer-events: none; opacity: 0.45; }
+.bg-panel { width: 300px; min-width: 0; display: flex; flex-direction: column; border-left: 1px solid var(--border); background: var(--bg-elevated); font-size: 12px; min-height: 0; }
+.bg-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px 8px; }
+.bg-title { font-size: 14px; font-weight: 600; }
+.bg-tabs { display: flex; gap: 2px; padding: 0 8px; border-bottom: 1px solid var(--border); }
+.bg-tabs [role="tab"] { border: 0; background: none; color: var(--fg-muted); padding: 7px 10px; font-size: 12px; border-bottom: 2px solid transparent; margin-bottom: -1px; cursor: pointer; }
+.bg-tabs [role="tab"]:hover { color: var(--fg); }
+.bg-tabs [role="tab"][aria-selected="true"] { color: var(--fg); border-bottom-color: var(--accent); font-weight: 600; }
+.bg-body { flex: 1; min-height: 0; overflow: auto; padding: 12px; }
+.bg-body section[hidden] { display: none; }
+.bg-body .dialog-form { grid-template-columns: minmax(0, 1fr); min-width: 0; gap: 8px; }
+.bg-body .dialog-form .slider-field input[type="range"] { flex: 1; min-width: 0; }
+.bg-body .dialog-form .slider-field .input { width: 62px; height: 26px; font-size: 12px; padding: 0 6px; flex: none; }
+.bg-body .opt-segment { align-self: flex-start; }
+.bg-pins { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+.bg-pin-label { color: var(--fg-muted); }
+.bg-global-form:not(:empty) { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+.bg-hint { margin: 14px 0 0; font-size: 11px; line-height: 1.45; }
+.bg-foot { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--border); }
+.bg-foot .checkbox { display: inline-flex; align-items: center; gap: 6px; }
+.bg-spacer { flex: 1; }

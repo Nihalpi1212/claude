@@ -1,0 +1,128 @@
+/* Post by hand (#/post-now/<id>): one column of numbered steps, phone first. */
+
+.pn { max-width: 680px; }
+.pn .page-header { align-items: flex-start; }
+.pn-status { margin-top: 8px; }
+.pn-after { gap: 8px; }
+
+.pn-steps {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.pn-step {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 12px;
+  padding: var(--sp-4) 0;
+  border-bottom: 1px solid var(--line);
+}
+.pn-step-no {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--ink-2);
+  font-size: var(--fs-xs);
+}
+.pn-step.is-done .pn-step-no { border-color: var(--ok); background: var(--ok); color: var(--surface); }
+.pn-step-body { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.pn-step-title {
+  margin: 3px 0 0;
+  font-family: var(--font-display);
+  font-stretch: 108%;
+  font-size: var(--fs-lg);
+  font-weight: 650;
+  line-height: 1.25;
+}
+.pn-step-body > p { margin: 0; }
+
+/* Media: one large frame, or a swipeable strip for carousels */
+.pn-media {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.pn-media.is-multi {
+  grid-auto-flow: column;
+  grid-auto-columns: min(74%, 260px);
+  grid-template-columns: none;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  padding-bottom: 6px;
+}
+.pn-media-item { display: flex; flex-direction: column; gap: 6px; min-width: 0; scroll-snap-align: start; }
+.pn-media-box {
+  position: relative;
+  display: grid;
+  place-items: center;
+  max-height: 56vh;
+  min-height: 140px;
+  overflow: hidden;
+  border: 3px solid var(--surface);
+  border-radius: var(--r-sm);
+  outline: 1px solid var(--line);
+  background: var(--surface-3);
+}
+.pn-media-box img,
+.pn-media-box video { display: block; width: 100%; height: 100%; max-height: 56vh; object-fit: contain; }
+.pn-media.is-multi .pn-media-box { aspect-ratio: 4 / 5; max-height: none; }
+.pn-media.is-multi .pn-media-box img,
+.pn-media.is-multi .pn-media-box video { max-height: none; object-fit: cover; }
+.pn-media-blank { color: var(--ink-3); }
+.pn-media-no {
+  position: absolute;
+  left: 6px;
+  top: 6px;
+  padding: 1px 5px;
+  border-radius: var(--r-sm);
+  background: var(--scrim);
+  color: var(--on-scrim);
+  font-size: 11px;
+}
+.pn-media-problem { display: flex; align-items: flex-start; gap: 6px; margin: 0; color: var(--bad-ink, var(--bad)); }
+.pn-media-problem .icon { flex: none; margin-top: 2px; }
+.pn-media-loading { max-width: 420px; }
+
+/* Copy blocks */
+.pn-copy { display: flex; flex-direction: column; gap: 6px; }
+.pn-copy-text {
+  width: 100%;
+  min-height: 64px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--fs-md);
+  line-height: 1.5;
+  resize: vertical;
+}
+.pn-copy-text:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.pn-copy .row { align-items: center; }
+
+/* What to add in Instagram */
+.pn-extras { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 10px 12px; list-style: none; border: 1px dashed var(--line-strong); border-radius: var(--r-md); font-size: var(--fs-sm); }
+.pn-extras li { display: flex; align-items: flex-start; gap: 8px; min-width: 0; overflow-wrap: anywhere; }
+.pn-extras .icon { flex: none; margin-top: 2px; color: var(--accent); }
+
+.pn-finish { gap: 8px; }
+
+@media (max-width: 759px) {
+  /* The phone shell (.app in css/app.css) has auto rows and a full-height minimum, so a short page
+     (already posted, canceled, unknown post) would stretch the top bar row. Keep rows at their content
+     height while this page is open. */
+  .app:has(.pn) { align-content: start; }
+  .pn-step { grid-template-columns: 28px minmax(0, 1fr); gap: 10px; }
+  .pn-step-no { width: 26px; height: 26px; }
+  .pn-step-body .row > .btn { flex: 1 1 auto; justify-content: center; }
+}

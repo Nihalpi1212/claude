@@ -1,0 +1,216 @@
+// Adjustment frame (ARCHITECTURE.md "0.4 features", I.1; E8). pixelEditDialog (dialog mode) and the Properties
+// adjustment section (panel mode) wrap an adjustment editor in it. Owned by adjust-tonal (the skeleton's stub had the
+// same API): the real `preset` widget (lib/adjust/preset-widget.js, with Load / Save files, Delete and "Default"),
+// eyedroppers that average the Eyedropper tool's Sample Size, Escape to put an armed eyedropper down, and
+// paramsChanged() so the preset menu shows "Custom" once the settings are edited.
+//
+// Rows, top to bottom, each shown only when the editor offers it (I.2): the preset menu (the `preset` widget of the
+// kind's preset kind), the editor element, the eyedropper buttons and the on-image tool button (an armed one pushes
+// a canvas-capture handler, I.3; in a dialog the canvas is let through with setCanvasThrough), the Auto button
+// (Alt-click: editor.auto.options()), and the Preview checkbox in dialog mode. A 0.3 editor offers none of the extra
+// rows, so a 0.3 dialog looks as before.
+import { createWidget } from '../fields.js';
+import { adjustmentPresetKind } from './presets.js';
+import { icon } from '../icons.js';
+import { ADJUSTMENTS } from '../../../shared/pixels/adjust.js';
+import { sampleArea, sampleSizeOf } from './eyedroppers.js';
+import './preset-widget.js'; // registers the real `preset` widget before any frame builds one
+
+const clone = (v) => (v === undefined || v === null ? v : JSON.parse(JSON.stringify(v)));
+
+/**
+ * buildAdjustmentFrame(app, kind, editor, { mode, sample(x, y), getParams(), setParams(params), onReset(),
+ *   source?, preview?, onDiscrete? }) -> { element, dispose(), disarm(), paramsChanged(params) }
+ * `onDiscrete()` (optional): called right before an eyedropper pick changes the params through the editor, so a host
+ * that merges consecutive edits can record the pick as its own step.
+ * paramsChanged(params) (adjust-tonal): the host reports the editor's edits, so the preset menu shows "Custom" when
+ * they leave the picked preset.
+ * `source` (an addition): the ImageDataLike Auto computes from (the session base in a dialog, the composite below in
+ * a panel), or a function returning it. `preview` (an addition, dialog mode): { checked, onChange(on) } for the
+ * Preview checkbox, which keeps 0.3's markup (input[data-key="__preview"]).
+ */
+export function buildAdjustmentFrame(app, kind, editor, opts = {}) {
+  const mode = opts.mode === 'panel' ? 'panel' : 'dialog';
+  const root = document.createElement('div');
+  root.className = `adjust-frame adjust-frame-${mode}`;
+  root.dataset.kind = kind;
+  const cleanups = [];
+  let armed = null; // { id, release, dialog, button }
+
+  // ---- preset menu
+  const presetKindId = adjustmentPresetKind(kind, editor);
+  let presetWidget = null;
+  if (presetKindId) {
+    const def = ADJUSTMENTS[kind];
+    presetWidget = createWidget('preset', {
+      kind: presetKindId,
+      onPick: (preset) => opts.setParams?.(clone(preset.data)),
+      getData: () => opts.getParams?.(),
+      defaults: def ? () => clone(def.defaults) : undefined,
+      defaultName: `${def?.name ?? 'Adjustment'} Preset`,
+      title: def?.name,
+    }, { app });
+    const r = document.createElement('div');
+    r.className = 'adjust-frame-row adjust-frame-presets';
+    r.appendChild(presetWidget.element);
+    root.appendChild(r);
+  }
+
+  // ---- the editor
+  if (editor?.element) root.appendChild(editor.element);
+
+  // ---- eyedroppers and the on-image tool
+  const disarm = () => {
+    if (!armed) return;
+    const a = armed;
+    armed = null;
+    a.release();
+    if (a.dialog) app.dialogs?.setCanvasThrough?.(a.dialog, false);
+    a.button?.setAttribute('aria-pressed', 'false');
+  };
+  // the Eyedropper tool's Sample Size (Photoshop's adjustment eyedroppers follow it)
+  const rgbaAt = (p) => (typeof opts.sample === 'function' ? sampleArea(opts.sample, p.x, p.y, sampleSizeOf(app)) : null);
+  const arm = (id, button, handler) => {
+    const again = armed?.id === id;
+    disarm();
+    if (again || !app.canvasCapture) return; // a second click on the armed button disarms it
+    const dialog = mode === 'dialog' ? root.closest('.dialog') : null;
+    if (dialog) app.dialogs?.setCanvasThrough?.(dialog, true);
+    // Escape puts the armed tool down (the dialog stays open)
+    const key = (e) => {
+      if (e.key !== 'Escape' || armed?.id !== id) return false;
+      disarm();
+      return true;
+    };
+    const release = app.canvasCapture.push({ id: `adjust-frame:${id}`, cursor: handler.cursor ?? 'crosshair', key, ...handler });
+    armed = { id, release, dialog, button };
+    button.setAttribute('aria-pressed', 'true');
+  };
+  const tools = [];
+  for (const ed of editor?.eyedroppers ?? []) {
+    const b = toolButton(ed.label, ed.icon ?? 'eyedropper');
+    b.dataset.eyedropper = ed.id;
+    b.addEventListener('click', () => arm(`eyedropper:${ed.id}`, b, {
+      down: (p) => {
+        const rgba = rgbaAt(p);
+        if (!rgba) return;
+        opts.onDiscrete?.(); // the host records the edit this pick makes as a step of its own
+        ed.pick(rgba, { x: p.x, y: p.y });
+      },
+    }));
+    tools.push(b);
+  }
+  if (editor?.onImage) {
+    const oi = editor.onImage;
+    const b = toolButton(oi.label, oi.icon ?? 'hand');
+    b.dataset.onImage = '';
+    b.addEventListener('click', () => arm('on-image', b, {
+      cursor: oi.cursor,
+      down: (p, view) => oi.down?.(rgbaAt(p), p, view),
+      move: (p, view, dragging) => (dragging ? oi.move?.(rgbaAt(p), p, view) : undefined),
+      up: (p, view) => oi.up?.(rgbaAt(p), p, view),
+    }));
+    tools.push(b);
+  }
+  // ---- Auto
+  if (editor?.auto?.run) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'btn small';
+    b.dataset.act = 'auto';
+    b.textContent = 'Auto';
+    b.title = 'Automatic settings (Alt-click: options)';
+    b.addEventListener('click', async (e) => {
+      if (e.altKey && editor.auto.options) {
+        await editor.auto.options();
+        return;
+      }
+      const src = typeof opts.source === 'function' ? opts.source() : opts.source;
+      if (!src) return;
+      const params = editor.auto.run(src);
+      if (params) {
+        opts.setParams?.(params);
+        presetWidget?.set?.(null); // Auto's settings are no preset: the menu says Custom
+      }
+    });
+    tools.push(b);
+  }
+  if (tools.length) {
+    const r = document.createElement('div');
+    r.className = 'adjust-frame-row adjust-frame-tools';
+    r.append(...tools);
+    root.appendChild(r);
+  }
+
+  // ---- Preview (dialog mode)
+  if (mode === 'dialog' && opts.preview) {
+    const pv = document.createElement('label');
+    pv.className = 'checkbox';
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.checked = !!opts.preview.checked;
+    input.dataset.key = '__preview';
+    input.addEventListener('change', () => opts.preview.onChange?.(input.checked));
+    pv.append(input, document.createTextNode('Preview'));
+    root.appendChild(pv);
+  }
+
+  // a panel's armed tool ends with the tool, the document or the section
+  if (mode === 'panel') {
+    cleanups.push(app.on?.('tool:changed', disarm), app.on?.('doc:closed', disarm));
+  }
+
+  let disposed = false;
+  return {
+    element: root,
+    disarm,
+    paramsChanged(params) {
+      presetWidget?.changed?.(params);
+    },
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      disarm();
+      for (const off of cleanups) off?.();
+      presetWidget?.destroy?.();
+      editor?.dispose?.();
+    },
+  };
+}
+
+function toolButton(label, iconName) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'pbtn adjust-frame-tool';
+  b.title = label;
+  b.setAttribute('aria-pressed', 'false');
+  b.innerHTML = icon(iconName);
+  return b;
+}
+
+/**
+ * (x, y) -> [r, g, b, a] | null: the full-resolution composite below an adjustment layer at a document point (what
+ * the layer adjusts), cached until the document changes. adjustmentSource (adjust-ui.js) stays for histograms: it is
+ * downscaled to 512 px.
+ */
+export function sampleBelow(app, layer) {
+  let cache = null; // { key, data, width, height }
+  return (x, y) => {
+    const d = app.doc;
+    if (!d || !layer.parent) return null;
+    if (x < 0 || y < 0 || x >= d.width || y >= d.height) return null;
+    const key = `${d.id}:${d.version}:${d.root.version}`;
+    if (cache?.key !== key) {
+      const skip = new Set();
+      let found = false;
+      for (const l of d.layers()) {
+        if (l === layer) found = true;
+        if (found) skip.add(l);
+      }
+      const c = d.view.compositor.composite(d, { skip });
+      cache = { key, data: c.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, c.width, c.height).data, width: c.width };
+    }
+    const i = (y * cache.width + x) * 4;
+    return [cache.data[i], cache.data[i + 1], cache.data[i + 2], cache.data[i + 3]];
+  };
+}

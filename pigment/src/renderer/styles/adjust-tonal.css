@@ -1,0 +1,53 @@
+/* adjust-tonal (ARCHITECTURE.md "0.4 features", rule 6): the tonal editors (Levels, Curves, Threshold), their slider
+   tracks, the adjustment frame's tool rows and the preset widget. */
+
+.tonal-editor { display: flex; flex-direction: column; gap: 6px; }
+.tonal-row { display: flex; align-items: center; gap: 8px; }
+.tonal-row > span { color: var(--fg-muted); font-size: 12px; min-width: 56px; }
+.tonal-row .select { flex: 1; min-width: 0; }
+.curves-top .tonal-row { flex: 1; min-width: 160px; }
+.tonal-editor .histogram { width: 100%; max-width: 256px; height: auto; aspect-ratio: 256 / 96; align-self: center; background: var(--bg-sunken); border: 1px solid var(--border); border-radius: 3px; }
+.threshold-editor .histogram { aspect-ratio: 256 / 80; }
+
+/* slider tracks with triangles */
+.tonal-track { position: relative; width: 100%; max-width: 256px; height: 18px; align-self: center; cursor: pointer; touch-action: none; user-select: none; }
+.tonal-track-bar { position: absolute; left: 0; right: 0; top: 2px; height: 6px; border-radius: 2px; border: 1px solid var(--border); background: linear-gradient(to right, #000, #fff); }
+.tonal-knob { position: absolute; top: 8px; width: 0; height: 0; margin-left: -6px; border-left: 6px solid transparent; border-right: 6px solid transparent; border-bottom: 9px solid var(--fg); filter: drop-shadow(0 0 1px var(--bg-elevated)); cursor: ew-resize; }
+.tonal-knob::after { content: ''; position: absolute; left: -4px; top: 3px; width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-bottom: 5px solid #000; }
+.tonal-knob-gray::after { border-bottom-color: #888; }
+.tonal-knob-white::after { border-bottom-color: #fff; }
+
+.tonal-fields { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.tonal-fields .input.num { width: 64px; }
+.tonal-fields-label { color: var(--fg-muted); font-size: 12px; min-width: 84px; }
+
+/* Curves */
+.curves-top { flex-wrap: wrap; }
+.curves-mode .seg-button { padding: 2px 8px; }
+.tonal-editor .curve-editor { align-self: center; color: var(--fg); }
+.curves-editor.pencil .curve-editor { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16'%3E%3Cpath d='M1 15l2-6 9-9 4 4-9 9z' fill='%23fff' stroke='%23000'/%3E%3C/svg%3E") 1 15, crosshair; }
+.curves-display summary { cursor: pointer; color: var(--fg-muted); font-size: 12px; }
+.curves-display { display: flex; flex-direction: column; gap: 4px; }
+.curves-display[open] > :not(summary) { margin-left: 8px; }
+
+/* the adjustment frame: eyedropper and tool buttons */
+.adjust-frame-tools { flex-wrap: wrap; }
+.adjust-frame-tool { width: 28px; height: 26px; display: inline-flex; align-items: center; justify-content: center; }
+.adjust-frame-tool svg { width: 18px; height: 18px; }
+
+/* the preset widget */
+.preset-widget { position: relative; display: inline-flex; align-items: center; gap: 4px; flex: 1; min-width: 0; }
+.preset-widget > .select { flex: 1; min-width: 120px; }
+.preset-more svg { width: 16px; height: 16px; }
+.preset-menu { position: absolute; z-index: 20; top: 100%; right: 0; margin-top: 2px; min-width: 190px; display: flex; flex-direction: column; padding: 4px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
+.preset-menu[hidden] { display: none; }
+.preset-menu-item { text-align: left; padding: 5px 8px; border: 0; background: none; color: var(--fg); border-radius: 4px; cursor: pointer; font: inherit; }
+.preset-menu-item:hover:not(:disabled) { background: var(--hover); }
+.preset-menu-item:disabled { color: var(--fg-muted); cursor: default; }
+.preset-menu-item[hidden] { display: none; }
+.adjust-frame-presets { width: 100%; }
+
+/* Properties panel: the editors fit the panel width */
+.props-adjust .tonal-track { max-width: 100%; }
+.props-adjust .tonal-fields .input.num { width: 52px; }
+.props-adjust .tonal-fields-label { min-width: 0; }

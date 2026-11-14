@@ -1,0 +1,55 @@
+/* type-character-panel (ARCHITECTURE.md "0.4 features", rule 6): the Character panel, the Properties text section and
+   the options bar's font-size field. */
+
+.char-panel { display: flex; flex-direction: column; }
+.char-head { display: flex; align-items: flex-start; gap: 6px; padding: 4px 8px 0; }
+.char-head .char-empty { flex: 1; margin: 0; padding: 4px 0; text-align: left; }
+.char-head .char-menu { margin-left: auto; }
+
+.char-controls { display: flex; flex-direction: column; gap: 6px; padding: 6px 8px 8px; }
+.char-line { display: flex; gap: 8px; align-items: center; min-width: 0; }
+.char-row-cell { flex: 1 1 0; min-width: 0; display: flex; align-items: center; gap: 4px; }
+.char-row-cell > select.select,
+.char-row-cell > .select { flex: 1; min-width: 0; }
+.char-cell { flex: 1 1 0; display: flex; align-items: center; gap: 2px; min-width: 0; }
+.char-cell .numeric-field { flex: 1 1 0; display: flex; align-items: center; gap: 3px; min-width: 0; }
+.char-cell > input.input { flex: 1 1 0; min-width: 0; width: auto; }
+.char-cell .numeric-label { flex: none; min-width: 30px; font-size: 11px; color: var(--muted, #888); user-select: none; }
+.char-cell .numeric-label.scrubby { cursor: ew-resize; }
+.char-cell .numeric-field input.input { flex: 1 1 0; min-width: 0; width: auto; }
+.char-cell .opt-unit { flex: none; font-size: 11px; color: var(--muted, #888); }
+.char-presets { flex: none; width: 18px; padding: 0; appearance: none; -webkit-appearance: none; background-image: none; text-align: center; text-align-last: center; cursor: pointer; }
+.char-kerning, .char-scale, .char-aa { flex: 1 1 0; display: flex; align-items: center; gap: 4px; min-width: 0; }
+.char-kerning select.select { flex: 1.3 1 0; min-width: 0; }
+.char-kerning .char-cell { flex: 1 1 0; }
+.char-scale { gap: 8px; }
+.char-aa select.select { flex: 1; min-width: 0; }
+.char-color { display: inline-flex; align-items: center; gap: 4px; }
+.char-color .numeric-label { min-width: 34px; font-size: 11px; color: var(--muted, #888); }
+.char-color input[type='color'][data-mixed='true'] { opacity: 0.5; }
+
+.char-toggles { display: flex; gap: 2px; flex-wrap: wrap; }
+.char-toggle {
+  min-width: 26px; height: 24px; padding: 0 4px; border: 1px solid var(--border, #555); border-radius: 4px;
+  background: transparent; color: inherit; font: 600 12px/1 serif; cursor: pointer;
+}
+.char-toggle sup, .char-toggle sub { font-size: 8px; }
+.char-toggle small { font-size: 9px; }
+.char-toggle[aria-pressed='true'] { background: var(--accent, #2d7ff9); border-color: var(--accent, #2d7ff9); color: #fff; }
+.char-toggle[aria-pressed='mixed'] { background: color-mix(in srgb, var(--accent, #2d7ff9) 35%, transparent); }
+
+.char-extras { display: flex; flex-direction: column; gap: 4px; border-top: 1px solid var(--border, #444); padding-top: 6px; }
+.char-extras .prop-row { display: flex; align-items: center; gap: 6px; }
+.char-extras .prop-row > span:first-child { min-width: 72px; font-size: 11px; color: var(--muted, #888); }
+.char-box input.input { width: 58px; }
+.char-sections:empty { display: none; }
+
+/* the Properties text section: narrower rows */
+.char-v-properties { padding: 4px 0 0; }
+.char-v-properties .char-cell .numeric-label { min-width: 30px; }
+
+/* the options bar's font size */
+.char-size-field { display: inline-flex; align-items: center; gap: 2px; }
+.char-size-field .char-size-grip { display: inline-flex; cursor: ew-resize; opacity: 0.8; }
+.char-size-field .char-size-grip svg { width: 14px; height: 14px; }
+.char-size-field input.input { width: 56px; }

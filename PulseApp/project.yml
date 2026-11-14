@@ -1,0 +1,31 @@
+name: Pulse
+options:
+  bundleIdPrefix: com.pulse.personal
+  deploymentTarget:
+    iOS: "16.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+targets:
+  Pulse:
+    type: application
+    platform: iOS
+    sources:
+      - Pulse
+    info:
+      path: Pulse/Info.plist
+      properties:
+        CFBundleDisplayName: Pulse
+        UILaunchScreen: {}
+        UIBackgroundModes:
+          - audio
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UIUserInterfaceStyle: Dark
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.pulse.personal.app
+        TARGETED_DEVICE_FAMILY: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
