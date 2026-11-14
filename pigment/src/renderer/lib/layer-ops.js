@@ -1237,7 +1237,15 @@ export function install(app) {
       for (let p = l; p && p !== d.root; p = p.parent) if (!p.visible) return true;
       return false;
     };
-    if (layers.some(hidden)) return app.dialogs.toast('Hidden layers cannot be merged: show or deselect them first', { kind: 'error' });
+    const off = layers.filter(hidden);
+    if (off.length) {
+      // Deselected, a hidden layer stays out of the merge and in the document, unless a picked group that is shown
+      // holds it: that group is merged all the same, and a merged group drops the hidden layers inside it. For
+      // such a layer the message does not offer deselecting
+      const dropped = off.some((l) => layers.some((g) => !off.includes(g) && isAncestor(g, l)));
+      if (dropped) return app.dialogs.toast('Hidden layers cannot be merged: show them first. A hidden layer inside a selected group is discarded when the group is merged.', { kind: 'error', timeout: 6000 });
+      return app.dialogs.toast('Hidden layers cannot be merged: show or deselect them first', { kind: 'error' });
+    }
     // A layer inside a picked group is drawn by that group and leaves the document with it: it is not a layer of
     // its own in the merge (lib/depth.js drops it the same way from the list it composites in float). Left in, it
     // could be the topmost one, and the result would be put next to it: inside the group the merge removes, where

@@ -307,6 +307,14 @@ const activeLayer = (page) => page.evaluate(() => {
 });
 /** RGBA at (x, y) in the pixels of a layer that covers the 100 x 100 document. */
 const at = (pixels, x, y) => pixels.slice((y * 100 + x) * 4, (y * 100 + x) * 4 + 4);
+/** Hides the layer of that name and takes the toasts off the screen (they stay for seconds), for toasts() to list what comes next. */
+const hideLayer = (page, name) => page.evaluate((n) => {
+  const d = window.pigmentApp.doc;
+  d.layers().find((l) => l.name === n).visible = false;
+  d.changed('tree');
+  for (const t of document.querySelectorAll('.toast')) t.remove();
+}, name);
+const toasts = (page) => page.evaluate(() => [...document.querySelectorAll('.toast')].map((t) => t.textContent));
 
 test('Merge Layers with a group and a layer inside it selected merges the group: the pixels and the merged layer stay', async ({ page }) => {
   const errors = await openApp(page);
@@ -349,7 +357,7 @@ test('Merge Layers with a group and a layer inside it selected merges the group:
   expect(errors).toEqual([]);
 });
 
-test('Merge Layers puts the result where the outermost selected layers were; a selected hidden layer inside a selected group still refuses', async ({ page }) => {
+test('Merge Layers puts the result where the outermost selected layers were; a selected hidden layer inside a selected group still refuses, with its own message', async ({ page }) => {
   const errors = await openApp(page);
   for (const depth of [8, 16]) {
     const note = `${depth} bits`;
@@ -375,18 +383,21 @@ test('Merge Layers puts the result where the outermost selected layers were; a s
     expect(maxDiff((await activeLayer(page)).pixels, merged.pixels), note).toBe(0);
     expect(maxDiff(await compositeData(page), before), note).toBeLessThanOrEqual(2);
 
-    // a hidden layer that is selected refuses the merge, as it did, also when its group is selected with it: the
-    // group alone would be merged without it
+    // a hidden layer that is selected refuses the merge, as it did, also when its group is selected with it. There
+    // the message does not offer to deselect it: the group would be merged without it, and the layer be discarded
     await groupedDoc(page, depth, { pick: ['G', 'A'] });
-    await page.evaluate(() => {
-      const d = window.pigmentApp.doc;
-      d.layers()[2].visible = false;
-      d.changed('tree');
-    });
+    await hideLayer(page, 'A');
     await runAwait(page, 'layer:merge-selected');
     expect(await treeState(page), note).toEqual({ layers: ['Background', 'G', 'A', 'B'], active: 'A', attached: true, selected: ['G', 'A'], stray: 0 });
     expect(await historyLength(page), note).toBe(0);
-    await expect(page.locator('.toast', { hasText: 'Hidden layers cannot be merged' }).first()).toBeVisible();
+    expect(await toasts(page), note).toEqual(['Hidden layers cannot be merged: show them first. A hidden layer inside a selected group is discarded when the group is merged.']);
+    // outside every selected group a deselected hidden layer stays in the document, and the message says so
+    await groupedDoc(page, depth, { pick: ['A', 'B'] });
+    await hideLayer(page, 'A');
+    await runAwait(page, 'layer:merge-selected');
+    expect(await treeState(page), note).toEqual({ layers: ['Background', 'G', 'A', 'B'], active: 'B', attached: true, selected: ['A', 'B'], stray: 0 });
+    expect(await historyLength(page), note).toBe(0);
+    expect(await toasts(page), note).toEqual(['Hidden layers cannot be merged: show or deselect them first']);
   }
   expect(errors).toEqual([]);
 });
