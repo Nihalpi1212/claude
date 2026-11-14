@@ -89,6 +89,7 @@ export function cloneDocument(doc) {
   out.paths = clone(doc.paths ?? []);
   out.meta = clone(doc.meta ?? {});
   if (doc.globalLight) out.globalLight = { ...doc.globalLight };
+  out.profile = doc.profile ?? null; // color (lib/color/pipeline.js), S6.2: the numbers stay in their profile
   out.active = out.root.children[out.root.children.length - 1] ?? null;
   out.selected = new Set(out.active ? [out.active] : []);
   return out;

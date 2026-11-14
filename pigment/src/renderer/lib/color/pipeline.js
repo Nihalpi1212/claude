@@ -203,3 +203,145 @@ function displayChanged() {
     hooks.app?.emit?.('color:display-changed');
   } catch {}
 }
+
+// ---- the document profile (S6.2) -----------------------------------------------------------------------------
+
+/**
+ * Edit > Assign Profile's one history entry: swaps `doc.profile` (null: untagged) and calls `doc.changed('props')`;
+ * the numbers stay as they are (Convert to Profile, 0.6, changes them).
+ */
+export function assignProfile(app, doc, profile, label = 'Assign Profile') {
+  if (!doc) return false;
+  const before = doc.profile ?? null;
+  const after = profile ?? null;
+  if ((before?.id ?? null) === (after?.id ?? null)) return false;
+  const set = (p) => {
+    doc.profile = p;
+    doc.changed('props');
+    app?.syncUiState?.();
+  };
+  set(after);
+  doc.history?.push({ label, undo: () => set(before), redo: () => set(after), bytes: after?.bytes?.length ?? 0, at: Date.now() });
+  return true;
+}
+
+// ---- display (S6.4) --------------------------------------------------------------------------------------------
+
+const stages = []; // { id, order, active(view), apply(canvas, view, { damage, scratch, source }) → canvas }
+
+/**
+ * A display stage: soft-proofing (0.6) at 100, icc-engine's transform (document profile → the view canvas's space) at
+ * 900. `apply(canvas, view, { damage, scratch, source })` returns the canvas to draw: `damage` is the region of the
+ * input that changed since the stage last saw this view's composite (a rect in document px, 'full', or null for
+ * nothing), `scratch` true for an input to convert whole into the stage's scratch buffer and not keep (a gesture
+ * preview frame, a postProcess output), `source` 'composite' | 'processed' | 'preview'. The compositor alternates two
+ * buffers for the composite, so a stage keys its kept copy of the composite on (view, doc.profile?.id, display space)
+ * and uses `damage`, not the canvas object; any miss converts in full. The same id again: the later wins.
+ */
+export function registerDisplayStage(def) {
+  if (!def?.id || typeof def.apply !== 'function') throw new Error('registerDisplayStage needs an id and apply()');
+  const at = stages.findIndex((s) => s.id === def.id);
+  if (at >= 0) stages.splice(at, 1);
+  const entry = { order: 500, active: () => true, ...def };
+  stages.push(entry);
+  stages.sort((a, b) => a.order - b.order);
+  for (const v of liveViews()) v.invalidate?.();
+  return () => {
+    const i = stages.indexOf(entry);
+    if (i >= 0) stages.splice(i, 1);
+    for (const v of liveViews()) v.invalidate?.();
+  };
+}
+
+export const displayStages = () => stages.slice();
+
+const liveViews = () => (hooks.app?.docs?.list?.() ?? []).map((d) => d.view).filter(Boolean);
+
+/**
+ * What the view draws for `shown` (0.4's postProcess result, or a gesture preview frame with `preview: true`): `shown`
+ * itself while no stage is active, which is every view without an engine. Damage is decided here alone: the
+ * composite's comes from `compositor.takeDamage(view)` (every rect any full composite changed since this view last
+ * took it, whoever composited); any other input is converted whole and not kept.
+ */
+export function toDisplay(shown, view, { preview = false } = {}) {
+  if (!stages.length || !shown) return shown;
+  const active = stages.filter((s) => {
+    try {
+      return !!s.active(view);
+    } catch {
+      return false;
+    }
+  });
+  if (!active.length) return shown;
+  const comp = view?.compositor;
+  const isComposite = !preview && !!comp?.full && comp.full.canvas === shown;
+  const damage = isComposite ? (typeof comp.takeDamage === 'function' ? comp.takeDamage(view) : 'full') : 'full';
+  const info = { damage, scratch: !isComposite, source: isComposite ? 'composite' : preview ? 'preview' : 'processed' };
+  let out = shown;
+  for (const s of active) {
+    try {
+      out = s.apply(out, view, info) ?? out;
+    } catch (err) {
+      console.warn(`display stage ${s.id} failed`, err);
+    }
+  }
+  return out;
+}
+
+/** The colour space the view's canvas context is made in: the engine's answer, 'srgb' without one. */
+export function displaySpaceOf(view) {
+  if (!live()) return 'srgb';
+  try {
+    return engine.displaySpace(view) === 'display-p3' ? 'display-p3' : 'srgb';
+  } catch {
+    return 'srgb';
+  }
+}
+
+/**
+ * A canvas of the document's numbers as the display shows them (the Navigator, the Camera Raw workspace's preview):
+ * `canvas` itself without an engine or for an sRGB / untagged document on an sRGB display; else a converted copy.
+ * Synchronous; the caller caches.
+ */
+export function displayCanvas(canvas, doc, { space = 'srgb' } = {}) {
+  if (!live() || !canvas) return canvas;
+  const from = profileOf(doc);
+  let to = SRGB;
+  if (space !== 'srgb') {
+    try {
+      to = (engine.builtins?.() ?? []).find((p) => p.wellKnown === space) ?? SRGB;
+    } catch {}
+  }
+  if (sameProfile(from, to)) return canvas;
+  try {
+    const t = engine.transform(from, to, { intent: 'perceptual', bpc: true, format: 'rgba8' });
+    if (t.identity) return canvas;
+    const out = document.createElement('canvas');
+    out.width = canvas.width;
+    out.height = canvas.height;
+    const ctx = out.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(canvas, 0, 0);
+    const img = ctx.getImageData(0, 0, out.width, out.height);
+    t.apply(img.data, img.data, out.width * out.height);
+    ctx.putImageData(img, 0, 0);
+    return out;
+  } catch {
+    return canvas;
+  }
+}
+
+/**
+ * start() (app.js), before MODULES: the pipeline emits 'color:display-changed' on `app` once the engine is ready
+ * (and whenever setColorEngine or setWorkingSpaces changes the answers); the views repaint and swap their canvas when
+ * the display space changes.
+ */
+export function attachColorPipeline(app) {
+  hooks.app = app;
+  Promise.resolve()
+    .then(() => engine.ready?.())
+    .then(() => {
+      if (engine !== STUB_ENGINE) displayChanged();
+    })
+    .catch(() => {});
+  return { colorEngine, describe, profilesList };
+}

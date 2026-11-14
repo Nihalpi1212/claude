@@ -26,6 +26,8 @@ export const REPAINT = { reuse: true, region: true, prefix: true, chain: true };
 // A region larger than this share of the document is composited whole (from the cached prefix): the paste costs more
 // than it saves there
 const REGION_MAX = 0.45;
+// takeDamage (S6.4): how many full composites the damage log remembers; a token further behind gets 'full'
+const DAMAGE_LOG = 64;
 // A region up to this many pixels is composited exactly even while a gesture previews (a brush dab, a small layer)
 const PREVIEW_EXACT_AREA = 600 * 600;
 // How many cached prefixes are kept (a document-sized canvas each): two cover going back and forth between two layers
@@ -258,6 +260,37 @@ export class Compositor {
     this.regionRuns = 0;
     this.previewRuns = 0;
     this.prefixHits = 0; // full composites that started from a cached prefix
+    // damage tokens (S6.4, takeDamage): what each full composite changed, numbered; each token remembers the last
+    // number it took
+    this.damageSeq = 0;
+    this.damageLog = []; // [{ seq, rect | 'full' }], the last DAMAGE_LOG
+    this.damageTaken = new WeakMap(); // token -> seq
+  }
+
+  /** A full composite changed `rect` (document px) or everything ('full') since the one before (takeDamage). */
+  noteDamage(rect) {
+    this.damageLog.push({ seq: ++this.damageSeq, rect });
+    if (this.damageLog.length > DAMAGE_LOG) this.damageLog.shift();
+  }
+
+  /**
+   * color (lib/color/pipeline.js), S6.4: the union of every rect the full composite changed since `token` last took
+   * it, whoever called composite() (the view, Info, the Eyedropper, the Navigator, exports); 'full' for a token that
+   * never took (or one so far behind that the log no longer reaches it); null when nothing changed.
+   */
+  takeDamage(token) {
+    const last = this.damageTaken.get(token);
+    this.damageTaken.set(token, this.damageSeq);
+    if (last === undefined) return 'full';
+    if (last === this.damageSeq) return null;
+    if (!this.damageLog.length || this.damageLog[0].seq > last + 1) return 'full';
+    let u = null;
+    for (const e of this.damageLog) {
+      if (e.seq <= last) continue;
+      if (e.rect === 'full') return 'full';
+      u = u ? unionRect(u, e.rect) : { ...e.rect };
+    }
+    return u;
   }
 
   /**
@@ -310,7 +343,10 @@ export class Compositor {
     // image modes other than RGB post-process the output (registerModeRenderer); mode changes bump doc.version
     const modeRender = doc.mode && doc.mode !== 'rgb' ? MODE_RENDERERS.get(doc.mode) : null;
     if (modeRender && !opts.rawMode) modeRender(doc, canvas, rect, opts);
-    if (isFull) this.full = { version: doc.version, rootVersion: doc.root.version, canvas };
+    if (isFull) {
+      this.full = { version: doc.version, rootVersion: doc.root.version, canvas };
+      this.noteDamage('full'); // takeDamage (S6.4)
+    }
     return canvas;
   }
 
@@ -370,6 +406,7 @@ export class Compositor {
           this.patchPrefix(doc, prev, after, r);
           this.records = after;
           this.regionRuns++;
+          this.noteDamage({ ...r }); // takeDamage (S6.4)
           return settle(out);
         }
       }
@@ -408,6 +445,7 @@ export class Compositor {
     if (modeRender) modeRender(doc, canvas, rect, opts);
     this.records = this.planOf(doc);
     this.fullRuns++;
+    this.noteDamage('full'); // takeDamage (S6.4)
     return settle(canvas);
   }
 

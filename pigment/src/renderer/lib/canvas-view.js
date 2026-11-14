@@ -7,6 +7,7 @@ import { paintMaskView } from './mask-view.js';
 import { guideSettings, guideColor, selectedGuides } from './guides.js';
 import { UNITS, UNIT_NAMES } from './rulers.js';
 import { normalizeSample } from './brush.js';
+import { toDisplay, displaySpaceOf } from './color/pipeline.js';
 
 /**
  * The view-scale preview while a gesture runs (ARCHITECTURE.md "Repaint caches"), as Photoshop does: while a pointer
@@ -70,7 +71,10 @@ export class CanvasView {
     this.canvas = this.el.querySelector('canvas.view');
     this.rulerH = this.el.querySelector('.ruler-h');
     this.rulerV = this.el.querySelector('.ruler-v');
-    this.ctx = this.canvas.getContext('2d');
+    // color (lib/color/pipeline.js): the 2D context in the display's colour space (S6.4; 'srgb' without an engine,
+    // which is 0.4's context exactly)
+    this.space = displaySpaceOf(this);
+    this.ctx = this.space === 'srgb' ? this.canvas.getContext('2d') : this.canvas.getContext('2d', { colorSpace: this.space });
     host.appendChild(this.el);
 
     this.onGestureStart = (e) => {
@@ -94,6 +98,8 @@ export class CanvasView {
     });
     // snap (lib/snap.js): a tool change ends whatever gesture showed smart-guide overlays
     this.offToolChanged = app.on?.('tool:changed', () => app.snap?.end());
+    // color (lib/color/pipeline.js): a new engine, display or working space repaints through the display stages
+    this.offColor = app.on?.('color:display-changed', () => this.syncColorSpace());
     this.checker = null;
     this.resize();
   }
@@ -107,7 +113,36 @@ export class CanvasView {
     window.removeEventListener('blur', this.onGestureEnd);
     this.unsubscribe?.();
     this.offToolChanged?.();
+    this.offColor?.();
     this.el.remove();
+  }
+
+  /**
+   * color (lib/color/pipeline.js): when the engine's display space for this view changes, the view canvas is replaced
+   * by a new element whose context is in that space (a context's colour space is fixed when it is made). The canvas
+   * listeners move to the new element; `view.canvas` is the live element.
+   */
+  syncColorSpace() {
+    const space = displaySpaceOf(this);
+    if (space !== this.space) {
+      const old = this.canvas;
+      const c = document.createElement('canvas');
+      c.className = old.className;
+      c.tabIndex = old.tabIndex;
+      c.width = old.width;
+      c.height = old.height;
+      c.style.cssText = old.style.cssText;
+      for (const a of old.getAttributeNames()) if (!['class', 'tabindex', 'width', 'height', 'style'].includes(a)) c.setAttribute(a, old.getAttribute(a));
+      const focused = document.activeElement === old;
+      old.replaceWith(c);
+      this.canvas = c;
+      this.space = space;
+      this.ctx = space === 'srgb' ? c.getContext('2d') : c.getContext('2d', { colorSpace: space });
+      this.checker = null;
+      for (const [type, fn, opts] of this.canvasListeners ?? []) c.addEventListener(type, fn, opts);
+      if (focused) c.focus({ preventScroll: true });
+    }
+    this.invalidate();
   }
 
   // ---- geometry ------------------------------------------------------------------------------------------------
@@ -305,8 +340,9 @@ export class CanvasView {
     ctx.imageSmoothingQuality = 'high';
     // colour proofing (lib/color-modes.js) may hand back a processed copy to draw instead of the composite
     const shown = (this.postProcess && this.postProcess(composite, this)) || composite;
-    ctx.drawImage(shown, 0, 0);
-    if (preview?.canvas) ctx.drawImage((this.postProcess && this.postProcess(preview.canvas, this)) || preview.canvas, preview.x, preview.y);
+    // color (lib/color/pipeline.js): the display stages (none without an engine: `shown` itself)
+    ctx.drawImage(toDisplay(shown, this), 0, 0);
+    if (preview?.canvas) ctx.drawImage(toDisplay((this.postProcess && this.postProcess(preview.canvas, this)) || preview.canvas, this, { preview: true }), preview.x, preview.y);
     // the mask channel view and the red overlay: lib/mask-view.js (K.1b, masks-vector-masks)
     paintMaskView(ctx, this, this.doc.active);
     ctx.restore(); // clip
@@ -669,7 +705,20 @@ export class CanvasView {
   // ---- pointer routing -----------------------------------------------------------------------------------------
 
   #bindPointer() {
-    const canvas = this.canvas;
+    // color (lib/color/pipeline.js): the view canvas is swapped for a new element when the display colour space
+    // changes (S6.4), so the handlers read the live element through this stand-in, and the canvas listeners are kept
+    // to be bound to each new element (the rulers' are bound once)
+    const view = this;
+    const listeners = (this.canvasListeners = []);
+    const canvas = {
+      addEventListener(type, fn, opts) {
+        listeners.push([type, fn, opts]);
+        view.canvas.addEventListener(type, fn, opts);
+      },
+      focus: (o) => view.canvas.focus(o),
+      getBoundingClientRect: () => view.canvas.getBoundingClientRect(),
+      setPointerCapture: (id) => view.canvas.setPointerCapture(id),
+    };
     // S2.5: every routed pointer event becomes a PointerSample (pen data, the eraser end, Caps Lock, the time)
     const norm = (e) => {
       const r = canvas.getBoundingClientRect();

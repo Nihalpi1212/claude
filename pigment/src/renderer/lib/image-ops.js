@@ -825,6 +825,7 @@ export function install(app) {
     copy.meta = { ...(d.meta ?? {}) };
     delete copy.meta.layerTags; // keyed by the layer ids of the original: lib/layers-extras/tags.js writes them anew from the copies
     if (d.globalLight) copy.globalLight = { ...d.globalLight };
+    copy.profile = d.profile ?? null; // color (lib/color/pipeline.js), S6.2
     if (d.selection) copy.selection = Selection.fromMask(d.width, d.height, new Uint8ClampedArray(d.selection.mask));
     app.docs.add(copy);
     copy.history.markSaved();
