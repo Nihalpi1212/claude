@@ -22,6 +22,8 @@ registerIcons({
 });
 
 const clone = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
+/** JSON with sorted keys: two params objects that hold the same settings give the same text. */
+const canonical = (v) => JSON.stringify(v ?? null, (k, x) => (x && typeof x === 'object' && !Array.isArray(x) ? Object.fromEntries(Object.keys(x).sort().map((key) => [key, x[key]])) : x));
 const FRAMES = new WeakMap(); // element -> { frame, end() }
 /** The settings each adjustment layer had when the section first showed it (its "previous state"). */
 const INITIAL = new WeakMap(); // layer -> { params, docVersion }
@@ -132,11 +134,11 @@ function render(layer, doc, { app, keep }) {
     if (app.doc !== doc || doc.active !== layer) return;
     endPrevious();
     const top = doc.history.entries[doc.history.index];
-    const start = { mark: doc.history.mark(), params: JSON.stringify(layer.params ?? null) };
+    const start = { mark: doc.history.mark(), params: canonical(layer.params) };
     setLayerProps(app, layer, { params: clone(params) }, label, { merge: !discrete && !!lastEdit && top === lastEdit });
     const now = doc.history.entries[doc.history.index];
     if (now !== top) run = discrete ? null : start;
-    else if (run && JSON.stringify(layer.params ?? null) === run.params) {
+    else if (run && canonical(layer.params) === run.params) {
       doc.history.rollback(run.mark); // the layer already holds the params of before the run
       run = null;
     }
