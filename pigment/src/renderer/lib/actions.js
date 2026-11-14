@@ -11,7 +11,7 @@
 //   without its argument so the command asks again; Stop steps show a message; conditional steps play
 //   another action of the set depending on the document state.
 // The panel is lib/panels/actions.js; Batch and the other File > Automate commands are lib/automate.js.
-import { COMMAND_LABELS, MENU_KEYS, RENDERER_KEYS, parseAccelerator } from '../../shared/keymap.js';
+import { COMMAND_LABELS, MENU_KEYS, RENDERER_KEYS, parseAccelerator, effectiveKeys } from '../../shared/keymap.js';
 import { UNDO_LIKE } from './sessions.js';
 import { bridge, isMac } from './bridge.js';
 import { canvasIsBlank, layerFromDescription } from './document.js';
@@ -1107,8 +1107,11 @@ async function saveAs(app, engine, arg) {
   return ok ? { ok: true } : { ok: false, message: `${String(arg.path).split(/[\\/]/).pop()} could not be saved` };
 }
 
-/** Function keys that built-in shortcuts already use, for the note in Action Options. */
-function builtinKeyOwner(fk) {
+/**
+ * Function keys that built-in shortcuts already use, for the note in Action Options. 0.5: the user's keymap (the
+ * overlay without the actions' own keys shadowing it); keymap (lib/keymap-store.js)
+ */
+function builtinKeyOwner(fk, app) {
   const n = M.normalizeFunctionKey(fk);
   if (!n) return null;
   const same = (accel) => {
@@ -1119,15 +1122,38 @@ function builtinKeyOwner(fk) {
       return false;
     }
   };
-  for (const [cmd, accel] of Object.entries(MENU_KEYS)) if (same(accel)) return M.commandLabel(cmd, undefined, COMMAND_LABELS[cmd]);
-  for (const [cmd, accels] of Object.entries(RENDERER_KEYS)) if (accels.some(same)) return M.commandLabel(cmd, undefined, COMMAND_LABELS[cmd]);
+  const keys = app?.keymap ? effectiveKeys(app.keymap.overlay()) : { menu: MENU_KEYS, renderer: RENDERER_KEYS };
+  for (const [cmd, accel] of Object.entries(keys.menu)) if (same(accel)) return M.commandLabel(cmd, undefined, COMMAND_LABELS[cmd]);
+  for (const [cmd, accels] of Object.entries(keys.renderer)) if (accels.some(same)) return M.commandLabel(cmd, undefined, COMMAND_LABELS[cmd]);
   return null;
+}
+
+/** The actions' function keys as Electron accelerators (Ctrl means Cmd on macOS: CmdOrCtrl). */
+function actionKeySources(engine) {
+  const out = [];
+  for (const set of engine.sets ?? []) {
+    for (const action of set.actions ?? []) {
+      const fk = M.normalizeFunctionKey(action.functionKey);
+      if (fk) out.push({ accel: `${fk.shift ? 'Shift+' : ''}${fk.ctrl ? 'CmdOrCtrl+' : ''}${fk.key}`, label: action.name, priority: 'over' });
+    }
+  }
+  return out;
 }
 
 export function install(app) {
   const engine = new ActionsEngine(app);
   app.actions = engine;
   engine.wrapCommands();
+  // keymap (lib/keymap-store.js): an action's function key owns its key (S9.3). The application binding on it leaves
+  // the effective keymap, so the native menu shows no accelerator for it and only the action plays (0.4 ran both)
+  let actionKeys = JSON.stringify(actionKeySources(engine));
+  app.keymap?.registerKeySource('actions', () => actionKeySources(engine));
+  app.on('actions:changed', () => {
+    const now = JSON.stringify(actionKeySources(engine));
+    if (now === actionKeys) return;
+    actionKeys = now;
+    app.keymap?.refreshSources();
+  });
   app.on('transform:committed', (t) => engine.onTransformCommitted(t));
   app.on('history:changed', (d) => engine.onHistoryChanged(d));
   app.on('color:changed', (c) => engine.onColorChanged(c ?? {}));
@@ -1160,7 +1186,7 @@ export function install(app) {
         sets: engine.sets,
         setId: set.id,
         keyOwner: (fk) => M.functionKeyOwner(engine.sets, fk)?.name ?? null,
-        builtinFor: builtinKeyOwner,
+        builtinFor: (fk) => builtinKeyOwner(fk, app),
         mac: isMac,
       });
       if (!o) return ctx?.cancel();
@@ -1180,7 +1206,7 @@ export function install(app) {
       functionKey: action.functionKey ?? null,
       color: action.color ?? 'none',
       keyOwner: (fk) => M.functionKeyOwner(engine.sets, fk, action)?.name ?? null,
-      builtinFor: builtinKeyOwner,
+      builtinFor: (fk) => builtinKeyOwner(fk, app),
       mac: isMac,
     });
     if (o) engine.setActionOptions(action, o);

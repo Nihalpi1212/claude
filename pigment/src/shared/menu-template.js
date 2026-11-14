@@ -7,7 +7,14 @@
 // Search, the shortcut list); it imports only src/shared. src/main/menu.js re-exports it. A click reports
 // whether it came from the item's accelerator: run(cmd, arg, viaKey), which main.js forwards so the renderer
 // runs the command with source 'menu-key' (accelerator) or 'menu' (mouse).
-import { MENU_KEYS } from './keymap.js';
+//
+// 0.5 (ARCHITECTURE.md "0.5 features", S9.5): accelerators come from the effective keymap the renderer reports in the
+// ui state (state.keymap: the resolved overlay as JSON; effectiveKeys of src/shared/keymap.js), then FIXED_KEYS. The
+// menu customisation (state.menus: { hidden, colors, showAll } as JSON) leaves hidden items out unless showAll, ends a
+// menu that lost items with "Show All Menu Items", and marks coloured items with `pigmentColor`, which main.js turns
+// into a dot icon. An item's key is its command, `${cmd}|${JSON.stringify(arg)}` with an argument, and a submenu's
+// `menu:${labels.join('>')}` (labels without '&').
+import { effectiveKeys, fixedKeyFor } from './keymap.js';
 import { ADJUSTMENTS } from './pixels/adjust.js';
 import { FILTERS, FILTER_CATEGORIES, GALLERY_GROUPS } from './pixels/filters.js';
 import { STYLE_KEYS } from './pixels/styles.js';
@@ -27,12 +34,83 @@ export const IMAGE_MODES = [
 /** Layer > Smart Objects > Stack Mode, in Photoshop's order. */
 export const STACK_MODES = [['none', 'None'], ['entropy', 'Entropy'], ['kurtosis', 'Kurtosis'], ['maximum', 'Maximum'], ['mean', 'Mean'], ['median', 'Median'], ['minimum', 'Minimum'], ['range', 'Range'], ['skewness', 'Skewness'], ['standard-deviation', 'Standard Deviation'], ['summation', 'Summation'], ['variance', 'Variance']];
 
+// 0.5 (S13.2): Styles and Shapes after Patterns; Brush Settings, Brushes and Tool Presets in a group of their own
 export const PANELS = [
-  ['color', 'Color'], ['swatches', 'Swatches'], ['gradients', 'Gradients'], ['patterns', 'Patterns'], ['brushes', 'Brushes'], null,
+  ['color', 'Color'], ['swatches', 'Swatches'], ['gradients', 'Gradients'], ['patterns', 'Patterns'], ['styles', 'Styles'], ['shapes', 'Shapes'], null,
+  ['brush-settings', 'Brush Settings'], ['brushes', 'Brushes'], ['tool-presets', 'Tool Presets'], null,
   ['properties', 'Properties'], ['adjustments', 'Adjustments'], ['character', 'Character'], ['paragraph', 'Paragraph'], ['paths', 'Paths'], null,
   ['layers', 'Layers'], ['channels', 'Channels'], ['history', 'History'], ['actions', 'Actions'], ['navigator', 'Navigator'], ['info', 'Info'], null,
   ['assistant', 'AI Assistant'],
 ];
+
+/** Type > Anti-Alias (S11.4 values, Photoshop's labels) and Type > Font Preview Size. */
+const ANTI_ALIAS = [['none', 'None'], ['sharp', 'Sharp'], ['crisp', 'Crisp'], ['strong', 'Strong'], ['smooth', 'Smooth'], ['lcd', 'Windows LCD'], ['windows', 'Windows']];
+const FONT_PREVIEW_SIZES = [['none', 'None'], ['small', 'Small'], ['medium', 'Medium'], ['large', 'Large'], ['xlarge', 'Extra Large'], ['huge', 'Huge']];
+const MENU_COLORS = new Set(['red', 'orange', 'yellow', 'green', 'blue', 'violet', 'gray']);
+/** An item's customisation key (S9.2); a symbol, so Electron never sees it. */
+const ITEM_KEY = Symbol('itemKey');
+
+function parseJson(s) {
+  if (typeof s !== 'string') return null;
+  try {
+    return JSON.parse(s);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Applies the menu customisation in place: hidden items left out (unless showAll), coloured items and submenus marked
+ * with pigmentColor, and a menu that lost items ends with a separator and `showAllItem`.
+ */
+function customize(template, custom, showAllItem) {
+  const hidden = new Set(custom.showAll ? [] : Array.isArray(custom.hidden) ? custom.hidden : []);
+  const colors = custom.colors && typeof custom.colors === 'object' ? custom.colors : {};
+  const visit = (list, path) => {
+    const out = [];
+    let lost = false;
+    for (const it of list) {
+      if (it.type === 'separator') {
+        out.push(it);
+        continue;
+      }
+      const label = typeof it.label === 'string' ? it.label.replace(/&/g, '') : '';
+      const key = it.submenu ? (label ? `menu:${[...path, label].join('>')}` : null) : it[ITEM_KEY] ?? null;
+      if (key && hidden.has(key)) {
+        lost = true;
+        continue;
+      }
+      if (key && MENU_COLORS.has(colors[key])) it.pigmentColor = colors[key];
+      if (Array.isArray(it.submenu)) it.submenu = visit(it.submenu, [...path, label]);
+      out.push(it);
+    }
+    if (!lost) return out;
+    // no separator at either end of the menu or twice in a row once items are gone
+    const tidy = out.filter((it, i) => it.type !== 'separator' || (i > 0 && out[i - 1].type !== 'separator'));
+    while (tidy[0]?.type === 'separator') tidy.shift();
+    while (tidy.at(-1)?.type === 'separator') tidy.pop();
+    return [...tidy, ...(tidy.length ? [{ type: 'separator' }] : []), { ...showAllItem }];
+  };
+  const top = visit(template, []);
+  template.splice(0, template.length, ...top);
+}
+
+let itemCommands = null;
+/** Every command with a native menu item, on either platform (lib/keymap-store.js places keys by it). */
+export function menuItemCommands() {
+  if (itemCommands) return itemCommands;
+  const found = new Set();
+  const state = { hasDocument: true, hasLayer: true, hasSelection: true, layerType: 'text', lastFilter: 'Filter', showGalleryInMenu: true };
+  const walk = (list) => {
+    for (const it of list) {
+      if (Array.isArray(it.submenu)) walk(it.submenu);
+      else if (typeof it.click === 'function') it.click(it, null, undefined);
+    }
+  };
+  for (const platform of ['darwin', 'win32']) walk(buildMenuTemplate({ platform, state, recent: [{ path: '/x', name: 'x' }], run: (cmd) => found.add(cmd), isPackaged: false }));
+  itemCommands = found;
+  return found;
+}
 
 /**
  * @param {object} opts
@@ -54,12 +132,14 @@ export function buildMenuTemplate({ platform, state = {}, recent = [], run, isPa
   const stubs = new Set(typeof state.stubs === 'string' ? state.stubs.split(',').filter(Boolean) : []);
   const snapTo = new Set(typeof state.snapTo === 'string' ? state.snapTo.split(',').filter(Boolean) : []);
   const sep = { type: 'separator' };
+  const keys = effectiveKeys(parseJson(state.keymap));
   const item = (label, cmd, extra = {}) => ({
     label,
-    accelerator: 'accelerator' in extra ? extra.accelerator : MENU_KEYS[cmd],
+    accelerator: 'accelerator' in extra ? extra.accelerator : keys.menu[cmd] ?? fixedKeyFor(cmd, { platform, isPackaged }) ?? undefined,
     click: (_item, _win, ev) => run(cmd, extra.arg, !!ev?.triggeredByAccelerator),
     enabled: (extra.enabled ?? true) && !stubs.has(cmd),
     ...(extra.type ? { type: extra.type, checked: !!extra.checked } : {}),
+    [ITEM_KEY]: extra.arg === undefined ? cmd : `${cmd}|${JSON.stringify(extra.arg)}`,
   });
   const doc = (label, cmd, extra = {}) => item(label, cmd, { enabled: has, ...extra });
   const lyr = (label, cmd, extra = {}) => item(label, cmd, { enabled: layer, ...extra });
@@ -174,7 +254,9 @@ export function buildMenuTemplate({ platform, state = {}, recent = [], run, isPa
     doc('Auto-Align Layers…', 'edit:auto-align'),
     doc('Auto-Blend Layers…', 'edit:auto-blend'),
     sep,
+    doc('Define Brush Preset…', 'edit:define-brush'),
     doc('Define &Pattern…', 'edit:define-pattern'),
+    doc('Define Custom Shape…', 'edit:define-custom-shape'),
     sep,
     sub('Purge', [
       doc('Undo', 'edit:purge', { arg: 'undo' }),
@@ -183,9 +265,16 @@ export function buildMenuTemplate({ platform, state = {}, recent = [], run, isPa
       item('All', 'edit:purge', { arg: 'all' }),
     ]),
     sep,
+    sub('Presets', [item('Preset Manager…', 'edit:preset-manager'), item('Export/Import Presets…', 'edit:export-import-presets'), item('Migrate Presets', 'edit:migrate-presets')]),
+    sep,
+    // 0.5 (S13.2): colour management (Assign Profile: icc-engine; Color Settings, Convert to Profile: 0.6)
+    item('Color Settings…', 'edit:color-settings'),
+    doc('Assign Profile…', 'edit:assign-profile'),
+    doc('Convert to Profile…', 'edit:convert-profile'),
+    sep,
     item('&Keyboard Shortcuts…', 'help:shortcuts'),
     item('Menus…', 'edit:menus'),
-    ...(mac ? [] : [item('Pre&ferences…', 'edit:preferences')]),
+    ...(mac ? [] : [item('Pre&ferences…', 'edit:preferences'), item('Camera Raw Preferences…', 'edit:camera-raw-preferences')]),
   ]);
 
   const mode = state.mode ?? 'rgb';
@@ -371,8 +460,14 @@ export function buildMenuTemplate({ platform, state = {}, recent = [], run, isPa
 
   // Photoshop's place, between Layer and Select (&T is taken by Fil&ter). Later Type items (Anti-Alias, Warp Text,
   // OpenType, …) arrive with the 0.5–0.9 skeletons (M.2).
+  const antiAlias = state.antiAlias ?? 'smooth';
+  const previewSize = state.fontPreviewSize ?? 'medium';
   const typeMenu = sub('T&ype', [
+    // 0.5 (S13.2): Add Fonts first, Anti-Alias after Panels, the conversions after Rasterize Type Layer
+    item('Add Fonts…', 'type:add-fonts'),
+    sep,
     sub('Panels', [item('Character Panel', 'window:panel-character'), item('Paragraph Panel', 'window:panel-paragraph')]),
+    sub('Anti-Alias', ANTI_ALIAS.map(([id, label]) => lyr(label, 'type:anti-alias', { arg: id, type: 'radio', checked: antiAlias === id, enabled: text })), text),
     sub('Orientation', [
       lyr('Horizontal', 'text:orientation', { arg: 'horizontal', type: 'radio', checked: !state.textOrientation || state.textOrientation === 'horizontal', enabled: text }),
       lyr('Vertical', 'text:orientation', { arg: 'vertical', type: 'radio', checked: state.textOrientation === 'vertical', enabled: text }),
@@ -385,6 +480,17 @@ export function buildMenuTemplate({ platform, state = {}, recent = [], run, isPa
     sep,
     lyr('Edit &Text', 'layer:edit-text', { enabled: text }),
     lyr('Rasterize Type Layer', 'layer:rasterize', { arg: 'type', enabled: text }),
+    lyr(state.textKind === 'paragraph' ? 'Convert to Point Text' : 'Convert to Paragraph Text', 'type:convert-text-kind', { enabled: text }),
+    lyr('Warp Text…', 'type:warp-text', { enabled: text }),
+    lyr('Create Work Path', 'type:create-work-path', { enabled: text }),
+    lyr('Convert to Shape', 'type:convert-to-shape', { enabled: text }),
+    sep,
+    sub('Font Preview Size', FONT_PREVIEW_SIZES.map(([id, label]) => item(label, 'type:font-preview-size', { arg: id, type: 'radio', checked: previewSize === id }))),
+    sep,
+    doc('Update All Text Layers', 'type:update-all'),
+    doc('Manage Missing Fonts…', 'type:manage-missing-fonts'),
+    doc('Replace All Missing Fonts', 'type:replace-missing-fonts'),
+    doc('Paste Lorem Ipsum', 'type:paste-lorem-ipsum'),
   ]);
 
   const selectMenu = sub('&Select', [
@@ -487,7 +593,8 @@ export function buildMenuTemplate({ platform, state = {}, recent = [], run, isPa
     sep,
     doc('Next Document', 'view:next-tab'),
     doc('Previous Document', 'view:prev-tab'),
-    item('Toggle Full Screen', 'view:fullscreen', { accelerator: mac ? 'Ctrl+Cmd+F' : 'F11' }),
+    // Ctrl+Cmd+F on macOS (FIXED_KEYS); elsewhere the renderer's key (F11), so the item shows what the page runs
+    item('Toggle Full Screen', 'view:fullscreen', { accelerator: mac ? fixedKeyFor('view:fullscreen', { platform }) : keys.renderer['view:fullscreen']?.[0] }),
   ]);
 
   const windowMenu = sub('&Window', [
@@ -506,8 +613,8 @@ export function buildMenuTemplate({ platform, state = {}, recent = [], run, isPa
       // the accelerator belongs to Edit > Keyboard Shortcuts… (Photoshop's place); an accelerator is shown once
       item('&Keyboard Shortcuts', 'help:shortcuts', { accelerator: undefined }),
       item('Pigment &Website', 'help:website'),
-      // F12 on every platform: Alt+Cmd+I is Image Size on macOS (development builds only)
-      ...(isPackaged ? [] : [sep, item('Toggle Developer Tools', 'help:devtools', { accelerator: 'F12' })]),
+      // Shift+CmdOrCtrl+F12 (FIXED_KEYS, development builds only): F12 is Revert (0.5), and Alt+Cmd+I is Image Size
+      ...(isPackaged ? [] : [sep, item('Toggle Developer Tools', 'help:devtools')]),
       ...(mac ? [] : [sep, item('&About Pigment', 'help:about')]),
     ],
   };
@@ -529,6 +636,8 @@ export function buildMenuTemplate({ platform, state = {}, recent = [], run, isPa
   ]);
 
   const template = [fileMenu, editMenu, imageMenu, layerMenu, typeMenu, selectMenu, filterMenu, aiMenu, viewMenu, windowMenu, helpMenu];
+  const custom = parseJson(state.menus);
+  if (custom && typeof custom === 'object') customize(template, custom, item('Show All Menu Items', 'edit:show-all-menu-items'));
   if (mac) {
     template.unshift({
       label: 'Pigment',
@@ -537,6 +646,7 @@ export function buildMenuTemplate({ platform, state = {}, recent = [], run, isPa
         sep,
         // Cmd+K as in Photoshop (Cmd+, is Hide / Show Layers, M.3)
         item('Settings…', 'edit:preferences'),
+        item('Camera Raw Preferences…', 'edit:camera-raw-preferences'),
         sep,
         { role: 'services' },
         sep,

@@ -1,6 +1,6 @@
 // Pigment renderer bootstrap: builds the App object, registers core commands and UI, installs the
 // feature modules, then opens startup files or shows the welcome screen.
-import { bridge, isElectron, isMac, platform } from './lib/bridge.js';
+import { bridge, isElectron, platform } from './lib/bridge.js';
 import { CommandRegistry } from './lib/commands.js';
 import { SessionRegistry, SAFE_WHILE_BUSY } from './lib/sessions.js';
 import { Dialogs } from './lib/dialogs.js';
@@ -20,13 +20,14 @@ import { installCanvasCapture } from './lib/canvas-capture.js';
 import { PresetStore } from './lib/presets.js';
 import { installToolBrush } from './lib/brush/tool-brush.js';
 import { BRUSH_SIZE } from './lib/brush/options.js';
+import { KeymapStore } from './lib/keymap-store.js';
 import { Selection } from './lib/selection.js';
 import { icon } from './lib/icons.js';
 import { withDefaults } from '../shared/defaults.js';
 import { openDocument } from './lib/io.js';
 import { flattenDocument } from './lib/compositor.js';
 import { parseColor, rgbaToHex } from '../shared/pixels/color.js';
-import { MENU_KEYS, RENDERER_KEYS, TYPE_KEYS, SHORTCUT_GROUPS, COMMAND_LABELS, describeAccelerator, runsWhileTyping } from '../shared/keymap.js';
+import { runsWhileTyping } from '../shared/keymap.js';
 
 // Feature modules installed after the core, in this order. A module that fails to load is skipped
 // with a warning so the rest of the app keeps working.
@@ -91,7 +92,21 @@ const MODULES = [
   'lib/shape-props.js', // shapes-live
   'lib/layer-dialogs.js', // finish-layer-menu
   'lib/conventions.js', // conventions-shortcuts-fields
-  'lib/stubs-later.js', // ids of later releases the 0.4 menus show (edit:menus)
+  'lib/stubs-later.js', // ids of later releases the menus show (0.6: edit:color-settings, edit:convert-profile)
+  // 0.5 entry modules (stubs until their packages land; ARCHITECTURE.md "0.5 features (contracts)", "New files", in
+  // package order; the four 0.5 panel modules come after lib/panels/layers-menu.js)
+  'lib/brush/define.js', // brush-engine-core
+  'lib/tools/paint-keys.js', // brush-painting-behaviours
+  'lib/color/cmm.js', // icc-engine
+  'lib/psd/index.js', // the PSD mappers of psd-layers and psd-text (skeleton, S4.1)
+  'lib/develop/workspace.js', // camera-raw-workspace
+  'lib/develop/tabs/index.js', // camera-raw-panels
+  'lib/tool-presets.js', // presets-panels
+  'lib/preset-manager.js', // preset-files-manager
+  'lib/color-picker.js', // color-picker-swatches
+  'lib/type/font-library.js', // type-fonts
+  'lib/type/commands.js', // type-menu-commands
+  'lib/shortcuts-editor.js', // shortcuts-editor (help:shortcuts works from the stub)
   'lib/panels/color.js',
   'lib/panels/swatches.js',
   'lib/panels/brushes.js',
@@ -109,6 +124,11 @@ const MODULES = [
   'lib/panels/gradients.js', // gradients
   'lib/panels/patterns.js', // patterns
   'lib/panels/layers-menu.js', // layers-panel-depth
+  // 0.5 panel modules (brush-settings-panel; presets-panels' three)
+  'lib/panels/brush-settings.js',
+  'lib/panels/styles.js',
+  'lib/panels/shapes.js',
+  'lib/panels/tool-presets.js',
   'lib/extras.js',
   'lib/welcome.js',
 ];
@@ -378,6 +398,13 @@ export class App extends EventTarget {
       snapTo: Object.entries(this.settings.guides?.snapTo ?? {}).filter(([, on]) => on).map(([k]) => k).join(','),
       patternPreview: !!this.ui.patternPreview,
       stubs: this.stubbed.join(','),
+      // 0.5 (S13.6): the keymap and the menu customisation as strings (ui state compares by identity), the Type
+      // menu's radios and labels
+      keymap: JSON.stringify(this.keymap?.resolvedOverlay() ?? { v: 1 }),
+      menus: JSON.stringify(this.keymap?.menus() ?? null),
+      antiAlias: d?.active?.type === 'text' ? d.active.typeOptions?.antiAlias ?? 'smooth' : null,
+      textKind: d?.active?.type === 'text' ? (d.active.width == null ? 'point' : 'paragraph') : null,
+      fontPreviewSize: this.settings.typeFonts?.previewSize ?? 'medium',
     };
     const changed = Object.keys(state).some((k) => this.uiState[k] !== state[k]);
     if (!changed) return;
@@ -606,7 +633,7 @@ function registerCoreCommands(app) {
     },
     'app:enter': { run: () => app.tools?.active?.commit?.() },
 
-    'help:shortcuts': { run: () => shortcutsDialog(app) },
+    // help:shortcuts is registered by lib/shortcuts-editor.js (0.5: shortcuts-editor's MODULES entry)
     'help:about': { run: () => aboutDialog(app) },
     'help:guide': { run: () => bridge.openExternal('https://github.com/Nihalpi1212/claude/blob/claude/fervent-newton-263lz3/pigment/docs/USER-GUIDE.md').catch(() => {}) },
     'help:website': { run: () => bridge.openExternal('https://github.com/Nihalpi1212/claude').catch(() => {}) },
@@ -634,35 +661,6 @@ function registerCoreCommands(app) {
       tool.setOpt('size', Math.max(1, Math.min(max, v + dir * step)));
     } else tool.setOpt('hardness', Math.round(Math.max(0, Math.min(1, v + dir * 0.25)) * 100) / 100);
   }
-}
-
-function shortcutsDialog(app) {
-  const content = document.createElement('div');
-  content.style.maxHeight = '60vh';
-  content.style.overflow = 'auto';
-  const table = document.createElement('table');
-  table.className = 'kbd-table';
-  for (const group of SHORTCUT_GROUPS) {
-    const head = document.createElement('tr');
-    head.innerHTML = `<th colspan="2">${group.title}${group.type ? ' (while editing text)' : ''}</th>`;
-    table.appendChild(head);
-    for (const cmd of group.commands) {
-      const keys = group.type ? [TYPE_KEYS[cmd]].filter(Boolean) : [MENU_KEYS[cmd], ...(RENDERER_KEYS[cmd] ?? [])].filter(Boolean);
-      if (!keys.length) continue;
-      const tr = document.createElement('tr');
-      const a = document.createElement('td');
-      a.textContent = COMMAND_LABELS[cmd] ?? cmd;
-      const b = document.createElement('td');
-      b.textContent = keys.map((k) => describeAccelerator(k, isMac)).join('  ·  ');
-      tr.append(a, b);
-      table.appendChild(tr);
-    }
-  }
-  const extra = document.createElement('p');
-  extra.className = 'muted';
-  extra.textContent = 'Hold Space to pan with any tool. Ctrl/Cmd + mouse wheel zooms. Alt-click with a painting tool samples a colour. Shift+letter cycles the tools in a slot.';
-  content.append(table, extra);
-  return app.dialogs.open({ title: 'Keyboard Shortcuts', content, width: 560, buttons: [{ label: 'Close', value: true, primary: true }] });
 }
 
 function aboutDialog(app) {
@@ -725,7 +723,9 @@ function setupHostEvents(app) {
     if (via === 'key') {
       const el = document.activeElement;
       const typing = app.isTextTarget(el) || (!!el && el !== document.body && app.sessions.ownsFocus(el));
-      return typing || app.dialogs?.isOpen ? undefined : app.commands.run(cmd, arg, 'key');
+      // while a painting tool is active the key may mean its paint-context command (Shift+Alt+M: the Brush's mode,
+      // S13.4): keymap (lib/keymap-store.js)
+      return typing || app.dialogs?.isOpen ? undefined : app.commands.run(app.keymap.resolveKey(cmd, 'key'), arg, 'key');
     }
     // a native menu accelerator (Electron) takes the key before the page: while the user types in a text field it may
     // only run what shortcuts.js lets the same key run there (the edit keys hand the edit to the field), so Ctrl+E,
@@ -846,6 +846,8 @@ async function start() {
   installRulers(app); // app.rulers (L.10)
   installSample(app); // sampleMerged and app.sampleSkip (L.11)
   installCanvasCapture(app); // app.canvasCapture (I.3)
+  // 0.5 (S9): the keymap store; lib/shortcuts.js, the first module, builds its key table from it
+  app.keymap = new KeymapStore(app);
   // the preset store (C): files under <userData>/presets (IndexedDB in the browser build), the 0.4 kinds registered
   try {
     const kinds = await import('./lib/preset-kinds.js');

@@ -77,6 +77,25 @@ export const DEFAULT_SETTINGS = Object.freeze({
   layersPanel: { thumbSize: 'medium', thumbBounds: 'layer', showEffects: true, expandEffects: true, fillDefaultMasks: true, addCopy: true }, // layers-panel-depth
   layerMenu: {}, // finish-layer-menu
   conventions: { toolSwitchWithShift: true, springLoaded: true, dialogPositions: {} }, // conventions-shortcuts-fields
+  // 0.5 (ARCHITECTURE.md "0.5 features", S14.1): one namespace per package, as in 0.4 (rule 5). 0.4's flat keys stay:
+  // brush, brushPresets, swatches, swatchesEdited, recentColors, cursorStyle, tools
+  brushes: { locks: {}, recent: [], view: 'thumbs', migrated: false }, // brush-settings-panel (the skeleton writes migrated)
+  brushEngine: {}, // brush-engine-core
+  painting: {
+    cursors: { crosshairInTip: false, crosshairWhilePainting: false, other: 'standard', previewColor: '#ff0000', leashColor: '#4080ff' },
+    hud: { vertical: 'hardness' },
+    digitPairMs: 600,
+  }, // brush-painting-behaviours
+  colorManagement: { display: 'auto', userProfiles: [] }, // icc-engine: display 'auto' | 'srgb' | 'display-p3'
+  psd: { maximizeCompatibility: 'always' }, // psd-layers ('ask' | 'always' | 'never'); psd-text adds its own sub-keys
+  cameraRaw: { defaults: null, view: { beforeAfter: 'off', clipShadows: false, clipHighlights: false } }, // camera-raw-workspace
+  presetPanels: { currentToolOnly: true }, // presets-panels
+  presetManager: {}, // preset-files-manager
+  colorUI: { picker: 'pigment', hud: 'hue-strip', swatchesMigrated: false }, // color-picker-swatches
+  typeFonts: { previewSize: 'medium', favourites: [], recent: [], sample: 'Sample' }, // type-fonts
+  typeCommands: {}, // type-menu-commands
+  // the skeleton's keymap store (lib/keymap-store.js, S9.2); shortcuts-editor writes it through app.keymap only
+  keymap: { set: 'photoshop-defaults', overlay: { v: 1 }, menus: { set: 'default', hidden: [], colors: {}, showAll: false } },
 });
 
 /** The Swatches panel's default palette (used until the user edits it; see swatchesEdited). */

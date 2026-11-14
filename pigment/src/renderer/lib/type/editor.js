@@ -21,7 +21,7 @@ import { setSelectionProvider, selectionChanged, typeTargets, readChar, readPara
 import { EditStack } from './edit-history.js';
 import { snapToCluster, nextCluster, prevCluster, nextWord, prevWord, paragraphRange, lineAt, unitRange, extendByUnit, nextClickCount, ordered } from './edit-selection.js';
 import { makeClip, setInAppClip, inAppClip, choosePaste, applyPaste } from './clipboard.js';
-import { typeCommandFor, TYPE_COMMANDS, mapCharRuns, kernStep } from './edit-keys.js';
+import { typeCommandFor, TYPE_COMMANDS, mapCharRuns, kernStep, setTypeKeyTable } from './edit-keys.js';
 import { MENU_KEYS, RENDERER_KEYS, TYPE_KEYS, parseAccelerator, eventMatches, typeKeyFor } from '../../../shared/keymap.js';
 import { UNDO_LIKE } from '../sessions.js';
 import { bridge, isMac } from '../bridge.js';
@@ -39,11 +39,20 @@ const ANSWERED = new Set(['edit:cut', 'edit:copy', 'edit:paste', 'edit:paste-wit
 /** Commands that run while text is edited: shortcuts.js lets these through from a text field (see shortcuts.js). */
 const PASSES_IN_TEXT = /^(file:|view:|help:|window:)/;
 
-// menu and renderer accelerators, so a keydown the editor swallows can name the command a menu would also send
-const ACCEL_TABLE = [
-  ...Object.entries(MENU_KEYS).map(([cmd, a]) => ({ cmd, desc: parseAccelerator(a) })),
-  ...Object.entries(RENDERER_KEYS).flatMap(([cmd, list]) => list.map((a) => ({ cmd, desc: parseAccelerator(a) }))),
-].sort((a, b) => w(b.desc) - w(a.desc));
+// menu and renderer accelerators, so a keydown the editor swallows can name the command a menu would also send. 0.5:
+// the effective tables of app.keymap, rebuilt on 'keymap:changed' (S9.4); keymap (lib/keymap-store.js)
+let ACCEL_TABLE = [];
+let EFFECTIVE = null; // app.keymap.effective(), for typeKeyFor
+function setAccelTable(effective) {
+  EFFECTIVE = effective ?? null;
+  const menu = effective?.menu ?? MENU_KEYS, renderer = effective?.renderer ?? RENDERER_KEYS;
+  ACCEL_TABLE = [
+    ...Object.entries(menu).map(([cmd, a]) => ({ cmd, desc: parseAccelerator(a) })),
+    ...Object.entries(renderer).flatMap(([cmd, list]) => list.map((a) => ({ cmd, desc: parseAccelerator(a) }))),
+  ].sort((a, b) => w(b.desc) - w(a.desc));
+}
+setAccelTable(null);
+const typeKeyOf = (id) => (EFFECTIVE ? typeKeyFor(id, EFFECTIVE) : typeKeyFor(id));
 function w(d) {
   return Number(d.shift) + Number(d.alt) + Number(d.cmdOrCtrl || d.ctrl || d.meta);
 }
@@ -751,9 +760,11 @@ export class TypeEditor {
   /** Commands the session answers itself; undefined lets the command run (after the commit policy). */
   handle(id, arg, source) {
     const keyish = source === 'key' || source === 'menu-key';
+    // 0.5 (S9.4): F12 is Revert; pressed while typing it does nothing, so the text being typed is not thrown away
+    if (keyish && id === 'file:revert') return {};
     // (3) the menu's copy of an accelerator the editor's key handler already ran (Windows and Linux send both)
     if (keyish && !this.dispatching) {
-      const typeId = typeKeyFor(id);
+      const typeId = typeKeyOf(id);
       if (this.ranRecently(id) || (typeId && this.ranRecently(typeId))) return {};
     }
     // (1) undo and the clipboard: the editor's own operations
@@ -775,7 +786,7 @@ export class TypeEditor {
     }
     // (2) a menu accelerator that is also a type key (Shift+Ctrl+L: Align Left, not Auto Tone)
     if (keyish) {
-      const typeId = typeKeyFor(id);
+      const typeId = typeKeyOf(id);
       if (typeId) {
         this.ran.set(typeId, now());
         return { result: this.app.commands.run(typeId, undefined, 'api') };
@@ -900,6 +911,14 @@ export async function boxSizeDialog(app, { width = 200, height = 100 } = {}) {
 }
 
 export function install(app) {
+  // 0.5 (S9.4): the type keys and the menu accelerators the editor knows follow the keymap; keymap (lib/keymap-store.js)
+  const keys = () => {
+    const eff = app.keymap?.effective?.() ?? null;
+    setTypeKeyTable(eff?.type ?? TYPE_KEYS);
+    setAccelTable(eff);
+  };
+  keys();
+  app.on?.('keymap:changed', keys);
   // the selection provider of the type target (B.7): the editor of the open session
   setSelectionProvider({ active: (a) => activeEditor(a)?.typeSession() ?? null });
 

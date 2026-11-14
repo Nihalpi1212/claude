@@ -5,12 +5,21 @@
 import { TYPE_KEYS, parseAccelerator, eventMatches } from '../../../shared/keymap.js';
 import * as M from './model.js';
 
-const TABLE = Object.entries(TYPE_KEYS).map(([id, accel]) => ({ id, desc: parseAccelerator(accel) }));
-// more modifiers first, so Alt+Shift+Ctrl+. is not taken for Shift+Ctrl+.
-TABLE.sort((a, b) => weight(b.desc) - weight(a.desc));
+let TABLE = [];
+/**
+ * The type keys the editor answers: TYPE_KEYS until lib/type/editor.js sets the effective table of app.keymap, and
+ * again on every 'keymap:changed', so a rebound type key takes effect inside a session (0.5, S9.4). keymap
+ * (lib/keymap-store.js)
+ */
+export function setTypeKeyTable(typeKeys) {
+  // more modifiers first, so Alt+Shift+Ctrl+. is not taken for Shift+Ctrl+.
+  TABLE = Object.entries(typeKeys ?? TYPE_KEYS).filter(([, accel]) => typeof accel === 'string').map(([id, accel]) => ({ id, desc: parseAccelerator(accel) }));
+  TABLE.sort((a, b) => weight(b.desc) - weight(a.desc));
+}
 function weight(d) {
   return Number(d.shift) + Number(d.alt) + Number(d.cmdOrCtrl || d.ctrl || d.meta);
 }
+setTypeKeyTable(TYPE_KEYS);
 
 /** The TYPE_KEYS command a keydown asks for, or null. */
 export function typeCommandFor(event, isMac = false) {
