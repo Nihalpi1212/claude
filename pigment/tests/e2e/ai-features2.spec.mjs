@@ -277,7 +277,8 @@ test('remove background keeps what an existing layer mask already hid', async ({
   await installFakeAi(page, [bothAnswers(subject)]);
   await page.evaluate(() => window.pigmentApp.ai.setPrefs({ defaultProvider: 'gemini' }));
   await runAwait(page, 'ai:remove-background');
-  await expect.poll(() => layerNames(page)).toEqual(['Background', 'Background (no background)']);
+  // 0.4 (L.13): adding a layer mask converts the Background to 'Layer 0' first, as Photoshop does
+  await expect.poll(() => layerNames(page)).toEqual(['Layer 0', 'Layer 0 (no background)']);
   const state = await page.evaluate(() => {
     const d = window.pigmentApp.doc;
     const m = d.active.mask.canvas.getContext('2d');

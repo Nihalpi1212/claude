@@ -159,18 +159,29 @@ test('double-clicking a layer name renames it', async ({ page }) => {
 
 test('a clipped layer that loses its base stays visible and is released', async ({ page }) => {
   const errors = await openApp(page);
-  await newDoc(page, { background: 'white' });
+  // 0.4 (L.13): nothing goes below a Background, so the white paper is an ordinary layer here
+  await newDoc(page, { background: 'transparent' });
+  await page.evaluate(() => {
+    // the new document's one layer becomes the white paper
+    const l = window.pigmentApp.doc.active;
+    l.name = 'Paper';
+    const ctx = l.canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, l.canvas.width, l.canvas.height);
+    l.touch();
+    window.pigmentApp.doc.changed('pixels', { layer: l });
+  });
   await addLayer(page, 'Base', '#00ff00', [50, 50, 100, 100]);
   await addLayer(page, 'Blue', '#0000ff');
   await runAwait(page, 'layer:clip');
   expect((await pixel(page, 10, 10)).slice(0, 3)).toEqual([255, 255, 255]);
   await runAwait(page, 'layer:arrange-back');
-  expect(await names(page)).toEqual(['Blue', 'Background', 'Base']);
+  expect(await names(page)).toEqual(['Blue', 'Paper', 'Base']);
   // Group a lone clipped layer: it becomes an ordinary layer inside the group
   await runAwait(page, 'edit:undo');
-  expect(await names(page)).toEqual(['Background', 'Base', 'Blue*']);
+  expect(await names(page)).toEqual(['Paper', 'Base', 'Blue*']);
   await runAwait(page, 'layer:group');
-  expect(await names(page)).toEqual(['Background', 'Base', 'Group 1[Blue]']);
+  expect(await names(page)).toEqual(['Paper', 'Base', 'Group 1[Blue]']);
   expect((await pixel(page, 10, 10)).slice(0, 3)).toEqual([0, 0, 255]);
   expect(errors).toEqual([]);
 });

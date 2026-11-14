@@ -233,11 +233,9 @@ test('a layer style whose pattern preset was deleted still renders (the ref carr
   await paintRects(page, [[0, 0, 60, 40, '#00ff00']]);
   await page.evaluate(async () => {
     const app = window.pigmentApp;
-    const { isStubWidget } = await import('/lib/fields.js');
     const { setLayerProps } = await import('/lib/layer-ops.js');
-    const ref = app.patterns.ref(app.patterns.current());
-    // until layer-style-effects lands, the stub style preparation reads 0.3's data URL string
-    const pattern = isStubWidget('contour') ? ref.dataUrl : ref;
+    // layer-style-effects stores a PatternRef (the skeleton's stub read 0.3's data URL string)
+    const pattern = app.patterns.ref(app.patterns.current());
     setLayerProps(app, app.doc.active, { styles: { patternOverlay: { enabled: true, blend: 'normal', opacity: 1, scale: 1, pattern } } }, 'Layer style');
   });
   await expect.poll(() => pixel(page, 1, 1)).toEqual([255, 0, 0, 255]);
@@ -373,9 +371,8 @@ test('a Pattern Fill layer keeps its pixels, Angle, Link with Layer and origin t
     const { setLayerProps } = await import('/lib/layer-ops.js');
     setLayerProps(app, app.doc.active, { paint: makePatternPaint(cur.canvas, { scale: 1.5, angle: 30, link: false, origin: [3, 1], presetId: cur.id, name: cur.name }) }, 'Edit fill');
   });
-  // the describe() of a fill layer is the skeleton's (document.js); J.1 has it write the PatternPaint fields
-  const described = await page.evaluate(() => JSON.stringify(window.pigmentApp.doc.describe()).includes('"angle":30'));
-  test.skip(!described, 'document.js describe() writes only the pattern scale of a fill layer (J.1 lists angle, link, origin, presetId, name): integrator');
+  // describe() of a fill layer writes the PatternPaint fields (J.1)
+  expect(await page.evaluate(() => JSON.stringify(window.pigmentApp.doc.describe()).includes('"angle":30'))).toBe(true);
   const before = await pixel(page, 7, 9);
   await page.evaluate(() => (window.__pigmentTest.nextSavePath = 'mem:/pattern.pigment'));
   await runAwait(page, 'file:save-as');

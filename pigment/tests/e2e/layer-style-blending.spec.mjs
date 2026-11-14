@@ -367,6 +367,7 @@ test('Blending Options edits are undone by Cancel and recorded by OK in one entr
 test('Layer Mask Hides Effects; Blend Clipped Layers as Group off; Blend Interior Effects as Group', async ({ page }) => {
   const errors = await openApp(page);
   const features = await page.evaluate(async () => (await import('/shared/pixels/styles.js')).STYLE_FEATURES);
+  expect(features.interiorAsGroup).toBe(true); // layer-style-effects has landed
   await build(page, { layers: [
     { name: 'Box', color: '#0000ff', x: 60, y: 40, w: 60, h: 50, styles: { stroke: { enabled: true, size: 6, position: 'outside', color: '#000000', opacity: 1, blend: 'normal' } } },
   ] });
@@ -424,9 +425,7 @@ test('Layer Mask Hides Effects; Blend Clipped Layers as Group off; Blend Interio
   expect(await pixel(page, 30, 30)).toEqual([255, 255, 255, 255]);
 
   // Blend Interior Effects as Group: a colour overlay fades with the fill (styles.js interiorAsGroup)
-  if (!features.interiorAsGroup) {
-    test.info().annotations.push({ type: 'skip', description: 'waits for layer-style-effects (STYLE_FEATURES.interiorAsGroup)' });
-  } else {
+  {
     await page.evaluate(() => {
       const d = window.pigmentApp.doc;
       d.remove(d.layers().find((x) => x.name === 'Clip'));
@@ -461,8 +460,8 @@ test('the Background takes no styles once its rules lock them; adjustment layers
   });
   expect(r.adj).toBe(false);
   expect(r.box).toBe(true);
-  // the stub rules lock nothing until finish-layer-menu lands
-  if (r.locks) expect(r.bg).toBe(false);
-  else test.info().annotations.push({ type: 'skip', description: 'waits for finish-layer-menu (app.backgroundRules.lockedProps)' });
+  // finish-layer-menu's rules lock the Background's styles
+  expect(r.locks).toBe(true);
+  expect(r.bg).toBe(false);
   expect(errors).toEqual([]);
 });

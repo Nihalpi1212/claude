@@ -3,17 +3,19 @@
 //
 //  - app.layerFilter(layer) -> true | false | null is the one hook lib/panels/layers.js consults for
 //    every row (null: no filtering at all).
-//  - Isolation also hides the other layers on the canvas. The view's compositor is left alone (exports,
+//  - Isolation also hides the other layers on the canvas, and from merged sampling (app.sampleSkip, L.11: the
+//    Eyedropper, Magic Wand, Paint Bucket and the other "all layers" samplers) and auto-select (app.isolationHides,
+//    read by tools/move.js and lib/snap.js). The view's compositor is left alone (exports,
 //    thumbnails and saves keep seeing the whole document): the canvas view's postProcess hook (the one
 //    Proof Colors uses) is handed a composite of the isolated layers to draw instead.
-import { BLEND_MODES, canvasIsBlank } from '../document.js';
+import { BLEND_MODES, canvasIsBlank, isDefaultBlending } from '../document.js';
 import { Compositor } from '../compositor.js';
 import { STYLE_KEYS, hasEnabledStyles, effectInstances } from '../../../shared/pixels/styles.js';
 import { icon } from '../icons.js';
 import { debounce } from '../form.js';
 import { LABEL_COLORS, labelOf } from './tags.js';
 
-export const FILTER_TYPES = [['kind', 'Kind'], ['name', 'Name'], ['effect', 'Effect'], ['mode', 'Mode'], ['attribute', 'Attribute'], ['color', 'Color']];
+export const FILTER_TYPES = [['kind', 'Kind'], ['name', 'Name'], ['effect', 'Effect'], ['mode', 'Mode'], ['attribute', 'Attribute'], ['color', 'Color'], ['selected', 'Selected']];
 export const KINDS = [
   ['pixel', 'Pixel layers', 'image'],
   ['adjustment', 'Adjustment and fill layers', 'adjust'],
@@ -22,7 +24,8 @@ export const KINDS = [
   ['smart', 'Smart objects', 'smart'],
 ];
 export const ATTRIBUTES = [
-  ['visible', 'Visible'], ['hidden', 'Not visible'], ['locked', 'Locked'], ['empty', 'Empty'], ['linked', 'Linked'], ['clipped', 'Clipped'], ['mask', 'Layer mask'], ['effects', 'Layer effects'],
+  ['visible', 'Visible'], ['hidden', 'Not visible'], ['locked', 'Locked'], ['unlocked', 'Not locked'], ['empty', 'Empty'], ['linked', 'Linked'], ['clipped', 'Clipped'], ['mask', 'Layer mask'],
+  ['vectorMask', 'Vector mask'], ['effects', 'Layer effects'], ['advancedBlending', 'Advanced blending'],
 ];
 
 /** The Find Layers kind of a layer (groups have none: they show when something inside them matches). */
@@ -49,19 +52,25 @@ function isEmpty(layer) {
   return empty;
 }
 
-/** Does the layer itself satisfy the filter (no tree logic)? */
-export function matchesFilter(layer, f) {
+/**
+ * Does the layer itself satisfy the filter (no tree logic)? ctx.selected (a Set of layers) answers the 'selected' type.
+ */
+export function matchesFilter(layer, f, ctx = {}) {
   switch (f.type) {
     case 'kind': return !f.kinds.length || f.kinds.includes(kindOf(layer));
     case 'name': return !f.name.trim() || layer.name.toLowerCase().includes(f.name.trim().toLowerCase());
     case 'effect': return !layer.styles?.hidden && effectInstances(layer.styles, f.effect).some((fx) => fx.enabled);
     case 'mode': return layer.blend === f.mode;
     case 'color': return labelOf(layer) === f.color;
+    case 'selected': return !!ctx.selected?.has(layer);
     case 'attribute':
       switch (f.attribute) {
         case 'visible': return layer.visible;
         case 'hidden': return !layer.visible;
         case 'locked': return !!(layer.locked.all || layer.locked.pixels || layer.locked.position || layer.locked.transparency);
+        case 'unlocked': return !(layer.locked.all || layer.locked.pixels || layer.locked.position || layer.locked.transparency);
+        case 'vectorMask': return !!layer.vectorMask;
+        case 'advancedBlending': return !!layer.blending && !isDefaultBlending(layer.blending);
         case 'empty': return isEmpty(layer);
         case 'linked': return !!layer.linked;
         case 'clipped': return !!layer.clip;
@@ -90,15 +99,31 @@ export function installFind(app) {
   const isoShows = (state, layer) => inIso(state, layer) || hasDescendant(layer, (c) => state.ids.has(c.id));
   /** A row shows when its layer matches; a group also shows for what it holds (kinds only describe the layers inside). */
   function filterShows(layer) {
-    if (!layer.isGroup) return matchesFilter(layer, filter);
-    if (filter.type === 'kind') return !filter.kinds.length || hasDescendant(layer, (c) => !c.isGroup && matchesFilter(c, filter));
-    return matchesFilter(layer, filter) || hasDescendant(layer, (c) => matchesFilter(c, filter));
+    const ctx = { selected: app.doc?.selected };
+    if (!layer.isGroup) return matchesFilter(layer, filter, ctx);
+    if (filter.type === 'kind') return !filter.kinds.length || hasDescendant(layer, (c) => !c.isGroup && matchesFilter(c, filter, ctx));
+    return matchesFilter(layer, filter, ctx) || hasDescendant(layer, (c) => matchesFilter(c, filter, ctx));
   }
 
   /** True for a layer the canvas does not draw while its document is isolated (tools must not hit what cannot be seen). */
   app.isolationHides = (layer, d = app.doc) => {
     const state = iso(d);
     return !!state && !isoShows(state, layer);
+  };
+
+  // L.11 (E28): what merged sampling must not see. While a document is isolated, the Eyedropper, Magic Wand, the
+  // Paint Bucket and every other "all layers" sampler read the isolated layers only, as the canvas shows them.
+  // The set is rebuilt only when the document or the isolation changes (the Info panel samples on every move).
+  const skipCache = new WeakMap(); // doc -> { key, set }
+  app.sampleSkip = (d) => {
+    const state = iso(d);
+    if (!state) return null;
+    const key = `${d.version}:${d.root.version}:${[...state.ids].join(',')}`;
+    const hit = skipCache.get(d);
+    if (hit?.key === key) return hit.set;
+    const set = new Set(d.layers().filter((l) => !isoShows(state, l)));
+    skipCache.set(d, { key, set });
+    return set;
   };
 
   app.layerFilter = (layer) => {
@@ -195,6 +220,12 @@ export function installFind(app) {
     else if (filter.type === 'mode') box.appendChild(select('mode', [['pass-through', 'Pass Through'], ...BLEND_MODES.filter(Boolean)], 'Blend mode'));
     else if (filter.type === 'attribute') box.appendChild(select('attribute', ATTRIBUTES, 'Attribute'));
     else if (filter.type === 'color') box.appendChild(select('color', LABEL_COLORS.map(([v, l]) => [v, l]), 'Colour label'));
+    else if (filter.type === 'selected') {
+      const note = document.createElement('span');
+      note.className = 'muted layer-filter-note';
+      note.textContent = 'Only the selected layers';
+      box.appendChild(note);
+    }
   }
 
   function syncBar({ rebuild = true } = {}) {

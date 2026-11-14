@@ -399,7 +399,11 @@ test('a command clicked in the menu (source menu) commits the text first; Edit >
   expect((await state(page)).text).toBe('Menu');
   await page.keyboard.type('x');
   const n = await historyLength(page);
-  await page.evaluate(() => window.pigmentApp.commands.run('layer:new', undefined, 'menu'));
+  // from the menu, New Layer opens its dialog (M.3, finish-layer-menu): the text is committed before it opens
+  await page.evaluate(() => { window.pigmentApp.commands.run('layer:new', undefined, 'menu'); });
+  await expect(page.locator('.dialog-backdrop')).toHaveCount(1);
+  expect(await editing(page)).toBe(false);
+  await confirmDialog(page);
   await expect.poll(() => editing(page)).toBe(false);
   expect(await page.evaluate(() => window.pigmentApp.doc.layers().find((l) => l.type === 'text').text)).toBe('Menux');
   expect(await historyLength(page)).toBeGreaterThanOrEqual(n + 1);

@@ -49,12 +49,14 @@ test('presets: write, read, blob round trip, invalid kind rejected, corrupt file
     expect(rejected).toEqual(['rejected', 'rejected', 'rejected', 'rejected']);
     expect(existsSync(join(userData, 'evil.json'))).toBe(false);
 
-    // the corrupt file is renamed when read; the store then shows the built-ins (Linear)
+    // the corrupt file is renamed when read; the store then shows the built-ins only (Linear and, once
+    // layer-style-effects has landed, Photoshop's other contours)
     const contours = await window.evaluate(async () => {
       await window.pigmentApp.presets.ready('contours');
-      return window.pigmentApp.presets.list('contours').map((p) => p.name);
+      return window.pigmentApp.presets.list('contours').map((p) => ({ name: p.name, builtin: !!p.builtin }));
     });
-    expect(contours).toEqual(['Linear']);
+    expect(contours.map((c) => c.name)).toContain('Linear');
+    expect(contours.filter((c) => !c.builtin)).toEqual([]);
     expect(readdirSync(dir).some((n) => /^contours\.json\.corrupt-\d+$/.test(n))).toBe(true);
 
     // the store writes through IPC: a user gradient lands in gradients.json after the debounce

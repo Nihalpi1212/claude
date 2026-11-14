@@ -299,7 +299,8 @@ export class CanvasView {
     this.paintGuides(ctx);
     ctx.save();
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    const tool = this.app.tools?.active;
+    // a temporary tool (Ctrl = Move, Alt = Eyedropper, Ctrl/Alt+Space = Zoom: lib/temp-tools.js) draws its overlay
+    const tool = this.tempTool ?? this.app.tools?.active;
     try {
       tool?.drawOverlay?.(ctx, this);
       for (const fn of this.overlayFns) fn(ctx, this);

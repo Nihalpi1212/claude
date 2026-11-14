@@ -860,6 +860,17 @@ export function isExactKind(kind, params = {}) {
 }
 const deepExactFor = (def, params) => (typeof def?.deepExact === 'function' ? def.deepExact(merge(def.defaults, params)) !== false : true);
 
+/**
+ * Whether a kind's 8-bit table (`def.lut`) is its whole effect on a deep image. Levels and Curves in the CMYK or Lab
+ * space (J.9) convert per pixel: their table is the grey axis only, exact just for neutral pixels, so they take the
+ * 8-bit fallback instead.
+ */
+export function lutCovers(kind, params = {}) {
+  const def = Object.prototype.hasOwnProperty.call(ADJUSTMENTS, kind) ? ADJUSTMENTS[kind] : null;
+  if (typeof def?.lut !== 'function') return false;
+  return !((kind === 'levels' || kind === 'curves') && (params?.space === 'cmyk' || params?.space === 'lab'));
+}
+
 function applyChannelFns(deep, r, { fns, keepLuma }) {
   const { width } = dims(deep);
   const d = deep.data;
@@ -1010,7 +1021,7 @@ export function applyAdjustmentDeep(deep, kind, params = {}, rect = null, ctx = 
     if (fn) applyPixelFn(deep, r, fn);
     return { exact: true };
   }
-  if (typeof def.lut === 'function') {
+  if (lutCovers(kind, params)) {
     applyLutDeep(deep, def.lut(params), r);
     return { exact: false };
   }

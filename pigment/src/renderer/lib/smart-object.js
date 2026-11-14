@@ -79,6 +79,13 @@ export function cloneDocument(doc) {
   }
   relinkCopies(out.root.children); // layer links hold between the copies
   out.guides = clone(doc.guides ?? []);
+  // the ruler origin (guides-snapping, L.10) comes along, so rulers and New Guide count from the same place
+  try {
+    const origin = doc.store?.get?.('rulerOrigin');
+    if (origin && out.store?.setRaw) out.store.setRaw('rulerOrigin', clone(origin));
+  } catch (err) {
+    console.warn('ruler origin not copied', err);
+  }
   out.paths = clone(doc.paths ?? []);
   out.meta = clone(doc.meta ?? {});
   if (doc.globalLight) out.globalLight = { ...doc.globalLight };

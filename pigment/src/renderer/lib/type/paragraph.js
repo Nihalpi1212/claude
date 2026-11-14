@@ -8,11 +8,10 @@
 // Photoshop's Justification dialog: word spacing in % of the space's width, letter spacing in % of the space's width
 // added between glyphs, glyph scaling in % of the glyphs' width.
 
-// The engines of 0.4 clamp a composer's `wordSpace` at 0 (lib/type/api.js canvasLayout, lib/type/layout.js), so word
-// spaces cannot shrink below their natural width. Until they accept negative values, the part of a compression that
-// belongs to the spaces is spread over the letter gaps instead (the line still ends flush). Flip to true once the
-// engines take negative word spacing (integrator: drop the Math.max(0, …) on wordSpace in both engines).
-export const SPACES_SHRINK = false;
+// Both engines (lib/type/api.js canvasLayout, lib/type/layout.js) take a negative composer `wordSpace`, so word spaces
+// can close up below their natural width down to the dialog's Minimum. With SPACES_SHRINK false the spaces' part of a
+// compression would be spread over the letter gaps instead (the line still ends flush).
+export const SPACES_SHRINK = true;
 
 const SPACE = ' ';
 const isTrailingSpace = (ch) => ch === ' ' || ch === '　';

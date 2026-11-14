@@ -317,6 +317,9 @@ export const COMMAND_LABELS = {
   'layer:select-back': 'Select bottom layer', 'layer:select-add-forward': 'Add layer above to selection', 'layer:select-add-backward': 'Add layer below to selection',
   'layer:lock-transparency-toggle': 'Lock transparent pixels', 'layer:visibility': 'Hide / show layers',
   'layer:blend-next': 'Next blend mode', 'layer:blend-prev': 'Previous blend mode',
+  // command ids the 0.4 packages added beyond M.7 (recorded steps and the Keyboard Shortcuts list read these)
+  'view:move-guide': 'Move guide', 'view:ruler-origin': 'Ruler origin', 'layer:mask-properties': 'Mask properties',
+  'layer:shape-properties': 'Shape properties', 'layer:effect': 'Layer effect', 'layer:adjustment-preset': 'Adjustment preset',
   ...Object.fromEntries(DIGITS.map((d) => [`layer:opacity-digit-${d}`, `Opacity ${d === '0' ? 100 : Number(d) * 10}%`])),
   ...Object.fromEntries(DIGITS.map((d) => [`layer:fill-digit-${d}`, `Fill ${d === '0' ? 100 : Number(d) * 10}%`])),
   ...Object.fromEntries(BLEND_MODE_KEYS.map(([id, , label]) => [`layer:blend-mode-${id}`, `Blend mode: ${label}`])),

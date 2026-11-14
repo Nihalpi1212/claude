@@ -311,8 +311,8 @@ test('the canvas stub engine draws single-style text exactly like 0.3, and two r
 });
 
 test('typing into the second run through the textarea keeps both runs; undo restores the formatting', async ({ page }) => {
+  // holds for 0.3's textarea session and for type-editing's editor, whose hidden input is the session's textarea (B.8)
   const errors = await openApp(page);
-  test.skip((await landed(page))['type-editing'], 'type-editing replaced the 0.3 textarea session; its own spec types into runs');
   await newDoc(page);
   await page.evaluate(async () => {
     const app = window.pigmentApp;
@@ -661,13 +661,16 @@ test('hooks placed in other files: snapping, canvas capture, drop handlers, path
   });
   const x0 = await page.evaluate(() => window.pigmentApp.doc.active.x);
   const from = await screenPoint(page, 30, 30);
-  // the layer's left edge lands 1 px short of the guide at 100: within 6 screen px, so it snaps onto it
-  const to = await screenPoint(page, 30 + 99 - x0, 30);
+  // the stub snapped the layer's canvas box (0.3): its left edge lands 1 px short of the guide at 100, within 6 screen
+  // px, so it snaps onto it. guides-snapping snaps the layer's content (Photoshop): the red square's left edge, 10 px
+  // into the layer, lands 1 px short of the guide instead
+  const real = has['guides-snapping'];
+  const to = await screenPoint(page, 30 + (real ? 89 : 99) - x0, 30);
   await page.mouse.move(from.x, from.y);
   await page.mouse.down();
   await page.mouse.move(to.x, to.y, { steps: 8 });
   await page.mouse.up();
-  expect(await page.evaluate(() => window.pigmentApp.doc.active.x)).toBe(100);
+  expect(await page.evaluate(() => window.pigmentApp.doc.active.x)).toBe(real ? 90 : 100);
   const marquee = await page.evaluate(() => {
     const app = window.pigmentApp;
     app.tools.activate('marquee-rect');
@@ -701,7 +704,13 @@ test('hooks placed in other files: snapping, canvas capture, drop handlers, path
     window.__cap.release();
     window.pigmentApp.dialogs.setCanvasThrough(document.querySelector('.dialog'), false);
   });
-  await page.mouse.click(at.x, at.y); // the backdrop again: Cancel
+  await page.mouse.click(at.x, at.y); // the backdrop again: Cancel (0.3)
+  if (has['conventions-shortcuts-fields']) {
+    // conventions-shortcuts-fields: over a document the canvas stays usable under a dialog, so a click beside it no
+    // longer cancels; Escape does
+    await expect(page.locator('.dialog-backdrop')).toHaveCount(1);
+    await page.keyboard.press('Escape');
+  }
   expect(await page.evaluate(() => window.__cap.p)).toBeNull();
 
   // drop handlers: a gradient dragged from a panel onto a layer row and onto the canvas

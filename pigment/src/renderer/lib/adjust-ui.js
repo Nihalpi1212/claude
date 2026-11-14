@@ -18,14 +18,20 @@ export const ADJUSTMENT_ICONS = {
   'brightness-contrast': 'adjust', levels: 'adjust', curves: 'adjust', exposure: 'adjust', vibrance: 'color', 'hue-saturation': 'color',
   'color-balance': 'color', 'black-white': 'adjust', 'photo-filter': 'color', 'channel-mixer': 'channels', invert: 'adjust',
   posterize: 'adjust', threshold: 'adjust', 'gradient-map': 'gradient', 'selective-color': 'color', desaturate: 'adjust',
-  equalize: 'adjust', 'shadows-highlights': 'adjust',
+  equalize: 'adjust', 'shadows-highlights': 'adjust', 'color-vibrance': 'color', 'clarity-dehaze': 'sharpen', grain: 'filter',
 };
 
 /** Kinds that make sense as adjustment layers (Photoshop's list), plus registry kinds flagged `layer: true` once implemented (Color Lookup). */
 const BASE_LAYER_KINDS = ['brightness-contrast', 'levels', 'curves', 'exposure', 'vibrance', 'hue-saturation', 'color-balance', 'black-white', 'photo-filter', 'channel-mixer', 'invert', 'posterize', 'threshold', 'gradient-map', 'selective-color'];
 export const LAYER_KINDS = [...BASE_LAYER_KINDS, ...ADJUSTMENT_KINDS.filter((k) => ADJUSTMENTS[k].layer && !ADJUSTMENTS[k].placeholder && !BASE_LAYER_KINDS.includes(k))];
-// Color Lookup sits after Channel Mixer in Photoshop's lists
+// Color Lookup sits after Channel Mixer in Photoshop's lists, and the newer kinds after it (as in the menus)
 if (LAYER_KINDS.includes('color-lookup')) LAYER_KINDS.splice(LAYER_KINDS.indexOf('channel-mixer') + 1, 0, ...LAYER_KINDS.splice(LAYER_KINDS.indexOf('color-lookup'), 1));
+{
+  const newer = ['color-vibrance', 'clarity-dehaze', 'grain'].filter((k) => LAYER_KINDS.includes(k));
+  for (const k of newer) LAYER_KINDS.splice(LAYER_KINDS.indexOf(k), 1);
+  const after = LAYER_KINDS.indexOf(LAYER_KINDS.includes('color-lookup') ? 'color-lookup' : 'channel-mixer');
+  LAYER_KINDS.splice(after + 1, 0, ...newer);
+}
 
 /**
  * Custom adjustment editors (0.3): lib/adjust-more-ui.js registers { editor(kind, params, onChange, { source }) ->

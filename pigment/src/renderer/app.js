@@ -546,36 +546,6 @@ function registerCoreCommands(app) {
     'view:pixel-grid': { checked: () => app.settings.pixelGrid !== false, run: () => toggleSetting('pixelGrid', true) },
     'view:snap': { checked: () => app.settings.snap !== false, run: () => toggleSetting('snap', true) },
     'view:extras': { checked: () => app.settings.showSelectionEdges !== false, run: () => toggleSetting('showSelectionEdges', true) },
-    // placeholders until guides-snapping registers both from lib/guides.js (0.4 rule 3)
-    'view:new-guide': {
-      enabled: has,
-      changesDocument: true,
-      run: async (arg) => {
-        let g = arg;
-        if (!g) {
-          const v = await app.dialogs.prompt('Position (pixels). Prefix with "h" for a horizontal guide, e.g. h200', { title: 'New Guide', value: String(Math.round(app.doc.width / 2)) });
-          if (v === null) return;
-          const m = /^\s*([hv]?)\s*(-?[\d.]+)/i.exec(v);
-          if (!m) return;
-          g = { axis: m[1].toLowerCase() === 'h' ? 'y' : 'x', pos: Number(m[2]) };
-        }
-        addGuide(app, g);
-      },
-    },
-    'view:clear-guides': {
-      enabled: () => !!app.doc?.guides.length,
-      changesDocument: true,
-      run: () => {
-        const d = app.doc;
-        const before = d.guides.slice();
-        const set = (g) => {
-          d.guides = g.slice();
-          d.changed('guides');
-        };
-        set([]);
-        d.history.push({ label: 'Clear guides', undo: () => set(before), redo: () => set([]), bytes: 0, at: Date.now() });
-      },
-    },
     'view:fullscreen': { run: async () => bridge.setFullScreen(!(await bridge.isFullScreen())) },
     'view:theme': { run: (t) => app.saveSettings({ theme: t }) },
     'view:next-tab': { run: () => app.docs.next(1) },
@@ -658,19 +628,6 @@ function registerCoreCommands(app) {
       tool.setOpt('size', Math.max(1, Math.min(2500, v + dir * step)));
     } else tool.setOpt('hardness', Math.round(Math.max(0, Math.min(1, v + dir * 0.25)) * 100) / 100);
   }
-}
-
-export function addGuide(app, g) {
-  const d = app.doc;
-  if (!d) return;
-  const before = d.guides.slice();
-  const after = [...before, { axis: g.axis === 'y' ? 'y' : 'x', pos: Math.round(g.pos) }];
-  const set = (list) => {
-    d.guides = list.slice();
-    d.changed('guides');
-  };
-  set(after);
-  d.history.push({ label: 'New guide', undo: () => set(before), redo: () => set(after), bytes: 0, at: Date.now() });
 }
 
 function shortcutsDialog(app) {

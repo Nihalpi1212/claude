@@ -305,7 +305,13 @@ function remapDocument(app, label, spec) {
       case 'fill': {
         // gradient end points are document coordinates
         const g = layer.paint?.gradient;
-        out = shallow(layer, g?.from && g?.to ? { paint: { ...layer.paint, gradient: { ...g, from: point(...g.from), to: point(...g.to) } } } : {});
+        const pat = layer.paint?.type === 'pattern' ? layer.paint.pattern : null;
+        if (g?.from && g?.to) out = shallow(layer, { paint: { ...layer.paint, gradient: { ...g, from: point(...g.from), to: point(...g.to) } } });
+        else if (pat?.link === true && mode === 'translate' && (m[4] || m[5])) {
+          // Link with Layer: Canvas Size, Crop and Reveal All keep a linked pattern on the content (patterns, G.2)
+          const o = Array.isArray(pat.origin) ? pat.origin : [0, 0];
+          out = shallow(layer, { paint: { ...layer.paint, pattern: { ...pat, origin: [(Number(o[0]) || 0) + m[4], (Number(o[1]) || 0) + m[5]] } } });
+        } else out = shallow(layer, {});
         break;
       }
       default:

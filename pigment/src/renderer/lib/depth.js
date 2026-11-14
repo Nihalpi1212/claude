@@ -21,13 +21,13 @@ import { hasEnabledStyles } from '../../shared/pixels/styles.js';
 import { maskCanvasFor, hasEffectiveMask } from './mask-render.js';
 import {
   DEEP_TYPES, DEEP_BITS, fromCanvasData, toCanvasData, convertDepth, createDeep, extractRect, writeRect, mixRect, hasPrecision, syncFromProxy,
-  applyAdjustmentDeep, isExactKind, blendDeep, resampleDeep, carryOver, statistics, DEEP_BLEND_MODES, q8u16, q8f32, toPs16,
+  applyAdjustmentDeep, isExactKind, lutCovers, blendDeep, resampleDeep, carryOver, statistics, DEEP_BLEND_MODES, q8u16, q8f32, toPs16,
 } from '../../shared/pixels/deep.js';
 import { encodePng, decodePng, toRgba16, isPng, pngInfo } from '../../shared/pixels/png.js';
 import { encodeTiff, decodeTiff, toRgba, isTiff } from '../../shared/pixels/tiff.js';
 import { encodeTga, decodeTga } from '../../shared/pixels/tga.js';
 import { parseColor } from '../../shared/pixels/color.js';
-import { Document, RasterLayer, createCanvas } from './document.js';
+import { Document, RasterLayer, createCanvas, isDefaultBlending } from './document.js';
 import { flattenDocument } from './compositor.js';
 import { registerExportFormat, registerOpenFormat, baseName, extOf } from './io.js';
 import { SAVE_FILTERS } from './documents.js';
@@ -415,9 +415,10 @@ export function install(app) {
         if (layer.clip && kids.slice(0, i).some((k) => !k.clip)) reason = `${name} is a clipping mask`;
         else if (layer.type === 'adjustment') {
           const def = Object.prototype.hasOwnProperty.call(ADJUSTMENTS, layer.kind) ? ADJUSTMENTS[layer.kind] : null;
-          if (!def || !(isExactKind(layer.kind, layer.params ?? {}) || typeof def.lut === 'function')) reason = `the ${def?.name ?? layer.kind} adjustment layer works at 8 bits`;
+          if (!def || !(isExactKind(layer.kind, layer.params ?? {}) || lutCovers(layer.kind, layer.params ?? {}))) reason = `the ${def?.name ?? layer.kind} adjustment layer works at 8 bits`;
           else steps.push({ adjust: layer });
-        } else if (layer.isGroup) {
+        } else if (!isDefaultBlending(layer.blending)) reason = `${name} has advanced blending options`; // knockout, Blend If, channels (K.3)
+        else if (layer.isGroup) {
           if (layer.blend === 'pass-through' && layer.opacity >= 1 && !hasEffectiveMask(layer) && !styled(layer)) walk(layer); // mask (K.1)
           else reason = `the group ${name} is not a plain Pass Through group`;
         } else if (styled(layer)) reason = `${name} has layer effects`;
@@ -573,7 +574,7 @@ export function install(app) {
       for (let p = layers[layers.length - 1].parent; p; p = p.parent) kept.add(p);
       for (const l of layers) {
         for (let p = l.parent; p && !kept.has(p); p = p.parent) {
-          if (!p.visible || p.clip || p.blend !== 'pass-through' || p.opacity < 1 || p.mask?.enabled || p.styles) return false;
+          if (!p.visible || p.clip || p.blend !== 'pass-through' || p.opacity < 1 || hasEffectiveMask(p) || hasEnabledStyles(p.styles) || !isDefaultBlending(p.blending)) return false;
         }
       }
       return true;

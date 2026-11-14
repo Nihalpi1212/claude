@@ -1,4 +1,6 @@
 // Layer styles 0.4 skeleton (J.6): instances, hidden, helpers, applyStyles options, splitEffects.
+// The assertions about what the renderer draws are gated on STYLE_FEATURES (rule 8): the skeleton's stub drew only the
+// first instance and ignored the options; layer-style-effects makes them real (tests/unit/layer-style-effects.test.mjs).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -16,8 +18,9 @@ function square(size = 16, x0 = 6, side = 4) {
 const shadowA = { enabled: true, size: 4, distance: 3, color: '#000000' };
 const shadowB = { enabled: true, size: 8, distance: 6, color: '#0000ff' };
 
-test('STYLE_FEATURES says nothing beyond 0.3 is real yet; the instance keys', () => {
-  assert.deepEqual(STYLE_FEATURES, { instances: false, interiorAsGroup: false, transparencyShapes: false, split: false });
+test('STYLE_FEATURES names the four 0.4 features; the instance keys', () => {
+  assert.deepEqual(Object.keys(STYLE_FEATURES), ['instances', 'interiorAsGroup', 'transparencyShapes', 'split']);
+  for (const v of Object.values(STYLE_FEATURES)) assert.equal(typeof v, 'boolean');
   assert.deepEqual(INSTANCE_KEYS, ['dropShadow', 'innerShadow', 'colorOverlay', 'gradientOverlay', 'stroke']);
 });
 
@@ -96,13 +99,16 @@ test('scaleEffects scales every instance\'s pixel fields, pattern and texture sc
   assert.deepEqual(merged.dropShadow.map((s) => s.size), [8, 16]);
 });
 
-test('stylePadding and applyStyles draw the first enabled instance and nothing while hidden', () => {
+test('stylePadding and applyStyles draw the enabled instances (the first only before 0.4) and nothing while hidden', () => {
   const img = square();
   const arr = { dropShadow: [{ ...shadowA, enabled: false }, shadowB, shadowA] };
-  assert.equal(stylePadding(arr), stylePadding({ dropShadow: shadowB }));
+  // with instances real every enabled instance draws, so a disabled one is the same as no entry
+  const same = STYLE_FEATURES.instances ? { dropShadow: [shadowB, shadowA] } : { dropShadow: shadowB };
+  assert.equal(stylePadding(arr), stylePadding(same));
   const a = applyStyles(img, arr);
-  const b = applyStyles(img, { dropShadow: shadowB });
+  const b = applyStyles(img, same);
   assert.deepEqual(a.image.data, b.image.data);
+  if (STYLE_FEATURES.instances) assert.notDeepEqual(a.image.data, applyStyles(img, { dropShadow: shadowB }).image.data);
   assert.equal(stylePadding({ dropShadow: shadowB, hidden: true }), 0);
   const h = applyStyles(img, { dropShadow: shadowB, hidden: true });
   const plain = applyStyles(img, null);
@@ -110,17 +116,31 @@ test('stylePadding and applyStyles draw the first enabled instance and nothing w
   assert.deepEqual([h.offsetX, h.offsetY], [0, 0]);
 });
 
-test('applyStyles accepts the 0.4 option names; split returns the merged image as the layer', () => {
+test('applyStyles accepts the 0.4 option names; split returns the layer and what lies below it', () => {
   const img = square();
   const st = { dropShadow: shadowB, colorOverlay: { enabled: true, color: '#00ff00' } };
   const base = applyStyles(img, st);
+  // the defaults of the options draw what 0.3 drew
+  const defaults = applyStyles(img, st, { interiorAsGroup: false, transparencyShapes: true });
+  assert.deepEqual(defaults.image.data, base.image.data);
   const withOpts = applyStyles(img, st, { interiorAsGroup: true, transparencyShapes: false });
-  assert.deepEqual(withOpts.image.data, base.image.data);
+  if (!STYLE_FEATURES.interiorAsGroup && !STYLE_FEATURES.transparencyShapes) assert.deepEqual(withOpts.image.data, base.image.data);
+  else assert.equal(withOpts.image.width, base.image.width);
   const split = applyStyles(img, st, { split: true });
-  assert.equal(split.below, null);
   assert.equal(split.above, null);
-  assert.deepEqual(split.layer.data, base.image.data);
   assert.deepEqual([split.offsetX, split.offsetY], [base.offsetX, base.offsetY]);
+  if (!STYLE_FEATURES.split) {
+    assert.equal(split.below, null);
+    assert.deepEqual(split.layer.data, base.image.data);
+  } else {
+    // the shadow is below; the layer holds the overlaid pixels only (recomposition: layer-style-effects.test.mjs)
+    assert.deepEqual([split.below.width, split.layer.width], [base.image.width, base.image.width]);
+    const px = (im, x, y) => im.data[(y * im.width + x) * 4 + 3];
+    const sx = 8 - base.offsetX + 6, sy = 8 - base.offsetY + 6; // inside the shadow, outside the layer
+    assert.ok(px(split.below, sx, sy) > 0);
+    assert.equal(px(split.layer, sx, sy), 0);
+    assert.equal(px(split.layer, 8 - base.offsetX, 8 - base.offsetY), 255);
+  }
 });
 
 test('splitEffects: exterior below (bottom instance first), interior clipped above, in stacking order', () => {
@@ -141,10 +161,16 @@ test('splitEffects: exterior below (bottom instance first), interior clipped abo
   const ds = parts[0];
   assert.equal(ds.blend, 'multiply');
   assert.equal(ds.opacity, 0.4);
-  // an exterior effect alone equals applyStyles with only that effect at full opacity on a zero fill
-  const ref = applyStyles(img, { dropShadow: { ...shadowB, opacity: 1, blend: 'normal' } }, { fillOpacity: 0 });
-  assert.deepEqual(ds.image.data, ref.image.data);
-  assert.deepEqual([ds.x, ds.y], [ref.offsetX, ref.offsetY]);
+  if (!STYLE_FEATURES.split) {
+    // the stub: an exterior effect alone equals applyStyles with only that effect at full opacity on a zero fill
+    const ref = applyStyles(img, { dropShadow: { ...shadowB, opacity: 1, blend: 'normal' } }, { fillOpacity: 0 });
+    assert.deepEqual(ds.image.data, ref.image.data);
+    assert.deepEqual([ds.x, ds.y], [ref.offsetX, ref.offsetY]);
+  } else {
+    // exact parts are cropped to their own pixels and knocked out by the layer (layer-style-effects.test.mjs)
+    assert.ok(ds.image.width > 0 && Number.isFinite(ds.x) && Number.isFinite(ds.y));
+    assert.ok(ds.image.data.some((v, i) => i % 4 === 3 && v > 0));
+  }
   // the overlay is clipped to the layer and holds its colour
   const co = parts.find((p) => p.key === 'colorOverlay');
   const at = (p, x, y) => getPixel(p.image, x - p.x, y - p.y);

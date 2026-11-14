@@ -513,7 +513,11 @@ async function preferencesDialog(app) {
   const patch = {};
   for (const sec of sections) {
     try {
-      Object.assign(patch, sec.write?.(result, app.settings) ?? {});
+      // namespace objects (J.7) merge one level deep, so two sections writing settings.type keep each other's keys
+      for (const [k, v] of Object.entries(sec.write?.(result, app.settings) ?? {})) {
+        const plain = (o) => o && typeof o === 'object' && !Array.isArray(o);
+        patch[k] = plain(v) && plain(patch[k]) ? { ...patch[k], ...v } : v;
+      }
     } catch (err) {
       console.warn(`preferences section ${sec.id} write failed`, err);
     }

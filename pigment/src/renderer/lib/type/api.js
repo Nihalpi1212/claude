@@ -163,14 +163,22 @@ function hyphenateRange(layer, from, to) {
   const content = layer.content;
   const word = plainText(content).slice(from, to);
   const lang = charStyleAt(content, from).language;
-  const h = hyphenators.find((x) => !x.languages.length || x.languages.includes(lang));
-  if (!h) return null;
+  // hyphenators that name the language first, then the catch-alls (no languages); newest first in each, and one that
+  // answers null passes the word on (a later package's hyphenator is not shadowed by an earlier catch-all)
+  const newest = hyphenators.slice().reverse();
+  const order = [...newest.filter((x) => x.languages.includes(lang)), ...newest.filter((x) => !x.languages.length)];
+  if (!order.length) return null;
   const para = paragraphs(content).find((p) => from >= p.from && from <= p.to);
   const hy = para?.style.hyphenation ?? {};
-  if (word.length < (hy.minWord ?? 7)) return null;
+  // Photoshop's "Words Longer Than n letters": a word of n letters or fewer stays whole
+  if (word.length <= (hy.minWord ?? 7)) return null;
   if (hy.capitalized === false && /^\p{Lu}/u.test(word)) return null;
-  const raw = h.fn(word, lang) ?? [];
-  return raw.filter((p) => p >= (hy.after ?? 2) && word.length - p >= (hy.before ?? 2)).map((p) => from + p);
+  let raw = null;
+  for (const h of order) {
+    raw = h.fn(word, lang);
+    if (raw != null) break;
+  }
+  return (raw ?? []).filter((p) => p >= (hy.after ?? 2) && word.length - p >= (hy.before ?? 2)).map((p) => from + p);
 }
 
 /** The layout the layer displays: a textExtensions entry (text on a path, stacked text), else the engine. */
@@ -663,7 +671,7 @@ function canvasLayout(layer, env) {
     const spaces = justify ? (text.slice(r.textFrom, r.textTo).match(/ /g) ?? []).length : 0;
     // a composer's `justify` (extra px per space and per glyph gap, glyph scale) is applied as given; without one the
     // stub spreads the extra width over the spaces (0.3 had no justification; the stub composer returns none)
-    const wordSpace = r.justify ? Math.max(0, Number(r.justify.wordSpace) || 0) : justify && spaces ? Math.max(0, avail - l.width) / spaces : 0;
+    const wordSpace = r.justify ? Number(r.justify.wordSpace) || 0 : justify && spaces ? Math.max(0, avail - l.width) / spaces : 0;
     const letterSpace = r.justify ? Number(r.justify.letterSpace) || 0 : 0;
     const glyphScale = r.justify && Number(r.justify.glyphScale) > 0 ? Number(r.justify.glyphScale) : 1;
     // the expression order is 0.3's (ox + l.width − line.width for right alignment), so positions match bit for bit

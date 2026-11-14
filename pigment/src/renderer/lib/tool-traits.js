@@ -22,6 +22,9 @@ const CLAIMS = new Map([
   ...['pen-tool', 'pen-free', 'pen-add', 'pen-delete', 'pen-convert', 'path-selection', 'direct-selection', 'shape-rect', 'shape-rrect', 'shape-ellipse', 'shape-polygon', 'shape-line', 'shape-custom', 'shape-triangle'].map((id) => [id, new Set(['ctrl', 'alt'])]),
   // the Move tool: Ctrl toggles auto-select
   ['move', new Set(['ctrl'])],
+  // tools whose Alt is their own: Alt-click sets the source (Clone Stamp, Healing Brush), swaps (Dodge / Burn) or
+  // subtracts (Adjustment Brush)
+  ...['clone', 'heal', 'dodge', 'burn', 'adjustment-brush'].map((id) => [id, new Set(['alt'])]),
 ]);
 
 /** True when the tool paints pixels (its own `paints` flag, else the fallback table). */

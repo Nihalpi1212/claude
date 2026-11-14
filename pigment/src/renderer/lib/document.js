@@ -71,6 +71,15 @@ const deepFreeze = (o) => {
 };
 const jsonCopy = (v) => (v === undefined || v === null ? null : JSON.parse(JSON.stringify(v)));
 
+/** The stored fields of a fill layer's PatternPaint (J.1); the pixels go to `patterns/<id>.png` (io.js). */
+const PATTERN_FIELDS = ['scale', 'angle', 'link', 'origin', 'presetId', 'name'];
+const describePattern = (pattern) => {
+  if (!pattern) return undefined;
+  const out = {};
+  for (const k of PATTERN_FIELDS) if (pattern[k] !== undefined) out[k] = pattern[k];
+  return out;
+};
+
 /**
  * A vector mask: `path` is PathData in document space; `initialFill` is what the mask starts from before the path's
  * components are combined into it ('hide': the path's inside shows; 'reveal': everything shows, subtract hides).
@@ -726,7 +735,7 @@ export class Document {
       const registered = LAYER_TYPES.get(layer.type);
       if (registered?.describe) Object.assign(d, registered.describe(layer));
       if (layer.type === 'shape') Object.assign(d, { path: JSON.parse(JSON.stringify(layer.path)), fill: layer.fill, stroke: layer.stroke, shapeKind: layer.shapeKind, shapeProps: layer.shapeProps });
-      if (layer.type === 'fill') Object.assign(d, { paint: JSON.parse(JSON.stringify({ ...layer.paint, pattern: layer.paint.pattern ? { scale: layer.paint.pattern.scale } : undefined })) });
+      if (layer.type === 'fill') Object.assign(d, { paint: JSON.parse(JSON.stringify({ ...layer.paint, pattern: describePattern(layer.paint.pattern) })) });
       if (layer.type === 'adjustment') Object.assign(d, { kind: layer.kind, params: JSON.parse(JSON.stringify(layer.params)) });
       return d;
     };

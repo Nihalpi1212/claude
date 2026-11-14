@@ -1,1 +1,48 @@
-/* layers-panel-depth (ARCHITECTURE.md "0.4 features", rule 6): this package's styles. Empty until the package lands. */
+/* layers-panel-depth (package 14): the Layers panel's 0.4 depth. panels.css keeps 0.3's row styles. */
+
+/* Panel Options: thumbnail size (the row and thumbnail sizes come from lib/panels/layers-model.js THUMB_SIZES) */
+.layer-list { --layer-row-h: 40px; --layer-thumb-w: 36px; --layer-thumb-h: 30px; }
+.layer-list .layer-row:not(.smart-filter-head):not(.smart-filter-row) { height: var(--layer-row-h); }
+.layer-list .layer-row .layer-thumb { width: var(--layer-thumb-w); height: var(--layer-thumb-h); }
+.layer-list[data-thumb='none'] .layer-row .layer-thumb.icon-thumb { width: 18px; height: 18px; border: 0; background: none; }
+.layer-list[data-thumb='none'] .layer-row .layer-thumb.icon-thumb svg,
+.layer-list[data-thumb='small'] .layer-row .layer-thumb svg { width: 13px; height: 13px; }
+.layer-thumb.icon-thumb svg { stroke: var(--fg-muted); }
+.layer-list[data-thumb='large'] .layer-name { font-size: 13px; }
+
+/* the toolbar: blend-mode button, scrubby Opacity and Fill, the panel menu */
+.layers-toolbar-blend { gap: 6px; }
+.blend-mode-button { flex: 1; min-width: 0; height: 24px; font-size: 12px; text-align: left; padding: 0 20px 0 8px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.blend-mode-button:disabled { cursor: default; opacity: 0.55; }
+.blend-mode-label { pointer-events: none; }
+.blend-mode-list { max-height: 420px; overflow-y: auto; padding: 4px 0; outline: none; }
+.blend-mode-list .blend-mode-item { display: block; padding: 3px 14px; font-size: 12px; cursor: default; white-space: nowrap; }
+.blend-mode-list .blend-mode-item.highlighted { background: var(--accent); color: var(--accent-fg); }
+.blend-mode-list .blend-mode-item[aria-selected='true']:not(.highlighted) { font-weight: 600; }
+.layers-percent { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; flex: none; }
+.layers-percent .numeric-label { color: var(--fg-muted); font-size: 11px; }
+.layers-percent .numeric-label.scrubby { cursor: ew-resize; }
+.layers-percent .input.num { width: 46px; height: 24px; font-size: 12px; padding: 0 4px; }
+.layers-percent .opt-unit { color: var(--fg-muted); font-size: 11px; }
+.layers-menu-button { flex: none; }
+.layers-toolbar [data-lock].mixed { box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--accent) 60%, transparent); }
+
+/* effect rows under a layer (lib/panels/layers-effects.js) */
+.layer-effect-row { display: flex; align-items: center; gap: 6px; height: 22px; padding: 0 6px 0 4px; font-size: 11px; color: var(--fg-muted); border-bottom: 1px solid color-mix(in srgb, var(--border) 35%, transparent); cursor: default; position: relative; }
+.layer-effect-row:hover { background: var(--accent-soft); }
+.layer-effect-row.selected { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.layer-effect-row.dragging { opacity: 0.4; }
+.layer-effect-row .eye { width: 20px; height: 18px; border: 0; background: none; color: var(--fg); cursor: pointer; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+.layer-effect-row .eye svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.75; }
+.layer-effect-row .eye.off svg { opacity: 0.25; }
+.layer-effect-row .layer-name { font-size: 11px; }
+.layer-effect-row.off .layer-name { opacity: 0.55; }
+.layer-effects-icon { font-size: 10px; font-weight: 700; font-style: italic; }
+.layer-fx.off { opacity: 0.45; }
+.layer-fx-twisty { width: 12px; }
+
+/* drags: footer drop targets, refused drops show nothing */
+.panel-footer .pbtn.drop-target { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* Alt over the line between two layers: the clipping cursor */
+.layer-list.clip-cursor, .layer-list.clip-cursor .layer-row { cursor: alias; }

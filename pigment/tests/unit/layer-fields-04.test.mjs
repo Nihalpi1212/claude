@@ -73,7 +73,7 @@ test('normalizeShapeProps reads every 0.3 shape (J.5 table)', () => {
   assert.deepEqual(normalizeShapeProps({ shapeKind: 'rect', shapeProps: { x: 0, y: 0, width: 1, height: 1, angle: 30, radii: [1, 2, 3, 4] } }).props.radii, [1, 2, 3, 4]);
 });
 
-test('mapShapeGeometry stub: path mapped, props shifted only by a translation, document-space paints mapped', () => {
+test('mapShapeGeometry: path mapped, props shifted by a translation and scaled by a scale, document-space paints mapped', () => {
   const layer = {
     shapeKind: 'rect',
     shapeProps: { x: 10, y: 20, width: 5, height: 5, radius: 0 },
@@ -90,7 +90,8 @@ test('mapShapeGeometry stub: path mapped, props shifted only by a translation, d
   assert.equal(move.stroke, undefined); // a solid stroke has nothing to map
   assert.deepEqual(layer.shapeProps.x, 10); // the input is not changed
   const scale = mapShapeGeometry(layer, (x, y) => [x * 2, y * 2], { matrix: [2, 0, 0, 2, 0, 0] });
-  assert.deepEqual(scale.shapeProps, layer.shapeProps); // 0.3: display only
+  // shapes-live (J.5): a uniform scale goes into the size fields, normalised to the 0.4 form
+  assert.deepEqual(scale.shapeProps, { x: 20, y: 40, width: 10, height: 10, angle: 0, radii: [0, 0, 0, 0] });
   assert.notEqual(scale.shapeProps, layer.shapeProps);
   assert.deepEqual(scale.path.subpaths[0].points[1], { x: 30, y: 40 });
   assert.deepEqual(mapPathPoints({ subpaths: [] }, (x, y) => [x, y]), { subpaths: [] });

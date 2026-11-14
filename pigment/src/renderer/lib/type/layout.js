@@ -237,7 +237,7 @@ export function layoutContent(content, opts) {
     const align = ps.align === 'center' ? 'center' : ps.align === 'right' ? 'right' : ps.align.startsWith('justify') && !justify ? ({ 'justify-center': 'center', 'justify-right': 'right' })[ps.align] ?? 'left' : 'left';
     const spaces = countSpaces(text, l.r.drawFrom, l.trimmed);
     const gaps = Math.max(0, countUnits(l.pcs, l.trimmed) - 1);
-    const wordSpace = r.justify ? Math.max(0, Number(r.justify.wordSpace) || 0) : justify && spaces ? Math.max(0, avail - l.natural) / spaces : 0;
+    const wordSpace = r.justify ? Number(r.justify.wordSpace) || 0 : justify && spaces ? Math.max(0, avail - l.natural) / spaces : 0;
     const letterSpace = r.justify ? Number(r.justify.letterSpace) || 0 : 0;
     const glyphScale = r.justify && Number(r.justify.glyphScale) > 0 ? Number(r.justify.glyphScale) : 1;
     const drawnWidth = (l.natural - l.hyphenW + wordSpace * spaces + letterSpace * gaps) * glyphScale + l.hyphenW;

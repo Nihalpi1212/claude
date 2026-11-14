@@ -1,19 +1,41 @@
-// Layers panel: the layer tree with visibility, thumbnails, masks, blend mode, opacity, fill,
-// locks, drag-and-drop reordering and grouping, rename, context menu and the footer buttons.
+// Layers panel: the layer tree with visibility, thumbnails, masks, blend mode, opacity, fill, locks, drag-and-drop,
+// rename, context menu and the footer buttons. 0.4 (layers-panel-depth, package 14) adds Photoshop's depth:
+//   - scrubby Opacity and Fill (numericField with `scrubby`), applied to every selected layer ({ ids, value }, M.3;
+//     a drag over the label is one history entry), and the blend-mode menu with live preview while hovering and
+//     arrow-key stepping (lib/blend-preview.js);
+//   - lock buttons on every selected layer; controls of the properties the Background rules lock (L.13) disabled;
+//   - footer modifiers: New Layer Alt-click { dialog: true }, Ctrl/Cmd-click { below: true }; New Group Alt-click
+//     { dialog: true }; Add Mask Alt-click hides, and adds a vector mask once the layer has a layer mask; rows and
+//     effect rows dropped on New Layer duplicate, on Delete delete;
+//   - drags: every selected row moves together, Alt-drag copies, drops into groups, effect rows between layers;
+//     indicators refuse what app.backgroundRules.canPlace refuses;
+//   - the eye column: drag down the eyes to show or hide each layer passed over (one history entry), Alt-click solo;
+//   - Alt-click on the line between two layers clips the upper one (layer:clip { id });
+//   - nested groups: Alt-click a group's triangle opens or closes every group inside it, Ctrl/Cmd-click every group;
+//   - effect rows under a layer (lib/panels/layers-effects.js) with the fx twisty;
+//   - the panel menu (lib/panels/layers-menu.js) and the Panel Options' thumbnail size and contents.
+// The row order and the gestures' rules are pure functions in lib/panels/layers-model.js (unit tested).
 import { icon } from '../icons.js';
-import { BLEND_MODES } from '../document.js';
 import { hasEnabledStyles } from '../../../shared/pixels/styles.js';
 import { Selection } from '../selection.js';
 import { vectorMaskThumb } from '../mask-view.js';
-
-const THUMB_W = 36, THUMB_H = 30;
+import { numericField } from '../numeric-field.js';
+import { blendControl, endBlendPreview } from '../blend-preview.js';
+import { createCanvas } from '../document.js';
+import {
+  panelRows, thumbSpec, dropPlacement, PLACE_MODE, clipEdge, clipCandidate, dragSubjects, dropRefused, sweepTargets,
+  groupsIn, alphaBounds, fitBox, listedEffects,
+} from './layers-model.js';
+import { effectHeaderRow, effectRow, runEffect } from './layers-effects.js';
+import { panelMenuItems, panelSettings } from './layers-menu.js';
 
 export function install(app) {
   const el = document.createElement('div');
   el.innerHTML = `
-    <div class="panel-toolbar layers-toolbar">
-      <select class="select" data-blend title="Blend mode"></select>
-      <label class="prop-inline" title="Opacity">Opacity <input class="input num" type="number" min="0" max="100" step="1" data-opacity> %</label>
+    <div class="panel-toolbar layers-toolbar layers-toolbar-blend">
+      <span class="layers-blend-slot"></span>
+      <span class="layers-opacity-slot"></span>
+      <button class="pbtn layers-menu-button" data-panel-menu title="Layers panel menu">${icon('menu')}</button>
     </div>
     <div class="panel-toolbar layers-toolbar">
       <span class="muted">Lock</span>
@@ -22,77 +44,217 @@ export function install(app) {
       <button class="pbtn" data-lock="position" title="Lock position">${icon('move')}</button>
       <button class="pbtn" data-lock="all" title="Lock all">${icon('lock')}</button>
       <span style="flex:1"></span>
-      <label class="prop-inline" title="Fill opacity (excludes layer styles)">Fill <input class="input num" type="number" min="0" max="100" step="1" data-fill> %</label>
+      <span class="layers-fill-slot"></span>
     </div>
     <ul class="layer-list" role="tree" aria-label="Layers"></ul>
     <div class="panel-footer">
       <button class="pbtn" data-cmd="layer:link" title="Link layers" hidden>${icon('link')}</button>
       <button class="pbtn" data-menu="style" title="Add a layer style">${icon('fx')}</button>
-      <button class="pbtn" data-cmd="layer:mask" data-arg="auto" title="Add layer mask">${icon('mask')}</button>
+      <button class="pbtn" data-cmd="layer:mask" data-arg="auto" title="Add layer mask (Alt: hide all; with a layer mask: add a vector mask)">${icon('mask')}</button>
       <button class="pbtn" data-menu="adjust" title="New fill or adjustment layer">${icon('adjust')}</button>
-      <button class="pbtn" data-cmd="layer:new-group" title="New group">${icon('folder')}</button>
-      <button class="pbtn" data-cmd="layer:new" title="New layer">${icon('plus')}</button>
-      <button class="pbtn" data-cmd="layer:delete" title="Delete layer">${icon('trash')}</button>
+      <button class="pbtn" data-cmd="layer:new-group" title="New group (Alt: with options)">${icon('folder')}</button>
+      <button class="pbtn" data-cmd="layer:new" title="New layer (Alt: with options; Ctrl/Cmd: below the current layer). Drop layers here to duplicate them">${icon('plus')}</button>
+      <button class="pbtn" data-cmd="layer:delete" title="Delete layer. Drop layers or effects here to delete them">${icon('trash')}</button>
     </div>`;
   el.style.display = 'flex';
   el.style.flexDirection = 'column';
   const list = el.querySelector('.layer-list');
   list.style.flex = '1';
   list.style.overflow = 'auto';
-  const blend = el.querySelector('[data-blend]');
-  for (const m of BLEND_MODES) {
-    if (!m) {
-      const sep = document.createElement('option');
-      sep.disabled = true;
-      sep.textContent = '──────────';
-      blend.appendChild(sep);
-      continue;
-    }
-    const o = document.createElement('option');
-    o.value = m[0];
-    o.textContent = m[1];
-    blend.appendChild(o);
-  }
-  const passThrough = document.createElement('option');
-  passThrough.value = 'pass-through';
-  passThrough.textContent = 'Pass Through';
-  blend.insertBefore(passThrough, blend.firstChild);
-  const opacity = el.querySelector('[data-opacity]');
-  const fill = el.querySelector('[data-fill]');
 
-  blend.addEventListener('change', () => app.commands.run('layer:blend', blend.value, 'panel'));
-  opacity.addEventListener('change', () => app.commands.run('layer:opacity', Number(opacity.value), 'panel'));
-  fill.addEventListener('change', () => app.commands.run('layer:fill-opacity', Number(fill.value), 'panel'));
-  for (const b of el.querySelectorAll('[data-lock]')) b.addEventListener('click', () => app.commands.run('layer:lock', b.dataset.lock, 'panel'));
-  for (const b of el.querySelectorAll('[data-cmd]')) b.addEventListener('click', () => app.commands.run(b.dataset.cmd, b.dataset.arg, 'panel'));
+  // ---- the controls ------------------------------------------------------------------------------------------
+  const doc = () => app.doc;
+  /** The layers the controls act on: the selected ones (the active one when none is selected). */
+  const targets = () => {
+    const d = doc();
+    if (!d) return [];
+    const sel = d.selectedLayers();
+    return sel.length ? sel : d.active ? [d.active] : [];
+  };
+  const ids = () => targets().map((l) => l.id);
+  const locked = (layer, prop) => (app.backgroundRules?.lockedProps?.(layer) ?? []).includes(prop);
+  /** The selected layers whose `prop` the Background rules leave free. */
+  const free = (prop) => targets().filter((l) => !locked(l, prop));
+
+  const blend = blendControl(app, {
+    targets: () => free('blend'),
+    commit: (mode) => app.commands.run('layer:blend', { ids: free('blend').map((l) => l.id), value: mode }, 'panel'),
+  });
+  el.querySelector('.layers-blend-slot').replaceWith(blend.element);
+
+  // a scrub of the label, the arrow keys and the popup slider apply live (merged into one history entry by
+  // setLayersProps); typed digits wait for Enter, Tab or leaving the field (the field's change event)
+  const percentField = (labelText, attr, commandId, prop, title) => {
+    const field = numericField({
+      label: labelText,
+      scrubby: true,
+      min: 0,
+      max: 100,
+      step: 1,
+      unit: '%',
+      popup: true,
+      width: 46,
+      className: 'input num',
+      onChange: (v) => setPercent(commandId, prop, v),
+    });
+    field.input.dataset[attr] = '';
+    field.input.title = title;
+    field.element.title = title;
+    field.element.classList.add('layers-percent');
+    field.input.addEventListener('input', (e) => {
+      if (e.isTrusted && typeof InputEvent !== 'undefined' && e instanceof InputEvent) return; // typing
+      const v = field.get();
+      if (v !== null) setPercent(commandId, prop, v);
+    });
+    return field;
+  };
+  const setPercent = (commandId, prop, v) => {
+    const layers = free(prop);
+    if (!layers.length || !Number.isFinite(v)) return;
+    const value = Math.max(0, Math.min(100, Math.round(v)));
+    if (layers.every((l) => Math.round((l[prop] ?? 1) * 100) === value)) return;
+    app.commands.run(commandId, { ids: layers.map((l) => l.id), value }, 'panel');
+  };
+  const opacity = percentField('Opacity', 'opacity', 'layer:opacity', 'opacity', 'Opacity: drag the label to scrub, Shift ten times faster');
+  const fill = percentField('Fill', 'fill', 'layer:fill-opacity', 'fillOpacity', 'Fill opacity (excludes layer styles): drag the label to scrub');
+  el.querySelector('.layers-opacity-slot').replaceWith(opacity.element);
+  el.querySelector('.layers-fill-slot').replaceWith(fill.element);
+
+  for (const b of el.querySelectorAll('[data-lock]')) b.addEventListener('click', () => app.commands.run('layer:lock', { ids: ids(), value: b.dataset.lock }, 'panel'));
+  el.querySelector('[data-panel-menu]').addEventListener('click', (e) => app.dialogs.popover(e.currentTarget, panelMenuItems(app), { align: 'right' }));
+
+  // footer: modifiers (M.3), and drops of rows (duplicate, delete)
+  for (const b of el.querySelectorAll('.panel-footer [data-cmd]')) {
+    b.addEventListener('click', (e) => footerClick(b.dataset.cmd, b.dataset.arg, e));
+    b.addEventListener('dragover', (e) => {
+      if (!drag || !['layer:new', 'layer:delete'].includes(b.dataset.cmd)) return;
+      if (drag.kind === 'effects' && b.dataset.cmd !== 'layer:delete') return;
+      e.preventDefault();
+      b.classList.add('drop-target');
+    });
+    b.addEventListener('dragleave', () => b.classList.remove('drop-target'));
+    b.addEventListener('drop', (e) => {
+      b.classList.remove('drop-target');
+      if (!drag) return;
+      e.preventDefault();
+      dropOnFooter(b.dataset.cmd);
+    });
+  }
   el.querySelector('[data-menu="style"]').addEventListener('click', (e) => app.dialogs.popover(e.currentTarget, app.layerStyleMenu?.() ?? [], { align: 'right' }));
   el.querySelector('[data-menu="adjust"]').addEventListener('click', (e) => app.dialogs.popover(e.currentTarget, app.adjustmentLayerMenu?.() ?? [], { align: 'right' }));
 
-  const thumbCache = new WeakMap(); // layer -> { version, canvas }
-  let dragLayer = null;
-  let renaming = null;
-  let pending = 0;
+  function footerClick(cmd, arg, e) {
+    const mod = e.ctrlKey || e.metaKey;
+    if (cmd === 'layer:new') {
+      const o = {};
+      if (e.altKey) o.dialog = true;
+      if (mod) o.below = true;
+      return app.commands.run('layer:new', Object.keys(o).length ? o : undefined, 'panel');
+    }
+    if (cmd === 'layer:new-group') return app.commands.run('layer:new-group', e.altKey ? { dialog: true } : undefined, 'panel');
+    if (cmd === 'layer:mask') {
+      const layer = doc()?.active;
+      // Photoshop: the button adds a layer mask, then a vector mask; Alt makes them hide instead of reveal
+      if (layer?.mask && !layer.vectorMask && app.commands.has('layer:vector-mask')) return app.commands.run('layer:vector-mask', e.altKey ? 'hide-all' : 'reveal-all', 'panel');
+      if (e.altKey && !layer?.mask) return app.commands.run('layer:mask', doc()?.selection && !doc().selection.isEmpty ? 'hide-selection' : 'hide-all', 'panel');
+      return app.commands.run('layer:mask', arg, 'panel');
+    }
+    return app.commands.run(cmd, arg, 'panel');
+  }
+
+  function dropOnFooter(cmd) {
+    const d = doc();
+    const payload = drag;
+    endDrag();
+    if (!d || !payload) return;
+    if (payload.kind === 'effects') {
+      if (cmd !== 'layer:delete') return;
+      const { layer, pick } = payload;
+      if (pick) runEffect(app, { id: layer.id, op: 'delete', key: pick.key, index: pick.index });
+      else runEffect(app, { id: layer.id, op: 'clear' });
+      return;
+    }
+    // the dragged layers become the selection, then Duplicate or Delete acts on them
+    const layers = payload.layers.filter((l) => d.find(l.id));
+    if (!layers.length) return;
+    d.selected.clear();
+    for (const l of layers) d.selected.add(l);
+    d.active = layers[layers.length - 1];
+    d.changed('active', { layer: d.active });
+    app.commands.run(cmd === 'layer:new' ? 'layer:duplicate' : 'layer:delete', undefined, 'panel');
+  }
+
+  // ---- thumbnails ----------------------------------------------------------------------------------------------
+  const thumbCache = new WeakMap(); // layer -> { [kind]: { key, canvas } }
+  const boundsCache = new WeakMap(); // layer -> { key, box } (content bounds for Thumbnail Contents: Layer Bounds)
+  const effectsOpen = new WeakMap(); // layer -> boolean (the fx twisty; default settings.layersPanel.expandEffects)
+  let scratch = null;
+
+  /** What the layer draws: { canvas, x, y } in document space, or null. */
+  function source(layer) {
+    if (layer.type === 'raster') return { canvas: layer.canvas, x: layer.x, y: layer.y };
+    if (layer.render) return layer.render() ?? null;
+    return null;
+  }
+
+  /** The box of the layer's visible pixels (document space), measured on a copy at most 256 px wide (cached). */
+  function contentBox(layer, src) {
+    const key = `${layer.version}:${src.canvas.width}x${src.canvas.height}@${src.x},${src.y}`;
+    const hit = boundsCache.get(layer);
+    if (hit?.key === key) return hit.box;
+    const sw = src.canvas.width, sh = src.canvas.height;
+    let box = null;
+    if (sw > 0 && sh > 0) {
+      const k = Math.min(1, 256 / Math.max(sw, sh));
+      const w = Math.max(1, Math.round(sw * k)), h = Math.max(1, Math.round(sh * k));
+      scratch ??= createCanvas(1, 1);
+      scratch.width = w;
+      scratch.height = h;
+      const ctx = scratch.getContext('2d', { willReadFrequently: true });
+      ctx.clearRect(0, 0, w, h);
+      ctx.drawImage(src.canvas, 0, 0, w, h);
+      const b = alphaBounds(ctx.getImageData(0, 0, w, h).data, w, h);
+      if (b) {
+        const x0 = Math.max(0, Math.floor(b.x / k)), y0 = Math.max(0, Math.floor(b.y / k));
+        const x1 = Math.min(sw, Math.ceil((b.x + b.w) / k)), y1 = Math.min(sh, Math.ceil((b.y + b.h) / k));
+        box = { x: src.x + x0, y: src.y + y0, w: Math.max(1, x1 - x0), h: Math.max(1, y1 - y0) };
+      }
+    }
+    boundsCache.set(layer, { key, box });
+    return box;
+  }
 
   function thumb(layer, kind = 'layer') {
-    const key = kind === 'mask' ? `m${layer.version}` : `l${layer.version}`;
+    const opts = panelSettings(app);
+    const spec = thumbSpec(opts.thumbSize);
+    const d = doc();
+    const key = `${kind === 'mask' ? 'm' : 'l'}${layer.version}:${spec.w}x${spec.h}:${opts.thumbBounds}:${d.width}x${d.height}`;
     const cache = thumbCache.get(layer) ?? {};
     if (cache[kind]?.key === key) return cache[kind].canvas;
+    const W = Math.max(8, spec.w || thumbSpec('small').w), H = Math.max(8, spec.h || thumbSpec('small').h);
     const c = document.createElement('canvas');
-    const doc = app.doc;
-    const scale = Math.min(THUMB_W / doc.width, THUMB_H / doc.height);
-    c.width = Math.max(1, Math.round(doc.width * scale));
-    c.height = Math.max(1, Math.round(doc.height * scale));
     const ctx = c.getContext('2d');
     ctx.imageSmoothingQuality = 'medium';
-    ctx.scale(scale, scale);
     if (kind === 'mask') {
+      const f = fitBox(d.width, d.height, W, H);
+      c.width = f.w;
+      c.height = f.h;
+      ctx.scale(f.scale, f.scale);
       ctx.fillStyle = '#000';
-      ctx.fillRect(0, 0, doc.width, doc.height);
+      ctx.fillRect(0, 0, d.width, d.height);
       if (layer.mask?.canvas) ctx.drawImage(layer.mask.canvas, 0, 0);
-    } else if (layer.type === 'raster') ctx.drawImage(layer.canvas, layer.x, layer.y);
-    else if (layer.render) {
-      const r = layer.render();
-      if (r) ctx.drawImage(r.canvas, r.x, r.y);
+    } else {
+      const src = source(layer);
+      // Thumbnail Contents: the layer's own pixels (Layer Bounds) or the whole canvas (Entire Document, 0.3)
+      const box = src && opts.thumbBounds === 'layer' ? contentBox(layer, src) : null;
+      const r = box ?? { x: 0, y: 0, w: d.width, h: d.height };
+      const f = fitBox(r.w, r.h, W, H);
+      c.width = f.w;
+      c.height = f.h;
+      if (src) {
+        ctx.scale(f.scale, f.scale);
+        ctx.drawImage(src.canvas, src.x - r.x, src.y - r.y);
+      }
     }
     cache[kind] = { key, canvas: c };
     thumbCache.set(layer, cache);
@@ -103,45 +265,69 @@ export function install(app) {
     return { group: 'folder', text: 'text', shape: 'shape', fill: 'fill', adjustment: 'adjust', smart: 'smart' }[layer.type];
   }
 
+  // ---- rows ----------------------------------------------------------------------------------------------------
+  let drag = null; // { kind: 'layers', layers } | { kind: 'effects', layer, pick }
+  let sweep = null; // the eye-column drag
+  let renaming = null;
+  let pending = 0;
+  let rows = [];
+
+  const isOpen = (layer) => (effectsOpen.has(layer) ? effectsOpen.get(layer) : panelSettings(app).expandEffects !== false);
+
   function render() {
     pending = 0;
     if (renaming) return; // the rename input lives in the current rows
-    const doc = app.doc;
+    const d = doc();
     list.replaceChildren();
-    if (!doc) {
+    const opts = panelSettings(app);
+    const spec = thumbSpec(opts.thumbSize);
+    list.dataset.thumb = opts.thumbSize;
+    list.style.setProperty('--layer-row-h', `${spec.row}px`);
+    list.style.setProperty('--layer-thumb-w', `${Math.max(spec.w, 14)}px`);
+    list.style.setProperty('--layer-thumb-h', `${Math.max(spec.h, 14)}px`);
+    if (!d) {
+      rows = [];
       list.innerHTML = '<li class="panel-empty">No document open</li>';
       updateControls();
       return;
     }
-    const rows = [];
-    const walk = (group, depth) => {
-      for (let i = group.children.length - 1; i >= 0; i--) {
-        const layer = group.children[i];
-        if (app.layerFilter?.(layer) === false) continue; // layers-extras (lib/layers-extras.js): Find Layers / Isolate Layers hide the rows that do not match
-        rows.push({ layer, depth });
-        // smart objects (lib/smart-object.js): their smart filters are listed under the layer
-        if (layer.type === 'smart' && layer.filters?.length) rows.push({ layer, depth, filters: true });
-        if (layer.isGroup && layer.expanded) walk(layer, depth + 1);
-      }
-    };
-    walk(doc.root, 0);
-    for (const { layer, depth, filters } of rows) list.appendChild(filters ? filterRows(layer, depth) : row(layer, depth));
+    // layers-extras (lib/layers-extras.js): Find Layers / Isolate Layers hide the rows that do not match
+    const filter = (layer) => app.layerFilter?.(layer);
+    rows = panelRows(d.root, { filter, showEffects: opts.showEffects !== false, effectsOpen: isOpen });
+    rows.forEach((r, i) => {
+      if (r.kind === 'layer') list.appendChild(row(r.layer, r.depth, i));
+      // smart objects (lib/smart-object.js): their smart filters are listed under the layer
+      else if (r.kind === 'filters') list.appendChild(filterRows(r.layer, r.depth));
+      else if (r.kind === 'effects') list.appendChild(effectHeaderRow(app, r.layer, effectCtx(r)));
+      else if (r.kind === 'effect') list.appendChild(effectRow(app, r.layer, r.entry, effectCtx(r)));
+    });
     updateControls();
   }
 
-  function row(layer, depth) {
-    const doc = app.doc;
+  const effectCtx = (r) => ({
+    indentPx: r.depth * 14 + 22,
+    selected: doc().selected.has(r.layer),
+    onDragStart: (e, li, payload) => startDrag(e, li, payload),
+    onDragEnd: () => endDrag(),
+  });
+
+  function row(layer, depth, index) {
+    const d = doc();
+    const opts = panelSettings(app);
     const li = document.createElement('li');
-    li.className = 'layer-row' + (doc.selected.has(layer) ? ' selected' : '') + (doc.active === layer ? ' active' : '');
+    li.className = 'layer-row' + (d.selected.has(layer) ? ' selected' : '') + (d.active === layer ? ' active' : '');
     li.setAttribute('role', 'treeitem');
     li.dataset.id = layer.id;
+    li.dataset.row = String(index); // its index in panelRows (the Alt-click clip line)
     li.draggable = !renaming;
     const eye = document.createElement('button');
     eye.className = 'eye' + (layer.visible ? '' : ' off');
-    eye.title = layer.visible ? 'Hide layer (Alt-click: show only this one)' : 'Show layer';
+    eye.title = layer.visible ? 'Hide layer (drag down the eyes for several; Alt-click: show only this one)' : 'Show layer';
     eye.innerHTML = icon('eye');
+    eye.addEventListener('pointerdown', (e) => startSweep(e, layer));
     eye.addEventListener('click', (e) => {
       e.stopPropagation();
+      if (eye.dataset.swept) return; // the sweep already applied it
       if (e.altKey) app.commands.run('layer:solo', layer.id, 'panel');
       else app.commands.run('layer:visibility', layer.id, 'panel');
     });
@@ -160,20 +346,26 @@ export function install(app) {
     if (layer.isGroup) {
       const tw = document.createElement('button');
       tw.className = 'layer-twisty';
+      tw.title = 'Open or close the group (Alt: with the groups inside it; Ctrl/Cmd: every group)';
       tw.innerHTML = icon(layer.expanded ? 'chevron-down' : 'chevron-right');
       tw.addEventListener('click', (e) => {
         e.stopPropagation();
-        layer.expanded = !layer.expanded;
+        const open = !layer.expanded;
+        const groups = e.ctrlKey || e.metaKey ? groupsIn(d.root) : e.altKey ? [layer, ...groupsIn(layer)] : [layer];
+        for (const g of groups) g.expanded = open;
         render();
       });
       li.appendChild(tw);
     }
+    const noThumb = opts.thumbSize === 'none';
     const t = document.createElement('span');
-    t.className = 'layer-thumb' + (!app.ui.editingMask && doc.active === layer && layer.mask ? ' selected-thumb' : '');
-    if (layer.isGroup || layer.type === 'adjustment') t.innerHTML = icon(typeIcon(layer));
-    else t.appendChild(thumb(layer));
+    t.className = 'layer-thumb' + (!app.ui.editingMask && d.active === layer && layer.mask ? ' selected-thumb' : '');
+    if (layer.isGroup || layer.type === 'adjustment' || noThumb) {
+      t.innerHTML = icon(typeIcon(layer) ?? 'image');
+      t.classList.add('icon-thumb');
+    } else t.appendChild(thumb(layer));
     t.addEventListener('click', (e) => {
-      if (doc.active === layer && app.ui.editingMask) {
+      if (d.active === layer && app.ui.editingMask) {
         e.stopPropagation();
         app.setEditingMask(false);
       }
@@ -190,14 +382,14 @@ export function install(app) {
       });
       li.appendChild(link);
       const m = document.createElement('span');
-      m.className = 'layer-thumb mask-thumb' + (app.ui.editingMask && doc.active === layer ? ' selected-thumb' : '');
+      m.className = 'layer-thumb mask-thumb' + (app.ui.editingMask && d.active === layer ? ' selected-thumb' : '');
       m.title = 'Layer mask: click to edit, Shift-click to disable, Alt-click to view';
       m.appendChild(thumb(layer, 'mask'));
       if (!layer.mask.enabled) m.style.opacity = '0.4';
       m.addEventListener('click', (e) => {
         e.stopPropagation();
         if (e.shiftKey) return app.commands.run('layer:mask', 'toggle', 'panel');
-        if (doc.active !== layer) doc.setActive(layer);
+        if (d.active !== layer) d.setActive(layer);
         if (e.altKey) return app.commands.run('layer:mask-toggle-view', undefined, 'panel');
         app.setEditingMask(true);
       });
@@ -213,18 +405,19 @@ export function install(app) {
       vlink.title = 'Link layer and vector mask';
       vlink.addEventListener('click', (e) => {
         e.stopPropagation();
-        if (doc.active !== layer) doc.setActive(layer);
+        if (d.active !== layer) d.setActive(layer);
         app.commands.run('layer:vector-mask', 'link', 'panel');
       });
       li.appendChild(vlink);
       const v = document.createElement('span');
       v.className = 'layer-thumb vector-mask-thumb';
       v.title = 'Vector mask: click to edit its path, Shift-click to disable, Ctrl/Cmd-click to load as a selection';
-      v.appendChild(vectorMaskThumb(layer, 32, 24, doc));
+      const spec = thumbSpec(noThumb ? 'small' : opts.thumbSize);
+      v.appendChild(vectorMaskThumb(layer, Math.max(16, spec.w - 4), Math.max(12, spec.h - 6), d));
       if (vm.enabled === false) v.style.opacity = '0.4';
       v.addEventListener('click', (e) => {
         e.stopPropagation();
-        if (doc.active !== layer) doc.setActive(layer);
+        if (d.active !== layer) d.setActive(layer);
         const op = e.shiftKey ? 'toggle' : e.ctrlKey || e.metaKey ? 'select' : 'target';
         app.commands.run('layer:vector-mask', op, 'panel');
       });
@@ -237,17 +430,32 @@ export function install(app) {
     li.appendChild(name);
     const badges = document.createElement('span');
     badges.className = 'layer-badges';
-    if (hasEnabledStyles(layer.styles)) {
+    const listed = listedEffects(layer.styles);
+    if (hasEnabledStyles(layer.styles) || listed.length) {
       const fx = document.createElement('span');
-      fx.className = 'layer-fx';
+      fx.className = 'layer-fx' + (hasEnabledStyles(layer.styles) ? '' : ' off');
       fx.textContent = 'fx';
       fx.title = 'Edit layer style';
       fx.addEventListener('click', (e) => {
         e.stopPropagation();
-        doc.setActive(layer);
+        d.setActive(layer);
         app.commands.run('layer:style', 'dialog', 'panel');
       });
       badges.appendChild(fx);
+      if (listed.length && opts.showEffects !== false) {
+        const open = isOpen(layer);
+        const tw = document.createElement('button');
+        tw.type = 'button';
+        tw.className = 'layer-twisty layer-fx-twisty';
+        tw.title = open ? 'Hide the effects' : 'Show the effects';
+        tw.innerHTML = icon(open ? 'chevron-down' : 'chevron-right');
+        tw.addEventListener('click', (e) => {
+          e.stopPropagation();
+          effectsOpen.set(layer, !open);
+          render();
+        });
+        badges.appendChild(tw);
+      }
     }
     if (layer.locked.all || layer.locked.pixels || layer.locked.position || layer.locked.transparency) badges.insertAdjacentHTML('beforeend', icon(layer.locked.all ? 'lock' : 'lock-alpha'));
     if (layer.type === 'text' || layer.type === 'shape' || layer.type === 'fill' || layer.type === 'adjustment') badges.insertAdjacentHTML('beforeend', icon(typeIcon(layer)));
@@ -261,39 +469,49 @@ export function install(app) {
     li.appendChild(badges);
 
     li.addEventListener('click', (e) => {
-      if (e.shiftKey && doc.active) {
+      if (e.altKey && !e.target.closest('.layer-thumb, .eye, .layer-twisty, .layer-fx')) {
+        // Alt-click on the line between two layers: clip the upper one onto the lower (or release it)
+        const r = li.getBoundingClientRect();
+        const target = clipCandidate(rows, index, clipEdge(e.clientY - r.top, r.height));
+        if (target) {
+          app.commands.run('layer:clip', { id: target.id }, 'panel');
+          return;
+        }
+      }
+      if (e.shiftKey && d.active) {
         // range select in visual order
-        const ids = [...list.querySelectorAll('.layer-row')].map((r) => r.dataset.id);
-        const a = ids.indexOf(doc.active.id), b = ids.indexOf(layer.id);
+        const order = [...list.querySelectorAll('.layer-row:not(.smart-filter-head):not(.smart-filter-row)')].map((r) => r.dataset.id);
+        const a = order.indexOf(d.active.id), b = order.indexOf(layer.id);
         const [lo, hi] = [Math.min(a, b), Math.max(a, b)];
-        doc.selected.clear();
-        for (const id of ids.slice(lo, hi + 1)) doc.selected.add(doc.find(id));
-        doc.active = layer;
-        doc.changed('active', { layer });
+        d.selected.clear();
+        for (const id of order.slice(lo, hi + 1)) d.selected.add(d.find(id));
+        d.active = layer;
+        d.changed('active', { layer });
       } else if ((e.ctrlKey || e.metaKey) && e.target.closest('.layer-thumb') && !layer.isGroup && layer.type !== 'adjustment') {
         // Ctrl-click a thumbnail: the layer's transparency (or its mask) as a selection
         const fromMask = !!e.target.closest('.mask-thumb') && layer.mask?.canvas;
         const mode = e.shiftKey && e.altKey ? 'intersect' : e.shiftKey ? 'add' : e.altKey ? 'subtract' : 'replace';
         let sel = null;
         if (fromMask) {
-          const a = layer.mask.canvas.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, doc.width, doc.height).data;
-          const m = new Uint8ClampedArray(doc.width * doc.height);
+          const a = layer.mask.canvas.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, d.width, d.height).data;
+          const m = new Uint8ClampedArray(d.width * d.height);
           for (let i = 0; i < m.length; i++) m[i] = a[i * 4 + 3];
-          sel = Selection.fromMask(doc.width, doc.height, m);
+          sel = Selection.fromMask(d.width, d.height, m);
         } else sel = app.layerAlphaSelection?.(layer) ?? null;
         if (sel) app.applySelection(sel, mode, 'Load selection');
       } else if (e.ctrlKey || e.metaKey) {
-        if (doc.selected.has(layer) && doc.selected.size > 1) {
-          doc.selected.delete(layer);
-          if (doc.active === layer) doc.active = [...doc.selected][0];
-          doc.changed('active', { layer: doc.active });
-        } else doc.setActive(layer, { additive: true });
+        if (d.selected.has(layer) && d.selected.size > 1) {
+          d.selected.delete(layer);
+          if (d.active === layer) d.active = [...d.selected][0];
+          d.changed('active', { layer: d.active });
+        } else d.setActive(layer, { additive: true });
       } else {
-        if (doc.active !== layer) app.setEditingMask(false);
-        doc.setActive(layer);
+        if (d.active !== layer) app.setEditingMask(false);
+        d.setActive(layer);
       }
     });
     li.addEventListener('dblclick', (e) => {
+      if (e.target.closest('.eye, .layer-twisty')) return;
       if (e.target.closest('.layer-name')) startRename(layer, name);
       else if (layer.type === 'smart' && e.target.closest('.layer-thumb:not(.mask-thumb)')) app.commands.run('layer:smart-edit', layer.id, 'panel');
       else if (layer.type === 'text') app.commands.run('layer:edit-text', layer.id, 'panel');
@@ -302,60 +520,204 @@ export function install(app) {
     });
     li.addEventListener('contextmenu', (e) => {
       e.preventDefault();
-      if (!doc.selected.has(layer)) doc.setActive(layer);
+      if (!d.selected.has(layer)) d.setActive(layer);
       app.dialogs.popover(li, contextMenu(layer), { at: { x: e.clientX, y: e.clientY } });
     });
     li.addEventListener('dragstart', (e) => {
-      dragLayer = layer;
-      e.dataTransfer.setData('text/plain', layer.id);
-      e.dataTransfer.effectAllowed = 'move';
-      li.classList.add('dragging');
+      if (sweep) return e.preventDefault(); // a drag down the eye column is not a row drag
+      startDrag(e, li, { kind: 'layers', layers: dragSubjects(layer, d.selected, d.layers()) });
     });
-    li.addEventListener('dragend', () => {
-      li.classList.remove('dragging');
-      dragLayer = null;
-      for (const r of list.querySelectorAll('.drop-above,.drop-below,.drop-into')) r.classList.remove('drop-above', 'drop-below', 'drop-into');
-    });
+    li.addEventListener('dragend', () => endDrag());
     li.addEventListener('dragover', (e) => {
-      if (!dragLayer && app.dropHandlerFor?.(e.dataTransfer, 'layer')) return e.preventDefault(); // drop (E25)
-      if (!dragLayer || dragLayer === layer) return;
-      e.preventDefault();
+      if (!drag && app.dropHandlerFor?.(e.dataTransfer, 'layer')) return e.preventDefault(); // drop (E25)
+      if (!drag) return;
+      clearIndicator(li);
+      if (drag.kind === 'effects') {
+        // effects go onto a layer that takes styles
+        if (drag.layer === layer || !effectsTarget(layer)) return;
+        e.preventDefault();
+        if (e.dataTransfer) e.dataTransfer.dropEffect = e.altKey ? 'copy' : 'move';
+        li.classList.add('drop-into');
+        return;
+      }
       const r = li.getBoundingClientRect();
-      const y = (e.clientY - r.top) / r.height;
-      li.classList.remove('drop-above', 'drop-below', 'drop-into');
-      // the lower part of an expanded group's row sits above its children: dropping there goes into the group
-      li.classList.add(layer.isGroup && y > 0.3 && (layer.expanded || y < 0.7) ? 'drop-into' : y < 0.5 ? 'drop-above' : 'drop-below');
+      const mode = dropPlacement((e.clientY - r.top) / r.height, { isGroup: layer.isGroup, expanded: layer.expanded });
+      if (!dropAllowed(drag.layers, layer, mode, e.altKey)) {
+        if (e.dataTransfer) e.dataTransfer.dropEffect = 'none';
+        return;
+      }
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = e.altKey ? 'copy' : 'move';
+      li.classList.add(mode === 'into' ? 'drop-into' : mode === 'above' ? 'drop-above' : 'drop-below');
     });
-    li.addEventListener('dragleave', () => li.classList.remove('drop-above', 'drop-below', 'drop-into'));
+    li.addEventListener('dragleave', () => clearIndicator(li));
     li.addEventListener('drop', (e) => {
       e.preventDefault();
-      if (!dragLayer) {
+      if (!drag) {
         // drop (E25): a gradient or a pattern dragged from a panel onto this row
         const found = app.dropHandlerFor?.(e.dataTransfer, 'layer');
         if (found) found.handler.layer(e.dataTransfer.getData(found.mime), layer, e);
         return;
       }
-      if (dragLayer === layer) return;
-      const mode = li.classList.contains('drop-into') ? 'into' : li.classList.contains('drop-above') ? 'above' : 'below';
-      li.classList.remove('drop-above', 'drop-below', 'drop-into');
-      app.commands.run('layer:move-to', { id: dragLayer.id, target: layer.id, mode, duplicate: e.altKey }, 'panel');
+      const payload = drag;
+      const mode = li.classList.contains('drop-into') ? 'into' : li.classList.contains('drop-above') ? 'above' : li.classList.contains('drop-below') ? 'below' : null;
+      clearIndicator(li);
+      endDrag();
+      if (!mode) return;
+      if (payload.kind === 'effects') {
+        const { layer: from, pick } = payload;
+        runEffect(app, { id: from.id, op: e.altKey ? 'copy' : 'move', target: layer.id, ...(pick ? { key: pick.key, index: pick.index } : {}) });
+        return;
+      }
+      const moving = payload.layers.filter((l) => l !== layer);
+      if (!moving.length) return;
+      const arg = { target: layer.id, mode, duplicate: e.altKey };
+      if (moving.length === 1) arg.id = moving[0].id;
+      else arg.ids = moving.map((l) => l.id);
+      app.commands.run('layer:move-to', arg, 'panel');
     });
     app.decorateLayerRow?.(li, layer); // layers-extras (lib/layers-extras.js): colour label tint (data-color) and the linked-layers badge
     return li;
   }
 
+  const clearIndicator = (li) => li.classList.remove('drop-above', 'drop-below', 'drop-into');
+  const effectsTarget = (layer) => layer.type !== 'adjustment' && !locked(layer, 'styles');
+
+  /** A drop of `layers` at `mode` of `target` is allowed: not into themselves, and what the Background rules allow. */
+  function dropAllowed(layers, target, mode, copy) {
+    if (dropRefused(layers, target)) return false;
+    // a copy of the Background may go anywhere; the Background itself stays at the bottom (L.13)
+    return app.backgroundRules?.canPlace?.(doc(), copy ? [] : layers, target, PLACE_MODE[mode]) !== false;
+  }
+
+  function startDrag(e, li, payload) {
+    drag = payload;
+    if (e.dataTransfer) {
+      const text = payload.kind === 'layers' ? payload.layers.map((l) => l.id).join(',') : `${payload.layer.id}:${payload.pick?.key ?? 'effects'}`;
+      e.dataTransfer.setData('text/plain', text);
+      e.dataTransfer.effectAllowed = 'copyMove';
+    }
+    if (payload.kind === 'layers') {
+      const set = new Set(payload.layers.map((l) => l.id));
+      for (const r of list.querySelectorAll('.layer-row')) if (set.has(r.dataset.id)) r.classList.add('dragging');
+    } else li.classList.add('dragging');
+    list.classList.add('dragging-' + payload.kind);
+  }
+
+  function endDrag() {
+    drag = null;
+    list.classList.remove('dragging-layers', 'dragging-effects');
+    for (const r of list.querySelectorAll('.dragging')) r.classList.remove('dragging');
+    for (const r of list.querySelectorAll('.drop-above,.drop-below,.drop-into')) clearIndicator(r);
+    for (const b of el.querySelectorAll('.drop-target')) b.classList.remove('drop-target');
+  }
+
+  // ---- the eye column: drag down the eyes -----------------------------------------------------------------------
+  // The layers passed over show the state the first eye was switched to at once (a preview that only sets
+  // `visible`, without history); the button's release puts them back and runs layer:visibility once for all of them,
+  // so the whole sweep is one history entry. A click without moving to another eye is the 0.3 toggle (click handler).
+  function startSweep(e, layer) {
+    if (e.button !== 0 || e.altKey || e.shiftKey || e.ctrlKey || e.metaKey) return;
+    const d = doc();
+    sweep = { doc: d, first: layer, visible: !layer.visible, passed: [layer], saved: new Map(), moved: false, off: null };
+    const over = (ev) => {
+      if (!sweep || !(ev.buttons & 1)) return;
+      const eyeEl = ev.target.closest?.('.layer-row > .eye');
+      const id = eyeEl?.closest('.layer-row')?.dataset.id;
+      const l = id ? d.find(id) : null;
+      if (!l || sweep.passed.includes(l)) return;
+      if (!sweep.moved) {
+        sweep.moved = true;
+        // a command run during the sweep (a key) must not see the previewed visibility: the sweep ends first
+        sweep.off = app.commands.observe({ before: () => endSweepPreview() });
+        showSwept(sweep.first);
+      }
+      sweep.passed.push(l);
+      showSwept(l);
+    };
+    const up = () => {
+      window.removeEventListener('pointerover', over, true);
+      window.removeEventListener('pointerup', up, true);
+      window.removeEventListener('pointercancel', up, true);
+      const s = sweep;
+      sweep = null;
+      if (!s?.moved) return;
+      // the preview ends; then one command for every layer passed over
+      s.off?.();
+      restoreSwept(s);
+      // the release over the first eye would also click it: that click is already part of the sweep
+      for (const b of list.querySelectorAll('.layer-row > .eye')) b.dataset.swept = '1';
+      setTimeout(() => {
+        for (const b of list.querySelectorAll('.layer-row > .eye')) delete b.dataset.swept;
+      }, 0);
+      const change = sweepTargets(s.passed.filter((l) => s.doc.find(l.id)), s.visible);
+      if (change.length) app.commands.run('layer:visibility', { ids: change.map((l) => l.id), visible: s.visible }, 'panel');
+    };
+    window.addEventListener('pointerover', over, true);
+    window.addEventListener('pointerup', up, true);
+    window.addEventListener('pointercancel', up, true);
+  }
+
+  function restoreSwept(s) {
+    let changed = false;
+    for (const [l, v] of s.saved) {
+      if (l.visible !== v) {
+        l.visible = v;
+        l.touch();
+        changed = true;
+      }
+    }
+    s.saved.clear();
+    if (changed) s.doc.view?.invalidate();
+  }
+
+  /** Ends the sweep without applying it (a command arrived while the button was held). */
+  function endSweepPreview() {
+    const s = sweep;
+    if (!s) return;
+    s.off?.();
+    s.off = null;
+    restoreSwept(s);
+    s.moved = false;
+    s.passed = [];
+    sweep = null;
+  }
+
+  function showSwept(layer) {
+    const s = sweep;
+    if (!s.saved.has(layer)) s.saved.set(layer, layer.visible);
+    if (layer.visible !== s.visible) {
+      layer.visible = s.visible;
+      layer.touch();
+      s.doc.view?.invalidate();
+    }
+    list.querySelector(`.layer-row[data-id="${CSS.escape(layer.id)}"] > .eye`)?.classList.toggle('off', !s.visible);
+  }
+
+  // Alt over the line between two layers shows the clipping cursor
+  list.addEventListener('mousemove', (e) => {
+    const li = e.target.closest?.('.layer-row');
+    let on = false;
+    if (e.altKey && li && !drag && !e.target.closest('.layer-thumb, .eye, .layer-twisty')) {
+      const r = li.getBoundingClientRect();
+      on = !!clipCandidate(rows, Number(li.dataset.row), clipEdge(e.clientY - r.top, r.height));
+    }
+    list.classList.toggle('clip-cursor', on);
+  });
+  list.addEventListener('mouseleave', () => list.classList.remove('clip-cursor'));
+
   /** The "Smart Filters" header and one row per filter below a smart object (lib/smart-object.js). */
   function filterRows(layer, depth) {
-    const doc = app.doc;
+    const d = doc();
     const frag = document.createDocumentFragment();
     const indentPx = depth * 14 + 22;
     const base = (cls, title) => {
       const li = document.createElement('li');
-      li.className = `layer-row ${cls}` + (doc.selected.has(layer) ? ' selected' : '');
+      li.className = `layer-row ${cls}` + (d.selected.has(layer) ? ' selected' : '');
       li.dataset.id = layer.id;
       li.title = title;
       li.addEventListener('click', () => {
-        if (doc.active !== layer) doc.setActive(layer);
+        if (d.active !== layer) d.setActive(layer);
       });
       return li;
     };
@@ -409,7 +771,7 @@ export function install(app) {
       li.addEventListener('contextmenu', (e) => {
         e.preventDefault();
         e.stopPropagation();
-        if (doc.active !== layer) doc.setActive(layer);
+        if (d.active !== layer) d.setActive(layer);
         app.dialogs.popover(li, [
           { label: 'Edit Smart Filter…', onSelect: () => run('edit') },
           { label: f.enabled === false ? 'Show Smart Filter' : 'Hide Smart Filter', onSelect: () => run('toggle') },
@@ -455,6 +817,9 @@ export function install(app) {
 
   function contextMenu(layer) {
     const run = (cmd, arg) => () => app.commands.run(cmd, arg, 'panel');
+    const d = doc();
+    const several = d.selected.size > 1;
+    const mergeLabel = several ? 'Merge Layers' : layer.isGroup ? 'Merge Group' : 'Merge Down';
     const items = [
       { label: 'Layer Properties…', onSelect: run('layer:properties', layer.id) },
       { label: 'Blending Options / Layer Style…', onSelect: run('layer:style', 'dialog') },
@@ -465,13 +830,20 @@ export function install(app) {
       { type: 'separator' },
       { label: 'Group Layers', onSelect: run('layer:group') },
       ...(layer.isGroup ? [{ label: 'Ungroup Layers', onSelect: run('layer:ungroup') }] : []),
-      { label: layer.clip ? 'Release Clipping Mask' : 'Create Clipping Mask', onSelect: run('layer:clip') },
+      { label: layer.clip ? 'Release Clipping Mask' : 'Create Clipping Mask', onSelect: run('layer:clip', { id: layer.id }) },
       { type: 'separator' },
       { label: layer.mask ? 'Delete Layer Mask' : 'Add Layer Mask', onSelect: run('layer:mask', layer.mask ? 'delete' : 'reveal-all') },
       ...(layer.mask ? [{ label: layer.mask.enabled ? 'Disable Layer Mask' : 'Enable Layer Mask', onSelect: run('layer:mask', 'toggle') }, { label: 'Apply Layer Mask', onSelect: run('layer:mask', 'apply') }, { label: 'Add Mask to Selection', onSelect: run('layer:mask', 'select') }] : []),
       { label: 'Select Layer Pixels', onSelect: run('select:from-layer', layer.id) },
       { type: 'separator' },
       ...(layer.type !== 'raster' && !layer.isGroup ? [{ label: 'Rasterize Layer', onSelect: run('layer:rasterize') }] : []),
+      // shapes-live (M.7): the shape attributes of a shape layer
+      ...(layer.type === 'shape'
+        ? [
+            { label: 'Copy Shape Attributes', disabled: !app.commands.isEnabled('layer:copy-shape-attributes'), onSelect: run('layer:copy-shape-attributes') },
+            { label: 'Paste Shape Attributes', disabled: !app.commands.isEnabled('layer:paste-shape-attributes'), onSelect: run('layer:paste-shape-attributes') },
+          ]
+        : []),
       // smart objects (lib/smart-object.js)
       ...(layer.type === 'smart'
         ? [
@@ -487,7 +859,7 @@ export function install(app) {
       ...(layer.styles ? [{ label: 'Copy Layer Style', onSelect: run('layer:copy-style') }, { label: 'Clear Layer Style', onSelect: run('layer:clear-style') }] : []),
       { label: 'Paste Layer Style', onSelect: run('layer:paste-style'), disabled: !app.copiedStyle },
       { type: 'separator' },
-      { label: 'Merge Down', onSelect: run('layer:merge-down') },
+      { label: mergeLabel, disabled: !app.commands.isEnabled('layer:merge'), onSelect: run('layer:merge') },
       { label: 'Merge Visible', onSelect: run('layer:merge-visible') },
       { label: 'Flatten Image', onSelect: run('image:flatten') },
     ];
@@ -495,28 +867,39 @@ export function install(app) {
   }
 
   function updateControls() {
-    const doc = app.doc;
-    const layer = doc?.active;
-    const disabled = !layer;
-    blend.disabled = opacity.disabled = fill.disabled = disabled;
+    const d = doc();
+    const layer = d?.active;
+    const sel = targets();
+    const off = (prop) => !layer || !sel.some((l) => !locked(l, prop));
+    blend.update({
+      mode: layer?.blend ?? 'normal',
+      isGroup: !!layer?.isGroup && sel.every((l) => l.isGroup),
+      disabled: off('blend'),
+      mixed: sel.length > 1 && sel.some((l) => l.blend !== layer?.blend),
+    });
+    opacity.setDisabled(off('opacity'));
+    fill.setDisabled(off('fillOpacity') || !!layer?.isGroup || layer?.type === 'adjustment');
     for (const b of el.querySelectorAll('[data-lock]')) {
-      b.disabled = disabled;
-      b.classList.toggle('active', !!layer?.locked[b.dataset.lock]);
+      b.disabled = !layer;
+      const k = b.dataset.lock;
+      const on = sel.filter((l) => !!l.locked[k]).length;
+      b.classList.toggle('active', !!layer?.locked[k]);
+      b.classList.toggle('mixed', on > 0 && on < sel.length);
     }
-    for (const b of el.querySelectorAll('[data-cmd],[data-menu]')) b.disabled = !doc;
+    for (const b of el.querySelectorAll('[data-cmd],[data-menu]')) b.disabled = !d;
     if (!layer) return;
-    blend.value = layer.blend;
-    passThrough.hidden = !layer.isGroup;
-    if (document.activeElement !== opacity) opacity.value = String(Math.round(layer.opacity * 100));
-    if (document.activeElement !== fill) fill.value = String(Math.round((layer.fillOpacity ?? 1) * 100));
-    fill.disabled = layer.isGroup || layer.type === 'adjustment';
+    if (document.activeElement !== opacity.input) opacity.set(Math.round(layer.opacity * 100));
+    if (document.activeElement !== fill.input) fill.set(Math.round((layer.fillOpacity ?? 1) * 100));
   }
 
   const schedule = () => {
     if (pending) return;
     pending = requestAnimationFrame(render);
   };
-  app.on('doc:activated', schedule);
+  app.on('doc:activated', () => {
+    endBlendPreview(app);
+    schedule();
+  });
   app.on('doc:change', (e) => {
     if (renaming) return;
     if (['tree', 'active', 'props', 'history', 'canvas', 'mask-edit'].includes(e.kind)) schedule();
@@ -526,6 +909,10 @@ export function install(app) {
     }
   });
   app.on('mask:editing', schedule);
+  app.on('layers-panel:view', schedule); // layers-menu.js: Collapse All Groups, Panel Options
+  app.on('settings:changed', (patch) => {
+    if (patch && 'layersPanel' in patch) schedule();
+  });
 
   app.panels.register({ id: 'layers', title: 'Layers', icon: 'layers', element: el, group: 'bottom', onShow: render });
   render();

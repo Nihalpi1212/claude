@@ -40,8 +40,12 @@ function captureState(l) {
   }
   if (l.mask?.canvas) s.mask = l.mask;
   if (l.vectorMask) s.vectorMask = l.vectorMask;
+  if (linkedPattern(l)) s.paint = l.paint;
   return s;
 }
+
+/** A Pattern Fill layer whose pattern is linked with the layer (G.2; 0.3 paints have no `link` and stay put). */
+const linkedPattern = (l) => l.type === 'fill' && l.paint?.type === 'pattern' && l.paint.pattern?.link === true;
 
 function shiftedState(s, dx, dy) {
   const n = { ...s };
@@ -63,6 +67,11 @@ function shiftedState(s, dx, dy) {
   }
   if (s.mask && s.mask.linked !== false && (dx || dy)) n.mask = { ...s.mask, canvas: shiftedMask(s.mask.canvas, dx, dy) };
   if (s.vectorMask && s.vectorMask.linked !== false && (dx || dy)) n.vectorMask = { ...s.vectorMask, path: mapPathPoints(s.vectorMask.path, shift) };
+  if (s.paint && (dx || dy)) {
+    // Link with Layer: moving a Pattern Fill layer moves its pattern (Photoshop)
+    const o = Array.isArray(s.paint.pattern.origin) ? s.paint.pattern.origin : [0, 0];
+    n.paint = { ...s.paint, pattern: { ...s.paint.pattern, origin: [(Number(o[0]) || 0) + dx, (Number(o[1]) || 0) + dy] } };
+  }
   return n;
 }
 
@@ -82,6 +91,7 @@ function applyState(s) {
   }
   if (s.mask) l.mask = s.mask;
   if (s.vectorMask) l.vectorMask = s.vectorMask;
+  if (s.paint) l.paint = s.paint;
   l.touch();
 }
 
@@ -94,8 +104,8 @@ function collect(layers) {
     if (l.isGroup) for (const c of l.children) walk(c);
   };
   layers.forEach(walk);
-  // fill and adjustment layers have no position of their own; only their (linked) masks move
-  return [...out].filter((l) => !(l.type === 'fill' || l.type === 'adjustment' || l.isGroup) || l.mask?.canvas || l.vectorMask);
+  // fill and adjustment layers have no position of their own; only their (linked) masks and linked patterns move
+  return [...out].filter((l) => !(l.type === 'fill' || l.type === 'adjustment' || l.isGroup) || l.mask?.canvas || l.vectorMask || linkedPattern(l));
 }
 
 /**

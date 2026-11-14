@@ -317,9 +317,14 @@ test('the vector mask is a path target: the Paths panel row, editing with the pa
   }, rect(50, 20, 20, 20));
   await page.locator('.options-bar button', { hasText: 'Shape' }).first().click();
   expect(await page.evaluate(() => window.pigmentApp.doc.active.type)).toBe('shape');
-  await page.evaluate(() => {
+  // (0.4, L.13: the Background takes no vector mask, so the Mask button acts on an ordinary layer)
+  await page.evaluate(async () => {
     const d = window.pigmentApp.doc;
-    d.setActive(d.layers().find((l) => l.name === 'Background'));
+    const { RasterLayer, createCanvas } = await import('/lib/document.js');
+    const plain = new RasterLayer({ name: 'Plain', canvas: createCanvas(d.width, d.height), x: 0, y: 0 });
+    d.add(plain);
+    d.setActive(plain);
+    d.changed('tree');
   });
   await page.evaluate(() => window.pigmentApp.commands.run('path:select', { kind: 'work' }, 'api'));
   await page.locator('.options-bar button', { hasText: 'Mask' }).first().click();
@@ -393,7 +398,7 @@ test('the Background rules lock vector masks and mask settings', async ({ page }
     const d = window.pigmentApp.doc;
     return window.pigmentApp.backgroundRules.lockedProps(d.layers().find((l) => l.name === 'Background'));
   });
-  test.skip(!locks.includes('vectorMask'), 'waits for finish-layer-menu: app.backgroundRules.lockedProps does not lock the Background yet');
+  expect(locks).toContain('vectorMask'); // finish-layer-menu's Background rules
   await page.evaluate(() => {
     const d = window.pigmentApp.doc;
     d.setActive(d.layers().find((l) => l.name === 'Background'));

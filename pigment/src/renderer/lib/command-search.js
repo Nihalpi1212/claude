@@ -229,6 +229,9 @@ export function openSearch(app, { isMac = false, platform = isMac ? 'darwin' : '
       onOpen: (_dialog, close) => {
         closeDialog = close;
         render();
+        // focus now, not on the dialog's next frame: keys typed right after Ctrl+F belong to the query, and before
+        // the frame they would reach the app's shortcuts (letters switch tools)
+        input.focus();
       },
     })
     .then((entry) => {

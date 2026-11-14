@@ -292,7 +292,11 @@ export function install(app) {
           app.setEditingMask(true);
           schedule();
         },
-        menu: [{ label: 'Edit Mask', icon: 'brush', onSelect: () => app.setEditingMask(true) }],
+        menu: [
+          { label: 'Edit Mask', icon: 'brush', onSelect: () => app.setEditingMask(true) },
+          // Photoshop's Layer Mask Display Options (masks-vector-masks: the overlay colour and opacity)
+          { label: 'Layer Mask Display Options…', icon: 'settings', onSelect: () => app.commands.run('layer:mask-overlay-options', undefined, 'panel') },
+        ],
       }));
     }
     for (const ch of doc.channels) {

@@ -3063,3 +3063,153 @@ names above stay valid). Package owners build against this list too.
   appends to `ICON_NAMES`.
 - **Settings defaults**: the J.7 objects are shared references inside `DEFAULT_SETTINGS` (`withDefaults` copies one
   level): write a new object (`saveSettings({ guides: { ...settings.guides, lock: true } })`), never mutate one in place.
+
+### The packages as built: what the integration recorded
+
+The sixteen packages follow the contracts above. Where one added an export, a file, a command id or a rule the text
+does not name, or chose between two readings of it, it is listed here (merged from the packages' notes at
+integration; the user-facing side is in `docs/0.4/<package>.md` and the user guide).
+
+- **type-engine-core** (`lib/type/fonts.js`, `shaper.js`, `layout.js`, `render.js`; harfbuzzjs 1.6.4 copied into
+  `src/renderer/vendor/harfbuzz/` by `scripts/vendor/harfbuzz.mjs`, run by `postinstall`). The engine `'harfbuzz'` is
+  tried before the stub `'canvas'`; `supports(layer)` is false while the wasm or a run's face is missing, and the stub
+  draws the layer. Faces come from `queryLocalFonts()` (Electron; the browser only with the `local-fonts`
+  permission) or `fonts.addFontData` / `window.__pigmentTest.addFont`; a face arriving calls `fontsChanged()` (no
+  history entry, the dirty flag unchanged). Metric-compatible aliases when a family is missing: Arial/Helvetica →
+  Liberation Sans or Arimo, Times New Roman/Times → Liberation Serif or Tinos, Courier New/Courier → Liberation Mono or
+  Cousine, Calibri → Carlito, Cambria → Caladea. `api.js` also exports `kerner(mode)` and `listMarkerText(paras,
+  index)`; `registerKerner` and `registerListFormatter` relay out open documents. Layout rules of the engine: each
+  baseline is the previous one plus the line's own leading (Photoshop; identical to the stub for one size); trailing
+  spaces hang and are not in `line.width`; tracking is added after each shaping cluster except a line's last, so a
+  ligature stays one glyph. `LayoutRun` carries `units` (positioned shaping units with `x`, `advance`, `trk`), `face`
+  and `size`; `LayoutLine` carries `_glyphScale`, `_hyphen`, `_marker`. `fonts.advances(style, text)` gives one value
+  per UTF-16 unit (a cluster's advance on its first unit, 0 on the others). A kerner is called once per shaped piece as
+  `fn(style, pieceText, outlines)` with `outlines[k]` per shaping unit; GPOS `kern` is off while it is asked. Colour
+  glyphs and characters the face lacks are drawn with `fillText` at the shaped positions (the face is also a private
+  CSS FontFace). Stacked vertical text iterates grapheme clusters.
+- **Both engines take a negative composer `wordSpace`** (integration): justified lines close up their word spaces down
+  to the Justification dialog's Minimum (`lib/type/paragraph.js SPACES_SHRINK = true`).
+- **Hyphenation in the facade** (integration): `hyphenateRange` asks the hyphenators that name the character's
+  language, then the catch-alls (no `languages`), newest first in each, and one that answers `null` passes the word on.
+  A word of `minWord` letters or fewer stays whole (Photoshop's "Words Longer Than").
+- **type-editing** (`lib/type/editor.js`, `edit-selection.js`, `edit-history.js`, `clipboard.js`, `edit-keys.js`). The
+  editor draws its own caret, selection and IME underline over the layout; a hidden `<textarea class="type-input">`
+  at the caret takes typing, IME and dead keys (its value is the plain text, its selection the editor's). The session's
+  `handle` (B.8) runs the 40 ms echo check first (sources `'key'` and `'menu-key'`, never while the editor itself
+  dispatches), then answers undo-like and clipboard ids for every source (Edit › Undo clicked while typing undoes the
+  typing), then `typeKeyFor` keys; any other `'menu'` command commits first. A box drawn with the tool stores its
+  height (a fixed box; 0.3 boxes keep `height: null` until a top or bottom handle is dragged). Moving the text while
+  editing snaps with `source: 'move'`. Shift+Enter inserts U+2028. Paste Without Formatting is registered in
+  `editor.js`. The type:* commands work outside a session on every selected text layer as one entry.
+- **type-character-panel** (`lib/type/char-format.js`, `char-values.js` (pure), `optical-kerning.js`,
+  `lib/properties/text.js`). Every change goes through `target.js`; with a caret it sets the insertion style; with no
+  text layer it edits the defaults (`setTypeDefaults`). Every panel change also becomes the default for new text
+  (except a manual kern and a targeted layer's colour). New text takes `settings.type.char` / `.para` from a
+  `'type:session'` listener inside the creation entry (`tools/text.js beginNew` builds from the tool options). Kerning
+  is a Metrics / Optical / 0 select plus a manual number. Reset Character keeps face, size, colour and stroke.
+  Preferences › Type Units (order 36). Optical kerning shapes each piece again without `kern` and returns `null`
+  (Metrics) when its unit count differs from the outlines the engine passed.
+- **type-paragraph-panel** (`lib/panels/paragraph.js`, `lib/type/paragraph.js`, `hyphenation.js`, `line-breaks.js`
+  (UAX 14 on Unicode 16.0), `lib/type/patterns/` (TeX patterns for en-US, en-GB, de, fr, es, it, nl, pt with
+  `LICENSES.md`), `lib/properties/paragraph.js`, `scripts/build-type-paragraph-data.mjs`). New text uses the Every-line
+  Composer and `breakRules: 'standard'` (set on `'type:session'`); version 2 documents keep `'single'` / `'legacy'` and
+  0.3's lines. The line search sums piece widths between break candidates and measures the chosen lines again in one
+  piece. A second, catch-all hyphenator maps regional tags (de-AT, en-AU, pt-BR) to the bundled language. Turning a
+  list on gives an unindented paragraph 1.5 em per level. `type:toggle-panels` toggles back to the panel shown before.
+  The panel menu has Line breaks: Standard / At Spaces Only (0.3).
+- **layer-style-blending** (`src/shared/pixels/blend-if.js`, `lib/blending-options.js`, `compositor.js
+  finishAdvanced`). A layer with default blending options goes through 0.3's code; a non-default one through
+  `finishAdvanced` (mask parts before and after the effects, clipped layers as a group or each cut to the base, Blend If
+  through `split`, knockout and channels per pixel). Root-level Shallow knockout behaves as Deep; Deep goes to the
+  Background or transparency. A pass-through group with effects or non-default options is drawn isolated; groups
+  ignore Fill unless styled. `styledCanvas` passes `origin`, `docWidth`, `docHeight`, `interiorAsGroup` and
+  `transparencyShapes` for every layer. Extra export `hasEffects(styles)`. 16/32-bit flattening falls back to the
+  8-bit composite for a layer with non-default blending options (`depth.js planFlatten`, integration).
+- **layer-style-effects** (`styles.js`, `contour.js`, `styles-more.js`, `lib/contour-editor.js`,
+  `lib/style-canvas-drag.js`, `lib/style-prepare.js`). `STYLE_FEATURES` is all true. With `split: true`, `above` is
+  always `null` and `layer` drawn Normal over `below` gives the merged image exactly. `splitEffects` entries carry
+  `name` and `part` (a bevel gives highlight and shadow parts; a centred stroke an outer and an inner part), each
+  cropped to its own pixels. `applyStyles` also takes `origin`, `docWidth`, `docHeight` (else `styles._place`). New
+  fields beyond J.6: bevel technique `'chisel-soft'`, `texture.origin`, the stroke's `patternScale`, `patternAngle`,
+  `link`, `origin`, and a glow's `reverse`; their defaults are `EFFECT_FIELD_DEFAULTS` / `effectDefaults(key)`
+  (`DEFAULT_STYLES` stays 0.3's). A Pattern Overlay stores a PatternRef; a Gradient Overlay keeps 0.3's `stops` in step.
+  Dragging a shadow with Use Global Light on sets that effect's own angle. The contours kind has Photoshop's 12
+  built-ins.
+- **adjust-tonal** (`src/shared/pixels/adjust-tonal.js`, `lib/adjust/*`: `tonal.js`, `tonal-ui.js`,
+  `levels-editor.js`, `curves-editor.js`, `simple-editors.js`, `auto-options.js`, `eyedroppers.js`,
+  `preset-widget.js`, `presets.js`, `frame.js`, `tonal-formats.js` (.alv, .acv)). Levels and Curves keep `lut`
+  (exact for RGB; for the CMYK and Lab spaces it is the grey axis only, so `deep.js lutCovers(kind, params)` sends them
+  to the 8-bit fallback, integration). The frame returns `paramsChanged(params)`; the `preset` widget has
+  `changed(data)` and the options `defaults`, `title`, `manage`. `pixelEditDialog`'s editor factory gets `{ refresh }`
+  and `run` gets `{ preview }`; `beginPixelEdit` takes `ignoreSelection`; `app.adjustDialog(kind, arg, ctx, { last })`.
+  Plain Adjustments commands open with the defaults except Shadows/Highlights, Replace Color, Match Color, HDR Toning
+  and Color Lookup (they keep their last settings). `settings.adjust.curvesDisplay`.
+- **adjust-color** (`src/shared/pixels/adjust-color.js`, `lib/adjust/color.js`, `hue-sat-editor.js`,
+  `shadows-highlights.js`, `color-editors.js`, `color-formats.js` (.ahu, .cha, .asv, .blw),
+  `lib/tools/adjustment-brush.js`, `lib/panels/adjustment-presets.js`, `lib/properties/adjustment.js`). New command
+  `layer:adjustment-preset` (`'<group>/<preset>'`). Shadows/Highlights stays destructive-only and declares a constant
+  `margin`; Clarity and Dehaze use fixed neighbourhoods (24 and 22 px). The Show More Options flag is
+  `settings.adjust.shMoreOptions` (inside adjust-tonal's `adjust` namespace, accepted at integration). The Adjustment
+  Brush joins "new layer + first stroke" into one history entry.
+- **gradients** (`gradient-model.js` methods and noise, `src/shared/pixels/gradient-render.js`,
+  `lib/gradient-widget.js`, `gradient-editor.js`, `gradient-picker.js`, `gradient-presets.js`, `gradient-paint.js`,
+  `lib/panels/gradients.js`, `lib/properties/fill.js`). Classic defs without dither still draw through a Canvas
+  gradient (0.3's pixels); every other method and noise draw per pixel. The Gradient tool's `mode` defaults to
+  `'classic'`. `tools/fill.js` re-registers the `gradients` preset kind with groups (the later registration wins).
+  While the on-canvas widget is dragged the layer draws a Canvas-gradient draft (`paint.gradient._draft`, never
+  stored). `settings.gradients.collapsed` and `.view`.
+- **patterns** (`lib/patterns.js`, `pattern-builtins.js`, `scripted-patterns.js`, `pattern-picker.js`,
+  `pattern-widget.js`, `pattern-paint.js`, `pattern-preview.js`, `lib/panels/patterns.js`, `lib/tools/bucket.js`).
+  `lib/patterns.js` registers the `patterns` preset kind with twelve seeded built-ins (pixels as PNG side files);
+  `app.patterns` adds `currentId()`, `refFor(id)`, `canvasOf(ref)`, `ready()`, `remove(ids)`, `rename(id, name)` and
+  `resolve(ref, onReady)`. There is always a current pattern. A paint without `link` (0.3) keeps 0.3's anchor; new
+  paints carry `link`. The Paint Bucket's tiles start at the document origin. `.pigment` writes a fill layer's
+  `pattern: { scale, angle, link, origin, presetId, name }` (`document.js describePattern`, integration). A linked
+  Pattern Fill layer's pattern moves with the layer and with Canvas Size, Crop and Reveal All (`layer-move.js`,
+  `image-ops.js remapDocument`, integration). The Pattern Stamp has the `pattern` option (integration).
+- **guides-snapping** (`lib/guides.js`, `snap.js`, `rulers.js`, `smart-guides.js`, `guide-layout.js`, `canvas-view.js`,
+  `tools/move.js`). `app.snap` picks the nearest target within 6 screen px, ties by kind (guide < document < artboard <
+  slice < layer < grid); guides and the grid snap only while shown; `'move'` rounds to whole pixels; the Move tool snaps
+  the layers' content bounds. `SnapTarget` may carry `edge: 'start' | 'centre' | 'end'`; providers get `query.kinds`
+  and `query.boxes`. `rulers.js` re-registers `rulerOrigin` with `transformOrigin(v, m)` (an untouched origin stays on
+  the document corner). New command ids `view:move-guide` (`{ moves: [{ id, axis, from, to }] }`) and
+  `view:ruler-origin` (`{ x, y }`), both `changesDocument`. The ruler and corner drags run with source `'panel'`. Guide
+  positions keep two decimals. `smart-object.js cloneDocument` copies the ruler origin (integration).
+- **masks-vector-masks** (`lib/vector-mask.js`, `mask-render.js`, `mask-view.js`, `src/shared/pixels/mask-math.js`,
+  `lib/properties/mask.js`, `lib/panels/paths.js`). New command `layer:mask-properties` (`{ part: 'raster' | 'vector',
+  density?, feather?, invert?, fromSelection?, merge?, layerId? }`). Feather is a Gaussian with sigma = feather / 2,
+  normalised at the document edge. A `'composite'` read whose last build took over 30 ms may show it for up to 150 ms
+  while the layer changes; `'bake'` reads are always exact. Extra export `renderVectorMask(vm, w, h)`. The vector-mask
+  path target's `rename` renames the layer; `select` loads the path without density or feather.
+- **shapes-live** (`lib/path-ops.js`, `shape-geometry.js` (pure), `tools/vector.js`, `tools/shape-widgets.js`,
+  `shape-paint-ui.js`, `shape-props.js`, `lib/properties/shape.js`). New command `layer:shape-properties` (`{ id? |
+  ids?, props?, fill?, stroke?, label?, merge? }`). `mapShapeGeometry` fits an affine map when it has no matrix; skew,
+  perspective or a mirrored custom shape makes a plain path; a non-uniform scale scales radii by the smaller factor.
+  Extra exports `isLiveShape`, `regenerateShape`, `shapeChangePatch`, `DEFAULT_STROKE`. Pattern paints of shapes carry
+  a `dataUrl` of their pixels. The Properties section `shape-live` (order 21) hides Transform for live shapes. Miter
+  limit 4; dashes in stroke widths; render bounds padded only as far as the stroke reaches.
+- **layers-panel-depth** (`lib/panels/layers.js`, `layers-menu.js`, `layers-effects.js`, `layers-model.js` (pure),
+  `lib/blend-preview.js`, `layers-extras/find.js`). New command `layer:effect` (`{ id, op: 'toggle' | 'toggle-all' |
+  'delete' | 'clear' | 'move' | 'copy', key?, index?, target?, visible? }`). The blend-mode control is a button with
+  its own list (`.blend-mode-button[data-blend]`, `.blend-mode-list [data-mode]`). An effect switched off with its eye
+  keeps `present: true`. `find.js` sets `app.sampleSkip` while layers are isolated. Thumbnails default to the layer's
+  own pixels (`settings.layersPanel.thumbBounds: 'layer'`).
+- **finish-layer-menu** (`lib/layer-ops.js`, `layer-dialogs.js` (`app.layerDialogs`), `layers-extras/structure.js`,
+  `layers-extras/stamp.js`, `layer-menu-model.js` (pure)). `app.backgroundRules` keeps the stub's API;
+  `lockedProps(background)` is `blend, opacity, fillOpacity, mask, vectorMask, styles, position`. A layer mask on the
+  Background converts it to "Layer 0" first. `layer:distribute 'horizontal' | 'vertical'` make equal gaps (`'hcenter'`
+  / `'vcenter'` spread centres). `layer:duplicate` takes `documentName`. `layer:merge` (Ctrl+E) dispatches to
+  merge-selected, merge-group or merge-down through their current definitions. `settings.layerMenu.digitPairMs`.
+- **conventions-shortcuts-fields** (`lib/numeric-field.js`, `conventions.js`, `command-search.js`, `temp-tools.js`,
+  `form.js`, `dialogs.js`, `tools.js`, `shortcuts.js`). The numeric field's listeners sit on `window` in the capture
+  phase (the expression is evaluated before `dialogs.js` sees Enter); a window-level enhancer gives every plain number
+  input the same arithmetic, units and stepping. Spring-loaded tool keys switch the real tool and back (450 ms);
+  `view.tempToolVia` is `'ctrl'`, `'alt'` or `'space'`. Alt = Eyedropper only for brush, pencil, Color Replacement and
+  gradient; Ctrl = Move only for the selection, painting and retouching slots. Over a document, a click beside a
+  dialog no longer cancels it. A temporary tool draws its own overlay (`canvas-view.js`, integration); clone, heal,
+  dodge, burn and the Adjustment Brush claim Alt in `tool-traits.js` (integration). Search focuses its field as it
+  opens.
+- **Preferences**: section patches that write the same namespace object merge one level deep (`extras.js`,
+  integration), so `type` (type-editing) and `type-units` (type-character-panel) keep each other's keys.
+- **Labels**: `COMMAND_LABELS` names the ids added beyond M.7 (`view:move-guide`, `view:ruler-origin`,
+  `layer:mask-properties`, `layer:shape-properties`, `layer:effect`, `layer:adjustment-preset`).

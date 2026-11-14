@@ -12,6 +12,7 @@ import { Selection } from './selection.js';
 import { maskCanvasFor } from './mask-render.js';
 import { isUniform, nonDefaultKeys, charStyleAt, paragraphs } from './type/model.js';
 import { isGradientV2, normalizeGradient } from '../../shared/pixels/gradient-model.js';
+import { pointsFromTable } from '../../shared/pixels/adjust-tonal.js';
 
 export const OPEN_EXTENSIONS = ['pigment', 'psd', 'psb', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'avif', 'svg', 'ico'];
 export const OPEN_FILTERS = [
@@ -547,7 +548,8 @@ function textToPsd(layer) {
 // ---- adjustment layers <-> PSD -------------------------------------------------------------------------------
 const lv = (c) => (c ? { shadowInput: c.inBlack ?? 0, highlightInput: c.inWhite ?? 255, shadowOutput: c.outBlack ?? 0, highlightOutput: c.outWhite ?? 255, midtoneInput: c.gamma ?? 1 } : undefined);
 const lvBack = (c) => (c ? { inBlack: c.shadowInput ?? 0, inWhite: c.highlightInput ?? 255, gamma: c.midtoneInput ?? 1, outBlack: c.shadowOutput ?? 0, outWhite: c.highlightOutput ?? 255 } : null);
-const cv = (pts) => (Array.isArray(pts) ? pts.map(([input, output]) => ({ input, output })) : undefined);
+// a drawn (pencil) curve channel ({ table }, adjust-tonal) is written as points sampled from its table
+const cv = (pts) => (pts?.table ? cv(pointsFromTable(pts, 19)) : Array.isArray(pts) ? pts.map(([input, output]) => ({ input, output })) : undefined);
 const cvBack = (pts) => (Array.isArray(pts) && pts.length ? pts.map((p) => [p.input, p.output]) : null);
 const hueCh = (p) => ({ a: 0, b: 0, c: 0, d: 0, hue: p?.hue ?? 0, saturation: p?.saturation ?? 0, lightness: p?.lightness ?? 0 });
 const ZERO_HUE = { a: 0, b: 0, c: 0, d: 0, hue: 0, saturation: 0, lightness: 0 };
@@ -691,6 +693,7 @@ export function writePsdDocument(doc, compositor) {
   };
   const shown = (canvas, x, y) => (modeRender ? inked(canvas, x, y) : canvas);
   let pixelText = 0; // text layers written as pixels because PSD text cannot hold their formatting (J.8)
+  let otherSpace = 0; // Levels / Curves in a Gray, CMYK or Lab channel space: PSD gets their RGB channels only (J.8)
   const toPsd = (layer) => {
     const lk = layer.locked ?? {};
     const base = {
@@ -709,6 +712,7 @@ export function writePsdDocument(doc, compositor) {
     if (layer.isGroup) return { ...base, opened: layer.expanded, children: layer.children.map(toPsd) };
     if (layer.type === 'adjustment') {
       const adjustment = adjustmentToPsd(layer.kind, layer.params);
+      if ((layer.kind === 'levels' || layer.kind === 'curves') && layer.params?.space && layer.params.space !== 'rgb') otherSpace++;
       if (adjustment) return { ...base, adjustment };
       // no PSD equivalent: keep an empty hidden placeholder so the layer order survives
       return { ...base, name: `${layer.name} (${layer.kind})`, hidden: true, left: 0, top: 0, canvas: createCanvas(1, 1) };
@@ -746,6 +750,7 @@ export function writePsdDocument(doc, compositor) {
     imageResources: { resolutionInfo: { horizontalResolution: doc.dpi, horizontalResolutionUnit: 'PPI', widthUnit: 'Inches', verticalResolution: doc.dpi, verticalResolutionUnit: 'PPI', heightUnit: 'Inches' } },
   };
   const bytes = writePsdUint8Array(psd, { generateThumbnail: true, noBackground: true });
+  if (otherSpace) doc.view?.app?.dialogs?.toast(`${otherSpace} Levels or Curves layer${otherSpace === 1 ? '' : 's'} in a Gray, CMYK or Lab channel space ${otherSpace === 1 ? 'was' : 'were'} saved without ${otherSpace === 1 ? 'its' : 'their'} settings: PSD keeps RGB channels only`, { timeout: 4000 });
   if (pixelText) doc.view?.app?.dialogs?.toast(`${pixelText} text layer${pixelText === 1 ? '' : 's'} with formatting PSD text cannot hold yet ${pixelText === 1 ? 'was' : 'were'} saved as pixels`, { timeout: 4000 });
   return bytes;
 }

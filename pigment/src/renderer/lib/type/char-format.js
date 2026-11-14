@@ -173,9 +173,14 @@ function guardedField(spec, onChange) {
   f.show = (v) => {
     const str = v === '' || v === null || v === undefined ? '' : formatNumber(Number(v), 4);
     shown = str;
-    if (dirty && document.activeElement === f.input) return;
+    const focused = document.activeElement === f.input;
+    if (dirty && focused) return;
     dirty = false;
+    const before = f.input.value;
     f.set(v === null || v === undefined ? '' : v);
+    // a field focused for typing (nothing typed yet) that shows a new value keeps it selected, so what is typed next
+    // replaces it rather than being appended to it (a new value would otherwise put the caret at its end)
+    if (focused && f.input.value !== before) f.input.select();
   };
   return f;
 }

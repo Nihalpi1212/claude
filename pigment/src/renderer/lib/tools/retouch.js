@@ -823,12 +823,25 @@ class PatternStampTool extends StrokeTool {
   constructor(app) {
     super(app, {
       id: 'pattern-stamp', name: 'Pattern Stamp Tool', icon: 'pattern-stamp',
-      hint: 'Paints with the current pattern (Edit › Define Pattern).',
-      options: [...BRUSH_OPTIONS, { kind: 'checkbox', key: 'aligned', label: 'Aligned', default: true }],
+      hint: 'Paints with the chosen pattern (the current one until you pick another).',
+      // the pattern picker (patterns' `pattern` widget, as the Paint Bucket has it); none chosen: the current pattern
+      options: [...BRUSH_OPTIONS, { kind: 'pattern', key: 'pattern', label: 'Pattern', default: null }, { kind: 'checkbox', key: 'aligned', label: 'Aligned', default: true }],
     });
   }
+  /** The pattern to paint: the option's PatternRef, else the current pattern; a canvas or null. */
+  patternCanvas() {
+    const ref = this.opt('pattern');
+    const data = ref ? this.app.patterns?.resolve?.(ref) : null;
+    if (data) {
+      const c = createCanvas(data.width, data.height);
+      c.getContext('2d').putImageData(data, 0, 0);
+      return c;
+    }
+    return this.app.patterns?.current()?.canvas ?? null;
+  }
   onPointerDown(p) {
-    if (!this.app.patterns?.current()) {
+    this.strokePattern = this.patternCanvas();
+    if (!this.strokePattern) {
       this.app.dialogs.toast('Define a pattern first (Edit › Define Pattern)', { kind: 'error' });
       return;
     }
@@ -836,7 +849,7 @@ class PatternStampTool extends StrokeTool {
     super.onPointerDown(p);
   }
   strokeSettings(p, layer, target) {
-    const pat = this.app.patterns.current().canvas;
+    const pat = this.strokePattern ?? this.app.patterns.current().canvas;
     const origin = this.strokeOrigin;
     return {
       ...this.baseSettings(layer, target),

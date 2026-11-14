@@ -36,7 +36,7 @@ const linesOf = (text, lines) => lines.map((l) => text.slice(l.textFrom ?? l.fro
 function facadeHyphenate(text, lang, hy = M.PARA_DEFAULTS.hyphenation) {
   return (from, to) => {
     const word = text.slice(from, to);
-    if (word.length < hy.minWord) return null;
+    if (word.length <= hy.minWord) return null; // Words Longer Than n letters
     if (hy.capitalized === false && /^\p{Lu}/u.test(word)) return null;
     const raw = H.hyphenateWord(word, lang) ?? [];
     return raw.filter((p) => p >= hy.after && word.length - p >= hy.before).map((p) => from + p);
@@ -113,7 +113,7 @@ test('Every-line Composer: justified breaks are the total-fit optimum on fixed b
   }
 });
 
-test('justification: word spacing within its range first, then letter spacing, then glyph scaling; shrinking moves to the letter gaps while the engines cannot shrink spaces', () => {
+test('justification: word spacing within its range first, then letter spacing, then glyph scaling; shrinking closes up the word spaces', () => {
   const ctx = { sp: { word: [0.8, 1, 1.33], letter: [0, 0, 0.1], glyph: [1, 1, 1.05], singleWord: 'justify-all' }, space: 5 };
   // 2 spaces of 5: word stretch 2 × 5 × 0.33 = 3.3; letter stretch 10 gaps × 0.5 = 5; glyph 5 % of the line
   const info = (natural, L) => ({ natural, hyph: 0, S: 2, G: 10, sw: 5, L, hangStart: 0, hangEnd: 0 });
@@ -129,10 +129,15 @@ test('justification: word spacing within its range first, then letter spacing, t
   const g = r.justify.glyphScale;
   assert.ok(g > 1 && g <= 1.05);
   assert.ok(Math.abs((100 + 2 * r.justify.wordSpace + 10 * r.justify.letterSpace) * g - 112) < 1e-9);
-  // shrinking 1 px: the spaces' part goes to the 10 letter gaps (the engines clamp word spacing at 0)
+  // shrinking 1 px: the two word spaces close up (both engines take a negative word spacing: SPACES_SHRINK)
   r = P.setLine(ctx, info(100, 99), true);
-  assert.equal(r.justify.wordSpace, 0);
-  assert.ok(Math.abs(r.justify.letterSpace * 10 + 1) < 1e-9);
+  if (P.SPACES_SHRINK) {
+    assert.ok(Math.abs(r.justify.wordSpace + 0.5) < 1e-9);
+    assert.equal(r.justify.letterSpace, 0);
+  } else {
+    assert.equal(r.justify.wordSpace, 0);
+    assert.ok(Math.abs(r.justify.letterSpace * 10 + 1) < 1e-9);
+  }
   // a ragged line at the desired spacing needs nothing
   assert.deepEqual(P.setLine(ctx, info(100, 150), false), {});
   // a single word: full justify letter-spaces it; Align Center shifts it into the middle through `hang`

@@ -101,9 +101,11 @@ test('deep.js: isExactKind takes the params; Gradient Map with a v2 def stays ex
   for (let i = 0; i < 16; i++) assert.ok(Math.abs(back.data[i] - eight.data[i]) <= 1, `sample ${i}`);
 });
 
-test('K.1 stub: the raster mask when enabled, nothing for the vector part', () => {
+test('K.1: the raster mask when enabled, nothing for a Reveal All vector mask with no path', () => {
+  // A vector mask with no path and initialFill 'reveal' shows everything (J.1), so only the raster part counts.
+  // (Without initialFill an empty vector mask is Hide All and hides the layer: masks-vector-masks.)
   const canvas = { width: 2, height: 2 };
-  const on = { mask: { canvas, enabled: true }, vectorMask: { path: { subpaths: [] }, enabled: true } };
+  const on = { mask: { canvas, enabled: true }, vectorMask: { path: { subpaths: [] }, initialFill: 'reveal', enabled: true } };
   const off = { mask: { canvas, enabled: false } };
   assert.equal(maskCanvasFor(on, null), canvas);
   assert.equal(maskCanvasFor(on, null, { parts: 'raster', purpose: 'bake' }), canvas);
