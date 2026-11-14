@@ -1,9 +1,10 @@
 // Regressions found in the review of the 0.3.1 hunt fixes, group "depth, modes, files": deep samples after undo and
 // redo over several entries, Image > Duplicate with layers kept, merges across groups and inside hidden groups at
 // 16 bits, long strips as TIFF / TGA / 16-bit PNG, the eyedropper in the grey modes, the memory of deep undo
-// patches, and a Grayscale document with a colouring adjustment layer saved as PSD.
+// patches, and a Grayscale document with a colouring adjustment layer saved as PSD. Reported later, with the other
+// merges across groups: Merge Layers with a group and a layer inside that group both selected.
 import { test, expect } from '@playwright/test';
-import { openApp, newDoc, run, runAwait } from './helpers.mjs';
+import { openApp, newDoc, run, runAwait, historyLength } from './helpers.mjs';
 import { encodePng } from '../../src/shared/pixels/png.js';
 
 const putFile = (page, path, bytes) => page.evaluate(([p, b]) => (window.__pigmentTest.files[p] = new Uint8Array(b)), [path, Array.from(bytes)]);
@@ -153,7 +154,12 @@ test('16/32-bit: Image > Duplicate with its layers kept is an exact copy (mask, 
   expect(errors).toEqual([]);
 });
 
-/** Document for the merge tests: a painted Background, a group G holding layer A (a small red square), layer B at the root. */
+/**
+ * Document for the merge tests: a painted Background, a group G holding layer A (a small red square), layer B at the
+ * root; A and B are selected. Options: the group's `opacity`, `masked` and `hidden`; `down` (a second layer A2 in the
+ * group, selected alone, for Merge Down); `below` (layer C, a green square, at the root under the group); `pick` (the
+ * names of the layers to select instead, the last one being the active layer).
+ */
 const groupedDoc = (page, depth, group) => page.evaluate(async ([bits, g]) => {
   const app = window.pigmentApp;
   const { RasterLayer, GroupLayer, createCanvas } = await import('/lib/document.js');
@@ -187,9 +193,15 @@ const groupedDoc = (page, depth, group) => page.evaluate(async ([bits, g]) => {
   };
   const A = rect('A', G, '#ff0000', 20, 20);
   const B = rect('B', doc.root, '#0000ff', 70, 70);
+  if (g.below) doc.move(rect('C', doc.root, '#00ff00', 45, 45), doc.root, 1);
   doc.selected = new Set(g.down ? [A] : [A, B]);
   doc.active = g.down ? rect('A2', G, '#00ff00', 40, 40) : B;
   if (g.down) doc.selected = new Set([doc.active]);
+  if (g.pick) {
+    const picked = g.pick.map((name) => doc.layers().find((l) => l.name === name));
+    doc.selected = new Set(picked);
+    doc.active = picked[picked.length - 1];
+  }
   doc.changed('tree');
   app.deep?.sync(doc);
 }, [depth, group]);
@@ -259,6 +271,133 @@ test('layers inside a hidden group are not merged into an empty layer: the merge
       return [at(25, 25), at(45, 45)];
     });
     expect(merged).toEqual([[255, 0, 0, 255], [0, 255, 0, 255]]);
+  }
+  expect(errors).toEqual([]);
+});
+
+/** The layer names, the active layer and the selection; `attached`: the active layer is in the document; `stray`: selected layers that are not. */
+const treeState = (page) => page.evaluate(() => {
+  const d = window.pigmentApp.doc, all = d.layers();
+  return {
+    layers: all.map((l) => l.name),
+    active: d.active?.name ?? null,
+    attached: all.includes(d.active),
+    selected: all.filter((l) => d.selected.has(l)).map((l) => l.name),
+    stray: [...d.selected].filter((l) => !all.includes(l)).length,
+  };
+});
+/**
+ * The active layer as a merge left it: its properties, its canvas pixels and, in a deep document, `off`: how many of
+ * its samples do not describe the canvas (-1 without samples; the sync pass has run).
+ */
+const activeLayer = (page) => page.evaluate(() => {
+  const app = window.pigmentApp, d = app.doc, l = d.active;
+  app.deep?.sync(d);
+  const px = l.canvas.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, l.canvas.width, l.canvas.height).data;
+  let off = 0;
+  if (d.depth > 8) {
+    if (l.deep?.data?.length !== px.length) off = -1;
+    else for (let i = 0; i < px.length; i++) if (Math.abs(Math.round(l.deep.data[i] / 257) - px[i]) > 1) off++;
+  }
+  return {
+    props: { name: l.name, type: l.type, opacity: l.opacity, blend: l.blend, clip: l.clip, x: l.x, y: l.y, width: l.canvas.width, height: l.canvas.height },
+    pixels: Array.from(px),
+    off,
+  };
+});
+/** RGBA at (x, y) in the pixels of a layer that covers the 100 x 100 document. */
+const at = (pixels, x, y) => pixels.slice((y * 100 + x) * 4, (y * 100 + x) * 4 + 4);
+/** Hides the layer of that name and takes the toasts off the screen (they stay for seconds), for toasts() to list what comes next. */
+const hideLayer = (page, name) => page.evaluate((n) => {
+  const d = window.pigmentApp.doc;
+  d.layers().find((l) => l.name === n).visible = false;
+  d.changed('tree');
+  for (const t of document.querySelectorAll('.toast')) t.remove();
+}, name);
+const toasts = (page) => page.evaluate(() => [...document.querySelectorAll('.toast')].map((t) => t.textContent));
+
+test('Merge Layers with a group and a layer inside it selected merges the group: the pixels and the merged layer stay', async ({ page }) => {
+  const errors = await openApp(page);
+  for (const depth of [8, 16]) {
+    for (const group of [{}, { opacity: 0.5 }]) {
+      const note = `${depth} bits, group ${JSON.stringify(group)}`;
+      // the reference: the group alone, merged by Merge Group
+      await groupedDoc(page, depth, { ...group, pick: ['G'] });
+      await run(page, 'layer:merge-group');
+      const alone = await activeLayer(page);
+      // the group and layer A inside it: A is drawn by its group, so merging the two is merging the group
+      await groupedDoc(page, depth, { ...group, pick: ['G', 'A'] });
+      const before = await compositeData(page);
+      await runAwait(page, 'layer:merge-selected');
+      const mergedState = { layers: ['Background', 'G', 'B'], active: 'G', attached: true, selected: ['G'], stray: 0 };
+      expect(await treeState(page), note).toEqual(mergedState);
+      expect(await historyLength(page), note).toBe(1);
+      const merged = await activeLayer(page);
+      expect(merged.props, note).toEqual({ name: 'G', type: 'raster', opacity: group.opacity ?? 1, blend: 'normal', clip: false, x: 0, y: 0, width: 100, height: 100 });
+      expect(merged.props, note).toEqual(alone.props);
+      expect(maxDiff(merged.pixels, alone.pixels), note).toBe(0);
+      // A's red square is in the merged layer at full strength (the group's opacity stays live on the layer), and
+      // the picture is the one from before the merge
+      expect(at(merged.pixels, 25, 25), note).toEqual([255, 0, 0, 255]);
+      expect(merged.off, note).toBe(0);
+      expect(maxDiff(await compositeData(page), before), note).toBeLessThanOrEqual(2);
+      // undo brings back the group, its layer and the selection; redo the merged layer
+      await runAwait(page, 'edit:undo');
+      expect(await treeState(page), note).toEqual({ layers: ['Background', 'G', 'A', 'B'], active: 'A', attached: true, selected: ['G', 'A'], stray: 0 });
+      expect(maxDiff(await compositeData(page), before), note).toBe(0);
+      await runAwait(page, 'edit:redo');
+      expect(await treeState(page), note).toEqual(mergedState);
+      const again = await activeLayer(page);
+      expect(again.props, note).toEqual(merged.props);
+      expect(maxDiff(again.pixels, merged.pixels), note).toBe(0);
+      expect(again.off, note).toBe(0);
+      expect(maxDiff(await compositeData(page), before), note).toBeLessThanOrEqual(2);
+    }
+  }
+  expect(errors).toEqual([]);
+});
+
+test('Merge Layers puts the result where the outermost selected layers were; a selected hidden layer inside a selected group still refuses, with its own message', async ({ page }) => {
+  const errors = await openApp(page);
+  for (const depth of [8, 16]) {
+    const note = `${depth} bits`;
+    // layer C at the root under the group, the group, and A inside the group: one layer in the group's place holds
+    // the pixels of C and A (A was the topmost of the three, and its place is inside the group that goes away)
+    await groupedDoc(page, depth, { below: true, pick: ['C', 'G', 'A'] });
+    const before = await compositeData(page);
+    await runAwait(page, 'layer:merge-selected');
+    const mergedState = { layers: ['Background', 'G', 'B'], active: 'G', attached: true, selected: ['G'], stray: 0 };
+    expect(await treeState(page), note).toEqual(mergedState);
+    expect(await historyLength(page), note).toBe(1);
+    const merged = await activeLayer(page);
+    expect(merged.props, note).toEqual({ name: 'G', type: 'raster', opacity: 1, blend: 'normal', clip: false, x: 0, y: 0, width: 100, height: 100 });
+    // A's red square, C's green square, and nothing of B, which was not selected
+    expect([at(merged.pixels, 25, 25), at(merged.pixels, 50, 50), at(merged.pixels, 75, 75)], note).toEqual([[255, 0, 0, 255], [0, 255, 0, 255], [0, 0, 0, 0]]);
+    expect(merged.off, note).toBe(0);
+    expect(maxDiff(await compositeData(page), before), note).toBeLessThanOrEqual(2);
+    await runAwait(page, 'edit:undo');
+    expect(await treeState(page), note).toEqual({ layers: ['Background', 'C', 'G', 'A', 'B'], active: 'A', attached: true, selected: ['C', 'G', 'A'], stray: 0 });
+    expect(maxDiff(await compositeData(page), before), note).toBe(0);
+    await runAwait(page, 'edit:redo');
+    expect(await treeState(page), note).toEqual(mergedState);
+    expect(maxDiff((await activeLayer(page)).pixels, merged.pixels), note).toBe(0);
+    expect(maxDiff(await compositeData(page), before), note).toBeLessThanOrEqual(2);
+
+    // a hidden layer that is selected refuses the merge, as it did, also when its group is selected with it. There
+    // the message does not offer to deselect it: the group would be merged without it, and the layer be discarded
+    await groupedDoc(page, depth, { pick: ['G', 'A'] });
+    await hideLayer(page, 'A');
+    await runAwait(page, 'layer:merge-selected');
+    expect(await treeState(page), note).toEqual({ layers: ['Background', 'G', 'A', 'B'], active: 'A', attached: true, selected: ['G', 'A'], stray: 0 });
+    expect(await historyLength(page), note).toBe(0);
+    expect(await toasts(page), note).toEqual(['Hidden layers cannot be merged: show them first. A hidden layer inside a selected group is discarded when the group is merged.']);
+    // outside every selected group a deselected hidden layer stays in the document, and the message says so
+    await groupedDoc(page, depth, { pick: ['A', 'B'] });
+    await hideLayer(page, 'A');
+    await runAwait(page, 'layer:merge-selected');
+    expect(await treeState(page), note).toEqual({ layers: ['Background', 'G', 'A', 'B'], active: 'B', attached: true, selected: ['A', 'B'], stray: 0 });
+    expect(await historyLength(page), note).toBe(0);
+    expect(await toasts(page), note).toEqual(['Hidden layers cannot be merged: show or deselect them first']);
   }
   expect(errors).toEqual([]);
 });

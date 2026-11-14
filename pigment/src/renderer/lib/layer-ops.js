@@ -1263,9 +1263,9 @@ export function install(app) {
   /**
    * Merge Group: the group's visible layers become one layer in its place, named after it. The group's blend mode
    * (Normal for Pass Through) and opacity stay live on the result; its mask and effects are rendered in. Hidden layers
-   * inside it are dropped, as Photoshop drops them.
+   * inside it are dropped, as Photoshop drops them. `label` names the history entry (Merge Layers passes its own).
    */
-  function mergeGroup(g) {
+  function mergeGroup(g, label = 'Merge group') {
     const d = doc();
     for (let p = g; p && p !== d.root; p = p.parent) if (!p.visible) return app.dialogs.toast('Hidden layers cannot be merged: show the group first', { kind: 'error' });
     const saved = { opacity: g.opacity, blend: g.blend };
@@ -1281,7 +1281,7 @@ export function install(app) {
     const merged = new RasterLayer({ name: g.name, canvas: flat, x: 0, y: 0, clip: g.clip, blend: g.blend === 'pass-through' ? 'normal' : g.blend, opacity: g.opacity, locked: { ...g.locked, all: false } });
     if (g.color) merged.color = g.color;
     if (g.linked) merged.linked = g.linked;
-    structural(app, 'Merge group', () => {
+    structural(app, label, () => {
       const parent = g.parent, i = parent.children.indexOf(g);
       d.remove(g);
       d.add(merged, parent, i);
@@ -1301,7 +1301,25 @@ export function install(app) {
       for (let p = l; p && p !== d.root; p = p.parent) if (!p.visible) return true;
       return false;
     };
-    if (layers.some(hidden)) return app.dialogs.toast('Hidden layers cannot be merged: show or deselect them first', { kind: 'error' });
+    const off = layers.filter(hidden);
+    if (off.length) {
+      // Deselected, a hidden layer stays out of the merge and in the document, unless a picked group that is shown
+      // holds it: that group is merged all the same, and a merged group drops the hidden layers inside it. For
+      // such a layer the message does not offer deselecting
+      const dropped = off.some((l) => layers.some((g) => !off.includes(g) && isAncestor(g, l)));
+      if (dropped) return app.dialogs.toast('Hidden layers cannot be merged: show them first. A hidden layer inside a selected group is discarded when the group is merged.', { kind: 'error', timeout: 6000 });
+      return app.dialogs.toast('Hidden layers cannot be merged: show or deselect them first', { kind: 'error' });
+    }
+    // A layer inside a picked group is drawn by that group and leaves the document with it: it is not a layer of
+    // its own in the merge (lib/depth.js drops it the same way from the list it composites in float). Left in, it
+    // could be the topmost one, and the result would be put next to it: inside the group the merge removes, where
+    // the merged pixels would be lost with it. A hidden one has refused the merge above, picked as it was.
+    layers = topLevel(layers);
+    // only a group and layers inside it were picked: that is the group alone, merged as Merge Group merges it
+    if (layers.length < 2) {
+      mergeGroup(layers[0], label);
+      return;
+    }
     const top = layers[layers.length - 1];
     // Merge Down keeps the lower layer's blend mode and opacity (rendered neutral, applied by the result)
     const base = layers[0];
