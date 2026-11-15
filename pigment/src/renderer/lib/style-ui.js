@@ -14,6 +14,11 @@
 // Gradient Overlay and Stroke (the + button on a row duplicates it; the buttons under the list move the selected
 // instance up or down or delete it), and dragging in the document to place a shadow, satin, gradient or pattern while
 // its page is shown (lib/style-canvas-drag.js).
+//
+// 0.5 (presets-panels, ARCHITECTURE.md "0.5 features", package 9): a Styles page above Blending Options lists the
+// `styles` presets (click replaces the draft's effects with a style's, Shift-click adds them); New Style… saves the
+// draft as a preset (lib/tool-presets.js newStyleDialog); every effect page has Make Default (its values become what
+// that effect starts from, settings.presetPanels.styleDefaults) and Reset to Default (back to them, else Pigment's).
 import {
   STYLE_KEYS, INSTANCE_KEYS, MAX_INSTANCES, mergeStyles, hasEnabledStyles, effectInstances, effectDefaults,
 } from '../../shared/pixels/styles.js';
@@ -26,6 +31,8 @@ import { setLayerProps } from './layer-ops.js';
 import { patternFromCanvas } from './patterns.js';
 import './contour-editor.js'; // the contour widget (registered when that module loads)
 import { armStyleDrag, DRAGGABLE } from './style-canvas-drag.js';
+import { presetGrid, styleThumbnail, styleTitle, panelPrefs, savePanelPrefs } from './presets-panels-ui.js';
+import { stylePatternRefs, resolveStyle } from './presets-panels-model.js';
 
 const clone = (v) => (v === undefined || v === null ? v : JSON.parse(JSON.stringify(v)));
 const BLENDS = BLEND_MODES.filter(Boolean);
@@ -236,6 +243,31 @@ const effectName = (key) => STYLE_KEYS.find((s) => s.key === key)?.name ?? key;
 
 export { EFFECT_FIELDS };
 
+// ---- Make Default (presets-panels, 0.5) ------------------------------------------------------------------------------
+// Pattern fields are not kept: a default holds plain values only (settings.json), the current pattern fills them.
+const PATTERN_FIELDS = ['pattern'];
+function withoutPatterns(fx) {
+  const out = clone(fx) ?? {};
+  for (const k of PATTERN_FIELDS) delete out[k];
+  if (out.texture && typeof out.texture === 'object') delete out.texture.pattern;
+  delete out.enabled;
+  return out;
+}
+/** The effect's default as the user made it (Make Default), merged over Pigment's, or Pigment's. */
+export function userEffectDefaults(app, key) {
+  const own = panelPrefs(app).styleDefaults?.[key];
+  const base = effectDefaults(key);
+  if (!own || typeof own !== 'object') return base;
+  const out = { ...base, ...clone(own) };
+  if (base.texture && own.texture) out.texture = { ...base.texture, ...clone(own.texture) };
+  if (base.contourSub && own.contourSub) out.contourSub = { ...base.contourSub, ...clone(own.contourSub) };
+  return out;
+}
+function makeEffectDefault(app, key, fx) {
+  const all = { ...(panelPrefs(app).styleDefaults ?? {}), [key]: withoutPatterns(fx) };
+  savePanelPrefs(app, { styleDefaults: all });
+}
+
 export function install(app) {
   // lib/blending-options.js (layer-style-blending) decides which layers take styles
   const hasStyleable = () => isStyleable(app.doc?.active, app);
@@ -287,6 +319,9 @@ export function install(app) {
     // the draft: every key as a list of instances (top first), each merged with the key's defaults
     const draft = {};
     for (const { key } of STYLE_KEYS) draft[key] = effectInstances(merged, key);
+    // an effect the layer does not have starts from its Make Default values (presets-panels)
+    const fresh = (key) => ({ ...userEffectDefaults(app, key), enabled: false });
+    for (const { key } of STYLE_KEYS) if (!layer.styles?.[key] && panelPrefs(app).styleDefaults?.[key]) draft[key] = [fresh(key)];
     const hidden = typeof merged.hidden === 'boolean' ? merged.hidden : undefined;
     // pattern overlays default to the current pattern
     const po = draft.patternOverlay[0];
@@ -342,7 +377,19 @@ export function install(app) {
     list.className = 'style-list';
     const tools = document.createElement('div');
     tools.className = 'style-list-tools';
-    side.append(list, tools);
+    // New Style… (presets-panels): the draft as a `styles` preset
+    const newStyleBtn = document.createElement('button');
+    newStyleBtn.type = 'button';
+    newStyleBtn.className = 'btn small style-new';
+    newStyleBtn.dataset.act = 'new-style';
+    newStyleBtn.textContent = 'New Style…';
+    newStyleBtn.addEventListener('click', async () => {
+      const { newStyleDialog } = await import('./tool-presets.js');
+      const st = stored();
+      await newStyleDialog(app, { styles: anyEffectOn(st) ? clone(st) : {}, blending: isDefaultBlending(ctx2.advanced) ? null : clone(ctx2.advanced), opacity: ctx2.opacity, fillOpacity: ctx2.fillOpacity, blend: ctx2.blend });
+      if (current.key === 'styles') select(current);
+    });
+    side.append(list, tools, newStyleBtn);
     const pane = document.createElement('div');
     pane.className = 'style-pane';
     root.append(side, pane);
@@ -362,7 +409,7 @@ export function install(app) {
     const upBtn = toolButton('up', '▲', 'Move the effect up');
     const downBtn = toolButton('down', '▼', 'Move the effect down');
     const delBtn = toolButton('delete', '✕', 'Delete the effect');
-    if (adjustment) tools.hidden = true;
+    if (adjustment) tools.hidden = newStyleBtn.hidden = true;
 
     const isEffect = (key) => !!draft[key];
     const effectOf = (sel) => {
@@ -420,6 +467,7 @@ export function install(app) {
     const buildList = () => {
       list.replaceChildren();
       rows.length = 0;
+      if (!adjustment) addRow({ key: 'styles', index: 0 }, 'Styles');
       for (const pg of pageList) addRow({ key: pg.id, index: 0 }, pg.title);
       if (adjustment) return markCurrent();
       for (const { key, name } of STYLE_KEYS) {
@@ -502,17 +550,77 @@ export function install(app) {
       select(current);
     };
 
+    // the Styles page (presets-panels): a style replaces the draft's effects (Shift: adds them) and, when it holds
+    // them, the blending options; its patterns are resolved as layer:style-preset resolves them
+    let stylesGrid = null;
+    const applyPreset = async (preset, addOnly) => {
+      const data = preset?.data;
+      if (!data?.styles) return;
+      const resolved = new Map();
+      for (const { ref } of stylePatternRefs(data.styles)) {
+        if (ref.presetId && !resolved.has(ref.presetId)) resolved.set(ref.presetId, (await Promise.resolve(app.patterns?.refFor?.(ref.presetId)).catch(() => null)) ?? null);
+      }
+      const { styles, missing } = resolveStyle(data.styles, resolved);
+      if (missing.length) app.dialogs.toast(`The pattern ${missing.map((n) => `"${n}"`).join(', ')} is missing: its effect is off`, { kind: 'error', timeout: 3000 });
+      const m = mergeStyles(styles);
+      for (const { key } of STYLE_KEYS) {
+        const has = styles[key] !== undefined;
+        if (addOnly && !(has && effectInstances(m, key).some((fx) => fx.enabled))) continue;
+        draft[key] = has ? effectInstances(m, key) : [fresh(key)];
+      }
+      if (!draft.patternOverlay[0].pattern) draft.patternOverlay[0].pattern = currentPatternRef();
+      if (!addOnly) {
+        if ('blending' in data) ctx2.advanced = clone(data.blending ?? DEFAULT_BLENDING);
+        for (const k of ['opacity', 'fillOpacity', 'blend']) if (data[k] !== undefined) ctx2[k] = data[k];
+      }
+      apply();
+      buildList();
+      markCurrent();
+    };
+    const stylesPage = () => {
+      const box = document.createElement('div');
+      box.className = 'style-presets';
+      stylesGrid?.destroy();
+      stylesGrid = presetGrid(app, 'styles', {
+        view: 'large',
+        label: 'Styles',
+        className: 'style-presets-grid',
+        draggable: false,
+        shiftSelects: false,
+        empty: 'No styles yet: New Style… saves this one',
+        thumb: (p, size, { onReady } = {}) => styleThumbnail(app, p.data, size, { onReady }),
+        title: (p) => styleTitle(p),
+        onPick: (p, e) => applyPreset(p, !!e?.shiftKey),
+      });
+      box.appendChild(stylesGrid.element);
+      const hint = document.createElement('p');
+      hint.className = 'muted';
+      hint.textContent = 'Click a style to use it; Shift-click to add its effects.';
+      box.appendChild(hint);
+      return box;
+    };
+
     let drag = null;
     const select = (sel) => {
-      if (!pages.has(sel.key) && !isEffect(sel.key) && sel.key !== 'bevel-contour' && sel.key !== 'bevel-texture') return;
+      if (!pages.has(sel.key) && !isEffect(sel.key) && sel.key !== 'bevel-contour' && sel.key !== 'bevel-texture' && sel.key !== 'styles') return;
       current = { key: sel.key, index: isEffect(sel.key) ? Math.min(sel.index ?? 0, draft[sel.key].length - 1) : 0 };
       markCurrent();
       pane.replaceChildren();
+      if (current.key !== 'styles' && stylesGrid) {
+        stylesGrid.destroy();
+        stylesGrid = null;
+      }
       const h = document.createElement('h3');
       h.style.margin = '0 0 10px';
       h.style.fontSize = '13px';
       const page = pages.get(current.key);
       const sub = { 'bevel-contour': 'Contour', 'bevel-texture': 'Texture' }[current.key];
+      if (current.key === 'styles') {
+        h.textContent = 'Styles';
+        pane.append(h, stylesPage());
+        drag?.refresh();
+        return;
+      }
       h.textContent = page ? page.title : sub ? `Bevel & Emboss: ${sub}` : effectName(current.key) + (draft[current.key].length > 1 ? ` (${current.index + 1} of ${draft[current.key].length})` : '');
       pane.appendChild(h);
       drag?.refresh();
@@ -565,17 +673,31 @@ export function install(app) {
         },
       });
       pane.appendChild(form.element);
+      // Make Default / Reset to Default (Photoshop's pair; presets-panels): the effect's values become what it starts
+      // from, and Reset to Default goes back to them (Pigment's own defaults until one was made)
+      const buttons = document.createElement('div');
+      buttons.className = 'style-default-buttons';
+      buttons.style.marginTop = '12px';
+      const makeDefault = document.createElement('button');
+      makeDefault.type = 'button';
+      makeDefault.className = 'btn small';
+      makeDefault.dataset.act = 'make-default';
+      makeDefault.textContent = 'Make Default';
+      makeDefault.addEventListener('click', () => {
+        makeEffectDefault(app, fxKey, draft[fxKey][index]);
+        app.dialogs.toast(`${effectName(fxKey)}: these values are its default now`, { kind: 'success', timeout: 1600 });
+      });
       const reset = document.createElement('button');
       reset.type = 'button';
       reset.className = 'btn small';
       reset.dataset.act = 'reset';
-      reset.style.marginTop = '12px';
-      reset.textContent = 'Reset to default';
+      reset.textContent = 'Reset to Default';
+      buttons.append(makeDefault, reset);
       reset.addEventListener('click', () => {
         const old = draft[fxKey][index];
-        let fresh = effectDefaults(fxKey);
-        if (sub === 'Contour') fresh = { ...old, contourSub: { ...effectDefaults('bevel').contourSub, enabled: !!old.contourSub?.enabled } };
-        else if (sub === 'Texture') fresh = { ...old, texture: { ...effectDefaults('bevel').texture, enabled: !!old.texture?.enabled, pattern: old.texture?.pattern ?? null } };
+        let fresh = userEffectDefaults(app, fxKey);
+        if (sub === 'Contour') fresh = { ...old, contourSub: { ...userEffectDefaults(app, 'bevel').contourSub, enabled: !!old.contourSub?.enabled } };
+        else if (sub === 'Texture') fresh = { ...old, texture: { ...userEffectDefaults(app, 'bevel').texture, enabled: !!old.texture?.enabled, pattern: old.texture?.pattern ?? null } };
         else {
           fresh.enabled = old.enabled;
           if (fxKey === 'patternOverlay') fresh.pattern = old.pattern;
@@ -588,7 +710,7 @@ export function install(app) {
         apply();
         select(current);
       });
-      pane.appendChild(reset);
+      pane.appendChild(buttons);
     };
     buildList();
 
@@ -625,6 +747,7 @@ export function install(app) {
     select(current);
     const ok = await opened;
     drag?.release();
+    stylesGrid?.destroy();
     const after = { styles: layer.styles ? clone(layer.styles) : null, opacity: layer.opacity, fillOpacity: layer.fillOpacity, blend: layer.blend, blending: clone(layer.blending ?? null) };
     Object.assign(layer, { styles: before.styles, opacity: before.opacity, fillOpacity: before.fillOpacity, blend: before.blend, blending: before.blending });
     layer.touch();

@@ -1,1 +1,53 @@
-/* presets-panels (ARCHITECTURE.md "0.5 features", rule 6): this package's own styles. Empty until the package lands. */
+/* presets-panels (ARCHITECTURE.md "0.5 features", rule 6): the preset grid of the Styles, Shapes and Tool Presets
+   panels, the tool preset picker of the options bar, the Custom Shape picker and the Layer Style dialog's Styles page.
+   Class names start with pset- (the patterns package owns pp-). */
+
+/* ---- grid ------------------------------------------------------------------------------------------------------- */
+.pset-grid { display: flex; flex-direction: column; gap: 2px; min-width: 0; outline: none; }
+.pset-items { display: flex; flex-wrap: wrap; gap: 4px; padding: 2px 4px 6px 20px; }
+.pset-items.pset-loose { padding-left: 4px; }
+.pset-item { display: inline-flex; align-items: center; gap: 8px; padding: 1px; border: 1px solid var(--border); border-radius: 3px; background: none; color: var(--fg); font: inherit; font-size: 12px; cursor: pointer; min-width: 0; }
+.pset-item canvas { display: block; border-radius: 2px; background: var(--bg-sunken); }
+.pset-item:hover { border-color: var(--fg-muted); }
+.pset-item[aria-selected="true"] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.pset-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pset-grid[data-view="list"] .pset-items, .pset-grid[data-view="text"] .pset-items { flex-direction: column; flex-wrap: nowrap; gap: 1px; }
+.pset-grid[data-view="list"] .pset-item, .pset-grid[data-view="text"] .pset-item { width: 100%; border-color: transparent; padding: 2px 4px; text-align: left; }
+.pset-grid[data-view="list"] .pset-item[aria-selected="true"], .pset-grid[data-view="text"] .pset-item[aria-selected="true"] { border-color: var(--accent); }
+.pset-group-head { display: flex; align-items: center; gap: 4px; width: 100%; padding: 3px 4px; border: 0; border-radius: 3px; background: none; color: var(--fg); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.pset-group-head:hover { background: var(--accent-soft); }
+.pset-group-head svg { width: 12px; height: 12px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; color: var(--fg-muted); }
+.pset-group-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pset-empty { padding: 8px; font-size: 12px; margin: 0; }
+
+/* tool preset rows: the tool's icon, its colour as a dot */
+.pset-tool-icon { position: relative; display: inline-flex; align-items: center; justify-content: center; width: var(--pset-size, 20px); height: var(--pset-size, 20px); flex: none; }
+.pset-tool-icon svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+.pset-tool-color { position: absolute; right: -1px; bottom: -1px; width: 7px; height: 7px; border-radius: 50%; border: 1px solid var(--bg-elevated); }
+
+/* ---- panels ----------------------------------------------------------------------------------------------------- */
+.pset-panel { display: flex; flex-direction: column; min-height: 0; }
+.pset-body { flex: 1; min-height: 0; overflow: auto; padding: 6px; }
+.pset-hint { font-size: 11px; }
+.pset-check { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--fg-muted); white-space: nowrap; }
+
+/* ---- options bar: the tool preset picker and the Custom Shape picker ------------------------------------------- */
+button.options-title.pset-tool-picker { border: 0; border-right: 1px solid var(--border); background: none; color: var(--fg); font: inherit; font-weight: 600; cursor: pointer; border-radius: 0; }
+button.options-title.pset-tool-picker:hover { background: var(--accent-soft); }
+.pset-caret { display: inline-flex; color: var(--fg-muted); }
+.pset-caret svg { width: 12px !important; height: 12px !important; }
+.pset-popover { padding: 6px; }
+.pset-picker { display: flex; flex-direction: column; gap: 4px; width: 280px; }
+.pset-picker-head { display: flex; align-items: center; gap: 4px; padding-bottom: 4px; border-bottom: 1px solid var(--border); }
+.pset-tool-list { max-height: 300px; overflow: auto; }
+.pset-shape-widget { display: inline-flex; align-items: center; }
+.pset-shape-button { display: inline-flex; align-items: center; gap: 4px; padding: 1px 4px; }
+.pset-shape-button canvas { display: block; }
+.pset-shape-missing { width: 20px; text-align: center; color: var(--fg-muted); }
+.pset-shape-picker { width: 300px; max-height: 320px; overflow: auto; }
+
+/* ---- Layer Style: the Styles page and the default buttons --------------------------------------------------------- */
+.style-presets-grid { max-height: 320px; overflow: auto; }
+.style-presets p { font-size: 11px; margin: 8px 0 0; }
+.style-new { margin: 8px 6px 0; }
+.style-default-buttons { display: flex; gap: 6px; }

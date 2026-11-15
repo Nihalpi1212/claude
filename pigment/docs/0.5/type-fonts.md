@@ -60,7 +60,8 @@ Image Processor do not stop for missing fonts: they write a line to their log.
 
 A character the text's font does not have (an arrow, a symbol, a letter of another script) is drawn with the first
 font that has it: Source Sans 3 first, then the other fonts Pigment has loaded. Emoji are drawn by the system's
-emoji font, as before.
+emoji font, as before. **Preferences > Fonts > Enable missing glyph protection** turns it off; the same section sets
+the font preview size.
 
 ## Release notes
 
@@ -74,6 +75,8 @@ emoji font, as before.
 - Missing fonts in opened files are reported once (Batch: in its log).
 - Missing glyph protection: characters a font lacks are drawn with a fallback font.
 - Bundled font: Source Sans 3 (variable).
+- New Preferences section **Fonts** (after Type): Enable missing glyph protection (default on), Font preview size
+  (default Medium). Settings `typeFonts.glyphProtection` (new sub-key, absent means on) and `typeFonts.previewSize`.
 - Changed: the style values of the options bar and the Character panel are PostScript names for families whose
   faces Pigment knows (`'700'`-style keys remain for the others); a style chosen this way sets the run's PostScript
   name, so the exact face is kept.
@@ -100,6 +103,10 @@ emoji font, as before.
   family is read, its name decides its class when it can.
 - A custom axis value is kept on the text and in the style key; tool presets keep it through the style key.
 - Variable fonts in WOFF/WOFF2 files cannot be added (HarfBuzz reads TrueType and OpenType only).
-- Missing glyph protection cannot be switched off from the Preferences yet (the setting
-  `typeFonts.glyphProtection: false` does it).
+- PSD: until psd-text lands, a text layer whose runs carry a PostScript name or axis values (a style chosen from a
+  family with real styles, an axis slider) is not "PSD expressible" for 0.4's text mapping and is saved as pixels with
+  the "saved as pixels" notice; families listed with 0.4's synthesised weights are saved as editable text as before.
+  psd-text writes the PostScript names (FontSet) and the named instance of a variable font; axis values between
+  instances have no PSD field and are reported.
+- The hover preview previews the family only; the style in the list stays what it is until a family is chosen.
 - Similar fonts compare classification and a few metrics (x-height, cap height, average width), not glyph shapes.

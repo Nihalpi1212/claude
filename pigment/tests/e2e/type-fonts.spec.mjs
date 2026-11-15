@@ -410,5 +410,60 @@ test('missing glyph protection: a character the font lacks is drawn by the bundl
     return p.subpaths.length;
   });
   expect(outline).toBeGreaterThan(0);
+  // Preferences > Fonts switches the protection off: the character stays in its run, drawn by the browser's fallback
+  const runsNow = () => page.evaluate((lid) => window.pigmentApp.doc.find(lid).layout().lines[0].runs.map((r) => [r.from, r.to, r.fallback?.family ?? null]), id);
+  const setProtection = (on) => page.evaluate(async (v) => {
+    const app = window.pigmentApp;
+    const sec = app.preferences.sections().find((s) => s.id === 'type-fonts');
+    const values = sec.read(app.settings);
+    const patch = sec.write({ ...values, typeFontsGlyphProtection: v }, app.settings);
+    try {
+      await app.saveSettings(patch);
+    } finally {
+      await new Promise((r) => setTimeout(r, 0));
+    }
+    return { before: values.typeFontsGlyphProtection, stored: app.settings.typeFonts.glyphProtection };
+  }, on);
+  expect(await setProtection(false)).toEqual({ before: true, stored: false });
+  await expect.poll(runsNow).toEqual([[0, 9, null]]);
+  expect(await setProtection(true)).toEqual({ before: false, stored: true });
+  await expect.poll(runsNow).toEqual([[0, 4, null], [4, 5, 'SourceSans3VF'], [5, 9, null]]);
+  expect(errors).toEqual([]);
+});
+
+test('in a 16-bit Grayscale document the style list and an axis value reach the runs and draw', async ({ page }) => {
+  const errors = await openApp(page);
+  await newDoc(page, { width: 500, height: 200 });
+  await ready(page);
+  const id = await addText(page, { text: 'Deep gray', char: { fontFamily: VF, size: 60 } });
+  await expect.poll(() => engineOf(page, id)).toBe('harfbuzz');
+  await runAwait(page, 'image:mode', { mode: 'grayscale', silent: true, flatten: false });
+  await runAwait(page, 'image:depth', 16);
+  expect(await page.evaluate(() => [window.pigmentApp.doc.mode, window.pigmentApp.doc.depth])).toEqual(['grayscale', 16]);
+  await page.evaluate((lid) => {
+    const app = window.pigmentApp;
+    app.doc.setActive(app.doc.find(lid));
+    app.doc.changed('tree');
+  }, id);
+  await runAwait(page, 'tool:text');
+  const style = page.locator('#options-bar .opt[data-key="style"] select');
+  await expect(style).toHaveValue('SourceSans3VF-Regular');
+  const w0 = await page.evaluate((lid) => window.pigmentApp.doc.find(lid).layout().width, id);
+  await style.selectOption('SourceSans3VF-Black');
+  await expect.poll(() => runsOf(page, id, ['postScriptName', 'fontWeight'])).toEqual([[9, { postScriptName: 'SourceSans3VF-Black', fontWeight: 900 }]]);
+  const r = await page.evaluate(async (lid) => {
+    const app = window.pigmentApp;
+    const { applyChar } = await import('/lib/type/target.js');
+    applyChar(app, { axes: { wght: 300 }, fontWeight: 300 });
+    const l = app.doc.find(lid);
+    const out = l.render();
+    const d = out.canvas.getContext('2d').getImageData(0, 0, out.canvas.width, out.canvas.height).data;
+    let ink = 0;
+    for (let i = 3; i < d.length; i += 4) if (d[i] > 128) ink++;
+    return { width: l.layout().width, face: l.layout().lines[0].runs[0].face.coords, ink };
+  }, id);
+  expect(r.face).toEqual({ wght: 300 });
+  expect(r.width).toBeLessThan(w0);
+  expect(r.ink).toBeGreaterThan(500);
   expect(errors).toEqual([]);
 });

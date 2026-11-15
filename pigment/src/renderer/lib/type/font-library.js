@@ -778,6 +778,25 @@ export function install(app) {
   });
 
   const SIZES = ['none', 'small', 'medium', 'large', 'xlarge', 'huge'];
+  // Preferences > Fonts (E20, a new section id beside the built-in Type section): Photoshop's Type preferences for the
+  // font menu, missing glyph protection and the preview size
+  app.preferences?.registerSection({
+    id: 'type-fonts',
+    title: 'Fonts',
+    order: 36,
+    fields: [
+      { key: 'typeFontsGlyphProtection', label: 'Enable missing glyph protection', type: 'checkbox', span: true },
+      { key: 'typeFontsPreviewSize', label: 'Font preview size', type: 'select', options: [['none', 'None'], ['small', 'Small'], ['medium', 'Medium'], ['large', 'Large'], ['xlarge', 'Extra Large'], ['huge', 'Huge']] },
+    ],
+    read: (s) => ({ typeFontsGlyphProtection: s.typeFonts?.glyphProtection !== false, typeFontsPreviewSize: SIZES.includes(s.typeFonts?.previewSize) ? s.typeFonts.previewSize : 'medium' }),
+    write: (values, s) => {
+      const cur = s.typeFonts ?? {};
+      const on = !!values.typeFontsGlyphProtection;
+      const size = SIZES.includes(values.typeFontsPreviewSize) ? values.typeFontsPreviewSize : 'medium';
+      if (on === (cur.glyphProtection !== false) && size === (cur.previewSize ?? 'medium')) return {};
+      return { typeFonts: { ...cur, glyphProtection: on, previewSize: size } };
+    },
+  });
   app.commands.register('type:font-preview-size', {
     label: 'Font Preview Size',
     record: false,

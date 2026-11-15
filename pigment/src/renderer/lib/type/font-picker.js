@@ -71,7 +71,7 @@ export function createHoverPreview(app, catalog) {
       const at = M.charAttrs(content, info.range[0], info.range[0] + 1);
       content = M.applyChar(content, info.range[0], info.range[1], patchFor(family, at));
     } else content = M.mapChar(content, (style, resolved) => ({ ...style, ...patchFor(family, resolved) }));
-    const clone = new TextLayer({ content, typeOptions: layer.typeOptions, x: layer.x, y: layer.y, width: layer.width, height: layer.height, pathText: layer.pathText });
+    const clone = new TextLayer({ content, typeOptions: layer.typeOptions, x: layer.x, y: layer.y, width: layer.width, height: layer.height, rotation: layer.rotation, pathText: layer.pathText });
     state.clones.set(layer, { clone, content: layer.content, family, version: layer.version });
     return clone;
   };

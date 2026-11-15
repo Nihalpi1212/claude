@@ -22,6 +22,9 @@ import { resolvePaint } from '../paint-editors.js';
 import { cornerWidgetAt, beginCornerDrag, drawCornerWidgets, createShapeDialog } from './shape-widgets.js';
 import '../shape-paint-ui.js'; // the shape-fill, shape-stroke and paint widgets of the options bar (H)
 import { registerIcons } from '../icons.js';
+// presets-panels (0.5): the Custom Shape picker (the `custom-shape` widget) and the 0..1 outline of Define Custom Shape
+import '../presets-panels-ui.js';
+import { unitShape, definedShapeSize } from '../presets-panels-model.js';
 
 // the Triangle tool's icon (rule 6: added through registerIcons, never replacing an existing name)
 registerIcons({ 'shape-triangle': '<path d="M12 4.5 21 19.5H3z"/>' });
@@ -524,9 +527,16 @@ export function shapeStyle(tool) {
   return { fill: fill ?? (stroke ? null : { type: 'solid', color: fg }), stroke };
 }
 
-/** Adds a shape layer (one history entry) above the active layer and makes it active. Exported for path:make-shape (L.4). */
+/**
+ * Adds a shape layer (one history entry) above the active layer and makes it active. Exported for path:make-shape (L.4).
+ * A custom shape keeps its outline in shapeProps.unit from the start (0.5, S10.5), so it draws where its preset is gone.
+ */
 export function createShapeLayer(app, path, { name, label, style, kind = 'path', props = {} }) {
   const doc = app.doc;
+  if (kind === 'custom' && !(props?.unit && Array.isArray(props.unit.subpaths))) {
+    const unit = customShapeUnit(app, props?.shape);
+    if (unit) props = { ...props, unit };
+  }
   const layer = new ShapeLayer({ name: nextLayerName(doc, name), path: clonePath(path), fill: style.fill, stroke: style.stroke, shapeKind: kind, shapeProps: props });
   // the Move tool keeps a shape's offset in x/y (see report): start them at 0
   layer.x = 0;
@@ -996,6 +1006,47 @@ function customUnitBounds(id) {
   return pathBounds(livePath('custom', { x: 0, y: 0, width: 1, height: 1, angle: 0, shape: id }) ?? { subpaths: [] }) ?? { x: 0, y: 0, width: 1, height: 1 };
 }
 
+/**
+ * Defined Size of a custom shape in px: the size a defined (or .csh) shape was made at, which its preset keeps as
+ * width / height (0.5); else 0.4's 100 px per unit of its 0..1 box.
+ */
+export function customShapeSize(app, id) {
+  const data = id ? app?.presets?.get?.('shapes', id)?.data : null;
+  if (data?.width > 0 && data?.height > 0) return definedShapeSize(data);
+  const b = customUnitBounds(id);
+  return [b.width * 100, b.height * 100];
+}
+
+/** A copy of the 0..1 outline of a `shapes` preset (0.3's built-in of that id when the store lacks it), or null. */
+export function customShapeUnit(app, id) {
+  const data = id ? app?.presets?.get?.('shapes', id)?.data : null;
+  if (data?.path && Array.isArray(data.path.subpaths)) return clonePath(data.path);
+  if (id && CUSTOM_SHAPES[id]) return customPath(id, 0, 0, 1, 1);
+  return null;
+}
+
+/**
+ * Edit > Define Custom Shape (presets-panels): the path it defines from, in document px: the selected components of
+ * the current path when the Path Selection tool selected some, else the whole current path (the path chosen in the
+ * Paths panel, the work path, or the active shape layer's path, as the path commands pick it). null when none.
+ */
+export function definableShapePath(app) {
+  const t = currentPathTarget(app);
+  if (!t) return null;
+  const path = clonePath(t.get());
+  if (state.sel.key === t.key && state.sel.subpaths.size) {
+    const keep = [...state.sel.subpaths].sort((a, b) => a - b).map((i) => path.subpaths[i]).filter(Boolean);
+    if (keep.length) return { subpaths: keep };
+  }
+  return path;
+}
+
+/** The `shapes` preset data Define Custom Shape stores for the current path, or null when it has no area. */
+export function definableShape(app) {
+  const path = definableShapePath(app);
+  return path ? unitShape(path) : null;
+}
+
 const sgn = (v) => Math.sign(v) || 1;
 
 export class ShapeTool extends VectorTool {
@@ -1022,7 +1073,8 @@ export class ShapeTool extends VectorTool {
         { kind: 'hidden', key: 'arrowLength', default: 1000 },
         { kind: 'hidden', key: 'arrowConcavity', default: 0 },
       ],
-      custom: [{ kind: 'select', key: 'shape', label: 'Shape', get options() { return customShapeChoices(app); }, default: 'heart' }],
+      // the Custom Shape picker (lib/presets-panels-ui.js, presets-panels); `options` kept for code that lists them
+      custom: [{ kind: 'custom-shape', key: 'shape', label: 'Shape', get options() { return customShapeChoices(app); }, default: 'heart' }],
     }[shape];
     super(app, {
       id: `shape-${shape}`,
@@ -1111,17 +1163,14 @@ export class ShapeTool extends VectorTool {
   }
   /** Width / height of Fixed Size (Defined Size for custom shapes: 100 px per unit of the shape's own box). */
   fixedSize() {
-    if (this.opt('constrain') === 'defined-size') {
-      const b = customUnitBounds(this.opt('shape') ?? 'heart');
-      return [b.width * 100, b.height * 100];
-    }
+    if (this.opt('constrain') === 'defined-size') return customShapeSize(this.app, this.opt('shape') ?? 'heart');
     return [Math.max(1, Number(this.opt('fixedW')) || 100), Math.max(1, Number(this.opt('fixedH')) || 100)];
   }
   /** Width / height ratio of Proportional (Defined Proportions: the custom shape's own). */
   ratio() {
     if (this.shape === 'custom' && (this.opt('constrain') === 'defined-proportions' || this.opt('constrain') === 'none')) {
-      const b = customUnitBounds(this.opt('shape') ?? 'heart');
-      return b.width / b.height || 1;
+      const [w, h] = customShapeSize(this.app, this.opt('shape') ?? 'heart');
+      return w / h || 1;
     }
     const w = Number(this.opt('propW')) || 1, h = Number(this.opt('propH')) || 1;
     return w / h;
