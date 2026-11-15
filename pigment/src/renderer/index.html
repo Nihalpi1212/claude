@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'sha256-p55XGb0QaH9b8gKgi6J6i6gGeVTKydLI+gFlL+WIoxg='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; worker-src 'self' blob:; connect-src 'self' blob: data: https://api.openai.com https://auth.openai.com https://generativelanguage.googleapis.com; media-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'sha256-9VmuXzP+QfpOBPFfhIdC/LzeLI5z5h9wKa2PckHHins='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; worker-src 'self' blob:; connect-src 'self' blob: data: https://api.openai.com https://auth.openai.com https://generativelanguage.googleapis.com; media-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
   <title>Pigment</title>
   <link rel="icon" href="/build/icon.png">
   <!-- The import map is inline; its sha256 hash is allowed by the CSP above. If you change the map,
@@ -11,7 +11,8 @@
   <script type="importmap">
   {
     "imports": {
-      "ag-psd": "./vendor/ag-psd.js"
+      "ag-psd": "./vendor/ag-psd.js",
+      "#ag-psd": "./vendor/ag-psd.js"
     }
   }
   </script>
@@ -50,6 +51,18 @@
   <link rel="stylesheet" href="./styles/layers-panel-depth.css">
   <link rel="stylesheet" href="./styles/finish-layer-menu.css">
   <link rel="stylesheet" href="./styles/conventions-shortcuts-fields.css">
+  <!-- 0.5: one stylesheet per package with UI (ARCHITECTURE.md "0.5 features", rule 6) -->
+  <link rel="stylesheet" href="./styles/brush-settings.css">
+  <link rel="stylesheet" href="./styles/painting.css">
+  <link rel="stylesheet" href="./styles/color-management.css">
+  <link rel="stylesheet" href="./styles/camera-raw.css">
+  <link rel="stylesheet" href="./styles/presets-panels.css">
+  <link rel="stylesheet" href="./styles/preset-manager.css">
+  <link rel="stylesheet" href="./styles/color-picker.css">
+  <link rel="stylesheet" href="./styles/type-fonts.css">
+  <link rel="stylesheet" href="./styles/type-commands.css">
+  <link rel="stylesheet" href="./styles/shortcuts-editor.css">
+  <link rel="stylesheet" href="./styles/move-tool.css">
 </head>
 <body>
   <div id="app" class="app">

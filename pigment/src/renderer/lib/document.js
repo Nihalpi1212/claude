@@ -378,8 +378,14 @@ export class TextLayer extends Layer {
   }
   render() {
     if (this._cache && this._cache.version === this.version) return this._cache;
-    const base = this.renderBase();
-    if (!this.transform) {
+    // text render stages (lib/type/api.js, S11.3): a `transformed` stage draws in document space with the matrix,
+    // and its result is used as it is; otherwise the base render is resampled through the matrix as in 0.4
+    const base = backend().render(this, { matrix: this.transform ?? null });
+    if (!this.transform || base.transformed) {
+      if (base.transformed) {
+        this._cache = { version: this.version, canvas: base.canvas, x: base.x, y: base.y };
+        return this._cache;
+      }
       this._cache = { version: this.version, ...base };
       return this._cache;
     }
@@ -577,6 +583,9 @@ export class Document {
     this.depth = opts.depth ?? 8; // bits per channel: 8 | 16 | 32 (lib/depth.js keeps RasterLayer.deep in step)
     this.colorTable = opts.colorTable ?? null; // indexed mode: [[r, g, b], ...] up to 256 entries (+ transparentIndex in duotone/indexed options)
     this.duotone = opts.duotone ?? null; // { type: 'monotone'|'duotone'|'tritone'|'quadtone', inks: [{ name, color: '#rrggbb', curve: [[x, y], ...] }] }
+    // color (lib/color/pipeline.js), S6.2: the ColorProfile the numbers are in; null is untagged, read as the working
+    // RGB space (sRGB in 0.5). In .pigment as describe().profile and the zip entry profile.icc
+    this.profile = opts.profile ?? null;
   }
 
   /** The guides (a frozen array of { id, axis, pos, color? }); assigning a list stores it without history. */
@@ -759,6 +768,8 @@ export class Document {
       workPath: this.workPath?.subpaths?.length ? JSON.parse(JSON.stringify(this.workPath)) : null,
       meta: this.meta,
       globalLight: this.globalLight ?? null,
+      // color (lib/color/pipeline.js): the profile's description; its bytes are the zip entry profile.icc (io.js)
+      profile: this.profile ? { id: this.profile.id, name: this.profile.name, colorSpace: this.profile.colorSpace, wellKnown: this.profile.wellKnown ?? null } : null,
       layers: this.root.children.filter(saved).map(walk),
     };
   }

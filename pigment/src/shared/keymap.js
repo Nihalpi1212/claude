@@ -7,6 +7,11 @@
 // dispatches them from the editor's input; shortcuts.js never sees them). typeKeyFor() maps a menu or renderer
 // command whose accelerator is also a type key to that type command (the type session's handle uses it).
 //
+// 0.5 (ARCHITECTURE.md "0.5 features", S9): these are the defaults. What runs is effectiveKeys(overlay): the user's
+// overlay (settings.keymap, edited through app.keymap, lib/keymap-store.js) applied to them. PAINT_KEYS are tried
+// first while a painting tool is active; FIXED_KEYS cannot be changed. Every reader goes through app.keymap (the
+// renderer) or effectiveKeys (main.js, Node), never through these tables directly.
+//
 // Dispatch rule: the renderer handles every combo it recognises (both tables) and calls
 // preventDefault; on macOS the native menu intercepts MENU_KEYS first, on Windows/Linux the page
 // sees the key first. The command registry de-duplicates a command that arrives twice within a
@@ -97,6 +102,14 @@ export const MENU_KEYS = {
   'view:prev-tab': 'Ctrl+Shift+Tab',
   'help:shortcuts': 'CmdOrCtrl+Alt+Shift+K',
   'edit:menus': 'CmdOrCtrl+Alt+Shift+M',
+  // 0.5 (S13.3): Photoshop's function keys. The panel commands keep 0.4's meaning (show and reveal; Photoshop's F-keys
+  // toggle, a recorded difference). Revert takes F12 from the developer tools (FIXED_KEYS: Shift+CmdOrCtrl+F12)
+  'help:guide': 'F1',
+  'window:panel-brush-settings': 'F5',
+  'window:panel-color': 'F6',
+  'window:panel-layers': 'F7',
+  'window:panel-info': 'F8',
+  'file:revert': 'F12',
 };
 
 /** The 24 blend-mode keys (Shift+Alt+letter, Photoshop's letters): [mode id, letter, label]. */
@@ -120,7 +133,6 @@ export const RENDERER_KEYS = {
   'view:zoom-200': ['CmdOrCtrl+2'],
   'view:fullscreen': ['F11'],
   'window:toggle-panels': ['Tab'],
-  'help:devtools': ['F12'],
   'tool:move': ['v'],
   'tool:marquee': ['m'],
   'tool:lasso': ['l'],
@@ -216,6 +228,152 @@ export const TYPE_KEYS = {
   'type:hide-selection': 'CmdOrCtrl+H',
 };
 
+// ---- 0.5 (ARCHITECTURE.md "0.5 features", S9.1, S13.3–S13.4) ------------------------------------------------------
+
+/**
+ * Keys considered only while the active tool paints (lib/tool-traits.js paints): shortcuts.js tries them before the
+ * global tables and runs the first whose command is enabled; app.keymap.resolveKey maps a global command main.js
+ * sent for the same key (Shift+Alt+letter on Windows and Linux) to it. A paint key shadowing a global key is by design.
+ */
+export const PAINT_BLEND_KEYS = [
+  ...BLEND_MODE_KEYS.filter(([id]) => id !== 'pass-through'),
+  ['behind', 'Q', 'Behind'], ['clear', 'R', 'Clear'],
+];
+export const PAINT_KEYS = {
+  'tool:airbrush-toggle': ['Shift+Alt+P'],
+  'tool:brush-prev': [','],
+  'tool:brush-next': ['.'],
+  'tool:brush-first': ['Shift+,'],
+  'tool:brush-last': ['Shift+.'],
+  ...Object.fromEntries(DIGITS.map((d) => [`tool:opacity-digit-${d}`, [d]])),
+  ...Object.fromEntries(DIGITS.map((d) => [`tool:flow-digit-${d}`, [`Shift+${d}`]])),
+  ...Object.fromEntries(PAINT_BLEND_KEYS.map(([id, letter]) => [`tool:blend-mode-${id}`, [`Shift+Alt+${letter}`]])),
+};
+
+/**
+ * Keys an overlay cannot change: the menu template applies them, keyConflicts reports a binding on them, the
+ * shortcuts editor shows them read only. platforms: only there; development: only in development builds.
+ */
+export const FIXED_KEYS = {
+  'view:fullscreen': { accel: 'Ctrl+Cmd+F', platforms: ['darwin'] },
+  'help:devtools': { accel: 'Shift+CmdOrCtrl+F12', development: true },
+};
+/** The fixed accelerator of cmd on a platform and build, or null. */
+export function fixedKeyFor(cmd, { platform = 'linux', isPackaged = true } = {}) {
+  const f = FIXED_KEYS[cmd];
+  if (!f) return null;
+  if (f.platforms && !f.platforms.includes(platform)) return null;
+  if (f.development && isPackaged) return null;
+  return f.accel;
+}
+
+/** A key that types text or edits it (no Ctrl, Cmd or Alt; function keys excepted): never a native menu key. */
+export function isPlainKey(accel) {
+  const d = parseAccelerator(accel);
+  return !d.cmdOrCtrl && !d.ctrl && !d.meta && !d.alt && !/^f([1-9]|1[0-9]|2[0-4])$/.test(d.key);
+}
+
+/** The key combination an accelerator stands for on one platform (CmdOrCtrl resolved). */
+function comboOf(accel, isMac) {
+  const d = parseAccelerator(accel);
+  const ctrl = d.ctrl || (d.cmdOrCtrl && !isMac);
+  const meta = d.meta || (d.cmdOrCtrl && isMac);
+  return `${ctrl ? 'C' : ''}${meta ? 'M' : ''}${d.alt ? 'A' : ''}${d.shift ? 'S' : ''}+${d.key}`;
+}
+/** Two accelerators press the same keys on macOS or on Windows and Linux. */
+export function accelCollides(a, b) {
+  return comboOf(a, true) === comboOf(b, true) || comboOf(a, false) === comboOf(b, false);
+}
+
+const validAccel = (a) => typeof a === 'string' && a.trim() !== '' && parseAccelerator(a).key !== '';
+
+/**
+ * A KeyOverlay with malformed entries dropped: { v: 1, menu?, renderer?, type?, paint? } where an entry replaces the
+ * default binding of its command and null (menu, type) or [] (renderer, paint) removes it.
+ */
+export function normalizeOverlay(overlay) {
+  const out = { v: 1 };
+  const o = overlay && typeof overlay === 'object' ? overlay : {};
+  for (const t of ['menu', 'type']) {
+    if (!o[t] || typeof o[t] !== 'object') continue;
+    const m = {};
+    for (const [cmd, a] of Object.entries(o[t])) if (a === null || validAccel(a)) m[cmd] = a;
+    if (Object.keys(m).length) out[t] = m;
+  }
+  for (const t of ['renderer', 'paint']) {
+    if (!o[t] || typeof o[t] !== 'object') continue;
+    const m = {};
+    for (const [cmd, list] of Object.entries(o[t])) if (Array.isArray(list)) m[cmd] = [...new Set(list.filter(validAccel))];
+    if (Object.keys(m).length) out[t] = m;
+  }
+  return out;
+}
+
+let DEFAULT_EFFECTIVE = null;
+/** effectiveKeys(null), computed once (callers must not change it). */
+function defaultEffective() {
+  DEFAULT_EFFECTIVE ??= effectiveKeys(null);
+  return DEFAULT_EFFECTIVE;
+}
+
+/** The default tables with an overlay applied: { menu, renderer, type, paint } (pure; main, renderer and Node use it). */
+export function effectiveKeys(overlay = null) {
+  const o = normalizeOverlay(overlay);
+  const one = (defaults, over = {}) => {
+    const t = { ...defaults };
+    for (const [cmd, a] of Object.entries(over)) {
+      if (a === null) delete t[cmd];
+      else t[cmd] = a;
+    }
+    return t;
+  };
+  const many = (defaults, over = {}) => {
+    const t = Object.fromEntries(Object.entries(defaults).map(([cmd, list]) => [cmd, list.slice()]));
+    for (const [cmd, list] of Object.entries(over)) {
+      if (list.length) t[cmd] = list.slice();
+      else delete t[cmd];
+    }
+    return t;
+  };
+  return { menu: one(MENU_KEYS, o.menu), renderer: many(RENDERER_KEYS, o.renderer), type: one(TYPE_KEYS, o.type), paint: many(PAINT_KEYS, o.paint) };
+}
+
+/**
+ * Keys bound to more than one command within a scope, on either platform: 'global' (menu ∪ renderer ∪ FIXED_KEYS ∪
+ * the key sources, named `source:<id>`), 'type', 'paint'. A type or paint key shadowing a global key is by design.
+ * sources: [{ id, accel, label? }].
+ */
+export function keyConflicts(effective, sources = []) {
+  const scopes = { global: [], type: [], paint: [] };
+  for (const [cmd, a] of Object.entries(effective.menu ?? {})) scopes.global.push([cmd, a]);
+  for (const [cmd, list] of Object.entries(effective.renderer ?? {})) for (const a of list) scopes.global.push([cmd, a]);
+  for (const [cmd, f] of Object.entries(FIXED_KEYS)) scopes.global.push([cmd, f.accel]);
+  for (const s of sources) if (s && typeof s.accel === 'string') scopes.global.push([`source:${s.id ?? s.label ?? 'source'}`, s.accel]);
+  for (const [cmd, a] of Object.entries(effective.type ?? {})) scopes.type.push([cmd, a]);
+  for (const [cmd, list] of Object.entries(effective.paint ?? {})) for (const a of list) scopes.paint.push([cmd, a]);
+  const out = [];
+  const seen = new Set();
+  for (const [scope, entries] of Object.entries(scopes)) {
+    for (const isMac of [false, true]) {
+      const by = new Map();
+      for (const [cmd, accel] of entries) {
+        const k = comboOf(accel, isMac);
+        if (!by.has(k)) by.set(k, { accel, commands: [] });
+        const g = by.get(k);
+        if (!g.commands.includes(cmd)) g.commands.push(cmd);
+      }
+      for (const g of by.values()) {
+        if (g.commands.length < 2) continue;
+        const key = `${scope}|${[...g.commands].sort().join(',')}|${comboOf(g.accel, false)}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push({ accel: g.accel, scope, commands: g.commands });
+      }
+    }
+  }
+  return out;
+}
+
 /**
  * Whether a key may run cmd while the focus is in a text field (M.4: a key that edits the text edits the text). The
  * edit keys run because their commands hand the edit to the field (undo, the clipboard, select all, delete); file,
@@ -224,6 +382,8 @@ export const TYPE_KEYS = {
  */
 export const TEXT_FIELD_EDIT_KEYS = new Set(['edit:undo', 'edit:redo', 'edit:cut', 'edit:copy', 'edit:paste', 'edit:select-all', 'select:all', 'edit:clear', 'view:zoom-in', 'view:zoom-out']);
 export function runsWhileTyping(cmd) {
+  // 0.5 (S9.4): F12 is Revert, which must not throw away the text being typed
+  if (cmd === 'file:revert') return false;
   return TEXT_FIELD_EDIT_KEYS.has(cmd) || /^(file:|view:|help:|window:)/.test(String(cmd));
 }
 
@@ -236,20 +396,24 @@ export function sameAccelerator(a, b) {
 /**
  * The type command whose TYPE_KEYS accelerator is also the accelerator of commandId in MENU_KEYS or RENDERER_KEYS
  * (Shift+Ctrl+L is Auto Tone outside a type session and Align Left inside one), else null. The type session's
- * handle uses it for keys (B.8); nothing else duplicates the mapping.
+ * handle uses it for keys (B.8); nothing else duplicates the mapping. 0.5: over the effective tables (S9.1), so a
+ * rebound key maps as it is bound now.
  */
-export function typeKeyFor(commandId) {
-  const own = [MENU_KEYS[commandId], ...(RENDERER_KEYS[commandId] ?? [])].filter(Boolean);
+export function typeKeyFor(commandId, effective = defaultEffective()) {
+  const own = [effective.menu[commandId], ...(effective.renderer[commandId] ?? [])].filter(Boolean);
   if (!own.length) return null;
-  for (const [typeCmd, accel] of Object.entries(TYPE_KEYS)) if (own.some((a) => sameAccelerator(a, accel))) return typeCmd;
+  for (const [typeCmd, accel] of Object.entries(effective.type)) if (own.some((a) => sameAccelerator(a, accel))) return typeCmd;
   return null;
 }
 
 export const SHORTCUT_GROUPS = [
-  { title: 'Files', commands: ['file:new', 'file:open', 'file:save', 'file:save-as', 'file:export', 'file:export-quick', 'file:save-for-web', 'file:print', 'file:close', 'file:close-others', 'file:properties'] },
-  { title: 'Editing', commands: ['edit:undo', 'edit:redo', 'edit:toggle-last-state', 'edit:step-backward', 'edit:step-forward', 'edit:cut', 'edit:copy', 'edit:copy-merged', 'edit:paste', 'edit:paste-in-place', 'edit:clear', 'edit:search', 'edit:fill', 'edit:fill-foreground', 'edit:fill-background', 'edit:free-transform', 'edit:content-aware-scale', 'edit:preferences', 'edit:menus'] },
+  { title: 'Files', commands: ['file:new', 'file:open', 'file:save', 'file:save-as', 'file:revert', 'file:export', 'file:export-quick', 'file:save-for-web', 'file:print', 'file:close', 'file:close-others', 'file:properties'] },
+  { title: 'Editing', commands: ['edit:undo', 'edit:redo', 'edit:toggle-last-state', 'edit:step-backward', 'edit:step-forward', 'edit:cut', 'edit:copy', 'edit:copy-merged', 'edit:paste', 'edit:paste-in-place', 'edit:clear', 'edit:search', 'edit:fill', 'edit:fill-foreground', 'edit:fill-background', 'edit:free-transform', 'edit:content-aware-scale', 'edit:preferences', 'edit:menus',
+    // 0.5 (S13.3)
+    'edit:define-brush', 'edit:define-custom-shape', 'edit:preset-manager', 'edit:export-import-presets', 'edit:migrate-presets',
+    'edit:color-settings', 'edit:assign-profile', 'edit:convert-profile', 'edit:camera-raw-preferences', 'edit:show-all-menu-items'] },
   { title: 'Image', commands: ['image:adjust-levels', 'image:adjust-curves', 'image:adjust-hue-saturation', 'image:adjust-color-balance', 'image:adjust-levels-last', 'image:adjust-curves-last', 'image:adjust-hue-saturation-last', 'image:adjust-color-balance-last', 'image:adjust-black-white', 'image:adjust-invert', 'image:adjust-desaturate', 'image:auto-tone', 'image:auto-contrast', 'image:auto-color', 'image:size', 'image:canvas-size'] },
-  { title: 'Layers', commands: ['layer:new', 'layer:new-no-dialog', 'layer:via-copy', 'layer:via-cut', 'layer:group', 'layer:ungroup', 'layer:clip', 'layer:merge', 'layer:merge-visible', 'layer:stamp-visible', 'layer:stamp-selected', 'layer:arrange-front', 'layer:arrange-forward', 'layer:arrange-backward', 'layer:arrange-back', 'layer:select-all', 'layer:visibility', 'layer:lock-dialog'] },
+  { title: 'Layers', commands: ['layer:new', 'layer:new-no-dialog', 'layer:via-copy', 'layer:via-cut', 'layer:group', 'layer:ungroup', 'layer:clip', 'layer:merge', 'layer:merge-visible', 'layer:stamp-visible', 'layer:stamp-selected', 'layer:arrange-front', 'layer:arrange-forward', 'layer:arrange-backward', 'layer:arrange-back', 'layer:select-all', 'layer:visibility', 'layer:lock-dialog', 'layer:style-preset'] },
   {
     title: 'Layer keys',
     commands: [
@@ -262,10 +426,18 @@ export const SHORTCUT_GROUPS = [
   { title: 'Selection', commands: ['select:all', 'select:none', 'select:reselect', 'select:inverse', 'select:feather', 'select:select-mask', 'select:find-layers'] },
   { title: 'Filters', commands: ['filter:last', 'filter:liquify', 'filter:camera-raw', 'filter:lens-correction'] },
   { title: 'View', commands: ['view:zoom-in', 'view:zoom-out', 'view:zoom-fit', 'view:zoom-100', 'view:zoom-200', 'view:rulers', 'view:grid', 'view:guides', 'view:lock-guides', 'view:extras', 'view:snap', 'view:proof', 'view:gamut', 'view:fullscreen', 'window:toggle-panels', 'window:panel-actions', 'view:next-tab', 'view:prev-tab'] },
-  { title: 'Tools', commands: ['tool:move', 'tool:marquee', 'tool:lasso', 'tool:wand', 'tool:crop', 'tool:eyedropper', 'tool:heal', 'tool:brush', 'tool:clone', 'tool:history', 'tool:eraser', 'tool:fill', 'tool:retouch', 'tool:pen', 'tool:text', 'tool:path-select', 'tool:shape', 'tool:hand', 'tool:rotate-view', 'tool:zoom', 'tool:swap-colors', 'tool:default-colors', 'tool:brush-size-down', 'tool:brush-size-up', 'tool:brush-hardness-down', 'tool:brush-hardness-up', 'app:escape', 'app:enter'] },
+  { title: 'Panels', commands: ['window:panel-brush-settings', 'window:panel-color', 'window:panel-layers', 'window:panel-info', 'window:panel-styles', 'window:panel-shapes', 'window:panel-tool-presets'] },
+  { title: 'Tools', commands: ['tool:move', 'tool:marquee', 'tool:lasso', 'tool:wand', 'tool:crop', 'tool:eyedropper', 'tool:heal', 'tool:brush', 'tool:clone', 'tool:history', 'tool:eraser', 'tool:fill', 'tool:retouch', 'tool:pen', 'tool:text', 'tool:path-select', 'tool:shape', 'tool:hand', 'tool:rotate-view', 'tool:zoom', 'tool:swap-colors', 'tool:default-colors', 'tool:brush-size-down', 'tool:brush-size-up', 'tool:brush-hardness-down', 'tool:brush-hardness-up', 'app:escape', 'app:enter',
+    'tool:brush-preset', 'tool:preset', 'tool:reset', 'tool:reset-all', 'tool:type-mask-horizontal', 'tool:type-mask-vertical'] },
+  // keys of PAINT_KEYS: only while a painting tool is active (S13.4)
+  { title: 'Painting', paint: true, commands: Object.keys(PAINT_KEYS) },
+  {
+    title: 'Type menu',
+    commands: ['type:add-fonts', 'type:anti-alias', 'type:warp-text', 'type:create-work-path', 'type:convert-to-shape', 'type:convert-text-kind', 'type:font-preview-size', 'type:update-all', 'type:manage-missing-fonts', 'type:replace-missing-fonts', 'type:paste-lorem-ipsum', 'type:toggle-orientation'],
+  },
   // keys of TYPE_KEYS: only while editing text with a Type tool
   { title: 'Type', type: true, commands: Object.keys(TYPE_KEYS) },
-  { title: 'Help', commands: ['help:shortcuts', 'help:devtools'] },
+  { title: 'Help', commands: ['help:guide', 'help:shortcuts', 'help:devtools'] },
 ];
 
 export const COMMAND_LABELS = {
@@ -334,6 +506,25 @@ export const COMMAND_LABELS = {
   ...Object.fromEntries(DIGITS.map((d) => [`layer:opacity-digit-${d}`, `Opacity ${d === '0' ? 100 : Number(d) * 10}%`])),
   ...Object.fromEntries(DIGITS.map((d) => [`layer:fill-digit-${d}`, `Fill ${d === '0' ? 100 : Number(d) * 10}%`])),
   ...Object.fromEntries(BLEND_MODE_KEYS.map(([id, , label]) => [`layer:blend-mode-${id}`, `Blend mode: ${label}`])),
+  // 0.5 (S13.3)
+  'file:revert': 'Revert', 'help:guide': 'Pigment help', 'window:panel-color': 'Color panel', 'window:panel-layers': 'Layers panel',
+  'window:panel-info': 'Info panel', 'window:panel-brush-settings': 'Brush Settings panel', 'window:panel-styles': 'Styles panel',
+  'window:panel-shapes': 'Shapes panel', 'window:panel-tool-presets': 'Tool Presets panel',
+  'edit:define-brush': 'Define brush preset', 'edit:define-custom-shape': 'Define custom shape', 'edit:preset-manager': 'Preset manager',
+  'edit:export-import-presets': 'Export / import presets', 'edit:migrate-presets': 'Migrate presets', 'edit:assign-profile': 'Assign profile',
+  'edit:color-settings': 'Color settings', 'edit:convert-profile': 'Convert to profile', 'edit:camera-raw-preferences': 'Camera Raw preferences',
+  'edit:show-all-menu-items': 'Show all menu items',
+  'type:add-fonts': 'Add fonts', 'type:font-preview-size': 'Font preview size', 'type:manage-missing-fonts': 'Manage missing fonts',
+  'type:replace-missing-fonts': 'Replace all missing fonts', 'type:anti-alias': 'Anti-aliasing', 'type:warp-text': 'Warp text',
+  'type:create-work-path': 'Create work path', 'type:convert-to-shape': 'Convert text to shape', 'type:convert-text-kind': 'Convert point / paragraph text',
+  'type:update-all': 'Update all text layers', 'type:paste-lorem-ipsum': 'Paste Lorem Ipsum', 'type:toggle-orientation': 'Toggle text orientation',
+  'tool:type-mask-horizontal': 'Horizontal Type Mask', 'tool:type-mask-vertical': 'Vertical Type Mask',
+  'tool:brush-preset': 'Brush preset', 'tool:airbrush-toggle': 'Airbrush (build-up)',
+  'tool:brush-prev': 'Previous brush', 'tool:brush-next': 'Next brush', 'tool:brush-first': 'First brush', 'tool:brush-last': 'Last brush',
+  'tool:preset': 'Tool preset', 'tool:reset': 'Reset tool', 'tool:reset-all': 'Reset all tools', 'layer:style-preset': 'Apply style',
+  ...Object.fromEntries(DIGITS.map((d) => [`tool:opacity-digit-${d}`, `Tool opacity ${d === '0' ? 100 : Number(d) * 10}%`])),
+  ...Object.fromEntries(DIGITS.map((d) => [`tool:flow-digit-${d}`, `Tool flow ${d === '0' ? 100 : Number(d) * 10}%`])),
+  ...Object.fromEntries(PAINT_BLEND_KEYS.map(([id, , label]) => [`tool:blend-mode-${id}`, `Tool mode: ${label}`])),
 };
 
 /** Parses an Electron accelerator ("CmdOrCtrl+Shift+Z") into a normalized key descriptor. */

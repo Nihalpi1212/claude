@@ -13,7 +13,8 @@ import { Tool } from '../tools.js';
 import { ShapeLayer, pathToPath2D, pathBounds, createCanvas, measureContext, newId, intersectRect } from '../document.js';
 import { structural, setLayerProps, nextLayerName } from '../layer-ops.js';
 import { Selection } from '../selection.js';
-import { BrushStroke } from '../brush.js';
+import { BrushStroke, strokeReach } from '../brush.js';
+import { toolBrush } from '../brush/tool-brush.js';
 import { formDialog } from '../form.js';
 import { parseColor } from '../../../shared/pixels/color.js';
 import { PATH_OPS, hasPathOps, pathAreaMask, hitPathArea, setSubpathOps, mapShapeGeometry, livePath } from '../path-ops.js';
@@ -620,8 +621,11 @@ export function strokePathPixels(app, path, { tool = 'brush', simulatePressure =
   const size = Math.max(1, Number(opt('size', 24)));
   const pb = pathBounds(path);
   if (!pb) return false;
+  // brush (lib/brush.js): the tool's brush gives the spacing and how far the stroke reaches (0.4: the size)
+  const brush = toolBrush(app, src);
+  const reach = strokeReach({ ...brush.preset, tip: { ...brush.preset.tip, size } }, brush.paint);
   if (!t.mask) {
-    const grow = intersectRect({ x: pb.x - size, y: pb.y - size, width: pb.width + size * 2, height: pb.height + size * 2 }, doc.bounds);
+    const grow = intersectRect({ x: pb.x - reach, y: pb.y - reach, width: pb.width + reach * 2, height: pb.height + reach * 2 }, doc.bounds);
     if (grow) t.layer.ensureCovers({ x: Math.floor(grow.x), y: Math.floor(grow.y), width: Math.ceil(grow.width) + 1, height: Math.ceil(grow.height) + 1 });
   }
   const target = t.mask ? { canvas: t.layer.mask.canvas, x: 0, y: 0, mask: true } : { canvas: t.layer.canvas, x: t.layer.x, y: t.layer.y, mask: false };
@@ -630,7 +634,7 @@ export function strokePathPixels(app, path, { tool = 'brush', simulatePressure =
     hardness: src === 'pencil' ? 1 : Number(opt('hardness', 0.8)),
     opacity: Number(opt('opacity', 1)),
     flow: Number(opt('flow', 1)),
-    spacing: Math.min(0.12, app.settings.brush?.spacing ?? 0.12),
+    spacing: Math.min(0.12, brush.preset.tip.spacing),
     smoothing: 0,
     pressureSize: simulatePressure,
     pressureOpacity: false,

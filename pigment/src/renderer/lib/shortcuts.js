@@ -5,10 +5,17 @@
 // 0.4 (conventions-shortcuts-fields): temporary tools (lib/temp-tools.js): Space pans, Ctrl+Space and Alt+Space zoom,
 // Ctrl springs to the Move tool and Alt to the Eyedropper, a held tool key springs back on release. While a dialog is
 // open the view navigation keys still work (zoom keys, Space to pan the canvas under the dialog), as in Photoshop.
-import { MENU_KEYS, RENDERER_KEYS, parseAccelerator, eventMatches, TEXT_FIELD_EDIT_KEYS } from '../../shared/keymap.js';
+//
+// 0.5 (ARCHITECTURE.md "0.5 features", S9.4, S13.4): the tables come from app.keymap.effective() and are rebuilt on
+// 'keymap:changed'. While the active tool paints, the PAINT keys are tried first and the first enabled one runs;
+// otherwise the global tables answer as in 0.4. A function key bound in the effective tables never reaches the
+// browser (F5 must not reload the browser build, F1 and F7 must not reach Chromium), in dialogs and text fields too,
+// where it still runs only what 0.4 ran there.
+import { parseAccelerator, eventMatches, TEXT_FIELD_EDIT_KEYS, runsWhileTyping } from '../../shared/keymap.js';
 import { isMac } from './bridge.js';
 import { TempTools } from './temp-tools.js';
 import { DIALOG_NAV } from './dialogs.js';
+import { paints } from './tool-traits.js';
 
 // the edit keys that go to a focused text field (shared with app.js's rule for the native menu's accelerators)
 const NATIVE_IN_TEXT = TEXT_FIELD_EDIT_KEYS;
@@ -28,24 +35,38 @@ function spaceIsOwnedBy(el) {
   return tag === 'TEXTAREA' || tag === 'SELECT' || tag === 'BUTTON' || el.isContentEditable || el.getAttribute?.('role') === 'button';
 }
 
-export function install(app) {
-  const table = [];
-  for (const [cmd, accel] of Object.entries(MENU_KEYS)) table.push({ cmd, desc: parseAccelerator(accel), plain: false });
-  for (const [cmd, accels] of Object.entries(RENDERER_KEYS)) {
-    for (const accel of accels) {
-      const desc = parseAccelerator(accel);
-      const plain = !desc.ctrl && !desc.meta && !desc.cmdOrCtrl && !desc.alt && !desc.shift;
-      table.push({ cmd, desc, plain });
-    }
-  }
-  // more modifiers first so Ctrl+Shift+Z wins over Ctrl+Z
-  table.sort((a, b) => Number(b.desc.shift) + Number(b.desc.alt) + Number(b.desc.cmdOrCtrl) - (Number(a.desc.shift) + Number(a.desc.alt) + Number(a.desc.cmdOrCtrl)));
+const isFunctionKey = (key) => /^f([1-9]|1[0-2])$/i.test(String(key));
+// more modifiers first so Ctrl+Shift+Z wins over Ctrl+Z
+const weight = (d) => Number(d.shift) + Number(d.alt) + Number(d.cmdOrCtrl);
+const isPlain = (desc) => !desc.ctrl && !desc.meta && !desc.cmdOrCtrl && !desc.alt && !desc.shift;
 
+export function install(app) {
+  // keymap (lib/keymap-store.js): the global table, the paint table and the tool letters, rebuilt when keys change
+  let table = [];
+  let paintTable = [];
   const toolKeys = new Map(); // letter -> slot id
-  for (const [cmd, accels] of Object.entries(RENDERER_KEYS)) {
-    if (!cmd.startsWith('tool:')) continue;
-    for (const a of accels) if (/^[a-z]$/.test(a)) toolKeys.set(a, cmd.slice(5));
-  }
+  const build = () => {
+    const eff = app.keymap.effective();
+    table = [];
+    for (const [cmd, accel] of Object.entries(eff.menu)) table.push({ cmd, desc: parseAccelerator(accel), plain: false });
+    for (const [cmd, accels] of Object.entries(eff.renderer)) {
+      for (const accel of accels) {
+        const desc = parseAccelerator(accel);
+        table.push({ cmd, desc, plain: isPlain(desc) });
+      }
+    }
+    table.sort((a, b) => weight(b.desc) - weight(a.desc));
+    paintTable = [];
+    for (const [cmd, accels] of Object.entries(eff.paint)) for (const accel of accels) paintTable.push({ cmd, desc: parseAccelerator(accel) });
+    paintTable.sort((a, b) => weight(b.desc) - weight(a.desc));
+    toolKeys.clear();
+    for (const [cmd, accels] of Object.entries(eff.renderer)) {
+      if (!cmd.startsWith('tool:')) continue;
+      for (const a of accels) if (/^[a-z]$/.test(a)) toolKeys.set(a, cmd.slice(5));
+    }
+  };
+  build();
+  app.on('keymap:changed', build);
 
   const temp = new TempTools(app);
   app.tempTools = temp;
@@ -106,6 +127,17 @@ export function install(app) {
       return;
     }
     // Shift+letter cycles the slot's tools
+    // the paint context (S13.4): while a painting tool is active its keys come first; a stub (disabled) passes the key
+    // on to the global table, so a skeleton without the package behaves as 0.4
+    if (!inText && !inDialog && paints(app.tools?.active)) {
+      for (const { cmd, desc } of paintTable) {
+        if (!eventMatches(event, desc, isMac) || !app.commands.isEnabled(cmd)) continue;
+        event.preventDefault();
+        event.stopPropagation();
+        if (!event.repeat) app.commands.run(cmd, undefined, 'key');
+        return;
+      }
+    }
     if (!inText && !inDialog && event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey && event.key.length === 1) {
       const slot = toolKeys.get(event.key.toLowerCase());
       if (slot && app.tools) {
@@ -123,6 +155,8 @@ export function install(app) {
     for (const entry of table) {
       if (!eventMatches(event, entry.desc, isMac)) continue;
       const { cmd, plain } = entry;
+      // a bound function key never reaches the browser, wherever the focus is (S9.4)
+      if (isFunctionKey(entry.desc.key)) event.preventDefault();
       if (inDialog) {
         // the view under the dialog stays navigable: zoom keys pass, unless the focus is in a text entry
         if (DIALOG_NAV.test(cmd) && !(isTextInput(event.target) && event.target.type !== 'number' && event.target.dataset?.numericText === undefined) && app.dialogs?.allowsNavigation?.()) {
@@ -135,8 +169,9 @@ export function install(app) {
       }
       if (inText) {
         if (plain || NATIVE_IN_TEXT.has(cmd) || cmd === 'app:enter' || cmd === 'window:toggle-panels') return;
-        // while typing, only file, window and view commands may run (Ctrl+I must not invert the image)
-        if (!/^(file:|view:|help:|window:)/.test(cmd) && cmd !== 'app:escape') return;
+        // while typing, only file, window and view commands may run (Ctrl+I must not invert the image; 0.5: F12, Revert,
+        // must not throw the typing away either)
+        if (!runsWhileTyping(cmd) && cmd !== 'app:escape') return;
         if (cmd === 'app:escape') {
           event.target.blur();
           event.preventDefault();

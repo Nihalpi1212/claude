@@ -190,38 +190,24 @@ function buildField(f, values, changed, form) {
       break;
     }
     case 'color': {
+      // the `color` widget (lib/fields.js, S7.3; color-picker-swatches registers the real one): the stub is 0.4's
+      // DOM, the colour input with the field's data-key and the hex box in a .slider-field
       addLabel();
-      const wrap = document.createElement('div');
-      wrap.className = 'slider-field';
-      const input = document.createElement('input');
-      input.type = 'color';
-      input.id = id;
-      input.dataset.key = f.key;
-      input.value = toHex6(values[f.key]);
-      const text = document.createElement('input');
-      text.className = 'input';
-      text.value = toHex6(values[f.key]);
-      text.spellcheck = false;
-      input.addEventListener('input', () => {
-        values[f.key] = input.value;
-        text.value = input.value;
-        changed(f.key);
-      });
-      text.addEventListener('change', () => {
-        const v = text.value.trim();
-        if (/^#?[0-9a-f]{6}$/i.test(v) || /^#?[0-9a-f]{3}$/i.test(v)) {
-          values[f.key] = toHex6(v.startsWith('#') ? v : '#' + v);
-          input.value = values[f.key];
-          text.value = values[f.key];
+      const widget = createWidget('color', { key: f.key, id, text: true }, {
+        app: form.app,
+        value: toHex6(values[f.key]),
+        onInput: (v) => {
+          values[f.key] = v;
           changed(f.key);
-        } else text.value = values[f.key];
+        },
+        onChange: (v) => {
+          if (values[f.key] === v) return;
+          values[f.key] = v;
+          changed(f.key);
+        },
       });
-      wrap.append(input, text);
-      el.appendChild(wrap);
-      sync = () => {
-        input.value = toHex6(values[f.key]);
-        text.value = input.value;
-      };
+      el.appendChild(widget.element);
+      sync = () => widget.set(toHex6(values[f.key]), { silent: true });
       break;
     }
     case 'slider':

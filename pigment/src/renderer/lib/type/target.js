@@ -4,6 +4,7 @@
 // Skeleton version; owned by type-editing afterwards (which installs its editor as the selection provider).
 import * as M from './model.js';
 import { setLayerProps } from '../layer-ops.js';
+import { fontCatalog } from './api.js';
 
 /** @type {{ active(app): null | object } | null} */
 let provider = null;
@@ -186,6 +187,24 @@ export function applyBox(app, box, { label = 'Text Box' } = {}) {
 
 const TOOL_IDS = ['type-horizontal', 'type-vertical'];
 
+// 0.5 (S11.2): the style option holds the font catalog's styleKey (0.4's '700i' with the stub, a PostScript name with
+// type-fonts), so the defaults read and write it through stylePatch / styleKey, as tools/text.js does. A key the
+// catalog does not answer for (a 0.4 key kept in settings or a 0.4 tool preset) is read as 0.4 read it.
+const isLegacyStyleKey = (key) => /^\d+i?$/.test(String(key));
+function stylePatchOf(family, key) {
+  let patch = null;
+  try {
+    patch = fontCatalog().stylePatch(family, String(key));
+  } catch {
+    patch = null;
+  }
+  if (patch && Number.isFinite(patch.fontWeight)) return patch;
+  const k = String(key);
+  return { fontFamily: family, fontWeight: parseInt(k, 10) || 400, fontItalic: isLegacyStyleKey(k) && k.endsWith('i'), postScriptName: null, axes: {} };
+}
+/** True when the face is more than a weight and an italic flag (S11.2): then postScriptName and axes follow the style. */
+const beyondLegacy = (patch) => fontCatalog().real === true || !!patch?.postScriptName || Object.keys(patch?.axes ?? {}).length > 0;
+
 /** What new text starts with: model defaults <- settings.type <- the type tools' options (family, style, size, align, colour). */
 export function typeDefaults(app) {
   const st = app.settings?.type ?? {};
@@ -194,8 +213,13 @@ export function typeDefaults(app) {
   const style = String(opt('style', '400'));
   const char = { ...(st.char ?? {}) };
   char.fontFamily = opt('family', char.fontFamily ?? M.CHAR_DEFAULTS.fontFamily);
-  char.fontWeight = parseInt(style, 10) || 400;
-  char.fontItalic = style.endsWith('i');
+  const patch = stylePatchOf(char.fontFamily, style);
+  char.fontWeight = patch.fontWeight;
+  char.fontItalic = !!patch.fontItalic;
+  if (beyondLegacy(patch)) {
+    char.postScriptName = patch.postScriptName ?? null;
+    char.axes = { ...(patch.axes ?? {}) };
+  }
   char.size = Math.max(0.1, Number(opt('size', char.size ?? M.CHAR_DEFAULTS.size)) || M.CHAR_DEFAULTS.size);
   char.color = app.settings?.foreground ?? char.color ?? M.CHAR_DEFAULTS.color;
   const para = { ...(st.para ?? {}), align: opt('align', st.para?.align ?? M.PARA_DEFAULTS.align) };
@@ -217,12 +241,21 @@ export function setTypeDefaults(app, { char = null, para = null } = {}) {
       else if (k === 'size') set('size', v);
       else if (k === 'color') app.setColors?.({ foreground: v });
       else if (k === 'fontWeight' || k === 'fontItalic') continue;
+      else if ((k === 'postScriptName' || k === 'axes') && beyondLegacy(char)) continue;
       else if (v === undefined) delete restChar[k];
       else restChar[k] = v;
     }
-    if ('fontWeight' in char || 'fontItalic' in char) {
+    if ('fontWeight' in char || 'fontItalic' in char || (beyondLegacy(char) && ('postScriptName' in char || 'axes' in char))) {
       const cur = typeDefaults(app).char;
-      set('style', `${char.fontWeight ?? cur.fontWeight}${(char.fontItalic ?? cur.fontItalic) ? 'i' : ''}`);
+      const face = { ...cur, fontWeight: char.fontWeight ?? cur.fontWeight, fontItalic: !!(char.fontItalic ?? cur.fontItalic) };
+      if (beyondLegacy(char)) {
+        // the face lives in the style option (the catalog's key), not in settings.type
+        face.postScriptName = char.postScriptName ?? null;
+        face.axes = { ...(char.axes ?? {}) };
+        delete restChar.postScriptName;
+        delete restChar.axes;
+      }
+      set('style', fontCatalog().styleKey(face));
     }
   }
   if (para) {

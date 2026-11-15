@@ -28,6 +28,8 @@ export const CHAR_DEFAULTS = freezeDeep({
   fontWeight: 400,
   fontItalic: false,
   postScriptName: null,
+  // 0.5 (S11.4): variable-font axis values { wght: 650, wdth: 90 }, sparse; type-fonts fills them
+  axes: {},
   size: 48,
   leading: 'auto',
   tracking: 0,
@@ -183,6 +185,13 @@ function cleanCharValue(key, v) {
       if (!isObj(v)) return undefined;
       const out = {};
       for (const k of Object.keys(v)) if (finite(v[k])) out[k] = v[k];
+      return out;
+    }
+    case 'axes': {
+      // a plain object of finite numbers keyed by four-character axis tags (S11.4)
+      if (!isObj(v)) return undefined;
+      const out = {};
+      for (const k of Object.keys(v)) if (/^[\x20-\x7e]{4}$/.test(k) && finite(v[k])) out[k] = v[k];
       return out;
     }
     case 'stroke': {
@@ -828,13 +837,37 @@ export function legacyFont(content, typeOptions = {}) {
   return font;
 }
 
-/** Layer-level type options with defaults filled in and invalid values replaced. */
+/**
+ * Warp Text styles (S11.4): lib/warp.js WARP_PRESETS without none and custom (warp.js is read only and not Node-safe,
+ * so the ids are listed here; skeleton-05 "type" checks that both lists agree).
+ */
+export const WARP_STYLES = freezeDeep(['arc', 'arc-lower', 'arc-upper', 'arch', 'bulge', 'shell-lower', 'shell-upper', 'flag', 'wave', 'fish', 'rise', 'fisheye', 'inflate', 'squeeze', 'twist']);
+/** The anti-alias methods of typeOptions.antiAlias (S11.4; the Character panel's and the options bar's seven values). */
+export const ANTI_ALIAS_METHODS = freezeDeep(['none', 'sharp', 'crisp', 'strong', 'smooth', 'lcd', 'windows']);
+
+/** typeOptions.warp cleaned (S11.4): { style, horizontal, bend, hDistort, vDistort } or null (no warp). */
+export function normalizeWarp(w) {
+  if (!isObj(w) || !WARP_STYLES.includes(w.style)) return null;
+  const pct = (v) => (finite(v) ? clampTo(v, [-100, 100]) : 0);
+  return { style: w.style, horizontal: w.horizontal !== false, bend: finite(w.bend) ? clampTo(w.bend, [-100, 100]) : 50, hDistort: pct(w.hDistort), vDistort: pct(w.vDistort) };
+}
+
+/**
+ * Layer-level type options with defaults filled in and invalid values replaced. `warp` (0.5) is kept only when it is
+ * a valid warp (an unknown style or style none leaves no `warp` key: absent means null), so 0.4's options are unchanged.
+ */
 export function normalizeTypeOptions(opts) {
   const o = isObj(opts) ? opts : {};
-  return {
+  const out = {
     ...o,
     orientation: ENUMS.orientation.includes(o.orientation) ? o.orientation : TYPE_OPTION_DEFAULTS.orientation,
     antiAlias: typeof o.antiAlias === 'string' && o.antiAlias ? o.antiAlias : TYPE_OPTION_DEFAULTS.antiAlias,
     systemLayout: typeof o.systemLayout === 'boolean' ? o.systemLayout : TYPE_OPTION_DEFAULTS.systemLayout,
   };
+  if ('warp' in out) {
+    const warp = normalizeWarp(out.warp);
+    if (warp) out.warp = warp;
+    else delete out.warp;
+  }
+  return out;
 }

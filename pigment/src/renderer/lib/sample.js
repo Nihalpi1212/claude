@@ -27,24 +27,39 @@ function skipKey(skip) {
   return skip ? [...skip].map((l) => `${l.id}@${l.version}`).sort().join(',') : '';
 }
 
+/** The adjustment layers of a document ("No Adjustments" samples without them, S7.5). */
+function adjustmentLayers(doc) {
+  const out = new Set();
+  for (const l of doc.layers?.() ?? []) if (l.type === 'adjustment') out.add(l);
+  return out;
+}
+
 /**
  * The merged image as an HTMLCanvasElement (read it, do not draw on it).
  *  - default: flattenDocument (the displayed composite, document sized);
  *  - stored: flattenStored (the image mode's stored pixels, not its inks shown);
- *  - rect: only that rectangle, composited directly (top-left at rect.x / rect.y), raw when `stored`.
+ *  - rect: only that rectangle, composited directly (top-left at rect.x / rect.y), raw when `stored`;
+ *  - until (0.5, S7.5): the layers below that one only (Photoshop's Sample: Current & Below passes the layer above
+ *    the current one); skipAdjustments: without the adjustment layers (All Layers No Adjustments). Both go to
+ *    compositor.composite(doc, { until, skip }) and into the cache key.
  */
-export function sampleMerged(app, doc, { stored = false, rect = null } = {}) {
+export function sampleMerged(app, doc, { stored = false, rect = null, until = null, skipAdjustments = false } = {}) {
   const compositor = doc.view?.compositor;
-  const skip = skipSet(app, doc);
-  if (rect) return compositor.composite(doc, { rawMode: !!stored, rect, ...(skip ? { skip } : {}) });
-  const key = `${stored ? 'stored' : 'shown'}:${doc.version}:${doc.root.version}:${doc.width}x${doc.height}:${doc.mode ?? 'rgb'}|${skipKey(skip)}`;
-  if (stored && !skip) return flattenStored(doc, compositor); // a fresh canvas, as 0.3's retouch tools read it
+  let skip = skipSet(app, doc);
+  if (skipAdjustments) {
+    const adj = adjustmentLayers(doc);
+    if (adj.size) skip = new Set([...(skip ?? []), ...adj]);
+  }
+  const extra = { ...(skip ? { skip } : {}), ...(until ? { until } : {}) };
+  if (rect) return compositor.composite(doc, { rawMode: !!stored, rect, ...extra });
+  const key = `${stored ? 'stored' : 'shown'}:${doc.version}:${doc.root.version}:${doc.width}x${doc.height}:${doc.mode ?? 'rgb'}|${skipKey(skip)}|${until ? `${until.id}@${until.version}` : ''}`;
+  if (stored && !skip && !until) return flattenStored(doc, compositor); // a fresh canvas, as 0.3's retouch tools read it
   const hit = cache.get(doc);
   if (hit?.key === key && hit.compositor === compositor) return hit.canvas;
   let canvas;
-  if (!skip) canvas = flattenDocument(doc, compositor);
+  if (!skip && !until) canvas = flattenDocument(doc, compositor);
   else {
-    const c = compositor.composite(doc, { skip, rawMode: !!stored });
+    const c = compositor.composite(doc, { ...extra, rawMode: !!stored });
     canvas = createCanvas(doc.width, doc.height);
     canvas.getContext('2d').drawImage(c, 0, 0);
   }

@@ -18,7 +18,7 @@ import {
 import { opticalKerning, glyphProfile, referenceTarget } from './optical-kerning.js';
 import { faceFor } from './fonts.js';
 import { shapePiece, drawnSize, harfBuzz } from './shaper.js';
-import { registerWidget } from '../fields.js';
+import { registerWidget, createWidget } from '../fields.js';
 import { numericField } from '../numeric-field.js';
 import { icon } from '../icons.js';
 import { fontFamilies, loadSystemFonts, STYLES, typeSession } from '../tools/text.js';
@@ -28,7 +28,8 @@ export { typeUnit, toUnit, fromUnit } from './char-values.js';
 
 const TYPE_TOOLS = ['type-horizontal', 'type-vertical'];
 const hex6 = (c) => rgbaToHex(parseColor(c ?? '#000000')).slice(0, 7);
-const ANTI_ALIAS = [['none', 'None'], ['sharp', 'Sharp'], ['crisp', 'Crisp'], ['strong', 'Strong'], ['smooth', 'Smooth']];
+// S11.4: the seven anti-alias methods (type-menu-commands draws them; Windows LCD and Windows as Smooth and Sharp)
+const ANTI_ALIAS = [['none', 'None'], ['sharp', 'Sharp'], ['crisp', 'Crisp'], ['strong', 'Strong'], ['smooth', 'Smooth'], ['lcd', 'Windows LCD'], ['windows', 'Windows']];
 const ORIENTATIONS = [['horizontal', 'Horizontal'], ['vertical', 'Vertical (rotated)'], ['vertical-stacked', 'Vertical, stacked']];
 // the eight toggles of Photoshop's Character panel: [id, attribute, value when on, title, label html]
 export const TOGGLES = Object.freeze([
@@ -330,13 +331,10 @@ export function createCharacterControls(app, { variant = 'panel' } = {}) {
       if (Number.isFinite(px)) apply({ baselineShift: M.tidyNumber(Math.max(-10000, Math.min(10000, px))) }, { label: 'Baseline Shift', merge });
     },
   });
-  const color = el('input');
-  color.type = 'color';
-  color.dataset.k = 'color';
-  color.setAttribute('aria-label', 'Text colour');
-  color.title = 'Text colour';
-  // a colour-picker drag is one history entry
-  color.addEventListener('input', () => apply({ color: color.value }, { label: 'Color', merge: true }));
+  // the text colour is a `color` widget (lib/fields.js, S7.3; the stub is 0.4's colour input); a colour-picker drag is
+  // one history entry
+  const colorW = createWidget('color', { dataK: 'color', ariaLabel: 'Text colour', title: 'Text colour' }, { app, onInput: (v) => apply({ color: v }, { label: 'Color', merge: true }) });
+  const color = colorW.element;
   const colorCell = el('label', 'char-color', '<span class="numeric-label">Color</span>');
   colorCell.appendChild(color);
   line(cell('baseline', shiftRow.cell), cell('color', colorCell));
@@ -362,7 +360,12 @@ export function createCharacterControls(app, { variant = 'panel' } = {}) {
   language.addEventListener('change', () => language.value && apply({ language: language.value }, { label: 'Language' }));
   const antiAlias = select('antiAlias', 'Anti-aliasing', ANTI_ALIAS);
   antiAlias.title = 'Anti-aliasing method';
-  antiAlias.addEventListener('change', () => antiAlias.value && applyTypeOptions(app, { antiAlias: antiAlias.value }, { label: 'Anti-Aliasing' }));
+  // S11.4: one writer, type:anti-alias (one "Anti-Alias" entry); while it is a stub, 0.4's applyTypeOptions
+  antiAlias.addEventListener('change', () => {
+    if (!antiAlias.value) return;
+    if (app.commands?.isEnabled?.('type:anti-alias')) app.commands.run('type:anti-alias', antiAlias.value, 'panel');
+    else applyTypeOptions(app, { antiAlias: antiAlias.value }, { label: 'Anti-Aliasing' });
+  });
   const aaCell = el('span', 'char-aa');
   aaCell.append(el('span', 'muted', 'aa'), antiAlias);
   line(cell('language', language), cell('antiAlias', aaCell));
@@ -381,20 +384,19 @@ export function createCharacterControls(app, { variant = 'panel' } = {}) {
   orientRow.appendChild(orientation);
   extras.appendChild(orientRow);
 
-  const strokeColor = el('input');
-  strokeColor.type = 'color';
-  strokeColor.dataset.k = 'strokeColor';
-  strokeColor.setAttribute('aria-label', 'Stroke colour');
+  // the stroke colour is a `color` widget too (S7.3)
+  const strokeColorW = createWidget('color', { dataK: 'strokeColor', ariaLabel: 'Stroke colour' }, { app, onInput: () => strokeColorInput() });
+  const strokeColor = strokeColorW.element;
   const strokeWidth = guardedField({ key: 'strokeWidth', min: 0, max: 1000, step: 0.5, width: 56 }, () => apply(strokePatch(), { label: 'Text Stroke' }));
   strokeWidth.input.setAttribute('aria-label', 'Stroke width');
   const strokePatch = () => {
     const w = Number(strokeWidth.input.value);
-    return { stroke: w > 0 ? { color: strokeColor.value, width: w } : null };
+    return { stroke: w > 0 ? { color: strokeColorW.get(), width: w } : null };
   };
-  strokeColor.addEventListener('input', () => {
+  function strokeColorInput() {
     if (!(Number(strokeWidth.input.value) > 0)) strokeWidth.input.value = '2';
     apply(strokePatch(), { label: 'Text Stroke', merge: true });
-  });
+  }
   const strokeRow = el('div', 'prop-row', '<span>Stroke</span>');
   strokeRow.dataset.row = 'stroke';
   strokeRow.append(strokeColor, strokeWidth.element, el('span', 'muted', 'px'));
@@ -488,7 +490,7 @@ export function createCharacterControls(app, { variant = 'panel' } = {}) {
     setField(scaleY, showNumber(attrs.scaleY));
     setField(scaleX, showNumber(attrs.scaleX));
     setField(shiftRow, showLength(attrs.baselineShift, unit, dpi));
-    if (document.activeElement !== color) color.value = attrs.color === M.MIXED ? '#000000' : hex6(attrs.color);
+    if (!color.contains(document.activeElement)) colorW.set(attrs.color === M.MIXED ? '#000000' : hex6(attrs.color), { silent: true });
     color.dataset.mixed = String(attrs.color === M.MIXED);
     for (const b of toggles.children) {
       const [, key, on] = TOGGLES.find(([id]) => id === b.dataset.k);
@@ -519,7 +521,7 @@ export function createCharacterControls(app, { variant = 'panel' } = {}) {
     setSelect(orientation, one((l) => l.typeOptions?.orientation ?? 'horizontal'));
     strokeRow.hidden = false;
     const st = attrs.stroke;
-    if (document.activeElement !== strokeColor) strokeColor.value = st && st !== M.MIXED ? hex6(st.color) : '#000000';
+    if (!strokeColor.contains(document.activeElement)) strokeColorW.set(st && st !== M.MIXED ? hex6(st.color) : '#000000', { silent: true });
     strokeWidth.show(st === M.MIXED ? '' : st ? st.width : 0);
     boxRow.hidden = !hasLayer;
     if (hasLayer) {

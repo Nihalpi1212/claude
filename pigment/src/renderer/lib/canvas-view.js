@@ -6,6 +6,8 @@ import { intersectRect } from './document.js';
 import { paintMaskView } from './mask-view.js';
 import { guideSettings, guideColor, selectedGuides } from './guides.js';
 import { UNITS, UNIT_NAMES } from './rulers.js';
+import { normalizeSample } from './brush.js';
+import { toDisplay, displaySpaceOf } from './color/pipeline.js';
 
 /**
  * The view-scale preview while a gesture runs (ARCHITECTURE.md "Repaint caches"), as Photoshop does: while a pointer
@@ -69,7 +71,10 @@ export class CanvasView {
     this.canvas = this.el.querySelector('canvas.view');
     this.rulerH = this.el.querySelector('.ruler-h');
     this.rulerV = this.el.querySelector('.ruler-v');
-    this.ctx = this.canvas.getContext('2d');
+    // color (lib/color/pipeline.js): the 2D context in the display's colour space (S6.4; 'srgb' without an engine,
+    // which is 0.4's context exactly)
+    this.space = displaySpaceOf(this);
+    this.ctx = this.space === 'srgb' ? this.canvas.getContext('2d') : this.canvas.getContext('2d', { colorSpace: this.space });
     host.appendChild(this.el);
 
     this.onGestureStart = (e) => {
@@ -93,6 +98,8 @@ export class CanvasView {
     });
     // snap (lib/snap.js): a tool change ends whatever gesture showed smart-guide overlays
     this.offToolChanged = app.on?.('tool:changed', () => app.snap?.end());
+    // color (lib/color/pipeline.js): a new engine, display or working space repaints through the display stages
+    this.offColor = app.on?.('color:display-changed', () => this.syncColorSpace());
     this.checker = null;
     this.resize();
   }
@@ -106,7 +113,36 @@ export class CanvasView {
     window.removeEventListener('blur', this.onGestureEnd);
     this.unsubscribe?.();
     this.offToolChanged?.();
+    this.offColor?.();
     this.el.remove();
+  }
+
+  /**
+   * color (lib/color/pipeline.js): when the engine's display space for this view changes, the view canvas is replaced
+   * by a new element whose context is in that space (a context's colour space is fixed when it is made). The canvas
+   * listeners move to the new element; `view.canvas` is the live element.
+   */
+  syncColorSpace() {
+    const space = displaySpaceOf(this);
+    if (space !== this.space) {
+      const old = this.canvas;
+      const c = document.createElement('canvas');
+      c.className = old.className;
+      c.tabIndex = old.tabIndex;
+      c.width = old.width;
+      c.height = old.height;
+      c.style.cssText = old.style.cssText;
+      for (const a of old.getAttributeNames()) if (!['class', 'tabindex', 'width', 'height', 'style'].includes(a)) c.setAttribute(a, old.getAttribute(a));
+      const focused = document.activeElement === old;
+      old.replaceWith(c);
+      this.canvas = c;
+      this.space = space;
+      this.ctx = space === 'srgb' ? c.getContext('2d') : c.getContext('2d', { colorSpace: space });
+      this.checker = null;
+      for (const [type, fn, opts] of this.canvasListeners ?? []) c.addEventListener(type, fn, opts);
+      if (focused) c.focus({ preventScroll: true });
+    }
+    this.invalidate();
   }
 
   // ---- geometry ------------------------------------------------------------------------------------------------
@@ -304,8 +340,9 @@ export class CanvasView {
     ctx.imageSmoothingQuality = 'high';
     // colour proofing (lib/color-modes.js) may hand back a processed copy to draw instead of the composite
     const shown = (this.postProcess && this.postProcess(composite, this)) || composite;
-    ctx.drawImage(shown, 0, 0);
-    if (preview?.canvas) ctx.drawImage((this.postProcess && this.postProcess(preview.canvas, this)) || preview.canvas, preview.x, preview.y);
+    // color (lib/color/pipeline.js): the display stages (none without an engine: `shown` itself)
+    ctx.drawImage(toDisplay(shown, this), 0, 0);
+    if (preview?.canvas) ctx.drawImage(toDisplay((this.postProcess && this.postProcess(preview.canvas, this)) || preview.canvas, this, { preview: true }), preview.x, preview.y);
     // the mask channel view and the red overlay: lib/mask-view.js (K.1b, masks-vector-masks)
     paintMaskView(ctx, this, this.doc.active);
     ctx.restore(); // clip
@@ -668,17 +705,48 @@ export class CanvasView {
   // ---- pointer routing -----------------------------------------------------------------------------------------
 
   #bindPointer() {
-    const canvas = this.canvas;
+    // color (lib/color/pipeline.js): the view canvas is swapped for a new element when the display colour space
+    // changes (S6.4), so the handlers read the live element through this stand-in, and the canvas listeners are kept
+    // to be bound to each new element (the rulers' are bound once)
+    const view = this;
+    const listeners = (this.canvasListeners = []);
+    const canvas = {
+      addEventListener(type, fn, opts) {
+        listeners.push([type, fn, opts]);
+        view.canvas.addEventListener(type, fn, opts);
+      },
+      focus: (o) => view.canvas.focus(o),
+      getBoundingClientRect: () => view.canvas.getBoundingClientRect(),
+      setPointerCapture: (id) => view.canvas.setPointerCapture(id),
+    };
+    // S2.5: every routed pointer event becomes a PointerSample (pen data, the eraser end, Caps Lock, the time)
     const norm = (e) => {
       const r = canvas.getBoundingClientRect();
       const sx = e.clientX - r.left, sy = e.clientY - r.top;
       const d = this.toDoc(sx, sy);
+      const pen = e.pointerType === 'pen';
       // temporary: the modifier that summoned a temporary tool (view.tempToolVia, set with view.tempTool by
       // conventions' temp-tools.js), so snap.js does not read that held Ctrl as "do not snap" (F)
-      return { x: d.x, y: d.y, screenX: sx, screenY: sy, pressure: e.pointerType === 'pen' && e.pressure > 0 ? e.pressure : 1, tiltX: e.tiltX, tiltY: e.tiltY, buttons: e.buttons, button: e.button, shift: e.shiftKey, alt: e.altKey, ctrl: e.ctrlKey, meta: e.metaKey, pointerType: e.pointerType, temporary: this.tempTool ? this.tempToolVia ?? null : null, original: e };
+      return normalizeSample({
+        x: d.x, y: d.y, screenX: sx, screenY: sy,
+        pressure: pen && e.pressure > 0 ? e.pressure : 1,
+        tiltX: e.tiltX ?? 0, tiltY: e.tiltY ?? 0, twist: e.twist ?? 0, tangentialPressure: e.tangentialPressure ?? 0,
+        altitude: Number.isFinite(e.altitudeAngle) ? e.altitudeAngle : undefined, azimuth: Number.isFinite(e.azimuthAngle) ? e.azimuthAngle : undefined,
+        pointerType: e.pointerType || 'mouse',
+        // the pen's eraser end (button 5 / buttons 32); the side button, held during tip contact or pressed while the
+        // pen hovers (a right-button drag: buttons & 2 on the press and moves, button 2 on the release, where buttons is 0)
+        eraser: pen && (e.button === 5 || (e.buttons & 32) !== 0),
+        barrel: pen && ((e.buttons & 2) !== 0 || e.button === 2),
+        buttons: e.buttons, button: e.button, shift: e.shiftKey, alt: e.altKey, ctrl: e.ctrlKey, meta: e.metaKey,
+        capsLock: !!e.getModifierState?.('CapsLock'),
+        time: e.timeStamp,
+        temporary: this.tempTool ? this.tempToolVia ?? null : null,
+        original: e,
+      });
     };
     let dragging = false;
     let handDrag = null;
+    let contextDrag = null; // S3.3: the tool whose onContextMenu took a right-button drag
     let capturing = null; // the canvas-capture handler that took the current drag (lib/canvas-capture.js, I.3)
     const currentTool = () => this.tempTool ?? this.app.tools?.active;
     const capture = () => this.app.canvasCapture?.top() ?? null;
@@ -780,10 +848,12 @@ export class CanvasView {
         e.preventDefault();
         return;
       }
-      if (e.button !== 0 && e.button !== 2) return;
+      // button 5: the pen's eraser end, a primary press (S2.5)
+      const primary = e.button === 0 || e.button === 5;
+      if (!primary && e.button !== 2) return;
       // a canvas-capture handler (an armed eyedropper, a dialog letting the canvas through) takes the click before
       // the active tool; panning stays first
-      const cap = e.button === 0 ? capture() : null;
+      const cap = primary ? capture() : null;
       if (cap) {
         capturing = cap;
         dragging = true;
@@ -797,11 +867,16 @@ export class CanvasView {
         this.invalidate();
         return;
       }
+      // S3.3 press claims: while a temporary tool is up, the active tool may take the press (a painting gesture such
+      // as Alt+right-drag); the temporary tool ends and the whole press goes to the active tool
+      if (this.tempTool && this.app.tools?.active?.claimsPress?.(p) === true) this.app.tempTools?.clear();
       dragging = true;
       canvas.setPointerCapture(e.pointerId);
       e.preventDefault();
       if (e.button === 2) {
-        currentTool()?.onContextMenu?.(p);
+        const tool = currentTool();
+        // S3.3: a tool whose onContextMenu returns true takes the right-button drag
+        contextDrag = tool?.onContextMenu?.(p) === true ? tool : null;
         return;
       }
       currentTool()?.onPointerDown?.(p);
@@ -820,6 +895,10 @@ export class CanvasView {
         const cap = capturing ?? capture();
         if (cap) {
           cap.move?.(p, this, dragging);
+          continue;
+        }
+        if (contextDrag) {
+          contextDrag.onPointerMove?.(p, true);
           continue;
         }
         currentTool()?.onPointerMove?.(p, dragging);
@@ -842,6 +921,14 @@ export class CanvasView {
         this.invalidate();
         return;
       }
+      if (contextDrag) {
+        const tool = contextDrag;
+        contextDrag = null;
+        tool.onPointerUp?.({ ...p, button: 2 });
+        this.app.snap?.end(); // snap (lib/snap.js)
+        this.invalidate();
+        return;
+      }
       if (e.button === 2) return;
       currentTool()?.onPointerUp?.(p);
       this.app.snap?.end(); // snap (lib/snap.js): the gesture is over
@@ -856,10 +943,12 @@ export class CanvasView {
           capturing = null;
           cap.up?.({ ...norm(e), cancelled: true }, this);
         } else {
-          currentTool()?.onPointerCancel?.(norm(e));
+          const tool = contextDrag ?? currentTool();
+          tool?.onPointerCancel?.(norm(e));
           this.app.snap?.end(); // snap (lib/snap.js)
         }
       }
+      contextDrag = null;
       handDrag = null;
     });
     canvas.addEventListener('pointerleave', () => {
@@ -916,8 +1005,18 @@ export class CanvasView {
     canvas.addEventListener('touchend', () => (pinch = null));
   }
 
+  /** Every cursor goes through the toolbox's cursor filter (S3.2: Other Cursors, Caps Lock), whoever sets it. */
   setCursor(cursor) {
-    this.canvas.style.cursor = cursor || 'default';
+    let css = cursor || 'default';
+    const filter = this.app.tools?.cursorFilter;
+    if (filter) {
+      try {
+        css = filter(css, { tool: this.tempTool ?? this.app.tools?.active ?? null, view: this }) || css;
+      } catch (err) {
+        console.warn('cursor filter failed', err);
+      }
+    }
+    this.canvas.style.cursor = css;
   }
 }
 

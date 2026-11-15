@@ -1,0 +1,79 @@
+{
+ "width": 120,
+ "height": 90,
+ "channels": 3,
+ "bitsPerChannel": 8,
+ "colorMode": 3,
+ "imageResources": {
+  "resolutionInfo": {
+   "horizontalResolution": 72,
+   "horizontalResolutionUnit": "PPI",
+   "widthUnit": "Inches",
+   "verticalResolution": 72,
+   "verticalResolutionUnit": "PPI",
+   "heightUnit": "Inches"
+  },
+  "gridAndGuidesInformation": {
+   "grid": {
+    "horizontal": 576,
+    "vertical": 576
+   },
+   "guides": [
+    {
+     "location": 30,
+     "direction": "vertical"
+    },
+    {
+     "location": 45.5,
+     "direction": "horizontal"
+    },
+    {
+     "location": 100,
+     "direction": "vertical"
+    }
+   ]
+  }
+ },
+ "children": [
+  {
+   "top": 0,
+   "left": 0,
+   "bottom": 90,
+   "right": 120,
+   "blendMode": "normal",
+   "opacity": 1,
+   "clipping": false,
+   "transparencyProtected": false,
+   "hidden": false,
+   "name": "Background",
+   "protected": {
+    "transparency": false,
+    "composite": false,
+    "position": false
+   },
+   "fillOpacity": 1,
+   "linkGroup": 0,
+   "linkGroupEnabled": true
+  },
+  {
+   "top": 20,
+   "left": 20,
+   "bottom": 60,
+   "right": 60,
+   "blendMode": "normal",
+   "opacity": 1,
+   "clipping": false,
+   "transparencyProtected": false,
+   "hidden": false,
+   "name": "Layer",
+   "protected": {
+    "transparency": false,
+    "composite": false,
+    "position": false
+   },
+   "fillOpacity": 1,
+   "linkGroup": 0,
+   "linkGroupEnabled": true
+  }
+ ]
+}

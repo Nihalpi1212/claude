@@ -1,6 +1,6 @@
 // Pigment renderer bootstrap: builds the App object, registers core commands and UI, installs the
 // feature modules, then opens startup files or shows the welcome screen.
-import { bridge, isElectron, isMac, platform } from './lib/bridge.js';
+import { bridge, isElectron, platform } from './lib/bridge.js';
 import { CommandRegistry } from './lib/commands.js';
 import { SessionRegistry, SAFE_WHILE_BUSY } from './lib/sessions.js';
 import { Dialogs } from './lib/dialogs.js';
@@ -18,13 +18,18 @@ import { installRulers } from './lib/rulers.js';
 import { installSample } from './lib/sample.js';
 import { installCanvasCapture } from './lib/canvas-capture.js';
 import { PresetStore } from './lib/presets.js';
+import { installToolBrush } from './lib/brush/tool-brush.js';
+import { installPresetFormats, opensAsPresets, importPresetFiles } from './lib/preset-formats.js';
+import { attachColorPipeline, describe as describeProfile } from './lib/color/pipeline.js';
+import { BRUSH_SIZE } from './lib/brush/options.js';
+import { KeymapStore } from './lib/keymap-store.js';
 import { Selection } from './lib/selection.js';
 import { icon } from './lib/icons.js';
 import { withDefaults } from '../shared/defaults.js';
 import { openDocument } from './lib/io.js';
 import { flattenDocument } from './lib/compositor.js';
 import { parseColor, rgbaToHex } from '../shared/pixels/color.js';
-import { MENU_KEYS, RENDERER_KEYS, TYPE_KEYS, SHORTCUT_GROUPS, COMMAND_LABELS, describeAccelerator, runsWhileTyping } from '../shared/keymap.js';
+import { runsWhileTyping } from '../shared/keymap.js';
 
 // Feature modules installed after the core, in this order. A module that fails to load is skipped
 // with a warning so the rest of the app keeps working.
@@ -89,7 +94,21 @@ const MODULES = [
   'lib/shape-props.js', // shapes-live
   'lib/layer-dialogs.js', // finish-layer-menu
   'lib/conventions.js', // conventions-shortcuts-fields
-  'lib/stubs-later.js', // ids of later releases the 0.4 menus show (edit:menus)
+  'lib/stubs-later.js', // ids of later releases the menus show (0.6: edit:color-settings, edit:convert-profile)
+  // 0.5 entry modules (stubs until their packages land; ARCHITECTURE.md "0.5 features (contracts)", "New files", in
+  // package order; the four 0.5 panel modules come after lib/panels/layers-menu.js)
+  'lib/brush/define.js', // brush-engine-core
+  'lib/tools/paint-keys.js', // brush-painting-behaviours
+  'lib/color/cmm.js', // icc-engine
+  'lib/psd/index.js', // the PSD mappers of psd-layers and psd-text (skeleton, S4.1)
+  'lib/develop/workspace.js', // camera-raw-workspace
+  'lib/develop/tabs/index.js', // camera-raw-panels
+  'lib/tool-presets.js', // presets-panels
+  'lib/preset-manager.js', // preset-files-manager
+  'lib/color-picker.js', // color-picker-swatches
+  'lib/type/font-library.js', // type-fonts
+  'lib/type/commands.js', // type-menu-commands
+  'lib/shortcuts-editor.js', // shortcuts-editor (help:shortcuts works from the stub)
   'lib/panels/color.js',
   'lib/panels/swatches.js',
   'lib/panels/brushes.js',
@@ -107,6 +126,11 @@ const MODULES = [
   'lib/panels/gradients.js', // gradients
   'lib/panels/patterns.js', // patterns
   'lib/panels/layers-menu.js', // layers-panel-depth
+  // 0.5 panel modules (brush-settings-panel; presets-panels' three)
+  'lib/panels/brush-settings.js',
+  'lib/panels/styles.js',
+  'lib/panels/shapes.js',
+  'lib/panels/tool-presets.js',
   'lib/extras.js',
   'lib/welcome.js',
 ];
@@ -376,6 +400,13 @@ export class App extends EventTarget {
       snapTo: Object.entries(this.settings.guides?.snapTo ?? {}).filter(([, on]) => on).map(([k]) => k).join(','),
       patternPreview: !!this.ui.patternPreview,
       stubs: this.stubbed.join(','),
+      // 0.5 (S13.6): the keymap and the menu customisation as strings (ui state compares by identity), the Type
+      // menu's radios and labels
+      keymap: JSON.stringify(this.keymap?.resolvedOverlay() ?? { v: 1 }),
+      menus: JSON.stringify(this.keymap?.menus() ?? null),
+      antiAlias: d?.active?.type === 'text' ? d.active.typeOptions?.antiAlias ?? 'smooth' : null,
+      textKind: d?.active?.type === 'text' ? (d.active.width == null ? 'point' : 'paragraph') : null,
+      fontPreviewSize: this.settings.typeFonts?.previewSize ?? 'medium',
     };
     const changed = Object.keys(state).some((k) => this.uiState[k] !== state[k]);
     if (!changed) return;
@@ -471,8 +502,9 @@ function registerCoreCommands(app) {
     // files
     'file:new': { run: (arg) => app.newDocumentDialog?.(arg) },
     'file:open': { run: () => app.docs.openDialog() },
-    'file:open-paths': { run: (paths) => app.docs.openPaths(Array.isArray(paths) ? paths : [paths]) },
-    'file:open-recent': { run: (path) => app.docs.openPaths([path]) },
+    // open hooks (S12.6): a recorded Open replayed by an action is not interactive
+    'file:open-paths': { run: (paths, ctx) => app.docs.openPaths(Array.isArray(paths) ? paths : [paths], { interactive: ctx?.source !== 'action' }) },
+    'file:open-recent': { run: (path, ctx) => app.docs.openPaths([path], { interactive: ctx?.source !== 'action' }) },
     'file:clear-recent': {
       run: async () => {
         await bridge.clearRecent();
@@ -572,16 +604,18 @@ function registerCoreCommands(app) {
     // colours and brush shortcuts
     'tool:swap-colors': { run: () => app.setColors({ foreground: app.settings.background, background: app.settings.foreground }) },
     'tool:default-colors': { run: () => app.setColors({ foreground: '#000000', background: '#ffffff' }) },
+    // S7.1: every colour the user chooses goes through app.colorPicker (lib/color-picker.js); the foreground and
+    // background stay hex strings set through app.setColors
     'tool:pick-fg': {
       run: async () => {
-        const c = await app.pickColor?.(app.settings.foreground, { title: 'Color Picker (Foreground Color)' });
-        if (c) app.setColors({ foreground: c });
+        const c = await app.colorPicker?.pick({ initial: app.settings.foreground, title: 'Color Picker (Foreground Color)', target: 'foreground' });
+        if (c?.hex) app.setColors({ foreground: c.hex });
       },
     },
     'tool:pick-bg': {
       run: async () => {
-        const c = await app.pickColor?.(app.settings.background, { title: 'Color Picker (Background Color)' });
-        if (c) app.setColors({ background: c });
+        const c = await app.colorPicker?.pick({ initial: app.settings.background, title: 'Color Picker (Background Color)', target: 'background' });
+        if (c?.hex) app.setColors({ background: c.hex });
       },
     },
     'tool:fg-color': { run: (hex) => app.setColors({ foreground: hex }) },
@@ -604,7 +638,7 @@ function registerCoreCommands(app) {
     },
     'app:enter': { run: () => app.tools?.active?.commit?.() },
 
-    'help:shortcuts': { run: () => shortcutsDialog(app) },
+    // help:shortcuts is registered by lib/shortcuts-editor.js (0.5: shortcuts-editor's MODULES entry)
     'help:about': { run: () => aboutDialog(app) },
     'help:guide': { run: () => bridge.openExternal('https://github.com/Nihalpi1212/claude/blob/claude/fervent-newton-263lz3/pigment/docs/USER-GUIDE.md').catch(() => {}) },
     'help:website': { run: () => bridge.openExternal('https://github.com/Nihalpi1212/claude').catch(() => {}) },
@@ -627,38 +661,11 @@ function registerCoreCommands(app) {
     const v = tool.opt(key);
     if (key === 'size') {
       const step = v < 10 ? 1 : v < 50 ? 5 : v < 100 ? 10 : v < 300 ? 25 : 50;
-      tool.setOpt('size', Math.max(1, Math.min(2500, v + dir * step)));
+      // 5000 px (S2.8), or the tool's own cap (the DabTools stop at 1000 px until 0.7, S2.7)
+      const max = Math.min(BRUSH_SIZE.max, tool.options.find((o) => o.key === 'size')?.max ?? BRUSH_SIZE.max);
+      tool.setOpt('size', Math.max(1, Math.min(max, v + dir * step)));
     } else tool.setOpt('hardness', Math.round(Math.max(0, Math.min(1, v + dir * 0.25)) * 100) / 100);
   }
-}
-
-function shortcutsDialog(app) {
-  const content = document.createElement('div');
-  content.style.maxHeight = '60vh';
-  content.style.overflow = 'auto';
-  const table = document.createElement('table');
-  table.className = 'kbd-table';
-  for (const group of SHORTCUT_GROUPS) {
-    const head = document.createElement('tr');
-    head.innerHTML = `<th colspan="2">${group.title}${group.type ? ' (while editing text)' : ''}</th>`;
-    table.appendChild(head);
-    for (const cmd of group.commands) {
-      const keys = group.type ? [TYPE_KEYS[cmd]].filter(Boolean) : [MENU_KEYS[cmd], ...(RENDERER_KEYS[cmd] ?? [])].filter(Boolean);
-      if (!keys.length) continue;
-      const tr = document.createElement('tr');
-      const a = document.createElement('td');
-      a.textContent = COMMAND_LABELS[cmd] ?? cmd;
-      const b = document.createElement('td');
-      b.textContent = keys.map((k) => describeAccelerator(k, isMac)).join('  ·  ');
-      tr.append(a, b);
-      table.appendChild(tr);
-    }
-  }
-  const extra = document.createElement('p');
-  extra.className = 'muted';
-  extra.textContent = 'Hold Space to pan with any tool. Ctrl/Cmd + mouse wheel zooms. Alt-click with a painting tool samples a colour. Shift+letter cycles the tools in a slot.';
-  content.append(table, extra);
-  return app.dialogs.open({ title: 'Keyboard Shortcuts', content, width: 560, buttons: [{ label: 'Close', value: true, primary: true }] });
 }
 
 function aboutDialog(app) {
@@ -688,12 +695,21 @@ function setupStatusbar(app) {
       app.statusbar.clear('zoom');
       app.statusbar.clear('size');
       app.statusbar.clear('pos');
+      app.statusbar.clear('profile');
       return;
     }
     app.statusbar.set('zoom', zoom);
     if (document.activeElement !== input) input.value = String(Math.round(d.view.zoom * 1000) / 10);
     app.statusbar.set('size', `${d.width} × ${d.height} px · ${d.dpi} ppi · ${d.layers().length} layer${d.layers().length === 1 ? '' : 's'}`);
+    profile();
   };
+  // color (lib/color/pipeline.js), S6.6: the document profile, absent while describe() is '' (no engine)
+  const profile = () => {
+    const text = app.doc ? describeProfile(app.doc) : '';
+    if (text) app.statusbar.set('profile', text);
+    else app.statusbar.clear('profile');
+  };
+  app.on('color:display-changed', profile);
   app.on('view:changed', () => {
     update();
     app.docs.renderTabs();
@@ -721,7 +737,12 @@ function setupHostEvents(app) {
     if (via === 'key') {
       const el = document.activeElement;
       const typing = app.isTextTarget(el) || (!!el && el !== document.body && app.sessions.ownsFocus(el));
-      return typing || app.dialogs?.isOpen ? undefined : app.commands.run(cmd, arg, 'key');
+      // while a painting tool is active the key may mean its paint-context command (Shift+Alt+M: the Brush's mode,
+      // S13.4): keymap (lib/keymap-store.js)
+      if (typing || app.dialogs?.isOpen) return undefined;
+      // null: a paint-only key while no painting tool can take it (nothing happens, as on the page)
+      const resolved = app.keymap.resolveKey(cmd, 'key');
+      return resolved ? app.commands.run(resolved, arg, 'key') : undefined;
     }
     // a native menu accelerator (Electron) takes the key before the page: while the user types in a text field it may
     // only run what shortcuts.js lets the same key run there (the edit keys hand the edit to the field), so Ctrl+E,
@@ -813,7 +834,10 @@ function setupDragAndDrop(app) {
     const files = [...e.dataTransfer.files];
     const paths = files.map((f) => bridge.pathForFile(f)).filter(Boolean);
     if (e.shiftKey && app.doc) {
-      for (const p of paths) await app.commands.run('file:place', p, 'drop');
+      // preset files (lib/preset-formats.js, S10.4): imported, never placed (without Shift, openPaths routes them)
+      const presets = paths.filter((p) => opensAsPresets(p));
+      if (presets.length) importPresetFiles(app, { paths: presets });
+      for (const p of paths) if (!presets.includes(p)) await app.commands.run('file:place', p, 'drop');
       return;
     }
     app.commands.run('file:open-paths', paths, 'drop'); // the user's gesture: a session that refuses it says why
@@ -842,14 +866,24 @@ async function start() {
   installRulers(app); // app.rulers (L.10)
   installSample(app); // sampleMerged and app.sampleSkip (L.11)
   installCanvasCapture(app); // app.canvasCapture (I.3)
+  // 0.5 (S9): the keymap store; lib/shortcuts.js, the first module, builds its key table from it
+  app.keymap = new KeymapStore(app);
+  // 0.5 (S6): the colour pipeline (the engine slot; 'color:display-changed' once an engine is ready)
+  attachColorPipeline(app);
   // the preset store (C): files under <userData>/presets (IndexedDB in the browser build), the 0.4 kinds registered
   try {
-    (await import('./lib/preset-kinds.js')).registerPresetKinds04();
+    const kinds = await import('./lib/preset-kinds.js');
+    kinds.registerPresetKinds04();
+    kinds.registerPresetKinds05(); // 0.5 (S10.5): `brushes` (step 4 of the skeleton) and the other 0.5 kinds
   } catch (err) {
     console.error('Preset kinds failed to load', err);
   }
   app.presets = new PresetStore({ backend: bridge.presets ?? null, onWriteError: (err) => app.reportWriteFailure('presets', err) });
   app.presets.addEventListener('change', (e) => app.emit('presets:changed', e.detail));
+  // 0.5 (S1.3): each painting tool's brush, the `brushes` migration and tool:brush-preset
+  installToolBrush(app);
+  // 0.5 (S10): preset files of both registries, the skeleton's blob references
+  installPresetFormats(app);
   registerCoreCommands(app);
   setupStatusbar(app);
   setupHostEvents(app);

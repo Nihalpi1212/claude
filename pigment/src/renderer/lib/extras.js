@@ -1,11 +1,11 @@
-// Shared dialogs installed last: New Document (app.newDocumentDialog), the colour picker
-// (app.pickColor) and Preferences (app.preferencesDialog).
+// Shared dialogs installed last: New Document (app.newDocumentDialog) and Preferences (app.preferencesDialog). The
+// colour picker (app.pickColor, app.colorPicker) moved to lib/color-picker.js in 0.5 (S7.1).
 import { icon } from './icons.js';
 import { bridge } from './bridge.js';
 import { formDialog } from './form.js';
-import { createColorWidget, normHex } from './panels/color.js';
-import { parseColor, rgbaToHex, rgbToLab, labToRgb, rgbToCmyk, cmykToRgb } from '../../shared/pixels/color.js';
-import { DEFAULT_SETTINGS, DEFAULT_SWATCHES } from '../../shared/defaults.js';
+import { normHex } from './panels/color.js';
+import { DEFAULT_SETTINGS } from '../../shared/defaults.js';
+import { SRGB, profileById, profilesList } from './color/pipeline.js';
 
 const MAX_SIDE = 30000;
 const MAX_AREA = 250e6;
@@ -99,10 +99,16 @@ function createFromOptions(app, o) {
   let depth = [8, 16, 32].includes(Number(o.depth)) ? Number(o.depth) : 8;
   if (mode === 'bitmap') depth = 8;
   else if ((mode === 'cmyk' || mode === 'lab') && depth > 16) depth = 16;
-  return app.newDocument({ width, height, dpi, name, background, backgroundColor, mode, depth });
+  const doc = app.newDocument({ width, height, dpi, name, background, backgroundColor, mode, depth });
+  // color (lib/color/pipeline.js), S6.6: the chosen profile; sRGB (0.4) and "Don't Color Manage" are untagged (null)
+  if (doc && o.profile && o.profile !== SRGB.id && o.profile !== 'none') doc.profile = profileById(o.profile) ?? null;
+  return doc;
 }
 const MODES = [['rgb', 'RGB Color'], ['grayscale', 'Grayscale'], ['cmyk', 'CMYK Color'], ['lab', 'Lab Color'], ['bitmap', 'Bitmap']];
 const DEPTHS = [[8, '8 bit'], [16, '16 bit'], [32, '32 bit']];
+
+/** The New Document dialog's Color Profile choices (S6.6): every profile the pipeline lists, then untagged. */
+const profileOptions = () => [...profilesList().filter((p) => p.colorSpace === 'rgb' || p.colorSpace === 'gray').map((p) => [p.id, p.name]), ['none', "Don't Color Manage This Document"]];
 
 async function newDocumentDialog(app, arg, ctx = null) {
   if (arg && typeof arg === 'object' && Number(arg.width) > 0 && Number(arg.height) > 0) return createFromOptions(app, arg);
@@ -123,6 +129,7 @@ async function newDocumentDialog(app, arg, ctx = null) {
     backgroundColor: normHex(last.backgroundColor ?? '#ffffff'),
     mode: MODES.some(([id]) => id === last.mode) ? last.mode : 'rgb',
     depth: [8, 16, 32].includes(last.depth) ? last.depth : 8,
+    profile: profileOptions().some(([id]) => id === last.profile) ? last.profile : SRGB.id,
   };
   let sizeNode = null;
   let summary = null;
@@ -196,6 +203,8 @@ async function newDocumentDialog(app, arg, ctx = null) {
     { key: 'dpi', label: 'Resolution', type: 'number', min: 1, max: 10000, step: 1, unit: 'ppi', width: 90 },
     { key: 'mode', label: 'Color mode', type: 'select', options: MODES },
     { key: 'depth', label: 'Bit depth', type: 'select', options: DEPTHS, when: (v) => v.mode !== 'bitmap' },
+    // color (lib/color/pipeline.js), S6.6
+    { key: 'profile', label: 'Color Profile', type: 'select', options: profileOptions(), when: (v) => v.mode !== 'bitmap' },
     { key: 'background', label: 'Background contents', type: 'select', options: [['white', 'White'], ['black', 'Black'], ['background', 'Background color'], ['transparent', 'Transparent'], ['custom', 'Custom color…']] },
     { key: 'backgroundColor', label: 'Custom color', type: 'color', when: (v) => v.background === 'custom' },
     {
@@ -251,136 +260,13 @@ async function newDocumentDialog(app, arg, ctx = null) {
     return null;
   }
   const opts = { width: Math.round(result.width), height: Math.round(result.height), dpi: Math.round(Number(result.dpi) || 72), background: result.background, backgroundColor: normHex(result.backgroundColor), name: result.name, unit: result.unit, mode: result.mode, depth: Number(result.depth) || 8 };
-  app.saveSettingsSoon({ newDocPreset: { width: opts.width, height: opts.height, dpi: opts.dpi, background: opts.background, backgroundColor: opts.backgroundColor, unit: opts.unit, preset: result.preset === 'clipboard' ? 'custom' : result.preset, name: 'Untitled', mode: opts.mode, depth: opts.depth } });
+  // color (lib/color/pipeline.js): a profile other than sRGB (0.4's documents) goes into the arguments and the preset
+  const profile = result.profile && result.profile !== SRGB.id ? { profile: result.profile } : {};
+  Object.assign(opts, profile);
+  app.saveSettingsSoon({ newDocPreset: { width: opts.width, height: opts.height, dpi: opts.dpi, background: opts.background, backgroundColor: opts.backgroundColor, unit: opts.unit, preset: result.preset === 'clipboard' ? 'custom' : result.preset, name: 'Untitled', mode: opts.mode, depth: opts.depth, ...profile } });
   // actions (lib/actions.js): the settings replay the command; an automatic "Untitled-n" name is left to each run
   ctx?.setReplayArg({ ...opts, name: /^Untitled(-\d+)?$/.test(opts.name ?? '') ? undefined : opts.name });
   return createFromOptions(app, opts);
-}
-
-// ---- colour picker ---------------------------------------------------------------------------------------------
-function pickColor(app, initial, { title = 'Color Picker', live } = {}) {
-  const start = normHex(initial ?? app.settings.foreground);
-  let current = start;
-  let liveRaf = 0;
-  let liveHex = null;
-  const pushLive = (hex) => {
-    if (typeof live !== 'function') return;
-    liveHex = hex;
-    if (liveRaf) return;
-    liveRaf = requestAnimationFrame(() => {
-      liveRaf = 0;
-      try {
-        live(liveHex);
-      } catch (err) {
-        console.error(err);
-      }
-    });
-  };
-
-  const content = document.createElement('div');
-  content.className = 'color-dialog';
-  const widget = createColorWidget({
-    value: start,
-    large: true,
-    onChange: (hex) => {
-      current = hex;
-      showNew();
-      pushLive(hex);
-    },
-  });
-  const side = document.createElement('div');
-  side.className = 'color-dialog-side';
-  side.innerHTML = `
-    <div class="cp-compare" aria-label="New and current colour">
-      <span class="muted">new</span>
-      <div class="cp-swatches"><span class="cp-new"></span><button type="button" class="cp-old" title="Click to go back to the current colour"></button></div>
-      <span class="muted">current</span>
-    </div>
-    <div class="color-fields cp-modes" style="grid-template-columns: repeat(4, 1fr)" aria-label="Lab and CMYK">
-      <label title="Lightness (0–100)">L <input class="input" data-m="L" type="number" min="0" max="100" step="1"></label>
-      <label title="a (green–red)">a <input class="input" data-m="a" type="number" min="-128" max="127" step="1"></label>
-      <label title="b (blue–yellow)">b <input class="input" data-m="b" type="number" min="-128" max="127" step="1"></label>
-      <label title="Cyan (%)">C <input class="input" data-m="c" type="number" min="0" max="100" step="1"></label>
-      <label title="Magenta (%)">M <input class="input" data-m="m" type="number" min="0" max="100" step="1"></label>
-      <label title="Yellow (%)">Y <input class="input" data-m="y" type="number" min="0" max="100" step="1"></label>
-      <label title="Black (%)">K <input class="input" data-m="k" type="number" min="0" max="100" step="1"></label>
-    </div>
-    <div class="cp-quick-title muted">Recent and swatches</div>
-    <div class="cp-quick"></div>
-    <button type="button" class="btn small cp-add">${icon('plus')} Add to Swatches</button>`;
-  const newSw = side.querySelector('.cp-new');
-  const oldSw = side.querySelector('.cp-old');
-  oldSw.style.background = start;
-  // Lab and CMYK readouts/fields (lib/color-modes.js owns the maths): typing in one converts back to RGB
-  const modes = Object.fromEntries([...side.querySelectorAll('[data-m]')].map((i) => [i.dataset.m, i]));
-  const showModes = () => {
-    const [r, g, b] = parseColor(current);
-    const lab = rgbToLab(r, g, b), cmyk = rgbToCmyk(r, g, b);
-    const vals = { L: lab[0], a: lab[1], b: lab[2], c: cmyk[0], m: cmyk[1], y: cmyk[2], k: cmyk[3] };
-    for (const [k, input] of Object.entries(modes)) if (document.activeElement !== input) input.value = String(Math.round(vals[k]));
-  };
-  const commitMode = (key) => {
-    const n = (k) => Number(modes[k].value);
-    if (Object.values(modes).some((i) => i.value === '' || !Number.isFinite(Number(i.value)))) return;
-    const rgb = 'Lab'.includes(key) ? labToRgb(n('L'), n('a'), n('b')) : cmykToRgb(n('c'), n('m'), n('y'), n('k'));
-    choose(rgbaToHex(rgb.map((v) => Math.round(v))));
-  };
-  for (const [k, input] of Object.entries(modes)) {
-    input.addEventListener('change', () => commitMode(k));
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') commitMode(k);
-    });
-  }
-  const showNew = () => {
-    newSw.style.background = current;
-    showModes();
-  };
-  const choose = (hex) => {
-    current = normHex(hex);
-    widget.set(current);
-    showNew();
-    pushLive(current);
-  };
-  oldSw.addEventListener('click', () => choose(start));
-  const quick = side.querySelector('.cp-quick');
-  const recent = (app.settings.recentColors ?? []).map(normHex);
-  const palette = app.settings.swatchesEdited || app.settings.swatches?.length ? app.settings.swatches : DEFAULT_SWATCHES;
-  const seen = new Set();
-  for (const c of [...recent, ...(palette ?? []).map((s) => normHex(typeof s === 'string' ? s : s?.color))]) {
-    if (seen.has(c) || seen.size >= 30) continue;
-    seen.add(c);
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.className = 'swatch';
-    b.style.background = c;
-    b.title = c;
-    b.addEventListener('click', () => choose(c));
-    quick.appendChild(b);
-  }
-  side.querySelector('.cp-add').addEventListener('click', (e) => {
-    const list = (app.settings.swatchesEdited || app.settings.swatches?.length ? app.settings.swatches : DEFAULT_SWATCHES).slice();
-    list.push(current);
-    app.saveSettingsSoon({ swatches: list, swatchesEdited: true });
-    app.emit('swatches:changed', list);
-    e.currentTarget.textContent = 'Added';
-    e.currentTarget.disabled = true;
-  });
-  showNew();
-  content.append(widget.element, side);
-
-  return app.dialogs
-    .open({
-      title,
-      content,
-      width: 520,
-      className: 'color-picker-dialog',
-      buttons: [{ label: 'Cancel', value: null }, { label: 'OK', value: true, primary: true }],
-    })
-    .then((ok) => {
-      cancelAnimationFrame(liveRaf);
-      liveRaf = 0;
-      return ok ? normHex(current) : null;
-    });
 }
 
 // ---- preferences ---------------------------------------------------------------------------------------------
@@ -404,6 +290,7 @@ function keySection(id, title, order, fields) {
       const values = Object.fromEntries(keys.map((k) => [k, s[k] ?? DEFAULT_SETTINGS[k]]));
       for (const k of ['checkerboardLight', 'checkerboardDark']) if (k in values) values[k] = normHex(values[k]);
       if ('checkerboardSize' in values) values.checkerboardSize = Number(values.checkerboardSize);
+      if (values.cursorStyle === 'dot') values.cursorStyle = 'standard'; // 0.4's Dot is 0.5's Standard (S3.2)
       return values;
     },
     write(values, s) {
@@ -427,7 +314,8 @@ const BUILTIN_PREF_SECTIONS = [
     { key: 'zoomWithWheel', label: 'Zoom with the scroll wheel (Ctrl/Cmd + wheel always zooms)', type: 'checkbox', span: true },
   ]),
   keySection('tools', 'Cursors and tools', 20, [
-    { key: 'cursorStyle', label: 'Painting cursor', type: 'select', options: [['outline', 'Brush outline'], ['precise', 'Precise (crosshair)'], ['dot', 'Dot']] },
+    // S3.2: Photoshop's four painting cursors (lib/brush-cursor.js draws them)
+    { key: 'cursorStyle', label: 'Painting cursor', type: 'select', options: [['standard', 'Standard'], ['precise', 'Precise'], ['outline', 'Normal Brush Tip'], ['full', 'Full Size Brush Tip']] },
     { key: 'transformInterpolation', label: 'Transform interpolation', type: 'select', options: [['bicubic', 'Bicubic'], ['bilinear', 'Bilinear'], ['nearest', 'Nearest neighbor']] },
     { key: 'resampleMethod', label: 'Image Size resampling', type: 'select', options: [['bicubic', 'Bicubic (smooth gradients)'], ['lanczos', 'Lanczos (sharper)'], ['bilinear', 'Bilinear'], ['area', 'Area average (reduction)'], ['nearest', 'Nearest neighbor (hard edges)']] },
     { key: 'transformProportional', label: 'Keep proportions while transforming (Shift releases)', type: 'checkbox', span: true },
@@ -553,7 +441,6 @@ export function install(app) {
   app.newDocumentDialog = (arg, ctx) => newDocumentDialog(app, arg, ctx);
   // actions (lib/actions.js): File > New is a dialog command that reports its settings (app.js registers it without ctx)
   app.commands.register('file:new', { dialog: true, run: (arg, ctx) => newDocumentDialog(app, arg, ctx) });
-  app.pickColor = (initial, opts) => pickColor(app, initial, opts);
   // app.preferences is created in the App constructor (before MODULES); a section a package registered first is kept
   for (const sec of BUILTIN_PREF_SECTIONS) app.preferences.registerSection(sec, { builtin: true });
   app.preferencesDialog = () => preferencesDialog(app);

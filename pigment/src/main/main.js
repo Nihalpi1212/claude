@@ -11,7 +11,7 @@ import { registerIpc } from './ipc.js';
 import { buildMenuTemplate } from './menu.js';
 import { filesFromArgv } from './startup-files.js';
 import { withDefaults } from '../shared/defaults.js';
-import { RENDERER_KEYS, parseAccelerator, eventMatches } from '../shared/keymap.js';
+import { parseAccelerator, eventMatches, effectiveKeys, sameAccelerator } from '../shared/keymap.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const RENDERER_DIR = join(here, '..', 'renderer');
@@ -102,16 +102,45 @@ function runCommand(cmd, arg, via = false) {
   mainWindow.webContents.send('pigment:event:command', cmd, arg, via);
 }
 
+// 0.5 (ARCHITECTURE.md "0.5 features", S9.4): the keymap the menu and the Shift+Alt keys follow. The renderer reports
+// the resolved overlay (its user keys minus the keys actions own) as a JSON string in the ui state; before the first
+// ui state, settings.keymap.overlay (the actions' keys follow with the first ui state).
+function keymapJson() {
+  return typeof uiState.current.keymap === 'string' ? uiState.current.keymap : JSON.stringify(settings.get().keymap?.overlay ?? null);
+}
+function menusJson() {
+  return typeof uiState.current.menus === 'string' ? uiState.current.menus : JSON.stringify(settings.get().keymap?.menus ?? null);
+}
+function parseJson(s) {
+  try {
+    return JSON.parse(s);
+  } catch {
+    return null;
+  }
+}
+
 // Shift+Alt+letter (the blend-mode keys) and Shift+Alt+[ / ] share Alt with the menu mnemonics on Windows and
 // Linux (&File, &Edit, …): Chromium would open a menu instead of delivering the key. main.js takes these keys
-// before the page and the menu see them and runs their command as a key (O).
-const SHIFT_ALT_KEYS = Object.entries(RENDERER_KEYS).flatMap(([cmd, list]) => list.map((accel) => ({ cmd, desc: parseAccelerator(accel) })))
-  .filter(({ desc }) => desc.shift && desc.alt && !desc.ctrl && !desc.meta && !desc.cmdOrCtrl);
+// before the page and the menu see them and runs their command as a key (O). 0.5: from the effective keymap; a
+// paint-context key with no global command on the same key (Shift+Alt+Q Behind, Shift+Alt+R Clear) goes as its
+// paint command, which the renderer runs only while it is enabled (S13.4)
+let shiftAltCache = { json: null, keys: [] };
+function shiftAltKeys() {
+  const json = keymapJson();
+  if (shiftAltCache.json === json) return shiftAltCache.keys;
+  const eff = effectiveKeys(parseJson(json));
+  const shiftAlt = ({ desc }) => desc.shift && desc.alt && !desc.ctrl && !desc.meta && !desc.cmdOrCtrl;
+  const entries = (table) => Object.entries(table).flatMap(([cmd, list]) => list.map((accel) => ({ cmd, accel, desc: parseAccelerator(accel) }))).filter(shiftAlt);
+  const global = entries(eff.renderer);
+  const paintOnly = entries(eff.paint).filter((p) => !global.some((g) => sameAccelerator(g.accel, p.accel)));
+  shiftAltCache = { json, keys: [...global, ...paintOnly] };
+  return shiftAltCache.keys;
+}
 
 function interceptShiftAlt(event, input) {
   if (IS_MAC || input.type !== 'keyDown' || !input.shift || !input.alt || input.control || input.meta) return;
   const ev = { key: input.key, code: input.code, location: input.location ?? 0, shiftKey: true, altKey: true, ctrlKey: false, metaKey: false };
-  const hit = SHIFT_ALT_KEYS.find(({ desc }) => eventMatches(ev, desc, false));
+  const hit = shiftAltKeys().find(({ desc }) => eventMatches(ev, desc, false));
   if (!hit) return;
   event.preventDefault();
   if (!input.isAutoRepeat) runCommand(hit.cmd, undefined, 'key');
@@ -121,9 +150,47 @@ let menuTimer = null;
 function updateMenu() {
   clearTimeout(menuTimer);
   menuTimer = setTimeout(() => {
-    const template = buildMenuTemplate({ platform: process.platform, state: uiState.current, recent: recent.get(), run: (cmd, arg, viaKey) => runCommand(cmd, arg, !!viaKey), isPackaged: app.isPackaged });
+    const state = { ...uiState.current, keymap: keymapJson(), menus: menusJson() };
+    const template = buildMenuTemplate({ platform: process.platform, state, recent: recent.get(), run: (cmd, arg, viaKey) => runCommand(cmd, arg, !!viaKey), isPackaged: app.isPackaged });
+    colourIcons(template);
     Menu.setApplicationMenu(Menu.buildFromTemplate(template));
   }, 30);
+}
+
+// Coloured menu items (S9.5): the template marks them with pigmentColor; each becomes a 12 px dot icon, made once per
+// colour. Photoshop's menu colours.
+const MENU_COLOR_RGB = { red: [229, 72, 77], orange: [247, 107, 21], yellow: [245, 196, 0], green: [48, 164, 108], blue: [59, 130, 246], violet: [142, 78, 198], gray: [139, 141, 152] };
+const dotIcons = new Map();
+function dotIcon(name) {
+  if (!dotIcons.has(name)) {
+    const [r, g, b] = MENU_COLOR_RGB[name] ?? MENU_COLOR_RGB.gray;
+    const size = 12;
+    const buf = Buffer.alloc(size * size * 4);
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        // coverage of a 10 px disc, antialiased over one pixel
+        const d = Math.hypot(x + 0.5 - size / 2, y + 0.5 - size / 2);
+        const a = Math.max(0, Math.min(1, 5.5 - d));
+        const i = (y * size + x) * 4;
+        // BGRA, premultiplied (what nativeImage.createFromBitmap reads)
+        buf[i] = Math.round(b * a);
+        buf[i + 1] = Math.round(g * a);
+        buf[i + 2] = Math.round(r * a);
+        buf[i + 3] = Math.round(255 * a);
+      }
+    }
+    dotIcons.set(name, nativeImage.createFromBitmap(buf, { width: size, height: size, scaleFactor: 1 }));
+  }
+  return dotIcons.get(name);
+}
+function colourIcons(list) {
+  for (const it of list) {
+    if (it.pigmentColor) {
+      it.icon = dotIcon(it.pigmentColor);
+      delete it.pigmentColor;
+    }
+    if (Array.isArray(it.submenu)) colourIcons(it.submenu);
+  }
 }
 
 // ---- window ------------------------------------------------------------------------------------------

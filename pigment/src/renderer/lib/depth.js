@@ -33,6 +33,7 @@ import { parseColor } from '../../shared/pixels/color.js';
 import { Document, RasterLayer, createCanvas, isDefaultBlending, effectiveBlending } from './document.js';
 import { flattenDocument } from './compositor.js';
 import { registerExportFormat, registerOpenFormat, baseName, extOf } from './io.js';
+import { applyChunks } from './io-chunks.js';
 import { SAVE_FILTERS } from './documents.js';
 import { bridge } from './bridge.js';
 
@@ -1104,7 +1105,8 @@ export function install(app) {
       const ext = extOf(path);
       if (ext === 'png') {
         try {
-          const bytes = await app.busy(`Saving ${path.split(/[\\/]/).pop()}…`, () => encodePng16(doc, {}, doc.view.compositor));
+          // chunks (lib/io-chunks.js): this save does not go through exportImage, so it applies the 'save' chunks itself
+          const bytes = await app.busy(`Saving ${path.split(/[\\/]/).pop()}…`, async () => applyChunks(doc, await encodePng16(doc, {}, doc.view.compositor), 'png', { purpose: 'save' }));
           await bridge.writeFile(path, bytes);
           if (!opts.copy) doc.history.markSaved(flattenDocument(doc, doc.view.compositor));
           app.dialogs.toast(`Saved ${path.split(/[\\/]/).pop()} (16 bits/channel)`, { kind: 'success', timeout: 1600 });

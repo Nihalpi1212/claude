@@ -5,6 +5,8 @@ import { bridge } from '../bridge.js';
 import { buildForm, debounce } from '../form.js';
 import { createCanvas } from '../document.js';
 import { exportImage, decodeImage, baseName } from '../io.js';
+import { flattenDocument } from '../compositor.js';
+import { toSRGB } from '../color/pipeline.js';
 import { indicesToImage } from '../../../shared/pixels/quantize.js';
 import { indexedFields, indexedOptions } from './dialogs.js';
 import { exportCanvas, quantizeForExport, gifBytes, png8Bytes } from './formats.js';
@@ -54,7 +56,16 @@ export async function encodeForWeb(app, doc, s, cache = null) {
   const format = s.format === 'png24' ? 'png' : s.format;
   // JPEG has no transparency; PNG-24 and WebP are matted only when transparency is switched off
   const background = format === 'jpeg' || s.transparency === false ? s.matte ?? '#ffffff' : null;
-  const bytes = await exportImage(doc, { format, quality: Math.max(0.01, Math.min(1, (s.quality ?? 80) / 100)), width, height, background }, doc.view?.compositor);
+  // color (lib/color/pipeline.js): "Convert to sRGB" (on unless unticked) converts a tagged document's pixels and
+  // embeds nothing of its profile (S6.3); untagged and sRGB documents, and every document without an engine, go as
+  // they are
+  const extra = {};
+  if (s.srgb !== false && doc.profile) {
+    const flat = flattenDocument(doc, doc.view?.compositor);
+    const converted = await toSRGB(flat, doc);
+    if (converted !== flat) Object.assign(extra, { canvas: converted, convertTo: 'srgb' });
+  }
+  const bytes = await exportImage(doc, { format, quality: Math.max(0.01, Math.min(1, (s.quality ?? 80) / 100)), width, height, background, ...extra }, doc.view?.compositor);
   // what a browser will show: the file decoded again
   const preview = await decodeImage(bytes, `x.${EXT[s.format]}`);
   return { bytes, preview, palette: null, transparentIndex: -1 };
@@ -62,6 +73,7 @@ export async function encodeForWeb(app, doc, s, cache = null) {
 
 function settingsOf(app, v) {
   const s = { format: v.format, width: Math.round(v.width), height: Math.round(v.height) };
+  if (v.srgb === false) s.srgb = false; // color (lib/color/pipeline.js): ticked (0.4's arguments) converts, see encodeForWeb
   if (indexed(v.format)) Object.assign(s, indexedOptions(app, v));
   else {
     s.quality = Math.round(v.quality);
@@ -150,7 +162,7 @@ export async function saveForWeb(app, arg, ctx = null) {
     when((v) => v.format === 'jpeg' || v.format === 'webp', { key: 'quality', label: 'Quality', type: 'slider', value: Number.isFinite(last.quality) ? last.quality : 80, min: 1, max: 100, unit: '%' }),
     when((v) => v.format === 'png24' || v.format === 'webp', { key: 'transparency24', label: 'Transparency', type: 'checkbox', value: last.transparency !== false }),
     when((v) => v.format === 'jpeg' || ((v.format === 'png24' || v.format === 'webp') && !v.transparency24), { key: 'matteColor24', label: 'Matte', type: 'color', value: typeof last.matte === 'string' ? last.matte : '#ffffff' }),
-    { key: 'srgb', label: 'Convert to sRGB', type: 'checkbox', value: true, help: 'Pigment documents are sRGB already: nothing is converted' },
+    { key: 'srgb', label: 'Convert to sRGB', type: 'checkbox', value: true, help: 'Converts a document in another colour profile to sRGB; sRGB and untagged documents are not changed' },
     { type: 'section', label: 'Image Size' },
     { key: 'width', label: 'W', type: 'number', value: doc.width, min: 1, max: 30000, unit: 'px' },
     { key: 'height', label: 'H', type: 'number', value: doc.height, min: 1, max: 30000, unit: 'px' },

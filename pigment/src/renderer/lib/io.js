@@ -1,22 +1,18 @@
 // Open, save and export (see ARCHITECTURE.md "File formats"): raster images through the browser's
 // decoders, PSD/PSB through ag-psd, and the native .pigment container (a ZIP with document.json
 // plus one PNG per raster layer and mask).
-import { readPsd, writePsdUint8Array, initializeCanvas } from 'ag-psd';
+import { initializeCanvas } from '#ag-psd';
 import { writeZip, readZip, findEntry, streamCodecs } from '../../shared/zip.js';
 import { DocStore } from './doc-store.js';
-import { Document, RasterLayer, GroupLayer, TextLayer, AdjustmentLayer, createCanvas, layerFromDescription, canvasIsBlank, textExtensionFor, isDefaultBlending, effectiveBlending } from './document.js';
-import { isDefaultBlendIf, normalizeRange } from '../../shared/pixels/blend-if.js';
-import { hasEnabledStyles } from '../../shared/pixels/styles.js';
-import { parseColor } from '../../shared/pixels/color.js';
-import { MODES, duotoneLut } from '../../shared/pixels/modes.js';
-import { Compositor, flattenDocument, modeRendererFor } from './compositor.js';
+import { Document, RasterLayer, createCanvas, layerFromDescription, canvasIsBlank } from './document.js';
+import { MODES } from '../../shared/pixels/modes.js';
+import { flattenDocument } from './compositor.js';
 import { Selection } from './selection.js';
-import { maskCanvasFor } from './mask-render.js';
-import { isUniform, nonDefaultKeys, charStyleAt, paragraphs, applyChar, applyPara, contentLength } from './type/model.js';
-import { isGradientV2, normalizeGradient } from '../../shared/pixels/gradient-model.js';
-import { pointsFromTable } from '../../shared/pixels/adjust-tonal.js';
-import { HUE_BASES, DEFAULT_RANGE_BOUNDS, hueSatRanges, normalizeBounds } from '../../shared/pixels/adjust-color.js';
-import { adjustmentDef } from '../../shared/pixels/adjust.js';
+import './psd/index.js'; // every PSD mapper registers (S4.1)
+import { readPsdDocument } from './psd/read.js';
+import { writePsdDocument } from './psd/write.js';
+import { readChunks, applyChunks, chunkFormatFor, sniffChunkFormat } from './io-chunks.js';
+import { colorEngine, profileById } from './color/pipeline.js';
 
 export const OPEN_EXTENSIONS = ['pigment', 'psd', 'psb', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'avif', 'svg', 'ico'];
 export const OPEN_FILTERS = [
@@ -84,8 +80,12 @@ export const WRITE_EXTENSIONS = ['pigment', 'psd', 'png', 'jpg', 'jpeg', 'webp']
 export const canWritePath = (path) => WRITE_EXTENSIONS.includes(extOf(path));
 export const baseName = (name) => String(name ?? 'Untitled').split(/[\\/]/).pop().replace(/\.[^.]+$/, '');
 
-/** Decodes encoded image bytes (PNG/JPEG/WebP/GIF/BMP/AVIF/SVG/ICO) to a canvas. */
-export async function decodeImage(bytes, name = '') {
+/**
+ * Decodes encoded image bytes (PNG/JPEG/WebP/GIF/BMP/AVIF/SVG/ICO) to a canvas. `colorSpaceConversion` is the
+ * engine's decodeConversion (S6.3): 'default' (0.4: the browser converts a tagged file to sRGB) or 'none' (the
+ * numbers as stored, for the engine to adopt the embedded profile).
+ */
+export async function decodeImage(bytes, name = '', { colorSpaceConversion = 'default' } = {}) {
   const ext = extOf(name);
   const type = { svg: 'image/svg+xml', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif', bmp: 'image/bmp', avif: 'image/avif', ico: 'image/x-icon' }[ext] ?? sniffType(bytes);
   const blob = new Blob([bytes], { type });
@@ -104,7 +104,7 @@ export async function decodeImage(bytes, name = '') {
       URL.revokeObjectURL(url);
     }
   }
-  const bitmap = await createImageBitmap(blob, { premultiplyAlpha: 'none', colorSpaceConversion: 'default' });
+  const bitmap = await createImageBitmap(blob, { premultiplyAlpha: 'none', colorSpaceConversion: colorSpaceConversion === 'none' ? 'none' : 'default' });
   const c = createCanvas(bitmap.width, bitmap.height);
   c.getContext('2d').drawImage(bitmap, 0, 0);
   bitmap.close?.();
@@ -134,17 +134,38 @@ function sniffType(b) {
   return 'application/octet-stream';
 }
 
+/** Waits for the colour engine (a launch with a file runs before the wasm is compiled), at most `ms`. */
+async function engineReady(ms = 3000) {
+  let timer = null;
+  try {
+    await Promise.race([Promise.resolve().then(() => colorEngine().ready?.()), new Promise((resolve) => (timer = setTimeout(resolve, ms)))]);
+  } catch {
+    /* an engine that failed to start answers as the stub */
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** Opens bytes as a Document according to the file name's extension (content sniffing as fallback). */
 export async function openDocument(bytes, { name = 'Untitled', path = null } = {}) {
   const ext = extOf(name);
   let doc;
+  // color (lib/color/pipeline.js), S6.3: the file's chunks are read first, and the engine decides before any reader
+  // runs whether the browser converts the pixels ('default', 0.4) or hands them over as stored ('none', adopted below)
+  await engineReady();
+  const format = chunkFormatFor(ext) ?? sniffChunkFormat(bytes);
+  const chunks = format ? await readChunks(bytes, format) : {};
+  let conv = 'default';
+  try {
+    conv = colorEngine().decodeConversion(chunks, format) === 'none' ? 'none' : 'default';
+  } catch {}
   // registered readers (16-bit PNG, TIFF, GIF with a colour table, ...) take precedence over the built-ins
   const reader = OPEN_READERS.find((r) => (r.test ? r.test(bytes, name) : (r.extensions ?? []).includes(ext)));
-  if (reader) doc = await reader.read(bytes, { name, path });
+  if (reader) doc = await reader.read(bytes, { name, path, colorSpaceConversion: conv });
   else if (ext === 'pigment' || (bytes[0] === 0x50 && bytes[1] === 0x4b)) doc = await readPigment(bytes);
   else if (ext === 'psd' || ext === 'psb' || (bytes[0] === 0x38 && bytes[1] === 0x42 && bytes[2] === 0x50 && bytes[3] === 0x53)) doc = readPsdDocument(bytes);
   else {
-    const canvas = await decodeImage(bytes, name);
+    const canvas = await decodeImage(bytes, name, { colorSpaceConversion: conv });
     doc = new Document({ width: canvas.width, height: canvas.height, name: baseName(name) });
     const layer = new RasterLayer({ name: 'Background', canvas, x: 0, y: 0 });
     doc.root.children.push(layer);
@@ -155,6 +176,14 @@ export async function openDocument(bytes, { name = 'Untitled', path = null } = {
   doc.name = baseName(name);
   doc.path = path;
   doc.format = ext === 'jpg' ? 'jpeg' : ext || 'png';
+  // what the engine adopts from the file (the embedded profile when it answered 'none'); nothing without an engine
+  if (format) {
+    try {
+      colorEngine().adoptOnOpen(doc, { chunks, format, conv });
+    } catch (err) {
+      console.warn('colour profile not adopted', err);
+    }
+  }
   return doc;
 }
 
@@ -199,6 +228,8 @@ export async function writePigment(doc) {
   }
   if (doc.selection && !doc.selection.isEmpty) entries.push({ name: 'selection.bin', data: doc.selection.mask, compress: true });
   for (const ch of doc.channels) entries.push({ name: `channels/${ch.id}.bin`, data: ch.mask, compress: true });
+  // color (lib/color/pipeline.js), S6.2: the document profile's bytes next to its description (0.4 readers ignore it)
+  if (doc.profile?.bytes?.length) entries.push({ name: 'profile.icc', data: doc.profile.bytes, compress: true });
   const flat = flattenDocument(doc);
   const scale = Math.min(1, 256 / Math.max(doc.width, doc.height));
   const thumb = createCanvas(Math.max(1, Math.round(doc.width * scale)), Math.max(1, Math.round(doc.height * scale)));
@@ -229,6 +260,15 @@ export async function readPigment(bytes) {
   if ((doc.mode === 'indexed' && !doc.colorTable?.length) || (doc.mode === 'multichannel' && !doc.meta?.imageMode?.multichannel)) doc.mode = 'rgb';
   if (d.workPath?.subpaths) doc.workPath = d.workPath;
   if (d.globalLight && Number.isFinite(d.globalLight.angle)) doc.globalLight = { angle: d.globalLight.angle, altitude: d.globalLight.altitude ?? 30 };
+  // color (lib/color/pipeline.js), S6.2: the document profile (a 0.4 file has none: untagged)
+  if (d.profile && typeof d.profile === 'object' && typeof d.profile.id === 'string') {
+    const icc = findEntry(entries, 'profile.icc')?.data ?? null;
+    let parsed = null;
+    try {
+      parsed = icc ? colorEngine().parse(icc) : null;
+    } catch {}
+    doc.profile = parsed ?? (!icc ? profileById(d.profile.id) : null) ?? { id: d.profile.id, name: String(d.profile.name ?? d.profile.id), bytes: icc ? new Uint8Array(icc) : null, colorSpace: d.profile.colorSpace ?? 'rgb', wellKnown: d.profile.wellKnown ?? null, source: 'embedded' };
+  }
   const smartSources = new Map(); // sourceRef -> the source shared by every instance that names it
   const image = async (name) => {
     const e = findEntry(entries, name);
@@ -298,598 +338,14 @@ export async function readPigment(bytes) {
 }
 
 // ---- PSD ----------------------------------------------------------------------------------------------------
-
-const PSD_TO_BLEND = { 'pass through': 'pass-through', 'linear height': 'normal', height: 'normal', subtraction: 'subtract' };
-const BLEND_TO_PSD = { 'pass-through': 'pass through' };
-const psdBlend = (m) => PSD_TO_BLEND[m] ?? (m ? m.replace(/ /g, '-') : 'normal');
-const toPsdBlend = (m) => BLEND_TO_PSD[m] ?? m.replace(/-/g, ' ');
-
-/**
- * Blend If as PSD's blending ranges (the layer record's blending ranges data, which ag-psd reads and writes as
- * `blendingRanges`): the composite gray source (This Layer) and destination (Underlying Layer) ranges, then a source
- * and destination pair per colour channel, R, G, B. A range is [black low, black high, white low, white high], the
- * 0..255 slider halves, as in Pigment's blendIf. Null when nothing is hidden (the record then stays as 0.3 wrote it).
- */
-export function blendIfToPsd(blendIf) {
-  if (isDefaultBlendIf(blendIf)) return null;
-  const r = (c, which) => normalizeRange(blendIf?.[c]?.[which]);
-  return {
-    compositeGrayBlendSource: r('gray', 'this'),
-    compositeGraphBlendDestinationRange: r('gray', 'under'),
-    ranges: ['r', 'g', 'b'].map((c) => ({ sourceRange: r(c, 'this'), destRange: r(c, 'under') })),
-  };
-}
-
-/** Pigment's blendIf from PSD blending ranges (blendIfToPsd's inverse), or null when they hide nothing. */
-export function blendIfFromPsd(ranges) {
-  if (!ranges || typeof ranges !== 'object') return null;
-  const ok = (v) => Array.isArray(v) && v.length === 4 && v.every(Number.isFinite);
-  const pair = (src, dst) => ({ this: ok(src) ? normalizeRange(src) : [0, 0, 255, 255], under: ok(dst) ? normalizeRange(dst) : [0, 0, 255, 255] });
-  const blendIf = { gray: pair(ranges.compositeGrayBlendSource, ranges.compositeGraphBlendDestinationRange) };
-  ['r', 'g', 'b'].forEach((c, i) => {
-    const e = Array.isArray(ranges.ranges) ? ranges.ranges[i] : null;
-    blendIf[c] = pair(e?.sourceRange, e?.destRange);
-  });
-  return isDefaultBlendIf(blendIf) ? null : blendIf;
-}
-
-/** Reads PSD/PSB bytes into a Document (layers, groups, masks, opacity, blend modes, clipping, text). */
-export function readPsdDocument(bytes) {
-  const psd = readPsd(bytes, { skipThumbnail: true, skipLinkedFilesData: true });
-  const doc = new Document({ width: psd.width, height: psd.height });
-  const res = psd.imageResources?.resolutionInfo;
-  if (res?.horizontalResolution) doc.dpi = Math.round(res.horizontalResolution);
-  // guides (image resource 1032): a horizontal guide sits at a y position (axis 'y')
-  const psdGuides = psd.imageResources?.gridAndGuidesInformation?.guides;
-  if (Array.isArray(psdGuides) && psdGuides.length) doc.guides = psdGuides.map((g) => ({ axis: g.direction === 'horizontal' ? 'y' : 'x', pos: g.location }));
-  const convert = (pl, parent) => {
-    let layer;
-    const common = {
-      name: pl.name ?? 'Layer',
-      visible: !pl.hidden,
-      opacity: pl.opacity ?? 1,
-      fillOpacity: pl.fillOpacity ?? 1,
-      blend: psdBlend(pl.blendMode),
-      clip: !!pl.clipping,
-      locked: { transparency: !!pl.protected?.transparency, pixels: !!pl.protected?.composite, position: !!pl.protected?.position, all: false },
-    };
-    // Blend If (the blending ranges of the layer record): adjustment layers take it too
-    const blendIf = blendIfFromPsd(pl.blendingRanges);
-    if (blendIf) common.blending = { blendIf };
-    if (pl.children) {
-      layer = new GroupLayer({ ...common, expanded: !!pl.opened });
-      if (layer.blend === 'normal' && pl.blendMode === 'pass through') layer.blend = 'pass-through';
-      parent.children.push(layer);
-      layer.parent = parent;
-      for (const child of pl.children) convert(child, layer);
-    } else {
-      const left = pl.left ?? 0, top = pl.top ?? 0;
-      const adj = pl.adjustment && adjustmentFromPsd(pl.adjustment);
-      if (adj) {
-        layer = new AdjustmentLayer({ ...common, kind: adj.kind, params: adj.params });
-        if (!(pl.mask?.canvas && !pl.mask.fromVectorData)) {
-          // Photoshop adjustment layers always carry a mask; an absent one means "reveal all"
-          const m = createCanvas(doc.width, doc.height);
-          m.getContext('2d').fillStyle = '#fff';
-          m.getContext('2d').fillRect(0, 0, doc.width, doc.height);
-          layer.mask = { canvas: m, enabled: true, linked: true };
-        }
-      } else if (pl.adjustment) {
-        // an adjustment Pigment has no equivalent for: keep the slot so the layer order survives
-        layer = new RasterLayer({ ...common, name: `${common.name} (${pl.adjustment.type})`, visible: false, canvas: createCanvas(1, 1), x: 0, y: 0 });
-      } else if (pl.text?.text) {
-        layer = textLayerFromPsd(pl, common, left, top);
-      } else {
-        const canvas = pl.canvas ?? createCanvas(Math.max(1, (pl.right ?? 1) - left), Math.max(1, (pl.bottom ?? 1) - top));
-        layer = new RasterLayer({ ...common, canvas, x: left, y: top });
-      }
-      parent.children.push(layer);
-      layer.parent = parent;
-    }
-    if (pl.mask?.canvas && !pl.mask.fromVectorData) {
-      const m = createCanvas(doc.width, doc.height);
-      const mctx = m.getContext('2d');
-      const def = pl.mask.defaultColor ?? 255;
-      mctx.fillStyle = def >= 128 ? '#fff' : 'rgba(0,0,0,0)';
-      mctx.fillRect(0, 0, doc.width, doc.height);
-      // PSD masks are greyscale (white = visible): convert luminance to alpha
-      const src = pl.mask.canvas;
-      const sctx = src.getContext('2d', { willReadFrequently: true });
-      const img = sctx.getImageData(0, 0, src.width, src.height);
-      for (let i = 0; i < img.data.length; i += 4) {
-        const v = img.data[i];
-        img.data[i] = img.data[i + 1] = img.data[i + 2] = 255;
-        img.data[i + 3] = v;
-      }
-      const tmp = createCanvas(src.width, src.height);
-      tmp.getContext('2d').putImageData(img, 0, 0);
-      mctx.clearRect(pl.mask.left ?? 0, pl.mask.top ?? 0, src.width, src.height);
-      mctx.drawImage(tmp, pl.mask.left ?? 0, pl.mask.top ?? 0);
-      layer.mask = { canvas: m, enabled: !pl.mask.disabled, linked: true };
-    }
-    return layer;
-  };
-  if (psd.children?.length) for (const pl of psd.children) convert(pl, doc.root);
-  else if (psd.canvas) {
-    const layer = new RasterLayer({ name: 'Background', canvas: psd.canvas, x: 0, y: 0 });
-    doc.root.children.push(layer);
-    layer.parent = doc.root;
-  }
-  doc.active = doc.root.children[doc.root.children.length - 1] ?? null;
-  if (doc.active) doc.selected.add(doc.active);
-  return doc;
-}
-
-function rgbFromPsd(c, fallback = '#000000') {
-  if (!c) return fallback;
-  const h = (v) => Math.round(Math.max(0, Math.min(255, v))).toString(16).padStart(2, '0');
-  if ('r' in c) return `#${h(c.r)}${h(c.g)}${h(c.b)}`;
-  if ('c' in c && 'k' in c) return `#${h(255 * (1 - c.c / 100) * (1 - c.k / 100))}${h(255 * (1 - c.m / 100) * (1 - c.k / 100))}${h(255 * (1 - c.y / 100) * (1 - c.k / 100))}`;
-  if ('k' in c) return `#${h(255 * (1 - c.k / 100)).repeat(3)}`;
-  if ('h' in c) return hsbHex(c.h, c.s, c.b);
-  if ('l' in c && 'a' in c) return c.l > 50 ? '#ffffff' : '#000000';
-  return fallback;
-}
-function hsbHex(h, s, b) {
-  const [r, g, bl] = hsbToRgb(h / 360, s / 100, b / 100);
-  const hx = (v) => Math.round(v * 255).toString(16).padStart(2, '0');
-  return `#${hx(r)}${hx(g)}${hx(bl)}`;
-}
-function hsbToRgb(h, s, v) {
-  const i = Math.floor(h * 6), f = h * 6 - i, p = v * (1 - s), q = v * (1 - f * s), t = v * (1 - (1 - f) * s);
-  return [[v, t, p], [q, v, p], [p, v, t], [p, q, v], [t, p, v], [v, p, q]][((i % 6) + 6) % 6];
-}
-const psdColor = (hex) => {
-  const [r, g, b] = parseColor(hex);
-  return { r, g, b };
-};
-
-/** Turns a PostScript font name (ArialMT, Arial-BoldMT, TimesNewRomanPS-ItalicMT) into a CSS family. */
-export function cssFamilyFromPsFont(name) {
-  if (!name) return 'Arial';
-  if (/\s/.test(name)) return name; // already a family name (Pigment writes those)
-  let n = name.replace(/(PS)?MT$/, '').replace(/-[A-Za-z]+$/, '').replace(/PS$/, '');
-  n = n.replace(/([a-z\d])([A-Z])/g, '$1 $2').replace(/([A-Z])([A-Z][a-z])/g, '$1 $2');
-  return n.trim() || name;
-}
-
-const JUSTIFY_TO_ALIGN = { left: 'left', right: 'right', center: 'center', 'justify-left': 'left', 'justify-right': 'right', 'justify-center': 'center', 'justify-all': 'left' };
-
-/** Builds an editable TextLayer from ag-psd text data (fonts are matched by family name; one style per layer). */
-function textLayerFromPsd(pl, common, left, top) {
-  const t = pl.text;
-  const st = t.style ?? t.styleRuns?.[0]?.style ?? {};
-  const m = Array.isArray(t.transform) && t.transform.length === 6 ? t.transform : [1, 0, 0, 1, left, top];
-  const scale = Math.sqrt(Math.abs(m[0] * m[3] - m[1] * m[2])) || 1;
-  const size = Math.max(1, (st.fontSize ?? 24) * scale);
-  const psName = st.font?.name ?? '';
-  const font = {
-    family: cssFamilyFromPsFont(psName),
-    size,
-    weight: st.fauxBold || /bold|black|heavy|semibold/i.test(psName.replace(/^[^-]*/, '')) ? 700 : 400,
-    italic: !!st.fauxItalic || /italic|oblique/i.test(psName.replace(/^[^-]*/, '')),
-    underline: !!st.underline,
-    color: rgbFromPsd(st.fillColor),
-    align: JUSTIFY_TO_ALIGN[t.paragraphStyle?.justification ?? t.paragraphStyleRuns?.[0]?.style?.justification] ?? 'left',
-    lineHeight: st.leading && st.autoLeading === false && st.fontSize ? Math.max(0.5, st.leading / st.fontSize) : 1.2,
-    letterSpacing: st.tracking ? (st.tracking / 1000) * size : 0,
-    ...(t.orientation === 'vertical' ? { orientation: 'vertical' } : {}),
-  };
-  const ascent = size * 0.8;
-  // linear part with the scale divided out: identity means plain, unrotated text
-  const lin = [m[0] / scale, m[1] / scale, m[2] / scale, m[3] / scale];
-  const plain = Math.abs(lin[0] - 1) < 1e-3 && Math.abs(lin[3] - 1) < 1e-3 && Math.abs(lin[1]) < 1e-3 && Math.abs(lin[2]) < 1e-3;
-  const box = t.shapeType === 'box' && Array.isArray(t.boxBounds) && t.boxBounds.length === 4 ? t.boxBounds : null;
-  const width = box ? Math.max(size, (box[2] - box[0]) * scale) : null;
-  // text space has its origin on the first baseline; Pigment's box starts one ascent above it
-  const ox = box ? box[0] * scale : 0, oy = box ? box[1] * scale + ascent : 0;
-  const props = { ...common, text: t.text.replace(/\r/g, '\n'), font, width };
-  if (plain) {
-    props.x = m[4] + ox;
-    props.y = m[5] - ascent + oy;
-  } else {
-    props.x = ox;
-    props.y = oy - ascent;
-    props.transform = [lin[0], lin[1], lin[2], lin[3], m[4], m[5]];
-  }
-  const layer = new TextLayer(props);
-  // the 0.4 attributes textToPsd writes (PSD_TEXT_KEYS) have no field in 0.3's flat font: put them on the rich text
-  // so a file Pigment saved as editable text reopens looking the same
-  const patch = {};
-  if (st.strikethrough) patch.strike = true;
-  if (st.fontCaps === 1 || st.fontCaps === 2) patch.caps = st.fontCaps === 1 ? 'small' : 'all';
-  if (st.baselineShift) patch.baselineShift = st.baselineShift * scale;
-  if (typeof st.horizontalScale === 'number' && st.horizontalScale > 0) patch.scaleX = Math.round(st.horizontalScale * 10000) / 100;
-  if (typeof st.verticalScale === 'number' && st.verticalScale > 0) patch.scaleY = Math.round(st.verticalScale * 10000) / 100;
-  if (st.autoKerning === false) patch.autoKern = 'none';
-  if (Object.keys(patch).length) layer.content = applyChar(layer.content, 0, contentLength(layer.content), patch);
-  // 0.3's font.align has no justified values; the paragraph model does
-  const just = t.paragraphStyle?.justification ?? t.paragraphStyleRuns?.[0]?.style?.justification;
-  if (typeof just === 'string' && just.startsWith('justify-')) layer.content = applyPara(layer.content, 0, contentLength(layer.content), { align: just });
-  return layer;
-}
-
-/**
- * The rich-text attributes textToPsd writes (J.8), by model key, with the ag-psd field each becomes (checked against
- * the vendored ag-psd typings: TextStyle and ParagraphStyle). A uniform text layer whose other non-default attributes
- * do not change its look stays editable text in a PSD; anything else is written as pixels.
- */
-export const PSD_TEXT_KEYS = Object.freeze({
-  char: Object.freeze({
-    fontFamily: 'font.name', fontWeight: 'fauxBold', fontItalic: 'fauxItalic', size: 'fontSize', color: 'fillColor',
-    underline: 'underline', strike: 'strikethrough', leading: 'leading / autoLeading', tracking: 'tracking',
-    caps: 'fontCaps', baselineShift: 'baselineShift', scaleX: 'horizontalScale', scaleY: 'verticalScale',
-    autoKern: 'autoKerning', fauxBold: 'fauxBold', fauxItalic: 'fauxItalic',
-  }),
-  para: Object.freeze({ align: 'justification' }),
-});
-// attributes that do not change what a paragraph looks like (language: hyphenation and spelling; the composer and
-// breaker rules of 0.3 paragraphs)
-const LOOK_NEUTRAL_CHAR = new Set(['language', 'noBreak', 'fractionalWidths']);
-const LOOK_NEUTRAL_PARA = new Set(['composer', 'breakRules']);
-
-/** True when PSD text (as textToPsd writes it) can hold the layer's formatting (J.8). */
-export function psdExpressible(layer) {
-  const c = layer.content;
-  if (!c || !isUniform(c)) return false;
-  const ch = charStyleAt(c, 0);
-  const para = paragraphs(c)[0].style;
-  const { char, para: paraKeys } = nonDefaultKeys(c);
-  for (const k of char) {
-    if (LOOK_NEUTRAL_CHAR.has(k)) continue;
-    if (!(k in PSD_TEXT_KEYS.char)) return false;
-    if (k === 'autoKern' && ch.autoKern === 'optical') return false;
-  }
-  const justifies = para.align.startsWith('justify');
-  for (const k of paraKeys) {
-    if (LOOK_NEUTRAL_PARA.has(k) || k in PSD_TEXT_KEYS.para) continue;
-    if (k === 'hyphenation' && !para.hyphenate) continue;
-    // auto leading is written as the leading; word, letter and glyph spacing matter only to justified lines
-    if (k === 'justification' && !justifies) continue;
-    return false;
-  }
-  return true;
-}
-
-/** PSD text data for a Pigment text layer (placed on the first baseline like Photoshop). */
-function textToPsd(layer) {
-  const f = layer.font, ch = charStyleAt(layer.content, 0);
-  const para = paragraphs(layer.content)[0].style;
-  const lay = layer.layout();
-  // the first baseline from the layout (every engine puts it at y + 0.8 x the first line's largest size)
-  const baseline = lay.lines[0]?.baseline ?? layer.y + f.size * 0.8;
-  const ascent = baseline - layer.y;
-  const base = [1, 0, 0, 1, layer.x, baseline];
-  let transform = base;
-  if (layer.transform) {
-    const [a, b, c, d, e, g] = layer.transform;
-    transform = [a, b, c, d, a * base[4] + c * base[5] + e, b * base[4] + d * base[5] + g];
-  }
-  const style = {
-    font: { name: f.family },
-    fontSize: f.size,
-    fillColor: psdColor(f.color),
-    fauxBold: !!ch.fauxBold || (f.weight ?? 400) >= 600,
-    fauxItalic: !!ch.fauxItalic || !!f.italic,
-    underline: !!f.underline,
-    autoLeading: Math.abs((f.lineHeight ?? 1.2) - 1.2) < 1e-6,
-    leading: f.size * (f.lineHeight ?? 1.2),
-    tracking: f.size ? Math.round(((f.letterSpacing ?? 0) / f.size) * 1000) : 0,
-  };
-  // 0.4 attributes, written only when set so a 0.3 layer's text data stays what 0.3 wrote
-  if (ch.strike) style.strikethrough = true;
-  if (ch.caps !== 'normal') style.fontCaps = ch.caps === 'small' ? 1 : 2;
-  if (ch.baselineShift) style.baselineShift = ch.baselineShift;
-  if (ch.scaleX !== 100) style.horizontalScale = ch.scaleX / 100;
-  if (ch.scaleY !== 100) style.verticalScale = ch.scaleY / 100;
-  if (ch.autoKern === 'none') style.autoKerning = false;
-  const out = {
-    text: layer.text,
-    orientation: f.orientation === 'vertical' ? 'vertical' : 'horizontal',
-    transform,
-    shapeType: layer.width === null ? 'point' : 'box',
-    style,
-    paragraphStyle: { justification: ['left', 'right', 'center', 'justify-left', 'justify-right', 'justify-center', 'justify-all'].includes(para.align) ? para.align : 'left' },
-  };
-  if (layer.width !== null) {
-    const h = typeof layer.height === 'number' ? layer.height : Math.max(lay.height, lay.lineHeight);
-    out.boxBounds = [0, -ascent, layer.width, h - ascent];
-  }
-  return out;
-}
-
-// ---- adjustment layers <-> PSD -------------------------------------------------------------------------------
-const lv = (c) => (c ? { shadowInput: c.inBlack ?? 0, highlightInput: c.inWhite ?? 255, shadowOutput: c.outBlack ?? 0, highlightOutput: c.outWhite ?? 255, midtoneInput: c.gamma ?? 1 } : undefined);
-const lvBack = (c) => (c ? { inBlack: c.shadowInput ?? 0, inWhite: c.highlightInput ?? 255, gamma: c.midtoneInput ?? 1, outBlack: c.shadowOutput ?? 0, outWhite: c.highlightOutput ?? 255 } : null);
-// a drawn (pencil) curve channel ({ table }, adjust-tonal) is written as points sampled from its table
-const cv = (pts) => (pts?.table ? cv(pointsFromTable(pts, 19)) : Array.isArray(pts) ? pts.map(([input, output]) => ({ input, output })) : undefined);
-const cvBack = (pts) => (Array.isArray(pts) && pts.length ? pts.map((p) => [p.input, p.output]) : null);
-const hueCh = (p) => ({ a: 0, b: 0, c: 0, d: 0, hue: p?.hue ?? 0, saturation: p?.saturation ?? 0, lightness: p?.lightness ?? 0 });
-const ZERO_HUE = { a: 0, b: 0, c: 0, d: 0, hue: 0, saturation: 0, lightness: 0 };
-const cb = (v) => ({ cyanRed: v?.[0] ?? 0, magentaGreen: v?.[1] ?? 0, yellowBlue: v?.[2] ?? 0 });
-const cbBack = (v) => [v?.cyanRed ?? 0, v?.magentaGreen ?? 0, v?.yellowBlue ?? 0];
-const mix = (c) => ({ red: c?.r ?? 0, green: c?.g ?? 0, blue: c?.b ?? 0, constant: c?.constant ?? 0 });
-const mixBack = (c, def) => ({ r: c?.red ?? def.r, g: c?.green ?? def.g, b: c?.blue ?? def.b, constant: c?.constant ?? 0 });
-const cmyk = (v) => ({ c: v?.c ?? 0, m: v?.m ?? 0, y: v?.y ?? 0, k: v?.k ?? 0 });
-const SELECTIVE = ['reds', 'yellows', 'greens', 'cyans', 'blues', 'magentas', 'whites', 'neutrals', 'blacks'];
-
-// ag-psd writes each location times the smoothness ('Intr' = smoothness x 4096), but Photoshop reads locations out of
-// 4096 whatever the smoothness, and smoothness 0 would write every location as 0 (read back as 0 / 0). So the
-// smoothness is kept at 1 / 4096 or more and the locations are divided by it first: the file holds location x 4096
-// The Gradient Map's interpolation method in a grdm block (version 3): Photoshop's 4-character codes. The vendored
-// ag-psd reads and writes them as `methodCode` (scripts/vendor-entries/ag-psd-grdm.js); a block without one (version
-// 1: Photoshop before CC, older Pigment) is Classic. Photoshop's Stripes method has no code here: it is written
-// as Classic, the nearest
-const GRDM_CODES = Object.freeze({ classic: 'Gcls', perceptual: 'Perc', linear: 'Lnr ', smooth: 'Smoo' });
-const GRDM_METHODS = Object.freeze(Object.fromEntries(Object.entries(GRDM_CODES).map(([k, v]) => [v, k])));
-
-const psdGradientStops = (smoothness, colorStops, opacityStops) => {
-  const sm = Math.max(1, Math.round(Math.max(0, Math.min(1, smoothness ?? 1)) * 4096)) / 4096;
-  const scale = (s) => ({ ...s, location: s.location / sm });
-  return { smoothness: sm, colorStops: colorStops.map(scale), opacityStops: opacityStops.map(scale) };
-};
-
-/** PSD adjustment data for a Pigment adjustment layer, or null when the kind has no PSD equivalent. */
-export function adjustmentToPsd(kind, p = {}) {
-  switch (kind) {
-    case 'invert': return { type: 'invert' };
-    case 'brightness-contrast': return { type: 'brightness/contrast', brightness: p.brightness ?? 0, contrast: p.contrast ?? 0, useLegacy: !!p.legacy };
-    case 'levels': return { type: 'levels', rgb: lv(p.rgb ?? {}), red: lv(p.r), green: lv(p.g), blue: lv(p.b) };
-    case 'curves': return { type: 'curves', rgb: cv(p.rgb ?? [[0, 0], [255, 255]]), red: cv(p.r), green: cv(p.g), blue: cv(p.b) };
-    case 'exposure': return { type: 'exposure', exposure: p.exposure ?? 0, offset: p.offset ?? 0, gamma: p.gamma ?? 1 };
-    case 'vibrance': return { type: 'vibrance', vibrance: p.vibrance ?? 0, saturation: p.saturation ?? 0 };
-    case 'hue-saturation': {
-      // Master and the colour ranges (J.9): PSD keeps one record per range in Photoshop's order, its bounds a..d in
-      // degrees with its three values; an unused range is written with its default bounds and no change, as Photoshop
-      // does. (0.3's single `range` comes through hueSatRanges as that one range.)
-      const { master, ranges } = hueSatRanges(p);
-      const slot = (base) => {
-        const r = ranges.find((x) => x.base === base);
-        const [a, b, c, d] = (r?.bounds ?? DEFAULT_RANGE_BOUNDS[base]).map(Math.round);
-        return { a, b, c, d, hue: Math.round(r?.hue ?? 0), saturation: Math.round(r?.saturation ?? 0), lightness: Math.round(r?.lightness ?? 0) };
-      };
-      return { type: 'hue/saturation', master: hueCh({ hue: Math.round(master.hue), saturation: Math.round(master.saturation), lightness: Math.round(master.lightness) }), ...Object.fromEntries(HUE_BASES.map((b) => [b, slot(b)])) };
-    }
-    case 'color-balance': return { type: 'color balance', shadows: cb(p.shadows), midtones: cb(p.midtones), highlights: cb(p.highlights), preserveLuminosity: p.preserveLuminosity !== false };
-    case 'black-white': return { type: 'black & white', reds: p.reds ?? 40, yellows: p.yellows ?? 60, greens: p.greens ?? 40, cyans: p.cyans ?? 60, blues: p.blues ?? 20, magentas: p.magentas ?? 80, useTint: !!p.tint, tintColor: psdColor(p.tint || '#e6c8a0') };
-    case 'photo-filter': return { type: 'photo filter', color: psdColor(p.color ?? '#ec8a00'), density: p.density ?? 25, preserveLuminosity: p.preserveLuminosity !== false };
-    case 'channel-mixer': return { type: 'channel mixer', monochrome: !!p.monochrome, red: mix(p.r ?? { r: 100 }), green: mix(p.g ?? { g: 100 }), blue: mix(p.b ?? { b: 100 }), gray: mix(p.gray ?? { r: 40, g: 40, b: 20 }) };
-    case 'posterize': return { type: 'posterize', levels: p.levels ?? 4 };
-    case 'threshold': return { type: 'threshold', level: p.level ?? 128 };
-    case 'gradient-map': {
-      // a v2 def (G.1) is normalised: its colour stops with their midpoints and its opacity stops, and its method (as
-      // Photoshop's code, see GRDM_CODES). 0.3 stops are linear, which is Classic at smoothness 0
-      if (isGradientV2(p)) {
-        const g = normalizeGradient(p);
-        return { type: 'gradient map', name: 'Gradient', gradientType: 'solid', methodCode: GRDM_CODES[g.interpolation] ?? GRDM_CODES.classic, reverse: !!p.reverse, dither: !!p.dither, ...psdGradientStops(g.smoothness, g.stops.map((s) => ({ location: s.pos, midpoint: s.mid, color: psdColor(s.color) })), g.opacityStops.map((s) => ({ location: s.pos, midpoint: s.mid, opacity: s.opacity }))) };
-      }
-      const stops = (p.stops?.length ? p.stops : [{ offset: 0, color: '#000000' }, { offset: 1, color: '#ffffff' }]).map((s) => ({ location: s.offset ?? s.pos ?? 0, midpoint: 0.5, color: psdColor(s.color) }));
-      return { type: 'gradient map', name: 'Gradient', gradientType: 'solid', methodCode: GRDM_CODES.classic, reverse: !!p.reverse, dither: false, ...psdGradientStops(0, stops, [{ location: 0, midpoint: 0.5, opacity: 1 }, { location: 1, midpoint: 0.5, opacity: 1 }]) };
-    }
-    case 'selective-color': return { type: 'selective color', mode: p.relative === false ? 'absolute' : 'relative', ...Object.fromEntries(SELECTIVE.map((k) => [k, cmyk(p[k])])) };
-    default: return null;
-  }
-}
-
-/** { kind, params } for ag-psd adjustment data, or null when Pigment has no such adjustment. */
-export function adjustmentFromPsd(a) {
-  if (!a?.type) return null;
-  switch (a.type) {
-    case 'invert': return { kind: 'invert', params: {} };
-    case 'brightness/contrast': return { kind: 'brightness-contrast', params: { brightness: a.brightness ?? 0, contrast: a.contrast ?? 0, legacy: !!a.useLegacy } };
-    case 'levels': return { kind: 'levels', params: { perChannel: !!(a.red || a.green || a.blue), rgb: lvBack(a.rgb) ?? { inBlack: 0, inWhite: 255, gamma: 1, outBlack: 0, outWhite: 255 }, r: lvBack(a.red), g: lvBack(a.green), b: lvBack(a.blue) } };
-    case 'curves': return { kind: 'curves', params: { rgb: cvBack(a.rgb) ?? [[0, 0], [255, 255]], r: cvBack(a.red), g: cvBack(a.green), b: cvBack(a.blue) } };
-    case 'exposure': return { kind: 'exposure', params: { exposure: a.exposure ?? 0, offset: a.offset ?? 0, gamma: a.gamma ?? 1 } };
-    case 'vibrance': return { kind: 'vibrance', params: { vibrance: a.vibrance ?? 0, saturation: a.saturation ?? 0 } };
-    case 'hue/saturation': {
-      const m = a.master ?? a.channels?.[0] ?? {};
-      // the colour ranges that change something (J.9), with their bounds (all zero in files 0.3 wrote: the defaults)
-      const ranges = [];
-      for (const base of HUE_BASES) {
-        const c = a[base];
-        if (!c || (!c.hue && !c.saturation && !c.lightness)) continue;
-        const raw = [c.a, c.b, c.c, c.d];
-        const bounds = raw.every((v) => !v) ? null : normalizeBounds(raw);
-        ranges.push({ base, bounds: bounds ?? [...DEFAULT_RANGE_BOUNDS[base]], hue: c.hue ?? 0, saturation: c.saturation ?? 0, lightness: c.lightness ?? 0 });
-      }
-      return { kind: 'hue-saturation', params: { hue: m.hue ?? 0, saturation: m.saturation ?? 0, lightness: m.lightness ?? 0, colorize: false, colorizeHue: 0, colorizeSat: 25, colorizeLight: 0, range: 'master', ranges } };
-    }
-    case 'color balance': return { kind: 'color-balance', params: { shadows: cbBack(a.shadows), midtones: cbBack(a.midtones), highlights: cbBack(a.highlights), preserveLuminosity: a.preserveLuminosity !== false } };
-    case 'black & white': return { kind: 'black-white', params: { reds: a.reds ?? 40, yellows: a.yellows ?? 60, greens: a.greens ?? 40, cyans: a.cyans ?? 60, blues: a.blues ?? 20, magentas: a.magentas ?? 80, tint: a.useTint ? rgbFromPsd(a.tintColor, '#e6c8a0') : null } };
-    case 'photo filter': return { kind: 'photo-filter', params: { color: rgbFromPsd(a.color, '#ec8a00'), density: a.density ?? 25, preserveLuminosity: a.preserveLuminosity !== false } };
-    case 'channel mixer': return { kind: 'channel-mixer', params: { r: mixBack(a.red, { r: 100, g: 0, b: 0 }), g: mixBack(a.green, { r: 0, g: 100, b: 0 }), b: mixBack(a.blue, { r: 0, g: 0, b: 100 }), gray: mixBack(a.gray, { r: 40, g: 40, b: 20 }), monochrome: !!a.monochrome } };
-    case 'posterize': return { kind: 'posterize', params: { levels: a.levels ?? 4 } };
-    case 'threshold': return { kind: 'threshold', params: { level: a.level ?? 128 } };
-    case 'gradient map': {
-      // ag-psd divides the locations by the smoothness ('Intr', 0..4096), Photoshop stores them out of 4096: multiply it
-      // back. Smoothness 0 leaves nothing to multiply (0 / 0): the stops are then spread evenly
-      const sm = Number.isFinite(a.smoothness) ? Math.max(0, Math.min(1, a.smoothness)) : 1;
-      const loc = (list) => list.map((s, i) => (sm > 0 && Number.isFinite(s.location) ? Math.max(0, Math.min(1, s.location * sm)) : list.length > 1 ? i / (list.length - 1) : 0));
-      const colorStops = a.colorStops ?? [], opacityStops = a.opacityStops ?? [];
-      const cpos = loc(colorStops), opos = loc(opacityStops);
-      const mid = (s) => Math.max(0.05, Math.min(0.95, Number.isFinite(s.midpoint) ? s.midpoint : 0.5));
-      const smoothness = sm * 4096 <= 1 ? 0 : sm; // adjustmentToPsd writes smoothness 0 as 1 / 4096
-      // only the raw code is trusted (`method` of an ag-psd without the fix reads every code as Perceptual); none is Classic
-      const interpolation = GRDM_METHODS[a.methodCode] ?? 'classic';
-      const plain = interpolation === 'classic' && smoothness === 0 && colorStops.every((s, i) => i === 0 || mid(s) === 0.5) && opacityStops.every((s) => (s.opacity ?? 1) >= 1);
-      if (colorStops.length >= 2 && !plain) {
-        // midpoints, transparency, smoothness or another method: a v2 def (G.1) keeps them
-        return { kind: 'gradient-map', params: { gradientVersion: 2, type: 'solid', interpolation, smoothness, stops: colorStops.map((s, i) => ({ pos: cpos[i], mid: mid(s), color: rgbFromPsd(s.color) })), opacityStops: opacityStops.length ? opacityStops.map((s, i) => ({ pos: opos[i], mid: mid(s), opacity: Math.max(0, Math.min(1, s.opacity ?? 1)) })) : [{ pos: 0, mid: 0.5, opacity: 1 }, { pos: 1, mid: 0.5, opacity: 1 }], reverse: !!a.reverse, dither: !!a.dither } };
-      }
-      const stops = colorStops.map((s, i) => ({ offset: cpos[i], color: rgbFromPsd(s.color) }));
-      return { kind: 'gradient-map', params: { stops: stops.length >= 2 ? stops : [{ offset: 0, color: '#000000' }, { offset: 1, color: '#ffffff' }], reverse: !!a.reverse, dither: !!a.dither } };
-    }
-    case 'selective color': return { kind: 'selective-color', params: { ...Object.fromEntries(SELECTIVE.map((k) => [k, cmyk(a[k])])), relative: a.mode !== 'absolute' } };
-    default: return null;
-  }
-}
-
-/** Writes a document as PSD (raster pixels for every layer; groups, masks, opacity, blend, clipping kept). */
-export function writePsdDocument(doc, compositor) {
-  // alpha mask -> greyscale PSD mask. An enabled raster mask or an enabled vector mask is written as the effective
-  // mask (density, feather and a linked vector mask baked into one raster mask: J.8), so Photoshop shows what Pigment
-  // shows; a disabled raster mask without a vector mask is written as it is, disabled (0.3)
-  const maskOf = (layer) => {
-    const effective = layer.mask?.enabled || layer.vectorMask?.enabled ? maskCanvasFor(layer, doc, { purpose: 'bake', parts: 'all' }) : null; // mask (K.1)
-    if (!effective && !layer.mask?.canvas) return null;
-    const m = effective ?? layer.mask.canvas;
-    const ctx = m.getContext('2d', { willReadFrequently: true });
-    const img = ctx.getImageData(0, 0, m.width, m.height);
-    for (let i = 0; i < img.data.length; i += 4) {
-      const a = img.data[i + 3];
-      img.data[i] = img.data[i + 1] = img.data[i + 2] = a;
-      img.data[i + 3] = 255;
-    }
-    const g = createCanvas(m.width, m.height);
-    g.getContext('2d').putImageData(img, 0, 0);
-    return { left: 0, top: 0, canvas: g, defaultColor: 0, disabled: !effective };
-  };
-  // A PSD written here is always RGB. Duotone and Multichannel documents keep other pixels than they show (greys
-  // under the ink curves, the picture before spot channels were removed) and a Grayscale one may hold coloured
-  // fill, shape or text layers it shows grey, so each layer is written the way the mode shows it, as Image > Mode >
-  // RGB Color would convert it: the file opens looking like the document did.
-  // Layer by layer is not the same picture under an adjustment layer in a Grayscale document: Photo Filter, Color
-  // Balance or a Gradient Map put colour on the grey pixels below, which the mode shows grey again and an RGB file
-  // would show coloured. Then the layers are written as they are stored, and a monochrome Channel Mixer on top of
-  // them (the luma weights, to the percent) does what the mode does to the composite.
-  const adjusts = (group) => group.children.some((l) => l.visible && (l.type === 'adjustment' || (l.isGroup && adjusts(l))));
-  const greyOnTop = doc.mode === 'grayscale' && adjusts(doc.root);
-  const render = !greyOnTop && ['duotone', 'multichannel', 'grayscale'].includes(doc.mode) ? modeRendererFor(doc.mode) : null;
-  const inkedCache = new Map(); // source canvas -> the same pixels the way the mode shows them
-  const inked = (canvas, x, y) => {
-    if (!render || !canvas?.width || !canvas.height) return canvas;
-    if (!inkedCache.has(canvas)) {
-      const c = createCanvas(canvas.width, canvas.height);
-      c.getContext('2d').drawImage(canvas, 0, 0);
-      render(doc, c, { x, y, width: c.width, height: c.height }, {});
-      inkedCache.set(canvas, c);
-    }
-    return inkedCache.get(canvas);
-  };
-  // Duotone inks are a curve of the composite's grey, not of each layer's: inked one by one, a translucent layer over
-  // a different one (or an adjustment layer) blends or adjusts ink colours where the document inks the blended grey,
-  // up to 15 levels off. When the layers inked one by one do not composite to the picture, they are written as
-  // stored (grey) and a Gradient Map on top, one stop per grey level (the same luma), prints the composite through
-  // the inks.
-  const content = (group) => group.children.reduce((n, l) => n + (!l.visible || l.quickMask || l.preview || l.type === 'adjustment' ? 0 : l.isGroup ? content(l) : 1), 0);
-  const layerByLayerIsShown = () => {
-    const probe = new Compositor();
-    probe.layerSource = (layer) => {
-      const src = Compositor.prototype.layerSource.call(probe, layer);
-      return src && { ...src, canvas: inked(src.canvas, src.x, src.y) };
-    };
-    const read = (c) => c.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, doc.width, doc.height).data;
-    const a = read(probe.composite(doc, { rawMode: true })), b = read(flattenDocument(doc, compositor));
-    for (let i = 0; i < a.length; i++) if (Math.abs(a[i] - b[i]) > 2) return false;
-    return true;
-  };
-  const inksOnTop = doc.mode === 'duotone' && doc.duotone?.inks?.length > 0 && (adjusts(doc.root) || content(doc.root) > 1) && !layerByLayerIsShown();
-  const modeRender = inksOnTop ? null : render;
-  const inks = () => {
-    const lut = duotoneLut(doc.duotone);
-    const hex = (v) => `#${[0, 1, 2].map((c) => lut[v * 3 + c].toString(16).padStart(2, '0')).join('')}`;
-    return adjustmentToPsd('gradient-map', { stops: Array.from({ length: 256 }, (_, v) => ({ offset: v / 255, color: hex(v) })) });
-  };
-  // text stays editable only when its own colour is what the document displays: grey text in a Grayscale document
-  const textAsShown = (layer) => {
-    if (!modeRender) return true;
-    const [r, g, b] = parseColor(layer.font?.color ?? '#000000');
-    return doc.mode === 'grayscale' && r === g && g === b;
-  };
-  const shown = (canvas, x, y) => (modeRender ? inked(canvas, x, y) : canvas);
-  let pixelText = 0; // text layers written as pixels because PSD text cannot hold their formatting (J.8)
-  let otherSpace = 0; // Levels / Curves in a Gray, CMYK or Lab channel space: PSD gets their RGB channels only (J.8)
-  let styled = 0; // layers whose effects or advanced blending options (knockout, the channels, the check boxes) PSD does not get
-  const noPsd = new Map(); // adjustment name -> count: kinds PSD has no layer for (written as hidden placeholders)
-  let colorized = 0; // Hue/Saturation layers set to Colorize: PSD gets their Master and ranges only
-  const toPsd = (layer) => {
-    const lk = layer.locked ?? {};
-    // Blend If goes into the layer record's blending ranges; no effects or other advanced blending options (knockout,
-    // the channels, the check boxes) are written yet: the layer opens without them in Photoshop or Pigment
-    const blendIf = layer.blending ? blendIfToPsd(effectiveBlending(layer).blendIf) : null;
-    if (hasEnabledStyles(layer.styles) || !isDefaultBlending(layer.blending ? { ...layer.blending, blendIf: null } : null)) styled++;
-    const base = {
-      name: layer.name,
-      hidden: !layer.visible,
-      opacity: layer.opacity,
-      fillOpacity: layer.fillOpacity ?? 1,
-      blendMode: toPsdBlend(layer.blend === 'pass-through' && !layer.isGroup ? 'normal' : layer.blend),
-      clipping: layer.clip,
-      protected: { transparency: !!(lk.transparency || lk.all), composite: !!(lk.pixels || lk.all), position: !!(lk.position || lk.all) },
-      ...(blendIf ? { blendingRanges: blendIf } : {}),
-    };
-    if (layer.mask?.canvas || layer.vectorMask) {
-      const mask = maskOf(layer);
-      if (mask) base.mask = mask;
-    }
-    if (layer.isGroup) return { ...base, opened: layer.expanded, children: layer.children.map(toPsd) };
-    if (layer.type === 'adjustment') {
-      const adjustment = adjustmentToPsd(layer.kind, layer.params);
-      if ((layer.kind === 'levels' || layer.kind === 'curves') && layer.params?.space && layer.params.space !== 'rgb') otherSpace++;
-      if (layer.kind === 'hue-saturation' && layer.params?.colorize) colorized++;
-      if (!adjustment) {
-        const what = adjustmentDef(layer.kind)?.name ?? layer.kind;
-        noPsd.set(what, (noPsd.get(what) ?? 0) + 1);
-      }
-      if (adjustment) return { ...base, adjustment };
-      // no PSD equivalent: keep an empty hidden placeholder so the layer order survives
-      return { ...base, name: `${layer.name} (${layer.kind})`, hidden: true, left: 0, top: 0, canvas: createCanvas(1, 1) };
-    }
-    let canvas, x = 0, y = 0;
-    if (layer.type === 'raster') {
-      canvas = layer.canvas;
-      x = layer.x;
-      y = layer.y;
-    } else {
-      const r = layer.render();
-      canvas = r.canvas;
-      x = r.x;
-      y = r.y;
-    }
-    const out = { ...base, left: x, top: y, canvas: shown(canvas, x, y) };
-    // text on a path / stacked text (lib/text-path.js) has no PSD equivalent: it exports rasterised (and so does
-    // text shown through inks or made grey by the mode: its own colour is not what the document displays, and
-    // formatting PSD text cannot hold yet, J.8)
-    if (layer.type === 'text' && !textExtensionFor(layer) && textAsShown(layer)) {
-      if (psdExpressible(layer)) out.text = textToPsd(layer);
-      else pixelText++;
-    }
-    return out;
-  };
-  const psd = {
-    width: doc.width,
-    height: doc.height,
-    children: [
-      ...doc.root.children.filter((l) => !l.quickMask && !l.preview).map(toPsd),
-      ...(greyOnTop ? [{ name: 'Grayscale', opacity: 1, blendMode: 'normal', adjustment: adjustmentToPsd('channel-mixer', { monochrome: true, gray: { r: 30, g: 59, b: 11, constant: 0 } }) }] : []),
-      ...(inksOnTop ? [{ name: 'Duotone', opacity: 1, blendMode: 'normal', adjustment: inks() }] : []),
-    ],
-    canvas: flattenDocument(doc, compositor),
-    imageResources: { resolutionInfo: { horizontalResolution: doc.dpi, horizontalResolutionUnit: 'PPI', widthUnit: 'Inches', verticalResolution: doc.dpi, verticalResolutionUnit: 'PPI', heightUnit: 'Inches' } },
-  };
-  // guides are image resource 1032 (positions in 1/32 px, unsigned: a guide left of or above the canvas cannot be
-  // written). The ruler origin has no resource PSD files from Pigment write: it is reported below
-  const guides = (doc.guides ?? []).filter((g) => g.pos >= 0 && g.pos * 32 < 2 ** 32);
-  if (guides.length) psd.imageResources.gridAndGuidesInformation = { guides: guides.map((g) => ({ location: g.pos, direction: g.axis === 'y' ? 'horizontal' : 'vertical' })) };
-  const lostGuides = (doc.guides?.length ?? 0) - guides.length;
-  const origin = doc.store?.get?.('rulerOrigin');
-  const movedOrigin = !!origin && (origin.x !== 0 || origin.y !== 0);
-  const bytes = writePsdUint8Array(psd, { generateThumbnail: true, noBackground: true });
-  if (otherSpace) doc.view?.app?.dialogs?.toast(`${otherSpace} Levels or Curves layer${otherSpace === 1 ? '' : 's'} in a Gray, CMYK or Lab channel space ${otherSpace === 1 ? 'was' : 'were'} saved without ${otherSpace === 1 ? 'its' : 'their'} settings: PSD keeps RGB channels only`, { timeout: 4000 });
-  if (styled) doc.view?.app?.dialogs?.toast(`${styled} layer${styled === 1 ? '' : 's'} with layer effects or Blending Options ${styled === 1 ? 'was' : 'were'} saved without them: PSD files from Pigment do not keep effects yet`, { timeout: 4000 });
-  // what changes the picture or the document without a PSD equivalent is said, as for text and channel spaces (J.8)
-  if (noPsd.size) {
-    const n = [...noPsd.values()].reduce((a, b) => a + b, 0);
-    doc.view?.app?.dialogs?.toast(`${n} adjustment layer${n === 1 ? '' : 's'} (${[...noPsd.keys()].join(', ')}) ${n === 1 ? 'has' : 'have'} no PSD equivalent and ${n === 1 ? 'was' : 'were'} saved as ${n === 1 ? 'a hidden empty layer' : 'hidden empty layers'}, without ${n === 1 ? 'its' : 'their'} settings`, { timeout: 5000 });
-  }
-  if (colorized) doc.view?.app?.dialogs?.toast(`${colorized} Hue/Saturation layer${colorized === 1 ? '' : 's'} set to Colorize ${colorized === 1 ? 'was' : 'were'} saved without Colorize`, { timeout: 4000 });
-  if (lostGuides > 0 || movedOrigin) {
-    const parts = [lostGuides > 0 ? `${lostGuides} guide${lostGuides === 1 ? '' : 's'} outside the canvas` : '', movedOrigin ? 'the ruler origin' : ''].filter(Boolean);
-    doc.view?.app?.dialogs?.toast(`PSD does not keep ${parts.join(' or ')}: ${parts.length > 1 || lostGuides > 1 ? 'they were' : 'it was'} not saved`, { timeout: 4000 });
-  }
-  if (pixelText) doc.view?.app?.dialogs?.toast(`${pixelText} text layer${pixelText === 1 ? '' : 's'} with formatting PSD text cannot hold yet ${pixelText === 1 ? 'was' : 'were'} saved as pixels`, { timeout: 4000 });
-  return bytes;
-}
+// 0.5 (ARCHITECTURE.md "0.5 features", S4): the PSD code lives in lib/psd/ as registered mappers; importing
+// lib/psd/index.js registers the built-ins and every mapper file (also in Node). These re-exports keep 0.4's names
+// here (tests and callers import them from lib/io.js); the files that now hold them keep the exports (rule 2).
+export { readPsdDocument } from './psd/read.js';
+export { writePsdDocument } from './psd/write.js';
+export { adjustmentToPsd, adjustmentFromPsd } from './psd/adjustments.js';
+export { blendIfToPsd, blendIfFromPsd } from './psd/builtin.js';
+export { psdExpressible, PSD_TEXT_KEYS, cssFamilyFromPsFont } from './psd/text.js';
 
 // ---- export -------------------------------------------------------------------------------------------------
 
@@ -900,8 +356,10 @@ export function writePsdDocument(doc, compositor) {
 export async function exportImage(doc, opts = {}, compositor) {
   const format = opts.format ?? 'png';
   const info = SAVE_FORMATS[format] ?? SAVE_FORMATS.png;
+  // chunks (lib/io-chunks.js), S5: exactly once per file, after any encoder (the bytes as they are without a provider)
+  const chunked = (bytes) => applyChunks(doc, bytes, info.ext ?? format, { purpose: opts.purpose ?? 'export', opts });
   // formats added by registerExportFormat (GIF, PNG-8, 16-bit PNG, TIFF ...) bring their own encoder
-  if (info.encode) return info.encode(doc, { ...opts, format }, compositor);
+  if (info.encode) return chunked(await info.encode(doc, { ...opts, format }, compositor));
   let canvas = opts.canvas ?? flattenDocument(doc, compositor);
   const w = Math.max(1, Math.round(opts.width ?? canvas.width * (opts.scale ?? 1)));
   const h = Math.max(1, Math.round(opts.height ?? canvas.height * (opts.scale ?? 1)));
@@ -919,21 +377,23 @@ export async function exportImage(doc, opts = {}, compositor) {
     canvas = out;
   }
   const blob = await new Promise((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error(`This system cannot encode ${info.name}`))), info.mime, info.lossy ? opts.quality ?? 0.92 : undefined));
-  return new Uint8Array(await blob.arrayBuffer());
+  return chunked(new Uint8Array(await blob.arrayBuffer()));
 }
 
 /** Saves a document in the format implied by the path's extension. */
 export async function encodeForPath(doc, path, compositor, exportOpts = {}) {
   const ext = extOf(path);
+  // .pigment keeps the profile in its own entry (S6.2); every other file gets the chunk providers' 'save' chunks once
   if (ext === 'pigment') return writePigment(doc);
-  if (ext === 'psd') return writePsdDocument(doc, compositor);
+  const saved = (bytes, format) => applyChunks(doc, bytes, format, { purpose: 'save', opts: exportOpts });
+  if (ext === 'psd') return saved(writePsdDocument(doc, compositor, exportOpts), 'psd'); // Maximize Compatibility resolved there (S4.4)
   if (!canWritePath(path)) throw new Error(`Pigment cannot write .${ext || '?'} files. Save as .pigment, .psd, .png, .jpg or .webp instead.`);
   const registered = exportFormatForPath(path);
-  if (registered?.layered && registered.encode) return registered.encode(doc, { ...exportOpts, format: registered.id }, compositor);
+  if (registered?.layered && registered.encode) return saved(await registered.encode(doc, { ...exportOpts, format: registered.id }, compositor), registered.ext ?? ext);
   // an Indexed Color document saved to .png stays a palette PNG when the PNG-8 writer is registered (lib/modes/formats.js)
-  if (ext === 'png' && doc.mode === 'indexed' && SAVE_FORMATS.png8?.encode && !exportOpts.format) return exportImage(doc, { ...exportOpts, format: 'png8' }, compositor);
+  if (ext === 'png' && doc.mode === 'indexed' && SAVE_FORMATS.png8?.encode && !exportOpts.format) return exportImage(doc, { ...exportOpts, format: 'png8', purpose: 'save' }, compositor);
   const format = registered?.id ?? (ext === 'jpg' || ext === 'jpeg' ? 'jpeg' : ext === 'webp' ? 'webp' : 'png');
-  return exportImage(doc, { ...exportOpts, format }, compositor);
+  return exportImage(doc, { ...exportOpts, format, purpose: 'save' }, compositor);
 }
 
 /** True when saving to this path keeps all layers. */

@@ -247,16 +247,25 @@ test('a vector mask survives .pigment and exports to PSD baked into the layer ma
     const pl = psd.layers().find((x) => x.name === 'Red');
     const m = pl.mask;
     const alpha = (x, y) => m.canvas.getContext('2d').getImageData(x, y, 1, 1).data[3];
-    return { vm: l.vectorMask, density: l.mask.density, psdVector: pl.vectorMask, psdMask: { enabled: m.enabled, a: [alpha(20, 20), alpha(80, 20), alpha(20, 60)] } };
+    const { psdFeatures } = await import('/lib/psd/registry.js');
+    return { landed: !!psdFeatures().vectorMasks, vm: l.vectorMask, density: l.mask.density, psdVector: pl.vectorMask, psdDensity: m.density ?? 1, psdMask: { enabled: m.enabled, a: [alpha(20, 20), alpha(80, 20), alpha(20, 60)] } };
   });
   expect(r.vm).toMatchObject({ enabled: true, linked: true, initialFill: 'hide', density: 1, feather: 0 });
   expect(r.vm.path.subpaths[0].points[2]).toEqual({ x: 100, y: 40 });
   expect(r.density).toBe(0.5);
-  expect(r.psdVector).toBeNull();
   expect(r.psdMask.enabled).toBe(true);
-  expect(r.psdMask.a[0]).toBe(255); // left half, inside the path
-  expect(Math.abs(r.psdMask.a[1] - 128)).toBeLessThanOrEqual(2); // right half: density 50 %
-  expect(r.psdMask.a[2]).toBe(0); // below the path
+  if (!r.landed) {
+    // rule 11 (S14.2): 0.4's bake (J.8) while psd-layers has not landed vector masks
+    expect(r.psdVector).toBeNull();
+    expect(r.psdMask.a[0]).toBe(255); // left half, inside the path
+    expect(Math.abs(r.psdMask.a[1] - 128)).toBeLessThanOrEqual(2); // right half: density 50 %
+    expect(r.psdMask.a[2]).toBe(0); // below the path
+  } else {
+    // the path comes back as a vector mask and the raster mask at full strength with its density: nothing baked
+    expect(r.psdVector.path.subpaths[0].points[2]).toMatchObject({ x: 100, y: 40 });
+    expect(Math.abs(r.psdDensity - 0.5)).toBeLessThanOrEqual(0.01);
+    expect(r.psdMask.a).toEqual([255, 0, 255]);
+  }
   expect(expected[0]).toEqual([255, 0, 0, 255]);
   expect(near(expected[1], [255, 127, 127, 255], 2)).toBe(true);
   expect(expected[2]).toEqual([255, 255, 255, 255]);

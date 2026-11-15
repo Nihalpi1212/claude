@@ -278,6 +278,10 @@ function createBrowserBridge() {
     async getPrinters() {
       return [];
     },
+    /** The operating system's ICC profiles (S6.6): none in the browser build, unless a spec lists some. */
+    async listColorProfiles() {
+      return Array.isArray(test.colorProfiles) ? test.colorProfiles : [];
+    },
     writeClipboardText(text) {
       test.clipboardText = text;
       navigator.clipboard?.writeText(text).catch(() => {});

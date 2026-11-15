@@ -56,6 +56,8 @@ const api = {
   ai: (method, payload) => invoke('ai', method, payload),
   printToPDF: (opts) => invoke('printToPDF', opts),
   getPrinters: () => invoke('getPrinters'),
+  // the operating system's ICC profiles: [{ path, name }] (S6.6)
+  listColorProfiles: () => invoke('listColorProfiles'),
 
   writeClipboardText: (text) => send('writeClipboardText', text),
   writeClipboardImage: (dataUrl) => send('writeClipboardImage', dataUrl),

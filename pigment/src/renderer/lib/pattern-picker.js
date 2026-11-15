@@ -10,6 +10,7 @@
 //   deletePatterns, newPatternGroup, importPatterns, exportPatterns, resetPatterns
 import { PATTERN_KIND, PATTERN_MIME, patternThumbnail } from './patterns.js';
 import { presetFormats } from './presets.js';
+import { exportPresetsDialog } from './preset-formats.js';
 import { bridge } from './bridge.js';
 
 const PRESET_MIME = 'application/x-pigment-pattern-preset';
@@ -276,23 +277,14 @@ export async function importPatterns(app, path = null) {
   return { added };
 }
 
-/** Export…: the given patterns (all when ids is null) as a .pigment-presets file, their pixels inside. */
+/**
+ * Export…: the given patterns (all when ids is null), their pixels inside; the save dialog offers every format that
+ * writes patterns, .pigment-presets first (0.5, S10.3: a registered .pat must not become the silent default).
+ */
 export async function exportPatterns(app, ids = null, path = null) {
-  const fmt = presetFormats(PATTERN_KIND).find((f) => f.write) ?? null;
-  if (!fmt) return null;
-  const target = path ?? await bridge.saveFileDialog({ title: 'Export Patterns', defaultPath: `Patterns.${fmt.extensions[0]}`, filters: [{ name: fmt.name, extensions: fmt.extensions }] });
-  if (!target) return null;
-  try {
-    await app.patterns.ready();
-    const { bytes, ext } = await app.presets.exportFile(PATTERN_KIND, ids, fmt.id);
-    const file = new RegExp(`\\.${ext}$`, 'i').test(target) ? target : `${target}.${ext}`;
-    await bridge.writeFile(file, bytes);
-    app.dialogs.toast('Exported the patterns', { kind: 'success', timeout: 1800 });
-    return file;
-  } catch (err) {
-    app.reportError?.(err, 'Could not export the patterns');
-    return null;
-  }
+  await app.patterns.ready();
+  // preset files (lib/preset-formats.js)
+  return exportPresetsDialog(app, PATTERN_KIND, ids, { title: 'Export Patterns', path });
 }
 
 export async function resetPatterns(app) {

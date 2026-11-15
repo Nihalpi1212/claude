@@ -16,6 +16,14 @@
 // loadSystemFonts, STYLES, styleOf, styleToFont, textTargets, typeSession, applyTypeStyle; typeSession(app) is the
 // tool whose `session` is { layer, doc, isNew, textarea } (textarea: the editor's hidden input, its value the plain
 // text and its selection the editor's).
+//
+// 0.5 (ARCHITECTURE.md "0.5 features", S11.2–S11.5, skeleton): the family and style options are the option kinds
+// `font-family` / `font-style` (widgets of lib/type/font-library.js; type-fonts replaces them) and their values go
+// through the font catalog's styleKey / stylePatch, so a PostScript name and axes reach the runs (with the stub
+// catalog the runs, entries and labels are 0.4's); the options bar gains Anti-Alias (type:anti-alias, falling back to
+// 0.4's applyTypeOptions while the command is a stub), the orientation toggle (type:toggle-orientation) and Warp Text
+// (type:warp-text); new text takes the tool's anti-alias. new TypeTool(app, { id, name, icon, vertical, mask }) and
+// registerTypeTool / typeTools(app) let a subclass (the Type Mask tools) share the sessions and every listener below.
 import { Tool } from '../tools.js';
 import { TextLayer, measureContext, DEFAULT_TEXT_STYLE, applyLegacyFont } from '../document.js';
 import { structural, setLayerProps } from '../layer-ops.js';
@@ -185,49 +193,94 @@ const MOVE_SLOP = 3;
 
 // ---- the tools ----------------------------------------------------------------------------------------------
 
+/** S11.4: the seven anti-alias methods of the options bar and the Character panel (Photoshop's labels). */
+export const ANTI_ALIAS_OPTIONS = [['none', 'None'], ['sharp', 'Sharp'], ['crisp', 'Crisp'], ['strong', 'Strong'], ['smooth', 'Smooth'], ['lcd', 'Windows LCD'], ['windows', 'Windows']];
+
 function typeOptions() {
   return [
-    { kind: 'select', key: 'family', label: '', options: fontFamilies().map((f) => [f, f]), default: 'Arial' },
-    { kind: 'select', key: 'style', label: '', options: STYLES, default: '400' },
+    // S13.3: the orientation toggle (type-menu-commands' command; a stub until it lands)
+    { kind: 'button', key: 'orientationToggle', label: '', icon: 'text-vertical', title: 'Toggle text orientation', onClick: (t) => t.app.commands.run('type:toggle-orientation', undefined, 'toolbar') },
+    // S11.2: option kinds of lib/type/font-library.js (0.4's selects in the stub); values: family, styleKey
+    { kind: 'font-family', key: 'family', label: '', options: fontFamilies().map((f) => [f, f]), default: 'Arial' },
+    { kind: 'font-style', key: 'style', label: '', options: STYLES, default: '400' },
     // kind font-size (lib/fields.js; type-character-panel adds units and the preset list): today's px field
     { kind: 'font-size', key: 'size', label: 'Size', min: 1, max: 1296, step: 1, default: 48, unit: 'px' },
+    { kind: 'select', key: 'antiAlias', label: '', title: 'Anti-aliasing method', options: ANTI_ALIAS_OPTIONS, default: 'smooth' },
     { kind: 'segment', key: 'align', label: '', options: [['left', 'Left align text', 'align-left'], ['center', 'Center text', 'align-hcenter'], ['right', 'Right align text', 'align-right']], default: 'left' },
     { kind: 'color', key: 'color', label: '', default: '#000000' },
+    { kind: 'button', key: 'warpText', label: '', icon: 'warp', title: 'Create warped text', onClick: (t) => t.app.commands.run('type:warp-text', undefined, 'toolbar') },
     { kind: 'button', key: 'charPanel', label: '', icon: 'character', onClick: (t) => t.app.commands.run('type:toggle-panels', undefined, 'toolbar') },
   ];
 }
 
 const FONT_KEYS = { family: (v) => ({ family: v }), style: (v) => styleToFont(v), size: (v) => ({ size: Math.max(1, Number(v) || 1) }), align: (v) => ({ align: v }), color: (v) => ({ color: v }) };
+/** Option keys a tool shares with its sibling of the other orientation. */
+const SHARED_KEYS = new Set([...Object.keys(FONT_KEYS), 'antiAlias']);
+
+/**
+ * The CharStyle patch of a family and a style key through the font catalog (S11.2): { fontFamily, fontWeight,
+ * fontItalic, postScriptName, axes }.
+ */
+function catalogPatch(family, key) {
+  return typeApi.fontCatalog().stylePatch(family, key);
+}
+/** True when a catalog patch says more than 0.4's family / weight / italic font patch can (a real face, axes). */
+const beyondLegacy = (patch) => !!patch && (!!patch.postScriptName || Object.keys(patch.axes ?? {}).length > 0 || typeApi.fontCatalog().real === true);
+
+// S11.5: every type tool of an app (the two of this file and registered subclasses: the Type Mask tools)
+const TYPE_TOOLS = new WeakMap(); // app -> TypeTool[]
+/** Adds a TypeTool subclass instance to the tools typeSession, applyTypeStyle and the listeners of install() see. */
+export function registerTypeTool(tool) {
+  const list = TYPE_TOOLS.get(tool.app) ?? [];
+  if (!list.includes(tool)) list.push(tool);
+  TYPE_TOOLS.set(tool.app, list);
+  return tool;
+}
+/** The type tools of an app: Horizontal and Vertical Type first, then the registered subclasses. */
+export function typeTools(app) {
+  return (TYPE_TOOLS.get(app) ?? []).slice();
+}
 
 export class TypeTool extends Tool {
-  constructor(app, vertical = false) {
+  /**
+   * new TypeTool(app, { id, name, icon, vertical = false, mask = false }) (0.5, S11.5), or 0.4's new TypeTool(app,
+   * vertical).
+   */
+  constructor(app, opts = false) {
+    const o = opts && typeof opts === 'object' ? opts : { vertical: !!opts };
+    const vertical = !!o.vertical;
     super(app, {
-      id: vertical ? 'type-vertical' : 'type-horizontal',
-      name: vertical ? 'Vertical Type Tool' : 'Horizontal Type Tool',
-      icon: vertical ? 'text-vertical' : 'text',
-      cursor: vertical ? 'vertical-text' : 'text',
-      hint: 'Click to add point text, drag to make a paragraph box (Alt-click to type its size), click text to edit it. While editing: drag a box handle to resize, hold Ctrl/Cmd to transform or drag to move. Ctrl/Cmd+Enter or ✓ commits, Esc cancels.',
+      id: o.id ?? (vertical ? 'type-vertical' : 'type-horizontal'),
+      name: o.name ?? (vertical ? 'Vertical Type Tool' : 'Horizontal Type Tool'),
+      icon: o.icon ?? (vertical ? 'text-vertical' : 'text'),
+      cursor: o.cursor ?? (vertical ? 'vertical-text' : 'text'),
+      hint: o.hint ?? 'Click to add point text, drag to make a paragraph box (Alt-click to type its size), click text to edit it. While editing: drag a box handle to resize, hold Ctrl/Cmd to transform or drag to move. Ctrl/Cmd+Enter or ✓ commits, Esc cancels.',
       options: typeOptions(),
     });
     this.vertical = vertical;
+    this.mask = !!o.mask;
     this.session = null;
     this.drag = null;
     // tool traits (L.12): the type tools never paint; Ctrl/Cmd is theirs (transform box, move while editing)
     this.paints = false;
     this.claimsModifiers = new Set(['ctrl']);
   }
+  /** The type tool of the other orientation with the same `mask` (S11.5). */
   get sibling() {
-    return this.app.tools.get(this.vertical ? 'type-horizontal' : 'type-vertical');
+    return typeTools(this.app).find((t) => t !== this && t.vertical !== this.vertical && !!t.mask === !!this.mask) ?? (this.mask ? null : this.app.tools.get(this.vertical ? 'type-horizontal' : 'type-vertical'));
   }
 
   // ---- options ----
   fontFromOptions() {
     const o = (k, d) => this.opt(k) ?? d;
+    // S11.2: the style key goes through the catalog (0.4's weight and italic with the stub)
+    const st = catalogPatch(o('family', 'Arial'), o('style', '400'));
     return {
       ...DEFAULT_TEXT_STYLE,
       family: o('family', 'Arial'),
       size: Math.max(1, Number(o('size', 48))),
-      ...styleToFont(o('style', '400')),
+      weight: st.fontWeight,
+      italic: !!st.fontItalic,
       align: o('align', 'left'),
       color: this.app.settings.foreground ?? '#000000',
       lineHeight: Number(o('lineHeight', 1.2)) || 1.2,
@@ -253,11 +306,13 @@ export class TypeTool extends Tool {
       if (ed) {
         const [a] = ed.range();
         const st = M.charStyleAt(layer.content, a > 0 && ed.sel.anchor === ed.sel.focus ? a - 1 : a);
-        font = { family: st.fontFamily, weight: st.fontWeight, italic: st.fontItalic, size: st.size, color: st.color, align: M.paraAttrs(layer.content, a, a).align };
-      } else font = layer.font;
+        font = { family: st.fontFamily, weight: st.fontWeight, italic: st.fontItalic, size: st.size, color: st.color, align: M.paraAttrs(layer.content, a, a).align, char: st };
+      } else font = { ...layer.font, char: M.charStyleAt(layer.content, 0) };
     }
+    // S11.2: the style option is the catalog's styleKey of the character style (0.4's '700i' with the stub)
+    const styleKeyOf = (f) => typeApi.fontCatalog().styleKey({ ...f.char, fontFamily: f.family, fontWeight: f.weight, fontItalic: !!f.italic });
     const values = font
-      ? { family: font.family, style: styleOf(font), size: Math.round(font.size * 100) / 100, align: alignOf(font.align), color: hex6(font.color) }
+      ? { family: font.family, style: styleKeyOf(font), size: Math.round(font.size * 100) / 100, align: alignOf(font.align), color: hex6(font.color), antiAlias: layer.typeOptions?.antiAlias ?? 'smooth' }
       : { color: hex6(this.app.settings.foreground) };
     let rerender = false;
     for (const [k, v] of Object.entries(values)) {
@@ -273,9 +328,28 @@ export class TypeTool extends Tool {
   }
   onOptionChanged(key, value) {
     const sib = this.sibling;
-    if (sib && key in FONT_KEYS) this.app.tools.setOpt(sib.id, key, value, { silent: true });
+    if (sib && SHARED_KEYS.has(key)) this.app.tools.setOpt(sib.id, key, value, { silent: true });
+    if (key === 'antiAlias') {
+      // S11.4: one writer, type:anti-alias; while it is a stub, 0.4's applyTypeOptions (the Character panel's path)
+      if (this.session || textTargets(this.doc).length) {
+        if (this.app.commands.isEnabled('type:anti-alias')) this.app.commands.run('type:anti-alias', value, 'toolbar');
+        else targetApplyTypeOptions(this.app, { antiAlias: value }, { label: 'Anti-Aliasing' });
+      }
+      if (this.session) setTimeout(() => this.session?.editor.focus(), 0);
+      return;
+    }
     const make = FONT_KEYS[key];
     if (!make) return;
+    // S11.2: a family or style whose catalog patch says more than 0.4's font patch (a PostScript name, axes, or any
+    // patch of a real catalog) is applied as a char patch through type/target.js (one "Character" entry)
+    if ((key === 'family' || key === 'style') && (this.session || textTargets(this.doc).length)) {
+      const patch = catalogPatch(key === 'family' ? value : this.opt('family') ?? 'Arial', key === 'style' ? value : this.opt('style') ?? '400');
+      if (beyondLegacy(patch)) {
+        targetApplyChar(this.app, patch, { label: 'Character' });
+        if (this.session) setTimeout(() => this.session?.editor.focus(), 0);
+        return;
+      }
+    }
     if (this.session || textTargets(this.doc).length) this.applyFont(make(value), { merge: key === 'size' || key === 'color' });
     else if (key === 'color') this.app.setColors({ foreground: value });
     if (this.session) setTimeout(() => this.session?.editor.focus(), 0);
@@ -795,6 +869,15 @@ export class TypeTool extends Tool {
     const r2 = (n) => Math.round(n * 100) / 100;
     const text = path ? this.placeholderFor(false) : this.placeholderFor(!!box);
     const layer = new TextLayer({ x: r2(x), y: r2(y), width: width === null ? null : r2(width), text, font, transform, pathText });
+    // S11.2: new text is built from the catalog's CharStyle patch (a PostScript name and axes beyond 0.4's font), and
+    // S11.4: takes the tool's anti-alias
+    const patch = catalogPatch(this.opt('family') ?? 'Arial', this.opt('style') ?? '400');
+    const extra = {};
+    if (patch.postScriptName) extra.postScriptName = patch.postScriptName;
+    if (Object.keys(patch.axes ?? {}).length) extra.axes = { ...patch.axes };
+    if (Object.keys(extra).length) layer.content = M.mapChar(layer.content, (style) => ({ ...style, ...extra }));
+    const antiAlias = this.opt('antiAlias') ?? 'smooth';
+    if (antiAlias !== (layer.typeOptions?.antiAlias ?? 'smooth')) layer.typeOptions = M.normalizeTypeOptions({ ...layer.typeOptions, antiAlias });
     if (height !== null) layer.height = r2(height);
     if (text) layer.name = autoName(text);
     structural(this.app, this.name, () => {
@@ -848,6 +931,7 @@ export class TypeTool extends Tool {
   }
   openEditor() {
     const s = this.session;
+    typeApi.setEditing(s.layer, true); // S11.3: 'bypass' render stages are skipped while the layer is edited
     s.editor.open();
     this.syncFromLayer(s.layer);
     if (this.app.tools.active === this) this.app.tools.renderOptions();
@@ -861,6 +945,7 @@ export class TypeTool extends Tool {
     this.session = null;
     this.gesture = null;
     s.editor.close();
+    typeApi.setEditing(s.layer, false);
     s.doc.view?.invalidate();
     if (this.app.tools.active === this) this.app.tools.renderOptions();
     this.app.emit('type:session', { layer: null });
@@ -1039,10 +1124,9 @@ function alignOf(a) {
 
 /** The type tool with an open editing session, if any. */
 export function typeSession(app) {
-  for (const id of ['type-horizontal', 'type-vertical']) {
-    const t = app.tools?.get(id);
-    if (t?.session) return t;
-  }
+  // S11.5: every type tool, a registered subclass's session included
+  const list = typeTools(app);
+  for (const t of list.length ? list : ['type-horizontal', 'type-vertical'].map((id) => app.tools?.get(id))) if (t?.session) return t;
   return null;
 }
 
@@ -1090,11 +1174,17 @@ export function applyTypeStyle(app, patch, opts = {}) {
 }
 
 export function install(app) {
-  const h = new TypeTool(app, false);
-  const v = new TypeTool(app, true);
+  const h = registerTypeTool(new TypeTool(app, false));
+  const v = registerTypeTool(new TypeTool(app, true));
   app.tools.register(h, 'text');
   app.tools.register(v, 'text');
-  const tools = [h, v];
+  // S11.5: the listeners below iterate every type tool, so a registered subclass's session is committed, laid out and
+  // closed like these two (lib/type/editor.js finds the editing tool through app.typeTools too)
+  const tools = {
+    includes: (t) => typeTools(app).includes(t),
+    [Symbol.iterator]: () => typeTools(app)[Symbol.iterator](),
+  };
+  app.typeTools = () => typeTools(app);
 
   // the options bar's panel button: the Character panel, and the Paragraph panel once a package registers it (M.6)
   app.commands.register('type:toggle-panels', {

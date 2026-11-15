@@ -214,13 +214,22 @@ test('Search: Ctrl+F finds a command by its menu path and runs it; the recorder 
   expect(await page.evaluate(() => window.pigmentApp.doc.history.entries[window.pigmentApp.doc.history.index].label)).toMatch(/Invert/);
   await expect.poll(() => page.evaluate(() => window.pigmentApp.actions.recording.action.steps.map((s) => s.command))).toEqual(['image:adjust-invert']);
   await page.evaluate(() => window.pigmentApp.actions.stopRecording());
-  // a command that is not available closes the palette and says so
+  // a command that is not available closes the palette and says so: Color Settings is a stub until 0.6 (0.5 S14.2:
+  // edit:menus became shortcuts-editor's, real once that package lands)
   await page.keyboard.press('Control+f');
-  await page.keyboard.type('menus');
-  await expect(dialog.locator('.command-search-row').first()).toHaveAttribute('data-command', 'edit:menus');
+  await page.keyboard.type('color settings');
+  await expect(dialog.locator('.command-search-row').first()).toHaveAttribute('data-command', 'edit:color-settings');
   await expect(dialog.locator('.command-search-row').first()).toHaveClass(/disabled/);
   await page.keyboard.press('Enter');
   await expect(page.locator('.toast', { hasText: 'is not available now' })).toBeVisible();
+  if (await page.evaluate(() => window.pigmentApp.stubbed.includes('edit:menus'))) {
+    await page.keyboard.press('Control+f');
+    await page.keyboard.type('menus');
+    await expect(dialog.locator('.command-search-row').first()).toHaveAttribute('data-command', 'edit:menus');
+    await expect(dialog.locator('.command-search-row').first()).toHaveClass(/disabled/);
+    await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
+  }
   expect(errors).toEqual([]);
 });
 

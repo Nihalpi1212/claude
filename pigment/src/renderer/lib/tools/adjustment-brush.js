@@ -47,7 +47,7 @@ export class AdjustmentBrushTool extends StrokeTool {
     return { layer: null, kind };
   }
 
-  onPointerDown(p) {
+  strokeDown(p) {
     const d = this.doc;
     if (!d) return;
     const subtract = this.opt('mode') === 'subtract' || !!p.alt;
@@ -80,8 +80,8 @@ export class AdjustmentBrushTool extends StrokeTool {
     this.stroke.begin(p);
   }
 
-  onPointerUp(p) {
-    super.onPointerUp(p);
+  strokeUp(p) {
+    super.strokeUp(p);
     const c = this.created;
     this.created = null;
     if (!c) return;

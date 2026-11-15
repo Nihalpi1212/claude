@@ -1,5 +1,10 @@
 // Filter menu: one dialog per filter (live preview on the canvas, limited to the selection),
 // Filter › Last Filter (Ctrl+F) and the filter:<kind> command ids.
+//
+// 0.5 (ARCHITECTURE.md "0.5 features", S12.4, skeleton): a command that is not a filter kind (Camera Raw, Liquify)
+// becomes the last filter through app.filterEditor.rememberCommand(id, name, params); Last Filter then runs it with
+// its params from source 'repeat' (the command applies them without UI) and records one step, that command with its
+// params; Last Filter Dialog (Alt+Ctrl+F) runs it from source 'api' (the command opens its dialog prefilled).
 import { FILTERS, FILTER_KINDS, FILTER_CATEGORIES, applyFilter } from '../../shared/pixels/filters.js';
 import { buildForm } from './form.js';
 import { beginPixelEdit, processed, pixelEditDialog, getPath, setPath } from './adjust-ui.js';
@@ -203,12 +208,35 @@ export function install(app) {
     app.menuRefresh?.();
   }
 
+  /** S12.4: Last Filter repeats a command (settings.lastFilter = { command, name, params }); "Last Filter: <name>". */
+  function rememberCommand(command, name, params) {
+    if (typeof command !== 'string' || !command) return;
+    app.settings.lastFilter = { command, name: String(name ?? command), params: clone(params ?? null) ?? null };
+    app.saveSettingsSoon();
+    app.syncUiState();
+    app.commands.invalidate();
+    app.menuRefresh?.();
+  }
+  /** The remembered entry: { kind } for a filter (0.4), { command } for a command, or null. */
+  const lastEntry = () => {
+    const l = app.settings.lastFilter;
+    return l?.kind && FILTERS[l.kind] ? l : typeof l?.command === 'string' && app.commands.has(l.command) ? l : null;
+  };
+
   const cmds = {
     'filter:apply': { enabled: has, run: (arg, ctx) => (typeof arg === 'string' ? run(arg, undefined, { ctx }) : arg?.kind ? run(arg.kind, arg.params ?? null, { ctx }) : null), dialog: true },
     'filter:last': {
-      enabled: () => has() && !!app.settings.lastFilter?.kind,
+      enabled: () => has() && !!lastEntry() && (!lastEntry().command || app.commands.isEnabled(lastEntry().command)),
       label: () => (app.settings.lastFilter?.name ? `Last Filter: ${app.settings.lastFilter.name}` : 'Last Filter'),
       run: (arg, ctx) => {
+        // S12.4: a remembered command runs inside this run (so an action records one step: that command with its
+        // params) from source 'repeat', which applies the params without UI
+        const cmd = arg && typeof arg === 'object' && typeof arg.command === 'string' ? arg : !(arg && typeof arg === 'object' && FILTERS[arg.kind]) ? lastEntry() : null;
+        if (cmd?.command) {
+          const params = clone(cmd.params ?? null) ?? undefined;
+          ctx?.setReplayCommand(cmd.command, clone(params));
+          return app.commands.run(cmd.command, params, 'repeat');
+        }
         // A step recorded from Last Filter carries the filter it ran ({ kind, params }): lib/actions.js records
         // that as the filter's own command, and a replay never depends on whichever filter was used most recently.
         const l = arg && typeof arg === 'object' && FILTERS[arg.kind] ? arg : app.settings.lastFilter;
@@ -222,9 +250,19 @@ export function install(app) {
       },
     },
     'filter:last-dialog': {
-      enabled: () => has() && !!app.settings.lastFilter?.kind,
+      enabled: () => has() && !!lastEntry() && (!lastEntry().command || app.commands.isEnabled(lastEntry().command)),
       run: (_arg, ctx) => {
-        const l = app.settings.lastFilter;
+        const l = lastEntry();
+        if (l?.command) {
+          // S12.4 / review decision 9: source 'api' (not a $dialog key in the params): the command opens its dialog
+          // prefilled; what it resolves with (its final params) is the step an action records
+          const result = app.commands.run(l.command, clone(l.params ?? null) ?? undefined, 'api');
+          return Promise.resolve(result).then((used) => {
+            if (used && typeof used === 'object') ctx?.setReplayCommand(l.command, clone(used));
+            else if (!used) ctx?.cancel();
+            return used;
+          });
+        }
         return l?.kind ? run(l.kind, undefined, { ctx }) : undefined;
       },
       dialog: true,
@@ -251,6 +289,8 @@ export function install(app) {
     /** Runs a kind directly with params (what the custom openers call after their own session committed is not needed: they commit themselves). */
     run: (kind, params, opts) => run(kind, params, opts),
     remember,
+    /** S12.4: makes a command the last filter (Camera Raw, Liquify): Last Filter repeats it with these params. */
+    rememberCommand,
     marginFor,
   };
 }

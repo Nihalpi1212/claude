@@ -3,12 +3,14 @@
 // points placed with the Color Sampler tool (doc.samplers).
 import { layerContentBounds } from './properties.js';
 import { sampleMerged } from '../sample.js';
-import { rgbaToHex, rgbToCmyk, rgbToLab, rgbToHsv } from '../../../shared/pixels/color.js';
+import { rgbaToHex, rgbToCmyk, rgbToHsv } from '../../../shared/pixels/color.js';
+import { toLab, describe as describeProfile } from '../color/pipeline.js';
 
 // the secondary readout (settings.infoSecondary): label -> rows of [key, text]
 const SECONDARY = {
   cmyk: { label: 'CMYK', rows: ([r, g, b]) => rgbToCmyk(r, g, b).map((v, i) => ['CMYK'[i], `${Math.round(v)}%`]) },
-  lab: { label: 'Lab', rows: ([r, g, b]) => rgbToLab(r, g, b).map((v, i) => ['Lab'[i], String(Math.round(v))]) },
+  // color (lib/color/pipeline.js): Lab of the document's numbers in its profile (0.4's sRGB maths without an engine)
+  lab: { label: 'Lab', rows: ([r, g, b], doc) => toLab([r, g, b], doc?.profile ?? null).map((v, i) => ['Lab'[i], String(Math.round(v))]) },
   hsb: { label: 'HSB', rows: ([r, g, b]) => rgbToHsv(r, g, b).map((v, i) => (i ? [i === 1 ? 'S' : 'B', `${Math.round(v * 100)}%`] : ['H', `${Math.round(v)}°`])) },
 };
 
@@ -48,6 +50,7 @@ export function install(app) {
         <span class="k">Selection</span><span data-k="sel">—</span>
         <span class="k">Layer</span><span data-k="layer">—</span>
         <span class="k">Bounds</span><span data-k="bounds">—</span>
+        <span class="k" data-k="profile-label" hidden>Profile</span><span data-k="profile" hidden></span>
       </div>
     </div>
     <div class="info-block info-samplers" hidden>
@@ -116,7 +119,7 @@ export function install(app) {
     const sw = $('swatch');
     const sec = SECONDARY[secondary()];
     if (mode.value !== secondary()) mode.value = secondary();
-    $('alt').replaceChildren(...sec.rows(rgba ?? [0, 0, 0]).flatMap(([k, v]) => {
+    $('alt').replaceChildren(...sec.rows(rgba ?? [0, 0, 0], doc).flatMap(([k, v]) => {
       const key = document.createElement('span');
       key.className = 'k';
       key.textContent = k;
@@ -147,6 +150,10 @@ export function install(app) {
   function renderDoc() {
     docTimer = 0;
     const doc = app.doc;
+    // color (lib/color/pipeline.js), S6.6: the document profile row, absent while describe() is '' (no engine)
+    const profile = doc ? describeProfile(doc) : '';
+    $('profile').textContent = profile;
+    $('profile').hidden = $('profile-label').hidden = !profile;
     if (!doc) {
       for (const k of ['doc', 'sel', 'layer', 'bounds']) $(k).textContent = '—';
       samplersBox.hidden = true;
@@ -216,6 +223,7 @@ export function install(app) {
     if (e.doc !== app.doc) return;
     scheduleDoc(e.kind === 'pixels' || e.kind === 'mask' ? 300 : 120);
   });
+  app.on('color:display-changed', () => scheduleDoc(0)); // color (lib/color/pipeline.js): the profile row
 
   app.panels.register({ id: 'info', title: 'Info', icon: 'info', element: el, group: 'bottom', onShow: () => renderDoc() });
   renderDoc();

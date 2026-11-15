@@ -3,12 +3,15 @@
 // to the active painting tool (or the last one used). Also provides app.brushPicker.show(anchor, tool),
 // the popover behind the options bar's brush button.
 //
-// Where the values live: size, hardness, flow, opacity are tool options (app.tools.setOpt); spacing is
-// settings.brush.spacing (what StrokeTool.baseSettings reads); angle and roundness are stored as tool
-// options too and fed to the brush engine by the small hook below (paint.js does not pass them yet).
+// brush-settings-panel's file (ARCHITECTURE.md "0.5 features"); the skeleton landed first: the tool's brush is
+// lib/brush/tool-brush.js (S1.3): size, hardness, angle, roundness and the per-tool flat spacing are tool settings,
+// a pick goes through setToolBrush (so the tool remembers which preset it came from), and the stroke preview is the
+// engine's renderStrokePreview (S2.6). 0.4's angle/roundness hook on StrokeTool is gone: baseSettings passes them.
 import { icon } from '../icons.js';
-import { dabCanvas } from '../brush.js';
+import { dabCanvas, dabDrawSide, renderStrokePreview } from '../brush.js';
 import { StrokeTool } from '../tools/paint.js';
+import { toolBrush, setToolBrush } from '../brush/tool-brush.js';
+import { brushFromLegacy } from '../brush/preset.js';
 
 export const BUILTIN_BRUSHES = [
   { id: 'hard-3', name: 'Hard Round 3', size: 3, hardness: 1 },
@@ -32,25 +35,6 @@ export const BUILTIN_BRUSHES = [
 const TIP_KEYS = ['size', 'hardness', 'spacing', 'angle', 'roundness', 'flow'];
 const DEFAULTS = { hardness: 0.8, spacing: 0.12, angle: 0, roundness: 1, flow: 1, opacity: 1 };
 
-// ---- engine hook: pass angle/roundness tool options to BrushStroke (only when paint.js does not) -----------
-function installTipHook() {
-  const proto = StrokeTool.prototype;
-  if (proto.__pigmentTipHook) return;
-  const base = proto.baseSettings;
-  proto.baseSettings = function baseSettingsWithTip(...args) {
-    const s = base.apply(this, args);
-    if (s && typeof s === 'object') {
-      if (s.angle === undefined) s.angle = Number(this.opt('angle')) || 0;
-      if (s.roundness === undefined) {
-        const r = Number(this.opt('roundness'));
-        s.roundness = Number.isFinite(r) && r > 0 ? Math.min(1, r) : 1;
-      }
-    }
-    return s;
-  };
-  proto.__pigmentTipHook = true;
-}
-
 // ---- drawing helpers ----------------------------------------------------------------------------------------
 function themeInk() {
   return getComputedStyle(document.documentElement).getPropertyValue('--fg').trim() || '#202020';
@@ -58,11 +42,13 @@ function themeInk() {
 
 function drawTip(ctx, cx, cy, { size, hardness, angle = 0, roundness = 1 }, color) {
   const dab = dabCanvas(Math.max(1, size), hardness, color);
+  // dabCanvas may return a larger canvas above 128 px (S2.8): draw it at the size asked
+  const side = dabDrawSide(Math.max(1, size));
   ctx.save();
   ctx.translate(cx, cy);
   ctx.rotate((angle * Math.PI) / 180);
   ctx.scale(1, Math.max(0.05, Math.min(1, roundness)));
-  ctx.drawImage(dab, -dab.width / 2, -dab.height / 2);
+  ctx.drawImage(dab, -side / 2, -side / 2, side, side);
   ctx.restore();
 }
 
@@ -79,45 +65,20 @@ function tipThumb(preset, px = 40) {
   return c;
 }
 
-/** Sample stroke (an S curve) painted like the engine: dabs into a buffer at flow, shown at opacity. */
-function drawStroke(canvas, s) {
+/** Sample stroke (an S curve) painted by the engine itself (renderStrokePreview), at flow, shown at opacity. */
+function drawStroke(canvas, s, app = null) {
   const dpr = window.devicePixelRatio || 1;
-  const w = Math.max(10, Math.round((canvas.clientWidth || 260) * dpr));
+  const cssW = Math.max(10, canvas.clientWidth || 260);
+  const w = Math.max(10, Math.round(cssW * dpr));
   const h = Math.round(64 * dpr);
   if (canvas.width !== w) canvas.width = w;
   if (canvas.height !== h) canvas.height = h;
   const ctx = canvas.getContext('2d');
   ctx.clearRect(0, 0, w, h);
-  const size = Math.max(1, Math.min(s.size, 44) * dpr);
-  const buf = document.createElement('canvas');
-  buf.width = w;
-  buf.height = h;
-  const b = buf.getContext('2d');
-  const ink = themeInk();
-  const pad = size / 2 + 4 * dpr;
-  const amp = Math.max(0, h / 2 - pad);
-  const pts = [];
-  for (let i = 0; i <= 120; i++) {
-    const t = i / 120;
-    pts.push([pad + t * (w - pad * 2), h / 2 - Math.sin(t * Math.PI * 2) * amp * 0.8]);
-  }
-  const step = Math.max(0.5 * dpr, size * (s.spacing ?? 0.12));
-  let carry = 0;
-  b.globalAlpha = Math.max(0.01, s.flow ?? 1);
-  drawTip(b, pts[0][0], pts[0][1], { ...s, size }, ink);
-  for (let i = 1; i < pts.length; i++) {
-    const [x0, y0] = pts[i - 1], [x1, y1] = pts[i];
-    const d = Math.hypot(x1 - x0, y1 - y0);
-    let t = step - carry;
-    while (t <= d) {
-      drawTip(b, x0 + ((x1 - x0) * t) / d, y0 + ((y1 - y0) * t) / d, { ...s, size }, ink);
-      t += step;
-    }
-    carry = d - (t - step);
-  }
-  ctx.globalAlpha = Math.max(0.01, s.opacity ?? 1);
-  ctx.drawImage(buf, 0, 0);
-  ctx.globalAlpha = 1;
+  const preset = brushFromLegacy({ size: Math.max(1, Math.min(s.size, 44)), hardness: s.hardness, spacing: s.spacing ?? 0.12, angle: s.angle ?? 0, roundness: s.roundness ?? 1 });
+  // app: the stroke context's app and patterns (a Texture modifier resolves its pattern through ctx.patterns)
+  const stroke = renderStrokePreview(preset, { flow: Math.max(0.01, s.flow ?? 1), opacity: Math.max(0.01, s.opacity ?? 1), app }, { width: w / dpr, height: 64, scale: dpr, color: themeInk() });
+  ctx.drawImage(stroke, 0, 0);
 }
 
 // ---- values -------------------------------------------------------------------------------------------------
@@ -140,15 +101,15 @@ function makeModel(app) {
   };
   const get = (tool, key) => {
     if (!tool) return DEFAULTS[key];
-    if (key === 'spacing') return app.settings.brush?.spacing ?? DEFAULTS.spacing;
+    if (key === 'spacing') return toolBrush(app, tool.id).preset.tip.spacing; // brush (lib/brush/tool-brush.js)
     const v = tool.opt(key);
     return v === undefined || v === null ? DEFAULTS[key] ?? 0 : Number(v);
   };
   const set = (tool, key, value) => {
     if (!tool || !supports(tool, key)) return;
     if (key === 'spacing') {
-      app.saveSettingsSoon({ brush: { ...(app.settings.brush ?? {}), spacing: value } });
-      app.emit('tool:options', { tool: tool.id, key, value });
+      // brush (lib/brush/tool-brush.js): the tool's own flat spacing (0.4: one settings.brush.spacing for every tool)
+      app.tools.setOpt(tool.id, 'spacing', Math.max(0.01, Math.min(10, value)));
       return;
     }
     const spec = tool.options.find((o) => o.key === key);
@@ -162,12 +123,9 @@ function makeModel(app) {
   const current = (tool = target()) => Object.fromEntries([...TIP_KEYS, 'opacity'].map((k) => [k, get(tool, k)]));
   const applyPreset = (preset, tool = target()) => {
     if (!tool) return;
-    set(tool, 'size', preset.size);
-    set(tool, 'hardness', preset.hardness ?? DEFAULTS.hardness);
-    set(tool, 'flow', preset.flow ?? 1);
-    set(tool, 'spacing', preset.spacing ?? DEFAULTS.spacing);
-    set(tool, 'angle', preset.angle ?? 0);
-    set(tool, 'roundness', preset.roundness ?? 1);
+    // brush (lib/brush/tool-brush.js): one write of the tool's brush, its flat keys and the preset id (S1.3); a
+    // 0.4 preset's flow is its tool flow
+    setToolBrush(app, tool.id, brushFromLegacy(preset), { presetId: preset.id ?? null });
     app.emit('brush:preset', { tool: tool.id, preset });
   };
   const matches = (preset, tool = target()) => {
@@ -230,7 +188,6 @@ function sliderRow(spec, onValue) {
 }
 
 export function install(app) {
-  installTipHook();
   const model = makeModel(app);
   const userPresets = () => (Array.isArray(app.settings.brushPresets) ? app.settings.brushPresets.filter((p) => p && Number.isFinite(p.size)) : []);
   const allPresets = () => [...BUILTIN_BRUSHES, ...userPresets().map((p) => ({ ...p, user: true }))];
@@ -327,7 +284,7 @@ export function install(app) {
       roundness: model.supports(tool, 'roundness') ? values.roundness : 1,
       flow: model.supports(tool, 'flow') ? values.flow : 1,
       opacity: model.supports(tool, 'opacity') ? values.opacity : 1,
-    });
+    }, app);
     markActive();
   }
   let pending = 0;

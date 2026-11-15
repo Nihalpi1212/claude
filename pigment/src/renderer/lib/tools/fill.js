@@ -338,7 +338,7 @@ export class GradientTool extends Tool {
     if (hit?.type !== 'stop') return;
     const g = layer.paint.gradient;
     const stop = g.stops[hit.index];
-    const hex = await this.app.pickColor?.(typeof stop.color === 'string' ? stop.color : '#000000', { title: 'Color Picker (Stop Color)' });
+    const hex = await this.app.pickColor?.(typeof stop.color === 'string' ? stop.color : '#000000', { title: 'Color Picker (Stop Color)', target: 'stop' });
     if (!hex || layer.paint.gradient !== g) return;
     const stops = g.stops.map((s, i) => (i === hit.index ? { ...s, color: rgbaToHex(parseColor(hex)) } : s));
     setLayerProps(this.app, layer, { paint: { ...layer.paint, gradient: { ...g, stops } } }, 'Edit gradient');

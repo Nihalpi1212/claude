@@ -88,7 +88,11 @@ test('the shape tools draw live shapes: Triangle, polygon star options, line arr
     window.pigmentApp.tools.activate('shape-custom');
   });
   await drag(page, [260, 180], [340, 260]);
-  expect(await props(page)).toEqual({ kind: 'custom', props: { x: 260, y: 180, width: 80, height: 80, angle: 0, shape: 'plus' } });
+  // 0.5 (S10.5): presets-panels gives a new custom shape its own outline in shapeProps.unit (absent before it lands)
+  const custom = await props(page);
+  if (custom.props.unit) expect(custom.props.unit.subpaths.length).toBeGreaterThan(0);
+  delete custom.props.unit;
+  expect(custom).toEqual({ kind: 'custom', props: { x: 260, y: 180, width: 80, height: 80, angle: 0, shape: 'plus' } });
   expect(errors).toEqual([]);
 });
 

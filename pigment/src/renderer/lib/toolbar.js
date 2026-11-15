@@ -50,8 +50,13 @@ export class Toolbar {
       btn.appendChild(span);
     }
     if (def.menu) btn.classList.add('has-menu');
-    const accel = def.command ? MENU_KEYS[def.command] ?? RENDERER_KEYS[def.command]?.[0] : null;
-    btn.title = accel ? `${def.title} (${describeAccelerator(accel, isMac)})` : def.title;
+    // keymap (lib/keymap-store.js): the key as bound now, again after every change
+    const setTitle = () => {
+      const accel = def.command ? (this.app.keymap ? this.app.keymap.keysFor(def.command)[0] : MENU_KEYS[def.command] ?? RENDERER_KEYS[def.command]?.[0]) ?? null : null;
+      btn.title = accel ? `${def.title} (${describeAccelerator(accel, isMac)})` : def.title;
+    };
+    setTitle();
+    if (def.command) this.app.on?.('keymap:changed', setTitle);
     btn.setAttribute('aria-label', def.title);
     if (def.toggle || def.pressed) btn.setAttribute('aria-pressed', 'false');
     btn.addEventListener('click', (event) => {

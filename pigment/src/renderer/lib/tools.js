@@ -78,8 +78,14 @@ export class ToolManager {
     this.active = null;
     this.previous = null;
     this.toolbox = document.getElementById('toolbox');
+    // 0.5 (S9.4): the tooltips show the keys as bound now
+    app.on?.('keymap:changed', () => {
+      if (this.toolboxBuilt) this.renderToolbox();
+    });
     this.optionsBar = document.getElementById('options-bar');
     this.optionsControls = new Map();
+    this.cursorFilter = null; // S3.2: applied by CanvasView.setCursor to every cursor
+    this.optionSlots = []; // S12.1: options-bar slots (the tool preset picker in 'title')
     app.on('color:changed', () => this.renderColors());
     app.on('settings:changed', () => this.renderColors());
   }
@@ -143,8 +149,82 @@ export class ToolManager {
     this.app.statusbar.set('hint', tool.hint ?? '');
   }
 
+  /** The first renderer key of cmd in the effective keymap. keymap (lib/keymap-store.js) */
+  rendererKey(cmd) {
+    return this.app.keymap ? this.app.keymap.keysFor(cmd, 'renderer')[0] ?? null : RENDERER_KEYS[cmd]?.[0] ?? null;
+  }
+
   updateCursor() {
     this.app.view?.setCursor(this.active?.cursorStyle);
+  }
+
+  /**
+   * S3.2: one filter (the later wins) through which CanvasView.setCursor passes every cursor, fn(css, { tool, view }) →
+   * css: Other Cursors (Precise) and Caps Lock (brush-painting-behaviours). null removes it.
+   */
+  setCursorFilter(fn) {
+    this.cursorFilter = typeof fn === 'function' ? fn : null;
+    this.updateCursor();
+  }
+
+  /**
+   * S12.1: an options-bar slot, rendered with every tool: `render(tool, bar)` returns an element or null (nothing
+   * shown). 'title' replaces the tool's icon and name (the first slot by order that renders wins), 'start' goes before
+   * the tool's options, 'end' after them. The same id again replaces the slot. Returns the function that removes it.
+   */
+  registerOptionsSlot({ id, place = 'end', order = 0, render } = {}) {
+    if (!id || typeof render !== 'function' || !['title', 'start', 'end'].includes(place)) throw new Error('registerOptionsSlot needs an id, a place and render()');
+    const slot = { id, place, order: Number(order) || 0, render };
+    this.optionSlots = [...this.optionSlots.filter((s) => s.id !== id), slot].sort((a, b) => a.order - b.order);
+    this.renderOptions();
+    return () => {
+      if (!this.optionSlots.includes(slot)) return;
+      this.optionSlots = this.optionSlots.filter((s) => s !== slot);
+      this.renderOptions();
+    };
+  }
+
+  /**
+   * S12.1: back to the tool's defaults (Photoshop's Reset Tool; '*' is Reset All Tools): deletes settings.tools[id],
+   * re-renders the options bar and emits 'tool:options' { tool, key: '*' } (for each tool with '*').
+   */
+  resetOptions(toolId) {
+    const tools = { ...(this.app.settings.tools ?? {}) };
+    const ids = toolId === '*' ? [...this.tools.keys()] : [toolId];
+    if (toolId === '*') for (const k of Object.keys(tools)) delete tools[k];
+    else delete tools[toolId];
+    this.app.settings.tools = tools;
+    this.app.saveSettingsSoon({ tools });
+    this.renderOptions();
+    this.updateCursor();
+    this.app.view?.invalidate();
+    for (const id of ids) this.app.emit('tool:options', { tool: id, key: '*' });
+  }
+
+  /**
+   * S12.1: writes several options of a tool at once (a tool preset): settings.tools[id] in one saveSettingsSoon, merged
+   * into what is stored (`replace`: instead of it). Never calls onOptionChanged, so no layer is restyled (Photoshop's
+   * tool presets change the tool, not the selection). Emits 'tool:options' { tool, key, value, batch: true } once per
+   * changed key, then { tool, key: '*' }; re-renders the options bar and the cursor.
+   */
+  setOptions(toolId, values, { replace = false } = {}) {
+    const prev = this.app.settings.tools?.[toolId] ?? {};
+    const given = values && typeof values === 'object' ? values : {};
+    const next = replace ? { ...given } : { ...prev, ...given };
+    const tools = { ...(this.app.settings.tools ?? {}), [toolId]: next };
+    this.app.settings.tools = tools;
+    this.app.saveSettingsSoon({ tools });
+    const keys = new Set([...Object.keys(prev), ...Object.keys(next)]);
+    for (const key of keys) {
+      if (JSON.stringify(prev[key]) === JSON.stringify(next[key])) continue;
+      this.app.emit('tool:options', { tool: toolId, key, value: next[key], batch: true });
+    }
+    this.app.emit('tool:options', { tool: toolId, key: '*' });
+    if (this.active?.id === toolId) {
+      this.renderOptions();
+      this.updateCursor();
+      this.app.view?.invalidate();
+    }
   }
 
   // ---- options (persisted per tool) ----------------------------------------------------------------------------
@@ -248,7 +328,7 @@ export class ToolManager {
       const slot = this.slots.find((s) => s.id === btn.dataset.slot);
       const tool = this.tools.get(slot.current);
       btn.querySelector('.tool-icon').innerHTML = icon(tool.icon);
-      const key = RENDERER_KEYS[`tool:${slot.id}`]?.[0] ?? RENDERER_KEYS[`tool:${tool.id}`]?.[0];
+      const key = this.rendererKey(`tool:${slot.id}`) ?? this.rendererKey(`tool:${tool.id}`);
       btn.title = key ? `${tool.name} (${describeAccelerator(key, isMac)})` : tool.name;
       btn.setAttribute('aria-pressed', String(this.active?.id === tool.id));
       btn.classList.toggle('active', this.active?.id === tool.id);
@@ -268,7 +348,7 @@ export class ToolManager {
    * slot's current tool; Shift+key (or the key alone, with "Use Shift Key for Tool Switch" off) steps through them.
    */
   showFlyout(slot, anchor) {
-    const key = RENDERER_KEYS[`tool:${slot.id}`]?.[0];
+    const key = this.rendererKey(`tool:${slot.id}`);
     const items = slot.tools.map((id) => {
       const t = this.tools.get(id);
       return { label: t.name, icon: t.icon, checked: this.active?.id === id, shortcut: key, onSelect: () => this.activate(id) };
@@ -289,16 +369,38 @@ export class ToolManager {
     this.optionsControls.clear();
     const tool = this.active;
     if (!tool) return;
-    const title = document.createElement('span');
-    title.className = 'options-title';
-    title.innerHTML = `${icon(tool.icon)}<span>${tool.name}</span>`;
+    // S12.1 slots: none registered gives 0.4's bar exactly
+    const slotEl = (slot) => {
+      try {
+        return slot.render(tool, bar) ?? null;
+      } catch (err) {
+        console.warn(`Options slot ${slot.id} failed`, err);
+        return null;
+      }
+    };
+    const placed = (place) => this.optionSlots.filter((s) => s.place === place);
+    let title = null;
+    for (const slot of placed('title')) if ((title = slotEl(slot))) break;
+    if (!title) {
+      title = document.createElement('span');
+      title.className = 'options-title';
+      title.innerHTML = `${icon(tool.icon)}<span>${tool.name}</span>`;
+    }
     bar.appendChild(title);
+    for (const slot of placed('start')) {
+      const el = slotEl(slot);
+      if (el) bar.appendChild(el);
+    }
     for (const spec of tool.options) {
       if (spec.when && !spec.when(tool)) continue;
       const el = this.buildControl(tool, spec);
       if (el) bar.appendChild(el);
     }
     tool.renderOptions?.(bar);
+    for (const slot of placed('end')) {
+      const el = slotEl(slot);
+      if (el) bar.appendChild(el);
+    }
   }
 
   buildControl(tool, spec) {
@@ -349,9 +451,20 @@ export class ToolManager {
         wrap.appendChild(box);
         break;
       }
+      case 'font-family':
+      case 'font-style':
+        // S11.2: widgets of lib/type/font-library.js (type-fonts' later); before one is registered, 0.4's select
+        if (hasWidget(spec.kind)) {
+          const widget = createWidget(spec.kind, spec, { app: this.app, value, onInput: (v) => set(v), onChange: (v) => set(v) });
+          wrap.appendChild(widget.element);
+          control = { widget };
+          break;
+        }
+      // falls through
       case 'select': {
         const select = document.createElement('select');
         select.className = 'select';
+        if (spec.title) select.title = spec.title;
         for (const [v, label] of spec.options) {
           const o = document.createElement('option');
           o.value = String(v);
@@ -375,12 +488,11 @@ export class ToolManager {
         break;
       }
       case 'color': {
-        const input = document.createElement('input');
-        input.type = 'color';
-        input.value = value ?? spec.default ?? '#000000';
-        input.addEventListener('input', () => set(input.value));
-        wrap.appendChild(input);
-        control = { input };
+        // the `color` widget (lib/fields.js, S7.3; the stub is 0.4's colour input): its live input sets the option,
+        // as 0.4's `input` event did
+        const widget = createWidget('color', {}, { app: this.app, value: value ?? spec.default ?? '#000000', onInput: (v) => set(v) });
+        wrap.appendChild(widget.element);
+        control = { widget };
         break;
       }
       case 'segment': {
@@ -406,15 +518,29 @@ export class ToolManager {
         b.type = 'button';
         b.className = 'btn small';
         b.innerHTML = `${spec.icon ? icon(spec.icon) : ''}${spec.label ?? ''}`;
+        if (spec.title) {
+          b.title = spec.title;
+          b.setAttribute('aria-label', spec.title);
+        }
         b.addEventListener('click', () => spec.onClick?.(tool));
         wrap.appendChild(b);
         control = { button: b };
         break;
       }
       case 'brush': {
+        // the Brushes panel's picker draws the button when it can (app.brushPicker.renderButton, brush-settings-panel);
+        // else 0.4's button
         const b = document.createElement('button');
         b.type = 'button';
         b.className = 'btn small opt-brush';
+        if (typeof this.app.brushPicker?.renderButton === 'function') {
+          const render = () => this.app.brushPicker.renderButton(b, tool);
+          render();
+          b.addEventListener('click', () => this.app.brushPicker?.show(b, tool));
+          wrap.appendChild(b);
+          control = { button: b, render };
+          break;
+        }
         const render = () => {
           const size = this.opt(tool.id, 'size') ?? 24;
           const hard = this.opt(tool.id, 'hardness') ?? 0.8;
@@ -472,14 +598,5 @@ function clampNum(n, spec) {
   return n;
 }
 
-/** Shared option specs. */
-export const BRUSH_OPTIONS = [
-  { kind: 'brush', key: 'preset', label: '' },
-  { kind: 'slider', key: 'size', label: 'Size', min: 1, max: 1000, step: 1, default: 24, unit: 'px' },
-  { kind: 'slider', key: 'hardness', label: 'Hardness', min: 0, max: 1, step: 0.01, default: 0.8 },
-  { kind: 'slider', key: 'opacity', label: 'Opacity', min: 0.01, max: 1, step: 0.01, default: 1 },
-  { kind: 'slider', key: 'flow', label: 'Flow', min: 0.01, max: 1, step: 0.01, default: 1 },
-  { kind: 'slider', key: 'smoothing', label: 'Smoothing', min: 0, max: 0.95, step: 0.05, default: 0.2 },
-  { kind: 'checkbox', key: 'pressureSize', label: 'Pen pressure → size', default: true },
-  { kind: 'checkbox', key: 'pressureOpacity', label: 'Pressure → opacity', default: false },
-];
+// Shared option specs: lib/brush/options.js (brush-engine-core's, S12.1) holds them; re-exported for 0.4's importers.
+export { BRUSH_OPTIONS, BRUSH_SIZE, PAINT_BLEND_OPTIONS } from './brush/options.js';

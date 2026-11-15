@@ -109,7 +109,7 @@ export function collectEntries(app, { platform = 'linux' } = {}) {
     const id = `tool:${tool.id}`;
     if (have.has(`${id}\u0001`)) continue;
     const slot = app.tools.slots.find((s) => s.tools.includes(tool.id));
-    const key = RENDERER_KEYS[`tool:${slot?.id}`]?.[0] ?? RENDERER_KEYS[id]?.[0] ?? null;
+    const key = rendererKey(app, `tool:${slot?.id}`) ?? rendererKey(app, id);
     out.push({ id, arg: undefined, label: tool.name, path: ['Tools'], kind: 'tool', icon: tool.icon, key });
   }
   for (const p of PANELS) {
@@ -126,8 +126,14 @@ export function collectEntries(app, { platform = 'linux' } = {}) {
 
 const KIND_LABEL = { menu: 'Menu', tool: 'Tool', panel: 'Panel' };
 
-function shortcutOf(entry, isMac) {
-  const accel = entry.key ?? (entry.arg === undefined ? MENU_KEYS[entry.id] ?? RENDERER_KEYS[entry.id]?.[0] : null);
+// keymap (lib/keymap-store.js): the keys as bound now (0.5, S9.4)
+function rendererKey(app, cmd) {
+  return (app.keymap ? app.keymap.keysFor(cmd, 'renderer')[0] : RENDERER_KEYS[cmd]?.[0]) ?? null;
+}
+
+function shortcutOf(app, entry, isMac) {
+  const first = (cmd) => (app.keymap ? app.keymap.keysFor(cmd)[0] : MENU_KEYS[cmd] ?? RENDERER_KEYS[cmd]?.[0]) ?? null;
+  const accel = entry.key ?? (entry.arg === undefined ? first(entry.id) : null);
   return accel ? describeAccelerator(accel, isMac) : '';
 }
 
@@ -196,7 +202,7 @@ export function openSearch(app, { isMac = false, platform = isMac ? 'darwin' : '
       text.append(label, path);
       const sc = document.createElement('span');
       sc.className = 'command-search-shortcut';
-      sc.textContent = shortcutOf(e, isMac);
+      sc.textContent = shortcutOf(app, e, isMac);
       row.append(kind, text, sc);
       row.addEventListener('mousemove', () => current !== i && select(i));
       row.addEventListener('click', () => choose(i));

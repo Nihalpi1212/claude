@@ -5,6 +5,12 @@
   "description": "Free, open-source image editor for Windows and macOS: layers, masks, brushes, selections, adjustments, filters, text, vector shapes, PSD import and export.",
   "main": "src/main/main.js",
   "type": "module",
+  "imports": {
+    "#ag-psd": {
+      "node": "./scripts/vendor-entries/ag-psd.js",
+      "default": "./src/renderer/vendor/ag-psd.js"
+    }
+  },
   "private": true,
   "license": "MIT",
   "author": "Pigment contributors",

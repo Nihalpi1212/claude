@@ -12,6 +12,7 @@
 // `value` are not edited here and are not part of the result (the caller keeps them).
 import { normalizeGradient, gradientLut, sampleGradient, INTERPOLATIONS, PLACEMENT_KEYS } from '../../shared/pixels/gradient-model.js';
 import { presetFormats } from './presets.js';
+import { exportPresetsDialog } from './preset-formats.js';
 import { numericField } from './numeric-field.js';
 import { bridge } from './bridge.js';
 import { GRADIENT_KIND } from './gradient-presets.js';
@@ -284,7 +285,7 @@ export function openGradientEditor(app, { value = null, keepRefs = false, title 
   async function pickStopColor() {
     if (sel.kind !== 'color') return;
     const stop = sel.stop;
-    const hex = await app.pickColor?.(stopHex(stop), { title: 'Color Picker (Stop Color)' });
+    const hex = await app.pickColor?.(stopHex(stop), { title: 'Color Picker (Stop Color)', target: 'stop' });
     if (!hex) return;
     stop.color = rgbaToHex(parseColor(hex));
     changed();
@@ -498,20 +499,11 @@ export async function importPresets(app, path = null) {
   }
 }
 
-/** Export…: the given presets (all when ids is null) as a .pigment-presets file. */
+/**
+ * Export…: the given presets (all when ids is null); the save dialog offers every format that writes gradients,
+ * .pigment-presets first (0.5, S10.3: a registered .grd must not become the silent default).
+ */
 export async function exportPresets(app, ids = null, path = null) {
-  const fmt = presetFormats(GRADIENT_KIND).find((f) => f.write) ?? null;
-  if (!fmt) return null;
-  const target = path ?? await bridge.saveFileDialog({ title: 'Export Gradients', defaultPath: `Gradients.${fmt.extensions[0]}`, filters: [{ name: fmt.name, extensions: fmt.extensions }] });
-  if (!target) return null;
-  try {
-    const { bytes, ext } = await app.presets.exportFile(GRADIENT_KIND, ids, fmt.id);
-    const file = new RegExp(`\\.${ext}$`, 'i').test(target) ? target : `${target}.${ext}`;
-    await bridge.writeFile(file, bytes);
-    app.dialogs.toast('Exported the gradients', { kind: 'success', timeout: 1800 });
-    return file;
-  } catch (err) {
-    app.reportError?.(err, 'Could not export the gradients');
-    return null;
-  }
+  // preset files (lib/preset-formats.js)
+  return exportPresetsDialog(app, GRADIENT_KIND, ids, { title: 'Export Gradients', path });
 }

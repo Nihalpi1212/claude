@@ -9,7 +9,7 @@
 //
 // The stub widgets below are deliberately plain; their owners replace them: numeric (conventions-shortcuts-fields),
 // gradient (gradients), pattern (patterns), contour (layer-style-effects), preset (adjust-tonal), paint (shapes-live),
-// font-size (type-character-panel).
+// font-size (type-character-panel), color (color-picker-swatches, 0.5: S7.3).
 import { numericField } from './numeric-field.js';
 import { gradientLut, normalizeGradient } from '../../shared/pixels/gradient-model.js';
 import { patternCanvas } from './patterns.js';
@@ -39,6 +39,85 @@ const el = (tag, className, text) => {
   return e;
 };
 const clone = (v) => (v === undefined || v === null ? v : JSON.parse(JSON.stringify(v)));
+
+// ---- color (0.5, S7.3): every colour field of the app ---------------------------------------------------------------
+// Value '#rrggbb'. Callers: form.js field type `color` (spec.text: the hex box beside it), tools.js option kind
+// `color`, the paint widget's solid colour, the gradient widget's two end colours (data-key "start" / "end"), the
+// Character panel's two colours (spec.dataK), shape-paint-ui.js and lens-correction.js. The stub is 0.4's DOM exactly:
+// an <input type="color"> with the caller's data-key (and id, title, aria-label), plus in forms the hex text input in
+// a .slider-field. onInput(v) fires on its `input` events (live), onChange(v) on `change` (the native picker closed, a
+// valid hex typed). color-picker-swatches registers the real one: a swatch button opening
+// app.colorPicker.pick({ target: 'field' }), keeping an input[type="color"] with the data-key whose `input` event sets
+// the value (it may be visually hidden: specs set colours through it).
+
+const hex6 = (v) => {
+  const s = String(v ?? '').trim();
+  if (/^#[0-9a-f]{6}/i.test(s)) return s.slice(0, 7).toLowerCase();
+  if (/^#?[0-9a-f]{3}$/i.test(s)) {
+    const h = s.replace('#', '');
+    return `#${h[0]}${h[0]}${h[1]}${h[1]}${h[2]}${h[2]}`.toLowerCase();
+  }
+  if (/^[0-9a-f]{6}$/i.test(s)) return `#${s.toLowerCase()}`;
+  return '#000000';
+};
+
+registerWidget('color', (spec, { value, onInput, onChange }) => {
+  const input = el('input', spec.className);
+  input.type = 'color';
+  if (spec.id) input.id = spec.id;
+  if (spec.key) input.dataset.key = spec.key;
+  if (spec.dataK) input.dataset.k = spec.dataK;
+  if (spec.title) input.title = spec.title;
+  if (spec.ariaLabel) input.setAttribute('aria-label', spec.ariaLabel);
+  if (spec.style) input.style.cssText = spec.style;
+  let current = hex6(value ?? spec.value ?? spec.default ?? '#000000');
+  input.value = current;
+  let text = null;
+  let element = input;
+  if (spec.text) {
+    element = el('div', 'slider-field');
+    text = el('input', 'input');
+    text.value = current;
+    text.spellcheck = false;
+    element.append(input, text);
+  }
+  input.addEventListener('input', () => {
+    current = input.value;
+    if (text) text.value = current;
+    onInput(current);
+  });
+  input.addEventListener('change', () => onChange(input.value));
+  text?.addEventListener('change', () => {
+    const v = text.value.trim();
+    if (/^#?[0-9a-f]{6}$/i.test(v) || /^#?[0-9a-f]{3}$/i.test(v)) {
+      current = hex6(v.startsWith('#') ? v : '#' + v);
+      input.value = current;
+      text.value = current;
+      onInput(current);
+      onChange(current);
+    } else text.value = current;
+  });
+  return {
+    element,
+    /** the native colour input (the stub's own; the real widget keeps one too) */
+    input,
+    get: () => current,
+    set(v, { silent = true } = {}) {
+      current = hex6(v);
+      input.value = current;
+      if (text) text.value = current;
+      if (!silent) {
+        onInput(current);
+        onChange(current);
+      }
+    },
+    setDisabled(b) {
+      input.disabled = !!b;
+      if (text) text.disabled = !!b;
+    },
+    destroy: () => element.remove(),
+  };
+});
 
 // ---- numeric -----------------------------------------------------------------------------------------------------
 
@@ -104,30 +183,25 @@ registerWidget('gradient', (spec, { value, onInput, onChange, app }) => {
       box.appendChild(r);
     };
     const hex = (s) => (typeof s?.color === 'string' ? s.color.slice(0, 7) : '#000000');
-    const c0 = el('input');
-    c0.type = 'color';
-    c0.dataset.key = 'start';
-    c0.value = hex(current.stops[0]);
-    const c1 = el('input');
-    c1.type = 'color';
-    c1.dataset.key = 'end';
-    c1.value = hex(current.stops[current.stops.length - 1]);
-    const rev = el('input');
-    rev.type = 'checkbox';
-    rev.dataset.key = 'reverse';
-    rev.checked = !!current.reverse;
-    row('Start color', c0);
-    row('End color', c1);
-    row('Reverse', rev);
+    // the two end colours are `color` widgets (S7.3)
     const update = () => {
       const stops = current.stops.map((s) => ({ ...s }));
-      stops[0] = { ...stops[0], color: c0.value };
-      stops[stops.length - 1] = { ...stops[stops.length - 1], color: c1.value };
+      stops[0] = { ...stops[0], color: c0.get() };
+      stops[stops.length - 1] = { ...stops[stops.length - 1], color: c1.get() };
       current = resolve({ ...current, stops, reverse: rev.checked });
       paint();
       emit();
     };
-    for (const i of [c0, c1, rev]) i.addEventListener(i.type === 'checkbox' ? 'change' : 'input', update);
+    const c0 = createWidget('color', { key: 'start' }, { app, value: hex(current.stops[0]), onInput: update });
+    const c1 = createWidget('color', { key: 'end' }, { app, value: hex(current.stops[current.stops.length - 1]), onInput: update });
+    const rev = el('input');
+    rev.type = 'checkbox';
+    rev.dataset.key = 'reverse';
+    rev.checked = !!current.reverse;
+    row('Start color', c0.element);
+    row('End color', c1.element);
+    row('Reverse', rev);
+    rev.addEventListener('change', update);
     wrap.appendChild(box);
   });
   return {
@@ -365,14 +439,12 @@ registerWidget('paint', (spec, { value, onInput, onChange, app }) => {
     for (const b of seg.children) b.setAttribute('aria-pressed', String(b.dataset.value === typeOf(current)));
     const t = typeOf(current);
     if (t === 'solid') {
-      const input = el('input');
-      input.type = 'color';
-      input.value = typeof current.color === 'string' ? current.color.slice(0, 7) : '#000000';
-      input.addEventListener('input', () => {
-        current = { type: 'solid', color: input.value };
+      // the solid colour is a `color` widget (S7.3)
+      const color = createWidget('color', {}, { app, value: typeof current.color === 'string' ? current.color.slice(0, 7) : '#000000', onInput: (v) => {
+        current = { type: 'solid', color: v };
         emit();
-      });
-      body.appendChild(input);
+      } });
+      body.appendChild(color.element);
     } else if (t === 'gradient') {
       sub = createWidget('gradient', { placement: spec.placement }, { app, value: current.gradient, onChange: (g) => {
         current = { type: 'gradient', gradient: g };

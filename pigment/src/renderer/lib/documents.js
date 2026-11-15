@@ -5,6 +5,7 @@ import { History } from './history.js';
 import { CanvasView } from './canvas-view.js';
 import { flattenDocument } from './compositor.js';
 import { openDocument, encodeForPath, isLayeredPath, canWritePath, extOf, baseName, OPEN_FILTERS } from './io.js';
+import { opensAsPresets, importPresetFiles, presetFileExtensions } from './preset-formats.js';
 import { formDialog } from './form.js';
 import { MODES } from '../../shared/pixels/modes.js';
 
@@ -15,6 +16,64 @@ export const SAVE_FILTERS = [
   { name: 'JPEG image', extensions: ['jpg', 'jpeg'] },
   { name: 'WebP image', extensions: ['webp'] },
 ];
+
+// ---- save options and open hooks (S12.3, S12.6) ----------------------------------------------------------------
+
+const SAVE_OPTIONS = []; // [{ exts: string[], ask(app, doc, path, { ask }) }], in registration order
+
+/**
+ * Save options for a format (an extension or several): `ask(app, doc, path, { ask })` returns the options to merge
+ * into what encodeForPath gets, or null to cancel the save; `ask: false` is a save nobody is there to answer for (a
+ * recorded "Close: save changes" step, Batch), which answers from the document or the preferences. 0.4's JPEG / WebP
+ * quality is the built-in registration; psd-layers registers 'psd' (Maximize Compatibility).
+ */
+export function registerSaveOptions(formatOrExt, def) {
+  if (typeof def?.ask !== 'function') throw new Error('registerSaveOptions needs ask()');
+  const exts = (Array.isArray(formatOrExt) ? formatOrExt : [formatOrExt]).map((e) => String(e).replace(/^\./, '').toLowerCase());
+  const entry = { exts, ask: def.ask };
+  SAVE_OPTIONS.push(entry);
+  return () => {
+    const i = SAVE_OPTIONS.indexOf(entry);
+    if (i >= 0) SAVE_OPTIONS.splice(i, 1);
+  };
+}
+
+registerSaveOptions(['jpg', 'jpeg', 'webp'], { ask: (app, doc, path, { ask }) => app.docs.lossyOptions(doc, path, { ask }) });
+
+const OPEN_HOOKS = []; // [{ fn, order }], by order
+
+/**
+ * An open hook: `fn(doc, { path, format, interactive, notice(text) })`, run in order after a file opened by openPaths
+ * (interactive unless an action opened it) and after each file Batch opens (`interactive: false`; `notice` writes the
+ * batch log). Not for New, Duplicate, Revert, Place, smart object contents or the contact sheet. A hook that is not
+ * interactive shows no dialog: `notice(text)` adds an open notice (S4.4). type-fonts registers the missing-font check;
+ * color-settings (0.6) the profile policy.
+ */
+export function registerOpenHook(fn, { order = 500 } = {}) {
+  if (typeof fn !== 'function') throw new Error('registerOpenHook needs a function');
+  const entry = { fn, order };
+  OPEN_HOOKS.push(entry);
+  OPEN_HOOKS.sort((a, b) => a.order - b.order);
+  return () => {
+    const i = OPEN_HOOKS.indexOf(entry);
+    if (i >= 0) OPEN_HOOKS.splice(i, 1);
+  };
+}
+
+/** Runs the open hooks on a document that was just opened (openPaths, Batch); a failing hook is reported, not fatal. */
+export async function runOpenHooks(doc, { path = null, format = null, interactive = true, notice = null } = {}) {
+  const add = notice ?? ((text) => {
+    if (!text) return;
+    doc.openNotices = [...(doc.openNotices ?? []), String(text)];
+  });
+  for (const { fn } of OPEN_HOOKS.slice()) {
+    try {
+      await fn(doc, { path, format: format ?? doc.format ?? null, interactive, notice: add });
+    } catch (err) {
+      console.error('open hook failed', err);
+    }
+  }
+}
 
 export class DocumentManager {
   constructor(app) {
@@ -94,9 +153,19 @@ export class DocumentManager {
     this.activate(this.docs[(i + delta + this.docs.length) % this.docs.length]);
   }
 
-  /** Opens files from paths (already-open paths are activated). */
-  async openPaths(paths) {
+  /**
+   * Opens files from paths (already-open paths are activated). `interactive` false (a recorded Open replayed by an
+   * action) tells the open hooks that nobody is there to answer a dialog (S12.6).
+   */
+  async openPaths(paths, { interactive = true } = {}) {
     let last = null;
+    // preset files (lib/preset-formats.js, S10.4): a file only a preset format reads (.abr, .grd, .pat, …) is imported,
+    // not opened, as Photoshop does
+    const presetFiles = paths.filter((p) => opensAsPresets(p));
+    if (presetFiles.length) {
+      await importPresetFiles(this.app, { paths: presetFiles });
+      paths = paths.filter((p) => !presetFiles.includes(p));
+    }
     for (const path of paths) {
       const existing = this.findByPath(path);
       if (existing) {
@@ -112,6 +181,8 @@ export class DocumentManager {
         this.add(doc);
         doc.history.markSaved(flattenDocument(doc, doc.view.compositor));
         this.rememberRecent(doc);
+        await runOpenHooks(doc, { path, format: doc.format, interactive }); // open hooks (S12.6)
+        this.showOpenNotices(doc); // psd (lib/psd/read.js) and the open hooks' notices (S4.4)
         last = doc;
       } catch (err) {
         this.app.reportError(err, `Could not open "${path.split(/[\\/]/).pop()}"`);
@@ -122,8 +193,20 @@ export class DocumentManager {
     return last;
   }
 
+  /**
+   * Shows `doc.openNotices` (S4.4): what the reader could not carry ("2 layer effects Pigment does not have were
+   * dropped: …"), one toast per line, once the document is open. The lines stay on the document, never in a file.
+   */
+  showOpenNotices(doc) {
+    for (const text of doc.openNotices ?? []) this.app.dialogs.toast(text, { timeout: 6000 });
+  }
+
   async openDialog() {
-    const paths = await bridge.openFileDialog({ multiple: true, filters: OPEN_FILTERS, title: 'Open' });
+    // preset files (lib/preset-formats.js, S10.4): a "Presets" filter with every registered preset extension (read when
+    // the dialog opens: packages register formats from install())
+    const presets = presetFileExtensions().filter((e) => opensAsPresets(`x.${e}`));
+    const filters = presets.length ? [...OPEN_FILTERS.slice(0, -1), { name: 'Presets', extensions: presets }, ...OPEN_FILTERS.slice(-1)] : OPEN_FILTERS;
+    const paths = await bridge.openFileDialog({ multiple: true, filters, title: 'Open' });
     if (paths?.length) return this.openPaths(paths);
     return null;
   }
@@ -170,6 +253,19 @@ export class DocumentManager {
     return doc.saveOpts;
   }
 
+  /** The options of every save-options registration for the path's format, merged (S12.3); null cancels the save. */
+  async saveOptions(doc, path, { ask = true } = {}) {
+    const ext = extOf(path);
+    let opts = {};
+    for (const entry of SAVE_OPTIONS.slice()) {
+      if (!entry.exts.includes(ext)) continue;
+      const answer = await entry.ask(this.app, doc, path, { ask });
+      if (!answer) return null;
+      opts = { ...opts, ...answer };
+    }
+    return opts;
+  }
+
   async saveAs(doc = this.active, { copy = false } = {}) {
     if (!doc) return false;
     const defaultName = `${baseName(doc.name)}${copy ? ' copy' : ''}.${doc.path && isLayeredPath(doc.path) ? extOf(doc.path) : 'pigment'}`;
@@ -206,7 +302,7 @@ export class DocumentManager {
       // what only shows for a moment ends first (View previous state in Properties): a save not run as a command, such
       // as Save in the quit prompt, writes the document's own state too
       this.app.emit?.('doc:saving', { doc });
-      const opts = await this.lossyOptions(doc, path, { ask: askOptions });
+      const opts = await this.saveOptions(doc, path, { ask: askOptions });
       if (!opts) return false;
       const bytes = await this.app.busy(`Saving ${path.split(/[\\/]/).pop()}…`, () => encodeForPath(doc, path, doc.view.compositor, opts));
       await bridge.writeFile(path, bytes);
