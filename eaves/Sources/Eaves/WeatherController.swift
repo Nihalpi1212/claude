@@ -160,18 +160,27 @@ final class WeatherController: ObservableObject {
         let longitude = settings.longitude
         fetchedFor = key(latitude, longitude)
         task?.cancel()
+        task = fetch(latitude: latitude, longitude: longitude) { [weak self] result in
+            self?.finish(result)
+        }
+    }
+
+    /// Fetches the current weather at a position and reports on the main queue.
+    @discardableResult
+    func fetch(latitude: Double, longitude: Double,
+               completion: @escaping (Result<WeatherReading, Error>) -> Void) -> URLSessionDataTask {
         let request = session.dataTask(with: OpenMeteo.forecastURL(latitude: latitude, longitude: longitude)) {
-            [weak self] data, response, error in
+            data, response, error in
             let result: Result<WeatherReading, Error>
             if let data = data, (response as? HTTPURLResponse)?.statusCode == 200 {
                 result = Result { try OpenMeteo.parseCurrent(data) }
             } else {
                 result = .failure(error ?? URLError(.badServerResponse))
             }
-            DispatchQueue.main.async { self?.finish(result) }
+            DispatchQueue.main.async { completion(result) }
         }
-        task = request
         request.resume()
+        return request
     }
 
     func search(_ query: String, completion: @escaping (Result<[Place], Error>) -> Void) {

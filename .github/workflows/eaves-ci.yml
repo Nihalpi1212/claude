@@ -51,6 +51,12 @@ jobs:
           wait "$APP_PID"
           swift scripts/screen-diff.swift build/before.png build/screenshot.png
 
+      # Asks the real weather service two questions and opens the Settings window. It depends on a
+      # service outside this repository, so a failure here is reported but does not fail the build.
+      - name: Check the weather service and the Settings window
+        continue-on-error: true
+        run: build/Eaves.app/Contents/MacOS/Eaves --probe
+
       - name: Upload the app
         uses: actions/upload-artifact@v4
         with:

@@ -30,6 +30,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var forcedScene: SceneKind?
     /// Set by `--selftest`: run for this many seconds, print what happened, and quit.
     private var selfTestSeconds: Double?
+    /// Set by `--probe`: open Settings, ask the weather service two real questions, report, and quit.
+    private var probing = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         readArguments()
@@ -43,6 +45,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         center.addObserver(self, selector: #selector(somethingChanged(_:)), name: .weatherChanged, object: nil)
 
         apply()
+        if probing {
+            runProbe()
+            return
+        }
         if let seconds = selfTestSeconds {
             DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in self?.finishSelfTest() }
             return
@@ -86,7 +92,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         var plan = currentPlan().plan
         plan.intensity *= Float(settings.density)
         overlay?.show(plan)
-        if selfTestSeconds == nil { weather.settingsChanged() }
+        if selfTestSeconds == nil && !probing { weather.settingsChanged() }
         updateStatusButton()
     }
 
@@ -272,6 +278,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func readArguments() {
         let arguments = CommandLine.arguments
+        probing = arguments.contains("--probe")
         if let index = arguments.firstIndex(of: "--scene"), index + 1 < arguments.count {
             forcedScene = SceneKind(rawValue: arguments[index + 1])
         }
@@ -279,6 +286,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let seconds = index + 1 < arguments.count ? Double(arguments[index + 1]) : nil
             selfTestSeconds = seconds ?? 15
             if forcedScene == nil { forcedScene = .blizzard }
+        }
+    }
+
+    /// Checks the parts that need the outside world: that the weather service still answers the way
+    /// Eaves expects, and that the Settings window opens. Uses a fixed public place (central London).
+    private func runProbe() {
+        showSettings()
+        var passed = true
+        weather.fetch(latitude: 51.51, longitude: -0.13) { [weak self] result in
+            switch result {
+            case .success(let reading):
+                print("eaves probe: weather code=\(reading.code) (\(WeatherMapping.summary(code: reading.code))) "
+                    + "temperature=\(reading.temperatureC)C wind=\(reading.windKmh)km/h "
+                    + "from=\(reading.windFromDegrees) day=\(reading.isDay)")
+            case .failure(let error):
+                print("eaves probe: weather request failed: \(error)")
+                passed = false
+            }
+            self?.weather.search("Lisbon") { result in
+                switch result {
+                case .success(let places):
+                    print("eaves probe: search found \(places.count) places, first: \(places.first?.label ?? "none")")
+                    if places.isEmpty { passed = false }
+                case .failure(let error):
+                    print("eaves probe: search failed: \(error)")
+                    passed = false
+                }
+                // Leave the Settings window a moment to draw, so a crash in it would show here.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                    let visible = self?.settingsWindow?.isVisible ?? false
+                    print("eaves probe: settings window visible=\(visible)")
+                    print(passed && visible ? "eaves probe: PASS" : "eaves probe: FAIL")
+                    fflush(stdout)
+                    exit(passed && visible ? 0 : 1)
+                }
+            }
         }
     }
 

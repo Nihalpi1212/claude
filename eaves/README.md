@@ -75,6 +75,7 @@ open build
 swift test                               # unit tests for the simulation and weather mapping
 swift run Eaves --scene blizzard         # run from source, showing one scene
 swift run Eaves --selftest 15            # run for 15 s, print what was drawn, exit 0 or 1
+swift run Eaves --probe                  # ask the weather service for real, open Settings, exit 0 or 1
 ```
 
 Layout: `Sources/EavesCore` is the simulation, the snow piles and the weather mapping (Foundation
