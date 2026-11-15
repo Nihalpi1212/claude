@@ -1,0 +1,79 @@
+import json, sys
+P = []
+def r(a, b): P.append((a, b))
+# fixes
+r("`setOpt` (0.4 code and 31 spec lines set them with `setOpt`)", "XX")  # placeholder, removed below
+P.pop()
+r("for size, hardness, angle and roundness (0.4 code and 31 spec lines set them with `setOpt`)",
+  "for size, hardness, angle and roundness (0.4 code and the specs set them with `setOpt`)")
+r("| `tests/e2e/hunt5-styles.spec.mjs:107–114` |", "| `tests/e2e/hunt5-styles.spec.mjs:112` (the test at 106) |")
+r("| `tests/e2e/adjustment-blending.spec.mjs:358` and the notice assertions of that test |", "| `tests/e2e/adjustment-blending.spec.mjs:358`, `:368`, `:376` |")
+r("(`actions.spec.mjs:342` assigns Shift+F9 to an action)", "(`actions.spec.mjs:341` assigns Shift+F9 to an action)")
+r("(`nativeImage.createFromDataURL`, made once per colour)", "(`nativeImage.createFromBitmap`, made once per colour)")
+r("**S5.4 Where it runs.**", "**Where it runs.**")
+# ownership table trims
+r("| `app.js` | skeleton | MODULES; `app.keymap` (S9) and `attachColorPipeline(app)` in `start()`; `help:shortcuts` moves to `lib/shortcuts-editor.js`; `tool:pick-fg` / `tool:pick-bg` through `app.colorPicker.pick`; `tool:brush-size-*` cap 5000; menu `'key'` commands through `app.keymap.resolveKey`; status-bar profile segment (S6.6); ui-state keys (S13.6); preset files dropped on the window are imported (S10.4) | E39, E43, E49, E50 |",
+  "| `app.js` | skeleton | MODULES and the `start()` services (see \"New files\"); `help:shortcuts` moves out; `tool:pick-fg/bg` through `app.colorPicker`; brush size cap 5000; `'key'` commands through `resolveKey` (S13.4); status bar (S6.6); ui state (S13.6); dropped preset files (S10.4) | E43, E49, E50 |")
+r("| `lib/tools/paint.js` | brush-painting-behaviours | gestures, cursor, arrow-key tip rotation | skeleton lands first: pointer handlers through `PaintGesture` to `strokeDown/Move/Up` (S3.1); `baseSettings` from `toolBrush` (marked `// brush (lib/brush/tool-brush.js)`); `BLEND_OPTIONS` from `lib/brush/options.js`; the `BrushStroke.prototype.migrate` patch moves into the engine; overlay and CSS cursor delegate to `lib/brush-cursor.js` |",
+  "| `lib/tools/paint.js` | brush-painting-behaviours | gestures, cursor, arrow-key tip rotation | skeleton lands first: S3.1's gesture split; `baseSettings` from `toolBrush` (marked `// brush (lib/brush/tool-brush.js)`); `BLEND_OPTIONS` from `options.js`; the `migrate` prototype patch removed; cursor through `lib/brush-cursor.js` |")
+r("| `lib/tools/text.js` | skeleton | option kinds `font-family`, `font-style` (S11.2); anti-alias select and orientation / Warp Text buttons (stub commands); `api.setEditing(layer)` around sessions (S11.3); the TypeTool methods subclasses rely on (S11.5) | E51, E52 |",
+  "| `lib/tools/text.js` | skeleton | S11.2's option kinds, the anti-alias, orientation and Warp Text controls, `setEditing` (S11.3), the TypeTool surface (S11.5) | E51, E52 |")
+r("| `lib/io.js` | skeleton | PSD code moves to `lib/psd/` with re-exports (S4); open reads chunks and asks the colour pipeline; `encodeForPath` applies chunk providers (S5, S6.3) | E40, E42, E43 |",
+  "| `lib/io.js` | skeleton | PSD code to `lib/psd/` (S4); chunks and the colour pipeline on open and save (S5, S6.3) | E40, E42, E43 |")
+r("| `lib/documents.js` | skeleton | save-options registry replacing `lossyOptions` (S12.3); preset files open as imports (S10.4); colour policy `onOpen` before `doc:opened`; open notices (S4.4) | E43, E45, E50 |",
+  "| `lib/documents.js` | skeleton | save options (S12.3), preset files (S10.4), colour policy `onOpen` (S6.7), open notices (S4.4) | E43, E45, E50 |")
+r("| `lib/extras.js` | skeleton | `pickColor` moves to `lib/color-picker.js`; the built-in Preferences section `tools` keeps its id and title; New Document gets \"Color Profile\" (S6.6) | E20, E43 |",
+  "| `lib/extras.js` | skeleton | `pickColor` moves to `lib/color-picker.js`; New Document \"Color Profile\" (S6.6) | E20, E43 |")
+r("| `lib/panels/brushes.js` | brush-settings-panel | the Brushes panel over the `brushes` kind, the options-bar picker (`app.brushPicker`) | skeleton lands first: deletes `installTipHook` (a prototype patch, a no-op since `baseSettings` passes angle and roundness); `BUILTIN_BRUSHES` kept |",
+  "| `lib/panels/brushes.js` | brush-settings-panel | the Brushes panel over `brushes`, `app.brushPicker` | skeleton lands first: deletes `installTipHook` (a prototype patch, a no-op since `baseSettings` passes angle and roundness); `BUILTIN_BRUSHES` kept |")
+# S2 trims
+r("""**S2.1 Facade.** `lib/brush.js` re-exports from `lib/brush/engine.js`: `BrushStroke`, `ENGINE`, `traceDabs`,
+`registerDabModifier`, `dabModifiers`, `registerTipKind`, `tipOutline`, `renderTip`, `renderStrokePreview`; and keeps its
+own `dabCanvas`, `drawBlended`, `drawOnMask` (fills and the bucket use them). Callers import from `lib/brush.js` only.
+The stub engine is 0.4's `BrushStroke` moved verbatim, plus the hooks below; `migrate` becomes a method (0.4 patched
+it onto the prototype from `paint.js`).""",
+"""**S2.1 Facade.** `lib/brush.js` re-exports the engine's exports (below) and keeps `dabCanvas`, `drawBlended`,
+`drawOnMask`; callers import from it only. The stub engine is 0.4's `BrushStroke` moved verbatim plus the hooks below;
+`migrate` becomes a method.""")
+r("""History: exactly 0.4's calls: `history.beginStroke(canvas, { label, layer, kind: 'mask' | 'pixels' })` in the
+constructor, `endStroke(dirty)` in `end()`, `cancelStroke()` in `cancel()` (lib/depth.js, the History panel and the
+actions recorder's "not recorded: tool strokes" notice rely on them). One stroke is one history entry, build-up dabs and
+Shift-click lines included.""",
+"""History: 0.4's calls exactly (`beginStroke` in the constructor, `endStroke(dirty)`, `cancelStroke()`; depth.js and the
+History panel rely on them); one stroke is one entry, build-up dabs and Shift-click lines included.""")
+r("""A mouse sample gives Pen Tilt, Rotation and Stylus Wheel controls their neutral value. Electron: pen pressure and tilt
+come through Chromium's pointer events; no command-line switch is added unless a measurement in the packaged app shows
+one is needed (icc-engine's and brush-engine-core's reports say what was measured).""",
+"""A mouse sample gives the tilt, rotation and wheel controls their neutral value. Electron gets pen data through
+Chromium's pointer events; no command-line switch is added unless a measurement in the packaged app needs one.""")
+r("""brush-engine-core registers 100–499 (it may evaluate them inside the engine, but registers them so the order is
+visible and `dabModifiers()` lists them); brush-settings-panel registers 50 and 500–900. A section that is enabled while
+no modifier for it is registered paints as if it were off, and `ENGINE.features` says so. **Stub:** the 0.4 engine plus:
+`geometry` called on every dab; when an enabled modifier has `coverage`, each dab is drawn into a scratch canvas, read
+back, passed and written back (a slow path used only then); `buffer` on a copy of the flushed rect. With nothing
+enabled the 0.4 path runs unchanged.""",
+"""brush-engine-core registers 100–499 (so `dabModifiers()` shows the order), brush-settings-panel 50 and 500–900. An
+enabled section with no registered modifier paints as off. **Stub:** 0.4's engine plus `geometry` on every dab;
+`coverage` through a scratch canvas read back and written back (a slow path, only when such a modifier is enabled);
+`buffer` on a copy of the flushed rect. With nothing enabled the 0.4 path runs unchanged.""")
+# S6 trims
+r("""icc-engine returns
+`'none'` only when it adopts the embedded profile, so untagged files, and PNGs with only `gAMA` / `sRGB`, decode exactly
+as in 0.4. TIFF, 16-bit PNG, GIF and PSD decoders never convert; adoption only sets `doc.profile`.""",
+"""icc-engine answers
+`'none'` only when it adopts the embedded profile: untagged files (and PNGs with only `gAMA` / `sRGB`) decode as in 0.4.
+TIFF, 16-bit PNG, GIF and PSD decoders never convert.""")
+r("""(the skeleton splits 0.4's `#bindPointer` into ruler bindings made once and canvas bindings made per element, and keeps
+`view.canvas` pointing at the live element)""", """(ruler listeners bound once, canvas listeners per element; `view.canvas`
+is the live element, which `dialogs.js` and the sessions read at call time)""")
+# S8 trims
+r("""the skeleton writes the maps of 0.4's fields (`crs:IncrementalTemperature`,
+`crs:IncrementalTint`, `crs:Exposure2012`, `crs:Contrast2012`, `crs:Highlights2012`, `crs:Shadows2012`,
+`crs:Whites2012`, `crs:Blacks2012`, `crs:Texture`, `crs:Clarity2012`, `crs:Dehaze`, `crs:Vibrance`, `crs:Saturation`,
+`crs:HueAdjustment<Range>` / `Saturation…` / `Luminance…`, `crs:Sharpness`, `crs:SharpenRadius`, `crs:SharpenDetail`,
+`crs:LuminanceSmoothing`, `crs:ColorNoiseReduction`, `crs:PostCropVignetteAmount`, `crs:GrainAmount`; scales chosen by
+camera-raw-workspace, which owns the reader and writer).""",
+"""the skeleton writes the names for 0.4's fields (`crs:IncrementalTemperature`, `crs:Exposure2012`, …,
+`crs:HueAdjustmentRed`, …, `crs:GrainAmount`); camera-raw-workspace owns the reader, the writer and the scales.""")
+json.dump(P, open(sys.argv[1], 'w'))
+print(len(P))
