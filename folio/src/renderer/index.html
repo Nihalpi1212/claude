@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'sha256-nyZEOBPCIbXHhjAUSSgTHWxU4dEO+frTmJ5dV+e8/nU='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; worker-src 'self' blob:; connect-src 'self' blob: data:; media-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Folio PDF</title>
+  <link rel="icon" href="/build/icon.png">
+  <!-- The import map is inline; its sha256 hash is allowed by the CSP above. If you change the map,
+       recompute the hash: node scripts/csp-hash.mjs -->
+  <script type="importmap">
+  {
+    "imports": {
+      "pdfjs-dist": "./vendor/pdfjs/pdf.mjs",
+      "pdfjs-dist/web/pdf_viewer.mjs": "./vendor/pdfjs/pdf_viewer.mjs",
+      "pdf-lib": "./vendor/pdf-lib/pdf-lib.esm.js",
+      "@pdf-lib/fontkit": "./vendor/pdf-lib/fontkit.es.js"
+    }
+  }
+  </script>
+  <link rel="stylesheet" href="./vendor/pdfjs/pdf_viewer.css">
+  <link rel="stylesheet" href="./styles/theme.css">
+  <link rel="stylesheet" href="./styles/app.css">
+  <link rel="stylesheet" href="./styles/viewer.css">
+  <link rel="stylesheet" href="./styles/sidebar.css">
+  <link rel="stylesheet" href="./styles/dialogs.css">
+  <link rel="stylesheet" href="./styles/annotate.css">
+  <link rel="stylesheet" href="./styles/pages.css">
+  <link rel="stylesheet" href="./styles/impose.css">
+  <link rel="stylesheet" href="./styles/print.css">
+</head>
+<body>
+  <div id="app" class="app">
+    <header id="titlebar" class="titlebar">
+      <div id="tabbar" class="tabbar" role="tablist" aria-label="Open documents"></div>
+    </header>
+    <div id="toolbar" class="toolbar" role="toolbar" aria-label="Main toolbar">
+      <div class="toolbar-group" data-group="file"></div>
+      <div class="toolbar-group" data-group="nav"></div>
+      <div class="toolbar-group" data-group="zoom"></div>
+      <div class="toolbar-group" data-group="tools"></div>
+      <div class="toolbar-group toolbar-spacer" data-group="spacer"></div>
+      <div class="toolbar-group" data-group="view"></div>
+      <div class="toolbar-group" data-group="right"></div>
+    </div>
+    <div id="toolbar-secondary" class="toolbar toolbar-secondary" hidden></div>
+    <div id="findbar" class="findbar" hidden></div>
+    <div id="main" class="main">
+      <aside id="sidebar" class="sidebar" hidden>
+        <div id="sidebar-tabs" class="sidebar-tabs" role="tablist" aria-label="Sidebar"></div>
+        <div id="sidebar-panels" class="sidebar-panels"></div>
+        <div id="sidebar-resizer" class="sidebar-resizer" role="separator" aria-orientation="vertical"></div>
+      </aside>
+      <section id="viewer-host" class="viewer-host" aria-live="polite"></section>
+      <section id="welcome" class="welcome" hidden></section>
+    </div>
+    <footer id="statusbar" class="statusbar" role="status"></footer>
+  </div>
+  <div id="dialogs" class="dialogs"></div>
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+  <div id="print-container" class="print-container" aria-hidden="true"></div>
+  <script src="./lib/polyfills.js"></script>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

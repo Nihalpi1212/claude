@@ -1,0 +1,1677 @@
+// Analytics: Overview, Posts, Reels, Stories, Audience, Best times, Hashtags.
+//
+// Numbers come from the worker's encrypted snapshots (analytics-daily, analytics-media,
+// analytics-stories, audience). When the worker has fewer than 3 days of snapshots for the chosen
+// range (or a short range has gaps), the missing days are loaded live from Instagram with
+// ig.accountDaily (at most 31 days, within Instagram's 90-day window) and labelled as such.
+// Several pieces are exported for the Reports screen (useAnalytics, computeOverview, sections, CSV).
+// Per-post history (analytics-media-history) drives the curve in the post drawer and the Reels
+// "Views at 24 h / 7 days" columns; post labels (posts[].labels, joined by igMediaId) filter the
+// Posts tab and feed the Reports campaign section.
+
+import { html, useEffect, useMemo, useRef, useState } from '../../vendor/preact.js';
+import { useApp } from '../app.js';
+import { loadViewCss } from '../css.js';
+import { mutate, transact, useDocs } from '../data.js';
+import { saveBlob } from '../media.js';
+import { setQuery } from '../router.js';
+import { BarChart, CurveChart, Donut, Heatmap, LineChart, StackedBar, StackedColumns } from '../ui/charts.js';
+import { Badge, Button, Callout, DataTable, Drawer, EmptyState, Icon, Menu, PageHeader, Panel, ProgressBar, Segmented, Select, Skeleton, Spinner, Stat, Tabs, cx, formatDelta, formatValue } from '../ui/kit.js';
+import { RangePicker, formatRangeLabel, previousRange, rangeFromQuery, rangeLength, rangeToQuery, resolveRange, shortDay } from '../ui/range-picker.js';
+import {
+  appendHistoryPoint,
+  breakdownTotals,
+  campaignStats,
+  engagementRate,
+  formatDuration,
+  formatPercent,
+  hashtagPerformance,
+  HISTORY_ADD_DAYS,
+  historyPoint,
+  interactionsOf,
+  labelCounts,
+  labelsByMedia,
+  median,
+  mediaInRange,
+  mediaWithLabel,
+  metricValue,
+  monthBounds,
+  parseTimestamp,
+  postingFrequency,
+  previousMonth,
+  seriesFor,
+  summarizeDays,
+  toCsv,
+  toList,
+  topMedia,
+  valueAtAge,
+} from '../../core/analytics.js';
+import { bestTimeMatrix } from '../../core/schedule.js';
+import { addDaysKey, dayKey, dayRange, format, relative, weekdayOfKey, WEEKDAY_NAMES, zonedToUtc } from '../../core/time.js';
+
+loadViewCss('analytics');
+
+const MIN_DAYS = 3; // fewer stored days than this -> load the range live
+const MAX_LIVE_DAYS = 31; // longest span loaded live in one go
+const HISTORY_DAYS = 89; // Instagram keeps account insights for about 90 days
+const LIVE_TTL_MS = 20 * 60e3;
+const DOCS = ['analytics-daily', 'analytics-media', 'analytics-stories', 'audience', 'competitors', 'analytics-media-history', 'posts', 'posts-archive'];
+
+export const TABS = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'posts', label: 'Posts' },
+  { id: 'reels', label: 'Reels' },
+  { id: 'stories', label: 'Stories' },
+  { id: 'audience', label: 'Audience' },
+  { id: 'best-times', label: 'Best times' },
+  { id: 'hashtags', label: 'Hashtags' },
+];
+
+const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
+const num = (v) => (isNum(v) ? v : null);
+const sum = (vals) => {
+  const v = vals.filter(isNum);
+  return v.length ? v.reduce((a, b) => a + b, 0) : null;
+};
+const avg = (vals) => {
+  const v = vals.filter(isNum);
+  return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
+};
+const rel = (c, p) => (isNum(c) && isNum(p) && p !== 0 ? (c - p) / Math.abs(p) : null);
+const roundOrNull = (v) => (isNum(v) ? Math.round(v) : null);
+const firstNum = (arr) => arr.find(isNum) ?? null;
+const lastNum = (arr) => {
+  for (let i = arr.length - 1; i >= 0; i--) if (isNum(arr[i])) return arr[i];
+  return null;
+};
+const signed = (n) => (isNum(n) ? `${n > 0 ? '+' : n < 0 ? '−' : ''}${formatValue(Math.abs(n))}` : '—');
+const fmtCount = (n) => (isNum(n) && Math.abs(n) >= 100000 ? 'compact' : 'number');
+/** Format for tables/tiles: 'percent' always shows one decimal (8.0%, not 8%). */
+const show = (v, kind = 'number') => (kind === 'percent' ? formatPercent(v) : formatValue(v, kind));
+
+function hasFlow(snap) {
+  return !!snap && typeof snap === 'object' && (isNum(snap.reach) || isNum(snap.views) || isNum(snap.totalInteractions) || isNum(snap.accountsEngaged));
+}
+
+// ---------------------------------------------------------------------------
+// Media helpers
+
+/** photo | carousel | reel | video | story */
+export function mediaKindOf(m) {
+  if (!m) return 'photo';
+  if (m.productType === 'STORY') return 'story';
+  if (m.productType === 'REELS' || (m.mediaType === 'VIDEO' && m.productType !== 'FEED')) return 'reel';
+  if (m.mediaType === 'CAROUSEL_ALBUM') return 'carousel';
+  if (m.mediaType === 'VIDEO') return 'video';
+  return 'photo';
+}
+
+export const KIND_LABEL = { photo: 'Photo', carousel: 'Carousel', reel: 'Reel', video: 'Video', story: 'Story' };
+const KIND_PLURAL = { photo: 'Photos', carousel: 'Carousels', reel: 'Reels', video: 'Videos' };
+// Color follows the entity (post type), never its rank.
+const KIND_COLOR = { photo: 'var(--series-1)', carousel: 'var(--series-2)', reel: 'var(--series-3)', video: 'var(--series-4)' };
+
+/** Skip rate as a fraction (Instagram reports a percentage). */
+function skipRateOf(m) {
+  const v = num(m?.metrics?.skipRate);
+  if (v == null) return null;
+  return v > 1 ? v / 100 : v;
+}
+
+export function captionLine(text, max = 140) {
+  const first = String(text || '').split(/\n/).find((l) => l.trim() && !/^[.\s]*$/.test(l)) || '';
+  const clean = first.trim();
+  return clean.length > max ? `${clean.slice(0, max - 1)}…` : clean;
+}
+
+export function previewOf(m) {
+  return m.thumbnailUrl || (m.mediaType === 'VIDEO' ? null : m.mediaUrl) || null;
+}
+
+export function shortDateTime(iso, tz) {
+  const t = parseTimestamp(iso);
+  return Number.isFinite(t) ? format(new Date(t), tz, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—';
+}
+
+function shortDate(iso, tz) {
+  const t = parseTimestamp(iso);
+  return Number.isFinite(t) ? format(new Date(t), tz, { month: 'short', day: 'numeric' }) : '—';
+}
+
+/** Media thumbnail with a quiet placeholder when the (expiring) Instagram URL fails. */
+export function Thumb({ src, alt = '', size = 40, ratio = '1 / 1', kind, eager = false, class: cls }) {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [src]);
+  return html`<span class=${cx('an-thumb', cls)} style=${{ width: size ? `${size}px` : undefined, aspectRatio: ratio }}>
+    ${src && !failed
+      ? html`<img src=${src} alt=${alt} loading=${eager ? 'eager' : 'lazy'} decoding="async" referrerpolicy="no-referrer" onError=${() => setFailed(true)} />`
+      : html`<${Icon} name=${kind === 'reel' ? 'reel' : kind === 'story' ? 'story' : 'image'} size=${size && size < 48 ? 15 : 22} />`}
+  </span>`;
+}
+
+// ---------------------------------------------------------------------------
+// Followers (stock metric) reconstruction
+
+/**
+ * Daily follower totals for a range. Days the worker captured keep their value; the others are
+ * estimated from the nearest captured total and the daily follows/unfollows in between. A day
+ * whose path to a captured total crosses a day without follow data stays null (unknown).
+ * @returns {{labels: string[], values: (number|null)[], estimated: boolean}}
+ */
+export function followerSeries(days, fromKey, toKey) {
+  const labels = fromKey <= toKey ? dayRange(fromKey, toKey) : [];
+  const anchors = Object.keys(days || {}).filter((k) => isNum(days[k]?.followers)).sort();
+  if (!anchors.length) return { labels, values: labels.map(() => null), estimated: false };
+  const netOf = (k) => {
+    const d = days[k];
+    const g = num(d?.followsGained);
+    const u = num(d?.unfollows);
+    return g == null && u == null ? null : (g ?? 0) - (u ?? 0);
+  };
+  let estimated = false;
+  const values = labels.map((k) => {
+    if (isNum(days[k]?.followers)) return days[k].followers;
+    const next = anchors.find((a) => a > k);
+    if (next) {
+      let v = days[next].followers;
+      for (let j = next; j > k; j = addDaysKey(j, -1)) {
+        const n = netOf(j);
+        if (n == null) {
+          if (j === next) continue; // the anchor day itself is still in progress
+          return null;
+        }
+        v -= n;
+      }
+      estimated = true;
+      return v;
+    }
+    const prev = anchors[anchors.length - 1];
+    let v = days[prev].followers;
+    for (let j = addDaysKey(prev, 1); j <= k; j = addDaysKey(j, 1)) {
+      const n = netOf(j);
+      if (n == null) return null;
+      v += n;
+    }
+    estimated = true;
+    return v;
+  });
+  return { labels, values, estimated };
+}
+
+// ---------------------------------------------------------------------------
+// Live fallback
+
+const liveCache = new Map(); // key -> { at, promise }
+
+function fetchLive(ig, { fromKey, toKey }, tz) {
+  const key = `${ig.userId}|${tz}|${fromKey}|${toKey}`;
+  const hit = liveCache.get(key);
+  if (hit && Date.now() - hit.at < LIVE_TTL_MS) return hit.promise;
+  const promise = Promise.all([ig.accountDaily({ sinceKey: fromKey, untilKey: toKey, tz }), ig.me().catch(() => null)]).then(([days, me]) => ({ days: days || {}, me }));
+  liveCache.set(key, { at: Date.now(), promise });
+  promise.catch(() => liveCache.delete(key));
+  return promise;
+}
+
+function clampWindow(fromKey, toKey, today) {
+  const to = toKey < today ? toKey : today;
+  let from = fromKey;
+  const floor = addDaysKey(today, -HISTORY_DAYS);
+  if (from < floor) from = floor;
+  const cap = addDaysKey(to, -(MAX_LIVE_DAYS - 1));
+  if (from < cap) from = cap;
+  return from <= to ? { fromKey: from, toKey: to, days: rangeLength(from, to) } : null;
+}
+
+/**
+ * Which days of a range must be loaded live, or null.
+ * - fewer than MIN_DAYS stored days: the range (its last 31 days, within Instagram's 90 days)
+ * - a short range (<= 31 days) with gaps: the span covering the gaps
+ */
+function liveNeed(stored, r, today, { allowGaps }) {
+  const end = r.toKey < today ? r.toKey : addDaysKey(today, -1); // today is never complete
+  const keys = r.fromKey <= end ? dayRange(r.fromKey, end) : [];
+  const missing = keys.filter((k) => !hasFlow(stored[k]));
+  const have = keys.length - missing.length;
+  if (have < MIN_DAYS) {
+    const win = clampWindow(r.fromKey, r.toKey, today);
+    return win ? { ...win, mode: 'range', have } : null;
+  }
+  if (!missing.length || !allowGaps || r.days > MAX_LIVE_DAYS) return null;
+  const win = clampWindow(missing[0], missing[missing.length - 1], today);
+  return win ? { ...win, mode: 'gaps', have } : null;
+}
+
+const hasFollowData = (d) => !!d && (isNum(d.followers) || isNum(d.followsGained) || isNum(d.unfollows));
+
+/**
+ * Follower totals are reconstructed backwards from the latest captured total, so a range that
+ * ends before the stored history needs the days in between too. Returns that "bridge" window
+ * (range end + 1 .. day before the first stored follow data, or today), or null.
+ */
+function bridgeNeed(stored, r, today) {
+  const start = addDaysKey(r.toKey, 1);
+  if (start >= today) return null;
+  const next = Object.keys(stored).filter((k) => k >= start && hasFollowData(stored[k])).sort()[0] || today;
+  const end = addDaysKey(next, -1);
+  if (end < start) return null;
+  const win = clampWindow(start, end, today);
+  return win && win.fromKey === start ? { ...win, mode: 'bridge' } : null;
+}
+
+function coverage(stored, r, today) {
+  const end = r.toKey < today ? r.toKey : addDaysKey(today, -1);
+  const keys = r.fromKey <= end ? dayRange(r.fromKey, end) : [];
+  return { have: keys.filter((k) => hasFlow(stored[k])).length, total: keys.length };
+}
+
+/**
+ * The period a range is compared with: the calendar month before for a whole calendar month (as
+ * the worker's monthly reports do), else the same number of days right before it.
+ * @returns {{fromKey, toKey, days}}
+ */
+export function comparisonRange(fromKey, toKey) {
+  const month = fromKey && fromKey.slice(0, 7);
+  if (month && fromKey.endsWith('-01') && monthBounds(month).toKey === toKey) {
+    const b = monthBounds(previousMonth(month));
+    return { ...b, days: rangeLength(b.fromKey, b.toKey) };
+  }
+  return previousRange(fromKey, toKey);
+}
+
+/** Posts published by Postpilot: Map(igMediaId -> post). */
+function postsByMediaId(...docs) {
+  const out = new Map();
+  for (const d of docs) for (const p of (d && d.posts) || []) if (p && p.igMediaId && !out.has(String(p.igMediaId))) out.set(String(p.igMediaId), p);
+  return out;
+}
+
+/** Trial reels published by Postpilot: Map(igMediaId -> trialReel mode). */
+function trialReelsByMedia(...docs) {
+  const out = new Map();
+  for (const d of docs) for (const p of (d && d.posts) || []) if (p && p.trialReel && p.igMediaId) out.set(String(p.igMediaId), p.trialReel);
+  return out;
+}
+
+/**
+ * Media entries with posts deleted from Instagram marked `deletedAt`: the worker's analytics job sets it,
+ * and a post deleted with "Delete from Instagram" (posts deletedFromInstagramAt) is marked before that run.
+ * Deleted posts keep counting in totals; tables mark them and top-post lists leave them out.
+ */
+export function markDeleted(media, ...docs) {
+  const gone = new Map();
+  for (const d of docs) for (const p of (d && d.posts) || []) if (p && p.igMediaId && p.deletedFromInstagramAt) gone.set(String(p.igMediaId), p.deletedFromInstagramAt);
+  if (!gone.size) return media;
+  return media.map((m) => (m && !m.deletedAt && gone.has(String(m.id)) ? { ...m, deletedAt: gone.get(String(m.id)) } : m));
+}
+
+const DAY_H = 24;
+const WEEK_H = 7 * 24;
+// The trial reel hint is shown while sharing it to followers is still timely (a product choice:
+// Instagram documents no deadline for sharing a trial reel from the app).
+const TRIAL_HINT_DAYS = 14;
+
+/**
+ * Views at 24 hours and 7 days for every reel with saved history, and the median of the others.
+ * @returns {{byId: Map<string, {v24, v7, published}>, medianOthers(id, key): number|null}}
+ */
+export function reelBenchmarks(media, historyDoc) {
+  const byId = new Map();
+  const hist = (historyDoc && historyDoc.media) || {};
+  for (const m of media || []) {
+    if (mediaKindOf(m) !== 'reel') continue;
+    const pts = hist[m.id] && hist[m.id].points;
+    if (!pts || !pts.length) continue;
+    byId.set(String(m.id), { v24: valueAtAge(pts, m.timestamp, DAY_H), v7: valueAtAge(pts, m.timestamp, WEEK_H), published: parseTimestamp(m.timestamp) });
+  }
+  return {
+    byId,
+    medianOthers(id, key) {
+      return median([...byId].filter(([k]) => k !== String(id)).map(([, v]) => v[key]));
+    },
+  };
+}
+
+/**
+ * {key, value, median, ahead} for a trial reel against the median of the other reels, judged at the
+ * latest age known (7 days once known, else 24 hours), so the hint never contradicts a newer number.
+ * null when unknown, or once the reel is older than TRIAL_HINT_DAYS.
+ */
+export function trialVerdict(bench, id, nowMs = Date.now()) {
+  const own = bench.byId.get(String(id));
+  if (!own) return null;
+  if (isNum(own.published) && nowMs - own.published > TRIAL_HINT_DAYS * 864e5) return null;
+  const key = isNum(own.v7) ? 'v7' : isNum(own.v24) ? 'v24' : null;
+  if (!key) return null;
+  const med = bench.medianOthers(id, key);
+  if (!isNum(med)) return null;
+  return { key, value: own[key], median: med, ahead: own[key] > med };
+}
+
+/**
+ * Analytics data for a range: stored snapshots merged with live days when needed.
+ * @returns {{ready, error, range, prev, today, days, media, mediaDoc, storiesDoc, audience, competitors,
+ *   history, labels, trials, postsByMedia, bench, followers, live: {current, previous}, coverage, freshness}}
+ */
+export function useAnalytics(range, { compare = true } = {}) {
+  const { ig, tz } = useApp();
+  const docs = useDocs(DOCS);
+  const daily = docs.data['analytics-daily'];
+  const ready = !!daily && !!docs.data['analytics-media'];
+  const stored = (daily && daily.days) || {};
+  const today = range.today || dayKey(new Date(), tz);
+  const prev = useMemo(() => comparisonRange(range.fromKey, range.toKey), [range.fromKey, range.toKey]);
+
+  const curNeed = ready ? liveNeed(stored, range, today, { allowGaps: true }) : null;
+  const prevNeed = ready && compare && prev.days <= MAX_LIVE_DAYS ? liveNeed(stored, { ...prev, today }, today, { allowGaps: true }) : null;
+  const bridge = curNeed ? bridgeNeed(stored, range, today) : null;
+  const curKey = curNeed ? `${curNeed.fromKey}|${curNeed.toKey}` : '';
+  const prevKey = prevNeed ? `${prevNeed.fromKey}|${prevNeed.toKey}` : '';
+  const bridgeKey = bridge ? `${bridge.fromKey}|${bridge.toKey}` : '';
+
+  const [live, setLive] = useState({});
+  const [retry, setRetry] = useState(0);
+  const alive = useRef(true);
+  useEffect(() => () => (alive.current = false), []);
+  useEffect(() => {
+    if (!ig) return;
+    for (const need of [curNeed, prevNeed, bridge]) {
+      if (!need) continue;
+      const k = `${need.fromKey}|${need.toKey}`;
+      if (live[k] && live[k].status !== 'error') continue;
+      setLive((s) => ({ ...s, [k]: { status: 'loading' } }));
+      fetchLive(ig, need, tz).then(
+        (res) => alive.current && setLive((s) => ({ ...s, [k]: { status: 'done', ...res } })),
+        (error) => alive.current && setLive((s) => ({ ...s, [k]: { status: 'error', error } })),
+      );
+    }
+  }, [ig, tz, curKey, prevKey, bridgeKey, retry]);
+
+  const curLive = curKey ? live[curKey] || { status: ig ? 'loading' : 'unavailable' } : null;
+  const prevLive = prevKey ? live[prevKey] || { status: ig ? 'loading' : 'unavailable' } : null;
+  const bridgeLive = bridgeKey ? live[bridgeKey] || null : null;
+
+  const days = useMemo(() => {
+    const out = {};
+    for (const src of [bridgeLive, prevLive, curLive]) {
+      if (src && src.status === 'done') for (const [k, v] of Object.entries(src.days || {})) out[k] = { ...v, _live: true };
+    }
+    for (const [k, v] of Object.entries(stored)) {
+      if (!v || typeof v !== 'object') continue;
+      out[k] = hasFlow(v) || !out[k] ? { ...v } : { ...out[k], ...v };
+    }
+    const me = (curLive && curLive.me) || (prevLive && prevLive.me);
+    if (me && isNum(me.followersCount) && !Object.values(out).some((d) => isNum(d.followers))) {
+      out[today] = { ...(out[today] || {}), followers: me.followersCount };
+    }
+    return out;
+  }, [stored, curLive, prevLive, bridgeLive, today]);
+
+  const postsDoc = docs.data.posts;
+  const archiveDoc = docs.data['posts-archive'];
+  const media = useMemo(() => markDeleted(toList(docs.data['analytics-media']?.media), postsDoc, archiveDoc), [docs.data['analytics-media'], postsDoc, archiveDoc]);
+  const labels = useMemo(() => labelsByMedia(postsDoc, archiveDoc), [postsDoc, archiveDoc]);
+  const trials = useMemo(() => trialReelsByMedia(postsDoc, archiveDoc), [postsDoc, archiveDoc]);
+  const postsByMedia = useMemo(() => postsByMediaId(postsDoc, archiveDoc), [postsDoc, archiveDoc]);
+  const history = docs.data['analytics-media-history'];
+  const bench = useMemo(() => reelBenchmarks(media, history), [media, history]);
+  const followers = useMemo(() => {
+    const keys = Object.keys(days).filter((k) => isNum(days[k].followers)).sort();
+    return keys.length ? days[keys[keys.length - 1]].followers : null;
+  }, [days]);
+
+  const freshness = useMemo(() => {
+    const times = [daily?.lastAttemptAt, docs.data['analytics-media']?.updatedAt].map((t) => Date.parse(t || '')).filter(Number.isFinite);
+    if (!times.length) {
+      for (const d of Object.values(stored)) {
+        const t = Date.parse(d?.capturedAt || '');
+        if (Number.isFinite(t)) times.push(t);
+      }
+    }
+    return times.length ? new Date(Math.max(...times)).toISOString() : null;
+  }, [daily, docs.data['analytics-media']]);
+
+  return {
+    ready,
+    error: docs.error,
+    range,
+    prev,
+    today,
+    days,
+    media,
+    mediaDoc: docs.data['analytics-media'],
+    storiesDoc: docs.data['analytics-stories'],
+    audience: docs.data.audience,
+    competitors: docs.data.competitors,
+    history,
+    labels,
+    trials,
+    postsByMedia,
+    bench,
+    followers,
+    live: { current: curNeed && { ...curNeed, ...curLive }, previous: prevNeed && { ...prevNeed, ...prevLive } },
+    coverage: coverage(stored, range, today),
+    freshness,
+    /** Ask Instagram again for live days that failed to load. */
+    retryLive: () => setRetry((n) => n + 1),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Overview math
+
+/** Everything the Overview (and the report summary) shows, computed once per data change. */
+export function computeOverview(a, tz, { compare = true } = {}) {
+  const { days, range, prev, media } = a;
+  const cur = summarizeDays(days, range.fromKey, range.toKey);
+  const pre = summarizeDays(days, prev.fromKey, prev.toKey);
+  const fol = followerSeries(days, addDaysKey(range.fromKey, -1), range.toKey);
+  const folValues = fol.values.slice(1);
+  const folStart = firstNum(fol.values);
+  const folEnd = lastNum(folValues);
+  const growth = folStart != null && folEnd != null ? folEnd - folStart : null;
+  const pfol = followerSeries(days, addDaysKey(prev.fromKey, -1), prev.toKey);
+  const pStart = firstNum(pfol.values);
+  const pEnd = lastNum(pfol.values);
+  const prevGrowth = pStart != null && pEnd != null && pfol.values.filter(isNum).length > 1 ? pEnd - pStart : null;
+
+  const posts = mediaInRange(media, range.fromKey, range.toKey, tz).filter((m) => m.productType !== 'STORY');
+  const prevPosts = mediaInRange(media, prev.fromKey, prev.toKey, tz).filter((m) => m.productType !== 'STORY');
+  const interactions = interactionsOf(cur);
+  const prevInteractions = interactionsOf(pre);
+  const er = interactions != null && cur.reach > 0 ? interactions / cur.reach : null;
+  const prevEr = prevInteractions != null && pre.reach > 0 ? prevInteractions / pre.reach : null;
+  const labels = dayRange(range.fromKey, range.toKey);
+  const s = (metric) => seriesFor(days, metric, range.fromKey, range.toKey, { forwardFill: false }).values;
+  const interactionSeries = labels.map((k) => (days[k] ? interactionsOf(days[k]) : null));
+  const erSeries = labels.map((k) => {
+    const d = days[k];
+    const i = d ? interactionsOf(d) : null;
+    return i != null && d.reach > 0 ? i / d.reach : null;
+  });
+  const daySeries = (pick) => labels.map((k) => (days[k] ? pick(days[k]) : null));
+  const split = (fKey, nKey) => ({
+    followers: daySeries((d) => num(d[fKey])),
+    nonFollowers: daySeries((d) => num(d[nKey])),
+    total: (cur[fKey] ?? 0) + (cur[nKey] ?? 0),
+    share: isNum(cur[nKey]) && (cur[fKey] ?? 0) + cur[nKey] > 0 ? cur[nKey] / ((cur[fKey] ?? 0) + cur[nKey]) : null,
+    prevShare: isNum(pre[nKey]) && (pre[fKey] ?? 0) + pre[nKey] > 0 ? pre[nKey] / ((pre[fKey] ?? 0) + pre[nKey]) : null,
+  });
+  const viewsByType = breakdownTotals(days, range.fromKey, range.toKey, 'viewsByType');
+  const typeKeys = viewsByType ? Object.keys(viewsByType).sort((x, y) => typeOrder(x) - typeOrder(y)) : [];
+  const has = (pv) => compare && isNum(pv);
+  const prevState = compare && a.live && a.live.previous ? a.live.previous.status : null;
+  const missingLabel = prevState === 'loading' ? 'Loading the previous period…'
+    : prevState === 'error' ? 'Could not load the previous period from Instagram'
+    : 'No data for the previous period';
+
+  const tiles = [
+    {
+      key: 'followers',
+      label: 'Followers',
+      value: folEnd,
+      format: fmtCount(folEnd),
+      delta: growth != null && folStart > 0 ? growth / folStart : undefined,
+      deltaLabel: growth != null ? `${signed(growth)} this period${compare && prevGrowth != null ? ` (${signed(prevGrowth)} before)` : ''}` : 'No follower history yet',
+      spark: folValues,
+    },
+    { key: 'reach', label: 'Reach', value: cur.reach, prev: pre.reach, spark: s('reach') },
+    { key: 'views', label: 'Views', value: cur.views, prev: pre.views, spark: s('views') },
+    { key: 'interactions', label: 'Interactions', value: interactions, prev: prevInteractions, spark: interactionSeries },
+    { key: 'er', label: 'Engagement rate', value: er, prev: prevEr, format: 'percent', spark: erSeries, hint: null },
+    { key: 'engaged', label: 'Accounts engaged', value: cur.accountsEngaged, prev: pre.accountsEngaged, spark: s('accountsEngaged') },
+    { key: 'linkTaps', label: 'Profile link taps', value: cur.profileLinksTaps, prev: pre.profileLinksTaps, spark: s('profileLinksTaps') },
+    { key: 'posts', label: 'Posts published', value: posts.length, prev: prevPosts.length },
+  ].map((t) => {
+    if (t.key === 'followers') return t;
+    const d = compare ? rel(t.value, t.prev) : undefined;
+    return {
+      ...t,
+      value: t.format === 'percent' ? (isNum(t.value) ? formatPercent(t.value) : null) : t.value,
+      format: t.format === 'percent' ? undefined : fmtCount(t.value),
+      delta: compare ? d : undefined,
+      deltaLabel: compare ? (has(t.prev) ? `vs ${show(t.prev, t.format === 'percent' ? 'percent' : 'number')} before` : missingLabel) : undefined,
+    };
+  });
+
+  const byKind = {};
+  for (const m of posts) {
+    const k = mediaKindOf(m);
+    (byKind[k] ||= []).push(m);
+  }
+  const kinds = ['photo', 'carousel', 'reel', 'video'].filter((k) => byKind[k]);
+  const typeRows = kinds.map((k) => ({
+    kind: k,
+    count: byKind[k].length,
+    avgReach: avg(byKind[k].map((m) => metricValue(m, 'reach'))),
+    avgEr: avg(byKind[k].map((m) => engagementRate(m))),
+    avgInteractions: avg(byKind[k].map((m) => interactionsOf(m))),
+  }));
+
+  return {
+    labels,
+    xLabels: labels.map(shortDay),
+    current: cur,
+    previous: pre,
+    followers: { values: folValues, start: folStart, end: folEnd, growth, prevGrowth, estimated: fol.estimated },
+    reach: s('reach'),
+    views: s('views'),
+    interactionSeries,
+    interactions,
+    prevInteractions,
+    er,
+    prevEr,
+    breakdown: [
+      { label: 'Likes', value: cur.likes },
+      { label: 'Comments', value: cur.comments },
+      { label: 'Shares', value: cur.shares },
+      { label: 'Saves', value: cur.saves },
+    ],
+    posts,
+    prevPosts,
+    perWeek: postingFrequency(posts, range.fromKey, range.toKey, tz),
+    prevPerWeek: postingFrequency(prevPosts, prev.fromKey, prev.toKey, tz),
+    typeRows,
+    top: topMedia(posts.filter((m) => !m.deletedAt), 'interactions', 3),
+    tiles,
+    reachSplit: split('reachFollowers', 'reachNonFollowers'),
+    viewsSplit: split('viewsFollowers', 'viewsNonFollowers'),
+    viewsByType,
+    viewsByTypeSeries: typeKeys.map((t) => ({ name: typeLabel(t), color: typeColor(t), values: daySeries((d) => num(d.viewsByType && d.viewsByType[t])) })),
+  };
+}
+
+// Instagram's media_product_type breakdown values (treated as open strings).
+const TYPE_INFO = {
+  POST: ['Posts', 'var(--series-1)'],
+  CAROUSEL_CONTAINER: ['Carousels', 'var(--series-2)'],
+  REEL: ['Reels', 'var(--series-3)'],
+  STORY: ['Stories', 'var(--series-5)'],
+  AD: ['Ads', 'var(--series-6)'],
+};
+const TYPE_ORDER = ['POST', 'CAROUSEL_CONTAINER', 'REEL', 'STORY', 'AD'];
+export const typeOrder = (t) => (TYPE_ORDER.includes(t) ? TYPE_ORDER.indexOf(t) : TYPE_ORDER.length);
+export const typeLabel = (t) => (TYPE_INFO[t] ? TYPE_INFO[t][0] : String(t).toLowerCase().replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase()));
+export const typeColor = (t) => (TYPE_INFO[t] ? TYPE_INFO[t][1] : 'var(--series-muted)');
+
+// ---------------------------------------------------------------------------
+// CSV
+
+function csvDownload(rows, columns, filename) {
+  const csv = toCsv(rows, columns, { bom: true });
+  saveBlob(new Blob([csv], { type: 'text/csv;charset=utf-8' }), filename);
+}
+
+/** Daily metrics for the range (followers estimated where not captured). */
+export function exportDailyCsv(a) {
+  const { days, range } = a;
+  const fol = followerSeries(days, range.fromKey, range.toKey);
+  const rows = dayRange(range.fromKey, range.toKey).map((k, i) => {
+    const d = days[k] || {};
+    return { date: k, followers: fol.values[i], ...d, interactions: hasFlow(d) ? interactionsOf(d) : null, source: hasFlow(d) ? (d._live ? 'Instagram (live)' : 'Postpilot worker') : '' };
+  });
+  const cols = [
+    { key: 'date', label: 'Date' },
+    { key: 'followers', label: 'Followers' },
+    { key: 'followsGained', label: 'New follows' },
+    { key: 'unfollows', label: 'Unfollows' },
+    { key: 'reach', label: 'Reach' },
+    { key: 'views', label: 'Views' },
+    { key: 'accountsEngaged', label: 'Accounts engaged' },
+    { key: 'interactions', label: 'Interactions' },
+    { key: 'likes', label: 'Likes' },
+    { key: 'comments', label: 'Comments' },
+    { key: 'shares', label: 'Shares' },
+    { key: 'saves', label: 'Saves' },
+    { key: 'replies', label: 'Replies' },
+    { key: 'profileLinksTaps', label: 'Profile link taps' },
+    { key: 'source', label: 'Source' },
+  ];
+  csvDownload(rows, cols, `postpilot-daily-${range.fromKey}_${range.toKey}.csv`);
+  return rows.length;
+}
+
+/** Posts published in the range with their latest metrics. */
+export function exportPostsCsv(a, tz) {
+  const { range, media } = a;
+  const list = mediaInRange(media, range.fromKey, range.toKey, tz);
+  const t = (m) => new Date(parseTimestamp(m.timestamp));
+  const cols = [
+    { key: 'date', label: 'Date', value: (m) => dayKey(t(m), tz) },
+    { key: 'time', label: 'Time', value: (m) => format(t(m), tz, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }) },
+    { key: 'type', label: 'Type', value: (m) => KIND_LABEL[mediaKindOf(m)] },
+    { key: 'caption', label: 'Caption' },
+    { key: 'permalink', label: 'Link' },
+    { key: 'reach', label: 'Reach', value: (m) => metricValue(m, 'reach') },
+    { key: 'views', label: 'Views', value: (m) => metricValue(m, 'views') },
+    { key: 'likes', label: 'Likes', value: (m) => metricValue(m, 'likes') },
+    { key: 'comments', label: 'Comments', value: (m) => metricValue(m, 'comments') },
+    { key: 'saves', label: 'Saves', value: (m) => metricValue(m, 'saves') },
+    { key: 'shares', label: 'Shares', value: (m) => metricValue(m, 'shares') },
+    { key: 'interactions', label: 'Interactions', value: (m) => interactionsOf(m) },
+    { key: 'er', label: 'Engagement rate (%)', value: (m) => (engagementRate(m) == null ? null : Math.round(engagementRate(m) * 10000) / 100) },
+    { key: 'watch', label: 'Avg watch time (s)', value: (m) => (isNum(m.metrics?.avgWatchTimeMs) ? Math.round(m.metrics.avgWatchTimeMs / 100) / 10 : null) },
+    { key: 'skip', label: 'Skip rate (%)', value: (m) => (skipRateOf(m) == null ? null : Math.round(skipRateOf(m) * 1000) / 10) },
+    { key: 'deleted', label: 'Deleted from Instagram', value: (m) => (m.deletedAt ? dayKey(new Date(m.deletedAt), tz) : null) },
+  ];
+  csvDownload(list, cols, `postpilot-posts-${range.fromKey}_${range.toKey}.csv`);
+  return list.length;
+}
+
+/** Stories posted in the range plus the ones live now (as in the Stories tab), with their last saved numbers. */
+export function exportStoriesCsv(a, tz) {
+  const list = storiesInRange(a.storiesDoc, a.range, tz, { includeLive: true });
+  const t = (s) => new Date(parseTimestamp(s.timestamp));
+  const nav = (s, k) => num(s.metrics?.navigation?.[k]);
+  const cols = [
+    { key: 'date', label: 'Date', value: (s) => dayKey(t(s), tz) },
+    { key: 'time', label: 'Time', value: (s) => format(t(s), tz, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }) },
+    { key: 'type', label: 'Type', value: (s) => (s.mediaType === 'VIDEO' ? 'Video' : 'Photo') },
+    { key: 'permalink', label: 'Link' },
+    { key: 'reach', label: 'Reach', value: (s) => num(s.metrics?.reach) },
+    { key: 'views', label: 'Views', value: (s) => num(s.metrics?.views) },
+    { key: 'replies', label: 'Replies', value: (s) => num(s.metrics?.replies) },
+    { key: 'shares', label: 'Shares', value: (s) => num(s.metrics?.shares) },
+    { key: 'interactions', label: 'Interactions', value: (s) => num(s.metrics?.totalInteractions) },
+    { key: 'follows', label: 'Follows', value: (s) => num(s.metrics?.follows) },
+    { key: 'profileVisits', label: 'Profile visits', value: (s) => num(s.metrics?.profileVisits) },
+    { key: 'tapForward', label: 'Taps forward', value: (s) => nav(s, 'tapForward') },
+    { key: 'tapBack', label: 'Taps back', value: (s) => nav(s, 'tapBack') },
+    { key: 'tapExit', label: 'Exits', value: (s) => nav(s, 'tapExit') },
+    { key: 'swipeForward', label: 'Swipes forward', value: (s) => nav(s, 'swipeForward') },
+    { key: 'exitRate', label: 'Exit rate (%)', value: (s) => (exitRateOf(s) == null ? null : Math.round(exitRateOf(s) * 1000) / 10) },
+    { key: 'capturedAt', label: 'Numbers saved at', value: (s) => (s.capturedAt ? format(new Date(s.capturedAt), tz, { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }) : null) },
+  ];
+  csvDownload(list, cols, `postpilot-stories-${a.range.fromKey}_${a.range.toKey}.csv`);
+  return list.length;
+}
+
+// ---------------------------------------------------------------------------
+// Overview sections (shared with Reports)
+
+export function OverviewStats({ ov, loading = false, class: cls }) {
+  return html`<div class=${cx('stats an-stats', cls)}>
+    ${ov.tiles.map(
+      (t) => html`<${Stat} key=${t.key} label=${t.label} value=${t.value ?? '—'} format=${t.format} delta=${t.delta} deltaLabel=${t.deltaLabel}
+        sparkline=${t.spark && t.spark.filter(isNum).length > 1 ? t.spark : undefined} loading=${loading} />`,
+    )}
+  </div>`;
+}
+
+export function FollowersChart({ ov, height = 220 }) {
+  const f = ov.followers;
+  return html`<${Panel} title="Followers" subtitle=${f.estimated ? 'Daily total, estimated from follows and unfollows between snapshots' : 'Daily total'}>
+    <${LineChart} label="Followers per day" area=${false} height=${height} xLabels=${ov.xLabels}
+      series=${[{ name: 'Followers', values: f.values }]} emptyText="No follower history for this range yet" />
+  <//>`;
+}
+
+export function ReachViewsChart({ ov, height = 220 }) {
+  return html`<${Panel} title="Reach and views" subtitle="Accounts reached and times your content was seen, per day">
+    <${LineChart} label="Reach and views per day" height=${height} xLabels=${ov.xLabels}
+      series=${[{ name: 'Views', values: ov.views }, { name: 'Reach', values: ov.reach }]} emptyText="No reach data for this range yet" />
+  <//>`;
+}
+
+const FOLLOWER_COLOR = 'var(--series-1)';
+const NON_FOLLOWER_COLOR = 'var(--series-2)';
+
+/** Daily reach split into followers and non-followers (stacked), with the period's share. */
+export function FollowerReachChart({ ov, height = 200, compare = true }) {
+  const sp = ov.reachSplit;
+  const sub = isNum(sp.share)
+    ? `${formatPercent(sp.share)} of reach came from non-followers${compare && isNum(sp.prevShare) ? ` (${formatPercent(sp.prevShare)} before)` : ''}`
+    : 'Accounts reached each day, split by whether they follow you';
+  return html`<${Panel} title="Reach: followers vs non-followers" subtitle=${sub} class="an-split">
+    <${StackedColumns} label="Reach per day, followers and non-followers" height=${height} xLabels=${ov.xLabels}
+      series=${[{ name: 'Followers', values: sp.followers, color: FOLLOWER_COLOR }, { name: 'Non-followers', values: sp.nonFollowers, color: NON_FOLLOWER_COLOR }]}
+      emptyText="No follower split saved for this range yet" />
+    <p class="an-note">Instagram reports reach per day, so an account reached on two days counts twice. The worker saves this split with each daily snapshot.</p>
+  <//>`;
+}
+
+/** Views by format (Instagram's media_product_type breakdown): share of the period, then per day. */
+export function ViewsByFormatChart({ ov, height = 150, trend = true }) {
+  const totals = ov.viewsByType;
+  const segs = totals
+    ? Object.keys(totals).sort((x, y) => typeOrder(x) - typeOrder(y)).map((t) => ({ label: typeLabel(t), value: totals[t], color: typeColor(t) }))
+    : [];
+  const vs = ov.viewsSplit;
+  const sub = isNum(vs.share) ? `${formatPercent(1 - vs.share)} of views from followers, ${formatPercent(vs.share)} from non-followers` : 'Times your content was seen, by format';
+  return html`<${Panel} title="Views by format" subtitle=${sub} class="an-split">
+    ${segs.length
+      ? html`<${StackedBar} label="Views by format in this period" segments=${segs} format="compact" />
+          ${trend && ov.viewsByTypeSeries.length
+            ? html`<div class="an-subchart">
+                <h3 class="an-subchart-title">Per day</h3>
+                <${StackedColumns} label="Views per day by format" height=${height} xLabels=${ov.xLabels} series=${ov.viewsByTypeSeries} format="compact" />
+              </div>`
+            : null}`
+      : html`<${EmptyState} compact icon="chart" title="No views by format saved for this range yet" body="The worker saves this split with each daily snapshot." />`}
+  <//>`;
+}
+
+export function InteractionsChart({ ov, trend = true }) {
+  const sub = ov.interactions != null ? `${formatValue(ov.interactions)} interactions · ${formatPercent(ov.er)} engagement rate` : 'Likes, comments, shares and saves';
+  return html`<${Panel} title="Interactions" subtitle=${sub}>
+    <${BarChart} horizontal label="Interactions by type" data=${ov.breakdown} emptyText="No interactions in this range" />
+    ${trend && ov.interactionSeries.filter(isNum).length > 1
+      ? html`<div class="an-subchart">
+          <h3 class="an-subchart-title">Per day</h3>
+          <${LineChart} label="Interactions per day" height=${132} xLabels=${ov.xLabels} series=${[{ name: 'Interactions', values: ov.interactionSeries }]} />
+        </div>`
+      : null}
+    <p class="an-note">Engagement rate is interactions divided by reach.</p>
+  <//>`;
+}
+
+export function PostingFrequency({ ov, compare = true }) {
+  const segs = ov.typeRows.map((r) => ({ label: KIND_PLURAL[r.kind], value: r.count, color: KIND_COLOR[r.kind] }));
+  return html`<${Panel} title="Posting frequency" subtitle="Feed posts and reels published in this period">
+    ${ov.posts.length
+      ? html`<div class="stack an-freq">
+          <div class="an-figure">
+            <span class="an-figure-value">${formatValue(Math.round(ov.perWeek * 10) / 10)}</span>
+            <span class="an-figure-unit">posts per week</span>
+            ${compare && ov.prevPosts.length ? html`<span class="an-figure-compare">vs ${formatValue(Math.round(ov.prevPerWeek * 10) / 10)} before</span>` : null}
+          </div>
+          <${StackedBar} label="Posts by type" segments=${segs} />
+          <div class="table-wrap">
+            <table class="table table-dense an-mini-table">
+              <thead><tr><th scope="col">Type</th><th scope="col" class="align-right">Posts</th><th scope="col" class="align-right an-col-reach">Avg reach</th><th scope="col" class="align-right">Eng. rate</th></tr></thead>
+              <tbody>
+                ${ov.typeRows.map(
+                  (r) => html`<tr key=${r.kind}>
+                    <td><span class="legend-key is-rect an-key" style=${{ '--key': KIND_COLOR[r.kind] }}></span>${KIND_PLURAL[r.kind]}</td>
+                    <td class="align-right">${r.count}</td>
+                    <td class="align-right an-col-reach">${formatValue(r.avgReach == null ? null : Math.round(r.avgReach))}</td>
+                    <td class="align-right">${formatPercent(r.avgEr)}</td>
+                  </tr>`,
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>`
+      : html`<${EmptyState} compact icon="calendar" title="No posts in this period" body="Posts you publish show up here with their reach and engagement." />`}
+  <//>`;
+}
+
+export function TopPosts({ ov, tz, onOpen, title = 'Top posts', count = 3 }) {
+  const list = ov.top.slice(0, count);
+  return html`<${Panel} title=${title} subtitle="Most interactions in this period">
+    ${list.length
+      ? html`<div class="an-top">
+          ${list.map((m, i) => {
+            const kind = mediaKindOf(m);
+            const body = html`
+              <span class="an-top-rank mono" aria-hidden="true">${String(i + 1).padStart(2, '0')}</span>
+              <${Thumb} src=${previewOf(m)} size=${null} ratio="4 / 5" kind=${kind} class="an-top-thumb" eager />
+              <span class="an-top-meta">
+                <span class="row row-between"><span class="muted text-sm">${shortDateTime(m.timestamp, tz)}</span><${Badge} tone="outline">${KIND_LABEL[kind]}<//></span>
+                <span class="an-top-caption clamp-2">${captionLine(m.caption) || 'No caption'}</span>
+                <span class="an-top-nums">
+                  <span><strong class="num">${formatValue(interactionsOf(m))}</strong> interactions</span>
+                  <span><strong class="num">${formatValue(metricValue(m, 'reach'))}</strong> reach</span>
+                  <span><strong class="num">${formatPercent(engagementRate(m))}</strong> eng.</span>
+                </span>
+              </span>`;
+            return onOpen
+              ? html`<button type="button" key=${m.id} class="an-top-card" onClick=${() => onOpen(m)} aria-label=${`Post ${i + 1}: ${captionLine(m.caption, 60) || KIND_LABEL[kind]}`}>${body}</button>`
+              : html`<div key=${m.id} class="an-top-card">${body}</div>`;
+          })}
+        </div>`
+      : html`<${EmptyState} compact icon="trophy" title="No post stats in this period" body="The worker saves stats for your recent posts every day." />`}
+  <//>`;
+}
+
+// ---------------------------------------------------------------------------
+// Status line: freshness + live labels
+
+function SourceNotes({ a, ig }) {
+  const cur = a.live.current;
+  const prev = a.live.previous;
+  const out = [];
+  if (cur) {
+    if (cur.status === 'loading') out.push(html`<${Badge} tone="info" key="cl"><${Spinner} size=${11} label="" /> Loading from Instagram…<//>`);
+    else if (cur.status === 'done') out.push(html`<${Badge} tone="info" icon="instagram-outline" key="cd" title=${`Live from Instagram: ${formatRangeLabel(cur.fromKey, cur.toKey)}`}>${cur.mode === 'gaps' ? 'Gaps filled live from Instagram' : 'Live from Instagram'}<//>`);
+  }
+  if (prev && prev.status === 'done') out.push(html`<span class="muted text-sm" key="pd">Previous period loaded live from Instagram</span>`);
+  else if (prev && prev.status === 'error') {
+    const msg = prev.error && prev.error.userMessage;
+    out.push(html`<span class="muted text-sm" key="pe">Could not load the previous period from Instagram${msg ? `: ${msg}` : '.'}</span>`);
+    if (a.retryLive) out.push(html`<${Button} key="pr" size="sm" variant="ghost" icon="refresh" onClick=${a.retryLive}>Try again<//>`);
+  }
+  return out.length ? html`<span class="row an-source">${out}</span>` : null;
+}
+
+function LiveProblems({ a, ig }) {
+  const cur = a.live.current;
+  if (!cur) {
+    if (a.coverage.total && a.coverage.have < a.coverage.total && a.coverage.have >= MIN_DAYS) {
+      return html`<p class="an-note">Daily stats cover ${a.coverage.have} of ${a.coverage.total} complete days in this range. Postpilot keeps every day from when the worker started; Instagram only keeps the last 90 days.</p>`;
+    }
+    return null;
+  }
+  if (cur.status === 'unavailable' || !ig) {
+    return html`<${Callout} tone="warning" title="Not enough saved data for this range"
+      action=${html`<${Button} size="sm" variant="secondary" href="#/settings?section=instagram">Open Settings<//>`}>
+      The worker has saved fewer than ${MIN_DAYS} days here. Connect Instagram in Settings to load these days live.
+    <//>`;
+  }
+  if (cur.status === 'error') {
+    const msg = (cur.error && (cur.error.userMessage || cur.error.message)) || 'Instagram did not answer.';
+    return html`<${Callout} tone="warning" title="Could not load these days from Instagram">${msg} Showing the days Postpilot has saved.<//>`;
+  }
+  if (cur.status === 'done' && cur.mode === 'range' && (cur.fromKey !== a.range.fromKey || cur.toKey !== a.range.toKey)) {
+    return html`<p class="an-note">Instagram only shares daily stats for the last 90 days, at most 31 days at a time, so this view covers ${formatRangeLabel(cur.fromKey, cur.toKey)}.</p>`;
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Post details drawer
+
+function MetricList({ m }) {
+  const mt = m.metrics || {};
+  const rows = [
+    ['Reach', metricValue(m, 'reach')],
+    ['Views', metricValue(m, 'views')],
+    ['Likes', metricValue(m, 'likes')],
+    ['Comments', metricValue(m, 'comments')],
+    ['Saves', metricValue(m, 'saves')],
+    ['Shares', metricValue(m, 'shares')],
+    ['Reposts', num(mt.reposts)],
+    ['Interactions', interactionsOf(m)],
+    ['Engagement rate', engagementRate(m), 'percent'],
+    ['Profile visits', num(mt.profileVisits)],
+    ['Follows', num(mt.follows)],
+    ['Avg watch time', num(mt.avgWatchTimeMs), 'ms'],
+    ['Total watch time', num(mt.totalWatchTimeMs), 'ms'],
+    ['Skip rate', skipRateOf(m), 'percent'],
+  ].filter(([, v]) => v != null);
+  if (!rows.length) return html`<p class="muted">Instagram has not reported stats for this post yet.</p>`;
+  return html`<dl class="kv an-kv">
+    ${rows.map(([label, v, kind]) => html`<dt>${label}</dt><dd class="num">${kind === 'ms' ? formatDuration(v) : show(v, kind || 'number')}</dd>`)}
+  </dl>`;
+}
+
+const HOUR_TICKS = [
+  { value: 1, label: '1h' },
+  { value: 3, label: '3h' },
+  { value: 6, label: '6h' },
+  { value: 12, label: '12h' },
+  { value: 24, label: '1d' },
+  { value: 48, label: '2d' },
+  { value: 72, label: '3d' },
+  { value: 168, label: '7d' },
+  { value: 336, label: '14d' },
+  { value: 720, label: '30d' },
+];
+
+/** "45 min", "5 h", "3.5 days" after posting. */
+export function ageText(hours) {
+  if (!isNum(hours)) return '—';
+  if (hours < 1) return `${Math.max(0, Math.round(hours * 60))} min after posting`;
+  if (hours < 48) return `${Math.round(hours)} h after posting`;
+  return `${Math.round((hours / 24) * 10) / 10} days after posting`;
+}
+
+// A curve starts from 0 at publishing only when its first point is this close to it; otherwise the
+// early growth was not measured and is left blank instead of drawn as a straight line.
+const HISTORY_LEAD_HOURS = 3;
+
+/** Day ticks ("21d") for a late history's own span, at most about 6. */
+function dayTicks(fromH, toH) {
+  const a = Math.floor(fromH / 24);
+  const b = Math.ceil(toH / 24);
+  const step = Math.max(1, Math.ceil((b - a) / 6));
+  const out = [];
+  for (let d = a; d <= b; d += step) out.push({ value: d * 24, label: `${d}d` });
+  return out;
+}
+
+/**
+ * Cumulative views and reach over the hours since publishing (log-spaced time axis). A history
+ * that starts late is drawn over its own span (linear, day ticks) instead of from publishing.
+ */
+export function HistoryChart({ media, points, height = 190 }) {
+  const t0 = parseTimestamp(media.timestamp);
+  const pts = (points || []).map((p) => ({ ...p, h: (parseTimestamp(p.t) - t0) / 36e5 })).filter((p) => isNum(p.h) && p.h >= 0);
+  const late = pts.length > 0 && pts[0].h > HISTORY_LEAD_HOURS;
+  const line = (key) => [...(late ? [] : [{ x: 0, y: 0 }]), ...pts.filter((p) => isNum(p[key])).map((p) => ({ x: Math.round(p.h * 100) / 100, y: p[key] }))];
+  const series = [];
+  if (pts.some((p) => isNum(p.v))) series.push({ name: 'Views', points: line('v'), color: 'var(--series-1)' });
+  if (pts.some((p) => isNum(p.r))) series.push({ name: 'Reach', points: line('r'), color: 'var(--series-3)' });
+  const axis = late ? { xScale: 'linear', xTicks: dayTicks(pts[0].h, pts[pts.length - 1].h), xFrom: Math.floor(pts[0].h / 24) * 24 } : { xScale: 'log', xTicks: HOUR_TICKS };
+  return html`<${CurveChart} label="Views and reach since publishing" height=${height} series=${series} xScale=${axis.xScale} xTicks=${axis.xTicks} xFrom=${axis.xFrom}
+      xFormat=${ageText} emptyText="No saved history for this post" />
+    ${late ? html`<p class="an-note an-history-late">History starts ${ageText(pts[0].h).replace(' after posting', '')} after publishing. Postpilot was not saving this post's growth before then.</p>` : null}`;
+}
+
+/** Values at 24 h and 7 days with the median of the other reels. */
+function AgeValues({ media, points, bench }) {
+  const reel = mediaKindOf(media) === 'reel';
+  const rows = [
+    ['Views at 24 h', valueAtAge(points, media.timestamp, DAY_H), reel ? bench.medianOthers(media.id, 'v24') : null],
+    ['Views at 7 days', valueAtAge(points, media.timestamp, WEEK_H), reel ? bench.medianOthers(media.id, 'v7') : null],
+    ['Reach at 24 h', valueAtAge(points, media.timestamp, DAY_H, 'r'), null],
+  ].filter(([, v, med]) => v != null || med != null);
+  if (!rows.length) return null;
+  return html`<dl class="kv an-kv an-age">
+    ${rows.map(
+      ([label, v, med]) => html`<dt>${label}</dt><dd class="num">${show(v)}${isNum(v) && isNum(med) ? html` <${VsMedian} value=${v} median=${med} />` : null}</dd>`,
+    )}
+  </dl>
+  ${reel && rows.some(([, v, med]) => isNum(v) && isNum(med)) ? html`<p class="an-note">Compared with the median of your other reels at the same age.</p>` : null}`;
+}
+
+/** "+23% vs median" chip. */
+function VsMedian({ value, median: med, short = false }) {
+  const d = rel(value, med);
+  if (d == null) return null;
+  const tone = Math.abs(d) < 0.05 ? 'is-flat' : d > 0 ? 'is-up' : 'is-down';
+  return html`<span class=${cx('an-vs', tone)} title=${`Median of your other reels: ${formatValue(Math.round(med))}`}>${formatDelta(d)}${short ? '' : ' vs median'}</span>`;
+}
+
+/** The hint for a trial reel that beats the median (graduating is only possible in the Instagram app). */
+export function TrialHint({ verdict, subject, action, mode }) {
+  if (!verdict || !verdict.ahead) return null;
+  const age = verdict.key === 'v24' ? 'at 24 hours' : 'at 7 days';
+  return html`<${Callout} tone="success" icon="arrow-up" class="an-trial-hint" title="Doing well with non-followers — share it to your followers in the Instagram app" action=${action}>
+    ${subject ? `${subject}: ` : 'This trial reel had '}${formatValue(verdict.value)} views ${age}; the median of your other reels is ${formatValue(Math.round(verdict.median))}.
+    Instagram's API can't share a trial reel with your followers, so do it from the reel in the Instagram app.${mode === 'SS_PERFORMANCE' ? ' You chose automatic sharing for this reel, so Instagram may also share it on its own when it performs well.' : ''}
+  <//>`;
+}
+
+export function PostDrawer({ media, onClose, history, bench, trials }) {
+  const { ig, tz, toast } = useApp();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  useEffect(() => setError(null), [media && media.id]);
+  if (!media) return html`<${Drawer} open=${false} onClose=${onClose} />`;
+  const kind = mediaKindOf(media);
+  const points = (history && history.media && history.media[media.id] && history.media[media.id].points) || [];
+  const trial = trials && trials.get(String(media.id));
+  const verdict = trial && bench ? trialVerdict(bench, media.id) : null;
+  const ageDays = (Date.now() - parseTimestamp(media.timestamp)) / 864e5;
+  const refresh = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const fresh = await ig.mediaInsights({ id: media.id, mediaType: media.mediaType, productType: media.productType });
+      const at = new Date().toISOString();
+      await transact(
+        async (tx) => {
+          const d = await tx.read('analytics-media');
+          const m = d.media && d.media[media.id];
+          if (!m) return;
+          m.metrics = { ...(m.metrics || {}), ...(fresh || {}) };
+          m.fetchedAt = at;
+          tx.write('analytics-media', d);
+          // Posts under 30 days old also get a history point, like a worker refresh.
+          const published = parseTimestamp(m.timestamp);
+          if (!fresh || !Object.keys(fresh).length || !(Date.parse(at) - published < HISTORY_ADD_DAYS * 864e5)) return;
+          const point = historyPoint(m, at);
+          const h = await tx.read('analytics-media-history');
+          h.media ||= {};
+          const next = point && appendHistoryPoint(h.media[media.id]?.points, point, { originMs: published });
+          if (!next) return;
+          h.media[media.id] = { ...(h.media[media.id] || {}), points: next };
+          tx.write('analytics-media-history', h);
+        },
+        { message: 'analytics: refresh one post' },
+      );
+      toast('Post stats updated from Instagram.', { kind: 'success' });
+    } catch (err) {
+      setError(err.userMessage || err.message || String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const deleted = !!media.deletedAt;
+  return html`<${Drawer} open=${true} title="Post details" onClose=${onClose}
+    footer=${deleted
+      ? null
+      : html`
+        ${media.permalink ? html`<${Button} variant="ghost" icon="external" href=${media.permalink} target="_blank" rel="noopener noreferrer">View on Instagram<//>` : null}
+        <${Button} variant="secondary" icon="refresh" loading=${busy} disabled=${!ig} onClick=${refresh}>Refresh from Instagram<//>`}>
+    <div class="stack an-drawer">
+      <div class="an-drawer-head">
+        <${Thumb} src=${previewOf(media)} size=${120} ratio="4 / 5" kind=${kind} eager />
+        <div class="stack-sm stack">
+          <div class="row">
+            <${Badge} tone="outline">${KIND_LABEL[kind]}<//>
+            ${trial ? html`<${Badge} tone="info" title="Published as a trial reel: shown to non-followers first">Trial reel<//>` : null}
+            <span class="muted text-sm">${shortDateTime(media.timestamp, tz)}</span>
+          </div>
+          <p class="pre-wrap an-drawer-caption">${media.caption || 'No caption'}</p>
+        </div>
+      </div>
+      ${deleted
+        ? html`<${Callout} tone="warning" title=${`Deleted from Instagram ${shortDateTime(media.deletedAt, tz)}`}>Its last numbers are kept and still count in your totals.<//>`
+        : html`<${TrialHint} verdict=${verdict} mode=${trial} />`}
+      ${error ? html`<${Callout} tone="danger" title="Could not refresh this post">${error}<//>` : null}
+      ${!ig && !deleted ? html`<p class="an-note">Connect Instagram in Settings to refresh a post's stats live.</p>` : null}
+      <h3 class="section-title">Since publishing</h3>
+      ${points.length
+        ? html`<div class="an-history">
+            <${HistoryChart} media=${media} points=${points} />
+            <${AgeValues} media=${media} points=${points} bench=${bench || reelBenchmarks([], null)} />
+          </div>`
+        : html`<p class="an-note">${ageDays >= HISTORY_ADD_DAYS
+            ? "Postpilot only saves growth during a post's first 30 days, and this post had passed that when history started."
+            : 'Postpilot saves how this post grows each time the worker refreshes it during its first 30 days. The first point appears after the next refresh.'}</p>`}
+      <h3 class="section-title">Stats</h3>
+      <${MetricList} m=${media} />
+      <p class="an-note">${media.fetchedAt ? `Updated ${relative(media.fetchedAt)}.` : 'Not refreshed yet.'}${deleted ? '' : ' The worker refreshes a post hourly for its first 2 days, every 6 hours until day 7, daily until day 30, then weekly.'}</p>
+    </div>
+  <//>`;
+}
+
+// ---------------------------------------------------------------------------
+// Posts tab
+
+function mediaColumns(tz, { reels = false, bench = null, trials = null } = {}) {
+  const n = (key, label, getter, fmt = 'number') => ({
+    key,
+    label,
+    align: 'right',
+    sortable: true,
+    sortValue: getter,
+    render: (m) => html`<span class="num">${show(getter(m), fmt)}</span>`,
+  });
+  const base = [
+    { key: 'thumb', label: '', width: 48, render: (m) => html`<${Thumb} src=${previewOf(m)} size=${36} kind=${mediaKindOf(m)} />` },
+    {
+      key: 'date',
+      label: 'Date',
+      sortable: true,
+      sortValue: (m) => parseTimestamp(m.timestamp),
+      defaultDir: 'desc',
+      render: (m) => html`<span class="nowrap">${shortDateTime(m.timestamp, tz)}</span>`,
+    },
+  ];
+  if (!reels) base.push({ key: 'type', label: 'Type', sortable: true, sortValue: (m) => KIND_LABEL[mediaKindOf(m)], render: (m) => html`<${Badge} tone="outline">${KIND_LABEL[mediaKindOf(m)]}<//>` });
+  base.push({
+    key: 'caption',
+    label: 'Caption',
+    class: 'an-caption-cell',
+    render: (m) => html`<span class="an-caption-wrap">${m.deletedAt ? html`<${Badge} tone="warning" class="an-deleted-badge" title=${`Deleted from Instagram ${shortDateTime(m.deletedAt, tz)}. Its numbers still count in totals.`}>Deleted from Instagram<//>` : null}${trials && trials.has(String(m.id)) ? html`<${Badge} tone="info" class="an-trial-badge" title="Published as a trial reel">Trial<//>` : null}<span class="an-caption" title=${captionLine(m.caption, 300)}>${captionLine(m.caption, 90) || html`<span class="faint">No caption</span>`}</span></span>`,
+  });
+  if (reels) {
+    const at = (key) => (m) => bench?.byId.get(String(m.id))?.[key] ?? null;
+    const aged = (key, label) => ({
+      key,
+      label,
+      align: 'right',
+      sortable: true,
+      sortValue: at(key),
+      class: 'an-age-cell',
+      render: (m) => {
+        const v = at(key)(m);
+        const med = v == null || !bench ? null : bench.medianOthers(m.id, key);
+        return v == null ? html`<span class="faint" title="Not known yet">—</span>` : html`<span class="num">${show(v)}</span>${isNum(med) ? html`<${VsMedian} value=${v} median=${med} short />` : null}`;
+      },
+    });
+    return [
+      ...base,
+      n('views', 'Views', (m) => metricValue(m, 'views')),
+      aged('v24', 'Views at 24 h'),
+      aged('v7', 'Views at 7 days'),
+      n('reach', 'Reach', (m) => metricValue(m, 'reach')),
+      { ...n('watch', 'Avg watch', (m) => num(m.metrics?.avgWatchTimeMs)), render: (m) => html`<span class="num">${formatDuration(num(m.metrics?.avgWatchTimeMs))}</span>` },
+      n('skip', 'Skip rate', skipRateOf, 'percent'),
+      n('likes', 'Likes', (m) => metricValue(m, 'likes')),
+      n('comments', 'Comments', (m) => metricValue(m, 'comments')),
+      n('shares', 'Shares', (m) => metricValue(m, 'shares')),
+      n('saves', 'Saves', (m) => metricValue(m, 'saves')),
+      n('er', 'Eng. rate', (m) => engagementRate(m), 'percent'),
+    ];
+  }
+  return [
+    ...base,
+    n('reach', 'Reach', (m) => metricValue(m, 'reach')),
+    n('views', 'Views', (m) => metricValue(m, 'views')),
+    n('likes', 'Likes', (m) => metricValue(m, 'likes')),
+    n('comments', 'Comments', (m) => metricValue(m, 'comments')),
+    n('saves', 'Saves', (m) => metricValue(m, 'saves')),
+    n('shares', 'Shares', (m) => metricValue(m, 'shares')),
+    n('er', 'Eng. rate', (m) => engagementRate(m), 'percent'),
+  ];
+}
+
+const POST_FILTERS = [
+  { value: 'all', label: 'All' },
+  { value: 'photo', label: 'Photos' },
+  { value: 'carousel', label: 'Carousels' },
+  { value: 'reel', label: 'Reels' },
+];
+
+/** Numbers for a filtered set of posts (a label), compared per post with every post in the period. */
+export function CampaignStats({ list, all, class: cls }) {
+  const c = campaignStats(list);
+  const base = campaignStats(all);
+  const perPost = (avgC, avgAll) => (isNum(avgC) ? `${formatValue(Math.round(avgC))} per post vs ${formatValue(isNum(avgAll) ? Math.round(avgAll) : null)}` : 'No numbers yet');
+  return html`<div class=${cx('stats an-stats-5 an-campaign-stats', cls)}>
+    <${Stat} label="Posts" value=${c.posts} hint=${`of ${base.posts} in this period`} />
+    <${Stat} label="Reach" value=${c.reach} format=${fmtCount(c.reach)} delta=${rel(c.avgReach, base.avgReach) ?? undefined} deltaLabel=${perPost(c.avgReach, base.avgReach)} />
+    <${Stat} label="Views" value=${c.views} format=${fmtCount(c.views)} delta=${rel(c.avgViews, base.avgViews) ?? undefined} deltaLabel=${perPost(c.avgViews, base.avgViews)} />
+    <${Stat} label="Interactions" value=${c.interactions} format=${fmtCount(c.interactions)} delta=${rel(c.avgInteractions, base.avgInteractions) ?? undefined} deltaLabel=${perPost(c.avgInteractions, base.avgInteractions)} />
+    <${Stat} label="Engagement rate" value=${isNum(c.avgER) ? formatPercent(c.avgER) : null} delta=${rel(c.avgER, base.avgER) ?? undefined} deltaLabel=${`average vs ${formatPercent(base.avgER)}`} />
+  </div>`;
+}
+
+/** Select options for the label filter (labels on posts in `list`, plus the active one). */
+export function labelOptions(list, index, active) {
+  const counts = labelCounts(list, index);
+  const opts = counts.map((l) => ({ value: l.label, label: `${l.label} (${l.count})` }));
+  if (active && !counts.some((l) => l.label.toLowerCase() === active.toLowerCase())) opts.push({ value: active, label: `${active} (0)` });
+  return opts;
+}
+
+function PostsTab({ a, ov, tz, onOpen, label, onLabel }) {
+  const [kind, setKind] = useState('all');
+  const byKind = useMemo(() => (kind === 'all' ? ov.posts : ov.posts.filter((m) => mediaKindOf(m) === kind || (kind === 'reel' && mediaKindOf(m) === 'video'))), [ov.posts, kind]);
+  const rows = useMemo(() => (label ? mediaWithLabel(byKind, a.labels, label) : byKind), [byKind, a.labels, label]);
+  const opts = useMemo(() => labelOptions(ov.posts, a.labels, label), [ov.posts, a.labels, label]);
+  const anyLabels = a.labels && a.labels.size > 0;
+  const cols = useMemo(() => mediaColumns(tz, { trials: a.trials }), [tz, a.trials]);
+  const avgEr = avg(rows.map((m) => engagementRate(m)));
+  const avgReach = avg(rows.map((m) => metricValue(m, 'reach')));
+  if (!a.media.length) {
+    return html`<${EmptyState} icon="list" title="No post stats yet" body="The worker saves stats for your recent posts every day. Use Refresh now to run it." />`;
+  }
+  return html`<div class="stack">
+    <div class="toolbar an-posts-toolbar">
+      <${Segmented} label="Post type" options=${POST_FILTERS} value=${kind} onChange=${setKind} size="sm" />
+      ${anyLabels
+        ? html`<label class="an-label-filter">
+            <span class="an-label-filter-text"><${Icon} name="tag" size=${14} />Label</span>
+            <${Select} aria-label="Filter by label" options=${[{ value: '', label: 'All posts' }, ...opts]} value=${label || ''} onChange=${(v) => onLabel(v || '')} />
+          </label>`
+        : null}
+      <span class="spacer"></span>
+      <span class="muted text-sm">${rows.length} ${rows.length === 1 ? 'post' : 'posts'} · avg reach <strong class="num an-ink">${formatValue(avgReach == null ? null : Math.round(avgReach))}</strong> · avg engagement <strong class="num an-ink">${formatPercent(avgEr)}</strong></span>
+    </div>
+    ${!anyLabels ? html`<p class="an-note">Add labels to posts in the composer (for example a campaign name) to filter them here and compare them in Reports.</p>` : null}
+    ${label
+      ? html`<div class="stack-sm stack">
+          <h3 class="an-subchart-title">Posts labelled “${label}” in this period · per post, compared with all posts</h3>
+          <${CampaignStats} list=${rows} all=${byKind} />
+        </div>`
+      : null}
+    <${Panel} flush>
+      <${DataTable} dense columns=${cols} rows=${rows} rowKey=${(m) => m.id} initialSort=${{ key: 'date', dir: 'desc' }} onRowClick=${onOpen} maxHeight=${620}
+        caption="Posts in this period" empty=${html`<${EmptyState} compact icon="list" title=${label ? `No posts labelled “${label}” in this period` : 'No posts of this type in this period'} />`} />
+    <//>
+  </div>`;
+}
+
+// ---------------------------------------------------------------------------
+// Reels tab
+
+export function reelsOf(ov) {
+  return ov.posts.filter((m) => mediaKindOf(m) === 'reel');
+}
+
+export function ReelsSummary({ reels }) {
+  return html`<div class="stats an-stats-4">
+    <${Stat} label="Reels" value=${reels.length} />
+    <${Stat} label="Avg views" value=${roundOrNull(avg(reels.map((m) => metricValue(m, 'views'))))} format="compact" />
+    <${Stat} label="Avg watch time" value=${formatDuration(avg(reels.map((m) => num(m.metrics?.avgWatchTimeMs))))} />
+    <${Stat} label="Avg skip rate" value=${formatPercent(avg(reels.map(skipRateOf)))} hint="Viewers who swiped away in the first 3 seconds" />
+  </div>`;
+}
+
+export function ReelViewsChart({ reels, tz, height = 220 }) {
+  const data = [...reels].sort((x, y) => parseTimestamp(x.timestamp) - parseTimestamp(y.timestamp)).map((m) => ({ label: shortDate(m.timestamp, tz), value: metricValue(m, 'views') }));
+  return html`<${Panel} title="Views per reel" subtitle="Oldest to newest; the most viewed reel is highlighted">
+    <${BarChart} label="Views per reel" data=${data} highlightMax height=${height} emptyText="No reels in this period" />
+  <//>`;
+}
+
+function ReelsTab({ a, ov, tz, onOpen }) {
+  const reels = reelsOf(ov);
+  const cols = useMemo(() => mediaColumns(tz, { reels: true, bench: a.bench, trials: a.trials }), [tz, a.bench, a.trials]);
+  if (!reels.length) {
+    return html`<${EmptyState} icon="reel" title="No reels in this period" body="Pick a longer date range, or publish a reel from the composer." />`;
+  }
+  const ahead = reels
+    .filter((m) => !m.deletedAt && a.trials.has(String(m.id)))
+    .map((m) => ({ m, v: trialVerdict(a.bench, m.id) }))
+    .filter((x) => x.v && x.v.ahead);
+  const med24 = median([...a.bench.byId.values()].map((v) => v.v24));
+  const med7 = median([...a.bench.byId.values()].map((v) => v.v7));
+  return html`<div class="stack-lg stack">
+    ${ahead.map(
+      ({ m, v }) => html`<${TrialHint} key=${m.id} verdict=${v} mode=${a.trials.get(String(m.id))} subject=${`“${captionLine(m.caption, 50) || 'Trial reel'}” (${shortDate(m.timestamp, tz)})`}
+        action=${html`<${Button} size="sm" variant="secondary" onClick=${() => onOpen(m)}>Details<//>`} />`,
+    )}
+    <${ReelsSummary} reels=${reels} />
+    <${ReelViewsChart} reels=${reels} tz=${tz} />
+    <p class="an-note">Views at 24 h and 7 days come from the history Postpilot saves during a reel's first 30 days (blank when it is not known). The percentage compares each reel with the median of your other reels.${isNum(med24) ? ` Median of all your reels: ${formatValue(Math.round(med24))} at 24 h${isNum(med7) ? `, ${formatValue(Math.round(med7))} at 7 days` : ''}.` : ''}</p>
+    <${Panel} flush>
+      <${DataTable} dense columns=${cols} rows=${reels} rowKey=${(m) => m.id} initialSort=${{ key: 'date', dir: 'desc' }} onRowClick=${onOpen} maxHeight=${560} caption="Reels in this period" />
+    <//>
+  </div>`;
+}
+
+// ---------------------------------------------------------------------------
+// Stories tab
+
+const STORY_LIFE_MS = 24 * 3600e3;
+const isLiveStory = (s, nowMs = Date.now()) => nowMs - parseTimestamp(s.timestamp) < STORY_LIFE_MS;
+
+/** Stories posted in the range, plus (with includeLive) the ones still live right now. */
+export function storiesInRange(storiesDoc, range, tz, { includeLive = false } = {}) {
+  const nowMs = Date.now();
+  return toList(storiesDoc && storiesDoc.stories)
+    .filter((s) => {
+      const t = parseTimestamp(s.timestamp);
+      if (!Number.isFinite(t)) return false;
+      if (includeLive && isLiveStory(s, nowMs)) return true;
+      const k = dayKey(new Date(t), tz);
+      return k >= range.fromKey && k <= range.toKey;
+    })
+    .sort((x, y) => parseTimestamp(y.timestamp) - parseTimestamp(x.timestamp));
+}
+
+const navOf = (s) => (s.metrics && s.metrics.navigation) || {};
+export const exitRateOf = (s) => {
+  const exits = num(navOf(s).tapExit);
+  const views = num(s.metrics?.views);
+  return exits != null && views > 0 ? exits / views : null;
+};
+
+export function storyColumns(tz) {
+  const n = (key, label, getter, fmt = 'number') => ({ key, label, align: 'right', sortable: true, sortValue: getter, render: (s) => html`<span class="num">${show(getter(s), fmt)}</span>` });
+  return [
+    { key: 'thumb', label: '', width: 44, render: (s) => html`<${Thumb} src=${s.thumbnailUrl || (s.mediaType === 'VIDEO' ? null : s.mediaUrl)} size=${32} ratio="9 / 16" kind="story" />` },
+    {
+      key: 'date',
+      label: 'Posted',
+      sortable: true,
+      sortValue: (s) => parseTimestamp(s.timestamp),
+      render: (s) => html`<span class="nowrap">${shortDateTime(s.timestamp, tz)}</span>${isLiveStory(s) ? html` <${Badge} tone="success">Live<//>` : null}`,
+    },
+    n('reach', 'Reach', (s) => num(s.metrics?.reach)),
+    n('views', 'Views', (s) => num(s.metrics?.views)),
+    n('replies', 'Replies', (s) => num(s.metrics?.replies)),
+    n('fwd', 'Taps forward', (s) => num(navOf(s).tapForward)),
+    n('back', 'Taps back', (s) => num(navOf(s).tapBack)),
+    n('exit', 'Exits', (s) => num(navOf(s).tapExit)),
+    n('exitRate', 'Exit rate', exitRateOf, 'percent'),
+  ];
+}
+
+export function StoriesSummary({ stories }) {
+  return html`<div class="stats an-stats-4">
+    <${Stat} label="Stories" value=${stories.length} />
+    <${Stat} label="Avg reach" value=${roundOrNull(avg(stories.map((s) => num(s.metrics?.reach))))} />
+    <${Stat} label="Replies" value=${sum(stories.map((s) => num(s.metrics?.replies))) ?? 0} />
+    <${Stat} label="Avg exit rate" value=${formatPercent(avg(stories.map(exitRateOf)))} hint="Exits divided by views" />
+  </div>`;
+}
+
+function StoriesTab({ a, tz }) {
+  const stories = storiesInRange(a.storiesDoc, a.range, tz, { includeLive: true });
+  const cols = useMemo(() => storyColumns(tz), [tz]);
+  const unsupported = a.storiesDoc && a.storiesDoc.unsupported;
+  return html`<div class="stack-lg stack">
+    <${Callout} tone="info" title="Story stats are saved while stories are live">
+      Instagram deletes story stats 24 hours after posting, so the worker saves them while a story is live: when it first sees the story, then once an hour, and on every run (about every 10 minutes) in the story's last 90 minutes, so the final numbers are kept. Stories that are live right now are listed whatever the date range.
+    <//>
+    ${unsupported ? html`<${Callout} tone="warning" title="Story stats aren't available for this connection">${unsupported.message || ''}<//>` : null}
+    ${stories.length
+      ? html`<${StoriesSummary} stories=${stories} />
+          <${Panel} flush>
+            <${DataTable} dense columns=${cols} rows=${stories} rowKey=${(s) => s.id} initialSort=${{ key: 'date', dir: 'desc' }} maxHeight=${560} caption="Stories in this period" />
+          <//>`
+      : html`<${EmptyState} icon="story" title="No stories saved for this period" body="Stories you post appear here once the worker has seen them." />`}
+  </div>`;
+}
+
+// ---------------------------------------------------------------------------
+// Audience tab
+
+const AGE_ORDER = ['13-17', '18-24', '25-34', '35-44', '45-54', '55-64', '65+'];
+const GENDER = { F: ['Women', 'var(--series-1)'], M: ['Men', 'var(--series-2)'], U: ['Not specified', 'var(--series-muted)'] };
+
+let regionNames = null;
+function countryName(code) {
+  try {
+    regionNames ||= new Intl.DisplayNames(undefined, { type: 'region' });
+    return regionNames.of(code) || code;
+  } catch {
+    return code;
+  }
+}
+
+/** Rows with their share of `base` (or of their own total). */
+function shares(rows, base) {
+  const list = (rows || []).filter((r) => r && isNum(r.value));
+  const total = base || sum(list.map((r) => r.value)) || 0;
+  return list.map((r) => ({ ...r, share: total ? r.value / total : null }));
+}
+const pct = (v) => formatPercent(v);
+
+export function AudienceCharts({ audience, who = 'follower', compact = false }) {
+  const demo = audience && audience.demographics && audience.demographics[who];
+  if (!demo) {
+    return html`<${EmptyState} icon="users" title="No audience breakdown yet"
+      body="Instagram shares age, gender and location once an account has at least 100 followers. The worker saves it weekly." />`;
+  }
+  // Instagram lists only the top countries and cities, so their shares use the whole audience
+  // (the gender breakdown covers everyone) rather than the listed rows.
+  const base = sum((demo.gender || []).map((r) => r && r.value)) || sum((demo.age || []).map((r) => r && r.value));
+  const age = shares(demo.age)
+    .sort((x, y) => AGE_ORDER.indexOf(x.key) - AGE_ORDER.indexOf(y.key))
+    .map((r) => ({ label: r.key, value: r.share }));
+  const gender = shares(demo.gender).map((r) => ({ label: (GENDER[r.key] || [r.key])[0], value: r.value, color: (GENDER[r.key] || [])[1] }));
+  const countries = shares(demo.country, base).slice(0, compact ? 6 : 10).map((r) => ({ label: countryName(r.key), value: r.share }));
+  const cities = shares(demo.city, base).slice(0, compact ? 6 : 10).map((r) => ({ label: r.key.replace(/,.*$/, ''), value: r.share }));
+  return html`<div class="grid-2 an-grid">
+    <${Panel} title="Age" subtitle="Share of the audience by age group">
+      <${BarChart} label="Audience by age" data=${age} format=${pct} highlightMax />
+    <//>
+    <${Panel} title="Gender" class="an-donut-panel">
+      <div class="an-donut"><${Donut} label="Audience" segments=${gender} format="number" /></div>
+    <//>
+    <${Panel} title="Top countries" subtitle="Share of the whole audience">
+      <${BarChart} horizontal label="Audience by country" data=${countries} format=${pct} />
+    <//>
+    <${Panel} title="Top cities" subtitle="Share of the whole audience">
+      <${BarChart} horizontal label="Audience by city" data=${cities} format=${pct} />
+    <//>
+  </div>`;
+}
+
+function onlineMatrix(online) {
+  if (!online) return null;
+  if (Array.isArray(online.byWeekdayHour) && online.byWeekdayHour.length === 7) return online.byWeekdayHour;
+  if (Array.isArray(online.byHour) && online.byHour.length === 24) return Array.from({ length: 7 }, () => online.byHour);
+  return null;
+}
+
+function AudienceTab({ a }) {
+  const { ig, tz, toast } = useApp();
+  const [who, setWho] = useState('follower');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const audience = a.audience;
+  const matrix = onlineMatrix(audience && audience.onlineFollowers);
+  const refresh = async () => {
+    setBusy(true);
+    setError(null);
+    const [online, demo] = await Promise.allSettled([ig.onlineFollowers({ tz }), ig.demographics({ timeframe: 'this_month' })]);
+    const got = { online: online.status === 'fulfilled' ? online.value : null, demo: demo.status === 'fulfilled' ? demo.value : null };
+    const usableDemo = got.demo && (got.demo.follower || got.demo.engaged) ? got.demo : null;
+    if (!got.online && !usableDemo) {
+      const err = online.reason || demo.reason;
+      setError((err && (err.userMessage || err.message)) || 'Instagram did not return audience data.');
+      setBusy(false);
+      return;
+    }
+    const at = new Date().toISOString();
+    try {
+      await mutate(
+        'audience',
+        (d) => {
+          if (got.online) d.onlineFollowers = got.online;
+          if (usableDemo) d.demographics = usableDemo;
+          d.fetchedAt = at;
+        },
+        { message: 'audience: refresh from Instagram' },
+      );
+      toast('Audience updated from Instagram.', { kind: 'success' });
+    } catch {
+      /* mutate already showed the error */
+    } finally {
+      setBusy(false);
+    }
+  };
+  return html`<div class="stack-lg stack">
+    <div class="toolbar">
+      <${Segmented} label="Audience" size="sm" value=${who} onChange=${setWho}
+        options=${[{ value: 'follower', label: 'Followers' }, { value: 'engaged', label: 'Engaged audience' }]} />
+      <span class="spacer"></span>
+      <span class="muted text-sm">${audience && audience.fetchedAt ? `Updated weekly · last ${relative(audience.fetchedAt)}` : 'Updated weekly by the worker'}</span>
+      <${Button} size="sm" variant="secondary" icon="refresh" loading=${busy} disabled=${!ig} onClick=${refresh}>Refresh from Instagram<//>
+    </div>
+    <p class="an-note">Audience data describes the last 30 days and isn't affected by the date range.${who === 'engaged' ? ' Engaged audience means accounts that interacted with your content this month.' : ''}</p>
+    ${error ? html`<${Callout} tone="danger" title="Could not refresh the audience">${error}<//>` : null}
+    <${AudienceCharts} audience=${audience} who=${who} />
+    <${Panel} title="When your followers are online" subtitle=${`Average followers online per hour, in your time zone (${tz})`}>
+      ${matrix
+        ? html`<${Heatmap} label="Followers online by weekday and hour" matrix=${matrix} format="number" />`
+        : html`<${EmptyState} compact icon="clock" title="No online-follower data yet" body="Instagram reports this for accounts with at least 100 followers." />`}
+    <//>
+  </div>`;
+}
+
+// ---------------------------------------------------------------------------
+// Best times tab
+
+function hourLabel(h) {
+  return format(new Date(Date.UTC(2026, 0, 1, h)), 'UTC', { hour: 'numeric' });
+}
+
+const BASIS_TEXT = {
+  blend: (n) => `Based on when your followers are online (60%) and how your last ${n} posts performed by the hour they went out (40%).`,
+  audience: () => 'Based on when your followers are online over the last 30 days.',
+  engagement: (n) => `Based on how your last ${n} posts performed by the hour they went out, blended with typical Instagram activity.`,
+  default: () => 'Typical Instagram activity. It becomes specific to you once the worker has saved audience data or a few posts.',
+};
+
+export function useBestTimes(a, tz) {
+  return useMemo(
+    () => bestTimeMatrix({ onlineFollowers: a.audience && a.audience.onlineFollowers, mediaStats: a.mediaDoc && a.mediaDoc.media, tz, followers: a.followers ?? undefined }),
+    [a.audience, a.mediaDoc, tz, a.followers],
+  );
+}
+
+/** Next time (ISO) this weekday/hour comes round in tz, at least 20 minutes from now. */
+function nextSlot(weekday, hour, tz, now = Date.now()) {
+  const today = dayKey(new Date(now), tz);
+  for (let i = 0; i <= 7; i++) {
+    const k = addDaysKey(today, i);
+    if (weekdayOfKey(k) !== weekday) continue;
+    const at = zonedToUtc(k, `${String(hour).padStart(2, '0')}:00`, tz);
+    if (at.getTime() > now + 20 * 60e3) return at.toISOString();
+  }
+  return zonedToUtc(addDaysKey(today, 7), `${String(hour).padStart(2, '0')}:00`, tz).toISOString();
+}
+
+export function BestTimesSection({ bt, tz, count = 5, compact = false, onPlan }) {
+  const top = bt.top.slice(0, count);
+  return html`<div class=${cx('an-best', compact && 'is-compact')}>
+    <${Panel} title="Best time to post" subtitle=${BASIS_TEXT[bt.basis](bt.postsUsed)} class="an-best-map">
+      <${Heatmap} label="Best time score by weekday and hour" matrix=${bt.matrix} format=${(v) => `${Math.round(v * 100)} / 100`} />
+    <//>
+    <${Panel} title="Top slots" subtitle=${`Times in ${tz}`} class="an-best-list">
+      <ol class="list an-slots">
+        ${top.map(
+          (s, i) => html`<li key=${`${s.weekday}-${s.hour}`} class="list-row">
+            <span class="an-slot-rank mono">${String(i + 1).padStart(2, '0')}</span>
+            <span class="grow">
+              <span class="an-slot-time">${WEEKDAY_NAMES[s.weekday]} ${hourLabel(s.hour)}</span>
+              <${ProgressBar} value=${Math.round(s.score * 100)} max=${100} label=${`Score ${Math.round(s.score * 100)} of 100`} />
+            </span>
+            <span class="num an-slot-score">${Math.round(s.score * 100)}</span>
+            ${onPlan ? html`<${Button} size="sm" variant="ghost" icon="plus" class="no-print" onClick=${() => onPlan(nextSlot(s.weekday, s.hour, tz))}
+              aria-label=${`Plan a post for ${WEEKDAY_NAMES[s.weekday]} ${hourLabel(s.hour)}`} title="Plan a post at this time" />` : null}
+          </li>`,
+        )}
+      </ol>
+    <//>
+  </div>`;
+}
+
+function BestTimesTab({ a, tz }) {
+  const { openComposer } = useApp();
+  const bt = useBestTimes(a, tz);
+  return html`<div class="stack">
+    <p class="an-note">Best times use your audience and every saved post, so they aren't affected by the date range. The composer and autopilot use the same scores. Use + to plan a post at the next occurrence of a slot.</p>
+    <${BestTimesSection} bt=${bt} tz=${tz} onPlan=${(iso) => openComposer({ scheduledAt: iso })} />
+  </div>`;
+}
+
+// ---------------------------------------------------------------------------
+// Hashtags tab
+
+export function hashtagColumns() {
+  const n = (key, label, fmt = 'number') => ({ key, label, align: 'right', sortable: true, render: (r) => html`<span class="num">${show(r[key] == null ? null : fmt === 'number' ? Math.round(r[key]) : r[key], fmt)}</span>` });
+  return [
+    { key: 'tag', label: 'Hashtag', sortable: true, render: (r) => html`<span class="mono">${r.tag}</span>` },
+    n('posts', 'Posts'),
+    n('avgReach', 'Avg reach'),
+    n('avgInteractions', 'Avg interactions'),
+    n('avgER', 'Avg eng. rate', 'percent'),
+  ];
+}
+
+function HashtagsTab({ ov, range }) {
+  const rows = useMemo(() => hashtagPerformance(ov.posts, { minPosts: 2 }), [ov.posts]);
+  const cols = useMemo(() => hashtagColumns(), []);
+  const chart = rows.slice(0, 10).map((r) => ({ label: r.tag, value: r.avgER }));
+  return html`<div class="stack-lg stack">
+    <${Callout} tone="neutral" title="Instagram uses at most 5 hashtags per post">
+      Since December 2025 Instagram ignores hashtags past the fifth, so keep the ones that perform best.
+    <//>
+    ${rows.length
+      ? html`<${Panel} title="Engagement rate by hashtag" subtitle="Average across posts that used the hashtag (at least 2 posts)">
+            <${BarChart} horizontal label="Average engagement rate by hashtag" data=${chart} format=${(v) => formatPercent(v)} />
+          <//>
+          <${Panel} flush>
+            <${DataTable} dense columns=${cols} rows=${rows} rowKey=${(r) => r.tag} initialSort=${{ key: 'avgER', dir: 'desc' }} maxHeight=${520} caption="Hashtag performance" />
+          <//>`
+      : html`<${EmptyState} icon="hash" title="Not enough posts to compare hashtags"
+          body="A hashtag needs at least 2 posts in the date range. Try a longer range."
+          action=${range.preset !== '90d' ? html`<${Button} variant="secondary" onClick=${() => setQuery(rangeToQuery({ preset: '90d' }))}>Show last 90 days<//>` : null} />`}
+  </div>`;
+}
+
+// ---------------------------------------------------------------------------
+// Overview tab
+
+function OverviewTab({ a, ov, tz, compare, onOpen, ig }) {
+  return html`<div class="stack-lg stack">
+    <${LiveProblems} a=${a} ig=${ig} />
+    <${OverviewStats} ov=${ov} />
+    <div class="grid-2 an-grid">
+      <${FollowersChart} ov=${ov} />
+      <${ReachViewsChart} ov=${ov} />
+      <${FollowerReachChart} ov=${ov} compare=${compare} />
+      <${ViewsByFormatChart} ov=${ov} />
+      <${InteractionsChart} ov=${ov} />
+      <${PostingFrequency} ov=${ov} compare=${compare} />
+    </div>
+    <${TopPosts} ov=${ov} tz=${tz} onOpen=${onOpen} />
+  </div>`;
+}
+
+function OverviewSkeleton() {
+  return html`<div class="stack-lg stack" aria-busy="true">
+    <div class="stats an-stats">${Array.from({ length: 8 }, (_, i) => html`<${Stat} key=${i} label="Loading" value="" loading />`)}</div>
+    <div class="grid-2 an-grid">${[0, 1].map((i) => html`<${Panel} key=${i}><${Skeleton} height=${220} /><//>`)}</div>
+  </div>`;
+}
+
+// ---------------------------------------------------------------------------
+// Screen
+
+export default function AnalyticsView() {
+  const { route, tz, ig, settings, dispatchWorker, toast } = useApp();
+  const q = route.query || {};
+  const tab = TABS.some((t) => t.id === q.tab) ? q.tab : 'overview';
+  const sel = rangeFromQuery(q);
+  const compare = q.compare !== '0';
+  const range = resolveRange(sel, tz);
+  const a = useAnalytics(range, { compare });
+  const [open, setOpen] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
+
+  // While a new range loads live, keep showing the last complete render (dimmed) instead of flashing.
+  const stable = useRef(null);
+  const loadingLive = a.live.current && a.live.current.status === 'loading';
+  if (a.ready && !loadingLive) stable.current = a;
+  const shown = loadingLive && stable.current ? stable.current : a;
+  const ov = useMemo(() => (shown.ready ? computeOverview(shown, tz, { compare }) : null), [shown.days, shown.media, shown.range.fromKey, shown.range.toKey, shown.ready, shown.live.previous && shown.live.previous.status, tz, compare]);
+
+  const openMedia = (m) => setOpen(m && m.id);
+  const openItem = open ? a.media.find((m) => m && String(m.id) === String(open)) || null : null;
+  const storiesCount = a.ready ? storiesInRange(a.storiesDoc, range, tz, { includeLive: true }).length : 0;
+  const tabs = TABS.map((t) => ({
+    ...t,
+    badge: !ov ? null : t.id === 'posts' ? ov.posts.length : t.id === 'reels' ? reelsOf(ov).length : t.id === 'stories' ? storiesCount : null,
+  }));
+
+  const refresh = async () => {
+    setRefreshing(true);
+    try {
+      await dispatchWorker('analytics refresh');
+    } catch {
+      /* dispatchWorker already explained the problem */
+    } finally {
+      setRefreshing(false);
+    }
+  };
+  const doExport = (kind) => {
+    if (!a.ready) return;
+    if (kind === 'stories') {
+      const n = exportStoriesCsv(a, tz);
+      toast(`Downloaded ${n} ${n === 1 ? 'story' : 'stories'}.`, { kind: 'success' });
+      return;
+    }
+    const n = kind === 'daily' ? exportDailyCsv(a) : exportPostsCsv(a, tz);
+    toast(kind === 'daily' ? `Downloaded ${n} days of metrics.` : `Downloaded ${n} ${n === 1 ? 'post' : 'posts'}.`, { kind: 'success' });
+  };
+  const label = typeof q.label === 'string' ? q.label.trim().slice(0, 64) : '';
+  const username = settings && settings.ig && settings.ig.username;
+  const freshness = a.freshness ? `Updated ${relative(a.freshness)} by the worker` : 'The worker has not saved analytics yet';
+
+  return html`<div class="page an-page">
+    <${PageHeader} eyebrow="Measure" title="Analytics"
+      subtitle=${`${username ? `@${username} · ` : ''}${range.label}`}
+      actions=${html`
+        <${Button} variant="ghost" icon="refresh" loading=${refreshing} onClick=${refresh}>Refresh now<//>
+        <${Menu} label="Export CSV" align="end"
+          trigger=${(p) => html`<${Button} ...${p} variant="secondary" icon="download" iconRight="chevron-down">Export CSV<//>`}
+          items=${[
+            { label: 'Daily metrics', icon: 'calendar', hint: 'CSV', onClick: () => doExport('daily'), disabled: !a.ready },
+            { label: 'Posts', icon: 'grid', hint: 'CSV', onClick: () => doExport('posts'), disabled: !a.ready },
+            { label: 'Stories', icon: 'story', hint: 'CSV', onClick: () => doExport('stories'), disabled: !a.ready },
+          ]} />`} />
+
+    <div class="an-filters">
+      <${RangePicker} value=${sel} tz=${tz} onChange=${(next) => setQuery(rangeToQuery(next))}
+        compare=${compare} onCompareChange=${(v) => setQuery({ compare: v ? undefined : '0' })} />
+      <span class="spacer"></span>
+      <span class="an-freshness muted text-sm"><${Icon} name="clock" size=${14} />${freshness}</span>
+      <${SourceNotes} a=${a} ig=${ig} />
+    </div>
+
+    <${Tabs} label="Analytics sections" tabs=${tabs} value=${tab} onChange=${(id) => setQuery({ tab: id === 'overview' ? undefined : id })} />
+
+    <div role="tabpanel" aria-label=${TABS.find((t) => t.id === tab).label} class=${cx('an-panel', loadingLive && 'is-refreshing')}>
+      ${a.error
+        ? html`<${Callout} tone="danger" title="Could not open your analytics">${a.error.userMessage || a.error.message}<//>`
+        : !ov
+          ? html`<${OverviewSkeleton} />`
+          : tab === 'overview'
+            ? html`<${OverviewTab} a=${shown} ov=${ov} tz=${tz} compare=${compare} onOpen=${openMedia} ig=${ig} />`
+            : tab === 'posts'
+              ? html`<${PostsTab} a=${shown} ov=${ov} tz=${tz} onOpen=${openMedia} label=${label} onLabel=${(v) => setQuery({ label: v || undefined })} />`
+              : tab === 'reels'
+                ? html`<${ReelsTab} a=${shown} ov=${ov} tz=${tz} onOpen=${openMedia} />`
+                : tab === 'stories'
+                  ? html`<${StoriesTab} a=${shown} tz=${tz} />`
+                  : tab === 'audience'
+                    ? html`<${AudienceTab} a=${shown} />`
+                    : tab === 'best-times'
+                      ? html`<${BestTimesTab} a=${shown} tz=${tz} />`
+                      : html`<${HashtagsTab} ov=${ov} range=${range} />`}
+    </div>
+    <${PostDrawer} media=${openItem} onClose=${() => setOpen(null)} history=${a.history} bench=${a.bench} trials=${a.trials} />
+  </div>`;
+}

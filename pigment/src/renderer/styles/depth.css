@@ -1,0 +1,12 @@
+/* 16 and 32 bits per channel (lib/depth.js): the Info panel's deep readout and the Export As depth note. */
+
+/* ---- Info panel: 16-bit (0..32768) or 32-bit float values under the pointer ---- */
+.info-deep { margin-top: 10px; }
+.info-deep[hidden] { display: none; }
+.info-deep .info-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.info-panel .info-grid.info-deep-grid { font-variant-numeric: tabular-nums; }
+.info-deep-grid > span:not(.k) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---- Export As: whether the file gets a true high-depth composite ---- */
+.depth-note { font-size: 11px; line-height: 1.4; padding: 6px 8px; border-radius: 4px; background: var(--bg-sunken); border: 1px solid var(--border); }
+.depth-note[data-exact="true"] { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }

@@ -1,0 +1,276 @@
+/* Onboarding stepper, ConnectInstagram (js/ui/connect-instagram.js) and WorkerSetup.
+   Also loaded by Settings, which reuses those components. Tokens come from css/app.css. */
+
+/* ---- Small shared bits ---------------------------------------------------- */
+
+.link-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  text-underline-offset: 3px;
+}
+.link-btn:hover { color: var(--accent-strong); text-decoration-color: currentColor; }
+
+.ext-link {
+  color: var(--accent);
+  text-underline-offset: 3px;
+}
+.ext-link .icon { display: inline-block; margin-left: 3px; vertical-align: -1px; }
+.ext-link:hover { color: var(--accent-strong); }
+
+.ci code,
+.ws code,
+.settings-page code {
+  padding: 1px 5px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  font: 12px/1.5 var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+/* ---- Reminder posts due while Instagram is disconnected ----------------------- */
+
+.onboarding .ob-hand { width: 100%; max-width: 860px; }
+.ob-hand-list { margin: 6px 0 0; padding-left: 18px; }
+.ob-hand-list li { overflow-wrap: anywhere; }
+.ob-hand-list li + li { margin-top: 2px; }
+
+/* ---- Stepper ---------------------------------------------------------------- */
+
+.onboarding .ob-steps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.ob-step { min-width: 0; }
+.ob-step + .ob-step { border-left: 1px solid var(--line); }
+.ob-step-btn {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 0;
+  background: none;
+  color: var(--ink-2);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.ob-step-btn:hover:not(:disabled) { background: var(--hover); color: var(--ink); }
+.ob-step-btn:disabled { cursor: not-allowed; color: var(--ink-3); }
+.ob-step-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.ob-step-no {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--ink-2);
+  font: 500 11.5px/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.ob-step-label { min-width: 0; font-weight: 500; line-height: 1.25; }
+.ob-step.is-current .ob-step-btn { color: var(--ink); }
+.ob-step.is-current .ob-step-btn::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: var(--accent);
+}
+.ob-step.is-current .ob-step-no { border-color: var(--accent); background: var(--accent); color: var(--accent-ink); }
+.ob-step.is-done .ob-step-no { border-color: color-mix(in srgb, var(--ok) 45%, transparent); background: var(--ok-soft); color: var(--ok-ink); }
+
+.onboarding .ob-steps,
+.ob-panel { width: 100%; max-width: 860px; }
+.ob-panel > .panel-body { padding: 22px 24px 24px; }
+.ob-step-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-display);
+  font-stretch: 112%;
+  font-size: var(--fs-xl);
+  font-weight: 650;
+  line-height: 1.2;
+}
+.ob-step-title + p { margin-top: 6px; }
+
+.ob-done { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--line); }
+.ob-done-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+/* ---- ConnectInstagram -------------------------------------------------------- */
+
+.ci-modes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-3);
+}
+.ci-mode {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  cursor: pointer;
+}
+.ci-mode:hover { border-color: var(--ink-3); }
+.ci-mode.is-selected { border-color: var(--accent); background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
+.ci-mode input {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 2px 0 0;
+  accent-color: var(--accent);
+}
+.ci-mode:has(input:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
+.ci-mode-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.ci-mode-title { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-weight: 600; color: var(--ink); }
+.ci-mode-body { color: var(--ink-2); font-size: var(--fs-sm); }
+
+.ci-howto {
+  padding: 14px 16px 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--surface-2) 45%, var(--surface));
+}
+.ci-howto > .label-caps { margin: 0 0 8px; }
+
+.ci-steps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: ci-step;
+}
+.ci-steps > li {
+  position: relative;
+  padding: 0 0 12px 34px;
+  counter-increment: ci-step;
+  color: var(--ink);
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.ci-steps > li::before {
+  content: counter(ci-step, decimal-leading-zero);
+  position: absolute;
+  left: 0;
+  top: 1px;
+  width: 24px;
+  color: var(--accent);
+  font: 600 12px/1.6 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.ci-steps strong { font-weight: 600; }
+.ci-steps .btn { margin-top: 6px; }
+
+.ci-perms { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0 2px; }
+
+.ci-found-label { display: flex; align-items: center; gap: 6px; color: var(--ok-ink); font-weight: 500; }
+
+.ci-account {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3) var(--sp-4);
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+.ci-account .avatar { flex: none; }
+.ci-account-text { flex: 1 1 220px; min-width: 0; }
+.ci-account-name { font-family: var(--font-display); font-stretch: 110%; font-size: var(--fs-lg); font-weight: 650; overflow-wrap: anywhere; }
+.ci-account-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  margin-top: 4px;
+  color: var(--ink-2);
+  font-size: var(--fs-sm);
+}
+.ci-account-meta strong { color: var(--ink); font-weight: 600; }
+
+/* ---- WorkerSetup ----------------------------------------------------------------- */
+
+.ws-intro { color: var(--ink-2); max-width: 70ch; }
+.ws-checks { display: flex; flex-direction: column; gap: 0; margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--line); }
+.ws-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line);
+}
+.ws-check-icon {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin-top: 0;
+  border-radius: 50%;
+  background: var(--surface-2);
+  color: var(--ink-3);
+}
+.is-ok > .ws-check-icon { background: var(--ok-soft); color: var(--ok-ink); }
+.is-todo > .ws-check-icon { background: var(--marker-soft); color: var(--warn-ink); }
+
+.ws-manual {
+  padding: 14px 16px 4px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--r-md);
+}
+.ws-key { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; }
+.ws-key-value {
+  flex: 1 1 260px;
+  min-width: 0;
+  padding: 6px 8px !important;
+  word-break: break-all;
+}
+.ws-busy { display: flex; align-items: center; gap: 8px; color: var(--ink-2); }
+.ws-errors { margin: 4px 0; padding-left: 18px; }
+.ws-errors li + li { margin-top: 2px; }
+
+/* ---- Phone ----------------------------------------------------------------------- */
+
+@media (max-width: 759px) {
+  .ci-modes { grid-template-columns: minmax(0, 1fr); }
+  .ob-panel > .panel-body { padding: 16px; }
+  .ob-step-btn { flex-direction: column; align-items: flex-start; gap: 6px; padding: 10px 8px; }
+  .ob-step-label { font-size: var(--fs-xs); }
+  .ci-howto { padding: 12px 12px 4px; }
+  .ci-steps > li { padding-left: 28px; }
+}

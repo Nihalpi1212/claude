@@ -1,0 +1,49 @@
+/* Design tokens. The html element carries data-theme="light" | "dark" (set by app.js). */
+:root {
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --radius: 6px;
+  --toolbar-height: 44px;
+  --titlebar-height: 38px;
+  --sidebar-width: 260px;
+  --statusbar-height: 24px;
+
+  --bg: #f4f4f6;
+  --bg-elevated: #ffffff;
+  --bg-sunken: #e9e9ee;
+  --fg: #1e1e24;
+  --fg-muted: #5f6270;
+  --accent: #4f46e5;
+  --accent-fg: #ffffff;
+  --accent-soft: rgba(79, 70, 229, 0.12);
+  --border: #d9d9e0;
+  --hover: rgba(30, 30, 36, 0.07);
+  --active: rgba(30, 30, 36, 0.13);
+  --danger: #d92d20;
+  --success: #16a34a;
+  --viewer-bg: #cfd0d8;
+  --shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
+  --focus-ring: 0 0 0 2px var(--accent-soft), 0 0 0 3px var(--accent);
+  --selection: rgba(79, 70, 229, 0.3);
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  --bg: #1b1b1f;
+  --bg-elevated: #26262c;
+  --bg-sunken: #131316;
+  --fg: #ececf1;
+  --fg-muted: #a0a3b1;
+  --accent: #8b85f3;
+  --accent-fg: #0f0f14;
+  --accent-soft: rgba(139, 133, 243, 0.18);
+  --border: #3a3a44;
+  --hover: rgba(255, 255, 255, 0.08);
+  --active: rgba(255, 255, 255, 0.16);
+  --danger: #f97066;
+  --success: #4ade80;
+  --viewer-bg: #2b2b31;
+  --shadow: 0 8px 28px rgba(0, 0, 0, 0.55);
+  --selection: rgba(139, 133, 243, 0.35);
+  color-scheme: dark;
+}

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:media="http://search.yahoo.com/mrss/" xml:base="https://blog.example.org/">
+  <title type="html">Clay &amp;amp; Fire</title>
+  <subtitle>A pottery blog</subtitle>
+  <link href="https://blog.example.org/" rel="alternate" type="text/html"/>
+  <link href="https://blog.example.org/atom.xml" rel="self"/>
+  <id>tag:blog.example.org,2026:feed</id>
+  <updated>2026-10-12T09:00:00Z</updated>
+  <entry>
+    <title>Throwing tall cylinders</title>
+    <link rel="alternate" type="text/html" href="/posts/tall-cylinders"/>
+    <id>tag:blog.example.org,2026:tall-cylinders</id>
+    <published>2026-10-11T18:30:00+02:00</published>
+    <updated>2026-10-12T08:00:00Z</updated>
+    <summary type="html">&lt;p&gt;Keep your elbows &lt;em&gt;tucked&lt;/em&gt;.&lt;/p&gt;</summary>
+    <content type="xhtml">
+      <div xmlns="http://www.w3.org/1999/xhtml">
+        <p>Long article body &amp; more.</p>
+        <img src="images/cylinder.jpg" alt="A tall cylinder"/>
+      </div>
+    </content>
+  </entry>
+  <entry>
+    <title type="text">Firing schedule &lt;draft&gt;</title>
+    <link href="https://blog.example.org/posts/firing"/>
+    <link rel="enclosure" type="image/jpeg" href="https://img.example.org/firing.jpg" length="1000"/>
+    <id>urn:uuid:60a76c80-d399-11d9-b93C-0003939e0af6</id>
+    <updated>2026-10-10T07:00:00Z</updated>
+  </entry>
+  <entry>
+    <title>Studio cat</title>
+    <link href="https://blog.example.org/posts/cat"/>
+    <id>tag:blog.example.org,2026:cat</id>
+    <updated>2026-10-09T07:00:00Z</updated>
+    <media:thumbnail url="https://img.example.org/cat-thumb.jpg" width="320"/>
+    <content type="html">&lt;p&gt;Meet Pip.&lt;/p&gt;</content>
+  </entry>
+</feed>

@@ -1,0 +1,33 @@
+# Postpilot CI: runs the core and worker test suites (node:test, no dependencies) whenever
+# anything under postpilot/ or the Postpilot workflows changes.
+
+name: Postpilot CI
+
+on:
+  push:
+    paths:
+      - 'postpilot/**'
+      - '.github/workflows/postpilot-worker.yml'
+      - '.github/workflows/postpilot-ci.yml'
+  pull_request:
+    paths:
+      - 'postpilot/**'
+      - '.github/workflows/postpilot-worker.yml'
+      - '.github/workflows/postpilot-ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run tests
+        run: cd postpilot && npm test

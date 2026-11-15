@@ -1,0 +1,48 @@
+/* conventions-shortcuts-fields (ARCHITECTURE.md "0.4 features", rule 6): numeric fields, movable dialogs over a
+   visible canvas, Alt = Reset, the Search palette and the tool flyouts. */
+
+/* ---- numeric fields: scrubby labels and the popup slider ---- */
+.numeric-label.scrubby, label.numeric-scrub-label { cursor: ew-resize; user-select: none; }
+label.numeric-scrub-label input, label.numeric-scrub-label select, label.numeric-scrub-label button { cursor: auto; }
+.numeric-label.scrubby.scrubbing, label.numeric-scrub-label.scrubbing { color: var(--accent, #4f81ff); }
+body.numeric-scrubbing, body.numeric-scrubbing * { cursor: ew-resize !important; user-select: none !important; }
+.numeric-field { display: inline-flex; align-items: center; gap: 4px; }
+.numeric-popup-button { width: 16px; height: 20px; padding: 0; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-sunken, transparent); color: var(--fg-muted); cursor: pointer; font-size: 9px; line-height: 1; }
+.numeric-popup-button::before { content: '▾'; }
+.numeric-popup-button:hover:not(:disabled) { color: var(--fg); background: var(--hover); }
+.numeric-popup { position: fixed; z-index: 2600; padding: 8px 10px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow); }
+.numeric-popup input[type="range"] { width: 160px; display: block; }
+
+/* ---- dialogs: the canvas stays visible and navigable under them ---- */
+.dialog-backdrop.over-canvas { background: transparent; }
+.dialog-backdrop.over-canvas .dialog { box-shadow: 0 10px 36px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(0, 0, 0, 0.12); }
+.dialog-backdrop.nav-through { pointer-events: none; }
+.dialog-backdrop.nav-through .dialog { pointer-events: auto; }
+.dialog-header.movable { cursor: move; user-select: none; touch-action: none; }
+.dialog-header.movable .dialog-close { cursor: pointer; }
+.dialog.moved { position: fixed; margin: 0; }
+.dialog.attention { animation: dialog-attention 260ms ease-out; }
+@keyframes dialog-attention {
+  0%, 100% { transform: none; }
+  30% { transform: translateX(-4px); }
+  60% { transform: translateX(4px); }
+}
+.dialog-buttons .btn.as-reset { font-style: italic; }
+
+/* ---- Edit > Search ---- */
+.dialog.command-search .dialog-body { padding-top: 10px; }
+.command-search-body { display: flex; flex-direction: column; gap: 8px; }
+.command-search-input { width: 100%; font-size: 14px; padding: 8px 10px; }
+.command-search-list { max-height: min(420px, 55vh); overflow: auto; display: flex; flex-direction: column; }
+.command-search-row { display: grid; grid-template-columns: 46px 1fr auto; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; cursor: pointer; }
+.command-search-row.selected { background: var(--accent-soft, var(--hover)); }
+.command-search-row.disabled { opacity: 0.5; }
+.command-search-kind { font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--fg-muted); }
+.command-search-text { display: flex; flex-direction: column; min-width: 0; }
+.command-search-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.command-search-path { font-size: 11px; color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.command-search-shortcut { font-size: 11px; color: var(--fg-muted); font-variant-numeric: tabular-nums; }
+.command-search-empty { margin: 4px 2px; }
+
+/* ---- tool flyouts ---- */
+.popover.tool-flyout .popover-title { font-size: 11px; font-weight: 400; color: var(--fg-muted); }

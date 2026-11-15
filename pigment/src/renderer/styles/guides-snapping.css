@@ -1,0 +1,8 @@
+/* guides-snapping (ARCHITECTURE.md "0.4 features", rule 6): guides, rulers, grid and snapping. */
+
+/* the ruler corner sets the ruler origin by dragging (double-click resets it) */
+.canvas-view .ruler-corner { cursor: crosshair; }
+
+/* New Guide, New Guide Layout and Edit Selected Guides */
+.guide-dialog .dialog-form .field .muted { font-size: 11px; }
+.guide-layout-dialog .dialog-form .field.span-all { margin-top: 4px; }

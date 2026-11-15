@@ -1,0 +1,38 @@
+/* Modal dialogs */
+.dialog-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.45); display: grid; place-items: center; z-index: 1500; animation: fade-in 120ms ease-out; }
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+.dialog { width: min(520px, calc(100vw - 32px)); max-height: calc(100vh - 48px); display: flex; flex-direction: column; background: var(--bg-elevated); color: var(--fg); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); }
+.dialog.wide { width: min(860px, calc(100vw - 32px)); }
+.dialog.full { width: calc(100vw - 48px); height: calc(100vh - 48px); }
+.dialog-header { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px 0; }
+.dialog-header h2 { margin: 0; font-size: 15px; font-weight: 600; }
+.dialog-close { border: 0; background: transparent; width: 28px; height: 28px; border-radius: 6px; color: var(--fg-muted); display: grid; place-items: center; }
+.dialog-close svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.dialog-close:hover { background: var(--hover); color: var(--fg); }
+.dialog-body { padding: 14px 18px; overflow: auto; flex: 1; min-height: 0; }
+.dialog-message { margin: 0 0 8px; font-size: 14px; font-weight: 500; }
+.dialog-buttons { display: flex; justify-content: flex-end; gap: 8px; padding: 0 18px 16px; }
+.dialog-buttons .btn.left { margin-right: auto; }
+.dialog .field:last-child { margin-bottom: 0; }
+
+.dialog-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin: 0 0 14px; }
+.dialog-tab { border: 0; background: transparent; padding: 8px 12px; color: var(--fg-muted); border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.dialog-tab[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); }
+
+.shortcut-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 18px 28px; }
+.shortcut-group h3 { margin: 0 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--fg-muted); }
+.shortcut-row { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; }
+.shortcut-row .keys { display: flex; gap: 4px; }
+
+.props-grid { display: grid; grid-template-columns: 140px 1fr; gap: 6px 14px; align-items: baseline; }
+.props-grid dt { color: var(--fg-muted); }
+.props-grid dd { margin: 0; user-select: text; word-break: break-word; }
+
+.about-dialog { text-align: center; }
+.about-dialog img { width: 96px; height: 96px; border-radius: 22px; margin-bottom: 12px; }
+.about-dialog h3 { margin: 0; font-size: 20px; }
+.about-dialog p { margin: 6px 0; color: var(--fg-muted); }
+
+.password-dialog .input { font-family: var(--mono); }
+.progress { height: 6px; border-radius: 3px; background: var(--bg-sunken); overflow: hidden; }
+.progress > div { height: 100%; background: var(--accent); width: 0; transition: width 120ms linear; }

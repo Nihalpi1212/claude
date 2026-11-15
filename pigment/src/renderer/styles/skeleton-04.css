@@ -1,0 +1,31 @@
+/* Pigment 0.4 skeleton: the stub field widgets of lib/fields.js and lib/numeric-field.js, and the rows of the
+   adjustment dialog frame (lib/adjust/frame.js). Owned by the skeleton; a package that replaces a widget or the
+   frame styles its own markup in styles/<package>.css (ARCHITECTURE.md "0.4 features", rule 6). */
+
+/* numeric fields keep 0.3's look (their markup is 0.3's number input); only the scrubby label is marked (H) */
+.numeric-label.scrubby { user-select: none; }
+
+/* gradient widget: a bar that opens a two-colour editor inline under it */
+.field-gradient { display: inline-flex; flex-direction: column; gap: 6px; min-width: 120px; }
+.field-gradient-bar { min-width: 120px; height: 20px; padding: 0; cursor: pointer; }
+.field-gradient-pop { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-elevated); }
+.field-gradient-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; }
+
+/* pattern widget: the current pattern's swatch and a button */
+.field-pattern { display: inline-flex; align-items: center; gap: 6px; }
+.field-pattern-swatch { display: inline-block; width: 28px; height: 28px; border: 1px solid var(--border); border-radius: 3px; background-color: var(--bg-sunken); background-size: cover; }
+
+/* contour widget: a preview of the curve next to the preset menu */
+.field-contour { display: inline-flex; align-items: center; gap: 6px; }
+.field-contour-preview { width: 32px; height: 32px; border: 1px solid var(--border); border-radius: 3px; background: var(--bg-sunken); }
+
+/* preset widget: a menu and Save Preset… */
+.field-preset { display: inline-flex; align-items: center; gap: 6px; }
+
+/* paint widget: none / solid / gradient / pattern, then the chosen type's controls */
+.field-paint { display: inline-flex; flex-direction: column; gap: 6px; }
+.field-paint-body { display: inline-flex; align-items: center; gap: 6px; }
+
+/* adjustment dialog frame: preset row and the eyedropper / on-image tool row */
+.adjust-frame-row { display: flex; align-items: center; gap: 6px; margin: 0 0 8px; }
+.adjust-frame-tool[aria-pressed="true"] { background: var(--accent); color: var(--accent-fg); }

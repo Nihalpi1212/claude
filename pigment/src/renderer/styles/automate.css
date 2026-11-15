@@ -1,0 +1,13 @@
+/* File > Automate dialogs (lib/automate.js, lib/automate/*.js): Batch, Image Processor, Contact Sheet, progress. */
+.automate-dialog .dialog-body { max-height: min(72vh, 720px); overflow: auto; }
+.automate-form .section:first-child { margin-top: 0; }
+.automate-folder { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.automate-folder .btn { flex: none; }
+.automate-path { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; font-size: 12px; }
+.automate-naming { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.automate-naming .input { min-width: 0; }
+.automate-example { font-size: 12px; overflow-wrap: anywhere; }
+.automate-progress { display: flex; flex-direction: column; gap: 8px; }
+.automate-progress p { margin: 0; }
+.automate-progress progress { width: 100%; height: 10px; accent-color: var(--accent); }
+.automate-progress-detail { min-height: 1.3em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }

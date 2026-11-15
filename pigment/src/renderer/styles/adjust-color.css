@@ -1,0 +1,34 @@
+/* adjust-color (ARCHITECTURE.md "0.4 features", rule 6): the Hue/Saturation range bars, Black & White's colour chips,
+   the Channel Mixer total, the Adjustments panel's presets and the Properties "previous state" button. */
+
+/* Hue/Saturation: two spectrum bars with the range's four bounds between them */
+.hs-bars { display: flex; flex-direction: column; gap: 0; width: 100%; max-width: 300px; margin: 4px auto 2px; }
+.hs-spectrum { width: 100%; height: 12px; display: block; border: 1px solid var(--border); border-radius: 2px; }
+.hs-track { position: relative; height: 16px; margin: 1px 0; touch-action: none; user-select: none; }
+.hs-falloff { position: absolute; top: 5px; height: 6px; background: var(--fg-muted); opacity: 0.35; border-radius: 3px; }
+.hs-band { position: absolute; top: 3px; height: 10px; background: var(--fg-muted); opacity: 0.8; border-radius: 2px; cursor: grab; }
+.hs-handle { position: absolute; top: 1px; width: 8px; height: 14px; margin-left: -4px; cursor: ew-resize; }
+.hs-handle-inner { background: var(--fg); border-radius: 2px; }
+.hs-handle-outer { width: 0; height: 0; margin-left: -6px; border-left: 6px solid transparent; border-right: 6px solid transparent; border-bottom: 12px solid var(--fg); }
+.hs-readout { font-size: 11px; text-align: center; font-variant-numeric: tabular-nums; white-space: pre; }
+
+/* Black & White: a colour chip at each slider's label */
+.bw-editor .field[style*="--bw-chip"] > label::before { content: ''; display: inline-block; width: 8px; height: 8px; margin-right: 6px; border-radius: 2px; background: var(--bw-chip); vertical-align: 0; }
+
+/* Channel Mixer: the total of the sources, with Photoshop's warning above 100 % */
+.mixer-total { font-size: 12px; color: var(--fg-muted); text-align: right; }
+.mixer-total.over { color: var(--danger, #d9534f); }
+.mixer-total.over::before { content: '⚠ '; }
+
+/* Gradient Map: the gradient field spans the dialog */
+.gradient-map-editor .field-gradient { width: 100%; }
+
+/* the Adjustments panel's presets */
+.adjustment-presets { display: flex; flex-direction: column; gap: 2px; margin-bottom: 6px; }
+.adjust-preset-group > summary { cursor: pointer; padding: 3px 2px; font-size: 12px; }
+.adjust-preset-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 4px; padding: 2px 0 6px 12px; }
+.adjust-preset { text-align: left; padding: 4px 6px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-sunken); color: var(--fg); font: inherit; font-size: 12px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.adjust-preset:hover:not(:disabled) { background: var(--hover); }
+
+/* Properties: View previous state */
+.props-adjust-bar [data-act="previous"][aria-pressed="true"] { background: var(--accent-soft, var(--hover)); }

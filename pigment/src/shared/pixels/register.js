@@ -1,0 +1,2071 @@
+// Image registration for Auto-Align Layers, Photomerge and Load Files into Stack, plus the seam and
+// gain maths of Auto-Blend Layers (see ARCHITECTURE.md "Auto-Align, Auto-Blend, Photomerge, stacks").
+//
+// The pipeline is the classic feature one: FAST-9 corners on a small pyramid of a reduced greyscale
+// copy, an orientation from the intensity centroid, a 256-bit rotated BRIEF descriptor (ORB),
+// brute-force Hamming matching with Lowe's ratio test and a cross check, then RANSAC for the motion
+// model (translation, similarity, homography). Descriptors alone are not enough where a picture
+// repeats itself or the view changed a lot, so a pair is registered in two rounds (registerPair): the
+// first models guide a second matching by position, and a pair only counts as an overlap when its
+// model explains a fair share of the features there and the pictures themselves agree under it.
+// alignImages() chains the pairwise models through the match graph to a reference image; for the
+// cylindrical and spherical layouts the pairs are fitted as camera rotations.
+//
+// Everything is pure: typed arrays, plain loops, deterministic (seeded sampling) and DOM-free, so
+// it runs in Node unit tests. Coordinates are pixel indices (the centre of pixel (x, y) is (x, y)),
+// which is what FAST reports; a model fitted on them maps pixel indices to pixel indices.
+import { createImage, randomSeeded } from './core.js';
+import { homography as homographyFrom4, invertHomography } from './transform.js';
+
+// ---- greyscale helpers ----------------------------------------------------------------------------------------
+
+/**
+ * Greyscale copy of an image: { width, height, data: Uint8Array(w*h), alpha: Uint8Array | null }.
+ * A greyscale object (data.length === w*h) is returned as it is. `alpha` exists only when the image has
+ * transparency: corners are not taken on or next to transparent pixels (their colour is arbitrary).
+ */
+export function toGray(img) {
+  const { width, height, data } = img;
+  const n = width * height;
+  if (data.length === n) return { width, height, data, alpha: img.alpha ?? null };
+  const g = new Uint8Array(n);
+  let alpha = null;
+  for (let p = 0, i = 0; p < n; p++, i += 4) {
+    const a = data[i + 3];
+    g[p] = (data[i] * 77 + data[i + 1] * 150 + data[i + 2] * 29 + 128) >> 8;
+    if (a < 255) {
+      if (!alpha) alpha = new Uint8Array(n).fill(255);
+      alpha[p] = a;
+      // transparent pixels carry no picture: flatten them so their hidden colour cannot make corners
+      if (a < 128) g[p] = 0;
+    }
+  }
+  return { width, height, data: g, alpha };
+}
+
+/** Area-averaged reduction of a greyscale image to w × h (both not larger than the source). */
+export function shrinkGray(gray, w, h) {
+  const { width: sw, height: sh, data: d } = gray;
+  if (w === sw && h === sh) return gray;
+  const out = new Uint8Array(w * h);
+  const alpha = gray.alpha ? new Uint8Array(w * h) : null;
+  const x0 = new Int32Array(w + 1), y0 = new Int32Array(h + 1);
+  for (let x = 0; x <= w; x++) x0[x] = Math.min(sw, Math.floor((x * sw) / w));
+  for (let y = 0; y <= h; y++) y0[y] = Math.min(sh, Math.floor((y * sh) / h));
+  for (let y = 0; y < h; y++) {
+    const ya = y0[y], yb = Math.max(ya + 1, y0[y + 1]);
+    for (let x = 0; x < w; x++) {
+      const xa = x0[x], xb = Math.max(xa + 1, x0[x + 1]);
+      let sum = 0, amin = 255;
+      for (let yy = ya; yy < yb; yy++) {
+        let i = yy * sw + xa;
+        for (let xx = xa; xx < xb; xx++, i++) {
+          sum += d[i];
+          if (alpha && gray.alpha[i] < amin) amin = gray.alpha[i];
+        }
+      }
+      const o = y * w + x;
+      out[o] = (sum / ((yb - ya) * (xb - xa)) + 0.5) | 0;
+      if (alpha) alpha[o] = amin;
+    }
+  }
+  return { width: w, height: h, data: out, alpha };
+}
+
+/** Binomial 5-tap blur applied twice (σ ≈ 1.4): BRIEF compares smoothed intensities, never single noisy pixels. */
+export function smoothGray(gray) {
+  const { width: w, height: h } = gray;
+  let src = gray.data;
+  const tmp = new Float32Array(w * h);
+  for (let pass = 0; pass < 2; pass++) {
+    const dst = new Uint8Array(w * h);
+    for (let y = 0; y < h; y++) {
+      const row = y * w;
+      for (let x = 0; x < w; x++) {
+        const xm2 = x < 2 ? 0 : x - 2, xm1 = x < 1 ? 0 : x - 1, xp1 = x + 1 >= w ? w - 1 : x + 1, xp2 = x + 2 >= w ? w - 1 : x + 2;
+        tmp[row + x] = src[row + xm2] + 4 * src[row + xm1] + 6 * src[row + x] + 4 * src[row + xp1] + src[row + xp2];
+      }
+    }
+    for (let y = 0; y < h; y++) {
+      const ym2 = (y < 2 ? 0 : y - 2) * w, ym1 = (y < 1 ? 0 : y - 1) * w, yp1 = (y + 1 >= h ? h - 1 : y + 1) * w, yp2 = (y + 2 >= h ? h - 1 : y + 2) * w, row = y * w;
+      for (let x = 0; x < w; x++) dst[row + x] = ((tmp[ym2 + x] + 4 * tmp[ym1 + x] + 6 * tmp[row + x] + 4 * tmp[yp1 + x] + tmp[yp2 + x]) / 256 + 0.5) | 0;
+    }
+    src = dst;
+  }
+  return { width: w, height: h, data: src, alpha: gray.alpha ?? null };
+}
+
+// ---- FAST ----------------------------------------------------------------------------------------------------
+
+/** The 16 pixels of the radius-3 Bresenham circle, clockwise from the top. */
+const RING = [[0, -3], [1, -3], [2, -2], [3, -1], [3, 0], [3, 1], [2, 2], [1, 3], [0, 3], [-1, 3], [-2, 2], [-3, 1], [-3, 0], [-3, -1], [-2, -2], [-1, -3]];
+
+/** True when a 16-bit ring mask holds 9 contiguous set bits (the circle wraps around). */
+function hasArc9(mask) {
+  const m = (mask | (mask << 16)) >>> 0;
+  let x = m;
+  for (let k = 1; k < 9 && x; k++) x &= m >>> k;
+  return x !== 0;
+}
+
+/**
+ * FAST-9 corner detector (Rosten & Drummond): a pixel is a corner when 9 contiguous pixels of the 16-pixel
+ * circle around it are all brighter than it by more than `threshold`, or all darker. Returns
+ * [{ x, y, score }] in scan order; the score is the summed contrast of the arc's side beyond the threshold.
+ * `nonmax` keeps only local maxima of the score in a 3 × 3 neighbourhood. Note what FAST is not: the X
+ * junction of a checkerboard (two bright and two dark quarter arcs) is not a FAST corner.
+ */
+export function fastCorners(grayIn, { threshold = 20, nonmax = true, border = 3 } = {}) {
+  const gray = toGray(grayIn);
+  const { width: w, height: h, data: d, alpha } = gray;
+  const b = Math.max(3, border | 0);
+  if (w <= b * 2 || h <= b * 2) return [];
+  const off = RING.map(([dx, dy]) => dy * w + dx);
+  const t = Math.max(1, threshold);
+  const scoreMap = nonmax ? new Int32Array(w * h) : null;
+  const xs = [], ys = [], ss = [];
+  for (let y = b; y < h - b; y++) {
+    let i = y * w + b;
+    for (let x = b; x < w - b; x++, i++) {
+      const p = d[i], hi = p + t, lo = p - t;
+      // any arc of 9 covers the top or the bottom pixel, and the left or the right one: two cheap rejections
+      let v = d[i + off[0]];
+      let u = d[i + off[8]];
+      if (!(v > hi || v < lo || u > hi || u < lo)) continue;
+      v = d[i + off[4]];
+      u = d[i + off[12]];
+      if (!(v > hi || v < lo || u > hi || u < lo)) continue;
+      let bright = 0, dark = 0, sb = 0, sd = 0;
+      for (let k = 0; k < 16; k++) {
+        const q = d[i + off[k]];
+        if (q > hi) {
+          bright |= 1 << k;
+          sb += q - hi;
+        } else if (q < lo) {
+          dark |= 1 << k;
+          sd += lo - q;
+        }
+      }
+      let score = 0;
+      if (hasArc9(bright)) score = sb;
+      if (hasArc9(dark) && sd > score) score = sd;
+      if (!score) continue;
+      if (alpha && alpha[i] < 255) continue;
+      if (scoreMap) scoreMap[i] = score;
+      xs.push(x);
+      ys.push(y);
+      ss.push(score);
+    }
+  }
+  const out = [];
+  for (let k = 0; k < xs.length; k++) {
+    const x = xs[k], y = ys[k], s = ss[k];
+    if (scoreMap) {
+      const i = y * w + x;
+      // strict against the neighbours scanned earlier so that a plateau keeps exactly one corner
+      if (scoreMap[i - w - 1] >= s || scoreMap[i - w] >= s || scoreMap[i - w + 1] >= s || scoreMap[i - 1] >= s) continue;
+      if (scoreMap[i + 1] > s || scoreMap[i + w - 1] > s || scoreMap[i + w] > s || scoreMap[i + w + 1] > s) continue;
+    }
+    out.push({ x, y, score: s });
+  }
+  return out;
+}
+
+// ---- ORB (oriented FAST, rotated BRIEF) -------------------------------------------------------------------------
+
+const PATCH_RADIUS = 15; // intensity-centroid patch (31 × 31, circular)
+const PATTERN_RADIUS = 13; // BRIEF test points stay inside this circle so every rotation fits the patch
+export const ORB_BORDER = 16; // corners nearer to the edge than this get no descriptor
+const ANGLE_BINS = 30; // the pattern is pre-rotated in 12° steps, as in ORB
+const WORDS = 8; // 256 bits
+
+/** Half-widths of the rows of the circular orientation patch. */
+const UMAX = (() => {
+  const u = new Int32Array(PATCH_RADIUS + 1);
+  for (let v = 0; v <= PATCH_RADIUS; v++) u[v] = Math.floor(Math.sqrt(PATCH_RADIUS * PATCH_RADIUS - v * v));
+  return u;
+})();
+
+/** 256 point pairs drawn once from a Gaussian around the patch centre (deterministic). */
+const PATTERN = (() => {
+  const rnd = randomSeeded(0x0bb5eed);
+  const gauss = () => {
+    let u = 0;
+    while (u < 1e-9) u = rnd();
+    return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * rnd());
+  };
+  const point = () => {
+    for (;;) {
+      const x = Math.round(gauss() * 5.5), y = Math.round(gauss() * 5.5);
+      if (x * x + y * y <= PATTERN_RADIUS * PATTERN_RADIUS) return [x, y];
+    }
+  };
+  const p = new Int8Array(256 * 4);
+  for (let k = 0; k < 256; k++) {
+    const a = point();
+    let c = point();
+    while (a[0] === c[0] && a[1] === c[1]) c = point();
+    p[k * 4] = a[0];
+    p[k * 4 + 1] = a[1];
+    p[k * 4 + 2] = c[0];
+    p[k * 4 + 3] = c[1];
+  }
+  return p;
+})();
+
+/** Pixel offsets of the pattern for an image width, per rotation bin (bin 0 = unrotated). */
+function patternOffsets(w, bin) {
+  const a = (bin * 2 * Math.PI) / ANGLE_BINS;
+  const cos = Math.cos(a), sin = Math.sin(a);
+  const off = new Int32Array(512);
+  for (let k = 0; k < 512; k++) {
+    const x = PATTERN[k * 2], y = PATTERN[k * 2 + 1];
+    off[k] = Math.round(x * sin + y * cos) * w + Math.round(x * cos - y * sin);
+  }
+  return off;
+}
+
+/** Orientation of the patch around (x, y): the angle of its intensity centroid (radians). */
+function patchAngle(d, w, x, y) {
+  let m01 = 0, m10 = 0;
+  const c = y * w + x;
+  for (let u = -PATCH_RADIUS; u <= PATCH_RADIUS; u++) m10 += u * d[c + u];
+  for (let v = 1; v <= PATCH_RADIUS; v++) {
+    let sum = 0;
+    const r = UMAX[v];
+    for (let u = -r; u <= r; u++) {
+      const below = d[c + v * w + u], above = d[c - v * w + u];
+      sum += below - above;
+      m10 += u * (below + above);
+    }
+    m01 += v * sum;
+  }
+  return Math.atan2(m01, m10);
+}
+
+/**
+ * Rotated BRIEF descriptors for corners: { keypoints: [{ x, y, score, angle }], descriptors: Uint32Array(8 per
+ * keypoint), count }. Corners closer than ORB_BORDER to the edge (or on the rim of transparency) are dropped,
+ * so `keypoints` can be shorter than `corners`. `rotate: false` gives plain upright BRIEF.
+ */
+export function orbDescriptors(grayIn, corners, { rotate = true, smoothed = false } = {}) {
+  const gray = toGray(grayIn);
+  const img = smoothed ? gray : smoothGray(gray);
+  const { width: w, height: h, data: d } = img;
+  const alpha = gray.alpha;
+  const offsets = new Array(ANGLE_BINS).fill(null);
+  const keypoints = [];
+  const words = [];
+  for (const c of corners) {
+    const x = Math.round(c.x), y = Math.round(c.y);
+    if (x < ORB_BORDER || y < ORB_BORDER || x >= w - ORB_BORDER || y >= h - ORB_BORDER) continue;
+    const i = y * w + x;
+    if (alpha) {
+      // the patch must not reach into transparency: eight probes on a radius-10 circle are a cheap test of that
+      if (alpha[i - 10] < 255 || alpha[i + 10] < 255 || alpha[i - 10 * w] < 255 || alpha[i + 10 * w] < 255) continue;
+      if (alpha[i - 7 * w - 7] < 255 || alpha[i - 7 * w + 7] < 255 || alpha[i + 7 * w - 7] < 255 || alpha[i + 7 * w + 7] < 255) continue;
+    }
+    const angle = rotate ? patchAngle(d, w, x, y) : 0;
+    let bin = rotate ? Math.round((angle / (2 * Math.PI)) * ANGLE_BINS) % ANGLE_BINS : 0;
+    if (bin < 0) bin += ANGLE_BINS;
+    const off = offsets[bin] ?? (offsets[bin] = patternOffsets(w, bin));
+    for (let wd = 0; wd < WORDS; wd++) {
+      let bits = 0;
+      const base = wd * 64;
+      for (let k = 0; k < 32; k++) if (d[i + off[base + k * 2]] < d[i + off[base + k * 2 + 1]]) bits |= 1 << k;
+      words.push(bits >>> 0);
+    }
+    keypoints.push({ x: c.x, y: c.y, score: c.score ?? 0, angle });
+  }
+  return { keypoints, descriptors: Uint32Array.from(words), count: keypoints.length };
+}
+
+/** Upright BRIEF (no orientation): enough for images that are only shifted. */
+export const briefDescriptors = (gray, corners, opts = {}) => orbDescriptors(gray, corners, { ...opts, rotate: false });
+
+/**
+ * Detects and describes features of an image on a small pyramid of a reduced copy (the longest side is brought
+ * down to `maxSize`; `levels` further steps of 1/`scaleFactor` give some scale tolerance). Keypoints are returned
+ * in the coordinates of the full image: { keypoints: [{ x, y, score, angle, level }], descriptors, count, scale }.
+ * The strongest corners are kept with a per-cell cap so they spread over the picture instead of crowding one
+ * busy area.
+ */
+export function detectFeatures(img, { maxSize = 1000, maxFeatures = 1500, levels = 5, scaleFactor = 1.3, threshold = 20, rotate = true } = {}) {
+  const full = toGray(img);
+  const scale = Math.min(1, maxSize / Math.max(full.width, full.height));
+  const keypoints = [];
+  const parts = [];
+  let total = 0;
+  for (let level = 0; level < Math.max(1, levels); level++) {
+    const s = scale / Math.pow(scaleFactor, level);
+    const w = Math.max(1, Math.round(full.width * s)), h = Math.max(1, Math.round(full.height * s));
+    if (Math.min(w, h) < ORB_BORDER * 2 + 8) break;
+    const gray = shrinkGray(full, w, h);
+    const quota = Math.max(50, Math.round(maxFeatures / Math.pow(scaleFactor, level * 1.5)));
+    // flat or soft pictures have few strong corners: lower the bar until there is enough to match
+    let corners = [];
+    for (let t = threshold; ; t = Math.floor(t / 2)) {
+      corners = fastCorners(gray, { threshold: t, nonmax: true, border: ORB_BORDER });
+      if (corners.length >= quota / 3 || t <= 5) break;
+    }
+    corners = spreadCorners(corners, w, h, quota);
+    const f = orbDescriptors(gray, corners, { rotate });
+    const kx = full.width / w, ky = full.height / h;
+    for (const k of f.keypoints) keypoints.push({ x: (k.x + 0.5) * kx - 0.5, y: (k.y + 0.5) * ky - 0.5, score: k.score, angle: k.angle, level });
+    parts.push(f.descriptors);
+    total += f.count;
+  }
+  const descriptors = new Uint32Array(total * WORDS);
+  let o = 0;
+  for (const p of parts) {
+    descriptors.set(p, o);
+    o += p.length;
+  }
+  // a small greyscale copy rides along: registerPair() checks a model against it (pictureAgreement)
+  const ts = Math.min(1, THUMB_SIZE / Math.max(full.width, full.height));
+  const thumb = shrinkGray(full, Math.max(1, Math.round(full.width * ts)), Math.max(1, Math.round(full.height * ts)));
+  return { keypoints, descriptors, count: total, scale, width: full.width, height: full.height, thumb };
+}
+
+/** Longest side of the thumbnail detectFeatures() keeps for pictureAgreement(). */
+const THUMB_SIZE = 160;
+
+/**
+ * How well two pictures agree under a model a -> b, judged on their thumbnails and independent of the features:
+ * the correlation (−1 … 1) of the brightness steps between neighbouring thumbnail pixels where the two overlap.
+ * Steps, not brightness, so that exposure and a sky-above-land layout do not count as agreement; clipped areas
+ * are left out. A right model scores 0.6 – 1; a wrong one that guided matching fell for (rows of identical
+ * windows that fit a row of other windows) scores about 0. null when the overlap is too small or too flat to say.
+ */
+export function pictureAgreement(fa, fb, H) {
+  const ta = fa.thumb, tb = fb.thumb;
+  if (!ta || !tb) return null;
+  const inv = invert3(H);
+  if (!inv) return null;
+  const { width: wa, height: ha, data: da } = ta;
+  const { width: wb, height: hb, data: db } = tb;
+  const ka = fa.width / wa, kya = fa.height / ha, kb = fb.width / wb, kyb = fb.height / hb;
+  // A seen through the model, on B's thumbnail grid (NaN where A has nothing)
+  const warped = new Float32Array(wb * hb).fill(NaN);
+  for (let y = 0; y < hb; y++) for (let x = 0; x < wb; x++) {
+    const o = y * wb + x;
+    if (tb.alpha && tb.alpha[o] < 255) continue;
+    const bx = (x + 0.5) * kb - 0.5, by = (y + 0.5) * kyb - 0.5;
+    const w = inv[6] * bx + inv[7] * by + inv[8];
+    if (w <= 1e-9) continue;
+    const sx = ((inv[0] * bx + inv[1] * by + inv[2]) / w + 0.5) / ka - 0.5, sy = ((inv[3] * bx + inv[4] * by + inv[5]) / w + 0.5) / kya - 0.5;
+    if (!(sx >= 0 && sy >= 0 && sx <= wa - 1 && sy <= ha - 1)) continue;
+    const x0 = Math.min(wa - 2, Math.floor(sx)), y0 = Math.min(ha - 2, Math.floor(sy));
+    if (x0 < 0 || y0 < 0) continue;
+    const i = y0 * wa + x0;
+    if (ta.alpha && (ta.alpha[i] < 255 || ta.alpha[i + 1] < 255 || ta.alpha[i + wa] < 255 || ta.alpha[i + wa + 1] < 255)) continue;
+    const tx = sx - x0, ty = sy - y0;
+    warped[o] = (da[i] * (1 - tx) + da[i + 1] * tx) * (1 - ty) + (da[i + wa] * (1 - tx) + da[i + wa + 1] * tx) * ty;
+  }
+  let sab = 0, saa = 0, sbb = 0, count = 0;
+  for (let y = 0; y < hb - 1; y++) for (let x = 0; x < wb - 1; x++) {
+    const o = y * wb + x;
+    const v = warped[o], r = warped[o + 1], d = warped[o + wb];
+    if (v !== v || r !== r || d !== d) continue;
+    // blown-out and blocked-up areas have no steps in one picture whatever the other shows (exposure brackets)
+    const bv = db[o], br = db[o + 1], bd = db[o + wb];
+    if (v < 5 || r < 5 || d < 5 || v > 250 || r > 250 || d > 250 || bv < 5 || br < 5 || bd < 5 || bv > 250 || br > 250 || bd > 250) continue;
+    const ax = r - v, ay = d - v, bx = br - bv, by = bd - bv;
+    sab += ax * bx + ay * by;
+    saa += ax * ax + ay * ay;
+    sbb += bx * bx + by * by;
+    count++;
+  }
+  // too few pixels, or steps no larger than rounding noise: no verdict
+  if (count < 40 || saa < count * 2 || sbb < count * 2) return null;
+  return sab / Math.sqrt(saa * sbb);
+}
+
+/** The strongest `max` corners, at most a fair share per cell of a 8 × 8 grid first, the rest by score. */
+function spreadCorners(corners, w, h, max) {
+  if (corners.length <= max) return corners;
+  const sorted = corners.slice().sort((a, b) => b.score - a.score);
+  const G = 8;
+  const cap = Math.max(4, Math.ceil((max / (G * G)) * 2));
+  const counts = new Int32Array(G * G);
+  const kept = [], spare = [];
+  for (const c of sorted) {
+    const cell = Math.min(G - 1, Math.floor((c.y * G) / h)) * G + Math.min(G - 1, Math.floor((c.x * G) / w));
+    if (counts[cell] < cap && kept.length < max) {
+      counts[cell]++;
+      kept.push(c);
+    } else spare.push(c);
+  }
+  for (let i = 0; kept.length < max && i < spare.length; i++) kept.push(spare[i]);
+  return kept;
+}
+
+// ---- matching ----------------------------------------------------------------------------------------------------
+
+function popcount(x) {
+  x -= (x >>> 1) & 0x55555555;
+  x = (x & 0x33333333) + ((x >>> 2) & 0x33333333);
+  x = (x + (x >>> 4)) & 0x0f0f0f0f;
+  return Math.imul(x, 0x01010101) >>> 24;
+}
+
+const descriptorsOf = (f) => (f instanceof Uint32Array ? f : f.descriptors);
+
+/**
+ * Brute-force Hamming matching of two descriptor sets (Uint32Array with 8 words per feature, or the objects
+ * orbDescriptors / detectFeatures return). A match survives Lowe's ratio test (best < ratio × second best),
+ * the cross check (each is the other's nearest) and `maxDistance`. Returns [{ a, b, distance }].
+ */
+export function matchDescriptors(fa, fb, { ratio = 0.8, crossCheck = true, maxDistance = 80 } = {}) {
+  const A = descriptorsOf(fa), B = descriptorsOf(fb);
+  const na = (A.length / WORDS) | 0, nb = (B.length / WORDS) | 0;
+  if (!na || !nb) return [];
+  const bestA = new Int32Array(na).fill(-1), distA = new Int32Array(na), secondA = new Int32Array(na);
+  for (let i = 0; i < na; i++) {
+    const o = i * WORDS;
+    const a0 = A[o], a1 = A[o + 1], a2 = A[o + 2], a3 = A[o + 3], a4 = A[o + 4], a5 = A[o + 5], a6 = A[o + 6], a7 = A[o + 7];
+    let best = 1 << 30, second = 1 << 30, bj = -1;
+    for (let j = 0, q = 0; j < nb; j++, q += WORDS) {
+      let dist = popcount(a0 ^ B[q]) + popcount(a1 ^ B[q + 1]) + popcount(a2 ^ B[q + 2]) + popcount(a3 ^ B[q + 3]);
+      if (dist < second) dist += popcount(a4 ^ B[q + 4]) + popcount(a5 ^ B[q + 5]) + popcount(a6 ^ B[q + 6]) + popcount(a7 ^ B[q + 7]);
+      else continue; // already no better than the second best: the remaining words can only add
+      if (dist < best) {
+        second = best;
+        best = dist;
+        bj = j;
+      } else if (dist < second) second = dist;
+    }
+    bestA[i] = bj;
+    distA[i] = best;
+    secondA[i] = second;
+  }
+  // the cross check (is a also b's nearest?) is verified only for the candidates that survived the ratio test
+  const out = [];
+  for (let i = 0; i < na; i++) {
+    const j = bestA[i];
+    if (j < 0 || distA[i] > maxDistance) continue;
+    if (nb > 1 && distA[i] >= ratio * secondA[i]) continue;
+    if (crossCheck && !isNearestInA(A, B, na, j, i, distA[i])) continue;
+    out.push({ a: i, b: j, distance: distA[i] });
+  }
+  return out;
+}
+
+/** True when no feature of A other than i is closer to B[j] than `dist`. */
+function isNearestInA(A, B, na, j, i, dist) {
+  const q = j * WORDS;
+  for (let k = 0, o = 0; k < na; k++, o += WORDS) {
+    if (k === i) continue;
+    let d = 0;
+    for (let wd = 0; wd < WORDS && d < dist; wd++) d += popcount(A[o + wd] ^ B[q + wd]);
+    if (d < dist) return false;
+  }
+  return true;
+}
+
+/** Point pairs of a match list: [{ x1, y1, x2, y2 }] (1 = the first image, 2 = the second). */
+export function matchedPoints(fa, fb, matches) {
+  return matches.map((m) => {
+    const p = fa.keypoints[m.a], q = fb.keypoints[m.b];
+    return { x1: p.x, y1: p.y, x2: q.x, y2: q.y };
+  });
+}
+
+// ---- small linear algebra -------------------------------------------------------------------------------------
+
+/** Solves A x = b in place (Gaussian elimination with partial pivoting); null when singular. */
+function solveLinear(A, b) {
+  const n = b.length;
+  for (let col = 0; col < n; col++) {
+    let piv = col;
+    for (let r = col + 1; r < n; r++) if (Math.abs(A[r][col]) > Math.abs(A[piv][col])) piv = r;
+    if (Math.abs(A[piv][col]) < 1e-12) return null;
+    if (piv !== col) {
+      [A[col], A[piv]] = [A[piv], A[col]];
+      [b[col], b[piv]] = [b[piv], b[col]];
+    }
+    for (let r = col + 1; r < n; r++) {
+      const f = A[r][col] / A[col][col];
+      if (!f) continue;
+      for (let c = col; c < n; c++) A[r][c] -= f * A[col][c];
+      b[r] -= f * b[col];
+    }
+  }
+  const x = new Array(n).fill(0);
+  for (let r = n - 1; r >= 0; r--) {
+    let s = b[r];
+    for (let c = r + 1; c < n; c++) s -= A[r][c] * x[c];
+    x[r] = s / A[r][r];
+  }
+  return x;
+}
+
+export const IDENTITY3 = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+
+/** 3 × 3 product A·B (row-major): apply B first, then A. */
+export function multiply3(A, B) {
+  const o = new Array(9);
+  for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) o[r * 3 + c] = A[r * 3] * B[c] + A[r * 3 + 1] * B[3 + c] + A[r * 3 + 2] * B[6 + c];
+  return o;
+}
+
+/** Scales a homography so its last element is 1 (when it can be). */
+function normalise3(H) {
+  const k = H[8];
+  return Math.abs(k) > 1e-12 ? H.map((v) => v / k) : H.slice();
+}
+
+/** Inverse of a 3 × 3 homography, normalised; null when singular. */
+export function invert3(H) {
+  try {
+    const inv = invertHomography(H);
+    return inv.every(Number.isFinite) ? normalise3(inv) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Applies a homography to a point: [x', y'] (Infinity when the point maps to the horizon). */
+export function applyH(H, x, y) {
+  const w = H[6] * x + H[7] * y + H[8];
+  return [(H[0] * x + H[1] * y + H[2]) / w, (H[3] * x + H[4] * y + H[5]) / w];
+}
+
+/** Affine matrix [a, b, c, d, e, f] (Canvas order) as a homography, and back (only valid when H is affine). */
+export const matrixToH = (m) => [m[0], m[2], m[4], m[1], m[3], m[5], 0, 0, 1];
+export const hToMatrix = (H) => [H[0] / H[8], H[3] / H[8], H[1] / H[8], H[4] / H[8], H[2] / H[8], H[5] / H[8]];
+
+// ---- model fitting -------------------------------------------------------------------------------------------
+
+/** Least-squares homography through point pairs (normalised DLT with h8 = 1 in the normalised frame). */
+export function fitHomography(pairs, idx = null) {
+  const n = idx ? idx.length : pairs.length;
+  if (n < 4) return null;
+  const at = (k) => pairs[idx ? idx[k] : k];
+  // Hartley normalisation: both point sets centred with a mean distance of √2 keeps the normal equations well conditioned
+  let mx1 = 0, my1 = 0, mx2 = 0, my2 = 0;
+  for (let k = 0; k < n; k++) {
+    const p = at(k);
+    mx1 += p.x1;
+    my1 += p.y1;
+    mx2 += p.x2;
+    my2 += p.y2;
+  }
+  mx1 /= n;
+  my1 /= n;
+  mx2 /= n;
+  my2 /= n;
+  let d1 = 0, d2 = 0;
+  for (let k = 0; k < n; k++) {
+    const p = at(k);
+    d1 += Math.hypot(p.x1 - mx1, p.y1 - my1);
+    d2 += Math.hypot(p.x2 - mx2, p.y2 - my2);
+  }
+  if (d1 < 1e-9 || d2 < 1e-9) return null;
+  const s1 = (Math.SQRT2 * n) / d1, s2 = (Math.SQRT2 * n) / d2;
+  const A = Array.from({ length: 8 }, () => new Array(8).fill(0));
+  const b = new Array(8).fill(0);
+  const row = new Array(8);
+  const add = (rhs) => {
+    for (let i = 0; i < 8; i++) {
+      if (!row[i]) continue;
+      for (let j = i; j < 8; j++) A[i][j] += row[i] * row[j];
+      b[i] += row[i] * rhs;
+    }
+  };
+  for (let k = 0; k < n; k++) {
+    const p = at(k);
+    const x = (p.x1 - mx1) * s1, y = (p.y1 - my1) * s1, u = (p.x2 - mx2) * s2, v = (p.y2 - my2) * s2;
+    row[0] = x; row[1] = y; row[2] = 1; row[3] = 0; row[4] = 0; row[5] = 0; row[6] = -u * x; row[7] = -u * y;
+    add(u);
+    row[0] = 0; row[1] = 0; row[2] = 0; row[3] = x; row[4] = y; row[5] = 1; row[6] = -v * x; row[7] = -v * y;
+    add(v);
+  }
+  for (let i = 0; i < 8; i++) for (let j = 0; j < i; j++) A[i][j] = A[j][i];
+  const hv = solveLinear(A, b);
+  if (!hv) return null;
+  const Hn = [hv[0], hv[1], hv[2], hv[3], hv[4], hv[5], hv[6], hv[7], 1];
+  // H = T2⁻¹ · Hn · T1
+  const T1 = [s1, 0, -mx1 * s1, 0, s1, -my1 * s1, 0, 0, 1];
+  const T2inv = [1 / s2, 0, mx2, 0, 1 / s2, my2, 0, 0, 1];
+  const H = multiply3(T2inv, multiply3(Hn, T1));
+  return Math.abs(H[8]) > 1e-12 && H.every(Number.isFinite) ? normalise3(H) : null;
+}
+
+/** Least-squares affine matrix [a, b, c, d, e, f] through point pairs. */
+export function fitAffine(pairs, idx = null) {
+  const n = idx ? idx.length : pairs.length;
+  if (n < 3) return null;
+  let sx = 0, sy = 0, sxx = 0, sxy = 0, syy = 0, su = 0, sv = 0, sxu = 0, syu = 0, sxv = 0, syv = 0;
+  for (let k = 0; k < n; k++) {
+    const p = pairs[idx ? idx[k] : k];
+    sx += p.x1; sy += p.y1; sxx += p.x1 * p.x1; sxy += p.x1 * p.y1; syy += p.y1 * p.y1;
+    su += p.x2; sv += p.y2; sxu += p.x1 * p.x2; syu += p.y1 * p.x2; sxv += p.x1 * p.y2; syv += p.y1 * p.y2;
+  }
+  const N = () => [[sxx, sxy, sx], [sxy, syy, sy], [sx, sy, n]];
+  const u = solveLinear(N(), [sxu, syu, su]);
+  const v = solveLinear(N(), [sxv, syv, sv]);
+  if (!u || !v) return null;
+  return [u[0], v[0], u[1], v[1], u[2], v[2]];
+}
+
+/** Least-squares similarity (rotation, uniform scale, translation; no mirror) through point pairs. */
+export function fitSimilarity(pairs, idx = null) {
+  const n = idx ? idx.length : pairs.length;
+  if (n < 2) return null;
+  let mx1 = 0, my1 = 0, mx2 = 0, my2 = 0;
+  for (let k = 0; k < n; k++) {
+    const p = pairs[idx ? idx[k] : k];
+    mx1 += p.x1; my1 += p.y1; mx2 += p.x2; my2 += p.y2;
+  }
+  mx1 /= n; my1 /= n; mx2 /= n; my2 /= n;
+  let dot = 0, cross = 0, norm = 0;
+  for (let k = 0; k < n; k++) {
+    const p = pairs[idx ? idx[k] : k];
+    const x = p.x1 - mx1, y = p.y1 - my1, u = p.x2 - mx2, v = p.y2 - my2;
+    dot += x * u + y * v;
+    cross += x * v - y * u;
+    norm += x * x + y * y;
+  }
+  if (norm < 1e-9) return null;
+  const a = dot / norm, b = cross / norm;
+  return [a, b, -b, a, mx2 - (a * mx1 - b * my1), my2 - (b * mx1 + a * my1)];
+}
+
+/** Distinct random indices below n. */
+function sample(rnd, n, k, out) {
+  for (let i = 0; i < k; i++) {
+    let v;
+    let again = true;
+    while (again) {
+      v = Math.floor(rnd() * n);
+      again = false;
+      for (let j = 0; j < i; j++) if (out[j] === v) again = true;
+    }
+    out[i] = v;
+  }
+  return out;
+}
+
+/** RANSAC iterations still needed for `confidence` given the best inlier ratio seen so far. */
+function iterationsFor(inlierRatio, sampleSize, confidence, max) {
+  const p = Math.pow(inlierRatio, sampleSize);
+  if (p <= 1e-9) return max;
+  if (p >= 1 - 1e-9) return 1;
+  return Math.min(max, Math.ceil(Math.log(1 - confidence) / Math.log(1 - p)));
+}
+
+/** Shared RANSAC loop: fit(sampleIndices) -> model | null, error(model, pair) -> squared distance. */
+function ransac(pairs, { size, fit, refit, error, threshold, iterations, seed, confidence = 0.995 }) {
+  const n = pairs.length;
+  if (n < size) return { model: null, inliers: [] };
+  const rnd = randomSeeded(seed);
+  const t2 = threshold * threshold;
+  const pick = new Array(size);
+  let best = null, bestCount = 0, bestErr = Infinity;
+  let needed = iterations;
+  const exhaustive = size === 1 && n <= iterations; // a one-point model: simply try every pair
+  for (let it = 0; it < (exhaustive ? n : needed); it++) {
+    if (exhaustive) pick[0] = it;
+    else sample(rnd, n, size, pick);
+    const model = fit(pick);
+    if (!model) continue;
+    let count = 0, err = 0;
+    for (let k = 0; k < n; k++) {
+      const e = error(model, pairs[k]);
+      if (e <= t2) {
+        count++;
+        err += e;
+      }
+    }
+    if (count > bestCount || (count === bestCount && err < bestErr)) {
+      best = model;
+      bestCount = count;
+      bestErr = err;
+      if (!exhaustive) needed = Math.min(needed, Math.max(it + 1, iterationsFor(count / n, size, confidence, iterations)));
+    }
+  }
+  if (!best || bestCount < size) return { model: null, inliers: [] };
+  return polish(pairs, best, { size, refit, error, threshold });
+}
+
+/**
+ * Least squares on the consensus set of a model, three times over: each refit can pull a few more pairs
+ * inside the threshold. Returns { model, inliers } (the pairs within `threshold` of the final model).
+ */
+function polish(pairs, start, { size, refit, error, threshold }) {
+  const n = pairs.length;
+  const t2 = threshold * threshold;
+  let model = start;
+  let inliers = [];
+  for (let round = 0; round < 3; round++) {
+    inliers = [];
+    for (let k = 0; k < n; k++) if (error(model, pairs[k]) <= t2) inliers.push(k);
+    if (inliers.length < size) break;
+    const next = refit(inliers);
+    if (!next) break;
+    model = next;
+  }
+  inliers = [];
+  for (let k = 0; k < n; k++) if (error(model, pairs[k]) <= t2) inliers.push(k);
+  return { model, inliers };
+}
+
+const errH = (H, p) => {
+  const w = H[6] * p.x1 + H[7] * p.y1 + H[8];
+  if (w <= 1e-9) return Infinity;
+  const dx = (H[0] * p.x1 + H[1] * p.y1 + H[2]) / w - p.x2, dy = (H[3] * p.x1 + H[4] * p.y1 + H[5]) / w - p.y2;
+  return dx * dx + dy * dy;
+};
+const errM = (m, p) => {
+  const dx = m[0] * p.x1 + m[2] * p.y1 + m[4] - p.x2, dy = m[1] * p.x1 + m[3] * p.y1 + m[5] - p.y2;
+  return dx * dx + dy * dy;
+};
+
+/**
+ * Homography (x1, y1) -> (x2, y2) from point pairs with outliers: { H: number[9] | null (row-major, H[8] = 1),
+ * inliers: indices into `pairs` }. `threshold` is the reprojection error in pixels that still counts as an inlier.
+ */
+export function ransacHomography(pairs, { threshold = 3, iterations = 2000, seed = 1 } = {}) {
+  const r = ransac(pairs, {
+    size: 4,
+    threshold,
+    iterations,
+    seed,
+    error: errH,
+    fit: (s) => {
+      try {
+        const H = homographyFrom4(s.map((k) => [pairs[k].x1, pairs[k].y1]), s.map((k) => [pairs[k].x2, pairs[k].y2]));
+        return H.every(Number.isFinite) ? H : null;
+      } catch {
+        return null; // three of the four points in a line
+      }
+    },
+    refit: (idx) => fitHomography(pairs, idx),
+  });
+  return { H: r.model, inliers: r.inliers };
+}
+
+/** Affine model from point pairs with outliers: { matrix: [a, b, c, d, e, f] | null, inliers }. */
+export function ransacAffine(pairs, { threshold = 3, iterations = 1000, seed = 1 } = {}) {
+  const r = ransac(pairs, { size: 3, threshold, iterations, seed, error: errM, fit: (s) => fitAffine(pairs, s), refit: (idx) => fitAffine(pairs, idx) });
+  return { matrix: r.model, inliers: r.inliers };
+}
+
+/** Similarity (rotate, scale, move) from point pairs with outliers: { matrix | null, inliers }. */
+export function ransacSimilarity(pairs, { threshold = 3, iterations = 1000, seed = 1 } = {}) {
+  const r = ransac(pairs, { size: 2, threshold, iterations, seed, error: errM, fit: (s) => fitSimilarity(pairs, s), refit: (idx) => fitSimilarity(pairs, idx) });
+  return { matrix: r.model, inliers: r.inliers };
+}
+
+/** Pure shift from point pairs with outliers: { dx, dy, matrix | null, inliers } (x2 = x1 + dx). */
+export function ransacTranslation(pairs, { threshold = 3, iterations = 1000, seed = 1 } = {}) {
+  const mean = (idx) => {
+    let dx = 0, dy = 0;
+    for (const k of idx) {
+      dx += pairs[k].x2 - pairs[k].x1;
+      dy += pairs[k].y2 - pairs[k].y1;
+    }
+    return [1, 0, 0, 1, dx / idx.length, dy / idx.length];
+  };
+  const r = ransac(pairs, { size: 1, threshold, iterations, seed, error: errM, fit: mean, refit: mean });
+  return { dx: r.model ? r.model[4] : 0, dy: r.model ? r.model[5] : 0, matrix: r.model, inliers: r.inliers };
+}
+
+// ---- cylindrical and spherical projection ------------------------------------------------------------------------
+
+/**
+ * Focal length (pixels) of the camera from the homography between two views that differ by a rotation
+ * (Szeliski & Shum; the same closed form OpenCV's stitcher uses). H must map coordinates centred on the first
+ * image's centre to coordinates centred on the second's. null when the homography does not constrain it.
+ */
+export function focalFromHomography(H) {
+  const h = normalise3(H);
+  // each focal has two closed forms v = numerator / d; the better conditioned one (larger |d|) that is positive wins
+  const pick = (n1, d1, n2, d2) => {
+    const scale = Math.max(Math.abs(d1), Math.abs(d2));
+    if (scale < 1e-18) return null;
+    const c = [[n1 / d1, Math.abs(d1)], [n2 / d2, Math.abs(d2)]].filter(([v, d]) => d > scale * 1e-6 && Number.isFinite(v) && v > 0);
+    if (!c.length) return null;
+    c.sort((p, q) => q[1] - p[1]);
+    return Math.sqrt(c[0][0]);
+  };
+  const f1 = pick(-(h[0] * h[1] + h[3] * h[4]), h[6] * h[7], h[0] * h[0] + h[3] * h[3] - h[1] * h[1] - h[4] * h[4], (h[7] - h[6]) * (h[7] + h[6]));
+  const f0 = pick(-h[2] * h[5], h[0] * h[3] + h[1] * h[4], h[5] * h[5] - h[2] * h[2], h[0] * h[0] + h[1] * h[1] - h[3] * h[3] - h[4] * h[4]);
+  if (f0 && f1) return Math.sqrt(f0 * f1);
+  return f0 ?? f1 ?? null;
+}
+
+/** Image point (x, y) -> coordinates on the cylinder / sphere of radius `focal`, relative to the image centre. */
+export function projectPoint(type, focal, cx, cy, x, y) {
+  const dx = x - cx, dy = y - cy;
+  const theta = Math.atan2(dx, focal);
+  const hyp = Math.hypot(dx, focal);
+  return [focal * theta, type === 'spherical' ? focal * Math.atan2(dy, hyp) : (focal * dy) / hyp];
+}
+
+/** Inverse of projectPoint. */
+export function unprojectPoint(type, focal, cx, cy, u, v) {
+  const theta = u / focal;
+  const dx = focal * Math.tan(theta);
+  const hyp = focal / Math.cos(theta);
+  return [cx + dx, cy + (type === 'spherical' ? Math.tan(v / focal) * hyp : (v * hyp) / focal)];
+}
+
+/** Inverse of a 3 × 3 matrix by cofactors, not normalised (a homography keeps its sign and scale); null when singular. */
+function inverse3(m) {
+  const A = m[4] * m[8] - m[5] * m[7], B = m[2] * m[7] - m[1] * m[8], C = m[1] * m[5] - m[2] * m[4];
+  const det = m[0] * A + m[3] * B + m[6] * C;
+  if (!(Math.abs(det) > 1e-300) || !Number.isFinite(det)) return null;
+  return [
+    A / det, B / det, C / det,
+    (m[5] * m[6] - m[3] * m[8]) / det, (m[0] * m[8] - m[2] * m[6]) / det, (m[2] * m[3] - m[0] * m[5]) / det,
+    (m[3] * m[7] - m[4] * m[6]) / det, (m[1] * m[6] - m[0] * m[7]) / det, (m[0] * m[4] - m[1] * m[3]) / det,
+  ];
+}
+
+/**
+ * A homography scaled so that its largest element is ±1, the sign kept. On a cylinder or a sphere the sign
+ * matters: H·p is the direction of a ray, and −H·p points the other way (normalise3's H[8] = 1 would flip an
+ * image that lies more than a quarter turn from the reference).
+ */
+function rescale3(H) {
+  let m = 0;
+  for (const v of H) if (Math.abs(v) > m) m = Math.abs(v);
+  return m > 0 ? H.map((v) => v / m) : H.slice();
+}
+
+/** The rotation nearest to a 3 × 3 matrix with roughly orthogonal columns (Gram–Schmidt on the first two); null when degenerate. */
+function toRotation(M) {
+  let x0 = M[0], x1 = M[3], x2 = M[6], y0 = M[1], y1 = M[4], y2 = M[7];
+  const nx = Math.hypot(x0, x1, x2);
+  if (!(nx > 1e-12)) return null;
+  x0 /= nx;
+  x1 /= nx;
+  x2 /= nx;
+  const dot = x0 * y0 + x1 * y1 + x2 * y2;
+  y0 -= dot * x0;
+  y1 -= dot * x1;
+  y2 -= dot * x2;
+  const ny = Math.hypot(y0, y1, y2);
+  if (!(ny > 1e-12)) return null;
+  y0 /= ny;
+  y1 /= ny;
+  y2 /= ny;
+  return [x0, y0, x1 * y2 - x2 * y1, x1, y1, x2 * y0 - x0 * y2, x2, y2, x0 * y1 - x1 * y0];
+}
+
+/** Rotation matrix of a rotation vector (axis × angle, Rodrigues). */
+function rotationFromVector(wx, wy, wz) {
+  const th = Math.hypot(wx, wy, wz);
+  if (th < 1e-12) return [1, -wz, wy, wz, 1, -wx, -wy, wx, 1];
+  const x = wx / th, y = wy / th, z = wz / th, c = Math.cos(th), s = Math.sin(th), k = 1 - c;
+  return [c + x * x * k, x * y * k - z * s, x * z * k + y * s, y * x * k + z * s, c + y * y * k, y * z * k - x * s, z * x * k - y * s, z * y * k + x * s, c + z * z * k];
+}
+
+/** The homography K_b · R · K_a⁻¹ of a camera that turned by R between two views (same focal, centres ca / cb). */
+export function rotationHomography(Rm, focal, ca, cb) {
+  const Kb = [focal, 0, cb[0], 0, focal, cb[1], 0, 0, 1];
+  const KaInv = [1 / focal, 0, -ca[0] / focal, 0, 1 / focal, -ca[1] / focal, 0, 0, 1];
+  return multiply3(Kb, multiply3(Rm, KaInv));
+}
+
+/**
+ * The rotation of a camera between two views, from matched points and a known focal length: least squares on
+ * the viewing rays (b ≈ R·a), by Gauss–Newton from `start` (a rotation, or a homography a -> b that is positive
+ * over the matches; default: no rotation). Three unknowns where a homography has eight: it cannot bend to fit a
+ * narrow overlap, so it stays right across the whole image and along a chain of images. Returns R (row-major)
+ * or null.
+ */
+export function fitRotation(pairs, idx, focal, ca, cb, start = null) {
+  const n = idx ? idx.length : pairs.length;
+  if (n < 2 || !(focal > 0)) return null;
+  const A = new Float64Array(n * 3), B = new Float64Array(n * 3);
+  for (let k = 0; k < n; k++) {
+    const p = pairs[idx ? idx[k] : k];
+    let x = (p.x1 - ca[0]) / focal, y = (p.y1 - ca[1]) / focal, l = Math.hypot(x, y, 1);
+    A[k * 3] = x / l;
+    A[k * 3 + 1] = y / l;
+    A[k * 3 + 2] = 1 / l;
+    x = (p.x2 - cb[0]) / focal;
+    y = (p.y2 - cb[1]) / focal;
+    l = Math.hypot(x, y, 1);
+    B[k * 3] = x / l;
+    B[k * 3 + 1] = y / l;
+    B[k * 3 + 2] = 1 / l;
+  }
+  let Rm = null;
+  if (start) {
+    // K_b⁻¹ · H · K_a is the rotation times a positive scale when H is a rotation homography
+    const KbInv = [1 / focal, 0, -cb[0] / focal, 0, 1 / focal, -cb[1] / focal, 0, 0, 1];
+    const Ka = [focal, 0, ca[0], 0, focal, ca[1], 0, 0, 1];
+    Rm = toRotation(multiply3(KbInv, multiply3(start, Ka)));
+  }
+  if (!Rm) Rm = IDENTITY3.slice();
+  for (let it = 0; it < 12; it++) {
+    // with r = R·a: minimise Σ |b − (r + ω × r)|² over the small turn ω  =>  Σ (I − r rᵀ) ω = Σ r × b
+    let m00 = 0, m01 = 0, m02 = 0, m11 = 0, m12 = 0, m22 = 0, gx = 0, gy = 0, gz = 0;
+    for (let k = 0; k < n; k++) {
+      const ax = A[k * 3], ay = A[k * 3 + 1], az = A[k * 3 + 2], bx = B[k * 3], by = B[k * 3 + 1], bz = B[k * 3 + 2];
+      const rx = Rm[0] * ax + Rm[1] * ay + Rm[2] * az, ry = Rm[3] * ax + Rm[4] * ay + Rm[5] * az, rz = Rm[6] * ax + Rm[7] * ay + Rm[8] * az;
+      m00 += 1 - rx * rx;
+      m01 -= rx * ry;
+      m02 -= rx * rz;
+      m11 += 1 - ry * ry;
+      m12 -= ry * rz;
+      m22 += 1 - rz * rz;
+      gx += ry * bz - rz * by;
+      gy += rz * bx - rx * bz;
+      gz += rx * by - ry * bx;
+    }
+    const w = solveLinear([[m00, m01, m02], [m01, m11, m12], [m02, m12, m22]], [gx, gy, gz]);
+    if (!w || !w.every(Number.isFinite)) break;
+    Rm = multiply3(rotationFromVector(w[0], w[1], w[2]), Rm);
+    if (Math.hypot(w[0], w[1], w[2]) < 1e-10) break;
+  }
+  return toRotation(Rm) ?? Rm;
+}
+
+/** Wraps an angle into (−π, π]. */
+const wrapAngle = (a) => a - 2 * Math.PI * Math.round(a / (2 * Math.PI));
+
+/**
+ * Where the ray through the reference-plane point (X, Y, W) (homogeneous: W < 0 is behind the reference camera)
+ * meets the cylinder / sphere: [θ, v] with v in pixels (the surface's radius is the focal length).
+ */
+function surfacePoint(type, focal, cx, cy, X, Y, W) {
+  const dx = X - cx * W, dy = Y - cy * W, dz = focal * W;
+  const hyp = Math.hypot(dx, dz);
+  if (type === 'spherical') return [Math.atan2(dx, dz), focal * Math.atan2(dy, hyp)];
+  // towards the cylinder's axis the height runs off to infinity: cut it at about 76° of elevation
+  return [Math.atan2(dx, dz), focal * Math.max(-4, Math.min(4, hyp > 1e-12 * Math.abs(dy) ? dy / hyp : dy > 0 ? 4 : -4))];
+}
+
+/**
+ * Integer bounds of an image of w × h on the cylinder / sphere around the reference camera, in the reference
+ * pixel space (the surface touches the reference image at its centre, so pixels there keep their place). `H`
+ * takes the image's pixels to the reference plane and must be positive over the image.
+ */
+function surfaceBounds(H, w, h, warp) {
+  const { type, focal, cx, cy } = warp;
+  const at = (x, y) => surfacePoint(type, focal, cx, cy, H[0] * x + H[1] * y + H[2], H[3] * x + H[4] * y + H[5], H[6] * x + H[7] * y + H[8]);
+  const centre = at((w - 1) / 2, (h - 1) / 2)[0];
+  let u1 = Infinity, v1 = Infinity, u2 = -Infinity, v2 = -Infinity;
+  const visit = (x, y) => {
+    const [theta, v] = at(x, y);
+    // the image may straddle the back of the cylinder: angles are taken relative to its own centre
+    const u = focal * (centre + wrapAngle(theta - centre));
+    if (u < u1) u1 = u;
+    if (u > u2) u2 = u;
+    if (v < v1) v1 = v;
+    if (v > v2) v2 = v;
+  };
+  const steps = 48;
+  for (let k = 0; k <= steps; k++) {
+    const x = -0.5 + (w * k) / steps, y = -0.5 + (h * k) / steps;
+    visit(x, -0.5);
+    visit(x, h - 0.5);
+    visit(-0.5, y);
+    visit(w - 0.5, y);
+  }
+  if (![u1, v1, u2, v2].every(Number.isFinite)) return null;
+  // edges bow between the sampled points: one pixel of slack
+  const x = Math.floor(u1 + cx) - 1, y = Math.floor(v1 + cy) - 1;
+  return { x, y, width: Math.ceil(u2 + cx) + 1 - x + 1, height: Math.ceil(v2 + cy) + 1 - y + 1 };
+}
+
+/**
+ * Renders an image onto the cylinder / sphere of an alignImages() entry that has `warp`: the pixels of `rect`
+ * (default: the entry's bounds) in the reference pixel space. Every output pixel is a viewing ray of the
+ * reference camera; the entry's homography says where that ray enters the image. Bilinear, premultiplied,
+ * transparent where the image has nothing.
+ */
+export function projectImage(img, t, rect = t.bounds) {
+  const out = createImage(rect.width, rect.height);
+  const inv = inverse3(t.homography);
+  if (!inv || !t.warp) return out;
+  const { type, focal: f, cx, cy } = t.warp;
+  const spherical = type === 'spherical';
+  const { width: w, height: h, data: d } = img;
+  const od = out.data;
+  const sinT = new Float64Array(rect.width), cosT = new Float64Array(rect.width);
+  for (let x = 0; x < rect.width; x++) {
+    const th = (rect.x + x - cx) / f;
+    sinT[x] = Math.sin(th);
+    cosT[x] = Math.cos(th);
+  }
+  for (let y = 0; y < rect.height; y++) {
+    const v = (rect.y + y - cy) / f;
+    if (spherical && Math.abs(v) >= Math.PI / 2) continue; // beyond the poles
+    // the ray (sin θ · c, s, cos θ · c) and its point on the reference plane, K · ray
+    const sv = spherical ? Math.sin(v) : v, cv = spherical ? Math.cos(v) : 1;
+    const Y0 = f * sv;
+    let o = y * rect.width * 4;
+    for (let x = 0; x < rect.width; x++, o += 4) {
+      const dz = cosT[x] * cv;
+      const X = f * sinT[x] * cv + cx * dz, Y = Y0 + cy * dz;
+      const q = inv[6] * X + inv[7] * Y + inv[8] * dz;
+      if (!(q > 0)) continue; // behind this image's camera
+      sampleInto(d, w, h, (inv[0] * X + inv[1] * Y + inv[2] * dz) / q, (inv[3] * X + inv[4] * Y + inv[5] * dz) / q, od, o);
+    }
+  }
+  return out;
+}
+
+// ---- alignImages ------------------------------------------------------------------------------------------------
+
+export const PROJECTIONS = ['auto', 'perspective', 'collage', 'cylindrical', 'spherical', 'reposition'];
+
+/** Bounds { x, y, width, height } (integers) of an image of w × h under a homography; null when a corner is behind the camera. */
+function boundsUnderH(H, w, h) {
+  let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
+  for (const [x, y] of [[-0.5, -0.5], [w - 0.5, -0.5], [w - 0.5, h - 0.5], [-0.5, h - 0.5]]) {
+    const ww = H[6] * x + H[7] * y + H[8];
+    if (ww <= 1e-6) return null;
+    const u = (H[0] * x + H[1] * y + H[2]) / ww, v = (H[3] * x + H[4] * y + H[5]) / ww;
+    if (!Number.isFinite(u) || !Number.isFinite(v)) return null;
+    if (u < x1) x1 = u;
+    if (u > x2) x2 = u;
+    if (v < y1) y1 = v;
+    if (v > y2) y2 = v;
+  }
+  const x = Math.floor(x1 + 0.5 + 1e-6), y = Math.floor(y1 + 0.5 + 1e-6);
+  return { x, y, width: Math.max(1, Math.ceil(x2 + 0.5 - 1e-6) - x), height: Math.max(1, Math.ceil(y2 + 0.5 - 1e-6) - y) };
+}
+
+const unionBounds = (a, b) => {
+  if (!a) return b ? { ...b } : null;
+  if (!b) return { ...a };
+  const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y);
+  return { x, y, width: Math.max(a.x + a.width, b.x + b.width) - x, height: Math.max(a.y + a.height, b.y + b.height) - y };
+};
+
+/**
+ * Fewest inliers a pairwise model needs before two images count as overlapping. Unrelated pictures still
+ * yield a few dozen chance matches, and the best model through those gathers up to about 4 (translation),
+ * 8 (similarity) and 9 (homography) of them; the minimums sit above that. A model with fewer than
+ * STRONG × the minimum is "weak": used only to reach an image that nothing better supported reaches.
+ */
+const MIN_INLIERS = { translation: 8, similarity: 10, homography: 12 };
+const STRONG = 3;
+/** Fewest first-round matches / inliers worth a second, guided round (see registerPair). */
+const MIN_SEED = 6;
+/**
+ * Two images overlap when one of their models, after guided matching, explains at least this share of the
+ * features either image has in the claimed overlap. A real overlap scores 0.3 – 0.9; a chance model that guided
+ * matching inflated (it will find look-alikes near any position in a busy picture) stays below 0.08, because
+ * everything else in the "overlap" finds no partner …
+ */
+const MIN_SHARE = 0.12;
+/**
+ * … and the pictures must agree under that model where they can be compared (pictureAgreement: right models
+ * score 0.6 – 1, wrong ones below 0.3). This is what catches a row of windows fitted onto another row of
+ * windows, which the features alone cannot tell from an overlap.
+ */
+const MIN_AGREEMENT = 0.5;
+/** Below this agreement a pair is used like a weakly supported one: only where nothing better reaches an image. */
+const SOLID_AGREEMENT = 0.75;
+
+/**
+ * Registers images against a reference. `images` are ImageDataLike (or feature sets from detectFeatures with
+ * `width`/`height`). Options: projection ('auto' | 'perspective' | 'collage' | 'cylindrical' | 'spherical' |
+ * 'reposition'), reference (index; default: the image in the middle of the match graph, ties to the middle of
+ * the list), maxSize / maxFeatures (feature detection), focal (pixels, overrides the estimate), seed.
+ *
+ * Returns an array with one entry per image:
+ *   { index, matched, sound, homography: number[9], matrix: [a, b, c, d, e, f] | null,
+ *     warp: { type, focal, cx, cy } | null, bounds: { x, y, width, height }, parent, inliers }
+ * in the pixel space of the reference image (its top-left pixel is (0, 0)). `homography` takes the image's pixels
+ * to the plane of the reference image; `matrix` is the same model when it is affine (reposition, collage). The
+ * cylindrical and spherical layouts set `warp`: the image is drawn by projectImage() onto a cylinder / sphere
+ * around the reference camera (radius `focal`, touching the reference image at its centre (cx, cy)) and fills
+ * `bounds` there. An image that could not be connected to the reference has matched: false and stays where it
+ * is; `sound` is false when the pair that connects it is thinly supported (few inliers, or pictures that only
+ * half agree). The array also carries `projection` (the one used: 'auto' resolves to one of the others), `reference`,
+ * `bounds` (the union), `focal`, `pairs` ([{ a, b, matches, inliers }]) and `samples()` (the matched points of
+ * the pairs that were used).
+ *
+ * Cylindrical and spherical: the focal length is estimated from the pair homographies (0.8 × the width when
+ * they say nothing about it) and every pair is then fitted as a camera rotation (fitRotation), so tilt and roll
+ * between the shots are registered too; rotations chain without drifting.
+ */
+export function alignImages(images, opts = {}) {
+  const { maxSize = 1000, maxFeatures = 1500, seed = 1, onProgress = null } = opts;
+  const n = images.length;
+  const feats = images.map((img, i) => {
+    onProgress?.(i / (n * 2));
+    return img.keypoints && img.descriptors ? img : detectFeatures(img, { maxSize, maxFeatures });
+  });
+  const sizes = images.map((img, i) => ({ width: img.width ?? feats[i].width, height: img.height ?? feats[i].height }));
+  const edges = [];
+  const pairs = candidatePairs(n);
+  pairs.forEach(([a, b], k) => {
+    onProgress?.(0.5 + (k / pairs.length) * 0.5);
+    const e = registerPair(feats[a], feats[b], { seed });
+    if (e) edges.push({ a, b, ...e });
+  });
+  return solveAlignment(sizes, edges, opts);
+}
+
+/**
+ * The image pairs alignImages() tries to match: [[a, b], …] with a < b. Every pair for a handful of images;
+ * many images are assumed to be in shooting order, so only near neighbours are tried.
+ */
+export function candidatePairs(n) {
+  const window = n > 12 ? 4 : n;
+  const out = [];
+  for (let a = 0; a < n; a++) for (let b = a + 1; b < n && b - a <= window; b++) out.push([a, b]);
+  return out;
+}
+
+/**
+ * Matches features again under a known model a -> b: every feature of A takes the most similar feature of B
+ * among those within `radius` pixels of where the model puts it, and a feature of B keeps only its best
+ * suitor. Where the first matching had to trust the descriptors alone (and so dropped everything ambiguous:
+ * windows, tiles, foliage), position now tells look-alikes apart. Returns [{ a, b, distance }].
+ */
+export function guidedMatches(fa, fb, H, { radius = 4, maxDistance = 80 } = {}) {
+  const A = fa.descriptors, B = fb.descriptors;
+  const ka = fa.keypoints, kb = fb.keypoints;
+  const wb = fb.width ?? Infinity, hb = fb.height ?? Infinity;
+  if (!ka.length || !kb.length) return [];
+  // B's features in a grid of radius-sized cells
+  const cell = Math.max(1, radius);
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const k of kb) {
+    if (k.x < minX) minX = k.x;
+    if (k.x > maxX) maxX = k.x;
+    if (k.y < minY) minY = k.y;
+    if (k.y > maxY) maxY = k.y;
+  }
+  const gw = Math.floor((maxX - minX) / cell) + 1, gh = Math.floor((maxY - minY) / cell) + 1;
+  const head = new Int32Array(gw * gh).fill(-1), next = new Int32Array(kb.length);
+  for (let j = 0; j < kb.length; j++) {
+    const c = Math.floor((kb[j].y - minY) / cell) * gw + Math.floor((kb[j].x - minX) / cell);
+    next[j] = head[c];
+    head[c] = j;
+  }
+  const r2 = radius * radius;
+  const bestA = new Int32Array(kb.length).fill(-1), bestD = new Int32Array(kb.length).fill(1 << 30);
+  for (let i = 0; i < ka.length; i++) {
+    const w = H[6] * ka[i].x + H[7] * ka[i].y + H[8];
+    if (w <= 1e-9) continue;
+    const px = (H[0] * ka[i].x + H[1] * ka[i].y + H[2]) / w, py = (H[3] * ka[i].x + H[4] * ka[i].y + H[5]) / w;
+    if (!(px >= -radius && py >= -radius && px <= wb - 1 + radius && py <= hb - 1 + radius)) continue;
+    const cx = Math.floor((px - minX) / cell), cy = Math.floor((py - minY) / cell);
+    const o = i * WORDS;
+    let bj = -1, bd = maxDistance + 1;
+    for (let gy = Math.max(0, cy - 1); gy <= Math.min(gh - 1, cy + 1); gy++) for (let gx = Math.max(0, cx - 1); gx <= Math.min(gw - 1, cx + 1); gx++) {
+      for (let j = head[gy * gw + gx]; j >= 0; j = next[j]) {
+        const dx = kb[j].x - px, dy = kb[j].y - py;
+        if (dx * dx + dy * dy > r2) continue;
+        const q = j * WORDS;
+        let d = 0;
+        for (let wd = 0; wd < WORDS && d < bd; wd++) d += popcount(A[o + wd] ^ B[q + wd]);
+        if (d < bd) {
+          bd = d;
+          bj = j;
+        }
+      }
+    }
+    if (bj >= 0 && bd < bestD[bj]) {
+      bestD[bj] = bd;
+      bestA[bj] = i;
+    }
+  }
+  const out = [];
+  for (let j = 0; j < kb.length; j++) if (bestA[j] >= 0) out.push({ a: bestA[j], b: j, distance: bestD[j] });
+  return out;
+}
+
+/**
+ * Matches two feature sets (detectFeatures) and fits the three motion models a -> b:
+ * { pts, matches, threshold, T, S, H, agreement } (ransacTranslation / ransacSimilarity / ransacHomography
+ * results, each with `share` and `tight`: see MIN_SHARE and solveAlignment), or null when the two have too
+ * few matches to be the same scene.
+ *
+ * Two rounds. The descriptors alone give the first matches and a few candidate models (the seeds). Each seed
+ * then guides a second matching by position (guidedMatches), which finds several times as many
+ * correspondences, spread over the whole overlap, and the models are fitted again on those. The candidate the
+ * pictures themselves agree with (pictureAgreement) wins. `guided: false` stops after the seeds.
+ */
+export function registerPair(fa, fb, { seed = 1, guided = true } = {}) {
+  const matches = matchDescriptors(fa, fb);
+  if (matches.length < MIN_SEED) return null;
+  const pts = matchedPoints(fa, fb, matches);
+  // features found on a reduced copy are only that precise in full-size pixels
+  const threshold = 3 / Math.min(1, fa.scale ?? 1, fb.scale ?? 1);
+  const T = ransacTranslation(pts, { threshold, seed });
+  const S = ransacSimilarity(pts, { threshold, seed });
+  const H = pts.length >= 8 ? ransacHomography(pts, { threshold, seed }) : { H: null, inliers: [] };
+  if (!guided) return { pts, matches: matches.length, threshold, T, S, H };
+
+  // Seeds, best supported first. Where look-alikes abound (windows, tiles) or the view changed a lot, only a
+  // few matches in a hundred are right: four random ones are then never all right, but two often are, so a
+  // similarity with a loose threshold gathers them and a homography is drawn from what it gathered.
+  const seeds = [];
+  const add = (model, support) => {
+    if (model && support >= MIN_SEED) seeds.push({ model, support });
+  };
+  add(H.H, H.inliers.length);
+  add(S.matrix && matrixToH(S.matrix), S.inliers.length);
+  add(T.matrix && matrixToH(T.matrix), T.inliers.length);
+  const loose = ransacSimilarity(pts, { threshold: threshold * 4, iterations: 4000, seed });
+  if (loose.matrix && loose.inliers.length >= MIN_SEED) {
+    const sub = loose.inliers.map((k) => pts[k]);
+    const h = sub.length >= 8 ? ransacHomography(sub, { threshold, seed }) : { H: null, inliers: [] };
+    if (h.H && h.inliers.length >= MIN_SEED) add(h.H, h.inliers.length);
+    // the similarity itself too: it is loosely held, but it does not bend away outside the matches it was drawn from
+    seeds.push({ model: matrixToH(loose.matrix), support: loose.inliers.length / 2 });
+  }
+  seeds.sort((p, q) => q.support - p.support);
+
+  let best = null;
+  const tried = [], found = [];
+  const cx = (fa.width ?? 0) / 2, cy = (fa.height ?? 0) / 2;
+  const middle = (m) => applyH(m, cx, cy);
+  for (const s of seeds) {
+    // two seeds that put the middle of the image in the same place are the same hypothesis
+    const [mx, my] = middle(s.model);
+    if (!Number.isFinite(mx) || !Number.isFinite(my) || tried.some(([x, y]) => Math.hypot(x - mx, y - my) <= 2 * threshold)) continue;
+    tried.push([mx, my]);
+    const c = guidedCandidate(fa, fb, s.model, threshold, seed);
+    if (!c) continue;
+    c.sure = c.agreement !== null && c.agreement >= MIN_AGREEMENT;
+    c.at = middle(c.model);
+    found.push(c);
+    if (!best || (c.sure && !best.sure) || (c.sure === best.sure && c.support > best.support)) best = c;
+    // plainly right: the other seeds would only find it again
+    if (c.sure && c.agreement >= SOLID_AGREEMENT && c.top.share >= 2 * MIN_SHARE) break;
+  }
+  if (!best) return null;
+  // Two different placements with much the same support: the pictures repeat (a facade, a fence, tiles) and
+  // the features cannot say which repeat belongs to which. Such a pair is reported, but as no overlap.
+  const ambiguous = found.some((c) => c !== best && c.support >= 0.7 * best.support && Math.hypot(c.at[0] - best.at[0], c.at[1] - best.at[1]) > 8 * threshold);
+  return { pts: best.pts, matches: best.pts.length, threshold, T: best.T, S: best.S, H: best.H, agreement: best.agreement, ambiguous };
+}
+
+/**
+ * One seed taken through guided matching: the three models fitted on the matches found by position, with how
+ * much of the overlap each explains (`share`), how many matches it fits closely (`tight`), and what the pictures
+ * say about the best of them (`agreement`). null when the seed leads nowhere.
+ */
+function guidedCandidate(fa, fb, start, threshold, seed) {
+  let model = start;
+  let pts = null, T = null, S = null, H = null;
+  // A wide search first (a seed drawn from one corner of the overlap is off at the other end), then closer ones.
+  // Each round refits the model on what it found, so the fit spreads from where the seed was right over the
+  // whole overlap; it stops once a round finds little more.
+  let support = 0;
+  const radii = [4, 3, 2, 2, 2, 2];
+  for (let round = 0; round < radii.length; round++) {
+    const again = guidedMatches(fa, fb, model, { radius: radii[round] * threshold });
+    if (again.length < MIN_SEED) return null;
+    pts = matchedPoints(fa, fb, again);
+    T = ransacTranslation(pts, { threshold, seed });
+    S = ransacSimilarity(pts, { threshold, seed });
+    H = pts.length >= 8 ? ransacHomography(pts, { threshold, seed }) : { H: null, inliers: [] };
+    let now;
+    if (H.H && H.inliers.length >= Math.max(T.inliers.length, S.inliers.length)) {
+      model = H.H;
+      now = H.inliers.length;
+    } else if (S.matrix && S.inliers.length >= T.inliers.length) {
+      model = matrixToH(S.matrix);
+      now = S.inliers.length;
+    } else if (T.matrix) {
+      model = matrixToH(T.matrix);
+      now = T.inliers.length;
+    } else return null;
+    if (round >= 2 && now <= support * 1.05) break;
+    support = now;
+  }
+  const fill = (r, m, error) => {
+    if (!m) return;
+    const hm = m.length === 9 ? m : matrixToH(m);
+    const inv = invert3(hm);
+    const seen = Math.max(featuresInside(fa, fb, hm), inv ? featuresInside(fb, fa, inv) : 0);
+    r.share = r.inliers.length / Math.max(1, seen);
+    const t2 = (threshold * threshold) / 4;
+    let tight = 0;
+    for (const p of pts) if (error(m, p) <= t2) tight++;
+    r.tight = tight;
+  };
+  fill(T, T.matrix, errM);
+  fill(S, S.matrix, errM);
+  fill(H, H.H, errH);
+  const top = H.H && H.inliers.length >= Math.max(T.inliers.length, S.inliers.length) ? H : S.matrix && S.inliers.length >= T.inliers.length ? S : T;
+  return { pts, T, S, H, top, model, support: top.inliers.length, agreement: pictureAgreement(fa, fb, model) };
+}
+
+/** How many features of A a model a -> b puts inside image B (inside the border within which B can have features). */
+function featuresInside(fa, fb, H) {
+  if (!(fb.width > 0 && fb.height > 0)) return fa.keypoints.length;
+  const m = ORB_BORDER / (fb.scale ?? 1);
+  const x2 = fb.width - 1 - m, y2 = fb.height - 1 - m;
+  let n = 0;
+  for (const k of fa.keypoints) {
+    const w = H[6] * k.x + H[7] * k.y + H[8];
+    if (w <= 1e-9) continue;
+    const x = (H[0] * k.x + H[1] * k.y + H[2]) / w, y = (H[3] * k.x + H[4] * k.y + H[5]) / w;
+    if (x >= m && y >= m && x <= x2 && y <= y2) n++;
+  }
+  return n;
+}
+
+/**
+ * The second half of alignImages(): chains pairwise models to a reference. `sizes` are the images'
+ * { width, height }, `edges` the registerPair() results as [{ a, b, …registerPair }]; options and result as
+ * for alignImages(). Split off so that a caller with a UI can detect and match image by image, yielding in
+ * between, and then solve (lib/align-blend.js).
+ */
+export function solveAlignment(sizes, edges, opts = {}) {
+  const { projection: wanted = 'auto' } = opts;
+  const n = sizes.length;
+
+  const part = (e, kind) => (kind === 'translation' ? e.T : kind === 'similarity' ? e.S : e.H);
+  const count = (e, kind) => part(e, kind).inliers.length;
+  const KINDS = ['translation', 'similarity', 'homography'];
+  // a real overlap: some model has enough inliers and explains enough of it, and the pictures agree where they
+  // can be compared (pairs without `share` / `agreement` were not guided, or were made by hand)
+  const agrees = (e) => !e.ambiguous && (e.agreement === undefined || e.agreement === null || e.agreement >= MIN_AGREEMENT);
+  const real = new Map(edges.map((e) => [e, agrees(e) && KINDS.some((k) => count(e, k) >= MIN_INLIERS[k] && (part(e, k).share === undefined || part(e, k).share >= MIN_SHARE))]));
+  const valid = (e, kind) => real.get(e) && count(e, kind) >= MIN_INLIERS[kind] && (kind !== 'homography' || !!e.H.H);
+
+  // ---- which projection ----
+  let projection = PROJECTIONS.includes(wanted) ? wanted : 'auto';
+  if (projection === 'auto') {
+    const strong = edges.filter((e) => KINDS.some((k) => valid(e, k)));
+    // the simplest motion that explains (nearly) all the matches wins: it moves pixels without resampling them.
+    // "Explains" is judged at half the inlier threshold where that count exists: a shift fits a slowly turning
+    // camera loosely everywhere, closely only in places
+    const close = (e, kind) => part(e, kind).tight ?? count(e, kind);
+    const best = (e) => Math.max(...KINDS.map((k) => close(e, k)));
+    if (!strong.length || strong.every((e) => valid(e, 'translation') && close(e, 'translation') >= 0.85 * best(e))) projection = 'reposition';
+    else if (strong.every((e) => valid(e, 'similarity') && close(e, 'similarity') >= 0.85 * best(e))) projection = 'collage';
+    else projection = 'perspective';
+  }
+
+  const solve = (proj) => {
+    const kind = proj === 'reposition' ? 'translation' : proj === 'collage' ? 'similarity' : 'homography';
+    const usable = edges.filter((e) => valid(e, kind));
+    // a pair is sound when it has plenty of inliers and the pictures agree well; anything less is "weak": used only
+    // to reach an image that nothing sound reaches (see MIN_INLIERS)
+    const strongAt = STRONG * MIN_INLIERS[kind];
+    const solid = (e) => e.agreement === undefined || e.agreement === null || e.agreement >= SOLID_AGREEMENT;
+    const reference = pickReference(n, usable.map((e) => ({ a: e.a, b: e.b, inliers: count(e, kind), weak: count(e, kind) < strongAt || !solid(e) })), opts.reference);
+    let focal = null;
+    const models = new Map(); // edge -> { forward: H (a -> b), backward: H (b -> a), inliers }
+    const curved = proj === 'cylindrical' || proj === 'spherical';
+    const centre = (z) => [(z.width - 1) / 2, (z.height - 1) / 2];
+    if (curved) {
+      // The layout is a camera turning on the spot: with the focal length each pair is a rotation, which is what
+      // gets chained. A pair that is no rotation (a flat original scanned in parts, a wrong focal) keeps its
+      // homography: the registration stays right and only the surface it is drawn on is a guess.
+      focal = Number(opts.focal) > 0 ? Number(opts.focal) : estimateFocal(usable, sizes);
+      for (const e of usable) {
+        const ca = centre(sizes[e.a]), cb = centre(sizes[e.b]);
+        // the homography's sign: positive over the matches (see rescale3)
+        let mx = 0, my = 0;
+        for (const k of e.H.inliers) {
+          mx += e.pts[k].x1;
+          my += e.pts[k].y1;
+        }
+        mx /= e.H.inliers.length;
+        my /= e.H.inliers.length;
+        let forward = e.H.H[6] * mx + e.H.H[7] * my + e.H.H[8] < 0 ? e.H.H.map((v) => -v) : e.H.H;
+        let inliers = e.H.inliers.length;
+        let turned = false; // the pair is a camera rotation (for that focal length)
+        let rot = fitRotation(e.pts, e.H.inliers, focal, ca, cb, forward);
+        const t2 = e.threshold * e.threshold * 2.25; // a lens is no pinhole: half as much again as for the free model
+        for (let round = 0; rot && round < 2; round++) {
+          const Hr = rotationHomography(rot, focal, ca, cb);
+          const idx = [];
+          for (let k = 0; k < e.pts.length; k++) if (errH(Hr, e.pts[k]) <= t2) idx.push(k);
+          if (idx.length < 0.8 * e.H.inliers.length) break;
+          forward = Hr;
+          inliers = idx.length;
+          turned = true;
+          rot = round ? null : fitRotation(e.pts, idx, focal, ca, cb, Hr);
+        }
+        const backward = inverse3(forward);
+        if (backward) models.set(e, { forward, backward, inliers, turned });
+      }
+    } else {
+      for (const e of usable) {
+        const forward = kind === 'homography' ? e.H.H : matrixToH(kind === 'similarity' ? e.S.matrix : e.T.matrix);
+        const backward = invert3(forward);
+        if (backward) models.set(e, { forward, backward, inliers: count(e, kind) });
+      }
+    }
+    // shortest paths from the reference: the fewest chained models (each adds its error), the best supported
+    // parent among equals. A weak model costs more than any chain of strong ones: it may be a chance agreement
+    // between two images that do not overlap at all, and must not short-cut a real chain of neighbours.
+    const chain = new Array(n).fill(null);
+    const parent = new Array(n).fill(-1);
+    const support = new Array(n).fill(0);
+    const cost = new Array(n).fill(Infinity);
+    const settled = new Array(n).fill(false);
+    const via = new Array(n).fill(null);
+    const weak = new Array(n).fill(false);
+    chain[reference] = IDENTITY3.slice();
+    cost[reference] = 0;
+    for (;;) {
+      let p = -1;
+      for (let i = 0; i < n; i++) if (!settled[i] && cost[i] < Infinity && (p < 0 || cost[i] < cost[p])) p = i;
+      if (p < 0) break;
+      settled[p] = true;
+      for (const [e, m] of models) {
+        const other = e.a === p ? e.b : e.b === p ? e.a : -1;
+        if (other < 0 || settled[other]) continue;
+        const sound = m.inliers >= strongAt && solid(e);
+        const c = cost[p] + 1 + (sound ? 0 : n);
+        if (c < cost[other] || (c === cost[other] && m.inliers > support[other])) {
+          cost[other] = c;
+          parent[other] = p;
+          support[other] = m.inliers;
+          via[other] = m;
+          weak[other] = !sound;
+          const H = multiply3(chain[p], e.a === other ? m.forward : m.backward); // other -> p -> reference
+          chain[other] = curved ? rescale3(H) : normalise3(H);
+        }
+      }
+    }
+    const refSize = sizes[reference];
+    const warp = curved ? { type: proj, focal, cx: (refSize.width - 1) / 2, cy: (refSize.height - 1) / 2 } : null;
+    const out = [];
+    let union = null;
+    let degenerate = false;
+    for (let i = 0; i < n; i++) {
+      const matched = !!chain[i];
+      const H = chain[i] ?? IDENTITY3.slice();
+      const { width: w, height: h } = sizes[i];
+      let bounds = warp ? surfaceBounds(H, w, h, warp) : boundsUnderH(H, w, h);
+      if (!bounds || bounds.width * bounds.height > 16 * w * h) {
+        degenerate = true;
+        bounds = bounds ?? { x: 0, y: 0, width: w, height: h };
+      }
+      const affine = !warp && Math.abs(H[6]) < 1e-12 && Math.abs(H[7]) < 1e-12;
+      out.push({ index: i, matched, sound: matched && !weak[i], homography: H, matrix: affine ? hToMatrix(H) : null, warp: warp ? { ...warp } : null, bounds, parent: parent[i], inliers: support[i] });
+      union = unionBounds(union, bounds);
+    }
+    // for Auto: is this a camera turning on the spot, and how far off the reference axis does the picture reach
+    const turning = curved && via.some(Boolean) && via.every((m) => !m || m.turned);
+    const reach = curved && union ? [Math.max(Math.abs(union.x - warp.cx), Math.abs(union.x + union.width - 1 - warp.cx)) / focal, Math.max(Math.abs(union.y - warp.cy), Math.abs(union.y + union.height - 1 - warp.cy)) / focal] : null;
+    return { out, union, reference, focal, degenerate, turning, reach };
+  };
+
+  let solved = solve(projection);
+  // A wide panorama stretches without limit on a plane: Auto goes to the cylinder then. That is when the plane
+  // cannot hold it at all, or needs far more canvas than the images have, or when the camera turned on the spot
+  // and its frames reach more than 45° off the reference axis (where a plane draws them twice as wide). A
+  // panorama that also reaches 45° up or down goes on the sphere, which does not stretch towards the poles.
+  if (wanted === 'auto' && projection === 'perspective') {
+    const area = sizes.reduce((s, z) => s + z.width * z.height, 0);
+    let wide = solved.degenerate || solved.union.width * solved.union.height > 2.5 * area;
+    let cylinder = null;
+    if (!wide) {
+      cylinder = solve('cylindrical');
+      wide = cylinder.turning && !cylinder.degenerate && cylinder.reach[0] > Math.PI / 4;
+    }
+    if (wide) {
+      projection = 'cylindrical';
+      solved = cylinder ?? solve('cylindrical');
+      if (solved.turning && solved.reach[1] > 1) {
+        projection = 'spherical';
+        solved = solve('spherical');
+      }
+    }
+  }
+  const result = solved.out;
+  result.projection = projection;
+  result.reference = solved.reference;
+  result.bounds = solved.union;
+  result.focal = solved.focal;
+  result.degenerate = solved.degenerate;
+  result.pairs = edges.map((e) => ({ a: e.a, b: e.b, matches: e.matches, inliers: { translation: e.T.inliers.length, similarity: e.S.inliers.length, homography: e.H.inliers.length } }));
+  // the matched point pairs of each tree edge (child -> parent), for vignette and distortion estimates
+  result.samples = () => {
+    const list = [];
+    for (const t of result) {
+      if (t.parent < 0) continue;
+      const e = edges.find((x) => (x.a === t.index && x.b === t.parent) || (x.b === t.index && x.a === t.parent));
+      if (!e) continue;
+      const use = projection === 'reposition' ? e.T.inliers : projection === 'collage' ? e.S.inliers : e.H.inliers;
+      list.push({ a: e.a, b: e.b, pairs: use.map((k) => e.pts[k]) });
+    }
+    return list;
+  };
+  return result;
+}
+
+/**
+ * The reference image: the asked one, else the centre of the match graph. `edges` are [{ a, b, inliers, weak }].
+ * The centre reaches the most images, over the shortest longest chain (a weak pair counts as longer than any
+ * chain of sound ones), with the best supported pairs of its own; ties go to the middle of the list.
+ */
+function pickReference(n, edges, asked) {
+  if (Number.isInteger(asked) && asked >= 0 && asked < n) return asked;
+  const adj = Array.from({ length: n }, () => []);
+  const own = new Array(n).fill(0);
+  for (const e of edges) {
+    adj[e.a].push([e.b, e.weak ? n + 1 : 1]);
+    adj[e.b].push([e.a, e.weak ? n + 1 : 1]);
+    own[e.a] += e.inliers;
+    own[e.b] += e.inliers;
+  }
+  const mid = (n - 1) / 2;
+  let best = Math.floor(mid), bestKey = null;
+  for (let s = 0; s < n; s++) {
+    // shortest paths from s (a handful of images: the plain quadratic search)
+    const dist = new Array(n).fill(Infinity);
+    const done = new Array(n).fill(false);
+    dist[s] = 0;
+    let reached = 0, far = 0;
+    for (;;) {
+      let p = -1;
+      for (let i = 0; i < n; i++) if (!done[i] && dist[i] < Infinity && (p < 0 || dist[i] < dist[p])) p = i;
+      if (p < 0) break;
+      done[p] = true;
+      reached++;
+      far = Math.max(far, dist[p]);
+      for (const [o, w] of adj[p]) if (dist[p] + w < dist[o]) dist[o] = dist[p] + w;
+    }
+    // (support in half-octave steps: a few inliers more or less must not decide between images that overlap alike)
+    const key = [-reached, far, -Math.round(Math.log2(own[s] + 1) * 2), Math.abs(s - mid), s];
+    let better = !bestKey;
+    for (let i = 0; !better && i < key.length; i++) {
+      if (key[i] === bestKey[i]) continue;
+      better = key[i] < bestKey[i];
+      break;
+    }
+    if (better) {
+      best = s;
+      bestKey = key;
+    }
+  }
+  return best;
+}
+
+/** Median focal length over the pair homographies; 0.8 × the mean width when none constrains it. */
+function estimateFocal(edges, sizes) {
+  const found = [];
+  for (const e of edges) {
+    if (!e.H.H) continue;
+    const sa = sizes[e.a], sb = sizes[e.b];
+    // centre both frames: Hc = C_b⁻¹ · H · C_a
+    const Ca = [1, 0, (sa.width - 1) / 2, 0, 1, (sa.height - 1) / 2, 0, 0, 1];
+    const CbInv = [1, 0, -(sb.width - 1) / 2, 0, 1, -(sb.height - 1) / 2, 0, 0, 1];
+    const f = focalFromHomography(multiply3(CbInv, multiply3(e.H.H, Ca)));
+    const w = (sa.width + sb.width) / 2;
+    if (f && f > 0.3 * w && f < 6 * w) found.push(f);
+  }
+  if (!found.length) return 0.8 * (sizes.reduce((s, z) => s + z.width, 0) / Math.max(1, sizes.length));
+  found.sort((a, b) => a - b);
+  return found[found.length >> 1];
+}
+
+// ---- applying an alignment (pure; the renderer draws through canvases instead) ---------------------------------
+
+/** Bilinear, premultiplied sample of img at pixel-index coordinates into out[o..o+3]; false when outside. */
+function sampleInto(d, w, h, sx, sy, od, o) {
+  if (sx <= -1 || sy <= -1 || sx >= w || sy >= h) return false;
+  const x0 = Math.floor(sx), y0 = Math.floor(sy), tx = sx - x0, ty = sy - y0;
+  let r = 0, g = 0, b = 0, a = 0;
+  for (let j = 0; j < 2; j++) {
+    const yy = y0 + j;
+    if (yy < 0 || yy >= h) continue;
+    const wy = j ? ty : 1 - ty;
+    for (let i = 0; i < 2; i++) {
+      const xx = x0 + i;
+      if (xx < 0 || xx >= w) continue;
+      const wgt = wy * (i ? tx : 1 - tx);
+      if (!wgt) continue;
+      const p = (yy * w + xx) * 4;
+      const pa = d[p + 3] * wgt;
+      r += d[p] * pa;
+      g += d[p + 1] * pa;
+      b += d[p + 2] * pa;
+      a += pa;
+    }
+  }
+  if (a < 0.5) return false;
+  od[o] = r / a;
+  od[o + 1] = g / a;
+  od[o + 2] = b / a;
+  od[o + 3] = a;
+  return true;
+}
+
+/**
+ * Renders an image through one entry of alignImages() into `rect` of the reference pixel space (default: the
+ * entry's bounds). Used where no canvas is at hand (Merge to HDR's alignment hook, tests).
+ */
+export function applyAlignment(img, t, rect = t.bounds) {
+  if (t.warp) return projectImage(img, t, rect);
+  const out = createImage(rect.width, rect.height);
+  const od = out.data;
+  const inv = invert3(t.homography);
+  if (!inv) return out;
+  const { width: w, height: h, data: d } = img;
+  for (let y = 0; y < rect.height; y++) {
+    const ry = rect.y + y;
+    for (let x = 0; x < rect.width; x++) {
+      const rx = rect.x + x;
+      const ww = inv[6] * rx + inv[7] * ry + inv[8];
+      if (ww <= 1e-9) continue;
+      sampleInto(d, w, h, (inv[0] * rx + inv[1] * ry + inv[2]) / ww, (inv[3] * rx + inv[4] * ry + inv[5]) / ww, od, (y * rect.width + x) * 4);
+    }
+  }
+  return out;
+}
+
+// ---- vignette --------------------------------------------------------------------------------------------------
+
+/** Mean luminance of the (2r+1)² box around a point; -1 when the box leaves the image or touches transparency. */
+function boxLuma(img, x, y, r = 3) {
+  const { width: w, height: h, data: d } = img;
+  const cx = Math.round(x), cy = Math.round(y);
+  if (cx < r || cy < r || cx >= w - r || cy >= h - r) return -1;
+  let sum = 0;
+  for (let yy = cy - r; yy <= cy + r; yy++) for (let xx = cx - r; xx <= cx + r; xx++) {
+    const i = (yy * w + xx) * 4;
+    if (d[i + 3] < 255) return -1;
+    sum += d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114;
+  }
+  return sum / ((2 * r + 1) * (2 * r + 1));
+}
+
+/**
+ * Estimates the lens vignette shared by the images from the brightness of matched points: the same scene point
+ * is darker in the image where it sits further from the centre. Model: observed = scene / (1 + v·ρ²), ρ = the
+ * distance from the image centre over the half diagonal. `images` is the array alignImages() was given (or a
+ * function index -> image, to load them on demand); `samples` is alignImages().samples(). Returns
+ * { amount: v (0 when it could not be estimated), samples: the number of point pairs used }.
+ */
+export function estimateVignette(images, samples) {
+  let num = 0, den = 0, used = 0;
+  const imageAt = typeof images === 'function' ? images : (i) => images[i];
+  for (const s of samples) {
+    const A = imageAt(s.a), B = imageAt(s.b);
+    const ra2 = (A.width * A.width + A.height * A.height) / 4, rb2 = (B.width * B.width + B.height * B.height) / 4;
+    const rows = [];
+    let sumA = 0, sumB = 0;
+    for (const p of s.pairs) {
+      const la = boxLuma(A, p.x1, p.y1), lb = boxLuma(B, p.x2, p.y2);
+      if (la < 8 || lb < 8 || la > 247 || lb > 247) continue;
+      const pa = ((p.x1 - (A.width - 1) / 2) ** 2 + (p.y1 - (A.height - 1) / 2) ** 2) / ra2;
+      const pb = ((p.x2 - (B.width - 1) / 2) ** 2 + (p.y2 - (B.height - 1) / 2) ** 2) / rb2;
+      rows.push([la, lb, pa, pb]);
+      sumA += la;
+      sumB += lb;
+    }
+    if (rows.length < 12) continue;
+    // an exposure difference between the two frames is not vignette: take it out first
+    const k = sumA / sumB;
+    for (const [la, lbRaw, pa, pb] of rows) {
+      const lb = lbRaw * k;
+      // la (1 + v pa) = lb (1 + v pb)  =>  v (la pa - lb pb) = lb - la
+      const c = la * pa - lb * pb, r = lb - la;
+      num += c * r;
+      den += c * c;
+      used++;
+    }
+  }
+  if (used < 24 || den < 1e-6) return { amount: 0, samples: used };
+  const v = num / den;
+  // a real lens darkens towards the corners by up to about two stops; anything else is a bad fit
+  return { amount: v > 0.02 && v < 3 ? v : 0, samples: used };
+}
+
+/** Brightens an image towards its corners by 1 + amount·ρ² (the inverse of the vignette model), in place. */
+export function removeVignette(img, amount) {
+  if (!(amount > 0)) return img;
+  const { width: w, height: h, data: d } = img;
+  const cx = (w - 1) / 2, cy = (h - 1) / 2, r2 = (w * w + h * h) / 4;
+  for (let y = 0; y < h; y++) {
+    const dy2 = (y - cy) * (y - cy);
+    for (let x = 0; x < w; x++) {
+      const g = 1 + (amount * ((x - cx) * (x - cx) + dy2)) / r2;
+      const i = (y * w + x) * 4;
+      d[i] = d[i] * g;
+      d[i + 1] = d[i + 1] * g;
+      d[i + 2] = d[i + 2] * g;
+    }
+  }
+  return img;
+}
+
+// ---- radial lens distortion ---------------------------------------------------------------------------------------
+
+/** Undistorted position of a distorted point for x_d = x_u (1 + k·r_u²) (r over the half diagonal), by fixed-point iteration. */
+function undistortPoint(k, cx, cy, r2, x, y) {
+  const dx = x - cx, dy = y - cy;
+  let ux = dx, uy = dy;
+  for (let it = 0; it < 6; it++) {
+    const s = 1 + (k * (ux * ux + uy * uy)) / r2;
+    ux = dx / s;
+    uy = dy / s;
+  }
+  return [cx + ux, cy + uy];
+}
+
+/**
+ * Estimates one radial distortion coefficient shared by the images: the k for which the matched points, once
+ * undistorted, are best explained by homographies. `samples` is alignImages().samples() of a perspective
+ * alignment. Returns { k (0 when the matches do not support a correction), improvement (ratio of the residuals) }.
+ */
+export function estimateDistortion(sizes, samples) {
+  const usable = samples.filter((s) => s.pairs.length >= 30);
+  if (!usable.length) return { k: 0, improvement: 0 };
+  const residual = (k) => {
+    let sum = 0, count = 0;
+    for (const s of usable) {
+      const A = sizes[s.a], B = sizes[s.b];
+      const ax = (A.width - 1) / 2, ay = (A.height - 1) / 2, ar = (A.width * A.width + A.height * A.height) / 4;
+      const bx = (B.width - 1) / 2, by = (B.height - 1) / 2, br = (B.width * B.width + B.height * B.height) / 4;
+      const pts = s.pairs.map((p) => {
+        const [x1, y1] = k ? undistortPoint(k, ax, ay, ar, p.x1, p.y1) : [p.x1, p.y1];
+        const [x2, y2] = k ? undistortPoint(k, bx, by, br, p.x2, p.y2) : [p.x2, p.y2];
+        return { x1, y1, x2, y2 };
+      });
+      const H = fitHomography(pts);
+      if (!H) return Infinity;
+      for (const p of pts) sum += Math.min(100, errH(H, p));
+      count += pts.length;
+    }
+    return Math.sqrt(sum / Math.max(1, count));
+  };
+  const base = residual(0);
+  if (!Number.isFinite(base) || base < 0.15) return { k: 0, improvement: 1 }; // already as good as the features are
+  // golden-section search over a plausible range of barrel (k < 0 here bulges outwards) and pincushion
+  let lo = -0.3, hi = 0.3;
+  const phi = (Math.sqrt(5) - 1) / 2;
+  let c = hi - phi * (hi - lo), d = lo + phi * (hi - lo);
+  let fc = residual(c), fd = residual(d);
+  for (let it = 0; it < 24; it++) {
+    if (fc < fd) {
+      hi = d;
+      d = c;
+      fd = fc;
+      c = hi - phi * (hi - lo);
+      fc = residual(c);
+    } else {
+      lo = c;
+      c = d;
+      fc = fd;
+      d = lo + phi * (hi - lo);
+      fd = residual(d);
+    }
+  }
+  const k = (lo + hi) / 2;
+  const best = residual(k);
+  // only a clear gain is trusted: features scatter by a fraction of a pixel anyway
+  if (!(best < base * 0.75) || Math.abs(k) < 0.004) return { k: 0, improvement: best / base };
+  return { k, improvement: best / base };
+}
+
+/** Resamples an image so that its radial distortion k (see estimateDistortion) is removed; same size, new image. */
+export function undistortImage(img, k) {
+  const { width: w, height: h, data: d } = img;
+  const out = createImage(w, h);
+  if (!k) {
+    out.data.set(d);
+    return out;
+  }
+  const cx = (w - 1) / 2, cy = (h - 1) / 2, r2 = (w * w + h * h) / 4;
+  for (let y = 0; y < h; y++) {
+    const uy = y - cy;
+    for (let x = 0; x < w; x++) {
+      const ux = x - cx;
+      const s = 1 + (k * (ux * ux + uy * uy)) / r2;
+      sampleInto(d, w, h, cx + ux * s, cy + uy * s, out.data, (y * w + x) * 4);
+    }
+  }
+  return out;
+}
+
+// ---- Auto-Blend: seams and gains -------------------------------------------------------------------------------
+
+/**
+ * Distance of every covered pixel to the nearest uncovered one or to the border of the frame (3-4 chamfer,
+ * in pixels). `cover` is a Uint8 array, non-zero = covered.
+ */
+export function distanceToEdge(cover, w, h) {
+  const INF = 1e9;
+  const dist = new Float32Array(w * h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const i = y * w + x;
+    if (!cover[i]) continue;
+    let v = INF;
+    // the frame border counts as an edge: a layer that fills the frame is still "furthest from its edge" in the middle
+    if (x === 0 || y === 0) v = 3;
+    else {
+      v = Math.min(v, dist[i - 1] + 3, dist[i - w] + 3, dist[i - w - 1] + 4);
+      if (x + 1 < w) v = Math.min(v, dist[i - w + 1] + 4);
+      else v = Math.min(v, 3);
+    }
+    dist[i] = v;
+  }
+  for (let y = h - 1; y >= 0; y--) for (let x = w - 1; x >= 0; x--) {
+    const i = y * w + x;
+    if (!cover[i]) continue;
+    let v = dist[i];
+    if (x === w - 1 || y === h - 1) v = Math.min(v, 3);
+    else {
+      v = Math.min(v, dist[i + 1] + 3, dist[i + w] + 3, dist[i + w + 1] + 4);
+      if (x > 0) v = Math.min(v, dist[i + w - 1] + 4);
+      else v = Math.min(v, 3);
+    }
+    dist[i] = v;
+  }
+  for (let i = 0; i < dist.length; i++) dist[i] /= 3;
+  return dist;
+}
+
+/** Three box blurs (≈ a Gaussian of σ ≈ radius) of a float map, in place. */
+function blurMap(map, w, h, radius) {
+  const r = Math.max(0, Math.round(radius));
+  if (!r) return map;
+  const tmp = new Float32Array(Math.max(w, h));
+  const norm = 1 / (2 * r + 1);
+  for (let pass = 0; pass < 3; pass++) {
+    for (let y = 0; y < h; y++) {
+      const row = y * w;
+      let sum = 0;
+      for (let k = -r; k <= r; k++) sum += map[row + Math.min(w - 1, Math.max(0, k))];
+      for (let x = 0; x < w; x++) {
+        tmp[x] = sum * norm;
+        sum += map[row + Math.min(w - 1, x + r + 1)] - map[row + Math.max(0, x - r)];
+      }
+      for (let x = 0; x < w; x++) map[row + x] = tmp[x];
+    }
+    for (let x = 0; x < w; x++) {
+      let sum = 0;
+      for (let k = -r; k <= r; k++) sum += map[Math.min(h - 1, Math.max(0, k)) * w + x];
+      for (let y = 0; y < h; y++) {
+        tmp[y] = sum * norm;
+        sum += map[Math.min(h - 1, y + r + 1) * w + x] - map[Math.max(0, y - r) * w + x];
+      }
+      for (let y = 0; y < h; y++) map[y * w + x] = tmp[y];
+    }
+  }
+  return map;
+}
+
+/** The size seamMasks() works at for a frame of width × height: { width, height, scale }. */
+export function seamWorkSize(width, height, maxPixels = 1.5e6) {
+  const scale = Math.min(1, Math.sqrt(maxPixels / Math.max(1, width * height)));
+  return { width: Math.max(1, Math.round(width * scale)), height: Math.max(1, Math.round(height * scale)), scale };
+}
+
+/**
+ * Area-averaged reduction of a one-channel plane from width × height to w × h. With `asCover` the result is a
+ * Uint8Array of 0 / 1 (1 where the mean is at least 128), else a Float32Array of means.
+ */
+export function reducePlane(plane, width, height, w, h, asCover = false) {
+  const out = asCover ? new Uint8Array(w * h) : new Float32Array(w * h);
+  const kx = width / w, ky = height / h;
+  for (let y = 0; y < h; y++) {
+    const ya = Math.floor(y * ky), yb = Math.max(ya + 1, Math.min(height, Math.floor((y + 1) * ky)));
+    for (let x = 0; x < w; x++) {
+      const xa = Math.floor(x * kx), xb = Math.max(xa + 1, Math.min(width, Math.floor((x + 1) * kx)));
+      let sum = 0;
+      for (let yy = ya; yy < yb; yy++) for (let xx = xa; xx < xb; xx++) sum += plane[yy * width + xx];
+      const mean = sum / ((yb - ya) * (xb - xa));
+      out[y * w + x] = asCover ? (mean >= 128 ? 1 : 0) : mean;
+    }
+  }
+  return out;
+}
+
+/**
+ * Layer masks for Auto-Blend. `alphas` are the layers' alpha planes (Uint8, width × height, bottom layer
+ * first) in one common frame. Every covered pixel is given to the layer with the largest weight there (by
+ * default its distance to that layer's own edge, so seams run through the middle of each overlap); the seams
+ * are then feathered and the result is turned into masks for normal ("over") compositing: the lowest layer
+ * covering a pixel is opaque, each layer above it carries its share, so the blend has no holes.
+ *
+ * Options: feather (pixels; default 10% of the widest overlap, 1..64), weights (Float32Array per layer, at
+ * the frame's size or at seamWorkSize(); larger wins: Stack Images passes local sharpness), maxPixels (the seam is computed on a reduced copy above
+ * this size and scaled back up). Returns { masks: Uint8ClampedArray[] (0..255), feather, overlap (px), labels }.
+ */
+export function seamMasks(alphas, width, height, { feather = null, weights = null, maxPixels = 1.5e6 } = {}) {
+  const n = alphas.length;
+  const { width: w, height: h, scale: s } = seamWorkSize(width, height, maxPixels);
+  const kx = width / w, ky = height / h;
+  const reduce = (plane, asCover) => {
+    if (!asCover && plane.length === w * h) return plane; // same size, or reduced by the caller already
+    return reducePlane(plane, width, height, w, h, asCover);
+  };
+  const cover = alphas.map((a) => reduce(a, true));
+  const dist = cover.map((c) => distanceToEdge(c, w, h));
+  const weight = weights ? weights.map((m) => reduce(m, false)) : dist;
+  // hard labels: the heaviest covering layer; the widest overlap is twice the largest runner-up edge distance
+  const labels = new Int16Array(w * h).fill(-1);
+  let runnerUp = 0;
+  for (let i = 0; i < w * h; i++) {
+    let best = -1, bw = -Infinity, second = 0, covering = 0;
+    for (let k = 0; k < n; k++) {
+      if (!cover[k][i]) continue;
+      covering++;
+      const v = weight[k][i];
+      // ties go to the upper layer, which is the one that would be seen without masks
+      if (v >= bw) {
+        bw = v;
+        best = k;
+      }
+    }
+    labels[i] = best;
+    if (covering > 1) {
+      for (let k = 0; k < n; k++) if (k !== best && cover[k][i] && dist[k][i] > second) second = dist[k][i];
+      const m = Math.min(second, dist[best][i]);
+      if (m > runnerUp) runnerUp = m;
+    }
+  }
+  const overlap = (2 * runnerUp) / s;
+  const f = feather === null || feather === undefined ? Math.min(64, Math.max(1, overlap * 0.1)) : Math.max(0, feather);
+  // feathered shares; a layer's share never leaves its own coverage
+  const share = [];
+  for (let k = 0; k < n; k++) {
+    const m = new Float32Array(w * h);
+    for (let i = 0; i < w * h; i++) m[i] = labels[i] === k ? 1 : 0;
+    // three box passes of radius r spread about r·√3: a third of the feather per pass gives a ramp of that width
+    blurMap(m, w, h, (f * s) / 2);
+    share.push(m);
+  }
+  const masks = alphas.map(() => new Uint8ClampedArray(width * height));
+  const c = new Float32Array(n);
+  for (let y = 0; y < height; y++) {
+    // bilinear position in the reduced maps
+    const fy = Math.min(h - 1, Math.max(0, (y + 0.5) / ky - 0.5));
+    const y0 = Math.floor(fy), y1 = Math.min(h - 1, y0 + 1), ty = fy - y0;
+    for (let x = 0; x < width; x++) {
+      const i = y * width + x;
+      let x0 = x, x1 = x, tx = 0;
+      if (w !== width) {
+        const fx = Math.min(w - 1, Math.max(0, (x + 0.5) / kx - 0.5));
+        x0 = Math.floor(fx);
+        x1 = Math.min(w - 1, x0 + 1);
+        tx = fx - x0;
+      }
+      let sum = 0, top = -1;
+      for (let k = 0; k < n; k++) {
+        if (alphas[k][i] === 0) {
+          c[k] = 0;
+          continue;
+        }
+        top = k;
+        const m = share[k];
+        const v = w === width && h === height ? m[i] : (m[y0 * w + x0] * (1 - tx) + m[y0 * w + x1] * tx) * (1 - ty) + (m[y1 * w + x0] * (1 - tx) + m[y1 * w + x1] * tx) * ty;
+        c[k] = v < 1e-4 ? 0 : v;
+        sum += c[k];
+      }
+      if (top < 0) continue; // nothing here: every mask stays black
+      if (sum <= 0) {
+        c[top] = 1; // covered, but the reduced labels missed it (a thin sliver): the upper layer shows
+        sum = 1;
+      }
+      // over-compositing: mask_k = share_k / (share_0 + … + share_k); the lowest layer that has pixels here is
+      // opaque whatever its share (nothing lies below it), which is what rules holes out
+      let below = 0, lowest = true;
+      for (let k = 0; k < n; k++) {
+        if (alphas[k][i] === 0) continue;
+        below += c[k];
+        masks[k][i] = lowest ? 255 : c[k] ? Math.round((c[k] / below) * 255) : 0;
+        lowest = false;
+      }
+    }
+  }
+  return { masks, feather: f, overlap, labels, width: w, height: h };
+}
+
+/**
+ * Local sharpness of an image for focus stacking: the absolute Laplacian of the luminance, averaged over a
+ * small window (Float32Array, width × height). Transparent pixels score 0.
+ */
+export function focusMeasure(img, radius = 4) {
+  const { width: w, height: h, data: d } = img;
+  const lum = new Float32Array(w * h);
+  for (let p = 0, i = 0; p < w * h; p++, i += 4) lum[p] = d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114;
+  const out = new Float32Array(w * h);
+  for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+    const i = y * w + x;
+    if (d[i * 4 + 3] === 0) continue;
+    out[i] = Math.abs(4 * lum[i] - lum[i - 1] - lum[i + 1] - lum[i - w] - lum[i + w]);
+  }
+  return blurMap(out, w, h, radius);
+}
+
+/**
+ * Gain compensation (Brown & Lowe): one gain per layer and channel so that the layers agree where they
+ * overlap, with a prior that keeps the gains near 1. `frames` are RGBA images of one size (the layers in a
+ * common frame). Returns [[gr, gg, gb], …]; `perChannel: false` gives one luminance gain per layer.
+ */
+export function gainCompensation(frames, { perChannel = true, step = null } = {}) {
+  const n = frames.length;
+  const gains = frames.map(() => [1, 1, 1]);
+  if (n < 2) return gains;
+  const { width: w, height: h } = frames[0];
+  const st = step ?? Math.max(1, Math.round(Math.sqrt((w * h) / 250000)));
+  const N = Array.from({ length: n }, () => new Float64Array(n));
+  const S = Array.from({ length: n }, () => Array.from({ length: n }, () => new Float64Array(3))); // S[i][j]: sum of i over the overlap with j
+  const present = new Int32Array(n);
+  for (let y = 0; y < h; y += st) for (let x = 0; x < w; x += st) {
+    const o = (y * w + x) * 4;
+    let m = 0;
+    for (let k = 0; k < n; k++) if (frames[k].data[o + 3] >= 250) present[m++] = k;
+    if (m < 2) continue;
+    for (let a = 0; a < m; a++) for (let b = 0; b < m; b++) {
+      if (a === b) continue;
+      const i = present[a], j = present[b];
+      const d = frames[i].data;
+      N[i][j]++;
+      S[i][j][0] += d[o];
+      S[i][j][1] += d[o + 1];
+      S[i][j][2] += d[o + 2];
+    }
+  }
+  const sigmaN = 10, sigmaG = 0.2;
+  const solveFor = (mean) => {
+    const A = Array.from({ length: n }, () => new Array(n).fill(0));
+    const b = new Array(n).fill(0);
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j < n; j++) {
+        if (i === j || !N[i][j]) continue;
+        const aij = mean(i, j), aji = mean(j, i);
+        A[i][i] += N[i][j] * ((2 * aij * aij) / (sigmaN * sigmaN) + 1 / (sigmaG * sigmaG));
+        A[i][j] -= (2 * N[i][j] * aij * aji) / (sigmaN * sigmaN);
+        b[i] += N[i][j] / (sigmaG * sigmaG);
+      }
+      if (!A[i][i]) {
+        A[i][i] = 1; // overlaps nothing: its gain stays 1
+        b[i] = 1;
+      }
+    }
+    const g = solveLinear(A, b);
+    return g ? g.map((v) => (Number.isFinite(v) ? Math.min(2, Math.max(0.5, v)) : 1)) : new Array(n).fill(1);
+  };
+  if (perChannel) {
+    for (let c = 0; c < 3; c++) {
+      const g = solveFor((i, j) => S[i][j][c] / N[i][j]);
+      for (let i = 0; i < n; i++) gains[i][c] = g[i];
+    }
+  } else {
+    const g = solveFor((i, j) => (S[i][j][0] * 0.299 + S[i][j][1] * 0.587 + S[i][j][2] * 0.114) / N[i][j]);
+    for (let i = 0; i < n; i++) gains[i] = [g[i], g[i], g[i]];
+  }
+  return gains;
+}
+
+/** Multiplies the colour channels of an image by per-channel gains, in place. */
+export function applyGain(img, gain) {
+  const d = img.data;
+  const [gr, gg, gb] = gain;
+  if (gr === 1 && gg === 1 && gb === 1) return img;
+  for (let i = 0; i < d.length; i += 4) {
+    d[i] = d[i] * gr;
+    d[i + 1] = d[i + 1] * gg;
+    d[i + 2] = d[i + 2] * gb;
+  }
+  return img;
+}

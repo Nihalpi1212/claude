@@ -1,0 +1,66 @@
+/* AI (see ARCHITECTURE.md "0.2 features: AI"). Accounts part: the AI Accounts dialog. The features and
+   assistant builders append their own rules below the marker at the end. */
+
+.ai-accounts { display: flex; flex-direction: column; gap: 14px; }
+.ai-reason { margin: 0; padding: 8px 12px; border-radius: var(--radius); background: var(--accent-soft); font-size: 13px; }
+.ai-card { border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; background: var(--bg); display: flex; flex-direction: column; gap: 10px; }
+.ai-card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.ai-card-head h3 { margin: 0; font-size: 14px; font-weight: 600; }
+.ai-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--fg-muted); }
+.ai-badge.connected { color: var(--success); }
+.ai-badge svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.ai-badge .ai-state { color: inherit; }
+.ai-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ai-row .muted { font-size: 12px; }
+.ai-or { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg-muted); display: flex; align-items: center; gap: 10px; }
+.ai-or::before, .ai-or::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+.ai-sub { font-size: 12px; color: var(--fg-muted); }
+.ai-key { display: flex; flex-direction: column; gap: 4px; }
+.ai-key-row { display: flex; gap: 8px; }
+.ai-key-row .input { flex: 1; font-family: var(--mono); font-size: 12px; }
+.ai-help { font-size: 12px; margin: 0; }
+.ai-link { color: var(--accent); text-decoration: none; }
+.ai-link:hover { text-decoration: underline; }
+.ai-models { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.ai-models .field { margin: 0; }
+.ai-pending { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-radius: var(--radius); background: var(--accent-soft); }
+.ai-pending-text { font-size: 13px; }
+.ai-pending-text::before { content: ""; display: inline-block; width: 10px; height: 10px; margin-right: 8px; border-radius: 50%; border: 2px solid var(--accent); border-top-color: transparent; animation: ai-spin 0.9s linear infinite; vertical-align: -1px; }
+@keyframes ai-spin { to { transform: rotate(360deg); } }
+.ai-foot { display: flex; flex-direction: column; gap: 8px; }
+.ai-default { margin: 0; max-width: 260px; }
+.ai-warning { margin: 0; padding: 8px 12px; border-radius: var(--radius); background: rgba(217, 45, 32, 0.1); color: var(--danger); font-size: 12px; }
+@media (max-width: 640px) { .ai-models { grid-template-columns: 1fr; } }
+
+/* ---- features / assistant (owned by the AI features builder) ----------------------------------------- */
+
+/* Feature dialogs (Generative Fill, Generate Image, ...) */
+.ai-dialog .dialog-form .field.span-all .textarea { min-height: 64px; }
+.ai-describe-text { min-height: 180px; font-size: 13px; line-height: 1.5; }
+
+/* Assistant panel */
+.assistant-panel { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.assistant-toolbar { flex: none; gap: 6px; }
+.assistant-toolbar .select { flex: 1; min-width: 0; height: 24px; font-size: 12px; }
+.assistant-toolbar .checkbox { font-size: 12px; gap: 6px; }
+.assistant-messages { flex: 1; min-height: 0; overflow: auto; padding: 8px; display: flex; flex-direction: column; gap: 8px; }
+.assistant-hint { font-size: 12px; line-height: 1.5; }
+.assistant-msg { display: flex; flex-direction: column; gap: 4px; max-width: 92%; font-size: 12.5px; line-height: 1.45; }
+.assistant-user { align-self: flex-end; align-items: flex-end; }
+.assistant-user .assistant-text { background: var(--accent); color: var(--accent-fg); border-radius: 12px 12px 2px 12px; }
+.assistant-assistant { align-self: flex-start; align-items: flex-start; }
+.assistant-assistant .assistant-text { background: var(--bg-sunken); border-radius: 12px 12px 12px 2px; }
+.assistant-error .assistant-text { background: rgba(217, 45, 32, 0.12); color: var(--danger); }
+.assistant-text { padding: 6px 10px; white-space: pre-wrap; word-break: break-word; user-select: text; }
+.assistant-thinking { display: inline-flex; align-items: center; gap: 6px; color: var(--fg-muted); }
+.assistant-thinking svg, .assistant-call svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.assistant-thinking svg, .assistant-call.pending svg { animation: ai-spin 1s linear infinite; }
+.assistant-attachment { max-width: 120px; max-height: 80px; border: 1px solid var(--border); border-radius: 6px; background: repeating-conic-gradient(#cccccc 0% 25%, #ffffff 0% 50%) 50% / 8px 8px; }
+.assistant-call { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; border: 1px solid var(--border); border-radius: 999px; font-size: 11.5px; color: var(--fg-muted); background: var(--bg); }
+.assistant-call.failed { color: var(--danger); border-color: rgba(217, 45, 32, 0.4); }
+.assistant-compose { flex: none; border-top: 1px solid var(--border); padding: 6px 8px 8px; display: flex; flex-direction: column; gap: 6px; background: var(--bg); }
+.assistant-input { min-height: 44px; max-height: 160px; font-size: 12.5px; padding: 6px 8px; resize: none; }
+.assistant-actions { display: flex; align-items: center; gap: 6px; }
+.assistant-actions .btn { height: 26px; padding: 0 10px; font-size: 12px; display: inline-flex; align-items: center; gap: 4px; }
+.assistant-actions .btn svg { width: 14px; height: 14px; }
+.assistant-status { font-size: 11.5px; }

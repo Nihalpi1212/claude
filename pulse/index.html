@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Pulse">
+<meta name="theme-color" content="#0b0b0f">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" href="icons/icon-192.png">
+<title>Pulse</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <main id="view" aria-live="polite"></main>
+
+  <div id="mini" class="hidden" data-a="openNP">
+    <img id="miniArt" alt="">
+    <div class="mini-text"><div id="miniTitle" class="t"></div><div id="miniArtist" class="s"></div></div>
+    <button class="icon" id="miniLike" data-a="likeCur" aria-label="Like"></button>
+    <button class="icon" id="miniPlay" data-a="toggle" aria-label="Play/Pause"></button>
+    <div class="mini-bar"><i id="miniProg"></i></div>
+  </div>
+
+  <nav id="tabs">
+    <button data-a="tab" data-t="home"><span class="ic"></span><b>Home</b></button>
+    <button data-a="tab" data-t="search"><span class="ic"></span><b>Search</b></button>
+    <button data-a="tab" data-t="library"><span class="ic"></span><b>Your Library</b></button>
+    <button data-a="tab" data-t="settings"><span class="ic"></span><b>Settings</b></button>
+  </nav>
+
+  <section id="np" aria-label="Now playing">
+    <div class="np-top">
+      <button class="icon" data-a="closeNP" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      <div class="np-label">NOW PLAYING</div>
+      <button class="icon" data-a="npMenu" aria-label="More"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg></button>
+    </div>
+    <div class="video"><div id="yt"></div><div id="ytMsg" class="yt-msg">Loading player…</div></div>
+    <div class="np-info">
+      <div class="np-text"><div id="npTitle" class="np-title"></div><div id="npArtist" class="np-artist"></div></div>
+      <button class="icon big" id="npLike" data-a="likeCur" aria-label="Like"></button>
+    </div>
+    <div class="seek">
+      <input id="seek" type="range" min="0" max="100" value="0" step="1" aria-label="Seek">
+      <div class="times"><span id="tCur">0:00</span><span id="tDur">0:00</span></div>
+    </div>
+    <div class="controls">
+      <button class="icon" id="bShuffle" data-a="shuffle" aria-label="Shuffle"></button>
+      <button class="icon big" data-a="prev" aria-label="Previous"></button>
+      <button class="play" id="bPlay" data-a="toggle" aria-label="Play/Pause"></button>
+      <button class="icon big" data-a="next" aria-label="Next"></button>
+      <button class="icon" id="bRepeat" data-a="repeat" aria-label="Repeat"></button>
+    </div>
+    <div class="np-foot"><button class="chip" data-a="showQueue">Up next</button></div>
+    <div id="queuePane" class="queue hidden"></div>
+  </section>
+
+  <div id="sheetBg" class="hidden" data-a="closeSheet"></div>
+  <div id="sheet" class="hidden"></div>
+  <div id="toast"></div>
+</div>
+<script src="app.js"></script>
+</body>
+</html>
