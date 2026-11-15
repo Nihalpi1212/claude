@@ -217,6 +217,31 @@ the rebrand (counts of matching lines, 2026-11-15):
 | `contributors/` | 1 | keep (credits) |
 | User-visible strings, catalogues (rebranded at build time), packaging names, icons, links | 0 left | changed to Pigment |
 
+## What Pigment added
+
+Pigment's own features live in files of their own. Where they hook into an upstream file, the hook
+is a line or two marked `// Pigment: …` (or `# Pigment: …`), and every one is listed here, so a
+merge knows what to keep.
+
+### Generative AI
+
+The JavaScript Pigment's AI features rebuilt on PhotoCraft; the contract is
+[`docs/generative-ai.md`](generative-ai.md). New files: `crates/engine/src/generative.rs`,
+`crates/engine/src/generative/mock.rs`, `crates/engine/src/cmd/ai_cmds.rs` and
+`crates/engine/src/cmd/ai_cmds/` (`region.rs`, `fill.rs`, `expand.rs`, `generate.rs`,
+`background.rs`, `describe.rs`, `tests.rs`), this page's section and `docs/generative-ai.md`.
+
+| Upstream file | Hook |
+|---|---|
+| `crates/engine/src/lib.rs` | `pub mod generative;`, `pub use cmd::ai_cmds;`, the `Session` field `generative` (its `set_generative` and `generative` live in `generative.rs`) |
+| `crates/engine/src/cmd.rs` | `pub mod ai_cmds;` and `v.extend(crate::ai_cmds::specs());` at the end of `build()` |
+| `crates/engine/src/error.rs` | the `EngineError::Generative { kind, message }` variant |
+| `crates/engine/src/cmd/actions_cmds.rs` | `recorded()` skips `ai_cmds::unrecorded` ids, so `ai.*` steps are never recorded into actions |
+| `crates/engine/Cargo.toml` | the `testgen` feature (the mock backend for other crates' tests) |
+
+At an upstream merge: if PhotoCraft adds generative commands of its own (through craft-ai-client),
+either alias ours to them or keep ours and hide theirs, and record the choice here.
+
 ## Keeping the rebrand: `scripts/pigment-rebrand.py`
 
 Most of the rebrand is mechanical and done by [`scripts/pigment-rebrand.py`](../scripts/pigment-rebrand.py):
