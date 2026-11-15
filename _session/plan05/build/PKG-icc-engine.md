@@ -73,6 +73,10 @@ Use the pipeline (`lib/color/pipeline.js`), never these files directly, except w
   - line 993 `expect(before).toEqual({ status: false, info: true })` → with the engine an untagged document shows
     "Untagged RGB" in the status bar (S6.5/S6.6): gate as `{ status: landed['icc-engine'], info: true }`.
   With those two lines commented out every skeleton-05 "colour" test passes with icc-engine landed (checked).
+- **tests/e2e/text-color.spec.mjs:274** pins 0.4's D65 Lab in the Info panel (`/L53a80b67/`). With the engine the
+  Info row reads D50 Lab through `toLab` (S6.5, as Photoshop: `L54a81b70`). Gate it on `colorEngine().available`.
+- Not mine, seen in my full run: `repaint-speed.spec.mjs:421` (gated on brush-engine-core; a full repaint during the
+  textured stroke) fails with my engine disabled as well — brush-engine-core's work in progress.
 - Packaged app (not mine): `build/icon.png` is not in electron-builder's `files`, so inside the asar the welcome
   screen's and About's `<img src="/build/icon.png" onerror=…>` 404 and the inline `onerror` is refused by the CSP
   (console error + CSP violation in the packaged app). My electron asar test ignores exactly these two messages.

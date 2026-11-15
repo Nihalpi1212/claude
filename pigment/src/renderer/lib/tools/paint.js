@@ -4,10 +4,14 @@
 // (lib/tools/paint-gesture.js, brush-painting-behaviours'), which calls strokeDown / strokeMove / strokeUp, 0.4's
 // handler bodies; the stroke settings come from the tool's brush (lib/brush/tool-brush.js); the cursor is
 // lib/brush-cursor.js'. Subclasses spread baseSettings and override keys exactly as in 0.4.
+//
+// brush-painting-behaviours: strokeDown(p, { erase }) paints with the tool's own brush as an eraser (the held tilde,
+// for the tools with tildeErases); Left / Right arrows turn the tip by 1 degree (Shift: 15); Escape and the overlay
+// ask the gesture first (the resize HUD).
 import { Tool } from '../tools.js';
 import { BRUSH_OPTIONS, PAINT_BLEND_OPTIONS, PENCIL_SIZE } from '../brush/options.js';
 import { BrushStroke, strokeReach } from '../brush.js';
-import { toolBrush } from '../brush/tool-brush.js';
+import { toolBrush, supportsBrush } from '../brush/tool-brush.js';
 import { legacyTip } from '../brush/preset.js';
 import { PaintGesture } from './paint-gesture.js';
 import { drawBrushCursor, brushCursorCss } from '../brush-cursor.js';
@@ -40,6 +44,11 @@ export class StrokeTool extends Tool {
   onContextMenu(p) {
     return this.gesture.contextDown(p);
   }
+  /** Keys while the tool is active (shortcuts.js asks first): the gesture's (Escape ends a HUD), the tip's angle. */
+  onKeyDown(e) {
+    if (this.gesture.key?.(e)) return true;
+    return rotateTipKey(this, e);
+  }
   /** Target canvas: the active layer's mask when mask editing is on, else the layer canvas. */
   strokeTarget(layer) {
     if (this.app.ui.editingMask && layer.mask?.canvas) return { canvas: layer.mask.canvas, x: 0, y: 0, mask: true };
@@ -61,7 +70,7 @@ export class StrokeTool extends Tool {
     const clipped = { x: Math.max(d.x, r.x), y: Math.max(d.y, r.y), width: Math.min(d.x + d.width, r.x + r.width) - Math.max(d.x, r.x), height: Math.min(d.y + d.height, r.y + r.height) - Math.max(d.y, r.y) };
     if (clipped.width > 0 && clipped.height > 0) layer.ensureCovers(clipped);
   }
-  strokeDown(p) {
+  strokeDown(p, opts = {}) {
     const layer = this.paintableLayer();
     if (!layer) return;
     if (layer.type !== 'raster' && !(this.app.ui.editingMask && layer.mask)) {
@@ -74,6 +83,9 @@ export class StrokeTool extends Tool {
     const target = this.strokeTarget(layer);
     const settings = this.strokeSettings(p, layer, target);
     if (!settings) return;
+    // the held tilde: this tool's brush erases (as the Eraser tool does: to the background colour where the layer
+    // keeps its transparency, hiding on a mask)
+    if (opts.erase) Object.assign(settings, eraseSettings(this.app, layer, target));
     this.stroke = new BrushStroke({ target, layer, settings, selection: this.doc.selection?.isEmpty === false ? this.doc.selection : null, history: this.doc.history, onDirty: (rect, layer) => this.view?.invalidate(rect, layer) });
     this.stroke.begin(p);
   }
@@ -99,6 +111,7 @@ export class StrokeTool extends Tool {
     this.stroke = null;
   }
   cancel() {
+    if (this.gesture.cancel()) return true;
     if (this.stroke) {
       this.stroke.cancel();
       this.stroke = null;
@@ -107,6 +120,7 @@ export class StrokeTool extends Tool {
     return false;
   }
   drawOverlay(ctx, view) {
+    if (this.gesture.drawOverlay?.(ctx, view)) return;
     drawBrushCursor(ctx, view, this);
   }
   /** Document position of a point given in the stroke canvas's coordinates (the canvas grows during a stroke). */
@@ -138,6 +152,31 @@ export class StrokeTool extends Tool {
   }
 }
 
+/** What a stroke changes to erase with the tool's own brush (the held tilde). */
+function eraseSettings(app, layer, target) {
+  if (target.mask) return { mode: 'mask', maskValue: 0, blend: 'normal' };
+  if (layer.locked?.transparency) return { mode: 'paint', color: app.settings.background, blend: 'normal' };
+  return { mode: 'erase', blend: 'normal' };
+}
+
+/** Left / Right arrow: the tip turns 1 degree (Shift: 15), clockwise with Right; tools with a full brush only. */
+function rotateTipKey(tool, e) {
+  if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return false;
+  if (e.ctrlKey || e.metaKey || e.altKey || supportsBrush(tool) !== 'full') return false;
+  if (e.repeat && tool.stroke) return true;
+  const step = (e.shiftKey ? 15 : 1) * (e.key === 'ArrowRight' ? 1 : -1);
+  const angle = Number(tool.opt('angle') ?? toolBrush(tool.app, tool.id).preset.tip.angle) || 0;
+  tool.setOpt('angle', wrapAngle(angle + step));
+  return true;
+}
+
+/** An angle in -180..180 (the BrushPreset range). */
+export function wrapAngle(a) {
+  let v = ((((a + 180) % 360) + 360) % 360) - 180;
+  if (v === -180 && a > 0) v = 180;
+  return Math.round(v * 1000) / 1000;
+}
+
 function luminanceOf(hex) {
   const n = parseInt(String(hex).slice(1, 7), 16);
   const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
@@ -153,10 +192,11 @@ export class BrushTool extends StrokeTool {
       hint: 'Paint with the foreground colour. [ and ] change the size, Shift+[ ] the hardness. Alt-click samples a colour.',
       options: [...BRUSH_OPTIONS, { kind: 'select', key: 'blend', label: 'Mode', options: BLEND_OPTIONS, default: 'normal' }, { kind: 'checkbox', key: 'lockAlpha', label: 'Lock alpha', default: false }],
     });
+    this.tildeErases = true;
   }
-  strokeDown(p) {
+  strokeDown(p, opts) {
     if (p.alt) return this.app.tools.get('eyedropper')?.sampleAt(p, { setForeground: true });
-    super.strokeDown(p);
+    super.strokeDown(p, opts);
   }
   strokeSettings(p, layer, target) {
     return { ...this.baseSettings(layer, target), label: 'Brush' };
@@ -177,10 +217,11 @@ export class PencilTool extends StrokeTool {
         { kind: 'checkbox', key: 'autoErase', label: 'Auto erase', default: false },
       ],
     });
+    this.tildeErases = true;
   }
-  strokeDown(p) {
+  strokeDown(p, opts) {
     if (p.alt) return this.app.tools.get('eyedropper')?.sampleAt(p, { setForeground: true });
-    super.strokeDown(p);
+    super.strokeDown(p, opts);
   }
   strokeSettings(p, layer, target) {
     const base = this.baseSettings(layer, target);
@@ -207,6 +248,11 @@ export class EraserTool extends StrokeTool {
         { kind: 'checkbox', key: 'eraseToHistory', label: 'Erase to original', default: false },
       ],
     });
+  }
+  /** Block mode erases with a 16 px hard dab whatever the brush: the cursor shows that. */
+  cursorTip() {
+    if (this.opt('mode') !== 'block') return null;
+    return { kind: 'computed', size: 16, hardness: 1, angle: 0, roundness: 1, flipX: false, flipY: false };
   }
   strokeSettings(p, layer, target) {
     const base = this.baseSettings(layer, target);

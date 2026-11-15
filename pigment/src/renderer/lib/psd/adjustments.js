@@ -1,17 +1,32 @@
-// Adjustment layers ↔ PSD (ARCHITECTURE.md "0.5 features", S4.3: kind `adjustment`, order 200). psd-layers' file;
-// until it lands this is the skeleton's stub with 0.4's mapping moved verbatim from lib/io.js (lib/io.js re-exports
-// adjustmentToPsd and adjustmentFromPsd). psd-layers replaces it at the same path, keeps those two exports and the
-// Node-safe imports of S4.1, and adds every adjustment with a PSD form (and fill layers, PSD_FEATURES.fills).
-import { registerPsdLayerKind, registerPsdAspect, registerPsdFeatures } from './registry.js';
+// Adjustment and fill layers ↔ PSD (ARCHITECTURE.md "0.5 features", S4.3: kinds `adjustment` 200 and `fill` 300).
+// psd-layers' file (lib/io.js re-exports adjustmentToPsd and adjustmentFromPsd).
+//
+// Adjustments: every Pigment adjustment with a PSD form stays an editable adjustment layer both ways: 0.4's mapping
+// (Levels, Curves, Brightness/Contrast, Exposure, Vibrance, Hue/Saturation with its colour ranges, Color Balance,
+// Black & White, Photo Filter, Channel Mixer, Posterize, Threshold, Gradient Map, Selective Color, Invert), plus
+// Hue/Saturation's Colorize (the flag and the colorization values sit in the record's first eight bytes, which ag-psd
+// reads as the master channel's range) and Color Lookup (the table as .cube data, or a built-in look by name).
+// What has no PSD form keeps its slot as a hidden empty layer, as 0.4 did, with 0.4's notice.
+//
+// Fill layers: Solid Color, Gradient (style, angle, scale, offset, reverse, dither, method; Pigment's document-space
+// from / to through the Gradient Fill dialog's placement) and Pattern (scale, angle, Link with Layer, Snap to Origin
+// offset; the pixels in the file's patterns) as 'SoCo' / 'GdFl' / 'PtFl'. In a Grayscale, Duotone or Multichannel
+// document a fill is written natively only when its colours are what the document shows (S4.2).
+import { registerPsdLayerKind, registerPsdAspect, registerPsdFeatures, registerPsdNotice } from './registry.js';
 import { rgbFromPsd, psdColor, gradientToPsd, gradientFromPsd } from './convert.js';
-import { AdjustmentLayer, RasterLayer, createCanvas } from '../document.js';
+import { paintFromContent, paintToContent, paintColors, addPatterns } from './paints.js';
+import { AdjustmentLayer, RasterLayer, FillLayer, createCanvas } from '../document.js';
 import { pointsFromTable } from '../../../shared/pixels/adjust-tonal.js';
 import { HUE_BASES, DEFAULT_RANGE_BOUNDS, hueSatRanges, normalizeBounds } from '../../../shared/pixels/adjust-color.js';
 import { adjustmentDef } from '../../../shared/pixels/adjust.js';
+import { colorLookupTable } from '../../../shared/pixels/adjust-more.js';
+import { writeCube, parseLut, LUT_PRESETS } from '../../../shared/pixels/lut.js';
 
 /** What this file has landed (S15); merged into psdFeatures() by the registry. */
-export const PSD_FEATURES = Object.freeze({ fills: false });
+export const PSD_FEATURES = Object.freeze({ fills: true });
 registerPsdFeatures(PSD_FEATURES);
+
+const plural = (n, one, many) => (n === 1 ? one : many);
 
 const lv = (c) => (c ? { shadowInput: c.inBlack ?? 0, highlightInput: c.inWhite ?? 255, shadowOutput: c.outBlack ?? 0, highlightOutput: c.outWhite ?? 255, midtoneInput: c.gamma ?? 1 } : undefined);
 const lvBack = (c) => (c ? { inBlack: c.shadowInput ?? 0, inWhite: c.highlightInput ?? 255, gamma: c.midtoneInput ?? 1, outBlack: c.shadowOutput ?? 0, outWhite: c.highlightOutput ?? 255 } : null);
@@ -45,7 +60,11 @@ export function adjustmentToPsd(kind, p = {}) {
         const [a, b, c, d] = (r?.bounds ?? DEFAULT_RANGE_BOUNDS[base]).map(Math.round);
         return { a, b, c, d, hue: Math.round(r?.hue ?? 0), saturation: Math.round(r?.saturation ?? 0), lightness: Math.round(r?.lightness ?? 0) };
       };
-      return { type: 'hue/saturation', master: hueCh({ hue: Math.round(master.hue), saturation: Math.round(master.saturation), lightness: Math.round(master.lightness) }), ...Object.fromEntries(HUE_BASES.map((b) => [b, slot(b)])) };
+      // Colorize: the flag byte, a padding byte and the colorization hue, saturation and lightness come before the
+      // master values, which ag-psd reads as the master channel's a (flag << 8), b, c, d
+      const m = hueCh({ hue: Math.round(master.hue), saturation: Math.round(master.saturation), lightness: Math.round(master.lightness) });
+      if (p.colorize) Object.assign(m, { a: 256, b: Math.round(p.colorizeHue ?? 0), c: Math.round(p.colorizeSat ?? 25), d: Math.round(p.colorizeLight ?? 0) });
+      return { type: 'hue/saturation', master: m, ...Object.fromEntries(HUE_BASES.map((b) => [b, slot(b)])) };
     }
     case 'color-balance': return { type: 'color balance', shadows: cb(p.shadows), midtones: cb(p.midtones), highlights: cb(p.highlights), preserveLuminosity: p.preserveLuminosity !== false };
     case 'black-white': return { type: 'black & white', reds: p.reds ?? 40, yellows: p.yellows ?? 60, greens: p.greens ?? 40, cyans: p.cyans ?? 60, blues: p.blues ?? 20, magentas: p.magentas ?? 80, useTint: !!p.tint, tintColor: psdColor(p.tint || '#e6c8a0') };
@@ -56,7 +75,33 @@ export function adjustmentToPsd(kind, p = {}) {
     // a v2 def (G.1) keeps its midpoints, opacity stops and method (convert.js gradientToPsd)
     case 'gradient-map': return { type: 'gradient map', ...gradientToPsd(p) };
     case 'selective-color': return { type: 'selective color', mode: p.relative === false ? 'absolute' : 'relative', ...Object.fromEntries(SELECTIVE.map((k) => [k, cmyk(p[k])])) };
+    case 'color-lookup': {
+      // the table as a .cube file inside the layer, Photoshop's form for a loaded 3D LUT
+      const lut = colorLookupTable(p);
+      const preset = typeof p.preset === 'string' && p.preset !== 'none' ? p.preset : null;
+      if (!lut) return { type: 'color lookup', lookupType: '3dlut', name: '', dither: !!p.dither };
+      const name = preset ?? (lut.title || 'Custom');
+      return { type: 'color lookup', lookupType: '3dlut', name, dither: !!p.dither, lutFormat: 'cube', lut3DFileName: `${name}.cube`, lut3DFileData: new TextEncoder().encode(writeCube(lut, { title: name })) };
+    }
     default: return null;
+  }
+}
+
+/** Color Lookup params for ag-psd's color lookup data, or null when Pigment cannot use it (an ICC abstract or device link). */
+function colorLookupFromPsd(a) {
+  if (a.lookupType && a.lookupType !== '3dlut') return null;
+  const base = (a.name ?? '').replace(/\.[^.]+$/, '');
+  if (!a.lut3DFileData?.length) {
+    // a built-in look Pigment has under the same name, or an empty layer
+    if (base && Object.prototype.hasOwnProperty.call(LUT_PRESETS, base)) return { preset: base, lut: null, dither: !!a.dither };
+    return a.name ? null : { preset: 'none', lut: null, dither: !!a.dither };
+  }
+  try {
+    const lut = parseLut(new TextDecoder().decode(a.lut3DFileData), a.lut3DFileName ?? `${base || 'Lookup'}.${a.lutFormat === '3dl' ? '3dl' : a.lutFormat === 'look' ? 'look' : 'cube'}`);
+    if (base && Object.prototype.hasOwnProperty.call(LUT_PRESETS, base)) return { preset: base, lut: null, dither: !!a.dither };
+    return { preset: 'none', lut, dither: !!a.dither };
+  } catch {
+    return null;
   }
 }
 
@@ -81,7 +126,8 @@ export function adjustmentFromPsd(a) {
         const bounds = raw.every((v) => !v) ? null : normalizeBounds(raw);
         ranges.push({ base, bounds: bounds ?? [...DEFAULT_RANGE_BOUNDS[base]], hue: c.hue ?? 0, saturation: c.saturation ?? 0, lightness: c.lightness ?? 0 });
       }
-      return { kind: 'hue-saturation', params: { hue: m.hue ?? 0, saturation: m.saturation ?? 0, lightness: m.lightness ?? 0, colorize: false, colorizeHue: 0, colorizeSat: 25, colorizeLight: 0, range: 'master', ranges } };
+      const colorize = ((m.a ?? 0) & 0xff00) !== 0;
+      return { kind: 'hue-saturation', params: { hue: m.hue ?? 0, saturation: m.saturation ?? 0, lightness: m.lightness ?? 0, colorize, colorizeHue: colorize ? m.b ?? 0 : 0, colorizeSat: colorize ? m.c ?? 25 : 25, colorizeLight: colorize ? m.d ?? 0 : 0, range: 'master', ranges } };
     }
     case 'color balance': return { kind: 'color-balance', params: { shadows: cbBack(a.shadows), midtones: cbBack(a.midtones), highlights: cbBack(a.highlights), preserveLuminosity: a.preserveLuminosity !== false } };
     case 'black & white': return { kind: 'black-white', params: { reds: a.reds ?? 40, yellows: a.yellows ?? 60, greens: a.greens ?? 40, cyans: a.cyans ?? 60, blues: a.blues ?? 20, magentas: a.magentas ?? 80, tint: a.useTint ? rgbFromPsd(a.tintColor, '#e6c8a0') : null } };
@@ -91,6 +137,10 @@ export function adjustmentFromPsd(a) {
     case 'threshold': return { kind: 'threshold', params: { level: a.level ?? 128 } };
     case 'gradient map': return { kind: 'gradient-map', params: gradientFromPsd(a) };
     case 'selective color': return { kind: 'selective-color', params: { ...Object.fromEntries(SELECTIVE.map((k) => [k, cmyk(a[k])])), relative: a.mode !== 'absolute' } };
+    case 'color lookup': {
+      const params = colorLookupFromPsd(a);
+      return params ? { kind: 'color-lookup', params } : null;
+    }
     default: return null;
   }
 }
@@ -126,7 +176,6 @@ registerPsdLayerKind({
   write(layer, ctx) {
     const adjustment = adjustmentToPsd(layer.kind, layer.params);
     if ((layer.kind === 'levels' || layer.kind === 'curves') && layer.params?.space && layer.params.space !== 'rgb') ctx.report.add('other-space');
-    if (layer.kind === 'hue-saturation' && layer.params?.colorize) ctx.report.add('colorized');
     if (adjustment) {
       ctx.claim(layer, 'adjustment');
       return { adjustment };
@@ -136,19 +185,66 @@ registerPsdLayerKind({
     placeholders.add(rec);
     return rec;
   },
-}, { builtin: true });
+});
 
 registerPsdAspect({
   id: 'adjustment-placeholder',
   order: 110,
-  read(pl, layer) {
+  read(pl, layer, ctx) {
     if (!placeholders.has(layer)) return;
     layer.name = `${layer.name} (${pl.adjustment.type})`;
     layer.visible = false;
+    ctx.report.add('psd-adjustment-unread', pl.adjustment.type);
   },
   write(layer, rec) {
     if (!placeholders.has(rec)) return;
     rec.name = `${layer.name} (${layer.kind})`;
     rec.hidden = true;
   },
-}, { builtin: true });
+});
+
+registerPsdNotice('psd-adjustment-unread', {
+  when: 'open',
+  timeout: 6000,
+  text: (n, kinds) => `${n} adjustment layer${plural(n, '', 's')} (${[...new Set(kinds)].join(', ')}) Pigment cannot use ${plural(n, 'was', 'were')} kept as ${plural(n, 'a hidden empty layer', 'hidden empty layers')}`,
+});
+
+// ---- fill layers (300) -------------------------------------------------------------------------------------------------
+
+registerPsdLayerKind({
+  id: 'fill',
+  order: 300,
+  // a fill without a stroke style or origination data (those are shapes, vector.js); a vector mask on it is the
+  // layer's own (the vector-mask aspect)
+  test: (pl) => !!pl.vectorFill && !pl.vectorStroke && !pl.vectorOrigination && !pl.adjustment,
+  read(pl, ctx) {
+    const { doc } = ctx;
+    const paint = paintFromContent(pl.vectorFill, { place: 'document', width: doc.width, height: doc.height, patterns: ctx.patterns, profile: doc.profile ?? null, report: (d) => ctx.report.add('psd-fill-dropped', d) });
+    if (!paint) return null;
+    const layer = new FillLayer({ paint, docWidth: doc.width, docHeight: doc.height });
+    ctx.claim(layer, 'fill');
+    return layer;
+  },
+  match: (layer) => layer.type === 'fill',
+  write(layer, ctx) {
+    const { doc } = ctx;
+    if (ctx.modeRendered && paintColors(layer.paint).some((c) => !c || !ctx.asShown(c))) return null;
+    const resolve = doc.view?.app?.patterns?.resolve?.bind(doc.view.app.patterns) ?? null;
+    const { content, patterns } = paintToContent(layer.paint, { place: 'document', width: doc.width, height: doc.height, resolve });
+    if (!content) {
+      if (layer.paint?.type === 'pattern') ctx.report.add('psd-shape-pattern');
+      return null;
+    }
+    const r = layer.render();
+    addPatterns(ctx.psd, patterns);
+    ctx.claim(layer, 'fill');
+    // the pixels too, for readers that do not render fills
+    return { left: r.x, top: r.y, canvas: ctx.shown(r.canvas, r.x, r.y), vectorFill: content };
+  },
+});
+
+registerPsdNotice('psd-fill-dropped', {
+  when: 'open',
+  timeout: 6000,
+  text: (n, details) => `${n} fill layer${plural(n, '', 's')} with a ${[...new Set(details)].join(', ')} the file does not hold ${plural(n, 'was', 'were')} read as pixels`,
+});

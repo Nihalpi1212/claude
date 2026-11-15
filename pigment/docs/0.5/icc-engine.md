@@ -75,6 +75,8 @@ they are either way.
 - Changed: the status bar and the Info panel show the document profile; an untagged document reads "Untagged RGB".
 - Changed: Save for Web's "Convert to sRGB" now converts tagged documents (it had nothing to convert in 0.4).
 - Changed: a tagged CMYK or Lab file opens as before, with a note that its profile was not used.
+- Changed: the Info panel's Lab readout is CIE Lab D50 of the document's profile, as Photoshop shows it (sRGB red reads
+  L54 a81 b70; 0.4 showed D65 numbers, L53 a80 b67). The colour picker's own Lab fields are color-picker-swatches'.
 - No key or menu changes beyond the skeleton's (Edit > Assign Profile… was placed by the skeleton).
 
 ## Third-party notices

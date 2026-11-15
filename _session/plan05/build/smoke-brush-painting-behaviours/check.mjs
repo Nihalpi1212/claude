@@ -1,0 +1,30 @@
+export default async function (page, logs) {
+  await page.evaluate(() => window.pigmentApp.newDocument({ width: 400, height: 300, name: 'T', background: 'white' }));
+  await page.waitForSelector('.doc-frame:not([hidden]) canvas.view');
+  const box = await page.locator('.doc-frame:not([hidden]) canvas.view').boundingBox();
+  const at = async (x, y) => page.evaluate(([x, y]) => { const s = window.pigmentApp.view.toScreen(x, y); return [s.x, s.y]; }, [x, y]);
+  await page.evaluate(() => { const a = window.pigmentApp; a.tools.activate('brush'); a.tools.setOpt('brush','size',10); a.tools.setOpt('brush','hardness',1); a.setColors({ foreground: '#000000' }); });
+  const p1 = await at(50, 50), p2 = await at(300, 200);
+  await page.mouse.click(box.x + p1[0], box.y + p1[1]);
+  await page.keyboard.down('Shift');
+  await page.mouse.click(box.x + p2[0], box.y + p2[1]);
+  await page.keyboard.up('Shift');
+  const r = await page.evaluate(() => { const a = window.pigmentApp; const l = a.doc.active; const px = (x,y)=>l.canvas.getContext('2d').getImageData(x-l.x,y-l.y,1,1).data[0]; return { entries: a.doc.history.entries.map(e=>e.label), mid: px(175,125), off: px(175,60) }; });
+  console.log(JSON.stringify(r));
+  await page.evaluate(() => document.activeElement?.blur?.());
+  await page.keyboard.press('4'); await page.keyboard.press('5');
+  console.log('opacity', await page.evaluate(() => window.pigmentApp.tools.opt('brush','opacity')));
+  await page.keyboard.press('Shift+Alt+M');
+  console.log('blend', await page.evaluate(() => window.pigmentApp.tools.opt('brush','blend')));
+  await page.mouse.move(box.x + 200, box.y + 150);
+  await page.keyboard.down('Alt');
+  await page.mouse.down({ button: 'right' });
+  await page.mouse.move(box.x + 240, box.y + 150, { steps: 4 });
+  await page.screenshot({ path: '/tmp/claude-0/-home-user-claude/02aa60de-818c-5d38-b2f3-33055ac112a1/scratchpad/plan05/build/smoke-brush-painting-behaviours/hud.png' });
+  await page.mouse.up({ button: 'right' });
+  await page.keyboard.up('Alt');
+  console.log('size', await page.evaluate(() => window.pigmentApp.tools.opt('brush','size')), 'zoom', await page.evaluate(() => window.pigmentApp.view.zoom));
+  await page.keyboard.press('ArrowRight');
+  console.log('angle', await page.evaluate(() => window.pigmentApp.tools.opt('brush','angle')));
+  console.log('stubbed', await page.evaluate(() => window.pigmentApp.stubbed.filter(x=>x.startsWith('tool:'))));
+}

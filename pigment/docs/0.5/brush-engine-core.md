@@ -108,7 +108,8 @@ described with the painting behaviours (brush-painting-behaviours).
   with no full repaint) does not pass on this machine. The engine's own cost is about 13 ms per 2500 px dab including
   its flushes; the view's per-frame composite of the ~3000 × 3000 region and its display take about 95 ms a frame, one
   frame per pointer event in the test, and a frame with four dabs covers more than the compositor's 45 % region limit,
-  which makes it a full composite. Both are outside the engine (canvas-view.js and compositor.js).
+  which makes it a full composite (one such frame in the test). Both are outside the engine (canvas-view.js and
+  compositor.js).
 - **Define Brush Preset** takes what the document shows (all visible layers), like Define Pattern, not the active
   layer alone.
 - Pen Tilt as a size control squashes the tip with Tilt Scale and shrinks it with the lean; Photoshop's exact curve is

@@ -85,7 +85,7 @@ stroke with Texture enabled, which paints as off until brush-settings-panel regi
 
 ## Integrator
 
-- **repaint-speed.spec.mjs:421 (S2.8 gated case) fails**: `full` runs = 1 to 2 (expects 0) and ~70 ms per dab (expects
+- **repaint-speed.spec.mjs:421 (S2.8 gated case) fails**: `full` runs = 1 (expects 0; 2 before the end-of-stroke change) and ~70 ms per dab (expects
   < 25). Measured: the engine's own work is ~13 ms per 2500 px dab including its flushes (no view); each frame of the
   test (one per pointer move) costs ~45 ms of stroke flush plus ~65 ms of `Compositor.composite` region repaint plus
   ~30 ms of the view's display draw, for 3 to 4 dabs. A frame whose dabs cover more than `REGION_MAX` (0.45) of the
@@ -96,3 +96,14 @@ stroke with Texture enabled, which paints as off until brush-settings-panel regi
   (no styles needed). If a sheet is wanted later, `styles/brush-engine.css` needs a link in index.html.
 - `docs/0.5/brush-engine-core.md` has the user guide, release notes (Shift+Alt+P, the Mode menu, Transfer's ceiling,
   whole-pixel large dabs, the end-of-stroke repaint, the tapering preview) and known gaps.
+
+## Test results at hand-off
+
+- Unit: `brush-engine-core.test.mjs` 17/17; whole unit suite 974/974.
+- e2e: `brush-engine-core.spec.mjs` 8/8; app, skeleton-04, skeleton-05, brush-golden green (skeleton-05:858 fails
+  only from icc-engine's chunk provider, in progress). Whole suite on 8851: 671 passed, 2 skipped, 4 failed — the
+  S2.8 case above (gated on this package) and three icc-engine tests in progress (skeleton-05:858, :989 — passed on
+  re-run — and text-color.spec:264's Lab readout).
+- Electron: 11/11 (with `tests/electron/brush-engine-core.spec.mjs`: pen tilt/twist/wheel through pigment://, and
+  Shift+Alt+P from main.js toggling the airbrush).
+- Every paint spec (235 tests across 23 specs that use the Brush, Pencil, Eraser, stamps, retouch tools) green.
