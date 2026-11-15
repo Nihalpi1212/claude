@@ -10,7 +10,8 @@ use serde_json::{Value, json};
 use crate::commands::{CommandSpec, always};
 use crate::{EngineError, Result, Session};
 
-pub const RELEASES: &str = "https://github.com/storytold/photocraft/releases";
+/// Pigment's releases page (docs/FORK.md).
+pub const RELEASES: &str = "https://github.com/Nihalpi1212/claude/releases";
 pub type CheckResult = std::result::Result<Option<Release>, String>;
 /// Starts background work and returns immediately. No document or personal data is sent.
 pub type CheckFn = Box<dyn FnMut() -> std::result::Result<Receiver<CheckResult>, String> + Send>;

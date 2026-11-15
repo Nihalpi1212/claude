@@ -73,6 +73,8 @@ mod startup_report;
 // Tablet support (macOS AppKit monitor, Linux X11/Wayland, Windows barrel button).
 mod tablet;
 mod ui_state;
+// PhotoCraft's update check, kept for upstream merges but not wired in (docs/FORK.md).
+#[allow(dead_code)]
 mod updates;
 mod window_frame;
 
@@ -227,7 +229,7 @@ fn at_least_min_size(mut builder: egui::ViewportBuilder) -> egui::ViewportBuilde
 fn attach_log_file(logger: Option<&'static logging::AppLogger>) {
     if let (Some(logger), Some(dir)) = (logger, services::config_dir()) {
         match logger.attach_dir(&dir.join("logs")) {
-            Ok(path) => log::info!("Pigment {}, log file {}", photocraft_engine::build_info::long_version(), path.display()),
+            Ok(path) => log::info!("{} ({}), log file {}", photocraft_format::brand::version_line(), photocraft_engine::build_info::long_version(), path.display()),
             // Standard error only by now (`attach_dir` gave up on the file); unlike `eprintln!`, never panics.
             Err(e) => log::warn!("no log file: {e}"),
         }
@@ -415,14 +417,8 @@ fn main() -> eframe::Result {
     // Then, so the panic hook and every start-up warning are recorded (`logging`).
     let logger = logging::install();
     crash_guard::install_hook();
-    #[cfg(not(target_arch = "wasm32"))]
-    if let Some(done) = craft_update::self_update::finish(&photocraft_ui_egui::UPDATE_APP, &std::env::args_os().skip(1).collect::<Vec<_>>()) {
-        if let Err(e) = done {
-            eprintln!("Pigment update helper failed: {e}");
-            std::process::exit(1);
-        }
-        return Ok(());
-    }
+    // Pigment installs no updates (docs/FORK.md): craft-update's Windows update helper
+    // (`--finish-update`, `craft_update::self_update::finish`) is not wired in.
 
     // The system font scan can take seconds (minutes on some Macs): run it off the UI thread.
     photocraft_ui_egui::type_tool::warm_fonts();
@@ -688,16 +684,10 @@ fn main() -> eframe::Result {
                 }
             });
             // Agents in the open window, unless the launch flags (`--control`) manage the
-            // connection. Behind the suite's AI-MCP feature flag, the ArtCraft Launcher's switch
-            // (Settings › AI agents) is the one consent; without it, as before, a Control Port.
-            let flags = craft_flags::load();
-            for problem in &flags.problems {
-                log::warn!("feature flags: {problem}");
-            }
-            app.agent_link.mcp_flag = flags.enabled(&craft_flags::AI_MCP);
-            if app.agent_link.mcp_flag {
-                app.services.launcher_agents = Some(agent_link::launcher_watch(&cc.egui_ctx));
-            }
+            // connection. Pigment's own switch (Preferences › AI Integrations, `connectAgents`) is
+            // the one consent: it reads neither the suite's feature flags nor the ArtCraft
+            // Launcher's switch (docs/FORK.md).
+            app.agent_link.mcp_flag = photocraft_automation::agent_link::mcp_flag();
             if let Some((listener, token, _)) = control {
                 app.agent_link.launch_flags = true;
                 app.agent_link.port = listener.local_addr().ok().map(|a| a.port());

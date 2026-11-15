@@ -112,12 +112,15 @@ fn apply(running: &mut Option<Running>, dir: Option<&Path>, integrations: &Integ
 }
 
 /// How often [`launcher_watch`] looks at the ArtCraft Launcher's files.
+#[allow(dead_code)]
 const LAUNCHER_POLL: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// Whether the ArtCraft Launcher turned agents on for every Craft app
 /// ([`agent_link::launcher_allows_agents`]), watched on its own thread so the UI can ask every
 /// frame without touching the disk. A change wakes the UI, which then starts or stops the
 /// connection. Without a thread (one couldn't be started) the answer stays what it was at launch.
+// Pigment never watches the ArtCraft Launcher (main.rs); kept for upstream merges.
+#[allow(dead_code)]
 pub fn launcher_watch(ctx: &egui::Context) -> Box<dyn Fn() -> bool> {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};

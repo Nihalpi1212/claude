@@ -95,11 +95,11 @@ pub const SHELL_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("window.theme.softLight", "Soft", &["Window", "Theme", "Light Theme"], None),
     ("window.theme.system", "Sync with system", &["Window", "Theme"], None),
     ("edit.search", "Search…", &["Edit"], Some("Cmd+F")),
-    ("help.discord", "Join the ArtCraft Discord…", &["Help"], None),
-    ("help.website", "Pigment Website", &["Help"], None),
-    ("help.artcraftWebsite", "ArtCraft Website", &["Help"], None),
-    ("help.github", "Pigment on GitHub", &["Help"], None),
+    // Pigment's links (docs/FORK.md): PhotoCraft's ids, Pigment's pages. No Discord link.
     ("help.reportIssue", "Report an Issue…", &["Help"], None),
+    ("help.github", "Pigment on GitHub", &["Help"], None),
+    ("help.website", "Pigment Releases", &["Help"], None),
+    ("help.artcraftWebsite", "PhotoCraft (upstream project)", &["Help"], None),
     ("help.systemInfo", "System Info…", &["Help"], None),
     ("help.about", "About Pigment", &["Help"], None),
 ];

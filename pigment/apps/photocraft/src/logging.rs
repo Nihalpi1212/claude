@@ -3,7 +3,7 @@
 //! Without a logger every `log::warn!`/`log::error!` in the workspace (GPU startup fallbacks, a
 //! lost device, the crash guard's panic report) vanished. A launch from a desktop menu has no
 //! terminal, so the file is what a bug report can attach: `<settings dir>/logs/pigment.log`
-//! (see `app_dirs`). Each start moves the previous log to `photocraft.1.log` (and that one to
+//! (see `app_dirs`). Each start moves the previous log to `pigment.1.log` (and that one to
 //! `.2`), so the log of a run that crashed survives the next launch. A start while another
 //! instance is still running leaves that instance's log alone and writes `photocraft-<pid>.log`
 //! (see [`rotate`]).

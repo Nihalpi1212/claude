@@ -32,7 +32,7 @@ fn annotated(mut tool: Tool) -> Tool {
 impl ServerHandler for PhotocraftMcp {
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().enable_resources().build())
-            .with_server_info(Implementation::new("photocraft", env!("CARGO_PKG_VERSION")))
+            .with_server_info(Implementation::new(crate::agent_link::SERVER_NAME, env!("CARGO_PKG_VERSION")))
             .with_instructions(INSTRUCTIONS)
     }
 

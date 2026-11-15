@@ -174,8 +174,8 @@ fn render_start_rail(app: &mut PhotocraftApp, ui: &mut egui::Ui, rail_w: f32) {
 
     ui.add_space(8.0);
 
-    render_rail_link(app, ui, rail_w, tl!("Website"), "link", crate::links::APP_PAGE);
-    render_rail_link(app, ui, rail_w, tl!("Discord"), "message-square", crate::links::DISCORD);
+    render_rail_link(app, ui, rail_w, tl!("Releases"), "link", crate::links::RELEASES);
+    render_rail_link(app, ui, rail_w, tl!("Report an Issue"), "message-square", crate::links::ISSUES);
     render_rail_link(app, ui, rail_w, tl!("GitHub"), "link-2", crate::links::GITHUB);
 }
 
