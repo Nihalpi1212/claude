@@ -1005,3 +1005,195 @@ events.
 **T12.6 Paths.** Revert and Restore Version are undoable entries; recovery files are `.pigment` files, so what survives
 `.pigment` survives a crash; actions: `file:revert` keeps 0.5's recording rule, the others are `record: false`;
 Electron and the browser build differ as T12.5 says.
+
+#### T13. OpenType and the Glyphs panel (E83)
+
+**T13.1 The catalogue** (`src/shared/opentype-features.js`, skeleton, frozen; the menu template and the renderer both
+read it):
+
+```ts
+OPENTYPE_FEATURES: { id: string, label: string, on: [tag, value][], off?: [tag, value][], defaultOn: boolean,
+                     group: 'ligatures' | 'alternates' | 'figures' | 'positional' | 'japanese', exclusive?: string }[]
+featuresFor(current: CharStyle['features'], id, on: boolean): CharStyle['features']   // the patch for one toggle
+activeFeatureIds(features): string[];  featureTags(id): string[]
+```
+Ids: `standard-ligatures` (liga, clig; on by default), `contextual-alternates` (calt; on), `discretionary-ligatures`
+(dlig), `swash` (swsh), `stylistic-alternates` (salt), `ss01` … `ss20`, `titling` (titl), `ornaments` (ornm),
+`ordinals` (ordn), `fractions` (frac), `justification-alternates` (jalt), `lining` / `oldstyle` (lnum / onum,
+exclusive `figure-case`), `proportional` / `tabular` (pnum / tnum, exclusive `figure-width`), `jp78`, `jp83`, `jp90`,
+`jp04`, `nlck` (exclusive `japanese-forms`), `proportional-metrics` (palt). A feature is a run attribute in 0.4's
+CharStyle `features` (tag → value), which type-fonts' shaper already passes to HarfBuzz: no model or shaper change.
+Small caps stay 0.4's `caps: 'small'` (real `smcp` when the face has it).
+
+**T13.2 Commands and controls** (type-opentype-glyphs): `type:opentype { id, on? }` (toggles without `on`) applies
+through `type/target.js applyChar` (one entry named after the feature, as Photoshop); Type › OpenType ▸ and the
+Character panel menu's OpenType ▸ (`openTypeMenuItems(app)` from `lib/type/features.js`, placed by the skeleton in
+`char-format.js`) list the catalogue as checkboxes (`state.openType`, `state.openTypeAvailable`, T17.5); the Character
+panel's button row is an E26 section `opentype`. A feature the face lacks is disabled (from the face record's
+`features` set); text drawn by the Canvas fallback engine (browser build without local fonts) cannot take features,
+and the controls say so.
+
+**T13.3 The Glyphs panel** (`lib/panels/glyphs.js`, `window:panel-glyphs`): the face's glyphs from its cmap
+(`face.collectUnicodes()`) and GSUB (`face.referenceTable('GSUB')`, parsed by the package), font and style choice, zoom,
+subsets (Entire Font, Alternates for Current Selection, Unicode blocks, OpenType features) through
+`registerGlyphSubset({ id, label, test(codepoint, face) })`, recently used glyphs (`settings.glyphs.recent`, 30). Double
+click: `type:insert-glyph { text, features?, postScriptName? }` inserts at the caret of the type session (one step of
+the session's own undo, its text recorded), or replaces the selection. A glyph reachable only through a substitution
+inserts its base character with the feature value that selects it (`aalt`, `salt`, `ssNN`, `swsh` = n) on that one
+character; a glyph with neither a code point nor a feature route is shown greyed. The on-canvas alternates popup
+(`alternates-popup.js`) does the same for the one selected character.
+
+**T13.4 PSD** (`lib/psd/text-features.js`): aspect `text-features` (order 410, after psd-text's text kind) writes the
+runs' features into the TextStyle fields ag-psd has (`ligatures`, `dLigatures`, `swash`, `oldStyle`, `fractions`,
+`ordinals`, `titling`, `stylisticAlternate`, `ornaments`, `figureStyle`) on layers claimed `'text'`, reads them back by
+text offset, and reports features without a PSD field (stylistic sets) once.
+
+**T13.5 What later packages use.** type-styles-prefs (0.7): character styles store `features`; `featuresFor` and the
+catalogue; `insertGlyph(app, spec)` (exported). type-international (0.9): `registerGlyphSubset` for CJK and Arabic
+blocks; vertical forms (`vert`, `vrt2`) are applied by the vertical layout, not listed in the catalogue.
+
+**T13.6 Paths.** One entry per toggle; `.pigment` and clone carry `features` (0.4); PSD: T13.4; actions record
+`type:opentype` with its id and `type:insert-glyph` with its text; Electron: local fonts reach HarfBuzz through
+`queryLocalFonts` (0.4); the browser build without `local-fonts` only shapes added fonts.
+
+#### T14. Camera RAW opening (E84)
+
+**T14.1 Decoder, licence and shipping** (raw-open-workflow). LibRaw (0.21 or later) compiled to wasm without the GPL
+demosaic packs, run in a module worker. Licence route **LGPL-2.1** (LibRaw's other option, CDDL-1.0, is not needed):
+the wasm and its glue ship as separate files in `src/renderer/vendor/libraw/` (`libraw.wasm`, `libraw.mjs`,
+`LICENSE`, `SOURCE.md` with the exact version, the source URL and the build script), loaded by URL at run time and never
+bundled into Pigment's own code; `build.asarUnpack` (package.json, raw-open-workflow) keeps the folder outside the asar
+so a user can replace it with an own build of the same interface (`libraw_version()` is checked at load). The vendor
+step `scripts/vendor/libraw.mjs` builds from pinned sources when emscripten is present, else copies a pinned prebuilt
+package; when neither works it warns (E23) and RAW stays off (`RAW_FEATURES.decoder` false: no reader registered). CSP:
+`'wasm-unsafe-eval'` and `worker-src 'self' blob:` are already in `index.html` (0.4). Decoding API (`lib/raw/decode.js`):
+
+```ts
+decodeRaw(bytes, { half = false } = {}): Promise<{ width, height,
+  planes: { R, G, B: Float32Array },              // camera-native, linear, black-subtracted, not white-balanced
+  camera: { make, model, lens?, iso?, exposureTime?, fNumber?, focalLength?, date? },
+  asShot: { multipliers: [r, g, b], temperature?, tint? }, cameraToXyz: number[] /* 3x3, D50 */,
+  dng?: { colorMatrix1?, colorMatrix2?, forwardMatrix1?, forwardMatrix2?, illuminant1?, illuminant2?, profileName? },
+  exif: Uint8Array | null, thumbnail: Uint8Array | null, orientation: number }>
+```
+
+**T14.2 The linear input path** (skeleton, `develop-stages.js` / `develop.js`): `developPlanes(planes, params, { input
+= 'display' | 'raw', rect, processVersion })` runs the registered stages on float planes, skipping 0.2's sRGB-to-linear
+entry when `input` is `'raw'`; every stage's `ctx` gains `input`. `develop(img, params, rect)` (8-bit, smart filters,
+actions) is unchanged and passes `'display'`. `registerRawVariant(stageId, apply)` lets the builtin stages
+`white-balance`, `exposure` and `tone` hand raw input to raw-open-workflow's scene-linear versions (Exposure in true
+stops, white balance in camera space, highlight recovery); the display path is untouched (the S8.1 unit test against
+`develop-04.mjs` keeps passing). raw-open-workflow registers raw-only stages from `develop-linear.js` (imported by
+`develop.js`; the stub is empty): `camera-color` (order 95: camera RGB to the working linear space through the DNG
+matrices interpolated by temperature, LibRaw's matrix, or a user `.dcp` HueSatMap and forward matrix) and `dcp-look`
+(order 260); both are neutral on display input. `.dcp` files are a preset kind `camera-profiles` (`{ make, model, name,
+blob: 'dcp-<sha1>.dcp' }`), listed in the workspace's profile browser.
+
+**T14.3 Workflow and outputs.** `settings.rawWorkflow = { space: profile id ('srgb'), depth: 8 | 16 | 32 (8), size: {
+long } | null, resolution: 300, sharpen: { for: 'none' | 'screen' | 'matte' | 'glossy', amount: 'low' | 'standard' |
+'high' }, smartObjects: false }` and the preset kind `raw-workflow-presets`. Open: a document in the workflow space
+(`doc.profile`), depth and size, `doc.format = 'raw'`, the EXIF block through `setMetadata` (T9.2). Open Copy: the
+same, the sidecar not written. Open Object: a smart object of source kind `raw` (T6: the raw bytes, params and
+workflow; `draw` renders the developed image; double-click reopens the workspace). Done: the sidecar is written,
+nothing opens (the reader returns `null`). Save Image: JPEG, TIFF or PSD through `encodeForPath` of a temporary
+document. Photo Merge (HDR, Panorama, HDR Panorama): `app.alignBlend.alignImages` and 0.3's merge maths, giving a
+`.pigment` document or a TIFF (never DNG).
+
+**T14.4 The session** (raw-open-workflow owns `develop-ui.js` and `develop/workspace.js` for the round):
+`openRawSession(app, files: { path, bytes }[], { interactive })` opens 0.5's workspace in RAW mode on several images:
+the filmstrip slot (thumbnails, ratings and colour labels, multiple selection, Sync Settings), the footer's Workflow
+Options link and the buttons Save Image…, Open (Alt: Open Copy; Shift: Open Object), Cancel, Done. It registers the
+open group `raw` (T12.1) for the RAW extensions (`dng`, `cr2`, `cr3`, `crw`, `nef`, `nrw`, `arw`, `srf`, `sr2`, `raf`,
+`orf`, `rw2`, `rwl`, `pef`, `srw`, `x3f`, `3fr`, `iiq`, `mrw`, `dcr`, `kdc`, `erf`, `mos`, `raw`; the skeleton adds them
+to `src/shared/formats.js`) and a reader with `interactive: false` (Batch, actions: the sidecar or the defaults, no
+UI). The open hook policy of T7.3 skips `format: 'raw'`.
+
+**T14.5 Sidecar .xmp.** `<name>.xmp` beside the raw file (Electron; the browser build keeps settings in the session):
+`paramsToXmp(params) → string` and `paramsFromXmp(text) → { params, report }` are a facade the skeleton adds in
+`lib/develop/registry.js` over camera-raw-workspace's reader and writer (S8.4); raw-open-workflow adds `xmp:Rating`,
+`xmp:Label` and `crs:RawFileName`.
+
+**T14.6 What later packages use.** camera-raw-local (0.9) adds local adjustments as stages over `developPlanes`;
+lens-correction-profiles (0.9) reads `camera.lens` and the EXIF fields and adds an Optics profile option through E47.
+
+**T14.7 Paths.** Opening is not an entry; Open Object's smart object edits are E55 entries; `.pigment` embeds the raw
+bytes of a `raw` source (large files, documented); PSD writes it as pixels (0.5); actions replay `file:open-paths` of a
+raw file non-interactively; 16/32-bit outputs; Electron: the unpacked wasm and the worker inside the packaged app;
+the browser build loads the same files from `vendor/`.
+
+#### T15. PDF import
+
+**T15.1 pdf.js** (`pdfjs-dist`, Apache-2.0). The skeleton adds it to `devDependencies` at an exact version (the newest
+release at least two weeks old that runs in Electron 44's Chromium; Folio's version is preferred, so one copy is
+reviewed). pdf-import's vendor step copies `build/pdf.min.mjs`, `build/pdf.worker.min.mjs`, `cmaps/` and
+`standard_fonts/` into `src/renderer/vendor/pdfjs/` (git-ignored, like ag-psd's bundle). Loading: `import()` of that
+file on first use, `GlobalWorkerOptions.workerSrc` beside it, `isEvalSupported: false`, local `cMapUrl` and
+`standardFontDataUrl`, no network; the CSP is unchanged. The NOTICE goes into `docs/0.6/pdf-import.md`.
+
+**T15.2 Open** (`lib/pdf/import.js`): `registerOpenFormat({ id: 'pdf', extensions: ['pdf', 'ai'], test: '%PDF-'
+header, read })`. Interactive: the Import PDF dialog (Pages or Images; page thumbnails with multiple selection; Crop To:
+bounding, media, crop, bleed, trim or art box; width, height, resolution and units with Constrain Proportions; Mode RGB
+or Grayscale; 8 or 16 bits; Anti-aliased). A reader may return several documents (`Document[]`, the skeleton's
+`openPaths` adds each, T12.1). Not interactive: page 1 with the last settings (`settings.pdfImport`). The PDF's XMP
+metadata goes to `setMetadata`; an RGB result is untagged (the working space). A non-PDF `.ai` (before Illustrator 9)
+is refused with a message.
+
+**T15.3 Place** (`lib/pdf/smart-source.js`): place reader `pdf` (`.pdf`, `.ai`; a page and crop box chooser) and
+source kind `pdf` (`{ bytes, page, box, width, height }` in points at 72 ppi): `draw(ctx, src, { matrix, rect })`
+renders the page with pdf.js at the matrix's scale. pdf.js renders asynchronously: a kind's `draw` may return `false`
+after drawing its nearest cached render scaled, and calls `src.onReady()` when the exact render is done; the skeleton's
+`SmartLayer` sets `onReady` to touch the layer and repaint. `.eps` placement is refused with "needs an EPS interpreter
+(Pigment 0.9)" (formats-more-codecs).
+
+**T15.4 What later packages use.** linked-smart-objects (0.7): kind `pdf` with `link`; notes-count-measurement (0.9):
+`pdfAnnotations(bytes, page) → { rect, contents, author, date }[]` (exported by `import.js`).
+
+**T15.5 Paths.** Place is one structural entry (0.2); `.pigment` stores the PDF bytes through the kind's `toFiles`;
+PSD writes the object as pixels (0.5); actions replay `file:place` and `file:open-paths` with the last settings;
+16-bit import renders at 8 bits and converts; Electron loads the vendor files inside the asar through `pigment://`.
+
+#### T16. View navigation (E85, E86)
+
+**T16.1 Range.** `MIN_ZOOM = 0.002`, `MAX_ZOOM = 128` (0.2 % to 12 800 %), `ZOOM_STEPS` extended with Photoshop's
+steps; the pixel grid and `imageSmoothingEnabled` rules of 0.2 hold.
+
+**T16.2 Motion** (`lib/view-motion.js`): `view.zoom`, `panX`, `panY` and `rotation` take their target values at once;
+Animated Zoom is a display transition only (the drawn transform eases over at most 150 ms while pointer mapping uses
+the target), so every caller and spec that reads `view.zoom` after a zoom command sees the final value. API:
+`view.animateTo({ zoom?, anchor?, panX?, panY?, rotation? }, { duration })`, `view.scrollBy(dx, dy)`,
+`view.scrollPage('up' | 'down' | 'left' | 'right' | 'home' | 'end', { small })`, `'view:changed'` with the target
+values (0.2). Flick panning: after a Hand or Space drag whose samples of the last 30 ms (by `timeStamp`) move faster
+than 0.8 px/ms, the pan continues and decays; synthetic drags whose samples share time stamps never flick
+(`conventions-shortcuts-fields.spec.mjs:385–389` asserts an exact pan). Overscroll: `settings.view.overscroll` default
+true keeps 0.5's 40 px sliver; false clamps as Photoshop's default does (a recorded difference).
+
+**T16.3 Wheel, gestures, auto-scroll.** Plain wheel scrolls (Shift: sideways), or zooms with Zoom with Scroll Wheel
+(0.5's setting); Alt+wheel zooms at the pointer; Ctrl+wheel (Cmd+wheel on macOS) scrolls sideways (Photoshop; 0.5
+zoomed: release note). A trackpad pinch arrives as a wheel event with `ctrlKey` while Control is not physically held
+(tracked from key events) and zooms. Edge auto-scroll (E85): during a primary-button drag routed to a tool whose
+`autoScrolls(tool)` is true (`tool-traits.js`, skeleton; false for Hand, Rotate View, Zoom, Eyedropper, Color Sampler),
+a pointer that stays outside the canvas area for 100 ms scrolls the view toward it, re-sending `onPointerMove` at the
+same screen point each frame; the release stops it.
+
+**T16.4 Scroll bars** (`lib/view-scrollbars.js`): overlays on the canvas host's right and bottom edges (thumb = visible
+fraction), hidden in full screen; dragging a thumb pans, a click on the track pages.
+
+**T16.5 Tool letters (E86)** (skeleton, `shortcuts.js`): a letter activates the slot's current tool, except in a slot
+whose tools have different letters of their own (`tool.key`): there the letter activates its tool. So H is always the
+Hand and R always Rotate View, both in the Hand slot as in Photoshop; Shift+H / Shift+R cycle the slot.
+
+**T16.6 Tools and Navigator** (view-navigation, `lib/tools/view-tools.js`, `panels/navigator.js`): Hand with bird's-eye
+view (hold H and press while zoomed in: the view zooms out to fit with a box; the release zooms in where the box is),
+Zoom (scrubby zoom, Zoom Clicked Point to Center, double-click its toolbox icon: 100 %), Hand icon double-click: fit;
+Rotate View with a compass overlay and an angle field; the Navigator's Ctrl-drag region zoom and Panel Options (view box
+colour, `settings.view.navigatorColor`). Toolbox double-clicks reach `tool.toolboxDoubleClick?.()` (skeleton,
+`tools.js`).
+
+**T16.7 Preferences and keys.** The skeleton's built-in section `navigation` (order 22) holds `zoomWithWheel` and
+`animatedZoom` (moved from `interface`); view-navigation replaces it (Animated Zoom, Zoom with Scroll Wheel, Zoom
+Clicked Point to Center, Enable Flick Panning, Overscroll) over `settings.view` and the two 0.3 keys. Keys: `view:scroll`
+(T17). Resize Windows, Scroll All Windows and Zoom All Windows wait for document-windows (0.8), which uses
+`animateTo`, the scroll API and the zoom constants.
+
+**T16.8 Paths.** No history; preferences persist; Electron: macOS trackpad pinch and Windows precision touchpads
+through the ctrlKey rule; the browser build is the same.
