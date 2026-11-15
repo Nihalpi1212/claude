@@ -1,0 +1,68 @@
+# Eaves (eaves/): unit tests, a universal build of the Mac app, and a run of the real app on the
+# runner to check that it draws. The built app is uploaded as the "Eaves-mac" artifact.
+#
+# The build is signed ad hoc, not with an Apple Developer ID, so macOS asks for confirmation the
+# first time it is opened; see eaves/README.md.
+
+name: Eaves CI
+
+on:
+  push:
+    paths:
+      - 'eaves/**'
+      - '.github/workflows/eaves-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: eaves
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          sw_vers
+          swift --version
+
+      - name: Unit tests
+        run: swift test
+
+      - name: Build the app (Apple silicon and Intel)
+        run: UNIVERSAL=1 ./scripts/build-app.sh
+
+      - name: Run the app and check that it draws
+        run: |
+          open -a TextEdit || true
+          sleep 3
+          build/Eaves.app/Contents/MacOS/Eaves --selftest 20
+
+      - name: Screenshot of the app running
+        continue-on-error: true
+        run: |
+          build/Eaves.app/Contents/MacOS/Eaves --scene snow &
+          APP_PID=$!
+          sleep 25
+          screencapture -x build/screenshot.png
+          kill "$APP_PID" || true
+
+      - name: Upload the app
+        uses: actions/upload-artifact@v4
+        with:
+          name: Eaves-mac
+          path: eaves/build/*.zip
+          if-no-files-found: error
+
+      - name: Upload the screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Eaves-screenshot
+          path: eaves/build/screenshot.png
+          if-no-files-found: ignore
