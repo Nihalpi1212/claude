@@ -1,0 +1,40 @@
+[package]
+name = "pigment-genai"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Pigment generative AI: the person's own OpenAI or Google Gemini key, called from their machine, behind photocraft_engine::generative (docs/generative-ai.md)"
+
+[lints]
+workspace = true
+
+[dependencies]
+photocraft-engine = { workspace = true }
+photocraft-raster = { workspace = true }
+photocraft-geom = { workspace = true }
+# The application id (`brand::APP_ID`), which names the credential store service.
+photocraft-format = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+log = { workspace = true }
+
+# Native only: the browser build has no AI provider (docs/generative-ai.md). The same ureq
+# features as craft-update's, already in Cargo.lock: rustls on ring, the OS trust store.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+ureq = { version = "3.5", default-features = false, features = ["rustls-no-provider", "_ring", "gzip", "platform-verifier"] }
+# Answers come as PNG, JPEG or WebP; requests go out as PNG. The codecs already in the tree.
+image = { workspace = true, features = ["png", "jpeg", "webp"] }
+base64 = "0.23"
+
+# API keys live in the OS credential store where keyring has a native one without C libraries:
+# the macOS Keychain and the Windows Credential Manager. Elsewhere a 0600 file (keys.rs).
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3.6", default-features = false, features = ["apple-native"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring = { version = "3.6", default-features = false, features = ["windows-native"] }
+
+[dev-dependencies]
+# The end-to-end test renders the document to check the fill landed inside the selection only.
+photocraft-compose = { workspace = true }

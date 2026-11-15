@@ -43,6 +43,8 @@ photocraft-ui-egui = { path = "crates/ui-egui" }
 photocraft-testkit = { path = "crates/testkit" }
 photocraft-tablet = { path = "crates/tablet" }
 photocraft-ipp = { path = "crates/ipp" }
+# Pigment: generative AI (OpenAI, Gemini) behind photocraft_engine::generative (docs/generative-ai.md).
+pigment-genai = { path = "crates/genai" }
 
 # external
 # ICC colour management: the shared crate (replaces crates/cms; craft-libs#779).
