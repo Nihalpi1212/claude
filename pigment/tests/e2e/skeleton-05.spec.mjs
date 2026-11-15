@@ -289,7 +289,7 @@ async function fakeGesture(page, claim) {
     const brush = app.tools.get('brush');
     const claims = new Function('p', `return (${claimSrc})(p)`);
     window.__gestureLog = [];
-    const log = (what, p, extra = {}) => window.__gestureLog.push({ what, button: p?.button, buttons: p?.buttons, alt: !!p?.alt, ctrl: !!p?.ctrl, eraser: !!p?.eraser, pointerType: p?.pointerType, ...extra });
+    const log = (what, p, extra = {}) => window.__gestureLog.push({ what, button: p?.button, buttons: p?.buttons, alt: !!p?.alt, ctrl: !!p?.ctrl, eraser: !!p?.eraser, barrel: !!p?.barrel, pointerType: p?.pointerType, ...extra });
     window.__realGesture ??= brush.gesture;
     brush.gesture = {
       claims: (p) => claims(p),
@@ -375,6 +375,26 @@ test('brush: claimed presses reach the Brush past the temporary tools; a pen era
   expect(pen[0]).toMatchObject({ what: 'down', eraser: true, pointerType: 'pen' });
   expect(pen.some((e) => e.what === 'move' && e.dragging === true && e.eraser)).toBe(true);
   expect(pen[pen.length - 1].what).toBe('up');
+
+  // the pen's side button pressed while the pen hovers: a right-button drag (button 2 / buttons 2) whose press, moves
+  // and release all carry barrel: true (S2.5); a mouse right-drag never does
+  await fakeGesture(page, (p) => p.button === 2);
+  const side = await page.evaluate(([x, y]) => {
+    const canvas = document.querySelector('.doc-frame:not([hidden]) canvas.view');
+    const drag = (pointerType, pointerId) => {
+      window.__gestureLog.length = 0;
+      const o = { bubbles: true, cancelable: true, composed: true, pointerId, pointerType, isPrimary: true, clientX: x, clientY: y, pressure: 0 };
+      canvas.dispatchEvent(new PointerEvent('pointerdown', { ...o, button: 2, buttons: 2 }));
+      canvas.dispatchEvent(new PointerEvent('pointermove', { ...o, clientX: x + 10, button: -1, buttons: 2 }));
+      canvas.dispatchEvent(new PointerEvent('pointerup', { ...o, clientX: x + 10, button: 2, buttons: 0 }));
+      return window.__gestureLog.map((e) => [e.what, e.barrel]);
+    };
+    return { pen: drag('pen', 2), mouse: drag('mouse', 3) };
+  }, at(-20, 20));
+  expect(side.pen.length).toBeGreaterThanOrEqual(3);
+  expect(side.pen.every(([, barrel]) => barrel === true)).toBe(true);
+  expect(side.mouse.length).toBeGreaterThan(0);
+  expect(side.mouse.every(([, barrel]) => barrel === false)).toBe(true);
   await page.evaluate(() => {
     window.pigmentApp.tools.get('brush').gesture = window.__realGesture;
   });
