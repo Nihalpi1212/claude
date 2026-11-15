@@ -1,6 +1,9 @@
 # Attribution
 
-Every non-code asset in this repository, with its author, source and license. PhotoCraft's own
+Every non-code asset in this repository, with its author, source and license. Pigment is based on
+PhotoCraft (docs/FORK.md); the rows below are PhotoCraft's, kept as upstream wrote them, except the
+app icon, which is Pigment's own, and PhotoCraft's `docs/brand/` (ArtCraft's trademarks), which
+Pigment does not ship. PhotoCraft's own
 code and original assets are MIT OR Apache-2.0 (see [`LICENSE-MIT`](LICENSE-MIT),
 [`LICENSE-APACHE`](LICENSE-APACHE) and [`NOTICE`](NOTICE)). When you add an asset, add a row here
 in the same change; third-party assets must be permissively licensed and keep their license file
@@ -49,7 +52,7 @@ next to them.
 | `assets/icons/symmetry-{vertical,horizontal,dual,diagonal}.svg` | Painting symmetry axis glyphs | @shorbank | Original work; supplied SVG line geometry centred on a common square canvas, stroke adjusted to match the painting-symmetry glyph | MIT OR Apache-2.0, [`assets/icons/LICENSE-symmetry-axes.txt`](assets/icons/LICENSE-symmetry-axes.txt) |
 | `assets/icons/lasso-magnetic.svg` | Magnetic Lasso tool glyph, adapted from "Magnetic Lasso Tool" (redrawn on the 24 px toolbar grid) | Lil' Seal (Noun Project); adapted by PhotoCraft contributors | <https://thenounproject.com/icon/magnetic-lasso-tool-177513/> | CC BY 3.0, [`assets/icons/LICENSE-noun-magnetic-lasso.txt`](assets/icons/LICENSE-noun-magnetic-lasso.txt) |
 | `assets/dict/en_US-scowl-50.txt.gz` | English word list for Check Spelling (SCOWL 2020.12.07, size 50, en_US; 72,403 words) | Kevin Atkinson and the SCOWL contributors | <http://wordlist.aspell.net/> | SCOWL license (permissive, keep the notice), [`assets/dict/LICENSE-SCOWL.txt`](assets/dict/LICENSE-SCOWL.txt), which also has the build recipe |
-| `assets/app-icon/` (all files) | PhotoCraft app icon (nine-tailed kitsune) | The project owner (drawn in ArtCraft, vectorised) | Original work, see [`assets/app-icon/README.md`](assets/app-icon/README.md) | MIT OR Apache-2.0, [`assets/app-icon/LICENSE.txt`](assets/app-icon/LICENSE.txt) |
+| `assets/app-icon/` (all files) | Pigment app icon (a paint palette and brush on an orange-to-violet tile) | Pigment contributors (the icon of Pigment 0.1–0.4, `build/icon.svg`, reframed to the 512 tile) | Original work, see [`assets/app-icon/README.md`](assets/app-icon/README.md) | MIT OR Apache-2.0, [`assets/app-icon/LICENSE.txt`](assets/app-icon/LICENSE.txt) |
 | `packaging/macos/dmg/` (all files) | PhotoCraft DMG window background and layout | @XusBadia, from the PhotoCraft app icon | Original work, see [`packaging/macos/dmg/README.md`](packaging/macos/dmg/README.md) | MIT OR Apache-2.0, like the code |
 | `crates/ui-egui/src/theme.rs` (Solarized Dark palette) | Solarized colour scheme used by the Solarized Dark theme | Ethan Schoonover | <https://ethanschoonover.com/solarized/> | MIT, [`LICENSE-solarized.txt`](crates/ui-egui/src/LICENSE-solarized.txt) |
 | `crates/ui-egui/src/theme.rs` (Breeze Light and Breeze Dark themes) | The Breeze Light and Breeze Dark themes are original colour values on PhotoCraft's Studio layout, chosen to look close to KDE Plasma's Breeze (cool blue-greys, blue accent, 5 px frame radius) so the app blends into a Plasma desktop. None of Breeze's colour values, files or code are copied; the values are a few levels away from its schemes and tuned for text contrast | PhotoCraft contributors | Inspired by the look of KDE Breeze, <https://invent.kde.org/plasma/breeze> (its colour schemes are LGPL-2.0-or-later) | Original work |
@@ -78,7 +81,6 @@ The built-in ICC profiles and the generated LUT looks come from `craft-cms`
 
 | Path | Title | Author | Source | License |
 |---|---|---|---|---|
-| `docs/brand/` (all files) | ArtCraft name, wordmark and mark | ArtCraft Team | getartcraft.com | Not open source; trademarks of the ArtCraft Team, [`docs/brand/LICENSE-brand.txt`](docs/brand/LICENSE-brand.txt) |
 | `docs/images/photocraft-*.jpg` | PhotoCraft screenshots | PhotoCraft contributors (UI) | Rendered offscreen with the `snapshot` example | MIT OR Apache-2.0 (UI); the artwork in each is public domain, listed below |
 | `docs/images/embedded-vector-editor-en.png` | Embedded AI/PDF/EPS conversion warning and editor chooser (no artwork) | Don Omondi | Offscreen `smart_svg_ui::tests::capture_embedded_vector_conversion_prompt` with authored bytes and mock services | MIT OR Apache-2.0 |
 | `docs/images/embedded-vector-tabs-linux.png` | Shared VectorCraft window after a portal editor save and ordinary document launch | Don Omondi | Local Linux GUI acceptance with authored orange rectangle/blue circle SVGs; no private artwork | MIT OR Apache-2.0 |
