@@ -1,1 +1,62 @@
-/* type-fonts (ARCHITECTURE.md "0.5 features", rule 6): this package's own styles. Empty until the package lands. */
+/* type-fonts (ARCHITECTURE.md "0.5 features", rule 6): the font field, the font menu, the style select, the axis
+   sliders and the Manage Missing Fonts dialog. */
+
+/* the family field (options bar, Character panel, Manage Missing Fonts) */
+.fp-field {
+  display: inline-flex; align-items: center; gap: 4px; min-width: 120px; max-width: 200px; height: 28px;
+  padding: 0 6px 0 8px; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg-elevated); color: var(--fg); text-align: left; cursor: pointer;
+}
+.fp-field:disabled { opacity: 0.5; cursor: default; }
+.fp-field:focus-visible { box-shadow: var(--focus-ring); outline: none; }
+.fp-field-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.fp-field-chev { flex: none; display: inline-grid; place-items: center; color: var(--fg-muted); }
+.fp-field-chev svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; }
+.fp-field.fp-missing .fp-field-name { color: var(--fg-muted); font-style: italic; }
+.fp-field.fp-missing .fp-field-name::before { content: '['; }
+.fp-field.fp-missing .fp-field-name::after { content: ']'; }
+.fp-panel-field { width: 100%; max-width: none; }
+.char-row-cell .fp-style { width: 100%; }
+.options-bar .fp-style { max-width: 150px; }
+
+/* the font menu */
+.fp-menu { display: flex; flex-direction: column; padding: 6px; gap: 6px; overflow: hidden; }
+.fp-head { display: flex; gap: 4px; align-items: center; }
+.fp-search {
+  flex: 1; min-width: 0; height: 28px; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg); color: var(--fg);
+}
+.fp-class { height: 28px; max-width: 120px; }
+.fp-head .btn svg, .fp-star svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linejoin: round; }
+.fp-head .btn[aria-pressed="true"] { color: var(--accent); background: var(--accent-soft); }
+.fp-list { position: relative; overflow-y: auto; overflow-x: hidden; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-elevated); outline: none; }
+.fp-spacer { width: 1px; }
+.fp-row, .fp-heading { position: absolute; left: 0; right: 0; display: flex; align-items: center; gap: 6px; padding: 0 6px; box-sizing: border-box; }
+.fp-heading { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--fg-muted); background: var(--bg-sunken); }
+.fp-row { cursor: default; }
+.fp-row.fp-active { background: var(--accent-soft); }
+.fp-star { flex: none; display: inline-grid; place-items: center; width: 20px; height: 20px; padding: 0; border: 0; background: transparent; color: var(--fg-muted); opacity: 0.45; }
+.fp-row:hover .fp-star, .fp-star[aria-pressed="true"] { opacity: 1; }
+.fp-star[aria-pressed="true"] { color: #e0a100; }
+.fp-star[aria-pressed="true"] svg { fill: currentColor; }
+.fp-name { flex: 0 1 auto; min-width: 90px; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.fp-badge { flex: none; font-size: 9px; font-weight: 700; padding: 1px 3px; border-radius: 3px; color: var(--fg-muted); border: 1px solid var(--border); }
+.fp-sample { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; color: var(--fg); line-height: 1.2; }
+.fp-foot { display: flex; gap: 6px; align-items: center; }
+.fp-foot .select { height: 26px; }
+.fp-count { margin-left: auto; font-size: 11px; color: var(--fg-muted); }
+
+/* variable axes (Character panel, Properties) */
+.fp-axes { display: grid; gap: 4px; padding: 4px 0; }
+.fp-axis { display: grid; grid-template-columns: 76px 1fr 56px; gap: 6px; align-items: center; font-size: 12px; }
+.fp-axis-name { color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fp-axis-range { width: 100%; accent-color: var(--accent); }
+.fp-axis-value { width: 56px; height: 24px; padding: 0 4px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); color: var(--fg); }
+
+/* Manage Missing Fonts */
+.mf-intro { margin: 0 0 10px; }
+.mf-table { display: grid; gap: 6px; max-height: 50vh; overflow: auto; }
+.mf-row { display: grid; grid-template-columns: 1fr 64px 180px 140px; gap: 8px; align-items: center; }
+.mf-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mf-count { color: var(--fg-muted); font-size: 12px; }
+.mf-row .fp-field { max-width: none; width: 100%; }

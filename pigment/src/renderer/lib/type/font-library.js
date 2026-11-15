@@ -27,76 +27,22 @@ import { fontFamilies, onFontsChanged, STYLES, styleOf, styleToFont } from '../t
 import { cssFamilyFromPsFont } from '../psd/text.js';
 import { registerPresetKind } from '../presets.js';
 import { bridge } from '../bridge.js';
-import { fontInfo, faceCountOf, isFontFile, classifyName, similarity, infoTableSpans, infoFromTables, FONT_CLASSES } from './font-tables.js';
+import { fontInfo, faceCountOf, isFontFile, classifyName, similarity, infoTableSpans, infoFromTables, FONT_CLASSES, parsePostScriptStyle, parseStyleName, nearestStyle, axesSuffix, parseStyleKey } from './font-tables.js';
 import { runsIn } from './model.js';
 import { installPicker } from './font-picker.js';
 import { installMissingFonts } from './missing-fonts.js';
 
-export { FONT_CLASSES };
+// parsePostScriptStyle is the stub's export (S15); the others are the style-key helpers of font-tables.js
+export { FONT_CLASSES, parsePostScriptStyle, parseStyleName, nearestStyle, axesSuffix, parseStyleKey };
 
 // fonts.js' metric-compatible substitutes: Canvas text draws these families with a substitute, so they are not missing
 const METRIC_ALIAS_FAMILIES = new Set(['arial', 'helvetica', 'times new roman', 'times', 'courier new', 'courier', 'calibri', 'cambria']);
 const GENERIC_FAMILIES = new Set(['sans-serif', 'serif', 'monospace', 'system-ui', 'cursive', 'fantasy']);
 
-const WEIGHT_WORDS = [
-  [/thin|hairline/i, 100], [/extra-?light|ultra-?light/i, 200], [/semi-?bold|demi-?bold/i, 600], [/extra-?bold|ultra-?bold|heavy/i, 800],
-  [/black/i, 900], [/bold/i, 700], [/medium/i, 500], [/light/i, 300],
-];
-/** Weight and italic of a PostScript name's style suffix ("Arial-BoldItalicMT" -> 700, true). */
-export function parsePostScriptStyle(name) {
-  const suffix = String(name ?? '').includes('-') ? String(name).slice(String(name).lastIndexOf('-') + 1) : '';
-  const weight = WEIGHT_WORDS.find(([re]) => re.test(suffix))?.[1] ?? 400;
-  return { weight, italic: /italic|oblique|(^|[a-z])It$/i.test(suffix) };
-}
-/** Weight and italic of a style name ("Semibold Italic" -> 600, true). */
-export function parseStyleName(name) {
-  const s = String(name ?? '');
-  return { weight: WEIGHT_WORDS.find(([re]) => re.test(s))?.[1] ?? 400, italic: /italic|oblique|kursiv/i.test(s) };
-}
-
 const LEGACY_KEY = /^\d{3}i?$/;
 const familyKey = (f) => String(f ?? '').trim().replace(/^["']|["']$/g, '').toLowerCase();
 const legacyStyles = () => STYLES.map(([key, name]) => ({ name, postScriptName: null, ...(({ weight, italic }) => ({ weight, italic }))(styleToFont(key)) }));
 const styleOrder = (a, b) => a.weight - b.weight || Number(a.italic) - Number(b.italic) || (a.stretch ?? 5) - (b.stretch ?? 5) || a.name.localeCompare(b.name);
-
-/** "wght=650,wdth=90" for the axis values of `axes` that differ from `base` (a named instance's), or ''. */
-export function axesSuffix(axes, base = {}) {
-  const tags = Object.keys(axes ?? {}).filter((t) => /^[\x20-\x7e]{4}$/.test(t) && Number.isFinite(axes[t]) && (!Number.isFinite(base?.[t]) || Math.abs(axes[t] - base[t]) > 1e-6)).sort();
-  return tags.map((t) => `${t}=${Math.round(axes[t] * 1000) / 1000}`).join(',');
-}
-/** Splits a style key into its PostScript name (or 0.4 key) and its axis values. */
-export function parseStyleKey(key) {
-  const s = String(key ?? '');
-  const bar = s.indexOf('|');
-  if (bar < 0) return { key: s, axes: {} };
-  const axes = {};
-  for (const part of s.slice(bar + 1).split(',')) {
-    const [t, v] = part.split('=');
-    if (t && /^[\x20-\x7e]{4}$/.test(t) && Number.isFinite(Number(v))) axes[t] = Number(v);
-  }
-  return { key: s.slice(0, bar), axes };
-}
-
-/**
- * The nearest style of a list to a weight and slant (CSS font matching: slant first, then the weight rules of
- * CSS Fonts 4 §5.2).
- */
-export function nearestStyle(styles, weight = 400, italic = false) {
-  let cands = styles.filter((s) => !!s.italic === !!italic);
-  if (!cands.length) cands = styles;
-  const w = Number(weight) || 400;
-  const score = (s) => {
-    const d = s.weight - w;
-    if (d === 0) return 0;
-    if (w >= 400 && w <= 500) {
-      if (d > 0 && s.weight <= 500) return d;
-      return d < 0 ? 1000 - d : 2000 + d;
-    }
-    if (w < 400) return d < 0 ? -d : 1000 + d;
-    return d > 0 ? d : 1000 - d;
-  };
-  return cands.slice().sort((a, b) => score(a) - score(b) || (a.stretch ?? 5) - (b.stretch ?? 5))[0] ?? null;
-}
 
 // ---- the classification cache (IndexedDB) -----------------------------------------------------------------------
 
