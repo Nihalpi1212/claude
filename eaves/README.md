@@ -31,22 +31,29 @@ Open the menu bar icon for the scene, amount, and pause; **Settings…** has the
 
 Needs macOS 13 (Ventura) or later, on Apple silicon or Intel.
 
-### Download a build
+### Use the installer
 
 Every change is built by GitHub Actions. Open the latest successful **Eaves CI** run in the
-repository's Actions tab, download the **Eaves-mac** artifact, unzip it twice, and drag **Eaves**
-to your Applications folder.
+repository's Actions tab, download the **Eaves-installer** artifact and unzip it: inside is
+`Eaves-<version>.pkg`. It puts Eaves in your Applications folder.
 
-Eaves is not signed with a paid Apple Developer ID, so macOS will not open it straight away. Once
-only, either:
+Eaves is not signed with a paid Apple Developer ID, so macOS will not open the installer straight
+away. Once only, either:
 
-- open it, dismiss the warning, then go to **System Settings › Privacy & Security** and click
-  **Open Anyway**; or
-- run this in Terminal:
+- double-click it, dismiss the warning, then go to **System Settings › Privacy & Security** and
+  click **Open Anyway**; or
+- run this in Terminal, then double-click the installer:
 
 ```bash
-xattr -dr com.apple.quarantine /Applications/Eaves.app
+xattr -d com.apple.quarantine ~/Downloads/Eaves-*.pkg
 ```
+
+After installing, open **Eaves** from Applications. An app put there by the installer opens without
+a further warning.
+
+The same run also has an **Eaves-mac** artifact: the bare app in a zip, to drag into Applications
+yourself. Opened that way, the app itself needs the one-time approval
+(`xattr -dr com.apple.quarantine /Applications/Eaves.app`).
 
 ### Or build it yourself
 

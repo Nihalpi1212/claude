@@ -1,5 +1,6 @@
-# Eaves (eaves/): unit tests, a universal build of the Mac app, and a run of the real app on the
-# runner that compares screenshots to check that it draws. The built app is uploaded as the "Eaves-mac" artifact.
+# Eaves (eaves/): unit tests, a universal build of the Mac app and its installer, an install of
+# that installer on the runner, and a run of the installed app that compares screenshots to check
+# that it draws. The installer is uploaded as the "Eaves-installer" artifact, the bare app as "Eaves-mac".
 #
 # The build is signed ad hoc, not with an Apple Developer ID, so macOS asks for confirmation the
 # first time it is opened; see eaves/README.md.
@@ -37,14 +38,21 @@ jobs:
       - name: Build the app (Apple silicon and Intel)
         run: UNIVERSAL=1 ./scripts/build-app.sh
 
-      # Launches the real app over a TextEdit window, screenshots the screen before and while it
+      - name: Install it with the installer
+        run: |
+          sudo installer -pkg build/Eaves-*.pkg -target /
+          test -x /Applications/Eaves.app/Contents/MacOS/Eaves
+          codesign --verify --strict /Applications/Eaves.app
+          defaults read /Applications/Eaves.app/Contents/Info.plist CFBundleShortVersionString
+
+      # Launches the installed app over a TextEdit window, screenshots the screen before and while it
       # snows, and prints what changed: the log shows whether snow was drawn, and where.
       - name: Run the app and check what it draws
         run: |
           open -a TextEdit || true
           sleep 4
           screencapture -x build/before.png
-          build/Eaves.app/Contents/MacOS/Eaves --selftest 30 &
+          /Applications/Eaves.app/Contents/MacOS/Eaves --selftest 30 &
           APP_PID=$!
           sleep 24
           screencapture -x build/screenshot.png
@@ -55,7 +63,14 @@ jobs:
       # service outside this repository, so a failure here is reported but does not fail the build.
       - name: Check the weather service and the Settings window
         continue-on-error: true
-        run: build/Eaves.app/Contents/MacOS/Eaves --probe
+        run: /Applications/Eaves.app/Contents/MacOS/Eaves --probe
+
+      - name: Upload the installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: Eaves-installer
+          path: eaves/build/*.pkg
+          if-no-files-found: error
 
       - name: Upload the app
         uses: actions/upload-artifact@v4
