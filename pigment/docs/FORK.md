@@ -232,7 +232,9 @@ The JavaScript Pigment's AI features rebuilt on PhotoCraft; the contract is
 `background.rs`, `describe.rs`, `tests.rs`), this page's section and `docs/generative-ai.md`; the
 provider crate `crates/genai` (package `pigment-genai`, with its tests in `crates/genai/tests/genai/`),
 `crates/automation/src/genai.rs`, `apps/photocraft-cli/src/ai.rs` and
-`apps/photocraft-cli/tests/it/ai.rs`.
+`apps/photocraft-cli/tests/it/ai.rs`; the interface `crates/ui-egui/src/ai_ui.rs` and
+`crates/ui-egui/src/ai_ui/` (`generate.rs`, `accounts.rs`, `describe.rs`, `task_bar.rs`) with its
+tests in `crates/ui-egui/tests/it/ai.rs`.
 
 | Upstream file | Hook |
 |---|---|
@@ -251,6 +253,23 @@ provider crate `crates/genai` (package `pigment-genai`, with its tests in `crate
 | `apps/photocraft-cli/src/document.rs` | `run_cmds` calls `crate::ai::install(&mut h, a)?` (refuses an `ai.*` step without `--allow-ai`, installs the backend that may send with it) |
 | `apps/photocraft-cli/tests/it/main.rs` | `mod ai;` |
 | `apps/photocraft-cli/tests/it/man_and_completions.rs` | the man pages `ai` and its subcommands add |
+| `crates/ui-egui/Cargo.toml` | `pigment-genai` under the not-wasm target dependencies; the engine's `testgen` feature in the dev-dependencies |
+| `crates/ui-egui/src/lib.rs` | `pub mod ai_ui;` and the `PhotocraftApp` field `ai: ai_ui::AiUi` |
+| `crates/ui-egui/src/app.rs` | `ai: Default::default()` in `PhotocraftApp::new` |
+| `crates/ui-egui/src/app/frame.rs` | `crate::ai_ui::show(self, &ctx)` after `dialogs::show` (the windows and AI Accounts) |
+| `crates/ui-egui/src/app/commands.rs` | `crate::ai_ui::gate(self, id, &params)?` after the automation check in `run_command_at_depth` (agents need "Allow agents to run AI commands") |
+| `crates/ui-egui/src/control.rs` | `handle` runs `dispatch` inside `crate::ai_ui::as_agent` |
+| `crates/ui-egui/src/menus/items.rs` | `is_live` asks `ai_ui::handles`; `menu_items` adds `ai_ui::menu_items` to the extras and asks `ai_ui::place_after` after `PLACE_AFTER` |
+| `crates/ui-egui/src/menus/state.rs` | `is_enabled` asks `ai_ui::is_enabled` for the shell's AI commands |
+| `crates/ui-egui/src/menus/invoke.rs` | `crate::ai_ui::menu(app, id, params)` in `invoke_early_commands` (the windows, AI Accounts, Remove Background, Describe) |
+| `crates/ui-egui/src/jobs_ui.rs` | `on_event` gives `ai_ui::on_job_event` the events first; `dialog` leaves `ai.*` jobs to the status bar (no modal) |
+| `crates/ui-egui/src/canvas.rs` | `crate::ai_ui::task_bars(app, ui, xf)` after `crop_task_bar::draw` |
+| `crates/ui-egui/src/tools/crop_task_bar.rs` | `crate::ai_ui::crop_task_bar_item(app, ui)` in the slot kept for Generative Expand |
+| `crates/ui-egui/src/canvas/canvas_tool_menu.rs` | the `Generative Fill…` row of `SELECTION_MENU` (and its doc line) |
+| `crates/ui-egui/src/canvas/canvas_tool_menu/tests.rs` | `selection_menus_follow_photoshop_order` expects that row |
+| `crates/ui-egui/src/prefs/prefs_ui/agents.rs` | the Generative AI rows with the AI Accounts… button (`ai_ui::preferences_button`) and its `aiAccounts` action |
+| `crates/ui-egui/tests/it/main.rs` | `mod ai;` (not on wasm) |
+| `apps/photocraft/src/main.rs` | `photocraft_ui_egui::ai_ui::install(&mut app, &dir)` with the settings folder, after `background_jobs` |
 
 At an upstream merge: if PhotoCraft adds generative commands of its own (through craft-ai-client),
 either alias ours to them or keep ours and hide theirs, and record the choice here.

@@ -43,10 +43,9 @@ the web build compiles the same code and offers none of it.
 
 ## The commands
 
-All in `crates/engine/src/cmd/ai_cmds/`. None has a menu path or a shortcut yet: the interface
-places them (Photoshop's places: Edit › Generative Fill…, Generate Image…, Sky Replacement…, AI
-Accounts…; Generative Expand in the Crop tool's task bar; Generate Background after Remove
-Background and in the Layer menu; Window › Assistant), and every one is in the command palette.
+All in `crates/engine/src/cmd/ai_cmds/`. None has a menu path or a shortcut of its own: the
+interface places them (see "The interface" below; Window › Assistant comes with the Assistant), and
+every one is in the command palette.
 
 | Id | Label | Needs | Sends | Result (one undo step named after the label) |
 |---|---|---|---|---|
@@ -88,7 +87,7 @@ are trimmed and cut to 4000 characters.
   billed (everything but `ai.status` and the local Remove Background). Headless agent sessions (MCP,
   `pigment-cli serve`) refuse those unless Pigment's `allowAgents` setting is on, and
   `pigment-cli run` unless `--allow-ai` is given (see "Who may send" below; the running app's MCP
-  bridge and control channel are the interface's part). The in-app Assistant may run only
+  bridge and control channel ask the same setting, see "The interface"). The in-app Assistant may run only
   `ai.generativeFill` among the `ai.*` commands.
 - **Locking.** v1 locks the document for the length of a request (`lock_document`), as PhotoCraft's
   long filters do: other documents stay editable, and the job shows in the status bar with Cancel.
@@ -178,6 +177,73 @@ nothing and is the error kind `notAllowed`.
 Errors add `notAllowed` to the kinds above. Timeouts: images and chat the settings' `timeoutSecs`
 (300 s by default, 10 to 600), model lists 30 s.
 
+## The interface (`crates/ui-egui/src/ai_ui*`)
+
+The desktop app installs the backend at start-up (`ai_ui::install(app, config_dir)`: the person's
+accounts in Pigment's settings folder, `Caller::Person`), and AI Accounts edits the same accounts
+the backend reads. The browser build has none of it: `ai_ui` keeps its signatures there and does
+nothing, and no AI item shows.
+
+**Where the features are** (Photoshop's places; there is no AI menu, and every item is also in the
+command palette):
+
+| Item | Command | Place |
+|---|---|---|
+| Edit › Generative Fill… | `ai.generativeFill` | after Content-Aware Fill; also the selection context menu and the task bar under a selection |
+| Edit › Generate Image… | `ai.generateImage` | after Generative Fill |
+| Edit › Sky Replacement… | `ai.replaceSky` | after Generate Image |
+| Edit › AI Accounts… | `ai.accounts` (the shell's) | after Toolbar…, above Preferences; also Preferences › AI Integrations' AI Accounts… button |
+| Layer › Remove Background | `ai.removeBackground` (`local`) | after Mask All Objects; nothing is sent |
+| Layer › Remove Background with AI Provider | `ai.removeBackground` (`provider`) | next to it (the shell's `ai.removeBackgroundWithProvider`) |
+| Layer › Generate Background… | `ai.replaceBackground` | next to them; also the task bar after Remove Background |
+| Image › Describe Image… | `ai.describe` | after Calculations… |
+| Generative Expand… | `ai.generativeExpand` | the Crop tool's task bar slot and the palette |
+
+Menu items are dimmed for the document (no selection, a layer without pixels, no backend) and never
+for a missing key: the window says how to add one.
+
+**The Generate window** (`ai_ui/generate.rs`) is one non-modal window for Fill, Expand, Generate
+Image, Generate Background and Sky Replacement. It holds the prompt (the feature's last one from
+`ai.json`, or Sky Replacement's "A dramatic sunset sky with warm clouds"), the feature's options
+(variations 1 to 3; Expand's new width, height and anchor; Generate Image's layer or new document,
+its size and transparency), the provider (shown when two have keys) and a model for this request
+(empty: the one AI Accounts sets), and a line saying what this feature sends. **Nothing is sent
+before Generate.** Generate is dimmed, with the reason as its tooltip, while a request runs, without
+a key or the agreement (with a link to AI Accounts), when the document doesn't suit, or without a
+prompt. Generate runs the engine command as a background job: the status bar shows it with Cancel
+(never the modal progress window: `ai.*` is exempt), the window shows **Stop** and the elapsed
+time, and the result lands as one undo step. A failure shows in the window with Open AI Accounts…
+(missing or refused key, no agreement, not allowed) or Try Again (network, timeout, server, quota,
+bad answer); Stop says a request already sent may still be billed. Closing the window leaves a
+running request alone.
+
+**Describe Image** asks at once (after checking a chat provider and the agreement; AI Accounts opens
+when one is missing) and shows the answer with Copy, Use as Document Description (`file.fileInfo
+{"description"}`, one undo step) and Close.
+
+**Remove Background with AI Provider** checks the provider and the agreement the same way first.
+
+**The task bars** (`ai_ui/task_bar.rs`, on `widgets::task_bar`) show only once a provider has a
+key, so the bar stays as it was for people who don't use AI: under a selection, a prompt field and
+Generate (Generative Fill at once; the window opens when something stops it); after Remove
+Background, while the document is as it left it, Generate Background…; in the Crop tool's bar,
+Generative Expand, which takes the crop frame's size and the sides it reaches past as the new
+canvas and anchor, and lets the frame go.
+
+**AI Accounts** (`ai_ui/accounts.rs`) is a modal: what is sent and who bills (a request stopped
+after it was sent is still billed), OpenAI and Google Gemini tabs, the key state ("ends in …WXYZ",
+and where it is kept), the masked key field with **Connect** (checks the key with one model list on a
+worker thread and stores it only when the provider accepts it), Test Connection, Remove Key, Get a
+key…, Preferred provider, Chat and Image model (empty: automatic, with Use Suggested from the last
+list), the request timeout, **the one-time agreement**, and **Allow agents to run AI commands**. The
+typed key lives only in the dialog's own form: never in `UiState`, a dialog's fields, the
+preferences or `ui.inspect`; it is wiped when sent to be checked and when the dialog closes, and its
+egui text state is dropped whenever the field is empty.
+
+**Agents in the running app.** A control request (MCP through the open window, `--control`) and
+synthetic input run a command that may send only while "Allow agents to run AI commands" is on
+(`ai_ui::gate`, from `PhotocraftApp::run`); the person's own clicks and keys always may.
+
 ## The command line
 
 `pigment-cli ai` is the command line's AI Accounts (`apps/photocraft-cli/src/ai.rs`):
@@ -221,5 +287,14 @@ runs Generative Fill from the command line.
 - **Consent and agents are new.** Pigment 0.4 had no agreement step (connecting an account was the
   consent) and no agents. The agreement is asked once in AI Accounts (or `pigment-cli ai consent`);
   agents and the command line opt in separately.
+- **Generative Expand from the Crop tool.** The task bar's Generative Expand grows the canvas to
+  take in the crop frame on the sides it reaches past (one anchor of nine; a frame reaching past
+  both sides of an axis centres it). The Crop options bar's Fill: list keeps its two entries
+  (its choice is a saved yes/no); Generative Expand is the task bar's.
+- **Model per request.** The Generate window's Model field is for that request; the saved choice is
+  AI Accounts' (Pigment 0.4 saved the window's choice). The provider chosen is saved as 0.4 did
+  (`imageProvider`).
+- **Keys are checked before they are stored** (Connect), as in 0.4. `pigment-cli ai set-key
+  --no-check` stores one without asking the provider.
 - **Follow-up: variations.** Photoshop keeps variations in one generative layer chosen in
   Properties; Pigment makes one layer per variation, as 0.4 did.
