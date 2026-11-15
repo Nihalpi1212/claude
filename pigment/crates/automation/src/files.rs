@@ -152,7 +152,7 @@ pub fn save_with_renderer_keeping(
         w.save_path(&named, path, &native_options(&named, opts)?)?;
         let mut warnings = Vec::new();
         if let Some(r) = renderer {
-            warnings.push("native .pcraft format uses CPU compositor for previews".into());
+            warnings.push("native .pigment format uses CPU compositor for previews".into());
             warnings.extend(r.drain_diagnostics());
         }
         return Ok(warnings);
@@ -198,7 +198,7 @@ pub fn save_bytes_with_renderer(
         let bytes = photocraft_format::save_to_bytes(&named, &native_options(&named, opts)?)?;
         let mut warnings = Vec::new();
         if let Some(r) = renderer {
-            warnings.push("native .pcraft format uses CPU compositor for previews".into());
+            warnings.push("native .pigment format uses CPU compositor for previews".into());
             warnings.extend(r.drain_diagnostics());
         }
         return Ok((bytes, warnings));

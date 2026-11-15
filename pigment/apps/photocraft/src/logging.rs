@@ -5,10 +5,11 @@
 //! terminal, so the file is what a bug report can attach: `<settings dir>/logs/pigment.log`
 //! (see `app_dirs`). Each start moves the previous log to `pigment.1.log` (and that one to
 //! `.2`), so the log of a run that crashed survives the next launch. A start while another
-//! instance is still running leaves that instance's log alone and writes `photocraft-<pid>.log`
+//! instance is still running leaves that instance's log alone and writes `pigment-<pid>.log`
 //! (see [`rotate`]).
 //!
-//! Levels: `info` for PhotoCraft's own crates, `warn` for everything else (wgpu and naga are
+//! Levels: `info` for Pigment's own targets (the app binary `pigment::…`, its CLI `pigment_cli`)
+//! and PhotoCraft's crates (`photocraft_*`), `warn` for everything else (wgpu and naga are
 //! chatty). `RUST_LOG` replaces that with env_logger-style directives: `debug`,
 //! `warn,photocraft_gpu=trace`, `wgpu_core=info`. A directive ending in `*` matches every target
 //! that starts with it (`photocraft*=debug`).
@@ -34,7 +35,9 @@ pub const MAX_FILE_BYTES: u64 = 16 * 1024 * 1024;
 /// Records kept in memory until the log file is attached.
 pub const MAX_PENDING: usize = 512;
 /// The built-in filter when `RUST_LOG` is unset or empty.
-pub const DEFAULT_FILTER: &str = "warn,photocraft*=info";
+/// The app binary is `pigment` (its log targets are `pigment::…`, docs/FORK.md); the library
+/// crates keep PhotoCraft's names (`photocraft_engine::…`).
+pub const DEFAULT_FILTER: &str = "warn,photocraft*=info,pigment*=info";
 
 /// Per-target level filter parsed from env_logger-style directives.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -136,17 +139,17 @@ pub const ROTATE_LOCK: &str = "rotate.lock";
 
 /// The log of an instance started while another one was writing [`LOG_FILE`].
 fn instance_log(dir: &Path, pid: u32) -> PathBuf {
-    dir.join(format!("photocraft-{pid}.log"))
+    dir.join(format!("pigment-{pid}.log"))
 }
 
 /// The lock file that marks [`instance_log`] as in use.
 fn instance_lock(dir: &Path, pid: u32) -> PathBuf {
-    dir.join(format!("photocraft-{pid}.lock"))
+    dir.join(format!("pigment-{pid}.lock"))
 }
 
 /// The process id in an [`instance_log`] file name.
 fn instance_pid(name: &str) -> Option<u32> {
-    let digits = name.strip_prefix("photocraft-")?.strip_suffix(".log")?;
+    let digits = name.strip_prefix("pigment-")?.strip_suffix(".log")?;
     if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
         return None;
     }
@@ -170,7 +173,7 @@ fn try_hold(file: &File) -> std::io::Result<bool> {
 ///
 /// Normally the previous logs shift up one (`.log` → `.1.log` → … → `.<KEEP>.log`, the oldest
 /// dropped). While another instance is still writing [`LOG_FILE`] (it holds [`OWNER_LOCK`]), the
-/// chain is left alone and this start writes `photocraft-<pid>.log` instead: rotating would move
+/// chain is left alone and this start writes `pigment-<pid>.log` instead: rotating would move
 /// that instance's live log away and, a few launches later, delete it (#6432). Such side-by-side
 /// logs are pruned to the newest [`KEEP`] once their instances have exited. On a file system
 /// without locks every start rotates, as before.
@@ -419,6 +422,11 @@ mod tests {
         let f = Filter::parse(DEFAULT_FILTER);
         assert_eq!(f.level_for("photocraft"), LevelFilter::Info);
         assert_eq!(f.level_for("photocraft::gpu_startup"), LevelFilter::Info);
+        // The app binary is `pigment`: its own modules log under `pigment::…`.
+        assert_eq!(f.level_for("pigment"), LevelFilter::Info);
+        assert_eq!(f.level_for("pigment::gpu_startup"), LevelFilter::Info);
+        assert_eq!(f.level_for("pigment_cli"), LevelFilter::Info);
+        assert_eq!(f.level_for(module_path!().split("::").next().unwrap_or_default()), LevelFilter::Info, "this crate's own target");
         assert_eq!(f.level_for("photocraft_gpu::health"), LevelFilter::Info);
         assert_eq!(f.level_for("wgpu_core::device"), LevelFilter::Warn);
         assert_eq!(f.level_for("naga"), LevelFilter::Warn);

@@ -121,20 +121,24 @@ const INFLECTIONS: &[(&str, &str)] = &[
     ("로", "으로"),   // ko "with/to"
 ];
 
+/// PhotoCraft's native extension in interface text, and Pigment's: the two hold the same format,
+/// and Pigment's interface names its own (Save Full-Size Composite in .pigment Files).
+const EXTENSION: (&str, &str) = (".pcraft", ".pigment");
+
 /// The name as Tamil writes it, without its last vowel sign, and Pigment's.
 const TAMIL: (&str, &str) = ("போட்டோகிராப்ட", "பிக்மென்ட");
 
 /// A craft-i18n catalog with the product name rebranded on every row (both columns; comment lines
-/// are left as they are). `PhotoCraft` as a word, not inside an identifier (`PhotoCraft_x`,
+/// are left as they are), and `.pcraft` named `.pigment` ([`EXTENSION`]). `PhotoCraft` as a word, not inside an identifier (`PhotoCraft_x`,
 /// `xPhotoCraft` with an ASCII `x`), becomes `Pigment` with its case ending (see [`INFLECTIONS`]).
 fn rebrand_catalog(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for line in text.split_inclusive('\n') {
-        if line.starts_with('#') || !(line.contains(UPSTREAM_NAME) || line.contains(TAMIL.0)) {
+        if line.starts_with('#') || !(line.contains(UPSTREAM_NAME) || line.contains(TAMIL.0) || line.contains(EXTENSION.0)) {
             out.push_str(line);
             continue;
         }
-        let line = line.replace(TAMIL.0, TAMIL.1);
+        let line = line.replace(TAMIL.0, TAMIL.1).replace(EXTENSION.0, EXTENSION.1);
         let mut rest = line.as_str();
         while let Some(i) = rest.find(UPSTREAM_NAME) {
             let (before, after) = (&rest[..i], &rest[i + UPSTREAM_NAME.len()..]);

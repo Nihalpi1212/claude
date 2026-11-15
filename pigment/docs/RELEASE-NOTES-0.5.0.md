@@ -24,13 +24,16 @@ objects and filters, type, vectors, brushes, real PSD/PSB files and a GPU compos
 - Help, About and the start screen link to Pigment's issues, repository and releases, and to the
   upstream project.
 
-The full list is in [`docs/FORK.md`](FORK.md).
+The full list is in [`pigment/docs/FORK.md`](https://github.com/Nihalpi1212/claude/blob/pigment-v0.5.0/pigment/docs/FORK.md).
 
 ### Known issues
 
 - **Documents from Pigment 0.1 to 0.4 don't open yet.** Pigment recognises them and says "This file
   was saved by Pigment 0.4 or earlier. Opening these files is coming in a later update." Export them
-  as PSD or PNG from Pigment 0.4 to bring them over now.
+  as PSD or PNG from Pigment 0.4 to bring them over now, **before installing 0.5**: on Windows and
+  macOS, 0.5 installs where 0.4 was (`%LOCALAPPDATA%\Programs\Pigment` or `C:\Program Files\Pigment`,
+  and `Pigment.app` in Applications) and replaces it. To keep 0.4, choose another folder on the
+  installer's folder page (Windows) or move `Pigment.app` out of Applications first (macOS).
 - The generative AI features and the other additions of Pigment 0.2 to 0.4 are not in 0.5.0 yet.
 - Interface strings Pigment added (the new links, the credit line in About, the agents switch) are
   in English in every language.

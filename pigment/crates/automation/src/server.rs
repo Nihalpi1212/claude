@@ -182,7 +182,7 @@ pub struct NewParams {
 pub struct SaveParams {
     /// Target beneath the configured automation write root: relative (forward slashes) or absolute.
     /// The extension selects the format. Omit to write back to the document's own file, which
-    /// works only for a PSD, PSB or .pcraft file kept in its own format; any other save needs
+    /// works only for a PSD, PSB, .pigment or .pcraft file kept in its own format; any other save needs
     /// `path`, so a flattened or converted copy never replaces the opened file.
     /// A document opened from a different read capability needs an explicit path first.
     #[serde(default)]
@@ -225,7 +225,7 @@ pub struct SaveParams {
     /// (a Multichannel document as plates alone). On by default; false writes the image only.
     #[serde(default, rename = "pdfSpotPlates")]
     pub pdf_spot_plates: Option<bool>,
-    /// .pcraft: request the flattened document at its canvas size as `composite/full.png`.
+    /// .pigment and .pcraft: request the flattened document at its canvas size as `composite/full.png`.
     /// The save may omit it; check the manifest's `full_composite` member. Off by default.
     #[serde(default, rename = "pcraftFullComposite")]
     pub pcraft_full_composite: Option<bool>,

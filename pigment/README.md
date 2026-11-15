@@ -131,8 +131,13 @@ Pigment 0.1 to 0.4 were a different program, an Electron app written in JavaScri
 [`pigment-v0.4.0`](https://github.com/Nihalpi1212/claude/releases/tag/pigment-v0.4.0). Pigment 0.5 is
 Pigment on PhotoCraft and replaces it: PhotoCraft already does far more of what Photoshop does.
 
-- The two apps install side by side (different application ids and installers) and keep their
-  settings apart; Pigment 0.5 reads nothing of the old app's.
+- The two apps have different application ids and keep their settings apart; Pigment 0.5 reads
+  nothing of the old app's.
+- **Before you install 0.5 over 0.4, export your old documents.** On Windows and macOS Pigment 0.5
+  installs where 0.4 was (`%LOCALAPPDATA%\Programs\Pigment` or `C:\Program Files\Pigment`, and
+  `Pigment.app` in Applications) and replaces it. To keep 0.4, pick another folder on the
+  installer's folder page (Windows) or copy `Pigment.app` somewhere else first (macOS). On Linux
+  the AppImages sit side by side.
 - Pigment 0.5 saves `.pigment` files in PhotoCraft's native format. A `.pigment` file saved by
   Pigment 0.4 or earlier doesn't open yet: Pigment says so ("This file was saved by Pigment 0.4 or
   earlier. Opening these files is coming in a later update.") and leaves the file alone. Export it

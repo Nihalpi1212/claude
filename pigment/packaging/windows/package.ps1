@@ -115,7 +115,8 @@ if ($env:CRAFT_FONTS_DIR) {
 function New-InstallerArt([string] $IconPng, [string] $BannerOut, [string] $DialogOut) {
   Add-Type -AssemblyName System.Drawing
   $paper = [System.Drawing.ColorTranslator]::FromHtml('#efe9dc')
-  $accent = [System.Drawing.ColorTranslator]::FromHtml('#2f7bf5')
+  # Pigment's magenta (the app icon's middle stop and the app's accent, crates/ui-egui/src/lib.rs).
+  $accent = [System.Drawing.ColorTranslator]::FromHtml('#e11d74')
   $icon = [System.Drawing.Image]::FromFile($IconPng)
   try {
     foreach ($spec in @(@($BannerOut, 493, 58), @($DialogOut, 493, 312))) {

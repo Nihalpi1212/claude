@@ -1201,17 +1201,17 @@ fn export_stages_with_renderer(
 ) -> Result<EncodedExport, IoError> {
     let ext = extension(name_or_ext);
     if ext == "pdn" {
-        return Err(IoError::Unsupported("PDN is import-only; save as .pcraft to preserve all layers and blend modes".into()));
+        return Err(IoError::Unsupported("PDN is import-only; save as .pigment to preserve all layers and blend modes".into()));
     }
     if affinity::EXTENSIONS.contains(&ext.as_str()) {
-        return Err(IoError::Unsupported("Affinity export is not implemented; save a new PSD, PNG or .pcraft copy".into()));
+        return Err(IoError::Unsupported("Affinity export is not implemented; save a new PSD, PNG or .pigment copy".into()));
     }
     if kra::EXTENSIONS.contains(&ext.as_str()) {
-        return Err(IoError::Unsupported("Krita files are import-only; save as .ora to open the layers in Krita, or .pcraft to keep everything".into()));
+        return Err(IoError::Unsupported("Krita files are import-only; save as .ora to open the layers in Krita, or .pigment to keep everything".into()));
     }
     if ext == "xcf" {
         return Err(IoError::Unsupported(
-            "XCF is GIMP's own format and Pigment only opens it; save as .pcraft to keep the layers, or export a flat image".into(),
+            "XCF is GIMP's own format and Pigment only opens it; save as .pigment to keep the layers, or export a flat image".into(),
         ));
     }
     if ext == "ora" {
