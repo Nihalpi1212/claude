@@ -188,22 +188,168 @@ export function layoutText(layer) {
   return engineLayout(layer);
 }
 
-/** Base render (no transform): { canvas, x, y }. */
-export function renderText(layer) {
+/**
+ * Base render (no transform): { canvas, x, y }, through the active text render stages (0.5, S11.3). With
+ * `matrix` (TextLayer.render passes its transform) a `transformed` stage draws in document space with it; the result
+ * then carries `transformed: true` and is used as it is.
+ */
+export function renderText(layer, { matrix = null } = {}) {
   const ext = textExtensionFor(layer);
-  if (ext) return ext.renderBase(layer);
-  const engine = currentEngine(layer);
-  return engine.render(layer, engineLayout(layer));
+  const base = () => {
+    if (ext) return ext.renderBase(layer);
+    const engine = currentEngine(layer);
+    return engine.render(layer, engineLayout(layer));
+  };
+  const stages = activeStages(layer, !!ext);
+  if (!stages.length) return base();
+  const lay = layoutText(layer);
+  // a lower order sits nearer the engine: each stage wraps the ones below it
+  let next = base;
+  for (const s of stages) {
+    const inner = next;
+    next = () => s.render(layer, inner, lay, { matrix });
+  }
+  const out = next();
+  return matrix && stages.some((s) => s.transformed) ? { ...out, transformed: true } : out;
 }
 
-/** Base bounds, padded for stroke, italics and shifts. */
+/** Base bounds, padded for stroke, italics and shifts (the active stages' bounds() wrap them, S11.3). */
 export function textBounds(layer) {
   const ext = textExtensionFor(layer);
-  if (ext) return ext.baseBounds(layer);
-  const engine = currentEngine(layer);
-  const lay = engineLayout(layer);
-  if (engine.bounds) return engine.bounds(layer, lay);
-  return paddedBounds(layer, lay);
+  const base = () => {
+    if (ext) return ext.baseBounds(layer);
+    const engine = currentEngine(layer);
+    const lay = engineLayout(layer);
+    if (engine.bounds) return engine.bounds(layer, lay);
+    return paddedBounds(layer, lay);
+  };
+  const stages = activeStages(layer, !!ext).filter((s) => typeof s.bounds === 'function');
+  if (!stages.length) return base();
+  const lay = layoutText(layer);
+  let next = base;
+  for (const s of stages) {
+    const inner = next;
+    next = () => s.bounds(layer, inner, lay);
+  }
+  return next();
+}
+
+// ---- text render stages (0.5, S11.3), the editing flag ---------------------------------------------------------
+
+const stages = new Map(); // id -> stage
+let stageSeq = 0;
+const editing = new WeakSet(); // layers a type session edits ('bypass' stages are skipped for them)
+
+/**
+ * Registers a text render stage: { id, order, test(layer), render(layer, next, layout, { matrix }), bounds?(layer,
+ * next, layout), geometry?(layer), transformed?, extensions?, whileEditing?: 'bypass' | 'apply' }. Same id: the later
+ * wins. Every text layer is drawn again. Returns a function that removes the stage.
+ */
+export function registerTextRenderStage(stage) {
+  if (!stage || typeof stage.id !== 'string' || typeof stage.render !== 'function') throw new Error('registerTextRenderStage: { id, render } are required');
+  const entry = { ...stage, seq: ++stageSeq };
+  stages.set(stage.id, entry);
+  relayoutAll();
+  return () => {
+    if (stages.get(stage.id) !== entry) return;
+    stages.delete(stage.id);
+    relayoutAll();
+  };
+}
+
+/** The stages that apply to a layer now, lowest order first. */
+function activeStages(layer, isExtension = false) {
+  if (!stages.size) return [];
+  const out = [];
+  for (const s of stages.values()) {
+    if (isExtension && !s.extensions) continue;
+    if (editing.has(layer) && (s.whileEditing ?? 'bypass') !== 'apply') continue;
+    let on = true;
+    try {
+      on = typeof s.test === 'function' ? !!s.test(layer) : true;
+    } catch (err) {
+      console.warn(`text render stage ${s.id}: test failed`, err);
+      on = false;
+    }
+    if (on) out.push(s);
+  }
+  return out.sort((a, b) => (Number(a.order) || 0) - (Number(b.order) || 0) || a.seq - b.seq);
+}
+
+/** The active stages' geometry below `belowOrder`, composed lowest first (an outline-space map), or null. */
+export function stageGeometry(layer, belowOrder = Infinity) {
+  const maps = activeStages(layer, !!textExtensionFor(layer)).filter((s) => (Number(s.order) || 0) < belowOrder && typeof s.geometry === 'function').map((s) => s.geometry(layer)).filter((g) => g && typeof g.mapPoint === 'function');
+  if (!maps.length) return null;
+  return {
+    mapPoint(x, y) {
+      let p = [x, y];
+      for (const g of maps) p = g.mapPoint(p[0], p[1]);
+      return p;
+    },
+  };
+}
+
+/** tools/text.js calls it around a session: the layer is drawn again, so the cache never shows a stale stage. */
+export function setEditing(layer, on) {
+  if (!layer) return;
+  const was = editing.has(layer);
+  if (on) editing.add(layer);
+  else editing.delete(layer);
+  if (was === !!on) return;
+  // only a stage the flag switches ('bypass' and active for this layer) changes the drawing: without one (0.4's
+  // stages: none) nothing is redrawn and no change event fires
+  const switched = [...stages.values()].some((s) => {
+    if ((s.whileEditing ?? 'bypass') === 'apply') return false;
+    try {
+      return typeof s.test === 'function' ? !!s.test(layer) : true;
+    } catch {
+      return false;
+    }
+  });
+  if (!switched) return;
+  layer.touch?.();
+  const doc = app?.docs?.list?.().find((d) => d.find?.(layer.id) === layer);
+  doc?.changed('canvas');
+}
+
+/** True while a type session edits the layer (setEditing). */
+export const isEditing = (layer) => editing.has(layer);
+
+// ---- the font catalog (0.5, S11.1) -----------------------------------------------------------------------------
+
+const WEIGHT_STEPS = [300, 400, 500, 700, 900];
+const nearWeight = (w) => WEIGHT_STEPS.reduce((a, b) => (Math.abs(b - w) < Math.abs(a - w) ? b : a));
+/**
+ * The default catalog: empty (no families), with 0.4's style keys ('400', '700i': the nearest of 0.4's five weights)
+ * so text.js works before lib/type/font-library.js registers the stub catalog (type-fonts the real one).
+ */
+const EMPTY_CATALOG = Object.freeze({
+  real: false,
+  ready: () => Promise.resolve(),
+  families: () => [],
+  family: () => null,
+  styles: () => [],
+  resolve: (st) => ({ family: st?.fontFamily ?? null, postScriptName: st?.postScriptName ?? null, weight: st?.fontWeight ?? 400, italic: !!st?.fontItalic, axes: { ...(st?.axes ?? {}) }, synthetic: { bold: false, italic: false }, missing: false, substitute: null }),
+  fromPostScriptName: () => null,
+  styleKey: (st) => `${nearWeight(Number(st?.fontWeight ?? 400) || 400)}${st?.fontItalic ? 'i' : ''}`,
+  stylePatch: (family, key) => ({ fontFamily: family, fontWeight: parseInt(String(key ?? '400'), 10) || 400, fontItalic: String(key ?? '').endsWith('i'), postScriptName: null, axes: {} }),
+  axes: () => Promise.resolve([]),
+  addFiles: () => Promise.resolve([]),
+  missing: () => [],
+  favourites: Object.freeze({ list: () => [], toggle() {} }),
+  recent: Object.freeze({ list: () => [], push() {} }),
+});
+let catalog = EMPTY_CATALOG;
+
+/** type-fonts (and the stub lib/type/font-library.js) register the catalog; emits 'type:catalog-changed'. */
+export function registerFontCatalog(c) {
+  catalog = c ?? EMPTY_CATALOG;
+  app?.emit('type:catalog-changed', { catalog });
+}
+
+/** The registered font catalog (S11.1). */
+export function fontCatalog() {
+  return catalog;
 }
 
 /** Straight layout by the engine alone (extensions consume it: never consults an extension). */

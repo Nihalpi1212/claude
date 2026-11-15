@@ -98,7 +98,14 @@ test('a range made bold keeps the rest regular, also after typing one more chara
   await showPanel(page);
   await editLayer(page, id);
   await selectRange(page, 0, 5);
-  await selectK(page, 'style').selectOption('700');
+  // S14.2 (0.5): the style select's values are the font catalog's style keys ('700' with the stub, a PostScript name
+  // with type-fonts)
+  const bold = await page.evaluate(async (lid) => {
+    const { fontCatalog } = await import('/lib/type/api.js');
+    const st = window.pigmentApp.doc.find(lid).content.runs[0].style;
+    return fontCatalog().styleKey({ fontFamily: st.fontFamily ?? 'Arial', fontWeight: 700, fontItalic: false });
+  }, id);
+  await selectK(page, 'style').selectOption(bold);
   await toggle(page, 'faux-italic').click();
   await expect.poll(() => runs(page, id, ['fontWeight', 'fauxItalic'])).toEqual([[5, { fontWeight: 700, fauxItalic: true }], [6, { fontWeight: null, fauxItalic: null }]]);
   // mixed over the whole text: the style select is blank and the toggle shows mixed
@@ -116,7 +123,7 @@ test('a range made bold keeps the rest regular, also after typing one more chara
   await expect.poll(() => page.evaluate((lid) => window.pigmentApp.doc.find(lid).text, id)).toBe('Heyllo world!');
   await expect.poll(() => runs(page, id, ['fontWeight'])).toEqual([[6, { fontWeight: 700 }], [7, { fontWeight: null }]]);
   // the caret's insertion style shows in the panel
-  await expect(selectK(page, 'style')).toHaveValue('700');
+  await expect(selectK(page, 'style')).toHaveValue(bold);
   await expect(toggle(page, 'faux-italic')).toHaveAttribute('aria-pressed', 'true');
   // the whole session commits as one entry, and undo restores the plain text
   const before = await historyLength(page);

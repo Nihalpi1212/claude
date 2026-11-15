@@ -368,9 +368,20 @@ export class ToolManager {
         wrap.appendChild(box);
         break;
       }
+      case 'font-family':
+      case 'font-style':
+        // S11.2: widgets of lib/type/font-library.js (type-fonts' later); before one is registered, 0.4's select
+        if (hasWidget(spec.kind)) {
+          const widget = createWidget(spec.kind, spec, { app: this.app, value, onInput: (v) => set(v), onChange: (v) => set(v) });
+          wrap.appendChild(widget.element);
+          control = { widget };
+          break;
+        }
+      // falls through
       case 'select': {
         const select = document.createElement('select');
         select.className = 'select';
+        if (spec.title) select.title = spec.title;
         for (const [v, label] of spec.options) {
           const o = document.createElement('option');
           o.value = String(v);
@@ -424,6 +435,10 @@ export class ToolManager {
         b.type = 'button';
         b.className = 'btn small';
         b.innerHTML = `${spec.icon ? icon(spec.icon) : ''}${spec.label ?? ''}`;
+        if (spec.title) {
+          b.title = spec.title;
+          b.setAttribute('aria-label', spec.title);
+        }
         b.addEventListener('click', () => spec.onClick?.(tool));
         wrap.appendChild(b);
         control = { button: b };

@@ -69,10 +69,9 @@ const VERTICAL_KEYS = { ArrowUp: 'ArrowLeft', ArrowDown: 'ArrowRight', ArrowLeft
 
 /** The type tool (horizontal or vertical) whose session is open, or null. */
 export function editingTool(app) {
-  for (const id of ['type-horizontal', 'type-vertical']) {
-    const t = app.tools?.get?.(id);
-    if (t?.session?.editor) return t;
-  }
+  // S11.5: every type tool (tools/text.js typeTools: a Type Mask tool's session included)
+  const list = typeof app.typeTools === 'function' ? app.typeTools() : ['type-horizontal', 'type-vertical'].map((id) => app.tools?.get?.(id));
+  for (const t of list) if (t?.session?.editor) return t;
   return null;
 }
 

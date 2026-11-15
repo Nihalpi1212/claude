@@ -28,7 +28,8 @@ export { typeUnit, toUnit, fromUnit } from './char-values.js';
 
 const TYPE_TOOLS = ['type-horizontal', 'type-vertical'];
 const hex6 = (c) => rgbaToHex(parseColor(c ?? '#000000')).slice(0, 7);
-const ANTI_ALIAS = [['none', 'None'], ['sharp', 'Sharp'], ['crisp', 'Crisp'], ['strong', 'Strong'], ['smooth', 'Smooth']];
+// S11.4: the seven anti-alias methods (type-menu-commands draws them; Windows LCD and Windows as Smooth and Sharp)
+const ANTI_ALIAS = [['none', 'None'], ['sharp', 'Sharp'], ['crisp', 'Crisp'], ['strong', 'Strong'], ['smooth', 'Smooth'], ['lcd', 'Windows LCD'], ['windows', 'Windows']];
 const ORIENTATIONS = [['horizontal', 'Horizontal'], ['vertical', 'Vertical (rotated)'], ['vertical-stacked', 'Vertical, stacked']];
 // the eight toggles of Photoshop's Character panel: [id, attribute, value when on, title, label html]
 export const TOGGLES = Object.freeze([
@@ -359,7 +360,12 @@ export function createCharacterControls(app, { variant = 'panel' } = {}) {
   language.addEventListener('change', () => language.value && apply({ language: language.value }, { label: 'Language' }));
   const antiAlias = select('antiAlias', 'Anti-aliasing', ANTI_ALIAS);
   antiAlias.title = 'Anti-aliasing method';
-  antiAlias.addEventListener('change', () => antiAlias.value && applyTypeOptions(app, { antiAlias: antiAlias.value }, { label: 'Anti-Aliasing' }));
+  // S11.4: one writer, type:anti-alias (one "Anti-Alias" entry); while it is a stub, 0.4's applyTypeOptions
+  antiAlias.addEventListener('change', () => {
+    if (!antiAlias.value) return;
+    if (app.commands?.isEnabled?.('type:anti-alias')) app.commands.run('type:anti-alias', antiAlias.value, 'panel');
+    else applyTypeOptions(app, { antiAlias: antiAlias.value }, { label: 'Anti-Aliasing' });
+  });
   const aaCell = el('span', 'char-aa');
   aaCell.append(el('span', 'muted', 'aa'), antiAlias);
   line(cell('language', language), cell('antiAlias', aaCell));

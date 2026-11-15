@@ -23,7 +23,7 @@ test('defaults, keys and ranges are frozen and complete', () => {
   assert.equal(PARA_DEFAULTS.composer, 'every');
   assert.equal(PARA_DEFAULTS.justification.autoLeading, 120);
   assert.deepEqual(TYPE_OPTION_DEFAULTS, { orientation: 'horizontal', antiAlias: 'smooth', systemLayout: false });
-  assert.equal(CHAR_KEYS.length, 24);
+  assert.equal(CHAR_KEYS.length, 25); // 0.5 (S11.4): axes
   assert.equal(PARA_KEYS.length, 14);
   assert.deepEqual(RANGES.size, [0.1, 10000]);
   assert.equal(typeof MIXED, 'symbol');

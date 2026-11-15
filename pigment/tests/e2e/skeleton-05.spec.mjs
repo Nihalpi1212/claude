@@ -1274,8 +1274,20 @@ test('colour ui: a registered color widget appears in a dialog form, the options
     app.tools.activate('type-horizontal');
     app.tools.renderOptions();
     const bar = document.querySelectorAll('#options-bar .fake-color').length;
-    const { createWidget } = await import('/lib/fields.js');
-    const g = createWidget('gradient', {}, { app, value: { kind: 'linear', stops: [{ pos: 0, color: '#000000' }, { pos: 1, color: '#ffffff' }] } });
+    // the skeleton's gradient field (fields.js; 0.4's gradients package registers its own, which picks stop colours
+    // through app.pickColor): a second instance of fields.js still holds the stub, so the fake goes there too
+    const F = await import('/lib/fields.js?gradient-stub');
+    F.registerWidget('color', (spec, { value }) => {
+      const wrap = document.createElement('span');
+      wrap.className = 'fake-color';
+      const input = document.createElement('input');
+      input.type = 'color';
+      if (spec.key) input.dataset.key = spec.key;
+      input.value = value ?? '#000000';
+      wrap.appendChild(input);
+      return { element: wrap, get: () => input.value, set: (v) => (input.value = v) };
+    });
+    const g = F.createWidget('gradient', {}, { app, value: { kind: 'linear', stops: [{ pos: 0, color: '#000000' }, { pos: 1, color: '#ffffff' }] } });
     document.body.appendChild(g.element);
     g.element.querySelector('button').click();
     const gradient = [...g.element.querySelectorAll('.fake-color input')].map((i) => i.dataset.key);
@@ -1366,5 +1378,234 @@ test('colour ui: the shape popover\'s swatch row follows swatchColors; sampleMer
     await confirmDialog(page);
     expect(await page.evaluate(() => window.pigmentApp.settings.foreground)).toBe('#112233');
   }
+  expect(errors).toEqual([]);
+});
+
+// ---- step 9: type (S11) -------------------------------------------------------------------------------------------
+
+/** Adds a text layer from plain text (one history entry) and returns its id. */
+const addTextLayer = (page, text, props = {}) =>
+  page.evaluate(async ([t, p]) => {
+    const app = window.pigmentApp;
+    const { TextLayer } = await import('/lib/document.js');
+    const { structural } = await import('/lib/layer-ops.js');
+    const M = await import('/lib/type/model.js');
+    const layer = new TextLayer({ content: M.fromPlain(t, { size: 60, color: '#000000' }), x: 20, y: 30, ...p });
+    layer.name = t;
+    structural(app, 'Add', () => {
+      app.doc.add(layer);
+      app.doc.setActive(layer);
+    });
+    return layer.id;
+  }, [text, props]);
+
+test('type: a render stage recolours a text layer and is bypassed while editing; a transformed stage gets the matrix of a vertical layer', async ({ page }) => {
+  const errors = await openApp(page);
+  await newDoc(page);
+  const id = await addTextLayer(page, 'HHHH');
+  const r = await page.evaluate(async (lid) => {
+    const app = window.pigmentApp;
+    const api = await import('/lib/type/api.js');
+    const layer = app.doc.find(lid);
+    // a stage that paints the glyphs red (source-in over what the engine drew)
+    const off = api.registerTextRenderStage({
+      id: 'test-red', order: 10, test: (l) => l.id === lid,
+      render(l, next) {
+        const base = next();
+        const c = document.createElement('canvas');
+        c.width = base.canvas.width;
+        c.height = base.canvas.height;
+        const ctx = c.getContext('2d');
+        ctx.drawImage(base.canvas, 0, 0);
+        ctx.globalCompositeOperation = 'source-in';
+        ctx.fillStyle = '#ff0000';
+        ctx.fillRect(0, 0, c.width, c.height);
+        return { canvas: c, x: base.x, y: base.y };
+      },
+    });
+    // the darkest pixel of the layer's render: red while the stage applies, black when bypassed
+    const ink = () => {
+      const out = layer.render();
+      const d = out.canvas.getContext('2d').getImageData(0, 0, out.canvas.width, out.canvas.height).data;
+      let best = null;
+      for (let i = 0; i < d.length; i += 4) if (d[i + 3] === 255 && (!best || d[i] + d[i + 1] + d[i + 2] < best[0] + best[1] + best[2])) best = [d[i], d[i + 1], d[i + 2]];
+      return best;
+    };
+    const applied = ink();
+    await app.commands.run('layer:edit-text', lid, 'api');
+    const editing = { ink: ink(), flag: api.isEditing(layer) };
+    app.tools.active.commitSession();
+    const after = { ink: ink(), flag: api.isEditing(layer) };
+    off();
+    const removed = ink();
+    return { applied, editing, after, removed };
+  }, id);
+  expect(r.applied).toEqual([255, 0, 0]);
+  expect(r.editing).toEqual({ ink: [0, 0, 0], flag: true });
+  expect(r.after).toEqual({ ink: [255, 0, 0], flag: false });
+  expect(r.removed).toEqual([0, 0, 0]);
+
+  // a transformed stage draws in document space with the layer's matrix; TextLayer.render uses it as it is
+  const vid = await addTextLayer(page, 'VV', { transform: [0, 1, -1, 0, 200, 10], typeOptions: { orientation: 'vertical' } });
+  const t = await page.evaluate(async (lid) => {
+    const app = window.pigmentApp;
+    const api = await import('/lib/type/api.js');
+    const layer = app.doc.find(lid);
+    const seen = [];
+    const marker = document.createElement('canvas');
+    marker.width = 3;
+    marker.height = 2;
+    const off = api.registerTextRenderStage({ id: 'test-matrix', order: 200, transformed: true, test: (l) => l.id === lid, render: (l, next, layout, opts) => {
+      seen.push(opts.matrix);
+      return { canvas: marker, x: 7, y: 9 };
+    } });
+    const out = layer.render();
+    const res = { matrix: seen.at(-1), same: out.canvas === marker, x: out.x, y: out.y, transform: layer.transform };
+    off();
+    return res;
+  }, vid);
+  expect(t.matrix).toEqual(t.transform);
+  expect(t).toMatchObject({ same: true, x: 7, y: 9 });
+  expect(errors).toEqual([]);
+});
+
+test('type: warp and axes survive .pigment; the model normalises them; Warp Text styles match warp.js', async ({ page }) => {
+  const errors = await openApp(page);
+  await newDoc(page);
+  const id = await addTextLayer(page, 'Arc');
+  const r = await page.evaluate(async (lid) => {
+    const app = window.pigmentApp;
+    const M = await import('/lib/type/model.js');
+    const io = await import('/lib/io.js');
+    const { WARP_PRESETS } = await import('/lib/warp.js');
+    const d = app.doc;
+    const layer = d.find(lid);
+    layer.typeOptions = M.normalizeTypeOptions({ ...layer.typeOptions, warp: { style: 'arc', bend: 40, hDistort: -20, vDistort: 300 } });
+    layer.content = M.applyChar(layer.content, 0, 3, { axes: { wght: 650, wdth: 90, bad: 1, opsz: 'x' } });
+    layer.touch();
+    const back = await io.readPigment(await io.writePigment(d));
+    const l2 = back.layers().find((l) => l.type === 'text' && l.name === 'Arc');
+    return {
+      warp: l2.typeOptions.warp,
+      axes: l2.content.runs[0].style.axes,
+      none: 'warp' in M.normalizeTypeOptions({ warp: { style: 'none' } }),
+      unknown: 'warp' in M.normalizeTypeOptions({ warp: { style: 'spiral' } }),
+      plain: M.normalizeTypeOptions({}),
+      styles: [...M.WARP_STYLES],
+      presets: WARP_PRESETS.map(([v]) => v).filter((v) => v !== 'none' && v !== 'custom'),
+      charKeys: M.CHAR_KEYS.length,
+      antiAlias: [...M.ANTI_ALIAS_METHODS],
+    };
+  }, id);
+  expect(r.warp).toEqual({ style: 'arc', horizontal: true, bend: 40, hDistort: -20, vDistort: 100 });
+  expect(r.axes).toEqual({ wght: 650, wdth: 90 });
+  expect(r.none).toBe(false);
+  expect(r.unknown).toBe(false);
+  expect(r.plain).toEqual({ orientation: 'horizontal', antiAlias: 'smooth', systemLayout: false });
+  expect(r.styles).toEqual(r.presets);
+  expect(r.charKeys).toBe(25);
+  expect(r.antiAlias).toEqual(['none', 'sharp', 'crisp', 'strong', 'smooth', 'lcd', 'windows']);
+  // the Character panel and the options bar offer the seven methods
+  await page.evaluate(() => window.pigmentApp.tools.activate('type-horizontal'));
+  const bar = await page.locator('#options-bar .opt[data-key="antiAlias"] select option').evaluateAll((os) => os.map((o) => o.value));
+  expect(bar).toEqual(r.antiAlias);
+  expect(errors).toEqual([]);
+});
+
+test('type: a fake catalog\'s PostScript-name style set from the options bar lands in the runs and in new text; new text takes the anti-alias', async ({ page }) => {
+  const errors = await openApp(page);
+  await newDoc(page);
+  const done = await landed(page);
+  // the stub catalog (rule 11: its keys are 0.4's only while type-fonts has not landed)
+  if (!done['type-fonts']) {
+    const stub = await page.evaluate(async () => {
+      const { fontCatalog } = await import('/lib/type/api.js');
+      const c = fontCatalog();
+      return { real: c.real, key: c.styleKey({ fontFamily: 'Arial', fontWeight: 700, fontItalic: true }), patch: c.stylePatch('Georgia', '300'), ps: c.fromPostScriptName('Arial-BoldItalicMT'), missing: c.resolve({ fontFamily: 'No Such Family Anywhere' }).missing, arial: c.resolve({ fontFamily: 'Arial' }).missing, docMissing: c.missing(window.pigmentApp.doc) };
+    });
+    expect(stub).toEqual({ real: false, key: '700i', patch: { fontFamily: 'Georgia', fontWeight: 300, fontItalic: false, postScriptName: null, axes: {} }, ps: { family: 'Arial', style: { name: 'Bold Italic', postScriptName: 'Arial-BoldItalicMT', weight: 700, italic: true }, missing: false }, missing: true, arial: false, docMissing: [] });
+  }
+  const id = await addTextLayer(page, 'Bold me');
+  const r = await page.evaluate(async (lid) => {
+    const app = window.pigmentApp;
+    const api = await import('/lib/type/api.js');
+    const prev = api.fontCatalog();
+    const fake = {
+      ...prev,
+      real: true,
+      styleKey: (st) => st.postScriptName ?? `${st.fontFamily}-${st.fontWeight}`,
+      stylePatch: (family, key) => (key === 'Fake-Black' ? { fontFamily: family, fontWeight: 900, fontItalic: false, postScriptName: 'Fake-Black', axes: { wght: 900 } } : prev.stylePatch(family, key)),
+    };
+    api.registerFontCatalog(fake);
+    try {
+      const d = app.doc;
+      const layer = d.find(lid);
+      app.tools.activate('type-horizontal');
+      const n = d.history.index;
+      app.tools.setOpt('type-horizontal', 'style', 'Fake-Black');
+      const entries = d.history.entries.slice(n + 1).map((e) => e.label);
+      const runs = layer.content.runs.map((x) => ({ len: x.len, ps: x.style.postScriptName ?? null, axes: x.style.axes ?? null, weight: x.style.fontWeight ?? null }));
+      // new text: nothing targeted, then the tool builds new text from its options
+      await app.commands.run('layer:new', undefined, 'api');
+      app.tools.setOpt('type-horizontal', 'antiAlias', 'crisp');
+      app.tools.active.beginNew({ x: 50, y: 200 }, null);
+      const s = app.tools.active.session;
+      const fresh = { ps: s.layer.content.runs[0].style.postScriptName ?? null, axes: s.layer.content.runs[0].style.axes ?? null, antiAlias: s.layer.typeOptions.antiAlias };
+      app.tools.active.cancelSession();
+      return { entries, runs, fresh };
+    } finally {
+      api.registerFontCatalog(prev);
+      app.tools.setOpt('type-horizontal', 'style', '400', { silent: true });
+      app.tools.setOpt('type-horizontal', 'antiAlias', 'smooth', { silent: true });
+    }
+  }, id);
+  expect(r.entries).toEqual(['Character']);
+  expect(r.runs).toEqual([{ len: 7, ps: 'Fake-Black', axes: { wght: 900 }, weight: 900 }]);
+  expect(r.fresh).toEqual({ ps: 'Fake-Black', axes: { wght: 900 }, antiAlias: 'crisp' });
+  expect(errors).toEqual([]);
+});
+
+test('type: a TypeTool subclass in the text slot is reached by Shift+T, and a non-type command commits its session', async ({ page }) => {
+  const errors = await openApp(page);
+  await newDoc(page);
+  await page.evaluate(async () => {
+    const app = window.pigmentApp;
+    const { TypeTool, registerTypeTool, typeTools } = await import('/lib/tools/text.js');
+    class DummyType extends TypeTool {
+      constructor(a) {
+        super(a, { id: 'type-dummy', name: 'Dummy Type Tool', icon: 'text', mask: true });
+      }
+    }
+    const t = registerTypeTool(new DummyType(app));
+    app.tools.register(t, 'text');
+    window.__typeTools = typeTools(app).map((x) => x.id);
+    app.tools.activate('type-horizontal');
+  });
+  expect(await page.evaluate(() => window.__typeTools)).toEqual(['type-horizontal', 'type-vertical', 'type-dummy']);
+  await page.locator('canvas.view').hover();
+  const seen = [];
+  for (let i = 0; i < 4 && !seen.includes('type-dummy'); i++) {
+    await page.keyboard.press('Shift+KeyT');
+    seen.push(await page.evaluate(() => window.pigmentApp.tools.active.id));
+  }
+  expect(seen).toContain('type-dummy');
+  const r = await page.evaluate(async () => {
+    const app = window.pigmentApp;
+    const { typeSession } = await import('/lib/tools/text.js');
+    const tool = app.tools.get('type-dummy');
+    tool.beginNew({ x: 40, y: 120 }, null);
+    tool.session.editor.insert('Dummy');
+    const during = typeSession(app)?.id ?? null;
+    const sibling = tool.sibling?.id ?? null;
+    const layers = app.doc.layers().length;
+    // a command from outside the type session commits it first (sessions.js, policy 'commit')
+    await app.commands.run('layer:new', undefined, 'api');
+    return { during, sibling, open: !!tool.session, text: app.doc.layers().find((l) => l.type === 'text')?.text ?? null, layers, after: app.doc.layers().length };
+  });
+  expect(r.during).toBe('type-dummy');
+  expect(r.sibling).toBe(null); // no vertical dummy with mask: no sibling
+  expect(r.open).toBe(false);
+  expect(r.text).toBe('Dummy');
+  expect(r.after).toBe(r.layers + 1);
   expect(errors).toEqual([]);
 });

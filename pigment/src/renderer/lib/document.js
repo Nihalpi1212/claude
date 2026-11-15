@@ -378,8 +378,14 @@ export class TextLayer extends Layer {
   }
   render() {
     if (this._cache && this._cache.version === this.version) return this._cache;
-    const base = this.renderBase();
-    if (!this.transform) {
+    // text render stages (lib/type/api.js, S11.3): a `transformed` stage draws in document space with the matrix,
+    // and its result is used as it is; otherwise the base render is resampled through the matrix as in 0.4
+    const base = backend().render(this, { matrix: this.transform ?? null });
+    if (!this.transform || base.transformed) {
+      if (base.transformed) {
+        this._cache = { version: this.version, canvas: base.canvas, x: base.x, y: base.y };
+        return this._cache;
+      }
       this._cache = { version: this.version, ...base };
       return this._cache;
     }
