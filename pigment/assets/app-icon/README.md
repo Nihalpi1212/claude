@@ -55,4 +55,5 @@ the `.icns` from a 1024 px render of the macOS variant:
 
 The committed files were rendered with librsvg 2.50 through cairo (the same 512 tile, the same
 macOS margin as `icons.sh`), the `.ico` packed exactly as `cargo xtask ico` packs it, and the
-`.icns` written by Pillow.
+`.icns` written by Pillow, with the 16 and 32 px entries Pillow leaves out (`icp4`, `icp5`, PNG,
+from the macOS render) added to it, as `iconutil` writes them.
