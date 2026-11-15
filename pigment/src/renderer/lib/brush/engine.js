@@ -1,29 +1,45 @@
-// The brush engine (ARCHITECTURE.md "0.5 features", S2). brush-engine-core's file; this is the skeleton's stub: 0.4's
-// BrushStroke moved verbatim from lib/brush.js (its `migrate` from tools/paint.js, now a method) plus the 0.5 hooks:
-//   - S2.2: settings in the one form (0.4's flat object, optionally with `preset`), split by splitStrokeSettings;
-//     partial samples filled by normalizeSample; begin() again within a stroke starts a sub-path; finish(); tick().
-//   - S2.3: traceDabs, the pure dab trace of a whole stroke (the placement code below is shared with BrushStroke, so
-//     the trace and the painted stroke cannot drift apart).
-//   - S2.4: the modifier chain: `sample` on each input sample, `geometry` on every dab, `coverage` through a scratch
-//     canvas read back and written back, `buffer` on a copy of the flushed rect; each only while a modifier of that
-//     stage is enabled for the stroke. With nothing enabled the 0.4 path runs unchanged (the goldens hold exactly).
-//   - S2.6: tip kinds, tipOutline (an ellipse), renderTip (dabCanvas), strokeReach (the tip size, 0.4's growth margin,
-//     plus every enabled modifier's reach) and renderStrokePreview (a real stroke on an offscreen canvas).
-// Callers import from lib/brush.js (the facade), never from this file. Node-safe at import time (traceDabs and the
-// registries run in Node tests); canvases are created only when a stroke paints.
+// The brush engine (ARCHITECTURE.md "0.5 features", S2; brush-engine-core). Callers import it from lib/brush.js (the
+// facade), never from this file.
+//
+//   - S2.2 BrushStroke: settings in the one form (0.4's flat object, optionally with `preset`, split by
+//     splitStrokeSettings); partial samples filled by normalizeSample; begin() again within a stroke starts a sub-path;
+//     finish(); tick() and its own requestAnimationFrame loop for build-up and Stroke Catch-up; `leash` for Pulled
+//     String Mode. One stroke is one history entry (0.4's beginStroke / endStroke / cancelStroke).
+//   - S2.3 the dab model and traceDabs, the pure trace of a whole stroke. Placement (lib/brush/stroke.js) and dynamics
+//     (lib/brush/dynamics.js) are pure and shared, so the trace and the painted stroke cannot drift apart. For 0.4's
+//     settings and presets whose sections are all off the trace is 0.4's dab for dab, and the stroke paints through
+//     0.4's code path (the goldens hold exactly).
+//   - S2.4 the modifier chain: `sample` on each input sample, `geometry` on every dab (the engine's own Shape Dynamics,
+//     Scattering, Color Dynamics and Transfer are modifiers 100-499), `coverage` on the dab's coverage (a reduced mask
+//     above 1024 px), `buffer` on a copy of the flushed rect; each stage runs only while a modifier of it is enabled.
+//   - S2.3 Transfer's opacity is a per-dab ceiling: a dab below full opacity is accumulated per pixel
+//     (stroke.js accumulateCeiling); a full-opacity dab goes through 0.4's canvas path.
+//   - Painting modes beyond the layer blend modes: Behind (paints under the layer's pixels), Clear (paints
+//     transparency), Dissolve (each pixel opaque or untouched, with the stroke's alpha as the chance).
+//   - S2.6 tips (lib/brush/tips.js), strokeReach, renderStrokePreview.
+// Node-safe at import time (traceDabs and the registries run in Node tests); canvases are created only when a stroke
+// paints.
 import { CANVAS_BLEND, blendImages } from '../../../shared/pixels/blend.js';
 import { parseColor, rgbaToHex } from '../../../shared/pixels/color.js';
 import { createCanvas } from '../document.js';
-import { dabCanvas, dabDiameter, dabDrawSide } from '../brush.js';
+import { dabDrawSide } from '../brush.js';
 import { splitStrokeSettings, normalizeBrush } from './preset.js';
-import { sampleCanvas } from './tool-brush.js';
+import { Placement, effectiveSize, dabFlow, accumulateCeiling, dissolveNoise } from './stroke.js';
+import { ENGINE_MODIFIERS, ENGINE_SECTIONS } from './dynamics.js';
+import { tipImage } from './tips.js';
+
+export { registerTipKind, tipOutline, renderTip } from './tips.js';
+export { BUILD_UP_INTERVAL } from './stroke.js';
 
 /** What this engine is (S15: brush-engine-core has landed when the id is not 'classic-0.4'). */
 export const ENGINE = Object.freeze({
-  id: 'classic-0.4',
-  version: 1,
-  features: Object.freeze({ dynamics: false, sampledTips: false, buildUp: false, smoothingModes: false, smoothCurves: false, tilt: false, modifiersFor: Object.freeze([]) }),
+  id: 'pigment-0.5',
+  version: 2,
+  features: Object.freeze({ dynamics: true, sampledTips: true, buildUp: true, smoothingModes: true, smoothCurves: true, tilt: true, modifiersFor: ENGINE_SECTIONS }),
 });
+
+/** The painting modes the engine adds to the layer blend modes (Brush and Pencil's Mode menu). */
+export const PAINT_ONLY_MODES = Object.freeze(['behind', 'clear']);
 
 // ---- pointer samples (S2.2, S2.5) -------------------------------------------------------------------------------
 
@@ -59,7 +75,7 @@ export function normalizeSample(partial, prev = null) {
   };
 }
 
-// ---- modifiers (S2.4) and tip kinds (S2.6) ----------------------------------------------------------------------
+// ---- modifiers (S2.4) ---------------------------------------------------------------------------------------------
 
 const MODIFIERS = new Map();
 
@@ -77,6 +93,9 @@ export function dabModifiers() {
   return [...MODIFIERS.values()].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 }
 
+// the engine's own sections: Shape Dynamics 100, Scattering 200, Color Dynamics 300, Transfer 400
+for (const mod of ENGINE_MODIFIERS) registerDabModifier(mod);
+
 function enabledFor(mod, preset, paint) {
   try {
     return !!mod.enabled?.(preset, paint);
@@ -93,54 +112,10 @@ function strokeModifiers(extra, preset, paint) {
   return [...byId.values()].filter((m) => enabledFor(m, preset, paint)).sort((a, b) => (a.order ?? 0) - (b.order ?? 0)).map((mod) => ({ mod, state: undefined }));
 }
 
-const TIP_KINDS = new Map();
-
-/** A tip kind: render(tip, size) → canvas with the coverage in alpha; outline(tip, o) → polygons around (0, 0). */
-export function registerTipKind(kind, def) {
-  TIP_KINDS.set(kind, def);
-}
-
-/** The tip's outline as polygons around (0, 0) in px (the cursor's shape). Stub: an ellipse. */
-export function tipOutline(tip, { size = tip?.size ?? 24, angle = tip?.angle ?? 0, roundness = tip?.roundness ?? 1, flipX = false, flipY = false } = {}) {
-  const kind = TIP_KINDS.get(tip?.kind);
-  if (kind?.outline) return kind.outline(tip, { size, angle, roundness, flipX, flipY });
-  const rx = size / 2, ry = (size / 2) * Math.max(0.01, Math.min(1, roundness));
-  const a = (angle * Math.PI) / 180, ca = Math.cos(a), sa = Math.sin(a);
-  const n = Math.max(16, Math.min(96, Math.round(size)));
-  const pts = [];
-  for (let i = 0; i < n; i++) {
-    const t = (i / n) * Math.PI * 2;
-    let x = Math.cos(t) * rx, y = Math.sin(t) * ry;
-    if (flipX) x = -x;
-    if (flipY) y = -y;
-    pts.push([x * ca - y * sa, x * sa + y * ca]);
-  }
-  return [pts];
-}
-
-/** A tip's image for thumbnails: coverage painted in `color`. Stub: dabCanvas (a decoded sampled tip: its sample). */
-export function renderTip(tip, size, color = '#000') {
-  const kind = TIP_KINDS.get(tip?.kind);
-  if (kind?.render) return tinted(kind.render(tip, size), color);
-  if (tip?.kind === 'sampled') {
-    const s = sampleDab(tip, size, color);
-    if (s) return atDrawSide(s, size);
-  }
-  return atDrawSide(dabCanvas(size, tip?.hardness ?? 0.8, color), size);
-}
-
-/** A cached dab canvas at the side it is drawn at (S2.8: the cache may hold a larger one); a copy only when it differs. */
-function atDrawSide(c, size) {
-  const side = dabDrawSide(size);
-  if (c.width === side && c.height === side) return c;
-  const out = createCanvas(side, side);
-  out.getContext('2d').drawImage(c, 0, 0, side, side);
-  return out;
-}
-
 /**
- * How far from the pointer a dab can put pixels (px): what a lazily grown layer grows by. Stub: the tip size (0.4's
- * growth margin) plus the reach of every enabled modifier.
+ * How far from the pointer a dab can put pixels (px): what a lazily grown layer grows by. The tip size (0.4's growth
+ * margin, which covers the tip at any angle and every size dynamics can give, since they only shrink it) plus the
+ * reach of every enabled modifier (Scattering's scatter x diameter; brush-settings-panel's Dual Brush and Brush Pose).
  */
 export function strokeReach(preset, paint = {}) {
   const p = preset?.tip ? preset : normalizeBrush(preset);
@@ -156,57 +131,7 @@ export function strokeReach(preset, paint = {}) {
   return r;
 }
 
-// ---- tips ---------------------------------------------------------------------------------------------------------
-
-function tinted(coverage, color) {
-  if (!coverage) return null;
-  const c = createCanvas(coverage.width, coverage.height);
-  const ctx = c.getContext('2d');
-  ctx.fillStyle = color;
-  ctx.fillRect(0, 0, c.width, c.height);
-  ctx.globalCompositeOperation = 'destination-in';
-  ctx.drawImage(coverage, 0, 0);
-  return c;
-}
-
-// bounded by the pixels it holds and keyed on dabCanvas's 1 % size steps, as dabCanvas's own cache (S2.8)
-const sampleCache = new Map();
-const SAMPLE_CACHE_PIXELS = 64 * 1024 * 1024;
-let sampleCachePixels = 0;
-/**
- * A decoded sampled tip (lib/brush/tool-brush.js sampleCanvas: coverage in alpha) scaled to `size`, in `color`. Like
- * dabCanvas it may be larger than asked above 128 px: draw it at dabDrawSide(size).
- */
-function sampleDab(tip, size, color) {
-  const id = tip?.sample?.hash || tip?.sample?.blob;
-  const src = id ? sampleCanvas(id) : null;
-  if (!src) return null;
-  const d = dabDiameter(size);
-  const key = `${id}|${d}|${color}`;
-  let c = sampleCache.get(key);
-  if (c) return c;
-  // the longer side of the sample is the diameter
-  const k = d / Math.max(src.width, src.height);
-  const w = Math.max(1, Math.round(src.width * k)), h = Math.max(1, Math.round(src.height * k));
-  const pad = 1;
-  c = createCanvas(d + pad * 2, d + pad * 2);
-  const ctx = c.getContext('2d');
-  ctx.fillStyle = color;
-  ctx.fillRect(0, 0, c.width, c.height);
-  ctx.globalCompositeOperation = 'destination-in';
-  ctx.drawImage(src, pad + (d - w) / 2, pad + (d - h) / 2, w, h);
-  const px = c.width * c.height;
-  while (sampleCache.size && sampleCachePixels + px > SAMPLE_CACHE_PIXELS) {
-    const [k, old] = sampleCache.entries().next().value;
-    sampleCache.delete(k);
-    sampleCachePixels -= old.width * old.height;
-  }
-  sampleCache.set(key, c);
-  sampleCachePixels += px;
-  return c;
-}
-
-// ---- placement (shared by BrushStroke and traceDabs) -------------------------------------------------------------
+// ---- the stroke's context (S2.4) ----------------------------------------------------------------------------------
 
 /** 0.4's merged settings view: its defaults, the flat settings, the tip keys from the preset where the flat ones are absent. */
 function strokeView(settings, preset) {
@@ -221,52 +146,6 @@ function strokeView(settings, preset) {
     angle: flat.angle ?? t.angle,
     roundness: flat.roundness ?? t.roundness,
   };
-}
-
-function effectiveSize(s, pressure) {
-  const base = s.size;
-  if (s.pressureSize && pressure !== undefined && pressure !== 1) return Math.max(1, base * Math.max(0.05, pressure));
-  return base;
-}
-
-function dabFlow(s, pressure) {
-  let flow = s.flow;
-  if (s.pressureOpacity && pressure !== undefined) flow *= Math.max(0.05, pressure);
-  return flow;
-}
-
-/** begin: the first dab of a (sub-)path at p (stroke-canvas px). */
-function placeBegin(st, p, emit) {
-  st.smoothed = { x: p.x, y: p.y };
-  st.last = { x: p.x, y: p.y, pressure: p.pressure };
-  emit(p.x, p.y, p.pressure);
-}
-
-/** extend: smoothing, then dabs every `step` along the segment (0.4's code). False when the pointer did not move. */
-function placeExtend(st, raw, emit) {
-  const k = 1 - Math.min(0.95, Math.max(0, st.s.smoothing));
-  st.smoothed = { x: st.smoothed.x + (raw.x - st.smoothed.x) * k, y: st.smoothed.y + (raw.y - st.smoothed.y) * k };
-  const p = { x: st.smoothed.x, y: st.smoothed.y, pressure: raw.pressure };
-  const size = effectiveSize(st.s, p.pressure);
-  const step = Math.max(0.5, size * st.s.spacing);
-  const dx = p.x - st.last.x, dy = p.y - st.last.y;
-  const dist = Math.hypot(dx, dy);
-  if (dist < 1e-3) return false;
-  const nx = dx / dist, ny = dy / dist;
-  let travelled = 0;
-  // place dabs every `step` along the segment, carrying the leftover from the previous segment
-  let first = step - st.distance;
-  if (first <= 0) first = step;
-  for (let t = first; t <= dist; t += step) {
-    const u = t / dist;
-    const pr = st.last.pressure + (p.pressure - st.last.pressure) * u;
-    emit(st.last.x + nx * t, st.last.y + ny * t, pr);
-    travelled = t;
-  }
-  // carry the distance since the last dab across segments that placed none (slow strokes)
-  st.distance = travelled > 0 ? dist - travelled : st.distance + dist;
-  st.last = { x: p.x, y: p.y, pressure: p.pressure };
-  return true;
 }
 
 function seededRandom(seed, salt) {
@@ -345,6 +224,14 @@ function geometryDabs(dab, mods, ctx) {
   return list;
 }
 
+/** A placed dab before the geometry stage (S2.3). */
+function makeDab(s, preset, { x, y, pressure, direction, index, t, sample, seed, color }) {
+  return {
+    x, y, pressure, size: effectiveSize(s, pressure), angle: s.angle ?? 0, roundness: s.roundness ?? 1, flipX: !!preset.tip.flipX, flipY: !!preset.tip.flipY,
+    opacity: 1, flow: dabFlow(s, pressure), color, tip: preset.tip, index, t, sample, direction, seed,
+  };
+}
+
 /** Runs the `buffer` stage on straight-alpha RGBA of the accumulated stroke inside rect (exported for tests). */
 export function runBufferModifiers(img, rect, mods, ctx) {
   for (const m of mods) if (typeof m.mod.buffer === 'function') runModifierHook(m, 'buffer', [img, rect, m.state, ctx]);
@@ -352,26 +239,25 @@ export function runBufferModifiers(img, rect, mods, ctx) {
 }
 
 /**
- * The dabs of a whole stroke, without pixels or timers (S2.3): sample stages, placement, smoothing and the geometry
- * stage. `{ break: true }` starts a sub-path; with `finish`, the last sample is also the release point (0.4's
- * onPointerUp extend, without smoothing), as a pointer's last move and its release are.
+ * The dabs of a whole stroke, without pixels or timers (S2.3): sample stages, placement, smoothing, dynamics and the
+ * geometry stage. `{ break: true }` starts a sub-path; `{ tick: ms }` is time passing with the pointer at rest (build-up,
+ * Stroke Catch-up: BrushStroke.tick); with `finish`, the last sample is also the release point (0.4's onPointerUp
+ * extend, without smoothing), as a pointer's last move and its release are. `zoom` is the view's (Pulled String Mode).
  */
-export function traceDabs(samples, settings, { seed = 1, finish = true, modifiers = [] } = {}) {
+export function traceDabs(samples, settings, { seed = 1, finish = true, modifiers = [], zoom = 1 } = {}) {
   const { preset, paint } = splitStrokeSettings({ ...(settings ?? {}), seed: settings?.seed ?? seed });
   const s = strokeView(settings, preset);
-  const st = { s, last: null, smoothed: null, distance: 0 };
   const mods = strokeModifiers(modifiers, preset, paint);
   const ctx = strokeContext({ preset, paint });
   for (const m of mods) if (typeof m.mod.begin === 'function') m.state = runModifierHook(m, 'begin', [ctx]);
   const out = [];
   const color = dabColor(s);
   let t0 = null, current = null, index = 0;
-  const emit = (x, y, pressure) => {
-    const prevDab = out[out.length - 1];
-    const direction = prevDab ? (Math.atan2(y - prevDab.y, x - prevDab.x) * 180) / Math.PI : 0;
-    const dab = { x, y, pressure, size: effectiveSize(s, pressure), angle: s.angle ?? 0, roundness: s.roundness ?? 1, flipX: preset.tip.flipX, flipY: preset.tip.flipY, opacity: 1, flow: dabFlow(s, pressure), color: color.slice(), tip: preset.tip, index: index++, t: current.time - t0, sample: current, direction, seed: paint.seed ?? seed };
+  const emit = (x, y, pressure, direction, time) => {
+    const dab = makeDab(s, preset, { x, y, pressure, direction, index: index++, t: (Number.isFinite(time) ? time : current.time) - t0, sample: current, seed: paint.seed ?? seed, color: color.slice() });
     out.push(...geometryDabs(dab, mods, ctx));
   };
+  const place = new Placement(s, { preset, paint, emit, zoom: () => zoom });
   const input = (raw) => {
     let smp = normalizeSample(raw, current);
     for (const m of mods) if (typeof m.mod.sample === 'function') smp = runModifierHook(m, 'sample', [smp, m.state, ctx]) ?? smp;
@@ -385,27 +271,33 @@ export function traceDabs(samples, settings, { seed = 1, finish = true, modifier
       newPath = true;
       continue;
     }
+    if (raw && Number.isFinite(raw.tick) && !('x' in raw)) {
+      if (started) place.tick(raw.tick);
+      continue;
+    }
     const smp = input(raw);
     last = raw;
-    const p = { x: smp.x, y: smp.y, pressure: smp.pressure };
+    const p = { x: smp.x, y: smp.y, pressure: smp.pressure, time: smp.time };
     if (!started || newPath) {
-      placeBegin(st, p, emit);
+      place.begin(p);
       started = true;
       newPath = false;
-    } else placeExtend(st, p, emit);
+    } else place.extend(p);
   }
   if (finish && last && started) {
     const smp = input(last);
-    const smoothing = s.smoothing;
-    s.smoothing = 0;
-    placeExtend(st, { x: smp.x, y: smp.y, pressure: smp.pressure }, emit);
-    s.smoothing = smoothing;
+    place.finish({ x: smp.x, y: smp.y, pressure: smp.pressure, time: smp.time });
   }
   for (const m of mods) if (typeof m.mod.end === 'function') runModifierHook(m, 'end', [m.state, ctx]);
   return out;
 }
 
 // ---- the stroke -----------------------------------------------------------------------------------------------
+
+/** Above this size (px) a dab is placed at whole pixels (S2.8; every golden dab is smaller). */
+const BIG_DAB = 128;
+const hasRaf = () => typeof requestAnimationFrame === 'function';
+const nowMs = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
 /**
  * One brush stroke (S2.2).
@@ -428,17 +320,15 @@ export class BrushStroke {
     this.buffer = createCanvas(this.canvas.width, this.canvas.height);
     this.bctx = this.buffer.getContext('2d');
     this.backup = history.beginStroke(this.canvas, { label: settings.label ?? 'Brush', layer, kind: target.mask ? 'mask' : 'pixels' }).backup;
-    this.last = null; // last dab position (canvas coords)
-    this.smoothed = null;
-    this.distance = 0;
     this.dirty = null;
     this.frameDirty = null;
     this.rafPending = false;
     this.ended = false;
-    this.dabs = 0;
-    this.leash = null; // pulled-string smoothing (brush-engine-core); the stub smooths by averaging
+    this.dabs = 0; // dabs painted (a geometry stage may make several of one placed dab)
+    this.placed = 0; // dabs placed
     this.t0 = null;
     this.current = null;
+    this.lastDab = null;
     this.mods = strokeModifiers(modifiers, preset, paint);
     this.seed = paint.seed ?? nextStrokeSeed();
     this.ctx = strokeContext({ preset, paint, stroke: this, layer, seed: this.seed });
@@ -447,19 +337,31 @@ export class BrushStroke {
     this.geometryMods = this.mods.filter((m) => typeof m.mod.geometry === 'function');
     this.coverageMods = this.mods.filter((m) => typeof m.mod.coverage === 'function');
     this.bufferMods = this.mods.filter((m) => typeof m.mod.buffer === 'function');
-    this.emit = (x, y, pressure) => this.dab(x, y, pressure);
+    this.place = new Placement(this.s, { preset, paint, emit: (x, y, pressure, direction, time) => this.dab(x, y, pressure, direction, time), zoom: () => paint.view?.zoom ?? 1 });
     this.tipWarned = false;
+    this.tipCache = new Map();
+    this.loopId = null;
+    this.clock = null;
   }
 
   get composite() {
     const { mode, blend } = this.s;
-    if (mode === 'erase') return 'destination-out';
+    if (mode === 'erase' || (mode === 'paint' && blend === 'clear')) return 'destination-out';
+    if (mode === 'paint' && blend === 'behind') return 'destination-over';
     return CANVAS_BLEND[blend] ?? 'source-over';
+  }
+
+  /** Pulled String Mode's leash in document px ({ from: brush, to: pointer }), or null (S2.2; the cursor draws it). */
+  get leash() {
+    const l = this.ended ? null : this.place.leash();
+    if (!l) return null;
+    const ox = this.target.x, oy = this.target.y;
+    return { from: { x: l.from.x + ox, y: l.from.y + oy }, to: { x: l.to.x + ox, y: l.to.y + oy } };
   }
 
   /** Converts a document point to canvas-local coordinates. */
   local(p) {
-    return { x: p.x - this.target.x, y: p.y - this.target.y, pressure: p.pressure ?? 1 };
+    return { x: p.x - this.target.x, y: p.y - this.target.y, pressure: p.pressure ?? 1, time: p.time };
   }
 
   /** An input sample: filled (normalizeSample) and through the modifiers' `sample` stage. */
@@ -473,46 +375,68 @@ export class BrushStroke {
 
   /** The first dab; again within a stroke: a new sub-path (position and smoothing reset, the entry kept). */
   begin(point) {
-    placeBegin(this, this.local(this.input(point)), this.emit);
+    if (this.ended) return;
+    const smp = this.input(point);
+    // the loop's clock (performance.now) in the samples' clock: equal for pointer events (e.timeStamp), but a caller's
+    // partial samples count 1 ms per px from 0, and build-up must not owe them the time since the page loaded
+    if (this.clock === null) this.clock = nowMs() - smp.time;
+    this.place.begin(this.local(smp));
     this.schedule();
+    this.startLoop();
   }
 
   extend(point) {
     if (this.ended) return;
-    if (placeExtend(this, this.local(this.input(point)), this.emit)) this.schedule();
+    if (this.place.extend(this.local(this.input(point)))) this.schedule();
   }
 
   /** Extends to the release point without smoothing (0.4's onPointerUp). */
   finish(point) {
     if (this.ended) return;
-    const smoothing = this.s.smoothing;
-    this.s.smoothing = 0;
-    this.extend(point);
-    this.s.smoothing = smoothing;
+    if (this.place.finish(this.local(this.input(point)))) this.schedule();
   }
 
-  /** Build-up: the dabs due at `now` while the pointer rests. The stub engine has no build-up. */
+  /** Build-up and Stroke Catch-up: the dabs due at `now` (ms, the samples' clock) while the pointer rests. The
+   * stroke's own loop passes performance.now() in that clock; tests pass fake times. */
   tick(now) {
-    void now;
+    if (this.ended) return 0;
+    const n = this.place.tick(now);
+    if (n) this.schedule();
+    return n;
+  }
+
+  /** The stroke drives its own ticks while build-up or catch-up is on (S2.2): exactly one loop per stroke. */
+  startLoop() {
+    if (this.loopId !== null || !this.place.wantsTicks || !hasRaf()) return;
+    const step = () => {
+      this.loopId = null;
+      if (this.ended) return;
+      this.tick(nowMs() - (this.clock ?? 0));
+      this.loopId = requestAnimationFrame(step);
+    };
+    this.loopId = requestAnimationFrame(step);
+  }
+
+  stopLoop() {
+    if (this.loopId !== null && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(this.loopId);
+    this.loopId = null;
   }
 
   effectiveSize(pressure) {
     return effectiveSize(this.s, pressure);
   }
 
-  dab(x, y, pressure = 1) {
+  dab(x, y, pressure = 1, direction = 0, time = undefined) {
     const size = this.effectiveSize(pressure);
     const flow = dabFlow(this.s, pressure);
     if (!this.geometryMods.length) {
-      this.paintDab({ x, y, size, flow, angle: this.s.angle, roundness: this.s.roundness, flipX: !!this.preset.tip.flipX, flipY: !!this.preset.tip.flipY, color: null });
+      this.placed++;
+      this.paintDab({ x, y, size, flow, opacity: 1, angle: this.s.angle, roundness: this.s.roundness, flipX: !!this.preset.tip.flipX, flipY: !!this.preset.tip.flipY, color: null });
       return;
     }
-    const prev = this.lastDab;
-    const dab = {
-      x, y, pressure, size, angle: this.s.angle ?? 0, roundness: this.s.roundness ?? 1, flipX: this.preset.tip.flipX, flipY: this.preset.tip.flipY,
-      opacity: 1, flow, color: dabColor(this.s), tip: this.preset.tip, index: this.dabs, t: (this.current?.time ?? 0) - (this.t0 ?? 0), sample: this.current,
-      direction: prev ? (Math.atan2(y - prev.y, x - prev.x) * 180) / Math.PI : 0, seed: this.seed,
-    };
+    const t = (Number.isFinite(time) ? time : this.current?.time ?? 0) - (this.t0 ?? 0);
+    // index: the placed dab's number (as traceDabs counts), whatever a geometry stage makes of it
+    const dab = makeDab(this.s, this.preset, { x, y, pressure, direction, index: this.placed++, t, sample: this.current, seed: this.seed, color: dabColor(this.s) });
     this.lastDab = dab;
     // a colour a modifier set goes through the mode's constraint (S2.7: Grayscale stays grey, Indexed snaps); a mask's
     // white and an eraser's black are not colours of the image
@@ -520,19 +444,38 @@ export class BrushStroke {
     for (const d of geometryDabs(dab, this.geometryMods, this.ctx)) this.paintDab({ ...d, color: d.color ? rgbaToHex(constrain(d.color)) : null });
   }
 
-  /** The dab's shape canvas: a decoded sampled tip, else 0.4's round dab. */
+  /** The dab's image: its tip (a decoded sampled tip, a registered kind) or 0.4's round dab. */
   dabShape(size, color, aliased) {
     const tip = this.preset.tip;
-    if (tip.kind === 'sampled' && !aliased) {
-      const c = sampleDab(tip, size, color);
-      if (c) return c;
-      if (!this.tipWarned) {
-        // not decoded yet (prepareBrush has not finished): paint as a computed tip of the same size
-        this.tipWarned = true;
-        this.ctx.app?.dialogs?.toast?.('The brush tip is still loading: this stroke uses a round tip', { timeout: 2000 });
-      }
+    const img = tipImage(tip, size, color, { hardness: aliased ? 1 : this.s.hardness, aliased, cache: this.tipCache });
+    if (img) return img;
+    if (!this.tipWarned) {
+      // not decoded yet (prepareBrush has not finished): paint as a computed tip of the same size (S2.6)
+      this.tipWarned = true;
+      this.ctx.app?.dialogs?.toast?.('The brush tip is still loading: this stroke uses a round tip', { timeout: 2000 });
     }
-    return dabCanvas(size, aliased ? 1 : this.s.hardness, color, { aliased });
+    return tipImage({ ...tip, kind: 'computed' }, size, color, { hardness: this.s.hardness });
+  }
+
+  /**
+   * A large dab's image at exactly `side` px: the caches hold 1 % size steps (S2.8), so the image is scaled once into
+   * a canvas of this stroke when the same side comes twice in a row (a stroke at one size); a pressure ramp, whose
+   * every dab differs, draws the cached step scaled instead of paying for a copy it would use once.
+   */
+  exactDab(img, side) {
+    if (img.width === side && img.height === side) return img;
+    const e = this.exact;
+    if (e && e.src === img && e.side === side) {
+      if (!e.canvas) {
+        e.canvas = createCanvas(side, side);
+        const g = e.canvas.getContext('2d');
+        g.imageSmoothingQuality = 'high';
+        g.drawImage(img, 0, 0, side, side);
+      }
+      return e.canvas;
+    }
+    this.exact = { src: img, side, canvas: null };
+    return img;
   }
 
   /** Draws one dab into ctx at alpha (0.4's dab body). */
@@ -554,11 +497,16 @@ export class BrushStroke {
       const tctx = tmp.getContext('2d');
       this.s.sampler(tctx, x - half - 1, y - half - 1, tmp.width, tmp.height, { x, y, size });
       tctx.globalCompositeOperation = 'destination-in';
-      tctx.drawImage(dab, 0, 0, side, side);
+      if (d.angle || rx !== 1 || flipped) {
+        tctx.translate(side / 2, side / 2);
+        tctx.rotate(((d.angle ?? 0) * Math.PI) / 180);
+        tctx.scale(d.flipX ? -1 : 1, rx * (d.flipY ? -1 : 1));
+        tctx.drawImage(dab, -side / 2, -side / 2, side, side);
+      } else tctx.drawImage(dab, 0, 0, side, side);
       ctx.drawImage(tmp, Math.round(x - half - 1), Math.round(y - half - 1));
     } else {
       const aliased = this.s.antialias === false;
-      const dab = this.dabShape(size, color, aliased);
+      let dab = this.dabShape(size, color, aliased);
       ctx.imageSmoothingEnabled = !aliased;
       if (d.angle || rx !== 1 || flipped) {
         ctx.translate(x, y);
@@ -567,6 +515,12 @@ export class BrushStroke {
         ctx.drawImage(dab, -side / 2, -side / 2, side, side);
       } else if (aliased) {
         ctx.drawImage(dab, Math.round(x - side / 2), Math.round(y - side / 2), side, side);
+      } else if (size > BIG_DAB) {
+        // S2.8: a large dab is drawn unscaled at a whole pixel (a fifth of the cost of a filtered, scaled draw at
+        // 2500 px); half a pixel of position does not show on a dab this size
+        dab = this.exactDab(dab, side);
+        if (dab.width === side && dab.height === side) ctx.drawImage(dab, Math.round(x - side / 2), Math.round(y - side / 2));
+        else ctx.drawImage(dab, Math.round(x - side / 2), Math.round(y - side / 2), side, side);
       } else ctx.drawImage(dab, x - side / 2, y - side / 2, side, side);
     }
     ctx.restore();
@@ -576,34 +530,66 @@ export class BrushStroke {
     const { x, y, size } = d;
     const half = size / 2;
     const r = { x: Math.floor(x - half - 2), y: Math.floor(y - half - 2), width: Math.ceil(size) + 5, height: Math.ceil(size) + 5 };
-    if (!this.coverageMods.length) this.drawDab(this.bctx, d, d.flow);
-    else this.coverageDab(d, r);
+    if (!this.coverageMods.length && !((d.opacity ?? 1) < 1)) this.drawDab(this.bctx, d, d.flow);
+    else this.accumulateDab(d, r);
     this.dirty = this.dirty ? union(this.dirty, r) : r;
     this.frameDirty = this.frameDirty ? union(this.frameDirty, r) : r;
     this.dabs++;
   }
 
-  /** The `coverage` stage: the dab rendered alone, its alpha handed to the modifiers, then accumulated at flow. */
-  coverageDab(d, r) {
-    const box = clip(r, this.canvas.width, this.canvas.height);
+  /** The dab's box in the stroke canvas, inside the selection's bounds when there is one (S2.4). */
+  dabBox(r) {
+    let box = clip(r, this.canvas.width, this.canvas.height);
+    const sel = this.selection?.bounds;
+    if (box && sel && !this.target.mask) box = intersect(box, { x: sel.x - this.target.x, y: sel.y - this.target.y, width: sel.width, height: sel.height });
+    else if (box && sel && this.target.mask) box = intersect(box, sel);
+    return box;
+  }
+
+  /**
+   * The dab rendered alone, its coverage handed to the `coverage` modifiers (a reduced mask, scale < 1, above 1024
+   * px), then accumulated: at its flow (source-over, as 0.4) or, below full opacity, toward its opacity ceiling.
+   */
+  accumulateDab(d, r) {
+    const box = this.dabBox(r);
     if (!box) return;
-    const scratch = createCanvas(box.width, box.height);
+    const big = Math.max(box.width, box.height);
+    const scale = this.coverageMods.length && big > 1024 ? 1024 / big : 1;
+    const sw = Math.max(1, Math.round(box.width * scale)), sh = Math.max(1, Math.round(box.height * scale));
+    const scratch = createCanvas(sw, sh);
     const sctx = scratch.getContext('2d', { willReadFrequently: true });
-    sctx.translate(-box.x, -box.y);
+    sctx.setTransform(sw / box.width, 0, 0, sh / box.height, -box.x * (sw / box.width), -box.y * (sh / box.height));
     this.drawDab(sctx, d, 1);
     sctx.setTransform(1, 0, 0, 1, 0, 0);
-    const img = sctx.getImageData(0, 0, box.width, box.height);
-    const mask = new Float32Array(box.width * box.height);
-    for (let i = 0; i < mask.length; i++) mask[i] = img.data[i * 4 + 3] / 255;
-    const m = { data: mask, width: box.width, height: box.height, x: box.x, y: box.y, scale: 1 };
-    for (const mod of this.coverageMods) runModifierHook(mod, 'coverage', [m, d, mod.state, this.ctx]);
-    for (let i = 0; i < mask.length; i++) img.data[i * 4 + 3] = Math.round(Math.max(0, Math.min(1, mask[i])) * 255);
-    sctx.putImageData(img, 0, 0);
-    this.bctx.save();
-    this.bctx.globalAlpha = d.flow;
-    this.bctx.globalCompositeOperation = 'source-over';
-    this.bctx.drawImage(scratch, box.x, box.y);
-    this.bctx.restore();
+    if (this.coverageMods.length) {
+      const img = sctx.getImageData(0, 0, sw, sh);
+      const mask = new Float32Array(sw * sh);
+      for (let i = 0; i < mask.length; i++) mask[i] = img.data[i * 4 + 3] / 255;
+      const m = { data: mask, width: sw, height: sh, x: box.x, y: box.y, scale: sw / box.width };
+      for (const mod of this.coverageMods) runModifierHook(mod, 'coverage', [m, d, mod.state, this.ctx]);
+      for (let i = 0; i < mask.length; i++) img.data[i * 4 + 3] = Math.round(Math.max(0, Math.min(1, mask[i])) * 255);
+      sctx.putImageData(img, 0, 0);
+    }
+    let src = scratch;
+    if (sw !== box.width || sh !== box.height) {
+      src = createCanvas(box.width, box.height);
+      const fctx = src.getContext('2d');
+      fctx.imageSmoothingEnabled = true;
+      fctx.drawImage(scratch, 0, 0, box.width, box.height);
+    }
+    const o = d.opacity ?? 1;
+    if (!(o < 1)) {
+      this.bctx.save();
+      this.bctx.globalAlpha = d.flow;
+      this.bctx.globalCompositeOperation = 'source-over';
+      this.bctx.drawImage(src, box.x, box.y);
+      this.bctx.restore();
+      return;
+    }
+    const dabPx = src.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, box.width, box.height).data;
+    const buf = this.bctx.getImageData(box.x, box.y, box.width, box.height);
+    accumulateCeiling(buf.data, dabPx, o, d.flow);
+    this.bctx.putImageData(buf, box.x, box.y);
   }
 
   schedule() {
@@ -664,6 +650,12 @@ export class BrushStroke {
       draw('lighter', opacity * Math.max(0, Math.min(1, this.s.maskValue ?? 1)));
     } else if (mode === 'erase') {
       draw('destination-out', opacity);
+    } else if (blend === 'clear' || blend === 'behind') {
+      // Clear paints transparency, Behind paints only where the layer is transparent; with the layer's transparency
+      // locked neither can change anything (Photoshop greys them out there)
+      if (!this.s.lockTransparency) draw(blend === 'clear' ? 'destination-out' : 'destination-over', opacity);
+    } else if (blend === 'dissolve') {
+      this.dissolve(ctx, src, sx, sy, rect, opacity);
     } else if (!CANVAS_BLEND[blend] && blend !== 'normal' && blend !== 'pass-through') {
       // blend modes Canvas 2D lacks (linear burn, vivid light, hard mix, ...): per pixel
       ctx.globalCompositeOperation = 'source-over';
@@ -695,6 +687,32 @@ export class BrushStroke {
     this.onDirty?.({ x: rect.x + this.target.x, y: rect.y + this.target.y, width: rect.width, height: rect.height }, this.layer);
   }
 
+  /**
+   * Dissolve: each pixel of the stroke is painted fully opaque, or not at all, with its alpha (x the stroke's opacity)
+   * as the chance. The noise depends on the document pixel and the stroke's seed, so every partial flush agrees.
+   */
+  dissolve(ctx, src, sx, sy, rect, opacity) {
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+    const dst = ctx.getImageData(rect.x, rect.y, rect.width, rect.height);
+    const s = src.getContext('2d', { willReadFrequently: true }).getImageData(sx, sy, rect.width, rect.height).data;
+    const dd = dst.data;
+    const ox = rect.x + this.target.x, oy = rect.y + this.target.y;
+    const lock = !!this.s.lockTransparency;
+    for (let y = 0, i = 0; y < rect.height; y++) {
+      for (let x = 0; x < rect.width; x++, i += 4) {
+        const a = (s[i + 3] / 255) * opacity;
+        if (a <= 0 || dissolveNoise(ox + x, oy + y, this.seed) >= a) continue;
+        if (lock && dd[i + 3] === 0) continue;
+        dd[i] = s[i];
+        dd[i + 1] = s[i + 1];
+        dd[i + 2] = s[i + 2];
+        if (!lock) dd[i + 3] = 255;
+      }
+    }
+    ctx.putImageData(dst, rect.x, rect.y);
+  }
+
   endModifiers() {
     for (const m of this.mods) if (typeof m.mod.end === 'function') runModifierHook(m, 'end', [m.state, this.ctx]);
   }
@@ -702,7 +720,11 @@ export class BrushStroke {
   end() {
     if (this.ended) return null;
     this.ended = true;
-    this.flush(true);
+    this.stopLoop();
+    // every flushed rect already shows the buffer composited over the backup: only what is pending is composited
+    // again, so the end of a large stroke does not repaint its whole box (S2.8). A buffer modifier sees each rect on
+    // its own (Wet Edges reads its neighbours), so with one the whole stroke is composited once more, as 0.4 did.
+    this.flush(this.bufferMods.length > 0);
     const entry = this.history.endStroke(this.dirty);
     // endStroke touches the layer without changing a pixel: an empty dirty rect says so, or the next repaint would
     // composite the layer's whole box again
@@ -714,6 +736,7 @@ export class BrushStroke {
   cancel() {
     if (this.ended) return;
     this.ended = true;
+    this.stopLoop();
     this.history.cancelStroke();
     this.endModifiers();
   }
@@ -722,9 +745,7 @@ export class BrushStroke {
   migrate(target, before) {
     const dx = before.x - target.x, dy = before.y - target.y; // old canvas origin inside the new canvas
     const grow = (old) => {
-      const c = document.createElement('canvas');
-      c.width = target.canvas.width;
-      c.height = target.canvas.height;
+      const c = createCanvas(target.canvas.width, target.canvas.height);
       c.getContext('2d').drawImage(old, dx, dy);
       return c;
     };
@@ -735,14 +756,7 @@ export class BrushStroke {
       this.history.stroke.canvas = target.canvas;
       this.history.stroke.backup = this.backup;
     }
-    if (this.last) {
-      this.last.x += dx;
-      this.last.y += dy;
-    }
-    if (this.smoothed) {
-      this.smoothed.x += dx;
-      this.smoothed.y += dy;
-    }
+    this.place.migrate(dx, dy);
     if (this.lastDab) this.lastDab = { ...this.lastDab, x: this.lastDab.x + dx, y: this.lastDab.y + dy };
     const shift = (r) => (r ? { x: r.x + dx, y: r.y + dy, width: r.width, height: r.height } : r);
     this.dirty = shift(this.dirty);
@@ -759,6 +773,11 @@ function union(a, b) {
 }
 function clip(r, w, h) {
   const x1 = Math.max(0, r.x), y1 = Math.max(0, r.y), x2 = Math.min(w, r.x + r.width), y2 = Math.min(h, r.y + r.height);
+  return x2 > x1 && y2 > y1 ? { x: x1, y: y1, width: x2 - x1, height: y2 - y1 } : null;
+}
+function intersect(a, b) {
+  const x1 = Math.max(a.x, Math.floor(b.x)), y1 = Math.max(a.y, Math.floor(b.y));
+  const x2 = Math.min(a.x + a.width, Math.ceil(b.x + b.width)), y2 = Math.min(a.y + a.height, Math.ceil(b.y + b.height));
   return x2 > x1 && y2 > y1 ? { x: x1, y: y1, width: x2 - x1, height: y2 - y1 } : null;
 }
 
@@ -779,7 +798,8 @@ function sCurvePath(w, h, size, dpr) {
 /**
  * A stroke preview (the Brush Settings preview, the Brushes panel's stroke view): a real BrushStroke along `path`
  * (CSS px; default 0.4's S curve) on an offscreen canvas of width × height CSS px at `scale`, with a no-op history and
- * a synchronous flush at the end, so registered modifiers show.
+ * a synchronous flush at the end, so registered modifiers show. Pen controls see a pressure that rises and falls
+ * along the path, as Photoshop's preview does; build-up and catch-up do not run (no time passes).
  */
 export function renderStrokePreview(preset, paint = {}, { width = 260, height = 64, scale = (typeof devicePixelRatio === 'number' ? devicePixelRatio : 1) || 1, path = null, color = '#000000' } = {}) {
   const w = Math.max(1, Math.round(width * scale)), h = Math.max(1, Math.round(height * scale));
@@ -787,6 +807,7 @@ export function renderStrokePreview(preset, paint = {}, { width = 260, height = 
   const p = normalizeBrush(preset);
   p.tip.size = Math.max(1, Math.min(5000, p.tip.size * scale));
   p.dualBrush.tip.size = Math.max(1, Math.min(5000, p.dualBrush.tip.size * scale));
+  p.buildUp = false;
   const pts = path?.length ? path.map(([x, y]) => [x * scale, y * scale]) : sCurvePath(w, h, p.tip.size, scale);
   const history = {
     stroke: null,
@@ -802,12 +823,14 @@ export function renderStrokePreview(preset, paint = {}, { width = 260, height = 
   // preview has a fixed seed unless paint gives one, so jitter does not change between redraws
   const { sampler: _sampler, view, preset: _preset, size: _s, hardness: _h, spacing: _sp, angle: _a, roundness: _r, ...rest } = paint ?? {};
   const app = rest.app ?? view?.app ?? null;
-  const settings = { opacity: 1, flow: 1, smoothing: 0, pressureSize: false, pressureOpacity: false, seed: 1, ...rest, app, preset: p, color, mode: 'paint', blend: 'normal', lockTransparency: false, label: 'Preview' };
+  const settings = { opacity: 1, flow: 1, smoothing: 0, pressureSize: false, pressureOpacity: false, seed: 1, ...rest, smoothingOptions: { mode: 'average' }, app, preset: p, color, mode: 'paint', blend: 'normal', lockTransparency: false, label: 'Preview' };
   const stroke = new BrushStroke({ target: { canvas, x: 0, y: 0, mask: false }, layer: null, settings, history });
-  stroke.begin({ x: pts[0][0], y: pts[0][1] });
-  for (const [x, y] of pts.slice(1)) stroke.extend({ x, y });
-  const end = pts[pts.length - 1];
-  stroke.finish({ x: end[0], y: end[1] });
+  const n = pts.length;
+  const pressure = (i) => (n > 1 ? Math.max(0.05, Math.sin((Math.PI * i) / (n - 1))) : 1);
+  stroke.begin({ x: pts[0][0], y: pts[0][1], pressure: pressure(0) });
+  for (let i = 1; i < n; i++) stroke.extend({ x: pts[i][0], y: pts[i][1], pressure: pressure(i) });
+  const end = pts[n - 1];
+  stroke.finish({ x: end[0], y: end[1], pressure: pressure(n - 1) });
   stroke.end();
   return canvas;
 }

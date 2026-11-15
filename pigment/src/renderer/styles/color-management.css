@@ -1,1 +1,44 @@
-/* color-management (ARCHITECTURE.md "0.5 features", rule 6): this package's own styles. Empty until the package lands. */
+/* color-management (icc-engine, ARCHITECTURE.md "0.5 features", rule 6): Preferences > Color Management, the list of
+   the user's own profiles. */
+.cm-profiles {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.cm-profile-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 140px;
+  overflow-y: auto;
+  border: 1px solid var(--border, rgba(128, 128, 128, 0.35));
+  border-radius: 4px;
+}
+.cm-profile-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 6px;
+}
+.cm-profile-list li + li {
+  border-top: 1px solid var(--border, rgba(128, 128, 128, 0.2));
+}
+.cm-profile-list .cm-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cm-profile-list .cm-space {
+  opacity: 0.7;
+  font-size: 0.9em;
+}
+.cm-profile-list .cm-empty {
+  opacity: 0.7;
+  font-style: italic;
+}
+.cm-profiles .cm-add {
+  align-self: flex-start;
+}

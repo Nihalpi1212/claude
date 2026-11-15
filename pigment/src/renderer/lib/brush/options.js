@@ -1,7 +1,9 @@
-// The painting tools' shared option specs (ARCHITECTURE.md "0.5 features", S12.1). brush-engine-core's file; this is
-// the skeleton's stub: 0.4's BRUSH_OPTIONS (from tools.js) and the Brush tool's mode list (from tools/paint.js), with
-// the size cap at 5000 px (S2.8). tools.js re-exports BRUSH_OPTIONS; tools/paint.js reads the rest from here. The
-// package adds Behind / Clear (and keeps Dissolve) in PAINT_BLEND_OPTIONS when its engine paints them.
+// The painting tools' shared option specs (ARCHITECTURE.md "0.5 features", S12.1; brush-engine-core). tools.js
+// re-exports BRUSH_OPTIONS; tools/paint.js reads the rest from here.
+//   - BRUSH_SIZE: 1..5000 px (S2.8), for every StrokeTool with a brush (Brush, Eraser, the stamps, the History Brush);
+//     the DabTool family keeps its own 1000 px option until 0.7 (S2.7).
+//   - PAINT_BLEND_OPTIONS: the Brush and Pencil's Mode menu as in Photoshop: Normal, Dissolve, Behind, Clear, then every
+//     other layer blend mode (0.4 had neither Dissolve nor Behind and Clear: the engine paints them now).
 import { BLEND_MODES } from '../document.js';
 
 /** The brush diameter option of every StrokeTool with a brush (Brush, Eraser, the stamps, the History Brush). */
@@ -20,5 +22,12 @@ export const BRUSH_OPTIONS = [
   { kind: 'checkbox', key: 'pressureOpacity', label: 'Pressure → opacity', default: false },
 ];
 
-/** The painting modes of the Brush and Pencil (0.4: every layer blend mode but Dissolve). */
-export const PAINT_BLEND_OPTIONS = BLEND_MODES.filter(Boolean).filter(([id]) => id !== 'dissolve').map(([id, label]) => [id, label]);
+/** The painting modes the engine adds after Normal and Dissolve (Photoshop's order). */
+const PAINT_ONLY = [['behind', 'Behind'], ['clear', 'Clear']];
+
+/** The painting modes of the Brush and Pencil: Normal, Dissolve, Behind, Clear, then the other layer blend modes. */
+export const PAINT_BLEND_OPTIONS = (() => {
+  const modes = BLEND_MODES.filter(Boolean).map(([id, label]) => [id, label]);
+  const i = modes.findIndex(([id]) => id === 'dissolve');
+  return [...modes.slice(0, i + 1), ...PAINT_ONLY, ...modes.slice(i + 1)];
+})();
