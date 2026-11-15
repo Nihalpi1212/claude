@@ -130,7 +130,7 @@ test('Levels dialog with live preview, Invert, Fade and adjustment layers', asyn
 test('filters: Gaussian Blur dialog, Last Filter (Ctrl+F) and a selection-limited filter', async ({ page }) => {
   const errors = await openApp(page);
   await openFixture(page, 'shapes.png');
-  await page.evaluate(() => window.pigmentApp.commands.run('select:all', undefined, 'api'));
+  await runAwait(page, 'select:all');
   await page.keyboard.press('Control+d');
   await run(page, 'filter:gaussian-blur');
   await page.locator('.dialog input[type="number"][data-key="radius"]').fill('4');

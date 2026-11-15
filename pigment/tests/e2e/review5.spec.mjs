@@ -219,7 +219,7 @@ test('formatting typed inside a new Type session is part of its Make Text Layer 
   expect(steps).toEqual(['actions:make-layer', 'type:toggle-faux-bold']);
   const recorded = await page.evaluate(() => JSON.stringify(window.pigmentApp.doc.active.content));
   await newDoc(page, { width: 300, height: 200, background: 'white' });
-  const played = await page.evaluate(() => window.pigmentApp.commands.run('actions:play', { action: 'Bold type' }, 'api'));
+  const played = await runAwait(page, 'actions:play', { action: 'Bold type' });
   expect(played?.ok).toBe(true);
   expect(await names(page)).toEqual(['Background:raster', 'Hello:text']);
   expect(await page.evaluate(() => JSON.stringify(window.pigmentApp.doc.active.content))).toBe(recorded);

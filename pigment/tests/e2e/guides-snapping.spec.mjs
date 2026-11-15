@@ -221,7 +221,7 @@ test('Clear Selected Guides is refused while a slow operation runs and inside Bl
   await expect(page.locator('.bg-panel')).toHaveCount(0);
 
   // now it runs; then Clear Canvas Guides takes the rest, one undo brings them back
-  await page.evaluate(() => window.pigmentApp.commands.run('view:clear-selected-guides', undefined, 'menu'));
+  await runAwait(page, 'view:clear-selected-guides', undefined, 'menu');
   expect((await guides(page)).map((g) => g.axis)).toEqual(['y']);
   await runAwait(page, 'view:clear-guides');
   expect(await guides(page)).toEqual([]);

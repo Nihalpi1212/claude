@@ -37,7 +37,7 @@ test('the Actions panel\'s Stop ends a playing action while one of its steps kee
     window.__busy = app.busy('Working…', () => new Promise((r) => (window.__release = r)));
   });
   await page.waitForFunction(() => window.pigmentApp.busyDepth > 0 && !!window.__release);
-  await page.evaluate(() => window.pigmentApp.commands.run('layer:new', undefined, 'panel'));
+  await runAwait(page, 'layer:new', undefined, 'panel');
   expect(await page.evaluate(() => window.pigmentApp.doc.layers().length)).toBe(1);
   await page.evaluate(async () => {
     window.__release();
@@ -208,7 +208,7 @@ test('Save, Undo and the panels keep working while an AI request is on its way',
   await page.waitForFunction(() => document.body.classList.contains('busy') && !!window.__answer);
   await page.keyboard.press('Control+z'); // the Invert
   await expect.poll(() => page.evaluate(() => window.pigmentApp.doc.history.entries.at(window.pigmentApp.doc.history.index).label)).toBe('New layer');
-  await page.evaluate(() => window.pigmentApp.commands.run('layer:opacity', 40, 'panel'));
+  await runAwait(page, 'layer:opacity', 40, 'panel');
   await expect.poll(() => page.evaluate(() => window.pigmentApp.doc.active.opacity)).toBe(0.4);
   await page.keyboard.press('Control+s');
   await expect.poll(() => page.evaluate(() => !!window.__pigmentTest.written['mem:/ai.pigment'])).toBe(true);

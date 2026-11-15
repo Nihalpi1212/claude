@@ -70,7 +70,7 @@ test('New Layer opens its dialog from the menu and the key only; the dialog sets
   await build(page, [{ name: 'Base', x: 0, y: 0, w: 200, h: 120, color: '#336699' }]);
   // the API, an action and the panel create without asking (0.3 behaviour)
   for (const source of ['api', 'action', 'panel', 'toolbar']) {
-    await page.evaluate((s) => window.pigmentApp.commands.run('layer:new', undefined, s), source);
+    await runAwait(page, 'layer:new', undefined, source);
     await expect(page.locator('.dialog-backdrop')).toHaveCount(0);
     await page.waitForTimeout(60); // the same command from two sources at once runs once (commands.js de-duplication)
   }
@@ -235,7 +235,7 @@ test('property commands act on every selected layer in one history entry; scrubb
   expect(await prop(page, 'A', 'visible')).toBe(true);
   // the panel's eye passes one id: that layer alone toggles (0.3)
   const bid = await page.evaluate(() => window.pigmentApp.doc.layers().find((l) => l.name === 'B').id);
-  await page.evaluate((id) => window.pigmentApp.commands.run('layer:visibility', id, 'panel'), bid);
+  await runAwait(page, 'layer:visibility', bid, 'panel');
   expect([await prop(page, 'A', 'visible'), await prop(page, 'B', 'visible')]).toEqual([true, false]);
   expect(errors).toEqual([]);
 });

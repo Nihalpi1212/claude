@@ -373,7 +373,7 @@ test('Shift+Ctrl+L while editing aligns left and records no Auto Tone; the menu 
     t.applyPara(window.pigmentApp, { align: 'right' });
   });
   await page.waitForTimeout(60);
-  await page.evaluate(() => window.pigmentApp.commands.run('image:auto-tone', undefined, 'menu-key'));
+  await runAwait(page, 'image:auto-tone', undefined, 'menu-key');
   expect(await align()).toBe('left');
   expect(await editing(page)).toBe(true);
   await page.keyboard.press('Control+Enter');
@@ -394,7 +394,7 @@ test('a command clicked in the menu (source menu) commits the text first; Edit >
   await editLayer(page, id);
   await page.keyboard.press('End');
   await page.keyboard.type('s');
-  await page.evaluate(() => window.pigmentApp.commands.run('edit:undo', undefined, 'menu'));
+  await runAwait(page, 'edit:undo', undefined, 'menu');
   expect(await editing(page)).toBe(true);
   expect((await state(page)).text).toBe('Menu');
   await page.keyboard.type('x');

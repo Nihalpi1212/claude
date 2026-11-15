@@ -375,7 +375,7 @@ test('dialogs: move by the header and reopen there; the canvas under them zooms 
   expect(z1).toBeGreaterThan(z0);
   expect(await page.evaluate(() => window.pigmentApp.dialogs.passesMenu('view:zoom-out'))).toBe(true);
   expect(await page.evaluate(() => window.pigmentApp.dialogs.passesMenu('layer:new'))).toBe(false);
-  await page.evaluate(() => window.pigmentApp.commands.run('view:zoom-out', undefined, 'menu-key'));
+  await runAwait(page, 'view:zoom-out', undefined, 'menu-key');
   await expect.poll(() => page.evaluate(() => window.pigmentApp.view.zoom)).toBeLessThan(z1);
   // Space-drag on the canvas beside the dialog pans it
   const pan0 = await page.evaluate(() => [window.pigmentApp.view.panX, window.pigmentApp.view.panY]);

@@ -2153,7 +2153,7 @@ test('toolbox: a grab on \'se\' continues the drag into one Free Transform entry
   expect(plain.labels).toEqual(['Free transform']); // 0.4's label
   expect(plain.tool).toBe('move');
   // undo, then from the Brush with Ctrl held (the temporary Move tool): the same scale, no distortion by the held Ctrl
-  await page.evaluate(() => window.pigmentApp.commands.run('edit:undo', undefined, 'api'));
+  await runAwait(page, 'edit:undo');
   const ctrl = await quadAfter(() => window.pigmentApp.tools.activate('brush'), ['Control']);
   expect(ctrl.quad).toEqual([[40, 40], [100, 40], [100, 90], [40, 90]]);
   expect(ctrl.labels).toEqual(['Free transform']);

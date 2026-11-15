@@ -76,7 +76,7 @@ const makeAction = (page, name, steps) =>
     [name, steps],
   );
 
-const play = (page, name) => page.evaluate((n) => window.pigmentApp.commands.run('actions:play', { action: n }, 'api'), name);
+const play = (page, name) => runAwait(page, 'actions:play', { action: name });
 
 const closeDoc = (page) => page.evaluate(() => window.pigmentApp.docs.close(window.pigmentApp.doc, { force: true }));
 

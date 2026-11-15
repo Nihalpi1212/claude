@@ -67,7 +67,7 @@ test('an action records the text the Type tool makes and the shape a shape tool 
   await page.evaluate(() => window.pigmentApp.tools.activate('shape-rect'));
   await drag(page, [150, 100], [260, 180], { steps: 6 });
   await expect.poll(() => page.evaluate(() => window.pigmentApp.doc.active?.type)).toBe('shape');
-  await page.evaluate(() => window.pigmentApp.commands.run('layer:shape-properties', { props: { radii: [10, 10, 10, 10] } }, 'menu'));
+  await runAwait(page, 'layer:shape-properties', { props: { radii: [10, 10, 10, 10] } }, 'menu');
   await expect.poll(() => page.evaluate(() => window.pigmentApp.doc.history.entries.at(-1)?.label)).toBe('Shape Properties');
   const steps = await page.evaluate(() => {
     const e = window.pigmentApp.actions;
@@ -79,7 +79,7 @@ test('an action records the text the Type tool makes and the shape a shape tool 
   expect(await page.evaluate(() => window.__toasts.filter((m) => /not recorded/.test(m)))).toEqual([]);
   const recorded = await composite(page);
   await newDoc(page, { width: 300, height: 200, background: 'white' });
-  const played = await page.evaluate(() => window.pigmentApp.commands.run('actions:play', { action: 'Make layers' }, 'api'));
+  const played = await runAwait(page, 'actions:play', { action: 'Make layers' });
   expect(played?.ok).toBe(true);
   expect(await page.evaluate(() => window.pigmentApp.doc.layers().map((l) => `${l.name}/${l.type}`))).toEqual(['Background/raster', 'Hello/text', 'Rectangle 1/shape']);
   expect(await page.evaluate(() => window.pigmentApp.doc.active.shapeProps?.radii)).toEqual([10, 10, 10, 10]);
