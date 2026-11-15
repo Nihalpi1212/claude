@@ -266,6 +266,7 @@ tests in `crates/ui-egui/tests/it/ai.rs`.
 | `crates/ui-egui/src/canvas.rs` | `crate::ai_ui::task_bars(app, ui, xf)` after `crop_task_bar::draw` |
 | `crates/ui-egui/src/tools/crop_task_bar.rs` | `crate::ai_ui::crop_task_bar_item(app, ui)` in the slot kept for Generative Expand |
 | `crates/ui-egui/src/canvas/canvas_tool_menu.rs` | the `Generative Fill…` row of `SELECTION_MENU` (and its doc line) |
+| `crates/ui-egui/src/canvas/canvas_tool_menu/tests.rs` | `selection_menus_follow_photoshop_order` expects that row |
 | `crates/ui-egui/src/prefs/prefs_ui/agents.rs` | the Generative AI rows with the AI Accounts… button (`ai_ui::preferences_button`) and its `aiAccounts` action |
 | `crates/ui-egui/tests/it/main.rs` | `mod ai;` (not on wasm) |
 | `apps/photocraft/src/main.rs` | `photocraft_ui_egui::ai_ui::install(&mut app, &dir)` with the settings folder, after `background_jobs` |

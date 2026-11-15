@@ -21,7 +21,11 @@
 3. **Other ports (#40).**
    - The 93 rows where Pigment was ahead (scratchpad/photocraft-eval/pigment-ahead.md), minus the AI rows #39 covers.
    - The importer for Pigment 0.1 to 0.4 `.pigment` files: the typed error IoError::LegacyPigment is the hook, in crates/io/src/legacy_pigment.rs.
-   - Brief and workflow: planpc/PORTS.md and planpc/ports.js, written from the research in planpc/ports/.
+   - Brief: planpc/PORTS.md. Specs: planpc/ports/PORTS-A.md and PORTS-B.md (40 packages).
+   - Generic workflow: planpc/ports.js, run once per group with the args listed in PORTS.md.
+   - Group order: L (legacy importer), A, P, FU, BT, BR1, BR2.
+   - **Release 0.5.0 (#41) comes right after the AI port and group L.** Groups A to BR2 then go into the next release (0.6.0).
+   - To resume a stopped package, pass args.notes = { "<id>": "continuation note" } with the same group args, and resumeFromRunId.
 4. **Release (#41).**
    - Docs: README, USER-GUIDE, release notes, and PARITY re-based on the new app (PhotoCraft's statuses from photocraft-eval/map plus the ported rows).
    - A cross-feature bug hunt with regression tests and an adversarial review.

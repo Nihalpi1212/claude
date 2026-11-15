@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use egui::vec2;
-use egui_kittest::kittest::{By, NodeT, Queryable};
+use egui_kittest::kittest::{By, Queryable};
 use photocraft_engine::Session;
 use photocraft_engine::generative::ProviderId;
 use photocraft_engine::generative::mock::{MockAnswer, MockBackend};
@@ -44,10 +44,9 @@ fn harness(prepare: impl FnOnce(&mut PhotocraftApp) + 'static) -> Harness {
     h
 }
 
-/// Install `mock` as the session's backend.
+/// Install `mock` as the session's backend (behind the app's agents gate, as the real one is).
 fn with_mock(app: &mut PhotocraftApp, mock: &Arc<MockBackend>) {
-    app.session.set_generative(Some(Arc::clone(mock) as Arc<dyn photocraft_engine::generative::GenerativeBackend>));
-    ai_ui::refresh(app);
+    ai_ui::install_backend(app, Arc::clone(mock) as Arc<dyn photocraft_engine::generative::GenerativeBackend>);
 }
 
 /// Run menu command `id` as a menu click does.
@@ -461,6 +460,40 @@ fn agents_need_permission_to_run_ai_commands() {
     ai_ui::install_accounts(h.state_mut(), a);
     with_mock(h.state_mut(), &mock);
     h.state_mut().run("ai.generativeFill", json!({"prompt": "y"})).unwrap();
+    assert_eq!(mock.calls().len(), 2);
+}
+
+/// An agent can't get around the gate with an action: a hand-built action holding an `ai.*` step,
+/// played by an agent, sends nothing while "Allow agents to run AI commands" is off (its step is
+/// refused, as the agent's own request is), and sends with it on.
+#[test]
+fn an_agent_playing_an_action_with_an_ai_step_needs_permission_too() {
+    let mock = Arc::new(MockBackend::connected());
+    let m = Arc::clone(&mock);
+    let mut h = harness(move |app| {
+        ai_ui::install_accounts(app, AiAccounts::in_memory());
+        with_mock(app, &m);
+        app.run("select.rect", json!({"x": 10, "y": 10, "width": 30, "height": 30})).unwrap();
+        app.session.actions.list.push(photocraft_engine::actions_cmds::Action::new("Agent's", Vec::new()));
+    });
+    let insert = json!({"command": "actions.insert", "params": {"action": "Agent's", "id": "ai.generativeFill", "params": {"prompt": "x"}}});
+    let v = control(&mut h, "engine.execute", insert);
+    assert_eq!(v["ok"], true, "{v}");
+    let play = json!({"command": "actions.play", "params": {"action": "Agent's"}});
+    let v = control(&mut h, "engine.execute", play.clone());
+    until_idle(&mut h);
+    assert!(v.to_string().contains("Allow agents to run AI commands"), "the step is refused: {v}");
+    assert!(mock.calls().is_empty(), "nothing sent: {:?}", mock.calls());
+    assert_eq!(layer_names(h.state()).len(), 1, "nothing changed");
+    // The person's own command right after is not taken for the agent's.
+    h.state_mut().run("ai.generativeFill", json!({"prompt": "y"})).unwrap();
+    until_idle(&mut h);
+    assert_eq!(mock.calls().len(), 1);
+    // With "Allow agents to run AI commands" on, the agent's action sends.
+    ai_ui::with_accounts(h.state(), |a| a.settings.allow_agents = true);
+    let v = control(&mut h, "engine.execute", play);
+    until_idle(&mut h);
+    assert!(!v.to_string().contains("Allow agents"), "{v}");
     assert_eq!(mock.calls().len(), 2);
 }
 

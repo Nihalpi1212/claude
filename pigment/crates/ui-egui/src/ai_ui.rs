@@ -97,29 +97,42 @@ pub struct AiUi {
     pub after_remove: Option<(photocraft_doc::DocId, u64)>,
     /// A control request (an agent) is being handled ([`as_agent`]).
     pub(crate) agent: bool,
+    /// Whether the command running now runs for an agent, as [`gate`] last found it: the
+    /// session's backend reads it when a command that sends starts, so a step `actions.play`
+    /// runs for an agent (which [`gate`] never sees) is held to the same rule.
+    pub(crate) agent_now: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
+
+/// Why an agent's AI command is refused.
+pub const AGENTS_REFUSED: &str = "Agents may not run AI commands: they send your images and prompts to your AI provider, billed to your account. Turn on \"Allow agents to run AI commands\" in Edit › AI Accounts…";
 
 /// Run `f` as an agent's request: commands that send need "Allow agents to run AI commands".
 pub fn as_agent<R>(app: &mut PhotocraftApp, f: impl FnOnce(&mut PhotocraftApp) -> R) -> R {
     let was = std::mem::replace(&mut app.ai.agent, true);
+    set_agent_now(app, true);
     let r = f(app);
     app.ai.agent = was;
+    set_agent_now(app, was || app.automation_input);
     r
+}
+
+fn set_agent_now(app: &PhotocraftApp, agent: bool) {
+    app.ai.agent_now.store(agent, std::sync::atomic::Ordering::SeqCst);
 }
 
 /// The refusal for an agent (a control request, synthetic input) running `id` with `params`
 /// when it would send to a provider and "Allow agents to run AI commands" is off. The person's
 /// own clicks and keys always pass.
 pub fn gate(app: &PhotocraftApp, id: &str, params: &Value) -> Result<(), String> {
-    if !(app.ai.agent || app.automation_input) || !photocraft_engine::ai_cmds::may_send(id, params) {
+    let agent = app.ai.agent || app.automation_input;
+    set_agent_now(app, agent);
+    if !agent || !photocraft_engine::ai_cmds::may_send(id, params) {
         return Ok(());
     }
     if agents_allowed(app) {
         return Ok(());
     }
-    Err(format!(
-        "Agents may not run AI commands: they send your images and prompts to your AI provider, billed to your account. Turn on \"Allow agents to run AI commands\" in {ACCOUNTS_PATH}"
-    ))
+    Err(AGENTS_REFUSED.to_string())
 }
 
 /// "Allow agents to run AI commands", as saved (re-read, so `pigment-cli ai agents` counts too).
@@ -219,14 +232,21 @@ mod web {
 #[cfg(not(target_arch = "wasm32"))]
 mod native {
     use std::path::Path;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Mutex, PoisonError};
 
-    use photocraft_engine::generative::{BackendStatus, ModelKind, ProviderId};
+    use photocraft_engine::generative::{
+        BackendStatus, ChatRequest, ChatTurn, Describe, GenError, GenerativeBackend, ImageEdit, ImageGen, ModelEntry, ModelKind, ProviderId,
+    };
     use photocraft_engine::jobs::{JobEvent, JobOutcome};
+    use photocraft_raster::Rgba8Image;
     use pigment_genai::{AiAccounts, Caller, GenAiBackend};
     use serde_json::{Value, json};
 
-    use super::*;
+    use super::{
+        ACCOUNTS, ACCOUNTS_PATH, BACKGROUND, DESCRIBE, EXPAND, FILL, GENERATE_IMAGE, ITEMS, PhotocraftApp, REMOVE_BACKGROUND, REMOVE_WITH_PROVIDER, SKY,
+        accounts, describe, generate, task_bar,
+    };
     use crate::canvas::ViewXform;
 
     /// Keep the AI accounts in Pigment's settings folder `dir` (the desktop app, at start-up): keys
@@ -239,10 +259,68 @@ mod native {
     /// Install `accounts` (tests: in memory, a local mock server) and the backend over them.
     pub fn install_accounts(app: &mut PhotocraftApp, accounts: AiAccounts) {
         let store = Arc::new(Mutex::new(accounts));
-        app.session.set_generative(Some(Arc::new(GenAiBackend::new(Arc::clone(&store), Caller::Person))));
-        app.ai.store = Some(store);
-        refresh(app);
+        app.ai.store = Some(Arc::clone(&store));
+        install_backend(app, Arc::new(GenAiBackend::new(store, Caller::Person)));
         generate::starting_provider(app);
+    }
+
+    /// Install `backend` on the session (tests: a mock), behind the app's agents gate
+    /// ([`AppBackend`]).
+    pub fn install_backend(app: &mut PhotocraftApp, backend: Arc<dyn GenerativeBackend>) {
+        let gated = AppBackend { inner: backend, agent: Arc::clone(&app.ai.agent_now), store: app.ai.store.clone() };
+        app.session.set_generative(Some(Arc::new(gated)));
+        refresh(app);
+    }
+
+    /// The app's backend: the person's, except that a command started for an agent (a control
+    /// or MCP request, synthetic input, or a step an action plays for one), or under an
+    /// automation gate (an action automation wrote), sends only while "Allow agents to run AI
+    /// commands" is on. [`super::gate`] refuses an agent's own request with the same message
+    /// before it starts; this catches what it never sees.
+    struct AppBackend {
+        inner: Arc<dyn GenerativeBackend>,
+        agent: Arc<AtomicBool>,
+        store: Option<Arc<Mutex<AiAccounts>>>,
+    }
+
+    impl GenerativeBackend for AppBackend {
+        fn status(&self) -> BackendStatus {
+            self.inner.status()
+        }
+
+        fn admit(&self, automated: bool) -> Result<(), GenError> {
+            if automated || self.agent.load(Ordering::SeqCst) {
+                let allowed = self.store.as_ref().is_some_and(|s| {
+                    let mut a = s.lock().unwrap_or_else(PoisonError::into_inner);
+                    a.reload();
+                    a.settings.allow_agents
+                });
+                if !allowed {
+                    return Err(GenError::new(photocraft_engine::generative::kind::NOT_ALLOWED, super::AGENTS_REFUSED));
+                }
+            }
+            self.inner.admit(automated)
+        }
+
+        fn edit_image(&self, req: &ImageEdit, cancelled: &dyn Fn() -> bool) -> Result<Rgba8Image, GenError> {
+            self.inner.edit_image(req, cancelled)
+        }
+
+        fn generate_image(&self, req: &ImageGen, cancelled: &dyn Fn() -> bool) -> Result<Rgba8Image, GenError> {
+            self.inner.generate_image(req, cancelled)
+        }
+
+        fn describe(&self, req: &Describe, cancelled: &dyn Fn() -> bool) -> Result<String, GenError> {
+            self.inner.describe(req, cancelled)
+        }
+
+        fn chat(&self, req: &ChatRequest, cancelled: &dyn Fn() -> bool) -> Result<ChatTurn, GenError> {
+            self.inner.chat(req, cancelled)
+        }
+
+        fn list_models(&self, provider: ProviderId, cancelled: &dyn Fn() -> bool) -> Result<Vec<ModelEntry>, GenError> {
+            self.inner.list_models(provider, cancelled)
+        }
     }
 
     /// The accounts AI Accounts edits, when installed.

@@ -96,7 +96,12 @@ pub fn menu_items(app: &PhotocraftApp) -> Vec<MenuItem> {
             // Insert after the item it belongs next to, else after the last item of the same
             // top-level menu, keeping menus contiguous.
             let top = e.path.first().cloned();
-            let after = PLACE_AFTER.iter().find(|(id, _)| *id == e.id).map(|(_, a)| *a).or_else(|| crate::ai_ui::place_after(&e.id)).and_then(|a| items.iter().position(|i| i.id == a));
+            let after = PLACE_AFTER
+                .iter()
+                .find(|(id, _)| *id == e.id)
+                .map(|(_, a)| *a)
+                .or_else(|| crate::ai_ui::place_after(&e.id))
+                .and_then(|a| items.iter().position(|i| i.id == a));
             if let Some(path) = after.and_then(|a| items.get(a)).map(|i| i.path.clone()) {
                 e.path = path;
             }

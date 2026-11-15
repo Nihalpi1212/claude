@@ -88,7 +88,7 @@ fn status(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn test_connection(s: &mut Session, p: &Value) -> Result<Value> {
     check_keys(TEST, p, &["provider"])?;
-    let backend = super::backend(s)?;
+    let backend = super::admitted(s)?;
     let status = backend.status();
     let named = choice(TEST, p)?.provider;
     let connected = |id: ProviderId| status.provider(id).is_some_and(|p| p.connected);

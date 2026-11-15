@@ -291,7 +291,12 @@ fn finished(app: &mut PhotocraftApp, work: Work, p: ProviderId, r: Result<Vec<Mo
             let text = match work {
                 Work::Connect => crate::i18n::fmt(tl!("{provider} connected."), &[("provider", p.label())]),
                 Work::Test => crate::i18n::fmt(
-                    &crate::i18n::trn(crate::i18n::current(), n as u64, "Connected to {provider}: {n} model available.", "Connected to {provider}: {n} models available."),
+                    &crate::i18n::trn(
+                        crate::i18n::current(),
+                        n as u64,
+                        "Connected to {provider}: {n} model available.",
+                        "Connected to {provider}: {n} models available.",
+                    ),
                     &[("provider", p.label())],
                 ),
             };
@@ -452,9 +457,7 @@ fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, acts: &mut Vec<Act>) {
     ui.label(dim(tl!(
         "Requests go straight from this computer to the provider you choose; Pigment has no server in between. The provider bills your account for each request, including one you stop after it was sent."
     )));
-    ui.label(dim(tl!(
-        "What is sent: your prompt and, when a feature needs it, the image, the layer or the selection. Never your key or your files."
-    )));
+    ui.label(dim(tl!("What is sent: your prompt and, when a feature needs it, the image, the layer or the selection. Never your key or your files.")));
     ui.add_space(10.0);
     provider_tabs(app, ui, acts);
     ui.add_space(6.0);
@@ -504,20 +507,19 @@ fn key_rows(app: &mut PhotocraftApp, ui: &mut egui::Ui, acts: &mut Vec<Act>) {
     let status = f.status.iter().find(|s| s.provider == p).cloned();
     let connected = status.as_ref().is_some_and(|s| s.connected);
     let state = match &status {
-        Some(s) if s.connected && !s.hint.is_empty() => {
-            crate::i18n::fmt(tl!("Connected with an API key (ends in …{hint}), kept in {store}."), &[("hint", s.hint.as_str()), ("store", store_name(s.backend))])
-        }
+        Some(s) if s.connected && !s.hint.is_empty() => crate::i18n::fmt(
+            tl!("Connected with an API key (ends in …{hint}), kept in {store}."),
+            &[("hint", s.hint.as_str()), ("store", store_name(s.backend))],
+        ),
         Some(s) if s.connected => crate::i18n::fmt(tl!("Connected with an API key, kept in {store}."), &[("store", store_name(s.backend))]),
         _ => tl!("Not connected.").to_string(),
     };
     ui.label(egui::RichText::new(state).color(if connected { t.text } else { t.text_dim }));
     if p == ProviderId::Gemini {
         ui.label(
-            egui::RichText::new(tl!(
-                "Google offers no plan-based sign-in for other apps, so Gemini always uses an API key from Google AI Studio."
-            ))
-            .color(t.text_faint)
-            .small(),
+            egui::RichText::new(tl!("Google offers no plan-based sign-in for other apps, so Gemini always uses an API key from Google AI Studio."))
+                .color(t.text_faint)
+                .small(),
         );
     }
     let busy = f.busy.as_ref().map(|b| b.work);
@@ -525,9 +527,7 @@ fn key_rows(app: &mut PhotocraftApp, ui: &mut egui::Ui, acts: &mut Vec<Act>) {
         let label = ui.label(tl!("API key"));
         // Masked and never filled in: a saved key is not shown again.
         let hint = if p == ProviderId::OpenAi { "sk-…" } else { "AIza…" };
-        let r = ui
-            .add(egui::TextEdit::singleline(&mut f.key).id(key_field_id()).password(true).desired_width(250.0).hint_text(hint))
-            .labelled_by(label.id);
+        let r = ui.add(egui::TextEdit::singleline(&mut f.key).id(key_field_id()).password(true).desired_width(250.0).hint_text(hint)).labelled_by(label.id);
         let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
         let label = if busy == Some(Work::Connect) { tl!("Checking…") } else { tl!("Connect") };
         let can = !f.key.trim().is_empty() && busy.is_none();
@@ -614,10 +614,8 @@ fn general_rows(app: &mut PhotocraftApp, ui: &mut egui::Ui, acts: &mut Vec<Act>)
         acts.push(Act::Agents(allow));
     }
     ui.label(
-        egui::RichText::new(tl!(
-            "Agents (MCP, the control channel, pigment-cli) could otherwise spend money on your account. Off until you turn it on."
-        ))
-        .color(t.text_faint)
-        .small(),
+        egui::RichText::new(tl!("Agents (MCP, the control channel, pigment-cli) could otherwise spend money on your account. Off until you turn it on."))
+            .color(t.text_faint)
+            .small(),
     );
 }

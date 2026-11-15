@@ -160,10 +160,20 @@ fn prompt(cmd: &str, p: &Value, default: Option<&str>) -> Result<String> {
     Ok(text.chars().take(PROMPT_LIMIT).collect())
 }
 
-/// The backend and the choice a request goes out with, after the checks every provider command
-/// makes before sending: a backend, consent and a provider that fits `kind`.
-fn prepare(s: &Session, cmd: &str, p: &Value, kind: ModelKind) -> Result<(Arc<dyn GenerativeBackend>, Choice)> {
+/// The installed backend, after it admitted this caller ([`GenerativeBackend::admit`]): asked
+/// here, on the calling thread, so a step `actions.play` runs for an agent is held to the same
+/// rule as the agent's own request.
+fn admitted(s: &Session) -> Result<Arc<dyn GenerativeBackend>> {
     let b = backend(s)?;
+    b.admit(s.authorize.is_some())?;
+    Ok(b)
+}
+
+/// The backend and the choice a request goes out with, after the checks every provider command
+/// makes before sending: a backend that admits the caller, consent and a provider that fits
+/// `kind`.
+fn prepare(s: &Session, cmd: &str, p: &Value, kind: ModelKind) -> Result<(Arc<dyn GenerativeBackend>, Choice)> {
+    let b = admitted(s)?;
     let mut choice = choice(cmd, p)?;
     choice.provider = Some(crate::generative::resolve_provider(&b.status(), &choice, kind)?);
     Ok((b, choice))

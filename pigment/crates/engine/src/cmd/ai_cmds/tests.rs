@@ -767,3 +767,39 @@ fn which_calls_may_be_billed() {
     assert!(!may_send("ai.status", &json!({})));
     assert!(!may_send("layer.removeBackground", &json!({})));
 }
+
+/// The backend admits each caller before anything is sent, asked on the calling thread with
+/// whether an automation gate is installed: an agent's own request, and a step of an action an
+/// agent plays (which no interface gate sees), are refused when the backend says so, and send
+/// nothing; the person's own play of the same action is admitted.
+#[test]
+fn an_automated_caller_is_admitted_by_the_backend_before_anything_is_sent() {
+    fn allow_all(_: &str, _: &Value) -> crate::Result<()> {
+        Ok(())
+    }
+    let mut s = rgb(32, 24);
+    let mock = install(&mut s, MockBackend::connected());
+    mock.set_refuse_automated(true);
+    select(&mut s, 4, 4, 8, 8);
+    let (rev, layers) = (revision(&s), layer_count(&s));
+    s.actions.list.push(crate::actions_cmds::Action::new("Fill", vec![("ai.generativeFill".to_string(), json!({"prompt": "x"}))]));
+
+    // An agent's request.
+    s.authorize = Some(allow_all);
+    let e = s.execute("ai.generativeFill", json!({"prompt": "x"})).unwrap_err();
+    assert_eq!(kind_of(&e), kind::NOT_ALLOWED, "{e}");
+    let e = s.execute("ai.testConnection", json!({})).unwrap_err();
+    assert_eq!(kind_of(&e), kind::NOT_ALLOWED, "{e}");
+    // A step of an action the agent plays.
+    let played = s.execute("actions.play", json!({"action": "Fill"})).unwrap();
+    assert!(played["failed"]["error"].as_str().is_some_and(|m| m.contains("may not run AI commands")), "{played}");
+    assert!(mock.calls().is_empty(), "nothing was sent: {:?}", mock.calls());
+    assert_eq!((revision(&s), layer_count(&s)), (rev, layers), "nothing changed");
+
+    // The person playing it: admitted, and the step runs.
+    s.authorize = None;
+    let played = s.execute("actions.play", json!({"action": "Fill"})).unwrap();
+    assert!(played.get("failed").is_none(), "{played}");
+    assert_eq!(mock.calls().len(), 1);
+    assert_eq!(mock.admitted(), vec![true, true, true, false], "asked for every call, with who asks");
+}
