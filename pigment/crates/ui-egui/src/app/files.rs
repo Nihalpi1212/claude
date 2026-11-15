@@ -238,7 +238,7 @@ impl PhotocraftApp {
         let transparent_jpeg = ext.as_deref().and_then(photocraft_formats::from_extension) == Some(photocraft_formats::Format::Jpeg)
             && plain_raster(&st.doc).is_some_and(|l| !crate::opaque_layer(&st.doc, l));
         let writable = ext.is_some_and(|e| {
-            matches!(e.as_str(), photocraft_format::EXTENSION | "psd" | "psb" | "tif" | "tiff")
+            (photocraft_format::brand::is_native_extension(&e) || matches!(e.as_str(), "psd" | "psb" | "tif" | "tiff"))
                 || (e == "ora" && holds_ora)
                 || (flat && photocraft_formats::from_extension(&e).is_some_and(|f| f.capabilities().write == photocraft_formats::Availability::Available))
         });
@@ -248,7 +248,7 @@ impl PhotocraftApp {
             p => {
                 let source = p.as_deref().unwrap_or(&st.doc.name);
                 let ext = match photocraft_engine::file_cmds::extension(source).as_deref() {
-                    Some("pdn") => "pcraft",
+                    Some("pdn") => photocraft_format::brand::EXTENSION,
                     Some("kra" | "krz") => "ora",
                     _ => "psd",
                 };
@@ -502,7 +502,7 @@ impl PhotocraftApp {
                     })
             };
             let path = st.path.clone().filter(|p| photocraft_engine::file_cmds::holds_at(&st.doc, p) || flat_own(p)).ok_or(
-                "Save writes back only to the document's own PSD, PSB, .pcraft or OpenRaster file (OpenRaster only when it holds everything), or to its own flat file while the document is a single plain layer and the file held only that image",
+                "Save writes back only to the document's own PSD, PSB, .pigment, .pcraft or OpenRaster file (OpenRaster only when it holds everything), or to its own flat file while the document is a single plain layer and the file held only that image",
             )?;
             return self.save_in_place(path, choices);
         }
@@ -815,7 +815,7 @@ impl PhotocraftApp {
             let state = self.session.active().ok_or("no document")?;
             // As File › Save: without `path` only a layered file is written back (#416).
             path.or_else(|| state.path.clone().filter(|p| photocraft_engine::file_cmds::holds_at(&state.doc, p))).ok_or(
-                "pass `path`: a save without one writes back only to the document's own PSD, PSB, .pcraft or OpenRaster file, and to OpenRaster only when it holds everything (adjustment layers, styles and masks don't fit)",
+                "pass `path`: a save without one writes back only to the document's own PSD, PSB, .pigment, .pcraft or OpenRaster file, and to OpenRaster only when it holds everything (adjustment layers, styles and masks don't fit)",
             )?
         };
         let reply = |path: &str, warnings: &[String]| json!({"path": path, "warnings": warnings});

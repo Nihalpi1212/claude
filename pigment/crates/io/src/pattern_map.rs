@@ -149,7 +149,7 @@ fn to_psd_in(p: &Pattern, remaining: &mut u64) -> Result<PsdPattern, String> {
         return Err(fail("invalid dimensions"));
     }
     if p.pixel_count() > photocraft_doc::pattern::MAX_PAINT_PIXELS {
-        return Err(fail("declared pixel count exceeds the pattern export limit; keep the native .pcraft file to preserve it"));
+        return Err(fail("declared pixel count exceeds the pattern export limit; keep the native .pigment file to preserve it"));
     }
     let f = p.surface.format();
     let mode = match f.mode {
@@ -159,7 +159,7 @@ fn to_psd_in(p: &Pattern, remaining: &mut u64) -> Result<PsdPattern, String> {
     let fmt = PixelFormat::new(mode, f.sample, f.alpha);
     let required = p.pixel_count().checked_mul(fmt.bytes_per_pixel() as u64).ok_or_else(|| fail("pixel byte count overflow"))?;
     if required > *remaining {
-        return Err(fail("dense pixels exceed the file's remaining pattern memory budget; keep the native .pcraft file to preserve it"));
+        return Err(fail("dense pixels exceed the file's remaining pattern memory budget; keep the native .pigment file to preserve it"));
     }
     let surf = if fmt == f { p.surface.clone() } else { p.surface.try_convert(fmt).map_err(|error| fail(&error.to_string()))? };
     let mut bytes = surf.try_to_interleaved(p.rect()).map_err(|error| fail(&error.to_string()))?;

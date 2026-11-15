@@ -1,0 +1,201 @@
+# Pigment CI: the quality gate for the Rust workspace in pigment/ (Pigment is based on PhotoCraft).
+#
+# The steps follow PhotoCraft's own gate (`cargo xtask ci`, run by storytold/craft-common-actions'
+# gate.yml, and its packaging-lint.yml), written out here instead of calling those reusable
+# workflows: rustfmt, clippy with warnings as errors, the workspace tests and doctests, the
+# repository checks xtask provides, the packaging script tests, the rebrand check, and a smoke test
+# of the pigment-cli binary. Left out from upstream's gate, because they need another toolchain, the
+# network beyond the pinned checkouts below, secrets or corpora: the wasm check (the web app is not
+# part of Pigment's releases), panic_hunt (cargo-nextest), the GPU lavapipe scripts, the Windows
+# legs, the corpus, fuzz and benchmark jobs, and SonarCloud.
+#
+# The tests need no secrets. The interface translations come from storytold/craft-i18n at the
+# commit in pigment/craft-i18n.rev, so the rebranded catalogues (crates/ui-egui/build.rs) are
+# built and tested, and the fonts from storytold/craft-fonts at PhotoCraft's pinned commit (as in
+# upstream's gate): the interface tests in Japanese, Chinese, Korean and Arabic need its glyphs.
+
+name: Pigment CI
+
+on:
+  push:
+    paths:
+      - 'pigment/**'
+      - '.github/workflows/pigment-ci.yml'
+  pull_request:
+    paths:
+      - 'pigment/**'
+      - '.github/workflows/pigment-ci.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pigment-ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # The Rust release Pigment is built and linted with. The workspace's minimum (rust-version in
+  # pigment/Cargo.toml) is 1.95; move this forward deliberately, together with pigment-release.yml,
+  # since a new clippy can bring new warnings.
+  RUST_TOOLCHAIN: '1.97.0'
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  CARGO_NET_RETRY: 10
+  RUST_BACKTRACE: 1
+  # As upstream's gate: no test may print a page, and a stray `lp` fails on a printer that doesn't
+  # exist.
+  PHOTOCRAFT_NO_PRINT: '1'
+  LPDEST: pigment-no-such-printer
+
+jobs:
+  gate:
+    name: fmt, clippy, test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    defaults:
+      run:
+        working-directory: pigment
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      # Nothing waits on it: the space is free before the build needs it.
+      - name: Free disk space
+        run: |
+          nohup sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL </dev/null >/dev/null 2>&1 &
+
+      - name: Read the craft-i18n pin
+        id: i18n
+        run: echo "rev=$(tr -d '[:space:]' < craft-i18n.rev)" >>"$GITHUB_OUTPUT"
+
+      - name: Check out craft-i18n
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: storytold/craft-i18n
+          ref: ${{ steps.i18n.outputs.rev }}
+          path: craft-i18n
+          persist-credentials: false
+
+      # Same commit as pigment-release.yml and PhotoCraft's own gate.
+      - name: Check out craft-fonts
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: storytold/craft-fonts
+          ref: b076417b5880bd4154bd22f00695b1d28c6bea83
+          path: craft-fonts
+          persist-credentials: false
+
+      # The Linux build's system libraries (upstream's gate packages; mesa-vulkan-drivers gives the
+      # GPU tests lavapipe) and the packaging tests' tools.
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libxkbcommon-dev libwayland-dev libx11-dev libxrandr-dev libxi-dev libgl1-mesa-dev \
+            libgtk-3-dev mesa-vulkan-drivers libvulkan1 pkg-config \
+            desktop-file-utils appstream file python3-yaml
+
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: pigment
+          # Pull requests read the cache but never write it.
+          save-if: ${{ github.event_name != 'pull_request' }}
+          cache-on-failure: true
+
+      - name: Translations and fonts
+        run: |
+          {
+            echo "CRAFT_I18N_DIR=$GITHUB_WORKSPACE/craft-i18n"
+            echo "CRAFT_I18N_REQUIRED=1"
+            echo "CRAFT_FONTS_DIR=$GITHUB_WORKSPACE/craft-fonts"
+            echo "CRAFT_FONTS_REQUIRED=1"
+          } >>"$GITHUB_ENV"
+
+      - name: Lockfile is current
+        run: cargo metadata --locked --format-version 1 >/dev/null
+
+      - name: Rebrand is complete
+        run: python3 scripts/pigment-rebrand.py --check
+
+      - name: Format
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked --features heif --keep-going -- -D warnings
+
+      # Unit and integration tests without the examples (clippy has checked those), as upstream's
+      # `cargo xtask test` does, then the doctests.
+      - name: Tests
+        run: cargo test --workspace --locked --features heif --no-fail-fast --lib --bins --tests
+
+      - name: Doctests
+        run: cargo test --workspace --locked --features heif --no-fail-fast --doc
+
+      # The repository checks of upstream's gate (`cargo xtask ci`) and packaging-lint.yml that need
+      # no extra toolchain.
+      - name: Repository checks (layers, panel commands, scorecard)
+        run: |
+          set -euo pipefail
+          cargo xtask layers
+          cargo xtask panel-commands
+          cargo xtask scorecard --check
+
+      - name: Packaging script tests (AppRun, verified downloads, package docs, Flatpak manifests)
+        run: |
+          set -euo pipefail
+          bash packaging/linux/apprun-test.sh
+          bash packaging/linux/apprun-cli-test.sh
+          bash packaging/linux/verified-download-test.sh
+          bash packaging/linux/package-docs-test.sh
+          desktop-file-validate packaging/linux/io.github.nihalpi1212.pigment.desktop
+          sed -e 's/@VERSION@/0.0.0/' -e 's/@DATE@/2026-01-01/' \
+            packaging/linux/io.github.nihalpi1212.pigment.metainfo.xml.in >"$RUNNER_TEMP/pigment.metainfo.xml"
+          appstreamcli validate --no-net --explain "$RUNNER_TEMP/pigment.metainfo.xml"
+
+      # The version line, a document converted to PNG and to Pigment's native `.pigment` and back,
+      # and the typed error for a document saved by Pigment 0.1 to 0.4.
+      - name: CLI smoke test
+        run: |
+          set -euo pipefail
+          cargo build --locked --features heif -p photocraft-cli
+          cli="$PWD/target/debug/pigment-cli"
+          out="$RUNNER_TEMP/pigment-smoke"
+          mkdir -p "$out"
+          cd "$out"
+          "$cli" --version | tee version.txt
+          grep -qx 'Pigment [0-9][^ ]* (based on PhotoCraft [0-9][^ ]*)' version.txt
+          # An example document: a magenta fill layer and an empty layer, saved as .pigment.
+          "$cli" run --new '{"width":64,"height":48,"name":"Example"}' \
+            --cmd layer.newFillLayer.solidColor --params '{"color":[225,29,116]}' \
+            --cmd layer.new.layer --out example.pigment
+          "$cli" convert example.pigment example.png
+          "$cli" convert example.png roundtrip.pigment
+          "$cli" convert roundtrip.pigment roundtrip.png
+          file example.* roundtrip.*
+          for f in example.png roundtrip.png; do head -c 8 "$f" | od -An -c | grep -q 'P   N   G'; done
+          # The native file is PhotoCraft's format (manifest.json inside) and reads back.
+          unzip -l example.pigment | grep -q 'manifest.json'
+          "$cli" info roundtrip.pigment >info.json
+          grep -q '"width": 64' info.json
+          grep -q '"height": 48' info.json
+          # A Pigment 0.1-0.4 document: document.json and layers/<id>.png, no manifest.json.
+          python3 - <<'EOF'
+          import zipfile
+          with zipfile.ZipFile("legacy.pigment", "w") as z:
+              z.writestr("document.json", '{"version":4,"width":4,"height":4,"layers":[{"id":1}]}')
+              z.writestr("layers/1.png", b"\x89PNG\r\n\x1a\n")
+          EOF
+          if "$cli" info legacy.pigment 2>err.txt; then echo "a Pigment 0.4 document opened" >&2; exit 1; fi
+          cat err.txt
+          grep -q 'This file was saved by Pigment 0.4 or earlier. Opening these files is coming in a later update.' err.txt
+
+      # A build or test must not have changed Cargo.lock.
+      - name: Lockfile unchanged
+        run: git diff --exit-code -- Cargo.lock

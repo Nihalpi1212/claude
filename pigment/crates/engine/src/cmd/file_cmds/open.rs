@@ -242,7 +242,8 @@ pub fn open_bytes_as_with_options(
 /// (`photocraft_io::raw::EXTENSIONS`) and the Affinity ones (`photocraft_io::affinity::EXTENSIONS`):
 /// the document and vector formats `photocraft_io::import` handles, and `raw`, the Open As type
 /// for any camera raw.
-const OPEN_AS_EXTRA: &[&str] = &["raw", "pdn", "ora", "xcf", "xcf.gz", "xcfgz", "kra", "krz", "psd", "psb", "psdt", "pcraft", "svg", "svgz", "pdf", "ai"];
+const OPEN_AS_EXTRA: &[&str] =
+    &["raw", "pdn", "ora", "xcf", "xcf.gz", "xcfgz", "kra", "krz", "psd", "psb", "psdt", "pcraft", "pigment", "svg", "svgz", "pdf", "ai"];
 
 /// Whether `ext` (the `as` value of Open As) names a format PhotoCraft reads.
 fn is_open_as_format(ext: &str) -> bool {

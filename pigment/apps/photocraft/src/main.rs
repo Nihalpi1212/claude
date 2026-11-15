@@ -229,7 +229,9 @@ fn at_least_min_size(mut builder: egui::ViewportBuilder) -> egui::ViewportBuilde
 fn attach_log_file(logger: Option<&'static logging::AppLogger>) {
     if let (Some(logger), Some(dir)) = (logger, services::config_dir()) {
         match logger.attach_dir(&dir.join("logs")) {
-            Ok(path) => log::info!("{} ({}), log file {}", photocraft_format::brand::version_line(), photocraft_engine::build_info::long_version(), path.display()),
+            Ok(path) => {
+                log::info!("{} ({}), log file {}", photocraft_format::brand::version_line(), photocraft_engine::build_info::long_version(), path.display())
+            }
             // Standard error only by now (`attach_dir` gave up on the file); unlike `eprintln!`, never panics.
             Err(e) => log::warn!("no log file: {e}"),
         }
@@ -426,7 +428,7 @@ fn main() -> eframe::Result {
     // option, a missing or bad value, a bad PHOTOCRAFT_CONTROL_PORT: issues #701, #6429, #6431)
     // names the argument on standard error and exits 2, so a launcher sees the failure. Neither
     // panics when the stream is closed or a pipe (`photocraft --help | head -1`).
-    let launch = launch_args::parse(launch_args::command(), std::env::args_os().skip(1)).unwrap_or_else(|e| e.exit());
+    let launch = launch_args::parse(launch_args::command(), std::env::args_os().skip(1)).unwrap_or_else(|e| launch_args::exit(e));
     let launch_args::FileNames { openable: files, unreadable: unreadable_paths } = launch.file_names();
     let launch_args::LaunchArgs {
         files: _,
@@ -1253,7 +1255,7 @@ mod tests {
             let commit =
                 source.lines().find_map(|l| l.trim().strip_prefix("commit:")).unwrap_or_else(|| panic!("{manifest}: the craft-i18n source pins a commit"));
             assert_eq!(commit.trim().trim_matches(['\'', '"']), rev, "{manifest}");
-            assert!(text.contains("CRAFT_I18N_DIR: /run/build/photocraft/craft-i18n"), "{manifest}: the build names the catalogs");
+            assert!(text.contains("CRAFT_I18N_DIR: /run/build/pigment/craft-i18n"), "{manifest}: the build names the catalogs");
         }
     }
 }

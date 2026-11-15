@@ -44,11 +44,11 @@ fn the_example_writes_the_files_the_packages_install() {
 
     let mut written: Vec<String> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
     written.sort();
-    let completions = ["pigment-cli.bash", "_photocraft-cli", "pigment-cli.fish", "pigment-cli.elv", "_photocraft-cli.ps1"];
+    let completions = ["pigment-cli.bash", "_pigment-cli", "pigment-cli.fish", "pigment-cli.elv", "_pigment-cli.ps1"];
     let subcommands = ["convert", "info", "run", "batch", "droplet", "commands", "mcp", "serve"];
     let mut expected: Vec<String> = completions.map(String::from).into();
     expected.push("pigment-cli.1".into());
-    expected.extend(subcommands.iter().map(|s| format!("photocraft-cli-{s}.1")));
+    expected.extend(subcommands.iter().map(|s| format!("pigment-cli-{s}.1")));
     expected.sort();
     assert_eq!(written, expected);
     std::fs::remove_dir_all(&dir).unwrap();

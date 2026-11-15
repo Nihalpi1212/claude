@@ -57,7 +57,7 @@ fn usage_and_unknown_command() {
     let out = ok(bin().arg("--help")).stdout;
     assert!(out.contains("convert"));
     let out = ok(bin().arg("--version")).stdout;
-    assert!(out.starts_with("pigment-cli "));
+    assert!(out.starts_with("Pigment ") && out.trim_end().ends_with(" (based on PhotoCraft 0.23.1)"), "{out}");
 }
 
 /// #423: `<subcommand> --help` and `-h` print usage and return at once (no inputs read, no files
@@ -1204,7 +1204,7 @@ fn mcp_stdio_handshake_and_tool_call() {
     send(json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
         "protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"0"}}}));
     let init = recv(1);
-    assert_eq!(init["result"]["serverInfo"]["name"], "photocraft", "{init}");
+    assert_eq!(init["result"]["serverInfo"]["name"], "pigment", "{init}");
     send(json!({"jsonrpc":"2.0","method":"notifications/initialized"}));
     send(json!({"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}));
     let tools = recv(2);
@@ -1478,7 +1478,7 @@ fn top_level_help_version_and_no_arguments() {
     for version in ["--version", "-V"] {
         let Invoke { code, stdout: out, stderr: err } = invoke(&[version]);
         assert_eq!((code, err.as_str()), (0, ""), "{version}");
-        assert!(out.starts_with("pigment-cli ") && out.ends_with('\n') && out.lines().count() == 1, "{version}: {out}");
+        assert!(out.starts_with("Pigment ") && out.ends_with(" (based on PhotoCraft 0.23.1)\n") && out.lines().count() == 1, "{version}: {out}");
     }
     let Invoke { code, stdout: out, stderr: err } = invoke(&["version"]);
     assert_eq!((code, out.is_empty()), (2, true));
@@ -1958,7 +1958,7 @@ fn mcp_reads_roots_in_order_with_fallback() {
     };
     send(json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
         "protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"0"}}}));
-    assert_eq!(recv(1)["result"]["serverInfo"]["name"], "photocraft");
+    assert_eq!(recv(1)["result"]["serverInfo"]["name"], "pigment");
     send(json!({"jsonrpc":"2.0","method":"notifications/initialized"}));
     for (id, path, width) in [(2, "shared.png", 3), (3, "fallback.png", 6)] {
         send(json!({"jsonrpc":"2.0","id":id,"method":"tools/call","params":{"name":"doc_open","arguments":{"path":path}}}));
@@ -2112,12 +2112,18 @@ fn mcp_without_consent_works_headless() {
     env.push(("PHOTOCRAFT_CONTROL_PORT", std::ffi::OsStr::new("not-a-port")));
     let r = mcp_session(&["mcp", "--headless"], &env, &calls[..1]);
     assert_ne!(r[0]["isError"], true, "{}", r[0]);
-    // Without the `AI-MCP` flag a Control Port saved before the agents switch (which the app
-    // reads as "agents may connect") still leaves plain `mcp` headless: it neither looks for
-    // the app nor applies When PhotoCraft Is Closed ("error" would fail this call).
+    // Pigment's own switch (`connectAgents`, docs/FORK.md) is the consent. Turned off it leaves plain
+    // `mcp` headless: it neither looks for the app nor applies When Pigment Is Closed ("error"
+    // would fail this call).
+    std::fs::write(dir.join("preferences.json"), r#"{"integrations": {"controlPort": 7878, "connectAgents": false}}"#).unwrap();
+    let r = mcp_session(&["mcp", "--when-closed", "error"], &env[..2], &calls[..1]);
+    assert_ne!(r[0]["isError"], true, "without consent plain mcp stays headless: {}", r[0]);
+    // Turned on (here by a Control Port saved before the switch existed, which the app reads as
+    // consent too), plain `mcp` looks for the open app and applies When Pigment Is Closed.
     std::fs::write(dir.join("preferences.json"), r#"{"integrations": {"controlPort": 7878}}"#).unwrap();
     let r = mcp_session(&["mcp", "--when-closed", "error"], &env[..2], &calls[..1]);
-    assert_ne!(r[0]["isError"], true, "without the flag plain mcp stays headless: {}", r[0]);
+    assert_eq!(r[0]["isError"], true, "with consent and the app closed, --when-closed error fails: {}", r[0]);
+    assert!(r[0]["content"][0]["text"].as_str().unwrap().contains("Pigment isn't running"), "{}", r[0]);
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_dir_all(&empty);
 }

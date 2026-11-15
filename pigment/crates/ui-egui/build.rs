@@ -10,9 +10,14 @@
 //!
 //! - `CRAFT_I18N_DIR`, a craft-i18n checkout (storytold/craft-i18n, at the SHA in
 //!   `craft-i18n.rev`): `craft_i18n.rs` holds `CRAFT_I18N`, one (locale, shared catalog, PhotoCraft
-//!   catalog) entry per locale that has a `photocraft.tsv`, embedded raw. Unset, or not a checkout
-//!   (a warning), it is empty and the interface is English only; with `CRAFT_I18N_REQUIRED=1` (CI
-//!   and releases) that is an error instead. Recipe: craft-i18n's `docs/integration.md`.
+//!   catalog) entry per locale that has a `photocraft.tsv`. Unset, or not a checkout (a warning),
+//!   it is empty and the interface is English only; with `CRAFT_I18N_REQUIRED=1` (CI and releases)
+//!   that is an error instead. Recipe: craft-i18n's `docs/integration.md`.
+//!
+//!   Pigment embeds the catalogs rebranded ([`rebrand_catalog`], docs/FORK.md): the product name
+//!   `PhotoCraft` becomes `Pigment` in the English and the translated column alike, so the
+//!   rebranded English strings in the code still find their rows, with the case endings some
+//!   languages put on the name adjusted. The rebranded copies are written to `OUT_DIR/i18n/`.
 
 use std::fmt::Write as _;
 
@@ -60,15 +65,104 @@ fn craft_i18n() -> String {
             Vec::new()
         }
     };
-    let mut o = String::from("/// (locale, shared catalog, Pigment's catalog), one entry per locale; `\"\"` for a missing file.\n");
+    let mut o = String::from("/// (locale, shared catalog, PhotoCraft's catalog), one entry per locale; `\"\"` for a missing file.\n");
     o.push_str("pub static CRAFT_I18N: &craft_i18n::Embedded = &[\n");
+    let out = std::path::PathBuf::from(std::env::var_os("OUT_DIR").unwrap_or_default()).join("i18n");
     for (code, shared, app) in entries {
         // `{:?}` escapes the path (Windows backslashes) as a Rust string literal.
-        let shared = shared.map_or_else(|| "\"\"".to_string(), |p| format!("include_str!({p:?})"));
-        let _ = writeln!(o, "    ({code:?}, {shared}, include_str!({app:?})),");
+        let shared = match shared.map(|p| rebranded(&p, &out.join(&code))) {
+            None => "\"\"".to_string(),
+            Some(Ok(p)) => format!("include_str!({p:?})"),
+            Some(Err(e)) => {
+                println!("cargo::error={e}");
+                "\"\"".to_string()
+            }
+        };
+        match rebranded(&app, &out.join(&code)) {
+            Ok(app) => {
+                let _ = writeln!(o, "    ({code:?}, {shared}, include_str!({app:?})),");
+            }
+            Err(e) => println!("cargo::error={e}"),
+        }
     }
     o.push_str("];\n");
     o
+}
+
+/// The catalog at `from`, rebranded ([`rebrand_catalog`]) into a file of the same name in `dir`:
+/// that file's path.
+fn rebranded(from: &std::path::Path, dir: &std::path::Path) -> Result<std::path::PathBuf, String> {
+    let text = std::fs::read_to_string(from).map_err(|e| format!("reading {}: {e}", from.display()))?;
+    let to = dir.join(from.file_name().unwrap_or_default());
+    std::fs::create_dir_all(dir).and_then(|()| std::fs::write(&to, rebrand_catalog(&text))).map_err(|e| format!("writing {}: {e}", to.display()))?;
+    Ok(to)
+}
+
+/// The product name in the catalogs and what Pigment's catalogs say instead.
+const UPSTREAM_NAME: &str = "PhotoCraft";
+const NAME: &str = "Pigment";
+
+/// Case endings some languages join to the name, as they read after "Pigment" (vowel harmony in
+/// Finnish, Hungarian and Turkish; the particle after a final consonant in Korean). Any other
+/// ending is kept as it is (`PhotoCraftu` → `Pigmentu`, `PhotoCraft-ში` → `Pigment-ში`).
+const INFLECTIONS: &[(&str, &str)] = &[
+    ("ia", "iä"),     // fi partitive
+    ("issa", "issä"), // fi inessive
+    ("ista", "istä"), // fi elative
+    ("ban", "ben"),   // hu inessive
+    ("ból", "ből"),   // hu elative
+    ("'ın", "'in"),   // tr genitive
+    ("'ı", "'i"),     // tr accusative
+    ("'a", "'e"),     // tr dative
+    ("가", "이"),     // ko subject particle
+    ("는", "은"),     // ko topic particle
+    ("를", "을"),     // ko object particle
+    ("와", "과"),     // ko "and"
+    ("로", "으로"),   // ko "with/to"
+];
+
+/// PhotoCraft's native extension in interface text, and Pigment's: the two hold the same format,
+/// and Pigment's interface names its own (Save Full-Size Composite in .pigment Files).
+const EXTENSION: (&str, &str) = (".pcraft", ".pigment");
+
+/// The name as Tamil writes it, without its last vowel sign, and Pigment's.
+const TAMIL: (&str, &str) = ("போட்டோகிராப்ட", "பிக்மென்ட");
+
+/// A craft-i18n catalog with the product name rebranded on every row (both columns; comment lines
+/// are left as they are), and `.pcraft` named `.pigment` ([`EXTENSION`]). `PhotoCraft` as a word, not inside an identifier (`PhotoCraft_x`,
+/// `xPhotoCraft` with an ASCII `x`), becomes `Pigment` with its case ending (see [`INFLECTIONS`]).
+fn rebrand_catalog(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for line in text.split_inclusive('\n') {
+        if line.starts_with('#') || !(line.contains(UPSTREAM_NAME) || line.contains(TAMIL.0) || line.contains(EXTENSION.0)) {
+            out.push_str(line);
+            continue;
+        }
+        let line = line.replace(TAMIL.0, TAMIL.1).replace(EXTENSION.0, EXTENSION.1);
+        let mut rest = line.as_str();
+        while let Some(i) = rest.find(UPSTREAM_NAME) {
+            let (before, after) = (&rest[..i], &rest[i + UPSTREAM_NAME.len()..]);
+            out.push_str(before);
+            // Only an ASCII letter or digit joins the name into an identifier: Thai and Khmer write it
+            // straight after a word (`อัพเดตPhotoCraft`).
+            let joined = |c: Option<char>| c.is_some_and(|c| c.is_ascii_alphanumeric() || c == '_' || c == '%');
+            if joined(before.chars().next_back()) || after.starts_with('_') {
+                out.push_str(UPSTREAM_NAME);
+                rest = after;
+                continue;
+            }
+            out.push_str(NAME);
+            rest = after;
+            if let Some((from, to)) =
+                INFLECTIONS.iter().find(|(from, _)| after.strip_prefix(from).is_some_and(|tail| !tail.chars().next().is_some_and(char::is_alphabetic)))
+            {
+                out.push_str(to);
+                rest = &after[from.len()..];
+            }
+        }
+        out.push_str(rest);
+    }
+    out
 }
 
 /// One embedded locale: its code, its `common.tsv` if it has one, and its PhotoCraft catalog.

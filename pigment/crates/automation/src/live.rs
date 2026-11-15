@@ -43,7 +43,7 @@ pub struct LiveConfig {
     pub launch: Option<LaunchFn>,
     pub launch_timeout: Duration,
     /// Whether the person lets agents use the open app, given its saved preferences
-    /// ([`agent_link::agents_allowed_now`]: the ArtCraft Launcher's switch); tests replace it.
+    /// ([`agent_link::agents_allowed_now`]: Pigment's own switch, `connectAgents`); tests replace it.
     pub allowed: fn(&photocraft_engine::prefs::Integrations) -> bool,
     /// Prepares a headless session before its first call (the CLI's `--gpu` / `--no-gpu`).
     pub prepare_headless: Option<PrepareFn>,
@@ -160,7 +160,7 @@ impl Live {
             }
             if Instant::now() >= deadline {
                 return Err(format!(
-                    "Pigment didn't accept agents within {} s of starting. If it's still opening, try again in a moment; otherwise check that AI agents are on in ArtCraft Launcher › Settings › AI agents.",
+                    "Pigment didn't accept agents within {} s of starting. If it's still opening, try again in a moment; otherwise check that Preferences › AI Integrations › Let AI apps use this window is on in Pigment.",
                     self.cfg.launch_timeout.as_secs()
                 ));
             }
@@ -216,7 +216,7 @@ pub fn launcher(cli: &Path) -> Option<LaunchFn> {
                 c
             }
             _ => {
-                let app = dir.join(if cfg!(windows) { "pigment.exe" } else { "photocraft" });
+                let app = dir.join(if cfg!(windows) { "pigment.exe" } else { "pigment" });
                 if !app.is_file() {
                     return None;
                 }

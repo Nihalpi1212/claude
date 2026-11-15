@@ -511,6 +511,26 @@ fn bundled_catalogs_are_consistent() {
     }
 }
 
+/// Pigment embeds the catalogs rebranded (build.rs, docs/FORK.md): no row names PhotoCraft or its
+/// `.pcraft` extension, and the rows the rebranded interface text looks up are still found.
+#[test]
+fn embedded_catalogs_are_rebranded() {
+    if !needs_catalogs() {
+        return;
+    }
+    let upstream = "PhotoCraft"; // upstream-ok
+    for (code, shared, app) in CRAFT_I18N {
+        for line in shared.lines().chain(app.lines()).filter(|l| !l.starts_with('#')) {
+            assert!(!line.contains(".pcraft"), "{code}: {line}");
+            assert!(!line.contains(&format!("{upstream} ")) && !line.ends_with(upstream), "{code}: {line}");
+        }
+    }
+    // The Preferences label that names the extension: found again in every catalog that has it.
+    let label = "Save Full-Size Composite in .pigment Files";
+    let translated = LANGUAGES.iter().skip(1).filter(|language| has(lang(language.code), label)).count();
+    assert!(translated > 0, "no catalog translates {label:?}");
+}
+
 #[test]
 fn raw_develop_labels_are_translated_in_every_shipped_catalog() {
     if !needs_catalogs() {

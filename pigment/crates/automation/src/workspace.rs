@@ -255,7 +255,8 @@ impl Drop for TempRemoval<'_> {
 fn written_kind(name: &str) -> bool {
     let Some((_, ext)) = name.rsplit_once('.') else { return false };
     let ext = ext.to_ascii_lowercase();
-    ["psd", "psb", "ora", "pdf", photocraft_format::EXTENSION].contains(&ext.as_str())
+    ["psd", "psb", "ora", "pdf"].contains(&ext.as_str())
+        || photocraft_format::brand::is_native_extension(&ext)
         || photocraft_codecs::from_extension(&ext).is_some_and(|format| format.caps().write)
 }
 

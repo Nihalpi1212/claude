@@ -33,11 +33,11 @@ fn pdn_save_requests_a_native_copy_without_overwriting_the_source() {
     let ctx = egui::Context::default();
     menus::invoke(&mut app, &ctx, "file.save", json!({})).unwrap();
     app.poll_file_dialog(&ctx, None);
-    assert!(matches!(open.borrow().as_slice(), [(FileDialogRequest::Save { suggested }, _)] if suggested == "/pics/layers.pcraft"));
-    answer(&open, Some(FileDialogAnswer::SaveTo("/pics/layers.pcraft".into())));
+    assert!(matches!(open.borrow().as_slice(), [(FileDialogRequest::Save { suggested }, _)] if suggested == "/pics/layers.pigment"));
+    answer(&open, Some(FileDialogAnswer::SaveTo("/pics/layers.pigment".into())));
     app.poll_file_dialog(&ctx, None);
-    assert_eq!(*written.borrow(), ["/pics/layers.pcraft"]);
-    assert_eq!(app.session.active().unwrap().path.as_deref(), Some("/pics/layers.pcraft"));
+    assert_eq!(*written.borrow(), ["/pics/layers.pigment"]);
+    assert_eq!(app.session.active().unwrap().path.as_deref(), Some("/pics/layers.pigment"));
 }
 
 /// A real flat JPEG import, optionally edited to contain another layer. A filename without a

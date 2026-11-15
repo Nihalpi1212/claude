@@ -69,7 +69,7 @@ fn help_prints_usage_and_exits_0() {
     for flag in ["--help", "-h"] {
         let Run { status, stdout, stderr } = run_photocraft(&[flag]);
         assert_eq!(status.code(), Some(0), "{flag} must exit 0, stderr: {stderr}");
-        assert!(stdout.contains("Usage: photocraft"), "{flag} stdout: {stdout}");
+        assert!(stdout.contains("Usage: pigment"), "{flag} stdout: {stdout}");
         for option in ["--safe-gpu", "--new-instance", "--control <PORT>", "--version", "`--`", "PHOTOCRAFT_AUTOMATION_READ_ROOT", "PHOTOCRAFT_NEW_INSTANCE"] {
             assert!(stdout.contains(option), "{flag} usage must list {option}: {stdout}");
         }
@@ -81,14 +81,15 @@ fn help_prints_usage_and_exits_0() {
 fn help_wins_over_later_arguments() {
     let Run { status, stdout, .. } = run_photocraft(&["--help", "picture.psd", "--safegpu"]);
     assert_eq!(status.code(), Some(0));
-    assert!(stdout.contains("Usage: photocraft"), "stdout: {stdout}");
+    assert!(stdout.contains("Usage: pigment"), "stdout: {stdout}");
 }
 
 #[test]
 fn version_prints_the_long_version() {
+    // Pigment's version line (docs/FORK.md), not clap's `<name> <version>`.
     let Run { status, stdout, .. } = run_photocraft(&["--version", "--safegpu"]);
     assert_eq!(status.code(), Some(0));
-    assert_eq!(stdout, format!("photocraft {}\n", photocraft_engine::build_info::long_version()));
+    assert_eq!(stdout, format!("Pigment {} (based on PhotoCraft 0.23.1)\n", photocraft_engine::build_info::VERSION));
 }
 
 #[test]

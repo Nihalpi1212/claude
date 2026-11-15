@@ -218,9 +218,11 @@ fn open_filters_keep_literal_extensions_on_windows_and_macos() {
 
 #[test]
 fn native_services_provide_update_transport() {
+    // Pigment makes no network request on its own (docs/FORK.md): no update check and no
+    // self-update to report; Help › Check for Updates opens the releases page instead.
     let services = native(None);
-    assert!(services.check_updates.is_some());
-    assert!(services.last_update.is_some());
+    assert!(services.check_updates.is_none());
+    assert!(services.last_update.is_none());
 }
 
 #[test]
@@ -234,8 +236,8 @@ fn xwayland_command_matches_how_photocraft_was_installed() {
     let bare = xwayland_command(None, Some("/opt/photocraft-0.3.0-linux-x86_64.AppImage"), true);
     assert_eq!(bare.as_deref(), Some("WAYLAND_DISPLAY= /opt/photocraft-0.3.0-linux-x86_64.AppImage"));
     // deb, rpm, AUR, tarball: the binary on the PATH.
-    assert_eq!(xwayland_command(None, None, true).as_deref(), Some("WAYLAND_DISPLAY= photocraft"));
-    assert_eq!(xwayland_command(Some(""), Some(""), true).as_deref(), Some("WAYLAND_DISPLAY= photocraft"));
+    assert_eq!(xwayland_command(None, None, true).as_deref(), Some("WAYLAND_DISPLAY= pigment"));
+    assert_eq!(xwayland_command(Some(""), Some(""), true).as_deref(), Some("WAYLAND_DISPLAY= pigment"));
     // No X server (XWayland disabled): nothing to suggest.
     assert_eq!(xwayland_command(None, Some("/opt/p.AppImage"), false), None);
 }
@@ -323,7 +325,7 @@ fn every_save_dialog_leads_with_its_own_extension() {
 #[test]
 fn save_as_offers_only_writable_formats_including_ico() {
     // Layered formats, and PDF, are written by `photocraft-io`, not a codec.
-    let layered = ["psd", "psb", "pcraft", "ora", "pdf"];
+    let layered = ["psd", "psb", "pcraft", "pigment", "ora", "pdf"];
     for (name, exts) in SAVE_FILTERS {
         for ext in exts.iter().filter(|e| !layered.contains(e)) {
             let format = photocraft_codecs::from_extension(ext).unwrap_or_else(|| panic!("{name}: .{ext} is no known format"));

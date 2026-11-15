@@ -37,6 +37,8 @@ pub const SECTIONS: [(&str, &str); 18] = [
 /// blocks), and while an unlisted one is read nowhere.
 pub const HIDDEN_UNTIL_IMPLEMENTED: &[&str] = &[
     "general.colorPicker",
+    // Pigment starts no update check (docs/FORK.md): Help › Check for Updates opens the releases page.
+    "general.automaticallyCheckUpdates",
     "workspace.autoShowHiddenPanels",
     "workspace.enableFloatingDocumentWindowDocking",
     "performance.legacyCompositing",

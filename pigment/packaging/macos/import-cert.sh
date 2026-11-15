@@ -18,10 +18,10 @@ if [[ -z "${APPLE_CERTIFICATE:-}" ]]; then
 fi
 
 TMP="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
-KEYCHAIN="$TMP/photocraft-signing.keychain-db"
+KEYCHAIN="$TMP/pigment-signing.keychain-db"
 # A fresh, private file (mktemp creates it exclusively, mode 0600): a predictable name could be
 # pre-created by another account, and redirection would keep that file's owner and mode.
-CERT="$(mktemp "$TMP/photocraft-signing.XXXXXX")"
+CERT="$(mktemp "$TMP/pigment-signing.XXXXXX")"
 KC_PASS="${KEYCHAIN_PASSWORD:-$(openssl rand -hex 24)}"
 
 trap 'rm -f "$CERT"' EXIT

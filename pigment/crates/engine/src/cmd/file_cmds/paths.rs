@@ -99,8 +99,8 @@ pub(super) fn openable_name(path: &str) -> bool {
 /// process silently.
 #[cfg(not(target_arch = "wasm32"))]
 const OPENABLE: &[&str] = &[
-    "pdn", "ora", "xcf", "xcfgz", "kra", "krz", "psd", "psb", "psdt", "pcraft", "svg", "svgz", "af", "afdesign", "afphoto", "afpub", "dng", "cr2", "nef",
-    "nrw", "arw", "pef",
+    "pdn", "ora", "xcf", "xcfgz", "kra", "krz", "psd", "psb", "psdt", "pcraft", "pigment", "svg", "svgz", "af", "afdesign", "afphoto", "afpub", "dng", "cr2",
+    "nef", "nrw", "arw", "pef",
 ];
 
 pub(crate) fn file_name(path: &str) -> String {
@@ -123,7 +123,7 @@ pub fn saves_in_place(path: &str) -> bool {
 /// .pcraft). A save to one becomes the document's file; any other format is a copy for automation
 /// saves, desktop and headless alike (#1547, #2579).
 pub fn layered_extension(ext: &str) -> bool {
-    matches!(ext, "psd" | "psb" | "pcraft" | "ora")
+    matches!(ext, "psd" | "psb" | "pcraft" | "pigment" | "ora")
 }
 
 /// Whether a file in format `ext` (lower-case) holds the whole of `doc`, so it can be the
@@ -133,7 +133,7 @@ pub fn layered_extension(ext: &str) -> bool {
 /// original is never overwritten with less than it had (#3806).
 pub fn holds(doc: &photocraft_doc::Document, ext: &str) -> bool {
     match ext {
-        "psd" | "psb" | "pcraft" => true,
+        "psd" | "psb" | "pcraft" | "pigment" => true,
         "ora" => photocraft_io::ora_losses(doc).is_empty(),
         _ => false,
     }

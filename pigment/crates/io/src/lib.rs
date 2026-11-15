@@ -52,6 +52,7 @@ pub mod exr_parts;
 mod flat;
 pub mod gradient_bake;
 pub mod guides_map;
+pub mod legacy_pigment;
 mod png_steps;
 pub use gradient_bake::{Method as GradientMethod, bake as bake_gradient, bake_smooth_opacity as bake_gradient_smooth_opacity};
 mod duotone_map;
@@ -157,6 +158,10 @@ pub enum IoError {
     /// The requested conversion is not possible.
     #[error("unsupported: {0}")]
     Unsupported(String),
+    /// A document saved by Pigment 0.1 to 0.4 (the Electron app; [`legacy_pigment`]), which
+    /// this version can't open yet.
+    #[error("{}", photocraft_format::brand::LEGACY_PIGMENT_MESSAGE)]
+    LegacyPigment,
     /// Native `.pcraft` bundle failure.
     #[error("pcraft: {0}")]
     Pcraft(#[from] photocraft_format::FormatError),
@@ -530,6 +535,9 @@ pub enum ImportPreflight {
 ///
 /// The order matches [`import_stages`]; keep the two in step.
 pub fn import_preflight(name: &str, bytes: &[u8]) -> ImportPreflight {
+    if legacy_pigment::is_legacy(bytes) {
+        return ImportPreflight::Unbounded;
+    }
     match photocraft_formats::detect(name, bytes) {
         Some(photocraft_formats::Format::Psd) => ImportPreflight::Psd,
         Some(photocraft_formats::Format::Tiff) => ImportPreflight::Tiff,
@@ -842,7 +850,10 @@ pub fn import_file_for_open_verified(
     // the identity from it after parsing, and never from a path that may point elsewhere now.
     let watch = source.file().try_clone().map_err(read_failed)?;
     let mut magic = [0u8; 4];
-    let psd = !has_extension(name, photocraft_format::EXTENSION) && craft_psd::ReadAt::read_at(&source, 0, &mut magic).is_ok() && is_psd(&magic);
+    let psd = !has_extension(name, photocraft_format::EXTENSION)
+        && !has_extension(name, photocraft_format::brand::EXTENSION)
+        && craft_psd::ReadAt::read_at(&source, 0, &mut magic).is_ok()
+        && is_psd(&magic);
     let result = if psd {
         import_source_with_options(name, craft_psd::Source::new(source), ctl, opts)
     } else {
@@ -933,6 +944,8 @@ pub fn import_file(name: &str, path: &std::path::Path, opts: &ImportOptions, ctl
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Route {
     Pcraft,
+    /// A Pigment 0.1–0.4 document ([`legacy_pigment`]), whatever its name.
+    LegacyPigment,
     Psd,
     Affinity,
     Ora,
@@ -950,6 +963,9 @@ pub(crate) enum Route {
 
 /// Which importer takes the file `name` holding `bytes`. The checks run in this order.
 pub(crate) fn route(name: &str, bytes: &[u8]) -> Route {
+    if legacy_pigment::is_legacy(bytes) {
+        return Route::LegacyPigment;
+    }
     match photocraft_formats::detect(name, bytes) {
         Some(photocraft_formats::Format::Pcraft) => Route::Pcraft,
         Some(photocraft_formats::Format::Psd) if is_psd(bytes) => Route::Psd,
@@ -968,7 +984,7 @@ pub(crate) fn route(name: &str, bytes: &[u8]) -> Route {
 
 fn route_forced(ext: &str) -> Route {
     let ext = ext.trim_start_matches('.').to_ascii_lowercase();
-    if ext == photocraft_format::EXTENSION {
+    if photocraft_format::brand::is_native_extension(&ext) {
         Route::Pcraft
     } else if matches!(ext.as_str(), "psd" | "psb" | "psdt") {
         Route::Psd
@@ -1008,7 +1024,11 @@ fn import_stages(
         if matches!(ext.as_str(), "pdf" | "ai") {
             return pdf_import::import(name, bytes, opts, ctl);
         }
-        route_forced(&ext)
+        // Open As Pigment (or PhotoCraft) on a Pigment 0.1–0.4 document still names it.
+        match route_forced(&ext) {
+            Route::Pcraft if legacy_pigment::is_legacy(bytes) => Route::LegacyPigment,
+            forced => forced,
+        }
     } else {
         // SVG content wins over a misleading `.pdf` suffix, matching the preflight (which checks SVG
         // before PDF).
@@ -1027,6 +1047,7 @@ fn import_stages(
             let document = photocraft_format::load_from_bytes(bytes)?;
             Ok(ImportResult { warnings: open_warnings(&document), document, source_read_only: false, preview_only: false })
         }
+        Route::LegacyPigment => legacy_pigment::import(name, bytes, ctl),
         Route::Psd | Route::NamedPsd => import_psd(name, ctl, damaged, opts, |want, recover| PsdFile::from_bytes_and_merged_preflight(bytes, want, recover)),
         Route::Affinity => affinity::import(name, bytes, ctl),
         Route::Ora => ora::import(name, bytes, ctl),
@@ -1180,17 +1201,17 @@ fn export_stages_with_renderer(
 ) -> Result<EncodedExport, IoError> {
     let ext = extension(name_or_ext);
     if ext == "pdn" {
-        return Err(IoError::Unsupported("PDN is import-only; save as .pcraft to preserve all layers and blend modes".into()));
+        return Err(IoError::Unsupported("PDN is import-only; save as .pigment to preserve all layers and blend modes".into()));
     }
     if affinity::EXTENSIONS.contains(&ext.as_str()) {
-        return Err(IoError::Unsupported("Affinity export is not implemented; save a new PSD, PNG or .pcraft copy".into()));
+        return Err(IoError::Unsupported("Affinity export is not implemented; save a new PSD, PNG or .pigment copy".into()));
     }
     if kra::EXTENSIONS.contains(&ext.as_str()) {
-        return Err(IoError::Unsupported("Krita files are import-only; save as .ora to open the layers in Krita, or .pcraft to keep everything".into()));
+        return Err(IoError::Unsupported("Krita files are import-only; save as .ora to open the layers in Krita, or .pigment to keep everything".into()));
     }
     if ext == "xcf" {
         return Err(IoError::Unsupported(
-            "XCF is GIMP's own format and Pigment only opens it; save as .pcraft to keep the layers, or export a flat image".into(),
+            "XCF is GIMP's own format and Pigment only opens it; save as .pigment to keep the layers, or export a flat image".into(),
         ));
     }
     if ext == "ora" {
@@ -1210,7 +1231,8 @@ fn export_stages_with_renderer(
         }
         return Ok(res.into());
     }
-    if ext == photocraft_format::EXTENSION {
+    // `.pigment` and `.pcraft` both hold PhotoCraft's native format (docs/FORK.md).
+    if photocraft_format::brand::is_native_extension(&ext) {
         let doc = named_for_file(doc, name_or_ext);
         let thumbnail = Some(photocraft_compose::thumbnail(doc.as_ref(), 256));
         ctl.check().map_err(|_| IoError::Cancelled)?;

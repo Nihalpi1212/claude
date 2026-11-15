@@ -18,10 +18,10 @@ mod recovery_tests;
 /// Photoshop brushes (.abr), gradients (.grd), layer styles (.asl), swatches (.aco, .act, .ase) and keyboard shortcut sets
 /// (.kys), which go to the preset libraries and Edit › Keyboard Shortcuts.
 const OPEN_EXTS: &[&str] = &[
-    "pcraft", "pdn", "ora", "xcf", "xcfgz", "gz", "kra", "krz", "psd", "psb", "psdt", "png", "jpg", "jpeg", "tif", "tiff", "webp", "gif", "bmp", "dib", "tga",
-    "ico", "qoi", "exr", "hdr", "pbm", "pgm", "ppm", "pnm", "pam", "pfm", "pcx", "dds", "xpm", "fits", "fit", "fts", "dpx", "cin", "dcm", "dicom", "dc3",
-    "iff", "lbm", "ilbm", "heic", "heif", "hif", "dng", "cr2", "cr3", "nef", "nrw", "arw", "pef", "orf", "rw2", "raf", "abr", "grd", "asl", "svg", "svgz",
-    "aco", "act", "ase", "kys", "af", "afdesign", "afphoto", "afpub",
+    "pigment", "pcraft", "pdn", "ora", "xcf", "xcfgz", "gz", "kra", "krz", "psd", "psb", "psdt", "png", "jpg", "jpeg", "tif", "tiff", "webp", "gif", "bmp",
+    "dib", "tga", "ico", "qoi", "exr", "hdr", "pbm", "pgm", "ppm", "pnm", "pam", "pfm", "pcx", "dds", "xpm", "fits", "fit", "fts", "dpx", "cin", "dcm",
+    "dicom", "dc3", "iff", "lbm", "ilbm", "heic", "heif", "hif", "dng", "cr2", "cr3", "nef", "nrw", "arw", "pef", "orf", "rw2", "raf", "abr", "grd", "asl",
+    "svg", "svgz", "aco", "act", "ase", "kys", "af", "afdesign", "afphoto", "afpub",
 ];
 const SVG_EXTS: &[&str] = &["svg", "svgz"];
 
@@ -42,7 +42,7 @@ fn open_filter_extensions(extensions: &[&str]) -> Vec<String> {
 /// picker defaults to another filter.
 const OPEN_FILTERS: &[(&str, &[&str])] = &[
     ("Photoshop", &["psd", "psb", "psdt"]),
-    ("Pigment", &["pcraft"]),
+    ("Pigment", &["pigment", "pcraft"]),
     ("Affinity", &["af", "afdesign", "afphoto", "afpub"]),
     ("Amiga IFF", &["iff", "lbm", "ilbm"]),
     ("BMP", &["bmp", "dib"]),
@@ -92,7 +92,7 @@ fn open_filters() -> Vec<(&'static str, Vec<String>)> {
 const SAVE_FILTERS: &[(&str, &[&str])] = &[
     ("PSD Document", &["psd", "psb"]),
     ("PSB Large Document", &["psb"]),
-    ("Pigment", &["pcraft"]),
+    ("Pigment", &["pigment", "pcraft"]),
     ("Amiga IFF", &["iff"]),
     ("BMP", &["bmp", "dib"]),
     ("Cineon", &["cin"]),
@@ -716,7 +716,7 @@ pub fn xwayland_command(flatpak_id: Option<&str>, appimage: Option<&str>, x_disp
     if let Some(id) = flatpak_id.filter(|id| !id.is_empty()) {
         return Some(format!("flatpak run --nosocket=wayland --socket=x11 {}", shell_word(id)));
     }
-    let exe = appimage.filter(|path| !path.is_empty()).map_or_else(|| "photocraft".to_string(), shell_word);
+    let exe = appimage.filter(|path| !path.is_empty()).map_or_else(|| "pigment".to_string(), shell_word);
     x_display.then(|| format!("WAYLAND_DISPLAY= {exe}"))
 }
 

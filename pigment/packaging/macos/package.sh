@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Build, sign and (optionally) notarize the macOS release artifacts:
 #
-#   $DIST/photocraft-<version>-macos-<arch>.dmg          PhotoCraft.app on a drag-to-Applications DMG
-#   $DIST/photocraft-cli-<version>-macos-<arch>.zip      the headless CLI
+#   $DIST/pigment-<version>-macos-<arch>.dmg          Pigment.app on a drag-to-Applications DMG
+#   $DIST/pigment-cli-<version>-macos-<arch>.zip      the headless CLI
 #
 # Usage: packaging/macos/package.sh [--arch universal|aarch64|x86_64] [--skip-build]
 #
@@ -39,9 +39,9 @@ export MACOSX_DEPLOYMENT_TARGET=11.0
 IDENTITY="${MACOS_SIGN_IDENTITY:--}"
 SHORT_VERSION="${VERSION%%-*}"
 WORK="$CARGO_TARGET_DIR/macos-package"
-APP="$WORK/PhotoCraft.app"
-DMG="$DIST/photocraft-$VERSION-macos-$ARCH.dmg"
-CLI_ZIP="$DIST/photocraft-cli-$VERSION-macos-$ARCH.zip"
+APP="$WORK/Pigment.app"
+DMG="$DIST/pigment-$VERSION-macos-$ARCH.dmg"
+CLI_ZIP="$DIST/pigment-cli-$VERSION-macos-$ARCH.zip"
 
 NOTARIZE=0
 if [[ "$IDENTITY" = "-" ]]; then
@@ -52,7 +52,7 @@ else
   warn "macOS: APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID incomplete; signed but not notarized"
 fi
 
-echo "==> PhotoCraft $VERSION for macOS ($ARCH), identity: $IDENTITY, notarize: $NOTARIZE"
+echo "==> Pigment $VERSION for macOS ($ARCH), identity: $IDENTITY, notarize: $NOTARIZE"
 
 # ---- build -------------------------------------------------------------------------------------
 if [[ "$SKIP_BUILD" = 0 ]]; then
@@ -63,7 +63,7 @@ fi
 
 rm -rf "$WORK"
 mkdir -p "$WORK/bin"
-for bin in photocraft photocraft-cli; do
+for bin in pigment pigment-cli; do
   inputs=()
   for t in "${TARGETS[@]}"; do inputs+=("$CARGO_TARGET_DIR/$t/release/$bin"); done
   lipo -create -output "$WORK/bin/$bin" "${inputs[@]}"
@@ -115,15 +115,15 @@ staple() {
   done
 }
 
-# ---- PhotoCraft.app ----------------------------------------------------------------------------
+# ---- Pigment.app ----------------------------------------------------------------------------
 echo "==> assembling $APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 # Executable and icon carry the display name (CFBundleExecutable / CFBundleIconFile).
-cp "$WORK/bin/photocraft" "$APP/Contents/MacOS/PhotoCraft"
+cp "$WORK/bin/pigment" "$APP/Contents/MacOS/Pigment"
 # The CLI too, beside the app: Preferences › AI Integrations points MCP clients at it
-# (`photocraft-cli mcp`), and it starts the app when an agent needs it.
-cp "$WORK/bin/photocraft-cli" "$APP/Contents/MacOS/photocraft-cli"
-cp "$ROOT/assets/app-icon/photocraft.icns" "$APP/Contents/Resources/PhotoCraft.icns"
+# (`pigment-cli mcp`), and it starts the app when an agent needs it.
+cp "$WORK/bin/pigment-cli" "$APP/Contents/MacOS/pigment-cli"
+cp "$ROOT/assets/app-icon/pigment.icns" "$APP/Contents/Resources/Pigment.icns"
 # Notices for the bundled font fallback, included before the bundle is signed.
 cp "$ROOT/NOTICE" "$ROOT/ATTRIBUTION.md" "$APP/Contents/Resources/"
 # Licences of the embedded craft-fonts fonts (only when built with CRAFT_FONTS_DIR).
@@ -139,14 +139,14 @@ printf 'APPL????' >"$APP/Contents/PkgInfo"
 
 # Sign inside-out: nested code first, then the bundle itself (no --deep on the final signature).
 # The bundled CLI is nested executable code; sign it before sealing the app bundle.
-sign --options runtime --identifier ai.storyteller.photocraft-cli "$APP/Contents/MacOS/photocraft-cli"
-sign --options runtime --entitlements "$HERE/entitlements.plist" "$APP/Contents/MacOS/PhotoCraft"
+sign --options runtime --identifier io.github.nihalpi1212.pigment-cli "$APP/Contents/MacOS/pigment-cli"
+sign --options runtime --entitlements "$HERE/entitlements.plist" "$APP/Contents/MacOS/Pigment"
 sign --options runtime --entitlements "$HERE/entitlements.plist" "$APP"
 codesign --verify --strict --deep --verbose=2 "$APP"
 
 if [[ "$NOTARIZE" = 1 ]]; then
-  ditto -c -k --keepParent "$APP" "$WORK/PhotoCraft-notarize.zip"
-  notarize "$WORK/PhotoCraft-notarize.zip"
+  ditto -c -k --keepParent "$APP" "$WORK/Pigment-notarize.zip"
+  notarize "$WORK/Pigment-notarize.zip"
   staple "$APP"
   spctl --assess --type execute -vvv "$APP"
 fi
@@ -155,7 +155,7 @@ fi
 echo "==> building $DMG"
 STAGE="$WORK/dmg"
 mkdir -p "$STAGE"
-ditto "$APP" "$STAGE/PhotoCraft.app"
+ditto "$APP" "$STAGE/Pigment.app"
 ln -s /Applications "$STAGE/Applications"
 # Finder window layout: background, icon size and positions (packaging/macos/dmg/README.md).
 mkdir -p "$STAGE/.background"
@@ -165,7 +165,7 @@ rm -f "$DMG" "$WORK/raw.dmg"
 # makehybrid + convert builds the image without attaching a device, unlike `create -srcfolder`,
 # which is flaky on CI runners ("Resource busy") and hangs in sandboxed sessions.
 # The volume name has no version: .DS_Store finds the background through an alias that includes it.
-hdiutil makehybrid -hfs -hfs-volume-name "PhotoCraft" -hfs-openfolder "$STAGE" -o "$WORK/raw.dmg" "$STAGE"
+hdiutil makehybrid -hfs -hfs-volume-name "Pigment" -hfs-openfolder "$STAGE" -o "$WORK/raw.dmg" "$STAGE"
 hdiutil convert "$WORK/raw.dmg" -format UDZO -imagekey zlib-level=9 -o "$DMG"
 rm -f "$WORK/raw.dmg"
 sign "$DMG"
@@ -178,20 +178,20 @@ fi
 
 # ---- CLI ---------------------------------------------------------------------------------------
 echo "==> building $CLI_ZIP"
-CLI_DIR="$WORK/photocraft-cli-$VERSION-macos-$ARCH"
+CLI_DIR="$WORK/pigment-cli-$VERSION-macos-$ARCH"
 mkdir -p "$CLI_DIR"
-cp "$WORK/bin/photocraft-cli" "$CLI_DIR/"
+cp "$WORK/bin/pigment-cli" "$CLI_DIR/"
 copy_docs "$CLI_DIR"
 # Same Developer ID and hardened runtime as the app, with an explicit reverse-DNS identifier
 # (codesign would otherwise use the bare file name).
-sign --options runtime --identifier ai.storyteller.photocraft-cli "$CLI_DIR/photocraft-cli"
-codesign --verify --strict --verbose=2 "$CLI_DIR/photocraft-cli"
+sign --options runtime --identifier io.github.nihalpi1212.pigment-cli "$CLI_DIR/pigment-cli"
+codesign --verify --strict --verbose=2 "$CLI_DIR/pigment-cli"
 rm -f "$CLI_ZIP"
 ditto -c -k --keepParent "$CLI_DIR" "$CLI_ZIP"
 # notarytool accepts a zip of the bare binary. A bare Mach-O can't carry a stapled ticket, so
 # Gatekeeper looks the notarization up online when a quarantined copy first runs.
 if [[ "$NOTARIZE" = 1 ]]; then notarize "$CLI_ZIP"; fi
 
-"$WORK/bin/photocraft-cli" --version
+"$WORK/bin/pigment-cli" --version
 echo "==> done (check the artifacts as shipped with packaging/macos/verify.sh --arch $ARCH)"
 ls -lh "$DMG" "$CLI_ZIP"

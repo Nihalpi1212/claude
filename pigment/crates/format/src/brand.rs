@@ -110,7 +110,12 @@ mod tests {
         assert!(!is_legacy_pigment(&zip(&["layers/1.png"])));
         assert!(!is_legacy_pigment(b"PK\x03\x04 not really a zip"));
         assert!(!is_legacy_pigment(b""));
-        let doc = photocraft_doc::Document::new("Native", photocraft_doc::Size { width: 4, height: 4 }, photocraft_color::ColorMode::Rgb, photocraft_color::SampleType::U8);
+        let doc = photocraft_doc::Document::new(
+            "Native",
+            photocraft_doc::Size { width: 4, height: 4 },
+            photocraft_color::ColorMode::Rgb,
+            photocraft_color::SampleType::U8,
+        );
         let native = crate::save_to_bytes(&doc, &crate::SaveOptions::default()).unwrap();
         assert!(!is_legacy_pigment(&native));
     }

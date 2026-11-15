@@ -8,7 +8,8 @@ Run it from anywhere after merging a new upstream revision into pigment/; it is 
 
 What it does, and nothing else:
 
-* Rust sources: on every line that is not a `//` comment, the product name `PhotoCraft` (a whole
+* Rust sources: on every line that is not a `//` comment (`///` doc comments that clap and the
+  MCP server show as help, in HELP_DOC_FILES, count as text), the product name `PhotoCraft` (a whole
   word, not `PhotoCraft_...`, `%PhotoCraft...` or `PhotoCraftData`) becomes `Pigment`. Lines that
   name the upstream project on purpose are left alone: they carry `upstream-ok`, or one of the
   markers in KEEP_LINE (file markers PhotoCraft reads back, credits, upstream links).
@@ -41,6 +42,7 @@ SELF = "scripts/pigment-rebrand.py"
 # Files whose `PhotoCraft` strings are upstream facts, file-format data or developer tooling.
 KEEP_FILES = {
     SELF,
+    "crates/ui-egui/build.rs",  # rebrands the craft-i18n catalogs: names the upstream product on purpose
 }
 KEEP_DIRS = ("target/", "contributors/", "xtask/", "examples/", "docs/", "book/", "perf/", "scorecard/", "tests/")
 
@@ -83,6 +85,17 @@ BINARY = [
     (re.compile(r"Usage: photocraft "), "Usage: pigment "),
 ]
 
+# Files whose `///` doc comments are user-visible text: clap turns them into `--help`, and the MCP
+# tool parameters' doc comments become the JSON schema descriptions MCP clients show. Their doc
+# comments are rebranded like code; other comments never are.
+HELP_DOC_FILES = {
+    "apps/photocraft/src/launch_args.rs",
+    "apps/photocraft-cli/src/args.rs",
+    "apps/photocraft-cli/src/gpu.rs",
+    "crates/automation/src/args.rs",
+    "crates/automation/src/server.rs",
+}
+
 TEXT_SUFFIXES = {
     ".rs", ".toml", ".md", ".sh", ".ps1", ".wxs", ".wxl", ".wxi", ".xml", ".in", ".yml", ".yaml",
     ".json", ".desktop", ".html", ".py", ".txt", ".tsv", ".plist", ".svg", ".js", ".webmanifest",
@@ -94,8 +107,9 @@ def keep_file(rel: str) -> bool:
     return rel in KEEP_FILES or rel.startswith(KEEP_DIRS)
 
 
-def rust_line(line: str, binaries: bool = False) -> str:
-    if line.lstrip().startswith("//"):
+def rust_line(line: str, binaries: bool = False, help_docs: bool = False) -> str:
+    stripped = line.lstrip()
+    if stripped.startswith("//") and not (help_docs and stripped.startswith("///")):
         return line
     if binaries and not any(k in line for k in BINARY_SKIP):
         for pattern, new in BINARY:
@@ -113,7 +127,8 @@ def rewrite(path: pathlib.Path, rel: str) -> str | None:
     out = text if rel == SELF else APP_ID.sub(APP_ID_NEW, text)
     if path.suffix == ".rs" and not keep_file(rel):
         binaries = rel.startswith(BINARY_DIRS)
-        out = "".join(rust_line(line, binaries) for line in out.splitlines(keepends=True))
+        help_docs = rel in HELP_DOC_FILES
+        out = "".join(rust_line(line, binaries, help_docs) for line in out.splitlines(keepends=True))
     return out if out != text else None
 
 

@@ -7,7 +7,7 @@
 
 fn main() -> std::io::Result<()> {
     println!("cargo:rerun-if-changed=build.rs");
-    println!("cargo:rerun-if-changed=../../assets/app-icon/photocraft.ico");
+    println!("cargo:rerun-if-changed=../../assets/app-icon/pigment.ico");
     println!("cargo:rerun-if-env-changed=PHOTOCRAFT_REQUIRE_WINRES");
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
         return Ok(());
@@ -24,11 +24,11 @@ fn main() -> std::io::Result<()> {
     // FileVersion / ProductVersion strings and the numeric FILEVERSION / PRODUCTVERSION are left
     // to `WindowsResource::new`, which reads the Cargo package version. A pre-release such as
     // `1.2.3-rc.1` stays in the strings; the numeric fields are `1.2.3.0`.
-    res.set_icon("../../assets/app-icon/photocraft.ico")
+    res.set_icon("../../assets/app-icon/pigment.ico")
         .set("ProductName", "Pigment")
         .set("FileDescription", "Pigment command-line interface")
-        .set("CompanyName", "Learning Machines LLC")
-        .set("LegalCopyright", "Copyright (c) the PhotoCraft authors. MIT OR Apache-2.0.")
+        .set("CompanyName", "Pigment contributors")
+        .set("LegalCopyright", "Copyright (c) 2026 Pigment contributors; based on PhotoCraft (c) the PhotoCraft authors. MIT OR Apache-2.0.")
         .set("OriginalFilename", "pigment-cli.exe")
         .set("InternalName", "pigment-cli");
     if let Err(err) = res.compile() {

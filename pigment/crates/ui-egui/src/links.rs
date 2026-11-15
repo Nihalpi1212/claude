@@ -118,16 +118,7 @@ mod tests {
         let help: Vec<String> = crate::menus::menu_items(&app).into_iter().filter(|i| i.path == ["Help"]).map(|i| i.id).collect();
         assert_eq!(
             help,
-            [
-                "help.reportIssue",
-                "help.github",
-                "help.website",
-                "help.artcraftWebsite",
-                "help.checkForUpdates",
-                "---",
-                "help.systemInfo",
-                "help.about"
-            ]
+            ["help.reportIssue", "help.github", "help.website", "help.artcraftWebsite", "help.checkForUpdates", "---", "help.systemInfo", "help.about"]
         );
         for (id, _) in COMMANDS {
             assert!(crate::menus::is_live(id) && crate::menus::is_enabled(&app, id), "{id}");

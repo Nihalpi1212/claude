@@ -1,0 +1,461 @@
+# Pigment release builds.
+#
+# Builds Pigment (pigment/, a Rust workspace based on PhotoCraft) with its own packaging scripts on
+# each platform's runner:
+#   macos-15       pigment-<v>-macos-universal.dmg (Pigment.app, Apple silicon + Intel, joined
+#                  with lipo) and pigment-cli-<v>-macos-universal.zip
+#   windows-latest pigment-<v>-windows-x64.msi (WiX), pigment-<v>-windows-x64-portable.zip and
+#                  the debug symbols, pigment-<v>-windows-x64-symbols.zip
+#   ubuntu-22.04   pigment-<v>-linux-x86_64.AppImage, .deb and .tar.gz (glibc 2.35 or newer)
+#
+# The steps follow PhotoCraft's release (storytold/craft-common-actions' release.yml, which
+# PhotoCraft's release.yml calls), written out here instead of calling that reusable workflow,
+# without its signing, notarization, update feeds, contributor refresh, nightly dry run and the
+# platforms Pigment does not ship yet. The version comes from [workspace.package] version in
+# pigment/Cargo.toml (the packaging scripts read it there).
+#
+# Runs on tags named pigment-v<version> and on demand. A tag push, or a manual run with the `tag`
+# input set, also creates (or updates) the GitHub Release for that tag; the tag must name the
+# version in pigment/Cargo.toml, and a manual run may publish only from the default branch. A manual
+# run without `tag` only builds and uploads workflow artifacts. The notes come from
+# pigment/docs/RELEASE-NOTES-<version>.md.
+#
+# The builds are NOT code-signed (this repository holds no certificates): macOS gets an ad-hoc
+# signature so the app starts on Apple silicon, and the release notes say how to open it. No
+# secrets are used.
+
+name: Pigment release
+
+on:
+  push:
+    tags:
+      - 'pigment-v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to publish, e.g. pigment-v0.5.0 (leave empty to only build the packages)'
+        required: false
+        type: string
+        default: ''
+
+# Read-only by default: only the release job, which runs no build code, gets write access. Every
+# action is pinned by commit SHA (the comment names the tag or branch it was taken from).
+permissions:
+  contents: read
+
+concurrency:
+  group: pigment-release-${{ inputs.tag || github.ref }}
+  cancel-in-progress: false
+
+env:
+  # Keep in step with pigment-ci.yml.
+  RUST_TOOLCHAIN: '1.97.0'
+  # storytold/craft-fonts at PhotoCraft's pinned commit (its release.yml and ci.yml). The release
+  # binaries embed its OFL fonts; the packages carry their licences as OFL-<family>.txt.
+  CRAFT_FONTS_REF: b076417b5880bd4154bd22f00695b1d28c6bea83
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  CARGO_NET_RETRY: 10
+  RUST_BACKTRACE: 1
+
+jobs:
+  version:
+    name: Version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+      date: ${{ steps.version.outputs.date }}
+      i18n: ${{ steps.version.outputs.i18n }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            pigment/Cargo.toml
+            pigment/craft-i18n.rev
+          sparse-checkout-cone-mode: false
+
+      - name: Read the version
+        id: version
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          version=$(awk '
+            /^\[/ { in_pkg = ($0 == "[workspace.package]"); next }
+            in_pkg && $1 == "version" { gsub(/[" ]/, "", $3); print $3; exit }
+          ' pigment/Cargo.toml)
+          semver='[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?'
+          if ! [[ "$version" =~ ^${semver}$ ]]; then
+            echo "::error file=pigment/Cargo.toml::could not read [workspace.package] version (got '$version')"
+            exit 1
+          fi
+          tag=""
+          if [ -n "$INPUT_TAG" ]; then
+            # A manual release is published only from the default branch, so a run started on an
+            # unreviewed branch can build packages but not release them under Pigment's tag.
+            if [ "$REF_NAME" != "$DEFAULT_BRANCH" ] || [ "$REF_TYPE" != branch ]; then
+              echo "::error::a manual run publishes a release only from $DEFAULT_BRANCH (this run is on $REF_TYPE '$REF_NAME'); clear the tag input to only build"
+              exit 1
+            fi
+            tag="$INPUT_TAG"
+          elif [ "$REF_TYPE" = tag ]; then
+            tag="$REF_NAME"
+          fi
+          if [ -n "$tag" ]; then
+            if ! [[ "$tag" =~ ^pigment-v${semver}$ ]]; then
+              echo "::error::release tag '$tag' is not pigment-v<version>"
+              exit 1
+            fi
+            if [ "${tag#pigment-v}" != "$version" ]; then
+              echo "::error::tag $tag does not match version $version in pigment/Cargo.toml; bump it with 'cargo xtask version set ${tag#pigment-v}' first"
+              exit 1
+            fi
+          fi
+          # 0.x versions and versions with a pre-release suffix are published as pre-releases.
+          prerelease=false
+          if [[ "$version" == 0.* || "$version" == *-* ]]; then prerelease=true; fi
+          i18n=$(tr -d '[:space:]' < pigment/craft-i18n.rev)
+          if ! [[ "$i18n" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error file=pigment/craft-i18n.rev::expected one full commit SHA (got '$i18n')"
+            exit 1
+          fi
+          {
+            echo "version=$version"
+            echo "tag=$tag"
+            echo "prerelease=$prerelease"
+            echo "date=$(date -u +%Y-%m-%d)"
+            echo "i18n=$i18n"
+          } >>"$GITHUB_OUTPUT"
+          echo "Pigment $version, tag '${tag:-none: build only}', prerelease $prerelease"
+
+  macos:
+    name: macOS universal
+    needs: version
+    runs-on: macos-15
+    timeout-minutes: 180
+    defaults:
+      run:
+        working-directory: pigment
+    env:
+      PHOTOCRAFT_BUILD_SHA: ${{ github.sha }}
+      PHOTOCRAFT_BUILD_DATE: ${{ needs.version.outputs.date }}
+      CRAFT_FONTS_DIR: ${{ github.workspace }}/craft-fonts
+      CRAFT_FONTS_REQUIRED: '1'
+      CRAFT_I18N_DIR: ${{ github.workspace }}/craft-i18n
+      CRAFT_I18N_REQUIRED: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Check out craft-fonts
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: storytold/craft-fonts
+          ref: ${{ env.CRAFT_FONTS_REF }}
+          path: craft-fonts
+          persist-credentials: false
+
+      - name: Check out craft-i18n
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: storytold/craft-i18n
+          ref: ${{ needs.version.outputs.i18n }}
+          path: craft-i18n
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: pigment
+          key: release-macos-universal
+
+      # No MACOS_SIGN_IDENTITY: package.sh signs ad hoc (codesign -s -), which Apple silicon needs
+      # to start the app at all, and skips notarization.
+      - name: Build and package (Pigment.app on a DMG, CLI zip)
+        run: packaging/macos/package.sh --arch universal
+
+      - name: Check the packages
+        run: |
+          set -euo pipefail
+          ls -l dist/release
+          for f in dist/release/pigment-*-macos-universal.dmg dist/release/pigment-cli-*-macos-universal.zip; do
+            test -s "$f"
+          done
+          for arch in x86_64 arm64; do
+            lipo -info target/macos-package/bin/pigment | grep -qw "$arch"
+            lipo -info target/macos-package/bin/pigment-cli | grep -qw "$arch"
+          done
+          codesign --verify --strict --deep --verbose=2 target/macos-package/Pigment.app
+          target/macos-package/Pigment.app/Contents/MacOS/Pigment --version | grep '^Pigment '
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: pigment-macos-universal
+          path: pigment/dist/release/*
+          if-no-files-found: error
+
+  windows:
+    name: Windows x64
+    needs: version
+    runs-on: windows-latest
+    timeout-minutes: 150
+    defaults:
+      run:
+        working-directory: pigment
+    env:
+      PHOTOCRAFT_BUILD_SHA: ${{ github.sha }}
+      PHOTOCRAFT_BUILD_DATE: ${{ needs.version.outputs.date }}
+      CRAFT_FONTS_DIR: ${{ github.workspace }}/craft-fonts
+      CRAFT_FONTS_REQUIRED: '1'
+      CRAFT_I18N_DIR: ${{ github.workspace }}/craft-i18n
+      CRAFT_I18N_REQUIRED: '1'
+      WIX_VERSION: 5.0.2
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Check out craft-fonts
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: storytold/craft-fonts
+          ref: ${{ env.CRAFT_FONTS_REF }}
+          path: craft-fonts
+          persist-credentials: false
+
+      - name: Check out craft-i18n
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: storytold/craft-i18n
+          ref: ${{ needs.version.outputs.i18n }}
+          path: craft-i18n
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: x86_64-pc-windows-msvc
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: pigment
+          key: release-windows-x64
+
+      # WiX v5 and the UI and Util extensions the installer uses (as craft-common-actions'
+      # install-wix).
+      - name: Install WiX
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version $env:WIX_VERSION
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          wix extension add -g "WixToolset.UI.wixext/$env:WIX_VERSION" "WixToolset.Util.wixext/$env:WIX_VERSION"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          wix --version
+
+      # No WINDOWS_CERTIFICATE or AZURE_* secrets: sign.ps1 warns and leaves the files unsigned.
+      - name: Build and package (MSI, portable zip)
+        shell: pwsh
+        run: ./packaging/windows/package.ps1 -Arch x64
+
+      - name: Check the packages
+        shell: pwsh
+        run: |
+          Get-ChildItem dist/release | Format-Table Name, Length
+          foreach ($pattern in 'pigment-*-windows-x64.msi', 'pigment-*-windows-x64-portable.zip') {
+            if (-not (Get-ChildItem dist/release -Filter $pattern)) { throw "missing $pattern" }
+          }
+          # The installer's scope, folders, upgrade identity and registration (no install).
+          $msi = (Get-ChildItem dist/release -Filter 'pigment-*-windows-x64.msi' | Select-Object -First 1).FullName
+          ./packaging/windows/check-install-policy.ps1 -MsiPath $msi
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: pigment-windows-x64
+          path: pigment/dist/release/*
+          if-no-files-found: error
+
+  linux:
+    name: Linux x86_64
+    needs: version
+    # The oldest GitHub-hosted image, so the binaries need only glibc 2.35 (Ubuntu 22.04+,
+    # Debian 12+, Fedora 36+).
+    runs-on: ubuntu-22.04
+    timeout-minutes: 150
+    defaults:
+      run:
+        working-directory: pigment
+    env:
+      PHOTOCRAFT_BUILD_SHA: ${{ github.sha }}
+      PHOTOCRAFT_BUILD_DATE: ${{ needs.version.outputs.date }}
+      CRAFT_FONTS_DIR: ${{ github.workspace }}/craft-fonts
+      CRAFT_FONTS_REQUIRED: '1'
+      CRAFT_I18N_DIR: ${{ github.workspace }}/craft-i18n
+      CRAFT_I18N_REQUIRED: '1'
+      NFPM_VERSION: 2.48.0
+      NFPM_SHA256: 787af76e172dd5fc7cedf4d7c5a090a2f62be9001557a4db1103e270f90ddefd
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Check out craft-fonts
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: storytold/craft-fonts
+          ref: ${{ env.CRAFT_FONTS_REF }}
+          path: craft-fonts
+          persist-credentials: false
+
+      - name: Check out craft-i18n
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: storytold/craft-i18n
+          ref: ${{ needs.version.outputs.i18n }}
+          path: craft-i18n
+          persist-credentials: false
+
+      # The build's libraries and the packaging tools (craft-common-actions' install-linux-deps):
+      # desktop-file-validate and appstreamcli check the desktop entry and metainfo, file is used
+      # by appimagetool. appimagetool and the AppImage runtime are downloaded, pinned and SHA-256
+      # checked, by package.sh itself.
+      - name: Install build and packaging dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libxkbcommon-dev libwayland-dev libx11-dev libxrandr-dev libxi-dev libgl1-mesa-dev \
+            libgtk-3-dev pkg-config desktop-file-utils appstream file
+
+      - name: Install nfpm (pinned, SHA-256 checked)
+        run: |
+          set -euo pipefail
+          deb="$RUNNER_TEMP/nfpm.deb"
+          curl --proto '=https' --proto-redir '=https' -fsSL -o "$deb" \
+            "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_amd64.deb"
+          echo "$NFPM_SHA256  $deb" | sha256sum -c -
+          sudo dpkg -i "$deb"
+          nfpm --version
+
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: pigment
+          key: release-linux-x86_64
+
+      - name: Build and package (AppImage, deb, tar.gz)
+        run: packaging/linux/package.sh --formats "appimage deb tar"
+
+      - name: Check the packages
+        run: |
+          set -euo pipefail
+          ls -l dist/release
+          test ! -e dist/release/*.zsync
+          dpkg-deb --info dist/release/pigment-*-linux-x86_64.deb
+          dpkg-deb --contents dist/release/pigment-*-linux-x86_64.deb | grep -E 'usr/bin/|metainfo|applications|OFL-'
+          tar -tzf dist/release/pigment-*-linux-x86_64.tar.gz | grep -E '/bin/pigment(-cli)?$'
+          ldd target/release/pigment
+          appimage=$(ls dist/release/pigment-*-linux-x86_64.AppImage)
+          chmod +x "$appimage"
+          APPIMAGE_EXTRACT_AND_RUN=1 "$appimage" --cli --version | grep '^Pigment '
+          APPIMAGE_EXTRACT_AND_RUN=1 "$appimage" --version | grep '^Pigment '
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: pigment-linux-x86_64
+          path: pigment/dist/release/*
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: [version, macos, windows, linux]
+    # A tag push, or a manual run with `tag` set (the version job checked it against Cargo.toml).
+    if: needs.version.outputs.tag != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      RELEASE_TAG: ${{ needs.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          sparse-checkout: pigment/docs
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: pigment-*
+          path: packages
+          merge-multiple: true
+
+      - name: Checksums
+        working-directory: packages
+        run: |
+          set -euo pipefail
+          ls -l
+          sha256sum -- * >../SHA256SUMS.txt
+          mv ../SHA256SUMS.txt .
+          cat SHA256SUMS.txt
+
+      - name: Release notes
+        run: |
+          set -euo pipefail
+          notes="pigment/docs/RELEASE-NOTES-${VERSION}.md"
+          v="$VERSION"
+          {
+            echo "Pigment $v: a free, open-source image editor for macOS, Windows and Linux, based on [PhotoCraft](https://github.com/storytold/photocraft) by the ArtCraft team and the PhotoCraft contributors."
+            echo
+            if [ -f "$notes" ]; then
+              cat "$notes"
+            else
+              echo "::warning file=$notes::$notes is missing; the release has no notes of its own" >&2
+              echo "See [pigment/README.md](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_SHA}/pigment/README.md)."
+            fi
+            echo
+            # Notes that carry their own downloads list (a "## Downloads" heading) replace the
+            # generic one and its first-launch steps.
+            if ! { [ -f "$notes" ] && grep -q '^## Downloads' "$notes"; }; then
+              echo "## Downloads"
+              echo
+              echo "| Platform | File |"
+              echo "|---|---|"
+              echo "| macOS 11+ (Apple silicon and Intel) | \`pigment-$v-macos-universal.dmg\` (app), \`pigment-cli-$v-macos-universal.zip\` (command line) |"
+              echo "| Windows 10/11 x64 | \`pigment-$v-windows-x64.msi\` (installer), \`pigment-$v-windows-x64-portable.zip\` (no install) |"
+              echo "| Linux x86_64 (glibc 2.35+) | \`pigment-$v-linux-x86_64.AppImage\`, \`pigment-$v-linux-x86_64.deb\`, \`pigment-$v-linux-x86_64.tar.gz\` |"
+              echo
+              echo "\`SHA256SUMS.txt\` lists the SHA-256 of every file (\`sha256sum -c SHA256SUMS.txt --ignore-missing\`). \`pigment-$v-windows-x64-symbols.zip\` holds debug symbols for profilers."
+              echo
+              echo "## First launch: these builds are not code-signed"
+              echo
+              echo "- **macOS:** the app is not notarized. Drag Pigment to Applications, then right-click (or Control-click) it and choose **Open**, and **Open** again in the dialog. Or run \`xattr -dr com.apple.quarantine /Applications/Pigment.app\` once in Terminal."
+              echo "- **Windows:** SmartScreen may say \"Windows protected your PC\". Choose **More info**, then **Run anyway**."
+              echo "- **Linux:** make the AppImage executable (\`chmod +x pigment-$v-linux-x86_64.AppImage\`) and run it, or install the \`.deb\` with \`sudo apt install ./pigment-$v-linux-x86_64.deb\`."
+            fi
+          } >release-body.md
+          cat release-body.md
+
+      - name: Create or update the release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          target_commitish: ${{ github.sha }}
+          name: Pigment ${{ env.VERSION }}
+          body_path: release-body.md
+          prerelease: ${{ needs.version.outputs.prerelease == 'true' }}
+          fail_on_unmatched_files: true
+          files: packages/*

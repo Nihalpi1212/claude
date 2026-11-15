@@ -998,7 +998,7 @@ pub(super) fn batch(s: &mut Session, p: &Value) -> Result<Value> {
                 if save_and_close
                     && !extension(out).is_some_and(|ext| {
                         ext == encode_format
-                            && (matches!(ext.as_str(), "psd" | "psb" | "pcraft" | "ora")
+                            && (matches!(ext.as_str(), "psd" | "psb" | "pcraft" | "pigment" | "ora")
                                 || photocraft_formats::from_extension(&ext)
                                     .is_some_and(|format| format.capabilities().write == photocraft_formats::Availability::Available))
                     })

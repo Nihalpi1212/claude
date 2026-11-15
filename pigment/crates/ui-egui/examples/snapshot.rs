@@ -85,7 +85,7 @@ fn main() {
             PhotocraftApp::setup_context(&cc.egui_ctx, Default::default());
             let mut services = services;
             services.is_wayland = wayland_notice;
-            services.xwayland_command = wayland_notice.then(|| "WAYLAND_DISPLAY= photocraft".into());
+            services.xwayland_command = wayland_notice.then(|| "WAYLAND_DISPLAY= pigment".into());
             let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), services);
             if update_notice {
                 app.session.updates.status = photocraft_engine::updates_cmds::Status::Available {
