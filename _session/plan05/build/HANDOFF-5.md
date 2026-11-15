@@ -159,3 +159,128 @@ running.
   `tests/unit/preset-formats.test.mjs`'s `makeApp()`): `preset-kinds.js` is not Node-safe (it imports the tools).
 - move-tool-depth: draw `previewBox(doc)` and call `app.transformTool.start({ mode: 'free', grab: { pointer, handle } })`
   from the Move tool's press; skeleton-05's grab test then drives the real handle (`showTransform` on).
+
+## Fix pass
+
+Two passes worked from the three reviews (engines, modules, wiring; 24 findings). The first (agent a961194ae4e53bf7d,
+02:12–02:28 UTC) edited through Bash and was stopped by a usage limit; its commands are in
+`scratchpad/plan05/build/fix-pass-1-actions.md`. The second pass (this one) checked each of its edits against the
+code, kept the sound ones, corrected the rest, finished the findings it had not reached, and ran the suites. Below,
+"P1" is the first pass's work and "P2" this pass's. Nothing is committed.
+
+### Findings, one by one
+
+1. **S2.8 large dabs drawn at the cache's size (blocker), fixed.** P1: `brush.js` exports `dabDiameter` and
+   `dabDrawSide(size)` (= `ceil(size) + 2`, 0.4's side); `engine.js drawDab` (plain, rotated, aliased and sampler
+   paths), `renderTip` (`atDrawSide`) and `panels/brushes.js drawTip` draw the cached canvas at that side, so a dab keeps
+   0.4's extent and stays in the dirty rect and coverage box; ARCHITECTURE S2.8 says so. P1's skeleton-05 test "one hard
+   dab at 1000 px and 2500 px keeps 0.4's extent" compares with 0.4's dab (±1 px reach, alpha sums within 0.2 %, the
+   dirty rect holds the dab); P1 showed it fails without the fix. P2: checked every `dabCanvas` caller (no others);
+   ran the test (passes).
+2. **S2.5 `barrel` on a hovering side-button drag, fixed.** P1: `canvas-view.js norm`: `barrel: pen && ((buttons & 2)
+   || button === 2)` (the `button === 2` part keeps it on the release, where buttons is 0); S2.5's text. P1's new check
+   in skeleton-05 "claimed presses …" failed: it dispatched with pointerIds 2 and 3, and `setPointerCapture` throws for
+   an id that is not active, so the press never reached `onContextMenu`. P2: the check uses pointerId 1 (as the eraser
+   check does); passes; the mouse right-drag stays `barrel: false`. P2 also reflowed the S2.5 paragraph.
+3. **S2.2 who drives `tick` (major), fixed in the text.** P1: ARCHITECTURE S2.2: while `preset.buildUp` is on the stroke
+   schedules its own rAF ticks from `begin()` to `end()`/`cancel()` (brush-engine-core); `tools/paint.js` schedules
+   none. P2: reworded its last sentence ("exactly one loop drives build-up"); the stub's `tick` stays a no-op (no
+   build-up before brush-engine-core).
+4. **S2.4 / S2.7 / S1.3 seed and constrainColor (major), fixed.** P1: `engine.js strokeContext` derives both when
+   `paint` lacks them: a fresh seed per stroke (`nextStrokeSeed`), `traceDabs` its `seed` option (default 1), previews
+   seed 1; `constrainColor` = `app.colorConstraint` (hex in, hex out) on the rgb, else identity; a geometry modifier's
+   dab colour goes through it; S2.4 and S2.7 text. P2: limited that constraint to `mode: 'paint'` (a mask's white and an
+   eraser's black are not image colours: in Indexed mode they would have snapped to the palette); added the rule to
+   S1.3 (`baseSettings` adds no `seed` and no `constrainColor`).
+5. **S2.6 previews without app (minor), fixed.** P1: `renderStrokePreview` keeps `paint.app` (or `paint.view.app`) and
+   drops only the view; `panels/brushes.js drawStroke` passes the app; `StrokePaint.app` in S2.4. P2: checked the call
+   site has `app` in scope.
+6. **S4 / S15 `registerPsdFeatures` (minor), fixed in the text** (P1): "each mapper file calls
+   `registerPsdFeatures(PSD_FEATURES)` at top level; exporting the object alone does not count", in the as-landed list
+   and at `psdFeatures()`.
+7. **S2.8 sampled-tip cache (minor), fixed** (P1): `sampleCache` keyed on `dabDiameter`, bounded at 64 MP like
+   `dabCanvas`, drawn at `dabDrawSide`. P2: checked.
+8. **S1.3 "Modified" against a clamped tool (minor), fixed.** P1: `setToolBrush` also writes the clamped tip values into
+   the stored `brush`, and `tool-brush.js` exports `clampBrushToTool(app, toolId, preset)`; S1.3 defines "Modified" as
+   `sectionDiff(toolBrush(app, id).preset, clampBrushToTool(app, id, stored))`. Both kept (the first makes
+   `settings.tools[id].brush` agree with `toolBrush`; the second fixes the comparison with the `brushes` preset, which
+   is what skeleton-05 "brush" compares). P2: unit assertions in `brush-preset.test.mjs` (a DabTool's stored brush holds
+   1000; a fresh pick of a 2500 px preset has no section difference; the Brush keeps 2500).
+9. **Stub stroke tip flips (minor), fixed** (P1): the no-geometry path paints `preset.tip.flipX/flipY`; goldens
+   unchanged.
+10. **S1.2 migration untested (minor), fixed** (P1): skeleton-05 "0.4's settings.brushPresets migrate once" (ids after
+   the built-ins, data, `migrated`, `brushPresets` kept, no duplicates after a second start). P2: ran it (passes).
+11. **S5 damaged files keep what was read (minor), fixed.** P1: every container reader stops at the damage and returns
+   the kinds read before it with `damaged: true` (PNG: a truncated chunk or a chunk whose zlib stream fails; JPEG: a bad
+   marker, a truncated segment, no SOS, a damaged 8BIM block; WebP; TIFF IFD0 entries outside the file; PSD resources);
+   writers still throw; unit test in `io-chunks.test.mjs`; the as-landed S5 text. P2: checked the PNG rewrite against
+   the original read loop (each `continue` became `return`, same branches); a JPEG profile split over APP2 segments is
+   now given only whole when the file is damaged (a cut-short profile would have reached icc-engine as a broken one);
+   S5 text updated.
+12. **S11.3 `transformed` stage that returns `next()` (major), fixed.** P1: `type/api.js renderText` marks a transformed
+   stage's result `transformed: true` unless it is `next()`'s own object handed on (it keeps `next()`'s space) or the
+   stage returns `transformed: false`; TextLayer.render then resamples as 0.4. S11.3 and the as-landed text; skeleton-05
+   "type: a render stage …" now checks a rotated layer gives the same pixels with a pass-through stage and with a
+   `transformed: false` stage as with none. P2: checked nesting (an inner transformed result handed on keeps its flag);
+   the test passes.
+13. **S11.2 `typeDefaults` / `setTypeDefaults` and the real catalog (major), fixed (the reviewer's first option).** P1:
+   `type/target.js` (listed as unchanged in 0.5; recorded as the one skeleton edit there) reads the style option through
+   `fontCatalog().stylePatch` and writes it through `styleKey`; `postScriptName` and `axes` live in the option with a
+   real catalog; a 0.4 key the catalog does not answer for is parsed as 0.4 did; skeleton-05's fake-catalog test checks
+   the capture and the apply. P2: made the "does not answer" rule explicit in ARCHITECTURE (`stylePatch` returns null or
+   no finite `fontWeight`); checked there is no import cycle.
+14. **skeleton-05 TypeTool list and sibling (major), fixed** (P1): the list starts with the two 0.4 tools and ends with
+   the dummy; `sibling` is the registered vertical mask tool when there is one, else null; the Shift+T loop runs the
+   slot's length. P2: corrected the stale comment.
+15. **skeleton-05 swatch row vs 76 built-ins (major), fixed** (P1): `after.colors` is `swatchColors(app).slice(0, 60)`.
+16. **skeleton-05 setOptions on the slot id 'text' (minor), fixed** (P1): activates and sets `type-horizontal`, checks the
+   active id; S12.1 notes that selecting another text layer re-syncs the options (0.4's `syncFromLayer`).
+17. **S11.1 hover preview stages applied twice (minor), fixed** (P1): `api.js` exports `renderBase(layer)` (engine or
+   extension, no stage); S11.1 tells the hover stage to render its clone through it.
+18. **skeleton-05 fake catalog as a spread (minor), fixed.** P1: `Object.create(prev)` + `Object.assign`, and
+   `prev.stylePatch.call(prev, …)`. P2: `Object.assign` onto an object whose prototype is frozen throws for inherited
+   read-only members (the stub catalog `EMPTY_CATALOG` is frozen; a real one may be), so the overrides are now defined
+   with `Object.create(prev, { … })`.
+19. **S7.1 picker targets (minor), fixed** (P1): `app.pickColor(initial, { title, live, target = 'field' })` passes its
+   target; gradient stops (`gradient-editor.js`, `tools/fill.js`) pass `'stop'`, the shape popover `'field'`; S7 text.
+20. **S13.4 paint-only Shift+Alt keys from main (major), fixed** (P1): `keymap-store.js resolveKey` returns a paint
+   command that has no global key only while a painting tool is active and it is enabled, else null; `app.js` runs
+   nothing for null (no `commitBefore`, a Free Transform stays open); unit test in `keymap-05.test.mjs`; the as-landed
+   S9/S13 text. P2: checked there is no other caller.
+21. **S9.5 macOS application menu not customisable (minor), fixed** (P1): `customize` runs after the macOS app menu is
+   added; the menu itself and its role items stay. P2: unit test in `menu-05.test.mjs` (hidden Settings… and Camera Raw
+   Preferences…, Quit kept, Show All Menu Items, About coloured).
+22. **S9.2 Toggle Full Screen after a rebind (minor), fixed** (P1): Windows and Linux show `keys.menu[cmd] ??
+   keys.renderer[cmd][0]`; macOS keeps the fixed Ctrl+Cmd+F (a user key works through `shortcuts.js`); recorded. P2:
+   the same unit test checks win32, linux and darwin.
+23. **S13.3 `keysFor` without FIXED_KEYS (minor), fixed** (P1): recorded that `keysFor` excludes them; the stub shortcuts
+   list adds `fixedKeyFor(cmd, { platform, isPackaged })`, so Toggle Developer Tools is listed in development builds.
+24. **`panels/brushes.js` ownership row (minor), fixed in the text** (P1): the row and the as-landed S1–S3 list name the
+   pick through `setToolBrush` with `presetId`, the spacing getter, `dabDrawSide` and the preview's `app`.
+
+No finding was rejected: each was real as reported.
+
+### Deviations added by the fix pass
+
+- `brush.js`: new exports `dabDiameter`, `dabDrawSide` (P1). `tool-brush.js`: new export `clampBrushToTool` (P1).
+  `type/api.js`: new export `renderBase` (P1). `StrokePaint.app` (P1). All recorded in ARCHITECTURE.
+- `type/target.js` changed although 0.5 lists it as unchanged (P1, finding 13; recorded in the as-landed S11 list).
+- `app.pickColor`'s options gain `target` (P1).
+
+### Test counts at the end
+
+Run after the last code change (only this hand-off changed afterwards):
+
+| Suite | Result |
+|---|---|
+| Unit | **949 / 949** pass (947 + io-chunks "a file damaged after its chunks" (P1) + menu-05 "the macOS application menu …" (P2); the other new unit checks are assertions inside existing tests) |
+| Browser (port 8850, one worker, 20.0 min, whole suite) | 658 listed: **655 passed, 3 skipped, 0 failed**. 658 = 656 + skeleton-05 "one hard dab at 1000 px and 2500 px" + "0.4's settings.brushPresets migrate once" (both P1). The 3 skipped are record-goldens (2) and the gated repaint-speed case. No flake, no "Execution context was destroyed". Log: `scratchpad/logs/fixpass2-full-e2e.log`. |
+| Electron | **8 / 8** pass |
+
+No test server, browser or Electron process of this pass is left running.
+
+### Tips
+
+- `fix-pass-1-actions.md` holds P1's exact commands; the current tree is P1 plus the P2 corrections listed above.
+- A synthetic `PointerEvent` dispatched at the view canvas must use pointerId 1 (the page's active pointer):
+  canvas-view calls `setPointerCapture`, which throws for any other id, and the press then never reaches the tool.

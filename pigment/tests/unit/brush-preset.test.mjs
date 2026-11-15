@@ -5,7 +5,7 @@ import {
   DEFAULT_BRUSH, BRUSH_SECTIONS, CONTROL_TYPES, TEXTURE_MODES, DUAL_MODES, RANGES,
   normalizeBrush, brushFromLegacy, legacyTip, splitStrokeSettings, brushEquals, sectionDiff, withSections, clearControls, blobsOf, withoutSampleData,
 } from '../../src/renderer/lib/brush/preset.js';
-import { toolBrush, setToolBrush, supportsBrush } from '../../src/renderer/lib/brush/tool-brush.js';
+import { toolBrush, setToolBrush, supportsBrush, clampBrushToTool } from '../../src/renderer/lib/brush/tool-brush.js';
 
 test('DEFAULT_BRUSH: every section off, the schema defaults, frozen', () => {
   assert.equal(DEFAULT_BRUSH.brushVersion, 1);
@@ -245,6 +245,12 @@ test('setToolBrush: one write of brush, flat keys and presetId; locks, tool valu
   assert.equal(app.settings.tools.blur.hardness, 0.3);
   assert.equal('angle' in app.settings.tools.blur, false);
   assert.equal('flow' in app.settings.tools.blur, false);
+  // the stored brush holds the clamped size too, and a fresh pick of a 2500 px preset is not "modified" (S1.3)
+  assert.equal(app.settings.tools.blur.brush.tip.size, 1000);
+  const big = normalizeBrush({ tip: { size: 2500, hardness: 0.3, angle: 45 }, tool: { flow: 0.5 } }); // the pick above
+  assert.equal(clampBrushToTool(app, 'blur', big).tip.size, 1000);
+  assert.deepEqual(sectionDiff(toolBrush(app, 'blur').preset, clampBrushToTool(app, 'blur', big)), []);
+  assert.equal(clampBrushToTool(app, 'brush', big).tip.size, 2500);
   // locks: the locked sections keep the current brush's values
   app.settings.brushes.locks = { scattering: true };
   setToolBrush(app, 'brush', normalizeBrush({ tip: { size: 10 }, scattering: { enabled: true, scatter: 3 } }));

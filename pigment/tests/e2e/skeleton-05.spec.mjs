@@ -1695,12 +1695,12 @@ test('type: a fake catalog\'s PostScript-name style set from the options bar lan
     const api = await import('/lib/type/api.js');
     const target = await import('/lib/type/target.js');
     const prev = api.fontCatalog();
-    // the catalog may be a class instance (type-fonts): keep its prototype and its `this`
-    const fake = Object.create(prev);
-    Object.assign(fake, {
-      real: true,
-      styleKey: (st) => st.postScriptName ?? `${st.fontFamily}-${st.fontWeight}`,
-      stylePatch: (family, key) => (key === 'Fake-Black' ? { fontFamily: family, fontWeight: 900, fontItalic: false, postScriptName: 'Fake-Black', axes: { wght: 900 } } : prev.stylePatch.call(prev, family, key)),
+    // the catalog may be a class instance (type-fonts): keep its prototype and its `this`; defined, not assigned, so a
+    // frozen catalog's read-only members do not refuse the overrides
+    const fake = Object.create(prev, {
+      real: { value: true, enumerable: true },
+      styleKey: { value: (st) => st.postScriptName ?? `${st.fontFamily}-${st.fontWeight}`, enumerable: true },
+      stylePatch: { value: (family, key) => (key === 'Fake-Black' ? { fontFamily: family, fontWeight: 900, fontItalic: false, postScriptName: 'Fake-Black', axes: { wght: 900 } } : prev.stylePatch.call(prev, family, key)), enumerable: true },
     });
     api.registerFontCatalog(fake);
     try {
@@ -1783,7 +1783,7 @@ test('type: a TypeTool subclass in the text slot is reached by Shift+T, and a no
     return { during, sibling, verticalMask, open: !!tool.session, text: app.doc.layers().find((l) => l.type === 'text')?.text ?? null, layers, after: app.doc.layers().length };
   });
   expect(r.during).toBe('type-dummy');
-  expect(r.sibling).toBe(r.verticalMask); // no vertical mask tool registered: no sibling
+  expect(r.sibling).toBe(r.verticalMask); // the registered vertical mask tool, else (the skeleton) no sibling
   expect(r.open).toBe(false);
   expect(r.text).toBe('Dummy');
   expect(r.after).toBe(r.layers + 1);

@@ -57,7 +57,9 @@ export function read(b) {
   const { list } = segments(b, () => (damaged = true));
   const out = {};
   const icc = list.filter(isIcc).map((s) => ({ seq: s.data[12], data: s.data.subarray(14) })).sort((a, c) => a.seq - c.seq);
-  if (icc.length) out.icc = concat(icc.map((p) => p.data));
+  // a damaged file whose profile is cut short (fewer APP2 parts than each declares) gives no profile, not part of one
+  const whole = !damaged || list.filter(isIcc).every((s) => s.data[13] === icc.length);
+  if (icc.length && whole) out.icc = concat(icc.map((p) => p.data));
   const exif = list.find(isExif);
   if (exif) out.exif = copyBytes(exif.data.subarray(EXIF_SIG.length));
   const xmp = list.find(isXmp);

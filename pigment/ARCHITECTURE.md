@@ -3771,7 +3771,8 @@ to 1000 px; `clampBrushToTool` is exported by `tool-brush.js`);
 antialias: true, view }`. Subclasses spread it and override keys exactly as in 0.4 (Pencil: `hardness: 1, flow: 1,
 smoothing: 0, antialias: false, pressureSize: false`; Eraser Block: `size: 16`; the stamps' `sampler`; the Adjustment
 Brush's `mode`, `maskValue`); S2.2's precedence makes those overrides win over the preset. A new ToolPaint field reaches
-the stroke without a paint.js edit.
+the stroke without a paint.js edit. `baseSettings` adds no `seed` and no `constrainColor`: the engine derives both
+(a fresh seed per stroke, `app.colorConstraint` through `view.app`; S2.4).
 
 **Command `tool:brush-preset`** (registered working by the skeleton): arg a preset id of `brushes`, or `{ id?,
 preset?, tool? }`; applies to `arg.tool`, else the active tool when `supportsBrush` is not false, else the last painting
@@ -5182,7 +5183,8 @@ names above stay valid). Package owners build against this list too.
 - `io-chunks.js` extras `sniffChunkFormat`, `chunkProviders`; `io-chunks/bytes.js` holds the shared byte and 8BIM
   helpers. Each container's reader stops at the damage (a truncated chunk, segment, tag or resource; a chunk whose zlib
   stream fails) and returns the kinds it read before it with `damaged: true`, so a truncated tagged PNG still gives its
-  `icc`; `{ damaged: true }` alone means nothing could be read (the signature or the first chunk is broken). `readChunks` sniffs the signature first; `applyChunks` sniffs when `formatOrExt` names no chunk format. PNG
+  `icc` (a JPEG profile split over APP2 segments is given only whole); `{ damaged: true }` alone means nothing could be
+  read (the signature or the first chunk is broken). `readChunks` sniffs the signature first; `applyChunks` sniffs when `formatOrExt` names no chunk format. PNG
   zlib uses `shared/pixels/png.js zlibCodecs` (iCCP and zTXt hold zlib streams). Resolution as read: PNG pHYs per inch
   rounded to 0.1, JPEG, TIFF and PSD to 0.01; PSD unit 2 is reported as `'cm'`.
 - `pipeline.js` extras: `displaySpaceOf(view)`, `profileOf(doc)`, `workingRGB()`, `setWorkingSpaces()`; `assignProfile`
@@ -5296,7 +5298,8 @@ lets `editor.js` find a subclass's session; a mask tool without a partner has no
 LCD" and "Windows". `api.js` also exports `renderBase(layer)` (S11.1's hover preview renders its clone through it).
 `type/target.js`, listed among the files 0.5 does not change, has one skeleton edit: `typeDefaults` reads the style
 option through `fontCatalog().stylePatch(family, key)` and `setTypeDefaults` writes it through `styleKey` (a 0.4 key
-such as `'700i'` the catalog does not answer for is read as 0.4 read it), so S10.5's capture, S12.1's apply and the
+such as `'700i'` the catalog does not answer for, `stylePatch` returning null or no finite `fontWeight`, is read as 0.4
+read it; type-fonts' catalog answers that way for a key it does not know, or maps 0.4 keys itself), so S10.5's capture, S12.1's apply and the
 Character panel without a text layer keep the face with a real catalog; `postScriptName` and `axes` then live in the
 style option, not in `settings.type.char`. With the stub catalog the results are 0.4's.
 

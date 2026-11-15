@@ -205,3 +205,20 @@ test('hidden and coloured items, "Show All Menu Items", and showAll', () => {
   const stubbed = commands('linux', { ...FULL, menus: JSON.stringify(menus), stubs: 'edit:show-all-menu-items' });
   assert.equal(find(stubbed, ['File', 'Show All Menu Items']).item.enabled, false);
 });
+
+test('the macOS application menu is customised like the others; Toggle Full Screen shows a key set() moved to menu', () => {
+  const menus = { hidden: ['edit:preferences', 'edit:camera-raw-preferences', 'menu:Pigment'], colors: { 'help:about': 'red' } };
+  const t = build('darwin', { ...FULL, menus: JSON.stringify(menus) });
+  const app = t[0];
+  assert.equal(app.label, 'Pigment'); // the menu itself stays: Quit lives there
+  const labels = app.submenu.map((i) => i.label ?? i.role ?? i.type);
+  assert.ok(!labels.some((l) => /^Settings|^Camera Raw Preferences/.test(l)), labels.join());
+  assert.ok(labels.includes('quit'));
+  assert.equal(app.submenu.at(-1).label, 'Show All Menu Items');
+  assert.equal(app.submenu.find((i) => /^About/.test(i.label ?? '')).pigmentColor, 'red');
+  const full = (platform, keymap) => commands(platform, { ...FULL, keymap: JSON.stringify(keymap) }).find((x) => x.cmd === 'view:fullscreen').item.accelerator;
+  const moved = { v: 1, menu: { 'view:fullscreen': 'CmdOrCtrl+Alt+Shift+F11' }, renderer: { 'view:fullscreen': [] } };
+  assert.equal(full('win32', moved), 'CmdOrCtrl+Alt+Shift+F11');
+  assert.equal(full('linux', { v: 1 }), 'F11');
+  assert.equal(full('darwin', moved), 'Ctrl+Cmd+F');
+});
