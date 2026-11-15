@@ -417,6 +417,7 @@ fn selection_menus_follow_photoshop_order() {
             Some("Fill…"),
             Some("Stroke…"),
             Some("Content-Aware Fill…"),
+            Some("Generative Fill…"), // Pigment: generative AI
             None,
             Some("Last Filter"),
             None,

@@ -599,6 +599,10 @@ fn main() -> eframe::Result {
             mac_window::disable_native_title_drag();
             // Long commands and file opens run as background jobs with progress and Cancel (#210).
             app.background_jobs = std::env::var_os("PHOTOCRAFT_INLINE_JOBS").is_none();
+            // Pigment: generative AI over the person's accounts in the settings folder.
+            if let Some(dir) = services::config_dir() {
+                photocraft_ui_egui::ai_ui::install(&mut app, &dir);
+            }
             // Displays and their profiles (#569): wait briefly so the first frames already use
             // the right profile; a slower reading is applied when it arrives, and the shell reads
             // again when the displays may have changed.

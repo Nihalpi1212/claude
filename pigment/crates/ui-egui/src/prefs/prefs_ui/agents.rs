@@ -117,10 +117,17 @@ pub(super) fn integration_rows(ui: &mut egui::Ui, obj: &mut Map<String, Value>, 
         let text = result.get("message").and_then(Value::as_str).unwrap_or("");
         ui.label(RichText::new(text).color(if ok { t.text_dim } else { t.danger }));
     }
+    // Pigment: generative AI's accounts.
+    if crate::ai_ui::preferences_button(ui) {
+        f.insert("__agentAction".into(), json!("aiAccounts"));
+    }
 }
 
 /// A button of [`integration_rows`]: choose a folder (into the dialog's working copy).
 pub(super) fn agent_action(app: &mut PhotocraftApp, f: &mut Map<String, Value>, action: &str, dialog: u64) {
+    if action == "aiAccounts" {
+        return crate::ai_ui::open_accounts(app); // Pigment: generative AI
+    }
     let key = match action {
         "chooseRead" => Some("readRoot"),
         "chooseWrite" => Some("writeRoot"),

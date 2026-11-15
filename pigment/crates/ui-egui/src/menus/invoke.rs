@@ -157,6 +157,10 @@ fn invoke_early_commands(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str,
     if id == "view.proofSetup.custom" {
         return Some(Ok(json!({"dialog": crate::filter_dialog::open(app, "view.proofSetup")})));
     }
+    // Pigment: the generative AI windows, AI Accounts, Remove Background and Describe Image.
+    if let Some(r) = crate::ai_ui::menu(app, id, params) {
+        return Some(r);
+    }
     // Image › Analysis tools/dialogs, Measurement Log and Notes panels, File › Import › Notes.
     if let Some(r) = crate::analysis_ui::menu(app, id, params) {
         return Some(r);

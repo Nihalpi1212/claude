@@ -175,7 +175,8 @@ pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest
     if let Some(gate) = app.services.automation_authorize {
         app.session.authorize = Some(gate);
     }
-    let outcome = dispatch(app, ctx, req);
+    // Pigment: an agent's request runs AI commands only with "Allow agents to run AI commands".
+    let outcome = crate::ai_ui::as_agent(app, |app| dispatch(app, ctx, req));
     app.session.authorize = saved;
     outcome
 }

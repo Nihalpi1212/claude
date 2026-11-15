@@ -616,6 +616,10 @@ fn on_event(app: &mut PhotocraftApp, ctx: &egui::Context, e: JobEvent) {
     if crate::camera_raw_ui::on_redevelop_event(app, &e) {
         return;
     }
+    // Pigment: the generative AI windows take the requests they started.
+    if crate::ai_ui::on_job_event(app, &e) {
+        return;
+    }
     if app.jobs.place.as_ref().is_some_and(|p| p.job == e.id)
         && let Some(place) = app.jobs.place.take()
     {
@@ -965,7 +969,13 @@ pub fn dialog(app: &mut PhotocraftApp, ctx: &egui::Context) {
                 &j.command,
                 !app.ui.view.hides_chrome() && app.ui.panels.status_bar && job_in_view(app).is_some_and(|shown| shown.id == j.id),
             );
-            if j.command == "file.automate.batch" || j.elapsed_ms < DIALOG_DELAY_MS || place || app.jobs.saves.iter().any(|s| s.job == j.id) {
+            // Pigment: a generative AI request waits on its provider in the status bar, never in a modal.
+            if j.command == "file.automate.batch"
+                || j.elapsed_ms < DIALOG_DELAY_MS
+                || place
+                || app.jobs.saves.iter().any(|s| s.job == j.id)
+                || j.command.starts_with("ai.")
+            {
                 return;
             }
             j

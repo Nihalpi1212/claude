@@ -62,6 +62,7 @@ impl PhotocraftApp {
         {
             authorize(id, &params)?;
         }
+        crate::ai_ui::gate(self, id, &params)?; // Pigment: agents need "Allow agents to run AI commands"
         // A new layer while Free Transform is open applies the transform first, as Photoshop does
         // (#5667): History reads the transform (or Place Embedded), then New Layer. Only for a
         // command that can run; a transform refused or still being applied keeps the box open and
