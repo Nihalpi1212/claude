@@ -142,8 +142,21 @@ jobs:
             case "$name" in '' | '#'*) continue ;; esac
             skips+=(--skip "$name")
           done <scripts/upstream-test-failures.txt
+          log="$RUNNER_TEMP/tests.log"
+          status=0
           cargo test --workspace --locked --features heif --no-fail-fast --lib --bins --tests \
-            -- --exact "${skips[@]}"
+            -- --exact "${skips[@]}" 2>&1 | tee "$log" || status=$?
+          # The log runs to tens of thousands of lines; repeat every failure at the end so it is in
+          # the tail that the log viewer and the API show first.
+          if [ "$status" -ne 0 ]; then
+            echo "::group::Failed tests (summary)"
+            grep -E '^test .* FAILED$|^error: [0-9]+ targets? failed|^    `-p ' "$log" || true
+            echo "::endgroup::"
+            echo "::group::Panic messages (first 40 lines after each)"
+            grep -E -A40 "panicked at " "$log" | head -n 2000 || true
+            echo "::endgroup::"
+          fi
+          exit "$status"
 
       # Informational: shows when a later upstream merge makes them pass (then drop their lines).
       - name: Known upstream test failures (not gating)
