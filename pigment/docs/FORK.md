@@ -229,7 +229,10 @@ The JavaScript Pigment's AI features rebuilt on PhotoCraft; the contract is
 [`docs/generative-ai.md`](generative-ai.md). New files: `crates/engine/src/generative.rs`,
 `crates/engine/src/generative/mock.rs`, `crates/engine/src/cmd/ai_cmds.rs` and
 `crates/engine/src/cmd/ai_cmds/` (`region.rs`, `fill.rs`, `expand.rs`, `generate.rs`,
-`background.rs`, `describe.rs`, `tests.rs`), this page's section and `docs/generative-ai.md`.
+`background.rs`, `describe.rs`, `tests.rs`), this page's section and `docs/generative-ai.md`; the
+provider crate `crates/genai` (package `pigment-genai`, with its tests in `crates/genai/tests/genai/`),
+`crates/automation/src/genai.rs`, `apps/photocraft-cli/src/ai.rs` and
+`apps/photocraft-cli/tests/it/ai.rs`.
 
 | Upstream file | Hook |
 |---|---|
@@ -238,6 +241,16 @@ The JavaScript Pigment's AI features rebuilt on PhotoCraft; the contract is
 | `crates/engine/src/error.rs` | the `EngineError::Generative { kind, message }` variant |
 | `crates/engine/src/cmd/actions_cmds.rs` | `recorded()` skips `ai_cmds::unrecorded` ids, so `ai.*` steps are never recorded into actions |
 | `crates/engine/Cargo.toml` | the `testgen` feature (the mock backend for other crates' tests) |
+| `Cargo.toml` (workspace) | `pigment-genai = { path = "crates/genai" }` in `[workspace.dependencies]` (`Cargo.lock` gains it, `keyring` and keyring's macOS and Windows dependencies) |
+| `crates/automation/Cargo.toml` | the `pigment-genai` dependency |
+| `crates/automation/src/lib.rs` | `pub mod genai;` |
+| `crates/automation/src/headless.rs` | `untrusted()` builds its session with `genai::session(Caller::Agent)`, `trusted_local()` with `genai::session(Caller::CommandLine { allow_ai: false })` |
+| `apps/photocraft-cli/Cargo.toml` | the `pigment-genai` dependency |
+| `apps/photocraft-cli/src/args.rs` | the `Ai(crate::ai::AiArgs)` subcommand and `run`'s `--allow-ai` |
+| `apps/photocraft-cli/src/lib.rs` | `mod ai;` and `Command::Ai(a) => ai::run(a, out, err)` |
+| `apps/photocraft-cli/src/document.rs` | `run_cmds` calls `crate::ai::install(&mut h, a)?` (refuses an `ai.*` step without `--allow-ai`, installs the backend that may send with it) |
+| `apps/photocraft-cli/tests/it/main.rs` | `mod ai;` |
+| `apps/photocraft-cli/tests/it/man_and_completions.rs` | the man pages `ai` and its subcommands add |
 
 At an upstream merge: if PhotoCraft adds generative commands of its own (through craft-ai-client),
 either alias ours to them or keep ours and hide theirs, and record the choice here.
