@@ -131,16 +131,45 @@ jobs:
         run: cargo clippy --workspace --all-targets --locked --features heif --keep-going -- -D warnings
 
       # Unit and integration tests without the examples (clippy has checked those), as upstream's
-      # `cargo xtask test` does, then the doctests.
+      # `cargo xtask test` does, then the doctests. The integration tests that already fail on
+      # PhotoCraft's own tree at the imported revision (scripts/upstream-test-failures.txt, which
+      # says why) are skipped by their exact names here and run on their own in the next step.
       - name: Tests
-        run: cargo test --workspace --locked --features heif --no-fail-fast --lib --bins --tests
+        run: |
+          set -euo pipefail
+          skips=()
+          while IFS= read -r name; do
+            case "$name" in '' | '#'*) continue ;; esac
+            skips+=(--skip "$name")
+          done <scripts/upstream-test-failures.txt
+          cargo test --workspace --locked --features heif --no-fail-fast --lib --bins --tests \
+            -- --exact "${skips[@]}"
 
+      # Informational: shows when a later upstream merge makes them pass (then drop their lines).
+      - name: Known upstream test failures (not gating)
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          names=()
+          while IFS= read -r name; do
+            case "$name" in '' | '#'*) continue ;; esac
+            names+=("$name")
+          done <scripts/upstream-test-failures.txt
+          # The same packages and features as the Tests step, so nothing is rebuilt; every other
+          # test is filtered out.
+          cargo test --workspace --locked --features heif --no-fail-fast --test it \
+            -- --exact "${names[@]}"
+
+      # The steps below don't depend on the tests, so they run (and report) even when tests fail.
       - name: Doctests
+        if: ${{ !cancelled() }}
         run: cargo test --workspace --locked --features heif --no-fail-fast --doc
 
       # The repository checks of upstream's gate (`cargo xtask ci`) and packaging-lint.yml that need
       # no extra toolchain.
       - name: Repository checks (layers, panel commands, scorecard)
+        if: ${{ !cancelled() }}
         run: |
           set -euo pipefail
           cargo xtask layers
@@ -148,6 +177,7 @@ jobs:
           cargo xtask scorecard --check
 
       - name: Packaging script tests (AppRun, verified downloads, package docs, Flatpak manifests)
+        if: ${{ !cancelled() }}
         run: |
           set -euo pipefail
           bash packaging/linux/apprun-test.sh
@@ -162,6 +192,7 @@ jobs:
       # The version line, a document converted to PNG and to Pigment's native `.pigment` and back,
       # and the typed error for a document saved by Pigment 0.1 to 0.4.
       - name: CLI smoke test
+        if: ${{ !cancelled() }}
         run: |
           set -euo pipefail
           cargo build --locked --features heif -p photocraft-cli

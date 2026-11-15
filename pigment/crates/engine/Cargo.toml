@@ -10,6 +10,8 @@ workspace = true
 [features]
 # Real-file corpus tests (opt-in; `cargo xtask test-corpus`). Fail when the corpus is missing.
 corpus = []
+# Pigment: generative AI. `photocraft_engine::generative::mock::MockBackend` for other crates' tests.
+testgen = []
 
 [dependencies]
 photocraft-geom = { workspace = true }

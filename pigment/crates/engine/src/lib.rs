@@ -20,6 +20,8 @@ pub mod display_color;
 pub mod doc_path;
 pub mod filters;
 pub mod filters_ext;
+// Pigment: generative AI
+pub mod generative;
 mod group_options;
 pub mod guide_layout;
 pub mod hidden_target;
@@ -68,6 +70,8 @@ pub use cmd as commands;
 pub use cmd::actions_cmds;
 pub use cmd::actions_edit_cmds;
 pub use cmd::adjust_cmds;
+// Pigment: generative AI
+pub use cmd::ai_cmds;
 pub use cmd::align_cmds;
 pub use cmd::analysis_cmds;
 pub use cmd::artboard_cmds;
@@ -344,6 +348,8 @@ pub struct Session {
     /// command reporting too narrow a redraw area (#4053). Counted in debug and test builds only;
     /// tests read it.
     pub damage_misses: usize,
+    /// Pigment: generative AI. The backend the `ai.*` commands call ([`generative`]).
+    generative: Option<Arc<dyn generative::GenerativeBackend>>,
     /// Commands that left the whole document to redraw (`last_damage` None) while changing under
     /// 25 % of it ([`Session::dispatch`]). Counted in debug and test builds only; tests read it.
     pub whole_redraws: usize,

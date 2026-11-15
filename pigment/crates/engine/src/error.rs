@@ -41,6 +41,10 @@ pub enum EngineError {
     /// step hits one fails that input instead of saving it unprocessed.
     #[error("{0}")]
     BatchLimit(String),
+    /// Pigment: generative AI. A refusal or provider failure with its kind (`missingKey`,
+    /// `needsConsent`, `quota`, …), so the interface can offer AI Accounts or Try Again.
+    #[error("{message}")]
+    Generative { kind: &'static str, message: String },
     /// A background job was cancelled (see [`jobs`]); nothing changed.
     #[error("cancelled")]
     Cancelled,

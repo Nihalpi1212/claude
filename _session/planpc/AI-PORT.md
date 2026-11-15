@@ -54,7 +54,10 @@ Sources:
 
 ## Rules for every package
 
-- **One build at a time.** Machine: 4 CPUs, a shared target directory and about 20 GB of free disk. Run one cargo process at a time with `-j 4`, and never `cargo clean`. The whole workspace test suite is too long here; run the tests of the crates and files you touched (CI runs everything).
+- **One build at a time.** Machine: 4 CPUs and a shared target directory. Run one cargo process at a time with `-j 4`, and never `cargo clean`. The whole workspace test suite is too long here; run the tests of the crates and files you touched (CI runs everything).
+- **Disk.** The real quota is about 39 GB, and about 15 GB is free at the start; `df` reports 252 GB, which is misleading. Always build with `CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0`.
+  - Before a big test build, check `df -h /`. If less than 6 GB is free, delete the test executables in `target/debug/deps` (`find pigment/target/debug/deps -maxdepth 1 -type f -perm -u+x -size +20M -delete`) and `target/debug/incremental`. Cargo rebuilds them when needed.
+  - Tests that only fail in this container, so don't chase them: PhotoCraft's scratch-disk check misreads the 252 GB volume (set `TMPDIR=/dev/shm/pt` for test runs, as the rebrand review did); CJK and Arabic glyph tests need craft-fonts; permission tests can't pass as root; three type-tool font tests pick up an Inter Display font installed here. The known upstream failures are listed in `pigment/scripts/upstream-test-failures.txt`.
 - **Keep CI green** (`.github/workflows/pigment-ci.yml`): `cargo fmt --all -- --check`, clippy with `-D warnings` on what you touched, and your tests. Add an `upstream-ok` marker or a FORK.md entry where the rebrand script or the merge notes need one.
 - **Hooks into upstream files stay small** (a line or two each). List every one in `pigment/docs/FORK.md` under "What Pigment added", as Nib does.
 - **New interface strings** go through PhotoCraft's i18n catalogues: English, with the other languages left to their usual fallback unless the catalogue tooling requires rows.
