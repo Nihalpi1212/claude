@@ -33,6 +33,7 @@ pub fn is_live(id: &str) -> bool {
         || crate::preset_panels::handles(id)
         || crate::type_panels_ui::handles(id)
         || crate::timeline_ui::handles(id)
+        || crate::ai_ui::handles(id)
 }
 
 /// Commands outside the catalogue that belong right after a catalogue item: `(id, after)`.
@@ -88,13 +89,14 @@ pub fn menu_items(app: &PhotocraftApp) -> Vec<MenuItem> {
             color: None,
         });
     }
+    extra.extend(crate::ai_ui::menu_items(app)); // Pigment: generative AI
     for mut e in extra {
         let dup = items.iter().any(|i| i.id == e.id || (i.path == e.path && i.label.trim_end_matches('…') == e.label.trim_end_matches('…')));
         if !dup {
             // Insert after the item it belongs next to, else after the last item of the same
             // top-level menu, keeping menus contiguous.
             let top = e.path.first().cloned();
-            let after = PLACE_AFTER.iter().find(|(id, _)| *id == e.id).and_then(|(_, a)| items.iter().position(|i| i.id == *a));
+            let after = PLACE_AFTER.iter().find(|(id, _)| *id == e.id).map(|(_, a)| *a).or_else(|| crate::ai_ui::place_after(&e.id)).and_then(|a| items.iter().position(|i| i.id == a));
             if let Some(path) = after.and_then(|a| items.get(a)).map(|i| i.path.clone()) {
                 e.path = path;
             }

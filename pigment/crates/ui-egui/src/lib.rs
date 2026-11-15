@@ -27,6 +27,8 @@ macro_rules! tl {
         $crate::i18n::t($s)
     };
 }
+// Pigment: generative AI.
+pub mod ai_ui;
 mod brush_mode_menu;
 pub mod canvas;
 pub mod control;
@@ -778,6 +780,8 @@ pub struct PhotocraftApp {
     last_frame_start_ms: f64,
     /// Background job bookkeeping: opening tabs, control replies waiting on a job.
     pub jobs: jobs_ui::JobsUi,
+    /// Pigment: generative AI's windows and accounts (`ai_ui`).
+    pub ai: ai_ui::AiUi,
     #[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
     live_tokens: theme::live::LiveTokens,
 }

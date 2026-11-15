@@ -68,10 +68,10 @@ impl AiAccounts {
     pub fn new(config_dir: &Path) -> Self {
         let mut a = Self::with_store(default_store(config_dir), AiSettings::load(config_dir), Some(config_dir.to_path_buf()));
         for p in ProviderId::ALL {
-            if let Ok(url) = std::env::var(base_url_env(p)) {
-                if a.set_base_url(p, &url).is_err() {
-                    log::warn!("genai: {} is not a loopback address; ignored", base_url_env(p));
-                }
+            if let Ok(url) = std::env::var(base_url_env(p))
+                && a.set_base_url(p, &url).is_err()
+            {
+                log::warn!("genai: {} is not a loopback address; ignored", base_url_env(p));
             }
         }
         a

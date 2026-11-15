@@ -63,7 +63,8 @@ pub fn draw(app: &mut PhotocraftApp, ui: &mut egui::Ui, xf: &ViewXform) {
 
 /// The Crop tool's controls in the bar.
 fn contents(app: &mut PhotocraftApp, ui: &mut egui::Ui, more: &mut task_bar::MoreMenu) {
-    // Generative Expand (#41) goes here, before the preset dropdown.
+    // Generative Expand (#41) goes here, before the preset dropdown. Pigment: generative AI.
+    crate::ai_ui::crop_task_bar_item(app, ui);
     let before_ratio = crop_ui::preset_ratio(app);
     // Its own id: the options bar shows the same dropdown.
     ui.push_id("crop-task-bar", |ui| crate::crop_presets::dropdown(app, ui));

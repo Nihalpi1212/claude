@@ -27,7 +27,10 @@ fn hello() -> ChatRequest {
 fn openai_generation_bodies_and_sizes() {
     let req = ImageRequest { prompt: "a fox".into(), width: 1600, height: 1000, transparent: true };
     let b = openai::generation_body("gpt-image-1", &req);
-    assert_eq!(b, json!({"model": "gpt-image-1", "prompt": "a fox", "n": 1, "size": "1536x1024", "quality": "auto", "output_format": "png", "background": "transparent"}));
+    assert_eq!(
+        b,
+        json!({"model": "gpt-image-1", "prompt": "a fox", "n": 1, "size": "1536x1024", "quality": "auto", "output_format": "png", "background": "transparent"})
+    );
     // gpt-image-2 takes no `background`; DALL·E answers base64 only when asked.
     let g2 = openai::generation_body("gpt-image-2", &req);
     assert!(g2.get("background").is_none() && g2["output_format"] == "png");
@@ -71,7 +74,9 @@ fn jpeg_answers_decode() {
 
 #[test]
 fn model_catalogs_and_preferred_models() {
-    let o = openai::parse_models(&json!({"data": [{"id": "gpt-image-1"}, {"id": "gpt-5.1"}, {"id": "whisper-1"}, {"id": "o3"}, {"id": "gpt-5.1"}, {"id": "computer-use-preview"}]}));
+    let o = openai::parse_models(
+        &json!({"data": [{"id": "gpt-image-1"}, {"id": "gpt-5.1"}, {"id": "whisper-1"}, {"id": "o3"}, {"id": "gpt-5.1"}, {"id": "computer-use-preview"}]}),
+    );
     let kinds: Vec<(&str, ModelKind)> = o.iter().map(|m| (m.id.as_str(), m.kind)).collect();
     assert_eq!(
         kinds,
@@ -130,15 +135,19 @@ fn gemini_image_bodies() {
     // An edit sends the instruction, the image, and the mask as white (may change) on black,
     // grey where the mask is partial.
     let mask = image(4, 4, |x, _| [255, 255, 255, [0, 128, 255, 255][x as usize]]);
-    let e = gemini::edit_body("gemini-2.5-flash-image", &EditRequest { prompt: "grow".into(), image: solid(4, 4, [9, 9, 9, 255]), mask: Some(mask), transparent: false })
-        .unwrap();
+    let e = gemini::edit_body(
+        "gemini-2.5-flash-image",
+        &EditRequest { prompt: "grow".into(), image: solid(4, 4, [9, 9, 9, 255]), mask: Some(mask), transparent: false },
+    )
+    .unwrap();
     let parts = e["contents"][0]["parts"].as_array().unwrap();
     assert_eq!(parts.len(), 3);
     assert!(parts[0]["text"].as_str().unwrap().starts_with("grow\n\nEdit the first image. The second image is a mask"));
     assert_eq!(px(&inline_image(&parts[1]), 0, 0), [9, 9, 9, 255]);
     let m = inline_image(&parts[2]);
     assert_eq!([px(&m, 0, 0), px(&m, 1, 0), px(&m, 3, 0)], [[0, 0, 0, 255], [128, 128, 128, 255], [255, 255, 255, 255]]);
-    let plain = gemini::edit_body("gemini-2.5-flash-image", &EditRequest { prompt: "x".into(), image: solid(2, 2, [0; 4]), mask: None, transparent: false }).unwrap();
+    let plain =
+        gemini::edit_body("gemini-2.5-flash-image", &EditRequest { prompt: "x".into(), image: solid(2, 2, [0; 4]), mask: None, transparent: false }).unwrap();
     assert_eq!(plain["contents"][0]["parts"].as_array().unwrap().len(), 2);
     assert_eq!(plain["contents"][0]["parts"][0]["text"], "x");
 }
@@ -175,7 +184,11 @@ fn error_translation() {
     assert_eq!(invalid.status, 401);
     // A key error never repeats what the provider said (it quotes the key).
     assert!(!invalid.message.contains("sk-test"), "{invalid}");
-    let quota = t(ProviderId::OpenAi, 429, json!({"error": {"message": "You exceeded your current quota.", "type": "insufficient_quota", "code": "insufficient_quota"}}));
+    let quota = t(
+        ProviderId::OpenAi,
+        429,
+        json!({"error": {"message": "You exceeded your current quota.", "type": "insufficient_quota", "code": "insufficient_quota"}}),
+    );
     assert_eq!(quota.kind, ErrorKind::Quota);
     assert!(quota.message.contains("no quota left"), "{quota}");
     let rate = t(ProviderId::OpenAi, 429, json!({"error": {"message": "Rate limit reached", "code": "rate_limit_exceeded"}}));
@@ -192,7 +205,10 @@ fn error_translation() {
     assert!(g.message.contains("Google Gemini"), "{g}");
     let exhausted = t(ProviderId::Gemini, 429, json!({"error": {"code": 429, "message": "Resource has been exhausted", "status": "RESOURCE_EXHAUSTED"}}));
     assert_eq!(exhausted.kind, ErrorKind::Quota);
-    assert_eq!(t(ProviderId::Gemini, 404, json!({"error": {"code": 404, "message": "models/x is not found", "status": "NOT_FOUND"}})).kind, ErrorKind::NotFound);
+    assert_eq!(
+        t(ProviderId::Gemini, 404, json!({"error": {"code": 404, "message": "models/x is not found", "status": "NOT_FOUND"}})).kind,
+        ErrorKind::NotFound
+    );
     assert_eq!(translate_error(ProviderId::OpenAi, 503, b"<html>oops</html>").kind, ErrorKind::Server);
     let other = t(ProviderId::OpenAi, 400, json!({"error": {"message": "Invalid size '7x7'."}}));
     assert_eq!(other.kind, ErrorKind::BadRequest);
@@ -277,7 +293,9 @@ fn gemini_images_through_the_server() {
     let data = r.json()["contents"][0]["parts"][0]["text"].clone();
     assert_eq!(data, "a fox");
     // Inline data decodes back to what was sent.
-    let e = gemini::edit_body("gemini-2.5-flash-image", &EditRequest { prompt: "p".into(), image: solid(3, 3, [7, 7, 7, 255]), mask: None, transparent: false }).unwrap();
+    let e =
+        gemini::edit_body("gemini-2.5-flash-image", &EditRequest { prompt: "p".into(), image: solid(3, 3, [7, 7, 7, 255]), mask: None, transparent: false })
+            .unwrap();
     let sent = base64_decode(e["contents"][0]["parts"][1]["inline_data"]["data"].as_str().unwrap()).unwrap();
     assert_eq!(px(&decode(&sent).unwrap(), 1, 1), [7, 7, 7, 255]);
 }

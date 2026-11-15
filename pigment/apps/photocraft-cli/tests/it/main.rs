@@ -1,5 +1,7 @@
 //! The crate's integration tests, linked into one test binary.
 
+// Pigment: generative AI.
+mod ai;
 mod cli;
 mod gpu;
 #[cfg(all(target_os = "linux", target_env = "gnu"))]

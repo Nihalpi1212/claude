@@ -58,6 +58,8 @@ craft-update = { workspace = true }
 rayon = { workspace = true }
 # Safe native UI-language APIs (Windows/macOS); no subprocess or web dependency.
 sys-locale = "=0.3.2"
+# Pigment: generative AI (AI Accounts, the keys, the provider backend; docs/generative-ai.md).
+pigment-genai = { workspace = true }
 
 # Installed RAM for the GPU memory budget (`gpu_canvas::physical_memory`) and the user's decimal
 # symbol (`i18n::decimal_separator`, a registry read): the safe binding the desktop app already
@@ -67,6 +69,8 @@ winsafe = { version = "=0.0.29", default-features = false, features = ["kernel",
 
 [dev-dependencies]
 photocraft-io = { workspace = true, features = ["testgen"] }
+# Pigment: the generative AI mock backend for the AI interface tests (tests/it/ai.rs).
+photocraft-engine = { workspace = true, features = ["testgen"] }
 # egui's own default fonts in tests: the oracle for egui_fonts.rs, and contexts made with
 # `Context::default()` (no install_fonts) can lay out text.
 egui = { workspace = true, features = ["default_fonts", "monochrome_emoji_fonts"] }

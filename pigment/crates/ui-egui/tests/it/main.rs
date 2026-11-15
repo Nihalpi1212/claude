@@ -1,6 +1,9 @@
 //! The crate's integration tests, linked into one test binary.
 
 mod actions_duplicate;
+// Pigment: generative AI.
+#[cfg(not(target_arch = "wasm32"))]
+mod ai;
 mod actions_panel_menu;
 mod actions_record_again;
 mod adjust_preview_gpu;

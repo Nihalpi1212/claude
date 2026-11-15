@@ -48,7 +48,10 @@ fn gemini_gets_its_schema_subset() {
     assert_eq!(g["properties"]["opacity"], json!({"type": "number"}));
     assert_eq!(g["required"], json!(["id"]), "only existing properties stay required");
     // A tool without parameters declares none (Gemini refuses an empty object).
-    assert_eq!(gemini_declaration("get_document", "Describe the document", &tools()[1].parameters), json!({"name": "get_document", "description": "Describe the document"}));
+    assert_eq!(
+        gemini_declaration("get_document", "Describe the document", &tools()[1].parameters),
+        json!({"name": "get_document", "description": "Describe the document"})
+    );
     assert_eq!(gemini_declaration("t", "", &Value::Null), json!({"name": "t", "description": ""}));
     // Arguments that arrive as JSON text are parsed; unreadable text is kept; results go back as text.
     assert_eq!(parse_args(&json!("{\"id\":\"x\"}")), json!({"id": "x"}));

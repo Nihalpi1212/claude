@@ -38,6 +38,8 @@ pub(crate) enum Command {
     Commands(CommandsArgs),
     Mcp(McpArgs),
     Serve(ServeArgs),
+    // Pigment: generative AI (docs/generative-ai.md).
+    Ai(crate::ai::AiArgs),
 }
 
 // How an image is written: shared by `convert`, `run` and `batch`.
@@ -179,6 +181,10 @@ pub(crate) struct RunArgs {
     /// Explicitly approve high-memory PSD/PSB imports within the hard memory budget
     #[arg(long)]
     pub(crate) approve_high_memory: bool,
+    /// Let `ai.*` commands send the image or prompt to your AI provider, billed to your account
+    /// (set up with `pigment-cli ai`)
+    #[arg(long)]
+    pub(crate) allow_ai: bool,
     #[command(flatten)]
     pub(crate) gpu: GpuArgs,
     #[command(flatten)]

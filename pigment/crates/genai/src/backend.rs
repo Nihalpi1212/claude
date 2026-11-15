@@ -25,7 +25,7 @@
 //! long-running server follows what the person changes in AI Accounts.
 
 use std::path::Path;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 
 use photocraft_engine::ai_cmds::region;
 use photocraft_engine::generative::{
@@ -56,9 +56,14 @@ pub enum Caller {
     CommandLine { allow_ai: bool },
 }
 
+/// Where a backend's accounts come from when it first needs them.
+type OpenAccounts = Box<dyn Fn() -> AiAccounts + Send + Sync>;
+
 /// The engine's generative backend over the person's AI accounts.
 pub struct GenAiBackend {
-    accounts: Arc<Mutex<AiAccounts>>,
+    accounts: OnceLock<Arc<Mutex<AiAccounts>>>,
+    /// Opens the accounts on first use ([`GenAiBackend::deferred`]).
+    open: Option<OpenAccounts>,
     caller: Caller,
 }
 
@@ -74,7 +79,7 @@ fn engine_kind(kind: ModelKind) -> generative::ModelKind {
 impl GenAiBackend {
     /// A backend over `accounts`, shared with whoever edits them (AI Accounts).
     pub fn new(accounts: Arc<Mutex<AiAccounts>>, caller: Caller) -> Self {
-        Self { accounts, caller }
+        Self { accounts: OnceLock::from(accounts), open: None, caller }
     }
 
     /// A backend over the accounts kept in `config_dir` (`ai.json`, the key store).
@@ -82,8 +87,14 @@ impl GenAiBackend {
         Self::new(Arc::new(Mutex::new(AiAccounts::new(config_dir))), caller)
     }
 
+    /// A backend whose accounts `open` reads only when an AI command first needs them, so a
+    /// session that never runs one (every headless session gets a backend) reads nothing.
+    pub fn deferred(caller: Caller, open: impl Fn() -> AiAccounts + Send + Sync + 'static) -> Self {
+        Self { accounts: OnceLock::new(), open: Some(Box::new(open)), caller }
+    }
+
     pub fn accounts(&self) -> &Arc<Mutex<AiAccounts>> {
-        &self.accounts
+        self.accounts.get_or_init(|| Arc::new(Mutex::new(self.open.as_ref().map_or_else(AiAccounts::in_memory, |open| open()))))
     }
 
     pub fn caller(&self) -> Caller {
@@ -112,7 +123,7 @@ impl GenAiBackend {
     fn prepare(&self, choice: &Choice, kind: ModelKind, cancelled: Cancelled<'_>) -> Result<(Arc<dyn Provider>, String)> {
         check(cancelled)?;
         let (p, provider, known) = {
-            let mut a = lock(&self.accounts);
+            let mut a = lock(self.accounts());
             a.reload();
             self.allowed(&a)?;
             let status = status_of(&a);
@@ -129,7 +140,7 @@ impl GenAiBackend {
                 match provider.list_models(cancelled) {
                     Ok(models) => {
                         let pick = provider::pick_model(p, &models, kind);
-                        lock(&self.accounts).cache_catalog(p, models);
+                        lock(self.accounts()).cache_catalog(p, models);
                         pick.unwrap_or_else(|| provider::fallback_model(p, kind).to_string())
                     }
                     Err(e) if e.kind == ErrorKind::Cancelled => return Err(e),
@@ -158,11 +169,8 @@ impl GenAiBackend {
         let (aspect, fill) = provider.edit_frame(&model, sw, sh);
         let (image, mask, at) = region::pad_to_aspect(&small, small_mask.as_ref(), aspect, fill);
         let (pw, ph) = (image.width, image.height);
-        let prompt = if req.transparent && !provider.native_transparency(&model) {
-            format!("{}\n\n{WHITE_BACKGROUND}", req.prompt)
-        } else {
-            req.prompt.clone()
-        };
+        let prompt =
+            if req.transparent && !provider.native_transparency(&model) { format!("{}\n\n{WHITE_BACKGROUND}", req.prompt) } else { req.prompt.clone() };
         let answer = provider.edit_image(&model, &EditRequest { prompt, image, mask, transparent: req.transparent }, cancelled)?;
         check(cancelled)?;
         let answer = region::crop(&region::resize_rgba8(&answer, pw, ph), at);
@@ -192,14 +200,14 @@ impl GenAiBackend {
     fn models(&self, p: ProviderId, cancelled: Cancelled<'_>) -> Result<Vec<ModelEntry>> {
         check(cancelled)?;
         let provider = {
-            let mut a = lock(&self.accounts);
+            let mut a = lock(self.accounts());
             a.reload();
             self.allowed(&a)?;
             a.provider(p)?
         };
         let models = provider.list_models(cancelled)?;
         let entries = models.iter().map(|m| (m.id.clone(), m.kind.engine_id())).collect();
-        lock(&self.accounts).cache_catalog(p, models);
+        lock(self.accounts()).cache_catalog(p, models);
         Ok(entries)
     }
 }
@@ -239,7 +247,7 @@ fn status_of(a: &AiAccounts) -> BackendStatus {
 
 impl GenerativeBackend for GenAiBackend {
     fn status(&self) -> BackendStatus {
-        let mut a = lock(&self.accounts);
+        let mut a = lock(self.accounts());
         a.reload();
         status_of(&a)
     }

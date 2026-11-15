@@ -184,8 +184,7 @@ pub fn contents(messages: &[ChatMessage]) -> Result<Vec<Value>> {
                 }
             }
             ChatMessage::ToolResults(results) if native_turn => {
-                let parts: Vec<Value> =
-                    results.iter().map(|r| json!({ "functionResponse": { "name": r.name, "response": { "result": r.output } } })).collect();
+                let parts: Vec<Value> = results.iter().map(|r| json!({ "functionResponse": { "name": r.name, "response": { "result": r.output } } })).collect();
                 out.push(json!({ "role": "user", "parts": parts }));
             }
             ChatMessage::ToolResults(results) => {

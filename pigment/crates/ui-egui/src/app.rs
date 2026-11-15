@@ -231,6 +231,7 @@ impl PhotocraftApp {
             min_frame_ms: None,
             last_frame_start_ms: 0.0,
             jobs: Default::default(),
+            ai: Default::default(),
             #[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
             live_tokens: theme::live::LiveTokens::from_env(),
         };

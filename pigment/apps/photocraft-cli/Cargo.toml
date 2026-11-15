@@ -42,6 +42,8 @@ clap = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+# Pigment: generative AI (`pigment-cli ai`, `run --allow-ai`).
+pigment-genai = { workspace = true }
 
 [dev-dependencies]
 serde = { workspace = true }

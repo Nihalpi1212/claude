@@ -31,10 +31,6 @@ impl Got {
         serde_json::from_slice(&self.body).unwrap_or(Value::Null)
     }
 
-    pub fn body_text(&self) -> String {
-        String::from_utf8_lossy(&self.body).into_owned()
-    }
-
     /// The parts of a `multipart/form-data` body: (name, bytes).
     pub fn form(&self) -> Vec<(String, Vec<u8>)> {
         let ct = self.header("content-type").unwrap_or_default();
@@ -126,11 +122,6 @@ impl MockServer {
         self.got.lock().unwrap().clone()
     }
 
-    /// The requests other than catalog reads.
-    pub fn work(&self) -> Vec<Got> {
-        self.requests().into_iter().filter(|g| !g.path.starts_with("/v1/models") || g.path.contains(':')).collect()
-    }
-
     /// The base URL as a provider root (`…/v1`).
     pub fn base(&self) -> String {
         format!("{}/v1", self.url)
@@ -165,8 +156,7 @@ fn serve(stream: TcpStream, handler: &Handler, log: &Mutex<Vec<Got>>) {
     let reply = handler(&got);
     thread::sleep(reply.delay);
     let mut out = stream;
-    let head =
-        format!("HTTP/1.1 {} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", reply.status, reply.body.len());
+    let head = format!("HTTP/1.1 {} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", reply.status, reply.body.len());
     let _ = out.write_all(head.as_bytes());
     let _ = out.write_all(&reply.body);
     let _ = out.flush();

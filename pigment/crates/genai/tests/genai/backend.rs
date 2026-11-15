@@ -31,7 +31,13 @@ fn openai_edits_are_scaled_padded_and_cropped_back() {
     let server = MockServer::replies(vec![Reply::ok(openai_image(&answer))]);
     let b = backend(accounts(&server), Caller::Person);
     let mask = image(2000, 1000, |x, _| [255, 255, 255, if x < 1000 { 255 } else { 0 }]);
-    let req = ImageEdit { choice: choice(ProviderId::OpenAi), prompt: "a lake".into(), image: solid(2000, 1000, [9, 9, 9, 255]), mask: Some(mask), transparent: false };
+    let req = ImageEdit {
+        choice: choice(ProviderId::OpenAi),
+        prompt: "a lake".into(),
+        image: solid(2000, 1000, [9, 9, 9, 255]),
+        mask: Some(mask),
+        transparent: false,
+    };
     let out = b.edit_image(&req, &|| false).unwrap();
     assert_eq!((out.width, out.height), (2000, 1000));
     for (x, y) in [(0, 0), (1999, 0), (1000, 500), (0, 999), (1999, 999)] {
@@ -61,7 +67,13 @@ fn gemini_edits_use_its_ratio_white_padding_and_mask() {
     a.set_models(ProviderId::Gemini, None, Some("gemini-3-pro-image-preview")).unwrap();
     let b = backend(a, Caller::Person);
     let mask = solid(1000, 700, [255, 255, 255, 255]);
-    let req = ImageEdit { choice: choice(ProviderId::Gemini), prompt: "a lake".into(), image: solid(1000, 700, [9, 9, 9, 255]), mask: Some(mask), transparent: false };
+    let req = ImageEdit {
+        choice: choice(ProviderId::Gemini),
+        prompt: "a lake".into(),
+        image: solid(1000, 700, [9, 9, 9, 255]),
+        mask: Some(mask),
+        transparent: false,
+    };
     let out = b.edit_image(&req, &|| false).unwrap();
     assert_eq!((out.width, out.height), (1000, 700));
     assert_eq!(px(&out, 500, 350), GREEN);
@@ -103,7 +115,7 @@ fn transparent_edits_ask_each_model_its_way() {
 #[test]
 fn generated_images_cover_the_size_and_key_white() {
     // OpenAI answers 1536 × 1024: covering 300 × 100 crops the top and bottom.
-    let tall = image(1536, 1024, |_, y| if y < 256 || y >= 768 { RED } else { GREEN });
+    let tall = image(1536, 1024, |_, y| if (256..768).contains(&y) { GREEN } else { RED });
     let server = MockServer::start(move |got| {
         if got.path.contains(":generateContent") {
             // A subject on white: keyed to transparent around it.
@@ -131,7 +143,9 @@ fn generated_images_cover_the_size_and_key_white() {
 
 #[test]
 fn describe_sends_the_image_with_the_question() {
-    let server = MockServer::start(|got| if got.path.contains(":generateContent") { Reply::ok(gemini_text("  A red square. \n")) } else { Reply::ok(openai_text("A red square.")) });
+    let server = MockServer::start(|got| {
+        if got.path.contains(":generateContent") { Reply::ok(gemini_text("  A red square. \n")) } else { Reply::ok(openai_text("A red square.")) }
+    });
     let b = backend(accounts(&server), Caller::Person);
     for p in ProviderId::ALL {
         let text = b.describe(&Describe { choice: choice(p), image: solid(32, 16, RED), prompt: None }, &|| false).unwrap();
@@ -161,11 +175,17 @@ fn automatic_models_come_from_the_catalog_once() {
     a.set_models(ProviderId::OpenAi, Some(""), Some("")).unwrap();
     a.set_models(ProviderId::Gemini, None, Some("")).unwrap();
     let b = backend(a, Caller::Person);
-    let gen = |p, model: Option<&str>| ImageGen { choice: Choice { provider: Some(p), model: model.map(str::to_string) }, prompt: "x".into(), width: 8, height: 8, transparent: false };
-    b.generate_image(&gen(ProviderId::OpenAi, None), &|| false).unwrap();
-    b.generate_image(&gen(ProviderId::OpenAi, None), &|| false).unwrap();
-    b.generate_image(&gen(ProviderId::OpenAi, Some("dall-e-3")), &|| false).unwrap();
-    b.generate_image(&gen(ProviderId::Gemini, None), &|| false).unwrap();
+    let req_gen = |p, model: Option<&str>| ImageGen {
+        choice: Choice { provider: Some(p), model: model.map(str::to_string) },
+        prompt: "x".into(),
+        width: 8,
+        height: 8,
+        transparent: false,
+    };
+    b.generate_image(&req_gen(ProviderId::OpenAi, None), &|| false).unwrap();
+    b.generate_image(&req_gen(ProviderId::OpenAi, None), &|| false).unwrap();
+    b.generate_image(&req_gen(ProviderId::OpenAi, Some("dall-e-3")), &|| false).unwrap();
+    b.generate_image(&req_gen(ProviderId::Gemini, None), &|| false).unwrap();
     let paths: Vec<String> = server.requests().iter().map(|g| g.path.clone()).collect();
     assert_eq!(
         paths,
@@ -186,7 +206,7 @@ fn automatic_models_come_from_the_catalog_once() {
     let down = MockServer::start(|got| if got.path == "/v1/models" { Reply::json(500, json!({})) } else { Reply::ok(openai_image(&solid(8, 8, GREEN))) });
     let mut a = accounts(&down);
     a.set_models(ProviderId::OpenAi, None, Some("")).unwrap();
-    backend(a, Caller::Person).generate_image(&gen(ProviderId::OpenAi, None), &|| false).unwrap();
+    backend(a, Caller::Person).generate_image(&req_gen(ProviderId::OpenAi, None), &|| false).unwrap();
     assert_eq!(down.requests()[1].json()["model"], "gpt-image-1");
 }
 
@@ -194,31 +214,31 @@ fn automatic_models_come_from_the_catalog_once() {
 #[test]
 fn refusals_send_nothing() {
     let server = MockServer::start(|_| Reply::ok(openai_image(&solid(8, 8, GREEN))));
-    let gen = ImageGen { choice: Choice::default(), prompt: "x".into(), width: 8, height: 8, transparent: false };
+    let req_gen = ImageGen { choice: Choice::default(), prompt: "x".into(), width: 8, height: 8, transparent: false };
     let mut no_consent = accounts(&server);
     no_consent.settings.consented = false;
-    let e = backend(no_consent, Caller::Person).generate_image(&gen, &|| false).unwrap_err();
+    let e = backend(no_consent, Caller::Person).generate_image(&req_gen, &|| false).unwrap_err();
     assert_eq!(e.kind, "needsConsent");
-    let e = backend(accounts(&server), Caller::Agent).generate_image(&gen, &|| false).unwrap_err();
+    let e = backend(accounts(&server), Caller::Agent).generate_image(&req_gen, &|| false).unwrap_err();
     assert_eq!(e.kind, "notAllowed");
     assert!(e.message.contains("Allow agents to run AI commands"), "{e}");
     let e = backend(accounts(&server), Caller::Agent).list_models(ProviderId::OpenAi, &|| false).unwrap_err();
     assert_eq!(e.kind, "notAllowed");
-    let e = backend(accounts(&server), Caller::CommandLine { allow_ai: false }).generate_image(&gen, &|| false).unwrap_err();
+    let e = backend(accounts(&server), Caller::CommandLine { allow_ai: false }).generate_image(&req_gen, &|| false).unwrap_err();
     assert_eq!(e.kind, "notAllowed");
     assert!(e.message.contains("--allow-ai"), "{e}");
-    let e = backend(accounts(&server), Caller::Person).generate_image(&gen, &|| true).unwrap_err();
+    let e = backend(accounts(&server), Caller::Person).generate_image(&req_gen, &|| true).unwrap_err();
     assert_eq!(e.kind, "cancelled");
     let mut nothing = AiAccounts::in_memory();
     nothing.settings.consented = true;
-    let e = backend(nothing, Caller::Person).generate_image(&gen, &|| false).unwrap_err();
+    let e = backend(nothing, Caller::Person).generate_image(&req_gen, &|| false).unwrap_err();
     assert_eq!(e.kind, "missingKey");
     assert!(server.requests().is_empty(), "{:?}", server.requests());
     // Allowed agents and `--allow-ai` send.
     let mut agents = accounts(&server);
     agents.settings.allow_agents = true;
-    backend(agents, Caller::Agent).generate_image(&gen, &|| false).unwrap();
-    backend(accounts(&server), Caller::CommandLine { allow_ai: true }).generate_image(&gen, &|| false).unwrap();
+    backend(agents, Caller::Agent).generate_image(&req_gen, &|| false).unwrap();
+    backend(accounts(&server), Caller::CommandLine { allow_ai: true }).generate_image(&req_gen, &|| false).unwrap();
     assert_eq!(server.requests().len(), 2);
 }
 
@@ -233,12 +253,12 @@ fn settings_are_reread_before_each_request() {
     a.set_models(ProviderId::OpenAi, None, Some("gpt-image-1")).unwrap();
     a.set_consented(true).unwrap();
     let b = GenAiBackend::new(Arc::new(Mutex::new(a)), Caller::Agent);
-    let gen = ImageGen { choice: Choice::default(), prompt: "x".into(), width: 8, height: 8, transparent: false };
-    assert_eq!(b.generate_image(&gen, &|| false).unwrap_err().kind, "notAllowed");
+    let req_gen = ImageGen { choice: Choice::default(), prompt: "x".into(), width: 8, height: 8, transparent: false };
+    assert_eq!(b.generate_image(&req_gen, &|| false).unwrap_err().kind, "notAllowed");
     let mut s = pigment_genai::AiSettings::load(&dir);
     s.allow_agents = true;
     s.save(&dir).unwrap();
-    b.generate_image(&gen, &|| false).unwrap();
+    b.generate_image(&req_gen, &|| false).unwrap();
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -264,7 +284,8 @@ fn status_never_carries_a_key() {
 /// Connect checks a key with the provider before storing it (JS `setApiKey`).
 #[test]
 fn connect_stores_only_a_key_the_provider_accepts() {
-    let server = MockServer::replies(vec![Reply::json(401, json!({"error": {"message": "Incorrect API key", "code": "invalid_api_key"}})), Reply::ok(openai_models())]);
+    let server =
+        MockServer::replies(vec![Reply::json(401, json!({"error": {"message": "Incorrect API key", "code": "invalid_api_key"}})), Reply::ok(openai_models())]);
     let mut a = AiAccounts::in_memory();
     a.set_base_url(ProviderId::OpenAi, &server.base()).unwrap();
     let e = a.connect(ProviderId::OpenAi, OPENAI_KEY, &|| false).unwrap_err();
@@ -293,7 +314,8 @@ fn the_engine_commands_run_through_the_backend() {
         "/v1/models" => Reply::ok(openai_models()),
         "/v1/responses" => Reply::ok(openai_text("A white rectangle.")),
         p if p.starts_with("/v1/images/") => {
-            let size = if p.ends_with("edits") { got.part("size").map(|s| String::from_utf8(s).unwrap()) } else { got.json()["size"].as_str().map(str::to_string) };
+            let size =
+                if p.ends_with("edits") { got.part("size").map(|s| String::from_utf8(s).unwrap()) } else { got.json()["size"].as_str().map(str::to_string) };
             let (w, h) = pigment_genai::image_util::parse_size(&size.unwrap_or_default()).unwrap_or((64, 64));
             Reply::ok(openai_image(&solid(w, h, GREEN)))
         }
@@ -330,4 +352,21 @@ fn the_engine_commands_run_through_the_backend() {
     let e = s.execute("ai.generativeFill", json!({"prompt": "x"})).unwrap_err();
     assert!(matches!(&e, photocraft_engine::EngineError::Generative { kind: "quota", .. }), "{e:?}");
     assert_eq!(s.active().unwrap().doc.walk().len(), before);
+}
+
+/// Every headless session gets a backend; it reads the accounts only when an AI command needs
+/// them, and once.
+#[test]
+fn a_deferred_backend_opens_its_accounts_on_first_use() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let opened = Arc::new(AtomicUsize::new(0));
+    let o = opened.clone();
+    let b = GenAiBackend::deferred(Caller::Agent, move || {
+        o.fetch_add(1, Ordering::SeqCst);
+        AiAccounts::in_memory()
+    });
+    assert_eq!(opened.load(Ordering::SeqCst), 0);
+    assert!(!b.status().consented);
+    assert_eq!(b.list_models(ProviderId::Gemini, &|| false).unwrap_err().kind, "notAllowed");
+    assert_eq!(opened.load(Ordering::SeqCst), 1);
 }

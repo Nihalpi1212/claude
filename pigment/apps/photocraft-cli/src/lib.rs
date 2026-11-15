@@ -9,6 +9,8 @@ use std::io::Write;
 use clap::CommandFactory;
 
 mod actions;
+// Pigment: generative AI.
+mod ai;
 mod args;
 mod automation;
 mod batch;
@@ -64,6 +66,7 @@ where
         Command::Commands(a) => commands(a, out),
         Command::Mcp(a) => mcp(a, err),
         Command::Serve(a) => serve(a, err),
+        Command::Ai(a) => ai::run(a, out, err),
     };
     match result {
         Ok(()) => 0,

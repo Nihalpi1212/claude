@@ -9,9 +9,7 @@ use photocraft_engine::generative::{ChatMessage, ChatRequest, ChatTurn, ToolCall
 use photocraft_raster::Rgba8Image;
 use serde_json::{Value, json};
 
-use super::{
-    EditRequest, ImageRequest, ModelInfo, ModelKind, Provider, ProviderConfig, call_json, clients, clip, ratio_of, state_provider,
-};
+use super::{EditRequest, ImageRequest, ModelInfo, ModelKind, Provider, ProviderConfig, call_json, clients, clip, ratio_of, state_provider};
 use crate::cancel::Cancelled;
 use crate::chat::{parse_args, result_text};
 use crate::http::{Body, Http, Multipart};
@@ -392,4 +390,3 @@ impl Provider for OpenAi {
         Ok(parse_models(&call_json(&self.catalog, &self.cfg, &self.key, self.headers(), "/models", Body::None, cancelled)?))
     }
 }
-

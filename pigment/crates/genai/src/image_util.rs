@@ -30,8 +30,7 @@ pub fn decode(bytes: &[u8]) -> Result<Rgba8Image> {
 
 /// `img` as PNG bytes.
 pub fn encode_png(img: &Rgba8Image) -> Result<Vec<u8>> {
-    let buf = RgbaImage::from_raw(img.width, img.height, img.pixels.clone())
-        .ok_or_else(|| AiError::bad_request("The image to send has no pixels."))?;
+    let buf = RgbaImage::from_raw(img.width, img.height, img.pixels.clone()).ok_or_else(|| AiError::bad_request("The image to send has no pixels."))?;
     let mut out = Cursor::new(Vec::new());
     buf.write_to(&mut out, ImageFormat::Png).map_err(|e| AiError::bad_request(format!("The image could not be encoded ({e}).")))?;
     Ok(out.into_inner())

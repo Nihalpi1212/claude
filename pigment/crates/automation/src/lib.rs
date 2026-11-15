@@ -24,6 +24,8 @@ pub mod args;
 pub mod bridge;
 pub mod budgets;
 pub mod files;
+// Pigment: generative AI in headless sessions.
+pub mod genai;
 pub mod headless;
 pub mod live;
 pub mod rpc;
