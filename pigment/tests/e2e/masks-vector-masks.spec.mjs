@@ -96,7 +96,7 @@ test('density 50 % halves the mask, feather blurs it, both undoable; Apply bakes
   await runAwait(page, 'edit:redo');
   expect((await pixel(page, 46, 40))[1]).toBeGreaterThan(5);
   // add a vector mask hiding the bottom rows, then Apply: the raster part with its feather goes into the pixels
-  await page.evaluate((p) => window.pigmentApp.commands.run('layer:vector-mask', { op: 'current-path', path: p }, 'api'), rect(0, 0, 100, 60));
+  await runAwait(page, 'layer:vector-mask', { op: 'current-path', path: rect(0, 0, 100, 60) });
   expect(await pixel(page, 20, 70)).toEqual([255, 255, 255, 255]);
   await runAwait(page, 'layer:mask', 'apply');
   const after = await page.evaluate(() => {
@@ -179,7 +179,7 @@ test('Hide All and Reveal All differ; Current Path hides outside the path; disab
 test('a vector mask moves with the layer (linked) and stays when unlinked; rasterize puts it into the layer mask; select loads it', async ({ page }) => {
   const errors = await openApp(page);
   await build(page);
-  await page.evaluate((p) => window.pigmentApp.commands.run('layer:vector-mask', { op: 'current-path', path: p }, 'api'), rect(10, 10, 30, 30));
+  await runAwait(page, 'layer:vector-mask', { op: 'current-path', path: rect(10, 10, 30, 30) });
   expect(await pixel(page, 20, 20)).toEqual([255, 0, 0, 255]);
   await page.evaluate(async () => {
     const { offsetLayers } = await import('/lib/layer-move.js');
@@ -234,7 +234,7 @@ test('a vector mask survives .pigment and exports to PSD baked into the layer ma
   await build(page);
   await halfMask(page);
   await runAwait(page, 'layer:mask-properties', { part: 'raster', density: 0.5 });
-  await page.evaluate((p) => window.pigmentApp.commands.run('layer:vector-mask', { op: 'current-path', path: p }, 'api'), rect(0, 0, 100, 40));
+  await runAwait(page, 'layer:vector-mask', { op: 'current-path', path: rect(0, 0, 100, 40) });
   const expected = [await pixel(page, 20, 20), await pixel(page, 80, 20), await pixel(page, 20, 60)];
   const r = await page.evaluate(async () => {
     const app = window.pigmentApp;
@@ -275,7 +275,7 @@ test('a vector mask survives .pigment and exports to PSD baked into the layer ma
 test('a 16-bit document with a vector mask flattens like the 8-bit one', async ({ page }) => {
   const errors = await openApp(page);
   await build(page);
-  await page.evaluate((p) => window.pigmentApp.commands.run('layer:vector-mask', { op: 'current-path', path: p }, 'api'), rect(10, 10, 50, 40));
+  await runAwait(page, 'layer:vector-mask', { op: 'current-path', path: rect(10, 10, 50, 40) });
   await runAwait(page, 'layer:mask-properties', { part: 'vector', density: 0.6 });
   const eight = [await pixel(page, 30, 30), await pixel(page, 80, 70)];
   await runAwait(page, 'image:depth', 16);
@@ -299,7 +299,7 @@ test('a 16-bit document with a vector mask flattens like the 8-bit one', async (
 test('the vector mask is a path target: the Paths panel row, editing with the path tools, path:delete; Mask and Shape buttons', async ({ page }) => {
   const errors = await openApp(page);
   await build(page);
-  await page.evaluate((p) => window.pigmentApp.commands.run('layer:vector-mask', { op: 'current-path', path: p }, 'api'), rect(10, 10, 30, 30));
+  await runAwait(page, 'layer:vector-mask', { op: 'current-path', path: rect(10, 10, 30, 30) });
   await page.evaluate(() => window.pigmentApp.panels.show('paths'));
   const row = page.locator('.paths-panel .path-row.vector-mask-row');
   await expect(row).toHaveCount(1);
@@ -335,7 +335,7 @@ test('the vector mask is a path target: the Paths panel row, editing with the pa
     d.setActive(plain);
     d.changed('tree');
   });
-  await page.evaluate(() => window.pigmentApp.commands.run('path:select', { kind: 'work' }, 'api'));
+  await runAwait(page, 'path:select', { kind: 'work' });
   await page.locator('.options-bar button', { hasText: 'Mask' }).first().click();
   expect(await page.evaluate(() => window.pigmentApp.doc.active.vectorMask?.path.subpaths[0].points[0])).toEqual({ x: 50, y: 20 });
   // path:delete on the vector mask target deletes the vector mask

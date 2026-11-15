@@ -30,7 +30,16 @@ export const run = (page, cmd, arg) =>
   }, [cmd, arg]);
 
 /** Runs a command and waits for it to finish (only for commands without a dialog). */
-export const runAwait = (page, cmd, arg) => page.evaluate(([c, a]) => window.pigmentApp.commands.run(c, a, 'api'), [cmd, arg]);
+export const runAwait = (page, cmd, arg, source = 'api') =>
+  page.evaluate(async ([c, a, s]) => {
+    try {
+      return await window.pigmentApp.commands.run(c, a, s);
+    } finally {
+      // V8 14.1 (Chromium 141) holds an awaited evaluate promise weakly: a GC in an app microtask after it settles
+      // (dispatch's .finally -> 'commands:changed') fails it with "Promise was collected". Settle from a fresh task.
+      await new Promise((r) => setTimeout(r, 0));
+    }
+  }, [cmd, arg, source]);
 
 export async function newDoc(page, opts = {}) {
   await page.evaluate((o) => window.pigmentApp.newDocument({ width: 400, height: 300, name: 'Test', ...o }), opts);

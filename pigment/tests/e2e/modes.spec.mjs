@@ -654,10 +654,10 @@ test('Conditional Mode Change converts only from the chosen source modes and rep
   // a played action never stops to ask: a layered document is converted layer by layer, a flattening mode flattens
   await runAwait(page, 'image:mode', 'rgb');
   await runAwait(page, 'layer:new', { name: 'Top' });
-  expect(await page.evaluate(() => window.pigmentApp.commands.run('image:mode', 'grayscale', 'action'))).toBe(true);
+  expect(await runAwait(page, 'image:mode', 'grayscale', 'action')).toBe(true);
   await expectNoDialog(page);
   expect(await page.evaluate(() => [window.pigmentApp.doc.mode, window.pigmentApp.doc.layers().length])).toEqual(['grayscale', 2]);
-  expect(await page.evaluate(() => window.pigmentApp.commands.run('image:mode', 'bitmap', 'action'))).toBe(true);
+  expect(await runAwait(page, 'image:mode', 'bitmap', 'action')).toBe(true);
   await expectNoDialog(page);
   expect(await page.evaluate(() => [window.pigmentApp.doc.mode, window.pigmentApp.doc.layers().length])).toEqual(['bitmap', 1]);
   // without a mode the command asks for one

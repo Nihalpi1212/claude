@@ -520,7 +520,7 @@ test('Find Layers filters the Layers panel by name, kind, attribute, mode, effec
 
   // attributes, blend mode, effect and colour label
   const filtered = async (patch) => {
-    await page.evaluate((p) => window.pigmentApp.commands.run('select:find-layers', p), patch);
+    await runAwait(page, 'select:find-layers', patch);
     return panelRows(page);
   };
   expect(await filtered({ type: 'attribute', attribute: 'hidden' })).toEqual(['Curves']);
