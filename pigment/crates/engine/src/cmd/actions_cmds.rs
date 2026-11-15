@@ -645,7 +645,8 @@ fn record(s: &mut Session, p: &Value) -> Result<Value> {
 /// Whether a journal entry is recorded as an action step: a replayable command, except Check
 /// Spelling's corrections and lookups.
 fn recorded(id: &str, p: &Value) -> bool {
-    replayable(id) && (id != "edit.checkSpelling" || crate::type_spell_cmds::records(p))
+    // Pigment: generative AI commands are never recorded (playing an action never spends money).
+    replayable(id) && !crate::ai_cmds::unrecorded(id) && (id != "edit.checkSpelling" || crate::type_spell_cmds::records(p))
 }
 
 /// Commands recorded with their step's dialog on: Check Spelling.
