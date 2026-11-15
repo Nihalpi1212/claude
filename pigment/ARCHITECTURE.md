@@ -3509,7 +3509,7 @@ the other packages use instead of editing it.
 | `lib/form.js`, `lib/fields.js` | skeleton | field type `color` through a widget; the stub `color` widget; the gradient field's two colour inputs (S7.3) | E7, E46 |
 | `lib/shape-paint-ui.js`, `lib/lens-correction.js` | skeleton | their `<input type=color>` become `color` widgets; the swatch row from `swatchColors(app)` (S7.1) | E46 |
 | `lib/panels/color.js`, `lib/panels/swatches.js` | color-picker-swatches | views, sliders, the swatch store, groups, search | keeps `createColorWidget`, `normHex` |
-| `lib/panels/brushes.js` | brush-settings-panel | the Brushes panel over `brushes`, `app.brushPicker` | skeleton lands first: deletes `installTipHook`; `drawStroke` moves to the engine as `renderStrokePreview`; the spacing slider writes the tool's flat `spacing` (marked); `BUILTIN_BRUSHES` kept |
+| `lib/panels/brushes.js` | brush-settings-panel | the Brushes panel over `brushes`, `app.brushPicker` | skeleton lands first: deletes `installTipHook`; `drawStroke` moves to the engine as `renderStrokePreview`; the spacing slider writes the tool's flat `spacing` (marked); `BUILTIN_BRUSHES` kept; as landed also: a pick goes through `setToolBrush(app, tool.id, brushFromLegacy(preset), { presetId })` and the spacing getter reads `toolBrush` (marked; skeleton-05 "brush" pins the pick), the tip thumbnail draws `dabCanvas` at `dabDrawSide` (S2.8), the stroke view passes `app` to `renderStrokePreview` (S2.4) |
 | `lib/panels/info.js` | skeleton | document profile row (S6.6); the Lab row through `toLab(rgb, doc.profile)` | E43 |
 | `lib/panels/navigator.js` | skeleton | the thumbnail through `displayCanvas` (marked `// color (lib/color/pipeline.js)`) | E43 |
 | `lib/style-ui.js` | presets-panels | Styles page, New Style, Make Default | E13 |
@@ -5142,6 +5142,14 @@ names above stay valid). Package owners build against this list too.
   without smoothing (0.4's move-then-release, which `dabs.json` recorded). The engine exports `runBufferModifiers`
   (unit-tested). The `coverage` stage's mask is the dab box ∩ the target canvas (not yet ∩ the selection bounds).
 - Cursor preference labels: Standard, Precise, Normal Brush Tip (`outline`), Full Size Brush Tip (`full`).
+- `panels/brushes.js` (brush-settings-panel's file) landed more than its ownership row first listed: a pick goes through
+  `setToolBrush(app, tool.id, brushFromLegacy(preset), { presetId })` (not six `setOpt` calls) and the spacing getter
+  reads `toolBrush(app, id).preset.tip.spacing`, both marked; skeleton-05 "brush" pins the pick (Size and the cursor
+  update, `[` keeps `brushPresetId`), so the replacement keeps that path.
+- `BrushStroke` without `paint.seed` takes a fresh seed per stroke, `constrainColor` falls back to
+  `app.colorConstraint`, and the stub stroke paints the tip's `flipX` / `flipY` with or without a geometry modifier, as
+  `traceDabs` reports them (S2.4). `clampBrushToTool(app, toolId, preset)` (tool-brush.js) is the "Modified" reference
+  (S1.3). `brush.js` exports `dabDiameter` and `dabDrawSide` (S2.8).
 
 **S4 (PSD).**
 
@@ -5190,7 +5198,9 @@ names above stay valid). Package owners build against this list too.
   default, so 0.4's recorded arguments are unchanged. The Info panel's Lab readout through `toLab` landed with S6.6. The
   status bar segment and the Info row exist only while `describe()` is non-empty.
 
-**S7 (colour UI).** `color-picker.js` also exports `colorValue(hex)`, `swatchHex(data)`. `swatchColors(app)` reads the
+**S7 (colour UI).** `color-picker.js` also exports `colorValue(hex)`, `swatchHex(data)`. `app.pickColor(initial, {
+title, live, target = 'field' })` passes its target to `pick`: the gradient stop pickers (`gradient-editor.js`,
+`tools/fill.js`) pass `'stop'`, the shape paint popover `'field'`; every other 0.4 call is a field's. `swatchColors(app)` reads the
 `swatches` kind only once `settings.colorUI.swatchesMigrated` is true (until then 0.4's edited palette shows). The
 `color` widget's spec fields are `key`, `dataK`, `id`, `text`, `title`, `ariaLabel`, `className`, `style`, and the widget
 exposes `.input`; `form.js` keeps its own `color` case (0.4's DOM); the options bar's `color` kind uses `onInput` only
@@ -5282,7 +5292,12 @@ already granted (no prompt), within 3 s; `favourites` and `recent` are no-ops; e
 says more than 0.4's font patch (a PostScript name, axes, or any patch of a `real` catalog), so with the stub catalog
 0.4's runs, entries and labels stay; new option keys `orientationToggle`, `antiAlias`, `warpText`; `app.typeTools()`
 lets `editor.js` find a subclass's session; a mask tool without a partner has no `sibling`. Anti-alias labels "Windows
-LCD" and "Windows".
+LCD" and "Windows". `api.js` also exports `renderBase(layer)` (S11.1's hover preview renders its clone through it).
+`type/target.js`, listed among the files 0.5 does not change, has one skeleton edit: `typeDefaults` reads the style
+option through `fontCatalog().stylePatch(family, key)` and `setTypeDefaults` writes it through `styleKey` (a 0.4 key
+such as `'700i'` the catalog does not answer for is read as 0.4 read it), so S10.5's capture, S12.1's apply and the
+Character panel without a text layer keep the face with a real catalog; `postScriptName` and `axes` then live in the
+style option, not in `settings.type.char`. With the stub catalog the results are 0.4's.
 
 **S12.1–S12.2 (toolbox and transform).**
 

@@ -3,8 +3,8 @@
 // shortcuts, moved here verbatim from app.js (its keys now read through app.keymap.keysFor, S9.4); Edit > Menus…
 // (edit:menus) and "Show All Menu Items" are disabled stubs. The package replaces this file at the same path with the
 // Keyboard Shortcuts and Menus dialog over app.keymap (S9), keeping help:shortcuts.
-import { SHORTCUT_GROUPS, COMMAND_LABELS, describeAccelerator } from '../../shared/keymap.js';
-import { isMac } from './bridge.js';
+import { SHORTCUT_GROUPS, COMMAND_LABELS, describeAccelerator, fixedKeyFor } from '../../shared/keymap.js';
+import { bridge, isMac, platform } from './bridge.js';
 import { stubCommands } from './stub.js';
 
 export function shortcutsDialog(app) {
@@ -19,7 +19,10 @@ export function shortcutsDialog(app) {
     table.appendChild(head);
     for (const cmd of group.commands) {
       // keymap (lib/keymap-store.js)
-      const keys = app.keymap.keysFor(cmd, group.type ? 'type' : group.paint ? 'paint' : 'global');
+      const keys = [...app.keymap.keysFor(cmd, group.type ? 'type' : group.paint ? 'paint' : 'global')];
+      // keysFor leaves out FIXED_KEYS (Toggle Developer Tools in development builds, macOS's full-screen key)
+      const fixed = group.type || group.paint ? null : fixedKeyFor(cmd, { platform, isPackaged: bridge.isPackaged !== false });
+      if (fixed && !keys.includes(fixed)) keys.push(fixed);
       if (!keys.length) continue;
       const tr = document.createElement('tr');
       const a = document.createElement('td');
