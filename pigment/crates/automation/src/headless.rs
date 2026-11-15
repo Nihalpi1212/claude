@@ -14,7 +14,8 @@ use crate::workspace::{ExportSequence, authorize_engine_command, authorize_engin
 use crate::{AuthorizedWorkspace, AutomationError, files};
 
 fn untrusted(filesystem: Filesystem) -> Headless {
-    let mut session = Session::new();
+    // Pigment: generative AI. Agents run `ai.*` only with "Allow agents to run AI commands".
+    let mut session = crate::genai::session(crate::genai::Caller::Agent);
     session.authorize = Some(authorize_engine_step);
     Headless { session, writers: HashMap::new(), filesystem, renderer: None, pending_diagnostics: Vec::new(), waited: HashMap::new() }
 }
@@ -73,7 +74,8 @@ impl Headless {
     /// `actions.play` steps are not re-checked: this caller is already trusted.
     pub fn trusted_local() -> Self {
         Self {
-            session: Session::new(),
+            // Pigment: generative AI. `pigment-cli run --allow-ai` replaces it with one that may send.
+            session: crate::genai::session(crate::genai::Caller::CommandLine { allow_ai: false }),
             writers: HashMap::new(),
             filesystem: Filesystem::TrustedLocal,
             renderer: None,

@@ -43,6 +43,9 @@ clap = { workspace = true }
 craft-flags = { workspace = true }
 craft-ai-agents = { workspace = true }
 
+# Pigment: generative AI (docs/generative-ai.md): the backend headless sessions install.
+pigment-genai = { workspace = true }
+
 # Optional native GPU rendering backend
 photocraft-gpu = { workspace = true, optional = true }
 wgpu = { version = "30", default-features = false, features = ["std", "wgsl"], optional = true }

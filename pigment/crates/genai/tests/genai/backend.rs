@@ -353,3 +353,20 @@ fn the_engine_commands_run_through_the_backend() {
     assert!(matches!(&e, photocraft_engine::EngineError::Generative { kind: "quota", .. }), "{e:?}");
     assert_eq!(s.active().unwrap().doc.walk().len(), before);
 }
+
+/// Every headless session gets a backend; it reads the accounts only when an AI command needs
+/// them, and once.
+#[test]
+fn a_deferred_backend_opens_its_accounts_on_first_use() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let opened = Arc::new(AtomicUsize::new(0));
+    let o = opened.clone();
+    let b = GenAiBackend::deferred(Caller::Agent, move || {
+        o.fetch_add(1, Ordering::SeqCst);
+        AiAccounts::in_memory()
+    });
+    assert_eq!(opened.load(Ordering::SeqCst), 0);
+    assert!(!b.status().consented);
+    assert_eq!(b.list_models(ProviderId::Gemini, &|| false).unwrap_err().kind, "notAllowed");
+    assert_eq!(opened.load(Ordering::SeqCst), 1);
+}
