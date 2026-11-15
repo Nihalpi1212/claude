@@ -212,12 +212,18 @@ export class KeymapStore {
 
   /**
    * The command a key press of cmd means now: while a painting tool is active, the enabled PAINT command bound to
-   * the same key (main.js sends Shift+Alt+letter as the global command, S13.4), else cmd itself.
+   * the same key (main.js sends Shift+Alt+letter as the global command, S13.4), else cmd itself. A paint command with
+   * no global key (main.js sends Shift+Alt+Q and R as themselves) means something only while a painting tool is active
+   * and it is enabled; otherwise null: the key does nothing, as shortcuts.js does with it, so it never reaches the
+   * command registry (whose commitBefore would end a Free Transform first).
    */
   resolveKey(cmd, source) {
     if (source !== 'key' && source !== 'menu-key') return cmd;
-    if (!paints(this.app.tools?.active)) return cmd;
     const own = this.keysFor(cmd, 'global');
+    if (!own.length && Object.prototype.hasOwnProperty.call(this.effective().paint, cmd)) {
+      return paints(this.app.tools?.active) && this.app.commands?.isEnabled?.(cmd) ? cmd : null;
+    }
+    if (!paints(this.app.tools?.active)) return cmd;
     if (!own.length) return cmd;
     for (const [pcmd, list] of Object.entries(this.effective().paint)) {
       if (!list.some((a) => own.some((b) => accelCollides(a, b)))) continue;

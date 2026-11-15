@@ -1,0 +1,15 @@
+import { KeymapStore } from '/home/user/claude/pigment/src/renderer/lib/keymap-store.js';
+const ev = [];
+const app = { settings: {}, on() {}, emit: (n, d) => ev.push(n), saveSettingsSoon(p) { Object.assign(app.settings, p); }, syncUiState() {}, tools: { active: null }, commands: { isEnabled: () => true } };
+const k = new KeymapStore(app);
+console.log('set F7 -> l:', JSON.stringify(k.set('window:panel-layers', ['l'])), 'conflicts');
+console.log('force:', JSON.stringify(k.set('window:panel-layers', ['l'], { force: true })));
+console.log('overlay', JSON.stringify(k.overlay()));
+console.log('keysFor layers', k.keysFor('window:panel-layers'), 'lasso', k.keysFor('tool:lasso'));
+console.log('set revert two keys', JSON.stringify(k.set('file:revert', ['Shift+F12', 'Alt+F12'])), JSON.stringify(k.overlay()));
+console.log('menu revert', k.effective().menu['file:revert'], 'renderer', k.effective().renderer['file:revert']);
+console.log('set fixed', JSON.stringify(k.set('file:revert', ['Shift+CmdOrCtrl+F12'])), JSON.stringify(k.set('file:revert', ['Shift+CmdOrCtrl+F12'], { force: true })));
+console.log('reset', k.reset('file:revert'), k.keysFor('file:revert'));
+console.log('set null', JSON.stringify(k.set('help:guide', null)), k.keysFor('help:guide'), JSON.stringify(k.resolvedOverlay()));
+console.log('paint set', JSON.stringify(k.set('tool:brush-next', ['Shift+Alt+N'], { scope: 'paint' })), k.keysFor('tool:brush-next', 'paint'));
+console.log('events', ev.length);

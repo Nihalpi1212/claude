@@ -9,19 +9,26 @@ export const support = { read: ['icc', 'exif', 'xmp', 'iptc', 'resolution'], wri
 const ID = { icc: 1039, exif: 1058, xmp: 1060, iptc: 1028, resolution: 1005 };
 
 /** { start, end } of the resource blocks (after the section's length field). */
-function section(b) {
+function section(b, onDamage = null) {
   if (ascii(b, 0, 4) !== '8BPS') throw new Error('Not a PSD file');
   const modeLen = u32be(b, 26);
   const at = 26 + 4 + modeLen;
   if (at + 4 > b.length) throw new Error('PSD is truncated');
   const len = u32be(b, at);
-  if (at + 4 + len > b.length) throw new Error('PSD image resources are truncated');
+  if (at + 4 + len > b.length) {
+    // a reader keeps the resources that are in the file (S5)
+    if (!onDamage) throw new Error('PSD image resources are truncated');
+    onDamage();
+    return { lenAt: at, start: at + 4, end: b.length };
+  }
   return { lenAt: at, start: at + 4, end: at + 4 + len };
 }
 
 export function read(b) {
-  const { start, end } = section(b);
-  const list = parseResources(b, start, end);
+  let damaged = false;
+  const onDamage = () => (damaged = true);
+  const { start, end } = section(b, onDamage);
+  const list = parseResources(b, start, end, onDamage);
   const get = (id) => list.find((r) => r.id === id)?.data;
   const out = {};
   if (get(ID.icc)) out.icc = copyBytes(get(ID.icc));
@@ -30,7 +37,7 @@ export function read(b) {
   if (get(ID.iptc)) out.iptc = copyBytes(get(ID.iptc));
   const res = resolutionFromPsd(get(ID.resolution));
   if (res) out.resolution = res;
-  return out;
+  return damaged ? { ...out, damaged: true } : out;
 }
 
 export function write(b, patch) {

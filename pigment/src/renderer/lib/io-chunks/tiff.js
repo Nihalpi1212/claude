@@ -25,28 +25,40 @@ function io(le) {
   return { u16, u32, w16, w32 };
 }
 
-/** IFD0: { at, entries: [{ tag, type, count, value: Uint8Array (file byte order) }], next }. */
-function ifd0(b) {
+/**
+ * IFD0: { at, entries: [{ tag, type, count, value: Uint8Array (file byte order) }], next }. With `onDamage` (read
+ * only) the entries that fit are kept and a tag whose value lies outside the file is skipped instead of throwing (S5).
+ */
+function ifd0(b, onDamage = null) {
   const le = byteOrder(b);
   const { u16, u32 } = io(le);
   const at = u32(b, 4);
   if (at < 8 || at + 2 > b.length) throw new Error('TIFF IFD0 is outside the file');
-  const n = u16(b, at);
-  if (at + 2 + n * 12 + 4 > b.length) throw new Error('TIFF IFD0 is truncated');
+  let n = u16(b, at);
+  if (at + 2 + n * 12 + 4 > b.length) {
+    if (!onDamage) throw new Error('TIFF IFD0 is truncated');
+    onDamage();
+    n = Math.max(0, Math.floor((b.length - at - 2) / 12));
+  }
   const entries = [];
   for (let k = 0; k < n; k++) {
     const e = at + 2 + k * 12;
     const tag = u16(b, e), type = u16(b, e + 2), count = u32(b, e + 4);
     const len = (SIZE[type] ?? 1) * count;
     const off = len <= 4 ? e + 8 : u32(b, e + 8);
-    if (off + len > b.length) throw new Error(`TIFF tag ${tag} is outside the file`);
+    if (off + len > b.length) {
+      if (!onDamage) throw new Error(`TIFF tag ${tag} is outside the file`);
+      onDamage();
+      continue;
+    }
     entries.push({ tag, type, count, value: b.subarray(off, off + len) });
   }
-  return { le, at, entries, next: u32(b, at + 2 + n * 12) };
+  return { le, at, entries, next: at + 2 + n * 12 + 4 <= b.length ? u32(b, at + 2 + n * 12) : 0 };
 }
 
 export function read(b) {
-  const { le, entries } = ifd0(b);
+  let damaged = false;
+  const { le, entries } = ifd0(b, () => (damaged = true));
   const { u16, u32 } = io(le);
   const get = (tag) => entries.find((e) => e.tag === tag);
   const out = {};
@@ -63,7 +75,7 @@ export function read(b) {
     const unit = unitTag ? u16(unitTag.value, 0) : 2;
     out.resolution = { x: round2(x ?? y), y: round2(y ?? x), unit: unit === 3 ? 'cm' : unit === 1 ? 'none' : 'in' };
   }
-  return out;
+  return damaged ? { ...out, damaged: true } : out;
 }
 
 export function write(b, patch) {

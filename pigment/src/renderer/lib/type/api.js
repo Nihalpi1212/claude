@@ -189,17 +189,25 @@ export function layoutText(layer) {
 }
 
 /**
+ * The engine's (or the text extension's) render of a layer with no render stage: { canvas, x, y } (S11.1). A stage
+ * that renders another layer in its place (type-fonts' hover preview of a clone) uses this, not renderText, so the
+ * stages outside it (warp, anti-alias) are not applied twice.
+ */
+export function renderBase(layer) {
+  const ext = textExtensionFor(layer);
+  if (ext) return ext.renderBase(layer);
+  return currentEngine(layer).render(layer, engineLayout(layer));
+}
+
+/**
  * Base render (no transform): { canvas, x, y }, through the active text render stages (0.5, S11.3). With
- * `matrix` (TextLayer.render passes its transform) a `transformed` stage draws in document space with it; the result
- * then carries `transformed: true` and is used as it is.
+ * `matrix` (TextLayer.render passes its transform) a `transformed` stage draws in document space with it; what it
+ * returns then carries `transformed: true` and is used as it is. A `transformed` stage that hands on `next()`'s own
+ * object (Smooth) or returns `transformed: false` gives a base-space result, which TextLayer.render resamples.
  */
 export function renderText(layer, { matrix = null } = {}) {
   const ext = textExtensionFor(layer);
-  const base = () => {
-    if (ext) return ext.renderBase(layer);
-    const engine = currentEngine(layer);
-    return engine.render(layer, engineLayout(layer));
-  };
+  const base = () => renderBase(layer);
   const stages = activeStages(layer, !!ext);
   if (!stages.length) return base();
   const lay = layoutText(layer);
@@ -207,10 +215,19 @@ export function renderText(layer, { matrix = null } = {}) {
   let next = base;
   for (const s of stages) {
     const inner = next;
-    next = () => s.render(layer, inner, lay, { matrix });
+    if (!s.transformed || !matrix) {
+      next = () => s.render(layer, inner, lay, { matrix });
+      continue;
+    }
+    // each transformed stage answers for its own result: next()'s object handed on keeps next()'s space
+    next = () => {
+      let passed;
+      const out = s.render(layer, () => (passed = inner()), lay, { matrix });
+      if (out && out === passed) return out;
+      return out && out.transformed === undefined ? { ...out, transformed: true } : out;
+    };
   }
-  const out = next();
-  return matrix && stages.some((s) => s.transformed) ? { ...out, transformed: true } : out;
+  return next();
 }
 
 /** Base bounds, padded for stroke, italics and shifts (the active stages' bounds() wrap them, S11.3). */

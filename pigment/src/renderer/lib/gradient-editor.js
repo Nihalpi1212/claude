@@ -285,7 +285,7 @@ export function openGradientEditor(app, { value = null, keepRefs = false, title 
   async function pickStopColor() {
     if (sel.kind !== 'color') return;
     const stop = sel.stop;
-    const hex = await app.pickColor?.(stopHex(stop), { title: 'Color Picker (Stop Color)' });
+    const hex = await app.pickColor?.(stopHex(stop), { title: 'Color Picker (Stop Color)', target: 'stop' });
     if (!hex) return;
     stop.color = rgbaToHex(parseColor(hex));
     changed();

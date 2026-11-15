@@ -135,7 +135,7 @@ export function paintPanel(app, { value = null, allow = PAINT_TYPES, role = 'fil
       const picker = el('button', 'btn small', 'Color Picker…');
       picker.type = 'button';
       picker.addEventListener('click', async () => {
-        const c = await app.pickColor?.(color, { title: role === 'stroke' ? 'Pick a solid color for the stroke' : 'Pick a solid color for the fill' });
+        const c = await app.pickColor?.(color, { title: role === 'stroke' ? 'Pick a solid color for the stroke' : 'Pick a solid color for the fill', target: 'field' });
         if (c) {
           report({ type: 'solid', color: hex6(c) });
           render();

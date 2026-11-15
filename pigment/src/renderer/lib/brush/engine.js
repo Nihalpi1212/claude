@@ -14,7 +14,7 @@
 import { CANVAS_BLEND, blendImages } from '../../../shared/pixels/blend.js';
 import { parseColor, rgbaToHex } from '../../../shared/pixels/color.js';
 import { createCanvas } from '../document.js';
-import { dabCanvas } from '../brush.js';
+import { dabCanvas, dabDiameter, dabDrawSide } from '../brush.js';
 import { splitStrokeSettings, normalizeBrush } from './preset.js';
 import { sampleCanvas } from './tool-brush.js';
 
@@ -124,9 +124,18 @@ export function renderTip(tip, size, color = '#000') {
   if (kind?.render) return tinted(kind.render(tip, size), color);
   if (tip?.kind === 'sampled') {
     const s = sampleDab(tip, size, color);
-    if (s) return s;
+    if (s) return atDrawSide(s, size);
   }
-  return dabCanvas(size, tip?.hardness ?? 0.8, color);
+  return atDrawSide(dabCanvas(size, tip?.hardness ?? 0.8, color), size);
+}
+
+/** A cached dab canvas at the side it is drawn at (S2.8: the cache may hold a larger one); a copy only when it differs. */
+function atDrawSide(c, size) {
+  const side = dabDrawSide(size);
+  if (c.width === side && c.height === side) return c;
+  const out = createCanvas(side, side);
+  out.getContext('2d').drawImage(c, 0, 0, side, side);
+  return out;
 }
 
 /**
@@ -160,13 +169,19 @@ function tinted(coverage, color) {
   return c;
 }
 
+// bounded by the pixels it holds and keyed on dabCanvas's 1 % size steps, as dabCanvas's own cache (S2.8)
 const sampleCache = new Map();
-/** A decoded sampled tip (lib/brush/tool-brush.js sampleCanvas: coverage in alpha) scaled to `size`, in `color`. */
+const SAMPLE_CACHE_PIXELS = 64 * 1024 * 1024;
+let sampleCachePixels = 0;
+/**
+ * A decoded sampled tip (lib/brush/tool-brush.js sampleCanvas: coverage in alpha) scaled to `size`, in `color`. Like
+ * dabCanvas it may be larger than asked above 128 px: draw it at dabDrawSide(size).
+ */
 function sampleDab(tip, size, color) {
   const id = tip?.sample?.hash || tip?.sample?.blob;
   const src = id ? sampleCanvas(id) : null;
   if (!src) return null;
-  const d = Math.max(1, Math.ceil(size));
+  const d = dabDiameter(size);
   const key = `${id}|${d}|${color}`;
   let c = sampleCache.get(key);
   if (c) return c;
@@ -180,8 +195,14 @@ function sampleDab(tip, size, color) {
   ctx.fillRect(0, 0, c.width, c.height);
   ctx.globalCompositeOperation = 'destination-in';
   ctx.drawImage(src, pad + (d - w) / 2, pad + (d - h) / 2, w, h);
-  if (sampleCache.size > 64) sampleCache.delete(sampleCache.keys().next().value);
+  const px = c.width * c.height;
+  while (sampleCache.size && sampleCachePixels + px > SAMPLE_CACHE_PIXELS) {
+    const [k, old] = sampleCache.entries().next().value;
+    sampleCache.delete(k);
+    sampleCachePixels -= old.width * old.height;
+  }
   sampleCache.set(key, c);
+  sampleCachePixels += px;
   return c;
 }
 
@@ -261,13 +282,33 @@ function seededRandom(seed, salt) {
   };
 }
 
-function strokeContext({ preset, paint, stroke = null, layer = null }) {
-  const app = paint.view?.app ?? null;
+// a stroke without paint.seed gets its own (S2.4), so two strokes do not repeat one jitter sequence
+let strokeCount = 0;
+function nextStrokeSeed() {
+  strokeCount = (strokeCount + 1) >>> 0;
+  return ((Date.now() ^ Math.imul(strokeCount, 0x9e3779b9)) >>> 0) || 1;
+}
+
+/**
+ * S2.4: the engine fills what paint lacks. `seed` (traceDabs: its option, default 1; a stroke: a fresh one per stroke);
+ * `constrainColor` (S2.7): paint's own, else app.colorConstraint (hex in, hex out) applied to the rgb, else identity.
+ * `app` comes from paint.view, else paint.app (renderStrokePreview passes it, so previews resolve ctx.patterns).
+ */
+function strokeContext({ preset, paint, stroke = null, layer = null, seed = paint.seed ?? 1 }) {
+  const app = paint.view?.app ?? paint.app ?? null;
+  const doc = paint.view?.doc ?? app?.doc ?? null;
+  let constrainColor = (rgb) => rgb;
+  if (typeof paint.constrainColor === 'function') constrainColor = paint.constrainColor;
+  else if (typeof app?.colorConstraint === 'function') {
+    constrainColor = (rgb) => {
+      const hex = app.colorConstraint(rgbaToHex(rgb), doc);
+      return typeof hex === 'string' ? parseColor(hex).slice(0, 3) : rgb;
+    };
+  }
   return {
-    preset, paint, stroke, layer, app,
-    doc: paint.view?.doc ?? app?.doc ?? null,
-    random: (salt) => seededRandom(paint.seed ?? 1, salt),
-    constrainColor: (rgb) => (typeof paint.constrainColor === 'function' ? paint.constrainColor(rgb) : rgb),
+    preset, paint, stroke, layer, app, doc,
+    random: (salt) => seededRandom(seed, salt),
+    constrainColor,
     patterns: app?.patterns ?? null,
   };
 }
@@ -399,7 +440,8 @@ export class BrushStroke {
     this.t0 = null;
     this.current = null;
     this.mods = strokeModifiers(modifiers, preset, paint);
-    this.ctx = strokeContext({ preset, paint, stroke: this, layer });
+    this.seed = paint.seed ?? nextStrokeSeed();
+    this.ctx = strokeContext({ preset, paint, stroke: this, layer, seed: this.seed });
     for (const m of this.mods) if (typeof m.mod.begin === 'function') m.state = runModifierHook(m, 'begin', [this.ctx]);
     this.sampleMods = this.mods.filter((m) => typeof m.mod.sample === 'function');
     this.geometryMods = this.mods.filter((m) => typeof m.mod.geometry === 'function');
@@ -462,17 +504,18 @@ export class BrushStroke {
     const size = this.effectiveSize(pressure);
     const flow = dabFlow(this.s, pressure);
     if (!this.geometryMods.length) {
-      this.paintDab({ x, y, size, flow, angle: this.s.angle, roundness: this.s.roundness, flipX: false, flipY: false, color: null });
+      this.paintDab({ x, y, size, flow, angle: this.s.angle, roundness: this.s.roundness, flipX: !!this.preset.tip.flipX, flipY: !!this.preset.tip.flipY, color: null });
       return;
     }
     const prev = this.lastDab;
     const dab = {
       x, y, pressure, size, angle: this.s.angle ?? 0, roundness: this.s.roundness ?? 1, flipX: this.preset.tip.flipX, flipY: this.preset.tip.flipY,
       opacity: 1, flow, color: dabColor(this.s), tip: this.preset.tip, index: this.dabs, t: (this.current?.time ?? 0) - (this.t0 ?? 0), sample: this.current,
-      direction: prev ? (Math.atan2(y - prev.y, x - prev.x) * 180) / Math.PI : 0, seed: this.paint.seed ?? 1,
+      direction: prev ? (Math.atan2(y - prev.y, x - prev.x) * 180) / Math.PI : 0, seed: this.seed,
     };
     this.lastDab = dab;
-    for (const d of geometryDabs(dab, this.geometryMods, this.ctx)) this.paintDab({ ...d, color: d.color ? rgbaToHex(d.color) : null });
+    // a colour a modifier set goes through the mode's constraint (S2.7: Grayscale stays grey, Indexed snaps)
+    for (const d of geometryDabs(dab, this.geometryMods, this.ctx)) this.paintDab({ ...d, color: d.color ? rgbaToHex(this.ctx.constrainColor(d.color)) : null });
   }
 
   /** The dab's shape canvas: a decoded sampled tip, else 0.4's round dab. */
@@ -495,6 +538,8 @@ export class BrushStroke {
     const { x, y, size } = d;
     const color = d.color ?? (this.s.mode === 'mask' ? '#ffffff' : this.s.mode === 'erase' ? '#000000' : rgbaToHex(parseColor(this.s.color)));
     const half = size / 2;
+    // the cached canvas may be larger than asked (S2.8): it is drawn at 0.4's side, so the dab keeps 0.4's extent
+    const side = dabDrawSide(size);
     const rx = d.roundness && d.roundness < 1 ? d.roundness : 1;
     const flipped = d.flipX || d.flipY;
     ctx.save();
@@ -503,11 +548,11 @@ export class BrushStroke {
     if (this.s.sampler) {
       // clone/heal/pattern: the sampler paints the dab area, masked by a dab shape
       const dab = this.dabShape(size, '#000000', false);
-      const tmp = createCanvas(dab.width, dab.height);
+      const tmp = createCanvas(side, side);
       const tctx = tmp.getContext('2d');
       this.s.sampler(tctx, x - half - 1, y - half - 1, tmp.width, tmp.height, { x, y, size });
       tctx.globalCompositeOperation = 'destination-in';
-      tctx.drawImage(dab, 0, 0);
+      tctx.drawImage(dab, 0, 0, side, side);
       ctx.drawImage(tmp, Math.round(x - half - 1), Math.round(y - half - 1));
     } else {
       const aliased = this.s.antialias === false;
@@ -517,10 +562,10 @@ export class BrushStroke {
         ctx.translate(x, y);
         ctx.rotate(((d.angle ?? 0) * Math.PI) / 180);
         ctx.scale(d.flipX ? -1 : 1, rx * (d.flipY ? -1 : 1));
-        ctx.drawImage(dab, -dab.width / 2, -dab.height / 2);
+        ctx.drawImage(dab, -side / 2, -side / 2, side, side);
       } else if (aliased) {
-        ctx.drawImage(dab, Math.round(x - dab.width / 2), Math.round(y - dab.height / 2));
-      } else ctx.drawImage(dab, x - dab.width / 2, y - dab.height / 2);
+        ctx.drawImage(dab, Math.round(x - side / 2), Math.round(y - side / 2), side, side);
+      } else ctx.drawImage(dab, x - side / 2, y - side / 2, side, side);
     }
     ctx.restore();
   }
@@ -751,8 +796,11 @@ export function renderStrokePreview(preset, paint = {}, { width = 260, height = 
     endStroke: () => null,
     cancelStroke() {},
   };
-  const { sampler: _sampler, view: _view, preset: _preset, size: _s, hardness: _h, spacing: _sp, angle: _a, roundness: _r, ...rest } = paint ?? {};
-  const settings = { opacity: 1, flow: 1, smoothing: 0, pressureSize: false, pressureOpacity: false, ...rest, preset: p, color, mode: 'paint', blend: 'normal', lockTransparency: false, label: 'Preview' };
+  // the view is dropped (a preview paints no document) but its app is kept, so ctx.app and ctx.patterns resolve; a
+  // preview has a fixed seed unless paint gives one, so jitter does not change between redraws
+  const { sampler: _sampler, view, preset: _preset, size: _s, hardness: _h, spacing: _sp, angle: _a, roundness: _r, ...rest } = paint ?? {};
+  const app = rest.app ?? view?.app ?? null;
+  const settings = { opacity: 1, flow: 1, smoothing: 0, pressureSize: false, pressureOpacity: false, seed: 1, ...rest, app, preset: p, color, mode: 'paint', blend: 'normal', lockTransparency: false, label: 'Preview' };
   const stroke = new BrushStroke({ target: { canvas, x: 0, y: 0, mask: false }, layer: null, settings, history });
   stroke.begin({ x: pts[0][0], y: pts[0][1] });
   for (const [x, y] of pts.slice(1)) stroke.extend({ x, y });

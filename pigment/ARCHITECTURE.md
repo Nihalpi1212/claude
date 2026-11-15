@@ -3761,7 +3761,9 @@ is 0.4's smoothing (`k = 1 − smoothing`) and the default, so every 0.4 stroke 
 in `settings.brushes.locks` keep the current brush's values; with `includeTool`, `preset.tool` values go to the flat
 `opacity`, `flow`, `blend`, `smoothing`, and `tool.color` to `app.setColors({ foreground })`. **Protect Texture:** when
 the current brush has `protectTexture` and the incoming preset's texture is enabled, the current pattern and scale are
-kept. **"Modified"** (the panel's mark, the recent row) means `sectionDiff(toolBrush(app, id).preset, stored).length > 0`;
+kept. **"Modified"** (the panel's mark, the recent row) means `sectionDiff(toolBrush(app, id).preset,
+clampBrushToTool(app, id, stored)).length > 0` (the stored preset as a pick gives it to that tool: DabTools clamp the size
+to 1000 px; `clampBrushToTool` is exported by `tool-brush.js`);
 `brushPresetId` is never cleared by an edit.
 
 `StrokeTool.baseSettings(layer, target)` (paint.js, landed by the skeleton) returns 0.4's flat object built from
@@ -3792,7 +3794,8 @@ class BrushStroke {
                                      // entry, dab index and fade count kept): strokePathPixels' sub-paths
   extend(sample): void;
   finish(sample): void;              // extends to the release point without smoothing (0.4's onPointerUp by hand)
-  tick(now: number): void;           // build-up: the dabs due at `now` while the pointer rests (rAF; tests pass fake times)
+  tick(now: number): void;           // build-up: the dabs due at `now` while the pointer rests (the stroke's own rAF
+                                     // loop calls it, see below; tests pass fake times)
   end(): HistoryEntry | null;  cancel(): void;  migrate(target, before): void;
   readonly target; readonly layer; readonly canvas; readonly dirty: Rect | null; readonly preset; readonly paint;
   readonly s: object;                // 0.4's merged settings view; `s.smoothing` stays writable (0.4 callers)
@@ -3802,7 +3805,8 @@ interface StrokePaint { mode: 'paint' | 'erase' | 'mask'; color: '#rrggbb'; back
   opacity: number; flow: number; blend: BlendMode | 'behind' | 'clear'; lockTransparency: boolean; antialias: boolean;
   sampler?: (tctx, lx, ly, w, h, { x, y, size }) => void;      // clone, pattern and history stamps (0.4 semantics)
   smoothing: number; smoothingOptions?: ToolPaint['smoothingOptions']; pressureSize: boolean; pressureOpacity: boolean;
-  label: string; constrainColor?: (rgb) => rgb; seed?: number; view?: CanvasView }
+  label: string; constrainColor?: (rgb) => rgb; seed?: number; view?: CanvasView;
+  app?: App /* without a view: previews pass it, so ctx.app and ctx.patterns resolve */ }
 normalizeSample(partial, prev?): PointerSample   // pressure 1, tilt 0, twist 0, wheel 0, pointerType 'mouse',
                                                  // time = prev.time + 1 ms per px travelled (0 for the first)
 ```
@@ -3813,6 +3817,11 @@ normalizeBrush(settings.preset ?? brushFromLegacy(settings))`, then every flat t
 (tools, `strokePathPixels`, previews, tests) uses this one form; samples may be partial (`normalizeSample` fills them).
 History: 0.4's calls exactly (`beginStroke` in the constructor, `endStroke(dirty)`, `cancelStroke()`); one stroke is one
 entry, build-up dabs, sub-paths and Shift-click lines included.
+
+Build-up drives itself: while `preset.buildUp` is on, the stroke schedules its own `requestAnimationFrame` ticks from
+`begin()` until `end()` or `cancel()` and calls `tick(performance.now())` from them (brush-engine-core, in the engine).
+`tick(now)` stays public for tests that pass fake times and for callers that drive time themselves; `tools/paint.js`
+(brush-painting-behaviours) schedules no ticks, so build-up never runs twice and never not at all.
 
 **S2.3 Dab model.**
 
@@ -3856,6 +3865,14 @@ interface StrokeContext { preset, paint, stroke: BrushStroke | null /* null in t
   random: (salt: string) => () => number /* seeded from paint.seed */, constrainColor(rgb), patterns: app.patterns }
 ```
 
+The engine fills what `paint` lacks, so `baseSettings` (S1.3) keeps its key list: without `paint.seed` a stroke takes a
+fresh seed of its own (two strokes never repeat one jitter sequence; `traceDabs` uses its `seed` option, default 1;
+`renderStrokePreview` uses 1, so a preview does not change between redraws); without `paint.constrainColor`,
+`constrainColor` is `app.colorConstraint` (hex in, hex out) applied to the rgb, identity when there is none. `app` is
+`paint.view.app`, else `paint.app`; `renderStrokePreview` keeps the app of its `paint` (as `app` or through `view`) and
+drops the view, so in a preview `ctx.doc` may be the app's document and `ctx.stroke.layer` is null. The stub engine
+does all of this (brush-engine-core keeps it); it also runs a colour a geometry modifier set through `constrainColor`.
+
 Data contracts. `coverage`'s mask covers dab bbox ∩ target canvas ∩ selection bounds (x, y: stroke-canvas px of its
 0,0); above 1024 px the engine may hand a reduced mask (`scale` < 1, one mask pixel per `1/scale` canvas px) and
 modifiers honour it. `buffer`'s `img` is straight-alpha RGBA8 of the accumulated stroke, before stroke opacity and the
@@ -3881,7 +3898,7 @@ interface PointerSample {
   altitude: number; azimuth: number;      // radians (e.altitudeAngle / azimuthAngle, else derived from tilt)
   pointerType: 'mouse' | 'pen' | 'touch';
   eraser: boolean;           // pen eraser end: pointerType 'pen' and (button 5 or buttons & 32)
-  barrel: boolean;           // side button held during tip contact: pointerType 'pen' and (buttons & 2) on a primary press
+  barrel: boolean;           // side button: pointerType 'pen' and (buttons & 2, or button 2 on its press and release)
   buttons, button, shift, alt, ctrl, meta;
   capsLock: boolean;         // e.getModifierState('CapsLock'): the precise cursor
   time: number;              // e.timeStamp
@@ -3892,7 +3909,8 @@ interface PointerSample {
 A mouse sample gives the tilt, rotation and wheel controls their neutral value. A pen eraser contact arrives as
 `pointerdown` with button 5 / buttons 32: canvas-view treats it as a primary press (canvas capture, `onPointerDown`
 with `eraser: true`, moves and up as for button 0). A side-button press without tip contact arrives as button 2 and is a
-right-button drag (S3.3) with `barrel: true`. Electron gets pen data through Chromium's pointer events; no command-line
+right-button drag (S3.3) with `barrel: true` on the press, the moves and the release; the side button held during
+tip contact gives `barrel: true` on the primary press's samples. Electron gets pen data through Chromium's pointer events; no command-line
 switch is added unless a measurement in the packaged app needs one.
 
 **S2.6 Tips, reach and previews.**
@@ -3926,11 +3944,15 @@ size, with one toast per stroke.
 
 16/32-bit documents: strokes paint the 8-bit proxy and `depth.js` rebuilds the deep pixels from it, as in 0.3 (float
 stroke buffers are deep-pipeline, 0.9). Non-RGB modes: `constrainColor` is `app.colorConstraint` applied to the dab
-colour, so Color Dynamics stay grey in Grayscale and snap in Indexed.
+colour (the engine derives it from `ctx.app`, S2.4; `baseSettings` does not add it), so Color Dynamics stay grey in
+Grayscale and snap in Indexed.
 
 **S2.8 Cost at 5000 px** (the cap rises in the skeleton, under the stub engine too). `dabCanvas` (skeleton) bounds its
 cache by total pixels (64 MP) instead of 200 entries, and quantises sizes above 128 px to 1 % steps (below, 0.4's whole
-pixels: the goldens are untouched). Every engine keeps 0.4's repaint contract: `onDirty` per flush with rects that
+pixels: the goldens are untouched). Above 128 px it therefore returns a canvas up to 1 % larger than asked: every caller
+draws it at `dabDrawSide(size)` (= `ceil(size) + 2`, exported next to it), so a dab keeps 0.4's extent and stays inside
+the dirty rect and coverage box worked out from `size` (the stub engine, `renderTip` and the Brushes panel do; a
+sampled tip's cache follows the same budget and steps). Every engine keeps 0.4's repaint contract: `onDirty` per flush with rects that
 include scattered dabs, an empty rect at the end, no full-view repaint per dab. `repaint-speed.spec.mjs` gains a case
 gated on `ENGINE.id !== 'classic-0.4'`: a 2500 px soft stroke with Texture on a 4000 × 4000 document, under 25 ms per
 dab on the CI runner, with no full repaint.
@@ -4020,7 +4042,8 @@ registerPsdResource({ id, order, read?(psd, doc, ctx): void, write?(doc, psd, ct
 registerPsdOptions({ read?(opts): opts, write?(opts): opts })      // ag-psd options (0.4: skipThumbnail, skipLinkedFilesData;
                                                                     // generateThumbnail, noBackground)
 registerPsdNotice(code, { when: 'open' | 'save', text(count, details): string, timeout?: number })
-psdFeatures(): Record<string, boolean>    // the merged PSD_FEATURES flags of the mapper files (S15); Node-safe
+psdFeatures(): Record<string, boolean>    // the merged PSD_FEATURES flags of the mapper files (S15; each file
+                                           // calls registerPsdFeatures(PSD_FEATURES) at top level); Node-safe
 interface PsdReadCtx  { doc, psd, opts, report, parent: GroupLayer, claim(layer, part), claimed(layer, part), patterns: Map }
 interface PsdWriteCtx { doc, psd, opts: { compositor, maximizeCompatibility, ... }, report, claim(layer, part), claimed(layer, part),
   shown(canvas, x, y) /* pixels as the image mode shows them, 0.4 */, maskOf(layer, parts) /* K.1 bake */,
@@ -4251,7 +4274,8 @@ app.colorPicker.pick({ initial: ColorValue | string, title?, live?(c: ColorValue
                        allowBooks? = true }): Promise<ColorValue | null>
 app.colorPicker.hud({ at: { x, y } /* screen */, tool, initial }): HudSession
 interface HudSession { move(p: PointerSample): void; up(p): void; cancel(): void; done: Promise<ColorValue | null> }
-app.pickColor(initial, { title, live }): Promise<'#rrggbb' | null>   // 0.4's API, kept: pick() returning hex
+app.pickColor(initial, { title, live, target = 'field' }): Promise<'#rrggbb' | null>   // 0.4's API, kept: pick()
+                                    // returning hex; without a target a call is a field's (gradient stops pass 'stop')
 swatchColors(app): '#rrggbb'[]      // the swatches as hex (the shape paint popover's row); stub: the `swatches` kind,
                                     // else 0.4's settings.swatches / DEFAULT_SWATCHES
 ```
@@ -4597,7 +4621,9 @@ suffix; `missing` means the family is in neither `fontFamilies()`, the local rec
 `fonts.addFontData`. The catalog emits `'type:catalog-changed'` on `app`. psd-text calls `fromPostScriptName` on read
 (CharStyle `postScriptName` is the file's name; family, weight and italic come from the answer) and `resolve` on write.
 **Hover preview** (type-fonts): a text render stage (order 0, `whileEditing: 'apply'`, `test` = the hovered targets)
-that returns `renderText` of a detached clone with `stylePatch` applied; starting and stopping it call `layer.touch()`
+that returns `renderBase` (api.js: the engine's render with no stage) of a detached clone with `stylePatch` applied, not
+`renderText`, whose stages would warp and anti-alias the clone before the outer stages do it again; starting and
+stopping it call `layer.touch()`
 and `doc.changed('canvas')` (no history entry, no dirty mark); it ends on blur, Escape and `doc:closed`.
 
 **S11.2 Font widgets and the type tools' options** (widgets registered by the `font-library.js` stub, E7): option kinds
@@ -4624,12 +4650,16 @@ registerTextRenderStage({ id, order, test(layer): boolean,
   whileEditing?: 'bypass' | 'apply' })                       // default 'bypass'
 stageGeometry(layer, belowOrder): { mapPoint } | null       // the active stages' geometry below that order, composed
 renderText(layer, { matrix = null } = {})                   // 0.4's signature plus opts
+renderBase(layer): { canvas, x, y }                          // the engine's (or extension's) render, no stage (S11.1)
 setEditing(layer, on: boolean): void                         // tools/text.js calls it around a session; touches the layer
 ```
 
 `renderText` and `textBounds` apply the stages whose `test` passes; **a lower order sits nearer the engine** (each stage
 wraps the lower ones; the engine's render innermost). `TextLayer.render` (skeleton) calls `renderText(layer, { matrix:
-this.transform })` and uses the result as it is when an active stage is `transformed`, else resamples as 0.4 does.
+this.transform })` and uses the result as it is when it carries `transformed: true`, else resamples as 0.4 does. A
+`transformed` stage's result is marked `transformed: true` unless it is `next()`'s own object handed on unchanged (it
+keeps `next()`'s space: Smooth through `next()` is resampled as 0.4's) or the stage returns `transformed: false`; a copy
+of `next()`'s result (`{ ...next() }`) without that flag counts as drawn in document space.
 `setEditing` calls `layer.touch()` and `doc.changed('canvas')`, so the cache never shows a stale warp. While a session
 edits a layer, `'bypass'` stages are skipped (warped text is edited unwarped, a known difference). type-menu-commands
 registers `warp` (order 100: `geometry` is the warp's map; `render` resamples `next()` for text without outlines) and
@@ -4679,7 +4709,8 @@ per changed key with `batch: true`, then once with key `'*'`; re-renders the opt
 presets-panels): activate the tool first (so `syncFromLayer` cannot overwrite the preset), then `setOptions(tool,
 options)`, `setToolBrush(app, tool, brush, { respectLocks: false, includeTool: false })` when `brush`,
 `setTypeDefaults(app, type)` when `type`, `app.setColors({ foreground: color })` when `color`; the replay argument is
-the data with `withSampleData`.
+the data with `withSampleData`. A type tool preset's options hold until another text layer becomes active: selecting
+one re-syncs the type tools' options from that layer (0.4's `syncFromLayer`), as in 0.4.
 
 **S12.2 Transform preview and grab** (image-ops.js, skeleton). `app.transformTool.previewBox(doc): { box, targets,
 selectionOnly } | null` is pure and built from the code `start()` uses (`collectTargets`, a raster layer's content or
@@ -5099,7 +5130,9 @@ names above stay valid). Package owners build against this list too.
 - The migration keeps 0.4's ids by pushing into the store's order (`app.presets.state('brushes').order`): `add()` makes
   new ids and `presets.js` is frozen. It runs only when `settings.brushPresets` has entries.
 - `setToolBrush` writes the flat tip keys a tool has an option for (and `angle`, `roundness`, `spacing` for `'full'`
-  tools), clamped to the tool's own option (DabTools 1000 px), and `preset.tool` values only for options the tool has,
+  tools), clamped to the tool's own option (DabTools 1000 px; the stored `brush` gets the clamped tip values too, and
+  "Modified" compares with `clampBrushToTool(app, id, stored)`, so a fresh pick of a 3000 px preset on Spot Healing is
+  not modified), and `preset.tool` values only for options the tool has,
   as 0.4's Brushes panel did; `brushPresetId` only when a presetId is given. Protect Texture keeps the current pattern
   and scale; the flag itself comes from the incoming preset.
 - `[` and `]` clamp to the tool's own maximum as well as 5000 (DabTools stop at 1000); the Pencil's maximum is 5000
@@ -5112,6 +5145,9 @@ names above stay valid). Package owners build against this list too.
 
 **S4 (PSD).**
 
+- Each mapper file calls `registerPsdFeatures(PSD_FEATURES)` at top level, as the stubs do: `psdFeatures()` merges only
+  the objects passed to it, so a replacement file that exports `PSD_FEATURES` without the call leaves its flags false
+  (and the gated specs and skeleton-05 "psd" keep asserting the stub's behaviour).
 - `psd/registry.js` extras: `registerPsdFeatures(flags)` (flags of files the registry cannot import), `psdLayerKinds()`,
   `psdAspects()`, `psdResources()`, `psdNotice(code)`, `psdNotices()`, `psdOptions(direction, base)`.
 - A kind's `write` returning null declines and the next kind is asked. Resources on read follow the write rule: order
@@ -5135,7 +5171,9 @@ names above stay valid). Package owners build against this list too.
 **S5–S6 (chunks, colour, opening, saving).**
 
 - `io-chunks.js` extras `sniffChunkFormat`, `chunkProviders`; `io-chunks/bytes.js` holds the shared byte and 8BIM
-  helpers. `readChunks` sniffs the signature first; `applyChunks` sniffs when `formatOrExt` names no chunk format. PNG
+  helpers. Each container's reader stops at the damage (a truncated chunk, segment, tag or resource; a chunk whose zlib
+  stream fails) and returns the kinds it read before it with `damaged: true`, so a truncated tagged PNG still gives its
+  `icc`; `{ damaged: true }` alone means nothing could be read (the signature or the first chunk is broken). `readChunks` sniffs the signature first; `applyChunks` sniffs when `formatOrExt` names no chunk format. PNG
   zlib uses `shared/pixels/png.js zlibCodecs` (iCCP and zTXt hold zlib streams). Resolution as read: PNG pHYs per inch
   rounded to 0.1, JPEG, TIFF and PSD to 0.01; PSD unit 2 is reported as `'cm'`.
 - `pipeline.js` extras: `displaySpaceOf(view)`, `profileOf(doc)`, `workingRGB()`, `setWorkingSpaces()`; `assignProfile`
@@ -5184,12 +5222,23 @@ package replaces at start-up. `sampleMerged`'s `skipAdjustments` skips layers of
   `'key'` and prevents the default, so the native accelerator never fires there; on macOS the menu takes the key
   (`'menu-key'`). `keys-05.spec.mjs` asserts one run either way.
 - `main.js`'s Shift+Alt table also holds the paint keys without a global binding (Shift+Alt+Q Behind, Shift+Alt+R
-  Clear) and sends them as their paint command, so menu mnemonics never swallow them.
+  Clear) and sends them as their paint command, so menu mnemonics never swallow them. Such a command therefore reaches
+  the renderer whatever tool is active: `resolveKey` returns it only while a painting tool is active and it is enabled,
+  else null, and `app.js` then runs nothing (no `commitBefore`: a Free Transform stays open), as `shortcuts.js` does on
+  the page. brush-painting-behaviours' Behind and Clear thus run from main only while a painting tool is active.
 - `set(..., { force: true })` refuses (returns the conflicts, changes nothing) for a `FIXED_KEYS` key or one a key
   source owns. `FIXED_KEYS` is `{ [cmd]: { accel, platforms?, development? } }` with `fixedKeyFor(cmd, { platform,
   isPackaged })`. A "plain key" has no Ctrl, Cmd or Alt and is not a function key; Shift+letter counts as plain.
 - `actions.js builtinKeyOwner` reads `effectiveKeys(app.keymap.overlay())`, not `keysFor` (which reads the tables after
-  the actions' own keys shadowed them). Window > Toggle Full Screen shows the effective renderer key (F11 by default).
+  the actions' own keys shadowed them). Window > Toggle Full Screen shows the effective renderer key (F11 by default); after `set('view:fullscreen', …)` (the
+  command has a menu item, so the key goes to the `menu` table) Windows and Linux show the user's key; macOS always
+  shows the fixed Ctrl+Cmd+F, and a user key there works through `shortcuts.js` without showing in the menu.
+- The macOS application menu (About, Settings…, Camera Raw Preferences…) is customised like the others: its items can
+  be hidden and coloured and it gets "Show All Menu Items" when it lost one; the menu itself and its role items
+  (Services, Hide, Quit) cannot be hidden.
+- `keysFor(cmd)` leaves out `FIXED_KEYS`: a list or editor that shows them (read only) takes them from
+  `fixedKeyFor(cmd, { platform, isPackaged })` (the stub shortcuts list does: Toggle Developer Tools shows Shift+Ctrl+F12
+  in development builds, nothing in a packaged one).
 
 **S10 (preset files).**
 
@@ -5225,7 +5274,8 @@ package replaces at start-up. `sampleMerged`'s `skipAdjustments` skips layers of
 
 **S11 (type).** `TYPE_OPTION_DEFAULTS` has no `warp` key (absent means null), so 0.4's typeOptions are unchanged;
 `WARP_STYLES` is listed in `model.js` (warp.js is not Node-safe; skeleton-05 checks they match). `api.js`: `renderText`
-marks `transformed: true` when a transformed stage ran; `setEditing` redraws only when a registered `'bypass'` stage
+marks the result of a transformed stage `transformed: true` unless the stage handed on `next()`'s own object or said
+`transformed: false` (S11.3); `setEditing` redraws only when a registered `'bypass'` stage
 applies; extra `isEditing(layer)`. `font-library.js` reads local font records only when the `local-fonts` permission is
 already granted (no prompt), within 3 s; `favourites` and `recent` are no-ops; extras `createStubCatalog`,
 `parsePostScriptStyle`. In `tools/text.js` a family or style patch goes through `type/target.js applyChar` only when it

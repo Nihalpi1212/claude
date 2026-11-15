@@ -18,14 +18,23 @@ let dabCachePixels = 0;
  * Diameter in whole pixels of the canvas for a dab of `size`: 0.4's ceiling up to 128 px (every golden dab), above that
  * the size rounded up to a 1 % step, so a pressure ramp on a large brush does not fill the cache with near-equal dabs.
  */
-function dabDiameter(size) {
+export function dabDiameter(size) {
   const d = Math.max(1, Math.ceil(size));
   if (d <= 128) return d;
   const step = Math.log(1.01);
   return Math.max(129, Math.ceil(Math.exp(Math.ceil(Math.log(d) / step - 1e-9) * step) - 1e-9));
 }
 
-/** A soft or hard round dab canvas of the given diameter (cached). */
+/**
+ * The side (px) a dab canvas for `size` is drawn at: 0.4's ceil(size) plus the 1 px padding on each side. Above 128 px
+ * dabCanvas returns the larger canvas of its 1 % step, and every caller scales it to this side, so a dab keeps 0.4's
+ * extent and stays inside the dirty rect worked out from `size`.
+ */
+export function dabDrawSide(size) {
+  return Math.max(1, Math.ceil(size)) + 2;
+}
+
+/** A soft or hard round dab canvas of the given diameter (cached; may be larger than asked: draw it at dabDrawSide). */
 export function dabCanvas(size, hardness, color = '#000000', { aliased = false } = {}) {
   const d = dabDiameter(size);
   const key = `${d}|${Math.round(hardness * 100)}|${color}|${aliased ? 'a' : 's'}`;

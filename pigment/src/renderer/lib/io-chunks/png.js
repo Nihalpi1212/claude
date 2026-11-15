@@ -13,15 +13,22 @@ export const support = { read: ['icc', 'exif', 'xmp', 'iptc', 'resolution'], wri
 const SIGNATURE = Uint8Array.of(137, 80, 78, 71, 13, 10, 26, 10);
 const XMP_KEY = 'XML:com.adobe.xmp';
 
-/** [{ type, data }] of every chunk (data aliases `b`); throws on a damaged file. */
-function chunksOf(b) {
+/**
+ * [{ type, data }] of every chunk (data aliases `b`); throws on a damaged file. With `onDamage` (read only) a truncated
+ * chunk ends the list instead, after a call to onDamage, so the chunks before the damage are still read (S5).
+ */
+function chunksOf(b, onDamage = null) {
   for (let i = 0; i < 8; i++) if (b[i] !== SIGNATURE[i]) throw new Error('Not a PNG file');
   const list = [];
   let i = 8;
   while (i + 12 <= b.length) {
     const len = u32be(b, i);
     const type = ascii(b, i + 4, 4);
-    if (i + 12 + len > b.length) throw new Error(`PNG chunk ${type} is truncated`);
+    if (i + 12 + len > b.length) {
+      if (!onDamage) throw new Error(`PNG chunk ${type} is truncated`);
+      onDamage();
+      break;
+    }
     list.push({ type, data: b.subarray(i + 8, i + 8 + len), raw: b.subarray(i, i + 12 + len) });
     i += 12 + len;
     if (type === 'IEND') break;
@@ -57,34 +64,45 @@ function iptcFromRawProfile(text) {
 
 export async function read(b, { inflate = zlibCodecs.inflate } = {}) {
   const out = {};
-  for (const c of chunksOf(b)) {
-    const d = c.data;
-    if (c.type === 'iCCP' && out.icc === undefined) {
-      const z = nul(d);
-      if (z > 0 && d[z + 1] === 0) out.icc = await inflate(d.subarray(z + 2));
-    } else if (c.type === 'eXIf' && out.exif === undefined) out.exif = copyBytes(d);
-    else if (c.type === 'iTXt' && out.xmp === undefined) {
-      const z = nul(d);
-      if (z < 0 || latin1(d.subarray(0, z)) !== XMP_KEY) continue;
-      const compressed = d[z + 1] === 1;
-      const lang = nul(d, z + 3);
-      const tkey = lang < 0 ? -1 : nul(d, lang + 1);
-      if (tkey < 0) continue;
-      const text = d.subarray(tkey + 1);
-      out.xmp = fromUtf8(compressed ? await inflate(text) : text);
-    } else if (c.type === 'zTXt' && out.iptc === undefined) {
-      const z = nul(d);
-      if (z < 0 || latin1(d.subarray(0, z)) !== 'Raw profile type iptc' || d[z + 1] !== 0) continue;
-      const iptc = iptcFromRawProfile(latin1(await inflate(d.subarray(z + 2))));
-      if (iptc) out.iptc = iptc;
-    } else if (c.type === 'pHYs' && d.length >= 9 && out.resolution === undefined) {
-      const x = u32be(d, 0), y = u32be(d, 4);
-      // pixels per metre: shown per inch, the unit Pigment and Photoshop use
-      // (to a tenth: whole pixels per metre cannot hold 72 dpi exactly, 2835 ppm reads 72.009)
-      out.resolution = d[8] === 1 ? { x: round1(x * 0.0254), y: round1(y * 0.0254), unit: 'in' } : { x, y, unit: 'none' };
+  let damaged = false;
+  for (const c of chunksOf(b, () => (damaged = true))) {
+    // a chunk that cannot be decoded (a broken zlib stream) is skipped: the others are still read (S5)
+    try {
+      await readChunk(c, out, inflate);
+    } catch {
+      damaged = true;
     }
   }
-  return out;
+  return damaged ? { ...out, damaged: true } : out;
+}
+
+/** Reads one chunk's kind into `out` (the first chunk of each kind wins). */
+async function readChunk(c, out, inflate) {
+  const d = c.data;
+  if (c.type === 'iCCP' && out.icc === undefined) {
+    const z = nul(d);
+    if (z > 0 && d[z + 1] === 0) out.icc = await inflate(d.subarray(z + 2));
+  } else if (c.type === 'eXIf' && out.exif === undefined) out.exif = copyBytes(d);
+  else if (c.type === 'iTXt' && out.xmp === undefined) {
+    const z = nul(d);
+    if (z < 0 || latin1(d.subarray(0, z)) !== XMP_KEY) return;
+    const compressed = d[z + 1] === 1;
+    const lang = nul(d, z + 3);
+    const tkey = lang < 0 ? -1 : nul(d, lang + 1);
+    if (tkey < 0) return;
+    const text = d.subarray(tkey + 1);
+    out.xmp = fromUtf8(compressed ? await inflate(text) : text);
+  } else if (c.type === 'zTXt' && out.iptc === undefined) {
+    const z = nul(d);
+    if (z < 0 || latin1(d.subarray(0, z)) !== 'Raw profile type iptc' || d[z + 1] !== 0) return;
+    const iptc = iptcFromRawProfile(latin1(await inflate(d.subarray(z + 2))));
+    if (iptc) out.iptc = iptc;
+  } else if (c.type === 'pHYs' && d.length >= 9 && out.resolution === undefined) {
+    const x = u32be(d, 0), y = u32be(d, 4);
+    // pixels per metre: shown per inch, the unit Pigment and Photoshop use
+    // (to a tenth: whole pixels per metre cannot hold 72 dpi exactly, 2835 ppm reads 72.009)
+    out.resolution = d[8] === 1 ? { x: round1(x * 0.0254), y: round1(y * 0.0254), unit: 'in' } : { x, y, unit: 'none' };
+  }
 }
 
 export async function write(b, patch, { deflate = zlibCodecs.deflate } = {}) {

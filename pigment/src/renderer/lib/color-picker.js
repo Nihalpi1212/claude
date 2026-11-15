@@ -2,7 +2,8 @@
 // the user chooses goes through app.colorPicker:
 //   app.colorPicker.pick({ initial: ColorValue | '#rrggbb', title?, live?(c), doc?, target?, allowBooks? }) -> Promise<ColorValue | null>
 //   app.colorPicker.hud({ at, tool, initial }) -> HudSession { move(p), up(p), cancel(), done: Promise<ColorValue | null> }
-//   app.pickColor(initial, { title, live }) -> Promise<'#rrggbb' | null>   (0.4's API, kept: pick() returning hex)
+//   app.pickColor(initial, { title, live, target = 'field' }) -> Promise<'#rrggbb' | null>   (0.4's API, kept: pick()
+//     returning hex; a call without a target is a field's)
 //   swatchColors(app) -> '#rrggbb'[]                                       (the shape paint popover's swatch row)
 // ColorValue: { hex, rgb: [r, g, b], lab?, cmyk?, book: { book, name } | null, space: 'rgb' | 'hsb' | 'lab' | 'cmyk' | 'book' }.
 //
@@ -206,5 +207,5 @@ export function install(app) {
   };
   app.colorPicker = picker;
   // 0.4's API: pick() returning hex
-  app.pickColor = (initial, { title, live } = {}) => picker.pick({ initial, title, live: typeof live === 'function' ? (c) => live(c.hex) : null }).then((c) => (c ? c.hex : null));
+  app.pickColor = (initial, { title, live, target = 'field' } = {}) => picker.pick({ initial, title, target, live: typeof live === 'function' ? (c) => live(c.hex) : null }).then((c) => (c ? c.hex : null));
 }

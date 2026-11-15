@@ -12,13 +12,21 @@ const XMP_SIG = 'http://ns.adobe.com/xap/1.0/\0';
 const PS_SIG = 'Photoshop 3.0\0';
 const ICC_MAX = 65519; // 65535 - the length field (2) - the signature (12) - sequence and count (2)
 
-/** Splits a JPEG into { head: segments before SOS [{ marker, data }], tail: SOS and everything after }. */
-function segments(b) {
+/**
+ * Splits a JPEG into { head: segments before SOS [{ marker, data }], tail: SOS and everything after }. With `onDamage`
+ * (read only) damage before SOS ends the list instead of throwing, so the segments before it are still read (S5).
+ */
+function segments(b, onDamage = null) {
+  const damaged = (msg, list) => {
+    if (!onDamage) throw new Error(msg);
+    onDamage();
+    return { list, tail: new Uint8Array(0) };
+  };
   if (b[0] !== 0xff || b[1] !== 0xd8) throw new Error('Not a JPEG file');
   const list = [];
   let i = 2;
   while (i + 4 <= b.length) {
-    if (b[i] !== 0xff) throw new Error('JPEG marker expected');
+    if (b[i] !== 0xff) return damaged('JPEG marker expected', list);
     let marker = b[i + 1];
     while (marker === 0xff && i + 2 < b.length) {
       i++; // fill bytes
@@ -31,11 +39,11 @@ function segments(b) {
       continue;
     }
     const len = u16be(b, i + 2);
-    if (len < 2 || i + 2 + len > b.length) throw new Error('JPEG segment is truncated');
+    if (len < 2 || i + 2 + len > b.length) return damaged('JPEG segment is truncated', list);
     list.push({ marker, data: b.subarray(i + 4, i + 2 + len) });
     i += 2 + len;
   }
-  throw new Error('JPEG has no image data');
+  return damaged('JPEG has no image data', list);
 }
 
 const isIcc = (s) => s.marker === 0xe2 && startsWith(s.data, 0, ICC_SIG);
@@ -45,7 +53,8 @@ const isPs = (s) => s.marker === 0xed && startsWith(s.data, 0, PS_SIG);
 const isJfif = (s) => s.marker === 0xe0 && startsWith(s.data, 0, 'JFIF\0');
 
 export function read(b) {
-  const { list } = segments(b);
+  let damaged = false;
+  const { list } = segments(b, () => (damaged = true));
   const out = {};
   const icc = list.filter(isIcc).map((s) => ({ seq: s.data[12], data: s.data.subarray(14) })).sort((a, c) => a.seq - c.seq);
   if (icc.length) out.icc = concat(icc.map((p) => p.data));
@@ -55,7 +64,7 @@ export function read(b) {
   if (xmp) out.xmp = fromUtf8(xmp.data.subarray(XMP_SIG.length));
   const ps = list.find(isPs);
   if (ps) {
-    const iptc = parseResources(ps.data, PS_SIG.length).find((r) => r.id === 0x0404);
+    const iptc = parseResources(ps.data, PS_SIG.length, ps.data.length, () => (damaged = true)).find((r) => r.id === 0x0404);
     if (iptc) out.iptc = copyBytes(iptc.data);
   }
   const jfif = list.find(isJfif);
@@ -63,7 +72,7 @@ export function read(b) {
     const unit = jfif.data[7], x = u16be(jfif.data, 8), y = u16be(jfif.data, 10);
     out.resolution = { x: round2(x), y: round2(y), unit: unit === 1 ? 'in' : unit === 2 ? 'cm' : 'none' };
   }
-  return out;
+  return damaged ? { ...out, damaged: true } : out;
 }
 
 const seg = (marker, data) => ({ marker, data });

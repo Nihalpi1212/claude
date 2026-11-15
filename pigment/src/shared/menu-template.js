@@ -63,7 +63,7 @@ function parseJson(s) {
  * Applies the menu customisation in place: hidden items left out (unless showAll), coloured items and submenus marked
  * with pigmentColor, and a menu that lost items ends with a separator and `showAllItem`.
  */
-function customize(template, custom, showAllItem) {
+function customize(template, custom, showAllItem, { keepTop = null } = {}) {
   const hidden = new Set(custom.showAll ? [] : Array.isArray(custom.hidden) ? custom.hidden : []);
   const colors = custom.colors && typeof custom.colors === 'object' ? custom.colors : {};
   const visit = (list, path) => {
@@ -76,7 +76,8 @@ function customize(template, custom, showAllItem) {
       }
       const label = typeof it.label === 'string' ? it.label.replace(/&/g, '') : '';
       const key = it.submenu ? (label ? `menu:${[...path, label].join('>')}` : null) : it[ITEM_KEY] ?? null;
-      if (key && hidden.has(key)) {
+      // the macOS application menu itself stays (Quit lives there); its items can be hidden and coloured
+      if (key && hidden.has(key) && !(path.length === 0 && keepTop && label === keepTop)) {
         lost = true;
         continue;
       }
@@ -594,7 +595,9 @@ export function buildMenuTemplate({ platform, state = {}, recent = [], run, isPa
     doc('Next Document', 'view:next-tab'),
     doc('Previous Document', 'view:prev-tab'),
     // Ctrl+Cmd+F on macOS (FIXED_KEYS); elsewhere the renderer's key (F11), so the item shows what the page runs
-    item('Toggle Full Screen', 'view:fullscreen', { accelerator: mac ? fixedKeyFor('view:fullscreen', { platform }) : keys.renderer['view:fullscreen']?.[0] }),
+    // macOS: the system's Ctrl+Cmd+F (a user key works through the page, shortcuts.js); elsewhere the user's key once
+    // set() placed it in the menu table, else the renderer's (F11)
+    item('Toggle Full Screen', 'view:fullscreen', { accelerator: mac ? fixedKeyFor('view:fullscreen', { platform }) : keys.menu['view:fullscreen'] ?? keys.renderer['view:fullscreen']?.[0] }),
   ]);
 
   const windowMenu = sub('&Window', [
@@ -637,7 +640,6 @@ export function buildMenuTemplate({ platform, state = {}, recent = [], run, isPa
 
   const template = [fileMenu, editMenu, imageMenu, layerMenu, typeMenu, selectMenu, filterMenu, aiMenu, viewMenu, windowMenu, helpMenu];
   const custom = parseJson(state.menus);
-  if (custom && typeof custom === 'object') customize(template, custom, item('Show All Menu Items', 'edit:show-all-menu-items'));
   if (mac) {
     template.unshift({
       label: 'Pigment',
@@ -658,5 +660,8 @@ export function buildMenuTemplate({ platform, state = {}, recent = [], run, isPa
       ],
     });
   }
+  // after the macOS application menu is added, so its items (Settings…, Camera Raw Preferences…, About) can be hidden
+  // and coloured like any other (S9.5); role items have no key and stay
+  if (custom && typeof custom === 'object') customize(template, custom, item('Show All Menu Items', 'edit:show-all-menu-items'), { keepTop: mac ? 'Pigment' : null });
   return template;
 }

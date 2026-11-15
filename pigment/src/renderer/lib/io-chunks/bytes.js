@@ -45,20 +45,28 @@ export const touches = (patch, kind) => patch && Object.prototype.hasOwnProperty
 
 // ---- Photoshop image resources ('8BIM' blocks: JPEG APP13, PSD's resource section) -----------------------------
 
-/** Parses a run of 8BIM resource blocks: [{ id, name: Uint8Array (the Pascal string, padded), data }]. Throws on damage. */
-export function parseResources(b, start = 0, end = b.length) {
+/**
+ * Parses a run of 8BIM resource blocks: [{ id, name: Uint8Array (the Pascal string, padded), data }]. Throws on damage;
+ * with `onDamage` (readers only) the blocks before the damage are returned after a call to it (S5).
+ */
+export function parseResources(b, start = 0, end = b.length, onDamage = null) {
   const out = [];
+  const damaged = (msg) => {
+    if (!onDamage) throw new Error(msg);
+    onDamage();
+    return out;
+  };
   let i = start;
   while (i + 12 <= end) {
     const sig = ascii(b, i, 4);
-    if (sig !== '8BIM' && sig !== 'MeSa' && sig !== 'AgHg' && sig !== 'PHUT' && sig !== 'DCSR') throw new Error('bad image resource signature');
+    if (sig !== '8BIM' && sig !== 'MeSa' && sig !== 'AgHg' && sig !== 'PHUT' && sig !== 'DCSR') return damaged('bad image resource signature');
     const id = u16be(b, i + 4);
     const nlen = b[i + 6];
     const npad = (nlen + 1) % 2 ? nlen + 2 : nlen + 1; // the Pascal string padded to an even size
     const at = i + 6 + npad;
-    if (at + 4 > end) throw new Error('image resource is truncated');
+    if (at + 4 > end) return damaged('image resource is truncated');
     const size = u32be(b, at);
-    if (at + 4 + size > end) throw new Error('image resource is truncated');
+    if (at + 4 + size > end) return damaged('image resource is truncated');
     out.push({ sig, id, name: b.slice(i + 6, i + 6 + npad), data: b.slice(at + 4, at + 4 + size) });
     i = at + 4 + size + (size % 2);
   }

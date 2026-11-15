@@ -8,7 +8,7 @@
 // a pick goes through setToolBrush (so the tool remembers which preset it came from), and the stroke preview is the
 // engine's renderStrokePreview (S2.6). 0.4's angle/roundness hook on StrokeTool is gone: baseSettings passes them.
 import { icon } from '../icons.js';
-import { dabCanvas, renderStrokePreview } from '../brush.js';
+import { dabCanvas, dabDrawSide, renderStrokePreview } from '../brush.js';
 import { StrokeTool } from '../tools/paint.js';
 import { toolBrush, setToolBrush } from '../brush/tool-brush.js';
 import { brushFromLegacy } from '../brush/preset.js';
@@ -42,11 +42,13 @@ function themeInk() {
 
 function drawTip(ctx, cx, cy, { size, hardness, angle = 0, roundness = 1 }, color) {
   const dab = dabCanvas(Math.max(1, size), hardness, color);
+  // dabCanvas may return a larger canvas above 128 px (S2.8): draw it at the size asked
+  const side = dabDrawSide(Math.max(1, size));
   ctx.save();
   ctx.translate(cx, cy);
   ctx.rotate((angle * Math.PI) / 180);
   ctx.scale(1, Math.max(0.05, Math.min(1, roundness)));
-  ctx.drawImage(dab, -dab.width / 2, -dab.height / 2);
+  ctx.drawImage(dab, -side / 2, -side / 2, side, side);
   ctx.restore();
 }
 
@@ -64,7 +66,7 @@ function tipThumb(preset, px = 40) {
 }
 
 /** Sample stroke (an S curve) painted by the engine itself (renderStrokePreview), at flow, shown at opacity. */
-function drawStroke(canvas, s) {
+function drawStroke(canvas, s, app = null) {
   const dpr = window.devicePixelRatio || 1;
   const cssW = Math.max(10, canvas.clientWidth || 260);
   const w = Math.max(10, Math.round(cssW * dpr));
@@ -74,7 +76,8 @@ function drawStroke(canvas, s) {
   const ctx = canvas.getContext('2d');
   ctx.clearRect(0, 0, w, h);
   const preset = brushFromLegacy({ size: Math.max(1, Math.min(s.size, 44)), hardness: s.hardness, spacing: s.spacing ?? 0.12, angle: s.angle ?? 0, roundness: s.roundness ?? 1 });
-  const stroke = renderStrokePreview(preset, { flow: Math.max(0.01, s.flow ?? 1), opacity: Math.max(0.01, s.opacity ?? 1) }, { width: w / dpr, height: 64, scale: dpr, color: themeInk() });
+  // app: the stroke context's app and patterns (a Texture modifier resolves its pattern through ctx.patterns)
+  const stroke = renderStrokePreview(preset, { flow: Math.max(0.01, s.flow ?? 1), opacity: Math.max(0.01, s.opacity ?? 1), app }, { width: w / dpr, height: 64, scale: dpr, color: themeInk() });
   ctx.drawImage(stroke, 0, 0);
 }
 
@@ -281,7 +284,7 @@ export function install(app) {
       roundness: model.supports(tool, 'roundness') ? values.roundness : 1,
       flow: model.supports(tool, 'flow') ? values.flow : 1,
       opacity: model.supports(tool, 'opacity') ? values.opacity : 1,
-    });
+    }, app);
     markActive();
   }
   let pending = 0;

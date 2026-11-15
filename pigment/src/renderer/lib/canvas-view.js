@@ -733,9 +733,10 @@ export class CanvasView {
         tiltX: e.tiltX ?? 0, tiltY: e.tiltY ?? 0, twist: e.twist ?? 0, tangentialPressure: e.tangentialPressure ?? 0,
         altitude: Number.isFinite(e.altitudeAngle) ? e.altitudeAngle : undefined, azimuth: Number.isFinite(e.azimuthAngle) ? e.azimuthAngle : undefined,
         pointerType: e.pointerType || 'mouse',
-        // the pen's eraser end (button 5 / buttons 32); the side button held during tip contact
+        // the pen's eraser end (button 5 / buttons 32); the side button, held during tip contact or pressed while the
+        // pen hovers (a right-button drag: buttons & 2 on the press and moves, button 2 on the release, where buttons is 0)
         eraser: pen && (e.button === 5 || (e.buttons & 32) !== 0),
-        barrel: pen && (e.buttons & 1) !== 0 && (e.buttons & 2) !== 0,
+        barrel: pen && ((e.buttons & 2) !== 0 || e.button === 2),
         buttons: e.buttons, button: e.button, shift: e.shiftKey, alt: e.altKey, ctrl: e.ctrlKey, meta: e.metaKey,
         capsLock: !!e.getModifierState?.('CapsLock'),
         time: e.timeStamp,

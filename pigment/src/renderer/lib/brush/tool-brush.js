@@ -68,6 +68,17 @@ function writesFlat(tool, key) {
 }
 
 /**
+ * `preset` with the tip values the tool keeps as flat options clamped to them (DabTools stop at 1000 px): what a pick
+ * of it gives the tool. "Modified" compares the tool's brush with this, not with the raw stored preset (S1.3).
+ */
+export function clampBrushToTool(app, toolId, preset) {
+  const tool = app.tools?.get?.(toolId) ?? null;
+  const next = normalizeBrush(preset);
+  for (const k of TIP_FLAT) if (writesFlat(tool, k)) next.tip[k] = flatValue(tool, k, next.tip[k]);
+  return next;
+}
+
+/**
  * Makes `preset` the tool's brush: `brush`, the flat keys and `brushPresetId` in one saveSettingsSoon, the options
  * bar and the cursor updated, 'tool:options' { tool, key: 'brush', value, presetId } emitted, the tip decoded.
  * respectLocks: the sections in settings.brushes.locks keep the current values; includeTool: preset.tool's values go
@@ -94,6 +105,8 @@ export function setToolBrush(app, toolId, preset, { respectLocks = true, include
   for (const k of TIP_FLAT) {
     if (!writesFlat(tool, k)) continue;
     stored[k] = flatValue(tool, k, tip[k]);
+    // the stored brush takes the clamped value too, so toolBrush and `brush` agree and a fresh pick is not 'modified'
+    next.tip[k] = stored[k];
     written.push(k);
   }
   if (includeTool && next.tool) {

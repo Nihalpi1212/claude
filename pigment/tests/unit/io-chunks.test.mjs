@@ -220,6 +220,34 @@ test('malformed and truncated input never throws from readChunks', async () => {
   await assert.rejects(() => C.writeChunks(files.png.subarray(0, 20), 'png', { icc: ICC }));
 });
 
+test('a file damaged after its chunks gives the chunks read before the damage and damaged: true (S5)', async () => {
+  const files = await containers();
+  // PNG: the metadata chunks follow IHDR; cutting into IDAT keeps them
+  const png = await C.writeChunks(files.png, 'png', pick(ALL, C.chunkSupport('png').write));
+  const p = await C.readChunks(png.subarray(0, png.length - 13), 'png');
+  assert.equal(p.damaged, true);
+  same(p.icc, ICC);
+  same(p.exif, EXIF);
+  assert.equal(p.xmp, XMP);
+  assert.deepEqual(p.resolution, { x: 300, y: 300, unit: 'in' });
+  // JPEG: the APP segments come before the DQT; a cut inside the DQT keeps them
+  const jpeg = await C.writeChunks(files.jpeg, 'jpeg', pick(ALL, C.chunkSupport('jpeg').write));
+  let dqt = -1;
+  for (let i = 0; i + 1 < jpeg.length; i++) if (jpeg[i] === 0xff && jpeg[i + 1] === 0xdb) dqt = i;
+  const j = await C.readChunks(jpeg.subarray(0, dqt + 6), 'jpeg');
+  assert.equal(j.damaged, true);
+  same(j.icc, ICC);
+  same(j.iptc, IPTC);
+  assert.equal(j.xmp, XMP);
+  // WebP: ICCP comes before the image chunk; a truncated image chunk keeps it
+  const webp = await C.writeChunks(files.webp, 'webp', { icc: ICC });
+  const w = await C.readChunks(webp.subarray(0, webp.length - 3), 'webp');
+  assert.equal(w.damaged, true);
+  same(w.icc, ICC);
+  // a PNG whose IHDR itself is cut has nothing to give
+  assert.deepEqual(await C.readChunks(files.png.subarray(0, 20), 'png'), { damaged: true });
+});
+
 test('providers in order, a later one overriding a kind; applyChunks leaves bytes alone without one', async () => {
   const files = await containers();
   const doc = { profile: null };

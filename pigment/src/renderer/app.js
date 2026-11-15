@@ -739,7 +739,10 @@ function setupHostEvents(app) {
       const typing = app.isTextTarget(el) || (!!el && el !== document.body && app.sessions.ownsFocus(el));
       // while a painting tool is active the key may mean its paint-context command (Shift+Alt+M: the Brush's mode,
       // S13.4): keymap (lib/keymap-store.js)
-      return typing || app.dialogs?.isOpen ? undefined : app.commands.run(app.keymap.resolveKey(cmd, 'key'), arg, 'key');
+      if (typing || app.dialogs?.isOpen) return undefined;
+      // null: a paint-only key while no painting tool can take it (nothing happens, as on the page)
+      const resolved = app.keymap.resolveKey(cmd, 'key');
+      return resolved ? app.commands.run(resolved, arg, 'key') : undefined;
     }
     // a native menu accelerator (Electron) takes the key before the page: while the user types in a text field it may
     // only run what shortcuts.js lets the same key run there (the edit keys hand the edit to the field), so Ctrl+E,

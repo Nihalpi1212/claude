@@ -265,6 +265,15 @@ test('resolveKey: the enabled PAINT command of the same key while a painting too
   assert.equal(s.resolveKey('layer:blend-mode-multiply', 'key'), 'layer:blend-mode-multiply');
   const move = store({ tool: 'move' }).s;
   assert.equal(move.resolveKey('layer:blend-mode-multiply', 'key'), 'layer:blend-mode-multiply');
+  // a paint command with no global key (Shift+Alt+Q Behind, Shift+Alt+R Clear, which main.js sends as themselves):
+  // only while a painting tool is active and it is enabled, else null (nothing runs, no commitBefore)
+  assert.equal(move.resolveKey('tool:blend-mode-behind', 'key'), null);
+  assert.equal(move.resolveKey('tool:blend-mode-clear', 'key'), null);
+  assert.equal(move.resolveKey('tool:blend-mode-behind', 'api'), 'tool:blend-mode-behind');
+  on = true;
+  assert.equal(s.resolveKey('tool:blend-mode-behind', 'key'), 'tool:blend-mode-behind');
+  on = false;
+  assert.equal(s.resolveKey('tool:blend-mode-clear', 'key'), null);
 });
 
 test('store: menus and settings written elsewhere are taken over', () => {

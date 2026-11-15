@@ -549,6 +549,118 @@ test('brush: a sampled tip given only as a data URL paints after prepareBrush, a
   expect(errors).toEqual([]);
 });
 
+test('brush: one hard dab at 1000 px and 2500 px keeps 0.4\'s extent and reaches the layer whole (S2.8)', async ({ page }) => {
+  const errors = await openApp(page);
+  const r = await page.evaluate(async () => {
+    const { BrushStroke } = await import('/lib/brush.js');
+    const { createCanvas } = await import('/lib/document.js');
+    // 0.4's dabCanvas (lib/brush.js at 0.4.0): a canvas of ceil(size) + 2 px, drawn at its own size
+    const dab04 = (size) => {
+      const d = Math.max(1, Math.ceil(size));
+      const c = createCanvas(d + 2, d + 2);
+      const ctx = c.getContext('2d');
+      const rad = d / 2;
+      const g = ctx.createRadialGradient(rad + 1, rad + 1, 0, rad + 1, rad + 1, rad);
+      const inner = 0.999;
+      g.addColorStop(0, 'rgba(0,0,0,1)');
+      g.addColorStop(inner, 'rgba(0,0,0,1)');
+      for (let i = 1; i <= 6; i++) {
+        const t = i / 6;
+        g.addColorStop(Math.min(1, inner + (1 - inner) * t), `rgba(0,0,0,${(1 - t * t * (3 - 2 * t)).toFixed(4)})`);
+      }
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, c.width, c.height);
+      return c;
+    };
+    const history = { stroke: null, beginStroke: (c) => ({ backup: createCanvas(c.width, c.height) }), endStroke: () => null, cancelStroke() {} };
+    const out = {};
+    for (const size of [1000, 2500]) {
+      const side = size + 200, cx = side / 2 + 0.5, cy = side / 2 + 0.5;
+      const canvas = createCanvas(side, side);
+      const s = new BrushStroke({ target: { canvas, x: 0, y: 0 }, layer: null, history, settings: { size, hardness: 1, opacity: 1, flow: 1, smoothing: 0, color: '#000000', mode: 'paint', blend: 'normal' } });
+      s.begin({ x: cx, y: cy });
+      s.end();
+      const ref = createCanvas(side, side);
+      const dab = dab04(size);
+      ref.getContext('2d').drawImage(dab, cx - dab.width / 2, cy - dab.height / 2);
+      const row = (c) => c.getContext('2d').getImageData(0, Math.floor(cy), side, 1).data;
+      const col = (c) => c.getContext('2d').getImageData(Math.floor(cx), 0, 1, side).data;
+      // the opaque reach from the centre in each direction (alpha > 0), and the sum of alpha along the two axes
+      const reach = (d) => {
+        let lo = -1, hi = -1, sum = 0;
+        for (let i = 0; i < side; i++) {
+          const a = d[i * 4 + 3];
+          sum += a;
+          if (a > 0) {
+            if (lo < 0) lo = i;
+            hi = i;
+          }
+        }
+        return { lo, hi, sum };
+      };
+      out[size] = { got: [reach(row(canvas)), reach(col(canvas))], ref: [reach(row(ref)), reach(col(ref))], dirty: s.dirty && [s.dirty.width, s.dirty.height] };
+    }
+    return out;
+  });
+  for (const size of [1000, 2500]) {
+    const { got, ref, dirty } = r[size];
+    for (let axis = 0; axis < 2; axis++) {
+      // the dab ends where 0.4's ended (the resampled 1 % step canvas may move the last soft edge pixel by one)
+      expect(Math.abs(got[axis].lo - ref[axis].lo)).toBeLessThanOrEqual(1);
+      expect(Math.abs(got[axis].hi - ref[axis].hi)).toBeLessThanOrEqual(1);
+      expect(Math.abs(got[axis].sum - ref[axis].sum) / ref[axis].sum).toBeLessThan(0.002);
+    }
+    // nothing outside the dirty rect: it holds the whole dab
+    expect(dirty[0]).toBeGreaterThanOrEqual(got[0].hi - got[0].lo + 1);
+  }
+  expect(errors).toEqual([]);
+});
+
+test('brush: 0.4\'s settings.brushPresets migrate once into `brushes` under their own ids (S1.2)', async ({ page }) => {
+  const errors = await openApp(page);
+  const old = [
+    { id: 'my-old-brush', name: 'My Old Brush', size: 33, hardness: 0.5, spacing: 0.2, angle: 30, roundness: 0.6, flow: 0.4 },
+    { id: 'hard', name: 'Hard', size: 12, hardness: 1 },
+  ];
+  await page.addInitScript((presets) => localStorage.setItem('pigment.settings', JSON.stringify({ brushPresets: presets, brushes: { migrated: false } })), old);
+  await page.reload();
+  await page.waitForSelector('body[data-ready]');
+  const read = () =>
+    page.evaluate(async () => {
+      const app = window.pigmentApp;
+      await app.presets.ready('brushes');
+      const list = app.presets.list('brushes');
+      const at = (id) => list.findIndex((p) => p.id === id);
+      const get = (id) => {
+        const p = app.presets.get('brushes', id);
+        return p && { name: p.name, tip: [p.data.tip.size, p.data.tip.hardness, p.data.tip.spacing, p.data.tip.angle, p.data.tip.roundness], flow: p.data.tool?.flow };
+      };
+      return {
+        ids: list.map((p) => p.id), lastBuiltin: Math.max(...list.filter((p) => p.builtin).map((p) => at(p.id))), mine: at('my-old-brush'), hard: at('hard'),
+        a: get('my-old-brush'), b: get('hard'), migrated: app.settings.brushes?.migrated, kept: (app.settings.brushPresets ?? []).map((p) => p.id),
+      };
+    });
+  await expect.poll(async () => (await read()).migrated).toBe(true);
+  const first = await read();
+  expect(first.mine).toBeGreaterThan(first.lastBuiltin);
+  expect(first.hard).toBe(first.mine + 1);
+  expect(first.a).toEqual({ name: 'My Old Brush', tip: [33, 0.5, 0.2, 30, 0.6], flow: 0.4 });
+  expect(first.b.tip.slice(0, 2)).toEqual([12, 1]);
+  expect(first.b.flow).toBe(1);
+  expect(first.kept).toEqual(['my-old-brush', 'hard']);
+  // a second start with what the first one saved adds nothing
+  await page.evaluate(() => window.pigmentApp.presets.flush());
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('pigment.settings') ?? '{}').brushes?.migrated)).toBe(true);
+  const saved = await page.evaluate(() => localStorage.getItem('pigment.settings'));
+  await page.addInitScript((s) => localStorage.setItem('pigment.settings', s), saved);
+  await page.reload();
+  await page.waitForSelector('body[data-ready]');
+  const second = await read();
+  expect(second.ids).toEqual(first.ids);
+  expect(second.ids.filter((id) => id === 'my-old-brush' || id === 'hard')).toEqual(['my-old-brush', 'hard']);
+  expect(errors).toEqual([]);
+});
+
 // ---- step 5: PSD mapper registries (S4) ---------------------------------------------------------------------------
 
 const PSD_GOLDEN = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'psd-golden');
@@ -1327,7 +1439,8 @@ test('colour ui: the shape popover\'s swatch row follows swatchColors; sampleMer
     const before = { row: row(), colors: swatchColors(app).slice(0, 60) };
     app.settings.swatches = ['#123456', { color: '#abcdef', name: 'Sky' }];
     app.settings.swatchesEdited = true;
-    return { before, after: { row: row(), colors: swatchColors(app) } };
+    // the row shows the first 60 (with color-picker-swatches, swatchColors reads the 76 built-ins of `swatches`)
+    return { before, after: { row: row(), colors: swatchColors(app).slice(0, 60) } };
   });
   expect(rows.before.row).toEqual(rows.before.colors);
   expect(rows.after.row).toEqual(rows.after.colors);
@@ -1472,6 +1585,30 @@ test('type: a render stage recolours a text layer and is bypassed while editing;
   }, vid);
   expect(t.matrix).toEqual(t.transform);
   expect(t).toMatchObject({ same: true, x: 7, y: 9 });
+
+  // a transformed stage that hands on next() (Smooth) gives the pixels of no stage: the base is still resampled
+  const rid = await addTextLayer(page, 'Rot', { transform: [0, 1, -1, 0, 120, 20] });
+  const p = await page.evaluate(async (lid) => {
+    const app = window.pigmentApp;
+    const api = await import('/lib/type/api.js');
+    const layer = app.doc.find(lid);
+    const snap = () => {
+      layer.touch();
+      const out = layer.render();
+      return { x: out.x, y: out.y, w: out.canvas.width, h: out.canvas.height, data: Array.from(out.canvas.getContext('2d').getImageData(0, 0, out.canvas.width, out.canvas.height).data) };
+    };
+    const plain = snap();
+    const off = api.registerTextRenderStage({ id: 'test-pass', order: 200, transformed: true, test: (l) => l.id === lid, render: (l, next) => next() });
+    const passed = snap();
+    off();
+    const flagged = api.registerTextRenderStage({ id: 'test-false', order: 200, transformed: true, test: (l) => l.id === lid, render: (l, next) => ({ ...next(), transformed: false }) });
+    const unflagged = snap();
+    flagged();
+    return { same: JSON.stringify(plain) === JSON.stringify(passed), sameFalse: JSON.stringify(plain) === JSON.stringify(unflagged), box: [plain.w, plain.h], passedBox: [passed.w, passed.h] };
+  }, rid);
+  expect(p.passedBox).toEqual(p.box);
+  expect(p.same).toBe(true);
+  expect(p.sameFalse).toBe(true);
   expect(errors).toEqual([]);
 });
 
@@ -1535,13 +1672,15 @@ test('type: a fake catalog\'s PostScript-name style set from the options bar lan
   const r = await page.evaluate(async (lid) => {
     const app = window.pigmentApp;
     const api = await import('/lib/type/api.js');
+    const target = await import('/lib/type/target.js');
     const prev = api.fontCatalog();
-    const fake = {
-      ...prev,
+    // the catalog may be a class instance (type-fonts): keep its prototype and its `this`
+    const fake = Object.create(prev);
+    Object.assign(fake, {
       real: true,
       styleKey: (st) => st.postScriptName ?? `${st.fontFamily}-${st.fontWeight}`,
-      stylePatch: (family, key) => (key === 'Fake-Black' ? { fontFamily: family, fontWeight: 900, fontItalic: false, postScriptName: 'Fake-Black', axes: { wght: 900 } } : prev.stylePatch(family, key)),
-    };
+      stylePatch: (family, key) => (key === 'Fake-Black' ? { fontFamily: family, fontWeight: 900, fontItalic: false, postScriptName: 'Fake-Black', axes: { wght: 900 } } : prev.stylePatch.call(prev, family, key)),
+    });
     api.registerFontCatalog(fake);
     try {
       const d = app.doc;
@@ -1558,7 +1697,13 @@ test('type: a fake catalog\'s PostScript-name style set from the options bar lan
       const s = app.tools.active.session;
       const fresh = { ps: s.layer.content.runs[0].style.postScriptName ?? null, axes: s.layer.content.runs[0].style.axes ?? null, antiAlias: s.layer.typeOptions.antiAlias };
       app.tools.active.cancelSession();
-      return { entries, runs, fresh };
+      // the defaults a tool preset captures and applies (S10.5, S12.1) read and write the catalog's key
+      const pick = (c) => ({ weight: c.fontWeight, ps: c.postScriptName ?? null, axes: c.axes ?? null });
+      const captured = pick(target.typeDefaults(app).char);
+      app.tools.setOpt('type-horizontal', 'style', '400', { silent: true });
+      target.setTypeDefaults(app, { char: { fontWeight: 900, fontItalic: false, postScriptName: 'Fake-Black', axes: { wght: 900 } } });
+      const applied = { style: app.tools.opt('type-horizontal', 'style'), stored: 'postScriptName' in (app.settings.type?.char ?? {}), back: pick(target.typeDefaults(app).char) };
+      return { entries, runs, fresh, captured, applied };
     } finally {
       api.registerFontCatalog(prev);
       app.tools.setOpt('type-horizontal', 'style', '400', { silent: true });
@@ -1568,6 +1713,8 @@ test('type: a fake catalog\'s PostScript-name style set from the options bar lan
   expect(r.entries).toEqual(['Character']);
   expect(r.runs).toEqual([{ len: 7, ps: 'Fake-Black', axes: { wght: 900 }, weight: 900 }]);
   expect(r.fresh).toEqual({ ps: 'Fake-Black', axes: { wght: 900 }, antiAlias: 'crisp' });
+  expect(r.captured).toEqual({ weight: 900, ps: 'Fake-Black', axes: { wght: 900 } });
+  expect(r.applied).toEqual({ style: 'Fake-Black', stored: false, back: { weight: 900, ps: 'Fake-Black', axes: { wght: 900 } } });
   expect(errors).toEqual([]);
 });
 
@@ -1587,29 +1734,35 @@ test('type: a TypeTool subclass in the text slot is reached by Shift+T, and a no
     window.__typeTools = typeTools(app).map((x) => x.id);
     app.tools.activate('type-horizontal');
   });
-  expect(await page.evaluate(() => window.__typeTools)).toEqual(['type-horizontal', 'type-vertical', 'type-dummy']);
+  // type-menu-commands registers the two Type Mask tools as well (S11.5): the 0.4 tools first, the dummy last
+  const ids = await page.evaluate(() => window.__typeTools);
+  expect(ids.slice(0, 2)).toEqual(['type-horizontal', 'type-vertical']);
+  expect(ids.at(-1)).toBe('type-dummy');
   await page.locator('canvas.view').hover();
+  const slotSize = await page.evaluate(() => window.pigmentApp.tools.slots.find((x) => x.id === 'text')?.tools.length ?? 0);
   const seen = [];
-  for (let i = 0; i < 4 && !seen.includes('type-dummy'); i++) {
+  for (let i = 0; i < Math.max(4, slotSize + 1) && !seen.includes('type-dummy'); i++) {
     await page.keyboard.press('Shift+KeyT');
     seen.push(await page.evaluate(() => window.pigmentApp.tools.active.id));
   }
   expect(seen).toContain('type-dummy');
   const r = await page.evaluate(async () => {
     const app = window.pigmentApp;
-    const { typeSession } = await import('/lib/tools/text.js');
+    const { typeSession, typeTools } = await import('/lib/tools/text.js');
     const tool = app.tools.get('type-dummy');
     tool.beginNew({ x: 40, y: 120 }, null);
     tool.session.editor.insert('Dummy');
     const during = typeSession(app)?.id ?? null;
     const sibling = tool.sibling?.id ?? null;
+    // the registered vertical mask tool, when type-menu-commands has landed one (S11.5)
+    const verticalMask = typeTools(app).find((x) => x !== tool && !!x.mask && x.vertical !== tool.vertical)?.id ?? null;
     const layers = app.doc.layers().length;
     // a command from outside the type session commits it first (sessions.js, policy 'commit')
     await app.commands.run('layer:new', undefined, 'api');
-    return { during, sibling, open: !!tool.session, text: app.doc.layers().find((l) => l.type === 'text')?.text ?? null, layers, after: app.doc.layers().length };
+    return { during, sibling, verticalMask, open: !!tool.session, text: app.doc.layers().find((l) => l.type === 'text')?.text ?? null, layers, after: app.doc.layers().length };
   });
   expect(r.during).toBe('type-dummy');
-  expect(r.sibling).toBe(null); // no vertical dummy with mask: no sibling
+  expect(r.sibling).toBe(r.verticalMask); // no vertical mask tool registered: no sibling
   expect(r.open).toBe(false);
   expect(r.text).toBe('Dummy');
   expect(r.after).toBe(r.layers + 1);
@@ -1837,13 +1990,15 @@ test('toolbox: options-bar slots render; resetOptions; setOptions on a Type tool
     const t = app.tools;
     const events = window.__toolboxEvents;
     const layer = app.doc.active;
-    t.activate('text');
+    // the real Type tool ('text' is its slot), activated first as presets-panels does (S12.1)
+    t.activate('type-horizontal');
+    const active = t.active?.id;
     const h0 = app.doc.history.index;
     const before = JSON.stringify(layer.content) + JSON.stringify(layer.typeOptions ?? null);
     events.length = 0;
-    t.setOptions('text', { size: 72, family: 'serif' });
+    t.setOptions('type-horizontal', { size: 72, family: 'Georgia' });
     const after = JSON.stringify(layer.content) + JSON.stringify(layer.typeOptions ?? null);
-    return { isText: layer.type === 'text', same: before === after, entries: app.doc.history.index - h0, size: t.opt('text', 'size'), family: t.opt('text', 'family'), events: events.splice(0) };
+    return { active, isText: layer.type === 'text', same: before === after, entries: app.doc.history.index - h0, size: t.opt('type-horizontal', 'size'), family: t.opt('type-horizontal', 'family'), events: events.splice(0) };
   });
   expect(r.withSlots.slice(0, 2)).toEqual(['test-title', 'test-start']);
   expect(r.withSlots.at(-1)).toBe('test-end');
@@ -1855,13 +2010,14 @@ test('toolbox: options-bar slots render; resetOptions; setOptions on a Type tool
   expect(r.reset.stored).toBeNull();
   expect(r.reset.opacity).toBe(1);
   expect(r.reset.events).toEqual([{ tool: 'brush', key: '*', batch: false }]);
+  expect(r.type.active).toBe('type-horizontal');
   expect(r.type.size).toBe(72);
-  expect(r.type.family).toBe('serif');
+  expect(r.type.family).toBe('Georgia');
   expect(r.type.entries).toBe(0);
   expect(r.type.isText).toBe(true);
   expect(r.type.same).toBe(true);
   expect(r.type.events.filter((e) => e.batch).map((e) => e.key).sort()).toEqual(['family', 'size']);
-  expect(r.type.events.at(-1)).toEqual({ tool: 'text', key: '*', batch: false });
+  expect(r.type.events.at(-1)).toEqual({ tool: 'type-horizontal', key: '*', batch: false });
   expect(errors).toEqual([]);
 });
 

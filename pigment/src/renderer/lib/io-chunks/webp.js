@@ -7,7 +7,8 @@ export const support = { read: ['icc', 'exif', 'xmp'], write: ['icc', 'exif', 'x
 
 const FLAG = { icc: 0x20, alpha: 0x10, exif: 0x08, xmp: 0x04, animation: 0x02 };
 
-function chunksOf(b) {
+/** The chunks; with `onDamage` (read only) a truncated chunk ends the list instead of throwing (S5). */
+function chunksOf(b, onDamage = null) {
   if (ascii(b, 0, 4) !== 'RIFF' || ascii(b, 8, 4) !== 'WEBP') throw new Error('Not a WebP file');
   const end = Math.min(b.length, 8 + u32le(b, 4));
   const list = [];
@@ -15,7 +16,11 @@ function chunksOf(b) {
   while (i + 8 <= end) {
     const type = ascii(b, i, 4);
     const size = u32le(b, i + 4);
-    if (i + 8 + size > end) throw new Error(`WebP chunk ${type} is truncated`);
+    if (i + 8 + size > end) {
+      if (!onDamage) throw new Error(`WebP chunk ${type} is truncated`);
+      onDamage();
+      break;
+    }
     list.push({ type, data: b.subarray(i + 8, i + 8 + size) });
     i += 8 + size + (size % 2);
   }
@@ -27,12 +32,13 @@ const raw = (c) => concat([asciiBytes(c.type), le32(c.data.length), c.data, c.da
 
 export function read(b) {
   const out = {};
-  for (const c of chunksOf(b)) {
+  let damaged = false;
+  for (const c of chunksOf(b, () => (damaged = true))) {
     if (c.type === 'ICCP' && out.icc === undefined) out.icc = copyBytes(c.data);
     else if (c.type === 'EXIF' && out.exif === undefined) out.exif = copyBytes(startsWith(c.data, 0, 'Exif\0\0') ? c.data.subarray(6) : c.data);
     else if (c.type === 'XMP ' && out.xmp === undefined) out.xmp = fromUtf8(c.data);
   }
-  return out;
+  return damaged ? { ...out, damaged: true } : out;
 }
 
 /** { width, height, alpha } of the image chunk of a simple file, for its new VP8X header. */
