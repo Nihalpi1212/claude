@@ -185,7 +185,13 @@ the `fonts`, `keyboard-shortcuts`, `menu-sets` kinds and the rest of `registerPr
 
 ## Test counts at the end (after step 9)
 
-(filled in below after the full runs)
+| Suite | Result |
+|---|---|
+| Unit | **942 / 942** pass (936 + develop-stages 6; type-model's count edited, not added) |
+| Browser (port 8850, one worker, 19.2 min) | 649 listed: **646 passed, 3 skipped, 0 failed**. 649 = 639 + skeleton-05 "camera raw" 4 + "colour ui" 2 + "type" 4. The 3 skipped: record-goldens (2) and the gated repaint-speed case. No flake, no "Execution context was destroyed". Log: `scratchpad/logs/impl4-full-e2e.log`. |
+| Electron | **7 / 7** pass |
+
+No test server, browser or Electron process of mine is left running.
 
 ## Tips for the next implementer (step 10: preset files)
 

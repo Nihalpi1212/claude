@@ -302,10 +302,13 @@ export function normalizeShapeProps(layer) {
       },
     };
     case 'line': return { kind, props: { x1: num(p.x1), y1: num(p.y1), x2: num(p.x2), y2: num(p.y2), weight: num(p.weight, 1), arrowStart: arrowOf(p.arrowStart), arrowEnd: arrowOf(p.arrowEnd) } };
-    case 'custom': return { kind, props: { ...box(p), shape: p.shape ?? null } };
+    // shapeProps.unit (0.5, S10.5): the shape's own 0..1 path, so it draws where its preset is gone
+    case 'custom': return { kind, props: { ...box(p), shape: p.shape ?? null, ...(validUnit(p.unit) ? { unit: p.unit } : {}) } };
     default: return { kind: 'path', props: { ...p } };
   }
 }
+
+const validUnit = (u) => !!u && typeof u === 'object' && Array.isArray(u.subpaths);
 
 /** PathData through pointFn(x, y) -> [x, y] (anchors and handles). */
 export function mapPathPoints(path, f) {
@@ -355,6 +358,11 @@ export function regenerateShape(layer, patch = null) {
   const n = normalizeShapeProps(layer);
   if (n.kind === 'path') return null;
   const props = patch ? { ...n.props, ...patch } : n.props;
+  // a custom shape keeps its outline from now on (0.5, S10.5: shapeProps.unit), whatever happens to its preset
+  if (n.kind === 'custom' && !validUnit(props.unit)) {
+    const unit = customPathOf?.(props.shape) ?? null;
+    if (validUnit(unit)) props.unit = JSON.parse(JSON.stringify(unit));
+  }
   return { path: shapePath(n.kind, props, { customPathOf }), shapeKind: n.kind, shapeProps: props };
 }
 

@@ -1,0 +1,898 @@
+// Pigment renderer bootstrap: builds the App object, registers core commands and UI, installs the
+// feature modules, then opens startup files or shows the welcome screen.
+import { bridge, isElectron, isMac, platform } from './lib/bridge.js';
+import { CommandRegistry } from './lib/commands.js';
+import { SessionRegistry, SAFE_WHILE_BUSY } from './lib/sessions.js';
+import { Dialogs } from './lib/dialogs.js';
+import { Statusbar } from './lib/statusbar.js';
+import { ToolManager } from './lib/tools.js';
+import { PanelDock } from './lib/panels.js';
+import { DocumentManager } from './lib/documents.js';
+import { createDocument } from './lib/document.js';
+// the type facade sets the text backend of document.js when it is evaluated: before any document opens (B.1)
+import { attachApp as attachTypeFacade } from './lib/type/api.js';
+import { attachSections as attachTypeSections } from './lib/type/sections.js';
+import { installPatterns } from './lib/patterns.js';
+import { installSnap } from './lib/snap.js';
+import { installRulers } from './lib/rulers.js';
+import { installSample } from './lib/sample.js';
+import { installCanvasCapture } from './lib/canvas-capture.js';
+import { PresetStore } from './lib/presets.js';
+import { Selection } from './lib/selection.js';
+import { icon } from './lib/icons.js';
+import { withDefaults } from '../shared/defaults.js';
+import { openDocument } from './lib/io.js';
+import { flattenDocument } from './lib/compositor.js';
+import { parseColor, rgbaToHex } from '../shared/pixels/color.js';
+import { MENU_KEYS, RENDERER_KEYS, TYPE_KEYS, SHORTCUT_GROUPS, COMMAND_LABELS, describeAccelerator, runsWhileTyping } from '../shared/keymap.js';
+
+// Feature modules installed after the core, in this order. A module that fails to load is skipped
+// with a warning so the rest of the app keeps working.
+const MODULES = [
+  'lib/shortcuts.js',
+  'lib/layer-ops.js',
+  'lib/edit-ops.js',
+  'lib/image-ops.js',
+  'lib/file-ops.js',
+  'lib/tools/move.js',
+  'lib/tools/select.js',
+  'lib/tools/paint.js',
+  'lib/tools/retouch.js',
+  'lib/tools/fill.js',
+  'lib/tools/bucket.js', // the Paint Bucket (patterns), after the Gradient tool in the same slot
+  'lib/tools/text.js',
+  'lib/tools/vector.js',
+  'lib/tools/nav.js',
+  'lib/adjust-ui.js',
+  'lib/filter-ui.js',
+  'lib/liquify.js',
+  'lib/content-aware.js',
+  'lib/style-ui.js',
+  'lib/smart-object.js',
+  'lib/warp.js',
+  'lib/develop-ui.js',
+  'lib/print.js',
+  'lib/text-path.js',
+  'lib/color-modes.js',
+  'lib/ai/accounts.js',
+  'lib/ai/features.js',
+  'lib/ai/assistant.js',
+  'lib/panels/assistant.js',
+  // 0.3 feature modules (stubs until their builders land; see ARCHITECTURE.md "0.3 features (contracts)")
+  'lib/modes.js',
+  'lib/depth.js',
+  'lib/filters-a-ui.js',
+  'lib/filters-b-ui.js',
+  'lib/gallery-b-ui.js',
+  'lib/adjust-more-ui.js',
+  'lib/filter-gallery.js',
+  'lib/blur-gallery-ui.js',
+  'lib/lens-correction.js',
+  'lib/content-aware-scale.js',
+  'lib/select-mask.js',
+  'lib/layers-extras.js',
+  'lib/align-blend.js',
+  'lib/automate.js',
+  'lib/actions.js',
+  'lib/panels/actions.js',
+  // 0.4 entry modules (stubs until their packages land; ARCHITECTURE.md "0.4 features (contracts)", in package
+  // order; the four panel modules come after lib/panels/info.js, the Paint Bucket after lib/tools/fill.js)
+  'lib/type/layout.js', // type-engine-core
+  'lib/type/editor.js', // type-editing
+  'lib/type/char-format.js', // type-character-panel
+  'lib/blending-options.js', // layer-style-blending: the Blending Options page of the Layer Style dialog (L.3)
+  'lib/contour-editor.js', // layer-style-effects
+  'lib/adjust/tonal.js', // adjust-tonal
+  'lib/adjust/color.js', // adjust-color
+  'lib/guides.js', // guides-snapping
+  'lib/vector-mask.js', // masks-vector-masks
+  'lib/shape-props.js', // shapes-live
+  'lib/layer-dialogs.js', // finish-layer-menu
+  'lib/conventions.js', // conventions-shortcuts-fields
+  'lib/stubs-later.js', // ids of later releases the 0.4 menus show (edit:menus)
+  'lib/panels/color.js',
+  'lib/panels/swatches.js',
+  'lib/panels/brushes.js',
+  'lib/panels/properties.js',
+  'lib/panels/adjustments.js',
+  'lib/panels/character.js',
+  'lib/panels/paths.js',
+  'lib/panels/layers.js',
+  'lib/panels/channels.js',
+  'lib/panels/history.js',
+  'lib/panels/navigator.js',
+  'lib/panels/info.js',
+  // 0.4 panel modules, after the existing panels so their tabs follow the existing ones
+  'lib/panels/paragraph.js', // type-paragraph-panel
+  'lib/panels/gradients.js', // gradients
+  'lib/panels/patterns.js', // patterns
+  'lib/panels/layers-menu.js', // layers-panel-depth
+  'lib/extras.js',
+  'lib/welcome.js',
+];
+
+export class App extends EventTarget {
+  constructor() {
+    super();
+    this.bridge = bridge;
+    this.settings = withDefaults({});
+    this.commands = new CommandRegistry(this);
+    // on-canvas sessions, Free Transform, slow operations and the type session (lib/sessions.js, E)
+    this.sessions = new SessionRegistry(this);
+    this.dialogs = new Dialogs(this);
+    this.statusbar = new Statusbar();
+    // patternPreview: View > Pattern Preview (patterns sets it; ui state, not a setting: it is off at every start)
+    this.ui = { editingMask: false, showMaskOverlay: false, isolated: false, patternPreview: false };
+    this.uiState = {};
+    this.stubbed = []; // command ids whose module has not landed (lib/stub.js); the menu greys them out
+    // hooks 0.3 modules install: colorConstraint(hex, doc) -> hex (image modes snap picked colours),
+    // pixelConstraint(doc, img, layer) -> img (modes snap edited pixels, see adjust-ui.js beginPixelEdit),
+    // isBackgroundLayer(layer) -> boolean (Layer > New > Background from Layer)
+    this.colorConstraint = null;
+    this.pixelConstraint = null;
+    this.isBackgroundLayer = null;
+    this.saveTimer = null;
+    this.pendingSettings = {};
+    // 0.4 registries (ARCHITECTURE.md "0.4 features"): view underlays (L.5), layer double-click actions (L.7), drop
+    // handlers for in-app drags (L.9)
+    this.viewUnderlays = new Set();
+    this.layerDoubleClicks = new Map();
+    this.dropHandlers = new Map();
+    // Preferences (L.2) and Properties (L.1) section registries exist before MODULES, so a package can register from
+    // install(); lib/extras.js and lib/panels/properties.js (late in MODULES) add their built-ins with
+    // { builtin: true }, which never replaces a section a package registered first. The Properties host attaches
+    // itself when it mounts; until then render() does nothing.
+    this.preferences = sectionRegistry((sec) => {
+      if (!sec || typeof sec.id !== 'string') throw new Error('registerSection: a section needs an id');
+      return sec;
+    });
+    this.properties = sectionRegistry((spec) => {
+      if (!spec || typeof spec.id !== 'string' || typeof spec.render !== 'function') throw new Error('registerSection: a section needs an id and render()');
+      return { order: 0, region: 'main', test: () => true, ...spec, region: spec.region === 'mask' ? 'mask' : 'main' };
+    });
+  }
+
+  /** L.7: what double-clicking a layer of `type` with the Move tool does; fn(layer, p) returns true when it acted. */
+  registerLayerDoubleClick(type, fn) {
+    this.layerDoubleClicks.set(type, fn);
+  }
+  /** Runs the double-click action of the layer's type: true when one acted (the Move tool then does nothing else). */
+  layerDoubleClick(layer, p) {
+    const fn = layer ? this.layerDoubleClicks.get(layer.type) : null;
+    if (!fn) return false;
+    try {
+      return !!fn(layer, p);
+    } catch (err) {
+      console.error('layer double-click failed', err);
+      return false;
+    }
+  }
+
+  /**
+   * L.9 (E25): app.registerDropHandler(mime, { canvas?(data, docPoint, e), layer?(data, layer, e) }) for in-app drags
+   * (a panel's dataTransfer.setData(mime, JSON)); the canvas and the Layers panel rows call it. Later wins.
+   */
+  registerDropHandler(mime, handler) {
+    this.dropHandlers.set(mime, handler);
+  }
+  /** The first registered handler for one of the drag's types that handles `where` ('canvas' | 'layer'), or null. */
+  dropHandlerFor(dataTransfer, where) {
+    for (const type of dataTransfer?.types ?? []) {
+      const handler = this.dropHandlers.get(type);
+      if (typeof handler?.[where] === 'function') return { mime: type, handler };
+    }
+    return null;
+  }
+
+  get doc() {
+    return this.docs?.active ?? null;
+  }
+  get view() {
+    return this.doc?.view ?? null;
+  }
+  /** 0.3's current pattern (a canvas), for 0.3 code: the pattern library's current entry (lib/patterns.js, L.6). */
+  get currentPattern() {
+    return this.patterns?.current()?.canvas ?? null;
+  }
+
+  emit(name, detail) {
+    this.dispatchEvent(new CustomEvent(name, { detail }));
+  }
+  on(name, handler) {
+    const listener = (event) => handler(event.detail);
+    this.addEventListener(name, listener);
+    return () => this.removeEventListener(name, listener);
+  }
+
+  async saveSettings(patch) {
+    Object.assign(this.settings, patch);
+    // send anything still queued by saveSettingsSoon along, or the reply below would drop it
+    clearTimeout(this.saveTimer);
+    const queued = this.pendingAll ? { ...this.settings } : this.pendingSettings;
+    this.pendingSettings = {};
+    this.pendingAll = false;
+    const full = { ...queued, ...patch };
+    try {
+      this.settings = withDefaults(await bridge.setSettings(full));
+    } catch (err) {
+      this.reportWriteFailure('settings', err);
+    }
+    this.emit('settings:changed', patch);
+    if (patch && 'theme' in patch) await this.applyTheme();
+  }
+
+  /**
+   * Coalesces frequent setting writes (tool options, panel layout) into one write. Without a patch,
+   * the caller changed app.settings directly and the whole settings object is written.
+   */
+  saveSettingsSoon(patch) {
+    if (patch) {
+      Object.assign(this.settings, patch);
+      Object.assign(this.pendingSettings, patch);
+    } else this.pendingAll = true;
+    clearTimeout(this.saveTimer);
+    this.saveTimer = setTimeout(() => {
+      const p = this.pendingAll ? { ...this.settings, ...this.pendingSettings } : this.pendingSettings;
+      this.pendingSettings = {};
+      this.pendingAll = false;
+      bridge.setSettings(p).catch((err) => this.reportWriteFailure('settings', err));
+    }, 400);
+    this.emit('settings:changed', patch ?? {});
+  }
+
+  /**
+   * A settings or presets write failed (N): one error toast per area and code per session, a 'settings:write-failed'
+   * event { area, code } and a console warning. The in-memory state stays, so the session keeps working.
+   */
+  reportWriteFailure(area, err) {
+    const code = err?.code ?? /\[(write-failed|storage-quota|storage-unavailable)\]/.exec(String(err?.message ?? ''))?.[1] ?? 'write-failed';
+    console.warn(`Could not save ${area}`, err);
+    this.emit('settings:write-failed', { area, code });
+    this.writeFailures ??= new Set();
+    const key = `${area}:${code}`;
+    if (this.writeFailures.has(key)) return;
+    this.writeFailures.add(key);
+    const why = code === 'storage-quota' ? 'the browser storage is full' : code === 'storage-unavailable' ? 'the browser storage is not available' : 'the file could not be written';
+    const what = area === 'presets' ? 'Presets could not be saved' : area === 'settings' ? 'Settings could not be saved' : `${area[0].toUpperCase()}${area.slice(1)} could not be saved`;
+    this.dialogs?.toast(`${what} (${why}). Changes made now are lost when Pigment closes.`, { kind: 'error', timeout: 8000 });
+  }
+
+  reportError(err, context) {
+    console.error(context ?? 'Error', err);
+    const message = err?.message ?? String(err);
+    this.dialogs.toast(context ? `${context}: ${message}` : message, { kind: 'error', timeout: 6000 });
+  }
+
+  /**
+   * Runs a slow task with a busy cursor and status text. While one runs (a 'busy' session, busyDepth > 0) the command
+   * registry refuses menu, key, toolbar and panel gestures that would change the document the task is computing on.
+   * `gate: false` is for a task that only waits (an AI request with its own Cancel, which adds its result when it
+   * arrives): the user goes on working meanwhile, saving and undoing included, as before 0.3.1.
+   */
+  async busy(label, fn, { gate = true } = {}) {
+    this.statusbar.set('busy', label);
+    document.body.classList.add('busy');
+    const session = gate ? this.sessions.begin({ id: 'busy', policy: 'busy', label, allow: SAFE_WHILE_BUSY, onClose: 'keep' }) : null;
+    try {
+      await new Promise((r) => requestAnimationFrame(() => setTimeout(r)));
+      return await fn();
+    } finally {
+      session?.end();
+      document.body.classList.remove('busy');
+      this.statusbar.clear('busy');
+    }
+  }
+
+  /** Number of slow operations running (0.3 compatibility: the busy sessions of app.sessions). */
+  get busyDepth() {
+    return this.sessions?.busyDepth ?? 0;
+  }
+
+  /**
+   * True when el takes typed text (a text input, a textarea, editable content): Edit > Undo goes to its native undo.
+   * False for an element an active session owns (the 0.4 type editor's hidden input), whose session answers instead.
+   */
+  isTextTarget(el = document.activeElement) {
+    if (!el) return false;
+    const text = (el.tagName === 'INPUT' && !['checkbox', 'radio', 'range', 'button', 'color'].includes(el.type)) || el.tagName === 'TEXTAREA' || el.isContentEditable;
+    return !!text && !this.sessions.ownsFocus(el);
+  }
+
+  /**
+   * Edit > Undo / Redo and the history steps (0.3's order): a text field undoes its own typing, else a session that
+   * claims undo (the type session) does, else (undo only) the active tool cancels what it is doing, else the
+   * document history moves. dir: 'undo' | 'redo' | { goTo: index }.
+   */
+  historyStep(dir) {
+    if (dir === 'undo' || dir === 'redo') {
+      if (this.isTextTarget()) return bridge.nativeEdit(dir);
+      if (dir === 'undo' ? this.sessions.undo() : this.sessions.redo()) return undefined;
+      if (dir === 'undo' && this.tools?.active?.cancel?.()) return undefined;
+      if (dir === 'undo') this.doc?.history.undo();
+      else this.doc?.history.redo();
+      return undefined;
+    }
+    if (dir && Number.isFinite(dir.goTo)) this.doc?.history.goTo(dir.goTo);
+    return undefined;
+  }
+
+  async applyTheme() {
+    const theme = this.settings.theme ?? 'system';
+    let dark;
+    try {
+      dark = await bridge.setTheme(theme);
+    } catch {
+      dark = theme === 'dark';
+    }
+    document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+    this.emit('theme:changed', { dark });
+    this.view?.invalidate();
+  }
+
+  syncUiState() {
+    const d = this.doc;
+    const state = {
+      hasDocument: !!d,
+      dirty: !!d?.history?.dirty,
+      path: d?.path ?? null,
+      title: d?.name ?? '',
+      hasSelection: !!d?.selection && !d.selection.isEmpty,
+      hasLayer: !!d?.active,
+      canUndo: !!d?.history?.canUndo,
+      canRedo: !!d?.history?.canRedo,
+      undoLabel: d?.history?.canUndo ? d.history.entries[d.history.index]?.label ?? '' : '',
+      redoLabel: d?.history?.canRedo ? d.history.entries[d.history.index + 1]?.label ?? '' : '',
+      theme: this.settings.theme,
+      tool: this.tools?.active?.id ?? null,
+      showRulers: this.settings.showRulers !== false,
+      showGrid: !!this.settings.showGrid,
+      showGuides: this.settings.showGuides !== false,
+      snap: this.settings.snap !== false,
+      pixelGrid: this.settings.pixelGrid !== false,
+      extras: this.settings.showSelectionEdges !== false,
+      lastFilter: this.settings.lastFilter?.name ?? '',
+      editingMask: !!this.ui.editingMask,
+      layerType: d?.active?.type ?? null,
+      textOrientation: d?.active?.type === 'text' ? d.active.font?.orientation ?? 'horizontal' : null,
+      proofColors: !!this.settings.proofColors,
+      gamutWarning: !!this.settings.gamutWarning,
+      // 0.3: image mode and depth (Image > Mode radios), isolation, background layer label, stack mode, gallery groups in the menu
+      mode: d?.mode ?? 'rgb',
+      depth: d?.depth ?? 8,
+      isolated: !!this.ui.isolated,
+      backgroundLayer: !!(d?.active && this.isBackgroundLayer?.(d.active)),
+      stackMode: d?.active?.stackMode ?? 'none',
+      showGalleryInMenu: !!this.settings.showGalleryInMenu,
+      // 0.4 (M.5): menu labels and checkmarks of the new items
+      selectedCount: d?.selected?.size ?? 0,
+      // Ctrl+E is Merge Clipping Mask on the base of a clipping mask (one layer selected, clipped layers right above it)
+      clippingBase: !!d?.active && !d.active.clip && !!d.active.parent?.children[d.active.parent.children.indexOf(d.active) + 1]?.clip,
+      effectsHidden: !!d?.active?.styles?.hidden,
+      hasVectorMask: !!d?.active?.vectorMask,
+      vectorMaskEnabled: !!d?.active?.vectorMask && d.active.vectorMask.enabled !== false,
+      typeEditing: this.sessions.list().some((s) => s.id === 'type'),
+      smartGuides: this.settings.guides?.smartGuides !== false,
+      lockGuides: !!this.settings.guides?.lock,
+      snapTo: Object.entries(this.settings.guides?.snapTo ?? {}).filter(([, on]) => on).map(([k]) => k).join(','),
+      patternPreview: !!this.ui.patternPreview,
+      stubs: this.stubbed.join(','),
+    };
+    const changed = Object.keys(state).some((k) => this.uiState[k] !== state[k]);
+    if (!changed) return;
+    this.uiState = state;
+    document.title = state.hasDocument ? `${state.dirty ? '• ' : ''}${state.title} — Pigment` : 'Pigment';
+    bridge.setUiState(state);
+  }
+
+  // ---- colours ----------------------------------------------------------------------------------------------
+  setColors({ foreground, background } = {}) {
+    const patch = {};
+    if (foreground) patch.foreground = rgbaToHex(parseColor(foreground));
+    if (background) patch.background = rgbaToHex(parseColor(background));
+    // image modes (lib/modes.js): grayscale, bitmap and indexed documents only paint colours they can hold
+    if (this.colorConstraint) for (const k of ['foreground', 'background']) if (patch[k]) patch[k] = this.colorConstraint(patch[k], this.doc) ?? patch[k];
+    this.saveSettingsSoon(patch);
+    this.emit('color:changed', { fg: this.settings.foreground, bg: this.settings.background });
+  }
+
+  // ---- selection helpers ------------------------------------------------------------------------------------------
+  /** Applies a selection (combine mode) undoably. */
+  applySelection(next, mode = 'replace', label = 'Selection') {
+    const d = this.doc;
+    if (!d) return;
+    const before = d.selection;
+    let result = next;
+    if (before && !before.isEmpty && next && mode !== 'replace') result = before.combine(next, mode);
+    if (result && result.isEmpty) result = null;
+    const set = (s) => {
+      d.selection = s;
+      d.changed('selection');
+    };
+    set(result);
+    if (before && !before.isEmpty) d.savedSelection = before;
+    d.history.push({ label, undo: () => set(before), redo: () => set(result), bytes: 0, at: Date.now() });
+    this.syncUiState();
+  }
+
+  setEditingMask(on) {
+    const layer = this.doc?.active;
+    const value = !!on && !!layer?.mask;
+    if (this.ui.editingMask === value) return;
+    this.ui.editingMask = value;
+    if (!value && this.view) this.view.maskView = false;
+    this.emit('mask:editing', value);
+    this.doc?.changed('mask-edit');
+    this.statusbar.set('target', value ? 'Editing layer mask (paint black to hide, white to reveal)' : '');
+    this.syncUiState();
+  }
+
+  /** Crops the canvas to rect (document coordinates), keeping layers that extend beyond when deletePixels is false. */
+  cropDocument(rect, opts) {
+    return this.commands.run('image:crop-rect', { rect, ...opts }, 'api');
+  }
+
+  /** Opens a new document from settings. */
+  newDocument(opts) {
+    const doc = createDocument(opts);
+    this.docs.add(doc);
+    doc.history.markSaved();
+    return doc;
+  }
+}
+
+// ---- core commands ------------------------------------------------------------------------------------------
+/**
+ * A section registry (L.1, L.2): registerSection(spec, { builtin }) where the later registration of an id wins, except
+ * that a built-in never replaces an id that is already registered; sections() in `order`; render() asks the attached
+ * host to redraw. attachHost({ changed(id, old), render() }) is for the host module only.
+ */
+function sectionRegistry(normalize) {
+  const map = new Map();
+  let host = null;
+  return {
+    registerSection(spec, { builtin = false } = {}) {
+      const sec = normalize(spec);
+      if (builtin && map.has(sec.id)) return;
+      const old = map.get(sec.id) ?? null;
+      map.set(sec.id, sec);
+      host?.changed?.(sec.id, old);
+    },
+    sections: () => [...map.values()].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
+    render: () => host?.render?.(),
+    attachHost(h) {
+      host = h;
+    },
+  };
+}
+
+function registerCoreCommands(app) {
+  const has = () => !!app.doc;
+  app.commands.registerAll({
+    // files
+    'file:new': { run: (arg) => app.newDocumentDialog?.(arg) },
+    'file:open': { run: () => app.docs.openDialog() },
+    'file:open-paths': { run: (paths) => app.docs.openPaths(Array.isArray(paths) ? paths : [paths]) },
+    'file:open-recent': { run: (path) => app.docs.openPaths([path]) },
+    'file:clear-recent': {
+      run: async () => {
+        await bridge.clearRecent();
+        app.emit('recent:changed');
+      },
+    },
+    'file:save': { enabled: has, run: () => app.docs.save() },
+    'file:save-as': { enabled: has, run: () => app.docs.saveAs() },
+    'file:save-copy': { enabled: has, run: () => app.docs.saveAs(app.doc, { copy: true }) },
+    'file:close': {
+      enabled: has,
+      // { save: true | false } answers "Save changes?" without asking. An answer given in the prompt is reported as
+      // the replay argument, so a recorded Close step (lib/actions.js) closes every file of a batch the same way.
+      // Dropping the changes unasked is a played step's answer only (its label says so, see normalizeStep in
+      // lib/actions/model.js): code or the assistant passing { save: false } still gets the question
+      run: async (arg, ctx) => {
+        const doc = app.doc;
+        const save = arg?.save === true || (arg?.save === false && ctx?.source === 'action') ? arg.save : null;
+        const closed = await app.docs.close(doc, save === null ? {} : { save });
+        if (closed && doc.closeAnswer) ctx?.setReplayArg({ save: doc.closeAnswer === 'save' });
+        return closed;
+      },
+    },
+    // takes no answer: only the single recorded Close step replays one. Close All asks for every document with
+    // unsaved changes, whoever runs it (an action file must not be able to drop the work in all open documents)
+    'file:close-all': { enabled: has, run: () => app.docs.closeAll() },
+    'file:revert': {
+      enabled: () => !!app.doc?.path && !!app.doc?.history?.dirty,
+      run: async () => {
+        const d = app.doc;
+        const ok = await app.dialogs.confirm(`Discard all changes to "${d.name}" and reload it from disk?`, { title: 'Revert', okLabel: 'Revert', danger: true });
+        if (!ok) return;
+        // reload first: the open document (and its edits) is replaced only when the file could be read again
+        const path = d.path;
+        let fresh;
+        try {
+          const bytes = await bridge.readFile(path);
+          fresh = await app.busy('Reverting…', () => openDocument(bytes, { name: path.split(/[\\/]/).pop(), path }));
+        } catch (err) {
+          app.reportError(err, 'Could not revert');
+          return;
+        }
+        const index = app.docs.docs.indexOf(d);
+        await app.docs.close(d, { force: true });
+        app.docs.add(fresh, { index });
+        fresh.history.markSaved(flattenDocument(fresh, fresh.view.compositor));
+      },
+    },
+    'file:reveal': { enabled: () => !!app.doc?.path, run: () => bridge.showItemInFolder(app.doc.path) },
+    'file:quit': { run: () => bridge.closeWindow() },
+
+    // history
+    // while text is being typed, Undo steps back inside the text instead of throwing the session away (the type
+    // session of tools/text.js claims it through app.sessions)
+    'edit:undo': { run: () => app.historyStep('undo') },
+    'edit:redo': { run: () => app.historyStep('redo') },
+    'edit:step-backward': { enabled: () => !!app.doc?.history.canUndo, run: () => app.doc.history.undo() },
+    'edit:step-forward': { enabled: () => !!app.doc?.history.canRedo, run: () => app.doc.history.redo() },
+    'edit:preferences': { run: () => app.preferencesDialog?.() },
+
+    // view
+    'view:zoom-in': { enabled: has, run: () => app.view.zoomStep(1) },
+    'view:zoom-out': { enabled: has, run: () => app.view.zoomStep(-1) },
+    'view:zoom-fit': { enabled: has, run: () => app.view.zoomToFit() },
+    'view:zoom-fill': { enabled: has, run: () => app.view.zoomToFill() },
+    'view:zoom-100': { enabled: has, run: () => app.view.setZoom(1) },
+    'view:zoom-200': { enabled: has, run: () => app.view.setZoom(2) },
+    'view:set-zoom': { enabled: has, run: (z) => app.view.setZoom(Number(z) / (Number(z) > 64 ? 100 : 1)) },
+    'view:rotate': { enabled: has, run: (deg) => app.view.setRotation(deg === 'reset' ? 0 : app.view.rotation + Number(deg || 0)) },
+    'view:rulers': { checked: () => app.settings.showRulers !== false, run: () => toggleSetting('showRulers', true) },
+    'view:grid': { checked: () => !!app.settings.showGrid, run: () => toggleSetting('showGrid', false) },
+    'view:guides': { checked: () => app.settings.showGuides !== false, run: () => toggleSetting('showGuides', true) },
+    'view:pixel-grid': { checked: () => app.settings.pixelGrid !== false, run: () => toggleSetting('pixelGrid', true) },
+    'view:snap': { checked: () => app.settings.snap !== false, run: () => toggleSetting('snap', true) },
+    'view:extras': { checked: () => app.settings.showSelectionEdges !== false, run: () => toggleSetting('showSelectionEdges', true) },
+    'view:fullscreen': { run: async () => bridge.setFullScreen(!(await bridge.isFullScreen())) },
+    'view:theme': { run: (t) => app.saveSettings({ theme: t }) },
+    'view:next-tab': { run: () => app.docs.next(1) },
+    'view:prev-tab': { run: () => app.docs.next(-1) },
+    'window:toggle-panels': {
+      run: () => {
+        const appEl = document.getElementById('app');
+        appEl.classList.toggle('panels-hidden');
+        if (!appEl.classList.contains('panels-hidden')) app.panels.refreshVisible();
+        requestAnimationFrame(() => app.view?.resize());
+      },
+    },
+    'window:reset-workspace': {
+      run: () => {
+        app.panels.reset();
+        document.getElementById('app').classList.remove('panels-hidden');
+        app.panels.refreshVisible();
+        requestAnimationFrame(() => app.view?.resize());
+      },
+    },
+
+    // colours and brush shortcuts
+    'tool:swap-colors': { run: () => app.setColors({ foreground: app.settings.background, background: app.settings.foreground }) },
+    'tool:default-colors': { run: () => app.setColors({ foreground: '#000000', background: '#ffffff' }) },
+    'tool:pick-fg': {
+      run: async () => {
+        const c = await app.pickColor?.(app.settings.foreground, { title: 'Color Picker (Foreground Color)' });
+        if (c) app.setColors({ foreground: c });
+      },
+    },
+    'tool:pick-bg': {
+      run: async () => {
+        const c = await app.pickColor?.(app.settings.background, { title: 'Color Picker (Background Color)' });
+        if (c) app.setColors({ background: c });
+      },
+    },
+    'tool:fg-color': { run: (hex) => app.setColors({ foreground: hex }) },
+    'tool:bg-color': { run: (hex) => app.setColors({ background: hex }) },
+    'tool:brush-size-up': { run: () => adjustBrush('size', +1) },
+    'tool:brush-size-down': { run: () => adjustBrush('size', -1) },
+    'tool:brush-hardness-up': { run: () => adjustBrush('hardness', +1) },
+    'tool:brush-hardness-down': { run: () => adjustBrush('hardness', -1) },
+    'tool:select': { run: (id) => app.tools.activate(id) },
+
+    'app:escape': {
+      run: () => {
+        if (app.dialogs.activePopover) return app.dialogs.closePopover();
+        if (app.tools?.active?.cancel?.()) return;
+        if (app.view?.maskView) {
+          app.view.maskView = false;
+          app.view.invalidate();
+        }
+      },
+    },
+    'app:enter': { run: () => app.tools?.active?.commit?.() },
+
+    'help:shortcuts': { run: () => shortcutsDialog(app) },
+    'help:about': { run: () => aboutDialog(app) },
+    'help:guide': { run: () => bridge.openExternal('https://github.com/Nihalpi1212/claude/blob/claude/fervent-newton-263lz3/pigment/docs/USER-GUIDE.md').catch(() => {}) },
+    'help:website': { run: () => bridge.openExternal('https://github.com/Nihalpi1212/claude').catch(() => {}) },
+    'help:devtools': { run: () => {} },
+  });
+
+  function toggleSetting(key, def) {
+    const value = !(app.settings[key] ?? def);
+    app.saveSettings({ [key]: value });
+    app.view?.el.classList.toggle('no-rulers', key === 'showRulers' ? !value : app.view?.el.classList.contains('no-rulers'));
+    if (key === 'showRulers') requestAnimationFrame(() => app.view?.resize());
+    app.view?.invalidate();
+    app.commands.invalidate();
+    app.syncUiState();
+  }
+
+  function adjustBrush(key, dir) {
+    const tool = app.tools?.active;
+    if (!tool || !tool.options.some((o) => o.key === key)) return;
+    const v = tool.opt(key);
+    if (key === 'size') {
+      const step = v < 10 ? 1 : v < 50 ? 5 : v < 100 ? 10 : v < 300 ? 25 : 50;
+      tool.setOpt('size', Math.max(1, Math.min(2500, v + dir * step)));
+    } else tool.setOpt('hardness', Math.round(Math.max(0, Math.min(1, v + dir * 0.25)) * 100) / 100);
+  }
+}
+
+function shortcutsDialog(app) {
+  const content = document.createElement('div');
+  content.style.maxHeight = '60vh';
+  content.style.overflow = 'auto';
+  const table = document.createElement('table');
+  table.className = 'kbd-table';
+  for (const group of SHORTCUT_GROUPS) {
+    const head = document.createElement('tr');
+    head.innerHTML = `<th colspan="2">${group.title}${group.type ? ' (while editing text)' : ''}</th>`;
+    table.appendChild(head);
+    for (const cmd of group.commands) {
+      const keys = group.type ? [TYPE_KEYS[cmd]].filter(Boolean) : [MENU_KEYS[cmd], ...(RENDERER_KEYS[cmd] ?? [])].filter(Boolean);
+      if (!keys.length) continue;
+      const tr = document.createElement('tr');
+      const a = document.createElement('td');
+      a.textContent = COMMAND_LABELS[cmd] ?? cmd;
+      const b = document.createElement('td');
+      b.textContent = keys.map((k) => describeAccelerator(k, isMac)).join('  ·  ');
+      tr.append(a, b);
+      table.appendChild(tr);
+    }
+  }
+  const extra = document.createElement('p');
+  extra.className = 'muted';
+  extra.textContent = 'Hold Space to pan with any tool. Ctrl/Cmd + mouse wheel zooms. Alt-click with a painting tool samples a colour. Shift+letter cycles the tools in a slot.';
+  content.append(table, extra);
+  return app.dialogs.open({ title: 'Keyboard Shortcuts', content, width: 560, buttons: [{ label: 'Close', value: true, primary: true }] });
+}
+
+function aboutDialog(app) {
+  const content = document.createElement('div');
+  content.innerHTML = `<div style="display:flex;gap:16px;align-items:center"><img src="/build/icon.png" alt="" width="64" height="64" onerror="this.remove()"><div><h2 style="margin:0">Pigment</h2><p class="muted" style="margin:4px 0">Version ${bridge.version}</p><p style="margin:4px 0">A free, open-source image editor: layers, masks, brushes, selections, adjustments, filters, layer styles, text, shapes and PSD files.</p><p class="muted" style="margin:4px 0">MIT License.</p></div></div>`;
+  return app.dialogs.open({ title: 'About Pigment', content, width: 480, buttons: [{ label: 'OK', value: true, primary: true }] });
+}
+
+// ---- status bar ---------------------------------------------------------------------------------------------
+function setupStatusbar(app) {
+  const zoom = document.createElement('span');
+  zoom.className = 'status-zoom';
+  zoom.innerHTML = `<input class="input" type="text" aria-label="Zoom" title="Zoom (type a percentage)">%`;
+  const input = zoom.querySelector('input');
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      const v = parseFloat(input.value);
+      if (Number.isFinite(v) && v > 0) app.view?.setZoom(v / 100);
+      input.blur();
+    }
+    e.stopPropagation();
+  });
+  app.statusbar.set('zoom', zoom);
+  const update = () => {
+    const d = app.doc;
+    if (!d) {
+      app.statusbar.clear('zoom');
+      app.statusbar.clear('size');
+      app.statusbar.clear('pos');
+      return;
+    }
+    app.statusbar.set('zoom', zoom);
+    if (document.activeElement !== input) input.value = String(Math.round(d.view.zoom * 1000) / 10);
+    app.statusbar.set('size', `${d.width} × ${d.height} px · ${d.dpi} ppi · ${d.layers().length} layer${d.layers().length === 1 ? '' : 's'}`);
+  };
+  app.on('view:changed', () => {
+    update();
+    app.docs.renderTabs();
+  });
+  app.on('doc:activated', update);
+  app.on('doc:change', (e) => {
+    if (e.kind === 'tree' || e.kind === 'canvas' || e.kind === 'props' || e.kind === 'history') update();
+  });
+  app.on('pointer:moved', ({ x, y }) => {
+    const d = app.doc;
+    if (!d) return;
+    const inside = x >= 0 && y >= 0 && x < d.width && y < d.height;
+    app.statusbar.set('pos', inside ? `X ${Math.floor(x)}  Y ${Math.floor(y)}` : '', { right: true });
+  });
+}
+
+// ---- host events ----------------------------------------------------------------------------------------------
+function setupHostEvents(app) {
+  // the native menu reports how a command arrived (M.1, O): its accelerator ('menu-key'), a mouse click ('menu'),
+  // or a key main.js took before the page saw it ('key': Shift+Alt+letter on Windows and Linux)
+  bridge.on('command', (cmd, arg, via) => {
+    // a key main.js took is treated as shortcuts.js treats the same key on the page: nothing while a text field has
+    // focus or a dialog is open (the blend-mode keys never act while typing, M.4). That includes the input of a
+    // session that owns focus (the type editor): isTextTarget() leaves those out for undo, not for these keys.
+    if (via === 'key') {
+      const el = document.activeElement;
+      const typing = app.isTextTarget(el) || (!!el && el !== document.body && app.sessions.ownsFocus(el));
+      return typing || app.dialogs?.isOpen ? undefined : app.commands.run(cmd, arg, 'key');
+    }
+    // a native menu accelerator (Electron) takes the key before the page: while the user types in a text field it may
+    // only run what shortcuts.js lets the same key run there (the edit keys hand the edit to the field), so Ctrl+E,
+    // Ctrl+J or Ctrl+, in a name or number field do not merge, duplicate or hide a layer. A session that owns the
+    // focus (the type editor) is not a text field here (isTextTarget), its keys go on reaching it.
+    if (via && app.isTextTarget() && !runsWhileTyping(cmd)) return undefined;
+    return app.commands.run(cmd, arg, via ? 'menu-key' : 'menu');
+  });
+  // A file opened from the OS is the user's own gesture, not code ('api'): while an on-canvas session owns the
+  // document (Blur Gallery, Select and Mask, Content-Aware Scale refuse commands) it gets their "finish first" hint
+  // instead of vanishing without a word.
+  bridge.on('open-files', (paths) => app.commands.run('file:open-paths', paths, 'os'));
+  bridge.on('theme', ({ dark }) => {
+    if (app.settings.theme === 'system') {
+      document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+      app.emit('theme:changed', { dark });
+      app.view?.invalidate();
+    }
+  });
+  bridge.on('fullscreen', ({ fullScreen }) => document.body.classList.toggle('fullscreen', !!fullScreen));
+  bridge.on('before-close', async ({ quitting } = {}) => {
+    bridge.closeAck?.();
+    try {
+      // the on-canvas sessions (Blur Gallery, Content-Aware Scale, Select and Mask, Free Transform) are cancelled, or
+      // committed when they say so, before anything else: their previews must be off the layers before a save
+      await app.sessions.cancelAll('close');
+      // preset edits are written 300 ms after the change: write what is still pending before the window goes
+      await app.presets?.flush().catch((err) => console.warn('presets flush', err));
+      // Before the first save, a dialog that previews on the canvas (a filter or an adjustment on a layer, a smart
+      // filter, a kind's own session on the temporary copy of a smart object) is dismissed like Escape, and its
+      // session gets a turn to put the document back: nothing the user has not confirmed may reach the saved file.
+      // Not sooner: who answers Cancel finds the dialog they were working in as they left it. A progress dialog
+      // (Batch, Image Processor: not dismissible) stays in any case, it holds the only Cancel of its run.
+      let settled = false;
+      const settle = async () => {
+        if (settled) return;
+        settled = true;
+        const dismissible = (opts) => opts?.dismissible !== false;
+        for (let i = 0; i < 4 && app.dialogs.closeAll(dismissible); i++) await new Promise((r) => setTimeout(r));
+        await new Promise((r) => setTimeout(r));
+      };
+      for (const d of app.docs.list()) {
+        const answer = await app.docs.askSave(d);
+        if (answer === 'save') await settle();
+        if (answer === 'cancel' || (answer === 'save' && !(await app.docs.save(d)))) {
+          bridge.respondClose(false, !!quitting);
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn('before-close', err);
+    }
+    bridge.respondClose(true, !!quitting);
+  });
+}
+
+// ---- drag and drop ----------------------------------------------------------------------------------------------
+function setupDragAndDrop(app) {
+  let overlay = null;
+  let depth = 0;
+  const show = () => {
+    if (overlay) return;
+    overlay = document.createElement('div');
+    overlay.className = 'drop-overlay';
+    overlay.textContent = app.doc ? 'Drop to open (hold Shift to place as a layer)' : 'Drop images to open them';
+    document.body.appendChild(overlay);
+  };
+  const hide = () => {
+    overlay?.remove();
+    overlay = null;
+    depth = 0;
+  };
+  window.addEventListener('dragenter', (e) => {
+    if (!e.dataTransfer?.types?.includes('Files')) return;
+    depth++;
+    show();
+  });
+  window.addEventListener('dragleave', () => {
+    depth = Math.max(0, depth - 1);
+    if (!depth) hide();
+  });
+  window.addEventListener('dragover', (e) => {
+    if (e.dataTransfer?.types?.includes('Files')) e.preventDefault();
+  });
+  window.addEventListener('drop', async (e) => {
+    if (!e.dataTransfer?.files?.length) return;
+    e.preventDefault();
+    hide();
+    const files = [...e.dataTransfer.files];
+    const paths = files.map((f) => bridge.pathForFile(f)).filter(Boolean);
+    if (e.shiftKey && app.doc) {
+      for (const p of paths) await app.commands.run('file:place', p, 'drop');
+      return;
+    }
+    app.commands.run('file:open-paths', paths, 'drop'); // the user's gesture: a session that refuses it says why
+  });
+}
+
+// ---- startup ------------------------------------------------------------------------------------------------------
+async function start() {
+  const app = new App();
+  window.pigmentApp = app;
+  document.body.classList.add(`platform-${platform}`);
+  try {
+    app.settings = withDefaults(await bridge.getSettings());
+  } catch (err) {
+    console.warn('settings unavailable', err);
+  }
+  await app.applyTheme();
+  app.tools = new ToolManager(app);
+  app.panels = new PanelDock(app);
+  app.docs = new DocumentManager(app);
+  attachTypeFacade(app); // relayout on 'type:fonts-changed' (B.4)
+  attachTypeSections(app);
+  // services the modules use from install() on (ARCHITECTURE.md "0.4 features"): their owners keep these exports
+  installPatterns(app); // app.patterns (L.6)
+  installSnap(app); // app.snap (F)
+  installRulers(app); // app.rulers (L.10)
+  installSample(app); // sampleMerged and app.sampleSkip (L.11)
+  installCanvasCapture(app); // app.canvasCapture (I.3)
+  // the preset store (C): files under <userData>/presets (IndexedDB in the browser build), the 0.4 kinds registered
+  try {
+    (await import('./lib/preset-kinds.js')).registerPresetKinds04();
+  } catch (err) {
+    console.error('Preset kinds failed to load', err);
+  }
+  app.presets = new PresetStore({ backend: bridge.presets ?? null, onWriteError: (err) => app.reportWriteFailure('presets', err) });
+  app.presets.addEventListener('change', (e) => app.emit('presets:changed', e.detail));
+  registerCoreCommands(app);
+  setupStatusbar(app);
+  setupHostEvents(app);
+  setupDragAndDrop(app);
+  app.docs.renderTabs();
+  for (const path of MODULES) {
+    try {
+      const mod = await import(`./${path}`);
+      await mod.install?.(app);
+    } catch (err) {
+      console.error(`Module ${path} failed to load`, err);
+    }
+  }
+  app.tools.renderToolbox();
+  const firstTool = app.settings.lastTool && app.tools.get(app.settings.lastTool) ? app.settings.lastTool : 'move';
+  app.tools.activate(app.tools.get(firstTool) ? firstTool : [...app.tools.tools.keys()][0]);
+  app.on('tool:changed', ({ tool }) => app.saveSettingsSoon({ lastTool: tool.id }));
+  app.on('doc:change', () => app.syncUiState());
+  app.on('selection:changed', () => app.commands.invalidate());
+  app.on('layer:activated', () => {
+    app.commands.invalidate();
+    app.syncUiState();
+  });
+  app.on('settings:changed', () => app.syncUiState());
+  app.on('commands:changed', () => app.syncUiState());
+  window.addEventListener('resize', () => app.view?.resize());
+  document.getElementById('welcome').hidden = false;
+  document.getElementById('canvas-host').hidden = true;
+  app.syncUiState();
+  const startup = await bridge.getStartupFiles().catch(() => []);
+  if (startup?.length) await app.docs.openPaths(startup);
+  document.body.dataset.ready = 'true';
+  app.emit('app:ready');
+  void isElectron;
+  void icon;
+  void Selection;
+}
+
+start().catch((err) => {
+  console.error('Pigment failed to start', err);
+  document.body.dataset.ready = 'error';
+  const pre = document.createElement('pre');
+  pre.style.cssText = 'padding:20px;color:#c00;white-space:pre-wrap';
+  pre.textContent = `Pigment failed to start:\n${err?.stack ?? err}`;
+  document.body.appendChild(pre);
+});

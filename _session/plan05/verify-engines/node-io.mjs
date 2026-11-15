@@ -1,0 +1,20 @@
+const io = await import('/home/user/claude/pigment/src/renderer/lib/io.js');
+const need = ['readPsdDocument','writePsdDocument','adjustmentToPsd','adjustmentFromPsd','blendIfToPsd','blendIfFromPsd','psdExpressible','PSD_TEXT_KEYS','cssFamilyFromPsFont'];
+console.log('io missing:', need.filter((k) => !(k in io)));
+const reg = await import('/home/user/claude/pigment/src/renderer/lib/psd/registry.js');
+console.log('features', reg.psdFeatures());
+console.log('kinds', reg.psdLayerKinds().map((k) => `${k.id}:${k.order}${k.builtin ? 'b' : ''}`).join(' '));
+console.log('aspects', reg.psdAspects().map((k) => `${k.id}:${k.order}${k.builtin ? 'b' : ''}`).join(' '));
+console.log('resources', reg.psdResources().map((k) => `${k.id}:${k.order}${k.builtin ? 'b' : ''}`).join(' '));
+console.log('notices', reg.psdNotices().map((n) => `${n.code}:${n.when}`).join(' '));
+// builtin rule: a later builtin registration of the same id never replaces
+const un = reg.registerPsdAspect({ id: 'raster-mask', order: 300, write() {} });
+console.log('pkg raster-mask replaced builtin:', reg.psdAspects().find((a) => a.id === 'raster-mask').builtin === false);
+reg.registerPsdAspect({ id: 'raster-mask', order: 300, write() {} }, { builtin: true });
+console.log('builtin after pkg kept pkg:', reg.psdAspects().find((a) => a.id === 'raster-mask').builtin === false);
+un();
+console.log('after unregister, raster-mask present?', reg.psdAspects().some((a) => a.id === 'raster-mask'));
+const conv = await import('/home/user/claude/pigment/src/renderer/lib/psd/convert.js');
+console.log('convert exports', Object.keys(conv).join(' '));
+const internals = await import('#ag-psd').catch((e) => ({ err: e.message }));
+console.log('#ag-psd from outside package?', Object.keys(internals).length);

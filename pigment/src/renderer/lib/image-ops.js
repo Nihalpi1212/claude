@@ -945,66 +945,93 @@ export class TransformTool extends Tool {
     return out.filter((l) => !(l.locked.all || l.locked.position));
   }
 
-  /** Starts an interactive transform. opts: { mode, selectionOnly } */
-  start({ mode = 'free', selectionOnly = false } = {}) {
+  /**
+   * What start() would transform, from the same code (pure): { box, targets, selectionOnly, floating? } or { error }
+   * (the toast start() shows), or null (a selection-only transform without a selection). `quiet: false` lets
+   * collectTargets report a locked layer.
+   */
+  planFor(d, { selectionOnly = false, quiet = true } = {}) {
+    const hasSel = d.selection && !d.selection.isEmpty;
+    if (selectionOnly) return hasSel ? { box: { ...d.selection.bounds }, targets: [], selectionOnly: true } : null;
+    const layers = this.collectTargets(d, { quiet });
+    if (!layers.length) return hasSel ? this.planFor(d, { selectionOnly: true }) : { error: 'Select a layer to transform' };
+    if (hasSel && layers.length === 1 && layers[0].type === 'raster') {
+      // the selected pixels of the layer
+      const b = intersectRect(d.selection.bounds, layers[0].bounds());
+      return b ? { box: { ...b }, targets: [layers[0]], selectionOnly: false, floating: true } : { error: 'The selected area is empty' };
+    }
+    let box = null;
+    for (const l of layers) {
+      // a shape transforms about its drawn content (path plus stroke), not its padded render box (bounds())
+      const lb = l.type === 'raster' ? contentRect(l) : l.type === 'shape' ? shapeContentBounds(l) : l.bounds();
+      if (lb) box = box ? unionRect(box, lb) : lb;
+    }
+    return box ? { box, targets: layers, selectionOnly: false } : { error: 'The layer is empty' };
+  }
+
+  /**
+   * S12.2 (move-tool-depth's handles): the box Free Transform would take now, and its targets, or null (no document, a
+   * transform in progress, nothing to transform). Pure: built by planFor, the code start() uses.
+   */
+  previewBox(doc) {
+    if (!doc || this.session) return null;
+    const plan = this.planFor(doc);
+    if (!plan || plan.error) return null;
+    return { box: { ...plan.box }, targets: plan.targets.slice(), selectionOnly: plan.selectionOnly };
+  }
+
+  /**
+   * Starts an interactive transform. opts: { mode, selectionOnly, grab } (S12.2: grab { pointer, handle } continues the
+   * drag in progress as if it had started on that handle of the box: the Move tool's handles call it directly).
+   */
+  start({ mode = 'free', selectionOnly = false, grab = null } = {}) {
     const app = this.app;
     const d = app.doc;
     if (!d || this.session) return;
+    // a grab from the Ctrl-held temporary Move tool: the temporary tool ends, the drag goes on in Free Transform
+    if (grab) app.tempTools?.clear?.();
     app.tools.active?.commit?.();
-    const hasSel = d.selection && !d.selection.isEmpty;
     const s = { mode, doc: d, targets: [], selectionOnly: false, history: [] };
-    if (selectionOnly) {
-      if (!hasSel) return;
+    const plan = this.planFor(d, { selectionOnly, quiet: false });
+    if (!plan) return;
+    if (plan.error) return app.dialogs.toast(plan.error, { kind: 'error' });
+    if (plan.selectionOnly) {
       s.selectionOnly = true;
       s.selection = d.selection;
       s.selCanvas = alphaCanvas(d.selection.mask, d.width, d.height);
-      s.box = { ...d.selection.bounds };
+      s.box = plan.box;
+    } else if (plan.floating) {
+      // transform the selected pixels: cut them into a floating piece
+      const layer = plan.targets[0];
+      const b = plan.box;
+      const piece = createCanvas(b.width, b.height);
+      const pctx = piece.getContext('2d');
+      pctx.drawImage(layer.canvas, layer.x - b.x, layer.y - b.y);
+      pctx.globalCompositeOperation = 'destination-in';
+      pctx.drawImage(d.selection.toCanvas(), -b.x, -b.y);
+      const erased = copyCanvas(layer.canvas);
+      const ectx = erased.getContext('2d');
+      ectx.globalCompositeOperation = 'destination-out';
+      ectx.drawImage(d.selection.toCanvas(), -layer.x, -layer.y);
+      s.floating = { layer, piece, pieceX: b.x, pieceY: b.y, erased, orig: { canvas: layer.canvas, x: layer.x, y: layer.y }, selection: d.selection };
+      s.box = { ...b };
+      s.targets = [layer];
+      layer.canvas = erased;
+      layer.touch();
     } else {
-      const layers = this.collectTargets(d);
-      if (!layers.length) {
-        if (hasSel) return this.start({ mode, selectionOnly: true });
-        return app.dialogs.toast('Select a layer to transform', { kind: 'error' });
-      }
-      if (hasSel && layers.length === 1 && layers[0].type === 'raster') {
-        // transform the selected pixels: cut them into a floating piece
-        const layer = layers[0];
-        const b = intersectRect(d.selection.bounds, layer.bounds());
-        if (!b) return app.dialogs.toast('The selected area is empty', { kind: 'error' });
-        const piece = createCanvas(b.width, b.height);
-        const pctx = piece.getContext('2d');
-        pctx.drawImage(layer.canvas, layer.x - b.x, layer.y - b.y);
-        pctx.globalCompositeOperation = 'destination-in';
-        pctx.drawImage(d.selection.toCanvas(), -b.x, -b.y);
-        const erased = copyCanvas(layer.canvas);
-        const ectx = erased.getContext('2d');
-        ectx.globalCompositeOperation = 'destination-out';
-        ectx.drawImage(d.selection.toCanvas(), -layer.x, -layer.y);
-        s.floating = { layer, piece, pieceX: b.x, pieceY: b.y, erased, orig: { canvas: layer.canvas, x: layer.x, y: layer.y }, selection: d.selection };
-        s.box = { ...b };
-        s.targets = [layer];
-        layer.canvas = erased;
-        layer.touch();
-      } else {
-        s.targets = layers;
-        let box = null;
-        for (const l of layers) {
-          // a shape transforms about its drawn content (path plus stroke), not its padded render box (bounds())
-          const lb = l.type === 'raster' ? contentRect(l) : l.type === 'shape' ? shapeContentBounds(l) : l.bounds();
-          if (lb) box = box ? unionRect(box, lb) : lb;
-        }
-        if (!box) return app.dialogs.toast('The layer is empty', { kind: 'error' });
-        s.box = box;
-        s.orig = layers.map((l) => ({ layer: l, canvas: l.canvas, x: l.x, y: l.y, transform: l.transform ?? null, path: l.path, mask: l.mask, stroke: l.stroke, fill: l.fill, shapeKind: l.shapeKind, shapeProps: l.shapeProps, vectorMask: l.vectorMask ?? null }));
-        // crop raster sources to their content so the transform box hugs the pixels
-        s.sources = new Map();
-        for (const o of s.orig) {
-          if (o.layer.type !== 'raster') continue;
-          const r = contentRect(o.layer);
-          if (!r) continue;
-          const c = createCanvas(r.width, r.height);
-          c.getContext('2d').drawImage(o.canvas, o.x - r.x, o.y - r.y);
-          s.sources.set(o.layer, { canvas: c, x: r.x, y: r.y });
-        }
+      const layers = plan.targets;
+      s.targets = layers;
+      s.box = plan.box;
+      s.orig = layers.map((l) => ({ layer: l, canvas: l.canvas, x: l.x, y: l.y, transform: l.transform ?? null, path: l.path, mask: l.mask, stroke: l.stroke, fill: l.fill, shapeKind: l.shapeKind, shapeProps: l.shapeProps, vectorMask: l.vectorMask ?? null }));
+      // crop raster sources to their content so the transform box hugs the pixels
+      s.sources = new Map();
+      for (const o of s.orig) {
+        if (o.layer.type !== 'raster') continue;
+        const r = contentRect(o.layer);
+        if (!r) continue;
+        const c = createCanvas(r.width, r.height);
+        c.getContext('2d').drawImage(o.canvas, o.x - r.x, o.y - r.y);
+        s.sources.set(o.layer, { canvas: c, x: r.x, y: r.y });
       }
     }
     s.hasText = s.targets.some((l) => l.type === 'text');
@@ -1024,6 +1051,7 @@ export class TransformTool extends Tool {
       if (e.kind === 'history' && !this.committing && this.session) this.cancel();
     });
     this.update();
+    if (grab?.handle) this.beginDrag({ ...grab.pointer, ctrl: false, meta: false }, grab.handle);
   }
 
   /** Immediate rotate/flip of the target layers around their centre. */
@@ -1401,9 +1429,14 @@ export class TransformTool extends Tool {
   }
 
   onPointerDown(p) {
+    if (!this.session) return;
+    this.beginDrag(p, this.hit(p));
+  }
+
+  /** A drag of handle h ('nw' … 'w', 'rotate', 'move', 'pivot') from pointer p: a press, or a grab (S12.2). */
+  beginDrag(p, h) {
     const s = this.session;
     if (!s) return;
-    const h = this.hit(p);
     const ctrl = p.ctrl || p.meta;
     let op = h;
     if (h && LOCAL[h]) {

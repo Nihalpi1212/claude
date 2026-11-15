@@ -1,0 +1,280 @@
+// File › Export As, Quick Export as PNG, Export Layers to Files, Document Properties.
+import { bridge, joinPath, pathSep } from './bridge.js';
+import { formDialog, debounce } from './form.js';
+import { exportImage, baseName, SAVE_FORMATS } from './io.js';
+import { createCanvas } from './document.js';
+import { renderLayersFlat } from './layer-ops.js';
+import { modeRendererFor } from './compositor.js';
+
+const formatSize = (n) => (n > 1048576 ? `${(n / 1048576).toFixed(2)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
+
+/** [id, name] of every flat (non-layered) export format, built-ins first and registered ones after. */
+const exportFormatOptions = () => Object.entries(SAVE_FORMATS).filter(([, info]) => !info.layered).map(([id, info]) => [id, info.name.replace(/ image$/, '')]);
+
+const MODE_NAMES = { rgb: 'RGB Color', grayscale: 'Grayscale', bitmap: 'Bitmap', duotone: 'Duotone', indexed: 'Indexed Color', cmyk: 'CMYK Color', lab: 'Lab Color', multichannel: 'Multichannel' };
+
+export function install(app) {
+  const has = () => !!app.doc;
+
+  async function exportAs(arg, ctx = null) {
+    const d = app.doc;
+    const last = app.settings.exportDefaults ?? {};
+    let opts = arg && typeof arg === 'object' && arg.path ? arg : null;
+    if (!opts) {
+      const sizeInfo = document.createElement('div');
+      sizeInfo.className = 'muted';
+      sizeInfo.textContent = 'Estimating file size…';
+      let token = 0;
+      const estimate = debounce(async (v) => {
+        const mine = ++token;
+        try {
+          const bytes = await exportImage(d, toExport(v), d.view.compositor);
+          if (mine === token) sizeInfo.textContent = `${Math.round(v.width)} × ${Math.round(v.height)} px — about ${formatSize(bytes.length)}`;
+        } catch (err) {
+          if (mine === token) sizeInfo.textContent = err.message;
+        }
+      }, 250);
+      // formats registered by 0.3 modules (GIF, PNG-8, 16-bit PNG, TIFF ...) bring their own option fields, shown for their format only
+      const extraFields = Object.entries(SAVE_FORMATS).flatMap(([id, info]) => (info.options ?? []).map((f) => ({ ...f, when: (v) => v.format === id && (!f.when || f.when(v)) })));
+      const extraKeys = new Set(extraFields.map((f) => f.key));
+      const toExport = (v) => ({
+        format: v.format,
+        quality: v.quality / 100,
+        width: v.width,
+        height: v.height,
+        background: v.background === 'transparent' || (v.background === 'auto' && !SAVE_FORMATS[v.format]?.opaque && v.format !== 'jpeg') ? null : v.background === 'auto' ? '#ffffff' : v.color,
+        ...Object.fromEntries([...extraKeys].filter((k) => (SAVE_FORMATS[v.format]?.options ?? []).some((f) => f.key === k)).map((k) => [k, v[k]])),
+      });
+      const values = await formDialog(app, {
+        title: 'Export As',
+        fields: [
+          { key: 'format', label: 'Format', type: 'select', value: SAVE_FORMATS[last.format] && !SAVE_FORMATS[last.format].layered ? last.format : 'png', options: exportFormatOptions() },
+          { key: 'quality', label: 'Quality', type: 'slider', value: Math.round((last.quality ?? 0.9) * 100), min: 1, max: 100, unit: '%', when: (v) => !!SAVE_FORMATS[v.format]?.lossy },
+          ...extraFields,
+          { key: 'width', label: 'Width', type: 'number', value: d.width, min: 1, max: 30000, unit: 'px' },
+          { key: 'height', label: 'Height', type: 'number', value: d.height, min: 1, max: 30000, unit: 'px' },
+          { key: 'scale', label: 'Scale', type: 'select', value: 1, options: [[0.25, '25%'], [0.5, '50%'], [1, '100%'], [2, '200%'], [3, '300%']] },
+          { key: 'background', label: 'Background', type: 'select', value: 'auto', options: [['auto', 'Automatic (transparent, white for JPEG)'], ['transparent', 'Transparent'], ['custom', 'Color…']] },
+          { key: 'color', label: 'Background color', type: 'color', value: '#ffffff', when: (v) => v.background === 'custom' },
+          { key: 'info', type: 'custom', render: () => sizeInfo },
+        ],
+        onOpen: (dialog, form) => estimate(form.values),
+        onChange: (v, key, form) => {
+          if (key === 'scale') {
+            form.set('width', Math.round(d.width * v.scale), { silent: true });
+            form.set('height', Math.round(d.height * v.scale), { silent: true });
+          } else if (key === 'width') form.set('height', Math.max(1, Math.round((v.width * d.height) / d.width)), { silent: true });
+          else if (key === 'height') form.set('width', Math.max(1, Math.round((v.height * d.width) / d.height)), { silent: true });
+          estimate(v);
+        },
+        okLabel: 'Export…',
+      });
+      if (!values) return ctx?.cancel(); // actions (lib/actions.js)
+      const info = SAVE_FORMATS[values.format];
+      const dir = d.path ? d.path.slice(0, d.path.lastIndexOf(pathSep) + 1) : '';
+      const path = await bridge.saveFileDialog({ title: 'Export As', defaultPath: `${dir}${baseName(d.name)}.${info.ext}`, filters: [{ name: info.name, extensions: [info.ext] }] });
+      if (!path) return ctx?.cancel(); // actions (lib/actions.js)
+      opts = { path, ...toExport(values) };
+      ctx?.setReplayArg({ ...opts }); // actions (lib/actions.js): path and settings replay the export
+      app.settings.exportDefaults = { ...(app.settings.exportDefaults ?? {}), format: values.format, quality: values.quality / 100 };
+      app.saveSettingsSoon();
+    }
+    try {
+      const bytes = await app.busy('Exporting…', () => exportImage(d, opts, d.view.compositor));
+      await bridge.writeFile(opts.path, bytes);
+      app.dialogs.toast(`Exported ${opts.path.split(/[\\/]/).pop()}`, { kind: 'success', timeout: 1800 });
+    } catch (err) {
+      app.reportError(err, 'Export failed');
+    }
+  }
+
+  async function quickExport(_arg, ctx = null) {
+    const d = app.doc;
+    let path;
+    if (d.path) {
+      path = d.path.replace(/\.[^.\\/]+$/, '') + '.png';
+      if (path === d.path) path = path.replace(/\.png$/i, ' copy.png');
+      // never overwrite an existing file (it may be the original photo) without asking
+      let exists = false;
+      try {
+        exists = !!(await bridge.pathInfo(path));
+      } catch {
+        exists = false;
+      }
+      if (exists) path = await bridge.saveFileDialog({ title: 'Quick Export as PNG', defaultPath: path, filters: [{ name: 'PNG image', extensions: ['png'] }] });
+    } else path = await bridge.saveFileDialog({ title: 'Quick Export as PNG', defaultPath: `${baseName(d.name)}.png`, filters: [{ name: 'PNG image', extensions: ['png'] }] });
+    if (!path) return ctx?.cancel(); // actions (lib/actions.js)
+    return exportAs({ path, format: 'png' });
+  }
+
+  async function exportLayers(arg, ctx = null) {
+    const d = app.doc;
+    // actions (lib/actions.js): recorded options ({ format, visibleOnly, trim, prefix, folder }) skip the dialog and the folder chooser
+    const o = arg && typeof arg === 'object' ? arg : await formDialog(app, {
+      title: 'Export Layers to Files',
+      intro: 'Each top-level layer or group is exported as its own image, named after the layer.',
+      fields: [
+        { key: 'format', label: 'Format', type: 'select', value: 'png', options: exportFormatOptions() },
+        { key: 'visibleOnly', label: 'Visible layers only', type: 'checkbox', value: true },
+        { key: 'trim', label: 'Trim to layer content', type: 'checkbox', value: false },
+        { key: 'prefix', label: 'File name prefix', type: 'text', value: `${baseName(d.name)}_` },
+      ],
+      okLabel: 'Choose Folder…',
+    });
+    if (!o) return ctx?.cancel(); // actions (lib/actions.js)
+    const dir = o.folder ?? (await bridge.openDirectoryDialog?.({ title: 'Export layers into' }));
+    const folder = Array.isArray(dir) ? dir[0] : dir;
+    if (!folder) return ctx?.cancel(); // actions (lib/actions.js)
+    ctx?.setReplayArg({ format: o.format, visibleOnly: !!o.visibleOnly, trim: !!o.trim, prefix: o.prefix, folder }); // actions (lib/actions.js)
+    const info = SAVE_FORMATS[o.format];
+    const layers = d.root.children.filter((l) => (!o.visibleOnly || l.visible) && l.type !== 'adjustment');
+    let n = 0;
+    await app.busy('Exporting layers…', async () => {
+      const used = new Set();
+      for (const layer of layers.slice().reverse()) {
+        const wasVisible = layer.visible;
+        layer.visible = true;
+        let canvas = renderLayersFlat(d, [layer]);
+        layer.visible = wasVisible;
+        // a composite of some layers skips the image mode's display pass (it usually becomes layer pixels again); a
+        // file must show the layer as the document does: grey, or in its duotone inks
+        modeRendererFor(d.mode)?.(d, canvas, d.bounds, {});
+        if (o.trim) {
+          const b = layer.bounds();
+          const r = b && { x: Math.max(0, b.x), y: Math.max(0, b.y), width: Math.min(d.width, b.x + b.width) - Math.max(0, b.x), height: Math.min(d.height, b.y + b.height) - Math.max(0, b.y) };
+          if (r && r.width > 0 && r.height > 0) {
+            const c = createCanvas(r.width, r.height);
+            c.getContext('2d').drawImage(canvas, -r.x, -r.y);
+            canvas = c;
+          }
+        }
+        let name = `${o.prefix}${layer.name}`.replace(/[\\/:*?"<>|]+/g, '_').slice(0, 120) || 'layer';
+        while (used.has(name.toLowerCase())) name += '_';
+        used.add(name.toLowerCase());
+        const bytes = await exportImage(d, { format: o.format, canvas }, d.view.compositor);
+        await bridge.writeFile(joinPath(folder, `${name}.${info.ext}`), bytes);
+        n++;
+      }
+    });
+    app.dialogs.toast(`Exported ${n} layer${n === 1 ? '' : 's'}`, { kind: 'success' });
+  }
+
+  /**
+   * File › File Info: the document's descriptive metadata (title, author, keywords, rating, copyright, origin)
+   * and its resolution, with the camera data of a photograph shown read-only. Stored in doc.meta (saved in
+   * .pigment files; lib/file-info.js turns it into the XMP packet other formats carry) as one undo step.
+   * arg (actions): an object of the fields skips the dialog.
+   */
+  async function properties(arg, ctx = null) {
+    const d = app.doc;
+    const info = await import('./file-info.js'); // loaded on demand: only this function of file-ops.js belongs to File Info
+    const layers = d.layers();
+    const bytes = layers.reduce((s, l) => s + (l.canvas ? l.canvas.width * l.canvas.height * 4 : 0) + (l.mask?.canvas ? d.width * d.height * 4 : 0), 0);
+    const meta = d.meta ?? {};
+    const current = info.normaliseInfo(meta);
+    let o = arg && typeof arg === 'object' ? { ...current, keywords: current.keywords.join('; '), dpi: d.dpi, ...arg } : null;
+    if (!o) {
+      const camera = info.describeExif(meta.exif);
+      const stars = (values, set) => {
+        const box = document.createElement('span');
+        box.className = 'file-info-rating';
+        box.setAttribute('role', 'radiogroup');
+        box.setAttribute('aria-label', 'Rating');
+        const paint = () => {
+          for (const b of box.children) b.classList.toggle('on', Number(b.dataset.star) <= values.rating);
+        };
+        for (let i = 1; i <= 5; i++) {
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.dataset.star = String(i);
+          b.title = `${i} star${i === 1 ? '' : 's'} (click again to clear)`;
+          b.textContent = '★';
+          b.addEventListener('click', () => {
+            set('rating', values.rating === i ? 0 : i); // the same star again takes the rating away
+            paint();
+          });
+          box.appendChild(b);
+        }
+        paint();
+        return box;
+      };
+      o = await formDialog(app, {
+        title: 'File Info',
+        intro: [
+          `${d.width} × ${d.height} px at ${d.dpi} ppi (${((d.width / d.dpi) * 2.54).toFixed(1)} × ${((d.height / d.dpi) * 2.54).toFixed(1)} cm)`,
+          `${MODE_NAMES[d.mode] ?? d.mode ?? 'RGB'}, ${d.mode === 'bitmap' ? 1 : d.depth ?? 8} bit${d.mode === 'bitmap' ? '' : 's/channel'}`,
+          `${layers.length} layer${layers.length === 1 ? '' : 's'}, about ${formatSize(bytes)} of pixels in memory`,
+          d.path ? d.path : 'Not saved yet',
+        ].join(' · '),
+        fields: [
+          { key: 'title', label: 'Title', type: 'text', value: current.title },
+          { key: 'author', label: 'Author', type: 'text', value: current.author },
+          { key: 'description', label: 'Description', type: 'textarea', value: current.description, rows: 3 },
+          { key: 'keywords', label: 'Keywords', type: 'text', value: current.keywords.join('; '), placeholder: 'Separate keywords with semicolons or commas', span: true },
+          { key: 'rating', label: 'Rating', type: 'custom', value: current.rating, render: stars },
+          { type: 'section', label: 'Copyright' },
+          { key: 'copyrightStatus', label: 'Copyright status', type: 'select', value: current.copyrightStatus, options: info.COPYRIGHT_STATUS },
+          { key: 'copyright', label: 'Copyright notice', type: 'text', value: current.copyright },
+          { key: 'copyrightUrl', label: 'Copyright info URL', type: 'text', value: current.copyrightUrl, placeholder: 'https://' },
+          { type: 'section', label: 'Origin' },
+          { key: 'credit', label: 'Credit', type: 'text', value: current.credit },
+          { key: 'source', label: 'Source', type: 'text', value: current.source },
+          { type: 'section', label: 'Document' },
+          { key: 'dpi', label: 'Resolution (pixels/inch)', type: 'number', value: d.dpi, min: 1, max: 10000 },
+          ...(camera.length
+            ? [
+                { type: 'section', label: 'Camera Data' },
+                {
+                  key: 'camera',
+                  type: 'custom',
+                  render: () => {
+                    // read-only: what the camera recorded is shown, never edited
+                    const dl = document.createElement('dl');
+                    dl.className = 'file-info-camera';
+                    for (const [label, text] of camera) {
+                      const dt = document.createElement('dt');
+                      dt.textContent = label;
+                      const dd = document.createElement('dd');
+                      dd.textContent = text;
+                      dl.append(dt, dd);
+                    }
+                    return dl;
+                  },
+                },
+              ]
+            : []),
+        ],
+        validate: (v) => {
+          if (!v.copyrightUrl || /^(https?:\/\/|www\.)\S+$/i.test(String(v.copyrightUrl).trim())) return true;
+          app.dialogs.toast('The copyright info URL should be a web address (https://…)', { kind: 'error', timeout: 2600 });
+          return false; // keeps the dialog open
+        },
+        width: 560,
+      });
+      if (!o) return ctx?.cancel(); // actions (lib/actions.js)
+    }
+    const next = info.normaliseInfo(o);
+    const dpi = Math.max(1, Math.min(10000, Math.round(Number(o.dpi) || d.dpi)));
+    ctx?.setReplayArg({ ...next, dpi }); // actions (lib/actions.js): the fields replay without the dialog
+    const before = { meta: { ...meta }, dpi: d.dpi };
+    const after = { meta: { ...meta, ...next }, dpi };
+    if (dpi === d.dpi && JSON.stringify(current) === JSON.stringify(next)) return; // OK without a change records nothing
+    const set = (v) => {
+      // only the File Info fields move with undo: whatever other modules keep in doc.meta stays as it is now
+      d.meta = { ...(d.meta ?? {}), ...Object.fromEntries(Object.keys(next).map((k) => [k, v.meta[k]])) };
+      for (const k of Object.keys(next)) if (d.meta[k] === undefined) delete d.meta[k];
+      d.dpi = v.dpi;
+      d.changed('props');
+    };
+    set(after);
+    d.history.push({ label: 'File info', undo: () => set(before), redo: () => set(after), bytes: 0, at: Date.now() });
+    d.changed('history');
+  }
+
+  app.commands.registerAll({
+    'file:export': { enabled: has, run: exportAs, label: 'Export As…', dialog: true }, // actions (lib/actions.js)
+    'file:export-quick': { enabled: has, run: quickExport, label: 'Quick Export as PNG' },
+    'file:export-layers': { enabled: has, run: exportLayers, label: 'Export Layers to Files…', dialog: true }, // actions (lib/actions.js)
+    'file:properties': { enabled: has, run: properties, label: 'File Info…' },
+  });
+}

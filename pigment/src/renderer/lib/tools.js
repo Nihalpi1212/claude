@@ -85,6 +85,7 @@ export class ToolManager {
     this.optionsBar = document.getElementById('options-bar');
     this.optionsControls = new Map();
     this.cursorFilter = null; // S3.2: applied by CanvasView.setCursor to every cursor
+    this.optionSlots = []; // S12.1: options-bar slots (the tool preset picker in 'title')
     app.on('color:changed', () => this.renderColors());
     app.on('settings:changed', () => this.renderColors());
   }
@@ -164,6 +165,66 @@ export class ToolManager {
   setCursorFilter(fn) {
     this.cursorFilter = typeof fn === 'function' ? fn : null;
     this.updateCursor();
+  }
+
+  /**
+   * S12.1: an options-bar slot, rendered with every tool: `render(tool, bar)` returns an element or null (nothing
+   * shown). 'title' replaces the tool's icon and name (the first slot by order that renders wins), 'start' goes before
+   * the tool's options, 'end' after them. The same id again replaces the slot. Returns the function that removes it.
+   */
+  registerOptionsSlot({ id, place = 'end', order = 0, render } = {}) {
+    if (!id || typeof render !== 'function' || !['title', 'start', 'end'].includes(place)) throw new Error('registerOptionsSlot needs an id, a place and render()');
+    const slot = { id, place, order: Number(order) || 0, render };
+    this.optionSlots = [...this.optionSlots.filter((s) => s.id !== id), slot].sort((a, b) => a.order - b.order);
+    this.renderOptions();
+    return () => {
+      if (!this.optionSlots.includes(slot)) return;
+      this.optionSlots = this.optionSlots.filter((s) => s !== slot);
+      this.renderOptions();
+    };
+  }
+
+  /**
+   * S12.1: back to the tool's defaults (Photoshop's Reset Tool; '*' is Reset All Tools): deletes settings.tools[id],
+   * re-renders the options bar and emits 'tool:options' { tool, key: '*' } (for each tool with '*').
+   */
+  resetOptions(toolId) {
+    const tools = { ...(this.app.settings.tools ?? {}) };
+    const ids = toolId === '*' ? [...this.tools.keys()] : [toolId];
+    if (toolId === '*') for (const k of Object.keys(tools)) delete tools[k];
+    else delete tools[toolId];
+    this.app.settings.tools = tools;
+    this.app.saveSettingsSoon({ tools });
+    this.renderOptions();
+    this.updateCursor();
+    this.app.view?.invalidate();
+    for (const id of ids) this.app.emit('tool:options', { tool: id, key: '*' });
+  }
+
+  /**
+   * S12.1: writes several options of a tool at once (a tool preset): settings.tools[id] in one saveSettingsSoon, merged
+   * into what is stored (`replace`: instead of it). Never calls onOptionChanged, so no layer is restyled (Photoshop's
+   * tool presets change the tool, not the selection). Emits 'tool:options' { tool, key, value, batch: true } once per
+   * changed key, then { tool, key: '*' }; re-renders the options bar and the cursor.
+   */
+  setOptions(toolId, values, { replace = false } = {}) {
+    const prev = this.app.settings.tools?.[toolId] ?? {};
+    const given = values && typeof values === 'object' ? values : {};
+    const next = replace ? { ...given } : { ...prev, ...given };
+    const tools = { ...(this.app.settings.tools ?? {}), [toolId]: next };
+    this.app.settings.tools = tools;
+    this.app.saveSettingsSoon({ tools });
+    const keys = new Set([...Object.keys(prev), ...Object.keys(next)]);
+    for (const key of keys) {
+      if (JSON.stringify(prev[key]) === JSON.stringify(next[key])) continue;
+      this.app.emit('tool:options', { tool: toolId, key, value: next[key], batch: true });
+    }
+    this.app.emit('tool:options', { tool: toolId, key: '*' });
+    if (this.active?.id === toolId) {
+      this.renderOptions();
+      this.updateCursor();
+      this.app.view?.invalidate();
+    }
   }
 
   // ---- options (persisted per tool) ----------------------------------------------------------------------------
@@ -308,16 +369,38 @@ export class ToolManager {
     this.optionsControls.clear();
     const tool = this.active;
     if (!tool) return;
-    const title = document.createElement('span');
-    title.className = 'options-title';
-    title.innerHTML = `${icon(tool.icon)}<span>${tool.name}</span>`;
+    // S12.1 slots: none registered gives 0.4's bar exactly
+    const slotEl = (slot) => {
+      try {
+        return slot.render(tool, bar) ?? null;
+      } catch (err) {
+        console.warn(`Options slot ${slot.id} failed`, err);
+        return null;
+      }
+    };
+    const placed = (place) => this.optionSlots.filter((s) => s.place === place);
+    let title = null;
+    for (const slot of placed('title')) if ((title = slotEl(slot))) break;
+    if (!title) {
+      title = document.createElement('span');
+      title.className = 'options-title';
+      title.innerHTML = `${icon(tool.icon)}<span>${tool.name}</span>`;
+    }
     bar.appendChild(title);
+    for (const slot of placed('start')) {
+      const el = slotEl(slot);
+      if (el) bar.appendChild(el);
+    }
     for (const spec of tool.options) {
       if (spec.when && !spec.when(tool)) continue;
       const el = this.buildControl(tool, spec);
       if (el) bar.appendChild(el);
     }
     tool.renderOptions?.(bar);
+    for (const slot of placed('end')) {
+      const el = slotEl(slot);
+      if (el) bar.appendChild(el);
+    }
   }
 
   buildControl(tool, spec) {

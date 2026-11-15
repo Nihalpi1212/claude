@@ -12,6 +12,8 @@ import { CUSTOM_SHAPES, customPath } from './tools/vector.js';
 import { BUILTIN_BRUSHES } from './panels/brushes.js';
 import { normalizeBrush, brushFromLegacy, blobsOf, withoutSampleData } from './brush/preset.js';
 import { DEFAULT_SWATCHES } from '../../shared/defaults.js';
+import { normalizeOverlay } from '../../shared/keymap.js';
+import { MENU_COLORS } from './keymap-store.js';
 
 const rgbOf = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
 
@@ -78,7 +80,8 @@ export function registerPresetKinds04() {
 /**
  * The preset kinds of 0.5 (ARCHITECTURE.md "0.5 features", S10.5), registered with registerPresetKinds04() in
  * start(). Their owners re-register them with their full definitions. Step 4 of the skeleton registers `brushes`,
- * step 7 the three Camera Raw kinds, step 8 swatches, color-books and color-profiles; step 10 adds the others.
+ * step 7 the three Camera Raw kinds, step 8 swatches, color-books and color-profiles, step 10 fonts, the two keymap
+ * kinds and 0.5's `tool-presets` data (styles and shapes keep 0.4's definitions until presets-panels re-registers them).
  */
 export function registerPresetKinds05() {
   registerPresetKind('brushes', {
@@ -134,4 +137,59 @@ export function registerPresetKinds05() {
     normalize: (data) => (isObject(data) && typeof data.blob === 'string' ? data : null),
     blobs: (data) => (typeof data?.blob === 'string' ? [data.blob] : []),
   });
+  // fonts (S10.5; type-fonts re-registers it): Add Fonts… keeps each font file as the preset's blob
+  registerPresetKind('fonts', {
+    title: 'Fonts',
+    version: 1,
+    builtins: () => ({ presets: [] }),
+    normalize: (data) => (isObject(data) && typeof data.family === 'string' && data.family && typeof data.blob === 'string' ? data : null),
+    blobs: (data) => (typeof data?.blob === 'string' ? [data.blob] : []),
+  });
+  // the keymap store's named sets (S9.2; shortcuts-editor re-registers them): an overlay, and hidden / coloured items
+  registerPresetKind('keyboard-shortcuts', {
+    title: 'Keyboard Shortcuts',
+    version: 1,
+    builtins: () => ({ presets: [{ id: 'photoshop-defaults', name: 'Photoshop Defaults', data: { v: 1 } }] }),
+    normalize: (data) => (isObject(data) ? normalizeOverlay(data) : null),
+  });
+  registerPresetKind('menu-sets', {
+    title: 'Menu Sets',
+    version: 1,
+    builtins: () => ({ presets: [{ id: 'default', name: 'Default', data: { hidden: [], colors: {} } }] }),
+    normalize: (data) => (isObject(data) ? normalizeMenuSet(data) : null),
+  });
+  // 0.5's tool preset data (S10.5; presets-panels re-registers the kind): a 0.4 preset (brush inside options, or none)
+  // reads as { tool, options, brush? }
+  registerPresetKind('tool-presets', {
+    title: 'Tool Presets',
+    version: 1,
+    builtins: () => ({ presets: [] }),
+    normalize: (data) => normalizeToolPreset(data),
+  });
+}
+
+const HEX = /^#[0-9a-f]{6}$/i;
+
+/** S10.5's tool preset: { tool, options (settings.tools[tool] without brush), brush?, type?: { char, para }, color? }. */
+export function normalizeToolPreset(data) {
+  if (!isObject(data) || typeof data.tool !== 'string' || !data.tool) return null;
+  const options = isObject(data.options) ? { ...data.options } : {};
+  const brush = isObject(data.brush) ? data.brush : isObject(options.brush) ? options.brush : null;
+  delete options.brush;
+  const out = { ...data, tool: data.tool, options };
+  delete out.brush;
+  delete out.type;
+  delete out.color;
+  if (brush) out.brush = withoutSampleData(normalizeBrush(brush));
+  if (isObject(data.type)) out.type = { char: isObject(data.type.char) ? { ...data.type.char } : {}, para: isObject(data.type.para) ? { ...data.type.para } : {} };
+  if (typeof data.color === 'string' && HEX.test(data.color)) out.color = data.color.toLowerCase();
+  return out;
+}
+
+/** A menu set's data (S9.2): { hidden: itemKey[], colors: { [itemKey]: MENU_COLORS } }. */
+function normalizeMenuSet(data) {
+  const hidden = Array.isArray(data.hidden) ? [...new Set(data.hidden.filter((k) => typeof k === 'string' && k))] : [];
+  const colors = {};
+  if (isObject(data.colors)) for (const [k, v] of Object.entries(data.colors)) if (MENU_COLORS.includes(v)) colors[k] = v;
+  return { hidden, colors };
 }

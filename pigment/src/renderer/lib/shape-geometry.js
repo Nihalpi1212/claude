@@ -428,7 +428,10 @@ export function lineShapePath(p) {
   return lineWithArrows(num(p.x1), num(p.y1), num(p.x2), num(p.y2), weight, arrowPx(p.arrowStart, weight), arrowPx(p.arrowEnd, weight));
 }
 
-/** A custom shape: `unit` is its path in a 0..1 box (the 'shapes' preset data), placed in the box and rotated. */
+/**
+ * A custom shape: `unit` is its path in a 0..1 box (the layer's shapeProps.unit, else the 'shapes' preset data), placed
+ * in the box and rotated.
+ */
 export function customShapePath(p, unit) {
   const x = num(p.x), y = num(p.y), w = num(p.width), h = num(p.height);
   const src = unit && Array.isArray(unit.subpaths) ? unit : customPath(p.shape in CUSTOM_SHAPES ? p.shape : 'heart', 0, 0, 1, 1);
@@ -449,7 +452,8 @@ export function shapePath(kind, props, { customPathOf = null } = {}) {
     case 'triangle': path = triangleShapePath(p); break;
     case 'polygon': path = polygonShapePath(p); break;
     case 'line': path = lineShapePath(p); break;
-    case 'custom': path = customShapePath(p, customPathOf?.(p.shape) ?? null); break;
+    // shapeProps.unit (0.5, S10.5) before the preset: the layer's own outline wins over the resolver
+    case 'custom': path = customShapePath(p, p.unit && Array.isArray(p.unit.subpaths) ? p.unit : customPathOf?.(p.shape) ?? null); break;
     default: return null;
   }
   // stored coordinates without floating noise (1e-6 px)

@@ -78,3 +78,25 @@ test('F7, an overlay, hidden and coloured items, and an action that owns F7', as
     rmSync(userData, { recursive: true, force: true });
   }
 });
+
+// Part 2, step 12: the packaged-style start (pigment://, the preload bridge, every 0.5 stub and service) logs no
+// console error or warning
+test('a start-up logs no console error or warning', async () => {
+  const userData = mkdtempSync(join(tmpdir(), 'pigment-userdata-'));
+  const app = await electron.launch({ args: ['.', '--no-sandbox', '--disable-gpu'], cwd: ROOT, env: { ...process.env, PIGMENT_USER_DATA: userData } });
+  try {
+    const window = await app.firstWindow();
+    const problems = [];
+    window.on('console', (m) => {
+      if (m.type() === 'error' || m.type() === 'warning') problems.push(`${m.type()}: ${m.text()}`);
+    });
+    window.on('pageerror', (e) => problems.push(`pageerror: ${e.message}`));
+    await window.waitForSelector('body[data-ready]', { timeout: 60_000 });
+    expect(await window.evaluate(() => ({ keymap: typeof window.pigmentApp.keymap?.keysFor, previewBox: typeof window.pigmentApp.transformTool?.previewBox, slots: typeof window.pigmentApp.tools.registerOptionsSlot }))).toEqual({ keymap: 'function', previewBox: 'function', slots: 'function' });
+    await window.waitForTimeout(1000);
+    expect(problems).toEqual([]);
+  } finally {
+    await app.close();
+    rmSync(userData, { recursive: true, force: true });
+  }
+});

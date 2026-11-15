@@ -19,6 +19,7 @@ import { installSample } from './lib/sample.js';
 import { installCanvasCapture } from './lib/canvas-capture.js';
 import { PresetStore } from './lib/presets.js';
 import { installToolBrush } from './lib/brush/tool-brush.js';
+import { installPresetFormats, opensAsPresets, importPresetFiles } from './lib/preset-formats.js';
 import { attachColorPipeline, describe as describeProfile } from './lib/color/pipeline.js';
 import { BRUSH_SIZE } from './lib/brush/options.js';
 import { KeymapStore } from './lib/keymap-store.js';
@@ -830,7 +831,10 @@ function setupDragAndDrop(app) {
     const files = [...e.dataTransfer.files];
     const paths = files.map((f) => bridge.pathForFile(f)).filter(Boolean);
     if (e.shiftKey && app.doc) {
-      for (const p of paths) await app.commands.run('file:place', p, 'drop');
+      // preset files (lib/preset-formats.js, S10.4): imported, never placed (without Shift, openPaths routes them)
+      const presets = paths.filter((p) => opensAsPresets(p));
+      if (presets.length) importPresetFiles(app, { paths: presets });
+      for (const p of paths) if (!presets.includes(p)) await app.commands.run('file:place', p, 'drop');
       return;
     }
     app.commands.run('file:open-paths', paths, 'drop'); // the user's gesture: a session that refuses it says why
@@ -875,6 +879,8 @@ async function start() {
   app.presets.addEventListener('change', (e) => app.emit('presets:changed', e.detail));
   // 0.5 (S1.3): each painting tool's brush, the `brushes` migration and tool:brush-preset
   installToolBrush(app);
+  // 0.5 (S10): preset files of both registries, the skeleton's blob references
+  installPresetFormats(app);
   registerCoreCommands(app);
   setupStatusbar(app);
   setupHostEvents(app);

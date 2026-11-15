@@ -1,6 +1,6 @@
 // Pigment 0.5 skeleton smoke spec (port 8850, ARCHITECTURE.md "0.5 features", Part 2). Each step of the skeleton adds
 // its tests here: "stubs" (step 2), "keys" (step 3), "brush" (4), "psd" (5), "colour" (6), "camera raw" (7), "colour ui"
-// (8), "type" (9), "presets" (10), "toolbox" (11).
+// (8), "type" (9), "presets" (10), "toolbox" (11), "start-up" and the exact stub list in "stubs" (12).
 //
 // Rule 11: this spec stays green before and after each 0.5 package lands. An assertion about a stub's own behaviour
 // runs only while the stub is in place, read from the capability flags of S15 (landed() below); the same test checks
@@ -9,7 +9,7 @@ import { test, expect } from '@playwright/test';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { openApp, newDoc, run, runAwait, pixel, confirmDialog } from './helpers.mjs';
+import { openApp, newDoc, run, runAwait, pixel, confirmDialog, screenPoint } from './helpers.mjs';
 import { PSD_GOLDEN_DOCS, pagePsdGolden } from './goldens.mjs';
 
 const RENDERER = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'src', 'renderer');
@@ -128,6 +128,12 @@ test('stubs: every S13.3 id is a disabled stub in app.stubbed or a real registra
     else if (owner === 'later') expect(c.stubbed, `${id} is a stub until 0.6`).toBe(true);
     // the package's own ids: stubs until it lands (rule 11: only the landed package's ids may be real)
     else if (!done[owner]) expect(c.stubbed, `${id} (${owner} has not landed)`).toBe(true);
+  }
+  // step 12: while no package has landed, app.stubbed is exactly S13.3's stub ids (with 0.6's two of stubs-later.js)
+  if (!Object.values(done).some(Boolean)) {
+    const stubbed = await page.evaluate(() => [...window.pigmentApp.stubbed].sort());
+    const expected = Object.entries(S13_3).filter(([, owner]) => owner !== 'working' && owner !== 'skeleton').map(([id]) => id).sort();
+    expect(stubbed).toEqual(expected);
   }
   // the record flag the stub declares for its owner (E31)
   expect(await page.evaluate(() => window.pigmentApp.commands.commands.get('edit:show-all-menu-items')?.record)).toBe(false);
@@ -1607,5 +1613,394 @@ test('type: a TypeTool subclass in the text slot is reached by Shift+T, and a no
   expect(r.open).toBe(false);
   expect(r.text).toBe('Dummy');
   expect(r.after).toBe(r.layers + 1);
+  expect(errors).toEqual([]);
+});
+
+// ---- step 10: preset files (S10, S7.2) -----------------------------------------------------------------------------
+
+test('presets: a fake two-kind format\'s file opened and dropped imports into both kinds; .ase reaches swatches; Open lists the preset files', async ({ page }) => {
+  const errors = await openApp(page);
+  const done = await landed(page);
+  const r = await page.evaluate(async (acoAseReal) => {
+    const app = window.pigmentApp;
+    const F = await import('/lib/preset-formats.js');
+    const { registerPresetFormat, presetFormats } = await import('/lib/presets.js');
+    // a tiny PNG (2 × 2, opaque): the pattern's side file
+    const c = document.createElement('canvas');
+    c.width = c.height = 2;
+    c.getContext('2d').fillRect(0, 0, 2, 2);
+    const png = new Uint8Array(await (await new Promise((res) => c.toBlob(res, 'image/png'))).arrayBuffer());
+    // a format of two kinds: a brush whose texture names the file's own pattern through a file-local ref
+    const off = F.registerPresetFileFormat({
+      id: 'skeleton-fake', name: 'Fake brushes', extensions: ['fakebrushes'], kinds: ['brushes', 'patterns'],
+      async read() {
+        return {
+          items: [
+            { kind: 'brushes', name: 'Fake textured', data: { tip: { size: 33 }, texture: { enabled: true, pattern: { $presetRef: { kind: 'patterns', ref: 'pat' } } } } },
+            { kind: 'patterns', ref: 'pat', name: 'Fake pattern', data: { width: 2, height: 2, blob: 'fake-pattern.png', mode: 'rgb' }, blobs: { 'fake-pattern.png': png } },
+          ],
+          report: [],
+        };
+      },
+    });
+    const count = (kind, name) => app.presets.list(kind).filter((p) => p.name === name).length;
+    const docs0 = app.docs.list().length;
+    try {
+      await Promise.all(['brushes', 'patterns', 'swatches'].map((k) => app.presets.ready(k)));
+      window.__pigmentTest.files['mem:/set.fakebrushes'] = new Uint8Array([1]);
+      await app.commands.run('file:open-paths', ['mem:/set.fakebrushes'], 'api');
+      const brush = app.presets.list('brushes').find((p) => p.name === 'Fake textured');
+      const pattern = app.presets.list('patterns').find((p) => p.name === 'Fake pattern');
+      const opened = { brushes: count('brushes', 'Fake textured'), patterns: count('patterns', 'Fake pattern'), ref: brush?.data.texture.pattern, patternId: pattern?.id, blob: !!(await app.presets.readBlob('patterns', 'fake-pattern.png')) };
+      // dropped on the window: imported again, not opened
+      const dt = new DataTransfer();
+      dt.items.add(new File([new Uint8Array([1])], 'dropped.fakebrushes'));
+      window.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
+      const t0 = Date.now();
+      while (count('brushes', 'Fake textured') < 2 && Date.now() - t0 < 4000) await new Promise((res) => setTimeout(res, 50));
+      const dropped = { brushes: count('brushes', 'Fake textured'), patterns: count('patterns', 'Fake pattern') };
+      // .ase goes to `swatches` only (S7.2): preset-files-manager's format, or a stand-in until it lands
+      if (!acoAseReal && !presetFormats('swatches').some((f) => (f.extensions ?? []).includes('ase'))) {
+        registerPresetFormat('swatches', { id: 'skeleton-ase', name: 'Swatch Exchange', extensions: ['ase'], read: async () => ({ presets: [{ name: 'From ASE', data: { color: { space: 'rgb', values: [255, 0, 0] } } }], report: [] }) });
+      }
+      // an Adobe Swatch Exchange file with one RGB colour "From ASE"
+      const name = 'From ASE';
+      const blockLen = 2 + (name.length + 1) * 2 + 4 + 12 + 2;
+      const ase = new Uint8Array(12 + 6 + blockLen);
+      const dv = new DataView(ase.buffer);
+      ase.set([65, 83, 69, 70]);
+      dv.setUint16(4, 1);
+      dv.setUint32(8, 1);
+      dv.setUint16(12, 1);
+      dv.setUint32(14, blockLen);
+      dv.setUint16(18, name.length + 1);
+      for (let i = 0; i < name.length; i++) dv.setUint16(20 + i * 2, name.charCodeAt(i));
+      let o = 20 + (name.length + 1) * 2;
+      ase.set([82, 71, 66, 32], o);
+      dv.setFloat32(o + 4, 1);
+      dv.setFloat32(o + 8, 0);
+      dv.setFloat32(o + 12, 0);
+      dv.setUint16(o + 16, 2);
+      window.__pigmentTest.files['mem:/colours.ase'] = ase;
+      const before = { gradients: app.presets.list('gradients').length, patterns: app.presets.list('patterns').length };
+      await app.commands.run('file:open-paths', ['mem:/colours.ase'], 'api');
+      const swatch = app.presets.list('swatches').find((p) => p.name === 'From ASE');
+      const ased = { swatch: swatch?.data.color ?? null, gradients: app.presets.list('gradients').length - before.gradients, patterns: app.presets.list('patterns').length - before.patterns };
+      // File > Open: a "Presets" filter lists the registered preset file extensions
+      let filters = null;
+      const orig = app.bridge.openFileDialog;
+      app.bridge.openFileDialog = async (opts) => {
+        filters = opts.filters;
+        return [];
+      };
+      try {
+        await app.docs.openDialog();
+      } finally {
+        app.bridge.openFileDialog = orig;
+      }
+      return { opened, dropped, ased, docs: app.docs.list().length - docs0, presetsFilter: filters?.find((f) => f.name === 'Presets')?.extensions ?? null, last: filters?.at(-1)?.name };
+    } finally {
+      off();
+    }
+  }, done.acoAseReal);
+  expect(r.opened).toMatchObject({ brushes: 1, patterns: 1, blob: true });
+  expect(r.opened.ref).toEqual({ presetId: r.opened.patternId, name: 'Fake pattern' });
+  expect(r.dropped).toEqual({ brushes: 2, patterns: 2 });
+  expect(r.ased.swatch?.space).toBe('rgb');
+  expect(r.ased.swatch.values.map(Math.round)).toEqual([255, 0, 0]);
+  expect([r.ased.gradients, r.ased.patterns]).toEqual([0, 0]);
+  expect(r.docs).toBe(0); // nothing was opened as a document
+  expect(r.presetsFilter).toEqual(expect.arrayContaining(['fakebrushes', 'pigment-presets', 'ase']));
+  expect(r.last).toBe('All files');
+  expect(errors).toEqual([]);
+});
+
+test('presets: with a writable gradients format registered, the Gradients panel\'s Export still writes .pigment-presets', async ({ page }) => {
+  const errors = await openApp(page);
+  await newDoc(page);
+  await page.evaluate(async () => {
+    const app = window.pigmentApp;
+    const { registerPresetFormat } = await import('/lib/presets.js');
+    // registered for the kind as preset-files-manager's .grd will be (S10.1): 0.4's Export would have picked it, being
+    // first (its own extension, so a .grd that has landed does not take the typed name below)
+    registerPresetFormat('gradients', { id: 'skeleton-grd', name: 'Test Gradients', extensions: ['skgrd'], read: async () => ({ presets: [], report: [] }), write: async () => new Uint8Array([8, 66, 73, 77]) });
+    window.__seenSave = null;
+    const orig = app.bridge.saveFileDialog;
+    app.bridge.saveFileDialog = (opts) => {
+      window.__seenSave = opts;
+      return orig(opts);
+    };
+    window.__pigmentTest.nextSavePath = 'mem:/MyGradients';
+    app.panels.show('gradients', { reveal: true });
+  });
+  const panel = page.locator('.panel[data-panel="gradients"]');
+  await panel.locator('[data-act="menu"]').click();
+  await page.locator('.popover-item', { hasText: 'Export All Gradients' }).click();
+  await expect.poll(() => page.evaluate(() => !!window.__pigmentTest.written['mem:/MyGradients.pigment-presets'])).toBe(true);
+  const r = await page.evaluate(async () => {
+    const file = JSON.parse(new TextDecoder().decode(window.__pigmentTest.written['mem:/MyGradients.pigment-presets']));
+    // the typed extension picks the format: .skgrd writes the registered format
+    const { exportPresets } = await import('/lib/gradient-editor.js');
+    await exportPresets(window.pigmentApp, null, 'mem:/Typed.skgrd');
+    return { format: file.format, kind: file.kind, n: file.items.length, defaultPath: window.__seenSave?.defaultPath, filters: window.__seenSave?.filters.map((f) => f.extensions[0]), grd: Array.from(window.__pigmentTest.written['mem:/Typed.skgrd'] ?? []) };
+  });
+  expect(r).toMatchObject({ format: 'pigment-presets', kind: 'gradients', defaultPath: 'Gradients.pigment-presets', grd: [8, 66, 73, 77] });
+  expect(r.n).toBeGreaterThan(0);
+  expect(r.filters[0]).toBe('pigment-presets');
+  expect(r.filters).toContain('skgrd');
+  expect(errors).toEqual([]);
+});
+
+test('presets: a custom shape whose preset is deleted keeps its outline through edits, .pigment and PSD', async ({ page }) => {
+  const errors = await openApp(page);
+  await newDoc(page, { width: 160, height: 120, background: 'transparent' });
+  const r = await page.evaluate(async () => {
+    const app = window.pigmentApp;
+    const io = await import('/lib/io.js');
+    const { createShapeLayer } = await import('/lib/tools/vector.js');
+    const { livePath, regenerateShape } = await import('/lib/path-ops.js');
+    const { readPsd } = await import('ag-psd');
+    await app.presets.ready('shapes');
+    // a diamond: nothing like the heart a missing preset falls back to
+    const diamond = { subpaths: [{ closed: true, points: [[0.5, 0], [1, 0.5], [0.5, 1], [0, 0.5]].map(([x, y]) => ({ x, y })) }] };
+    const preset = app.presets.add('shapes', { name: 'Diamond', data: { path: diamond } });
+    const props = { x: 20, y: 20, width: 80, height: 80, angle: 0, shape: preset.id };
+    const layer = createShapeLayer(app, livePath('custom', props), { name: 'Diamond', label: 'Custom Shape', style: { fill: { type: 'solid', color: '#ff0000' }, stroke: null }, kind: 'custom', props });
+    const corners = () => layer.path.subpaths.map((sp) => sp.points.map((p) => [Math.round(p.x), Math.round(p.y)]));
+    // an edit while the preset exists fills shapeProps.unit
+    await app.commands.run('layer:shape-properties', { props: { width: 100 } }, 'api');
+    const unit = JSON.parse(JSON.stringify(layer.shapeProps.unit ?? null));
+    app.presets.remove('shapes', [preset.id]);
+    await app.commands.run('layer:shape-properties', { props: { width: 120 } }, 'api');
+    const afterDelete = corners();
+    // .pigment: the outline comes back with the layer, and a regenerate still draws it
+    const back = await io.readPigment(await io.writePigment(app.doc));
+    const bl = back.layers().find((l) => l.type === 'shape');
+    const regen = regenerateShape(bl, { height: 40 }).path.subpaths.map((sp) => sp.points.map((p) => [Math.round(p.x), Math.round(p.y)]));
+    // PSD: the layer's pixels are the diamond's (the left tip is filled, the box corner is not)
+    const psd = readPsd(io.writePsdDocument(app.doc, app.doc.view.compositor), { skipThumbnail: true, skipCompositeImageData: true });
+    const rec = psd.children.find((c) => c.name === layer.name);
+    const alphaAt = (x, y) => rec.canvas.getContext('2d').getImageData(x - rec.left, y - rec.top, 1, 1).data[3];
+    return { unit, afterDelete, backUnit: !!bl.shapeProps.unit, regen, tip: alphaAt(24, 60), corner: alphaAt(30, 26), centre: alphaAt(80, 60) };
+  });
+  expect(r.unit?.subpaths?.[0]?.points?.length).toBe(4);
+  expect(r.afterDelete).toEqual([[[80, 20], [140, 60], [80, 100], [20, 60]]]);
+  expect(r.backUnit).toBe(true);
+  expect(r.regen).toEqual([[[80, 20], [140, 40], [80, 60], [20, 40]]]);
+  expect(r.tip).toBeGreaterThan(200);
+  expect(r.corner).toBe(0);
+  expect(r.centre).toBe(255);
+  expect(errors).toEqual([]);
+});
+
+// ---- step 11: toolbox and transform (S12.1, S12.2) ------------------------------------------------------------------
+
+test('toolbox: options-bar slots render; resetOptions; setOptions on a Type tool with a text layer active edits no layer', async ({ page }) => {
+  const errors = await openApp(page);
+  const done = await landed(page);
+  await newDoc(page);
+  const r = await page.evaluate(async () => {
+    const app = window.pigmentApp;
+    const t = app.tools;
+    t.activate('brush');
+    const el = (cls, text) => Object.assign(document.createElement('span'), { className: cls, textContent: text });
+    const offTitle = t.registerOptionsSlot({ id: 'test-title', place: 'title', order: -1e6, render: (tool) => el('test-title', `Preset of ${tool.id}`) });
+    const offStart = t.registerOptionsSlot({ id: 'test-start', place: 'start', order: -1e6, render: () => el('test-start', 'S') });
+    const offEnd = t.registerOptionsSlot({ id: 'test-end', place: 'end', order: 1e6, render: (tool) => (tool.id === 'brush' ? el('test-end', 'E') : null) });
+    const bar = document.getElementById('options-bar');
+    const order = () => [...bar.children].map((c) => c.className.split(' ')[0]);
+    const withSlots = order();
+    const titleText = bar.querySelector('.test-title')?.textContent;
+    t.activate('move');
+    const moveHasEnd = !!bar.querySelector('.test-end');
+    t.activate('brush');
+    offTitle();
+    offStart();
+    offEnd();
+    const without = order();
+
+    // resetOptions: the stored options go, the bar shows the defaults, 'tool:options' says '*'
+    const events = [];
+    app.on('tool:options', (e) => events.push({ tool: e.tool, key: e.key, batch: !!e.batch }));
+    t.setOpt('brush', 'opacity', 0.25);
+    events.length = 0;
+    t.resetOptions('brush');
+    const reset = { stored: app.settings.tools?.brush ?? null, opacity: t.opt('brush', 'opacity'), events: events.splice(0) };
+
+    window.__toolboxEvents = events;
+    return { withSlots, titleText, moveHasEnd, without, reset };
+  });
+  // setOptions on the Type tool with a text layer active: the tool's options change, the layer does not
+  await addTextLayer(page, 'Hello', { x: 40, y: 80 });
+  r.type = await page.evaluate(() => {
+    const app = window.pigmentApp;
+    const t = app.tools;
+    const events = window.__toolboxEvents;
+    const layer = app.doc.active;
+    t.activate('text');
+    const h0 = app.doc.history.index;
+    const before = JSON.stringify(layer.content) + JSON.stringify(layer.typeOptions ?? null);
+    events.length = 0;
+    t.setOptions('text', { size: 72, family: 'serif' });
+    const after = JSON.stringify(layer.content) + JSON.stringify(layer.typeOptions ?? null);
+    return { isText: layer.type === 'text', same: before === after, entries: app.doc.history.index - h0, size: t.opt('text', 'size'), family: t.opt('text', 'family'), events: events.splice(0) };
+  });
+  expect(r.withSlots.slice(0, 2)).toEqual(['test-title', 'test-start']);
+  expect(r.withSlots.at(-1)).toBe('test-end');
+  expect(r.withSlots).not.toContain('options-title');
+  expect(r.titleText).toBe('Preset of brush');
+  expect(r.moveHasEnd).toBe(false);
+  if (!done['presets-panels']) expect(r.without[0]).toBe('options-title'); // its tool preset picker is a title slot
+  expect(r.without).not.toContain('test-start');
+  expect(r.reset.stored).toBeNull();
+  expect(r.reset.opacity).toBe(1);
+  expect(r.reset.events).toEqual([{ tool: 'brush', key: '*', batch: false }]);
+  expect(r.type.size).toBe(72);
+  expect(r.type.family).toBe('serif');
+  expect(r.type.entries).toBe(0);
+  expect(r.type.isText).toBe(true);
+  expect(r.type.same).toBe(true);
+  expect(r.type.events.filter((e) => e.batch).map((e) => e.key).sort()).toEqual(['family', 'size']);
+  expect(r.type.events.at(-1)).toEqual({ tool: 'text', key: '*', batch: false });
+  expect(errors).toEqual([]);
+});
+
+/** Adds raster layers filled black at the given rects; the last one is active. */
+const addBoxes = (page, rects) =>
+  page.evaluate(async (list) => {
+    const app = window.pigmentApp;
+    const { RasterLayer, createCanvas } = await import('/lib/document.js');
+    const { structural } = await import('/lib/layer-ops.js');
+    const out = [];
+    for (const [i, r] of list.entries()) {
+      const c = createCanvas(r.width, r.height);
+      c.getContext('2d').fillRect(0, 0, r.width, r.height);
+      const layer = new RasterLayer({ name: `Box ${i + 1}`, canvas: c, x: r.x, y: r.y });
+      structural(app, 'Add', () => {
+        app.doc.add(layer);
+        app.doc.setActive(layer);
+      });
+      out.push(layer.id);
+    }
+    return out;
+  }, rects);
+
+test('toolbox: previewBox equals the box Free Transform takes, for a raster layer with a pixel selection and for two layers', async ({ page }) => {
+  const errors = await openApp(page);
+  await newDoc(page, { width: 200, height: 150, background: 'transparent' });
+  const ids = await addBoxes(page, [{ x: 40, y: 40, width: 40, height: 30 }, { x: 120, y: 90, width: 20, height: 20 }]);
+  const r = await page.evaluate(async (ids) => {
+    const app = window.pigmentApp;
+    const tt = app.transformTool;
+    const d = app.doc;
+    const { Selection } = await import('/lib/selection.js');
+    const compare = () => {
+      const pb = tt.previewBox(d);
+      app.commands.run('edit:free-transform', undefined, 'api');
+      const s = tt.session;
+      const out = { preview: pb && { box: pb.box, targets: pb.targets.map((l) => l.id), selectionOnly: pb.selectionOnly }, session: s && { box: { ...s.box }, targets: s.targets.map((l) => l.id), selectionOnly: s.selectionOnly }, during: tt.previewBox(d) };
+      tt.cancel();
+      return out;
+    };
+    // one raster layer and a pixel selection: the selected pixels
+    d.setActive(d.find(ids[0]));
+    d.selection = Selection.fromRect(d.width, d.height, { x: 50, y: 30, width: 20, height: 20 });
+    d.changed('selection');
+    const sel = compare();
+    // two layers, no selection: the union of their contents
+    d.selection = null;
+    d.changed('selection');
+    d.setActive(d.find(ids[1]));
+    d.setActive(d.find(ids[0]), { additive: true });
+    const two = compare();
+    return { sel, two, none: (() => {
+      // nothing to transform: null, as start() would refuse
+      app.newDocument({ width: 20, height: 20, name: 'Empty', background: 'transparent' });
+      return tt.previewBox(app.doc);
+    })() };
+  }, ids);
+  expect(r.sel.preview).toEqual({ box: { x: 50, y: 40, width: 20, height: 10 }, targets: [ids[0]], selectionOnly: false });
+  expect(r.sel.session).toEqual(r.sel.preview);
+  expect(r.sel.during).toBeNull();
+  expect(r.two.preview.box).toEqual({ x: 40, y: 40, width: 100, height: 70 });
+  expect(r.two.session).toEqual(r.two.preview);
+  expect(r.none).toBeNull();
+  expect(errors).toEqual([]);
+});
+
+test('toolbox: a grab on \'se\' continues the drag into one Free Transform entry, also from the Ctrl-held Move tool, without distorting', async ({ page }) => {
+  const errors = await openApp(page);
+  const done = await landed(page);
+  await newDoc(page, { width: 200, height: 150, background: 'transparent' });
+  const [id] = await addBoxes(page, [{ x: 40, y: 40, width: 40, height: 30 }]);
+  // the Move tool's handles are move-tool-depth's; until it lands a press near the box's 'se' corner grabs it here
+  await page.evaluate((real) => {
+    const app = window.pigmentApp;
+    if (real) {
+      app.tools.setOpt('move', 'showTransform', true);
+      return;
+    }
+    const move = app.tools.get('move');
+    window.__realMoveDown ??= move.onPointerDown;
+    move.onPointerDown = function (p) {
+      const pb = app.transformTool.previewBox(app.doc);
+      const se = pb && [pb.box.x + pb.box.width, pb.box.y + pb.box.height];
+      if (se && Math.hypot(p.x - se[0], p.y - se[1]) < 4) return app.transformTool.start({ mode: 'free', grab: { pointer: p, handle: 'se' } });
+      return window.__realMoveDown.call(this, p);
+    };
+  }, done['move-tool-depth']);
+  const quadAfter = async (prepare, modifiers) => {
+    await page.evaluate(prepare);
+    const h0 = await page.evaluate(() => window.pigmentApp.doc.history.index);
+    const a = await screenPoint(page, 80, 70);
+    const b = await screenPoint(page, 100, 90);
+    for (const m of modifiers) await page.keyboard.down(m);
+    await page.mouse.move(a.x, a.y);
+    if (modifiers.includes('Control')) await expect.poll(() => page.evaluate(() => window.pigmentApp.view.tempTool?.id ?? null)).toBe('move');
+    await page.mouse.down();
+    await page.mouse.move(b.x, b.y, { steps: 6 });
+    await page.mouse.up();
+    for (const m of modifiers) await page.keyboard.up(m);
+    return page.evaluate((h) => {
+      const app = window.pigmentApp;
+      const tt = app.transformTool;
+      const quad = tt.session?.quad.map((q) => q.map((v) => Math.round(v))) ?? null;
+      tt.commit();
+      const d = app.doc;
+      return { quad, tool: app.tools.active.id, labels: d.history.entries.slice(h + 1, d.history.index + 1).map((e) => e.label), x: d.active.x, y: d.active.y, w: d.active.canvas.width, h: d.active.canvas.height };
+    }, h0);
+  };
+  // the Move tool active: the drag scales the box from its 'se' corner
+  const plain = await quadAfter(() => window.pigmentApp.tools.activate('move'), []);
+  expect(plain.quad).toEqual([[40, 40], [100, 40], [100, 90], [40, 90]]);
+  expect(plain.labels).toEqual(['Free transform']); // 0.4's label
+  expect(plain.tool).toBe('move');
+  // undo, then from the Brush with Ctrl held (the temporary Move tool): the same scale, no distortion by the held Ctrl
+  await page.evaluate(() => window.pigmentApp.commands.run('edit:undo', undefined, 'api'));
+  const ctrl = await quadAfter(() => window.pigmentApp.tools.activate('brush'), ['Control']);
+  expect(ctrl.quad).toEqual([[40, 40], [100, 40], [100, 90], [40, 90]]);
+  expect(ctrl.labels).toEqual(['Free transform']);
+  expect(ctrl.tool).toBe('brush'); // back to the tool that was active
+  expect(await page.evaluate((lid) => window.pigmentApp.doc.find(lid) === window.pigmentApp.doc.active, id)).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+// ---- step 12: the whole skeleton --------------------------------------------------------------------------------------
+
+test('start-up: a headless start shows no console error or warning, with every 0.5 stub and service in place', async ({ page }) => {
+  const messages = [];
+  page.on('console', (m) => {
+    if (m.type() === 'warning' || m.type() === 'error') messages.push(`${m.type()}: ${m.text()}`);
+  });
+  const errors = await openApp(page);
+  await newDoc(page);
+  // the services start() creates before MODULES (New files): every one is there
+  const services = await page.evaluate(() => {
+    const app = window.pigmentApp;
+    return { keymap: typeof app.keymap?.keysFor, presets: typeof app.presets?.list, colorPicker: typeof app.colorPicker?.pick, transform: typeof app.transformTool?.previewBox, slots: typeof app.tools.registerOptionsSlot };
+  });
+  expect(services).toEqual({ keymap: 'function', presets: 'function', colorPicker: 'function', transform: 'function', slots: 'function' });
+  await page.waitForTimeout(500); // late warnings (deferred loads) too
+  expect(messages).toEqual([]);
   expect(errors).toEqual([]);
 });

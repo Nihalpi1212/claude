@@ -5,6 +5,7 @@ import { History } from './history.js';
 import { CanvasView } from './canvas-view.js';
 import { flattenDocument } from './compositor.js';
 import { openDocument, encodeForPath, isLayeredPath, canWritePath, extOf, baseName, OPEN_FILTERS } from './io.js';
+import { opensAsPresets, importPresetFiles, presetFileExtensions } from './preset-formats.js';
 import { formDialog } from './form.js';
 import { MODES } from '../../shared/pixels/modes.js';
 
@@ -158,6 +159,13 @@ export class DocumentManager {
    */
   async openPaths(paths, { interactive = true } = {}) {
     let last = null;
+    // preset files (lib/preset-formats.js, S10.4): a file only a preset format reads (.abr, .grd, .pat, …) is imported,
+    // not opened, as Photoshop does
+    const presetFiles = paths.filter((p) => opensAsPresets(p));
+    if (presetFiles.length) {
+      await importPresetFiles(this.app, { paths: presetFiles });
+      paths = paths.filter((p) => !presetFiles.includes(p));
+    }
     for (const path of paths) {
       const existing = this.findByPath(path);
       if (existing) {
@@ -194,7 +202,11 @@ export class DocumentManager {
   }
 
   async openDialog() {
-    const paths = await bridge.openFileDialog({ multiple: true, filters: OPEN_FILTERS, title: 'Open' });
+    // preset files (lib/preset-formats.js, S10.4): a "Presets" filter with every registered preset extension (read when
+    // the dialog opens: packages register formats from install())
+    const presets = presetFileExtensions().filter((e) => opensAsPresets(`x.${e}`));
+    const filters = presets.length ? [...OPEN_FILTERS.slice(0, -1), { name: 'Presets', extensions: presets }, ...OPEN_FILTERS.slice(-1)] : OPEN_FILTERS;
+    const paths = await bridge.openFileDialog({ multiple: true, filters, title: 'Open' });
     if (paths?.length) return this.openPaths(paths);
     return null;
   }

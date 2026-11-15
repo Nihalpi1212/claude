@@ -93,7 +93,7 @@ specs use 8850, the packages 8851–8866 in the order of "Packages". Rule 15 bec
 | RAW camera data | EXIF from the decoder into the document (raw-open-workflow) | storing and writing it (metadata-io) | `setMetadata` (T9.2) |
 | Placed PDF / AI stays sharp | the vector source kind (pdf-import) | `SmartLayer.render` (skeleton change; smart-filters-depth's file afterwards) | `registerSourceKind` (T6) |
 | OpenType features | the catalogue use, buttons, menus, glyph insertion (type-opentype-glyphs) | applying `features` while shaping (type-fonts 0.5, unchanged) | CharStyle `features` (0.4 A) |
-| OpenType in PSD | the `text-features` aspect (type-opentype-glyphs) | the text kind (psd-text, 0.5, unchanged) | aspect order 410 (T13.5) |
+| OpenType in PSD | the `text-features` aspect (type-opentype-glyphs) | the text kind (psd-text, 0.5, unchanged) | aspect order 410 (T13.4) |
 | Edge auto-scroll | scrolling the view (view-navigation) | every dragging tool (unchanged; opt-out trait) | `autoScrolls(tool)` (T16.3) |
 | Space during a gesture | the marquee and shape repositioning (selection-tools-depth) | key routing (skeleton, `shortcuts.js`) | `tool.takeSpace` (T1.4) |
 | Channel keys Ctrl+2…9, Ctrl+\\ | the commands (channels-depth) | the bindings (skeleton) | T17 |
@@ -109,24 +109,25 @@ another package owns carries a marker comment naming the T-section, as in rule 1
 | File | Owner | What the owner changes | Plug in |
 |---|---|---|---|
 | `app.js` | skeleton | MODULES; `'app:started'` emitted at the end of `start()` (T12.4); `file:revert` moves to `lib/file-handling.js` verbatim; ui state keys of T17.5; `app.editTarget` (T2) | E62, E81 |
-| `lib/edit-ops.js` | skeleton | `colorRange`/`rangeMask` move to `lib/color-range.js`, `modify` and the six Modify commands to `lib/select-modify.js`, quick mask to `lib/quick-mask.js`, `select:save`/`select:load` to `lib/channel-dialogs.js` (all verbatim, T1.7); `pixelTarget` becomes `editTarget` (`app.pixelTarget` kept as an alias); paste asks the target and the colour policy (T2.4, T7.3); Fill › History reads `history.sourcePixels` (T4.4) | E62, E65, E72 |
+| `lib/edit-ops.js` | skeleton | `colorRange`/`rangeMask` move to `lib/color-range.js`, `modify` and the six Modify commands to `lib/select-modify.js`, quick mask to `lib/quick-mask.js`, `select:save`/`select:load` to `lib/channel-dialogs.js` (all verbatim, T1.7); `pixelTarget` becomes `editTarget` (`app.pixelTarget` kept as an alias); paste asks the target and the colour policy (T2.4, T7.3); Fill › History reads `history.sourcePixels` (T4.4); registers `select:offset` (T1.2) | E62, E65, E72 |
 | `lib/selection.js` | skeleton | `offset(dx, dy)`, `Selection.equals` (T1.1) | E56 |
+| `lib/layer-ops.js` | skeleton | `setLayerProps` marks a `{ visible }`-only entry `visibility: true` (T4.1) | E65 (move-tool-depth's 0.5 markers stay) |
 | `src/shared/pixels/selection-ops.js` | select-menu-finish | localized colour clusters, hue-dominance ranges, `canvasBounds` option of the Modify operations | skeleton lands first: `floodFill(…, { sample })` (Magic Wand Sample Size, T1.3, marked) |
-| `lib/tools/select.js` | selection-tools-depth | marquee styles, outline drags and nudges, the lassos with live-wire, Quick Selection, Wand sample size | keeps `applySelection`, `COMBINE_OPTION`, the classes' exports; the snap calls stay (rule 10) |
+| `lib/tools/select.js` | selection-tools-depth | marquee styles, outline drags and nudges, the lassos with live-wire, Quick Selection, Wand sample size | skeleton lands first: the magnetic snap and the Quick Selection flood move to the stubs of `livewire.js` and `quick-select.js` (T1.3); keeps `applySelection`, `COMBINE_OPTION`, the classes' exports; the snap calls stay (rule 10) |
 | `lib/tools/object-select.js` | skeleton | `objectSelect` through `segment('object', …)` (T1.6) | E59 |
 | `lib/select-mask.js` | select-menu-finish | Focus Area brushes and views; Select Subject / Sky through segmenters | skeleton lands first: the three `segment()` calls (marked) |
 | `lib/select-mask/workspace.js`, `preview.js` | selection-tools-depth | tool options, brush picker, reduced preview and High Quality / Real-time Refinement, presets, Remember Settings | keeps `TOOL_ID`, `REFINE_DEFAULTS`, `normaliseRefine`, `refineOptions`, the DOM `select-mask.spec` drives |
 | `lib/select-mask/engine.js`, `output.js`, `ops.js`, `worker.js` | skeleton | `engine.js` asks the segmenter registry (T1.6); `output.js` unchanged | E59 |
 | `lib/panels/channels.js` | channels-depth | eyes, targets, reorder, Channel Options, spot channels, shortcuts, panel menu | skeleton lands first: rows from `channelRows(doc)` after the saved channels (T3.3); keeps the DOM of T3.6 |
-| `lib/panels/layers.js` | skeleton | `filterRows` moves verbatim to `lib/panels/layers-filters.js` (smart-filters-depth's); the layer row's mask thumbnail Ctrl-click targets the mask through `channel:target` (T2.2) | E25, E68 |
+| `lib/panels/layers.js` | skeleton | `filterRows` moves verbatim to `lib/panels/layers-filters.js` (smart-filters-depth's); the layer and mask thumbnails set the target through `app.setEditTarget` (0.4's `setEditingMask` kept in step, T2.2) | E25, E68 |
 | `lib/smart-object.js` | smart-filters-depth | filter mask, per-filter blending, resources, drag between layers, re-edit, PSD hand-off | skeleton lands first: source kinds and place readers (T6), filter entries keep the T5.1 fields, `applySmartFilter` resolves resources (T5.4, stub: none) |
 | `lib/history.js` | history-panel-depth | the entry tree, snapshots, options, source, delete state, Clear History | skeleton lands first: `source()`, `sourcePixels()`, `willWrite()` and its calls inside `beginStroke` / `pixels` (T4) |
 | `lib/panels/history.js` | history-panel-depth | source column, New Snapshot dialog, History Options, panel menu | keeps T4.8's DOM |
 | `lib/tools/paint.js`, `retouch.js`, `fill.js`, `bucket.js`, `adjustment-brush.js`, `lib/tools/vector.js` (its `pixelTarget` twin), `lib/brush/engine.js` (the restriction at composite) | skeleton | every stroke and fill target through `editTarget` (T2.3); History Brush and erase-to-history through `sourcePixels` (T4.4) | E62, E65 (no 0.6 package edits these files) |
 | `lib/adjust-ui.js`, `lib/filter-ui.js` | skeleton | `beginPixelEdit` takes `editTarget(app, { for: 'filter' \| 'adjust' })` and commits through `restrictToTarget` (T2.3) | E62 |
 | `lib/depth.js` | skeleton | `willWrite(layer.deep)` before every in-place deep rewrite (T4.6); the png16 encoder passes `opts.interlace` and `opts.compression` to `encodePng` (T11.3) | E67, E78 |
-| `lib/io.js` | skeleton | `.pigment` entry providers (T5.5, T9.5, T12.2), smart sources through kinds (T6.3), the channel fields (T3.1), `openDocument(…, { as, interactive })`, `null` results, orientation flag (T9.3, T12.1) | E70, E71, E80 |
-| `lib/document.js` | skeleton | `doc.metadata`; channel `spot` / `options` / `visible` in `describe()` and normalised (T3.1) | E65, E76 |
+| `lib/io.js` | skeleton | `.pigment` entry providers (T5.5, T9.5, T12.2), smart sources through kinds (T6), the channel fields (T3.1), `openDocument(…, { as, interactive })`, `null` results, orientation flag (T9.3, T12.1) | E70, E71, E80 |
+| `lib/document.js` | skeleton | `doc.metadata` (T9.2); channel `kind` / `spot` / `options` in `describe()` and normalised (T3.1); `cloneLayer` copies a smart layer's `filterMask` (T5.1) | E68, E76 |
 | `lib/documents.js` | skeleton | wildcard save options and `asCopy` (T11.2), open groups and `{ as }` (T12.1), `replaceContent` (T12.3), `SAVE_FILTERS` from the registered formats | E78, E80, E81 |
 | `lib/io-chunks.js`, `lib/io-chunks/*.js` | skeleton | TIFF EXIF read and write, PSD thumbnail resource 1036, `readOrientation` (T9.1) | E76 |
 | `lib/file-info.js` | metadata-io | reads and writes through the store; the `writeTo` wrap and `stampPsd` removed | keeps `xmpPacket`, `parseXmp`, `readExif`, `describeExif`, `normaliseInfo`, `hasInfo`, `app.fileInfo.withInfo` (batch.js calls it) |
@@ -143,7 +144,7 @@ another package owns carries a marker comment naming the T-section, as in rule 1
 | `lib/extras.js` | skeleton | `zoomWithWheel` and `animatedZoom` move from the built-in `interface` section to a new built-in `navigation` section (T18.1) | E20 |
 | `lib/type/char-format.js` | skeleton | the Character panel menu gains "OpenType ▸" from the shared catalogue (T13.2) | E83 |
 | `lib/develop-ui.js`, `lib/develop/workspace.js` | raw-open-workflow | the workspace opened on a RAW session (several images, filmstrip, output buttons) | keeps camera-raw-workspace's API and S8.3's DOM; E47's slots |
-| `src/shared/pixels/develop.js`, `develop-stages.js`, `lib/develop/registry.js` | skeleton | `developPlanes`, `ctx.input`, the import of `develop-linear.js`, the xmp facade (T14.3, T14.5) | E84 |
+| `src/shared/pixels/develop.js`, `develop-stages.js`, `lib/develop/registry.js` | skeleton | `developPlanes`, `ctx.input`, the import of `develop-linear.js`, the xmp facade (T14.2, T14.5) | E84 |
 | `lib/canvas-view.js` | view-navigation | zoom range and animation, wheel and gestures, overscroll, edge auto-scroll, scroll bars, flick panning | keeps `MIN_ZOOM`/`MAX_ZOOM` exports, `ZOOM_STEPS`, S2.5/S3.3's pointer contract, S6.4's display path |
 | `lib/tools/nav.js` | skeleton | Hand, Rotate View and Zoom move verbatim to `lib/tools/view-tools.js` (view-navigation's) | the Eyedropper, Color Sampler and Ruler stay (no 0.6 package edits nav.js) |
 | `lib/panels/navigator.js` | view-navigation | Ctrl-drag region zoom, panel options, view box colour | keeps 0.5's `displayCanvas` call (marked) |
@@ -157,12 +158,12 @@ another package owns carries a marker comment naming the T-section, as in rule 1
 | `lib/stubs-later.js` | skeleton | drops `edit:color-settings`, `edit:convert-profile` (now `lib/color/*` stubs) | |
 | `lib/preset-kinds.js` | skeleton | `registerPresetKinds06()` (T18.3) | E5 |
 | `index.html` | skeleton | stylesheet links; no import map change (pdf.js and LibRaw are loaded by URL from `vendor/`, T15.1, T14.1) | rule 6 |
-| `package.json`, `package-lock.json` | raw-open-workflow | its LibRaw build dependency, if it uses one | skeleton lands first: `pdfjs-dist` (T15.1) |
+| `package.json`, `package-lock.json` | raw-open-workflow | its LibRaw build dependency, if it uses one; `build.asarUnpack` for `src/renderer/vendor/libraw/**` (T14.1) | skeleton lands first: `pdfjs-dist` (T15.1) |
 | the spec lines of T18.2 | skeleton | gated as listed | |
 
 No 0.6 package edits a file owned by "skeleton" in this table, nor these, which 0.6 does not change: `compositor.js`,
-`sessions.js`, `commands.js`, `presets.js`, `doc-store.js`, `layer-ops.js`, `image-ops.js`, `temp-tools.js`,
-`canvas-capture.js`, `sample.js`, `brush.js` and `lib/brush/*` other than `engine.js`, `lib/psd/text.js` and the other 0.5 mapper files,
+`sessions.js`, `commands.js`, `presets.js`, `doc-store.js`, `image-ops.js`, `temp-tools.js`,
+`canvas-capture.js`, `sample.js`, `brush.js` and `lib/brush/*` other than `engine.js`, `layer-move.js`, `lib/psd/text.js` and the other 0.5 mapper files,
 `lib/type/*` other than the new files, `panels/character.js`, `panels/properties.js`, `actions.js`, `keymap-store.js`,
 `preset-formats.js`, `src/main/main.js`, `src/main/watch.js`, and `src/shared/pixels/*` other than `selection-ops.js`,
 `tiff.js`, `png.js`, `develop.js`, `develop-stages.js` and the new files.
@@ -423,8 +424,8 @@ app.ui.target                         // the current choice; { kind: 'mask' } ke
 Built-in kinds (skeleton): `mask` (order 100: 0.4's mask when `app.ui.editingMask` and the layer has one) and `layer`
 (order 900: a raster layer, with 0.5's rasterize prompt and lock refusals). With these two `editTarget` answers exactly
 0.5's `pixelTarget`, so every 0.5 test holds. channels-depth registers `alpha` (order 150: an alpha or spot channel,
-through a ChannelSurface) and `channel` (order 200: one or more colour channels of a raster layer). `app.pixelTarget`
-stays as an alias of `editTarget(app, { for: 'pixels' })`.
+through a ChannelSurface) and `channel` (order 200: one or more colour channels of a raster layer). `app.pixelTarget(opts)`
+stays as an alias of `editTarget(app, opts)`.
 
 **T2.2 Choosing it.** Clicks in the Channels panel, `channel:target` (T17: Ctrl+2 composite, Ctrl+3/4/5 red, green,
 blue, Ctrl+6…9 the first four alpha channels, Ctrl+\\ the layer mask), Shift-click adding colour channels, the Layers
@@ -961,7 +962,8 @@ encoders, the rest are 8-bit; modes: the mode renderer runs in the flatten (0.3)
 **T12.1 Opening** (skeleton): `openDocument(bytes, { name, path, as = null, interactive = true })`; `as` forces a
 reader (a registered id, or `'pigment'`, `'psd'`, `'image'`); readers get `{ name, path, colorSpaceConversion,
 interactive }` and may return `null` ("nothing to open": Cancel or Done in the RAW workspace, a cancelled Import PDF):
-`openPaths` then adds nothing, reports no error and records no recent file. `registerOpenGroup({ id, test(path) →
+`openPaths` then adds nothing, reports no error and records no recent file; or an array of documents (Import PDF of
+several pages), each added like a single open. `registerOpenGroup({ id, test(path) →
 boolean, open(app, paths, { interactive }) → Promise<Document[]> })`: `openPaths` hands every path a group's `test`
 accepts to that group at once (RAW files opened together share one session, T14.4) and opens the rest one by one; the
 group's documents go through `add`, the open hooks and the notices like the others. Batch calls `openDocument` with
@@ -1037,8 +1039,9 @@ and the controls say so.
 (`face.collectUnicodes()`) and GSUB (`face.referenceTable('GSUB')`, parsed by the package), font and style choice, zoom,
 subsets (Entire Font, Alternates for Current Selection, Unicode blocks, OpenType features) through
 `registerGlyphSubset({ id, label, test(codepoint, face) })`, recently used glyphs (`settings.glyphs.recent`, 30). Double
-click: `type:insert-glyph { text, features?, postScriptName? }` inserts at the caret of the type session (one step of
-the session's own undo, its text recorded), or replaces the selection. A glyph reachable only through a substitution
+click: `type:insert-glyph { text, features?, postScriptName? }` inserts at the caret of the type session through 0.4's
+editor (`typeSession(app).session.editor.insert`, then `typeSession().edit` for the features; one step of the
+session's own undo, its text recorded), or replaces the selection. A glyph reachable only through a substitution
 inserts its base character with the feature value that selects it (`aalt`, `salt`, `ssNN`, `swsh` = n) on that one
 character; a glyph with neither a code point nor a feature route is shown greyed. The on-canvas alternates popup
 (`alternates-popup.js`) does the same for the one selected character.
@@ -1197,3 +1200,504 @@ Clicked Point to Center, Enable Flick Panning, Overscroll) over `settings.view` 
 
 **T16.8 Paths.** No history; preferences persist; Electron: macOS trackpad pinch and Windows precision touchpads
 through the ctrlKey rule; the browser build is the same.
+
+#### T17. Commands, menus and keys
+
+**T17.1** S13.1's rules hold: every item and binding below lands in skeleton-06 (`menu-template.js`, `keymap.js`,
+`COMMAND_LABELS`, `SHORTCUT_GROUPS`); an item whose command is a stub is disabled through `state.stubs`; no package
+adds a command id outside this table; actions inside a package's own panels and dialogs are not commands unless
+listed. Keymap tables bind commands, not arguments, so keyed variants are separate ids.
+
+**T17.2 Menus.** File: Open As… after Open…; Version History… after Revert; Export ▸ gains Export Preferences… after
+Export As…, and its first item's label is "Quick Export as <format>" (`state.quickExportFormat`); Share… after
+Export ▸. Edit: Color Settings… gets Shift+CmdOrCtrl+K. Layer › Smart Filter ▸ (0.4 submenu) gains Disable Filter
+Mask and Delete Filter Mask. View: Proof Setup ▸ before Proof Colors (radios on `state.proofSetup`: Custom…, ─,
+Working CMYK, Working Cyan / Magenta / Yellow / Black Plate, Working CMY Plates, ─, Legacy Macintosh RGB, Internet
+Standard RGB (sRGB), Monitor RGB, ─, Color Blindness – Protanopia-type, Color Blindness – Deuteranopia-type, then the
+saved setups of `state.proofSetups`); 200% keeps its item without a key. Type: Panels ▸ gains Glyphs Panel; OpenType ▸
+after Anti-Alias ▸ (checkboxes from `OPENTYPE_FEATURES`, checked from `state.openType`, enabled from
+`state.openTypeAvailable`). Window (`PANELS`): Glyphs after Paragraph. Channel, History and Glyphs panel commands
+have no native items.
+
+**T17.3 Every new command id.**
+
+| Id (arg) | Menu place | Key | Until the owner lands | Owner |
+|---|---|---|---|---|
+| `select:offset` (`{ dx, dy }`) | none (selection tools, arrows) | none (the tools' arrows) | working | skeleton |
+| `tool:selection-brush` | toolbox, `wand` slot | Shift+W cycles (0.4) | stub; `app.tools.register` replaces it | selection-tools-depth |
+| `select:quick-mask-options` (`{ indicates, color, opacity }` or dialog) | none (Quick Mask row and button double-click) | none | stub | select-menu-finish |
+| `channel:target` (`'composite' \| 'mask' \| 'layer' \| { channels } \| { alpha: name }`) | none (Channels panel) | none | stub | channels-depth |
+| `channel:target-composite`, `channel:target-1` … `-7`, `channel:target-mask` | none | Ctrl+2, Ctrl+3 … Ctrl+9 (the n-th channel after the composite: colour channels, then alpha and spot), Ctrl+\\ | stub | channels-depth |
+| `channel:load-composite`, `channel:load-1` … `-7` | none | Ctrl+Alt+2 (luminosity), Ctrl+Alt+3 … Ctrl+Alt+9 | stub | channels-depth |
+| `channel:new`, `channel:new-spot`, `channel:duplicate`, `channel:delete`, `channel:options`, `channel:merge-spot`, `channel:split`, `channel:merge`, `channel:panel-options` | none (Channels panel menu) | none | stub | channels-depth |
+| `channel:visibility` (id or colour id) | none (eyes) | none | stub, `record: false` | channels-depth |
+| `layer:smart-filter-mask` (`'add' \| 'delete' \| 'toggle' \| 'link' \| 'from-selection'`) | Layer › Smart Filter ▸ | none | stub | smart-filters-depth |
+| `history:new-snapshot` (`{ name, from }` or dialog) | none (History panel) | none | stub | history-panel-depth |
+| `history:select`, `history:delete`, `history:clear`, `history:new-document`, `history:options`, `history:set-source` | none (History panel and its menu) | none | stub, `record: false` | history-panel-depth |
+| `edit:color-settings` (0.5 id) | Edit | Shift+CmdOrCtrl+K | stub, moves from `stubs-later.js` to `lib/color/settings.js` | color-settings |
+| `edit:convert-profile` (0.5 id; T7.4) | Edit | none | stub, moves to `lib/color/convert.js` | color-settings |
+| `view:proof-setup` (T8.1 id or `{ custom }`) | View › Proof Setup ▸ | none | stub, `record: false` | soft-proofing |
+| `file:export-preferences` | File › Export ▸ | none | stub | export-as |
+| `file:open-as` | File | Alt+Shift+CmdOrCtrl+O | stub | file-handling-autosave |
+| `file:versions` | File | none | stub | file-handling-autosave |
+| `file:share` | File | none | stub, `record: false` | file-handling-autosave |
+| `file:revert` (0.4 id) | File | F12 (0.5) | working, moved to `lib/file-handling.js` | file-handling-autosave |
+| `type:opentype` (`{ id, on? }`) | Type › OpenType ▸; Character panel menu | none | stub | type-opentype-glyphs |
+| `type:insert-glyph` (`{ text, features?, postScriptName? }`) | none (Glyphs panel) | none | stub | type-opentype-glyphs |
+| `window:panel-glyphs` | Window; Type › Panels ▸ | none | stub | type-opentype-glyphs |
+| `view:scroll-up`, `-down`, `-left`, `-right`, `-up-small`, `-down-small`, `-left-small`, `-right-small`, `-home`, `-end` | none | PageUp, PageDown, CmdOrCtrl+PageUp, CmdOrCtrl+PageDown, Shift+PageUp, Shift+PageDown, Shift+CmdOrCtrl+PageUp, Shift+CmdOrCtrl+PageDown, Home, End | stub | view-navigation |
+
+raw-open-workflow, pdf-import, metadata-io, psd-document, save-options-common-formats add no command: they work
+through File › Open, Place, Save As, Export As and the workspace's own buttons.
+
+**T17.4 Changed bindings and the specs that press them** (grep of `tests/e2e` and `tests/electron` for
+`keyboard.press`, `keyboard.down`, `mouse.wheel` and `sendInputEvent` on the frozen 0.5 tree):
+
+| Key | 0.5 | 0.6 | Spec lines | Change |
+|---|---|---|---|---|
+| Ctrl+2 | `view:zoom-200` (renderer key) | `channel:target-composite` | none | none |
+| Ctrl+3 … Ctrl+9, Ctrl+Alt+2 … 9, Ctrl+\\ | unbound | channel keys | none (`masks-vector-masks.spec.mjs:386` presses Backslash alone: `layer:mask-overlay`, unchanged) | none |
+| Shift+CmdOrCtrl+K | type session only (All Caps) | `edit:color-settings`; the type key still wins inside a type session (`typeKeyFor`, 0.4) | `type-editing.spec.mjs:315` (in a session) | none |
+| Alt+Shift+CmdOrCtrl+O | unbound | `file:open-as` | none | none |
+| PageUp, PageDown, Home, End (and modified) | unbound | `view:scroll-*` | `Home`, `End`, `Shift+Home`, `Shift+End`, `Control+Home`, `Control+End` are pressed in text fields and type sessions only, where plain and editing keys never reach the global table (0.4) | none |
+| Ctrl+wheel | zoom | sideways scroll (a pinch still zooms) | `conventions-shortcuts-fields.spec.mjs:70, 394` use a plain wheel | none |
+| Alt+wheel | scroll | zoom | none | none |
+| R, H | the Hand slot's current tool | Rotate View, Hand | `blur-gallery.spec.mjs:541–545` presses `h` inside the Blur Gallery session (its own keys) | none |
+
+**T17.5 UI state** (added keys): `proofSetup` (condition id), `proofSetups` (JSON of the saved setups' ids and names),
+`openType` and `openTypeAvailable` (comma lists of catalogue ids for the active text), `quickExportFormat` (`'PNG'`),
+`channelTarget` (`'composite' | 'r' | 'g' | 'b' | 'mask' | <alpha id>`).
+
+#### T18. Settings, preset kinds, spec lines, stubs and flags
+
+**T18.1 Namespaces** (`src/shared/defaults.js`, skeleton; rule 5):
+
+| Key | Owner | Declared sub-keys |
+|---|---|---|
+| `selectionTools` | selection-tools-depth | `selectMask: { remember: true, presetId: null, highQuality: false, realtime: true }` |
+| `selectMenu` | select-menu-finish | `colorRange: { last: null }`, `quickMask: { indicates: 'masked', color: '#ff0000', opacity: 0.5 }` |
+| `channels` | channels-depth | `showInColor: false`, `thumbSize: 'small'` |
+| `smartFilters` | smart-filters-depth | `{}` |
+| `history` | history-panel-depth | T4.7 |
+| `colorSettings` | color-settings | T7.1 (`preset: 'pigment-default'`, `rgb: 'srgb'`, `cmyk: null`, `gray: null`, …) |
+| `proof` | soft-proofing | `last: { id: 'working-cmyk', device: null, preserveNumbers: false, intent: 'relative', bpc: true, paperColor: false, blackInk: false }`, `gamut: { color: '#808080', opacity: 1 }` |
+| `metadata` | metadata-io | `{}` |
+| `psdDocument` | psd-document | `{}` |
+| `export` | export-as | T11.4 |
+| `saveOptions` | save-options-common-formats | `jpeg: {}`, `png: {}`, `tiff: {}`, `webp: {}`, `bmp: {}`, `ico: {}` (the last answers per format) |
+| `fileHandling` | file-handling-autosave | T12.4 |
+| `glyphs` | type-opentype-glyphs | `recent: []`, `zoom: 1`, `subset: 'all'` |
+| `rawWorkflow` | raw-open-workflow | T14.3 plus `sidecar: true`, `libraryPath: null` |
+| `pdfImport` | pdf-import | `{ select: 'pages', box: 'crop', resolution: 300, mode: 'rgb', depth: 8, antialias: true }` |
+| `view` | view-navigation | `overscroll: true`, `flickPanning: true`, `zoomClickedPointToCenter: false`, `navigatorColor: '#ff0000'` |
+
+0.3's flat `zoomWithWheel`, `animatedZoom`, `proofColors`, `gamutWarning`, `infoSecondary`, `historyLimit`,
+`historyMemoryMB` and `exportDefaults` stay where they are. Preferences sections of 0.6 (E20, new ids): `navigation` 22
+(built-in by the skeleton, replaced by view-navigation), `transparency-gamut` 31 (soft-proofing), `file-recovery` 44
+(file-handling-autosave; psd-layers' `file-handling` 45 stays its own), `export` 48 (export-as), `raw-files` 49
+(raw-open-workflow: sidecars, the LibRaw folder).
+
+**T18.2 Existing spec lines that pin a 0.5 behaviour** (edited by the skeleton so they hold before and after the package
+lands; rule 11; flags read in the page by dynamic import of the T18.4 modules):
+
+| Line | Pins | Change (step of Part 2) |
+|---|---|---|
+| `tests/e2e/skeleton-05.spec.mjs:719` "every save and export of an untagged document is byte-identical" (as the 0.5 integrator left it) | no metadata provider | its byte comparisons run while `!METADATA_FEATURES.provider`; after, decoded pixels are equal and the chunk kinds are exactly `resolution` (PNG, JPEG, TIFF), `resolution` and `thumbnail` (PSD) (9) |
+| `tests/e2e/hunt2-layers.spec.mjs:276`, `:282` | the count of every `.history-item` in the panel (a first snapshot adds one) | `.history-states .history-item`: equal before and after (6) |
+| `tests/e2e/hunt2.spec.mjs:125`, `:134` | Revert's confirmation | `confirmDialog` only while `app.stubbed.includes('file:open-as')`; after, the test also checks one "Revert" entry and `dirty === false` (11) |
+| `tests/e2e/conventions-shortcuts-fields.spec.mjs` (the 0.5 S14.2 probe for "color settings") | `edit:color-settings` disabled | disabled while `app.stubbed.includes('edit:color-settings')`, enabled after (2) |
+| every spec that compares `app.stubbed` with an exact list (grep `stubbed` in `tests/e2e`) | 0.5's final stub list | every id in `app.stubbed` is an S13.3 or T17.3 id; T17.3's are stubs or real registrations (2) |
+| `tests/unit/menu-04.test.mjs`, `menu-05.test.mjs`, `keymap-05.test.mjs` | exact menu or key lists, if any assertion is exact | widened to include T17's items only where a line fails (3) |
+
+Not edited (they hold): skeleton-05's F12 tests (F12 still reverts only outside text fields and type sessions), the
+0.3/0.4 proof and gamut specs (T8.2 gives 0.3's pixels without a CMYK profile), the select-mask, modes and channel
+specs (T1.8, T3.6 keep their DOM).
+
+**T18.3 Preset kinds** (`registerPresetKinds06()` in `preset-kinds.js`, called after `registerPresetKinds05()`; owners
+re-register with full definitions): `select-mask-presets` (selection-tools-depth), `color-settings` (color-settings),
+`proof-setups` (soft-proofing), `export-presets` (export-as: saved asset settings), `camera-profiles` and
+`raw-workflow-presets` (raw-open-workflow). Each is registered empty, with no built-ins.
+
+**T18.4 Stubs and capability flags.** Each package's MODULES entry is a stub whose `install(app)` calls
+`stubCommands(app, ids)` with its T17.3 ids and exports the stub API its file lists; a package replaces its files at the
+same paths and keeps every listed export. "Landed" is read from:
+
+| Package | Flag (false or present in the stub) |
+|---|---|
+| selection-tools-depth | `app.stubbed` lacks `tool:selection-brush`; `LIVEWIRE_REAL` (`livewire.js`) |
+| select-menu-finish | `app.stubbed` lacks `select:quick-mask-options` |
+| channels-depth | `app.stubbed` lacks `channel:new-spot` |
+| smart-filters-depth | `app.stubbed` lacks `layer:smart-filter-mask` |
+| history-panel-depth | `HISTORY_FEATURES.tree` (`lib/history-states.js`) |
+| color-settings | `app.stubbed` lacks `edit:color-settings` |
+| soft-proofing | `PROOF_FEATURES.real` (`lib/color/proof.js`) |
+| metadata-io | `METADATA_FEATURES.provider` (`lib/metadata-store.js`) |
+| psd-document | `psdFeatures().paths` (and `.guidesGrid`, `.alphaChannels`, `.spotChannels`, `.deep16`, `.deep32`, `.modes`, `.psb`, `.psdt`) |
+| export-as | `app.stubbed` lacks `file:export-preferences` |
+| save-options-common-formats | `SAVE_OPTION_FEATURES.panel` (`lib/save-options.js`) |
+| file-handling-autosave | `app.stubbed` lacks `file:open-as` |
+| type-opentype-glyphs | `app.stubbed` lacks `type:opentype` |
+| raw-open-workflow | `RAW_FEATURES.decoder` (`lib/raw/workflow.js`) |
+| pdf-import | `PDF_FEATURES.import` (`lib/pdf/import.js`) |
+| view-navigation | `VIEW_FEATURES.motion` (`lib/view-motion.js`) |
+
+### Packages
+
+Ports 8851–8866 in this order. The brief's feature list is each package's scope; a section adds what the contract
+decides: files, what it provides, how it builds before a partner lands, tests, the paths of rules 13 and 16 that bite,
+and "done". **Landing order** (every package builds against the stubs; the order only decides which landed partner a
+later package's checks can already see): sequence A — history-panel-depth, selection-tools-depth, select-menu-finish,
+channels-depth, smart-filters-depth, pdf-import, type-opentype-glyphs, view-navigation; sequence B — color-settings,
+soft-proofing, metadata-io, psd-document, save-options-common-formats, export-as, file-handling-autosave,
+raw-open-workflow. Two packages run at a time, one from each sequence.
+
+#### 1. selection-tools-depth (8851, entry `lib/tools/selection-brush.js`)
+**Owns** `lib/tools/select.js`, `selection-brush.js`, `lib/select-mask/workspace.js`, `preview.js`, `engine.js` (after
+the skeleton), new `lib/select-mask/presets.js`, `src/shared/pixels/livewire.js`, `quick-select.js`. **Delivers** T1.2's
+outline drags and nudges, T1.3's options (marquee styles with Space repositioning through `takeSpace`, the lassos with
+live-wire, Quick Selection as edge-aware region growing with Enhance Edge, Wand sample size, the Selection Brush), the
+E57 buttons, T1.8 (presets on `select-mask-presets`, Remember Settings, reduced preview, Real-time Refinement).
+**Provides** E58's live-wire API (pen-paths, 0.7), E56. **Same release** Select Subject runs whatever segmenter is
+registered (the heuristic). **Tests** unit `selection-tools-depth.test.mjs` (live-wire paths on synthetic edges,
+quick-select growth stops at an edge, sample-size seeds), e2e `selection-tools-depth.spec.mjs` (drag inside moves the
+outline and the layer's pixels stay; arrows nudge with one entry each; Fixed Ratio and Fixed Size; Space repositions
+mid-drag; a magnetic lasso follows a drawn edge; Quick Selection stops at an edge; a preset round trip). **Paths**
+undo labels; the Ctrl-held temporary Move tool still moves pixels; Quick Mask on refuses outline moves; select-mask
+specs. **Done** `select-mask.spec.mjs` and every 0.5 selection spec green, `LIVEWIRE_REAL` true.
+
+#### 2. select-menu-finish (8852, entries `lib/color-range.js`, `select-modify.js`, `quick-mask.js`)
+**Owns** those three (after the skeleton's move), `lib/select-mask.js`, `src/shared/pixels/selection-ops.js`, new
+`lib/select-mask/focus-tools.js`. **Delivers** Color Range as a real dialog (sampled colours with + and − eyedroppers
+on image and preview, Localized Color Clusters and Range, the six hue ranges, tones, Out of Gamut through
+`outOfGamut`, preview modes, Selection / Image toggle, `.axt` load and save, inside an existing selection), the
+`registerColorRangeKind` registry (E60), Modify's Apply effect at canvas bounds, Quick Mask Options, history and its
+channel row (E63), Focus Area brushes, Hand, Zoom and view modes. **Same release** Out of Gamut uses the stub gamut
+test until soft-proofing lands; the Quick Mask row shows in 0.5's panel through the skeleton's `channelRows` call.
+**Tests** unit (localized clusters, hue-dominance masks, canvas-bounds contraction), e2e `select-menu-finish.spec.mjs`
+(Color Range add and subtract samples, inside a selection, replay of the 0.5 argument and of the 0.6 one; Quick Mask
+options inverted; Focus Area add brush). **Paths** actions replay without dialogs; 16/32-bit sample the proxy;
+modes (a grey document's colour ranges). **Done** every T1.5 argument replays.
+
+#### 3. channels-depth (8853, entries `lib/channel-dialogs.js`, `lib/channel-target.js`)
+**Owns** `lib/panels/channels.js` (after the skeleton), `channel-dialogs.js` (after the move), new `channel-target.js`,
+`spot-channels.js`. **Delivers** T2's `alpha` and `channel` targets with surfaces and paste, T3.2's three display
+stages, T3.4's commands and dialogs, the eyes, reordering, panel options, every T17.3 `channel:*` id, Save and Load
+Selection with document and operation choices. **Provides** T3.1 fields to psd-document and save-options-common-formats.
+**Same release** psd-document maps the fields whether or not the panel exists. **Tests** unit (surface write-back,
+`restrictToTarget`), e2e `channels-depth.spec.mjs` (Brush, Gradient, Gaussian Blur, Levels and Paste on the Red channel
+leave green and blue alone; painting an alpha channel then undo; a spot channel's ink shows on screen and not in
+`pixel()`; Split and Merge round trip; Ctrl+3 then Ctrl+2; T3.6's DOM). **Paths** undo through surfaces; `.pigment`
+fields; CMYK and Lab refusals; 16-bit restriction; Electron menu keys Ctrl+digits. **Done** `modes.spec.mjs` green, every
+0.5 brush tool paints an alpha channel.
+
+#### 4. smart-filters-depth (8854, entry `lib/smart-filter-mask.js`)
+**Owns** `lib/smart-object.js` (after the skeleton), `lib/panels/layers-filters.js`, new `smart-filter-mask.js`,
+`smart-filter-resources.js`, `lib/psd/smart-filters.js`. **Delivers** T5.1–T5.6: the filter mask (from the selection,
+an edit target), per-filter blending, drag and Alt-drag through E25, re-editing, resources for Lens Blur, Displace and
+the texture filters, the `.pigment` provider, the PSD descriptor mapping and aspect, `layer:smart-filter-mask`.
+**Provides** `filterToPsd` / `filterFromPsd`, E68–E69 for 0.7. **Same release** pdf-import's source kind renders through
+the skeleton's `SmartLayer.render` change, which this package keeps. **Tests** unit (blend and mask maths of the chain),
+e2e `smart-filters-depth.spec.mjs` (a mask hides a blur where black; Multiply 50 % on one filter; Alt-drag copies a filter
+to another smart object in one entry; a Lens Blur with a depth channel survives `.pigment` on a fresh document; the PSD
+save notice). **Paths** setFilters entries; `cloneLayer` and Duplicate keep masks; actions by layer name and index.
+**Done** 0.3's known gaps for Lens Blur, Displace and the texture kinds on smart objects are closed.
+
+#### 5. history-panel-depth (8855, entry `lib/history-states.js`)
+**Owns** `lib/history.js`, `lib/panels/history.js` (after the skeleton), new `history-states.js`,
+`lib/panels/history-menu.js`. **Delivers** T4.2 (tree, `states`, `jump`, `deleteState`, `clearStates`), T4.4 (source,
+set from the panel's left column, captured on choice), T4.5 (snapshots From Full Document / Merged Layers / Current
+Layer, dialog, first snapshot, snapshot on save, New Document from a state or snapshot), T4.6 copy-on-write if it
+chooses, T4.7 options, every `history:*` id, Fill › History through the source. **Provides** E65–E67. **Tests** unit
+`history-tree.test.mjs` (branching, jump, trimming with branches, merge rules, rollback, dirty on a branch), e2e
+`history-panel-depth.spec.mjs` (non-linear: two branches reachable; History Brush from a chosen state; a Full Document
+snapshot restores layers; snapshot on save; Current Layer snapshot; memory refusal offers Merged Layers; T4.8's DOM).
+**Paths** every recording API through the tree (a stroke, a structural change, a slider merge, a type session, a
+smart object's `mark` / `rollback`); 16/32-bit snapshots; budget. **Done** `hunt4-sessions.spec.mjs` and every
+history-reading spec green with non-linear history both off and on (one CI run each).
+
+#### 6. color-settings (8856, entries `lib/color/settings.js`, `lib/color/convert.js`)
+**Owns** `lib/color/cmm.js`, `profiles.js`, `doc-profile.js` (icc-engine's), `lib/modes.js`, `lib/adjust-more-ui.js`,
+new `settings.js`, `convert.js`, `lut-icc.js`. **Delivers** T7.1 (dialog, presets, `setWorkingSpaces`), T7.2's engine
+members, T7.3 (open hook, paste policy), T7.4 (Convert to Profile basic and advanced, modes through profiles), T7.5's
+`gray` and `web` readouts, T7.6. **Provides** CMYK, Gray and proof transforms in the engine for soft-proofing.
+**Same release** soft-proofing builds on the stubs and on icc-engine's transforms. **Tests** unit (transform round trips
+in Node when the wasm loads there; policy decisions), e2e `color-settings.spec.mjs` (a mismatched PNG asks and converts;
+non-interactive Batch converts silently; Convert to Profile of a 16-bit document and undo; working CMYK numbers in Info
+and the picker change with the profile; a paste from a P3 document is converted). **Paths** untagged documents stay
+byte-identical; actions replay Convert with the profile's bytes; Electron's system profiles. **Done** S6.4's targets
+still met with a CMYK proof active (with soft-proofing).
+
+#### 7. soft-proofing (8857, entry `lib/color/proof.js`)
+**Owns** `lib/color-modes.js`, new `proof.js`, `src/shared/pixels/color-blind.js`. **Delivers** T8: conditions, Custom
+dialog, presets and saved setups, the two display stages over S6.4's damage, the gamut test, `proofConvertCanvas`, the
+`transparency-gamut` section, the `proof` readout. **Same release** without color-settings' CMYK transforms the stages
+give 0.3's naive proof; with them the real one. **Tests** unit (colour-blind simulation numbers), e2e
+`soft-proofing.spec.mjs` (a proof stage converts the damage only; Gamut Warning colour and opacity; a plate preset shows
+one ink; the browser build without an engine shows 0.3's pixels). **Paths** per-view conditions with two documents;
+the view's canvas swap (S6.4). **Done** the 0.3 proof specs green and Proof Setup radios in the native menu.
+
+#### 8. metadata-io (8858, entry `lib/metadata-store.js`)
+**Owns** `lib/file-info.js`, new `metadata-store.js`, `src/shared/metadata/exif.js`, `xmp.js`, `iptc.js`. **Delivers**
+T9.2–T9.6: the store, the provider, orientation, thumbnails, the `.pigment` provider, File Info through the store (the
+`writeTo` wrap removed). **Provides** T9.6's functions. **Tests** unit (EXIF parse and write keeping MakerNotes and
+unknown tags at byte level; XMP merge; IPTC; orientation), e2e `metadata-io.spec.mjs` (a JPEG built with EXIF and XMP
+keeps them through Save As JPEG, PNG, TIFF, WebP and PSD; Export As with each metadata choice; a rotated TIFF opens
+upright and saves orientation 1; resolution through every format; Batch keeps camera data). **Paths** the gated
+skeleton-05 line (T18.2); `.pigment` round trip; the Image Processor's `withInfo`. **Done** File Info reaches JPEG, PNG,
+TIFF and WebP through Save As.
+
+#### 9. psd-document (8859, files loaded by `lib/psd/index.js`)
+**Owns** `lib/psd/resources.js`, `channels.js`, `deep.js`, `modes.js`. **Delivers** T10.1 through T10.2's registries
+and T10.3's helpers, the save notices, PSB and PSDT. **Tests** unit (each resource both ways on ag-psd objects and
+bytes), e2e `psd-document.spec.mjs` (guides and grid; a saved path, the work path and a clipping path; alpha and spot
+channels with their DisplayInfo; 16-bit and 32-bit layer pixels within 1/65535 and exactly; Grayscale, Indexed and
+Bitmap kept; a PSB above 30 000 px wide refused at the canvas limit with a message; a PSDT opens untitled).
+**Paths** the 0.5 PSD goldens while the flags are false; mode documents through `modeRendered`; the packaged bundle.
+**Done** `psdFeatures()` flags true and the two 0.5 toasts gone.
+
+#### 10. export-as (8860, entry `lib/export/prefs.js`)
+**Owns** `lib/file-ops.js`, `lib/layers-extras/export.js`, new `lib/export/dialog.js`, `assets.js`, `prefs.js`.
+**Delivers** T11.4: the dialog, assets with scales and suffixes, the preview, Quick Export by preference, Layers to
+Files with PSD and nesting, per-layer Export As, the `export` section, `export-presets`. **Same release** the metadata
+choice reaches files once metadata-io lands (until then `'none'` is what 0.5 writes anyway). **Tests** e2e
+`export-as.spec.mjs` (three scales with suffixes write three files; canvas size; Convert to sRGB on a P3 document;
+Quick Export as JPEG next to the document; Layers to Files as PSD; 0.4's recorded `file:export` arguments replay).
+**Paths** chunks exactly once; 16-bit PNG; actions. **Done** every 0.4/0.5 export spec green.
+
+#### 11. save-options-common-formats (8861, entry `lib/save-options.js`)
+**Owns** `src/shared/pixels/tiff.js`, `png.js`, new `save-options.js`, `jpeg-encode.js`, `bmp.js`, `ico.js`.
+**Delivers** T11.1–T11.3 and T10.5 (layered TIFF), TIFF read depth (JPEG-in-TIFF, YCbCr, Lab, pages, pyramid, byte
+order), BMP and ICO / CUR read and write. **Same release** Use Proof Setup uses the stub proof conversion until
+soft-proofing lands; alpha and spot channels come from T3.1 whatever the panel. **Tests** unit (JPEG encoder against the
+browser's decoder; BMP and ICO round trips; TIFF variants built in the test), e2e `save-options-common-formats.spec.mjs`
+(As a Copy keeps the path and dirty state; Layers off flattens; a layered TIFF reopens with its layers; progressive
+JPEG; PNG interlaced; WebP lossless). **Paths** default options keep 0.5's bytes; 16-bit TIFF and PNG; save with
+`ask: false` (Batch, close-save). **Done** `hunt2.spec.mjs`' JPEG quality test and the S12.3 specs green.
+
+#### 12. file-handling-autosave (8862, entry `lib/file-handling.js`)
+**Owns** `file-handling.js` (after the move), new `recovery.js`, `versions.js`, `file-watch.js`, `src/main/share.js`.
+**Delivers** T12.1's Open As, T12.2–T12.4, Share, the `file-recovery` section. **Tests** unit (recovery index and naming),
+e2e `file-handling-autosave.spec.mjs` (a recovery file is written after the interval with fake timers and offered on a
+restart of the page; Revert is one entry and undoes; a changed file reloads a clean document; Open As forces the PNG
+reader on a misnamed file; a version restores), electron `file-handling.spec.mjs` (recovery folder under userData).
+**Paths** the gated hunt2 line; quitting with dirty documents removes nothing; the browser bridge. **Done** recovery
+survives a killed renderer in the Electron spec.
+
+#### 13. type-opentype-glyphs (8863, entries `lib/type/features.js`, `lib/panels/glyphs.js`)
+**Owns** those, new `lib/type/alternates-popup.js`, `lib/psd/text-features.js`. **Delivers** T13.2–T13.4.
+**Tests** unit (GSUB alternate lookup on the OFL test font, catalogue patches), e2e `type-opentype-glyphs.spec.mjs` (with
+the OFL fixture font: Discretionary Ligatures changes the shaped glyphs; a disabled button for a missing feature; Glyphs
+panel insertion inside a session; an alternate through `salt`; PSD round trip of ligatures and fractions; `.pigment`).
+**Paths** the Canvas engine message; type sessions' own undo. **Done** the type specs green.
+
+#### 14. raw-open-workflow (8864, entry `lib/raw/workflow.js`)
+**Owns** `lib/develop-ui.js`, `lib/develop/workspace.js`, `package.json` and `package-lock.json` (after the skeleton),
+new `lib/raw/decode.js`, `session.js`, `workflow.js`, `src/shared/pixels/develop-linear.js`, `scripts/vendor/libraw.mjs`,
+`src/renderer/vendor/libraw/`. **Delivers** T14. **Same release** sidecar `.xmp` through the skeleton's facade;
+metadata through `setMetadata`. **Tests** unit (`develop-linear` numbers: exposure stops on linear planes, camera matrix
+interpolation; the display path equal to `develop-04.mjs`), e2e `raw-open-workflow.spec.mjs` (a small DNG built in the
+test opens through the workspace; Done writes a sidecar and opens nothing; Open Object makes a `raw` smart object that
+re-edits; two files share one session with a filmstrip; Batch opens without UI), electron `raw.spec.mjs` (the wasm loads
+from the unpacked folder). **Paths** CSP and asar; 16-bit output; actions. **Done** RAW_FEATURES.decoder true in the
+packaged app on all three CI platforms, licence files shipped.
+
+#### 15. pdf-import (8865, entry `lib/pdf/import.js`)
+**Owns** `import.js`, new `smart-source.js`, `scripts/vendor/pdfjs.mjs`, `src/renderer/vendor/pdfjs/`. **Delivers**
+T15. **Same release** the source kind runs on the skeleton's render change, kept by smart-filters-depth. **Tests** e2e
+`pdf-import.spec.mjs` (a two-page PDF built in the test opens page 2 at 150 ppi; Images mode; a placed page stays sharp
+after a 4× scale; `.pigment` round trip of a placed PDF; a non-interactive open). **Paths** Electron loads the worker
+inside the asar; no network. **Done** both builds open the fixture.
+
+#### 16. view-navigation (8866, entry `lib/tools/view-tools.js`)
+**Owns** `lib/canvas-view.js`, `lib/panels/navigator.js`, `view-tools.js` (after the move), new `view-motion.js`,
+`view-scrollbars.js`. **Delivers** T16. **Tests** unit (zoom steps, flick decay), e2e `view-navigation.spec.mjs` (the
+zoom range; Alt+wheel zooms; Ctrl+wheel scrolls sideways; a pinch zooms; a marquee drag past the edge scrolls after
+100 ms; R and H; bird's-eye; scroll bars; PageDown). **Paths** every spec that reads `view.zoom` or pans
+(`conventions-shortcuts-fields`, `guides-snapping`, `blur-gallery`, `hunt4-layers-automation`); dialogs letting the
+canvas through (E15). **Done** the whole suite green with Animated Zoom and Flick Panning on.
+
+### Reliances on 0.5
+
+What a 0.6 package uses that a 0.5 *package* promised; each line is checked against the code when 0.5 is released, in
+step 0 of Part 2. A reliance that does not hold is fixed by the skeleton (a facade) or noted here before packages start.
+
+| 0.6 user | 0.5 promise | CONTRACT-05 | Function or field |
+|---|---|---|---|
+| color-settings, soft-proofing | ICC engine with RGB transforms and profile parsing of every colour space | S6.1 (icc-engine) | `parse` accepts CMYK, Gray and Lab profiles; `transform(from, to, { intent, bpc, format })`; the engine members of 0.5 deviation 18 |
+| color-settings | `color-profiles` kind, system profile listing | S6.6, S10.5 (icc-engine) | the kind's `data`, `profiles()` |
+| export-as | the `'icc'` provider honours `embedProfile` and `convertTo` | S6.3 (icc-engine) | `opts.embedProfile === false`, `opts.convertTo === 'srgb'` |
+| export-as, raw-open-workflow | `toSRGB` converts | S6.5 (icc-engine) | `toSRGB(canvas, doc)` |
+| channels-depth | the colour picker with books | S7.1 (color-picker-swatches) | `app.colorPicker.pick({ allowBooks })` |
+| skeleton (call sites) | the picker's CMYK fields and the Color panel's CMYK sliders call 0.3's model through identifiable functions | S7.1 (color-picker-swatches) | `rgbToCmyk` / `cmykToRgb` call sites in `color-picker.js`, `color-views.js` |
+| type-opentype-glyphs | the face record exposes the HarfBuzz face and its features | S11 (type-fonts keeps `faceFor`) | `faceFor(style).face` (harfbuzzjs `Face`), `.features` (Set) |
+| type-opentype-glyphs | `features` reach HarfBuzz per run | 0.4 A, S11 (type-fonts) | `featureList` in `shaper.js` |
+| type-opentype-glyphs | the text kind writes and reads style runs in the model's run order | S4, psd-text section | `rec.text.styleRuns`, claim `'text'` |
+| raw-open-workflow | the workspace implements `DevelopWorkspace`, its slots, presets and snapshots | S8.2, S8.4 (camera-raw-workspace) | `registerWorkspaceSlot` places, `DevelopWorkspace`, `camera-raw-presets` |
+| raw-open-workflow, skeleton | the .xmp reader and writer | S8.4 (camera-raw-workspace) | the names behind T14.5's facade (to be read from `lib/develop/presets.js`) |
+| raw-open-workflow | the `profile` stage and the profile browser | S8.4 (camera-raw-workspace) | order 250, `camera-raw-profiles` |
+| raw-open-workflow | Optics and Geometry stages with `mapPoint` | S8.1 (camera-raw-panels) | resample stages 50–90 |
+| psd-document | the raster-mask aspect and claims | S4.6 (psd-layers) | `claim(layer, 'vector-mask')`, the `raster-mask` re-registration |
+| psd-document | Maximize Compatibility's composite | S4.4 (psd-layers' setting) | `settings.psd.maximizeCompatibility` |
+| smart-filters-depth | Camera Raw's smart kind with `open` | S8.3 (camera-raw-workspace) | `registerKind('camera-raw', { open })` |
+| history-panel-depth | tool presets do not write history | S12.1 (presets-panels) | `setOptions` |
+| selection-tools-depth | the brush picker for Quick Selection and the Selection Brush | brush-settings-panel | `app.brushPicker.renderButton(el, tool)` |
+| view-navigation | the Eyedropper keeps `sampleAt` and the ring | S12 (color-picker-swatches) | `EyedropperTool.sampleAt`, `this.ring` |
+| skeleton | the keymap store's sets and overlays | S9 (skeleton-05; shortcuts-editor writes) | `KeymapStore.set` placement for the T17 keys |
+
+### Tests expected from every 0.6 package
+
+As in 0.5: `tests/unit/<package>.test.mjs` for pure code (numbers checked), `tests/e2e/<package>.spec.mjs` on its port,
+`app.spec.mjs`, `skeleton-04/05/06.spec.mjs` and `brush-golden.spec.mjs` green with the package landed, and the whole
+suite green on its port. The report lists what was not done, every behaviour change of an existing feature, every
+deviation from this contract, every test skipped until a partner lands, the six paths checked (rules 13 and 16), and
+the measured cost of anything on the repaint or stroke path.
+
+### Open questions for the reviewers
+
+1. **Smart filters editable in PSD** need smart objects written natively. Move embedded smart objects (PSD kind 500,
+   ag-psd's `placedLayer` and `linkedFiles`) from linked-smart-objects (0.7) into smart-filters-depth, or keep T5.6's
+   inert aspect and the notice?
+2. **A bundled CMYK profile**: ship a freely redistributable one (for example an ECI profile, licence to be checked) as
+   the default working CMYK, or leave CMYK on 0.3's model until the user picks a profile?
+3. **History Options defaults**: `visibilityUndoable: true` keeps 0.5's recorded eye toggles; Photoshop's default may
+   differ by version. Keep?
+4. **Snapshots as entries**: clicking a snapshot adds an entry (T4.5) instead of selecting the row. Acceptable?
+5. **LibRaw build**: an own emscripten build in CI (reproducible, slower CI) or a pinned prebuilt package (to be vetted)?
+6. **Revert without confirmation** once undoable: Photoshop does not ask; 0.5 asked. Keep the question for documents
+   whose history the revert would make unreachable in linear mode?
+7. **Overscroll default** stays on (0.5's behaviour) although Photoshop's default is off: T16.2.
+
+---
+
+# Part 2: implementation checklist for skeleton-06
+
+The app works after every step. After each step: `npm test` and the specs the step names; after steps 5, 10 and 13
+the whole browser suite and the Electron tests. Start: 0.5 as released (roughly 1000 unit, 700 browser and 8 Electron
+tests, all green); they stay green, changed only where T18.2 says, in the step it names. Every new skeleton test that
+pins a stub's own behaviour reads its package's T18.4 flag and checks the landed behaviour otherwise (rule 11):
+`skeleton-06.spec.mjs` keeps an owner map and a `landed(page)` helper as skeleton-05 does (a flag module that does not
+exist yet is not imported). Ports: 8850. The skeleton adds about 60 unit tests in 13 files, about 32 browser tests in
+`skeleton-06.spec.mjs` and 2 Electron tests in `tests/electron/keys-06.spec.mjs`.
+
+**Step 0. Start state and reliances.** Run the three suites on the released tree and record the counts. Check every
+row of "Reliances on 0.5" against the code and write the result (holds / differs, with the real name) into
+`docs/0.6/README.md`; a row that differs gets a facade in this checklist's step that uses it, or a note to the owner
+package before the round starts. Read the 0.5 integrator's edits of `skeleton-05.spec.mjs` and of the S14.2 lines, and
+grep `tests/e2e` for `stubbed` and for `.history-item`, to fix T18.2's line numbers. Confirm T10.4 against the
+installed ag-psd. No goldens are recorded: 0.5's brush, PSD and develop goldens cover the paths 0.6's skeleton touches.
+
+**Step 1. Settings, styles, preset kinds.** `defaults.js` (T18.1); fourteen empty stylesheets linked in `index.html`
+(`selection-tools`, `select-menu`, `channels`, `smart-filters`, `history`, `color-settings`, `proofing`, `export-as`,
+`save-options`, `file-handling`, `glyphs`, `raw`, `pdf-import`, `view-navigation`); `registerPresetKinds06()` (T18.3)
+called from `start()`; `extras.js`: the built-in `navigation` section (order 22) with `zoomWithWheel` and
+`animatedZoom`, removed from `interface`. Test: `tests/unit/skeleton-06.test.mjs` "settings" (every namespace
+declared; `withDefaults` keeps a 0.5 settings object unchanged).
+
+**Step 2. Stubs and moved code.** Every MODULES entry of "New files" as a stub with its T17.3 ids and its stub API; the
+MODULES order; moved verbatim and working: `colorRange`/`rangeMask` → `lib/color-range.js`, Modify → `lib/select-modify.js`,
+quick mask and its Q listener → `lib/quick-mask.js`, `select:save`/`select:load` → `lib/channel-dialogs.js`,
+`file:revert` → `lib/file-handling.js`, Hand / Rotate View / Zoom → `lib/tools/view-tools.js`, `filterRows` →
+`lib/panels/layers-filters.js`, the magnetic snap → `src/shared/pixels/livewire.js` (stub with T1.3's API), the Quick
+Selection flood → `src/shared/pixels/quick-select.js`; `stubs-later.js` drops its two ids (now `lib/color/settings.js`
+and `lib/color/convert.js` stubs); T18.2's `stubbed` lists and the conventions probe. Tests: `skeleton-06.spec.mjs`
+"stubs" (every T17.3 id is a disabled stub in `app.stubbed` or a real registration; the moved commands behave as in
+0.5: a Color Range replay with 0.5's argument, Feather, Q twice, Save then Load Selection, Revert, `tool:hand`,
+`tool:rotate-view`, `tool:zoom`, the smart filter rows' DOM).
+
+**Step 3. Keys, menus, formats, tool plumbing.** `keymap.js` (T17.3's keys; Ctrl+2 leaves `view:zoom-200`; labels,
+groups), `menu-template.js` (T17.2; T17.5's ui state read), `src/shared/opentype-features.js` (T13.1),
+`src/shared/formats.js` (`psdt`, `pdf`, `ai`, the RAW list), `app.js` ui state keys, `shortcuts.js` (`takeSpace`,
+T16.5's letters, the `view:scroll-*` plain keys outside text fields), `tool-traits.js` (`selects`, `autoScrolls`),
+`tools.js` (`toolboxDoubleClick`), `char-format.js` (OpenType ▸ in the Character panel menu from
+`openTypeMenuItems`). Tests: `tests/unit/keymap-06.test.mjs` (every T17.3 key; no conflict with the 0.5 tables on any
+platform through `keyConflicts`; `typeKeyFor` keeps Shift+Ctrl+K as All Caps in a session; Ctrl+2 is no longer
+`view:zoom-200`), `tests/unit/menu-06.test.mjs` (every T17.2 item with its command and argument; OpenType items equal the
+catalogue; the Proof Setup radios; no accelerator twice), `tests/unit/opentype-features.test.mjs` (patches,
+exclusive groups, default-on features), `tests/electron/keys-06.spec.mjs` (Alt+Shift+Ctrl+O reaches `file:open-as` once;
+a Proof Setup radio follows `state.proofSetup`), `skeleton-06.spec.mjs` "keys" (R activates Rotate View after the Hand
+was the slot's last tool and H the Hand; a fake tool whose `takeSpace` answers true keeps Space from panning;
+`app.keymap.keysFor('channel:target-composite')` is Ctrl+2).
+
+**Step 4. Selection and segmenters** (T1.1, T1.2's command, T1.3's `floodFill` sample, T1.6): `selection.js`
+(`offset`, `equals`), `select:offset` (registered working in `edit-ops.js`), `selection-ops.js floodFill(…, { sample })`,
+`lib/segmenters.js` with the heuristic built-in, and the four call sites. Tests: `tests/unit/segmenters.test.mjs`
+(priority, availability, unknown kinds), `tests/unit/selection-06.test.mjs` (offset clipping, sample-size seed means),
+`skeleton-06.spec.mjs` "selection" (`select:offset` is one entry that undoes and records; Select Subject's mask equals
+0.5's on a fixture through the heuristic; a fake segmenter of priority 10 answers instead).
+
+**Step 5. Edit targets and channel plumbing** (T2, T3.1, T3.3): `lib/edit-target.js` with `mask` and `layer`,
+`app.setEditTarget`, `app.ui.target`, `'target:changed'`, the status bar label; the call sites of T2.3 (`paint.js`,
+`retouch.js`, `fill.js`, `bucket.js`, `vector.js`, `adjustment-brush.js`, `adjust-ui.js`, `filter-ui.js`, `edit-ops.js`
+fill, stroke and paste) and `lib/brush/engine.js`'s `restrict`; `lib/channel-rows.js` and its call in 0.5's panel;
+`document.js` channel fields in `describe()`, `readPigment`'s normalisation. Tests: `tests/unit/edit-target.test.mjs`
+(order, first answer, `restrictToTarget` on ImageData), `skeleton-06.spec.mjs` "targets" (with a fake `channel` kind
+restricting to red: a Brush stroke, a Gradient, Fill, Gaussian Blur, Levels and Paste change red only, each one entry;
+a fake `alpha` kind with a surface: a stroke and its undo write the mask array in place; 0.5's mask editing and every
+`pixelTarget` caller unchanged; a fake row provider adds a row; the channel fields survive `.pigment`). Whole suite.
+
+**Step 6. History and document states** (T4.1, T4.3, T4.4, T4.6): `history.js` (`source`, `setSource`, `sourcePixels`,
+`willWrite` and its calls in `beginStroke` and `pixels`), `lib/doc-state.js`, the three source call sites,
+`layer-ops.js setLayerProps`' `visibility` mark, `depth.js`' `willWrite` calls, T18.2's `hunt2-layers` narrowing.
+Tests: `skeleton-06.spec.mjs` "history" (`sourcePixels` equals `savedSnapshot` and the History Brush paints as in 0.5;
+`captureDocState` and `applyDocState` round trip a 16-bit layered document with a mask, an alpha channel and a smart
+object as one entry that undoes; `docStateToDocument`; a spy sees `willWrite` from a stroke, a filter commit and a deep
+refresh; a capture over the budget throws `RangeError`).
+
+**Step 7. Smart objects and `.pigment` entries** (T5.1, T5.4's pass-through, T5.5, T6): `lib/source-kinds.js` with
+`image` and `document`; `smart-object.js` (`makeSource`, `copySource`, `resolveSource`, `render`'s `draw` and `onReady`,
+place readers in `file:place`, the T5.1 fields in `normaliseFilter`, the constructor, `describe`; `injectResources`);
+`document.js cloneLayer` copies `filterMask`; `lib/pigment-entries.js` and its two calls in `io.js`; sources through
+kinds in `writePigment` / `readPigment` with 0.5's entries still read. Tests: `tests/unit/pigment-entries.test.mjs`,
+`tests/unit/source-kinds.test.mjs`, `skeleton-06.spec.mjs` "smart" (a fake vector kind draws with the render matrix at
+3×, and an async kind's `onReady` repaints; a fake place reader places its source and `null` cancels silently; a 0.5
+`.pigment` with document and image smart objects reopens equal; filter `blend` and `filterMask` survive `.pigment`
+and Duplicate Layer while nothing renders them; a fake entry provider round trips and a failing one is an open notice).
+
+**Step 8. Colour** (T7.1–T7.3, T7.5, T8.1's stubs): `pipeline.js` (`setWorkingSpaces`, `workingSpaces`, `toCmyk`,
+`fromCmyk`, `toGray`, `fromGray`, `channelPlanesFor`, `convertPixels`, `setDocumentConverter`, `convertDocument`,
+`registerColorPolicy`, `colorPolicy`, `currentProof`, `setProof`, `proofTransformFor`, `proofConvertCanvas`,
+`outOfGamut`, `setGamutTest`); `lib/info-readouts.js` and `panels/info.js`; the call sites in `color-picker.js`,
+`color-views.js`, `edit-ops.js` paste and the Channels panel's planes. Tests: `tests/unit/color-pipeline-06.test.mjs`
+(every stub equals 0.3's numbers; an engine member is used when present; 0.5's `{ rgb }` call still works),
+`skeleton-06.spec.mjs` "colour" (a fake engine's `toCmyk` reaches the picker's fields, the Color panel and Info; a fake
+paste policy converts a paste and `null` cancels it; a fake gamut test drives the picker's alarm and Info's "!"; a
+registered readout appears in Info's select).
+
+**Step 9. Metadata containers and the store stub** (T9.1–T9.3): `io-chunks/tiff.js` EXIF read and write,
+`io-chunks/psd.js` 1036, `readOrientation`, `chunkSupport`; `decodeImage`'s explicit `imageOrientation`;
+`openDocument` fills `doc.metadata` and `orientationApplied`; `lib/metadata-store.js` stub; T18.2's skeleton-05 gate.
+Tests: `tests/unit/io-chunks-06.test.mjs` (TIFF EXIF both byte orders with EXIF and GPS sub-IFDs; an empty patch keeps
+the bytes; PSD thumbnail; orientation; malformed input never throws), `skeleton-06.spec.mjs` "metadata" (a JPEG with
+orientation 6 opens upright with `orientation: 6, orientationApplied: true`; a TIFF with orientation 6 opens as stored
+with `orientationApplied: false`; `doc.metadata`'s blocks equal the file's).
+
+**Step 10. PSD byte stages** (T10.2, T10.3, T10.6's gates): `psd/registry.js` (`registerPsdByteStage`,
+`registerPsdRawResource`, refused chunk ids), `read.js` and `write.js` pipelines, `lib/psd/bytes.js`, the six import
+lines in `psd/index.js` (stub mapper files), the two gated toasts. Tests: `tests/unit/psd-bytes.test.mjs` (sections of
+an ag-psd file; resources written and read back; `packBits` round trip; `psdLayerSection` / `psdFromLayerSection`
+through `readPsdDocument`), `tests/unit/psd-registry-06.test.mjs` (stage order; 1039 refused), `skeleton-06.spec.mjs`
+"psd" (a fake raw resource 2000 round trips; a fake `afterWrite` stage's bytes reach `afterRead`; the 0.5 PSD goldens
+unchanged with no stage). Whole suite.
+
+**Step 11. Saving, exporting, opening, file handling** (T11.2, T12.1, T12.3, T12.5): `documents.js` (registration ids
+and `'*'`, `saveAs` in `ask`, `asCopy`, `layers`, `useProofSetup`, `embedProfile`; `SAVE_FILTERS` from the formats;
+`registerOpenGroup`; `null` and array results; `replaceContent`), `io.js openDocument(…, { as, interactive })`,
+`automate/batch.js`, `depth.js` PNG options, `ipc.js` / `preload.cjs` / `bridge.js` (`share`, `tempPath`, the recovery
+calls, `'file-changed'`), `src/main/share.js` stub, `app.js` `'app:started'`, T18.2's `hunt2.spec.mjs` gate. Tests:
+`skeleton-06.spec.mjs` "files" (a fake `'*'` option answering `asCopy` keeps the path and the dirty state; the `quality`
+id replaced by a fake asks once; a fake group takes two paths at once; a reader returning `null` adds nothing, no error,
+no recent file; `as` forces a reader; `replaceContent` is one "Revert" entry that undoes; the browser bridge's recovery
+calls round trip; Batch opens with `interactive: false`), `keys-06.spec.mjs` (recovery write, list and remove under
+userData; `share` answers the stub's result).
+
+**Step 12. The develop input path** (T14.2, T14.5): `developPlanes`, `ctx.input`, `registerRawVariant` in
+`develop-stages.js`; `develop.js` imports `develop-linear.js`; the xmp facade in `lib/develop/registry.js`. Tests:
+`tests/unit/develop-planes.test.mjs` (display input equals `develop()`; raw input skips the entry conversion; a raw
+variant runs for raw input only; `develop-04.mjs` equality kept; the facade answers camera-raw-workspace's functions).
+
+**Step 13. Specs and the full run.** T18.2 checked line by line; `skeleton-06.spec.mjs` complete with every stub
+assertion gated on T18.4; all three suites; a headless start-up with no console error or warning; while no package has
+landed, `app.stubbed` is exactly T17.3's stub ids (after, each is a stub or a real registration).
+
+**Step 14. Documentation.** Part 1 into ARCHITECTURE.md; `docs/0.6/README.md` naming the packages, ports, the landing
+sequences and step 0's reliance results; "The skeleton as landed" for every detail the code forced, as in 0.4 and 0.5.
