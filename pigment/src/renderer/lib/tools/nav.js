@@ -1,8 +1,12 @@
-// Navigation tools: hand (pan), rotate view, zoom; and the eyedropper / colour sampler.
+// Navigation tools: hand (pan), rotate view, zoom; and the eyedropper / colour sampler. The Eyedropper's Sample Size and
+// the five Sample choices (S7.5), screen sampling and Copy Color as Hex / HTML are color-picker-swatches' (0.5); the
+// calls other tools make, EyedropperTool.sampleAt(p, { setForeground, setBackground }) and this.ring, are kept.
 import { Tool } from '../tools.js';
 import { sampleMerged } from '../sample.js';
 import { intersectRect } from '../document.js';
 import { rgbaToHex } from '../../../shared/pixels/color.js';
+import { SAMPLE_SIZES, SAMPLE_SOURCES, sampleSourceOf, averageRgba, hexCode, htmlCode, rgbOfHex } from '../color-picker-model.js';
+import { SRGB, convertColor } from '../color/pipeline.js';
 
 export class HandTool extends Tool {
   constructor(app) {
@@ -108,6 +112,19 @@ export class ZoomTool extends Tool {
   }
 }
 
+/** The layer drawn right above `layer` (its next sibling, or its group's): Sample "Current & Below" stops there. */
+export function layerAbove(doc, layer) {
+  const all = doc?.layers?.() ?? [];
+  const i = all.indexOf(layer);
+  if (i < 0) return null;
+  const inside = (l) => {
+    for (let p = l.parent; p; p = p.parent) if (p === layer) return true;
+    return false;
+  };
+  for (let j = i + 1; j < all.length; j++) if (!inside(all[j])) return all[j];
+  return null;
+}
+
 export class EyedropperTool extends Tool {
   constructor(app) {
     super(app, {
@@ -115,71 +132,119 @@ export class EyedropperTool extends Tool {
       name: 'Eyedropper Tool',
       icon: 'eyedropper',
       cursor: 'crosshair',
-      hint: 'Click to set the foreground colour, Alt-click for the background colour.',
+      hint: 'Click to set the foreground colour, Alt-click for the background colour. Drag off the image and release to sample the screen. Right-click for the sample size and to copy the colour as hex or HTML.',
       options: [
-        { kind: 'select', key: 'sample', label: 'Sample size', options: [['1', 'Point sample'], ['3', '3 × 3 average'], ['5', '5 × 5 average'], ['11', '11 × 11 average'], ['31', '31 × 31 average']], default: '3' },
-        { kind: 'select', key: 'source', label: 'Sample', options: [['merged', 'All layers'], ['layer', 'Current layer']], default: 'merged' },
+        { kind: 'select', key: 'sample', label: 'Sample size', options: SAMPLE_SIZES.map(([v, l]) => [v, l]), default: '3' },
+        { kind: 'select', key: 'source', label: 'Sample', options: SAMPLE_SOURCES.map(([v, l]) => [v, l]), default: 'merged' },
         { kind: 'checkbox', key: 'showRing', label: 'Show sampling ring', default: true },
+        { kind: 'button', key: 'screen', label: 'Sample Screen', onClick: (t) => t.sampleScreen() },
       ],
     });
     this.ring = null;
   }
-  /** Average colour under a document point. Returns [r,g,b,a(0..1)]. */
-  sampleAt(p, { setForeground = true, setBackground = false } = {}) {
-    const doc = this.doc;
+
+  /**
+   * The colour under a document point, averaged over the Sample Size, from what the Sample option reads (S7.5):
+   * [r, g, b, a (0..1)] or null (outside, or fully transparent). Sets nothing (the colour picker samples with it).
+   */
+  sampleColor(p, { size = null, source = null } = {}) {
+    const doc = this.doc ?? this.app.doc;
     if (!doc) return null;
-    const n = Number(this.opt('sample') ?? 3);
+    const n = Math.max(1, Number(size ?? this.opt('sample') ?? 3) || 1);
     const half = Math.floor(n / 2);
+    const src = sampleSourceOf(source ?? this.opt('source') ?? 'merged', doc.active, (l) => layerAbove(doc, l));
     let canvas, ox = 0, oy = 0;
-    if (this.opt('source') === 'layer' && doc.active && !doc.active.isGroup) {
-      const src = doc.active.type === 'raster' ? { canvas: doc.active.canvas, x: doc.active.x, y: doc.active.y } : doc.active.render?.();
-      if (!src) return null;
-      canvas = src.canvas;
-      ox = src.x;
-      oy = src.y;
+    if (src.layer && doc.active && !doc.active.isGroup) {
+      const own = doc.active.type === 'raster' ? { canvas: doc.active.canvas, x: doc.active.x, y: doc.active.y } : doc.active.render?.();
+      if (!own) return null;
+      canvas = own.canvas;
+      ox = own.x;
+      oy = own.y;
     } else if (doc.mode && doc.mode !== 'rgb') {
       // the colour is painted back: in a Duotone document that is the stored grey, not its ink colour. The stored
       // composite (flattenStored) is not cached, and a sample comes with every pointer move of a drag: composite
       // the few pixels that are read, not the whole document
       const rect = intersectRect({ x: Math.floor(p.x) - half, y: Math.floor(p.y) - half, width: n, height: n }, doc.bounds);
       if (!rect) return null;
-      canvas = sampleMerged(this.app, doc, { stored: true, rect }); // sample (lib/sample.js)
+      canvas = sampleMerged(this.app, doc, { stored: true, rect, until: src.until, skipAdjustments: src.skipAdjustments }); // sample (lib/sample.js)
       ox = rect.x;
       oy = rect.y;
-    } else canvas = sampleMerged(this.app, doc); // sample (lib/sample.js)
+    } else canvas = sampleMerged(this.app, doc, { until: src.until, skipAdjustments: src.skipAdjustments }); // sample (lib/sample.js)
     const x = Math.floor(p.x) - ox - half, y = Math.floor(p.y) - oy - half;
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     const x1 = Math.max(0, x), y1 = Math.max(0, y), x2 = Math.min(canvas.width, x + n), y2 = Math.min(canvas.height, y + n);
     if (x2 <= x1 || y2 <= y1) return null;
-    const d = ctx.getImageData(x1, y1, x2 - x1, y2 - y1).data;
-    let r = 0, g = 0, b = 0, a = 0, w = 0;
-    for (let i = 0; i < d.length; i += 4) {
-      const al = d[i + 3] / 255;
-      r += d[i] * al;
-      g += d[i + 1] * al;
-      b += d[i + 2] * al;
-      a += al;
-      w++;
-    }
-    if (!w || a <= 0) return null; // fully transparent: keep the current colour, like Photoshop
-    const color = [r / a, g / a, b / a, a / w];
+    return averageRgba(ctx.getImageData(x1, y1, x2 - x1, y2 - y1).data); // fully transparent: null, like Photoshop
+  }
+
+  /** Average colour under a document point; sets the foreground (or background). Returns [r,g,b,a(0..1)]. */
+  sampleAt(p, { setForeground = true, setBackground = false } = {}) {
+    const color = this.sampleColor(p);
+    if (!color) return null;
+    this.applySample(color, { setForeground, setBackground });
+    return color;
+  }
+
+  applySample(color, { setForeground = true, setBackground = false } = {}) {
     const hex = rgbaToHex(color);
     // the ring shows the colour before this drag started next to the sampled one
     const previous = this.ring?.previous ?? (setBackground ? this.app.settings.background : this.app.settings.foreground);
     if (setBackground) this.app.setColors({ background: hex });
     else if (setForeground) this.app.setColors({ foreground: hex });
     this.ring = { color: hex, previous };
-    this.app.statusbar.set('hint', `${hex}  R ${Math.round(color[0])} G ${Math.round(color[1])} B ${Math.round(color[2])}`);
-    return color;
+    this.app.statusbar?.set('hint', `${hex}  R ${Math.round(color[0])} G ${Math.round(color[1])} B ${Math.round(color[2])}`);
   }
+
+  /**
+   * Sample anywhere on the screen (window.EyeDropper, Chromium and Electron): the colour arrives as sRGB and is
+   * converted into the document's profile (S6.5). Resolves the hex set, or null.
+   */
+  async sampleScreen({ background = false } = {}) {
+    if (typeof window.EyeDropper !== 'function') {
+      this.app.dialogs?.toast?.('Sampling the screen is not available here', { kind: 'info', timeout: 2000 });
+      return null;
+    }
+    let res = null;
+    try {
+      res = await new window.EyeDropper().open();
+    } catch {
+      return null; // Escape
+    }
+    if (!res?.sRGBHex) return null;
+    const rgb = convertColor(rgbOfHex(res.sRGBHex), SRGB, this.app.doc?.profile ?? null);
+    const hex = rgbaToHex(rgb);
+    this.app.setColors(background ? { background: hex } : { foreground: hex });
+    return hex;
+  }
+
   onPointerDown(p) {
+    this.dragOut = false;
     this.sampleAt(p, { setForeground: !p.alt, setBackground: p.alt });
   }
   onPointerMove(p, dragging) {
-    if (dragging) this.sampleAt(p, { setForeground: !p.alt, setBackground: p.alt });
+    if (!dragging) return;
+    // a drag that leaves the image samples the screen when it is released (Photoshop)
+    const r = this.view?.canvas?.getBoundingClientRect?.();
+    const cx = p.original?.clientX, cy = p.original?.clientY;
+    this.dragOut = !!r && Number.isFinite(cx) && (cx < r.left || cx > r.right || cy < r.top || cy > r.bottom);
+    if (!this.dragOut) this.sampleAt(p, { setForeground: !p.alt, setBackground: p.alt });
   }
-  onPointerUp() {
+  onPointerUp(p) {
     this.ring = null;
+    if (this.dragOut && !p?.cancelled) this.sampleScreen({ background: !!p?.alt });
+    this.dragOut = false;
+  }
+  /** Right-click: Sample Size, then Copy Color's Hex Code and Copy Color as HTML (the foreground colour). */
+  onContextMenu(p) {
+    const at = { x: p.original?.clientX ?? 0, y: p.original?.clientY ?? 0 };
+    const size = String(this.opt('sample') ?? '3');
+    const fg = this.app.settings.foreground;
+    this.app.dialogs.popover(this.view?.canvas ?? document.body, [
+      ...SAMPLE_SIZES.map(([v, label]) => ({ label, checked: v === size, onSelect: () => this.setOpt('sample', v) })),
+      { type: 'separator' },
+      { label: 'Copy Color\'s Hex Code', icon: 'copy', onSelect: () => copyColorCode(this.app, fg, 'hex') },
+      { label: 'Copy Color as HTML', icon: 'copy', onSelect: () => copyColorCode(this.app, fg, 'html') },
+    ], { at });
   }
   drawOverlay(ctx, view) {
     if (!this.ring || !view.pointer || this.opt('showRing') === false) return;
@@ -204,6 +269,15 @@ export class EyedropperTool extends Tool {
     ctx.stroke();
     ctx.restore();
   }
+}
+
+/** Copy Color's Hex Code ("ff8800") / Copy Color as HTML (COLOR="#ff8800") to the clipboard, with a toast. */
+export async function copyColorCode(app, hex, kind = 'hex') {
+  const text = kind === 'html' ? htmlCode(hex) : hexCode(hex);
+  const { bridge } = await import('../bridge.js');
+  bridge.writeClipboardText(text);
+  app.dialogs?.toast?.(`Copied ${text}`, { kind: 'success', timeout: 1500 });
+  return text;
 }
 
 export class ColorSamplerTool extends Tool {

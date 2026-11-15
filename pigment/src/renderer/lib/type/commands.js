@@ -98,40 +98,58 @@ export async function install(app) {
   /** The document-space outline path of a text layer: its warp and transform included, or null. */
   const outlinesOf = (layer) => outlinePath(layer, { geometry: stageGeometry(layer, Infinity) });
 
-  async function warpText(arg, ctx) {
+  /** The text layers Warp Text acts on (after ending a type session), or null with the reason shown. */
+  function warpTargets() {
     commitTyping();
     const list = targets().filter(isStraight);
-    if (!list.length) {
-      if (targets().length) return toast('Warp Text does not work on text on a path or stacked vertical text');
-      return toast('Select a text layer first');
-    }
-    let warp;
-    if (arg !== undefined && arg !== null && typeof arg === 'object') warp = arg.style === 'none' ? null : M.normalizeWarp(arg);
-    else if (arg === 'none' || arg === null) warp = null;
-    else {
-      const first = list[0];
-      const originals = list.map((l) => l.typeOptions);
-      const d = doc();
-      const preview = (w) => {
-        list.forEach((l, i) => {
-          l.typeOptions = w === undefined ? originals[i] : withWarp({ typeOptions: originals[i] }, w);
-          l.touch();
-        });
-        d.changed('canvas');
-      };
-      const values = await formDialog(app, {
-        title: 'Warp Text',
-        className: 'warp-text-dialog',
-        fields: dialogFields(),
-        values: dialogValues(first.typeOptions?.warp),
-        live: { apply: (v) => preview(warpFromValues(v)), revert: () => preview(undefined) },
-      });
-      preview(undefined);
-      if (!values) return ctx?.cancel();
-      warp = warpFromValues(values);
-    }
+    if (list.length) return list;
+    if (targets().length) toast('Warp Text does not work on text on a path or stacked vertical text');
+    else toast('Select a text layer first');
+    return null;
+  }
+
+  /** Warp Text with its argument: synchronous, so an action's next step never waits on it. */
+  function warpTextApply(arg, ctx) {
+    const list = warpTargets();
+    if (!list) return false;
+    const warp = arg && typeof arg === 'object' && arg.style !== 'none' ? M.normalizeWarp(arg) : null;
     ctx?.setReplayArg(warp ? { ...warp } : { style: 'none' });
     setWarp(list, warp);
+    app.syncUiState?.();
+    return true;
+  }
+
+  /** Warp Text without an argument: the dialog, previewing live on the canvas. */
+  async function warpTextDialog(ctx) {
+    const list = warpTargets();
+    if (!list) return false;
+    const first = list[0];
+    const originals = list.map((l) => l.typeOptions);
+    const d = doc();
+    const preview = (w) => {
+      list.forEach((l, i) => {
+        l.typeOptions = w === undefined ? originals[i] : withWarp({ typeOptions: originals[i] }, w);
+        l.touch();
+      });
+      d.changed('canvas');
+    };
+    const values = await formDialog(app, {
+      title: 'Warp Text',
+      className: 'warp-text-dialog',
+      fields: dialogFields(),
+      values: dialogValues(first.typeOptions?.warp),
+      live: { apply: (v) => preview(warpFromValues(v)), revert: () => preview(undefined) },
+    });
+    preview(undefined);
+    if (!values) {
+      ctx?.cancel();
+      return false;
+    }
+    const warp = warpFromValues(values);
+    ctx?.setReplayArg(warp ? { ...warp } : { style: 'none' });
+    // the layers may have gone while the dialog was open (another document, undo)
+    const live = list.filter((l) => d.find(l.id) === l);
+    if (live.length && app.doc === d) setWarp(live, warp);
     app.syncUiState?.();
     return true;
   }
@@ -339,7 +357,7 @@ export async function install(app) {
       label: 'Warp Text',
       dialog: true,
       enabled: () => !!doc() && hasText(),
-      run: (arg, ctx) => warpText(arg, ctx),
+      run: (arg, ctx) => (arg === undefined ? warpTextDialog(ctx) : warpTextApply(arg, ctx)),
     },
     'type:create-work-path': {
       label: 'Create Work Path',

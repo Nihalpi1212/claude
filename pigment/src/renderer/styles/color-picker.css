@@ -1,1 +1,107 @@
-/* color-picker (ARCHITECTURE.md "0.5 features", rule 6): this package's own styles. Empty until the package lands. */
+/* color-picker (ARCHITECTURE.md "0.5 features", rule 6): color-picker-swatches' styles: the picker dialog, the colour
+   field widget, the HUD colour picker, the Color panel's views, the Swatches panel's groups and Color Libraries. */
+
+/* ---- the picker dialog ---- */
+.cpx-dialog { display: flex; gap: 14px; align-items: flex-start; }
+.cpx-picker { display: flex; gap: 10px; flex: none; }
+.cpx-field, .cpx-strip { position: relative; flex: none; border-radius: 3px; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.2); cursor: crosshair; touch-action: none; outline: none; }
+.cpx-field:focus-visible, .cpx-strip:focus-visible { box-shadow: var(--focus-ring); }
+.cpx-field canvas, .cpx-strip canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; border-radius: 3px; image-rendering: auto; }
+.cpx-strip { cursor: ns-resize; }
+.cpx-field-marker { position: absolute; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6); pointer-events: none; }
+.cpx-field-marker.on-light { border-color: #000; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.6); }
+.cpx-strip-marker { position: absolute; left: -6px; right: -6px; height: 0; pointer-events: none; }
+.cpx-strip-marker::before, .cpx-strip-marker::after { content: ''; position: absolute; top: -5px; border: 5px solid transparent; }
+.cpx-strip-marker::before { left: 0; border-left-color: var(--fg, #ddd); }
+.cpx-strip-marker::after { right: 0; border-right-color: var(--fg, #ddd); }
+.cpx-side { display: flex; flex-direction: column; gap: 8px; flex: 1; min-width: 0; }
+.cpx-top { display: flex; gap: 10px; align-items: flex-start; }
+.cpx-warnings { display: flex; flex-direction: column; gap: 6px; width: 30px; padding-top: 16px; }
+.cpx-warn { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 2px; border: 0; background: none; color: var(--warning, #e0a020); cursor: pointer; border-radius: 4px; }
+.cpx-warn:hover { background: var(--hover, rgba(127, 127, 127, 0.15)); }
+.cpx-warn svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; }
+.cpx-warn-swatch { display: block; width: 16px; height: 10px; border: 1px solid rgba(0, 0, 0, 0.3); }
+.color-gamut { display: inline-flex; align-items: center; gap: 2px; color: var(--warning, #e0a020); }
+.color-gamut .cpx-warn-swatch { width: 10px; height: 10px; }
+.cpx-actions { display: flex; flex-direction: column; gap: 6px; margin-left: auto; align-items: stretch; }
+.cpx-actions .btn { justify-content: flex-start; }
+.cpx-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 14px; }
+.cpx-col { display: flex; flex-direction: column; gap: 3px; }
+.cpx-dialog .cp-modes { display: flex; grid-template-columns: none !important; }
+.cpx-row { display: grid; grid-template-columns: 16px 14px 1fr 16px; align-items: center; gap: 4px; font-size: 11px; color: var(--fg-muted); }
+.cpx-row .input { width: 100%; height: 22px; font-size: 11px; padding: 0 4px; -moz-appearance: textfield; appearance: textfield; }
+.cpx-row .input::-webkit-inner-spin-button, .cpx-row .input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.cpx-row input[type="radio"] { margin: 0; width: 12px; height: 12px; }
+.cpx-row.cpx-hex { grid-template-columns: 16px 14px 1fr 16px; }
+.cpx-row.cpx-hex .cpx-label { grid-column: 2; }
+.cpx-row.cpx-hex .input { grid-column: 3; text-transform: lowercase; }
+.cpx-radio-gap { display: block; }
+.cpx-web-only { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.cp-book { font-size: 11px; }
+.cp-note { font-size: 11px; color: var(--warning, #e0a020); }
+.cp-sample-hint { font-size: 11px; }
+.cpx-system { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.cpx-system-input { width: 80px; height: 48px; padding: 0; border: 1px solid var(--border); border-radius: 4px; background: none; }
+
+/* ---- the colour field widget (S7.3) ---- */
+.color-field { position: relative; display: inline-flex; align-items: center; gap: 6px; }
+.color-chip { position: relative; width: 28px; height: 22px; padding: 2px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-input, transparent); cursor: pointer; flex: none; display: inline-block; }
+.color-chip:focus-visible { box-shadow: var(--focus-ring); outline: none; }
+.color-chip:disabled { opacity: 0.5; cursor: default; }
+.color-chip-fill { display: block; width: 100%; height: 100%; border-radius: 2px; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15); }
+.color-field[data-mixed="true"] .color-chip-fill { opacity: 0.5; }
+/* the native input stays for scripts and specs (its input event sets the value), out of sight and out of the tab order */
+.color-field .color-native { position: absolute; left: 0; bottom: 0; width: 1px !important; height: 1px !important; padding: 0 !important; border: 0 !important; opacity: 0; pointer-events: none; }
+.prefs-dialog .dialog-form .color-chip, .newdoc-dialog .dialog-form .color-chip { width: 36px; height: 28px; }
+.sl-solid-top .color-chip.sl-color-input { width: 40px; height: 24px; }
+
+/* ---- the HUD colour picker ---- */
+.hud-picker { position: fixed; z-index: 3000; pointer-events: none; background: rgba(30, 30, 30, 0.92); border-radius: 8px; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45); }
+.hud-picker canvas { display: block; }
+.hud-picker-chip { margin: 0 8px 8px; height: 16px; border-radius: 3px; font: 10px/16px system-ui, sans-serif; text-align: center; color: transparent; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.3); }
+
+/* ---- the Color panel ---- */
+.color-panel .color-view { display: flex; justify-content: center; flex: 1 1 auto; min-height: 0; }
+.color-panel[data-view="hue-cube"] .color-view { flex-direction: column; }
+.color-panel[data-view="hue-cube"] .color-view > .color-widget { flex: 1 1 0; min-height: 0; }
+.color-panel .color-view .cpx-picker { gap: 8px; }
+.color-wheel-view canvas { display: block; cursor: crosshair; touch-action: none; }
+.color-sliders { display: flex; flex-direction: column; gap: 4px; }
+.color-slider-row { display: grid; grid-template-columns: 14px 1fr 46px 14px; align-items: center; gap: 6px; font-size: 11px; color: var(--fg-muted); }
+.color-slider { -webkit-appearance: none; appearance: none; height: 10px; border-radius: 5px; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.2); margin: 0; }
+.color-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 10px; height: 14px; border-radius: 3px; background: #fff; border: 1px solid rgba(0, 0, 0, 0.6); cursor: pointer; }
+.color-slider-num { height: 20px; font-size: 11px; padding: 0 4px; }
+.color-ramp { display: block; width: 100%; height: 36px; border-radius: 3px; cursor: crosshair; touch-action: none; }
+.color-sliders-wrap[hidden], .color-ramp-wrap[hidden] { display: none; }
+
+/* ---- the Swatches panel ---- */
+.swatches-panel .swatch-search-row { padding: 6px 8px 0; }
+.swatches-panel .swatch-search { width: 100%; height: 24px; font-size: 12px; }
+.swatches-panel .swatch-body { flex: 1 1 auto; overflow: auto; min-height: 0; }
+.swatch-group { padding-left: calc(var(--depth, 0) * 10px); }
+.swatch-group-head { display: flex; align-items: center; gap: 4px; width: 100%; padding: 3px 8px; border: 0; background: none; color: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.swatch-group-head svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2; flex: none; }
+.swatch-group-head:hover { background: var(--hover, rgba(127, 127, 127, 0.12)); }
+.swatch-group-head.drop-target, .swatch-grid.drop-target { box-shadow: inset 0 0 0 2px var(--accent); }
+.swatch[aria-selected="true"] { outline: 2px solid var(--accent); outline-offset: 1px; }
+.swatch.spot { border-radius: 50%; }
+.swatch-grid.large { grid-template-columns: repeat(auto-fill, 32px); }
+.swatch-grid.large .swatch { width: 32px; height: 32px; }
+.swatch-grid.as-list { grid-template-columns: 1fr; }
+.swatch-grid.as-list .swatch { width: 100%; height: 20px; display: flex; align-items: center; padding: 0; background-clip: padding-box; }
+.swatch-grid.as-list .swatch-name { margin-left: 26px; padding: 0 6px; font-size: 11px; background: var(--bg-panel, #2a2a2a); color: var(--fg, #ddd); flex: 1; height: 100%; line-height: 20px; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.swatch-empty { padding: 8px 10px; font-size: 12px; }
+
+/* ---- Color Libraries ---- */
+.cl-dialog { display: flex; flex-direction: column; gap: 8px; }
+.cl-top { display: flex; gap: 8px; align-items: center; }
+.cl-book-row { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; font-size: 12px; }
+.cl-book-row select { flex: 1; min-width: 0; }
+.cl-body { display: flex; gap: 12px; }
+.cl-list { flex: 1; height: 280px; overflow: auto; border: 1px solid var(--border); border-radius: 4px; display: flex; flex-direction: column; }
+.cl-color { display: flex; align-items: center; gap: 8px; padding: 2px 6px; border: 0; background: none; color: inherit; font-size: 12px; text-align: left; cursor: pointer; flex: none; }
+.cl-color[aria-selected="true"] { background: var(--accent); color: #fff; }
+.cl-chip { width: 28px; height: 16px; border-radius: 2px; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.2); flex: none; }
+.cl-side { width: 150px; display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
+.cl-preview { height: 70px; border-radius: 4px; border: 1px solid var(--border); }
+.cl-values { font-size: 11px; }
