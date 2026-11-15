@@ -5,7 +5,7 @@ The skeleton is committed on `claude/fervent-newton-263lz3`:
 | Commit | What |
 |---|---|
 | f99f7e5 | The 0.5 skeleton (Part 2, steps 0 to 13, plus the fix pass for the three reviews' 24 findings). |
-| FLAKE_COMMIT | The flake #26 fix, test-only: `tests/e2e/helpers.mjs` runAwait, and 23 direct command evaluates in 13 specs moved onto it. |
+| FLAKE_COMMIT | The flake #26 fix, test-only: `tests/e2e/helpers.mjs` runAwait, 23 direct command evaluates in 13 specs moved onto it, and `hunt2-layers.spec.mjs:204` made race-free. |
 
 ## Test counts at the start of the round
 
@@ -31,8 +31,12 @@ A whole browser run takes about 20 minutes. With two engineers each running it o
 - The shipped Electron app (V8 15.2) is not affected.
 - If the message still appears, report the whole message and the test name; do not reinstall node_modules.
 
+The fix makes runAwait settle one task later, which exposed one racy test:
+- `hunt2-layers.spec.mjs:204` measured a Layers row from the test (`boundingBox()`), then dispatched a drag in the page. The panel can rebuild its rows in the next frame, so the measured row could already be detached, and `boundingBox()` returned null. It failed 6 times in 30 with the new timing (0 in 30 before).
+- It now measures the row inside the page, in the same `evaluate` as the drag, and passed 40 times in 40. Write new tests the same way: measure and act in one `page.evaluate`, or act with `page.mouse` on a box measured once the UI has settled (`expect(...).toBeVisible()` first).
+
 No other test is known to be flaky. Before calling a failure a flake, re-run it alone with `--repeat-each 3`.
 
 ## CI
 
-`.github/workflows/pigment-ci.yml` runs on every push that touches `pigment/`: `npm ci` (its postinstall builds the vendor bundles), the unit tests, the browser suite and the Electron tests, on ubuntu-24.04, with a 45-minute limit. CI on f99f7e5: CI_RESULT.
+`.github/workflows/pigment-ci.yml` runs on every push that touches `pigment/`: `npm ci` (its postinstall builds the vendor bundles), the unit tests, the browser suite and the Electron tests, on ubuntu-24.04, with a 45-minute limit. CI on f99f7e5 is green: push run 43675759433 and pull_request run 43675762361, about 21 minutes each (the PSD text goldens pass on CI's fonts too).

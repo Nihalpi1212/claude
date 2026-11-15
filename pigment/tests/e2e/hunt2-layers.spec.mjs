@@ -208,10 +208,13 @@ test('dropping on the lower part of an expanded group row moves the layer into t
   await runAwait(page, 'layer:group');
   await addLayer(page, 'Loose', '#0000ff', [0, 0, 10, 10]);
   await runAwait(page, 'window:panel-layers');
-  const groupRow = page.locator('[data-panel="layers"] .layer-row').filter({ hasText: 'Group 1' }).first();
-  const box = await groupRow.boundingBox();
-  const cls = await page.evaluate(([x, y]) => {
+  await expect(page.locator('[data-panel="layers"] .layer-row').filter({ hasText: 'Group 1' }).first()).toBeVisible();
+  // measure the row in the page, in the same task as the drag: the panel can rebuild its rows in the next frame, and a
+  // row measured from the test by then is detached (boundingBox() gives null)
+  const cls = await page.evaluate(() => {
     const row = [...document.querySelectorAll('[data-panel="layers"] .layer-row')].find((r) => r.textContent.includes('Group 1'));
+    const box = row.getBoundingClientRect();
+    const [x, y] = [box.x + box.width / 2, box.y + box.height * 0.85];
     const d = window.pigmentApp.doc;
     const over = new DragEvent('dragover', { bubbles: true, cancelable: true, clientX: x, clientY: y });
     // start a drag of the loose layer through the panel's own dragstart handler
@@ -221,7 +224,7 @@ test('dropping on the lower part of an expanded group row moves the layer into t
     const c = [...row.classList].filter((k) => k.startsWith('drop-'));
     row.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, clientX: x, clientY: y, dataTransfer: new DataTransfer() }));
     return [c, d.layers().find((l) => l.name === 'Loose').parent.name];
-  }, [box.x + box.width / 2, box.y + box.height * 0.85]);
+  });
   expect(cls).toEqual([['drop-into'], 'Group 1']);
   expect(await names(page)).toEqual(['Background', 'Group 1[Inner,Loose]']);
   expect(errors).toEqual([]);
