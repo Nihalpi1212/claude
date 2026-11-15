@@ -395,7 +395,7 @@ fn a_single_path_clip_becomes_the_groups_vector_mask() {
     let off = ours.chunks(4).zip(theirs.chunks(4)).filter(|(a, b)| a.iter().zip(*b).any(|(x, y)| x.abs_diff(*y) > 48)).count();
     assert!(off < 64, "{off} pixels differ");
     // The report's file: PhotoCraft's own icon opens without the clip-path warning.
-    let icon = import_svg("photocraft.svg", include_bytes!("../../../../assets/app-icon/photocraft.svg")).unwrap();
+    let icon = import_svg("photocraft.svg", include_bytes!("../../../../assets/app-icon/pigment.svg")).unwrap();
     assert!(icon.warnings.iter().all(|w| !w.contains("clip-path")), "{:?}", icon.warnings);
     assert!(icon.document.layers.iter().any(|l| l.vector_mask.is_some()), "its rounded square is a vector mask");
     // Two shapes in the clip: rasterised, and said so.

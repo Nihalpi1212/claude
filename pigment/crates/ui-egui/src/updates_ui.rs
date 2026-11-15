@@ -1,4 +1,5 @@
-//! One background check at startup and a non-modal window for release information.
+//! Help › Check for Updates (Pigment opens its releases page; no check starts at launch, see
+//! docs/FORK.md) and the non-modal window for release information craft-update draws.
 
 use photocraft_engine::updates_cmds::Status;
 use serde_json::Value;
@@ -6,7 +7,6 @@ use serde_json::Value;
 use crate::PhotocraftApp;
 
 pub(crate) struct Runtime {
-    startup_checked: bool,
     notified_version: Option<String>,
     /// The startup prompt and the self-update behind it (desktop).
     #[cfg(not(target_arch = "wasm32"))]
@@ -22,7 +22,6 @@ pub(crate) struct Runtime {
 impl Default for Runtime {
     fn default() -> Self {
         Self {
-            startup_checked: false,
             notified_version: None,
             #[cfg(not(target_arch = "wasm32"))]
             updater: craft_update::updater::Updater::new(&crate::UPDATE_APP, photocraft_engine::build_info::VERSION),
@@ -40,39 +39,20 @@ fn release_of(found: &photocraft_engine::updates_cmds::Release) -> craft_update:
     craft_update::Release {
         tag: format!("v{}", found.version),
         version: craft_update::parse_version(&found.version),
-        name: format!("PhotoCraft {}", found.version),
+        name: format!("Pigment {}", found.version),
         html_url: found.url.clone(),
         ..Default::default()
     }
 }
 
-pub(crate) fn check(app: &mut PhotocraftApp, _ctx: &egui::Context, params: Value) -> Result<Value, String> {
-    let before = app.session.updates.status.clone();
-    let result = app.run("help.checkForUpdates", params);
-    // A check that fails to start still shows its failure and Check Again; the command error
-    // stands. Only this call's failure: a Failed left from an earlier check doesn't open the
-    // window for a call refused for another reason (bad params).
-    let failed_to_start = match (&result, &app.session.updates.status) {
-        (Err(error), status @ Status::Failed { message }) => *status != before || (!message.is_empty() && error.contains(message.as_str())),
-        _ => false,
-    };
-    if result.is_ok() || failed_to_start {
-        app.ui.updates_open = true;
-        app.updates_rt.startup_checked = true;
-        // A release the user dismissed is offered again by a manual check.
-        app.updates_rt.notified_version = None;
-        // The window shows this check from now on.
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            app.updates_rt.requested = true;
-            app.updates_rt.updater.dismiss_status();
-            app.updates_rt.last_update = craft_update::updater::Status::Idle;
-            // A check made before the first frame leaves the last self-update's records for the
-            // next start.
-            app.services.last_update = None;
-        }
+/// Help › Check for Updates: opens Pigment's releases page in the browser, where each release
+/// (`pigment-vX.Y.Z`) lists what changed and its downloads. Nothing is fetched or installed: Pigment
+/// makes no network request on its own (docs/FORK.md).
+pub(crate) fn check(app: &mut PhotocraftApp, ctx: &egui::Context, params: Value) -> Result<Value, String> {
+    if params.as_object().is_some_and(|o| !o.is_empty()) || !(params.is_null() || params.is_object()) {
+        return Err("help.checkForUpdates takes no parameters".into());
     }
-    result
+    Ok(crate::links::open(app, ctx, crate::links::RELEASES))
 }
 
 pub(crate) fn tick(app: &mut PhotocraftApp, ctx: &egui::Context) {
@@ -113,12 +93,8 @@ pub(crate) fn tick(app: &mut PhotocraftApp, ctx: &egui::Context) {
     if app.session.updates.check.is_none() {
         return;
     }
-    if !app.updates_rt.startup_checked {
-        app.updates_rt.startup_checked = true;
-        if app.session.prefs().general.automatically_check_updates && matches!(app.session.updates.status, Status::Idle) {
-            let _ = app.run("help.checkForUpdates", serde_json::json!({}));
-        }
-    }
+    // Pigment starts no check at launch (docs/FORK.md); a check another frontend started is
+    // still followed.
     if matches!(app.session.updates.status, Status::Checking) {
         ctx.request_repaint_after(std::time::Duration::from_millis(100));
     }
@@ -204,16 +180,18 @@ fn check_status(status: &Status) -> craft_update::updater::Status {
 mod tests {
     use super::*;
     use crate::{Services, menus};
-    use photocraft_engine::{Session, updates_cmds::Release};
+    use photocraft_engine::Session;
     use std::sync::{Arc, Mutex, mpsc};
 
     type Sender = Arc<Mutex<Option<mpsc::Sender<photocraft_engine::updates_cmds::CheckResult>>>>;
 
+    /// An app whose update check (were one started) counts its calls.
     fn app() -> (PhotocraftApp, Arc<Mutex<u32>>, Sender) {
         let calls = Arc::new(Mutex::new(0));
         let count = calls.clone();
         let sender = Arc::new(Mutex::new(None));
         let tx = sender.clone();
+        let opened: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
         let app = PhotocraftApp::new(
             Session::new(),
             Services {
@@ -222,6 +200,10 @@ mod tests {
                     let (sender, receiver) = mpsc::channel();
                     *tx.lock().unwrap() = Some(sender);
                     Ok(receiver)
+                })),
+                open_url: Some(Box::new(move |u: &str| {
+                    opened.lock().unwrap().push(u.to_string());
+                    Ok(())
                 })),
                 ..Default::default()
             },
@@ -235,183 +217,34 @@ mod tests {
     }
 
     #[test]
-    fn automatic_check_runs_once_per_launch_even_after_days_or_preference_changes() {
-        let (mut app, calls, sender) = app();
-        let ctx = egui::Context::default();
-        at(&mut app, &ctx, 0.0);
-        at(&mut app, &ctx, 1.0);
-        at(&mut app, &ctx, 2.0);
-        assert_eq!(*calls.lock().unwrap(), 1);
-        sender.lock().unwrap().as_ref().unwrap().send(Ok(None)).unwrap();
-        at(&mut app, &ctx, 3.0);
-        assert!(!app.ui.updates_open, "automatic up-to-date checks stay quiet");
-        at(&mut app, &ctx, 86400.0);
-        app.session.edit_prefs(|p| p.general.automatically_check_updates = false);
-        at(&mut app, &ctx, 86401.0);
-        app.session.edit_prefs(|p| p.general.automatically_check_updates = true);
-        at(&mut app, &ctx, 172800.0);
-        assert_eq!(*calls.lock().unwrap(), 1, "no periodic checks or preference-triggered rechecks");
-        let (mut restarted, restarted_calls, _) = self::app();
-        at(&mut restarted, &ctx, 0.0);
-        assert_eq!(*restarted_calls.lock().unwrap(), 1, "the next launch checks again");
-    }
-
-    #[test]
-    fn startup_opt_out_and_failed_checks_do_not_retry_automatically() {
-        let (mut disabled, calls, _) = app();
-        let ctx = egui::Context::default();
-        disabled.session.edit_prefs(|p| p.general.automatically_check_updates = false);
-        at(&mut disabled, &ctx, 0.0);
-        disabled.session.edit_prefs(|p| p.general.automatically_check_updates = true);
-        at(&mut disabled, &ctx, 86400.0);
-        assert_eq!(*calls.lock().unwrap(), 0, "opt-out is evaluated at startup");
-
-        let (mut failed, calls, sender) = app();
-        at(&mut failed, &ctx, 0.0);
-        sender.lock().unwrap().as_ref().unwrap().send(Err("offline".into())).unwrap();
-        at(&mut failed, &ctx, 1.0);
-        at(&mut failed, &ctx, 172800.0);
-        assert_eq!(*calls.lock().unwrap(), 1);
-        assert!(!failed.ui.updates_open, "an automatic failure stays quiet");
-    }
-
-    #[test]
-    fn manual_check_works_when_automatic_checks_are_off_and_opens_status() {
-        let (mut app, calls, sender) = app();
-        let ctx = egui::Context::default();
-        app.session.edit_prefs(|p| p.general.automatically_check_updates = false);
-        assert!(menus::is_enabled(&app, "help.checkForUpdates"));
-        menus::invoke(&mut app, &ctx, "help.checkForUpdates", serde_json::json!({})).unwrap();
-        assert!(app.ui.updates_open);
-        assert_eq!(*calls.lock().unwrap(), 1);
-        sender.lock().unwrap().as_ref().unwrap().send(Err("offline".into())).unwrap();
-        at(&mut app, &ctx, 1.0);
-        assert!(matches!(app.session.updates.status, Status::Failed { .. }));
-        let mut web = PhotocraftApp::new(Session::new(), Services::default());
-        assert!(!menus::is_enabled(&web, "help.checkForUpdates"));
-        at(&mut web, &ctx, 2.0);
-        assert_eq!(web.session.updates.status, Status::Idle);
-    }
-
-    #[test]
-    fn available_release_notifies_once_even_when_automation_polls_first() {
-        let (mut app, _, sender) = app();
-        let ctx = egui::Context::default();
-        at(&mut app, &ctx, 0.0);
-        sender
-            .lock()
-            .unwrap()
-            .as_ref()
-            .unwrap()
-            .send(Ok(Some(Release { version: "99.0.0".into(), url: "https://github.com/storytold/photocraft/releases/tag/v99.0.0".into() })))
-            .unwrap();
-        app.run("updates.status", serde_json::json!({})).unwrap();
-        at(&mut app, &ctx, 1.0);
-        assert!(app.ui.updates_open);
-        app.ui.updates_open = false;
-        at(&mut app, &ctx, 2.0);
-        assert!(!app.ui.updates_open);
-    }
-
-    #[test]
-    #[cfg(not(target_arch = "wasm32"))]
-    fn startup_update_prompt_appears_and_can_be_dismissed() {
-        let (mut app, _, sender) = app();
-        let ctx = egui::Context::default();
-        at(&mut app, &ctx, 0.0);
-        sender
-            .lock()
-            .unwrap()
-            .as_ref()
-            .unwrap()
-            .send(Ok(Some(Release { version: "99.0.0".into(), url: "https://github.com/storytold/photocraft/releases/tag/v99.0.0".into() })))
-            .unwrap();
-        at(&mut app, &ctx, 1.0);
-        assert!(app.updates_rt.updater.prompt_open(), "startup prompt initialized on available release");
-
-        // Rendering show() renders the prompt modal
-        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
-            show(&mut app, ui.ctx());
-        });
-        output.textures_delta.clear();
-        assert!(app.updates_rt.updater.prompt_open());
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    fn press_escape(app: &mut PhotocraftApp, ctx: &egui::Context) {
-        let escape = egui::Event::Key { key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE };
-        let mut output = ctx.run_ui(egui::RawInput { events: vec![escape], ..Default::default() }, |ui| show(app, ui.ctx()));
-        output.textures_delta.clear();
-    }
-
-    #[test]
-    #[cfg(not(target_arch = "wasm32"))]
-    fn the_last_update_opens_the_result_window_once_until_it_is_closed() {
-        use craft_update::updater::Status as Shown;
-        let (mut app, _, _) = app();
-        app.services.last_update = Some(|| Some(Ok("99.0.0".into())));
-        let ctx = egui::Context::default();
-        at(&mut app, &ctx, 0.0);
-        assert!(app.ui.updates_open);
-        assert_eq!(shown_status(&app), Shown::Updated("99.0.0".into()));
-        assert!(app.services.last_update.is_none(), "read once");
-        at(&mut app, &ctx, 1.0);
-        assert_eq!(shown_status(&app), Shown::Updated("99.0.0".into()), "shown until closed");
-        press_escape(&mut app, &ctx);
-        assert!(!app.ui.updates_open);
-        assert_eq!(app.updates_rt.last_update, Shown::Idle);
-        assert_eq!(shown_status(&app), Shown::Idle);
-    }
-
-    #[test]
-    #[cfg(not(target_arch = "wasm32"))]
-    fn a_failed_update_is_reported_until_a_manual_check_replaces_it() {
-        use craft_update::updater::Status as Shown;
+    fn no_check_runs_at_launch_even_with_automatic_checks_on() {
         let (mut app, calls, _) = app();
-        app.services.last_update = Some(|| Some(Err("the installer exited with code 1603".into())));
-        app.session.edit_prefs(|p| p.general.automatically_check_updates = false);
         let ctx = egui::Context::default();
-        at(&mut app, &ctx, 0.0);
-        assert_eq!(shown_status(&app), Shown::InstallFailed("the installer exited with code 1603".into()));
-        menus::invoke(&mut app, &ctx, "help.checkForUpdates", serde_json::json!({})).unwrap();
-        assert_eq!(*calls.lock().unwrap(), 1);
-        assert_eq!(shown_status(&app), Shown::Checking, "the window shows the new check");
-
-        let (mut early, _, _) = self::app();
-        early.services.last_update = Some(|| Some(Err("unread".into())));
-        menus::invoke(&mut early, &ctx, "help.checkForUpdates", serde_json::json!({})).unwrap();
-        at(&mut early, &ctx, 0.0);
-        assert_eq!(shown_status(&early), Shown::Checking, "a check before the first frame is not replaced by the last update");
-        assert!(early.services.last_update.is_none());
-
-        let (mut quiet, _, _) = self::app();
-        quiet.services.last_update = Some(|| None);
-        at(&mut quiet, &ctx, 0.0);
-        assert!(!quiet.ui.updates_open, "nothing to report opens nothing");
+        app.session.edit_prefs(|p| p.general.automatically_check_updates = true);
+        for t in [0.0, 1.0, 86400.0] {
+            at(&mut app, &ctx, t);
+        }
+        assert_eq!(*calls.lock().unwrap(), 0, "Pigment makes no network request on its own");
+        assert_eq!(app.session.updates.status, Status::Idle);
+        assert!(!app.ui.updates_open);
     }
 
     #[test]
-    fn a_manual_check_that_fails_to_start_opens_the_status_window() {
-        let mut app =
-            PhotocraftApp::new(Session::new(), Services { check_updates: Some(Box::new(|| Err("Could not start worker".into()))), ..Default::default() });
+    fn check_for_updates_opens_the_releases_page_and_fetches_nothing() {
+        let (mut app, calls, _) = app();
         let ctx = egui::Context::default();
-        let error = menus::invoke(&mut app, &ctx, "help.checkForUpdates", serde_json::json!({})).unwrap_err();
-        assert!(error.contains("Could not start worker"), "{error}");
-        assert!(matches!(app.session.updates.status, Status::Failed { .. }));
-        assert!(app.ui.updates_open, "the failure and Check Again are shown");
-        // Bad params are a caller error, not a failed check: nothing opens, also while the earlier
-        // failure is still the status.
-        app.ui.updates_open = false;
+        assert!(menus::is_enabled(&app, "help.checkForUpdates"));
+        let r = menus::invoke(&mut app, &ctx, "help.checkForUpdates", serde_json::json!({})).unwrap();
+        assert_eq!(r["url"], "https://github.com/Nihalpi1212/claude/releases");
+        assert_eq!(app.ui.status, "Opened https://github.com/Nihalpi1212/claude/releases");
+        assert_eq!(*calls.lock().unwrap(), 0);
         assert!(menus::invoke(&mut app, &ctx, "help.checkForUpdates", serde_json::json!({"x": 1})).is_err());
-        assert!(matches!(app.session.updates.status, Status::Failed { .. }), "the earlier failure stays");
-        assert!(!app.ui.updates_open, "bad params after a failed check");
-        app.session.updates.status = Status::Idle;
-        assert!(menus::invoke(&mut app, &ctx, "help.checkForUpdates", serde_json::json!({"x": 1})).is_err());
-        assert!(!app.ui.updates_open);
-        // The same start failure again opens it again.
-        app.session.updates.status = Status::Failed { message: "Could not start worker".into() };
-        assert!(menus::invoke(&mut app, &ctx, "help.checkForUpdates", serde_json::json!({})).is_err());
-        assert!(app.ui.updates_open, "a repeated start failure");
+        // Without an update service (Pigment's desktop and web builds) it is the same link.
+        let mut plain = PhotocraftApp::new(Session::new(), Services::default());
+        assert!(menus::is_enabled(&plain, "help.checkForUpdates"));
+        assert_eq!(menus::invoke(&mut plain, &ctx, "help.checkForUpdates", serde_json::json!({})).unwrap()["url"], crate::links::RELEASES);
+        at(&mut plain, &ctx, 2.0);
+        assert_eq!(plain.session.updates.status, Status::Idle);
     }
 
     #[test]

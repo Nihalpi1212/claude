@@ -28,6 +28,7 @@
 
 pub mod atomic;
 pub mod autosave;
+pub mod brand;
 mod convert;
 mod finite;
 mod import_conversion;

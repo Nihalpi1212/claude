@@ -122,31 +122,10 @@ fn connection_updates_keep_the_mcp_flag() {
     assert!(app.agent_link.mcp_flag, "after a change");
 }
 
-/// With the flag the page has no switch of its own and nothing that sets up an MCP client: it says
-/// where agents are turned on (the ArtCraft Launcher), and keeps the port, folders and closed-app
-/// choice.
+/// Pigment's page has its own switch (`connectAgents`) and nothing that sets up an MCP client, and
+/// never sends the user to the ArtCraft Launcher; the port, folders and closed-app choice stay.
 #[test]
-fn ai_integrations_point_to_the_launcher_and_have_no_switch_or_client_buttons() {
-    use egui_kittest::{Harness, kittest::Queryable};
-    let (mut app, _) = app_with_store();
-    app.agent_link.mcp_flag = true;
-    open_preferences(&mut app, "integrations");
-    let mut h = Harness::builder().with_size(vec2(1280.0, 800.0)).build_eframe(move |cc| {
-        PhotocraftApp::setup_context(&cc.egui_ctx, Default::default());
-        app
-    });
-    h.run_steps(4);
-    for label in ["Let AI agents connect (MCP)", "Copy Configuration", "Add to Claude Desktop", "Copy Prompt for an Agent"] {
-        assert!(h.query_by_label(label).is_none(), "{label}");
-    }
-    h.get_by_label_contains("ArtCraft Launcher › Settings › AI agents › Let AI agents use Craft apps");
-    h.get_by_label("Off: turn on AI agents in ArtCraft Launcher › Settings › AI agents.");
-    assert!(h.query_by_label("Folder agents can open from").is_some(), "the folders stay");
-}
-
-/// Without the suite's AI-MCP feature flag the page shows only the settings it had before.
-#[test]
-fn ai_integrations_without_the_mcp_flag_show_only_the_earlier_settings() {
+fn ai_integrations_have_pigments_own_switch_and_no_client_buttons() {
     use egui_kittest::{Harness, kittest::Queryable};
     let (mut app, _) = app_with_store();
     app.agent_link.mcp_flag = false;
@@ -156,9 +135,13 @@ fn ai_integrations_without_the_mcp_flag_show_only_the_earlier_settings() {
         app
     });
     h.run_steps(4);
-    assert!(h.query_by_label("Let AI agents connect (MCP)").is_none(), "the new connection switch waits for the flag");
-    assert!(h.query_by_label("Folder agents can open from").is_none());
-    assert!(h.query_by_label("Allow agent control").is_some(), "the earlier setting stays");
+    for label in ["Copy Configuration", "Add to Claude Desktop", "Copy Prompt for an Agent"] {
+        assert!(h.query_by_label(label).is_none(), "{label}");
+    }
+    assert!(h.query_by_label_contains("Let AI apps use this window").is_some(), "Pigment's own switch");
+    h.get_by_label("Off: AI apps get a session without a window.");
+    assert!(h.query_by_label_contains("ArtCraft").is_none(), "no launcher");
+    assert!(h.query_by_label("Folder agents can open from").is_some(), "the folders stay");
 }
 
 #[test]

@@ -55,10 +55,10 @@ pub(super) fn humanize(key: &str) -> String {
     }
     // MCP: the labels its own rows show (`agents::integration_rows`), also for search.
     match key {
-        "connectAgents" => return "Let AI agents connect (MCP)".into(),
+        "connectAgents" => return "Let AI apps use this window".into(),
         "readRoot" => return "Folder agents can open from".into(),
         "writeRoot" => return "Folder agents can save to".into(),
-        "whenAppClosed" => return "When PhotoCraft is closed".into(),
+        "whenAppClosed" => return "When Pigment is closed".into(),
         _ => {}
     }
     if key == "notificationDurationSeconds" {
@@ -136,9 +136,9 @@ pub(super) fn choice_label(v: &str) -> String {
         "mhc" => "Malvar–He–Cutler".into(),
         "cpu" => "CPU (no GPU acceleration)".into(),
         // MCP › When PhotoCraft is closed.
-        "launch" => "Open PhotoCraft".into(),
+        "launch" => "Open Pigment".into(),
         "headless" => "Work without a window".into(),
-        "error" => "Ask to open PhotoCraft".into(),
+        "error" => "Ask to open Pigment".into(),
         v => humanize(v),
     }
 }
@@ -265,21 +265,14 @@ fn prefs_body(ui: &mut egui::Ui, f: &mut Map<String, Value>, system: Option<egui
                     f.get("__order").and_then(|o| o.get(&section)).and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default();
                 if !has_visible_fields(&values, &section) {
                     ui.add_space(4.0);
-                    ui.label(RichText::new(tl!("These settings aren't available in PhotoCraft yet.")).color(t.text_faint));
+                    ui.label(RichText::new(tl!("These settings aren't available in Pigment yet.")).color(t.text_faint));
                 } else if section == "integrations"
-                    && f.get("__agentLink").and_then(|s| s.get("mcpFlag")).and_then(Value::as_bool) == Some(true)
                     && let Some(obj) = values.get_mut(&section).and_then(Value::as_object_mut)
                 {
+                    // Pigment's page, with its own switch (PhotoCraft shows it only behind the
+                    // suite's AI-MCP flag, and its older settings without it; docs/FORK.md).
                     super::agents::integration_rows(ui, obj, f);
                     ui.add_space(8.0);
-                } else if section == "integrations"
-                    && let Some(obj) = values.get_mut(&section).and_then(Value::as_object_mut)
-                {
-                    // Without the AI-MCP feature flag: the settings PhotoCraft had before.
-                    let mut shown: Map<String, Value> =
-                        obj.iter().filter(|(k, _)| LEGACY_INTEGRATIONS.contains(&k.as_str())).map(|(k, v)| (k.clone(), v.clone())).collect();
-                    section_fields(ui, &section, &mut shown, &order, lang, system, filter);
-                    obj.extend(shown);
                 } else if let Some(obj) = values.get_mut(&section).and_then(Value::as_object_mut) {
                     section_fields(ui, &section, obj, &order, lang, system, filter);
                     if section == "fileHandling" {
@@ -403,10 +396,6 @@ fn interface_groups(ui: &mut egui::Ui, obj: &mut Map<String, Value>, keys: &[Str
 
 /// Where a clicked colour swatch leaves its preference path and label for the dialog body, which
 /// holds the fields the Color Picker request goes in.
-/// Preferences › AI Integrations without the AI-MCP feature flag: the settings PhotoCraft had
-/// before the agent connection page.
-const LEGACY_INTEGRATIONS: [&str; 2] = ["allowAgentControl", "controlPort"];
-
 const PICK_ID: &str = "prefs-pick-color";
 
 /// The colour swatch clicked this frame, if any: (preference path, label).
@@ -616,7 +605,7 @@ fn field_rows(ui: &mut egui::Ui, section: &str, obj: &mut Map<String, Value>, ke
                     if scratch.free_space_unmeasured {
                         let dir = scratch.dir.as_deref().map(|p| p.display().to_string()).unwrap_or_else(|| tl!("Unknown").into());
                         let warning = crate::i18n::fmt(
-                            tl!("The current scratch directory ({path}) doesn't report its free space, so PhotoCraft can't stop before it fills up, and large files get no extra room from it without a Scratch Size Limit. This warning applies to the current configuration; changes above take effect on Apply or OK. Set a limit or use a local disk."),
+                            tl!("The current scratch directory ({path}) doesn't report its free space, so Pigment can't stop before it fills up, and large files get no extra room from it without a Scratch Size Limit. This warning applies to the current configuration; changes above take effect on Apply or OK. Set a limit or use a local disk."),
                             &[("path", &dir)],
                         );
                         ui.add(egui::Label::new(RichText::new(warning).color(t.warning)).wrap());

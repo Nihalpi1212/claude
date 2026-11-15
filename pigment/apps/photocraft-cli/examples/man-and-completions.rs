@@ -33,7 +33,7 @@ fn generate(dir: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)?;
     let mut cmd = photocraft_cli::command();
     for &shell in Shell::value_variants() {
-        clap_complete::generate_to(shell, &mut cmd, "photocraft-cli", dir)?;
+        clap_complete::generate_to(shell, &mut cmd, "pigment-cli", dir)?;
     }
     // A fresh command: `clap_complete::generate_to` built `cmd`, adding the `help` subcommand,
     // which `clap_mangen` would otherwise give pages of its own (`photocraft-cli-help-convert.1`).

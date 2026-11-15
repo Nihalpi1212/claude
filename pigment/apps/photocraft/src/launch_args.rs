@@ -21,11 +21,11 @@ use photocraft_automation::args::{AutomationArgs, ControlArgs, blank_env_is_unse
 
 use crate::presentation;
 
-/// Opens PhotoCraft with the given files
+/// Opens Pigment with the given files
 #[derive(Parser)]
-#[command(name = "photocraft", version = photocraft_engine::build_info::long_version_static(), after_help = ENVIRONMENT)]
+#[command(name = "pigment", version = photocraft_engine::build_info::long_version_static(), after_help = ENVIRONMENT)]
 pub(crate) struct LaunchArgs {
-    /// Files to open. On Windows and Linux they open as new tabs in the PhotoCraft already running.
+    /// Files to open. On Windows and Linux they open as new tabs in the Pigment already running.
     /// Put `--` before a name that starts with `-`
     pub(crate) files: Vec<PathBuf>,
     /// Start with the CPU renderer for this launch (after a graphics driver crash)
@@ -35,7 +35,7 @@ pub(crate) struct LaunchArgs {
     /// or off is off; empty is unset)
     #[arg(long, env = "PHOTOCRAFT_IN_WINDOW_MENUS", value_parser = FalseyValueParser::new())]
     pub(crate) in_window_menus: bool,
-    /// Windows and Linux: start a separate PhotoCraft instead of opening the files in the one
+    /// Windows and Linux: start a separate Pigment instead of opening the files in the one
     /// already running
     #[arg(long)]
     pub(crate) new_instance: bool,
@@ -61,6 +61,24 @@ pub(crate) struct LaunchArgs {
     /// The per-process options given on the command line, set by [`parse`].
     #[arg(skip)]
     pub(crate) launch_options: Vec<PerProcess>,
+}
+
+/// What `--version` prints in place of clap's `pigment <version>`: Pigment's version line,
+/// `Pigment 0.5.0 (based on PhotoCraft 0.23.1)` (docs/FORK.md). `None` for every other outcome.
+pub(crate) fn version_text(e: &clap::Error) -> Option<String> {
+    (e.kind() == clap::error::ErrorKind::DisplayVersion).then(|| format!("{}\n", photocraft_format::brand::version_line()))
+}
+
+/// Ends the process on a parse outcome: `--version` prints [`version_text`] to standard output and
+/// exits 0; help and usage errors go through clap as before.
+pub(crate) fn exit(e: clap::Error) -> ! {
+    if let Some(text) = version_text(&e) {
+        use std::io::Write as _;
+        // A closed pipe (`pigment --version | true`) is not an error.
+        let _ = std::io::stdout().write_all(text.as_bytes());
+        std::process::exit(0);
+    }
+    e.exit()
 }
 
 /// The variables that aren't a flag's fallback, for the end of `--help`.
@@ -164,7 +182,7 @@ pub(crate) fn parse(mut cmd: Command, args: impl IntoIterator<Item = OsString>) 
             !(options && a.to_str().is_some_and(|s| s.starts_with("-psn_")))
         })
         .collect();
-    let argv = std::iter::once(OsString::from("photocraft")).chain(args.iter().cloned());
+    let argv = std::iter::once(OsString::from("pigment")).chain(args.iter().cloned());
     let matches = cmd.try_get_matches_from_mut(argv).map_err(|e| name_env_vars(e, &cmd, &args))?;
     let mut launch = LaunchArgs::from_arg_matches(&matches)?;
     // Only the control server reads a token, so a stale exported pair doesn't stop a launch.
@@ -305,7 +323,10 @@ mod tests {
     fn version_stops_parsing() {
         let e = parse_args(&["--version", "--control"]).err().unwrap();
         assert_eq!((e.kind(), e.exit_code()), (ErrorKind::DisplayVersion, 0));
-        assert_eq!(e.to_string(), format!("photocraft {}\n", photocraft_engine::build_info::long_version()));
+        assert_eq!(e.to_string(), format!("pigment {}\n", photocraft_engine::build_info::long_version()));
+        // What `pigment --version` prints instead ([`exit`]).
+        assert_eq!(version_text(&e).as_deref(), Some(format!("{}\n", photocraft_format::brand::version_line()).as_str()));
+        assert_eq!(version_text(&parse_args(&["--control"]).err().unwrap()), None);
     }
 
     #[test]

@@ -2,8 +2,8 @@
 //!
 //! Without a logger every `log::warn!`/`log::error!` in the workspace (GPU startup fallbacks, a
 //! lost device, the crash guard's panic report) vanished. A launch from a desktop menu has no
-//! terminal, so the file is what a bug report can attach: `<settings dir>/logs/photocraft.log`
-//! (see `app_dirs`). Each start moves the previous log to `photocraft.1.log` (and that one to
+//! terminal, so the file is what a bug report can attach: `<settings dir>/logs/pigment.log`
+//! (see `app_dirs`). Each start moves the previous log to `pigment.1.log` (and that one to
 //! `.2`), so the log of a run that crashed survives the next launch. A start while another
 //! instance is still running leaves that instance's log alone and writes `photocraft-<pid>.log`
 //! (see [`rotate`]).
@@ -26,8 +26,8 @@ use std::time::SystemTime;
 use log::LevelFilter;
 
 /// The current log file's name inside the log directory.
-pub const LOG_FILE: &str = "photocraft.log";
-/// How many previous logs are kept (`photocraft.1.log` … `photocraft.<KEEP>.log`).
+pub const LOG_FILE: &str = "pigment.log";
+/// How many previous logs are kept (`pigment.1.log` … `pigment.<KEEP>.log`).
 pub const KEEP: usize = 2;
 /// The log file stops growing past this size (a runaway warning can't fill the disk).
 pub const MAX_FILE_BYTES: u64 = 16 * 1024 * 1024;
@@ -124,13 +124,13 @@ fn utc_parts(secs: i64, nanos: u32) -> (i64, chrono::NaiveDateTime) {
 }
 
 fn numbered(dir: &Path, n: usize) -> PathBuf {
-    if n == 0 { dir.join(LOG_FILE) } else { dir.join(format!("photocraft.{n}.log")) }
+    if n == 0 { dir.join(LOG_FILE) } else { dir.join(format!("pigment.{n}.log")) }
 }
 
 /// Held by the instance that writes [`LOG_FILE`], from its start until it exits. A separate lock
 /// file rather than a lock on the log itself: Windows locks are mandatory, and a locked log could
 /// not be opened for a bug report while the app runs.
-pub const OWNER_LOCK: &str = "photocraft.lock";
+pub const OWNER_LOCK: &str = "pigment.lock";
 /// Held while one start rotates and prunes the logs, so two starts at once can't interleave.
 pub const ROTATE_LOCK: &str = "rotate.lock";
 
@@ -487,9 +487,9 @@ mod tests {
             std::fs::write(&path, format!("run {run}")).expect("write");
         }
         assert_eq!(std::fs::read_to_string(dir.join(LOG_FILE)).expect("current"), "run 4");
-        assert_eq!(std::fs::read_to_string(dir.join("photocraft.1.log")).expect("1"), "run 3");
-        assert_eq!(std::fs::read_to_string(dir.join("photocraft.2.log")).expect("2"), "run 2");
-        assert!(!dir.join("photocraft.3.log").exists(), "only {KEEP} old logs are kept");
+        assert_eq!(std::fs::read_to_string(dir.join("pigment.1.log")).expect("1"), "run 3");
+        assert_eq!(std::fs::read_to_string(dir.join("pigment.2.log")).expect("2"), "run 2");
+        assert!(!dir.join("pigment.3.log").exists(), "only {KEEP} old logs are kept");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -509,12 +509,12 @@ mod tests {
         }
         first.file.write_all(b"first, after\n").expect("write");
         assert_eq!(read(&dir.join(LOG_FILE)), "first, before\nfirst, after\n");
-        assert!(!dir.join("photocraft.1.log").exists(), "the running instance's log was rotated");
+        assert!(!dir.join("pigment.1.log").exists(), "the running instance's log was rotated");
         // Once the first instance is gone, the next start rotates as before.
         drop(first);
         let third = rotate(&dir).expect("third start");
         assert_eq!(third.path, dir.join(LOG_FILE));
-        assert_eq!(read(&dir.join("photocraft.1.log")), "first, before\nfirst, after\n");
+        assert_eq!(read(&dir.join("pigment.1.log")), "first, before\nfirst, after\n");
         drop(third);
         let _ = std::fs::remove_dir_all(&dir);
     }

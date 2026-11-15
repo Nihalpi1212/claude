@@ -44,6 +44,11 @@ where
     // for `out`, exit 0: the subcommand never runs.
     let cli = match parse(&args) {
         Ok(cli) => cli,
+        // `--version` prints Pigment's version line (docs/FORK.md), not clap's `pigment-cli <version>`.
+        Err(e) if e.kind() == clap::error::ErrorKind::DisplayVersion => {
+            let _ = writeln!(out, "{}", photocraft_format::brand::version_line());
+            return 0;
+        }
         Err(e) => {
             let to: &mut dyn Write = if e.use_stderr() { err } else { out };
             let _ = write!(to, "{}", e.render());

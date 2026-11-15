@@ -1,21 +1,29 @@
-//! Community and project links: the Help menu, the About dialog, the start screen and the title
-//! bar all open these. URLs follow the crafting-app pattern (`getartcraft.com/apps/<app>`,
-//! `github.com/storytold/<app>`).
+//! Project links: the Help menu, the About dialog and the start screen open these. Pigment points
+//! them at its own repository, issues and releases, and at the upstream PhotoCraft project it is
+//! based on (docs/FORK.md). The command ids are PhotoCraft's, kept so upstream changes merge:
+//! `help.reportIssue` opens Pigment's issues, `help.github` its repository, `help.website` its
+//! releases and `help.artcraftWebsite` the upstream project. PhotoCraft's Discord and
+//! getartcraft.com links are gone.
 
 use serde_json::{Value, json};
 
 use crate::PhotocraftApp;
 
-pub const DISCORD: &str = "https://discord.gg/artcraft";
-pub const ARTCRAFT_WEBSITE: &str = "https://getartcraft.com";
-pub const APP_PAGE: &str = "https://getartcraft.com/apps/photocraft";
-pub const TUTORIALS: &str = "https://getartcraft.com/tutorials";
-pub const GITHUB: &str = "https://github.com/storytold/photocraft";
-pub const ISSUES: &str = "https://github.com/storytold/photocraft/issues";
+/// Where Pigment's bugs and ideas are reported.
+pub const ISSUES: &str = "https://github.com/Nihalpi1212/claude/issues";
+/// Pigment's source repository (the app lives in `pigment/`).
+pub const GITHUB: &str = "https://github.com/Nihalpi1212/claude";
+/// Pigment's releases (tags `pigment-vX.Y.Z`, assets `pigment-*`); Help › Check for Updates opens it.
+pub const RELEASES: &str = "https://github.com/Nihalpi1212/claude/releases";
+/// The upstream project Pigment is based on.
+pub const UPSTREAM: &str = "https://github.com/storytold/photocraft";
+/// The user guide (Learn on the start screen).
+pub const TUTORIALS: &str = "https://github.com/Nihalpi1212/claude/tree/HEAD/pigment/docs/user";
+/// The app's page: its releases.
+pub const APP_PAGE: &str = RELEASES;
 
 /// Help-menu link commands: (id, url). Labels live in `menus::UI_COMMANDS`.
-pub const COMMANDS: &[(&str, &str)] =
-    &[("help.discord", DISCORD), ("help.website", APP_PAGE), ("help.artcraftWebsite", ARTCRAFT_WEBSITE), ("help.github", GITHUB), ("help.reportIssue", ISSUES)];
+pub const COMMANDS: &[(&str, &str)] = &[("help.reportIssue", ISSUES), ("help.github", GITHUB), ("help.website", RELEASES), ("help.artcraftWebsite", UPSTREAM)];
 
 pub fn url_for(id: &str) -> Option<&'static str> {
     COMMANDS.iter().find(|c| c.0 == id).map(|c| c.1)
@@ -33,26 +41,31 @@ pub fn open(app: &mut PhotocraftApp, ctx: &egui::Context, url: &str) -> Value {
     json!({"url": url})
 }
 
-/// The prominent "Join us on Discord" button.
-pub fn discord_button(app: &mut PhotocraftApp, ui: &mut egui::Ui, min_width: f32) -> egui::Response {
-    let r = crate::widgets::primary_button(ui, tl!("Join us on Discord"), min_width).on_hover_text(DISCORD);
-    if r.clicked() {
-        open(app, ui.ctx(), DISCORD);
-    }
-    r
+/// The About window's credit line: what Pigment is based on, and its licence.
+pub fn credit(ui: &mut egui::Ui) {
+    let t = crate::theme::Tokens::get(ui.ctx());
+    ui.label(
+        egui::RichText::new(tl!("Pigment is based on PhotoCraft by the ArtCraft team and the PhotoCraft contributors (MIT OR Apache-2.0)")).color(t.text_dim),
+    );
 }
 
-/// "PhotoCraft website · GitHub · ArtCraft" as links, centred. Clicks route through [`open`] (the
-/// platform browser service) rather than `ui.hyperlink_to`, which uses the unreliable `ctx.open_url`.
+/// "Report an Issue · Pigment on GitHub · Pigment Releases · PhotoCraft (upstream project)" as
+/// links, centred. Clicks route through [`open`] (the platform browser service) rather than
+/// `ui.hyperlink_to`, which uses the unreliable `ctx.open_url`.
 pub fn link_row(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let t = crate::theme::Tokens::get(ui.ctx());
-    let links = [(tl!("PhotoCraft website"), APP_PAGE), (tl!("GitHub"), GITHUB), (tl!("ArtCraft"), ARTCRAFT_WEBSITE)];
+    let links = [
+        (tl!("Report an Issue"), ISSUES),
+        (tl!("Pigment on GitHub"), GITHUB),
+        (tl!("Pigment Releases"), RELEASES),
+        (tl!("PhotoCraft (upstream project)"), UPSTREAM),
+    ];
     let font = egui::FontId::proportional(12.5);
     let sep = "  ·  ";
     let width: f32 = links.iter().map(|(l, _)| ui.painter().layout_no_wrap((*l).into(), font.clone(), t.text).size().x).sum::<f32>()
-        + 2.0 * ui.painter().layout_no_wrap(sep.into(), font.clone(), t.text).size().x;
+        + (links.len() - 1) as f32 * ui.painter().layout_no_wrap(sep.into(), font.clone(), t.text).size().x;
     let mut clicked: Option<&str> = None;
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
         ui.add_space(((ui.available_width() - width) / 2.0).max(0.0));
         for (i, (label, url)) in links.iter().enumerate() {
@@ -75,7 +88,7 @@ mod tests {
 
     #[test]
     fn links_open_through_the_platform_service() {
-        // Issue #14: links (Help menu, Discord button, start-page links) must open in the browser.
+        // Issue #14: links (Help menu, About, start-page links) must open in the browser.
         // They route through the `open_url` service rather than the unreliable `ctx.open_url`.
         use std::sync::{Arc, Mutex};
         let opened: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
@@ -94,9 +107,9 @@ mod tests {
             crate::menus::invoke(&mut app, &ctx, id, json!({})).unwrap();
             assert_eq!(opened.lock().unwrap().last().map(String::as_str), Some(*url), "{id}");
         }
-        // The direct open() helper (Discord button / start-page links) also uses it.
-        open(&mut app, &ctx, DISCORD);
-        assert_eq!(opened.lock().unwrap().last().map(String::as_str), Some(DISCORD));
+        // The direct open() helper (start-page links) also uses it.
+        open(&mut app, &ctx, ISSUES);
+        assert_eq!(opened.lock().unwrap().last().map(String::as_str), Some(ISSUES));
     }
 
     #[test]
@@ -105,17 +118,7 @@ mod tests {
         let help: Vec<String> = crate::menus::menu_items(&app).into_iter().filter(|i| i.path == ["Help"]).map(|i| i.id).collect();
         assert_eq!(
             help,
-            [
-                "help.discord",
-                "help.website",
-                "help.artcraftWebsite",
-                "help.github",
-                "help.reportIssue",
-                "help.checkForUpdates",
-                "---",
-                "help.systemInfo",
-                "help.about"
-            ]
+            ["help.reportIssue", "help.github", "help.website", "help.artcraftWebsite", "help.checkForUpdates", "---", "help.systemInfo", "help.about"]
         );
         for (id, _) in COMMANDS {
             assert!(crate::menus::is_live(id) && crate::menus::is_enabled(&app, id), "{id}");
@@ -127,9 +130,10 @@ mod tests {
         let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
         let ctx = egui::Context::default();
         for (id, url) in [
-            ("help.discord", "https://discord.gg/artcraft"),
-            ("help.website", "https://getartcraft.com/apps/photocraft"),
-            ("help.github", "https://github.com/storytold/photocraft"),
+            ("help.reportIssue", "https://github.com/Nihalpi1212/claude/issues"),
+            ("help.github", "https://github.com/Nihalpi1212/claude"),
+            ("help.website", "https://github.com/Nihalpi1212/claude/releases"),
+            ("help.artcraftWebsite", "https://github.com/storytold/photocraft"),
         ] {
             let r = crate::menus::invoke(&mut app, &ctx, id, serde_json::json!({})).unwrap();
             assert_eq!(r["url"], url);

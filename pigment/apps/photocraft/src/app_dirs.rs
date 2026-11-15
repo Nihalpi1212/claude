@@ -4,11 +4,11 @@
 //! In order:
 //! 1. `PHOTOCRAFT_CONFIG_DIR`, when set (tests, agents, custom setups).
 //! 2. **Portable mode** (#228): a marker file ([`PORTABLE_MARKERS`]) beside the executable puts
-//!    everything in `<exe dir>/PhotoCraftData`, so a portable copy on a USB stick leaves nothing in
+//!    everything in `<exe dir>/PigmentData`, so a portable copy on a USB stick leaves nothing in
 //!    `%APPDATA%`. The Windows portable zip ships with `portable.txt`; the MSI doesn't. If that
 //!    folder can't be written (read-only medium, Program Files), the app warns and falls back.
-//! 3. The platform convention: macOS `~/Library/Application Support/Photocraft`, Windows
-//!    `%APPDATA%\Photocraft`, Linux `$XDG_CONFIG_HOME/photocraft` or `~/.config/photocraft`.
+//! 3. The platform convention: macOS `~/Library/Application Support/Pigment`, Windows
+//!    `%APPDATA%\Pigment`, Linux `$XDG_CONFIG_HOME/pigment` or `~/.config/pigment`.
 //!
 //! The rules live in [`photocraft_automation::app_dirs`], so `photocraft-cli` resolves the same
 //! folder; this module resolves it once for the app and logs the outcome.
@@ -34,7 +34,7 @@ pub fn current() -> &'static DataDir {
         let d = resolve(|k| std::env::var_os(k), exe.as_deref().and_then(Path::parent));
         if let Some(w) = &d.warning {
             log::warn!("{w}");
-            eprintln!("photocraft: {w}");
+            eprintln!("pigment: {w}");
         }
         log::info!("settings directory ({:?}): {:?}", d.mode, d.dir);
         d
@@ -62,13 +62,13 @@ pub fn recovery_dir() -> Option<PathBuf> {
 
 /// The recovery folder for `data`. Autosaves hold whole documents and are rewritten every few
 /// minutes, so with the platform convention they stay out of what is synced with the settings:
-/// - Windows (#5648): the machine-local `%LOCALAPPDATA%\Photocraft\Recovery`; the roaming
+/// - Windows (#5648): the machine-local `%LOCALAPPDATA%\Pigment\Recovery`; the roaming
 ///   `%APPDATA%` may be synced at sign-in and sign-out or capped by policy.
-/// - Linux and other XDG systems (#6612): `$XDG_STATE_HOME/photocraft/Recovery`, by default
-///   `~/.local/state/photocraft/Recovery`, where the XDG Base Directory spec puts state that
+/// - Linux and other XDG systems (#6612): `$XDG_STATE_HOME/pigment/Recovery`, by default
+///   `~/.local/state/pigment/Recovery`, where the XDG Base Directory spec puts state that
 ///   should outlive a restart but isn't configuration; dotfile managers and config sync often copy
 ///   `~/.config` whole. As the spec asks, a relative `XDG_STATE_HOME` is ignored.
-/// - macOS: `~/Library/Application Support/Photocraft/Recovery` as before. Apple's guidelines put
+/// - macOS: `~/Library/Application Support/Pigment/Recovery` as before. Apple's guidelines put
 ///   app-created data that can't be regenerated there; `~/Library/Caches` may be purged by the
 ///   system.
 ///
@@ -78,7 +78,7 @@ pub fn resolve_recovery(data: &DataDir, env: impl Fn(&str) -> Option<OsString>) 
     if data.mode == Mode::Platform {
         if cfg!(windows) {
             if let Some(local) = env("LOCALAPPDATA").filter(|l| !l.is_empty()) {
-                return Some(PathBuf::from(local).join("Photocraft").join(RECOVERY));
+                return Some(PathBuf::from(local).join("Pigment").join(RECOVERY));
             }
         } else if !cfg!(target_os = "macos") {
             let state = env("XDG_STATE_HOME")
@@ -86,7 +86,7 @@ pub fn resolve_recovery(data: &DataDir, env: impl Fn(&str) -> Option<OsString>) 
                 .filter(|s| s.is_absolute())
                 .or_else(|| env("HOME").filter(|h| !h.is_empty()).map(|h| PathBuf::from(h).join(".local").join("state")));
             if let Some(state) = state {
-                return Some(state.join("photocraft").join(RECOVERY));
+                return Some(state.join("pigment").join(RECOVERY));
             }
         }
     }
@@ -143,7 +143,7 @@ fn adopt_legacy_recovery_waiting(legacy: &Path, dir: &Path, wait: std::time::Dur
             Err(std::fs::TryLockError::WouldBlock) if std::time::Instant::now() < deadline => std::thread::sleep(std::time::Duration::from_millis(50)),
             Err(std::fs::TryLockError::WouldBlock) => {
                 // Another process is moving and may yet remove the old folder: never write there.
-                log::info!("another PhotoCraft is moving crash-recovery autosaves; using {}", dir.display());
+                log::info!("another Pigment is moving crash-recovery autosaves; using {}", dir.display());
                 return dir.to_path_buf();
             }
             Err(std::fs::TryLockError::Error(e)) => {

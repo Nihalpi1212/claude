@@ -6,7 +6,7 @@
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
-    println!("cargo:rerun-if-changed=../../assets/app-icon/photocraft.ico");
+    println!("cargo:rerun-if-changed=../../assets/app-icon/pigment.ico");
     println!("cargo:rerun-if-env-changed=PHOTOCRAFT_REQUIRE_WINRES");
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
         return;
@@ -20,17 +20,17 @@ fn main() {
         println!("cargo:rustc-link-arg-bins=delayimp.lib");
     }
     let mut res = winresource::WindowsResource::new();
-    res.set_icon("../../assets/app-icon/photocraft.ico")
-        .set("ProductName", "PhotoCraft")
-        .set("FileDescription", "PhotoCraft image editor")
-        .set("CompanyName", "Learning Machines LLC")
-        .set("LegalCopyright", "Copyright (c) the PhotoCraft authors. MIT OR Apache-2.0.")
-        .set("OriginalFilename", "photocraft.exe")
-        .set("InternalName", "photocraft");
+    res.set_icon("../../assets/app-icon/pigment.ico")
+        .set("ProductName", "Pigment")
+        .set("FileDescription", "Pigment image editor")
+        .set("CompanyName", "Pigment contributors")
+        .set("LegalCopyright", "Copyright (c) 2026 Pigment contributors; based on PhotoCraft (c) the PhotoCraft authors. MIT OR Apache-2.0.")
+        .set("OriginalFilename", "pigment.exe")
+        .set("InternalName", "pigment");
     if let Err(e) = res.compile() {
         if std::env::var_os("PHOTOCRAFT_REQUIRE_WINRES").is_some() {
             panic!("embedding Windows resources failed: {e}");
         }
-        println!("cargo:warning=photocraft.exe built without icon/version resources: {e}");
+        println!("cargo:warning=pigment.exe built without icon/version resources: {e}");
     }
 }

@@ -18,10 +18,10 @@ mod recovery_tests;
 /// Photoshop brushes (.abr), gradients (.grd), layer styles (.asl), swatches (.aco, .act, .ase) and keyboard shortcut sets
 /// (.kys), which go to the preset libraries and Edit › Keyboard Shortcuts.
 const OPEN_EXTS: &[&str] = &[
-    "pcraft", "pdn", "ora", "xcf", "xcfgz", "gz", "kra", "krz", "psd", "psb", "psdt", "png", "jpg", "jpeg", "tif", "tiff", "webp", "gif", "bmp", "dib", "tga",
-    "ico", "qoi", "exr", "hdr", "pbm", "pgm", "ppm", "pnm", "pam", "pfm", "pcx", "dds", "xpm", "fits", "fit", "fts", "dpx", "cin", "dcm", "dicom", "dc3",
-    "iff", "lbm", "ilbm", "heic", "heif", "hif", "dng", "cr2", "cr3", "nef", "nrw", "arw", "pef", "orf", "rw2", "raf", "abr", "grd", "asl", "svg", "svgz",
-    "aco", "act", "ase", "kys", "af", "afdesign", "afphoto", "afpub",
+    "pigment", "pcraft", "pdn", "ora", "xcf", "xcfgz", "gz", "kra", "krz", "psd", "psb", "psdt", "png", "jpg", "jpeg", "tif", "tiff", "webp", "gif", "bmp",
+    "dib", "tga", "ico", "qoi", "exr", "hdr", "pbm", "pgm", "ppm", "pnm", "pam", "pfm", "pcx", "dds", "xpm", "fits", "fit", "fts", "dpx", "cin", "dcm",
+    "dicom", "dc3", "iff", "lbm", "ilbm", "heic", "heif", "hif", "dng", "cr2", "cr3", "nef", "nrw", "arw", "pef", "orf", "rw2", "raf", "abr", "grd", "asl",
+    "svg", "svgz", "aco", "act", "ase", "kys", "af", "afdesign", "afphoto", "afpub",
 ];
 const SVG_EXTS: &[&str] = &["svg", "svgz"];
 
@@ -42,7 +42,7 @@ fn open_filter_extensions(extensions: &[&str]) -> Vec<String> {
 /// picker defaults to another filter.
 const OPEN_FILTERS: &[(&str, &[&str])] = &[
     ("Photoshop", &["psd", "psb", "psdt"]),
-    ("PhotoCraft", &["pcraft"]),
+    ("Pigment", &["pigment", "pcraft"]),
     ("Affinity", &["af", "afdesign", "afphoto", "afpub"]),
     ("Amiga IFF", &["iff", "lbm", "ilbm"]),
     ("BMP", &["bmp", "dib"]),
@@ -92,7 +92,7 @@ fn open_filters() -> Vec<(&'static str, Vec<String>)> {
 const SAVE_FILTERS: &[(&str, &[&str])] = &[
     ("PSD Document", &["psd", "psb"]),
     ("PSB Large Document", &["psb"]),
-    ("PhotoCraft", &["pcraft"]),
+    ("Pigment", &["pigment", "pcraft"]),
     ("Amiga IFF", &["iff"]),
     ("BMP", &["bmp", "dib"]),
     ("Cineon", &["cin"]),
@@ -400,9 +400,14 @@ fn shader_compiler_identity() -> String {
 }
 
 /// The brush preset store (one file per preset group plus tip bitmaps; see
-/// `photocraft_engine::preset_store`).
+/// `photocraft_engine::preset_store`). PhotoCraft calls it `Presets`; Pigment's settings folder
+/// is also the Electron userData folder of Pigment 0.1–0.4 on Windows and macOS, whose `presets`
+/// (the same folder on those file systems) holds other files of the same names (docs/FORK.md).
+pub const PRESETS_DIR: &str = "Preset Library";
+
+/// [`PRESETS_DIR`] in the settings folder.
 pub fn presets_dir() -> Option<PathBuf> {
-    config_dir().map(|d| d.join("Presets"))
+    config_dir().map(|d| d.join(PRESETS_DIR))
 }
 
 /// Crash-recovery autosaves: under the settings directory, except where that is synced with the
@@ -711,7 +716,7 @@ pub fn xwayland_command(flatpak_id: Option<&str>, appimage: Option<&str>, x_disp
     if let Some(id) = flatpak_id.filter(|id| !id.is_empty()) {
         return Some(format!("flatpak run --nosocket=wayland --socket=x11 {}", shell_word(id)));
     }
-    let exe = appimage.filter(|path| !path.is_empty()).map_or_else(|| "photocraft".to_string(), shell_word);
+    let exe = appimage.filter(|path| !path.is_empty()).map_or_else(|| "pigment".to_string(), shell_word);
     x_display.then(|| format!("WAYLAND_DISPLAY= {exe}"))
 }
 
@@ -792,8 +797,10 @@ pub fn native(automation: Option<photocraft_automation::AuthorizedWorkspace>) ->
         inbox: None,
         open_url: Some(Box::new(|url: &str| open::that(url).map_err(|e| e.to_string()))),
         beep: Some(platform_beep),
-        check_updates: Some(crate::updates::service()),
-        last_update: Some(crate::updates::last_update),
+        // Pigment makes no network request on its own (docs/FORK.md): no update check, and no
+        // self-update to report. Help › Check for Updates opens the releases page instead.
+        check_updates: None,
+        last_update: None,
         clipboard_set_image: Some({
             let clip = clip.clone();
             guarded_clipboard_set(move |w: u32, h: u32, px: &[u8]| {

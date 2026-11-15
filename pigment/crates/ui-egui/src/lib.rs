@@ -9,13 +9,16 @@
 #![recursion_limit = "256"]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
-/// PhotoCraft as craft-update knows it, with its 128 px icon and accent colour: the update
-/// prompt shows both, and an AppImage's menu entry gets the icon.
+/// Pigment as craft-update knows it, with its 128 px icon and accent colour: the release window
+/// shows both. Pigment's own repository and ids, not PhotoCraft's; Pigment starts no update check
+/// and installs nothing (docs/FORK.md).
 #[cfg(not(target_arch = "wasm32"))]
 pub const UPDATE_APP: craft_update::app::App = craft_update::app::App {
-    icon_png: Some(include_bytes!("../../../assets/app-icon/hicolor/128x128/apps/ai.storyteller.photocraft.png")),
-    accent: Some([0x2f, 0x7b, 0xf5]),
-    ..craft_update::suite::PHOTOCRAFT
+    icon_png: Some(include_bytes!("../../../assets/app-icon/hicolor/128x128/apps/io.github.nihalpi1212.pigment.png")),
+    accent: Some([0xe1, 0x1d, 0x74]),
+    developer: "Pigment contributors",
+    bundle_id_override: Some(photocraft_format::brand::APP_ID),
+    ..craft_update::app::App::new("pigment", "Pigment", "Image editing", "Nihalpi1212/claude")
 };
 
 /// Translate a string literal into the current UI language: `tl!("Image Size…")`.

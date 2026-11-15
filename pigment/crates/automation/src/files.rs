@@ -145,7 +145,7 @@ pub fn save_with_renderer_keeping(
         .map(|f| f.trim_start_matches('.').to_ascii_lowercase())
         .or_else(|| path.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()))
         .ok_or_else(|| AutomationError::BadRequest(format!("cannot tell the format of `{}`; pass a format", path.display())))?;
-    if ext == photocraft_format::EXTENSION {
+    if photocraft_format::brand::is_native_extension(&ext) {
         let named = named_for_output(doc, &path.to_string_lossy());
         let mut local = PcraftWriter::new();
         let w = writer.unwrap_or(&mut local);
@@ -191,7 +191,7 @@ pub fn save_bytes_with_renderer(
         .map(|format| format.trim_start_matches('.').to_ascii_lowercase())
         .or_else(|| Path::new(name).extension().map(|extension| extension.to_string_lossy().to_ascii_lowercase()))
         .ok_or_else(|| AutomationError::BadRequest(format!("cannot tell the format of `{name}`; pass a format")))?;
-    if ext == photocraft_format::EXTENSION {
+    if photocraft_format::brand::is_native_extension(&ext) {
         let named = named_for_output(doc, name);
         // Encode before draining: if the options check or the encode fails, the queued
         // diagnostics stay with the renderer for the caller to report alongside the error.

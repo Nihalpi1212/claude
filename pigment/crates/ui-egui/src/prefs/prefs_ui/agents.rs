@@ -1,7 +1,7 @@
-//! Preferences › AI Integrations: whether agents can use the open app (one switch for every Craft
-//! app, in the ArtCraft Launcher), the port, the folders agents may use, and what
-//! `photocraft-cli mcp` does while the app is closed. Changes apply at once, without a restart.
-//! Adding PhotoCraft to an MCP client is the launcher's job too, so there is nothing for it here.
+//! Preferences › AI Integrations: whether agents can use the open app (Pigment's own switch,
+//! `connectAgents`; PhotoCraft leaves it to the ArtCraft Launcher, which Pigment never reads), the
+//! port, the folders agents may use, and what `pigment-cli mcp` does while the app is closed.
+//! Changes apply at once, without a restart. See docs/FORK.md.
 
 use super::dialogs::is_preferences;
 use super::fields::{choice_label, humanize};
@@ -13,10 +13,9 @@ pub(super) const AGENT_LINK_RETRY_S: f64 = 5.0;
 /// Start, move or stop the agent connection when its settings change
 /// ([`crate::Services::agent_link`]); the first frame applies the saved settings. A connection
 /// that is on but failed to start is tried again every [`AGENT_LINK_RETRY_S`], so freeing its
-/// port is enough, without touching a setting. With the suite's `AI-MCP` flag, the ArtCraft
-/// Launcher's switch ([`crate::Services::launcher_agents`]) alone decides whether agents may connect:
-/// one switch for every Craft app. Without the flag, as before, a Control Port saved in the
-/// preferences (`connectAgents`, set from it when they load).
+/// port is enough, without touching a setting. In Pigment `connectAgents` decides (its own switch,
+/// also set from a saved Control Port when the preferences load); PhotoCraft's `AI-MCP` flag and
+/// ArtCraft Launcher switch ([`crate::Services::launcher_agents`]) are never read there.
 pub(super) fn sync_agent_link(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let launcher = app.services.launcher_agents.as_ref().is_some_and(|on| on());
     let mcp_flag = app.agent_link.mcp_flag;
@@ -59,10 +58,14 @@ pub(super) fn integration_rows(ui: &mut egui::Ui, obj: &mut Map<String, Value>, 
     let t = Tokens::get(ui.ctx());
     let status = f.get("__agentLink").cloned().unwrap_or(Value::Null);
     let launch_flags = status.get("launchFlags").and_then(Value::as_bool) == Some(true);
-    // One switch for every Craft app: ArtCraft Launcher › Settings › AI agents. There is none here.
+    // Pigment's own switch (PhotoCraft leaves it to the ArtCraft Launcher). Off by default: then
+    // `pigment-cli mcp` serves a session without a window, as it always did.
+    let mut on = obj.get("connectAgents").and_then(Value::as_bool).unwrap_or(false);
+    crate::widgets::checkbox(ui, &mut on, tl!(&humanize("connectAgents")));
+    obj.insert("connectAgents".into(), json!(on));
     ui.label(
         RichText::new(tl!(
-            "AI apps such as Claude can open, edit and save documents in this window while ArtCraft Launcher › Settings › AI agents › Let AI agents use Craft apps is on. Only programs on this computer can connect."
+            "While this is on, AI apps such as Claude can open, edit and save documents in this window through pigment-cli mcp. Only programs on this computer can connect."
         ))
         .color(t.text_dim),
     );
@@ -73,7 +76,7 @@ pub(super) fn integration_rows(ui: &mut egui::Ui, obj: &mut Map<String, Value>, 
         (true, _, _) => (tl!("Managed by the launch options (--control).").to_string(), t.text_dim),
         (false, _, Some(e)) => (e.to_string(), t.danger),
         (false, Some(p), None) => (crate::i18n::fmt(tl!("Agents can connect on 127.0.0.1:{port}."), &[("port", &p.to_string())]), t.accent_text),
-        (false, None, None) => (tl!("Off: turn on AI agents in ArtCraft Launcher › Settings › AI agents.").to_string(), t.text_faint),
+        (false, None, None) => (tl!("Off: AI apps get a session without a window.").to_string(), t.text_faint),
     };
     ui.label(RichText::new(line).color(color));
     ui.add_space(8.0);

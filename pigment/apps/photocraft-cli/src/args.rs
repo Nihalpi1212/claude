@@ -20,9 +20,9 @@ use photocraft_codecs::{JpegFormat, TiffCompression};
 use photocraft_io::{DdsCompression, DpxBits, TgaBits, XmpEmbed};
 use serde_json::Value;
 
-/// photocraft-cli: headless PhotoCraft
+/// pigment-cli: headless Pigment
 #[derive(Parser)]
-#[command(name = "photocraft-cli", version = photocraft_engine::build_info::long_version_static(), arg_required_else_help = true)]
+#[command(name = "pigment-cli", version = photocraft_engine::build_info::long_version_static(), arg_required_else_help = true)]
 pub(crate) struct Cli {
     #[command(subcommand)]
     pub(crate) command: Command,
@@ -83,7 +83,7 @@ pub(crate) struct ExportArgs {
     /// and CMYK shrink) or progressive
     #[arg(long, value_name = "baseline|optimized|progressive", value_parser = jpeg_format)]
     pub(crate) jpeg_format: Option<JpegFormat>,
-    /// Request the flattened document at its canvas size in .pcraft output as
+    /// Request the flattened document at its canvas size in .pigment or .pcraft output as
     /// composite/full.png; it may be omitted. Check the manifest's full_composite member.
     #[arg(long)]
     pub(crate) pcraft_full_composite: bool,
@@ -96,12 +96,12 @@ pub(crate) struct ExportArgs {
     /// The document metadata a flat export embeds: all (the default) keeps the document's XMP
     /// packet and free-form text where the format holds them, as Save As does; none leaves them
     /// out, as Export As's Metadata: None. Nothing else changes: the ICC profile, EXIF and
-    /// resolution are written as they are without it. PSD, PSB and .pcraft always keep the XMP
+    /// resolution are written as they are without it. PSD, PSB, .pigment and .pcraft always keep the XMP
     #[arg(long, value_name = "none|all", value_parser = metadata)]
     pub(crate) metadata: Option<XmpEmbed>,
 }
 
-/// Convert between formats (.pcraft, .psd, .png, .jpg, .tif, .webp, .exr, …)
+/// Convert between formats (.pigment, .pcraft, .psd, .png, .jpg, .tif, .webp, .exr, …)
 ///
 /// An <OUT> that is the <IN> file is refused, as the result would replace the original;
 /// --in-place allows it.
@@ -270,13 +270,13 @@ pub(crate) struct CommandsArgs {
     pub(crate) filter: Option<String>,
 }
 
-/// Run the MCP server on stdio: in the open PhotoCraft window when the person lets agents use it
-/// (ArtCraft Launcher › Settings › AI agents), otherwise headless
+/// Run the MCP server on stdio: in the open Pigment window when the person lets agents use it
+/// (Preferences › AI Integrations › Let AI apps use this window), otherwise headless
 ///
 /// The open window is found again on every call, with no port or token to configure. Without
 /// the person's consent, or with --headless, it runs headless: each automation root grants that
 /// direction of file access; an omitted root denies it. Prefer absolute root paths in MCP client
-/// configurations. Bridge (--bridge or PHOTOCRAFT_CONTROL_PORT): a running `photocraft --control
+/// configurations. Bridge (--bridge or PHOTOCRAFT_CONTROL_PORT): a running `pigment --control
 /// <port>`; set the roots on the desktop app, root flags are refused, and the token flags require
 /// it.
 #[derive(Args)]
@@ -284,11 +284,11 @@ pub(crate) struct McpArgs {
     /// Always work headless, without the open window
     #[arg(long, conflicts_with = "when_closed")]
     pub(crate) headless: bool,
-    /// While agents may use PhotoCraft but it is closed: start it, serve a headless session, or
-    /// fail (default: the app's When PhotoCraft Is Closed setting)
+    /// While agents may use Pigment but it is closed: start it, serve a headless session, or
+    /// fail (default: the app's When Pigment Is Closed setting)
     #[arg(long, value_name = "launch|headless|error", value_parser = when_closed)]
     pub(crate) when_closed: Option<photocraft_engine::prefs::WhenAppClosed>,
-    /// Bridge to the PhotoCraft app listening here instead of a headless engine; a bare port means
+    /// Bridge to the Pigment app listening here instead of a headless engine; a bare port means
     /// 127.0.0.1:<PORT>
     #[arg(long, value_name = "127.0.0.1:PORT", env = "PHOTOCRAFT_CONTROL_PORT", value_parser = bridge)]
     pub(crate) bridge: Option<Bridge>,
@@ -502,10 +502,10 @@ pub(crate) fn parse(args: &[OsString]) -> Result<Cli, clap::Error> {
     if args.first().is_some_and(|a| a == "mcp") && args.iter().take_while(|a| *a != "--").any(|a| a == "--headless") {
         cmd = cmd.mut_subcommand("mcp", |sub| sub.mut_arg("bridge", |arg| arg.env(None::<&str>)));
     }
-    let argv = std::iter::once(OsString::from("photocraft-cli")).chain(args.iter().cloned());
+    let argv = std::iter::once(OsString::from("pigment-cli")).chain(args.iter().cloned());
     let matches = match cmd.try_get_matches_from_mut(argv) {
         Err(e) if args.iter().take_while(|a| *a != "--").any(|a| *a == "--help" || *a == "-h") => {
-            let help = [OsString::from("photocraft-cli"), args.first().cloned().unwrap_or_default(), OsString::from("--help")];
+            let help = [OsString::from("pigment-cli"), args.first().cloned().unwrap_or_default(), OsString::from("--help")];
             return Err(cmd.try_get_matches_from_mut(help).err().unwrap_or(e));
         }
         matches => matches.map_err(|e| name_env_vars(e, &cmd, args))?,

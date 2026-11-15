@@ -396,7 +396,7 @@ fn load_frames(path: &str, fmt: photocraft_color::PixelFormat, opts: &photocraft
     let is_img = |f: &std::path::Path| {
         matches!(
             f.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()).as_deref(),
-            Some("png" | "jpg" | "jpeg" | "tif" | "tiff" | "webp" | "bmp" | "gif" | "tga" | "exr" | "pcraft" | "psd")
+            Some("png" | "jpg" | "jpeg" | "tif" | "tiff" | "webp" | "bmp" | "gif" | "tga" | "exr" | "pcraft" | "pigment" | "psd")
         )
     };
     let files: Vec<std::path::PathBuf> = if p.is_dir() {

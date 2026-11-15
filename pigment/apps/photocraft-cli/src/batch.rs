@@ -21,7 +21,7 @@ fn same_dir(a: &Path, b: &Path) -> bool {
 
 pub(crate) fn is_input(p: &Path) -> bool {
     let known = |e: &str| {
-        matches!(e, "pcraft" | "psd" | "psb" | "pdn" | "ora" | "kra" | "krz" | "af" | "afdesign" | "afphoto" | "afpub")
+        matches!(e, "pcraft" | "pigment" | "psd" | "psb" | "pdn" | "ora" | "kra" | "krz" | "af" | "afdesign" | "afphoto" | "afpub")
             || photocraft_codecs::from_extension(e).is_some_and(|f| photocraft_codecs::caps(f).read)
     };
     p.is_file() && p.extension().is_some_and(|e| known(&e.to_string_lossy().to_ascii_lowercase()))
@@ -60,7 +60,7 @@ pub(crate) fn batch(a: &BatchArgs, out: &mut dyn Write, err: &mut dyn Write) -> 
         return Err(CliError::OutIsIn(out_dir.to_path_buf()));
     }
     let inputs: Vec<photocraft_engine::file_cmds::BatchInput> = if a.recursive {
-        photocraft_engine::file_cmds::list_images_tree(&in_dir.to_string_lossy(), &out_dir.to_string_lossy(), "photocraft-cli batch")?
+        photocraft_engine::file_cmds::list_images_tree(&in_dir.to_string_lossy(), &out_dir.to_string_lossy(), "pigment-cli batch")?
             .into_iter()
             .filter(|input| is_input(Path::new(&input.path)))
             .collect()

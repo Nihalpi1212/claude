@@ -38,7 +38,7 @@ fn has_display() -> bool {
 /// The dialog's text: the error, the renderer that was tried and why it wasn't the preference,
 /// the version and, when one was opened, the log file.
 pub fn text(error: &str, renderer: &str, note: Option<&str>, version: &str, log: Option<&Path>) -> String {
-    let mut text = format!("PhotoCraft could not start.\n\n{error}\n\nRenderer: {renderer}");
+    let mut text = format!("Pigment could not start.\n\n{error}\n\nRenderer: {renderer}");
     if let Some(note) = note {
         text.push_str(&format!("\nStartup: {note}"));
     }
@@ -57,7 +57,7 @@ pub fn show(error: &str, renderer: &str, note: Option<&str>, log: Option<&Path>)
     log::info!("showing the startup-failure dialog");
     let _ = rfd::MessageDialog::new()
         .set_level(rfd::MessageLevel::Error)
-        .set_title(photocraft_ui_egui::i18n::t("PhotoCraft could not start"))
+        .set_title(photocraft_ui_egui::i18n::t("Pigment could not start"))
         .set_description(body)
         .set_buttons(rfd::MessageButtons::Ok)
         .show();
@@ -77,15 +77,11 @@ mod tests {
 
     #[test]
     fn the_text_names_the_error_renderer_version_and_log() {
-        let log = Path::new("/home/me/.config/photocraft/logs/photocraft.log");
+        let log = Path::new("/home/me/.config/pigment/logs/pigment.log");
         let body = text("no adapter for Vulkan", "dx12", None, "0.15.1 (abc1234)", Some(log));
-        for part in [
-            "could not start",
-            "no adapter for Vulkan",
-            "Renderer: dx12",
-            "Version: 0.15.1 (abc1234)",
-            "Log file: /home/me/.config/photocraft/logs/photocraft.log",
-        ] {
+        for part in
+            ["could not start", "no adapter for Vulkan", "Renderer: dx12", "Version: 0.15.1 (abc1234)", "Log file: /home/me/.config/pigment/logs/pigment.log"]
+        {
             assert!(body.contains(part), "{part:?} missing from {body:?}");
         }
         assert!(!body.contains("Startup:"), "no fallback to explain: {body:?}");

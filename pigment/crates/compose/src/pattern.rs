@@ -131,7 +131,7 @@ impl<'a> PreparedPatterns<'a> {
                         use std::io::Write as _;
                         let _ = writeln!(
                             std::io::stderr(),
-                            "photocraft: pattern \"{}\" is past this render's pattern memory ({} MiB) and is converted again as tiles need it",
+                            "pigment: pattern \"{}\" is past this render's pattern memory ({} MiB) and is converted again as tiles need it",
                             p.display_name(),
                             self.budget >> 20
                         );

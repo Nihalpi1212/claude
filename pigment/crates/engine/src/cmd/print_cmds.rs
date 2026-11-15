@@ -417,7 +417,7 @@ fn cups_spool(job: &PrintJob) -> std::result::Result<String, SpoolError> {
     let default = printers.iter().find(|p| p.is_default).map(|p| p.name.clone());
     let printer = resolve_printer(job.printer.as_deref(), default.as_deref(), &printers)?;
     let is_class = printers.iter().any(|p| p.name == printer && p.is_class);
-    let user = std::env::var("USER").or_else(|_| std::env::var("USERNAME")).unwrap_or_else(|_| "photocraft".into());
+    let user = std::env::var("USER").or_else(|_| std::env::var("USERNAME")).unwrap_or_else(|_| "pigment".into());
     let id = photocraft_ipp::print_job(
         &ep,
         &photocraft_ipp::Job { printer: &printer, is_class, title: &job.title, user: &user, copies: job.copies, document: &job.pdf, format: "application/pdf" },
@@ -1451,9 +1451,10 @@ fn package(s: &mut Session, p: &Value) -> Result<Value> {
     // The native format keeps external links; our PSD writer has no `lnkE` (external linked
     // file) support yet, so a PSD package would embed or flatten them.
     let ext = match p.get("format").and_then(Value::as_str) {
+        // Pigment's native files are `.pigment`; `pcraft` stays the format's id (docs/FORK.md).
         Some(f @ ("psd" | "psb" | "pcraft")) => f.to_string(),
-        Some(f) => return Err(bad(cmd, format!("unknown package format `{f}` (pcraft|psd|psb)"))),
-        None => "pcraft".into(),
+        Some("pigment") | None => photocraft_format::brand::EXTENSION.into(),
+        Some(f) => return Err(bad(cmd, format!("unknown package format `{f}` (pigment|pcraft|psd|psb)"))),
     };
     let folder = join(&dir, &crate::file_cmds::sanitize(&name));
     let links_dir = join(&folder, "Links");
@@ -1551,7 +1552,7 @@ pub fn paths_to_ai(doc: &Document, which: &str) -> Result<(String, usize)> {
         name => chosen.extend(doc.paths.iter().filter(|p| p.name == name).map(|p| &p.path)),
     }
     let mut s = String::new();
-    s.push_str("%!PS-Adobe-2.0 EPSF-1.2\n%%Creator: PhotoCraft\n");
+    s.push_str("%!PS-Adobe-2.0 EPSF-1.2\n%%Creator: Pigment\n");
     s.push_str(&format!("%%Title: ({})\n", ps_comment_text(&doc.name).replace([')', '('], "_")));
     s.push_str(&format!(
         "%%BoundingBox: 0 0 {} {}\n%%HiResBoundingBox: 0 0 {w:.4} {h:.4}\n%AI3_Cropmarks: 0 0 {w:.4} {h:.4}\n",
@@ -1684,7 +1685,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Package…",
             &["File"],
             None,
-            r##"{"dir":folder,"format":"pcraft|psd|psb"="pcraft"} → {folder, document, links, missing} (copies the document and its linked files into <dir>/<name>/, relinked to Links/)"##,
+            r##"{"dir":folder,"format":"pigment|pcraft|psd|psb"="pigment"} → {folder, document, links, missing} (copies the document and its linked files into <dir>/<name>/, relinked to Links/)"##,
             native_doc,
             package
         ),

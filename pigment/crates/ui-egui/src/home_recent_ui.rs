@@ -266,7 +266,7 @@ fn load_thumbnail_image_bounded(path: &str, file_len: u64) -> Option<ColorImage>
     };
 
     // 2. If .pcraft, read the embedded thumbnail PNG
-    if ext.eq_ignore_ascii_case("pcraft") {
+    if photocraft_format::brand::is_native_extension(ext) {
         if std_path.is_dir() {
             let thumb_path = std_path.join("thumb.png");
             if let Ok(thumb_meta) = std::fs::metadata(&thumb_path)

@@ -29,7 +29,7 @@ pub enum Backend {
     /// A running desktop app reached over the control protocol.
     Bridge(Arc<BridgeClient>),
     /// The desktop app found through its connection file before each call, or the closed-app
-    /// choice (plain `photocraft-cli mcp`, see [`crate::live`]).
+    /// choice (plain `pigment-cli mcp`, see [`crate::live`]).
     Live(Arc<Live>),
 }
 
@@ -601,8 +601,8 @@ fn place_options(p: &PlaceParams) -> Value {
 fn bridge_only(name: &str) -> Result<CallToolResult, McpError> {
     Ok(fail(format!(
         "`{name}` drives the live GUI and needs bridge mode: start the app with \
-         `photocraft --control <port> --control-token-file <path>`, then run \
-         `photocraft-cli mcp --bridge 127.0.0.1:<port> --control-token-file <path>`"
+         `pigment --control <port> --control-token-file <path>`, then run \
+         `pigment-cli mcp --bridge 127.0.0.1:<port> --control-token-file <path>`"
     )))
 }
 
@@ -624,7 +624,7 @@ impl PhotocraftMcp {
     }
 
     /// Serve the desktop app found through its connection file, or headless without consent
-    /// (plain `photocraft-cli mcp`).
+    /// (plain `pigment-cli mcp`).
     pub fn live(config: LiveConfig) -> Self {
         Self::with_backend(Backend::Live(Arc::new(Live::new(config))))
     }
@@ -941,8 +941,8 @@ impl PhotocraftMcp {
         self.run_command("file.new".into(), Value::Object(params), true).await
     }
 
-    #[tool(description = "Save the document. `.pcraft` is the lossless native format (incremental); other extensions \
-        (psd, png, jpg, tif, webp, exr, …) export. Without `path` only a PSD, PSB or .pcraft document is written back to its own file. `pcraftFullComposite` requests `composite/full.png`, which may be omitted; check the manifest's `full_composite` member. Returns warnings about anything the format cannot hold.")]
+    #[tool(description = "Save the document. `.pigment` (or `.pcraft`, the same format) is the lossless native format (incremental); other extensions \
+        (psd, png, jpg, tif, webp, exr, …) export. Without `path` only a PSD, PSB, .pigment or .pcraft document is written back to its own file. `pcraftFullComposite` requests `composite/full.png`, which may be omitted; check the manifest's `full_composite` member. Returns warnings about anything the format cannot hold.")]
     async fn doc_save(&self, Parameters(p): Parameters<SaveParams>) -> Result<CallToolResult, McpError> {
         self.save_impl(p).await
     }
@@ -1200,7 +1200,9 @@ impl PhotocraftMcp {
             }
             if !same_target(pinned.as_ref(), self.target().as_ref()) {
                 failed += 1;
-                results.push(json!({"ok": false, "error": "PhotoCraft restarted (or the session changed) during the batch; this step and the ones after it did not run"}));
+                results.push(
+                    json!({"ok": false, "error": "Pigment restarted (or the session changed) during the batch; this step and the ones after it did not run"}),
+                );
                 break;
             }
             let response = self.step(s.id, s.params.unwrap_or_else(|| json!({})), s.wait.unwrap_or(true), &mut waiter, (i, total)).await;

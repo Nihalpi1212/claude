@@ -186,7 +186,7 @@ impl AuthorizedWorkspace {
         }
         if exists && !written_kind(&leaf) && !holds_image(&root.dir, &relative) {
             return Err(AutomationError::BadRequest(format!(
-                "automation write refused: `{path}` already exists and is not an image or document file PhotoCraft writes; save to a new name"
+                "automation write refused: `{path}` already exists and is not an image or document file Pigment writes; save to a new name"
             )));
         }
         let parent = relative.parent().map(Path::to_path_buf).unwrap_or_default();
@@ -255,7 +255,8 @@ impl Drop for TempRemoval<'_> {
 fn written_kind(name: &str) -> bool {
     let Some((_, ext)) = name.rsplit_once('.') else { return false };
     let ext = ext.to_ascii_lowercase();
-    ["psd", "psb", "ora", "pdf", photocraft_format::EXTENSION].contains(&ext.as_str())
+    ["psd", "psb", "ora", "pdf"].contains(&ext.as_str())
+        || photocraft_format::brand::is_native_extension(&ext)
         || photocraft_codecs::from_extension(&ext).is_some_and(|format| format.caps().write)
 }
 

@@ -174,8 +174,8 @@ fn render_start_rail(app: &mut PhotocraftApp, ui: &mut egui::Ui, rail_w: f32) {
 
     ui.add_space(8.0);
 
-    render_rail_link(app, ui, rail_w, tl!("Website"), "link", crate::links::APP_PAGE);
-    render_rail_link(app, ui, rail_w, tl!("Discord"), "message-square", crate::links::DISCORD);
+    render_rail_link(app, ui, rail_w, tl!("Releases"), "link", crate::links::RELEASES);
+    render_rail_link(app, ui, rail_w, tl!("Report an Issue"), "message-square", crate::links::ISSUES);
     render_rail_link(app, ui, rail_w, tl!("GitHub"), "link-2", crate::links::GITHUB);
 }
 
@@ -208,7 +208,7 @@ fn render_start_content(app: &mut PhotocraftApp, ui: &mut egui::Ui, recent: &[St
 
         ui.add_space(10.0);
 
-        let title_galley = ui.painter().layout_no_wrap(tl!("PhotoCraft").into(), crate::theme::semibold(20.0), t.text);
+        let title_galley = ui.painter().layout_no_wrap(tl!("Pigment").into(), crate::theme::semibold(20.0), t.text);
         let (title_r, _) = ui.allocate_exact_size(title_galley.size(), Sense::hover());
         ui.painter().galley(title_r.min, title_galley, t.text);
     });

@@ -1147,7 +1147,7 @@ pub fn settle() {
 
 fn log_error(msg: &str) {
     #[cfg(not(target_arch = "wasm32"))]
-    eprintln!("photocraft: {msg}");
+    eprintln!("pigment: {msg}");
     #[cfg(target_arch = "wasm32")]
     let _ = msg;
 }

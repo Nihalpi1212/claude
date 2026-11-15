@@ -1,7 +1,7 @@
-//! Connecting AI agents to the open desktop app: whether the person lets them (one switch, in
-//! the ArtCraft Launcher, [`agents_allowed`]), and how a local client finds the app's control
-//! server without being told. Adding PhotoCraft to MCP clients is the launcher's job (one entry
-//! for every Craft app), so nothing here writes a client's configuration.
+//! Connecting AI agents to the open desktop app: whether the person lets them (Pigment's own
+//! switch, Preferences › AI Integrations, [`agents_allowed`]; PhotoCraft's ArtCraft Launcher
+//! switch is never read), and how a local client finds the app's control server without being
+//! told. Nothing here writes an MCP client's configuration.
 //!
 //! While agents may connect (and no `--control` was given), the app serves its control protocol
 //! on loopback and publishes where in its settings folder ([`CONNECTION_FILE`]): the port, its
@@ -35,8 +35,8 @@ use crate::AutomationError;
 pub const CONNECTION_FILE: &str = "agent-connection.json";
 /// The bearer-token file the app keeps in its settings folder for agent connections.
 pub const TOKEN_FILE: &str = "agent-control.token";
-/// The server name MCP clients list PhotoCraft under.
-pub const SERVER_NAME: &str = "photocraft";
+/// The server name MCP clients list Pigment under.
+pub const SERVER_NAME: &str = "pigment";
 /// How long [`probe`] waits for the app to accept a connection.
 pub const PROBE_TIMEOUT: Duration = Duration::from_millis(500);
 /// Version of the [`Connection`] file format.
@@ -182,34 +182,33 @@ pub fn read_integrations(dir: &Path) -> Integrations {
 
 // ---- The agents switch -------------------------------------------------------------------------
 
-/// The id the ArtCraft Launcher's app list names PhotoCraft by.
+/// The id the ArtCraft Launcher's app list names PhotoCraft by. Pigment never reads that list.
 pub const LAUNCHER_APP_ID: &str = "photocraft";
 
-/// The suite's `AI-MCP` feature flag (`ArtCraft/flags.toml` or `CRAFT_FLAGS`).
+/// The suite's `AI-MCP` feature flag. Pigment reads no suite flags file (`ArtCraft/flags.toml`,
+/// `CRAFT_FLAGS`): always off, so PhotoCraft's launcher-switch mode never applies (docs/FORK.md).
 pub fn mcp_flag() -> bool {
-    craft_flags::load().enabled(&craft_flags::AI_MCP)
+    false
 }
 
-/// The ArtCraft Launcher's switch (Settings › AI agents › *Let AI agents use Craft apps*) lets
-/// agents use PhotoCraft: the `AI-MCP` flag is on and the launcher's app list names PhotoCraft,
-/// read through `craft-ai-agents` like the launcher, the MCP gateway and every Craft app do. Reads
-/// two small files; ask from a timer, not every frame.
+/// The ArtCraft Launcher's switch. Pigment never reads the launcher's files (`craft-ai-agents`):
+/// always off. Pigment's own switch is Preferences › AI Integrations › Let AI Apps Use This
+/// Window (`connectAgents`).
 pub fn launcher_allows_agents() -> bool {
-    mcp_flag() && craft_ai_agents::allowed(LAUNCHER_APP_ID)
+    false
 }
 
-/// Whether agents may use the open window. With the `AI-MCP` flag only the launcher's switch
-/// decides: there is one switch for every Craft app, and none in PhotoCraft. Without the flag it
-/// is as on `main`: a Control Port saved in the preferences (`connect_agents`, set from it when
-/// the preferences load). Allow Agent Control off still refuses agents either way.
+/// Whether agents may use the open window. With the `AI-MCP` flag (PhotoCraft's mode, never on in
+/// Pigment) only the launcher's switch decides. Otherwise Pigment's own preference does:
+/// `connect_agents` (Let AI Apps Use This Window, also set from a Control Port saved by an older
+/// version), off by default. Allow Agent Control off still refuses agents either way.
 pub fn agents_allowed(integrations: &Integrations, mcp_flag: bool, launcher: bool) -> bool {
     if mcp_flag { launcher } else { integrations.connect_agents }
 }
 
-/// [`agents_allowed`] for this run: the flag and the launcher's switch as they are now.
+/// [`agents_allowed`] for this run: Pigment's preference alone.
 pub fn agents_allowed_now(integrations: &Integrations) -> bool {
-    let flag = mcp_flag();
-    agents_allowed(integrations, flag, flag && craft_ai_agents::allowed(LAUNCHER_APP_ID))
+    agents_allowed(integrations, mcp_flag(), launcher_allows_agents())
 }
 
 #[cfg(test)]
@@ -226,6 +225,13 @@ mod tests {
     }
 
     #[test]
+    fn pigment_reads_neither_the_suite_flag_nor_the_launcher() {
+        assert!(!mcp_flag() && !launcher_allows_agents());
+        assert!(!agents_allowed_now(&Integrations::default()), "off by default");
+        assert!(agents_allowed_now(&Integrations { connect_agents: true, ..Default::default() }), "Pigment's own switch");
+    }
+
+    #[test]
     fn with_the_flag_only_the_launchers_switch_lets_agents_in() {
         let legacy = Integrations { connect_agents: true, ..Default::default() };
         let none = Integrations::default();
@@ -234,7 +240,7 @@ mod tests {
         assert!(!agents_allowed(&none, false, true), "the launcher's list means nothing without the flag");
         // With the flag: the launcher's switch, and nothing else.
         assert!(agents_allowed(&none, true, true));
-        assert!(!agents_allowed(&legacy, true, false), "no second switch in PhotoCraft");
+        assert!(!agents_allowed(&legacy, true, false), "no second switch in Pigment");
     }
 
     #[test]

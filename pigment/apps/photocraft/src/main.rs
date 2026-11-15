@@ -73,6 +73,8 @@ mod startup_report;
 // Tablet support (macOS AppKit monitor, Linux X11/Wayland, Windows barrel button).
 mod tablet;
 mod ui_state;
+// PhotoCraft's update check, kept for upstream merges but not wired in (docs/FORK.md).
+#[allow(dead_code)]
 mod updates;
 mod window_frame;
 
@@ -159,7 +161,7 @@ fn control_port_for(cli: Option<u16>, prefs: &photocraft_engine::prefs::Integrat
     if !prefs.allow_agent_control {
         let warning = cli.map(|p| {
             format!(
-                "photocraft: Preferences › AI Integrations › Allow Agent Control is off: not listening on port {p}
+                "pigment: Preferences › AI Integrations › Allow Agent Control is off: not listening on port {p}
 "
             )
         });
@@ -178,7 +180,7 @@ fn native_options(custom_titlebar: bool) -> eframe::NativeOptions {
     eframe::NativeOptions {
         viewport: viewport
             .with_app_id(APP_ID)
-            .with_title("PhotoCraft")
+            .with_title("Pigment")
             .with_inner_size([1440.0, 900.0])
             .with_min_inner_size(photocraft_ui_egui::MIN_WINDOW_SIZE)
             .with_drag_and_drop(true)
@@ -227,7 +229,9 @@ fn at_least_min_size(mut builder: egui::ViewportBuilder) -> egui::ViewportBuilde
 fn attach_log_file(logger: Option<&'static logging::AppLogger>) {
     if let (Some(logger), Some(dir)) = (logger, services::config_dir()) {
         match logger.attach_dir(&dir.join("logs")) {
-            Ok(path) => log::info!("PhotoCraft {}, log file {}", photocraft_engine::build_info::long_version(), path.display()),
+            Ok(path) => {
+                log::info!("{} ({}), log file {}", photocraft_format::brand::version_line(), photocraft_engine::build_info::long_version(), path.display())
+            }
             // Standard error only by now (`attach_dir` gave up on the file); unlike `eprintln!`, never panics.
             Err(e) => log::warn!("no log file: {e}"),
         }
@@ -261,7 +265,7 @@ fn claim_single_instance(
     };
     match (single_instance::skip_reason(&context), services::config_dir()) {
         (Some(reason), _) => {
-            log::info!("running as a separate PhotoCraft: {reason}");
+            log::info!("running as a separate Pigment: {reason}");
             Continue(None)
         }
         (None, None) => Continue(None),
@@ -269,12 +273,12 @@ fn claim_single_instance(
             let paths: Vec<String> = files.iter().map(|f| single_instance::absolute(f)).collect();
             match single_instance::claim(&dir, &paths) {
                 single_instance::Launch::Forwarded => {
-                    log::info!("handed {} file(s) to the running PhotoCraft", paths.len());
+                    log::info!("handed {} file(s) to the running Pigment", paths.len());
                     Break(())
                 }
                 single_instance::Launch::Primary(primary) => Continue(Some(primary)),
                 single_instance::Launch::Standalone(reason) => {
-                    log::warn!("starting a separate PhotoCraft: {reason}");
+                    log::warn!("starting a separate Pigment: {reason}");
                     Continue(None)
                 }
             }
@@ -295,7 +299,7 @@ fn linux_display_session() -> linux_libs::DisplaySession {
         && std::env::var_os("DISPLAY").is_some_and(|d| !d.is_empty())
         && linux_libs::available(linux_libs::DisplaySession::X11)
     {
-        eprintln!("photocraft: opening the window through Xwayland (Preferences › Performance › Linux display server)");
+        eprintln!("pigment: opening the window through Xwayland (Preferences › Performance › Linux display server)");
         linux_libs::DisplaySession::X11
     } else {
         session
@@ -360,7 +364,7 @@ fn control_setup_in(
     let listener = match std::net::TcpListener::bind(("127.0.0.1", port)) {
         Ok(listener) => listener,
         Err(error) => {
-            eprintln!("photocraft: control server failed to bind 127.0.0.1:{port}: {error}");
+            eprintln!("pigment: control server failed to bind 127.0.0.1:{port}: {error}");
             std::process::exit(2);
         }
     };
@@ -368,26 +372,26 @@ fn control_setup_in(
     let token = match photocraft_automation::security::server_token(supplied.as_deref(), token_file.as_deref()) {
         Ok(token) => token,
         Err(e) => {
-            eprintln!("photocraft: cannot configure control authentication: {e}");
+            eprintln!("pigment: cannot configure control authentication: {e}");
             std::process::exit(2);
         }
     };
     if let Some(path) = &token_file {
-        eprintln!("photocraft: control token file: {}", path.display());
+        eprintln!("pigment: control token file: {}", path.display());
     } else if supplied.is_none() {
-        eprintln!("photocraft: control token: {token}");
+        eprintln!("pigment: control token: {token}");
     } else {
-        eprintln!("photocraft: using supplied control token");
+        eprintln!("pigment: using supplied control token");
     }
     let (workspace, warning) = match automation_workspace(automation, prefs) {
         Ok(workspace) => workspace,
         Err(error) => {
-            eprintln!("photocraft: cannot configure automation workspace: {error}");
+            eprintln!("pigment: cannot configure automation workspace: {error}");
             std::process::exit(2);
         }
     };
     if let Some(warning) = &warning {
-        eprintln!("photocraft: {warning}");
+        eprintln!("pigment: {warning}");
         log::warn!("{warning}");
     }
     let warning = warning.map(|w| ControlNotice { title: "Automation folder not used", lines: w.lines().map(str::to_owned).collect() });
@@ -415,14 +419,8 @@ fn main() -> eframe::Result {
     // Then, so the panic hook and every start-up warning are recorded (`logging`).
     let logger = logging::install();
     crash_guard::install_hook();
-    #[cfg(not(target_arch = "wasm32"))]
-    if let Some(done) = craft_update::self_update::finish(&photocraft_ui_egui::UPDATE_APP, &std::env::args_os().skip(1).collect::<Vec<_>>()) {
-        if let Err(e) = done {
-            eprintln!("PhotoCraft update helper failed: {e}");
-            std::process::exit(1);
-        }
-        return Ok(());
-    }
+    // Pigment installs no updates (docs/FORK.md): craft-update's Windows update helper
+    // (`--finish-update`, `craft_update::self_update::finish`) is not wired in.
 
     // The system font scan can take seconds (minutes on some Macs): run it off the UI thread.
     photocraft_ui_egui::type_tool::warm_fonts();
@@ -430,7 +428,7 @@ fn main() -> eframe::Result {
     // option, a missing or bad value, a bad PHOTOCRAFT_CONTROL_PORT: issues #701, #6429, #6431)
     // names the argument on standard error and exits 2, so a launcher sees the failure. Neither
     // panics when the stream is closed or a pipe (`photocraft --help | head -1`).
-    let launch = launch_args::parse(launch_args::command(), std::env::args_os().skip(1)).unwrap_or_else(|e| e.exit());
+    let launch = launch_args::parse(launch_args::command(), std::env::args_os().skip(1)).unwrap_or_else(|e| launch_args::exit(e));
     let launch_args::FileNames { openable: files, unreadable: unreadable_paths } = launch.file_names();
     let launch_args::LaunchArgs {
         files: _,
@@ -564,7 +562,7 @@ fn main() -> eframe::Result {
     let created_in_callback = app_created.clone();
     let started_sentinel = sentinel.clone();
     let result = eframe::run_native(
-        "PhotoCraft",
+        "Pigment",
         options,
         Box::new(move |cc| {
             created_in_callback.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -688,16 +686,10 @@ fn main() -> eframe::Result {
                 }
             });
             // Agents in the open window, unless the launch flags (`--control`) manage the
-            // connection. Behind the suite's AI-MCP feature flag, the ArtCraft Launcher's switch
-            // (Settings › AI agents) is the one consent; without it, as before, a Control Port.
-            let flags = craft_flags::load();
-            for problem in &flags.problems {
-                log::warn!("feature flags: {problem}");
-            }
-            app.agent_link.mcp_flag = flags.enabled(&craft_flags::AI_MCP);
-            if app.agent_link.mcp_flag {
-                app.services.launcher_agents = Some(agent_link::launcher_watch(&cc.egui_ctx));
-            }
+            // connection. Pigment's own switch (Preferences › AI Integrations, `connectAgents`) is
+            // the one consent: it reads neither the suite's feature flags nor the ArtCraft
+            // Launcher's switch (docs/FORK.md).
+            app.agent_link.mcp_flag = photocraft_automation::agent_link::mcp_flag();
             if let Some((listener, token, _)) = control {
                 app.agent_link.launch_flags = true;
                 app.agent_link.port = listener.local_addr().ok().map(|a| a.port());
@@ -840,7 +832,7 @@ fn main() -> eframe::Result {
     // file to attach (#7643). A terminal or automation launch can read standard error or the
     // exit status instead, so it keeps the silent exit.
     if let Err(error) = &result {
-        log::error!("PhotoCraft could not start: {error}");
+        log::error!("Pigment could not start: {error}");
         if startup_report::needs_dialog(control_port.is_some()) {
             startup_report::show(&error.to_string(), &started_renderer, started_note.as_deref(), logger.and_then(logging::AppLogger::path).as_deref());
         }
@@ -1034,7 +1026,7 @@ mod tests {
             .with_fullscreen(true)
             .with_maximized(true);
         let opened = hook(saved);
-        assert_eq!(opened.fullscreen, Some(false), "Standard Screen Mode is where PhotoCraft starts");
+        assert_eq!(opened.fullscreen, Some(false), "Standard Screen Mode is where Pigment starts");
         assert_eq!(opened.maximized, Some(true), "the rest of the saved geometry is kept");
         assert_eq!(opened.inner_size, Some(egui::vec2(2560.0, 1392.0)));
     }
@@ -1242,7 +1234,7 @@ mod tests {
     /// so it has to be the class the window carries: the app id, on Wayland and X11 alike.
     #[test]
     fn the_desktop_entry_names_the_window_class() {
-        let entry = include_str!("../../../packaging/linux/ai.storyteller.photocraft.desktop");
+        let entry = include_str!("../../../packaging/linux/io.github.nihalpi1212.pigment.desktop");
         let class = entry.lines().find_map(|line| line.strip_prefix("StartupWMClass="));
         assert_eq!(class, Some(super::APP_ID));
     }
@@ -1256,14 +1248,14 @@ mod tests {
         let rev = std::fs::read_to_string(root.join("craft-i18n.rev")).unwrap();
         let rev = rev.trim();
         assert!(rev.len() == 40 && rev.bytes().all(|b| b.is_ascii_hexdigit()), "craft-i18n.rev holds one full SHA: {rev:?}");
-        for manifest in ["ai.storyteller.photocraft.yml", "ai.storyteller.photocraft.bundle.yml"] {
+        for manifest in ["io.github.nihalpi1212.pigment.yml", "io.github.nihalpi1212.pigment.bundle.yml"] {
             let text = std::fs::read_to_string(root.join("packaging/linux/flatpak").join(manifest)).unwrap();
             let source = text.split("url: https://github.com/storytold/craft-i18n").nth(1).unwrap_or_else(|| panic!("{manifest}: a craft-i18n git source"));
             let source = source.split("- type:").next().unwrap_or(source);
             let commit =
                 source.lines().find_map(|l| l.trim().strip_prefix("commit:")).unwrap_or_else(|| panic!("{manifest}: the craft-i18n source pins a commit"));
             assert_eq!(commit.trim().trim_matches(['\'', '"']), rev, "{manifest}");
-            assert!(text.contains("CRAFT_I18N_DIR: /run/build/photocraft/craft-i18n"), "{manifest}: the build names the catalogs");
+            assert!(text.contains("CRAFT_I18N_DIR: /run/build/pigment/craft-i18n"), "{manifest}: the build names the catalogs");
         }
     }
 }

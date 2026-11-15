@@ -71,7 +71,7 @@ fn apply(running: &mut Option<Running>, dir: Option<&Path>, integrations: &Integ
     }
     let Some(dir) = dir else {
         out.stopped = running.take().is_some();
-        out.status.error = Some("Agents can't connect: PhotoCraft has no settings folder (no home folder).".into());
+        out.status.error = Some("Agents can't connect: Pigment has no settings folder (no home folder).".into());
         return out;
     };
     if running.as_ref().is_none_or(|r| r.port_pref != integrations.control_port) {
@@ -112,12 +112,15 @@ fn apply(running: &mut Option<Running>, dir: Option<&Path>, integrations: &Integ
 }
 
 /// How often [`launcher_watch`] looks at the ArtCraft Launcher's files.
+#[allow(dead_code)]
 const LAUNCHER_POLL: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// Whether the ArtCraft Launcher turned agents on for every Craft app
 /// ([`agent_link::launcher_allows_agents`]), watched on its own thread so the UI can ask every
 /// frame without touching the disk. A change wakes the UI, which then starts or stops the
 /// connection. Without a thread (one couldn't be started) the answer stays what it was at launch.
+// Pigment never watches the ArtCraft Launcher (main.rs); kept for upstream merges.
+#[allow(dead_code)]
 pub fn launcher_watch(ctx: &egui::Context) -> Box<dyn Fn() -> bool> {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};

@@ -3,6 +3,10 @@ use super::items::MenuItem;
 use super::{DOCUMENT_ITEM, PhotocraftApp, Value};
 
 pub fn is_enabled(app: &PhotocraftApp, id: &str) -> bool {
+    // Pigment's Check for Updates is a link to its releases page (`updates_ui::check`).
+    if id == "help.checkForUpdates" {
+        return true;
+    }
     if id == "layer.selectUnderCursor" {
         return app.session.active().is_some() && app.drag.is_none() && app.brush_resize.is_none();
     }
