@@ -1,392 +1,468 @@
-# Pigment
+<p align="center">
+  <a href="https://getartcraft.com/">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="docs/brand/artcraft-logo-white.svg">
+      <img alt="ArtCraft" src="docs/brand/artcraft-logo.svg" width="200">
+    </picture>
+  </a>
+</p>
 
-A free, open-source image editor for **Windows** and **macOS** (Linux too) that covers what people use
-Adobe Photoshop for: layers and masks, painting and retouching, selections, adjustments, filters,
-layer styles, text and vector shapes, image modes, actions and batch processing, with Photoshop's
-shortcuts and PSD files. No account, no subscription, no telemetry.
+<p align="center">
+  <img src="assets/app-icon/hicolor/256x256/apps/ai.storyteller.photocraft.png" width="128" height="128" alt="PhotoCraft icon: an engraved nine-tailed fox on a blue tile">
+</p>
 
-Built with [Electron](https://www.electronjs.org/) and plain JavaScript (no framework, no bundler),
-with [ag-psd](https://github.com/Agamnentzar/ag-psd) for Photoshop files and
-[HarfBuzz](https://harfbuzz.github.io/) (harfbuzzjs) for text shaping. MIT licensed.
+<h1 align="center">PhotoCraft</h1>
+
+<p align="center">
+  <b>Image editing; an open-source, clean-room reimplementation of Adobe Photoshop, rebuilt in pure Rust.</b><br>
+  Layers, masks, adjustment layers, layer styles, type, vectors, brushes and real PSD files,<br>
+  in a native app written entirely in Rust. Open source, offline, and yours.
+</p>
+
+<p align="center">
+  <img alt="100% Rust" src="https://img.shields.io/badge/100%25-Rust-b7410e?style=flat-square&logo=rust">
+  <img alt="macOS · Windows · Linux · FreeBSD · Web" src="https://img.shields.io/badge/macOS%20%C2%B7%20Windows%20%C2%B7%20Linux%20%C2%B7%20FreeBSD%20%C2%B7%20Web-native-2f7bf5?style=flat-square">
+  <img alt="License: MIT OR Apache-2.0" src="https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-3a3a3a?style=flat-square">
+  <img alt="Status: early alpha" src="https://img.shields.io/badge/status-early%20alpha-d69e2e?style=flat-square">
+  <br>
+  <a href="https://sonarcloud.io/project/overview?id=storytold_photocraft"><img alt="Scanned by SonarCloud" src="https://img.shields.io/badge/Scanned_by-SonarCloud-4b9fd5?style=flat-square&logo=sonarqubecloud&logoColor=white"></a>
+  <a href="https://coderabbit.ai"><img alt="Reviewed by CodeRabbit" src="https://img.shields.io/coderabbit/prs/github/storytold/photocraft?style=flat-square&label=Reviewed%20by%20CodeRabbit&logo=coderabbit"></a>
+</p>
+
+<p align="center">
+  <a href="https://discord.gg/artcraft"><img alt="Join the ArtCraft community on Discord" src="https://img.shields.io/badge/Join%20us%20on%20Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" height="40"></a>
+</p>
+
+<p align="center">
+  <a href="https://getartcraft.com/apps/photocraft"><b>PhotoCraft on getartcraft.com</b></a> ·
+  <a href="https://getartcraft.com/">ArtCraft</a> ·
+  <a href="https://getartcraft.com/apps">All Crafting Apps</a>
+</p>
+
+<br>
+
+<p align="center">
+  <img src="docs/images/photocraft-demo.jpg" alt="PhotoCraft editing Hokusai's The Great Wave: a caption card with a drop shadow, Title and Credit type layers, Vibrance and Curves adjustment layers, and the Curves editor drawn over the image's histogram" width="100%">
+  <br>
+  <sub>A caption card with a drop shadow, live type, and Vibrance and Curves adjustment layers, with the Curves editor open.<br>
+  <i>The Great Wave off Kanagawa</i>, Katsushika Hokusai, c. 1831</sub>
+</p>
+
+> [!NOTE]
+> **ArtCraft is a community of artists from all walks of life.** Digital, generative, music,
+> games &mdash; if you make things, you're one of us. **[Come say hi on Discord](https://discord.gg/artcraft).**
+
+<p align="center">
+  <a href="#features">Features</a> ·
+  <a href="#everything-in-the-box">Everything in the box</a> ·
+  <a href="#psd-without-compromise">PSD</a> ·
+  <a href="#built-for-agents">Agents</a> ·
+  <a href="#under-the-hood">Under the hood</a> ·
+  <a href="#get-started">Get started</a> ·
+  <a href="#downloads">Downloads</a> ·
+  <a href="#the-crafting-apps">Crafting Apps</a> ·
+  <a href="https://discord.gg/artcraft">Discord</a>
+</p>
+
+<br>
+
+<table>
+  <tr>
+    <td width="25%" valign="top">
+      <h3>🎛️ Familiar by design</h3>
+      The menus, shortcuts, panels and tools are where your hands expect them, from ⌘J to ⇧⌘D. If you know Photoshop, you already know PhotoCraft.
+    </td>
+    <td width="25%" valign="top">
+      <h3>⚡ Native and fast</h3>
+      A GPU compositor on wgpu (Metal, Vulkan, DX12, WebGPU), copy-on-write tiles and multithreaded filters. No Electron, no web view, no waiting.
+    </td>
+    <td width="25%" valign="top">
+      <h3>🗂️ Real PSD files</h3>
+      Open, edit and save layered Photoshop documents. Re-saving keeps the render of 307 of the 309 psd-tools test files.
+    </td>
+    <td width="25%" valign="top">
+      <h3>🤖 Agent-ready</h3>
+      Every action is a command, so you can drive the same engine from the UI, the CLI, a JSON control channel or an MCP server.
+    </td>
+  </tr>
+</table>
+
+<br>
 
 ## Features
 
-**Documents and files**
-- Tabs for several images, drag and drop, "Open with" from the file manager, recent files, quick-start sizes
-- Open PSD/PSB (layers, groups, masks, opacity, blend modes, visibility), PNG (8- and 16-bit, palette),
-  JPEG, WebP, GIF, TIFF, Targa, BMP, AVIF, SVG, ICO; Open as Smart Object
-- Save layered work as **.pigment** (zip with PNG layers, masks, styles, channels, paths, guides,
-  16/32-bit pixels) or **.psd**; Save As also writes PNG, JPEG, WebP, GIF, TIFF and Targa
-- Export As PNG, PNG-8, 16-bit PNG, JPEG, WebP, GIF, TIFF (8/16/32-bit, LZW / Deflate / PackBits) and
-  Targa with quality, scale and size; quick PNG export; export layers to files; Quick Export and
-  Export As for the selected layers
-- **Save for Web (Legacy)**: original and optimised side by side for GIF, PNG-8, PNG-24, JPEG and
-  WebP, with palette, dither, transparency, image size and a file-size estimate
-- **File Info** (title, author, copyright, keywords, rating, read-only camera data), written as XMP
-  into PSD files; Close Others; Purge
-- Copy and paste through the system clipboard (paste into, paste in place, new image from clipboard)
-- **Print** (Ctrl+P): printer, paper size, orientation, margins, scale and position with a page preview;
-  Save as PDF
+Every screenshot here is the real app at work on public-domain art, rendered offscreen through its control channel.
 
-**Layers**
-- Pixel, text, shape, fill (solid, gradient, pattern) and adjustment layers; groups with pass-through
-- Layer masks (reveal/hide all or selection, from transparency, apply, disable, link), clipping masks
-- **Vector masks** (Reveal All, Hide All, Current Path, delete, disable, link, rasterize), edited with
-  the path tools and shown in the Layers and Paths panels; Mask and Shape buttons on the path
-  selection tools, Make Vector Mask in the Paths panel
-- **Mask density and feather**, non-destructive, for layer and vector masks in the Properties panel,
-  with Select and Mask, Color Range and Invert there; the mask overlay (\\) with its colour and opacity
-- 27 blend modes, opacity and fill opacity, locks, align and distribute, merge, flatten, rasterize
-- **Layer styles**: drop shadow, inner shadow, outer and inner glow, bevel and emboss, satin, color,
-  gradient and pattern overlay, stroke, with Photoshop's fields for each: contours (Contour Editor and
-  built-in contours), noise, glow technique, Bevel & Emboss Contour and Texture, gradient and pattern
-  strokes; several instances of Drop Shadow, Inner Shadow, Color Overlay, Gradient Overlay and Stroke;
-  drag in the document to place a shadow, satin, gradient or pattern; copy/paste styles; global light.
-  Each shadow, glow and outer stroke blends with the layers below in its own blend mode, as in Photoshop
-- **Blending Options**: fill opacity, channels, knockout (Shallow, Deep), Blend Interior Effects as
-  Group, Blend Clipped Layers as Group, the mask-hides-effects options and Blend If with split sliders,
-  also on adjustment layers; layer styles on groups; Create Layers, Hide All Effects, Scale Effects
-- **Layers panel**: effects listed under each layer with their own eyes (drag them between layers);
-  Opacity and Fill as scrubby fields for every selected layer; blend-mode menu that previews on the
-  canvas while you hover; drag several rows, Alt-drag to copy, drag down the eye column; Alt-click
-  between layers to clip; panel menu with Panel Options and Collapse All Groups; thumbnails,
-  rename in place, solo visibility (Alt-click the eye)
-- **Layer menu**: New Layer, New Group and Duplicate Layer dialogs (to another open document too),
-  Arrange with Reverse, Distribute by every edge and centre and by equal gaps, Lock Layers and Lock All
-  Layers in Group, Merge Down / Merge Layers / Merge Group on Ctrl+E, Stamp Visible and Stamp Layers,
-  Select › Similar Layers, Rasterize Type / Shape / Fill Content / Vector Mask / Smart Object; opacity,
-  fill and blend-mode keys (digits, Shift+digits, Shift+Alt+letters); Photoshop's Background rules
-- Background from Layer / Layer from Background, Group from Layers, Delete Hidden Layers, Rasterize
-  All Layers, Link Layers and Select Linked Layers, colour labels
-- **Find Layers** (filter the Layers panel by kind, name, effect, mode, attribute or colour) and
-  **Isolate Layers** (the samplers see only the isolated layers)
-- **Matting**: Defringe, Color Decontaminate, Remove Black / White Matte
-- **Smart objects**: place files as smart objects or convert layers into one, edit the contents in
-  their own tab, replace or export the source, transform without losing quality, reset the transform
-- **Smart filters**: filters, adjustments and the Camera Raw filter applied to a smart object stay
-  editable (double-click to change, toggle or clear them in the Layers panel)
-- **Stack modes** on a smart object (mean, median, maximum, minimum, range, and seven more) and
-  Convert to Layers
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/images/photocraft-adjustments.jpg" alt="Monet's Impression, Sunrise with Levels and Vibrance adjustment layers; the Levels editor and the Histogram panel with mean, standard deviation and median are open on the right" width="100%">
+      <br>
+      <sub>Levels and Vibrance adjustment layers, with the live Histogram panel.<br><i>Impression, Sunrise</i>, Claude Monet, 1872</sub>
+      <h3>Edit without regret</h3>
+      Adjustment layers keep every edit live. Stack Levels, Curves, Vibrance, Hue/Saturation and a dozen more, mask them to an area, reorder them, or turn them off, and your original pixels never change.
+      <br><br>
+      <b>16 adjustment layers</b> that also apply directly to pixels, including Curves with per-channel editing, Levels with a live histogram, Black &amp; White, Channel Mixer, Gradient Map, Photo Filter, Selective Color and Color Lookup (.cube, .3dl, .look). Plus Shadows/Highlights, Replace Color, Match Color, HDR Toning, Desaturate and Equalize.
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/images/photocraft-layer-styles.jpg" alt="The Layer Style dialog editing an Outer Glow on the EARTHRISE type layer, with Stroke also enabled, over the Apollo 8 Earthrise photograph" width="100%">
+      <br>
+      <sub>Outer Glow and Stroke on a live type layer, in the Layer Style dialog.<br><i>Earthrise</i>, William Anders / NASA, 1968</sub>
+      <h3>Styles that sell the shot</h3>
+      Drop Shadow, Inner Shadow, Outer and Inner Glow, Bevel &amp; Emboss, Satin, Stroke, and Color, Gradient and Pattern Overlay, live on any layer, including type. Patterns come from a library (built-ins, Edit › Define Pattern, <code>.pat</code> import/export) and PSD <code>Patt</code> blocks.
+      <br><br>
+      Copy and paste styles between layers, hide all effects at once, and open styles straight from your PSDs, rendered to match Photoshop.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/images/photocraft-masks.jpg" alt="Vermeer's Girl with a Pearl Earring: an elliptical selection around the face, and a Hue/Saturation layer with an elliptical mask that turns everything outside the face gray" width="100%">
+      <br>
+      <sub>An elliptical selection becomes the mask of a Hue/Saturation layer, so only the face keeps its color.<br><i>Girl with a Pearl Earring</i>, Johannes Vermeer, c. 1665</sub>
+      <h3>Selections that understand your image</h3>
+      Marquees, lassos and the Magic Wand for precision; Quick Selection, Object Selection and Select Subject when you want the computer to do the tracing; Select and Mask to refine hair-fine edges.
+      <br><br>
+      Feather, expand, contract, smooth, grow, reselect. Turn any selection into a layer mask, a vector path or a shape. Smart selection runs on your machine, with no cloud and no account.
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/images/photocraft-type.jpg" alt="Bierstadt's Among the Sierra Nevada with the headline SIERRA NEVADA being edited on the canvas in Georgia, a byline, and a paragraph caption; the Character and Paragraph controls are open" width="100%">
+      <br>
+      <sub>A headline edited in place, with a byline and a paragraph of body text.<br><i>Among the Sierra Nevada, California</i>, Albert Bierstadt, 1868</sub>
+      <h3>Type that sets beautifully</h3>
+      Point and paragraph text, edited right on the canvas, with full Character and Paragraph controls: font, weight, size, leading, tracking, alignment and colour. The <a href="docs/color-picker.md">full Type Color Picker</a> also supports screen sampling with a pixel loupe.
+      <br><br>
+      Type layers stay editable, take layer styles, and round-trip through PSD.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/images/photocraft-vector.jpg" alt="A lotus badge built from shape layers (Lotus, Water, Sun, Badge and Dotted Ring) over Monet's Water Lilies, with the lotus path's anchor points selected" width="100%">
+      <br>
+      <sub>A badge made of shape layers: a gradient-filled lotus, a star and a dotted ring.<br><i>Water Lilies</i>, Claude Monet, 1906</sub>
+      <h3>Pixel-perfect vectors</h3>
+      Rectangle, Ellipse, Triangle, Polygon, Line and the Pen, Freeform Pen and Curvature Pen tools, with resolution-independent shape layers, gradient fills, and dashed, aligned strokes.
+      <br><br>
+      Combine shapes (unite, subtract, intersect, exclude), keep paths in the Paths panel, use them as vector masks, or stroke and fill them. 116 of 116 shape layers in our PSD corpus match Photoshop's pixels.
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/images/photocraft-filters.jpg" alt="The Twirl filter dialog at a 320 degree angle, previewing live inside an elliptical selection on Van Gogh's The Starry Night" width="100%">
+      <br>
+      <sub>Twirl previews live on the canvas, only inside the selection.<br><i>The Starry Night</i>, Vincent van Gogh, 1889</sub>
+      <h3>See it before you commit</h3>
+      Every filter dialog previews live on the canvas, through your selection. Blurs (Gaussian, Box, Motion, Radial, Surface, Smart, Lens, Shape, and the Blur Gallery: Tilt-Shift, Iris, Field, Spin, Path), sharpening, Reduce Noise, distortions (Twirl, Wave, Ripple, Displace, Shear, Zig Zag…), Pixelate, Stylize (Oil Paint, Wind, Extrude…), Render (Clouds, Fibers, Lens Flare, Lighting Effects) and more.
+      <br><br>
+      Run filters on a smart object and they stay editable: change, hide, reorder or mask them at any time.
+      <br><br>
+      Large-radius blurs use running-sum box passes across all cores: a radius-180 Gaussian on 3.6 MP takes under a second.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/images/photocraft-transform.jpg" alt="Free Transform handles around a rotated copy of Ansel Adams' The Tetons and the Snake River, with the History panel listing Open, Duplicate Layer, Free Transform and other steps" width="100%">
+      <br>
+      <sub>Free Transform on a rotated print, with every step listed in History.<br><i>The Tetons and the Snake River</i>, Ansel Adams, 1942</sub>
+      <h3>Shape it any way you like</h3>
+      Free Transform with scale, rotate, skew, distort and perspective; exact 90° and 180° rotations and flips; Transform Again. Layers, type, shapes, masks and selections all transform together.
+      <br><br>
+      Full history, Toggle Last State and the History Brush mean every step can be undone, even one brush stroke at a time.
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/images/photocraft-export-light.jpg" alt="The Export As dialog in the light theme over Klimt's The Kiss: JPG at quality 90, scaled to 50 percent, with a preview and an estimated size of about 684K" width="100%">
+      <br>
+      <sub>Export As in the light theme, with a preview and a file-size estimate.<br><i>The Kiss</i>, Gustav Klimt, 1907–1908</sub>
+      <h3>Ship it anywhere</h3>
+      Export As with format, quality, transparency and scale, plus a preview and an instant file-size estimate. Quick Export to PNG in one click.
+      <br><br>
+      Choose a dark Pro theme, the airy Studio themes, or a Classic look.
+    </td>
+  </tr>
+</table>
 
-**Paint and retouch**
-- Brush, pencil, eraser with size, hardness, opacity, flow, spacing, smoothing and pen pressure
-- Brush presets, color picker, swatches, eyedropper and color sampler
-- **Content-Aware Fill** and a content-aware spot healing brush; healing brush, patch, red eye, clone stamp, pattern stamp, history brush
-- Background eraser, magic eraser, color replacement, blur, sharpen, smudge, dodge, burn, sponge;
-  the **Adjustment Brush**
-- Paint bucket and gradients (linear, radial, angle, reflected, diamond) with dithering
-- **Gradients**: the Gradient Editor (colour and opacity stops, midpoints, smoothness, presets with New,
-  Save, Import and Export), noise gradients, the five interpolation methods (Perceptual, Linear,
-  Classic, Smooth, Stripes), the gradient picker with preset groups, the Gradients panel, live
-  gradients edited on the canvas, and Gradient Fill layers with Method, Dither and Offset; the same
-  gradients in shapes, Gradient Map, Gradient Overlay and Stroke
-- **Patterns**: a pattern library with built-in patterns, the Patterns panel and pattern picker,
-  Define Pattern with a name, Edit › Fill with Scripted Patterns (Brick Fill, Cross Weave, Place Along
-  Path, Random Fill, Spiral, Symmetry Fill), Pattern Fill layers with Angle, Link with Layer and Snap to
-  Origin, View › Pattern Preview, and drag a pattern onto the canvas to make a fill layer
+<br>
 
-**Select**
-- Rectangular, elliptical, single row/column marquee; lasso, polygonal and magnetic lasso
-- Magic wand and quick selection; add/subtract/intersect; feather and anti-aliasing
-- Color range, grow, similar, border, smooth, expand, contract, feather, transform selection
-- Quick mask (Q), save and load selections as channels, layer transparency as selection
-- **Select Subject**, **Select Sky** and **Focus Area** (colour, saliency and sharpness heuristics that
-  run on your computer, not a learned model)
-- **Object Selection tool**: drag a box or lasso around an object and the selection shrinks to it
-- **Select and Mask** workspace: quick selection, refine edge brush, brush, lasso and object
-  selection tools, seven view modes, edge detection radius, smooth / feather / contrast / shift
-  edge, Decontaminate Colors, output to a selection, mask, layer or document
+## Everything in the box
 
-**Adjust and filter**
-- Brightness/contrast, levels, curves, exposure, vibrance, hue/saturation (with colorize), color
-  balance, black & white, photo filter, channel mixer, invert, posterize, threshold, gradient map,
-  selective color, shadows/highlights, desaturate, equalize; auto tone, auto contrast, auto color; Fade
-- **Levels and Curves** as in Photoshop: input and output sliders, black / grey / white point
-  eyedroppers, the clipping display (Alt-drag, Show Clipping), Curves' pencil mode with Smooth, the
-  on-image tool and Curve Display Options, Auto with Auto Color Correction Options, channels in Gray,
-  CMYK and Lab documents, and presets that read and write Photoshop's .alv and .acv files. Exposure
-  eyedroppers, the Threshold histogram, Brightness/Contrast Auto
-- **Hue/Saturation** with several colour ranges, range eyedroppers and the on-image tool;
-  Shadows/Highlights with Photoshop's Show More Options; presets for Hue/Saturation, Channel Mixer,
-  Selective Color and Black & White that read and write Photoshop's preset files; HDR Toning presets
-- New adjustments: **Color and Vibrance**, **Clarity and Dehaze** and **Grain**; the Adjustments panel
-  has built-in presets; Alt+Ctrl+L / M / U / B open Levels, Curves, Hue/Saturation and Color Balance
-  with the last values (the dialogs otherwise open with the defaults, as in Photoshop)
-- **Color Lookup** (31 built-in looks, and .cube, .3dl, .look and .csp files), **HDR Toning**,
-  **Match Color**, **Replace Color**; Export Color Lookup Tables (.cube, .3dl)
-- Most adjustments also work as a non-destructive adjustment layer with its own mask
-- **Apply Image** and **Calculations**: blend a layer or channel of one image into another, or two
-  channels into a new channel, selection or document
-- More than 70 filters in the Filter menu with live preview:
-  - Blur: average, blur, blur more, box, Gaussian, lens (with a depth map), motion, radial, shape,
-    smart and surface blur
-  - Sharpen: sharpen, sharpen edges, sharpen more, smart sharpen, unsharp mask, shake reduction
-  - Noise: add noise, despeckle, dust & scratches, median, reduce noise
-  - Pixelate: color halftone, crystallize, facet, fragment, mezzotint, mosaic, pointillize
-  - Distort: displace, pinch, polar coordinates, ripple, shear, spherize, twirl, wave, zigzag
-  - Stylize: diffuse, emboss, extrude, find edges, glowing edges, oil paint, solarize, tiles, trace
-    contour, wind
-  - Render: clouds, difference clouds, fibers, flame, lens flare, lighting effects, picture frame,
-    tree, vignette
-  - Video and Other: de-interlace, NTSC colors; custom kernel, high pass, HSB/HSL, maximum, minimum,
-    offset; Last Filter (Ctrl+F)
-- **Filter Gallery**: 46 more effects (Artistic, Brush Strokes, Distort, Sketch, Texture) that stack
-  as effect layers in one dialog
-- **Blur Gallery**: Field, Iris, Tilt-Shift, Path and Spin Blur with pins and handles on the canvas,
-  bokeh and noise
-- **Lens Correction** (Ctrl+Shift+R): distortion, chromatic aberration, vignette, perspective, angle
-  and scale, with straighten and remove-distortion tools and automatic horizon detection
-- **Liquify** (Shift+Ctrl+X): forward warp, reconstruct, twirl, pucker and bloat brushes
-- **Camera Raw Filter** (Ctrl+Shift+A): white balance, exposure, contrast, highlights, shadows, whites,
-  blacks, texture, clarity, dehaze, vibrance, saturation, HSL per colour range, sharpening, noise
-  reduction, vignette and grain, with Auto
+<table>
+  <tr>
+    <td width="33%" valign="top">
+      <h4>🧰 69 tools</h4>
+      Move · Artboard · Rectangular and Elliptical Marquee · Single Row Marquee · Single Column Marquee · Lasso · Polygonal Lasso · Magnetic Lasso · Object Selection · Quick Selection · Magic Wand · Crop · Perspective Crop · Slice · Slice Select · Frame · Eyedropper · Color Sampler · Ruler · Note · Count · Remove · Spot Healing Brush · Healing Brush · Patch · Content-Aware Move · Red Eye · Brush · Pencil · Mixer Brush · Color Replacement · Clone Stamp · Pattern Stamp · History Brush · Art History Brush · Eraser · Background Eraser · Magic Eraser · Gradient · Paint Bucket · Blur · Sharpen · Smudge · Dodge · Burn · Sponge · Pen · Freeform Pen · Curvature Pen · Add Anchor Point · Delete Anchor Point · Convert Point · Horizontal and Vertical Type · Horizontal and Vertical Type Mask · Path Selection · Direct Selection · Rectangle · Ellipse · Triangle · Polygon · Star · Line · Custom Shape · Hand · Rotate View · Zoom
+    </td>
+    <td width="33%" valign="top">
+      <h4>🖌️ A real brush engine</h4>
+      Shape Dynamics, Scattering, Texture, Dual Brush, Color Dynamics, Transfer, Brush Pose, Wet Edges, Build-up and Smoothing (including Pulled String), driven by pen pressure, tilt, rotation and direction. Brush presets, Define Brush from Selection, and deterministic, replayable strokes.
+    </td>
+    <td width="33%" valign="top">
+      <h4>🗃️ Layers, done properly</h4>
+      Groups, clipping masks, pixel and vector masks, fill layers (solid, gradient and pattern), adjustment layers, live smart objects with smart filters and lossless transforms and warps, multi-layer selection with align, distribute and link, alpha channels and Quick Mask, 27 Photoshop blend modes plus six Paint.NET variants, opacity and fill, locks, colour labels, a layer kind filter, merge, flatten, rasterize, Layer via Copy/Cut, Paste Into.
+    </td>
+  </tr>
+  <tr>
+    <td width="33%" valign="top">
+      <h4>🎨 Any colour, any depth</h4>
+      RGB, Grayscale, CMYK and Lab documents at 8, 16 and 32 bits per channel. Bit depth and colour model are runtime data, so every tool works at every depth.
+      <br><br>
+      Real ICC colour management in pure Rust: embedded profiles, Assign and Convert to Profile with all four rendering intents and black point compensation, soft proofing (⌘Y) and Gamut Warning (⇧⌘Y) on the GPU.
+    </td>
+    <td width="33%" valign="top">
+      <h4>🗂️ Formats</h4>
+      PSD and PSB, layered TIFF (Photoshop's layer data in the TIFF, read and written in either byte order), <a href="docs/pdn.md">Paint.NET PDN3 (read, with editable layers and all 14 blend modes)</a>, <a href="docs/ora.md">OpenRaster (read and write, with layers, groups and blend modes, for Krita, MyPaint and GIMP)</a>, <a href="docs/xcf.md">GIMP XCF (read, with layers, groups, masks, blend modes, channels and the selection)</a>, <a href="docs/kra.md">Krita .kra (read, with paint layers, groups, blend modes and transparency masks)</a>, SVG (opens as shape layers, places as a vector Smart Object), plus flat PNG, JPEG, TIFF, WebP (lossy and lossless), GIF, BMP, TGA, ICO, QOI, PNM, OpenEXR, Radiance HDR and FITS (astronomy images: 8/16-bit and 32-bit float, gray or RGB, header kept), and the native <code>.pcraft</code> format. Flat formats retain the depths they support: PNG keeps 8/16-bit samples, TIFF keeps 8/16-bit and 32-bit float samples, and OpenEXR keeps half/float samples; JPEG, WebP and the other 8-bit formats reduce higher-depth samples with an export warning. See the <a href="https://github.com/storytold/craft-libs/tree/main/crates/image-codecs#capability-matrix-default-build">codec capability matrix</a> for each format. HEIC photos from iPhone and Mac are read-only (included in official builds; optional <code>--features heif</code> for source builds). AVIF is write-only with the optional <code>avif</code> build feature; AVIF decoding and JPEG XL are unavailable. Affinity documents (<code>.af</code>, <code>.afdesign</code>, <code>.afphoto</code>, <code>.afpub</code>) open natively, read only, with artboards, layers, vectors, text, images and masks; effects, adjustments and other unsupported parts are listed in a warning, and Affinity export is unavailable.
+    </td>
+    <td width="33%" valign="top">
+      <h4>🪄 The everyday essentials</h4>
+      Auto Tone, Contrast and Color · Equalize · Image and Canvas Size · Crop and Trim · Reveal All · Edit › Fill and Stroke · Copy Merged · Paste in Place · guides, rulers, grid and snapping · Actions record and replay · a command palette (⌘F).
+    </td>
+  </tr>
+</table>
 
-**Transform and canvas**
-- Free transform (Ctrl+T): scale, rotate, skew, distort, perspective, numeric entry, flips and 90° turns;
-  transforms pixels, selections, text and shapes; Transform Again
-- Image size (bicubic, Lanczos, bilinear, area, nearest), canvas size with anchor, rotate canvas,
-  crop tool with ratios and overlays, crop to selection, trim, reveal all, duplicate image
-- **Perspective Crop tool**: mark the four corners of a slanted rectangle and crop it flat
-- **Content-Aware Scale** (Ctrl+Alt+Shift+C): resize by removing or inserting seams through the
-  unimportant areas, with a protected channel and skin-tone protection
-- **Warp** (Edit › Transform › Warp): a Bézier control net with Arc, Arch, Bulge, Flag, Wave, Fish,
-  Rise, Fisheye, Inflate, Squeeze, Twist and more presets and a Bend slider
-- **Perspective Warp**: lay out quads on the planes of a photo, then move their corners
-- **Puppet Warp**: a mesh over the layer, pins to hold and drag, rigid / normal / distort modes
+<br>
 
-**Modes and bit depth**
-- Image › Mode: Bitmap, Grayscale, Duotone (mono- to quadtone), Indexed Color (with Color Table),
-  RGB, CMYK, Lab and Multichannel; Trap; Conditional Mode Change
-- 8, 16 and 32 bits per channel: tonal adjustments, crop, flips, 90° turns and Flatten Image keep
-  the full precision; 16-bit PNG and TIFF in and out
-- Channels panel that follows the mode (CMYK, Lab, grey, index and spot channels)
+## PSD without compromise
 
-**Combine images**
-- **Auto-Align Layers** (Auto, Perspective, Collage, Cylindrical, Spherical, Reposition) and
-  **Auto-Blend Layers** (panorama seams or focus stacking)
-- **Photomerge**, **Load Files into Stack**, **Statistics**, **Merge to HDR** (exposure fusion)
+PhotoCraft's PSD support is a standalone crate written from Adobe's public specification and tested against a corpus of real-world files.
 
-**Actions and automation**
-- **Actions panel** (Alt+F9): record, play, edit, save and load actions; stops, menu items,
-  conditionals, function keys, Button Mode, a Default Actions set
-- **Batch** and **Image Processor** over folders or open files; Fit Image, Crop and Straighten
-  Photos, Contact Sheet, Delete All Empty Layers, Flatten All Layer Effects, Flatten All Masks
+- **Faithful round trips:** opening and re-saving a document renders the same for 307 of the 309 files in the psd-tools test set and 169 of 170 in our mixed ag-psd/psd-tools set (`crates/io/tests/it/corpus.rs`; fetch the psd-tools set with `cargo xtask corpus --psd-tools`), and anything we don't model yet (raw blocks, descriptors, extras) is carried over instead of being dropped. A re-saved file is not byte-identical to its source: PhotoCraft rewrites image resources, layer records and the composite. Only the standalone `craft-psd` crate, parsing and writing a file without the document model, reproduces every parseable corpus file byte for byte (`craft-psd/tests/it/corpus.rs`).
+- **Pixels that match:** a composite oracle compares our render with Photoshop's own merged image, covering gradient interpolation (Classic, Perceptual and Linear), layer effects, shape strokes, clipping and fill opacity.
+- **Large documents:** PSB, 16 and 32-bit files, and CMYK and Lab documents open natively.
 
-**Type and vectors**
-- Point and paragraph text, editable at any time, with **several fonts, sizes, colours and styles in
-  one layer**, shaped by HarfBuzz (kerning, ligatures, complex scripts, colour fonts and emoji; a missing
-  character falls back to another installed font); paragraph boxes with a height that show overflow
-- **On-canvas editing**: the Type tool draws its own cursor and selection, with Photoshop's selection
-  clicks, formatted copy and paste between type layers, Paste Without Formatting, input methods and
-  dead keys, tab characters, placeholder text, an eight-handle paragraph box, moving and transforming
-  the text while editing, and Photoshop's type keys
-- **Character panel** on the selected characters: leading with Auto, kerning (Metrics, Optical,
-  manual), tracking in 1/1000 em, vertical and horizontal scale, baseline shift, Faux Bold and Italic,
-  All Caps, Small Caps, superscript, subscript, underline, strikethrough, language, No Break, Reset
-  Character; type sizes in pixels, points or millimetres
-- **Paragraph panel**: alignment and justification (justify last left, centred, right, all), indents,
-  space before and after, the Single-line and Every-line composers, Justification settings (word and
-  letter spacing, glyph scaling), hyphenation in eight languages with the Hyphenation settings, Roman
-  Hanging Punctuation, bulleted and numbered lists; a Type menu with the Character and Paragraph panels
-- **Text on a path**: type along any path or shape, slide and flip it; horizontal, vertical and
-  **stacked vertical** (upright CJK) orientation
-- **Live shapes**: rectangle (with corner radii, each editable on the canvas), rounded rectangle,
-  ellipse, triangle, polygon/star (sides, star ratio, smooth corners), line (weight, arrowheads) and
-  custom shapes stay editable in the Properties panel through moves, transforms and canvas changes;
-  fills and strokes in solid colour, gradient or pattern, stroke caps, joins and dashes; Copy / Paste
-  Shape Attributes; shape layers, paths or pixels
-- **Path operations**: combine, subtract, intersect and exclude shape areas, merge shape components
-- Pen, freeform pen, add/delete/convert anchor points, path and direct selection; Paths panel
-  (fill, stroke, make selection, path from selection)
+## Built for agents
 
-**AI (optional, bring your own account)**
-- **Sign in with ChatGPT** (uses your ChatGPT Plus or Pro plan for the chat models), or an OpenAI or
-  Google Gemini **API key**; credentials stay on your computer, encrypted with the system keychain
-- **Generative Fill** and **Generative Expand**, **Generate Image** (new layer or document),
-  **Remove Background** (as a layer mask), **Replace Background**, **Replace Sky**, **Describe Image**
-- **AI Assistant** panel: chat about the open image and let the model edit it; adjustments, filters,
-  selections, crop, resize, layers, text and generative fill all land as undoable history steps
-
-**Workspace**
-- Photoshop's menu layout and **default keyboard shortcuts** (Ctrl+F is Search, Alt+Ctrl+Z Toggle Last
-  State, Ctrl+Y Proof Colors, as in Photoshop), tool flyouts, options bar
-- **Search** (Ctrl+F) for tools, menu commands and panels; **spring-loaded tools** (hold Ctrl for
-  Move, Alt for the Eyedropper, or a tool key for that tool while it is held; Ctrl/Alt+Space to zoom)
-- **Numeric fields** that take arithmetic (`100+50`), percentages and units, step with Shift+arrow
-  and the wheel, and scrub when you drag their label; dialogs that move, leave the canvas visible and
-  navigable, and turn Cancel into Reset while Alt is held
-- Panels: Color, Swatches, Gradients, Patterns, Brushes, Properties, Adjustments, Character,
-  Paragraph, Paths, Layers, Channels, History (with snapshots), Actions, Navigator, Info, AI Assistant
-- **Proof Colors** (CMYK preview) and **Gamut Warning**; Lab and CMYK readouts in the Info panel and
-  the Color Picker
-- **Guides and rulers**: guides with their own colours that can be selected, moved and deleted with the
-  Move tool, Lock Guides, New Guide Layout, New Guides From Shape, Edit Selected Guides; ruler units and
-  a movable ruler origin; grid colour, style and subdivisions
-- **Snap To** guides, grid, layers and document bounds for every placing tool (marquee, crop, shapes,
-  pen, Free Transform, type box, gradient), nearest target first; **Smart Guides** with alignment
-  lines, equal spacing and Ctrl-hover distances
-- Pixel grid, view rotation, light and dark themes
-
-## Download
-
-Installers are produced by the **Pigment release** GitHub Actions workflow and attached to each GitHub
-Release tagged `pigment-v*`:
-
-| Platform | File |
-|---|---|
-| Windows 10/11 (x64, Arm) | `pigment-<version>-win-<arch>.exe` (installer) or `pigment-<version>-win-portable.exe` |
-| macOS 11+ (Apple silicon and Intel) | `pigment-<version>-mac-universal.dmg` |
-| Linux (x64) | `pigment-<version>-linux-x86_64.AppImage` |
-
-The builds are **not code-signed** (signing certificates cost money and are not part of this repository), so:
-
-- **macOS**: the first time, right-click (or Control-click) *Pigment.app* and choose **Open**, then **Open**
-  again. Alternatively run `xattr -dr com.apple.quarantine /Applications/Pigment.app`.
-- **Windows**: in the SmartScreen prompt choose **More info** and then **Run anyway**.
-
-## Build it yourself
-
-You need Node.js 22.
+Every menu item, tool and dialog runs a command from one registry of 500+ commands. The UI, the CLI, the JSON control channel and the MCP server all call the same commands, so anything you can click, a script or an AI agent can do too.
 
 ```sh
-cd pigment
-npm ci            # also bundles ag-psd and HarfBuzz into src/renderer/vendor
-npm start         # run the app
-npm test          # unit tests of the pixel engine (node:test)
-npm run test:e2e  # end-to-end tests in Chromium (Playwright)
-npm run dist:mac  # or dist:win / dist:linux: installers in dist/
+# Headless: open, edit, save
+photocraft-cli run wave.psd \
+  --cmd filter.sharpen.smartSharpen     --params '{"amount":80}' \
+  --cmd layer.newAdjustmentLayer.curves --params '{"points":[[0,0],[64,48],[192,212],[255,255]]}' \
+  --out wave-final.png
+
+# Apply one action list to a folder of images
+photocraft-cli batch --actions grade.json --in ./raw --out ./graded
+
+# Every subcommand explains itself
+photocraft-cli batch --help
+
+# Let an agent drive it over MCP (headless, or bridged to the running app)
+photocraft-cli mcp
 ```
 
-`npm run dev:web` serves the editor at http://127.0.0.1:8766 so it can run in a normal browser
-(files are read and written in memory there).
+The desktop app also offers an authenticated, loopback-only control channel (`photocraft --control`) for inspecting UI state, driving tools with pointer events, and taking offscreen screenshots. Every image in this README was rendered that way. See [`docs/control-protocol.md`](docs/control-protocol.md).
 
-## How it works
+## Under the hood
 
-- `src/main/` is the Electron main process (window, native menu, file dialogs, settings, recent files,
-  printing). The renderer is sandboxed and talks to it only through the preload bridge (`src/preload.cjs`).
-- `src/main/ai.js` holds the AI accounts: the Sign in with ChatGPT flow, API keys encrypted with
-  Electron's `safeStorage`, and the only code that talks to the providers. The renderer never sees a
-  token or key; it sends request descriptions and receives answers.
-- `src/shared/pixels/` is the image-processing engine: blend modes, adjustments, filters, layer styles,
-  selections, transforms and retouching, written as pure functions on RGBA buffers and unit-tested in Node.
-- `src/renderer/` is the editor: the document model and compositor, history (undo), the canvas view,
-  tools, panels and dialogs. See [ARCHITECTURE.md](ARCHITECTURE.md) and the
-  [user guide](docs/USER-GUIDE.md).
+- **Engine first:** a pure-data document model and a command engine, with a thin egui UI on top. Layering is enforced at build time across 24 crates.
+- **Two compositors:** a CPU compositor serves as the reference oracle, and a wgpu compositor puts the canvas on the GPU. They are tested against each other.
+- **Copy-on-write tiles:** 256² sparse tiles make undo cheap and huge canvases light, and effect maps are cached per layer state.
+- **Runs in the browser:** the whole engine and UI compile to WebAssembly.
+- **Clean-room:** implemented from public specs and observed behaviour only. No proprietary code, shaders or assets.
+- **Tested:** more than 1,700 tests, including PSD round trips, synthetic generators, compositor oracles and multi-depth checks.
 
-## What it does not do (yet)
+## Get started
 
-For a feature-by-feature comparison with Photoshop (1,432 entries, each marked done, partial,
-approximate, missing or not feasible, with the release that plans it), see
-[docs/PARITY.md](docs/PARITY.md).
+```sh
+git clone https://github.com/storytold/photocraft
+cd photocraft
+cargo run --release -p photocraft -- image.psd   # the desktop app
+cargo test --workspace                           # the test suite
+```
 
-Missing features:
+Japanese fonts for the UI and Type tool come from [craft-fonts](https://github.com/storytold/craft-fonts), an optional build input (desktop release builds always include it). Without it PhotoCraft uses your system's CJK fonts:
 
-- The font menu of Photoshop (search, previews, favourites, variable-font axes), Warp Text, Convert to
-  Shape and the other Type menu commands, OpenType features and the Glyphs panel, Character and
-  Paragraph Styles, spelling and Find and Replace; text on a path follows the first subpath of the
-  chosen path, and there is no area type
-- Right-to-left and mixed-direction paragraphs (no bidirectional reordering across runs) and East
-  Asian typography beyond stacked vertical text
-- Artboards, frames, layer comps and slices
-- The full Brush Settings engine (shape dynamics, scattering, texture, dual brush) and `.abr` brush
-  files; the mixer brush and the art history brush
-- The Styles, Shapes and Tool Presets panels; Photoshop's preset files for gradients (`.grd`),
-  patterns (`.pat`), styles (`.asl`), contours (`.shc`) and swatches; the Preset Manager
-- Editing the keyboard shortcuts and menus (Edit › Menus… is not built yet)
-- Timeline, animation and video; 3D
-- Opening camera RAW files (CR2, NEF, ARW, DNG…): the Camera Raw filter develops RGB images only
-- ICC colour management: no profiles are read, converted or embedded, everything is treated as sRGB
-- Vanishing Point, Adaptive Wide Angle and Neural Filters
-- Photoshop `.atn` action files (actions are saved as `.pigment-actions`), lens profiles, and
-  Adobe's cloud features (libraries, cloud documents, Adobe Fonts, Firefly)
+```sh
+git clone https://github.com/storytold/craft-fonts ../craft-fonts
+CRAFT_FONTS_DIR="$PWD/../craft-fonts" cargo run --release -p photocraft
+```
 
-Except Adobe's cloud features, each of these has a planned release in [docs/PARITY.md](docs/PARITY.md) ("Planned releases"): 0.5
-brings the brush engine, ICC colour management, PSD fidelity for 0.4's layers and text, Camera Raw
-depth, the preset panels and files, the colour picker and swatches, the font menu, the Type menu
-commands and the shortcut editor; 0.6 selections, channels, colour settings and proofing, export and
-save options, RAW opening and PDF import; later releases artboards, layer comps, slices, animation,
-video and the rest.
+New contributors and AI agents: start with [`AGENTS.md`](AGENTS.md), then [`docs/`](docs/).
 
-Limits of what is there:
+Installers for macOS, Windows, Linux, FreeBSD and the web are attached to each [GitHub release](https://github.com/storytold/photocraft/releases). On Linux you can pick an AppImage, a `.deb`, an `.rpm`, a tarball or a Flatpak bundle. The bundle needs the freedesktop runtime from [Flathub](https://flathub.org/setup), which `flatpak` offers to install along with it:
 
-- **CMYK, Lab and Multichannel are views of RGB pixels.** Pigment always stores RGBA; those modes
-  change the channels you see and what the Info panel reports, not how the file is stored. There is
-  no ink-accurate separation. Proof Colors and Gamut Warning are previews of the same kind
-- **16 and 32 bits**: Levels, Curves and the other tonal adjustments, crop, canvas size, flips, 90°
-  turns and Flatten Image work at full precision. Painting, retouching, filters, Image Size, Free
-  Transform and the warps work at 8 bits on the pixels they touch. Masks are 8-bit. 32-bit is
-  display-referred float (highlights above white are kept), not linear light. Merges, stamps and
-  clipping masks keep full precision, but layers with effects, knockout or Blend If on a pixel layer,
-  blend modes other than Normal, Multiply and Screen, Merge Group, and Levels or Curves in the CMYK or
-  Lab space go through the 8-bit composite. PSD files are written at 8 bits
-- **PSD export of 0.4's features waits for 0.5**: the merged image is right, and Fill, Blend If,
-  Hue/Saturation ranges, the Gradient Map's method and guides are written, but layer effects, knockout,
-  the channel restriction and the other advanced blending options, and live shape parameters are not
-  (saving says which layers lose them); the three new adjustments are written as hidden placeholders;
-  masks are written with density, feather and the vector mask baked into a raster mask; a text layer
-  with several styles or a stroke is written as pixels. Vector masks and layer effects are not read
-  from PSD files
-- **Type**: anti-aliasing methods are stored but text is drawn smooth; OpenType-SVG colour glyphs draw
-  as plain outlines; variable fonts draw at their default instance; Hyphenate Across Column has no
-  effect, only the eight bundled languages hyphenate, and East Asian Width is approximated in line
-  breaking; converting paragraph to point text keeps each paragraph on one line; Reset Character keeps
-  the font, size and colour. The vertical type modes keep 0.3's layout. In the browser build without the
-  font permission, text is drawn by 0.3's Canvas engine (Optical kerning falls back to Metrics there)
-- **Layer styles**: Create Layers cannot match the picture with knockout, a layer opacity below 100 % with
-  exterior effects, or a Fill below 100 % with interior effects (it warns, as Photoshop does), and Dissolve
-  effects speckle differently once they are layers; Stroke has no Overprint; there is no Make
-  Default and no Styles page in the Layer Style dialog; dragging a shadow that uses global light sets
-  its own angle instead of moving the global light
-- **Adjustments**: the Properties panel does not show the Levels and Curves clipping display; built-in
-  preset values (adjustment dialogs, Black & White Auto, Channel Mixer, HDR Toning) approximate
-  Photoshop's; preset groups cannot be created; the Adjustments panel presets are built-in only and do
-  not preview on hover; HDR Toning (.hdt) and Shadows/Highlights (.shh) files are not read. Clarity and
-  Dehaze use a fixed neighbourhood, and Levels and Curves in CMYK and Lab follow Pigment's simple
-  conversions, so they match Photoshop only roughly
-- **Gradients and patterns**: the on-canvas gradient widget edits colour stops and end points only;
-  Align with Layer is not offered on Gradient Fill layers. Scripted Patterns are Pigment's own
-  placements modelled on Photoshop's scripts, not their exact output. An action that recorded New Fill
-  Layer › Pattern with a pattern that is no longer in the library replays the current pattern
-- **Guides and snapping**: no artboard guides or slices (Snap To › Artboards and Slices have no targets);
-  the Properties panel's transform section and the Free Transform bar show pixels, not ruler units; the
-  rulers do not follow a rotated view; Smart Guides do not show while a path is drawn
-- **Masks and shapes**: Color Range from the Properties panel makes two History steps; the Mask and Shape
-  buttons are not on the Pen tool's Path mode; corner widgets show with the shape and path selection
-  tools, not with the Move tool's transform controls; the Stroke options have no "Align dashes to corners
-  and path ends"
-- **Layers panel and Layer menu**: no Use Default Masks on Fill Layers; no Smart Object or Artboard
-  filters in Find Layers; the eye column has no Show/Hide menu items; while layers are isolated, a
-  clipped layer whose base is hidden is drawn unclipped. The Move tool and Free Transform still move a
-  new document's Background (Photoshop converts it to a layer first); Duplicate Layer into another
-  document neither centres the layer nor converts its colours; a two-digit opacity typed quickly is
-  recorded by actions as two steps. The digit keys set layer opacity, not a painting tool's opacity
-- **Search and fields**: Search does not list open documents or help topics; a spring-loaded tool key
-  switches to the real tool while it is held; plain number fields in older dialogs take arithmetic,
-  stepping and scrubbing but have no unit list or popup slider
-- **Color Lookup presets** carry Photoshop's names but are generated by Pigment; they approximate
-  Adobe's tables and do not match them. Loaded LUT files are applied as they are
-- **Merge to HDR** is exposure fusion into a normal image followed by HDR Toning, not a 32-bit
-  radiance map
-- **Select Subject, Select Sky and Focus Area** are heuristics (colour, saliency, sharpness), not a
-  learned model, and can pick the wrong region in a busy scene. The AI menu's Remove Background uses
-  a provider model instead
-- **Shake Reduction** estimates one straight blur trace; curved or mixed camera shake is not removed
-- **Lens Correction** has no lens profile database: Auto Correction straightens the horizon and
-  switches the manual corrections on and off. Auto-Align's vignette and distortion options are
-  estimated from the images for the same reason
-- Lighting Effects edits one light in its dialog. A Displace map or a texture loaded from a file is
-  not stored with an action or a saved smart filter and has to be chosen again
-- Save for Web has the 2-up view only (no 4-up, slices or animation); GIF is read and written as a
-  single frame
-- TIFF: no JPEG-in-TIFF, CCITT, YCbCr, Lab or BigTIFF; multi-page files open their first image
-- Actions do not record brush strokes, Move tool drags, the Warp tools or Fade
-- Linked layers move together with the Move tool and with Align and Distribute; colour labels and links are saved in
-  `.pigment`, not in PSD
-- Masks on individual smart filters (the smart object's layer mask applies to all of them); Last
-  Filter does not repeat the Camera Raw filter; Warp, Perspective Warp and Puppet Warp rasterize a
-  smart object first
-- Image generation through a ChatGPT plan: OpenAI only serves image models to API keys, so
-  Generative Fill, Generate Image and the background tools need an OpenAI or Gemini key. Plan
-  sign-in covers Describe Image and the assistant
-- Sign in with ChatGPT in the browser build (`npm run dev:web`): it needs the desktop app, so the
-  browser build takes API keys only
+```sh
+flatpak install --user photocraft-<version>-linux-x86_64.flatpak   # or -linux-aarch64
+flatpak run ai.storyteller.photocraft
+```
+
+The Flatpak prints through the host's CUPS socket (File › Print talks IPP to it directly, no `lp` needed); without CUPS, or without a printer, File › Print opens the system print dialog through the print portal. See [printing](docs/printing.md).
+
+The AppImage needs no install: the first run registers its launcher icon and menu entry in `~/.local/share` so the dock shows PhotoCraft's icon on Wayland. Set `PHOTOCRAFT_NO_DESKTOP_INTEGRATION=1` to skip that, and see [`docs/releasing.md`](docs/releasing.md) › Linux to undo it.
+
+To use the bundled CLI, run `./photocraft-<version>-linux-x86_64.AppImage --cli --help`, or `--cli mcp` to start the MCP server on stdio. CLI launches skip desktop integration. A symlink named `photocraft-cli` also selects the CLI; see [`docs/development.md`](docs/development.md#headless-cli).
+
+On a Wayland session, files dropped on the window don't open yet: winit 0.30, the windowing library under egui, has no Wayland drag and drop (#386). Use File › Open, or copy the image in your file manager and paste it with Ctrl+V. To drag and drop, start PhotoCraft under XWayland: `WAYLAND_DISPLAY= photocraft`, `WAYLAND_DISPLAY= ./photocraft-<version>-linux-x86_64.AppImage`, or `flatpak run --nosocket=wayland --socket=x11 ai.storyteller.photocraft`. On Wayland, PhotoCraft shows the command for your install in a notice until you dismiss it. Preferences › Performance › Linux display server = X11 does the same on every launch. With a fractional display scale (125%, 150%, 175%) an XWayland window is drawn at a lower resolution and enlarged by the compositor, so the interface is blurred there; native Wayland stays sharp (#1072).
+
+On macOS, the command-line tool comes as `photocraft-cli-<version>-macos-universal.zip`. The binary is signed with the same Developer ID as the app and notarized by Apple. A bare binary can't carry a stapled notarization ticket the way the DMG does, so the first time you run it macOS checks the notarization online. You can confirm it yourself:
+
+```sh
+ditto -x -k photocraft-cli-<version>-macos-universal.zip .
+spctl --assess --type install -vv photocraft-cli-<version>-macos-universal/photocraft-cli
+# ... accepted, source=Notarized Developer ID
+```
+
+On FreeBSD 14 (x86_64), the release has a tarball laid out like `/usr/local`. Install the runtime libraries, then unpack it there:
+
+```sh
+pkg install libxkbcommon wayland libX11 libXcursor libXrandr libXi libxcb mesa-libs vulkan-loader gtk3 fontconfig freetype2 alsa-lib
+tar -xzf photocraft-<version>-freebsd-x86_64.tar.gz --strip-components 1 -C /usr/local
+photocraft
+```
+
+Maintainers: [`docs/releasing.md`](docs/releasing.md) explains how releases are built, signed and published.
+
+> [!IMPORTANT]
+> **Status:** PhotoCraft is in early alpha, and we want to be straight about where it stands: much of Photoshop's feature surface exists in some form, but **it is not yet a Photoshop replacement for daily professional work**. The biggest gaps are AI/generative features, 15 missing tools, depth in typography and pro workflows, and plug-in compatibility. Every Photoshop menu item is wired to a command ([`docs/parity-checklist.md`](docs/parity-checklist.md)), but that measures wiring, not behaviour. The honest, dimension-by-dimension picture and where we're going next are in the [roadmap](ROADMAP.md) and [parity assessment](docs/target-app-parity.md). Expect rough edges, and please file issues (include your OS, document size, layer count and a screenshot). You can also tell us what broke on [Discord](https://discord.gg/artcraft).
+
+## Community packages
+
+These installers are maintained by community members, not by the PhotoCraft team.
+
+On Gentoo, the [::snakebyte overlay](https://github.com/switch87/snakebyte-overlay) packages the Linux release as `media-gfx/photocraft-bin`:
+
+```sh
+eselect repository add snakebyte git https://github.com/switch87/snakebyte-overlay.git
+emaint sync -r snakebyte
+echo 'media-gfx/photocraft-bin ~amd64' >> /etc/portage/package.accept_keywords/photocraft
+emerge --ask media-gfx/photocraft-bin
+```
+
+## Documentation
+
+Developer, architecture, automation, format, and security documentation is maintained in the [PhotoCraft documentation book](book/).
+
+To self-host the browser version with Docker, see [Docker web hosting](packaging/web/README.md#docker).
+
+## Security
+
+Security architecture, threat modeling, parser hardening, fuzzing, and vulnerability reporting are covered in the [security documentation](book/src/security/) and the repository [security policy](SECURITY.md).
+
+## Test corpora
+
+PhotoCraft is tested against real files: our own Photoshop-authored oracle PSDs in
+[photocraft-corpus](https://github.com/storytold/photocraft-corpus) plus the psd-tools, ag-psd and PngSuite sets, pinned and
+sha256-verified. Fetch them with `cargo xtask corpus --all` and run the tests with
+`cargo xtask test-corpus` (details in [docs/development.md](docs/development.md#test-corpora)).
+
+## Downloads
+
+**New to PhotoCraft?** Download it from the [PhotoCraft page on getartcraft.com](https://getartcraft.com/apps/photocraft). That's the easiest way to install it.
+
+**Want a specific build or format?** On GitHub, the [latest release](https://github.com/storytold/photocraft/releases/latest) has every build listed below, and [all releases](https://github.com/storytold/photocraft/releases) have earlier versions and their notes. `<ver>` in the file names is the version number, and `SHA256SUMS.txt` lists a checksum for every file.
+
+### Windows
+
+| Build | Installer | Portable |
+|---|---|---|
+| x64 (64-bit Intel/AMD) | `photocraft-<ver>-windows-x64.msi` | `photocraft-<ver>-windows-x64-portable.zip` |
+| arm64 (Snapdragon and other ARM PCs) | `photocraft-<ver>-windows-arm64.msi` | `photocraft-<ver>-windows-arm64-portable.zip` |
+| x86 (32-bit) | `photocraft-<ver>-windows-x86.msi` | `photocraft-<ver>-windows-x86-portable.zip` |
+
+Installers and executables are code-signed.
+
+### macOS
+
+| Build | File | Notes |
+|---|---|---|
+| App, universal (Apple silicon + Intel) | `photocraft-<ver>-macos-universal.dmg` | Signed and notarized |
+| Command-line tool, universal | `photocraft-cli-<ver>-macos-universal.zip` | Signed and notarized |
+
+### Linux
+
+| Format | x86_64 | aarch64 (ARM64) | Notes |
+|---|---|---|---|
+| AppImage | `photocraft-<ver>-linux-x86_64.AppImage` | `photocraft-<ver>-linux-aarch64.AppImage` | Runs anywhere; updates itself with [AppImageUpdate](https://github.com/AppImageCommunity/AppImageUpdate) (`.zsync` files) |
+| Flatpak | `photocraft-<ver>-linux-x86_64.flatpak` | `photocraft-<ver>-linux-aarch64.flatpak` | Sandboxed; `flatpak install --user <file>` |
+| Debian/Ubuntu | `photocraft-<ver>-linux-x86_64.deb` | `photocraft-<ver>-linux-aarch64.deb` | |
+| Fedora/RHEL/openSUSE | `photocraft-<ver>-linux-x86_64.rpm` | `photocraft-<ver>-linux-aarch64.rpm` | |
+| Tarball | `photocraft-<ver>-linux-x86_64.tar.gz` | `photocraft-<ver>-linux-aarch64.tar.gz` | Unpack anywhere |
+
+RISC-V (riscv64): `photocraft-<ver>-linux-riscv64.tar.gz` only, built against Ubuntu 24.04 (needs glibc 2.39+).
+
+### FreeBSD
+
+| Build | File |
+|---|---|
+| x86_64 | `photocraft-<ver>-freebsd-x86_64.tar.gz` |
+
+### Web (WebAssembly)
+
+| Build | File | Notes |
+|---|---|---|
+| Static site | `photocraft-web-<ver>.zip` | Runs in a modern browser; host it on any static server |
+
+## The Crafting Apps
+
+PhotoCraft is one of the **Crafting Apps**: free, open-source creative tools from the
+[ArtCraft](https://getartcraft.com/) team, each written from scratch in Rust and each able to
+stand on its own.
+
+| | App | What it's for | Code | Learn more |
+|:-:|---|---|---|---|
+| <img src="https://raw.githubusercontent.com/storytold/photocraft/main/assets/app-icon/hicolor/64x64/apps/ai.storyteller.photocraft.png" alt="" width="32" height="32"> | **PhotoCraft** | Image editing: layers, masks, type and real PSD files | [GitHub](https://github.com/storytold/photocraft) | [Website](https://getartcraft.com/apps/photocraft) |
+| <img src="https://raw.githubusercontent.com/storytold/vectorcraft/main/assets/app-icon/hicolor/64x64/apps/ai.storyteller.vectorcraft.png" alt="" width="32" height="32"> | **VectorCraft** | Vector illustration | [GitHub](https://github.com/storytold/vectorcraft) | [Website](https://getartcraft.com/apps/vectorcraft) |
+| <img src="https://raw.githubusercontent.com/storytold/filmcraft/main/assets/app-icon/hicolor/64x64/apps/ai.storyteller.filmcraft.png" alt="" width="32" height="32"> | **FilmCraft** | Video editing, color and sound | [GitHub](https://github.com/storytold/filmcraft) | [Website](https://getartcraft.com/apps/filmcraft) |
+| <img src="https://raw.githubusercontent.com/storytold/lightcraft/main/assets/app-icon/hicolor/64x64/apps/ai.storyteller.lightcraft.png" alt="" width="32" height="32"> | **LightCraft** | Photo library and raw development | [GitHub](https://github.com/storytold/lightcraft) | [Website](https://getartcraft.com/apps/lightcraft) |
+| <img src="https://raw.githubusercontent.com/storytold/pdfcraft/main/assets/app-icon/hicolor/64x64/apps/ai.storyteller.pdfcraft.png" alt="" width="32" height="32"> | **PdfCraft** | Reading, organizing and protecting PDFs | [GitHub](https://github.com/storytold/pdfcraft) | [Website](https://getartcraft.com/apps/pdfcraft) |
+| <img src="https://raw.githubusercontent.com/storytold/effectcraft/main/assets/app-icon/hicolor/64x64/apps/ai.storyteller.effectcraft.png" alt="" width="32" height="32"> | **EffectCraft** | Motion graphics and visual effects | [GitHub](https://github.com/storytold/effectcraft) | [Website](https://getartcraft.com/apps/effectcraft) |
+| <img src="https://raw.githubusercontent.com/storytold/designcraft/main/assets/app-icon/hicolor/64x64/apps/ai.storyteller.designcraft.png" alt="" width="32" height="32"> | **DesignCraft** | Page layout and publishing | [GitHub](https://github.com/storytold/designcraft) | [Website](https://getartcraft.com/apps/designcraft) |
+| <img src="https://raw.githubusercontent.com/storytold/figcraft/main/assets/app-icon/hicolor/64x64/apps/ai.storyteller.figcraft.png" alt="" width="32" height="32"> | **FigCraft** | Interface design and prototyping | [GitHub](https://github.com/storytold/figcraft) | [Website](https://getartcraft.com/apps/figcraft) |
+| <img src="https://raw.githubusercontent.com/storytold/wordcraft/main/assets/app-icon/hicolor/64x64/apps/ai.storyteller.wordcraft.png" alt="" width="32" height="32"> | **WordCraft** | Word processing and documents | [GitHub](https://github.com/storytold/wordcraft) | [Website](https://getartcraft.com/apps/wordcraft) |
+| <img src="https://raw.githubusercontent.com/storytold/soundcraft/main/assets/app-icon/hicolor/64x64/apps/ai.storyteller.soundcraft.png" alt="" width="32" height="32"> | **SoundCraft** | Audio recording and editing | [GitHub](https://github.com/storytold/soundcraft) | [Website](https://getartcraft.com/apps/soundcraft) |
+| <img src="https://raw.githubusercontent.com/storytold/deckcraft/main/assets/app-icon/hicolor/64x64/apps/ai.storyteller.deckcraft.png" alt="" width="32" height="32"> | **DeckCraft** | Presentations and slide decks | [GitHub](https://github.com/storytold/deckcraft) | [Website](https://getartcraft.com/apps/deckcraft) |
+| <img src="https://raw.githubusercontent.com/storytold/cadcraft/main/assets/app-icon/hicolor/64x64/apps/ai.storyteller.cadcraft.png" alt="" width="32" height="32"> | **CADCraft** | Computer-aided design | [GitHub](https://github.com/storytold/cadcraft) | [Website](https://getartcraft.com/apps/cadcraft) |
+| <img src="https://raw.githubusercontent.com/storytold/gridcraft/main/assets/app-icon/hicolor/64x64/apps/ai.storyteller.gridcraft.png" alt="" width="32" height="32"> | **GridCraft** | Spreadsheets and data | [GitHub](https://github.com/storytold/gridcraft) | [Website](https://getartcraft.com/apps/gridcraft) |
+| <img src="https://raw.githubusercontent.com/storytold/texturecraft/main/assets/app-icon/hicolor/64x64/apps/ai.storyteller.texturecraft.png" alt="" width="32" height="32"> | **TextureCraft** | 3D texture painting | [GitHub](https://github.com/storytold/texturecraft) | [Website](https://getartcraft.com/apps/texturecraft) |
+| <img src="https://raw.githubusercontent.com/storytold/craft-anything/main/assets/app-icon/hicolor/64x64/apps/ai.storyteller.craft-anything.png" alt="" width="32" height="32"> | **Craft Anything** | See how any software works, then build your own | [GitHub](https://github.com/storytold/craft-anything) | [Website](https://getartcraft.com/apps/craft-anything) |
+| <img src="https://raw.githubusercontent.com/tangency-labs/solidcraft/main/assets/icons/app/linux/exports/hicolor/64x64/apps/io.tangencylabs.solidcraft.png" alt="" width="32" height="32"> | **SolidCraft** | Parametric 3D CAD by Tangency Labs (community app) | [GitHub](https://github.com/tangency-labs/solidcraft) | |
+
+And [**ArtCraft**](https://getartcraft.com/) itself, our AI image and video studio for artists who want real control.
+
+The Crafting Apps share the same conventions: clean-room and pure Rust, native on macOS, Windows and Linux, in the browser via WebAssembly, and fully drivable by agents.
+
+<br>
+
+<p align="center">
+  <a href="https://discord.gg/artcraft"><img alt="Join the ArtCraft community on Discord" src="https://img.shields.io/badge/Join%20us%20on%20Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" height="40"></a>
+</p>
+
+<h3 align="center">Come make things with us</h3>
+
+<p align="center">
+  Our Discord is where artists of every kind hang out: people who paint, shoot, draw, cut film,
+  set type, and people still figuring out what they like to make. Share what you're working on,
+  ask for help, tell us what's broken, or tell us what you wish these tools could do.
+  Whatever your medium and however long you've been at it, you're welcome here.
+</p>
+
+<p align="center">
+  <a href="https://discord.gg/artcraft"><b>discord.gg/artcraft</b></a> ·
+  <a href="https://getartcraft.com/">getartcraft.com</a> ·
+  <a href="https://getartcraft.com/apps">The Crafting Apps</a> ·
+  <a href="https://getartcraft.com/apps/photocraft">PhotoCraft</a>
+</p>
+
+---
+
+## License and credits
+
+PhotoCraft is dual-licensed under [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your option.
+Copyright (c) 2026 ArtCraft Team and the PhotoCraft contributors. Required notices are in [NOTICE](NOTICE).
+
+Bundled fonts, icons, images and other assets keep their own open licenses; each one is listed
+with its author, source and license in [ATTRIBUTION.md](ATTRIBUTION.md).
+
+Every artwork shown is in the public domain (Wikimedia Commons, NASA, U.S. National Archives); sources are listed in [`docs/images/SOURCES.md`](docs/images/SOURCES.md).
+
+The ArtCraft name, wordmark and logos in [`docs/brand/`](docs/brand/) are trademarks of the
+ArtCraft Team and are not covered by this license. They may be used only unmodified, and only as
+part of this repository and PhotoCraft, under [`docs/brand/LICENSE-brand.txt`](docs/brand/LICENSE-brand.txt).
+Forks and modified versions must remove them.
+
+<sub>Adobe, Photoshop, Illustrator, Premiere Pro, Lightroom, Acrobat, After Effects and InDesign are trademarks or registered trademarks of Adobe Inc. in the United States and/or other countries. PhotoCraft is an independent, open-source project and is not affiliated with, sponsored by or endorsed by Adobe Inc.; these names are used only to describe the workflows it is compatible with.</sub>
+
+<p align="center">
+  <a href="https://getartcraft.com/"><img alt="ArtCraft" src="docs/brand/artcraft-mark.svg" width="28"></a><br>
+  <sub>Made by the <a href="https://getartcraft.com/">ArtCraft</a> team and community.</sub>
+</p>
+
+## Star history
+
+[![Star History Chart](https://api.star-history.com/svg?repos=storytold/photocraft&type=Date&legend=top-left)](https://www.star-history.com/?repos=storytold%2Fphotocraft&type=date&legend=top-left)
