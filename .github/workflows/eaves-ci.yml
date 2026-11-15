@@ -1,0 +1,88 @@
+# Eaves (eaves/): unit tests, a universal build of the Mac app and its installer, an install of
+# that installer on the runner, and a run of the installed app that compares screenshots to check
+# that it draws. The installer is uploaded as the "Eaves-installer" artifact, the bare app as "Eaves-mac".
+#
+# The build is signed ad hoc, not with an Apple Developer ID, so macOS asks for confirmation the
+# first time it is opened; see eaves/README.md.
+
+name: Eaves CI
+
+on:
+  push:
+    paths:
+      - 'eaves/**'
+      - '.github/workflows/eaves-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: eaves
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          sw_vers
+          swift --version
+
+      - name: Unit tests
+        run: swift test
+
+      - name: Build the app (Apple silicon and Intel)
+        run: UNIVERSAL=1 ./scripts/build-app.sh
+
+      - name: Install it with the installer
+        run: |
+          sudo installer -pkg build/Eaves-*.pkg -target /
+          test -x /Applications/Eaves.app/Contents/MacOS/Eaves
+          codesign --verify --strict /Applications/Eaves.app
+          defaults read /Applications/Eaves.app/Contents/Info.plist CFBundleShortVersionString
+
+      # Launches the installed app over a TextEdit window, screenshots the screen before and while it
+      # snows, and prints what changed: the log shows whether snow was drawn, and where.
+      - name: Run the app and check what it draws
+        run: |
+          open -a TextEdit || true
+          sleep 4
+          screencapture -x build/before.png
+          /Applications/Eaves.app/Contents/MacOS/Eaves --selftest 30 &
+          APP_PID=$!
+          sleep 24
+          screencapture -x build/screenshot.png
+          wait "$APP_PID"
+          swift scripts/screen-diff.swift build/before.png build/screenshot.png
+
+      # Asks the real weather service two questions and opens the Settings window. It depends on a
+      # service outside this repository, so a failure here is reported but does not fail the build.
+      - name: Check the weather service and the Settings window
+        continue-on-error: true
+        run: /Applications/Eaves.app/Contents/MacOS/Eaves --probe
+
+      - name: Upload the installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: Eaves-installer
+          path: eaves/build/*.pkg
+          if-no-files-found: error
+
+      - name: Upload the app
+        uses: actions/upload-artifact@v4
+        with:
+          name: Eaves-mac
+          path: eaves/build/*.zip
+          if-no-files-found: error
+
+      - name: Upload the screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Eaves-screenshot
+          path: eaves/build/screenshot.png
+          if-no-files-found: ignore

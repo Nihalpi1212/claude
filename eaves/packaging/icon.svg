@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1c2a52"/>
+      <stop offset="0.55" stop-color="#34558f"/>
+      <stop offset="1" stop-color="#6f9fc9"/>
+    </linearGradient>
+    <linearGradient id="pane" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fdf3dc"/>
+      <stop offset="1" stop-color="#f6cf8f"/>
+    </linearGradient>
+    <clipPath id="shape"><rect x="100" y="100" width="824" height="824" rx="186"/></clipPath>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="9"/></filter>
+  </defs>
+  <rect x="100" y="112" width="824" height="824" rx="186" fill="#0b1228" opacity="0.28" filter="url(#soft)"/>
+  <g clip-path="url(#shape)">
+    <rect x="100" y="100" width="824" height="824" fill="url(#sky)"/>
+    <!-- far flakes -->
+    <g fill="#ffffff" opacity="0.55">
+      <circle cx="210" cy="230" r="9"/><circle cx="330" cy="330" r="7"/><circle cx="600" cy="205" r="8"/>
+      <circle cx="770" cy="300" r="7"/><circle cx="850" cy="470" r="8"/><circle cx="170" cy="470" r="7"/>
+      <circle cx="455" cy="250" r="6"/><circle cx="700" cy="400" r="6"/>
+    </g>
+    <!-- near flakes -->
+    <g fill="#ffffff">
+      <circle cx="270" cy="400" r="15"/><circle cx="520" cy="330" r="17"/><circle cx="800" cy="200" r="14"/>
+      <circle cx="400" cy="180" r="13"/><circle cx="690" cy="290" r="12"/>
+    </g>
+    <!-- the window, lit from inside -->
+    <rect x="236" y="560" width="552" height="420" rx="44" fill="#22335e"/>
+    <rect x="270" y="640" width="484" height="340" rx="18" fill="url(#pane)"/>
+    <rect x="500" y="640" width="24" height="340" fill="#22335e"/>
+    <rect x="270" y="770" width="484" height="22" fill="#22335e"/>
+    <!-- snow lying on top of it -->
+    <path d="M212 592 C212 548 262 520 316 528 C352 478 438 468 486 512 C528 470 622 474 660 524 C722 506 806 536 812 592 C812 612 796 622 776 622 L248 622 C228 622 212 612 212 592 Z" fill="#c9d9ee"/>
+    <path d="M212 580 C212 536 262 508 316 516 C352 466 438 456 486 500 C528 458 622 462 660 512 C722 494 806 524 812 580 C812 600 796 610 776 610 L248 610 C228 610 212 600 212 580 Z" fill="#ffffff"/>
+  </g>
+</svg>
