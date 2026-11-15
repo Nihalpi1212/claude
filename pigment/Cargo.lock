@@ -5960,6 +5960,7 @@ dependencies = [
  "image",
  "keyring",
  "log",
+ "photocraft-compose",
  "photocraft-engine",
  "photocraft-format",
  "photocraft-geom",

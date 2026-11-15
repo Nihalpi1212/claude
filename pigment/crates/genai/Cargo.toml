@@ -36,4 +36,5 @@ keyring = { version = "3.6", default-features = false, features = ["apple-native
 keyring = { version = "3.6", default-features = false, features = ["windows-native"] }
 
 [dev-dependencies]
-photocraft-geom = { workspace = true }
+# The end-to-end test renders the document to check the fill landed inside the selection only.
+photocraft-compose = { workspace = true }
