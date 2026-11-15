@@ -238,8 +238,9 @@ export function openFontMenu(app, catalog, preview, anchor, { value = '', initia
     // the current family is highlighted when it is listed
     const cur = items.findIndex((it) => it.kind === 'family' && !it.recent && familyKey(it.entry.name) === familyKey(value));
     highlight = q ? items.findIndex((it) => it.kind === 'family') : cur;
+    // the current family in view (as the menu opens), else the top of the new list
+    list.scrollTop = highlight >= 0 && !q ? Math.max(0, highlight * rowH - list.clientHeight / 2 + rowH / 2) : 0;
     paint();
-    if (highlight >= 0 && !q) list.scrollTop = Math.max(0, highlight * rowH - list.clientHeight / 2 + rowH / 2);
   };
   const rowCache = new Map();
   const paint = () => {
@@ -270,6 +271,9 @@ export function openFontMenu(app, catalog, preview, anchor, { value = '', initia
       row.remove();
       rowCache.delete(key);
     }
+    // document order follows the list order (assistive technology and keyboard focus read it)
+    const rows = [...rowCache.values()].sort((x, y) => parseFloat(x.style.top) - parseFloat(y.style.top));
+    if (rows.some((r, i) => list.children[i + 1] !== r)) list.append(...rows);
   };
   const renderRow = (it, i, size, sample) => {
     const row = el('div', it.kind === 'head' ? 'fp-heading' : 'fp-row');
@@ -684,15 +688,25 @@ export function installPicker(app, catalog) {
           const v = mixed(attrs.axes) ? null : st.axes[a.tag] ?? rec?.coords?.[a.tag] ?? (a.tag === 'wght' && !mixed(attrs.fontWeight) ? attrs.fontWeight : a.default);
           range.value = String(v ?? a.default);
           num.value = v === null ? '' : String(Math.round(Number(v) * 10) / 10);
+          let last = Number(range.value);
           const commit = (raw) => {
             const n = Math.min(a.max, Math.max(a.min, Number(raw)));
-            if (!Number.isFinite(n)) return;
+            // one change, one entry (a blur after a typed value must not apply it twice)
+            if (!Number.isFinite(n) || n === last) return;
+            last = n;
             const axesNow = { ...(mixed(attrs.axes) ? {} : attrs.axes ?? {}), [a.tag]: M.tidyNumber ? M.tidyNumber(n) : n };
             apply({ axes: axesNow, ...(a.tag === 'wght' ? { fontWeight: Math.round(n) } : {}) });
           };
           range.addEventListener('input', () => (num.value = range.value));
-          range.addEventListener('change', () => commit(range.value));
-          num.addEventListener('change', () => commit(num.value));
+          // the panel does not redraw its sections while one of them has the focus: let go, so the style list follows
+          range.addEventListener('change', () => {
+            commit(range.value);
+            range.blur();
+          });
+          num.addEventListener('change', () => {
+            commit(num.value);
+            num.blur();
+          });
           row.append(name, range, num);
           box.appendChild(row);
         }
