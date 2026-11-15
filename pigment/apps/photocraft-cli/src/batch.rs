@@ -60,7 +60,7 @@ pub(crate) fn batch(a: &BatchArgs, out: &mut dyn Write, err: &mut dyn Write) -> 
         return Err(CliError::OutIsIn(out_dir.to_path_buf()));
     }
     let inputs: Vec<photocraft_engine::file_cmds::BatchInput> = if a.recursive {
-        photocraft_engine::file_cmds::list_images_tree(&in_dir.to_string_lossy(), &out_dir.to_string_lossy(), "photocraft-cli batch")?
+        photocraft_engine::file_cmds::list_images_tree(&in_dir.to_string_lossy(), &out_dir.to_string_lossy(), "pigment-cli batch")?
             .into_iter()
             .filter(|input| is_input(Path::new(&input.path)))
             .collect()

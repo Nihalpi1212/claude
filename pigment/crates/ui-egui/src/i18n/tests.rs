@@ -354,7 +354,7 @@ fn azerbaijani_keeps_context_placeholders_and_command_names() {
     assert_eq!(tr_ctx(az, "cameraRaw", "Light"), "İşıq");
     assert_eq!(tr_ctx(az, "fontWeight", "Light"), "İncə");
     assert_ne!(tr_id(az, "edit.clear", "Clear"), "Clear");
-    assert!(fmt(tr(az, "About {app}"), &[("app", "PhotoCraft")]).contains("PhotoCraft"));
+    assert!(fmt(tr(az, "About {app}"), &[("app", "Pigment")]).contains("Pigment"));
 }
 
 /// Bosnian locales, with or without region, script or encoding, select the Latin catalog.
@@ -505,7 +505,7 @@ fn bundled_catalogs_are_consistent() {
         for line in app.lines().filter(|l| l.starts_with("@id\t")) {
             let id = line.split('\t').nth(1).unwrap_or_default();
             if id != "language.name" && !(crate::menus::is_live(id) || crate::menu_catalog::CATALOG.iter().any(|m| m.3 == id)) {
-                println!("{code}: @id row for a command PhotoCraft doesn't have: {id:?}");
+                println!("{code}: @id row for a command Pigment doesn't have: {id:?}");
             }
         }
     }

@@ -1,0 +1,985 @@
+{
+ "file.new": {
+  "label": "New\u2026",
+  "path": "File",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd.rs:279:            \"file.new\",",
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/atn_cmds/events.rs:891:            \"file.new\","
+  ],
+  "nrefs": 484
+ },
+ "file.open": {
+  "label": "Open\u2026",
+  "path": "File",
+  "defs": [],
+  "nrefs": 9
+ },
+ "file.openAs": {
+  "label": "Open As\u2026",
+  "path": "File",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/file_cmds.rs:290:            \"file.openAs\","
+  ],
+  "nrefs": 12
+ },
+ "file.openAsSmartObject": {
+  "label": "Open as Smart Object\u2026",
+  "path": "File",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/file_cmds.rs:299:            \"file.openAsSmartObject\","
+  ],
+  "nrefs": 8
+ },
+ "file.openExrParts": {
+  "label": "Open EXR Parts\u2026",
+  "path": "File",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/exr_cmds.rs:79:            \"file.openExrParts\","
+  ],
+  "nrefs": 16
+ },
+ "file.close": {
+  "label": "Close",
+  "path": "File",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd.rs:346:            \"file.close\","
+  ],
+  "nrefs": 23
+ },
+ "file.closeAll": {
+  "label": "Close All",
+  "path": "File",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/file_cmds.rs:252:        spec!(\"file.closeAll\", \"Close All\", &[\"File\"], Some(\"Cmd+Alt+W\"), \"{}\", has_doc, |s, _| close_all(s)),"
+  ],
+  "nrefs": 10
+ },
+ "file.closeOthers": {
+  "label": "Close Others",
+  "path": "File",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/file_cmds.rs:254:            \"file.closeOthers\","
+  ],
+  "nrefs": 9
+ },
+ "file.save": {
+  "label": "Save",
+  "path": "File",
+  "defs": [],
+  "nrefs": 32
+ },
+ "file.saveAs": {
+  "label": "Save As\u2026",
+  "path": "File",
+  "defs": [],
+  "nrefs": 45
+ },
+ "file.saveACopy": {
+  "label": "Save a Copy\u2026",
+  "path": "File",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/file_cmds.rs:281:            \"file.saveACopy\","
+  ],
+  "nrefs": 31
+ },
+ "file.revert": {
+  "label": "Revert",
+  "path": "File",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/file_cmds.rs:279:        spec!(\"file.revert\", \"Revert\", &[\"File\"], Some(\"F12\"), \"{} (reloads the saved file as one undoable step)\", can_revert, |s, _| revert(s)),"
+  ],
+  "nrefs": 7
+ },
+ "file.export.quickExportAsPng": {
+  "label": "Quick Export as PNG",
+  "path": "File, Export",
+  "defs": [],
+  "nrefs": 8
+ },
+ "file.export.exportAs": {
+  "label": "Export As\u2026",
+  "path": "File, Export",
+  "defs": [],
+  "nrefs": 7
+ },
+ "file.export.exportPreferences": {
+  "label": "Export Preferences\u2026",
+  "path": "File, Export",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/web_cmds.rs:88:            \"file.export.exportPreferences\","
+  ],
+  "nrefs": 5
+ },
+ "file.export.saveForWebLegacy": {
+  "label": "Save for Web (Legacy)\u2026",
+  "path": "File, Export",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/web_cmds.rs:79:            \"file.export.saveForWebLegacy\","
+  ],
+  "nrefs": 11
+ },
+ "file.export.artboardsToFiles": {
+  "label": "Artboards to Files\u2026",
+  "path": "File, Export",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/artboard_cmds.rs:829:            \"file.export.artboardsToFiles\",",
+   "/home/user/storytold/photocraft/crates/ui-egui/src/canvas/artboard_ui.rs:355:            \"file.export.artboardsToFiles\","
+  ],
+  "nrefs": 7
+ },
+ "file.export.artboardsToPdf": {
+  "label": "Artboards to PDF\u2026",
+  "path": "File, Export",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/artboard_cmds.rs:837:            \"file.export.artboardsToPdf\",",
+   "/home/user/storytold/photocraft/crates/ui-egui/src/canvas/artboard_ui.rs:356:            \"file.export.artboardsToPdf\","
+  ],
+  "nrefs": 6
+ },
+ "file.export.layersToFiles": {
+  "label": "Layers to Files\u2026",
+  "path": "File, Export",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/file_cmds.rs:404:            \"file.export.layersToFiles\","
+  ],
+  "nrefs": 8
+ },
+ "file.export.layerCompsToFiles": {
+  "label": "Layer Comps to Files\u2026",
+  "path": "File, Export",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/comps_cmds.rs:542:            \"file.export.layerCompsToFiles\",",
+   "/home/user/storytold/photocraft/crates/ui-egui/src/canvas/artboard_ui.rs:357:            \"file.export.layerCompsToFiles\","
+  ],
+  "nrefs": 7
+ },
+ "file.export.colorLookupTables": {
+  "label": "Color Lookup Tables\u2026",
+  "path": "File, Export",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/file_cmds.rs:413:            \"file.export.colorLookupTables\","
+  ],
+  "nrefs": 6
+ },
+ "file.export.dataSetsAsFiles": {
+  "label": "Data Sets as Files\u2026",
+  "path": "File, Export",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/variables_cmds.rs:470:                \"file.export.dataSetsAsFiles\",",
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/variables_cmds.rs:547:            \"file.export.dataSetsAsFiles\","
+  ],
+  "nrefs": 10
+ },
+ "file.export.pathsToIllustrator": {
+  "label": "Paths to Illustrator\u2026",
+  "path": "File, Export",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/print_cmds.rs:1692:            \"file.export.pathsToIllustrator\","
+  ],
+  "nrefs": 4
+ },
+ "file.export.renderVideo": {
+  "label": "Render Video\u2026",
+  "path": "File, Export",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/video_cmds.rs:784:        spec!(\"file.export.renderVideo\", \"Render Video\u2026\", &[\"File\", \"Export\"], has_doc, |s, p| render_video(s, p)),"
+  ],
+  "nrefs": 7
+ },
+ "file.generate.imageAssets": {
+  "label": "Image Assets",
+  "path": "File, Generate",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/web_cmds.rs:106:            \"file.generate.imageAssets\","
+  ],
+  "nrefs": 3
+ },
+ "file.placeEmbedded": {
+  "label": "Place Embedded\u2026",
+  "path": "File",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/file_cmds.rs:322:            \"file.placeEmbedded\","
+  ],
+  "nrefs": 18
+ },
+ "file.placeLinked": {
+  "label": "Place Linked\u2026",
+  "path": "File",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/file_cmds.rs:331:            \"file.placeLinked\","
+  ],
+  "nrefs": 14
+ },
+ "file.package": {
+  "label": "Package\u2026",
+  "path": "File",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/print_cmds.rs:1683:            \"file.package\","
+  ],
+  "nrefs": 4
+ },
+ "file.automate.batch": {
+  "label": "Batch\u2026",
+  "path": "File, Automate",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/file_cmds/batch_run.rs:1523:                    \"file.automate.batch\",",
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/file_cmds/batch_run.rs:1577:                \"file.automate.batch\",",
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/file_cmds.rs:367:            \"file.automate.batch\","
+  ],
+  "nrefs": 50
+ },
+ "file.automate.createDroplet": {
+  "label": "Create Droplet\u2026",
+  "path": "File, Automate",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/automate_cmds.rs:655:            \"file.automate.createDroplet\","
+  ],
+  "nrefs": 10
+ },
+ "file.automate.cropAndStraightenPhotos": {
+  "label": "Crop and Straighten Photos",
+  "path": "File, Automate",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/photo_cmds.rs:1398:            id: \"file.automate.cropAndStraightenPhotos\","
+  ],
+  "nrefs": 4
+ },
+ "file.automate.contactSheetII": {
+  "label": "Contact Sheet II\u2026",
+  "path": "File, Automate",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/automate_cmds.rs:647:            \"file.automate.contactSheetII\","
+  ],
+  "nrefs": 4
+ },
+ "file.automate.conditionalModeChange": {
+  "label": "Conditional Mode Change\u2026",
+  "path": "File, Automate",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/file_cmds.rs:358:            \"file.automate.conditionalModeChange\","
+  ],
+  "nrefs": 6
+ },
+ "file.automate.fitImage": {
+  "label": "Fit Image\u2026",
+  "path": "File, Automate",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/file_cmds.rs:349:            \"file.automate.fitImage\","
+  ],
+  "nrefs": 7
+ },
+ "file.automate.lensCorrection": {
+  "label": "Lens Correction\u2026",
+  "path": "File, Automate",
+  "defs": [],
+  "nrefs": 4
+ },
+ "file.automate.mergeToHdrPro": {
+  "label": "Merge to HDR Pro\u2026",
+  "path": "File, Automate",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/photo_cmds.rs:1388:            id: \"file.automate.mergeToHdrPro\","
+  ],
+  "nrefs": 5
+ },
+ "file.automate.photomerge": {
+  "label": "Photomerge\u2026",
+  "path": "File, Automate",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/photo_cmds.rs:1378:            id: \"file.automate.photomerge\","
+  ],
+  "nrefs": 5
+ },
+ "file.scripts.imageProcessor": {
+  "label": "Image Processor\u2026",
+  "path": "File, Scripts",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/file_cmds.rs:376:            \"file.scripts.imageProcessor\","
+  ],
+  "nrefs": 9
+ },
+ "file.scripts.deleteAllEmptyLayers": {
+  "label": "Delete All Empty Layers",
+  "path": "File, Scripts",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/extra_cmds.rs:1151:        spec!(\"file.scripts.deleteAllEmptyLayers\", \"Delete All Empty Layers\", &[\"File\", \"Scripts\"], None, \"{}\", has_doc, |s, _| delete_where("
+  ],
+  "nrefs": 3
+ },
+ "file.scripts.flattenAllLayerEffects": {
+  "label": "Flatten All Layer Effects",
+  "path": "File, Scripts",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/file_cmds.rs:393:        spec!(\"file.scripts.flattenAllLayerEffects\", \"Flatten All Layer Effects\", &[\"File\", \"Scripts\"], None, \"{}\", has_doc, |s, _| flatten_all_effects(s)),"
+  ],
+  "nrefs": 3
+ },
+ "file.scripts.flattenAllMasks": {
+  "label": "Flatten All Masks",
+  "path": "File, Scripts",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/file_cmds.rs:395:            \"file.scripts.flattenAllMasks\","
+  ],
+  "nrefs": 3
+ },
+ "file.scripts.scriptEventsManager": {
+  "label": "Script Events Manager\u2026",
+  "path": "File, Scripts",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/automate_cmds.rs:687:            \"file.scripts.scriptEventsManager\","
+  ],
+  "nrefs": 6
+ },
+ "file.scripts.loadFilesIntoStack": {
+  "label": "Load Files into Stack\u2026",
+  "path": "File, Scripts",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/file_cmds.rs:385:            \"file.scripts.loadFilesIntoStack\","
+  ],
+  "nrefs": 7
+ },
+ "file.scripts.statistics": {
+  "label": "Statistics\u2026",
+  "path": "File, Scripts",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/automate_cmds.rs:671:            \"file.scripts.statistics\","
+  ],
+  "nrefs": 5
+ },
+ "file.scripts.browse": {
+  "label": "Browse\u2026",
+  "path": "File, Scripts",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/automate_cmds.rs:679:            \"file.scripts.browse\","
+  ],
+  "nrefs": 8
+ },
+ "file.import.variableDataSets": {
+  "label": "Variable Data Sets\u2026",
+  "path": "File, Import",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/variables_cmds.rs:539:            \"file.import.variableDataSets\","
+  ],
+  "nrefs": 7
+ },
+ "file.import.videoFramesToLayers": {
+  "label": "Video Frames to Layers\u2026",
+  "path": "File, Import",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/video_cmds.rs:783:        spec!(\"file.import.videoFramesToLayers\", \"Video Frames to Layers\u2026\", &[\"File\", \"Import\"], has_doc, |s, p| frames_to_layers(s, p)),"
+  ],
+  "nrefs": 5
+ },
+ "file.import.notes": {
+  "label": "Notes\u2026",
+  "path": "File, Import",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/notes_cmds.rs:261:            id: \"file.import.notes\","
+  ],
+  "nrefs": 9
+ },
+ "file.import.wiaSupport": {
+  "label": "WIA Support\u2026",
+  "path": "File, Import",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/wia_cmds.rs:26:        id: \"file.import.wiaSupport\","
+  ],
+  "nrefs": 3
+ },
+ "file.fileInfo": {
+  "label": "File Info\u2026",
+  "path": "File",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/file_cmds.rs:340:            \"file.fileInfo\","
+  ],
+  "nrefs": 8
+ },
+ "file.print": {
+  "label": "Print\u2026",
+  "path": "File",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/print_cmds.rs:1642:        spec!(\"file.print\", \"Print\u2026\", &[\"File\"], Some(\"Cmd+P\"), PRINT_PARAMS, native_doc, print),"
+  ],
+  "nrefs": 19
+ },
+ "file.printOneCopy": {
+  "label": "Print One Copy",
+  "path": "File",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/print_cmds.rs:1674:            \"file.printOneCopy\","
+  ],
+  "nrefs": 9
+ },
+ "file.exit": {
+  "label": "Exit",
+  "path": "File",
+  "defs": [],
+  "nrefs": 9
+ },
+ "edit.undo": {
+  "label": "Undo",
+  "path": "Edit",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/atn_cmds/events.rs:939:            \"edit.undo\","
+  ],
+  "nrefs": 128
+ },
+ "edit.redo": {
+  "label": "Redo",
+  "path": "Edit",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/atn_cmds/events.rs:940:            \"edit.redo\","
+  ],
+  "nrefs": 41
+ },
+ "edit.toggleLastState": {
+  "label": "Toggle Last State",
+  "path": "Edit",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/edit_cmds.rs:1276:        spec!(\"edit.toggleLastState\", \"Toggle Last State\", &[\"Edit\"], Some(\"Cmd+Alt+Z\"), \"{}\", has_doc, |s, _| toggle_last_state(s)),"
+  ],
+  "nrefs": 8
+ },
+ "edit.fade": {
+  "label": "Fade\u2026",
+  "path": "Edit",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/ui-egui/src/dialogs/filter_dialog.rs:331:    \"edit.fade\",",
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/edit_menu_cmds.rs:362:            \"edit.fade\","
+  ],
+  "nrefs": 12
+ },
+ "edit.cut": {
+  "label": "Cut",
+  "path": "Edit",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/edit_cmds.rs:1179:            \"edit.cut\","
+  ],
+  "nrefs": 15
+ },
+ "edit.copy": {
+  "label": "Copy",
+  "path": "Edit",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/kys.rs:423:            Entry { id: \"edit.copy\".into(), label: \"Copy\".into(), tool: false, keys: vec![\"Cmd+C\".into(), \"F3\".into()] },",
+   "/home/user/storytold/photocraft/crates/engine/src/kys.rs:438:        assert_eq!(set.commands[0], KysCommand { name: \"Copy\".into(), shortcuts: vec![\"Cmd+C\".into(), \"F3\".into()], id: Some(\"edit.copy\".into()) });",
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/edit_cmds.rs:1222:            \"edit.copy\","
+  ],
+  "nrefs": 34
+ },
+ "edit.copyMerged": {
+  "label": "Copy Merged",
+  "path": "Edit",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/edit_cmds.rs:1238:        spec!(\"edit.copyMerged\", \"Copy Merged\", &[\"Edit\"], Some(\"Cmd+Shift+C\"), \"{}\", has_doc, |s, _| copy(s, true)),"
+  ],
+  "nrefs": 6
+ },
+ "edit.paste": {
+  "label": "Paste",
+  "path": "Edit",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/edit_cmds.rs:1240:            \"edit.paste\",",
+   "/home/user/storytold/photocraft/crates/ui-egui/src/panels/smart_ui.rs:915:            \"edit.paste\","
+  ],
+  "nrefs": 30
+ },
+ "edit.pasteSpecial.pasteInPlace": {
+  "label": "Paste in Place",
+  "path": "Edit, Paste Special",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/edit_cmds.rs:1262:            \"edit.pasteSpecial.pasteInPlace\","
+  ],
+  "nrefs": 9
+ },
+ "edit.pasteSpecial.pasteInto": {
+  "label": "Paste Into",
+  "path": "Edit, Paste Special",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/extra_cmds.rs:947:            \"edit.pasteSpecial.pasteInto\","
+  ],
+  "nrefs": 6
+ },
+ "edit.pasteSpecial.pasteOutside": {
+  "label": "Paste Outside",
+  "path": "Edit, Paste Special",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/extra_cmds.rs:956:            \"edit.pasteSpecial.pasteOutside\","
+  ],
+  "nrefs": 5
+ },
+ "edit.clear": {
+  "label": "Clear",
+  "path": "Edit",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd.rs:381:            \"edit.clear\","
+  ],
+  "nrefs": 12
+ },
+ "edit.search": {
+  "label": "Search\u2026",
+  "path": "Edit",
+  "defs": [],
+  "nrefs": 10
+ },
+ "edit.checkSpelling": {
+  "label": "Check Spelling\u2026",
+  "path": "Edit",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/type_spell_cmds.rs:282:            id: \"edit.checkSpelling\","
+  ],
+  "nrefs": 64
+ },
+ "edit.findAndReplaceText": {
+  "label": "Find and Replace Text\u2026",
+  "path": "Edit",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/edit_menu_cmds.rs:415:            \"edit.findAndReplaceText\","
+  ],
+  "nrefs": 6
+ },
+ "edit.fill": {
+  "label": "Fill\u2026",
+  "path": "Edit",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd.rs:372:            \"edit.fill\",",
+   "/home/user/storytold/photocraft/crates/ui-egui/src/panels/smart_ui.rs:914:            \"edit.fill\","
+  ],
+  "nrefs": 188
+ },
+ "edit.stroke": {
+  "label": "Stroke\u2026",
+  "path": "Edit",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/extra_cmds.rs:915:            \"edit.stroke\","
+  ],
+  "nrefs": 15
+ },
+ "edit.contentAwareFill": {
+  "label": "Content-Aware Fill\u2026",
+  "path": "Edit",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/edit_menu_cmds.rs:378:            \"edit.contentAwareFill\",",
+   "/home/user/storytold/photocraft/crates/ui-egui/src/dialogs/filter_dialog.rs:249:    \"edit.contentAwareFill\","
+  ],
+  "nrefs": 33
+ },
+ "edit.contentAwareScale": {
+  "label": "Content-Aware Scale",
+  "path": "Edit",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/edit_menu_cmds.rs:388:            \"edit.contentAwareScale\","
+  ],
+  "nrefs": 17
+ },
+ "edit.puppetWarp": {
+  "label": "Puppet Warp",
+  "path": "Edit",
+  "defs": [],
+  "nrefs": 14
+ },
+ "edit.perspectiveWarp": {
+  "label": "Perspective Warp",
+  "path": "Edit",
+  "defs": [],
+  "nrefs": 10
+ },
+ "edit.freeTransform": {
+  "label": "Free Transform",
+  "path": "Edit",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/ui-egui/src/tools/transform_tool/begin.rs:184:            \"edit.freeTransform\",",
+   "/home/user/storytold/photocraft/crates/ui-egui/src/menus/enable_rules.rs:233:            \"edit.freeTransform\","
+  ],
+  "nrefs": 23
+ },
+ "edit.transform.again": {
+  "label": "Again",
+  "path": "Edit, Transform",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/edit_cmds.rs:1277:        spec!(\"edit.transform.again\", \"Again\", &[\"Edit\", \"Transform\"], Some(\"Cmd+Shift+T\"), \"{}\", has_doc, |s, _| transform_again(s)),"
+  ],
+  "nrefs": 5
+ },
+ "edit.transform.scale": {
+  "label": "Scale",
+  "path": "Edit, Transform",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/ui-egui/src/menus/enable_rules.rs:234:            \"edit.transform.scale\","
+  ],
+  "nrefs": 6
+ },
+ "edit.transform.rotate": {
+  "label": "Rotate",
+  "path": "Edit, Transform",
+  "defs": [],
+  "nrefs": 7
+ },
+ "edit.transform.skew": {
+  "label": "Skew",
+  "path": "Edit, Transform",
+  "defs": [],
+  "nrefs": 7
+ },
+ "edit.transform.distort": {
+  "label": "Distort",
+  "path": "Edit, Transform",
+  "defs": [],
+  "nrefs": 12
+ },
+ "edit.transform.perspective": {
+  "label": "Perspective",
+  "path": "Edit, Transform",
+  "defs": [],
+  "nrefs": 11
+ },
+ "edit.transform.warp": {
+  "label": "Warp",
+  "path": "Edit, Transform",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/warp_cmds.rs:719:            id: \"edit.transform.warp\","
+  ],
+  "nrefs": 12
+ },
+ "edit.transform.splitWarpHorizontally": {
+  "label": "Split Warp Horizontally",
+  "path": "Edit, Transform",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/warp_cmds.rs:749:            id: \"edit.transform.splitWarpHorizontally\","
+  ],
+  "nrefs": 9
+ },
+ "edit.transform.splitWarpVertically": {
+  "label": "Split Warp Vertically",
+  "path": "Edit, Transform",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/warp_cmds.rs:759:            id: \"edit.transform.splitWarpVertically\","
+  ],
+  "nrefs": 9
+ },
+ "edit.transform.splitWarpCrosswise": {
+  "label": "Split Warp Crosswise",
+  "path": "Edit, Transform",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/warp_cmds.rs:739:            id: \"edit.transform.splitWarpCrosswise\","
+  ],
+  "nrefs": 9
+ },
+ "edit.transform.removeWarpSplit": {
+  "label": "Remove Warp Split",
+  "path": "Edit, Transform",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/warp_cmds.rs:769:            id: \"edit.transform.removeWarpSplit\","
+  ],
+  "nrefs": 9
+ },
+ "edit.transform.rotate180": {
+  "label": "Rotate 180\u00b0",
+  "path": "Edit, Transform",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/extra_cmds.rs:923:        spec!(\"edit.transform.rotate180\", \"Rotate 180\u00b0\", &[\"Edit\", \"Transform\"], None, TRANSFORM_TARGET, has_layer, |s, p| transform_preset(",
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/atn_cmds/events.rs:746:            \"edit.transform.rotate180\",",
+   "/home/user/storytold/photocraft/crates/ui-egui/src/panels/smart_ui.rs:901:            \"edit.transform.rotate180\","
+  ],
+  "nrefs": 10
+ },
+ "edit.transform.rotate90Cw": {
+  "label": "Rotate 90\u00b0 Clockwise",
+  "path": "Edit, Transform",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/extra_cmds.rs:928:        spec!(\"edit.transform.rotate90Cw\", \"Rotate 90\u00b0 Clockwise\", &[\"Edit\", \"Transform\"], None, TRANSFORM_TARGET, has_layer, |s, p| transform_preset(",
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/atn_cmds/events.rs:744:            \"edit.transform.rotate90Cw\","
+  ],
+  "nrefs": 9
+ },
+ "edit.transform.rotate90Ccw": {
+  "label": "Rotate 90\u00b0 Counter Clockwise",
+  "path": "Edit, Transform",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/extra_cmds.rs:933:        spec!(\"edit.transform.rotate90Ccw\", \"Rotate 90\u00b0 Counter Clockwise\", &[\"Edit\", \"Transform\"], None, TRANSFORM_TARGET, has_layer, |s, p| {",
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/atn_cmds/events.rs:745:            \"edit.transform.rotate90Ccw\","
+  ],
+  "nrefs": 9
+ },
+ "edit.transform.flipHorizontal": {
+  "label": "Flip Horizontal",
+  "path": "Edit, Transform",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/extra_cmds.rs:936:        spec!(\"edit.transform.flipHorizontal\", \"Flip Horizontal\", &[\"Edit\", \"Transform\"], None, TRANSFORM_TARGET, has_layer, |s, p| transform_preset(",
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/atn_cmds/events.rs:758:            \"edit.transform.flipHorizontal\","
+  ],
+  "nrefs": 10
+ },
+ "edit.transform.flipVertical": {
+  "label": "Flip Vertical",
+  "path": "Edit, Transform",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/extra_cmds.rs:941:        spec!(\"edit.transform.flipVertical\", \"Flip Vertical\", &[\"Edit\", \"Transform\"], None, TRANSFORM_TARGET, has_layer, |s, p| transform_preset(",
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/atn_cmds/events.rs:759:            \"edit.transform.flipVertical\","
+  ],
+  "nrefs": 9
+ },
+ "edit.autoAlignLayers": {
+  "label": "Auto-Align Layers\u2026",
+  "path": "Edit",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/align_cmds.rs:361:            \"edit.autoAlignLayers\","
+  ],
+  "nrefs": 5
+ },
+ "edit.autoBlendLayers": {
+  "label": "Auto-Blend Layers\u2026",
+  "path": "Edit",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/align_cmds.rs:367:            \"edit.autoBlendLayers\","
+  ],
+  "nrefs": 4
+ },
+ "edit.defineBrushPreset": {
+  "label": "Define Brush Preset\u2026",
+  "path": "Edit",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/edit_menu_cmds.rs:397:            \"edit.defineBrushPreset\","
+  ],
+  "nrefs": 3
+ },
+ "edit.definePattern": {
+  "label": "Define Pattern\u2026",
+  "path": "Edit",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/pattern_cmds.rs:550:            id: \"edit.definePattern\","
+  ],
+  "nrefs": 16
+ },
+ "edit.defineCustomShape": {
+  "label": "Define Custom Shape\u2026",
+  "path": "Edit",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/edit_menu_cmds.rs:406:            \"edit.defineCustomShape\","
+  ],
+  "nrefs": 9
+ },
+ "edit.purge.undo": {
+  "label": "Undo",
+  "path": "Edit, Purge",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/edit_menu_cmds.rs:370:        spec!(\"edit.purge.undo\", \"Undo\", [\"Edit\", \"Purge\"], None, \"{}\", can_purge_undo, |s, _| purge(s, \"undo\")),"
+  ],
+  "nrefs": 3
+ },
+ "edit.purge.clipboard": {
+  "label": "Clipboard",
+  "path": "Edit, Purge",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/edit_menu_cmds.rs:371:        spec!(\"edit.purge.clipboard\", \"Clipboard\", [\"Edit\", \"Purge\"], None, \"{}\", can_purge_clipboard, |s, _| purge(s, \"clipboard\")),"
+  ],
+  "nrefs": 3
+ },
+ "edit.purge.histories": {
+  "label": "Histories",
+  "path": "Edit, Purge",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/edit_menu_cmds.rs:372:        spec!(\"edit.purge.histories\", \"Histories\", [\"Edit\", \"Purge\"], None, \"{}\", can_purge_histories, |s, _| purge(s, \"histories\")),"
+  ],
+  "nrefs": 6
+ },
+ "edit.purge.videoCache": {
+  "label": "Video Cache",
+  "path": "Edit, Purge",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/edit_menu_cmds.rs:373:        spec!(\"edit.purge.videoCache\", \"Video Cache\", [\"Edit\", \"Purge\"], None, \"{}\", always, |_, _| Ok("
+  ],
+  "nrefs": 2
+ },
+ "edit.purge.all": {
+  "label": "All",
+  "path": "Edit, Purge",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/edit_menu_cmds.rs:376:        spec!(\"edit.purge.all\", \"All\", [\"Edit\", \"Purge\"], None, \"{}\", can_purge_all, |s, _| purge(s, \"all\")),"
+  ],
+  "nrefs": 3
+ },
+ "edit.presets.presetManager": {
+  "label": "Preset Manager\u2026",
+  "path": "Edit, Presets",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/edit_menu_cmds.rs:424:            \"edit.presets.presetManager\","
+  ],
+  "nrefs": 11
+ },
+ "edit.presets.migratePresets": {
+  "label": "Migrate Presets",
+  "path": "Edit, Presets",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/migrate_cmds.rs:71:        id: \"edit.presets.migratePresets\","
+  ],
+  "nrefs": 10
+ },
+ "edit.presets.exportImportPresets": {
+  "label": "Export/Import Presets\u2026",
+  "path": "Edit, Presets",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/edit_menu_cmds.rs:433:            \"edit.presets.exportImportPresets\","
+  ],
+  "nrefs": 6
+ },
+ "edit.colorSettings": {
+  "label": "Color Settings\u2026",
+  "path": "Edit",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/color_cmds.rs:1352:            \"edit.colorSettings\","
+  ],
+  "nrefs": 35
+ },
+ "edit.assignProfile": {
+  "label": "Assign Profile\u2026",
+  "path": "Edit",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/color_cmds.rs:1334:            \"edit.assignProfile\",",
+   "/home/user/storytold/photocraft/crates/ui-egui/src/dialogs/filter_dialog.rs:328:    \"edit.assignProfile\","
+  ],
+  "nrefs": 17
+ },
+ "edit.convertToProfile": {
+  "label": "Convert to Profile\u2026",
+  "path": "Edit",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/cmd/color_cmds.rs:1343:            \"edit.convertToProfile\",",
+   "/home/user/storytold/photocraft/crates/ui-egui/src/dialogs/filter_dialog.rs:329:    \"edit.convertToProfile\","
+  ],
+  "nrefs": 24
+ },
+ "edit.keyboardShortcuts": {
+  "label": "Keyboard Shortcuts\u2026",
+  "path": "Edit",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/prefs/cmds.rs:194:            \"edit.keyboardShortcuts\",",
+   "/home/user/storytold/photocraft/crates/ui-egui/src/prefs/prefs_ui/dialogs.rs:417:                \"edit.keyboardShortcuts\","
+  ],
+  "nrefs": 11
+ },
+ "edit.menus": {
+  "label": "Menus\u2026",
+  "path": "Edit",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/prefs/cmds.rs:203:            \"edit.menus\","
+  ],
+  "nrefs": 7
+ },
+ "edit.toolbar": {
+  "label": "Toolbar\u2026",
+  "path": "Edit",
+  "defs": [
+   "/home/user/storytold/photocraft/crates/engine/src/prefs/cmds.rs:211:        spec!(\"edit.toolbar\", \"Toolbar\u2026\", [\"Edit\"], None, r##\"{\"hidden\":[\"<tool>\",\u2026]?,\"order\":[\"<tool>\",\u2026]?,\"reset\":bool=false}\"##, toolbar, true),"
+  ],
+  "nrefs": 5
+ },
+ "edit.preferences.general": {
+  "label": "General\u2026",
+  "path": "Edit, Preferences",
+  "defs": [],
+  "nrefs": 2
+ },
+ "edit.preferences.integrations": {
+  "label": "AI Integrations\u2026",
+  "path": "Edit, Preferences",
+  "defs": [],
+  "nrefs": 2
+ },
+ "edit.preferences.interface": {
+  "label": "Interface\u2026",
+  "path": "Edit, Preferences",
+  "defs": [],
+  "nrefs": 2
+ },
+ "edit.preferences.workspace": {
+  "label": "Workspace\u2026",
+  "path": "Edit, Preferences",
+  "defs": [],
+  "nrefs": 2
+ },
+ "edit.preferences.tools": {
+  "label": "Tools\u2026",
+  "path": "Edit, Preferences",
+  "defs": [],
+  "nrefs": 2
+ },
+ "edit.preferences.historyLog": {
+  "label": "History Log\u2026",
+  "path": "Edit, Preferences",
+  "defs": [],
+  "nrefs": 2
+ },
+ "edit.preferences.fileHandling": {
+  "label": "File Handling\u2026",
+  "path": "Edit, Preferences",
+  "defs": [],
+  "nrefs": 2
+ },
+ "edit.preferences.export": {
+  "label": "Export\u2026",
+  "path": "Edit, Preferences",
+  "defs": [],
+  "nrefs": 3
+ },
+ "edit.preferences.performance": {
+  "label": "Performance\u2026",
+  "path": "Edit, Preferences",
+  "defs": [],
+  "nrefs": 3
+ },
+ "edit.preferences.scratchDisks": {
+  "label": "Scratch Disks\u2026",
+  "path": "Edit, Preferences",
+  "defs": [],
+  "nrefs": 2
+ },
+ "edit.preferences.cursors": {
+  "label": "Cursors\u2026",
+  "path": "Edit, Preferences",
+  "defs": [],
+  "nrefs": 2
+ },
+ "edit.preferences.transparencyAndGamut": {
+  "label": "Transparency & Gamut\u2026",
+  "path": "Edit, Preferences",
+  "defs": [],
+  "nrefs": 2
+ },
+ "edit.preferences.unitsAndRulers": {
+  "label": "Units & Rulers\u2026",
+  "path": "Edit, Preferences",
+  "defs": [],
+  "nrefs": 2
+ },
+ "edit.preferences.guidesGridAndSlices": {
+  "label": "Guides, Grid & Slices\u2026",
+  "path": "Edit, Preferences",
+  "defs": [],
+  "nrefs": 3
+ },
+ "edit.preferences.plugIns": {
+  "label": "Plugins\u2026",
+  "path": "Edit, Preferences",
+  "defs": [],
+  "nrefs": 2
+ },
+ "edit.preferences.type": {
+  "label": "Type\u2026",
+  "path": "Edit, Preferences",
+  "defs": [],
+  "nrefs": 2
+ },
+ "edit.preferences.enhancedControls": {
+  "label": "Enhanced Controls\u2026",
+  "path": "Edit, Preferences",
+  "defs": [],
+  "nrefs": 2
+ },
+ "edit.preferences.rawDefaults": {
+  "label": "RAW Defaults\u2026",
+  "path": "Edit, Preferences",
+  "defs": [],
+  "nrefs": 3
+ }
+}

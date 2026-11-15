@@ -268,7 +268,7 @@ pub(super) fn open_as(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(ext) = as_ext
         && !is_open_as_format(ext)
     {
-        return Err(EngineError::BadParams { cmd: "file.openAs".into(), msg: format!("\"as\" names no format PhotoCraft reads: {ext:?}") });
+        return Err(EngineError::BadParams { cmd: "file.openAs".into(), msg: format!("\"as\" names no format Pigment reads: {ext:?}") });
     }
     let bytes = read_file(&path)?;
     let result = open_bytes_as_with_options(s, &path, &bytes, as_ext, Some(path.clone()), approve_high_memory)?;

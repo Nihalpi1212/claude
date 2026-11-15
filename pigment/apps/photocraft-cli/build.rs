@@ -25,20 +25,20 @@ fn main() -> std::io::Result<()> {
     // to `WindowsResource::new`, which reads the Cargo package version. A pre-release such as
     // `1.2.3-rc.1` stays in the strings; the numeric fields are `1.2.3.0`.
     res.set_icon("../../assets/app-icon/photocraft.ico")
-        .set("ProductName", "PhotoCraft")
-        .set("FileDescription", "PhotoCraft command-line interface")
+        .set("ProductName", "Pigment")
+        .set("FileDescription", "Pigment command-line interface")
         .set("CompanyName", "Learning Machines LLC")
         .set("LegalCopyright", "Copyright (c) the PhotoCraft authors. MIT OR Apache-2.0.")
-        .set("OriginalFilename", "photocraft-cli.exe")
-        .set("InternalName", "photocraft-cli");
+        .set("OriginalFilename", "pigment-cli.exe")
+        .set("InternalName", "pigment-cli");
     if let Err(err) = res.compile() {
         if std::env::var_os("PHOTOCRAFT_REQUIRE_WINRES").is_some() {
             return Err(std::io::Error::other(format!(
-                "embedding Windows resources into photocraft-cli.exe failed: {err}. \
+                "embedding Windows resources into pigment-cli.exe failed: {err}. \
                  Install the Windows SDK resource compiler (rc.exe) or mingw-w64 windres and rebuild."
             )));
         }
-        println!("cargo:warning=photocraft-cli.exe built without icon/version resources: {err}");
+        println!("cargo:warning=pigment-cli.exe built without icon/version resources: {err}");
     }
     Ok(())
 }

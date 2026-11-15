@@ -234,7 +234,7 @@ mod tests {
         assert!(!agents_allowed(&none, false, true), "the launcher's list means nothing without the flag");
         // With the flag: the launcher's switch, and nothing else.
         assert!(agents_allowed(&none, true, true));
-        assert!(!agents_allowed(&legacy, true, false), "no second switch in PhotoCraft");
+        assert!(!agents_allowed(&legacy, true, false), "no second switch in Pigment");
     }
 
     #[test]

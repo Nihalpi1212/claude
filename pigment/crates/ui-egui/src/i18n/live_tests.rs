@@ -132,8 +132,8 @@ fn ukrainian_native_app_menu_keeps_product_and_language_names() {
         let h = harness();
         let layout = crate::native_menu::photocraft_layout(&crate::menus::menu_items(h.state()), lang("uk"), "uk");
         for (id, template) in [("help.about", "About {app}"), (crate::native_menu::HIDE, "Hide {app}"), ("file.exit", "Quit {app}")] {
-            let label = fmt(tr(lang("uk"), template), &[("app", "PhotoCraft")]);
-            assert!(label.contains("PhotoCraft"), "{id}: {label}");
+            let label = fmt(tr(lang("uk"), template), &[("app", "Pigment")]);
+            assert!(label.contains("Pigment"), "{id}: {label}");
             assert_eq!(layout.bar.find(id).map(|item| item.label.as_str()), Some(label.as_str()), "{id}");
         }
         assert_eq!(layout.bar.find("app.language.uk").map(|item| (item.label.as_str(), item.checked)), Some(("Українська", Some(true))));
@@ -549,7 +549,7 @@ fn czech_status_notices_and_navigator_draw_translated_text() {
             crate::notices::post(
                 h.state_mut(),
                 "Preferences can't be saved",
-                vec!["PhotoCraft keeps retrying; until a save succeeds, preference changes are lost when it closes.".into()],
+                vec!["Pigment keeps retrying; until a save succeeds, preference changes are lost when it closes.".into()],
                 true,
                 None,
             );
@@ -645,10 +645,10 @@ fn arabic_names_are_laid_out_right_to_left() {
         let name = "لاشي مكتوب هنا";
         let galley = h.ctx.fonts_mut(|f| f.layout_no_wrap(name.to_string(), font.clone(), egui::Color32::WHITE));
         assert!(x_in(&galley, 'ل') > x_in(&galley, 'ه'), "{name}: first word at the right");
-        let title = "لاشي مكتوب.png — PhotoCraft";
+        let title = "لاشي مكتوب.png — Pigment";
         let job = crate::panels::title_bar::title_job(title, font, egui::Color32::WHITE);
         let galley = h.ctx.fonts_mut(|f| f.layout_job(job));
         assert!(x_in(&galley, 'ل') > x_in(&galley, 'م'), "{title}: the name's first word right of its second");
-        assert!(x_in(&galley, 'P') > x_in(&galley, 'ل'), "{title}: PhotoCraft stays at the right");
+        assert!(x_in(&galley, 'P') > x_in(&galley, 'ل'), "{title}: Pigment stays at the right");
     });
 }

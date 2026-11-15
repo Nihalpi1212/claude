@@ -120,7 +120,7 @@ impl Live {
             return self.headless(&self.cfg.read_roots, self.cfg.write_root.clone(), "the automation roots can't be used");
         }
         match self.cfg.when_closed.unwrap_or(integrations.when_app_closed) {
-            WhenAppClosed::Error => Err("PhotoCraft isn't running: open it, then try again.".into()),
+            WhenAppClosed::Error => Err("Pigment isn't running: open it, then try again.".into()),
             WhenAppClosed::Headless => {
                 let reads = if self.cfg.read_roots.is_empty() {
                     agent_link::folder(&integrations.read_root).into_iter().collect()
@@ -128,7 +128,7 @@ impl Live {
                     self.cfg.read_roots.clone()
                 };
                 let write = self.cfg.write_root.clone().or_else(|| agent_link::folder(&integrations.write_root));
-                self.headless(&reads, write, "PhotoCraft isn't running and its agent folders can't be used")
+                self.headless(&reads, write, "Pigment isn't running and its agent folders can't be used")
             }
             WhenAppClosed::Launch => self.launch_and_wait().await,
         }
@@ -148,9 +148,9 @@ impl Live {
     /// Start the app (agents may use it) and wait until it accepts them.
     async fn launch_and_wait(&self) -> Result<(), String> {
         let Some(launch) = &self.cfg.launch else {
-            return Err("PhotoCraft isn't running, and this install can't start it from here: open PhotoCraft, then try again.".into());
+            return Err("Pigment isn't running, and this install can't start it from here: open Pigment, then try again.".into());
         };
-        launch().map_err(|e| format!("couldn't start PhotoCraft: {e}"))?;
+        launch().map_err(|e| format!("couldn't start Pigment: {e}"))?;
         let deadline = Instant::now() + self.cfg.launch_timeout;
         loop {
             tokio::time::sleep(POLL).await;
@@ -160,7 +160,7 @@ impl Live {
             }
             if Instant::now() >= deadline {
                 return Err(format!(
-                    "PhotoCraft didn't accept agents within {} s of starting. If it's still opening, try again in a moment; otherwise check that AI agents are on in ArtCraft Launcher › Settings › AI agents.",
+                    "Pigment didn't accept agents within {} s of starting. If it's still opening, try again in a moment; otherwise check that AI agents are on in ArtCraft Launcher › Settings › AI agents.",
                     self.cfg.launch_timeout.as_secs()
                 ));
             }
@@ -191,7 +191,7 @@ fn find_app(dir: &Path) -> Result<Option<(Connection, String)>, String> {
     if !agent_link::probe(c.port, PROBE_TIMEOUT) {
         return Ok(None);
     }
-    let token = security::client_token(None, Some(&c.token_file)).map_err(|e| format!("PhotoCraft's agent token: {e}"))?;
+    let token = security::client_token(None, Some(&c.token_file)).map_err(|e| format!("Pigment's agent token: {e}"))?;
     Ok(Some((c, token)))
 }
 
@@ -216,7 +216,7 @@ pub fn launcher(cli: &Path) -> Option<LaunchFn> {
                 c
             }
             _ => {
-                let app = dir.join(if cfg!(windows) { "photocraft.exe" } else { "photocraft" });
+                let app = dir.join(if cfg!(windows) { "pigment.exe" } else { "photocraft" });
                 if !app.is_file() {
                     return None;
                 }
@@ -280,7 +280,7 @@ mod tests {
 
     #[test]
     fn windows_starts_the_app_through_explorer() {
-        let app = Path::new(r"C:\Program Files\PhotoCraft\photocraft.exe");
+        let app = Path::new(r"C:\Program Files\Pigment\pigment.exe");
         let (program, args) = windows_launch(app, Some(OsStr::new(r"D:\Win")));
         assert_eq!(program, Path::new(r"D:\Win").join("explorer.exe"));
         assert_eq!(args, [app.as_os_str()]);
@@ -289,7 +289,7 @@ mod tests {
         assert_eq!(windows_launch(app, Some(OsStr::new(""))).0, default);
         assert_eq!(windows_launch(app, None).0, default);
         // Explorer would split this path at the comma.
-        let comma = Path::new(r"C:\Apps, tools\photocraft.exe");
+        let comma = Path::new(r"C:\Apps, tools\pigment.exe");
         assert_eq!(windows_launch(comma, None), (comma.to_path_buf(), Vec::new()));
     }
 }

@@ -4,13 +4,13 @@
 #
 #   curl -fsSLO https://raw.githubusercontent.com/flatpak/flatpak-builder-tools/master/cargo/flatpak-cargo-generator.py
 #   python3 flatpak-cargo-generator.py Cargo.lock -o packaging/linux/flatpak/cargo-sources.json
-#   flatpak-builder --user --install --force-clean build-flatpak packaging/linux/flatpak/ai.storyteller.photocraft.yml
-#   flatpak run ai.storyteller.photocraft
+#   flatpak-builder --user --install --force-clean build-flatpak packaging/linux/flatpak/io.github.nihalpi1212.pigment.yml
+#   flatpak run io.github.nihalpi1212.pigment
 #
 # For Flathub, replace the `dir` source with a `git` source pinned to a release tag and commit.
-# The single-file .flatpak attached to each release comes from ai.storyteller.photocraft.bundle.yml,
+# The single-file .flatpak attached to each release comes from io.github.nihalpi1212.pigment.bundle.yml,
 # which repackages the prebuilt release binaries. Keep runtime-version and finish-args identical.
-id: ai.storyteller.photocraft
+id: io.github.nihalpi1212.pigment
 runtime: org.freedesktop.Platform
 runtime-version: '26.08'
 sdk: org.freedesktop.Sdk
@@ -110,14 +110,14 @@ modules:
       - install -Dm644 docs/control-protocol.md /app/share/doc/photocraft/control-protocol.md
       - install -Dm644 NOTICE /app/share/doc/photocraft/NOTICE
       - install -Dm644 ATTRIBUTION.md /app/share/doc/photocraft/ATTRIBUTION.md
-      - install -Dm644 packaging/linux/ai.storyteller.photocraft.desktop /app/share/applications/ai.storyteller.photocraft.desktop
-      - install -Dm644 packaging/linux/ai.storyteller.photocraft.mime.xml /app/share/mime/packages/ai.storyteller.photocraft.xml
+      - install -Dm644 packaging/linux/io.github.nihalpi1212.pigment.desktop /app/share/applications/io.github.nihalpi1212.pigment.desktop
+      - install -Dm644 packaging/linux/io.github.nihalpi1212.pigment.mime.xml /app/share/mime/packages/io.github.nihalpi1212.pigment.xml
       - mkdir -p /app/share/icons && cp -R assets/app-icon/hicolor /app/share/icons/
       - >-
         version=$(awk '/^\[/{p=($0=="[workspace.package]");next} p&&$1=="version"{gsub(/[" ]/,"",$3);print $3;exit}' Cargo.toml);
         install -d /app/share/metainfo;
         sed -e "s/@VERSION@/$version/" -e "s/@DATE@/$(date -u +%Y-%m-%d)/"
-        packaging/linux/ai.storyteller.photocraft.metainfo.xml.in > /app/share/metainfo/ai.storyteller.photocraft.metainfo.xml
+        packaging/linux/io.github.nihalpi1212.pigment.metainfo.xml.in > /app/share/metainfo/io.github.nihalpi1212.pigment.metainfo.xml
     sources:
       - type: dir
         path: ../../..

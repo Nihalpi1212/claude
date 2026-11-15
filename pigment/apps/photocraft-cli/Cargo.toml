@@ -1,6 +1,6 @@
 [package]
 name = "photocraft-cli"
-description = "Headless PhotoCraft: convert, inspect, run commands, batch, MCP server"
+description = "Headless Pigment: convert, inspect, run commands, batch, MCP server"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -21,8 +21,9 @@ workspace = true
 name = "photocraft_cli"
 path = "src/lib.rs"
 
+# The shipped binary is `pigment-cli` (the package keeps PhotoCraft's name so upstream changes merge).
 [[bin]]
-name = "photocraft-cli"
+name = "pigment-cli"
 path = "src/main.rs"
 
 [[example]]

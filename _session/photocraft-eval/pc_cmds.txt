@@ -1,0 +1,454 @@
+
+                layerComp.list
+            brush.mixer.autoClean
+            brush.mixer.autoLoad
+            brush.mixer.sample
+            brush.mixer.sampleAllLayers
+            brush.presets.deleteGroup
+            brush.presets.move
+            brush.presets.moveGroup
+            brush.presets.renameGroup
+            brush.presets.save
+            brush.presets.update
+            channel.duplicate
+            channel.merge
+            channel.new
+            channel.newSpot
+            channel.options
+            channel.setVisible
+            channel.target
+            color.profileMismatch
+            count.setGroup
+            edit.assignProfile
+            edit.autoAlignLayers
+            edit.autoBlendLayers
+            edit.colorSettings
+            edit.contentAwareFill
+            edit.contentAwareScale
+            edit.convertToProfile
+            edit.copy
+            edit.cut
+            edit.defineBrushPreset
+            edit.defineCustomShape
+            edit.fade
+            edit.findAndReplaceText
+            edit.keyboardShortcuts
+            edit.menus
+            edit.paste
+            edit.pasteSpecial.pasteInPlace
+            edit.pasteSpecial.pasteInto
+            edit.pasteSpecial.pasteOutside
+            edit.presets.exportImportPresets
+            edit.presets.presetManager
+            edit.stroke
+            edit.transform.againCopy
+            file.automate.batch
+            file.automate.conditionalModeChange
+            file.automate.contactSheetII
+            file.automate.createDroplet
+            file.automate.fitImage
+            file.automate.runDroplet
+            file.closeOthers
+            file.export.artboardsToFiles
+            file.export.artboardsToPdf
+            file.export.colorLookupTables
+            file.export.dataSetsAsFiles
+            file.export.exportPreferences
+            file.export.layerCompsToFiles
+            file.export.layersToFiles
+            file.export.pathsToIllustrator
+            file.export.quickExport
+            file.export.saveForWebLegacy
+            file.fileInfo
+            file.generate.imageAssets
+            file.import.variableDataSets
+            file.newFromClipboard
+            file.openAs
+            file.openAsSmartObject
+            file.openExrParts
+            file.package
+            file.placeEmbedded
+            file.placeLinked
+            file.printOneCopy
+            file.saveACopy
+            file.scripts.browse
+            file.scripts.flattenAllMasks
+            file.scripts.imageProcessor
+            file.scripts.loadFilesIntoStack
+            file.scripts.scriptEventsManager
+            file.scripts.statistics
+            filter.convertForSmartFilters
+            image.adjustments.equalize
+            image.adjustments.hdrToning
+            image.adjustments.matchColor
+            image.adjustments.replaceColor
+            image.adjustments.shadowsHighlights
+            image.analysis.countTool
+            image.analysis.placeScaleMarker
+            image.analysis.recordMeasurements
+            image.analysis.rulerTool
+            image.analysis.selectDataPoints
+            image.analysis.setMeasurementScale
+            image.analysis.straightenLayer
+            image.applyDataSet
+            image.applyImage
+            image.calculations
+            image.canvasSize
+            image.crop
+            image.imageSize
+            image.mode.bitmap
+            image.mode.cmyk
+            image.mode.colorTable
+            image.mode.duotone
+            image.mode.grayscale
+            image.mode.indexedColor
+            image.mode.lab
+            image.mode.rgb
+            image.rotation.arbitrary
+            image.trim
+            image.variables.dataSets
+            image.variables.define
+            layer.artboard.addBeside
+            layer.artboard.set
+            layer.combineShapes.mergeShapeComponents
+            layer.distribute.horizontally
+            layer.exportAs
+            layer.hideLayers
+            layer.layerMask.enabled
+            layer.layerMask.hideSelection
+            layer.layerMask.linked
+            layer.layerStyle.blendingOptions
+            layer.layerStyle.globalLight
+            layer.layerStyle.pasteLayerStyle
+            layer.layerStyle.transferEffects
+            layer.linkLayers
+            layer.lockLayers
+            layer.matting.colorDecontaminate
+            layer.new.artboard
+            layer.new.artboardFromGroup
+            layer.new.artboardFromLayers
+            layer.new.groupFromLayers
+            layer.new.layerFromBackground
+            layer.newLayerBasedSlice
+            layer.rasterize.fillContent
+            layer.rasterize.layer
+            layer.rasterize.smartObject
+            layer.rasterize.type
+            layer.rasterize.vectorMask
+            layer.showOnly
+            layer.smartFilter.blendingOptions
+            layer.smartFilter.deleteFilterMask
+            layer.smartFilter.disableFilterMask
+            layer.smartFilter.disableSmartFilters
+            layer.smartFilter.setParams
+            layer.smartFilter.setVisible
+            layer.smartFilter.transfer
+            layer.smartObjects.convertToLayers
+            layer.smartObjects.convertToLinked
+            layer.smartObjects.convertToSmartObject
+            layer.smartObjects.editContents
+            layer.smartObjects.embedAllLinked
+            layer.smartObjects.exportContents
+            layer.smartObjects.resetTransform
+            layer.smartObjects.revealInFinder
+            layer.smartObjects.updateAllModifiedContent
+            layer.smartObjects.updateChanged
+            layer.toggleLockTransparency
+            layer.ungroupLayers
+            layer.vectorMask.add
+            layer.vectorMask.edit
+            layer.vectorMask.fromPath
+            layerComp.apply
+            layerComp.new
+            layerComp.setOptions
+            layerComp.update
+            layerComp.updateWarnings
+            measurementLog.export
+            paint.colorReplacement
+            paint.mixerBrush
+            paint.mixerLoad
+            paint.pencil
+            path.clippingPath.set
+            path.fill
+            path.set
+            path.stroke
+            path.style.pasteFill
+            path.style.pasteStroke
+            path.toShape
+            path.transform
+            prefs.get
+            prefs.set
+            select.colorRange
+            select.findLayers
+            select.focusArea
+            select.lasso
+            select.loadSelection
+            select.magicWand
+            select.modify.contract
+            select.modify.feather
+            select.object
+            select.quick
+            select.refineEdge
+            select.saveSelection
+            select.subject
+            shape.create
+            shape.edit
+            slice.divide
+            slice.new
+            slice.set
+            tools.setBrush
+            type.attachToPath
+            type.pasteLoremIpsum
+            type.resolveMissingFonts
+            type.saveDefaultTypeStyles
+            type.setPathPlacement
+            type.warpText
+            view.clearSelectedArtboardGuides
+            view.editGuide
+            view.gamutWarning
+            view.moveGuide
+            view.newGuide
+            view.newGuideLayout
+            view.proofSetup
+            view.setRulerOrigin
+brush.defineFromSelection
+brush.get
+brush.mixer.clean
+brush.mixer.load
+brush.presets.delete
+brush.presets.list
+brush.presets.rename
+brush.presets.setCurrent
+channel.delete
+channel.mergeSpot
+channel.move
+channel.rename
+channel.split
+channel.target.composite
+channel.target.layerMask
+channel.target.slot3
+channel.target.slot4
+channel.target.slot5
+channel.target.slot6
+channel.target.slot7
+channel.target.slot8
+channel.target.slot9
+count.add
+count.clear
+count.deleteGroup
+count.move
+count.newGroup
+count.remove
+edit.copyMerged
+edit.deleteAndFillSelection
+edit.profileInfo
+edit.purge.all
+edit.purge.clipboard
+edit.purge.histories
+edit.purge.undo
+edit.purge.videoCache
+edit.toggleLastState
+edit.toolbar
+edit.transform.again
+edit.transform.flipHorizontal
+edit.transform.flipVertical
+edit.transform.rotate180
+edit.transform.rotate90Ccw
+edit.transform.rotate90Cw
+entropy
+file.closeAll
+file.export.renderVideo
+file.exrParts
+file.import.videoFramesToLayers
+file.print
+file.revealInFinder
+file.revert
+file.scripts.deleteAllEmptyLayers
+file.scripts.flattenAllLayerEffects
+image.analysis.info
+image.autoColor
+image.autoContrast
+image.autoTone
+image.duplicate
+image.mode.bits16
+image.mode.bits32
+image.mode.bits8
+image.revealAll
+kurtosis
+layer.addAboveToSelection
+layer.addBelowToSelection
+layer.align.bottomEdges
+layer.align.horizontalCenters
+layer.align.leftEdges
+layer.align.rightEdges
+layer.align.topEdges
+layer.align.verticalCenters
+layer.arrange.reverse
+layer.combineShapes.excludeOverlappingShapes
+layer.combineShapes.intersectShapeAreas
+layer.combineShapes.subtractFrontShape
+layer.combineShapes.unite
+layer.delete.hiddenLayers
+layer.distribute.bottomEdges
+layer.distribute.horizontalCenters
+layer.distribute.leftEdges
+layer.distribute.rightEdges
+layer.distribute.topEdges
+layer.distribute.verticalCenters
+layer.distribute.vertically
+layer.layerMask.apply
+layer.layerMask.fromTransparency
+layer.layerStyle.copyLayerStyle
+layer.layerStyle.createLayer
+layer.layerStyle.hideAllEffects
+layer.layerStyle.scaleEffects
+layer.layerStyle.showAllEffects
+layer.maskAllObjects
+layer.matting.defringe
+layer.matting.removeBlackMatte
+layer.matting.removeWhiteMatte
+layer.mergeLayers
+layer.mergeVisible
+layer.new.layerViaCopy
+layer.new.layerViaCut
+layer.quickExportAsPng
+layer.rasterize.allLayers
+layer.rasterize.shape
+layer.rasterize.video
+layer.renameLayer
+layer.selectAbove
+layer.selectBelow
+layer.selectBottom
+layer.selectLinkedLayers
+layer.selectTop
+layer.showLayers
+layer.smartFilter.clearSmartFilters
+layer.smartFilter.delete
+layer.smartFilter.move
+layer.smartObjects.convertToEmbedded
+layer.smartObjects.newSmartObjectViaCopy
+layer.smartObjects.rasterize
+layer.smartObjects.relinkToFile
+layer.smartObjects.replaceContents
+layer.smartObjects.saveContents
+layer.smartObjects.updateModifiedContent
+layer.vectorMask.currentPath
+layer.vectorMask.delete
+layer.vectorMask.enabled
+layer.vectorMask.hideAll
+layer.vectorMask.linked
+layer.vectorMask.revealAll
+layer.videoLayers.deleteFrame
+layer.videoLayers.duplicateFrame
+layer.videoLayers.insertBlankFrame
+layer.videoLayers.interpretFootage
+layer.videoLayers.newBlankVideoLayer
+layer.videoLayers.newVideoLayerFromFile
+layer.videoLayers.rasterize
+layer.videoLayers.reloadFrame
+layer.videoLayers.replaceFootage
+layer.videoLayers.restoreAllFrames
+layer.videoLayers.restoreFrame
+layer.videoLayers.showAlteredVideo
+layerComp.delete
+layerComp.duplicate
+layerComp.next
+layerComp.previous
+layerComp.rename
+layerComp.reorder
+layerComp.restoreLastDocumentState
+layerComp.setComment
+maximum
+mean
+measurementLog.delete
+measurementLog.list
+median
+minimum
+none
+path.clippingPath.clear
+path.delete
+path.rename
+path.style.copyFill
+path.style.copyStroke
+prefs.reset
+range
+select.allLayers
+select.convertToShape
+select.deselectLayers
+select.editInQuickMaskMode
+select.grow
+select.loadLuminosity
+select.modify.border
+select.modify.expand
+select.modify.smooth
+select.reselect
+select.similar
+select.toWorkPath
+shape.rasterize
+skewness
+slice.delete
+slice.fromGuides
+slice.promote
+standardDeviation
+summation
+timeline.create
+timeline.delete
+timeline.info
+timeline.nextFrame
+timeline.previousFrame
+timeline.setFrame
+timeline.setProps
+type.antiAlias.crisp
+type.antiAlias.none
+type.antiAlias.sharp
+type.antiAlias.smooth
+type.antiAlias.strong
+type.antiAlias.windows
+type.antiAlias.windowsLcd
+type.convertToParagraphText
+type.convertToPointText
+type.convertToShape
+type.createWorkPath
+type.detachFromPath
+type.loadDefaultTypeStyles
+type.openType.contextualAlternates
+type.openType.discretionaryLigatures
+type.openType.fractions
+type.openType.numerals.default
+type.openType.numerals.lining
+type.openType.numerals.oldstyle
+type.openType.numerals.proportional
+type.openType.numerals.proportionalLining
+type.openType.numerals.proportionalOldstyle
+type.openType.numerals.tabular
+type.openType.numerals.tabularLining
+type.openType.numerals.tabularOldstyle
+type.openType.oldstyle
+type.openType.ordinals
+type.openType.ornaments
+type.openType.standardLigatures
+type.openType.stylisticAlternates
+type.openType.swash
+type.openType.titlingAlternates
+type.orientation.horizontal
+type.orientation.vertical
+type.rasterizeTypeLayer
+type.replaceAllMissingFonts
+type.updateAllTextLayers
+variance
+view.clearCanvasGuides
+view.clearGuides
+view.clearSlices
+view.deleteGuide
+view.lockSlices
+view.newGuidesFromShape
+view.proofColors
+view.proofSetup.colorBlindnessDeuteranopia
+view.proofSetup.colorBlindnessProtanopia
+view.proofSetup.legacyMacintoshRgb
+view.proofSetup.workingBlackPlate
+view.proofSetup.workingCmyPlate
+view.proofSetup.workingCyanPlate
+view.proofSetup.workingMagentaPlate
+view.proofSetup.workingYellowPlate
+view.resetRulerOrigin

@@ -1,15 +1,16 @@
-//! Where PhotoCraft keeps its per-user data, resolved the same way by the desktop app and
+//! Where Pigment keeps its per-user data, resolved the same way by the desktop app and
 //! `photocraft-cli` (which finds the app's agent connection file there, see [`crate::agent_link`]).
 //!
 //! In order:
 //! 1. `PHOTOCRAFT_CONFIG_DIR`, when set (tests, agents, custom setups).
 //! 2. **Portable mode** (#228): a marker file ([`PORTABLE_MARKERS`]) beside the executable puts
-//!    everything in `<exe dir>/PhotoCraftData`, so a portable copy on a USB stick leaves nothing in
+//!    everything in `<exe dir>/PigmentData`, so a portable copy on a USB stick leaves nothing in
 //!    `%APPDATA%`. The Windows portable zip ships with `portable.txt`; the MSI doesn't. If that
 //!    folder can't be written (read-only medium, Program Files), the platform folder is used and
 //!    [`DataDir::warning`] says why.
-//! 3. The platform convention: macOS `~/Library/Application Support/Photocraft`, Windows
-//!    `%APPDATA%\Photocraft`, Linux `$XDG_CONFIG_HOME/photocraft` or `~/.config/photocraft`.
+//! 3. The platform convention: macOS `~/Library/Application Support/Pigment`, Windows
+//!    `%APPDATA%\Pigment`, Linux `$XDG_CONFIG_HOME/pigment` or `~/.config/pigment`. Pigment
+//!    never reads PhotoCraft's (`Photocraft`, `photocraft`) or ArtCraft's folders (docs/FORK.md).
 //!
 //! The desktop app's `app_dirs` resolves it once per process and adds the crash-recovery folder.
 
@@ -17,16 +18,16 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 /// Files beside the executable that switch on portable mode (either one; contents are ignored).
-pub const PORTABLE_MARKERS: [&str; 2] = ["portable.txt", "PhotoCraft.portable"];
+pub const PORTABLE_MARKERS: [&str; 2] = ["portable.txt", "Pigment.portable"];
 /// The data folder created beside the executable in portable mode.
-pub const PORTABLE_DATA_DIR: &str = "PhotoCraftData";
+pub const PORTABLE_DATA_DIR: &str = "PigmentData";
 
 /// How [`DataDir::dir`] was chosen.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
     /// `PHOTOCRAFT_CONFIG_DIR`.
     Override,
-    /// `<exe dir>/PhotoCraftData`.
+    /// `<exe dir>/PigmentData`.
     Portable,
     /// The platform's per-user config directory.
     Platform,
@@ -67,12 +68,12 @@ pub fn resolve(env: impl Fn(&str) -> Option<OsString>, exe_dir: Option<&Path>) -
 pub fn platform_dir(env: &impl Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
     let home = env("HOME").filter(|h| !h.is_empty()).map(PathBuf::from);
     if cfg!(target_os = "macos") {
-        return home.map(|h| h.join("Library/Application Support/Photocraft"));
+        return home.map(|h| h.join("Library/Application Support/Pigment"));
     }
     if cfg!(windows) {
-        return env("APPDATA").filter(|a| !a.is_empty()).map(|a| PathBuf::from(a).join("Photocraft"));
+        return env("APPDATA").filter(|a| !a.is_empty()).map(|a| PathBuf::from(a).join("Pigment"));
     }
-    env("XDG_CONFIG_HOME").filter(|x| !x.is_empty()).map(PathBuf::from).or_else(|| home.map(|h| h.join(".config"))).map(|c| c.join("photocraft"))
+    env("XDG_CONFIG_HOME").filter(|x| !x.is_empty()).map(PathBuf::from).or_else(|| home.map(|h| h.join(".config"))).map(|c| c.join("pigment"))
 }
 
 /// The first portable marker file in `exe_dir`, if any.

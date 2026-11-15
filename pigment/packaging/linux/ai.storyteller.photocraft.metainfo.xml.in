@@ -2,7 +2,7 @@
 <!-- AppStream metadata (software centres, Flathub). Template: package.sh and the Flatpak
      manifest substitute @VERSION@ and @DATE@ from Cargo.toml and the build date. -->
 <component type="desktop-application">
-  <id>ai.storyteller.photocraft</id>
+  <id>io.github.nihalpi1212.pigment</id>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>MIT OR Apache-2.0</project_license>
   <name>PhotoCraft</name>
@@ -23,8 +23,8 @@
       <li>Every action is a command, scriptable from a CLI, a JSON control channel and an MCP server</li>
     </ul>
   </description>
-  <launchable type="desktop-id">ai.storyteller.photocraft.desktop</launchable>
-  <icon type="stock">ai.storyteller.photocraft</icon>
+  <launchable type="desktop-id">io.github.nihalpi1212.pigment.desktop</launchable>
+  <icon type="stock">io.github.nihalpi1212.pigment</icon>
   <!-- Only url types known to appstream 0.15 (Ubuntu 22.04, where CI validates): no vcs-browser. -->
   <url type="homepage">https://getartcraft.com/apps/photocraft</url>
   <url type="bugtracker">https://github.com/storytold/photocraft/issues</url>

@@ -1,0 +1,93 @@
+- tools: Pen tilt, barrel rotation and stylus wheel input (Pigment Done, PhotoCraft Partial): Engine reads tilt, rotation, wheel, but input is uneven: no tilt or rotation on the default Windows Ink path (WinTab opt-in), barrel rotation not applied to the tip on macOS (#1301), native Wayland has no pen
+- tools: Shape fill: none, solid, gradient, pattern (Pigment Done, PhotoCraft Partial): No Color / Solid / Gradient work; Pattern fill is off for shapes
+- tools: Polygon tool: sides, star ratio, smooth corners (Pigment Done, PhotoCraft Partial): Sides and star ratio present; no Smooth Corners / Smooth Star Indents options
+- tools: Preset management (Pigment Done, PhotoCraft Partial): Preset Manager covers 3 kinds with rename/delete only: no swatches, gradients, styles, contours, tool presets; no thumbnails, Save Set or Replace
+- tools: Tool Presets (Pigment Done, PhotoCraft Partial): No .tpl import or export (brush-parity.md, no tpl code found)
+- tools: Object Selection tool: Rectangle / Lasso mode, Sample All Layers, Object Subtract, Hard Edge (Pigment Approximate, PhotoCraft Approximate): Classical GrabCut; no Lasso mode, Object Subtract or Hard Edge options
+- tools: Smart guides and measurement guides (Pigment Done, PhotoCraft Partial): Smart guide distance and spacing labels missing (ui-parity.md)
+- tools: Noise gradients (Pigment Done, PhotoCraft Missing): No noise gradient type
+- tools: Adjustment Brush tool (Pigment Done, PhotoCraft Missing)
+- image-layer: Curves: display options and Show Clipping (Pigment Done, PhotoCraft Missing): No Curve Display Options (grid, overlays, light/pigment) or Show Clipping in Curves
+- image-layer: Curves: eyedroppers and on-image adjustment tool (Pigment Done, PhotoCraft Partial): Black/grey/white eyedroppers and Ctrl-click to place a point; no on-image drag adjustment tool
+- image-layer: Hue/Saturation: range sliders and range eyedroppers (Pigment Done, PhotoCraft Partial): Range bar with draggable bounds and fall-off; no add/subtract range eyedroppers
+- image-layer: Hue/Saturation: on-image tool and presets (Pigment Done, PhotoCraft Missing): No on-image tool, no Hue/Saturation presets or .ahu
+- image-layer: Newer adjustments: Color and Vibrance, Clarity and Dehaze, Grain (Pigment Approximate, PhotoCraft Missing): Clarity, Dehaze and Grain exist only inside the Camera Raw filter (gpu/src/camera_raw.rs), not as adjustments or adjustment layers
+- image-layer: Levels: black/grey/white point eyedroppers (Pigment Done, PhotoCraft Done): Set Black/Neutral Gray/White Point eyedroppers; no target-colour editing (Auto Options missing)
+- image-layer: Auto Color Correction Options (Pigment Done, PhotoCraft Missing): No Auto Color Correction Options (algorithms, Snap Neutral Midtones, target colours, clip %)
+- image-layer: Curves: presets and Auto (Pigment Done, PhotoCraft Missing): Curves has neither presets (.acv) nor Auto
+- image-layer: Black & White (Pigment Done, PhotoCraft Partial): Six sliders, Tint and Auto; no on-image tool, no presets/.blw
+- image-layer: Brightness/Contrast (Pigment Done, PhotoCraft Partial): Brightness, Contrast, Use Legacy; no Auto, no presets
+- image-layer: Channel Mixer (Pigment Done, PhotoCraft Partial): No presets/.cha
+- image-layer: Exposure (Pigment Done, PhotoCraft Partial): No eyedroppers, no presets
+- image-layer: HDR Toning (Pigment Done, PhotoCraft Partial): Local Adaptation parameters only, as a schema dialog: no Method menu (Equalize Histogram, Exposure and Gamma, Highlight Compression), no presets
+- image-layer: Threshold (Pigment Done, PhotoCraft Done): No presets
+- image-layer: Levels: Auto and Auto Options (Pigment Done, PhotoCraft Partial): Auto present; no Auto Options
+- image-layer: Match Color (Pigment Done, PhotoCraft Partial): Luminance, Intensity, Fade, Neutralize, source doc/layer, selections; no Save/Load Statistics
+- image-layer: Replace Color (Pigment Done, PhotoCraft Partial): Schema dialog with eyedropper, fuzziness, localized clusters, result swatch; add/subtract points are engine params, no selection/image preview thumbnail in the dialog
+- image-layer: Properties: fill layer (Pigment Done, PhotoCraft Partial): Gradient fill edited in Properties; solid colour fill only through its dialog
+- image-layer: Adjustment presets: save, load, built-in lists (Pigment Done, PhotoCraft Missing): No adjustment preset menus, no .acv/.alv/.ahu files
+- image-layer: Adjustments panel: adjustment presets (Pigment Partial, PhotoCraft Missing): No adjustment presets in the Adjustments panel
+- file-edit: Cursors: Other Cursors (Standard / Precise), Brush Preview colour, brush leash colour (Pigment Done, PhotoCraft Partial): Other Cursors and Brush Preview colour exist; no brush leash colour preference
+- file-edit: Color Lookup Tables (Pigment Partial, PhotoCraft Partial): .cube only, 2-129 points, title; no .3dl/.csp/ICC output or copyright field
+- file-edit: Export As: formats (Pigment Done, PhotoCraft Partial): PNG, JPG, WebP, TIFF, TGA, ICO, JPEG XL; no GIF in Export As
+- file-edit: Open: common raster formats (PNG 8/16-bit and palette, JPEG, WebP, GIF, BMP, TIFF, Targa, AVIF, SVG, ICO) (Pigment Done, PhotoCraft Partial): AVIF does not open; the rest open (TIFF deeper than Pigment: YCbCr, BigTIFF, all IFDs)
+- file-edit: Fill: Scripted Patterns (Brick Fill, Cross Weave, Place Along Path, Random Fill, Spiral, Symmetry Fill) (Pigment Approximate, PhotoCraft Missing): no scripted fills (Brick Fill, Cross Weave, Random Fill, Spiral, Symmetry)
+- file-edit: Presets > Export/Import Presets and Migrate Presets (Pigment Done, PhotoCraft Partial): export/import covers brushes, custom shapes and tool presets only
+- file-edit: Presets > Preset Manager (Pigment Done, PhotoCraft Partial): kinds brushes, custom shapes, patterns; list, rename, delete, move
+- file-edit: File Info: Origin, IPTC, IPTC Extension, GPS Data, Audio/Video Data, Photoshop (history log), DICOM, Raw Data (Pigment Partial, PhotoCraft Missing): only Basic fields plus read-only camera data; no IPTC, GPS, Origin or raw sections
+- file-edit: File Info: Basic (title, author, description, rating, keywords, copyright status, notice and URL) (Pigment Done, PhotoCraft Partial): title, author, description, keywords, copyright status/notice/URL; no rating
+- file-edit: Paste Special > Paste Without Formatting (Pigment Done, PhotoCraft Missing)
+- file-edit: Generative Fill (Pigment Approximate, PhotoCraft Missing)
+- file-edit: Sky Replacement (Pigment Approximate, PhotoCraft Missing)
+- select-filter-view: Show > Smart Guides (Pigment Done, PhotoCraft Partial): Alignment and Cmd distances; no equal-spacing guides found
+- select-filter-view: Blur Gallery: Effects (Bokeh, Motion Effects) and Noise (Pigment Partial, PhotoCraft Missing): No Effects, Motion Effects or Noise tabs
+- select-filter-view: Blur Gallery: Path Blur (Pigment Partial, PhotoCraft Partial): Parameter dialog, no on-canvas path editing, no Centered Blur, end-point speeds, Rear Sync Flash or Edit Blur Shapes
+- select-filter-view: Lens Correction: tools (Pigment Partial, PhotoCraft Missing): No Remove Distortion, Straighten, Move Grid, Hand or Zoom tools; straighten is a two-point param
+- select-filter-view: Sharpen: Shake Reduction (Pigment Approximate, PhotoCraft Missing): Not present
+- select-filter-view: Lens Correction: Custom tab (Pigment Done, PhotoCraft Partial): No Fix Green/Magenta fringe slider; generic dialog
+- select-filter-view: Lens Correction: Preview, Show Grid, grid Size and Color (Pigment Done, PhotoCraft Partial): Preview yes; no Show Grid, grid size or colour
+- select-filter-view: Focus Area: View modes (Pigment Partial, PhotoCraft Missing): No View menu in Focus Area
+- select-filter-view: Focus Area: parameters and output (Pigment Approximate, PhotoCraft Partial): In-Focus Range and Image Noise Level only; no Auto, Soften Edge, Output To or Select and Mask hand-off
+- select-filter-view: Select and Mask: Refine Mode (Color Aware / Object Aware) (Pigment Approximate, PhotoCraft Partial): Color Aware only
+- formats-color-automation: AVIF (Pigment Partial, PhotoCraft Missing): No AVIF open (#463)
+- formats-color-automation: Targa (Pigment Done, PhotoCraft Done): 24/32-bit only; Pigment also reads 15/16-bit and colour-mapped
+- formats-color-automation: Export Color Lookup Tables (Pigment Partial, PhotoCraft Partial): Only .cube; no .3dl/.csp/ICC device link output (Pigment writes .3dl too)
+- formats-color-automation: File Info: Origin, IPTC and IPTC Extension tabs (Pigment Partial, PhotoCraft Missing)
+- formats-color-automation: EXIF reading (Camera Data) (Pigment Partial, PhotoCraft Partial): Fewer tags than Pigment's 17
+- formats-color-automation: Actions: default and bundled action sets (Pigment Partial, PhotoCraft Missing): Can load Adobe .atn sets the user owns
+- formats-color-automation: Generate Image (Pigment Partial, PhotoCraft Missing)
+- formats-color-automation: Generate Background (Pigment Approximate, PhotoCraft Missing)
+- formats-color-automation: Generative Expand (Pigment Approximate, PhotoCraft Missing)
+- formats-color-automation: Generative Fill (Pigment Approximate, PhotoCraft Missing)
+- formats-color-automation: Sky Replacement dialog (Pigment Approximate, PhotoCraft Missing): Select Sky exists; no replacement dialog
+- formats-color-automation: Model choice and partner models (Pigment Approximate, PhotoCraft Missing)
+- formats-color-automation: Describe Image (alt text into File Info) (Pigment Done, PhotoCraft Missing)
+- formats-color-automation: AI assistant (chat that edits the document) (Pigment Done, PhotoCraft Approximate): No in-app chat: an external MCP client drives every command
+- panels-workspace: Info panel: second colour readout modes (Pigment Partial, PhotoCraft Partial): Fixed CMYK, no Lab/HSB/Gray choice (Pigment has a selector)
+- panels-workspace: Info panel: 16-bit and 32-bit value readouts (Pigment Done, PhotoCraft Missing): No 16-bit or 32-bit value readout
+- panels-workspace: Actions: Default Actions set (Pigment Approximate, PhotoCraft Missing)
+- panels-workspace: Actions: Clear All Actions, Reset Actions (Pigment Done, PhotoCraft Missing)
+- panels-workspace: Actions: Insert Conditional (Pigment Done, PhotoCraft Partial): No Insert Conditional dialog in the panel
+- panels-workspace: Pen tablet: tilt, rotation, barrel wheel, eraser end, side buttons (Pigment Done, PhotoCraft Partial): Tilt and rotation uneven: none on Windows Ink, barrel not applied to tip on macOS (#1301), native Wayland no pen
+- panels-workspace: Tool presets: load / save / replace / reset, .tpl files (Pigment Done, PhotoCraft Partial): No .tpl files
+- more: Select Similar Layers (Pigment Done, PhotoCraft Missing)
+- more: Operating-system recent documents (Pigment Done, PhotoCraft Missing)
+- type: Subscript (Pigment Done, PhotoCraft Partial): In the model, type.setStyle and PSD, but no Character panel button or menu item for it
+- type: Superscript (Pigment Done, PhotoCraft Partial): Model, command and PSD only; no panel button or menu item
+- type: Fractional Widths (Pigment Done, PhotoCraft Missing): Searched code for Fractional Widths: none
+- type: No Break (Pigment Done, PhotoCraft Missing): Searched: none
+- type: Reset Character (Pigment Partial, PhotoCraft Missing): Searched: none
+- type: System Layout (Pigment Done, PhotoCraft Missing)
+- type: Character language (dictionary for hyphenation and spelling) (Pigment Done, PhotoCraft Partial): Stored and round-tripped, no UI to set it; spelling is English (SCOWL) only and nothing hyphenates
+- type: Font menu WYSIWYG preview with selectable sample text (Pigment Done, PhotoCraft Partial): WYSIWYG samples, but the sample text is fixed; no choice of sample
+- type: Font Preview Size (None, Small ... Huge) (Pigment Done, PhotoCraft Partial): Preferences > Type size works; the Type > Font Preview Size menu only moves a checkmark, nothing reads it
+- type: Manage Missing Fonts / Replace All Missing Fonts / Resolve Missing Fonts (Pigment Done, PhotoCraft Partial): Replace All works and opening warns; Resolve Missing Fonts... has no dialog in the UI (engine returns the list, replacement needs a scripted map)
+- type: Cut, copy and paste text, with formatting kept between type layers (Pigment Done, PhotoCraft Partial): Cut/copy/paste are plain text: formatting is not carried between layers
+- type: Bulleted and numbered lists (Pigment Done, PhotoCraft Missing): Searched: none
+- type: Hyphenate, and the Hyphenation settings dialog (Pigment Done, PhotoCraft Missing): Flag only (Alt+Shift+Cmd+H, PSD); no hyphenation and no settings dialog
+- type: Reset Paragraph (Pigment Done, PhotoCraft Missing)
+- type: Roman Hanging Punctuation (Pigment Done, PhotoCraft Missing)
+- type: Justification settings (word, letter and glyph spacing min/desired/max, auto leading) (Pigment Done, PhotoCraft Missing): Justified alignment exists, no word/letter/glyph spacing settings
+- type: Paragraph panel (Pigment Done, PhotoCraft Partial): Alignment, indents, spacing, direction; no hyphenation, justification, composer, hanging punctuation
+- type: Adobe Single-line Composer / Every-line Composer (Pigment Approximate, PhotoCraft Missing)
+- type: Alt-click to enter paragraph box width and height numerically (Pigment Done, PhotoCraft Missing)

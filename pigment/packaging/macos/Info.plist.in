@@ -43,7 +43,7 @@
   <key>CFBundleExecutable</key>
   <string>PhotoCraft</string>
   <key>CFBundleIdentifier</key>
-  <string>ai.storyteller.photocraft</string>
+  <string>io.github.nihalpi1212.pigment</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundlePackageType</key>
@@ -104,7 +104,7 @@
   <array>
     <dict>
       <key>UTTypeIdentifier</key>
-      <string>ai.storyteller.photocraft.ora</string>
+      <string>io.github.nihalpi1212.pigment.ora</string>
       <key>UTTypeDescription</key>
       <string>OpenRaster Image</string>
       <key>UTTypeConformsTo</key>
@@ -119,7 +119,7 @@
     </dict>
     <dict>
       <key>UTTypeIdentifier</key>
-      <string>ai.storyteller.photocraft.kra</string>
+      <string>io.github.nihalpi1212.pigment.kra</string>
       <key>UTTypeDescription</key>
       <string>Krita Document</string>
       <key>UTTypeConformsTo</key>
@@ -134,7 +134,7 @@
     </dict>
     <dict>
       <key>UTTypeIdentifier</key>
-      <string>ai.storyteller.photocraft.pdn</string>
+      <string>io.github.nihalpi1212.pigment.pdn</string>
       <key>UTTypeDescription</key>
       <string>Paint.NET Document</string>
       <key>UTTypeConformsTo</key>
@@ -165,7 +165,7 @@
     </dict>
     <dict>
       <key>UTTypeIdentifier</key>
-      <string>ai.storyteller.photocraft.qoi</string>
+      <string>io.github.nihalpi1212.pigment.qoi</string>
       <key>UTTypeDescription</key>
       <string>QOI Image</string>
       <key>UTTypeConformsTo</key>
@@ -229,10 +229,10 @@
         <string>com.ilm.openexr-image</string>
         <string>public.radiance</string>
         <string>public.avif</string>
-        <string>ai.storyteller.photocraft.qoi</string>
-        <string>ai.storyteller.photocraft.pdn</string>
-        <string>ai.storyteller.photocraft.ora</string>
-        <string>ai.storyteller.photocraft.kra</string>
+        <string>io.github.nihalpi1212.pigment.qoi</string>
+        <string>io.github.nihalpi1212.pigment.pdn</string>
+        <string>io.github.nihalpi1212.pigment.ora</string>
+        <string>io.github.nihalpi1212.pigment.kra</string>
       </array>
     </dict>
   </array>

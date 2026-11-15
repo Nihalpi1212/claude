@@ -1,0 +1,1778 @@
+[
+{
+"section": "view",
+"feature": "Ruler origin",
+"where": "Drag from the ruler corner to set the zero point; double-click the corner to reset",
+"status": "Done",
+"pig": "0.4: drag from the ruler corner, double-click to reset; follows Image Size, Canvas Size, Rotate, Flip and Crop",
+"planned": "0.4 \u00b7 guides-snapping"
+},
+{
+"section": "view",
+"feature": "Bird's-eye view",
+"where": "Hold H and drag while zoomed in",
+"status": "Missing",
+"pig": "Not present",
+"planned": "0.6 \u00b7 view-navigation"
+},
+{
+"section": "view",
+"feature": "Animated zoom",
+"where": "Preferences > Tools > Animated Zoom; continuous zoom while holding the Zoom tool",
+"status": "Missing",
+"pig": "defaults.js has animatedZoom: true but nothing reads it and setZoom() discards its animate option (`void animate` in canvas-view.js); zoom always jumps",
+"planned": "0.6 \u00b7 view-navigation"
+},
+{
+"section": "view",
+"feature": "Flick panning",
+"where": "Preferences > Tools > Enable Flick Panning",
+"status": "Missing",
+"pig": "The Hand tool pans without inertia",
+"planned": "0.6 \u00b7 view-navigation"
+},
+{
+"section": "view",
+"feature": "32-bit Preview Options",
+"where": "View > 32-bit Preview Options (Exposure and Gamma / Highlight Compression); status bar 32-bit Exposure slider",
+"status": "Missing",
+"pig": "No command; 32-bit is display-referred float shown as is (depth.js has no preview exposure)",
+"planned": "0.10 \u00b7 hdr-32bit"
+},
+{
+"section": "view",
+"feature": "Actual Size",
+"where": "View > Actual Size",
+"status": "Missing",
+"pig": "Not present (needs the display's physical DPI)",
+"planned": "0.7 \u00b7 screen-modes-extras"
+},
+{
+"section": "view",
+"feature": "Fit Layer(s) on Screen",
+"where": "View > Fit Layer(s) on Screen; Alt-click a layer thumbnail",
+"status": "Missing",
+"pig": "Not present",
+"planned": "0.7 \u00b7 screen-modes-extras"
+},
+{
+"section": "view",
+"feature": "Flip Horizontal (view only)",
+"where": "View > Flip Horizontal",
+"status": "Missing",
+"pig": "Not present; the view matrix has zoom, pan and rotation only",
+"planned": "0.7 \u00b7 screen-modes-extras"
+},
+{
+"section": "view",
+"feature": "Pattern Preview",
+"where": "View > Pattern Preview",
+"status": "Done",
+"pig": "0.4: View \u203a Pattern Preview",
+"planned": "0.4 \u00b7 patterns"
+},
+{
+"section": "view",
+"feature": "Pixel Aspect Ratio and Pixel Aspect Ratio Correction",
+"where": "View > Pixel Aspect Ratio (Square, D1/DV NTSC, PAL, Anamorphic..., Custom, Delete, Reset); View > Pixel Aspect Ratio Correction",
+"status": "Missing",
+"pig": "No non-square pixel support anywhere in the view or document model",
+"planned": "0.11 \u00b7 render-video"
+},
+{
+"section": "view",
+"feature": "Print Size",
+"where": "View > Print Size",
+"status": "Missing",
+"pig": "Not present",
+"planned": "0.7 \u00b7 screen-modes-extras"
+},
+{
+"section": "view",
+"feature": "Show > All, None, Show Extras Options",
+"where": "View > Show",
+"status": "Missing",
+"pig": "Not present",
+"planned": "0.7 \u00b7 screen-modes-extras"
+},
+{
+"section": "view",
+"feature": "Show > Count, Slices, Notes",
+"where": "View > Show",
+"status": "Missing",
+"pig": "The Count tool, slices and notes do not exist, so neither do their overlays",
+"planned": "0.10 \u00b7 slices-web-export"
+},
+{
+"section": "view",
+"feature": "Show > Layer Edges",
+"where": "View > Show > Layer Edges",
+"status": "Missing",
+"pig": "Not present",
+"planned": "0.7 \u00b7 screen-modes-extras"
+},
+{
+"section": "view",
+"feature": "Show > Smart Guides",
+"where": "View > Show > Smart Guides",
+"status": "Done",
+"pig": "0.4: alignment lines, equal spacing and Ctrl-hover distances; no Smart Guides while drawing paths",
+"planned": "0.4 \u00b7 guides-snapping"
+},
+{
+"section": "view",
+"feature": "Show > Target Path",
+"where": "View > Show > Target Path (Shift+Ctrl+H)",
+"status": "Missing",
+"pig": "No toggle",
+"planned": "0.7 \u00b7 screen-modes-extras"
+},
+{
+"section": "view",
+"feature": "Snap To",
+"where": "View > Snap To > Guides, Grid, Layers, Slices, Document Bounds, All, None",
+"status": "Done",
+"pig": "0.4: Guides, Grid, Layers, Document Bounds, All, None; Artboards and Slices have no targets yet",
+"planned": "0.4 \u00b7 guides-snapping"
+},
+{
+"section": "view",
+"feature": "Zoom tool options: Resize Windows to Fit, Zoom All Windows",
+"where": "Zoom tool options bar",
+"status": "Missing",
+"pig": "Only Zoom in/out, Fit on screen, 100 %, Fill screen and Scrubby zoom; documents are tabs in one window",
+"planned": "0.8 \u00b7 document-windows"
+},
+{
+"section": "view",
+"feature": "Scroll-wheel and gesture zoom",
+"where": "Preferences > Tools: Zoom with Scroll Wheel; Alt+wheel; trackpad pinch",
+"status": "Partial",
+"pig": "lib/canvas-view.js wheel handler: Ctrl/Cmd+wheel and pinch zoom, plain wheel scrolls (or zooms with the zoomWithWheel preference), Shift+wheel scrolls sideways. Alt+wheel, Photoshop's default zoom gesture, is not handled, and Ctrl+wheel zooms where Photoshop scrolls horizontally.",
+"planned": "0.6 \u00b7 view-navigation"
+},
+{
+"section": "view",
+"feature": "Ruler units",
+"where": "Right-click a ruler; Preferences > Units & Rulers (Pixels, Inches, Centimeters, Millimeters, Points, Picas, Percent)",
+"status": "Done",
+"pig": "0.4: Pixels, Inches, Centimeters, Millimeters, Points, Picas and Percent from the ruler menu or Preferences",
+"planned": "0.4 \u00b7 guides-snapping"
+},
+{
+"section": "view",
+"feature": "Rotate View tool",
+"where": "Rotate View tool (R): drag, Shift for 15 degrees, Rotation Angle field, Reset View, Rotate All Windows",
+"status": "Partial",
+"pig": "lib/tools/nav.js RotateViewTool: drag, Shift snaps to 15 degrees, Angle field and Reset view. No compass overlay while dragging and no Rotate All Windows (there is one view per document). R is shared with the Hand slot as the panels auditor notes.",
+"planned": "0.6 \u00b7 view-navigation"
+},
+{
+"section": "view",
+"feature": "Temporary navigation keys",
+"where": "Space (Hand), Ctrl+Space / Alt+Space (Zoom in / out), hold R (Rotate View)",
+"status": "Done",
+"pig": "0.4: Space, Ctrl+Space, Alt+Space, and a held tool key (R for Rotate View)",
+"planned": "0.4 \u00b7 conventions-shortcuts-fields"
+},
+{
+"section": "view",
+"feature": "Extras (master toggle)",
+"where": "View > Extras (Ctrl+H)",
+"status": "Partial",
+"pig": "view:extras (Ctrl+H) only toggles selection edges (settings.showSelectionEdges); guides, grid and paths stay",
+"planned": "0.7 \u00b7 screen-modes-extras"
+},
+{
+"section": "view",
+"feature": "Show > Brush Preview, Mesh, Edit Pins",
+"where": "View > Show",
+"status": "Partial",
+"pig": "Puppet Warp has its own 'Show mesh' checkbox (/home/user/claude/pigment/src/renderer/lib/warp.js); no View > Show entries, no pin toggle, no brush preview",
+"planned": "0.7 \u00b7 screen-modes-extras"
+},
+{
+"section": "view",
+"feature": "Snap",
+"where": "View > Snap (Shift+Ctrl+;)",
+"status": "Done",
+"pig": "0.4: View \u203a Snap; every placing tool snaps, nearest target first; Ctrl while dragging turns it off",
+"planned": "0.4 \u00b7 guides-snapping"
+},
+{
+"section": "view",
+"feature": "Status bar zoom field",
+"where": "Document window status bar: zoom percentage",
+"status": "Done",
+"pig": "Editable zoom field in the status bar (app.js, view:set-zoom)",
+"planned": ""
+},
+{
+"section": "view",
+"feature": "100% and 200%",
+"where": "View > 100% (Ctrl+1), 200%",
+"status": "Done",
+"pig": "view:zoom-100, view:zoom-200 (Ctrl+2)",
+"planned": ""
+},
+{
+"section": "view",
+"feature": "Fit on Screen",
+"where": "View > Fit on Screen (Ctrl+0)",
+"status": "Done",
+"pig": "view:zoom-fit (also resets the view rotation); extra Fill Screen item",
+"planned": ""
+},
+{
+"section": "view",
+"feature": "Rulers",
+"where": "View > Rulers (Ctrl+R)",
+"status": "Done",
+"pig": "view:rulers; drawn in canvas-view.js and follow zoom and pan",
+"planned": ""
+},
+{
+"section": "view",
+"feature": "Show > Grid",
+"where": "View > Show > Grid (Ctrl+')",
+"status": "Done",
+"pig": "view:grid",
+"planned": ""
+},
+{
+"section": "view",
+"feature": "Show > Guides",
+"where": "View > Show > Guides (Ctrl+;)",
+"status": "Done",
+"pig": "view:guides",
+"planned": ""
+},
+{
+"section": "view",
+"feature": "Show > Pixel Grid",
+"where": "View > Show > Pixel Grid",
+"status": "Done",
+"pig": "view:pixel-grid (drawn from 800 % zoom)",
+"planned": ""
+},
+{
+"section": "view",
+"feature": "Show > Selection Edges",
+"where": "View > Show > Selection Edges",
+"status": "Done",
+"pig": "view:extras",
+"planned": ""
+},
+{
+"section": "view",
+"feature": "Zoom In / Zoom Out",
+"where": "View > Zoom In (Ctrl++), Zoom Out (Ctrl+-)",
+"status": "Done",
+"pig": "view:zoom-in / view:zoom-out, preset steps 1 %..6400 % (/home/user/claude/pigment/src/renderer/lib/canvas-view.js; Photoshop goes to 12800 %)",
+"planned": ""
+},
+{
+"section": "view",
+"feature": "Scrubby zoom and marquee zoom",
+"where": "Zoom tool options bar: Scrubby Zoom; drag a marquee when off",
+"status": "Done",
+"pig": "ZoomTool in tools/nav.js: scrubby option on by default, marquee zoom when off, Alt zooms out",
+"planned": ""
+},
+{
+"section": "filters",
+"feature": "Blur Gallery: several blur types in one session",
+"where": "Blur Gallery panel: Field / Iris / Tilt-Shift / Path / Spin checkboxes combined",
+"status": "Missing",
+"pig": "Each kind is its own command and session; they cannot be combined in one pass",
+"planned": "0.7 \u00b7 filter-dialogs-b"
+},
+{
+"section": "filters",
+"feature": "Filter > 3D: Generate Bump (Height) Map, Generate Normal Map",
+"where": "Filter > 3D",
+"status": "Missing",
+"pig": "No 3D group in the registry (FILTER_CATEGORIES in /home/user/claude/pigment/src/shared/pixels/filters.js). Both maps are classical image filters and do not need a 3D engine",
+"planned": "0.7 \u00b7 filter-dialogs-b"
+},
+{
+"section": "filters",
+"feature": "Adaptive Wide Angle",
+"where": "Filter > Adaptive Wide Angle (Fisheye / Perspective / Auto / Panorama / Full Spherical, Constraint and Polygon Constraint tools, Scale, Focal Length, Crop Factor)",
+"status": "Missing",
+"pig": "No command (README lists it as missing). Buildable with projection models and line constraints; Auto mode needs lens data (EXIF plus Lensfun as substitute for Adobe profiles)",
+"planned": "0.9 \u00b7 lens-correction-profiles"
+},
+{
+"section": "filters",
+"feature": "Vanishing Point",
+"where": "Filter > Vanishing Point (Create/Edit Plane, Marquee, Stamp, Brush, Transform, Eyedropper, Measure; render grids, export)",
+"status": "Missing",
+"pig": "No command (README lists it as missing)",
+"planned": "0.10 \u00b7 vanishing-point"
+},
+{
+"section": "filters",
+"feature": "Blur Gallery: options bar",
+"where": "Blur Gallery options bar: Selection Bleed, Focus, Save Mask to Channels, High Quality, Preview, Remove All Pins",
+"status": "Partial",
+"pig": "Preview and Reset only",
+"planned": "0.7 \u00b7 filter-dialogs-b"
+},
+{
+"section": "filters",
+"feature": "Blur Gallery: Effects (Bokeh, Motion Effects) and Noise",
+"where": "Blur Gallery: Effects tab (Light Bokeh, Bokeh Color, Light Range; Strobe Strength, Strobe Flashes, Strobe Flash Duration), Noise tab",
+"status": "Partial",
+"pig": "Bokeh, strobe strength and flashes and the Noise tab exist; Strobe Flash Duration is missing; noise has Uniform/Gaussian but no Grain type",
+"planned": "0.7 \u00b7 filter-dialogs-b"
+},
+{
+"section": "filters",
+"feature": "Blur: Lens Blur",
+"where": "Filter > Blur > Lens Blur (Depth Map source, Blur Focal Distance, Invert, Iris shape/radius/blade curvature/rotation, Specular Highlights, Noise)",
+"status": "Partial",
+"pig": "All listed parameters are present (shared/pixels/filters-more-a.js LENS_BLUR_FIELDS; depth map from transparency, layer mask or an alpha channel). Missing: Set Focal Point by clicking in the image (lib/filters-a-ui.js has no click handling for it) and the Faster / More Accurate preview choice.",
+"planned": "0.7 \u00b7 filter-dialogs-a"
+},
+{
+"section": "filters",
+"feature": "Blur: Radial Blur",
+"where": "Filter > Blur > Radial Blur (Amount, Spin/Zoom, Quality, Blur Center)",
+"status": "Partial",
+"pig": "Amount, Spin/Zoom; centre set with two sliders instead of the draggable Blur Center box; no Quality choice",
+"planned": "0.7 \u00b7 filter-dialogs-a"
+},
+{
+"section": "filters",
+"feature": "Blur: Shape Blur",
+"where": "Filter > Blur > Shape Blur (Radius, custom shape picker)",
+"status": "Partial",
+"pig": "Ten built-in kernels (circle, square, triangle, diamond, star, heart, arrow, cross, hexagon, ring); cannot use the custom shape presets",
+"planned": "0.7 \u00b7 filter-dialogs-a"
+},
+{
+"section": "filters",
+"feature": "Blur Gallery: Path Blur",
+"where": "Filter > Blur Gallery > Path Blur (Basic Blur / Rear Sync Flash, Speed, Taper, Centered Blur, End Point Speed, Edit Blur Shapes)",
+"status": "Partial",
+"pig": "Speed, Taper, Centered Blur, end speeds, multiple paths. Paths have no curve handles, no Edit Blur Shapes, no Basic Blur / Rear Sync Flash preset; 4-13 s at 12 MP",
+"planned": "0.7 \u00b7 filter-dialogs-b"
+},
+{
+"section": "filters",
+"feature": "Distort: Shear",
+"where": "Filter > Distort > Shear (curve with draggable points, Wrap Around / Repeat Edge Pixels)",
+"status": "Partial",
+"pig": "One Bend slider (a three-point curve) in filter-ui.js; the engine accepts a point list but there is no curve editor",
+"planned": "0.7 \u00b7 filter-dialogs-a"
+},
+{
+"section": "filters",
+"feature": "Distort: Spherize",
+"where": "Filter > Distort > Spherize (Amount, Mode: Normal / Horizontal only / Vertical only)",
+"status": "Partial",
+"pig": "Amount only; no Mode",
+"planned": "0.7 \u00b7 filter-dialogs-a"
+},
+{
+"section": "filters",
+"feature": "Distort: Wave",
+"where": "Filter > Distort > Wave (Number of Generators, Wavelength min/max, Amplitude min/max, Scale horiz/vert, Type, Randomize, Undefined Areas)",
+"status": "Partial",
+"pig": "One amplitude, one wavelength, Type and edge mode; no generators, min/max ranges, per-axis scale or Randomize",
+"planned": "0.7 \u00b7 filter-dialogs-a"
+},
+{
+"section": "filters",
+"feature": "Distort: ZigZag",
+"where": "Filter > Distort > ZigZag (Amount, Ridges, Style: Around Center / Out From Center / Pond Ripples)",
+"status": "Partial",
+"pig": "Amount and Ridges; no Style",
+"planned": "0.7 \u00b7 filter-dialogs-a"
+},
+{
+"section": "filters",
+"feature": "Last Filter",
+"where": "Filter > Last Filter (Alt+Ctrl+F)",
+"status": "Partial",
+"pig": "filter:last (Ctrl+F) in /home/user/claude/pigment/src/renderer/lib/filter-ui.js repeats registry filters only: Camera Raw Filter and Liquify are never remembered (admitted for Camera Raw). filter:last-dialog (reopen the dialog) is registered but has no menu item or shortcut",
+"planned": "0.7 \u00b7 filter-dialogs-a"
+},
+{
+"section": "filters",
+"feature": "Noise: Reduce Noise",
+"where": "Filter > Noise > Reduce Noise (Strength, Preserve Details, Reduce Color Noise, Sharpen Details, Remove JPEG Artifact; Advanced per-channel; saved settings)",
+"status": "Partial",
+"pig": "A single Strength 0..10 slider (filter-ui.js FIELDS['reduce-noise']); every other option and the Advanced per-channel mode are missing",
+"planned": "0.7 \u00b7 filter-dialogs-a"
+},
+{
+"section": "filters",
+"feature": "Other: Custom",
+"where": "Filter > Other > Custom (5 x 5 kernel, Scale, Offset, Load / Save .acf)",
+"status": "Partial",
+"pig": "3 x 3 kernel with Scale and Offset; no 5 x 5 grid, no Load/Save",
+"planned": "0.7 \u00b7 filter-dialogs-a"
+},
+{
+"section": "filters",
+"feature": "Other: Maximum, Minimum",
+"where": "Filter > Other > Maximum / Minimum (Radius with decimals, Preserve: Squareness / Roundness)",
+"status": "Partial",
+"pig": "Integer Radius 1..100 only; no Preserve choice (square kernel)",
+"planned": "0.7 \u00b7 filter-dialogs-a"
+},
+{
+"section": "filters",
+"feature": "Other: Offset",
+"where": "Filter > Other > Offset (Horizontal, Vertical, Undefined Areas: Set to Transparent / Repeat Edge Pixels / Wrap Around)",
+"status": "Partial",
+"pig": "Horizontal, Vertical and a 'Wrap around' checkbox (transparent otherwise); Repeat Edge Pixels is not offered although the engine has an edge parameter",
+"planned": "0.7 \u00b7 filter-dialogs-a"
+},
+{
+"section": "filters",
+"feature": "Render: Lens Flare",
+"where": "Filter > Render > Lens Flare (Brightness, Flare Center, Lens Type: 50-300mm Zoom / 35mm Prime / 105mm Prime / Movie Prime)",
+"status": "Partial",
+"pig": "Brightness and centre sliders only; one flare look, no Lens Type, no click-to-place preview",
+"planned": "0.7 \u00b7 filter-dialogs-a"
+},
+{
+"section": "filters",
+"feature": "Render: Lighting Effects",
+"where": "Filter > Render > Lighting Effects (multiple Spot / Point / Infinite lights with on-canvas handles, presets, Properties: Colorize, Gloss, Metallic, Ambience, Texture, Height)",
+"status": "Partial",
+"pig": "lighting-effects dialog edits one light only (the engine honours up to 16), no on-canvas light editor, no Lights list, no presets. Adobe has removed this filter from current releases",
+"planned": "0.7 \u00b7 filter-dialogs-b"
+},
+{
+"section": "filters",
+"feature": "Sharpen: Smart Sharpen",
+"where": "Filter > Sharpen > Smart Sharpen (Amount, Radius, Reduce Noise, Remove: Gaussian / Lens / Motion Blur with Angle, Shadows and Highlights: Fade Amount, Tonal Width, Radius; presets; Use Legacy)",
+"status": "Partial",
+"pig": "Amount, Radius, Reduce noise only (filter-ui.js FIELDS['smart-sharpen']); no Remove choice or angle, no Shadows / Highlights sections, no presets",
+"planned": "0.7 \u00b7 filter-dialogs-a"
+},
+{
+"section": "filters",
+"feature": "Filters at 16 and 32 bits per channel",
+"where": "Filter menu on 16-bit / 32-bit documents",
+"status": "Partial",
+"pig": "Every filter runs at 8 bits on the pixels it touches and the deep data is rebuilt from the 8-bit proxy (README limits, /home/user/claude/pigment/src/renderer/lib/depth.js)",
+"planned": "0.9 \u00b7 deep-pipeline"
+},
+{
+"section": "filters",
+"feature": "Lens Correction: tools",
+"where": "Lens Correction toolbar: Remove Distortion, Straighten, Move Grid, Hand, Zoom",
+"status": "Partial",
+"pig": "Remove Distortion, Straighten, Hand and zoom buttons; no Move Grid tool",
+"planned": "0.9 \u00b7 lens-correction-profiles"
+},
+{
+"section": "filters",
+"feature": "Lens Correction: Auto tab Correction checkboxes, Auto Scale Image, Edge",
+"where": "Filter > Lens Correction > Auto Correction",
+"status": "Approximate",
+"pig": "Geometric Distortion / Chromatic Aberration / Vignette checkboxes only switch the Custom values on and off; Auto Scale and Edge (Transparency, Edge Extension, Wrap Around, Background Color) work; extra 'Straighten horizon' button",
+"planned": "0.9 \u00b7 lens-correction-profiles"
+},
+{
+"section": "filters",
+"feature": "Render: Flame",
+"where": "Filter > Render > Flame (6 flame types, length, width, angle, interval, quality; Advanced: turbulence, jag, opacity, flame lines, bottom alignment, style, shape, randomize; presets)",
+"status": "Approximate",
+"pig": "flame with the six types and the basic sliders on Pigment's own generator; Advanced options Flame Lines, Bottom Alignment, Style, Shape and presets are missing",
+"planned": "0.7 \u00b7 filter-dialogs-b"
+},
+{
+"section": "filters",
+"feature": "Render: Picture Frame",
+"where": "Filter > Render > Picture Frame (47 frames, vine/flower/leaf choices, margin, arrangement, Advanced)",
+"status": "Approximate",
+"pig": "picture-frame: 10 own frames, Size, two colours, seed; far fewer designs and parameters than Photoshop",
+"planned": "0.7 \u00b7 filter-dialogs-b"
+},
+{
+"section": "filters",
+"feature": "Render: Tree",
+"where": "Filter > Render > Tree (34 tree types, light direction, leaves, branches, arrangement, Advanced camera tilt and colours)",
+"status": "Approximate",
+"pig": "tree: 11 own species with the main sliders; Photoshop has 34 types and custom leaf types",
+"planned": "0.7 \u00b7 filter-dialogs-b"
+},
+{
+"section": "filters",
+"feature": "Sharpen: Shake Reduction",
+"where": "Filter > Sharpen > Shake Reduction (blur trace regions, Blur Trace Bounds, Source Noise, Smoothing, Artifact Suppression, Advanced traces, Detail loupe)",
+"status": "Approximate",
+"pig": "shake-reduction estimates one straight trace and deconvolves (README limit); no multiple or curved traces, no trace regions or loupe. Adobe has dropped this filter from current releases",
+"planned": ""
+},
+{
+"section": "filters",
+"feature": "Stylize: Oil Paint",
+"where": "Filter > Stylize > Oil Paint (Stylization, Cleanliness, Scale, Bristle Detail, Lighting Angle and Shine)",
+"status": "Approximate",
+"pig": "oil-paint is a neighbourhood-histogram effect with Radius and Levels (filter-ui.js); none of Photoshop's six controls, no brush-stroke relief or lighting. A user would notice immediately",
+"planned": "0.7 \u00b7 filter-dialogs-b"
+},
+{
+"section": "filters",
+"feature": "Filter Gallery: the 47 effects (Artistic 15, Brush Strokes 8, Distort 3, Sketch 14, Stylize 1, Texture 6)",
+"where": "Filter Gallery groups; also Filter menu when 'Show all Filter Gallery groups and names' is on",
+"status": "Approximate",
+"pig": "All 47 kinds exist (gallery-artistic.js, gallery-sketch.js, textures.js under /home/user/claude/pigment/src/shared/pixels) with Photoshop's parameter names, written from scratch: looks are similar, not pixel-identical. Rough Pastels and Underpainting have no Load Texture button; Glowing Edges lacks Smoothness",
+"planned": "0.7 \u00b7 filter-dialogs-b"
+},
+{
+"section": "filters",
+"feature": "Lens Correction: Auto Correction lens profiles",
+"where": "Filter > Lens Correction > Auto Correction: Search Criteria (Camera Make, Model, Lens), Lens Profiles, Search Online",
+"status": "Not feasible",
+"pig": "No profile database (README, /home/user/claude/pigment/src/renderer/lib/lens-correction.js). Adobe's profiles are licensed. Substitute: bundle or download the open Lensfun database and match by EXIF",
+"planned": ""
+},
+{
+"section": "filters",
+"feature": "Filter dialogs: live preview and Preview checkbox",
+"where": "Every filter dialog",
+"status": "Done",
+"pig": "pixelEditDialog previews on the canvas inside the selection with a Preview checkbox (/home/user/claude/pigment/src/renderer/lib/adjust-ui.js); no small zoomable preview pane",
+"planned": ""
+},
+{
+"section": "filters",
+"feature": "Blur: Blur, Blur More",
+"where": "Filter > Blur",
+"status": "Done",
+"pig": "blur, blur-more (direct)",
+"planned": ""
+},
+{
+"section": "filters",
+"feature": "Blur: Average",
+"where": "Filter > Blur > Average",
+"status": "Done",
+"pig": "average (direct); with a non-rectangular selection the mean is taken over its bounding box",
+"planned": ""
+},
+{
+"section": "filters",
+"feature": "Blur: Box Blur",
+"where": "Filter > Blur > Box Blur",
+"status": "Done",
+"pig": "box-blur, radius 1..500",
+"planned": ""
+},
+{
+"section": "filters",
+"feature": "Blur: Gaussian Blur",
+"where": "Filter > Blur > Gaussian Blur",
+"status": "Done",
+"pig": "gaussian-blur, radius 0.1..250 (Photoshop allows up to 1000)",
+"planned": ""
+},
+{
+"section": "filters",
+"feature": "Blur: Motion Blur",
+"where": "Filter > Blur > Motion Blur",
+"status": "Done",
+"pig": "motion-blur: Angle, Distance 1..2000",
+"planned": ""
+},
+{
+"section": "filters",
+"feature": "Blur: Smart Blur",
+"where": "Filter > Blur > Smart Blur (Radius, Threshold, Quality, Mode)",
+"status": "Done",
+"pig": "smart-blur with Normal / Edge Only / Overlay Edge",
+"planned": ""
+},
+{
+"section": "filters",
+"feature": "Blur: Surface Blur",
+"where": "Filter > Blur > Surface Blur",
+"status": "Done",
+"pig": "surface-blur: Radius, Threshold",
+"planned": ""
+},
+{
+"section": "filters",
+"feature": "Blur Gallery: Field Blur, Iris Blur, Tilt-Shift, Spin Blur",
+"where": "Filter > Blur Gallery",
+"status": "Done",
+"pig": "/home/user/claude/pigment/src/renderer/lib/blur-gallery-ui.js on-canvas pins, rings and handles; engine blur-gallery.js. Spin Blur treats the ellipse as the outer limit",
+"planned": ""
+},
+{
+"section": "filters",
+"feature": "Distort: Pinch, Polar Coordinates, Ripple, Twirl",
+"where": "Filter > Distort",
+"status": "Done",
+"pig": "pinch, polar, ripple (Small/Medium/Large), twirl, each with an extra Undefined areas choice",
+"planned": ""
+},
+{
+"section": "filters",
+"feature": "Distort: Displace",
+"where": "Filter > Distort > Displace (Horizontal/Vertical Scale, Stretch To Fit / Tile, Wrap Around / Repeat Edge Pixels, map file)",
+"status": "Done",
+"pig": "displace (/home/user/claude/pigment/src/renderer/lib/filters-b-ui.js); map from another document, a layer or a file; the map is not stored with actions or saved smart filters",
+"planned": ""
+},
+{
+"section": "filters",
+"feature": "Filter Gallery dialog",
+"where": "Filter > Filter Gallery: preview with zoom, effect thumbnails by group, effect layer stack (new, delete, hide, reorder)",
+"status": "Done",
+"pig": "/home/user/claude/pigment/src/renderer/lib/filter-gallery.js: all of those; the editing preview is a 720 px reduction with unscaled parameters, so strokes look larger than in the result",
+"planned": ""
+},
+{
+"section": "filters",
+"feature": "Lens Correction: Custom tab",
+"where": "Filter > Lens Correction > Custom: Remove Distortion, Chromatic Aberration (R/C, G/M, B/Y), Vignette Amount / Midpoint, Vertical / Horizontal Perspective, Angle, Scale",
+"status": "Done",
+"pig": "All present (lens-correction.js, engine /home/user/claude/pigment/src/shared/pixels/lens.js)",
+"planned": ""
+},
+{
+"section": "filters",
+"feature": "Noise: Add Noise, Despeckle, Dust & Scratches, Median",
+"where": "Filter > Noise",
+"status": "Done",
+"pig": "add-noise (Uniform/Gaussian, Monochromatic), despeckle, dust-scratches, median",
+"planned": ""
+},
+{
+"section": "filters",
+"feature": "Other: High Pass, HSB/HSL",
+"where": "Filter > Other",
+"status": "Done",
+"pig": "high-pass (Radius), hsb-hsl (input and row order)",
+"planned": ""
+},
+{
+"section": "filters",
+"feature": "Pixelate: Color Halftone, Crystallize, Facet, Fragment, Mezzotint, Mosaic, Pointillize",
+"where": "Filter > Pixelate",
+"status": "Done",
+"pig": "All seven kinds with Photoshop's options (Mezzotint's ten types, four screen angles for Color Halftone)",
+"planned": ""
+},
+{
+"section": "filters",
+"feature": "Render: Clouds, Difference Clouds, Fibers",
+"where": "Filter > Render",
+"status": "Done",
+"pig": "clouds / difference-clouds (with a dialog for scale, colours and seed, a superset) and fibers (Variance, Strength)",
+"planned": ""
+},
+{
+"section": "filters",
+"feature": "Sharpen: Sharpen, Sharpen Edges, Sharpen More, Unsharp Mask",
+"where": "Filter > Sharpen",
+"status": "Done",
+"pig": "sharpen (with an Amount dialog), sharpen-edges, sharpen-more, unsharp-mask (Amount, Radius, Threshold)",
+"planned": ""
+},
+{
+"section": "filters",
+"feature": "Stylize: Diffuse, Emboss, Extrude, Find Edges, Solarize, Tiles, Trace Contour, Wind",
+"where": "Filter > Stylize",
+"status": "Done",
+"pig": "All eight with Photoshop's options (Diffuse's four modes, Extrude Blocks/Pyramids, Wind/Blast/Stagger); Tiles takes its colours from the dialog",
+"planned": ""
+},
+{
+"section": "filters",
+"feature": "Video: De-Interlace, NTSC Colors",
+"where": "Filter > Video",
+"status": "Done",
+"pig": "de-interlace (Odd/Even, Duplication/Interpolation), ntsc-colors",
+"planned": ""
+},
+{
+"section": "filters",
+"feature": "Lens Correction: Preview, Show Grid, grid Size and Color",
+"where": "Lens Correction bottom bar",
+"status": "Done",
+"pig": "Present in lens-correction.js",
+"planned": ""
+},
+{
+"section": "select",
+"feature": "Quick Mask Options",
+"where": "Double-click the Quick Mask button: Color Indicates Masked / Selected Areas, Color, Opacity; Alt-click toggles",
+"status": "Missing",
+"pig": "Overlay is fixed red at 50 % showing masked areas; no options dialog, and the quick mask does not appear as a temporary channel in the Channels panel",
+"planned": "0.6 \u00b7 select-menu-finish"
+},
+{
+"section": "select",
+"feature": "Color Range inside an existing selection",
+"where": "Select > Color Range with an active selection (limits to it; Shift adds)",
+"status": "Missing",
+"pig": "The result always replaces the selection and is computed over the whole composite",
+"planned": "0.6 \u00b7 select-menu-finish"
+},
+{
+"section": "select",
+"feature": "Color Range: Localized Color Clusters and Range",
+"where": "Select > Color Range: Localized Color Clusters checkbox, Range slider",
+"status": "Missing",
+"pig": "Not present: no spatial weighting around sample points",
+"planned": "0.6 \u00b7 select-menu-finish"
+},
+{
+"section": "select",
+"feature": "Color Range: Out of Gamut",
+"where": "Select > Color Range: Select = Out of Gamut",
+"status": "Missing",
+"pig": "Not present; the gamut test of applyProof() in /home/user/claude/pigment/src/shared/pixels/color.js could feed it",
+"planned": "0.6 \u00b7 select-menu-finish"
+},
+{
+"section": "select",
+"feature": "Color Range: Skin Tones and Detect Faces",
+"where": "Select > Color Range: Select = Skin Tones, Detect Faces checkbox",
+"status": "Missing",
+"pig": "Not present. Skin-tone range is classical colour work; Detect Faces needs a face detector (an open-source model would be the substitute for Adobe's)",
+"planned": "0.9 \u00b7 local-models-segmentation"
+},
+{
+"section": "select",
+"feature": "Focus Area: Add / Subtract focus brushes, Hand, Zoom",
+"where": "Select > Focus Area dialog tools",
+"status": "Missing",
+"pig": "No brushes or dialog tools (admitted in ARCHITECTURE.md)",
+"planned": "0.6 \u00b7 select-menu-finish"
+},
+{
+"section": "select",
+"feature": "Modify: Apply effect at canvas bounds",
+"where": "Select > Modify > Border / Smooth / Expand / Contract / Feather dialogs: checkbox",
+"status": "Missing",
+"pig": "The five dialogs are a single number prompt (modify() in edit-ops.js); the engine always behaves as 'do not apply at canvas bounds' (edge pixels replicated)",
+"planned": "0.6 \u00b7 select-menu-finish"
+},
+{
+"section": "select",
+"feature": "Select and Mask: High Quality Preview / Real-time Refinement",
+"where": "Select and Mask Properties: View Mode checkboxes",
+"status": "Missing",
+"pig": "No such options; refinement always runs at full size in a worker (no reduced preview)",
+"planned": "0.6 \u00b7 selection-tools-depth"
+},
+{
+"section": "select",
+"feature": "Select and Mask: Refine Hair",
+"where": "Select and Mask options bar: Refine Hair",
+"status": "Missing",
+"pig": "Not present; would be an automatic Refine Edge pass over detected hair regions (heuristic, or an open-source matting model)",
+"planned": "0.9 \u00b7 local-models-segmentation"
+},
+{
+"section": "select",
+"feature": "Color Range: Sampled Colors with eyedropper, add and subtract eyedroppers",
+"where": "Select > Color Range: Select = Sampled Colors, eyedropper tools, click on image or preview",
+"status": "Partial",
+"pig": "colorRange() in edit-ops.js is a form dialog: one colour swatch labelled 'Foreground color'. No clicking the image or preview, no +/- eyedroppers or Shift/Alt sampling, although selection-ops.js colorRange() already accepts several colours",
+"planned": "0.6 \u00b7 select-menu-finish"
+},
+{
+"section": "select",
+"feature": "Color Range: Highlights / Midtones / Shadows",
+"where": "Select > Color Range: Select menu tonal presets with Fuzziness and Range",
+"status": "Partial",
+"pig": "Fixed luminance thresholds in rangeMask(); the Fuzziness slider has no effect and there is no Range slider for these",
+"planned": "0.6 \u00b7 select-menu-finish"
+},
+{
+"section": "select",
+"feature": "Color Range: Selection Preview modes and Selection/Image toggle",
+"where": "Select > Color Range: Selection Preview (None, Grayscale, Black Matte, White Matte, Quick Mask); Selection / Image radio",
+"status": "Partial",
+"pig": "Only a greyscale mask preview inside the dialog; nothing is previewed on the canvas, no matte or quick-mask previews, no Image view",
+"planned": "0.6 \u00b7 select-menu-finish"
+},
+{
+"section": "select",
+"feature": "Focus Area: View modes",
+"where": "Select > Focus Area: View (Marching Ants, Overlay, On Black, On White, Black & White, On Layers, Reveal Layer)",
+"status": "Partial",
+"pig": "FOCUS_VIEWS: Overlay, On Black, On White, Black & White, Onion Skin, None. Missing Marching Ants, On Layers, Reveal Layer",
+"planned": "0.6 \u00b7 select-menu-finish"
+},
+{
+"section": "select",
+"feature": "Load Selection",
+"where": "Select > Load Selection: Document, Channel (incl. layer transparency and masks), Invert, Operation",
+"status": "Partial",
+"pig": "select:load offers the document's saved channels, Invert and New/Add/Subtract/Intersect. No source Document menu (other open documents of the same size) and no layer transparency / layer mask entries in the list",
+"planned": "0.6 \u00b7 channels-depth"
+},
+{
+"section": "select",
+"feature": "Save Selection",
+"where": "Select > Save Selection: Document (incl. New), Channel (New or existing), Name, Operation (Replace/Add/Subtract/Intersect)",
+"status": "Partial",
+"pig": "select:save only asks for a channel name and always creates a new alpha channel in the current document. No destination document, no saving into an existing channel with an operation, no save as layer mask",
+"planned": "0.6 \u00b7 channels-depth"
+},
+{
+"section": "select",
+"feature": "Select and Mask: tool options",
+"where": "Select and Mask options bar: add/subtract, size, brush picker (hardness, spacing, angle, roundness), Sample All Layers, Object mode",
+"status": "Partial",
+"pig": "Add/subtract, Size, Hardness (Brush only), Rectangle/Lasso mode, Sample All Layers. No brush picker with spacing, angle, roundness or pen-pressure size",
+"planned": "0.6 \u00b7 selection-tools-depth"
+},
+{
+"section": "select",
+"feature": "Color Range: Reds / Yellows / Greens / Cyans / Blues / Magentas",
+"where": "Select > Color Range: Select menu colour presets",
+"status": "Approximate",
+"pig": "rangeMask() in edit-ops.js measures distance to the pure primary (#ff0000 etc.) with the Fuzziness slider; Photoshop selects by hue dominance with no fuzziness. Results differ visibly on desaturated colours",
+"planned": "0.6 \u00b7 select-menu-finish"
+},
+{
+"section": "select",
+"feature": "Focus Area: parameters and output",
+"where": "Select > Focus Area: In-Focus Range, Auto, Image Noise Level, Soften Edge, Output To, Select and Mask...",
+"status": "Approximate",
+"pig": "/home/user/claude/pigment/src/renderer/lib/select-mask.js focusArea() with all those controls; the engine is local Laplacian energy plus graph cut (/home/user/claude/pigment/src/shared/pixels/segment.js), not Adobe's algorithm",
+"planned": ""
+},
+{
+"section": "select",
+"feature": "Select and Mask: Refine Mode (Color Aware / Object Aware)",
+"where": "Select and Mask Properties: Refine Mode",
+"status": "Approximate",
+"pig": "Both modes exist (segment control 'mode'); both are guided-filter matting variants in /home/user/claude/pigment/src/shared/pixels/matte.js, not Adobe's algorithms. Hair on busy backgrounds will be cruder",
+"planned": "0.9 \u00b7 local-models-segmentation"
+},
+{
+"section": "select",
+"feature": "Select and Mask: Select Subject button",
+"where": "Select and Mask options bar: Select Subject",
+"status": "Approximate",
+"pig": "Button present (workspace.js selectSubject), same heuristic engine as Select > Subject",
+"planned": "0.9 \u00b7 local-models-segmentation"
+},
+{
+"section": "select",
+"feature": "Select and Mask on a layer mask",
+"where": "Properties panel / Select > Select and Mask with a mask targeted",
+"status": "Done",
+"pig": "With no selection on a layer that has a mask the workspace refines that mask (select-mask.js)",
+"planned": ""
+},
+{
+"section": "select",
+"feature": "Select All",
+"where": "Select > All (Ctrl+A)",
+"status": "Done",
+"pig": "select:all in /home/user/claude/pigment/src/renderer/lib/edit-ops.js",
+"planned": ""
+},
+{
+"section": "select",
+"feature": "Color Range: Fuzziness",
+"where": "Select > Color Range: Fuzziness slider",
+"status": "Done",
+"pig": "Fuzziness 0..200 with Photoshop-like falloff (/home/user/claude/pigment/src/shared/pixels/selection-ops.js colorRange)",
+"planned": ""
+},
+{
+"section": "select",
+"feature": "Color Range: Invert",
+"where": "Select > Color Range: Invert",
+"status": "Done",
+"pig": "Invert checkbox in colorRange() (edit-ops.js)",
+"planned": ""
+},
+{
+"section": "select",
+"feature": "Deselect",
+"where": "Select > Deselect (Ctrl+D)",
+"status": "Done",
+"pig": "select:none in edit-ops.js",
+"planned": ""
+},
+{
+"section": "select",
+"feature": "Edit in Quick Mask Mode",
+"where": "Select > Edit in Quick Mask Mode (Q)",
+"status": "Done",
+"pig": "toggleQuickMask() in edit-ops.js: red rubylith overlay painted with any paint tool",
+"planned": ""
+},
+{
+"section": "select",
+"feature": "Grow",
+"where": "Select > Grow",
+"status": "Done",
+"pig": "select:grow uses the Magic Wand tolerance (selection-ops.js grow)",
+"planned": ""
+},
+{
+"section": "select",
+"feature": "Inverse",
+"where": "Select > Inverse (Shift+Ctrl+I)",
+"status": "Done",
+"pig": "select:inverse in edit-ops.js",
+"planned": ""
+},
+{
+"section": "select",
+"feature": "Modify > Border",
+"where": "Select > Modify > Border (Width)",
+"status": "Done",
+"pig": "select:border, ring of expand/contract (selection-ops.js border); prompt for width",
+"planned": ""
+},
+{
+"section": "select",
+"feature": "Modify > Contract",
+"where": "Select > Modify > Contract",
+"status": "Done",
+"pig": "select:contract (disc erosion)",
+"planned": ""
+},
+{
+"section": "select",
+"feature": "Modify > Expand",
+"where": "Select > Modify > Expand",
+"status": "Done",
+"pig": "select:expand (disc dilation)",
+"planned": ""
+},
+{
+"section": "select",
+"feature": "Modify > Feather",
+"where": "Select > Modify > Feather (Shift+F6)",
+"status": "Done",
+"pig": "select:feather, Shift+F6",
+"planned": ""
+},
+{
+"section": "select",
+"feature": "Modify > Smooth",
+"where": "Select > Modify > Smooth (Sample Radius)",
+"status": "Done",
+"pig": "select:smooth (selection-ops.js smooth)",
+"planned": ""
+},
+{
+"section": "select",
+"feature": "Reselect",
+"where": "Select > Reselect (Shift+Ctrl+D)",
+"status": "Done",
+"pig": "select:reselect restores doc.savedSelection (edit-ops.js)",
+"planned": ""
+},
+{
+"section": "select",
+"feature": "Similar",
+"where": "Select > Similar",
+"status": "Done",
+"pig": "select:similar uses the Magic Wand tolerance (selection-ops.js similar)",
+"planned": ""
+},
+{
+"section": "select",
+"feature": "Transform Selection",
+"where": "Select > Transform Selection",
+"status": "Done",
+"pig": "select:transform starts Free Transform with selectionOnly (/home/user/claude/pigment/src/renderer/lib/image-ops.js)",
+"planned": ""
+},
+{
+"section": "select",
+"feature": "Select and Mask: Edge Detection Radius and Smart Radius",
+"where": "Select and Mask Properties: Edge Detection",
+"status": "Done",
+"pig": "Radius 0..250 px and Smart Radius (matte.js edgeBand / smartFactor)",
+"planned": ""
+},
+{
+"section": "select",
+"feature": "Select and Mask: Decontaminate Colors with Amount",
+"where": "Select and Mask Properties: Output Settings",
+"status": "Done",
+"pig": "decontaminate + amount (matte.js decontaminate)",
+"planned": ""
+},
+{
+"section": "select",
+"feature": "Select and Mask: Output To",
+"where": "Select and Mask Properties: Output To (Selection, Layer Mask, New Layer, New Layer with Layer Mask, New Document, New Document with Layer Mask)",
+"status": "Done",
+"pig": "OUTPUTS in /home/user/claude/pigment/src/renderer/lib/select-mask/output.js, all six",
+"planned": ""
+},
+{
+"section": "select",
+"feature": "Select and Mask: Global Refinements",
+"where": "Select and Mask Properties: Smooth, Feather, Contrast, Shift Edge, Clear Selection, Invert",
+"status": "Done",
+"pig": "All four sliders plus Clear Selection, Invert and Reset in workspace.js",
+"planned": ""
+},
+{
+"section": "select",
+"feature": "Select and Mask: View modes",
+"where": "Select and Mask Properties: View (Onion Skin, Marching Ants, Overlay, On Black, On White, Black & White, On Layers), F cycles, X disables",
+"status": "Done",
+"pig": "VIEW_MODES and VIEW_KEYS in /home/user/claude/pigment/src/renderer/lib/select-mask/preview.js",
+"planned": ""
+},
+{
+"section": "select",
+"feature": "Select and Mask: Show Edge, Show Original, Transparency/Opacity, overlay Color, Indicates",
+"where": "Select and Mask Properties: View Mode section",
+"status": "Done",
+"pig": "All present in the workspace form (workspace.js lines 1106-1113)",
+"planned": ""
+},
+{
+"section": "select",
+"feature": "Select and Mask: tools",
+"where": "Select and Mask workspace toolbar: Quick Selection, Refine Edge Brush, Brush, Object Selection, Lasso, Polygonal Lasso, Hand, Zoom",
+"status": "Done",
+"pig": "SUB_TOOLS in /home/user/claude/pigment/src/renderer/lib/select-mask/workspace.js, same shortcuts (W, R, B, L, H, Z)",
+"planned": ""
+},
+{
+"section": "camera-raw",
+"feature": "Camera Raw: Calibration",
+"where": "Camera Raw > Edit > Calibration (Process, Shadows Tint, Red/Green/Blue Primary Hue and Saturation)",
+"status": "Missing",
+"pig": "Not present",
+"planned": "0.5 \u00b7 camera-raw-panels"
+},
+{
+"section": "camera-raw",
+"feature": "Camera Raw: Color Grading",
+"where": "Camera Raw > Edit > Color Grading (Shadows / Midtones / Highlights / Global wheels, Blending, Balance)",
+"status": "Missing",
+"pig": "Not present (no split toning either)",
+"planned": "0.5 \u00b7 camera-raw-panels"
+},
+{
+"section": "camera-raw",
+"feature": "Camera Raw: Color Mixer 'Color' view, Targeted Adjustment tool, Point Color",
+"where": "Camera Raw > Edit > Color Mixer",
+"status": "Missing",
+"pig": "Not present",
+"planned": "0.5 \u00b7 camera-raw-panels"
+},
+{
+"section": "camera-raw",
+"feature": "Camera Raw: Curve",
+"where": "Camera Raw > Edit > Curve (Parametric, Point, Red/Green/Blue channels, Targeted Adjustment)",
+"status": "Missing",
+"pig": "No curve tab",
+"planned": "0.5 \u00b7 camera-raw-panels"
+},
+{
+"section": "camera-raw",
+"feature": "Camera Raw: Geometry",
+"where": "Camera Raw > Edit > Geometry: Upright (Auto, Level, Vertical, Full, Guided), Vertical, Horizontal, Rotate, Aspect, Scale, Offset X/Y, Constrain crop",
+"status": "Missing",
+"pig": "Not present (Lens Correction has manual perspective, angle and scale only; there is no automatic Upright)",
+"planned": "0.5 \u00b7 camera-raw-panels"
+},
+{
+"section": "camera-raw",
+"feature": "Camera Raw: Optics (manual)",
+"where": "Camera Raw > Edit > Optics: Remove Chromatic Aberration, Distortion, Vignette, Defringe (purple / green amount and hue)",
+"status": "Missing",
+"pig": "Not in the Camera Raw dialog; distortion, CA and vignette exist only in the separate Lens Correction filter; there is no Defringe anywhere",
+"planned": "0.5 \u00b7 camera-raw-panels"
+},
+{
+"section": "camera-raw",
+"feature": "Camera Raw: Masking (manual tools)",
+"where": "Camera Raw > Masking: Brush, Linear Gradient, Radial Gradient, Color Range, Luminance Range; add / subtract / intersect; local adjustment sliders",
+"status": "Missing",
+"pig": "No local adjustments at all",
+"planned": "0.7 \u00b7 camera-raw-local"
+},
+{
+"section": "camera-raw",
+"feature": "Camera Raw: Snapshots",
+"where": "Camera Raw > Snapshots",
+"status": "Missing",
+"pig": "Not present",
+"planned": "0.5 \u00b7 camera-raw-workspace"
+},
+{
+"section": "camera-raw",
+"feature": "Camera Raw: histogram, clipping warnings, zoom / hand, colour sampler",
+"where": "Camera Raw dialog chrome",
+"status": "Missing",
+"pig": "The dialog is a floating form over the canvas; no histogram, no shadow/highlight clipping overlay, no sampler",
+"planned": "0.5 \u00b7 camera-raw-workspace"
+},
+{
+"section": "camera-raw",
+"feature": "Camera Raw: Healing (Remove, Heal, Clone) and Red Eye",
+"where": "Camera Raw toolbar: Remove, Red Eye",
+"status": "Missing",
+"pig": "Not in the dialog (the main editor has healing and red-eye tools in /home/user/claude/pigment/src/renderer/lib/tools/retouch.js)",
+"planned": "0.7 \u00b7 camera-raw-local"
+},
+{
+"section": "camera-raw",
+"feature": "Camera Raw: White balance",
+"where": "Camera Raw > Edit > Color: White balance menu (As Shot, Auto, Custom), eyedropper, Temperature, Tint",
+"status": "Partial",
+"pig": "Temperature and Tint as relative -100..100 shifts. No White Balance tool (click a neutral), no Auto/As Shot menu",
+"planned": "0.5 \u00b7 camera-raw-workspace"
+},
+{
+"section": "camera-raw",
+"feature": "Camera Raw: Detail",
+"where": "Camera Raw > Edit > Detail: Sharpening (Amount, Radius, Detail, Masking), Noise Reduction (Luminance, Detail, Contrast), Color Noise Reduction (Color, Detail, Smoothness)",
+"status": "Partial",
+"pig": "Sharpening Amount/Radius/Detail and Luminance / Color noise amounts only. Missing Masking, luminance Detail and Contrast, colour Detail and Smoothness",
+"planned": "0.5 \u00b7 camera-raw-panels"
+},
+{
+"section": "camera-raw",
+"feature": "Camera Raw: Effects vignette and grain",
+"where": "Camera Raw > Edit > Effects: Vignette (Style, Midpoint, Roundness, Feather, Highlights), Grain (Amount, Size, Roughness)",
+"status": "Partial",
+"pig": "Vignette Amount and Grain Amount (+ seed) only",
+"planned": "0.5 \u00b7 camera-raw-panels"
+},
+{
+"section": "camera-raw",
+"feature": "Camera Raw: Auto and B&W buttons",
+"where": "Camera Raw > Edit header: Auto, B&W",
+"status": "Partial",
+"pig": "Auto (autoTone from the histogram) and Reset exist; no B&W conversion toggle and no B&W Mixer",
+"planned": "0.5 \u00b7 camera-raw-workspace"
+},
+{
+"section": "camera-raw",
+"feature": "Camera Raw: Before / After views",
+"where": "Camera Raw bottom bar: cycle Before/After (Q), swap, copy settings",
+"status": "Partial",
+"pig": "Only the Preview checkbox of pixelEditDialog (whole image on or off); no side-by-side or split views",
+"planned": "0.5 \u00b7 camera-raw-workspace"
+},
+{
+"section": "camera-raw",
+"feature": "Camera Raw: Texture, Clarity, Dehaze, Vibrance, Saturation",
+"where": "Camera Raw > Edit > Effects / Color",
+"status": "Approximate",
+"pig": "Present with Pigment's own maths (ARCHITECTURE.md 'Camera Raw filter': texture as a mid-frequency boost, clarity as local contrast at about 1% of the long edge, a simple dehaze). Same controls, different look from Adobe's, most of all Dehaze.",
+"planned": "0.5 \u00b7 camera-raw-panels"
+},
+{
+"section": "camera-raw",
+"feature": "Camera Raw: Light (Exposure, Contrast, Highlights, Shadows, Whites, Blacks)",
+"where": "Filter > Camera Raw Filter > Edit > Light",
+"status": "Approximate",
+"pig": "All six sliders exist (lib/develop-ui.js Basic tab) but shared/pixels/develop.js applies them as luminance-masked curves to 8-bit display-referred sRGB, not Adobe's process on scene-linear data: Exposure is not a true stop on linear light and highlight recovery cannot bring back clipped data. Results differ visibly from Camera Raw at strong settings.",
+"planned": "0.6 \u00b7 raw-open-workflow"
+},
+{
+"section": "camera-raw",
+"feature": "Camera Raw: Denoise (AI), Raw Details, Super Resolution",
+"where": "Camera Raw > Detail > Denoise; Enhance",
+"status": "Not feasible",
+"pig": "Absent. Adobe models, and they apply to raw mosaics which Pigment does not open. Substitute: open-source denoise / super-resolution models on RGB",
+"planned": ""
+},
+{
+"section": "camera-raw",
+"feature": "Camera Raw: Lens Blur",
+"where": "Camera Raw > Edit > Lens Blur (AI depth, bokeh shapes, focal range)",
+"status": "Not feasible",
+"pig": "Absent. Adobe depth model. Substitute: open-source depth model feeding Pigment's Lens Blur",
+"planned": ""
+},
+{
+"section": "camera-raw",
+"feature": "Camera Raw: Optics profile corrections",
+"where": "Camera Raw > Edit > Optics > Use profile corrections",
+"status": "Not feasible",
+"pig": "Absent. Adobe lens profiles are licensed data. Substitute: the open Lensfun database, looked up from EXIF",
+"planned": ""
+},
+{
+"section": "camera-raw",
+"feature": "Camera Raw: Profiles and profile browser",
+"where": "Camera Raw > Edit > Profile (Adobe Color, Monochrome, Artistic, Vintage...)",
+"status": "Not feasible",
+"pig": "Absent. Adobe's profiles are licensed data. Substitute: a profile slot that loads user-supplied .cube LUTs (Pigment already reads LUT files in /home/user/claude/pigment/src/shared/pixels/lut.js) and Pigment's own looks",
+"planned": ""
+},
+{
+"section": "camera-raw",
+"feature": "Camera Raw: Masking (AI: Subject, Sky, Background, Objects, People, Depth Range)",
+"where": "Camera Raw > Masking",
+"status": "Not feasible",
+"pig": "Absent. Adobe models. Substitute: Pigment's heuristic Subject/Sky masks or open-source segmentation and depth models, labelled as such",
+"planned": ""
+},
+{
+"section": "camera-raw",
+"feature": "Camera Raw: Color Mixer HSL",
+"where": "Camera Raw > Edit > Color Mixer > Mixer (Hue, Saturation, Luminance for 8 ranges)",
+"status": "Done",
+"pig": "HSL tab with Hue / Saturation / Luminance for reds..magentas",
+"planned": ""
+},
+{
+"section": "camera-raw",
+"feature": "Camera Raw as a smart filter",
+"where": "Filter > Camera Raw Filter on a smart object",
+"status": "Done",
+"pig": "registerKind('camera-raw') in develop-ui.js; re-editable",
+"planned": ""
+},
+{
+"section": "liquify",
+"feature": "Liquify as a smart filter",
+"where": "Filter > Liquify on a smart object",
+"status": "Missing",
+"pig": "filter:liquify is a plain pixel edit outside the filter registry, so it is never taken over as a smart filter and Last Filter does not repeat it",
+"planned": "0.7 \u00b7 liquify-depth"
+},
+{
+"section": "liquify",
+"feature": "Liquify: Smooth tool",
+"where": "Filter > Liquify toolbar (E)",
+"status": "Missing",
+"pig": "Not present",
+"planned": "0.7 \u00b7 liquify-depth"
+},
+{
+"section": "liquify",
+"feature": "Liquify: Freeze Mask / Thaw Mask tools and Mask Options",
+"where": "Filter > Liquify toolbar (F, D); Mask Options (Replace/Add/Subtract/Intersect/Invert from Selection, Transparency, Layer Mask; None, Mask All, Invert All)",
+"status": "Missing",
+"pig": "No freeze mask at all",
+"planned": "0.7 \u00b7 liquify-depth"
+},
+{
+"section": "liquify",
+"feature": "Liquify: Hand and Zoom",
+"where": "Filter > Liquify toolbar (H, Z), zoom menu",
+"status": "Missing",
+"pig": "The stage shows the image at one fitted scale; no zoom or pan in the dialog",
+"planned": "0.7 \u00b7 liquify-depth"
+},
+{
+"section": "liquify",
+"feature": "Liquify: Push Left tool",
+"where": "Filter > Liquify toolbar (O)",
+"status": "Missing",
+"pig": "Not present",
+"planned": "0.7 \u00b7 liquify-depth"
+},
+{
+"section": "liquify",
+"feature": "Liquify: Face tool and Face-Aware Liquify",
+"where": "Filter > Liquify: Face tool (A); Face-Aware Liquify (Eyes, Nose, Mouth, Face Shape sliders, Select Face)",
+"status": "Missing",
+"pig": "Not present. Needs face landmarks: Adobe's detector is proprietary, an open-source landmark model (MediaPipe Face Mesh, Apache-2.0) is the honest substitute; the warps themselves are ordinary mesh edits",
+"planned": "0.10 \u00b7 neural-filters-local"
+},
+{
+"section": "liquify",
+"feature": "Liquify: Load Mesh, Load Last Mesh, Save Mesh",
+"where": "Filter > Liquify: Load Mesh Options",
+"status": "Missing",
+"pig": "No buttons; the mesh is only serialised for action steps (/home/user/claude/pigment/src/renderer/lib/actions/mesh-data.js), so Pigment's own mesh file is a small step (.msh import would be extra)",
+"planned": "0.7 \u00b7 liquify-depth"
+},
+{
+"section": "liquify",
+"feature": "Liquify: View Options",
+"where": "Filter > Liquify: Show Guides, Show Face Overlay, Show Image, Show Mesh (size, colour), Show Mask (colour), Show Backdrop (Use, Mode, Opacity)",
+"status": "Missing",
+"pig": "None of them; only the active layer is shown, without the other layers as backdrop",
+"planned": "0.7 \u00b7 liquify-depth"
+},
+{
+"section": "liquify",
+"feature": "Liquify: Forward Warp, Reconstruct, Twirl Clockwise, Pucker, Bloat",
+"where": "Filter > Liquify toolbar (W, R, C, S, B)",
+"status": "Partial",
+"pig": "/home/user/claude/pigment/src/renderer/lib/liquify.js has the five tools; Alt with Twirl does not turn counter-clockwise (Alt only reconstructs in Forward Warp)",
+"planned": "0.7 \u00b7 liquify-depth"
+},
+{
+"section": "liquify",
+"feature": "Liquify: Brush Reconstruct Options",
+"where": "Filter > Liquify: Reconstruct... (amount), Restore All",
+"status": "Partial",
+"pig": "Restore All and Undo stroke; no Reconstruct amount dialog",
+"planned": "0.7 \u00b7 liquify-depth"
+},
+{
+"section": "liquify",
+"feature": "Liquify: Brush Tool Options",
+"where": "Filter > Liquify: Size, Density, Pressure, Rate, Stylus Pressure, Pin Edges",
+"status": "Partial",
+"pig": "Brush size and Brush pressure only",
+"planned": "0.7 \u00b7 liquify-depth"
+},
+{
+"section": "guides",
+"feature": "Guide selection, colours and Edit Selected Guides",
+"where": "Click / Shift-click guides; View > Guides > Edit Selected Guides (orientation, position, colour)",
+"status": "Done",
+"pig": "0.4: click and Shift-click guides, a colour per guide, Edit Selected Guides",
+"planned": "0.4 \u00b7 guides-snapping"
+},
+{
+"section": "guides",
+"feature": "Move and delete individual guides",
+"where": "Move tool: drag a guide, drag it back to the ruler to delete",
+"status": "Done",
+"pig": "0.4: the Move tool selects and drags guides, a drag out of the canvas deletes them, Delete clears the selected ones",
+"planned": "0.4 \u00b7 guides-snapping"
+},
+{
+"section": "guides",
+"feature": "Clear Selected Guides / Clear Selected Artboard Guides / Clear Canvas Guides",
+"where": "View > Guides",
+"status": "Done",
+"pig": "0.4: all three in View \u203a Guides (artboard guides wait for artboards)",
+"planned": "0.4 \u00b7 guides-snapping"
+},
+{
+"section": "guides",
+"feature": "Lock Guides",
+"where": "View > Guides > Lock Guides (Alt+Ctrl+;)",
+"status": "Done",
+"pig": "0.4: View \u203a Guides \u203a Lock Guides (Alt+Ctrl+;)",
+"planned": "0.4 \u00b7 guides-snapping"
+},
+{
+"section": "guides",
+"feature": "New Guide Layout",
+"where": "View > Guides > New Guide Layout (Columns, Rows, Gutter, Margin, Center Columns, presets, Target)",
+"status": "Done",
+"pig": "0.4: Columns, Rows, Gutter, Margin, Center Columns, presets",
+"planned": "0.4 \u00b7 guides-snapping"
+},
+{
+"section": "guides",
+"feature": "New Guides From Shape",
+"where": "View > Guides > New Guides From Shape",
+"status": "Done",
+"pig": "0.4: View \u203a Guides \u203a New Guides From Shape",
+"planned": "0.4 \u00b7 guides-snapping"
+},
+{
+"section": "guides",
+"feature": "Create guides by dragging from a ruler",
+"where": "Drag from a ruler; Alt switches orientation; Shift snaps to ruler ticks",
+"status": "Done",
+"pig": "0.4: Alt switches orientation, Shift snaps to ruler ticks, positions keep two decimals",
+"planned": "0.4 \u00b7 guides-snapping"
+},
+{
+"section": "guides",
+"feature": "New Guide",
+"where": "View > Guides > New Guide (Orientation, Position with units, Color)",
+"status": "Done",
+"pig": "0.4: orientation, position with units from the ruler origin, colour",
+"planned": "0.4 \u00b7 guides-snapping"
+},
+{
+"section": "guides",
+"feature": "Clear Guides",
+"where": "View > Guides > Clear Guides",
+"status": "Done",
+"pig": "view:clear-guides (undoable) in /home/user/claude/pigment/src/renderer/app.js",
+"planned": ""
+},
+{
+"section": "smart-filters",
+"feature": "Smart filters: filter mask",
+"where": "Layers panel smart filter mask thumbnail; Layer > Smart Filter > Add / Delete / Disable Filter Mask",
+"status": "Missing",
+"pig": "No smart filter mask (filters[].mask is always null; admitted in ARCHITECTURE.md). A selection active when the filter is added is ignored as a mask",
+"planned": "0.6 \u00b7 smart-filters-depth"
+},
+{
+"section": "smart-filters",
+"feature": "Smart filters: Blending Options per filter",
+"where": "Layers panel: double-click the sliders icon on a smart filter (Mode, Opacity)",
+"status": "Missing",
+"pig": "Filter entries carry only kind, params, enabled; no blend mode or opacity per filter",
+"planned": "0.6 \u00b7 smart-filters-depth"
+},
+{
+"section": "smart-filters",
+"feature": "Smart filters: drag or Alt-drag between layers",
+"where": "Layers panel: drag a smart filter or the Smart Filters row to another smart object (move / copy)",
+"status": "Missing",
+"pig": "Not present",
+"planned": "0.6 \u00b7 smart-filters-depth"
+},
+{
+"section": "smart-filters",
+"feature": "Smart filters: apply any filter non-destructively",
+"where": "Filter menu on a smart object",
+"status": "Partial",
+"pig": "app.smartFilters.intercept turns registry filters, adjustments and Camera Raw into smart filters. Liquify cannot be a smart filter; Lens Blur loses its depth map; Displace maps and loaded Filter Gallery textures are not saved in .pigment",
+"planned": "0.6 \u00b7 smart-filters-depth"
+},
+{
+"section": "smart-filters",
+"feature": "Smart filters: reorder",
+"where": "Layers panel: drag a smart filter up or down",
+"status": "Partial",
+"pig": "Context menu Move Up / Move Down only; no drag reordering",
+"planned": "0.6 \u00b7 smart-filters-depth"
+},
+{
+"section": "smart-filters",
+"feature": "Convert for Smart Filters",
+"where": "Filter > Convert for Smart Filters",
+"status": "Done",
+"pig": "Runs layer:smart-convert (/home/user/claude/pigment/src/renderer/lib/smart-object.js)",
+"planned": ""
+},
+{
+"section": "smart-filters",
+"feature": "Smart filters: enable / disable (one or all), edit, delete, clear",
+"where": "Layers panel smart filter rows; Layer > Smart Filter",
+"status": "Done",
+"pig": "filterOp() in smart-object.js and the rows in /home/user/claude/pigment/src/renderer/lib/panels/layers.js (eye, double-click to edit, Delete, Clear Smart Filters, Enable/Disable)",
+"planned": ""
+},
+{
+"section": "color-management",
+"feature": "Proof Setup: Color Blindness (Protanopia-type, Deuteranopia-type)",
+"where": "View > Proof Setup",
+"status": "Missing",
+"pig": "Not present; classical matrices, no profiles needed",
+"planned": "0.6 \u00b7 soft-proofing"
+},
+{
+"section": "color-management",
+"feature": "Proof Setup: Legacy Macintosh RGB, Internet Standard RGB (sRGB), Monitor RGB",
+"where": "View > Proof Setup",
+"status": "Missing",
+"pig": "Not present",
+"planned": "0.6 \u00b7 soft-proofing"
+},
+{
+"section": "color-management",
+"feature": "Proof Setup: Working Cyan / Magenta / Yellow / Black Plate, Working CMY Plates",
+"where": "View > Proof Setup",
+"status": "Missing",
+"pig": "Not present",
+"planned": "0.6 \u00b7 soft-proofing"
+},
+{
+"section": "color-management",
+"feature": "Proof Setup: Custom",
+"where": "View > Proof Setup > Custom (Device to Simulate, Preserve Numbers, Rendering Intent, Black Point Compensation, Simulate Paper Color / Black Ink, save/load)",
+"status": "Missing",
+"pig": "No Proof Setup submenu and no ICC engine (README: everything is treated as sRGB). Buildable with an open-source CMM (Little CMS compiled to WebAssembly) and user-supplied ICC profiles",
+"planned": "0.6 \u00b7 soft-proofing"
+},
+{
+"section": "color-management",
+"feature": "Gamut Warning",
+"where": "View > Gamut Warning (Shift+Ctrl+Y); Preferences > Transparency & Gamut colour and opacity",
+"status": "Approximate",
+"pig": "view:gamut greys pixels outside the same generic CMYK model; no warning colour or opacity preference, not tied to a proof profile",
+"planned": "0.6 \u00b7 soft-proofing"
+},
+{
+"section": "color-management",
+"feature": "Proof Colors",
+"where": "View > Proof Colors (Ctrl+Y)",
+"status": "Approximate",
+"pig": "view:proof in /home/user/claude/pigment/src/renderer/lib/color-modes.js toggles the generic CMYK preview; menu label 'Proof Colors (CMYK)', no Ctrl+Y shortcut",
+"planned": "0.6 \u00b7 soft-proofing"
+},
+{
+"section": "color-management",
+"feature": "Proof Setup: Working CMYK",
+"where": "View > Proof Setup > Working CMYK",
+"status": "Approximate",
+"pig": "The only proof is a fixed generic CMYK simulation (applyProof in /home/user/claude/pigment/src/shared/pixels/color.js), not a profile-based working space",
+"planned": "0.6 \u00b7 soft-proofing"
+},
+{
+"section": "presets",
+"feature": "Camera Raw: Presets panel and settings load / save",
+"where": "Camera Raw > Presets; More menu: Load Settings, Save Settings, defaults",
+"status": "Missing",
+"pig": "No presets, no saving or loading of settings (.xmp). Adobe's bundled presets cannot be shipped; Pigment's own and user .xmp reading can",
+"planned": "0.5 \u00b7 camera-raw-workspace"
+},
+{
+"section": "presets",
+"feature": "Color Range: Load / Save settings (.axt)",
+"where": "Select > Color Range: Load..., Save...",
+"status": "Missing",
+"pig": "Not present",
+"planned": "0.6 \u00b7 select-menu-finish"
+},
+{
+"section": "presets",
+"feature": "Lens Correction: Settings menu",
+"where": "Lens Correction > Custom > Settings (Lens Default, Previous Correction, Custom, Default; Load / Save settings)",
+"status": "Partial",
+"pig": "Previous and Reset buttons only; no saved settings files or Lens Default",
+"planned": "0.9 \u00b7 lens-correction-profiles"
+},
+{
+"section": "presets",
+"feature": "Select and Mask: Preset menu and Remember Settings",
+"where": "Select and Mask Properties: Preset (Default, Load Preset, Save Preset), Remember Settings",
+"status": "Partial",
+"pig": "View and tool preferences are remembered (settings.tools['select-mask']); no named refine presets, no Load/Save, no Remember Settings checkbox for the refinement values",
+"planned": "0.6 \u00b7 selection-tools-depth"
+},
+{
+"section": "3d",
+"feature": "New 3D Extrusion",
+"where": "Select > New 3D Extrusion",
+"status": "Missing",
+"pig": "No 3D at all (README). Adobe has discontinued Photoshop's 3D features, so this is the lowest priority; a faithful build is a 3D subsystem",
+"planned": "0.11 \u00b7 3d-lite"
+},
+{
+"section": "3d",
+"feature": "Show > 3D overlays",
+"where": "View > Show > 3D Secondary View, Ground Plane, Lights, Selection, UV Overlay, Mesh Bounding Box",
+"status": "Missing",
+"pig": "No 3D (discontinued by Adobe)",
+"planned": "0.11 \u00b7 3d-lite"
+},
+{
+"section": "ai",
+"feature": "Neural Filters workspace",
+"where": "Filter > Neural Filters (filter list, download manager, preview, Output: Current Layer / New Layer / Masked / Smart Filter)",
+"status": "Missing",
+"pig": "No command and no menu item (README lists it as missing). The shell (panel, output options, model download manager) is buildable; the individual filters depend on models, see below",
+"planned": "0.10 \u00b7 neural-filters-local"
+},
+{
+"section": "ai",
+"feature": "Neural Filters: Color Transfer",
+"where": "Filter > Neural Filters > Color",
+"status": "Missing",
+"pig": "Absent, but buildable without a model: Reinhard-style Lab statistics transfer from a reference image with luminance/colour strength and hue/saturation/brightness sliders (Match Color engine is the base)",
+"planned": "0.10 \u00b7 neural-filters-local"
+},
+{
+"section": "ai",
+"feature": "Select Sky",
+"where": "Select > Sky",
+"status": "Approximate",
+"pig": "select:sky uses a colour/position/smoothness prior plus GrabCut (segment.js selectSky); same limit and same substitute as Select Subject",
+"planned": "0.9 \u00b7 local-models-segmentation"
+},
+{
+"section": "ai",
+"feature": "Select Subject",
+"where": "Select > Subject (Device / Cloud processing)",
+"status": "Approximate",
+"pig": "select:subject runs saliency plus GrabCut locally (segment.js selectSubject); README admits it is a heuristic that picks the wrong region in busy scenes. Adobe's trained model cannot be shipped; the honest upgrade is an open-source segmentation model (U2-Net / ISNet / SAM in ONNX) run offline",
+"planned": "0.9 \u00b7 local-models-segmentation"
+},
+{
+"section": "ai",
+"feature": "Neural Filters: Colorize",
+"where": "Filter > Neural Filters > Color",
+"status": "Not feasible",
+"pig": "Absent. Proprietary model. Substitute: an open-source colourisation model (DDColor / DeOldify, ONNX) the user downloads, or a provider request",
+"planned": ""
+},
+{
+"section": "ai",
+"feature": "Neural Filters: Harmonization",
+"where": "Filter > Neural Filters > Color",
+"status": "Not feasible",
+"pig": "Absent. Proprietary model. Substitute: classical statistics matching of the layer to a reference layer (Match Color already exists in /home/user/claude/pigment/src/shared/pixels/adjust-more.js) presented honestly as Match to Layer",
+"planned": ""
+},
+{
+"section": "ai",
+"feature": "Neural Filters: Style Transfer",
+"where": "Filter > Neural Filters > Creative",
+"status": "Not feasible",
+"pig": "Absent. Adobe's styles and model are proprietary. Substitute: an open-source arbitrary style-transfer model (AdaIN-type, ONNX) with user-supplied style images",
+"planned": ""
+},
+{
+"section": "ai",
+"feature": "Neural Filters: Landscape Mixer",
+"where": "Filter > Neural Filters > Creative (cloud)",
+"status": "Not feasible",
+"pig": "Absent. Adobe cloud model. Substitute: provider image-edit with a reference image through the user's key",
+"planned": ""
+},
+{
+"section": "ai",
+"feature": "Neural Filters: Depth Blur",
+"where": "Filter > Neural Filters > Photography",
+"status": "Not feasible",
+"pig": "Absent. Proprietary depth model. Substitute: an open-source monocular depth model (MiDaS / Depth Anything, ONNX) feeding the existing Lens Blur depth map input",
+"planned": ""
+},
+{
+"section": "ai",
+"feature": "Neural Filters: Super Zoom",
+"where": "Filter > Neural Filters > Photography",
+"status": "Not feasible",
+"pig": "Absent. Proprietary model. Substitute: an open-source super-resolution model (Real-ESRGAN, ONNX)",
+"planned": ""
+},
+{
+"section": "ai",
+"feature": "Neural Filters: Makeup Transfer",
+"where": "Filter > Neural Filters > Portraits",
+"status": "Not feasible",
+"pig": "Absent. Proprietary model. Substitute: an open-source makeup-transfer model the user downloads, or a provider image-edit prompt with a reference image",
+"planned": ""
+},
+{
+"section": "ai",
+"feature": "Neural Filters: Skin Smoothing",
+"where": "Filter > Neural Filters > Portraits",
+"status": "Not feasible",
+"pig": "Absent. Adobe's model is proprietary. Substitute: face detection with an open-source model plus classical frequency-separation smoothing inside the face mask",
+"planned": ""
+},
+{
+"section": "ai",
+"feature": "Neural Filters: Smart Portrait",
+"where": "Filter > Neural Filters > Portraits (cloud)",
+"status": "Not feasible",
+"pig": "Absent. Runs on Adobe's cloud GAN. Substitute: an image-edit request through the user's own OpenAI/Gemini key (the AI menu already has that plumbing), clearly labelled as generative",
+"planned": ""
+},
+{
+"section": "ai",
+"feature": "Neural Filters: JPEG Artifacts Removal",
+"where": "Filter > Neural Filters > Restoration",
+"status": "Not feasible",
+"pig": "Absent. Proprietary model. Substitute: classical deblocking (which Reduce Noise's missing 'Remove JPEG Artifact' option also needs) or an open-source model such as FBCNN",
+"planned": ""
+},
+{
+"section": "ai",
+"feature": "Neural Filters: Photo Restoration",
+"where": "Filter > Neural Filters > Restoration",
+"status": "Not feasible",
+"pig": "Absent. Proprietary model. Substitute: open-source face/photo restoration models (GFPGAN / CodeFormer, check their licences) plus classical scratch inpainting",
+"planned": ""
+},
+{
+"section": "artboards",
+"feature": "Fit Artboard on Screen",
+"where": "View > Fit Artboard on Screen",
+"status": "Missing",
+"pig": "No artboards (README)",
+"planned": "0.9 \u00b7 artboards-frames"
+},
+{
+"section": "artboards",
+"feature": "Show > Canvas Guides, Artboard Guides, Artboard Names",
+"where": "View > Show",
+"status": "Missing",
+"pig": "No artboards, so no distinction between canvas and artboard guides",
+"planned": "0.9 \u00b7 artboards-frames"
+},
+{
+"section": "layers",
+"feature": "Find Layers (Layers panel filter bar)",
+"where": "Select > Find Layers (Alt+Shift+Ctrl+F); Layers panel filter row",
+"status": "Partial",
+"pig": "0.4: the filter bar with the Selected type and the Not locked, Vector mask and Advanced blending attributes; no Smart Object or Artboard filter",
+"planned": "0.4 \u00b7 layers-panel-depth"
+},
+{
+"section": "layers",
+"feature": "Isolate Layers",
+"where": "Select > Isolate Layers",
+"status": "Done",
+"pig": "0.4: the samplers and the Move tool see only the isolated layers",
+"planned": "0.4 \u00b7 layers-panel-depth"
+},
+{
+"section": "layers",
+"feature": "All Layers",
+"where": "Select > All Layers (Alt+Ctrl+A)",
+"status": "Done",
+"pig": "layer:select-all in /home/user/claude/pigment/src/renderer/lib/layer-ops.js; no Alt+Ctrl+A accelerator in keymap.js",
+"planned": ""
+},
+{
+"section": "layers",
+"feature": "Deselect Layers",
+"where": "Select > Deselect Layers",
+"status": "Done",
+"pig": "select:deselect-layers in /home/user/claude/pigment/src/renderer/lib/layers-extras/structure.js",
+"planned": ""
+},
+{
+"section": "prefs",
+"feature": "Guides, Grid & Slices preferences",
+"where": "Preferences > Guides, Grid & Slices (guide colour and style, grid colour, style, Gridline Every, Subdivisions)",
+"status": "Done",
+"pig": "0.4: guide colour and style, Smart Guides colour, grid colour, style, Gridline Every and Subdivisions; the slice settings wait for slices",
+"planned": "0.4 \u00b7 guides-snapping"
+},
+{
+"section": "prefs",
+"feature": "Overscroll",
+"where": "Preferences > Tools > Overscroll",
+"status": "Partial",
+"pig": "Panning past the document edge always works (clampPan keeps a 40 px sliver on screen) but there is no Overscroll preference to turn it off; the string does not occur in the source. The file-edit auditor's 'missing' for the preference and the view auditor's 'done' for the behaviour are both right in part.",
+"planned": "0.6 \u00b7 view-navigation"
+},
+{
+"section": "panels",
+"feature": "Navigator panel",
+"where": "Window > Navigator: proxy view, zoom slider, buttons, zoom field; Ctrl-drag to zoom to an area; Panel Options (view box colour)",
+"status": "Partial",
+"pig": "/home/user/claude/pigment/src/renderer/lib/panels/navigator.js has the thumbnail with draggable view box, slider, buttons, field, Fit / 100 % / Fill; no Ctrl-drag region zoom, no panel options",
+"planned": "0.6 \u00b7 view-navigation"
+},
+{
+"section": "scripting",
+"feature": "Third-party plug-in filters (8BF)",
+"where": "Filter menu plug-in entries; Plugins",
+"status": "Missing",
+"pig": "No plug-in host. Hosting Photoshop-SDK filter plug-ins needs a native module per platform and Adobe's SDK terms; Pigment's own script/plug-in interface is the realistic substitute",
+"planned": "0.9 \u00b7 plugin-api"
+},
+{
+"section": "slices",
+"feature": "Lock Slices, Clear Slices",
+"where": "View > Lock Slices, View > Clear Slices",
+"status": "Missing",
+"pig": "No slices (README)",
+"planned": "0.10 \u00b7 slices-web-export"
+},
+{
+"section": "workspace",
+"feature": "Screen Mode",
+"where": "View > Screen Mode (Standard, Full Screen Mode With Menu Bar, Full Screen Mode), F cycles",
+"status": "Partial",
+"pig": "Only the OS full-screen toggle (view:fullscreen, F11) and Show/Hide Panels (Tab). No three-mode cycle, no chrome-free black-surround mode, no F key",
+"planned": "0.7 \u00b7 screen-modes-extras"
+}
+]

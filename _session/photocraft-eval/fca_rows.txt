@@ -1,0 +1,224 @@
+1 formats | Zoomify export | Missing | No tiled web viewer export | 0.10 · slices-web-export
+2 formats | Import from scanner or camera (WIA, ImageKit, TWAIN) | Missing | No device acquisition; needs native OS bindings in the main process (WIA on Windows, Image | 0.9 · home-new-doc-browser
+3 formats | Cineon / DPX | Missing | No codec; 10-bit log formats that would map to 16-bit documents | 0.9 · formats-more-codecs
+4 formats | DICOM | Missing | No reader; a JS parser for uncompressed and JPEG-lossless transfer syntaxes with frame imp | 0.9 · formats-more-codecs
+5 formats | JPEG Stereo (JPS) and Multi-Picture Format (MPO) | Missing | Extensions not registered; both are JPEG containers, so opening the images as layers is a  | 0.9 · formats-more-codecs
+6 formats | Open PDF (Import PDF dialog: pages or images, crop box, resolution, mode, bit depth) | Missing | No PDF reader; pdf.js (Apache-2.0) can rasterise pages and extract images for an import di | 0.6 · pdf-import
+7 formats | BigTIFF | Missing | decodeTiff throws 'BigTIFF files are not supported'; the canvas size limit makes such docu | 0.11 · scratch-memory-limits
+8 formats | IFF (Amiga / Maya) | Missing | No reader or writer; small codec for the format registry | 0.9 · formats-more-codecs
+9 formats | JPEG 2000 (JPF, JP2, J2K) | Missing | Not decodable by Chromium, no codec; OpenJPEG compiled to WASM (BSD) is the route | 0.9 · formats-more-codecs
+10 formats | JPEG XL | Missing | No codec registered; libjxl compiled to WASM (BSD) is the route, it also carries 16/32-bit | 0.9 · formats-more-codecs
+11 formats | OpenEXR | Missing | No codec; needs half / float scanline and tile reading with ZIP / PIZ / RLE (DWA optional) | 0.10 · hdr-32bit
+12 formats | PCX | Missing | No codec | 0.9 · formats-more-codecs
+13 formats | Photoshop Raw (.raw) | Missing | No reader, writer or options dialog | 0.9 · formats-more-codecs
+14 formats | Pixar (.pxr) | Missing | No codec | 0.9 · formats-more-codecs
+15 formats | Portable Bit Map family (PBM, PGM, PPM, PNM, PFM, PAM) | Missing | No codec; trivial formats, PFM would feed 32-bit documents | 0.9 · formats-more-codecs
+16 formats | Radiance HDR (.hdr, RGBE) | Missing | No codec; small RLE RGBE reader / writer for 32-bit documents | 0.10 · hdr-32bit
+17 formats | Scitex CT | Missing | No codec; a CMYK format, so it also depends on real CMYK storage | 0.11 · cmyk-formats-separations
+18 formats | Camera RAW files (DNG, CR2 / CR3, NEF, ARW, RAF, ORF, RW2 ...) | Missing | No RAW decoder; the Camera Raw filter (lib/develop-ui.js) develops RGB layers only. LibRaw | 0.6 · raw-open-workflow
+19 formats | Place Illustrator / PDF / EPS as vector smart objects | Missing | sourceFromFile accepts only raster formats and .pigment / PSD. PDF and PDF-compatible .ai  | 0.6 · pdf-import
+20 formats | Photoshop DCS 1.0 / 2.0 | Missing | No writer; depends on real CMYK and spot separations which Pigment does not store | 0.11 · cmyk-formats-separations
+21 formats | Photoshop EPS (save, and open of Photoshop-written EPS) | Missing | No EPS reader or writer. Writing a raster EPS with TIFF preview is straightforward; readin | 0.9 · formats-more-codecs
+22 formats | WBMP and other legacy web formats | Missing | Not offered | 0.9 · formats-more-codecs
+23 formats | TIFF with layers | Missing | TIFF is flat only; Photoshop stores a PSD layer block in tag 37724, which could reuse the  | 0.6 · save-options-common-formats
+24 formats | TIFF image pyramid | Missing | Single resolution only | 0.6 · save-options-common-formats
+25 formats | Export As dialog | Partial | lib/file-ops.js exportAs: format (PNG, PNG-8, PNG 16-bit, JPEG, WebP, GIF, TIFF, Targa), q | 0.6 · export-as
+26 formats | Quick Export and Export preferences | Partial | Quick Export as PNG for the document and for selected layers; no preference for another fo | 0.6 · export-as
+27 formats | Save for Web (Legacy) | Partial | lib/modes/save-for-web.js: 2-up, GIF / PNG-8 / PNG-24 / JPEG / WebP, palette algorithms, c | 0.9 · save-for-web
+28 formats | ICO / CUR | Partial | ICO opens through Chromium (one image of the icon, no size picker); .cur is not registered | 0.6 · save-options-common-formats
+29 formats | JPEG open | Partial | lib/io.js decodeImage through createImageBitmap: EXIF orientation is applied, CMYK and pro | 0.6 · save-options-common-formats
+30 formats | TIFF open | Partial | src/shared/pixels/tiff.js: strips or tiles, 1-32 bit integer and float, grey / palette / R | 0.6 · save-options-common-formats
+31 formats | AVIF | Partial | Opens through Chromium; no writer (Chromium's canvas cannot encode AVIF). libavif in WASM  | 0.9 · formats-more-codecs
+32 formats | BMP | Partial | Opens through Chromium's decoder; no writer registered | 0.6 · save-options-common-formats
+33 formats | PSB (Large Document Format) | Partial | Opens through ag-psd; cannot be saved (WRITE_EXTENSIONS has psd only, ag-psd's psb option  | 0.6 · psd-document
+34 formats | PNG | Partial | 8-bit through Chromium, 16-bit and palette through src/shared/pixels/png.js (reads every c | 0.6 · save-options-common-formats
+35 formats | Save As options (As a Copy, Layers, Alpha Channels, Spot Colors, Notes, Embed Color Profile, Use Proof Setup) | Partial | Save As and Save a Copy exist with a format list (.pigment, .psd, PNG, JPEG, WebP, GIF, TI | 0.6 · save-options-common-formats
+36 formats | JPEG save options | Partial | canvas.toBlob with a quality slider and a background colour in Export As; no baseline / pr | 0.6 · save-options-common-formats
+37 formats | Photoshop PDF save (layers, presets, compression, security) | Partial | Only File > Print > Save as PDF (src/main/print.js printToPDF): the flattened image on a p | 0.7 · pdf-export
+38 formats | TIFF save options | Partial | Export As: depth 8 / 16 / 32-float and LZW / ZIP / PackBits / none. No JPEG compression, n | 0.6 · save-options-common-formats
+39 formats | WebP (lossy, lossless, metadata) | Partial | Opens and saves through Chromium with a quality slider (quality 100 gives lossless; no exp | 0.6 · save-options-common-formats
+40 formats | SVG open | Approximate | lib/io.js draws the SVG through an Image at its intrinsic size (1024 px when it has none): | 0.7 · vector-io
+41 formats | Adobe camera matching profiles and Adobe Standard colour for RAW | Not feasible | Adobe's per-camera profiles are proprietary data. Substitute: the colour matrices embedded | 
+42 formats | HEIF / HEIC | Not feasible | Not registered and not decodable by Chromium; HEVC is patent-encumbered, so a bundled deco | 
+43 formats | Generic EPS / PostScript rasterised on open | Not feasible | Needs a PostScript interpreter. The only complete open one is Ghostscript (AGPL), which ca | 
+44 formats | GIF (still) | Done | src/shared/pixels/gif.js + lib/modes/formats.js: opens as Indexed Color with its colour ta | 
+45 formats | Targa | Done | src/shared/pixels/tga.js: reads colour-mapped, true-colour and grey at 8/15/16/24/32 bpp,  | 
+46 formats | Open as Smart Object / Place Embedded | Done | file:open-smart and file:place (lib/smart-object.js, edit-ops.js) for every format Pigment | 
+47 formats | Native layered document with full fidelity (.pigment) | Done | lib/io.js writePigment/readPigment: ZIP with document.json, PNG per layer and mask, raw u1 | 
+48 psd | PSD: notes (annotations) | Missing | No Notes tool or panel; annotations ignored | 0.9 · notes-count-measurement
+49 psd | PSD: artboards | Missing | No artboards; artboard groups open as plain groups | 0.9 · artboards-frames
+50 psd | PSD: spot channels | Missing | Spot channels exist only as flagged saved channels of a Multichannel document and are stor | 0.6 · psd-document
+51 psd | PSD: alpha channels | Missing | doc.channels (saved selections) are not written and extra channels are not read; ag-psd do | 0.6 · psd-document
+52 psd | PSD: CMYK, Lab, Duotone and Multichannel documents | Missing | ag-psd supportedColorModes are bitmap, grayscale, indexed and RGB: opening a CMYK / Lab /  | 0.11 · cmyk-formats-separations
+53 psd | PSD: 32 bits/channel | Missing | Not kept on read, never written (8-bit only) | 0.6 · psd-document
+54 psd | PSD: guides and grid settings | Missing | doc.guides are saved in .pigment only; ag-psd's gridAndGuidesInformation is not read or wr | 0.6 · psd-document
+55 psd | PSD: embedded ICC profile | Missing | Not read (pixels taken as sRGB without conversion) and not embedded | 0.5 · icc-engine
+56 psd | PSD: slices | Missing | No slices feature and no resource handling | 0.10 · slices-web-export
+57 psd | PSD: layer comps | Missing | No layer comps feature; resource ignored | 0.8 · layer-comps
+58 psd | PSD: saved paths, work path, clipping path | Missing | doc.paths and doc.workPath live in .pigment only; the PSD reader and writer ignore path re | 0.6 · psd-document
+59 psd | PSD: layer colour labels and linked layers | Missing | Saved in .pigment only (README); ag-psd exposes layerColor and linkGroup, they are simply  | 0.5 · psd-layers
+60 psd | PSD: layer styles (effects) stay editable | Missing | pl.effects is never read and writePsdDocument writes no effects and does not bake them int | 0.5 · psd-layers
+61 psd | PSD: smart filters stay editable | Missing | Smart filters are baked into the rasterised pixels on save and never read; would need a ma | 0.6 · smart-filters-depth
+62 psd | PSD: vector masks | Missing | readPsdDocument skips masks with fromVectorData and ignores pl.vectorMask, so a vector-mas | 0.5 · psd-layers
+63 psd | PSD: text layers stay editable | Partial | textLayerFromPsd / textToPsd keep one style per layer: text, font family by name, size, co | 0.5 · psd-text
+64 psd | PSD: adjustment layers stay editable | Partial | lib/io.js adjustmentToPsd / adjustmentFromPsd cover 15 kinds (brightness/contrast, levels, | 0.5 · psd-layers
+65 psd | PSD: Grayscale, Indexed and Bitmap documents | Partial | Open as RGB documents (doc.mode is not set from the file, the colour table is not kept); s | 0.6 · psd-document
+66 psd | PSD: 16 bits/channel | Partial | Opens but ag-psd is used without useImageData, so layers arrive as 8-bit canvases; saving  | 0.6 · psd-document
+67 psd | PSD: layer masks (raster) | Partial | Mask pixels and the disabled flag round-trip; the link flag is not read or written (always | 0.5 · psd-layers
+68 psd | PSD: smart objects stay editable (embedded and linked) | Partial | readPsd runs with skipLinkedFilesData: true and the layer is taken as flat pixels; on save | 0.7 · linked-smart-objects
+69 psd | PSD: shape layers stay editable | Partial | Rasterised both ways: reader takes the pixel canvas, writer uses layer.render(); paths, fi | 0.5 · psd-layers
+70 psd | PSD: fill layers (solid, gradient, pattern) stay editable | Partial | Appearance only: read as the rasterised layer canvas (vectorFill ignored), written through | 0.5 · psd-layers
+71 psd | PSD: pixel layers, groups, opacity, fill opacity, visibility, locks, 27 blend modes, pass-through | Done | lib/io.js readPsdDocument / writePsdDocument through ag-psd 31; group open state kept; unk | 
+72 psd | PSD: clipping masks | Done | lib/io.js maps clipping both ways | 
+73 psd | PSD: resolution and File Info (XMP) | Done | resolutionInfo read and written; lib/file-info.js injectPsdXmp adds the XMP packet after s | 
+74 psd | PSD: merged composite and thumbnail (Maximize Compatibility) | Done | writePsdUint8Array is always given the flattened canvas and generateThumbnail: true; there | 
+75 color-management | Color Libraries: other books (TOYO, DIC, HKS, ANPA, FOCOLTONE, TRUMATCH) and .acb loading | Missing | No Color Libraries dialog and no .acb / .ase reader. The other books are also vendor-owned | 0.5 · color-picker-swatches
+76 color-management | Color Settings presets (.csf) load / save and Creative Cloud synchronisation | Missing | No settings files; reading Adobe .csf is undocumented, Pigment's own JSON preset would be  | 0.6 · color-settings
+77 color-management | Color Settings: Custom CMYK, dot gain and gray gamma | Missing | No ink / dot-gain / GCR-UCR separation setup | 0.11 · cmyk-formats-separations
+78 color-management | Assign Profile | Missing | No command; trivial once documents carry a profile and the view converts through it | 0.5 · icc-engine
+79 color-management | Color Settings: working spaces (RGB, CMYK, Gray, Spot) | Missing | No Color Settings dialog or command. Requires a colour engine; LittleCMS 2 compiled to WAS | 0.6 · color-settings
+80 color-management | Color Settings: advanced controls (desaturate monitor colours, blend RGB colours using gamma, blend text colours using gamma) | Missing | Blending is always in the document's encoded values; no gamma-1.0 blending option | 0.6 · color-settings
+81 color-management | Color Settings: colour management policies and mismatch / missing-profile dialogs | Missing | No policies, no warnings on open or paste | 0.6 · color-settings
+82 color-management | Color Settings: conversion options (engine, intent, black point compensation, dither, scene-referred compensation) | Missing | No profile conversions exist; with lcms2 the four rendering intents, BPC and 8-bit dither  | 0.6 · color-settings
+83 color-management | Convert to Profile (basic and advanced: device link, abstract, multichannel) | Missing | No command; Image > Mode changes are formula conversions without profiles | 0.6 · color-settings
+84 color-management | HDR display output | Missing | Canvas output is SDR sRGB; Chromium's HDR canvas support is still limited, so this depends | 0.10 · hdr-32bit
+85 color-management | ICC profile embedding on save | Missing | No format writer embeds a profile (JPEG APP2, PNG iCCP, TIFF 34675, PSD 1039, WebP ICCP);  | 0.5 · icc-engine
+86 color-management | Document colour profile (shown in the status bar / Info panel) | Missing | Document has no profile field; everything is implicitly sRGB (README: 'no profiles are rea | 0.5 · icc-engine
+87 color-management | 32-bit preview options, exposure slider and HDR colour picker | Missing | The proxy clamps at white; no viewing exposure, no highlight-compression preview, no HDR c | 0.10 · hdr-32bit
+88 color-management | Colour-blind proofing (protanopia, deuteranopia) | Missing | No simulation; the published dichromacy matrices make this a small post-process on the exi | 0.6 · soft-proofing
+89 color-management | Proof Setup with real profiles (device to simulate, preserve numbers, intent, BPC, simulate paper colour and black ink) | Missing | No Proof Setup menu or dialog; soft proofing through an ICC profile needs the colour engin | 0.6 · soft-proofing
+90 color-management | Proof Setup presets: Working CMYK, individual plates, Legacy Macintosh RGB, Internet Standard RGB, Monitor RGB | Missing | Only the single 'Proof Colors (CMYK)' toggle | 0.6 · soft-proofing
+91 color-management | Spot channels (New Spot Channel, ink colour, solidity, merge spot channel) | Partial | Spot channels appear only when a document is converted to Multichannel (lib/modes.js); the | 0.6 · channels-depth
+92 color-management | Export Color Lookup Tables | Partial | file:export-luts writes .cube and .3dl; no .csp and no ICC abstract / device-link output | 0.6 · color-settings
+93 color-management | 16 bits/channel pipeline | Partial | lib/depth.js: 15 tonal adjustments, crop, canvas size, flips, 90-degree turns and Flatten  | 0.9 · deep-pipeline
+94 color-management | CMYK and Lab numbers in the Color Picker and Info panel | Approximate | Present, computed with fixed formulas (pixels/color.js rgbToCmyk, rgbToLab) rather than th | 0.6 · color-settings
+95 color-management | Merge to HDR Pro (32-bit radiance map, response curve, ghost removal, tone-mapping modes, presets) | Approximate | file:automate-merge-hdr (lib/adjust-more-ui.js, pixels/hdr.js): exposure fusion (Mertens-s | 0.10 · hdr-32bit
+96 color-management | ICC profile read on open | Approximate | No profile is ever kept. JPEG / PNG / WebP / AVIF go through createImageBitmap with colorS | 0.5 · icc-engine
+97 color-management | 32-bit HDR editing in linear light | Approximate | 32-bit is display-referred float in the sRGB encoding (lib/depth.js, deep.js): values abov | 0.10 · hdr-32bit
+98 color-management | Real CMYK pixel storage and separations | Approximate | CMYK is a view of RGBA: channelPlanes() derives C / M / Y / K with a formula for the Chann | 0.10 · cmyk-lab-storage
+99 color-management | Grayscale pixel storage with gray gamma / dot gain | Approximate | RGBA layers constrained and displayed as grey (Rec. 601 luma or linear-light option); no g | 0.10 · cmyk-lab-storage
+100 color-management | Real Lab pixel storage | Approximate | View of RGBA (D50 Lab derived from sRGB for channels and readouts); colours outside sRGB c | 0.10 · cmyk-lab-storage
+101 color-management | Display profile handling | Approximate | The canvas is sRGB and Chromium converts it to the monitor profile, so sRGB documents disp | 0.5 · icc-engine
+102 color-management | 'Convert to sRGB' on export | Approximate | The checkbox exists in Save for Web and Image Processor and is labelled as doing nothing b | 0.5 · icc-engine
+103 color-management | Gamut Warning | Approximate | view:gamut greys pixels that the built-in ink model cannot reach (isOutOfCmykGamut), not t | 0.6 · soft-proofing
+104 color-management | Proof Colors | Approximate | view:proof (lib/color-modes.js, pixels/color.js applyProof): one fixed CMYK simulation bui | 0.6 · soft-proofing
+105 color-management | Color Libraries: PANTONE books | Not feasible | Pantone data is licensed (Adobe itself now requires Pantone Connect). Substitute: load use | 
+106 color-management | Adobe (ACE) colour engine | Not feasible | ACE is Adobe's proprietary CMM. Substitute: LittleCMS 2, whose results differ from ACE by  | 
+107 color-management | Adobe's bundled ICC profiles (Adobe RGB (1998), ProPhoto RGB, U.S. Web Coated (SWOP) v2, Coated FOGRA39, GRACoL, Japan Color) | Not feasible | Adobe's profile files are under Adobe's licence and cannot ship in an MIT app. Substitute: | 
+108 metadata | Content Credentials: read and display existing credentials | Missing | No C2PA manifest reading; feasible offline with the open-source c2pa library (WASM) | 0.8 · file-info-dialog
+109 metadata | Metadata options on export | Missing | No metadata choice; exports carry none | 0.6 · export-as
+110 metadata | File Info: Audio Data, Video Data, DICOM, Photoshop (history) and AEM tabs | Missing | None of these tabs exist | 0.8 · file-info-dialog
+111 metadata | File Info: Raw Data view and metadata templates (import / export) | Missing | No raw XMP view, no XMP template files | 0.8 · file-info-dialog
+112 metadata | GPS data | Missing | The EXIF reader skips the GPS IFD (tag 0x8825); no tab | 0.8 · file-info-dialog
+113 metadata | IPTC (IIM) reading and writing | Missing | No IIM parser or writer | 0.6 · metadata-io
+114 metadata | Metadata preservation through open and save (EXIF, XMP, IPTC, MakerNotes, ICC) | Missing | Saving re-encodes pixels through canvas.toBlob or Pigment's encoders; the original EXIF bl | 0.6 · metadata-io
+115 metadata | History Log | Missing | History entries are not logged to a file or to XMP | 0.8 · file-info-dialog
+116 metadata | XMP reading | Partial | lib/file-info.js findXmp + parseXmp (regex) read 10 fields (title, creator, description, r | 0.6 · metadata-io
+117 metadata | File Info: Basic tab | Partial | lib/file-ops.js properties(): title, author, description, keywords, rating, copyright stat | 0.8 · file-info-dialog
+118 metadata | File Info: Origin, IPTC and IPTC Extension tabs | Partial | Only Credit and Source. Missing: date created, city, state, country, headline, instruction | 0.8 · file-info-dialog
+119 metadata | EXIF orientation | Partial | JPEG and WebP are rotated by Chromium's decoder; the TIFF orientation tag is ignored by ti | 0.6 · metadata-io
+120 metadata | EXIF reading (Camera Data) | Partial | readExif parses 17 tags (make, model, lens, exposure, f-number, ISO, bias, focal length, f | 0.6 · metadata-io
+121 metadata | Resolution metadata per format | Partial | Read and written for TIFF, PSD, .pigment, 16-bit PNG and PNG-8; not read from JPEG / WebP  | 0.6 · metadata-io
+122 metadata | Thumbnails and previews | Partial | PSD thumbnail resource and a thumbnail.png inside .pigment are written; no EXIF thumbnail  | 0.6 · metadata-io
+123 metadata | XMP writing | Partial | Written only into PSD after saving (injectPsdXmp) and into JPEGs produced by Image Process | 0.6 · metadata-io
+124 metadata | Content Credentials: attach signed credentials on export | Not feasible | Adobe signs manifests with its own certificate through its cloud, and trusted status needs | 
+125 automation | Actions: Insert Path and Allow Tool Recording | Missing | Brush strokes, Move tool drags, the warp tools and Fade are not recorded (README); there i | 0.8 · actions-recording
+126 automation | Actions file format .atn (load / save) | Missing | Actions save and load as JSON .pigment-actions; an .atn file is recognised only to explain | 0.8 · actions-atn
+127 automation | Create Droplet | Missing | No droplets and no command-line entry to run an action on files. Honest equivalent: a 'pig | 0.8 · automate-finish
+128 automation | Lens Correction (batch) | Missing | No batch command; the single-image filter has no lens profile database either | 0.9 · lens-correction-profiles
+129 automation | PDF Presentation | Missing | No multi-page PDF or slideshow output | 0.7 · pdf-export
+130 automation | Layer Comps to Files / PDF, Artboards to Files / PDF | Missing | Neither layer comps nor artboards exist, so no export of them | 0.9 · artboards-frames
+131 automation | Generator and image assets | Missing | No name-driven automatic asset export; could reuse layers-extras/export.js on doc:change | 0.10 · slices-web-export
+132 automation | Script Events Manager | Missing | No event-to-action binding. The app already emits doc:opened, doc:saved, command:done etc. | 0.8 · scripting-api
+133 automation | Variables and data sets | Missing | No variables (visibility, pixel replacement, text replacement), no CSV / text data-set imp | 0.9 · variables-data-sets
+134 automation | Copy CSS / Copy SVG from layers | Missing | No CSS or SVG generation from shape / text layer properties | 0.10 · slices-web-export
+135 automation | Actions: default and bundled action sets | Partial | One 'Default Actions' set of ten actions (lib/actions/defaults.js); the other eight Adobe  | 0.8 · actions-atn
+136 automation | Batch | Partial | lib/automate/batch.js: set / action, source folder (with subfolders) or opened files, Over | 0.8 · automate-finish
+137 automation | Contact Sheet II | Partial | lib/automate/contact-sheet.js: source folder / open documents, units, size, resolution, RG | 0.8 · automate-finish
+138 automation | Photomerge | Approximate | lib/align-blend.js + pixels/register.js: own FAST / ORB / RANSAC registration with all six | 
+139 automation | Actions: Insert Stop, Insert Menu Item, Insert Conditional | Done | actions:insert-stop (message, allow continue), actions:insert-menu-item, actions:insert-co | 
+140 automation | Conditional Mode Change, Fit Image, Crop and Straighten Photos | Done | file:automate-conditional-mode (lib/modes), file:automate-fit-image (with 'don't enlarge') | 
+141 automation | Export Layers to Files | Done | file:export-layers (lib/file-ops.js): format, visible only, trim, prefix; top-level layers | 
+142 automation | Scripts: Delete All Empty Layers, Flatten All Layer Effects, Flatten All Masks | Done | lib/automate.js commands file:script-delete-empty-layers, -flatten-effects, -flatten-masks | 
+143 automation | Image Processor | Done | lib/automate/batch.js imageProcessorCommand: open images or folder with subfolders, same l | 
+144 automation | Load Files into Stack and Statistics | Done | lib/align-blend.js with auto-align and smart-object options; eleven stack modes in pixels/ | 
+145 automation | Actions panel: record, play, sets, step toggles, dialog toggles, Button Mode, function keys, playback options | Done | lib/actions.js + lib/panels/actions.js: sets / actions / steps, include and dialog toggles | 
+146 ai | Contextual Task Bar generative entry points | Missing | AI commands live in the AI menu and the Assistant panel only | 0.10 · generative-features
+147 ai | Reference Image (and style reference) for generation | Missing | providers.editImage sends one image plus mask; no extra reference image input in any dialo | 0.10 · generative-features
+148 ai | Generative Upscale | Missing | Only classical resampling in Image Size (bicubic, Lanczos). Substitute: an open-source sup | 0.10 · neural-filters-local
+149 ai | Harmonize (match a pasted object's colour, light and shadow to the scene) | Missing | No command. Local Match Color exists (statistics only); a provider edit prompt constrained | 0.10 · neural-filters-local
+150 ai | Generative layer (non-destructive, variations kept in Properties, regenerate, prompt stored) | Missing | Each variation is an ordinary raster layer; the prompt, mask and alternatives are not kept | 0.10 · generative-features
+151 ai | Select People and Object Finder (hover to select detected objects, people parts) | Missing | Object Selection needs a dragged region and uses grab-cut style refinement; no automatic o | 0.9 · local-models-segmentation
+152 ai | Generate Similar | Missing | No command; both providers accept an input image for variations, so it can ride on editIma | 0.10 · generative-features
+153 ai | Enhance Detail on a generated variation | Missing | No refinement pass; could re-run the fill region at higher resolution in tiles | 0.10 · generative-features
+154 ai | Distraction removal (Find Distractions: wires and cables, people) | Missing | No detection of wires or bystanders. Needs a segmentation model (downloadable open-source  | 0.9 · local-models-segmentation
+155 ai | Remove tool (brush over an object; generative AI on / off / auto) | Missing | No Remove tool. Nearby: the Spot Healing Brush in content-aware mode and Edit > Content-Aw | 0.8 · retouch-healing
+156 ai | Generative Workspace (batch generation, prompt variables, generation history) | Missing | No batch generation or gallery of past generations; prompts are remembered per dialog only | 0.10 · generative-features
+157 ai | Generate Image | Partial | ai:generate-image: prompt, new layer or new document, size, transparent background (gpt-im | 0.10 · generative-features
+158 ai | Generate Background | Approximate | ai:replace-background: subject mask from the provider, inverse filled from the prompt as a | 
+159 ai | Generative Expand | Approximate | ai:generative-expand: a dialog with new canvas size and anchor (or the transparent border  | 0.10 · generative-features
+160 ai | Generative Fill | Approximate | ai:generative-fill (lib/ai/features.js): selection as mask, prompt, provider / model choic | 0.10 · generative-features
+161 ai | Sky Replacement dialog | Approximate | ai:replace-sky generates a sky from a text prompt through the selection or a heuristic bri | 0.10 · neural-filters-local
+162 ai | Model choice and partner models | Approximate | Provider and model selects in every AI dialog, listing whatever the user's OpenAI or Gemin | 0.10 · generative-features
+163 ai | Remove Background | Approximate | lib/ai/features.js removeBackground() requires a connected OpenAI or Gemini image model an | 0.9 · local-models-segmentation
+164 ai | Select Subject (device and cloud modes) | Approximate | select:subject is a colour / saliency heuristic (pixels/segment.js, README says so) and mi | 0.9 · local-models-segmentation
+165 ai | Adobe Firefly models and generative credits | Not feasible | Firefly is Adobe's hosted model. Pigment's substitute is in place: the user's own OpenAI a | 
+166 ai | Content Credentials on AI-generated content | Not feasible | Depends on Adobe-signed C2PA manifests (see Content Credentials). Honest substitute: write | 
+167 ai | Camera Raw AI features (Denoise, Super Resolution, Raw Details, AI masks, Generative Remove, Lens Blur, reflection removal) | Not feasible | Adobe models inside Camera Raw. Pigment's Camera Raw filter has classical noise reduction  | 
+168 ai | Neural Filters: colour (Harmonization, Color Transfer, Colorize) | Not feasible | Adobe models. Local partial substitutes exist (Match Color for colour transfer); Colorize  | 
+169 ai | Neural Filters: creative (Landscape Mixer, Style Transfer) | Not feasible | Adobe models and preset style images. Substitute: provider image-edit prompts with a refer | 
+170 ai | Neural Filters: photography and restoration (Super Zoom, Depth Blur, JPEG Artifacts Removal, Photo Restoration) | Not feasible | Adobe models. Substitutes: Lens Blur accepts a user depth map today (an open monocular-dep | 
+171 ai | Neural Filters: portrait (Skin Smoothing, Smart Portrait, Makeup Transfer) | Not feasible | Adobe's trained models (some cloud-run). No Neural Filters dialog exists. Substitute: prov | 
+172 ai | Describe Image (alt text into File Info) | Done | ai:describe: description from the chat model, copy or store as the document description | 
+173 ai | AI assistant (chat that edits the document) | Done | lib/ai/assistant.js + panels/assistant.js: 14 tools (adjustments, filters, run_command, la | 
+174 timeline | APNG export | Missing | png.js has no acTL / fcTL / fdAT support; small addition once frames exist | 0.10 · animation-io
+175 timeline | Render Video (H.264 / QuickTime / DPX / image sequence, size, frame rate, range, alpha) | Missing | No renderer. WebCodecs + an MP4 / WebM muxer can encode H.264 where the OS provides the en | 0.11 · render-video
+176 timeline | Video Frames to Layers | Missing | No import; feasible on its own with an HTMLVideoElement seek loop into raster layers (rang | 0.10 · animation-io
+177 timeline | Animated GIF open and export | Missing | GIF opens with firstFrameOnly: true and is written as one frame (README). Codec is ready;  | 0.10 · animation-io
+178 timeline | Video files (MP4, MOV, AVI, MPEG) open | Missing | No video reader; see Timeline entries | 0.10 · video-timeline-core
+179 timeline | Animated WebP | Missing | First frame only on open, single frame on save; no timeline to carry frames | 0.10 · animation-io
+180 timeline | Image sequence open | Missing | No sequence import and no frames to hold it | 0.10 · animation-io
+181 timeline | Video layers (New Video Layer from File, blank video layer, interpret / replace footage, frame-by-frame painting, rasterise) | Missing | No video layer type; decoding would use WebCodecs or an HTMLVideoElement in Electron (H.26 | 0.10 · video-timeline-core
+182 timeline | Keyframe animation (position, opacity, style, transform, text warp, masks), transitions, audio tracks, comments | Missing | Nothing | 0.11 · video-keyframes-effects
+183 timeline | Pixel aspect ratio and film / video document presets with safe-area guides | Missing | Square pixels only; no video presets or action / title safe guides | 0.11 · render-video
+184 timeline | Frame animation (frames, delays, loop count, tween, Make Frames From Layers, Flatten Frames Into Layers, disposal, unify, propagate frame 1) | Missing | No frames. pixels/gif.js already encodes and decodes multiple frames with delays, loop and | 0.9 · frame-animation
+185 timeline | Timeline panel: video timeline (tracks, clips, trim, split, playhead, work area, frame rate) | Missing | No Timeline panel, no time dimension in the document model (README: 'Timeline, animation a | 0.10 · video-timeline-core
+186 timeline | Video filters (De-Interlace, NTSC Colors) | Done | filter:de-interlace and filter:ntsc-colors in the Filter menu | 
+187 print | Print: Separations | Missing | No plate output; needs real CMYK / spot channels | 0.11 · cmyk-formats-separations
+188 print | Print: colour management (Color Handling, printer profile, rendering intent, black point compensation, Send 16-bit Data) | Missing | The flattened sRGB PNG is handed to Chromium's print pipeline; no 'Photoshop Manages Color | 0.8 · print
+189 print | Print: hard proofing and preview toggles (Match Print Colors, Gamut Warning, Show Paper White) | Missing | No proof printing, no colour-accurate preview | 0.8 · print
+190 print | Print: functions (emulsion down, negative, background, border, bleed) | Missing | None of these options | 0.8 · print
+191 print | Print: PostScript options (calibration bars, interpolation, include vector data) | Missing | Text and shapes are printed as pixels at document resolution (the page is one PNG); no vec | 0.8 · print
+192 print | Print Settings (the printer driver's own dialog) | Missing | Prints through Electron webContents.print with silent: false, which shows the system dialo | 0.8 · print
+193 print | Print: printing marks (corner and centre crop marks, registration marks, description, labels) | Missing | The print page holds only the image | 0.8 · print
+194 print | Print One Copy | Missing | No command or shortcut; print.js already accepts silent: true, so it is a small command us | 0.8 · print
+195 print | Print: position and size (centre, top / left, scale, scale to fit media, height / width, print resolution, units, Print Selected Area, drag in preview) | Partial | Centre or left / top offset in mm, Fit to page / 100% / custom %. Missing: height and widt | 0.8 · print
+196 print | Print to PDF | Done | 'Save as PDF...' button in the print dialog (printToPDF) with the same page geometry | 
+197 print | Print dialog: printer, copies, layout orientation, paper size | Done | lib/print.js + src/main/print.js: printer list, copies, six paper sizes plus custom, orien | 
+198 scripting | Remote Connections | Missing | Not present; Adobe has retired it, so low priority. A local scripting socket would be the  | 0.8 · scripting-api
+199 scripting | Scripting API (JavaScript) | Missing | Nothing documented or exposed to users. The honest equivalent is Pigment's own JavaScript  | 0.8 · scripting-api
+200 scripting | Scripts: Browse (run a script file) | Missing | No way to run a user script | 0.8 · scripting-api
+201 scripting | Pigment plug-in API (the substitute for 8bf / UXP) | Missing | No loader. The internal registries are already plug-in shaped (FILTERS / ADJUSTMENTS defin | 0.9 · plugin-api
+202 scripting | Record actions as script (ScriptListener equivalent) | Missing | Recorded steps are {command, arg} JSON; exporting an action as a runnable script is trivia | 0.8 · scripting-api
+203 scripting | ExtendScript / UXP / Action Manager (batchPlay) compatibility | Not feasible | Photoshop's DOM, descriptor event IDs and both runtimes are Adobe's; existing .jsx / .psjs | 
+204 scripting | Filter plug-ins (.8bf) and other Photoshop SDK plug-ins (file format 8bi, automation 8li, export, acquire) | Not feasible | These are native binaries written against Adobe's SDK and host callbacks; an Electron rend | 
+205 scripting | Plug-in panels and marketplace (UXP plug-ins, legacy CEP extensions, Plugins panel, Browse Plugins) | Not feasible | UXP / CEP and the Creative Cloud marketplace are Adobe platforms. Substitute: Pigment plug | 
+206 vector | SVG export of shapes and text | Missing | No SVG writer for shape, text or path data | 0.7 · vector-io
+207 vector | Paths to Illustrator | Missing | No path export (an .ai / SVG writer for doc.paths) | 0.7 · vector-io
+208 vector | SVG import as editable shapes and text | Missing | No SVG-to-shape conversion; tools/vector.js parseSvgPath handles only absolute M / L / C / | 0.7 · vector-io
+209 3d | 3D-adjacent 2D features still in Photoshop (Vanishing Point planes, 3D LUT files) | Partial | 3D LUT files (.cube, .3dl, .look, .csp) load in Color Lookup; Vanishing Point is missing ( | 0.10 · vanishing-point
+210 3d | 3D menu, 3D panel, 3D layers, extrusions, materials, lights, ray-trace render, 3D printing | Not feasible | Nothing, and not planned: Adobe has discontinued Photoshop's 3D and moved it to the Substa | 
+211 3d | Substance 3D materials and Substance 3D Viewer round trip | Not feasible | Proprietary Adobe engine and app hand-off. Substitute: procedural textures already in pixe | 
+212 3d | Substance materials (.sbsar) and 3D model formats (OBJ, glTF, USD, STL, DAE, KMZ, U3D) | Not feasible | No 3D engine. Adobe has removed Photoshop's own 3D and Substance is a proprietary engine.  | 
+213 layers | Place Linked, relink, update modified content, Package | Missing | Smart objects are always embedded; no linked sources, no missing-link handling, no Package | 0.7 · linked-smart-objects
+214 prefs | Auto-recovery and background save | Missing | No recovery files or timed saves anywhere in src/main or lib/documents.js; a crash loses u | 0.6 · file-handling-autosave
+215 cloud | Adobe Bridge integration (Browse in Bridge, Mini Bridge, batch from Bridge) | Not feasible | Separate Adobe application. Substitute: the system file manager (Reveal in Finder / Explor | 
+216 cloud | Creative Cloud documents (.psdc), offline sync, Manage Cloud Documents | Not feasible | Adobe's storage service and format. Substitute: local files; the user can keep .pigment fi | 
+217 cloud | Adobe Stock (search, license, licensed previews) | Not feasible | Commercial Adobe service. Substitute: none bundled; File > Place for images the user obtai | 
+218 cloud | Share for Review, Invite to Edit, live co-editing, Comments panel | Not feasible | Need Adobe's servers and accounts. Substitute: export a flattened copy; local notes / anno | 
+219 cloud | Version History | Not feasible | Tied to cloud documents. Offline substitute that could be built: numbered local snapshots  | 
+220 cloud | Lightroom integration (Edit in Photoshop round trip, Lightroom photos on the Home screen) | Not feasible | Adobe ecosystem. Pigment can be chosen as an external editor in Lightroom Classic or any o | 
+221 cloud | Preset and settings sync, Home screen learn content, in-app Discover search | Not feasible | Adobe account services. Local equivalents exist in part: settings-store.js keeps settings, | 
+222 cloud | Adobe Fonts (activation, missing-font resolution) | Not feasible | Licensed font service. Substitute: system-installed fonts (used today) plus loading user f | 
+223 cloud | Creative Cloud Libraries | Not feasible | Adobe service. Substitute: a local Libraries panel backed by a folder of assets (colours,  | 
+224 filters | Adobe lens profiles (LCP database) | Not feasible | Adobe's profile database is proprietary. Substitute: the open Lensfun database (LGPL data, | 

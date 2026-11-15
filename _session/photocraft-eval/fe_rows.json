@@ -1,0 +1,1618 @@
+[
+{
+"section": "prefs",
+"feature": "Export Preferences",
+"where": "File > Export > Export Preferences (Preferences > Export)",
+"status": "Missing",
+"inp": "No Quick Export format, destination (ask / next to document), metadata or colour-space preferences.",
+"planned": "0.6 \u00b7 export-as"
+},
+{
+"section": "prefs",
+"feature": "Camera Raw preferences (defaults, sidecar XMP, cache, DNG and JPEG/TIFF handling, performance)",
+"where": "Preferences > Camera Raw",
+"status": "Missing",
+"inp": "The Camera Raw filter (/home/user/claude/pigment/src/renderer/lib/develop-ui.js) has no preferences, raw defaults or presets storage.",
+"planned": "0.5 \u00b7 camera-raw-workspace"
+},
+{
+"section": "prefs",
+"feature": "Cursors: Other Cursors (Standard / Precise), Brush Preview colour, brush leash colour",
+"where": "Preferences > Cursors",
+"status": "Missing",
+"inp": "No options for non-painting cursors or preview colours.",
+"planned": "0.5 \u00b7 brush-painting-behaviours"
+},
+{
+"section": "prefs",
+"feature": "Enhanced Controls (Microsoft Dial, Touch Bar)",
+"where": "Preferences > Enhanced Controls",
+"status": "Missing",
+"inp": "No hardware control support.",
+"planned": "0.10 \u00b7 accessibility-i18n-input"
+},
+{
+"section": "prefs",
+"feature": "File Handling: File Compatibility (Camera Raw preferences, prefer Camera Raw for raw files, Ignore EXIF profile tag, Ignore Rotation Metadata, Ask Before Saving Layered TIFF, Disable PSD compression, Maximize PSD and PSB Compatibility)",
+"where": "Preferences > File Handling: File Compatibility",
+"status": "Missing",
+"inp": "No such options; EXIF orientation is always applied by the browser decoder and PSDs always carry a composite.",
+"planned": "0.8 \u00b7 preferences-dialog"
+},
+{
+"section": "prefs",
+"feature": "File Handling: Image Previews, File Extension case, Save As to Original Folder, Enable legacy Save As, do not append 'copy'",
+"where": "Preferences > File Handling: File Saving Options",
+"status": "Missing",
+"inp": "No such options; .pigment always stores a thumbnail and Save a Copy always appends ' copy'.",
+"planned": "0.8 \u00b7 preferences-dialog"
+},
+{
+"section": "prefs",
+"feature": "General: Color Picker (Adobe or system) and HUD Color Picker",
+"where": "Preferences > General",
+"status": "Missing",
+"inp": "Only Pigment's own picker; no system picker choice and no HUD picker.",
+"planned": "0.5 \u00b7 color-picker-swatches"
+},
+{
+"section": "prefs",
+"feature": "General: Export Clipboard",
+"where": "Preferences > General: Export Clipboard",
+"status": "Missing",
+"inp": "Copies always go to the system clipboard as PNG; there is no switch to keep large copies internal.",
+"planned": "0.8 \u00b7 preferences-dialog"
+},
+{
+"section": "prefs",
+"feature": "General: Auto show the Home Screen, Use Legacy New Document Interface, Beep When Done",
+"where": "Preferences > General: Options",
+"status": "Missing",
+"inp": "The welcome screen always shows with no document; no completion sound; one New Document dialog.",
+"planned": "0.8 \u00b7 preferences-dialog"
+},
+{
+"section": "prefs",
+"feature": "Guides, Grid & Slices: guide colours and styles (canvas, artboard, smart guides)",
+"where": "Preferences > Guides, Grid & Slices: Guides",
+"status": "Done",
+"inp": "0.4: guide colour and style (Lines, Dashed Lines) and the Smart Guides colour in Preferences \u203a Guides, Grid & Slices; every guide also has its own colour. Artboard guides wait for artboards (0.9)",
+"planned": "0.4 \u00b7 guides-snapping"
+},
+{
+"section": "prefs",
+"feature": "Guides, Grid & Slices: Slices (line colour, show slice numbers) and Path options",
+"where": "Preferences > Guides, Grid & Slices: Slices, Paths",
+"status": "Missing",
+"inp": "No slices; path outline colour and thickness are fixed.",
+"planned": "0.10 \u00b7 slices-web-export"
+},
+{
+"section": "prefs",
+"feature": "History Log (save to metadata, text file or both; Sessions Only, Concise, Detailed)",
+"where": "Preferences > History Log",
+"status": "Missing",
+"inp": "No edit log is written anywhere.",
+"planned": "0.8 \u00b7 file-info-dialog"
+},
+{
+"section": "prefs",
+"feature": "Interface: canvas colour and border per screen mode (Standard, Full Screen with Menus, Full Screen, Artboards)",
+"where": "Preferences > Interface: Appearance",
+"status": "Missing",
+"inp": "settings.canvasBackground is defined in /home/user/claude/pigment/src/shared/defaults.js but has no UI and no reader; there are no screen modes beyond the OS full screen.",
+"planned": "0.7 \u00b7 screen-modes-extras"
+},
+{
+"section": "prefs",
+"feature": "Interface: Show Channels in Color, Dynamic Color Sliders, Show Menu Colors",
+"where": "Preferences > Interface: Options",
+"status": "Missing",
+"inp": "No such options.",
+"planned": "0.8 \u00b7 preferences-dialog"
+},
+{
+"section": "prefs",
+"feature": "Interface: UI Language, UI Font Size, UI Scaling",
+"where": "Preferences > Interface: Presentation",
+"status": "Missing",
+"inp": "English only with no string catalogue; no font size or scaling control (OS zoom only).",
+"planned": "0.10 \u00b7 accessibility-i18n-input"
+},
+{
+"section": "prefs",
+"feature": "Technology Previews",
+"where": "Preferences > Technology Previews",
+"status": "Missing",
+"inp": "No experimental feature switches.",
+"planned": "0.8 \u00b7 preferences-dialog"
+},
+{
+"section": "prefs",
+"feature": "Tools: Show Tooltips / Rich Tooltips, Enable Gestures, Use Shift Key for Tool Switch, Overscroll, Enable Flick Panning",
+"where": "Preferences > Tools",
+"status": "Missing",
+"inp": "Tooltips are always on and Shift+letter always cycles; no gesture, overscroll or flick panning settings.",
+"planned": "0.8 \u00b7 preferences-dialog"
+},
+{
+"section": "prefs",
+"feature": "Tools: Snap Vector Tools and Transforms to Pixel Grid, Show Transformation Values, Double Click Layer Mask Launches Select and Mask, Vary Round Brush Hardness based on HUD",
+"where": "Preferences > Tools",
+"status": "Missing",
+"inp": "None of these options exist (Pigment adds its own 'Scale shape strokes with transforms').",
+"planned": "0.8 \u00b7 preferences-dialog"
+},
+{
+"section": "prefs",
+"feature": "Transparency & Gamut: Gamut Warning colour and opacity",
+"where": "Preferences > Transparency & Gamut: Gamut Warning",
+"status": "Missing",
+"inp": "View > Gamut Warning exists but its overlay colour and opacity are fixed.",
+"planned": "0.6 \u00b7 soft-proofing"
+},
+{
+"section": "prefs",
+"feature": "Units & Rulers: Type unit, Column Size (width, gutter), New Document Preset Resolutions (print, screen), Point/Pica Size",
+"where": "Preferences > Units & Rulers",
+"status": "Missing",
+"inp": "None of these exist; type size is always in pixels.",
+"planned": "0.8 \u00b7 preferences-dialog"
+},
+{
+"section": "prefs",
+"feature": "Preferences dialog structure",
+"where": "Edit > Preferences (20 sections, Prev/Next, search)",
+"status": "Partial",
+"inp": "One page with four headings (Interface, Cursors and tools, Canvas, Performance) and 17 settings in extras.js, plus Reset All Settings.",
+"planned": "0.8 \u00b7 preferences-dialog"
+},
+{
+"section": "prefs",
+"feature": "Cursors: Painting Cursors (Standard, Precise, Normal Brush Tip, Full Size Brush Tip, crosshair in tip, only crosshair while painting)",
+"where": "Preferences > Cursors: Painting Cursors",
+"status": "Partial",
+"inp": "cursorStyle: Brush outline, Precise, Dot. No full-size tip (soft edge), no crosshair-in-tip options.",
+"planned": "0.5 \u00b7 brush-painting-behaviours"
+},
+{
+"section": "prefs",
+"feature": "File Handling: Recent File List Contains N files",
+"where": "Preferences > File Handling",
+"status": "Partial",
+"inp": "settings.recentLimit (20) is honoured by /home/user/claude/pigment/src/main/ipc.js but has no field in Preferences; the menu shows 15.",
+"planned": "0.8 \u00b7 preferences-dialog"
+},
+{
+"section": "prefs",
+"feature": "General: Reset All Warning Dialogs, Reset Preferences on Quit",
+"where": "Preferences > General",
+"status": "Partial",
+"inp": "Reset All Settings resets preferences, tool options, swatches, brush presets and layout at once. There are no 'don't show again' warnings to reset.",
+"planned": "0.8 \u00b7 preferences-dialog"
+},
+{
+"section": "prefs",
+"feature": "General: Resize Image During Place, Skip Transform when Placing, Always Create Smart Objects when Placing",
+"where": "Preferences > General: Options",
+"status": "Partial",
+"inp": "'Place files as smart objects' exists (placeAsSmart). Resize-to-fit is always on and the transform step is always skipped, with no preferences for either.",
+"planned": "0.7 \u00b7 linked-smart-objects"
+},
+{
+"section": "prefs",
+"feature": "Guides, Grid & Slices: Grid colour, style, Gridline Every, Subdivisions",
+"where": "Preferences > Guides, Grid & Slices: Grid",
+"status": "Done",
+"inp": "0.4: grid colour, style (lines, dashed, dots), Gridline Every with a unit and Subdivisions; the grid starts at the ruler origin",
+"planned": "0.4 \u00b7 guides-snapping"
+},
+{
+"section": "prefs",
+"feature": "Interface: Color Theme (four brightness levels), Highlight Color, Neutral Color Mode",
+"where": "Preferences > Interface: Appearance",
+"status": "Partial",
+"inp": "Theme is System, Light or Dark; no intermediate greys, highlight colour or neutral mode.",
+"planned": "0.8 \u00b7 preferences-dialog"
+},
+{
+"section": "prefs",
+"feature": "Performance: Memory Usage (let the app use N% of RAM)",
+"where": "Preferences > Performance: Memory Usage",
+"status": "Partial",
+"inp": "Only a per-document history memory cap (historyMemoryMB). No overall memory budget or usage readout.",
+"planned": "0.11 \u00b7 scratch-memory-limits"
+},
+{
+"section": "prefs",
+"feature": "Tools: Animated Zoom, Zoom Resizes Windows, Zoom with Scroll Wheel, Zoom Clicked Point to Center",
+"where": "Preferences > Tools",
+"status": "Partial",
+"inp": "Zoom with the scroll wheel is in Preferences. settings.animatedZoom exists in defaults.js without UI or a reader; the other two are absent.",
+"planned": "0.6 \u00b7 view-navigation"
+},
+{
+"section": "prefs",
+"feature": "Transparency & Gamut: Grid Size and Grid Colors",
+"where": "Preferences > Transparency & Gamut: Transparency Settings",
+"status": "Partial",
+"inp": "Small/Medium/Large and two custom colours (checkerboardSize, checkerboardLight, checkerboardDark). No 'None' and no named colour presets.",
+"planned": "0.8 \u00b7 preferences-dialog"
+},
+{
+"section": "prefs",
+"feature": "General: Image Interpolation default",
+"where": "Preferences > General: Image Interpolation",
+"status": "Done",
+"inp": "resampleMethod (Image Size) and transformInterpolation in the Preferences dialog.",
+"planned": ""
+},
+{
+"section": "prefs",
+"feature": "General: Use Legacy Free Transform (proportional scaling by default)",
+"where": "Preferences > General: Options",
+"status": "Done",
+"inp": "'Keep proportions while transforming (Shift releases)' (transformProportional).",
+"planned": ""
+},
+{
+"section": "prefs",
+"feature": "Performance: History States",
+"where": "Preferences > Performance: History & Cache",
+"status": "Done",
+"inp": "historyLimit, 1 to 1000, applied to open documents at once.",
+"planned": ""
+},
+{
+"section": "prefs",
+"feature": "Units & Rulers: Rulers unit",
+"where": "Preferences > Units & Rulers: Units",
+"status": "Done",
+"inp": "rulerUnit: pixels, inches, centimetres, millimetres, points, percent (no picas).",
+"planned": ""
+},
+{
+"section": "export",
+"feature": "Zoomify",
+"where": "File > Export > Zoomify",
+"status": "Missing",
+"inp": "No tiled-pyramid export. The Zoomify viewer is third-party; a tile pyramid plus Pigment's own HTML viewer would be the substitute.",
+"planned": "0.10 \u00b7 slices-web-export"
+},
+{
+"section": "export",
+"feature": "Generate > Image Assets",
+"where": "File > Generate > Image Assets",
+"status": "Missing",
+"inp": "No automatic asset export from layer names (for example 'icon.png, 200% icon@2x.png').",
+"planned": "0.10 \u00b7 slices-web-export"
+},
+{
+"section": "export",
+"feature": "Save for Web: named presets and Optimize to File Size",
+"where": "Save for Web: Preset menu, panel menu",
+"status": "Missing",
+"inp": "The last settings are remembered (settings.saveForWeb) but there are no named presets and no target-file-size optimiser.",
+"planned": "0.9 \u00b7 save-for-web"
+},
+{
+"section": "export",
+"feature": "Save for Web: encoder options (JPEG Progressive/Optimized/Blur, GIF Lossy/Interlaced/Web Snap, PNG Interlaced, Embed Color Profile, Metadata menu)",
+"where": "Save for Web: optimisation settings",
+"status": "Missing",
+"inp": "None of these exist; 'Convert to sRGB' is a no-op checkbox because documents are sRGB already.",
+"planned": "0.9 \u00b7 save-for-web"
+},
+{
+"section": "export",
+"feature": "Color Lookup Tables",
+"where": "File > Export > Color Lookup Tables",
+"status": "Partial",
+"inp": "file:export-luts in /home/user/claude/pigment/src/renderer/lib/adjust-more-ui.js writes .cube and .3dl with a description and 16/32/64 grid points. Missing: .csp and ICC (abstract/device-link) output, copyright field, lowercase-extension option and Photoshop's quality range up to 256.",
+"planned": "0.6 \u00b7 color-settings"
+},
+{
+"section": "export",
+"feature": "Export As: Image Size, Scale, Resample method, Canvas Size",
+"where": "File > Export > Export As: Image Size / Canvas Size",
+"status": "Partial",
+"inp": "Width, height (linked) and a scale preset. No Resample menu (the canvas 'high' smoothing is always used) and no Canvas Size fields.",
+"planned": "0.6 \u00b7 export-as"
+},
+{
+"section": "export",
+"feature": "Export As: multiple scales with suffixes, layer/artboard asset list",
+"where": "File > Export > Export As: Scale All, asset list",
+"status": "Partial",
+"inp": "One file per export. Selected layers have their own Export As (/home/user/claude/pigment/src/renderer/lib/layers-extras/export.js) but there is no 1x/2x/3x list with suffixes and no per-asset settings.",
+"planned": "0.6 \u00b7 export-as"
+},
+{
+"section": "export",
+"feature": "Export As: preview with zoom and 2-up comparison",
+"where": "File > Export > Export As: preview pane",
+"status": "Partial",
+"inp": "No preview; only a debounced 'about N KB' estimate from a real encode. Save for Web has the 2-up preview.",
+"planned": "0.6 \u00b7 export-as"
+},
+{
+"section": "export",
+"feature": "Layers to Files",
+"where": "File > Export > Layers to Files",
+"status": "Partial",
+"inp": "file:export-layers (file-ops.js): top-level layers or groups, any flat format, Visible Layers Only, Trim, file name prefix. Missing: PSD and PDF output, per-format options (JPEG quality, PNG-8 transparency, TIFF compression), Include ICC Profile, nested layers.",
+"planned": "0.6 \u00b7 export-as"
+},
+{
+"section": "export",
+"feature": "Quick Export as [format]",
+"where": "File > Export > Quick Export as PNG",
+"status": "Partial",
+"inp": "file:export-quick in /home/user/claude/pigment/src/renderer/lib/file-ops.js always writes PNG next to the document (asks before overwriting). The format, quality, location and metadata cannot be changed because Export Preferences does not exist.",
+"planned": "0.6 \u00b7 export-as"
+},
+{
+"section": "export",
+"feature": "Save for Web: Color Table editing (lock, shift to web, delete, map to transparent, sort, load/save table)",
+"where": "Save for Web: Color Table panel and menu",
+"status": "Partial",
+"inp": "The table is shown read-only; a custom palette can be supplied through the Indexed Color fields. No per-swatch editing or .act load/save in this dialog.",
+"planned": "0.9 \u00b7 save-for-web"
+},
+{
+"section": "export",
+"feature": "Save for Web: Original / Optimized / 4-Up tabs",
+"where": "Save for Web: view tabs",
+"status": "Partial",
+"inp": "2-up only (README limit); no single-pane tabs and no 4-up comparison of settings.",
+"planned": "0.9 \u00b7 save-for-web"
+},
+{
+"section": "export",
+"feature": "Export As: formats",
+"where": "File > Export > Export As: Format",
+"status": "Done",
+"inp": "PNG, PNG-8, 16-bit PNG, JPEG, WebP, GIF, TIFF and Targa with quality and per-format fields (file-ops.js exportAs). Covers Photoshop's PNG/JPG/GIF and more.",
+"planned": ""
+},
+{
+"section": "export",
+"feature": "Save for Web (Legacy): core optimisation",
+"where": "File > Export > Save for Web (Legacy)",
+"status": "Done",
+"inp": "/home/user/claude/pigment/src/renderer/lib/modes/save-for-web.js: 2-up original/optimised, GIF, JPEG, PNG-8, PNG-24 and WebP, palette type, colour count, forced colours, dither and amount, transparency, matte, image size and percent, zoom, real file size and download time, colour table display.",
+"planned": ""
+},
+{
+"section": "formats",
+"feature": "Open: 32-bit HDR formats (OpenEXR, Radiance .hdr, Portable Bit Map/PFM)",
+"where": "File > Open",
+"status": "Missing",
+"inp": "32-bit documents exist (depth.js) but only TIFF float and .pigment carry them; no EXR/HDR/PBM readers.",
+"planned": "0.10 \u00b7 hdr-32bit"
+},
+{
+"section": "formats",
+"feature": "Open: EPS / DCS (Rasterize EPS Format dialog)",
+"where": "File > Open",
+"status": "Missing",
+"inp": "No PostScript interpreter. Would need a bundled or user-installed interpreter (Ghostscript is AGPL, so user-installed helper is the honest route).",
+"planned": "0.9 \u00b7 formats-more-codecs"
+},
+{
+"section": "formats",
+"feature": "Open: JPEG 2000 and JPEG XL",
+"where": "File > Open",
+"status": "Missing",
+"inp": "Neither is decoded (Chromium does not decode them and no reader is registered). OpenJPEG and libjxl are open source and can be built to WASM.",
+"planned": "0.9 \u00b7 formats-more-codecs"
+},
+{
+"section": "formats",
+"feature": "Open: legacy and specialist formats (DICOM, PCX, IFF, Pixar, Scitex CT, Cineon/DPX, Photoshop Raw with Raw Options, WBMP, MPO)",
+"where": "File > Open",
+"status": "Missing",
+"inp": "None of these are registered in OPEN_READERS (io.js).",
+"planned": "0.9 \u00b7 formats-more-codecs"
+},
+{
+"section": "formats",
+"feature": "Open: camera RAW files (DNG, CR2/CR3, NEF, ARW, RAF...) through Camera Raw",
+"where": "File > Open (Camera Raw dialog)",
+"status": "Missing",
+"inp": "No RAW decoder; the Camera Raw filter develops RGB layers only. Adobe's camera profiles are proprietary, but an open decoder (LibRaw compiled to WASM) feeding the existing develop pipeline is an honest substitute.",
+"planned": "0.6 \u00b7 raw-open-workflow"
+},
+{
+"section": "formats",
+"feature": "Open: PDF and Illustrator files (Import PDF dialog: pages/images, crop to, resolution, mode, bit depth)",
+"where": "File > Open (Import PDF)",
+"status": "Missing",
+"inp": "No PDF reader. pdf.js can rasterise pages and extract images offline.",
+"planned": "0.6 \u00b7 pdf-import"
+},
+{
+"section": "formats",
+"feature": "Photoshop PDF save (Adobe PDF presets, compression, output, security, preserve editing capabilities)",
+"where": "File > Save As: Photoshop PDF; Edit > Adobe PDF Presets",
+"status": "Missing",
+"inp": "The only PDF is Chromium's print-to-PDF of one flattened page (print.js saveAsPdf). No PDF writer with presets, compression, PDF/X or passwords, and no Adobe PDF Presets manager. A local PDF writer with Pigment's own presets is the substitute for Adobe's .joboptions.",
+"planned": "0.7 \u00b7 pdf-export"
+},
+{
+"section": "formats",
+"feature": "Scripts > Load Multiple DICOM Files",
+"where": "File > Scripts > Load Multiple DICOM Files",
+"status": "Missing",
+"inp": "No DICOM reader.",
+"planned": "0.9 \u00b7 formats-more-codecs"
+},
+{
+"section": "formats",
+"feature": "Open: PSD/PSB fidelity",
+"where": "File > Open (Photoshop and Large Document formats)",
+"status": "Partial",
+"inp": "readPsdDocument in /home/user/claude/pigment/src/renderer/lib/io.js reads layers, groups, raster masks, opacity, fill opacity, blend modes, clipping, locks, text (one style per layer) and 14 adjustment kinds. Not read: layer styles/effects, vector masks, shape and fill layers (arrive as pixels), smart objects and smart filters (pixels), artboards, layer comps, guides, alpha/spot channels, paths, ICC profile, 16/32-bit depth and CMYK/Lab/Grayscale modes (all become 8-bit RGB).",
+"planned": "0.5 \u00b7 psd-layers"
+},
+{
+"section": "formats",
+"feature": "Save As: format list",
+"where": "File > Save As: Format menu",
+"status": "Partial",
+"inp": "Writes .pigment, PSD, PNG, JPEG, WebP, GIF, TIFF and Targa (SAVE_FILTERS in documents.js plus depth.js and modes/formats.js). Missing: PSB (opened but not written), BMP (read only), Photoshop PDF, EPS, DCS, JPEG 2000, JPEG XL, OpenEXR, Radiance, Portable Bit Map, PCX, DICOM, IFF, Photoshop Raw, Scitex, Pixar, Multi-Picture.",
+"planned": "0.9 \u00b7 formats-more-codecs"
+},
+{
+"section": "formats",
+"feature": "Save: PSD write fidelity (and Maximize Compatibility)",
+"where": "File > Save As: Photoshop",
+"status": "Partial",
+"inp": "writePsdDocument (io.js) always writes 8-bit RGB with a composite. Kept: pixels, groups, masks, opacity, blend, clipping, locks, editable text (one style), 14 adjustment kinds, XMP. Lost: layer styles (not written and not baked in), smart objects, shapes and fill layers (rasterised), alpha/spot channels, paths, guides, 16/32-bit data, image mode. No Maximize Compatibility choice.",
+"planned": "0.5 \u00b7 psd-layers"
+},
+{
+"section": "formats",
+"feature": "Format option dialogs (JPEG Options, PNG Format Options, TIFF Options, WebP options)",
+"where": "File > Save As: per-format dialogs",
+"status": "Partial",
+"inp": "JPEG and WebP ask for quality only (documents.js lossyOptions): no matte, baseline/optimized/progressive, lossless WebP or metadata switches. PNG has no compression/interlace choice. TIFF depth and compression fields exist in Export As only; Save As to .tif asks nothing; no layered TIFF, byte order or pyramid.",
+"planned": "0.6 \u00b7 save-options-common-formats"
+},
+{
+"section": "formats",
+"feature": "Open: HEIF/HEIC",
+"where": "File > Open",
+"status": "Not feasible",
+"inp": "HEVC is patent-encumbered, so a decoder cannot be shipped freely. Substitute: use the operating system's codec where installed (macOS ImageIO, Windows HEIF extension) or a user-installed libheif.",
+"planned": ""
+},
+{
+"section": "formats",
+"feature": "Open: common raster formats (PNG 8/16-bit and palette, JPEG, WebP, GIF, BMP, TIFF, Targa, AVIF, SVG, ICO)",
+"where": "File > Open",
+"status": "Done",
+"inp": "io.js decodeImage plus registered readers in /home/user/claude/pigment/src/renderer/lib/depth.js (16-bit PNG, TIFF, TGA) and /home/user/claude/pigment/src/renderer/lib/modes/formats.js (GIF). Stated limits: TIFF without JPEG-in-TIFF, CCITT, YCbCr, Lab, BigTIFF, first page only; SVG is rasterised at its natural size.",
+"planned": ""
+},
+{
+"section": "file",
+"feature": "Browse in Bridge / Close and Go to Bridge",
+"where": "File > Browse in Bridge, File > Close and Go to Bridge",
+"status": "Missing",
+"inp": "No file browser. Adobe Bridge is a separate Adobe application; the honest equivalent is a built-in folder and thumbnail browser (with ratings and keywords from the File Info metadata Pigment already reads).",
+"planned": "0.9 \u00b7 home-new-doc-browser"
+},
+{
+"section": "file",
+"feature": "Import > WIA Support / Images from Device (scanners and cameras)",
+"where": "File > Import > WIA Support (Windows), Images from Device (macOS)",
+"status": "Missing",
+"inp": "No device acquisition. Needs native platform APIs (WIA, ImageCaptureCore) through a helper; TWAIN is licence-encumbered.",
+"planned": "0.9 \u00b7 home-new-doc-browser"
+},
+{
+"section": "file",
+"feature": "Open As (force a file format)",
+"where": "File > Open As (Windows)",
+"status": "Missing",
+"inp": "Format is chosen by extension with magic-byte sniffing as fallback (io.js openDocument); the user cannot force a reader.",
+"planned": "0.6 \u00b7 file-handling-autosave"
+},
+{
+"section": "file",
+"feature": "Save As dialog options (As a Copy, Layers, Alpha Channels, Spot Colors, Notes, Use Proof Setup, Embed Color Profile)",
+"where": "File > Save As: Save options",
+"status": "Missing",
+"inp": "The native save dialog has no option panel; the only question is a 'will be flattened' confirmation. Nothing lets the user drop layers or channels or embed a profile.",
+"planned": "0.6 \u00b7 save-options-common-formats"
+},
+{
+"section": "file",
+"feature": "Share (send the image to another app or service)",
+"where": "File > Share / Quick Share",
+"status": "Missing",
+"inp": "No share command. The OS share sheet (macOS share menu, Windows share contract) on an exported copy would be the offline equivalent; Pigment only has Reveal in Finder/Explorer.",
+"planned": "0.6 \u00b7 file-handling-autosave"
+},
+{
+"section": "file",
+"feature": "File Handling: Save in Background and Automatically Save Recovery Information Every N minutes",
+"where": "Preferences > File Handling",
+"status": "Missing",
+"inp": "Saving blocks behind a busy overlay and there is no crash recovery or autosave; settings.restoreSession and lastSession exist in defaults.js but nothing reads them.",
+"planned": "0.6 \u00b7 file-handling-autosave"
+},
+{
+"section": "file",
+"feature": "Auto-Update Open Documents (reload when the file changes on disk)",
+"where": "Preferences > General: Auto-Update Open Documents",
+"status": "Missing",
+"inp": "/home/user/claude/pigment/src/main/watch.js and the watchFile IPC exist, but no renderer code calls watchFile or listens for file-changed, so nothing happens.",
+"planned": "0.6 \u00b7 file-handling-autosave"
+},
+{
+"section": "file",
+"feature": "Revert",
+"where": "File > Revert (F12)",
+"status": "Partial",
+"inp": "file:revert in /home/user/claude/pigment/src/renderer/app.js reloads the file after a confirmation, but it replaces the document and discards its history; Photoshop records Revert as an undoable history state. F12 is not bound.",
+"planned": "0.6 \u00b7 file-handling-autosave"
+},
+{
+"section": "file",
+"feature": "Close, Close All, Close Others (with Save changes prompt)",
+"where": "File > Close / Close All / Close Others",
+"status": "Done",
+"inp": "documents.js close/closeAll and files.js closeOthers; Photoshop's 'Apply to All' checkbox in the prompt is not offered (each document asks).",
+"planned": ""
+},
+{
+"section": "file",
+"feature": "Exit / Quit (with unsaved-changes prompts)",
+"where": "File > Exit",
+"status": "Done",
+"inp": "menu.js quit role and file:quit.",
+"planned": ""
+},
+{
+"section": "file",
+"feature": "Open (multi-select, tabs, drag and drop, OS 'Open with', already-open files are activated)",
+"where": "File > Open",
+"status": "Done",
+"inp": "DocumentManager.openDialog/openPaths in /home/user/claude/pigment/src/renderer/lib/documents.js.",
+"planned": ""
+},
+{
+"section": "file",
+"feature": "Open Recent (list, Clear Recent File List)",
+"where": "File > Open Recent",
+"status": "Done",
+"inp": "15 entries in the menu, Clear Recent Files (menu.js, /home/user/claude/pigment/src/main/recent.js); also listed on the welcome screen.",
+"planned": ""
+},
+{
+"section": "file",
+"feature": "Open as Smart Object",
+"where": "File > Open as Smart Object",
+"status": "Done",
+"inp": "file:open-smart in /home/user/claude/pigment/src/renderer/lib/layers-extras/files.js: each file opens as its own document holding one smart object; layered files stay documents.",
+"planned": ""
+},
+{
+"section": "file",
+"feature": "Save",
+"where": "File > Save",
+"status": "Done",
+"inp": "documents.js save(); read-only formats and multi-layer flat files route to Save As.",
+"planned": ""
+},
+{
+"section": "file",
+"feature": "Save a Copy",
+"where": "File > Save a Copy",
+"status": "Done",
+"inp": "file:save-copy (documents.js saveAs with copy: true); the document keeps its path and dirty state.",
+"planned": ""
+},
+{
+"section": "transform",
+"feature": "Transform a duplicate and step-and-repeat",
+"where": "Ctrl+Alt+T (transform a copy), Ctrl+Alt+Shift+T (transform again on a copy)",
+"status": "Missing",
+"inp": "Neither shortcut nor behaviour exists in keymap.js or image-ops.js.",
+"planned": "0.7 \u00b7 transform-warp-depth"
+},
+{
+"section": "transform",
+"feature": "Warp: Split Warp Horizontally / Vertically / Crosswise, Remove Warp Split, Grid sizes (3x3, 4x4, 5x5, custom), Convert Warp Anchor Point, Toggle Guides",
+"where": "Edit > Transform submenu and Warp options bar",
+"status": "Missing",
+"inp": "The net is always the single 4x4 Bezier patch; no splits, no grid choice, no guide options.",
+"planned": "0.7 \u00b7 transform-warp-depth"
+},
+{
+"section": "transform",
+"feature": "Perspective Warp",
+"where": "Edit > Perspective Warp",
+"status": "Partial",
+"inp": "PerspectiveWarp in warp.js: Layout and Warp modes, quads that snap together, Shift-click an edge to straighten. Missing: the three auto-straighten buttons (vertical, horizontal, both) and non-destructive use on a smart object.",
+"planned": "0.7 \u00b7 transform-warp-depth"
+},
+{
+"section": "transform",
+"feature": "Puppet Warp",
+"where": "Edit > Puppet Warp",
+"status": "Partial",
+"inp": "PuppetWarp in /home/user/claude/pigment/src/renderer/lib/warp.js: Mode (Rigid, Normal, Distort), Density, Show Mesh, pins, Alt-drag rotation, remove all pins. Missing: Expansion, Pin Depth (bring forward / send backward), Rotate Auto/Fixed with a numeric angle, and it rasterises a smart object instead of staying editable.",
+"planned": "0.7 \u00b7 transform-warp-depth"
+},
+{
+"section": "transform",
+"feature": "Transform > Warp: control net and presets",
+"where": "Edit > Transform > Warp; options bar Warp menu, Bend, H, V",
+"status": "Partial",
+"inp": "BezierWarp in warp.js with 15 presets (Arc to Twist), Bend, H and V. Missing the Cylinder preset and the Change Warp Orientation toggle.",
+"planned": "0.7 \u00b7 transform-warp-depth"
+},
+{
+"section": "transform",
+"feature": "Free Transform options bar: numeric X, Y, W, H, rotation, horizontal and vertical skew, Maintain Aspect Ratio link",
+"where": "Free Transform options bar",
+"status": "Partial",
+"inp": "X, Y, W%, H%, angle and one skew field. No vertical skew, and the W/H link is a preference (transformProportional) rather than a button in the bar; values are blank for a distorted quad.",
+"planned": "0.7 \u00b7 transform-warp-depth"
+},
+{
+"section": "transform",
+"feature": "Free Transform: Interpolation",
+"where": "Free Transform options bar: Interpolation",
+"status": "Partial",
+"inp": "Bicubic, Bilinear, Nearest Neighbor. No Bicubic Smoother, Bicubic Sharper or Bicubic Automatic.",
+"planned": "0.7 \u00b7 transform-warp-depth"
+},
+{
+"section": "transform",
+"feature": "Free Transform options bar: reference point",
+"where": "Free Transform options bar: reference point locator and Use Relative Positioning",
+"status": "Partial",
+"inp": "The pivot can be dragged on the canvas, but there is no nine-point locator, no show/hide toggle and no relative positioning (delta) switch.",
+"planned": "0.7 \u00b7 transform-warp-depth"
+},
+{
+"section": "transform",
+"feature": "Content-Aware Scale",
+"where": "Edit > Content-Aware Scale",
+"status": "Done",
+"inp": "/home/user/claude/pigment/src/renderer/lib/content-aware-scale.js: seam carving with Amount, Protect (alpha channel), Protect Skin Tones, W and H. No reference point locator or relative positioning fields.",
+"planned": ""
+},
+{
+"section": "transform",
+"feature": "Free Transform: handles and modifier keys",
+"where": "Edit > Free Transform (Ctrl+T)",
+"status": "Done",
+"inp": "Transform tool in /home/user/claude/pigment/src/renderer/lib/image-ops.js: scale, rotate (Shift snaps 15 degrees), Alt from centre, Ctrl-drag distort, Ctrl+Shift skew; pixels, selections, text, shapes and smart objects.",
+"planned": ""
+},
+{
+"section": "transform",
+"feature": "Transform > Rotate 180, 90 CW, 90 CCW, Flip Horizontal, Flip Vertical",
+"where": "Edit > Transform",
+"status": "Done",
+"inp": "edit:transform-rotate-180/90/-90 and flip-h/flip-v.",
+"planned": ""
+},
+{
+"section": "transform",
+"feature": "Transform > Scale, Rotate, Skew, Distort, Perspective",
+"where": "Edit > Transform",
+"status": "Done",
+"inp": "edit:transform-<mode> commands in image-ops.js.",
+"planned": ""
+},
+{
+"section": "transform",
+"feature": "Transform > Again",
+"where": "Edit > Transform > Again (Ctrl+Shift+T)",
+"status": "Done",
+"inp": "edit:transform-again replays the last matrix relative to the new bounds.",
+"planned": ""
+},
+{
+"section": "automation",
+"feature": "Automate > Create Droplet",
+"where": "File > Automate > Create Droplet",
+"status": "Missing",
+"inp": "No droplet. Equivalent: a small launcher or shortcut that starts Pigment with a batch description for the dropped files.",
+"planned": "0.8 \u00b7 automate-finish"
+},
+{
+"section": "automation",
+"feature": "Automate > Lens Correction (batch with lens profiles)",
+"where": "File > Automate > Lens Correction",
+"status": "Missing",
+"inp": "Only the interactive Filter > Lens Correction exists. Adobe's lens profile database is licensed data; the open Lensfun database is the honest substitute for automatic profiles.",
+"planned": "0.9 \u00b7 lens-correction-profiles"
+},
+{
+"section": "automation",
+"feature": "Automate > PDF Presentation",
+"where": "File > Automate > PDF Presentation",
+"status": "Missing",
+"inp": "No multi-page PDF or slideshow output (the only PDF path is one page from the Print dialog).",
+"planned": "0.7 \u00b7 pdf-export"
+},
+{
+"section": "automation",
+"feature": "Data Sets as Files (variables and data-driven graphics)",
+"where": "File > Export > Data Sets as Files; Image > Variables",
+"status": "Missing",
+"inp": "No variables or data sets.",
+"planned": "0.9 \u00b7 variables-data-sets"
+},
+{
+"section": "automation",
+"feature": "Import > Variable Data Sets",
+"where": "File > Import > Variable Data Sets",
+"status": "Missing",
+"inp": "No variables.",
+"planned": "0.9 \u00b7 variables-data-sets"
+},
+{
+"section": "automation",
+"feature": "Automate > Batch",
+"where": "File > Automate > Batch",
+"status": "Partial",
+"inp": "lib/automate/batch.js: Set, Action, Source (Folder or Opened Files), Include All Subfolders, Override Action Open / Save As commands, Destination (None, Save and Close, Folder), File Naming with serial numbers, Errors (stop or log). Missing: Suppress File Open Options Dialogs, Suppress Color Profile Warnings, and the Import and Bridge sources. This agrees with the formats auditor's 'partial' and replaces the file-edit auditor's 'done'.",
+"planned": "0.8 \u00b7 automate-finish"
+},
+{
+"section": "automation",
+"feature": "Automate > Contact Sheet II",
+"where": "File > Automate > Contact Sheet II",
+"status": "Partial",
+"inp": "/home/user/claude/pigment/src/renderer/lib/automate/contact-sheet.js: folder or open documents, units, size, resolution, RGB/Grayscale, flatten, across/down, columns, rows, auto-spacing, rotate for best fit, caption font and size. Missing: bit depth, colour profile, separate vertical/horizontal spacing, font style, Bridge source, save/load presets.",
+"planned": "0.8 \u00b7 automate-finish"
+},
+{
+"section": "automation",
+"feature": "Automate > Merge to HDR Pro",
+"where": "File > Automate > Merge to HDR Pro",
+"status": "Approximate",
+"inp": "file:automate-merge-hdr (adjust-more-ui.js) is exposure fusion into a normal image followed by HDR Toning, with align and remove-ghosts options. No 32-bit radiance result, no EV/response-curve handling, no HDR Pro workspace (presets, edge glow, tone and detail, choice of base frame for deghosting). Users wanting a 32-bit master would notice.",
+"planned": "0.10 \u00b7 hdr-32bit"
+},
+{
+"section": "automation",
+"feature": "Automate > Conditional Mode Change",
+"where": "File > Automate > Conditional Mode Change",
+"status": "Done",
+"inp": "file:automate-conditional-mode in /home/user/claude/pigment/src/renderer/lib/modes.js.",
+"planned": ""
+},
+{
+"section": "automation",
+"feature": "Automate > Crop and Straighten Photos",
+"where": "File > Automate > Crop and Straighten Photos",
+"status": "Done",
+"inp": "file:automate-crop-straighten in /home/user/claude/pigment/src/renderer/lib/automate.js with /home/user/claude/pigment/src/renderer/lib/automate/scan.js; each photo becomes a new document.",
+"planned": ""
+},
+{
+"section": "automation",
+"feature": "Automate > Fit Image",
+"where": "File > Automate > Fit Image",
+"status": "Done",
+"inp": "automate.js fitImage with Don't Enlarge.",
+"planned": ""
+},
+{
+"section": "automation",
+"feature": "Automate > Photomerge",
+"where": "File > Automate > Photomerge",
+"status": "Done",
+"inp": "/home/user/claude/pigment/src/renderer/lib/align-blend.js: files or open documents, Auto/Perspective/Collage/Cylindrical/Spherical/Reposition, Blend Images Together, Vignette Removal, Geometric Distortion Correction, Content Aware Fill Transparent Areas (vignette and distortion are estimated from the images, no lens profiles).",
+"planned": ""
+},
+{
+"section": "automation",
+"feature": "Scripts > Delete All Empty Layers",
+"where": "File > Scripts > Delete All Empty Layers",
+"status": "Done",
+"inp": "automate.js deleteEmptyLayers, one undo step.",
+"planned": ""
+},
+{
+"section": "automation",
+"feature": "Scripts > Flatten All Layer Effects",
+"where": "File > Scripts > Flatten All Layer Effects",
+"status": "Done",
+"inp": "automate.js flattenEffects.",
+"planned": ""
+},
+{
+"section": "automation",
+"feature": "Scripts > Flatten All Masks",
+"where": "File > Scripts > Flatten All Masks",
+"status": "Done",
+"inp": "automate.js flattenMasks (pixel layers with raster masks; there are no vector masks to flatten).",
+"planned": ""
+},
+{
+"section": "automation",
+"feature": "Scripts > Image Processor",
+"where": "File > Scripts > Image Processor",
+"status": "Done",
+"inp": "batch.js imageProcessorCommand: open images or folder, same location or folder, JPEG (quality 0 to 12), PSD, PNG, TIFF with Resize to Fit, Run Action, Copyright Info. Not present: save/load settings, 'open first image to apply settings', ICC profile inclusion.",
+"planned": ""
+},
+{
+"section": "automation",
+"feature": "Scripts > Load Files into Stack",
+"where": "File > Scripts > Load Files into Stack",
+"status": "Done",
+"inp": "align-blend.js file:script-load-stack with Attempt to Automatically Align and Create Smart Object after Loading.",
+"planned": ""
+},
+{
+"section": "automation",
+"feature": "Scripts > Statistics",
+"where": "File > Scripts > Statistics",
+"status": "Done",
+"inp": "align-blend.js file:script-statistics with the eleven stack modes and auto-align.",
+"planned": ""
+},
+{
+"section": "edit",
+"feature": "Fill: Scripted Patterns (Brick Fill, Cross Weave, Place Along Path, Random Fill, Spiral, Symmetry Fill)",
+"where": "Edit > Fill: Pattern > Script",
+"status": "Approximate",
+"inp": "0.4: all six in Edit \u203a Fill \u203a Pattern \u203a Script; they are Pigment's own placements modelled on Photoshop's scripts, not their exact output",
+"planned": "0.4 \u00b7 patterns"
+},
+{
+"section": "edit",
+"feature": "Toggle Last State",
+"where": "Edit > Toggle Last State (Ctrl+Alt+Z)",
+"status": "Done",
+"inp": "0.4: Edit \u203a Toggle Last State (Alt+Ctrl+Z) flips between the last two states; after an Undo or a History click it returns to the state you came from",
+"planned": "0.4 \u00b7 conventions-shortcuts-fields"
+},
+{
+"section": "edit",
+"feature": "Fill shortcuts",
+"where": "Alt+Backspace, Ctrl+Backspace, Shift+F5, Shift+Backspace, with Shift to preserve transparency",
+"status": "Partial",
+"inp": "Alt+Backspace/Delete, Ctrl+Backspace/Delete and Shift+F5 are bound (/home/user/claude/pigment/src/shared/keymap.js). Shift+Backspace (open Fill), the Shift variants that preserve transparency and Ctrl+Alt+Backspace (fill from history) are not.",
+"planned": "0.7 \u00b7 edit-clipboard-finish"
+},
+{
+"section": "edit",
+"feature": "Fade",
+"where": "Edit > Fade (Ctrl+Shift+F)",
+"status": "Partial",
+"inp": "edit:fade in /home/user/claude/pigment/src/renderer/lib/adjust-ui.js offers opacity and every blend mode, but only after a filter or adjustment (the only code that sets app.lastPixelEdit). It does not work after a brush stroke, Fill, Stroke or other paint command, has no shortcut and is not recorded in actions.",
+"planned": "0.7 \u00b7 edit-clipboard-finish"
+},
+{
+"section": "edit",
+"feature": "Fill: Blending (Mode, Opacity, Preserve Transparency)",
+"where": "Edit > Fill: Blending",
+"status": "Partial",
+"inp": "Mode (27 modes), opacity and Preserve Transparency are present. Photoshop's Behind and Clear fill modes are not.",
+"planned": "0.7 \u00b7 edit-clipboard-finish"
+},
+{
+"section": "edit",
+"feature": "Stroke",
+"where": "Edit > Stroke",
+"status": "Partial",
+"inp": "strokeDialog in edit-ops.js: width, colour, Inside/Center/Outside, mode, opacity. Needs a selection (Photoshop strokes the layer's content when there is none), no Preserve Transparency checkbox (follows the layer lock), no Behind/Clear modes.",
+"planned": "0.7 \u00b7 edit-clipboard-finish"
+},
+{
+"section": "edit",
+"feature": "Fill: History",
+"where": "Edit > Fill: Contents > History",
+"status": "Approximate",
+"inp": "Fills from the last saved state (history.savedSnapshot), not from the state or snapshot marked as the history source in the History panel. Noticeable to anyone using snapshots as the source.",
+"planned": "0.6 \u00b7 history-panel-depth"
+},
+{
+"section": "edit",
+"feature": "Clear",
+"where": "Edit > Clear",
+"status": "Done",
+"inp": "edit:clear: clears the selection (background colour on a transparency-locked layer), hides on a mask, deletes the layer when nothing is selected.",
+"planned": ""
+},
+{
+"section": "edit",
+"feature": "Fill: colour contents (Foreground, Background, Color..., Black, 50% Gray, White)",
+"where": "Edit > Fill: Contents",
+"status": "Done",
+"inp": "fillDialog in edit-ops.js; works on layers and masks.",
+"planned": ""
+},
+{
+"section": "edit",
+"feature": "Purge (Undo, Clipboard, Histories, All, Video Cache)",
+"where": "Edit > Purge",
+"status": "Done",
+"inp": "edit:purge in layers-extras/files.js with confirmation; Video Cache does not apply.",
+"planned": ""
+},
+{
+"section": "edit",
+"feature": "Undo / Redo (multiple steps)",
+"where": "Edit > Undo, Redo",
+"status": "Done",
+"inp": "edit:undo and edit:redo in app.js; menu shows the step name; text fields and live typing use native undo.",
+"planned": ""
+},
+{
+"section": "workspace",
+"feature": "Menus (show/hide and colour menu items, menu sets)",
+"where": "Edit > Menus",
+"status": "Missing",
+"inp": "The menu template is fixed in menu.js.",
+"planned": "0.5 \u00b7 shortcuts-editor"
+},
+{
+"section": "workspace",
+"feature": "Search (tools, panels, menus, help, Stock) / Discover panel",
+"where": "Edit > Search (Ctrl+F)",
+"status": "Partial",
+"inp": "0.4: Edit \u203a Search\u2026 (Ctrl+F) finds menu commands, tools and panels and runs the chosen one; no open documents, help topics beyond the Help menu, Stock or Learn results, no Discover panel",
+"planned": "0.4 \u00b7 conventions-shortcuts-fields"
+},
+{
+"section": "workspace",
+"feature": "Toolbar customisation (reorder, group, hide tools; extra tools; presets)",
+"where": "Edit > Toolbar",
+"status": "Missing",
+"inp": "The toolbox layout is fixed in /home/user/claude/pigment/src/renderer/lib/toolbar.js; settings.toolboxColumns is defined but unused.",
+"planned": "0.9 \u00b7 workspaces-toolbar"
+},
+{
+"section": "workspace",
+"feature": "Workspace: Auto-Collapse Iconic Panels, Auto-Show Hidden Panels, Open Documents as Tabs, Enable Floating Document Window Docking, Large Tabs, Narrow Options Bar",
+"where": "Preferences > Workspace",
+"status": "Missing",
+"inp": "Documents are always tabs in one window; there are no floating document windows or iconic panels to configure.",
+"planned": "0.8 \u00b7 panel-docking"
+},
+{
+"section": "workspace",
+"feature": "Keyboard Shortcuts editor (sets, application menus, panel menus, tools, taskspaces, conflict warnings, Summarize)",
+"where": "Edit > Keyboard Shortcuts",
+"status": "Partial",
+"inp": "shortcutsDialog in app.js is a read-only table of the built-in keys. Nothing can be rebound, saved as a set or exported.",
+"planned": "0.5 \u00b7 shortcuts-editor"
+},
+{
+"section": "workspace",
+"feature": "Home screen (recent files with thumbnails, sort/filter, Learn, cloud and shared files)",
+"where": "Home screen shown with no document / File > New, Open",
+"status": "Partial",
+"inp": "/home/user/claude/pigment/src/renderer/lib/welcome.js shows New, Open, New from clipboard, quick sizes and a recent list (name and path, no thumbnails, no sort or filter). Cloud, Shared with you and Learn tabs need Adobe services.",
+"planned": "0.9 \u00b7 home-new-doc-browser"
+},
+{
+"section": "color-management",
+"feature": "Assign Profile",
+"where": "Edit > Assign Profile",
+"status": "Missing",
+"inp": "No document profile to assign.",
+"planned": "0.5 \u00b7 icc-engine"
+},
+{
+"section": "color-management",
+"feature": "Color Settings (working spaces, colour management policies, conversion engine and intent, black point compensation, dither, blend RGB/text gamma, settings files)",
+"where": "Edit > Color Settings",
+"status": "Missing",
+"inp": "No ICC colour management: profiles are not read, converted or embedded and everything is treated as sRGB (README). Adobe's ACE engine and some bundled profiles are proprietary; LittleCMS (WASM) with freely distributable profiles (sRGB, Display P3, Adobe RGB, ECI/FOGRA CMYK) is the open substitute.",
+"planned": "0.6 \u00b7 color-settings"
+},
+{
+"section": "color-management",
+"feature": "Convert to Profile (basic and advanced)",
+"where": "Edit > Convert to Profile",
+"status": "Missing",
+"inp": "No profile conversion; mode changes use fixed formulas (/home/user/claude/pigment/src/shared/pixels/color.js).",
+"planned": "0.6 \u00b7 color-settings"
+},
+{
+"section": "color-management",
+"feature": "New Document: Color Profile",
+"where": "File > New: Advanced Options > Color Profile",
+"status": "Missing",
+"inp": "No ICC colour management at all; every document is treated as sRGB. Depends on the Color Settings subsystem.",
+"planned": "0.5 \u00b7 icc-engine"
+},
+{
+"section": "color-management",
+"feature": "Print: Color Management (Printer or Photoshop manages colors, printer profile, rendering intent, black point compensation, hard proofing)",
+"where": "File > Print: Color Management",
+"status": "Missing",
+"inp": "No ICC handling; the flattened sRGB PNG is sent to the driver.",
+"planned": "0.8 \u00b7 print"
+},
+{
+"section": "color-management",
+"feature": "New Document: Color Mode and bit depth",
+"where": "File > New: Color Mode (Bitmap, Grayscale, RGB, CMYK, Lab) and 1/8/16/32 bit",
+"status": "Approximate",
+"inp": "All five modes and 8/16/32 bit are offered (extras.js MODES/DEPTHS). CMYK and Lab documents are views over RGBA pixels, not real separations (README limits), so a prepress user would notice.",
+"planned": "0.10 \u00b7 cmyk-lab-storage"
+},
+{
+"section": "presets",
+"feature": "Presets > Export/Import Presets and Migrate Presets",
+"where": "Edit > Presets > Export/Import Presets, Migrate Presets",
+"status": "Missing",
+"inp": "Presets sit inside settings.json with no export or import. Migrating from an earlier Photoshop does not apply; importing Photoshop preset files is the useful equivalent.",
+"planned": "0.5 \u00b7 preset-files-manager"
+},
+{
+"section": "presets",
+"feature": "Presets > Preset Manager",
+"where": "Edit > Presets > Preset Manager",
+"status": "Missing",
+"inp": "No central manager for brushes, swatches, gradients, styles, patterns, contours, shapes and tool presets; brushes and swatches are edited only in their panels.",
+"planned": "0.5 \u00b7 preset-files-manager"
+},
+{
+"section": "presets",
+"feature": "Photoshop preset file formats (.abr, .pat, .grd, .asl, .csh, .aco/.ase, .tpl, .atn)",
+"where": "Preset Manager and panel menus: Load / Save / Import",
+"status": "Missing",
+"inp": "None can be read or written; .atn is recognised only to explain that it cannot be loaded (/home/user/claude/pigment/src/renderer/lib/actions/model.js). The formats are publicly documented or reverse-engineered, so readers are feasible offline.",
+"planned": "0.5 \u00b7 preset-files-manager"
+},
+{
+"section": "presets",
+"feature": "Define Pattern",
+"where": "Edit > Define Pattern",
+"status": "Done",
+"inp": "0.4: Edit \u203a Define Pattern\u2026 asks for the name and adds the pattern to the persistent pattern library",
+"planned": "0.4 \u00b7 patterns"
+},
+{
+"section": "presets",
+"feature": "Fill: Pattern with Custom Pattern picker",
+"where": "Edit > Fill: Contents > Pattern",
+"status": "Done",
+"inp": "0.4: Edit \u203a Fill \u203a Pattern has the Custom Pattern picker over the pattern library, plus Scripted Patterns",
+"planned": "0.4 \u00b7 patterns"
+},
+{
+"section": "timeline",
+"feature": "Render Video",
+"where": "File > Export > Render Video",
+"status": "Missing",
+"inp": "No Timeline, frames or video layers.",
+"planned": "0.11 \u00b7 render-video"
+},
+{
+"section": "timeline",
+"feature": "Import > Video Frames to Layers",
+"where": "File > Import > Video Frames to Layers",
+"status": "Missing",
+"inp": "No video import. Chromium can decode common video locally, so frames to layers is buildable without a Timeline.",
+"planned": "0.10 \u00b7 animation-io"
+},
+{
+"section": "timeline",
+"feature": "Open: animated GIF as frames",
+"where": "File > Open (GIF opens with a frame animation in the Timeline)",
+"status": "Missing",
+"inp": "GIF is read and written as a single frame; there is no Timeline.",
+"planned": "0.10 \u00b7 animation-io"
+},
+{
+"section": "timeline",
+"feature": "Open: video files as video layers",
+"where": "File > Open (MP4, MOV...)",
+"status": "Missing",
+"inp": "No video layers or Timeline.",
+"planned": "0.10 \u00b7 video-timeline-core"
+},
+{
+"section": "timeline",
+"feature": "Save for Web: animation frames and Looping Options",
+"where": "Save for Web: Animation section",
+"status": "Missing",
+"inp": "GIF is written as one frame; there are no frames to export.",
+"planned": "0.10 \u00b7 animation-io"
+},
+{
+"section": "content-aware",
+"feature": "Content-Aware Fill: Fill Settings (Color Adaptation, Rotation Adaptation, Scale, Mirror)",
+"where": "Edit > Content-Aware Fill: Fill Settings",
+"status": "Missing",
+"inp": "inpaint() takes only a patch size; no colour adaptation levels, rotation, scale or mirrored patches.",
+"planned": "0.7 \u00b7 content-aware-fill-workspace"
+},
+{
+"section": "content-aware",
+"feature": "Content-Aware Fill: Output To (Current Layer, New Layer, Duplicate Layer) and live preview panel",
+"where": "Edit > Content-Aware Fill: Output Settings, Preview",
+"status": "Missing",
+"inp": "Always writes into the current layer with no preview before commit.",
+"planned": "0.7 \u00b7 content-aware-fill-workspace"
+},
+{
+"section": "content-aware",
+"feature": "Content-Aware Fill workspace: Sampling Area (Auto, Rectangular, Custom; overlay opacity, colour, indicates), Sampling Brush, Lasso, Hand and Zoom tools",
+"where": "Edit > Content-Aware Fill: workspace and Sampling Area Options",
+"status": "Missing",
+"inp": "No workspace. The user cannot see or edit which pixels are sampled; the source is always a fixed margin around the hole.",
+"planned": "0.7 \u00b7 content-aware-fill-workspace"
+},
+{
+"section": "content-aware",
+"feature": "Fill: Content-Aware with Color Adaptation",
+"where": "Edit > Fill: Contents > Content-Aware",
+"status": "Partial",
+"inp": "Choosing Content-Aware runs edit:content-aware-fill; there is no Color Adaptation checkbox and the dialog's mode and opacity are ignored for it.",
+"planned": "0.7 \u00b7 content-aware-fill-workspace"
+},
+{
+"section": "content-aware",
+"feature": "Content-Aware Fill: the fill itself",
+"where": "Edit > Content-Aware Fill",
+"status": "Approximate",
+"inp": "/home/user/claude/pigment/src/renderer/lib/content-aware.js runs a patch-based inpaint (/home/user/claude/pigment/src/shared/pixels/inpaint.js) from a margin around the selection straight into the active layer. Different algorithm from Adobe's; results are comparable on textures and weaker on structure.",
+"planned": "0.7 \u00b7 content-aware-fill-workspace"
+},
+{
+"section": "metadata",
+"feature": "Export As: Metadata (None / Copyright and Contact Info) and Color Space (Convert to sRGB, Embed Color Profile)",
+"where": "File > Export > Export As: Metadata, Color Space",
+"status": "Missing",
+"inp": "Exported files carry no XMP, EXIF or ICC profile and the dialog has no such options.",
+"planned": "0.6 \u00b7 export-as"
+},
+{
+"section": "metadata",
+"feature": "File Info: metadata templates (import, export, append/replace)",
+"where": "File > File Info: Template Folder menu",
+"status": "Missing",
+"inp": "No .xmp template import or export.",
+"planned": "0.8 \u00b7 file-info-dialog"
+},
+{
+"section": "metadata",
+"feature": "File Info: Origin, IPTC, IPTC Extension, GPS Data, Audio/Video Data, Photoshop (history log), DICOM, Raw Data",
+"where": "File > File Info: remaining tabs",
+"status": "Partial",
+"inp": "Only Credit and Source from Origin. No IPTC contact/image/status fields, no GPS, no raw XMP view, no history tab.",
+"planned": "0.8 \u00b7 file-info-dialog"
+},
+{
+"section": "metadata",
+"feature": "Metadata preserved in saved and exported files",
+"where": "File > Save As / Export (XMP, EXIF, IPTC carried in the file)",
+"status": "Partial",
+"inp": "XMP is read from JPEG, TIFF, PSD, PNG and WebP, but written only into PSD on save (file-info.js stampPsd) and into JPEG by the Image Processor. Save As or Export to JPEG, PNG, TIFF or WebP drops XMP and all EXIF, so a photo loses its camera data and copyright.",
+"planned": "0.6 \u00b7 metadata-io"
+},
+{
+"section": "metadata",
+"feature": "File Info: Basic (title, author, description, rating, keywords, copyright status, notice and URL)",
+"where": "File > File Info: Basic",
+"status": "Done",
+"inp": "properties() in file-ops.js with /home/user/claude/pigment/src/renderer/lib/file-info.js; undoable. Author Title and Description Writer fields are absent.",
+"planned": ""
+},
+{
+"section": "metadata",
+"feature": "File Info: Camera Data",
+"where": "File > File Info: Camera Data",
+"status": "Done",
+"inp": "EXIF from JPEG and TIFF shown read-only (file-info.js readExif/describeExif).",
+"planned": ""
+},
+{
+"section": "new-doc",
+"feature": "New Document: Saved presets (save, rename, delete custom document presets)",
+"where": "File > New: Saved tab, Save Preset button",
+"status": "Missing",
+"inp": "No way to save a custom document preset; only the built-in list plus Custom.",
+"planned": "0.9 \u00b7 home-new-doc-browser"
+},
+{
+"section": "new-doc",
+"feature": "New Document: Recent items and Clipboard preset",
+"where": "File > New: Recent tab",
+"status": "Partial",
+"inp": "A Clipboard preset appears when the clipboard holds an image and the last used settings are remembered (settings.newDocPreset). There is no list of recently used sizes.",
+"planned": "0.9 \u00b7 home-new-doc-browser"
+},
+{
+"section": "new-doc",
+"feature": "New Document: units (pixels, inches, cm, mm, points, picas; resolution in px/inch or px/cm)",
+"where": "File > New: Width/Height unit menu, Resolution unit menu",
+"status": "Partial",
+"inp": "Units are px, in, cm, mm only (UNITS in extras.js). No points, picas or columns; resolution is ppi only (no pixels/cm).",
+"planned": "0.9 \u00b7 home-new-doc-browser"
+},
+{
+"section": "new-doc",
+"feature": "New Document: preset categories (Photo, Print, Art & Illustration, Web, Mobile, Film & Video)",
+"where": "File > New: category tabs with blank document presets",
+"status": "Partial",
+"inp": "One flat select of 21 sizes (DOC_PRESETS in extras.js: screen, paper, photo, social, web, icon). No category tabs, no mobile device presets, no Film & Video presets (which also need pixel aspect ratio).",
+"planned": "0.9 \u00b7 home-new-doc-browser"
+},
+{
+"section": "new-doc",
+"feature": "New Document: name, width, height, orientation swap, resolution",
+"where": "File > New (New Document dialog)",
+"status": "Done",
+"inp": "newDocumentDialog in /home/user/claude/pigment/src/renderer/lib/extras.js; limits 30000 px per side, 250 MP; memory summary line.",
+"planned": ""
+},
+{
+"section": "new-doc",
+"feature": "New Document: Background Contents",
+"where": "File > New: Background Contents (White, Black, Background Color, Transparent, Custom)",
+"status": "Done",
+"inp": "All five choices in extras.js, including a custom colour picker.",
+"planned": ""
+},
+{
+"section": "scripting",
+"feature": "Remote Connections",
+"where": "Edit > Remote Connections",
+"status": "Missing",
+"inp": "No remote control service. Photoshop itself has retired this; a local, opt-in automation socket would be the equivalent if wanted.",
+"planned": "0.8 \u00b7 scripting-api"
+},
+{
+"section": "scripting",
+"feature": "Scripts > Browse (run a script) and the scripting engine (ExtendScript, UXP)",
+"where": "File > Scripts > Browse",
+"status": "Missing",
+"inp": "No scripting. Running Adobe .jsx or UXP scripts unmodified is not feasible (proprietary object model); the honest substitute is Pigment's own JavaScript scripting API over the command registry (/home/user/claude/pigment/src/renderer/lib/commands.js), with user script files in a sandbox.",
+"planned": "0.8 \u00b7 scripting-api"
+},
+{
+"section": "scripting",
+"feature": "Scripts > Script Events Manager",
+"where": "File > Scripts > Script Events Manager",
+"status": "Missing",
+"inp": "No way to run an action or script on events (Start Application, Open Document, Save Document...).",
+"planned": "0.8 \u00b7 scripting-api"
+},
+{
+"section": "scripting",
+"feature": "Plugins (UXP and legacy extension panels, Generator, filter plug-ins, plugin manager)",
+"where": "Preferences > Plugins; Plugins menu",
+"status": "Missing",
+"inp": "No plugin system. Loading Adobe UXP/CEP panels or .8bf filters is not feasible (proprietary host APIs); the honest substitute is a Pigment plugin API on the existing filter, adjustment and format registries. Only 'Show all Filter Gallery groups and names' exists, inside the Filter Gallery dialog.",
+"planned": "0.9 \u00b7 plugin-api"
+},
+{
+"section": "type-engine",
+"feature": "Check Spelling",
+"where": "Edit > Check Spelling",
+"status": "Missing",
+"inp": "No spell check for text layers. Electron's built-in Hunspell spellchecker is available offline (spellcheck is already enabled in /home/user/claude/pigment/src/main/main.js for inputs only).",
+"planned": "0.7 \u00b7 type-styles-prefs"
+},
+{
+"section": "type-engine",
+"feature": "Find and Replace Text",
+"where": "Edit > Find and Replace Text",
+"status": "Missing",
+"inp": "No search across text layers.",
+"planned": "0.7 \u00b7 type-styles-prefs"
+},
+{
+"section": "type-engine",
+"feature": "Paste Special > Paste Without Formatting",
+"where": "Edit > Paste Special > Paste Without Formatting (while editing type)",
+"status": "Done",
+"inp": "0.4: Edit \u203a Paste Special \u203a Paste Without Formatting pastes plain text into a type session",
+"planned": "0.4 \u00b7 type-editing"
+},
+{
+"section": "type-engine",
+"feature": "Type preferences (Use Smart Quotes, Enable Missing Glyph Protection, Show Font Names in English, Use ESC key to commit text, glyph alternates, Fill new type layers with placeholder text, recent fonts count, text engine options)",
+"where": "Preferences > Type",
+"status": "Missing",
+"inp": "No type preferences.",
+"planned": "0.7 \u00b7 type-styles-prefs"
+},
+{
+"section": "clipboard",
+"feature": "Paste dialog for vector artwork (Paste As Smart Object, Pixels, Path, Shape Layer)",
+"where": "Edit > Paste (from Illustrator or SVG data)",
+"status": "Missing",
+"inp": "Only bitmap clipboard data is read; SVG or PDF clipboard content is ignored.",
+"planned": "0.7 \u00b7 vector-io"
+},
+{
+"section": "clipboard",
+"feature": "Paste Special > Paste Outside",
+"where": "Edit > Paste Special > Paste Outside",
+"status": "Missing",
+"inp": "Not in the menu or the registry; it is Paste Into with the inverted selection as the mask.",
+"planned": "0.7 \u00b7 edit-clipboard-finish"
+},
+{
+"section": "clipboard",
+"feature": "Copy and paste of whole layers, shapes, paths and styled text between documents",
+"where": "Edit > Copy / Paste with layers selected",
+"status": "Partial",
+"inp": "Text, shape, fill and smart layers are copied as rasterised pixels (copyPixels renders them). There is no clipboard for layer structure, vector data or text attributes; Duplicate to another document is the only route.",
+"planned": "0.7 \u00b7 edit-clipboard-finish"
+},
+{
+"section": "clipboard",
+"feature": "Cut, Copy, Copy Merged",
+"where": "Edit > Cut / Copy / Copy Merged",
+"status": "Done",
+"inp": "/home/user/claude/pigment/src/renderer/lib/edit-ops.js: pixels inside the selection to an internal clipboard and the system clipboard as PNG; works on masks.",
+"planned": ""
+},
+{
+"section": "clipboard",
+"feature": "Paste (new layer, centred in view or selection; new document from clipboard)",
+"where": "Edit > Paste",
+"status": "Done",
+"inp": "edit-ops.js paste; prefers the internal clipboard when it matches the system image.",
+"planned": ""
+},
+{
+"section": "clipboard",
+"feature": "Paste Special > Paste Into",
+"where": "Edit > Paste Special > Paste Into",
+"status": "Done",
+"inp": "edit:paste-into creates the layer with an unlinked mask from the selection.",
+"planned": ""
+},
+{
+"section": "clipboard",
+"feature": "Paste Special > Paste in Place",
+"where": "Edit > Paste Special > Paste in Place",
+"status": "Done",
+"inp": "edit:paste-in-place.",
+"planned": ""
+},
+{
+"section": "layers",
+"feature": "Layer Comps to Files / Layer Comps to PDF",
+"where": "File > Export > Layer Comps to Files, Layer Comps to PDF",
+"status": "Missing",
+"inp": "No layer comps.",
+"planned": "0.8 \u00b7 layer-comps"
+},
+{
+"section": "layers",
+"feature": "Place Linked, linked smart object management (Update Modified Content, Relink to File, Embed Linked) and Package",
+"where": "File > Place Linked, File > Package",
+"status": "Missing",
+"inp": "Smart objects are always embedded; there is no link to an external file, so Package (collect linked files) has nothing to do.",
+"planned": "0.7 \u00b7 linked-smart-objects"
+},
+{
+"section": "layers",
+"feature": "Place Embedded",
+"where": "File > Place Embedded",
+"status": "Partial",
+"inp": "file:place in /home/user/claude/pigment/src/renderer/lib/smart-object.js places the file as a smart object fitted to the canvas (or pixels when the preference is off) and switches to Move. It does not enter a Free Transform session to size and confirm the placement, and PDF/AI cannot be placed; SVG is rasterised rather than kept as a vector smart object.",
+"planned": "0.7 \u00b7 linked-smart-objects"
+},
+{
+"section": "layers",
+"feature": "Auto-Align Layers",
+"where": "Edit > Auto-Align Layers",
+"status": "Done",
+"inp": "align-blend.js: Auto, Perspective, Collage, Cylindrical, Spherical, Reposition, Vignette Removal, Geometric Distortion (estimated from the images, not from lens profiles).",
+"planned": ""
+},
+{
+"section": "layers",
+"feature": "Auto-Blend Layers",
+"where": "Edit > Auto-Blend Layers",
+"status": "Done",
+"inp": "align-blend.js: Panorama or Stack Images, Seamless Tones and Colors, Content Aware Fill Transparent Areas.",
+"planned": ""
+},
+{
+"section": "performance",
+"feature": "Performance: Graphics Processor settings (Use Graphics Processor, advanced modes, 30-bit display), multithreaded compositing",
+"where": "Preferences > Performance: Graphics Processor Settings",
+"status": "Missing",
+"inp": "Rendering is Canvas 2D with pixel code in JavaScript; no GPU pipeline or settings.",
+"planned": "0.11 \u00b7 gpu-pipeline"
+},
+{
+"section": "performance",
+"feature": "Performance: Cache Levels, Cache Tile Size and the document-type optimisation presets",
+"where": "Preferences > Performance: History & Cache",
+"status": "Missing",
+"inp": "No image pyramid or tile cache; the compositor works on full-resolution canvases (/home/user/claude/pigment/src/renderer/lib/compositor.js).",
+"planned": "0.10 \u00b7 tile-store"
+},
+{
+"section": "performance",
+"feature": "Scratch Disks",
+"where": "Preferences > Scratch Disks",
+"status": "Missing",
+"inp": "Everything is held in RAM; no disk-backed storage for pixels or history, so very large documents are limited by memory.",
+"planned": "0.11 \u00b7 scratch-memory-limits"
+},
+{
+"section": "print",
+"feature": "Print One Copy",
+"where": "File > Print One Copy",
+"status": "Missing",
+"inp": "No command; print.js already stores printDefaults, so a silent print with them is small.",
+"planned": "0.8 \u00b7 print"
+},
+{
+"section": "print",
+"feature": "Print Selected Area",
+"where": "File > Print: Position and Size > Print Selected Area",
+"status": "Missing",
+"inp": "Always prints the whole flattened document.",
+"planned": "0.8 \u00b7 print"
+},
+{
+"section": "print",
+"feature": "Print: Printing Marks and Functions (crop and registration marks, description, labels, emulsion down, negative, background, border, bleed)",
+"where": "File > Print: Printing Marks, Functions",
+"status": "Missing",
+"inp": "None of these exist in the print dialog.",
+"planned": "0.8 \u00b7 print"
+},
+{
+"section": "print",
+"feature": "Print: printer, copies, paper, orientation, position and size, scale to fit, preview",
+"where": "File > Print (Photoshop Print Settings)",
+"status": "Done",
+"inp": "/home/user/claude/pigment/src/renderer/lib/print.js and /home/user/claude/pigment/src/main/print.js: printer list, copies, paper sizes and custom, margins, fit/100%/custom scale, centre or offsets, live page preview, Save as PDF.",
+"planned": ""
+},
+{
+"section": "artboards",
+"feature": "Artboards to Files / Artboards to PDF",
+"where": "File > Export > Artboards to Files, Artboards to PDF",
+"status": "Missing",
+"inp": "No artboards.",
+"planned": "0.9 \u00b7 artboards-frames"
+},
+{
+"section": "artboards",
+"feature": "New Document: Artboards checkbox",
+"where": "File > New: Artboards",
+"status": "Missing",
+"inp": "No artboards exist anywhere in Pigment (README 'What it does not do'). Needs the artboard layer type first.",
+"planned": "0.9 \u00b7 artboards-frames"
+},
+{
+"section": "vector",
+"feature": "Define Custom Shape",
+"where": "Edit > Define Custom Shape",
+"status": "Missing",
+"inp": "The Custom Shape tool has a fixed built-in list (/home/user/claude/pigment/src/renderer/lib/tools/vector.js); a path cannot be saved as a new shape.",
+"planned": "0.5 \u00b7 presets-panels"
+},
+{
+"section": "vector",
+"feature": "Paths to Illustrator",
+"where": "File > Export > Paths to Illustrator",
+"status": "Missing",
+"inp": "Paths cannot be exported. An SVG (or simple .ai-compatible PDF) writer for the Paths panel would be the equivalent.",
+"planned": "0.7 \u00b7 vector-io"
+},
+{
+"section": "3d",
+"feature": "3D preferences and 3D features",
+"where": "Preferences > 3D",
+"status": "Missing",
+"inp": "No 3D (README). Adobe has itself retired Photoshop's 3D features, so this is the lowest-value gap in the area.",
+"planned": "0.11 \u00b7 3d-lite"
+},
+{
+"section": "brush-engine",
+"feature": "Define Brush Preset",
+"where": "Edit > Define Brush Preset",
+"status": "Missing",
+"inp": "Brush tips are parametric only (size, hardness, angle, roundness in /home/user/claude/pigment/src/renderer/lib/brush.js); a selection cannot become a sampled brush tip. Needs image-tip support in the brush engine.",
+"planned": "0.5 \u00b7 brush-engine-core"
+},
+{
+"section": "panels",
+"feature": "Import > Notes",
+"where": "File > Import > Notes",
+"status": "Missing",
+"inp": "No Note tool or Notes panel, so nothing to import into.",
+"planned": "0.9 \u00b7 notes-count-measurement"
+},
+{
+"section": "slices",
+"feature": "Save for Web: slices, Slice Select tool, HTML output settings, Preview in browser",
+"where": "Save for Web: toolbox, Preview button, Output Settings",
+"status": "Missing",
+"inp": "No slices in Pigment at all; the dialog has no tools, no HTML output and no browser preview.",
+"planned": "0.10 \u00b7 slices-web-export"
+},
+{
+"section": "view",
+"feature": "New Document: Pixel Aspect Ratio",
+"where": "File > New: Advanced Options > Pixel Aspect Ratio (and View > Pixel Aspect Ratio)",
+"status": "Missing",
+"inp": "No pixel aspect ratio field in the document model or the view.",
+"planned": "0.11 \u00b7 render-video"
+},
+{
+"section": "ai",
+"feature": "Generative Fill",
+"where": "Edit > Generative Fill (and the Contextual Task Bar)",
+"status": "Approximate",
+"inp": "AI > Generative Fill (/home/user/claude/pigment/src/renderer/lib/ai/features.js) sends the selection and a prompt to the user's own OpenAI or Gemini account and adds 1 to 3 result layers. Adobe Firefly itself is not feasible. Missing versus Photoshop: generative layer with variation history in Properties, reference image, the item under the Edit menu and a contextual task bar.",
+"planned": "0.10 \u00b7 generative-features"
+},
+{
+"section": "ai",
+"feature": "Sky Replacement",
+"where": "Edit > Sky Replacement",
+"status": "Approximate",
+"inp": "Only AI > Replace Sky (ai/features.js): a text prompt generates a sky through the user's provider key over a heuristic or selected sky mask. Nothing of Photoshop's dialog: sky preset library and imported sky images, Shift Edge, Fade Edge, sky brightness/temperature/scale/flip, foreground lighting and colour adjustment, output as a layer group with masks. Adobe's sky model and bundled skies are proprietary; an offline version using Select Sky plus a user-supplied sky image and colour harmonisation is buildable.",
+"planned": "0.10 \u00b7 neural-filters-local"
+},
+{
+"section": "ai",
+"feature": "Image Processing (Select Subject and Remove Background on device or cloud, generative Remove tool, Firefly model choice)",
+"where": "Preferences > Image Processing",
+"status": "Not feasible",
+"inp": "These choose between Adobe's device models and Adobe's cloud. Pigment's counterpart is the AI Accounts dialog (/home/user/claude/pigment/src/renderer/lib/ai/accounts.js) for provider and model, with local heuristics for Select Subject and Sky; an open segmentation model the user downloads would be the closest device-side substitute.",
+"planned": ""
+},
+{
+"section": "cloud",
+"feature": "Invite to Edit / Share for Review",
+"where": "File > Invite, File > Share for Review",
+"status": "Not feasible",
+"inp": "Requires Adobe cloud documents and accounts. No substitute beyond exporting a file.",
+"planned": ""
+},
+{
+"section": "cloud",
+"feature": "New Document: templates from Adobe Stock",
+"where": "File > New: Templates section",
+"status": "Not feasible",
+"inp": "Needs Adobe Stock servers and licensed template files. Honest substitute: a local templates folder of .pigment/.psd files offered in the dialog.",
+"planned": ""
+},
+{
+"section": "cloud",
+"feature": "Cloud documents (Save to Creative Cloud, PSDC, offline availability)",
+"where": "File > Save / Save As: Save to cloud documents",
+"status": "Not feasible",
+"inp": "Needs Adobe's cloud storage. Local .pigment files are the substitute; a user-chosen synced folder works with any cloud drive.",
+"planned": ""
+},
+{
+"section": "cloud",
+"feature": "Search Adobe Stock",
+"where": "File > Search Adobe Stock",
+"status": "Not feasible",
+"inp": "Adobe Stock service and licensing. No substitute planned.",
+"planned": ""
+},
+{
+"section": "cloud",
+"feature": "Version History",
+"where": "File > Version History",
+"status": "Not feasible",
+"inp": "Photoshop's versions live with cloud documents. Substitute: local numbered versions or snapshots stored inside the .pigment container or beside the file.",
+"planned": ""
+}
+]

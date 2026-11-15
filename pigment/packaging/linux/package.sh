@@ -23,7 +23,7 @@ set -euo pipefail
 HERE="$ROOT/packaging/linux"
 # shellcheck source=verified-download.sh
 . "$HERE/verified-download.sh"
-APP_ID=ai.storyteller.photocraft
+APP_ID=io.github.nihalpi1212.pigment
 
 SKIP_BUILD=0
 FORMATS="appimage deb rpm tar"

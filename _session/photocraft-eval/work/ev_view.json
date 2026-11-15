@@ -1,0 +1,212 @@
+{
+"0": [
+"Done",
+"ui-egui/src/canvas/rulers.rs:294,608-615 (doc.ruler_origin, view.resetRulerOrigin)",
+"Drag from ruler corner sets zero point, double-click resets",
+"same"
+],
+"1": [
+"Missing",
+"no bird's-eye code (rg 'bird' only hits shapes presets)",
+"Not implemented",
+"neither"
+],
+"2": [
+"Done",
+"ui-egui/src/canvas/zoom_hold.rs; View.request_zoom_animation (state.rs:228); gaps.md G9 #6210",
+"Animated Zoom pref read; held Zoom tool zooms continuously",
+"photocraft"
+],
+"3": [
+"Done",
+"ui-egui/src/prefs/flick_pan.rs, engine prefs flick",
+"Flick Panning preference with inertia",
+"photocraft"
+],
+"4": [
+"Partial",
+"engine/src/proof_sim.rs:14-17,305-312 (view.thirtyTwoBitPreviewOptions); menus/workspace_ui.rs:477",
+"Exposure and Gamma works on 32-bit display; Highlight Compression is accepted but does nothing (canvas texture clamped to 0-1, per proof_sim.rs docs); no status-bar exposure slider found",
+"photocraft"
+],
+"5": [
+"Missing",
+"no Actual Size / physical-DPI zoom command (rg 'actualSize'); only Print Size",
+"Not present (Photoshop's Print Size exists instead)",
+"neither"
+],
+"6": [
+"Done",
+"menus/view_cmds/dispatch.rs:443 fit_layers (arrange.rs)",
+"View > Fit Layer(s) on Screen works",
+"photocraft"
+],
+"7": [
+"Done",
+"dispatch.rs:414; canvas.rs:3552 ViewXform flip",
+"View-only horizontal flip in the view transform",
+"photocraft"
+],
+"8": [
+"Done",
+"ui-egui/src/canvas/pattern_preview.rs (#1067)",
+"Document tiled around itself, up to 31 tiles per axis",
+"same"
+],
+"9": [
+"Partial",
+"dispatch.rs:390 view.pixelAspectRatio.*; options.rs:45 pixel_aspect_ratio; workspace_ui.rs Custom dialog; canvas display_aspect",
+"All presets, Custom and Correction toggle work on the view; no Delete/Reset Pixel Aspect Ratios, ratio is a view setting not stored per document",
+"photocraft"
+],
+"10": [
+"Done",
+"dispatch.rs:430-441 (screen resolution / document ppi)",
+"Uses Preferences screen resolution",
+"photocraft"
+],
+"11": [
+"Partial",
+"dispatch.rs:335 view.show.all; workspace_ui.rs:184 Show Extras Options dialog",
+"All and Show Extras Options exist; no Show > None item",
+"photocraft"
+],
+"12": [
+"Done",
+"tools/analysis_ui.rs:526,537 (count, notes overlays), tools/slice_ui.rs:250",
+"Count tool, notes and slices exist and their overlays follow Show",
+"photocraft"
+],
+"13": [
+"Done",
+"canvas/transform_controls.rs:12 (show.layer_edges)",
+"Layer Edges overlay",
+"photocraft"
+],
+"14": [
+"Partial",
+"engine/src/snap.rs (alignment lines), lib.rs:411 Cmd-hover distances",
+"Alignment and Cmd distances; no equal-spacing guides found",
+"pigment"
+],
+"15": [
+"Done",
+"tools/vector_ui/path_ops.rs:215 (show.target_path), Cmd+Shift+H",
+"Toggle hides the target path",
+"photocraft"
+],
+"16": [
+"Done",
+"dispatch.rs:351 view.snapTo.*; engine/src/snap.rs (artboards offer edges)",
+"Guides, Grid, Layers, Slices, Document Bounds, All, None; artboards snap",
+"photocraft"
+],
+"17": [
+"Partial",
+"panels/options_bar.rs:813 Resize Windows to Fit (zoom_window_fit.rs)",
+"Resize Windows to Fit present; no Zoom All Windows (window.arrange.matchZoom exists separately)",
+"photocraft"
+],
+"18": [
+"Done",
+"canvas/wheel_nav.rs:1-25",
+"Alt+wheel zooms (10% per notch, Shift snaps), Zoom with Scroll Wheel pref, pinch and touch pinch, Ctrl/Shift+wheel sideways",
+"photocraft"
+],
+"19": [
+"Done",
+"canvas/rulers.rs:51-69 (seven units incl. Percent)",
+"All seven ruler units",
+"same"
+],
+"20": [
+"Partial",
+"canvas/rotate_view.rs:3-19 (Shift 15 degrees, compass, Reset View); options_bar.rs:845 angle field",
+"Has the on-canvas compass; no Rotate All Windows option (window.arrange.matchRotation instead)",
+"photocraft"
+],
+"21": [
+"Done",
+"input/hold_keys.rs:3-8; input/spring_tools.rs (#2672)",
+"Space, Cmd/Ctrl+Space, Alt+Space, spring-loaded tool keys",
+"same"
+],
+"22": [
+"Done",
+"menus/view_cmds.rs:156 shows() = extras && flag, gates guides, layer edges, slices, count, notes, target path",
+"Real master toggle over the Show items",
+"photocraft"
+],
+"23": [
+"Partial",
+"view_cmds/options.rs:69-73 flags brushPreview/mesh/editPins",
+"Menu toggles exist but the mesh, editPins and brushPreview flags are not read by any canvas code",
+"same"
+],
+"24": [
+"Done",
+"menu view.snap (Cmd+Shift+;); engine/src/snap.rs",
+"Snap master toggle",
+"same"
+],
+"25": [
+"Done",
+"panels/status_bar.rs:33-38 zoom field",
+"Editable zoom percentage",
+"same"
+],
+"26": [
+"Done",
+"view.actualPixels (Cmd+1), view.twoHundredPercent dispatch.rs:430",
+"",
+"same"
+],
+"27": [
+"Done",
+"view.fitOnScreen (Cmd+0)",
+"",
+"same"
+],
+"28": [
+"Done",
+"view.rulers; canvas/rulers.rs",
+"",
+"same"
+],
+"29": [
+"Done",
+"view.show.grid",
+"",
+"same"
+],
+"30": [
+"Done",
+"view.show.guides",
+"",
+"same"
+],
+"31": [
+"Done",
+"view.show.pixelGrid; canvas/pixel_grid.rs",
+"",
+"same"
+],
+"32": [
+"Done",
+"view.show.selectionEdges",
+"",
+"same"
+],
+"33": [
+"Done",
+"view.zoomIn / view.zoomOut; canvas/zoom_levels.rs",
+"",
+"same"
+],
+"34": [
+"Done",
+"panels/options_bar.rs:816 Scrubby Zoom checkbox; hold_keys scrubby drag",
+"",
+"same"
+]
+}

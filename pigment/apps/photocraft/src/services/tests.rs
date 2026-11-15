@@ -226,8 +226,8 @@ fn native_services_provide_update_transport() {
 #[test]
 fn xwayland_command_matches_how_photocraft_was_installed() {
     // Flatpak: WAYLAND_DISPLAY doesn't reach the sandbox's socket choice; flatpak's flags do.
-    let flatpak = xwayland_command(Some("ai.storyteller.photocraft"), None, false);
-    assert_eq!(flatpak.as_deref(), Some("flatpak run --nosocket=wayland --socket=x11 ai.storyteller.photocraft"));
+    let flatpak = xwayland_command(Some("io.github.nihalpi1212.pigment"), None, false);
+    assert_eq!(flatpak.as_deref(), Some("flatpak run --nosocket=wayland --socket=x11 io.github.nihalpi1212.pigment"));
     // AppImage: its own path, quoted for the shell (spaces, quotes).
     let appimage = xwayland_command(None, Some("/home/me/My Apps/it's.AppImage"), true);
     assert_eq!(appimage.as_deref(), Some(r"WAYLAND_DISPLAY= '/home/me/My Apps/it'\''s.AppImage'"));
@@ -998,11 +998,11 @@ fn psb_is_its_own_save_type() {
 #[test]
 fn save_types_list_the_document_formats_then_the_rest_by_name() {
     let names: Vec<&str> = SAVE_FILTERS.iter().map(|(name, _)| *name).collect();
-    assert_eq!(names[..3], ["PSD Document", "PSB Large Document", "PhotoCraft"]);
+    assert_eq!(names[..3], ["PSD Document", "PSB Large Document", "Pigment"]);
     let key = |name: &&str| name.to_ascii_lowercase();
     assert!(names[3..].is_sorted_by_key(key), "{:?}", &names[3..]);
     let names: Vec<&str> = OPEN_FILTERS.iter().map(|(name, _)| *name).collect();
-    assert_eq!(names[..2], ["Photoshop", "PhotoCraft"]);
+    assert_eq!(names[..2], ["Photoshop", "Pigment"]);
     let formats = names.iter().position(|name| *name == "Brushes").expect("the app's own resources");
     assert!(names[2..formats].is_sorted_by_key(key), "{:?}", &names[2..formats]);
 }

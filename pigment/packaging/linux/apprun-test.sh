@@ -8,7 +8,7 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
-APP_ID=ai.storyteller.photocraft
+APP_ID=io.github.nihalpi1212.pigment
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT

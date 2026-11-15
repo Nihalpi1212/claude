@@ -215,7 +215,7 @@ pub fn missing_message(session: DisplaySession, missing: &[AnyOf], distro: Distr
             packages.push(p);
         }
     }
-    let mut msg = format!("photocraft: cannot start: the {session_name} session needs libraries that are not installed: {}.\n", names.join(", "));
+    let mut msg = format!("pigment: cannot start: the {session_name} session needs libraries that are not installed: {}.\n", names.join(", "));
     msg.push_str(&format!("Install them with:\n  {}\n", install_command(&packages, distro)));
     if distro == Distro::Unknown {
         let fedora: Vec<&str> = missing.iter().filter_map(|any| any.first()).map(|l| l.fedora).collect();

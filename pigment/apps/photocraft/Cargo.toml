@@ -3,9 +3,15 @@ name = "photocraft"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-default-run = "photocraft"
-description = "PhotoCraft: an open-source, native image editor"
+default-run = "pigment"
+description = "Pigment: a free, open-source image editor based on PhotoCraft"
 build = "build.rs"
+autobins = false
+
+# The shipped binary is `pigment` (the package keeps PhotoCraft's name so upstream changes merge).
+[[bin]]
+name = "pigment"
+path = "src/main.rs"
 
 [features]
 # Open HEIC/HEIF photos (the optional craft-heif crate). Not default so distributors choose

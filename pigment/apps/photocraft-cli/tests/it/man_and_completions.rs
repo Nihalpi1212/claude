@@ -13,7 +13,7 @@ fn command_is_consistent() {
 fn completions_generate_for_every_shell() {
     for &shell in Shell::value_variants() {
         let mut out = Vec::new();
-        clap_complete::generate(shell, &mut photocraft_cli::command(), "photocraft-cli", &mut out);
+        clap_complete::generate(shell, &mut photocraft_cli::command(), "pigment-cli", &mut out);
         assert!(!out.is_empty(), "{shell}");
     }
 }
@@ -38,16 +38,16 @@ fn the_example_writes_the_files_the_packages_install() {
     std::fs::create_dir_all(&dir).unwrap();
     let mut cmd = photocraft_cli::command();
     for &shell in Shell::value_variants() {
-        clap_complete::generate_to(shell, &mut cmd, "photocraft-cli", &dir).unwrap();
+        clap_complete::generate_to(shell, &mut cmd, "pigment-cli", &dir).unwrap();
     }
     clap_mangen::generate_to(photocraft_cli::command(), &dir).unwrap();
 
     let mut written: Vec<String> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
     written.sort();
-    let completions = ["photocraft-cli.bash", "_photocraft-cli", "photocraft-cli.fish", "photocraft-cli.elv", "_photocraft-cli.ps1"];
+    let completions = ["pigment-cli.bash", "_photocraft-cli", "pigment-cli.fish", "pigment-cli.elv", "_photocraft-cli.ps1"];
     let subcommands = ["convert", "info", "run", "batch", "droplet", "commands", "mcp", "serve"];
     let mut expected: Vec<String> = completions.map(String::from).into();
-    expected.push("photocraft-cli.1".into());
+    expected.push("pigment-cli.1".into());
     expected.extend(subcommands.iter().map(|s| format!("photocraft-cli-{s}.1")));
     expected.sort();
     assert_eq!(written, expected);

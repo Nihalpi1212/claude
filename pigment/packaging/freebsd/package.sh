@@ -16,7 +16,7 @@ set -euo pipefail
 # shellcheck source=../env.sh
 . "$(dirname "${BASH_SOURCE[0]}")/../env.sh"
 LINUX="$ROOT/packaging/linux"
-APP_ID=ai.storyteller.photocraft
+APP_ID=io.github.nihalpi1212.pigment
 
 SKIP_BUILD=0
 DRY_RUN=0

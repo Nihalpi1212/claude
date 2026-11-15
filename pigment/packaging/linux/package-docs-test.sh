@@ -107,7 +107,7 @@ for index, arg in enumerate(args[:-1]):
     cargo.chmod(0o755)
     env["PATH"] = str(tools) + os.pathsep + env["PATH"]
     for suffix, directory in ((".yml", fixture), (".bundle.yml", bundle)):
-        manifest = yaml.safe_load((root / f"packaging/linux/flatpak/ai.storyteller.photocraft{suffix}").read_text())
+        manifest = yaml.safe_load((root / f"packaging/linux/flatpak/io.github.nihalpi1212.pigment{suffix}").read_text())
         app = temp / ("flatpak-source" if suffix == ".yml" else "flatpak-bundle")
         # Other modules, such as cups-client, build their own sources; only photocraft is checked here.
         module = next(m for m in manifest["modules"] if isinstance(m, dict) and m.get("name") == "photocraft")

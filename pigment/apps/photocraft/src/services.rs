@@ -42,7 +42,7 @@ fn open_filter_extensions(extensions: &[&str]) -> Vec<String> {
 /// picker defaults to another filter.
 const OPEN_FILTERS: &[(&str, &[&str])] = &[
     ("Photoshop", &["psd", "psb", "psdt"]),
-    ("PhotoCraft", &["pcraft"]),
+    ("Pigment", &["pcraft"]),
     ("Affinity", &["af", "afdesign", "afphoto", "afpub"]),
     ("Amiga IFF", &["iff", "lbm", "ilbm"]),
     ("BMP", &["bmp", "dib"]),
@@ -92,7 +92,7 @@ fn open_filters() -> Vec<(&'static str, Vec<String>)> {
 const SAVE_FILTERS: &[(&str, &[&str])] = &[
     ("PSD Document", &["psd", "psb"]),
     ("PSB Large Document", &["psb"]),
-    ("PhotoCraft", &["pcraft"]),
+    ("Pigment", &["pcraft"]),
     ("Amiga IFF", &["iff"]),
     ("BMP", &["bmp", "dib"]),
     ("Cineon", &["cin"]),
@@ -400,9 +400,14 @@ fn shader_compiler_identity() -> String {
 }
 
 /// The brush preset store (one file per preset group plus tip bitmaps; see
-/// `photocraft_engine::preset_store`).
+/// `photocraft_engine::preset_store`). PhotoCraft calls it `Presets`; Pigment's settings folder
+/// is also the Electron userData folder of Pigment 0.1–0.4 on Windows and macOS, whose `presets`
+/// (the same folder on those file systems) holds other files of the same names (docs/FORK.md).
+pub const PRESETS_DIR: &str = "Preset Library";
+
+/// [`PRESETS_DIR`] in the settings folder.
 pub fn presets_dir() -> Option<PathBuf> {
-    config_dir().map(|d| d.join("Presets"))
+    config_dir().map(|d| d.join(PRESETS_DIR))
 }
 
 /// Crash-recovery autosaves: under the settings directory, except where that is synced with the

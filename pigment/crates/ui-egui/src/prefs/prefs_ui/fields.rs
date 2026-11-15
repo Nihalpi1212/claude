@@ -58,7 +58,7 @@ pub(super) fn humanize(key: &str) -> String {
         "connectAgents" => return "Let AI agents connect (MCP)".into(),
         "readRoot" => return "Folder agents can open from".into(),
         "writeRoot" => return "Folder agents can save to".into(),
-        "whenAppClosed" => return "When PhotoCraft is closed".into(),
+        "whenAppClosed" => return "When Pigment is closed".into(),
         _ => {}
     }
     if key == "notificationDurationSeconds" {
@@ -136,9 +136,9 @@ pub(super) fn choice_label(v: &str) -> String {
         "mhc" => "Malvar–He–Cutler".into(),
         "cpu" => "CPU (no GPU acceleration)".into(),
         // MCP › When PhotoCraft is closed.
-        "launch" => "Open PhotoCraft".into(),
+        "launch" => "Open Pigment".into(),
         "headless" => "Work without a window".into(),
-        "error" => "Ask to open PhotoCraft".into(),
+        "error" => "Ask to open Pigment".into(),
         v => humanize(v),
     }
 }
@@ -265,7 +265,7 @@ fn prefs_body(ui: &mut egui::Ui, f: &mut Map<String, Value>, system: Option<egui
                     f.get("__order").and_then(|o| o.get(&section)).and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default();
                 if !has_visible_fields(&values, &section) {
                     ui.add_space(4.0);
-                    ui.label(RichText::new(tl!("These settings aren't available in PhotoCraft yet.")).color(t.text_faint));
+                    ui.label(RichText::new(tl!("These settings aren't available in Pigment yet.")).color(t.text_faint));
                 } else if section == "integrations"
                     && f.get("__agentLink").and_then(|s| s.get("mcpFlag")).and_then(Value::as_bool) == Some(true)
                     && let Some(obj) = values.get_mut(&section).and_then(Value::as_object_mut)
@@ -616,7 +616,7 @@ fn field_rows(ui: &mut egui::Ui, section: &str, obj: &mut Map<String, Value>, ke
                     if scratch.free_space_unmeasured {
                         let dir = scratch.dir.as_deref().map(|p| p.display().to_string()).unwrap_or_else(|| tl!("Unknown").into());
                         let warning = crate::i18n::fmt(
-                            tl!("The current scratch directory ({path}) doesn't report its free space, so PhotoCraft can't stop before it fills up, and large files get no extra room from it without a Scratch Size Limit. This warning applies to the current configuration; changes above take effect on Apply or OK. Set a limit or use a local disk."),
+                            tl!("The current scratch directory ({path}) doesn't report its free space, so Pigment can't stop before it fills up, and large files get no extra room from it without a Scratch Size Limit. This warning applies to the current configuration; changes above take effect on Apply or OK. Set a limit or use a local disk."),
                             &[("path", &dir)],
                         );
                         ui.add(egui::Label::new(RichText::new(warning).color(t.warning)).wrap());

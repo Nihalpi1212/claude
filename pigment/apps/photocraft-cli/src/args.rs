@@ -22,7 +22,7 @@ use serde_json::Value;
 
 /// photocraft-cli: headless PhotoCraft
 #[derive(Parser)]
-#[command(name = "photocraft-cli", version = photocraft_engine::build_info::long_version_static(), arg_required_else_help = true)]
+#[command(name = "pigment-cli", version = photocraft_engine::build_info::long_version_static(), arg_required_else_help = true)]
 pub(crate) struct Cli {
     #[command(subcommand)]
     pub(crate) command: Command,
@@ -502,10 +502,10 @@ pub(crate) fn parse(args: &[OsString]) -> Result<Cli, clap::Error> {
     if args.first().is_some_and(|a| a == "mcp") && args.iter().take_while(|a| *a != "--").any(|a| a == "--headless") {
         cmd = cmd.mut_subcommand("mcp", |sub| sub.mut_arg("bridge", |arg| arg.env(None::<&str>)));
     }
-    let argv = std::iter::once(OsString::from("photocraft-cli")).chain(args.iter().cloned());
+    let argv = std::iter::once(OsString::from("pigment-cli")).chain(args.iter().cloned());
     let matches = match cmd.try_get_matches_from_mut(argv) {
         Err(e) if args.iter().take_while(|a| *a != "--").any(|a| *a == "--help" || *a == "-h") => {
-            let help = [OsString::from("photocraft-cli"), args.first().cloned().unwrap_or_default(), OsString::from("--help")];
+            let help = [OsString::from("pigment-cli"), args.first().cloned().unwrap_or_default(), OsString::from("--help")];
             return Err(cmd.try_get_matches_from_mut(help).err().unwrap_or(e));
         }
         matches => matches.map_err(|e| name_env_vars(e, &cmd, args))?,

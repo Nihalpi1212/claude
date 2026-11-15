@@ -10,7 +10,7 @@ app_dir="$test_dir/PhotoCraft test.AppDir"
 mkdir -p "$app_dir/usr/bin" "$app_dir/usr/share/applications"
 cp "$HERE/AppRun" "$app_dir/AppRun"
 printf '[Desktop Entry]\nType=Application\nName=PhotoCraft\nExec=photocraft %%F\n' \
-  >"$app_dir/usr/share/applications/ai.storyteller.photocraft.desktop"
+  >"$app_dir/usr/share/applications/io.github.nihalpi1212.pigment.desktop"
 cat >"$app_dir/usr/bin/photocraft" <<'EOF'
 #!/bin/sh
 printf 'gui\n'
@@ -64,7 +64,7 @@ status=0
 # GUI invocations still forward all arguments; only a leading --cli is a selector.
 out="$("$app_dir/AppRun" 'input file.png' --cli)"
 [[ "$out" = $'gui\n<input file.png>\n<--cli>' ]] || fail "GUI arguments changed: $out"
-[[ -f "$XDG_DATA_HOME/applications/ai.storyteller.photocraft.desktop" ]] || fail "GUI integration lost"
+[[ -f "$XDG_DATA_HOME/applications/io.github.nihalpi1212.pigment.desktop" ]] || fail "GUI integration lost"
 out="$(ARGV0=another-photocraft-cli "$app_dir/AppRun" mcp)"
 [[ "$out" = $'gui\n<mcp>' ]] || fail "an unrelated filename selected CLI"
 

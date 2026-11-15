@@ -130,7 +130,7 @@ pub(crate) struct FieldWheel;
 
 impl egui::plugin::Plugin for FieldWheel {
     fn debug_name(&self) -> &'static str {
-        "PhotoCraft field wheel"
+        "Pigment field wheel"
     }
 
     fn on_begin_pass(&mut self, ui: &mut Ui) {
