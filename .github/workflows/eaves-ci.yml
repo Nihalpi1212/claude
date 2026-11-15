@@ -1,5 +1,5 @@
 # Eaves (eaves/): unit tests, a universal build of the Mac app, and a run of the real app on the
-# runner to check that it draws. The built app is uploaded as the "Eaves-mac" artifact.
+# runner that compares screenshots to check that it draws. The built app is uploaded as the "Eaves-mac" artifact.
 #
 # The build is signed ad hoc, not with an Apple Developer ID, so macOS asks for confirmation the
 # first time it is opened; see eaves/README.md.
@@ -37,20 +37,19 @@ jobs:
       - name: Build the app (Apple silicon and Intel)
         run: UNIVERSAL=1 ./scripts/build-app.sh
 
-      - name: Run the app and check that it draws
+      # Launches the real app over a TextEdit window, screenshots the screen before and while it
+      # snows, and prints what changed: the log shows whether snow was drawn, and where.
+      - name: Run the app and check what it draws
         run: |
           open -a TextEdit || true
-          sleep 3
-          build/Eaves.app/Contents/MacOS/Eaves --selftest 20
-
-      - name: Screenshot of the app running
-        continue-on-error: true
-        run: |
-          build/Eaves.app/Contents/MacOS/Eaves --scene snow &
+          sleep 4
+          screencapture -x build/before.png
+          build/Eaves.app/Contents/MacOS/Eaves --selftest 30 &
           APP_PID=$!
-          sleep 25
+          sleep 24
           screencapture -x build/screenshot.png
-          kill "$APP_PID" || true
+          wait "$APP_PID"
+          swift scripts/screen-diff.swift build/before.png build/screenshot.png
 
       - name: Upload the app
         uses: actions/upload-artifact@v4
