@@ -97,9 +97,24 @@ folder on the case-insensitive file systems Windows and macOS use by default, an
 `<name>.json` files there with different contents. Pigment 0.5 names its folder `Preset Library`
 (`PRESETS_DIR` in `apps/photocraft/src/services.rs`). Nothing else shares a name: Chromium's
 `Preferences` has no extension, PhotoCraft's `preferences.json` has one, and Electron writes no
-`logs`, `Recovery` or `ui.ron`. Both apps can be installed side by side (`com.pigmentapp.app` and
-`io.github.nihalpi1212.pigment` are different application ids, and the installers differ), and
-Pigment 0.5 reads none of the JavaScript app's files.
+`logs`, `Recovery` or `ui.ron`. `com.pigmentapp.app` and `io.github.nihalpi1212.pigment` are
+different application ids, and Pigment 0.5 reads none of the JavaScript app's files.
+
+**Install locations do clash.** The JavaScript app's installers used the same places Pigment 0.5's
+use by default, so installing 0.5 there replaces 0.4 instead of installing beside it:
+
+- Windows: electron-builder's assisted NSIS installer put Pigment 0.4 in
+  `%LOCALAPPDATA%\Programs\Pigment` (for one user) or `C:\Program Files\Pigment` (for everyone),
+  the folders the MSI picks for "Only for me" and "Everyone". The MSI then writes `pigment.exe` over
+  0.4's `Pigment.exe` (Windows names ignore case), and 0.4's uninstaller later deletes the whole
+  folder, Pigment 0.5's files included. Both also add a Start menu shortcut named `Pigment`.
+- macOS: both DMGs hold `Pigment.app`; dragging 0.5 to Applications replaces 0.4.
+- Linux: the AppImages have different file names and can be kept side by side.
+
+The README and the 0.5.0 release notes tell 0.4 users to export their `.pigment` documents (PSD or
+PNG) before installing 0.5, or to install 0.5 in another folder (the MSI's folder page, or another
+folder on macOS). Changing the default install folder or the app bundle name is left as a decision
+for a later release.
 
 There are no separate fonts, plug-ins, scripts or templates folders: PhotoCraft reads system fonts,
 loads plug-ins and scripts from where the user opens them, and keeps templates in its presets.
@@ -130,7 +145,8 @@ Pigment never downloads or installs anything and makes no network request on its
   (`crates/ui-egui/src/updates_ui.rs`); it is always enabled, and fetches nothing.
 - The once-per-launch check is gone: the desktop app has no update service (`check_updates` and
   `last_update` are `None` in `apps/photocraft/src/services.rs`), and `updates_ui::tick` starts no
-  check whatever **Automatically Check for Updates** says. craft-update's release window stays
+  check. **Automatically Check for Updates** is hidden from Preferences
+  (`prefs::HIDDEN_UNTIL_IMPLEMENTED`; the setting still loads and saves). craft-update's release window stays
   compiled in, pointed at Pigment's repository and ids (`UPDATE_APP` in
   `crates/ui-egui/src/lib.rs`). `apps/photocraft/src/updates.rs` (PhotoCraft's checker) is kept for
   merges but not wired in, and the Windows update helper (`--finish-update`) is not wired in.
@@ -171,7 +187,10 @@ Every place in the shipped code that can reach another machine, and what Pigment
   (gamma 1.732, PhotoCraft)`, `PhotoCraft Coated CMYK`), the hidden font-face aliases
   (`.PhotoCraft-face-…`), the case-sensitivity probe file.
 - Environment variables (`PHOTOCRAFT_CONFIG_DIR`, `PHOTOCRAFT_CONTROL_PORT`, `PHOTOCRAFT_BUILD_SHA`, …)
-  and the log targets (`photocraft::…`, `RUST_LOG=photocraft=debug`).
+  and the library crates' log targets (`photocraft_engine::…`). The desktop binary is `pigment`, so
+  its own modules log as `pigment::…` (`RUST_LOG=pigment=debug`); the default filter
+  (`apps/photocraft/src/logging.rs`) shows `info` for both `photocraft*` and `pigment*`. A second
+  instance's log is `pigment-<pid>.log`.
 - The id the ArtCraft Launcher would know PhotoCraft by (`LAUNCHER_APP_ID`), unused.
 - Comments, PhotoCraft's docs, `book/`, changelogs and roadmap, the contributor credits
   (`contributors/`, Help › About › Contributors), `NOTICE`'s upstream text, `ATTRIBUTION.md`'s rows
@@ -190,7 +209,7 @@ the rebrand (counts of matching lines, 2026-11-15):
 | Crate, package, module and type identifiers in Rust code (`photocraft_*`, `photocraft-*`, `PhotocraftApp`, `photocraft::` log targets) | ~25,700 lines | keep (internal) |
 | Environment variables `PHOTOCRAFT_*` (code, scripts, docs) | 577 | keep (internal interface) |
 | `Cargo.toml` and `Cargo.lock` (package names, `storytold/craft-libs`, `storytold/egui` and other dependency sources) | 511 | keep (internal names, dependencies) |
-| `PhotoCraft` as a word in Rust code outside comments | 29 lines | keep: the XMP toolkit marker and its tests, profile descriptions documents carry, the font-face alias and case probe, the upstream link, credit and version line (`brand.rs`, `links.rs`, `shell_commands.rs`), the copyright in the Windows resources, the catalog rebrand (`build.rs`), the example plug-in's author, developer tooling (`xtask`), tests of those |
+| `PhotoCraft` as a word in Rust code outside comments | 30 lines | keep: the XMP toolkit marker and its tests, profile descriptions documents carry, the font-face alias and case probe, the upstream link, credit and version line (`brand.rs`, `links.rs`, `shell_commands.rs`), the copyright in the Windows resources, the catalog rebrand (`build.rs`), the example plug-in's author, developer tooling (`xtask`), tests of those (including the test that the embedded catalogues name neither) |
 | `ArtCraft` in Rust code outside comments | 6 lines | keep: the credit line in About, the never-wired launcher watch (`apps/photocraft/src/agent_link.rs`), a test that the launcher is gone |
 | Packaging (`packaging/`) | 147 lines | keep: environment variables, `-p photocraft` package names, `apps/photocraft*` paths, WiX element ids (`PhotocraftExe`, …), the web build's `photocraft-web` file names and `photocraft-parts` marker, `.pcraft`'s own types (`application/x-photocraft`, `ai.storyteller.photocraft.document`, "PhotoCraft Document"), the craft-i18n and craft-fonts sources, credits and comments, the ArtCraft Launcher's own install-policy mode in `check-install-policy.ps1` (unused by Pigment) |
 | README, NOTICE, ATTRIBUTION.md, this page, the release notes | 204 | keep: credits, upstream links, upstream notice and asset rows |
@@ -273,3 +292,10 @@ the release notes.
    [clash table](#the-settings-folder-and-pigment-01-04).
 8. Build and test the packages the merge touched (`cargo build -p photocraft -p photocraft-cli`,
    `cargo test -p …`), and run `pigment --version` and `pigment-cli --version`.
+9. Check `scripts/upstream-test-failures.txt`. It lists the 60 integration tests (in
+   photocraft-format, photocraft-io and photocraft-raw) that already fail on PhotoCraft's own tree
+   at the imported revision, because they were written for an earlier craft-libs than the one its
+   Cargo.lock pins; Pigment changes none of the code they exercise. `pigment-ci.yml` skips exactly
+   those names in its Tests step and runs them on their own in a step that doesn't fail the job.
+   Remove the lines of the tests that pass after the merge, and never add a test that the rebrand
+   broke: fix that one.
