@@ -394,12 +394,11 @@ export class ToolManager {
         break;
       }
       case 'color': {
-        const input = document.createElement('input');
-        input.type = 'color';
-        input.value = value ?? spec.default ?? '#000000';
-        input.addEventListener('input', () => set(input.value));
-        wrap.appendChild(input);
-        control = { input };
+        // the `color` widget (lib/fields.js, S7.3; the stub is 0.4's colour input): its live input sets the option,
+        // as 0.4's `input` event did
+        const widget = createWidget('color', {}, { app: this.app, value: value ?? spec.default ?? '#000000', onInput: (v) => set(v) });
+        wrap.appendChild(widget.element);
+        control = { widget };
         break;
       }
       case 'segment': {
