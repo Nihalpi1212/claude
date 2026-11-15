@@ -1,11 +1,10 @@
-// Shared dialogs installed last: New Document (app.newDocumentDialog), the colour picker
-// (app.pickColor) and Preferences (app.preferencesDialog).
+// Shared dialogs installed last: New Document (app.newDocumentDialog) and Preferences (app.preferencesDialog). The
+// colour picker (app.pickColor, app.colorPicker) moved to lib/color-picker.js in 0.5 (S7.1).
 import { icon } from './icons.js';
 import { bridge } from './bridge.js';
 import { formDialog } from './form.js';
-import { createColorWidget, normHex } from './panels/color.js';
-import { parseColor, rgbaToHex, rgbToLab, labToRgb, rgbToCmyk, cmykToRgb } from '../../shared/pixels/color.js';
-import { DEFAULT_SETTINGS, DEFAULT_SWATCHES } from '../../shared/defaults.js';
+import { normHex } from './panels/color.js';
+import { DEFAULT_SETTINGS } from '../../shared/defaults.js';
 import { SRGB, profileById, profilesList } from './color/pipeline.js';
 
 const MAX_SIDE = 30000;
@@ -270,132 +269,6 @@ async function newDocumentDialog(app, arg, ctx = null) {
   return createFromOptions(app, opts);
 }
 
-// ---- colour picker ---------------------------------------------------------------------------------------------
-function pickColor(app, initial, { title = 'Color Picker', live } = {}) {
-  const start = normHex(initial ?? app.settings.foreground);
-  let current = start;
-  let liveRaf = 0;
-  let liveHex = null;
-  const pushLive = (hex) => {
-    if (typeof live !== 'function') return;
-    liveHex = hex;
-    if (liveRaf) return;
-    liveRaf = requestAnimationFrame(() => {
-      liveRaf = 0;
-      try {
-        live(liveHex);
-      } catch (err) {
-        console.error(err);
-      }
-    });
-  };
-
-  const content = document.createElement('div');
-  content.className = 'color-dialog';
-  const widget = createColorWidget({
-    value: start,
-    large: true,
-    onChange: (hex) => {
-      current = hex;
-      showNew();
-      pushLive(hex);
-    },
-  });
-  const side = document.createElement('div');
-  side.className = 'color-dialog-side';
-  side.innerHTML = `
-    <div class="cp-compare" aria-label="New and current colour">
-      <span class="muted">new</span>
-      <div class="cp-swatches"><span class="cp-new"></span><button type="button" class="cp-old" title="Click to go back to the current colour"></button></div>
-      <span class="muted">current</span>
-    </div>
-    <div class="color-fields cp-modes" style="grid-template-columns: repeat(4, 1fr)" aria-label="Lab and CMYK">
-      <label title="Lightness (0–100)">L <input class="input" data-m="L" type="number" min="0" max="100" step="1"></label>
-      <label title="a (green–red)">a <input class="input" data-m="a" type="number" min="-128" max="127" step="1"></label>
-      <label title="b (blue–yellow)">b <input class="input" data-m="b" type="number" min="-128" max="127" step="1"></label>
-      <label title="Cyan (%)">C <input class="input" data-m="c" type="number" min="0" max="100" step="1"></label>
-      <label title="Magenta (%)">M <input class="input" data-m="m" type="number" min="0" max="100" step="1"></label>
-      <label title="Yellow (%)">Y <input class="input" data-m="y" type="number" min="0" max="100" step="1"></label>
-      <label title="Black (%)">K <input class="input" data-m="k" type="number" min="0" max="100" step="1"></label>
-    </div>
-    <div class="cp-quick-title muted">Recent and swatches</div>
-    <div class="cp-quick"></div>
-    <button type="button" class="btn small cp-add">${icon('plus')} Add to Swatches</button>`;
-  const newSw = side.querySelector('.cp-new');
-  const oldSw = side.querySelector('.cp-old');
-  oldSw.style.background = start;
-  // Lab and CMYK readouts/fields (lib/color-modes.js owns the maths): typing in one converts back to RGB
-  const modes = Object.fromEntries([...side.querySelectorAll('[data-m]')].map((i) => [i.dataset.m, i]));
-  const showModes = () => {
-    const [r, g, b] = parseColor(current);
-    const lab = rgbToLab(r, g, b), cmyk = rgbToCmyk(r, g, b);
-    const vals = { L: lab[0], a: lab[1], b: lab[2], c: cmyk[0], m: cmyk[1], y: cmyk[2], k: cmyk[3] };
-    for (const [k, input] of Object.entries(modes)) if (document.activeElement !== input) input.value = String(Math.round(vals[k]));
-  };
-  const commitMode = (key) => {
-    const n = (k) => Number(modes[k].value);
-    if (Object.values(modes).some((i) => i.value === '' || !Number.isFinite(Number(i.value)))) return;
-    const rgb = 'Lab'.includes(key) ? labToRgb(n('L'), n('a'), n('b')) : cmykToRgb(n('c'), n('m'), n('y'), n('k'));
-    choose(rgbaToHex(rgb.map((v) => Math.round(v))));
-  };
-  for (const [k, input] of Object.entries(modes)) {
-    input.addEventListener('change', () => commitMode(k));
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') commitMode(k);
-    });
-  }
-  const showNew = () => {
-    newSw.style.background = current;
-    showModes();
-  };
-  const choose = (hex) => {
-    current = normHex(hex);
-    widget.set(current);
-    showNew();
-    pushLive(current);
-  };
-  oldSw.addEventListener('click', () => choose(start));
-  const quick = side.querySelector('.cp-quick');
-  const recent = (app.settings.recentColors ?? []).map(normHex);
-  const palette = app.settings.swatchesEdited || app.settings.swatches?.length ? app.settings.swatches : DEFAULT_SWATCHES;
-  const seen = new Set();
-  for (const c of [...recent, ...(palette ?? []).map((s) => normHex(typeof s === 'string' ? s : s?.color))]) {
-    if (seen.has(c) || seen.size >= 30) continue;
-    seen.add(c);
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.className = 'swatch';
-    b.style.background = c;
-    b.title = c;
-    b.addEventListener('click', () => choose(c));
-    quick.appendChild(b);
-  }
-  side.querySelector('.cp-add').addEventListener('click', (e) => {
-    const list = (app.settings.swatchesEdited || app.settings.swatches?.length ? app.settings.swatches : DEFAULT_SWATCHES).slice();
-    list.push(current);
-    app.saveSettingsSoon({ swatches: list, swatchesEdited: true });
-    app.emit('swatches:changed', list);
-    e.currentTarget.textContent = 'Added';
-    e.currentTarget.disabled = true;
-  });
-  showNew();
-  content.append(widget.element, side);
-
-  return app.dialogs
-    .open({
-      title,
-      content,
-      width: 520,
-      className: 'color-picker-dialog',
-      buttons: [{ label: 'Cancel', value: null }, { label: 'OK', value: true, primary: true }],
-    })
-    .then((ok) => {
-      cancelAnimationFrame(liveRaf);
-      liveRaf = 0;
-      return ok ? normHex(current) : null;
-    });
-}
-
 // ---- preferences ---------------------------------------------------------------------------------------------
 // Preferences are a registry of sections (ARCHITECTURE.md "0.4 features", L.2; E20), shown in order as one form (0.3's
 // look): app.preferences.registerSection({ id, title, order, fields: FieldSpec[], read(settings) -> values,
@@ -568,7 +441,6 @@ export function install(app) {
   app.newDocumentDialog = (arg, ctx) => newDocumentDialog(app, arg, ctx);
   // actions (lib/actions.js): File > New is a dialog command that reports its settings (app.js registers it without ctx)
   app.commands.register('file:new', { dialog: true, run: (arg, ctx) => newDocumentDialog(app, arg, ctx) });
-  app.pickColor = (initial, opts) => pickColor(app, initial, opts);
   // app.preferences is created in the App constructor (before MODULES); a section a package registered first is kept
   for (const sec of BUILTIN_PREF_SECTIONS) app.preferences.registerSection(sec, { builtin: true });
   app.preferencesDialog = () => preferencesDialog(app);

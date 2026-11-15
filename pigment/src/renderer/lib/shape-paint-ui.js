@@ -13,7 +13,7 @@
 import { registerWidget, createWidget, gradientCss } from './fields.js';
 import { icon } from './icons.js';
 import { normalizeGradient } from '../../shared/pixels/gradient-model.js';
-import { DEFAULT_SWATCHES } from '../../shared/defaults.js';
+import { swatchColors } from './color-picker.js';
 import { gradientPicker, resolvedPresetData } from './gradient-picker.js';
 import { patternPicker } from './pattern-picker.js';
 import { makePatternPaint, paintRef } from './pattern-paint.js';
@@ -125,13 +125,13 @@ export function paintPanel(app, { value = null, allow = PAINT_TYPES, role = 'fil
     if (typeShown === 'solid') {
       const color = current?.type === 'solid' ? hex6(current.color) : hex6(colors(app).fg);
       const top = el('div', 'sl-solid-top');
-      const input = el('input', 'sl-color-input');
-      input.type = 'color';
-      input.dataset.key = 'paint-color';
-      input.value = color;
-      input.title = 'Color';
-      input.addEventListener('input', () => report({ type: 'solid', color: input.value }));
-      input.addEventListener('change', () => render());
+      // a `color` widget (lib/fields.js, S7.3; the stub is 0.4's colour input)
+      const input = createWidget('color', { className: 'sl-color-input', key: 'paint-color', title: 'Color' }, {
+        app,
+        value: color,
+        onInput: (v) => report({ type: 'solid', color: v }),
+        onChange: () => render(),
+      }).element;
       const picker = el('button', 'btn small', 'Color Picker…');
       picker.type = 'button';
       picker.addEventListener('click', async () => {
@@ -150,10 +150,12 @@ export function paintPanel(app, { value = null, allow = PAINT_TYPES, role = 'fil
         for (const c of recent) r.appendChild(swatch(c));
         body.appendChild(r);
       }
-      const palette = Array.isArray(app.settings?.swatches) && (app.settings.swatchesEdited || app.settings.swatches.length) ? app.settings.swatches : DEFAULT_SWATCHES;
+      // the swatch row from swatchColors(app) (S7.1: the `swatches` kind once color-picker-swatches lands); the names
+      // of 0.4's settings.swatches entries stay as tooltips
+      const named = new Map((Array.isArray(app.settings?.swatches) ? app.settings.swatches : []).filter((c) => c && typeof c === 'object' && c.name).map((c) => [hex6(c.color), c.name]));
       body.appendChild(el('div', 'sl-paint-title muted', 'Swatches'));
       const g = el('div', 'sl-colors sl-swatches');
-      for (const c of palette.slice(0, 60)) g.appendChild(swatch(typeof c === 'string' ? c : c?.color ?? '#000000', typeof c === 'object' ? c?.name : undefined));
+      for (const c of swatchColors(app).slice(0, 60)) g.appendChild(swatch(c, named.get(hex6(c))));
       body.appendChild(g);
       for (const b of body.querySelectorAll('.sl-color')) b.classList.toggle('current', b.dataset.color === color);
       return;

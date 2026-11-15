@@ -603,16 +603,18 @@ function registerCoreCommands(app) {
     // colours and brush shortcuts
     'tool:swap-colors': { run: () => app.setColors({ foreground: app.settings.background, background: app.settings.foreground }) },
     'tool:default-colors': { run: () => app.setColors({ foreground: '#000000', background: '#ffffff' }) },
+    // S7.1: every colour the user chooses goes through app.colorPicker (lib/color-picker.js); the foreground and
+    // background stay hex strings set through app.setColors
     'tool:pick-fg': {
       run: async () => {
-        const c = await app.pickColor?.(app.settings.foreground, { title: 'Color Picker (Foreground Color)' });
-        if (c) app.setColors({ foreground: c });
+        const c = await app.colorPicker?.pick({ initial: app.settings.foreground, title: 'Color Picker (Foreground Color)', target: 'foreground' });
+        if (c?.hex) app.setColors({ foreground: c.hex });
       },
     },
     'tool:pick-bg': {
       run: async () => {
-        const c = await app.pickColor?.(app.settings.background, { title: 'Color Picker (Background Color)' });
-        if (c) app.setColors({ background: c });
+        const c = await app.colorPicker?.pick({ initial: app.settings.background, title: 'Color Picker (Background Color)', target: 'background' });
+        if (c?.hex) app.setColors({ background: c.hex });
       },
     },
     'tool:fg-color': { run: (hex) => app.setColors({ foreground: hex }) },

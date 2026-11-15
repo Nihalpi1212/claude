@@ -19,6 +19,7 @@ import { resize } from '../../shared/pixels/transform.js';
 import { buildForm, frameThrottle } from './form.js';
 import { beginPixelEdit, processed } from './adjust-ui.js';
 import { icon } from './icons.js';
+import { createWidget } from './fields.js';
 
 const KIND = 'lens-correction';
 /** Longest side of the copy the preview runs on. */
@@ -182,13 +183,19 @@ async function openLens(app, { params, def, previous = null }) {
   gridSize.title = 'Grid size (px)';
   gridSize.setAttribute('aria-label', 'Grid size');
   gridSize.style.cssText = 'width:64px;height:26px';
-  const gridColor = el('input');
-  gridColor.type = 'color';
-  gridColor.value = prefs.gridColor;
-  gridColor.dataset.key = '__gridColor';
-  gridColor.title = 'Grid colour';
-  gridColor.setAttribute('aria-label', 'Grid colour');
-  gridColor.style.cssText = 'width:30px;height:26px;padding:0;border:1px solid var(--border);border-radius:4px;background:none';
+  // a `color` widget (lib/fields.js, S7.3; the stub is 0.4's colour input)
+  const gridColor = createWidget('color', {
+    key: '__gridColor', title: 'Grid colour', ariaLabel: 'Grid colour',
+    style: 'width:30px;height:26px;padding:0;border:1px solid var(--border);border-radius:4px;background:none',
+  }, {
+    app,
+    value: prefs.gridColor,
+    onInput: (v) => {
+      prefs.gridColor = v;
+      savePrefs();
+      paint();
+    },
+  }).element;
   const spacer = el('span');
   spacer.style.flex = '1';
   bar.append(zoomOut, zoomSel, zoomIn, spacer, pv.label, grid.label, gridSize, gridColor);
@@ -519,11 +526,6 @@ async function openLens(app, { params, def, previous = null }) {
     const v = Number(gridSize.value);
     if (!Number.isFinite(v) || v < 8) return;
     prefs.gridSize = Math.min(512, Math.round(v));
-    savePrefs();
-    paint();
-  });
-  gridColor.addEventListener('input', () => {
-    prefs.gridColor = gridColor.value;
     savePrefs();
     paint();
   });

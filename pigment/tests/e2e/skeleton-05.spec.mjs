@@ -1232,3 +1232,139 @@ test('camera raw: Last Filter repeats a remembered command without its dialog an
   expect((await pixel(page, 200, 150))[0]).toBe(after);
   expect(errors).toEqual([]);
 });
+
+// ---- step 8: colour UI (S7) --------------------------------------------------------------------------------------
+
+test('colour ui: a registered color widget appears in a dialog form, the options bar, the gradient field and the Character panel', async ({ page }) => {
+  const errors = await openApp(page);
+  await newDoc(page);
+  await page.evaluate(async () => {
+    const { registerWidget } = await import('/lib/fields.js');
+    // a fake real widget: a swatch button keeping a (hidden) colour input with the field's data-key (S7.3)
+    registerWidget('color', (spec, { value, onInput, onChange }) => {
+      const wrap = document.createElement('span');
+      wrap.className = 'fake-color';
+      const input = document.createElement('input');
+      input.type = 'color';
+      if (spec.key) input.dataset.key = spec.key;
+      input.value = value ?? '#000000';
+      input.addEventListener('input', () => {
+        onInput(input.value);
+        onChange(input.value);
+      });
+      wrap.appendChild(input);
+      return { element: wrap, get: () => input.value, set: (v) => (input.value = v) };
+    });
+  });
+  // a dialog form
+  await page.evaluate(async () => {
+    const { formDialog } = await import('/lib/form.js');
+    window.__formResult = formDialog(window.pigmentApp, { title: 'Fake colour', fields: [{ key: 'tint', label: 'Tint', type: 'color', value: '#336699' }] });
+  });
+  await expect(page.locator('.dialog .fake-color input[data-key="tint"]')).toHaveValue('#336699');
+  await page.locator('.dialog .fake-color input[data-key="tint"]').evaluate((i) => {
+    i.value = '#ff0000';
+    i.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await confirmDialog(page);
+  expect(await page.evaluate(() => window.__formResult)).toEqual({ tint: '#ff0000' });
+  // the options bar (the Type tool's colour option), the gradient field's two end colours, the Character panel's two
+  const r = await page.evaluate(async () => {
+    const app = window.pigmentApp;
+    app.tools.activate('type-horizontal');
+    app.tools.renderOptions();
+    const bar = document.querySelectorAll('#options-bar .fake-color').length;
+    const { createWidget } = await import('/lib/fields.js');
+    const g = createWidget('gradient', {}, { app, value: { kind: 'linear', stops: [{ pos: 0, color: '#000000' }, { pos: 1, color: '#ffffff' }] } });
+    document.body.appendChild(g.element);
+    g.element.querySelector('button').click();
+    const gradient = [...g.element.querySelectorAll('.fake-color input')].map((i) => i.dataset.key);
+    g.destroy?.();
+    const { createCharacterControls } = await import('/lib/type/char-format.js');
+    const chars = createCharacterControls(app, { variant: 'panel' });
+    const character = chars.element.querySelectorAll('.fake-color').length;
+    chars.destroy?.();
+    return { bar, gradient, character };
+  });
+  expect(r.bar).toBe(1);
+  expect(r.gradient).toEqual(['start', 'end']);
+  expect(r.character).toBe(2);
+  expect(errors).toEqual([]);
+});
+
+test('colour ui: the shape popover\'s swatch row follows swatchColors; sampleMerged with until skips the layers above; the stub picker', async ({ page }) => {
+  const errors = await openApp(page);
+  await newDoc(page);
+  const done = await landed(page);
+  const rows = await page.evaluate(async () => {
+    const app = window.pigmentApp;
+    const { swatchColors } = await import('/lib/color-picker.js');
+    const { paintPanel } = await import('/lib/shape-paint-ui.js');
+    const row = () => {
+      const p = paintPanel(app, { value: { type: 'solid', color: '#ff0000' } });
+      const out = [...p.element.querySelectorAll('.sl-swatches .sl-color')].map((b) => b.dataset.color);
+      p.destroy?.();
+      return out;
+    };
+    const before = { row: row(), colors: swatchColors(app).slice(0, 60) };
+    app.settings.swatches = ['#123456', { color: '#abcdef', name: 'Sky' }];
+    app.settings.swatchesEdited = true;
+    return { before, after: { row: row(), colors: swatchColors(app) } };
+  });
+  expect(rows.before.row).toEqual(rows.before.colors);
+  expect(rows.after.row).toEqual(rows.after.colors);
+  // rule 11: 0.4's palette while the stub reads it (the package migrates it into the `swatches` kind)
+  if (!done['color-picker-swatches']) expect(rows.after.colors).toEqual(['#123456', '#abcdef']);
+
+  const sampled = await page.evaluate(async () => {
+    const app = window.pigmentApp;
+    const d = app.doc;
+    const bottom = d.active;
+    const ctx = bottom.canvas.getContext('2d');
+    ctx.fillStyle = '#ff0000';
+    ctx.fillRect(0, 0, bottom.canvas.width, bottom.canvas.height);
+    bottom.touch();
+    await app.commands.run('layer:new', undefined, 'api');
+    const top = d.active;
+    top.canvas.getContext('2d').fillStyle = '#0000ff';
+    top.canvas.getContext('2d').fillRect(0, 0, 50, 50);
+    top.touch();
+    d.changed('pixels', { layer: top });
+    const px = (c) => Array.from(c.getContext('2d').getImageData(10, 10, 1, 1).data);
+    return { all: px(app.sampleMerged(d)), below: px(app.sampleMerged(d, { until: top })), rect: px(app.sampleMerged(d, { until: top, rect: { x: 0, y: 0, width: 20, height: 20 } })), again: px(app.sampleMerged(d)) };
+  });
+  expect(sampled.all).toEqual([0, 0, 255, 255]);
+  expect(sampled.below).toEqual([255, 0, 0, 255]);
+  expect(sampled.rect).toEqual([255, 0, 0, 255]);
+  expect(sampled.again).toEqual([0, 0, 255, 255]);
+
+  // the picker API (S7.1): pick resolves a ColorValue, the 0.4 hex API stays, tool:pick-fg sets the foreground
+  const api = await page.evaluate(() => ({ real: window.pigmentApp.colorPicker.real, pick: typeof window.pigmentApp.colorPicker.pick, hud: typeof window.pigmentApp.colorPicker.hud, pickColor: typeof window.pigmentApp.pickColor }));
+  expect(api).toEqual({ real: done['color-picker-swatches'], pick: 'function', hud: 'function', pickColor: 'function' });
+  if (!done['color-picker-swatches']) {
+    // the stub: 0.4's dialog (S7.4's DOM), the HUD session resolves null on up()
+    await page.evaluate(() => {
+      window.__picked = window.pigmentApp.colorPicker.pick({ initial: '#00ff00', title: 'Pick', target: 'field' });
+    });
+    await expect(page.locator('.color-picker-dialog')).toBeVisible();
+    await page.locator('.color-picker-dialog [data-f="hex"]').fill('#204060');
+    await page.locator('.color-picker-dialog [data-f="hex"]').dispatchEvent('change');
+    await confirmDialog(page);
+    expect(await page.evaluate(() => window.__picked)).toEqual({ hex: '#204060', rgb: [32, 64, 96], book: null, space: 'rgb' });
+    expect(await page.evaluate(async () => {
+      const s = window.pigmentApp.colorPicker.hud({ at: { x: 10, y: 10 }, tool: window.pigmentApp.tools.active, initial: '#ff0000' });
+      s.move({ x: 20, y: 20 });
+      s.up({ x: 20, y: 20 });
+      return s.done;
+    })).toBe(null);
+    await page.evaluate(() => {
+      window.pigmentApp.commands.run('tool:pick-fg', undefined, 'api');
+    });
+    await expect(page.locator('.color-picker-dialog')).toBeVisible();
+    await page.locator('.color-picker-dialog [data-f="hex"]').fill('#112233');
+    await page.locator('.color-picker-dialog [data-f="hex"]').dispatchEvent('change');
+    await confirmDialog(page);
+    expect(await page.evaluate(() => window.pigmentApp.settings.foreground)).toBe('#112233');
+  }
+  expect(errors).toEqual([]);
+});

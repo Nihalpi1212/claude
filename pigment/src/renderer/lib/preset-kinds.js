@@ -11,6 +11,9 @@ import { GRADIENT_PRESETS } from './tools/fill.js';
 import { CUSTOM_SHAPES, customPath } from './tools/vector.js';
 import { BUILTIN_BRUSHES } from './panels/brushes.js';
 import { normalizeBrush, brushFromLegacy, blobsOf, withoutSampleData } from './brush/preset.js';
+import { DEFAULT_SWATCHES } from '../../shared/defaults.js';
+
+const rgbOf = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
 
 const slug = (name) => name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 const isObject = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
@@ -75,7 +78,7 @@ export function registerPresetKinds04() {
 /**
  * The preset kinds of 0.5 (ARCHITECTURE.md "0.5 features", S10.5), registered with registerPresetKinds04() in
  * start(). Their owners re-register them with their full definitions. Step 4 of the skeleton registers `brushes`,
- * step 7 the three Camera Raw kinds; step 10 adds the others.
+ * step 7 the three Camera Raw kinds, step 8 swatches, color-books and color-profiles; step 10 adds the others.
  */
 export function registerPresetKinds05() {
   registerPresetKind('brushes', {
@@ -85,6 +88,30 @@ export function registerPresetKinds05() {
     builtins: () => ({ presets: BUILTIN_BRUSHES.map((b) => ({ id: b.id, name: b.name, data: withoutSampleData(brushFromLegacy(b)) })) }),
     normalize: (data) => (isObject(data) ? withoutSampleData(normalizeBrush(data)) : null),
     blobs: (data) => blobsOf(data),
+  });
+  // colour (S7.2, S10.5; color-picker-swatches and icc-engine re-register them): registered by step 8 of the skeleton.
+  // 0.4's settings.swatches stay where they are until color-picker-swatches migrates them (settings.colorUI).
+  registerPresetKind('swatches', {
+    title: 'Swatches',
+    version: 1,
+    builtins: () => ({
+      presets: DEFAULT_SWATCHES.map((hex, i) => ({ id: `default-${i}`, name: hex, data: { color: { space: 'rgb', values: rgbOf(hex) } } })),
+    }),
+    normalize: (data) => (isObject(data) && isObject(data.color) && ['rgb', 'lab', 'cmyk', 'gray'].includes(data.color.space) && Array.isArray(data.color.values) && data.color.values.every(Number.isFinite) ? data : null),
+  });
+  registerPresetKind('color-books', {
+    title: 'Color Books',
+    version: 1,
+    builtins: () => ({ presets: [] }), // no licensed books are shipped
+    normalize: (data) => (isObject(data) && typeof data.blob === 'string' ? data : null),
+    blobs: (data) => (typeof data?.blob === 'string' ? [data.blob] : []),
+  });
+  registerPresetKind('color-profiles', {
+    title: 'Color Profiles',
+    version: 1,
+    builtins: () => ({ presets: [] }), // the user's ICC profiles (the browser build too)
+    normalize: (data) => (isObject(data) && typeof data.blob === 'string' ? data : null),
+    blobs: (data) => (typeof data?.blob === 'string' ? [data.blob] : []),
   });
   // Camera Raw (S8.4; camera-raw-workspace re-registers them): registered empty by step 7 of the skeleton
   registerPresetKind('camera-raw-presets', {
