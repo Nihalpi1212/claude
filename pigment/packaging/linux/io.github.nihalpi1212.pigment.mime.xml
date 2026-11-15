@@ -2,9 +2,15 @@
 <!-- shared-mime-info definitions for types the system database may not have.
      Installed to /usr/share/mime/packages/ (update-mime-database runs on install). -->
 <mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-pigment">
+    <comment>Pigment Image</comment>
+    <icon name="io.github.nihalpi1212.pigment"/>
+    <glob pattern="*.pigment"/>
+  </mime-type>
+  <!-- PhotoCraft's documents: the same format under PhotoCraft's own extension. -->
   <mime-type type="application/x-photocraft">
     <comment>PhotoCraft document</comment>
-    <icon name="ai.storyteller.photocraft"/>
+    <icon name="io.github.nihalpi1212.pigment"/>
     <glob pattern="*.pcraft"/>
   </mime-type>
   <mime-type type="image/x-psb">

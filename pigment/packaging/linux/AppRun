@@ -1,8 +1,8 @@
 #!/bin/sh
-# PhotoCraft AppImage entry point (packaging/linux/AppRun; installed by package.sh).
+# Pigment AppImage entry point (packaging/linux/AppRun; installed by package.sh).
 #
 # On Wayland the compositor resolves a window's dock icon by taking the window's
-# app_id (ai.storyteller.photocraft) and looking up an installed .desktop file.
+# app_id (io.github.nihalpi1212.pigment) and looking up an installed .desktop file.
 # An AppImage installs nothing, so every AppImage run would otherwise show the
 # generic "Wayland" icon (#593). Best-effort desktop integration: on first run
 # (and whenever the AppImage's path changes) install the .desktop entry and the
@@ -12,17 +12,17 @@
 set -u
 
 APPDIR="$(dirname "$(readlink -f "$0")")"
-DESK_ID=ai.storyteller.photocraft
+DESK_ID=io.github.nihalpi1212.pigment
 
 # Select the bundled headless binary before desktop integration. In particular,
 # an MCP launch must leave stdio untouched and must not install a GUI launcher.
 if [ "${1:-}" = --cli ]; then
   shift
-  exec "$APPDIR/usr/bin/photocraft-cli" "$@"
+  exec "$APPDIR/usr/bin/pigment-cli" "$@"
 fi
 # Type 2 runtimes preserve a symlink's original name in ARGV0.
 case "${ARGV0:-}" in
-  photocraft-cli | */photocraft-cli) exec "$APPDIR/usr/bin/photocraft-cli" "$@" ;;
+  pigment-cli | */pigment-cli) exec "$APPDIR/usr/bin/pigment-cli" "$@" ;;
 esac
 
 # A damaged snapshot is not evidence that an absent user key was newly added.
@@ -72,7 +72,7 @@ integrate() {
   # If another integrator already registered a .desktop whose Exec points at this
   # AppImage, do not write a second launcher (#3623); remove our own if one is left
   # over, and still install the hicolor icons below. $DESKTOPINTEGRATION is not that
-  # signal: PhotoCraft sets X-AppImage-Integrate=false, so AppImageLauncher skips the
+  # signal: Pigment sets X-AppImage-Integrate=false, so AppImageLauncher skips the
   # AppImage and still exports the variable on its binfmt bypass. Treating it as
   # "already integrated" left the menu with no entry (#5534).
   apps="$data/applications"
@@ -93,7 +93,7 @@ integrate() {
   # PATH rather than this AppImage, so the check above misses it. AM's author
   # names the only two places it writes one: system-wide for AM, per user for
   # AppMan and rootless installs.
-  for f in /usr/local/share/applications/photocraft-AM.desktop "$apps/photocraft-AM.desktop"; do
+  for f in /usr/local/share/applications/pigment-AM.desktop "$apps/pigment-AM.desktop"; do
     if [ -f "$f" ]; then
       external=1
       break
@@ -220,13 +220,13 @@ integrate() {
   done
 }
 
-# `PhotoCraft.AppImage --cli <args>` runs the bundled photocraft-cli: MCP clients start
+# `Pigment.AppImage --cli <args>` runs the bundled pigment-cli: MCP clients start
 # `--cli mcp` this way (the ArtCraft Launcher's app list), since the mount point that holds
 # the CLI changes with every run.
 if [ "${1:-}" = "--cli" ]; then
   shift
-  exec "$APPDIR/usr/bin/photocraft-cli" "$@"
+  exec "$APPDIR/usr/bin/pigment-cli" "$@"
 fi
 
 integrate
-exec "$APPDIR/usr/bin/photocraft" "$@"
+exec "$APPDIR/usr/bin/pigment" "$@"

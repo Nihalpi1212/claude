@@ -37,13 +37,13 @@
     <string>nb</string>
   </array>
   <key>CFBundleDisplayName</key>
-  <string>PhotoCraft</string>
+  <string>Pigment</string>
   <key>CFBundleName</key>
-  <string>PhotoCraft</string>
+  <string>Pigment</string>
   <key>CFBundleExecutable</key>
-  <string>PhotoCraft</string>
+  <string>Pigment</string>
   <key>CFBundleIdentifier</key>
-  <string>ai.storyteller.photocraft</string>
+  <string>io.github.nihalpi1212.pigment</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundlePackageType</key>
@@ -54,12 +54,12 @@
   <string>@SHORT_VERSION@</string>
   <key>CFBundleVersion</key>
   <string>@SHORT_VERSION@</string>
-  <key>PhotoCraftVersion</key>
+  <key>PigmentVersion</key>
   <string>@VERSION@</string>
-  <key>PhotoCraftBuildCommit</key>
+  <key>PigmentBuildCommit</key>
   <string>@BUILD_SHA@</string>
   <key>CFBundleIconFile</key>
-  <string>PhotoCraft</string>
+  <string>Pigment</string>
   <key>LSApplicationCategoryType</key>
   <string>public.app-category.graphics-design</string>
   <!-- Must match MACOSX_DEPLOYMENT_TARGET in package.sh. Big Sur is the first release on
@@ -73,11 +73,37 @@
   <key>NSRequiresAquaSystemAppearance</key>
   <false/>
   <key>NSHumanReadableCopyright</key>
-  <string>Copyright © the PhotoCraft authors. MIT OR Apache-2.0.</string>
+  <string>Copyright © 2026 Pigment contributors; based on PhotoCraft © the PhotoCraft authors. MIT OR Apache-2.0.</string>
 
-  <!-- PhotoCraft's own format. -->
+  <!-- Pigment's own format: `.pigment` files hold PhotoCraft's native format (docs/FORK.md). -->
   <key>UTExportedTypeDeclarations</key>
   <array>
+    <dict>
+      <key>UTTypeIdentifier</key>
+      <string>io.github.nihalpi1212.pigment.document</string>
+      <key>UTTypeDescription</key>
+      <string>Pigment Image</string>
+      <key>UTTypeConformsTo</key>
+      <array>
+        <string>public.data</string>
+        <string>public.image</string>
+      </array>
+      <key>UTTypeIconFile</key>
+      <string>Pigment</string>
+      <key>UTTypeTagSpecification</key>
+      <dict>
+        <key>public.filename-extension</key>
+        <array><string>pigment</string></array>
+        <key>public.mime-type</key>
+        <array><string>application/x-pigment</string></array>
+      </dict>
+    </dict>
+  </array>
+  <!-- Types macOS may not know; the system's own declaration wins when it has one. -->
+  <key>UTImportedTypeDeclarations</key>
+  <array>
+    <!-- PhotoCraft's documents (`.pcraft`, the same format): PhotoCraft's own type, imported so
+         Pigment opens them and PhotoCraft, when installed, keeps owning them. -->
     <dict>
       <key>UTTypeIdentifier</key>
       <string>ai.storyteller.photocraft.document</string>
@@ -88,8 +114,6 @@
         <string>public.data</string>
         <string>public.image</string>
       </array>
-      <key>UTTypeIconFile</key>
-      <string>PhotoCraft</string>
       <key>UTTypeTagSpecification</key>
       <dict>
         <key>public.filename-extension</key>
@@ -98,13 +122,9 @@
         <array><string>application/x-photocraft</string></array>
       </dict>
     </dict>
-  </array>
-  <!-- Types macOS may not know; the system's own declaration wins when it has one. -->
-  <key>UTImportedTypeDeclarations</key>
-  <array>
     <dict>
       <key>UTTypeIdentifier</key>
-      <string>ai.storyteller.photocraft.ora</string>
+      <string>io.github.nihalpi1212.pigment.ora</string>
       <key>UTTypeDescription</key>
       <string>OpenRaster Image</string>
       <key>UTTypeConformsTo</key>
@@ -119,7 +139,7 @@
     </dict>
     <dict>
       <key>UTTypeIdentifier</key>
-      <string>ai.storyteller.photocraft.kra</string>
+      <string>io.github.nihalpi1212.pigment.kra</string>
       <key>UTTypeDescription</key>
       <string>Krita Document</string>
       <key>UTTypeConformsTo</key>
@@ -134,7 +154,7 @@
     </dict>
     <dict>
       <key>UTTypeIdentifier</key>
-      <string>ai.storyteller.photocraft.pdn</string>
+      <string>io.github.nihalpi1212.pigment.pdn</string>
       <key>UTTypeDescription</key>
       <string>Paint.NET Document</string>
       <key>UTTypeConformsTo</key>
@@ -165,7 +185,7 @@
     </dict>
     <dict>
       <key>UTTypeIdentifier</key>
-      <string>ai.storyteller.photocraft.qoi</string>
+      <string>io.github.nihalpi1212.pigment.qoi</string>
       <key>UTTypeDescription</key>
       <string>QOI Image</string>
       <key>UTTypeConformsTo</key>
@@ -185,13 +205,23 @@
   <array>
     <dict>
       <key>CFBundleTypeName</key>
-      <string>PhotoCraft Document</string>
+      <string>Pigment Image</string>
       <key>CFBundleTypeRole</key>
       <string>Editor</string>
       <key>LSHandlerRank</key>
       <string>Owner</string>
       <key>CFBundleTypeIconFile</key>
-      <string>PhotoCraft</string>
+      <string>Pigment</string>
+      <key>LSItemContentTypes</key>
+      <array><string>io.github.nihalpi1212.pigment.document</string></array>
+    </dict>
+    <dict>
+      <key>CFBundleTypeName</key>
+      <string>PhotoCraft Document</string>
+      <key>CFBundleTypeRole</key>
+      <string>Editor</string>
+      <key>LSHandlerRank</key>
+      <string>Alternate</string>
       <key>LSItemContentTypes</key>
       <array><string>ai.storyteller.photocraft.document</string></array>
     </dict>
@@ -229,10 +259,10 @@
         <string>com.ilm.openexr-image</string>
         <string>public.radiance</string>
         <string>public.avif</string>
-        <string>ai.storyteller.photocraft.qoi</string>
-        <string>ai.storyteller.photocraft.pdn</string>
-        <string>ai.storyteller.photocraft.ora</string>
-        <string>ai.storyteller.photocraft.kra</string>
+        <string>io.github.nihalpi1212.pigment.qoi</string>
+        <string>io.github.nihalpi1212.pigment.pdn</string>
+        <string>io.github.nihalpi1212.pigment.ora</string>
+        <string>io.github.nihalpi1212.pigment.kra</string>
       </array>
     </dict>
   </array>

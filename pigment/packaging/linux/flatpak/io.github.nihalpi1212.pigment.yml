@@ -1,33 +1,33 @@
-# Flatpak manifest for PhotoCraft, ready for a Flathub submission.
+# Flatpak manifest for Pigment, ready for a Flathub submission.
 #
 # Flatpak builds run offline, so the crate sources must be vendored first. From the repo root:
 #
 #   curl -fsSLO https://raw.githubusercontent.com/flatpak/flatpak-builder-tools/master/cargo/flatpak-cargo-generator.py
 #   python3 flatpak-cargo-generator.py Cargo.lock -o packaging/linux/flatpak/cargo-sources.json
-#   flatpak-builder --user --install --force-clean build-flatpak packaging/linux/flatpak/ai.storyteller.photocraft.yml
-#   flatpak run ai.storyteller.photocraft
+#   flatpak-builder --user --install --force-clean build-flatpak packaging/linux/flatpak/io.github.nihalpi1212.pigment.yml
+#   flatpak run io.github.nihalpi1212.pigment
 #
 # For Flathub, replace the `dir` source with a `git` source pinned to a release tag and commit.
-# The single-file .flatpak attached to each release comes from ai.storyteller.photocraft.bundle.yml,
+# The single-file .flatpak attached to each release comes from io.github.nihalpi1212.pigment.bundle.yml,
 # which repackages the prebuilt release binaries. Keep runtime-version and finish-args identical.
-id: ai.storyteller.photocraft
+id: io.github.nihalpi1212.pigment
 runtime: org.freedesktop.Platform
 runtime-version: '26.08'
 sdk: org.freedesktop.Sdk
 sdk-extensions:
   - org.freedesktop.Sdk.Extension.rust-stable
-command: photocraft
+command: pigment
 finish-args:
-  # The shared updater inspects and updates this installation via flatpak-spawn --host.
-  - --talk-name=org.freedesktop.Flatpak
-  - --filesystem=xdg-data/ArtCraft/versions:ro
+  # Pigment installs no updates and never reads the ArtCraft Launcher's folders (docs/FORK.md): no
+  # --talk-name=org.freedesktop.Flatpak and no xdg-data/ArtCraft access, unlike PhotoCraft.
   # Display: Wayland first; X11 only when no Wayland compositor is running.
   - --socket=wayland
   - --socket=fallback-x11
   # X11 shared memory (MIT-SHM). Without it the X11 fallback is slow or fails.
   - --share=ipc
-  # Network for update checks and the optional --control server. The server listens on 127.0.0.1,
-  # which with network shared is also reachable from the host's network namespace.
+  # Network for printing to a CUPS server and the optional --control server (Pigment checks for no
+  # updates). The server listens on 127.0.0.1, which with network shared is also reachable from
+  # the host's network namespace.
   - --share=network
   # GPU access for the wgpu compositor (Vulkan, or GL as a fallback).
   - --device=dri
@@ -93,31 +93,31 @@ modules:
           - '  esac'
           - 'fi'
           - 'exec "/app/libexec/cups/${0##*/}" "$@"'
-  - name: photocraft
+  - name: pigment
     buildsystem: simple
     build-options:
       env:
-        CARGO_HOME: /run/build/photocraft/cargo
+        CARGO_HOME: /run/build/pigment/cargo
         CARGO_NET_OFFLINE: 'true'
         # The interface translations (the craft-i18n source below), embedded by build.rs.
-        CRAFT_I18N_DIR: /run/build/photocraft/craft-i18n
+        CRAFT_I18N_DIR: /run/build/pigment/craft-i18n
         CRAFT_I18N_REQUIRED: '1'
     build-commands:
       - cargo --offline build --release --locked -p photocraft -p photocraft-cli --features heif
-      - install -Dm755 target/release/photocraft /app/bin/photocraft
-      - install -Dm755 target/release/photocraft-cli /app/bin/photocraft-cli
-      - install -Dm644 docs/mcp.md /app/share/doc/photocraft/mcp.md
-      - install -Dm644 docs/control-protocol.md /app/share/doc/photocraft/control-protocol.md
-      - install -Dm644 NOTICE /app/share/doc/photocraft/NOTICE
-      - install -Dm644 ATTRIBUTION.md /app/share/doc/photocraft/ATTRIBUTION.md
-      - install -Dm644 packaging/linux/ai.storyteller.photocraft.desktop /app/share/applications/ai.storyteller.photocraft.desktop
-      - install -Dm644 packaging/linux/ai.storyteller.photocraft.mime.xml /app/share/mime/packages/ai.storyteller.photocraft.xml
+      - install -Dm755 target/release/pigment /app/bin/pigment
+      - install -Dm755 target/release/pigment-cli /app/bin/pigment-cli
+      - install -Dm644 docs/mcp.md /app/share/doc/pigment/mcp.md
+      - install -Dm644 docs/control-protocol.md /app/share/doc/pigment/control-protocol.md
+      - install -Dm644 NOTICE /app/share/doc/pigment/NOTICE
+      - install -Dm644 ATTRIBUTION.md /app/share/doc/pigment/ATTRIBUTION.md
+      - install -Dm644 packaging/linux/io.github.nihalpi1212.pigment.desktop /app/share/applications/io.github.nihalpi1212.pigment.desktop
+      - install -Dm644 packaging/linux/io.github.nihalpi1212.pigment.mime.xml /app/share/mime/packages/io.github.nihalpi1212.pigment.xml
       - mkdir -p /app/share/icons && cp -R assets/app-icon/hicolor /app/share/icons/
       - >-
         version=$(awk '/^\[/{p=($0=="[workspace.package]");next} p&&$1=="version"{gsub(/[" ]/,"",$3);print $3;exit}' Cargo.toml);
         install -d /app/share/metainfo;
         sed -e "s/@VERSION@/$version/" -e "s/@DATE@/$(date -u +%Y-%m-%d)/"
-        packaging/linux/ai.storyteller.photocraft.metainfo.xml.in > /app/share/metainfo/ai.storyteller.photocraft.metainfo.xml
+        packaging/linux/io.github.nihalpi1212.pigment.metainfo.xml.in > /app/share/metainfo/io.github.nihalpi1212.pigment.metainfo.xml
     sources:
       - type: dir
         path: ../../..
