@@ -3821,7 +3821,7 @@ entry, build-up dabs, sub-paths and Shift-click lines included.
 Build-up drives itself: while `preset.buildUp` is on, the stroke schedules its own `requestAnimationFrame` ticks from
 `begin()` until `end()` or `cancel()` and calls `tick(performance.now())` from them (brush-engine-core, in the engine).
 `tick(now)` stays public for tests that pass fake times and for callers that drive time themselves; `tools/paint.js`
-(brush-painting-behaviours) schedules no ticks, so build-up never runs twice and never not at all.
+(brush-painting-behaviours) schedules no ticks, so exactly one loop drives build-up.
 
 **S2.3 Dab model.**
 
@@ -3871,7 +3871,8 @@ fresh seed of its own (two strokes never repeat one jitter sequence; `traceDabs`
 `constrainColor` is `app.colorConstraint` (hex in, hex out) applied to the rgb, identity when there is none. `app` is
 `paint.view.app`, else `paint.app`; `renderStrokePreview` keeps the app of its `paint` (as `app` or through `view`) and
 drops the view, so in a preview `ctx.doc` may be the app's document and `ctx.stroke.layer` is null. The stub engine
-does all of this (brush-engine-core keeps it); it also runs a colour a geometry modifier set through `constrainColor`.
+does all of this (brush-engine-core keeps it); it also runs a colour a geometry modifier set through `constrainColor`
+(paint mode only: a mask's white and an eraser's black stay).
 
 Data contracts. `coverage`'s mask covers dab bbox ∩ target canvas ∩ selection bounds (x, y: stroke-canvas px of its
 0,0); above 1024 px the engine may hand a reduced mask (`scale` < 1, one mask pixel per `1/scale` canvas px) and
@@ -3910,8 +3911,8 @@ A mouse sample gives the tilt, rotation and wheel controls their neutral value. 
 `pointerdown` with button 5 / buttons 32: canvas-view treats it as a primary press (canvas capture, `onPointerDown`
 with `eraser: true`, moves and up as for button 0). A side-button press without tip contact arrives as button 2 and is a
 right-button drag (S3.3) with `barrel: true` on the press, the moves and the release; the side button held during
-tip contact gives `barrel: true` on the primary press's samples. Electron gets pen data through Chromium's pointer events; no command-line
-switch is added unless a measurement in the packaged app needs one.
+tip contact gives `barrel: true` on the primary press's samples. Electron gets pen data through Chromium's pointer
+events; no command-line switch is added unless a measurement in the packaged app needs one.
 
 **S2.6 Tips, reach and previews.**
 

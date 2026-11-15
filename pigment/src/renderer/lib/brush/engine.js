@@ -514,8 +514,10 @@ export class BrushStroke {
       direction: prev ? (Math.atan2(y - prev.y, x - prev.x) * 180) / Math.PI : 0, seed: this.seed,
     };
     this.lastDab = dab;
-    // a colour a modifier set goes through the mode's constraint (S2.7: Grayscale stays grey, Indexed snaps)
-    for (const d of geometryDabs(dab, this.geometryMods, this.ctx)) this.paintDab({ ...d, color: d.color ? rgbaToHex(this.ctx.constrainColor(d.color)) : null });
+    // a colour a modifier set goes through the mode's constraint (S2.7: Grayscale stays grey, Indexed snaps); a mask's
+    // white and an eraser's black are not colours of the image
+    const constrain = this.s.mode === 'paint' ? (c) => this.ctx.constrainColor(c) : (c) => c;
+    for (const d of geometryDabs(dab, this.geometryMods, this.ctx)) this.paintDab({ ...d, color: d.color ? rgbaToHex(constrain(d.color)) : null });
   }
 
   /** The dab's shape canvas: a decoded sampled tip, else 0.4's round dab. */

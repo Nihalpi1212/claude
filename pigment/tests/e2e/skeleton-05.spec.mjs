@@ -381,7 +381,8 @@ test('brush: claimed presses reach the Brush past the temporary tools; a pen era
   await fakeGesture(page, (p) => p.button === 2);
   const side = await page.evaluate(([x, y]) => {
     const canvas = document.querySelector('.doc-frame:not([hidden]) canvas.view');
-    const drag = (pointerType, pointerId) => {
+    // pointerId 1 (the page's active pointer): setPointerCapture throws for an id that is not active
+    const drag = (pointerType, pointerId = 1) => {
       window.__gestureLog.length = 0;
       const o = { bubbles: true, cancelable: true, composed: true, pointerId, pointerType, isPrimary: true, clientX: x, clientY: y, pressure: 0 };
       canvas.dispatchEvent(new PointerEvent('pointerdown', { ...o, button: 2, buttons: 2 }));
@@ -389,7 +390,7 @@ test('brush: claimed presses reach the Brush past the temporary tools; a pen era
       canvas.dispatchEvent(new PointerEvent('pointerup', { ...o, clientX: x + 10, button: 2, buttons: 0 }));
       return window.__gestureLog.map((e) => [e.what, e.barrel]);
     };
-    return { pen: drag('pen', 2), mouse: drag('mouse', 3) };
+    return { pen: drag('pen'), mouse: drag('mouse') };
   }, at(-20, 20));
   expect(side.pen.length).toBeGreaterThanOrEqual(3);
   expect(side.pen.every(([, barrel]) => barrel === true)).toBe(true);
