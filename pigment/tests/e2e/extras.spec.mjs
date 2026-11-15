@@ -29,7 +29,9 @@ test('Camera Raw: the preview changes pixels, Cancel restores them, OK records o
 
   await run(page, 'filter:camera-raw');
   await expect(page.locator('.dialog .camera-raw')).toBeVisible();
-  expect(await page.locator('.dialog .dialog-tab').allTextContents()).toEqual(['Basic', 'Detail', 'HSL', 'Effects']);
+  // S14.2 (0.5): the tabs come from the Camera Raw registry; camera-raw-panels adds tabs, so only 0.4's ids are pinned
+  const tabIds = await page.locator('.dialog .dialog-tab').evaluateAll((els) => els.map((el) => el.dataset.tab));
+  expect(tabIds).toEqual(expect.arrayContaining(['basic', 'detail', 'hsl', 'effects']));
   await page.locator('.dialog input[type="number"][data-key="exposure"]').fill('2');
   // live preview: two stops brighter on the canvas while the dialog is open
   await expect.poll(async () => (await pixel(page, 200, 150))[0]).toBeGreaterThan(170);

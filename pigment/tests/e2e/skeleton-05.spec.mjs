@@ -9,7 +9,7 @@ import { test, expect } from '@playwright/test';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { openApp, newDoc, runAwait } from './helpers.mjs';
+import { openApp, newDoc, run, runAwait, pixel, confirmDialog } from './helpers.mjs';
 import { PSD_GOLDEN_DOCS, pagePsdGolden } from './goldens.mjs';
 
 const RENDERER = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'src', 'renderer');
@@ -1015,5 +1015,220 @@ test('colour: an open hook sees interactive from Open, not from Batch, and does 
   expect(r.processed).toBe(2);
   expect(r.notes.map((n) => n.message)).toEqual(['checked a', 'checked b']);
   expect(r.log).toContain('checked a');
+  expect(errors).toEqual([]);
+});
+
+// ---- step 7: Camera Raw stages and registry, Last Filter for commands (S8, S12.4) -----------------------------------
+
+/** Fills the active layer with one colour (no history entry). */
+const fillLayer = (page, color) =>
+  page.evaluate((c) => {
+    const l = window.pigmentApp.doc.active;
+    const ctx = l.canvas.getContext('2d');
+    ctx.fillStyle = c;
+    ctx.fillRect(0, 0, l.canvas.width, l.canvas.height);
+    l.touch();
+    window.pigmentApp.doc.changed('pixels', { layer: l });
+  }, color);
+
+test('camera raw: a stage, a section and a tool registered in the page appear in the dialog and drive the preview', async ({ page }) => {
+  const errors = await openApp(page);
+  await newDoc(page);
+  await fillLayer(page, '#808080');
+  const done = await landed(page);
+  await page.evaluate(async () => {
+    const S = await import('/shared/pixels/develop-stages.js');
+    const R = await import('/lib/develop/registry.js');
+    // a perceptual stage that paints the image a flat red at 100 %, owning its own top-level key
+    window.__crOff = [
+      S.registerDevelopStage({
+        id: 'test-red', order: 560, space: 'perceptual',
+        params: { keys: ['testRed'], defaults: () => ({ testRed: { amount: 0 } }), normalize: (p) => ({ testRed: { amount: 0, ...(p.testRed ?? {}) } }) },
+        neutral: (p) => !p.testRed.amount,
+        apply({ R: r, G, B }, p) {
+          const k = p.testRed.amount / 100;
+          for (let i = 0; i < r.length; i++) {
+            r[i] += (1 - r[i]) * k;
+            G[i] -= G[i] * k;
+            B[i] -= B[i] * k;
+          }
+        },
+      }),
+      R.registerDevelopSection({ tab: 'basic', id: 'test-red', label: 'Test red', order: 900, fields: [{ key: 'testRed.amount', label: 'Red', type: 'slider', min: 0, max: 100, step: 1 }] }),
+      R.registerDevelopTab({ id: 'test-tab', label: 'Test tab', order: 950 }),
+      R.registerDevelopSection({ tab: 'test-tab', id: 'custom', label: 'Custom', order: 1, render: (ctx) => {
+        const b = document.createElement('button');
+        b.className = 'test-custom';
+        b.textContent = 'Half red';
+        b.addEventListener('click', () => ctx.set('testRed.amount', 50));
+        return b;
+      } }),
+      R.registerDevelopTool({ id: 'test-tool', label: 'Probe', icon: 'eyedropper', order: 10, cursor: 'crosshair', activate: (ws) => { window.__crTool = { active: true, red: ws.get('testRed.amount') }; }, down() {} }),
+    ];
+  });
+  await run(page, 'filter:camera-raw');
+  await expect(page.locator('.dialog .camera-raw')).toBeVisible();
+  // 0.4's tab ids stay, the registered tab follows them; the registered section's field sits in Basic
+  const tabs = await page.locator('.dialog .dialog-tab').evaluateAll((els) => els.map((el) => el.dataset.tab));
+  expect(tabs).toEqual(expect.arrayContaining(['basic', 'detail', 'hsl', 'effects', 'test-tab']));
+  if (!done['camera-raw-panels']) expect(tabs).toEqual(['basic', 'detail', 'hsl', 'effects', 'test-tab']);
+  await page.locator('.dialog input[type="number"][data-key="testRed.amount"]').fill('100');
+  await expect.poll(async () => (await pixel(page, 200, 150)).slice(0, 3)).toEqual([255, 0, 0]);
+  // a rendered section sets a param through ctx.set: the form follows and the preview updates
+  await page.locator('.dialog .dialog-tab[data-tab="test-tab"]').click();
+  await page.locator('.dialog .test-custom').click();
+  await expect(page.locator('.dialog input[type="number"][data-key="testRed.amount"]')).toHaveValue('50');
+  await expect.poll(async () => (await pixel(page, 200, 150))[1]).toBeLessThan(100);
+  // the registered tool has a button in the dialog's tool strip and gets a workspace when activated
+  await page.locator('.dialog .camera-raw [data-tool="test-tool"]').click();
+  expect(await page.evaluate(() => window.__crTool)).toEqual({ active: true, red: 50 });
+  await confirmDialog(page);
+  const r = await page.evaluate(() => {
+    const d = window.pigmentApp.doc;
+    for (const off of window.__crOff) off();
+    return { label: d.history.entries[d.history.index].label };
+  });
+  expect(r.label).toBe('Camera Raw');
+  expect((await pixel(page, 200, 150))[0]).toBeGreaterThan(180);
+  expect(errors).toEqual([]);
+});
+
+test('camera raw: a fake kind\'s open runs for a new and a re-edited smart filter, each one entry; the stub dialog keeps 0.4\'s smart kind', async ({ page }) => {
+  const errors = await openApp(page);
+  await newDoc(page);
+  await fillLayer(page, '#808080');
+  await runAwait(page, 'layer:smart-convert');
+  const r = await page.evaluate(async () => {
+    const app = window.pigmentApp;
+    const d = app.doc;
+    const layer = d.active;
+    const calls = [];
+    app.smartFilters.registerKind('test-open', {
+      name: 'Test Open',
+      defaults: () => ({ amount: 1 }),
+      apply: (img) => img,
+      editor: () => ({ element: document.createElement('div') }),
+      geometric: (p) => p.amount > 5,
+      recolourOnly: () => true,
+      async open(l, params, { index, label }) {
+        // the kind previews through layer.filters; the module puts them back and records the entry
+        calls.push({ same: l === layer, params, index, label });
+        l.filters = [...l.filters, { kind: 'test-open', params: { amount: 99 }, enabled: true }];
+        return { amount: params.amount + 1 };
+      },
+    });
+    const n0 = d.history.index;
+    const added = await app.smartFilters.intercept(layer, 'test-open', null, 'Test Open').done;
+    const n1 = d.history.index;
+    const entry1 = d.history.entries[n1].label;
+    const filters1 = JSON.parse(JSON.stringify(layer.filters));
+    const edited = await app.smartFilters.edit(layer, 0);
+    const n2 = d.history.index;
+    return { calls, added, edited, steps: [n1 - n0, n2 - n1], entry1, entry2: d.history.entries[n2].label, filters1, filters2: JSON.parse(JSON.stringify(layer.filters)) };
+  });
+  expect(r.calls).toEqual([
+    { same: true, params: { amount: 1 }, index: -1, label: 'Test Open' },
+    { same: true, params: { amount: 2 }, index: 0, label: 'Test Open' },
+  ]);
+  expect(r.added).toEqual({ amount: 2 });
+  expect(r.edited).toEqual({ amount: 3 });
+  expect(r.steps).toEqual([1, 1]);
+  expect(r.entry1).toBe('Smart filter: Test Open');
+  expect(r.entry2).toBe('Edit smart filter: Test Open');
+  expect(r.filters1).toEqual([{ kind: 'test-open', params: { amount: 2 }, enabled: true }]);
+  expect(r.filters2).toEqual([{ kind: 'test-open', params: { amount: 3 }, enabled: true }]);
+  // the skeleton's Camera Raw kind: geometric, recolour-only and 48 px of padding (0.4's results)
+  const kind = await page.evaluate(async () => {
+    const { isGeometricFilter, filterPadding } = await import('/lib/smart-object.js');
+    return { geometric: isGeometricFilter({ kind: 'camera-raw', params: {} }), pad: filterPadding([{ kind: 'camera-raw', params: { exposure: 1 } }]), fake: [isGeometricFilter({ kind: 'test-open', params: { amount: 1 } }), isGeometricFilter({ kind: 'test-open', params: { amount: 9 } })] };
+  });
+  expect(kind.geometric).toBe(true);
+  expect(kind.fake).toEqual([false, true]);
+  // the skeleton's padding (camera-raw-workspace owns develop-ui.js afterwards)
+  if (!(await landed(page))['camera-raw-workspace']) expect(kind.pad).toBe(48);
+  expect(errors).toEqual([]);
+});
+
+test('camera raw: a stage that needs the whole layer restarts the session without the selection, which masks the result', async ({ page }) => {
+  const errors = await openApp(page);
+  await newDoc(page);
+  await fillLayer(page, '#808080');
+  await page.evaluate(async () => {
+    const app = window.pigmentApp;
+    const { Selection } = await import('/lib/selection.js');
+    const d = app.doc;
+    d.selection = Selection.fromRect(d.width, d.height, { x: 0, y: 0, width: 100, height: 300 });
+    d.changed('selection');
+    const S = await import('/shared/pixels/develop-stages.js');
+    window.__crSeen = [];
+    window.__crOff = S.registerDevelopStage({
+      id: 'test-whole', order: 70, space: 'resample',
+      params: { keys: ['testWhole'], defaults: () => ({ testWhole: 0 }) },
+      neutral: (p) => !p.testWhole,
+      margin: () => Infinity,
+      apply({ R, G, B, w, h }) {
+        window.__crSeen.push([w, h]);
+        R.fill(1);
+        G.fill(0);
+        B.fill(0);
+      },
+    });
+  });
+  await page.evaluate(async () => {
+    const R = await import('/lib/develop/registry.js');
+    window.__crOff2 = R.registerDevelopSection({ tab: 'basic', id: 'test-whole', label: '', order: 950, fields: [{ key: 'testWhole', label: 'Whole', type: 'number', min: 0, max: 1 }] });
+  });
+  await run(page, 'filter:camera-raw');
+  await page.locator('.dialog input[type="number"][data-key="testWhole"]').fill('1');
+  await expect.poll(async () => (await pixel(page, 50, 150)).slice(0, 3)).toEqual([255, 0, 0]);
+  await confirmDialog(page);
+  const seen = await page.evaluate(() => {
+    window.__crOff();
+    window.__crOff2();
+    return window.__crSeen.at(-1);
+  });
+  // the stage saw the whole 400 x 300 layer; outside the selection the pixels stay grey
+  expect(seen).toEqual([400, 300]);
+  expect((await pixel(page, 50, 150)).slice(0, 3)).toEqual([255, 0, 0]);
+  expect((await pixel(page, 300, 150)).slice(0, 3)).toEqual([128, 128, 128]);
+  expect(errors).toEqual([]);
+});
+
+test('camera raw: Last Filter repeats a remembered command without its dialog and records one step with its params; Last Filter Dialog opens it prefilled', async ({ page }) => {
+  const errors = await openApp(page);
+  await newDoc(page);
+  await fillLayer(page, '#808080');
+  const r = await page.evaluate(async () => {
+    const app = window.pigmentApp;
+    const seen = [];
+    app.commands.register('test:remembered', { label: 'Remembered', dialog: true, run: (arg, ctx) => { seen.push({ arg, source: ctx.source }); ctx.setReplayArg(arg); return arg; } });
+    app.filterEditor.rememberCommand('test:remembered', 'Remembered', { amount: 7 });
+    app.actions.record(app.actions.newAction({ name: 'Repeat' }));
+    await app.commands.run('filter:last', undefined, 'api');
+    await new Promise((res) => setTimeout(res, 50));
+    const steps = app.actions.recording.action.steps.map((s) => ({ cmd: s.command, arg: s.arg }));
+    app.actions.stopRecording();
+    return { seen, steps, last: app.settings.lastFilter, menu: app.uiState.lastFilter };
+  });
+  expect(r.seen).toEqual([{ arg: { amount: 7 }, source: 'repeat' }]);
+  expect(r.last).toEqual({ command: 'test:remembered', name: 'Remembered', params: { amount: 7 } });
+  expect(r.steps).toEqual([{ cmd: 'test:remembered', arg: { amount: 7 } }]);
+  expect(r.menu).toBe('Remembered'); // the native menu reads "Last Filter: Remembered"
+
+  // Camera Raw remembered: Last Filter applies it without a dialog, Last Filter Dialog opens it prefilled
+  const before = (await pixel(page, 200, 150))[0];
+  await page.evaluate(() => window.pigmentApp.filterEditor.rememberCommand('filter:camera-raw', 'Camera Raw', { exposure: 1.5 }));
+  await runAwait(page, 'filter:last');
+  await expect(page.locator('.dialog-backdrop')).toHaveCount(0);
+  await page.waitForFunction(() => !document.body.classList.contains('busy'));
+  const after = (await pixel(page, 200, 150))[0];
+  expect(after).toBeGreaterThan(before + 40);
+  expect(await page.evaluate(() => window.pigmentApp.doc.history.entries[window.pigmentApp.doc.history.index].label)).toBe('Camera Raw');
+  await run(page, 'filter:last-dialog');
+  await expect(page.locator('.dialog .camera-raw')).toBeVisible();
+  await expect(page.locator('.dialog input[type="number"][data-key="exposure"]')).toHaveValue('1.5');
+  await page.locator('.dialog-backdrop .dialog-buttons button[data-value="null"]').last().click();
+  await expect(page.locator('.dialog-backdrop')).toHaveCount(0);
+  expect((await pixel(page, 200, 150))[0]).toBe(after);
   expect(errors).toEqual([]);
 });

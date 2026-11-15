@@ -2,7 +2,7 @@
 # Backs up the working tree (tracked changes and new files, .gitignore respected) as a commit on
 # claude/fervent-newton-263lz3-wip05, without touching HEAD, the index or the files: the skeleton's agents keep
 # seeing their work as uncommitted changes against 99dbdee. Each snapshot's parent is the previous one, so the
-# push is a fast-forward. The plan files that exist only in the scratchpad (plan05: the contract, the workflow
+# push is a fast-forward. The plan files that exist only in the scratchpad (plan05 and plan06 without its frozen tree: the contracts, the workflow
 # scripts, the hand-offs, the tools, the patches; text files under 400 KB) ride along under _session/plan05/ in
 # the snapshot tree only, never in the working tree or the real index.  Usage: snapshot.sh "what the snapshot holds"
 set -euo pipefail
@@ -13,8 +13,8 @@ IDX=$(mktemp "$SCR/wip-index.XXXXXX")
 trap 'rm -f "$IDX"' EXIT
 cp .git/index "$IDX"
 GIT_INDEX_FILE="$IDX" git add -A
-(cd "$SCR" && find plan05 -type f -size -400k \( -name '*.md' -o -name '*.js' -o -name '*.mjs' -o -name '*.py' \
-    -o -name '*.sh' -o -name '*.json' -o -name '*.patch' -o -name '*.txt' \) -print0) |
+(cd "$SCR" && find plan05 plan06 -path plan06/tree -prune -o -type f -size -400k \( -name '*.md' -o -name '*.js' \
+    -o -name '*.mjs' -o -name '*.py' -o -name '*.sh' -o -name '*.json' -o -name '*.patch' -o -name '*.txt' \) -print0) |
   while IFS= read -r -d '' f; do
     printf '100644 %s\t%s\0' "$(git hash-object -w "$SCR/$f")" "_session/$f"
   done | GIT_INDEX_FILE="$IDX" git update-index -z --add --index-info

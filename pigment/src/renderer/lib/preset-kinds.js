@@ -74,8 +74,8 @@ export function registerPresetKinds04() {
 
 /**
  * The preset kinds of 0.5 (ARCHITECTURE.md "0.5 features", S10.5), registered with registerPresetKinds04() in
- * start(). Their owners re-register them with their full definitions. Step 4 of the skeleton registers `brushes`;
- * step 10 adds the others.
+ * start(). Their owners re-register them with their full definitions. Step 4 of the skeleton registers `brushes`,
+ * step 7 the three Camera Raw kinds; step 10 adds the others.
  */
 export function registerPresetKinds05() {
   registerPresetKind('brushes', {
@@ -85,5 +85,26 @@ export function registerPresetKinds05() {
     builtins: () => ({ presets: BUILTIN_BRUSHES.map((b) => ({ id: b.id, name: b.name, data: withoutSampleData(brushFromLegacy(b)) })) }),
     normalize: (data) => (isObject(data) ? withoutSampleData(normalizeBrush(data)) : null),
     blobs: (data) => blobsOf(data),
+  });
+  // Camera Raw (S8.4; camera-raw-workspace re-registers them): registered empty by step 7 of the skeleton
+  registerPresetKind('camera-raw-presets', {
+    title: 'Camera Raw Presets',
+    version: 1,
+    builtins: () => ({ presets: [] }),
+    normalize: (data) => (isObject(data) && isObject(data.params) ? { params: data.params, groups: Array.isArray(data.groups) ? data.groups.map(String) : [] } : null),
+  });
+  registerPresetKind('camera-raw-snapshots', {
+    title: 'Camera Raw Snapshots',
+    version: 1,
+    builtins: () => ({ presets: [] }),
+    normalize: (data) => (isObject(data) && isObject(data.params) ? { params: data.params, document: typeof data.document === 'string' ? data.document : '' } : null),
+  });
+  registerPresetKind('camera-raw-profiles', {
+    title: 'Camera Raw Profiles',
+    version: 1,
+    builtins: () => ({ presets: [] }),
+    // the user's LUT library: the .cube file is the blob
+    normalize: (data) => (isObject(data) && typeof data.blob === 'string' ? data : null),
+    blobs: (data) => (typeof data?.blob === 'string' ? [data.blob] : []),
   });
 }

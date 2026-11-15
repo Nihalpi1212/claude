@@ -107,7 +107,11 @@ function documentFromImage(src, name) {
 
 // ---- smart filters: pixel work ----------------------------------------------------------------------------
 
-/** Filter kinds registered by other modules (Camera Raw): kind -> { name, apply(img, params), editor?, defaults? }. */
+/**
+ * Filter kinds registered by other modules (Camera Raw): kind -> { name, apply(img, params), editor?, defaults?,
+ * padding?(params), geometric?: boolean | (params) => boolean, recolourOnly?(params), open?(layer, params, { index,
+ * label }) -> Promise<params | null> } (E55, S8.3).
+ */
 const EXTRA_KINDS = new Map();
 const warned = new Set();
 
@@ -150,13 +154,20 @@ const LOCAL_FILTERS = new Set([
   // 0.3
   'blur', 'blur-more', 'smart-blur', 'shape-blur', 'lens-blur', 'sharpen-edges', 'sharpen-more', 'facet', 'ntsc-colors', 'hsb-hsl', 'trace-contour',
 ]);
-/** Kinds registered by other modules that need the whole object (Camera Raw's vignette is centred on it). */
-const GEOMETRIC_FILTERS = new Set(['camera-raw']);
+/**
+ * Kinds of this file that need the whole object. Kinds registered by other modules say so themselves through
+ * registerKind's `geometric` (E55, S8.3: Camera Raw's vignette is centred on the object; 0.4 listed 'camera-raw' here).
+ */
+const GEOMETRIC_FILTERS = new Set([]);
 /** Adjustments computed from the statistics of the whole image. */
 const GLOBAL_ADJUSTMENTS = new Set(['equalize']);
 export const isGeometricFilter = (f) => {
   if (f.kind.startsWith('adjust:')) return GLOBAL_ADJUSTMENTS.has(f.kind.slice(7));
-  if (EXTRA_KINDS.has(f.kind)) return GEOMETRIC_FILTERS.has(f.kind) || !!EXTRA_KINDS.get(f.kind).geometric;
+  if (EXTRA_KINDS.has(f.kind)) {
+    // registerKind's `geometric`: a boolean or a function of the filter's params (E55)
+    const g = EXTRA_KINDS.get(f.kind).geometric;
+    return GEOMETRIC_FILTERS.has(f.kind) || (typeof g === 'function' ? !!g(f.params ?? {}) : !!g);
+  }
   return GEOMETRIC_FILTERS.has(f.kind) || !LOCAL_FILTERS.has(f.kind);
 };
 /** The largest render a smart object may allocate (pixels, and per side): a 40× scale must never ask for gigabytes. */
@@ -206,7 +217,9 @@ const laidOutOnBounds = (f) => isGeometricFilter(f) && filterPadding([f]) === 0;
  * tree, clouds, tiles, a vignette, blur pins): run on the padded render as well, it would show a second time around
  * the object, laid out for a larger image, so the halo is left as the earlier filters made it.
  */
-const RECOLOUR_ONLY = new Set(['camera-raw', 'adjust:equalize', 'average']);
+const RECOLOUR_ONLY = new Set(['adjust:equalize', 'average']);
+/** RECOLOUR_ONLY, or a registered kind whose recolourOnly(params) says so (E55, S8.3: Camera Raw left the set in 0.5). */
+const recolourOnly = (f) => RECOLOUR_ONLY.has(f.kind) || !!EXTRA_KINDS.get(f.kind)?.recolourOnly?.(f.params ?? {});
 
 /**
  * Runs one smart filter on a sub-rectangle of img (in place). The rest of img is left alone, or, with `around`
@@ -367,7 +380,7 @@ export class SmartLayer extends Layer {
       // adjustment ctx (I.4): the render's (0, 0) is the document point (rect.x, rect.y)
       const actx = { origin: { x: rect.x, y: rect.y }, docWidth: host?.width ?? rect.width, docHeight: host?.height ?? rect.height, scale: 1 };
       for (const f of filters) {
-        if (own && laidOutOnBounds(f)) applyToRegion(work, own, f, spilled && RECOLOUR_ONLY.has(f.kind), actx);
+        if (own && laidOutOnBounds(f)) applyToRegion(work, own, f, spilled && recolourOnly(f), actx);
         else applySmartFilter(work, f, actx);
         if (filterPadding([f]) > 0) spilled = true;
       }
@@ -843,8 +856,38 @@ export function install(app) {
     return used;
   }
 
+  /**
+   * A registered kind with its own session (E55, S8.3): its open(layer, params, { index, label }) previews through
+   * layer.filters and d.changed and resolves with the params (null: nothing changes); this module still records the
+   * one "Smart filter" / "Edit smart filter" entry.
+   */
+  async function openKindSession(layer, kind, index, params) {
+    const extra = EXTRA_KINDS.get(kind);
+    const def = describeKind(kind);
+    const original = layer.filters;
+    const start = clone(params ?? (index >= 0 ? original[index]?.params : def.defaults())) ?? {};
+    let used = null;
+    try {
+      used = await extra.open(layer, start, { index, label: def.name });
+    } finally {
+      // whatever the session previewed goes; setFilters below records the result
+      if (layer.filters !== original) {
+        layer.filters = original;
+        layer.touch();
+        docOf(layer)?.changed('props', { layer });
+      }
+    }
+    if (!used) return null;
+    const entry = { kind, params: clone(used) ?? {}, enabled: index >= 0 ? original[index]?.enabled !== false : true };
+    const list = index >= 0 ? original.map((f, i) => (i === index ? entry : f)) : [...original, entry];
+    setFilters(layer, list, `${index >= 0 ? 'Edit smart filter' : 'Smart filter'}: ${def.name}`);
+    if (index < 0) rememberLastFilter(kind, used);
+    return used;
+  }
+
   /** Dialog adding (index < 0) or re-editing a smart filter, previewing live on the layer. */
   async function filterDialog(layer, kind, index = -1, params = null) {
+    if (typeof EXTRA_KINDS.get(kind)?.open === 'function') return openKindSession(layer, kind, index, params);
     if (!params && FILTERS[kind]?.ui === 'custom' && app.filterEditor?.opener?.(kind)) return customFilterDialog(layer, kind, index, params);
     const def = describeKind(kind);
     if (!def) return null;
@@ -933,7 +976,11 @@ export function install(app) {
         return { done: Promise.resolve(params) };
       }
       // `start`: params of a replay that only the kind's own opener can complete (Displace without its map)
-      const session = start && FILTERS[kind]?.ui === 'custom' && app.filterEditor?.opener?.(kind) ? customFilterDialog(layer, kind, -1, { ...app.filterEditor.defaults(kind), ...start }) : filterDialog(layer, kind, -1, null);
+      // a registered kind (Camera Raw) opens its dialog or its own session prefilled from `start` (S12.4: params
+      // from a source other than an action or Last Filter's repeat)
+      const session = EXTRA_KINDS.has(kind)
+        ? filterDialog(layer, kind, -1, start && typeof start === 'object' ? clone(start) : null)
+        : start && FILTERS[kind]?.ui === 'custom' && app.filterEditor?.opener?.(kind) ? customFilterDialog(layer, kind, -1, { ...app.filterEditor.defaults(kind), ...start }) : filterDialog(layer, kind, -1, null);
       return {
         done: session.catch((err) => {
           app.reportError(err, `${label ?? kind} failed`);
@@ -941,7 +988,7 @@ export function install(app) {
         }),
       };
     },
-    /** Other modules (Camera Raw) make their filter kind available as a smart filter. */
+    /** Other modules (Camera Raw) make their filter kind available as a smart filter (see EXTRA_KINDS; E55). */
     registerKind(kind, def) {
       EXTRA_KINDS.set(kind, def);
     },

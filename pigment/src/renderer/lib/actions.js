@@ -28,7 +28,7 @@ import { encodeSelection, selectionMask } from './actions/selection-data.js';
 const TRANSPARENT = /^app:(enter|escape)$/;
 const MAX_DEPTH = 12;
 /** Sources of commands that code runs (lib/automate.js, other commands, playback), as opposed to user gestures. */
-const PROGRAMMATIC = /^(api|action)$/;
+const PROGRAMMATIC = /^(api|action|repeat)$/; // 'repeat': Last Filter repeating a command (S12.4)
 const GROUP_NAMES = { file: 'File', edit: 'Edit', image: 'Image', layer: 'Layer', select: 'Select', filter: 'Filter', ai: 'AI', text: 'Type', path: 'Shape', view: 'View', tool: 'Colors' };
 
 const frame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r)));
