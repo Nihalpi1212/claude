@@ -335,7 +335,9 @@ export function shapeRaw(rec, str, at, len, { cFrom = at, cTo = at + len, featur
  * Shapes text[from, to) in one resolved character style.
  *
  * env: { faceFor(style) -> rec | null, measure(str, style, size) -> px (Canvas text measurement in the run's CSS font),
- *        ctxFrom, ctxTo (the characters around the piece that inform shaping, default the piece) }
+ *        ctxFrom, ctxTo (the characters around the piece that inform shaping, default the piece),
+ *        fallbackFace?(str, style, rec) -> rec | null (0.5, missing glyph protection: the face that draws a cluster the
+ *        run's face has no glyph for; its unit carries `face`) }
  * Returns a Piece: { from, to, size, face, rtl, units: [{ index, end, advance (px, horizontal scale and fractional
  * widths applied, no tracking), kind, glyphs: [{ id, x, y }] (px relative to the unit's pen start, y down), str }] }
  * Units are in logical order and cover [from, to) exactly; each starts at a grapheme boundary.
@@ -395,9 +397,14 @@ function shapeSegment(text, seg, dr, st, env, rec, size, sx, features, units) {
     const a = keys[q];
     const b = keys[q + 1] ?? to;
     const idx = groups.get(a);
-    // a cluster with a missing glyph (.notdef) is drawn by Canvas, so the browser's font fallback can find it
+    // a cluster with a missing glyph (.notdef): a fallback face that has it (0.5, missing glyph protection), else
+    // Canvas, so the browser's font fallback can find it
     if (idx.some((i) => raw.gid[i] === 0)) {
-      fallbackUnit(a, b);
+      const s = seg.map ? seg.str.slice(seg.map.indexOf(a), lastIndexOf(seg.map, b - 1) + 1) : text.slice(a, b);
+      const fb = env.fallbackFace?.(s, st, rec) ?? null;
+      const unit = fb && fb !== rec ? fallbackFaceUnit(fb, s, a, b, st, size, sx, features, dr.rtl) : null;
+      if (unit) units.push(unit);
+      else fallbackUnit(a, b);
       continue;
     }
     // HarfBuzz returns glyphs in visual order (a right-to-left buffer comes reversed): raw indices run left to right
@@ -419,6 +426,24 @@ function shapeSegment(text, seg, dr, st, env, rec, size, sx, features, units) {
   const lead = [];
   for (let q = 0; q < starts.length && starts[q] < first; q++) lead.push({ index: starts[q], end: Math.min(first, starts[q + 1] ?? to), advance: 0, kind: 'glyphs', glyphs: [], str: '', size, rtl: dr.rtl });
   if (lead.length) units.splice(units.length - keys.length, 0, ...lead);
+}
+
+/** One cluster shaped alone with a fallback face: a unit carrying `face`, or null when that face misses a glyph too. */
+function fallbackFaceUnit(fb, s, a, b, st, size, sx, features, rtl) {
+  const raw = shapeRaw(fb, s, 0, s.length, { features, language: st.language, rtl });
+  const n = raw.gid.length;
+  if (!n) return null;
+  for (let i = 0; i < n; i++) if (raw.gid[i] === 0) return null;
+  const k = size / fb.upem;
+  let pen = 0;
+  const glyphs = [];
+  let color = false;
+  for (let i = 0; i < n; i++) {
+    glyphs.push({ id: raw.gid[i], x: (pen + raw.dx[i]) * k * sx, y: -raw.dy[i] * k });
+    pen += raw.ax[i];
+    if (isColorGlyph(fb, raw.gid[i])) color = true;
+  }
+  return { index: a, end: b, advance: pen * k * sx, kind: color ? 'color' : 'glyphs', glyphs, str: s, size, rtl, face: fb };
 }
 
 function lastIndexOf(arr, v) {

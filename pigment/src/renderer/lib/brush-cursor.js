@@ -155,10 +155,27 @@ export function drawBrushCursor(ctx, view, tool) {
   }
   if (!view.pointer) return;
   const style = effectiveCursorStyle(app);
-  // Precise: the CSS crosshair (brushCursorCss, or the cursor filter for Caps Lock) is the whole cursor
-  if (style === 'precise') return;
   const p = view.toScreen(view.pointer.x, view.pointer.y);
   const painting = !!(tool.stroke || tool.active);
+  // Shift held between strokes: where a click would draw the straight line from the last stroke's end
+  const last = !painting && paintKeyState.shift ? tool.gesture?.lastPoint?.() : null;
+  if (last) {
+    const a = view.toScreen(last.x, last.y);
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(p.x, p.y);
+    ctx.setLineDash([4, 4]);
+    ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.lineDashOffset = 4;
+    ctx.strokeStyle = 'rgba(255,255,255,0.8)';
+    ctx.stroke();
+    ctx.restore();
+  }
+  // Precise: the CSS crosshair (brushCursorCss, or the cursor filter for Caps Lock) is the whole cursor
+  if (style === 'precise') return;
   ctx.save();
   ctx.lineWidth = 1;
   if (painting && prefs.crosshairWhilePainting) {

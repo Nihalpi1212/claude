@@ -364,7 +364,8 @@ export function layoutContent(content, opts) {
       }
       const run = makeRun(piece, text, p.from, p.to, st, x + runStart * glyphScale, bl, glyphScale, positioned.map((q) => ({ ...q, at: x + q.at * glyphScale })));
       run.advance = (pen - runStart) * glyphScale;
-      line.runs.push(run);
+      // clusters drawn by a fallback face (missing glyph protection) get runs of their own: a run has one face
+      line.runs.push(...splitByFace(run));
     }
   }
 }
@@ -413,6 +414,34 @@ function makeRun(piece, text, from, to, st, x, baseline, glyphScale, positioned)
   return { from, to, x, baseline: baseline - baselineOffset(st), advance, style: st, css: cssOf(st), scaleX: st.scaleX / 100, scaleY: st.scaleY / 100, clusters, units, face: piece.face ?? null, size: piece.size ?? drawnSize(st) };
 }
 
+/**
+ * A run whose units are drawn by more than one face (0.5: a unit carrying `face` came from a fallback face) split into
+ * runs of one face each, in logical order; a fallback run names its face in `fallback` ({ family, postScriptName }).
+ * Units, clusters, advances and positions are kept; a run with one face is returned as it is.
+ */
+export function splitByFace(run) {
+  if (!run.units.some((u) => u.face && u.face !== run.face)) return [run];
+  const groups = [];
+  for (const u of run.units) {
+    const face = u.face ?? run.face;
+    const last = groups[groups.length - 1];
+    if (last && last.face === face) last.units.push(u);
+    else groups.push({ face, units: [u] });
+  }
+  return groups.map((g) => {
+    const from = g.units[0].index;
+    const to = g.units[g.units.length - 1].end;
+    const xs = g.units.map((u) => u.x);
+    const x = Math.min(...xs);
+    const advance = g.units.reduce((sum, u) => sum + u.advance, 0);
+    const clusters = run.clusters.filter((c) => c.index >= from && c.index < to);
+    const out = { ...run, from, to: Math.min(to, run.to), x, advance, clusters, units: g.units, face: g.face };
+    if (g.face !== run.face && g.face) out.fallback = { family: g.face.family, postScriptName: g.face.postScriptName ?? null };
+    else delete out.fallback;
+    return out;
+  });
+}
+
 const quoteFamily = (f) => (/[\s'"]/.test(f) && !/^["']/.test(f) ? `"${f}"` : f);
 /** The CSS font of a resolved style (document.js cssFont's form, at the drawn size). */
 export const cssOf = (st, size = drawnSize(st)) => `${st.fontItalic ? 'italic ' : ''}${st.fontWeight ?? 400} ${size}px ${quoteFamily(st.fontFamily)}`;
@@ -423,8 +452,8 @@ let facesEpoch = 0;
 const supportCache = new WeakMap(); // content -> { key, value }
 
 /** Builds the engine from its parts; layout.js install() registers it (separate so Node tests can make one). */
-export function createEngine({ faceFor, requestFamily, measureText, kerner, listMarker, render, bounds, outline }) {
-  const piece = (text, from, to, st, o = {}) => shapePiece(text, from, to, st, { faceFor, measure: measureText, ctxFrom: o.ctxFrom, ctxTo: o.ctxTo, opticalFallback: o.kern });
+export function createEngine({ faceFor, requestFamily, measureText, kerner, listMarker, render, bounds, outline, fallbackFace = null }) {
+  const piece = (text, from, to, st, o = {}) => shapePiece(text, from, to, st, { faceFor, fallbackFace, measure: measureText, ctxFrom: o.ctxFrom, ctxTo: o.ctxTo, opticalFallback: o.kern });
   const measurer = {
     piece: (text, from, to, st, o) => piece(text, from, to, st, o),
     hyphen: (st) => piece('-', 0, 1, st).units.reduce((s, u) => s + u.advance, 0),
@@ -518,6 +547,7 @@ export async function install(app) {
     kerner: (mode) => api.kerner?.(mode) ?? null,
     listMarker: (paras, index) => api.listMarkerText?.(paras, index) ?? null,
     outline: (piece, unit) => fonts.unitOutline(piece.face, unit),
+    fallbackFace: fonts.fallbackFaceFor,
     render: render.renderLayout,
     bounds: render.layoutBounds,
   });

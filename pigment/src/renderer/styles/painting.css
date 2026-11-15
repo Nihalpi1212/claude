@@ -1,1 +1,3 @@
-/* painting (ARCHITECTURE.md "0.5 features", rule 6): this package's own styles. Empty until the package lands. */
+/* painting (ARCHITECTURE.md "0.5 features", rule 6): brush-painting-behaviours' styles. The brush cursor, the resize
+   HUD and the line preview are drawn on the canvas overlay (lib/brush-cursor.js, lib/brush-hud.js) and the Cursors
+   preferences use the form's own fields, so nothing needs a rule here yet. */

@@ -1,1 +1,48 @@
-/* preset-manager (ARCHITECTURE.md "0.5 features", rule 6): this package's own styles. Empty until the package lands. */
+/* preset-manager (ARCHITECTURE.md "0.5 features", rule 6): the Preset Manager, Export/Import Presets and Migrate
+   Presets dialogs. */
+.preset-manager { display: flex; flex-direction: column; gap: 8px; }
+.preset-manager .pm-top { display: flex; align-items: center; gap: 8px; }
+.preset-manager .pm-top label { display: inline-flex; align-items: center; gap: 6px; flex: 1; }
+.preset-manager .pm-top select { min-width: 180px; }
+.preset-manager .pm-menu { margin-left: auto; padding: 2px 6px; display: inline-flex; align-items: center; }
+.preset-manager .pm-menu svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; }
+.preset-manager .pm-body { display: flex; gap: 10px; min-height: 0; }
+.preset-manager .pm-list {
+  flex: 1; height: 340px; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg-sunken); padding: 4px; display: flex; flex-wrap: wrap; align-content: flex-start; gap: 2px;
+  outline: none;
+}
+.preset-manager .pm-list:focus-visible { box-shadow: 0 0 0 2px var(--focus-ring); }
+.preset-manager .pm-actions { display: flex; flex-direction: column; gap: 6px; width: 110px; }
+.preset-manager .pm-group { flex-basis: 100%; font-size: 11px; color: var(--fg-muted); padding: 6px 4px 2px; text-transform: uppercase; letter-spacing: 0.04em; }
+.preset-manager .pm-item { display: flex; align-items: center; gap: 6px; border-radius: 3px; cursor: default; user-select: none; border: 1px solid transparent; }
+.preset-manager .pm-item:hover { background: var(--hover); }
+.preset-manager .pm-item.selected { background: var(--selection); border-color: var(--accent); }
+.preset-manager .pm-item.drop-before { box-shadow: -2px 0 0 var(--accent); }
+.preset-manager .pm-thumb { display: inline-flex; align-items: center; justify-content: center; flex: none; }
+.preset-manager .pm-thumb canvas, .preset-manager .pm-thumb svg { display: block; max-width: 100%; max-height: 100%; }
+.preset-manager .pm-icon svg { width: 70%; height: 70%; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.preset-manager .pm-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.preset-manager .pm-empty { padding: 12px; }
+.preset-manager .pm-status { font-size: 11px; min-height: 14px; }
+
+/* the five views */
+.pm-list[data-view="text"] .pm-item { flex-basis: 100%; padding: 2px 6px; }
+.pm-list[data-view="text"] .pm-thumb { display: none; }
+.pm-list[data-view="small-thumbs"] .pm-item, .pm-list[data-view="large-thumbs"] .pm-item { flex-direction: column; padding: 2px; }
+.pm-list[data-view="small-thumbs"] .pm-name, .pm-list[data-view="large-thumbs"] .pm-name { display: none; }
+.pm-list[data-view="small-thumbs"] .pm-thumb { width: 32px; height: 32px; }
+.pm-list[data-view="large-thumbs"] .pm-thumb { width: 64px; height: 64px; }
+.pm-list[data-view="small-list"] .pm-item, .pm-list[data-view="large-list"] .pm-item { flex-basis: 100%; padding: 2px 6px; }
+.pm-list[data-view="small-list"] .pm-thumb { width: 20px; height: 20px; }
+.pm-list[data-view="large-list"] .pm-thumb { width: 36px; height: 36px; }
+.pm-list .pm-thumb:empty { background: var(--bg-elevated); border-radius: 2px; }
+.pm-list[data-view="text"] .pm-thumb:empty { background: none; }
+
+/* Export/Import Presets */
+.pm-exim .pm-tabs { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 8px; }
+.pm-exim .pm-tabs .seg-button.active { background: var(--accent); color: var(--accent-fg, #fff); }
+.pm-exim .pm-checks { display: flex; flex-direction: column; gap: 4px; max-height: 260px; overflow: auto; margin: 6px 0 10px; }
+.pm-exim .pm-checks label { display: flex; align-items: center; gap: 6px; }
+.pm-exim .pm-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.popover.pm-popover { z-index: 1600; }

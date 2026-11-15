@@ -1,0 +1,53 @@
+{
+  "about": "Pigment-made preset libraries (ARCHITECTURE.md \"0.5 features\", S10.5): offered by the Preset Manager and the panels; every value is Pigment's own.",
+  "libraries": [
+    {
+      "id": "swatches-web-safe",
+      "file": "swatches-web-safe.pigment-presets",
+      "kind": "swatches",
+      "name": "Web Safe Colors"
+    },
+    {
+      "id": "swatches-grays",
+      "file": "swatches-grays.pigment-presets",
+      "kind": "swatches",
+      "name": "Grays"
+    },
+    {
+      "id": "swatches-hue-wheel",
+      "file": "swatches-hue-wheel.pigment-presets",
+      "kind": "swatches",
+      "name": "Hue Wheel"
+    },
+    {
+      "id": "gradients-pigment",
+      "file": "gradients-pigment.pigment-presets",
+      "kind": "gradients",
+      "name": "Pigment Gradients"
+    },
+    {
+      "id": "shapes-pigment",
+      "file": "shapes-pigment.pigment-presets",
+      "kind": "shapes",
+      "name": "Pigment Shapes"
+    },
+    {
+      "id": "patterns-pigment",
+      "file": "patterns-pigment.pigment-presets",
+      "kind": "patterns",
+      "name": "Pigment Patterns"
+    },
+    {
+      "id": "styles-pigment",
+      "file": "styles-pigment.pigment-presets",
+      "kind": "styles",
+      "name": "Pigment Styles"
+    },
+    {
+      "id": "brushes-dry-media",
+      "file": "brushes-dry-media.pigment-presets",
+      "kind": "brushes",
+      "name": "Dry Media"
+    }
+  ]
+}

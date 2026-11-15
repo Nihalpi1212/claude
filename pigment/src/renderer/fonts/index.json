@@ -1,0 +1,192 @@
+{
+ "format": "pigment-fonts",
+ "version": 1,
+ "default": "SourceSans3VF",
+ "families": [
+  {
+   "name": "SourceSans3VF",
+   "classification": "sans-serif",
+   "variable": true,
+   "license": "SourceSans3-LICENSE.md",
+   "origin": "Source Sans 3 3.52.0 by Adobe (npm package source-sans), SIL Open Font License 1.1",
+   "faces": [
+    {
+     "file": "SourceSans3VF-Upright.ttf",
+     "postScriptName": "SourceSans3VF-ExtraLight",
+     "style": "Regular",
+     "weight": 200,
+     "italic": false,
+     "stretch": 5,
+     "metrics": {
+      "xHeight": 0.478,
+      "capHeight": 0.66,
+      "avgWidth": 0.493
+     },
+     "axes": [
+      {
+       "tag": "wght",
+       "name": "Weight",
+       "min": 200,
+       "default": 200,
+       "max": 900,
+       "hidden": false
+      }
+     ],
+     "instances": [
+      {
+       "name": "ExtraLight",
+       "postScriptName": "SourceSans3VF-ExtraLight",
+       "weight": 200,
+       "italic": false,
+       "coords": {
+        "wght": 200
+       }
+      },
+      {
+       "name": "Light",
+       "postScriptName": "SourceSans3VF-Light",
+       "weight": 300,
+       "italic": false,
+       "coords": {
+        "wght": 300
+       }
+      },
+      {
+       "name": "Regular",
+       "postScriptName": "SourceSans3VF-Regular",
+       "weight": 400,
+       "italic": false,
+       "coords": {
+        "wght": 400
+       }
+      },
+      {
+       "name": "Medium",
+       "postScriptName": "SourceSans3VF-Medium",
+       "weight": 500,
+       "italic": false,
+       "coords": {
+        "wght": 500
+       }
+      },
+      {
+       "name": "Semibold",
+       "postScriptName": "SourceSans3VF-Semibold",
+       "weight": 600,
+       "italic": false,
+       "coords": {
+        "wght": 600
+       }
+      },
+      {
+       "name": "Bold",
+       "postScriptName": "SourceSans3VF-Bold",
+       "weight": 700,
+       "italic": false,
+       "coords": {
+        "wght": 700
+       }
+      },
+      {
+       "name": "Black",
+       "postScriptName": "SourceSans3VF-Black",
+       "weight": 900,
+       "italic": false,
+       "coords": {
+        "wght": 900
+       }
+      }
+     ]
+    },
+    {
+     "file": "SourceSans3VF-Italic.ttf",
+     "postScriptName": "SourceSans3VF-ExtraLightItalic",
+     "style": "Italic",
+     "weight": 200,
+     "italic": true,
+     "stretch": 5,
+     "metrics": {
+      "xHeight": 0.478,
+      "capHeight": 0.66,
+      "avgWidth": 0.477
+     },
+     "axes": [
+      {
+       "tag": "wght",
+       "name": "Weight",
+       "min": 200,
+       "default": 200,
+       "max": 900,
+       "hidden": false
+      }
+     ],
+     "instances": [
+      {
+       "name": "ExtraLight Italic",
+       "postScriptName": "SourceSans3VF-ExtraLightItalic",
+       "weight": 200,
+       "italic": true,
+       "coords": {
+        "wght": 200
+       }
+      },
+      {
+       "name": "Light Italic",
+       "postScriptName": "SourceSans3VF-LightItalic",
+       "weight": 300,
+       "italic": true,
+       "coords": {
+        "wght": 300
+       }
+      },
+      {
+       "name": "Italic",
+       "postScriptName": "SourceSans3VF-Italic",
+       "weight": 400,
+       "italic": true,
+       "coords": {
+        "wght": 400
+       }
+      },
+      {
+       "name": "Medium Italic",
+       "postScriptName": "SourceSans3VF-MediumItalic",
+       "weight": 500,
+       "italic": true,
+       "coords": {
+        "wght": 500
+       }
+      },
+      {
+       "name": "Semibold Italic",
+       "postScriptName": "SourceSans3VF-SemiboldItalic",
+       "weight": 600,
+       "italic": true,
+       "coords": {
+        "wght": 600
+       }
+      },
+      {
+       "name": "Bold Italic",
+       "postScriptName": "SourceSans3VF-BoldItalic",
+       "weight": 700,
+       "italic": true,
+       "coords": {
+        "wght": 700
+       }
+      },
+      {
+       "name": "Black Italic",
+       "postScriptName": "SourceSans3VF-BlackItalic",
+       "weight": 900,
+       "italic": true,
+       "coords": {
+        "wght": 900
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}
