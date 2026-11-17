@@ -55,18 +55,19 @@ Sources:
 ## Rules for every package
 
 - **One build at a time.** Machine: 4 CPUs and a shared target directory. Run one cargo process at a time with `-j 4`, and never `cargo clean`. The whole workspace test suite is too long here; run the tests of the crates and files you touched (CI runs everything).
-- **Disk.** The real quota is about 39 GB, and about 15 GB is free at the start; `df` reports 252 GB, which is misleading. Always build with `CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0`.
+- **Disk.** The real quota is about 39 GB in all; `df` reports 252 GB, which is misleading. Always build with `CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0`. Test runs use `TMPDIR=/dev/shm/pt CRAFT_I18N_DIR=/home/user/storytold/craft-i18n CRAFT_FONTS_DIR=/home/user/storytold/craft-fonts` (the translations and fonts CI uses, at the same commits).
   - Before a big test build, check `df -h /`. If less than 6 GB is free, delete the test executables in `target/debug/deps` (`find pigment/target/debug/deps -maxdepth 1 -type f -perm -u+x -size +20M -delete`) and `target/debug/incremental`. Cargo rebuilds them when needed.
-  - Tests that only fail in this container, so don't chase them: PhotoCraft's scratch-disk check misreads the 252 GB volume (set `TMPDIR=/dev/shm/pt` for test runs, as the rebrand review did); CJK and Arabic glyph tests need craft-fonts; permission tests can't pass as root; three type-tool font tests pick up an Inter Display font installed here. The known upstream failures are listed in `pigment/scripts/upstream-test-failures.txt`.
+  - Tests that only fail in this container, so don't chase them: PhotoCraft's scratch-disk check misreads the 252 GB volume unless `TMPDIR=/dev/shm/pt` is set; permission tests can't pass as root; a few type-tool font tests can pick up a font installed here. The known upstream failures are listed in `pigment/scripts/upstream-test-failures.txt`.
 - **Keep CI green** (`.github/workflows/pigment-ci.yml`): `cargo fmt --all -- --check`, clippy with `-D warnings` on what you touched, and your tests. Add an `upstream-ok` marker or a FORK.md entry where the rebrand script or the merge notes need one.
 - **Hooks into upstream files stay small** (a line or two each). List every one in `pigment/docs/FORK.md` under "What Pigment added", as Nib does.
 - **New interface strings** go through PhotoCraft's i18n catalogues: English, with the other languages left to their usual fallback unless the catalogue tooling requires rows.
 - **Commits.** Commit locally after each verified part, with messages ending in these two lines:
 
   ```
-  Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+  Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>
   Claude-Session: https://claude.ai/code/session_012irzNNBVSJyVqHJpCPbdwm
   ```
 
-  Never push or rewrite history. Put no model names in the repository other than in those trailers.
+  **Push each verified commit at once:** `git push origin claude/pigment-photocraft` (retry up to 4 times on a network error). The container can be reclaimed at any moment, and an unpushed commit is then lost. Commit and push only work that builds and passes its tests, fmt and clippy: CI runs on every push. Never rewrite history. Put no model names in the repository other than in those trailers.
+- **Back up as you go.** Run `bash /tmp/claude-0/-home-user-claude/02aa60de-818c-5d38-b2f3-33055ac112a1/scratchpad/planpc/snapshot.sh "<package>: <what>"` at least every 30 minutes while you have uncommitted work, and after you write or update your notes. It pushes the working tree and the plan files to a backup branch without touching HEAD or the index. The container can be reclaimed at any moment, and whatever is neither pushed nor in a snapshot is lost.
 - **Hand-off notes.** Write a short note to `planpc/build/PKG-<package>.md` for the next engineer: what you built, the files, the hooks, the tests, and anything left.

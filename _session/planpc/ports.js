@@ -13,6 +13,8 @@ const G = args || {}
 const SPEC = `${SCR}/planpc/ports/${G.spec}`
 const PKGS = G.packages || []
 // Continuation notes for a package stopped mid-way (added by the orchestrator only, before a resume): { "<id>": "text" }.
+// Restartable after a container replacement (the journal is lost then): pass the packages still to build in
+// args.packages and the ones already built and pushed in args.done; args.packages may be empty to run only the review.
 const NOTES = G.notes || {}
 
 const PKG_SCHEMA = {
@@ -47,17 +49,18 @@ for (let i = 0; i < PKGS.length; i++) {
   const prior = PKGS.slice(0, i)
   const note = NOTES[id] ? `\n\n${NOTES[id]}` : ''
   reports[id] = await agent(`Read the brief ${BRIEF}. Then read package ${id} in ${SPEC}: its section, and every row it lists in full. Build package ${id} in /home/user/claude/pigment, with its tests, exactly as the spec says. The spec is the plan; where it is wrong about the code you find, follow the code and record it.
-${prior.length ? `Earlier packages of this group are committed on the branch. Read their notes first: ${prior.map((p) => `${SCR}/planpc/build/PKG-port-${p}.md`).join(', ')}.` : 'You are the first package of this group.'} Other packages from earlier groups and the AI port are also committed; git log shows them.
+${(G.done || []).concat(prior).length ? `Earlier packages of this group are committed on the branch. Read their notes first: ${(G.done || []).concat(prior).map((p) => `${SCR}/planpc/build/PKG-port-${p}.md`).join(', ')}.` : 'You are the first package of this group.'} Other packages from earlier groups and the AI port are also committed; git log shows them.
 Follow the brief's rules:
 - one cargo process at a time, with -j 4 and CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0;
 - fmt, clippy -D warnings, your tests and the rebrand check green;
 - small hooks, listed in FORK.md;
-- local commits with the two trailer lines; never push.
+- commits with the two trailer lines, each pushed at once when it is verified, and a snapshot at least every 30 minutes, as the brief says.
 Write ${SCR}/planpc/build/PKG-port-${id}.md for the next engineer. Return the schema: what you built, your commits (short sha and subject), the spec rows done and not done (with why), the tests and their results, the checks, every hook into an upstream file, and what the next package should know.${note}`, { label: `build:${id}`, phase: 'Build', schema: PKG_SCHEMA, effort: 'high' })
 }
 
 phase('Review')
-const review = await agent(`You review group ${G.group} of the port of the JavaScript Pigment's extras: packages ${PKGS.join(', ')}, which other engineers just finished. Read the brief ${BRIEF} and those packages' sections in ${SPEC}. The work is the local commits on branch claude/pigment-photocraft in /home/user/claude (git log, git show) and the notes ${PKGS.map((p) => `${SCR}/planpc/build/PKG-port-${p}.md`).join(', ')}. The engineers' reports follow, but judge from the code:
+const ALL = (G.done || []).concat(PKGS)
+const review = await agent(`You review group ${G.group} of the port of the JavaScript Pigment's extras: packages ${ALL.join(', ')}, which other engineers just finished. Read the brief ${BRIEF} and those packages' sections in ${SPEC}. The work is the local commits on branch claude/pigment-photocraft in /home/user/claude (git log, git show) and the notes ${ALL.map((p) => `${SCR}/planpc/build/PKG-port-${p}.md`).join(', ')}. The engineers' reports follow where this run has them (a restarted run has only the notes), but judge from the code:
 ${JSON.stringify(reports)}
 
 Be a skeptic. Check:
@@ -65,6 +68,6 @@ Be a skeptic. Check:
 - PSD and .pigment round trips, undo and redo as one step, 8, 16 and 32-bit documents and the colour modes where the feature applies;
 - hostile or odd input in any new reader (truncated files, huge sizes, bad values);
 - small hooks listed in FORK.md, and tests that really test what they claim.
-Run the packages' tests and add a test for each real defect you find. Fix what you find in local commits with the two trailer lines (never push), one cargo process at a time with -j 4 and CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0. Return the findings (severity: blocker, major or minor; where; what; whether fixed and how), the checks you ran with their results, your commits, and what you could not fix.`, { label: `review:${G.group}`, phase: 'Review', schema: REVIEW_SCHEMA, effort: 'high' })
+Run the packages' tests and add a test for each real defect you find. Fix what you find, in commits made and pushed as the brief says, one cargo process at a time with -j 4 and CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0. Write ${SCR}/planpc/build/PKG-port-review-${G.group}.md: what you found and fixed, and what the next group should know. Return the findings (severity: blocker, major or minor; where; what; whether fixed and how), the checks you ran with their results, your commits, and what you could not fix.`, { label: `review:${G.group}`, phase: 'Review', schema: REVIEW_SCHEMA, effort: 'high' })
 
 return { group: G.group, reports, review }

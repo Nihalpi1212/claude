@@ -40,12 +40,11 @@ After each group: read its reports and review, verify the commits (build, the gr
 
 ## Rules for every package
 
-- **Builds.** 4 CPUs and one shared target directory. Run one cargo process at a time with `-j 4`, and never `cargo clean`. Always set `CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0`. Test runs use `TMPDIR=/dev/shm/pt`, because PhotoCraft's scratch-disk check misreads the 252 GB volume. Run the tests of the crates and files you touched; CI runs the whole workspace.
+- **Builds.** 4 CPUs and one shared target directory. Run one cargo process at a time with `-j 4`, and never `cargo clean`. Always set `CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0`. Test runs use `TMPDIR=/dev/shm/pt CRAFT_I18N_DIR=/home/user/storytold/craft-i18n CRAFT_FONTS_DIR=/home/user/storytold/craft-fonts` (the translations and fonts CI uses, at the same commits); without that TMPDIR, PhotoCraft's scratch-disk check misreads the 252 GB volume. Run the tests of the crates and files you touched; CI runs the whole workspace.
 - **Disk.** The real quota is about 39 GB. Before a big test build, check `df -h /`. If less than 6 GB is free, delete the test executables over 20 MB in `pigment/target/debug/deps` (`find pigment/target/debug/deps -maxdepth 1 -type f -perm -u+x -size +20M -delete`) and `target/debug/incremental`.
 - **Container-only failures.** These fail only in this container, so don't chase them:
-  - CJK and Arabic glyph tests, which need craft-fonts;
   - permission tests, which can't pass as root;
-  - three type-tool font tests that pick up an Inter Display font installed here.
+  - a few type-tool font tests that can pick up a font installed here.
 
   Known upstream failures are listed in `pigment/scripts/upstream-test-failures.txt`.
 - **Keep CI green** (`.github/workflows/pigment-ci.yml`): `cargo fmt --all -- --check`, clippy with `-D warnings` on what you touched, your tests, and `python3 pigment/scripts/pigment-rebrand.py --check`.
@@ -56,9 +55,10 @@ After each group: read its reports and review, verify the commits (build, the gr
 - **Commits.** Commit locally after each verified part, with messages ending in these two lines:
 
   ```
-  Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+  Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>
   Claude-Session: https://claude.ai/code/session_012irzNNBVSJyVqHJpCPbdwm
   ```
 
-  Never push or rewrite history. Put no model names elsewhere in the repository.
+  **Push each verified commit at once:** `git push origin claude/pigment-photocraft` (retry up to 4 times on a network error). The container can be reclaimed at any moment, and an unpushed commit is then lost. Commit and push only work that builds and passes its tests, fmt and clippy: CI runs on every push. Never rewrite history. Put no model names in the repository other than in those trailers.
+- **Back up as you go.** Run `bash /tmp/claude-0/-home-user-claude/02aa60de-818c-5d38-b2f3-33055ac112a1/scratchpad/planpc/snapshot.sh "<package>: <what>"` at least every 30 minutes while you have uncommitted work, and after you write or update your notes. It pushes the working tree and the plan files to a backup branch without touching HEAD or the index. The container can be reclaimed at any moment, and whatever is neither pushed nor in a snapshot is lost.
 - **Hand-off notes.** Write `planpc/build/PKG-port-<id>.md` for the next engineer: what you built, the files, the hooks, the tests, and anything left.
