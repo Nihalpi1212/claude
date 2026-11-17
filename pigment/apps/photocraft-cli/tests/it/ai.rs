@@ -292,3 +292,153 @@ fn run_sends_only_with_allow_ai() {
     assert_eq!(m.got.lock().unwrap().len(), 1, "nothing more was sent: {stdout}{err}");
     let _ = std::fs::remove_dir_all(&d);
 }
+
+// ---- Sign in with ChatGPT (experimental) ----------------------------------------------------
+
+/// The sign-in server and the plan route's catalog on 127.0.0.1. The ID token carries `nonce`,
+/// which the test sets once it has read the attempt's address. Returns the server's root.
+fn plan_mock(nonce: &Arc<Mutex<String>>) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let root = format!("http://{}", listener.local_addr().unwrap());
+    let nonce = Arc::clone(nonce);
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(stream) = stream else { continue };
+            let nonce = Arc::clone(&nonce);
+            std::thread::spawn(move || {
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                let mut len = 0usize;
+                loop {
+                    let mut h = String::new();
+                    if reader.read_line(&mut h).unwrap_or(0) == 0 || h == "\r\n" {
+                        break;
+                    }
+                    if let Some((k, v)) = h.trim_end().split_once(':')
+                        && k.eq_ignore_ascii_case("content-length")
+                    {
+                        len = v.trim().parse().unwrap_or(0);
+                    }
+                }
+                let mut body = vec![0; len];
+                let _ = reader.read_exact(&mut body);
+                let part = |v: &Value| pigment_genai::chatgpt::base64url(v.to_string().as_bytes());
+                let reply = if line.contains("/oauth/token") {
+                    let claims = json!({"iss": "https://auth.openai.com", "aud": "oaiapp_42", "exp": 4_000_000_000_i64, "nonce": *nonce.lock().unwrap(), "email": "me@example.com"});
+                    json!({"access_token": "access-token-ONE", "refresh_token": "refresh-token-ONE", "expires_in": 3600, "scope": "openid chatgpt.tokens.use.direct",
+                        "id_token": format!("{}.{}.sig", part(&json!({"alg": "RS256"})), part(&claims))})
+                } else {
+                    json!({"models": [{"slug": "gpt-5.1"}, {"slug": "gpt-5-codex"}]})
+                }
+                .to_string();
+                let mut out = stream;
+                let _ = write!(out, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{reply}", reply.len());
+            });
+        }
+    });
+    root
+}
+
+/// A query parameter of `url`, percent-decoded.
+fn param(url: &str, name: &str) -> String {
+    let raw = url.split_once('?').unwrap().1.split('&').find_map(|kv| kv.strip_prefix(&format!("{name}="))).unwrap();
+    let (bytes, mut out, mut i) = (raw.as_bytes(), vec![], 0);
+    while i < bytes.len() {
+        match bytes[i] {
+            b'%' => {
+                out.push(u8::from_str_radix(&raw[i + 1..i + 3], 16).unwrap());
+                i += 2;
+            }
+            b'+' => out.push(b' '),
+            b => out.push(b),
+        }
+        i += 1;
+    }
+    String::from_utf8(out).unwrap()
+}
+
+/// `ai sign-in` in `settings`, until it has printed the address to open: the running command,
+/// the rest of its output to read, and the address.
+fn start_sign_in(settings: &Path, root: &str) -> (std::process::Child, BufReader<std::process::ChildStdout>, String) {
+    let mut c = cli(settings, &format!("{root}/v1"));
+    c.env("PIGMENT_AI_AUTH_URL_CHATGPT", root).args(["ai", "sign-in", "--port", "0"]);
+    let mut child = c.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
+    let mut out = BufReader::new(child.stdout.take().unwrap());
+    let mut url = String::new();
+    while !url.contains("/api/accounts/authorize?") {
+        url.clear();
+        assert!(out.read_line(&mut url).unwrap() > 0, "sign-in ended before printing its address");
+    }
+    (child, out, url.trim().to_string())
+}
+
+/// `pigment-cli ai sign-in`: the address is printed, the browser's callback (or the pasted
+/// address) finishes it, the status names the account and never a token, `ai test` lists the
+/// plan's models, and `ai sign-out` removes it.
+#[test]
+fn sign_in_with_chatgpt_from_the_terminal() {
+    if !pigment_genai::chatgpt::ENABLED {
+        return;
+    }
+    let d = dir("chatgpt");
+    let nonce = Arc::new(Mutex::new(String::new()));
+    let root = plan_mock(&nonce);
+    let status = |d: &Path, json: bool| {
+        let mut c = cli(d, &format!("{root}/v1"));
+        c.env("PIGMENT_AI_AUTH_URL_CHATGPT", &root).args(if json { &["ai", "status", "--json"][..] } else { &["ai", "status"][..] });
+        text(&run(c, "")).0
+    };
+    let sub = |d: &Path, args: &[&str]| {
+        let mut c = cli(d, &format!("{root}/v1"));
+        c.env("PIGMENT_AI_AUTH_URL_CHATGPT", &root).args(args);
+        text(&run(c, ""))
+    };
+    // The browser lands on the loopback callback.
+    let (mut child, mut rest, url) = start_sign_in(&d, &root);
+    assert_eq!(param(&url, "client_id"), "dynamic_agent_client");
+    *nonce.lock().unwrap() = param(&url, "nonce");
+    let redirect = param(&url, "redirect_uri");
+    let (host, path) = redirect.strip_prefix("http://").unwrap().split_once('/').unwrap();
+    let mut browser = std::net::TcpStream::connect(host).unwrap();
+    write!(browser, "GET /{path}?code=the-code&state={}&client_id=oaiapp_42 HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n", param(&url, "state"))
+        .unwrap();
+    let mut page = String::new();
+    browser.read_to_string(&mut page).unwrap();
+    assert!(page.contains("You can return to Pigment"), "{page}");
+    let mut out = String::new();
+    rest.read_to_string(&mut out).unwrap();
+    assert_eq!(child.wait().unwrap().code(), Some(0), "{out}");
+    assert!(out.contains("Signed in with ChatGPT as me@example.com") && out.contains("pigment-cli ai consent"), "{out}");
+    let (plain, json) = (status(&d, false), status(&d, true));
+    assert!(plain.contains("OpenAI: signed in with ChatGPT as me@example.com (experimental; chat models only"), "{plain}");
+    assert!(json.contains("\"method\": \"chatgpt\"") && json.contains("\"email\": \"me@example.com\""), "{json}");
+    let key_file = std::fs::read_to_string(d.join("ai-keys.json")).unwrap();
+    assert!(key_file.contains("openai-chatgpt") && key_file.contains("access-token-ONE"), "the tokens are in the private key file");
+    for secret in ["access-token-ONE", "refresh-token-ONE", "the-code"] {
+        assert!(!out.contains(secret) && !plain.contains(secret) && !json.contains(secret), "{secret}");
+        assert!(!std::fs::read_to_string(d.join("ai.json")).unwrap().contains(secret), "{secret} in ai.json");
+    }
+    let (tested, err) = sub(&d, &["ai", "test"]);
+    assert!(tested.contains("the ChatGPT sign-in works (2 models)") && tested.contains("gpt-5.1"), "{tested}{err}");
+    assert!(sub(&d, &["ai", "clear-key", "openai"]).0.contains("still signed in with ChatGPT"), "removing a key leaves the sign-in");
+    assert!(sub(&d, &["ai", "sign-out"]).0.contains("Signed out of ChatGPT."));
+    assert!(status(&d, false).contains("OpenAI: not connected"));
+    assert!(!d.join("ai-keys.json").exists(), "the file goes with the sign-in");
+    assert!(sub(&d, &["ai", "sign-out"]).0.contains("Not signed in with ChatGPT."));
+    // A browser on another computer: the address it lands on, pasted at the prompt. One that
+    // belongs to another attempt is refused and the command goes on waiting.
+    let (mut child, mut rest, url) = start_sign_in(&d, &root);
+    *nonce.lock().unwrap() = param(&url, "nonce");
+    let mut stdin = child.stdin.take().unwrap();
+    writeln!(stdin, "code=c&state=someone-elses").unwrap();
+    writeln!(stdin, "{}?code=the-code&state={}&client_id=oaiapp_42", param(&url, "redirect_uri"), param(&url, "state")).unwrap();
+    let mut out = String::new();
+    rest.read_to_string(&mut out).unwrap();
+    let mut err = String::new();
+    child.stderr.take().unwrap().read_to_string(&mut err).unwrap();
+    assert_eq!(child.wait().unwrap().code(), Some(0), "{out}{err}");
+    assert!(out.contains("Signed in with ChatGPT as me@example.com"), "{out}");
+    assert!(err.contains("another sign-in attempt"), "{err}");
+    assert!(status(&d, false).contains("signed in with ChatGPT"));
+}

@@ -477,6 +477,18 @@ impl World {
         self.server.requests().iter().filter(|g| g.path.ends_with("/oauth/token")).map(Got::fields).collect()
     }
 
+    /// Wait until the token endpoint has been asked `n` times (the request is in flight: the
+    /// mock logs it before its delay), so what the test does next lands while it waits.
+    fn token_request_in_flight(&self, n: usize) {
+        for _ in 0..2000 {
+            if self.token_calls().len() >= n {
+                return;
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
+        panic!("the token endpoint was never asked");
+    }
+
     fn chat(&self, text: &str) -> Result<String, photocraft_engine::generative::GenError> {
         let req = ChatRequest {
             choice: Choice::default(),
@@ -645,10 +657,10 @@ fn the_sign_in_is_kept_in_the_private_key_file_and_nowhere_else() {
 fn a_refresh_that_lands_after_sign_out_does_not_resurrect_the_account() {
     let Some(w) = World::new("resurrect") else { return };
     w.plant_expired();
-    w.knob(|k| k.refresh_delay = Duration::from_millis(250));
+    w.knob(|k| k.refresh_delay = Duration::from_millis(800));
     let backend = w.backend();
     let request = thread::spawn(move || backend.list_models(ProviderId::OpenAi, &|| false));
-    thread::sleep(Duration::from_millis(80));
+    w.token_request_in_flight(1);
     w.accounts.lock().unwrap().sign_out().unwrap();
     assert_eq!(w.method(), None);
     let e = request.join().unwrap().unwrap_err();
@@ -723,15 +735,14 @@ fn an_error_without_this_attempts_state_is_a_stray_request() {
 #[test]
 fn cancel_during_the_code_exchange_stores_nothing() {
     let Some(w) = World::new("cancel") else { return };
-    w.knob(|k| k.code_delay = Duration::from_millis(400));
+    w.knob(|k| k.code_delay = Duration::from_millis(800));
     let auth = w.start();
     let (chatgpt, address) = (Arc::clone(&w.chatgpt), format!("{}?code=the-code&state={}&client_id=oaiapp_42", auth["redirect_uri"], auth["state"]));
     let manual = thread::spawn(move || chatgpt.complete_manual(&address));
-    thread::sleep(Duration::from_millis(120));
+    w.token_request_in_flight(1);
     w.chatgpt.cancel();
     assert_eq!(w.chatgpt.take_outcome().unwrap().unwrap_err().kind, ErrorKind::Cancelled);
     assert_eq!(manual.join().unwrap().unwrap_err().kind, ErrorKind::Cancelled);
-    thread::sleep(Duration::from_millis(450));
     assert_eq!(w.method(), None);
     assert!(w.stored().is_none());
     assert_eq!(w.token_calls().len(), 1, "the code was sent, and its answer dropped");
@@ -763,10 +774,10 @@ fn the_first_exchange_must_answer_with_an_id_token() {
 fn a_fatal_refresh_after_a_new_api_key_keeps_the_key() {
     let Some(w) = World::new("newkey") else { return };
     w.plant_expired();
-    w.knob(|k| (k.refresh_delay, k.fail_refresh) = (Duration::from_millis(250), Some("invalid_grant")));
+    w.knob(|k| (k.refresh_delay, k.fail_refresh) = (Duration::from_millis(800), Some("invalid_grant")));
     let backend = w.backend();
     let request = thread::spawn(move || backend.list_models(ProviderId::OpenAi, &|| false));
-    thread::sleep(Duration::from_millis(80));
+    w.token_request_in_flight(1);
     w.accounts.lock().unwrap().set_key(ProviderId::OpenAi, OPENAI_KEY).unwrap();
     assert_eq!(w.method(), Some(Method::ApiKey));
     let e = request.join().unwrap().unwrap_err();
@@ -779,18 +790,17 @@ fn a_fatal_refresh_after_a_new_api_key_keeps_the_key() {
 #[test]
 fn a_cancelled_attempt_never_ends_the_next_sign_in() {
     let Some(w) = World::new("next") else { return };
-    w.knob(|k| k.code_delay = Duration::from_millis(400));
+    w.knob(|k| k.code_delay = Duration::from_millis(800));
     let a = w.start();
     let (chatgpt, address) = (Arc::clone(&w.chatgpt), format!("code=c&state={}", a["state"]));
     let manual = thread::spawn(move || chatgpt.complete_manual(&address));
-    thread::sleep(Duration::from_millis(120));
+    w.token_request_in_flight(1);
     w.chatgpt.cancel();
     assert_eq!(w.chatgpt.take_outcome().unwrap().unwrap_err().kind, ErrorKind::Cancelled);
     // Attempt B starts while A's exchange is still in flight.
     let b = w.start();
     assert_ne!(a["state"], b["state"]);
     assert_eq!(manual.join().unwrap().unwrap_err().kind, ErrorKind::Cancelled);
-    thread::sleep(Duration::from_millis(450));
     let st = w.chatgpt.status();
     assert!(st.pending && query(st.url.as_deref().unwrap())["state"] == b["state"], "attempt B is still waiting for its own callback");
     assert!(w.chatgpt.take_outcome().is_none());
@@ -997,8 +1007,11 @@ fn an_attempt_ends_after_its_time() {
     assert!(e.kind == ErrorKind::Timeout && e.message.contains("timed out after 5 minutes"), "{e:?}");
     assert!(w.chatgpt.complete_manual(&format!("code=c&state={}", auth["state"])).unwrap_err().message.contains("Start \"Sign in with ChatGPT\" first"));
     let port: u16 = auth["redirect_uri"].split(':').nth(2).unwrap().split('/').next().unwrap().parse().unwrap();
-    thread::sleep(Duration::from_millis(100));
-    assert!(TcpListener::bind(("127.0.0.1", port)).is_ok(), "the listener is gone");
+    let freed = (0..1000).any(|_| {
+        thread::sleep(Duration::from_millis(5));
+        TcpListener::bind(("127.0.0.1", port)).is_ok()
+    });
+    assert!(freed, "the listener is gone");
     // The address that replaces auth.openai.com must be this machine.
     assert!(w.chatgpt.set_auth_base("https://evil.example").is_err());
 }

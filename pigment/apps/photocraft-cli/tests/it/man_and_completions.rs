@@ -47,7 +47,9 @@ fn the_example_writes_the_files_the_packages_install() {
     let completions = ["pigment-cli.bash", "_pigment-cli", "pigment-cli.fish", "pigment-cli.elv", "_pigment-cli.ps1"];
     let subcommands = ["convert", "info", "run", "batch", "droplet", "commands", "mcp", "serve"];
     // Pigment: generative AI adds `ai` and its subcommands.
-    let subcommands = [&subcommands[..], &["ai", "ai-status", "ai-set-key", "ai-clear-key", "ai-test", "ai-consent", "ai-agents", "ai-use"]].concat();
+    let subcommands =
+        [&subcommands[..], &["ai", "ai-status", "ai-set-key", "ai-clear-key", "ai-sign-in", "ai-sign-out", "ai-test", "ai-consent", "ai-agents", "ai-use"]]
+            .concat();
     let mut expected: Vec<String> = completions.map(String::from).into();
     expected.push("pigment-cli.1".into());
     expected.extend(subcommands.iter().map(|s| format!("pigment-cli-{s}.1")));

@@ -802,7 +802,8 @@ fn browser_lands(server: &PlanServer, sign_in_url: &str) -> String {
     let redirect = param(sign_in_url, "redirect_uri");
     let (host, path) = redirect.strip_prefix("http://").unwrap().split_once('/').unwrap();
     let mut s = TcpStream::connect(host).unwrap();
-    write!(s, "GET /{path}?code=the-code&state={}&client_id=oaiapp_42 HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n", param(sign_in_url, "state")).unwrap();
+    write!(s, "GET /{path}?code=the-code&state={}&client_id=oaiapp_42 HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n", param(sign_in_url, "state"))
+        .unwrap();
     let mut page = String::new();
     s.read_to_string(&mut page).unwrap();
     page
@@ -819,6 +820,14 @@ fn shows(h: &Harness, secret: &str) -> bool {
         || serde_json::to_string(app.session.prefs()).unwrap().contains(secret)
 }
 
+/// Save what the window looks like, when `PIGMENT_AI_EVIDENCE_DIR` names a folder for it.
+fn evidence(h: &mut Harness, name: &str) {
+    if let Some(dir) = std::env::var_os("PIGMENT_AI_EVIDENCE_DIR") {
+        std::fs::create_dir_all(&dir).unwrap();
+        h.render().expect("offscreen UI render").save(std::path::Path::new(&dir).join(format!("{name}.png"))).unwrap();
+    }
+}
+
 /// AI Accounts' Sign in with ChatGPT, marked experimental: the button starts the attempt and
 /// the tab waits for the browser; once the browser lands on the loopback callback the account
 /// shows with its e-mail address, for chat models only; the tokens and the sign-in address show
@@ -833,6 +842,7 @@ fn sign_in_with_chatgpt_from_ai_accounts() {
     invoke(&mut h, "ai.accounts").unwrap();
     assert!(h.query_by_label("Experimental").is_some(), "the row is marked experimental");
     assert!(server.log.lock().unwrap().is_empty(), "opening sends nothing");
+    evidence(&mut h, "accounts-sign-in-offered");
     h.get_by_label("Sign in with ChatGPT").click();
     h.run_steps(3);
     assert!(h.query_by_label_contains("Waiting for your browser").is_some());
@@ -840,12 +850,14 @@ fn sign_in_with_chatgpt_from_ai_accounts() {
     let url = st.url.clone().unwrap();
     assert!(st.pending && st.warning.is_none() && url.contains("client_id=dynamic_agent_client"), "{st:?}");
     assert!(!shows(&h, &param(&url, "state")), "the sign-in address names the attempt: it is not shown");
+    evidence(&mut h, "accounts-sign-in-waiting");
     assert!(server.log.lock().unwrap().is_empty(), "Pigment sends nothing: the browser signs in");
     let page = browser_lands(&server, &url);
     assert!(page.contains("You can return to Pigment"), "{page}");
     h.run_steps(4);
     assert!(h.query_by_label("Signed in with ChatGPT as me@example.com.").is_some());
     assert!(h.query_by_label_contains("Signed in with ChatGPT · me@example.com").is_some());
+    evidence(&mut h, "accounts-signed-in");
     assert!(h.query_by_label("Sign in with ChatGPT").is_none() && h.query_by_label_contains("Waiting for your browser").is_none());
     assert!(ai_ui::fits(h.state(), photocraft_engine::generative::ModelKind::Chat), "chat models");
     assert!(!ai_ui::fits(h.state(), photocraft_engine::generative::ModelKind::Image), "never image models");

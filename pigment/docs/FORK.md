@@ -230,7 +230,8 @@ The JavaScript Pigment's AI features rebuilt on PhotoCraft; the contract is
 `crates/engine/src/generative/mock.rs`, `crates/engine/src/cmd/ai_cmds.rs` and
 `crates/engine/src/cmd/ai_cmds/` (`region.rs`, `fill.rs`, `expand.rs`, `generate.rs`,
 `background.rs`, `describe.rs`, `tests.rs`), this page's section and `docs/generative-ai.md`; the
-provider crate `crates/genai` (package `pigment-genai`, with its tests in `crates/genai/tests/genai/`),
+provider crate `crates/genai` (package `pigment-genai`, with its tests in `crates/genai/tests/genai/`;
+Sign in with ChatGPT is its `src/chatgpt.rs` and `tests/genai/chatgpt.rs`),
 `crates/automation/src/genai.rs`, `apps/photocraft-cli/src/ai.rs` and
 `apps/photocraft-cli/tests/it/ai.rs`; the interface `crates/ui-egui/src/ai_ui.rs` and
 `crates/ui-egui/src/ai_ui/` (`generate.rs`, `accounts.rs`, `describe.rs`, `task_bar.rs`, and the
@@ -275,6 +276,14 @@ Assistant's `assistant.rs` and `assistant_tools.rs`) with its tests in
 
 At an upstream merge: if PhotoCraft adds generative commands of its own (through craft-ai-client),
 either alias ours to them or keep ours and hide theirs, and record the choice here.
+
+Sign in with ChatGPT (experimental, chat models only) added no hook of its own: it lives in
+`pigment-genai` and in AI Accounts (`ai_ui/accounts.rs`), and `pigment-cli ai sign-in` and
+`sign-out` are two more names on the man-page line above. Its dependencies (`sha2`, `getrandom`,
+`chrono`) were in `Cargo.lock` already. It rests on an OpenAI flow that is not documented as
+stable and was never checked against the live service; if it stops working, set
+`pigment_genai::chatgpt::ENABLED` to `false` (`crates/genai/src/chatgpt.rs`): AI Accounts loses the
+row, a stored sign-in is ignored, API keys are untouched, and the tests still pass.
 
 ## Keeping the rebrand: `scripts/pigment-rebrand.py`
 
