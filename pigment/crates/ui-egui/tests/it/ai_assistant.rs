@@ -683,6 +683,38 @@ fn conversations_belong_to_their_document() {
     assert!(assistant::conversation(h.state(), b).is_empty(), "closed with its document");
 }
 
+/// Closing the document, or Clear, while its turn runs ends the turn: the request is dropped, no
+/// tool runs, and another document's turn can start.
+#[test]
+fn closing_the_document_or_clear_ends_its_turn() {
+    let rec = Recorder::connected();
+    let r = Arc::clone(&rec);
+    let mut h = harness(move |app| r.install(app));
+    rec.mock.set_delay(Duration::from_secs(60));
+    assert_eq!(assistant::send(h.state_mut(), "never answered"), Ok(true));
+    h.run_steps(2);
+    assistant::clear(h.state_mut());
+    assert!(!assistant::running(h.state()) && assistant::messages(h.state()).is_empty());
+    until_done(&mut h);
+
+    h.state_mut().run("file.new", json!({"width": 64, "height": 48})).unwrap();
+    let b = h.state().session.active().unwrap().doc.id;
+    assert_eq!(assistant::send(h.state_mut(), "about to close"), Ok(true));
+    h.run_steps(2);
+    assert_eq!(assistant::conversation(h.state(), b).len(), 2);
+    h.state_mut().run("file.close", json!({})).unwrap();
+    h.run_steps(2);
+    assert!(!assistant::running(h.state()) && assistant::conversation(h.state(), b).is_empty());
+    until_done(&mut h);
+    assert_eq!(rec.requests().len(), 2, "two requests went, neither was answered");
+    // The first document is free for a turn of its own.
+    rec.mock.set_delay(Duration::ZERO);
+    rec.answer("Here.", &[]);
+    send(&mut h, "still there?");
+    assert_eq!(assistant::messages(h.state()).last().unwrap().text, "Here.");
+    assert!(!h.state().ui.status_error, "{}", h.state().ui.status);
+}
+
 /// At most forty messages are kept per document, the oldest dropped first.
 #[test]
 fn a_conversation_keeps_forty_messages() {
@@ -788,6 +820,13 @@ fn a_step_that_runs_in_the_background_is_waited_for() {
         app.background_jobs = true;
         assistant::open(app);
     });
+    // The model list is a background job too: "Loading…", then the chat models.
+    assistant::list_models(h.state_mut()).unwrap();
+    assert!(assistant::listed_models(h.state(), ProviderId::OpenAi).is_none(), "on its way");
+    until(&mut h, "the model list", |app| assistant::listed_models(app, ProviderId::OpenAi).is_some());
+    assert_eq!(assistant::listed_models(h.state(), ProviderId::OpenAi), Some(&["mock-chat".to_string()][..]));
+    assert!(rec.requests().is_empty() && !assistant::running(h.state()));
+
     let fill = [("select", json!({"kind": "rect", "rect": {"x": 20, "y": 20, "width": 80, "height": 60}})), ("generative_fill", json!({"prompt": "a pond"}))];
     rec.answer("", &fill);
     rec.mock.push(MockAnswer::Solid([0, 90, 200, 255]));
