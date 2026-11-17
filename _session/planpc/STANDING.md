@@ -70,9 +70,8 @@ A cloud container is reclaimed after inactivity; a usage-limit stop of a few hou
 
 ## State (update at every check-in)
 
-- **PAUSED by the user until 18:16 UTC on Nov 17** ("can we pause for two hours please", said at 16:15). Nothing runs. If a check fires before 18:16, end the turn in one line.
-- For the pause, the hourly check's schedule was changed to `20 18-23 17-30 11 *` (first firing 18:20 UTC; it retries hourly in the evening if a firing fails). **At the first check after the pause: set it back to hourly** (update_trigger trig_0177jAfVM7gN5HetzTvbeyX5, cron_expression "0 * * * *"), then resume.
-- To resume: launch planpc/ai-port-2.js with args {"steps":["P4","P5","review45","final"]}. P4 had run for under three minutes when it was stopped (reading only; the tree is clean), so it starts from the beginning with no continuation note.
+- Nov 17, 16:40 UTC. The user ended their pause early ("continue", 16:38). The hourly check is hourly again (trig_0177jAfVM7gN5HetzTvbeyX5, fires at :39).
+- Running since 16:39: planpc/ai-port-2.js with args {"steps":["P4","P5","review45","final"]} (run wf_53b8bbe5-d9b, task woh9k3azm). If it stops, launch it again with the steps not yet done (git log and planpc/build/PKG-ai-*.md show which), with a continuation note for the cut-off step.
 - AI port so far: P1, P2, P3 and review123 are done and pushed. review123 fixed: the two CI failures (3c5c86b); an action or an event script never sends to a provider, and the backend admits each caller, so an agent can't spend money through a script (6bfea87); a bound on a provider's image size and the key redacted in every error (5718ec1); docs (aeb188f). Its notes: planpc/build/PKG-ai-review123.md. Left open on purpose or small: a script the person runs can send after consent; Stop doesn't abort a sent HTTP request; memory for document-size results on very large canvases; small interface gaps (no model list in the Generate window).
 - CI is green on 968cb28 (run 178, the first with cargo-nextest and the panic hunt). Pushed after that: 779043a (FORK.md: how CI runs the tests); its CI run started at 16:14.
 - Next after the AI port: group L (legacy .pigment importer) with planpc/ports.js, then release 0.5.0.
