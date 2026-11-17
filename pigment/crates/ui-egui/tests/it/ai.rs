@@ -23,14 +23,14 @@ use photocraft_ui_egui::menus;
 use pigment_genai::AiAccounts;
 use serde_json::{Value, json};
 
-type Harness = egui_kittest::Harness<'static, PhotocraftApp>;
+pub(super) type Harness = egui_kittest::Harness<'static, PhotocraftApp>;
 
-const KEY: &str = "sk-test-0123456789abcdefWXYZ";
+pub(super) const KEY: &str = "sk-test-0123456789abcdefWXYZ";
 
 /// The app in English with a 200 × 160 white document; `prepare` runs on it before the first
 /// frame. The AI task bar is off unless a test turns it on (its Generate button would share a
 /// label with the window's).
-fn harness(prepare: impl FnOnce(&mut PhotocraftApp) + 'static) -> Harness {
+pub(super) fn harness(prepare: impl FnOnce(&mut PhotocraftApp) + 'static) -> Harness {
     let mut h = Harness::builder().with_size(vec2(1280.0, 900.0)).with_max_steps(64).build_eframe(|cc| {
         PhotocraftApp::setup_context(&cc.egui_ctx, Default::default());
         let mut app = PhotocraftApp::new(Session::new(), Default::default());
@@ -45,19 +45,19 @@ fn harness(prepare: impl FnOnce(&mut PhotocraftApp) + 'static) -> Harness {
 }
 
 /// Install `mock` as the session's backend (behind the app's agents gate, as the real one is).
-fn with_mock(app: &mut PhotocraftApp, mock: &Arc<MockBackend>) {
+pub(super) fn with_mock(app: &mut PhotocraftApp, mock: &Arc<MockBackend>) {
     ai_ui::install_backend(app, Arc::clone(mock) as Arc<dyn photocraft_engine::generative::GenerativeBackend>);
 }
 
 /// Run menu command `id` as a menu click does.
-fn invoke(h: &mut Harness, id: &str) -> Result<Value, String> {
+pub(super) fn invoke(h: &mut Harness, id: &str) -> Result<Value, String> {
     let ctx = h.ctx.clone();
     let r = menus::invoke(h.state_mut(), &ctx, id, json!({}));
     h.run_steps(3);
     r
 }
 
-fn layer_names(app: &PhotocraftApp) -> Vec<String> {
+pub(super) fn layer_names(app: &PhotocraftApp) -> Vec<String> {
     app.session.active().map(|st| st.doc.layers.iter().map(|l| l.name.clone()).collect()).unwrap_or_default()
 }
 
@@ -76,14 +76,14 @@ fn until_idle(h: &mut Harness) {
 }
 
 /// Click the field labelled `label` and type `text` into it.
-fn type_into(h: &mut Harness, label: &str, text: &str) {
+pub(super) fn type_into(h: &mut Harness, label: &str, text: &str) {
     h.get_by_label(label).click();
     h.run_steps(2);
     h.get_by_label(label).type_text(text);
     h.run_steps(2);
 }
 
-fn control(h: &mut Harness, method: &str, params: Value) -> Value {
+pub(super) fn control(h: &mut Harness, method: &str, params: Value) -> Value {
     let ctx = h.ctx.clone();
     let (req, _rx) = ControlRequest::new(method, params.clone());
     let Outcome::Done(v) = handle(h.state_mut(), &ctx, &req) else { panic!("{method} {params}: not done") };
@@ -534,7 +534,7 @@ fn an_action_with_an_ai_step_never_sends() {
 
 /// Click `label` as an agent does: `ui.click` through the control channel, its events delivered
 /// in one frame the way the app's input hook delivers them (as automation's input).
-fn synthetic_click(h: &mut Harness, label: &str) {
+pub(super) fn synthetic_click(h: &mut Harness, label: &str) {
     let at = h.get_by_label(label).rect().center();
     let ctx = h.ctx.clone();
     let (req, _rx) = ControlRequest::new("ui.click", json!({"x": at.x, "y": at.y}));
@@ -548,7 +548,7 @@ fn synthetic_click(h: &mut Harness, label: &str) {
 
 /// The same click from the person's own pointer: the same events at the same place, in one
 /// frame, not marked as automation's.
-fn pointer_click(h: &mut Harness, label: &str) {
+pub(super) fn pointer_click(h: &mut Harness, label: &str) {
     let pos = h.get_by_label(label).rect().center();
     let button = |pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
     h.input_mut().events.extend([egui::Event::PointerMoved(pos), button(true), button(false)]);

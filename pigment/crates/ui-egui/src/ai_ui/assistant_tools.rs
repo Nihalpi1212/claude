@@ -323,8 +323,24 @@ const ALLOWED: &[&str] = &[
 /// or record actions and scripts, cancel jobs, install plug-ins, or talk to the AI providers
 /// themselves.
 const BLOCKED_PREFIXES: &[&str] = &[
-    "file.", "help.", "window.", "ai.", "tool.", "tools.", "ui.", "edit.preferences", "edit.presets.", "edit.purge.", "prefs.", "actions.", "jobs.", "plugin.",
-    "updates.", "document.", "session.", "command.",
+    "file.",
+    "help.",
+    "window.",
+    "ai.",
+    "tool.",
+    "tools.",
+    "ui.",
+    "edit.preferences",
+    "edit.presets.",
+    "edit.purge.",
+    "prefs.",
+    "actions.",
+    "jobs.",
+    "plugin.",
+    "updates.",
+    "document.",
+    "session.",
+    "command.",
 ];
 
 /// Single commands the Assistant may not run: app-wide settings, and what cannot be undone.
@@ -383,8 +399,7 @@ pub fn object_arg(v: Option<&Value>, name: &str) -> Result<Map<String, Value>, S
 pub fn value_arg(v: Option<&Value>) -> Result<Value, String> {
     let Some(Value::String(s)) = v else { return Ok(v.cloned().unwrap_or(Value::Null)) };
     let t = s.trim();
-    let json_like =
-        t.starts_with(['[', '{', '"', '-']) || t.chars().next().is_some_and(|c| c.is_ascii_digit()) || matches!(t, "true" | "false" | "null");
+    let json_like = t.starts_with(['[', '{', '"', '-']) || t.chars().next().is_some_and(|c| c.is_ascii_digit()) || matches!(t, "true" | "false" | "null");
     if !json_like {
         return Ok(Value::String(s.clone()));
     }
@@ -431,7 +446,11 @@ impl Ranges {
 fn numeric_text(s: &str) -> Option<f64> {
     let t = s.trim();
     let digits = t.strip_prefix('-').unwrap_or(t);
-    let plain = !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit() || c == '.') && digits.matches('.').count() <= 1 && !digits.starts_with('.') && !digits.ends_with('.');
+    let plain = !digits.is_empty()
+        && digits.chars().all(|c| c.is_ascii_digit() || c == '.')
+        && digits.matches('.').count() <= 1
+        && !digits.starts_with('.')
+        && !digits.ends_with('.');
     if plain { t.parse().ok().filter(|n: &f64| n.is_finite()) } else { None }
 }
 
@@ -758,7 +777,9 @@ fn layer_arg(app: &PhotocraftApp, v: Option<&Value>) -> Result<(u64, String), St
         _ => return Err("id must be a layer id (a number; call get_document for the ids)".into()),
     };
     let shown = v.map(|v| v.as_str().map_or_else(|| v.to_string(), str::to_string)).unwrap_or_default();
-    id.and_then(|id| st.doc.layer(LayerId(id))).map(|l| (l.id.0, l.name.clone())).ok_or_else(|| format!("No layer with id \"{}\" (call get_document for the ids)", first_chars(&shown, 60)))
+    id.and_then(|id| st.doc.layer(LayerId(id)))
+        .map(|l| (l.id.0, l.name.clone()))
+        .ok_or_else(|| format!("No layer with id \"{}\" (call get_document for the ids)", first_chars(&shown, 60)))
 }
 
 /// The active layer when adjustments, filters and fills can change its pixels: its name, and
@@ -1279,7 +1300,16 @@ mod tests {
             let e = blocked(id, &json!({})).expect_err(id);
             assert_eq!(e, format!("Command \"{id}\" cannot be run by the assistant"));
         }
-        for id in ["ai.generativeFill", "file.fileInfo", "edit.undo", "layer.duplicate", "filter.blur.gaussianBlur", "select.subject", "tools.setColors", "view.fitOnScreen"] {
+        for id in [
+            "ai.generativeFill",
+            "file.fileInfo",
+            "edit.undo",
+            "layer.duplicate",
+            "filter.blur.gaussianBlur",
+            "select.subject",
+            "tools.setColors",
+            "view.fitOnScreen",
+        ] {
             assert_eq!(blocked(id, &json!({"radius": 2})), Ok(()), "{id}");
         }
         // A file or a script in the params is not the Assistant's either.

@@ -191,7 +191,8 @@ fn load(app: &mut PhotocraftApp) {
     }
     let saved = with_accounts(app, |a| {
         a.reload();
-        let models: Vec<(&'static str, String)> = ProviderId::ALL.into_iter().filter_map(|p| Some((p.id(), a.settings.models(p).chat_model.clone()?))).collect();
+        let models: Vec<(&'static str, String)> =
+            ProviderId::ALL.into_iter().filter_map(|p| Some((p.id(), a.settings.models(p).chat_model.clone()?))).collect();
         (a.settings.assistant_attach, a.settings.chat_provider, models)
     });
     let s = &mut app.ai.assistant;
@@ -332,6 +333,15 @@ pub fn list_models(app: &mut PhotocraftApp) -> Result<(), String> {
     Ok(())
 }
 
+/// `p`'s chat models as listed ([`list_models`], or AI Accounts in the last ten minutes); `None`
+/// before a list was read, or while one is on its way.
+pub fn listed_models(app: &PhotocraftApp, p: ProviderId) -> Option<&[String]> {
+    match app.ai.assistant.lists.get(p.id()) {
+        Some(ModelList::Ready(models)) => Some(models),
+        _ => None,
+    }
+}
+
 /// The chat models of an `ai.testConnection` answer.
 fn chat_models(v: &Value) -> Vec<String> {
     let models = v.get("models").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
@@ -353,9 +363,7 @@ fn base_history(convo: &[Message]) -> Vec<ChatMessage> {
     kept.iter()
         .enumerate()
         .map(|(i, m)| match m.role {
-            Role::User => {
-                ChatMessage::User { text: m.text.clone(), images: m.image.iter().filter(|_| i == last).map(|img| Rgba8Image::clone(img)).collect() }
-            }
+            Role::User => ChatMessage::User { text: m.text.clone(), images: m.image.iter().filter(|_| i == last).map(|img| Rgba8Image::clone(img)).collect() },
             Role::Assistant => ChatMessage::Assistant { text: m.text.clone() },
         })
         .collect()
@@ -973,11 +981,17 @@ fn input_rows(app: &mut PhotocraftApp, ui: &mut egui::Ui, t: &Tokens, has_doc: b
         // Enter sends; Shift+Enter is the new line.
         .return_key(egui::KeyboardShortcut::new(egui::Modifiers::SHIFT, egui::Key::Enter))
         .char_limit(photocraft_engine::ai_cmds::PROMPT_LIMIT);
-    let r = egui::ScrollArea::vertical().id_salt("pigment-ai-assistant-input-scroll").max_height(160.0).show(ui, |ui| ui.add_enabled(has_doc, field)).inner.labelled_by(label.id);
+    let r = egui::ScrollArea::vertical()
+        .id_salt("pigment-ai-assistant-input-scroll")
+        .max_height(160.0)
+        .show(ui, |ui| ui.add_enabled(has_doc, field))
+        .inner
+        .labelled_by(label.id);
     if std::mem::take(&mut app.ai.assistant.focus) && has_doc {
         r.request_focus();
     }
-    let plain_enter = |i: &egui::InputState| i.key_pressed(egui::Key::Enter) && !i.modifiers.shift && !i.modifiers.alt && !i.modifiers.ctrl && !i.modifiers.command;
+    let plain_enter =
+        |i: &egui::InputState| i.key_pressed(egui::Key::Enter) && !i.modifiers.shift && !i.modifiers.alt && !i.modifiers.ctrl && !i.modifiers.command;
     if r.has_focus() && ui.input(plain_enter) {
         act = Some(Act::Send);
     }
