@@ -356,4 +356,11 @@ the release notes.
    Cargo.lock pins; Pigment changes none of the code they exercise. `pigment-ci.yml` skips exactly
    those names in its Tests step and runs them on their own in a step that doesn't fail the job.
    Remove the lines of the tests that pass after the merge, and never add a test that the rebrand
-   broke: fix that one.
+   broke: fix that one. `scripts/upstream-test-filter.py` turns the list into the test filter, by
+   package and exact name, so keep each test under its `# <package> --test <target>` section line.
+
+`pigment-ci.yml` runs the tests with cargo-nextest (its `ci` profile in `.config/nextest.toml`), as
+PhotoCraft's own gate does: one process per test, which its tests are written for. Under plain
+`cargo test` a timing-sensitive test (automation's bridge authentication) failed now and then. The
+gate also runs the engine's panic hunt (upstream's AGENTS.md rule 9): run it after adding or
+changing a command, `cargo test -p photocraft-engine --test panic_hunt -- --ignored`.
