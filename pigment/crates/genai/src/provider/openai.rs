@@ -81,12 +81,14 @@ impl OpenAi {
         };
         let mut token = sign_in.access_token(None, cancelled)?;
         let mut resp = send(&token)?;
+        // A token the provider refused: still a secret, and no longer among the stored ones.
+        let mut refused = String::new();
         if resp.status == 401 {
-            token = sign_in.access_token(Some(&token), cancelled)?;
+            refused = std::mem::replace(&mut token, sign_in.access_token(Some(&token), cancelled)?);
             resp = send(&token)?;
         }
-        // The token is taken out of the answer before anything reads it.
-        let body = scrub(resp.body, &[&token]);
+        // Both tokens are taken out of the answer before anything reads it.
+        let body = scrub(resp.body, &[&token, &refused]);
         let text = String::from_utf8_lossy(&body);
         let stream = resp.content_type.contains("text/event-stream") || chatgpt::looks_like_sse(&text);
         if (200..300).contains(&resp.status) {
