@@ -1,10 +1,11 @@
 # PKG ai-P4: the Assistant (Window › Assistant, its tools and the turn)
 
-Branch `claude/pigment-photocraft`. Three commits, all pushed:
+Branch `claude/pigment-photocraft`. Four commits, all pushed:
 
 - `d39ce30` Pigment: Window › Assistant, the chat that edits the document (the code and its tests)
 - `9e34d4f` Pigment: document the Assistant, and test its background steps and closed documents
 - `a3f9673` Pigment: the Assistant keeps one full image, and bounds what an answer may ask for
+- `d361bd0` Pigment: the Assistant's instructions spell out every adjustment's params
 
 The contract is `pigment/docs/generative-ai.md` › "The Assistant". Read that first; this note is what
 the next engineer needs beyond it.
@@ -85,8 +86,8 @@ Everything else P4 touches is Pigment's own files. The existing hooks P3 placed 
   the shell's, in `ai_ui::ITEMS`, like P3's: not in `engine::shell_commands`, so it has no row in
   Edit › Keyboard Shortcuts and does not exist on the web build.
 - **`list_commands` replaces the command list** in the instructions; the adjustment and filter
-  kinds are still inlined with their params (about 15,000 characters of instructions in all; a spec
-  over 160 characters is left as `{…}`).
+  kinds are still inlined with their params (about 15,000 characters of instructions in all; a
+  filter's spec over 160 characters is left as `{…}`, every adjustment is spelt out).
 - **Ranges come from each command's params spec**, not from JS's two tables (whose parameter names
   don't exist here).
 - **The specific tools never open a dialog** (they call `app.run` with params). `run_command` goes
@@ -200,8 +201,7 @@ Results here (all on the final tree):
   to run AI commands" was on at Send). Turning the switch off mid-turn does not stop that turn.
 - **The interactive look was checked from three offscreen renders only** (the PNGs above); IME in the
   message field and the native macOS menu item were not exercised.
-- CI: runs for the three commits were queued or in progress when this note was written (see the
-  final message of the session for their state).
+- CI: see "CI" below.
 
 ## For P5 (Sign in with ChatGPT)
 

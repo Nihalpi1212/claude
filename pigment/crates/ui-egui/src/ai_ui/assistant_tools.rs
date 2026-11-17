@@ -50,8 +50,8 @@ const LIST_LIMIT: usize = 30;
 const MAX_LAYERS: usize = 400;
 /// The longest tool result sent back to the model, in characters.
 const RESULT_LIMIT: usize = 12_000;
-/// A params spec longer than this is left out of the instructions (the model asks
-/// `list_commands` for it).
+/// A filter's params spec longer than this is left out of the instructions (the model asks
+/// `list_commands` for it). The adjustments, far fewer, are all spelt out.
 const INLINE_SPEC: usize = 160;
 
 const ADJUSTMENTS: &str = "image.adjustments.";
@@ -221,15 +221,15 @@ fn spec_object(spec: &str) -> &str {
 }
 
 /// One line per kind with its params (names, ranges and defaults, as the registry documents
-/// them), for the instructions. A long spec is left as `{…}`.
-fn kind_list(prefix: &str) -> String {
+/// them), for the instructions. A spec longer than `inline` characters is left as `{…}`.
+fn kind_list(prefix: &str, inline: usize) -> String {
     kinds(prefix)
         .iter()
         .map(|(kind, c)| {
             let spec = spec_object(c.params);
             match spec {
                 "" | "{}" => (*kind).to_string(),
-                s if s.chars().count() > INLINE_SPEC => format!("{kind} {{…}}"),
+                s if s.chars().count() > inline => format!("{kind} {{…}}"),
                 s => format!("{kind} {s}"),
             }
         })
@@ -286,8 +286,8 @@ pub fn instructions() -> String {
         "You are the assistant inside Pigment, a layer-based raster image editor (Photoshop-like). The user is editing the active document; a downscaled copy of its composite may be attached to the message.".to_string(),
         "Help with the image: answer questions about it and perform edits with the tools. Prefer the specific tools (apply_adjustment, apply_filter, select, crop, add_text, ...) over run_command. Every tool changes the document immediately and is undoable; call get_document when you need layer ids or the selection. Act without asking for confirmation unless the request is ambiguous. Keep answers short and say what you changed.".to_string(),
         "Edits apply to the active layer (image adjustments and filters are destructive on it); add a new layer first when the user wants a separate layer. Coordinates are document pixels with the origin at the top left. Layer ids are numbers.".to_string(),
-        format!("Adjustment kinds (params as name:range=default): {}.", kind_list(ADJUSTMENTS)),
-        format!("Filter kinds (params as name:range=default; {{…}} means: ask list_commands for them): {}.", kind_list(FILTERS)),
+        format!("Adjustment kinds (params as name:range=default): {}.", kind_list(ADJUSTMENTS, usize::MAX)),
+        format!("Filter kinds (params as name:range=default; {{…}} means: ask list_commands for them): {}.", kind_list(FILTERS, INLINE_SPEC)),
         "colorLookup's looks are its \"lut\" values. matchColor needs a second open document and is best left to its dialog.".to_string(),
         format!("Blend modes: {blends}."),
         format!(
@@ -1373,6 +1373,7 @@ mod tests {
         assert!(text.contains("brightnessContrast {\"brightness\":-150..150=0,\"contrast\":-50..100=0,\"legacy\":bool=false}"), "{text}");
         assert!(text.contains("blur.gaussianBlur {\"radius\":0.1..1000=1}"));
         assert!(text.contains("invert;") && text.contains("cameraRaw {…}"));
+        assert!(text.contains("hueSaturation {\"hue\":-180..180=0,") && text.contains("selectiveColor {\"method\":"), "every adjustment is spelt out");
         assert!(text.contains("Blend modes: Normal, Dissolve, Darken, Multiply"));
         assert!(!text.contains("lastFilter") && !text.contains("blackWhite.auto"));
         assert!(text.chars().count() < 24_000, "the instructions stay a few thousand tokens: {}", text.chars().count());

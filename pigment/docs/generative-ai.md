@@ -372,9 +372,10 @@ open a dialog: they always give params.
 
 **The instructions** are the JavaScript app's, with the lists read from this registry: the
 adjustment and filter kinds with their params as the registry documents them (name, range and
-default; a spec longer than 160 characters is left as `{…}` for `list_commands`), the blend modes,
-and, in place of the whole command list (about a thousand commands here), how many there are, a
-short list of common ones and `list_commands`.
+default; every adjustment is spelt out, and a filter's spec longer than 160 characters is left as
+`{…}` for `list_commands`), the blend modes, and, in place of the whole command list (about a
+thousand commands here), how many there are, a short list of common ones and `list_commands`.
+They come to about 15,000 characters.
 
 **Who may send.** A message is a request that is billed, so it is held like a command that sends:
 nothing goes before the one-time agreement or without a connected chat provider (AI Accounts opens
