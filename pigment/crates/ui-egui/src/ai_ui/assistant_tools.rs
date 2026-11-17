@@ -343,15 +343,35 @@ const BLOCKED_PREFIXES: &[&str] = &[
     "command.",
 ];
 
-/// Single commands the Assistant may not run: app-wide settings, and what cannot be undone.
-const BLOCKED_IDS: &[&str] = &["edit.keyboardShortcuts", "edit.menus", "edit.toolbar", "edit.colorSettings", "edit.search", "history.clear"];
+/// Single commands the Assistant may not run: app-wide settings, what cannot be undone, and
+/// what reads or writes a smart object's file.
+const BLOCKED_IDS: &[&str] = &[
+    "edit.keyboardShortcuts",
+    "edit.menus",
+    "edit.toolbar",
+    "edit.colorSettings",
+    "edit.search",
+    "history.clear",
+    "layer.layerStyle.contours.load",
+    "layer.layerStyle.contours.save",
+    "layer.smartObjects.convertToLinked",
+    "layer.smartObjects.relinkToFile",
+    "layer.smartObjects.replaceContents",
+    "layer.smartObjects.saveContents",
+];
 
-/// Params that name a file, a folder or a script: the Assistant reads and writes the open
-/// document only.
-const PATH_KEYS: &[&str] = &["path", "paths", "file", "folder", "directory", "output", "destination", "script", "steps"];
+/// Params that name a file, a folder or a script: the Assistant works on the open document only.
+const PATH_KEYS: &[&str] = &["path", "paths", "file", "folder", "directory", "output", "destination", "mapPath", "script", "steps"];
+
+/// Whether `id`'s last part says it imports or exports: a preset library or a file, neither of
+/// which is the document (`swatches.import`, `layer.exportAs`, `layer.quickExportAsPng`).
+fn moves_files(id: &str) -> bool {
+    let last = id.rsplit('.').next().unwrap_or(id);
+    ["import", "export", "quickExport"].iter().any(|verb| last.starts_with(verb))
+}
 
 fn blocked_id(id: &str) -> bool {
-    !ALLOWED.contains(&id) && (BLOCKED_PREFIXES.iter().any(|p| id.starts_with(p)) || BLOCKED_IDS.contains(&id))
+    !ALLOWED.contains(&id) && (BLOCKED_PREFIXES.iter().any(|p| id.starts_with(p)) || BLOCKED_IDS.contains(&id) || moves_files(id))
 }
 
 /// The Assistant's command policy, in the shape of the automation gate
@@ -361,7 +381,11 @@ pub fn blocked(id: &str, params: &Value) -> Result<(), String> {
     if blocked_id(id) {
         return Err(format!("Command \"{id}\" cannot be run by the assistant"));
     }
-    if let Some(key) = params.as_object().and_then(|o| o.keys().find(|k| PATH_KEYS.contains(&k.as_str()))) {
+    let on_disk = |key: &str, value: &Value| {
+        // A colour profile is a built-in id, or a file: only the id is the Assistant's.
+        PATH_KEYS.contains(&key) || (key == "profile" && value.as_str().is_some_and(|v| v.contains(['/', '\\'])))
+    };
+    if let Some((key, _)) = params.as_object().and_then(|o| o.iter().find(|(k, v)| on_disk(k, v))) {
         return Err(format!("Command \"{id}\" cannot be run by the assistant with \"{key}\": it works on the open document only, not on files or scripts"));
     }
     Ok(())
@@ -1315,7 +1339,23 @@ mod tests {
         // A file or a script in the params is not the Assistant's either.
         let e = blocked("image.adjustments.colorLookup", &json!({"file": "/etc/passwd"})).unwrap_err();
         assert!(e.contains("\"file\"") && e.contains("open document only"), "{e}");
-        assert!(blocked("swatches.import", &json!({"path": "/tmp/x.aco"})).is_err());
+        assert!(blocked("layer.smartObjects.newSmartObjectViaCopy", &json!({"path": "/tmp/x.png"})).is_err());
+        assert!(blocked("filter.distort.displace", &json!({"mapPath": "/tmp/map.psd"})).is_err());
+        assert!(blocked("image.mode.cmyk", &json!({"profile": "/tmp/press.icc"})).is_err());
+        assert_eq!(blocked("image.mode.cmyk", &json!({"profile": "coated-cmyk"})), Ok(()));
+        // Nor is importing or exporting, with or without a path.
+        for id in [
+            "swatches.import",
+            "swatches.export",
+            "layer.exportAs",
+            "layer.quickExportAsPng",
+            "pattern.export",
+            "brush.presets.importAbr",
+            "measurementLog.export",
+        ] {
+            assert!(blocked(id, &json!({})).is_err(), "{id}");
+        }
+        assert_eq!(blocked("layer.smartObjects.embedAllLinked", &json!({})), Ok(()));
         // Every `ai.*` command of the engine but Generative Fill is blocked, whatever is added later.
         for id in photocraft_engine::ai_cmds::COMMANDS {
             assert_eq!(blocked(id, &json!({})).is_ok(), *id == FILL, "{id}");

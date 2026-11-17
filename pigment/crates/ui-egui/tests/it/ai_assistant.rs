@@ -776,6 +776,51 @@ fn a_command_that_opens_a_dialog_waits_for_the_person() {
     assert_eq!(layer_names(h.state()), ["Background"]);
 }
 
+/// A step whose command runs as a background job (how the app runs Generative Fill): the turn
+/// waits for it, the model gets the job's result, and it lands as one undo step. Stop meanwhile
+/// lets the step finish and then ends the turn.
+#[test]
+fn a_step_that_runs_in_the_background_is_waited_for() {
+    let rec = Recorder::connected();
+    let r = Arc::clone(&rec);
+    let mut h = harness(move |app| {
+        r.install(app);
+        app.background_jobs = true;
+        assistant::open(app);
+    });
+    let fill = [("select", json!({"kind": "rect", "rect": {"x": 20, "y": 20, "width": 80, "height": 60}})), ("generative_fill", json!({"prompt": "a pond"}))];
+    rec.answer("", &fill);
+    rec.mock.push(MockAnswer::Solid([0, 90, 200, 255]));
+    rec.answer("Filled the selection with a pond.", &[]);
+    let steps = history(h.state()).len();
+    send(&mut h, "a pond in the middle");
+    let told = results(&rec.requests().pop().unwrap().messages[2]);
+    assert_eq!(told[1].1["layers"].as_array().map(Vec::len), Some(1), "the job's result, once it landed: {told:?}");
+    assert_eq!(layer_names(h.state()), ["Background", "Generative Fill"]);
+    assert_eq!(history(h.state()).len(), steps + 2, "the selection and the fill: one step each");
+    assert_eq!(assistant::messages(h.state()).last().unwrap().text, "Filled the selection with a pond.");
+    assert_eq!(pixel(h.state(), 60, 50), [0, 90, 200, 255]);
+    h.state_mut().run("edit.undo", json!({})).unwrap();
+    assert_eq!(pixel(h.state(), 60, 50), [255, 255, 255, 255], "one Undo takes the fill back");
+
+    // Stop while the provider paints: the fill lands, then the turn ends without another request.
+    let asked = rec.requests().len();
+    rec.answer("", &[("generative_fill", json!({"prompt": "a boat"})), ("new_layer", json!({"name": "Never"}))]);
+    rec.mock.push(MockAnswer::Solid([200, 30, 30, 255]));
+    rec.mock.set_delay(Duration::from_millis(200));
+    assert_eq!(assistant::send(h.state_mut(), "and a boat"), Ok(true));
+    until(&mut h, "the fill's job", |app| assistant::messages(app).last().is_some_and(|m| m.calls.first().is_some_and(|c| c.result.is_none())));
+    assert!(assistant::stop(h.state_mut()));
+    h.run_steps(2);
+    assert!(assistant::running(h.state()) && assistant::stopping(h.state()), "the step is let finish");
+    until_done(&mut h);
+    let m = assistant::messages(h.state()).last().unwrap();
+    assert!(m.stopped && m.calls.len() == 1, "the second step never ran: {:?}", m.calls);
+    assert_eq!(m.calls[0].result.as_ref().and_then(|r| r["layers"].as_array()).map(Vec::len), Some(1), "the running step finished: {:?}", m.calls[0]);
+    assert_eq!(rec.requests().len(), asked + 1, "no request after Stop");
+    assert!(!layer_names(h.state()).iter().any(|n| n == "Never"));
+}
+
 /// Who may send. An agent (synthetic input, a control request) sends nothing while "Allow agents
 /// to run AI commands" is off; nothing connected opens AI Accounts and keeps what was typed; a
 /// failed request shows why, with AI Accounts when that fixes it.

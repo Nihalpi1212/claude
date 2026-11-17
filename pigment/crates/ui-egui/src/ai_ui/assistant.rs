@@ -650,6 +650,10 @@ pub(crate) fn poll(app: &mut PhotocraftApp, ctx: &egui::Context) {
     if turn.stopping {
         return finish(app, End::Stopped);
     }
+    // A step never runs behind a dialog the person has open: it waits until the dialog is done.
+    if !turn.queue.is_empty() && !app.ui.dialogs.is_empty() {
+        return;
+    }
     if let Some(call) = turn.queue.pop_front() {
         run_call(app, ctx, call);
         ctx.request_repaint();

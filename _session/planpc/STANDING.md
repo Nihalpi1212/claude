@@ -70,8 +70,8 @@ A cloud container is reclaimed after inactivity; a usage-limit stop of a few hou
 
 ## State (update at every check-in)
 
-- Nov 17, 16:40 UTC. The user ended their pause early ("continue", 16:38). The hourly check is hourly again (trig_0177jAfVM7gN5HetzTvbeyX5, fires at :39).
-- Running since 16:39: planpc/ai-port-2.js with args {"steps":["P4","P5","review45","final"]} (run wf_53b8bbe5-d9b, task woh9k3azm). If it stops, launch it again with the steps not yet done (git log and planpc/build/PKG-ai-*.md show which), with a continuation note for the cut-off step.
+- Nov 17, 17:41 UTC, hourly check. The user ended their pause early ("continue", 16:38). The hourly check is hourly (trig_0177jAfVM7gN5HetzTvbeyX5, fires at :39).
+- Running since 16:39: planpc/ai-port-2.js with args {"steps":["P4","P5","review45","final"]} (run wf_53b8bbe5-d9b, task woh9k3azm). At 17:41 the P4 engineer (agent af206112daa8f3fea) was active: the Assistant is written (crates/ui-egui/src/ai_ui/assistant.rs, assistant_tools.rs, tests/it/ai_assistant.rs, docs), uncommitted, in its last clippy and test runs before the first commit. If the workflow stops, launch it again with the steps not yet done (git log and planpc/build/PKG-ai-*.md show which), with a continuation note for the cut-off step.
 - AI port so far: P1, P2, P3 and review123 are done and pushed. review123 fixed: the two CI failures (3c5c86b); an action or an event script never sends to a provider, and the backend admits each caller, so an agent can't spend money through a script (6bfea87); a bound on a provider's image size and the key redacted in every error (5718ec1); docs (aeb188f). Its notes: planpc/build/PKG-ai-review123.md. Left open on purpose or small: a script the person runs can send after consent; Stop doesn't abort a sent HTTP request; memory for document-size results on very large canvases; small interface gaps (no model list in the Generate window).
-- CI is green on 968cb28 (run 178, the first with cargo-nextest and the panic hunt). Pushed after that: 779043a (FORK.md: how CI runs the tests); its CI run started at 16:14.
+- CI is green on the head 779043a (run 179) and on 968cb28 (run 178): two runs in a row with cargo-nextest and no bridge-test flake.
 - Next after the AI port: group L (legacy .pigment importer) with planpc/ports.js, then release 0.5.0.

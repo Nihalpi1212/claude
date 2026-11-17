@@ -4,8 +4,8 @@ Pigment 0.2 to 0.4 (the JavaScript app) had Generative Fill, Generative Expand, 
 AI Remove Background, Replace Background, Replace Sky, Describe Image, an Assistant that edits the
 document, and AI Accounts with OpenAI and Gemini keys. Pigment 0.5 rebuilds them on PhotoCraft. This
 page is the contract for that work: the engine seam, the commands and the rules they keep, the
-provider crate and the command line. It grows with each part (the interface, the Assistant, Sign in
-with ChatGPT).
+provider crate, the interface, the Assistant and the command line. It grows with each part (Sign in
+with ChatGPT is next).
 
 ## The engine seam: `photocraft_engine::generative`
 
@@ -167,10 +167,10 @@ they are entered again.
  "openai":{"chatModel":null,"imageModel":null},"gemini":{"chatModel":null,"imageModel":null},
  "timeoutSecs":300,"consented":false,"allowAgents":false,
  "lastFillPrompt":null,"lastExpandPrompt":null,"lastGeneratePrompt":null,
- "lastBackgroundPrompt":null,"lastSkyPrompt":null}
+ "lastBackgroundPrompt":null,"lastSkyPrompt":null,"assistantAttach":true}
 ```
 
-A `null` model is automatic. Choosing the preferred provider resets `imageProvider` and
+`assistantAttach` is the Assistant's Attach image. A `null` model is automatic. Choosing the preferred provider resets `imageProvider` and
 `chatProvider` with it (0.4). The backend re-reads the file before each request and status, so a
 long-running MCP server follows what the person changes in AI Accounts.
 `PIGMENT_AI_BASE_URL_OPENAI` and `PIGMENT_AI_BASE_URL_GEMINI` replace a provider's address with a
@@ -207,6 +207,7 @@ command palette):
 | Layer › Generate Background… | `ai.replaceBackground` | next to them; also the task bar after Remove Background |
 | Image › Describe Image… | `ai.describe` | after Calculations… |
 | Generative Expand… | `ai.generativeExpand` | the Crop tool's task bar slot and the palette |
+| Window › Assistant | `window.panel.aiAssistant` (the shell's) | after Adjustments, in the Window menu's alphabetical list; checked while its window is open |
 
 Menu items are dimmed for the document (no selection, a layer without pixels, no backend) and never
 for a missing key: the window says how to add one.
@@ -258,6 +259,125 @@ sends when it starts for an agent or under the session's automation gate, which 
 first never sees (a step of a script the agent runs). In AI Accounts, synthetic input can switch
 tabs and close the dialog, nothing else: keys, the agreement and the agents' permission are the
 person's.
+
+## The Assistant (`crates/ui-egui/src/ai_ui/assistant.rs`, `assistant_tools.rs`)
+
+Window › Assistant is a chat about the active document whose model can also edit it. It is the
+JavaScript app's Assistant panel, as a floating window.
+
+**The window.** The provider (the connected ones; the choice is saved as `chatProvider`, which AI
+Accounts' Preferred provider resets) and the chat model (Automatic, or one of the provider's chat
+models; saved as that provider's `chatModel`, the same choice AI Accounts shows). The model list is
+the one AI Accounts read in the last ten minutes, or **List models** asks for it (one request with
+the key, as Test Connection); it is never fetched unasked. **Attach image** (on by default, saved
+as `assistantAttach`), AI Accounts…, Clear. Then the conversation, the message field (Enter sends,
+Shift+Enter is a new line), a status line, and Send, which is Stop while a turn runs. A line at the
+bottom says what a message sends and that a stopped request may still be billed.
+
+**A conversation per document**, in memory only: never in the document, `UiState`, the
+preferences or `ai.json`. At most 40 messages are kept, the oldest dropped first. It goes when the
+document closes or with Clear. One turn runs at a time, app-wide.
+
+**A turn.** Send stores the message, with the composite scaled to at most 1024 px on its longer
+side when Attach image is on, and sends: the instructions, the fifteen tools, and every stored
+message that isn't a failure, as text; only the latest message carries its image. Each request is
+a background job (`ai.chat`, a job and not a command): the status bar shows it with Cancel,
+nothing is modal, and the document is not locked. The model's tool calls then run on the interface
+thread, one a frame, each shown as a step in the conversation; their results go back with the
+model's own turn (as the provider gave it: OpenAI's output items, Gemini's parts with their thought
+signatures), and the model answers again. After twelve rounds of tools a model that still wants
+more ends the turn with "Stopped after 12 tool steps; say “continue” to go on." A model that only
+called tools gets "Done."; one that said nothing, "(no answer)". A failed request shows its reason
+in the conversation, with Open AI Accounts… when that fixes it, and is not sent again with later
+messages.
+
+**Stop** ends the turn. A request in flight is dropped at once (its answer never runs a tool; the
+provider may still bill it) and tools not yet run never run. A step that is running as a background
+job, or waiting on a dialog, is let finish first ("Stopping after the current step…"). The status
+bar's Cancel on the request is the same Stop.
+
+**The tools** are the JavaScript app's fourteen, aimed at the engine's commands, and
+`list_commands`:
+
+| Tool | Runs | Notes |
+|---|---|---|
+| `get_document` | reads the document | name, size, dpi, mode, depth, the layers top to bottom (id, name, type, visible, opacity 0-100, blend, active, parent, mask, locked, background, text), the selection's bounds, the description: the short form, not `document.inspect` |
+| `set_active_layer {id}` | `layer.select` | the id as a number, as text, or the one layer of that name |
+| `apply_adjustment {kind, params}` | `image.adjustments.<kind>` | the kind however it is spelt (`brightnessContrast`, `brightness-contrast`, "Brightness/Contrast") |
+| `apply_filter {kind, params}` | `filter.<kind>` | `blur.gaussianBlur`, or `gaussianBlur` where no other filter ends the same |
+| `list_commands {filter}` | reads the registry | the commands the Assistant may run whose id, name or keywords hold every word of the filter, 30 at most, each with its params and why it can't run now; without words, how many commands each family has |
+| `run_command {id, params}` | the command, as the command palette runs it | see below |
+| `new_layer {name}` | `layer.new.layer` | |
+| `set_layer_props {id, opacity, blend, visible, name}` | `layer.setProps` | opacity 0-100; `null` leaves a property as it is |
+| `select {kind, rect}` | `select.all`, `select.deselect`, `select.inverse`, `select.rect` | the inverse of nothing selects everything |
+| `crop {rect}` | `image.crop` | |
+| `resize_image {width, height}` | `image.imageSize` (bicubic, styles scaled) | 1 to 30000 px |
+| `canvas_size {width, height, anchor}` | `image.canvasSize` | `nw` … `se`; a Background is extended with the background colour, like the dialog, else the new area is transparent |
+| `fill_selection {color}` | `edit.fill`, or `edit.clear` for a transparent colour | hex, `rgb()`, `rgba()` or a CSS colour name; the colour's alpha is the fill's opacity |
+| `add_text {text, x, y, size, color}` | `type.create` | pixels (the size becomes points at the document's resolution); defaults from the canvas as in the JavaScript app |
+| `generative_fill {prompt}` | `ai.generativeFill` | needs a selection; the preferred image provider, one variation, no window |
+
+Every tool goes through `PhotocraftApp::run` (`run_command` through the menus' `invoke`), so each
+is an ordinary command: **one undo step**, recorded into an action that is being recorded, held to
+the same gates as the person's own. A tool's failure is returned to the model as `{"error": …}` and
+shown on its step; it is not put in the status bar.
+
+**What a model is not trusted with** (`assistant_tools.rs`):
+
+- *Ids.* A layer id must exist ("No layer with id … (call get_document for the ids)"). An unknown
+  command, adjustment or filter is an error the model reads.
+- *Ranges.* Numbers in `apply_adjustment`, `apply_filter` and `run_command` params are clamped to
+  the range the command's own params spec documents for that key (the ranges its dialog is built
+  from, in place of the JavaScript app's two fixed tables); numeric text is converted where the
+  key takes a number; NaN, `null` and anything that isn't a number, a boolean, text, a list or an
+  object is dropped; text is cut (200 characters, 4000 for `run_command`); nesting stops at four
+  levels. `run_command`'s params then pass the engine's `Session::precheck`.
+- *Rectangles* are cut to the canvas; an empty intersection or a size that isn't positive is an
+  error, not a 1 px rectangle.
+- *JSON text.* An object that arrives as JSON text (Gemini's schemas carry open objects as
+  strings) is parsed; text that looks like JSON and can't be read is an error.
+- *The active document.* A tool refuses once its document is no longer the active one ("The
+  document is no longer active"). A step never runs behind a dialog the person has open.
+- *Results* go back cut to 12000 characters.
+
+**What the Assistant may not run** (`assistant_tools::blocked`, the shape of the automation gate;
+the JavaScript app's `BLOCKED_COMMANDS` for this registry). `run_command` refuses, with "Command
+"<id>" cannot be run by the assistant", and `list_commands` never offers:
+
+- `file.*` (open, save, export, place, print, close, quit, scripts, batch) except `file.fileInfo`
+  and the three `file.scripts.*` that only tidy the open document;
+- `ai.*` except `ai.generativeFill`: **the Assistant reaches a provider only through its own chat
+  and Generative Fill**;
+- `window.*`, `help.*`, `ui.*`, `tool.*` and `tools.*` (except the three colour commands),
+  `edit.preferences*`, `prefs.*` (except `prefs.get`), Keyboard Shortcuts, Menus, Toolbar, Color
+  Settings, the command palette, `updates.*`, `plugin.*`;
+- `actions.*` (except `actions.list` and `actions.get`): an action could hold what the Assistant
+  may not run; `jobs.*` except `jobs.list`; `document.*` and `session.*` except their read-only
+  queries (`document.activate` would take the turn's document away);
+- what can't be undone (`edit.purge.*`, `history.clear`), and what imports or exports (a command
+  whose last part starts with `import`, `export` or `quickExport`, the contour and smart-object
+  file commands, `edit.presets.*`);
+- any command with a param that names a file, a folder or a script (`path`, `paths`, `file`,
+  `folder`, `directory`, `output`, `destination`, `mapPath`, `script`, `steps`), or a colour
+  `profile` given as a path: the Assistant works on the open document only.
+
+**A command that opens a dialog.** `run_command` without params runs the command as its menu item
+does, so one with a dialog opens it. The turn then waits for the person to finish the dialog (the
+step says so), and the model is told "The command opened a dialog; the user has closed it
+(completed or cancelled). Call get_document to see the current state." The specific tools never
+open a dialog: they always give params.
+
+**The instructions** are the JavaScript app's, with the lists read from this registry: the
+adjustment and filter kinds with their params as the registry documents them (name, range and
+default; a spec longer than 160 characters is left as `{…}` for `list_commands`), the blend modes,
+and, in place of the whole command list (about a thousand commands here), how many there are, a
+short list of common ones and `list_commands`.
+
+**Who may send.** A message is a request that is billed, so it is held like a command that sends:
+nothing goes before the one-time agreement or without a connected chat provider (AI Accounts opens
+and what was typed stays in the field); an agent (a control request, synthetic input) sends a
+message only while "Allow agents to run AI commands" is on, and the app's backend is asked
+(`admit`) before the first request. The tools of a turn then run as the person's commands.
 
 ## The command line
 
@@ -317,3 +437,23 @@ runs Generative Fill from the command line.
   --no-check` stores one without asking the provider.
 - **Follow-up: variations.** Photoshop keeps variations in one generative layer chosen in
   Properties; Pigment makes one layer per variation, as 0.4 did.
+- **The Assistant is a window, not a docked panel**, opened from Window › Assistant (0.4: Window ›
+  AI Assistant and the AI menu). Its conversations, limits (40 messages, 12 tool rounds, a
+  1024 px image), tools, Stop and wording are 0.4's.
+- **The Assistant finds commands with `list_commands`.** 0.4 listed every command id in its
+  instructions; this registry has about a thousand, each with a params spec, so the instructions
+  name a few and the model looks the rest up. `run_command` takes `params` (an object); 0.4's
+  `arg` is still read.
+- **The Assistant's ranges come from the commands.** 0.4 clamped by two fixed tables of parameter
+  names; here each command's own params spec gives the range, so every adjustment and filter is
+  covered, and the kinds and their params are PhotoCraft's (`brightnessContrast`,
+  `blur.gaussianBlur`).
+- **The Assistant's model list is asked for.** 0.4 fetched a provider's models when the panel
+  showed them. Here nothing is sent unasked: the list is AI Accounts' recent one, or List models.
+  Automatic needs no list.
+- **A document locked by a running step.** Generative Fill as an Assistant step locks the document
+  until it lands, as it does from its window (see "editing during a request").
+- **Follow-up: the Assistant's attached image** is composed on the interface thread when Send is
+  pressed. A very large document that can't use a proxy takes a moment there; composing it on the
+  request's worker is the refinement.
+- **Layer ids are numbers** in PhotoCraft; 0.4's were strings. The tools take either.
