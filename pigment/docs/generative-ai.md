@@ -276,7 +276,8 @@ bottom says what a message sends and that a stopped request may still be billed.
 
 **A conversation per document**, in memory only: never in the document, `UiState`, the
 preferences or `ai.json`. At most 40 messages are kept, the oldest dropped first. It goes when the
-document closes or with Clear. One turn runs at a time, app-wide.
+document closes or with Clear. One turn runs at a time, app-wide. Only the latest message keeps
+the image it was sent with; earlier ones keep a 96 px preview for the conversation.
 
 **A turn.** Send stores the message, with the composite scaled to at most 1024 px on its longer
 side when Attach image is on, and sends: the instructions, the fifteen tools, and every stored
@@ -339,6 +340,8 @@ shown on its step; it is not put in the status bar.
 - *The active document.* A tool refuses once its document is no longer the active one ("The
   document is no longer active"). A step never runs behind a dialog the person has open.
 - *Results* go back cut to 12000 characters.
+- *Answers.* The model's text is kept to 20000 characters. An answer that asks for more than 32
+  tool calls at once fails the turn, and none of them runs.
 
 **What the Assistant may not run** (`assistant_tools::blocked`, the shape of the automation gate;
 the JavaScript app's `BLOCKED_COMMANDS` for this registry). `run_command` refuses, with "Command

@@ -545,6 +545,8 @@ fn later_messages_send_only_the_latest_image() {
     send(&mut h, "and now?");
     let second = rec.requests().pop().unwrap();
     assert_eq!(second.messages.len(), 3, "user, assistant, user: {:?}", second.messages);
+    let kept: Vec<bool> = assistant::messages(h.state()).iter().map(|m| m.image.is_some()).collect();
+    assert_eq!(kept, [false, false, true, false], "only the latest message keeps its full image in memory");
     assert!(user(&second.messages[0]).1.is_empty(), "the first message's image stays home");
     assert!(matches!(&second.messages[1], ChatMessage::Assistant { text } if text == "It is white."));
     assert_eq!(user(&second.messages[2]).1.iter().map(|i| (i.width, i.height)).collect::<Vec<_>>(), [(200, 160)], "a small image is not enlarged");
@@ -564,6 +566,21 @@ fn later_messages_send_only_the_latest_image() {
     assert_eq!(user(third.messages.last().unwrap()), ("two", &[][..]), "trimmed, and without an image");
     assert!(third.messages.iter().all(|m| !matches!(m, ChatMessage::User { images, .. } if !images.is_empty())), "no image at all");
     assert_eq!(assistant::messages(h.state()).last().unwrap().text, "(no answer)", "a model that says nothing");
+}
+
+/// A provider's answer is not trusted to be reasonable: one that asks for hundreds of steps at
+/// once fails the turn, and none of them runs.
+#[test]
+fn an_answer_with_too_many_tool_calls_runs_none() {
+    let rec = Recorder::connected();
+    let r = Arc::clone(&rec);
+    let mut h = harness(move |app| r.install(app));
+    let flood: Vec<(&str, Value)> = (0..200).map(|_| ("new_layer", json!({}))).collect();
+    rec.answer("", &flood);
+    send(&mut h, "one layer, please");
+    let m = assistant::messages(h.state()).last().unwrap();
+    assert!(m.error && m.calls.is_empty() && m.text.contains("too many steps"), "{}", m.text);
+    assert_eq!((layer_names(h.state()).len(), rec.requests().len()), (1, 1));
 }
 
 /// The model wanted more than twelve tool rounds: the turn ends and says so, instead of a silent
