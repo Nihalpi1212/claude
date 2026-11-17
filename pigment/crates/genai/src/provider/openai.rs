@@ -1,6 +1,7 @@
 //! OpenAI: images through the Images API (`POST /images/generations`, `POST /images/edits`), chat
 //! and Describe through the Responses API (`POST /responses`, `store: false`), the catalog through
-//! `GET /models`. Authorization: `Bearer <key>`. The request shapes are JavaScript Pigment's
+//! `GET /models`. Authorization: `Bearer <key>`, or with a ChatGPT sign-in its access token on the
+//! same routes (chat and the catalog only, reshaped and streamed: `crate::chatgpt`). The request shapes are JavaScript Pigment's
 //! (`providers.js`): the nearest accepted size, `background` and `input_fidelity` only for
 //! gpt-image-1 and 1.5, `response_format: b64_json` for DALL·E, the mask with alpha 0 where the
 //! image may change.
@@ -9,8 +10,14 @@ use photocraft_engine::generative::{ChatMessage, ChatRequest, ChatTurn, ToolCall
 use photocraft_raster::Rgba8Image;
 use serde_json::{Value, json};
 
-use super::{EditRequest, ImageRequest, ModelInfo, ModelKind, Provider, ProviderConfig, call_json, clients, clip, ratio_of, redacted, state_provider};
+use std::sync::Arc;
+
+use super::{
+    EditRequest, ImageRequest, ModelInfo, ModelKind, Provider, ProviderConfig, call_json, clients, clip, parse_json, ratio_of, redacted, state_provider,
+    translate_error_for,
+};
 use crate::cancel::Cancelled;
+use crate::chatgpt::{self, ChatGpt};
 use crate::chat::{parse_args, result_text};
 use crate::http::{Body, Http, Multipart};
 use crate::image_util::{base64_decode, base64_encode, decode, encode_png, openai_mask};
@@ -24,25 +31,90 @@ pub const DALLE2_SIZES: [&str; 3] = ["256x256", "512x512", "1024x1024"];
 /// The longest side an edit sends (JS `PROVIDERS.openai.maxEdge`).
 pub const MAX_EDGE: u32 = 1536;
 
+/// What a request is authorized with.
+enum Auth {
+    /// The person's API key: every model.
+    Key(ApiKey),
+    /// A ChatGPT sign-in: chat models only, on the plan route (`crate::chatgpt`).
+    SignIn(Arc<ChatGpt>),
+}
+
 pub struct OpenAi {
     cfg: ProviderConfig,
-    key: ApiKey,
+    auth: Auth,
     http: Http,
     catalog: Http,
 }
 
+/// What an image request gets with a ChatGPT sign-in: nothing is sent.
+const IMAGES_NEED_A_KEY: &str = "Image models need an OpenAI API key: a ChatGPT sign-in covers chat models only. Add a key in Edit › AI Accounts…";
+
 impl OpenAi {
     pub fn new(cfg: ProviderConfig, key: ApiKey) -> Self {
         let (http, catalog) = clients(&cfg);
-        Self { cfg, key, http, catalog }
+        Self { cfg, auth: Auth::Key(key), http, catalog }
     }
 
-    fn headers(&self) -> Vec<(&'static str, String)> {
-        vec![("Authorization", format!("Bearer {}", self.key.expose())), ("Accept", "application/json".into())]
+    /// OpenAI with a ChatGPT sign-in instead of a key.
+    pub fn signed_in(cfg: ProviderConfig, sign_in: Arc<ChatGpt>) -> Self {
+        let (http, catalog) = clients(&cfg);
+        Self { cfg, auth: Auth::SignIn(sign_in), http, catalog }
     }
 
-    fn call(&self, path: &str, body: Body, cancelled: Cancelled<'_>) -> Result<Value> {
-        call_json(&self.http, &self.cfg, &self.key, self.headers(), path, body, cancelled)
+    fn call(&self, http: &Http, path: &str, body: Body, cancelled: Cancelled<'_>) -> Result<Value> {
+        match &self.auth {
+            Auth::Key(key) => {
+                let headers = vec![("Authorization", format!("Bearer {}", key.expose())), ("Accept", "application/json".into())];
+                call_json(http, &self.cfg, key, headers, path, body, cancelled)
+            }
+            Auth::SignIn(sign_in) => self.plan_call(sign_in, http, path, &body, cancelled),
+        }
+    }
+
+    /// A request on the ChatGPT plan route: the same API root with the sign-in's access token.
+    /// A 401 refreshes the token once and tries again, then gives up. The answer may be an
+    /// event stream (every `POST /responses` is), folded into its final response.
+    fn plan_call(&self, sign_in: &ChatGpt, http: &Http, path: &str, body: &Body, cancelled: Cancelled<'_>) -> Result<Value> {
+        let send = |token: &str| {
+            let headers = vec![("Authorization", format!("Bearer {token}")), ("Accept", "application/json, text/event-stream".into())];
+            http.send(crate::http::Request { url: self.cfg.url(path), headers, body: body.clone() }, cancelled)
+        };
+        let mut token = sign_in.access_token(None, cancelled)?;
+        let mut resp = send(&token)?;
+        if resp.status == 401 {
+            token = sign_in.access_token(Some(&token), cancelled)?;
+            resp = send(&token)?;
+        }
+        let text = String::from_utf8_lossy(&resp.body);
+        let stream = resp.content_type.contains("text/event-stream") || chatgpt::looks_like_sse(&text);
+        let answer = if (200..300).contains(&resp.status) {
+            if stream { chatgpt::aggregate_sse(&text) } else { parse_json(&resp.body) }
+        } else {
+            // A failed stream says why in an event; anything else is an ordinary error body.
+            let event = if stream { chatgpt::aggregate_sse(&text).err().map(|e| e.with_status(resp.status)) } else { None };
+            Err(event.unwrap_or_else(|| translate_error_for(ProviderId::OpenAi, resp.status, &resp.body, true)))
+        };
+        answer.map_err(|e| e.redact(&token))
+    }
+
+    /// `r` with the credential in use (the key, or the sign-in's tokens) taken out of an
+    /// error's message.
+    fn redacted<T>(&self, r: Result<T>) -> Result<T> {
+        match &self.auth {
+            Auth::Key(key) => redacted(r, key),
+            Auth::SignIn(sign_in) => r.map_err(|e| {
+                let secrets = sign_in.secrets();
+                chatgpt::redact_all(e, &secrets.iter().map(String::as_str).collect::<Vec<_>>())
+            }),
+        }
+    }
+
+    /// The refusal of an image request with a ChatGPT sign-in, which never runs image models.
+    fn images(&self) -> Result<()> {
+        match self.auth {
+            Auth::Key(_) => Ok(()),
+            Auth::SignIn(_) => Err(AiError::new(ErrorKind::MissingKey, IMAGES_NEED_A_KEY)),
+        }
     }
 }
 
@@ -375,18 +447,22 @@ impl Provider for OpenAi {
     }
 
     fn generate_image(&self, model: &str, req: &ImageRequest, cancelled: Cancelled<'_>) -> Result<Rgba8Image> {
-        redacted(self.call("/images/generations", json_body(&generation_body(model, req)), cancelled).and_then(|v| parse_image(&v)), &self.key)
+        self.images()?;
+        self.redacted(self.call(&self.http, "/images/generations", json_body(&generation_body(model, req)), cancelled).and_then(|v| parse_image(&v)))
     }
 
     fn edit_image(&self, model: &str, req: &EditRequest, cancelled: Cancelled<'_>) -> Result<Rgba8Image> {
-        redacted(self.call("/images/edits", edit_form(model, req)?, cancelled).and_then(|v| parse_image(&v)), &self.key)
+        self.images()?;
+        self.redacted(self.call(&self.http, "/images/edits", edit_form(model, req)?, cancelled).and_then(|v| parse_image(&v)))
     }
 
     fn chat(&self, model: &str, req: &ChatRequest, cancelled: Cancelled<'_>) -> Result<ChatTurn> {
-        redacted(self.call("/responses", json_body(&chat_body(model, req)?), cancelled).and_then(|v| parse_turn(&v)), &self.key)
+        let body = chat_body(model, req)?;
+        let body = if matches!(self.auth, Auth::SignIn(_)) { chatgpt::reshape_for_plan_route(&body) } else { body };
+        self.redacted(self.call(&self.http, "/responses", json_body(&body), cancelled).and_then(|v| parse_turn(&v)))
     }
 
     fn list_models(&self, cancelled: Cancelled<'_>) -> Result<Vec<ModelInfo>> {
-        Ok(parse_models(&call_json(&self.catalog, &self.cfg, &self.key, self.headers(), "/models", Body::None, cancelled)?))
+        self.redacted(self.call(&self.catalog, "/models", Body::None, cancelled).map(|v| parse_models(&v)))
     }
 }

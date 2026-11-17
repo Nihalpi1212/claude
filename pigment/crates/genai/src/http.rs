@@ -11,9 +11,12 @@ use crate::cancel::{Cancelled, check};
 use crate::{AiError, ErrorKind, Result};
 
 /// What the providers send.
+#[derive(Clone)]
 pub(crate) enum Body {
     None,
     Json(Vec<u8>),
+    /// `application/x-www-form-urlencoded` text (the ChatGPT sign-in's token requests).
+    Form(String),
     /// `multipart/form-data; boundary=…` and its bytes.
     Multipart(String, Vec<u8>),
 }
@@ -27,6 +30,8 @@ pub(crate) struct Request {
 
 pub(crate) struct Response {
     pub status: u16,
+    /// The answer's `Content-Type`, lower-cased (empty without one).
+    pub content_type: String,
     pub body: Vec<u8>,
 }
 
@@ -86,6 +91,7 @@ impl Http {
                 }
                 match body {
                     Body::Json(bytes) => b.content_type("application/json").send(bytes),
+                    Body::Form(text) => b.content_type("application/x-www-form-urlencoded").send(text),
                     Body::Multipart(ct, bytes) => b.content_type(ct).send(bytes),
                     Body::None => b.send_empty(),
                 }
@@ -93,8 +99,9 @@ impl Http {
         };
         let resp = sent.map_err(transport_error)?;
         let status = resp.status().as_u16();
+        let content_type = resp.headers().get("content-type").and_then(|v| v.to_str().ok()).unwrap_or_default().to_ascii_lowercase();
         let body = self.read_body(resp.into_body(), cancelled)?;
-        Ok(Response { status, body })
+        Ok(Response { status, content_type, body })
     }
 
     fn read_body(&self, body: ureq::Body, cancelled: Cancelled<'_>) -> Result<Vec<u8>> {

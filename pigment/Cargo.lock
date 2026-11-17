@@ -5960,6 +5960,8 @@ name = "pigment-genai"
 version = "0.5.0"
 dependencies = [
  "base64 0.23.1",
+ "chrono",
+ "getrandom 0.3.4",
  "image",
  "keyring",
  "log",
@@ -5970,6 +5972,7 @@ dependencies = [
  "photocraft-raster",
  "serde",
  "serde_json",
+ "sha2",
  "ureq",
 ]
 

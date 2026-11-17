@@ -18,6 +18,10 @@
 //! * **Models:** the request's, else the person's choice, else the catalog's preferred model,
 //!   else a known one.
 //!
+//! A ChatGPT sign-in (`crate::chatgpt`) serves chat models only: the status says so
+//! (`imageCapable: false`), so an image request goes to a provider with a key or is refused
+//! before anything is sent.
+//!
 //! **Who may send** ([`Caller`]): the person in the app always (after the one-time consent); an
 //! agent (MCP, the control channel, `pigment-cli serve`) only while "Allow agents to run AI
 //! commands" is on; `pigment-cli run` only with `--allow-ai`. A refused call sends nothing and is
@@ -33,7 +37,7 @@ use photocraft_engine::generative::{
 };
 use photocraft_raster::Rgba8Image;
 
-use crate::accounts::AiAccounts;
+use crate::accounts::{AiAccounts, Method};
 use crate::cancel::{Cancelled, check};
 use crate::provider::{self, EditRequest, ImageRequest, ModelKind, Provider};
 use crate::{AiError, ErrorKind, ProviderId, Result};
@@ -235,8 +239,8 @@ fn status_of(a: &AiAccounts) -> BackendStatus {
             connected: s.connected,
             hint: (!s.hint.is_empty()).then(|| format!("…{}", s.hint)),
             store: Some(s.backend.to_string()),
-            // An API key runs image and chat models; a ChatGPT sign-in (later) chat only.
-            image_capable: s.connected,
+            // An API key runs image and chat models; a ChatGPT sign-in chat models only.
+            image_capable: s.method == Some(Method::ApiKey),
             chat_capable: s.connected,
             image_model: Some(s.image_model),
             chat_model: Some(s.chat_model),

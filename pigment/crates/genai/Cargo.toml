@@ -26,6 +26,12 @@ ureq = { version = "3.5", default-features = false, features = ["rustls-no-provi
 # Answers come as PNG, JPEG or WebP; requests go out as PNG. The codecs already in the tree.
 image = { workspace = true, features = ["png", "jpeg", "webp"] }
 base64 = "0.23"
+# Sign in with ChatGPT (chatgpt.rs): the PKCE challenge is a SHA-256, the state, nonce and
+# verifier are random bytes, and `earliest_refresh_at` may come as an ISO date. All three are in
+# the tree already (automation, the workspace).
+sha2 = "0.10"
+getrandom = { workspace = true }
+chrono = { workspace = true }
 
 # API keys live in the OS credential store where keyring has a native one without C libraries:
 # the macOS Keychain and the Windows Credential Manager. Elsewhere a 0600 file (keys.rs).

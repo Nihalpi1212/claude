@@ -8,6 +8,11 @@
 //!   documented fallback, and AI Accounts says the key is kept in a file only you can read. In
 //!   portable mode it lives in the portable data folder.
 //!
+//! The same store keeps one longer secret beside the keys: the tokens of a ChatGPT sign-in
+//! ([`crate::chatgpt`]), as text under the account [`crate::chatgpt::ACCOUNT`]
+//! ([`SecretStore::get_secret`]). On Windows, whose credentials hold at most 2560 bytes, it is
+//! kept in several entries ([`chunked`]).
+//!
 //! A key never leaves this module except through [`ApiKey::expose`], which only the providers
 //! call to set the request header. [`ApiKey`]'s `Debug` prints `[redacted]` and it has no
 //! `Display` or `Serialize`, so it can't be logged or written by accident.
@@ -72,6 +77,11 @@ pub trait SecretStore: Send + Sync {
     fn get(&self, provider: ProviderId) -> Result<Option<ApiKey>>;
     fn set(&self, provider: ProviderId, key: &ApiKey) -> Result<()>;
     fn clear(&self, provider: ProviderId) -> Result<()>;
+    /// A longer secret kept beside the keys under `account` (the ChatGPT sign-in's tokens, as
+    /// text). `None` when there is none.
+    fn get_secret(&self, account: &str) -> Result<Option<String>>;
+    fn set_secret(&self, account: &str, value: &str) -> Result<()>;
+    fn clear_secret(&self, account: &str) -> Result<()>;
     /// What AI Accounts says the keys are kept in ("macOS Keychain", "a file only you can read").
     fn backend(&self) -> &'static str;
 }
@@ -97,20 +107,45 @@ fn store_error(what: &str, e: impl std::fmt::Display) -> AiError {
     AiError::new(ErrorKind::KeyStore, format!("Pigment could not {what} the API key: {e}."))
 }
 
+/// Longest secret kept beside the keys (three tokens of a few kilobytes each fit many times).
+pub const MAX_SECRET_LEN: usize = 96 * 1024;
+
+fn check_secret(value: &str) -> Result<()> {
+    if value.is_empty() || value.len() > MAX_SECRET_LEN {
+        return Err(AiError::new(ErrorKind::KeyStore, "Pigment could not store the ChatGPT sign-in: it is empty or too large."));
+    }
+    Ok(())
+}
+
 /// Keys in memory only (tests, sessions that save nothing).
 #[derive(Default)]
-pub struct MemoryStore(Mutex<BTreeMap<&'static str, ApiKey>>);
+pub struct MemoryStore {
+    keys: Mutex<BTreeMap<&'static str, ApiKey>>,
+    secrets: Mutex<BTreeMap<String, String>>,
+}
 
 impl SecretStore for MemoryStore {
     fn get(&self, p: ProviderId) -> Result<Option<ApiKey>> {
-        Ok(self.0.lock().map_err(|_| store_error("read", "lock poisoned"))?.get(p.id()).cloned())
+        Ok(self.keys.lock().map_err(|_| store_error("read", "lock poisoned"))?.get(p.id()).cloned())
     }
     fn set(&self, p: ProviderId, key: &ApiKey) -> Result<()> {
-        self.0.lock().map_err(|_| store_error("store", "lock poisoned"))?.insert(p.id(), key.clone());
+        self.keys.lock().map_err(|_| store_error("store", "lock poisoned"))?.insert(p.id(), key.clone());
         Ok(())
     }
     fn clear(&self, p: ProviderId) -> Result<()> {
-        self.0.lock().map_err(|_| store_error("remove", "lock poisoned"))?.remove(p.id());
+        self.keys.lock().map_err(|_| store_error("remove", "lock poisoned"))?.remove(p.id());
+        Ok(())
+    }
+    fn get_secret(&self, account: &str) -> Result<Option<String>> {
+        Ok(self.secrets.lock().map_err(|_| store_error("read", "lock poisoned"))?.get(account).cloned())
+    }
+    fn set_secret(&self, account: &str, value: &str) -> Result<()> {
+        check_secret(value)?;
+        self.secrets.lock().map_err(|_| store_error("store", "lock poisoned"))?.insert(account.to_string(), value.to_string());
+        Ok(())
+    }
+    fn clear_secret(&self, account: &str) -> Result<()> {
+        self.secrets.lock().map_err(|_| store_error("remove", "lock poisoned"))?.remove(account);
         Ok(())
     }
     fn backend(&self) -> &'static str {
@@ -118,14 +153,15 @@ impl SecretStore for MemoryStore {
     }
 }
 
-/// `{"openai": "…", "gemini": "…"}` in a file only its owner can read.
+/// `{"openai": "…", "gemini": "…"}` in a file only its owner can read; a ChatGPT sign-in's
+/// tokens are one more entry (`"openai-chatgpt": "<JSON text>"`).
 pub struct FileStore {
     path: PathBuf,
     lock: Mutex<()>,
 }
 
-/// Largest key file read (a few keys).
-const MAX_FILE: u64 = 64 * 1024;
+/// Largest key file read (a few keys and one sign-in).
+const MAX_FILE: u64 = 4 * MAX_SECRET_LEN as u64;
 
 impl FileStore {
     pub fn new(path: PathBuf) -> Self {
@@ -206,9 +242,23 @@ impl SecretStore for FileStore {
         self.write(&keys)
     }
     fn clear(&self, p: ProviderId) -> Result<()> {
+        self.clear_secret(p.id())
+    }
+    fn get_secret(&self, account: &str) -> Result<Option<String>> {
+        let _g = self.lock.lock().map_err(|_| store_error("read", "lock poisoned"))?;
+        Ok(self.read()?.remove(account).filter(|v| !v.is_empty()))
+    }
+    fn set_secret(&self, account: &str, value: &str) -> Result<()> {
+        check_secret(value)?;
+        let _g = self.lock.lock().map_err(|_| store_error("store", "lock poisoned"))?;
+        let mut keys = self.read()?;
+        keys.insert(account.to_string(), value.to_string());
+        self.write(&keys)
+    }
+    fn clear_secret(&self, account: &str) -> Result<()> {
         let _g = self.lock.lock().map_err(|_| store_error("remove", "lock poisoned"))?;
         let mut keys = self.read()?;
-        if keys.remove(p.id()).is_none() {
+        if keys.remove(account).is_none() {
             return Ok(());
         }
         self.write(&keys)
@@ -218,33 +268,130 @@ impl SecretStore for FileStore {
     }
 }
 
+/// A long secret over a store whose entries are small (the Windows Credential Manager holds
+/// 2560 bytes a credential, 1280 UTF-16 units): the text is cut into pieces of at most `piece`
+/// characters. The entry `account` holds `<n>:<first piece>`, the entries `account.1` …
+/// `account.<n-1>` the rest. Generic over the store's three calls, so it is tested everywhere.
+pub mod chunked {
+    use crate::Result;
+
+    /// Most pieces read or written (a damaged count can't make a long loop).
+    pub const MAX_PIECES: usize = 256;
+
+    fn entry(account: &str, i: usize) -> String {
+        if i == 0 { account.to_string() } else { format!("{account}.{i}") }
+    }
+
+    /// The count and first piece of the head entry.
+    fn head(text: &str) -> Option<(usize, &str)> {
+        let (n, first) = text.split_once(':')?;
+        let n: usize = n.parse().ok()?;
+        (1..=MAX_PIECES).contains(&n).then_some((n, first))
+    }
+
+    /// The secret under `account`; `None` when there is none or a piece is missing.
+    pub fn read(account: &str, get: &dyn Fn(&str) -> Result<Option<String>>) -> Result<Option<String>> {
+        let Some(first) = get(account)? else { return Ok(None) };
+        let Some((n, first)) = head(&first) else { return Ok(None) };
+        let mut out = first.to_string();
+        for i in 1..n {
+            match get(&entry(account, i))? {
+                Some(piece) => out.push_str(&piece),
+                None => return Ok(None),
+            }
+        }
+        Ok(Some(out))
+    }
+
+    /// Store `value` under `account` in pieces of at most `piece` characters, and remove the
+    /// pieces an earlier, longer value left.
+    pub fn write(
+        account: &str,
+        value: &str,
+        piece: usize,
+        get: &dyn Fn(&str) -> Result<Option<String>>,
+        set: &dyn Fn(&str, &str) -> Result<()>,
+        del: &dyn Fn(&str) -> Result<()>,
+    ) -> Result<()> {
+        let before = get(account)?.as_deref().and_then(head).map_or(0, |(n, _)| n);
+        let chars: Vec<char> = value.chars().collect();
+        let pieces: Vec<String> = chars.chunks(piece.max(1)).take(MAX_PIECES).map(|c| c.iter().collect()).collect();
+        let n = pieces.len().max(1);
+        // The later pieces first: a reader never finds a head that counts pieces not yet there.
+        for (i, text) in pieces.iter().enumerate().skip(1) {
+            set(&entry(account, i), text)?;
+        }
+        set(account, &format!("{n}:{}", pieces.first().map(String::as_str).unwrap_or_default()))?;
+        for i in n..before {
+            del(&entry(account, i))?;
+        }
+        Ok(())
+    }
+
+    /// Remove the secret under `account` with all its pieces.
+    pub fn clear(account: &str, get: &dyn Fn(&str) -> Result<Option<String>>, del: &dyn Fn(&str) -> Result<()>) -> Result<()> {
+        let n = get(account)?.as_deref().and_then(head).map_or(1, |(n, _)| n);
+        for i in (0..n).rev() {
+            del(&entry(account, i))?;
+        }
+        Ok(())
+    }
+}
+
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 mod os {
-    use super::{ApiKey, ProviderId, Result, SecretStore, service, store_error};
+    use super::{ApiKey, ProviderId, Result, SecretStore, check_secret, chunked, service, store_error};
 
     /// The OS credential store.
     pub struct OsStore;
 
-    fn entry(p: ProviderId) -> Result<keyring::Entry> {
-        keyring::Entry::new(&service(), p.id()).map_err(|e| store_error("open the credential store for", e))
+    /// Characters a piece of a long secret holds: a Windows credential takes 2560 bytes of
+    /// UTF-16, so 600 characters fit whatever they are; the macOS Keychain takes the whole text
+    /// in one item (one item, one permission prompt).
+    const PIECE: usize = if cfg!(target_os = "windows") { 600 } else { usize::MAX };
+
+    fn entry(account: &str) -> Result<keyring::Entry> {
+        keyring::Entry::new(&service(), account).map_err(|e| store_error("open the credential store for", e))
+    }
+
+    fn get_text(account: &str) -> Result<Option<String>> {
+        match entry(account)?.get_password() {
+            Ok(k) => Ok(Some(k)),
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(e) => Err(store_error("read", e)),
+        }
+    }
+
+    fn set_text(account: &str, value: &str) -> Result<()> {
+        entry(account)?.set_password(value).map_err(|e| store_error("store", e))
+    }
+
+    fn del_text(account: &str) -> Result<()> {
+        match entry(account)?.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(e) => Err(store_error("remove", e)),
+        }
     }
 
     impl SecretStore for OsStore {
         fn get(&self, p: ProviderId) -> Result<Option<ApiKey>> {
-            match entry(p)?.get_password() {
-                Ok(k) => Ok(ApiKey::new(&k).ok()),
-                Err(keyring::Error::NoEntry) => Ok(None),
-                Err(e) => Err(store_error("read", e)),
-            }
+            Ok(get_text(p.id())?.and_then(|k| ApiKey::new(&k).ok()))
         }
         fn set(&self, p: ProviderId, key: &ApiKey) -> Result<()> {
-            entry(p)?.set_password(key.expose()).map_err(|e| store_error("store", e))
+            set_text(p.id(), key.expose())
         }
         fn clear(&self, p: ProviderId) -> Result<()> {
-            match entry(p)?.delete_credential() {
-                Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-                Err(e) => Err(store_error("remove", e)),
-            }
+            del_text(p.id())
+        }
+        fn get_secret(&self, account: &str) -> Result<Option<String>> {
+            chunked::read(account, &get_text)
+        }
+        fn set_secret(&self, account: &str, value: &str) -> Result<()> {
+            check_secret(value)?;
+            chunked::write(account, value, PIECE, &get_text, &set_text, &del_text)
+        }
+        fn clear_secret(&self, account: &str) -> Result<()> {
+            chunked::clear(account, &get_text, &del_text)
         }
         fn backend(&self) -> &'static str {
             if cfg!(target_os = "macos") { "macOS Keychain" } else { "Windows Credential Manager" }
