@@ -317,6 +317,27 @@ fn provider_errors_come_back_translated_and_redacted() {
     assert!(e.message.contains("[redacted]"), "{e}");
 }
 
+/// A 2xx answer can quote the key too (an `error` object, a refusal, text where an image was
+/// asked for): whatever of it reaches a message, the key does not.
+#[test]
+fn a_key_quoted_in_a_successful_answer_never_reaches_a_message() {
+    let server = MockServer::start(|got| match got.path.as_str() {
+        "/v1/responses" => Reply::ok(json!({"error": {"message": format!("failed for {OPENAI_KEY}")}})),
+        "/v1/images/generations" => Reply::ok(json!({"data": [{"b64_json": format!("{OPENAI_KEY}!")}], "note": OPENAI_KEY})),
+        _ => Reply::ok(gemini_text(&format!("I can't draw that, but your key is {GEMINI_KEY}."))),
+    });
+    let o = provider(ProviderId::OpenAi, &server.base());
+    let e = o.chat("gpt-5.1", &hello(), &never).unwrap_err();
+    assert!(e.message.contains("failed for [redacted]") && !e.message.contains(OPENAI_KEY), "{e}");
+    let req = ImageRequest { prompt: "x".into(), width: 64, height: 64, transparent: false };
+    let e = o.generate_image("gpt-image-1", &req, &never).unwrap_err();
+    assert_eq!(e.kind, ErrorKind::BadResponse);
+    assert!(!e.message.contains(OPENAI_KEY), "{e}");
+    let g = provider(ProviderId::Gemini, &server.base());
+    let e = g.generate_image("gemini-2.5-flash-image", &req, &never).unwrap_err();
+    assert!(e.message.contains("text instead of an image") && e.message.contains("[redacted]") && !e.message.contains(GEMINI_KEY), "{e}");
+}
+
 #[test]
 fn a_slow_provider_times_out() {
     let server = MockServer::replies(vec![Reply::ok(openai_text("late")).after(Duration::from_secs(3))]);

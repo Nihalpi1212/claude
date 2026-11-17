@@ -102,16 +102,19 @@ mod tests {
         !crc
     }
 
-    /// A PNG that is only its signature and header: enough to read the size it claims.
+    /// A PNG that is only its signature, its header and the start of its (empty) pixel data:
+    /// enough to read the size it claims.
     fn png_header(w: u32, h: u32) -> Vec<u8> {
         let mut ihdr = b"IHDR".to_vec();
         ihdr.extend(w.to_be_bytes());
         ihdr.extend(h.to_be_bytes());
         ihdr.extend([8, 6, 0, 0, 0]);
         let mut out = b"\x89PNG\r\n\x1a\n".to_vec();
-        out.extend(13u32.to_be_bytes());
-        out.extend(&ihdr);
-        out.extend(crc32(&ihdr).to_be_bytes());
+        for chunk in [ihdr.as_slice(), b"IDAT"] {
+            out.extend((chunk.len() as u32 - 4).to_be_bytes());
+            out.extend(chunk);
+            out.extend(crc32(chunk).to_be_bytes());
+        }
         out
     }
 

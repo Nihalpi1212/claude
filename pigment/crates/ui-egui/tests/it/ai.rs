@@ -532,6 +532,133 @@ fn an_action_with_an_ai_step_never_sends() {
     assert_eq!(layer_names(h.state()).len(), 1, "nothing changed");
 }
 
+/// Click `label` as an agent does: `ui.click` through the control channel, its events delivered
+/// in one frame the way the app's input hook delivers them (as automation's input).
+fn synthetic_click(h: &mut Harness, label: &str) {
+    let at = h.get_by_label(label).rect().center();
+    let ctx = h.ctx.clone();
+    let (req, _rx) = ControlRequest::new("ui.click", json!({"x": at.x, "y": at.y}));
+    assert!(matches!(handle(h.state_mut(), &ctx, &req), Outcome::AfterInput), "ui.click on {label}");
+    let events = h.state_mut().take_synthetic_step();
+    assert!(!events.is_empty());
+    h.input_mut().events.extend(events);
+    h.step();
+    h.run_steps(2);
+}
+
+/// Synthetic input can't spend the person's money or give itself the right to: an agent's click
+/// on Generate sends nothing while "Allow agents to run AI commands" is off, and its clicks in AI
+/// Accounts change neither the agreement nor that permission (it can still close the dialog). The
+/// person's own clicks do both.
+#[test]
+fn synthetic_input_neither_sends_nor_grants_itself_permission() {
+    let mock = Arc::new(MockBackend::connected());
+    let m = Arc::clone(&mock);
+    let mut h = harness(move |app| {
+        ai_ui::install_accounts(app, AiAccounts::in_memory());
+        with_mock(app, &m);
+        app.run("select.rect", json!({"x": 10, "y": 10, "width": 30, "height": 30})).unwrap();
+    });
+    ai_ui::menu(h.state_mut(), "ai.generativeFill", &json!({"prompt": "clouds"})).unwrap().unwrap();
+    h.run_steps(3);
+    synthetic_click(&mut h, "Generate");
+    until_idle(&mut h);
+    assert!(mock.calls().is_empty(), "nothing sent: {:?}", mock.calls());
+    let refused = h.state().ai.generate.error.as_ref().map(|e| e.message.clone()).unwrap_or_default();
+    assert!(refused.contains("Allow agents to run AI commands"), "the click reached Generate and was refused: {refused:?}");
+    assert_eq!(layer_names(h.state()).len(), 1, "nothing changed");
+
+    invoke(&mut h, "ai.accounts").unwrap();
+    let settings = |h: &Harness| ai_ui::with_accounts(h.state(), |a| (a.settings.consented, a.settings.allow_agents)).unwrap();
+    assert_eq!(settings(&h), (false, false));
+    synthetic_click(&mut h, accounts::CONSENT);
+    synthetic_click(&mut h, "Allow agents to run AI commands");
+    assert_eq!(settings(&h), (false, false), "an agent's clicks grant nothing");
+    // The person's clicks do.
+    h.get_by_label("Allow agents to run AI commands").click();
+    h.run_steps(3);
+    h.get_by_label(accounts::CONSENT).click();
+    h.run_steps(3);
+    assert_eq!(settings(&h), (true, true));
+    // Closing is all synthetic input may do there.
+    synthetic_click(&mut h, "Done");
+    assert!(!accounts::is_open(h.state()), "the synthetic click does reach the dialog");
+    // With the permission given, the agent's Generate sends.
+    synthetic_click(&mut h, "Generate");
+    until_idle(&mut h);
+    assert_eq!(mock.calls().len(), 1);
+}
+
+/// Generate Image into a new document, as a background job (how the app runs it): the document
+/// appears with its one layer and the prompt as its description, the open document is left
+/// alone, and a stopped request makes no document.
+#[test]
+fn generate_image_makes_a_new_document_in_the_background() {
+    let mock = Arc::new(MockBackend::connected());
+    let m = Arc::clone(&mock);
+    let mut h = harness(move |app| {
+        with_mock(app, &m);
+        app.background_jobs = true;
+    });
+    invoke(&mut h, "ai.generateImage").unwrap();
+    {
+        let g = &mut h.state_mut().ai.generate;
+        assert!(!g.new_document, "a layer by default with a document open");
+        g.prompt = "a lighthouse at dawn".into();
+        g.new_document = true;
+        (g.width, g.height) = (96, 64);
+    }
+    generate::start(h.state_mut()).unwrap();
+    assert!(h.state().ai.generate.job.is_some(), "a background job");
+    until_idle(&mut h);
+    assert_eq!(h.state().session.documents().len(), 2);
+    let st = h.state().session.active().unwrap();
+    assert_eq!((st.doc.size.width, st.doc.size.height), (96, 64));
+    assert_eq!(layer_names(h.state()), ["Generated"]);
+    let call = &mock.calls()[0];
+    assert_eq!((call.op, call.width, call.height, call.prompt.as_str()), ("generate", 96, 64, "a lighthouse at dawn"));
+    let info = h.state_mut().run("file.fileInfo", json!({})).unwrap();
+    assert_eq!(info["description"], "a lighthouse at dawn");
+    assert_eq!(h.state().session.documents()[0].doc.layers.len(), 1, "the open document is left alone");
+    // Stopped: no document.
+    mock.set_delay(Duration::from_secs(60));
+    generate::start(h.state_mut()).unwrap();
+    h.run_steps(2);
+    assert!(generate::stop(h.state_mut()));
+    until_idle(&mut h);
+    assert_eq!(h.state().session.documents().len(), 2, "a stopped request makes nothing");
+}
+
+/// Generative Expand from its window, as a background job: the canvas grows and the new area is
+/// filled in one undo step.
+#[test]
+fn generative_expand_grows_the_canvas_in_one_undo_step() {
+    let mock = Arc::new(MockBackend::connected());
+    let m = Arc::clone(&mock);
+    let mut h = harness(move |app| {
+        with_mock(app, &m);
+        app.background_jobs = true;
+    });
+    invoke(&mut h, "ai.generativeExpand").unwrap();
+    {
+        let g = &mut h.state_mut().ai.generate;
+        assert_eq!((g.feature, g.width, g.height, g.anchor), ("ai.generativeExpand", 200, 160, "center"));
+        g.width = 260;
+        g.anchor = "left";
+    }
+    generate::start(h.state_mut()).unwrap();
+    until_idle(&mut h);
+    let size = |h: &Harness| h.state().session.active().map(|st| (st.doc.size.width, st.doc.size.height));
+    assert_eq!(size(&h), Some((260, 160)));
+    assert!(layer_names(h.state()).iter().any(|n| n == "Generative Expand"));
+    let call = &mock.calls()[0];
+    assert_eq!((call.width, call.height), (260, 160));
+    assert!(call.mask_coverage.is_some_and(|c| (c - 60.0 / 260.0).abs() < 0.02), "only the new band may change: {:?}", call.mask_coverage);
+    h.state_mut().run("edit.undo", json!({})).unwrap();
+    assert_eq!(size(&h), Some((200, 160)), "one undo step takes the canvas and the fill back");
+    assert!(!layer_names(h.state()).iter().any(|n| n == "Generative Expand"));
+}
+
 /// The last prompt of each feature is kept in `ai.json` and fills the window next time.
 #[test]
 fn the_last_prompt_comes_back() {

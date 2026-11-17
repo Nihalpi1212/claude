@@ -9,7 +9,7 @@ use photocraft_engine::generative::{ChatMessage, ChatRequest, ChatTurn, ToolCall
 use photocraft_raster::Rgba8Image;
 use serde_json::{Value, json};
 
-use super::{EditRequest, ImageRequest, ModelInfo, ModelKind, Provider, ProviderConfig, call_json, clients, clip, ratio_of, state_provider};
+use super::{EditRequest, ImageRequest, ModelInfo, ModelKind, Provider, ProviderConfig, call_json, clients, clip, ratio_of, redacted, state_provider};
 use crate::cancel::Cancelled;
 use crate::chat::{parse_args, result_text};
 use crate::http::{Body, Http, Multipart};
@@ -375,15 +375,15 @@ impl Provider for OpenAi {
     }
 
     fn generate_image(&self, model: &str, req: &ImageRequest, cancelled: Cancelled<'_>) -> Result<Rgba8Image> {
-        parse_image(&self.call("/images/generations", json_body(&generation_body(model, req)), cancelled)?)
+        redacted(self.call("/images/generations", json_body(&generation_body(model, req)), cancelled).and_then(|v| parse_image(&v)), &self.key)
     }
 
     fn edit_image(&self, model: &str, req: &EditRequest, cancelled: Cancelled<'_>) -> Result<Rgba8Image> {
-        parse_image(&self.call("/images/edits", edit_form(model, req)?, cancelled)?)
+        redacted(self.call("/images/edits", edit_form(model, req)?, cancelled).and_then(|v| parse_image(&v)), &self.key)
     }
 
     fn chat(&self, model: &str, req: &ChatRequest, cancelled: Cancelled<'_>) -> Result<ChatTurn> {
-        parse_turn(&self.call("/responses", json_body(&chat_body(model, req)?), cancelled)?)
+        redacted(self.call("/responses", json_body(&chat_body(model, req)?), cancelled).and_then(|v| parse_turn(&v)), &self.key)
     }
 
     fn list_models(&self, cancelled: Cancelled<'_>) -> Result<Vec<ModelInfo>> {

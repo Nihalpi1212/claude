@@ -317,6 +317,13 @@ pub(crate) fn check(p: ProviderId, resp: crate::http::Response, key: &ApiKey) ->
     if (200..300).contains(&resp.status) { Ok(resp.body) } else { Err(translate_error(p, resp.status, &resp.body).redact(key.expose())) }
 }
 
+/// `r` with the key in use taken out of an error's message. [`check`] does this for a provider's
+/// error answers; this also covers what is read out of a 2xx answer and quoted in a message (an
+/// `error` object, a refusal, text sent instead of an image), so no route puts the key in one.
+pub(crate) fn redacted<T>(r: Result<T>, key: &ApiKey) -> Result<T> {
+    r.map_err(|e| e.redact(key.expose()))
+}
+
 /// The ratio closest to `w:h` in log aspect among `ratios` (`"16:9"` or `"1536x1024"`).
 pub fn nearest_ratio<'a>(w: u32, h: u32, ratios: &[&'a str]) -> &'a str {
     let want = f64::from(w.max(1)).ln() - f64::from(h.max(1)).ln();

@@ -10,7 +10,9 @@ use photocraft_engine::generative::{ChatMessage, ChatRequest, ChatTurn, ToolCall
 use photocraft_raster::Rgba8Image;
 use serde_json::{Value, json};
 
-use super::{EditRequest, ImageRequest, ModelInfo, ModelKind, Provider, ProviderConfig, call_json, clients, clip, nearest_ratio, ratio_of, state_provider};
+use super::{
+    EditRequest, ImageRequest, ModelInfo, ModelKind, Provider, ProviderConfig, call_json, clients, clip, nearest_ratio, ratio_of, redacted, state_provider,
+};
 use crate::cancel::Cancelled;
 use crate::chat::{gemini_declaration, parse_args};
 use crate::http::{Body, Http};
@@ -287,15 +289,15 @@ impl Provider for Gemini {
     }
 
     fn generate_image(&self, model: &str, req: &ImageRequest, cancelled: Cancelled<'_>) -> Result<Rgba8Image> {
-        parse_image(&self.generate(model, &image_body(model, req), cancelled)?)
+        redacted(self.generate(model, &image_body(model, req), cancelled).and_then(|v| parse_image(&v)), &self.key)
     }
 
     fn edit_image(&self, model: &str, req: &EditRequest, cancelled: Cancelled<'_>) -> Result<Rgba8Image> {
-        parse_image(&self.generate(model, &edit_body(model, req)?, cancelled)?)
+        redacted(self.generate(model, &edit_body(model, req)?, cancelled).and_then(|v| parse_image(&v)), &self.key)
     }
 
     fn chat(&self, model: &str, req: &ChatRequest, cancelled: Cancelled<'_>) -> Result<ChatTurn> {
-        parse_turn(&self.generate(model, &chat_body(req)?, cancelled)?)
+        redacted(self.generate(model, &chat_body(req)?, cancelled).and_then(|v| parse_turn(&v)), &self.key)
     }
 
     fn list_models(&self, cancelled: Cancelled<'_>) -> Result<Vec<ModelInfo>> {
