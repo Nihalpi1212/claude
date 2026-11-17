@@ -133,13 +133,15 @@ do toggle the two checkboxes.
 - That test is flaky and older than the AI port: it failed the same way in run 173 on `abc4d3e` (before
   `093b6f0`), passed in runs 174 and 175, failed in 176. It is PhotoCraft's own test of its own bridge;
   nothing in P1 to P3 touches that path (`Headless::new()` gained a backend that opens nothing until an
-  `ai.*` command runs). The handshake is two HMACs, so the 5 s are a stall, not work; the cause was not found
-  . Ruled out by reading: a slow proof (plain HMAC), a shared limiter or lock before authentication,
+  `ai.*` command runs). The handshake is two HMACs, so the 5 s are a stall, not work; the cause was not found.
+  Ruled out by reading: a slow proof (plain HMAC), a shared limiter or lock before authentication,
   and a port shared with the silent listeners of the two tests that run beside it (a script that binds
   three `SO_REUSEADDR` sockets to port 0 at once 3000 times never got a port twice here). It did not fail in
-  12 local runs of the three `bridge_token` tests (this container has no IPv6 loopback; CI has).
+  12 local runs of the three `bridge_token` tests.
 - Run 177 on `aeb188f` (this review's head): **success**. Every step is green, the flaky test included.
   If a later run goes red on that one test, re-run the failed job before looking further.
+- After that run, `968cb28` ("Pigment CI: run the tests with cargo-nextest…") appeared on the branch from
+  another session. It is not part of this review and was not looked at.
 
 ## For the next engineer
 
