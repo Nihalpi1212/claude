@@ -1,6 +1,6 @@
 # Pigment on PhotoCraft: porting the JavaScript Pigment's other extras
 
-Task #40. The old JavaScript Pigment (0.1 to 0.4) was ahead of PhotoCraft on 93 Photoshop rows. The generative-AI rows go through planpc/AI-PORT.md. This brief covers the rest, plus opening the `.pigment` files that Pigment 0.1 to 0.4 wrote, so nobody who used Pigment loses a feature or a file.
+Task #2. The old JavaScript Pigment (0.1 to 0.4) was ahead of PhotoCraft on 93 Photoshop rows. The generative-AI rows go through planpc/AI-PORT.md. This brief covers the rest, plus opening the `.pigment` files that Pigment 0.1 to 0.4 wrote, so nobody who used Pigment loses a feature or a file.
 
 ## The specs (read your package's section and every row it lists)
 
@@ -28,7 +28,7 @@ The specs' recommendations and their dropped items (sections "dropped") are acce
 
 Launch each group with `Workflow({ scriptPath: '/tmp/claude-0/-home-user-claude/02aa60de-818c-5d38-b2f3-33055ac112a1/scratchpad/planpc/ports.js', args: <the group's object> })`.
 
-1. Group L, legacy importer; Pigment 0.5.0 ships after it, task #41: `{"group":"L","spec":"PORTS-A.md","packages":["L1","L2","L3"]}`
+1. Group L, legacy importer; Pigment 0.5.0 ships after it, task #3: `{"group":"L","spec":"PORTS-A.md","packages":["L1","L2","L3"]}`
 2. Group A, adjustments: `{"group":"A","spec":"PORTS-A.md","packages":["A1","A2","A3","A4","A5","A6","A7"]}`
 3. Group P, presets: `{"group":"P","spec":"PORTS-A.md","packages":["P1a","P1b","P2","P3","P4"]}`
 4. Group FU, formats and panels: `{"group":"FU","spec":"PORTS-A.md","packages":["F1","F2","F3","U1","U2","U3","U4"]}`
@@ -36,7 +36,7 @@ Launch each group with `Workflow({ scriptPath: '/tmp/claude-0/-home-user-claude/
 6. Group BR1, filters and guides: `{"group":"BR1","spec":"PORTS-B.md","packages":["B9","B10","B11","B12","B13"]}`
 7. Group BR2, selection, shapes, brushes, fills: `{"group":"BR2","spec":"PORTS-B.md","packages":["B14","B15","B16","B17","B18"]}`
 
-After each group: read its reports and review, verify the commits (build, the group's tests, the rebrand check), push, and get Pigment CI green before launching the next group. Mark task #40 done after group BR2.
+After each group: read its reports and review, verify the commits (build, the group's tests, the rebrand check), push, and get Pigment CI green before launching the next group. Mark task #2 done after group BR2.
 
 ## Rules for every package
 

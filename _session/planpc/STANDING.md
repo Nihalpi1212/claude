@@ -30,17 +30,17 @@ A cloud container is reclaimed after inactivity; a usage-limit stop of a few hou
 4. The first cargo build is cold (about 25 minutes). Start it in the background before launching agents:
    `cd pigment && CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 cargo build --locked -p photocraft -p photocraft-cli -p xtask -j 4`
 
-## The plan, in order (task ids from the task list)
+## The plan, in order (the task list was reset with the container on Nov 17: #1 AI port, #2 other ports, #3 release)
 
-1. **Rebrand (#38).** Done.
-2. **AI port (#39).** Brief planpc/AI-PORT.md, specs planpc/ai/PIGMENT-AI.md and INTEGRATION.md.
+1. **Rebrand.** Done.
+2. **AI port (task #1).** Brief planpc/AI-PORT.md, specs planpc/ai/PIGMENT-AI.md and INTEGRATION.md.
    - Done and pushed: P1 (engine seam and ai.* commands), P2 (pigment-genai, CLI), P3 (interface). Notes in planpc/build/PKG-ai-P1.md, P2.md, P3.md.
    - Remaining, run by planpc/ai-port-2.js with args { steps: [...], notes: { "<step>": "continuation note" } }. The steps, in order: review123, P4 (Assistant), P5 (Sign in with ChatGPT), review45, final.
-3. **Other ports (#40).** The 93 rows where the JavaScript Pigment was ahead, minus the AI rows, plus the importer for Pigment 0.1 to 0.4 `.pigment` files (hook: IoError::LegacyPigment in crates/io/src/legacy_pigment.rs).
+3. **Other ports (task #2).** The 93 rows where the JavaScript Pigment was ahead, minus the AI rows, plus the importer for Pigment 0.1 to 0.4 `.pigment` files (hook: IoError::LegacyPigment in crates/io/src/legacy_pigment.rs).
    - Brief planpc/PORTS.md, specs planpc/ports/PORTS-A.md and PORTS-B.md (40 packages), generic workflow planpc/ports.js, run once per group with the args listed in PORTS.md (after a restart: packages = those still to build, done = those already pushed).
    - Group order: L (legacy importer), A, P, FU, BT, BR1, BR2.
-   - **Release 0.5.0 (#41) comes right after the AI port and group L.** Groups A to BR2 then go into 0.6.0.
-4. **Release (#41).**
+   - **Release 0.5.0 (task #3) comes right after the AI port and group L.** Groups A to BR2 then go into 0.6.0.
+4. **Release (task #3).**
    - Docs: README, USER-GUIDE, release notes, and PARITY re-based on the new app. The row-by-row map of PhotoCraft's statuses (photocraft-eval/map/*.jsonl) was lost with the container on Nov 16: only the summaries survive (photocraft-eval/REPORT.md, area-table.md, pigment-ahead.md, map/*-beyond.md). The docs step re-audits the Rust tree against the JavaScript app's docs/parity pages and keeps the result in the repository (pigment/docs/parity/).
    - A cross-feature bug hunt with regression tests and an adversarial review.
    - Merge the latest upstream PhotoCraft first if it is cheap; pigment/docs/FORK.md has the steps.
