@@ -107,6 +107,8 @@ fn settings_never_hold_keys_and_survive_a_restart() {
     a.set_consented(true).unwrap();
     a.set_allow_agents(true).unwrap();
     a.settings.set_last_prompt(PromptFeature::Sky, &format!("  a stormy sky {}", "x".repeat(5000)));
+    assert!(a.settings.assistant_attach, "the Assistant attaches the image until that is turned off");
+    a.settings.assistant_attach = false;
     a.save().unwrap();
     let text = std::fs::read_to_string(AiSettings::path(&dir)).unwrap();
     assert!(!text.contains(OPENAI_KEY), "{text}");
@@ -118,7 +120,10 @@ fn settings_never_hold_keys_and_survive_a_restart() {
     assert_eq!((back.image_provider, back.chat_provider), (Some(ProviderId::Gemini), Some(ProviderId::Gemini)), "the preferred provider resets both");
     assert_eq!(back.openai.chat_model.as_deref(), Some("gpt-4.1"));
     assert_eq!(back.openai.image_model, None, "an empty model is automatic");
-    assert!(back.consented && back.allow_agents);
+    assert!(back.consented && back.allow_agents && !back.assistant_attach);
+    assert!(text.contains("\"assistantAttach\": false"), "{text}");
+    let older: AiSettings = serde_json::from_str("{\"consented\":true}").unwrap();
+    assert!(older.consented && older.assistant_attach, "a settings file from before the Assistant");
     let sky = back.last_prompt(PromptFeature::Sky).unwrap();
     assert!(sky.starts_with("a stormy sky") && sky.chars().count() == 4000, "trimmed and cut to the prompt limit");
     assert_eq!(PromptFeature::of_command("ai.replaceSky"), Some(PromptFeature::Sky));

@@ -147,16 +147,15 @@ fn one_step(app: &mut PhotocraftApp, name: &str, args: Value) -> Value {
     r
 }
 
-/// Each tool runs its engine command, as one undo step, and answers as JavaScript Pigment's did.
+/// `get_document` is the short form the model needs; `new_layer`, `set_layer_props` and
+/// `set_active_layer` run their commands, each one undo step, and check what they are given.
 #[test]
-fn each_tool_runs_its_engine_command_as_one_undo_step() {
+fn the_layer_tools_run_their_commands_and_check_ids() {
     let mut app = app();
     let background = active_layer(&app);
-
     let doc = tool(&mut app, "get_document", json!({})).unwrap();
     assert_eq!((doc["width"].as_u64(), doc["height"].as_u64()), (Some(200), Some(160)));
-    assert_eq!(doc["activeLayer"], json!(background));
-    assert_eq!(doc["selection"], Value::Null);
+    assert_eq!((doc["activeLayer"].clone(), doc["selection"].clone()), (json!(background), Value::Null));
     let layer = &doc["layers"][0];
     assert_eq!(
         (layer["id"].clone(), layer["type"].as_str(), layer["opacity"].as_f64(), layer["blend"].as_str()),
@@ -168,21 +167,8 @@ fn each_tool_runs_its_engine_command_as_one_undo_step() {
     // new_layer: a layer above, active, named.
     let made = one_step(&mut app, "new_layer", json!({"name": "  Sky  "}));
     let sky = made["id"].as_u64().expect("the new layer's id");
-    assert_eq!(made["name"], "Sky");
-    assert_eq!(active_layer(&app), sky);
+    assert_eq!((made["name"].as_str(), active_layer(&app)), (Some("Sky"), sky));
     assert_eq!(layer_names(&app), ["Background", "Sky"]);
-
-    // fill_selection: the whole layer without a selection; alpha becomes the fill's opacity.
-    let r = one_step(&mut app, "fill_selection", json!({"color": "#ff0000"}));
-    assert_eq!(r, "Filled the layer with #ff0000");
-    assert_eq!(pixel(&app, 100, 80), [255, 0, 0, 255]);
-    let r = one_step(&mut app, "fill_selection", json!({"color": "transparent"}));
-    assert_eq!(r, "Cleared the layer to transparent");
-    assert_eq!(pixel(&app, 100, 80), [255, 255, 255, 255], "the white Background shows again");
-    let r = one_step(&mut app, "fill_selection", json!({"color": "rgba(0, 0, 255, 0.5)"}));
-    assert_eq!(r, "Filled the layer with #0000ff at 50 % opacity");
-    let half = pixel(&app, 100, 80);
-    assert!((120..=135).contains(&half[0]) && half[2] == 255, "blue at half opacity over white: {half:?}");
 
     // set_layer_props: opacity 0-100, a blend mode, `null` meaning "leave it".
     let r = one_step(&mut app, "set_layer_props", json!({"id": sky, "opacity": 250, "blend": "multiply", "visible": null, "name": null}));
@@ -190,12 +176,14 @@ fn each_tool_runs_its_engine_command_as_one_undo_step() {
     assert!(r.starts_with("Updated Sky: ") && r.contains("opacity") && r.contains("blend") && !r.contains("visible"), "{r}");
     let l = tool(&mut app, "get_document", json!({})).unwrap()["layers"][0].clone();
     assert_eq!((l["opacity"].as_f64(), l["blend"].as_str()), (Some(100.0), Some("Multiply")), "opacity is clamped to 100");
-    assert_eq!(tool(&mut app, "set_layer_props", json!({"id": sky, "name": "  "})).unwrap_err(), "name is empty");
-    assert_eq!(tool(&mut app, "set_layer_props", json!({"id": sky, "opacity": null})).unwrap_err(), "Nothing to change");
-    assert_eq!(
-        tool(&mut app, "set_layer_props", json!({"id": 999_999, "opacity": 5})).unwrap_err(),
-        "No layer with id \"999999\" (call get_document for the ids)"
-    );
+    for (args, error) in [
+        (json!({"id": sky, "name": "  "}), "name is empty"),
+        (json!({"id": sky, "opacity": null}), "Nothing to change"),
+        (json!({"id": 999_999, "opacity": 5}), "No layer with id \"999999\" (call get_document for the ids)"),
+        (json!({"id": sky, "opacity": "half"}), "opacity must be a number"),
+    ] {
+        assert_eq!(tool(&mut app, "set_layer_props", args).unwrap_err(), error);
+    }
     assert!(tool(&mut app, "set_layer_props", json!({"id": sky, "blend": "sparkle"})).unwrap_err().contains("sparkle"));
 
     // set_active_layer: by id, by the id as text, by a name.
@@ -203,24 +191,62 @@ fn each_tool_runs_its_engine_command_as_one_undo_step() {
     assert_eq!(active_layer(&app), background);
     assert_eq!(tool(&mut app, "set_active_layer", json!({"id": "Sky"})).unwrap(), format!("Active layer: Sky ({sky})"));
     assert_eq!(tool(&mut app, "set_active_layer", json!({"id": null})).unwrap_err(), "id must be a layer id (a number; call get_document for the ids)");
-    tool(&mut app, "set_active_layer", json!({"id": background})).unwrap();
+    assert_eq!(tool(&mut app, "paint_everything", json!({})).unwrap_err(), "Unknown tool \"paint_everything\"");
+    assert!(app.ui.status.is_empty() && !app.ui.status_error, "a tool's failure is the model's to read, not the status bar's: {}", app.ui.status);
+}
 
-    // apply_adjustment and apply_filter, however the kind is spelt; params as JSON text; numbers
-    // clamped to the command's own range (the engine would refuse a radius of 99999).
+/// `fill_selection` fills the layer or the selection; the colour's alpha is the fill's opacity,
+/// and a transparent colour clears.
+#[test]
+fn fill_selection_honours_alpha() {
+    let mut app = app();
+    tool(&mut app, "new_layer", json!({})).unwrap();
+    assert_eq!(one_step(&mut app, "fill_selection", json!({"color": "#ff0000"})), "Filled the layer with #ff0000");
+    assert_eq!(pixel(&app, 100, 80), [255, 0, 0, 255]);
+    assert_eq!(one_step(&mut app, "fill_selection", json!({"color": "transparent"})), "Cleared the layer to transparent");
+    assert_eq!(pixel(&app, 100, 80), [255, 255, 255, 255], "the white Background shows again");
+    assert_eq!(one_step(&mut app, "fill_selection", json!({"color": "rgba(0, 0, 255, 0.5)"})), "Filled the layer with #0000ff at 50 % opacity");
+    let half = pixel(&app, 100, 80);
+    assert!((120..=135).contains(&half[0]) && half[2] == 255, "blue at half opacity over white: {half:?}");
+    tool(&mut app, "select", json!({"kind": "rect", "rect": {"x": 0, "y": 0, "width": 20, "height": 20}})).unwrap();
+    assert_eq!(one_step(&mut app, "fill_selection", json!({"color": "Lime"})), "Filled the selection with #00ff00");
+    assert_eq!((pixel(&app, 5, 5), pixel(&app, 100, 80)), ([0, 255, 0, 255], half), "inside the selection only");
+    assert_eq!(tool(&mut app, "fill_selection", json!({"color": "blurple"})).unwrap_err(), "Unknown colour \"blurple\"");
+    // The Background's transparency is locked: clearing it is refused, as in JavaScript Pigment.
+    let background = tool(&mut app, "get_document", json!({})).unwrap()["layers"][1]["id"].clone();
+    tool(&mut app, "set_active_layer", json!({"id": background})).unwrap();
+    assert_eq!(tool(&mut app, "fill_selection", json!({"color": "transparent"})).unwrap_err(), "Layer \"Background\" has its transparency locked");
+}
+
+/// `apply_adjustment` and `apply_filter`: the kind however it is spelt, params as an object or as
+/// JSON text, numbers clamped to the command's own range (the engine refuses a radius of 99999).
+#[test]
+fn adjustments_and_filters_are_clamped_and_take_json_text() {
+    let mut app = app();
     let before = pixel(&app, 10, 10);
     assert_eq!(one_step(&mut app, "apply_adjustment", json!({"kind": "invert"})), "Applied Invert to \"Background\"");
     assert_ne!(pixel(&app, 10, 10), before);
     assert_eq!(history(&app).last().map(String::as_str), Some("Invert"));
     let r = one_step(&mut app, "apply_adjustment", json!({"kind": "brightness-contrast", "params": {"brightness": "40", "contrast": 9999}}));
     assert_eq!(r, "Applied Brightness/Contrast to \"Background\"");
+    assert!(app.session.execute("filter.blur.gaussianBlur", json!({"radius": 99999})).is_err(), "the engine refuses what the tool clamps");
     let r = one_step(&mut app, "apply_filter", json!({"kind": "gaussian-blur", "params": "{\"radius\": 99999}"}));
     assert_eq!(r, "Applied Gaussian Blur to \"Background\"");
     assert_eq!(history(&app).last().map(String::as_str), Some("Gaussian Blur"));
     assert_eq!(tool(&mut app, "apply_filter", json!({"kind": "sparkle"})).unwrap_err(), "Unknown filter \"sparkle\"");
     assert_eq!(tool(&mut app, "apply_adjustment", json!({"kind": "levels", "params": [1]})).unwrap_err(), "params must be an object");
     assert!(tool(&mut app, "apply_adjustment", json!({"kind": "levels", "params": "{gamma"})).unwrap_err().starts_with("params must be a JSON object such as"));
+    // Adjustments want pixels: the model is told what to do about a type layer.
+    tool(&mut app, "add_text", json!({"text": "Hello"})).unwrap();
+    let e = tool(&mut app, "apply_adjustment", json!({"kind": "invert"})).unwrap_err();
+    assert_eq!(e, "The active layer is a type layer; run_command layer.rasterize.layer first or activate a pixel layer");
+}
 
-    // select: a rectangle cut to the canvas, all, inverse, none.
+/// `select`: a rectangle cut to the canvas, all, inverse, none. `add_text`: a type layer with
+/// defaults from the canvas, `null` meaning "the default".
+#[test]
+fn select_and_add_text() {
+    let mut app = app();
     let r = one_step(&mut app, "select", json!({"kind": "rect", "rect": {"x": -20, "y": 10, "width": 70, "height": 40}}));
     assert_eq!(r, json!({"selection": {"x": 0, "y": 10, "width": 50, "height": 40}}));
     assert_eq!(
@@ -235,7 +261,6 @@ fn each_tool_runs_its_engine_command_as_one_undo_step() {
     assert_eq!(tool(&mut app, "select", json!({"kind": "lasso"})).unwrap_err(), "kind must be 'all', 'none', 'inverse' or 'rect'");
     tool(&mut app, "select", json!({"kind": "none"})).unwrap();
 
-    // add_text: defaults from the canvas (`null` is "the default"), a type layer, active.
     let text = one_step(&mut app, "add_text", json!({"text": "Hello", "x": null, "size": null, "color": "tomato"}));
     let id = text["id"].as_u64().expect("the text layer's id");
     assert_eq!(active_layer(&app), id);
@@ -243,30 +268,26 @@ fn each_tool_runs_its_engine_command_as_one_undo_step() {
     let l = doc["layers"].as_array().unwrap().iter().find(|l| l["id"] == json!(id)).expect("the text layer").clone();
     assert_eq!((l["type"].as_str(), l["text"].as_str()), (Some("type"), Some("Hello")));
     assert_eq!(tool(&mut app, "add_text", json!({"text": "   "})).unwrap_err(), "text is empty");
-    // Adjustments and fills want pixels: the model is told what to do about a type layer.
-    let e = tool(&mut app, "apply_adjustment", json!({"kind": "invert"})).unwrap_err();
-    assert_eq!(e, "The active layer is a type layer; run_command layer.rasterize.layer first or activate a pixel layer");
-    tool(&mut app, "set_active_layer", json!({"id": background})).unwrap();
-    assert_eq!(tool(&mut app, "fill_selection", json!({"color": "transparent"})).unwrap_err(), "Layer \"Background\" has its transparency locked");
-    assert_eq!(tool(&mut app, "fill_selection", json!({"color": "blurple"})).unwrap_err(), "Unknown colour \"blurple\"");
+    assert_eq!(tool(&mut app, "add_text", json!({"text": "Hi", "size": "big"})).unwrap_err(), "size must be a number");
+}
 
-    // canvas_size: a Background is extended with the background colour, like the dialog.
+/// `canvas_size` extends a Background with the background colour, like the dialog; `crop` and
+/// `resize_image` take pixels, cut or clamped to what a document can be.
+#[test]
+fn canvas_size_crop_and_resize() {
+    let mut app = app();
     app.run("tools.setColors", json!({"background": "#00ff00"})).unwrap();
     let r = one_step(&mut app, "canvas_size", json!({"width": 300, "height": 200.4, "anchor": "nw"}));
     assert_eq!(r, "Canvas is now 300 × 200; the added area is filled with the background colour");
     assert_eq!(size(&app), (300, 200));
-    assert_eq!(pixel(&app, 290, 190), [0, 255, 0, 255]);
-
-    // crop and resize_image.
+    assert_eq!((pixel(&app, 290, 190), pixel(&app, 10, 10)), ([0, 255, 0, 255], [255, 255, 255, 255]), "the image stays at the top left");
     assert_eq!(one_step(&mut app, "crop", json!({"rect": {"x": 250, "y": 150, "width": 500, "height": 500}})), "Cropped to 50 × 50");
     assert_eq!(size(&app), (50, 50));
     assert_eq!(tool(&mut app, "crop", json!({"rect": {"x": 0, "y": 0, "width": -5, "height": 5}})).unwrap_err(), "rect.width and rect.height must be positive");
-    assert_eq!(one_step(&mut app, "resize_image", json!({"width": "120", "height": 90000})), "Image is now 120 × 30000");
-    app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(tool(&mut app, "crop", json!({})).unwrap_err(), "rect must be { x, y, width, height }");
+    assert_eq!(one_step(&mut app, "resize_image", json!({"width": "120", "height": 90})), "Image is now 120 × 90");
+    assert_eq!(size(&app), (120, 90));
     assert_eq!(tool(&mut app, "resize_image", json!({"width": "wide", "height": 9})).unwrap_err(), "width must be a number");
-
-    assert_eq!(tool(&mut app, "paint_everything", json!({})).unwrap_err(), "Unknown tool \"paint_everything\"");
-    assert!(app.ui.status.is_empty() && !app.ui.status_error, "a tool's failure is the model's to read, not the status bar's: {}", app.ui.status);
 }
 
 /// Without a Background, a larger canvas is transparent.
@@ -279,15 +300,11 @@ fn canvas_size_without_a_background_adds_transparency() {
     assert_eq!(pixel(&app, 2, 2)[3], 0);
 }
 
-/// `list_commands` finds commands by every word of the filter and never offers a blocked one;
-/// `run_command` refuses blocked and unknown ids and unavailable commands, reads params given as
-/// JSON text, and runs the rest as the command palette would.
+/// `list_commands` finds commands by every word of the filter, says which can't run now, and
+/// never offers a blocked one.
 #[test]
-fn run_command_runs_what_the_assistant_may_and_tells_the_model_what_it_may_not() {
-    let rec = Recorder::connected();
+fn list_commands_finds_commands_and_never_offers_a_blocked_one() {
     let mut app = app();
-    rec.install(&mut app);
-
     let found = tool(&mut app, "list_commands", json!({"filter": "gaussian blur"})).unwrap();
     let row = found["commands"].as_array().unwrap().iter().find(|c| c["id"] == "filter.blur.gaussianBlur").expect("Gaussian Blur").clone();
     assert_eq!((row["name"].as_str(), row["params"].as_str()), (Some("Gaussian Blur"), Some("{\"radius\":0.1..1000=1}")));
@@ -310,23 +327,34 @@ fn run_command_runs_what_the_assistant_may_and_tells_the_model_what_it_may_not()
     let many = tool(&mut app, "list_commands", json!({"filter": "layer"})).unwrap();
     assert_eq!(many["commands"].as_array().unwrap().len(), 30);
     assert!(many["more"].as_u64().unwrap() > 50);
+}
 
-    // What it may run.
+/// `run_command` runs a command as the command palette would, with params given as an object or
+/// as JSON text, and answers with the command's own result.
+#[test]
+fn run_command_runs_commands_and_reads_json_text() {
+    let mut app = app();
     let before = pixel(&app, 5, 5);
-    assert_eq!(tool(&mut app, "run_command", json!({"id": "image.adjustments.invert"})).unwrap(), "ok");
+    assert_eq!(tool(&mut app, "run_command", json!({"id": "image.adjustments.invert"})).unwrap(), "ok", "a command without a result");
     assert_ne!(pixel(&app, 5, 5), before);
     let blurred = tool(&mut app, "run_command", json!({"id": "filter.blur.gaussianBlur", "params": "{\"radius\": 3}"})).unwrap();
     assert_eq!(blurred["filter"]["radius"], 3.0, "the command's own result: {blurred}");
     assert_eq!(history(&app).last().map(String::as_str), Some("Gaussian Blur"));
     assert_eq!(tool(&mut app, "run_command", json!({"id": "edit.undo", "arg": null})).unwrap(), true);
-    assert_eq!(tool(&mut app, "run_command", json!({"id": "select.all"})).unwrap(), "ok", "a command without a result");
     let made = tool(&mut app, "run_command", json!({"id": "layer.new.layer", "params": {"name": "From a command"}})).unwrap();
-    assert!(made["layer"].is_u64(), "the command's own result: {made}");
+    assert!(made["layer"].is_u64(), "{made}");
     let info = tool(&mut app, "run_command", json!({"id": "file.fileInfo", "params": {"description": "A white card"}})).unwrap();
     assert_eq!(info["description"], "A white card");
     assert_eq!(tool(&mut app, "get_document", json!({})).unwrap()["description"], "A white card");
+    // A view command of the shell's, not the engine's.
+    assert!(tool(&mut app, "run_command", json!({"id": "view.fitOnScreen"})).is_ok());
+}
 
-    // What it may not, and what can't run.
+/// `run_command` refuses what is not the Assistant's to run, unknown ids, commands that can't run
+/// now and params it can't read; the document stays as it was.
+#[test]
+fn run_command_refuses_what_the_assistant_may_not_run() {
+    let mut app = app();
     let layers = layer_names(&app);
     for id in [
         "file.close",
@@ -342,23 +370,34 @@ fn run_command_runs_what_the_assistant_may_and_tells_the_model_what_it_may_not()
         assert_eq!(tool(&mut app, "run_command", json!({"id": id})).unwrap_err(), format!("Command \"{id}\" cannot be run by the assistant"));
     }
     assert_eq!(app.session.documents().len(), 1, "the document is still open");
-    assert_eq!(tool(&mut app, "run_command", json!({"id": "edit.sparkle"})).unwrap_err(), "Unknown command \"edit.sparkle\" (find one with list_commands)");
-    assert_eq!(tool(&mut app, "run_command", json!({"id": "select.deselect"})).unwrap(), "ok");
+    for (args, error) in [
+        (json!({"id": "edit.sparkle"}), "Unknown command \"edit.sparkle\" (find one with list_commands)"),
+        (json!({}), "id must be a command id (see list_commands)"),
+        (json!({"id": "edit.undo", "params": 7}), "params must be a JSON object such as {\"radius\": 4}"),
+    ] {
+        assert_eq!(tool(&mut app, "run_command", args).unwrap_err(), error);
+    }
     assert!(tool(&mut app, "run_command", json!({"id": "select.deselect"})).unwrap_err().starts_with("Command \"select.deselect\" is not available right now"));
-    assert_eq!(tool(&mut app, "run_command", json!({})).unwrap_err(), "id must be a command id (see list_commands)");
-    assert_eq!(tool(&mut app, "run_command", json!({"id": "edit.undo", "params": 7})).unwrap_err(), "params must be a JSON object such as {\"radius\": 4}");
     assert!(tool(&mut app, "run_command", json!({"id": "edit.undo", "params": "{\"a\":"})).unwrap_err().contains("looks like JSON but could not be read"));
     let e = tool(&mut app, "run_command", json!({"id": "filter.blur.gaussianBlur", "params": {"radius": "wide"}})).unwrap_err();
     assert!(e.contains("radius"), "the engine's own check of the params: {e}");
     let e = tool(&mut app, "run_command", json!({"id": "image.adjustments.colorLookup", "params": {"file": "/etc/hostname"}})).unwrap_err();
     assert!(e.contains("open document only"), "{e}");
+    assert_eq!(layer_names(&app), layers);
+    assert_eq!(history(&app).len(), 1, "nothing ran");
+}
 
-    // Among the `ai.*` commands only Generative Fill runs, and it runs (no window opens for it).
+/// Among the `ai.*` commands the Assistant runs Generative Fill only, by its own tool or through
+/// `run_command` (no window opens for it); every other one is refused before anything is sent.
+#[test]
+fn among_the_ai_commands_only_generative_fill_runs() {
+    let rec = Recorder::connected();
+    let mut app = app();
+    rec.install(&mut app);
     for id in photocraft_engine::ai_cmds::COMMANDS.iter().filter(|id| **id != "ai.generativeFill").chain(&["ai.accounts", "ai.removeBackgroundWithProvider"]) {
         let e = tool(&mut app, "run_command", json!({"id": id, "params": {"prompt": "a castle"}})).unwrap_err();
         assert_eq!(e, format!("Command \"{id}\" cannot be run by the assistant"));
     }
-    assert_eq!(layer_names(&app), layers);
     assert!(rec.mock.calls().is_empty(), "nothing was sent: {:?}", rec.mock.calls());
     assert_eq!(tool(&mut app, "generative_fill", json!({"prompt": "a fox"})).unwrap_err(), "Generative fill needs a selection: call select first");
     tool(&mut app, "select", json!({"kind": "rect", "rect": {"x": 20, "y": 20, "width": 60, "height": 50}})).unwrap();
@@ -371,6 +410,20 @@ fn run_command_runs_what_the_assistant_may_and_tells_the_model_what_it_may_not()
     let calls = rec.mock.calls();
     assert_eq!(calls.iter().map(|c| (c.op, c.prompt.as_str())).collect::<Vec<_>>(), [("edit", "a fox"), ("edit", "a second fox")]);
     assert_eq!(layer_names(&app).iter().filter(|n| n.starts_with("Generative Fill")).count(), 2);
+    // Without a provider the model is told why, and the document is left alone.
+    let nobody = Recorder::new(MockBackend::disconnected());
+    nobody.install(&mut app);
+    let e = tool(&mut app, "generative_fill", json!({"prompt": "a fox"})).unwrap_err();
+    assert!(e.contains("AI Accounts"), "{e}");
+    assert!(nobody.mock.calls().is_empty());
+}
+
+/// Save what the window looks like, when `PIGMENT_AI_EVIDENCE_DIR` names a folder for it.
+fn evidence(h: &mut Harness, name: &str) {
+    if let Some(dir) = std::env::var_os("PIGMENT_AI_EVIDENCE_DIR") {
+        std::fs::create_dir_all(&dir).unwrap();
+        h.render().expect("offscreen UI render").save(std::path::Path::new(&dir).join(format!("{name}.png"))).unwrap();
+    }
 }
 
 /// Draw frames until the turn has ended and no job runs.
@@ -434,6 +487,7 @@ fn a_turn_sends_the_image_runs_the_tools_and_shows_the_answer() {
     assert!(assistant::is_open(h.state()));
     assert!(h.query_by_label_contains("Ask about the image or describe an edit").is_some(), "the empty conversation says what to do");
     assert!(rec.requests().is_empty(), "opening sends nothing");
+    evidence(&mut h, "assistant-empty");
 
     rec.answer("", &[("apply_adjustment", json!({"kind": "invert"}))]);
     rec.answer("Inverted the image.", &[]);
@@ -473,17 +527,28 @@ fn a_turn_sends_the_image_runs_the_tools_and_shows_the_answer() {
     assert_eq!(pixel(h.state(), 3, 3), [0, 0, 0, 255], "white, inverted");
     h.state_mut().run("edit.undo", json!({})).unwrap();
     assert_eq!(pixel(h.state(), 3, 3), [255, 255, 255, 255], "one Undo takes the edit back");
+}
 
-    // The next message: earlier images are not sent again, only the latest one's.
+/// Later messages: the conversation goes out as text, with the latest message's image only.
+/// Attach image off sends no image. Shift+Enter is a new line, not Send.
+#[test]
+fn later_messages_send_only_the_latest_image() {
+    let rec = Recorder::connected();
+    let r = Arc::clone(&rec);
+    let mut h = harness(move |app| {
+        r.install(app);
+        assistant::open(app);
+    });
     rec.answer("It is white.", &[]);
     send(&mut h, "what colour is it?");
-    let third = rec.requests().pop().unwrap();
-    assert_eq!(third.messages.len(), 3, "user, assistant, user: {:?}", third.messages);
-    assert!(user(&third.messages[0]).1.is_empty(), "the first message's image stays home");
-    assert!(matches!(&third.messages[1], ChatMessage::Assistant { text } if text == "Inverted the image."));
-    assert_eq!(user(&third.messages[2]).1.len(), 1);
+    rec.answer("Still white.", &[]);
+    send(&mut h, "and now?");
+    let second = rec.requests().pop().unwrap();
+    assert_eq!(second.messages.len(), 3, "user, assistant, user: {:?}", second.messages);
+    assert!(user(&second.messages[0]).1.is_empty(), "the first message's image stays home");
+    assert!(matches!(&second.messages[1], ChatMessage::Assistant { text } if text == "It is white."));
+    assert_eq!(user(&second.messages[2]).1.iter().map(|i| (i.width, i.height)).collect::<Vec<_>>(), [(200, 160)], "a small image is not enlarged");
 
-    // Attach image off: text only. Shift+Enter is a new line, not Send.
     h.get_by_label("Attach image").click();
     h.run_steps(2);
     assert!(!h.state().ai.assistant.attach);
@@ -492,11 +557,12 @@ fn a_turn_sends_the_image_runs_the_tools_and_shows_the_answer() {
     h.key_press_modifiers(egui::Modifiers::SHIFT, egui::Key::Enter);
     h.run_steps(2);
     assert_eq!(h.state().ai.assistant.input, "two\n");
-    assert_eq!(rec.requests().len(), 3, "nothing sent");
+    assert_eq!(rec.requests().len(), 2, "nothing sent");
     h.get_by_label("Send").click();
     until_done(&mut h);
-    let fourth = rec.requests().pop().unwrap();
-    assert!(fourth.messages.iter().all(|m| !matches!(m, ChatMessage::User { images, .. } if !images.is_empty())), "no image");
+    let third = rec.requests().pop().unwrap();
+    assert_eq!(user(third.messages.last().unwrap()), ("two", &[][..]), "trimmed, and without an image");
+    assert!(third.messages.iter().all(|m| !matches!(m, ChatMessage::User { images, .. } if !images.is_empty())), "no image at all");
     assert_eq!(assistant::messages(h.state()).last().unwrap().text, "(no answer)", "a model that says nothing");
 }
 
@@ -542,6 +608,7 @@ fn stop_ends_the_turn_and_nothing_runs_after_it() {
     assert_eq!(assistant::send(h.state_mut(), "and another"), Err("The assistant is still working.".to_string()), "one turn at a time");
     assert!(h.query_by_label("Working…").is_some() && h.query_by_label("Thinking…").is_some());
     assert!(h.query_by_label("Esc to cancel").is_none(), "no modal: the request is a background job");
+    evidence(&mut h, "assistant-working");
     h.get_by_label("Stop").click();
     h.run_steps(2);
     assert!(!assistant::running(h.state()), "at once, not when the provider answers");
@@ -673,6 +740,7 @@ fn the_model_sees_refusals_and_only_generative_fill_reaches_a_provider() {
     let m = assistant::messages(h.state()).last().unwrap();
     assert_eq!(m.calls.iter().map(assistant::Call::failed).collect::<Vec<_>>(), [true, true, true, false, false, false]);
     assert!(h.query_by_label("Failed: Ran file.close").is_some() && h.query_by_label("Generative fill").is_some());
+    evidence(&mut h, "assistant-turn");
 }
 
 /// A command that opens a dialog: the turn waits for the person to finish it instead of running
@@ -811,6 +879,17 @@ fn the_window_item_and_the_saved_choices() {
     assert_eq!(assistant::model(&app, ProviderId::Gemini), None, "empty is automatic");
     assistant::set_model(&mut app, ProviderId::Gemini, "not a model id!");
     assert!(app.ai.assistant.note.is_some() && assistant::model(&app, ProviderId::Gemini).is_none(), "a bad id is refused, not saved");
+
+    // The saved choice is one with AI Accounts': its Preferred provider resets the chat provider,
+    // and a chat model set there is the Assistant's.
+    ai_ui::with_accounts(&app, |a| {
+        a.set_default_provider(ProviderId::OpenAi).unwrap();
+        a.set_models(ProviderId::OpenAi, Some("gpt-4.1"), None).unwrap();
+        a.set_default_provider(ProviderId::Gemini).unwrap();
+    });
+    assert_eq!(assistant::model(&app, ProviderId::OpenAi).as_deref(), Some("gpt-4.1"));
+    assert_eq!(assistant::provider(&app), Some(ProviderId::Gemini));
+    app.ai.assistant.note = None;
 
     // The model list is asked for, not fetched behind the person's back.
     assert!(mock.calls().is_empty() && assistant::listed_models(&app, ProviderId::Gemini).is_none());

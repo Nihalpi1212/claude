@@ -144,9 +144,10 @@ pub struct State {
     pub input: String,
     /// Attach image: send a downscaled copy of the image with each message.
     pub attach: bool,
-    /// The provider chosen in the window; `None`: the preferred one.
+    /// The provider chosen in the window, where there are no saved settings to keep it in;
+    /// `None`: the preferred one.
     pub provider: Option<ProviderId>,
-    /// The chat model chosen per provider id; none or empty: the one AI Accounts sets.
+    /// The chat model chosen per provider id, likewise; none or empty: automatic.
     models: HashMap<&'static str, String>,
     lists: HashMap<&'static str, ModelList>,
     conversations: HashMap<DocId, Vec<Message>>,
@@ -184,23 +185,20 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// Read the saved choices once: Attach image, the chat provider and each provider's chat model.
+/// Read the saved Attach image once. (The provider and the chat model are read from the saved
+/// settings whenever they are needed: AI Accounts changes them too.)
 fn load(app: &mut PhotocraftApp) {
     if app.ai.assistant.loaded {
         return;
     }
-    let saved = with_accounts(app, |a| {
+    let attach = with_accounts(app, |a| {
         a.reload();
-        let models: Vec<(&'static str, String)> =
-            ProviderId::ALL.into_iter().filter_map(|p| Some((p.id(), a.settings.models(p).chat_model.clone()?))).collect();
-        (a.settings.assistant_attach, a.settings.chat_provider, models)
+        a.settings.assistant_attach
     });
     let s = &mut app.ai.assistant;
     s.loaded = true;
-    if let Some((attach, provider, models)) = saved {
+    if let Some(attach) = attach {
         s.attach = attach;
-        s.provider = provider;
-        s.models = models.into_iter().collect();
     }
 }
 
@@ -275,12 +273,17 @@ pub fn messages(app: &PhotocraftApp) -> &[Message] {
 pub fn provider(app: &PhotocraftApp) -> Option<ProviderId> {
     let fits = fitting(app, ModelKind::Chat);
     let preferred = app.ai.status.as_ref().and_then(|s| s.default_provider);
-    app.ai.assistant.provider.filter(|p| fits.contains(p)).or(preferred.filter(|p| fits.contains(p))).or(fits.first().copied())
+    // As saved (AI Accounts' Preferred provider resets it); without accounts, as chosen here.
+    let chosen = with_accounts(app, |a| a.settings.chat_provider).unwrap_or(app.ai.assistant.provider);
+    chosen.filter(|p| fits.contains(p)).or(preferred.filter(|p| fits.contains(p))).or(fits.first().copied())
 }
 
-/// The chat model chosen here for `p`; `None`: the one AI Accounts sets (automatic by default).
+/// The chat model chosen for `p`, here or in AI Accounts (the same saved choice); `None`:
+/// automatic, the provider's preferred chat model.
 pub fn model(app: &PhotocraftApp, p: ProviderId) -> Option<String> {
-    app.ai.assistant.models.get(p.id()).map(|m| m.trim().to_string()).filter(|m| !m.is_empty())
+    let saved = with_accounts(app, |a| a.settings.chosen_model(p, pigment_genai::ModelKind::Chat).map(str::to_string));
+    let chosen = saved.unwrap_or_else(|| app.ai.assistant.models.get(p.id()).cloned());
+    chosen.map(|m| m.trim().to_string()).filter(|m| !m.is_empty())
 }
 
 /// Choose the provider messages go to (saved as `chatProvider`).
@@ -832,7 +835,7 @@ fn top_rows(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> Option<Act> {
         if let Some(c) = current.as_ref().filter(|c| !listed.contains(c)) {
             listed.insert(0, c.clone());
         }
-        egui::ComboBox::from_id_salt("pigment-ai-chat-model")
+        craft_ui::ComboBox::from_id_salt("pigment-ai-chat-model")
             .selected_text(current.clone().unwrap_or_else(|| automatic.clone()))
             .width(190.0)
             .show_ui(ui, |ui| {
