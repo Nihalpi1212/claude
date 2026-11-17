@@ -81,8 +81,17 @@ are trimmed and cut to 4000 characters.
 - **Sizes.** Images go out as sRGB 8-bit at most 2048 px a side (the backend may scale further);
   answers are checked for size (a wrong size is refused and changes nothing) and scaled back to the
   region.
-- **Never recorded into Actions.** `ai.*` steps stay out of recorded actions, so playing an action, a
-  batch or a droplet never calls a provider. (`ai_cmds::unrecorded`.)
+- **Never from an action.** A command that may send is not recorded into an action
+  (`ai_cmds::unrecorded`), and one that is in an action all the same (built with `actions.insert`,
+  loaded from a file) is refused at that step, whoever plays it: the engine refuses a command that
+  sends while an action plays (also a batch's or a droplet's) or while an event's script runs
+  (Script Events Manager), with the error kind `notAllowed` and before the backend is asked. So
+  playing an action never calls a provider. The local Remove Background sends nothing: it is
+  recorded and plays, like PhotoCraft's own `layer.removeBackground`.
+- **The backend admits the caller.** Before a command that sends starts its job, the engine asks
+  `GenerativeBackend::admit(automated)` on the calling thread, `automated` being whether the
+  session runs under an automation gate (`Session::authorize`). This also covers a command reached
+  through another one (a step of a script an agent runs), which no gate in front of the engine sees.
 - **Agents and the command line opt in.** `ai_cmds::may_send(id, params)` says whether a call may be
   billed (everything but `ai.status` and the local Remove Background). Headless agent sessions (MCP,
   `pigment-cli serve`) refuse those unless Pigment's `allowAgents` setting is on, and
@@ -171,7 +180,7 @@ loopback one (the end-to-end tests' mock server); any other address is ignored.
 `pigment-cli serve` sessions; `photocraft_automation::genai` installs the backend on every headless
 session and opens the accounts only when an `ai.*` command first needs them): also needs
 `allowAgents`. The command line: `pigment-cli run --allow-ai`; without it `run` refuses an `ai.*`
-step before any work (and an action it plays can't send either); `batch` and droplets never send. A refusal sends
+step before any work; an action it plays never sends, with or without the flag; `batch` and droplets never send. A refusal sends
 nothing and is the error kind `notAllowed`.
 
 Errors add `notAllowed` to the kinds above. Timeouts: images and chat the settings' `timeoutSecs`
@@ -241,8 +250,14 @@ preferences or `ui.inspect`; it is wiped when sent to be checked and when the di
 egui text state is dropped whenever the field is empty.
 
 **Agents in the running app.** A control request (MCP through the open window, `--control`) and
-synthetic input run a command that may send only while "Allow agents to run AI commands" is on
-(`ai_ui::gate`, from `PhotocraftApp::run`); the person's own clicks and keys always may.
+synthetic input run a command that may send only while "Allow agents to run AI commands" is on;
+the person's own clicks and keys always may. Two checks hold this: `ai_ui::gate` (from
+`PhotocraftApp::run`) refuses the agent's own request before it starts, and the backend the app
+installs (`ai_ui`'s `AppBackend`, around the provider backend) refuses in `admit` a command that
+sends when it starts for an agent or under the session's automation gate, which catches what the
+first never sees (a step of a script the agent runs). In AI Accounts, synthetic input can switch
+tabs and close the dialog, nothing else: keys, the agreement and the agents' permission are the
+person's.
 
 ## The command line
 
@@ -284,6 +299,10 @@ runs Generative Fill from the command line.
   background. Pigment asks every model without alpha (Gemini, gpt-image-2, DALL·E), for new images
   and for Remove Background's edit, and keys the white out, so "transparent" means the same
   whichever model is chosen.
+- **Actions never send.** Pigment 0.4 recorded the AI dialogs' values, and playing the action
+  called the provider (and billed) again. Here a command that sends is neither recorded nor run
+  from an action, a batch, a droplet or a script event. Layer › Remove Background (the local
+  method) is recorded and plays, as it sends nothing.
 - **Consent and agents are new.** Pigment 0.4 had no agreement step (connecting an account was the
   consent) and no agents. The agreement is asked once in AI Accounts (or `pigment-cli ai consent`);
   agents and the command line opt in separately.
