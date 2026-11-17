@@ -4,8 +4,8 @@ Pigment 0.2 to 0.4 (the JavaScript app) had Generative Fill, Generative Expand, 
 AI Remove Background, Replace Background, Replace Sky, Describe Image, an Assistant that edits the
 document, and AI Accounts with OpenAI and Gemini keys. Pigment 0.5 rebuilds them on PhotoCraft. This
 page is the contract for that work: the engine seam, the commands and the rules they keep, the
-provider crate, the interface, the Assistant and the command line. It grows with each part (Sign in
-with ChatGPT is next).
+provider crate, Sign in with ChatGPT (experimental), the interface, the Assistant and the command
+line.
 
 ## The engine seam: `photocraft_engine::generative`
 
@@ -114,7 +114,8 @@ and nothing of it is in the web build's dependency graph.
 | `provider.rs`, `provider/openai.rs`, `provider/gemini.rs` | the `Provider` trait; request bodies and answer parsing as pure functions; error translation (with the ChatGPT plan route's messages); the JSON bound |
 | `chat.rs` | Gemini's schema subset (`clean_schema`, `gemini_schema`, `gemini_declaration`), tool arguments, Describe as a chat round |
 | `http.rs` | ureq on rustls with the OS trust store: HTTPS only, no redirects, a 64 MiB answer cap, a timeout, Cancel polled between 64 KiB chunks; plain HTTP to loopback only (tests) |
-| `keys.rs`, `settings.rs`, `accounts.rs` | where keys and settings live (below); `AiAccounts` (status, connect, models, consent, agents) |
+| `keys.rs`, `settings.rs`, `accounts.rs` | where keys and settings live (below); `AiAccounts` (status, connect, models, consent, agents, how OpenAI is connected: a key or a ChatGPT sign-in) |
+| `chatgpt.rs` | Sign in with ChatGPT (experimental; its own section below): the sign-in, the tokens and their refresh, the plan route's request shape |
 | `image_util.rs` | decoding answers with limits (PNG, JPEG, WebP), PNG and base64, the providers' mask conventions |
 | `backend.rs` | `GenAiBackend`, the engine trait, and `Caller` (who may send) |
 
@@ -158,7 +159,9 @@ if someone loosened it, deleted with the last key. AI Accounts says "a file only
 `Serialize`, and any message holding the key in use is redacted. Status shows the last four
 characters. **Connect** asks the provider (it lists the models) before storing a key, as 0.4 did;
 a refused key is not stored. Keys and the ChatGPT sign-in are not migrated from the Electron app:
-they are entered again.
+they are entered again. A provider's answer has the key taken out before anything reads it
+(`provider::scrub`), so a message that quotes part of an answer, cut to a few hundred characters,
+can't hold half a key the redaction would no longer find.
 
 **Settings.** `ai.json` in the settings folder, never a key and never a base URL:
 
@@ -167,10 +170,12 @@ they are entered again.
  "openai":{"chatModel":null,"imageModel":null},"gemini":{"chatModel":null,"imageModel":null},
  "timeoutSecs":300,"consented":false,"allowAgents":false,
  "lastFillPrompt":null,"lastExpandPrompt":null,"lastGeneratePrompt":null,
- "lastBackgroundPrompt":null,"lastSkyPrompt":null,"assistantAttach":true}
+ "lastBackgroundPrompt":null,"lastSkyPrompt":null,"assistantAttach":true,
+ "chatgptSignIn":true,"hostId":null}
 ```
 
-`assistantAttach` is the Assistant's Attach image. A `null` model is automatic. Choosing the preferred provider resets `imageProvider` and
+`assistantAttach` is the Assistant's Attach image. `chatgptSignIn` and `hostId` belong to Sign in
+with ChatGPT (below). A `null` model is automatic. Choosing the preferred provider resets `imageProvider` and
 `chatProvider` with it (0.4). The backend re-reads the file before each request and status, so a
 long-running MCP server follows what the person changes in AI Accounts.
 `PIGMENT_AI_BASE_URL_OPENAI` and `PIGMENT_AI_BASE_URL_GEMINI` replace a provider's address with a
@@ -185,6 +190,111 @@ nothing and is the error kind `notAllowed`.
 
 Errors add `notAllowed` to the kinds above. Timeouts: images and chat the settings' `timeoutSecs`
 (300 s by default, 10 to 600), model lists 30 s.
+
+## Sign in with ChatGPT (experimental): `crates/genai/src/chatgpt.rs`
+
+Pigment 0.2 to 0.4 let people use their ChatGPT Plus or Pro plan instead of an OpenAI API key, for
+**chat models only** (the Assistant, Describe Image). Pigment 0.5 keeps it, ported from 0.4's
+`src/main/ai.js` with its unit tests as the vectors.
+
+**Why experimental.** The flow is OpenAI's open "Sign in with ChatGPT" token-sharing flow for
+third-party apps: a public PKCE client with no secret, registered as a dynamic agent client on the
+first sign-in. It is not a documented, stable API, and it **was never checked against the live
+service**: 0.4's tests drove a fake token endpoint and so do these. OpenAI may change or end it.
+So AI Accounts marks it Experimental, and it is isolated:
+
+- **One switch turns it off.** `pigment_genai::chatgpt::ENABLED` (a constant: flip it and build),
+  or `"chatgptSignIn": false` in `ai.json`. Off, AI Accounts and `pigment-cli ai status` show no
+  sign-in, starting one is refused, a stored one is ignored (not deleted: on again, it is back),
+  and nothing changes for API keys. The test suite passes either way.
+- **Nothing an API key uses goes through it.** The OpenAI provider holds a key or a sign-in
+  (`provider/openai.rs` `Auth`); the key's path is the code it was.
+
+**The sign-in** (`ChatGpt::start`, `complete`, `complete_manual`, `cancel`):
+
+1. PKCE S256 (a 48-byte verifier), a random `state` and `nonce`, and the installation id
+   (`hostId` in `ai.json`: a random `urn:uuid:`, made at the first sign-in and kept, as 0.4's
+   `aiHostId`).
+2. A listener on 127.0.0.1, the first free port of 1455 to 1460. With all six taken the attempt
+   goes on without one, and AI Accounts says to paste the address the browser lands on.
+3. The authorize address (`https://auth.openai.com/api/accounts/authorize`: `response_type=code`,
+   `client_id=dynamic_agent_client`, `redirect_uri=http://127.0.0.1:<port>/auth/callback`,
+   `scope=openid profile email offline_access resource.invoke chatgpt.tokens.use.direct`,
+   `resource=https://api.openai.com/v1`, `state`, `nonce`, `code_challenge`, `S256`,
+   `agent_name_hint=Pigment`, `ext_agent_host_id`) is handed to the caller, which opens it in the
+   system browser. Pigment itself sends nothing yet.
+4. The callback (the listener's, or the pasted address: a URL, a path with a query, or a bare
+   query). **Its `state` is checked before anything else**: a callback without this attempt's
+   state is a stray request whatever it carries, it is refused, and the attempt goes on. An
+   `error` with the right state ends the attempt with the provider's description. Any other path
+   on the listener is 404.
+5. The code exchange (`POST https://auth.openai.com/api/accounts/oauth/token`, form-encoded,
+   30 s: `grant_type=authorization_code`, `code`, `code_verifier`, `redirect_uri`, the client id
+   the callback issued (else the dynamic one), `resource`). The answer must hold an access token
+   and, this first time, an ID token whose issuer is `https://auth.openai.com`, whose audience
+   holds the client id, which has not expired and carries the attempt's nonce. (Its signature is
+   not checked: it came over TLS from the token endpoint and is never used as a credential.)
+6. The tokens are stored and the browser gets a small page ("Signed in", "You can return to
+   Pigment."; a failure page says why, HTML-escaped).
+
+One attempt at a time; it ends after five minutes, on Cancel, when an OpenAI key is stored or
+removed, or on Sign Out. A Cancel while the code is being exchanged stores nothing, and an ended
+attempt never ends the next one.
+
+**The tokens** are kept in the key store under the account `openai-chatgpt`, as one JSON text
+(`clientId`, `accessToken`, `refreshToken`, `idToken`, `expiresAt`, `earliestRefreshAt`, `email`,
+`plan`, `signedInAt`): the macOS Keychain, the Windows Credential Manager (in pieces of 600
+characters, `openai-chatgpt`, `openai-chatgpt.1`, …, because one credential there holds 2560
+bytes), or the 0600 `ai-keys.json` on Linux and the BSDs (not encrypted, as AI Accounts says; 0.4
+sealed them with Electron's safeStorage where the system had a keychain). Never in `ai.json`, a
+document, a log, a message, `ai.status`, `ui.inspect` or the control protocol. The interface holds
+the address to open and, afterwards, the account's e-mail address; `ai.status` reports neither.
+**An OpenAI API key and a sign-in exclude each other**, as in 0.4: storing a key drops the
+sign-in, signing in drops the key. Sign Out removes the tokens here; nothing is revoked at OpenAI
+(as in 0.4).
+
+**Using it** (`ChatGpt::access_token`). The stored access token is used until five minutes before
+it expires, and past that while `earliest_refresh_at` is not reached and it has not expired. Then
+it is refreshed (`grant_type=refresh_token`, the stored client id, `resource`), **one refresh at a
+time** (refresh tokens rotate, and one used twice ends the sign-in), with what the answer leaves
+out kept (a refreshed ID token that does not validate is dropped, the old one stays). A refresh
+the server refuses for good (`invalid_grant`, `invalid_client`, `invalid_refresh_token`,
+`refresh_token_expired`, `refresh_token_invalidated`, `refresh_token_reused`, `token_expired`), or
+a sign-in without a refresh token, clears the sign-in: "Your ChatGPT sign-in has expired. Sign in
+again in Edit › AI Accounts…". A refresh that lands after the sign-in was replaced or removed
+(Sign Out, a new key, another sign-in, also by another Pigment process) is dropped and changes
+nothing.
+
+**The plan route.** With a sign-in, OpenAI's requests go to the same API root with
+`Authorization: Bearer <access token>`:
+
+- `POST /responses` (the Assistant, Describe) is reshaped (`reshape_for_plan_route`): `store:
+  false`, `stream: true`, the parameters the route refuses dropped (`temperature`, `top_p`,
+  `max_output_tokens`, `metadata`, `user` and the rest of 0.4's list), `system` and `developer`
+  input messages moved into `instructions`, hosted tools other than `web_search` dropped, an
+  object `tool_choice` dropped. The answer is an event stream, folded into the response of its
+  `response.completed` or `response.incomplete` event (`aggregate_sse`); a `response.failed` or
+  `error` event is the failure; without a final event the text deltas are the answer.
+- `GET /models` answers `{models: [{slug}]}`, which the catalog reads like a key's `{data: [{id}]}`.
+- A 401 refreshes the token once and tries again, then gives up ("OpenAI rejected the ChatGPT
+  sign-in. Sign out and sign in again in Edit › AI Accounts…", kind `invalidKey`).
+- The route's own error codes get their explanation (`subscription_sharing_user_not_eligible`:
+  "Your ChatGPT plan does not include use in third-party apps…", `…_usage_limit_exceeded`,
+  `…_usage_unavailable`, `…_route_not_supported`, `…_unsupported_capability`, `…_invalid_user`).
+- **Never an image model.** The status says `imageCapable: false` for a sign-in, so an image
+  request goes to a provider with a key (Gemini, when it has one) or is refused before anything
+  is sent ("OpenAI is not connected for image models. Add an API key in Edit › AI Accounts…"); the
+  provider refuses an image request too.
+
+The code, the verifier and the tokens are taken out of the answers they were sent with before
+anything reads them, and out of every message. The one-time agreement, "Allow agents to run AI
+commands" and `--allow-ai` apply to a sign-in's requests as to a key's.
+
+`PIGMENT_AI_AUTH_URL_CHATGPT` replaces `https://auth.openai.com` with a loopback address (the
+tests' mock, a check against a local one); any other address is ignored.
+
+**Not checked here** (it needs a real ChatGPT account and a browser): the hand-off to the system
+browser, the page the browser shows, and the live service's answers.
 
 ## The interface (`crates/ui-egui/src/ai_ui*`)
 
@@ -250,6 +360,17 @@ typed key lives only in the dialog's own form: never in `UiState`, a dialog's fi
 preferences or `ui.inspect`; it is wiped when sent to be checked and when the dialog closes, and its
 egui text state is dropped whenever the field is empty.
 
+OpenAI's tab also has **Sign in with ChatGPT**, marked Experimental (when the feature is on). The
+button starts the attempt and opens the browser; while it waits the tab shows "Waiting for your
+browser…", Copy Link, Cancel, and a field for the address the browser landed on with Use (a
+browser on another computer, or the warning that every port is taken). Signed in, the tab reads
+"Signed in with ChatGPT · <e-mail>" (and "plan access not granted" when the sign-in did not grant
+the plan), offers Sign Out, says that image models need an API key, and the Image model field
+reads "Needs an API key". Connecting a key replaces the sign-in; with a key connected the button
+is not shown (Remove Key first), as in 0.4. The sign-in address is never written to the status bar
+or the interface state (it names the attempt); a sign-in that completes while the dialog is closed
+is said in the status bar and reaches the menus and windows at once.
+
 **Agents in the running app.** A control request (MCP through the open window, `--control`) and
 synthetic input run a command that may send only while "Allow agents to run AI commands" is on;
 the person's own clicks and keys always may. Two checks hold this: `ai_ui::gate` (from
@@ -257,8 +378,8 @@ the person's own clicks and keys always may. Two checks hold this: `ai_ui::gate`
 installs (`ai_ui`'s `AppBackend`, around the provider backend) refuses in `admit` a command that
 sends when it starts for an agent or under the session's automation gate, which catches what the
 first never sees (a step of a script the agent runs). In AI Accounts, synthetic input can switch
-tabs and close the dialog, nothing else: keys, the agreement and the agents' permission are the
-person's.
+tabs and close the dialog, nothing else: keys, the ChatGPT sign-in (starting, cancelling, pasting
+an address, signing out), the agreement and the agents' permission are the person's.
 
 ## The Assistant (`crates/ui-egui/src/ai_ui/assistant.rs`, `assistant_tools.rs`)
 
@@ -389,9 +510,11 @@ message only while "Allow agents to run AI commands" is on, and the app's backen
 
 | Subcommand | Does |
 |---|---|
-| `ai status [--json]` | the providers, key hints (never a key), models, consent, `allowAgents`, where keys are kept |
+| `ai status [--json]` | the providers, how each is connected (a key's hint, never a key; a ChatGPT sign-in's e-mail address, never a token), models, consent, `allowAgents`, where keys are kept |
 | `ai set-key <openai\|gemini> [--no-check]` | reads the key from standard input (without echo at a Unix terminal), checks it with the provider, stores it; a key given on the command line is refused |
 | `ai clear-key <provider>` | removes the key |
+| `ai sign-in [--port N]` | Sign in with ChatGPT (experimental): prints the address to open in a browser and waits (five minutes at most) for the browser's callback, or for the address it landed on pasted on standard input |
+| `ai sign-out` | removes the ChatGPT sign-in from this computer |
 | `ai test [<provider>] [--json]` | lists the models with the stored key |
 | `ai consent [--revoke]` | the one-time agreement, with its wording |
 | `ai agents <on\|off>` | `allowAgents` |
@@ -427,6 +550,14 @@ runs Generative Fill from the command line.
   called the provider (and billed) again. Here a command that sends is neither recorded nor run
   from an action, a batch, a droplet or a script event. Layer › Remove Background (the local
   method) is recorded and plays, as it sends nothing.
+- **Sign in with ChatGPT is marked experimental and can be turned off** (one constant, or
+  `"chatgptSignIn": false`). Otherwise it is 0.4's: chat models only, the same addresses, ports,
+  scopes, checks and messages. What differs: the tokens are in the key store (the OS credential
+  store, or the 0600 key file where 0.4 used Electron's safeStorage); the one-time agreement
+  applies to its requests; the key field stays on OpenAI's tab while signed in (connecting a key
+  replaces the sign-in); a refresh also yields to a sign-in changed by another Pigment process;
+  0.4's generic request proxy (and its path checks) has no counterpart, since only the providers
+  build requests here; and `pigment-cli ai sign-in` is new.
 - **Consent and agents are new.** Pigment 0.4 had no agreement step (connecting an account was the
   consent) and no agents. The agreement is asked once in AI Accounts (or `pigment-cli ai consent`);
   agents and the command line opt in separately.
