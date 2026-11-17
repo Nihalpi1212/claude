@@ -16,6 +16,9 @@
 //!   Keychain, Windows Credential Manager) or in a 0600 file in Pigment's config folder, never in
 //!   documents, settings, logs, MCP output or the control protocol. `ai.json` holds the choices
 //!   (provider, models, consent, `allowAgents`, the last prompt of each feature), never a key.
+//! * [`chatgpt`]: Sign in with ChatGPT (experimental), for chat models only: the loopback PKCE
+//!   sign-in, the tokens in the key store, their refresh, and the plan route's request shape.
+//!   One constant turns it off ([`chatgpt::ENABLED`]).
 //! * [`backend`]: the engine trait, with the provider-specific pixel steps (scaling to the
 //!   provider's edge, padding to its aspect ratio, its mask convention, keying a white background,
 //!   resampling back) and who may send ([`Caller`]: the person, an agent, the command line).
@@ -29,6 +32,7 @@ pub mod accounts;
 pub mod backend;
 pub mod cancel;
 pub mod chat;
+pub mod chatgpt;
 pub mod error;
 mod http;
 pub mod image_util;
@@ -36,7 +40,7 @@ pub mod keys;
 pub mod provider;
 pub mod settings;
 
-pub use accounts::{AccountStatus, AiAccounts};
+pub use accounts::{AccountStatus, AiAccounts, Method};
 pub use backend::{Caller, GenAiBackend};
 pub use cancel::{CancelToken, Cancelled};
 pub use error::{AiError, ErrorKind};

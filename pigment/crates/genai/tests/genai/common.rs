@@ -31,6 +31,11 @@ impl Got {
         serde_json::from_slice(&self.body).unwrap_or(Value::Null)
     }
 
+    /// The fields of an `application/x-www-form-urlencoded` body.
+    pub fn fields(&self) -> std::collections::BTreeMap<String, String> {
+        query(&String::from_utf8_lossy(&self.body))
+    }
+
     /// The parts of a `multipart/form-data` body: (name, bytes).
     pub fn form(&self) -> Vec<(String, Vec<u8>)> {
         let ct = self.header("content-type").unwrap_or_default();
@@ -59,17 +64,25 @@ impl Got {
     }
 }
 
-/// An answer: status, body, and how long to wait before sending it.
+/// An answer: status, body, its content type, and how long to wait before sending it.
 #[derive(Clone, Debug)]
 pub struct Reply {
     pub status: u16,
     pub body: Vec<u8>,
+    pub content_type: &'static str,
     pub delay: Duration,
 }
 
 impl Reply {
     pub fn json(status: u16, v: Value) -> Self {
-        Self { status, body: serde_json::to_vec(&v).unwrap(), delay: Duration::ZERO }
+        Self { status, body: serde_json::to_vec(&v).unwrap(), content_type: "application/json", delay: Duration::ZERO }
+    }
+
+    /// A `text/event-stream` answer: one `data:` event per value, then `[DONE]`.
+    pub fn sse(status: u16, events: &[Value]) -> Self {
+        let mut text: String = events.iter().map(|e| format!("event: {}\ndata: {e}\n\n", e["type"].as_str().unwrap_or("message"))).collect();
+        text.push_str("data: [DONE]\n\n");
+        Self { status, body: text.into_bytes(), content_type: "text/event-stream", delay: Duration::ZERO }
     }
 
     pub fn ok(v: Value) -> Self {
@@ -156,7 +169,8 @@ fn serve(stream: TcpStream, handler: &Handler, log: &Mutex<Vec<Got>>) {
     let reply = handler(&got);
     thread::sleep(reply.delay);
     let mut out = stream;
-    let head = format!("HTTP/1.1 {} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", reply.status, reply.body.len());
+    let head =
+        format!("HTTP/1.1 {} X\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", reply.status, reply.content_type, reply.body.len());
     let _ = out.write_all(head.as_bytes());
     let _ = out.write_all(&reply.body);
     let _ = out.flush();
@@ -285,4 +299,39 @@ pub fn temp_dir(name: &str) -> std::path::PathBuf {
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(&d).unwrap();
     d
+}
+
+/// The fields of a query string (or of the query of a URL), decoded.
+pub fn query(text: &str) -> std::collections::BTreeMap<String, String> {
+    let q = text.split_once('?').map_or(text, |(_, q)| q);
+    let decode = |s: &str| {
+        let b = s.as_bytes();
+        let (mut out, mut i) = (vec![], 0);
+        while i < b.len() {
+            match b[i] {
+                b'+' => out.push(b' '),
+                b'%' if i + 2 < b.len() => {
+                    out.push(u8::from_str_radix(&s[i + 1..i + 3], 16).unwrap());
+                    i += 2;
+                }
+                c => out.push(c),
+            }
+            i += 1;
+        }
+        String::from_utf8(out).unwrap()
+    };
+    q.split('&').filter(|p| !p.is_empty()).map(|p| p.split_once('=').unwrap_or((p, ""))).map(|(k, v)| (decode(k), decode(v))).collect()
+}
+
+/// A plain `GET` of `url` on this machine, as the browser makes it: (status, body).
+pub fn http_get(url: &str) -> (u16, String) {
+    let rest = url.strip_prefix("http://").unwrap();
+    let (host, path) = rest.split_once('/').unwrap();
+    let mut s = TcpStream::connect(host).unwrap();
+    s.set_read_timeout(Some(Duration::from_secs(20))).unwrap();
+    write!(s, "GET /{path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n").unwrap();
+    let mut text = String::new();
+    s.read_to_string(&mut text).unwrap();
+    let status = text.split_whitespace().nth(1).unwrap().parse().unwrap();
+    (status, text.split_once("\r\n\r\n").map(|(_, b)| b.to_string()).unwrap_or_default())
 }

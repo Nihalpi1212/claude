@@ -11,8 +11,13 @@
 //!  "openai":{"chatModel":null,"imageModel":null},"gemini":{"chatModel":null,"imageModel":null},
 //!  "timeoutSecs":300,"consented":false,"allowAgents":false,
 //!  "lastFillPrompt":null,"lastExpandPrompt":null,"lastGeneratePrompt":null,
-//!  "lastBackgroundPrompt":null,"lastSkyPrompt":null,"assistantAttach":true}
+//!  "lastBackgroundPrompt":null,"lastSkyPrompt":null,"assistantAttach":true,
+//!  "chatgptSignIn":true,"hostId":null}
 //! ```
+//!
+//! `chatgptSignIn: false` turns Sign in with ChatGPT off for these accounts ([`crate::chatgpt`]);
+//! `hostId` is the installation id that sign-in sends (a random `urn:uuid:`, made at the first
+//! sign-in; JS `aiHostId`). The sign-in's tokens are never here: they are in the key store.
 //!
 //! A model of `null` means "automatic": the first of the provider's preferred models its catalog
 //! lists ([`crate::provider::pick_model`]), as JavaScript Pigment chose when nothing was saved.
@@ -98,6 +103,11 @@ pub struct AiSettings {
     /// The Assistant's "Attach image": send a downscaled copy of the image with each message
     /// (JS `assistantAttach`; on until the person turns it off).
     pub assistant_attach: bool,
+    /// Sign in with ChatGPT is offered and a stored sign-in is used. `false` turns the feature
+    /// off without touching API keys (a stored sign-in is ignored, not deleted).
+    pub chatgpt_sign_in: bool,
+    /// The installation id Sign in with ChatGPT sends (`urn:uuid:…`), made at the first sign-in.
+    pub host_id: Option<String>,
 }
 
 impl Default for AiSettings {
@@ -117,6 +127,8 @@ impl Default for AiSettings {
             last_background_prompt: None,
             last_sky_prompt: None,
             assistant_attach: true,
+            chatgpt_sign_in: true,
+            host_id: None,
         }
     }
 }

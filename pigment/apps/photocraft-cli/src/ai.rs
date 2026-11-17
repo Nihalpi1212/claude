@@ -247,7 +247,16 @@ fn status(accounts: &AiAccounts, dir: &std::path::Path, json: bool, out: &mut dy
         None => writeln!(out, "Keys are kept in the {}.", accounts.store_backend())?,
     }
     for r in rows {
-        let state = if r.connected { format!("connected (…{})", r.hint) } else { "not connected".to_string() };
+        let state = match r.method {
+            Some(pigment_genai::Method::Chatgpt) => {
+                let who = r.email.as_deref().map(|e| format!(" as {e}")).unwrap_or_default();
+                let plan = if r.plan == Some(false) { ", plan access not granted" } else { "" };
+                format!("signed in with ChatGPT{who} (experimental; chat models only, image models need an API key{plan})")
+            }
+            Some(pigment_genai::Method::ApiKey) if r.hint.is_empty() => "connected with an API key".to_string(),
+            Some(pigment_genai::Method::ApiKey) => format!("connected (…{})", r.hint),
+            None => "not connected".to_string(),
+        };
         let preferred = if r.is_default { ", preferred" } else { "" };
         writeln!(out, "{}: {state}{preferred}", r.label)?;
         let auto = |a: bool| if a { " (automatic)" } else { "" };

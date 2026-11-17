@@ -187,6 +187,13 @@ pub trait Provider: Send + Sync {
     fn list_models(&self, cancelled: Cancelled<'_>) -> Result<Vec<ModelInfo>>;
 }
 
+/// OpenAI for `cfg` with a ChatGPT sign-in instead of a key: chat models only, on the plan
+/// route ([`crate::chatgpt`]).
+pub fn build_signed_in(cfg: ProviderConfig, sign_in: Arc<crate::chatgpt::ChatGpt>) -> Result<Arc<dyn Provider>> {
+    cfg.validate()?;
+    Ok(Arc::new(openai::OpenAi::signed_in(cfg, sign_in)))
+}
+
 /// The provider for `cfg` with `key`.
 pub fn build(cfg: ProviderConfig, key: ApiKey) -> Result<Arc<dyn Provider>> {
     cfg.validate()?;
@@ -259,8 +266,19 @@ const SUBSCRIPTION_HINTS: [(&str, ErrorKind, &str); 6] = [
     ("subscription_sharing_invalid_user", ErrorKind::InvalidKey, "ChatGPT rejected this sign-in. Sign out and sign in with ChatGPT again."),
 ];
 
+/// The kind and message of one of the ChatGPT plan route's own error codes.
+pub fn subscription_hint(code: &str) -> Option<(ErrorKind, &'static str)> {
+    SUBSCRIPTION_HINTS.iter().find(|(c, ..)| *c == code).map(|(_, kind, msg)| (*kind, *msg))
+}
+
 /// The error a non-2xx answer means. `body` is the provider's error JSON (or anything else).
 pub fn translate_error(p: ProviderId, status: u16, body: &[u8]) -> AiError {
+    translate_error_for(p, status, body, false)
+}
+
+/// [`translate_error`] for either credential: with `sign_in`, a rejected credential is the
+/// ChatGPT sign-in, not an API key, and the message says so.
+pub fn translate_error_for(p: ProviderId, status: u16, body: &[u8], sign_in: bool) -> AiError {
     let v: Value = if json_value_bound(body) > MAX_JSON_VALUES { Value::Null } else { serde_json::from_slice(body).unwrap_or(Value::Null) };
     let e = v.get("error").filter(|e| e.is_object()).unwrap_or(&v);
     let field = |k: &str| e.get(k).and_then(Value::as_str).unwrap_or_default().to_string();
@@ -276,7 +294,9 @@ pub fn translate_error(p: ProviderId, status: u16, body: &[u8]) -> AiError {
     let provider_message = clip(field("message").trim(), 300);
     let all = format!("{code} {ty} {gstatus} {} {}", reasons.join(" "), provider_message).to_ascii_lowercase();
     let name = p.label();
-    let (k, msg) = if all.contains("api_key_invalid") || all.contains("invalid_api_key") || all.contains("api key not valid") || status == 401 {
+    let (k, msg) = if sign_in && status == 401 {
+        (ErrorKind::InvalidKey, format!("{name} rejected the ChatGPT sign-in. Sign out and sign in again in Edit › AI Accounts…"))
+    } else if all.contains("api_key_invalid") || all.contains("invalid_api_key") || all.contains("api key not valid") || status == 401 {
         (ErrorKind::InvalidKey, format!("{name} rejected the API key. Check it in Edit › AI Accounts…"))
     } else if all.contains("insufficient_quota") || all.contains("billing") {
         (ErrorKind::Quota, format!("The {name} account has no quota left. Check its plan and billing."))
@@ -285,7 +305,8 @@ pub fn translate_error(p: ProviderId, status: u16, body: &[u8]) -> AiError {
     } else if all.contains("moderation") || all.contains("content_policy") || all.contains("safety") || all.contains("blocked") {
         (ErrorKind::Safety, format!("{name} refused the request for safety reasons. Try a different prompt."))
     } else if status == 403 || gstatus == "PERMISSION_DENIED" {
-        (ErrorKind::InvalidKey, format!("{name} refused this request for the API key (permission denied)."))
+        let credential = if sign_in { "the ChatGPT sign-in" } else { "the API key" };
+        (ErrorKind::InvalidKey, format!("{name} refused this request for {credential} (permission denied)."))
     } else if status == 404 {
         (ErrorKind::NotFound, format!("{name} doesn't know the model or endpoint. Pick another model in Edit › AI Accounts…"))
     } else if status >= 500 {
@@ -312,9 +333,29 @@ pub(crate) fn clip(s: &str, max: usize) -> String {
     out
 }
 
-/// A response with a 2xx status, else its translated error with the key redacted.
+/// An answer's body with every one of `secrets` taken out, before anything reads it. What is
+/// read out of an answer and quoted in a message is cut to a few hundred characters, and a
+/// secret cut in two there would no longer be found; taken out here, none is left to cut.
+pub(crate) fn scrub(body: Vec<u8>, secrets: &[&str]) -> Vec<u8> {
+    let secrets: Vec<&str> = secrets.iter().copied().filter(|s| s.len() >= 4).collect();
+    match String::from_utf8(body) {
+        Ok(mut text) => {
+            for s in secrets {
+                if text.contains(s) {
+                    text = text.replace(s, "[redacted]");
+                }
+            }
+            text.into_bytes()
+        }
+        // Not text: nothing of it is ever quoted.
+        Err(e) => e.into_bytes(),
+    }
+}
+
+/// A response with a 2xx status, else its translated error. Either way without the key in it.
 pub(crate) fn check(p: ProviderId, resp: crate::http::Response, key: &ApiKey) -> Result<Vec<u8>> {
-    if (200..300).contains(&resp.status) { Ok(resp.body) } else { Err(translate_error(p, resp.status, &resp.body).redact(key.expose())) }
+    let body = scrub(resp.body, &[key.expose()]);
+    if (200..300).contains(&resp.status) { Ok(body) } else { Err(translate_error(p, resp.status, &body).redact(key.expose())) }
 }
 
 /// `r` with the key in use taken out of an error's message. [`check`] does this for a provider's
