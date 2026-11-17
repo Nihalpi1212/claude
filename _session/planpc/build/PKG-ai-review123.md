@@ -56,7 +56,12 @@ person's money), each with a test. CI's two failures on `d2be723` are fixed.
    "the model answered with text instead of an image: …") quote the provider's text. Every provider call's
    error now goes through `provider::redacted`.
 
-## Tests added (each fails without its fix)
+## Tests added
+
+Each is written to fail on the unfixed code (the mock records a call, the step is missing from the action,
+the decode is not refused). They were run on the fixed tree only; none was run against the unfixed one,
+except that the synthetic-input test checks itself: the same pointer events, not marked as automation's,
+do toggle the two checkboxes.
 
 - Engine, `ai_cmds/tests.rs`:
   - `a_step_that_sends_never_runs_from_an_action_or_an_event_script` (four sending commands in actions, a
@@ -101,6 +106,36 @@ person's money), each with a test. CI's two failures on `d2be723` are fixed.
   image, safety blocks (both providers, 4xx and in-body), a body over 64 MiB, a JSON bomb, a redirect (not
   followed), a timeout, cancel before sending.
 - **Hooks**: each a line or two, all in FORK.md (this review added `xtask/src/layers.rs`).
+
+## Checks run (all on the final tree unless noted)
+
+- `cargo test -p xtask` (88 pass), `cargo xtask layers`, `panel-commands`, `scorecard --check`: pass.
+- `cargo test -p photocraft-engine --lib -- ai_cmds generative`: 42 pass.
+- `cargo test -p photocraft-engine --test panic_hunt -- --ignored`: pass.
+- `cargo test -p pigment-genai`: 2 unit and 42 integration pass, 1 ignored (the real OS keychain).
+- `cargo test -p photocraft-ui-egui --test it -- ai::`: 17 pass.
+- `cargo test -p photocraft-automation --lib -- genai`: 1 pass.
+- `cargo test -p photocraft-cli --test it -- ai`: 3 pass (9 with the names that match).
+- `cargo clippy -p photocraft-engine -p pigment-genai -p photocraft-ui-egui -p photocraft-automation
+  -p photocraft-cli --all-targets -- -D warnings`: clean.
+- `cargo fmt --all -- --check`, `scripts/pigment-rebrand.py --check`, `cargo metadata --locked`: clean.
+- `cargo check --target wasm32-unknown-unknown -p photocraft-engine -p photocraft-ui-egui -p pigment-genai`:
+  compiles (three warnings in upstream interface files, none in the AI code).
+- Not run: the whole workspace suite (CI runs it).
+
+## CI
+
+- Run 176 on `3c5c86b` (the layers and scorecard fix): the two failures of run 175 are gone
+  (`scorecard::tests::staleness_check_and_determinism` passes, "Repository checks" passes). The run still
+  ended red, on one test: `bridge_token::the_bridge_authenticates_to_the_headless_server_by_challenge`
+  (`crates/automation/tests/it/bridge_token.rs:135`, "control authentication timed out; the request was not
+  sent" after the bridge's fixed 5 s authentication timeout).
+- That test is flaky and older than the AI port: it failed the same way in run 173 on `abc4d3e` (before
+  `093b6f0`), passed in runs 174 and 175, failed in 176. It is PhotoCraft's own test of its own bridge;
+  nothing in P1 to P3 touches that path (`Headless::new()` gained a backend that opens nothing until an
+  `ai.*` command runs). The handshake is two HMACs, so the 5 s are a stall, not work; the cause was not found
+  (see the final report for what was ruled out).
+- See the final report for run 177 on the review's head.
 
 ## For the next engineer
 
