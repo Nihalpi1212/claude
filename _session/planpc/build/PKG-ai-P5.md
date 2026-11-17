@@ -173,10 +173,13 @@ Results on the final tree (`3a4f755`), unless noted:
 
 ## CI
 
-Run 44187841757 on `8a526b7` was in progress when this was written; the later pushes queue
-behind it (a newer push cancels a pending run). Look at the run on `3a4f755`. If it is red on
-`bridge_token::the_bridge_authenticates_to_the_headless_server_by_challenge`, that is the known
-flaky upstream test (PKG-ai-review123.md): re-run the job.
+Pigment CI is green on both heads it ran: run 44187841757 on `8a526b7` (the crate) and run
+44193673928 on `3a4f755` (the final head: fmt, workspace clippy, every test under nextest, the
+panic hunt, doctests, the repository checks, packaging tests, the CLI smoke test). The run on
+`fe3e942` was superseded by the next push (cancelled while pending). The "exit code 100"
+annotation on each run is the non-gating "Known upstream test failures" step. If a later run is
+red on `bridge_token::the_bridge_authenticates_to_the_headless_server_by_challenge`, that is the
+known flaky upstream test (PKG-ai-review123.md): re-run the job.
 
 ## Not done
 
