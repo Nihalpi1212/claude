@@ -203,6 +203,14 @@ Results here (all on the final tree):
   message field and the native macOS menu item were not exercised.
 - CI: see "CI" below.
 
+## CI
+
+Pigment CI is green on the first commit (d39ce30, run 180) and on the last (d361bd0, run 183): the
+whole workspace suite under cargo-nextest, the panic hunt, the doctests, the repository checks and
+the CLI smoke test. Runs 181 and 182 were replaced in the queue by the next push (shown as
+cancelled), not failed. The engineer was stopped by a usage limit while waiting for run 183; this
+section was added by the orchestrator afterwards.
+
 ## For P5 (Sign in with ChatGPT)
 
 - The Assistant asks for `ModelKind::Chat` everywhere (`fitting(app, ModelKind::Chat)`,
