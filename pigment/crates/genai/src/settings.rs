@@ -11,7 +11,7 @@
 //!  "openai":{"chatModel":null,"imageModel":null},"gemini":{"chatModel":null,"imageModel":null},
 //!  "timeoutSecs":300,"consented":false,"allowAgents":false,
 //!  "lastFillPrompt":null,"lastExpandPrompt":null,"lastGeneratePrompt":null,
-//!  "lastBackgroundPrompt":null,"lastSkyPrompt":null}
+//!  "lastBackgroundPrompt":null,"lastSkyPrompt":null,"assistantAttach":true}
 //! ```
 //!
 //! A model of `null` means "automatic": the first of the provider's preferred models its catalog
@@ -95,6 +95,9 @@ pub struct AiSettings {
     pub last_generate_prompt: Option<String>,
     pub last_background_prompt: Option<String>,
     pub last_sky_prompt: Option<String>,
+    /// The Assistant's "Attach image": send a downscaled copy of the image with each message
+    /// (JS `assistantAttach`; on until the person turns it off).
+    pub assistant_attach: bool,
 }
 
 impl Default for AiSettings {
@@ -113,6 +116,7 @@ impl Default for AiSettings {
             last_generate_prompt: None,
             last_background_prompt: None,
             last_sky_prompt: None,
+            assistant_attach: true,
         }
     }
 }
