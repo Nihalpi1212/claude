@@ -4,7 +4,7 @@
 //! * **Where the features are** (Photoshop's places; there is no AI menu): Edit › Generative
 //!   Fill…, Generate Image…, Sky Replacement… and AI Accounts…; Layer › Remove Background,
 //!   Remove Background with AI Provider and Generate Background…; Image › Describe Image…;
-//!   Generative Expand in the Crop tool's contextual task bar. Every one is also in the command
+//!   Window › Assistant; Generative Expand in the Crop tool's contextual task bar. Every one is also in the command
 //!   palette ([`menu_items`]), Generative Fill in the selection context menu and in the task bar
 //!   under a selection, Generate Background in the task bar after Remove Background.
 //! * **Nothing is sent before Generate.** A menu item opens the Generate window
@@ -18,6 +18,9 @@
 //! * **AI Accounts** ([`accounts`]): the keys, typed into a masked field kept here (never in
 //!   [`crate::UiState`], a dialog's fields or the preferences), the models, the timeout, the
 //!   one-time agreement and "Allow agents to run AI commands".
+//! * **Window › Assistant** ([`assistant`]): a chat about the active document whose model edits
+//!   it through tools ([`assistant_tools`]), each an ordinary undoable command; a conversation
+//!   per document, kept in memory only.
 //! * **Agents** (the control channel, MCP through the open window, synthetic input) may run a
 //!   command that sends only while "Allow agents to run AI commands" is on: [`gate`] refuses the
 //!   agent's own request, and the session's backend (`AppBackend`) a command the agent reaches
@@ -27,6 +30,10 @@
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod accounts;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod assistant;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod assistant_tools;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod describe;
 #[cfg(not(target_arch = "wasm32"))]
@@ -52,6 +59,8 @@ pub const BACKGROUND: &str = "ai.replaceBackground";
 /// Edit › Sky Replacement… (the engine's `ai.replaceSky`).
 pub const SKY: &str = "ai.replaceSky";
 pub const DESCRIBE: &str = "ai.describe";
+/// Window › Assistant: the chat that edits the document.
+pub const ASSISTANT: &str = "window.panel.aiAssistant";
 
 /// Where AI Accounts is, as messages name it.
 pub const ACCOUNTS_PATH: &str = "Edit › AI Accounts…";
@@ -68,10 +77,11 @@ pub const ITEMS: &[(&str, &str, &[&str], &str)] = &[
     (BACKGROUND, "Generate Background…", &["Layer"], REMOVE_WITH_PROVIDER),
     (DESCRIBE, "Describe Image…", &["Image"], "image.calculations"),
     (EXPAND, "Generative Expand…", &[], ""),
+    (ASSISTANT, "Assistant", &["Window"], "window.panel.adjustments"),
 ];
 
 /// The commands of the shell's own (not engine commands).
-const SHELL: &[&str] = &[ACCOUNTS, REMOVE_WITH_PROVIDER];
+const SHELL: &[&str] = &[ACCOUNTS, REMOVE_WITH_PROVIDER, ASSISTANT];
 
 /// What the app holds for generative AI. Nothing here is saved with the interface state.
 #[derive(Default)]
@@ -90,6 +100,9 @@ pub struct AiUi {
     pub(crate) accounts: Option<accounts::Form>,
     #[cfg(not(target_arch = "wasm32"))]
     pub describe: describe::State,
+    /// Window › Assistant: its window, the conversations and the turn being worked on.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub assistant: assistant::State,
     /// The task bar's Generative Fill prompt.
     #[cfg(not(target_arch = "wasm32"))]
     pub bar_prompt: String,
@@ -119,7 +132,7 @@ pub fn as_agent<R>(app: &mut PhotocraftApp, f: impl FnOnce(&mut PhotocraftApp) -
     r
 }
 
-fn set_agent_now(app: &PhotocraftApp, agent: bool) {
+pub(crate) fn set_agent_now(app: &PhotocraftApp, agent: bool) {
     app.ai.agent_now.store(agent, std::sync::atomic::Ordering::SeqCst);
 }
 
@@ -179,10 +192,21 @@ pub fn menu_items(app: &PhotocraftApp) -> Vec<MenuItem> {
             path: path.iter().map(|s| s.to_string()).collect(),
             shortcut: None,
             enabled: crate::menus::is_enabled(app, id),
-            checked: None,
+            checked: checked(app, id),
             color: None,
         })
         .collect()
+}
+
+/// Whether menu item `id` shows a check mark, for this module's items: Window › Assistant
+/// while its window is open. `None` for the rest.
+pub fn checked(app: &PhotocraftApp, id: &str) -> Option<bool> {
+    #[cfg(not(target_arch = "wasm32"))]
+    if id == ASSISTANT {
+        return Some(app.ai.assistant.open);
+    }
+    let _ = (app, id);
+    None
 }
 
 /// Whether menu item `id` is enabled, for this module's shell commands; `None` for the rest
@@ -247,8 +271,8 @@ mod native {
     use serde_json::{Value, json};
 
     use super::{
-        ACCOUNTS, ACCOUNTS_PATH, BACKGROUND, DESCRIBE, EXPAND, FILL, GENERATE_IMAGE, ITEMS, PhotocraftApp, REMOVE_BACKGROUND, REMOVE_WITH_PROVIDER, SKY,
-        accounts, describe, generate, task_bar,
+        ACCOUNTS, ACCOUNTS_PATH, ASSISTANT, BACKGROUND, DESCRIBE, EXPAND, FILL, GENERATE_IMAGE, ITEMS, PhotocraftApp, REMOVE_BACKGROUND, REMOVE_WITH_PROVIDER,
+        SKY, accounts, assistant, describe, generate, task_bar,
     };
     use crate::canvas::ViewXform;
 
@@ -406,6 +430,7 @@ mod native {
             DESCRIBE if params.as_object().is_none_or(|o| o.is_empty()) => describe::start(app),
             REMOVE_BACKGROUND if params.as_object().is_none_or(|o| o.is_empty()) => remove_background(app, "local"),
             REMOVE_WITH_PROVIDER => remove_background(app, "provider"),
+            ASSISTANT => assistant::toggle(app, params),
             _ => return None,
         })
     }
@@ -439,7 +464,7 @@ mod native {
             app.sync_views();
             removed_background(app);
         }
-        if describe::on_job_event(app, e) {
+        if describe::on_job_event(app, e) || assistant::on_job_event(app, e) {
             return true;
         }
         generate::on_job_event(app, e)
@@ -449,6 +474,7 @@ mod native {
     pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
         generate::show(app, ctx);
         describe::show(app, ctx);
+        assistant::show(app, ctx);
         accounts::show(app, ctx);
     }
 
