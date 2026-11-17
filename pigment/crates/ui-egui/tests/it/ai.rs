@@ -546,6 +546,16 @@ fn synthetic_click(h: &mut Harness, label: &str) {
     h.run_steps(2);
 }
 
+/// The same click from the person's own pointer: the same events at the same place, in one
+/// frame, not marked as automation's.
+fn pointer_click(h: &mut Harness, label: &str) {
+    let pos = h.get_by_label(label).rect().center();
+    let button = |pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
+    h.input_mut().events.extend([egui::Event::PointerMoved(pos), button(true), button(false)]);
+    h.step();
+    h.run_steps(2);
+}
+
 /// Synthetic input can't spend the person's money or give itself the right to: an agent's click
 /// on Generate sends nothing while "Allow agents to run AI commands" is off, and its clicks in AI
 /// Accounts change neither the agreement nor that permission (it can still close the dialog). The
@@ -574,11 +584,13 @@ fn synthetic_input_neither_sends_nor_grants_itself_permission() {
     synthetic_click(&mut h, accounts::CONSENT);
     synthetic_click(&mut h, "Allow agents to run AI commands");
     assert_eq!(settings(&h), (false, false), "an agent's clicks grant nothing");
-    // The person's clicks do.
-    h.get_by_label("Allow agents to run AI commands").click();
-    h.run_steps(3);
-    h.get_by_label(accounts::CONSENT).click();
-    h.run_steps(3);
+    // The person's clicks do: the very same pointer events, when they are not automation's.
+    pointer_click(&mut h, "Allow agents to run AI commands");
+    assert_eq!(settings(&h), (false, true));
+    pointer_click(&mut h, accounts::CONSENT);
+    assert_eq!(settings(&h), (true, true));
+    // And an agent can't take them back either.
+    synthetic_click(&mut h, accounts::CONSENT);
     assert_eq!(settings(&h), (true, true));
     // Closing is all synthetic input may do there.
     synthetic_click(&mut h, "Done");

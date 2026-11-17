@@ -299,6 +299,10 @@ runs Generative Fill from the command line.
   background. Pigment asks every model without alpha (Gemini, gpt-image-2, DALL·E), for new images
   and for Remove Background's edit, and keys the white out, so "transparent" means the same
   whichever model is chosen.
+- **Actions never send.** Pigment 0.4 recorded the AI dialogs' values, and playing the action
+  called the provider (and billed) again. Here a command that sends is neither recorded nor run
+  from an action, a batch, a droplet or a script event. Layer › Remove Background (the local
+  method) is recorded and plays, as it sends nothing.
 - **Consent and agents are new.** Pigment 0.4 had no agreement step (connecting an account was the
   consent) and no agents. The agreement is asked once in AI Accounts (or `pigment-cli ai consent`);
   agents and the command line opt in separately.
