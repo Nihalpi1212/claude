@@ -409,7 +409,7 @@ fn an_answer_with_millions_of_values_is_refused_unparsed() {
     let mut body = b"[0".to_vec();
     body.extend(std::iter::repeat_n(&b",0"[..], MAX_JSON_VALUES).flatten());
     body.push(b']');
-    let server = MockServer::start(move |_| Reply { status: 200, body: body.clone(), delay: Duration::ZERO });
+    let server = MockServer::start(move |_| Reply { status: 200, body: body.clone(), content_type: "application/json", delay: Duration::ZERO });
     let e = provider(ProviderId::OpenAi, &server.base()).list_models(&never).unwrap_err();
     assert_eq!(e.kind, ErrorKind::BadResponse);
     assert!(e.message.contains("too many values"), "{e}");

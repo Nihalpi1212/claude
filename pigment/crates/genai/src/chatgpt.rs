@@ -302,7 +302,8 @@ pub fn parse_callback(input: &str) -> Result<Callback> {
             .next()
             .filter(|v| !v.is_empty())
     };
-    let out = Callback { code: get("code"), state: get("state"), client_id: get("client_id"), error: get("error"), error_description: get("error_description") };
+    let out =
+        Callback { code: get("code"), state: get("state"), client_id: get("client_id"), error: get("error"), error_description: get("error_description") };
     if out.code.is_none() && out.error.is_none() {
         return Err(bad_callback("The callback address carries no authorization code."));
     }
@@ -317,7 +318,19 @@ pub fn decode_jwt(token: &str) -> Option<Map<String, Value>> {
         return None;
     }
     let payload = token.split('.').nth(1)?;
-    let clean: String = payload.chars().filter(|c| !c.is_whitespace() && *c != '=').map(|c| if c == '+' { '-' } else if c == '/' { '_' } else { c }).collect();
+    let clean: String = payload
+        .chars()
+        .filter(|c| !c.is_whitespace() && *c != '=')
+        .map(|c| {
+            if c == '+' {
+                '-'
+            } else if c == '/' {
+                '_'
+            } else {
+                c
+            }
+        })
+        .collect();
     let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(clean.as_bytes()).ok()?;
     if provider::json_value_bound(&bytes) > 10_000 {
         return None;
@@ -941,7 +954,14 @@ impl ChatGpt {
         let redirect_uri = redirect_uri_for(bound);
         let url = authorize_url_at(
             &inner.authorize_url,
-            &AuthorizeParams { client_id: None, redirect_uri: &redirect_uri, state: &state, nonce: &nonce, code_challenge: &pkce.challenge, host_id: Some(host_id) },
+            &AuthorizeParams {
+                client_id: None,
+                redirect_uri: &redirect_uri,
+                state: &state,
+                nonce: &nonce,
+                code_challenge: &pkce.challenge,
+                host_id: Some(host_id),
+            },
         )?;
         let id = inner.next_attempt;
         inner.next_attempt += 1;
@@ -1164,7 +1184,8 @@ impl ChatGpt {
                 }
                 if f.fatal {
                     self.clear_if_same(generation, &rec);
-                    return Err(AiError::new(ErrorKind::InvalidKey, "Your ChatGPT sign-in has expired. Sign in again in Edit › AI Accounts…").with_status(f.error.status));
+                    return Err(AiError::new(ErrorKind::InvalidKey, "Your ChatGPT sign-in has expired. Sign in again in Edit › AI Accounts…")
+                        .with_status(f.error.status));
                 }
                 return Err(redact_all(f.error, &[&refresh_token, &rec.access_token]));
             }
@@ -1249,7 +1270,10 @@ fn token_request(token_url: &str, form: &[(&str, &str)], cancelled: Cancelled<'_
     let http = Http::new(token_url, TOKEN_TIMEOUT, MAX_TOKEN_ANSWER);
     let req = Request { url: token_url.to_string(), headers: vec![("Accept", "application/json".into())], body: Body::Form(form_encode(form)) };
     let resp = http.send(req, cancelled)?;
-    let body: Value = if provider::json_value_bound(&resp.body) > 10_000 { Value::Null } else { serde_json::from_slice(&resp.body).unwrap_or(Value::Null) };
+    // What was sent in confidence is taken out of the answer before anything reads it.
+    let sent: Vec<&str> = form.iter().filter(|(k, _)| matches!(*k, "code" | "code_verifier" | "refresh_token")).map(|(_, v)| *v).collect();
+    let text = provider::scrub(resp.body, &sent);
+    let body: Value = if provider::json_value_bound(&text) > 10_000 { Value::Null } else { serde_json::from_slice(&text).unwrap_or(Value::Null) };
     if !(200..300).contains(&resp.status) {
         let t = translate_error(resp.status, &body);
         return Err(TokenFail { fatal: t.fatal(), error: t.into_error_from("The ChatGPT sign-in server") });

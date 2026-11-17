@@ -333,9 +333,29 @@ pub(crate) fn clip(s: &str, max: usize) -> String {
     out
 }
 
-/// A response with a 2xx status, else its translated error with the key redacted.
+/// An answer's body with every one of `secrets` taken out, before anything reads it. What is
+/// read out of an answer and quoted in a message is cut to a few hundred characters, and a
+/// secret cut in two there would no longer be found; taken out here, none is left to cut.
+pub(crate) fn scrub(body: Vec<u8>, secrets: &[&str]) -> Vec<u8> {
+    let secrets: Vec<&str> = secrets.iter().copied().filter(|s| s.len() >= 4).collect();
+    match String::from_utf8(body) {
+        Ok(mut text) => {
+            for s in secrets {
+                if text.contains(s) {
+                    text = text.replace(s, "[redacted]");
+                }
+            }
+            text.into_bytes()
+        }
+        // Not text: nothing of it is ever quoted.
+        Err(e) => e.into_bytes(),
+    }
+}
+
+/// A response with a 2xx status, else its translated error. Either way without the key in it.
 pub(crate) fn check(p: ProviderId, resp: crate::http::Response, key: &ApiKey) -> Result<Vec<u8>> {
-    if (200..300).contains(&resp.status) { Ok(resp.body) } else { Err(translate_error(p, resp.status, &resp.body).redact(key.expose())) }
+    let body = scrub(resp.body, &[key.expose()]);
+    if (200..300).contains(&resp.status) { Ok(body) } else { Err(translate_error(p, resp.status, &body).redact(key.expose())) }
 }
 
 /// `r` with the key in use taken out of an error's message. [`check`] does this for a provider's

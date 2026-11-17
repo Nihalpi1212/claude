@@ -5,6 +5,7 @@
 
 mod backend;
 mod chat;
+mod chatgpt;
 mod common;
 mod keys;
 mod providers;

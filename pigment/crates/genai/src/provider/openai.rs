@@ -13,12 +13,12 @@ use serde_json::{Value, json};
 use std::sync::Arc;
 
 use super::{
-    EditRequest, ImageRequest, ModelInfo, ModelKind, Provider, ProviderConfig, call_json, clients, clip, parse_json, ratio_of, redacted, state_provider,
+    EditRequest, ImageRequest, ModelInfo, ModelKind, Provider, ProviderConfig, call_json, clients, clip, parse_json, ratio_of, redacted, scrub, state_provider,
     translate_error_for,
 };
 use crate::cancel::Cancelled;
-use crate::chatgpt::{self, ChatGpt};
 use crate::chat::{parse_args, result_text};
+use crate::chatgpt::{self, ChatGpt};
 use crate::http::{Body, Http, Multipart};
 use crate::image_util::{base64_decode, base64_encode, decode, encode_png, openai_mask};
 use crate::keys::ApiKey;
@@ -85,16 +85,16 @@ impl OpenAi {
             token = sign_in.access_token(Some(&token), cancelled)?;
             resp = send(&token)?;
         }
-        let text = String::from_utf8_lossy(&resp.body);
+        // The token is taken out of the answer before anything reads it.
+        let body = scrub(resp.body, &[&token]);
+        let text = String::from_utf8_lossy(&body);
         let stream = resp.content_type.contains("text/event-stream") || chatgpt::looks_like_sse(&text);
-        let answer = if (200..300).contains(&resp.status) {
-            if stream { chatgpt::aggregate_sse(&text) } else { parse_json(&resp.body) }
-        } else {
-            // A failed stream says why in an event; anything else is an ordinary error body.
-            let event = if stream { chatgpt::aggregate_sse(&text).err().map(|e| e.with_status(resp.status)) } else { None };
-            Err(event.unwrap_or_else(|| translate_error_for(ProviderId::OpenAi, resp.status, &resp.body, true)))
-        };
-        answer.map_err(|e| e.redact(&token))
+        if (200..300).contains(&resp.status) {
+            return if stream { chatgpt::aggregate_sse(&text) } else { parse_json(&body) };
+        }
+        // A failed stream says why in an event; anything else is an ordinary error body.
+        let event = if stream { chatgpt::aggregate_sse(&text).err().map(|e| e.with_status(resp.status)) } else { None };
+        Err(event.unwrap_or_else(|| translate_error_for(ProviderId::OpenAi, resp.status, &body, true)))
     }
 
     /// `r` with the credential in use (the key, or the sign-in's tokens) taken out of an
