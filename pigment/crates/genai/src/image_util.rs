@@ -11,13 +11,21 @@ use crate::{AiError, Result};
 
 /// The largest image decoded from a provider (per side).
 pub const MAX_SIDE: u32 = 8192;
+/// The most pixels decoded from a provider: 24 megapixels. Requests ask for at most 2048 px a
+/// side, and the largest answer a provider gives to those is under 5 megapixels (Gemini's 2K);
+/// an answer is resampled as premultiplied floats (16 bytes a pixel), so an 8192 × 8192 one, a
+/// few hundred kilobytes as a flat PNG, would take over a gigabyte.
+pub const MAX_PIXELS: u64 = 24_000_000;
 
 /// Decode `bytes` (PNG, JPEG or WebP) with size limits: a hostile answer can't make Pigment
-/// allocate gigabytes.
+/// allocate gigabytes. The size is read from the header and refused before any pixel is decoded.
 pub fn decode(bytes: &[u8]) -> Result<Rgba8Image> {
-    let mut reader = ImageReader::new(Cursor::new(bytes))
-        .with_guessed_format()
-        .map_err(|_| AiError::bad_response("The model returned an image that could not be decoded."))?;
+    let undecodable = || AiError::bad_response("The model returned an image that could not be decoded.");
+    let (w, h) = ImageReader::new(Cursor::new(bytes)).with_guessed_format().map_err(|_| undecodable())?.into_dimensions().map_err(|_| undecodable())?;
+    if w == 0 || h == 0 || w > MAX_SIDE || h > MAX_SIDE || u64::from(w) * u64::from(h) > MAX_PIXELS {
+        return Err(AiError::bad_response(format!("The model returned an image of a size Pigment can't use ({w} × {h} px).")));
+    }
+    let mut reader = ImageReader::new(Cursor::new(bytes)).with_guessed_format().map_err(|_| undecodable())?;
     let mut limits = Limits::default();
     limits.max_image_width = Some(MAX_SIDE);
     limits.max_image_height = Some(MAX_SIDE);
@@ -76,4 +84,61 @@ pub fn white_mask(mask: &Rgba8Image) -> Rgba8Image {
 pub fn parse_size(s: &str) -> Option<(u32, u32)> {
     let (w, h) = s.split_once('x')?;
     Some((w.parse().ok()?, h.parse().ok()?))
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use super::*;
+
+    fn crc32(bytes: &[u8]) -> u32 {
+        let mut crc = !0u32;
+        for b in bytes {
+            crc ^= u32::from(*b);
+            for _ in 0..8 {
+                crc = if crc & 1 == 1 { (crc >> 1) ^ 0xEDB8_8320 } else { crc >> 1 };
+            }
+        }
+        !crc
+    }
+
+    /// A PNG that is only its signature, its header and the start of its (empty) pixel data:
+    /// enough to read the size it claims.
+    fn png_header(w: u32, h: u32) -> Vec<u8> {
+        let mut ihdr = b"IHDR".to_vec();
+        ihdr.extend(w.to_be_bytes());
+        ihdr.extend(h.to_be_bytes());
+        ihdr.extend([8, 6, 0, 0, 0]);
+        let mut out = b"\x89PNG\r\n\x1a\n".to_vec();
+        for chunk in [ihdr.as_slice(), b"IDAT"] {
+            out.extend((chunk.len() as u32 - 4).to_be_bytes());
+            out.extend(chunk);
+            out.extend(crc32(chunk).to_be_bytes());
+        }
+        out
+    }
+
+    /// An answer that claims a huge size is refused from its header, before anything is
+    /// allocated for its pixels: 8192 × 8192 fits the per-side limit but not the pixel budget.
+    #[test]
+    fn an_answer_too_large_to_resample_is_refused_before_it_is_decoded() {
+        for (w, h) in [(8192, 8192), (6000, 5000), (20_000, 16), (16, 20_000)] {
+            let e = decode(&png_header(w, h)).unwrap_err();
+            assert_eq!(e.kind, crate::ErrorKind::BadResponse);
+            assert!(e.message.contains(&format!("{w} × {h} px")), "{}", e.message);
+        }
+        // A size a provider really answers with is decoded (here it fails later: no pixel data).
+        let e = decode(&png_header(2752, 1536)).unwrap_err();
+        assert!(e.message.contains("could not be decoded"), "{}", e.message);
+    }
+
+    /// Real images of ordinary sizes still decode, whatever their format.
+    #[test]
+    fn ordinary_answers_decode() {
+        let img = Rgba8Image { width: 3, height: 2, pixels: vec![200; 24] };
+        let back = decode(&encode_png(&img).unwrap()).unwrap();
+        assert_eq!((back.width, back.height, back.pixels), (3, 2, vec![200; 24]));
+        assert!(decode(b"not an image").is_err());
+        assert!(decode(&[]).is_err());
+    }
 }
