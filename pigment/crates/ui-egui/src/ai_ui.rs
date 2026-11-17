@@ -17,7 +17,8 @@
 //!   error with what fixes it (Open AI Accounts…, Try Again).
 //! * **AI Accounts** ([`accounts`]): the keys, typed into a masked field kept here (never in
 //!   [`crate::UiState`], a dialog's fields or the preferences), the models, the timeout, the
-//!   one-time agreement and "Allow agents to run AI commands".
+//!   one-time agreement and "Allow agents to run AI commands"; and for OpenAI the experimental
+//!   Sign in with ChatGPT (chat models only), whose tokens the interface never holds.
 //! * **Window › Assistant** ([`assistant`]): a chat about the active document whose model edits
 //!   it through tools ([`assistant_tools`]), each an ordinary undoable command; a conversation
 //!   per document, kept in memory only.
@@ -98,6 +99,13 @@ pub struct AiUi {
     /// AI Accounts while it is open.
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) accounts: Option<accounts::Form>,
+    /// The accounts' ChatGPT sign-in (AI Accounts' experimental row), and whether an attempt
+    /// started here is still to be heard of ([`accounts::poll`] takes its outcome, also while
+    /// the dialog is closed, so the menus and windows learn of the new account).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) chatgpt: Option<std::sync::Arc<pigment_genai::chatgpt::ChatGpt>>,
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) sign_in_watch: bool,
     #[cfg(not(target_arch = "wasm32"))]
     pub describe: describe::State,
     /// Window › Assistant: its window, the conversations and the turn being worked on.
@@ -285,6 +293,7 @@ mod native {
 
     /// Install `accounts` (tests: in memory, a local mock server) and the backend over them.
     pub fn install_accounts(app: &mut PhotocraftApp, accounts: AiAccounts) {
+        app.ai.chatgpt = Some(Arc::clone(accounts.chatgpt()));
         let store = Arc::new(Mutex::new(accounts));
         app.ai.store = Some(Arc::clone(&store));
         install_backend(app, Arc::new(GenAiBackend::new(store, Caller::Person)));

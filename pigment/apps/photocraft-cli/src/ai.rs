@@ -1,5 +1,6 @@
 //! Pigment: `pigment-cli ai`, the AI Accounts of the command line (docs/generative-ai.md): keys,
-//! consent, the preferred provider and its models, and whether agents may run AI commands. Keys
+//! the experimental Sign in with ChatGPT (chat models only), consent, the preferred provider and
+//! its models, and whether agents may run AI commands. Keys
 //! are read from standard input, never from the command line (where the shell history and the
 //! process list would keep them), and never printed: the status shows the last four characters.
 //! `pigment-cli run --allow-ai` is what lets `run` send ([`install`]).
@@ -57,6 +58,19 @@ pub(crate) enum AiCommand {
         #[arg(value_parser = provider)]
         provider: ProviderId,
     },
+    /// Sign in with ChatGPT (experimental): use a ChatGPT Plus or Pro plan for chat models (the
+    /// Assistant, Describe Image). Image models still need an API key. Prints an address to open
+    /// in a browser and waits for the sign-in to finish there (five minutes at most). With a
+    /// browser on another computer, paste the address it lands on at the prompt
+    SignIn {
+        /// The port on 127.0.0.1 to listen on for the browser (default: the first free one of
+        /// 1455 to 1460)
+        #[arg(long, value_name = "PORT")]
+        port: Option<u16>,
+    },
+    /// Sign out of ChatGPT: the sign-in is removed from this computer (nothing is revoked at
+    /// OpenAI)
+    SignOut,
     /// List a provider's models with its stored key (sends the key, no prompt or image)
     Test {
         /// openai or gemini (default: the preferred connected provider)
@@ -184,6 +198,17 @@ pub(crate) fn run(a: &AiArgs, out: &mut dyn Write, err: &mut dyn Write) -> Resul
             writeln!(out, "{} key removed.", provider.label())?;
             Ok(())
         }
+        AiCommand::SignIn { port } => sign_in(&mut accounts, *port, out, err),
+        AiCommand::SignOut => {
+            if accounts.method(ProviderId::OpenAi) != Some(pigment_genai::Method::Chatgpt) {
+                accounts.chatgpt().cancel();
+                writeln!(out, "Not signed in with ChatGPT.")?;
+                return Ok(());
+            }
+            accounts.sign_out().map_err(ai_error)?;
+            writeln!(out, "Signed out of ChatGPT.")?;
+            Ok(())
+        }
         AiCommand::Test { provider, json } => {
             let p = provider
                 .or_else(|| accounts.default_provider())
@@ -192,7 +217,8 @@ pub(crate) fn run(a: &AiArgs, out: &mut dyn Write, err: &mut dyn Write) -> Resul
             if *json {
                 print_json(out, &json!({ "provider": p.id(), "models": models_json(&models) }), JsonStyle::Pretty)
             } else {
-                writeln!(out, "{}: the key works ({} models).", p.label(), models.len())?;
+                let what = if accounts.method(p) == Some(pigment_genai::Method::Chatgpt) { "the ChatGPT sign-in" } else { "the key" };
+                writeln!(out, "{}: {what} works ({} models).", p.label(), models.len())?;
                 writeln!(out, "  chat models: {}\n  image models: {}", ids(&models, ModelKind::Chat), ids(&models, ModelKind::Image))?;
                 Ok(())
             }
@@ -221,6 +247,69 @@ pub(crate) fn run(a: &AiArgs, out: &mut dyn Write, err: &mut dyn Write) -> Resul
             Ok(())
         }
     }
+}
+
+/// `ai sign-in`: start the attempt, print the address to open, and wait for the browser's
+/// callback (or the address pasted on standard input) until the sign-in ends.
+fn sign_in(accounts: &mut AiAccounts, port: Option<u16>, out: &mut dyn Write, err: &mut dyn Write) -> Result {
+    let started = accounts.sign_in(port).map_err(ai_error)?;
+    let url = started.url.unwrap_or_default();
+    writeln!(out, "Sign in with ChatGPT (experimental): a ChatGPT Plus or Pro plan for chat models. Image models need an API key.")?;
+    writeln!(out, "Open this address in a browser and sign in:\n\n  {url}\n")?;
+    if let Some(warning) = &started.warning {
+        writeln!(out, "{warning}")?;
+    }
+    writeln!(out, "Waiting for the browser (5 minutes at most). With a browser on another computer, paste the address it lands on here and press Enter.")?;
+    out.flush()?;
+    // A pasted address, read on its own thread so the wait below also sees the browser's callback.
+    let chatgpt = std::sync::Arc::clone(accounts.chatgpt());
+    let (pasted, refused) = (std::sync::Arc::clone(&chatgpt), std::sync::mpsc::channel::<String>());
+    let (tx, rx) = refused;
+    let reader = std::thread::Builder::new().name("pigment-ai-sign-in-stdin".into()).spawn(move || {
+        for line in std::io::stdin().lock().lines() {
+            let Ok(line) = line else { break };
+            if !pasted.status().pending {
+                break;
+            }
+            if line.trim().is_empty() {
+                continue;
+            }
+            // An address that is refused while the attempt goes on (another attempt's, an
+            // unreadable one) is said and the wait goes on; a failure that ends the attempt is
+            // the command's own error.
+            if let Err(e) = pasted.complete_manual(&line)
+                && pasted.status().pending
+                && tx.send(e.message).is_err()
+            {
+                break;
+            }
+        }
+    });
+    if reader.is_err() {
+        writeln!(err, "(standard input can't be read here: finish the sign-in in the browser on this computer)")?;
+    }
+    let outcome = loop {
+        while let Ok(message) = rx.try_recv() {
+            writeln!(err, "{message}")?;
+        }
+        if let Some(outcome) = chatgpt.take_outcome() {
+            break outcome;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    };
+    while let Ok(message) = rx.try_recv() {
+        writeln!(err, "{message}")?;
+    }
+    let who = outcome.map_err(ai_error)?;
+    let named = who.email.as_deref().map(|e| format!(" as {e}")).unwrap_or_default();
+    writeln!(out, "Signed in with ChatGPT{named}. The sign-in is kept in {}.", accounts.store_backend())?;
+    if who.plan == Some(false) {
+        writeln!(out, "The sign-in did not grant plan access: chat requests may be refused. An OpenAI API key works instead.")?;
+    }
+    if !accounts.settings.consented {
+        writeln!(out, "Before AI commands run, agree to what they send: pigment-cli ai consent")?;
+    }
+    Ok(())
 }
 
 fn status(accounts: &AiAccounts, dir: &std::path::Path, json: bool, out: &mut dyn Write) -> Result {

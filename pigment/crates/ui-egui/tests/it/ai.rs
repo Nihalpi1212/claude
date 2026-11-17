@@ -4,7 +4,9 @@
 //! shown, saved or reported), Describe Image, the task bars and the agents' gate.
 //!
 //! No request leaves this machine: the engine's `MockBackend` answers the features, and AI
-//! Accounts talks to a `TcpListener` on 127.0.0.1.
+//! Accounts talks to a `TcpListener` on 127.0.0.1. The last tests are Sign in with ChatGPT
+//! (experimental, chat models only): the same listener plays the sign-in server and the plan
+//! route, and the test plays the browser.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -691,4 +693,277 @@ fn the_last_prompt_comes_back() {
     generate::close(h.state_mut());
     invoke(&mut h, "ai.replaceSky").unwrap();
     assert_eq!(h.state().ai.generate.prompt, generate::SKY_PROMPT);
+}
+
+// ---- Sign in with ChatGPT (experimental) ----------------------------------------------------
+
+/// The sign-in server and the ChatGPT plan route on 127.0.0.1: the token endpoint (its ID token
+/// carries `nonce`, set once the attempt's address is known), a streamed `POST /v1/responses`
+/// and `GET /v1/models`. `log` keeps each request's path and bearer token.
+struct PlanServer {
+    url: String,
+    nonce: Arc<Mutex<String>>,
+    log: Arc<Mutex<Vec<(String, String)>>>,
+}
+
+fn plan_server() -> PlanServer {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let (nonce, log) = (Arc::new(Mutex::new(String::new())), Arc::new(Mutex::new(vec![])));
+    let (n, l) = (Arc::clone(&nonce), Arc::clone(&log));
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(stream) = stream else { continue };
+            let (n, l) = (Arc::clone(&n), Arc::clone(&l));
+            std::thread::spawn(move || plan_answer(stream, &n, &l));
+        }
+    });
+    PlanServer { url, nonce, log }
+}
+
+fn plan_answer(stream: TcpStream, nonce: &Mutex<String>, log: &Mutex<Vec<(String, String)>>) {
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
+    let mut reader = BufReader::new(stream.try_clone().unwrap());
+    let mut line = String::new();
+    if reader.read_line(&mut line).unwrap_or(0) == 0 {
+        return;
+    }
+    let (mut len, mut bearer) = (0usize, String::new());
+    loop {
+        let mut h = String::new();
+        if reader.read_line(&mut h).unwrap_or(0) == 0 || h == "\r\n" {
+            break;
+        }
+        match h.trim_end().split_once(':') {
+            Some((k, v)) if k.trim().eq_ignore_ascii_case("content-length") => len = v.trim().parse().unwrap_or(0),
+            Some((k, v)) if k.trim().eq_ignore_ascii_case("authorization") => bearer = v.trim().trim_start_matches("Bearer ").to_string(),
+            _ => {}
+        }
+    }
+    let mut req = vec![0u8; len];
+    let _ = reader.read_exact(&mut req);
+    let path = line.split_whitespace().nth(1).unwrap_or_default().to_string();
+    log.lock().unwrap().push((path.clone(), bearer));
+    let part = |v: &Value| pigment_genai::chatgpt::base64url(v.to_string().as_bytes());
+    let (content_type, body) = match path.as_str() {
+        "/api/accounts/oauth/token" => {
+            let claims = json!({"iss": "https://auth.openai.com", "aud": "oaiapp_42", "exp": 4_000_000_000_i64, "nonce": *nonce.lock().unwrap(), "email": "me@example.com"});
+            let id_token = format!("{}.{}.sig", part(&json!({"alg": "RS256"})), part(&claims));
+            let tokens = json!({"access_token": "access-token-ONE", "refresh_token": "refresh-token-ONE", "id_token": id_token, "expires_in": 3600,
+                "scope": "openid chatgpt.tokens.use.direct"});
+            ("application/json", tokens.to_string())
+        }
+        "/v1/responses" => {
+            let done = json!({"type": "response.completed", "response": {"output": [
+                {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "Hello from the plan."}]}]}});
+            ("text/event-stream", format!("event: response.completed\ndata: {done}\n\ndata: [DONE]\n\n"))
+        }
+        _ => ("application/json", json!({"models": [{"slug": "gpt-5.1"}, {"slug": "gpt-5-codex"}]}).to_string()),
+    };
+    let mut out = stream;
+    let _ = write!(out, "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+}
+
+/// The app with accounts whose sign-in and OpenAI requests go to `server`, the agreement given.
+fn plan_harness(server: &PlanServer) -> Harness {
+    let url = server.url.clone();
+    harness(move |app| {
+        let mut a = AiAccounts::in_memory();
+        a.set_base_url(ProviderId::OpenAi, &format!("{url}/v1")).unwrap();
+        a.chatgpt().set_auth_base(&url).unwrap();
+        a.chatgpt().set_ports(&[0]);
+        a.settings.consented = true;
+        ai_ui::install_accounts(app, a);
+    })
+}
+
+/// A query parameter of `url`, percent-decoded.
+fn param(url: &str, name: &str) -> String {
+    let raw = url.split_once('?').unwrap().1.split('&').find_map(|kv| kv.strip_prefix(&format!("{name}="))).unwrap();
+    let (bytes, mut out, mut i) = (raw.as_bytes(), vec![], 0);
+    while i < bytes.len() {
+        match bytes[i] {
+            b'%' => {
+                out.push(u8::from_str_radix(&raw[i + 1..i + 3], 16).unwrap());
+                i += 2;
+            }
+            b'+' => out.push(b' '),
+            b => out.push(b),
+        }
+        i += 1;
+    }
+    String::from_utf8(out).unwrap()
+}
+
+/// What the browser does with the sign-in address: lands on the loopback callback with a code.
+/// The page it gets.
+fn browser_lands(server: &PlanServer, sign_in_url: &str) -> String {
+    *server.nonce.lock().unwrap() = param(sign_in_url, "nonce");
+    let redirect = param(sign_in_url, "redirect_uri");
+    let (host, path) = redirect.strip_prefix("http://").unwrap().split_once('/').unwrap();
+    let mut s = TcpStream::connect(host).unwrap();
+    write!(s, "GET /{path}?code=the-code&state={}&client_id=oaiapp_42 HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n", param(sign_in_url, "state"))
+        .unwrap();
+    let mut page = String::new();
+    s.read_to_string(&mut page).unwrap();
+    page
+}
+
+/// Whether `secret` shows anywhere an agent or a screen reader can read.
+fn shows(h: &Harness, secret: &str) -> bool {
+    let has = |t: Option<String>| t.is_some_and(|t| t.contains(secret));
+    let tree = h.query_all(By::new().include_labels().predicate(|n| has(n.label()) || has(n.value()) || has(n.description()))).count();
+    let app = h.state();
+    tree > 0
+        || photocraft_ui_egui::control::inspect(app, &h.ctx).to_string().contains(secret)
+        || serde_json::to_string(&app.ui).unwrap().contains(secret)
+        || serde_json::to_string(app.session.prefs()).unwrap().contains(secret)
+}
+
+/// Save what the window looks like, when `PIGMENT_AI_EVIDENCE_DIR` names a folder for it.
+fn evidence(h: &mut Harness, name: &str) {
+    if let Some(dir) = std::env::var_os("PIGMENT_AI_EVIDENCE_DIR") {
+        std::fs::create_dir_all(&dir).unwrap();
+        h.render().expect("offscreen UI render").save(std::path::Path::new(&dir).join(format!("{name}.png"))).unwrap();
+    }
+}
+
+/// AI Accounts' Sign in with ChatGPT, marked experimental: the button starts the attempt and
+/// the tab waits for the browser; once the browser lands on the loopback callback the account
+/// shows with its e-mail address, for chat models only; the tokens and the sign-in address show
+/// nowhere; Sign Out removes it.
+#[test]
+fn sign_in_with_chatgpt_from_ai_accounts() {
+    let server = plan_server();
+    let mut h = plan_harness(&server);
+    if !accounts::sign_in_offered(h.state()) {
+        return; // Built without Sign in with ChatGPT.
+    }
+    invoke(&mut h, "ai.accounts").unwrap();
+    assert!(h.query_by_label("Experimental").is_some(), "the row is marked experimental");
+    assert!(server.log.lock().unwrap().is_empty(), "opening sends nothing");
+    evidence(&mut h, "accounts-sign-in-offered");
+    h.get_by_label("Sign in with ChatGPT").click();
+    h.run_steps(3);
+    assert!(h.query_by_label_contains("Waiting for your browser").is_some());
+    let st = accounts::sign_in_status(h.state());
+    let url = st.url.clone().unwrap();
+    assert!(st.pending && st.warning.is_none() && url.contains("client_id=dynamic_agent_client"), "{st:?}");
+    assert!(!shows(&h, &param(&url, "state")), "the sign-in address names the attempt: it is not shown");
+    evidence(&mut h, "accounts-sign-in-waiting");
+    assert!(server.log.lock().unwrap().is_empty(), "Pigment sends nothing: the browser signs in");
+    let page = browser_lands(&server, &url);
+    assert!(page.contains("You can return to Pigment"), "{page}");
+    h.run_steps(4);
+    assert!(h.query_by_label("Signed in with ChatGPT as me@example.com.").is_some());
+    assert!(h.query_by_label_contains("Signed in with ChatGPT · me@example.com").is_some());
+    evidence(&mut h, "accounts-signed-in");
+    assert!(h.query_by_label("Sign in with ChatGPT").is_none() && h.query_by_label_contains("Waiting for your browser").is_none());
+    assert!(ai_ui::fits(h.state(), photocraft_engine::generative::ModelKind::Chat), "chat models");
+    assert!(!ai_ui::fits(h.state(), photocraft_engine::generative::ModelKind::Image), "never image models");
+    let status = h.state_mut().run("ai.status", json!({})).unwrap();
+    let openai = &status["providers"][0];
+    assert_eq!((&openai["connected"], &openai["chatCapable"], &openai["imageCapable"]), (&json!(true), &json!(true), &json!(false)), "{openai}");
+    for secret in ["access-token-ONE", "refresh-token-ONE", "the-code"] {
+        assert!(!shows(&h, secret) && !status.to_string().contains(secret), "{secret}");
+    }
+    assert!(!status.to_string().contains("me@example.com"), "agents don't learn whose account it is");
+    h.get_by_label("Sign Out").click();
+    h.run_steps(3);
+    assert!(h.query_by_label("Signed out of ChatGPT.").is_some() && h.query_by_label("Not connected.").is_some());
+    assert!(!ai_ui::fits(h.state(), photocraft_engine::generative::ModelKind::Chat));
+}
+
+/// The pasted address finishes a sign-in (a browser on another computer): another attempt's is
+/// refused and the attempt goes on; Cancel ends it. An agent's clicks neither start a sign-in
+/// nor cancel one nor sign out: the account is the person's.
+#[test]
+fn the_pasted_address_finishes_a_sign_in_and_agents_cannot_start_or_end_one() {
+    let server = plan_server();
+    let mut h = plan_harness(&server);
+    if !accounts::sign_in_offered(h.state()) {
+        return;
+    }
+    invoke(&mut h, "ai.accounts").unwrap();
+    synthetic_click(&mut h, "Sign in with ChatGPT");
+    assert!(!accounts::sign_in_status(h.state()).pending, "an agent's click starts nothing");
+    pointer_click(&mut h, "Sign in with ChatGPT");
+    let url = accounts::sign_in_status(h.state()).url.unwrap();
+    synthetic_click(&mut h, "Cancel");
+    assert!(accounts::sign_in_status(h.state()).pending, "nor does it cancel");
+    // Another attempt's address is refused; this one's finishes the sign-in.
+    let field = "Browser on another computer? Paste the callback address here:";
+    let finish = |h: &mut Harness, address: &str| {
+        type_into(h, field, address);
+        h.get_by_label("Use").click();
+        h.run_steps(2);
+        while accounts::busy(h.state()).is_some() {
+            accounts::wait(h.state_mut(), Duration::from_millis(20));
+            h.run_steps(1);
+        }
+        h.run_steps(3);
+    };
+    finish(&mut h, "code=c&state=someone-elses");
+    assert!(h.query_by_label_contains("another sign-in attempt").is_some());
+    assert!(accounts::sign_in_status(h.state()).pending);
+    *server.nonce.lock().unwrap() = param(&url, "nonce");
+    finish(&mut h, &format!("{}?code=the-code&state={}&client_id=oaiapp_42", param(&url, "redirect_uri"), param(&url, "state")));
+    assert!(h.query_by_label("Signed in with ChatGPT as me@example.com.").is_some());
+    assert!(!shows(&h, "the-code"), "the pasted address is wiped");
+    synthetic_click(&mut h, "Sign Out");
+    assert!(h.query_by_label_contains("Signed in with ChatGPT · me@example.com").is_some(), "an agent can't sign the person out");
+    // Cancel, from the person.
+    pointer_click(&mut h, "Sign Out");
+    pointer_click(&mut h, "Sign in with ChatGPT");
+    assert!(accounts::sign_in_status(h.state()).pending);
+    pointer_click(&mut h, "Cancel");
+    assert!(!accounts::sign_in_status(h.state()).pending && h.query_by_label("Sign in with ChatGPT").is_some());
+}
+
+/// With a ChatGPT sign-in the Assistant and Describe Image run on the plan route, and the image
+/// features ask for an API key before anything is sent, as in the JavaScript app. A sign-in
+/// that completes while AI Accounts is closed is still noticed.
+#[test]
+fn a_sign_in_serves_the_assistant_and_describe_and_images_ask_for_a_key() {
+    let server = plan_server();
+    let mut h = plan_harness(&server);
+    if !accounts::sign_in_offered(h.state()) {
+        return;
+    }
+    invoke(&mut h, "ai.accounts").unwrap();
+    let url = accounts::start_sign_in(h.state_mut()).unwrap();
+    accounts::close(h.state_mut());
+    assert!(browser_lands(&server, &url).contains("now connected"));
+    h.run_steps(3);
+    assert_eq!(h.state().ui.status, "Signed in with ChatGPT as me@example.com.", "said in the status bar when the dialog is closed");
+    // The Assistant.
+    ai_ui::assistant::open(h.state_mut());
+    assert_eq!(ai_ui::assistant::provider(h.state()), Some(ProviderId::OpenAi));
+    assert!(ai_ui::assistant::send(h.state_mut(), "Say hello").unwrap());
+    for _ in 0..2000 {
+        h.run_steps(1);
+        if !ai_ui::assistant::running(h.state()) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let last = ai_ui::assistant::messages(h.state()).last().unwrap();
+    assert!(!last.error && last.text == "Hello from the plan.", "{:?}", last.text);
+    // Describe Image.
+    describe::start(h.state_mut()).unwrap();
+    until_idle(&mut h);
+    assert_eq!(h.state().ai.describe.text.as_ref().map(|t| t.0.as_str()), Some("Hello from the plan."));
+    let asked: Vec<(String, String)> = server.log.lock().unwrap().iter().filter(|(p, _)| p == "/v1/responses").cloned().collect();
+    assert_eq!(asked.len(), 2);
+    assert!(asked.iter().all(|(_, bearer)| bearer == "access-token-ONE"), "with the plan's token");
+    // Image features: the window says a key is needed, and nothing is sent.
+    let before = server.log.lock().unwrap().len();
+    h.state_mut().run("select.rect", json!({"x": 10, "y": 10, "width": 30, "height": 30})).unwrap();
+    ai_ui::menu(h.state_mut(), "ai.generativeFill", &json!({"prompt": "clouds"})).unwrap().unwrap();
+    h.run_steps(3);
+    assert!(generate::blocked(h.state()).unwrap_or_default().contains("API key"));
+    let refused = h.state_mut().run("ai.generativeFill", json!({"prompt": "clouds", "provider": "openai"})).unwrap_err();
+    assert!(refused.contains("not connected for image models"), "{refused}");
+    assert_eq!(server.log.lock().unwrap().len(), before, "nothing sent");
+    assert_eq!(layer_names(h.state()).len(), 1);
 }

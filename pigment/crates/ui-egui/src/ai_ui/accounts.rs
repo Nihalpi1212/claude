@@ -9,6 +9,14 @@
 //! model list, on a worker thread) and stores it only when the provider accepts it; the field is
 //! wiped either way, and afterwards the dialog shows only the key's last four characters. Nothing
 //! but that check goes to a provider from here.
+//!
+//! **Sign in with ChatGPT** (OpenAI's tab, marked experimental; `pigment_genai::chatgpt`) uses
+//! the person's ChatGPT plan for chat models only. The button starts the attempt and opens the
+//! browser; while it waits the tab shows Copy Link, Cancel and a field for the address the
+//! browser landed on (a browser on another computer, or every loopback port taken). The tokens
+//! stay in the key store: the interface holds the address to open and, afterwards, the account's
+//! e-mail address. With the feature off ([`pigment_genai::chatgpt::ENABLED`], or
+//! `"chatgptSignIn": false` in `ai.json`) the tab has no such rows.
 
 use std::collections::BTreeMap;
 use std::sync::mpsc::{Receiver, TryRecvError};
@@ -16,7 +24,7 @@ use std::time::Duration;
 
 use photocraft_engine::generative::ProviderId;
 use pigment_genai::provider::{ModelInfo, ModelKind, pick_model};
-use pigment_genai::{AccountStatus, AiError, CancelToken};
+use pigment_genai::{AccountStatus, AiError, CancelToken, Method};
 
 use super::{message, refresh, with_accounts};
 use crate::PhotocraftApp;
@@ -40,6 +48,8 @@ pub enum Work {
     Connect,
     /// Listing the models with the stored key.
     Test,
+    /// Finishing Sign in with ChatGPT with the pasted address (the code exchange).
+    SignIn,
 }
 
 /// A worker thread's request and how to stop it.
@@ -56,6 +66,9 @@ pub(crate) struct Form {
     pub provider: ProviderId,
     /// The key being typed (masked). Wiped once sent to be checked, and with the dialog.
     pub key: String,
+    /// Sign in with ChatGPT: the pasted address of the page the browser landed on. Wiped once
+    /// used, and with the dialog.
+    pub callback: String,
     pub chat_model: String,
     pub image_model: String,
     pub timeout: u64,
@@ -75,6 +88,7 @@ impl Drop for Form {
     /// overwritten, not only forgotten.
     fn drop(&mut self) {
         wipe(&mut self.key);
+        wipe(&mut self.callback);
         if let Some(b) = &self.busy {
             b.cancel.cancel();
         }
@@ -104,6 +118,7 @@ pub fn open(app: &mut PhotocraftApp, reason: Option<String>) {
         let mut f = Form {
             provider,
             key: String::new(),
+            callback: String::new(),
             chat_model: String::new(),
             image_model: String::new(),
             timeout,
@@ -247,13 +262,131 @@ pub fn test(app: &mut PhotocraftApp) {
     }
 }
 
+/// Whether AI Accounts offers Sign in with ChatGPT (the feature is on for these accounts).
+pub fn sign_in_offered(app: &PhotocraftApp) -> bool {
+    app.ai.chatgpt.as_ref().is_some_and(|c| c.enabled())
+}
+
+/// The sign-in attempt in progress, as the dialog shows it.
+pub fn sign_in_status(app: &PhotocraftApp) -> pigment_genai::chatgpt::SignInStatus {
+    app.ai.chatgpt.as_ref().map(|c| c.status()).unwrap_or_default()
+}
+
+/// Sign in with ChatGPT: start the attempt (the loopback listener) and return the address to
+/// open in a browser. Nothing is sent from here; the browser does the signing in.
+pub fn start_sign_in(app: &mut PhotocraftApp) -> Option<String> {
+    match with_accounts(app, |a| a.sign_in(None))? {
+        Ok(st) => {
+            app.ai.sign_in_watch = true;
+            if let Some(f) = app.ai.accounts.as_mut() {
+                f.message = None;
+            }
+            st.url
+        }
+        Err(e) => {
+            note(app, true, message(&e.message));
+            None
+        }
+    }
+}
+
+/// Cancel the sign-in attempt in progress.
+pub fn cancel_sign_in(app: &mut PhotocraftApp) {
+    if let Some(c) = &app.ai.chatgpt {
+        c.cancel();
+    }
+    if let Some(f) = app.ai.accounts.as_mut() {
+        wipe(&mut f.callback);
+        f.message = None;
+    }
+}
+
+/// Type `address` into the pasted-address field (tests).
+pub fn set_pasted_address(app: &mut PhotocraftApp, address: &str) {
+    if let Some(f) = app.ai.accounts.as_mut() {
+        wipe(&mut f.callback);
+        f.callback.push_str(address);
+    }
+}
+
+/// Use: finish the sign-in with the pasted address. The code exchange runs on a worker thread.
+pub fn use_pasted_address(app: &mut PhotocraftApp) {
+    let Some(chatgpt) = app.ai.chatgpt.clone() else { return };
+    let Some(f) = app.ai.accounts.as_mut() else { return };
+    if f.busy.is_some() {
+        return;
+    }
+    let mut pasted = std::mem::take(&mut f.callback);
+    let p = f.provider;
+    let (tx, rx) = std::sync::mpsc::channel();
+    let spawned = std::thread::Builder::new().name("pigment-ai-sign-in-paste".into()).spawn(move || {
+        let r = chatgpt.complete_manual(&pasted).map(|_| Vec::new());
+        wipe(&mut pasted);
+        let _ = tx.send(r);
+    });
+    match spawned {
+        Ok(_) => {
+            app.ai.sign_in_watch = true;
+            if let Some(f) = app.ai.accounts.as_mut() {
+                f.busy = Some(Busy { work: Work::SignIn, provider: p, rx, cancel: CancelToken::new() });
+                f.message = None;
+            }
+        }
+        Err(e) => note(app, true, e.to_string()),
+    }
+}
+
+/// Sign Out of ChatGPT: the tokens leave the key store. Nothing is revoked at OpenAI.
+pub fn sign_out(app: &mut PhotocraftApp) {
+    let r = with_accounts(app, |a| a.sign_out());
+    reread(app);
+    match r {
+        Some(Ok(())) => note(app, false, tl!("Signed out of ChatGPT.").into()),
+        Some(Err(e)) => note(app, true, message(&e.message)),
+        None => {}
+    }
+}
+
+/// Take the outcome of a sign-in attempt started here, once it has one: the account shows in
+/// the dialog, the menus and the windows, and a failure is said (in the dialog, or in the
+/// status bar when it is closed).
+fn poll_sign_in(app: &mut PhotocraftApp) {
+    if !app.ai.sign_in_watch {
+        return;
+    }
+    let Some(chatgpt) = app.ai.chatgpt.clone() else { return };
+    if chatgpt.status().pending {
+        return;
+    }
+    app.ai.sign_in_watch = false;
+    let Some(outcome) = chatgpt.take_outcome() else { return };
+    reread(app);
+    let (error, text) = match outcome {
+        Ok(who) => {
+            let text = match who.email.as_deref() {
+                Some(email) => crate::i18n::fmt(tl!("Signed in with ChatGPT as {email}."), &[("email", email)]),
+                None => tl!("Signed in with ChatGPT.").to_string(),
+            };
+            (false, text)
+        }
+        Err(e) if e.kind == pigment_genai::ErrorKind::Cancelled => return,
+        Err(e) => (true, message(&e.message)),
+    };
+    if app.ai.accounts.is_some() {
+        note(app, error, text);
+    } else {
+        app.ui.status = text;
+    }
+}
+
 /// What the worker is doing, if anything.
 pub fn busy(app: &PhotocraftApp) -> Option<Work> {
     app.ai.accounts.as_ref().and_then(|f| f.busy.as_ref()).map(|b| b.work)
 }
 
-/// Take the worker's answer when it has one (once per frame).
+/// Take the worker's answer when it has one (once per frame), and a sign-in attempt's outcome.
 pub fn poll(app: &mut PhotocraftApp) {
+    poll_sign_in(app);
     let Some(f) = app.ai.accounts.as_mut() else { return };
     let Some(b) = &f.busy else { return };
     let r = match b.rx.try_recv() {
@@ -282,6 +415,15 @@ pub fn wait(app: &mut PhotocraftApp, timeout: Duration) -> bool {
 
 fn finished(app: &mut PhotocraftApp, work: Work, p: ProviderId, r: Result<Vec<ModelInfo>, AiError>) {
     reread(app);
+    if work == Work::SignIn {
+        // A sign-in that ended (signed in, or failed for good) is said by `poll_sign_in`; an
+        // address that was refused while the attempt goes on (another attempt's, unreadable)
+        // is said here.
+        if let Err(e) = r {
+            note(app, true, message(&e.message));
+        }
+        return poll_sign_in(app);
+    }
     match r {
         Ok(models) => {
             let n = models.len();
@@ -290,6 +432,7 @@ fn finished(app: &mut PhotocraftApp, work: Work, p: ProviderId, r: Result<Vec<Mo
             }
             let text = match work {
                 Work::Connect => crate::i18n::fmt(tl!("{provider} connected."), &[("provider", p.label())]),
+                Work::SignIn => return,
                 Work::Test => crate::i18n::fmt(
                     &crate::i18n::trn(
                         crate::i18n::current(),
@@ -381,12 +524,22 @@ enum Act {
     Timeout(u64),
     SaveModels,
     Link(&'static str),
+    /// Sign in with ChatGPT: start, copy the address to open, use the pasted one, cancel, sign out.
+    SignIn,
+    SignInCopy,
+    SignInUse,
+    SignInCancel,
+    SignOut,
     Close,
 }
 
 /// Draw AI Accounts while it is open.
 pub(crate) fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
     poll(app);
+    if app.ai.sign_in_watch {
+        // The callback lands without any input here: look again soon.
+        ctx.request_repaint_after(Duration::from_millis(250));
+    }
     if app.ai.accounts.is_none() {
         return;
     }
@@ -427,6 +580,21 @@ pub(crate) fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
             Act::Link(url) => {
                 crate::links::open(app, ctx, url);
             }
+            Act::SignIn => {
+                if let Some(url) = start_sign_in(app) {
+                    open_sign_in_page(app, ctx, &url);
+                }
+            }
+            Act::SignInCopy => match sign_in_status(app).url {
+                Some(url) => {
+                    ctx.copy_text(url);
+                    note(app, false, tl!("Link copied; open it in any browser.").into());
+                }
+                None => note(app, true, tl!("The sign-in link is not ready yet.").into()),
+            },
+            Act::SignInUse => use_pasted_address(app),
+            Act::SignInCancel => cancel_sign_in(app),
+            Act::SignOut => sign_out(app),
             Act::Close => close(app),
         }
     }
@@ -436,6 +604,16 @@ pub(crate) fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
     if app.ai.accounts.as_ref().is_some_and(|f| f.busy.is_some()) {
         ctx.request_repaint_after(Duration::from_millis(100));
     }
+}
+
+/// Open the sign-in page in the system browser. The address is not written to the status bar
+/// (it names the attempt, which is nobody else's business); Copy Link gives it to the person.
+fn open_sign_in_page(app: &mut PhotocraftApp, ctx: &egui::Context, url: &str) {
+    let opened = app.services.open_url.as_ref().map(|f| f(url).is_ok()).unwrap_or(false);
+    if !opened {
+        ctx.open_url(egui::OpenUrl::new_tab(url));
+    }
+    app.ui.status = tl!("Opened the ChatGPT sign-in page in your browser").to_string();
 }
 
 fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, acts: &mut Vec<Act>) {
@@ -506,7 +684,22 @@ fn key_rows(app: &mut PhotocraftApp, ui: &mut egui::Ui, acts: &mut Vec<Act>) {
     let p = f.provider;
     let status = f.status.iter().find(|s| s.provider == p).cloned();
     let connected = status.as_ref().is_some_and(|s| s.connected);
+    let method = status.as_ref().and_then(|s| s.method);
     let state = match &status {
+        Some(s) if method == Some(Method::Chatgpt) => {
+            let mut text = tl!("Signed in with ChatGPT").to_string();
+            if let Some(email) = &s.email {
+                text.push_str(" · ");
+                text.push_str(email);
+            }
+            if s.plan == Some(false) {
+                text.push_str(" · ");
+                text.push_str(tl!("plan access not granted"));
+            }
+            text.push_str(". ");
+            text.push_str(&crate::i18n::fmt(tl!("The sign-in is kept in {store}."), &[("store", store_name(s.backend))]));
+            text
+        }
         Some(s) if s.connected && !s.hint.is_empty() => crate::i18n::fmt(
             tl!("Connected with an API key (ends in …{hint}), kept in {store}."),
             &[("hint", s.hint.as_str()), ("store", store_name(s.backend))],
@@ -544,7 +737,7 @@ fn key_rows(app: &mut PhotocraftApp, ui: &mut egui::Ui, acts: &mut Vec<Act>) {
         if busy.is_some() {
             ui.add(egui::Spinner::new().size(14.0));
         }
-        if ui.add_enabled(connected && busy.is_none(), egui::Button::new(tl!("Remove Key"))).clicked() {
+        if ui.add_enabled(method == Some(Method::ApiKey) && busy.is_none(), egui::Button::new(tl!("Remove Key"))).clicked() {
             acts.push(Act::RemoveKey);
         }
         let page = key_page(p);
@@ -552,9 +745,70 @@ fn key_rows(app: &mut PhotocraftApp, ui: &mut egui::Ui, acts: &mut Vec<Act>) {
             acts.push(Act::Link(page));
         }
     });
+    if p == ProviderId::OpenAi && sign_in_offered(app) {
+        sign_in_rows(app, ui, acts, method);
+    }
     let mut use_it = status.as_ref().is_some_and(|s| s.is_default);
     if ui.checkbox(&mut use_it, tl!("Preferred provider for the AI commands")).changed() && use_it {
         acts.push(Act::Default(p));
+    }
+}
+
+/// OpenAI's Sign in with ChatGPT rows: the button, the waiting card, or Sign Out.
+fn sign_in_rows(app: &mut PhotocraftApp, ui: &mut egui::Ui, acts: &mut Vec<Act>, method: Option<Method>) {
+    let t = Tokens::get(ui.ctx());
+    let faint = |s: &str| egui::RichText::new(s).color(t.text_faint).small();
+    let pending = sign_in_status(app);
+    let Some(f) = app.ai.accounts.as_mut() else { return };
+    let busy = f.busy.is_some();
+    ui.add_space(4.0);
+    if method == Some(Method::Chatgpt) {
+        ui.horizontal(|ui| {
+            if ui.add_enabled(!busy, egui::Button::new(tl!("Sign Out"))).clicked() {
+                acts.push(Act::SignOut);
+            }
+            ui.label(egui::RichText::new(tl!("Experimental")).color(t.accent_text).small());
+        });
+        ui.label(faint(tl!(
+            "A ChatGPT plan covers chat models only: the Assistant and Describe Image. Image models (Generative Fill, Generate Image and the others) need an API key; connecting one replaces the sign-in."
+        )));
+    } else if pending.pending {
+        ui.label(tl!("Waiting for your browser… finish signing in to ChatGPT there, then come back."));
+        if let Some(warning) = &pending.warning {
+            ui.label(egui::RichText::new(warning).color(ui.visuals().warn_fg_color));
+        }
+        ui.horizontal(|ui| {
+            if ui.button(tl!("Copy Link")).clicked() {
+                acts.push(Act::SignInCopy);
+            }
+            if ui.button(tl!("Cancel")).clicked() {
+                acts.push(Act::SignInCancel);
+            }
+            if busy {
+                ui.add(egui::Spinner::new().size(14.0));
+            }
+        });
+        let label = ui.label(tl!("Browser on another computer? Paste the callback address here:"));
+        ui.horizontal(|ui| {
+            let hint = tl!("Paste the address of the page the browser landed on");
+            let r = ui.add(egui::TextEdit::singleline(&mut f.callback).desired_width(330.0).hint_text(hint).char_limit(8192)).labelled_by(label.id);
+            let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            let can = !f.callback.trim().is_empty() && !busy;
+            let clicked = ui.add_enabled(can, egui::Button::new(tl!("Use"))).clicked();
+            if (clicked || enter) && can {
+                acts.push(Act::SignInUse);
+            }
+        });
+    } else if method.is_none() {
+        ui.horizontal(|ui| {
+            if ui.add_enabled(!busy, egui::Button::new(tl!("Sign in with ChatGPT"))).clicked() {
+                acts.push(Act::SignIn);
+            }
+            ui.label(egui::RichText::new(tl!("Experimental")).color(t.accent_text).small());
+        });
+        ui.label(faint(tl!(
+            "Uses your ChatGPT Plus or Pro plan for chat models: the Assistant and Describe Image. Image models need an API key. This sign-in is not a documented OpenAI service and may stop working."
+        )));
     }
 }
 
@@ -568,10 +822,14 @@ fn model_rows(app: &mut PhotocraftApp, ui: &mut egui::Ui, acts: &mut Vec<Act>) {
             (tl!("Chat model"), &mut f.chat_model, ModelKind::Chat, status.as_ref().map(|s| s.chat_model.clone()).unwrap_or_default()),
             (tl!("Image model"), &mut f.image_model, ModelKind::Image, status.as_ref().map(|s| s.image_model.clone()).unwrap_or_default()),
         ];
+        // A ChatGPT sign-in runs no image model: the field says so and takes nothing.
+        let chat_only = status.as_ref().is_some_and(|s| s.method == Some(Method::Chatgpt));
         for (label, field, want, shown) in rows {
             let l = ui.label(label);
-            let hint = crate::i18n::fmt(tl!("automatic ({model})"), &[("model", &shown)]);
-            let r = ui.add_sized(egui::vec2(230.0, 22.0), egui::TextEdit::singleline(field).hint_text(hint).char_limit(120)).labelled_by(l.id);
+            let needs_key = chat_only && want == ModelKind::Image;
+            let hint = if needs_key { tl!("Needs an API key").to_string() } else { crate::i18n::fmt(tl!("automatic ({model})"), &[("model", &shown)]) };
+            let edit = egui::TextEdit::singleline(field).hint_text(hint).char_limit(120).interactive(!needs_key);
+            let r = ui.add_sized(egui::vec2(230.0, 22.0), edit).labelled_by(l.id);
             if r.lost_focus() {
                 acts.push(Act::SaveModels);
             }
