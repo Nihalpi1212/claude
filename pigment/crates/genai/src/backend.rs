@@ -252,6 +252,14 @@ impl GenerativeBackend for GenAiBackend {
         status_of(&a)
     }
 
+    /// The caller check, before the job starts (it is made again before sending). The person's
+    /// interface holds its agents to "Allow agents to run AI commands" itself (`ai_ui`).
+    fn admit(&self, _automated: bool) -> std::result::Result<(), GenError> {
+        let mut a = lock(self.accounts());
+        a.reload();
+        self.allowed(&a).map_err(GenError::from)
+    }
+
     fn edit_image(&self, req: &ImageEdit, cancelled: &dyn Fn() -> bool) -> std::result::Result<Rgba8Image, GenError> {
         self.edit(req, cancelled).map_err(GenError::from)
     }

@@ -20,7 +20,11 @@
 //!   stays exact.
 //! - Images go out as sRGB 8-bit, at most [`SEND_MAX_EDGE`] pixels a side (the backend may scale
 //!   further); answers are checked for size and scaled back to the region.
-//! - **Not recorded into Actions** ([`unrecorded`]): playing an action never spends money.
+//! - **Never from an action.** A command that sends is not recorded into Actions
+//!   ([`unrecorded`]) and is refused while an action, a batch, a droplet or an event's script
+//!   plays ([`NOT_FROM_ACTIONS`]), whoever plays it: playing one never spends money.
+//! - **The backend admits the caller** ([`GenerativeBackend::admit`]) before the job starts, with
+//!   whether the session runs under an automation gate: agents and the command line opt in.
 
 use std::sync::Arc;
 
@@ -67,10 +71,14 @@ pub const COMMANDS: &[&str] = &[
     "ai.testConnection",
 ];
 
-/// Whether a journal entry stays out of a recorded action: every `ai.*` command, so playing an
-/// action (or a batch, or a droplet) never calls a provider by surprise.
-pub fn unrecorded(id: &str) -> bool {
-    id.starts_with("ai.")
+/// Why a command that sends is refused while an action or an event's script plays.
+pub const NOT_FROM_ACTIONS: &str = "AI commands that send to your AI provider do not run from an action, a batch, a droplet or a script event, so playing one never spends money. Run the command itself.";
+
+/// Whether a journal entry stays out of a recorded action: every command that may send
+/// ([`may_send`]), so playing an action (or a batch, or a droplet) never calls a provider by
+/// surprise. The local Remove Background sends nothing and is recorded, as PhotoCraft's own is.
+pub fn unrecorded(id: &str, params: &Value) -> bool {
+    may_send(id, params)
 }
 
 /// Whether running `id` with `params` may send something to an AI provider (and so be billed):
@@ -160,10 +168,26 @@ fn prompt(cmd: &str, p: &Value, default: Option<&str>) -> Result<String> {
     Ok(text.chars().take(PROMPT_LIMIT).collect())
 }
 
-/// The backend and the choice a request goes out with, after the checks every provider command
-/// makes before sending: a backend, consent and a provider that fits `kind`.
-fn prepare(s: &Session, cmd: &str, p: &Value, kind: ModelKind) -> Result<(Arc<dyn GenerativeBackend>, Choice)> {
+/// The installed backend, for a command that is about to send. Refused while an action (also a
+/// batch's or a droplet's) or an event's script plays, whoever started it: nobody watches each
+/// step of one, and an action can come from a file or from an agent. Then the backend admits the
+/// caller ([`GenerativeBackend::admit`]), asked here, on the calling thread, with whether the
+/// session runs under an automation gate, so a command an agent reaches through another one (a
+/// script's step) is held to the same rule as the agent's own request.
+fn admitted(s: &Session) -> Result<Arc<dyn GenerativeBackend>> {
     let b = backend(s)?;
+    if s.actions.playing > 0 || s.file_menu.firing {
+        return Err(generative_error(kind::NOT_ALLOWED, NOT_FROM_ACTIONS));
+    }
+    b.admit(s.authorize.is_some())?;
+    Ok(b)
+}
+
+/// The backend and the choice a request goes out with, after the checks every provider command
+/// makes before sending: a backend that admits the caller, consent and a provider that fits
+/// `kind`.
+fn prepare(s: &Session, cmd: &str, p: &Value, kind: ModelKind) -> Result<(Arc<dyn GenerativeBackend>, Choice)> {
+    let b = admitted(s)?;
     let mut choice = choice(cmd, p)?;
     choice.provider = Some(crate::generative::resolve_provider(&b.status(), &choice, kind)?);
     Ok((b, choice))

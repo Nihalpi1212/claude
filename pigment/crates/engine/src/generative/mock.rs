@@ -59,6 +59,10 @@ struct State {
     calls: Vec<MockCall>,
     delay: Duration,
     hook: Option<Arc<dyn Fn() + Send + Sync>>,
+    /// Refuse automated callers in [`GenerativeBackend::admit`].
+    refuse_automated: bool,
+    /// What each [`GenerativeBackend::admit`] was asked, oldest first.
+    admitted: Vec<bool>,
 }
 
 /// The scripted backend. Cheap to share: wrap it in an `Arc` and keep a clone to inspect.
@@ -101,7 +105,17 @@ impl MockBackend {
     }
 
     pub fn with_status(status: BackendStatus) -> Self {
-        Self { state: Mutex::new(State { status, script: VecDeque::new(), calls: Vec::new(), delay: Duration::ZERO, hook: None }) }
+        Self {
+            state: Mutex::new(State {
+                status,
+                script: VecDeque::new(),
+                calls: Vec::new(),
+                delay: Duration::ZERO,
+                hook: None,
+                refuse_automated: false,
+                admitted: Vec::new(),
+            }),
+        }
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, State> {
@@ -132,6 +146,17 @@ impl MockBackend {
     /// job from here).
     pub fn set_hook(&self, hook: Option<Arc<dyn Fn() + Send + Sync>>) {
         self.lock().hook = hook;
+    }
+
+    /// Refuse (or admit again) callers that run under an automation gate, as an agent gate
+    /// does without "Allow agents to run AI commands".
+    pub fn set_refuse_automated(&self, refuse: bool) {
+        self.lock().refuse_automated = refuse;
+    }
+
+    /// The `automated` flag of every admission asked so far, oldest first.
+    pub fn admitted(&self) -> Vec<bool> {
+        self.lock().admitted.clone()
     }
 
     /// Every call so far, oldest first.
@@ -216,6 +241,15 @@ fn call(op: &'static str, choice: &super::Choice, prompt: &str) -> MockCall {
 impl GenerativeBackend for MockBackend {
     fn status(&self) -> BackendStatus {
         self.lock().status.clone()
+    }
+
+    fn admit(&self, automated: bool) -> Result<(), GenError> {
+        let mut st = self.lock();
+        st.admitted.push(automated);
+        if automated && st.refuse_automated {
+            return Err(GenError::new(super::kind::NOT_ALLOWED, "Agents may not run AI commands (mock)."));
+        }
+        Ok(())
     }
 
     fn edit_image(&self, req: &ImageEdit, cancelled: &dyn Fn() -> bool) -> Result<Rgba8Image, GenError> {

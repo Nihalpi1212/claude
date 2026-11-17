@@ -755,7 +755,27 @@ fn ai_commands_are_not_recorded_into_actions() {
     let a = s.actions.list.iter().find(|a| a.name == "A").unwrap();
     let ids: Vec<&str> = a.steps.iter().map(|(id, _)| id.as_str()).collect();
     assert_eq!(ids, ["image.adjustments.invert"]);
-    assert!(unrecorded("ai.generativeFill") && !unrecorded("layer.removeBackground"));
+    assert!(unrecorded("ai.generativeFill", &json!({})) && !unrecorded("layer.removeBackground", &json!({})));
+}
+
+/// The local Remove Background sends nothing, so it is recorded like PhotoCraft's own
+/// `layer.removeBackground`, and plays (locally) from the action.
+#[test]
+fn the_local_remove_background_is_recorded_and_plays() {
+    let mut s = disc();
+    let mock = install(&mut s, MockBackend::connected());
+    s.execute("actions.record", json!({"name": "Cut out"})).unwrap();
+    s.execute("ai.removeBackground", json!({"method": "local"})).unwrap();
+    s.execute("actions.stop", json!({})).unwrap();
+    let a = s.actions.list.iter().find(|a| a.name == "Cut out").unwrap();
+    assert_eq!(a.steps, vec![("ai.removeBackground".to_string(), json!({"method": "local"}))]);
+    assert!(!unrecorded("ai.removeBackground", &json!({})) && unrecorded("ai.removeBackground", &json!({"method": "provider"})));
+    s.execute("edit.undo", json!({})).unwrap();
+    assert!(s.active().unwrap().doc.layers[0].mask.is_none());
+    let played = s.execute("actions.play", json!({"action": "Cut out"})).unwrap();
+    assert!(played.get("failed").is_none(), "{played}");
+    assert!(s.active().unwrap().doc.layers[0].mask.is_some());
+    assert!(mock.calls().is_empty());
 }
 
 #[test]
@@ -766,4 +786,87 @@ fn which_calls_may_be_billed() {
     assert!(!may_send("ai.removeBackground", &json!({})));
     assert!(!may_send("ai.status", &json!({})));
     assert!(!may_send("layer.removeBackground", &json!({})));
+}
+
+/// The backend admits each caller before anything is sent, asked on the calling thread with
+/// whether an automation gate is installed: an agent's own request, and a step of a script an
+/// agent runs (which no interface gate sees), are refused when the backend says so, and send
+/// nothing; the person running the same script is admitted.
+#[test]
+fn an_automated_caller_is_admitted_by_the_backend_before_anything_is_sent() {
+    fn allow_all(_: &str, _: &Value) -> crate::Result<()> {
+        Ok(())
+    }
+    let mut s = rgb(32, 24);
+    let mock = install(&mut s, MockBackend::connected());
+    mock.set_refuse_automated(true);
+    select(&mut s, 4, 4, 8, 8);
+    let (rev, layers) = (revision(&s), layer_count(&s));
+    let script = json!({"steps": [{"command": "ai.generativeFill", "params": {"prompt": "x"}}]});
+
+    // An agent's request.
+    s.authorize = Some(allow_all);
+    let e = s.execute("ai.generativeFill", json!({"prompt": "x"})).unwrap_err();
+    assert_eq!(kind_of(&e), kind::NOT_ALLOWED, "{e}");
+    let e = s.execute("ai.testConnection", json!({})).unwrap_err();
+    assert_eq!(kind_of(&e), kind::NOT_ALLOWED, "{e}");
+    // A step of a script the agent runs.
+    let ran = s.execute("file.scripts.browse", script.clone()).unwrap();
+    assert_eq!(ran["ok"], false, "{ran}");
+    assert!(ran.to_string().contains("may not run AI commands"), "{ran}");
+    assert!(mock.calls().is_empty(), "nothing was sent: {:?}", mock.calls());
+    assert_eq!((revision(&s), layer_count(&s)), (rev, layers), "nothing changed");
+
+    // The person running it: admitted, and the step runs.
+    s.authorize = None;
+    let ran = s.execute("file.scripts.browse", script).unwrap();
+    assert_eq!(ran["ok"], true, "{ran}");
+    assert_eq!(mock.calls().len(), 1);
+    assert_eq!(mock.admitted(), vec![true, true, true, false], "asked for every call, with who asks");
+}
+
+/// Playing an action never spends money: a step that sends is refused inside an action, whoever
+/// plays it (a hand-built or loaded action can hold one; recording never stores one), and inside
+/// a script an event runs. The backend is not even asked, nothing is sent and nothing changes.
+#[test]
+fn a_step_that_sends_never_runs_from_an_action_or_an_event_script() {
+    let mut s = rgb(32, 24);
+    let mock = install(&mut s, MockBackend::connected());
+    select(&mut s, 4, 4, 8, 8);
+    let (rev, layers) = (revision(&s), layer_count(&s));
+    let action = |name: &str, id: &str, p: Value| crate::actions_cmds::Action::new(name, vec![(id.to_string(), p)]);
+    s.actions.list.push(action("Fill", "ai.generativeFill", json!({"prompt": "x"})));
+    s.actions.list.push(action("Describe", "ai.describe", json!({})));
+    s.actions.list.push(action("Cut out", "ai.removeBackground", json!({"method": "provider"})));
+    s.actions.list.push(action("Models", "ai.testConnection", json!({})));
+    for name in ["Fill", "Describe", "Cut out", "Models"] {
+        let played = s.execute("actions.play", json!({"action": name})).unwrap();
+        assert!(played["failed"]["error"].as_str().is_some_and(|m| m == super::NOT_FROM_ACTIONS), "{name}: {played}");
+    }
+    // An action that plays another one, and a script that plays an action.
+    s.actions.list.push(action("Outer", "actions.play", json!({"action": "Fill"})));
+    let played = s.execute("actions.play", json!({"action": "Outer"})).unwrap();
+    assert!(played.to_string().contains("do not run from an action"), "{played}");
+    let ran = s.execute("file.scripts.browse", json!({"steps": [["actions.play", {"action": "Fill"}]]})).unwrap();
+    assert!(ran.to_string().contains("do not run from an action"), "{ran}");
+    // A script bound to an event: New Document fires it.
+    s.execute(
+        "file.scripts.scriptEventsManager",
+        json!({"enabled": true, "add": {"event": "newDocument", "name": "Greeter", "steps": [["ai.generateImage", {"prompt": "x", "target": "document"}]]}}),
+    )
+    .unwrap();
+    let docs = s.documents().len();
+    s.execute("file.new", json!({"width": 8, "height": 8})).unwrap();
+    assert_eq!(s.documents().len(), docs + 1, "only the document asked for");
+    let log = s.file_menu.event_log.last().cloned().unwrap_or_default();
+    assert!(log.to_string().contains("do not run from an action"), "{log}");
+    s.execute("file.close", json!({"save": false})).ok();
+
+    assert!(mock.calls().is_empty(), "nothing was sent: {:?}", mock.calls());
+    assert!(mock.admitted().is_empty(), "refused before the backend is asked");
+    assert_eq!(s.actions.playing, 0);
+    // Outside an action the same command runs.
+    s.execute("ai.generativeFill", json!({"prompt": "x"})).unwrap();
+    assert_eq!(mock.calls().len(), 1);
+    let _ = (rev, layers);
 }

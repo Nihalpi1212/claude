@@ -44,10 +44,9 @@ fn harness(prepare: impl FnOnce(&mut PhotocraftApp) + 'static) -> Harness {
     h
 }
 
-/// Install `mock` as the session's backend.
+/// Install `mock` as the session's backend (behind the app's agents gate, as the real one is).
 fn with_mock(app: &mut PhotocraftApp, mock: &Arc<MockBackend>) {
-    app.session.set_generative(Some(Arc::clone(mock) as Arc<dyn photocraft_engine::generative::GenerativeBackend>));
-    ai_ui::refresh(app);
+    ai_ui::install_backend(app, Arc::clone(mock) as Arc<dyn photocraft_engine::generative::GenerativeBackend>);
 }
 
 /// Run menu command `id` as a menu click does.
@@ -287,6 +286,16 @@ fn ai_accounts_connects_a_key_that_never_shows_anywhere() {
     assert!(accounts::is_open(h.state()));
     assert!(paths.lock().unwrap().is_empty(), "opening sends nothing");
     type_into(&mut h, "API key", KEY);
+    // While it is typed the key is in the masked field only: not in the accessibility tree, not in
+    // what an agent can read of the interface.
+    let shown = h
+        .query_all(By::new().include_labels().predicate(|n| {
+            n.label().is_some_and(|l| l.contains(KEY)) || n.value().is_some_and(|v| v.contains(KEY)) || n.description().is_some_and(|d| d.contains(KEY))
+        }))
+        .count();
+    assert_eq!(shown, 0, "the accessibility tree while typing");
+    assert!(!photocraft_ui_egui::control::inspect(h.state(), &h.ctx).to_string().contains(KEY), "ui.inspect while typing");
+    assert!(!serde_json::to_string(&h.state().ui).unwrap().contains(KEY), "the interface state while typing");
     h.get_by_label("Connect").click();
     h.run_steps(2);
     for _ in 0..500 {
@@ -462,6 +471,204 @@ fn agents_need_permission_to_run_ai_commands() {
     with_mock(h.state_mut(), &mock);
     h.state_mut().run("ai.generativeFill", json!({"prompt": "y"})).unwrap();
     assert_eq!(mock.calls().len(), 2);
+}
+
+/// An agent can't get around the gate through another command: a script it runs with a step
+/// that sends is refused at that step while "Allow agents to run AI commands" is off (as the
+/// agent's own request is), and sends with it on. The person's own command right after is not
+/// taken for the agent's.
+#[test]
+fn an_agent_running_a_script_with_an_ai_step_needs_permission_too() {
+    let mock = Arc::new(MockBackend::connected());
+    let m = Arc::clone(&mock);
+    let mut h = harness(move |app| {
+        ai_ui::install_accounts(app, AiAccounts::in_memory());
+        with_mock(app, &m);
+        app.run("select.rect", json!({"x": 10, "y": 10, "width": 30, "height": 30})).unwrap();
+    });
+    let script = json!({"command": "file.scripts.browse", "params": {"steps": [["ai.generativeFill", {"prompt": "x"}]]}});
+    let v = control(&mut h, "engine.execute", script.clone());
+    until_idle(&mut h);
+    assert!(v.to_string().contains("Allow agents to run AI commands"), "the step is refused: {v}");
+    assert!(mock.calls().is_empty(), "nothing sent: {:?}", mock.calls());
+    assert_eq!(layer_names(h.state()).len(), 1, "nothing changed");
+    // The person's own command right after is theirs.
+    h.state_mut().run("ai.generativeFill", json!({"prompt": "y"})).unwrap();
+    until_idle(&mut h);
+    assert_eq!(mock.calls().len(), 1);
+    // With "Allow agents to run AI commands" on, the agent's script sends.
+    ai_ui::with_accounts(h.state(), |a| a.settings.allow_agents = true);
+    let v = control(&mut h, "engine.execute", script);
+    until_idle(&mut h);
+    assert!(!v.to_string().contains("Allow agents"), "{v}");
+    assert_eq!(mock.calls().len(), 2);
+}
+
+/// Playing an action never sends, whoever plays it and whatever the agents may do: a hand-built
+/// action holding a step that sends stops at that step, from the control channel and from the
+/// person's own Play alike.
+#[test]
+fn an_action_with_an_ai_step_never_sends() {
+    let mock = Arc::new(MockBackend::connected());
+    let m = Arc::clone(&mock);
+    let mut h = harness(move |app| {
+        let mut a = AiAccounts::in_memory();
+        a.settings.allow_agents = true;
+        ai_ui::install_accounts(app, a);
+        with_mock(app, &m);
+        app.run("select.rect", json!({"x": 10, "y": 10, "width": 30, "height": 30})).unwrap();
+        app.session.actions.list.push(photocraft_engine::actions_cmds::Action::new("Built", Vec::new()));
+    });
+    let insert = json!({"command": "actions.insert", "params": {"action": "Built", "id": "ai.generativeFill", "params": {"prompt": "x"}}});
+    let v = control(&mut h, "engine.execute", insert);
+    assert_eq!(v["ok"], true, "{v}");
+    let v = control(&mut h, "engine.execute", json!({"command": "actions.play", "params": {"action": "Built"}}));
+    until_idle(&mut h);
+    assert!(v.to_string().contains("do not run from an action"), "the agent's play stops at the step: {v}");
+    let v = h.state_mut().run("actions.play", json!({"action": "Built"}));
+    until_idle(&mut h);
+    assert!(format!("{v:?}").contains("do not run from an action"), "the person's play too: {v:?}");
+    assert!(mock.calls().is_empty(), "nothing sent: {:?}", mock.calls());
+    assert_eq!(layer_names(h.state()).len(), 1, "nothing changed");
+}
+
+/// Click `label` as an agent does: `ui.click` through the control channel, its events delivered
+/// in one frame the way the app's input hook delivers them (as automation's input).
+fn synthetic_click(h: &mut Harness, label: &str) {
+    let at = h.get_by_label(label).rect().center();
+    let ctx = h.ctx.clone();
+    let (req, _rx) = ControlRequest::new("ui.click", json!({"x": at.x, "y": at.y}));
+    assert!(matches!(handle(h.state_mut(), &ctx, &req), Outcome::AfterInput), "ui.click on {label}");
+    let events = h.state_mut().take_synthetic_step();
+    assert!(!events.is_empty());
+    h.input_mut().events.extend(events);
+    h.step();
+    h.run_steps(2);
+}
+
+/// The same click from the person's own pointer: the same events at the same place, in one
+/// frame, not marked as automation's.
+fn pointer_click(h: &mut Harness, label: &str) {
+    let pos = h.get_by_label(label).rect().center();
+    let button = |pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
+    h.input_mut().events.extend([egui::Event::PointerMoved(pos), button(true), button(false)]);
+    h.step();
+    h.run_steps(2);
+}
+
+/// Synthetic input can't spend the person's money or give itself the right to: an agent's click
+/// on Generate sends nothing while "Allow agents to run AI commands" is off, and its clicks in AI
+/// Accounts change neither the agreement nor that permission (it can still close the dialog). The
+/// person's own clicks do both.
+#[test]
+fn synthetic_input_neither_sends_nor_grants_itself_permission() {
+    let mock = Arc::new(MockBackend::connected());
+    let m = Arc::clone(&mock);
+    let mut h = harness(move |app| {
+        ai_ui::install_accounts(app, AiAccounts::in_memory());
+        with_mock(app, &m);
+        app.run("select.rect", json!({"x": 10, "y": 10, "width": 30, "height": 30})).unwrap();
+    });
+    ai_ui::menu(h.state_mut(), "ai.generativeFill", &json!({"prompt": "clouds"})).unwrap().unwrap();
+    h.run_steps(3);
+    synthetic_click(&mut h, "Generate");
+    until_idle(&mut h);
+    assert!(mock.calls().is_empty(), "nothing sent: {:?}", mock.calls());
+    let refused = h.state().ai.generate.error.as_ref().map(|e| e.message.clone()).unwrap_or_default();
+    assert!(refused.contains("Allow agents to run AI commands"), "the click reached Generate and was refused: {refused:?}");
+    assert_eq!(layer_names(h.state()).len(), 1, "nothing changed");
+
+    invoke(&mut h, "ai.accounts").unwrap();
+    let settings = |h: &Harness| ai_ui::with_accounts(h.state(), |a| (a.settings.consented, a.settings.allow_agents)).unwrap();
+    assert_eq!(settings(&h), (false, false));
+    synthetic_click(&mut h, accounts::CONSENT);
+    synthetic_click(&mut h, "Allow agents to run AI commands");
+    assert_eq!(settings(&h), (false, false), "an agent's clicks grant nothing");
+    // The person's clicks do: the very same pointer events, when they are not automation's.
+    pointer_click(&mut h, "Allow agents to run AI commands");
+    assert_eq!(settings(&h), (false, true));
+    pointer_click(&mut h, accounts::CONSENT);
+    assert_eq!(settings(&h), (true, true));
+    // And an agent can't take them back either.
+    synthetic_click(&mut h, accounts::CONSENT);
+    assert_eq!(settings(&h), (true, true));
+    // Closing is all synthetic input may do there.
+    synthetic_click(&mut h, "Done");
+    assert!(!accounts::is_open(h.state()), "the synthetic click does reach the dialog");
+    // With the permission given, the agent's Generate sends.
+    synthetic_click(&mut h, "Generate");
+    until_idle(&mut h);
+    assert_eq!(mock.calls().len(), 1);
+}
+
+/// Generate Image into a new document, as a background job (how the app runs it): the document
+/// appears with its one layer and the prompt as its description, the open document is left
+/// alone, and a stopped request makes no document.
+#[test]
+fn generate_image_makes_a_new_document_in_the_background() {
+    let mock = Arc::new(MockBackend::connected());
+    let m = Arc::clone(&mock);
+    let mut h = harness(move |app| {
+        with_mock(app, &m);
+        app.background_jobs = true;
+    });
+    invoke(&mut h, "ai.generateImage").unwrap();
+    {
+        let g = &mut h.state_mut().ai.generate;
+        assert!(!g.new_document, "a layer by default with a document open");
+        g.prompt = "a lighthouse at dawn".into();
+        g.new_document = true;
+        (g.width, g.height) = (96, 64);
+    }
+    generate::start(h.state_mut()).unwrap();
+    assert!(h.state().ai.generate.job.is_some(), "a background job");
+    until_idle(&mut h);
+    assert_eq!(h.state().session.documents().len(), 2);
+    let st = h.state().session.active().unwrap();
+    assert_eq!((st.doc.size.width, st.doc.size.height), (96, 64));
+    assert_eq!(layer_names(h.state()), ["Generated"]);
+    let call = &mock.calls()[0];
+    assert_eq!((call.op, call.width, call.height, call.prompt.as_str()), ("generate", 96, 64, "a lighthouse at dawn"));
+    let info = h.state_mut().run("file.fileInfo", json!({})).unwrap();
+    assert_eq!(info["description"], "a lighthouse at dawn");
+    assert_eq!(h.state().session.documents()[0].doc.layers.len(), 1, "the open document is left alone");
+    // Stopped: no document.
+    mock.set_delay(Duration::from_secs(60));
+    generate::start(h.state_mut()).unwrap();
+    h.run_steps(2);
+    assert!(generate::stop(h.state_mut()));
+    until_idle(&mut h);
+    assert_eq!(h.state().session.documents().len(), 2, "a stopped request makes nothing");
+}
+
+/// Generative Expand from its window, as a background job: the canvas grows and the new area is
+/// filled in one undo step.
+#[test]
+fn generative_expand_grows_the_canvas_in_one_undo_step() {
+    let mock = Arc::new(MockBackend::connected());
+    let m = Arc::clone(&mock);
+    let mut h = harness(move |app| {
+        with_mock(app, &m);
+        app.background_jobs = true;
+    });
+    invoke(&mut h, "ai.generativeExpand").unwrap();
+    {
+        let g = &mut h.state_mut().ai.generate;
+        assert_eq!((g.feature, g.width, g.height, g.anchor), ("ai.generativeExpand", 200, 160, "center"));
+        g.width = 260;
+        g.anchor = "left";
+    }
+    generate::start(h.state_mut()).unwrap();
+    until_idle(&mut h);
+    let size = |h: &Harness| h.state().session.active().map(|st| (st.doc.size.width, st.doc.size.height));
+    assert_eq!(size(&h), Some((260, 160)));
+    assert!(layer_names(h.state()).iter().any(|n| n == "Generative Expand"));
+    let call = &mock.calls()[0];
+    assert_eq!((call.width, call.height), (260, 160));
+    assert!(call.mask_coverage.is_some_and(|c| (c - 60.0 / 260.0).abs() < 0.02), "only the new band may change: {:?}", call.mask_coverage);
+    h.state_mut().run("edit.undo", json!({})).unwrap();
+    assert_eq!(size(&h), Some((200, 160)), "one undo step takes the canvas and the fill back");
+    assert!(!layer_names(h.state()).iter().any(|n| n == "Generative Expand"));
 }
 
 /// The last prompt of each feature is kept in `ai.json` and fills the window next time.

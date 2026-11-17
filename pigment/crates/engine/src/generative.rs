@@ -265,6 +265,10 @@ pub mod kind {
     pub const BAD_REQUEST: &str = "badRequest";
     /// The feature can't run on this document, layer or selection.
     pub const DOCUMENT: &str = "document";
+    /// The caller may not spend the person's money: an agent while "Allow agents to run AI
+    /// commands" is off, `pigment-cli run` without `--allow-ai`, a step of a playing action or of
+    /// an event's script.
+    pub const NOT_ALLOWED: &str = "notAllowed";
 }
 
 /// A failure from a backend or from the checks before sending. `kind` is a stable id
@@ -313,6 +317,15 @@ pub type ModelEntry = (String, &'static str);
 /// thread) and polls `cancelled`.
 pub trait GenerativeBackend: Send + Sync {
     fn status(&self) -> BackendStatus;
+    /// Whether this caller may send now, asked on the calling thread when a command that sends
+    /// starts, before its job: also for a command another one runs (a script's step), which no
+    /// interface gate sees. `automated` is true while an automation gate is installed
+    /// ([`Session::authorize`]: a control, MCP or synthetic-input request). A refusal (kind
+    /// [`kind::NOT_ALLOWED`]) sends nothing. The default admits every call.
+    fn admit(&self, automated: bool) -> Result<(), GenError> {
+        let _ = automated;
+        Ok(())
+    }
     fn edit_image(&self, req: &ImageEdit, cancelled: &dyn Fn() -> bool) -> Result<Rgba8Image, GenError>;
     fn generate_image(&self, req: &ImageGen, cancelled: &dyn Fn() -> bool) -> Result<Rgba8Image, GenError>;
     fn describe(&self, req: &Describe, cancelled: &dyn Fn() -> bool) -> Result<String, GenError>;
