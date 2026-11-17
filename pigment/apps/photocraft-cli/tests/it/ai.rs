@@ -421,6 +421,7 @@ fn sign_in_with_chatgpt_from_the_terminal() {
     }
     let (tested, err) = sub(&d, &["ai", "test"]);
     assert!(tested.contains("the ChatGPT sign-in works (2 models)") && tested.contains("gpt-5.1"), "{tested}{err}");
+    assert!(sub(&d, &["ai", "clear-key", "openai"]).0.contains("still signed in with ChatGPT"), "removing a key leaves the sign-in");
     assert!(sub(&d, &["ai", "sign-out"]).0.contains("Signed out of ChatGPT."));
     assert!(status(&d, false).contains("OpenAI: not connected"));
     assert!(!d.join("ai-keys.json").exists(), "the file goes with the sign-in");

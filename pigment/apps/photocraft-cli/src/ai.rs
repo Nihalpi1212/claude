@@ -196,6 +196,9 @@ pub(crate) fn run(a: &AiArgs, out: &mut dyn Write, err: &mut dyn Write) -> Resul
         AiCommand::ClearKey { provider } => {
             accounts.clear_key(*provider).map_err(ai_error)?;
             writeln!(out, "{} key removed.", provider.label())?;
+            if accounts.method(*provider) == Some(pigment_genai::Method::Chatgpt) {
+                writeln!(out, "{} is still signed in with ChatGPT: `pigment-cli ai sign-out` removes that.", provider.label())?;
+            }
             Ok(())
         }
         AiCommand::SignIn { port } => sign_in(&mut accounts, *port, out, err),
