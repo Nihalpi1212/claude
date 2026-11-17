@@ -266,7 +266,8 @@ pub mod kind {
     /// The feature can't run on this document, layer or selection.
     pub const DOCUMENT: &str = "document";
     /// The caller may not spend the person's money: an agent while "Allow agents to run AI
-    /// commands" is off, `pigment-cli run` without `--allow-ai`.
+    /// commands" is off, `pigment-cli run` without `--allow-ai`, a step of a playing action or of
+    /// an event's script.
     pub const NOT_ALLOWED: &str = "notAllowed";
 }
 
@@ -317,9 +318,9 @@ pub type ModelEntry = (String, &'static str);
 pub trait GenerativeBackend: Send + Sync {
     fn status(&self) -> BackendStatus;
     /// Whether this caller may send now, asked on the calling thread when a command that sends
-    /// starts, before its job: for a step `actions.play` runs too, which no interface gate sees.
-    /// `automated` is true while an automation gate is installed ([`Session::authorize`]: a
-    /// control, MCP or synthetic-input request, an action automation wrote). A refusal (kind
+    /// starts, before its job: also for a command another one runs (a script's step), which no
+    /// interface gate sees. `automated` is true while an automation gate is installed
+    /// ([`Session::authorize`]: a control, MCP or synthetic-input request). A refusal (kind
     /// [`kind::NOT_ALLOWED`]) sends nothing. The default admits every call.
     fn admit(&self, automated: bool) -> Result<(), GenError> {
         let _ = automated;

@@ -19,7 +19,9 @@
 //!   [`crate::UiState`], a dialog's fields or the preferences), the models, the timeout, the
 //!   one-time agreement and "Allow agents to run AI commands".
 //! * **Agents** (the control channel, MCP through the open window, synthetic input) may run a
-//!   command that sends only while "Allow agents to run AI commands" is on ([`gate`]).
+//!   command that sends only while "Allow agents to run AI commands" is on: [`gate`] refuses the
+//!   agent's own request, and the session's backend (`AppBackend`) a command the agent reaches
+//!   through another one (a script's step). An action never sends, whoever plays it (the engine).
 //!
 //! The browser build has no provider: this module keeps its signatures there and does nothing.
 
@@ -97,9 +99,10 @@ pub struct AiUi {
     pub after_remove: Option<(photocraft_doc::DocId, u64)>,
     /// A control request (an agent) is being handled ([`as_agent`]).
     pub(crate) agent: bool,
-    /// Whether the command running now runs for an agent, as [`gate`] last found it: the
-    /// session's backend reads it when a command that sends starts, so a step `actions.play`
-    /// runs for an agent (which [`gate`] never sees) is held to the same rule.
+    /// Whether the command running now runs for an agent, as [`gate`] (asked for every command
+    /// the app runs) and [`as_agent`] last found it: the session's backend reads it when a
+    /// command that sends starts, so one an agent reaches through another command (a script's
+    /// step, which [`gate`] never sees) is held to the same rule.
     pub(crate) agent_now: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
@@ -273,10 +276,10 @@ mod native {
     }
 
     /// The app's backend: the person's, except that a command started for an agent (a control
-    /// or MCP request, synthetic input, or a step an action plays for one), or under an
-    /// automation gate (an action automation wrote), sends only while "Allow agents to run AI
-    /// commands" is on. [`super::gate`] refuses an agent's own request with the same message
-    /// before it starts; this catches what it never sees.
+    /// or MCP request, synthetic input), or under the session's automation gate, sends only
+    /// while "Allow agents to run AI commands" is on. [`super::gate`] refuses an agent's own
+    /// request with the same message before it starts; this catches what it never sees: a
+    /// command that sends run by another command (a script's step).
     struct AppBackend {
         inner: Arc<dyn GenerativeBackend>,
         agent: Arc<AtomicBool>,

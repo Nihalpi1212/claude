@@ -241,7 +241,7 @@ tests in `crates/ui-egui/tests/it/ai.rs`.
 | `crates/engine/src/lib.rs` | `pub mod generative;`, `pub use cmd::ai_cmds;`, the `Session` field `generative` (its `set_generative` and `generative` live in `generative.rs`) |
 | `crates/engine/src/cmd.rs` | `pub mod ai_cmds;` and `v.extend(crate::ai_cmds::specs());` at the end of `build()` |
 | `crates/engine/src/error.rs` | the `EngineError::Generative { kind, message }` variant |
-| `crates/engine/src/cmd/actions_cmds.rs` | `recorded()` skips `ai_cmds::unrecorded` ids, so `ai.*` steps are never recorded into actions |
+| `crates/engine/src/cmd/actions_cmds.rs` | `recorded()` skips `ai_cmds::unrecorded` steps, so an `ai.*` step that may send is never recorded into an action |
 | `crates/engine/Cargo.toml` | the `testgen` feature (the mock backend for other crates' tests) |
 | `Cargo.toml` (workspace) | `pigment-genai = { path = "crates/genai" }` in `[workspace.dependencies]` (`Cargo.lock` gains it, `keyring` and keyring's macOS and Windows dependencies) |
 | `crates/automation/Cargo.toml` | the `pigment-genai` dependency |
@@ -270,6 +270,7 @@ tests in `crates/ui-egui/tests/it/ai.rs`.
 | `crates/ui-egui/src/prefs/prefs_ui/agents.rs` | the Generative AI rows with the AI Accounts… button (`ai_ui::preferences_button`) and its `aiAccounts` action |
 | `crates/ui-egui/tests/it/main.rs` | `mod ai;` (not on wasm) |
 | `apps/photocraft/src/main.rs` | `photocraft_ui_egui::ai_ui::install(&mut app, &dir)` with the settings folder, after `background_jobs` |
+| `xtask/src/layers.rs` | `pigment-genai` in the layers table (L6), and the two orderings that let `automation` and `ui-egui` (also L6) depend on it |
 
 At an upstream merge: if PhotoCraft adds generative commands of its own (through craft-ai-client),
 either alias ours to them or keep ours and hide theirs, and record the choice here.

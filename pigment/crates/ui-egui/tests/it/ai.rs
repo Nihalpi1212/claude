@@ -286,6 +286,16 @@ fn ai_accounts_connects_a_key_that_never_shows_anywhere() {
     assert!(accounts::is_open(h.state()));
     assert!(paths.lock().unwrap().is_empty(), "opening sends nothing");
     type_into(&mut h, "API key", KEY);
+    // While it is typed the key is in the masked field only: not in the accessibility tree, not in
+    // what an agent can read of the interface.
+    let shown = h
+        .query_all(By::new().include_labels().predicate(|n| {
+            n.label().is_some_and(|l| l.contains(KEY)) || n.value().is_some_and(|v| v.contains(KEY)) || n.description().is_some_and(|d| d.contains(KEY))
+        }))
+        .count();
+    assert_eq!(shown, 0, "the accessibility tree while typing");
+    assert!(!photocraft_ui_egui::control::inspect(h.state(), &h.ctx).to_string().contains(KEY), "ui.inspect while typing");
+    assert!(!serde_json::to_string(&h.state().ui).unwrap().contains(KEY), "the interface state while typing");
     h.get_by_label("Connect").click();
     h.run_steps(2);
     for _ in 0..500 {
@@ -463,38 +473,63 @@ fn agents_need_permission_to_run_ai_commands() {
     assert_eq!(mock.calls().len(), 2);
 }
 
-/// An agent can't get around the gate with an action: a hand-built action holding an `ai.*` step,
-/// played by an agent, sends nothing while "Allow agents to run AI commands" is off (its step is
-/// refused, as the agent's own request is), and sends with it on.
+/// An agent can't get around the gate through another command: a script it runs with a step
+/// that sends is refused at that step while "Allow agents to run AI commands" is off (as the
+/// agent's own request is), and sends with it on. The person's own command right after is not
+/// taken for the agent's.
 #[test]
-fn an_agent_playing_an_action_with_an_ai_step_needs_permission_too() {
+fn an_agent_running_a_script_with_an_ai_step_needs_permission_too() {
     let mock = Arc::new(MockBackend::connected());
     let m = Arc::clone(&mock);
     let mut h = harness(move |app| {
         ai_ui::install_accounts(app, AiAccounts::in_memory());
         with_mock(app, &m);
         app.run("select.rect", json!({"x": 10, "y": 10, "width": 30, "height": 30})).unwrap();
-        app.session.actions.list.push(photocraft_engine::actions_cmds::Action::new("Agent's", Vec::new()));
     });
-    let insert = json!({"command": "actions.insert", "params": {"action": "Agent's", "id": "ai.generativeFill", "params": {"prompt": "x"}}});
-    let v = control(&mut h, "engine.execute", insert);
-    assert_eq!(v["ok"], true, "{v}");
-    let play = json!({"command": "actions.play", "params": {"action": "Agent's"}});
-    let v = control(&mut h, "engine.execute", play.clone());
+    let script = json!({"command": "file.scripts.browse", "params": {"steps": [["ai.generativeFill", {"prompt": "x"}]]}});
+    let v = control(&mut h, "engine.execute", script.clone());
     until_idle(&mut h);
     assert!(v.to_string().contains("Allow agents to run AI commands"), "the step is refused: {v}");
     assert!(mock.calls().is_empty(), "nothing sent: {:?}", mock.calls());
     assert_eq!(layer_names(h.state()).len(), 1, "nothing changed");
-    // The person's own command right after is not taken for the agent's.
+    // The person's own command right after is theirs.
     h.state_mut().run("ai.generativeFill", json!({"prompt": "y"})).unwrap();
     until_idle(&mut h);
     assert_eq!(mock.calls().len(), 1);
-    // With "Allow agents to run AI commands" on, the agent's action sends.
+    // With "Allow agents to run AI commands" on, the agent's script sends.
     ai_ui::with_accounts(h.state(), |a| a.settings.allow_agents = true);
-    let v = control(&mut h, "engine.execute", play);
+    let v = control(&mut h, "engine.execute", script);
     until_idle(&mut h);
     assert!(!v.to_string().contains("Allow agents"), "{v}");
     assert_eq!(mock.calls().len(), 2);
+}
+
+/// Playing an action never sends, whoever plays it and whatever the agents may do: a hand-built
+/// action holding a step that sends stops at that step, from the control channel and from the
+/// person's own Play alike.
+#[test]
+fn an_action_with_an_ai_step_never_sends() {
+    let mock = Arc::new(MockBackend::connected());
+    let m = Arc::clone(&mock);
+    let mut h = harness(move |app| {
+        let mut a = AiAccounts::in_memory();
+        a.settings.allow_agents = true;
+        ai_ui::install_accounts(app, a);
+        with_mock(app, &m);
+        app.run("select.rect", json!({"x": 10, "y": 10, "width": 30, "height": 30})).unwrap();
+        app.session.actions.list.push(photocraft_engine::actions_cmds::Action::new("Built", Vec::new()));
+    });
+    let insert = json!({"command": "actions.insert", "params": {"action": "Built", "id": "ai.generativeFill", "params": {"prompt": "x"}}});
+    let v = control(&mut h, "engine.execute", insert);
+    assert_eq!(v["ok"], true, "{v}");
+    let v = control(&mut h, "engine.execute", json!({"command": "actions.play", "params": {"action": "Built"}}));
+    until_idle(&mut h);
+    assert!(v.to_string().contains("do not run from an action"), "the agent's play stops at the step: {v}");
+    let v = h.state_mut().run("actions.play", json!({"action": "Built"}));
+    until_idle(&mut h);
+    assert!(format!("{v:?}").contains("do not run from an action"), "the person's play too: {v:?}");
+    assert!(mock.calls().is_empty(), "nothing sent: {:?}", mock.calls());
+    assert_eq!(layer_names(h.state()).len(), 1, "nothing changed");
 }
 
 /// The last prompt of each feature is kept in `ai.json` and fills the window next time.
