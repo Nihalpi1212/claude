@@ -54,7 +54,7 @@ A cloud container is reclaimed after inactivity; a usage-limit stop of a few hou
 - **Commit trailers** (changed on Nov 17 with the model):
   - Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>
   - Claude-Session: https://claude.ai/code/session_012irzNNBVSJyVqHJpCPbdwm
-- **CI.** Pigment CI (.github/workflows/pigment-ci.yml) must end green on pushed heads. The Tests step repeats failures at its end: mcp__github__get_job_logs (job_id, return_content, tail_lines 2500) saves the log to a file; search it for "Failed tests (summary)", "panicked at" and "error:".
+- **CI.** Pigment CI (.github/workflows/pigment-ci.yml) must end green on pushed heads. The tests run through cargo-nextest (since Nov 17), whose `ci` profile repeats every failure at the end: mcp__github__get_job_logs (job_id, return_content, tail_lines 2500) saves the log to a file; search it for " FAIL [", "Summary [", "panicked at" and "error:".
   - Never skip a test to get green. The one exception is pigment/scripts/upstream-test-failures.txt: 60 tests that fail on untouched upstream too.
 - **Builds and tests.** CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0, -j 4, one cargo process at a time. Tests: TMPDIR=/dev/shm/pt CRAFT_I18N_DIR=/home/user/storytold/craft-i18n CRAFT_FONTS_DIR=/home/user/storytold/craft-fonts.
 - **Disk.** The real quota is about 39 GB; `df` misreports the volume as 252 GB. Below 6 GB free, delete the test executables over 20 MB in pigment/target/debug/deps and target/debug/incremental. Never `cargo clean`.
@@ -70,8 +70,7 @@ A cloud container is reclaimed after inactivity; a usage-limit stop of a few hou
 
 ## State (update at every check-in)
 
-- Nov 17, 11:45 UTC. New container. Branch head d2be723 (P1 to P3 pushed). CI on d2be723 failed in two places: docs/scorecard.md stale, and `cargo xtask layers` (pigment-genai not in the layers table).
-- The first reviewer of P1 to P3 was cut off on Nov 15 (weekly limit, then the container went). Its edits as of 21:12 are back in the tree, uncommitted (10 files): an `admit` gate on GenerativeBackend, the regenerated scorecard, the layers rows, ui and test changes.
-- Running since 11:31 UTC: planpc/ai-port-2.js with all five steps (run wf_7699b425-ced, task w4m9dqmf7); review123 has a continuation note about those edits and the two CI failures.
+- Nov 17, 12:45 UTC. Container healthy. Running since 11:31: planpc/ai-port-2.js, all five steps (run wf_7699b425-ced, task w4m9dqmf7). review123 is working and has pushed 3c5c86b (layers table, scorecard), 6bfea87 (an action never sends; the backend admits each caller), 5718ec1 (bound a provider's image size; key out of every error) and aeb188f (docs).
+- CI: run 176 on 3c5c86b failed in one test only, automation's `bridge_token::the_bridge_authenticates_to_the_headless_server_by_challenge` ("control authentication timed out", a 5 s deadline). The same target failed in run 173 and passed in 174 and 175: intermittent. Upstream's gate runs tests with cargo-nextest (one process per test); ours ran `cargo test` (one process per binary). Run 177 on aeb188f was in progress at 12:35.
+- In the tree, uncommitted, mine (not an agent's): .github/workflows/pigment-ci.yml (cargo-nextest for Tests and the known-failures step, a Panic hunt step), pigment/scripts/upstream-test-filter.py (new) and pigment/scripts/upstream-test-failures.txt (comment). cargo-nextest 0.9.150 is being installed locally (log pc-build/nextest-install.log) to check the filter on the toy workspace SCR/nextest-toy first. Then: commit exactly those three paths (git add the new file; git commit -- <paths>) with the trailers, push, and watch the CI run. FORK.md item 9 ("Check scripts/upstream-test-failures.txt") still describes `--exact --skip`: update it when no agent has FORK.md open.
 - The hourly check is scheduled task trig_0177jAfVM7gN5HetzTvbeyX5 (fires at :30).
-- Snapshots now also carry .jsonl files and setup-container.sh.

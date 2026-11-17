@@ -2,12 +2,13 @@
 #
 # The steps follow PhotoCraft's own gate (`cargo xtask ci`, run by storytold/craft-common-actions'
 # gate.yml, and its packaging-lint.yml), written out here instead of calling those reusable
-# workflows: rustfmt, clippy with warnings as errors, the workspace tests and doctests, the
-# repository checks xtask provides, the packaging script tests, the rebrand check, and a smoke test
-# of the pigment-cli binary. Left out from upstream's gate, because they need another toolchain, the
-# network beyond the pinned checkouts below, secrets or corpora: the wasm check (the web app is not
-# part of Pigment's releases), panic_hunt (cargo-nextest), the GPU lavapipe scripts, the Windows
-# legs, the corpus, fuzz and benchmark jobs, and SonarCloud.
+# workflows: rustfmt, clippy with warnings as errors, the workspace tests (cargo-nextest, as
+# upstream runs them), the engine's panic hunt and the doctests, the repository checks xtask
+# provides, the packaging script tests, the rebrand check, and a smoke test of the pigment-cli
+# binary. Left out from upstream's gate, because they need another toolchain, the network beyond
+# the pinned checkouts below, secrets or corpora: the wasm check (the web app is not part of
+# Pigment's releases), the GPU lavapipe scripts, the Windows legs, the corpus, fuzz and benchmark
+# jobs, and SonarCloud.
 #
 # The tests need no secrets. The interface translations come from storytold/craft-i18n at the
 # commit in pigment/craft-i18n.rev, so the rebranded catalogues (crates/ui-egui/build.rs) are
@@ -130,33 +131,25 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked --features heif --keep-going -- -D warnings
 
+      # cargo-nextest, the runner upstream's gate uses (`cargo xtask ci`), at the version
+      # .config/nextest.toml requires. It runs every test in a process of its own, which is what
+      # PhotoCraft's tests are written for. Under `cargo test` the tests of one binary share a
+      # process, and automation's bridge authentication test (a 5 s deadline) timed out there in
+      # two runs of five. rust-cache keeps the installed binary, so this builds once per cache.
+      - name: Install cargo-nextest
+        run: cargo nextest --version 2>/dev/null | grep -q 'cargo-nextest 0\.9\.150' || cargo install cargo-nextest --version 0.9.150 --locked
+
       # Unit and integration tests without the examples (clippy has checked those), as upstream's
-      # `cargo xtask test` does, then the doctests. The integration tests that already fail on
-      # PhotoCraft's own tree at the imported revision (scripts/upstream-test-failures.txt, which
-      # says why) are skipped by their exact names here and run on their own in the next step.
+      # gate runs them (nextest's `ci` profile: no fail-fast, hung tests end, every failure is
+      # repeated at the end of the log), then the doctests. The integration tests that already
+      # fail on PhotoCraft's own tree at the imported revision (scripts/upstream-test-failures.txt,
+      # which says why) are left out here by package and exact name
+      # (scripts/upstream-test-filter.py builds the filter) and run on their own in the next step.
       - name: Tests
         run: |
           set -euo pipefail
-          skips=()
-          while IFS= read -r name; do
-            case "$name" in '' | '#'*) continue ;; esac
-            skips+=(--skip "$name")
-          done <scripts/upstream-test-failures.txt
-          log="$RUNNER_TEMP/tests.log"
-          status=0
-          cargo test --workspace --locked --features heif --no-fail-fast --lib --bins --tests \
-            -- --exact "${skips[@]}" 2>&1 | tee "$log" || status=$?
-          # The log runs to tens of thousands of lines; repeat every failure at the end so it is in
-          # the tail that the log viewer and the API show first.
-          if [ "$status" -ne 0 ]; then
-            echo "::group::Failed tests (summary)"
-            grep -E '^test .* FAILED$|^error: [0-9]+ targets? failed|^    `-p ' "$log" || true
-            echo "::endgroup::"
-            echo "::group::Panic messages (first 40 lines after each)"
-            grep -E -A40 "panicked at " "$log" | head -n 2000 || true
-            echo "::endgroup::"
-          fi
-          exit "$status"
+          cargo nextest run --profile ci --workspace --locked --features heif --lib --bins --tests \
+            -E "$(python3 scripts/upstream-test-filter.py --skip)"
 
       # Informational: shows when a later upstream merge makes them pass (then drop their lines).
       - name: Known upstream test failures (not gating)
@@ -164,17 +157,22 @@ jobs:
         continue-on-error: true
         run: |
           set -euo pipefail
-          names=()
-          while IFS= read -r name; do
-            case "$name" in '' | '#'*) continue ;; esac
-            names+=("$name")
-          done <scripts/upstream-test-failures.txt
           # The same packages and features as the Tests step, so nothing is rebuilt; every other
           # test is filtered out.
-          cargo test --workspace --locked --features heif --no-fail-fast --test it \
-            -- --exact "${names[@]}"
+          cargo nextest run --profile ci --workspace --locked --features heif --lib --bins --tests \
+            -E "$(python3 scripts/upstream-test-filter.py --only)"
 
       # The steps below don't depend on the tests, so they run (and report) even when tests fail.
+
+      # Upstream's AGENTS.md rule 9: no command may panic or hang on adversarial parameters. The
+      # hunt is `#[ignore]`d (slow); the gate runs it alone, as `cargo xtask ci` does, with the
+      # same packages, features and targets as the tests, so nothing is rebuilt.
+      - name: Panic hunt
+        if: ${{ !cancelled() }}
+        run: |
+          cargo nextest run --profile ci --workspace --locked --features heif --lib --bins --tests \
+            --run-ignored only -E 'binary_id(photocraft-engine::panic_hunt)'
+
       - name: Doctests
         if: ${{ !cancelled() }}
         run: cargo test --workspace --locked --features heif --no-fail-fast --doc
