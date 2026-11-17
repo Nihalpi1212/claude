@@ -134,8 +134,12 @@ do toggle the two checkboxes.
   `093b6f0`), passed in runs 174 and 175, failed in 176. It is PhotoCraft's own test of its own bridge;
   nothing in P1 to P3 touches that path (`Headless::new()` gained a backend that opens nothing until an
   `ai.*` command runs). The handshake is two HMACs, so the 5 s are a stall, not work; the cause was not found
-  (see the final report for what was ruled out).
-- See the final report for run 177 on the review's head.
+  . Ruled out by reading: a slow proof (plain HMAC), a shared limiter or lock before authentication,
+  and a port shared with the silent listeners of the two tests that run beside it (a script that binds
+  three `SO_REUSEADDR` sockets to port 0 at once 3000 times never got a port twice here). It did not fail in
+  12 local runs of the three `bridge_token` tests (this container has no IPv6 loopback; CI has).
+- Run 177 on `aeb188f` (this review's head): **success**. Every step is green, the flaky test included.
+  If a later run goes red on that one test, re-run the failed job before looking further.
 
 ## For the next engineer
 
@@ -171,3 +175,10 @@ do toggle the two checkboxes.
 - **macOS Keychain and Windows Credential Manager** paths compile in CI but were never run with a real
   store (the round-trip test is `#[ignore]`).
 - Not run here: the whole workspace test suite (CI does), `cargo xtask wasm`, `panic_hunt`.
+
+## Commits (all pushed to `claude/pigment-photocraft`)
+
+- `3c5c86b` Pigment: register pigment-genai in the layers table and regenerate the scorecard
+- `6bfea87` Pigment: an action never sends to an AI provider, and the backend admits each caller
+- `5718ec1` Pigment: bound the size of a provider's image and keep the key out of every error
+- `aeb188f` Pigment: document that actions never send, the backend's caller check and the layers hook
