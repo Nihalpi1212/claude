@@ -39,6 +39,10 @@ pub const CHAT_JOB: &str = "ai.chat";
 const WIDTH: f32 = 380.0;
 /// The longest side of an attached image as the conversation shows it.
 const THUMB_EDGE: u32 = 96;
+/// The longest answer kept, in characters, and the most tool calls one answer may ask for: a
+/// provider's answer is not trusted to be reasonable.
+const TEXT_LIMIT: usize = 20_000;
+const MAX_CALLS: usize = 32;
 
 /// Who wrote a message.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -68,8 +72,11 @@ impl Call {
 pub struct Message {
     pub role: Role,
     pub text: String,
-    /// The composite sent with a user message (Attach image).
+    /// The composite sent with a user message (Attach image). Only the latest message keeps it:
+    /// earlier images are never sent again.
     pub image: Option<Arc<Rgba8Image>>,
+    /// That image, small, as the conversation shows it.
+    preview: Option<Rgba8Image>,
     pub calls: Vec<Call>,
     /// The assistant's answer is still being worked on.
     pub pending: bool,
@@ -86,7 +93,19 @@ pub struct Message {
 
 impl Message {
     fn new(role: Role, text: String) -> Self {
-        Self { role, text, image: None, calls: Vec::new(), pending: false, error: false, needs_accounts: false, stopped: false, truncated: false, thumb: None }
+        Self {
+            role,
+            text,
+            image: None,
+            preview: None,
+            calls: Vec::new(),
+            pending: false,
+            error: false,
+            needs_accounts: false,
+            stopped: false,
+            truncated: false,
+            thumb: None,
+        }
     }
 }
 
@@ -407,7 +426,13 @@ pub fn send(app: &mut PhotocraftApp, text: &str) -> Result<bool, String> {
     let image = app.ai.assistant.attach.then(|| Arc::new(photocraft_compose::thumbnail(&doc, tools::IMAGE_EDGE)));
     let s = &mut app.ai.assistant;
     let convo = s.conversations.entry(doc_id).or_default();
+    // Earlier messages keep their small preview only: their images are never sent again.
+    convo.iter_mut().for_each(|m| m.image = None);
     let mut user = Message::new(Role::User, clean);
+    user.preview = image.as_deref().map(|img| {
+        let (w, h) = photocraft_engine::ai_cmds::region::fit_within(img.width, img.height, THUMB_EDGE);
+        photocraft_engine::ai_cmds::region::resize_rgba8(img, w, h)
+    });
     user.image = image;
     convo.push(user);
     trim(convo);
@@ -481,8 +506,11 @@ fn answered(app: &mut PhotocraftApp) {
     let Some(answer) = lock(&turn.slot).take() else {
         return finish(app, End::Failed { kind: None, message: tl!("The model request failed.").to_string() });
     };
-    let text = answer.text.trim().to_string();
+    let text: String = answer.text.trim().chars().take(TEXT_LIMIT).collect();
     let (calls, rounds) = (answer.tool_calls.len(), turn.rounds);
+    if calls > MAX_CALLS {
+        return finish(app, End::Failed { kind: None, message: tl!("The model asked for too many steps at once.").to_string() });
+    }
     if calls > 0 && rounds < MAX_ROUNDS {
         turn.rounds += 1;
         turn.queue = answer.tool_calls.iter().cloned().collect();
@@ -921,10 +949,8 @@ fn log(ui: &mut egui::Ui, t: &Tokens, has_doc: bool, convo: Option<&mut Vec<Mess
 fn user_row(ui: &mut egui::Ui, t: &Tokens, m: &mut Message) {
     egui::Frame::new().fill(t.field).corner_radius(t.radius).inner_margin(6.0).show(ui, |ui| {
         ui.set_width(ui.available_width());
-        if let Some(img) = &m.image {
+        if let Some(small) = &m.preview {
             let thumb = m.thumb.get_or_insert_with(|| {
-                let (w, h) = photocraft_engine::ai_cmds::region::fit_within(img.width, img.height, THUMB_EDGE);
-                let small = photocraft_engine::ai_cmds::region::resize_rgba8(img, w, h);
                 let pixels = egui::ColorImage::from_rgba_unmultiplied([small.width as usize, small.height as usize], &small.pixels);
                 ui.ctx().load_texture("pigment-ai-attached", pixels, egui::TextureOptions::LINEAR)
             });
