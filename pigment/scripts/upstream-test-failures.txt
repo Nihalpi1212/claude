@@ -7,7 +7,8 @@
 # Cargo.lock's dependencies are upstream's. They fail in CI (a normal user, craft-fonts present) and
 # here as root alike, each also when run on its own.
 #
-# pigment-ci.yml skips exactly these names (`--exact --skip <name>`) in the Tests step and runs
+# pigment-ci.yml leaves exactly these tests out of the Tests step (scripts/upstream-test-filter.py
+# turns this list into the cargo-nextest filter, by package and exact name) and runs
 # them on their own, without failing the job, so a later upstream merge shows when they pass.
 # Remove a line when it passes after a merge (docs/FORK.md, "Merging a later upstream revision").
 # One full test name per line (module path inside its test binary); `#` starts a comment.
