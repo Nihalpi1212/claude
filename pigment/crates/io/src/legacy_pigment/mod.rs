@@ -452,6 +452,15 @@ pub(crate) fn import(name: &str, bytes: &[u8], ctl: &Interrupt) -> Result<Import
     import_at(name, bytes, ctl, 0, &mut Budget::default())
 }
 
+/// Opens a Pigment 0.1–0.4 document whose pixels may take at most `pixels` bytes (of the 2 GiB a
+/// document may take): for the engine's tests of what the smart objects it draws take.
+#[doc(hidden)]
+pub fn import_within(name: &str, bytes: &[u8], ctl: &Interrupt, pixels: u64) -> Result<ImportResult, IoError> {
+    let mut budget = Budget::default();
+    budget.pixels = budget.pixels.min(pixels);
+    import_at(name, bytes, ctl, 0, &mut budget)
+}
+
 /// Opens a document `depth` smart objects deep, within what is left of `budget` (a nested
 /// document takes from its host's), and leaves in `budget` what it did not take.
 fn import_at(name: &str, bytes: &[u8], ctl: &Interrupt, depth: usize, budget: &mut Budget) -> Result<ImportResult, IoError> {
@@ -520,6 +529,7 @@ fn read(name: &str, container: &mut Container<'_>, ctl: &Interrupt, nesting: usi
     let mut layers = reader.layers(d.get("layers").and_then(Value::as_array).map_or(&[][..], Vec::as_slice), 1)?;
     layers::apply_links(&mut layers, &reader.links);
     document.patterns = std::mem::take(&mut reader.patterns.list);
+    let smart_sources = smart::source_bounds(&reader.smart_sources);
     background(&mut layers);
     document.layers = layers;
     if document.layers.is_empty() {
@@ -539,7 +549,7 @@ fn read(name: &str, container: &mut Container<'_>, ctl: &Interrupt, nesting: usi
     if skipped > 0 {
         warnings.note("some type layers are too large to draw within the memory limit; they show once they are edited");
     }
-    smart::render(&mut document, &mut container.pixel_budget, &mut warnings);
+    smart::render(&mut document, &smart_sources, &mut container.pixel_budget, &mut warnings);
     ctl.progress(0.95);
 
     // File Info and the camera data.

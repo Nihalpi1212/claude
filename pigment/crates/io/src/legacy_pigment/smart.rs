@@ -20,7 +20,7 @@ use photocraft_geom::{Affine, Rect};
 use photocraft_raster::Surface;
 use serde_json::{Map, Value};
 
-use super::container::{MAX_ENTRY_BYTES, Rgba8};
+use super::container::{MAX_ENTRY_BYTES, MAX_SIDE, Rgba8, png_size};
 use super::layers::{LayerReader, Samples, Tone, encode};
 use super::{filters, import_at, text};
 use crate::IoError;
@@ -35,6 +35,14 @@ pub(crate) struct Shared {
     key: String,
     contents: SmartContentsId,
     source: SmartSource,
+    /// The source's pixels at its own size (a nested document's canvas, an image's size from its
+    /// header), for pricing a placement before it is drawn; `None` when it cannot be told.
+    bounds: Option<Rect>,
+}
+
+/// The size of each source, by the contents its instances share.
+pub(crate) fn source_bounds(shared: &[Shared]) -> Vec<(SmartContentsId, Rect)> {
+    shared.iter().filter_map(|s| Some((s.contents, s.bounds?))).collect()
 }
 
 /// Draws a smart object's appearance from its source and smart filters, as the engine draws it.
@@ -65,8 +73,8 @@ impl LayerReader<'_, '_, '_> {
         let shared = match self.smart_sources.iter().position(|s| s.key == key) {
             Some(i) => i,
             None => match self.read_source(&key, desc, name)? {
-                Some(source) => {
-                    self.smart_sources.push(Shared { key: key.clone(), contents: SmartContentsId::fresh(), source });
+                Some((source, bounds)) => {
+                    self.smart_sources.push(Shared { key: key.clone(), contents: SmartContentsId::fresh(), source, bounds });
                     self.smart_sources.len() - 1
                 }
                 None => return Ok(None),
@@ -91,8 +99,8 @@ impl LayerReader<'_, '_, '_> {
         Ok(Some(Layer::new("", LayerContent::Smart(sm))))
     }
 
-    /// The source the file keeps under `key`: a nested document or an image.
-    fn read_source(&mut self, key: &str, desc: &Map<String, Value>, name: &str) -> Result<Option<SmartSource>, IoError> {
+    /// The source the file keeps under `key`, a nested document or an image, and its size.
+    fn read_source(&mut self, key: &str, desc: &Map<String, Value>, name: &str) -> Result<Option<(SmartSource, Option<Rect>)>, IoError> {
         let source_name = desc.get("source").and_then(|s| s.get("name")).and_then(Value::as_str);
         let nested = format!("smart/{key}.pigment");
         if self.container.contains(&nested) {
@@ -131,14 +139,16 @@ impl LayerReader<'_, '_, '_> {
                     return Ok(None);
                 }
             };
-            return Ok(Some(SmartSource::Embedded {
-                file_name: file_name(source_name, name, "pcraft").replace(".pigment.pcraft", ".pcraft"),
-                bytes: Arc::new(bytes),
-            }));
+            let source =
+                SmartSource::Embedded { file_name: file_name(source_name, name, "pcraft").replace(".pigment.pcraft", ".pcraft"), bytes: Arc::new(bytes) };
+            return Ok(Some((source, Some(r.document.bounds()))));
         }
         let image = format!("smart/{key}.png");
         match self.container.read(&image, MAX_ENTRY_BYTES) {
-            Ok(Some(bytes)) => Ok(Some(SmartSource::Embedded { file_name: file_name(source_name, name, "png"), bytes: Arc::new(bytes) })),
+            Ok(Some(bytes)) => {
+                let bounds = png_size(&bytes).map(|(w, h)| Rect::new(0, 0, w.min(MAX_SIDE) as i32, h.min(MAX_SIDE) as i32));
+                Ok(Some((SmartSource::Embedded { file_name: file_name(source_name, name, "png"), bytes: Arc::new(bytes) }, bounds)))
+            }
             Ok(None) => {
                 self.warnings.layer(name, "the smart object's contents are not in the file; it opens as an empty layer");
                 Ok(None)
@@ -171,11 +181,25 @@ fn source_pixels(source: &SmartSource, fmt: PixelFormat, budget: u64) -> Option<
     Some((surface, rect))
 }
 
+/// What placing `rect` of a source by `transform` takes in `fmt` (with alpha): the tiles of the
+/// placed stage, which is not clipped to the canvas, wherever it lands. `None`: it cannot be
+/// priced.
+fn placement_cost(rect: Rect, transform: &Affine, fmt: PixelFormat) -> Option<u64> {
+    let [a, b, c, d, e, f] = transform.m;
+    let h = photocraft_algo::transform::Homography([a, c, e, b, d, f, 0.0, 0.0, 1.0]);
+    let (w, ht) = photocraft_algo::transform::warp_output_size(rect, &h)?;
+    let tile = photocraft_geom::TILE_SIZE as u64;
+    let tiles = w.div_ceil(tile).saturating_add(1).saturating_mul(ht.div_ceil(tile).saturating_add(1));
+    Some(photocraft_raster::stored_tiles_bytes(tiles, &PixelFormat::new(fmt.mode, fmt.sample, true)))
+}
+
 /// Draws the appearance of every smart object of `document`: through the engine's renderer
 /// when one is installed (smart filters included), else the source placed by its matrix, without
-/// its filters, which is reported. A source too large for what is left of `budget` stays
-/// undrawn, reported.
-pub(crate) fn render(document: &mut Document, budget: &mut u64, warnings: &mut crate::ora::Warnings) {
+/// its filters, which is reported. Each placement is priced against what is left of `budget`
+/// before it is drawn, from its source's size in `sources`, and charged once drawn: a large
+/// placement fills memory (and takes minutes) before anything could fail, and instances of one
+/// source each keep their own. One that does not fit stays undrawn, reported.
+pub(crate) fn render(document: &mut Document, sources: &[(SmartContentsId, Rect)], budget: &mut u64, warnings: &mut crate::ora::Warnings) {
     let ids = smart_layers(&document.layers);
     if ids.is_empty() {
         return;
@@ -184,29 +208,24 @@ pub(crate) fn render(document: &mut Document, budget: &mut u64, warnings: &mut c
     let fmt = document.pixel_format();
     for id in ids {
         let Some(layer) = document.layer_mut(id) else { continue };
+        let LayerContent::Smart(sm) = &layer.content else { continue };
+        let cost = sources.iter().find(|(c, _)| *c == sm.contents_id).and_then(|(_, rect)| placement_cost(*rect, &sm.transform, fmt));
+        let Some(cost) = cost.filter(|cost| *cost <= *budget) else {
+            let name = layer.name.clone();
+            warnings.layer(&name, "the smart object's contents could not be drawn; they show once the smart object is edited");
+            continue;
+        };
         if RENDERER.get().is_some_and(|render| render(&snapshot, layer)) {
+            *budget = budget.saturating_sub(cost);
             continue;
         }
         let LayerContent::Smart(sm) = &mut layer.content else { continue };
         let unfiltered = sm.filters_enabled && !sm.smart_filters.is_empty();
-        let drawn = source_pixels(&sm.source, fmt, *budget).and_then(|(pixels, rect)| {
-            // The placed source is not clipped to the canvas: a large placement fills memory
-            // (and takes minutes) before anything could fail, so the whole of it is priced, as
-            // the engine prices it.
-            let [a, b, c, d, e, f] = sm.transform.m;
-            let h = photocraft_algo::transform::Homography([a, c, e, b, d, f, 0.0, 0.0, 1.0]);
-            let (w, ht) = photocraft_algo::transform::warp_output_size(rect, &h)?;
-            let bpp = PixelFormat::new(fmt.mode, fmt.sample, true).bytes_per_pixel() as u64;
-            let cost = w.saturating_mul(ht).saturating_mul(bpp);
-            if cost > *budget {
-                return None;
-            }
-            let out = photocraft_algo::warp::place_source(&pixels, rect, &sm.transform, None).ok()?;
-            *budget = budget.saturating_sub(cost);
-            Some(out)
-        });
-        match drawn {
+        let placed =
+            source_pixels(&sm.source, fmt, *budget).and_then(|(pixels, rect)| photocraft_algo::warp::place_source(&pixels, rect, &sm.transform, None).ok());
+        match placed {
             Some(surface) => {
+                *budget = budget.saturating_sub(cost);
                 sm.cache = Some(surface);
                 if unfiltered {
                     warnings.layer(&layer.name, "the smart filters could not be drawn; the smart object shows without them until it is edited");
