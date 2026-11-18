@@ -112,7 +112,7 @@ mod tests {
 
         super::install();
         // A 64 px image placed 1024 px wide under eight slow filters (each takes seconds).
-        let filters = vec![r#"{"kind":"median","params":{"radius":500},"enabled":true}"#; 8].join(",");
+        let filters = [r#"{"kind":"median","params":{"radius":500},"enabled":true}"#; 8].join(",");
         let layer =
             format!(r#"{{"id":"s","name":"Slow","type":"smart","source":{{"kind":"image","name":"x"}},"transform":[16,0,0,16,0,0],"filters":[{filters}]}}"#);
         let bytes = with_source(&opaque_png(), &[layer]);

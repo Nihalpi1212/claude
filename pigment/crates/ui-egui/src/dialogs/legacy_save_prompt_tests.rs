@@ -135,3 +135,46 @@ fn a_played_save_step_writes_without_asking() {
     assert!(!app.session.active().unwrap().is_dirty());
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+/// A document whose import left parts out loses them for good when it is saved over its file: the
+/// question says so, Save As… is its default (Enter), and it is asked even after "Don't show
+/// again". A document that lost nothing is asked as before.
+#[test]
+fn saving_over_a_file_whose_import_left_parts_out_says_so() {
+    let ctx = egui::Context::default();
+    let (mut app, written, asked) = app();
+
+    let (dir, path) = legacy_file("nothing-left-out");
+    app.open_file(&path, GROUPS).unwrap();
+    let id = menus::invoke(&mut app, &ctx, "file.save", json!({})).unwrap()["dialog"].as_u64().unwrap();
+    let p = app.ui.dialog_mut(id).unwrap();
+    assert_eq!(p.fields["choice"], "save");
+    assert!(!super::leaves_parts_out(&p.fields) && p.fields.contains_key("__dontShowAgain"));
+    app.ui.close_dialog(id);
+    std::fs::remove_dir_all(dir).unwrap();
+
+    // Data of a later 0.4 build this version does not know: the import leaves it out.
+    let json = br#"{"version":3,"app":"pigment","width":4,"height":4,"layers":[{"id":"a","type":"raster","name":"A"}],"store":{"timeline":{"data":[]}}}"#;
+    let mut zip = photocraft_format::zip::ZipWriter::new();
+    zip.add("document.json", json).unwrap();
+    let bytes = zip.finish().unwrap();
+    let (dir, path) = legacy_file("left-out");
+    std::fs::write(&path, &bytes).unwrap();
+    app.open_file(&path, &bytes).unwrap();
+    super::dont_show_again::remember(&mut app, super::PREF);
+
+    let r = menus::invoke(&mut app, &ctx, "file.save", json!({})).unwrap();
+    assert!(written.borrow().is_empty(), "{r}");
+    let p = prompt(&app).expect("asked although \"Don't show again\" was ticked");
+    assert!(super::leaves_parts_out(&p.fields));
+    assert_eq!(p.fields["choice"], "saveAs");
+    assert!(!p.fields.contains_key("__dontShowAgain"));
+    // Its default answer keeps the old file.
+    let id = p.id;
+    crate::dialogs::confirm(&mut app, id).unwrap();
+    app.poll_file_dialog(&ctx, None);
+    assert!(matches!(asked.borrow().as_slice(), [crate::FileDialogRequest::Save { .. }]));
+    assert!(written.borrow().is_empty());
+    assert!(photocraft_io::legacy_pigment::is_legacy(&std::fs::read(&path).unwrap()));
+    std::fs::remove_dir_all(dir).unwrap();
+}
