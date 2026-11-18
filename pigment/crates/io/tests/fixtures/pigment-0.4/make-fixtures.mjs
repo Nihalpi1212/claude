@@ -325,4 +325,9 @@ else {
   // adjustment, fill and shape layers, vector masks, layer styles, advanced blending
   const { default: layerFixtures } = await import('./make-fixtures-layers.mjs');
   await layerFixtures({ set, lib, out, io, D, add, canvasFrom, background, save });
+  // text layers and smart objects
+  if (set !== 'v1') {
+    const { default: l3Fixtures } = await import('./make-fixtures-l3.mjs');
+    await l3Fixtures({ set, lib, out, io, D, add, canvasFrom, background, save });
+  }
 }
