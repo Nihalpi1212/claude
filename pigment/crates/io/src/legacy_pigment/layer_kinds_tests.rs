@@ -672,3 +672,62 @@ fn dump_pictures() {
         std::fs::write(format!("{dir}/{name}.{}x{}.rgba", doc.size.width, doc.size.height), raw).unwrap();
     }
 }
+
+/// `name`'s `document.json` with another image mode and bit depth (the app wrote every layer
+/// kind in every mode and depth; its fixtures are RGB and 8-bit).
+fn in_mode(name: &str, mode: &str, depth: u64) -> Vec<u8> {
+    let bytes = std::fs::read(fixture_dir().join(format!("{name}.pigment"))).unwrap();
+    let mut archive = craft_zip::Archive::open(&bytes, craft_zip::Limits { max_entries: 1024, max_total_bytes: 1 << 30 }).unwrap();
+    let names: Vec<String> = archive.names().map(|n| n.into_owned()).collect();
+    let mut w = craft_zip::Writer::new();
+    for entry in names {
+        let mut data = archive.read(&entry, 1 << 30).unwrap().unwrap();
+        if entry == "document.json" {
+            let mut d: serde_json::Value = serde_json::from_slice(&data).unwrap();
+            d["mode"] = mode.into();
+            d["depth"] = depth.into();
+            data = serde_json::to_vec(&d).unwrap();
+        }
+        w.add(&entry, &data, craft_zip::Compression::Deflated).unwrap();
+    }
+    w.finish().unwrap()
+}
+
+fn count(layers: &[Layer]) -> usize {
+    layers.iter().map(|l| 1 + l.children().map_or(0, count)).sum()
+}
+
+/// Every layer kind opens in Grayscale and at 16 and 32 bits, draws, and keeps its layers through
+/// a PSD and the new format.
+#[test]
+fn every_layer_kind_opens_in_every_depth_and_mode_and_saves_as_psd_and_pigment() {
+    let mut names: Vec<String> = std::fs::read_dir(fixture_dir())
+        .unwrap()
+        .filter_map(|e| e.ok()?.path().file_stem()?.to_str().map(str::to_string))
+        .filter(|n| {
+            ["v3-adjust-", "v3-fill-", "v3-shape-", "v3-style-", "v3-blending-", "v3-vector-", "v3-text-", "v3-smart-"].iter().any(|k| n.starts_with(k))
+        })
+        .collect();
+    names.sort();
+    names.dedup();
+    assert!(names.len() > 100, "{}", names.len());
+    for name in &names {
+        for (mode, depth, want_mode, want_depth) in [
+            ("rgb", 16, ColorMode::Rgb, SampleType::U16),
+            ("rgb", 32, ColorMode::Rgb, SampleType::F32),
+            ("grayscale", 8, ColorMode::Grayscale, SampleType::U8),
+            ("grayscale", 16, ColorMode::Grayscale, SampleType::U16),
+        ] {
+            let at = format!("{name} {mode} {depth}");
+            let doc = crate::import("x.pigment", &in_mode(name, mode, depth)).unwrap_or_else(|e| panic!("{at}: {e}")).document;
+            assert_eq!((doc.mode, doc.depth), (want_mode, want_depth), "{at}");
+            photocraft_compose::flatten_to_surface(&doc, doc.pixel_format(), None);
+            let psd = crate::export(&doc, "x.psd", &crate::ExportOptions::default()).unwrap_or_else(|e| panic!("{at}: {e}"));
+            let back = crate::import("x.psd", &psd.bytes).unwrap_or_else(|e| panic!("{at}: {e}")).document;
+            assert_eq!((back.mode, back.depth, count(&back.layers)), (doc.mode, doc.depth, count(&doc.layers)), "{at}: PSD");
+            let native = crate::export(&doc, "x.pigment", &crate::ExportOptions::default()).unwrap_or_else(|e| panic!("{at}: {e}"));
+            let back = crate::import("x.pigment", &native.bytes).unwrap_or_else(|e| panic!("{at}: {e}")).document;
+            assert_eq!((back.mode, back.depth, count(&back.layers)), (doc.mode, doc.depth, count(&doc.layers)), "{at}: .pigment");
+        }
+    }
+}

@@ -1391,11 +1391,11 @@ pub mod guide_layout_ui;
 pub mod history_options_ui;
 mod image_processor_ui;
 pub mod jpeg_options_ui;
-// Pigment: the first Save over a Pigment 0.1–0.4 file asks first.
 #[cfg(test)]
 mod label_column_tests;
 pub mod layer_picker;
 pub mod layer_style;
+// Pigment: the first Save over a Pigment 0.1–0.4 file asks first.
 pub mod legacy_save_prompt;
 pub mod liquify_ui;
 pub mod live_shape_prompt;

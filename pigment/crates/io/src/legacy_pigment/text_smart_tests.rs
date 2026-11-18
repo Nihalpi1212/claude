@@ -279,3 +279,26 @@ fn hostile_type_and_smart_objects() {
     assert!(matches!(&r.document.layers[0].content, LayerContent::Text(t) if t.text == "ab😀"));
     assert!(matches!(&r.document.layers[1].content, LayerContent::Text(t) if t.text.is_empty()));
 }
+
+/// A smart object placed far larger than memory allows is reported and left undrawn, at once:
+/// its placed source is not clipped to the canvas, so drawing it used to fill memory (a 64 px
+/// image scaled 1000 times needs 16 GB) until the process was killed.
+#[test]
+fn a_smart_object_placed_too_large_is_reported_not_drawn() {
+    let png = std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/pigment-0.4/v3-smart-image.png")).unwrap();
+    for t in ["[1000,0,0,1000,0,0]", "[1e7,0,0,1e7,0,0]", "[0,1e7,-1e7,0,5,5]"] {
+        let json = format!(
+            r#"{{"version":3,"app":"pigment","width":64,"height":64,"dpi":72,"layers":[{{"id":"s","name":"Big","type":"smart","source":{{"kind":"image","name":"x"}},"transform":{t}}}]}}"#
+        );
+        let bytes = super::tests::zip(&[("mimetype", b"application/x-pigment"), ("document.json", json.as_bytes()), ("smart/s.png", &png)]);
+        let at = std::time::Instant::now();
+        let r = crate::import("big.pigment", &bytes).unwrap();
+        assert!(at.elapsed().as_secs() < 20, "{t}: {:?}", at.elapsed());
+        assert!(smart(&r, "Big").cache.is_none(), "{t}");
+        assert!(r.warnings.iter().any(|w| w.contains("Big") && w.contains("could not be drawn")), "{t}: {:?}", r.warnings);
+    }
+    // A placement that fits is drawn.
+    let json = r#"{"version":3,"app":"pigment","width":64,"height":64,"dpi":72,"layers":[{"id":"s","name":"Fits","type":"smart","source":{"kind":"image","name":"x"},"transform":[2,0,0,2,0,0]}]}"#;
+    let bytes = super::tests::zip(&[("mimetype", b"application/x-pigment"), ("document.json", json.as_bytes()), ("smart/s.png", &png)]);
+    assert!(smart(&crate::import("fits.pigment", &bytes).unwrap(), "Fits").cache.is_some());
+}

@@ -513,7 +513,8 @@ impl PhotocraftApp {
             let path = st.path.clone().filter(|p| photocraft_engine::file_cmds::holds_at(&st.doc, p) || flat_own(p)).ok_or(
                 "Save writes back only to the document's own PSD, PSB, .pigment, .pcraft or OpenRaster file (OpenRaster only when it holds everything), or to its own flat file while the document is a single plain layer and the file held only that image",
             )?;
-            return self.save_in_place(path, choices);
+            // Pigment: a played Save does not ask about a Pigment 0.1–0.4 file (`legacy_save_prompt`).
+            return self.save_in_place_unasked(path, choices);
         }
         if id == crate::export_dialog::COMMAND {
             // Export As has its own settings, its TGA bits included (#7207).

@@ -137,7 +137,7 @@ by Pigment 0.1 to 0.4 by its content, whatever it is called, and converts it.
 **Saving goes to the new format.** The document keeps its file, and the first File › Save asks
 "Save in the new Pigment format? Pigment 0.4 will no longer be able to open this file.": Save
 writes the new format over it, Save As… keeps the old file and saves a new one, Cancel does
-neither ("Don't show again" stops the question). Scripts and AI agents that save do not ask. A file
+neither ("Don't show again" stops the question). Scripts, AI agents and actions that save do not ask. A file
 that cannot be read at all says "This Pigment 0.4 file is damaged:" and why.
 
 On Windows and macOS, 0.5 installs where 0.4 was (`%LOCALAPPDATA%\Programs\Pigment` or
