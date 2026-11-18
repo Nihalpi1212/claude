@@ -107,11 +107,13 @@ has the details and a feature-by-feature comparison with Pigment 0.4.
 
 - **Documents from Pigment 0.1 to 0.4 open, but not all of their layers yet.** Pigment recognises
   them by their content and converts the document (size, resolution, image mode, 8, 16 and 32 bits
-  per channel), pixel layers and groups with their opacity, blend mode, locks, clipping and masks,
-  colour labels and links, the selection, saved channels, guides, paths and File Info. Adjustment,
-  fill and shape layers, layer styles, vector masks and advanced blending are not converted yet,
-  nor are text layers, smart objects and their filters: each opens as an empty layer in its place,
-  and the notes shown after opening list them. File › Save asks for a new file name, so the old
+  per channel), pixel, group, adjustment, fill and shape layers with their opacity, blend mode,
+  locks, clipping, masks, vector masks, layer styles and advanced blending, colour labels and
+  links, the selection, saved channels, guides, paths and File Info. Color and Vibrance, Clarity
+  and Dehaze and Grain adjustment layers keep their settings but change nothing yet, and some
+  adjustments and effects look slightly different (PhotoCraft computes them as Photoshop does).
+  Text layers, smart objects and their filters are not converted yet: each opens as an empty layer
+  in its place, and the notes shown after opening list them. File › Save asks for a new file name, so the old
   file stays as it was. Keep the old files, and to bring a document with such layers over whole
   today, export it as PSD from Pigment 0.4 **before installing 0.5**: on Windows and
   macOS, 0.5 installs where 0.4 was (`%LOCALAPPDATA%\Programs\Pigment` or `C:\Program Files\Pigment`,

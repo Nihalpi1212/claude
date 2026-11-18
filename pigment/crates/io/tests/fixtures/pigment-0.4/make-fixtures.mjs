@@ -31,6 +31,10 @@ globalThis.document = {
   },
 };
 globalThis.ImageData ??= napi.ImageData;
+// What the app's compositor draws shapes and patterns with (make-fixtures-layers.mjs).
+globalThis.DOMMatrix ??= napi.DOMMatrix;
+globalThis.DOMPoint ??= napi.DOMPoint;
+globalThis.Path2D ??= napi.Path2D;
 
 const lib = (p) => import(pathToFileURL(join(app, 'src', p)).href);
 const io = await lib('renderer/lib/io.js');
@@ -61,8 +65,11 @@ function background(doc, color = [255, 255, 255, 255]) {
   return add(doc.root, new RasterLayer({ name: 'Background', canvas: canvasFrom(doc.width, doc.height, () => color), x: 0, y: 0 }));
 }
 
-/** A document-sized mask canvas: grey in RGB, opaque, as lib/layer-ops.js makes them. */
-const maskCanvas = (doc, value) => canvasFrom(doc.width, doc.height, (x, y) => { const v = value(x, y); return [v, v, v, 255]; });
+/**
+ * A document-sized mask canvas as the app makes them (Selection.toCanvas, solidMask in lib/layer-ops.js): white, with
+ * the mask in the alpha channel, which is what the compositor masks with (destination-in).
+ */
+const maskCanvas = (doc, value) => canvasFrom(doc.width, doc.height, (x, y) => [255, 255, 255, value(x, y)]);
 
 async function save(name, doc) {
   const bytes = await io.writePigment(doc);
@@ -315,4 +322,7 @@ else {
     await modeFlag('cmyk');
     await modeFlag('lab');
   }
+  // adjustment, fill and shape layers, vector masks, layer styles, advanced blending
+  const { default: layerFixtures } = await import('./make-fixtures-layers.mjs');
+  await layerFixtures({ set, lib, out, io, D, add, canvasFrom, background, save });
 }

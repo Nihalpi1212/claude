@@ -1,17 +1,21 @@
 //! The layer tree of a Pigment 0.1–0.4 document (`Layer.describe()` in
-//! `renderer/lib/document.js`, pixels from `renderer/lib/io.js`): raster layers, groups and layer
-//! masks. The other layer kinds (adjustment, fill, shape, text, smart object) and the layer
-//! styles, vector masks and advanced blending are not converted here yet: such a layer opens as
-//! an empty pixel layer in its place with its common properties, and the report says so.
+//! `renderer/lib/document.js`, pixels from `renderer/lib/io.js`): raster, group, adjustment,
+//! fill and shape layers, with their layer masks, vector masks, layer styles and advanced
+//! blending. Text layers and smart objects are not converted here yet: such a layer opens as an
+//! empty pixel layer in its place with its common properties, and the report says so.
 
-use photocraft_color::{BlendMode, PixelFormat, SampleType};
+use photocraft_color::{BlendMode, ColorMode, PixelFormat, SampleType};
+use photocraft_doc::advanced::{AdvancedBlending, Knockout};
+use photocraft_doc::blend_if::{BlendIf, BlendRange};
 use photocraft_doc::{LabelColor, Layer, LayerContent, LayerId, LayerMask};
 use photocraft_geom::Rect;
 use photocraft_raster::{Interrupt, Surface};
 use serde_json::Value;
 
 use super::container::{Container, MAX_ENTRY_BYTES, Rgba8};
-use super::{blend, damaged};
+use super::paint::{self, Patterns, Place};
+use super::styles::StyleReader;
+use super::{adjust, blend, damaged};
 use crate::IoError;
 use crate::ora::Warnings;
 
@@ -156,6 +160,13 @@ pub(crate) struct LayerReader<'a, 'b, 'c> {
     pub(crate) links: Vec<(LayerId, String)>,
     /// Each layer's id in the file and in the document, in tree order.
     pub(crate) ids: Vec<(String, LayerId)>,
+    /// `document.json`'s version (1, 2 or 3): shape dashes were in pixels before 3.
+    pub(crate) version: u64,
+    /// The document's mode and size (fill layers cover the canvas).
+    pub(crate) mode: ColorMode,
+    pub(crate) canvas: (u32, u32),
+    /// The patterns fills, shapes and styles bring.
+    pub(crate) patterns: Patterns,
 }
 
 impl LayerReader<'_, '_, '_> {
@@ -192,11 +203,17 @@ impl LayerReader<'_, '_, '_> {
                     }
                     group
                 }
+                "adjustment" => {
+                    let mut notes = Vec::new();
+                    let kind = desc.get("kind").and_then(Value::as_str).unwrap_or("levels");
+                    let adjustment = adjust::to_adjustment(kind, desc.get("params").unwrap_or(&Value::Null), &mut notes);
+                    self.notes(&name, notes);
+                    Layer::new("", LayerContent::Adjustment(adjustment))
+                }
+                "fill" => self.fill(desc, id.as_deref(), &name)?,
+                "shape" => self.shape(desc, &name)?,
                 other => {
                     let what = match other {
-                        "adjustment" => "adjustment layers are not converted yet; the layer opens as an empty layer".to_string(),
-                        "fill" => "fill layers are not converted yet; the layer opens as an empty layer".to_string(),
-                        "shape" => "shape layers are not converted yet; the layer opens as an empty layer".to_string(),
                         "text" => "text layers are not converted yet; the layer opens as an empty layer".to_string(),
                         "smart" => "smart objects are not converted yet; the layer opens as an empty layer".to_string(),
                         "" => "the layer has no type; it opens as an empty layer".to_string(),
@@ -251,17 +268,155 @@ impl LayerReader<'_, '_, '_> {
                 self.links.push((layer.id, set.to_string()));
             }
         }
-        // What the next parts of the importer convert.
-        if desc.get("vectorMask").is_some_and(|v| !v.is_null()) {
-            self.warnings.layer(&layer.name, "the vector mask is not converted yet and was left out");
+        let mut notes = Vec::new();
+        if let Some(vm) = desc.get("vectorMask").and_then(Value::as_object) {
+            layer.vector_mask = Some(paint::vector_mask(vm, &mut notes));
         }
-        if desc.get("styles").is_some_and(|v| v.as_object().is_some_and(|m| !m.is_empty())) {
-            self.warnings.layer(&layer.name, "the layer styles are not converted yet and were left out");
+        if let Some(styles) = desc.get("styles").and_then(Value::as_object).filter(|m| !m.is_empty()) {
+            let mut reader = StyleReader { patterns: &mut self.patterns, notes: Vec::new() };
+            layer.effects = reader.effects(styles);
+            // Effect colours are in the document's mode.
+            layer.effects.items = std::mem::take(&mut layer.effects.items).into_iter().map(|e| e.in_mode(self.mode)).collect();
+            // The app tiled linked patterns from the layer's pixels' top-left.
+            if matches!(layer.content, LayerContent::Raster(_)) {
+                layer.effects.reference = Some((f64::from(offset(desc.get("x"))), f64::from(offset(desc.get("y")))));
+            }
+            notes.append(&mut reader.notes);
         }
-        if desc.get("blending").is_some_and(|v| !v.is_null()) {
-            self.warnings.layer(&layer.name, "the advanced blending options are not converted yet; the defaults are used");
+        if let Some(b) = desc.get("blending").and_then(Value::as_object) {
+            self.blending(layer, b, &mut notes);
         }
+        let name = layer.name.clone();
+        self.notes(&name, notes);
         Ok(())
+    }
+
+    fn notes(&mut self, layer: &str, notes: Vec<String>) {
+        for n in notes {
+            self.warnings.layer(layer, &n);
+        }
+    }
+
+    /// `blending` (`DEFAULT_BLENDING` of lib/document.js): channels, knockout, the advanced
+    /// options and Blend If (`[black low, black high, white low, white high]` in 0..255 per
+    /// channel, this layer and the one beneath).
+    fn blending(&mut self, layer: &mut Layer, b: &serde_json::Map<String, Value>, notes: &mut Vec<String>) {
+        let rgb = self.mode == ColorMode::Rgb;
+        if let Some(ch) = b.get("channels").and_then(Value::as_object) {
+            let off: Vec<usize> =
+                ["r", "g", "b"].iter().enumerate().filter(|(_, k)| ch.get(**k).and_then(Value::as_bool) == Some(false)).map(|(i, _)| i).collect();
+            if rgb {
+                layer.excluded_channels = off.iter().fold(0, |bits, i| bits | (1 << i));
+            } else if !off.is_empty() {
+                notes.push("the channels left out of blending were red, green or blue, which this image mode does not have; every channel blends".into());
+            }
+        }
+        let flag = |k: &str, d: bool| b.get(k).and_then(Value::as_bool).unwrap_or(d);
+        layer.advanced = AdvancedBlending {
+            knockout: b.get("knockout").and_then(Value::as_str).and_then(Knockout::from_name).unwrap_or(Knockout::None),
+            blend_interior: flag("interiorAsGroup", false),
+            blend_clipped: flag("clippedAsGroup", true),
+            transparency_shapes: flag("transparencyShapes", true),
+            layer_mask_hides_effects: flag("maskHidesEffects", false),
+            vector_mask_hides_effects: flag("vectorMaskHidesEffects", false),
+        };
+        if let Some(bi) = b.get("blendIf").and_then(Value::as_object) {
+            let range = |v: Option<&Value>| -> BlendRange {
+                match v.and_then(Value::as_array) {
+                    Some(a) if a.len() == 4 && a.iter().all(|v| v.as_f64().is_some_and(f64::is_finite)) => {
+                        let mut r = [0, 1, 2, 3].map(|i| a[i].as_f64().unwrap_or(0.0).round().clamp(0.0, 255.0) as u8);
+                        // Each half of a split point stays on its side.
+                        r[1] = r[1].max(r[0]);
+                        r[3] = r[3].max(r[2]);
+                        BlendRange::from_bytes(r)
+                    }
+                    _ => BlendRange::FULL,
+                }
+            };
+            let mut out = BlendIf::default();
+            let keys: &[&str] = if rgb { &["gray", "r", "g", "b"] } else { &["gray"] };
+            for (i, key) in keys.iter().enumerate() {
+                let c = bi.get(*key).and_then(Value::as_object);
+                out.set(i, [range(c.and_then(|c| c.get("this"))), range(c.and_then(|c| c.get("under")))]);
+            }
+            if !rgb
+                && ["r", "g", "b"].iter().any(|k| bi.get(*k).is_some_and(|c| [c.get("this"), c.get("under")].into_iter().any(|r| range(r) != BlendRange::FULL)))
+            {
+                notes.push("Blend If on red, green or blue was left out: this image mode does not have them".into());
+            }
+            layer.blend_if = out;
+        }
+    }
+
+    /// A shape layer, drawn once into its cache as the other importers do. A pattern-filled
+    /// shape is a pattern fill layer seen through its path, as PhotoCraft (and Photoshop) keep it.
+    fn shape(&mut self, desc: &serde_json::Map<String, Value>, name: &str) -> Result<Layer, IoError> {
+        let mut notes = Vec::new();
+        let mut shape = paint::shape(desc, self.version, &mut self.patterns, &mut notes);
+        shape.fill = shape.fill.map(|f| f.in_mode(self.mode));
+        if let Some(stroke) = &mut shape.stroke {
+            stroke.paint = stroke.paint.clone().in_mode(self.mode);
+        }
+        let has_vector_mask = desc.get("vectorMask").is_some_and(Value::is_object);
+        if let Some(fill @ photocraft_doc::Fill::Pattern { .. }) = &shape.fill
+            && !has_vector_mask
+        {
+            if shape.stroke.is_some() {
+                notes.push("the stroke of a pattern-filled shape was left out: the shape opens as a pattern fill layer with a vector mask".into());
+            }
+            self.notes(name, notes);
+            let mut layer = Layer::new("", LayerContent::Fill(fill.clone()));
+            layer.vector_mask = Some(photocraft_doc::vector::VectorMask::new(std::mem::take(&mut shape.path)));
+            return Ok(layer);
+        }
+        self.notes(name, notes);
+        let canvas = Rect::new(0, 0, self.canvas.0 as i32, self.canvas.1 as i32);
+        let compiled = photocraft_vector::CompiledShape::new(&shape, photocraft_vector::DEFAULT_TOLERANCE, canvas);
+        if let Some(bounds) = compiled.bounds().map(|b| b.intersect(&canvas)).filter(|b| !b.is_empty()) {
+            let cost = photocraft_raster::tile_storage_bytes(bounds, &self.fmt);
+            if cost > self.container.pixel_budget {
+                return Err(IoError::Unsupported(
+                    "this Pigment 0.4 document is too large to open: its layers need more pixel memory than the 2 GiB limit".into(),
+                ));
+            }
+            self.container.pixel_budget -= cost;
+            self.ctl.check().map_err(|_| IoError::Cancelled)?;
+            shape.cache = Some(compiled.render(self.fmt, bounds));
+        }
+        Ok(Layer::new("", LayerContent::Shape(shape)))
+    }
+
+    /// A fill layer (`paint`): it covers the canvas; a pattern's tile is `patterns/<id>.png`.
+    fn fill(&mut self, desc: &serde_json::Map<String, Value>, id: Option<&str>, name: &str) -> Result<Layer, IoError> {
+        let (w, h) = (f64::from(self.canvas.0), f64::from(self.canvas.1));
+        // The app laid a fill layer's gradient out over the document, whatever its masks show.
+        let place = Place { bx: (0.0, 0.0, w, h), frame: (0.0, 0.0, w, h), align: false };
+        let mut notes = Vec::new();
+        let mut tile_error = None;
+        let mut tile = |p: &serde_json::Map<String, Value>| -> Result<(String, String), String> {
+            let id = id.ok_or("cannot be found (the layer has no id)")?;
+            match self.container.png(&format!("patterns/{id}.png")) {
+                Ok(Ok(png)) => self.patterns.add(png, p.get("name").and_then(Value::as_str)),
+                Ok(Err(why)) => Err(why),
+                Err(e) => {
+                    tile_error = Some(e);
+                    Err("could not be read".into())
+                }
+            }
+        };
+        let fill = paint::fill_of(desc.get("paint").unwrap_or(&Value::Null), &place, &mut tile, &mut notes);
+        if let Some(e) = tile_error {
+            return Err(e);
+        }
+        self.notes(name, notes);
+        Ok(match fill {
+            // A fill layer's colours are in the document's mode.
+            Some(fill) => Layer::new("", LayerContent::Fill(fill.in_mode(self.mode))),
+            None => {
+                self.warnings.layer(name, "the fill layer has no paint Pigment can draw; it opens as an empty layer");
+                Layer::raster("", self.fmt)
+            }
+        })
     }
 
     /// A raster layer: `layers/<id>.png`, or its 16/32-bit samples next to it in a deep document.
@@ -327,8 +482,9 @@ impl LayerReader<'_, '_, '_> {
         Ok(())
     }
 
-    /// `masks/<id>.png`: the red channel is the mask. The app kept masks document-sized at the
-    /// origin; outside the image the mask reveals.
+    /// `masks/<id>.png`: the alpha channel is the mask (the app's masks are white with the mask
+    /// in their alpha, which its compositor masks with). The app kept masks document-sized at
+    /// the origin; outside the image the mask reveals.
     fn mask(&mut self, desc: &serde_json::Map<String, Value>, id: Option<&str>, name: &str) -> Result<Option<LayerMask>, IoError> {
         let Some(id) = id else { return Ok(None) };
         let png = match self.container.png(&format!("masks/{id}.png"))? {
@@ -339,7 +495,7 @@ impl LayerReader<'_, '_, '_> {
             }
         };
         let pixels = png.width as usize * png.height as usize;
-        let bytes = encode_gray(png.data.iter().step_by(4).copied(), pixels, self.mask_fmt, false);
+        let bytes = encode_gray(png.data.iter().skip(3).step_by(4).copied(), pixels, self.mask_fmt, false);
         let mut surface = Surface::with_default(self.mask_fmt, &[1.0]);
         self.container.write(&mut surface, Rect::new(0, 0, png.width as i32, png.height as i32), &bytes)?;
         let feather = desc.get("maskFeather").and_then(Value::as_f64).filter(|n| n.is_finite()).map_or(0.0, |n| n.clamp(0.0, 1000.0) as f32);
