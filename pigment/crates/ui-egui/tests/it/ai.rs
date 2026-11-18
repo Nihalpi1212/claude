@@ -462,6 +462,33 @@ fn expand_from_crop_on_a_very_wide_document() {
     assert!(mock.calls().is_empty(), "nothing sent before Generate");
 }
 
+/// The selection bar's Generate sends one request, whatever the Generate window was last set to,
+/// and a model typed for another feature is not carried over.
+#[test]
+fn the_bar_generate_sends_one_request() {
+    let mock = Arc::new(MockBackend::connected());
+    let m = Arc::clone(&mock);
+    let mut h = harness(move |app| {
+        with_mock(app, &m);
+        app.run("select.rect", json!({"x": 20, "y": 20, "width": 40, "height": 40})).unwrap();
+    });
+    generate::open(h.state_mut(), "ai.generativeFill", None).unwrap();
+    h.state_mut().ai.generate.variations = 3;
+    generate::close(h.state_mut());
+    h.run_steps(2);
+    h.state_mut().ai.bar_prompt = "a moon".into();
+    task_bar::fill_from_bar(h.state_mut());
+    h.run_steps(3);
+    assert_eq!(mock.calls().len(), 1, "{:?}", mock.calls());
+    assert_eq!(layer_names(h.state()).iter().filter(|n| n.starts_with("Generative Fill")).count(), 1);
+    // A model typed for Generate Image stays with it.
+    generate::open(h.state_mut(), "ai.generateImage", None).unwrap();
+    h.state_mut().ai.generate.model = "image-model-x".into();
+    generate::close(h.state_mut());
+    generate::open(h.state_mut(), "ai.generativeFill", None).unwrap();
+    assert_eq!(h.state().ai.generate.model, "", "another feature's model");
+}
+
 /// Describe Image shows at most 20,000 characters of an answer, however long the provider's.
 #[test]
 fn describe_shows_a_bounded_answer() {

@@ -117,6 +117,13 @@ pub fn open(app: &mut PhotocraftApp, feature: &'static str, prompt: Option<&str>
         let last = PromptFeature::of_command(feature).and_then(|f| with_accounts(app, |a| a.settings.last_prompt(f).map(str::to_string)).flatten());
         let size = app.session.active().map(|st| (st.doc.size.width, st.doc.size.height));
         let g = &mut app.ai.generate;
+        // A model typed for another feature stays with it, and each opening starts at one
+        // variation: the selection bar's Generate runs through this window without showing it,
+        // so a count chosen earlier must not bill several requests unseen.
+        if g.feature != feature {
+            g.model.clear();
+        }
+        g.variations = 1;
         g.feature = feature;
         g.error = None;
         g.note = None;

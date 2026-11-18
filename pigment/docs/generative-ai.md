@@ -331,7 +331,9 @@ Image, Generate Background and Sky Replacement. It holds the prompt (the feature
 `ai.json`, or Sky Replacement's "A dramatic sunset sky with warm clouds"), the feature's options
 (variations 1 to 3; Expand's new width, height and anchor; Generate Image's layer or new document,
 its size and transparency), the provider (shown when two have keys) and a model for this request
-(empty: the one AI Accounts sets), and a line saying what this feature sends. **Nothing is sent
+(empty: the one AI Accounts sets), and a line saying what this feature sends. Each opening starts at
+one variation, and a model typed for one feature is not kept for another: the selection bar's
+Generate runs Generative Fill through this window without showing it. **Nothing is sent
 before Generate.** Generate is dimmed, with the reason as its tooltip, while a request runs, without
 a key or the agreement (with a link to AI Accounts), when the document doesn't suit, or without a
 prompt. Generate runs the engine command as a background job: the status bar shows it with Cancel
