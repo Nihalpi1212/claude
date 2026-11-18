@@ -1,5 +1,12 @@
 # User docs: rules for agents and contributors
 
+**In Pigment:** these pages are Pigment's user guide, read on GitHub (Help › Learn and the README
+link here); they are not published at getartcraft.com. Call the product "Pigment", link Pigment's
+releases and issue tracker (`github.com/Nihalpi1212/claude`), and set `verified` to the Pigment
+release you checked the page against. PhotoCraft's rules below otherwise apply; where they say
+"PhotoCraft", read "Pigment". At an upstream merge, read upstream's changes to these pages and
+carry over what applies by hand (see `docs/FORK.md`, "The user guide").
+
 Everything in this folder (except this file, CLAUDE.md and README.md) is published at
 https://getartcraft.com/docs/photocraft. The file path is the URL:
 `troubleshooting/taskbar-turns-black.md` → `/docs/photocraft/troubleshooting/taskbar-turns-black`.

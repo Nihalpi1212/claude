@@ -1,16 +1,16 @@
 ---
 title: Getting started
-description: Install PhotoCraft and open your first image.
+description: Install Pigment and open your first image.
 order: 10
-verified: 0.8.2
+verified: 0.5.0
 ---
 
-Install PhotoCraft, then open an image with **File › Open…**. The panels you use most are **Layers**, **Properties** and **History**.
+Install Pigment, then open an image with **File › Open…**. The panels you use most are **Layers**, **Properties** and **History**.
 
-1. [Install PhotoCraft](install.md).
-2. Start PhotoCraft and choose **File › Open…**. To start from nothing, choose **File › New…** and click **Create**.
+1. [Install Pigment](install.md).
+2. Start Pigment and choose **File › Open…**. To start from nothing, choose **File › New…** and click **Create**.
 3. Pick the **Horizontal Type Tool**, a selection tool or an adjustment, and work on the image. Every step is listed in the **History** panel and can be undone.
-4. Keep your layers with **File › Save As…** (PSD or PhotoCraft), or make a flat copy with **File › Export › Export As…**.
+4. Keep your layers with **File › Save As…** (PSD or Pigment), or make a flat copy with **File › Export › Export As…**.
 
 The guides walk through each of these:
 
@@ -19,3 +19,6 @@ The guides walk through each of these:
 - [Select part of an image and mask it](../guides/select-and-mask.md)
 - [Add and style text](../guides/add-and-style-text.md)
 - [Export an image](../guides/export-an-image.md)
+- [Use generative AI](../guides/use-generative-ai.md)
+
+Coming from Pigment 0.4? Your `.pigment` documents open: see [Open documents from Pigment 0.4 and earlier](../guides/open-pigment-0-4-documents.md).
