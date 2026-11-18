@@ -440,6 +440,35 @@ fn task_bar_items_appear_only_with_a_key() {
     assert!(h.state().ui.crop_rect.is_none(), "the frame is let go");
 }
 
+/// Remove Background with AI Provider as a background job, with another tab made active while it
+/// runs: Generate Background is offered on the document whose background was removed, not on the
+/// tab that happens to be active when the job lands.
+#[test]
+fn generate_background_follows_the_document_the_job_ran_on() {
+    let mock = Arc::new(MockBackend::connected());
+    let m = Arc::clone(&mock);
+    let mut h = harness(move |app| {
+        with_mock(app, &m);
+        app.background_jobs = true;
+        app.ui.panels.context_task_bar = true;
+        app.run("file.new", json!({"width": 120, "height": 90, "background": "white"})).expect("B");
+        app.session.set_active(0);
+    });
+    mock.push(MockAnswer::Pattern(|x, _| if x < 50 { [0, 0, 0, 0] } else { [10, 200, 30, 255] }));
+    let a = h.state().session.active().unwrap().doc.id;
+    let r = ai_ui::menu(h.state_mut(), "ai.removeBackgroundWithProvider", &json!({})).unwrap();
+    assert!(r.is_ok(), "{r:?}");
+    h.state_mut().session.set_active(1);
+    until_idle(&mut h);
+    assert_eq!(mock.calls().len(), 1);
+    let rev_a = h.state().session.documents().iter().find(|st| st.doc.id == a).unwrap().revision;
+    assert_eq!(h.state().ai.after_remove, Some((a, rev_a)), "the job's document");
+    assert_eq!(task_bar::which(h.state()), None, "not on the other tab");
+    h.state_mut().session.set_active(0);
+    h.run_steps(2);
+    assert_eq!(task_bar::which(h.state()), Some(task_bar::Bar::AfterRemove));
+}
+
 /// Generative Expand from the Crop bar on a document wider than 30,000 px (PhotoCraft allows
 /// 300,000 a side): no panic while the canvas is drawn, and the window keeps the size the frame
 /// asked for instead of capping it below the document's own.

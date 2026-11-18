@@ -456,14 +456,15 @@ mod native {
         }
         let r = app.run(REMOVE_BACKGROUND, json!({"method": method}))?;
         if r.get("pending").is_none() {
-            removed_background(app);
+            let active = app.session.active().map(|st| st.doc.id);
+            removed_background(app, active);
         }
         Ok(r)
     }
 
-    /// Remove Background landed: offer Generate Background in the task bar.
-    fn removed_background(app: &mut PhotocraftApp) {
-        app.ai.after_remove = app.session.active().map(|st| (st.doc.id, st.revision));
+    /// Remove Background landed on `doc`: offer Generate Background in its task bar.
+    fn removed_background(app: &mut PhotocraftApp, doc: Option<photocraft_doc::DocId>) {
+        app.ai.after_remove = doc.and_then(|id| app.session.documents().iter().find(|st| st.doc.id == id)).map(|st| (st.doc.id, st.revision));
     }
 
     /// A background job ended: the AI windows take the ones they started. `true` when the event is
@@ -471,7 +472,8 @@ mod native {
     pub fn on_job_event(app: &mut PhotocraftApp, e: &JobEvent) -> bool {
         if matches!(e.outcome, JobOutcome::Done(_)) && matches!(e.command.as_str(), REMOVE_BACKGROUND | "layer.removeBackground") {
             app.sync_views();
-            removed_background(app);
+            // The job's document, not whichever tab is active when it lands.
+            removed_background(app, e.document);
         }
         if describe::on_job_event(app, e) || assistant::on_job_event(app, e) {
             return true;
