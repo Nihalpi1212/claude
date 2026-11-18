@@ -167,15 +167,17 @@ fn color_table_of(v: Option<&Value>) -> Option<Vec<[u8; 3]>> {
     (!colors.is_empty()).then_some(colors)
 }
 
-/// One plane of `size` bytes (the selection, a channel) from entry `name`; `Ok(Err(why))` when
-/// the entry is not that plane.
-fn plane(container: &mut Container<'_>, name: &str, size: Size) -> Result<Result<Vec<u8>, String>, IoError> {
+/// One plane of `size` bytes (the selection, a channel) from entry `name`, to be kept in `fmt`;
+/// `Ok(Err(why))` when the entry is not that plane. A plane the pixel budget cannot keep is
+/// refused before it is read.
+fn plane(container: &mut Container<'_>, name: &str, size: Size, fmt: &PixelFormat) -> Result<Result<Vec<u8>, String>, IoError> {
     let expected = u64::from(size.width) * u64::from(size.height);
     match container.declared_size(name) {
         None => return Ok(Err("is missing from the file".into())),
         Some(declared) if declared != expected => return Ok(Err(format!("holds {declared} bytes where the canvas has {expected} pixels"))),
         Some(_) => {}
     }
+    container.price(Rect::from_size(size), fmt)?;
     match container.read(name, expected) {
         Ok(Some(data)) if data.len() as u64 == expected => Ok(Ok(data)),
         Ok(_) => Ok(Err("does not hold one byte per pixel".into())),
@@ -259,7 +261,7 @@ fn channels_and_selection(
             .and_then(Value::as_str)
             .filter(|s| !s.trim().is_empty())
             .map_or_else(|| format!("Alpha {}", document.channels.len() + 1), str::to_string);
-        let data = match plane(container, &format!("channels/{id}.bin"), size)? {
+        let data = match plane(container, &format!("channels/{id}.bin"), size, &mask_fmt)? {
             Ok(data) => data,
             Err(why) => {
                 warnings.note(&format!("the channel \"{name}\" {why} and was left out"));
@@ -278,7 +280,7 @@ fn channels_and_selection(
         document.channels.push(channel);
     }
     if container.contains("selection.bin") {
-        match plane(container, "selection.bin", size)? {
+        match plane(container, "selection.bin", size, &mask_fmt)? {
             Ok(data) if data.iter().any(|v| *v != 0) => {
                 let mut surface = Surface::new(mask_fmt);
                 container.write(&mut surface, canvas, &encode_gray(data.into_iter(), pixels, mask_fmt, false))?;

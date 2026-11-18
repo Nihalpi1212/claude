@@ -39,7 +39,7 @@ pub(crate) const MAX_SIDE: u32 = 300_000;
 /// Pixel memory one document may take (the tiles its layers, masks and channels keep).
 pub(crate) const MAX_PIXEL_BYTES: u64 = 2 << 30;
 
-fn too_large(what: &str) -> IoError {
+pub(crate) fn too_large(what: &str) -> IoError {
     IoError::Unsupported(format!("this Pigment 0.4 document is too large to open: {what}"))
 }
 
@@ -63,13 +63,37 @@ pub(crate) fn decode_png(data: &[u8], budget: u64) -> Result<Rgba8, String> {
     let image = codecs::decode_as_with(codecs::Format::Png, data, &opts).map_err(|e| format!("could not be decoded ({e})"))?;
     let (width, height) = image.dimensions();
     let bytes = u64::from(width) * u64::from(height) * 4;
-    let rgba = image.converted(ChannelLayout::Rgba, CSample::U8);
-    let data = rgba.data().to_vec();
+    // The decoded samples are taken as they are when they already are 8-bit RGBA, not copied.
+    let converted = match image.converted(ChannelLayout::Rgba, CSample::U8) {
+        std::borrow::Cow::Owned(rgba) => Some(rgba),
+        std::borrow::Cow::Borrowed(_) => None,
+    };
+    let data = match converted {
+        Some(rgba) => {
+            drop(image);
+            rgba.into_data()
+        }
+        None => image.into_data(),
+    };
     if data.len() as u64 != bytes {
         return Err("could not be decoded (its size is inconsistent)".into());
     }
     Ok(Rgba8 { width, height, data })
 }
+
+/// The width and height a PNG's header gives (`IHDR`, which comes first), from the first
+/// [`PNG_HEAD`] bytes of the file; `None` when they are not a PNG's.
+pub(crate) fn png_size(head: &[u8]) -> Option<(u32, u32)> {
+    let head = head.get(..PNG_HEAD)?;
+    if &head[..8] != b"\x89PNG\r\n\x1a\n" || &head[12..16] != b"IHDR" {
+        return None;
+    }
+    let be = |i: usize| u32::from_be_bytes([head[i], head[i + 1], head[i + 2], head[i + 3]]);
+    Some((be(16), be(20)))
+}
+
+/// The bytes of a PNG that hold its size.
+pub(crate) const PNG_HEAD: usize = 24;
 
 /// What one document may still take: the bytes its entries expand to and the pixel memory. A
 /// smart object's nested document takes from its host's.
@@ -145,6 +169,36 @@ impl<'a> Container<'a> {
         }
     }
 
+    /// Refuses the document when the PNG entry `name` says it is larger than `cost` (what its
+    /// pixels will take, from its width and height) lets the pixel budget hold. Only the PNG's
+    /// header is read: an image that cannot be kept is neither inflated nor decoded. An entry
+    /// that is missing or is not a PNG passes, for [`Self::png`] to report.
+    pub(crate) fn price_png(&mut self, name: &str, cost: impl FnOnce(u32, u32) -> u64) -> Result<(), IoError> {
+        let want = (PNG_HEAD as u64).min(self.declared_size(name).unwrap_or(0));
+        if want > self.bytes_left {
+            // Reading it fails the document, as it is.
+            return Ok(());
+        }
+        let head = match self.archive.read_head(name, PNG_HEAD) {
+            Ok(Some(head)) => head,
+            Ok(None) | Err(_) => return Ok(()),
+        };
+        self.bytes_left = self.bytes_left.saturating_sub(head.len() as u64);
+        match png_size(&head) {
+            Some((w, h)) if cost(w, h) > self.pixel_budget => Err(too_large("its layers need more pixel memory than the 2 GiB limit")),
+            _ => Ok(()),
+        }
+    }
+
+    /// Refuses the document when `rect` in `fmt` takes more than the pixel budget has left:
+    /// asked before the pixels are read and converted, which takes as much memory again.
+    pub(crate) fn price(&self, rect: Rect, fmt: &PixelFormat) -> Result<(), IoError> {
+        if photocraft_raster::tile_storage_bytes(rect, fmt) > self.pixel_budget {
+            return Err(too_large("its layers need more pixel memory than the 2 GiB limit"));
+        }
+        Ok(())
+    }
+
     /// `document.json`, parsed. Without it, or when it is not JSON, the file is damaged.
     pub(crate) fn document(&mut self) -> Result<Value, IoError> {
         let data = match self.read(DOCUMENT, MAX_DOCUMENT_BYTES) {
@@ -180,9 +234,7 @@ impl<'a> Container<'a> {
     /// `surface` and charges the tiles it keeps to the pixel budget.
     pub(crate) fn write(&mut self, surface: &mut Surface, rect: Rect, bytes: &[u8]) -> Result<(), IoError> {
         let fmt: PixelFormat = surface.format();
-        if photocraft_raster::tile_storage_bytes(rect, &fmt) > self.pixel_budget {
-            return Err(too_large("its layers need more pixel memory than the 2 GiB limit"));
-        }
+        self.price(rect, &fmt)?;
         let before = surface.tile_count();
         surface.try_write_interleaved(rect, bytes).map_err(|e| IoError::OutOfMemory(e.to_string()))?;
         surface.prune();

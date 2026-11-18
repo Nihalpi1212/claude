@@ -707,29 +707,37 @@ fn hostile_sizes_are_refused_by_the_limits() {
     let many = format!("[{}]", vec![r#"{"type":"group"}"#; 8193].join(","));
     assert!(too_large(&described(&many)).ends_with("it has more than 8192 layers"));
 
-    // A PNG that claims 30000 × 30000 pixels in a few bytes: never allocated, the layer opens empty.
-    let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
-    let mut chunk = |kind: &[u8; 4], data: &[u8]| {
-        png.extend_from_slice(&(data.len() as u32).to_be_bytes());
-        let mut body = kind.to_vec();
-        body.extend_from_slice(data);
-        png.extend_from_slice(&body);
-        png.extend_from_slice(&crc32fast::hash(&body).to_be_bytes());
+    // A PNG that claims a size in a few bytes. 30000 × 30000 is more than a layer's pixel
+    // memory may take: refused from the header alone. As a mask it would fit, so it is decoded,
+    // and is never allocated: the mask is left out. A smaller damaged image opens empty.
+    let png_of = |side: u32| {
+        let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+        let mut chunk = |kind: &[u8; 4], data: &[u8]| {
+            png.extend_from_slice(&(data.len() as u32).to_be_bytes());
+            let mut body = kind.to_vec();
+            body.extend_from_slice(data);
+            png.extend_from_slice(&body);
+            png.extend_from_slice(&crc32fast::hash(&body).to_be_bytes());
+        };
+        let mut ihdr = Vec::new();
+        ihdr.extend_from_slice(&side.to_be_bytes());
+        ihdr.extend_from_slice(&side.to_be_bytes());
+        ihdr.extend_from_slice(&[8, 6, 0, 0, 0]);
+        chunk(b"IHDR", &ihdr);
+        chunk(b"IDAT", &[0x78, 0x9c, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01]);
+        chunk(b"IEND", &[]);
+        png
     };
-    let mut ihdr = Vec::new();
-    ihdr.extend_from_slice(&30_000u32.to_be_bytes());
-    ihdr.extend_from_slice(&30_000u32.to_be_bytes());
-    ihdr.extend_from_slice(&[8, 6, 0, 0, 0]);
-    chunk(b"IHDR", &ihdr);
-    chunk(b"IDAT", &[0x78, 0x9c, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01]);
-    chunk(b"IEND", &[]);
+    let (png, small) = (png_of(30_000), png_of(300));
+    let layer = br#"{"app":"pigment","width":4,"height":4,"layers":[{"id":"big","type":"raster","name":"Big"}]}"#;
+    too_large(&zip(&[("document.json", layer), ("layers/big.png", &png)]));
     let json =
         br#"{"app":"pigment","width":4,"height":4,"layers":[{"id":"big","type":"raster","name":"Big","hasMask":true}],"channels":[{"id":"c","name":"Huge"}]}"#;
     // A channel that inflates to far more than the canvas has pixels is not inflated at all.
     let huge = vec![0u8; 32 << 20];
     let started = std::time::Instant::now();
-    let r =
-        crate::import("bomb.pigment", &zip(&[("document.json", json), ("layers/big.png", &png), ("masks/big.png", &png), ("channels/c.bin", &huge)])).unwrap();
+    let r = crate::import("bomb.pigment", &zip(&[("document.json", json), ("layers/big.png", &small), ("masks/big.png", &png), ("channels/c.bin", &huge)]))
+        .unwrap();
     assert!(started.elapsed() < std::time::Duration::from_secs(20));
     assert!(matches!(&r.document.layers[0].content, LayerContent::Raster(s) if s.tile_count() == 0));
     assert!(r.document.layers[0].mask.is_none() && r.document.channels.is_empty());
@@ -815,4 +823,42 @@ fn pigment_saves_the_native_format_and_opens_it_again() {
     // A `.pcraft` still opens.
     let pcraft = crate::export(&doc, "poster.pcraft", &opts).unwrap();
     assert!(crate::import("poster.pcraft", &pcraft.bytes).is_ok());
+}
+
+/// What a document's pixels take is asked before they are read and converted: a plane that
+/// cannot be kept is never inflated, and a layer image that cannot be kept is neither inflated
+/// nor decoded (only its header is read).
+#[test]
+fn pixels_that_cannot_be_kept_are_refused_before_they_are_read() {
+    let refused = |pixels: u64, layers: &str, rest: &str, entries: &[(&str, &[u8])]| {
+        // 1000 × 1000 at 32 bits: about 16 MB as a layer, 4 MB as a mask or a channel.
+        let json = format!(r#"{{"version":3,"app":"pigment","width":1000,"height":1000,"depth":32,"layers":[{layers}]{rest}}}"#);
+        let mut all: Vec<(&str, &[u8])> = vec![("document.json", json.as_bytes())];
+        all.extend_from_slice(entries);
+        let bytes = zip(&all);
+        let mut budget = Budget { pixels, ..Budget::default() };
+        match import_at("big.pigment", &bytes, &Interrupt::NONE, 0, &mut budget) {
+            Err(IoError::Unsupported(why)) => assert!(why.starts_with("this Pigment 0.4 document is too large to open: "), "{why}"),
+            other => panic!("{layers}{rest}: expected a refusal, got {:?}", other.map(|r| r.warnings)),
+        }
+        // Only the description (and a PNG's header) was read.
+        let read = Budget::default().bytes - budget.bytes;
+        assert!(read <= json.len() as u64 + container::PNG_HEAD as u64, "{layers}{rest}: {read} bytes were read");
+        assert_eq!(budget.pixels, pixels, "{layers}{rest}");
+    };
+    let plane = vec![0xffu8; 1000 * 1000];
+    refused(1 << 20, "", r#","channels":[{"id":"c1","name":"Alpha 1"}]"#, &[("channels/c1.bin", &plane)]);
+    refused(1 << 20, "", "", &[("selection.bin", &plane)]);
+
+    let image = photocraft_codecs::Image::new(1000, 1000, photocraft_codecs::ChannelLayout::Rgba, photocraft_codecs::SampleType::U8).unwrap();
+    let png = photocraft_codecs::encode(&image, photocraft_codecs::Format::Png, &Default::default()).unwrap();
+    // The 8-bit image decodes within 8 MiB; at 32 bits it does not fit.
+    refused(8 << 20, r#"{"id":"l","type":"raster","name":"L"}"#, "", &[("layers/l.png", &png)]);
+    let deep = vec![0u8; 1000 * 1000 * 16];
+    refused(8 << 20, r#"{"id":"l","type":"raster","name":"L","deep":"f32","width":1000,"height":1000}"#, "", &[("layers/l.f32", &deep)]);
+    refused(8 << 20, r#"{"id":"l","type":"raster","name":"L","deep":"f32"}"#, "", &[("layers/l.png", &png), ("layers/l.f32", &deep)]);
+    // A mask takes as much as its 8-bit image: just under what it needs.
+    let mask_fmt = PixelFormat::new(ColorMode::Grayscale, SampleType::F32, false);
+    let mask = photocraft_raster::tile_storage_bytes(Rect::new(0, 0, 1000, 1000), &mask_fmt) - 1;
+    refused(mask, r#"{"id":"l","type":"raster","name":"L","hasMask":true}"#, "", &[("masks/l.png", &png)]);
 }
