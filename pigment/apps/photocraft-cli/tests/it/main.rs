@@ -4,6 +4,8 @@
 mod ai;
 mod cli;
 mod gpu;
+// Pigment: documents of Pigment 0.1–0.4.
+mod legacy_pigment;
 #[cfg(all(target_os = "linux", target_env = "gnu"))]
 mod malloc_tuning;
 

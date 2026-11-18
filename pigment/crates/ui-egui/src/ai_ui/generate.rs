@@ -443,11 +443,13 @@ fn options(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         }
         EXPAND => {
             let (w0, h0) = doc.unwrap_or((1, 1));
+            // From the document's own side up to the engine's limit (Canvas Size's).
+            let max = photocraft_engine::ai_cmds::EXPAND_MAX_SIDE;
             ui.horizontal(|ui| {
                 let l = ui.label(tl!("New width:"));
-                ui.add(egui::DragValue::new(&mut g.width).range(w0..=30_000).suffix(" px")).labelled_by(l.id);
+                ui.add(egui::DragValue::new(&mut g.width).range(w0..=max.max(w0)).suffix(" px")).labelled_by(l.id);
                 let l = ui.label(tl!("New height:"));
-                ui.add(egui::DragValue::new(&mut g.height).range(h0..=30_000).suffix(" px")).labelled_by(l.id);
+                ui.add(egui::DragValue::new(&mut g.height).range(h0..=max.max(h0)).suffix(" px")).labelled_by(l.id);
             });
             ui.horizontal(|ui| {
                 ui.label(tl!("Keep the image:"));

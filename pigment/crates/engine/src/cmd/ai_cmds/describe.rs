@@ -36,7 +36,7 @@ fn describe(s: &mut Session, p: &Value) -> Result<Value> {
             ctx.check()?;
             let req = Describe { choice, image, prompt: question };
             let text = call(ctx, |cancelled| backend.describe(&req, cancelled))?;
-            let text = text.trim().to_string();
+            let text = bounded(text.trim());
             if text.is_empty() {
                 return Err(generative_error(kind::BAD_RESPONSE, "The model returned no description"));
             }
@@ -44,6 +44,18 @@ fn describe(s: &mut Session, p: &Value) -> Result<Value> {
         },
         move |_, text| Ok(json!({ "text": text, "provider": provider })),
     )
+}
+
+/// `text` without control characters other than line breaks and tabs (they have no place in a
+/// description or its XMP), cut to [`super::DESCRIBE_LIMIT`] characters with an ellipsis.
+fn bounded(text: &str) -> String {
+    let mut kept = text.chars().filter(|c| !c.is_control() || matches!(c, '\n' | '\t'));
+    let mut out: String = kept.by_ref().take(super::DESCRIBE_LIMIT).collect();
+    if kept.next().is_some() {
+        out.pop();
+        out.push('…');
+    }
+    out
 }
 
 /// A key hint as `ai.status` shows it: an ellipsis and at most the last four characters, so even

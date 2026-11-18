@@ -139,8 +139,10 @@ pub fn expand_from_crop(app: &mut PhotocraftApp) {
         (false, true) => 0,
         _ => 1,
     };
+    // At least the document (which may be up to Canvas Size's limit itself), at most that limit.
+    let max = f64::from(photocraft_engine::ai_cmds::EXPAND_MAX_SIDE);
     let g = &mut app.ai.generate;
-    g.width = (w + left + right).round().clamp(w, 30_000.0) as u32;
-    g.height = (h + top + bottom).round().clamp(h, 30_000.0) as u32;
+    g.width = (w + left + right).round().min(max).max(w) as u32;
+    g.height = (h + top + bottom).round().min(max).max(h) as u32;
     g.anchor = generate::ANCHORS[side(top, bottom) * 3 + side(left, right)];
 }

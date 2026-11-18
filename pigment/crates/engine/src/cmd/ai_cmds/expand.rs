@@ -50,8 +50,8 @@ fn side(p: &Value, key: &str, current: u32) -> Result<u32> {
             if n < f64::from(current) {
                 return Err(bad(CMD, format!("`{key}` must be at least the document's {key} ({current} px)")));
             }
-            if n > 300_000.0 {
-                return Err(bad(CMD, format!("`{key}` must be at most 300000 px")));
+            if n > f64::from(super::EXPAND_MAX_SIDE) {
+                return Err(bad(CMD, format!("`{key}` must be at most {} px", super::EXPAND_MAX_SIDE)));
             }
             Ok(n as u32)
         }

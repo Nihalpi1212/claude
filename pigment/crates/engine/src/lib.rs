@@ -32,7 +32,7 @@ pub mod jobs;
 pub mod kys;
 pub mod layer_place;
 pub mod layer_style;
-mod legacy_pigment_render;
+pub mod legacy_pigment_render;
 pub mod link_watch;
 pub mod malloc_tuning;
 pub mod memory;

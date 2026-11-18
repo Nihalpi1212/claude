@@ -173,7 +173,8 @@ fn source_pixels(source: &SmartSource, fmt: PixelFormat, budget: u64) -> Option<
 
 /// Draws the appearance of every smart object of `document`: through the engine's renderer
 /// when one is installed (smart filters included), else the source placed by its matrix, without
-/// its filters. A source too large for what is left of `budget` stays undrawn, reported.
+/// its filters, which is reported. A source too large for what is left of `budget` stays
+/// undrawn, reported.
 pub(crate) fn render(document: &mut Document, budget: &mut u64, warnings: &mut crate::ora::Warnings) {
     let ids = smart_layers(&document.layers);
     if ids.is_empty() {
@@ -187,6 +188,7 @@ pub(crate) fn render(document: &mut Document, budget: &mut u64, warnings: &mut c
             continue;
         }
         let LayerContent::Smart(sm) = &mut layer.content else { continue };
+        let unfiltered = sm.filters_enabled && !sm.smart_filters.is_empty();
         let drawn = source_pixels(&sm.source, fmt, *budget).and_then(|(pixels, rect)| {
             // The placed source is not clipped to the canvas: a large placement fills memory
             // (and takes minutes) before anything could fail, so the whole of it is priced, as
@@ -204,7 +206,12 @@ pub(crate) fn render(document: &mut Document, budget: &mut u64, warnings: &mut c
             Some(out)
         });
         match drawn {
-            Some(surface) => sm.cache = Some(surface),
+            Some(surface) => {
+                sm.cache = Some(surface);
+                if unfiltered {
+                    warnings.layer(&layer.name, "the smart filters could not be drawn; the smart object shows without them until it is edited");
+                }
+            }
             None => {
                 let name = layer.name.clone();
                 warnings.layer(&name, "the smart object's contents could not be drawn; they show once the smart object is edited");
