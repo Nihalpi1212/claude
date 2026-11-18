@@ -340,6 +340,7 @@ pub fn use_pasted_address(app: &mut PhotocraftApp) {
 pub fn sign_out(app: &mut PhotocraftApp) {
     let r = with_accounts(app, |a| a.sign_out());
     reread(app);
+    super::assistant::forget_models(app);
     match r {
         Some(Ok(())) => note(app, false, tl!("Signed out of ChatGPT.").into()),
         Some(Err(e)) => note(app, true, message(&e.message)),
@@ -415,6 +416,7 @@ pub fn wait(app: &mut PhotocraftApp, timeout: Duration) -> bool {
 
 fn finished(app: &mut PhotocraftApp, work: Work, p: ProviderId, r: Result<Vec<ModelInfo>, AiError>) {
     reread(app);
+    super::assistant::forget_models(app);
     if work == Work::SignIn {
         // A sign-in that ended (signed in, or failed for good) is said by `poll_sign_in`; an
         // address that was refused while the attempt goes on (another attempt's, unreadable)
@@ -455,6 +457,7 @@ pub fn remove_key(app: &mut PhotocraftApp) {
     let Some(p) = app.ai.accounts.as_ref().map(|f| f.provider) else { return };
     let r = with_accounts(app, |a| a.clear_key(p));
     reread(app);
+    super::assistant::forget_models(app);
     match r {
         Some(Ok(())) => note(app, false, crate::i18n::fmt(tl!("Key removed for {provider}."), &[("provider", p.label())])),
         Some(Err(e)) => note(app, true, message(&e.message)),
@@ -545,6 +548,7 @@ pub(crate) fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
     }
     let id = egui::Id::unique("pigment-ai-accounts");
     let mut acts = vec![];
+    let before = app.ai.accounts.as_ref().map(|f| (f.chat_model.clone(), f.image_model.clone(), f.timeout));
     let modal = egui::Modal::new(id).show(ctx, |ui| {
         ui.set_width(500.0);
         ui.label(egui::RichText::new(tl!("AI Accounts")).font(crate::theme::semibold(15.0)));
@@ -560,8 +564,13 @@ pub(crate) fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
     }
     // Keys, the agreement and the agents' permission are the person's: synthetic input (an agent
     // clicking through the control channel) only switches tabs and closes.
+    // The model fields and the timeout are edited while drawn: what synthetic input typed into
+    // them is put back, so Switch and Close (which keep the models) save only the person's.
     if app.automation_input {
         acts.retain(|a| matches!(a, Act::Switch(_) | Act::Close));
+        if let (Some(f), Some((chat, image, timeout))) = (app.ai.accounts.as_mut(), before) {
+            (f.chat_model, f.image_model, f.timeout) = (chat, image, timeout);
+        }
     }
     for act in acts {
         match act {

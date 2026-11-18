@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use egui::vec2;
-use egui_kittest::kittest::{By, Queryable};
+use egui_kittest::kittest::{By, NodeT, Queryable};
 use photocraft_engine::Session;
 use photocraft_engine::generative::ProviderId;
 use photocraft_engine::generative::mock::{MockAnswer, MockBackend};
@@ -440,6 +440,35 @@ fn task_bar_items_appear_only_with_a_key() {
     assert!(h.state().ui.crop_rect.is_none(), "the frame is let go");
 }
 
+/// Remove Background with AI Provider as a background job, with another tab made active while it
+/// runs: Generate Background is offered on the document whose background was removed, not on the
+/// tab that happens to be active when the job lands.
+#[test]
+fn generate_background_follows_the_document_the_job_ran_on() {
+    let mock = Arc::new(MockBackend::connected());
+    let m = Arc::clone(&mock);
+    let mut h = harness(move |app| {
+        with_mock(app, &m);
+        app.background_jobs = true;
+        app.ui.panels.context_task_bar = true;
+        app.run("file.new", json!({"width": 120, "height": 90, "background": "white"})).expect("B");
+        app.session.set_active(0);
+    });
+    mock.push(MockAnswer::Pattern(|x, _| if x < 50 { [0, 0, 0, 0] } else { [10, 200, 30, 255] }));
+    let a = h.state().session.active().unwrap().doc.id;
+    let r = ai_ui::menu(h.state_mut(), "ai.removeBackgroundWithProvider", &json!({})).unwrap();
+    assert!(r.is_ok(), "{r:?}");
+    h.state_mut().session.set_active(1);
+    until_idle(&mut h);
+    assert_eq!(mock.calls().len(), 1);
+    let rev_a = h.state().session.documents().iter().find(|st| st.doc.id == a).unwrap().revision;
+    assert_eq!(h.state().ai.after_remove, Some((a, rev_a)), "the job's document");
+    assert_eq!(task_bar::which(h.state()), None, "not on the other tab");
+    h.state_mut().session.set_active(0);
+    h.run_steps(2);
+    assert_eq!(task_bar::which(h.state()), Some(task_bar::Bar::AfterRemove));
+}
+
 /// Generative Expand from the Crop bar on a document wider than 30,000 px (PhotoCraft allows
 /// 300,000 a side): no panic while the canvas is drawn, and the window keeps the size the frame
 /// asked for instead of capping it below the document's own.
@@ -460,6 +489,31 @@ fn expand_from_crop_on_a_very_wide_document() {
     assert_eq!((g.width, g.height, g.anchor), (40_100, 100, "right"));
     assert_eq!(generate::params(h.state())["width"], 40_100);
     assert!(mock.calls().is_empty(), "nothing sent before Generate");
+}
+
+/// Generative Expand where the document can't take it (Indexed Color): the Crop bar's item is
+/// dimmed with the reason, and asking anyway keeps the crop frame and says why in the status bar.
+#[test]
+fn expand_from_crop_keeps_the_frame_where_expand_is_disabled() {
+    let mock = Arc::new(MockBackend::connected());
+    let m = Arc::clone(&mock);
+    let mut h = harness(move |app| {
+        with_mock(app, &m);
+        app.ui.panels.context_task_bar = true;
+        app.run("image.mode.indexedColor", json!({})).expect("indexed");
+    });
+    control(&mut h, "ui.set", json!({"tool": "crop"}));
+    let frame = [-20.0, 0.0, 200.0, 160.0];
+    h.state_mut().ui.crop_rect = Some(frame);
+    h.run_steps(3);
+    let item = h.get_by_label("Generative Expand");
+    assert!(item.accesskit_node().is_disabled(), "the Crop bar's item is dimmed");
+    task_bar::expand_from_crop(h.state_mut());
+    h.run_steps(3);
+    let app = h.state();
+    assert!(!app.ai.generate.open);
+    assert_eq!(app.ui.crop_rect, Some(frame), "the frame is kept");
+    assert!(app.ui.status.contains("Generative AI needs an RGB, CMYK, Lab or Grayscale document"), "{:?}", app.ui.status);
 }
 
 /// The selection bar's Generate sends one request, whatever the Generate window was last set to,
@@ -667,6 +721,60 @@ fn synthetic_input_neither_sends_nor_grants_itself_permission() {
     synthetic_click(&mut h, "Generate");
     until_idle(&mut h);
     assert_eq!(mock.calls().len(), 1);
+}
+
+/// Type `text` as an agent does: `ui.type` through the control channel, delivered in one frame as
+/// automation's input.
+fn synthetic_type(h: &mut Harness, text: &str) {
+    let ctx = h.ctx.clone();
+    let (req, _rx) = ControlRequest::new("ui.type", json!({"text": text}));
+    assert!(matches!(handle(h.state_mut(), &ctx, &req), Outcome::AfterInput), "ui.type");
+    let events = h.state_mut().take_synthetic_step();
+    assert!(!events.is_empty());
+    h.input_mut().events.extend(events);
+    h.step();
+    h.run_steps(2);
+}
+
+/// Nor can synthetic input choose the models or the provider the person's own requests are billed
+/// on: what an agent types into AI Accounts' model fields is not saved when it closes the dialog,
+/// and its click on a provider in the Generate window neither chooses it nor (with its refused
+/// Generate) saves it. The person's own typing and clicks do both.
+#[test]
+fn synthetic_input_chooses_neither_the_models_nor_the_provider() {
+    let mock = Arc::new(MockBackend::connected());
+    let m = Arc::clone(&mock);
+    let mut h = harness(move |app| {
+        ai_ui::install_accounts(app, AiAccounts::in_memory());
+        with_mock(app, &m);
+        app.run("select.rect", json!({"x": 10, "y": 10, "width": 30, "height": 30})).unwrap();
+    });
+    let image_model = |h: &Harness| ai_ui::with_accounts(h.state(), |a| a.settings.models(ProviderId::OpenAi).image_model.clone()).unwrap();
+    invoke(&mut h, "ai.accounts").unwrap();
+    synthetic_click(&mut h, "Image model");
+    synthetic_type(&mut h, "gpt-image-1");
+    synthetic_click(&mut h, "Done");
+    assert!(!accounts::is_open(h.state()), "the synthetic click does reach the dialog");
+    assert_eq!(image_model(&h), None, "an agent's typing chooses no model");
+    // The person's own typing is kept when they close it.
+    invoke(&mut h, "ai.accounts").unwrap();
+    type_into(&mut h, "Image model", "gpt-image-1");
+    pointer_click(&mut h, "Done");
+    assert_eq!(image_model(&h).as_deref(), Some("gpt-image-1"));
+
+    let saved = |h: &Harness| ai_ui::with_accounts(h.state(), |a| a.settings.image_provider).unwrap();
+    ai_ui::menu(h.state_mut(), "ai.generativeFill", &json!({"prompt": "clouds"})).unwrap().unwrap();
+    h.run_steps(3);
+    synthetic_click(&mut h, "Google Gemini");
+    assert_eq!(h.state().ai.generate.provider, None, "an agent's click chooses no provider");
+    synthetic_click(&mut h, "Generate");
+    until_idle(&mut h);
+    assert!(mock.calls().is_empty(), "nothing sent: {:?}", mock.calls());
+    let refused = h.state().ai.generate.error.as_ref().map(|e| e.message.clone()).unwrap_or_default();
+    assert!(refused.contains("Allow agents to run AI commands"), "{refused:?}");
+    assert_eq!(saved(&h), None, "the refused request saved nothing");
+    pointer_click(&mut h, "Google Gemini");
+    assert_eq!(h.state().ai.generate.provider, Some(ProviderId::Gemini), "the person's click does");
 }
 
 /// Generate Image into a new document, as a background job (how the app runs it): the document

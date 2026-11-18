@@ -226,6 +226,12 @@ fn load(app: &mut PhotocraftApp) {
     }
 }
 
+/// Forget the model lists read (a key was connected or removed, a sign-in started or ended): the
+/// next one comes from AI Accounts' fresh list or from asking again.
+pub(crate) fn forget_models(app: &mut PhotocraftApp) {
+    app.ai.assistant.lists.retain(|_, l| matches!(l, ModelList::Loading(_)));
+}
+
 /// The chat models already known for the chosen provider (AI Accounts listed them in the last
 /// ten minutes), so the list is there without asking the provider again.
 fn known_models(app: &mut PhotocraftApp) {
@@ -914,8 +920,13 @@ fn top_rows(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> Option<Act> {
             })
             .response
             .labelled_by(l.id);
+        if let Some(ModelList::Failed(why)) = list {
+            let text = crate::i18n::fmt(tl!("Could not list models: {message}"), &[("message", why)]);
+            ui.label(egui::RichText::new(text).color(ui.visuals().error_fg_color));
+        }
         match list {
-            None => {
+            // Never listed, or the last list failed: the person can ask (again).
+            None | Some(ModelList::Failed(_)) => {
                 if ui.link(tl!("List models")).on_hover_text(tl!("Ask the provider which chat models your key can use")).clicked() {
                     act = Some(Act::ListModels);
                 }
@@ -925,10 +936,6 @@ fn top_rows(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> Option<Act> {
             }
             Some(ModelList::Ready(models)) if models.is_empty() => {
                 ui.label(egui::RichText::new(tl!("No chat models")).color(t.text_dim));
-            }
-            Some(ModelList::Failed(why)) => {
-                let text = crate::i18n::fmt(tl!("Could not list models: {message}"), &[("message", why)]);
-                ui.label(egui::RichText::new(text).color(ui.visuals().error_fg_color));
             }
             Some(ModelList::Ready(_)) => {}
         }

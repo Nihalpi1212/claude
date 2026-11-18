@@ -825,6 +825,27 @@ fn a_command_that_opens_a_dialog_waits_for_the_person() {
     assert_eq!(layer_names(h.state()), ["Background"]);
 }
 
+/// A model list that failed (offline, a refused key, Stop) can be asked for again: "List models"
+/// stays next to the error, and the next list replaces it.
+#[test]
+fn a_model_list_that_failed_can_be_asked_for_again() {
+    let rec = Recorder::connected();
+    let r = Arc::clone(&rec);
+    let mut h = harness(move |app| {
+        r.install(app);
+        assistant::open(app);
+    });
+    rec.mock.push(MockAnswer::Text("not a model list".into()));
+    assistant::list_models(h.state_mut()).unwrap();
+    h.run_steps(3);
+    assert!(assistant::listed_models(h.state(), ProviderId::OpenAi).is_none(), "the list failed");
+    assert!(h.query_by_label("List models").is_some(), "the person can ask again");
+    rec.mock.push(MockAnswer::Models(vec![("chat-a".into(), "text"), ("chat-b".into(), "text")]));
+    h.get_by_label("List models").click();
+    h.run_steps(3);
+    assert_eq!(assistant::listed_models(h.state(), ProviderId::OpenAi), Some(&["chat-a".to_string(), "chat-b".to_string()][..]));
+}
+
 /// A step whose command runs as a background job (how the app runs Generative Fill): the turn
 /// waits for it, the model gets the job's result, and it lands as one undo step. Stop meanwhile
 /// lets the step finish and then ends the turn.
