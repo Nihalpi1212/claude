@@ -442,3 +442,31 @@ fn sign_in_with_chatgpt_from_the_terminal() {
     assert!(err.contains("another sign-in attempt"), "{err}");
     assert!(status(&d, false).contains("signed in with ChatGPT"));
 }
+
+/// A sign-in replaces a stored OpenAI key (they exclude each other). AI Accounts does not offer
+/// the sign-in while a key is connected; the command line says so before the person signs in,
+/// and a sign-in that is not finished leaves the key where it was.
+#[test]
+fn sign_in_says_when_it_would_replace_a_stored_key() {
+    if !pigment_genai::chatgpt::ENABLED {
+        return;
+    }
+    let d = dir("chatgpt-key");
+    let nonce = Arc::new(Mutex::new(String::new()));
+    let root = plan_mock(&nonce);
+    let mut c = cli(&d, &format!("{root}/v1"));
+    c.args(["ai", "set-key", "openai", "--no-check"]);
+    assert!(run(c, &format!("{KEY}\n")).status.success());
+    let (mut child, mut rest, _url) = start_sign_in(&d, &root);
+    let mut said = String::new();
+    for _ in 0..3 {
+        rest.read_line(&mut said).unwrap();
+    }
+    child.kill().unwrap();
+    child.wait().unwrap();
+    assert!(said.contains("signing in replaces it") && said.contains("Ctrl+C"), "{said}");
+    assert!(!said.contains(KEY), "{said}");
+    let mut c = cli(&d, &format!("{root}/v1"));
+    c.args(["ai", "status"]);
+    assert!(text(&run(c, "")).0.contains("OpenAI: connected"), "the key is still there");
+}

@@ -9,8 +9,8 @@ commits are listed at the end.
 Both packages hold up. The parity list of PIGMENT-AI.md §4 and §9 is there, the differences are
 decisions of the brief or are recorded in `docs/generative-ai.md`, and no route was found by which
 an agent or the command line spends the person's money without the opt-in. Tokens stay in the key
-store. Five defects were found and fixed, each with a test that failed on the code as it was
-(the failures were seen, not assumed: see "Tests added"). None is a blocker. The largest: the
+store. Seven defects were found and fixed, each with a test (how each test was seen to fail
+without its fix is under "Tests added"). None is a blocker. The largest: the
 Assistant's file rule was enforced for `run_command` only, so `apply_adjustment` and
 `apply_filter` read any file the model named.
 
@@ -75,6 +75,13 @@ Assistant's file rule was enforced for `run_command` only, so `apply_adjustment`
    conversation.
    - Fix: `plan_call` scrubs both tokens from the answer.
 
+7. **`pigment-cli ai sign-in` dropped a stored OpenAI key without a word (minor, parity).** A key
+   and a sign-in exclude each other, so a finished sign-in removes the key. AI Accounts hides the
+   sign-in while a key is connected (as the JavaScript app did); the command line started it
+   anyway, and on success the key and the image models were gone.
+   - Fix: with a key stored, the command says after the address, before it waits, that signing in
+     replaces the key and that Ctrl+C keeps it. It still signs in when the person goes on.
+
 ## Tests added
 
 Each was seen to fail without its fix, then passes with it. The three interface tests for
@@ -103,6 +110,10 @@ the depth of the key check and the listed-choices test (both unit tests fail).
 - `crates/genai/tests/genai/chatgpt.rs`:
   `a_refused_token_quoted_after_the_retry_is_taken_out`. Before the fix the message read
   "OpenAI said: ACCESS-TOKEN-1 was refused a moment ago…".
+
+- `apps/photocraft-cli/tests/it/ai.rs`: `sign_in_says_when_it_would_replace_a_stored_key` (the
+  notice, and an unfinished sign-in leaves the key). Not run without the fix: the line it reads
+  did not exist.
 
 ## What was checked and found sound
 
@@ -134,23 +145,27 @@ the depth of the key check and the listed-choices test (both unit tests fail).
 - **Fit.** P4 added two hooks (`menus/state.rs`, `tests/it/main.rs`) and P5 one changed line
   (`man_and_completions.rs`); all three are in FORK.md. This review touched no upstream file.
 
-## Checks run (on the final tree, `cdbefa3`)
+## Checks run (on the final tree, `b06b411`; the interface and provider-crate runs on `cdbefa3`, which the last commit did not touch)
 
 - `cargo test -p pigment-genai`: 2 unit and 76 integration pass, 1 ignored (the real OS keychain).
   Before the review: 2 and 75.
 - `cargo test -p photocraft-ui-egui --test it -- ai`: 84 pass (80 before the review, 4 new).
 - `cargo test -p photocraft-ui-egui --lib -- ai_ui`: 8 pass (6 before, 2 new).
-- `cargo test -p photocraft-cli --test it -- ai`: 10 pass.
+- `cargo test -p photocraft-cli --lib --test it`: 7 and 89 pass (11 match `ai`, 1 new).
 - `cargo test -p photocraft-automation --lib -- genai`: 1 pass.
-- `cargo clippy -p pigment-genai -p photocraft-ui-egui --all-targets -- -D warnings`: clean.
+- `cargo clippy -p pigment-genai -p photocraft-ui-egui -p photocraft-cli --all-targets -- -D warnings`:
+  clean.
 - `cargo fmt --all -- --check`, `scripts/pigment-rebrand.py --check`: clean.
 - Not run: the whole workspace suite, the rest of the interface's unit tests (`--lib` beyond
   `ai_ui`), the panic hunt (no engine command was added or changed), `cargo xtask wasm` (the files
   changed are compiled for the desktop only), `cargo xtask layers` and `scorecard` (no crate,
   preference or panel command was added). CI runs them.
-- CI: run 44206281536 on `cdbefa3` was in progress when this note was written (a run takes about
-  55 minutes); see the review's return for how it ended. The run before it, on P5's head
-  `3a4f755`, was green.
+- CI: the run on `cdbefa3` (44206281536) was replaced in the queue by the push of `b06b411`
+  before it finished; the run on `b06b411` was in progress when this note was written (a run
+  takes about 55 minutes). See the review's return for what was known at the end. The run before
+  them, on P5's head `3a4f755`, was green. If a run is red on
+  `bridge_token::the_bridge_authenticates_to_the_headless_server_by_challenge` alone, that is the
+  known flaky upstream test (PKG-ai-review123.md): re-run the job.
 
 ## For the next engineer
 
@@ -192,7 +207,8 @@ the depth of the key check and the listed-choices test (both unit tests fail).
 - **The release notes and the README still say the AI is not in 0.5.0** (P4's and P5's notes).
   Left for the docs and release task.
 
-## Commits (both pushed to `claude/pigment-photocraft`)
+## Commits (all pushed to `claude/pigment-photocraft`)
 
 - `8b41109` Pigment: a refused ChatGPT token is taken out of the retry's answer too
 - `cdbefa3` Pigment: the Assistant's file rule holds for every tool, and its window for agents
+- `b06b411` Pigment: pigment-cli ai sign-in says when it would replace a stored key

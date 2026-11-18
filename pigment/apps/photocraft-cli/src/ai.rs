@@ -262,6 +262,13 @@ fn sign_in(accounts: &mut AiAccounts, port: Option<u16>, out: &mut dyn Write, er
     if let Some(warning) = &started.warning {
         writeln!(out, "{warning}")?;
     }
+    // AI Accounts hides the sign-in while a key is connected; here the person is told first.
+    if accounts.method(ProviderId::OpenAi) == Some(pigment_genai::Method::ApiKey) {
+        writeln!(
+            out,
+            "OpenAI has an API key stored, and signing in replaces it: image models then need the key again (pigment-cli ai set-key openai). Press Ctrl+C now to keep the key."
+        )?;
+    }
     writeln!(out, "Waiting for the browser (5 minutes at most). With a browser on another computer, paste the address it lands on here and press Enter.")?;
     out.flush()?;
     // A pasted address, read on its own thread so the wait below also sees the browser's callback.
