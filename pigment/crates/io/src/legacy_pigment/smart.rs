@@ -1,0 +1,224 @@
+//! Smart objects of Pigment 0.1–0.4 (`SmartLayer` in `renderer/lib/smart-object.js`): a source
+//! that is a nested document (`smart/<id>.pigment`, written by the same `writePigment`) or an
+//! image (`smart/<id>.png`), a matrix from the source's pixels to the document's, and smart
+//! filters. Instances made by Duplicate Layer share one source: the file holds it once, under the
+//! first instance's id, and the others name it in `sourceRef`.
+//!
+//! A nested document is opened by this importer (at most [`MAX_SMART_DEPTH`] deep, within the
+//! host's budget) and kept in the smart object as a PhotoCraft document (`.pcraft`), the source
+//! Convert to Smart Object makes; an image source keeps its PNG. Instances sharing a source share
+//! one `SmartContentsId`, so editing the contents of one updates them all, as in the app.
+//!
+//! The app saved no pixels for a smart object: its appearance is drawn here when the document
+//! has been read ([`render`]).
+
+use std::sync::{Arc, OnceLock};
+
+use photocraft_color::PixelFormat;
+use photocraft_doc::{Document, Layer, LayerContent, SmartContentsId, SmartObject, SmartSource, StackMode};
+use photocraft_geom::{Affine, Rect};
+use photocraft_raster::Surface;
+use serde_json::{Map, Value};
+
+use super::container::{MAX_ENTRY_BYTES, Rgba8};
+use super::layers::{LayerReader, Samples, Tone, encode};
+use super::{filters, import_at, text};
+use crate::IoError;
+
+/// Smart objects nested in smart objects: the app had no limit, a file that nests deeper than
+/// this is not a document anyone made.
+pub(crate) const MAX_SMART_DEPTH: usize = 8;
+
+/// A source read once and shared by every instance that names it.
+pub(crate) struct Shared {
+    /// The id the file keeps it under (`smart/<id>.…`).
+    key: String,
+    contents: SmartContentsId,
+    source: SmartSource,
+}
+
+/// Draws a smart object's appearance from its source and smart filters, as the engine draws it.
+/// The engine installs it ([`set_renderer`]): this crate has no filters of its own.
+pub type Renderer = fn(&Document, &mut Layer) -> bool;
+
+static RENDERER: OnceLock<Renderer> = OnceLock::new();
+
+/// Installs the engine's smart-object renderer. The first one installed stays.
+pub fn set_renderer(render: Renderer) {
+    let _ = RENDERER.set(render);
+}
+
+fn file_name(name: Option<&str>, fallback: &str, ext: &str) -> String {
+    let base: String = name.map(str::trim).filter(|n| !n.is_empty()).unwrap_or(fallback).chars().filter(|c| !matches!(c, '/' | '\\')).take(120).collect();
+    if base.to_ascii_lowercase().ends_with(&format!(".{ext}")) { base } else { format!("{base}.{ext}") }
+}
+
+impl LayerReader<'_, '_, '_> {
+    /// A smart-object layer; `None` when its source is not in the file or nests too deep (the
+    /// caller then opens an empty layer in its place, reported).
+    pub(crate) fn smart(&mut self, desc: &Map<String, Value>, id: Option<&str>, name: &str) -> Result<Option<Layer>, IoError> {
+        let key = desc.get("sourceRef").and_then(Value::as_str).filter(|s| !s.is_empty()).or(id).map(str::to_string);
+        let Some(key) = key else {
+            self.warnings.layer(name, "the smart object has no id, so its contents cannot be found; it opens as an empty layer");
+            return Ok(None);
+        };
+        let shared = match self.smart_sources.iter().position(|s| s.key == key) {
+            Some(i) => i,
+            None => match self.read_source(&key, desc, name)? {
+                Some(source) => {
+                    self.smart_sources.push(Shared { key: key.clone(), contents: SmartContentsId::fresh(), source });
+                    self.smart_sources.len() - 1
+                }
+                None => return Ok(None),
+            },
+        };
+        let Shared { contents, source, .. } = &self.smart_sources[shared];
+        let transform = text::matrix(desc.get("transform")).unwrap_or(Affine::IDENTITY);
+        let mut sm = SmartObject::new(source.clone(), transform, None);
+        sm.contents_id = *contents;
+        let mut notes = Vec::new();
+        if let Some(list) = desc.get("filters").and_then(Value::as_array) {
+            sm.smart_filters = filters::smart_filters(list, &mut notes);
+        }
+        sm.filters_enabled = desc.get("filtersEnabled").and_then(Value::as_bool).unwrap_or(true);
+        sm.stack_mode = desc.get("stackMode").and_then(Value::as_str).and_then(|m| match m {
+            "standard-deviation" => Some(StackMode::StandardDeviation),
+            other => StackMode::from_id(other),
+        });
+        for n in notes {
+            self.warnings.layer(name, &n);
+        }
+        Ok(Some(Layer::new("", LayerContent::Smart(sm))))
+    }
+
+    /// The source the file keeps under `key`: a nested document or an image.
+    fn read_source(&mut self, key: &str, desc: &Map<String, Value>, name: &str) -> Result<Option<SmartSource>, IoError> {
+        let source_name = desc.get("source").and_then(|s| s.get("name")).and_then(Value::as_str);
+        let nested = format!("smart/{key}.pigment");
+        if self.container.contains(&nested) {
+            if self.depth >= MAX_SMART_DEPTH {
+                self.warnings.layer(name, &format!("smart objects nest more than {MAX_SMART_DEPTH} deep here; this one opens as an empty layer"));
+                return Ok(None);
+            }
+            let bytes = match self.container.read(&nested, MAX_ENTRY_BYTES) {
+                Ok(Some(bytes)) => bytes,
+                Ok(None) | Err(Ok(_)) => {
+                    self.warnings.layer(name, "the smart object's contents could not be read; it opens as an empty layer");
+                    return Ok(None);
+                }
+                Err(Err(limit)) => return Err(limit),
+            };
+            let file = file_name(source_name, name, "pigment");
+            let mut budget = self.container.budget();
+            let opened = import_at(&file, &bytes, self.ctl, self.depth + 1, &mut budget);
+            self.container.spent_nested(budget);
+            let r = match opened {
+                Ok(r) => r,
+                // A limit of the whole document stays one.
+                Err(e @ (IoError::Unsupported(_) | IoError::Cancelled | IoError::OutOfMemory(_))) => return Err(e),
+                Err(e) => {
+                    self.warnings.layer(name, &format!("the smart object's contents could not be read ({e}); it opens as an empty layer"));
+                    return Ok(None);
+                }
+            };
+            for w in r.warnings.iter().take(64) {
+                self.warnings.layer(name, &format!("in the smart object's contents: {w}"));
+            }
+            let bytes = match photocraft_format::save_to_bytes(&r.document, &Default::default()) {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    self.warnings.layer(name, &format!("the smart object's contents could not be kept ({e}); it opens as an empty layer"));
+                    return Ok(None);
+                }
+            };
+            return Ok(Some(SmartSource::Embedded { file_name: file_name(source_name, name, "pcraft").replace(".pigment.pcraft", ".pcraft"), bytes: Arc::new(bytes) }));
+        }
+        let image = format!("smart/{key}.png");
+        match self.container.read(&image, MAX_ENTRY_BYTES) {
+            Ok(Some(bytes)) => Ok(Some(SmartSource::Embedded { file_name: file_name(source_name, name, "png"), bytes: Arc::new(bytes) })),
+            Ok(None) => {
+                self.warnings.layer(name, "the smart object's contents are not in the file; it opens as an empty layer");
+                Ok(None)
+            }
+            Err(Ok(_)) => {
+                self.warnings.layer(name, "the smart object's contents could not be read; it opens as an empty layer");
+                Ok(None)
+            }
+            Err(Err(limit)) => Err(limit),
+        }
+    }
+}
+
+/// The source's pixels in `fmt`, at the source's own size: a `.pcraft` composited, a PNG decoded.
+fn source_pixels(source: &SmartSource, fmt: PixelFormat, budget: u64) -> Option<(Surface, Rect)> {
+    let SmartSource::Embedded { bytes, .. } = source else { return None };
+    if photocraft_format::is_pcraft(bytes) {
+        let doc = photocraft_format::load_from_bytes(bytes).ok()?;
+        let bounds = doc.bounds();
+        if photocraft_raster::tile_storage_bytes(bounds, &fmt) > budget {
+            return None;
+        }
+        return Some((photocraft_compose::flatten_to_surface(&doc, fmt, None), bounds));
+    }
+    let Rgba8 { width, height, data } = super::container::decode_png(bytes, budget).ok()?;
+    let rect = Rect::new(0, 0, width as i32, height as i32);
+    let tone = if fmt.mode.color_channels() == 1 { Tone::Gray } else { Tone::Color };
+    let mut surface = Surface::new(fmt);
+    surface.try_write_interleaved(rect, &encode(Samples::U8(&data), width as usize * height as usize, tone, fmt)).ok()?;
+    Some((surface, rect))
+}
+
+/// Draws the appearance of every smart object of `document`: through the engine's renderer
+/// when one is installed (smart filters included), else the source placed by its matrix, without
+/// its filters. A source too large for what is left of `budget` stays undrawn, reported.
+pub(crate) fn render(document: &mut Document, budget: &mut u64, warnings: &mut crate::ora::Warnings) {
+    let ids = smart_layers(&document.layers);
+    if ids.is_empty() {
+        return;
+    }
+    let snapshot = document.clone();
+    let fmt = document.pixel_format();
+    let canvas = document.bounds();
+    for id in ids {
+        let Some(layer) = document.layer_mut(id) else { continue };
+        if RENDERER.get().is_some_and(|render| render(&snapshot, layer)) {
+            continue;
+        }
+        let LayerContent::Smart(sm) = &mut layer.content else { continue };
+        let drawn = source_pixels(&sm.source, fmt, *budget).and_then(|(pixels, rect)| {
+            let [a, b, c, d, e, f] = sm.transform.m;
+            let corners = [(0.0, 0.0), (f64::from(rect.x1), 0.0), (0.0, f64::from(rect.y1)), (f64::from(rect.x1), f64::from(rect.y1))]
+                .map(|(x, y)| (a * x + c * y + e, b * x + d * y + f));
+            let (x0, x1) = corners.iter().fold((f64::MAX, f64::MIN), |(lo, hi), p| (lo.min(p.0), hi.max(p.0)));
+            let (y0, y1) = corners.iter().fold((f64::MAX, f64::MIN), |(lo, hi), p| (lo.min(p.1), hi.max(p.1)));
+            let placed = Rect::new(x0.floor().max(-1.0e6) as i32, y0.floor().max(-1.0e6) as i32, x1.ceil().min(1.0e6) as i32, y1.ceil().min(1.0e6) as i32);
+            let cost = photocraft_raster::tile_storage_bytes(placed.intersect(&canvas), &fmt);
+            if cost > *budget {
+                return None;
+            }
+            let out = photocraft_algo::warp::place_source(&pixels, rect, &sm.transform, None).ok()?;
+            *budget = budget.saturating_sub(cost);
+            Some(out)
+        });
+        match drawn {
+            Some(surface) => sm.cache = Some(surface),
+            None => {
+                let name = layer.name.clone();
+                warnings.layer(&name, "the smart object's contents could not be drawn; they show once the smart object is edited");
+            }
+        }
+    }
+}
+
+fn smart_layers(layers: &[Layer]) -> Vec<photocraft_doc::LayerId> {
+    let mut out = Vec::new();
+    for l in layers {
+        if matches!(l.content, LayerContent::Smart(_)) {
+            out.push(l.id);
+        }
+        if let Some(children) = l.children() {
+            out.extend(smart_layers(children));
+        }
+    }
+    out
+}

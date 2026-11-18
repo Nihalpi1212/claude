@@ -453,7 +453,7 @@ mod tests {
         let runs = byte_runs("aé😀b", &[(2, 'x'), (2, 'y'), (5, 'z')]);
         assert_eq!(runs, vec![(3, 'x'), (4, 'y'), (1, 'z')]);
         // A run that ends inside a surrogate pair takes the pair; what is left over joins the last run.
-        assert_eq!(byte_runs("😀ab", &[(1, 'x')]), vec![(7, 'x')]);
+        assert_eq!(byte_runs("😀ab", &[(1, 'x')]), vec![(6, 'x')]);
         assert_eq!(byte_runs("", &[(0, 'x')]), vec![(0, 'x')]);
         assert_eq!(paragraph_lengths("ab\ncd\n"), vec![3, 3, 0]);
     }

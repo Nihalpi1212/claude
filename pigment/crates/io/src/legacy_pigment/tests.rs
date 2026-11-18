@@ -68,7 +68,7 @@ fn luma(r: i32, g: i32, b: i32) -> u8 {
     ((r * 299 + g * 587 + b * 114 + 500) / 1000) as u8
 }
 
-fn zip(entries: &[(&str, &[u8])]) -> Vec<u8> {
+pub(super) fn zip(entries: &[(&str, &[u8])]) -> Vec<u8> {
     let mut w = craft_zip::Writer::new();
     for (name, data) in entries {
         w.add(name, data, craft_zip::Compression::Deflated).unwrap();
@@ -77,7 +77,7 @@ fn zip(entries: &[(&str, &[u8])]) -> Vec<u8> {
 }
 
 /// A document with `layers` (JSON) and no pixels.
-fn described(layers: &str) -> Vec<u8> {
+pub(super) fn described(layers: &str) -> Vec<u8> {
     let json = format!(r#"{{"version":3,"app":"pigment","width":4,"height":4,"dpi":72,"layers":{layers}}}"#);
     zip(&[("mimetype", b"application/x-pigment"), ("document.json", json.as_bytes())])
 }
@@ -98,8 +98,10 @@ fn raster_layers_keep_their_place_pixels_and_properties() {
         let r = open(&name);
         let doc = &r.document;
         assert_eq!(r.warnings, Vec::<String>::new(), "{v}");
-        // Save must not put the new format over the old file by itself.
-        assert!(r.source_read_only && !r.preview_only);
+        // The document keeps its file; its import report says where it came from, which the
+        // interface's first Save asks about (`legacy_save_prompt`).
+        assert!(!r.source_read_only && !r.preview_only);
+        assert!(super::came_from_legacy(doc));
         assert_eq!(doc.name, format!("{name}.pigment"));
         assert_eq!((doc.size.width, doc.size.height, doc.resolution_dpi), (16, 12, 144.0));
         assert_eq!((doc.mode, doc.depth), (ColorMode::Rgb, SampleType::U8));
@@ -557,10 +559,10 @@ fn an_opened_document_saves_in_the_new_format_and_opens_again() {
     }
 }
 
-// ---- layers and data this part of the importer does not convert yet --------------------------
+// ---- every layer kind, and what is not one --------------------------------------------------
 
 #[test]
-fn layers_not_converted_yet_keep_their_place_and_are_reported() {
+fn every_layer_kind_keeps_its_place_and_what_is_not_one_is_reported() {
     let bytes = described(
         r##"[
         {"id":"a","type":"adjustment","name":"Levels 1","kind":"levels","params":{},"opacity":0.5,"blend":"screen","clip":true,"hasMask":false},
@@ -584,7 +586,10 @@ fn layers_not_converted_yet_keep_their_place_and_are_reported() {
     assert!(matches!(&bx.content, LayerContent::Shape(s) if s.path.subpaths.is_empty() && s.fill.is_some()));
     assert!(bx.vector_mask.as_ref().is_some_and(|m| m.path.subpaths.is_empty() && m.path.inverted), "an empty vector mask that hides");
     assert!(bx.effects.items.len() == 1 && !bx.effects.items[0].enabled() && bx.advanced.knockout == photocraft_doc::Knockout::Deep);
-    for l in &doc.layers[3..7] {
+    // Type and smart objects open as what they are (text_smart_tests.rs has the rest); a smart
+    // object whose contents are not in the file, and the kinds that are not one, as empty layers.
+    assert!(matches!(&doc.layers[3].content, LayerContent::Text(t) if t.text == "Hello"));
+    for l in &doc.layers[4..7] {
         assert!(matches!(&l.content, LayerContent::Raster(s) if s.tile_count() == 0), "{}", l.name);
     }
     let levels = &doc.layers[0];
@@ -600,8 +605,7 @@ fn layers_not_converted_yet_keep_their_place_and_are_reported() {
         r.warnings,
         [
             "an entry of the layer list is not a layer and was skipped",
-            "text layers are not converted yet; the layer opens as an empty layer (\"Hello\")",
-            "smart objects are not converted yet; the layer opens as an empty layer (\"Placed\")",
+            "the smart object's contents are not in the file; it opens as an empty layer (\"Placed\")",
             "layers of type \"hologram\" are not known; the layer opens as an empty layer (\"From the future\")",
             "the blend mode \"plus-lighter\" is not known; the layer blends as Normal (\"From the future\")",
             "the layer has no type; it opens as an empty layer (\"No type\")",
