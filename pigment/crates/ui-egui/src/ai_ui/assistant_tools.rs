@@ -398,7 +398,11 @@ fn moves_files(id: &str) -> bool {
 
 fn blocked_id(id: &str) -> bool {
     !ALLOWED.contains(&id)
-        && (BLOCKED_PREFIXES.iter().any(|p| id.starts_with(p)) || BLOCKED_IDS.contains(&id) || id.starts_with("image.variables.") || moves_files(id) || changes_presets(id))
+        && (BLOCKED_PREFIXES.iter().any(|p| id.starts_with(p))
+            || BLOCKED_IDS.contains(&id)
+            || id.starts_with("image.variables.")
+            || moves_files(id)
+            || changes_presets(id))
 }
 
 /// Whether the value of a [`PATH_KEYS`] param names a file: text does, unless it is one of the
@@ -425,7 +429,15 @@ fn file_param<'a>(params: &'a Value, choices: &HashMap<String, Vec<String>>, dep
     // The choices are the top level's: a nested param is held to its name alone.
     let nested = HashMap::new();
     match params {
-        Value::Object(o) => o.iter().find_map(|(k, v)| if on_disk(k, v) { Some(k.as_str()) } else if depth < 4 { file_param(v, &nested, depth + 1) } else { None }),
+        Value::Object(o) => o.iter().find_map(|(k, v)| {
+            if on_disk(k, v) {
+                Some(k.as_str())
+            } else if depth < 4 {
+                file_param(v, &nested, depth + 1)
+            } else {
+                None
+            }
+        }),
         Value::Array(a) if depth < 4 => a.iter().find_map(|v| file_param(v, &nested, depth + 1)),
         _ => None,
     }
@@ -1423,6 +1435,14 @@ mod tests {
             assert!(blocked(id, &json!({})).is_err(), "{id}");
         }
         assert_eq!(blocked("layer.smartObjects.embedAllLinked", &json!({})), Ok(()));
+        // Every `ai.*` command of the engine but Generative Fill is blocked, whatever is added later.
+        for id in photocraft_engine::ai_cmds::COMMANDS {
+            assert_eq!(blocked(id, &json!({})).is_ok(), *id == FILL, "{id}");
+        }
+    }
+
+    #[test]
+    fn the_blocked_list_keeps_other_files_other_documents_and_the_preset_libraries() {
         // Nor is what shows a file in the file manager, asks for one, reads the ones a data set
         // names, changes another document, forgets history, or changes a preset library beyond
         // adding to it.
@@ -1476,6 +1496,10 @@ mod tests {
             assert!(photocraft_engine::commands::find(id).is_some(), "{id} is a command");
             assert_eq!(blocked(id, &json!({})), Ok(()), "{id}");
         }
+    }
+
+    #[test]
+    fn a_param_names_a_file_at_any_depth_unless_it_is_a_listed_choice_or_geometry() {
         // A file named deeper in the params, a list of files, a profile file without a folder.
         assert!(blocked("image.adjustments.levels", &json!({"options": {"file": "/tmp/x"}})).is_err());
         assert!(blocked("image.adjustments.levels", &json!({"list": [{"mapPath": "/tmp/x"}]})).is_err());
@@ -1491,10 +1515,6 @@ mod tests {
         assert!(blocked("image.adjustments.levels", &json!({"output": "new"})).is_err(), "not a value this command lists");
         assert_eq!(blocked("shape.create", &json!({"kind": "path", "path": {"subpaths": [{"knots": [[1, 2], [3, 4], [5, 6]]}]}})), Ok(()));
         assert_eq!(blocked("filter.blurGallery.pathBlur", &json!({"paths": [[[0, 0], [10, 10]]]})), Ok(()));
-        // Every `ai.*` command of the engine but Generative Fill is blocked, whatever is added later.
-        for id in photocraft_engine::ai_cmds::COMMANDS {
-            assert_eq!(blocked(id, &json!({})).is_ok(), *id == FILL, "{id}");
-        }
     }
 
     #[test]

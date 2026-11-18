@@ -1123,7 +1123,10 @@ fn an_agents_clicks_change_neither_the_model_nor_what_is_attached() {
     synthetic_click(&mut h, "Google Gemini");
     synthetic_click(&mut h, "List models");
     assert_eq!((h.state().ai.assistant.attach, saved(&h)), (true, (true, None)), "the agent's clicks changed a setting");
-    assert!(assistant::listed_models(h.state(), ProviderId::OpenAi).is_none() && h.query_by_label("List models").is_some(), "the agent's click changed the window");
+    assert!(
+        assistant::listed_models(h.state(), ProviderId::OpenAi).is_none() && h.query_by_label("List models").is_some(),
+        "the agent's click changed the window"
+    );
     assert!(rec.mock.calls().iter().all(|c| c.op == "chat"), "nothing but the person's message was sent: {:?}", rec.mock.calls());
     // With the permission, an agent may; and the person always may.
     ai_ui::with_accounts(h.state(), |a| a.set_allow_agents(true)).unwrap().unwrap();

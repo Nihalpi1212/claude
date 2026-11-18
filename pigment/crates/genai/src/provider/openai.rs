@@ -84,7 +84,8 @@ impl OpenAi {
         // A token the provider refused: still a secret, and no longer among the stored ones.
         let mut refused = String::new();
         if resp.status == 401 {
-            refused = std::mem::replace(&mut token, sign_in.access_token(Some(&token), cancelled)?);
+            let fresh = sign_in.access_token(Some(&token), cancelled)?;
+            refused = std::mem::replace(&mut token, fresh);
             resp = send(&token)?;
         }
         // Both tokens are taken out of the answer before anything reads it.
