@@ -72,6 +72,10 @@ where
         Ok(()) => 0,
         Err(e) => {
             let _ = writeln!(err, "error: {e}");
+            // Pigment: generative AI. The command line's way to give what an `ai.*` step lacked.
+            if let Some(hint) = ai::hint(&e) {
+                let _ = writeln!(err, "{hint}");
+            }
             1
         }
     }

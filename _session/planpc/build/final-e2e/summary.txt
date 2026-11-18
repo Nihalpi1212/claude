@@ -1,0 +1,45 @@
+=== xtask-layers: cargo xtask layers
+=== xtask-layers exit 0 (1 s)
+=== xtask-panel-commands: cargo xtask panel-commands
+=== xtask-panel-commands exit 0 (0 s)
+=== xtask-scorecard: cargo xtask scorecard --check
+=== xtask-scorecard exit 0 (2 s)
+=== test-xtask: cargo test -j 4 --locked -p xtask
+=== test-xtask exit 0 (5 s)
+running 13 tests
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.25s
+running 88 tests
+test result: ok. 88 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.40s
+running 0 tests
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+=== test-genai: cargo test -j 4 --locked -p pigment-genai
+=== test-genai exit 0 (25 s)
+running 2 tests
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+running 77 tests
+test result: ok. 76 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 3.22s
+running 0 tests
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+=== test-engine: cargo test -j 4 --locked -p photocraft-engine --lib -- ai_cmds generative
+=== test-engine exit 0 (255 s)
+running 42 tests
+test result: ok. 42 passed; 0 failed; 0 ignored; 0 measured; 3905 filtered out; finished in 0.51s
+=== test-ui-it: cargo test -j 4 --locked -p photocraft-ui-egui --test it -- ai
+=== test-ui-it exit 0 (108 s)
+running 84 tests
+test result: ok. 84 passed; 0 failed; 0 ignored; 0 measured; 278 filtered out; finished in 17.85s
+=== test-ui-lib: cargo test -j 4 --locked -p photocraft-ui-egui --lib -- ai_ui
+=== test-ui-lib exit 0 (118 s)
+running 8 tests
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 7490 filtered out; finished in 0.00s
+=== test-automation: cargo test -j 4 --locked -p photocraft-automation --lib -- genai
+=== test-automation exit 0 (2 s)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 154 filtered out; finished in 1.28s
+=== test-cli-it: cargo test -j 4 --locked -p photocraft-cli --test it -- ai
+=== test-cli-it exit 0 (12 s)
+running 11 tests
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 78 filtered out; finished in 9.31s
+=== build-bins: cargo build -j 4 --locked --features heif -p photocraft-cli -p photocraft
+=== build-bins exit 0 (236 s)
+=== all done
+/dev/vda        252G   27G   12G  70% /

@@ -149,6 +149,23 @@ pub(crate) fn install(h: &mut Headless, a: &RunArgs) -> Result {
     Ok(())
 }
 
+/// What the command line does about a failed `ai.*` step whose message names the app's
+/// Edit › AI Accounts… (the engine words it for the app): the agreement or a key is missing or
+/// was refused. Printed after the error, so a person without the app open knows the next step.
+pub(crate) fn hint(e: &CliError) -> Option<&'static str> {
+    use photocraft_engine::generative::kind;
+    let CliError::Command { source: photocraft_automation::AutomationError::Engine(photocraft_engine::EngineError::Generative { kind, .. }), .. } = e else {
+        return None;
+    };
+    match *kind {
+        kind::NEEDS_CONSENT => Some("On the command line: `pigment-cli ai consent` records the agreement."),
+        kind::MISSING_KEY | "invalidKey" => {
+            Some("On the command line: `pigment-cli ai set-key <openai|gemini>` connects a provider, and `pigment-cli ai status` shows what is set up.")
+        }
+        _ => None,
+    }
+}
+
 fn ai_error(e: pigment_genai::AiError) -> CliError {
     CliError::Other(e.message)
 }

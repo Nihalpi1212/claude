@@ -162,9 +162,10 @@ key with the provider and then keeps it in the macOS Keychain or the Windows Cre
 Linux it is kept in `ai-keys.json` in Pigment's settings folder, readable only by you (not
 encrypted). Then tick the agreement in the same dialog, once.
 
-- **Nothing is sent before that agreement**, and afterwards only when you run a feature: your
-  prompt and, where the feature needs it, the image, the layer or the selection. Never your key or
-  your files. The windows say what each feature sends.
+- **Nothing is sent before that agreement** (Connect only asks the provider for its list of
+  models, to check your key), and afterwards only when you run a feature: your prompt and, where
+  the feature needs it, the image, the layer or the selection. Never your files, and your key
+  only to its own provider. The windows say what each feature sends.
 - **The provider bills your account for every request**, including one you stop after it was sent.
 - **Your pixels are safe.** A generated result lands on a new layer (or as a layer mask) in one
   undo step; the pixels outside the selection or mask are never changed.

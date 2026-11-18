@@ -547,7 +547,9 @@ as the settings in AI Accounts are.
 | `ai use <provider> [--chat-model ID] [--image-model ID]` | the preferred provider and its models (`""` for automatic) |
 
 `pigment-cli run --new '{"width":64,"height":32}' --cmd select.rect --params '{"x":8,"y":8,"width":16,"height":8}' --cmd ai.generativeFill --params '{"prompt":"a green box"}' --out out.pigment --allow-ai`
-runs Generative Fill from the command line.
+runs Generative Fill from the command line. A step refused because the agreement or a key is
+missing fails with the engine's message, which names the app's Edit › AI Accounts…, and a second
+line naming the command line's way: `pigment-cli ai consent`, or `pigment-cli ai set-key`.
 
 ## Pigment 0.4's features in Pigment 0.5, one by one
 

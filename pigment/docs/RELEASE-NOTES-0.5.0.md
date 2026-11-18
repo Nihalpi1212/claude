@@ -66,7 +66,9 @@ and not encrypted.
 **Nothing is sent before the one-time agreement.** AI Accounts asks you once to agree to what the
 AI commands send (your prompt and, where a feature needs it, the image, the layer or the
 selection) and that the provider bills your account for every request, including one you stop
-after it was sent. Until you agree, and unless you run a feature, Pigment sends nothing.
+after it was sent. Until you agree, no prompt and no picture leaves your computer, and afterwards
+only when you run a feature. The one request before that is yours too: Connect and Test
+Connection ask the provider for its list of models, to check the key you entered.
 
 What differs from Pigment 0.4:
 
