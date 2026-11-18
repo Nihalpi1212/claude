@@ -495,7 +495,10 @@ never offers:
   the person's preset libraries (`brush.presets.*`, `swatches.*`, `pattern.*`,
   `gradient.presets.*`, `style.presets.*`, `shape.presets.*`, `layer.layerStyle.contours.*` with
   a last part that starts with `delete`, `reset`, `edit`, `rename`, `move` or `update`). Reading
-  a library, using a preset and adding one stay the Assistant's;
+  a library, using a preset and adding one stay the Assistant's. Nor does it change the person's
+  spelling dictionary (`edit.checkSpelling` with `action` `addToDictionary`, `add` or
+  `removeFromDictionary`; checking and correcting the document stay its own) or favourite fonts
+  (`type.font.favorite`);
 - what imports or exports (a command whose last part starts with `import`, `export` or
   `quickExport`, the contour and smart-object file commands, `edit.presets.*`), what reads a file
   or asks for one (`layer.videoLayers.newVideoLayerFromFile`, `layer.videoLayers.replaceFootage`,
