@@ -6,6 +6,7 @@ verified: 0.8.2
 ---
 
 - [Open and save files](open-and-save-files.md)
+- [Open documents from Pigment 0.4 and earlier](open-pigment-0-4-documents.md)
 - [Adjust colors without changing your pixels](adjust-colors-with-adjustment-layers.md)
 - [Select part of an image and mask it](select-and-mask.md)
 - [Add and style text](add-and-style-text.md)

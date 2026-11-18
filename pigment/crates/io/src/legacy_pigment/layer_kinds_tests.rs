@@ -189,6 +189,12 @@ const DIFFERENT_BY_DESIGN: &[(&str, u8, f64)] = &[
     ("v3-style-stroke-outside", 118, 3.25),
     ("v3-style-stroke-pattern", 127, 3.25),
     ("v3-style-strokes", 162, 5.50),
+    // The app scaled and turned smart objects with the canvas's image smoothing, PhotoCraft resamples them bicubic:
+    // the edges of turned and enlarged pixels differ, the placement does not.
+    ("v2-smart-image", 20, 0.35),
+    ("v2-smart-instances", 30, 0.7),
+    ("v3-smart-image", 20, 0.35),
+    ("v3-smart-instances", 30, 0.7),
 ];
 
 #[test]
@@ -197,6 +203,11 @@ fn every_fixture_draws_as_the_app_drew_it() {
     assert!(names.len() > 150, "{} pictures", names.len());
     let mut failures = Vec::new();
     for name in &names {
+        // Its smart filters are drawn by the engine's filters; the engine compares that picture
+        // (`legacy_pigment_render.rs` in photocraft-engine).
+        if name.ends_with("-smart-filters") {
+            continue;
+        }
         let (max, mean) = difference(name);
         let (bound_max, bound_mean) = DIFFERENT_BY_DESIGN.iter().find(|(n, ..)| n == name).map_or((3, 0.5), |(_, m, a)| (*m, *a));
         if max > bound_max || mean > bound_mean {

@@ -304,6 +304,24 @@ fn delete_prompt_body(ui: &mut egui::Ui, fields: &mut Fields) {
     }
 }
 
+/// The questions File › Save asks before it writes: another app changed the file, or (Pigment)
+/// the file is one Pigment 0.1–0.4 saved.
+fn save_prompt(fields: &Fields) -> bool {
+    crate::disk_change_prompt::owns(fields) || crate::legacy_save_prompt::owns(fields)
+}
+
+fn save_prompt_body(ui: &mut egui::Ui, fields: &mut Fields) {
+    if crate::legacy_save_prompt::owns(fields) {
+        crate::legacy_save_prompt::body(ui, fields);
+    } else {
+        crate::disk_change_prompt::body(ui, fields);
+    }
+}
+
+fn save_prompt_confirm(app: &mut PhotocraftApp, fields: &Fields) -> Result<Value, String> {
+    if crate::legacy_save_prompt::owns(fields) { crate::legacy_save_prompt::confirm(app, fields) } else { crate::disk_change_prompt::confirm(app, fields) }
+}
+
 fn command_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, d: &Dialog, fields: &mut Fields, id: egui::Id, interactive: bool) -> Option<bool> {
     let mut outcome: Option<bool> = None;
     match d.kind {
@@ -320,7 +338,7 @@ fn command_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, d: &Dialog, fields: 
         _ if crate::channel_options_ui::owns_new_spot(fields) => crate::channel_options_ui::new_spot_body(ui, fields),
         _ if crate::shape_dialog::owns(fields) => crate::shape_dialog::body(app, ui, fields),
         _ if delete_prompt(fields) => delete_prompt_body(ui, fields),
-        _ if crate::disk_change_prompt::owns(fields) => crate::disk_change_prompt::body(ui, fields),
+        _ if save_prompt(fields) => save_prompt_body(ui, fields),
         _ if crate::replace_prompt::owns(fields) => crate::replace_prompt::body(ui, fields),
         _ if crate::preset_group_prompt::owns(fields) => crate::preset_group_prompt::body(ui, fields),
         _ if crate::actions::owns_stop_message(fields) => crate::actions::stop_message_body(ui, fields),
@@ -531,6 +549,17 @@ fn button_row(
                 fields.insert("choice".into(), json!("smartObject"));
             } else if hit == Some(ButtonRole::Default) {
                 fields.insert("choice".into(), json!("rasterize"));
+            }
+            hit
+        } else if crate::legacy_save_prompt::owns(fields) {
+            // Pigment: Save / Cancel / Save As… over a Pigment 0.1–0.4 file.
+            let save = DialogButton::new(ButtonRole::Default, tl!("Save"), 84.0);
+            let save_as = DialogButton::new(ButtonRole::Alternate, tl!("Save As…"), 100.0);
+            let hit = dialog_buttons(ui, &[save, cancel, save_as]);
+            if hit == Some(ButtonRole::Alternate) {
+                fields.insert("choice".into(), json!("saveAs"));
+            } else if hit == Some(ButtonRole::Default) {
+                fields.insert("choice".into(), json!("save"));
             }
             hit
         } else if crate::preset_group_prompt::owns(fields) {
@@ -939,6 +968,7 @@ const ROUTES: &[fn(&Fields) -> bool] = &[
     crate::analysis_ui::owns_clear_notes,
     live_shape_prompt::owns,
     crate::disk_change_prompt::owns,
+    crate::legacy_save_prompt::owns,
     crate::actions::owns_stop_message,
     crate::actions::owns_insert_stop,
     crate::actions::menu_item::owns,
@@ -980,7 +1010,7 @@ pub fn is_route_marker(key: &str) -> bool {
 /// the engine (a disk-change save, Export As, Save for Web, Print), so automation is judged for
 /// that command rather than for the dialog's `__command`.
 fn file_command(fields: &Fields) -> Option<&'static str> {
-    if crate::disk_change_prompt::owns(fields) {
+    if crate::disk_change_prompt::owns(fields) || crate::legacy_save_prompt::owns(fields) {
         Some("file.save")
     } else if fields.contains_key("__export") {
         Some("file.export.exportAs")
@@ -1160,7 +1190,7 @@ fn confirm_command(app: &mut PhotocraftApp, d: Dialog) -> Result<Value, String> 
         _ if crate::channel_options_ui::owns_new_spot(&d.fields) => crate::channel_options_ui::confirm_new_spot(app, &d.fields),
         _ if crate::shape_dialog::owns(&d.fields) => crate::shape_dialog::confirm(app, &d.fields),
         _ if crate::delete_layer_prompt::owns(&d.fields) => crate::delete_layer_prompt::confirm(app, &d.fields),
-        _ if crate::disk_change_prompt::owns(&d.fields) => crate::disk_change_prompt::confirm(app, &d.fields),
+        _ if save_prompt(&d.fields) => save_prompt_confirm(app, &d.fields),
         _ if crate::replace_prompt::owns(&d.fields) => crate::replace_prompt::confirm(app),
         _ if crate::preset_group_prompt::owns(&d.fields) => crate::preset_group_prompt::confirm(app, &d.fields),
         _ if crate::actions::owns_stop_message(&d.fields) => crate::actions::stop_message_confirm(app, &d.fields),
@@ -1361,10 +1391,12 @@ pub mod guide_layout_ui;
 pub mod history_options_ui;
 mod image_processor_ui;
 pub mod jpeg_options_ui;
+// Pigment: the first Save over a Pigment 0.1–0.4 file asks first.
 #[cfg(test)]
 mod label_column_tests;
 pub mod layer_picker;
 pub mod layer_style;
+pub mod legacy_save_prompt;
 pub mod liquify_ui;
 pub mod live_shape_prompt;
 pub mod mask_trash_prompt;

@@ -1,8 +1,8 @@
 //! The layer tree of a Pigment 0.1–0.4 document (`Layer.describe()` in
 //! `renderer/lib/document.js`, pixels from `renderer/lib/io.js`): raster, group, adjustment,
 //! fill and shape layers, with their layer masks, vector masks, layer styles and advanced
-//! blending. Text layers and smart objects are not converted here yet: such a layer opens as an
-//! empty pixel layer in its place with its common properties, and the report says so.
+//! blending, type layers (`text.rs`) and smart objects (`smart.rs`). A layer of a kind this does
+//! not know opens as an empty pixel layer in its place with its common properties, reported.
 
 use photocraft_color::{BlendMode, ColorMode, PixelFormat, SampleType};
 use photocraft_doc::advanced::{AdvancedBlending, Knockout};
@@ -15,7 +15,7 @@ use serde_json::Value;
 use super::container::{Container, MAX_ENTRY_BYTES, Rgba8};
 use super::paint::{self, Patterns, Place};
 use super::styles::StyleReader;
-use super::{adjust, blend, damaged};
+use super::{adjust, blend, damaged, text};
 use crate::IoError;
 use crate::ora::Warnings;
 
@@ -167,6 +167,12 @@ pub(crate) struct LayerReader<'a, 'b, 'c> {
     pub(crate) canvas: (u32, u32),
     /// The patterns fills, shapes and styles bring.
     pub(crate) patterns: Patterns,
+    /// The document's resolution: type sizes were pixels in the app, they are points here.
+    pub(crate) dpi: f32,
+    /// How deep in smart objects this document is (0: the file opened).
+    pub(crate) depth: usize,
+    /// Smart-object sources read so far, shared by the instances that name them.
+    pub(crate) smart_sources: Vec<super::smart::Shared>,
 }
 
 impl LayerReader<'_, '_, '_> {
@@ -190,6 +196,8 @@ impl LayerReader<'_, '_, '_> {
             let name =
                 desc.get("name").and_then(Value::as_str).filter(|s| !s.trim().is_empty()).map_or_else(|| format!("Layer {}", self.nodes), str::to_string);
             let kind = desc.get("type").and_then(Value::as_str).unwrap_or("");
+            // A type layer's stroke, which becomes a layer effect.
+            let mut stroke = None;
             let mut layer = match kind {
                 "raster" => self.raster(desc, id.as_deref(), &name)?,
                 "group" => {
@@ -212,10 +220,19 @@ impl LayerReader<'_, '_, '_> {
                 }
                 "fill" => self.fill(desc, id.as_deref(), &name)?,
                 "shape" => self.shape(desc, &name)?,
+                "text" => {
+                    let mut notes = Vec::new();
+                    let converted = text::text_layer(desc, self.dpi, self.mode, &mut notes);
+                    self.notes(&name, notes);
+                    stroke = converted.stroke;
+                    Layer::new("", LayerContent::Text(converted.text))
+                }
+                "smart" => match self.smart(desc, id.as_deref(), &name)? {
+                    Some(layer) => layer,
+                    None => Layer::raster("", self.fmt),
+                },
                 other => {
                     let what = match other {
-                        "text" => "text layers are not converted yet; the layer opens as an empty layer".to_string(),
-                        "smart" => "smart objects are not converted yet; the layer opens as an empty layer".to_string(),
                         "" => "the layer has no type; it opens as an empty layer".to_string(),
                         other => format!("layers of type \"{}\" are not known; the layer opens as an empty layer", other.chars().take(40).collect::<String>()),
                     };
@@ -225,6 +242,16 @@ impl LayerReader<'_, '_, '_> {
             };
             layer.name = name;
             self.common(&mut layer, desc, id.as_deref())?;
+            if let Some(stroke) = stroke {
+                // Drawn with the glyphs, under the layer's own styles.
+                layer.effects.items.insert(0, stroke);
+                if layer.effects.items.len() > 1 {
+                    self.warnings.layer(
+                        &layer.name,
+                        "the type's stroke and its layer styles are drawn together as layer effects, which can differ a little from Pigment 0.4",
+                    );
+                }
+            }
             if let Some(id) = id {
                 self.ids.push((id, layer.id));
             }

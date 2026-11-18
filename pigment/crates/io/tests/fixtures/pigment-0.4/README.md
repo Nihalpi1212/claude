@@ -53,6 +53,26 @@ document's picture with it.
 
 Layer ids hold the time of writing, so tests find layers by name.
 
+Type layers and smart objects (`make-fixtures-l3.mjs`, `v2` and `v3`). Smart-object documents
+have the app's picture next to them as above; type documents do not (the app drew type with the
+fonts of the machine it ran on, so a picture would compare fonts): the tests check the text, the
+runs and where the type sits. `crates/io/src/legacy_pigment/text_smart_tests.rs` opens them; the
+engine compares the filtered smart object's picture (`crates/engine/src/legacy_pigment_render.rs`).
+
+| File | Holds |
+|---|---|
+| `*-text-point` | point type with every 0.3 font field set: bold, italic, underline, colour, line height, letter spacing, a stroke (144 ppi, so 16 px is 8 pt) |
+| `*-text-box` | a centred paragraph box with two paragraphs (in `v3` with its fixed height), and right-aligned point type turned and scaled by its matrix |
+| `v3-text-runs` | 0.4's rich text: runs with font, PostScript name, size, tracking, baseline shift, faux bold, colour, kerning, scale, italic, underline, strikethrough, caps, superscript, language, OpenType features, leading, a stroke on one run, No Break; paragraphs with alignment, indents, spacing, hyphenation, a list, hanging punctuation and justification spacing; crisp anti-aliasing |
+| `v3-text-vertical` | stacked vertical type in two columns, and 0.4's "vertical" (horizontal type turned a quarter) |
+| `v3-text-path` | type on an open curve from a fifth of its length, and flipped and centred |
+| `*-smart-instances` | a nested document placed twice: the second instance shares the first's source (`sourceRef`), turned and scaled, at 80 % |
+| `*-smart-image` | an image source scaled twice, and one without a matrix |
+| `*-smart-filters` | Gaussian Blur, Unsharp Mask and Levels as smart filters, and an Invert that is off |
+| `*-smart-filters-unmapped` | Box Blur, Glowing Edges (Pigment has no counterpart) and Mosaic, with the whole stack off |
+| `*-smart-deep` | smart objects nested ten deep |
+
+
 ## Making them again
 
 `make-fixtures.mjs` builds the documents with the app's classes and calls its `writePigment`. The
@@ -67,7 +87,8 @@ npm install --ignore-scripts --no-save --omit=optional ag-psd@31.0.3 esbuild@0.2
                                                            # no install scripts: nothing is downloaded but npm packages
 mkdir /tmp/fixgen && cd /tmp/fixgen && npm init -y && npm install @napi-rs/canvas
 node <this folder>/make-fixtures.mjs /tmp/pigment-js/pigment v3 <this folder>   # v1, v2, v3 or wip05
-                                           # make-fixtures-layers.mjs runs too (keep it next to make-fixtures.mjs)
+                                           # make-fixtures-layers.mjs and make-fixtures-l3.mjs run too
+                                           # (keep them next to make-fixtures.mjs)
 ```
 
 Run it once per checkout with the matching set name. The `v1` run writes the layer-kind documents

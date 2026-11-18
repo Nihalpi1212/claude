@@ -71,21 +71,49 @@ pub(crate) fn decode_png(data: &[u8], budget: u64) -> Result<Rgba8, String> {
     Ok(Rgba8 { width, height, data })
 }
 
+/// What one document may still take: the bytes its entries expand to and the pixel memory. A
+/// smart object's nested document takes from its host's.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Budget {
+    /// Of [`MAX_TOTAL_BYTES`].
+    pub(crate) bytes: u64,
+    /// Of [`MAX_PIXEL_BYTES`].
+    pub(crate) pixels: u64,
+}
+
+impl Default for Budget {
+    fn default() -> Self {
+        Budget { bytes: MAX_TOTAL_BYTES, pixels: MAX_PIXEL_BYTES }
+    }
+}
+
 /// The open archive and the pixel memory still available.
 pub(crate) struct Container<'a> {
     archive: craft_zip::Archive<'a>,
     /// Bytes of [`MAX_PIXEL_BYTES`] not yet taken.
     pub(crate) pixel_budget: u64,
+    /// Bytes of [`MAX_TOTAL_BYTES`] not yet read (entries of nested documents included).
+    bytes_left: u64,
 }
 
 impl<'a> Container<'a> {
-    pub(crate) fn open(bytes: &'a [u8]) -> Result<Self, IoError> {
-        let archive =
-            craft_zip::Archive::open(bytes, craft_zip::Limits { max_entries: MAX_ENTRIES, max_total_bytes: MAX_TOTAL_BYTES }).map_err(|e| match e {
-                craft_zip::Error::TooManyEntries { .. } => too_large(&e.to_string()),
-                e => damaged(e.to_string()),
-            })?;
-        Ok(Container { archive, pixel_budget: MAX_PIXEL_BYTES })
+    pub(crate) fn open(bytes: &'a [u8], budget: Budget) -> Result<Self, IoError> {
+        let archive = craft_zip::Archive::open(bytes, craft_zip::Limits { max_entries: MAX_ENTRIES, max_total_bytes: budget.bytes }).map_err(|e| match e {
+            craft_zip::Error::TooManyEntries { .. } => too_large(&e.to_string()),
+            e => damaged(e.to_string()),
+        })?;
+        Ok(Container { archive, pixel_budget: budget.pixels, bytes_left: budget.bytes })
+    }
+
+    /// What is left of the budget.
+    pub(crate) fn budget(&self) -> Budget {
+        Budget { bytes: self.bytes_left, pixels: self.pixel_budget }
+    }
+
+    /// Takes what a nested document used: the budget it had left is what this one has left.
+    pub(crate) fn spent_nested(&mut self, left: Budget) {
+        self.bytes_left = self.bytes_left.min(left.bytes);
+        self.pixel_budget = self.pixel_budget.min(left.pixels);
     }
 
     pub(crate) fn contains(&self, name: &str) -> bool {
@@ -101,10 +129,18 @@ impl<'a> Container<'a> {
     /// the whole document; an entry that does not decode is `Err(Ok(why))`, for the caller to
     /// report and carry on without it.
     pub(crate) fn read(&mut self, name: &str, max: u64) -> Result<Option<Vec<u8>>, Result<String, IoError>> {
-        match self.archive.read(name, max) {
-            Ok(data) => Ok(data),
+        if self.bytes_left == 0 {
+            return Err(Err(too_large("its entries expand to more than 4 GiB")));
+        }
+        // The whole budget is what may still be read, whatever one entry may hold.
+        let limited = max > self.bytes_left;
+        match self.archive.read(name, max.min(self.bytes_left)) {
+            Ok(data) => {
+                self.bytes_left = self.bytes_left.saturating_sub(data.as_ref().map_or(0, |d| d.len() as u64));
+                Ok(data)
+            }
             Err(e @ craft_zip::Error::BudgetSpent { .. }) => Err(Err(too_large(&e.to_string()))),
-            Err(e @ craft_zip::Error::EntryTooLarge { .. }) if max >= MAX_ENTRY_BYTES => Err(Err(too_large(&e.to_string()))),
+            Err(e @ craft_zip::Error::EntryTooLarge { .. }) if max >= MAX_ENTRY_BYTES || limited => Err(Err(too_large(&e.to_string()))),
             Err(e) => Err(Ok(e.to_string())),
         }
     }

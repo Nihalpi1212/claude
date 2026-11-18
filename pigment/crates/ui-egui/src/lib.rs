@@ -153,6 +153,7 @@ pub use dialogs::dialog_alt_reset;
 pub use dialogs::dialog_blend_ui;
 pub use dialogs::discard_ui;
 pub use dialogs::disk_change_prompt;
+// Pigment: the first Save over a Pigment 0.1–0.4 file asks first.
 pub use dialogs::distort_ui;
 pub use dialogs::duplicate_layer_ui;
 pub use dialogs::edit_history;
@@ -169,6 +170,7 @@ pub use dialogs::history_options_ui;
 pub use dialogs::jpeg_options_ui;
 pub use dialogs::layer_picker;
 pub use dialogs::layer_style;
+pub use dialogs::legacy_save_prompt;
 pub use dialogs::liquify_ui;
 pub use dialogs::mask_trash_prompt;
 pub use dialogs::new_doc_ui;

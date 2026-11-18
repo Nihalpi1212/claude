@@ -959,6 +959,8 @@ pub const OPEN_JOB: &str = "file.open";
 
 /// The import settings files are opened and placed with.
 pub fn import_options(prefs: &crate::prefs::Preferences) -> photocraft_io::ImportOptions {
+    // Pigment: a Pigment 0.1–0.4 document's smart objects are drawn with the engine's filters.
+    crate::legacy_pigment_render::install();
     photocraft_io::ImportOptions {
         max_group_depth: prefs.file_handling.rasterize_svg_groups_deeper_than as usize,
         demosaic: prefs.raw_defaults.demosaic.method(),

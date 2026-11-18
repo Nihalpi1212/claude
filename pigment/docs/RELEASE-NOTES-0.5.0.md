@@ -103,22 +103,50 @@ What differs from Pigment 0.4:
 [`pigment/docs/generative-ai.md`](https://github.com/Nihalpi1212/claude/blob/pigment-v0.5.0/pigment/docs/generative-ai.md)
 has the details and a feature-by-feature comparison with Pigment 0.4.
 
+### Documents from Pigment 0.1 to 0.4
+
+**Your old `.pigment` documents open, with every kind of layer.** Pigment recognises a file saved
+by Pigment 0.1 to 0.4 by its content, whatever it is called, and converts it.
+
+- **Converted exactly:** the document (size, resolution, the Bitmap, Grayscale, Duotone, Indexed
+  Color and RGB modes, 8, 16 and 32 bits per channel); pixel, group, adjustment, fill, shape, type
+  and smart-object layers with their opacity, fill opacity, blend mode, locks and clipping; layer
+  masks with density and feather, and vector masks; the settings of every adjustment and layer
+  style; advanced blending (Blend If, knockout, channels); type as editable type, with its text,
+  fonts and character and paragraph settings (point type, paragraph boxes, type on a path,
+  vertical type); smart objects with their contents (a nested document or an image), shared
+  between duplicated instances, and their transform; the smart filters Pigment has (the blurs,
+  sharpening, noise, Mosaic, Emboss, Find Edges, Maximum, Minimum, Offset, Twirl, Pinch, Spherize,
+  Ripple, Polar Coordinates and the adjustments); colour labels and links, the selection, saved
+  channels, guides, paths, the global light and File Info.
+- **Approximated**, converted but drawn a little differently: adjustments and effects PhotoCraft
+  computes as Photoshop does (Brightness/Contrast, Photo Filter, Color Balance, Vibrance, Selective
+  Color, Exposure, the Curves spline, some shadows, glows and strokes); type, which Pigment's type
+  engine lays out (lines can break and glyphs sit slightly differently, and a stroke on the
+  characters becomes a Stroke layer effect); turned or scaled smart objects (resampled bicubic) and
+  smart filters (Pigment's own filters); CMYK and Lab documents, which open in RGB (Pigment 0.4
+  kept RGB pixels for them), and Multichannel ones, in RGB with their inks as spot channels.
+- **Reported as not converted:** the notes shown after opening list, one line each, what has no
+  place in Pigment yet: Color and Vibrance, Clarity and Dehaze and Grain adjustment layers (their
+  settings are kept, they change nothing), smart filters Pigment does not have (Filter Gallery
+  effects, Glowing Edges, Oil Paint and others), type settings it does not have (lists, hanging
+  punctuation, justification spacing, hyphenation settings, tab stops, No Break), a stroke on a
+  pattern-filled shape, smart objects nested more than 8 deep, and anything missing from a damaged
+  file. The document's import report keeps the same list when you save it.
+
+**Saving goes to the new format.** The document keeps its file, and the first File › Save asks
+"Save in the new Pigment format? Pigment 0.4 will no longer be able to open this file.": Save
+writes the new format over it, Save As… keeps the old file and saves a new one, Cancel does
+neither ("Don't show again" stops the question). Scripts and AI agents that save do not ask. A file
+that cannot be read at all says "This Pigment 0.4 file is damaged:" and why.
+
+On Windows and macOS, 0.5 installs where 0.4 was (`%LOCALAPPDATA%\Programs\Pigment` or
+`C:\Program Files\Pigment`, and `Pigment.app` in Applications) and replaces it; your documents stay
+where they are. To keep 0.4 as well, choose another folder on the installer's folder page
+(Windows) or move `Pigment.app` out of Applications first (macOS).
+
 ### Known issues
 
-- **Documents from Pigment 0.1 to 0.4 open, but not all of their layers yet.** Pigment recognises
-  them by their content and converts the document (size, resolution, image mode, 8, 16 and 32 bits
-  per channel), pixel, group, adjustment, fill and shape layers with their opacity, blend mode,
-  locks, clipping, masks, vector masks, layer styles and advanced blending, colour labels and
-  links, the selection, saved channels, guides, paths and File Info. Color and Vibrance, Clarity
-  and Dehaze and Grain adjustment layers keep their settings but change nothing yet, and some
-  adjustments and effects look slightly different (PhotoCraft computes them as Photoshop does).
-  Text layers, smart objects and their filters are not converted yet: each opens as an empty layer
-  in its place, and the notes shown after opening list them. File › Save asks for a new file name, so the old
-  file stays as it was. Keep the old files, and to bring a document with such layers over whole
-  today, export it as PSD from Pigment 0.4 **before installing 0.5**: on Windows and
-  macOS, 0.5 installs where 0.4 was (`%LOCALAPPDATA%\Programs\Pigment` or `C:\Program Files\Pigment`,
-  and `Pigment.app` in Applications) and replaces it. To keep 0.4, choose another folder on the
-  installer's folder page (Windows) or move `Pigment.app` out of Applications first (macOS).
 - **The generative AI was tested against local stand-ins for OpenAI and Google Gemini, not with
   live accounts** (none was available). If a real account behaves differently, please report it.
   **Sign in with ChatGPT** in particular uses a route OpenAI has not documented as a stable

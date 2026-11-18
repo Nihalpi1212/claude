@@ -10,36 +10,47 @@
 //! and 3 (0.4: the document store, mask density and feather; the unfinished 0.5 added the
 //! document profile).
 //!
-//! What is converted so far: the document (size, resolution, image mode and bit depth, colour
-//! table, duotone inks, profile), raster, group, adjustment, fill and shape layers with their
-//! common properties, layer masks, vector masks, layer styles and advanced blending, the patterns
-//! fills and styles use, colour labels and link sets, the selection, saved channels, guides and
-//! the ruler origin, saved paths and the work path, the global light, and File Info. Text and
-//! smart-object layers are reported and open as empty layers (`layers.rs`). A file that is one of
-//! these documents but cannot be read at all fails with [`IoError::LegacyPigment`].
+//! Everything the app saved is read: the document (size, resolution, image mode and bit depth,
+//! colour table, duotone inks, profile), raster, group, adjustment, fill, shape, type and
+//! smart-object layers with their common properties, layer masks, vector masks, layer styles and
+//! advanced blending, smart filters, the patterns fills and styles use, colour labels and link
+//! sets, the selection, saved channels, guides and the ruler origin, saved paths and the work
+//! path, the global light, and File Info. What PhotoCraft draws another way, and what it has no
+//! place for, is reported one line each in the import warnings and kept in the document's import
+//! report ([`photocraft_doc::import_conversion`]), which says the document came from Pigment
+//! 0.1–0.4. A file that is one of these documents but cannot be read at all fails with
+//! [`IoError::LegacyPigment`].
 //!
-//! The document is marked `source_read_only`: File › Save goes to Save As, so the old file is
-//! never overwritten by the new format without the person choosing to.
+//! The document keeps its file: File › Save in the interface first asks whether to write the new
+//! format over it, which Pigment 0.4 cannot open (`legacy_save_prompt` in photocraft-ui-egui).
 
 mod adjust;
 mod blend;
 mod container;
+mod filters;
 mod gradient;
 mod info;
 mod layers;
 mod paint;
 mod path;
+mod smart;
 mod styles;
+mod text;
+
+pub use smart::{Renderer, set_renderer as set_smart_object_renderer};
 
 #[cfg(test)]
 mod layer_kinds_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod text_smart_tests;
 
 use std::sync::Arc;
 
 use photocraft_color::{Color, ColorMode, PixelFormat, SampleType};
 use photocraft_doc::adjust::CurvePoint;
+use photocraft_doc::import_conversion::{ConversionDisposition, ConversionEntry, ConversionReason, ConversionReport, ImportConversion, SourceItemRef};
 use photocraft_doc::mode::{ColorTable, Duotone, DuotoneInk};
 use photocraft_doc::vector::NamedPath;
 use photocraft_doc::{AlphaChannel, Document, GlobalLight};
@@ -47,7 +58,7 @@ use photocraft_geom::{Rect, Size};
 use photocraft_raster::{Interrupt, Surface};
 use serde_json::{Map, Value};
 
-use self::container::{Container, MAX_SIDE};
+use self::container::{Budget, Container, MAX_SIDE};
 use self::layers::{LayerReader, Tone, encode_gray};
 use crate::ora::Warnings;
 use crate::{ImportResult, IoError};
@@ -384,9 +395,71 @@ fn background(layers: &mut [photocraft_doc::Layer]) {
     }
 }
 
+/// What [`ImportConversion`](photocraft_doc::import_conversion::ImportConversion) calls the
+/// documents this importer reads.
+pub const SOURCE_FORMAT: &str = "pigment-0.1-0.4";
+
+/// Whether `doc` was opened from a Pigment 0.1–0.4 document (its import report says so; the
+/// report stays with the document when it is saved in the new format).
+pub fn came_from_legacy(doc: &Document) -> bool {
+    matches!(doc.metadata.import_conversion.as_deref(), Some(ImportConversion::Report(r)) if r.source_format == SOURCE_FORMAT)
+}
+
+/// The import report of a document: each warning line, as converted another way, kept but not
+/// applied, or left out.
+fn report(version: u64, lines: &[String]) -> ImportConversion {
+    let entries = lines
+        .iter()
+        .take(4096)
+        .enumerate()
+        .map(|(i, line)| {
+            let has = |words: &[&str]| words.iter().any(|w| line.contains(w));
+            let (disposition, reason) = if has(&["changes nothing"]) {
+                (ConversionDisposition::RetainedUnapplied, ConversionReason::NativeLimitation)
+            } else if has(&["could not", "not in the file", "is missing", "has no id", "damaged"]) {
+                (ConversionDisposition::SkippedNonessential, ConversionReason::ResourceUnavailable)
+            } else if has(&["left out", "was skipped", "empty layer", "opens empty", "nothing is drawn", "opens without", "not known", "no paint"]) {
+                (ConversionDisposition::SkippedNonessential, ConversionReason::MissingMapping)
+            } else {
+                (ConversionDisposition::NativeApproximation, ConversionReason::NativeLimitation)
+            };
+            let line: String = line.chars().take(4096).collect();
+            ConversionEntry {
+                feature_code: format!("pigment.{}", i + 1),
+                source: SourceItemRef { kind: "document".into(), ..Default::default() },
+                targets: Vec::new(),
+                disposition,
+                reason,
+                source_description: line.clone(),
+                native_description: line,
+                attachments: Vec::new(),
+            }
+        })
+        .collect();
+    ImportConversion::Report(ConversionReport {
+        source_format: SOURCE_FORMAT.into(),
+        source_version: u32::try_from(version).ok(),
+        policy_version: 1,
+        entries,
+        attachments: Vec::new(),
+    })
+}
+
 /// Opens a Pigment 0.1–0.4 document.
 pub(crate) fn import(name: &str, bytes: &[u8], ctl: &Interrupt) -> Result<ImportResult, IoError> {
-    let mut container = Container::open(bytes)?;
+    import_at(name, bytes, ctl, 0, &mut Budget::default())
+}
+
+/// Opens a document `depth` smart objects deep, within what is left of `budget` (a nested
+/// document takes from its host's), and leaves in `budget` what it did not take.
+fn import_at(name: &str, bytes: &[u8], ctl: &Interrupt, depth: usize, budget: &mut Budget) -> Result<ImportResult, IoError> {
+    let mut container = Container::open(bytes, *budget)?;
+    let result = read(name, &mut container, ctl, depth);
+    *budget = container.budget();
+    result
+}
+
+fn read(name: &str, container: &mut Container<'_>, ctl: &Interrupt, nesting: usize) -> Result<ImportResult, IoError> {
     let description = container.document()?;
     let d = description.as_object().ok_or_else(|| damaged(format!("{} does not hold a document", container::DOCUMENT)))?;
     // `readPigment` in lib/io.js: anything else "is not a Pigment document".
@@ -422,8 +495,9 @@ pub(crate) fn import(name: &str, bytes: &[u8], ctl: &Interrupt) -> Result<Import
         _ => {}
     }
 
+    let version = d.get("version").and_then(Value::as_u64).unwrap_or(1);
     let mut reader = LayerReader {
-        container: &mut container,
+        container: &mut *container,
         ctl,
         warnings: &mut warnings,
         fmt: document.pixel_format(),
@@ -433,10 +507,13 @@ pub(crate) fn import(name: &str, bytes: &[u8], ctl: &Interrupt) -> Result<Import
         nodes: 0,
         links: Vec::new(),
         ids: Vec::new(),
-        version: d.get("version").and_then(Value::as_u64).unwrap_or(1),
+        version,
         mode,
         canvas: (size.width, size.height),
         patterns: paint::Patterns::default(),
+        dpi: document.resolution_dpi,
+        depth: nesting,
+        smart_sources: Vec::new(),
     };
     let mut layers = reader.layers(d.get("layers").and_then(Value::as_array).map_or(&[][..], Vec::as_slice), 1)?;
     layers::apply_links(&mut layers, &reader.links);
@@ -450,10 +527,18 @@ pub(crate) fn import(name: &str, bytes: &[u8], ctl: &Interrupt) -> Result<Import
 
     // The inks of a Multichannel document: `meta.imageMode.multichannel.spots` has their colours.
     let spots = multichannel.filter(|_| d.get("mode").and_then(Value::as_str) == Some("multichannel")).and_then(|m| m.get("spots")).and_then(Value::as_object);
-    channels_and_selection(d, spots, &mut container, &mut document, &mut warnings, ctl)?;
+    channels_and_selection(d, spots, container, &mut document, &mut warnings, ctl)?;
     guides_and_origin(d, &mut document, &mut warnings);
     paths_and_light(d, &mut document);
-    profile(d, &mut container, &mut document, &mut warnings)?;
+    profile(d, container, &mut document, &mut warnings)?;
+
+    // Type and smart objects: the app saved no pixels for them.
+    let skipped = crate::text_import::prepare_within(&mut document, None, &mut container.pixel_budget, ctl).map_err(|_| IoError::Cancelled)?;
+    if skipped > 0 {
+        warnings.note("some type layers are too large to draw within the memory limit; they show once they are edited");
+    }
+    smart::render(&mut document, &mut container.pixel_budget, &mut warnings);
+    ctl.progress(0.95);
 
     // File Info and the camera data.
     if let Some((packet, camera)) = meta.and_then(info::xmp_packet) {
@@ -463,5 +548,8 @@ pub(crate) fn import(name: &str, bytes: &[u8], ctl: &Interrupt) -> Result<Import
         }
     }
 
-    Ok(ImportResult { document, warnings: warnings.finish(), source_read_only: true, preview_only: false })
+    let warnings = warnings.finish();
+    document.metadata.import_conversion = Some(Arc::new(report(version, &warnings)));
+    // The document keeps its file; the interface asks before the first save writes over it.
+    Ok(ImportResult { document, warnings, source_read_only: false, preview_only: false })
 }

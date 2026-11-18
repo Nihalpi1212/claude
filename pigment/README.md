@@ -198,23 +198,44 @@ Pigment on PhotoCraft and replaces it: PhotoCraft already does far more of what 
   Pigment 0.4 are not carried over (they were sealed by the old app): enter them once more in
   Edit › AI Accounts…. What works differently from 0.4 is listed in
   [`docs/RELEASE-NOTES-0.5.0.md`](docs/RELEASE-NOTES-0.5.0.md).
-- **Before you install 0.5 over 0.4, export your old documents.** On Windows and macOS Pigment 0.5
-  installs where 0.4 was (`%LOCALAPPDATA%\Programs\Pigment` or `C:\Program Files\Pigment`, and
+- **0.5 replaces 0.4 when you install it.** Your documents stay where they are, and 0.5 opens them
+  (below). On Windows and macOS Pigment 0.5 installs where 0.4 was (`%LOCALAPPDATA%\Programs\Pigment` or `C:\Program Files\Pigment`, and
   `Pigment.app` in Applications) and replaces it. To keep 0.4, pick another folder on the
   installer's folder page (Windows) or copy `Pigment.app` somewhere else first (macOS). On Linux
   the AppImages sit side by side.
-- **Your old `.pigment` documents open.** Pigment 0.5 saves `.pigment` files in PhotoCraft's native
-  format and recognises a file saved by Pigment 0.1 to 0.4 by its content. What it converts so far:
-  the document (size, resolution, image mode, 8, 16 and 32 bits per channel), pixel, group,
-  adjustment, fill and shape layers with their opacity, blend mode, locks, clipping, masks, vector
-  masks, layer styles and advanced blending (Blend If, knockout, channels), colour labels and links,
-  the selection, saved channels, guides, paths and File Info. A few adjustments Pigment 0.4 added
-  (Color and Vibrance, Clarity and Dehaze, Grain) keep their settings but change nothing yet, and
-  some adjustments and effects look slightly different, because PhotoCraft computes them as
-  Photoshop does. **Not converted yet:** text layers, smart objects and their filters. Such a layer
-  opens empty in its place, and the notes shown after opening list each one. File › Save asks for
-  a new file name, so the old file stays as it was; keep it until the rest is converted. A file
-  that cannot be read says "This Pigment 0.4 file is damaged:" and why.
+- **Your old `.pigment` documents open, every layer kind.** Pigment 0.5 saves `.pigment` files in
+  PhotoCraft's native format and recognises a file saved by Pigment 0.1 to 0.4 by its content.
+  - **Converted exactly:** the document (size, resolution, the Bitmap, Grayscale, Duotone, Indexed
+    Color and RGB modes, 8, 16 and 32 bits per channel); pixel, group, adjustment, fill, shape, type
+    and smart-object layers with their opacity, fill opacity, blend mode, locks, clipping, layer
+    masks (density and feather) and vector masks; the settings of every adjustment and layer
+    style; advanced blending (Blend If, knockout, channels); type as editable type, with its text,
+    fonts and character and paragraph settings; smart objects with their contents (a nested
+    document or an image), shared between duplicated instances, and their transform; the smart
+    filters Pigment has (the blurs, sharpening, noise, Mosaic, Emboss, Find Edges, Maximum,
+    Minimum, Offset, Twirl, Pinch, Spherize, Ripple, Polar Coordinates and the adjustments); colour
+    labels and links, the selection, saved channels, guides, paths, the global light and File Info.
+  - **Approximated** (converted, but drawn a little differently): adjustments and effects PhotoCraft
+    computes as Photoshop does (Brightness/Contrast, Photo Filter, Color Balance, Vibrance,
+    Selective Color, Exposure, the Curves spline, some shadows, glows and strokes); type, laid out
+    by Pigment's type engine (lines can break and glyphs sit slightly differently; a stroke on the
+    characters becomes a Stroke layer effect); turned or scaled smart objects (resampled bicubic)
+    and smart filters (Pigment's own filters); CMYK and Lab documents, which open in RGB (0.4 kept
+    RGB pixels for them), and Multichannel ones, in RGB with their inks as spot channels.
+  - **Reported as not converted:** the notes shown after opening list, one line each, what has no
+    place in Pigment yet: Color and Vibrance, Clarity and Dehaze and Grain adjustment layers (their
+    settings are kept, they change nothing), smart filters Pigment does not have (Filter Gallery
+    effects, Glowing Edges, Oil Paint and others), type settings it does not have (lists, hanging
+    punctuation, justification spacing, hyphenation settings, tab stops, No Break), a stroke on a
+    pattern-filled shape, smart objects nested more than 8 deep, and anything missing from a
+    damaged file. The same list is kept in the document's import report when you save it.
+
+  The document keeps its file. **The first File › Save asks "Save in the new Pigment format?
+  Pigment 0.4 will no longer be able to open this file."** Save writes the new format there, Save
+  As… keeps the old file and saves a new one, Cancel does neither (the question has a "Don't show
+  again" box). Scripts and AI agents that save do not ask. A file that cannot be read says "This
+  Pigment 0.4 file is damaged:" and why. The [user guide](docs/user/guides/open-pigment-0-4-documents.md)
+  has the details.
 
 ## Downloads
 

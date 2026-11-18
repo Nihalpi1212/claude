@@ -1,5 +1,6 @@
-//! Pigment: a document saved by Pigment 0.1–0.4 opens through the interface's own open paths,
-//! and none of them lets File › Save write the new format over the old file.
+//! Pigment: a document saved by Pigment 0.1–0.4 opens through the interface's own open paths and
+//! keeps its file; the first File › Save over it asks first (`legacy_save_prompt`, whose own
+//! tests save).
 
 use photocraft_ui_egui::{PhotocraftApp, Services};
 
@@ -22,7 +23,7 @@ fn layer_names(app: &PhotocraftApp) -> Vec<String> {
 }
 
 #[test]
-fn a_pigment_0_4_document_opens_and_save_asks_for_a_new_file() {
+fn a_pigment_0_4_document_opens_and_keeps_its_file() {
     // File › Open, a dropped file, Open Recent.
     let mut a = app();
     let warnings = a.open_file("/pictures/poster.pigment", GROUPS).unwrap();
@@ -30,15 +31,16 @@ fn a_pigment_0_4_document_opens_and_save_asks_for_a_new_file() {
     assert_eq!(layer_names(&a), ["Background", "Outer", "Top"]);
     let st = a.session.active().unwrap();
     assert_eq!(st.doc.name, "poster.pigment");
-    // The old file is not the document's file: Save cannot go back over it.
-    assert!(st.source_read_only);
-    assert_eq!(st.path, None);
+    // The old file is the document's file; Save asks before it writes the new format there.
+    assert!(!st.source_read_only);
+    assert_eq!(st.path.as_deref(), Some("/pictures/poster.pigment"));
+    assert!(photocraft_io::legacy_pigment::came_from_legacy(&st.doc));
 
     // The control channel's `app.open`, as an agent uses it.
     let mut a = app();
     a.open_automation_bytes("poster.pigment", GROUPS).unwrap();
     assert_eq!(layer_names(&a), ["Background", "Outer", "Top"]);
-    assert!(a.session.active().unwrap().source_read_only);
+    assert!(!a.session.active().unwrap().source_read_only);
 }
 
 #[test]
