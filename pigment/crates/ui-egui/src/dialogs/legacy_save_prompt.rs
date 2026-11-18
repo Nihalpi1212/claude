@@ -26,10 +26,17 @@ pub fn owns(fields: &Map<String, Value>) -> bool {
     fields.contains_key(MARK)
 }
 
-/// Whether the file at `path` is still one Pigment 0.1–0.4 saved.
+/// Whether the file at `path` is still one Pigment 0.1–0.4 saved. Every Save of a document
+/// opened from one asks this on the UI thread, also once the file holds the new format, so only
+/// the archive's directory is read; the whole file only when that cannot tell.
 #[cfg(not(target_arch = "wasm32"))]
 fn still_legacy(path: &str) -> bool {
-    std::fs::read(path).is_ok_and(|bytes| photocraft_io::legacy_pigment::is_legacy(&bytes))
+    let by_directory = std::fs::File::open(path).and_then(|f| photocraft_format::brand::is_legacy_pigment_reader(&mut std::io::BufReader::new(f)));
+    match by_directory {
+        Ok(Some(legacy)) => legacy,
+        Ok(None) => std::fs::read(path).is_ok_and(|bytes| photocraft_io::legacy_pigment::is_legacy(&bytes)),
+        Err(_) => false,
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
