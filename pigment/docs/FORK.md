@@ -84,8 +84,8 @@ import report (`Metadata::import_conversion`, source format `pigment-0.1-0.4`) t
 came from and lists what was approximated or left out. In the interface, the first File › Save over
 a file that is still a Pigment 0.1–0.4 document asks "Save in the new Pigment format? Pigment 0.4
 will no longer be able to open this file." (Save / Save As… / Cancel, with "Don't show again";
-`crates/ui-egui/src/dialogs/legacy_save_prompt.rs`). The engine's `file.save` (scripts, actions,
-agents, the CLI) writes without asking.
+`crates/ui-egui/src/dialogs/legacy_save_prompt.rs`). The engine's `file.save` (scripts, agents,
+the CLI) and a Save step of an action being played write without asking.
 
 ### The settings folder and Pigment 0.1–0.4
 
@@ -362,7 +362,7 @@ path calls first. Without it (photocraft-io alone) the source is placed without 
 | `crates/engine/src/lib.rs` | `mod legacy_pigment_render;` |
 | `crates/engine/src/jobs.rs` | one line at the top of `import_options`: `crate::legacy_pigment_render::install();` |
 | `crates/engine/src/cmd/file_cmds/open.rs` | the same line in `import_result_for_open` |
-| `crates/ui-egui/src/app/files.rs` | `save_in_place` asks `legacy_save_prompt::intercept` first; its old body is `save_in_place_unasked` |
+| `crates/ui-egui/src/app/files.rs` | `save_in_place` asks `legacy_save_prompt::intercept` first; its old body is `save_in_place_unasked`, which `replay_save` calls for a played Save (an action's Save step does not ask) |
 | `crates/ui-egui/src/dialogs.rs` | `pub mod legacy_save_prompt;`; `save_prompt`, `save_prompt_body` and `save_prompt_confirm` take the place of the disk-change prompt's arms in `command_body` and `confirm_command` and dispatch to either; the Save / Cancel / Save As… buttons; the `ROUTES` entry; `file_command` names `file.save` for it |
 | `crates/ui-egui/src/lib.rs` | `pub use dialogs::legacy_save_prompt;` |
 | `crates/ui-egui/tests/it/main.rs` | `mod legacy_pigment;` |

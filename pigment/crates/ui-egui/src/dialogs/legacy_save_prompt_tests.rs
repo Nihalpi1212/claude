@@ -118,3 +118,20 @@ fn save_as_keeps_the_old_file_and_dont_show_again_is_kept() {
     assert_eq!(written.borrow().len(), 2);
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+/// An action's Save step plays without the question (the module says so): it used to open the
+/// prompt in the middle of the action and go on without saving, so a Save and Close action or a
+/// Batch stopped at a document it had not saved.
+#[test]
+fn a_played_save_step_writes_without_asking() {
+    let (mut app, written, _) = app();
+    let (dir, path) = legacy_file("played");
+    app.open_file(&path, GROUPS).unwrap();
+    app.run("layer.new.layer", json!({})).unwrap();
+    app.replay_save("file.save", &json!({})).unwrap();
+    assert!(prompt(&app).is_none());
+    assert_eq!(*written.borrow(), std::slice::from_ref(&path));
+    assert!(photocraft_format::is_pcraft(&std::fs::read(&path).unwrap()));
+    assert!(!app.session.active().unwrap().is_dirty());
+    std::fs::remove_dir_all(dir).unwrap();
+}

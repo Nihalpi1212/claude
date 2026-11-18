@@ -50,7 +50,7 @@ The document keeps its file. The first time you choose **File › Save**, Pigmen
 - **Save As…** keeps the old file and saves the document as a new one.
 - **Cancel** saves nothing.
 
-Tick **Don't show again** to stop the question. After the first save the file is in the new format and **File › Save** does not ask again. Keep a copy of the old file if you still use Pigment 0.4.
+Tick **Don't show again** to stop the question. After the first save the file is in the new format and **File › Save** does not ask again. A Save step of an action you play, a script and an AI agent save without asking. Keep a copy of the old file if you still use Pigment 0.4.
 
 ## If the file does not open
 
