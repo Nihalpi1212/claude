@@ -84,7 +84,9 @@ pub(crate) fn encode(src: Samples<'_>, pixels: usize, tone: Tone, fmt: PixelForm
     let scale = src.scale();
     let mut out = Vec::with_capacity(pixels * fmt.bytes_per_pixel());
     for p in 0..pixels {
-        let [r, g, b, a] = [src.get(4 * p), src.get(4 * p + 1), src.get(4 * p + 2), src.get(4 * p + 3)];
+        let [r, g, b] = [src.get(4 * p), src.get(4 * p + 1), src.get(4 * p + 2)];
+        // Colour may be brighter than white in a 32-bit document; coverage may not.
+        let a = src.get(4 * p + 3).clamp(0.0, scale);
         if tone == Tone::Color {
             for v in [r, g, b] {
                 push(&mut out, v, scale, fmt.sample);

@@ -43,7 +43,8 @@ app draws on a browser canvas; under Node, [`@napi-rs/canvas`](https://www.npmjs
 # outside this repository's working tree
 git worktree add --detach /tmp/pigment-js 99dbdee          # or 3731508, b0e43cc, e9845fc
 cd /tmp/pigment-js/pigment
-npm install --ignore-scripts --no-save                     # ag-psd and the other pure JavaScript parts
+npm install --ignore-scripts --no-save --omit=optional ag-psd@31.0.3 esbuild@0.25.10 harfbuzzjs@1.6.4
+                                                           # no install scripts: nothing is downloaded but npm packages
 mkdir /tmp/fixgen && cd /tmp/fixgen && npm init -y && npm install @napi-rs/canvas
 node <this folder>/make-fixtures.mjs /tmp/pigment-js/pigment v3 <this folder>   # v1, v2, v3 or wip05
 ```

@@ -482,11 +482,12 @@ fn cmyk_lab_and_multichannel() {
             );
         }
 
-        // Multichannel: the inks are the picture.
+        // Multichannel: the pixels the app kept under the inks, and the inks as spot channels.
         let r = open(&format!("{v}-mode-multichannel"));
         let doc = &r.document;
-        assert_eq!(doc.mode, ColorMode::Multichannel);
-        assert!(doc.layers.is_empty());
+        assert_eq!(doc.mode, ColorMode::Rgb);
+        let s = raster(layer(&doc.layers, "Background"));
+        assert_eq!(px8(s, 3, 5), [3 * 36, 5 * 36, 8 * 18, 255]);
         assert_eq!(doc.channels.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["Cyan", "Magenta", "Yellow", "Alpha 1"]);
         let ink = |i: usize| doc.channels[i].spot.map(|(c, solidity)| (c.to_rgba8(), solidity));
         assert_eq!(ink(0), Some(([0, 255, 255, 255], 0.0)));
@@ -502,8 +503,13 @@ fn cmyk_lab_and_multichannel() {
                 assert_eq!(px8(&doc.channels[3].surface, x, y), [((y * 8 + x) * 4) as u8], "{v} alpha ({x}, {y})");
             }
         }
-        assert_eq!(r.warnings.len(), 1);
-        assert!(r.warnings[0].starts_with("Multichannel documents open as their ink channels"), "{:?}", r.warnings);
+        assert_eq!(
+            r.warnings,
+            ["Multichannel documents open in RGB with the pixels Pigment 0.4 kept under the inks; the ink channels are kept as spot channels"]
+        );
+        // The flattened picture is the one the app showed with every ink in place.
+        let image = crate::document_to_image(doc, &mut Vec::new()).unwrap().to_rgba8();
+        assert_eq!(image[(5 * 8 + 3) * 4..(5 * 8 + 3) * 4 + 4], [3 * 36, 5 * 36, 8 * 18, 255], "{v}");
     }
 }
 

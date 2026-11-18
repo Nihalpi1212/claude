@@ -201,13 +201,14 @@ jobs:
           appstreamcli validate --no-net --explain "$RUNNER_TEMP/pigment.metainfo.xml"
 
       # The version line, a document converted to PNG and to Pigment's native `.pigment` and back,
-      # and the typed error for a document saved by Pigment 0.1 to 0.4.
+      # a document saved by Pigment 0.4 converted to PNG, and the typed error for a damaged one.
       - name: CLI smoke test
         if: ${{ !cancelled() }}
         run: |
           set -euo pipefail
           cargo build --locked --features heif -p photocraft-cli
           cli="$PWD/target/debug/pigment-cli"
+          legacy="$PWD/crates/io/tests/fixtures/pigment-0.4"
           out="$RUNNER_TEMP/pigment-smoke"
           mkdir -p "$out"
           cd "$out"
@@ -227,16 +228,29 @@ jobs:
           "$cli" info roundtrip.pigment >info.json
           grep -q '"width": 64' info.json
           grep -q '"height": 48' info.json
-          # A Pigment 0.1-0.4 document: document.json and layers/<id>.png, no manifest.json.
+          # A Pigment 0.1-0.4 document (document.json and layers/<id>.png, no manifest.json), written
+          # by Pigment 0.4.0 itself: it opens, and converts to PNG and to the native format.
+          "$cli" info "$legacy/v3-groups.pigment" >legacy.json
+          grep -q '"width": 8' legacy.json
+          grep -q '"name": "Outer"' legacy.json
+          "$cli" convert "$legacy/v3-groups.pigment" legacy.png
+          head -c 8 legacy.png | od -An -c | grep -q 'P   N   G'
+          "$cli" convert "$legacy/v3-groups.pigment" converted.pigment
+          unzip -l converted.pigment | grep -q 'manifest.json'
+          # Its File Info and camera data are read by File Info's own command.
+          "$cli" run "$legacy/v3-tags-info.pigment" --cmd file.fileInfo >fileinfo.json
+          grep -q '"title":"A title"' fileinfo.json
+          grep -q '"exposure":"1/250 s"' fileinfo.json
+          # A damaged one (its document.json is cut short) fails with the typed error.
           python3 - <<'EOF'
           import zipfile
-          with zipfile.ZipFile("legacy.pigment", "w") as z:
-              z.writestr("document.json", '{"version":4,"width":4,"height":4,"layers":[{"id":1}]}')
+          with zipfile.ZipFile("damaged.pigment", "w") as z:
+              z.writestr("document.json", '{"version":3,"app":"pigment","width":4')
               z.writestr("layers/1.png", b"\x89PNG\r\n\x1a\n")
           EOF
-          if "$cli" info legacy.pigment 2>err.txt; then echo "a Pigment 0.4 document opened" >&2; exit 1; fi
+          if "$cli" info damaged.pigment 2>err.txt; then echo "a damaged Pigment 0.4 document opened" >&2; exit 1; fi
           cat err.txt
-          grep -q 'This file was saved by Pigment 0.4 or earlier. Opening these files is coming in a later update.' err.txt
+          grep -q 'This Pigment 0.4 file is damaged: document.json is not valid JSON' err.txt
 
       # A build or test must not have changed Cargo.lock.
       - name: Lockfile unchanged

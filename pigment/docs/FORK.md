@@ -297,12 +297,12 @@ written by the JavaScript app's own writer: `crates/io/tests/fixtures/pigment-0.
 `make-fixtures.mjs` and a README that names the commits.
 
 Converted so far: the document (size, resolution, the image modes Bitmap, Grayscale, Duotone,
-Indexed Color, RGB and Multichannel, 8, 16 and 32 bits per channel, the profile the unfinished 0.5
-wrote), raster layers and groups (name, visibility, opacity, fill opacity, blend mode, locks,
+Indexed Color and RGB, 8, 16 and 32 bits per channel, the profile the unfinished 0.5 wrote), raster layers and groups (name, visibility, opacity, fill opacity, blend mode, locks,
 clipping, folding), layer masks with density and feather, colour labels and link sets, the
 selection, saved channels, guides with their colours and the ruler origin, saved paths and the
 work path, the global light, and File Info with the camera data. CMYK and Lab documents open in
-RGB (the JavaScript app kept RGB pixels with a mode flag). **Not converted yet**, each opening as an
+RGB (the JavaScript app kept RGB pixels with a mode flag), and so do Multichannel ones, with their
+inks as spot channels. **Not converted yet**, each opening as an
 empty layer in its place and listed in the import report: adjustment, fill and shape layers, layer
 styles, vector masks and advanced blending (the next package), then text layers, smart objects and
 their filters. The active layer is not carried: `ImportResult` has no place for it.
@@ -403,3 +403,11 @@ PhotoCraft's own gate does: one process per test, which its tests are written fo
 `cargo test` a timing-sensitive test (automation's bridge authentication) failed now and then. The
 gate also runs the engine's panic hunt (upstream's AGENTS.md rule 9): run it after adding or
 changing a command, `cargo test -p photocraft-engine --test panic_hunt -- --ignored`.
+
+One upstream test was repaired for nextest rather than skipped:
+`crates/ui-egui/src/tools/type_tool/panels_toggle_tests.rs`, whose `bare_app()` now waits for the
+installed fonts' scan (`photocraft_text::shared()`, one line marked `// Pigment:`). The Type
+options bar draws "Loading fonts…" until that background scan ends and then moves its buttons;
+`without_a_document_it_opens_and_closes_the_group`, alone in its process, clicked a button of the
+frame before and missed (7 of 64 runs on a busy machine, once in CI). Other tests that click in
+the Type options bar without a type layer would need the same line.
