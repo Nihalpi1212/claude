@@ -553,15 +553,7 @@ fn button_row(
             hit
         } else if crate::legacy_save_prompt::owns(fields) {
             // Pigment: Save / Cancel / Save As… over a Pigment 0.1–0.4 file.
-            let save = DialogButton::new(ButtonRole::Default, tl!("Save"), 84.0);
-            let save_as = DialogButton::new(ButtonRole::Alternate, tl!("Save As…"), 100.0);
-            let hit = dialog_buttons(ui, &[save, cancel, save_as]);
-            if hit == Some(ButtonRole::Alternate) {
-                fields.insert("choice".into(), json!("saveAs"));
-            } else if hit == Some(ButtonRole::Default) {
-                fields.insert("choice".into(), json!("save"));
-            }
-            hit
+            legacy_save_prompt::buttons(ui, fields, cancel)
         } else if crate::preset_group_prompt::owns(fields) {
             // Import as New Group / Cancel / Replace (#10640): Enter keeps the group.
             let new = DialogButton::new(ButtonRole::Default, tl!("Import as New Group"), 150.0);

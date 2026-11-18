@@ -408,7 +408,7 @@ stays undrawn, reported.
 | `crates/automation/tests/it/main.rs` | `mod legacy_pigment;` |
 | `apps/photocraft-cli/tests/it/main.rs` | `mod legacy_pigment;` |
 | `crates/ui-egui/src/app/files.rs` | `save_in_place` asks `legacy_save_prompt::intercept` first; its old body is `save_in_place_unasked`, which `replay_save` calls for a played Save (an action's Save step does not ask) |
-| `crates/ui-egui/src/dialogs.rs` | `pub mod legacy_save_prompt;`; `save_prompt`, `save_prompt_body` and `save_prompt_confirm` take the place of the disk-change prompt's arms in `command_body` and `confirm_command` and dispatch to either; the Save / Cancel / Save As… buttons; the `ROUTES` entry; `file_command` names `file.save` for it |
+| `crates/ui-egui/src/dialogs.rs` | `pub mod legacy_save_prompt;`; `save_prompt`, `save_prompt_body` and `save_prompt_confirm` take the place of the disk-change prompt's arms in `command_body` and `confirm_command` and dispatch to either; the Save / Cancel / Save As… buttons (one call, `legacy_save_prompt::buttons`); the `ROUTES` entry; `file_command` names `file.save` for it |
 | `crates/ui-egui/src/lib.rs` | `pub use dialogs::legacy_save_prompt;` |
 | `crates/ui-egui/tests/it/main.rs` | `mod legacy_pigment;` |
 | `docs/user/guides/index.md` | the links to `open-pigment-0-4-documents.md` and `use-generative-ai.md` (Pigment's own pages); the rest of `docs/user/` is rewritten for Pigment ([the user guide](#the-user-guide)) |
