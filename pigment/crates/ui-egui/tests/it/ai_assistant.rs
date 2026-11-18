@@ -1016,3 +1016,153 @@ fn the_window_item_and_the_saved_choices() {
     let call = mock.calls().pop().unwrap();
     assert_eq!((call.op, call.provider, call.model.as_deref(), call.tools), ("chat", Some(ProviderId::Gemini), Some("gemini-2.5-flash"), 15));
 }
+
+/// A LUT file that turns everything red: reading it would show.
+fn red_lut(name: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("pigment-assistant-{name}-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let lut = dir.join("red.cube");
+    std::fs::write(&lut, format!("LUT_3D_SIZE 2\n{}", "1.0 0.0 0.0\n".repeat(8))).unwrap();
+    lut
+}
+
+/// The Assistant works on the open document only. The file a params object names is refused
+/// by `apply_adjustment` and `apply_filter` as it is by `run_command` (also as JSON text and
+/// inside a nested object); and nothing reaches the file manager, a file chooser, the files a
+/// data set names, another document, history that can't be brought back, or the person's
+/// preset libraries.
+#[test]
+fn no_tool_reads_a_file_or_reaches_outside_the_document() {
+    let mut app = app();
+    let lut = red_lut("files");
+    let file = lut.to_str().unwrap();
+    let before = pixel(&app, 5, 5);
+    for (name, args) in [
+        ("apply_adjustment", json!({"kind": "colorLookup", "params": {"file": file}})),
+        ("apply_adjustment", json!({"kind": "Color Lookup", "params": json!({"file": file}).to_string()})),
+        ("apply_filter", json!({"kind": "distort.displace", "params": {"mapPath": file, "horizontal": 20}})),
+        ("apply_filter", json!({"kind": "displace", "params": {"mapPath": file}})),
+        ("run_command", json!({"id": "image.adjustments.colorLookup", "params": {"lut": "warm", "options": {"file": file}}})),
+        ("run_command", json!({"id": "edit.assignProfile", "params": {"profile": "press.icc"}})),
+    ] {
+        let e = tool(&mut app, name, args.clone()).expect_err(&format!("{name} {args} ran"));
+        assert!(e.contains("open document only"), "{name} {args}: {e}");
+    }
+    assert_eq!(pixel(&app, 5, 5), before, "the file was not read");
+    assert_eq!(history(&app).len(), 1, "nothing ran");
+    for id in [
+        "layer.smartObjects.revealInFinder",
+        "layer.videoLayers.newVideoLayerFromFile",
+        "layer.videoLayers.replaceFootage",
+        "image.variables.define",
+        "image.variables.dataSets",
+        "image.applyDataSet",
+        "layer.copyToDocument",
+        "history.deleteState",
+        "history.deleteSnapshot",
+        "history.options",
+        "brush.presets.delete",
+        "brush.presets.update",
+        "swatches.delete",
+        "swatches.reset",
+        "pattern.delete",
+        "gradient.presets.edit",
+        "gradient.presets.reset",
+        "layer.layerStyle.contours.delete",
+    ] {
+        assert!(menus::is_live(id), "{id} is a command");
+        assert_eq!(tool(&mut app, "run_command", json!({"id": id})).unwrap_err(), format!("Command \"{id}\" cannot be run by the assistant"));
+        let listed = tool(&mut app, "list_commands", json!({"filter": id})).unwrap();
+        assert!(!listed["commands"].as_array().unwrap().iter().any(|c| c["id"] == id), "{id} is offered");
+    }
+    assert_eq!(history(&app).len(), 1, "nothing ran");
+    // A built-in look is not a file, and the libraries can still be read and added to.
+    one_step(&mut app, "apply_adjustment", json!({"kind": "colorLookup", "params": {"lut": "warm"}}));
+    assert!(tool(&mut app, "run_command", json!({"id": "swatches.list"})).is_ok());
+    assert!(tool(&mut app, "run_command", json!({"id": "variables.list"})).is_ok());
+    let _ = std::fs::remove_dir_all(lut.parent().unwrap());
+}
+
+/// A param that only shares its name with a file param is not one: a value the command itself
+/// lists for that key, or geometry. (Refusing these left Content-Aware Fill's and Refine Edge's
+/// output, and every shape and vector mask drawn from a path, out of the Assistant's reach.)
+#[test]
+fn a_param_named_like_a_file_param_that_is_no_file_runs() {
+    let mut app = app();
+    tool(&mut app, "select", json!({"kind": "rect", "rect": {"x": 20, "y": 20, "width": 40, "height": 30}})).unwrap();
+    let filled = tool(&mut app, "run_command", json!({"id": "edit.contentAwareFill", "params": {"output": "new"}}));
+    assert!(filled.is_ok(), "an output the command lists: {filled:?}");
+    let e = tool(&mut app, "run_command", json!({"id": "edit.contentAwareFill", "params": {"output": "/tmp/out.png"}})).unwrap_err();
+    assert!(e.contains("open document only"), "{e}");
+    let knots = json!([[20, 20], [120, 30], [70, 110]]);
+    let shape = tool(&mut app, "run_command", json!({"id": "shape.create", "params": {"kind": "path", "path": {"subpaths": [{"knots": knots}]}}}));
+    assert!(shape.is_ok(), "a path is geometry: {shape:?}");
+    assert!(layer_names(&app).len() >= 3, "{:?}", layer_names(&app));
+    // A list of files is still files.
+    let e = tool(&mut app, "run_command", json!({"id": "shape.create", "params": {"path": ["/tmp/a.svg"]}})).unwrap_err();
+    assert!(e.contains("open document only"), "{e}");
+}
+
+/// The provider, the chat model, Attach image and the conversation are the person's: an agent's
+/// clicks in the window (synthetic input) change none of them while "Allow agents to run AI
+/// commands" is off, as its clicks in AI Accounts change no setting. The person's clicks do.
+#[test]
+fn an_agents_clicks_change_neither_the_model_nor_what_is_attached() {
+    let rec = Recorder::connected();
+    let r = Arc::clone(&rec);
+    let mut h = harness(move |app| {
+        ai_ui::install_accounts(app, AiAccounts::in_memory());
+        r.install(app);
+        assistant::open(app);
+    });
+    rec.answer("Hello.", &[]);
+    send(&mut h, "hello");
+    let saved = |h: &Harness| ai_ui::with_accounts(h.state(), |a| (a.settings.assistant_attach, a.settings.chat_provider)).unwrap();
+    assert_eq!((h.state().ai.assistant.attach, saved(&h)), (true, (true, None)));
+    synthetic_click(&mut h, "Attach image");
+    synthetic_click(&mut h, "Google Gemini");
+    synthetic_click(&mut h, "List models");
+    assert_eq!((h.state().ai.assistant.attach, saved(&h)), (true, (true, None)), "the agent's clicks changed a setting");
+    assert!(
+        assistant::listed_models(h.state(), ProviderId::OpenAi).is_none() && h.query_by_label("List models").is_some(),
+        "the agent's click changed the window"
+    );
+    assert!(rec.mock.calls().iter().all(|c| c.op == "chat"), "nothing but the person's message was sent: {:?}", rec.mock.calls());
+    // With the permission, an agent may; and the person always may.
+    ai_ui::with_accounts(h.state(), |a| a.set_allow_agents(true)).unwrap().unwrap();
+    synthetic_click(&mut h, "Attach image");
+    assert_eq!((h.state().ai.assistant.attach, saved(&h).0), (false, false));
+    ai_ui::with_accounts(h.state(), |a| a.set_allow_agents(false)).unwrap().unwrap();
+    h.get_by_label("Attach image").click();
+    h.run_steps(3);
+    h.get_by_label("Google Gemini").click();
+    h.run_steps(3);
+    assert_eq!((h.state().ai.assistant.attach, saved(&h)), (true, (true, Some(ProviderId::Gemini))));
+}
+
+/// A step is not trusted to be reasonable either: an answer with a step whose arguments run to
+/// megabytes, or whose tool name is no name, fails the turn; no step of it runs, and it is not
+/// sent back to the provider round after round.
+#[test]
+fn an_answer_with_a_step_too_large_to_run_runs_none() {
+    let rec = Recorder::connected();
+    let r = Arc::clone(&rec);
+    let mut h = harness(move |app| r.install(app));
+    rec.answer("", &[("new_layer", json!({})), ("new_layer", json!({"name": "x".repeat(300_000)}))]);
+    send(&mut h, "one layer, please");
+    let m = assistant::messages(h.state()).last().unwrap();
+    assert!(m.error && m.calls.is_empty() && m.text.contains("too large"), "{}", m.text);
+    assert_eq!((layer_names(h.state()).len(), rec.requests().len()), (1, 1));
+    let name = "n".repeat(5000);
+    rec.answer("", &[(name.as_str(), json!({}))]);
+    send(&mut h, "again");
+    let m = assistant::messages(h.state()).last().unwrap();
+    assert!(m.error && m.calls.is_empty() && m.text.contains("too large"), "{}", m.text);
+    assert_eq!(rec.requests().len(), 2);
+    // An ordinary step with long text still runs.
+    rec.answer("", &[("add_text", json!({"text": "t".repeat(1900)}))]);
+    rec.answer("Added.", &[]);
+    send(&mut h, "some text");
+    let m = assistant::messages(h.state()).last().unwrap();
+    assert!(!m.error && m.calls.len() == 1 && !m.calls[0].failed(), "{}", m.text);
+}

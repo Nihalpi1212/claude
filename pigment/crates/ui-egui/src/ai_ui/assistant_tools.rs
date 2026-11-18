@@ -343,8 +343,9 @@ const BLOCKED_PREFIXES: &[&str] = &[
     "command.",
 ];
 
-/// Single commands the Assistant may not run: app-wide settings, what cannot be undone, and
-/// what reads or writes a smart object's file.
+/// Single commands the Assistant may not run: app-wide settings, what cannot be undone, what
+/// reads or writes a file (a smart object's, a video's, the ones a data set names) or shows one
+/// in the file manager, and what changes another document.
 const BLOCKED_IDS: &[&str] = &[
     "edit.keyboardShortcuts",
     "edit.menus",
@@ -352,16 +353,41 @@ const BLOCKED_IDS: &[&str] = &[
     "edit.colorSettings",
     "edit.search",
     "history.clear",
+    "history.deleteState",
+    "history.deleteSnapshot",
+    "history.options",
+    "image.applyDataSet",
+    "layer.copyToDocument",
     "layer.layerStyle.contours.load",
     "layer.layerStyle.contours.save",
     "layer.smartObjects.convertToLinked",
     "layer.smartObjects.relinkToFile",
     "layer.smartObjects.replaceContents",
+    "layer.smartObjects.revealInFinder",
     "layer.smartObjects.saveContents",
+    "layer.videoLayers.newVideoLayerFromFile",
+    "layer.videoLayers.replaceFootage",
 ];
 
-/// Params that name a file, a folder or a script: the Assistant works on the open document only.
-const PATH_KEYS: &[&str] = &["path", "paths", "file", "folder", "directory", "output", "destination", "mapPath", "script", "steps"];
+/// The person's preset libraries (brushes, swatches, patterns, gradients, styles, shapes,
+/// contours): they outlive the document and Undo does not bring them back, so the Assistant may
+/// read them, use them and add to them, and no more ([`changes_presets`]).
+const PRESET_FAMILIES: &[&str] =
+    &["brush.presets.", "swatches.", "pattern.", "gradient.presets.", "style.presets.", "shape.presets.", "layer.layerStyle.contours."];
+
+/// Whether `id` deletes, resets, renames, moves or overwrites entries of a preset library.
+fn changes_presets(id: &str) -> bool {
+    let last = id.rsplit('.').next().unwrap_or(id);
+    PRESET_FAMILIES.iter().any(|f| id.starts_with(f)) && ["delete", "reset", "edit", "rename", "move", "update"].iter().any(|verb| last.starts_with(verb))
+}
+
+/// Params that name a script or its steps: never the Assistant's, whatever they hold.
+const SCRIPT_KEYS: &[&str] = &["script", "steps"];
+
+/// Params that name a file or a folder: the Assistant works on the open document only. Some
+/// commands use the same names for something else (an output that is one of a few listed
+/// choices, a path that is geometry), which [`names_a_file`] tells apart.
+const PATH_KEYS: &[&str] = &["path", "paths", "file", "folder", "directory", "output", "destination", "mapPath"];
 
 /// Whether `id`'s last part says it imports or exports: a preset library or a file, neither of
 /// which is the document (`swatches.import`, `layer.exportAs`, `layer.quickExportAsPng`).
@@ -371,21 +397,72 @@ fn moves_files(id: &str) -> bool {
 }
 
 fn blocked_id(id: &str) -> bool {
-    !ALLOWED.contains(&id) && (BLOCKED_PREFIXES.iter().any(|p| id.starts_with(p)) || BLOCKED_IDS.contains(&id) || moves_files(id))
+    !ALLOWED.contains(&id)
+        && (BLOCKED_PREFIXES.iter().any(|p| id.starts_with(p))
+            || BLOCKED_IDS.contains(&id)
+            || id.starts_with("image.variables.")
+            || moves_files(id)
+            || changes_presets(id))
+}
+
+/// Whether the value of a [`PATH_KEYS`] param names a file: text does, unless it is one of the
+/// choices the command lists for that key (`"output":"current|new|duplicate"`); so does a list
+/// with text in it. An object or a list of numbers is geometry (its own keys are looked at in
+/// turn).
+fn names_a_file(key: &str, value: &Value, choices: &HashMap<String, Vec<String>>) -> bool {
+    match value {
+        Value::String(v) => !choices.get(key).is_some_and(|options| options.iter().any(|o| o == v)),
+        Value::Array(a) => a.iter().any(Value::is_string),
+        _ => false,
+    }
+}
+
+/// The first param of `params`, at any depth [`sanitize_params`] keeps, that names a file, a
+/// folder or a script.
+fn file_param<'a>(params: &'a Value, choices: &HashMap<String, Vec<String>>, depth: usize) -> Option<&'a str> {
+    let on_disk = |key: &str, value: &Value| {
+        SCRIPT_KEYS.contains(&key)
+            || (PATH_KEYS.contains(&key) && names_a_file(key, value, choices))
+            // A colour profile is a built-in id, or a file: only the id is the Assistant's.
+            || (key == "profile" && value.as_str().is_some_and(|v| v.contains(['/', '\\']) || [".icc", ".icm"].iter().any(|e| v.to_ascii_lowercase().ends_with(e))))
+    };
+    // The choices are the top level's: a nested param is held to its name alone.
+    let nested = HashMap::new();
+    match params {
+        Value::Object(o) => o.iter().find_map(|(k, v)| {
+            if on_disk(k, v) {
+                Some(k.as_str())
+            } else if depth < 4 {
+                file_param(v, &nested, depth + 1)
+            } else {
+                None
+            }
+        }),
+        Value::Array(a) if depth < 4 => a.iter().find_map(|v| file_param(v, &nested, depth + 1)),
+        _ => None,
+    }
 }
 
 /// The Assistant's command policy, in the shape of the automation gate
 /// (`Services::automation_command`): `Err` with what the model is told when `id` with `params`
-/// is not the Assistant's to run. Among the `ai.*` commands only Generative Fill passes.
+/// is not the Assistant's to run. Among the `ai.*` commands only Generative Fill passes. Every
+/// tool that runs a command by its id asks here: `run_command`, and `apply_adjustment` and
+/// `apply_filter` (a LUT's `file`, Displace's `mapPath`).
 pub fn blocked(id: &str, params: &Value) -> Result<(), String> {
     if blocked_id(id) {
         return Err(format!("Command \"{id}\" cannot be run by the assistant"));
     }
-    let on_disk = |key: &str, value: &Value| {
-        // A colour profile is a built-in id, or a file: only the id is the Assistant's.
-        PATH_KEYS.contains(&key) || (key == "profile" && value.as_str().is_some_and(|v| v.contains(['/', '\\'])))
-    };
-    if let Some((key, _)) = params.as_object().and_then(|o| o.iter().find(|(k, v)| on_disk(k, v))) {
+    // The values the command itself lists for each of its params.
+    let choices: HashMap<String, Vec<String>> = photocraft_engine::commands::find(id)
+        .map(|spec| parse_spec(spec.params))
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|p| match p.kind {
+            Kind::Choice { options, .. } => Some((p.key, options)),
+            _ => None,
+        })
+        .collect();
+    if let Some(key) = file_param(params, &choices, 0) {
         return Err(format!("Command \"{id}\" cannot be run by the assistant with \"{key}\": it works on the open document only, not on files or scripts"));
     }
     Ok(())
@@ -969,6 +1046,8 @@ fn apply_kind(app: &mut PhotocraftApp, prefix: &str, what: &str, args: &Map<Stri
     let spec = find_kind(prefix, &kind).ok_or_else(|| format!("Unknown {what} \"{}\"", first_chars(&kind, 60)))?;
     let (layer, _) = need_raster(app)?;
     let params = sanitize_params(&object_arg(args.get("params"), "params")?, spec.params, 200);
+    // A LUT's file, Displace's map: no more the Assistant's here than through run_command.
+    blocked(spec.id, &params)?;
     let name = spec.label.trim_end_matches('…').to_string();
     let r = app.run(spec.id, params);
     finish(app, r, move |_, _| Ok(json!(format!("Applied {name} to \"{layer}\""))))
@@ -1272,7 +1351,7 @@ pub fn describe_call(name: &str, args: &Value, failed: bool) -> String {
         "fill_selection" => fmt(tl!("Filled with {x}"), text("color").unwrap_or_default()),
         "add_text" => fmt(tl!("Added text “{x}”"), first_chars(&text("text").unwrap_or_default(), 30)),
         "generative_fill" => tl!("Generative fill").to_string(),
-        other => other.to_string(),
+        other => first_chars(other, 60),
     };
     if failed { fmt(tl!("Failed: {x}"), label) } else { label }
 }
@@ -1360,6 +1439,82 @@ mod tests {
         for id in photocraft_engine::ai_cmds::COMMANDS {
             assert_eq!(blocked(id, &json!({})).is_ok(), *id == FILL, "{id}");
         }
+    }
+
+    #[test]
+    fn the_blocked_list_keeps_other_files_other_documents_and_the_preset_libraries() {
+        // Nor is what shows a file in the file manager, asks for one, reads the ones a data set
+        // names, changes another document, forgets history, or changes a preset library beyond
+        // adding to it.
+        for id in [
+            "layer.smartObjects.revealInFinder",
+            "layer.videoLayers.newVideoLayerFromFile",
+            "layer.videoLayers.replaceFootage",
+            "image.variables.define",
+            "image.variables.dataSets",
+            "image.applyDataSet",
+            "layer.copyToDocument",
+            "history.deleteState",
+            "history.deleteSnapshot",
+            "history.options",
+            "brush.presets.delete",
+            "brush.presets.deleteGroup",
+            "brush.presets.rename",
+            "brush.presets.move",
+            "brush.presets.update",
+            "swatches.delete",
+            "swatches.reset",
+            "swatches.rename",
+            "pattern.delete",
+            "pattern.presets.edit",
+            "gradient.presets.edit",
+            "gradient.presets.reset",
+            "style.presets.reset",
+            "shape.presets.edit",
+            "layer.layerStyle.contours.delete",
+        ] {
+            assert!(photocraft_engine::commands::find(id).is_some(), "{id} is a command");
+            assert!(blocked(id, &json!({})).is_err(), "{id}");
+        }
+        for id in [
+            "brush.presets.list",
+            "brush.presets.save",
+            "brush.presets.setCurrent",
+            "swatches.list",
+            "swatches.add",
+            "swatches.use",
+            "pattern.list",
+            "gradient.presets.apply",
+            "gradient.presets.new",
+            "style.presets.apply",
+            "shape.presets.place",
+            "layer.layerStyle.contours.list",
+            "history.newSnapshot",
+            "variables.list",
+            "edit.definePattern",
+        ] {
+            assert!(photocraft_engine::commands::find(id).is_some(), "{id} is a command");
+            assert_eq!(blocked(id, &json!({})), Ok(()), "{id}");
+        }
+    }
+
+    #[test]
+    fn a_param_names_a_file_at_any_depth_unless_it_is_a_listed_choice_or_geometry() {
+        // A file named deeper in the params, a list of files, a profile file without a folder.
+        assert!(blocked("image.adjustments.levels", &json!({"options": {"file": "/tmp/x"}})).is_err());
+        assert!(blocked("image.adjustments.levels", &json!({"list": [{"mapPath": "/tmp/x"}]})).is_err());
+        assert!(blocked("shape.create", &json!({"path": ["/tmp/a.svg"]})).is_err());
+        assert!(blocked("edit.assignProfile", &json!({"profile": "Press.ICC"})).is_err());
+        assert!(blocked("layer.new.layer", &json!({"steps": 3})).is_err(), "a script's steps, whatever they hold");
+        // A param that shares a file param's name and is none: one of the values the command
+        // lists for it (not any other text, and not deeper down), or geometry.
+        assert_eq!(blocked("edit.contentAwareFill", &json!({"output": "new"})), Ok(()));
+        assert_eq!(blocked("select.refineEdge", &json!({"output": "layerMask"})), Ok(()));
+        assert!(blocked("edit.contentAwareFill", &json!({"output": "new.png"})).is_err());
+        assert!(blocked("edit.contentAwareFill", &json!({"fillEdits": [{"output": "new"}]})).is_err());
+        assert!(blocked("image.adjustments.levels", &json!({"output": "new"})).is_err(), "not a value this command lists");
+        assert_eq!(blocked("shape.create", &json!({"kind": "path", "path": {"subpaths": [{"knots": [[1, 2], [3, 4], [5, 6]]}]}})), Ok(()));
+        assert_eq!(blocked("filter.blurGallery.pathBlur", &json!({"paths": [[[0, 0], [10, 10]]]})), Ok(()));
     }
 
     #[test]

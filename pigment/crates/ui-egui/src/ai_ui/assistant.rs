@@ -43,6 +43,11 @@ const THUMB_EDGE: u32 = 96;
 /// provider's answer is not trusted to be reasonable.
 const TEXT_LIMIT: usize = 20_000;
 const MAX_CALLS: usize = 32;
+/// The longest arguments of one tool call, as JSON text, and the longest tool name. A step
+/// beyond them fails the turn: it would be drawn in the conversation and sent back to the
+/// provider with every later round.
+const ARGS_LIMIT: usize = 64 * 1024;
+const NAME_LIMIT: usize = 64;
 
 /// Who wrote a message.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -500,6 +505,23 @@ fn pending_message(s: &mut State) -> Option<&mut Message> {
     s.conversations.get_mut(&doc)?.iter_mut().rev().find(|m| m.pending)
 }
 
+/// Whether a tool call is beyond what a step may be ([`ARGS_LIMIT`], [`NAME_LIMIT`]).
+fn too_large(call: &ToolCall) -> bool {
+    /// Counts what is written, keeping nothing.
+    struct Count(usize);
+    impl std::io::Write for Count {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0 = self.0.saturating_add(buf.len());
+            // Past the limit there is no need to go on.
+            if self.0 > ARGS_LIMIT { Err(std::io::ErrorKind::FileTooLarge.into()) } else { Ok(buf.len()) }
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    call.name.len() > NAME_LIMIT || serde_json::to_writer(Count(0), &call.arguments).is_err()
+}
+
 /// The request's job left the model's answer: run its tool calls, or end the turn.
 fn answered(app: &mut PhotocraftApp) {
     let Some(turn) = app.ai.assistant.turn.as_mut() else { return };
@@ -510,6 +532,9 @@ fn answered(app: &mut PhotocraftApp) {
     let (calls, rounds) = (answer.tool_calls.len(), turn.rounds);
     if calls > MAX_CALLS {
         return finish(app, End::Failed { kind: None, message: tl!("The model asked for too many steps at once.").to_string() });
+    }
+    if answer.tool_calls.iter().any(too_large) {
+        return finish(app, End::Failed { kind: None, message: tl!("The model asked for a step too large to run.").to_string() });
     }
     if calls > 0 && rounds < MAX_ROUNDS {
         turn.rounds += 1;
@@ -771,6 +796,13 @@ pub(crate) fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
         .show(ctx, |ui| {
             act = body(app, ui);
         });
+    // The provider, the model, what is attached and the conversation are the person's, as the
+    // settings in AI Accounts are: without "Allow agents to run AI commands", synthetic input
+    // (an agent clicking through the control channel) only sends (which `send` refuses), stops
+    // and opens AI Accounts.
+    if app.automation_input && !matches!(act, None | Some(Act::Send | Act::Stop | Act::Accounts)) && !super::agents_allowed(app) {
+        act = None;
+    }
     match act {
         Some(Act::Send) => {
             let text = app.ai.assistant.input.clone();

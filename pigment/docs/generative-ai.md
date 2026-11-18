@@ -287,7 +287,8 @@ nothing.
   provider refuses an image request too.
 
 The code, the verifier and the tokens are taken out of the answers they were sent with before
-anything reads them, and out of every message. The one-time agreement, "Allow agents to run AI
+anything reads them, and out of every message; after a 401 that is both access tokens, the one
+the provider refused and the one that replaced it. The one-time agreement, "Allow agents to run AI
 commands" and `--allow-ai` apply to a sign-in's requests as to a key's.
 
 `PIGMENT_AI_AUTH_URL_CHATGPT` replaces `https://auth.openai.com` with a loopback address (the
@@ -462,11 +463,16 @@ shown on its step; it is not put in the status bar.
   document is no longer active"). A step never runs behind a dialog the person has open.
 - *Results* go back cut to 12000 characters.
 - *Answers.* The model's text is kept to 20000 characters. An answer that asks for more than 32
-  tool calls at once fails the turn, and none of them runs.
+  tool calls at once fails the turn, and none of them runs. So does one with a step whose
+  arguments are over 64 KiB of JSON or whose tool name is over 64 characters ("The model asked
+  for a step too large to run"): such a step would be drawn in the conversation and sent back to
+  the provider with every later round.
 
 **What the Assistant may not run** (`assistant_tools::blocked`, the shape of the automation gate;
-the JavaScript app's `BLOCKED_COMMANDS` for this registry). `run_command` refuses, with "Command
-"<id>" cannot be run by the assistant", and `list_commands` never offers:
+the JavaScript app's `BLOCKED_COMMANDS` for this registry). Every tool that runs a command by its
+id asks it: `run_command`, and `apply_adjustment` and `apply_filter` for the params they pass on.
+`run_command` refuses with "Command "<id>" cannot be run by the assistant", and `list_commands`
+never offers:
 
 - `file.*` (open, save, export, place, print, close, quit, scripts, batch) except `file.fileInfo`
   and the three `file.scripts.*` that only tidy the open document;
@@ -474,16 +480,30 @@ the JavaScript app's `BLOCKED_COMMANDS` for this registry). `run_command` refuse
   and Generative Fill**;
 - `window.*`, `help.*`, `ui.*`, `tool.*` and `tools.*` (except the three colour commands),
   `edit.preferences*`, `prefs.*` (except `prefs.get`), Keyboard Shortcuts, Menus, Toolbar, Color
-  Settings, the command palette, `updates.*`, `plugin.*`;
+  Settings, History Options, the command palette, `updates.*`, `plugin.*`;
 - `actions.*` (except `actions.list` and `actions.get`): an action could hold what the Assistant
   may not run; `jobs.*` except `jobs.list`; `document.*` and `session.*` except their read-only
-  queries (`document.activate` would take the turn's document away);
-- what can't be undone (`edit.purge.*`, `history.clear`), and what imports or exports (a command
-  whose last part starts with `import`, `export` or `quickExport`, the contour and smart-object
-  file commands, `edit.presets.*`);
-- any command with a param that names a file, a folder or a script (`path`, `paths`, `file`,
-  `folder`, `directory`, `output`, `destination`, `mapPath`, `script`, `steps`), or a colour
-  `profile` given as a path: the Assistant works on the open document only.
+  queries (`document.activate` would take the turn's document away), and
+  `layer.copyToDocument`, which changes another document;
+- what can't be undone: `edit.purge.*`, `history.clear`, `history.deleteState`,
+  `history.deleteSnapshot`, and whatever deletes, resets, renames, moves or overwrites entries of
+  the person's preset libraries (`brush.presets.*`, `swatches.*`, `pattern.*`,
+  `gradient.presets.*`, `style.presets.*`, `shape.presets.*`, `layer.layerStyle.contours.*` with
+  a last part that starts with `delete`, `reset`, `edit`, `rename`, `move` or `update`). Reading
+  a library, using a preset and adding one stay the Assistant's;
+- what imports or exports (a command whose last part starts with `import`, `export` or
+  `quickExport`, the contour and smart-object file commands, `edit.presets.*`), what reads a file
+  or asks for one (`layer.videoLayers.newVideoLayerFromFile`, `layer.videoLayers.replaceFootage`,
+  and `image.variables.*` and `image.applyDataSet`, whose data sets name image files), and
+  `layer.smartObjects.revealInFinder`, which starts the file manager;
+- any command with a param that names a script (`script`, `steps`), a file or a folder (`path`,
+  `paths`, `file`, `folder`, `directory`, `output`, `destination`, `mapPath`), at any depth the
+  params are kept to, or a colour `profile` given as a path or an `.icc` or `.icm` file: the
+  Assistant works on the open document only. So `apply_adjustment` takes Color Lookup's built-in
+  looks and not its `file`, and `apply_filter` runs Displace only with a map that is an open
+  document. A param that shares one of those names and is no file passes: text that is one of the
+  values the command's own params spec lists for that key (`"output":"current|new|duplicate"`),
+  and geometry (an object, or a list without text, as a shape's `path`).
 
 **A command that opens a dialog.** `run_command` without params runs the command as its menu item
 does, so one with a dialog opens it. The turn then waits for the person to finish the dialog (the
@@ -503,6 +523,9 @@ nothing goes before the one-time agreement or without a connected chat provider 
 and what was typed stays in the field); an agent (a control request, synthetic input) sends a
 message only while "Allow agents to run AI commands" is on, and the app's backend is asked
 (`admit`) before the first request. The tools of a turn then run as the person's commands.
+Without that permission an agent's clicks in the window do nothing but Send (refused), Stop and
+AI Accounts…: the provider, the chat model, Attach image, List models and Clear are the person's,
+as the settings in AI Accounts are.
 
 ## The command line
 
