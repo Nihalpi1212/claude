@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use egui::vec2;
-use egui_kittest::kittest::{By, Queryable};
+use egui_kittest::kittest::{By, NodeT, Queryable};
 use photocraft_engine::Session;
 use photocraft_engine::generative::ProviderId;
 use photocraft_engine::generative::mock::{MockAnswer, MockBackend};
@@ -460,6 +460,31 @@ fn expand_from_crop_on_a_very_wide_document() {
     assert_eq!((g.width, g.height, g.anchor), (40_100, 100, "right"));
     assert_eq!(generate::params(h.state())["width"], 40_100);
     assert!(mock.calls().is_empty(), "nothing sent before Generate");
+}
+
+/// Generative Expand where the document can't take it (Indexed Color): the Crop bar's item is
+/// dimmed with the reason, and asking anyway keeps the crop frame and says why in the status bar.
+#[test]
+fn expand_from_crop_keeps_the_frame_where_expand_is_disabled() {
+    let mock = Arc::new(MockBackend::connected());
+    let m = Arc::clone(&mock);
+    let mut h = harness(move |app| {
+        with_mock(app, &m);
+        app.ui.panels.context_task_bar = true;
+        app.run("image.mode.indexedColor", json!({})).expect("indexed");
+    });
+    control(&mut h, "ui.set", json!({"tool": "crop"}));
+    let frame = [-20.0, 0.0, 200.0, 160.0];
+    h.state_mut().ui.crop_rect = Some(frame);
+    h.run_steps(3);
+    let item = h.get_by_label("Generative Expand");
+    assert!(item.accesskit_node().is_disabled(), "the Crop bar's item is dimmed");
+    task_bar::expand_from_crop(h.state_mut());
+    h.run_steps(3);
+    let app = h.state();
+    assert!(!app.ai.generate.open);
+    assert_eq!(app.ui.crop_rect, Some(frame), "the frame is kept");
+    assert!(app.ui.status.contains("Generative AI needs an RGB, CMYK, Lab or Grayscale document"), "{:?}", app.ui.status);
 }
 
 /// The selection bar's Generate sends one request, whatever the Generate window was last set to,

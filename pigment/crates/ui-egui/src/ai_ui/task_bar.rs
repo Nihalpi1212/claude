@@ -116,21 +116,28 @@ pub(crate) fn crop_item(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     if !fits(app, ModelKind::Image) {
         return;
     }
-    if ui.button(tl!("Generative Expand")).clicked() {
+    // Dimmed, with the engine's reason, where the document can't take it (Indexed Color, …).
+    let why = app.session.disabled_reason(EXPAND);
+    let r = ui.add_enabled(why.is_none(), egui::Button::new(tl!("Generative Expand")));
+    if let Some(why) = why {
+        r.on_disabled_hover_text(why);
+    } else if r.clicked() {
         expand_from_crop(app);
     }
 }
 
 /// Generative Expand from the crop frame: the canvas grows to take in the frame, on the sides it
-/// reaches past; the frame is let go and the Generate window opens with that size.
+/// reaches past; the frame is let go and the Generate window opens with that size. When the
+/// window can't open, the frame stays and the status bar says why.
 pub fn expand_from_crop(app: &mut PhotocraftApp) {
     let Some(st) = app.session.active() else { return };
     let (w, h) = (f64::from(st.doc.size.width), f64::from(st.doc.size.height));
     let frame = app.ui.crop_rect;
-    crate::crop_ui::dismiss(app);
-    if generate::open(app, EXPAND, None).is_err() {
+    if let Err(why) = generate::open(app, EXPAND, None) {
+        app.ui.status = why;
         return;
     }
+    crate::crop_ui::dismiss(app);
     let Some([x0, y0, x1, y1]) = frame else { return };
     let (left, right) = ((-x0).max(0.0), (x1 - w).max(0.0));
     let (top, bottom) = ((-y0).max(0.0), (y1 - h).max(0.0));
