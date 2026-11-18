@@ -26,6 +26,83 @@ objects and filters, type, vectors, brushes, real PSD/PSB files and a GPU compos
 
 The full list is in [`pigment/docs/FORK.md`](https://github.com/Nihalpi1212/claude/blob/pigment-v0.5.0/pigment/docs/FORK.md).
 
+### Generative AI
+
+Pigment 0.5.0 has the generative AI of Pigment 0.4, rebuilt for the new app. It is optional and
+uses your own OpenAI or Google Gemini account.
+
+- **Generative Fill:** Edit › Generative Fill…, the bar under a selection, or right-click a
+  selection. Fills the selection from a description, 1 to 3 variations, each on a new layer.
+- **Generative Expand:** the Crop tool's bar (drag the crop frame past the canvas) and the command
+  palette. Enlarges the canvas and fills the new area.
+- **Generate Image:** Edit › Generate Image…. A new layer or a new document from a description,
+  with a transparent background if you like.
+- **Remove Background:** Layer › Remove Background works on your computer and needs no account.
+  Layer › Remove Background with AI Provider asks the provider's image model for the subject.
+- **Generate Background:** Layer › Generate Background…, and the bar that appears after Remove
+  Background. Keeps the subject and generates new surroundings.
+- **Sky Replacement:** Edit › Sky Replacement…. A new sky from a description; the sky is your
+  selection, or the one Select › Sky finds.
+- **Describe Image:** Image › Describe Image…. Describes the picture, to copy or to keep as the
+  document's description.
+- **Assistant:** Window › Assistant. A chat about the open document that can edit it: adjustments,
+  filters, layers, selections, text and Generative Fill, each an ordinary undo step.
+- **AI Accounts:** Edit › AI Accounts… (also a button in Preferences › AI Integrations). OpenAI and
+  Google Gemini API keys, the models, and **Sign in with ChatGPT (experimental)**, which uses a
+  ChatGPT Plus or Pro plan for the Assistant and Describe Image; the image features always need an
+  API key.
+- **`pigment-cli ai`** does what AI Accounts does from the command line (`status`, `set-key`,
+  `sign-in`, `consent`, `test`, …), and `pigment-cli run --allow-ai` runs the features in a script.
+
+Every feature is also in the command palette. There is no AI menu: the features sit where
+Photoshop puts them.
+
+**Keys and the sign-in are entered again.** Nothing migrates from Pigment 0.4: its API keys and
+its ChatGPT sign-in were sealed by the old app and are not read. Open Edit › AI Accounts…, paste
+your key and press Connect (or sign in again). Keys are kept in the macOS Keychain or the Windows
+Credential Manager; on Linux in `ai-keys.json` in Pigment's settings folder, readable only by you
+and not encrypted.
+
+**Nothing is sent before the one-time agreement.** AI Accounts asks you once to agree to what the
+AI commands send (your prompt and, where a feature needs it, the image, the layer or the
+selection) and that the provider bills your account for every request, including one you stop
+after it was sent. Until you agree, no prompt and no picture leaves your computer, and afterwards
+only when you run a feature. The one request before that is yours too: Connect and Test
+Connection ask the provider for its list of models, to check the key you entered.
+
+What differs from Pigment 0.4:
+
+- **The agreement is new.** In 0.4, connecting an account was the consent.
+- **No AI menu.** The items moved to the Edit, Layer, Image and Window menus, and to the bars and
+  the right-click menu named above.
+- **Remove Background masks the layer itself** instead of hiding it behind a masked copy
+  (duplicate the layer first to keep an untouched one). The menu's default now runs on your
+  computer; the provider's method is the item next to it. Both need a pixel layer: rasterize a
+  type or shape layer first.
+- **Replace Background is now Generate Background, and Replace Sky is Sky Replacement.** The
+  subject and the sky are found on your computer (Select Subject, Select › Sky), so Generate
+  Background sends one request, not two.
+- **Generative Expand is one undo step** (0.4 made a Canvas Size step and then the fill).
+- **The document is locked while its request runs.** 0.4 let you keep editing it; here you can
+  work in other documents, and the status bar shows the request with Cancel.
+- **Actions never replay AI.** 0.4 recorded the AI dialogs, and playing the action called the
+  provider (and billed) again. Now a command that sends is neither recorded nor run from an
+  action, a batch or a droplet. Layer › Remove Background, which sends nothing, is recorded.
+- **The Assistant is a floating window**, not a docked panel. It looks commands up instead of
+  carrying the whole command list, and its model list is fetched when you press List models, not
+  on its own.
+- **Models are picked automatically** from the provider's list unless you type one in AI Accounts
+  (Use Suggested fills it in) or, for one request, in the feature's window. 0.4 had drop-down
+  lists there.
+- **Sign in with ChatGPT is marked experimental** and can be switched off (`"chatgptSignIn":
+  false` in `ai.json`).
+- **New:** `pigment-cli ai`; a prompt field in the bar under a selection; and AI agents (MCP, the
+  control channel) may run these features only while **Allow agents to run AI commands** is on in
+  AI Accounts (off by default).
+
+[`pigment/docs/generative-ai.md`](https://github.com/Nihalpi1212/claude/blob/pigment-v0.5.0/pigment/docs/generative-ai.md)
+has the details and a feature-by-feature comparison with Pigment 0.4.
+
 ### Known issues
 
 - **Documents from Pigment 0.1 to 0.4 don't open yet.** Pigment recognises them and says "This file
@@ -34,8 +111,14 @@ The full list is in [`pigment/docs/FORK.md`](https://github.com/Nihalpi1212/clau
   macOS, 0.5 installs where 0.4 was (`%LOCALAPPDATA%\Programs\Pigment` or `C:\Program Files\Pigment`,
   and `Pigment.app` in Applications) and replaces it. To keep 0.4, choose another folder on the
   installer's folder page (Windows) or move `Pigment.app` out of Applications first (macOS).
-- The generative AI features and the other additions of Pigment 0.2 to 0.4 are not in 0.5.0 yet.
-- Interface strings Pigment added (the new links, the credit line in About, the agents switch) are
-  in English in every language.
+- **The generative AI was tested against local stand-ins for OpenAI and Google Gemini, not with
+  live accounts** (none was available). If a real account behaves differently, please report it.
+  **Sign in with ChatGPT** in particular uses a route OpenAI has not documented as a stable
+  service and was never tried against the real one: it may not work, or may stop working. API
+  keys do not depend on it.
+- The other additions of Pigment 0.2 to 0.4 (those besides the generative AI) are not in 0.5.0
+  yet.
+- Interface strings Pigment added (the new links, the credit line in About, the agents switch, the
+  AI windows) are in English in every language.
 - The builds are not code-signed (see the first-launch steps below).
 - Everything PhotoCraft 0.23.1 lists as missing or in progress applies (its `ROADMAP.md`).
