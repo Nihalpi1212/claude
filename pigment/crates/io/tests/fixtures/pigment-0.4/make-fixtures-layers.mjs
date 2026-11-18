@@ -11,6 +11,17 @@ export default async function layerFixtures({ set, lib, out, io, D, add, canvasF
   const { Document, RasterLayer, GroupLayer, ShapeLayer, FillLayer, AdjustmentLayer, createCanvas } = D;
   const { flattenDocument } = await lib('renderer/lib/compositor.js');
   const v3 = set === 'v3';
+  if (v3) {
+    // 0.4 draws gradient and pattern paints with the renderers its gradients and patterns packages register when the
+    // app starts (lib/tools/fill.js and lib/panels/patterns.js call these); without them a paint draws as in 0.3.
+    // Their modules read `window` when loaded; nothing of it is used for drawing.
+    globalThis.window ??= globalThis;
+    globalThis.matchMedia ??= () => ({ matches: false, addEventListener() {}, addListener() {} });
+    globalThis.addEventListener ??= () => {};
+    globalThis.localStorage ??= { getItem: () => null, setItem() {}, removeItem() {} };
+    (await lib('renderer/lib/gradient-paint.js')).installGradientPaint({});
+    (await lib('renderer/lib/pattern-paint.js')).installPatternPaint({});
+  }
 
   /** Writes the document and the app's picture of it. */
   async function saveBoth(name, doc) {
