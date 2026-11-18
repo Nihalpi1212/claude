@@ -4,8 +4,11 @@ Pigment 0.2 to 0.4 (the JavaScript app) had Generative Fill, Generative Expand, 
 AI Remove Background, Replace Background, Replace Sky, Describe Image, an Assistant that edits the
 document, and AI Accounts with OpenAI and Gemini keys. Pigment 0.5 rebuilds them on PhotoCraft. This
 page is the contract for that work: the engine seam, the commands and the rules they keep, the
-provider crate, Sign in with ChatGPT (experimental), the interface, the Assistant and the command
-line.
+provider crate, Sign in with ChatGPT (experimental), the interface, the Assistant, the command
+line, and, feature by feature, what Pigment 0.4 had and where it is now.
+
+No live key or account existed while this was built: every test runs against the engine's mock
+backend or a mock provider on 127.0.0.1, and nothing was tried against OpenAI or Google.
 
 ## The engine seam: `photocraft_engine::generative`
 
@@ -546,6 +549,112 @@ as the settings in AI Accounts are.
 `pigment-cli run --new '{"width":64,"height":32}' --cmd select.rect --params '{"x":8,"y":8,"width":16,"height":8}' --cmd ai.generativeFill --params '{"prompt":"a green box"}' --out out.pigment --allow-ai`
 runs Generative Fill from the command line.
 
+## Pigment 0.4's features in Pigment 0.5, one by one
+
+Every AI feature of the JavaScript app (0.2 to 0.4), with the command and the place it has now.
+**Has it**: the same behaviour. **Differs**: there, changed on purpose; the letter names the
+decision below, and "Differences from Pigment 0.4, and follow-ups" says more. **Missing**: not in
+0.5.0 (the list after the tables gathers these). Checked against the code at the end of the port.
+
+The decisions the port was built on:
+
+- **A. Photoshop's places.** No AI menu: Edit, Layer, Image and Window, the task bars, the
+  selection's context menu, and the command palette for everything.
+- **B. Remove Background masks the layer in place**, as Photoshop and PhotoCraft do, and the
+  menu's default is the local method, which needs no key.
+- **C. A one-time agreement** in AI Accounts; nothing is sent before it.
+- **D. A request locks its document** until the answer lands or is cancelled (first version).
+- **E. Actions never send; agents and the command line opt in.** The Assistant may run only
+  Generative Fill among the `ai.*` commands.
+- **F. Local masks.** The sky comes from Select › Sky, the subject from the layer or Select
+  Subject; only the new pixels come from the provider.
+- **G. No migration** from the Electron app: keys and the ChatGPT sign-in are entered again.
+- **H. Sign in with ChatGPT is experimental** and can be turned off; images always need an API key.
+- **I. Pigment's own provider crate, in the desktop app and `pigment-cli` only.** The browser build
+  has no AI.
+
+**Accounts and settings**
+
+| Pigment 0.4 | Pigment 0.5 | |
+|---|---|---|
+| AI › AI Accounts… (`ai:accounts`), a modal with a card per provider; also opened by a feature that finds nothing connected | `ai.accounts`: Edit › AI Accounts…, the AI Accounts… button in Preferences › AI Integrations, and Open AI Accounts… in every AI window; a modal with a tab per provider | Has it (A) |
+| OpenAI and Gemini API keys: a masked field, Connect checks the key with the provider and stores it only when accepted, Enter connects, a link to the provider's key page, Sign out | The same: Connect (one model list), "ends in …WXYZ", Get a key…, Remove Key; plus Test Connection. `pigment-cli ai set-key`, `clear-key`, `test` | Has it |
+| Keys sealed through the system keychain (Electron safeStorage); without one, a plain file and a warning | The macOS Keychain and the Windows Credential Manager; on Linux and the BSDs the 0600 `ai-keys.json`, not encrypted, and the dialog says so | Differs (I): no keychain on Linux |
+| Chat model and Image model per provider: drop-down lists of the provider's catalog, the default by a preference list | The same two choices and the same preference lists; the fields are text: empty is automatic, Use Suggested fills in the pick from the last list read | Differs: no drop-down list in AI Accounts |
+| Preferred provider; choosing it resets the providers the dialogs last used | Preferred provider, with the same reset (`defaultProvider`, `imageProvider`, `chatProvider`) | Has it |
+| The provider a feature uses: the preferred one when it fits the kind of model, else the first connected one that does; a dialog opens on the provider it last used | The same order (the request's own, the preferred, OpenAI, Gemini); the Generate window opens on `imageProvider`, the Assistant on `chatProvider` | Has it |
+| The status: which provider is connected and how, never a key | `ai.status` (never a key; a hint of four characters at most), `pigment-cli ai status` | Has it |
+| Sign in with ChatGPT: a ChatGPT Plus or Pro plan for chat models; the browser, ports 1455 to 1460, Copy link, Cancel, the pasted callback address; the e-mail and "plan access not granted"; token refresh; the plan route's messages | The same flow, checks, addresses and messages, on OpenAI's tab; `pigment-cli ai sign-in`, `sign-out` | Differs (H): marked Experimental, one switch turns it off, tokens in the key store. Never tried against the live service (nor was 0.4's) |
+| A key and a sign-in exclude each other; images need an API key | The same | Has it |
+| No consent step: connecting an account was the consent | The one-time agreement in AI Accounts (`pigment-cli ai consent`) | Differs (C) |
+| Timeouts: chat 180 s, images 300 s, model lists 30 s | One Request timeout in AI Accounts for chat and images (300 s, 10 to 600); model lists 30 s | Differs: one setting |
+| Remembered in the settings: models, providers, the last prompt of each feature, Attach image, the installation id | The same, in `ai.json` | Has it |
+| Keys, sign-in and choices kept from one version to the next | Nothing is read from 0.4 | Differs (G) |
+| The browser build: keys in the browser's storage, requests straight to the providers | None | Missing (I) |
+
+**The features**
+
+| Pigment 0.4 | Pigment 0.5 | |
+|---|---|---|
+| AI › Generative Fill… (`ai:generative-fill`): a selection, a prompt, 1 to 3 variations, each a new layer holding the answer inside the selection | `ai.generativeFill`: Edit › Generative Fill… (after Content-Aware Fill), the selection's context menu, the task bar under a selection | Has it (A). The region, the feather, the layer names, the kept selection and "Make a selection first" are 0.4's |
+| AI › Generative Expand… (`ai:generative-expand`): new width, height and where the image stays; fills transparency the canvas already has; a default prompt; "Nothing to expand" | `ai.generativeExpand`: the Crop tool's task bar and the command palette (no menu item) | Has it (A). Differs: the canvas growth and the fill are one undo step (0.4: a Canvas Size step, taken back when the request failed) |
+| AI › Generate Image… (`ai:generate-image`): a new layer of the document's size or a new document of 16 to 8192 px; Transparent background | `ai.generateImage`: Edit › Generate Image… | Has it (A). Differs: Transparent background is offered for every model (0.4 hid it for DALL·E), since every model without alpha is keyed |
+| AI › Remove Background (`ai:remove-background`): the image model returns the subject; a masked copy of the layer, the original hidden | `ai.removeBackground` `{"method":"provider"}`: Layer › Remove Background with AI Provider (`ai.removeBackgroundWithProvider`) | Differs (B): the mask goes on the layer itself. Missing: a type, shape or smart object layer is not rasterized for it |
+| (none: 0.4's only Remove Background called the provider) | `ai.removeBackground` (`local`): Layer › Remove Background, on the computer, nothing sent | New (B) |
+| AI › Replace Background… (`ai:replace-background`): a first request finds the subject, a second fills around it | `ai.replaceBackground`, Generate Background…: Layer › Generate Background…, and the task bar after Remove Background | Differs (F): the subject is the layer's mask or transparency, else Select Subject's, so one request. Run Remove Background with AI Provider first for 0.4's two |
+| AI › Replace Sky… (`ai:replace-sky`): the selection, else a bright area found from the top edge; "A dramatic sunset sky with warm clouds" | `ai.replaceSky`, Sky Replacement…: Edit › Sky Replacement… | Differs (F): without a selection the sky is Select › Sky's. The default prompt is 0.4's |
+| AI › Describe Image (`ai:describe`): the composite at 1024 px; Copy, Use as document description | `ai.describe`: Image › Describe Image…; Copy, Use as Document Description (`file.fileInfo`, one undo step) | Has it (A) |
+| The feature dialog: the prompt (the feature's last one, cut to 4000 characters), provider, a model list, Generate | The Generate window, not modal: the prompt, the options, the provider when two fit, a Model field for this request, what the feature sends | Has it. Differs: the model is a text field (empty: AI Accounts' choice) and the window does not save it |
+| While a request runs: a notice with Cancel, and the document stays editable; Cancel drops the late answer | The status bar shows the job with Cancel, the window shows Stop; the document is locked, other documents are not | Differs (D) |
+| A failure: a notice with AI Accounts… when that fixes it | In the window, with Open AI Accounts… or Try Again | Has it |
+| A result: new layers above the active one, the last active, one undo step, the original pixels untouched | The same, in RGB, Grayscale, CMYK and Lab at 8, 16 and 32 bits (0.4: 8-bit RGB) | Has it |
+| Actions record the AI dialogs' values, and playing one calls the provider again | A command that sends is neither recorded nor played; the local Remove Background is | Differs (E) |
+| No shortcut on any AI command; all in the command search | No default shortcut; all in the command palette. The `ai.*` commands can be given one in Edit › Keyboard Shortcuts; AI Accounts, Remove Background with AI Provider and Assistant cannot | Has it |
+| Calling the features from code (`app.aiFeatures`) | Every feature is a command: `pigment-cli run --allow-ai`, MCP and the control channel with "Allow agents to run AI commands" | Has it (E) |
+
+**The Assistant**
+
+| Pigment 0.4 | Pigment 0.5 | |
+|---|---|---|
+| The Assistant panel, docked at the bottom: Window › AI Assistant, AI › AI Assistant (`ai:assistant`, which focuses the input) | `window.panel.aiAssistant`: Window › Assistant, a floating window; opening it focuses the message field | Differs (A): a window, not a docked panel |
+| Provider and Chat model lists, Attach image, AI Accounts, Clear the conversation | The same; the chat models are listed when List models is pressed (or from AI Accounts' recent list), Automatic needs none | Has it. Differs: the list is not fetched unasked |
+| A conversation per document, in memory; 40 messages; only the latest message carries its image, at most 1024 px | The same | Has it |
+| Enter sends, Shift+Enter is a new line; Stop; "Thinking…", "Working…", the steps with their labels; a command that opens a dialog makes the turn wait | The same | Has it |
+| Twelve tool rounds a turn; "Stopped after 12 tool steps…", "Done.", "(no answer)", "Stopped." | The same; also at most 32 calls in one answer and 64 KiB a call | Has it |
+| Fourteen tools: `get_document`, `set_active_layer`, `apply_adjustment`, `apply_filter`, `run_command`, `new_layer`, `set_layer_props`, `select`, `crop`, `resize_image`, `canvas_size`, `fill_selection`, `add_text`, `generative_fill` | The same fourteen on PhotoCraft's commands, and `list_commands` | Has it |
+| The instructions list every adjustment and filter kind, the blend modes and every command id | The same paragraphs from this registry; the command ids are looked up with `list_commands` (about a thousand commands) | Differs: looked up, not listed |
+| Blocked commands (files, quit, preferences, windows, tools, help, `ai:`) | The same families and more (other documents, preset libraries, anything that names a file) | Has it, stricter |
+| Arguments checked: ids, ranges from two tables, rectangles cut to the canvas, JSON given as text | The same checks; the ranges come from each command's own params | Has it |
+| `generative_fill` is the one AI feature the Assistant runs | The same | Has it (E) |
+
+**The providers**
+
+| Pigment 0.4 | Pigment 0.5 | |
+|---|---|---|
+| OpenAI: `/images/edits`, `/images/generations`, `/responses`, `/models`; Gemini: `generateContent`, `/models`; the sizes, ratios, masks, padding and white keying | The same requests (see "The provider crate") | Has it |
+| Errors in plain words, with the ChatGPT plan's hints; a provider's message passed on as it came | The same, and a key or token is taken out of every message | Has it |
+| No request on its own; model lists fetched when a dialog shows them, kept ten minutes | No request on its own; a model list is fetched only by Connect, Test Connection, List models or a request that needs the automatic model, kept ten minutes | Has it |
+
+**New in 0.5:** the local Remove Background in the Layer menu; the task bars (a prompt under a
+selection, Generate Background… after Remove Background, Generative Expand in the Crop tool's);
+Generative Fill in the selection's context menu; Test Connection; the agreement; "Allow agents to
+run AI commands"; `pigment-cli ai` and `run --allow-ai`; every colour mode and depth.
+
+**Missing in 0.5.0**, each small or decided:
+
+- AI in the browser build (I). No browser build of Pigment 0.5 is published.
+- Drop-down model lists in AI Accounts and the Generate window. The fields are text with an
+  automatic default and Use Suggested; the Assistant lists the chat models on request.
+- Editing a document while its request runs (D): see "Follow-up: editing during a request".
+- Remove Background with AI Provider on a type, shape or smart object layer: rasterize it first.
+- Playing AI steps from an action (E), and reading 0.4's keys, sign-in, model choices and last
+  prompts (G).
+- The Assistant as a docked panel.
+- A keyboard shortcut for AI Accounts, Remove Background with AI Provider and Assistant.
+- A Generative Expand entry in the Crop options bar's Fill: list (it is in the Crop tool's task
+  bar and the palette).
+- Translations: the AI windows are in English in every language.
+
 ## Differences from Pigment 0.4, and follow-ups
 
 - **Remove Background masks the layer in place**, as Photoshop and PhotoCraft do, instead of hiding
@@ -615,3 +724,13 @@ runs Generative Fill from the command line.
   pressed. A very large document that can't use a proxy takes a moment there; composing it on the
   request's worker is the refinement.
 - **Layer ids are numbers** in PhotoCraft; 0.4's were strings. The tools take either.
+- **One request timeout.** 0.4 gave chat 180 s and images 300 s; AI Accounts' Request timeout
+  (300 s by default) is for both.
+- **Model fields are text.** 0.4 filled drop-down lists from the provider's catalog in AI Accounts
+  and in each dialog. Here a field left empty is automatic (the same preference lists), Use
+  Suggested fills in the pick from the last list read, and only the Assistant lists models, on
+  request. Lists in AI Accounts and the Generate window are a follow-up.
+- **Transparent background is offered for DALL·E too** (0.4 hid it): those answers are keyed off
+  white like Gemini's.
+- **Nothing is read from Pigment 0.4**: not the keys or the sign-in (sealed by Electron), nor the
+  model choices, the last prompts and the installation id, which start afresh in `ai.json`.

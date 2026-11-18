@@ -49,6 +49,7 @@
 <p align="center">
   <a href="#what-pigment-is">What Pigment is</a> ·
   <a href="#everything-in-the-box">Everything in the box</a> ·
+  <a href="#generative-ai">Generative AI</a> ·
   <a href="#pigment-04-and-earlier">Pigment 0.4 and earlier</a> ·
   <a href="#downloads">Downloads</a> ·
   <a href="#first-launch-the-builds-are-not-code-signed">First launch</a> ·
@@ -86,6 +87,11 @@ What comes from PhotoCraft, in short:
 - **Automation:** every menu item, tool, panel and dialog is a command you can drive from
   `pigment-cli`, a JSON control channel or an MCP server ([`docs/mcp.md`](docs/mcp.md),
   [`docs/control-protocol.md`](docs/control-protocol.md)).
+
+What Pigment adds: **generative AI** with your own OpenAI or Google Gemini account (Generative Fill
+and Expand, Generate Image, Remove and Generate Background, Sky Replacement, Describe Image and an
+Assistant that edits the document). It is optional, and nothing is sent until you set it up and
+run one of these features; see [Generative AI](#generative-ai) below.
 
 PhotoCraft's own feature tour, with screenshots, is in its documentation under [`docs/`](docs) and
 [`book/`](book); read "PhotoCraft" there as "Pigment".
@@ -125,6 +131,60 @@ PhotoCraft's own feature tour, with screenshots, is in its documentation under [
   </tr>
 </table>
 
+## Generative AI
+
+Pigment 0.5 has the generative AI of Pigment 0.4, rebuilt for the new app. It is optional and uses
+**your own account** with OpenAI or Google Gemini; without one, Pigment works as before and sends
+nothing.
+
+| Feature | Where to find it | What it does |
+|---|---|---|
+| **Generative Fill** | Edit › Generative Fill…, the bar under a selection, or right-click a selection | Fills the selection with what you describe, using the image around it. 1 to 3 variations, each on a new layer. |
+| **Generative Expand** | The Crop tool's bar (drag the crop frame past the canvas), or the command palette | Enlarges the canvas and fills the new area so the picture continues. |
+| **Generate Image** | Edit › Generate Image… | Makes a picture from a description, as a new layer or a new document, with a transparent background if you like. |
+| **Remove Background** | Layer › Remove Background | Masks the layer down to its subject **on your computer**: no account, nothing sent. |
+| **Remove Background with AI Provider** | Layer › Remove Background with AI Provider | The same, with the subject found by the provider's image model. |
+| **Generate Background** | Layer › Generate Background…, or the bar that appears after Remove Background | Keeps the subject and generates new surroundings from a description, on a new layer. |
+| **Sky Replacement** | Edit › Sky Replacement… | Generates a new sky from a description. The sky is your selection, or the one Select › Sky finds. |
+| **Describe Image** | Image › Describe Image… | Describes the picture in words, to copy or to keep as the document's description (File Info). |
+| **Assistant** | Window › Assistant | A chat about the open document that can also edit it for you: adjustments, filters, layers, selections, text, Generative Fill. Every step it takes is an ordinary undo step. |
+| **AI Accounts** | Edit › AI Accounts…, or Preferences › AI Integrations | Your keys, the models, the agreement, and whether AI agents may use these features. |
+
+Every one of them is also in the command palette (⌘F / Ctrl+F). There is no AI menu: the features
+sit where Photoshop puts them. The buttons in the bars (under a selection, in the Crop tool's bar,
+after Remove Background) appear once an account with an image model is connected, so the bars
+stay as they were for people who don't use AI.
+
+**Setting it up.** Open **Edit › AI Accounts…**, paste an API key from
+[OpenAI](https://platform.openai.com/api-keys) or
+[Google AI Studio](https://aistudio.google.com/apikey) and press **Connect**. Pigment checks the
+key with the provider and then keeps it in the macOS Keychain or the Windows Credential Manager; on
+Linux it is kept in `ai-keys.json` in Pigment's settings folder, readable only by you (not
+encrypted). Then tick the agreement in the same dialog, once.
+
+- **Nothing is sent before that agreement**, and afterwards only when you run a feature: your
+  prompt and, where the feature needs it, the image, the layer or the selection. Never your key or
+  your files. The windows say what each feature sends.
+- **The provider bills your account for every request**, including one you stop after it was sent.
+- **Your pixels are safe.** A generated result lands on a new layer (or as a layer mask) in one
+  undo step; the pixels outside the selection or mask are never changed.
+- **Sign in with ChatGPT (experimental).** The OpenAI tab can use a ChatGPT Plus or Pro plan
+  instead of an API key, for the Assistant and Describe Image only; the image features always need
+  an API key. This sign-in uses a route OpenAI has not documented as a stable service, and it
+  could not be tried against the real one, so it may not work or may stop working.
+- **Actions, batches and droplets never call a provider**, so replaying an action never spends
+  money. AI agents (MCP, the control channel) and `pigment-cli run` may use these features only
+  after you allow it: **Allow agents to run AI commands** in AI Accounts, or `--allow-ai` on the
+  command line.
+- **From the command line:** `pigment-cli ai status`, `ai set-key`, `ai consent`, `ai test`,
+  `ai sign-in` and the rest do what AI Accounts does (`pigment-cli ai --help`).
+
+No live account was available while this was built: every feature was tested against local
+stand-ins for the two providers. If a real account behaves differently, please
+[report it](https://github.com/Nihalpi1212/claude/issues).
+[`docs/generative-ai.md`](docs/generative-ai.md) has the details: what each feature sends, how keys
+are kept, the Assistant's tools and limits, and a feature-by-feature comparison with Pigment 0.4.
+
 ## Pigment 0.4 and earlier
 
 Pigment 0.1 to 0.4 were a different program, an Electron app written in JavaScript, released up to
@@ -133,6 +193,10 @@ Pigment on PhotoCraft and replaces it: PhotoCraft already does far more of what 
 
 - The two apps have different application ids and keep their settings apart; Pigment 0.5 reads
   nothing of the old app's.
+- **The generative AI is back, and you connect it again.** API keys and the ChatGPT sign-in of
+  Pigment 0.4 are not carried over (they were sealed by the old app): enter them once more in
+  Edit › AI Accounts…. What works differently from 0.4 is listed in
+  [`docs/RELEASE-NOTES-0.5.0.md`](docs/RELEASE-NOTES-0.5.0.md).
 - **Before you install 0.5 over 0.4, export your old documents.** On Windows and macOS Pigment 0.5
   installs where 0.4 was (`%LOCALAPPDATA%\Programs\Pigment` or `C:\Program Files\Pigment`, and
   `Pigment.app` in Applications) and replaces it. To keep 0.4, pick another folder on the
@@ -222,7 +286,9 @@ claude mcp add pigment -- /path/to/pigment-cli mcp
 ```
 
 By default that is a session without a window. To let AI apps work in the open window, turn on
-**Preferences › AI Integrations › Let AI apps use this window**.
+**Preferences › AI Integrations › Let AI apps use this window**. An AI app can run the generative
+features, which are billed to your account, only while **Allow agents to run AI commands** is on
+in Edit › AI Accounts….
 
 ## Status
 
@@ -230,7 +296,8 @@ By default that is a session without a window. To let AI apps work in the open w
 photo editing and PSD work are close to usable, but a professional can't switch from Photoshop yet.
 PhotoCraft's own [`ROADMAP.md`](ROADMAP.md) and [`docs/`](docs) list what is missing.
 [`docs/RELEASE-NOTES-0.5.0.md`](docs/RELEASE-NOTES-0.5.0.md) says what is in 0.5.0 and its known
-issues; the generative AI and other features of Pigment 0.4 are not in 0.5.0 yet.
+issues. The generative AI of Pigment 0.4 is in 0.5.0 (see [Generative AI](#generative-ai)); its
+other additions are not yet.
 
 ## License and credits
 
