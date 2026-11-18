@@ -76,9 +76,11 @@ and PhotoCraft opens Pigment's files once renamed. A `.pigment` file from the Ja
 ZIP with `document.json` and `layers/<id>.png` and no `manifest.json`.
 `photocraft_format::brand::is_legacy_pigment` recognises one by its content, whatever it is called,
 and every open path (File › Open and Open As, Place, Open Recent, the CLI, MCP, scripts) reaches
-`crates/io/src/legacy_pigment.rs` before any other importer. Its `import` fails with
-`IoError::LegacyPigment`, whose message is "This file was saved by Pigment 0.4 or earlier. Opening
-these files is coming in a later update." The importer goes in that one function.
+`crates/io/src/legacy_pigment/` before any other importer. Its `import` converts the document
+("Opening documents from Pigment 0.1–0.4" below says what, so far). One that cannot be read at all
+fails with `IoError::LegacyPigment`, whose message is "This Pigment 0.4 file is damaged: " and the
+reason. The opened document is `source_read_only`, like the other import-only formats: File › Save
+asks for a new file, so the old one is never overwritten with the new format unasked.
 
 ### The settings folder and Pigment 0.1–0.4
 
@@ -285,6 +287,33 @@ stable and was never checked against the live service; if it stops working, set
 `pigment_genai::chatgpt::ENABLED` to `false` (`crates/genai/src/chatgpt.rs`): AI Accounts loses the
 row, a stored sign-in is ignored, API keys are untouched, and the tests still pass.
 
+### Opening documents from Pigment 0.1–0.4
+
+The importer for the `.pigment` files of the JavaScript app, in `crates/io/src/legacy_pigment/`
+(Pigment's own folder): `mod.rs` (the document), `container.rs` (the ZIP, `document.json` and the
+size limits), `layers.rs` (the layer tree, masks, bit depth and image modes of the pixels),
+`path.rs`, `blend.rs`, `info.rs` (File Info as an XMP packet) and `tests.rs`. Its fixtures were
+written by the JavaScript app's own writer: `crates/io/tests/fixtures/pigment-0.4/` with
+`make-fixtures.mjs` and a README that names the commits.
+
+Converted so far: the document (size, resolution, the image modes Bitmap, Grayscale, Duotone,
+Indexed Color, RGB and Multichannel, 8, 16 and 32 bits per channel, the profile the unfinished 0.5
+wrote), raster layers and groups (name, visibility, opacity, fill opacity, blend mode, locks,
+clipping, folding), layer masks with density and feather, colour labels and link sets, the
+selection, saved channels, guides with their colours and the ruler origin, saved paths and the
+work path, the global light, and File Info with the camera data. CMYK and Lab documents open in
+RGB (the JavaScript app kept RGB pixels with a mode flag). **Not converted yet**, each opening as an
+empty layer in its place and listed in the import report: adjustment, fill and shape layers, layer
+styles, vector masks and advanced blending (the next package), then text layers, smart objects and
+their filters. The active layer is not carried: `ImportResult` has no place for it.
+
+| Upstream file | Hook |
+|---|---|
+| `crates/io/src/lib.rs` | `pub mod legacy_pigment;`, the `IoError::LegacyPigment(String)` variant, `Route::LegacyPigment` with its line in `route`, `import_stages` (two) and `import_preflight` |
+| `crates/io/Cargo.toml` | `craft-zip` under `[dependencies]` (it was a dev-dependency; `Cargo.lock` is unchanged) |
+| `crates/ui-egui/src/app/files.rs` | the two places that mark an Affinity source read-only also ask `photocraft_io::legacy_pigment::is_legacy` (the open paths that do not go through the engine's open job, which takes `ImportResult::source_read_only` itself) |
+| `crates/ui-egui/tests/it/main.rs` | `mod legacy_pigment;` |
+
 ## Keeping the rebrand: `scripts/pigment-rebrand.py`
 
 Most of the rebrand is mechanical and done by [`scripts/pigment-rebrand.py`](../scripts/pigment-rebrand.py):
@@ -302,7 +331,7 @@ rows), with the case endings Finnish, Hungarian, Turkish and Korean put on the n
 line, the agents switch) have no translations yet and show in English.
 
 The rest was done by hand and is listed above: `crates/format/src/brand.rs` (names, versions,
-application id, extension, the legacy check), `crates/io/src/legacy_pigment.rs`, the `.pigment`
+application id, extension, the legacy check), `crates/io/src/legacy_pigment/`, the `.pigment`
 extension (`crates/io/src/lib.rs`, `export_estimate.rs`, `crates/automation/src/{files,workspace}.rs`,
 `crates/engine/src/cmd/file_cmds/{open,paths,batch_run}.rs`, `print_cmds.rs`, `video_cmds.rs`,
 `crates/ui-egui/src/{app/files.rs, control/dispatch.rs, home_recent_ui.rs}`,

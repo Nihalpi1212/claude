@@ -131,7 +131,8 @@ impl PhotocraftApp {
             self,
             open_prompt::Held {
                 doc,
-                read_only: photocraft_io::affinity::is_affinity(bytes),
+                // Pigment: a Pigment 0.1–0.4 document is import-only too (Save asks for a new file).
+                read_only: photocraft_io::affinity::is_affinity(bytes) || photocraft_io::legacy_pigment::is_legacy(bytes),
                 damage_pending: damaged,
                 name: name.to_string(),
                 path: path.map(str::to_string),
@@ -182,7 +183,8 @@ impl PhotocraftApp {
         // The caller records the path it read from.
         self.session.add_document(doc, None);
         if let Some(st) = self.session.active_mut() {
-            st.source_read_only = photocraft_io::affinity::is_affinity(bytes);
+            // Pigment: a Pigment 0.1–0.4 document is import-only too.
+            st.source_read_only = photocraft_io::affinity::is_affinity(bytes) || photocraft_io::legacy_pigment::is_legacy(bytes);
         }
         self.sync_views();
         self.ui.status = crate::i18n::fmt(tl!("Opened {name}"), &[("name", name)]);

@@ -194,7 +194,12 @@ fn model_of(d: &Map<String, Value>, has_ink_channels: bool, warnings: &mut Warni
         // Without inks the app showed the grey pixels.
         "duotone" => (ColorMode::Grayscale, Tone::Gray, depth),
         "indexed" if color_table.is_some() => (ColorMode::Indexed, Tone::Color, SampleType::U8),
-        "multichannel" if has_ink_channels => (ColorMode::Multichannel, Tone::Color, if depth == SampleType::F32 { SampleType::U8 } else { depth }),
+        // The pixels of the mode the image was split from, which the app showed through the ink
+        // channels that were left: with every ink there, the picture is those pixels.
+        "multichannel" if has_ink_channels => {
+            warnings.note("Multichannel documents open in RGB with the pixels Pigment 0.4 kept under the inks; the ink channels are kept as spot channels");
+            (ColorMode::Rgb, Tone::Color, depth)
+        }
         // As the app did for a mode that lost its colour table or its channel state.
         "indexed" | "multichannel" => (ColorMode::Rgb, Tone::Color, depth),
         "cmyk" | "lab" => {
@@ -244,8 +249,8 @@ fn channels_and_selection(
                 continue;
             }
         };
-        // An ink of a Multichannel document: `meta.imageMode.multichannel.spots[id]` has its colour.
-        // The app drew ink planes with white as no ink; a spot channel holds ink density.
+        // An ink of a Multichannel document. The app drew ink planes with white as no ink; a
+        // spot channel holds ink density.
         let ink = spots.and_then(|s| s.get(&id)).and_then(|s| s.get("color")).and_then(rgb_of);
         let mut surface = Surface::new(mask_fmt);
         container.write(&mut surface, canvas, &encode_gray(data.into_iter(), pixels, mask_fmt, ink.is_some()))?;
@@ -394,32 +399,28 @@ pub(crate) fn import(name: &str, bytes: &[u8], ctl: &Interrupt) -> Result<Import
         _ => {}
     }
 
-    // Layers. A Multichannel document's picture is its ink channels; it has no layers.
-    if mode == ColorMode::Multichannel {
-        warnings.note("Multichannel documents open as their ink channels, which are the picture; the pixel layer Pigment 0.4 kept under them is not needed and was left out");
-    } else {
-        let mut reader = LayerReader {
-            container: &mut container,
-            ctl,
-            warnings: &mut warnings,
-            fmt: document.pixel_format(),
-            mask_fmt: PixelFormat::new(ColorMode::Grayscale, depth, false),
-            tone,
-            tags: meta.and_then(|m| m.get("layerTags")).and_then(Value::as_object),
-            nodes: 0,
-            links: Vec::new(),
-            ids: Vec::new(),
-        };
-        let mut layers = reader.layers(d.get("layers").and_then(Value::as_array).map_or(&[][..], Vec::as_slice), 1)?;
-        layers::apply_links(&mut layers, &reader.links);
-        document.layers = layers;
-        if document.layers.is_empty() {
-            warnings.note("the document has no layers");
-        }
+    let mut reader = LayerReader {
+        container: &mut container,
+        ctl,
+        warnings: &mut warnings,
+        fmt: document.pixel_format(),
+        mask_fmt: PixelFormat::new(ColorMode::Grayscale, depth, false),
+        tone,
+        tags: meta.and_then(|m| m.get("layerTags")).and_then(Value::as_object),
+        nodes: 0,
+        links: Vec::new(),
+        ids: Vec::new(),
+    };
+    let mut layers = reader.layers(d.get("layers").and_then(Value::as_array).map_or(&[][..], Vec::as_slice), 1)?;
+    layers::apply_links(&mut layers, &reader.links);
+    document.layers = layers;
+    if document.layers.is_empty() {
+        warnings.note("the document has no layers");
     }
     ctl.progress(0.8);
 
-    let spots = multichannel.filter(|_| mode == ColorMode::Multichannel).and_then(|m| m.get("spots")).and_then(Value::as_object);
+    // The inks of a Multichannel document: `meta.imageMode.multichannel.spots` has their colours.
+    let spots = multichannel.filter(|_| d.get("mode").and_then(Value::as_str) == Some("multichannel")).and_then(|m| m.get("spots")).and_then(Value::as_object);
     channels_and_selection(d, spots, &mut container, &mut document, &mut warnings, ctl)?;
     guides_and_origin(d, &mut document, &mut warnings);
     paths_and_light(d, &mut document);

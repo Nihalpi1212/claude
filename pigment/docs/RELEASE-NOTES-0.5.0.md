@@ -105,9 +105,15 @@ has the details and a feature-by-feature comparison with Pigment 0.4.
 
 ### Known issues
 
-- **Documents from Pigment 0.1 to 0.4 don't open yet.** Pigment recognises them and says "This file
-  was saved by Pigment 0.4 or earlier. Opening these files is coming in a later update." Export them
-  as PSD or PNG from Pigment 0.4 to bring them over now, **before installing 0.5**: on Windows and
+- **Documents from Pigment 0.1 to 0.4 open, but not all of their layers yet.** Pigment recognises
+  them by their content and converts the document (size, resolution, image mode, 8, 16 and 32 bits
+  per channel), pixel layers and groups with their opacity, blend mode, locks, clipping and masks,
+  colour labels and links, the selection, saved channels, guides, paths and File Info. Adjustment,
+  fill and shape layers, layer styles, vector masks and advanced blending are not converted yet,
+  nor are text layers, smart objects and their filters: each opens as an empty layer in its place,
+  and the notes shown after opening list them. File › Save asks for a new file name, so the old
+  file stays as it was. Keep the old files, and to bring a document with such layers over whole
+  today, export it as PSD from Pigment 0.4 **before installing 0.5**: on Windows and
   macOS, 0.5 installs where 0.4 was (`%LOCALAPPDATA%\Programs\Pigment` or `C:\Program Files\Pigment`,
   and `Pigment.app` in Applications) and replaces it. To keep 0.4, choose another folder on the
   installer's folder page (Windows) or move `Pigment.app` out of Applications first (macOS).
