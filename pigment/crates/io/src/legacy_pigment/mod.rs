@@ -42,6 +42,8 @@ pub use smart::{Renderer, set_renderer as set_smart_object_renderer};
 #[cfg(test)]
 mod layer_kinds_tests;
 #[cfg(test)]
+mod review_probe_tests;
+#[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod text_smart_tests;
