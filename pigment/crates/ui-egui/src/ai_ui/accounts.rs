@@ -545,6 +545,7 @@ pub(crate) fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
     }
     let id = egui::Id::unique("pigment-ai-accounts");
     let mut acts = vec![];
+    let before = app.ai.accounts.as_ref().map(|f| (f.chat_model.clone(), f.image_model.clone(), f.timeout));
     let modal = egui::Modal::new(id).show(ctx, |ui| {
         ui.set_width(500.0);
         ui.label(egui::RichText::new(tl!("AI Accounts")).font(crate::theme::semibold(15.0)));
@@ -560,8 +561,13 @@ pub(crate) fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
     }
     // Keys, the agreement and the agents' permission are the person's: synthetic input (an agent
     // clicking through the control channel) only switches tabs and closes.
+    // The model fields and the timeout are edited while drawn: what synthetic input typed into
+    // them is put back, so Switch and Close (which keep the models) save only the person's.
     if app.automation_input {
         acts.retain(|a| matches!(a, Act::Switch(_) | Act::Close));
+        if let (Some(f), Some((chat, image, timeout))) = (app.ai.accounts.as_mut(), before) {
+            (f.chat_model, f.image_model, f.timeout) = (chat, image, timeout);
+        }
     }
     for act in acts {
         match act {

@@ -228,6 +228,13 @@ pub fn start(app: &mut PhotocraftApp) -> Result<Value, String> {
     }
     let feature = app.ai.generate.feature;
     let params = params(app);
+    // An agent's request refused by the agents' gate saves nothing either: not the provider its
+    // click chose, not its prompt.
+    if let Err(e) = super::gate(app, feature, &params) {
+        app.ai.generate.note = None;
+        app.ai.generate.error = Some(Failure { kind: None, message: e.clone() });
+        return Err(e);
+    }
     // The last prompt of the feature and the provider chosen, as JavaScript Pigment kept them.
     let (prompt, chosen) = (app.ai.generate.prompt.clone(), provider(app));
     with_accounts(app, |a| {
@@ -318,6 +325,7 @@ pub(crate) fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
     }
     let mut open = true;
     let mut act = None;
+    let before = (app.ai.generate.provider, app.ai.generate.model.clone());
     let canvas = app.last_canvas_rect;
     let at = if canvas.is_positive() { canvas.right_top() + egui::vec2(-WIDTH - 40.0, 40.0) } else { egui::pos2(200.0, 120.0) };
     egui::Window::new(title(app.ai.generate.feature))
@@ -330,6 +338,12 @@ pub(crate) fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
             ui.set_width(WIDTH);
             act = body(app, ui);
         });
+    // The provider and the model bill the person's account, as the models in AI Accounts do:
+    // without "Allow agents to run AI commands", synthetic input chooses neither.
+    let g = &app.ai.generate;
+    if app.automation_input && (g.provider, &g.model) != (before.0, &before.1) && !super::agents_allowed(app) {
+        (app.ai.generate.provider, app.ai.generate.model) = before;
+    }
     match act {
         Some(Act::Generate) => {
             let _ = start(app);

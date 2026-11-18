@@ -669,6 +669,60 @@ fn synthetic_input_neither_sends_nor_grants_itself_permission() {
     assert_eq!(mock.calls().len(), 1);
 }
 
+/// Type `text` as an agent does: `ui.type` through the control channel, delivered in one frame as
+/// automation's input.
+fn synthetic_type(h: &mut Harness, text: &str) {
+    let ctx = h.ctx.clone();
+    let (req, _rx) = ControlRequest::new("ui.type", json!({"text": text}));
+    assert!(matches!(handle(h.state_mut(), &ctx, &req), Outcome::AfterInput), "ui.type");
+    let events = h.state_mut().take_synthetic_step();
+    assert!(!events.is_empty());
+    h.input_mut().events.extend(events);
+    h.step();
+    h.run_steps(2);
+}
+
+/// Nor can synthetic input choose the models or the provider the person's own requests are billed
+/// on: what an agent types into AI Accounts' model fields is not saved when it closes the dialog,
+/// and its click on a provider in the Generate window neither chooses it nor (with its refused
+/// Generate) saves it. The person's own typing and clicks do both.
+#[test]
+fn synthetic_input_chooses_neither_the_models_nor_the_provider() {
+    let mock = Arc::new(MockBackend::connected());
+    let m = Arc::clone(&mock);
+    let mut h = harness(move |app| {
+        ai_ui::install_accounts(app, AiAccounts::in_memory());
+        with_mock(app, &m);
+        app.run("select.rect", json!({"x": 10, "y": 10, "width": 30, "height": 30})).unwrap();
+    });
+    let image_model = |h: &Harness| ai_ui::with_accounts(h.state(), |a| a.settings.models(ProviderId::OpenAi).image_model.clone()).unwrap();
+    invoke(&mut h, "ai.accounts").unwrap();
+    synthetic_click(&mut h, "Image model");
+    synthetic_type(&mut h, "gpt-image-1");
+    synthetic_click(&mut h, "Done");
+    assert!(!accounts::is_open(h.state()), "the synthetic click does reach the dialog");
+    assert_eq!(image_model(&h), None, "an agent's typing chooses no model");
+    // The person's own typing is kept when they close it.
+    invoke(&mut h, "ai.accounts").unwrap();
+    type_into(&mut h, "Image model", "gpt-image-1");
+    pointer_click(&mut h, "Done");
+    assert_eq!(image_model(&h).as_deref(), Some("gpt-image-1"));
+
+    let saved = |h: &Harness| ai_ui::with_accounts(h.state(), |a| a.settings.image_provider).unwrap();
+    ai_ui::menu(h.state_mut(), "ai.generativeFill", &json!({"prompt": "clouds"})).unwrap().unwrap();
+    h.run_steps(3);
+    synthetic_click(&mut h, "Google Gemini");
+    assert_eq!(h.state().ai.generate.provider, None, "an agent's click chooses no provider");
+    synthetic_click(&mut h, "Generate");
+    until_idle(&mut h);
+    assert!(mock.calls().is_empty(), "nothing sent: {:?}", mock.calls());
+    let refused = h.state().ai.generate.error.as_ref().map(|e| e.message.clone()).unwrap_or_default();
+    assert!(refused.contains("Allow agents to run AI commands"), "{refused:?}");
+    assert_eq!(saved(&h), None, "the refused request saved nothing");
+    pointer_click(&mut h, "Google Gemini");
+    assert_eq!(h.state().ai.generate.provider, Some(ProviderId::Gemini), "the person's click does");
+}
+
 /// Generate Image into a new document, as a background job (how the app runs it): the document
 /// appears with its one layer and the prompt as its description, the open document is left
 /// alone, and a stopped request makes no document.
