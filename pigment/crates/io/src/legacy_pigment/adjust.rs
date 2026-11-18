@@ -471,7 +471,7 @@ pub(crate) fn to_adjustment(kind: &str, params: &Value, notes: &mut Vec<String>)
                 "clarity-dehaze" => "Clarity and Dehaze",
                 _ => "Grain",
             };
-            notes.push(format!("{what} adjustments are not in PhotoCraft yet; the layer keeps its settings and changes nothing"));
+            notes.push(format!("{what} adjustments are not in Pigment yet; the layer keeps its settings and changes nothing"));
             unsupported(kind, params)
         }
         other => {
@@ -679,7 +679,7 @@ mod tests {
         let Adjustment::Unsupported { psd_key, raw } = a else { panic!() };
         assert_eq!(psd_key, "pcJS");
         assert_eq!(serde_json::from_slice::<Value>(&raw).unwrap(), json!({"kind": "grain", "params": {"amount": 40}}));
-        assert_eq!(notes, ["Grain adjustments are not in PhotoCraft yet; the layer keeps its settings and changes nothing"]);
+        assert_eq!(notes, ["Grain adjustments are not in Pigment yet; the layer keeps its settings and changes nothing"]);
         let (_, notes) = adj("warp-drive", json!(null));
         assert_eq!(notes.len(), 1);
         // Nonsense parameters take the defaults.

@@ -275,6 +275,8 @@ impl LayerReader<'_, '_, '_> {
         if let Some(styles) = desc.get("styles").and_then(Value::as_object).filter(|m| !m.is_empty()) {
             let mut reader = StyleReader { patterns: &mut self.patterns, notes: Vec::new() };
             layer.effects = reader.effects(styles);
+            // Effect colours are in the document's mode.
+            layer.effects.items = std::mem::take(&mut layer.effects.items).into_iter().map(|e| e.in_mode(self.mode)).collect();
             // The app tiled linked patterns from the layer's pixels' top-left.
             if matches!(layer.content, LayerContent::Raster(_)) {
                 layer.effects.reference = Some((f64::from(offset(desc.get("x"))), f64::from(offset(desc.get("y")))));
@@ -351,6 +353,10 @@ impl LayerReader<'_, '_, '_> {
     fn shape(&mut self, desc: &serde_json::Map<String, Value>, name: &str) -> Result<Layer, IoError> {
         let mut notes = Vec::new();
         let mut shape = paint::shape(desc, self.version, &mut self.patterns, &mut notes);
+        shape.fill = shape.fill.map(|f| f.in_mode(self.mode));
+        if let Some(stroke) = &mut shape.stroke {
+            stroke.paint = stroke.paint.clone().in_mode(self.mode);
+        }
         let has_vector_mask = desc.get("vectorMask").is_some_and(Value::is_object);
         if let Some(fill @ photocraft_doc::Fill::Pattern { .. }) = &shape.fill
             && !has_vector_mask
@@ -383,7 +389,8 @@ impl LayerReader<'_, '_, '_> {
     /// A fill layer (`paint`): it covers the canvas; a pattern's tile is `patterns/<id>.png`.
     fn fill(&mut self, desc: &serde_json::Map<String, Value>, id: Option<&str>, name: &str) -> Result<Layer, IoError> {
         let (w, h) = (f64::from(self.canvas.0), f64::from(self.canvas.1));
-        let place = Place { bx: (0.0, 0.0, w, h), frame: (0.0, 0.0, w, h), align: true };
+        // The app laid a fill layer's gradient out over the document, whatever its masks show.
+        let place = Place { bx: (0.0, 0.0, w, h), frame: (0.0, 0.0, w, h), align: false };
         let mut notes = Vec::new();
         let mut tile_error = None;
         let mut tile = |p: &serde_json::Map<String, Value>| -> Result<(String, String), String> {
@@ -403,9 +410,10 @@ impl LayerReader<'_, '_, '_> {
         }
         self.notes(name, notes);
         Ok(match fill {
-            Some(fill) => Layer::new("", LayerContent::Fill(fill)),
+            // A fill layer's colours are in the document's mode.
+            Some(fill) => Layer::new("", LayerContent::Fill(fill.in_mode(self.mode))),
             None => {
-                self.warnings.layer(name, "the fill layer has no paint PhotoCraft can draw; it opens as an empty layer");
+                self.warnings.layer(name, "the fill layer has no paint Pigment can draw; it opens as an empty layer");
                 Layer::raster("", self.fmt)
             }
         })

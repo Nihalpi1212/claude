@@ -5,8 +5,8 @@
 //! gradient placed by document-space `from` / `to` points (fill layers, 0.3's gradients) or by an
 //! angle, scale and offset against a box (0.4's shape paints), or a pattern tile. A gradient's
 //! geometry is turned into PhotoCraft's angle, scale and offset over the same frame, so it
-//! lands where it was: the canvas for fill layers, the path's bounds for shapes (both Align with
-//! Layer, as the app placed them).
+//! lands where it was: the canvas for fill layers (Align with Layer off: the app measured them
+//! against the document whatever their masks showed), the path's bounds for shapes.
 //!
 //! Paths of shapes and vector masks (`renderer/lib/path-ops.js`, `mask-render.js`): without
 //! operations the app filled the whole path at once (non-zero), so an inner subpath wound the
@@ -321,7 +321,7 @@ pub(crate) fn mask_area(v: &Value, reveal: bool, notes: &mut Vec<String>) -> Pat
         };
     }
     if path.subpaths.iter().skip(1).any(|s| s.op == PathOp::Intersect) {
-        notes.push("the vector mask intersects a shape after Reveal All, which PhotoCraft draws differently".into());
+        notes.push("the vector mask intersects a shape after Reveal All, which Pigment draws differently".into());
     }
     path
 }
@@ -495,7 +495,7 @@ pub(crate) fn shape(d: &Map<String, Value>, version: u64, patterns: &mut Pattern
             };
             if why != "custom" {
                 notes.push(format!(
-                    "the {what} is {}, which PhotoCraft's live shapes are not; it opens as a path",
+                    "the {what} is {}, which Pigment's live shapes are not; it opens as a path",
                     if why == "turned" { "turned" } else { "smoothed" }
                 ));
             }

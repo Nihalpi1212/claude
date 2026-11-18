@@ -316,7 +316,7 @@ fn adjustments_pigment_0_4_added() {
         let Adjustment::Unsupported { psd_key, raw } = a else { panic!() };
         let kept: serde_json::Value = serde_json::from_slice(&raw).unwrap();
         assert_eq!((psd_key.as_str(), kept["kind"].as_str()), ("pcJS", Some(kind)));
-        assert_eq!(w, [format!("{what} adjustments are not in PhotoCraft yet; the layer keeps its settings and changes nothing (\"Adjustment\")")]);
+        assert_eq!(w, [format!("{what} adjustments are not in Pigment yet; the layer keeps its settings and changes nothing (\"Adjustment\")")]);
     }
 }
 
@@ -337,7 +337,7 @@ fn fill_layers() {
         assert_eq!((&l.content, l.opacity), (&LayerContent::Fill(Fill::Solid(photocraft_color::Color::rgb(0.2, 0.4, 0.8))), 0.75));
         // From (4, 4) to (28, 20) on 32 × 24: the angle, the length over the canvas's chord along
         // it (32 / cos 33.69° = 38.46), the centre.
-        let Fill::Gradient { style: GradientStyle::Linear, angle, scale, offset, stops, align: true, .. } = fill(&format!("{v}-fill-gradient-linear")) else {
+        let Fill::Gradient { style: GradientStyle::Linear, angle, scale, offset, stops, align: false, .. } = fill(&format!("{v}-fill-gradient-linear")) else {
             panic!()
         };
         assert!((angle - (-33.69)).abs() < 0.01 && (offset.0, offset.1) == (0.0, 0.0), "{angle} {offset:?}");
@@ -409,7 +409,7 @@ fn shape_layers() {
     for (name, why) in [("v3-shape-rect-turned", "the rectangle is turned"), ("v3-shape-star-smooth", "the polygon is smoothed")] {
         let r = open(name);
         assert_eq!(shape_of(&r.document, "Shape").live, None);
-        assert_eq!(r.warnings, [format!("{why}, which PhotoCraft's live shapes are not; it opens as a path (\"Shape\")")]);
+        assert_eq!(r.warnings, [format!("{why}, which Pigment's live shapes are not; it opens as a path (\"Shape\")")]);
     }
     assert_eq!(live("v3-shape-custom"), None);
     let doc = open("v3-shape-stroke-options").document;
@@ -620,6 +620,20 @@ fn hostile_descriptions_of_the_new_kinds() {
     assert_eq!((g.excluded_channels, g.advanced.knockout), (1, Knockout::None));
     assert!(r.warnings.iter().any(|w| w.contains("glitter")), "{:?}", r.warnings);
     assert!(r.warnings.iter().any(|w| w.contains("plaid")), "{:?}", r.warnings);
+}
+
+#[test]
+fn colours_follow_the_document_mode() {
+    let json = r##"{"version":3,"app":"pigment","width":4,"height":4,"mode":"grayscale","layers":[
+        {"id":"f","type":"fill","name":"Fill","paint":{"type":"solid","color":"#ff0000"},"styles":{"colorOverlay":{"enabled":true,"color":"#00ff00"}}}
+    ]}"##;
+    let mut w = craft_zip::Writer::new();
+    w.add("document.json", json.as_bytes(), craft_zip::Compression::Deflated).unwrap();
+    let doc = crate::import("grey.pigment", &w.finish().unwrap()).unwrap().document;
+    assert_eq!(doc.mode, ColorMode::Grayscale);
+    let l = &doc.layers[0];
+    assert!(matches!(&l.content, LayerContent::Fill(Fill::Solid(c)) if c.mode == ColorMode::Grayscale));
+    assert!(matches!(&l.effects.items[0], Effect::ColorOverlay { color, .. } if color.mode == ColorMode::Grayscale));
 }
 
 #[test]
