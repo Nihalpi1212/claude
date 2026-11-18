@@ -109,7 +109,9 @@ fn raster_layers_keep_their_place_pixels_and_properties() {
 
         let bg = layer(&doc.layers, "Background");
         assert_eq!((bg.opacity, bg.fill_opacity, bg.blend, bg.visible, bg.clipped), (1.0, 1.0, BlendMode::Normal, true, false));
-        assert!(!bg.locks.any() && bg.mask.is_none() && bg.label == LabelColor::None && bg.link_group.is_none());
+        assert!(bg.mask.is_none() && bg.label == LabelColor::None && bg.link_group.is_none());
+        // The bottom "Background" is the Background, as in Pigment 0.4.
+        assert!(bg.locks.transparency && bg.locks.position && !bg.locks.pixels && !bg.locks.all && doc.is_background(bg.id));
         for (x, y) in [(0, 0), (15, 11), (7, 5)] {
             assert_eq!(px8(raster(bg), x, y), [255, 255, 255, 255]);
         }
@@ -575,7 +577,14 @@ fn layers_not_converted_yet_keep_their_place_and_are_reported() {
     let r = crate::import("old.pigment", &bytes).unwrap();
     let doc = &r.document;
     assert_eq!(names(&doc.layers), ["Levels 1", "Colour", "Box", "Hello", "Placed", "From the future", "No type", "Layer 8"]);
-    for l in &doc.layers[..7] {
+    // Adjustment, fill and shape layers open as what they are (layer_kinds_tests.rs has the rest).
+    assert!(matches!(&doc.layers[0].content, LayerContent::Adjustment(photocraft_doc::Adjustment::Levels { .. })));
+    assert!(matches!(&doc.layers[1].content, LayerContent::Fill(_)));
+    let bx = &doc.layers[2];
+    assert!(matches!(&bx.content, LayerContent::Shape(s) if s.path.subpaths.is_empty() && s.fill.is_some()));
+    assert!(bx.vector_mask.as_ref().is_some_and(|m| m.path.subpaths.is_empty() && m.path.inverted), "an empty vector mask that hides");
+    assert!(bx.effects.items.len() == 1 && !bx.effects.items[0].enabled() && bx.advanced.knockout == photocraft_doc::Knockout::Deep);
+    for l in &doc.layers[3..7] {
         assert!(matches!(&l.content, LayerContent::Raster(s) if s.tile_count() == 0), "{}", l.name);
     }
     let levels = &doc.layers[0];
@@ -591,12 +600,6 @@ fn layers_not_converted_yet_keep_their_place_and_are_reported() {
         r.warnings,
         [
             "an entry of the layer list is not a layer and was skipped",
-            "adjustment layers are not converted yet; the layer opens as an empty layer (\"Levels 1\")",
-            "fill layers are not converted yet; the layer opens as an empty layer (\"Colour\")",
-            "shape layers are not converted yet; the layer opens as an empty layer (\"Box\")",
-            "the vector mask is not converted yet and was left out (\"Box\")",
-            "the layer styles are not converted yet and were left out (\"Box\")",
-            "the advanced blending options are not converted yet; the defaults are used (\"Box\")",
             "text layers are not converted yet; the layer opens as an empty layer (\"Hello\")",
             "smart objects are not converted yet; the layer opens as an empty layer (\"Placed\")",
             "layers of type \"hologram\" are not known; the layer opens as an empty layer (\"From the future\")",

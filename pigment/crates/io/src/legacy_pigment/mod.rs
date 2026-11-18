@@ -11,22 +11,28 @@
 //! document profile).
 //!
 //! What is converted so far: the document (size, resolution, image mode and bit depth, colour
-//! table, duotone inks, profile), raster layers and groups with their common properties, layer
-//! masks, colour labels and link sets, the selection, saved channels, guides and the ruler
-//! origin, saved paths and the work path, the global light, and File Info. Adjustment, fill,
-//! shape, text and smart-object layers, layer styles, vector masks and advanced blending are
-//! reported and left out (`layers.rs`). A file that is one of these documents but cannot be read
-//! at all fails with [`IoError::LegacyPigment`].
+//! table, duotone inks, profile), raster, group, adjustment, fill and shape layers with their
+//! common properties, layer masks, vector masks, layer styles and advanced blending, the patterns
+//! fills and styles use, colour labels and link sets, the selection, saved channels, guides and
+//! the ruler origin, saved paths and the work path, the global light, and File Info. Text and
+//! smart-object layers are reported and open as empty layers (`layers.rs`). A file that is one of
+//! these documents but cannot be read at all fails with [`IoError::LegacyPigment`].
 //!
 //! The document is marked `source_read_only`: File › Save goes to Save As, so the old file is
 //! never overwritten by the new format without the person choosing to.
 
+mod adjust;
 mod blend;
 mod container;
+mod gradient;
 mod info;
 mod layers;
+mod paint;
 mod path;
+mod styles;
 
+#[cfg(test)]
+mod layer_kinds_tests;
 #[cfg(test)]
 mod tests;
 
@@ -361,6 +367,23 @@ fn profile(d: &Map<String, Value>, container: &mut Container<'_>, document: &mut
     Ok(())
 }
 
+/// Pigment 0.4 treated the bottom pixel layer called "Background" as Photoshop's Background
+/// (`isBackgroundLayer` in lib/layers-extras/structure.js): fixed in place, without a mask, and
+/// what a knockout reveals. PhotoCraft's Background is the bottom layer with transparency and
+/// position locked.
+fn background(layers: &mut [photocraft_doc::Layer]) {
+    if let Some(bottom) = layers.first_mut()
+        && bottom.name == "Background"
+        && matches!(bottom.content, photocraft_doc::LayerContent::Raster(_))
+        && bottom.mask.is_none()
+        && bottom.vector_mask.is_none()
+        && !bottom.clipped
+    {
+        bottom.locks.set("transparency", true);
+        bottom.locks.set("position", true);
+    }
+}
+
 /// Opens a Pigment 0.1–0.4 document.
 pub(crate) fn import(name: &str, bytes: &[u8], ctl: &Interrupt) -> Result<ImportResult, IoError> {
     let mut container = Container::open(bytes)?;
@@ -410,9 +433,15 @@ pub(crate) fn import(name: &str, bytes: &[u8], ctl: &Interrupt) -> Result<Import
         nodes: 0,
         links: Vec::new(),
         ids: Vec::new(),
+        version: d.get("version").and_then(Value::as_u64).unwrap_or(1),
+        mode,
+        canvas: (size.width, size.height),
+        patterns: paint::Patterns::default(),
     };
     let mut layers = reader.layers(d.get("layers").and_then(Value::as_array).map_or(&[][..], Vec::as_slice), 1)?;
     layers::apply_links(&mut layers, &reader.links);
+    document.patterns = std::mem::take(&mut reader.patterns.list);
+    background(&mut layers);
     document.layers = layers;
     if document.layers.is_empty() {
         warnings.note("the document has no layers");

@@ -120,7 +120,7 @@ export default async function layerFixtures({ set, lib, out, io, D, add, canvasF
   {
     const doc = photo('Adjustment with a mask');
     const layer = add(doc.root, new AdjustmentLayer({ name: 'Adjustment', kind: 'invert', params: {}, opacity: 0.5, blend: 'luminosity' }));
-    layer.mask = { canvas: canvasFrom(SIZE, SIZE, (x) => (x < 12 ? [255, 255, 255, 255] : [0, 0, 0, 255])), enabled: true, linked: true };
+    layer.mask = { canvas: canvasFrom(SIZE, SIZE, (x) => [255, 255, 255, x < 12 ? 255 : 0]), enabled: true, linked: true };
     await saveBoth('adjust-masked', doc);
   }
   if (v3) {
@@ -193,7 +193,9 @@ export default async function layerFixtures({ set, lib, out, io, D, add, canvasF
   async function shape(name, props) {
     const doc = new Document({ width: 40, height: 32, name: `Shape ${name}` });
     background(doc);
-    add(doc.root, new ShapeLayer({ name: 'Shape', ...props }));
+    const layer = add(doc.root, new ShapeLayer({ name: 'Shape', ...props }));
+    // The constructor turns a null fill into its default blue; the app sets "no fill" afterwards (shape-paint-ui.js)
+    if (props.fill === null) layer.fill = null;
     await saveBoth(`shape-${name}`, doc);
   }
   const box = (x, y, w, h) => ({ closed: true, points: [{ x, y }, { x: x + w, y }, { x: x + w, y: y + h }, { x, y: y + h }] });
@@ -258,7 +260,7 @@ export default async function layerFixtures({ set, lib, out, io, D, add, canvasF
     add(group, new RasterLayer({ name: 'Inside', canvas: canvasFrom(32, 32, () => [255, 0, 255, 255]), x: 0, y: 0 }));
     // with a layer mask as well: the layer shows where both show
     const both = solid('Both masks', [0, 255, 255, 255], { vectorMask: vm({ subpaths: [box(18, 18, 12, 12)] }) });
-    both.mask = { canvas: canvasFrom(32, 32, (x, y) => (y < 24 ? [255, 255, 255, 255] : [0, 0, 0, 255])), enabled: true, linked: true };
+    both.mask = { canvas: canvasFrom(32, 32, (x, y) => [255, 255, 255, y < 24 ? 255 : 0]), enabled: true, linked: true };
     await saveBoth('vector-masks', doc);
   }
 

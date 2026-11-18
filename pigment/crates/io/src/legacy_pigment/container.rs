@@ -50,6 +50,27 @@ pub(crate) struct Rgba8 {
     pub(crate) data: Vec<u8>,
 }
 
+/// Pixel memory the patterns of one document may take (decoded tiles).
+pub(crate) const MAX_PATTERN_BYTES: u64 = 256 << 20;
+
+/// PNG `data` as 8-bit RGBA; the decoder allocates at most `budget` bytes. `Err(why)` finishes
+/// "the image …". The caller checks the result against what it may keep.
+pub(crate) fn decode_png(data: &[u8], budget: u64) -> Result<Rgba8, String> {
+    let mut opts = codecs::DecodeOptions::default();
+    opts.limits.max_width = MAX_SIDE;
+    opts.limits.max_height = MAX_SIDE;
+    opts.limits.max_alloc = budget;
+    let image = codecs::decode_as_with(codecs::Format::Png, data, &opts).map_err(|e| format!("could not be decoded ({e})"))?;
+    let (width, height) = image.dimensions();
+    let bytes = u64::from(width) * u64::from(height) * 4;
+    let rgba = image.converted(ChannelLayout::Rgba, CSample::U8);
+    let data = rgba.data().to_vec();
+    if data.len() as u64 != bytes {
+        return Err("could not be decoded (its size is inconsistent)".into());
+    }
+    Ok(Rgba8 { width, height, data })
+}
+
 /// The open archive and the pixel memory still available.
 pub(crate) struct Container<'a> {
     archive: craft_zip::Archive<'a>,
@@ -108,27 +129,15 @@ impl<'a> Container<'a> {
             Err(Ok(why)) => return Ok(Err(format!("could not be read ({why})"))),
             Err(Err(limit)) => return Err(limit),
         };
-        let mut opts = codecs::DecodeOptions::default();
-        opts.limits.max_width = MAX_SIDE;
-        opts.limits.max_height = MAX_SIDE;
         // The decoded image and its 8-bit RGBA copy live together for a moment.
-        opts.limits.max_alloc = self.pixel_budget;
-        let image = match codecs::decode_as_with(codecs::Format::Png, &data, &opts) {
-            Ok(image) => image,
-            Err(e) => return Ok(Err(format!("could not be decoded ({e})"))),
+        let png = match decode_png(&data, self.pixel_budget) {
+            Ok(png) => png,
+            Err(why) => return Ok(Err(why)),
         };
-        drop(data);
-        let (width, height) = image.dimensions();
-        let bytes = u64::from(width) * u64::from(height) * 4;
-        if bytes > self.pixel_budget {
+        if png.data.len() as u64 > self.pixel_budget {
             return Err(too_large("its layers need more pixel memory than the 2 GiB limit"));
         }
-        let rgba = image.converted(ChannelLayout::Rgba, CSample::U8);
-        let data = rgba.data().to_vec();
-        if data.len() as u64 != bytes {
-            return Ok(Err("could not be decoded (its size is inconsistent)".into()));
-        }
-        Ok(Ok(Rgba8 { width, height, data }))
+        Ok(Ok(png))
     }
 
     /// Writes `bytes` (encoded samples of `surface`'s format, row-major over `rect`) into

@@ -50,7 +50,7 @@ The rebrand keeps every crate, package and module name (`photocraft-*`, `photocr
 | Portable mode | `portable.txt` beside the exe, `PhotoCraftData` | `portable.txt`, `PigmentData` |
 | Log file | `logs/photocraft.log` (`photocraft.1.log` …), lock `photocraft.lock` | `logs/pigment.log` (`pigment.1.log` …), lock `pigment.lock` |
 | Native file extension | `.pcraft` | `.pigment` (MIME `application/x-pigment`, "Pigment Image"; macOS type `io.github.nihalpi1212.pigment.document`); `.pcraft` still opens and can still be saved |
-| Pigment 0.1–0.4 documents | — | a `.pigment` ZIP with `document.json` and `layers/<id>.png` is recognised by content and refused with a typed error ([below](#documents-from-pigment-01-04)) |
+| Pigment 0.1–0.4 documents | — | a `.pigment` ZIP with `document.json` and `layers/<id>.png` is recognised by content and converted ([below](#documents-from-pigment-01-04)) |
 | Shortcut set and actions | "PhotoCraft Defaults", "PhotoCraft Actions" | "Pigment Defaults", "Pigment Actions" |
 | MCP server | `serverInfo.name` `photocraft` | `pigment` (title and instructions say Pigment) |
 | Agent consent | the ArtCraft Launcher's switch, behind the suite's `AI-MCP` flag | Pigment's own preference ([below](#ai-agents-and-mcp)) |
@@ -291,21 +291,34 @@ row, a stored sign-in is ignored, API keys are untouched, and the tests still pa
 
 The importer for the `.pigment` files of the JavaScript app, in `crates/io/src/legacy_pigment/`
 (Pigment's own folder): `mod.rs` (the document), `container.rs` (the ZIP, `document.json` and the
-size limits), `layers.rs` (the layer tree, masks, bit depth and image modes of the pixels),
-`path.rs`, `blend.rs`, `info.rs` (File Info as an XMP packet) and `tests.rs`. Its fixtures were
-written by the JavaScript app's own writer: `crates/io/tests/fixtures/pigment-0.4/` with
-`make-fixtures.mjs` and a README that names the commits.
+size limits), `layers.rs` (the layer tree, masks, advanced blending, bit depth and image modes of
+the pixels), `adjust.rs` (adjustment layers, with the app's Color Lookup looks), `gradient.rs`
+(the app's gradient model: midpoints, smoothness, the five interpolation methods, noise),
+`paint.rs` (fills, shapes, vector masks and the patterns they use), `styles.rs` (layer styles),
+`path.rs`, `blend.rs`, `info.rs` (File Info as an XMP packet), `tests.rs` and
+`layer_kinds_tests.rs`. Its fixtures were written by the JavaScript app's own writer:
+`crates/io/tests/fixtures/pigment-0.4/` with `make-fixtures.mjs`, `make-fixtures-layers.mjs` and a
+README that names the commits; next to each fixture with adjustment, fill or shape layers, vector
+masks, styles or blending is `<name>.png`, the app's own picture of it, and the tests compare the
+opened document's picture with it.
 
 Converted so far: the document (size, resolution, the image modes Bitmap, Grayscale, Duotone,
 Indexed Color and RGB, 8, 16 and 32 bits per channel, the profile the unfinished 0.5 wrote), raster layers and groups (name, visibility, opacity, fill opacity, blend mode, locks,
-clipping, folding), layer masks with density and feather, colour labels and link sets, the
-selection, saved channels, guides with their colours and the ruler origin, saved paths and the
-work path, the global light, and File Info with the camera data. CMYK and Lab documents open in
-RGB (the JavaScript app kept RGB pixels with a mode flag), and so do Multichannel ones, with their
-inks as spot channels. **Not converted yet**, each opening as an
-empty layer in its place and listed in the import report: adjustment, fill and shape layers, layer
-styles, vector masks and advanced blending (the next package), then text layers, smart objects and
-their filters. The active layer is not carried: `ImportResult` has no place for it.
+clipping, folding), layer masks with density and feather (the mask is the PNG's alpha, as the app
+masked with it), the bottom "Background" as the Background, adjustment layers (every kind the app
+had; Color and Vibrance, Clarity and Dehaze and Grain are kept as `pcJS` blocks that draw nothing
+until PhotoCraft has them), fill layers (solid, gradient with its geometry, pattern), shape layers
+(path operations, fill, stroke with alignment, caps, joins and dashes, live rectangles, ellipses,
+triangles, polygons, stars and lines where PhotoCraft has them; a pattern-filled shape is a pattern
+fill layer with a vector mask), vector masks (Reveal All as an inverted path), layer styles (all
+ten effects, several drop shadows, inner shadows, overlays and strokes, contours, Hide All
+Effects), advanced blending (channels, knockout, the four options, Blend If with split points),
+colour labels and link sets, the selection, saved channels, guides with their colours and the
+ruler origin, saved paths and the work path, the global light, and File Info with the camera data.
+CMYK and Lab documents open in RGB (the JavaScript app kept RGB pixels with a mode flag), and so do
+Multichannel ones, with their inks as spot channels. **Not converted yet**, each opening as an
+empty layer in its place and listed in the import report: text layers, smart objects and their
+filters. The active layer is not carried: `ImportResult` has no place for it.
 
 | Upstream file | Hook |
 |---|---|

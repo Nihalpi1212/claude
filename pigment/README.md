@@ -205,14 +205,16 @@ Pigment on PhotoCraft and replaces it: PhotoCraft already does far more of what 
   the AppImages sit side by side.
 - **Your old `.pigment` documents open.** Pigment 0.5 saves `.pigment` files in PhotoCraft's native
   format and recognises a file saved by Pigment 0.1 to 0.4 by its content. What it converts so far:
-  the document (size, resolution, image mode, 8, 16 and 32 bits per channel), pixel layers and
-  groups with their opacity, blend mode, locks, clipping and masks, colour labels and links, the
-  selection, saved channels, guides, paths and File Info. **Not converted yet:** adjustment, fill
-  and shape layers, layer styles, vector masks and advanced blending, and after those text layers,
-  smart objects and their filters. Such a layer opens empty in its place, and the notes shown after
-  opening list each one. File › Save asks for a new file name, so the old file stays as it was;
-  keep it until the rest is converted. A file that cannot be read says "This Pigment 0.4 file is
-  damaged:" and why.
+  the document (size, resolution, image mode, 8, 16 and 32 bits per channel), pixel, group,
+  adjustment, fill and shape layers with their opacity, blend mode, locks, clipping, masks, vector
+  masks, layer styles and advanced blending (Blend If, knockout, channels), colour labels and links,
+  the selection, saved channels, guides, paths and File Info. A few adjustments Pigment 0.4 added
+  (Color and Vibrance, Clarity and Dehaze, Grain) keep their settings but change nothing yet, and
+  some adjustments and effects look slightly different, because PhotoCraft computes them as
+  Photoshop does. **Not converted yet:** text layers, smart objects and their filters. Such a layer
+  opens empty in its place, and the notes shown after opening list each one. File › Save asks for
+  a new file name, so the old file stays as it was; keep it until the rest is converted. A file
+  that cannot be read says "This Pigment 0.4 file is damaged:" and why.
 
 ## Downloads
 

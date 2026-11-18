@@ -65,8 +65,11 @@ function background(doc, color = [255, 255, 255, 255]) {
   return add(doc.root, new RasterLayer({ name: 'Background', canvas: canvasFrom(doc.width, doc.height, () => color), x: 0, y: 0 }));
 }
 
-/** A document-sized mask canvas: grey in RGB, opaque, as lib/layer-ops.js makes them. */
-const maskCanvas = (doc, value) => canvasFrom(doc.width, doc.height, (x, y) => { const v = value(x, y); return [v, v, v, 255]; });
+/**
+ * A document-sized mask canvas as the app makes them (Selection.toCanvas, solidMask in lib/layer-ops.js): white, with
+ * the mask in the alpha channel, which is what the compositor masks with (destination-in).
+ */
+const maskCanvas = (doc, value) => canvasFrom(doc.width, doc.height, (x, y) => [255, 255, 255, value(x, y)]);
 
 async function save(name, doc) {
   const bytes = await io.writePigment(doc);
