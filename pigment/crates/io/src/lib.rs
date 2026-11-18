@@ -158,10 +158,10 @@ pub enum IoError {
     /// The requested conversion is not possible.
     #[error("unsupported: {0}")]
     Unsupported(String),
-    /// A document saved by Pigment 0.1 to 0.4 (the Electron app; [`legacy_pigment`]), which
-    /// this version can't open yet.
-    #[error("{}", photocraft_format::brand::LEGACY_PIGMENT_MESSAGE)]
-    LegacyPigment,
+    /// A document saved by Pigment 0.1 to 0.4 (the Electron app; [`legacy_pigment`]) that cannot
+    /// be read: the reason finishes the sentence.
+    #[error("{}: {0}", photocraft_format::brand::LEGACY_PIGMENT_DAMAGED)]
+    LegacyPigment(String),
     /// Native `.pcraft` bundle failure.
     #[error("pcraft: {0}")]
     Pcraft(#[from] photocraft_format::FormatError),
