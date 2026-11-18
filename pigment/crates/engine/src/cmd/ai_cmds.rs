@@ -53,6 +53,8 @@ mod tests;
 pub const SEND_MAX_EDGE: u32 = 2048;
 /// The largest region a fill sends (JS `fillRegion`'s cap, before a larger selection widens it).
 pub const FILL_REGION_MAX: u32 = 1536;
+/// Generative Expand's largest side: Image › Canvas Size's limit.
+pub const EXPAND_MAX_SIDE: u32 = 300_000;
 /// Prompts are cut to this many characters (JS `PROMPT_LIMIT`).
 pub const PROMPT_LIMIT: usize = 4000;
 /// Why the provider commands are disabled when no backend is installed.

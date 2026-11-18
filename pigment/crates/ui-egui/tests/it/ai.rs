@@ -440,6 +440,28 @@ fn task_bar_items_appear_only_with_a_key() {
     assert!(h.state().ui.crop_rect.is_none(), "the frame is let go");
 }
 
+/// Generative Expand from the Crop bar on a document wider than 30,000 px (PhotoCraft allows
+/// 300,000 a side): no panic while the canvas is drawn, and the window keeps the size the frame
+/// asked for instead of capping it below the document's own.
+#[test]
+fn expand_from_crop_on_a_very_wide_document() {
+    let mock = Arc::new(MockBackend::connected());
+    let m = Arc::clone(&mock);
+    let mut h = harness(move |app| {
+        with_mock(app, &m);
+        app.run("file.new", json!({"width": 40_000, "height": 100, "background": "transparent"})).expect("wide");
+    });
+    control(&mut h, "ui.set", json!({"tool": "crop"}));
+    h.state_mut().ui.crop_rect = Some([-100.0, 0.0, 40_000.0, 100.0]);
+    task_bar::expand_from_crop(h.state_mut());
+    h.run_steps(3);
+    let g = &h.state().ai.generate;
+    assert!(g.open && g.feature == "ai.generativeExpand");
+    assert_eq!((g.width, g.height, g.anchor), (40_100, 100, "right"));
+    assert_eq!(generate::params(h.state())["width"], 40_100);
+    assert!(mock.calls().is_empty(), "nothing sent before Generate");
+}
+
 /// Agents run AI commands that send only with "Allow agents to run AI commands"; the person's own
 /// clicks always may.
 #[test]
