@@ -293,6 +293,48 @@ fn run_sends_only_with_allow_ai() {
     let _ = std::fs::remove_dir_all(&d);
 }
 
+/// The engine words a missing agreement or key for the app ("… in Edit › AI Accounts…"). On the
+/// command line the error also names `pigment-cli ai`'s way to give it, and nothing is sent.
+#[test]
+fn a_refused_run_names_the_command_lines_way_to_agree_and_to_connect() {
+    let d = dir("hint");
+    let m = mock(false);
+    let args = || {
+        let mut c = cli(&d, &m.base);
+        c.args(["run", "--new", r#"{"width":16,"height":16}"#, "--cmd", "select.all"]);
+        c.args(["--cmd", "ai.generativeFill", "--params", r#"{"prompt":"a green box"}"#, "--allow-ai"]);
+        c
+    };
+    // No agreement yet.
+    std::fs::write(d.join("ai-keys.json"), format!("{{\"openai\":\"{KEY}\"}}")).unwrap();
+    let o = run(args(), "");
+    let (stdout, err) = text(&o);
+    assert_eq!(o.status.code(), Some(1), "{stdout}{err}");
+    assert!(err.contains("AI Accounts") && err.contains("`pigment-cli ai consent`"), "{err}");
+    // Agreed, and no key.
+    std::fs::write(d.join("ai.json"), r#"{"consented":true}"#).unwrap();
+    std::fs::remove_file(d.join("ai-keys.json")).unwrap();
+    let o = run(args(), "");
+    let (stdout, err) = text(&o);
+    assert_eq!(o.status.code(), Some(1), "{stdout}{err}");
+    assert!(err.contains("AI Accounts") && err.contains("`pigment-cli ai set-key <openai|gemini>`"), "{err}");
+    assert!(m.got.lock().unwrap().is_empty(), "neither refusal sent anything");
+    // An error that is not about the accounts (no selection here) gets no such line.
+    std::fs::write(d.join("ai-keys.json"), format!("{{\"openai\":\"{KEY}\"}}")).unwrap();
+    let o = run(
+        {
+            let mut c = cli(&d, &m.base);
+            c.args(["run", "--new", r#"{"width":16,"height":16}"#, "--cmd", "ai.generativeFill", "--params", r#"{"prompt":"x"}"#, "--allow-ai"]);
+            c
+        },
+        "",
+    );
+    let (stdout, err) = text(&o);
+    assert_eq!(o.status.code(), Some(1), "{stdout}{err}");
+    assert!(!err.contains("On the command line"), "{err}");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
 // ---- Sign in with ChatGPT (experimental) ----------------------------------------------------
 
 /// The sign-in server and the plan route's catalog on 127.0.0.1. The ID token carries `nonce`,
