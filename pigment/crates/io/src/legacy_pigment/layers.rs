@@ -461,10 +461,12 @@ impl LayerReader<'_, '_, '_> {
             }
             _ => None,
         };
+        let rect = |w: u64, h: u64| Rect::new(x, y, x + w as i32, y + h as i32);
         // The deep samples have the size the description gives, when both are right: no PNG is decoded then.
         if let (Some((entry, bytes, u16s)), Some(w), Some(h)) = (&deep, side("width"), side("height"))
             && self.container.declared_size(entry) == Some(w * h * 4 * bytes)
             && w * h * 4 * bytes <= MAX_ENTRY_BYTES
+            && self.container.price(rect(w, h), &self.fmt).map(|()| true)?
             && let Ok(Some(data)) = self.container.read(entry, MAX_ENTRY_BYTES).or_else(|e| e.map(|_| None))
             && data.len() as u64 == w * h * 4 * bytes
         {
@@ -472,7 +474,10 @@ impl LayerReader<'_, '_, '_> {
             self.place(&mut layer, x, y, w as u32, h as u32, samples)?;
             return Ok(layer);
         }
-        let png = match self.container.png(&format!("layers/{id}.png"))? {
+        let image = format!("layers/{id}.png");
+        let fmt = self.fmt;
+        self.container.price_png(&image, |w, h| photocraft_raster::tile_storage_bytes(rect(w.into(), h.into()), &fmt))?;
+        let png = match self.container.png(&image)? {
             Ok(png) => png,
             Err(why) => {
                 self.warnings.layer(name, &format!("the layer's image {why}; the layer opens empty"));
@@ -501,8 +506,10 @@ impl LayerReader<'_, '_, '_> {
     }
 
     fn place(&mut self, layer: &mut Layer, x: i32, y: i32, width: u32, height: u32, samples: Samples<'_>) -> Result<(), IoError> {
-        let bytes = encode(samples, width as usize * height as usize, self.tone, self.fmt);
         let rect = Rect::new(x, y, x + width as i32, y + height as i32);
+        // Converted to a deeper document, the pixels take more than the image: asked first.
+        self.container.price(rect, &self.fmt)?;
+        let bytes = encode(samples, width as usize * height as usize, self.tone, self.fmt);
         if let LayerContent::Raster(surface) = &mut layer.content {
             self.container.write(surface, rect, &bytes)?;
         }
@@ -514,7 +521,10 @@ impl LayerReader<'_, '_, '_> {
     /// the origin; outside the image the mask reveals.
     fn mask(&mut self, desc: &serde_json::Map<String, Value>, id: Option<&str>, name: &str) -> Result<Option<LayerMask>, IoError> {
         let Some(id) = id else { return Ok(None) };
-        let png = match self.container.png(&format!("masks/{id}.png"))? {
+        let image = format!("masks/{id}.png");
+        let fmt = self.mask_fmt;
+        self.container.price_png(&image, |w, h| photocraft_raster::tile_storage_bytes(Rect::new(0, 0, w as i32, h as i32), &fmt))?;
+        let png = match self.container.png(&image)? {
             Ok(png) => png,
             Err(why) => {
                 self.warnings.layer(name, &format!("the layer mask's image {why}; the layer opens without its mask"));
@@ -522,6 +532,7 @@ impl LayerReader<'_, '_, '_> {
             }
         };
         let pixels = png.width as usize * png.height as usize;
+        self.container.price(Rect::new(0, 0, png.width as i32, png.height as i32), &self.mask_fmt)?;
         let bytes = encode_gray(png.data.iter().skip(3).step_by(4).copied(), pixels, self.mask_fmt, false);
         let mut surface = Surface::with_default(self.mask_fmt, &[1.0]);
         self.container.write(&mut surface, Rect::new(0, 0, png.width as i32, png.height as i32), &bytes)?;

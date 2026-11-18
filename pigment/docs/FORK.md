@@ -385,12 +385,15 @@ a damaged file. The active layer is not carried: `ImportResult` has no place for
 The file holds no pixels for type and smart objects. Type is drawn by
 `text_import::prepare_within` (as for a PSD without type pixels). Smart objects are drawn by the
 engine's own renderer, with its filters: `photocraft_io::legacy_pigment::set_smart_object_renderer`
-takes `smart_cmds::refresh_layer`, installed by `crates/engine/src/legacy_pigment_render.rs` (Pigment's
+takes `smart_cmds::refresh_layer_with`, run under a job context that a watcher thread cancels when
+the import's interrupt is cancelled, installed by `crates/engine/src/legacy_pigment_render.rs` (Pigment's
 own file) from `jobs::import_options` and `file_cmds::open::import_result_for_open`, which the app's
 open paths call first, and from automation's `files::open_with_options` and
 `files::open_bytes_with_options`, which the CLI, MCP and the headless sessions open through. Without
 it (photocraft-io alone) the source is placed without its filters, and the import warnings and
-report say so.
+report say so. Each placement is priced against the document's 2 GiB of pixel memory before it is
+drawn, by the tiles of its unclipped placed stage, and charged once drawn; one that does not fit
+stays undrawn, reported.
 
 | Upstream file | Hook |
 |---|---|
@@ -399,6 +402,8 @@ report say so.
 | `crates/engine/src/lib.rs` | `pub mod legacy_pigment_render;` (public for automation's open paths) |
 | `crates/engine/src/jobs.rs` | one line at the top of `import_options`: `crate::legacy_pigment_render::install();` |
 | `crates/engine/src/cmd/file_cmds/open.rs` | the same line in `import_result_for_open` |
+| `crates/engine/src/cmd/smart_cmds/rendering.rs` | `refresh_layer_with`, `refresh_layer` under a caller's `JobCtx` (a cancellable smart object drawn when a 0.1–0.4 document opens) |
+| `crates/engine/src/cmd/smart_cmds.rs` | `pub use rendering::refresh_layer_with;` |
 | `crates/automation/src/files.rs` | one line at the top of `open_bytes_with_options` and of `open_with_options`: `photocraft_engine::legacy_pigment_render::install();`; and `&& !photocraft_format::brand::is_legacy_pigment(bytes)` on the native shortcut of `open_bytes_with_options`, so a 0.1–0.4 document named `.pcraft` (MCP's and `serve`'s workspace folders) is imported as `route` imports it |
 | `crates/automation/tests/it/main.rs` | `mod legacy_pigment;` |
 | `apps/photocraft-cli/tests/it/main.rs` | `mod legacy_pigment;` |
