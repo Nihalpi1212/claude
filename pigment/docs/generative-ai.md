@@ -58,7 +58,7 @@ every one is in the command palette.
 | `ai.removeBackground` | Remove Background | an unlocked pixel layer | `local`: nothing; `provider`: the layer's visible pixels | a layer mask on the layer, in place (the Background becomes a normal layer). `local` (default) is PhotoCraft's `layer.removeBackground`; `provider` masks by the subject the model returns, keyed off white when it answers opaque, within the layer's existing mask |
 | `ai.replaceBackground` | Generate Background… | a layer with pixels | the composite, everything around the subject, the prompt | a layer "Generate Background" above the subject's layer holding the new surroundings. The subject is what the layer shows when it is already cut out (a mask, transparency), else Select Subject's |
 | `ai.replaceSky` | Sky Replacement… | a document | the composite, the sky, the prompt | a layer "Sky Replacement" holding the new sky. The sky is the selection, else Select › Sky's |
-| `ai.describe` | Describe Image… | a document | the composite, at most 1024 px a side, and an optional question | `{text}`; changes nothing (the interface offers Copy and "Use as document description", which runs `file.fileInfo`) |
+| `ai.describe` | Describe Image… | a document | the composite, at most 1024 px a side, and an optional question | `{text}`, at most 20,000 characters (cut with an ellipsis; control characters other than line breaks and tabs dropped); changes nothing (the interface offers Copy and "Use as document description", which runs `file.fileInfo`) |
 | `ai.status` | AI Status | — | nothing | `{installed, providers:[{id,label,connected,hint,store,imageCapable,chatCapable,imageModel,chatModel}], defaultProvider, consented}`; never a key |
 | `ai.testConnection` | Test AI Connection | a connected provider | the key (lists the models) | `{provider, models:[{id,kind}]}` |
 
@@ -331,7 +331,9 @@ Image, Generate Background and Sky Replacement. It holds the prompt (the feature
 `ai.json`, or Sky Replacement's "A dramatic sunset sky with warm clouds"), the feature's options
 (variations 1 to 3; Expand's new width, height and anchor; Generate Image's layer or new document,
 its size and transparency), the provider (shown when two have keys) and a model for this request
-(empty: the one AI Accounts sets), and a line saying what this feature sends. **Nothing is sent
+(empty: the one AI Accounts sets), and a line saying what this feature sends. Each opening starts at
+one variation, and a model typed for one feature is not kept for another: the selection bar's
+Generate runs Generative Fill through this window without showing it. **Nothing is sent
 before Generate.** Generate is dimmed, with the reason as its tooltip, while a request runs, without
 a key or the agreement (with a link to AI Accounts), when the document doesn't suit, or without a
 prompt. Generate runs the engine command as a background job: the status bar shows it with Cancel
