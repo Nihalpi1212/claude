@@ -17,10 +17,27 @@ is built on, and how to bring in a later upstream revision without losing the re
   Issues: <https://github.com/Nihalpi1212/claude/issues>. Releases: tags `pigment-vX.Y.Z`, assets
   `pigment-*`, at <https://github.com/Nihalpi1212/claude/releases>.
 
-Everything in PhotoCraft's docs (`docs/*.md` other than this page and the release notes, `book/`)
-describes PhotoCraft as it was at the upstream revision; read "PhotoCraft" there as "Pigment" unless
-it names the upstream project. [`AGENTS.md`](../AGENTS.md) is PhotoCraft's agent guide: its
-engineering rules (Rust only, no panics or `unsafe` in shipped code, hostile input, clean room,
+## Upstream after the import
+
+PhotoCraft kept moving fast after Pigment imported it. On 18 November 2026 upstream's `main` was at
+`6dbe43e`: 1,760 files changed since `abb30df`, with about 127,000 lines added and 278,000 removed
+(172 commits on `main` since 15 November alone). **Pigment 0.5.0 does not include any of it:** a
+merge of that size is not a small step to take in the last days before a release, and every Pigment
+hook below would have to be checked against it.
+
+The merge is planned as its own step right after the 0.5.0 release, before the 0.6 work (the
+packages listed on the [parity page](parity/README.md#the-06-packages)) starts, while the gap is
+still manageable: upstream moves by thousands of lines a day. It follows
+[Merging a later upstream revision](#merging-a-later-upstream-revision) below. Until then
+`UPSTREAM-REVISION` stays `abb30df`, and the parity page and PhotoCraft's own documents in `docs/`
+describe that revision.
+
+Everything in PhotoCraft's docs (`docs/*.md` other than this page, the release notes and
+`docs/parity/`, `book/`) describes PhotoCraft as it was at the upstream revision; read "PhotoCraft"
+there as "Pigment" unless it names the upstream project. The user guide (`docs/user/`) is the
+exception: it is rewritten for Pigment ([below](#the-user-guide)).
+
+[`AGENTS.md`](../AGENTS.md) is PhotoCraft's agent guide: its engineering rules (Rust only, no panics or `unsafe` in shipped code, hostile input, clean room,
 asset and licence policy) apply to Pigment; its process rules (pull requests, issues, contributor
 credits, the suite's naming) are PhotoCraft's own.
 
@@ -46,11 +63,11 @@ The rebrand keeps every crate, package and module name (`photocraft-*`, `photocr
 | macOS app | `PhotoCraft.app` | `Pigment.app` (executable `Pigment`, volume `Pigment`; the CLI's signing identifier `io.github.nihalpi1212.pigment-cli`) |
 | FreeBSD and Linux trees | `bin/photocraft`, `share/doc/photocraft`, `photocraft-<ver>-freebsd-<arch>.tar.gz` | `bin/pigment`, `share/doc/pigment`, `pigment-<ver>-freebsd-<arch>.tar.gz`; deb/rpm package `pigment` |
 | Settings, logs, Data Recovery, presets folder | `Photocraft` (`~/.config/photocraft`, `%APPDATA%\Photocraft`, `~/Library/Application Support/Photocraft`; recovery in `%LOCALAPPDATA%\Photocraft` and `$XDG_STATE_HOME/photocraft`) | `Pigment` (`~/.config/pigment`, `%APPDATA%\Pigment`, `~/Library/Application Support/Pigment`; `%LOCALAPPDATA%\Pigment`, `$XDG_STATE_HOME/pigment`); nothing is read from PhotoCraft's or ArtCraft's folders |
-| Brush and preset library in the settings folder | `Presets` | `Preset Library` (see [the clash check](#the-settings-folder-and-pigment-01-04)) |
+| Brush and preset library in the settings folder | `Presets` | `Preset Library` (see [the clash check](#the-settings-folder-and-pigment-0104)) |
 | Portable mode | `portable.txt` beside the exe, `PhotoCraftData` | `portable.txt`, `PigmentData` |
 | Log file | `logs/photocraft.log` (`photocraft.1.log` …), lock `photocraft.lock` | `logs/pigment.log` (`pigment.1.log` …), lock `pigment.lock` |
 | Native file extension | `.pcraft` | `.pigment` (MIME `application/x-pigment`, "Pigment Image"; macOS type `io.github.nihalpi1212.pigment.document`); `.pcraft` still opens and can still be saved |
-| Pigment 0.1–0.4 documents | — | a `.pigment` ZIP with `document.json` and `layers/<id>.png` is recognised by content and converted ([below](#documents-from-pigment-01-04)) |
+| Pigment 0.1–0.4 documents | — | a `.pigment` ZIP with `document.json` and `layers/<id>.png` is recognised by content and converted ([below](#documents-from-pigment-0104)) |
 | Shortcut set and actions | "PhotoCraft Defaults", "PhotoCraft Actions" | "Pigment Defaults", "Pigment Actions" |
 | MCP server | `serverInfo.name` `photocraft` | `pigment` (title and instructions say Pigment) |
 | Agent consent | the ArtCraft Launcher's switch, behind the suite's `AI-MCP` flag | Pigment's own preference ([below](#ai-agents-and-mcp)) |
@@ -224,6 +241,23 @@ the rebrand (counts of matching lines, 2026-11-15):
 | `contributors/` | 1 | keep (credits) |
 | User-visible strings, catalogues (rebranded at build time), packaging names, icons, links | 0 left | changed to Pigment |
 
+### The user guide
+
+`docs/user/` is the guide Help › Learn and the README link to. Upstream publishes it at
+getartcraft.com for PhotoCraft; in Pigment every page is rewritten for Pigment: the product name,
+Pigment's downloads (unsigned, the three published platforms), its issue tracker instead of
+Discord, its settings and log folders (`pigment.log`), the `.pigment` type in the file dialogs,
+`verified: 0.5.0` after checking each page against the code, and the PhotoCraft fixes the old pages
+told people to update for described as included. Pigment's own pages are
+`guides/open-pigment-0-4-documents.md` and `guides/use-generative-ai.md`; the file names of the
+upstream pages are kept (`faq/is-photocraft-free.md`, `troubleshooting/photocraft-does-not-start.md`)
+so that upstream's changes still land on the right file. `docs/user/AGENTS.md` keeps upstream's
+rules with a Pigment paragraph at the top. At a merge, read upstream's changes to these pages and
+carry over by hand what applies to Pigment, instead of taking them as they are.
+
+`docs/parity/README.md` (where Pigment stands against Photoshop) and `docs/RELEASE-NOTES-*.md` are
+Pigment's own.
+
 ## What Pigment added
 
 Pigment's own features live in files of their own. Where they hook into an upstream file, the hook
@@ -366,7 +400,7 @@ path calls first. Without it (photocraft-io alone) the source is placed without 
 | `crates/ui-egui/src/dialogs.rs` | `pub mod legacy_save_prompt;`; `save_prompt`, `save_prompt_body` and `save_prompt_confirm` take the place of the disk-change prompt's arms in `command_body` and `confirm_command` and dispatch to either; the Save / Cancel / Save As… buttons; the `ROUTES` entry; `file_command` names `file.save` for it |
 | `crates/ui-egui/src/lib.rs` | `pub use dialogs::legacy_save_prompt;` |
 | `crates/ui-egui/tests/it/main.rs` | `mod legacy_pigment;` |
-| `docs/user/guides/index.md` | the link to `open-pigment-0-4-documents.md` (Pigment's own page) |
+| `docs/user/guides/index.md` | the links to `open-pigment-0-4-documents.md` and `use-generative-ai.md` (Pigment's own pages); the rest of `docs/user/` is rewritten for Pigment ([the user guide](#the-user-guide)) |
 
 ## Keeping the rebrand: `scripts/pigment-rebrand.py`
 
@@ -440,7 +474,7 @@ the release notes.
    version check) or another outgoing request, point it at Pigment's releases or turn it into a link,
    and add it to the endpoint table above; Pigment makes no network request on its own. If upstream
    added a file or folder to the settings folder, check it against the
-   [clash table](#the-settings-folder-and-pigment-01-04).
+   [clash table](#the-settings-folder-and-pigment-0104).
 8. Build and test the packages the merge touched (`cargo build -p photocraft -p photocraft-cli`,
    `cargo test -p …`), and run `pigment --version` and `pigment-cli --version`.
 9. Check `scripts/upstream-test-failures.txt`. It lists the 60 integration tests (in

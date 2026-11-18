@@ -9,6 +9,19 @@ objects and filters, type, vectors, brushes, real PSD/PSB files and a GPU compos
 
 `pigment --version` prints `Pigment 0.5.0 (based on PhotoCraft 0.23.1)`.
 
+In short, 0.5.0 has:
+
+- **PhotoCraft's editor**, almost unchanged. Measured against 1,432 Photoshop features, about 907
+  are done, 304 partial or approximate and 153 missing (the JavaScript Pigment had about 545 done, counting its unfinished 0.5 work).
+  It is an alpha: "done" means the feature is there, not that it is as fast or dependable as Photoshop's.
+  [The parity page](https://github.com/Nihalpi1212/claude/blob/pigment-v0.5.0/pigment/docs/parity/README.md) has the numbers by area and how they were measured.
+- **The generative AI of Pigment 0.4**, rebuilt for the new app, with your own OpenAI or Google
+  Gemini account ([below](#generative-ai)).
+- **Your Pigment 0.1 to 0.4 documents open**, every kind of layer
+  ([below](#documents-from-pigment-01-to-04)).
+- **Not yet:** 83 smaller features Pigment 0.4 had, such as adjustment presets and paragraph
+  typography ([below](#not-in-050-yet)).
+
 ### What changed from PhotoCraft
 
 - **Pigment's name, icon and ids everywhere:** the binaries are `pigment` and `pigment-cli`, the
@@ -145,16 +158,85 @@ On Windows and macOS, 0.5 installs where 0.4 was (`%LOCALAPPDATA%\Programs\Pigme
 where they are. To keep 0.4 as well, choose another folder on the installer's folder page
 (Windows) or move `Pigment.app` out of Applications first (macOS).
 
+### Not in 0.5.0 yet
+
+Pigment 0.4 was ahead of PhotoCraft on 93 Photoshop features. The 10 generative-AI ones are in
+0.5.0. The other 83 are not, and are planned for 0.6:
+
+- **Adjustments:** adjustment presets (`.acv`, `.alv`, `.ahu` and the others) and the Adjustments
+  panel's presets; Auto Color Correction Options and Auto in Curves and Brightness/Contrast; Curves
+  display options and Show Clipping; the on-image tools and the Hue/Saturation range eyedroppers;
+  Color and Vibrance, Clarity and Dehaze and Grain as adjustments; HDR Toning's methods, Match
+  Color's statistics, Replace Color's preview, a solid fill edited in Properties.
+- **Type:** hyphenation and its settings, justification spacing, the single-line and every-line
+  composers, bulleted and numbered lists, Roman hanging punctuation, Fractional Widths, No Break,
+  System Layout, Reset Character and Reset Paragraph, Superscript and Subscript buttons, the
+  character language, formatting kept when text is pasted between layers, Paste Without
+  Formatting, the font menu's sample text, Font Preview Size and the Resolve Missing Fonts dialog.
+- **Presets:** the Preset Manager and Export/Import Presets for every kind, Migrate Presets from
+  Pigment 0.4, `.tpl` tool presets, noise gradients.
+- **Files and panels:** opening AVIF, GIF in Export As, 15 and 16-bit Targa, `.3dl` and the other
+  lookup-table formats, File Info's rating, IPTC, Origin and GPS sections, more camera data; the
+  Info panel's readout modes and 16 and 32-bit values; the Default Actions set, Clear All and
+  Reset Actions, Insert Conditional; pen tilt and rotation through Windows Ink; Select Similar
+  Layers and the system's recent documents.
+- **Filters, tools and selection:** Blur Gallery effects and Path Blur editing, the Lens Correction
+  workspace, Shake Reduction, Focus Area's views and options, Object Aware in Select and Mask,
+  Object Selection's lasso mode, pattern-filled shapes and smooth polygon corners, smart guides'
+  spacing labels, the Adjustment Brush, the brush leash colour and scripted pattern fills.
+
+Eleven of these (the Preset Manager, Export/Import Presets, `.tpl` files, the pen input, the brush
+leash colour and the font menu items) were only in Pigment 0.4's unfinished successor and never in
+a release. A Pigment 0.4 document that uses one of them still opens; the notes after opening say
+what was kept without effect. [The parity page](https://github.com/Nihalpi1212/claude/blob/pigment-v0.5.0/pigment/docs/parity/README.md#the-93-entries-where-pigment-04-was-ahead)
+lists each feature with its status.
+
 ### Known issues
 
-- **The generative AI was tested against local stand-ins for OpenAI and Google Gemini, not with
-  live accounts** (none was available). If a real account behaves differently, please report it.
-  **Sign in with ChatGPT** in particular uses a route OpenAI has not documented as a stable
-  service and was never tried against the real one: it may not work, or may stop working. API
-  keys do not depend on it.
-- The other additions of Pigment 0.2 to 0.4 (those besides the generative AI) are not in 0.5.0
-  yet.
-- Interface strings Pigment added (the new links, the credit line in About, the agents switch, the
-  AI windows) are in English in every language.
-- The builds are not code-signed (see the first-launch steps below).
-- Everything PhotoCraft 0.23.1 lists as missing or in progress applies (its `ROADMAP.md`).
+**Generative AI**
+
+- **It was tested against local stand-ins for OpenAI and Google Gemini, not with live accounts**
+  (none was available). If a real account behaves differently, please report it. The preferred
+  model names are Pigment 0.4's; if one no longer exists, the next one or the provider's first
+  model of the kind is used.
+- **Sign in with ChatGPT** uses a route OpenAI has not documented as a stable service and was never
+  tried against the real one: it may not work, or may stop working. API keys do not depend on it.
+- **The macOS Keychain and the Windows Credential Manager** were never tried on a real Mac or PC
+  while this was built; the key store was tested on Linux only. On Linux the key file is readable only
+  by you but not encrypted.
+- **A document is locked while its AI request runs** (other documents are not). Pigment 0.4 let you
+  keep editing it.
+- **Stop does not take back a request already sent.** Nothing lands in the document, but the
+  provider may still bill it.
+- **Remove Background with AI Provider needs a pixel layer**: rasterize a type or shape layer
+  first (Pigment 0.4 did it for you).
+- **Models are typed or picked automatically**, not chosen from a list, in AI Accounts and the
+  feature windows; the Assistant lists the chat models when you press List models.
+- **The Assistant can run several Generative Fill steps in one turn**, each billed; Stop ends the
+  turn. Turning off "Allow agents to run AI commands" does not stop an AI app's turn already
+  running.
+- **On Windows, `pigment-cli ai set-key` shows the key as you type it.** Pipe it in instead, or
+  use AI Accounts.
+- **Very large canvases:** Generate Image or Generative Expand at document size on a 48-megapixel
+  document can use about 1.2 GB of memory.
+
+**Documents from Pigment 0.1 to 0.4**
+
+- Some adjustments look visibly different from 0.4 once opened (Brightness/Contrast, Photo Filter,
+  Colorize, Levels in CMYK): Pigment computes them as Photoshop does. Their settings are kept.
+- Closing an unsaved old document and choosing Save asks "Save in the new Pigment format?" too;
+  after that question, the close prompt needs Save a second time. Nothing is lost.
+- A type layer with tens of thousands of style runs, or a shape with over a thousand subpaths,
+  takes seconds to minutes to open. No real Pigment document is known to come near this.
+
+**The app**
+
+- **The builds are not code-signed** (see the first-launch steps below). Only Windows x64, macOS
+  (universal) and Linux x86_64 builds are published.
+- **It is PhotoCraft as of `abb30df`** (0.23.1). Upstream has changed a great deal since; none of
+  it is in 0.5.0, and merging it is planned as the next step. Everything PhotoCraft lists as
+  missing or unreliable at that revision applies: Photoshop does not yet reliably accept the PSD
+  files it writes, most performance targets are not met, and there are many open bugs (its
+  [`gaps.md`](https://github.com/Nihalpi1212/claude/blob/pigment-v0.5.0/pigment/docs/gaps.md) and [`ROADMAP.md`](https://github.com/Nihalpi1212/claude/blob/pigment-v0.5.0/pigment/ROADMAP.md)).
+- **Interface strings Pigment added** (the AI windows, the new links, the credit line in About, the
+  agents switch) are in English in every language.

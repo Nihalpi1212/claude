@@ -1,8 +1,8 @@
 ---
 title: Select part of an image and mask it
-description: Make a selection with the marquee tools or Select Subject, soften its edge, and turn it into a layer mask in PhotoCraft.
+description: Make a selection with the marquee tools or Select Subject, soften its edge, and turn it into a layer mask in Pigment.
 order: 30
-verified: 0.8.2
+verified: 0.5.0
 ---
 
 Pick a selection tool, drag around the area, then choose **Layer › Layer Mask › Reveal Selection** to show only that area. A mask hides part of a layer without erasing any pixels.
@@ -13,7 +13,7 @@ Use one of these:
 
 - **Elliptical Marquee Tool** or **Rectangular Marquee Tool** for simple shapes. Drag on the canvas.
 - **Quick Selection Tool**, **Magic Wand Tool** or **Lasso Tool** to follow the edges of an object.
-- **Select › Subject** to let PhotoCraft pick the main subject. The **Quick Selection Tool** and **Object Selection Tool** also have a **Select Subject** button in the options bar. If nothing is found, PhotoCraft says "No subject found" and suggests the Object Selection or Lasso tool.
+- **Select › Subject** to let Pigment pick the main subject. The **Quick Selection Tool** and **Object Selection Tool** also have a **Select Subject** button in the options bar. If nothing is found, Pigment says "No subject found" and suggests the Object Selection or Lasso tool.
 
 Smart selection runs on your computer. It needs no account and no cloud.
 

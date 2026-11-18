@@ -1,8 +1,8 @@
 ---
 title: Export an image
-description: Export a PNG, JPG, WebP, TIFF or TGA from PhotoCraft with a preview, a size estimate and a scale.
+description: Export a PNG, JPG, WebP, TIFF, TGA, ICO or JPEG XL from Pigment with a preview, a size estimate and a scale.
 order: 50
-verified: 0.8.2
+verified: 0.5.0
 ---
 
 Choose **File › Export › Export As…**, set the format, and click **Export**. The dialog shows a preview and an estimate of the file size before you save. Your layered document is not changed.
@@ -10,7 +10,7 @@ Choose **File › Export › Export As…**, set the format, and click **Export*
 ## Export with settings
 
 1. Choose **File › Export › Export As…**.
-2. Under **File Settings**, pick a **Format**: **PNG**, **JPG**, **WebP**, **TIFF** or **TGA**.
+2. Under **File Settings**, pick a **Format**: **PNG**, **JPG**, **WebP**, **TIFF**, **TGA**, **ICO** or **JPEG XL**.
 3. Set the options for that format:
    - **JPG** and lossy **WebP** have a **Quality** slider from 1 to 100.
    - **WebP** also has a **Lossless** checkbox.
@@ -21,7 +21,7 @@ Choose **File › Export › Export As…**, set the format, and click **Export*
 5. Check the preview on the right. The line under it shows the format and the estimated file size.
 6. Click **Export**, then choose a name and a place for the file.
 
-PhotoCraft shows "Exported" with the file path and size in the status bar when it is done.
+Pigment shows "Exported" with the file path and size in the status bar when it is done.
 
 ## Export in one step
 
@@ -35,4 +35,4 @@ With several layers or artboards selected in the **Layers** panel, both commands
 
 ## Keep your layers
 
-Exporting makes a flat copy. To keep the layers, use **File › Save As…** with **PSD Document** or **PhotoCraft**; see [Open and save files](open-and-save-files.md).
+Exporting makes a flat copy. To keep the layers, use **File › Save As…** with **PSD Document** or **Pigment**; see [Open and save files](open-and-save-files.md).

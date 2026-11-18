@@ -52,6 +52,10 @@ The document keeps its file. The first time you choose **File › Save**, Pigmen
 
 Tick **Don't show again** to stop the question. After the first save the file is in the new format and **File › Save** does not ask again. A Save step of an action you play, a script and an AI agent save without asking. Keep a copy of the old file if you still use Pigment 0.4.
 
+## Pigment 0.4 features not in 0.5 yet
+
+Pigment 0.5 is a new app built on PhotoCraft, and some things Pigment 0.4 could do are not in it yet: adjustment presets and the Auto options of Levels and Curves, the Color and Vibrance, Clarity and Dehaze and Grain adjustments, paragraph typography (hyphenation, justification, composers, lists, hanging punctuation), the Preset Manager for every kind, noise gradients, opening AVIF, GIF in Export As, the IPTC and GPS sections of File Info, and a few filter workspaces. They are planned for 0.6. The [parity page](../../parity/README.md#the-93-entries-where-pigment-04-was-ahead) lists every one. The generative AI of Pigment 0.4 is in 0.5: see [Use generative AI](use-generative-ai.md).
+
 ## If the file does not open
 
 A file that cannot be read says "This Pigment 0.4 file is damaged:" and why. Open it in Pigment 0.4 and save it again, or export it as PSD from there.

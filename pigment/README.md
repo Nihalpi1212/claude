@@ -24,6 +24,7 @@
 <p align="center">
   <a href="https://github.com/Nihalpi1212/claude/releases"><b>Download</b></a> ·
   <a href="docs/user/">User guide</a> ·
+  <a href="docs/parity/README.md">Compared with Photoshop</a> ·
   <a href="docs/FORK.md">What Pigment changed</a> ·
   <a href="https://github.com/Nihalpi1212/claude/issues">Report an issue</a>
 </p>
@@ -91,7 +92,9 @@ What comes from PhotoCraft, in short:
 What Pigment adds: **generative AI** with your own OpenAI or Google Gemini account (Generative Fill
 and Expand, Generate Image, Remove and Generate Background, Sky Replacement, Describe Image and an
 Assistant that edits the document). It is optional, and nothing is sent until you set it up and
-run one of these features; see [Generative AI](#generative-ai) below.
+run one of these features; see [Generative AI](#generative-ai) below. And it **opens the
+`.pigment` documents of Pigment 0.1 to 0.4**, every kind of layer
+([Pigment 0.4 and earlier](#pigment-04-and-earlier)).
 
 PhotoCraft's own feature tour, with screenshots, is in its documentation under [`docs/`](docs) and
 [`book/`](book); read "PhotoCraft" there as "Pigment".
@@ -122,7 +125,7 @@ PhotoCraft's own feature tour, with screenshots, is in its documentation under [
     </td>
     <td width="33%" valign="top">
       <h4>🗂️ Formats</h4>
-      PSD and PSB, layered TIFF (Photoshop's layer data in the TIFF, read and written in either byte order), <a href="docs/pdn.md">Paint.NET PDN3 (read, with editable layers and all 14 blend modes)</a>, <a href="docs/ora.md">OpenRaster (read and write, with layers, groups and blend modes, for Krita, MyPaint and GIMP)</a>, <a href="docs/xcf.md">GIMP XCF (read, with layers, groups, masks, blend modes, channels and the selection)</a>, <a href="docs/kra.md">Krita .kra (read, with paint layers, groups, blend modes and transparency masks)</a>, SVG (opens as shape layers, places as a vector Smart Object), plus flat PNG, JPEG, TIFF, WebP (lossy and lossless), GIF, BMP, TGA, ICO, QOI, PNM, OpenEXR, Radiance HDR and FITS (astronomy images: 8/16-bit and 32-bit float, gray or RGB, header kept), and the native <code>.pcraft</code> format. Flat formats retain the depths they support: PNG keeps 8/16-bit samples, TIFF keeps 8/16-bit and 32-bit float samples, and OpenEXR keeps half/float samples; JPEG, WebP and the other 8-bit formats reduce higher-depth samples with an export warning. See the <a href="https://github.com/storytold/craft-libs/tree/main/crates/image-codecs#capability-matrix-default-build">codec capability matrix</a> for each format. HEIC photos from iPhone and Mac are read-only (included in official builds; optional <code>--features heif</code> for source builds). AVIF is write-only with the optional <code>avif</code> build feature; AVIF decoding and JPEG XL are unavailable. Affinity documents (<code>.af</code>, <code>.afdesign</code>, <code>.afphoto</code>, <code>.afpub</code>) open natively, read only, with artboards, layers, vectors, text, images and masks; effects, adjustments and other unsupported parts are listed in a warning, and Affinity export is unavailable.
+      PSD and PSB, layered TIFF (Photoshop's layer data in the TIFF, read and written in either byte order), <a href="docs/pdn.md">Paint.NET PDN3 (read, with editable layers and all 14 blend modes)</a>, <a href="docs/ora.md">OpenRaster (read and write, with layers, groups and blend modes, for Krita, MyPaint and GIMP)</a>, <a href="docs/xcf.md">GIMP XCF (read, with layers, groups, masks, blend modes, channels and the selection)</a>, <a href="docs/kra.md">Krita .kra (read, with paint layers, groups, blend modes and transparency masks)</a>, SVG (opens as shape layers, places as a vector Smart Object), plus flat PNG, JPEG, TIFF, WebP (lossy and lossless), GIF, BMP, TGA, ICO, QOI, PNM, OpenEXR, Radiance HDR and FITS (astronomy images: 8/16-bit and 32-bit float, gray or RGB, header kept), and the native <code>.pcraft</code> format. Flat formats retain the depths they support: PNG keeps 8/16-bit samples, TIFF keeps 8/16-bit and 32-bit float samples, and OpenEXR keeps half/float samples; JPEG, WebP and the other 8-bit formats reduce higher-depth samples with an export warning. See the <a href="https://github.com/storytold/craft-libs/tree/main/crates/image-codecs#capability-matrix-default-build">codec capability matrix</a> for each format. HEIC photos from iPhone and Mac are read-only (included in official builds; optional <code>--features heif</code> for source builds). JPEG XL is written (Save As and Export As) but not read; AVIF is neither read nor written by the published builds (writing needs the optional <code>avif</code> build feature). Affinity documents (<code>.af</code>, <code>.afdesign</code>, <code>.afphoto</code>, <code>.afpub</code>) open natively, read only, with artboards, layers, vectors, text, images and masks; effects, adjustments and other unsupported parts are listed in a warning, and Affinity export is unavailable.
     </td>
     <td width="33%" valign="top">
       <h4>🪄 The everyday essentials</h4>
@@ -194,6 +197,12 @@ Pigment on PhotoCraft and replaces it: PhotoCraft already does far more of what 
 
 - The two apps have different application ids and keep their settings apart; Pigment 0.5 reads
   nothing of the old app's.
+- **Some of Pigment 0.4's features are not in 0.5 yet.** Pigment 0.4 was ahead of PhotoCraft on 93
+  Photoshop features. The 10 generative-AI ones are in 0.5.0; the other 83 (adjustment presets and
+  Auto options, Color and Vibrance, Clarity and Dehaze and Grain, paragraph typography such as
+  hyphenation, justification and lists, the Preset Manager, noise gradients, opening AVIF, GIF in
+  Export As, File Info's IPTC and GPS sections, and a few filter workspaces) are planned for 0.6.
+  The [parity page](docs/parity/README.md#the-93-entries-where-pigment-04-was-ahead) lists each one.
 - **The generative AI is back, and you connect it again.** API keys and the ChatGPT sign-in of
   Pigment 0.4 are not carried over (they were sealed by the old app): enter them once more in
   Edit › AI Accounts…. What works differently from 0.4 is listed in
@@ -322,12 +331,23 @@ in Edit › AI Accounts….
 
 ## Status
 
-**Pigment 0.5.0 is an alpha.** It inherits PhotoCraft's state at the imported revision: everyday
-photo editing and PSD work are close to usable, but a professional can't switch from Photoshop yet.
-PhotoCraft's own [`ROADMAP.md`](ROADMAP.md) and [`docs/`](docs) list what is missing.
-[`docs/RELEASE-NOTES-0.5.0.md`](docs/RELEASE-NOTES-0.5.0.md) says what is in 0.5.0 and its known
-issues. The generative AI of Pigment 0.4 is in 0.5.0 (see [Generative AI](#generative-ai)); its
-other additions are not yet.
+**Pigment 0.5.0 is an alpha.** It is PhotoCraft as of revision `abb30df` (0.23.1) with Pigment's
+generative AI and importer. Measured against 1,432 Photoshop features, about 907 are done, 304
+partial or approximate, 153 missing and 68 not feasible without Adobe's services; "done" means the
+feature is in the code, not that it is as fast or dependable as Photoshop's. Everyday photo editing
+and PSD work are close to usable, but a professional can't switch from Photoshop yet: PSD files
+Photoshop does not always accept, performance with large documents and an open bug backlog are the
+biggest gaps.
+
+- [`docs/parity/README.md`](docs/parity/README.md): where Pigment 0.5.0 stands, area by area, and
+  the Pigment 0.4 features still to come.
+- [`docs/RELEASE-NOTES-0.5.0.md`](docs/RELEASE-NOTES-0.5.0.md): what is in 0.5.0, what differs from
+  Pigment 0.4, and the known issues.
+- PhotoCraft's own measures: [`ROADMAP.md`](ROADMAP.md), [`docs/gaps.md`](docs/gaps.md) and
+  [`docs/target-app-parity.md`](docs/target-app-parity.md).
+
+Upstream PhotoCraft has changed a great deal since `abb30df`; none of that is in 0.5.0. Merging it
+is the next step after this release ([`docs/FORK.md`](docs/FORK.md#upstream-after-the-import)).
 
 ## License and credits
 
