@@ -55,7 +55,7 @@ After each group: read its reports and review, verify the commits (build, the gr
 - **Commits.** Commit locally after each verified part, with messages ending in these two lines:
 
   ```
-  Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>
+  Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
   Claude-Session: https://claude.ai/code/session_012irzNNBVSJyVqHJpCPbdwm
   ```
 

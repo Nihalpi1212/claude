@@ -10,6 +10,7 @@ SCR = /tmp/claude-0/-home-user-claude/02aa60de-818c-5d38-b2f3-33055ac112a1/scrat
   - **Standing permission:** after any usage-limit stop, resume automatically from the work done. Never wait for the user and never ask.
   - Keep the user informed in a few lines at milestones, but don't block on them.
 - Nov 17: the user switched the session to the model claude-fable-5-2 and said "Try again".
+- Nov 18, about 17:40 UTC: Fable's weekly limit had stopped everything at 04:22 UTC ("resets Nov 23, 2pm (UTC)"). The user switched the session to claude-opus-5-5 and said "Try again". Workflow agents inherit the session's model. The commit trailer is now "Claude Opus 5.5" (the briefs and snapshot.sh were changed).
 - Ultracode is on: use the Workflow tool for substantive work, one cargo build at a time on this 4-CPU machine.
 
 ## If the scratchpad or the build folder is gone (the container was replaced)
@@ -51,8 +52,8 @@ A cloud container is reclaimed after inactivity; a usage-limit stop of a few hou
 ## Rules
 
 - **Commits and pushes.** Agents commit each verified part and push it at once to claude/pigment-photocraft (the briefs say so), and run planpc/snapshot.sh at least every 30 minutes. I check CI after their pushes and fix what breaks. When the stop hook asks to commit while agents work, run planpc/snapshot.sh "what" and say so; never commit an agent's unfinished files.
-- **Commit trailers** (changed on Nov 17 with the model):
-  - Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>
+- **Commit trailers** (changed with the model on Nov 17, and again on Nov 18):
+  - Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
   - Claude-Session: https://claude.ai/code/session_012irzNNBVSJyVqHJpCPbdwm
 - **CI.** Pigment CI (.github/workflows/pigment-ci.yml) must end green on pushed heads. The tests run through cargo-nextest (since Nov 17), whose `ci` profile repeats every failure at the end: mcp__github__get_job_logs (job_id, return_content, tail_lines 2500) saves the log to a file; search it for " FAIL [", "Summary [", "panicked at" and "error:".
   - Never skip a test to get green. The one exception is pigment/scripts/upstream-test-failures.txt: 60 tests that fail on untouched upstream too.

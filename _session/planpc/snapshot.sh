@@ -33,7 +33,7 @@ _session/ holds the plan files, which live outside the repository.
 
 Base: $(git rev-parse HEAD)
 
-Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_012irzNNBVSJyVqHJpCPbdwm"
 commit=$(git commit-tree "$tree" -p "$parent" -m "$msg")
 for i in 1 2 3 4; do
