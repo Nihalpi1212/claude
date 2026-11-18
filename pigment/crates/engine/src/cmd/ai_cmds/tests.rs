@@ -691,6 +691,27 @@ fn describe_answers_text_and_changes_nothing() {
     assert_eq!((mock.calls()[0].width, mock.calls()[0].height), (1024, 205));
 }
 
+/// However long the provider's answer, Describe returns at most 20,000 characters, cut at a
+/// character and ending in an ellipsis, so the window, the CLI, MCP and the XMP all get a text of
+/// a sensible size.
+#[test]
+fn describe_bounds_the_answer() {
+    let mut s = rgb(40, 30);
+    let mock = install(&mut s, MockBackend::connected());
+    mock.push(MockAnswer::Text("é".repeat(1_000_000)));
+    let r = s.execute("ai.describe", json!({})).unwrap();
+    let text = r["text"].as_str().unwrap();
+    assert_eq!(text.chars().count(), 20_000);
+    assert!(text.ends_with('…') && text.starts_with("éé"));
+    // An answer within the limit is untouched.
+    let fits = "é".repeat(20_000);
+    mock.push(MockAnswer::Text(fits.clone()));
+    assert_eq!(s.execute("ai.describe", json!({})).unwrap()["text"], fits);
+    // Control characters (no place in XMP) go; line breaks and tabs stay.
+    mock.push(MockAnswer::Text("A\u{0}B\u{1b}[2J\r\nC\tD".into()));
+    assert_eq!(s.execute("ai.describe", json!({})).unwrap()["text"], "AB[2J\nC\tD");
+}
+
 #[test]
 fn status_never_returns_a_key() {
     let mut s = Session::new();

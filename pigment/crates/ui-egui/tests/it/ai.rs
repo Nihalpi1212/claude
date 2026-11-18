@@ -462,6 +462,23 @@ fn expand_from_crop_on_a_very_wide_document() {
     assert!(mock.calls().is_empty(), "nothing sent before Generate");
 }
 
+/// Describe Image shows at most 20,000 characters of an answer, however long the provider's.
+#[test]
+fn describe_shows_a_bounded_answer() {
+    let mock = Arc::new(MockBackend::connected());
+    mock.push(MockAnswer::Text("é".repeat(1_000_000)));
+    let m = Arc::clone(&mock);
+    let mut h = harness(move |app| {
+        with_mock(app, &m);
+        app.background_jobs = true;
+    });
+    describe::start(h.state_mut()).unwrap();
+    until_idle(&mut h);
+    let text = describe::text(h.state()).unwrap();
+    assert!(text.chars().count() <= 20_000, "{}", text.len());
+    assert!(text.ends_with('…'));
+}
+
 /// Agents run AI commands that send only with "Allow agents to run AI commands"; the person's own
 /// clicks always may.
 #[test]

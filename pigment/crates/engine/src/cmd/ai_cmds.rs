@@ -55,6 +55,10 @@ pub const SEND_MAX_EDGE: u32 = 2048;
 pub const FILL_REGION_MAX: u32 = 1536;
 /// Generative Expand's largest side: Image › Canvas Size's limit.
 pub const EXPAND_MAX_SIDE: u32 = 300_000;
+/// Describe Image's answer is cut to this many characters, an ellipsis included (as the
+/// Assistant cuts its answers), so the window, an agent and the document's description get a text
+/// of a sensible size whatever the provider sent.
+pub const DESCRIBE_LIMIT: usize = 20_000;
 /// Prompts are cut to this many characters (JS `PROMPT_LIMIT`).
 pub const PROMPT_LIMIT: usize = 4000;
 /// Why the provider commands are disabled when no backend is installed.
