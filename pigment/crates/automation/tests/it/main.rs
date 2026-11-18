@@ -9,6 +9,8 @@ mod gpu_backend;
 mod inactive_save;
 mod krita;
 mod layered_save_dirty;
+// Pigment: documents of Pigment 0.1–0.4.
+mod legacy_pigment;
 mod linked_save_bytes;
 mod mcp;
 mod mcp_wire;

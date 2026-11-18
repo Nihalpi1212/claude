@@ -2,12 +2,13 @@
 //! a smart object, only its source and smart filters; photocraft-io's importer
 //! (`legacy_pigment`) asks the engine to draw them, with the engine's filters, through the
 //! renderer installed here. Every open path installs it before it imports (`jobs::import_options`
-//! and `file_cmds::open::import_result_for_open`).
+//! and `file_cmds::open::import_result_for_open`; automation's `files` for the CLI and MCP).
 
 use photocraft_doc::{Document, Layer};
 
-/// Installs the renderer once per process.
-pub(crate) fn install() {
+/// Installs the renderer once per process. Call it before importing a document with
+/// `photocraft_io` directly.
+pub fn install() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| photocraft_io::legacy_pigment::set_smart_object_renderer(render));
 }

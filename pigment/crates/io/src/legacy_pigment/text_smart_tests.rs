@@ -208,6 +208,9 @@ fn smart_filters_map_to_pigments_and_the_others_are_reported() {
             "{v}"
         );
         assert!(s.filters_enabled);
+        // photocraft-io alone has no renderer for smart filters: the source is placed without
+        // them, and the report says so.
+        assert!(r.warnings.iter().any(|w| w.contains("smart filters could not be drawn") && w.contains("(\"Filtered\")")), "{v}: {:?}", r.warnings);
 
         let r = open(&format!("{v}-smart-filters-unmapped"));
         let s = smart(&r, "Unmapped");

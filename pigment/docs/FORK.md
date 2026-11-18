@@ -386,16 +386,22 @@ The file holds no pixels for type and smart objects. Type is drawn by
 `text_import::prepare_within` (as for a PSD without type pixels). Smart objects are drawn by the
 engine's own renderer, with its filters: `photocraft_io::legacy_pigment::set_smart_object_renderer`
 takes `smart_cmds::refresh_layer`, installed by `crates/engine/src/legacy_pigment_render.rs` (Pigment's
-own file) from `jobs::import_options` and `file_cmds::open::import_result_for_open`, which every open
-path calls first. Without it (photocraft-io alone) the source is placed without its filters.
+own file) from `jobs::import_options` and `file_cmds::open::import_result_for_open`, which the app's
+open paths call first, and from automation's `files::open_with_options` and
+`files::open_bytes_with_options`, which the CLI, MCP and the headless sessions open through. Without
+it (photocraft-io alone) the source is placed without its filters, and the import warnings and
+report say so.
 
 | Upstream file | Hook |
 |---|---|
 | `crates/io/src/lib.rs` | `pub mod legacy_pigment;`, the `IoError::LegacyPigment(String)` variant, `Route::LegacyPigment` with its line in `route`, `import_stages` (two) and `import_preflight` |
 | `crates/io/Cargo.toml` | `craft-zip` under `[dependencies]` (it was a dev-dependency; `Cargo.lock` is unchanged) |
-| `crates/engine/src/lib.rs` | `mod legacy_pigment_render;` |
+| `crates/engine/src/lib.rs` | `pub mod legacy_pigment_render;` (public for automation's open paths) |
 | `crates/engine/src/jobs.rs` | one line at the top of `import_options`: `crate::legacy_pigment_render::install();` |
 | `crates/engine/src/cmd/file_cmds/open.rs` | the same line in `import_result_for_open` |
+| `crates/automation/src/files.rs` | one line at the top of `open_bytes_with_options` and of `open_with_options`: `photocraft_engine::legacy_pigment_render::install();`; and `&& !photocraft_format::brand::is_legacy_pigment(bytes)` on the native shortcut of `open_bytes_with_options`, so a 0.1–0.4 document named `.pcraft` (MCP's and `serve`'s workspace folders) is imported as `route` imports it |
+| `crates/automation/tests/it/main.rs` | `mod legacy_pigment;` |
+| `apps/photocraft-cli/tests/it/main.rs` | `mod legacy_pigment;` |
 | `crates/ui-egui/src/app/files.rs` | `save_in_place` asks `legacy_save_prompt::intercept` first; its old body is `save_in_place_unasked`, which `replay_save` calls for a played Save (an action's Save step does not ask) |
 | `crates/ui-egui/src/dialogs.rs` | `pub mod legacy_save_prompt;`; `save_prompt`, `save_prompt_body` and `save_prompt_confirm` take the place of the disk-change prompt's arms in `command_body` and `confirm_command` and dispatch to either; the Save / Cancel / Save As… buttons; the `ROUTES` entry; `file_command` names `file.save` for it |
 | `crates/ui-egui/src/lib.rs` | `pub use dialogs::legacy_save_prompt;` |
