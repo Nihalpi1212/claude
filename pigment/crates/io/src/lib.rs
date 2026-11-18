@@ -160,7 +160,7 @@ pub enum IoError {
     Unsupported(String),
     /// A document saved by Pigment 0.1 to 0.4 (the Electron app; [`legacy_pigment`]) that cannot
     /// be read: the reason finishes the sentence.
-    #[error("{}: {0}", photocraft_format::brand::LEGACY_PIGMENT_DAMAGED)]
+    #[error("{prefix}: {0}", prefix = photocraft_format::brand::LEGACY_PIGMENT_DAMAGED)]
     LegacyPigment(String),
     /// Native `.pcraft` bundle failure.
     #[error("pcraft: {0}")]

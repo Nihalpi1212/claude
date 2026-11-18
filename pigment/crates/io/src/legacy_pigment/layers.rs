@@ -174,7 +174,8 @@ impl LayerReader<'_, '_, '_> {
                 return Err(IoError::Unsupported(format!("this Pigment 0.4 document is too large to open: it has more than {MAX_NODES} layers")));
             }
             let id = id_of(desc.get("id"));
-            let name = desc.get("name").and_then(Value::as_str).filter(|s| !s.trim().is_empty()).map_or_else(|| format!("Layer {}", self.nodes), str::to_string);
+            let name =
+                desc.get("name").and_then(Value::as_str).filter(|s| !s.trim().is_empty()).map_or_else(|| format!("Layer {}", self.nodes), str::to_string);
             let kind = desc.get("type").and_then(Value::as_str).unwrap_or("");
             let mut layer = match kind {
                 "raster" => self.raster(desc, id.as_deref(), &name)?,
@@ -271,7 +272,9 @@ impl LayerReader<'_, '_, '_> {
         let (x, y) = (offset(desc.get("x")), offset(desc.get("y")));
         let side = |key: &str| desc.get(key).and_then(Value::as_u64).filter(|n| (1..=u64::from(super::container::MAX_SIDE)).contains(n));
         let deep = match desc.get("deep").and_then(Value::as_str) {
-            Some(kind @ ("u16" | "f32")) if self.fmt.sample != SampleType::U8 => Some((format!("layers/{id}.{kind}"), if kind == "u16" { 2u64 } else { 4u64 }, kind == "u16")),
+            Some(kind @ ("u16" | "f32")) if self.fmt.sample != SampleType::U8 => {
+                Some((format!("layers/{id}.{kind}"), if kind == "u16" { 2u64 } else { 4u64 }, kind == "u16"))
+            }
             _ => None,
         };
         // The deep samples have the size the description gives, when both are right: no PNG is decoded then.

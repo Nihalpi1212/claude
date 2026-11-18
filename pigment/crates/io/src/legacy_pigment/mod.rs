@@ -112,7 +112,12 @@ fn duotone_of(v: Option<&Value>) -> Option<Duotone> {
     let inks = v?.get("inks")?.as_array()?;
     let mut out = Vec::new();
     for (i, ink) in inks.iter().take(4).enumerate() {
-        let name = ink.get("name").and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty()).map_or_else(|| if i == 0 { "Black".to_string() } else { format!("Ink {}", i + 1) }, str::to_string);
+        let name = ink
+            .get("name")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map_or_else(|| if i == 0 { "Black".to_string() } else { format!("Ink {}", i + 1) }, str::to_string);
         let color = ink.get("color").and_then(rgb_of).unwrap_or([0, 0, 0]).map(|c| f32::from(c) / 255.0);
         let mut curve: Vec<CurvePoint> = ink
             .get("curve")
@@ -162,24 +167,17 @@ fn plane(container: &mut Container<'_>, name: &str, size: Size) -> Result<Result
     }
 }
 
-/// Opens a Pigment 0.1–0.4 document.
-pub(crate) fn import(name: &str, bytes: &[u8], ctl: &Interrupt) -> Result<ImportResult, IoError> {
-    let mut container = Container::open(bytes)?;
-    let description = container.document()?;
-    let d = description.as_object().ok_or_else(|| damaged(format!("{} does not hold a document", container::DOCUMENT)))?;
-    // `readPigment` in lib/io.js: anything else "is not a Pigment document".
-    if d.get("app").and_then(Value::as_str) != Some("pigment") {
-        return Err(damaged(format!("{} does not say it is a Pigment document", container::DOCUMENT)));
-    }
-    let mut warnings = Warnings::default();
-    if let Some(version) = d.get("version").and_then(Value::as_u64).filter(|v| *v > NEWEST_VERSION) {
-        warnings.note(&format!("the file was saved by a newer Pigment (document format {version}); what Pigment 0.4 wrote was read, the rest was left out"));
-    }
-    let size = size_of(d)?;
-    let meta = d.get("meta").and_then(Value::as_object);
-    let image_mode = meta.and_then(|m| m.get("imageMode")).and_then(Value::as_object);
+/// The image mode, what it makes of the stored RGBA pixels, and the bit depth. The app stored
+/// RGBA pixels for every mode, with a mode flag.
+struct Model {
+    mode: ColorMode,
+    tone: Tone,
+    depth: SampleType,
+    color_table: Option<Vec<[u8; 3]>>,
+    duotone: Option<Duotone>,
+}
 
-    // Image mode and bit depth: the app stored RGBA pixels for every mode, with a mode flag.
+fn model_of(d: &Map<String, Value>, has_ink_channels: bool, warnings: &mut Warnings) -> Model {
     let depth = match d.get("depth").and_then(Value::as_u64) {
         Some(16) => SampleType::U16,
         Some(32) => SampleType::F32,
@@ -187,8 +185,8 @@ pub(crate) fn import(name: &str, bytes: &[u8], ctl: &Interrupt) -> Result<Import
     };
     let color_table = color_table_of(d.get("colorTable"));
     let duotone = duotone_of(d.get("duotone"));
-    let multichannel = image_mode.and_then(|m| m.get("multichannel")).and_then(Value::as_object);
-    let (mode, tone, depth) = match d.get("mode").and_then(Value::as_str).unwrap_or("rgb") {
+    let name = d.get("mode").and_then(Value::as_str).unwrap_or("rgb");
+    let (mode, tone, depth) = match name {
         "rgb" => (ColorMode::Rgb, Tone::Color, depth),
         "grayscale" => (ColorMode::Grayscale, Tone::Gray, depth),
         "bitmap" => (ColorMode::Bitmap, Tone::Bitmap, SampleType::U8),
@@ -196,12 +194,13 @@ pub(crate) fn import(name: &str, bytes: &[u8], ctl: &Interrupt) -> Result<Import
         // Without inks the app showed the grey pixels.
         "duotone" => (ColorMode::Grayscale, Tone::Gray, depth),
         "indexed" if color_table.is_some() => (ColorMode::Indexed, Tone::Color, SampleType::U8),
-        "multichannel" if multichannel.is_some() => (ColorMode::Multichannel, Tone::Color, if depth == SampleType::F32 { SampleType::U8 } else { depth }),
+        "multichannel" if has_ink_channels => (ColorMode::Multichannel, Tone::Color, if depth == SampleType::F32 { SampleType::U8 } else { depth }),
         // As the app did for a mode that lost its colour table or its channel state.
         "indexed" | "multichannel" => (ColorMode::Rgb, Tone::Color, depth),
         "cmyk" | "lab" => {
-            let label = if d.get("mode").and_then(Value::as_str) == Some("cmyk") { "CMYK" } else { "Lab" };
-            warnings.note(&format!("{label} documents of Pigment 0.4 held RGB pixels with a {label} view of them; the document opens in RGB with the same pixels"));
+            let label = if name == "cmyk" { "CMYK" } else { "Lab" };
+            warnings
+                .note(&format!("{label} documents of Pigment 0.4 held RGB pixels with a {label} view of them; the document opens in RGB with the same pixels"));
             (ColorMode::Rgb, Tone::Color, depth)
         }
         other => {
@@ -213,99 +212,68 @@ pub(crate) fn import(name: &str, bytes: &[u8], ctl: &Interrupt) -> Result<Import
     if depth == SampleType::F32 {
         warnings.note("32-bit documents of Pigment 0.4 held display values (sRGB-encoded, not linear light); the values are kept as they were");
     }
+    Model { mode, tone, depth, color_table, duotone }
+}
 
-    let mut document = Document::new(name, size, mode, depth);
-    if name.trim().is_empty()
-        && let Some(own) = d.get("name").and_then(Value::as_str).filter(|s| !s.trim().is_empty())
-    {
-        document.name = own.chars().take(255).collect();
-    }
-    if let Some(dpi) = d.get("dpi").and_then(Value::as_f64).filter(|n| n.is_finite() && *n >= 1.0 && *n <= 1.0e6) {
-        document.resolution_dpi = dpi as f32;
-    }
-    let fmt = document.pixel_format();
-    let mask_fmt = PixelFormat::new(ColorMode::Grayscale, depth, false);
+/// Saved channels (`channels/<id>.bin`) and the selection (`selection.bin`, written only when
+/// something is selected): one byte per pixel each.
+fn channels_and_selection(
+    d: &Map<String, Value>,
+    spots: Option<&Map<String, Value>>,
+    container: &mut Container<'_>,
+    document: &mut Document,
+    warnings: &mut Warnings,
+    ctl: &Interrupt,
+) -> Result<(), IoError> {
+    let size = document.size;
+    let mask_fmt = PixelFormat::new(ColorMode::Grayscale, document.depth, false);
     let canvas = Rect::new(0, 0, size.width as i32, size.height as i32);
-
-    // Layers. A Multichannel document's picture is its ink channels (below); it has no layers.
-    let empty = Vec::new();
-    let layer_list = d.get("layers").and_then(Value::as_array).unwrap_or(&empty);
-    if mode == ColorMode::Multichannel {
-        warnings.note("Multichannel documents open as their ink channels, which are the picture; the pixel layer Pigment 0.4 kept under them is not needed and was left out");
-    } else {
-        let mut reader = LayerReader {
-            container: &mut container,
-            ctl,
-            warnings: &mut warnings,
-            fmt,
-            mask_fmt,
-            tone,
-            tags: meta.and_then(|m| m.get("layerTags")).and_then(Value::as_object),
-            nodes: 0,
-            links: Vec::new(),
-            ids: Vec::new(),
-        };
-        let mut layers = reader.layers(layer_list, 1)?;
-        layers::apply_links(&mut layers, &reader.links);
-        document.layers = layers;
-        if document.layers.is_empty() {
-            warnings.note("the document has no layers");
-        }
-    }
-    ctl.progress(0.8);
-
-    match mode {
-        ColorMode::Indexed => {
-            let transparent = image_mode.and_then(|m| m.get("transparentIndex")).and_then(Value::as_u64).and_then(|i| u8::try_from(i).ok());
-            let colors = color_table.unwrap_or_default();
-            document.color_table = Some(ColorTable { transparent: transparent.filter(|i| usize::from(*i) < colors.len()), colors });
-        }
-        ColorMode::Duotone => document.duotone = duotone,
-        _ => {}
-    }
-
-    // Saved channels: `channels/<id>.bin`, one byte per pixel.
-    let spots = multichannel.and_then(|m| m.get("spots")).and_then(Value::as_object);
-    for ch in d.get("channels").and_then(Value::as_array).unwrap_or(&empty).iter().take(MAX_CHANNELS) {
+    let pixels = size.width as usize * size.height as usize;
+    for ch in d.get("channels").and_then(Value::as_array).map_or(&[][..], Vec::as_slice).iter().take(MAX_CHANNELS) {
         ctl.check().map_err(|_| IoError::Cancelled)?;
         let Some(id) = layers::id_of(ch.get("id")) else { continue };
-        let channel_name = ch.get("name").and_then(Value::as_str).filter(|s| !s.trim().is_empty()).map_or_else(|| format!("Alpha {}", document.channels.len() + 1), str::to_string);
-        let data = match plane(&mut container, &format!("channels/{id}.bin"), size)? {
+        let name = ch
+            .get("name")
+            .and_then(Value::as_str)
+            .filter(|s| !s.trim().is_empty())
+            .map_or_else(|| format!("Alpha {}", document.channels.len() + 1), str::to_string);
+        let data = match plane(container, &format!("channels/{id}.bin"), size)? {
             Ok(data) => data,
             Err(why) => {
-                warnings.note(&format!("the channel \"{channel_name}\" {why} and was left out"));
+                warnings.note(&format!("the channel \"{name}\" {why} and was left out"));
                 continue;
             }
         };
         // An ink of a Multichannel document: `meta.imageMode.multichannel.spots[id]` has its colour.
         // The app drew ink planes with white as no ink; a spot channel holds ink density.
-        let ink = if mode == ColorMode::Multichannel { spots.and_then(|s| s.get(&id)).and_then(|s| s.get("color")).and_then(rgb_of) } else { None };
+        let ink = spots.and_then(|s| s.get(&id)).and_then(|s| s.get("color")).and_then(rgb_of);
         let mut surface = Surface::new(mask_fmt);
-        container.write(&mut surface, canvas, &encode_gray(data.into_iter(), canvas.width() as usize * canvas.height() as usize, mask_fmt, ink.is_some()))?;
-        let mut channel = AlphaChannel::new(channel_name, surface);
+        container.write(&mut surface, canvas, &encode_gray(data.into_iter(), pixels, mask_fmt, ink.is_some()))?;
+        let mut channel = AlphaChannel::new(name, surface);
         if let Some([r, g, b]) = ink {
             channel.spot = Some((Color::rgb(f32::from(r) / 255.0, f32::from(g) / 255.0, f32::from(b) / 255.0), 0.0));
         }
         document.channels.push(channel);
     }
-
-    // The selection: `selection.bin`, one byte per pixel (written only when something is selected).
     if container.contains("selection.bin") {
-        match plane(&mut container, "selection.bin", size)? {
+        match plane(container, "selection.bin", size)? {
             Ok(data) if data.iter().any(|v| *v != 0) => {
                 let mut surface = Surface::new(mask_fmt);
-                container.write(&mut surface, canvas, &encode_gray(data.into_iter(), canvas.width() as usize * canvas.height() as usize, mask_fmt, false))?;
+                container.write(&mut surface, canvas, &encode_gray(data.into_iter(), pixels, mask_fmt, false))?;
                 document.selection = Some(surface);
             }
             Ok(_) => {}
             Err(why) => warnings.note(&format!("the selection {why} and was left out")),
         }
     }
+    Ok(())
+}
 
-    // Guides and the ruler origin: in `store` since 0.4, guides as a plain list before.
+/// Guides and the ruler origin: in `store` since 0.4, guides as a plain list before.
+fn guides_and_origin(d: &Map<String, Value>, document: &mut Document, warnings: &mut Warnings) {
     let store = d.get("store").and_then(Value::as_object);
     let stored = |name: &str| store.and_then(|s| s.get(name)).and_then(|c| c.get("data"));
-    let guides = stored("guides").or_else(|| d.get("guides")).and_then(Value::as_array).unwrap_or(&empty);
+    let guides = stored("guides").or_else(|| d.get("guides")).and_then(Value::as_array).map_or(&[][..], Vec::as_slice);
     let mut artboard_guides = false;
     for g in guides.iter().take(MAX_GUIDES) {
         let Some(pos) = g.get("pos").and_then(Value::as_f64).filter(|n| n.is_finite() && n.abs() <= 1.0e7) else { continue };
@@ -333,18 +301,25 @@ pub(crate) fn import(name: &str, bytes: &[u8], ctl: &Interrupt) -> Result<Import
             document.ruler_origin = [x, y];
         }
     }
-    if let Some(store) = store {
-        let unknown: Vec<String> = store.keys().filter(|k| !matches!(k.as_str(), "guides" | "rulerOrigin")).take(8).map(|k| format!("\"{}\"", k.chars().take(40).collect::<String>())).collect();
-        if !unknown.is_empty() {
-            warnings.note(&format!("document data this version does not know was left out: {}", unknown.join(", ")));
-        }
+    let unknown: Vec<String> = store
+        .into_iter()
+        .flat_map(Map::keys)
+        .filter(|k| !matches!(k.as_str(), "guides" | "rulerOrigin"))
+        .take(8)
+        .map(|k| format!("\"{}\"", k.chars().take(40).collect::<String>()))
+        .collect();
+    if !unknown.is_empty() {
+        warnings.note(&format!("document data this version does not know was left out: {}", unknown.join(", ")));
     }
+}
 
-    // Saved paths, the work path and the global light.
-    for p in d.get("paths").and_then(Value::as_array).unwrap_or(&empty).iter().take(MAX_PATHS) {
+/// Saved paths, the work path and the global light.
+fn paths_and_light(d: &Map<String, Value>, document: &mut Document) {
+    for p in d.get("paths").and_then(Value::as_array).map_or(&[][..], Vec::as_slice).iter().take(MAX_PATHS) {
         let Some(path) = p.get("path").and_then(path::to_path) else { continue };
-        let path_name = p.get("name").and_then(Value::as_str).filter(|s| !s.trim().is_empty()).map_or_else(|| format!("Path {}", document.paths.len() + 1), str::to_string);
-        document.paths.push(NamedPath { name: path_name, path, psd_raw: None });
+        let name =
+            p.get("name").and_then(Value::as_str).filter(|s| !s.trim().is_empty()).map_or_else(|| format!("Path {}", document.paths.len() + 1), str::to_string);
+        document.paths.push(NamedPath { name, path, psd_raw: None });
     }
     document.work_path = d.get("workPath").and_then(path::to_path).filter(|p| !p.is_empty());
     if let Some(light) = d.get("globalLight").filter(|l| l.is_object()) {
@@ -353,31 +328,105 @@ pub(crate) fn import(name: &str, bytes: &[u8], ctl: &Interrupt) -> Result<Import
             document.global_light = GlobalLight { angle: angle.clamp(-360.0, 360.0) as f32, altitude: n("altitude").unwrap_or(30.0).clamp(0.0, 90.0) as f32 };
         }
     }
+}
 
-    // The document profile (the unfinished 0.5): `profile.icc`, or a built-in named by its id.
-    if let Some(profile) = d.get("profile").filter(|p| p.is_object()) {
-        let label: String = profile.get("name").or_else(|| profile.get("id")).and_then(Value::as_str).unwrap_or("").chars().take(80).collect();
-        let fits = |p: &craft_cms::Profile| p.channels() == fmt.mode.color_channels();
-        let embedded = match container.read("profile.icc", 64 << 20) {
-            Ok(Some(icc)) => craft_cms::Profile::parse(&icc).ok().filter(fits).map(|_| icc),
-            Ok(None) | Err(Ok(_)) => None,
-            Err(Err(limit)) => return Err(limit),
-        };
-        let builtin = || {
-            let id = profile.get("wellKnown").and_then(Value::as_str).or_else(|| profile.get("id").and_then(Value::as_str))?;
-            let builtin = craft_cms::Builtin::from_id(id)?.profile();
-            fits(builtin).then(|| builtin.to_bytes().to_vec())
-        };
-        match embedded.or_else(builtin) {
-            Some(icc) => document.icc_profile = Some(Arc::new(icc)),
-            None => warnings.note(&format!("the colour profile \"{label}\" is not in the file or does not fit the image mode; the document opens without a profile")),
+/// The document profile (written by the unfinished 0.5 only): `profile.icc`, or a built-in
+/// named by its id.
+fn profile(d: &Map<String, Value>, container: &mut Container<'_>, document: &mut Document, warnings: &mut Warnings) -> Result<(), IoError> {
+    let Some(profile) = d.get("profile").filter(|p| p.is_object()) else { return Ok(()) };
+    let channels = document.pixel_format().mode.color_channels();
+    let fits = |p: &craft_cms::Profile| p.channels() == channels;
+    let embedded = match container.read("profile.icc", 64 << 20) {
+        Ok(Some(icc)) => craft_cms::Profile::parse(&icc).ok().filter(fits).map(|_| icc),
+        Ok(None) | Err(Ok(_)) => None,
+        Err(Err(limit)) => return Err(limit),
+    };
+    let builtin = || {
+        let id = profile.get("wellKnown").and_then(Value::as_str).or_else(|| profile.get("id").and_then(Value::as_str))?;
+        let builtin = craft_cms::Builtin::from_id(id)?.profile();
+        fits(builtin).then(|| builtin.to_bytes().to_vec())
+    };
+    match embedded.or_else(builtin) {
+        Some(icc) => document.icc_profile = Some(Arc::new(icc)),
+        None => {
+            let label: String = profile.get("name").or_else(|| profile.get("id")).and_then(Value::as_str).unwrap_or("").chars().take(80).collect();
+            warnings.note(&format!("the colour profile \"{label}\" is not in the file or does not fit the image mode; the document opens without a profile"));
         }
     }
+    Ok(())
+}
+
+/// Opens a Pigment 0.1–0.4 document.
+pub(crate) fn import(name: &str, bytes: &[u8], ctl: &Interrupt) -> Result<ImportResult, IoError> {
+    let mut container = Container::open(bytes)?;
+    let description = container.document()?;
+    let d = description.as_object().ok_or_else(|| damaged(format!("{} does not hold a document", container::DOCUMENT)))?;
+    // `readPigment` in lib/io.js: anything else "is not a Pigment document".
+    if d.get("app").and_then(Value::as_str) != Some("pigment") {
+        return Err(damaged(format!("{} does not say it is a Pigment document", container::DOCUMENT)));
+    }
+    let mut warnings = Warnings::default();
+    if let Some(version) = d.get("version").and_then(Value::as_u64).filter(|v| *v > NEWEST_VERSION) {
+        warnings.note(&format!("the file was saved by a newer Pigment (document format {version}); what Pigment 0.4 wrote was read, the rest was left out"));
+    }
+    let size = size_of(d)?;
+    let meta = d.get("meta").and_then(Value::as_object);
+    let image_mode = meta.and_then(|m| m.get("imageMode")).and_then(Value::as_object);
+    let multichannel = image_mode.and_then(|m| m.get("multichannel")).and_then(Value::as_object);
+    let Model { mode, tone, depth, color_table, duotone } = model_of(d, multichannel.is_some(), &mut warnings);
+
+    let mut document = Document::new(name, size, mode, depth);
+    if name.trim().is_empty()
+        && let Some(own) = d.get("name").and_then(Value::as_str).filter(|s| !s.trim().is_empty())
+    {
+        document.name = own.chars().take(255).collect();
+    }
+    if let Some(dpi) = d.get("dpi").and_then(Value::as_f64).filter(|n| n.is_finite() && *n >= 1.0 && *n <= 1.0e6) {
+        document.resolution_dpi = dpi as f32;
+    }
+    match mode {
+        ColorMode::Indexed => {
+            let transparent = image_mode.and_then(|m| m.get("transparentIndex")).and_then(Value::as_u64).and_then(|i| u8::try_from(i).ok());
+            let colors = color_table.unwrap_or_default();
+            document.color_table = Some(ColorTable { transparent: transparent.filter(|i| usize::from(*i) < colors.len()), colors });
+        }
+        ColorMode::Duotone => document.duotone = duotone,
+        _ => {}
+    }
+
+    // Layers. A Multichannel document's picture is its ink channels; it has no layers.
+    if mode == ColorMode::Multichannel {
+        warnings.note("Multichannel documents open as their ink channels, which are the picture; the pixel layer Pigment 0.4 kept under them is not needed and was left out");
+    } else {
+        let mut reader = LayerReader {
+            container: &mut container,
+            ctl,
+            warnings: &mut warnings,
+            fmt: document.pixel_format(),
+            mask_fmt: PixelFormat::new(ColorMode::Grayscale, depth, false),
+            tone,
+            tags: meta.and_then(|m| m.get("layerTags")).and_then(Value::as_object),
+            nodes: 0,
+            links: Vec::new(),
+            ids: Vec::new(),
+        };
+        let mut layers = reader.layers(d.get("layers").and_then(Value::as_array).map_or(&[][..], Vec::as_slice), 1)?;
+        layers::apply_links(&mut layers, &reader.links);
+        document.layers = layers;
+        if document.layers.is_empty() {
+            warnings.note("the document has no layers");
+        }
+    }
+    ctl.progress(0.8);
+
+    let spots = multichannel.filter(|_| mode == ColorMode::Multichannel).and_then(|m| m.get("spots")).and_then(Value::as_object);
+    channels_and_selection(d, spots, &mut container, &mut document, &mut warnings, ctl)?;
+    guides_and_origin(d, &mut document, &mut warnings);
+    paths_and_light(d, &mut document);
+    profile(d, &mut container, &mut document, &mut warnings)?;
 
     // File Info and the camera data.
-    if let Some(meta) = meta
-        && let Some((packet, camera)) = info::xmp_packet(meta)
-    {
+    if let Some((packet, camera)) = meta.and_then(info::xmp_packet) {
         document.metadata.xmp = Some(packet.into());
         if camera {
             warnings.note("the camera data is kept in File Info; the photograph's original EXIF block was not in the file");
