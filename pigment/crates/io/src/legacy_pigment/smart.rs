@@ -181,7 +181,6 @@ pub(crate) fn render(document: &mut Document, budget: &mut u64, warnings: &mut c
     }
     let snapshot = document.clone();
     let fmt = document.pixel_format();
-    let canvas = document.bounds();
     for id in ids {
         let Some(layer) = document.layer_mut(id) else { continue };
         if RENDERER.get().is_some_and(|render| render(&snapshot, layer)) {
@@ -189,13 +188,14 @@ pub(crate) fn render(document: &mut Document, budget: &mut u64, warnings: &mut c
         }
         let LayerContent::Smart(sm) = &mut layer.content else { continue };
         let drawn = source_pixels(&sm.source, fmt, *budget).and_then(|(pixels, rect)| {
+            // The placed source is not clipped to the canvas: a large placement fills memory
+            // (and takes minutes) before anything could fail, so the whole of it is priced, as
+            // the engine prices it.
             let [a, b, c, d, e, f] = sm.transform.m;
-            let corners = [(0.0, 0.0), (f64::from(rect.x1), 0.0), (0.0, f64::from(rect.y1)), (f64::from(rect.x1), f64::from(rect.y1))]
-                .map(|(x, y)| (a * x + c * y + e, b * x + d * y + f));
-            let (x0, x1) = corners.iter().fold((f64::MAX, f64::MIN), |(lo, hi), p| (lo.min(p.0), hi.max(p.0)));
-            let (y0, y1) = corners.iter().fold((f64::MAX, f64::MIN), |(lo, hi), p| (lo.min(p.1), hi.max(p.1)));
-            let placed = Rect::new(x0.floor().max(-1.0e6) as i32, y0.floor().max(-1.0e6) as i32, x1.ceil().min(1.0e6) as i32, y1.ceil().min(1.0e6) as i32);
-            let cost = photocraft_raster::tile_storage_bytes(placed.intersect(&canvas), &fmt);
+            let h = photocraft_algo::transform::Homography([a, c, e, b, d, f, 0.0, 0.0, 1.0]);
+            let (w, ht) = photocraft_algo::transform::warp_output_size(rect, &h)?;
+            let bpp = PixelFormat::new(fmt.mode, fmt.sample, true).bytes_per_pixel() as u64;
+            let cost = w.saturating_mul(ht).saturating_mul(bpp);
             if cost > *budget {
                 return None;
             }
