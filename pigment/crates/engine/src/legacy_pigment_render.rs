@@ -4,7 +4,13 @@
 //! renderer installed here. Every open path installs it before it imports (`jobs::import_options`
 //! and `file_cmds::open::import_result_for_open`; automation's `files` for the CLI and MCP).
 
+use std::sync::mpsc;
+use std::time::Duration;
+
 use photocraft_doc::{Document, Layer};
+use photocraft_raster::{Cancelled, Interrupt};
+
+use crate::jobs::JobCtx;
 
 /// Installs the renderer once per process. Call it before importing a document with
 /// `photocraft_io` directly.
@@ -14,9 +20,33 @@ pub fn install() {
 }
 
 /// Draws `layer` (a smart object of `doc`) from its source and smart filters; `false` when it
-/// cannot, and the importer then places the source without its filters.
-fn render(doc: &Document, layer: &mut Layer) -> bool {
-    crate::smart_cmds::refresh_layer(doc, layer).unwrap_or(false)
+/// cannot, and the importer then places the source without its filters. The filters run under a
+/// job context that a watcher cancels as soon as the import's `ctl` is cancelled: the engine's
+/// filters ask their context, not the importer's interrupt.
+fn render(doc: &Document, layer: &mut Layer, ctl: &Interrupt) -> Result<bool, Cancelled> {
+    ctl.check()?;
+    let ctx = JobCtx::new();
+    let drawn = std::thread::scope(|s| {
+        let (finished, wait) = mpsc::channel::<()>();
+        let ctx = &ctx;
+        s.spawn(move || {
+            // Until the drawing is finished (the sender is dropped), or the import is cancelled.
+            while let Err(mpsc::RecvTimeoutError::Timeout) = wait.recv_timeout(Duration::from_millis(10)) {
+                if ctl.cancelled() {
+                    ctx.cancel();
+                    return;
+                }
+            }
+        });
+        let drawn = crate::smart_cmds::refresh_layer_with(doc, layer, ctx);
+        drop(finished);
+        drawn
+    });
+    if ctx.cancelled() {
+        return Err(Cancelled);
+    }
+    ctl.check()?;
+    Ok(drawn.unwrap_or(false))
 }
 
 #[cfg(test)]
@@ -71,6 +101,41 @@ mod tests {
         assert!(kept <= limit, "{} smart objects keep {kept} bytes", caches.len());
         assert!(!caches.is_empty());
         assert_eq!(named(&r.warnings, "contents could not be drawn"), 16 - caches.len(), "{:?}", r.warnings);
+    }
+
+    /// The smart filters of a smart object drawn when a Pigment 0.4 document opens stop when the
+    /// open is cancelled: before the smart objects are drawn, and while their filters run.
+    #[test]
+    fn cancelling_the_open_stops_the_smart_filters() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        use std::time::{Duration, Instant};
+
+        super::install();
+        // A 64 px image placed 1024 px wide under eight slow filters (each takes seconds).
+        let filters = [r#"{"kind":"median","params":{"radius":500},"enabled":true}"#; 8].join(",");
+        let layer =
+            format!(r#"{{"id":"s","name":"Slow","type":"smart","source":{{"kind":"image","name":"x"}},"transform":[16,0,0,16,0,0],"filters":[{filters}]}}"#);
+        let bytes = with_source(&opaque_png(), &[layer]);
+        // Cancelled `after` the importer reports 0.8, which it does right before the smart objects.
+        for after in [Duration::ZERO, Duration::from_millis(300)] {
+            let progress = AtomicU32::new(0);
+            let reached = std::sync::OnceLock::new();
+            let report = |p: f32| {
+                progress.fetch_max(p.to_bits(), Ordering::Relaxed);
+            };
+            let cancel = || {
+                if f32::from_bits(progress.load(Ordering::Relaxed)) < 0.8 {
+                    return false;
+                }
+                reached.get_or_init(Instant::now).elapsed() >= after
+            };
+            let ctl = photocraft_raster::Interrupt::new(&cancel, &report);
+            let started = Instant::now();
+            let r = photocraft_io::import_with("slow.pigment", &bytes, &ctl);
+            assert!(matches!(r, Err(photocraft_io::IoError::Cancelled)), "{after:?}: {:?}", r.map(|r| r.warnings));
+            let late = reached.get().map(|at| at.elapsed()).unwrap_or_else(|| started.elapsed()).saturating_sub(after);
+            assert!(late < Duration::from_secs(2), "{after:?}: stopped {late:?} after the cancel");
+        }
     }
 
     fn fixture(name: &str) -> String {

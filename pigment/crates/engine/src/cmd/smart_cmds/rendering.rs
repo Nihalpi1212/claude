@@ -415,6 +415,14 @@ pub fn refresh_layer(doc: &Document, l: &mut Layer) -> Result<bool> {
     refresh_layer_in(doc, l, &JobCtx::new())
 }
 
+/// Pigment: [`refresh_layer`] under `ctx`, which the caller can cancel (`legacy_pigment_render`).
+pub fn refresh_layer_with(doc: &Document, l: &mut Layer, ctx: &JobCtx) -> Result<bool> {
+    if matches!(&l.content, LayerContent::Smart(sm) if !unapplied_filters(sm).is_empty()) {
+        return Ok(false);
+    }
+    refresh_layer_in(doc, l, ctx)
+}
+
 pub(super) fn unapplied_filters(sm: &SmartObject) -> Vec<String> {
     sm.smart_filters
         .iter()

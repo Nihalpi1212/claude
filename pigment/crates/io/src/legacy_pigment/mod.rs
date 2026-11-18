@@ -549,7 +549,7 @@ fn read(name: &str, container: &mut Container<'_>, ctl: &Interrupt, nesting: usi
     if skipped > 0 {
         warnings.note("some type layers are too large to draw within the memory limit; they show once they are edited");
     }
-    smart::render(&mut document, &smart_sources, &mut container.pixel_budget, &mut warnings);
+    smart::render(&mut document, &smart_sources, &mut container.pixel_budget, &mut warnings, ctl)?;
     ctl.progress(0.95);
 
     // File Info and the camera data.

@@ -17,7 +17,7 @@ use std::sync::{Arc, OnceLock};
 use photocraft_color::PixelFormat;
 use photocraft_doc::{Document, Layer, LayerContent, SmartContentsId, SmartObject, SmartSource, StackMode};
 use photocraft_geom::{Affine, Rect};
-use photocraft_raster::Surface;
+use photocraft_raster::{Cancelled, Interrupt, Surface};
 use serde_json::{Map, Value};
 
 use super::container::{MAX_ENTRY_BYTES, MAX_SIDE, Rgba8, png_size};
@@ -45,9 +45,11 @@ pub(crate) fn source_bounds(shared: &[Shared]) -> Vec<(SmartContentsId, Rect)> {
     shared.iter().filter_map(|s| Some((s.contents, s.bounds?))).collect()
 }
 
-/// Draws a smart object's appearance from its source and smart filters, as the engine draws it.
-/// The engine installs it ([`set_renderer`]): this crate has no filters of its own.
-pub type Renderer = fn(&Document, &mut Layer) -> bool;
+/// Draws a smart object's appearance from its source and smart filters, as the engine draws it;
+/// `Ok(false)` when it cannot, and `Err` when the import is cancelled meanwhile (it stops as soon
+/// as the interrupt says so). The engine installs it ([`set_renderer`]): this crate has no
+/// filters of its own.
+pub type Renderer = fn(&Document, &mut Layer, &Interrupt) -> Result<bool, Cancelled>;
 
 static RENDERER: OnceLock<Renderer> = OnceLock::new();
 
@@ -198,15 +200,23 @@ fn placement_cost(rect: Rect, transform: &Affine, fmt: PixelFormat) -> Option<u6
 /// its filters, which is reported. Each placement is priced against what is left of `budget`
 /// before it is drawn, from its source's size in `sources`, and charged once drawn: a large
 /// placement fills memory (and takes minutes) before anything could fail, and instances of one
-/// source each keep their own. One that does not fit stays undrawn, reported.
-pub(crate) fn render(document: &mut Document, sources: &[(SmartContentsId, Rect)], budget: &mut u64, warnings: &mut crate::ora::Warnings) {
+/// source each keep their own. One that does not fit stays undrawn, reported. `ctl` is asked
+/// before each smart object, and the engine's renderer asks it while it draws.
+pub(crate) fn render(
+    document: &mut Document,
+    sources: &[(SmartContentsId, Rect)],
+    budget: &mut u64,
+    warnings: &mut crate::ora::Warnings,
+    ctl: &Interrupt,
+) -> Result<(), IoError> {
     let ids = smart_layers(&document.layers);
     if ids.is_empty() {
-        return;
+        return Ok(());
     }
     let snapshot = document.clone();
     let fmt = document.pixel_format();
     for id in ids {
+        ctl.check().map_err(|_| IoError::Cancelled)?;
         let Some(layer) = document.layer_mut(id) else { continue };
         let LayerContent::Smart(sm) = &layer.content else { continue };
         let cost = sources.iter().find(|(c, _)| *c == sm.contents_id).and_then(|(_, rect)| placement_cost(*rect, &sm.transform, fmt));
@@ -215,7 +225,9 @@ pub(crate) fn render(document: &mut Document, sources: &[(SmartContentsId, Rect)
             warnings.layer(&name, "the smart object's contents could not be drawn; they show once the smart object is edited");
             continue;
         };
-        if RENDERER.get().is_some_and(|render| render(&snapshot, layer)) {
+        if let Some(render) = RENDERER.get()
+            && render(&snapshot, layer, ctl).map_err(|_| IoError::Cancelled)?
+        {
             *budget = budget.saturating_sub(cost);
             continue;
         }
@@ -237,6 +249,7 @@ pub(crate) fn render(document: &mut Document, sources: &[(SmartContentsId, Rect)
             }
         }
     }
+    Ok(())
 }
 
 fn smart_layers(layers: &[Layer]) -> Vec<photocraft_doc::LayerId> {
