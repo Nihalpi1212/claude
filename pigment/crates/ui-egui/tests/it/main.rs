@@ -48,6 +48,8 @@ mod healing_reset_tip;
 #[allow(dead_code)]
 mod interactive_bench_reporting;
 mod layout_perf;
+// Pigment: documents of Pigment 0.1–0.4.
+mod legacy_pigment;
 mod live_stroke_canvas;
 mod magnetic_lasso_right_click;
 mod marching_ants_pixels;

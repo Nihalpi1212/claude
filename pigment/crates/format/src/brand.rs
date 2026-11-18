@@ -4,8 +4,8 @@
 //! exchange with PhotoCraft; only the extension and the names differ.
 //!
 //! Pigment 0.1 to 0.4 were a different program (an Electron app) whose `.pigment` files hold
-//! another format: [`is_legacy_pigment`] tells them apart, and opening one fails with
-//! [`LEGACY_PIGMENT_MESSAGE`] until an importer is added.
+//! another format: [`is_legacy_pigment`] tells them apart, and `photocraft-io` converts them
+//! (`legacy_pigment`). One that cannot be read fails with [`LEGACY_PIGMENT_DAMAGED`] and why.
 
 /// The product name users see.
 pub const NAME: &str = "Pigment";
@@ -26,8 +26,9 @@ pub const MIME: &str = "application/x-pigment";
 /// What file managers call [`EXTENSION`] files.
 pub const DOCUMENT_KIND: &str = "Pigment Image";
 
-/// What opening a document saved by Pigment 0.1 to 0.4 says (see [`is_legacy_pigment`]).
-pub const LEGACY_PIGMENT_MESSAGE: &str = "This file was saved by Pigment 0.4 or earlier. Opening these files is coming in a later update.";
+/// How the error for a document saved by Pigment 0.1 to 0.4 that cannot be read begins (see
+/// [`is_legacy_pigment`]); the reason follows after a colon.
+pub const LEGACY_PIGMENT_DAMAGED: &str = "This Pigment 0.4 file is damaged";
 
 /// `Pigment 0.5.0 (based on PhotoCraft 0.23.1)`: `--version`, About and logs.
 pub fn version_line() -> String {
