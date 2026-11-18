@@ -978,6 +978,25 @@ fn what_a_server_echoes_never_puts_a_secret_in_a_message() {
     assert_eq!(w.method(), Some(Method::Chatgpt), "an error that is not fatal keeps the sign-in");
 }
 
+/// A token the provider refused is as secret as the one that replaced it: when the retry's
+/// answer quotes the refused token, it is taken out too (the stored tokens are the new ones by
+/// then, so nothing else would know it).
+#[test]
+fn a_refused_token_quoted_after_the_retry_is_taken_out() {
+    let server = MockServer::start(|g| match g.path.as_str() {
+        "/api/accounts/oauth/token" => Reply::ok(json!({"access_token": "ACCESS-TOKEN-2", "refresh_token": "REFRESH-TOKEN-2", "expires_in": 3600})),
+        _ if bearer(g) == "ACCESS-TOKEN-1" => Reply::json(401, json!({"error": {"message": "expired", "code": "token_expired"}})),
+        _ => Reply::json(400, json!({"error": {"message": "ACCESS-TOKEN-1 was refused a moment ago, and this request is bad", "code": "nope"}})),
+    });
+    let Some(w) = World::with_server("stale-echo", server) else { return };
+    let now = w.chatgpt.now();
+    let rec = json!({"clientId": "c", "accessToken": "ACCESS-TOKEN-1", "refreshToken": "REFRESH-TOKEN-1", "expiresAt": now + 3600.0});
+    w.file.set_secret(chatgpt::ACCOUNT, &rec.to_string()).unwrap();
+    let e = w.chat("hi").unwrap_err();
+    assert_eq!(w.stored().unwrap()["accessToken"], "ACCESS-TOKEN-2", "the token was refreshed");
+    assert!(e.message.contains("[redacted]") && !e.message.contains("ACCESS-TOKEN"), "{e:?}");
+}
+
 /// The same for an answer that succeeds: a model's text that quotes the token comes back
 /// without it (the Assistant shows that text).
 #[test]
