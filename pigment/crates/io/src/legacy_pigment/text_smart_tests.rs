@@ -121,12 +121,21 @@ fn mixed_runs_keep_their_characters_and_paragraphs() {
     let paras = t.paragraph_runs();
     assert_eq!(paras.iter().map(|p| p.len).collect::<Vec<_>>(), [16, 11]);
     let p = &paras[0].style;
-    assert_eq!((p.align, p.start_indent_pt, p.end_indent_pt, p.first_line_indent_pt, p.space_before_pt, p.space_after_pt, p.hyphenate), (TextAlign::JustifyLeft, 2.0, 1.0, 3.0, 1.5, 2.5, true));
+    assert_eq!(
+        (p.align, p.start_indent_pt, p.end_indent_pt, p.first_line_indent_pt, p.space_before_pt, p.space_after_pt, p.hyphenate),
+        (TextAlign::JustifyLeft, 2.0, 1.0, 3.0, 1.5, 2.5, true)
+    );
     assert_eq!((paras[1].style.align, paras[1].style.auto_leading), (TextAlign::Right, 1.4));
     assert_eq!(t.antialias, AntiAlias::Crisp);
     // What PhotoCraft's type does not have is named, once.
     let w = r.warnings.join("\n");
-    for what in ["No Break", "bulleted and numbered lists", "Roman Hanging Punctuation", "Justification word, letter and glyph spacing", "stroke differed between characters"] {
+    for what in [
+        "No Break",
+        "bulleted and numbered lists",
+        "Roman Hanging Punctuation",
+        "Justification word, letter and glyph spacing",
+        "stroke differed between characters",
+    ] {
         assert!(w.contains(what), "{what}: {w}");
     }
 }
@@ -240,7 +249,9 @@ fn type_and_smart_objects_save_in_the_new_format_and_open_again() {
         assert_eq!(again.layers.len(), first.layers.len(), "{name}");
         for (a, b) in again.layers.iter().zip(&first.layers) {
             match (&a.content, &b.content) {
-                (LayerContent::Text(x), LayerContent::Text(y)) => assert_eq!((&x.text, &x.runs, &x.paragraphs, &x.shape, x.transform), (&y.text, &y.runs, &y.paragraphs, &y.shape, y.transform), "{name}"),
+                (LayerContent::Text(x), LayerContent::Text(y)) => {
+                    assert_eq!((&x.text, &x.runs, &x.paragraphs, &x.shape, x.transform), (&y.text, &y.runs, &y.paragraphs, &y.shape, y.transform), "{name}")
+                }
                 (LayerContent::Smart(x), LayerContent::Smart(y)) => {
                     assert_eq!((&x.source, &x.smart_filters, x.transform, x.contents_id), (&y.source, &y.smart_filters, y.transform, y.contents_id), "{name}")
                 }

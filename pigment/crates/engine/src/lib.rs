@@ -28,9 +28,11 @@ pub mod hidden_target;
 pub mod inspect;
 pub mod installed_profiles;
 pub mod jobs;
+// Pigment: smart objects of Pigment 0.1–0.4 documents are drawn by the engine.
 pub mod kys;
 pub mod layer_place;
 pub mod layer_style;
+mod legacy_pigment_render;
 pub mod link_watch;
 pub mod malloc_tuning;
 pub mod memory;

@@ -77,10 +77,15 @@ ZIP with `document.json` and `layers/<id>.png` and no `manifest.json`.
 `photocraft_format::brand::is_legacy_pigment` recognises one by its content, whatever it is called,
 and every open path (File › Open and Open As, Place, Open Recent, the CLI, MCP, scripts) reaches
 `crates/io/src/legacy_pigment/` before any other importer. Its `import` converts the document
-("Opening documents from Pigment 0.1–0.4" below says what, so far). One that cannot be read at all
-fails with `IoError::LegacyPigment`, whose message is "This Pigment 0.4 file is damaged: " and the
-reason. The opened document is `source_read_only`, like the other import-only formats: File › Save
-asks for a new file, so the old one is never overwritten with the new format unasked.
+("Opening documents from Pigment 0.1–0.4" below says what). One that cannot be read at all fails
+with `IoError::LegacyPigment`, whose message is "This Pigment 0.4 file is damaged: " and the reason.
+The opened document keeps its file (`ImportResult::source_read_only` is false) and carries an
+import report (`Metadata::import_conversion`, source format `pigment-0.1-0.4`) that says where it
+came from and lists what was approximated or left out. In the interface, the first File › Save over
+a file that is still a Pigment 0.1–0.4 document asks "Save in the new Pigment format? Pigment 0.4
+will no longer be able to open this file." (Save / Save As… / Cancel, with "Don't show again";
+`crates/ui-egui/src/dialogs/legacy_save_prompt.rs`). The engine's `file.save` (scripts, actions,
+agents, the CLI) writes without asking.
 
 ### The settings folder and Pigment 0.1–0.4
 
@@ -290,42 +295,78 @@ row, a stored sign-in is ignored, API keys are untouched, and the tests still pa
 ### Opening documents from Pigment 0.1–0.4
 
 The importer for the `.pigment` files of the JavaScript app, in `crates/io/src/legacy_pigment/`
-(Pigment's own folder): `mod.rs` (the document), `container.rs` (the ZIP, `document.json` and the
-size limits), `layers.rs` (the layer tree, masks, advanced blending, bit depth and image modes of
-the pixels), `adjust.rs` (adjustment layers, with the app's Color Lookup looks), `gradient.rs`
-(the app's gradient model: midpoints, smoothness, the five interpolation methods, noise),
-`paint.rs` (fills, shapes, vector masks and the patterns they use), `styles.rs` (layer styles),
-`path.rs`, `blend.rs`, `info.rs` (File Info as an XMP packet), `tests.rs` and
-`layer_kinds_tests.rs`. Its fixtures were written by the JavaScript app's own writer:
-`crates/io/tests/fixtures/pigment-0.4/` with `make-fixtures.mjs`, `make-fixtures-layers.mjs` and a
-README that names the commits; next to each fixture with adjustment, fill or shape layers, vector
-masks, styles or blending is `<name>.png`, the app's own picture of it, and the tests compare the
-opened document's picture with it.
+(Pigment's own folder): `mod.rs` (the document and the import report), `container.rs` (the ZIP,
+`document.json`, the size limits and the budget nested documents share), `layers.rs` (the layer
+tree, masks, advanced blending, bit depth and image modes of the pixels), `adjust.rs` (adjustment
+layers, with the app's Color Lookup looks), `gradient.rs` (the app's gradient model: midpoints,
+smoothness, the five interpolation methods, noise), `paint.rs` (fills, shapes, vector masks and the
+patterns they use), `styles.rs` (layer styles), `text.rs` (type layers), `smart.rs` (smart objects
+and their sources), `filters.rs` (smart filters: the app's filter kinds and `adjust:<kind>` as
+PhotoCraft commands with their parameters), `path.rs`, `blend.rs`, `info.rs` (File Info as an XMP
+packet), `tests.rs`, `layer_kinds_tests.rs` and `text_smart_tests.rs`. Its fixtures were written by
+the JavaScript app's own writer: `crates/io/tests/fixtures/pigment-0.4/` with `make-fixtures.mjs`,
+`make-fixtures-layers.mjs`, `make-fixtures-l3.mjs` and a README that names the commits; next to
+each fixture with adjustment, fill or shape layers, vector masks, styles, blending or smart objects
+is `<name>.png`, the app's own picture of it, and the tests compare the opened document's picture
+with it.
 
-Converted so far: the document (size, resolution, the image modes Bitmap, Grayscale, Duotone,
-Indexed Color and RGB, 8, 16 and 32 bits per channel, the profile the unfinished 0.5 wrote), raster layers and groups (name, visibility, opacity, fill opacity, blend mode, locks,
-clipping, folding), layer masks with density and feather (the mask is the PNG's alpha, as the app
-masked with it), the bottom "Background" as the Background, adjustment layers (every kind the app
-had; Color and Vibrance, Clarity and Dehaze and Grain are kept as `pcJS` blocks that draw nothing
-until PhotoCraft has them), fill layers (solid, gradient with its geometry, pattern), shape layers
-(path operations, fill, stroke with alignment, caps, joins and dashes, live rectangles, ellipses,
+**Converted exactly** (the same settings): the document (size, resolution, the image modes Bitmap,
+Grayscale, Duotone, Indexed Color and RGB, 8, 16 and 32 bits per channel, the profile the
+unfinished 0.5 wrote), raster layers and groups (name, visibility, opacity, fill opacity, blend
+mode, locks, clipping, folding), layer masks with density and feather (the mask is the PNG's alpha,
+as the app masked with it), the bottom "Background" as the Background, adjustment layers (every
+kind the app had), fill layers (solid, gradient with its geometry, pattern), shape layers (path
+operations, fill, stroke with alignment, caps, joins and dashes, live rectangles, ellipses,
 triangles, polygons, stars and lines where PhotoCraft has them; a pattern-filled shape is a pattern
 fill layer with a vector mask), vector masks (Reveal All as an inverted path), layer styles (all
 ten effects, several drop shadows, inner shadows, overlays and strokes, contours, Hide All
 Effects), advanced blending (channels, knockout, the four options, Blend If with split points),
-colour labels and link sets, the selection, saved channels, guides with their colours and the
-ruler origin, saved paths and the work path, the global light, and File Info with the camera data.
-CMYK and Lab documents open in RGB (the JavaScript app kept RGB pixels with a mode flag), and so do
-Multichannel ones, with their inks as spot channels. **Not converted yet**, each opening as an
-empty layer in its place and listed in the import report: text layers, smart objects and their
-filters. The active layer is not carried: `ImportResult` has no place for it.
+type layers as editable PhotoCraft type (0.4's rich text: runs over UTF-16 units become runs over
+UTF-8 bytes, every character attribute PhotoCraft has, paragraph alignment, indents, spacing, auto
+leading and hyphenation, point type, paragraph boxes, type on a path, stacked vertical type; 0.1–0.3's
+one `font` read as 0.4 read it; sizes, leading and shifts from pixels to points), smart objects (a
+nested document opened by this importer up to 8 deep and kept as a `.pcraft` source, as Convert to
+Smart Object makes it; an image source keeps its PNG; instances sharing a source share one
+`SmartContentsId`; the transform, Disable Smart Filters, Stack Mode), smart filters PhotoCraft has
+(the table in `filters.rs`), colour labels and link sets, the selection, saved channels, guides
+with their colours and the ruler origin, saved paths and the work path, the global light, and File
+Info with the camera data.
+
+**Approximated** (converted, drawn a little differently; each layer named in the import report):
+adjustments PhotoCraft computes as Photoshop does, some effects, type (laid out by PhotoCraft's type
+engine; the first baseline and the alignment of point type are placed where the app drew them,
+measured with that engine; a stroke on the characters becomes an outside Stroke effect of half its
+width, which is what showed under the glyphs' fill), turned and scaled smart objects (bicubic, the
+app used the canvas's smoothing), smart filters (PhotoCraft's filters), CMYK and Lab documents in
+RGB (the JavaScript app kept RGB pixels with a mode flag), Multichannel in RGB with its inks as spot
+channels. 0.4's "vertical" type was horizontal type turned a quarter by its matrix and stays so.
+
+**Reported as not converted** (a line each in the import warnings and the report): Color and
+Vibrance, Clarity and Dehaze and Grain (kept as `pcJS` blocks that draw nothing until PhotoCraft has
+them), smart filters PhotoCraft has no counterpart for, type settings it lacks (lists, hanging
+punctuation, justification spacing, hyphenation settings, tab stops, No Break, Fractional Widths
+off), a stroke on a pattern-filled shape, smart objects nested more than 8 deep, pieces missing from
+a damaged file. The active layer is not carried: `ImportResult` has no place for it.
+
+The file holds no pixels for type and smart objects. Type is drawn by
+`text_import::prepare_within` (as for a PSD without type pixels). Smart objects are drawn by the
+engine's own renderer, with its filters: `photocraft_io::legacy_pigment::set_smart_object_renderer`
+takes `smart_cmds::refresh_layer`, installed by `crates/engine/src/legacy_pigment_render.rs` (Pigment's
+own file) from `jobs::import_options` and `file_cmds::open::import_result_for_open`, which every open
+path calls first. Without it (photocraft-io alone) the source is placed without its filters.
 
 | Upstream file | Hook |
 |---|---|
 | `crates/io/src/lib.rs` | `pub mod legacy_pigment;`, the `IoError::LegacyPigment(String)` variant, `Route::LegacyPigment` with its line in `route`, `import_stages` (two) and `import_preflight` |
 | `crates/io/Cargo.toml` | `craft-zip` under `[dependencies]` (it was a dev-dependency; `Cargo.lock` is unchanged) |
-| `crates/ui-egui/src/app/files.rs` | the two places that mark an Affinity source read-only also ask `photocraft_io::legacy_pigment::is_legacy` (the open paths that do not go through the engine's open job, which takes `ImportResult::source_read_only` itself) |
+| `crates/engine/src/lib.rs` | `mod legacy_pigment_render;` |
+| `crates/engine/src/jobs.rs` | one line at the top of `import_options`: `crate::legacy_pigment_render::install();` |
+| `crates/engine/src/cmd/file_cmds/open.rs` | the same line in `import_result_for_open` |
+| `crates/ui-egui/src/app/files.rs` | `save_in_place` asks `legacy_save_prompt::intercept` first; its old body is `save_in_place_unasked` |
+| `crates/ui-egui/src/dialogs.rs` | `pub mod legacy_save_prompt;`; `save_prompt`, `save_prompt_body` and `save_prompt_confirm` take the place of the disk-change prompt's arms in `command_body` and `confirm_command` and dispatch to either; the Save / Cancel / Save As… buttons; the `ROUTES` entry; `file_command` names `file.save` for it |
+| `crates/ui-egui/src/lib.rs` | `pub use dialogs::legacy_save_prompt;` |
 | `crates/ui-egui/tests/it/main.rs` | `mod legacy_pigment;` |
+| `docs/user/guides/index.md` | the link to `open-pigment-0-4-documents.md` (Pigment's own page) |
 
 ## Keeping the rebrand: `scripts/pigment-rebrand.py`
 

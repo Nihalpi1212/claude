@@ -34,7 +34,9 @@ fn filter(kind: &str, p: &Map<String, Value>) -> Option<(String, Value)> {
             let method = if text(p, "method", "spin") == "zoom" { "zoom" } else { "spin" };
             ("filter.blur.radialBlur", json!({"amount": n("amount", 10.0).clamp(1.0, 100.0), "method": method, "centerX": c("x"), "centerY": c("y")}))
         }
-        "surface-blur" => ("filter.blur.surfaceBlur", json!({"radius": n("radius", 5.0).clamp(1.0, 100.0), "threshold": n("threshold", 15.0).clamp(2.0, 255.0)})),
+        "surface-blur" => {
+            ("filter.blur.surfaceBlur", json!({"radius": n("radius", 5.0).clamp(1.0, 100.0), "threshold": n("threshold", 15.0).clamp(2.0, 255.0)}))
+        }
         // The app's Sharpen was an Unsharp Mask of radius 1 with the amount it was given.
         "sharpen" => ("filter.sharpen.unsharpMask", json!({"amount": n("amount", 50.0).clamp(1.0, 500.0), "radius": 1.0, "threshold": 0.0})),
         "unsharp-mask" => (
@@ -57,7 +59,9 @@ fn filter(kind: &str, p: &Map<String, Value>) -> Option<(String, Value)> {
         ),
         "median" => ("filter.noise.median", json!({"radius": n("radius", 1.0).clamp(1.0, 500.0)})),
         "despeckle" => ("filter.noise.despeckle", json!({})),
-        "dust-scratches" => ("filter.noise.dustAndScratches", json!({"radius": n("radius", 1.0).clamp(1.0, 500.0), "threshold": n("threshold", 0.0).clamp(0.0, 255.0)})),
+        "dust-scratches" => {
+            ("filter.noise.dustAndScratches", json!({"radius": n("radius", 1.0).clamp(1.0, 500.0), "threshold": n("threshold", 0.0).clamp(0.0, 255.0)}))
+        }
         "mosaic" => ("filter.pixelate.mosaic", json!({"cellSize": n("size", 10.0).clamp(2.0, 200.0)})),
         "fragment" => ("filter.pixelate.fragment", json!({})),
         "facet" => ("filter.pixelate.facet", json!({})),
@@ -77,7 +81,10 @@ fn filter(kind: &str, p: &Map<String, Value>) -> Option<(String, Value)> {
             } else {
                 "transparent"
             };
-            ("filter.other.offset", json!({"horizontal": n("dx", 0.0).clamp(-1.0e6, 1.0e6).round(), "vertical": n("dy", 0.0).clamp(-1.0e6, 1.0e6).round(), "undefinedAreas": undefined}))
+            (
+                "filter.other.offset",
+                json!({"horizontal": n("dx", 0.0).clamp(-1.0e6, 1.0e6).round(), "vertical": n("dy", 0.0).clamp(-1.0e6, 1.0e6).round(), "undefinedAreas": undefined}),
+            )
         }
         "twirl" => ("filter.distort.twirl", json!({"angle": n("angle", 50.0).clamp(-999.0, 999.0)})),
         "pinch" => ("filter.distort.pinch", json!({"amount": n("amount", 50.0).clamp(-100.0, 100.0)})),
@@ -140,7 +147,9 @@ const SELECTIVE_RANGES: [&str; 9] = ["reds", "yellows", "greens", "cyans", "blue
 fn adjustment(a: &Adjustment) -> Option<(&'static str, Value)> {
     Some(match a {
         Adjustment::Invert => ("invert", json!({})),
-        Adjustment::BrightnessContrast { brightness, contrast, legacy } => ("brightnessContrast", json!({"brightness": brightness, "contrast": contrast, "legacy": legacy})),
+        Adjustment::BrightnessContrast { brightness, contrast, legacy } => {
+            ("brightnessContrast", json!({"brightness": brightness, "contrast": contrast, "legacy": legacy}))
+        }
         Adjustment::Threshold { level } => ("threshold", json!({"level": (level * 255.0).round().clamp(1.0, 255.0)})),
         Adjustment::Posterize { levels } => ("posterize", json!({"levels": levels})),
         Adjustment::Exposure { exposure, offset, gamma } => ("exposure", json!({"exposure": exposure, "offset": offset, "gamma": gamma})),
@@ -271,7 +280,10 @@ mod tests {
         let mut notes = Vec::new();
         let f = smart_filters(list.as_array().unwrap(), &mut notes);
         let ids: Vec<&str> = f.iter().map(|f| f.command.as_str()).collect();
-        assert_eq!(ids, ["filter.blur.gaussianBlur", "filter.sharpen.unsharpMask", "image.adjustments.levels", "image.adjustments.invert", "filter.other.offset"]);
+        assert_eq!(
+            ids,
+            ["filter.blur.gaussianBlur", "filter.sharpen.unsharpMask", "image.adjustments.levels", "image.adjustments.invert", "filter.other.offset"]
+        );
         assert_eq!(f[0].params, json!({"radius": 1.5}));
         assert_eq!(f[1].params, json!({"amount": 80.0, "radius": 1.0, "threshold": 2.0}));
         assert_eq!((f[2].params["inBlack"].as_f64(), f[2].params["inWhite"].as_f64(), f[2].params["gamma"].as_f64()), (Some(20.0), Some(220.0), Some(1.4)));
@@ -282,7 +294,23 @@ mod tests {
 
     #[test]
     fn every_adjustment_kind_has_command_parameters() {
-        for kind in ["brightness-contrast", "levels", "curves", "exposure", "vibrance", "hue-saturation", "color-balance", "black-white", "photo-filter", "channel-mixer", "invert", "posterize", "threshold", "gradient-map", "selective-color"] {
+        for kind in [
+            "brightness-contrast",
+            "levels",
+            "curves",
+            "exposure",
+            "vibrance",
+            "hue-saturation",
+            "color-balance",
+            "black-white",
+            "photo-filter",
+            "channel-mixer",
+            "invert",
+            "posterize",
+            "threshold",
+            "gradient-map",
+            "selective-color",
+        ] {
             let a = adjust::to_adjustment(kind, &json!({}), &mut Vec::new());
             assert!(adjustment(&a).is_some(), "{kind}");
         }

@@ -98,11 +98,10 @@ pub(crate) struct Container<'a> {
 
 impl<'a> Container<'a> {
     pub(crate) fn open(bytes: &'a [u8], budget: Budget) -> Result<Self, IoError> {
-        let archive =
-            craft_zip::Archive::open(bytes, craft_zip::Limits { max_entries: MAX_ENTRIES, max_total_bytes: budget.bytes }).map_err(|e| match e {
-                craft_zip::Error::TooManyEntries { .. } => too_large(&e.to_string()),
-                e => damaged(e.to_string()),
-            })?;
+        let archive = craft_zip::Archive::open(bytes, craft_zip::Limits { max_entries: MAX_ENTRIES, max_total_bytes: budget.bytes }).map_err(|e| match e {
+            craft_zip::Error::TooManyEntries { .. } => too_large(&e.to_string()),
+            e => damaged(e.to_string()),
+        })?;
         Ok(Container { archive, pixel_budget: budget.pixels, bytes_left: budget.bytes })
     }
 

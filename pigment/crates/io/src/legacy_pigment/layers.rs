@@ -246,7 +246,10 @@ impl LayerReader<'_, '_, '_> {
                 // Drawn with the glyphs, under the layer's own styles.
                 layer.effects.items.insert(0, stroke);
                 if layer.effects.items.len() > 1 {
-                    self.warnings.layer(&layer.name, "the type's stroke and its layer styles are drawn together as layer effects, which can differ a little from Pigment 0.4");
+                    self.warnings.layer(
+                        &layer.name,
+                        "the type's stroke and its layer styles are drawn together as layer effects, which can differ a little from Pigment 0.4",
+                    );
                 }
             }
             if let Some(id) = id {

@@ -131,8 +131,7 @@ impl PhotocraftApp {
             self,
             open_prompt::Held {
                 doc,
-                // Pigment: a Pigment 0.1–0.4 document is import-only too (Save asks for a new file).
-                read_only: photocraft_io::affinity::is_affinity(bytes) || photocraft_io::legacy_pigment::is_legacy(bytes),
+                read_only: photocraft_io::affinity::is_affinity(bytes),
                 damage_pending: damaged,
                 name: name.to_string(),
                 path: path.map(str::to_string),
@@ -183,8 +182,7 @@ impl PhotocraftApp {
         // The caller records the path it read from.
         self.session.add_document(doc, None);
         if let Some(st) = self.session.active_mut() {
-            // Pigment: a Pigment 0.1–0.4 document is import-only too.
-            st.source_read_only = photocraft_io::affinity::is_affinity(bytes) || photocraft_io::legacy_pigment::is_legacy(bytes);
+            st.source_read_only = photocraft_io::affinity::is_affinity(bytes);
         }
         self.sync_views();
         self.ui.status = crate::i18n::fmt(tl!("Opened {name}"), &[("name", name)]);
@@ -316,6 +314,15 @@ impl PhotocraftApp {
     /// Targa, DDS or JPEG answer in `choices` (a replayed or scripted Save of a flat file brings
     /// its own).
     pub(crate) fn save_in_place(&mut self, path: String, choices: FormatChoices) -> Result<Value, String> {
+        // Pigment: the first Save over a file of Pigment 0.1–0.4 asks first (`legacy_save_prompt`).
+        if let Some(r) = crate::legacy_save_prompt::intercept(self, &path, choices) {
+            return r;
+        }
+        self.save_in_place_unasked(path, choices)
+    }
+
+    /// [`Self::save_in_place`] without Pigment's question about a Pigment 0.1–0.4 file.
+    pub(crate) fn save_in_place_unasked(&mut self, path: String, choices: FormatChoices) -> Result<Value, String> {
         if self.save_options_open() {
             return Err(SAVE_OPTIONS_OPEN.into());
         }

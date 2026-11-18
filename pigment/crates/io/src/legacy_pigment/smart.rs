@@ -131,7 +131,10 @@ impl LayerReader<'_, '_, '_> {
                     return Ok(None);
                 }
             };
-            return Ok(Some(SmartSource::Embedded { file_name: file_name(source_name, name, "pcraft").replace(".pigment.pcraft", ".pcraft"), bytes: Arc::new(bytes) }));
+            return Ok(Some(SmartSource::Embedded {
+                file_name: file_name(source_name, name, "pcraft").replace(".pigment.pcraft", ".pcraft"),
+                bytes: Arc::new(bytes),
+            }));
         }
         let image = format!("smart/{key}.png");
         match self.container.read(&image, MAX_ENTRY_BYTES) {

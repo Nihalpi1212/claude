@@ -14,9 +14,11 @@
 //! app drew it.
 
 use photocraft_color::{Color, ColorMode};
-use photocraft_doc::effects::{Effect, FxCommon, FxPaint, StrokeFx, StrokePosition};
-use photocraft_doc::text::{AntiAlias, Caps, CharStyle, FontBaseline, FontFeature, Kerning, Orientation, ParagraphRun, ParagraphStyle, TextAlign, TextRun, TextShape};
 use photocraft_doc::TextLayer;
+use photocraft_doc::effects::{Effect, FxCommon, FxPaint, StrokeFx, StrokePosition};
+use photocraft_doc::text::{
+    AntiAlias, Caps, CharStyle, FontBaseline, FontFeature, Kerning, Orientation, ParagraphRun, ParagraphStyle, TextAlign, TextRun, TextShape,
+};
 use photocraft_geom::Affine;
 use serde_json::{Map, Value};
 
@@ -183,12 +185,23 @@ fn para_style(p: &Map<String, Value>, pt: f64, losses: &mut Losses) -> Paragraph
     }
 }
 
+/// A layer's text, its character runs (UTF-16 lengths, sparse styles) and paragraph styles.
+type Content = (String, Vec<(usize, Map<String, Value>)>, Vec<Map<String, Value>>);
+
 /// The content of a 0.1–0.3 layer: `text` and one `font` (`fromLegacy` in type/model.js).
-fn from_legacy(desc: &Map<String, Value>) -> (String, Vec<(usize, Map<String, Value>)>, Vec<Map<String, Value>>) {
+fn from_legacy(desc: &Map<String, Value>) -> Content {
     let text: String = desc.get("text").and_then(Value::as_str).unwrap_or("").chars().take(MAX_TEXT).collect();
     let f = desc.get("font").and_then(Value::as_object).cloned().unwrap_or_default();
     let mut char = Map::new();
-    for (from, to) in [("family", "fontFamily"), ("weight", "fontWeight"), ("italic", "fontItalic"), ("size", "size"), ("color", "color"), ("underline", "underline"), ("stroke", "stroke")] {
+    for (from, to) in [
+        ("family", "fontFamily"),
+        ("weight", "fontWeight"),
+        ("italic", "fontItalic"),
+        ("size", "size"),
+        ("color", "color"),
+        ("underline", "underline"),
+        ("stroke", "stroke"),
+    ] {
         if let Some(v) = f.get(from) {
             char.insert(to.into(), v.clone());
         }
@@ -210,7 +223,7 @@ fn from_legacy(desc: &Map<String, Value>) -> (String, Vec<(usize, Map<String, Va
 }
 
 /// The content of a 0.4 layer: its text, runs (UTF-16 lengths) and paragraph styles.
-fn content(c: &Map<String, Value>) -> (String, Vec<(usize, Map<String, Value>)>, Vec<Map<String, Value>>) {
+fn content(c: &Map<String, Value>) -> Content {
     let text: String = c.get("text").and_then(Value::as_str).unwrap_or("").chars().take(MAX_TEXT).collect();
     let runs = c
         .get("runs")
@@ -362,7 +375,8 @@ pub(crate) fn text_layer(desc: &Map<String, Value>, dpi: f32, mode: ColorMode, n
         // PhotoCraft's vertical point type hangs from the top of the first column's centre line.
         t.orientation = Orientation::Vertical;
         let lines = t.text.split('\n').count().max(1) as f64;
-        let line_height = paras.first().and_then(|p| p.get("justification")).and_then(|j| j.get("autoLeading")).and_then(Value::as_f64).map_or(1.2, |a| a / 100.0);
+        let line_height =
+            paras.first().and_then(|p| p.get("justification")).and_then(|j| j.get("autoLeading")).and_then(Value::as_f64).map_or(1.2, |a| a / 100.0);
         let pitch = first_size * line_height;
         t.transform = place(Affine::translate(x + (lines - 1.0) * pitch + pitch / 2.0, y));
         notes.push("vertical type is laid out by Pigment's type engine, so its columns may sit a little differently".into());

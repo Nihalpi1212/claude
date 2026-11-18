@@ -82,6 +82,8 @@ pub(super) fn import_result_with(name: &str, bytes: &[u8], opts: &photocraft_io:
 /// File › Open's job learns it (`photocraft_io::import_for_open`), so an interactive caller can ask.
 pub(super) fn import_result_for_open(name: &str, bytes: &[u8], opts: &photocraft_io::ImportOptions) -> Result<(photocraft_io::ImportResult, bool)> {
     crate::allocation::checkpoint("importing document")?;
+    // Pigment: a Pigment 0.1–0.4 document's smart objects are drawn with the engine's filters.
+    crate::legacy_pigment_render::install();
     let (r, damaged) = photocraft_io::import_for_open(name, bytes, opts).map_err(|e| crate::error::io_open_error(name, e))?;
     // Auxiliary imports return only a document and cannot surface the preview's fidelity warning.
     // Open has its own warning-preserving path; never silently place or process a thumbnail.

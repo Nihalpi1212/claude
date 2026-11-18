@@ -100,8 +100,7 @@ fn raster_layers_keep_their_place_pixels_and_properties() {
         assert_eq!(r.warnings, Vec::<String>::new(), "{v}");
         // The document keeps its file; its import report says where it came from, which the
         // interface's first Save asks about (`legacy_save_prompt`).
-        assert!(!r.source_read_only && !r.preview_only);
-        assert!(super::came_from_legacy(doc));
+        assert!(!r.source_read_only && !r.preview_only && super::came_from_legacy(doc));
         assert_eq!(doc.name, format!("{name}.pigment"));
         assert_eq!((doc.size.width, doc.size.height, doc.resolution_dpi), (16, 12, 144.0));
         assert_eq!((doc.mode, doc.depth), (ColorMode::Rgb, SampleType::U8));
