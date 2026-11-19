@@ -4,7 +4,7 @@ Reviewer's run, Nov 19 2026, 01:40 to about 03:00 UTC, on `claude/pigment-photoc
 
 ## Verdict
 
-**Go**, once CI on the head (f4e3ffa) is green. Publish with a manual run of "Pigment release" on
+**Go.** CI on the head (f4e3ffa, run 44445557238) is green. Publish with a manual run of "Pigment release" on
 `claude/pigment-photocraft` with `tag: pigment-v0.5.0` (now allowed, see 5), or by pushing the tag.
 Every blocker and major from the hunt is fixed, each fix has a test that fails without it (two
 re-checked here by mutation), the only CI failure was a race in a test (fixed), and the documents
@@ -28,7 +28,8 @@ now match the code. What is left is minor and listed below for 0.6.
   after Ctrl+C. 25 stress iterations of `photocraft-cli::it ai::` pass; fmt and workspace clippy clean.
   Every other step of that run passed (clippy, panic hunt, doctests, repository checks, packaging
   tests, CLI smoke test, lockfile).
-- aa128ca (docs) and f4e3ffa were still running when I wrote this; the next engineer checks them first.
+- 44444110179 (aa128ca, before the test fix): green, the race did not recur.
+- 44445557238 (f4e3ffa, the head): **green**, every step.
 
 ## 2. Checks on the head (one cargo process at a time)
 
