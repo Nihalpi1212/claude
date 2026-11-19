@@ -19,7 +19,7 @@ Pigment needs Windows 10 or 11 on a 64-bit Intel or AMD PC.
 
 To run without installing, download `pigment-<version>-windows-x64-portable.zip` instead and unzip it. The portable copy keeps its settings in a `PigmentData` folder next to `pigment.exe`.
 
-If Pigment 0.4 is installed, the installer puts Pigment 0.5 in the same folder and replaces it. To keep 0.4, choose another folder on the installer's folder page.
+If Pigment 0.4 is installed, uninstall it first in **Settings › Apps**. The installer would put Pigment 0.5 in 0.4's folder but leave 0.4 in the list of installed apps, and 0.4's uninstaller, run later, deletes that folder with Pigment 0.5 in it. To keep 0.4, choose another folder on the installer's folder page instead.
 
 ## macOS
 
