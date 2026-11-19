@@ -15,7 +15,7 @@
          .exe need an .exe icon identifier (ICE50), even when the source is an ICO. -->
     <Icon Id="PhotocraftIcon.exe" SourceFile="$(var.IconPath)" />
     <Property Id="ARPPRODUCTICON" Value="PhotocraftIcon.exe" />
-    <Property Id="ARPURLINFOABOUT" Value="https://github.com/Nihalpi1212/claude" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/Nihalpi1212/claude/tree/pigment-v$(var.DisplayVersion)/pigment" />
     <Property Id="ARPURLUPDATEINFO" Value="https://github.com/Nihalpi1212/claude/releases" />
     <Property Id="ARPHELPLINK" Value="https://github.com/Nihalpi1212/claude/issues" />
 

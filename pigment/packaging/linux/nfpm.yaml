@@ -14,7 +14,8 @@ section: graphics
 priority: optional
 maintainer: ${PHOTOCRAFT_MAINTAINER}
 vendor: Pigment contributors
-homepage: https://github.com/Nihalpi1212/claude
+# package.sh fills in @VERSION@: the default branch holds the JavaScript app (Pigment 0.1 to 0.4).
+homepage: https://github.com/Nihalpi1212/claude/tree/pigment-v@VERSION@/pigment
 license: MIT OR Apache-2.0
 description: |-
   Free, open-source, native image editor with familiar, professional tools.

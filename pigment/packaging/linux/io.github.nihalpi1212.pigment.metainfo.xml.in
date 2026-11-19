@@ -30,9 +30,11 @@
   <launchable type="desktop-id">io.github.nihalpi1212.pigment.desktop</launchable>
   <icon type="stock">io.github.nihalpi1212.pigment</icon>
   <!-- Only url types known to appstream 0.15 (Ubuntu 22.04, where CI validates): no vcs-browser. -->
-  <url type="homepage">https://github.com/Nihalpi1212/claude</url>
+  <!-- Pigment's tree and user guide at this version's tag: the repository's default branch holds
+       the JavaScript app (Pigment 0.1 to 0.4). -->
+  <url type="homepage">https://github.com/Nihalpi1212/claude/tree/pigment-v@VERSION@/pigment</url>
   <url type="bugtracker">https://github.com/Nihalpi1212/claude/issues</url>
-  <url type="help">https://github.com/Nihalpi1212/claude</url>
+  <url type="help">https://github.com/Nihalpi1212/claude/tree/pigment-v@VERSION@/pigment/docs/user</url>
   <url type="contact">https://github.com/Nihalpi1212/claude/issues</url>
   <categories>
     <category>Graphics</category>

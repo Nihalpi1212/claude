@@ -11,14 +11,16 @@ use crate::PhotocraftApp;
 
 /// Where Pigment's bugs and ideas are reported.
 pub const ISSUES: &str = "https://github.com/Nihalpi1212/claude/issues";
-/// Pigment's source repository (the app lives in `pigment/`).
-pub const GITHUB: &str = "https://github.com/Nihalpi1212/claude";
+/// Pigment's source, as this version was released: the tree of its tag `pigment-v<version>` (the
+/// release workflow creates it). Not the bare repository or `HEAD`: the repository's default branch
+/// holds the JavaScript app (Pigment 0.1 to 0.4), whose tree has no `pigment/docs/user`.
+pub const GITHUB: &str = concat!("https://github.com/Nihalpi1212/claude/tree/pigment-v", env!("CARGO_PKG_VERSION"), "/pigment");
 /// Pigment's releases (tags `pigment-vX.Y.Z`, assets `pigment-*`); Help › Check for Updates opens it.
 pub const RELEASES: &str = "https://github.com/Nihalpi1212/claude/releases";
 /// The upstream project Pigment is based on.
 pub const UPSTREAM: &str = "https://github.com/storytold/photocraft";
-/// The user guide (Learn on the start screen).
-pub const TUTORIALS: &str = "https://github.com/Nihalpi1212/claude/tree/HEAD/pigment/docs/user";
+/// The user guide (Learn on the start screen), as this version was released.
+pub const TUTORIALS: &str = concat!("https://github.com/Nihalpi1212/claude/tree/pigment-v", env!("CARGO_PKG_VERSION"), "/pigment/docs/user");
 /// The app's page: its releases.
 pub const APP_PAGE: &str = RELEASES;
 
@@ -126,12 +128,25 @@ mod tests {
     }
 
     #[test]
+    fn repository_links_name_this_release_s_tag_not_the_default_branch() {
+        // The repository's default branch holds the JavaScript app (Pigment 0.1 to 0.4), so a link
+        // to `HEAD` or the bare repository opens its tree and README, and `pigment/docs/user` is a
+        // 404 there. The release workflow tags the commit it builds `pigment-v<version>`.
+        let tree = format!("https://github.com/Nihalpi1212/claude/tree/pigment-v{}/pigment", photocraft_format::brand::VERSION);
+        assert_eq!(GITHUB, tree);
+        assert_eq!(TUTORIALS, format!("{tree}/docs/user"));
+        for url in [ISSUES, GITHUB, RELEASES, TUTORIALS, APP_PAGE] {
+            assert!(!url.contains("/HEAD/"), "{url}");
+        }
+    }
+
+    #[test]
     fn link_commands_open_their_urls() {
         let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
         let ctx = egui::Context::default();
         for (id, url) in [
             ("help.reportIssue", "https://github.com/Nihalpi1212/claude/issues"),
-            ("help.github", "https://github.com/Nihalpi1212/claude"),
+            ("help.github", concat!("https://github.com/Nihalpi1212/claude/tree/pigment-v", env!("CARGO_PKG_VERSION"), "/pigment")),
             ("help.website", "https://github.com/Nihalpi1212/claude/releases"),
             ("help.artcraftWebsite", "https://github.com/storytold/photocraft"),
         ] {

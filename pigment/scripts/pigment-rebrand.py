@@ -25,6 +25,12 @@ catalogs it embeds, with the same rules and the case endings some languages put 
 
 Crate names, the native format's id, environment variables (`PHOTOCRAFT_*`), comments and docs
 are never touched here; FORK.md lists what was renamed by hand.
+
+It also checks, in both modes, what it cannot rewrite: the user guide (`docs/user/`, which Help ›
+Learn opens) was rewritten for Pigment by hand, so a line there that sends people to PhotoCraft's
+downloads, launcher, website or Discord, or a link to the repository's `HEAD` (the default branch
+holds the JavaScript app), is reported and fails the run. Links to the upstream repository, its
+issue tracker and its numbered issues are credits and stay.
 """
 
 import pathlib
@@ -103,6 +109,25 @@ TEXT_SUFFIXES = {
 TEXT_NAMES = {"AppRun"}
 
 
+# The user guide's pages (not the maintainers' AGENTS.md and CLAUDE.md, which keep upstream's rules).
+USER_GUIDE = "docs/user/"
+USER_GUIDE_KEEP = {"docs/user/AGENTS.md", "docs/user/CLAUDE.md"}
+USER_GUIDE_BANNED = re.compile(
+    r"getartcraft|discord|artcraft launcher"
+    r"|storytold/(?!photocraft(?:/issues(?:/\d+)?)?(?:[)>\s]|$))"
+    r"|Nihalpi1212/claude/(?:tree|blob)/HEAD/",
+    re.IGNORECASE,
+)
+
+
+def user_guide_problems(path: pathlib.Path, rel: str) -> list[str]:
+    """Lines of a user-guide page that point people at PhotoCraft's channels or the default branch."""
+    if not rel.startswith(USER_GUIDE) or rel in USER_GUIDE_KEEP or path.suffix != ".md":
+        return []
+    text = path.read_text(encoding="utf-8")
+    return [f"{rel}:{n}: {line.strip()}" for n, line in enumerate(text.splitlines(), 1) if USER_GUIDE_BANNED.search(line)]
+
+
 def keep_file(rel: str) -> bool:
     return rel in KEEP_FILES or rel.startswith(KEEP_DIRS)
 
@@ -135,10 +160,12 @@ def rewrite(path: pathlib.Path, rel: str) -> str | None:
 def main() -> int:
     check = "--check" in sys.argv[1:]
     changed = []
+    problems = []
     for path in sorted(ROOT.rglob("*")):
         rel = path.relative_to(ROOT).as_posix()
         if not path.is_file() or rel.startswith(("target/", ".git/")):
             continue
+        problems += user_guide_problems(path, rel)
         if path.suffix not in TEXT_SUFFIXES and path.name not in TEXT_NAMES:
             continue
         if rel.startswith(("docs/", "book/")) and path.suffix == ".md":
@@ -153,7 +180,9 @@ def main() -> int:
             path.write_text(new, encoding="utf-8")
     for rel in changed:
         print(("would change " if check else "changed ") + rel)
-    return 1 if check and changed else 0
+    for line in problems:
+        print("user guide names PhotoCraft's channels or the default branch (rewrite by hand): " + line)
+    return 1 if (check and changed) or problems else 0
 
 
 if __name__ == "__main__":
