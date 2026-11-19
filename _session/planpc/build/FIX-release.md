@@ -7,7 +7,7 @@ This continues an engineer cut off by a container restart at 01:16 UTC. REL-3 wa
 | Finding | Severity | Reproduced | Fixed | Commit |
 |---|---|---|---|---|
 | REL-1 | major | yes | yes | c588cb4 |
-| REL-2 | minor | yes | yes | REL2_COMMIT |
+| REL-2 | minor | yes | yes | 9cb5b51 |
 | REL-3 | minor | yes (workflow read) | yes | 66a6dff |
 
 ## REL-1: Learn and the GitHub links go through HEAD to the JavaScript app's default branch
@@ -20,7 +20,7 @@ This continues an engineer cut off by a container restart at 01:16 UTC. REL-3 wa
 ## REL-2: Pigment reads PhotoCraft's PHOTOCRAFT_CONFIG_DIR, control port, token and automation-root variables
 - Reproduced: `crates/automation/src/app_dirs.rs::tests::photocraft_s_config_dir_variable_is_not_pigment_s` failed on the old code, because `PHOTOCRAFT_CONFIG_DIR` alone resolved as `Override` (PhotoCraft's folder) instead of `Platform`. `args::tests::token_variables_are_pigment_s_own` failed because the token flags' variables were `PHOTOCRAFT_CONTROL_TOKEN*`. `apps/photocraft-cli/tests/it/cli.rs::photocraft_s_control_variables_are_ignored` sets PhotoCraft's port and token variables and checks that `serve` stays on stdio and `mcp` does not bridge. On the old code, `mcp` printed "PHOTOCRAFT_CONTROL_PORT is set; bridging…".
 - Fix: the six variables that choose a folder, a port or a token are now Pigment's own: `PIGMENT_CONFIG_DIR`, `PIGMENT_CONTROL_PORT`, `PIGMENT_CONTROL_TOKEN`, `PIGMENT_CONTROL_TOKEN_FILE`, `PIGMENT_AUTOMATION_READ_ROOT` and `PIGMENT_AUTOMATION_WRITE_ROOT`. The automation roots are included because a PhotoCraft value would widen what Pigment's agents may read and write. The PHOTOCRAFT_ names of these six are no longer read. The rename covers the Rust code, the help text and the messages in apps/photocraft, apps/photocraft-cli and crates/automation, plus their tests. Other PHOTOCRAFT_* variables (GPU, NEW_INSTANCE, IN_WINDOW_MENUS, the AppImage's NO_DESKTOP_INTEGRATION, debug and test hooks) are tuning switches that share nothing, so they keep their names. FORK.md (kept identifiers) lists the six new names and where each is read. Upstream's developer docs (docs/development.md, control-protocol.md, mcp.md, book/, AGENTS.md) are left as upstream wrote them, and FORK.md says they still use the old names.
-- Checks: REL2_CHECKS
+- Checks: photocraft-automation tests all pass. The photocraft tests pass too (unit 281, it 18). photocraft-cli: unit 7 and it 94 pass. The new CLI test first failed only on its own expectation: headless `mcp` with no stdin exits 1 at "MCP init". I corrected that expectation, and it now passes together with the existing tests of the PIGMENT_CONTROL_* fallbacks. Clippy -D warnings on photocraft-automation, photocraft-cli and photocraft (all targets), fmt and the rebrand check are clean. One gotcha: the rebrand pass rewrites `///` comments in crates/automation/src/args.rs (clap help), so the new test's explanation there is a `//` comment.
 
 ## REL-3: 0.x versions published as pre-releases leave Latest on the JavaScript 0.4.0
 - Fixed by the previous engineer in 66a6dff, on the orchestrator's decision. Only a version with a suffix (for example 0.6.0-beta.1) is a pre-release now, and the release step sets `make_latest` explicitly: true for a full release. The release notes say 0.4.0 stays downloadable. Reproduced by reading the workflow: the old version job had `prerelease=true` for every `0.*`. Not run against a fork, so the first real check is `gh release view --json isPrerelease,isLatest pigment-v0.5.0` after the release.

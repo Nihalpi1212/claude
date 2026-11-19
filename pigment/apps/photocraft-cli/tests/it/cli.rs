@@ -1760,7 +1760,10 @@ fn photocraft_s_control_variables_are_ignored() {
             .unwrap();
         let err = String::from_utf8_lossy(&o.stderr);
         assert!(!err.contains("PHOTOCRAFT_") && !err.contains("bridging") && !err.contains("serving on TCP"), "{sub}: {err}");
-        assert_eq!(o.status.code(), Some(0), "{sub}: {err}");
+        // `serve` reads stdio to its end; headless `mcp` stops at the missing initialize request.
+        let expected = if sub == "serve" { Some(0) } else { Some(1) };
+        assert_eq!(o.status.code(), expected, "{sub}: {err}");
+        assert!(sub == "serve" || err.contains("MCP init"), "{sub}: {err}");
     }
 }
 
