@@ -220,7 +220,9 @@ pub(crate) fn run(a: &AiArgs, out: &mut dyn Write, err: &mut dyn Write) -> Resul
         }
         AiCommand::SignIn { port } => sign_in(&mut accounts, *port, out, err),
         AiCommand::SignOut => {
-            if accounts.method(ProviderId::OpenAi) != Some(pigment_genai::Method::Chatgpt) {
+            // What is stored, not what is active: tokens hidden by Sign in with ChatGPT turned off,
+            // or by an API key stored next to them, are removed too.
+            if !accounts.chatgpt().has_stored() {
                 accounts.chatgpt().cancel();
                 writeln!(out, "Not signed in with ChatGPT.")?;
                 return Ok(());

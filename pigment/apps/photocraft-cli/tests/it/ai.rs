@@ -485,6 +485,39 @@ fn sign_in_with_chatgpt_from_the_terminal() {
     assert!(status(&d, false).contains("signed in with ChatGPT"));
 }
 
+/// `ai sign-out` removes the stored ChatGPT tokens whatever hides them: Sign in with ChatGPT
+/// turned off (`"chatgptSignIn": false`, or the feature switched off in the build), or an OpenAI
+/// key stored next to them. Before, it said "Not signed in with ChatGPT." and left both tokens in
+/// the key store, to come back when the feature was on again.
+#[test]
+fn sign_out_removes_tokens_the_feature_does_not_show() {
+    let record = json!({"clientId": "oaiapp_42", "accessToken": "access-token-LEFT", "refreshToken": "refresh-token-LEFT", "expiresAt": 4.0e9}).to_string();
+    let sign_out = |d: &Path| {
+        let mut c = cli(d, "http://127.0.0.1:9/v1");
+        c.args(["ai", "sign-out"]);
+        let o = run(c, "");
+        assert!(o.status.success(), "{o:?}");
+        text(&o).0
+    };
+    let keys = |d: &Path| std::fs::read_to_string(d.join("ai-keys.json")).unwrap_or_default();
+
+    let d = dir("sign-out-off");
+    std::fs::write(d.join("ai-keys.json"), json!({"openai-chatgpt": record}).to_string()).unwrap();
+    std::fs::write(d.join("ai.json"), r#"{"chatgptSignIn": false}"#).unwrap();
+    let out = sign_out(&d);
+    assert!(out.contains("Signed out of ChatGPT."), "{out}");
+    assert!(!keys(&d).contains("openai-chatgpt") && !keys(&d).contains("refresh-token-LEFT"), "{}", keys(&d));
+    assert!(sign_out(&d).contains("Not signed in with ChatGPT."), "nothing left to remove");
+
+    let d = dir("sign-out-key");
+    std::fs::write(d.join("ai-keys.json"), json!({"openai": KEY, "openai-chatgpt": record}).to_string()).unwrap();
+    let out = sign_out(&d);
+    assert!(out.contains("Signed out of ChatGPT."), "{out}");
+    let left = keys(&d);
+    assert!(!left.contains("openai-chatgpt") && !left.contains("access-token-LEFT"), "{left}");
+    assert!(left.contains(KEY), "the API key stays");
+}
+
 /// A sign-in replaces a stored OpenAI key (they exclude each other). AI Accounts does not offer
 /// the sign-in while a key is connected; the command line says so before the person signs in,
 /// and a sign-in that is not finished leaves the key where it was.

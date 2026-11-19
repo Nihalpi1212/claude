@@ -790,6 +790,27 @@ fn ai_accounts_left_open_keeps_what_the_command_line_changed() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// With Sign in with ChatGPT turned off, AI Accounts drops its rows but still offers to remove
+/// a sign-in left in the key store, so the tokens don't come back when it is turned on again.
+#[test]
+fn ai_accounts_removes_a_sign_in_the_feature_hides() {
+    let dir = std::env::temp_dir().join(format!("pigment-ai-hidden-sign-in-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let record = json!({"clientId": "oaiapp_42", "accessToken": "access-token-LEFT", "refreshToken": "refresh-token-LEFT", "expiresAt": 4.0e9}).to_string();
+    std::fs::write(dir.join("ai-keys.json"), json!({"openai-chatgpt": record}).to_string()).unwrap();
+    std::fs::write(dir.join("ai.json"), r#"{"chatgptSignIn": false}"#).unwrap();
+    let a = AiAccounts::new(&dir);
+    let mut h = harness(move |app| ai_ui::install_accounts(app, a));
+    invoke(&mut h, "ai.accounts").unwrap();
+    assert!(h.query_by_label("Sign in with ChatGPT").is_none(), "the feature is off");
+    pointer_click(&mut h, "Remove the stored ChatGPT sign-in");
+    let keys = std::fs::read_to_string(dir.join("ai-keys.json")).unwrap_or_default();
+    assert!(!keys.contains("openai-chatgpt") && !keys.contains("refresh-token-LEFT"), "{keys}");
+    assert!(h.query_by_label("Remove the stored ChatGPT sign-in").is_none(), "nothing left to remove");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// Type `text` as an agent does: `ui.type` through the control channel, delivered in one frame as
 /// automation's input.
 fn synthetic_type(h: &mut Harness, text: &str) {

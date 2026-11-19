@@ -209,7 +209,8 @@ So AI Accounts marks it Experimental, and it is isolated:
 - **One switch turns it off.** `pigment_genai::chatgpt::ENABLED` (a constant: flip it and build),
   or `"chatgptSignIn": false` in `ai.json`. Off, AI Accounts and `pigment-cli ai status` show no
   sign-in, starting one is refused, a stored one is ignored (not deleted: on again, it is back),
-  and nothing changes for API keys. The test suite passes either way.
+  and nothing changes for API keys. A stored one can still be removed: AI Accounts shows "Remove
+  the stored ChatGPT sign-in", and `pigment-cli ai sign-out` removes it whatever the switch says. The test suite passes either way.
 - **Nothing an API key uses goes through it.** The OpenAI provider holds a key or a sign-in
   (`provider/openai.rs` `Auth`); the key's path is the code it was.
 
@@ -546,7 +547,7 @@ as the settings in AI Accounts are.
 | `ai set-key <openai\|gemini> [--no-check]` | reads the key from standard input (without echo at a Unix terminal), checks it with the provider, stores it; a key given on the command line is refused |
 | `ai clear-key <provider>` | removes the key |
 | `ai sign-in [--port N]` | Sign in with ChatGPT (experimental): prints the address to open in a browser and waits (five minutes at most) for the browser's callback, or for the address it landed on pasted on standard input. With an OpenAI key stored it says first that signing in replaces the key (AI Accounts does not offer the sign-in then) |
-| `ai sign-out` | removes the ChatGPT sign-in from this computer |
+| `ai sign-out` | removes the ChatGPT sign-in from this computer (also one the switch hides) |
 | `ai test [<provider>] [--json]` | lists the models with the stored key |
 | `ai consent [--revoke]` | the one-time agreement, with its wording |
 | `ai agents <on\|off>` | `allowAgents` |
