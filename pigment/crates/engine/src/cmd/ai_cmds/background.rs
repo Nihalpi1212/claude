@@ -100,10 +100,7 @@ fn provider(s: &mut Session, p: &Value) -> Result<Value> {
             let mut px = vec![[0u8; 4]; w as usize * h as usize];
             surface.read_rgba8_into(rect, &mut px);
             let mut shown = Vec::new();
-            match &layer.mask {
-                Some(m) => m.values_into(rect, &mut shown),
-                None => shown.resize(px.len(), 1.0),
-            }
+            super::mask_shown(layer, doc.bounds(), rect, &mut shown);
             let mut image = Rgba8Image::new(w, h);
             for ((o, p), m) in image.pixels.chunks_exact_mut(4).zip(&px).zip(&shown) {
                 o.copy_from_slice(&[p[0], p[1], p[2], (f32::from(p[3]) * m.clamp(0.0, 1.0) + 0.5) as u8]);
@@ -120,13 +117,14 @@ fn provider(s: &mut Session, p: &Value) -> Result<Value> {
             let bytes: Vec<u8> = alpha.iter().zip(&shown).map(|(a, m)| (a * m.clamp(0.0, 1.0) * 255.0 + 0.5) as u8).collect();
             let mut mask = Surface::from_interleaved(photocraft_color::PixelFormat::GRAY8, rect, &bytes);
             mask.prune();
-            Ok(mask)
+            // The old mask's feather and density are in `shown`; its link stays as it was.
+            Ok((mask, layer.mask.as_ref().is_none_or(|m| m.linked)))
         },
-        move |s, mask| {
+        move |s, (mask, linked)| {
             let bounds = s.edit("Remove Background", |doc, _| {
                 crate::extra_cmds::background_to_layer_for_mask(doc, id);
                 let b = mask.content_bounds();
-                let mask = crate::commands::mask_at_depth(LayerMask { surface: mask, ..LayerMask::reveal_all() }, doc.depth)?;
+                let mask = crate::commands::mask_at_depth(LayerMask { surface: mask, linked, ..LayerMask::reveal_all() }, doc.depth)?;
                 doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?.mask = Some(mask);
                 doc.selection = None;
                 Ok([b.x0, b.y0, b.width() as i32, b.height() as i32])

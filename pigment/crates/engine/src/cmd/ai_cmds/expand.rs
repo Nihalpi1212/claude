@@ -96,7 +96,7 @@ fn run(s: &mut Session, p: &Value) -> Result<Value> {
                     "Nothing to expand: enter a larger size, or enlarge the canvas with a transparent extension (Image › Canvas Size)",
                 ));
             }
-            let mut images = super::fill::fill_layers(&*backend, &choice, &prompt, &original, &cov, 1, ctx)?;
+            let (mut images, _) = super::fill::fill_layers(&*backend, &choice, &prompt, &original, &cov, 1, ctx)?;
             let image = images.pop().ok_or_else(|| generative_error(kind::BAD_RESPONSE, "The AI provider returned no image"))?;
             let surface = layer_surface(&image, canvas, layer_format(target))?;
             Ok((grown, surface))

@@ -256,7 +256,10 @@ pub fn start(app: &mut PhotocraftApp) -> Result<Value, String> {
             let g = &mut app.ai.generate;
             match v.get("pending").and_then(Value::as_bool).filter(|p| *p).and_then(|_| v.get("job")?.as_u64()) {
                 Some(job) => g.job = Some((JobId(job), Instant::now())),
-                None => g.note = Some(done_note(feature)),
+                None => {
+                    g.note = Some(done_note(feature));
+                    g.error = partial(&v);
+                }
             }
             Ok(v)
         }
@@ -265,6 +268,16 @@ pub fn start(app: &mut PhotocraftApp) -> Result<Value, String> {
             Err(e)
         }
     }
+}
+
+/// A Generative Fill whose later variation failed: the variations that arrived landed, and
+/// `failed` says why the next did not.
+fn partial(v: &Value) -> Option<Failure> {
+    let message = v.get("failed")?.get("message").and_then(Value::as_str)?;
+    Some(Failure {
+        kind: None,
+        message: crate::i18n::fmt(tl!("The variations that arrived were kept. The next one failed: {message}"), &[("message", message)]),
+    })
 }
 
 fn done_note(feature: &str) -> String {
@@ -296,8 +309,9 @@ pub(crate) fn on_job_event(app: &mut PhotocraftApp, e: &JobEvent) -> bool {
     }
     g.job = None;
     match &e.outcome {
-        JobOutcome::Done(_) => {
+        JobOutcome::Done(v) => {
             g.note = Some(done_note(g.feature));
+            g.error = partial(v);
             false
         }
         JobOutcome::Failed(err) => {

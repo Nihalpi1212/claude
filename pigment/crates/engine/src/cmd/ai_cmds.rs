@@ -210,6 +210,27 @@ fn call<T>(ctx: &JobCtx, f: impl FnOnce(&dyn Fn() -> bool) -> std::result::Resul
     Ok(r)
 }
 
+/// The layer's pixel mask over `r` as the compositor draws it on `canvas`: density and feather
+/// applied (`LayerMask::values_into` leaves the feather out), all ones without an enabled mask.
+/// The vector mask is left out.
+fn mask_shown(layer: &photocraft_doc::Layer, canvas: Rect, r: Rect, out: &mut Vec<f32>) {
+    match &layer.mask {
+        Some(m) if m.enabled && photocraft_compose::masks::feather_sigma(m.feather) > 0.0 => {
+            let mut mask_only = layer.clone();
+            mask_only.vector_mask = None;
+            match photocraft_compose::masks::combined_mask(&mask_only, canvas) {
+                Some(soft) => soft.read_region_into(r, out),
+                None => m.values_into(r, out),
+            }
+        }
+        Some(m) => m.values_into(r, out),
+        None => {
+            out.clear();
+            out.resize(r.width() as usize * r.height() as usize, 1.0);
+        }
+    }
+}
+
 /// Refuse an answer that is not the size asked for.
 fn check_answer(img: &Rgba8Image, w: u32, h: u32) -> Result<()> {
     if img.width != w || img.height != h || img.pixels.len() != w as usize * h as usize * 4 {
