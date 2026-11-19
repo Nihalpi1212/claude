@@ -1334,7 +1334,8 @@ pub fn run(app: &mut PhotocraftApp, ctx: &egui::Context, name: &str, args: &Valu
 pub fn describe_call(name: &str, args: &Value, failed: bool) -> String {
     let args = parse_maybe_json(args);
     let text = |key: &str| args.get(key).filter(|v| !v.is_null()).map(|v| v.as_str().map_or_else(|| v.to_string(), str::to_string));
-    let fmt = |template: &str, value: String| crate::i18n::fmt(template, &[("x", &value)]);
+    // What the model put in the label is cut short: a kind or an id may be any text.
+    let fmt = |template: &str, value: String| crate::i18n::fmt(template, &[("x", &first_chars(&value, 60))]);
     let kind = |prefix: &str| {
         let kind = text("kind").unwrap_or_default();
         find_kind(prefix, &kind).map_or(kind, |c| c.label.trim_end_matches('…').to_string())
@@ -1361,7 +1362,12 @@ pub fn describe_call(name: &str, args: &Value, failed: bool) -> String {
         "generative_fill" => tl!("Generative fill").to_string(),
         other => first_chars(other, 60),
     };
-    if failed { fmt(tl!("Failed: {x}"), label) } else { label }
+    if failed { failed_label(&label) } else { label }
+}
+
+/// A step's label once it failed.
+pub fn failed_label(label: &str) -> String {
+    crate::i18n::fmt(tl!("Failed: {x}"), &[("x", label)])
 }
 
 #[cfg(test)]

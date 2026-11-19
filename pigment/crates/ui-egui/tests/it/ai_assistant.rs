@@ -688,7 +688,7 @@ fn conversations_belong_to_their_document() {
     assert_eq!(layer_names(h.state()), ["Background"], "A is untouched");
     let last = assistant::conversation(h.state(), b).last().unwrap();
     assert!(last.calls[0].failed() && last.text == "Could not.");
-    assert!(tools::describe_call(&last.calls[0].name, &last.calls[0].args, true).starts_with("Failed: New layer"));
+    assert!(last.calls[0].shown().starts_with("Failed: New layer"));
 
     // Clear empties the active document's conversation only; closing B drops B's.
     assistant::clear(h.state_mut());
@@ -1159,6 +1159,34 @@ fn an_agents_clicks_change_neither_the_model_nor_what_is_attached() {
     h.get_by_label("Google Gemini").click();
     h.run_steps(3);
     assert_eq!((h.state().ai.assistant.attach, saved(&h)), (true, (true, Some(ProviderId::Gemini))));
+}
+
+/// A long turn of large steps (twelve rounds of 32 steps whose arguments are about 60 KiB each,
+/// all within the limits) keeps the window quick: what a step shows is worked out once, when it
+/// runs, and is bounded, so drawing the conversation does not serialize the arguments again.
+#[test]
+fn a_turn_of_large_steps_keeps_the_window_quick() {
+    let mock = Arc::new(MockBackend::connected());
+    let m = Arc::clone(&mock);
+    let mut h = harness(move |app| {
+        with_mock(app, &m);
+        assistant::open(app);
+    });
+    let big = json!({"kind": "k".repeat(60_000)});
+    for round in 0..12 {
+        let tool_calls = (0..32).map(|i| ToolCall { id: format!("call_{round}_{i}"), name: "apply_filter".into(), arguments: big.clone() }).collect();
+        mock.push(MockAnswer::Turn(ChatTurn { text: String::new(), tool_calls, provider_state: json!({}) }));
+    }
+    mock.push(MockAnswer::Turn(ChatTurn { text: "Done.".into(), tool_calls: vec![], provider_state: json!({}) }));
+    send(&mut h, "many filters");
+    let m = assistant::messages(h.state()).last().unwrap();
+    assert_eq!(m.calls.len(), 12 * 32);
+    assert!(m.calls.iter().all(|c| c.detail.chars().count() <= 400 && c.label.chars().count() <= 400), "what a step shows is bounded");
+    h.run_steps(2);
+    let started = std::time::Instant::now();
+    h.run_steps(5);
+    let frame = started.elapsed() / 5;
+    assert!(frame < Duration::from_millis(250), "one frame took {frame:?}");
 }
 
 /// A step is not trusted to be reasonable either: an answer with a step whose arguments run to

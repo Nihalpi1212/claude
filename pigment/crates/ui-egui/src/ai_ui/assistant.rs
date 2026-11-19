@@ -56,11 +56,19 @@ pub enum Role {
     Assistant,
 }
 
-/// One tool call of an assistant message, as the panel shows it.
+/// How much of a step's arguments (or of its error) its hover text shows.
+const DETAIL_CHARS: usize = 400;
+
+/// One tool call of an assistant message, as the panel shows it. What it shows is worked out
+/// once, when the step runs, and is bounded: the arguments themselves are kept only in the turn's
+/// history (a step may have 64 KiB of them, a turn hundreds of steps), not drawn again each frame.
 #[derive(Clone, Debug)]
 pub struct Call {
     pub name: String,
-    pub args: Value,
+    /// What the step does, in words ([`tools::describe_call`]).
+    pub label: String,
+    /// What the step was asked to do: its arguments as JSON, at most [`DETAIL_CHARS`] characters.
+    pub detail: String,
     /// What the tool answered (`{"error": …}` when it failed); `None` while it runs.
     pub result: Option<Value>,
     /// The command opened a dialog and the turn waits for the person to finish it.
@@ -68,9 +76,23 @@ pub struct Call {
 }
 
 impl Call {
+    fn new(call: &ToolCall) -> Self {
+        let detail = first_chars(&call.arguments.to_string(), DETAIL_CHARS);
+        Self { name: call.name.clone(), label: tools::describe_call(&call.name, &call.arguments, false), detail, result: None, waiting: false }
+    }
+
     pub fn failed(&self) -> bool {
         self.result.as_ref().is_some_and(|r| r.get("error").is_some())
     }
+
+    /// The line the panel shows for the step ("Failed: …" when it failed).
+    pub fn shown(&self) -> String {
+        if self.failed() { tools::failed_label(&self.label) } else { self.label.clone() }
+    }
+}
+
+fn first_chars(s: &str, n: usize) -> String {
+    s.chars().take(n).collect()
 }
 
 /// One message of a conversation.
@@ -644,7 +666,7 @@ fn record(app: &mut PhotocraftApp, index: usize, call: &ToolCall, result: Value)
 fn run_call(app: &mut PhotocraftApp, ctx: &egui::Context, call: ToolCall) {
     let Some(doc) = app.ai.assistant.turn.as_ref().map(|t| t.doc) else { return };
     let Some(index) = pending_message(&mut app.ai.assistant).map(|m| {
-        m.calls.push(Call { name: call.name.clone(), args: call.arguments.clone(), result: None, waiting: false });
+        m.calls.push(Call::new(&call));
         m.calls.len() - 1
     }) else {
         return;
@@ -1011,17 +1033,19 @@ fn assistant_row(ui: &mut egui::Ui, t: &Tokens, m: &Message) -> Option<Act> {
                 Some(_) if failed => dot(ui, ui.visuals().error_fg_color),
                 Some(_) => dot(ui, t.accent),
             }
-            let mut label = tools::describe_call(&c.name, &c.args, failed);
+            let mut label = c.shown();
             if c.waiting {
                 label.push_str(tl!(" — waiting for you to finish the dialog"));
             }
-            // The failure, or what the step was asked to do.
-            let detail = match c.result.as_ref().and_then(|r| r.get("error")) {
-                Some(e) => e.as_str().map_or_else(|| e.to_string(), str::to_string),
-                None => c.args.to_string(),
-            };
-            let detail: String = detail.chars().take(400).collect();
-            ui.label(egui::RichText::new(label).color(t.text_dim)).on_hover_text(detail);
+            // The failure, or what the step was asked to do: worked out only while hovered.
+            ui.label(egui::RichText::new(label).color(t.text_dim)).on_hover_ui(|ui| {
+                let detail = match c.result.as_ref().and_then(|r| r.get("error")) {
+                    Some(Value::String(e)) => first_chars(e, DETAIL_CHARS),
+                    Some(e) => first_chars(&e.to_string(), DETAIL_CHARS),
+                    None => c.detail.clone(),
+                };
+                ui.label(detail);
+            });
         });
     }
     if m.pending && m.text.is_empty() {
