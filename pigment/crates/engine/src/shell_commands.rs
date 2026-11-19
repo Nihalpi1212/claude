@@ -82,13 +82,7 @@ pub const SHELL_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("edit.search", "Search…", &["Edit"], Some("Cmd+F")),
     // Pigment's links (docs/FORK.md): PhotoCraft's ids, Pigment's pages. No Discord link.
     ("help.reportIssue", "Report an Issue…", &["Help"], None),
-<<<<<<< ours
-    ("help.github", "Pigment on GitHub", &["Help"], None),
-    ("help.website", "Pigment Releases", &["Help"], None),
-    ("help.artcraftWebsite", "PhotoCraft (upstream project)", &["Help"], None),
-=======
     ("help.checkForUpdates", "Check for Updates…", &["Help"], None),
->>>>>>> theirs
     ("help.systemInfo", "System Info…", &["Help"], None),
     ("help.about", "About Pigment", &["Help"], None),
 ];

@@ -6667,12 +6667,8 @@ dependencies = [
  "craft-svg 0.1.0 (git+https://github.com/storytold/craft-libs?rev=7b8c1eccea0c695a495ab279c9523e6efcc9b8be)",
  "craft-tiff 0.1.0 (git+https://github.com/storytold/craft-libs?rev=18ffc07519b15f5ef39e752aa0f405261fec8ebb)",
  "craft-xcf",
-<<<<<<< ours
- "craft-xml",
- "craft-zip",
-=======
  "craft-xml 0.1.0 (git+https://github.com/storytold/craft-libs?rev=18ffc07519b15f5ef39e752aa0f405261fec8ebb)",
->>>>>>> theirs
+ "craft-zip",
  "crc32fast",
  "flate2",
  "kurbo 0.13.1",
@@ -6700,14 +6696,10 @@ dependencies = [
 
 [[package]]
 name = "photocraft-ipp"
-<<<<<<< ours
 version = "0.5.0"
-=======
-version = "0.23.1"
 dependencies = [
  "craft-ipp",
 ]
->>>>>>> theirs
 
 [[package]]
 name = "photocraft-ops"
@@ -6942,7 +6934,7 @@ dependencies = [
  "photocraft-raster",
  "serde",
  "serde_json",
- "sha2",
+ "sha2 0.10.9",
  "ureq",
 ]
 

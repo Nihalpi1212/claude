@@ -112,13 +112,7 @@ const QUICK_EXPORT_CPU_NOTE: &str = "file.export.quickExport runs on the CPU com
 pub(crate) fn run_cmds(a: &RunArgs, out: &mut dyn Write, err: &mut dyn Write) -> Result {
     let opts = ExportOptions::from(&a.export);
     let mut h = Headless::trusted_local();
-<<<<<<< ours
-    // Pigment: generative AI. `ai.*` commands send only with --allow-ai.
-    crate::ai::install(&mut h, a)?;
-    let policy = crate::gpu::GpuPolicy::from_args(&a.gpu).map_err(CliError::Other)?;
-=======
     let policy = crate::gpu::GpuPolicy::from_args(&a.gpu)?;
->>>>>>> theirs
     policy.apply_to_headless(&mut h);
     // Opening, running commands and exporting can all notice the same missing font:
     // one `run` invocation reports each warning line at most once.

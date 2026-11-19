@@ -60,12 +60,6 @@ mod startup_report;
 // Tablet support (macOS AppKit monitor, Linux X11/Wayland, Windows barrel button).
 mod tablet;
 mod ui_state;
-<<<<<<< ours
-// PhotoCraft's update check, kept for upstream merges but not wired in (docs/FORK.md).
-#[allow(dead_code)]
-mod updates;
-=======
->>>>>>> theirs
 mod window_frame;
 
 use photocraft_engine::Session;
@@ -123,15 +117,9 @@ fn automation_workspace(
 }
 
 /// The control port this launch listens on, and the warning to print when a request was refused.
-<<<<<<< ours
-/// Only `--control` (or `PIGMENT_CONTROL_PORT`) opens one at launch: Preferences › AI
-/// Integrations' connection starts and stops while the app runs (`agent_link`). Allow Agent
-/// Control off refuses the flag too, and says so rather than ignoring it silently.
-=======
 /// Only `--control` (or `PHOTOCRAFT_CONTROL_PORT`) opens one at launch: the agent link starts and
 /// stops its own while the app runs (`craft::automation::agents::AgentLink`). Allow Agent Control
 /// off refuses the flag too, and says so rather than ignoring it silently.
->>>>>>> theirs
 fn control_port_for(cli: Option<u16>, prefs: &photocraft_engine::prefs::Integrations) -> (Option<u16>, Option<String>) {
     if !prefs.agents.allow_agent_control {
         let warning = cli.map(|p| {
@@ -155,20 +143,7 @@ fn native_options(frame: &Frame) -> eframe::NativeOptions {
     let viewport =
         viewport.with_app_id(APP_ID).with_title("PhotoCraft").with_inner_size([1440.0, 900.0]).with_min_inner_size(MIN_WINDOW_SIZE).with_drag_and_drop(true);
     eframe::NativeOptions {
-<<<<<<< ours
-        viewport: viewport
-            .with_app_id(APP_ID)
-            .with_title("Pigment")
-            .with_inner_size([1440.0, 900.0])
-            .with_min_inner_size(photocraft_ui_egui::MIN_WINDOW_SIZE)
-            .with_drag_and_drop(true)
-            .with_decorations(!custom_titlebar)
-            .with_fullsize_content_view(true)
-            .with_titlebar_shown(false)
-            .with_title_shown(false),
-=======
         viewport: window_policy::apply(viewport, frame),
->>>>>>> theirs
         centered: true,
         // PhotoCraft owns its fallback fonts (`cjk_fonts`, craft-fonts): eframe's system-font
         // provider would compete with it and make glyph choice machine-dependent (#8512).
@@ -681,18 +656,6 @@ fn main() -> eframe::Result {
                     log::warn!("couldn't remember GPU backend {}: {e}", b.name());
                 }
             });
-<<<<<<< ours
-            // Agents in the open window, unless the launch flags (`--control`) manage the
-            // connection. Pigment's own switch (Preferences › AI Integrations, `connectAgents`) is
-            // the one consent: it reads neither the suite's feature flags nor the ArtCraft
-            // Launcher's switch (docs/FORK.md).
-            app.agent_link.mcp_flag = photocraft_automation::agent_link::mcp_flag();
-            if let Some((listener, token, _)) = control {
-                app.agent_link.launch_flags = true;
-                app.agent_link.port = listener.local_addr().ok().map(|a| a.port());
-                let rx = control_server::start(listener, token, cc.egui_ctx.clone());
-                app = app.with_control(rx);
-=======
             // Agents in the open window. Behind the suite's AI-MCP flag the ArtCraft Launcher's
             // switch (Settings › AI agents) is the one consent; without it, as before, a Control
             // Port saved in the preferences. The launch flags (`--control`) manage the connection
@@ -707,7 +670,6 @@ fn main() -> eframe::Result {
                 eprintln!("photocraft: control server listening on {}", server.addr);
                 app = app.with_control(requests);
                 craft::automation::agents::AgentLink::from_launch(server)
->>>>>>> theirs
             } else {
                 app.services.agent_automation = Some(Box::new(services::agent_automation));
                 craft::automation::agents::AgentLink::new(services::config_dir(), photocraft_engine::build_info::long_version())

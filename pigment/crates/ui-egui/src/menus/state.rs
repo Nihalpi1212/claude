@@ -2,14 +2,7 @@ use super::invoke::{panel_alias, proof_preset, workspace_id};
 use super::{DOCUMENT_ITEM, PhotocraftApp, Value};
 
 pub fn is_enabled(app: &PhotocraftApp, id: &str) -> bool {
-<<<<<<< ours
-    // Pigment's Check for Updates is a link to its releases page (`updates_ui::check`).
-    if id == "help.checkForUpdates" {
-        return true;
-    }
-=======
     // Shortcut-only: the tool host owns presses during a gesture.
->>>>>>> theirs
     if id == "layer.selectUnderCursor" {
         return app.session.active().is_some() && !app.brush_resize.active();
     }
@@ -46,17 +39,7 @@ pub fn is_enabled(app: &PhotocraftApp, id: &str) -> bool {
     if let Some(e) = crate::workspace_ui::is_enabled(app, id) {
         return e;
     }
-<<<<<<< ours
-    if crate::analysis_ui::handles(id) {
-        return true;
-    }
-    if let Some(e) = crate::ai_ui::is_enabled(app, id) {
-        return e;
-    }
-    if crate::preset_panels::handles(id) || crate::type_panels_ui::handles(id) || crate::timeline_ui::handles(id) {
-=======
     if crate::analysis::handles(id) {
->>>>>>> theirs
         return true;
     }
     if let Some(e) = crate::view_cmds::is_enabled(app, id) {
@@ -159,24 +142,7 @@ pub(super) fn checked(app: &PhotocraftApp, id: &str) -> Option<bool> {
     if let Some(c) = crate::view_cmds::checked(app, id) {
         return Some(c);
     }
-<<<<<<< ours
-    if let Some(c) = crate::analysis_ui::checked(app, id).or_else(|| crate::workspace_ui::checked(app, id)).or_else(|| crate::file_ui::checked(app, id)) {
-        return Some(c);
-    }
-    if let Some(c) = crate::preset_panels::checked(app, id) {
-        return Some(c);
-    }
-    if let Some(c) = crate::timeline_ui::checked(app, id) {
-        return Some(c);
-    }
-    // Pigment: Window › Assistant.
-    if let Some(c) = crate::ai_ui::checked(app, id) {
-        return Some(c);
-    }
-    if let Some(c) = crate::type_panels_ui::checked(app, id) {
-=======
     if let Some(c) = crate::analysis::checked(app, id).or_else(|| crate::workspace_ui::checked(app, id)).or_else(|| crate::file_ui::checked(app, id)) {
->>>>>>> theirs
         return Some(c);
     }
     if let Some(alias) = panel_alias(id) {

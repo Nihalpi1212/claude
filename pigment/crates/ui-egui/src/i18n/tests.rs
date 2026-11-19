@@ -303,28 +303,6 @@ fn azerbaijani_resolves_locales_and_preferences() {
         assert_eq!(Lang::from_pref(tag), az, "{tag}");
     }
     assert_eq!(tr(az, "unknown translation"), "unknown translation");
-<<<<<<< ours
-    for n in [0, 1, 2, 11, 19, 20, 21, 99, 100, 101, 102, 119, 120, 1000, 1001, u64::MAX] {
-        assert_eq!(trn(az, n, "{n} layer", "{n} layers"), format!("{n} qat"));
-    }
-}
-
-/// Exact lookups retain contextual meanings, dotted/dotless letters and product placeholders.
-#[test]
-fn azerbaijani_keeps_context_placeholders_and_command_names() {
-    if !needs_catalogs() {
-        return;
-    }
-    let az = lang("az");
-    for (source, translated) in [("File", "Fayl"), ("Layer", "Qat"), ("Kind", "Növ"), ("Type Layer", "Mətn qatı"), ("Light Theme", "Açıq mövzu")] {
-        assert_eq!(tr(az, source), translated);
-    }
-    assert_eq!(tr_ctx(az, "cameraRaw", "Light"), "İşıq");
-    assert_eq!(tr_ctx(az, "fontWeight", "Light"), "İncə");
-    assert_ne!(tr_id(az, "edit.clear", "Clear"), "Clear");
-    assert!(fmt(tr(az, "About {app}"), &[("app", "Pigment")]).contains("Pigment"));
-=======
->>>>>>> theirs
 }
 
 /// Bosnian locales, with or without region, script or encoding, select the Latin catalog.
@@ -478,39 +456,3 @@ fn bundled_catalogs_are_consistent() {
         }
     }
 }
-<<<<<<< ours
-
-/// Pigment embeds the catalogs rebranded (build.rs, docs/FORK.md): no row names PhotoCraft or its
-/// `.pcraft` extension, and the rows the rebranded interface text looks up are still found.
-#[test]
-fn embedded_catalogs_are_rebranded() {
-    if !needs_catalogs() {
-        return;
-    }
-    let upstream = "PhotoCraft"; // upstream-ok
-    for (code, shared, app) in CRAFT_I18N {
-        for line in shared.lines().chain(app.lines()).filter(|l| !l.starts_with('#')) {
-            assert!(!line.contains(".pcraft"), "{code}: {line}");
-            assert!(!line.contains(&format!("{upstream} ")) && !line.ends_with(upstream), "{code}: {line}");
-        }
-    }
-    // The Preferences label that names the extension: found again in every catalog that has it.
-    let label = "Save Full-Size Composite in .pigment Files";
-    let translated = LANGUAGES.iter().skip(1).filter(|language| has(lang(language.code), label)).count();
-    assert!(translated > 0, "no catalog translates {label:?}");
-}
-
-#[test]
-fn raw_develop_labels_are_translated_in_every_shipped_catalog() {
-    if !needs_catalogs() {
-        return;
-    }
-    for language in LANGUAGES.iter().skip(1) {
-        let l = lang(language.code);
-        for source in ["RAW Develop", "RAW Develop Filter", "RAW Develop Filter…", "RAW Defaults", "RAW Defaults…"] {
-            assert!(has(l, source) && !tr(l, source).is_empty(), "{}: {source}", language.code);
-        }
-    }
-}
-=======
->>>>>>> theirs

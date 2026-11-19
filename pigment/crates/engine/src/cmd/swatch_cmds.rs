@@ -404,29 +404,6 @@ pub fn act_bytes(colors: &[[u8; 3]], transparent: Option<u16>) -> std::result::R
     craft_psd::act::write(colors, Some(colors.len().min(ACT_COLORS) as u16), transparent).map_err(|e| e.to_string())
 }
 
-<<<<<<< ours
-/// Parse a swatch file into groups (`group` names the group for ungrouped colours).
-pub fn read_file(bytes: &[u8], format: Format, group: &str) -> std::result::Result<(Vec<Group<Swatch>>, Vec<String>), String> {
-    let mut warnings = Vec::new();
-    let mut out: Vec<Group<Swatch>> = Vec::new();
-    let fallback = |i: usize, name: &str| if name.trim().is_empty() { format!("Swatch {}", i + 1) } else { clip(name.trim()) };
-    match format {
-        Format::Aco => {
-            let f = craft_psd::aco::parse(bytes).map_err(|e| format!("not a readable .aco swatch file: {e}"))?;
-            let books = f.swatches.iter().filter(|s| matches!(s.color, AcoColor::Other { .. })).count();
-            if books > 0 {
-                warnings.push(format!(
-                    "{books} swatches use a colour book or colour space Pigment can't show; they are kept (shown gray) and saved back unchanged"
-                ));
-            }
-            let items = f
-                .swatches
-                .iter()
-                .enumerate()
-                .map(|(i, s)| Swatch { name: fallback(i, &s.name), color: from_aco(s.color), kind: SwatchKind::Process })
-                .collect();
-            out.push(Group::new(group, items));
-=======
 /// The format an id or extension names (`aco`, `.ACT`, …).
 fn parse_format(s: &str) -> Option<SwatchFormat> {
     SwatchFormat::from_name(&format!("x.{}", s.trim_start_matches('.')))
@@ -438,7 +415,6 @@ fn word_note(note: &SwatchNote, format: SwatchFormat, writing: bool) -> String {
     match *note {
         SwatchNote::BookColors(n) if writing => {
             format!("{n} colour-book swatches can't be stored in a .{ext} file and were left out (save as .aco to keep them)")
->>>>>>> theirs
         }
         SwatchNote::BookColors(n) => {
             format!("{n} swatches use a colour book or colour space PhotoCraft can't show; they are kept (shown gray) and saved back unchanged")

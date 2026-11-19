@@ -223,61 +223,8 @@ pub(crate) mod params {
         app.framework.dialogs.get_mut_by_id::<HostedParamDialog>(id)
     }
 
-<<<<<<< ours
-/// The questions File › Save asks before it writes: another app changed the file, or (Pigment)
-/// the file is one Pigment 0.1–0.4 saved.
-fn save_prompt(fields: &Fields) -> bool {
-    crate::disk_change_prompt::owns(fields) || crate::legacy_save_prompt::owns(fields)
-}
-
-fn save_prompt_body(ui: &mut egui::Ui, fields: &mut Fields) {
-    if crate::legacy_save_prompt::owns(fields) {
-        crate::legacy_save_prompt::body(ui, fields);
-    } else {
-        crate::disk_change_prompt::body(ui, fields);
-    }
-}
-
-fn save_prompt_confirm(app: &mut PhotocraftApp, fields: &Fields) -> Result<Value, String> {
-    if crate::legacy_save_prompt::owns(fields) { crate::legacy_save_prompt::confirm(app, fields) } else { crate::disk_change_prompt::confirm(app, fields) }
-}
-
-fn command_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, d: &Dialog, fields: &mut Fields, id: egui::Id, interactive: bool) -> Option<bool> {
-    let mut outcome: Option<bool> = None;
-    match d.kind {
-        _ if crate::open_prompt::owns_memory(fields) => crate::open_prompt::memory_body(ui, fields),
-        _ if crate::open_prompt::owns_damage(fields) => crate::open_prompt::damage_body(ui, fields),
-        _ if crate::guide_layout_ui::owns(fields) => outcome = crate::guide_layout_ui::body(app, ui, fields, interactive),
-        _ if crate::brush_preset_dialog::owns(fields) => outcome = crate::brush_preset_dialog::body(app, ui, fields, interactive),
-        _ if crate::fill_ui::owns(fields) => crate::fill_ui::body(app, ui, fields),
-        _ if crate::pattern_fill_ui::owns(fields) => crate::pattern_fill_ui::body(app, ui, fields),
-        _ if crate::stroke_ui::owns(fields) => crate::stroke_ui::body(ui, fields),
-        _ if crate::new_group_ui::owns(fields) => crate::new_group_ui::body(ui, fields),
-        _ if crate::snapshot_dialog::owns(fields) => crate::snapshot_dialog::body(ui, fields),
-        _ if crate::channel_options_ui::owns(fields) => crate::channel_options_ui::body(ui, fields),
-        _ if crate::channel_options_ui::owns_new_spot(fields) => crate::channel_options_ui::new_spot_body(ui, fields),
-        _ if crate::shape_dialog::owns(fields) => crate::shape_dialog::body(app, ui, fields),
-        _ if delete_prompt(fields) => delete_prompt_body(ui, fields),
-        _ if save_prompt(fields) => save_prompt_body(ui, fields),
-        _ if crate::replace_prompt::owns(fields) => crate::replace_prompt::body(ui, fields),
-        _ if crate::preset_group_prompt::owns(fields) => crate::preset_group_prompt::body(ui, fields),
-        _ if crate::actions::owns_stop_message(fields) => crate::actions::stop_message_body(ui, fields),
-        _ if crate::actions::owns_insert_stop(fields) => crate::actions::insert_stop_body(ui, fields),
-        _ if crate::actions::menu_item::owns(fields) => crate::actions::menu_item::body(ui, fields),
-        _ if crate::actions::owns_new_set(fields) => crate::actions::new_set_body(ui, fields),
-        _ if crate::actions::playback::owns(fields) => crate::actions::playback::body(ui, fields),
-        _ if crate::new_layer_ui::owns(fields) => crate::new_layer_ui::body(ui, fields),
-        _ if crate::mask_trash_prompt::owns(fields) => crate::mask_trash_prompt::body(ui, fields),
-        _ if crate::rasterize_prompt::owns(fields) => crate::rasterize_prompt::body(ui, fields),
-        _ if crate::duplicate_layer_ui::owns(fields) => crate::duplicate_layer_ui::body(app, ui, fields),
-        _ if crate::stack_dialog::owns(fields) => crate::stack_dialog::body(app, ui, fields, d.id),
-        _ if crate::tool_reset::owns(fields) => crate::tool_reset::body(ui),
-        _ if crate::crop_presets::owns(fields) => crate::crop_presets::body(app, ui, fields),
-        _ => return command_body_more(app, ui, d, fields, id),
-=======
     fn key_of(app: &PhotocraftApp, id: DialogId) -> Option<String> {
         app.framework.dialogs.get_by_id::<HostedParamDialog>(id).and_then(|dialog| StackDialog::key(dialog).map(str::to_owned))
->>>>>>> theirs
     }
 
     /// Judges the OK each held dialog filed with its family's `check` (no check accepts) and answers the dialog.
@@ -349,24 +296,8 @@ fn command_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, d: &Dialog, fields: 
                     dialog.answer_listing(request.key, files);
                 }
             }
-<<<<<<< ours
-            hit
-        } else if crate::legacy_save_prompt::owns(fields) {
-            // Pigment: Save / Cancel / Save As… over a Pigment 0.1–0.4 file.
-            legacy_save_prompt::buttons(ui, fields, cancel)
-        } else if crate::preset_group_prompt::owns(fields) {
-            // Import as New Group / Cancel / Replace (#10640): Enter keeps the group.
-            let new = DialogButton::new(ButtonRole::Default, tl!("Import as New Group"), 150.0);
-            let replace = DialogButton::new(ButtonRole::Alternate, tl!("Replace"), 84.0);
-            let hit = dialog_buttons(ui, &[new, cancel, replace]);
-            if hit == Some(ButtonRole::Alternate) {
-                fields.insert("choice".into(), json!("replace"));
-            } else if hit == Some(ButtonRole::Default) {
-                fields.insert("choice".into(), json!("new"));
-=======
             if let (Some(action), Some(footer)) = (footer, family.and_then(|family| family.footer)) {
                 footer(app, ctx, id, &action);
->>>>>>> theirs
             }
         }
     }
@@ -483,25 +414,6 @@ pub(crate) const PROMPTS: &[PromptRow] = &[
     crate::actions::library::answer,
 ];
 
-<<<<<<< ours
-/// One About tab's contents: the credits lists, or the product blurb and links.
-fn about_tab_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, tab: &str) {
-    match tab {
-        "contributors" => crate::credits::contributors_ui(app, ui),
-        "models" => crate::credits::models_ui(ui),
-        _ => {
-            ui.label(tl!("Pigment — an open-source, native image editor written in Rust."));
-            ui.label(photocraft_format::brand::version_line());
-            ui.weak(crate::i18n::fmt(tl!("Version {version}"), &[("version", &photocraft_engine::build_info::long_version())]));
-            ui.add_space(8.0);
-            crate::links::credit(ui);
-            ui.add_space(12.0);
-            ui.vertical_centered(|ui| {
-                crate::links::link_row(app, ui);
-            });
-            ui.add_space(10.0);
-            ui.weak("egui · wgpu · photocraft-engine");
-=======
 /// [`prompts_take`] over the rows `rows`.
 fn take_prompts_from(app: &mut PhotocraftApp, ctx: &egui::Context, rows: &[PromptRow]) {
     while let Some(result) = app.framework.dialogs.take::<StandardPrompt>() {
@@ -511,7 +423,6 @@ fn take_prompts_from(app: &mut PhotocraftApp, ctx: &egui::Context, rows: &[Promp
             if row(app, ctx, &mut answer) {
                 break;
             }
->>>>>>> theirs
         }
     }
 }
@@ -560,90 +471,6 @@ pub(crate) const TAKERS: &[fn(&mut PhotocraftApp, &egui::Context)] = &[
     crate::actions::dialogs::take_stops,
 ];
 
-<<<<<<< ours
-pub fn title(d: &Dialog) -> String {
-    match d.kind {
-        DialogKind::NewDocument => "New Document".into(),
-        DialogKind::About if d.fields.get("systemInfo").and_then(Value::as_bool) == Some(true) => "System Info".into(),
-        DialogKind::About => "About Pigment".into(),
-        DialogKind::LayerStyle => "Layer Style".into(),
-        DialogKind::Command => d.fields.get("__label").and_then(Value::as_str).unwrap_or("Command").trim_end_matches('…').to_string(),
-        DialogKind::Error => "Error".into(),
-    }
-}
-
-type Fields = serde_json::Map<String, Value>;
-
-/// The markers [`confirm`] and [`cancel`] choose a dialog's handler by: keys the code opening a
-/// dialog puts in its fields. Keep in step with the arms of `confirm`.
-const ROUTES: &[fn(&Fields) -> bool] = &[
-    crate::guide_layout_ui::owns,
-    crate::brush_preset_dialog::owns,
-    crate::fill_ui::owns,
-    crate::pattern_fill_ui::owns,
-    crate::stroke_ui::owns,
-    crate::channel_options_ui::owns,
-    crate::channel_options_ui::owns_new_spot,
-    merge_channels_ui::owns,
-    crate::shape_dialog::owns,
-    crate::delete_layer_prompt::owns,
-    crate::analysis_ui::owns_delete_note,
-    crate::analysis_ui::owns_clear_notes,
-    live_shape_prompt::owns,
-    crate::disk_change_prompt::owns,
-    crate::legacy_save_prompt::owns,
-    crate::actions::owns_stop_message,
-    crate::actions::owns_insert_stop,
-    crate::actions::menu_item::owns,
-    crate::actions::record_again::owns,
-    crate::actions::owns_new_set,
-    crate::actions::playback::owns,
-    crate::new_layer_ui::owns,
-    crate::new_group_ui::owns,
-    crate::mask_trash_prompt::owns,
-    crate::rasterize_prompt::owns,
-    crate::duplicate_layer_ui::owns,
-    crate::stack_dialog::owns,
-    crate::tool_reset::owns,
-    crate::crop_presets::owns,
-    crate::variables_ui::owns,
-    crate::file_ui::owns,
-    crate::new_guide_ui::owns,
-    crate::equalize_ui::owns,
-    crate::color_picker_ui::owns,
-    crate::color_range_ui::owns,
-    crate::prefs_ui::owns,
-    crate::open_prompt::owns,
-    crate::replace_prompt::owns,
-    crate::preset_group_prompt::owns,
-    crate::layer_style::color_picker::owns,
-    |f| f.contains_key("__export"),
-    |f| f.contains_key("__smartFilter"),
-    |f| f.contains_key(crate::actions::RESUME),
-];
-
-/// Whether `key` is reserved to its dialog. Automation may change private fields but never
-/// add a route marker: that could select a handler its command was never judged for.
-pub fn is_route_marker(key: &str) -> bool {
-    let probe = Fields::from_iter([(key.to_string(), Value::Bool(true))]);
-    key == crate::filter_dialog::MATCH_COLOR_DESTINATION || ROUTES.iter().any(|owns| owns(&probe))
-}
-
-/// The file command a dialog's handler stands for when it reads or writes files itself, outside
-/// the engine (a disk-change save, Export As, Save for Web, Print), so automation is judged for
-/// that command rather than for the dialog's `__command`.
-fn file_command(fields: &Fields) -> Option<&'static str> {
-    if crate::disk_change_prompt::owns(fields) || crate::legacy_save_prompt::owns(fields) {
-        Some("file.save")
-    } else if fields.contains_key("__export") {
-        Some("file.export.exportAs")
-    } else if fields.contains_key("__web") {
-        Some("file.export.saveForWebLegacy")
-    } else if fields.contains_key("__print") {
-        Some("file.print")
-    } else {
-        None
-=======
 /// Runs the answers of every dialog that finished: parameter dialogs, prompts, then each family's own results. It runs
 /// after every host pass and at once after [`confirm`], [`cancel`] and an automation edit, so an answer acts inside the
 /// request that caused it.
@@ -726,7 +553,6 @@ pub fn cancel(app: &mut PhotocraftApp, ctx: &egui::Context, id: DialogId) -> Res
     }
     if !app.framework.dialogs.cancel_by_id(ctx, id) {
         return Err(format!("no dialog {}", id.value()));
->>>>>>> theirs
     }
     take_results(app, ctx);
     Ok(())
@@ -793,54 +619,10 @@ pub fn open_command_dialog(app: &mut PhotocraftApp, command: &str, label: &str) 
 /// Preference entries the engine reads itself, by key: the engine has no settings store, so they cannot move.
 const ENGINE_READ: &[&str] = &["ui.layersPanelOptions", "file.print", "file.export.saveForWebLegacy"];
 
-<<<<<<< ours
-/// Confirm a dialog: run its action and close it. Used by the OK button and by automation.
-/// Confirm a command dialog through the first handler whose marker its fields carry; the prompts
-/// and small editors are here, the rest in `confirm_command_more`.
-fn confirm_command(app: &mut PhotocraftApp, d: Dialog) -> Result<Value, String> {
-    if crate::actions::record_again::owns(&d.fields) || crate::actions::record_again::owns_dialog(app, d.id) {
-        return crate::actions::record_again::confirm(app, d.id, &d.fields);
-    }
-    if crate::actions::menu_item::owns(&d.fields) || crate::actions::menu_item::owns_dialog(app, d.id) {
-        return crate::actions::menu_item::confirm(app, d.id, &d.fields);
-    }
-    match d.kind {
-        _ if crate::open_prompt::owns_memory(&d.fields) => crate::open_prompt::answer_memory(app, true),
-        _ if crate::open_prompt::owns_damage(&d.fields) => crate::open_prompt::answer_damage(app, true),
-        _ if crate::guide_layout_ui::owns(&d.fields) => crate::guide_layout_ui::confirm(app, &d.fields),
-        _ if crate::brush_preset_dialog::owns(&d.fields) => crate::brush_preset_dialog::confirm(app, &d.fields),
-        _ if crate::fill_ui::owns(&d.fields) => crate::fill_ui::confirm(app, &d.fields),
-        _ if crate::pattern_fill_ui::owns(&d.fields) => crate::pattern_fill_ui::confirm(app, &d.fields),
-        _ if crate::stroke_ui::owns(&d.fields) => crate::stroke_ui::confirm(app, &d.fields),
-        _ if crate::new_group_ui::owns(&d.fields) => crate::new_group_ui::confirm(app, &d.fields),
-        _ if crate::snapshot_dialog::owns(&d.fields) => crate::snapshot_dialog::confirm(app, &d.fields),
-        _ if crate::channel_options_ui::owns(&d.fields) => crate::channel_options_ui::confirm(app, &d.fields),
-        _ if crate::channel_options_ui::owns_new_spot(&d.fields) => crate::channel_options_ui::confirm_new_spot(app, &d.fields),
-        _ if crate::shape_dialog::owns(&d.fields) => crate::shape_dialog::confirm(app, &d.fields),
-        _ if crate::delete_layer_prompt::owns(&d.fields) => crate::delete_layer_prompt::confirm(app, &d.fields),
-        _ if save_prompt(&d.fields) => save_prompt_confirm(app, &d.fields),
-        _ if crate::replace_prompt::owns(&d.fields) => crate::replace_prompt::confirm(app),
-        _ if crate::preset_group_prompt::owns(&d.fields) => crate::preset_group_prompt::confirm(app, &d.fields),
-        _ if crate::actions::owns_stop_message(&d.fields) => crate::actions::stop_message_confirm(app, &d.fields),
-        _ if crate::actions::owns_insert_stop(&d.fields) => crate::actions::insert_stop_confirm(app, &d.fields),
-        _ if crate::actions::owns_new_set(&d.fields) => crate::actions::new_set_confirm(app, &d.fields),
-        _ if crate::actions::playback::owns(&d.fields) => crate::actions::playback::confirm(app, &d.fields),
-        _ if crate::new_layer_ui::owns(&d.fields) => crate::new_layer_ui::confirm(app, &d.fields),
-        _ if crate::mask_trash_prompt::owns(&d.fields) => crate::mask_trash_prompt::confirm(app, &d.fields),
-        _ if crate::rasterize_prompt::owns(&d.fields) => crate::rasterize_prompt::confirm(app, &d.fields),
-        _ if crate::duplicate_layer_ui::owns(&d.fields) => crate::duplicate_layer_ui::confirm(app, &d.fields),
-        _ if crate::stack_dialog::owns(&d.fields) => crate::stack_dialog::confirm(app, &d.fields),
-        _ if crate::tool_reset::owns(&d.fields) => crate::tool_reset::confirm(app),
-        _ if crate::crop_presets::owns(&d.fields) => crate::crop_presets::confirm(app, &d.fields),
-        _ if crate::variables_ui::owns(&d.fields) => crate::variables_ui::confirm(app, &d.fields),
-        _ => confirm_command_more(app, d),
-    }
-=======
 /// The "Don't show again" entries (`{"skip": true}`), by key, as their prompt modules read them. Told apart by key, not
 /// by the shape of the value.
 fn dont_show_again_keys() -> [&'static str; 4] {
     [delete_layer_prompt::PREF, live_shape_prompt::PREF, crate::analysis::note_alerts::DELETE_NOTE_PREF, crate::retouch_ui::CAM_NO_PIXELS_PREF]
->>>>>>> theirs
 }
 
 /// Where the remembered value of the preference entry `key` goes: `None` keeps it in `Preferences.dialogs`, else the

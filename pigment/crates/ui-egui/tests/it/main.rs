@@ -2,19 +2,6 @@
 
 mod actions_duplicate;
 mod actions_panel_menu;
-<<<<<<< ours
-mod actions_record_again;
-mod adjust_preview_gpu;
-// Pigment: generative AI.
-#[cfg(not(target_arch = "wasm32"))]
-mod ai;
-// Pigment: the Assistant.
-#[cfg(not(target_arch = "wasm32"))]
-mod ai_assistant;
-mod arbitrary_rotation_preview;
-mod background_eraser_reset_tip;
-=======
->>>>>>> theirs
 mod batch_export_options;
 mod brush_reset_defaults;
 mod camera_raw_histogram;
@@ -35,12 +22,6 @@ mod healing_reset_tip;
 #[allow(dead_code)]
 mod interactive_bench_reporting;
 mod layout_perf;
-<<<<<<< ours
-// Pigment: documents of Pigment 0.1–0.4.
-mod legacy_pigment;
-mod live_stroke_canvas;
-=======
->>>>>>> theirs
 mod magnetic_lasso_right_click;
 mod paint_bucket_all_layers;
 mod pending_remove_pointer;

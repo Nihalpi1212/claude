@@ -113,19 +113,6 @@ pub fn intercept(app: &mut PhotocraftApp, tool: Tool, x: f64, y: f64, pressure: 
     true
 }
 
-<<<<<<< ours
-/// Open the prompt for `layer`; OK rasterizes it. `tool` and `at` (x, y, pressure) only record the press that opened it.
-pub fn open(app: &mut PhotocraftApp, kind: Kind, layer: photocraft_doc::LayerId, tool: Tool, at: [f64; 3]) -> u64 {
-    let mut f = Map::new();
-    f.insert(MARK.into(), json!(kind.key()));
-    f.insert("__command".into(), json!(kind.command()));
-    f.insert("__label".into(), json!("Pigment"));
-    f.insert("message".into(), json!(kind.message()));
-    f.insert("layer".into(), json!(layer.0));
-    f.insert("tool".into(), json!(format!("{tool:?}")));
-    f.insert("at".into(), json!(at));
-    app.ui.open_dialog(DialogKind::Command, f)
-=======
 /// Opens the prompt for `layer`; OK rasterizes it, and the id of the prompt already open comes back
 /// when there is one. `tool` and `at` (x, y, pressure) name the press that opened it; the press is
 /// never replayed, so they change nothing.
@@ -136,7 +123,6 @@ pub fn open(app: &mut PhotocraftApp, kind: Kind, layer: photocraft_doc::LayerId,
         .button(PromptChoice::Cancel, tl!("Cancel").to_owned())
         .tag(Rasterize { kind, layer: layer.0, filter: None });
     alerts::open_prompt(app, prompt).unwrap_or_else(|open| open)
->>>>>>> theirs
 }
 
 /// The active type layer when `id` is a filter that only needs it rasterized: the engine greys it
@@ -170,36 +156,6 @@ pub fn filter_needs(app: &PhotocraftApp, id: &str) -> Option<(photocraft_doc::La
 /// A filter chosen on a type layer: open the prompt instead and return its answer to the caller.
 pub fn intercept_filter(app: &mut PhotocraftApp, id: &str, params: &Value) -> Option<Result<Value, String>> {
     let (layer, smart) = filter_needs(app, id)?;
-<<<<<<< ours
-    if let Some(d) = app.ui.dialogs.iter().find(|d| owns(&d.fields)) {
-        return Some(Ok(json!({"dialog": d.id})));
-    }
-    let mut f = Map::new();
-    f.insert(MARK.into(), json!(Kind::Type.key()));
-    f.insert("__label".into(), json!("Pigment"));
-    f.insert("message".into(), json!(Kind::Type.message()));
-    f.insert("layer".into(), json!(layer.0));
-    f.insert("filter".into(), json!(id));
-    f.insert("params".into(), params.clone());
-    f.insert("choice".into(), json!("rasterize"));
-    f.insert("smartObject".into(), json!(smart));
-    Some(Ok(json!({"dialog": app.ui.open_dialog(DialogKind::Command, f)})))
-}
-
-/// Is this the filter prompt (Convert to Smart Object / Rasterize / Cancel)?
-pub fn is_filter(fields: &Map<String, Value>) -> bool {
-    owns(fields) && fields.contains_key("filter")
-}
-
-/// Does the filter prompt offer Convert to Smart Object?
-pub fn offers_smart_object(fields: &Map<String, Value>) -> bool {
-    fields.get("smartObject").and_then(Value::as_bool) == Some(true)
-}
-
-/// Is this dialog the prompt?
-pub fn owns(fields: &Map<String, Value>) -> bool {
-    fields.contains_key(MARK)
-=======
     let mut prompt = StandardPrompt::custom(tl!(Kind::Type.message()).to_owned())
         .title(tl!("PhotoCraft").to_owned())
         .button(PromptChoice::Proceed, tl!("Rasterize").to_owned());
@@ -213,7 +169,6 @@ pub fn owns(fields: &Map<String, Value>) -> bool {
     });
     let dialog = alerts::open_prompt(app, prompt).unwrap_or_else(|open| open);
     Some(Ok(json!({"dialog": dialog.value()})))
->>>>>>> theirs
 }
 
 /// The `PROMPTS` entry: Proceed rasterizes, Alternate converts to a Smart Object (the filter prompt

@@ -99,104 +99,6 @@ fn warp_box_open(app: &mut PhotocraftApp) {
     crate::transform_tool::begin_warp(app, &ctx).unwrap();
 }
 
-<<<<<<< ours
-/// #1447, #1438: a click on Help leaves its search field focused, so typing searches at once,
-/// and clicking into the field and typing keeps the menu open. Whole app, real clicks (press
-/// and release in separate frames), with the custom title bar (Windows, Linux) and without.
-#[test]
-fn help_search_takes_typing_and_clicks_without_closing_the_menu() {
-    use egui::{Event, Modifiers, PointerButton};
-    use egui_kittest::{Harness, kittest::Queryable};
-    for (custom, doc, scale) in [(true, false, 1.0), (true, true, 1.25), (false, true, 1.5)] {
-        let what = format!("custom title bar {custom}, document {doc}, scale {scale}");
-        let mut h =
-            Harness::builder().with_size(egui::vec2(1200.0 / scale, 800.0 / scale)).with_pixels_per_point(scale).with_max_steps(64).build_eframe(move |cc| {
-                PhotocraftApp::setup_context(&cc.egui_ctx, crate::theme::ThemeKind::ALL[0]);
-                let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
-                app.custom_titlebar = custom;
-                if doc {
-                    app.run("file.new", json!({"width": 64, "height": 48})).unwrap();
-                }
-                app
-            });
-        h.run_steps(4);
-        let click = |h: &mut Harness<'_, PhotocraftApp>, at: egui::Pos2| {
-            h.event(Event::PointerMoved(at));
-            h.run_steps(1);
-            h.event(Event::PointerButton { pos: at, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
-            h.run_steps(1);
-            h.event(Event::PointerButton { pos: at, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
-            h.run_steps(3);
-        };
-        let typing = |h: &mut Harness<'_, PhotocraftApp>, text: &str| {
-            for c in text.chars() {
-                h.event(Event::Text(c.to_string()));
-                h.run_steps(1);
-            }
-            h.run_steps(3);
-        };
-        let open = |h: &Harness<'_, PhotocraftApp>| h.query_by_label_contains("About Pigment").is_some();
-        let field_id = egui::Id::unique("help-menu-search").with("field");
-        let help = h.get_by_label("Help").rect().center();
-        click(&mut h, help);
-        assert!(open(&h), "Help opened ({what})");
-        assert_eq!(h.ctx.memory(|m| m.focused()), Some(field_id), "the click on Help leaves the search field focused ({what})");
-        typing(&mut h, "lev");
-        assert!(open(&h), "typing keeps Help open ({what})");
-        assert!(h.query_all_by_label_contains("› Levels").next().is_some(), "typing right away searches ({what})");
-        let field = h.query_all_by_role(egui::accesskit::Role::TextInput).find(|n| n.is_focused()).map(|n| n.rect().center());
-        let field = field.unwrap_or_else(|| panic!("the search field is in the accessibility tree ({what})"));
-        click(&mut h, field);
-        assert!(open(&h), "clicking the search field keeps Help open ({what})");
-        assert_eq!(h.ctx.memory(|m| m.focused()), Some(field_id), "and focused ({what})");
-        typing(&mut h, "els");
-        assert!(open(&h), "typing after the click keeps Help open ({what})");
-        assert!(h.query_all_by_label_contains("› Levels").next().is_some(), "and lists the matches ({what})");
-    }
-}
-
-/// #5996: a real key press comes as a key and its text. A letter typed into Help › Search is
-/// text for the field, not a mnemonic: "S" ran System Info and "A" the ArtCraft website.
-#[test]
-fn help_search_letters_are_not_mnemonics() {
-    use egui::{Event, Key, Modifiers, PointerButton};
-    use egui_kittest::{Harness, kittest::Queryable};
-    let mut h = Harness::builder().with_size(egui::vec2(1200.0, 800.0)).with_max_steps(64).build_eframe(|cc| {
-        PhotocraftApp::setup_context(&cc.egui_ctx, crate::theme::ThemeKind::ALL[0]);
-        PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default())
-    });
-    h.run_steps(4);
-    let help = h.get_by_label("Help").rect().center();
-    h.event(Event::PointerMoved(help));
-    h.run_steps(1);
-    for pressed in [true, false] {
-        h.event(Event::PointerButton { pos: help, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE });
-        h.run_steps(1);
-    }
-    h.run_steps(3);
-    assert!(h.query_by_label_contains("About Pigment").is_some(), "Help opened");
-    for c in "DeSelect all".chars() {
-        let key = Key::from_name(&c.to_ascii_uppercase().to_string());
-        if let Some(key) = key {
-            h.event(Event::Key { key, physical_key: Some(key), pressed: true, repeat: false, modifiers: Modifiers::NONE });
-        }
-        h.event(Event::Text(c.to_string()));
-        h.run_steps(1);
-        if let Some(key) = key {
-            h.event(Event::Key { key, physical_key: Some(key), pressed: false, repeat: false, modifiers: Modifiers::NONE });
-        }
-    }
-    h.run_steps(3);
-    assert!(h.query_by_label_contains("About Pigment").is_some(), "typing keeps Help open");
-    let query: String = h.ctx.data(|d| d.get_temp(egui::Id::unique("help-menu-search"))).unwrap_or_default();
-    assert_eq!(query, "DeSelect all", "every letter reached the field");
-    assert!(h.state().ui.dialogs.is_empty(), "no menu command ran: {:?}", h.state().ui.dialogs);
-}
-
-#[test]
-fn dropdown_items_have_room() {
-    use egui_kittest::{Harness, kittest::Queryable};
-=======
 fn stored_warp(app: &mut PhotocraftApp) {
     painted_layer(app);
     app.run("layer.smartObjects.convertToSmartObject", json!({})).unwrap();
@@ -262,7 +164,6 @@ fn menu_rows_sit_where_photoshop_puts_them_and_show_their_state() {
             }
         }
     }
->>>>>>> theirs
 
     // The context menus' Select actions all live under Select; Make Work Path is a Paths panel action.
     let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());

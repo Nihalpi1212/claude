@@ -99,39 +99,7 @@ fn store_preferences(app: &mut PhotocraftApp, _now: Instant) -> Option<Instant> 
     match save(&text) {
         Ok(()) => {
             app.prefs_rt.saved_rev = rev;
-<<<<<<< ours
-            app.prefs_rt.saved_value = Some(ours);
-            let r = std::mem::take(&mut app.prefs_rt.save_retry);
-            if r.failures > 0 {
-                let message = "Preferences saved";
-                app.ui.status = tl!(message).into();
-                app.ui.status_error = false;
-                if let Some(id) = r.notice {
-                    app.ui.notices.retain(|n| n.id != id);
-                }
-            }
-            None
-        }
-        Err(e) => {
-            let r = &mut app.prefs_rt.save_retry;
-            r.failures = r.failures.saturating_add(1);
-            (r.tried_at, r.tried_rev) = (now, rev);
-            let delay = (SAVE_RETRY_S * 2f64.powi(r.failures.min(16) as i32 - 1)).min(SAVE_RETRY_MAX_S);
-            r.at = now + delay;
-            let failures = r.failures;
-            if failures == 1 {
-                let template = "Couldn't save preferences: {error}. Retrying…";
-                app.ui.status = crate::i18n::fmt(tl!(template), &[("error", &e)]);
-                app.ui.status_error = true;
-            } else if failures == SAVE_NOTICE_AFTER {
-                let lines = vec![e, "Pigment keeps retrying; until a save succeeds, preference changes are lost when it closes.".into()];
-                let id = crate::notices::post(app, "Preferences can't be saved", lines, true, None);
-                app.prefs_rt.save_retry.notice = Some(id);
-            }
-            Some(delay)
-=======
             saved(app);
->>>>>>> theirs
         }
         Err(e) => save_failed(app, &e),
     }

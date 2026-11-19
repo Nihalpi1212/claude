@@ -270,39 +270,8 @@ pub fn decode_tip(bytes: &[u8]) -> Result<GrayTile, String> {
 
 /// [`decode_tip`] refusing (before inflating anything) a bitmap with a side over `max_side`.
 fn decode_tip_max(bytes: &[u8], max_side: u32) -> Result<GrayTile, String> {
-<<<<<<< ours
-    let head = bytes.get(..TIP_HEADER).ok_or("truncated tip header")?;
-    if &head[..6] != TIP_MAGIC {
-        return Err("not a Pigment tip".into());
-    }
-    let bits = head[6];
-    let u32_at = |i: usize| u32::from_le_bytes([head[i], head[i + 1], head[i + 2], head[i + 3]]);
-    let (w, h) = (u32_at(7), u32_at(11));
-    if w == 0 || h == 0 || w > MAX_TIP_SIDE.min(max_side) || h > MAX_TIP_SIDE.min(max_side) {
-        return Err(format!("bad tip size {w}×{h}"));
-    }
-    let n = u64::from(w) * u64::from(h);
-    if n > MAX_TIP_SAMPLES {
-        return Err(format!("tip too large ({w}×{h})"));
-    }
-    let bytes_per = match bits {
-        8 => 1u64,
-        16 => 2,
-        b => return Err(format!("unsupported tip depth {b}")),
-    };
-    let want = n * bytes_per;
-    let mut raw = Vec::with_capacity(want as usize);
-    flate2::read::ZlibDecoder::new(&bytes[TIP_HEADER..]).take(want + 1).read_to_end(&mut raw).map_err(|e| format!("tip data: {e}"))?;
-    if raw.len() as u64 != want {
-        return Err(format!("tip data has {} bytes, expected {want}", raw.len()));
-    }
-    let data: Vec<u16> =
-        if bits == 8 { raw.iter().map(|&v| u16::from(v) * 257).collect() } else { raw.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c)).collect() };
-    Ok(GrayTile { width: w, height: h, data: data.into() })
-=======
     let tip = craft_pcraft_tip::tip::decode_with_max_side(bytes, max_side)?;
     Ok(GrayTile { width: tip.width, height: tip.height, data: tip.data.into() })
->>>>>>> theirs
 }
 
 // ------------------------------------------------------------------ group files

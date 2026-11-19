@@ -345,41 +345,12 @@ fn insert_target(app: &PhotocraftApp) -> Result<(usize, Option<usize>), String> 
     }
 }
 
-<<<<<<< ours
-/// Import one set and reveal its first action, for both native paths and browser contents.
-fn load_source(app: &mut PhotocraftApp, name: &str, params: Value) -> Result<Value, String> {
-    let r = app.run("actions.load", params)?;
-    let n = r["actions"].as_array().map_or(0, Vec::len) as u64;
-    let unsupported = r["unsupported"].as_array().map_or(0, Vec::len);
-    let shown = crate::file_open::display_name(name);
-    let loaded =
-        crate::i18n::fmt(&crate::i18n::trn(crate::i18n::current(), n, "Loaded {n} action from {file}", "Loaded {n} actions from {file}"), &[("file", &shown)]);
-    app.ui.status_error = false;
-    app.ui.status = if unsupported > 0 {
-        let note =
-            crate::i18n::trn(crate::i18n::current(), unsupported as u64, "{n} step has no Pigment equivalent yet", "{n} steps have no Pigment equivalent yet");
-        let template = "{message} ({note})";
-        crate::i18n::fmt(tl!(template), &[("message", &loaded), ("note", &note)])
-    } else {
-        loaded
-    };
-    // Show what arrived: select the first loaded action, expanded.
-    let list = &app.session.actions.list;
-    if let Some(first) = r["actions"][0].as_str()
-        && let Some(i) = list.iter().position(|a| a.name == first)
-    {
-        app.ui.actions.select(i, None);
-        app.ui.actions.expanded.resize(list.len(), false);
-        if let Some(e) = app.ui.actions.expanded.get_mut(i) {
-            *e = true;
-=======
 fn apply_event(app: &mut PhotocraftApp, event: ActionsEvent) -> Result<(), String> {
     match event {
         ActionsEvent::Play { action, from, .. } => play_and_report(app, &[action], from),
         ActionsEvent::PlaySet(set) => {
             let targets = set_actions(app, &set);
             play_and_report(app, &targets, 0);
->>>>>>> theirs
         }
         ActionsEvent::BeginRecording { into, .. } => begin_recording(app, into),
         ActionsEvent::NewAction => begin_recording(app, None),
@@ -416,66 +387,6 @@ fn apply_event(app: &mut PhotocraftApp, event: ActionsEvent) -> Result<(), Strin
                     app.ui.actions.panel.selected = Some(ActionSelection::Set(copy.to_owned()));
                 }
             }
-<<<<<<< ours
-        }
-        if count == 1 {
-            return match errors.pop() {
-                Some(e) => Err(e),
-                None => Ok(last),
-            };
-        }
-        let actions = sets.iter().fold(0usize, |sum, e| sum.saturating_add(e.2));
-        let unsupported = sets.iter().fold(0usize, |sum, e| sum.saturating_add(e.3));
-        let lang = crate::i18n::current();
-        let files = crate::i18n::trn(lang, loaded as u64, "{n} action file loaded", "{n} action files loaded");
-        let mut notes = vec![crate::i18n::trn(lang, actions as u64, "{n} action", "{n} actions")];
-        if unsupported > 0 {
-            notes.push(crate::i18n::trn(lang, unsupported as u64, "{n} step has no Pigment equivalent yet", "{n} steps have no Pigment equivalent yet"));
-        }
-        notes.extend(replaced);
-        if !errors.is_empty() {
-            let failed = crate::i18n::trn(lang, errors.len() as u64, "{n} file could not be loaded: {errors}", "{n} files could not be loaded: {errors}");
-            notes.push(crate::i18n::fmt(&failed, &[("errors", &errors.join("; "))]));
-        }
-        let template = "{message} ({note})";
-        let summary = crate::i18n::fmt(tl!(template), &[("message", &files), ("note", &notes.join("; "))]);
-        if !errors.is_empty() {
-            return Err(summary);
-        }
-        app.ui.status = summary;
-        app.ui.status_error = false;
-        Ok(json!({"files": loaded, "actions": actions, "unsupported": unsupported}))
-    })
-}
-
-/// Save Actions…: the selected action's set (every action of it), else the selected set folder,
-/// or every action when none came from a set, as a `.atn` file Photoshop loads.
-fn save_dialog(app: &mut PhotocraftApp, set: Option<String>) -> Result<Value, String> {
-    let selected_set = app.ui.actions.selected.is_none().then(|| app.ui.actions.selected_set.clone()).flatten();
-    let selected_set = selected_set.filter(|set| photocraft_engine::actions_edit_cmds::set_names(&app.session).contains(set));
-    let set = set.or(selected_set).or_else(|| selected_action(app).and_then(|a| a.set.clone()));
-    let params = match &set {
-        Some(set) => json!({"set": set, "skipUnsupported": true}),
-        None => json!({"skipUnsupported": true}),
-    };
-    let r = app.run("actions.save", params)?;
-    let bytes = r["data"].as_str().and_then(photocraft_engine::paint::tile::b64_decode).ok_or("the export returned no data")?;
-    let n = r["actions"].as_array().map_or(0, Vec::len) as u64;
-    let skipped = r["skipped"].as_array().map_or(0, Vec::len);
-    // A set name can hold characters a file name can't (as in Keyboard Shortcuts' Save), or be a
-    // Windows device name (`CON`); the file keeps the set's own name.
-    let stem: String = r["set"]
-        .as_str()
-        .unwrap_or("Actions")
-        .chars()
-        .map(|c| if c.is_control() || matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') { '_' } else { c })
-        .collect();
-    // A file name holds at most 255 bytes: the stem gets what `.atn` leaves, cut at a character.
-    let mut stem = photocraft_engine::file_cmds::portable_device_name(stem);
-    let mut cut = 255 - ".atn".len();
-    while !stem.is_char_boundary(cut.min(stem.len())) {
-        cut -= 1;
-=======
             _ => {}
         },
         ActionsEvent::Rename { action, text, .. } => rename_action(app, action, text),
@@ -505,7 +416,6 @@ fn save_dialog(app: &mut PhotocraftApp, set: Option<String>) -> Result<Value, St
         // Set Options and Batch are not offered; ShowOnly and its undo never arrive, the panel
         // reports per-cell Flip and Restore steps.
         _ => {}
->>>>>>> theirs
     }
     Ok(())
 }

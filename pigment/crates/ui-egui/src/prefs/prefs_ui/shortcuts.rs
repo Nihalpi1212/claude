@@ -229,50 +229,8 @@ fn save_text(app: &mut PhotocraftApp, state: &mut DialogState, suggested: &str, 
         write(&path, text.as_bytes())?;
         Ok(json!({"path": path}))
     });
-<<<<<<< ours
-    ui.add_space(6.0);
-    if tab == 0 {
-        ui.horizontal(|ui| {
-            let has_sel = !selected.is_empty();
-            if ui.add_enabled(has_sel, egui::Button::new(tl!("Add Shortcut"))).clicked() {
-                capture = true;
-                capture_alt = true;
-                message.clear();
-                message_warning = false;
-            }
-            if ui.add_enabled(has_sel, egui::Button::new(tl!("Use Default"))).clicked() {
-                overrides.remove(&selected);
-                alt_overrides.remove(&selected);
-                message = tl!("Default restored.").into();
-                message_warning = false;
-            }
-            if ui.add_enabled(has_sel, egui::Button::new(tl!("Delete Shortcut"))).clicked() {
-                overrides.insert(selected.clone(), String::new());
-                message = tl!("Shortcut removed.").into();
-                message_warning = false;
-            }
-            if ui.button(tl!("Reset All to Defaults")).clicked() {
-                overrides.clear();
-                alt_overrides.clear();
-                message = tl!("All shortcuts reset to Pigment defaults.").into();
-                message_warning = false;
-            }
-            // A Photoshop set (`.kys`) fills the overrides; the file arrives after this frame
-            // and `kys_import` writes the dialog's fields then (#1163).
-            if ui.button(tl!("Import Shortcuts…")).on_hover_text(tl!("Load a keyboard shortcut set saved as .kys")).clicked()
-                && let Err(e) = crate::kys_import::import_dialog(app)
-            {
-                message = e;
-                message_warning = false;
-            }
-        });
-    } else if ui.button(tl!("Show All Menu Items")).clicked() {
-        hidden.clear();
-        colors.clear();
-=======
     if let Err(e) = saved {
         state.show_error(e);
->>>>>>> theirs
     }
 }
 
@@ -383,136 +341,12 @@ pub(crate) fn assign(
 #[cfg(test)]
 pub(crate) fn rebind(
     app: &mut PhotocraftApp,
-<<<<<<< ours
-    ui: &mut egui::Ui,
-    f: &mut Map<String, Value>,
-    overrides: &mut BTreeMap<String, String>,
-    alternates: &mut BTreeMap<String, Vec<String>>,
-    items: &[(String, String, Vec<String>, Option<String>)],
-    message: &mut String,
-    warning: &mut bool,
-) {
-    use photocraft_engine::shortcut_sets::{self, ShortcutSet};
-    let mut sets: BTreeMap<String, ShortcutSet> = f.get("sets").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default();
-    let mut active = f.get("activeSet").and_then(Value::as_str).unwrap_or("").to_string();
-    if !active.is_empty() && !sets.contains_key(&active) {
-        active.clear();
-    }
-    // The engine decides what a set holds and when it is modified (not the actions' F-keys).
-    let now = ShortcutSet::from_bindings(overrides, alternates);
-    let modified = shortcut_sets::differs(&sets, &active, overrides, alternates);
-    let defaults = tl!("Pigment Defaults").to_string();
-    let shown = |name: &str| -> String {
-        let base = if name.is_empty() { defaults.clone() } else { name.to_string() };
-        if name == active && modified { crate::i18n::fmt(tl!("{set} (modified)"), &[("set", &base)]) } else { base }
-    };
-    let names: Vec<(String, String)> = std::iter::once(String::new()).chain(sets.keys().cloned()).map(|n| (n.clone(), shown(&n))).collect();
-    let mut new_name: Option<String> = f.get("newSetName").and_then(Value::as_str).map(str::to_string);
-    let set_label = if active.is_empty() { defaults.clone() } else { active.clone() };
-    let mut export = false;
-    let mut summarize = false;
-    ui.horizontal(|ui| {
-        ui.label(tl!("Set:"));
-        let mut chosen = active.clone();
-        let pairs: Vec<(String, &str)> = names.iter().map(|(n, l)| (n.clone(), l.as_str())).collect();
-        if crate::widgets::dropdown(ui, "shortcut-set", tl!("Set:"), &mut chosen, &pairs, 220.0) && chosen != active {
-            // As `useSet`: the set's bindings, keeping the actions' F-keys.
-            sets.get(&chosen).cloned().unwrap_or_default().apply(overrides, alternates);
-            active = chosen;
-            message.clear();
-        }
-        if ui.button(tl!("New Set…")).on_hover_text(tl!("Save these shortcuts as a new set")).clicked() {
-            new_name = Some(String::new());
-        }
-        if ui.add_enabled(!active.is_empty() && modified, egui::Button::new(tl!("Save"))).on_hover_text(tl!("Save the changes to this set")).clicked() {
-            sets.insert(active.clone(), now.clone());
-            *message = tl!("Set saved.").into();
-            *warning = false;
-        }
-        if ui.add_enabled(!active.is_empty(), egui::Button::new(tl!("Delete"))).on_hover_text(tl!("Delete this set")).clicked() {
-            sets.remove(&active);
-            active.clear();
-            *message = tl!("Set deleted.").into();
-            *warning = false;
-        }
-        export = ui.button(tl!("Export…")).on_hover_text(tl!("Save these shortcuts as a .kys file")).clicked();
-        summarize = ui.button(tl!("Summarize…")).on_hover_text(tl!("Save a list of these shortcuts as a web page")).clicked();
-    });
-    if let Some(name) = new_name.as_mut() {
-        let mut create = false;
-        let mut cancel = false;
-        ui.horizontal(|ui| {
-            ui.label(tl!("Name:"));
-            let r = ui.add(egui::TextEdit::singleline(name).desired_width(220.0).hint_text(tl!("set name")));
-            create = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-            create |= ui.button(tl!("Create")).clicked();
-            cancel = ui.button(tl!("Cancel")).clicked();
-        });
-        if create {
-            match shortcut_sets::set_name(name) {
-                Ok(n) if !sets.contains_key(&n) && sets.len() >= shortcut_sets::MAX_SETS => {
-                    *message = tl!("There are too many sets: delete one first.").into();
-                    *warning = true;
-                }
-                Ok(n) => {
-                    sets.insert(n.clone(), now.clone());
-                    active = n;
-                    new_name = None;
-                    *message = tl!("Set saved.").into();
-                    *warning = false;
-                }
-                Err(e) => {
-                    *message = e;
-                    *warning = true;
-                }
-            }
-        } else if cancel {
-            new_name = None;
-        }
-    }
-    if export || summarize {
-        let result = if export {
-            let entries: Vec<photocraft_engine::kys::Entry> = items
-                .iter()
-                .map(|(id, label, _, def)| photocraft_engine::kys::Entry {
-                    id: id.clone(),
-                    label: label.clone(),
-                    tool: id.starts_with("tools.select."),
-                    keys: dialog_keys(overrides, alternates, id, def.as_deref()),
-                })
-                .collect();
-            let text = photocraft_engine::kys::write(&set_label, &entries);
-            save_text(app, &format!("{set_label}.kys"), text)
-        } else {
-            let mut sections: Vec<shortcut_sets::Section> = Vec::new();
-            for (id, label, path, def) in items {
-                let section = path.first().cloned().unwrap_or_else(|| tl!("Other").to_string());
-                let name = path.iter().skip(1).chain(std::iter::once(label)).cloned().collect::<Vec<_>>().join(" › ");
-                let row = (name, dialog_keys(overrides, alternates, id, def.as_deref()));
-                match sections.iter_mut().find(|(s, _)| *s == section) {
-                    Some((_, rows)) => rows.push(row),
-                    None => sections.push((section, vec![row])),
-                }
-            }
-            let html = shortcut_sets::summarize(&set_label, &sections, cfg!(target_os = "macos"));
-            save_text(app, &format!("{set_label}.html"), html)
-        };
-        if let Err(e) = result {
-            *message = e;
-            *warning = true;
-        }
-    }
-    f.insert("sets".into(), json!(sets));
-    f.insert("activeSet".into(), json!(active));
-    f.insert("newSetName".into(), new_name.map_or(Value::Null, Value::String));
-=======
     command: &CommandRef,
     binding: craft::keymap::Binding,
     policy: craft::keymap::Policy,
 ) -> Result<craft::keymap::Assigned, craft::keymap::AssignError> {
     let session = app.prefs_rt.shortcuts.as_mut().ok_or(craft::keymap::AssignError::UnknownCommand)?;
     session.keymap.set_bindings(command, vec![binding], policy)
->>>>>>> theirs
 }
 
 /// Test hook: presses OK in the open dialog and handles the outcome, in one pass on `ctx`.

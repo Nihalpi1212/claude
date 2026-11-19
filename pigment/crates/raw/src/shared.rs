@@ -104,17 +104,12 @@ fn warnings(image: &craft_raw::RawImage) -> Vec<String> {
     }
     for op in image.opcodes.list1.iter().chain(&image.opcodes.list2).chain(&image.opcodes.list3) {
         if !matches!(op, craft_raw::Opcode::GainMap { .. } | craft_raw::Opcode::MapPolynomial { .. }) {
-            out.push("some raw correction opcodes are not applied by Pigment".to_string());
+            out.push("some raw correction opcodes are not applied by PhotoCraft".to_string());
             break;
         }
     }
-<<<<<<< ours
-    if image.color.profile.gain_table_map.is_some() {
-        out.push("the raw camera profile's gain table map is not applied by Pigment".to_string());
-=======
     if image.notices.gain_table_omitted || image.color.profile.gain_table_map.is_some() {
         out.push("the raw camera profile's ProfileGainTableMap is not applied by PhotoCraft".to_string());
->>>>>>> theirs
     }
     out
 }

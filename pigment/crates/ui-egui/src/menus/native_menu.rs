@@ -19,12 +19,8 @@ use craft::ui::runtime::windows::WindowHost;
 use crate::PhotocraftApp;
 use crate::menus::items;
 
-<<<<<<< ours
-pub const APP_NAME: &str = "Pigment";
-=======
 /// The name the app menu, About, Hide and Quit show.
 pub const APP_NAME: &str = "PhotoCraft";
->>>>>>> theirs
 
 /// [`items::model`]'s menus laid out as a Mac menu bar, in the UI language.
 ///
@@ -66,30 +62,6 @@ pub fn poll(app: &mut PhotocraftApp, ctx: &egui::Context) {
 /// when anything they show may have changed. Building the rows walks every command's enabled
 /// state, so the layout runs only when [`state_hash`] changes or a menu event arrived.
 pub fn sync(app: &mut PhotocraftApp, ctx: &egui::Context) {
-<<<<<<< ours
-    let Some(menu) = app.services.native_menu.as_ref() else { return };
-    let state = state_hash(app, had_input(ctx).then_some(app.frame));
-    if menu.state == Some(state) && !menu.dirty {
-        return;
-    }
-    let lang = crate::i18n::current();
-    let mut items = crate::menus::menu_items(app);
-    // AppKit swallows a key equivalent whose item is disabled: no action, no key-down for the
-    // window (#8965). While a Keyboard Shortcuts field waits for keys, every item with a key
-    // stays enabled, so its key comes back as a key press for the field to record (⌘Z, ⌘⌥Z,
-    // ⌘H…); a click on one is still dropped under the dialog ([`run`]).
-    let capturing = crate::prefs_ui::capturing_shortcut(app);
-    for it in &mut items {
-        it.enabled = if capturing && it.shortcut.is_some() { true } else { it.enabled && crate::menus::modal_allows(app, &it.id) };
-    }
-    let layout = app_layout(app, &items, lang, &app.session.prefs().interface.language);
-    let Some(menu) = app.services.native_menu.as_mut() else { return };
-    if !menu.logged {
-        for c in &layout.clashes {
-            log::info!("menu: {} is {} on macOS and {} in Pigment; {}", c.shortcut, c.system, c.command, c.resolution);
-        }
-        menu.logged = true;
-=======
     // Taken out for the pass: the layout borrows the whole app.
     let Some(mut native) = app.services.native_menu.take() else { return };
     let (gate, rules) = crate::menus::menu_gate(app);
@@ -98,7 +70,6 @@ pub fn sync(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let state = state_hash(app, craft::menu::had_input(ctx).then_some(app.frame));
     for c in native.sync_with(state, || laid_out(app, ctx)) {
         log::info!("menu: {} is {} on macOS and {} in PhotoCraft; {}", c.shortcut.portable(), c.system, c.command.id, c.resolution);
->>>>>>> theirs
     }
     app.services.native_menu = Some(native);
 }

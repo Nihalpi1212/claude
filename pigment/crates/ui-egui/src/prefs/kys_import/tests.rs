@@ -84,62 +84,11 @@ fn plan_of(app: &PhotocraftApp, text: &str) -> ImportPlan {
     plan(&kys::read(text).unwrap(), &draft_keymap(app), &import_options(&Default::default()))
 }
 
-<<<<<<< ours
-/// The dialog's Import Shortcuts… button: the chosen file fills the overrides (a key
-/// equal to the default clears its override), reports what it did, and OK applies the set like
-/// hand-made changes, taking a moved key from its old owner.
-#[test]
-fn import_button_fills_the_dialog_and_ok_applies_the_set() {
-    let answers = vec![Some(FileDialogAnswer::Contents("/sets/texcuts.kys".into(), SAMPLE.as_bytes().to_vec()))];
-    let services = crate::Services { file_dialog: Some(crate::file_dialog::fake(answers).0), ..Default::default() };
-    let mut h = Harness::builder().with_size(egui::vec2(1100.0, 760.0)).with_max_steps(64).build_eframe(|cc| {
-        PhotocraftApp::setup_context(&cc.egui_ctx, Default::default());
-        PhotocraftApp::new(photocraft_engine::Session::new(), services)
-    });
-    let ctx = h.ctx.clone();
-    // A hand-made override the file agrees with the default on: the import clears it.
-    h.state_mut().run("edit.keyboardShortcuts", json!({"set": {"edit.undo": "Cmd+Shift+Z"}})).unwrap();
-    let id = crate::menus::invoke(h.state_mut(), &ctx, "edit.keyboardShortcuts", json!({})).unwrap()["dialog"].as_u64().unwrap();
-    // A short list keeps the button row on screen.
-    h.state_mut().ui.dialog_mut(id).unwrap().fields.insert("filter".into(), json!("gaussian"));
-    h.state_mut().ui.dialog_mut(id).unwrap().fields.insert("messageWarning".into(), json!(true));
-    h.run_steps(2);
-    h.get_by_label("Import Shortcuts…").click();
-    h.run_steps(3);
-    let field = |h: &Harness<'_, PhotocraftApp>, name: &str| -> Value {
-        h.state().ui.dialogs.iter().find(|d| d.id == id).unwrap().fields.get(name).cloned().unwrap_or(Value::Null)
-    };
-    assert_eq!(h.state().ui.status, "", "the import failed");
-    let overrides = field(&h, "overrides");
-    assert_eq!(overrides["filter.blur.gaussianBlur"], json!("Cmd+Ctrl+Alt+G"));
-    assert!(overrides.get("edit.preferences.general").is_none(), "Cmd+K is Preferences' default: {overrides}");
-    assert_eq!(overrides["filter.lastFilter"], json!("Cmd+F"));
-    assert!(overrides.get("edit.undo").is_none(), "Cmd+Z is the default again: {overrides}");
-    assert!(overrides.get("select.all").is_none(), "already the default: {overrides}");
-    assert!(overrides.get("view.zoomIn").is_none(), "Cmd+= is among the keys, so the default stays: {overrides}");
-    let message = field(&h, "message");
-    // 9 commands and the Move Tool's V (its own letter: no override).
-    assert_eq!(message, json!("Imported 10 shortcuts from texcuts.kys. Click OK to keep them. 2 commands are not in Pigment."));
-    assert!(overrides.get("tools.select.move").is_none(), "{overrides}");
-    assert_eq!(field(&h, "capture"), json!(false));
-    assert_eq!(field(&h, "messageWarning"), json!(false), "an import clears the earlier shortcut conflict warning");
-    // Nothing is applied until OK.
-    assert_eq!(crate::shortcuts::effective_shortcut(h.state(), "edit.undo", Some("Cmd+Z")).as_deref(), Some("Cmd+Shift+Z"));
-    crate::dialogs::confirm(h.state_mut(), id).unwrap();
-    let app = h.state();
-    assert_eq!(crate::shortcuts::effective_shortcut(app, "edit.undo", Some("Cmd+Z")).as_deref(), Some("Cmd+Z"));
-    assert_eq!(crate::shortcuts::effective_shortcut(app, "filter.blur.gaussianBlur", None).as_deref(), Some("Cmd+Ctrl+Alt+G"));
-    assert_eq!(crate::shortcuts::effective_shortcut(app, "edit.preferences.general", Some("Cmd+K")).as_deref(), Some("Cmd+K"));
-    // Cmd+F went to Last Filter, so Search (Cmd+F by default) lost its key.
-    assert_eq!(crate::shortcuts::effective_shortcut(app, "edit.search", Some("Cmd+F")), None);
-    assert_eq!(crate::shortcuts::effective_shortcut(app, "filter.lastFilter", Some("Cmd+Alt+F")).as_deref(), Some("Cmd+F"));
-=======
 /// The keys the plan gives command `id`, as the preferences spell them.
 fn keys(plan: &ImportPlan, id: &str) -> Vec<String> {
     let of =
         |p: &craft::keymap::import::Planned| -> Vec<String> { p.bindings.iter().filter_map(|b| normalize_shortcut(&b.binding.text(&Scope::app()))).collect() };
     plan.commands.iter().find(|p| p.command.id == id).map(of).unwrap_or_default()
->>>>>>> theirs
 }
 
 /// The set the dialog is asked to review: queued once, read by the dialog's next pass alone.

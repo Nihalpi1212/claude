@@ -106,35 +106,8 @@ fn without_the_flag_the_launcher_switch_means_nothing() {
     assert!(port(&app).is_some(), "a saved Control Port still counts");
 }
 
-<<<<<<< ours
-/// Pigment's page has its own switch (`connectAgents`) and nothing that sets up an MCP client, and
-/// never sends the user to the ArtCraft Launcher; the port, folders and closed-app choice stay.
-#[test]
-fn ai_integrations_have_pigments_own_switch_and_no_client_buttons() {
-    use egui_kittest::{Harness, kittest::Queryable};
-    let (mut app, _) = app_with_store();
-    app.agent_link.mcp_flag = false;
-    open_preferences(&mut app, "integrations");
-    let mut h = Harness::builder().with_size(vec2(1280.0, 800.0)).build_eframe(move |cc| {
-        PhotocraftApp::setup_context(&cc.egui_ctx, Default::default());
-        app
-    });
-    h.run_steps(4);
-    for label in ["Copy Configuration", "Add to Claude Desktop", "Copy Prompt for an Agent"] {
-        assert!(h.query_by_label(label).is_none(), "{label}");
-    }
-    assert!(h.query_by_label_contains("Let AI apps use this window").is_some(), "Pigment's own switch");
-    h.get_by_label("Off: AI apps get a session without a window.");
-    assert!(h.query_by_label_contains("ArtCraft").is_none(), "no launcher");
-    assert!(h.query_by_label("Folder agents can open from").is_some(), "the folders stay");
-}
-
-#[test]
-fn ai_integrations_choices_and_paths_validate_through_prefs_set() {
-=======
 #[test]
 fn agent_choices_and_paths_validate_through_prefs_set() {
->>>>>>> theirs
     let (mut app, _) = app_with_store();
     for v in ["launch", "headless", "error"] {
         app.run("prefs.set", json!({"values": {"integrations.whenAppClosed": v}})).unwrap();

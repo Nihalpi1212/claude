@@ -7,13 +7,8 @@ use craft::ui::display::Picture;
 use egui::Color32;
 use photocraft_codecs::{ChannelLayout, SampleType};
 
-<<<<<<< ours
-/// 128 px: sharp at 20 pt on a 3× display, and the mipmaps keep it clean at 1×.
-const ICON_PNG: &[u8] = include_bytes!("../../../../assets/app-icon/hicolor/128x128/apps/io.github.nihalpi1212.pigment.png");
-=======
 /// 128 px: sharp at 20 pt on a 3× display.
 const ICON_PNG: &[u8] = include_bytes!("../../../../assets/app-icon/hicolor/128x128/apps/ai.storyteller.photocraft.png");
->>>>>>> theirs
 
 /// The key the picture store keeps the decoded icon under.
 const KEY: u64 = 0x7068_6f74_6f63_7266;

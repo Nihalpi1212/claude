@@ -70,32 +70,6 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui, area: egui::Rect) {
     app.ui.task_bar_shown = Some([r.min.x, r.min.y, r.max.x, r.max.y]);
 }
 
-<<<<<<< ours
-/// The Crop tool's controls in the bar.
-fn contents(app: &mut PhotocraftApp, ui: &mut egui::Ui, more: &mut task_bar::MoreMenu) {
-    // Generative Expand (#41) goes here, before the preset dropdown. Pigment: generative AI.
-    crate::ai_ui::crop_task_bar_item(app, ui);
-    let before_ratio = crop_ui::preset_ratio(app);
-    // Its own id: the options bar shows the same dropdown.
-    ui.push_id("crop-task-bar", |ui| crate::crop_presets::dropdown(app, ui));
-    if crop_ui::preset_ratio(app) != before_ratio {
-        crop_ui::apply_ratio(app);
-    }
-    let armed = app.crop.straighten.armed;
-    if crate::icons::button_with_icon_size_tip(ui, STRAIGHTEN_ICON, task_bar::BUTTON, 14.0, armed, tl!("Straighten"), false).clicked() {
-        crate::crop_straighten::toggle(app);
-    }
-    more.show(ui);
-    if crop_ui::pending(app) {
-        if ui.button(tl!("Cancel")).clicked() {
-            crop_ui::dismiss(app);
-        }
-        if ui.button(tl!("Done")).clicked() {
-            crate::canvas::commit_crop(app);
-        }
-    }
-=======
 fn label(text: &str) -> Label {
     Label::from(text.to_string())
->>>>>>> theirs
 }

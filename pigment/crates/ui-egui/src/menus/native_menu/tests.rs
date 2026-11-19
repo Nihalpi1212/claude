@@ -1,64 +1,9 @@
-<<<<<<< ours
-use super::*;
-use serde_json::json;
-
-fn app(doc: bool) -> PhotocraftApp {
-    let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
-    if doc {
-        app.run("file.new", json!({"width": 64, "height": 48})).unwrap();
-        app.sync_views();
-    }
-    app
-}
-
-fn layout(doc: bool) -> Layout {
-    photocraft_layout(&crate::menus::menu_items(&app(doc)), Lang::EN, "auto")
-}
-
-fn ids(nodes: &[Node]) -> Vec<String> {
-    nodes
-        .iter()
-        .map(|n| match n {
-            Node::Item(it) => it.id.clone(),
-            Node::Separator => "---".into(),
-            Node::Submenu { label, .. } => format!("[{label}]"),
-            Node::Standard(s) => format!("<{s:?}>"),
-        })
-        .collect()
-}
-
-#[test]
-fn photocraft_gets_a_mac_app_menu() {
-    let l = layout(true);
-    let app = &l.bar.menus[0];
-    assert_eq!((app.title.as_str(), app.role), ("Pigment", MenuRole::App));
-    assert_eq!(
-        ids(&app.children),
-        ["help.about", "---", "[Settings]", "[Language]", "[Appearance]", "---", "<Services>", "---", HIDE, "<HideOthers>", "<ShowAll>", "---", "file.exit"]
-    );
-    let quit = l.bar.find("file.exit").unwrap();
-    assert_eq!((quit.label.as_str(), quit.shortcut.as_deref()), ("Quit Pigment", Some("Cmd+Q")));
-    assert_eq!(l.bar.find("help.about").unwrap().label, "About Pigment");
-}
-
-#[test]
-fn moved_items_leave_their_old_menus() {
-    let l = layout(true);
-    let by = |t: &str| l.bar.menus.iter().find(|m| m.title == t).unwrap();
-    assert!(!ids(&by("File").children).contains(&"file.exit".to_string()));
-    assert!(!ids(&by("Help").children).contains(&"help.about".to_string()));
-    assert!(!ids(&by("Edit").children).contains(&"[Preferences]".to_string()));
-    let titles: Vec<&str> = l.bar.menus.iter().map(|m| m.title.as_str()).collect();
-    assert_eq!(titles, ["Pigment", "File", "Edit", "Image", "Layer", "Type", "Select", "Filter", "View", "Window", "Help"]);
-}
-=======
 use std::cell::RefCell;
 use std::rc::Rc;
 
 use craft::menu::{Backend, CommandRef, Dispatch, Event, ItemRole, MenuBar, MenuRole, Node};
 use egui_kittest::Harness;
 use serde_json::json;
->>>>>>> theirs
 
 use super::*;
 

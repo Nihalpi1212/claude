@@ -74,11 +74,7 @@ pub(crate) fn serve(a: &ServeArgs, err: &mut dyn Write) -> Result {
 /// always headless; `--bridge` (or PIGMENT_CONTROL_PORT) a `pigment --control` app.
 pub(crate) fn mcp(a: &McpArgs, err: &mut dyn Write) -> Result {
     let server = match &a.bridge {
-<<<<<<< ours
-        None if !a.headless => PhotocraftMcp::live(live_config(a)?),
-=======
         None if !a.headless && craft::automation::agents::mcp_flag() => PhotocraftMcp::live(live_config(a)?),
->>>>>>> theirs
         Some(addr) => {
             if a.bridge_from_env {
                 // Name the mode switch, as `serve` does: the way back to headless is to unset it.

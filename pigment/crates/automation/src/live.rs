@@ -120,25 +120,12 @@ impl Live {
             // this command. The app's own folders are for agents the person let in.
             return self.headless(&self.cfg.read_roots, self.cfg.write_root.clone(), "the automation roots can't be used");
         }
-<<<<<<< ours
-        match self.cfg.when_closed.unwrap_or(integrations.when_app_closed) {
-            WhenAppClosed::Error => Err("Pigment isn't running: open it, then try again.".into()),
-            WhenAppClosed::Headless => {
-                let reads = if self.cfg.read_roots.is_empty() {
-                    agent_link::folder(&integrations.read_root).into_iter().collect()
-                } else {
-                    self.cfg.read_roots.clone()
-                };
-                let write = self.cfg.write_root.clone().or_else(|| agent_link::folder(&integrations.write_root));
-                self.headless(&reads, write, "Pigment isn't running and its agent folders can't be used")
-=======
         match self.cfg.when_closed.unwrap_or(integrations.agents.when_app_closed) {
             WhenAppClosed::Error => Err("PhotoCraft isn't running: open it, then try again.".into()),
             WhenAppClosed::Headless => {
                 let reads = if self.cfg.read_roots.is_empty() { integrations.agents.read_folder().into_iter().collect() } else { self.cfg.read_roots.clone() };
                 let write = self.cfg.write_root.clone().or_else(|| integrations.agents.write_folder());
                 self.headless(&reads, write, "PhotoCraft isn't running and its agent folders can't be used")
->>>>>>> theirs
             }
             WhenAppClosed::Launch => self.launch_and_wait().await,
         }

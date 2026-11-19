@@ -14,18 +14,8 @@ use crate::panels::panel_docking;
 
 const TOGGLE: &str = "Toggle Character and Paragraph panels";
 
-<<<<<<< ours
-fn bare_app() -> PhotocraftApp {
-    // Pigment: wait for the installed fonts' scan. Until it ends the bar draws "Loading fonts…"
-    // in place of its font menus, and when it ends between two frames the bar's buttons move, so a
-    // click aimed at the frame before misses. Only the test without a document met that (the
-    // others create a type layer, which waits for the scan), alone in its process, as under
-    // cargo-nextest, and more often on a busy machine.
-    let _ = photocraft_text::shared();
-=======
 /// An app with one selected type layer.
 fn app_with_layer() -> Box<PhotocraftApp> {
->>>>>>> theirs
     let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
     app.ui.tool = crate::state::Tool::Type;
     app.run("file.new", json!({"width": 200, "height": 100})).unwrap();

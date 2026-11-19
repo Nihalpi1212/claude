@@ -1,9 +1,4 @@
-<<<<<<< ours
-//! Help › Check for Updates (Pigment opens its releases page; no check starts at launch, see
-//! docs/FORK.md) and the non-modal window for release information craft-update draws.
-=======
 //! Help ▸ Check for Updates and the check at startup, both driven by craft-update's `Updater`.
->>>>>>> theirs
 
 use serde_json::Value;
 
@@ -11,12 +6,7 @@ use crate::PhotocraftApp;
 
 /// The update checker's state (desktop); the web build has none.
 pub(crate) struct Runtime {
-<<<<<<< ours
-    notified_version: Option<String>,
-    /// The startup prompt and the self-update behind it (desktop).
-=======
     /// The one checker: the startup prompt, the manual check, the installation and the last update's outcome.
->>>>>>> theirs
     #[cfg(not(target_arch = "wasm32"))]
     updater: craft::update::updater::Updater,
     /// The check-result dialog on the dialog host, while one is open.
@@ -30,10 +20,6 @@ pub(crate) struct Runtime {
 impl Default for Runtime {
     fn default() -> Self {
         Self {
-<<<<<<< ours
-            notified_version: None,
-=======
->>>>>>> theirs
             #[cfg(not(target_arch = "wasm32"))]
             updater: craft::update::updater::Updater::new(&crate::UPDATE_APP, photocraft_engine::build_info::VERSION),
             #[cfg(not(target_arch = "wasm32"))]
@@ -46,26 +32,6 @@ impl Default for Runtime {
 
 /// Help ▸ Check for Updates: starts a check whose outcome the result window shows.
 #[cfg(not(target_arch = "wasm32"))]
-<<<<<<< ours
-fn release_of(found: &photocraft_engine::updates_cmds::Release) -> craft_update::Release {
-    craft_update::Release {
-        tag: format!("v{}", found.version),
-        version: craft_update::parse_version(&found.version),
-        name: format!("Pigment {}", found.version),
-        html_url: found.url.clone(),
-        ..Default::default()
-    }
-}
-
-/// Help › Check for Updates: opens Pigment's releases page in the browser, where each release
-/// (`pigment-vX.Y.Z`) lists what changed and its downloads. Nothing is fetched or installed: Pigment
-/// makes no network request on its own (docs/FORK.md).
-pub(crate) fn check(app: &mut PhotocraftApp, ctx: &egui::Context, params: Value) -> Result<Value, String> {
-    if params.as_object().is_some_and(|o| !o.is_empty()) || !(params.is_null() || params.is_object()) {
-        return Err("help.checkForUpdates takes no parameters".into());
-    }
-    Ok(crate::links::open(app, ctx, crate::links::RELEASES))
-=======
 pub(crate) fn check(app: &mut PhotocraftApp, _ctx: &egui::Context, _params: Value) -> Result<Value, String> {
     app.updates_rt.updater.check_now();
     app.ui.updates_open = true;
@@ -76,7 +42,6 @@ pub(crate) fn check(app: &mut PhotocraftApp, _ctx: &egui::Context, _params: Valu
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn check(_app: &mut PhotocraftApp, _ctx: &egui::Context, _params: Value) -> Result<Value, String> {
     Err("Update checks are not available here".into())
->>>>>>> theirs
 }
 
 /// Once per pass: the check at start when the preference is on (the `Updater` runs it once per
@@ -92,31 +57,6 @@ pub(crate) fn tick(app: &mut PhotocraftApp) {
     if !app.updates_rt.outcome_announced && matches!(app.updates_rt.updater.status(), Status::Updated(_) | Status::InstallFailed(_)) {
         app.updates_rt.outcome_announced = true;
         app.ui.updates_open = true;
-<<<<<<< ours
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            let updater = &mut app.updates_rt.updater;
-            updater.offer(release_of(release));
-            // While an update installs or waits for the app to close, or while the launcher keeps
-            // this version, no prompt opens: a manual check reports that state in the result window.
-            if std::mem::take(&mut app.updates_rt.requested) && !updater.prompt_open() {
-                updater.check_now(ctx);
-            }
-        }
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    if !matches!(app.session.updates.status, Status::Checking) {
-        app.updates_rt.requested = false;
-    }
-    if app.session.updates.check.is_none() {
-        return;
-    }
-    // Pigment starts no check at launch (docs/FORK.md); a check another frontend started is
-    // still followed.
-    if matches!(app.session.updates.status, Status::Checking) {
-        ctx.request_repaint_after(std::time::Duration::from_millis(100));
-=======
->>>>>>> theirs
     }
 }
 
@@ -214,70 +154,6 @@ mod tests {
     use std::sync::{Arc, Mutex, mpsc};
     use std::time::Duration;
 
-<<<<<<< ours
-    type Sender = Arc<Mutex<Option<mpsc::Sender<photocraft_engine::updates_cmds::CheckResult>>>>;
-
-    /// An app whose update check (were one started) counts its calls.
-    fn app() -> (PhotocraftApp, Arc<Mutex<u32>>, Sender) {
-        let calls = Arc::new(Mutex::new(0));
-        let count = calls.clone();
-        let sender = Arc::new(Mutex::new(None));
-        let tx = sender.clone();
-        let opened: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
-        let app = PhotocraftApp::new(
-            Session::new(),
-            Services {
-                check_updates: Some(Box::new(move || {
-                    *count.lock().unwrap() += 1;
-                    let (sender, receiver) = mpsc::channel();
-                    *tx.lock().unwrap() = Some(sender);
-                    Ok(receiver)
-                })),
-                open_url: Some(Box::new(move |u: &str| {
-                    opened.lock().unwrap().push(u.to_string());
-                    Ok(())
-                })),
-                ..Default::default()
-            },
-        );
-        (app, calls, sender)
-    }
-
-    fn at(app: &mut PhotocraftApp, ctx: &egui::Context, time: f64) {
-        let mut output = ctx.run_ui(egui::RawInput { time: Some(time), ..Default::default() }, |ui| tick(app, ui.ctx()));
-        output.textures_delta.clear();
-    }
-
-    #[test]
-    fn no_check_runs_at_launch_even_with_automatic_checks_on() {
-        let (mut app, calls, _) = app();
-        let ctx = egui::Context::default();
-        app.session.edit_prefs(|p| p.general.automatically_check_updates = true);
-        for t in [0.0, 1.0, 86400.0] {
-            at(&mut app, &ctx, t);
-        }
-        assert_eq!(*calls.lock().unwrap(), 0, "Pigment makes no network request on its own");
-        assert_eq!(app.session.updates.status, Status::Idle);
-        assert!(!app.ui.updates_open);
-    }
-
-    #[test]
-    fn check_for_updates_opens_the_releases_page_and_fetches_nothing() {
-        let (mut app, calls, _) = app();
-        let ctx = egui::Context::default();
-        assert!(menus::is_enabled(&app, "help.checkForUpdates"));
-        let r = menus::invoke(&mut app, &ctx, "help.checkForUpdates", serde_json::json!({})).unwrap();
-        assert_eq!(r["url"], "https://github.com/Nihalpi1212/claude/releases");
-        assert_eq!(app.ui.status, "Opened https://github.com/Nihalpi1212/claude/releases");
-        assert_eq!(*calls.lock().unwrap(), 0);
-        assert!(menus::invoke(&mut app, &ctx, "help.checkForUpdates", serde_json::json!({"x": 1})).is_err());
-        // Without an update service (Pigment's desktop and web builds) it is the same link.
-        let mut plain = PhotocraftApp::new(Session::new(), Services::default());
-        assert!(menus::is_enabled(&plain, "help.checkForUpdates"));
-        assert_eq!(menus::invoke(&mut plain, &ctx, "help.checkForUpdates", serde_json::json!({})).unwrap()["url"], crate::links::RELEASES);
-        at(&mut plain, &ctx, 2.0);
-        assert_eq!(plain.session.updates.status, Status::Idle);
-=======
     fn app() -> Box<PhotocraftApp> {
         PhotocraftApp::new(Session::new(), Services::default())
     }
@@ -304,7 +180,6 @@ mod tests {
         assert!(app.ui.updates_open);
         assert_ne!(*app.updates_rt.updater.status(), craft::update::updater::Status::Idle);
         assert!(checks.recv_timeout(Duration::from_secs(5)).is_ok(), "the manual check ran");
->>>>>>> theirs
     }
 
     #[test]

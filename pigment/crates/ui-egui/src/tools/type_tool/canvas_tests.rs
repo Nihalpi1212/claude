@@ -1311,13 +1311,8 @@ fn temporary_type_transform_preserves_depth_and_color_model() {
     for (depth, mode) in [(8, "rgb"), (16, "rgb"), (32, "rgb"), (16, "gray"), (8, "cmyk"), (16, "lab")] {
         let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
         app.run("file.new", json!({"width": 1200, "height": 900, "depth": depth, "mode": mode})).unwrap();
-<<<<<<< ours
-        let id = LayerId(app.run("type.create", json!({"text": "Pigment é世界", "size": 32, "x": 300, "y": 350})).unwrap()["layer"].as_u64().unwrap());
-        super::edit_active(&mut app).unwrap();
-=======
         let id = LayerId(app.run("type.create", json!({"text": "PhotoCraft é世界", "size": 32, "x": 300, "y": 350})).unwrap()["layer"].as_u64().unwrap());
         begin_edit(&mut app).unwrap();
->>>>>>> theirs
         let format = app.session.active().unwrap().doc.pixel_format();
         let a = frame_of(&mut app).unwrap().quad[2];
         tool_event(&mut app, ToolEvent::Down { x: a[0], y: a[1], pressure: 1.0 }, type_command());
@@ -1327,7 +1322,7 @@ fn temporary_type_transform_preserves_depth_and_color_model() {
         assert_eq!(text_layer(&shown, id).unwrap().cache.as_ref().unwrap().format(), format);
         tool_event(&mut app, ToolEvent::Up { x: a[0] + 30.0, y: a[1] + 15.0 }, Modifiers::NONE);
         assert_eq!(text(&app, id).cache.as_ref().unwrap().format(), format);
-        assert_eq!(text(&app, id).text, "Pigment é世界");
+        assert_eq!(text(&app, id).text, "PhotoCraft é世界");
     }
 }
 
@@ -1395,79 +1390,8 @@ fn temporary_type_transform_imported_psd_retains_editability_and_styles() {
     assert_affine(text(&app, id).transform, before.transform);
 }
 
-<<<<<<< ours
-#[test]
-#[ignore = "release benchmark for issue #1091: 24 MP, eight text layers, 60 preview updates"]
-fn temporary_type_transform_large_document_preview() {
-    use crate::canvas::{ToolEvent, tool_event};
-    let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
-    app.run("file.new", json!({"width": 6000, "height": 4000})).unwrap();
-    for i in 0..8 {
-        app.run("type.create", json!({"text": "Pigment transform preview", "size": 60, "x": 300, "y": 300 + i * 200})).unwrap();
-    }
-    super::edit_active(&mut app).unwrap();
-    let frame = crate::type_transform::frame(&mut app).unwrap();
-    let a = frame.quad[2];
-    let revision = app.session.active().unwrap().revision;
-    let doc = app.session.active().unwrap().doc.id;
-    let index = app.session.active_index().unwrap();
-    let count = app.session.active().unwrap().history.entries().len();
-    let source = (*app.session.active().unwrap().doc).clone();
-    let layer = app.ui.text_edit.as_ref().unwrap().layer;
-    tool_event(&mut app, ToolEvent::Down { x: a[0], y: a[1], pressure: 1.0 }, type_command());
-    let mut times = Vec::new();
-    let mut transforms = Vec::new();
-    let mut before = 0;
-    for i in 1..=60 {
-        let started = std::time::Instant::now();
-        tool_event(&mut app, ToolEvent::Move { x: a[0] + f64::from(i) * 2.0, y: a[1] + f64::from(i), pressure: 1.0 }, type_command());
-        let (_, after) = crate::type_transform::display_doc(&mut app, index).unwrap();
-        times.push(started.elapsed().as_secs_f64() * 1000.0);
-        transforms.push(crate::type_transform::current_transform(&app, LayerId(layer)).unwrap());
-        let damage = crate::type_transform::damage(&app, doc, revision, before, after).unwrap();
-        assert!(i64::from(damage.width()) * i64::from(damage.height()) < 2_000_000, "preview only damages the type layer");
-        let (_, same) = crate::type_transform::display_doc(&mut app, index).unwrap();
-        assert_eq!(same, after, "stationary pointer reuses the rendered preview");
-        before = after;
-    }
-    assert_eq!(app.session.active().unwrap().revision, revision);
-    assert_eq!(app.session.active().unwrap().history.entries().len(), count);
-    times.sort_by(f64::total_cmp);
-    println!(
-        "24 MP / 8 type layers / 60 previews: p50 {:.3} ms, p95 {:.3} ms, max {:.3} ms (render + gesture; composite excluded)",
-        times[29], times[56], times[59]
-    );
-    // Compare the same matrices with the existing live-command path on the same document.
-    let mut commands = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
-    commands.session.add_document(source, None);
-    let mut command_times = Vec::new();
-    for transform in transforms {
-        let started = std::time::Instant::now();
-        commands.run("type.edit", json!({"layer": layer, "transform": transform.m, "coalesce": "1091-bench"})).unwrap();
-        command_times.push(started.elapsed().as_secs_f64() * 1000.0);
-    }
-    command_times.sort_by(f64::total_cmp);
-    println!(
-        "existing type.edit per update: p50 {:.3} ms, p95 {:.3} ms, max {:.3} ms (command + render; composite excluded)",
-        command_times[29], command_times[56], command_times[59]
-    );
-    crate::type_transform::cancel_drag(&mut app);
-}
-
-#[test]
-fn font_styles_keep_metadata_names_and_numeric_labels() {
-    let styles = super::styles("Inter");
-    assert!(styles.contains(&"Regular".into()));
-    assert!(styles.contains(&"SemiBold".into()));
-    assert_eq!(super::style_label("20"), "20");
-    assert_eq!(super::style_label("30"), "30");
-    assert_eq!(super::styles("Missing test family"), ["Regular"]);
-}
-
-=======
 /// The style of a face named only by its PostScript name is the face's own subfamily, which the
 /// Character controls' `CharacterValues.style` shows.
->>>>>>> theirs
 #[test]
 fn postscript_only_style_shows_actual_subfamily() {
     // `selected_style` reads the engine only once the font scan is done (try_shared). Under nextest

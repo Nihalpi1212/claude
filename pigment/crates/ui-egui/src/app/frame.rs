@@ -245,39 +245,6 @@ impl PhotocraftApp {
                     let panels_hidden = cx.shell().is_some_and(|shell| shell.panels_hidden());
                     crate::panel_docking::show(app, ui, panels_hidden);
                 }
-<<<<<<< ours
-            }
-        }
-        // The floating editor windows belong to the editor: Home covers them (dialogs and notices
-        // below stay).
-        if !home {
-            brush_panel::window(self, &ctx);
-            preset_panels::windows(self, &ctx);
-            gradient_ui::editor_window(self, &ctx);
-            type_panels_ui::windows(self, &ctx);
-            analysis_ui::windows(self, &ctx);
-            timeline_ui::windows(self, &ctx);
-            workspace_ui::windows(self, &ctx);
-        }
-        palette::show(self, &ctx);
-        dialogs::show(self, &ctx);
-        crate::ai_ui::show(self, &ctx); // Pigment: generative AI
-        layers_panel_ui::show_dialog(self, &ctx);
-        rasterize_prompt::run_pending(self, &ctx);
-        jobs_ui::dialog(self, &ctx);
-        discard_ui::show(self, &ctx);
-        tiff_options_ui::show(self, &ctx);
-        targa_options_ui::show(self, &ctx);
-        jpeg_options_ui::show(self, &ctx);
-        dds_options_ui::show(self, &ctx);
-        smart_svg_ui::poll(self, &ctx);
-        smart_svg_ui::show(self, &ctx);
-        distort_ui::show(self, &ctx);
-        camera_raw_ui::show(self, &ctx);
-        wide_angle_ui::show(self, &ctx);
-        canvas::extra_windows(self, &ctx);
-        notices::show(self, &ctx);
-=======
                 notices::show(app, ui);
                 smart_svg_ui::host(app, &ui.ctx().clone());
             })
@@ -286,7 +253,6 @@ impl PhotocraftApp {
         // Over the window: the background job and update dialogs before the host runs, then every
         // hosted dialog, then the other OS windows' contents.
         jobs_ui::dialog(self, ui);
->>>>>>> theirs
         updates_ui::show(self, &ctx);
         // The Keyboard Shortcuts dialog draws while its session is open.
         prefs_ui::show_shortcuts(self, ui);

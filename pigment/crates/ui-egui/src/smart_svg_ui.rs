@@ -237,79 +237,6 @@ fn editor_id(editor: Editor) -> &'static str {
     CHOICES.iter().find(|(choice, ..)| *choice == editor).map_or("vectorCraft", |&(_, id, _)| id)
 }
 
-<<<<<<< ours
-/// Draw the editor-choice dialog while a choice is pending. The internal editor is offered
-/// only for SVG; "Stop syncing" ends a running session for the same contents.
-pub(crate) fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
-    let file_dialog_open = app.file_dialog_open();
-    let can_pick = app.services.file_dialog.is_some() && !file_dialog_open;
-    let Some(pending) = app.smart_svg.pending.as_mut() else { return };
-    let mut ok = false;
-    let mut cancel = false;
-    let mut choose = false;
-    let mut stop = false;
-    let running = app.smart_svg.editing.iter().any(|edit| edit.target.doc == pending.target.doc && edit.target.contents_id == pending.target.contents_id);
-    let modal = egui::Modal::new(egui::Id::unique("smart-svg-editor")).show(ctx, |ui| {
-        let tokens = crate::theme::Tokens::get(ctx);
-        ui.set_max_width(470.0);
-        ui.label(
-            egui::RichText::new(tr(if pending.target.extension == "svg" { "Edit SVG Smart Object" } else { "Edit Vector Smart Object" }))
-                .font(crate::theme::semibold(15.0)),
-        );
-        ui.add_space(4.0);
-        crate::widgets::hairline(ui);
-        ui.add_space(8.0);
-        ui.label(tr(if pending.target.extension == "svg" {
-            "Choose the application used to edit this SVG:"
-        } else {
-            "Choose the application used to edit this vector:"
-        }));
-        if pending.target.extension != "svg" {
-            ui.label(tr(
-                "AI/PDF/EPS files keep their original format. Unsupported features may change when saved. Original contents remain available through Undo.",
-            ));
-        }
-        for (choice, label) in [
-            (Editor::VectorCraft, "VectorCraft"),
-            (Editor::Illustrator, "Adobe Illustrator"),
-            (Editor::Program, "Other application"),
-            (Editor::Internal, "Pigment (internal editor)"),
-        ] {
-            // The desktop shell discovers Illustrator installations only on Windows and macOS.
-            if choice == Editor::Illustrator && !cfg!(any(windows, target_os = "macos")) {
-                continue;
-            }
-            let available = pending.target.extension == "svg" || choice != Editor::Internal;
-            ui.add_enabled_ui(available, |ui| ui.radio_value(&mut pending.editor, choice, tr(label)));
-        }
-        if pending.editor == Editor::Program {
-            if let Some(program) = &pending.program {
-                let name = std::path::Path::new(program).file_name().and_then(|s| s.to_str()).unwrap_or(program);
-                ui.label(name);
-            }
-            choose = ui.add_enabled(can_pick, egui::Button::new(tr("Choose executable…"))).clicked();
-        }
-        ui.add_space(8.0);
-        ui.label(
-            egui::RichText::new(tr(if pending.target.extension == "svg" {
-                "Save to the opened SVG file. Each saved change becomes one undo step in Pigment."
-            } else {
-                "Save to the opened original-format file. Each saved change becomes one undo step in Pigment."
-            }))
-            .small()
-            .color(tokens.text_dim),
-        );
-        ui.label(egui::RichText::new(tr("Updates wait while another document or an editing dialog is active.")).small().color(tokens.text_dim));
-        if running {
-            stop = ui.button(tr("Stop syncing this Smart Object")).clicked();
-        }
-        ui.add_space(12.0);
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let enabled = !file_dialog_open && (pending.editor != Editor::Program || pending.program.is_some());
-            ok = ui.add_enabled_ui(enabled, |ui| crate::widgets::primary_button(ui, "OK", 84.0)).inner.clicked();
-            cancel = crate::widgets::secondary_button(ui, "Cancel", 84.0).clicked();
-        });
-=======
 fn editor_from(id: Option<&str>) -> Editor {
     CHOICES.iter().find(|(_, choice, _)| Some(*choice) == id).map_or(Editor::VectorCraft, |(editor, ..)| *editor)
 }
@@ -341,7 +268,6 @@ fn params(svg: bool) -> Vec<Param> {
         "Save to the opened SVG file. Each saved change becomes one undo step in PhotoCraft."
     } else {
         "Save to the opened original-format file. Each saved change becomes one undo step in PhotoCraft."
->>>>>>> theirs
     });
     rows.push(Param::read_only_text("savedNote", Label::Empty, Label::from(saved)).full_width());
     rows.push(

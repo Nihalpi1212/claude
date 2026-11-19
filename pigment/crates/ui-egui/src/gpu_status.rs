@@ -192,7 +192,7 @@ pub fn system_info(app: &PhotocraftApp) -> Vec<String> {
 
 /// Help › System Info's on-screen text: version, platform and the graphics state.
 pub fn system_info_ui(app: &PhotocraftApp) -> Vec<String> {
-    let mut v = vec![format!("Pigment {}", photocraft_engine::build_info::long_version()), {
+    let mut v = vec![format!("PhotoCraft {}", photocraft_engine::build_info::long_version()), {
         let template = "Platform: {os} {arch}";
         crate::i18n::fmt(tl!(template), &[("os", std::env::consts::OS), ("arch", std::env::consts::ARCH)])
     }];
@@ -309,64 +309,14 @@ fn choose_recovery(app: &mut PhotocraftApp, retry: bool) -> Result<(), String> {
         crate::notices::post(
             app,
             "GPU retry scheduled",
-<<<<<<< ours
-            vec!["Save your work and restart Pigment to retry GPU acceleration. CPU rendering remains active for this session.".into()],
-            false,
-=======
             vec!["Save your work and restart PhotoCraft to retry GPU acceleration. CPU rendering remains active for this session.".into()],
             craft::theme::variant::Tone::Neutral,
->>>>>>> theirs
             None,
         );
     }
     Ok(())
 }
 
-<<<<<<< ours
-/// Recovery is an explicit choice; the CPU document renderer stays active while the user works.
-pub fn show_fallback(app: &mut PhotocraftApp, ctx: &egui::Context) {
-    let Some(reason) = app.ui.gpu_fallback_notice.clone() else { return };
-    let retry_now = can_retry_now(app);
-    let t = crate::theme::Tokens::get(ctx);
-    let mut choice = None;
-    egui::Window::new(tl!("Switched to CPU rendering"))
-        .id(egui::Id::unique("gpu-fallback-warning"))
-        .collapsible(false)
-        .resizable(false)
-        .default_width(440.0)
-        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
-        .show(ctx, |ui| {
-            ui.label(egui::RichText::new(tl!("GPU acceleration could not continue. Your documents are unchanged.")).color(t.warning));
-            ui.label(tl!("Pigment is using the CPU image compositor. The window may still use your graphics adapter."));
-            ui.collapsing(tl!("Details"), |ui| {
-                ui.label(&reason);
-            });
-            if retry_now {
-                ui.label(tl!("Retry GPU tries the graphics processor again now."));
-            } else {
-                ui.label(tl!("Retry GPU requires a restart. Save your work first."));
-            }
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                use crate::widgets::{ButtonRole, DialogButton};
-                let buttons =
-                    [DialogButton::new(ButtonRole::Default, tl!("Keep Using CPU"), 150.0), DialogButton::new(ButtonRole::Alternate, tl!("Retry GPU"), 120.0)];
-                if let Some(role) = crate::widgets::dialog_buttons(ui, &buttons) {
-                    choice = Some(role == ButtonRole::Alternate);
-                }
-            });
-        });
-    if let Some(retry) = choice {
-        match choose_recovery(app, retry) {
-            Ok(()) if retry => app.retry_compositor(ctx),
-            Ok(()) => (),
-            Err(error) => crate::notices::error(app, error),
-        }
-    }
-}
-
-=======
->>>>>>> theirs
 #[cfg(test)]
 mod tests {
     use super::*;

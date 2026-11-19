@@ -31,69 +31,10 @@ pub fn tick(app: &mut PhotocraftApp, ctx: &Context) -> bool {
     busy(app)
 }
 
-<<<<<<< ours
-/// The picker window: hidden until its snapshot has been painted (#3210).
-fn viewport_builder(ctx: &Context, image: &ScreenImage) -> egui::ViewportBuilder {
-    let mut builder = crate::os_window::builder()
-        .with_title(tl!("Pigment — Screen Color Picker"))
-        .with_decorations(false)
-        .with_resizable(false)
-        .with_position(image.position / ctx.zoom_factor())
-        .with_inner_size(image.size / ctx.zoom_factor())
-        // Not `AlwaysOnTop` here: a monitor-sized window created topmost makes the DX12 backend
-        // fail its swapchain creation (0x887A0001) and the app panics. The level is raised once
-        // the first frame has been painted, in `show`.
-        // Do not expose the native window's empty first frame over the desktop.
-        // The viewport is made visible after its snapshot has been painted below.
-        .with_visible(false)
-        .with_clamp_size_to_monitor_size(false);
-    if let Some(monitor) = image.monitor {
-        builder = builder.with_monitor(monitor);
-    }
-    builder
-}
-pub fn show(ctx: &Context) {
-    let r = runtime(ctx);
-    let s = lock(&r);
-    let images = s.images.clone();
-    let generation = s.generation;
-    drop(s);
-    for (n, snapshot) in images.into_iter().enumerate() {
-        let Snapshot { image, texture, conversion } = snapshot;
-        let shared = r.clone();
-        let vid = egui::ViewportId::from_hash_of(("screen-color", generation, n));
-        let builder = viewport_builder(ctx, &image);
-        // Immediate, so it paints inside the main window's own frame: as a deferred viewport the
-        // main window stopped being redrawn on Windows (OpenGL) once the picker was up, so a click
-        // or Esc was never turned into an answer and the overlay could not be left.
-        ctx.show_viewport_immediate(vid, builder, move |ui, _| {
-            {
-                let s = lock(&shared);
-                if s.generation != generation || s.owner.is_none() {
-                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
-                    return;
-                }
-            }
-            frame(ui, &shared, &image, &texture, conversion.as_deref());
-            // Showing a new native viewport before this frame is painted can briefly cover
-            // the screen with the window's default white clear color.
-            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Visible(true));
-            // Once per picker window (`show` runs every frame, so a local flag would resend it):
-            // raise it, and take the keyboard so Esc reaches the picker: a window shown later
-            // isn't always given focus by the OS, and the picker covers the screen (#4291).
-            let raised = Id::unique(("screen-picker-raised", ui.ctx().viewport_id()));
-            if !ui.ctx().data_mut(|d| std::mem::replace(d.get_temp_mut_or_default::<bool>(raised), true)) {
-                ui.ctx().send_viewport_cmd(egui::ViewportCommand::WindowLevel(egui::WindowLevel::AlwaysOnTop));
-                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Focus);
-            }
-        });
-    }
-=======
 /// Follows the picker button's press for `owner` (a dialog id, a popover id): a click starts a
 /// capture; a held drag inside the app's windows returns the live sample under the pointer.
 pub fn hold(app: &mut PhotocraftApp, ctx: &Context, owner: impl Hash, gesture: ScreenPickGesture) -> Option<Srgba> {
     app.screen_pick.hold(ctx, owner, gesture)
->>>>>>> theirs
 }
 
 /// The colour `owner`'s pick ended with, once; another owner gets nothing.

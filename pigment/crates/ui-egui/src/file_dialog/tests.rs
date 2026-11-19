@@ -80,20 +80,11 @@ fn pdn_save_requests_a_native_copy_without_overwriting_the_source() {
     st.path = Some("/pics/layers.PDN".into());
     let ctx = egui::Context::default();
     menus::invoke(&mut app, &ctx, "file.save", json!({})).unwrap();
-<<<<<<< ours
-    app.poll_file_dialog(&ctx, None);
-    assert!(matches!(open.borrow().as_slice(), [(FileDialogRequest::Save { suggested }, _)] if suggested == "/pics/layers.pigment"));
-    answer(&open, Some(FileDialogAnswer::SaveTo("/pics/layers.pigment".into())));
-    app.poll_file_dialog(&ctx, None);
-    assert_eq!(*written.borrow(), ["/pics/layers.pigment"]);
-    assert_eq!(app.session.active().unwrap().path.as_deref(), Some("/pics/layers.pigment"));
-=======
     assert_eq!(asked_save(&files), "/pics/layers.pcraft");
     answer(&files, chose("/pics/layers.pcraft"));
     app.poll_file_dialog();
     assert_eq!(*written.borrow(), ["/pics/layers.pcraft"]);
     assert_eq!(app.session.active().unwrap().path.as_deref(), Some("/pics/layers.pcraft"));
->>>>>>> theirs
 }
 
 /// A real flat JPEG import, optionally edited to contain another layer. A filename without a
@@ -577,15 +568,9 @@ fn scripts_browse_extendscript_picks_report_the_error() {
 
 #[test]
 fn save_and_export_dialogs_start_beside_the_document() {
-<<<<<<< ours
-    let (mut app, open, _) = app();
-    let ctx = egui::Context::default();
-    let dir = std::env::temp_dir().join("Pigment projects").join("图像");
-=======
     let (mut app, files, _) = app();
     let ctx = app.ctx().clone();
     let dir = std::env::temp_dir().join("PhotoCraft projects").join("图像");
->>>>>>> theirs
     let source = dir.join("original.psd");
     app.session.active_mut().unwrap().path = Some(source.to_string_lossy().into_owned());
     for command in ["file.saveAs", "file.export.exportAs", "file.export.saveForWebLegacy"] {

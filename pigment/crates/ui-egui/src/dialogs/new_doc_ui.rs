@@ -15,75 +15,7 @@ use photocraft_color::ColorMode;
 use photocraft_engine::document_preset_cmds::DocumentSettings;
 use serde_json::{Value, json};
 
-<<<<<<< ours
-/// A blank-document preset: (name, width px, height px, ppi).
-pub type Preset = (&'static str, u32, u32, f32);
-
-/// Photoshop's New Document categories and their blank-document presets.
-pub const CATEGORIES: &[(&str, &[Preset])] = &[
-    ("Recent", &[("Default Pigment Size", 2100, 1500, 300.0), ("HDTV 1080p", 1920, 1080, 72.0)]),
-    (
-        "Photo",
-        &[
-            ("Landscape, 6 x 4", 1800, 1200, 300.0),
-            ("Landscape, 7 x 5", 2100, 1500, 300.0),
-            ("Landscape, 10 x 8", 3000, 2400, 300.0),
-            ("Portrait, 4 x 6", 1200, 1800, 300.0),
-            ("Portrait, 5 x 7", 1500, 2100, 300.0),
-            ("Square, 5 x 5", 1500, 1500, 300.0),
-        ],
-    ),
-    (
-        "Print",
-        &[
-            ("Letter", 2550, 3300, 300.0),
-            ("Legal", 2550, 4200, 300.0),
-            ("Tabloid", 3300, 5100, 300.0),
-            ("A4", 2480, 3508, 300.0),
-            ("A3", 3508, 4961, 300.0),
-            ("A5", 1748, 2480, 300.0),
-            ("B3", 4169, 5906, 300.0),
-            ("B4", 2953, 4169, 300.0),
-        ],
-    ),
-    (
-        "Art & Illustration",
-        &[("Poster", 5400, 7200, 300.0), ("Postcard", 1800, 1200, 300.0), ("Comic Book", 1988, 3075, 300.0), ("Square, 12 x 12", 3600, 3600, 300.0)],
-    ),
-    (
-        "Web",
-        &[
-            ("Web Most Common", 1366, 768, 72.0),
-            ("Web Minimum", 1024, 768, 72.0),
-            ("Web Large", 1920, 1080, 72.0),
-            ("MacBook Pro 16\"", 3456, 2234, 72.0),
-            ("iMac 24\"", 4480, 2520, 72.0),
-        ],
-    ),
-    (
-        "Mobile",
-        &[
-            ("iPhone 16", 1179, 2556, 72.0),
-            ("iPhone 16 Pro Max", 1320, 2868, 72.0),
-            ("iPad Pro 13\"", 2064, 2752, 72.0),
-            ("Android 1080p", 1080, 1920, 72.0),
-            ("Apple Watch 45mm", 396, 484, 72.0),
-        ],
-    ),
-    (
-        "Film & Video",
-        &[
-            ("HDTV 1080p", 1920, 1080, 72.0),
-            ("HDTV 720p", 1280, 720, 72.0),
-            ("UHD 4K", 3840, 2160, 72.0),
-            ("DCI 4K", 4096, 2160, 72.0),
-            ("UHD 8K", 7680, 4320, 72.0),
-        ],
-    ),
-];
-=======
 use crate::PhotocraftApp;
->>>>>>> theirs
 
 /// The SAVED-tier key of the last created settings (without their name): the next New Document opens on them.
 pub(crate) const LAST_CREATED: SaveKey = SaveKey::new("photocraft.file.new");
