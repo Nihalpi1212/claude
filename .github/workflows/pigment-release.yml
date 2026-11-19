@@ -16,9 +16,10 @@
 #
 # Runs on tags named pigment-v<version> and on demand. A tag push, or a manual run with the `tag`
 # input set, also creates (or updates) the GitHub Release for that tag; the tag must name the
-# version in pigment/Cargo.toml, and a manual run may publish only from the default branch. A manual
-# run without `tag` only builds and uploads workflow artifacts. The notes come from
-# pigment/docs/RELEASE-NOTES-<version>.md.
+# version in pigment/Cargo.toml, and a manual run may publish only from the repository's default
+# branch or from Pigment's release branch, claude/pigment-photocraft (the default branch is the
+# JavaScript app's). A manual run without `tag` only builds and uploads workflow artifacts. The
+# notes come from pigment/docs/RELEASE-NOTES-<version>.md.
 #
 # The builds are NOT code-signed (this repository holds no certificates): macOS gets an ad-hoc
 # signature so the app starts on Apple silicon, and the release notes say how to open it. No
@@ -85,6 +86,7 @@ jobs:
           REF_TYPE: ${{ github.ref_type }}
           REF_NAME: ${{ github.ref_name }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          RELEASE_BRANCH: claude/pigment-photocraft
         run: |
           set -euo pipefail
           version=$(awk '
@@ -98,10 +100,11 @@ jobs:
           fi
           tag=""
           if [ -n "$INPUT_TAG" ]; then
-            # A manual release is published only from the default branch, so a run started on an
-            # unreviewed branch can build packages but not release them under Pigment's tag.
-            if [ "$REF_NAME" != "$DEFAULT_BRANCH" ] || [ "$REF_TYPE" != branch ]; then
-              echo "::error::a manual run publishes a release only from $DEFAULT_BRANCH (this run is on $REF_TYPE '$REF_NAME'); clear the tag input to only build"
+            # A manual release is published only from the default branch or from Pigment's release
+            # branch, so a run started on any other branch can build packages but not release them
+            # under Pigment's tag.
+            if [ "$REF_TYPE" != branch ] || { [ "$REF_NAME" != "$DEFAULT_BRANCH" ] && [ "$REF_NAME" != "$RELEASE_BRANCH" ]; }; then
+              echo "::error::a manual run publishes a release only from $DEFAULT_BRANCH or $RELEASE_BRANCH (this run is on $REF_TYPE '$REF_NAME'); clear the tag input to only build"
               exit 1
             fi
             tag="$INPUT_TAG"
