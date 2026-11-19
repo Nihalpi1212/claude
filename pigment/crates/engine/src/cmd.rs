@@ -57,8 +57,8 @@ macro_rules! cmd {
 pub mod actions_cmds;
 pub mod actions_edit_cmds;
 pub mod adjust_cmds;
-// Pigment: generative AI
 mod adjust_params;
+// Pigment: generative AI
 pub mod ai_cmds;
 pub mod align_cmds;
 pub mod analysis_cmds;

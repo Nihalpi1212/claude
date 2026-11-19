@@ -189,7 +189,7 @@ Every place in the shipped code that can reach another machine, and what Pigment
 | GitHub releases API (`api.github.com/repos/storytold/photocraft/releases`) and release downloads | `craft-update` via `apps/photocraft/src/updates.rs` | checked once per launch and from Help › Check for Updates; the installer downloads and runs updates | not called: no update service, the menu opens <https://github.com/Nihalpi1212/claude/releases> |
 | Windows self-update helper (`--finish-update`) | `craft_update::self_update::finish` in `main.rs` | finishes a downloaded update | not wired in |
 | ArtCraft Launcher app list and suite flags | `craft_ai_agents::allowed`, `craft_flags::load` (local files under the launcher's data folder) | decides whether agents may use the window | never read |
-| Release pages in error messages and the release window | `crates/engine/src/cmd/updates_cmds.rs` (`RELEASES`), `crates/engine/src/error.rs` | `storytold/photocraft/releases` | Pigment's releases; opened only when the user clicks |
+| Release pages in error messages and the release window | `crates/engine/src/build_info.rs` (`RELEASES`), `crates/engine/src/error.rs` | `storytold/photocraft/releases` | Pigment's releases; opened only when the user clicks |
 | Help, About and start-screen links; contributor profiles (`github.com/<login>`) in About › Contributors; Learn (`pigment/docs/user` on GitHub) | `crates/ui-egui/src/links.rs`, `dialogs/credits.rs`, `canvas/start_screen.rs` | Discord, getartcraft.com, `storytold/photocraft` | Pigment's issues, repository and releases, and the upstream project; opened in the browser only when clicked |
 | Printing (IPP to a printer or CUPS server, `lp`/`lpstat`, Avahi) | `crates/ipp`, the print commands | when the user prints | unchanged |
 | Control server, MCP bridge, single-instance hand-off, agent connection | `apps/photocraft/src/control_server.rs`, `crates/automation/src/{bridge,agent_link}.rs`, `single_instance.rs` | loopback (`127.0.0.1`) only | unchanged, loopback only |
@@ -453,7 +453,7 @@ the version line (`apps/photocraft/src/launch_args.rs`, `apps/photocraft-cli/src
 `crates/ui-egui/src/dialogs.rs`), the folders (`crates/automation/src/app_dirs.rs`,
 `apps/photocraft/src/{app_dirs.rs, logging.rs, services.rs}`), the links
 (`crates/ui-egui/src/links.rs`, `crates/engine/src/shell_commands.rs`,
-`crates/engine/src/cmd/updates_cmds.rs`, `canvas/start_screen.rs`), updates
+`crates/engine/src/build_info.rs`, `canvas/start_screen.rs`), updates
 (`crates/ui-egui/src/updates_ui.rs`, `menus/state.rs`, `lib.rs`, `apps/photocraft/src/main.rs`),
 the agents gate (`crates/automation/src/{agent_link,live}.rs`, `crates/ui-egui/src/prefs/prefs_ui/{agents,fields}.rs`,
 `apps/photocraft-cli/src/automation.rs`, `apps/photocraft/src/main.rs`), the `[[bin]]` names in
