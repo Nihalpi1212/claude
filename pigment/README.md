@@ -209,8 +209,11 @@ Pigment on PhotoCraft and replaces it: PhotoCraft already does far more of what 
   [`docs/RELEASE-NOTES-0.5.0.md`](docs/RELEASE-NOTES-0.5.0.md).
 - **0.5 replaces 0.4 when you install it.** Your documents stay where they are, and 0.5 opens them
   (below). On Windows and macOS Pigment 0.5 installs where 0.4 was (`%LOCALAPPDATA%\Programs\Pigment` or `C:\Program Files\Pigment`, and
-  `Pigment.app` in Applications) and replaces it. To keep 0.4, pick another folder on the
-  installer's folder page (Windows) or copy `Pigment.app` somewhere else first (macOS). On Linux
+  `Pigment.app` in Applications) and replaces it. On Windows, uninstall Pigment 0.4 first
+  (Settings › Apps): the installer writes into its folder but leaves it in the list of installed
+  apps, and 0.4's uninstaller, run later, would delete Pigment 0.5 too. To keep 0.4, pick another
+  folder on the installer's folder page (Windows) or copy `Pigment.app` somewhere else first
+  (macOS). On Linux
   the AppImages sit side by side.
 - **Your old `.pigment` documents open, every layer kind.** Pigment 0.5 saves `.pigment` files in
   PhotoCraft's native format and recognises a file saved by Pigment 0.1 to 0.4 by its content.
@@ -242,7 +245,9 @@ Pigment on PhotoCraft and replaces it: PhotoCraft already does far more of what 
   The document keeps its file. **The first File › Save asks "Save in the new Pigment format?
   Pigment 0.4 will no longer be able to open this file."** Save writes the new format there, Save
   As… keeps the old file and saves a new one, Cancel does neither (the question has a "Don't show
-  again" box). Scripts and AI agents that save do not ask. A file that cannot be read says "This
+  again" box). When the notes after opening list parts that were left out, the question says that
+  saving over the file loses them, Save As… is its default, and it is asked even after "Don't show
+  again". Scripts, AI agents and actions that save do not ask. A file that cannot be read says "This
   Pigment 0.4 file is damaged:" and why. The [user guide](docs/user/guides/open-pigment-0-4-documents.md)
   has the details.
 

@@ -135,9 +135,10 @@ use by default, so installing 0.5 there replaces 0.4 instead of installing besid
 - macOS: both DMGs hold `Pigment.app`; dragging 0.5 to Applications replaces 0.4.
 - Linux: the AppImages have different file names and can be kept side by side.
 
-The README and the 0.5.0 release notes tell 0.4 users to export their `.pigment` documents (PSD or
-PNG) before installing 0.5, or to install 0.5 in another folder (the MSI's folder page, or another
-folder on macOS). Changing the default install folder or the app bundle name is left as a decision
+The README, the install page of the user guide and the 0.5.0 release notes tell Windows users to
+uninstall 0.4 before installing 0.5, or to install 0.5 in another folder to keep both (the MSI's
+folder page, or another folder on macOS). Pigment 0.5 opens 0.4's `.pigment` documents, so nothing
+needs exporting first. Changing the default install folder or the app bundle name is left as a decision
 for a later release.
 
 There are no separate fonts, plug-ins, scripts or templates folders: PhotoCraft reads system fonts,

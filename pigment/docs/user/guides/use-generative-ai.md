@@ -32,7 +32,7 @@ Nothing leaves your computer before you agree, and afterwards only when you run 
 | **Describe Image** | **Image › Describe Image…** | Describes the picture in words, to copy or to keep as the document's description in **File › File Info…**. |
 | **Assistant** | **Window › Assistant** | A chat about the open document that can also edit it: adjustments, filters, layers, selections, text and Generative Fill. |
 
-Every feature is also in the command palette (Cmd+F). There is no AI menu: the features sit where Photoshop puts them.
+Every feature is also in the command palette (⌘F on macOS, Ctrl+F on Windows and Linux). There is no AI menu: the features sit where Photoshop puts them.
 
 ## Run a feature
 

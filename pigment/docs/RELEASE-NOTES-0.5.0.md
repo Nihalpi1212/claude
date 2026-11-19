@@ -157,8 +157,10 @@ that cannot be read at all says "This Pigment 0.4 file is damaged:" and why.
 
 On Windows and macOS, 0.5 installs where 0.4 was (`%LOCALAPPDATA%\Programs\Pigment` or
 `C:\Program Files\Pigment`, and `Pigment.app` in Applications) and replaces it; your documents stay
-where they are. To keep 0.4 as well, choose another folder on the installer's folder page
-(Windows) or move `Pigment.app` out of Applications first (macOS).
+where they are. **On Windows, uninstall Pigment 0.4 first** (Settings › Apps): the 0.5 installer
+writes into 0.4's folder but leaves 0.4 in the list of installed apps, and 0.4's uninstaller, run
+later, deletes that folder with Pigment 0.5 in it. To keep 0.4 as well, choose another folder on
+the installer's folder page (Windows) or move `Pigment.app` out of Applications first (macOS).
 
 ### Not in 0.5.0 yet
 
