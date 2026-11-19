@@ -1,0 +1,30 @@
+# FIX-release: the rebrand, the packages and the release
+
+CI before starting (01:18 UTC, Nov 19): the newest finished Pigment CI runs on claude/pigment-photocraft were cancelled (each superseded by the next push), not red; the newest run with a result (44426220468) was green; 44434978381 (66a6dff) was still running. No earlier FIX-*.md covered these findings.
+
+This continues an engineer cut off by a container restart at 01:16 UTC. REL-3 was theirs (66a6dff); the REL-1 diff was in the tree, uncommitted (snapshot 9a629d9). I reviewed it, completed it and committed it.
+
+| Finding | Severity | Reproduced | Fixed | Commit |
+|---|---|---|---|---|
+| REL-1 | major | yes | yes | c588cb4 |
+| REL-2 | minor | yes | yes | REL2_COMMIT |
+| REL-3 | minor | yes (workflow read) | yes | 66a6dff |
+
+## REL-1: Learn and the GitHub links go through HEAD to the JavaScript app's default branch
+- Reproduced: `git ls-remote --symref origin HEAD` and `gh api repos/Nihalpi1212/claude` give the default branch `claude/fervent-newton-263lz3`, the JavaScript app. On that branch `gh api repos/Nihalpi1212/claude/contents/pigment/docs/user` returns 404, so Learn (`tree/HEAD/pigment/docs/user`) was a 404. GitHub, the AppStream homepage and help, nfpm's homepage and WiX's ARPURLINFOABOUT all linked the bare repository, which opens the JavaScript app's README. The new test `links::tests::repository_links_name_this_release_s_tag_not_the_default_branch` fails on the old constants: GITHUB was the bare repository and TUTORIALS contained `/tree/HEAD/`.
+- Already done before this fix: the user-guide part of the finding (pages titled PhotoCraft, Discord, getartcraft, the ArtCraft Launcher, storytold releases) was fixed in 1fc64f3 (21:10 UTC), after the hunt ran (20:56 UTC). The remaining mentions of PhotoCraft in docs/user are credits and links to upstream issues.
+- Fix: `links::GITHUB` and `links::TUTORIALS` are now `concat!(…/tree/pigment-v, CARGO_PKG_VERSION, …)`, which is the tag the release workflow creates (`target_commitish: github.sha`). The metainfo homepage and help use `pigment-v@VERSION@` (package.sh and CI substitute it). The same goes for nfpm's homepage (package.sh now substitutes @VERSION@ in nfpm.yaml) and WiX's ARPURLINFOABOUT (`$(var.DisplayVersion)`). The signing description URL in sign.ps1 now points at the releases page. `pigment-rebrand.py` now also checks docs/user, which it does not rewrite: a line that names getartcraft, Discord or the ArtCraft Launcher, a storytold link other than the upstream repository or its issues, or a `tree|blob/HEAD/` link to the repository fails the run, in both modes. A probe page with getartcraft made `--check` exit 1. FORK.md ("Keeping the rebrand") says so.
+- Checks: links tests (4) pass. Clippy -D warnings on photocraft-ui-egui (all targets), fmt and the rebrand check are clean. package-docs-test.sh, apprun-test.sh, apprun-cli-test.sh and verified-download-test.sh pass. The metainfo parses as XML. appstreamcli is not installed here; CI validates it.
+- Left: `docs/user/faq/is-photocraft-free.md` links `tree/claude/pigment-photocraft/pigment`. That branch exists, so the link works, but it will break if the branch is deleted after a merge. A link that only exists after the tag is pushed can't be checked before the release either. If the repository's default branch is ever switched to Pigment, these links could go back to the bare repository.
+
+## REL-2: Pigment reads PhotoCraft's PHOTOCRAFT_CONFIG_DIR, control port, token and automation-root variables
+- Reproduced: `crates/automation/src/app_dirs.rs::tests::photocraft_s_config_dir_variable_is_not_pigment_s` failed on the old code, because `PHOTOCRAFT_CONFIG_DIR` alone resolved as `Override` (PhotoCraft's folder) instead of `Platform`. `args::tests::token_variables_are_pigment_s_own` failed because the token flags' variables were `PHOTOCRAFT_CONTROL_TOKEN*`. `apps/photocraft-cli/tests/it/cli.rs::photocraft_s_control_variables_are_ignored` sets PhotoCraft's port and token variables and checks that `serve` stays on stdio and `mcp` does not bridge. On the old code, `mcp` printed "PHOTOCRAFT_CONTROL_PORT is set; bridging…".
+- Fix: the six variables that choose a folder, a port or a token are now Pigment's own: `PIGMENT_CONFIG_DIR`, `PIGMENT_CONTROL_PORT`, `PIGMENT_CONTROL_TOKEN`, `PIGMENT_CONTROL_TOKEN_FILE`, `PIGMENT_AUTOMATION_READ_ROOT` and `PIGMENT_AUTOMATION_WRITE_ROOT`. The automation roots are included because a PhotoCraft value would widen what Pigment's agents may read and write. The PHOTOCRAFT_ names of these six are no longer read. The rename covers the Rust code, the help text and the messages in apps/photocraft, apps/photocraft-cli and crates/automation, plus their tests. Other PHOTOCRAFT_* variables (GPU, NEW_INSTANCE, IN_WINDOW_MENUS, the AppImage's NO_DESKTOP_INTEGRATION, debug and test hooks) are tuning switches that share nothing, so they keep their names. FORK.md (kept identifiers) lists the six new names and where each is read. Upstream's developer docs (docs/development.md, control-protocol.md, mcp.md, book/, AGENTS.md) are left as upstream wrote them, and FORK.md says they still use the old names.
+- Checks: REL2_CHECKS
+
+## REL-3: 0.x versions published as pre-releases leave Latest on the JavaScript 0.4.0
+- Fixed by the previous engineer in 66a6dff, on the orchestrator's decision. Only a version with a suffix (for example 0.6.0-beta.1) is a pre-release now, and the release step sets `make_latest` explicitly: true for a full release. The release notes say 0.4.0 stays downloadable. Reproduced by reading the workflow: the old version job had `prerelease=true` for every `0.*`. Not run against a fork, so the first real check is `gh release view --json isPrerelease,isLatest pigment-v0.5.0` after the release.
+
+## For the next engineer
+- Check CI on my last push first, before anything else.
+- The release build has not run yet. The WiX `$(var.DisplayVersion)` in ARPURLINFOABOUT and the nfpm @VERSION@ substitution are only exercised by the release workflow's packaging jobs.
