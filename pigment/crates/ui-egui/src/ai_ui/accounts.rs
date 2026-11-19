@@ -81,6 +81,9 @@ pub(crate) struct Form {
     pub catalog: BTreeMap<&'static str, Vec<ModelInfo>>,
     /// The status as last read (no key, only its last four characters).
     pub status: Vec<AccountStatus>,
+    /// A ChatGPT sign-in is stored, shown or not: with Sign in with ChatGPT turned off (or an
+    /// API key stored next to it) the dialog still offers to remove it.
+    pub stored_sign_in: bool,
 }
 
 impl Drop for Form {
@@ -115,6 +118,7 @@ pub fn open(app: &mut PhotocraftApp, reason: Option<String>) {
         let status = with_accounts(app, |a| a.status()).unwrap_or_default();
         let provider = status.iter().find(|s| s.is_default).map_or(ProviderId::OpenAi, |s| s.provider);
         let timeout = with_accounts(app, |a| a.settings.timeout_secs).unwrap_or(300);
+        let stored_sign_in = stored_sign_in(app);
         let mut f = Form {
             provider,
             key: String::new(),
@@ -127,6 +131,7 @@ pub fn open(app: &mut PhotocraftApp, reason: Option<String>) {
             message: None,
             catalog: BTreeMap::new(),
             status,
+            stored_sign_in,
         };
         load_models(app, &mut f);
         app.ai.accounts = Some(f);
@@ -156,8 +161,10 @@ fn load_models(app: &PhotocraftApp, f: &mut Form) {
 /// Read the accounts' status again, for the dialog and the windows.
 fn reread(app: &mut PhotocraftApp) {
     let status = with_accounts(app, |a| a.status()).unwrap_or_default();
+    let stored = stored_sign_in(app);
     if let Some(f) = app.ai.accounts.as_mut() {
         f.status = status;
+        f.stored_sign_in = stored;
     }
     refresh(app);
 }
@@ -268,6 +275,11 @@ pub fn test(app: &mut PhotocraftApp) {
 /// Whether AI Accounts offers Sign in with ChatGPT (the feature is on for these accounts).
 pub fn sign_in_offered(app: &PhotocraftApp) -> bool {
     app.ai.chatgpt.as_ref().is_some_and(|c| c.enabled())
+}
+
+/// A ChatGPT sign-in is stored, whether or not the feature is on.
+fn stored_sign_in(app: &PhotocraftApp) -> bool {
+    app.ai.chatgpt.as_ref().is_some_and(|c| c.has_stored())
 }
 
 /// The sign-in attempt in progress, as the dialog shows it.
@@ -775,6 +787,12 @@ fn key_rows(app: &mut PhotocraftApp, ui: &mut egui::Ui, acts: &mut Vec<Act>) {
     });
     if p == ProviderId::OpenAi && sign_in_offered(app) {
         sign_in_rows(app, ui, acts, method);
+    }
+    // Tokens the dialog does not show otherwise (the feature turned off, or a key stored next to
+    // them) can still be removed, so they don't come back when the feature is turned on again.
+    let hidden_sign_in = method != Some(Method::Chatgpt) && app.ai.accounts.as_ref().is_some_and(|f| f.stored_sign_in);
+    if p == ProviderId::OpenAi && hidden_sign_in && ui.link(tl!("Remove the stored ChatGPT sign-in")).clicked() {
+        acts.push(Act::SignOut);
     }
     let mut use_it = status.as_ref().is_some_and(|s| s.is_default);
     if ui.checkbox(&mut use_it, tl!("Preferred provider for the AI commands")).changed() && use_it {

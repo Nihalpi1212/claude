@@ -879,6 +879,12 @@ impl ChatGpt {
         self.load().ok().flatten().map(|r| r.account())
     }
 
+    /// A sign-in is stored, whether or not the feature is on or the record is usable: what
+    /// Sign out removes. A store that can't be read counts as none.
+    pub fn has_stored(&self) -> bool {
+        matches!(self.store.get_secret(ACCOUNT), Ok(Some(_)))
+    }
+
     /// The tokens stored now, for taking them out of error messages.
     pub(crate) fn secrets(&self) -> Vec<String> {
         self.load().ok().flatten().map(|r| r.secrets()).unwrap_or_default()
