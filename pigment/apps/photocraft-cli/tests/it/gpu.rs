@@ -7,9 +7,9 @@ use serde_json::Value;
 
 fn bin() -> Command {
     let mut cmd = crate::command();
-    cmd.env_remove("PHOTOCRAFT_CONTROL_PORT");
-    cmd.env_remove("PHOTOCRAFT_CONTROL_TOKEN");
-    cmd.env_remove("PHOTOCRAFT_CONTROL_TOKEN_FILE");
+    cmd.env_remove("PIGMENT_CONTROL_PORT");
+    cmd.env_remove("PIGMENT_CONTROL_TOKEN");
+    cmd.env_remove("PIGMENT_CONTROL_TOKEN_FILE");
     cmd.env_remove("PHOTOCRAFT_GPU");
     cmd
 }

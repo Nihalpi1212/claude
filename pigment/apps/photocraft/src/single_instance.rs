@@ -18,7 +18,7 @@
 //! files and frees the lock.
 //!
 //! Only for the per-user settings folder ([`skip_reason`]): a portable copy's folder beside the
-//! executable, or a `PHOTOCRAFT_CONFIG_DIR`, may be shared between users.
+//! executable, or a `PIGMENT_CONFIG_DIR`, may be shared between users.
 //! macOS doesn't need this: LaunchServices already sends a running app an open-documents event.
 
 // Only the tests use it on macOS.
@@ -127,7 +127,7 @@ pub struct LaunchContext<'a> {
     pub new_instance_flag: bool,
     /// `PHOTOCRAFT_NEW_INSTANCE`, if set.
     pub new_instance_env: Option<&'a str>,
-    /// `--control` or `PHOTOCRAFT_CONTROL_PORT`: automation gets its own process.
+    /// `--control` or `PIGMENT_CONTROL_PORT`: automation gets its own process.
     pub control: bool,
     /// Paths that aren't valid Unicode: this launch reports them.
     pub unreadable_paths: bool,
@@ -184,7 +184,7 @@ fn env_launch_options_from(get: impl Fn(&str) -> Option<std::ffi::OsString>) -> 
 /// Why this launch runs as its own instance, or `None` to take part in single-instance.
 pub fn skip_reason(c: &LaunchContext) -> Option<String> {
     if !c.per_user_settings {
-        return Some("the settings folder isn't the per-user one (portable or PHOTOCRAFT_CONFIG_DIR)".into());
+        return Some("the settings folder isn't the per-user one (portable or PIGMENT_CONFIG_DIR)".into());
     }
     if c.new_instance_flag || c.new_instance_env.is_some_and(|v| !v.is_empty() && v != "0") {
         return Some("--new-instance".into());

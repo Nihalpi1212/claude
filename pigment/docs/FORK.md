@@ -210,8 +210,16 @@ Every place in the shipped code that can reach another machine, and what Pigment
   sidecars carry (`is_photocraft_xmp`), the built-in profile descriptions (`Dot Gain 20%-compatible
   (gamma 1.732, PhotoCraft)`, `PhotoCraft Coated CMYK`), the hidden font-face aliases
   (`.PhotoCraft-face-…`), the case-sensitivity probe file.
-- Environment variables (`PHOTOCRAFT_CONFIG_DIR`, `PHOTOCRAFT_CONTROL_PORT`, `PHOTOCRAFT_BUILD_SHA`, …)
-  and the library crates' log targets (`photocraft_engine::…`). The desktop binary is `pigment`, so
+- Environment variables (`PHOTOCRAFT_GPU`, `PHOTOCRAFT_NEW_INSTANCE`, `PHOTOCRAFT_BUILD_SHA`, …),
+  except the six that choose a folder, a port or a token, which are Pigment's own so that one set
+  for an installed PhotoCraft never shares its settings, single-instance lock, control port or
+  agent access with Pigment: `PIGMENT_CONFIG_DIR` (`crates/automation/src/app_dirs.rs`),
+  `PIGMENT_CONTROL_PORT` (`apps/photocraft/src/launch_args.rs`, `apps/photocraft-cli/src/args.rs`),
+  `PIGMENT_CONTROL_TOKEN` and `PIGMENT_CONTROL_TOKEN_FILE` (`crates/automation/src/args.rs`),
+  `PIGMENT_AUTOMATION_READ_ROOT` and `PIGMENT_AUTOMATION_WRITE_ROOT` (`launch_args.rs`); the
+  `PHOTOCRAFT_*` names of those six are not read. PhotoCraft's docs and `book/` still use the old
+  names.
+- The library crates' log targets (`photocraft_engine::…`). The desktop binary is `pigment`, so
   its own modules log as `pigment::…` (`RUST_LOG=pigment=debug`); the default filter
   (`apps/photocraft/src/logging.rs`) shows `info` for both `photocraft*` and `pigment*`. A second
   instance's log is `pigment-<pid>.log`.

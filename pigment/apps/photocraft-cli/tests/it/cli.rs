@@ -15,7 +15,7 @@ fn bin() -> Command {
     cmd
 }
 
-const ENV_VARS: [&str; 4] = ["PHOTOCRAFT_CONTROL_PORT", "PHOTOCRAFT_CONTROL_TOKEN", "PHOTOCRAFT_CONTROL_TOKEN_FILE", "PHOTOCRAFT_GPU"];
+const ENV_VARS: [&str; 4] = ["PIGMENT_CONTROL_PORT", "PIGMENT_CONTROL_TOKEN", "PIGMENT_CONTROL_TOKEN_FILE", "PHOTOCRAFT_GPU"];
 
 fn tmp(name: &str) -> PathBuf {
     let d = std::env::temp_dir().join(format!("pc-cli-{}-{name}", std::process::id()));
@@ -153,7 +153,7 @@ fn unknown_flags_are_usage_errors() {
 }
 
 fn server_usage_error(args: &[&str], expected: &str) {
-    let o = bin().args(args).env_remove("PHOTOCRAFT_CONTROL_TOKEN").env_remove("PHOTOCRAFT_CONTROL_TOKEN_FILE").stdin(Stdio::null()).output().unwrap();
+    let o = bin().args(args).env_remove("PIGMENT_CONTROL_TOKEN").env_remove("PIGMENT_CONTROL_TOKEN_FILE").stdin(Stdio::null()).output().unwrap();
     let err = String::from_utf8_lossy(&o.stderr);
     assert_eq!(o.status.code(), Some(2), "{args:?}: {err}");
     assert!(o.stdout.is_empty(), "usage errors must leave protocol stdout empty: {args:?}");
@@ -198,8 +198,8 @@ fn server_validation_does_not_consume_stdio_or_create_files() {
             .current_dir(&d)
             .args(["serve", "--port", "0", &token_flag])
             .args(tail)
-            .env_remove("PHOTOCRAFT_CONTROL_TOKEN")
-            .env_remove("PHOTOCRAFT_CONTROL_TOKEN_FILE")
+            .env_remove("PIGMENT_CONTROL_TOKEN")
+            .env_remove("PIGMENT_CONTROL_TOKEN_FILE")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -1692,39 +1692,39 @@ fn serve_tcp_stderr(cmd: &mut Command) -> String {
     err
 }
 
-/// #2491: `PHOTOCRAFT_CONTROL_PORT` turns `serve` from stdio into a TCP listener and `mcp` from a
+/// #2491: `PIGMENT_CONTROL_PORT` turns `serve` from stdio into a TCP listener and `mcp` from a
 /// headless engine into a bridge, and both say so on stderr. A flag wins, an empty value counts as
 /// unset, and a bad value is a usage error naming the variable.
 #[test]
 fn control_port_env_switches_modes_with_a_notice_and_flags_win() {
     let port = free_port();
-    let err = serve_tcp_stderr(bin().arg("serve").env("PHOTOCRAFT_CONTROL_PORT", port.to_string()));
-    assert!(err.contains(&format!("PHOTOCRAFT_CONTROL_PORT={port} is set; serving on TCP instead of stdio")), "{err}");
+    let err = serve_tcp_stderr(bin().arg("serve").env("PIGMENT_CONTROL_PORT", port.to_string()));
+    assert!(err.contains(&format!("PIGMENT_CONTROL_PORT={port} is set; serving on TCP instead of stdio")), "{err}");
     assert!(err.contains("unset it to serve stdio") && err.contains("pigment-cli serving on"), "{err}");
 
     // No token is given, so the bridge fails after the notice.
-    let err = with_var(&["mcp"], "PHOTOCRAFT_CONTROL_PORT", &port.to_string()).stderr;
-    assert!(err.contains(&format!("PHOTOCRAFT_CONTROL_PORT is set; bridging to the app on 127.0.0.1:{port}")), "{err}");
+    let err = with_var(&["mcp"], "PIGMENT_CONTROL_PORT", &port.to_string()).stderr;
+    assert!(err.contains(&format!("PIGMENT_CONTROL_PORT is set; bridging to the app on 127.0.0.1:{port}")), "{err}");
     assert!(err.contains("unset it to run headless"), "{err}");
 
     // The flag wins, so the variable's bad value is never parsed.
-    let err = serve_tcp_stderr(bin().args(["serve", "--port"]).arg(port.to_string()).env("PHOTOCRAFT_CONTROL_PORT", "not-a-port"));
-    assert!(err.contains("pigment-cli serving on") && !err.contains("PHOTOCRAFT_CONTROL_PORT"), "{err}");
+    let err = serve_tcp_stderr(bin().args(["serve", "--port"]).arg(port.to_string()).env("PIGMENT_CONTROL_PORT", "not-a-port"));
+    assert!(err.contains("pigment-cli serving on") && !err.contains("PIGMENT_CONTROL_PORT"), "{err}");
 
     // Empty or blank counts as unset: `serve` reads stdio (at its end, so it exits at once) and
     // `mcp` stays headless.
     // A root on the command line is the headless engine's: the variable can't switch to a bridge
     // that would drop it.
     for root in ["--automation-read-root", "--automation-write-root"] {
-        let Exited { code, stderr: err } = with_var(&["mcp", root, "."], "PHOTOCRAFT_CONTROL_PORT", &port.to_string());
+        let Exited { code, stderr: err } = with_var(&["mcp", root, "."], "PIGMENT_CONTROL_PORT", &port.to_string());
         assert_eq!(code, Some(2), "{root}: {err}");
-        assert!(err.contains(root) && err.contains("cannot be used with 'PHOTOCRAFT_CONTROL_PORT'") && !err.contains("bridging"), "{root}: {err}");
+        assert!(err.contains(root) && err.contains("cannot be used with 'PIGMENT_CONTROL_PORT'") && !err.contains("bridging"), "{root}: {err}");
     }
 
     for empty in ["", "  "] {
-        let Exited { code, stderr: err } = with_var(&["serve"], "PHOTOCRAFT_CONTROL_PORT", empty);
-        assert!(code == Some(0) && !err.contains("PHOTOCRAFT_CONTROL_PORT"), "{empty:?}: {err}");
-        let err = with_var(&["mcp"], "PHOTOCRAFT_CONTROL_PORT", empty).stderr;
+        let Exited { code, stderr: err } = with_var(&["serve"], "PIGMENT_CONTROL_PORT", empty);
+        assert!(code == Some(0) && !err.contains("PIGMENT_CONTROL_PORT"), "{empty:?}: {err}");
+        let err = with_var(&["mcp"], "PIGMENT_CONTROL_PORT", empty).stderr;
         assert!(!err.contains("bridging"), "{empty:?}: {err}");
     }
 
@@ -1738,29 +1738,52 @@ fn control_port_env_switches_modes_with_a_notice_and_flags_win() {
         ("mcp", ":7878"),
         ("mcp", "bad:port"),
     ] {
-        let Exited { code, stderr: err } = with_var(&[sub], "PHOTOCRAFT_CONTROL_PORT", bad);
+        let Exited { code, stderr: err } = with_var(&[sub], "PIGMENT_CONTROL_PORT", bad);
         assert_eq!(code, Some(2), "{sub} {bad}: {err}");
-        assert!(err.contains(&format!("invalid value '{bad}' for 'PHOTOCRAFT_CONTROL_PORT'")), "{sub} {bad}: {err}");
+        assert!(err.contains(&format!("invalid value '{bad}' for 'PIGMENT_CONTROL_PORT'")), "{sub} {bad}: {err}");
     }
 }
 
-/// `--control-token` and `--control-token-file` fall back to `PHOTOCRAFT_CONTROL_TOKEN` and
-/// `PHOTOCRAFT_CONTROL_TOKEN_FILE`. One from the environment and the other as a flag is the
+/// PhotoCraft's `PHOTOCRAFT_CONTROL_PORT` and token variables, set for an installed PhotoCraft, are
+/// not Pigment's: `serve` stays on stdio and `mcp` doesn't bridge to PhotoCraft's port.
+#[test]
+fn photocraft_s_control_variables_are_ignored() {
+    let port = free_port().to_string();
+    for sub in ["serve", "mcp"] {
+        let o = bin()
+            .arg(sub)
+            .env("PHOTOCRAFT_CONTROL_PORT", &port)
+            .env("PHOTOCRAFT_CONTROL_TOKEN", "0".repeat(64))
+            .env("PHOTOCRAFT_CONTROL_TOKEN_FILE", "token")
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        let err = String::from_utf8_lossy(&o.stderr);
+        assert!(!err.contains("PHOTOCRAFT_") && !err.contains("bridging") && !err.contains("serving on TCP"), "{sub}: {err}");
+        // `serve` reads stdio to its end; headless `mcp` stops at the missing initialize request.
+        let expected = if sub == "serve" { Some(0) } else { Some(1) };
+        assert_eq!(o.status.code(), expected, "{sub}: {err}");
+        assert!(sub == "serve" || err.contains("MCP init"), "{sub}: {err}");
+    }
+}
+
+/// `--control-token` and `--control-token-file` fall back to `PIGMENT_CONTROL_TOKEN` and
+/// `PIGMENT_CONTROL_TOKEN_FILE`. One from the environment and the other as a flag is the
 /// either/or usage error, naming the variable, when a token is used: a stale exported pair doesn't
 /// stop headless `mcp` or stdio `serve`. Help names the token's variable, never its value.
 #[test]
 fn control_token_env_vars_are_the_flags_fallbacks() {
     let token = "a".repeat(64);
     for mode in [["mcp", "--bridge", "1"], ["serve", "--port", "0"]] {
-        let Exited { code, stderr: err } = with_var(&[&mode[..], &["--control-token", token.as_str()][..]].concat(), "PHOTOCRAFT_CONTROL_TOKEN_FILE", "token");
+        let Exited { code, stderr: err } = with_var(&[&mode[..], &["--control-token", token.as_str()][..]].concat(), "PIGMENT_CONTROL_TOKEN_FILE", "token");
         assert_eq!(code, Some(2), "{mode:?}: {err}");
-        assert!(err.contains("PHOTOCRAFT_CONTROL_TOKEN_FILE") && err.contains("cannot be used with"), "{mode:?}: {err}");
-        let Exited { code, stderr: err } = with_var(&[&mode[..], &["--control-token-file", "token"][..]].concat(), "PHOTOCRAFT_CONTROL_TOKEN", &token);
+        assert!(err.contains("PIGMENT_CONTROL_TOKEN_FILE") && err.contains("cannot be used with"), "{mode:?}: {err}");
+        let Exited { code, stderr: err } = with_var(&[&mode[..], &["--control-token-file", "token"][..]].concat(), "PIGMENT_CONTROL_TOKEN", &token);
         assert_eq!(code, Some(2), "{mode:?}: {err}");
-        assert!(err.contains("PHOTOCRAFT_CONTROL_TOKEN") && err.contains("cannot be used with") && !err.contains(&token), "{mode:?}: {err}");
+        assert!(err.contains("PIGMENT_CONTROL_TOKEN") && err.contains("cannot be used with") && !err.contains(&token), "{mode:?}: {err}");
     }
     for sub in ["mcp", "serve"] {
-        let o = bin().arg(sub).env("PHOTOCRAFT_CONTROL_TOKEN", &token).env("PHOTOCRAFT_CONTROL_TOKEN_FILE", "token").stdin(Stdio::null()).output().unwrap();
+        let o = bin().arg(sub).env("PIGMENT_CONTROL_TOKEN", &token).env("PIGMENT_CONTROL_TOKEN_FILE", "token").stdin(Stdio::null()).output().unwrap();
         let err = String::from_utf8_lossy(&o.stderr);
         assert!(!err.contains("cannot be used with"), "{sub}: {err}");
         // stdio `serve` exits 0 at the end of its input; how headless `mcp` ends there isn't
@@ -1770,15 +1793,15 @@ fn control_token_env_vars_are_the_flags_fallbacks() {
         } else {
             assert_ne!(o.status.code(), Some(2), "{sub}: {err}");
         }
-        let o = bin().args([sub, "--help"]).env("PHOTOCRAFT_CONTROL_TOKEN", &token).output().unwrap();
+        let o = bin().args([sub, "--help"]).env("PIGMENT_CONTROL_TOKEN", &token).output().unwrap();
         let out = String::from_utf8_lossy(&o.stdout);
-        assert!(out.contains("[env: PHOTOCRAFT_CONTROL_TOKEN]") && !out.contains(&token), "{sub}: {out}");
+        assert!(out.contains("[env: PIGMENT_CONTROL_TOKEN]") && !out.contains(&token), "{sub}: {out}");
     }
     // The server takes the variable's token, so it neither generates nor prints one; an empty
     // variable counts as unset.
-    let err = serve_tcp_stderr(bin().args(["serve", "--port"]).arg(free_port().to_string()).env("PHOTOCRAFT_CONTROL_TOKEN", &token));
+    let err = serve_tcp_stderr(bin().args(["serve", "--port"]).arg(free_port().to_string()).env("PIGMENT_CONTROL_TOKEN", &token));
     assert!(err.contains("pigment-cli serving on") && !err.contains("control token"), "{err}");
-    let err = serve_tcp_stderr(bin().args(["serve", "--port"]).arg(free_port().to_string()).env("PHOTOCRAFT_CONTROL_TOKEN", ""));
+    let err = serve_tcp_stderr(bin().args(["serve", "--port"]).arg(free_port().to_string()).env("PIGMENT_CONTROL_TOKEN", ""));
     assert!(err.contains("pigment-cli serving on") && err.contains("pigment-cli control token: "), "{err}");
 }
 
@@ -2094,7 +2117,7 @@ fn mcp_session(args: &[&str], env: &[(&str, &std::ffi::OsStr)], calls: &[(&str, 
 }
 
 /// Plain `mcp` without the person's consent works headless, as it always did: commands run, UI
-/// tools say they need the open app. `--headless` too, and it doesn't read a PHOTOCRAFT_CONTROL_PORT
+/// tools say they need the open app. `--headless` too, and it doesn't read a PIGMENT_CONTROL_PORT
 /// exported for another tool (here not even a port).
 #[test]
 fn mcp_without_consent_works_headless() {
@@ -2102,14 +2125,14 @@ fn mcp_without_consent_works_headless() {
     let empty = tmp("mcp-plain-launcher");
     // `crate::command()` keeps the machine's launcher and flags out already; this test names its
     // own settings and an empty launcher folder as well, to say what it relies on.
-    let env = [("PHOTOCRAFT_CONFIG_DIR", dir.as_os_str()), ("CRAFT_MCP_DIR", empty.as_os_str())];
+    let env = [("PIGMENT_CONFIG_DIR", dir.as_os_str()), ("CRAFT_MCP_DIR", empty.as_os_str())];
     let calls = [("command_list", json!({})), ("ui_inspect", json!({}))];
     let r = mcp_session(&["mcp", "--when-closed", "error"], &env, &calls);
     assert_ne!(r[0]["isError"], true, "headless commands run: {}", r[0]);
     assert_eq!(r[1]["isError"], true, "{}", r[1]);
     assert!(r[1]["content"][0]["text"].as_str().unwrap().contains("bridge"), "{}", r[1]);
     let mut env = env.to_vec();
-    env.push(("PHOTOCRAFT_CONTROL_PORT", std::ffi::OsStr::new("not-a-port")));
+    env.push(("PIGMENT_CONTROL_PORT", std::ffi::OsStr::new("not-a-port")));
     let r = mcp_session(&["mcp", "--headless"], &env, &calls[..1]);
     assert_ne!(r[0]["isError"], true, "{}", r[0]);
     // Pigment's own switch (`connectAgents`, docs/FORK.md) is the consent. Turned off it leaves plain

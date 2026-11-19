@@ -105,7 +105,7 @@ fn override_wins_over_portable() {
     std::fs::create_dir_all(&exe).unwrap();
     std::fs::write(exe.join("portable.txt"), b"").unwrap();
     let custom = root.join("custom");
-    let d = resolve(env_of(&[("PHOTOCRAFT_CONFIG_DIR", &custom)]), Some(&exe));
+    let d = resolve(env_of(&[("PIGMENT_CONFIG_DIR", &custom)]), Some(&exe));
     assert_eq!((d.mode, d.dir), (Mode::Override, Some(custom)));
     assert!(!exe.join(PORTABLE_DATA_DIR).exists());
     let _ = std::fs::remove_dir_all(&root);
@@ -440,7 +440,7 @@ fn missing_exe_dir_or_env_never_panics() {
     let d = resolve(|_| None, None);
     assert_eq!((d.mode, d.dir), (Mode::Platform, None));
     let empty = PathBuf::new();
-    let d = resolve(env_of(&[("PHOTOCRAFT_CONFIG_DIR", &empty), ("HOME", &empty), ("APPDATA", &empty)]), None);
+    let d = resolve(env_of(&[("PIGMENT_CONFIG_DIR", &empty), ("HOME", &empty), ("APPDATA", &empty)]), None);
     assert_eq!(d.dir, None, "empty variables are ignored");
 }
 

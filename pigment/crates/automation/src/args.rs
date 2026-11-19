@@ -21,11 +21,11 @@ use crate::{AuthorizedWorkspace, AutomationError};
 #[derive(Args)]
 pub struct ControlArgs {
     /// The control token (64 hex digits)
-    #[arg(long, value_name = "64-HEX", env = "PHOTOCRAFT_CONTROL_TOKEN", hide_env_values = true, value_parser = NonEmptyStringValueParser::new())]
+    #[arg(long, value_name = "64-HEX", env = "PIGMENT_CONTROL_TOKEN", hide_env_values = true, value_parser = NonEmptyStringValueParser::new())]
     pub control_token: Option<String>,
     /// A file holding the control token, used instead of --control-token (a server creates it
     /// when missing)
-    #[arg(long, value_name = "PATH", env = "PHOTOCRAFT_CONTROL_TOKEN_FILE")]
+    #[arg(long, value_name = "PATH", env = "PIGMENT_CONTROL_TOKEN_FILE")]
     pub control_token_file: Option<PathBuf>,
 }
 
@@ -54,7 +54,7 @@ impl AutomationArgs {
 }
 
 /// A control port, for clap's `value_parser`: `pigment --control`, `pigment-cli serve --port`
-/// and PHOTOCRAFT_CONTROL_PORT, which may carry spaces.
+/// and PIGMENT_CONTROL_PORT, which may carry spaces.
 pub fn control_port(s: &str) -> Result<u16, NotAPort> {
     s.trim().parse().map_err(|_| NotAPort)
 }
@@ -64,7 +64,7 @@ pub fn control_port(s: &str) -> Result<u16, NotAPort> {
 #[error("expected a port, 0-65535")]
 pub struct NotAPort;
 
-/// For `Command::mut_args`: an empty or blank variable counts as unset, so `PHOTOCRAFT_CONTROL_PORT=`
+/// For `Command::mut_args`: an empty or blank variable counts as unset, so `PIGMENT_CONTROL_PORT=`
 /// turns a fallback off without `unset` (#2491). clap would pass the empty value to the parser.
 pub fn blank_env_is_unset(arg: Arg) -> Arg {
     let blank = arg.get_env().and_then(std::env::var_os).is_some_and(|v| v.to_str().is_some_and(|v| v.trim().is_empty()));
@@ -123,6 +123,16 @@ mod tests {
         for bad in ["78787", "-1", "", "x"] {
             assert_eq!(control_port(bad), Err(NotAPort), "{bad:?}");
         }
+    }
+
+    // Pigment reads its own variables, never PhotoCraft's: a `PHOTOCRAFT_CONTROL_TOKEN*` set for
+    // an installed PhotoCraft must not hand Pigment that app's token (docs/FORK.md).
+    #[test]
+    fn token_variables_are_pigment_s_own() {
+        let cmd = ControlArgs::augment_args(Command::new("test"));
+        let env = |id: &str| cmd.get_arguments().find(|a| a.get_id() == id).and_then(Arg::get_env).map(|v| v.to_string_lossy().into_owned());
+        assert_eq!(env("control_token").as_deref(), Some("PIGMENT_CONTROL_TOKEN"));
+        assert_eq!(env("control_token_file").as_deref(), Some("PIGMENT_CONTROL_TOKEN_FILE"));
     }
 
     #[derive(clap::Parser)]

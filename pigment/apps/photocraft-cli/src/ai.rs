@@ -173,7 +173,7 @@ fn ai_error(e: pigment_genai::AiError) -> CliError {
 fn config_dir() -> Result<PathBuf> {
     photocraft_automation::app_dirs::from_env()
         .dir
-        .ok_or_else(|| CliError::Other("Pigment's settings folder is unknown here (no home folder): set PHOTOCRAFT_CONFIG_DIR".into()))
+        .ok_or_else(|| CliError::Other("Pigment's settings folder is unknown here (no home folder): set PIGMENT_CONFIG_DIR".into()))
 }
 
 fn models_json(models: &[ModelInfo]) -> Value {

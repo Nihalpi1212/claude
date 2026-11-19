@@ -52,7 +52,7 @@ pub(crate) struct LaunchArgs {
     #[arg(long, value_name = "stderr|FILE.csv")]
     pub(crate) stroke_trace: Option<String>,
     /// Start the localhost JSON-lines control server on this port
-    #[arg(long, value_name = "PORT", env = "PHOTOCRAFT_CONTROL_PORT", value_parser = control_port, allow_negative_numbers = true)]
+    #[arg(long, value_name = "PORT", env = "PIGMENT_CONTROL_PORT", value_parser = control_port, allow_negative_numbers = true)]
     pub(crate) control: Option<u16>,
     #[command(flatten)]
     pub(crate) auth: ControlArgs,
@@ -83,7 +83,7 @@ pub(crate) fn exit(e: clap::Error) -> ! {
 
 /// The variables that aren't a flag's fallback, for the end of `--help`.
 const ENVIRONMENT: &str = "\
-Environment: PHOTOCRAFT_NEW_INSTANCE (anything but 0 or empty: as --new-instance), PHOTOCRAFT_CONFIG_DIR (the settings folder)";
+Environment: PHOTOCRAFT_NEW_INSTANCE (anything but 0 or empty: as --new-instance), PIGMENT_CONFIG_DIR (the settings folder)";
 
 /// An option that applies only to the process it's given to: a launch with any of them keeps its
 /// own process instead of handing its files to the running one (`single_instance`). Shown as the
@@ -165,8 +165,8 @@ impl LaunchArgs {
 /// variable counts as unset.
 pub(crate) fn command() -> Command {
     LaunchArgs::command()
-        .mut_arg("automation_read_root", |a| a.env("PHOTOCRAFT_AUTOMATION_READ_ROOT"))
-        .mut_arg("automation_write_root", |a| a.env("PHOTOCRAFT_AUTOMATION_WRITE_ROOT"))
+        .mut_arg("automation_read_root", |a| a.env("PIGMENT_AUTOMATION_READ_ROOT"))
+        .mut_arg("automation_write_root", |a| a.env("PIGMENT_AUTOMATION_WRITE_ROOT"))
         .mut_args(blank_env_is_unset)
 }
 

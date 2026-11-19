@@ -46,7 +46,7 @@ pub(crate) fn serve(a: &ServeArgs, err: &mut dyn Write) -> Result {
             if a.port_from_env {
                 // Name the mode switch: an exported variable changes what this command does, and
                 // unsetting it (or setting it empty) is the way back to stdio.
-                let _ = writeln!(err, "pigment-cli: PHOTOCRAFT_CONTROL_PORT={port} is set; serving on TCP instead of stdio (unset it to serve stdio)");
+                let _ = writeln!(err, "pigment-cli: PIGMENT_CONTROL_PORT={port} is set; serving on TCP instead of stdio (unset it to serve stdio)");
             }
             let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, port)).to_string();
             let (supplied, token_file) = (a.control.control_token.as_deref(), a.control.control_token_file.as_deref());
@@ -71,7 +71,7 @@ pub(crate) fn serve(a: &ServeArgs, err: &mut dyn Write) -> Result {
 /// `mcp`: the open window when Pigment's own switch (Preferences › AI Integrations › Let AI Apps
 /// Use This Window) lets agents use it, otherwise headless (`mcp_live`). PhotoCraft does this only
 /// behind the suite's `AI-MCP` flag, which Pigment never reads (docs/FORK.md). `--headless`
-/// always headless; `--bridge` (or PHOTOCRAFT_CONTROL_PORT) a `pigment --control` app.
+/// always headless; `--bridge` (or PIGMENT_CONTROL_PORT) a `pigment --control` app.
 pub(crate) fn mcp(a: &McpArgs, err: &mut dyn Write) -> Result {
     let server = match &a.bridge {
         None if !a.headless => PhotocraftMcp::live(live_config(a)?),
@@ -80,7 +80,7 @@ pub(crate) fn mcp(a: &McpArgs, err: &mut dyn Write) -> Result {
                 // Name the mode switch, as `serve` does: the way back to headless is to unset it.
                 let _ = writeln!(
                     err,
-                    "pigment-cli: PHOTOCRAFT_CONTROL_PORT is set; bridging to the app on {addr} instead of a headless engine (unset it to run headless)"
+                    "pigment-cli: PIGMENT_CONTROL_PORT is set; bridging to the app on {addr} instead of a headless engine (unset it to run headless)"
                 );
             }
             let token = security::client_token(a.control.control_token.as_deref(), a.control.control_token_file.as_deref())?;
@@ -106,7 +106,7 @@ fn live_config(a: &McpArgs) -> Result<photocraft_automation::live::LiveConfig> {
     let other = |m: &str| crate::CliError::Other(m.to_string());
     let dir = photocraft_automation::app_dirs::from_env()
         .dir
-        .ok_or_else(|| other("can't find Pigment's settings folder (no home folder; set PHOTOCRAFT_CONFIG_DIR)"))?;
+        .ok_or_else(|| other("can't find Pigment's settings folder (no home folder; set PIGMENT_CONFIG_DIR)"))?;
     let mut config = photocraft_automation::live::LiveConfig::new(dir);
     config.when_closed = a.when_closed;
     // As a headless `mcp` always did: folders that can't be opened stop the start, before the

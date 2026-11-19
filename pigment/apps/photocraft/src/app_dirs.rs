@@ -2,7 +2,7 @@
 //! autosaves and the GPU startup marker all live under the one directory [`config_dir`] returns.
 //!
 //! In order:
-//! 1. `PHOTOCRAFT_CONFIG_DIR`, when set (tests, agents, custom setups).
+//! 1. `PIGMENT_CONFIG_DIR`, when set (tests, agents, custom setups).
 //! 2. **Portable mode** (#228): a marker file ([`PORTABLE_MARKERS`]) beside the executable puts
 //!    everything in `<exe dir>/PigmentData`, so a portable copy on a USB stick leaves nothing in
 //!    `%APPDATA%`. The Windows portable zip ships with `portable.txt`; the MSI doesn't. If that

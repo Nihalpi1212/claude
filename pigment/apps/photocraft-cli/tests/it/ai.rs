@@ -80,7 +80,7 @@ fn dir(name: &str) -> PathBuf {
 /// The CLI with its settings in `settings` and OpenAI's address replaced by `base`.
 fn cli(settings: &Path, base: &str) -> Command {
     let mut c = super::command();
-    c.env("PHOTOCRAFT_CONFIG_DIR", settings).env("PIGMENT_AI_BASE_URL_OPENAI", base).env_remove("PIGMENT_AI_BASE_URL_GEMINI");
+    c.env("PIGMENT_CONFIG_DIR", settings).env("PIGMENT_AI_BASE_URL_OPENAI", base).env_remove("PIGMENT_AI_BASE_URL_GEMINI");
     c
 }
 
