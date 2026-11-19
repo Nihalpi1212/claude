@@ -121,11 +121,11 @@ impl Live {
             return self.headless(&self.cfg.read_roots, self.cfg.write_root.clone(), "the automation roots can't be used");
         }
         match self.cfg.when_closed.unwrap_or(integrations.agents.when_app_closed) {
-            WhenAppClosed::Error => Err("PhotoCraft isn't running: open it, then try again.".into()),
+            WhenAppClosed::Error => Err("Pigment isn't running: open it, then try again.".into()),
             WhenAppClosed::Headless => {
                 let reads = if self.cfg.read_roots.is_empty() { integrations.agents.read_folder().into_iter().collect() } else { self.cfg.read_roots.clone() };
                 let write = self.cfg.write_root.clone().or_else(|| integrations.agents.write_folder());
-                self.headless(&reads, write, "PhotoCraft isn't running and its agent folders can't be used")
+                self.headless(&reads, write, "Pigment isn't running and its agent folders can't be used")
             }
             WhenAppClosed::Launch => self.launch_and_wait().await,
         }

@@ -72,7 +72,7 @@ fn fake_app(dir: &Path, name: &'static str) -> FakeApp {
     let port = listener.local_addr().unwrap().port();
     let token_file = dir.join(agents::TOKEN_FILE);
     let token = photocraft_automation::security::replace_token_file(&token_file).unwrap();
-    agents::write_connection(dir, &Connection::new(port, token_file, "PhotoCraft test")).unwrap();
+    agents::write_connection(dir, &Connection::new(port, token_file, "Pigment test")).unwrap();
     let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let stopped = stop.clone();
     std::thread::spawn(move || {
@@ -145,7 +145,7 @@ async fn a_closed_app_is_a_tool_error_that_says_what_to_do() {
     let gone = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = gone.local_addr().unwrap().port();
     drop(gone);
-    agents::write_connection(&dir, &Connection::new(port, dir.join(agents::TOKEN_FILE), "PhotoCraft test")).unwrap();
+    agents::write_connection(&dir, &Connection::new(port, dir.join(agents::TOKEN_FILE), "Pigment test")).unwrap();
     let r = call(&client, "ui_inspect", json!({})).await;
     assert!(text(&r).contains("isn't running"), "{}", text(&r));
     client.cancel().await.unwrap();
