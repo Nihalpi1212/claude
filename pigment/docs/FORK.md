@@ -285,6 +285,7 @@ Assistant's `assistant.rs` and `assistant_tools.rs`) with its tests in
 | `crates/engine/src/cmd.rs` | `pub mod ai_cmds;` and `v.extend(crate::ai_cmds::specs());` at the end of `build()` |
 | `crates/engine/src/error.rs` | the `EngineError::Generative { kind, message }` variant |
 | `crates/engine/src/cmd/actions_cmds.rs` | `recorded()` skips `ai_cmds::unrecorded` steps, so an `ai.*` step that may send is never recorded into an action |
+| `crates/engine/src/jobs.rs` | `independent_of_document` keeps `VIEW_EDITS` (the `view.*` commands that edit the Document: guides, slices, the ruler origin) out of what a running job lets through, so they wait as other edits do and an AI request's paid answer is not discarded as "the document changed while it ran" |
 | `crates/engine/Cargo.toml` | the `testgen` feature (the mock backend for other crates' tests) |
 | `Cargo.toml` (workspace) | `pigment-genai = { path = "crates/genai" }` in `[workspace.dependencies]` (`Cargo.lock` gains it, `keyring` and keyring's macOS and Windows dependencies) |
 | `crates/automation/Cargo.toml` | the `pigment-genai` dependency |

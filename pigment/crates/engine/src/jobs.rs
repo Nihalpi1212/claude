@@ -689,7 +689,24 @@ pub enum Started {
 fn independent_of_document(id: &str) -> bool {
     const PREFIXES: &[&str] = &["jobs.", "tools.", "view.", "window.", "help.", "brush.presets.", "gradient.presets."];
     const IDS: &[&str] = &["file.new", "file.close", "file.closeAll", "edit.preferences", "edit.colorSettings", "edit.keyboardShortcuts", "edit.menus"];
-    PREFIXES.iter().any(|p| id.starts_with(p)) || IDS.contains(&id)
+    // Pigment: guides, slices and the ruler origin live in the Document; editing them while a
+    // job runs on it would discard the job's result.
+    const VIEW_EDITS: &[&str] = &[
+        "view.newGuide",
+        "view.moveGuide",
+        "view.editGuide",
+        "view.deleteGuide",
+        "view.clearGuides",
+        "view.clearCanvasGuides",
+        "view.clearSelectedArtboardGuides",
+        "view.newGuideLayout",
+        "view.newGuidesFromShape",
+        "view.setRulerOrigin",
+        "view.resetRulerOrigin",
+        "view.clearSlices",
+        "view.lockSlices",
+    ];
+    (PREFIXES.iter().any(|p| id.starts_with(p)) && !VIEW_EDITS.contains(&id)) || IDS.contains(&id)
 }
 
 /// Imports the file at `path`, taking its identity from the very handle it decodes.

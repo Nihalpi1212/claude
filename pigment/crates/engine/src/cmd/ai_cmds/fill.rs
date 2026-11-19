@@ -27,6 +27,9 @@ const SKY: &str = "ai.replaceSky";
 /// The pixels of the new layers for `n` variations of an edit of `original` (a region's
 /// composite) under the coverage `cov` (the same size): each answer scaled back to the region,
 /// with its alpha multiplied by the coverage. One backend call per variation, in order.
+///
+/// A variation failing after others arrived ends the requests but keeps those (each was billed):
+/// they come back with the error. The first failing, or a cancel at any point, is an error.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn fill_layers(
     backend: &dyn GenerativeBackend,
@@ -36,7 +39,7 @@ pub(super) fn fill_layers(
     cov: &[f32],
     n: u32,
     ctx: &JobCtx,
-) -> Result<Vec<Rgba8Image>> {
+) -> Result<(Vec<Rgba8Image>, Option<EngineError>)> {
     let (w, h) = (original.width, original.height);
     let (sw, sh) = region::fit_within(w, h, SEND_MAX_EDGE);
     let image = region::resize_rgba8(original, sw, sh);
@@ -46,11 +49,14 @@ pub(super) fn fill_layers(
     for i in 0..n {
         ctx.check()?;
         ctx.progress(i as f32 / n as f32, if n > 1 { "Generating variations" } else { "Generating" });
-        let answer = call(ctx, |cancelled| backend.edit_image(&req, cancelled))?;
-        check_answer(&answer, sw, sh)?;
+        let answer = match call(ctx, |cancelled| backend.edit_image(&req, cancelled)).and_then(|a| check_answer(&a, sw, sh).map(|()| a)) {
+            Ok(a) => a,
+            Err(e) if !out.is_empty() && !matches!(e, EngineError::Cancelled) => return Ok((out, Some(e))),
+            Err(e) => return Err(e),
+        };
         out.push(region::masked_layer(&region::resize_rgba8(&answer, w, h), cov));
     }
-    Ok(out)
+    Ok((out, None))
 }
 
 /// The selection's coverage over `rect`, feathered by 1 px as if the canvas went on beyond its
@@ -115,14 +121,23 @@ fn run_fill(
             let (rect, cov) = mask(&doc, ctx)?;
             ctx.check()?;
             let original = composite_rgba8(&doc, rect, ctx)?;
-            let images = fill_layers(&*backend, &choice, &prompt, &original, &cov, n, ctx)?;
+            let (images, failed) = fill_layers(&*backend, &choice, &prompt, &original, &cov, n, ctx)?;
             let surfaces = images.iter().map(|img| layer_surface(img, rect, format)).collect::<Result<Vec<Surface>>>()?;
-            Ok((rect, surfaces))
+            Ok((rect, surfaces, failed))
         },
-        move |s, (rect, surfaces)| {
+        move |s, (rect, surfaces, failed)| {
             let layers = names(label, surfaces.len()).into_iter().zip(surfaces).collect();
             let ids = s.edit(label, |doc, active| insert_layers(doc, active, anchor, layers))?;
-            Ok(json!({ "layers": ids.iter().map(|id| id.0).collect::<Vec<_>>(), "bounds": [rect.x0, rect.y0, rect.width(), rect.height()] }))
+            let mut r = json!({ "layers": ids.iter().map(|id| id.0).collect::<Vec<_>>(), "bounds": [rect.x0, rect.y0, rect.width(), rect.height()] });
+            // The variations that arrived landed; say why the next did not.
+            if let Some(e) = failed {
+                let kind = match &e {
+                    EngineError::Generative { kind, .. } => json!(kind),
+                    _ => Value::Null,
+                };
+                r["failed"] = json!({ "kind": kind, "message": e.to_string() });
+            }
+            Ok(r)
         },
     )
 }
@@ -153,17 +168,15 @@ fn generative_fill(s: &mut Session, p: &Value) -> Result<Value> {
     run_fill(s, "Generative Fill", anchor, n, backend, choice, prompt, move |doc, _| Ok((rect, selection_coverage(doc, rect))))
 }
 
-/// The layer's visible pixels as coverage over `canvas`: its alpha times its enabled mask.
+/// The layer's visible pixels as coverage over `canvas`: its alpha times its enabled mask, as
+/// drawn (feather included).
 fn visible_alpha(doc: &Document, id: LayerId, canvas: Rect) -> Option<Vec<f32>> {
     let l = doc.layer(id)?;
     let surface = l.surface()?;
     let mut px = vec![[0u8; 4]; canvas.width() as usize * canvas.height() as usize];
     surface.read_rgba8_into(canvas, &mut px);
     let mut mask = Vec::new();
-    match &l.mask {
-        Some(m) => m.values_into(canvas, &mut mask),
-        None => mask.resize(px.len(), 1.0),
-    }
+    super::mask_shown(l, doc.bounds(), canvas, &mut mask);
     Some(px.iter().zip(mask.iter().chain(std::iter::repeat(&1.0))).map(|(p, m)| f32::from(p[3]) / 255.0 * m.clamp(0.0, 1.0)).collect())
 }
 
@@ -278,7 +291,7 @@ pub(super) fn specs() -> Vec<CommandSpec> {
             label: "Generative Fill…",
             menu: &[],
             shortcut: None,
-            params: r##"{"prompt":str,"variations":1..3=1,"provider":"openai|gemini"?,"model":str?,"layer":id? (the new layers go above it; default the active layer)} → {layers:[id],bounds} (sends the composite around the selection, the selection and the prompt to the AI provider; one new layer per variation holds the generated pixels inside the feathered selection; one step; the selection stays)"##,
+            params: r##"{"prompt":str,"variations":1..3=1,"provider":"openai|gemini"?,"model":str?,"layer":id? (the new layers go above it; default the active layer)} → {layers:[id],bounds} (sends the composite around the selection, the selection and the prompt to the AI provider; one new layer per variation holds the generated pixels inside the feathered selection; one step; the selection stays; when a later variation fails, those that arrived still land and `failed`:{kind,message} says why the next did not)"##,
             enabled: fill_enabled,
             run: generative_fill,
             journal: true,

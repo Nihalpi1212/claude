@@ -6,6 +6,7 @@ use serde_json::{Value, json};
 
 use super::{SEND_MAX_EDGE, bad, call, check_answer, check_keys, has_backend, insert_layers, layer_format, layer_surface, prepare, prompt, region};
 use crate::commands::CommandSpec;
+use crate::document_preset_cmds::MAX_RESOLUTION;
 use crate::generative::{ImageGen, ModelKind};
 use crate::{EngineError, Result, Session};
 
@@ -68,7 +69,9 @@ fn run(s: &mut Session, p: &Value) -> Result<Value> {
             (size_param(p, "width", dw)?, size_param(p, "height", dh)?)
         }
     };
-    let dpi = open.map_or(72.0, |(_, _, dpi, _)| dpi);
+    // A new document takes the open one's resolution where `file.new` accepts it: an imported
+    // file can hold 0, NaN or more than 30,000 ppi, and the apply step runs after billing.
+    let dpi = open.map(|(_, _, dpi, _)| f64::from(dpi)).filter(|d| d.is_finite() && *d > 0.0).map_or(72.0, |d| d.clamp(1.0, MAX_RESOLUTION));
     let transparent = transparent(p)?;
     let prompt = prompt(CMD, p, None)?;
     let (backend, choice) = prepare(s, CMD, p, ModelKind::Image)?;

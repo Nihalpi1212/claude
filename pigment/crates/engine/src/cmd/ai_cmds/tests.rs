@@ -307,11 +307,15 @@ fn a_failed_or_wrong_sized_answer_changes_nothing() {
     mock.push(MockAnswer::Error { kind: "quota", message: "Your OpenAI quota is used up.".into() });
     let e = s.execute("ai.generateImage", json!({"prompt": "x"})).unwrap_err();
     assert_eq!(kind_of(&e), "quota");
-    // A second variation failing drops the first too.
+    assert_eq!((revision(&s), layer_count(&s)), (rev, layers));
+    // A second variation failing keeps the first, which was billed.
     mock.push(MockAnswer::Solid([0, 255, 0, 255]));
     mock.push(MockAnswer::Image(Rgba8Image::new(1, 1)));
-    assert!(s.execute("ai.generativeFill", json!({"prompt": "x", "variations": 2})).is_err());
-    assert_eq!((revision(&s), layer_count(&s)), (rev, layers));
+    let r = s.execute("ai.generativeFill", json!({"prompt": "x", "variations": 2})).unwrap();
+    assert_eq!(r["layers"].as_array().map(Vec::len), Some(1));
+    assert_eq!(r["failed"]["kind"], json!(kind::BAD_RESPONSE));
+    assert!(r["failed"]["message"].as_str().unwrap_or_default().contains("wrong size"), "{r}");
+    assert_eq!(layer_count(&s), layers + 1);
 }
 
 #[test]
@@ -890,4 +894,191 @@ fn a_step_that_sends_never_runs_from_an_action_or_an_event_script() {
     s.execute("ai.generativeFill", json!({"prompt": "x"})).unwrap();
     assert_eq!(mock.calls().len(), 1);
     let _ = (rev, layers);
+}
+
+/// AIE-1: a new document from Generate Image takes a resolution `file.new` accepts, whatever the
+/// open document holds (imported files can hold 0, NaN or more than 30,000 ppi); the request is
+/// not sent only to be thrown away by the apply step.
+#[test]
+fn generate_image_into_a_new_document_survives_any_resolution_of_the_open_one() {
+    for (dpi, want) in [(40_000.0, 30_000.0), (0.0, 72.0), (f32::NAN, 72.0), (-5.0, 72.0), (f32::INFINITY, 72.0), (300.0, 300.0)] {
+        let mut s = rgb(32, 32);
+        s.edit("dpi", |doc, _| {
+            doc.resolution_dpi = dpi;
+            Ok(())
+        })
+        .unwrap();
+        let mock = install(&mut s, MockBackend::connected());
+        mock.push(MockAnswer::Solid([255, 0, 255, 255]));
+        let docs = s.documents().len();
+        let r = s.execute("ai.generateImage", json!({"prompt": "a magenta box", "target": "document", "width": 64, "height": 64}));
+        assert!(r.is_ok(), "{dpi} ppi: {r:?}");
+        assert_eq!(mock.calls().len(), 1, "{dpi} ppi");
+        assert_eq!(s.documents().len(), docs + 1, "{dpi} ppi");
+        assert_eq!(s.active().unwrap().doc.resolution_dpi, want, "{dpi} ppi");
+    }
+}
+
+/// AIE-2: while an AI request runs on a document, the `view.*` commands that edit the Document
+/// (guides, slices, the ruler origin) are refused as any other edit is, so the paid answer is not
+/// discarded as "the document changed while it ran".
+#[test]
+fn guides_and_slices_wait_for_a_running_request() {
+    let mut s = rgb(64, 64);
+    s.execute("view.newGuide", json!({"orientation": "horizontal", "position": 5})).unwrap();
+    s.execute("slice.new", json!({"x": 0, "y": 0, "width": 16, "height": 16})).unwrap();
+    let mock = install(&mut s, MockBackend::connected());
+    mock.set_delay(Duration::from_millis(300));
+    select(&mut s, 8, 8, 20, 20);
+    let past = steps(&s);
+    let Started::Job(id) = s.start("ai.generativeFill", json!({"prompt": "x"})).unwrap() else { panic!("expected a job") };
+    let e = s.execute("view.newGuide", json!({"orientation": "vertical", "position": 10})).unwrap_err();
+    assert!(matches!(e, EngineError::Disabled(..)), "{e:?}");
+    assert!(e.to_string().contains("still running"), "{e}");
+    let r = s.wait_job(id).unwrap();
+    assert_eq!(r["layers"].as_array().map(Vec::len), Some(1));
+    assert_eq!(steps(&s), past + 1);
+    assert_eq!(mock.calls().len(), 1);
+}
+
+/// AIE-2's guard: no journaled `view.*` command that a running job lets through changes the
+/// document it locks.
+#[test]
+fn every_view_command_a_running_job_allows_leaves_its_document_alone() {
+    let mut s = rgb(64, 64);
+    s.execute("view.newGuide", json!({"orientation": "horizontal", "position": 5})).unwrap();
+    s.execute("view.newGuide", json!({"orientation": "vertical", "position": 7})).unwrap();
+    s.execute("slice.new", json!({"x": 0, "y": 0, "width": 16, "height": 16})).unwrap();
+    let mock = install(&mut s, MockBackend::connected());
+    mock.set_delay(Duration::from_millis(3000));
+    select(&mut s, 8, 8, 20, 20);
+    let Started::Job(id) = s.start("ai.generativeFill", json!({"prompt": "x"})).unwrap() else { panic!("expected a job") };
+    let tries = [
+        json!({}),
+        json!({"orientation": "vertical", "position": 10}),
+        json!({"orientation": "horizontal", "index": 0, "position": 12}),
+        json!({"orientation": "vertical", "index": 0}),
+        json!({"x": 3, "y": 4}),
+        json!({"on": true}),
+        json!({"on": false}),
+        json!({"columns": 2, "rows": 2}),
+        json!({"x": 3, "y": 4, "index": 0}),
+    ];
+    let mut allowed = Vec::new();
+    for spec in crate::commands::command_specs().iter().filter(|c| c.id.starts_with("view.") && c.journal) {
+        for p in &tries {
+            let before = Arc::downgrade(&s.active().unwrap().doc);
+            let r = s.execute(spec.id, p.clone());
+            if let Err(e) = &r
+                && e.to_string().contains("still running")
+            {
+                continue;
+            }
+            allowed.push(spec.id);
+            assert!(before.upgrade().is_some_and(|b| Arc::ptr_eq(&b, &s.active().unwrap().doc)), "{} {p} changed the locked document: {r:?}", spec.id);
+        }
+    }
+    assert!(!allowed.is_empty());
+    assert!(s.cancel_job(id));
+    let _ = s.wait_job(id);
+}
+
+/// AIE-3: a later variation failing keeps the variations already received (and billed); they land
+/// as one step and the result says what failed. Cancel still drops everything.
+#[test]
+fn a_failed_variation_keeps_the_ones_received() {
+    let mut s = rgb(40, 30);
+    let mock = install(&mut s, MockBackend::connected());
+    mock.push(MockAnswer::Solid([0, 255, 0, 255]));
+    mock.push(MockAnswer::Solid([0, 0, 255, 255]));
+    mock.push(MockAnswer::Error { kind: "quota", message: "Your OpenAI quota is used up.".into() });
+    select(&mut s, 10, 10, 10, 10);
+    let (layers, past) = (layer_count(&s), steps(&s));
+    let r = s.execute("ai.generativeFill", json!({"prompt": "x", "variations": 3})).unwrap();
+    assert_eq!(mock.calls().len(), 3);
+    assert_eq!(layer_count(&s), layers + 2);
+    assert_eq!(steps(&s), past + 1);
+    assert_eq!(undo_label(&s).as_deref(), Some("Generative Fill"));
+    assert_eq!(r["layers"].as_array().map(Vec::len), Some(2));
+    assert_eq!(r["failed"], json!({"kind": "quota", "message": "Your OpenAI quota is used up."}));
+    let names: Vec<&str> = s.active().unwrap().doc.layers.iter().skip(1).map(|l| l.name.as_str()).collect();
+    assert_eq!(names, ["Generative Fill 1", "Generative Fill 2"]);
+
+    // The first failing still fails the whole request, and stops asking.
+    let (layers, rev) = (layer_count(&s), revision(&s));
+    mock.push(MockAnswer::Error { kind: "quota", message: "Your OpenAI quota is used up.".into() });
+    let e = s.execute("ai.generativeFill", json!({"prompt": "x", "variations": 3})).unwrap_err();
+    assert_eq!(kind_of(&e), "quota");
+    assert_eq!(mock.calls().len(), 4);
+    assert_eq!((layer_count(&s), revision(&s)), (layers, rev));
+
+    // A cancel after one answer drops it.
+    let ctx = JobCtx::new();
+    s.set_inline_job_ctx(Some(ctx.clone()));
+    let c = ctx.clone();
+    let n = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let k = n.clone();
+    mock.set_hook(Some(Arc::new(move || {
+        if k.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 1 {
+            c.cancel();
+        }
+    })));
+    assert!(matches!(s.execute("ai.generativeFill", json!({"prompt": "x", "variations": 3})), Err(EngineError::Cancelled)));
+    assert_eq!((layer_count(&s), revision(&s)), (layers, rev));
+    mock.set_hook(None);
+    s.set_inline_job_ctx(None);
+}
+
+/// A pixel layer whose unlinked mask hides x < 32 with a 16 px feather.
+fn feathered() -> (Session, LayerId) {
+    let mut s = rgb(64, 32);
+    s.execute("layer.new.layerFromBackground", json!({})).unwrap();
+    let id = s.active().unwrap().active_layer.unwrap();
+    s.edit("mask", |doc, _| {
+        let bytes: Vec<u8> = (0..32).flat_map(|_| (0..64).map(|x| if x < 32 { 0 } else { 255 })).collect();
+        doc.layer_mut(id).unwrap().mask = Some(LayerMask {
+            surface: Surface::from_interleaved(photocraft_color::PixelFormat::GRAY8, Rect::new(0, 0, 64, 32), &bytes),
+            feather: 16.0,
+            linked: false,
+            ..LayerMask::reveal_all()
+        });
+        Ok(())
+    })
+    .unwrap();
+    (s, id)
+}
+
+/// AIE-4: Remove Background with AI Provider keeps a feathered mask's soft edge and the mask's
+/// link.
+#[test]
+fn remove_background_by_provider_keeps_the_old_masks_feather_and_link() {
+    let (mut s, id) = feathered();
+    let alpha_row = |s: &Session| -> Vec<f32> { composite(s)[16 * 64..17 * 64].iter().map(|p| p[3]).collect() };
+    let before = alpha_row(&s);
+    assert!(before[31] > 0.1 && before[32] < 0.9, "the edge is soft: {:?}", &before[24..40]);
+    let mock = install(&mut s, MockBackend::connected());
+    mock.push(MockAnswer::Solid([10, 10, 10, 255]));
+    s.execute("ai.removeBackground", json!({"method": "provider"})).unwrap();
+    let after = alpha_row(&s);
+    for x in 0..64 {
+        assert!((after[x] - before[x]).abs() < 0.02, "x = {x}: {} before, {} after", before[x], after[x]);
+    }
+    let m = s.active().unwrap().doc.layer(id).unwrap().mask.clone().unwrap();
+    assert!(!m.linked, "the mask stays unlinked");
+}
+
+/// AIE-4: Generate Background's subject is what the layer shows, its mask's feather included.
+#[test]
+fn generate_background_reads_the_subject_through_the_masks_feather() {
+    let (mut s, _) = feathered();
+    let mock = install(&mut s, MockBackend::connected());
+    s.execute("ai.replaceBackground", json!({"prompt": "a beach"})).unwrap();
+    assert_eq!(mock.calls().len(), 1);
+    // The new layer fills what the subject leaves: across the old edge it fades as the
+    // feathered mask does, not in one column.
+    let l = top(&s);
+    assert_eq!(l.name, "Generate Background");
+    let (a, b) = (alpha_at(l, 31, 16), alpha_at(l, 32, 16));
+    assert!(a < 0.9 && b > 0.1, "a hard edge: {a} at x = 31, {b} at x = 32");
+    assert!(alpha_at(l, 2, 16) > 0.99 && alpha_at(l, 62, 16) < 0.01);
 }

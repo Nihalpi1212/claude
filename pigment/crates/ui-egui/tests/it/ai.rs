@@ -176,6 +176,32 @@ fn generative_fill_sends_nothing_before_generate_and_lands_as_one_step() {
     assert!(!layer_names(h.state()).iter().any(|n| n == "Generative Fill"), "one undo step takes it back");
 }
 
+/// A later variation failing keeps the ones that arrived: they land as one step, and the window
+/// says why the next did not.
+#[test]
+fn a_failed_variation_keeps_the_ones_that_arrived_and_says_so() {
+    let mock = Arc::new(MockBackend::connected());
+    let m = Arc::clone(&mock);
+    let mut h = harness(move |app| {
+        with_mock(app, &m);
+        app.background_jobs = true;
+        app.run("select.rect", json!({"x": 40, "y": 40, "width": 60, "height": 50})).unwrap();
+    });
+    mock.push(MockAnswer::Solid([0, 255, 0, 255]));
+    mock.push(MockAnswer::Error { kind: "quota", message: "Your OpenAI quota is used up.".into() });
+    invoke(&mut h, "ai.generativeFill").unwrap();
+    type_into(&mut h, "Describe what to generate", "a red fox");
+    h.state_mut().ai.generate.variations = 3;
+    h.get_by_label("Generate").click();
+    until_idle(&mut h);
+    assert_eq!(mock.calls().len(), 2, "no request after the failure");
+    assert_eq!(layer_names(h.state()).iter().filter(|n| n.starts_with("Generative Fill")).count(), 1);
+    let error = h.state().ai.generate.error.as_ref().map(|e| e.message.clone()).unwrap_or_default();
+    assert!(error.contains("were kept") && error.contains("quota is used up"), "{error}");
+    h.run_steps(2);
+    assert!(h.query_by_label_contains("were kept").is_some(), "the window shows it");
+}
+
 /// Stop cancels a request that never answers: nothing lands, and the window says a request
 /// already sent may still be billed.
 #[test]
