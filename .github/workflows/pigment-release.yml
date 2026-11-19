@@ -118,9 +118,12 @@ jobs:
               exit 1
             fi
           fi
-          # 0.x versions and versions with a pre-release suffix are published as pre-releases.
+          # Only a version with a pre-release suffix (0.6.0-beta.1) is published as a pre-release.
+          # Every other version, 0.x included, is a full release marked Latest: Pigment 0.4.0 (the
+          # JavaScript app this one replaces) was a full release, and a pre-release would leave
+          # GitHub's Latest release, /releases/latest and the sidebar on it.
           prerelease=false
-          if [[ "$version" == 0.* || "$version" == *-* ]]; then prerelease=true; fi
+          if [[ "$version" == *-* ]]; then prerelease=true; fi
           i18n=$(tr -d '[:space:]' < pigment/craft-i18n.rev)
           if ! [[ "$i18n" =~ ^[0-9a-f]{40}$ ]]; then
             echo "::error file=pigment/craft-i18n.rev::expected one full commit SHA (got '$i18n')"
@@ -457,5 +460,7 @@ jobs:
           name: Pigment ${{ env.VERSION }}
           body_path: release-body.md
           prerelease: ${{ needs.version.outputs.prerelease == 'true' }}
+          # Set Latest explicitly rather than leave it to GitHub's default (by date and semver).
+          make_latest: ${{ needs.version.outputs.prerelease == 'true' && 'false' || 'true' }}
           fail_on_unmatched_files: true
           files: packages/*

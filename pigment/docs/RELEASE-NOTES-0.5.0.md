@@ -191,6 +191,10 @@ a release. A Pigment 0.4 document that uses one of them still opens; the notes a
 what was kept without effect. [The parity page](https://github.com/Nihalpi1212/claude/blob/pigment-v0.5.0/pigment/docs/parity/README.md#the-93-entries-where-pigment-04-was-ahead)
 lists each feature with its status.
 
+If you need one of them now, Pigment 0.4.0, the JavaScript app, stays downloadable from
+[its own release page](https://github.com/Nihalpi1212/claude/releases/tag/pigment-v0.4.0). 0.5.0 is
+Pigment's latest release; 0.4.0 gets no more updates.
+
 ### Known issues
 
 **Generative AI**
