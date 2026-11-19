@@ -588,6 +588,15 @@ fn set_key_prompt_gives_the_terminal_its_echo_back() {
         fn shown(&self) -> String {
             String::from_utf8_lossy(&self.shown.lock().unwrap()).into_owned()
         }
+        /// What the terminal has shown once it shows `text`, or after 10 s: the CLI's last line
+        /// can still be in the terminal, not yet read by the screen thread, when the CLI exits.
+        fn shown_with(&self, text: &str) -> String {
+            let end = Instant::now() + Duration::from_secs(10);
+            while !self.shown().contains(text) && Instant::now() < end {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            self.shown()
+        }
         fn type_keys(&self, keys: &str) {
             (&self.keyboard).write_all(keys.as_bytes()).unwrap();
         }
@@ -626,7 +635,7 @@ fn set_key_prompt_gives_the_terminal_its_echo_back() {
     t.type_keys(&format!("{KEY}x\x7f\r"));
     let status = wait(exited);
     assert!(t.echo(), "echo is back after Enter");
-    let shown = t.shown();
+    let shown = t.shown_with("OpenAI key stored");
     assert!(status.success(), "{status:?}: {shown}");
     assert!(shown.contains("OpenAI key stored") && !shown.contains(KEY), "{shown}");
     let file = std::fs::read_to_string(d.join("ai-keys.json")).unwrap();
@@ -639,7 +648,7 @@ fn set_key_prompt_gives_the_terminal_its_echo_back() {
     t.type_keys("sk-te\x03");
     let status = wait(exited);
     assert!(t.echo(), "the terminal's echo is still off after Ctrl+C ({status:?})");
-    let shown = t.shown();
+    let shown = t.shown_with("interrupted");
     assert_eq!(status.code(), Some(1), "{shown}");
     assert!(shown.contains("interrupted") && !shown.contains("sk-te"), "{shown}");
     assert!(!d.join("ai-keys.json").exists());
