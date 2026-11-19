@@ -274,7 +274,10 @@ pub fn start(app: &mut PhotocraftApp) -> Result<Value, String> {
 /// `failed` says why the next did not.
 fn partial(v: &Value) -> Option<Failure> {
     let message = v.get("failed")?.get("message").and_then(Value::as_str)?;
-    Some(Failure { kind: None, message: crate::i18n::fmt(tl!("The variations that arrived were kept. The next one failed: {message}"), &[("message", message)]) })
+    Some(Failure {
+        kind: None,
+        message: crate::i18n::fmt(tl!("The variations that arrived were kept. The next one failed: {message}"), &[("message", message)]),
+    })
 }
 
 fn done_note(feature: &str) -> String {
