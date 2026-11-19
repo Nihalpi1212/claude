@@ -388,19 +388,21 @@ fn status(accounts: &AiAccounts, dir: &std::path::Path, json: bool, out: &mut dy
 fn read_key(p: ProviderId, err: &mut dyn Write) -> Result<String> {
     let stdin = std::io::stdin();
     let terminal = stdin.is_terminal();
-    let echo_off = terminal && set_echo(false);
+    let hidden = if terminal { hidden::Hidden::start() } else { None };
     if terminal {
-        let note = if echo_off { "" } else { " (it will show as you type)" };
+        let note = if hidden.is_some() { "" } else { " (it will show as you type)" };
         write!(err, "Paste the {} API key and press Enter{note}: ", p.label())?;
         err.flush()?;
     }
-    let mut line = String::new();
-    let read = stdin.lock().read_line(&mut line);
-    if echo_off {
-        set_echo(true);
+    let line = if let Some(h) = hidden {
+        let line = h.read_line();
         writeln!(err)?;
-    }
-    read?;
+        line?.ok_or_else(|| CliError::Other("interrupted: no key was stored".into()))?
+    } else {
+        let mut line = String::new();
+        stdin.lock().read_line(&mut line)?;
+        line
+    };
     let key = line.trim().to_string();
     if key.is_empty() {
         return Err(CliError::Other("no key on standard input: pipe it in, or paste it at the prompt".into()));
@@ -408,16 +410,76 @@ fn read_key(p: ProviderId, err: &mut dyn Write) -> Result<String> {
     Ok(key)
 }
 
-/// Turn the terminal's echo off or on with `stty`; whether it worked.
-fn set_echo(on: bool) -> bool {
-    if !cfg!(unix) {
-        return false;
+/// A line typed at the terminal without echo. Ctrl+C reaches this process as a keystroke, not as
+/// a signal (ISIG off), so the terminal is always put back as it was before the CLI ends: a
+/// signal would kill it with echo still off.
+#[cfg(unix)]
+mod hidden {
+    use std::io::Read;
+
+    use rustix::termios::{LocalModes, OptionalActions, SpecialCodeIndex, Termios, tcgetattr, tcsetattr};
+
+    /// Standard input's terminal with echo, line editing and signal keys off; dropping it puts
+    /// the saved settings back.
+    pub(super) struct Hidden(Termios);
+
+    impl Hidden {
+        pub(super) fn start() -> Option<Hidden> {
+            let stdin = std::io::stdin();
+            let saved = tcgetattr(&stdin).ok()?;
+            let mut t = saved.clone();
+            t.local_modes.remove(LocalModes::ECHO | LocalModes::ICANON | LocalModes::ISIG | LocalModes::IEXTEN);
+            t.special_codes[SpecialCodeIndex::VMIN] = 1;
+            t.special_codes[SpecialCodeIndex::VTIME] = 0;
+            tcsetattr(&stdin, OptionalActions::Now, &t).ok()?;
+            Some(Hidden(saved))
+        }
+
+        /// The line up to Enter (or Ctrl+D), with Backspace and Ctrl+U applied; `None` for
+        /// Ctrl+C.
+        pub(super) fn read_line(self) -> std::io::Result<Option<String>> {
+            let mut line = Vec::new();
+            let mut stdin = std::io::stdin().lock();
+            let mut byte = [0u8; 1];
+            loop {
+                if stdin.read(&mut byte)? == 0 {
+                    break;
+                }
+                match byte[0] {
+                    b'\n' | b'\r' | 0x04 => break,
+                    0x03 => return Ok(None),
+                    0x7f | 0x08 => {
+                        // One character, with its UTF-8 continuation bytes.
+                        while line.pop().is_some_and(|b| b & 0xc0 == 0x80) {}
+                    }
+                    0x15 => line.clear(),
+                    b if b < 0x20 => {}
+                    b => line.push(b),
+                }
+            }
+            Ok(Some(String::from_utf8_lossy(&line).into_owned()))
+        }
     }
-    std::process::Command::new("stty")
-        .arg(if on { "echo" } else { "-echo" })
-        .stdin(std::process::Stdio::inherit())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .is_ok_and(|s| s.success())
+
+    impl Drop for Hidden {
+        fn drop(&mut self) {
+            let _ = tcsetattr(std::io::stdin(), OptionalActions::Now, &self.0);
+        }
+    }
+}
+
+/// Elsewhere the key shows as it is typed.
+#[cfg(not(unix))]
+mod hidden {
+    pub(super) enum Hidden {}
+
+    impl Hidden {
+        pub(super) fn start() -> Option<Hidden> {
+            None
+        }
+
+        pub(super) fn read_line(self) -> std::io::Result<Option<String>> {
+            match self {}
+        }
+    }
 }
