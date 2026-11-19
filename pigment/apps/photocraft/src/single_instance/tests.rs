@@ -248,7 +248,7 @@ fn only_per_user_launches_without_process_options_take_part() {
         launch_options: &[],
     };
     assert_eq!(skip_reason(&base), None);
-    // A portable copy's folder or a PHOTOCRAFT_CONFIG_DIR may be shared between users.
+    // A portable copy's folder or a PIGMENT_CONFIG_DIR may be shared between users.
     assert!(skip_reason(&LaunchContext { per_user_settings: false, ..base }).is_some());
     assert!(skip_reason(&LaunchContext { new_instance_flag: true, ..base }).is_some());
     assert!(skip_reason(&LaunchContext { new_instance_env: Some("1"), ..base }).is_some());
@@ -353,7 +353,7 @@ fn an_environment_override_counts_as_a_process_option() {
     // The trace and the two presentation values are trimmed where they take effect.
     assert_eq!(with(&[("PHOTOCRAFT_PRESENT_MODE", " novsync "), ("PHOTOCRAFT_STROKE_TRACE", " 1 ")]), vec![PerProcess::PresentMode, PerProcess::StrokeTrace]);
     // The menus and the automation roots are flags' fallbacks: `launch_args::parse` counts them.
-    assert!(with(&[("PHOTOCRAFT_IN_WINDOW_MENUS", "1"), ("PHOTOCRAFT_AUTOMATION_WRITE_ROOT", "/tmp/out")]).is_empty());
+    assert!(with(&[("PHOTOCRAFT_IN_WINDOW_MENUS", "1"), ("PIGMENT_AUTOMATION_WRITE_ROOT", "/tmp/out")]).is_empty());
     let base = LaunchContext {
         per_user_settings: true,
         new_instance_flag: false,

@@ -210,8 +210,16 @@ Every place in the shipped code that can reach another machine, and what Pigment
   sidecars carry (`is_photocraft_xmp`), the built-in profile descriptions (`Dot Gain 20%-compatible
   (gamma 1.732, PhotoCraft)`, `PhotoCraft Coated CMYK`), the hidden font-face aliases
   (`.PhotoCraft-face-…`), the case-sensitivity probe file.
-- Environment variables (`PHOTOCRAFT_CONFIG_DIR`, `PHOTOCRAFT_CONTROL_PORT`, `PHOTOCRAFT_BUILD_SHA`, …)
-  and the library crates' log targets (`photocraft_engine::…`). The desktop binary is `pigment`, so
+- Environment variables (`PHOTOCRAFT_GPU`, `PHOTOCRAFT_NEW_INSTANCE`, `PHOTOCRAFT_BUILD_SHA`, …),
+  except the six that choose a folder, a port or a token, which are Pigment's own so that one set
+  for an installed PhotoCraft never shares its settings, single-instance lock, control port or
+  agent access with Pigment: `PIGMENT_CONFIG_DIR` (`crates/automation/src/app_dirs.rs`),
+  `PIGMENT_CONTROL_PORT` (`apps/photocraft/src/launch_args.rs`, `apps/photocraft-cli/src/args.rs`),
+  `PIGMENT_CONTROL_TOKEN` and `PIGMENT_CONTROL_TOKEN_FILE` (`crates/automation/src/args.rs`),
+  `PIGMENT_AUTOMATION_READ_ROOT` and `PIGMENT_AUTOMATION_WRITE_ROOT` (`launch_args.rs`); the
+  `PHOTOCRAFT_*` names of those six are not read. PhotoCraft's docs and `book/` still use the old
+  names.
+- The library crates' log targets (`photocraft_engine::…`). The desktop binary is `pigment`, so
   its own modules log as `pigment::…` (`RUST_LOG=pigment=debug`); the default filter
   (`apps/photocraft/src/logging.rs`) shows `info` for both `photocraft*` and `pigment*`. A second
   instance's log is `pigment-<pid>.log`.
@@ -421,7 +429,11 @@ the product name in Rust strings (not comments, not the kept markers; `///` doc 
 files clap and the MCP server turn into help), the binary names in the app's, CLI's, MCP's,
 engine's and interface's text, and the application id in every text file (except PhotoCraft's own
 document type, `ai.storyteller.photocraft.document`). It is idempotent; `--check` lists what it would
-change and fails if anything is left.
+change and fails if anything is left. It also checks the user guide (`docs/user/`, which it does not
+rewrite): a page that sends people to PhotoCraft's downloads, launcher, website or Discord, or links
+the repository's `HEAD`, fails the run. Links to Pigment's tree and guide (`links.rs`, the AppStream
+homepage and help, nfpm's homepage, WiX's `ARPURLINFOABOUT`) name the tag `pigment-v<version>`,
+not `HEAD` or the bare repository: the default branch holds the JavaScript app (Pigment 0.1 to 0.4).
 
 The interface catalogues are not in this tree: they come from craft-i18n at the commit in
 `craft-i18n.rev`, and `crates/ui-egui/build.rs` (`rebrand_catalog`) rebrands them as it embeds them,

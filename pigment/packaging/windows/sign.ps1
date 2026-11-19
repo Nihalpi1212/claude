@@ -65,7 +65,7 @@ if (-not $haveCert -and -not $haveAzure) {
 }
 
 $script:SignTool = Find-SignTool
-$common = @('sign', '/v', '/fd', 'SHA256', '/td', 'SHA256', '/d', 'Pigment', '/du', 'https://github.com/Nihalpi1212/claude')
+$common = @('sign', '/v', '/fd', 'SHA256', '/td', 'SHA256', '/d', 'Pigment', '/du', 'https://github.com/Nihalpi1212/claude/releases')
 $tmp = Join-Path ([IO.Path]::GetTempPath()) "pigment-sign-$PID"
 New-Item -ItemType Directory -Force -Path $tmp | Out-Null
 

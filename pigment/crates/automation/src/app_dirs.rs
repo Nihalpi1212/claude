@@ -2,7 +2,7 @@
 //! `photocraft-cli` (which finds the app's agent connection file there, see [`crate::agent_link`]).
 //!
 //! In order:
-//! 1. `PHOTOCRAFT_CONFIG_DIR`, when set (tests, agents, custom setups).
+//! 1. `PIGMENT_CONFIG_DIR`, when set (tests, agents, custom setups).
 //! 2. **Portable mode** (#228): a marker file ([`PORTABLE_MARKERS`]) beside the executable puts
 //!    everything in `<exe dir>/PigmentData`, so a portable copy on a USB stick leaves nothing in
 //!    `%APPDATA%`. The Windows portable zip ships with `portable.txt`; the MSI doesn't. If that
@@ -25,7 +25,7 @@ pub const PORTABLE_DATA_DIR: &str = "PigmentData";
 /// How [`DataDir::dir`] was chosen.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
-    /// `PHOTOCRAFT_CONFIG_DIR`.
+    /// `PIGMENT_CONFIG_DIR`.
     Override,
     /// `<exe dir>/PigmentData`.
     Portable,
@@ -45,7 +45,7 @@ pub struct DataDir {
 
 /// Resolve the data directory from the environment (`env`) and the executable's folder.
 pub fn resolve(env: impl Fn(&str) -> Option<OsString>, exe_dir: Option<&Path>) -> DataDir {
-    if let Some(d) = env("PHOTOCRAFT_CONFIG_DIR").filter(|d| !d.is_empty()) {
+    if let Some(d) = env("PIGMENT_CONFIG_DIR").filter(|d| !d.is_empty()) {
         return DataDir { dir: Some(PathBuf::from(d)), mode: Mode::Override, warning: None };
     }
     let platform = platform_dir(&env);
@@ -112,4 +112,27 @@ pub fn ensure_writable(dir: &Path) -> std::io::Result<()> {
 pub fn from_env() -> DataDir {
     let exe = std::env::current_exe().ok();
     resolve(|k| std::env::var_os(k), exe.as_deref().and_then(Path::parent))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn env_of(pairs: &'static [(&'static str, &'static str)]) -> impl Fn(&str) -> Option<OsString> {
+        move |k| pairs.iter().find(|(n, _)| *n == k).map(|(_, v)| OsString::from(v))
+    }
+
+    /// Pigment reads `PIGMENT_CONFIG_DIR`, never PhotoCraft's `PHOTOCRAFT_CONFIG_DIR`: one set for an
+    /// installed PhotoCraft would share its settings, recovery files, agent token and single-instance
+    /// lock with Pigment, and a `.pigment` file opened while PhotoCraft runs would open in PhotoCraft.
+    #[test]
+    fn photocraft_s_config_dir_variable_is_not_pigment_s() {
+        let d = resolve(env_of(&[("PHOTOCRAFT_CONFIG_DIR", "/photocraft-settings"), ("HOME", "/home/u"), ("APPDATA", "/appdata")]), None);
+        assert_eq!(d.mode, Mode::Platform);
+        assert_eq!(d.dir, platform_dir(&env_of(&[("HOME", "/home/u"), ("APPDATA", "/appdata")])));
+        assert!(d.dir.is_some_and(|d| d != Path::new("/photocraft-settings")));
+
+        let d = resolve(env_of(&[("PIGMENT_CONFIG_DIR", "/pigment-settings"), ("PHOTOCRAFT_CONFIG_DIR", "/photocraft-settings")]), None);
+        assert_eq!((d.mode, d.dir), (Mode::Override, Some(PathBuf::from("/pigment-settings"))));
+    }
 }

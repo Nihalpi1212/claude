@@ -282,7 +282,7 @@ pub(crate) struct CommandsArgs {
 /// The open window is found again on every call, with no port or token to configure. Without
 /// the person's consent, or with --headless, it runs headless: each automation root grants that
 /// direction of file access; an omitted root denies it. Prefer absolute root paths in MCP client
-/// configurations. Bridge (--bridge or PHOTOCRAFT_CONTROL_PORT): a running `pigment --control
+/// configurations. Bridge (--bridge or PIGMENT_CONTROL_PORT): a running `pigment --control
 /// <port>`; set the roots on the desktop app, root flags are refused, and the token flags require
 /// it.
 #[derive(Args)]
@@ -296,9 +296,9 @@ pub(crate) struct McpArgs {
     pub(crate) when_closed: Option<photocraft_engine::prefs::WhenAppClosed>,
     /// Bridge to the Pigment app listening here instead of a headless engine; a bare port means
     /// 127.0.0.1:<PORT>
-    #[arg(long, value_name = "127.0.0.1:PORT", env = "PHOTOCRAFT_CONTROL_PORT", value_parser = bridge)]
+    #[arg(long, value_name = "127.0.0.1:PORT", env = "PIGMENT_CONTROL_PORT", value_parser = bridge)]
     pub(crate) bridge: Option<Bridge>,
-    /// `--bridge` came from PHOTOCRAFT_CONTROL_PORT, set by [`parse`].
+    /// `--bridge` came from PIGMENT_CONTROL_PORT, set by [`parse`].
     #[arg(skip)]
     pub(crate) bridge_from_env: bool,
     #[command(flatten)]
@@ -315,13 +315,13 @@ pub(crate) struct McpArgs {
 /// jobs.list/cancel, engine.commands,
 /// doc.open/new/place/save/exportLayers/exportDataSets/importDataSets/inspect/render/select/close,
 /// session.list, batch, methods (docs/control-protocol.md#headless-server). The token flags require
-/// --port (or PHOTOCRAFT_CONTROL_PORT); stdio needs no control token.
+/// --port (or PIGMENT_CONTROL_PORT); stdio needs no control token.
 #[derive(Args)]
 pub(crate) struct ServeArgs {
     /// Listen on 127.0.0.1:<PORT> instead of stdio
-    #[arg(long, value_name = "PORT", env = "PHOTOCRAFT_CONTROL_PORT", value_parser = control_port)]
+    #[arg(long, value_name = "PORT", env = "PIGMENT_CONTROL_PORT", value_parser = control_port)]
     pub(crate) port: Option<u16>,
-    /// `--port` came from PHOTOCRAFT_CONTROL_PORT, set by [`parse`].
+    /// `--port` came from PIGMENT_CONTROL_PORT, set by [`parse`].
     #[arg(skip)]
     pub(crate) port_from_env: bool,
     #[command(flatten)]
@@ -351,7 +351,7 @@ enum ValueError {
     OnOff,
     #[error("expected a positive number")]
     PdfDpi,
-    /// Why a `--bridge` value, or a PHOTOCRAFT_CONTROL_PORT value for `mcp`, is refused.
+    /// Why a `--bridge` value, or a PIGMENT_CONTROL_PORT value for `mcp`, is refused.
     #[error("expected a port, 0-65535 (--bridge also takes 127.0.0.1:<PORT>)")]
     Bridge,
     #[error("expected launch, headless or error")]
@@ -362,9 +362,9 @@ enum ValueError {
 /// (exit 2).
 #[derive(Debug, thiserror::Error)]
 enum ServerOptionError {
-    /// PHOTOCRAFT_CONTROL_PORT holds a port, as for the desktop app's --control: only the flag
+    /// PIGMENT_CONTROL_PORT holds a port, as for the desktop app's --control: only the flag
     /// takes host:port.
-    #[error("invalid value '{0}' for 'PHOTOCRAFT_CONTROL_PORT': {bridge}", bridge = ValueError::Bridge)]
+    #[error("invalid value '{0}' for 'PIGMENT_CONTROL_PORT': {bridge}", bridge = ValueError::Bridge)]
     BridgeVar(String),
     /// With --bridge the roots are the desktop process's to set: accepting them here promises
     /// authority the bridge can't give (#8035).
@@ -467,7 +467,7 @@ impl fmt::Display for Bridge {
     }
 }
 
-/// `mcp --bridge`, or PHOTOCRAFT_CONTROL_PORT, which holds a port.
+/// `mcp --bridge`, or PIGMENT_CONTROL_PORT, which holds a port.
 fn bridge(s: &str) -> Result<Bridge, ValueError> {
     match control_port(s) {
         Ok(port) => Ok(Bridge::Port(port)),
@@ -503,7 +503,7 @@ fn steps(m: &ArgMatches) -> Vec<Step> {
 /// stray.psd --help`): clap reports the mistake first.
 pub(crate) fn parse(args: &[OsString]) -> Result<Cli, clap::Error> {
     let mut cmd = Cli::command().mut_subcommands(|sub| sub.mut_args(blank_env_is_unset));
-    // `mcp --headless` reaches no app: a PHOTOCRAFT_CONTROL_PORT exported for another tool is not
+    // `mcp --headless` reaches no app: a PIGMENT_CONTROL_PORT exported for another tool is not
     // read, so a value it couldn't use anyway doesn't stop it.
     if args.first().is_some_and(|a| a == "mcp") && args.iter().take_while(|a| *a != "--").any(|a| a == "--headless") {
         cmd = cmd.mut_subcommand("mcp", |sub| sub.mut_arg("bridge", |arg| arg.env(None::<&str>)));

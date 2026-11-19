@@ -29,13 +29,13 @@ fn run_with(args: &[&str], vars: &[(&str, &str)]) -> Run {
     std::fs::create_dir_all(&dir).unwrap();
     let mut child = std::process::Command::new(crate::binary())
         .args(args)
-        .env("PHOTOCRAFT_CONFIG_DIR", &dir)
+        .env("PIGMENT_CONFIG_DIR", &dir)
         // Isolate from the host environment so the test is reproducible.
-        .env_remove("PHOTOCRAFT_CONTROL_PORT")
-        .env_remove("PHOTOCRAFT_CONTROL_TOKEN")
-        .env_remove("PHOTOCRAFT_CONTROL_TOKEN_FILE")
-        .env_remove("PHOTOCRAFT_AUTOMATION_READ_ROOT")
-        .env_remove("PHOTOCRAFT_AUTOMATION_WRITE_ROOT")
+        .env_remove("PIGMENT_CONTROL_PORT")
+        .env_remove("PIGMENT_CONTROL_TOKEN")
+        .env_remove("PIGMENT_CONTROL_TOKEN_FILE")
+        .env_remove("PIGMENT_AUTOMATION_READ_ROOT")
+        .env_remove("PIGMENT_AUTOMATION_WRITE_ROOT")
         .env_remove("DISPLAY")
         .env_remove("WAYLAND_DISPLAY")
         .env_remove("WAYLAND_SOCKET")
@@ -114,7 +114,7 @@ fn missing_automation_write_root_exits_with_status_2() {
 
 #[test]
 fn automation_roots_come_from_the_environment_too() {
-    for var in ["PHOTOCRAFT_AUTOMATION_READ_ROOT", "PHOTOCRAFT_AUTOMATION_WRITE_ROOT"] {
+    for var in ["PIGMENT_AUTOMATION_READ_ROOT", "PIGMENT_AUTOMATION_WRITE_ROOT"] {
         let Run { status, stderr } = run_with(&["--control", "0", "--control-token", VALID_TOKEN], &[(var, "/nonexistent/photocraft-test-path")]);
         assert_eq!(status.code(), Some(2), "{var}: missing root must exit 2, stderr: {stderr}");
         assert!(stderr.contains("cannot configure automation workspace"), "{var}: stderr: {stderr}");

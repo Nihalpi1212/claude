@@ -19,7 +19,7 @@
 //! `--in-window-menus` (or `PHOTOCRAFT_IN_WINDOW_MENUS=1`) keeps the menus inside the window on
 //! macOS instead of the macOS menu bar (`mac_menu`).
 //!
-//! `--control <port>` (or `PHOTOCRAFT_CONTROL_PORT`) starts a localhost JSON-lines control server.
+//! `--control <port>` (or `PIGMENT_CONTROL_PORT`) starts a localhost JSON-lines control server.
 //! The first line must authenticate; subsequent request lines get reply lines.
 //! `{"id":1,"ok":true,"result":…}`. See `photocraft_ui_egui::control` for the methods.
 
@@ -154,7 +154,7 @@ fn automation_workspace(
 }
 
 /// The control port this launch listens on, and the warning to print when a request was refused.
-/// Only `--control` (or `PHOTOCRAFT_CONTROL_PORT`) opens one at launch: Preferences › AI
+/// Only `--control` (or `PIGMENT_CONTROL_PORT`) opens one at launch: Preferences › AI
 /// Integrations' connection starts and stops while the app runs (`agent_link`). Allow Agent
 /// Control off refuses the flag too, and says so rather than ignoring it silently.
 fn control_port_for(cli: Option<u16>, prefs: &photocraft_engine::prefs::Integrations) -> (Option<u16>, Option<String>) {
@@ -425,7 +425,7 @@ fn main() -> eframe::Result {
     // The system font scan can take seconds (minutes on some Macs): run it off the UI thread.
     photocraft_ui_egui::type_tool::warm_fonts();
     // `--help` and `--version` print to standard output and exit 0. A usage error (an unknown
-    // option, a missing or bad value, a bad PHOTOCRAFT_CONTROL_PORT: issues #701, #6429, #6431)
+    // option, a missing or bad value, a bad PIGMENT_CONTROL_PORT: issues #701, #6429, #6431)
     // names the argument on standard error and exits 2, so a launcher sees the failure. Neither
     // panics when the stream is closed or a pipe (`photocraft --help | head -1`).
     let launch = launch_args::parse(launch_args::command(), std::env::args_os().skip(1)).unwrap_or_else(|e| launch_args::exit(e));
