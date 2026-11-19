@@ -544,7 +544,7 @@ as the settings in AI Accounts are.
 | Subcommand | Does |
 |---|---|
 | `ai status [--json]` | the providers, how each is connected (a key's hint, never a key; a ChatGPT sign-in's e-mail address, never a token), models, consent, `allowAgents`, where keys are kept |
-| `ai set-key <openai\|gemini> [--no-check]` | reads the key from standard input (without echo at a Unix terminal), checks it with the provider, stores it; a key given on the command line is refused |
+| `ai set-key <openai\|gemini> [--no-check]` | reads the key from standard input (without echo at a Unix terminal, where Ctrl+C cancels and leaves the terminal as it was), checks it with the provider, stores it; a key given on the command line is refused |
 | `ai clear-key <provider>` | removes the key |
 | `ai sign-in [--port N]` | Sign in with ChatGPT (experimental): prints the address to open in a browser and waits (five minutes at most) for the browser's callback, or for the address it landed on pasted on standard input. With an OpenAI key stored it says first that signing in replaces the key (AI Accounts does not offer the sign-in then) |
 | `ai sign-out` | removes the ChatGPT sign-in from this computer (also one the switch hides) |

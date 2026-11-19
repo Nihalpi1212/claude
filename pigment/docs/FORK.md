@@ -291,7 +291,7 @@ Assistant's `assistant.rs` and `assistant_tools.rs`) with its tests in
 | `crates/automation/Cargo.toml` | the `pigment-genai` dependency |
 | `crates/automation/src/lib.rs` | `pub mod genai;` |
 | `crates/automation/src/headless.rs` | `untrusted()` builds its session with `genai::session(Caller::Agent)`, `trusted_local()` with `genai::session(Caller::CommandLine { allow_ai: false })` |
-| `apps/photocraft-cli/Cargo.toml` | the `pigment-genai` dependency |
+| `apps/photocraft-cli/Cargo.toml` | the `pigment-genai` dependency; `rustix` (termios) under the Unix dependencies, for `ai set-key`'s no-echo prompt, and with `pty` under the Unix dev-dependencies for its test |
 | `apps/photocraft-cli/src/args.rs` | the `Ai(crate::ai::AiArgs)` subcommand and `run`'s `--allow-ai` |
 | `apps/photocraft-cli/src/lib.rs` | `mod ai;`, `Command::Ai(a) => ai::run(a, out, err)`, and `ai::hint(&e)` printed after a failed command's error (an `ai.*` step refused for the agreement or a key names `pigment-cli ai consent` or `ai set-key`) |
 | `apps/photocraft-cli/src/document.rs` | `run_cmds` calls `crate::ai::install(&mut h, a)?` (refuses an `ai.*` step without `--allow-ai`, installs the backend that may send with it) |

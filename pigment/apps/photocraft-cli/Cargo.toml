@@ -45,6 +45,10 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 # Pigment: generative AI (`pigment-cli ai`, `run --allow-ai`).
 pigment-genai = { workspace = true }
 
+# Pigment: `ai set-key`'s prompt reads the key with the terminal's echo off.
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1.1.5", features = ["termios", "std"] }
+
 [dev-dependencies]
 serde = { workspace = true }
 tempfile = "3"
@@ -60,6 +64,9 @@ clap_complete = { workspace = true }
 clap_mangen = { workspace = true }
 # The PSD write recipe runner (tests/it/psd_write_oracle.rs).
 xtask = { path = "../../xtask" }
+# A pseudo-terminal for `ai set-key`'s no-echo prompt (tests/it/ai.rs).
+[target.'cfg(unix)'.dev-dependencies]
+rustix = { version = "1.1.5", features = ["pty", "termios", "std"] }
 
 [build-dependencies]
 # Icon + VERSIONINFO for photocraft-cli.exe; build.rs only uses it when targeting Windows.

@@ -545,3 +545,102 @@ fn sign_in_says_when_it_would_replace_a_stored_key() {
     c.args(["ai", "status"]);
     assert!(text(&run(c, "")).0.contains("OpenAI: connected"), "the key is still there");
 }
+
+/// `ai set-key`'s prompt at a terminal: the key isn't echoed, Backspace works, and the
+/// terminal's echo is back the moment the CLI ends, whether the person pressed Enter or Ctrl+C.
+/// (Ctrl+C used to kill the CLI by its signal with echo still off.) The CLI runs with the pty as
+/// its controlling terminal (`setsid --ctty`), so Ctrl+C is the keystroke a person types.
+#[cfg(target_os = "linux")]
+#[test]
+fn set_key_prompt_gives_the_terminal_its_echo_back() {
+    use rustix::pty::{OpenptFlags, grantpt, openpt, ptsname, unlockpt};
+    use rustix::termios::{LocalModes, tcgetattr};
+    use std::sync::mpsc;
+    use std::time::{Duration, Instant};
+
+    /// A terminal: what it has shown so far, its keyboard, and the device the CLI gets.
+    struct Pty {
+        shown: Arc<Mutex<Vec<u8>>>,
+        keyboard: std::fs::File,
+        device: std::fs::File,
+    }
+    impl Pty {
+        fn new() -> Pty {
+            let master = openpt(OpenptFlags::RDWR | OpenptFlags::NOCTTY).unwrap();
+            grantpt(&master).unwrap();
+            unlockpt(&master).unwrap();
+            let name = ptsname(&master, Vec::new()).unwrap();
+            let device = std::fs::OpenOptions::new().read(true).write(true).open(name.to_str().unwrap()).unwrap();
+            let master = std::fs::File::from(master);
+            let shown = Arc::new(Mutex::new(Vec::new()));
+            let (log, mut screen) = (shown.clone(), master.try_clone().unwrap());
+            std::thread::spawn(move || {
+                let mut buf = [0u8; 4096];
+                while let Ok(n @ 1..) = screen.read(&mut buf) {
+                    log.lock().unwrap().extend_from_slice(&buf[..n]);
+                }
+            });
+            Pty { shown, keyboard: master, device }
+        }
+        fn echo(&self) -> bool {
+            tcgetattr(&self.device).unwrap().local_modes.contains(LocalModes::ECHO)
+        }
+        fn shown(&self) -> String {
+            String::from_utf8_lossy(&self.shown.lock().unwrap()).into_owned()
+        }
+        fn type_keys(&self, keys: &str) {
+            (&self.keyboard).write_all(keys.as_bytes()).unwrap();
+        }
+        /// `ai set-key openai` at this terminal, once its prompt shows; its exit status arrives
+        /// on the receiver.
+        fn set_key(&self, d: &Path) -> mpsc::Receiver<std::process::ExitStatus> {
+            let inner = cli(d, "http://127.0.0.1:9/v1");
+            let mut c = Command::new("setsid");
+            c.arg("--ctty").arg(inner.get_program()).args(["ai", "set-key", "openai", "--no-check"]);
+            for (k, v) in inner.get_envs() {
+                match v {
+                    Some(v) => c.env(k, v),
+                    None => c.env_remove(k),
+                };
+            }
+            let io = || Stdio::from(self.device.try_clone().unwrap());
+            let mut child = c.stdin(io()).stdout(io()).stderr(io()).spawn().unwrap();
+            let (done, exited) = mpsc::channel();
+            std::thread::spawn(move || done.send(child.wait().unwrap()).unwrap());
+            let end = Instant::now() + Duration::from_secs(20);
+            while !self.shown().contains("API key and press Enter: ") && Instant::now() < end {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            assert!(self.shown().contains("API key and press Enter: "), "no prompt: {}", self.shown());
+            assert!(!self.echo(), "echo is off while the key is typed");
+            exited
+        }
+    }
+    let wait = |exited: mpsc::Receiver<std::process::ExitStatus>| exited.recv_timeout(Duration::from_secs(20)).unwrap();
+
+    // Enter: stored as typed (after the Backspace), never shown, echo back on.
+    let d = dir("pty");
+    let t = Pty::new();
+    assert!(t.echo());
+    let exited = t.set_key(&d);
+    t.type_keys(&format!("{KEY}x\x7f\r"));
+    let status = wait(exited);
+    assert!(t.echo(), "echo is back after Enter");
+    let shown = t.shown();
+    assert!(status.success(), "{status:?}: {shown}");
+    assert!(shown.contains("OpenAI key stored") && !shown.contains(KEY), "{shown}");
+    let file = std::fs::read_to_string(d.join("ai-keys.json")).unwrap();
+    assert!(file.contains(&format!("\"{KEY}\"")), "{file}");
+
+    // Ctrl+C, halfway through the key: nothing stored, and echo is back on as the CLI ends.
+    let d = dir("pty-interrupt");
+    let t = Pty::new();
+    let exited = t.set_key(&d);
+    t.type_keys("sk-te\x03");
+    let status = wait(exited);
+    assert!(t.echo(), "the terminal's echo is still off after Ctrl+C ({status:?})");
+    let shown = t.shown();
+    assert_eq!(status.code(), Some(1), "{shown}");
+    assert!(shown.contains("interrupted") && !shown.contains("sk-te"), "{shown}");
+    assert!(!d.join("ai-keys.json").exists());
+}
