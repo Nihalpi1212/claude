@@ -1,10 +1,15 @@
-//! PhotoCraft's side of agents in the open desktop app: its agent settings as `photocraft-cli mcp`
-//! reads them from the saved preferences, and whether the person lets agents in now. The switch,
-//! the connection file and the link host are the framework's (`craft::automation::agents`): the
+//! Pigment's side of agents in the open desktop app: its agent settings as `pigment-cli mcp` reads
+//! them from the saved preferences, and whether the person lets agents in now: Pigment's own
+//! switch, Preferences › AI Integrations › Let AI apps use this window (`connectAgents`, off by
+//! default; docs/FORK.md). PhotoCraft's ArtCraft Launcher switch and the suite's `AI-MCP` flag are
+//! never read: [`mcp_flag`] and [`launcher_allows_agents`] are always false, and nothing here calls
+//! `craft::automation::agents::mcp_flag` or `launcher_allows`.
+//!
+//! The connection file and the link host are the framework's (`craft::automation::agents`): the
 //! app serves its control channel on loopback while agents may connect and publishes where in its
-//! settings folder, and `photocraft-cli mcp` ([`crate::live`]) reads that file on every tool call,
-//! so MCP client configurations never hold a port or a token. Adding PhotoCraft to MCP clients is
-//! the ArtCraft Launcher's job (one entry for every Craft app).
+//! settings folder, and `pigment-cli mcp` ([`crate::live`]) reads that file on every tool call, so
+//! MCP client configurations never hold a port or a token. Nothing here writes an MCP client's
+//! configuration.
 
 use std::path::Path;
 
@@ -24,11 +29,28 @@ pub fn read_integrations(dir: &Path) -> Integrations {
 /// The id the ArtCraft Launcher's app list names PhotoCraft by. Pigment never reads that list.
 pub const LAUNCHER_APP_ID: &str = "photocraft";
 
-/// Whether agents may use the open window now ([`agents::agents_allowed`]): with the suite's
-/// `AI-MCP` flag the launcher's switch, without it a Control Port saved in the preferences
-/// (`connect_agents`).
+/// The server name MCP clients list Pigment under (`serverInfo.name`).
+pub const SERVER_NAME: &str = "pigment";
+
+/// The suite's `AI-MCP` feature flag. Pigment reads no suite flags file (`ArtCraft/flags.toml`,
+/// `CRAFT_FLAGS`): always off, so PhotoCraft's launcher-switch mode never applies (docs/FORK.md).
+pub fn mcp_flag() -> bool {
+    false
+}
+
+/// The ArtCraft Launcher's switch. Pigment never reads the launcher's files (`craft-ai-agents`):
+/// always off. Pigment's own switch is Preferences › AI Integrations › Let AI apps use this
+/// window (`connectAgents`).
+pub fn launcher_allows_agents() -> bool {
+    false
+}
+
+/// Whether agents may use the open window now ([`agents::agents_allowed`] with Pigment's
+/// [`mcp_flag`] and [`launcher_allows_agents`], both off): Pigment's own preference alone,
+/// `connect_agents` (Let AI apps use this window, also set from a Control Port saved by an older
+/// version), off by default. Allow Agent Control off still refuses agents.
 pub fn agents_allowed_now(integrations: &Integrations) -> bool {
-    agents::agents_allowed(agents::mcp_flag(), agents::launcher_allows(LAUNCHER_APP_ID), integrations.connect_agents)
+    agents::agents_allowed(mcp_flag(), launcher_allows_agents(), integrations.connect_agents)
 }
 
 #[cfg(test)]
@@ -43,6 +65,22 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    #[test]
+    fn pigment_reads_neither_the_suite_flag_nor_the_launcher() {
+        assert!(!mcp_flag() && !launcher_allows_agents());
+        assert!(!agents_allowed_now(&Integrations::default()), "off by default");
+        assert!(agents_allowed_now(&Integrations { connect_agents: true, ..Default::default() }), "Pigment's own switch");
+        // The source never asks the framework for the suite flag or the launcher's list.
+        let src = include_str!("agent_link.rs");
+        let call = |name: &str| format!("agents::{name}(");
+        assert!(!src.contains(&call("mcp_flag")) && !src.contains(&call("launcher_allows")));
+    }
+
+    #[test]
+    fn mcp_clients_list_pigment_as_pigment() {
+        assert_eq!(SERVER_NAME, "pigment");
     }
 
     #[test]
