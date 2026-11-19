@@ -1,8 +1,9 @@
 use super::*;
+use photocraft_codecs::{ChannelLayout, EncodeOptions, Image};
 use photocraft_engine::Session;
 use photocraft_format::list_recovery;
 use photocraft_ui_egui::{PhotocraftApp, prefs_ui};
-use serde_json::{Value, json};
+use serde_json::json;
 
 /// #6607: a PSD/PSB save streams the file model into the temporary file, which then holds
 /// exactly the exported bytes; a serializer error halfway leaves the old file and no
@@ -39,73 +40,13 @@ fn a_psd_save_streams_the_exported_bytes_and_keeps_the_old_file_on_error() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// #6601: a chosen path whose name isn't valid Unicode is reported, never handed on lossily
-/// (Open would fail with "No such file", Save would write a second, renamed file).
-#[test]
-fn a_chosen_path_that_is_not_valid_unicode_is_an_error_not_another_name() {
-    #[cfg(unix)]
-    let bad = {
-        use std::os::unix::ffi::OsStrExt;
-        std::env::temp_dir().join(std::ffi::OsStr::from_bytes(b"img\xFF.png"))
-    };
-    #[cfg(windows)]
-    let bad = {
-        use std::os::windows::ffi::OsStringExt;
-        let mut wide: Vec<u16> = "img".encode_utf16().collect();
-        wide.push(0xD800);
-        wide.extend(".png".encode_utf16());
-        std::env::temp_dir().join(std::ffi::OsString::from_wide(&wide))
-    };
-    let good = std::env::temp_dir().join("ok.png");
-    let save = |path: &Path| answer_one(path, true, FileDialogAnswer::SaveTo);
-    assert!(matches!(save(&bad), FileDialogAnswer::Unavailable(e) if e.contains("not valid Unicode") && e.contains("another name")));
-    assert!(matches!(save(&good), FileDialogAnswer::SaveTo(p) if p == good.to_str().unwrap()));
-    let open = answer([good.as_path(), bad.as_path()], false, FileDialogAnswer::Paths);
-    assert!(matches!(open, FileDialogAnswer::Unavailable(e) if e.contains("open it again")));
-}
-
-/// #6121: the file type picked in the save dialog gives the name its extension where the
-/// dialog left the one it opened with, and only there.
-#[test]
-fn the_picked_file_type_gives_the_name_its_extension() {
-    let exts = |e: &[&str]| e.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-    let (png, psd) = (exts(&["png"]), exts(&["psd", "psb"]));
-    let opened = Some("Untitled-1.psd");
-    let cases = [
-        // PNG picked, the name as the dialog opened (or renamed, its extension kept).
-        ("/pics/Untitled-1.psd", opened, &png, "/pics/Untitled-1.png"),
-        ("/pics/art.psd", opened, &png, "/pics/art.png"),
-        ("/pics/ART.PSD", opened, &png, "/pics/ART.png"),
-        // No extension: the type's. One PhotoCraft doesn't save is part of the name.
-        ("/pics/art", opened, &png, "/pics/art.png"),
-        ("/pics/scan.2024", opened, &png, "/pics/scan.2024.png"),
-        // Typed, an extension PhotoCraft saves is the user's: kept, whatever the type says
-        // (the PSD type untouched, or PNG picked and .jpg typed).
-        ("/pics/art.png", opened, &psd, "/pics/art.png"),
-        ("/pics/art.jpg", opened, &png, "/pics/art.jpg"),
-        ("/pics/art.pcraft", opened, &png, "/pics/art.pcraft"),
-        // Already the type's: kept, including its other extensions.
-        ("/pics/art.png", opened, &png, "/pics/art.png"),
-        ("/pics/art.PNG", opened, &png, "/pics/art.PNG"),
-        ("/pics/big.psb", opened, &psd, "/pics/big.psb"),
-        // The dialog opened on a .pcraft: that is the extension the type replaces.
-        ("/pics/art.pcraft", Some("art.pcraft"), &png, "/pics/art.png"),
-        ("/pics/art.psd", Some("art.pcraft"), &png, "/pics/art.psd"),
-    ];
-    for (typed, opened, chosen, want) in cases {
-        assert_eq!(with_chosen_type(Path::new(typed), opened, chosen), PathBuf::from(want), "{typed} (opened {opened:?})");
-    }
-    // No type picked: the name as typed.
-    assert_eq!(with_chosen_type(Path::new("/pics/art.psd"), opened, &[]), PathBuf::from("/pics/art.psd"));
-}
-
 /// Regression using the real clipboard on an isolated Windows CI runner.
 #[cfg(target_os = "windows")]
 #[test]
 #[ignore = "requires exclusive use of the Windows clipboard"]
 fn busy_native_clipboard_preserves_copied_shape() {
     for id in ["edit.paste", "edit.pasteSpecial.pasteInPlace"] {
-        let mut native = native(None);
+        let mut native = native(None, craft::host::Wake::none());
         let services =
             Services { clipboard_set_image: native.clipboard_set_image.take(), clipboard_get_image: native.clipboard_get_image.take(), ..Default::default() };
         let mut app = PhotocraftApp::new(Session::new(), services);
@@ -147,6 +88,7 @@ fn busy_native_clipboard_preserves_copied_shape() {
     }
 }
 
+<<<<<<< ours
 #[cfg(all(unix, not(target_os = "macos")))]
 #[test]
 fn open_filters_cover_uppercase_and_mixed_case_extensions() {
@@ -225,6 +167,8 @@ fn native_services_provide_update_transport() {
     assert!(services.last_update.is_none());
 }
 
+=======
+>>>>>>> theirs
 #[test]
 fn xwayland_command_matches_how_photocraft_was_installed() {
     // Flatpak: WAYLAND_DISPLAY doesn't reach the sandbox's socket choice; flatpak's flags do.
@@ -242,6 +186,7 @@ fn xwayland_command_matches_how_photocraft_was_installed() {
     assert_eq!(xwayland_command(None, Some("/opt/p.AppImage"), false), None);
 }
 
+<<<<<<< ours
 /// Tests every native save dialog and records the suggested file name. Each name's file type must come first
 /// in the save panel, or the panel appends the first type's extension (`photo.webp.psd`, `photo.gif.psd`).
 #[test]
@@ -410,6 +355,8 @@ fn the_windows_save_dialog_gets_a_bare_name_so_the_type_picks_the_extension() {
     assert_eq!(dialog_file_name("", true), None);
 }
 
+=======
+>>>>>>> theirs
 /// A name in another letter case reaches the same file where the file system ignores case
 /// (Windows, and macOS by default), and only there. Two files with the same contents are two.
 #[test]
@@ -477,10 +424,10 @@ const GREEN: [f32; 4] = [0.0, 1.0, 0.0, 1.0];
 
 /// One app launch with crash recovery in `dir` (dropping it is the crash: background writes
 /// already queued finish, nothing else runs).
-fn launch(dir: &Path) -> PhotocraftApp {
+fn launch(dir: &Path) -> Box<PhotocraftApp> {
     let mut app = PhotocraftApp::new(Session::new(), recovery_services(Some(dir.to_path_buf())));
-    let ctx = egui::Context::default();
-    prefs_ui::tick(&mut app, &ctx);
+    let ctx = app.ctx().clone();
+    prefs_ui::tick(&mut app, &ctx, std::time::Instant::now());
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     while app.session.has_jobs() && std::time::Instant::now() < deadline {
         photocraft_ui_egui::jobs_ui::tick(&mut app, &ctx);
@@ -506,17 +453,17 @@ fn new_doc(app: &mut PhotocraftApp, color: &str) {
 
 fn autosave(app: &mut PhotocraftApp, ctx: &egui::Context) {
     prefs_ui::autosave_now(app);
-    prefs_ui::tick(app, ctx);
+    prefs_ui::tick(app, ctx, std::time::Instant::now());
 }
 
 #[test]
 fn recovered_documents_survive_a_second_crash_until_saved_or_closed() {
     let dir = std::env::temp_dir().join(format!("photocraft-recovery-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
-    let ctx = egui::Context::default();
     // Launch 1: two unsaved documents are autosaved, then the app crashes.
     {
         let mut app = launch(&dir);
+        let ctx = app.ctx().clone();
         new_doc(&mut app, "#ff0000");
         new_doc(&mut app, "#0000ff");
         autosave(&mut app, &ctx);
@@ -525,16 +472,18 @@ fn recovered_documents_survive_a_second_crash_until_saved_or_closed() {
     // Launch 2 recovers both and crashes again before its first autosave (#444).
     {
         let mut app = launch(&dir);
+        let ctx = app.ctx().clone();
         let mut docs = open_docs(&app);
         docs.sort_by(|a, b| a.0[0].total_cmp(&b.0[0]));
         assert_eq!(docs, [(BLUE, true), (RED, true)], "recovered and still unsaved");
-        prefs_ui::tick(&mut app, &ctx);
+        prefs_ui::tick(&mut app, &ctx, std::time::Instant::now());
     }
     assert_eq!(list_recovery(&dir).len(), 2, "recovering keeps the entries on disk");
     // Launch 3 has both again; autosaving unchanged documents adds nothing, a new document
     // (whose id may repeat one from an earlier launch) gets an entry of its own.
     {
         let mut app = launch(&dir);
+        let ctx = app.ctx().clone();
         assert_eq!(app.session.documents().len(), 2);
         autosave(&mut app, &ctx);
         new_doc(&mut app, "#00ff00");
@@ -543,6 +492,7 @@ fn recovered_documents_survive_a_second_crash_until_saved_or_closed() {
     assert_eq!(list_recovery(&dir).len(), 3);
     // Launch 4: closing and saving recovered documents removes their entries, no duplicates.
     let mut app = launch(&dir);
+    let ctx = app.ctx().clone();
     assert_eq!(app.session.documents().len(), 3);
     let red = index_of(&app, RED);
     app.run("file.close", json!({"document": red})).unwrap();
@@ -550,35 +500,44 @@ fn recovered_documents_survive_a_second_crash_until_saved_or_closed() {
     assert!(app.session.set_active(index_of(&app, BLUE)));
     let st = app.session.active_mut().unwrap();
     st.saved_revision = st.revision;
-    prefs_ui::tick(&mut app, &ctx);
+    prefs_ui::tick(&mut app, &ctx, std::time::Instant::now());
     let left = list_recovery(&dir);
     assert_eq!(left.len(), 1);
     assert_eq!(photocraft_compose::flatten(&photocraft_format::recover(&left[0]).unwrap()).px.first().copied(), Some(GREEN));
     let green = index_of(&app, GREEN);
     app.run("file.close", json!({"document": green})).unwrap();
-    prefs_ui::tick(&mut app, &ctx);
+    prefs_ui::tick(&mut app, &ctx, std::time::Instant::now());
     assert!(list_recovery(&dir).is_empty());
     drop(app);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A background autosave that fails reaches the status line, and the same revision is written at
+/// the next interval with no edit in between (not before it). Time moves only through the `now`
+/// each tick hands the autosave timer; ticks repeated at one `now` queue nothing new.
 #[test]
 fn failed_background_autosave_is_reported_and_retried_without_another_edit() {
     let dir = temp("autosave-retry");
     let recovery = dir.join("Recovery");
     // A regular file prevents creation of the recovery bundle directory.
     std::fs::write(&recovery, b"blocked").unwrap();
-    let ctx = egui::Context::default();
     let mut app = launch(&recovery);
+    let ctx = app.ctx().clone();
+    app.run("prefs.set", json!({"path": "fileHandling.autosaveMinutes", "value": 5})).unwrap();
     new_doc(&mut app, "#ff0000");
     let revision = app.session.active().unwrap().revision;
     assert_ne!(revision, 0, "a sidecar-less bundle lists as revision 0");
-    autosave(&mut app, &ctx);
+    let interval = std::time::Duration::from_secs(5 * 60);
+    // The changed interval restarts the clock at this tick; the next one at the interval writes.
+    let start = std::time::Instant::now();
+    prefs_ui::tick(&mut app, &ctx, start);
+    let first = start + interval;
+    prefs_ui::tick(&mut app, &ctx, first);
 
     let mut failed = false;
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
     while std::time::Instant::now() < deadline {
-        prefs_ui::tick(&mut app, &ctx);
+        prefs_ui::tick(&mut app, &ctx, first);
         if app.ui.status.starts_with("Autosave failed:") {
             failed = true;
             break;
@@ -589,10 +548,15 @@ fn failed_background_autosave_is_reported_and_retried_without_another_edit() {
     assert!(app.ui.status_error);
     assert!(list_recovery(&recovery).is_empty());
 
-    // No edit occurs: retrying this very same revision must still work.
+    // No edit occurs. Before the next interval nothing is written, even with the folder back.
     std::fs::remove_file(&recovery).unwrap();
     std::fs::create_dir(&recovery).unwrap();
-    autosave(&mut app, &ctx);
+    prefs_ui::tick(&mut app, &ctx, first + interval / 2);
+    let queued = app.services.flush_autosaves.as_mut().unwrap()();
+    assert!(queued.is_empty() && list_recovery(&recovery).is_empty(), "retried before the interval: {queued:?}");
+    // At the next interval the very same revision is written.
+    let second = first + interval;
+    prefs_ui::tick(&mut app, &ctx, second);
     // The worker commits the bundle's manifest before it publishes the sidecar, and
     // `list_recovery` lists a committed sidecar-less bundle (revision 0) on its own, so
     // the first non-empty listing can come from the middle of the write. Wait for the write
@@ -600,7 +564,7 @@ fn failed_background_autosave_is_reported_and_retried_without_another_edit() {
     let mut recovered = Vec::new();
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
     while std::time::Instant::now() < deadline {
-        prefs_ui::tick(&mut app, &ctx);
+        prefs_ui::tick(&mut app, &ctx, second);
         recovered = list_recovery(&recovery);
         if recovered.iter().any(|e| e.info.revision == revision) {
             break;
@@ -911,7 +875,7 @@ fn paste_turns_svg_text_on_the_clipboard_into_a_layer() {
         ..Default::default()
     };
     let mut app = PhotocraftApp::new(Session::new(), services);
-    let ctx = egui::Context::default();
+    let ctx = app.ctx().clone();
     app.run("file.new", json!({"width": 300, "height": 200})).unwrap();
     let layers = app.session.active().unwrap().doc.layers.len();
     let r = photocraft_ui_egui::menus::invoke(&mut app, &ctx, "edit.paste", json!({})).unwrap();
@@ -971,6 +935,7 @@ fn tiff_options_reach_the_written_file() {
     assert_eq!(info.pages.iter().map(|p| (p.width, p.compression)).collect::<Vec<_>>(), [(200, 5), (100, 5), (50, 5)]);
     assert!(!photocraft_codecs::decode(&bytes).unwrap().layout().has_alpha());
 }
+<<<<<<< ours
 
 /// PSB is a save type of its own: it shows in the list, and the type gives a typed name its
 /// extension. As an extension of the PSD type it was hidden, and KDE's dialog, which adds the
@@ -1008,3 +973,5 @@ fn save_types_list_the_document_formats_then_the_rest_by_name() {
     let formats = names.iter().position(|name| *name == "Brushes").expect("the app's own resources");
     assert!(names[2..formats].is_sorted_by_key(key), "{:?}", &names[2..formats]);
 }
+=======
+>>>>>>> theirs

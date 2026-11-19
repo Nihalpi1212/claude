@@ -1,19 +1,19 @@
-//! Native platform services: file dialogs (rfd), filesystem, codecs.
+//! Native platform services: filesystem, codecs, clipboard, crash recovery, the settings store and
+//! the file panels.
 
-use photocraft_codecs::{ChannelLayout, EncodeOptions, Image};
 use photocraft_doc::Document;
 use photocraft_format::RecoveryStore;
-use photocraft_ui_egui::{FileDialogAnswer, FileDialogReply, FileDialogRequest, Recoverable, Services};
+use photocraft_ui_egui::{Recoverable, Services};
 use std::cell::{Cell, RefCell};
 use std::future::Future;
 use std::path::{Path, PathBuf};
-use std::pin::Pin;
 use std::rc::Rc;
 use std::sync::Arc;
 
 #[cfg(test)]
 mod recovery_tests;
 
+<<<<<<< ours
 /// Everything File › Open reads: PhotoCraft, Photoshop, OpenRaster, Krita and Affinity documents, flat images, and
 /// Photoshop brushes (.abr), gradients (.grd), layer styles (.asl), swatches (.aco, .act, .ase) and keyboard shortcut sets
 /// (.kys), which go to the preset libraries and Edit › Keyboard Shortcuts.
@@ -333,6 +333,8 @@ fn answer_one(path: &Path, saving: bool, make: impl FnOnce(String) -> FileDialog
     }
 }
 
+=======
+>>>>>>> theirs
 /// Runs `future` to completion on this thread, sleeping until it is woken.
 pub(crate) fn block_on<T>(future: impl Future<Output = T>) -> T {
     struct Unpark(std::thread::Thread);
@@ -360,8 +362,16 @@ pub fn config_dir() -> Option<PathBuf> {
     crate::app_dirs::config_dir()
 }
 
-pub fn prefs_file() -> Option<PathBuf> {
-    config_dir().map(|d| d.join("preferences.json"))
+/// The preferences store in [`config_dir`] (in memory when there is none), importing the older
+/// `preferences.json` on the first run (`photocraft_engine::prefs::store_options`).
+fn settings_store() -> (craft::settings::SettingsStore<photocraft_engine::prefs::SavedPrefs>, craft::settings::LoadReport) {
+    craft::settings::SettingsStore::open_with(photocraft_engine::prefs::store_options(config_dir().as_deref()))
+}
+
+/// The preferences [`settings_store`] would load, read without opening it: the launch reads
+/// before the window opens.
+pub fn saved_prefs() -> photocraft_engine::prefs::SavedPrefs {
+    photocraft_engine::prefs::read_saved(config_dir().as_deref())
 }
 
 fn gpu_memo_file() -> Option<PathBuf> {
@@ -761,7 +771,21 @@ pub fn automation(workspace: Option<photocraft_automation::AuthorizedWorkspace>)
     photocraft_ui_egui::AutomationServices { read, write, open_pcraft, save, command, authorize }
 }
 
-pub fn native(automation: Option<photocraft_automation::AuthorizedWorkspace>) -> Services {
+/// What agent requests may read, write and run with the agent settings' folders
+/// (`Services::agent_automation`): the automation policy always, and without folders no file
+/// access. A folder that can't be opened, or isn't an absolute path, is left out (that direction
+/// fails closed) and named, as at launch.
+pub fn agent_automation(settings: &craft::automation::agents::AgentSettings) -> (photocraft_ui_egui::AutomationServices, Option<String>) {
+    let no_flags = photocraft_automation::args::AutomationArgs { automation_read_root: Vec::new(), automation_write_root: None };
+    match crate::automation_workspace(&no_flags, settings) {
+        Ok((workspace, warning)) => (automation(Some(workspace)), warning.map(|w| format!("Agents can connect, but without file access there: {w}"))),
+        Err(e) => (automation(Some(photocraft_automation::AuthorizedWorkspace::default())), Some(format!("Agents can connect, but without file access: {e}"))),
+    }
+}
+
+/// Every native service. `wake` requests a repaint from any thread; the file panels answer through it.
+pub fn native(automation: Option<photocraft_automation::AuthorizedWorkspace>, wake: craft::dialogs::Wake) -> Services {
+    let (files, file_panels) = craft::dialogs::service::FileService::new(wake);
     let clip: Rc<RefCell<Option<arboard::Clipboard>>> = Rc::default();
     let clip_unreadable: Rc<Cell<bool>> = Rc::default();
     let automation = self::automation(automation);
@@ -776,7 +800,9 @@ pub fn native(automation: Option<photocraft_automation::AuthorizedWorkspace>) ->
             crate::crash_guard::guard("Export", || photocraft_io::export(doc, path, &opts).map(|r| (r.bytes, r.warnings)).map_err(|e| e.to_string()))
         })),
         save_file: Some(Arc::new(save_file)),
-        file_dialog: Some(Box::new(show_file_dialog)),
+        files: Some(Arc::new(files)),
+        file_panels: Some(file_panels),
+        settings: Some(settings_store()),
         write: Some(Box::new(|path: &str, bytes: &[u8]| write_atomic(Path::new(path), bytes))),
         file_stamp: Some(Box::new(|path: &str| {
             // Follows a symlink, as Save writes through it to the file it points at.
@@ -790,17 +816,16 @@ pub fn native(automation: Option<photocraft_automation::AuthorizedWorkspace>) ->
         automation_save: automation.save,
         automation_command: automation.command,
         automation_authorize: automation.authorize,
-        encode_png: Some(Box::new(|w, h, rgba| {
-            let img = Image::from_u8(w, h, ChannelLayout::Rgba, rgba.to_vec()).map_err(|e| e.to_string())?;
-            photocraft_codecs::encode(&img, photocraft_codecs::Format::Png, &EncodeOptions::default()).map_err(|e| e.to_string())
-        })),
         inbox: None,
         open_url: Some(Box::new(|url: &str| open::that(url).map_err(|e| e.to_string()))),
         beep: Some(platform_beep),
+<<<<<<< ours
         // Pigment makes no network request on its own (docs/FORK.md): no update check, and no
         // self-update to report. Help › Check for Updates opens the releases page instead.
         check_updates: None,
         last_update: None,
+=======
+>>>>>>> theirs
         clipboard_set_image: Some({
             let clip = clip.clone();
             guarded_clipboard_set(move |w: u32, h: u32, px: &[u8]| {
@@ -861,9 +886,7 @@ pub fn native(automation: Option<photocraft_automation::AuthorizedWorkspace>) ->
             })
         }),
         clipboard_unreadable: Some(Box::new(move || clip_unreadable.get())),
-        load_prefs: Some(Box::new(|| std::fs::read_to_string(prefs_file()?).ok())),
         photoshop_shortcuts: Some(Box::new(|| crate::photoshop_settings::live_keyboard_shortcuts(&|k| std::env::var_os(k)))),
-        save_prefs: Some(Box::new(|text: &str| write_atomic(&prefs_file().ok_or("no config directory")?, text.as_bytes()))),
         load_gpu_memo: Some(Box::new(load_gpu_memo_text)),
         save_gpu_memo: Some(Box::new(|text: &str| {
             if text.len() > photocraft_ui_egui::gpu_memo::MAX_GPU_MEMO_BYTES {
@@ -872,7 +895,6 @@ pub fn native(automation: Option<photocraft_automation::AuthorizedWorkspace>) ->
             write_atomic(&gpu_memo_file().ok_or("no config directory")?, text.as_bytes())
         })),
         shader_compiler: Some(shader_compiler_identity()),
-        system_theme: crate::appearance::service(),
         append_text: Some(Box::new(|path: &str, text: &str| {
             use std::io::Write;
             let mut f = std::fs::OpenOptions::new().create(true).append(true).open(path).map_err(|e| e.to_string())?;

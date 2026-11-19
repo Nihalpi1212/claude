@@ -1,52 +1,63 @@
+<<<<<<< ours
 //! Preferences › AI Integrations: whether agents can use the open app (Pigment's own switch,
 //! `connectAgents`; PhotoCraft leaves it to the ArtCraft Launcher, which Pigment never reads), the
 //! port, the folders agents may use, and what `pigment-cli mcp` does while the app is closed.
 //! Changes apply at once, without a restart. See docs/FORK.md.
+=======
+//! Agents in the open window: the agent link follows Preferences › Integrations and the ArtCraft
+//! Launcher's switch without a restart. The link, the switch and the Agents page are the
+//! framework's (`craft::automation::agents`, `custom_rows::AGENTS_PAGE`); PhotoCraft supplies what
+//! agent requests may read, write and run (`Services::agent_automation`).
+>>>>>>> theirs
 
-use super::dialogs::is_preferences;
-use super::fields::{choice_label, humanize};
-use super::{Map, PhotocraftApp, RichText, Tokens, Value, json, prefs};
+use craft::automation::agents::LinkProblem;
+use craft::automation::control::ControlChannel;
+use craft::ui::runtime::windows::WindowHost;
 
-/// Seconds between tries while the agent connection is on but couldn't start (its port taken).
-pub(super) const AGENT_LINK_RETRY_S: f64 = 5.0;
+use super::PhotocraftApp;
+use crate::AutomationServices;
 
+<<<<<<< ours
 /// Start, move or stop the agent connection when its settings change
 /// ([`crate::Services::agent_link`]); the first frame applies the saved settings. A connection
 /// that is on but failed to start is tried again every [`AGENT_LINK_RETRY_S`], so freeing its
 /// port is enough, without touching a setting. In Pigment `connectAgents` decides (its own switch,
 /// also set from a saved Control Port when the preferences load); PhotoCraft's `AI-MCP` flag and
 /// ArtCraft Launcher switch ([`crate::Services::launcher_agents`]) are never read there.
+=======
+/// Brings the agent link in line with the saved agent settings and the launcher's switch: the link
+/// starts, moves or stops its control server, and does nothing while neither changed. With the
+/// suite's `AI-MCP` flag the launcher's switch alone lets agents in; without it a Control Port
+/// saved before the switch (`connect_agents`). While the server runs, agent requests get the
+/// automation policy over the folders chosen; a folder that can't be used is named on the page.
+>>>>>>> theirs
 pub(super) fn sync_agent_link(app: &mut PhotocraftApp, ctx: &egui::Context) {
-    let launcher = app.services.launcher_agents.as_ref().is_some_and(|on| on());
-    let mcp_flag = app.agent_link.mcp_flag;
+    let integrations = app.session.prefs().integrations.clone();
+    let legacy = integrations.connect_agents;
+    let allowed = app.services.agent_switch.as_ref().map_or(legacy, |switch| switch.allows(legacy));
     let Some(link) = app.services.agent_link.as_mut() else { return };
-    let mut effective = app.session.prefs().integrations.clone();
-    if mcp_flag {
-        effective.connect_agents = launcher;
+    let update = link.sync(allowed.then_some(&integrations.agents), &WindowHost::of(ctx));
+    if update.stopped {
+        app.control = None;
     }
-    let current = &effective;
-    let now = crate::gpu_canvas::now_ms() / 1000.0;
-    let retry_due = app.prefs_rt.agent_link_retry.is_some_and(|at| now >= at);
-    if app.prefs_rt.agent_link.as_ref() == Some(current) && !retry_due {
+    if let Some(requests) = update.requests {
+        app.control = Some(ControlChannel::new(requests));
+    }
+    if !update.changed {
         return;
     }
-    let update = link(current, ctx);
-    let failed_start = current.connect_agents && current.allow_agent_control && update.status.port.is_none();
-    app.prefs_rt.agent_link = Some(current.clone());
-    app.prefs_rt.agent_link_retry = failed_start.then_some(now + AGENT_LINK_RETRY_S);
-    if failed_start {
-        ctx.request_repaint_after(std::time::Duration::from_secs_f64(AGENT_LINK_RETRY_S));
+    let (automation, problem) = match app.services.agent_automation.as_ref() {
+        Some(policy) if link.status().port.is_some() => policy(&integrations.agents),
+        _ => (AutomationServices::default(), None),
+    };
+    if let Some(problem) = problem {
+        link.note(LinkProblem::App(problem));
     }
-    if update.stopped {
-        app.control_rx = None;
-    }
-    if let Some(rx) = update.requests {
-        app.control_rx = Some(rx);
-    }
-    app.services.set_automation(update.automation);
+    app.services.set_automation(automation);
     // Actions automation records keep the policy as their gate when the user plays them, as they
     // do with `--control` (`PhotocraftApp::new`); the gate stays once agents have connected.
     app.session.automation_gate = app.session.automation_gate.or(app.services.automation_authorize);
+<<<<<<< ours
     // The service reports the connection; the feature flag is the app's, set once at launch.
     app.agent_link = update.status;
     app.agent_link.mcp_flag = mcp_flag;
@@ -148,4 +159,6 @@ pub(super) fn agent_action(app: &mut PhotocraftApp, f: &mut Map<String, Value>, 
             f.insert("__agentResult".into(), json!({"ok": false, "message": e}));
         }
     }
+=======
+>>>>>>> theirs
 }

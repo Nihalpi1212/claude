@@ -1,3 +1,4 @@
+<<<<<<< ours
 //! Connecting AI agents to the open desktop app: whether the person lets them (Pigment's own
 //! switch, Preferences › AI Integrations, [`agents_allowed`]; PhotoCraft's ArtCraft Launcher
 //! switch is never read), and how a local client finds the app's control server without being
@@ -20,15 +21,22 @@
 //! The app starts and stops that server at once when the switch changes. `photocraft-cli mcp`
 //! ([`crate::live`]) reads the connection file on every tool call, so MCP client configurations
 //! never hold a port or a token, and keep working when the app restarts on another port.
+=======
+//! PhotoCraft's side of agents in the open desktop app: its agent settings as `photocraft-cli mcp`
+//! reads them from the saved preferences, and whether the person lets agents in now. The switch,
+//! the connection file and the link host are the framework's (`craft::automation::agents`): the
+//! app serves its control channel on loopback while agents may connect and publishes where in its
+//! settings folder, and `photocraft-cli mcp` ([`crate::live`]) reads that file on every tool call,
+//! so MCP client configurations never hold a port or a token. Adding PhotoCraft to MCP clients is
+//! the ArtCraft Launcher's job (one entry for every Craft app).
+>>>>>>> theirs
 
-use std::net::{SocketAddr, TcpStream};
-use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::path::Path;
 
+use craft::automation::agents;
 use photocraft_engine::prefs::Integrations;
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
+<<<<<<< ours
 use crate::AutomationError;
 
 /// The connection file in the settings folder, present while the app accepts agents.
@@ -170,14 +178,14 @@ fn read_small(path: &Path) -> Result<Option<String>, AutomationError> {
 
 /// The MCP preferences saved in `dir/preferences.json` (defaults when the file or
 /// the section is missing or unreadable: the CLI must not fail over the app's settings).
+=======
+/// The MCP preferences saved in `dir`, read as the app's settings store loads them
+/// (`photocraft_engine::prefs::read_saved`: `config.toml`, or before it the older
+/// `preferences.json`). Defaults when nothing is saved or the file is unreadable: the CLI must not
+/// fail over the app's settings.
+>>>>>>> theirs
 pub fn read_integrations(dir: &Path) -> Integrations {
-    read_small(&dir.join("preferences.json"))
-        .ok()
-        .flatten()
-        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
-        .and_then(|v| v.get("integrations").cloned())
-        .map(photocraft_engine::prefs::read_integrations_section)
-        .unwrap_or_default()
+    photocraft_engine::prefs::read_saved(Some(dir)).prefs.integrations
 }
 
 // ---- The agents switch -------------------------------------------------------------------------
@@ -185,6 +193,7 @@ pub fn read_integrations(dir: &Path) -> Integrations {
 /// The id the ArtCraft Launcher's app list names PhotoCraft by. Pigment never reads that list.
 pub const LAUNCHER_APP_ID: &str = "photocraft";
 
+<<<<<<< ours
 /// The suite's `AI-MCP` feature flag. Pigment reads no suite flags file (`ArtCraft/flags.toml`,
 /// `CRAFT_FLAGS`): always off, so PhotoCraft's launcher-switch mode never applies (docs/FORK.md).
 pub fn mcp_flag() -> bool {
@@ -209,11 +218,19 @@ pub fn agents_allowed(integrations: &Integrations, mcp_flag: bool, launcher: boo
 /// [`agents_allowed`] for this run: Pigment's preference alone.
 pub fn agents_allowed_now(integrations: &Integrations) -> bool {
     agents_allowed(integrations, mcp_flag(), launcher_allows_agents())
+=======
+/// Whether agents may use the open window now ([`agents::agents_allowed`]): with the suite's
+/// `AI-MCP` flag the launcher's switch, without it a Control Port saved in the preferences
+/// (`connect_agents`).
+pub fn agents_allowed_now(integrations: &Integrations) -> bool {
+    agents::agents_allowed(agents::mcp_flag(), agents::launcher_allows(LAUNCHER_APP_ID), integrations.connect_agents)
+>>>>>>> theirs
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     fn temp(tag: &str) -> PathBuf {
@@ -225,6 +242,7 @@ mod tests {
     }
 
     #[test]
+<<<<<<< ours
     fn pigment_reads_neither_the_suite_flag_nor_the_launcher() {
         assert!(!mcp_flag() && !launcher_allows_agents());
         assert!(!agents_allowed_now(&Integrations::default()), "off by default");
@@ -281,6 +299,8 @@ mod tests {
     }
 
     #[test]
+=======
+>>>>>>> theirs
     fn integrations_come_from_the_saved_preferences_or_default() {
         let dir = temp("prefs");
         assert_eq!(read_integrations(&dir), Integrations::default());
@@ -296,10 +316,9 @@ mod tests {
         .unwrap();
         let i = read_integrations(&dir);
         assert!(i.connect_agents);
-        assert_eq!(i.when_app_closed, photocraft_engine::prefs::WhenAppClosed::Headless);
-        assert_eq!(folder(&i.read_root), Some(PathBuf::from("/in")));
-        assert_eq!(folder(&i.write_root), None);
-        assert_eq!(folder("  "), None);
+        assert_eq!(i.agents.when_app_closed, photocraft_engine::prefs::WhenAppClosed::Headless);
+        assert_eq!(i.agents.read_folder(), Some(PathBuf::from("/in")));
+        assert_eq!(i.agents.write_folder(), None);
         // A Control Port saved before the agents switch reads as on, as the app reads it.
         std::fs::write(dir.join("preferences.json"), r#"{"integrations": {"controlPort": 7878}}"#).unwrap();
         assert!(read_integrations(&dir).connect_agents);
@@ -307,87 +326,7 @@ mod tests {
         assert!(!read_integrations(&dir).connect_agents);
         // One bad value resets only itself, as in the app: the saved closed-app choice stays.
         std::fs::write(dir.join("preferences.json"), r#"{"integrations": {"whenAppClosed": "error", "readRoot": 5}}"#).unwrap();
-        assert_eq!(read_integrations(&dir).when_app_closed, photocraft_engine::prefs::WhenAppClosed::Error);
+        assert_eq!(read_integrations(&dir).agents.when_app_closed, photocraft_engine::prefs::WhenAppClosed::Error);
         let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn a_published_connection_reads_back_in_the_documented_shape() {
-        let dir = temp("conn");
-        let c = Connection::new(7878, dir.join(TOKEN_FILE));
-        write_connection(&dir, &c).unwrap();
-        assert_eq!(read_connection(&dir).unwrap(), Some(c.clone()));
-        let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(dir.join(CONNECTION_FILE)).unwrap()).unwrap();
-        let mut keys: Vec<_> = v.as_object().unwrap().keys().cloned().collect();
-        keys.sort();
-        assert_eq!(keys, ["app", "pid", "port", "tokenFile", "version"]);
-        assert_eq!((v["version"].as_u64(), v["port"].as_u64()), (Some(1), Some(7878)));
-        assert_eq!(c.addr(), "127.0.0.1:7878");
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn other_versions_garbage_and_port_zero_read_as_none() {
-        let dir = temp("conn");
-        assert_eq!(read_connection(&dir).unwrap(), None, "no file");
-        for text in [
-            &b"{not json"[..],
-            br#"{"version":2,"pid":1,"port":7878,"tokenFile":"t","app":"x"}"#,
-            br#"{"version":1,"pid":1,"port":0,"tokenFile":"t","app":"x"}"#,
-            b"\xff\xfe not utf-8",
-        ] {
-            std::fs::write(dir.join(CONNECTION_FILE), text).unwrap();
-            assert_eq!(read_connection(&dir).unwrap(), None, "{}", String::from_utf8_lossy(text));
-        }
-        std::fs::remove_file(dir.join(CONNECTION_FILE)).unwrap();
-        // Not a regular file: an error (and `remove_stale_connection` leaves it), never a read
-        // that could block on a FIFO.
-        std::fs::create_dir(dir.join(CONNECTION_FILE)).unwrap();
-        assert!(read_connection(&dir).is_err());
-        remove_stale_connection(&dir);
-        assert!(dir.join(CONNECTION_FILE).is_dir());
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn only_the_publishing_process_removes_its_file() {
-        let dir = temp("conn");
-        let c = Connection { pid: 1, ..Connection::new(7878, dir.join(TOKEN_FILE)) };
-        write_connection(&dir, &c).unwrap();
-        remove_connection(&dir, 2);
-        assert!(dir.join(CONNECTION_FILE).is_file(), "another process's file stays");
-        remove_connection(&dir, 1);
-        assert!(!dir.join(CONNECTION_FILE).exists());
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn a_stale_file_is_removed_and_a_live_one_kept() {
-        let dir = temp("conn");
-        let live = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let live_port = live.local_addr().unwrap().port();
-        write_connection(&dir, &Connection { pid: 1, ..Connection::new(live_port, dir.join(TOKEN_FILE)) }).unwrap();
-        remove_stale_connection(&dir);
-        assert!(dir.join(CONNECTION_FILE).is_file(), "something listens on {live_port}");
-        drop(live);
-        // A port nothing listens on: bind one, then close it.
-        let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
-        write_connection(&dir, &Connection { pid: 1, ..Connection::new(closed, dir.join(TOKEN_FILE)) }).unwrap();
-        remove_stale_connection(&dir);
-        assert!(!dir.join(CONNECTION_FILE).exists(), "nothing listens on {closed}");
-        for text in [&b"{not json"[..], b"\xff\xfe not utf-8"] {
-            std::fs::write(dir.join(CONNECTION_FILE), text).unwrap();
-            remove_stale_connection(&dir);
-            assert!(!dir.join(CONNECTION_FILE).exists(), "an unreadable file is not a connection");
-        }
-        remove_stale_connection(&dir);
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn folder_preferences_are_trimmed_and_empty_means_none() {
-        assert_eq!(folder(""), None);
-        assert_eq!(folder("   "), None);
-        assert_eq!(folder(" /work/project "), Some(PathBuf::from("/work/project")));
     }
 }

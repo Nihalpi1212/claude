@@ -1,13 +1,17 @@
-use super::{PhotocraftApp, Sense, Tokens, icons, theme, vec2, widgets};
+use craft::ui::contract::Show as _;
+use craft::ui::shell::{Title, TitleBar};
+
+use super::{PhotocraftApp, brand};
 
 // ----------------------------------------------------------------------------- title bar
 
-/// The app's top bar: brand mark, menus, the document title and the workspace controls. With
-/// [`PhotocraftApp::custom_titlebar`] (Windows and Linux) it is also the window's title bar, as in
-/// Photoshop on Windows: the caption buttons take its ends (`titlebar`). With the system
-/// title bar (Windows and Linux, `system_title_bar`) the OS draws its own icon and title, so the
-/// in-app bar shows menus and workspace controls only: no brand mark, no centred title.
+/// The app's top bar, in the shell's title slot: brand mark, menus and the document title. Nothing else sits at its
+/// far end, as in the reference application: the workspace switcher, command search and appearance mode live in
+/// Window › Workspace, Edit › Search and Window › Appearance (#13577).
+/// The framework `TitleBar` follows the window's frame: with the app's own frame (Windows and Linux) it is also the
+/// window's title bar and the caption buttons take its ends; with the system's frame it shows the content and no title.
 pub fn title_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
+<<<<<<< ours
     let t = Tokens::get(ui.ctx());
     let custom = app.custom_titlebar;
     let system = system_title_bar(app);
@@ -146,22 +150,36 @@ pub fn title_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 let g = ui.painter().layout_job(job);
                 let x = if rtl { free.1 - TITLE_GAP - g.size().x } else { free.0 + TITLE_GAP };
                 ui.painter().galley(egui::pos2(x, full.center().y - g.size().y / 2.0), g, t.text_dim);
+=======
+    let title = title_text(app);
+    let out = TitleBar::new().show_titled(
+        ui,
+        Title::new(title),
+        |ui, _| {
+            brand::mark().show(ui);
+            // With the macOS menu bar the menus are at the top of the screen instead.
+            if app.services.native_menu.is_none() {
+                crate::menus::menu_bar(app, ui);
+>>>>>>> theirs
             }
-        });
-    // A click anywhere on the bar keeps a zoom being typed (zoom_field.rs).
-    crate::zoom_field::set_title_bar_rect(ui.ctx(), bar.response.rect);
-    if custom {
-        crate::titlebar::caption_buttons(app, ui, bar.response.rect);
+        },
+        |_, _| {},
+    );
+    // The bar never closes the window: File › Exit asks about unsaved work first.
+    if out.close_requested {
+        let _ = crate::menus::invoke(app, ui.ctx(), "file.exit", serde_json::json!({}));
     }
 }
 
-/// Whether the window shows the system's title bar instead of the app drawing its own: Windows
-/// and Linux with Preferences › Interface › System Title Bar. macOS always has system decorations,
-/// but keeps the in-app brand mark and centred title, so it never counts as system mode here; nor
-/// does the web build (the browser tab has no document title), nor an embedder or the snapshot
-/// example that never turned the preference on.
-pub fn system_title_bar(app: &PhotocraftApp) -> bool {
-    !app.custom_titlebar && app.session.prefs().interface.system_title_bar && !cfg!(any(target_os = "macos", target_arch = "wasm32"))
+/// The title the bar shows: the active document's name with a dot when it has unsaved changes, or the app name with
+/// no document open. With Preferences › Interface › Show File Name In Title off, the file name drops out and the app
+/// name (and the dot) remains, since the tabs already name the file (#5037).
+pub(crate) fn title_text(app: &PhotocraftApp) -> String {
+    let show_name = app.session.prefs().interface.show_file_name_in_title;
+    app.session
+        .active()
+        .map(|d| format!("{}{}", if show_name { d.doc.name.as_str() } else { "PhotoCraft" }, if d.is_dirty() { "  •" } else { "" }))
+        .unwrap_or_else(|| "PhotoCraft".into())
 }
 
 /// The OS window title: the active document's name suffixed with the app name (a `*` prefix
@@ -175,42 +193,5 @@ pub fn window_title(app: &PhotocraftApp) -> String {
     app.session.active().map(|d| format!("{}{} \u{2014} Pigment", if d.is_dirty() { "*" } else { "" }, d.doc.name)).unwrap_or_else(|| "Pigment".into())
 }
 
-/// Keep the OS window title (and the taskbar / Alt-Tab entry) on the active file. Sends
-/// `ViewportCommand::Title` only when the title changed since the last frame.
-pub fn sync_window_title(app: &mut PhotocraftApp, ctx: &egui::Context) {
-    let want = window_title(app);
-    if app.last_window_title != want {
-        app.last_window_title = want.clone();
-        ctx.send_viewport_cmd(egui::ViewportCommand::Title(want));
-    }
-}
-
-/// The in-app title line. It reads left to right as a whole, so a right-to-left document name keeps
-/// "— PhotoCraft" after it, at the right; egui orders the name's own words.
-pub(crate) fn title_job(title: &str, font: egui::FontId, color: egui::Color32) -> egui::text::LayoutJob {
-    let mut job = egui::text::LayoutJob::simple_singleline(title.to_owned(), font, color);
-    job.direction = egui::epaint::text::TextDirection::LeftToRight;
-    job
-}
-
-/// Minimum space kept between the window title and the menus or controls beside it.
-const TITLE_GAP: f32 = 16.0;
-
-/// The workspace switcher's narrowest width, and one 28 pt title-bar icon with its spacing.
-const WORKSPACE_MIN: f32 = 90.0;
-
-const ICON_SLOT: f32 = 34.0;
-
-/// Left edge for a title `width` wide: centred on `center` when it fits in the free gap from
-/// `left` to `right` (the menus' and the controls' facing edges, whichever side each is on),
-/// else slid into that gap; None when the gap is too small for the whole title.
-pub(super) fn title_x(center: f32, left: f32, right: f32, width: f32) -> Option<f32> {
-    let (lo, hi) = (left + TITLE_GAP, right - TITLE_GAP - width);
-    if !(lo.is_finite() && hi.is_finite() && width.is_finite()) || hi < lo {
-        return None;
-    }
-    if !center.is_finite() {
-        return Some(lo);
-    }
-    Some((center - width / 2.0).clamp(lo, hi))
-}
+#[cfg(test)]
+mod tests;

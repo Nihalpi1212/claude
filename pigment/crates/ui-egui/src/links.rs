@@ -43,6 +43,7 @@ pub fn open(app: &mut PhotocraftApp, ctx: &egui::Context, url: &str) -> Value {
     json!({"url": url})
 }
 
+<<<<<<< ours
 /// The About window's credit line: what Pigment is based on, and its licence.
 pub fn credit(ui: &mut egui::Ui) {
     let t = crate::theme::Tokens::get(ui.ctx());
@@ -84,6 +85,8 @@ pub fn link_row(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     }
 }
 
+=======
+>>>>>>> theirs
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -103,7 +106,7 @@ mod tests {
             ..Default::default()
         };
         let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), services);
-        let ctx = egui::Context::default();
+        let ctx = app.ctx().clone();
         // Every Help-menu link id reaches the service with its URL.
         for (id, url) in COMMANDS {
             crate::menus::invoke(&mut app, &ctx, id, json!({})).unwrap();
@@ -113,6 +116,7 @@ mod tests {
         open(&mut app, &ctx, ISSUES);
         assert_eq!(opened.lock().unwrap().last().map(String::as_str), Some(ISSUES));
     }
+<<<<<<< ours
 
     #[test]
     fn help_menu_lists_links_then_separator_then_system_info_and_about() {
@@ -155,4 +159,6 @@ mod tests {
             assert_eq!(app.ui.status, format!("Opened {url}"));
         }
     }
+=======
+>>>>>>> theirs
 }

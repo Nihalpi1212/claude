@@ -1,34 +1,85 @@
-use super::appearance::{AppearanceRows, appearance_rows, system_theme};
-use super::dialogs::{mismatch_body, presets_body, presets_io_body, settings_height};
-use super::graphics::{gpu_memory_lines, gpu_status_rows, memory_usage_row, read_at_launch, rendering_mode_row};
-use super::shortcuts::shortcuts_body;
-use super::{Color32, Map, PhotocraftApp, RichText, SECTIONS, Sense, Tokens, Value, json, prefs, vec2};
+//! The Preferences window's settings struct and rules: which engine preferences the window edits, and what each
+//! row looks like beyond its type.
 
-// ------------------------------------------------------------------ bodies
+use std::collections::BTreeMap;
 
-/// Render one of our dialogs' bodies (`id`: the dialog's, for answers that arrive later).
-pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Value>, id: u64) {
-    match f.get("__prefsui").and_then(Value::as_str).unwrap_or("") {
-        "prefs" => {
-            let mut info = app.perf.gpu_info.lines();
-            info.extend(gpu_memory_lines(app));
-            f.insert("__gpuInfo".into(), json!(info));
-            f.insert("__gpuAdapters".into(), json!(app.perf.gpu_info.adapters));
-            f.insert("__agentLink".into(), serde_json::to_value(&app.agent_link).unwrap_or(Value::Null));
-            let system = system_theme(app, ui.ctx());
-            prefs_body(ui, f, system);
-            if let Some(action) = f.remove("__agentAction").and_then(|a| a.as_str().map(str::to_string)) {
-                super::agents::agent_action(app, f, &action, id);
+use craft::ui::patterns::preferences::SettingRule;
+use photocraft_engine::prefs::{self, SECTIONS};
+use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
+
+/// The engine's editable preference pages, by their serde names: the settings struct the window's document is
+/// built over. The engine's other preference fields (shortcuts, layouts, remembered dialogs) are not Preferences
+/// pages and stay out of the document.
+#[derive(Serialize, Deserialize, Default, Clone, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub(super) struct PrefPages {
+    general: prefs::General,
+    interface: prefs::Interface,
+    workspace: prefs::Workspace,
+    tools: prefs::Tools,
+    history_log: prefs::HistoryLog,
+    file_handling: prefs::FileHandling,
+    export: prefs::Export,
+    performance: prefs::Performance,
+    scratch_disks: prefs::ScratchDisks,
+    cursors: prefs::Cursors,
+    transparency_and_gamut: prefs::TransparencyAndGamut,
+    units_and_rulers: prefs::UnitsAndRulers,
+    guides_grid_and_slices: prefs::GuidesGridAndSlices,
+    plug_ins: prefs::PlugIns,
+    #[serde(rename = "type")]
+    type_: prefs::TypePrefs,
+    enhanced_controls: prefs::EnhancedControls,
+    raw_defaults: prefs::RawDefaults,
+    integrations: prefs::Integrations,
+}
+
+impl PrefPages {
+    /// The pages of `prefs`.
+    pub(super) fn of(prefs: &prefs::Preferences) -> Self {
+        PrefPages {
+            general: prefs.general.clone(),
+            interface: prefs.interface.clone(),
+            workspace: prefs.workspace.clone(),
+            tools: prefs.tools.clone(),
+            history_log: prefs.history_log.clone(),
+            file_handling: prefs.file_handling.clone(),
+            export: prefs.export.clone(),
+            performance: prefs.performance.clone(),
+            scratch_disks: prefs.scratch_disks.clone(),
+            cursors: prefs.cursors.clone(),
+            transparency_and_gamut: prefs.transparency_and_gamut.clone(),
+            units_and_rulers: prefs.units_and_rulers.clone(),
+            guides_grid_and_slices: prefs.guides_grid_and_slices.clone(),
+            plug_ins: prefs.plug_ins.clone(),
+            type_: prefs.type_.clone(),
+            enhanced_controls: prefs.enhanced_controls.clone(),
+            raw_defaults: prefs.raw_defaults.clone(),
+            integrations: prefs.integrations.clone(),
+        }
+    }
+
+    /// The window's applied edits as engine calls: the `values` map of `prefs.set` (dotted key to value), and the
+    /// paths of keys with no value, which `prefs.reset` takes one by one.
+    pub(super) fn edits_to_values<V: Serialize>(edits: Vec<(String, Option<V>)>) -> (Value, Vec<String>) {
+        let mut values = Map::new();
+        let mut resets = Vec::new();
+        for (key, value) in edits {
+            match value {
+                Some(value) => {
+                    if let Ok(json) = serde_json::to_value(&value) {
+                        values.insert(key, json);
+                    }
+                }
+                None => resets.push(key),
             }
         }
-        "shortcuts" => shortcuts_body(app, ui, f),
-        "presets" => presets_body(app, ui, f),
-        "presetsIO" => presets_io_body(ui, f),
-        "mismatch" => mismatch_body(ui, f),
-        _ => {}
+        (Value::Object(values), resets)
     }
 }
 
+<<<<<<< ours
 /// The label a preference key shows in the dialog: a few keys have their own wording, the rest
 /// split camelCase into words (`convertToSrgb` → "Convert to srgb").
 pub(super) fn humanize(key: &str) -> String {
@@ -79,43 +130,152 @@ pub(super) fn humanize(key: &str) -> String {
     }
     if key == "pcraftFullComposite" {
         return "Save Full-Size Composite in .pigment Files".into();
+=======
+/// The rules of every setting from the engine's schema: choices, ranges, colours, hidden settings, the ones read
+/// at launch, and the labels and groups the window shows.
+pub(super) fn rules() -> Vec<SettingRule> {
+    let defaults = prefs::Preferences::default().to_json();
+    let mut rules: BTreeMap<String, SettingRule> = BTreeMap::new();
+    for (section, _) in SECTIONS {
+        let Some(table) = defaults.get(section).and_then(Value::as_object) else { continue };
+        for (key, default) in table {
+            let path = format!("{section}.{key}");
+            if let Some(label) = label_override(key) {
+                tweak(&mut rules, &path, |r| r.label(label));
+            }
+            if path == "interface.language" {
+                let mut pairs: Vec<(String, String)> = vec![("auto".into(), "Auto".into())];
+                pairs.extend(crate::i18n::Lang::for_picker().into_iter().map(|l| (l.code().to_string(), l.name().to_string())));
+                let refs: Vec<(&str, &str)> = pairs.iter().map(|(id, label)| (id.as_str(), label.as_str())).collect();
+                tweak(&mut rules, &path, |r| r.choices(&refs));
+            } else if let Some(options) = prefs::choices(&path) {
+                let labelled: Vec<(&str, String)> = options.iter().map(|id| (*id, choice_label(id))).collect();
+                let refs: Vec<(&str, &str)> = labelled.iter().map(|(id, label)| (*id, label.as_str())).collect();
+                tweak(&mut rules, &path, |r| r.choices(&refs));
+            } else if let Some((lo, hi)) = prefs::range(&path) {
+                if default.is_i64() || default.is_u64() {
+                    tweak(&mut rules, &path, |r| r.int(lo as i64..=hi as i64));
+                } else if default.is_f64() {
+                    tweak(&mut rules, &path, |r| r.float(lo..=hi, 3));
+                }
+            } else if default.is_string() && prefs::is_color(&path) {
+                tweak(&mut rules, &path, |r| r.color());
+            }
+            if prefs::HIDDEN_UNTIL_IMPLEMENTED.contains(&path.as_str()) {
+                tweak(&mut rules, &path, |r| r.hidden());
+            }
+            if prefs::LINUX_ONLY.contains(&path.as_str()) {
+                tweak(&mut rules, &path, |r| r.linux_only());
+            }
+            if read_at_launch(&path) {
+                tweak(&mut rules, &path, |r| r.restart());
+            }
+        }
+>>>>>>> theirs
     }
-    // Plug-ins: Photoshop's wording (#9392).
-    if key == "generatorEnabled" {
-        return "Enable Generator".into();
+
+    // Interface groups, in Photoshop's order.
+    for key in ["canvasColor", "canvasCustomColor", "canvasBorder"] {
+        tweak(&mut rules, &format!("interface.{key}"), |r| r.group("Appearance"));
     }
-    if key == "lowLatencyDrawing" {
-        return "Low-Latency Drawing (vsync off, applies at next launch)".into();
+    for key in ["language", "uiFontSize", "uiScale"] {
+        tweak(&mut rules, &format!("interface.{key}"), |r| r.group("Presentation"));
     }
-    // Performance: the canvas compositor's GPU memory, 0 for the automatic budget (L3).
-    // Scratch Disks: how large the scratch file may grow; the free-space reserve always applies.
-    if key == "sizeLimitMb" {
-        return "Scratch Size Limit (MB, 0 = No Limit)".into();
+
+    // Drawn elsewhere or not at all: the theme keys follow the Appearance row, View › Rulers sets showRulers, and the
+    // GPU row draws the adapter, backend and GPU switch together.
+    for path in [
+        "interface.theme",
+        "interface.lightTheme",
+        "interface.darkTheme",
+        "interface.favoriteThemes",
+        "unitsAndRulers.showRulers",
+        "performance.useGpu",
+        "performance.gpuBackend",
+    ] {
+        tweak(&mut rules, path, |r| r.hidden());
     }
-    if key == "gpuMemoryMb" {
-        return "GPU Memory (MB, 0 = Automatic)".into();
-    }
-    let mut s = String::new();
-    for (i, ch) in key.chars().enumerate() {
-        if i == 0 {
-            s.extend(ch.to_uppercase());
-        } else if ch.is_uppercase() {
-            s.push(' ');
-            s.extend(ch.to_lowercase());
-        } else {
-            s.push(ch);
+    // The web build has no Agents page (`custom_rows::AGENTS_PAGE`): it shows the settings PhotoCraft had before the
+    // ArtCraft Launcher's switch.
+    if cfg!(target_arch = "wasm32") {
+        for key in ["connectAgents", "readRoot", "writeRoot", "whenAppClosed"] {
+            tweak(&mut rules, &format!("integrations.{key}"), |r| r.hidden());
         }
     }
-    s.replace("Psd", "PSD")
-        .replace("Gpu", "GPU")
-        .replace("Ui ", "UI ")
-        .replace("Mb", "(MB)")
-        .replace("Exif", "EXIF")
-        .replace("Hud", "HUD")
-        .replace("Lut ", "LUT ")
+    // The browser presents frames itself: Low-Latency Drawing does nothing there.
+    if cfg!(target_arch = "wasm32") {
+        tweak(&mut rules, "performance.lowLatencyDrawing", |r| r.hidden());
+    }
+    // WinTab is a Windows-only opt-in, drawn with its note.
+    if cfg!(target_os = "windows") {
+        tweak(&mut rules, "tools.tabletInput", |r| r.custom());
+    } else {
+        tweak(&mut rules, "tools.tabletInput", |r| r.hidden());
+    }
+
+    // Rows the app draws itself (`PrefsCustom`).
+    for path in [
+        "performance.memoryUsagePercent",
+        "performance.memoryUsageMb",
+        "performance.renderingMode",
+        "performance.gpuAdapter",
+        "tools.pressureCurve",
+        "scratchDisks.disks",
+        "fileHandling.recentFiles",
+        "type.favoriteFonts",
+        "interface.appearanceMode",
+    ] {
+        tweak(&mut rules, path, |r| r.custom());
+    }
+    // The favourite fonts are the user's library, not a Type setting.
+    tweak(&mut rules, "type.favoriteFonts", |r| r.keep_on_reset());
+
+    // JPEG and WebP have independent settings; unrelated format controls stay out of view.
+    tweak(&mut rules, "export.jpegQuality", |r| r.shown_when("export.quickExportFormat", "jpg"));
+    tweak(&mut rules, "export.webpLossless", |r| r.shown_when("export.quickExportFormat", "webp"));
+    tweak(&mut rules, "export.webpQuality", |r| r.shown_when("export.quickExportFormat", "webp").shown_when("export.webpLossless", "false"));
+    tweak(&mut rules, "export.convertToSrgb", |r| r.shown_unless("export.quickExportFormat", "exr"));
+    tweak(&mut rules, "export.metadata", |r| r.shown_unless("export.quickExportFormat", "exr"));
+    // The pause that bundles arrow-key nudges means nothing with Bundle Arrow-Key Nudges off.
+    tweak(&mut rules, "tools.nudgeBundlePauseMs", |r| r.shown_when("tools.bundleNudges", "true"));
+
+    rules.into_values().collect()
 }
 
-/// The visible label of a stored choice value (`windowsInk` -> "Windows Ink (default)").
+/// Changes the rule of `key`, starting one when it has none.
+fn tweak(rules: &mut BTreeMap<String, SettingRule>, key: &str, change: impl FnOnce(SettingRule) -> SettingRule) {
+    let rule = rules.remove(key).unwrap_or_else(|| SettingRule::new(key));
+    rules.insert(key.to_string(), change(rule));
+}
+
+/// The English label of the keys that have their own wording; the rest the window spells out from the key.
+fn label_override(key: &str) -> Option<&'static str> {
+    Some(match key {
+        "appearanceMode" => "Appearance Mode",
+        "exrAcesCg" => "Open color-less EXR as ACEScg",
+        "darkTheme" => "Dark Theme",
+        "lightTheme" => "Light Theme",
+        "automaticallyCheckUpdates" => "Automatically Check for Updates",
+        // Units & Rulers › Column Size (in points), as translated for New Guide Layout.
+        "columnWidth" => "Column width",
+        // These controls appear only for WebP, so they reuse the translated labels.
+        "webpLossless" => "Lossless",
+        "webpQuality" => "Quality",
+        "notificationAutoHide" => "Auto Hide Notifications",
+        "notificationDurationSeconds" => "Notification Duration (seconds)",
+        "bundleNudges" => "Bundle Arrow-Key Nudges",
+        "nudgeBundlePauseMs" => "Nudge Bundle Pause (ms)",
+        "doNotAppendCopy" => "Do not append \"copy\" to filename when saving a copy",
+        "pcraftFullComposite" => "Save Full-Size Composite in .pcraft Files",
+        "generatorEnabled" => "Enable Generator",
+        "lowLatencyDrawing" => "Low-Latency Drawing (vsync off, applies at next launch)",
+        "sizeLimitMb" => "Scratch Size Limit (MB, 0 = No Limit)",
+        "gpuMemoryMb" => "GPU Memory (MB, 0 = Automatic)",
+        _ => return None,
+    })
+}
+
+/// The English label of a stored choice value (`windowsInk` -> "Windows Ink (default)").
 pub(super) fn choice_label(v: &str) -> String {
     match v {
         "windowsInk" => "Windows Ink (default)".into(),
@@ -135,6 +295,7 @@ pub(super) fn choice_label(v: &str) -> String {
         "ahd" => "AHD (adaptive homogeneity)".into(),
         "mhc" => "Malvar–He–Cutler".into(),
         "cpu" => "CPU (no GPU acceleration)".into(),
+<<<<<<< ours
         // MCP › When PhotoCraft is closed.
         "launch" => "Open Pigment".into(),
         "headless" => "Work without a window".into(),
@@ -445,34 +606,13 @@ pub(super) fn section_fields(
     }
     if section == "performance" && (query.is_empty() || preference_matches(section, "memoryUsageMb", query)) {
         memory_usage_row(ui, obj);
+=======
+        v => spelled(v),
+>>>>>>> theirs
     }
-    // WinTab is an explicit Windows choice; Windows Ink stays the default everywhere else.
-    if section == "tools"
-        && cfg!(target_os = "windows")
-        && (query.is_empty() || preference_matches(section, "tabletInput", query))
-        && obj.contains_key("tabletInput")
-    {
-        let t = Tokens::get(ui.ctx());
-        pref_group(ui, "Pen Tablet", |ui| {
-            egui::Grid::new("prefs-grid-pen-tablet").num_columns(2).spacing([14.0, 7.0]).show(ui, |ui| {
-                field_rows(ui, section, obj, vec!["tabletInput".to_string()], lang);
-            });
-            ui.add(
-                egui::Label::new(
-                    RichText::new(tl!(
-                        "WinTab reads pressure, tilt, rotation and the eraser end from the tablet driver. Turn off Windows Ink in your tablet's software utility (for example Wacom Center) before using it."
-                    ))
-                    .small()
-                    .color(t.text_dim),
-                )
-                .wrap(),
-            );
-        });
-    }
-    keys.retain(|k| field_visible(section, obj, k, query));
-    egui::Grid::new(("prefs-grid", section)).num_columns(2).spacing([14.0, 7.0]).show(ui, |ui| field_rows(ui, section, obj, keys, lang));
 }
 
+<<<<<<< ours
 /// One grid row per setting in `keys` (already filtered by `field_visible`).
 fn field_rows(ui: &mut egui::Ui, section: &str, obj: &mut Map<String, Value>, keys: Vec<String>, lang: crate::i18n::Lang) {
     let t = Tokens::get(ui.ctx());
@@ -621,23 +761,37 @@ fn field_rows(ui: &mut egui::Ui, section: &str, obj: &mut Map<String, Value>, ke
                 }
             }
             _ => continue,
+=======
+/// A camelCase id as words (`convertToSrgb` -> "Convert to srgb"), with the acronyms capitalised.
+fn spelled(id: &str) -> String {
+    let mut s = String::new();
+    for (i, ch) in id.chars().enumerate() {
+        if i == 0 {
+            s.extend(ch.to_uppercase());
+        } else if ch.is_uppercase() {
+            s.push(' ');
+            s.extend(ch.to_lowercase());
+        } else {
+            s.push(ch);
+>>>>>>> theirs
         }
-        ui.end_row();
     }
+    s.replace("Psd", "PSD")
+        .replace("Gpu", "GPU")
+        .replace("Ui ", "UI ")
+        .replace("Mb", "(MB)")
+        .replace("Exif", "EXIF")
+        .replace("Hud", "HUD")
+        .replace("Lut ", "LUT ")
 }
 
-#[cfg(test)]
-mod tests {
-    use super::preference_matches;
-
-    /// The Tablet input row matches its visible search terms.
-    #[test]
-    fn wintab_row_matches_its_visible_terms() {
-        if cfg!(target_os = "windows") {
-            for query in ["windows ink", "pen tablet", "wintab", "tablet input"] {
-                assert!(preference_matches("tools", "tabletInput", query), "{query}");
-            }
-        }
-        assert!(preference_matches("tools", "useTabletPressure", "tablet pressure"));
+/// Settings read only when the app starts, which say "Applies at next launch." under their row.
+pub(super) fn read_at_launch(path: &str) -> bool {
+    match path {
+        // Only Windows and Linux draw their own title bar.
+        "interface.systemTitleBar" => cfg!(all(not(target_arch = "wasm32"), not(target_os = "macos"))),
+        // The WinTab context is opened once, when the window starts.
+        "tools.tabletInput" => cfg!(target_os = "windows"),
+        _ => false,
     }
 }
