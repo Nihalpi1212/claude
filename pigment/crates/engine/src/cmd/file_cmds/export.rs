@@ -183,7 +183,7 @@ fn bake_cube_layers(size: usize, title: &str, layers: &[&Layer], depth: photocra
         let px = out.px[g * w as usize + b * n + r];
         [px[0], px[1], px[2]]
     });
-    craft_cms::lutfile::write_cube_export("PhotoCraft", title, n, !matches!(depth, photocraft_color::SampleType::F32), rows)
+    craft_cms::lutfile::write_cube_export("Pigment", title, n, !matches!(depth, photocraft_color::SampleType::F32), rows)
 }
 
 /// Backwards-compatible helper for exporting all visible top-level adjustments.

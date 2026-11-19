@@ -22,7 +22,7 @@ type Shortcuts = BTreeMap<String, String>;
 type Alternates = BTreeMap<String, Vec<String>>;
 
 /// The set Reset Actions… restores.
-pub const BASICS_SET: &str = "PhotoCraft Basics";
+pub const BASICS_SET: &str = "Pigment Basics";
 
 /// What the undo of the last Clear All, Reset or Replace restores beside the list.
 #[derive(Clone, Debug, PartialEq)]
