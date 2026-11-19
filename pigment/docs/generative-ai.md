@@ -361,7 +361,8 @@ after it was sent is still billed), OpenAI and Google Gemini tabs, the key state
 and where it is kept), the masked key field with **Connect** (checks the key with one model list on a
 worker thread and stores it only when the provider accepts it), Test Connection, Remove Key, Get a
 key…, Preferred provider, Chat and Image model (empty: automatic, with Use Suggested from the last
-list), the request timeout, **the one-time agreement**, and **Allow agents to run AI commands**. The
+list; each is saved on its own, and one that is not a model id keeps the dialog open with why), the
+request timeout, **the one-time agreement**, and **Allow agents to run AI commands**. The
 typed key lives only in the dialog's own form: never in `UiState`, a dialog's fields, the
 preferences or `ui.inspect`; it is wiped when sent to be checked and when the dialog closes, and its
 egui text state is dropped whenever the field is empty.
@@ -495,7 +496,10 @@ never offers:
   the person's preset libraries (`brush.presets.*`, `swatches.*`, `pattern.*`,
   `gradient.presets.*`, `style.presets.*`, `shape.presets.*`, `layer.layerStyle.contours.*` with
   a last part that starts with `delete`, `reset`, `edit`, `rename`, `move` or `update`). Reading
-  a library, using a preset and adding one stay the Assistant's;
+  a library, using a preset and adding one stay the Assistant's. Nor does it change the person's
+  spelling dictionary (`edit.checkSpelling` with `action` `addToDictionary`, `add` or
+  `removeFromDictionary`; checking and correcting the document stay its own) or favourite fonts
+  (`type.font.favorite`);
 - what imports or exports (a command whose last part starts with `import`, `export` or
   `quickExport`, the contour and smart-object file commands, `edit.presets.*`), what reads a file
   or asks for one (`layer.videoLayers.newVideoLayerFromFile`, `layer.videoLayers.replaceFootage`,

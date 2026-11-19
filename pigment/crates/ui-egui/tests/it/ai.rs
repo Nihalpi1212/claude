@@ -723,6 +723,25 @@ fn synthetic_input_neither_sends_nor_grants_itself_permission() {
     assert_eq!(mock.calls().len(), 1);
 }
 
+/// Done with a Chat model that is not a model id: the dialog stays open and says why, and the
+/// valid Image model typed in the same visit is kept.
+#[test]
+fn done_with_a_model_that_is_not_a_model_id_says_so() {
+    let mut h = harness(|app| ai_ui::install_accounts(app, AiAccounts::in_memory()));
+    invoke(&mut h, "ai.accounts").unwrap();
+    type_into(&mut h, "Chat model", "gpt 5.5");
+    type_into(&mut h, "Image model", "gpt-image-1.5");
+    h.get_by_label("Done").click();
+    h.run_steps(3);
+    assert!(accounts::is_open(h.state()), "the dialog stays open");
+    assert!(h.query_by_label_contains("`gpt 5.5` is not a model id.").is_some(), "and says why");
+    let models = ai_ui::with_accounts(h.state(), |a| {
+        let m = a.settings.models(ProviderId::OpenAi);
+        (m.chat_model.clone(), m.image_model.clone())
+    });
+    assert_eq!(models, Some((None, Some("gpt-image-1.5".to_string()))), "the valid field is kept");
+}
+
 /// Type `text` as an agent does: `ui.type` through the control channel, delivered in one frame as
 /// automation's input.
 fn synthetic_type(h: &mut Harness, text: &str) {

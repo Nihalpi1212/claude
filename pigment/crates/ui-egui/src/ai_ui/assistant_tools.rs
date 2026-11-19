@@ -367,7 +367,15 @@ const BLOCKED_IDS: &[&str] = &[
     "layer.smartObjects.saveContents",
     "layer.videoLayers.newVideoLayerFromFile",
     "layer.videoLayers.replaceFootage",
+    // The person's favourite fonts: app-wide, kept across restarts, not undone.
+    "type.font.favorite",
 ];
+
+/// Whether `params` make `id` change the person's spelling dictionary (app-wide, kept across
+/// restarts, not undone); checking and correcting the document's spelling stay allowed.
+fn changes_dictionary(id: &str, params: &Value) -> bool {
+    id == "edit.checkSpelling" && matches!(params.get("action").and_then(Value::as_str), Some("add" | "addToDictionary" | "removeFromDictionary"))
+}
 
 /// The person's preset libraries (brushes, swatches, patterns, gradients, styles, shapes,
 /// contours): they outlive the document and Undo does not bring them back, so the Assistant may
@@ -449,7 +457,7 @@ fn file_param<'a>(params: &'a Value, choices: &HashMap<String, Vec<String>>, dep
 /// tool that runs a command by its id asks here: `run_command`, and `apply_adjustment` and
 /// `apply_filter` (a LUT's `file`, Displace's `mapPath`).
 pub fn blocked(id: &str, params: &Value) -> Result<(), String> {
-    if blocked_id(id) {
+    if blocked_id(id) || changes_dictionary(id, params) {
         return Err(format!("Command \"{id}\" cannot be run by the assistant"));
     }
     // The values the command itself lists for each of its params.
@@ -1326,7 +1334,8 @@ pub fn run(app: &mut PhotocraftApp, ctx: &egui::Context, name: &str, args: &Valu
 pub fn describe_call(name: &str, args: &Value, failed: bool) -> String {
     let args = parse_maybe_json(args);
     let text = |key: &str| args.get(key).filter(|v| !v.is_null()).map(|v| v.as_str().map_or_else(|| v.to_string(), str::to_string));
-    let fmt = |template: &str, value: String| crate::i18n::fmt(template, &[("x", &value)]);
+    // What the model put in the label is cut short: a kind or an id may be any text.
+    let fmt = |template: &str, value: String| crate::i18n::fmt(template, &[("x", &first_chars(&value, 60))]);
     let kind = |prefix: &str| {
         let kind = text("kind").unwrap_or_default();
         find_kind(prefix, &kind).map_or(kind, |c| c.label.trim_end_matches('…').to_string())
@@ -1353,7 +1362,12 @@ pub fn describe_call(name: &str, args: &Value, failed: bool) -> String {
         "generative_fill" => tl!("Generative fill").to_string(),
         other => first_chars(other, 60),
     };
-    if failed { fmt(tl!("Failed: {x}"), label) } else { label }
+    if failed { failed_label(&label) } else { label }
+}
+
+/// A step's label once it failed.
+pub fn failed_label(label: &str) -> String {
+    crate::i18n::fmt(tl!("Failed: {x}"), &[("x", label)])
 }
 
 #[cfg(test)]
@@ -1495,6 +1509,27 @@ mod tests {
         ] {
             assert!(photocraft_engine::commands::find(id).is_some(), "{id} is a command");
             assert_eq!(blocked(id, &json!({})), Ok(()), "{id}");
+        }
+    }
+
+    #[test]
+    fn the_spelling_dictionary_and_the_favourite_fonts_are_the_persons() {
+        // App-wide lists that outlive the document and that Undo does not bring back.
+        assert!(photocraft_engine::commands::find("type.font.favorite").is_some());
+        for (id, params) in [
+            ("edit.checkSpelling", json!({"action": "addToDictionary", "word": "x"})),
+            ("edit.checkSpelling", json!({"action": "add", "word": "x"})),
+            ("edit.checkSpelling", json!({"action": "removeFromDictionary", "word": "x"})),
+            ("type.font.favorite", json!({"family": "Arial"})),
+            ("type.font.favorite", json!({"family": "Arial", "on": false})),
+        ] {
+            assert!(blocked(id, &params).is_err(), "{id} {params}");
+        }
+        // Checking and correcting the document's spelling stay the Assistant's.
+        for params in
+            [json!({}), json!({"action": "list"}), json!({"action": "changeAll", "word": "Teh", "replace": "The"}), json!({"action": "suggest", "word": "Teh"})]
+        {
+            assert_eq!(blocked("edit.checkSpelling", &params), Ok(()), "{params}");
         }
     }
 

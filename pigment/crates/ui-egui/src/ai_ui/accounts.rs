@@ -165,7 +165,10 @@ fn reread(app: &mut PhotocraftApp) {
 /// Close it: the models typed are kept, a key typed and not connected is dropped, a check
 /// running is stopped.
 pub fn close(app: &mut PhotocraftApp) {
-    save_models(app);
+    // A model that is not a model id keeps the dialog open, with why, so it isn't lost unseen.
+    if !save_models(app) {
+        return;
+    }
     app.ai.accounts = None;
     refresh(app);
 }
@@ -465,21 +468,36 @@ pub fn remove_key(app: &mut PhotocraftApp) {
     }
 }
 
-/// Keep the models typed for the provider shown (an empty field goes back to automatic).
-fn save_models(app: &mut PhotocraftApp) {
-    let Some(f) = app.ai.accounts.as_ref() else { return };
+/// Keep the models typed for the provider shown (an empty field goes back to automatic). Each
+/// field is saved on its own, so a valid one is kept beside one that is not a model id. `false`
+/// when one could not be saved: the dialog says why.
+fn save_models(app: &mut PhotocraftApp) -> bool {
+    let Some(f) = app.ai.accounts.as_ref() else { return true };
     let (p, chat, image) = (f.provider, f.chat_model.trim().to_string(), f.image_model.trim().to_string());
-    let changed = with_accounts(app, |a| {
+    let Some((chat_changed, image_changed)) = with_accounts(app, |a| {
         let m = a.settings.models(p);
-        m.chat_model.as_deref().unwrap_or_default() != chat || m.image_model.as_deref().unwrap_or_default() != image
-    });
-    if changed != Some(true) {
-        return;
+        (m.chat_model.as_deref().unwrap_or_default() != chat, m.image_model.as_deref().unwrap_or_default() != image)
+    }) else {
+        return true;
+    };
+    if !chat_changed && !image_changed {
+        return true;
     }
-    if let Some(Err(e)) = with_accounts(app, |a| a.set_models(p, Some(&chat), Some(&image))) {
-        note(app, true, message(&e.message));
+    let mut error = None;
+    if chat_changed && let Some(Err(e)) = with_accounts(app, |a| a.set_models(p, Some(&chat), None)) {
+        error = Some(e);
+    }
+    if image_changed && let Some(Err(e)) = with_accounts(app, |a| a.set_models(p, None, Some(&image))) {
+        error = error.or(Some(e));
     }
     reread(app);
+    match error {
+        Some(e) => {
+            note(app, true, message(&e.message));
+            false
+        }
+        None => true,
+    }
 }
 
 /// Saves a setting through `f`, reporting a failed save in the dialog.
@@ -501,7 +519,9 @@ pub fn set_allow_agents(app: &mut PhotocraftApp, yes: bool) {
 }
 
 fn switch(app: &mut PhotocraftApp, p: ProviderId) {
-    save_models(app);
+    if !save_models(app) {
+        return;
+    }
     let Some(mut f) = app.ai.accounts.take() else { return };
     wipe(&mut f.key);
     f.provider = p;
@@ -585,7 +605,9 @@ pub(crate) fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                 a.settings.timeout_secs = secs.clamp(10, 600);
                 a.save()
             }),
-            Act::SaveModels => save_models(app),
+            Act::SaveModels => {
+                save_models(app);
+            }
             Act::Link(url) => {
                 crate::links::open(app, ctx, url);
             }
