@@ -127,7 +127,7 @@ if has deb || has rpm; then
   # so its entry is dropped too.
   DROP_ZSH_LINK=
   [[ -f "$STAGE/usr/share/zsh/site-functions/_pigment-cli" ]] || DROP_ZSH_LINK='\|^  - src: /usr/share/zsh/site-functions/|,/packager: deb/d;'
-  sed "${DROP_ZSH_LINK}s|\${STAGE}|$STAGE|g" "$HERE/nfpm.yaml" >"$WORK/nfpm.yaml"
+  sed "${DROP_ZSH_LINK}s|\${STAGE}|$STAGE|g;s|@VERSION@|$VERSION|g" "$HERE/nfpm.yaml" >"$WORK/nfpm.yaml"
   for fmt in deb rpm; do
     if has "$fmt"; then (cd "$ROOT" && nfpm package -f "$WORK/nfpm.yaml" -p "$fmt" -t "$DIST/$BASENAME.$fmt"); fi
   done

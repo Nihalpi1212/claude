@@ -421,7 +421,11 @@ the product name in Rust strings (not comments, not the kept markers; `///` doc 
 files clap and the MCP server turn into help), the binary names in the app's, CLI's, MCP's,
 engine's and interface's text, and the application id in every text file (except PhotoCraft's own
 document type, `ai.storyteller.photocraft.document`). It is idempotent; `--check` lists what it would
-change and fails if anything is left.
+change and fails if anything is left. It also checks the user guide (`docs/user/`, which it does not
+rewrite): a page that sends people to PhotoCraft's downloads, launcher, website or Discord, or links
+the repository's `HEAD`, fails the run. Links to Pigment's tree and guide (`links.rs`, the AppStream
+homepage and help, nfpm's homepage, WiX's `ARPURLINFOABOUT`) name the tag `pigment-v<version>`,
+not `HEAD` or the bare repository: the default branch holds the JavaScript app (Pigment 0.1 to 0.4).
 
 The interface catalogues are not in this tree: they come from craft-i18n at the commit in
 `craft-i18n.rev`, and `crates/ui-egui/build.rs` (`rebrand_catalog`) rebrands them as it embeds them,
