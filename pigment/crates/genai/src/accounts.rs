@@ -181,12 +181,12 @@ impl AiAccounts {
         if !self.chatgpt.enabled() {
             return self.chatgpt.start(port, "");
         }
+        self.reload();
         let host_id = match self.settings.host_id.clone().filter(|h| h.starts_with("urn:uuid:")) {
             Some(h) => h,
             None => {
                 let h = chatgpt::new_host_id()?;
-                self.settings.host_id = Some(h.clone());
-                if let Err(e) = self.save() {
+                if let Err(e) = self.update(|s| s.host_id = Some(h.clone())) {
                     log::warn!("genai: could not save the installation id ({})", e.kind.id());
                 }
                 h
@@ -267,10 +267,11 @@ impl AiAccounts {
     /// AI Accounts' "Preferred provider": also where the feature windows start (JS resets
     /// `imageProvider` and `chatProvider` with it).
     pub fn set_default_provider(&mut self, p: ProviderId) -> Result<()> {
-        self.settings.default_provider = Some(p);
-        self.settings.image_provider = Some(p);
-        self.settings.chat_provider = Some(p);
-        self.save()
+        self.update(|s| {
+            s.default_provider = Some(p);
+            s.image_provider = Some(p);
+            s.chat_provider = Some(p);
+        })
     }
 
     /// Choose `p`'s models: `None` keeps one, an empty string makes it automatic.
@@ -285,28 +286,38 @@ impl AiAccounts {
         };
         let chat = chat.map(pick).transpose()?;
         let image = image.map(pick).transpose()?;
-        let models = self.settings.models_mut(p);
-        if let Some(c) = chat {
-            models.chat_model = c;
-        }
-        if let Some(i) = image {
-            models.image_model = i;
-        }
-        self.save()
+        self.update(|s| {
+            let models = s.models_mut(p);
+            if let Some(c) = chat {
+                models.chat_model = c;
+            }
+            if let Some(i) = image {
+                models.image_model = i;
+            }
+        })
     }
 
     /// Record that the person agreed to send prompts and images to their provider (or withdrew).
     pub fn set_consented(&mut self, yes: bool) -> Result<()> {
-        self.settings.consented = yes;
-        self.save()
+        self.update(|s| s.consented = yes)
     }
 
     /// "Allow agents to run AI commands".
     pub fn set_allow_agents(&mut self, yes: bool) -> Result<()> {
-        self.settings.allow_agents = yes;
+        self.update(|s| s.allow_agents = yes)
+    }
+
+    /// Change one setting and save: `ai.json` is read again first, so what another process (the
+    /// command line's `ai agents off`, `ai consent --revoke`) or another window wrote since this
+    /// one last read it is kept, and only what `f` changes is written over it.
+    pub fn update(&mut self, f: impl FnOnce(&mut AiSettings)) -> Result<()> {
+        self.reload();
+        f(&mut self.settings);
         self.save()
     }
 
+    /// Save the settings held in memory as they are, over whatever `ai.json` holds now. To change
+    /// a setting, use [`AiAccounts::update`], which keeps other processes' changes.
     pub fn save(&self) -> Result<()> {
         match &self.config_dir {
             Some(d) => self.settings.save(d),

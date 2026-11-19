@@ -238,13 +238,15 @@ pub fn start(app: &mut PhotocraftApp) -> Result<Value, String> {
     // The last prompt of the feature and the provider chosen, as JavaScript Pigment kept them.
     let (prompt, chosen) = (app.ai.generate.prompt.clone(), provider(app));
     with_accounts(app, |a| {
-        if let Some(f) = PromptFeature::of_command(feature) {
-            a.settings.set_last_prompt(f, &prompt);
-        }
-        if chosen.is_some() {
-            a.settings.image_provider = chosen;
-        }
-        if let Err(e) = a.save() {
+        let saved = a.update(|s| {
+            if let Some(f) = PromptFeature::of_command(feature) {
+                s.set_last_prompt(f, &prompt);
+            }
+            if chosen.is_some() {
+                s.image_provider = chosen;
+            }
+        });
+        if let Err(e) = saved {
             log::warn!("ai: could not save the AI settings: {e}");
         }
     });

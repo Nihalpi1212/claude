@@ -167,3 +167,54 @@ fn os_store_round_trip() {
     assert!(store.get(ProviderId::Gemini).unwrap().is_none());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Each save of `ai.json` changes only what it was asked to change: what another process (the
+/// command line's `ai agents off`, `ai consent --revoke`) wrote since this one last read the
+/// file is kept, not overwritten with an old copy.
+#[test]
+fn a_save_keeps_what_another_process_changed() {
+    let dir = temp_dir("stale");
+    let mut app = AiAccounts::new(&dir);
+    app.set_consented(true).unwrap();
+    app.set_allow_agents(true).unwrap();
+    // The command line, while the app keeps its copy.
+    let revoke = || {
+        let mut cli = AiAccounts::new(&dir);
+        cli.set_allow_agents(false).unwrap();
+        cli.set_consented(false).unwrap();
+    };
+    let kept = |what: &str| {
+        let s = AiSettings::load(&dir);
+        assert!(!s.allow_agents && !s.consented, "{what} brought back the old consent or agents");
+    };
+    revoke();
+    app.set_default_provider(ProviderId::Gemini).unwrap();
+    kept("set_default_provider");
+    assert_eq!(AiSettings::load(&dir).default_provider, Some(ProviderId::Gemini));
+
+    app.set_consented(true).unwrap();
+    app.set_allow_agents(true).unwrap();
+    revoke();
+    app.set_models(ProviderId::OpenAi, Some("gpt-4o"), None).unwrap();
+    kept("set_models");
+    assert_eq!(AiSettings::load(&dir).chosen_model(ProviderId::OpenAi, ModelKind::Chat), Some("gpt-4o"));
+
+    app.set_allow_agents(true).unwrap();
+    let mut cli = AiAccounts::new(&dir);
+    cli.set_allow_agents(false).unwrap();
+    app.set_consented(true).unwrap();
+    assert!(!AiSettings::load(&dir).allow_agents, "set_consented brought back allowAgents");
+
+    app.set_allow_agents(true).unwrap();
+    cli.set_consented(false).unwrap();
+    app.set_allow_agents(false).unwrap();
+    assert!(!AiSettings::load(&dir).consented, "set_allow_agents brought back consent");
+
+    app.set_consented(true).unwrap();
+    app.set_allow_agents(true).unwrap();
+    revoke();
+    app.update(|s| s.timeout_secs = 90).unwrap();
+    kept("the timeout");
+    assert_eq!(AiSettings::load(&dir).timeout_secs, 90);
+    let _ = std::fs::remove_dir_all(&dir);
+}
