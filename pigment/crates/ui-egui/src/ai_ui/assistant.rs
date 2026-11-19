@@ -342,8 +342,7 @@ pub fn model(app: &PhotocraftApp, p: ProviderId) -> Option<String> {
 pub fn set_provider(app: &mut PhotocraftApp, p: ProviderId) {
     app.ai.assistant.provider = Some(p);
     with_accounts(app, |a| {
-        a.settings.chat_provider = Some(p);
-        if let Err(e) = a.save() {
+        if let Err(e) = a.update(|s| s.chat_provider = Some(p)) {
             log::warn!("ai: could not save the AI settings: {e}");
         }
     });
@@ -365,8 +364,7 @@ pub fn set_model(app: &mut PhotocraftApp, p: ProviderId, model: &str) {
 pub fn set_attach(app: &mut PhotocraftApp, on: bool) {
     app.ai.assistant.attach = on;
     with_accounts(app, |a| {
-        a.settings.assistant_attach = on;
-        if let Err(e) = a.save() {
+        if let Err(e) = a.update(|s| s.assistant_attach = on) {
             log::warn!("ai: could not save the AI settings: {e}");
         }
     });

@@ -768,6 +768,28 @@ fn done_with_a_model_that_is_not_a_model_id_says_so() {
     assert_eq!(models, Some((None, Some("gpt-image-1.5".to_string()))), "the valid field is kept");
 }
 
+/// AI Accounts left open keeps what the command line changed meanwhile: a click that saves
+/// (here the Preferred provider) writes over `ai.json` only what it changes, so `pigment-cli ai
+/// agents off` and `ai consent --revoke` are not undone by an old copy of the settings.
+#[test]
+fn ai_accounts_left_open_keeps_what_the_command_line_changed() {
+    let dir = std::env::temp_dir().join(format!("pigment-ai-stale-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let mut a = AiAccounts::new(&dir);
+    a.set_consented(true).unwrap();
+    a.set_allow_agents(true).unwrap();
+    let mut h = harness(move |app| ai_ui::install_accounts(app, a));
+    invoke(&mut h, "ai.accounts").unwrap();
+    let mut cli = AiAccounts::new(&dir);
+    cli.set_allow_agents(false).unwrap();
+    cli.set_consented(false).unwrap();
+    pointer_click(&mut h, "Preferred provider for the AI commands");
+    let s = pigment_genai::AiSettings::load(&dir);
+    assert_eq!(s.default_provider, Some(ProviderId::OpenAi), "the click was saved");
+    assert!(!s.allow_agents && !s.consented, "and agents and consent stay off");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// Type `text` as an agent does: `ui.type` through the control channel, delivered in one frame as
 /// automation's input.
 fn synthetic_type(h: &mut Harness, text: &str) {

@@ -601,10 +601,7 @@ pub(crate) fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
             Act::Default(p) => save_with(app, |a| a.set_default_provider(p)),
             Act::Consent(yes) => set_consent(app, yes),
             Act::Agents(yes) => set_allow_agents(app, yes),
-            Act::Timeout(secs) => save_with(app, |a| {
-                a.settings.timeout_secs = secs.clamp(10, 600);
-                a.save()
-            }),
+            Act::Timeout(secs) => save_with(app, |a| a.update(|s| s.timeout_secs = secs.clamp(10, 600))),
             Act::SaveModels => {
                 save_models(app);
             }
