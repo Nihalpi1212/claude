@@ -777,8 +777,8 @@ fn ai_commands_are_not_recorded_into_actions() {
     s.execute("image.adjustments.invert", json!({})).unwrap();
     s.execute("ai.removeBackground", json!({"method": "provider"})).unwrap_or_default();
     s.execute("actions.stop", json!({})).unwrap();
-    let a = s.actions.list.iter().find(|a| a.name == "A").unwrap();
-    let ids: Vec<&str> = a.steps.iter().map(|(id, _)| id.as_str()).collect();
+    let a = s.actions.list.actions().iter().find(|a| a.name == "A").unwrap();
+    let ids: Vec<&str> = a.steps.iter().map(|step| step.command.as_str()).collect();
     assert_eq!(ids, ["image.adjustments.invert"]);
     assert!(unrecorded("ai.generativeFill", &json!({})) && !unrecorded("layer.removeBackground", &json!({})));
 }
@@ -792,8 +792,8 @@ fn the_local_remove_background_is_recorded_and_plays() {
     s.execute("actions.record", json!({"name": "Cut out"})).unwrap();
     s.execute("ai.removeBackground", json!({"method": "local"})).unwrap();
     s.execute("actions.stop", json!({})).unwrap();
-    let a = s.actions.list.iter().find(|a| a.name == "Cut out").unwrap();
-    assert_eq!(a.steps, vec![("ai.removeBackground".to_string(), json!({"method": "local"}))]);
+    let a = s.actions.list.actions().iter().find(|a| a.name == "Cut out").unwrap();
+    assert_eq!(a.steps, vec![crate::actions_cmds::ActionStep::new("ai.removeBackground", json!({"method": "local"}))]);
     assert!(!unrecorded("ai.removeBackground", &json!({})) && unrecorded("ai.removeBackground", &json!({"method": "provider"})));
     s.execute("edit.undo", json!({})).unwrap();
     assert!(s.active().unwrap().doc.layers[0].mask.is_none());
@@ -859,17 +859,17 @@ fn a_step_that_sends_never_runs_from_an_action_or_an_event_script() {
     let mock = install(&mut s, MockBackend::connected());
     select(&mut s, 4, 4, 8, 8);
     let (rev, layers) = (revision(&s), layer_count(&s));
-    let action = |name: &str, id: &str, p: Value| crate::actions_cmds::Action::new(name, vec![(id.to_string(), p)]);
-    s.actions.list.push(action("Fill", "ai.generativeFill", json!({"prompt": "x"})));
-    s.actions.list.push(action("Describe", "ai.describe", json!({})));
-    s.actions.list.push(action("Cut out", "ai.removeBackground", json!({"method": "provider"})));
-    s.actions.list.push(action("Models", "ai.testConnection", json!({})));
+    let action = |name: &str, id: &str, p: Value| crate::actions_cmds::Action::new(name, vec![crate::actions_cmds::ActionStep::new(id, p)]);
+    s.actions.list.push(action("Fill", "ai.generativeFill", json!({"prompt": "x"}))).unwrap();
+    s.actions.list.push(action("Describe", "ai.describe", json!({}))).unwrap();
+    s.actions.list.push(action("Cut out", "ai.removeBackground", json!({"method": "provider"}))).unwrap();
+    s.actions.list.push(action("Models", "ai.testConnection", json!({}))).unwrap();
     for name in ["Fill", "Describe", "Cut out", "Models"] {
         let played = s.execute("actions.play", json!({"action": name})).unwrap();
         assert!(played["failed"]["error"].as_str().is_some_and(|m| m == super::NOT_FROM_ACTIONS), "{name}: {played}");
     }
     // An action that plays another one, and a script that plays an action.
-    s.actions.list.push(action("Outer", "actions.play", json!({"action": "Fill"})));
+    s.actions.list.push(action("Outer", "actions.play", json!({"action": "Fill"}))).unwrap();
     let played = s.execute("actions.play", json!({"action": "Outer"})).unwrap();
     assert!(played.to_string().contains("do not run from an action"), "{played}");
     let ran = s.execute("file.scripts.browse", json!({"steps": [["actions.play", {"action": "Fill"}]]})).unwrap();

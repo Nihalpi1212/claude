@@ -31,6 +31,7 @@ pub mod jobs;
 pub mod keymap_defs;
 pub mod layer_place;
 pub mod layer_style;
+// Pigment: smart objects of Pigment 0.1–0.4 documents are drawn by the engine.
 pub mod legacy_pigment_render;
 pub mod link_watch;
 pub mod malloc_tuning;
