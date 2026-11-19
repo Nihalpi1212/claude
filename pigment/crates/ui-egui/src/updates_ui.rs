@@ -44,16 +44,13 @@ pub(crate) fn check(_app: &mut PhotocraftApp, _ctx: &egui::Context, _params: Val
     Err("Update checks are not available here".into())
 }
 
-/// Once per pass: the check at start when the preference is on (the `Updater` runs it once per
-/// launch), else only the read of the last update's outcome (also once, inside the `Updater`).
+/// Once per pass: only the read of the last update's outcome (a local file, once, inside the
+/// `Updater`). Pigment starts no update check at launch, whatever the hidden preference holds
+/// (docs/FORK.md): `check_at_start` is never called.
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn tick(app: &mut PhotocraftApp) {
     use craft::update::updater::Status;
-    if app.session.prefs().general.automatically_check_updates {
-        app.updates_rt.updater.check_at_start();
-    } else {
-        app.updates_rt.updater.read_last_update();
-    }
+    app.updates_rt.updater.read_last_update();
     if !app.updates_rt.outcome_announced && matches!(app.updates_rt.updater.status(), Status::Updated(_) | Status::InstallFailed(_)) {
         app.updates_rt.outcome_announced = true;
         app.ui.updates_open = true;
