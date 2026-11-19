@@ -302,7 +302,7 @@ cargo run --release -p photocraft                          # the app (binary: pi
 cargo run --release -p photocraft -- image.psd
 cargo build --release -p photocraft-cli                    # the command-line tool (binary: pigment-cli)
 
-./target/release/pigment-cli --version                     # Pigment 0.5.0 (based on PhotoCraft 0.23.1)
+./target/release/pigment-cli --version                     # Pigment 0.5.0 (based on PhotoCraft 0.23.1+057297b)
 ./target/release/pigment-cli convert image.psd image.png   # headless export
 ./target/release/pigment-cli convert image.psd image.pigment
 ./target/release/pigment-cli mcp                           # MCP server on stdio

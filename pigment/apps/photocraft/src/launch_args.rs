@@ -64,7 +64,7 @@ pub(crate) struct LaunchArgs {
 }
 
 /// What `--version` prints in place of clap's `pigment <version>`: Pigment's version line,
-/// `Pigment 0.5.0 (based on PhotoCraft 0.23.1)` (docs/FORK.md). `None` for every other outcome.
+/// `Pigment 0.5.0 (based on PhotoCraft 0.23.1+057297b)` (docs/FORK.md). `None` for every other outcome.
 pub(crate) fn version_text(e: &clap::Error) -> Option<String> {
     (e.kind() == clap::error::ErrorKind::DisplayVersion).then(|| format!("{}\n", photocraft_format::brand::version_line()))
 }

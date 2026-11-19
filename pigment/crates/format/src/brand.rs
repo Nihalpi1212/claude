@@ -15,6 +15,10 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const UPSTREAM_NAME: &str = "PhotoCraft"; // upstream-ok
 /// The PhotoCraft release this copy of Pigment is based on (`UPSTREAM-REVISION`).
 pub const UPSTREAM_VERSION: &str = "0.23.1";
+/// The upstream commit this copy is built on, short (the first 7 characters of
+/// `UPSTREAM-REVISION`): upstream's version moves slowly while its tree moves fast, so the
+/// version line names both.
+pub const UPSTREAM_REVISION: &str = "057297b";
 /// The application id: Wayland/X11 app id, desktop entry, AppStream, MIME, macOS bundle id,
 /// Flatpak id and Windows AppUserModelID.
 pub const APP_ID: &str = "io.github.nihalpi1212.pigment";
@@ -30,15 +34,15 @@ pub const DOCUMENT_KIND: &str = "Pigment Image";
 /// [`is_legacy_pigment`]); the reason follows after a colon.
 pub const LEGACY_PIGMENT_DAMAGED: &str = "This Pigment 0.4 file is damaged";
 
-/// `Pigment 0.5.0 (based on PhotoCraft 0.23.1)`: `--version`, About and logs.
+/// `Pigment 0.5.0 (based on PhotoCraft 0.23.1+057297b)`: `--version`, About and logs.
 pub fn version_line() -> String {
-    format!("{NAME} {} (based on {UPSTREAM_NAME} {UPSTREAM_VERSION})", crate_version())
+    format!("{NAME} {}", version_detail())
 }
 
 /// [`version_line`] without the leading name, as clap prints after the command's name.
 pub fn version_detail() -> &'static str {
     static DETAIL: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-    DETAIL.get_or_init(|| format!("{} (based on {UPSTREAM_NAME} {UPSTREAM_VERSION})", crate_version()))
+    DETAIL.get_or_init(|| format!("{} (based on {UPSTREAM_NAME} {UPSTREAM_VERSION}+{UPSTREAM_REVISION})", crate_version()))
 }
 
 fn crate_version() -> &'static str {
@@ -207,8 +211,15 @@ mod tests {
 
     #[test]
     fn the_version_line_names_pigment_and_its_upstream() {
-        assert_eq!(version_line(), format!("Pigment {} (based on PhotoCraft 0.23.1)", env!("CARGO_PKG_VERSION")));
+        assert_eq!(version_line(), format!("Pigment {} (based on PhotoCraft 0.23.1+057297b)", env!("CARGO_PKG_VERSION")));
         assert_eq!(format!("{NAME} {}", version_detail()), version_line());
+    }
+
+    #[test]
+    fn the_short_revision_is_the_one_in_upstream_revision() {
+        let full = include_str!("../../../UPSTREAM-REVISION").trim();
+        assert_eq!(full.len(), 40, "{full}");
+        assert!(full.starts_with(UPSTREAM_REVISION), "UPSTREAM-REVISION {full} vs brand::UPSTREAM_REVISION {UPSTREAM_REVISION}");
     }
 
     #[test]

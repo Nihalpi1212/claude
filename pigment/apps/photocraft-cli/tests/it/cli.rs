@@ -57,7 +57,7 @@ fn usage_and_unknown_command() {
     let out = ok(bin().arg("--help")).stdout;
     assert!(out.contains("convert"));
     let out = ok(bin().arg("--version")).stdout;
-    assert!(out.starts_with("Pigment ") && out.trim_end().ends_with(" (based on PhotoCraft 0.23.1)"), "{out}");
+    assert!(out.starts_with("Pigment ") && out.trim_end().ends_with(" (based on PhotoCraft 0.23.1+057297b)"), "{out}");
 }
 
 /// #423: `<subcommand> --help` and `-h` print usage and return at once (no inputs read, no files
@@ -1479,7 +1479,7 @@ fn top_level_help_version_and_no_arguments() {
     for version in ["--version", "-V"] {
         let Invoke { code, stdout: out, stderr: err } = invoke(&[version]);
         assert_eq!((code, err.as_str()), (0, ""), "{version}");
-        assert!(out.starts_with("Pigment ") && out.ends_with(" (based on PhotoCraft 0.23.1)\n") && out.lines().count() == 1, "{version}: {out}");
+        assert!(out.starts_with("Pigment ") && out.ends_with(" (based on PhotoCraft 0.23.1+057297b)\n") && out.lines().count() == 1, "{version}: {out}");
     }
     let Invoke { code, stdout: out, stderr: err } = invoke(&["version"]);
     assert_eq!((code, out.is_empty()), (2, true));
