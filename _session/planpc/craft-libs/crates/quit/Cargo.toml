@@ -1,0 +1,24 @@
+[package]
+name = "craft-quit"
+description = "Quit a Craft app the platform's own way: on macOS through `-[NSApplication terminate:]`."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[features]
+# `on_menu_event` and `intercept_close`: the Quit menu item and the unsaved-documents hold, on an egui context.
+ui = ["dep:egui"]
+
+[dependencies]
+egui = { workspace = true, optional = true }
+
+# Already in the apps' Cargo.lock: objc2 and objc2-app-kit through eframe, dispatch2 through its other dependencies.
+[target.'cfg(target_os = "macos")'.dependencies]
+dispatch2 = { version = "0.3.1", default-features = false, features = ["std"] }
+objc2 = { version = "0.6.4", default-features = false, features = ["std"] }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSApplication", "NSResponder"] }
+
+[lints]
+workspace = true
