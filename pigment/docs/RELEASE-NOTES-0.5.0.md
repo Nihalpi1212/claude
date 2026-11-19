@@ -150,7 +150,9 @@ by Pigment 0.1 to 0.4 by its content, whatever it is called, and converts it.
 **Saving goes to the new format.** The document keeps its file, and the first File › Save asks
 "Save in the new Pigment format? Pigment 0.4 will no longer be able to open this file.": Save
 writes the new format over it, Save As… keeps the old file and saves a new one, Cancel does
-neither ("Don't show again" stops the question). Scripts, AI agents and actions that save do not ask. A file
+neither ("Don't show again" stops the question). When the notes after opening list parts that were
+left out, the question says that saving over the file loses them, Save As… is its default, and it
+is asked even after "Don't show again". Scripts, AI agents and actions that save do not ask. A file
 that cannot be read at all says "This Pigment 0.4 file is damaged:" and why.
 
 On Windows and macOS, 0.5 installs where 0.4 was (`%LOCALAPPDATA%\Programs\Pigment` or
@@ -228,8 +230,6 @@ Pigment's latest release; 0.4.0 gets no more updates.
 
 - Some adjustments look visibly different from 0.4 once opened (Brightness/Contrast, Photo Filter,
   Colorize, Levels in CMYK): Pigment computes them as Photoshop does. Their settings are kept.
-- Closing an unsaved old document and choosing Save asks "Save in the new Pigment format?" too;
-  after that question, the close prompt needs Save a second time. Nothing is lost.
 - A type layer with tens of thousands of style runs, or a shape with over a thousand subpaths,
   takes seconds to minutes to open. No real Pigment document is known to come near this.
 
