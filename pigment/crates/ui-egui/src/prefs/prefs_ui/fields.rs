@@ -203,6 +203,8 @@ fn label_override(key: &str) -> Option<&'static str> {
         "darkTheme" => "Dark Theme",
         "lightTheme" => "Light Theme",
         "automaticallyCheckUpdates" => "Automatically Check for Updates",
+        // Pigment's own switch for agents in the open window (`agents::page`).
+        "connectAgents" => "Let AI apps use this window",
         // Units & Rulers › Column Size (in points), as translated for New Guide Layout.
         "columnWidth" => "Column width",
         // These controls appear only for WebP, so they reuse the translated labels.

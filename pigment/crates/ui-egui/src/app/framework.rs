@@ -109,6 +109,8 @@ pub struct Framework {
     pub(crate) delivered: Vec<Fired>,
     /// The suite's theme selection, shared with the other Craft apps.
     suite: SuiteClient,
+    /// Pigment: the folder `suite` keeps its themes in, once opened (`open_suite`); `None` in memory.
+    pub(crate) suite_folder: Option<std::path::PathBuf>,
     /// The theme slots and mode as PhotoCraft's preferences and the suite last agreed on them.
     synced: Option<ThemePrefs>,
     /// The preferences' rev `synced` was taken at: with no suite move since, nothing to sync.
@@ -280,6 +282,7 @@ impl Framework {
             refused: false,
             delivered: Vec::new(),
             suite: SuiteClient::memory(),
+            suite_folder: None,
             synced: None,
             synced_rev: None,
             started: false,
@@ -345,14 +348,17 @@ impl Framework {
         FrameInput::new(root).host(Arc::clone(&self.host)).commands(commands).latched(latched)
     }
 
-    /// Opens the suite folder this machine shares with the other Craft apps, in place of the
-    /// in-memory suite the app starts with.
+    /// Opens the theme folder `folder` (in memory with `None`), in place of the in-memory suite the
+    /// app starts with. Pigment: its own folder, never the one the Craft apps share
+    /// (`SuiteDir::resolve`, `ArtCraft/themes` or `$CRAFT_SUITE_DIR`; docs/FORK.md).
     #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) fn open_suite(&mut self, ctx: &egui::Context) {
+    pub(crate) fn open_suite(&mut self, ctx: &egui::Context, folder: Option<std::path::PathBuf>) {
         use craft::theme_store::{StoreOptions, SuiteDir, SuiteWatch};
         let ctx = ctx.clone();
-        let options = StoreOptions::new(concat!("photocraft ", env!("CARGO_PKG_VERSION")));
-        self.suite = SuiteClient::new(SuiteWatch::open(&SuiteDir::resolve(false), options, move || ctx.request_repaint()));
+        let options = StoreOptions::new(concat!("pigment ", env!("CARGO_PKG_VERSION")));
+        let dir = folder.clone().map_or_else(SuiteDir::memory, SuiteDir::at);
+        self.suite_folder = folder;
+        self.suite = SuiteClient::new(SuiteWatch::open(&dir, options, move || ctx.request_repaint()));
         self.synced = None;
         self.synced_rev = None;
         self.started = false;

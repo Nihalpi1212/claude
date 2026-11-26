@@ -44,7 +44,8 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui, area: egui::Rect) {
     // The body borrows `app`, so the place lives in a local while the bar is shown.
     let mut place = app.ui.panels.task_bar;
     let output = TaskBar::new(label(tl!("Contextual Task Bar")), &corners, Bind::bound(&mut place)).show(ui, area, |ui, cx| {
-        // Generative Expand (#41) goes here, before the preset list.
+        // Generative Expand (#41) goes here, before the preset list. Pigment: generative AI.
+        crate::ai_ui::crop_task_bar_item(app, ui);
         crop_ui::bar::preset_list(app, ui);
         let armed = app.canvas_tools.crop.tool.straighten_armed();
         let straighten = ToggleButton::new(label(tl!("Straighten")), Bind::given(armed)).icon(IconId::new("ruler")).icon_only().show(ui);

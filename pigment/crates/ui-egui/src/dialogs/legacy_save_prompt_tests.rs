@@ -2,7 +2,10 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::Arc;
 
+use craft::host::{PickKind, ScriptedFiles};
+use craft::ui::dialog::{StackDialog as _, StandardPrompt};
 use serde_json::json;
 
 use crate::{PhotocraftApp, Services, menus};
@@ -10,13 +13,14 @@ use crate::{PhotocraftApp, Services, menus};
 /// Written by Pigment 0.4.0 itself (`crates/io/tests/fixtures/pigment-0.4/README.md`).
 const GROUPS: &[u8] = include_bytes!("../../../io/tests/fixtures/pigment-0.4/v3-groups.pigment");
 
-type Asked = Rc<RefCell<Vec<crate::FileDialogRequest>>>;
+type Asked = Arc<ScriptedFiles>;
 
 /// An app with the real importer and exporter, writing to disk, and a file dialog that records
 /// what it was asked.
-fn app() -> (PhotocraftApp, Rc<RefCell<Vec<String>>>, Asked) {
-    let (written, asked): (Rc<RefCell<Vec<String>>>, Asked) = Default::default();
-    let (w, a) = (written.clone(), asked.clone());
+fn app() -> (Box<PhotocraftApp>, Rc<RefCell<Vec<String>>>, Asked) {
+    let written: Rc<RefCell<Vec<String>>> = Default::default();
+    let asked: Asked = Arc::new(ScriptedFiles::held());
+    let w = written.clone();
     let services = Services {
         import: Some(Box::new(|name: &str, bytes: &[u8], opts: &photocraft_io::ImportOptions| {
             photocraft_io::import_with_options(name, bytes, opts).map(|r| (r.document, r.warnings)).map_err(|e| e.to_string())
@@ -29,14 +33,31 @@ fn app() -> (PhotocraftApp, Rc<RefCell<Vec<String>>>, Asked) {
             w.borrow_mut().push(path.to_string());
             Ok(())
         })),
-        file_dialog: Some(Box::new(move |request, _parent, _reply| a.borrow_mut().push(request))),
+        files: Some(asked.clone()),
         ..Default::default()
     };
     (PhotocraftApp::new(photocraft_engine::Session::new(), services), written, asked)
 }
 
-fn prompt(app: &PhotocraftApp) -> Option<&crate::state::Dialog> {
-    app.ui.dialogs.iter().find(|d| super::owns(&d.fields))
+fn prompt(app: &PhotocraftApp) -> Option<craft::ui::dialog::DialogId> {
+    super::open_id(app)
+}
+
+/// The open prompt, which the `file.save` reply `r` names.
+fn dialog_of(app: &PhotocraftApp, r: &serde_json::Value) -> craft::ui::dialog::DialogId {
+    let id = prompt(app).expect("a prompt");
+    assert_eq!(r["dialog"].as_u64(), Some(id.value()), "{r}");
+    id
+}
+
+/// The kinds of the file dialogs asked for so far.
+fn asked_kinds(asked: &ScriptedFiles) -> Vec<PickKind> {
+    asked.requests().iter().map(|r| r.kind).collect()
+}
+
+/// The open prompt's fields as automation reads them (`choice`, `skip` when it has the box).
+fn fields(app: &PhotocraftApp, id: craft::ui::dialog::DialogId) -> serde_json::Value {
+    app.framework.dialogs.get_by_id::<StandardPrompt>(id).and_then(|p| p.json_fields()).expect("the prompt")
 }
 
 /// A Pigment 0.4 document in a folder of its own.
@@ -51,8 +72,8 @@ fn legacy_file(name: &str) -> (std::path::PathBuf, String) {
 
 #[test]
 fn the_first_save_over_a_pigment_0_4_file_asks_once() {
-    let ctx = egui::Context::default();
     let (mut app, written, _) = app();
+    let ctx = app.ctx().clone();
     let (dir, path) = legacy_file("once");
     app.open_file(&path, GROUPS).unwrap();
     // The document keeps its file.
@@ -62,19 +83,28 @@ fn the_first_save_over_a_pigment_0_4_file_asks_once() {
     let r = menus::invoke(&mut app, &ctx, "file.save", json!({})).unwrap();
     assert_eq!(r["confirmationPending"], true);
     assert!(written.borrow().is_empty(), "nothing is written before the answer");
-    let p = prompt(&app).expect("Save asks first");
-    assert!(p.fields["message"].as_str().unwrap().contains("poster.pigment"), "{:?}", p.fields);
+    let id = prompt(&app).expect("Save asks first");
+    assert_eq!(dialog_of(&app, &r), id);
+    assert_eq!(super::pending(&app).unwrap().path, path);
+    // Asked again while it is open: the same prompt.
+    assert_eq!({
+        let r = menus::invoke(&mut app, &ctx, "file.save", json!({})).unwrap();
+        dialog_of(&app, &r)
+    }, id);
 
     // Cancel leaves the old file and the document as they are.
-    let id = p.id;
-    app.ui.close_dialog(id);
+    crate::dialogs::cancel(&mut app, &ctx, id).unwrap();
+    assert!(prompt(&app).is_none());
     assert!(written.borrow().is_empty());
     assert!(photocraft_io::legacy_pigment::is_legacy(&std::fs::read(&path).unwrap()));
     assert!(app.session.active().unwrap().is_dirty());
 
     // Save writes the new format over it, and the next Save doesn't ask again.
-    let id = menus::invoke(&mut app, &ctx, "file.save", json!({})).unwrap()["dialog"].as_u64().unwrap();
-    crate::dialogs::confirm(&mut app, id).unwrap();
+    let id = {
+        let r = menus::invoke(&mut app, &ctx, "file.save", json!({})).unwrap();
+        dialog_of(&app, &r)
+    };
+    crate::dialogs::confirm(&mut app, &ctx, id).unwrap();
     assert_eq!(*written.borrow(), std::slice::from_ref(&path));
     let saved = std::fs::read(&path).unwrap();
     assert!(!photocraft_io::legacy_pigment::is_legacy(&saved) && photocraft_format::is_pcraft(&saved));
@@ -88,29 +118,38 @@ fn the_first_save_over_a_pigment_0_4_file_asks_once() {
 
 #[test]
 fn save_as_keeps_the_old_file_and_dont_show_again_is_kept() {
-    let ctx = egui::Context::default();
     let (mut app, written, asked) = app();
+    let ctx = app.ctx().clone();
     let (dir, path) = legacy_file("save-as");
     app.open_file(&path, GROUPS).unwrap();
 
     // Save As…: the save dialog, the old file untouched.
-    let id = menus::invoke(&mut app, &ctx, "file.save", json!({})).unwrap()["dialog"].as_u64().unwrap();
-    app.ui.dialog_mut(id).unwrap().fields.insert("choice".into(), json!("saveAs"));
-    crate::dialogs::confirm(&mut app, id).unwrap();
-    app.poll_file_dialog(&ctx, None);
-    assert!(matches!(asked.borrow().as_slice(), [crate::FileDialogRequest::Save { .. }]), "{:?}", asked.borrow().len());
+    let id = {
+        let r = menus::invoke(&mut app, &ctx, "file.save", json!({})).unwrap();
+        dialog_of(&app, &r)
+    };
+    app.framework.dialogs.set_json_field(&ctx, id, "choice", json!("alternate")).unwrap();
+    crate::dialogs::confirm(&mut app, &ctx, id).unwrap();
+    app.poll_file_dialog();
+    assert_eq!(asked_kinds(&asked), [PickKind::Save]);
     assert!(written.borrow().is_empty());
     assert!(photocraft_io::legacy_pigment::is_legacy(&std::fs::read(&path).unwrap()));
 
     // "Don't show again": the next Save writes at once.
-    let id = menus::invoke(&mut app, &ctx, "file.save", json!({})).unwrap()["dialog"].as_u64().unwrap();
-    app.ui.dialog_mut(id).unwrap().fields.insert("skip".into(), json!(true));
-    app.ui.close_dialog(id);
-    assert!(!super::dont_show_again::dismissed(&app, super::PREF), "Cancel keeps nothing");
-    let id = menus::invoke(&mut app, &ctx, "file.save", json!({})).unwrap()["dialog"].as_u64().unwrap();
-    app.ui.dialog_mut(id).unwrap().fields.insert("skip".into(), json!(true));
-    crate::dialogs::confirm(&mut app, id).unwrap();
-    assert!(super::dont_show_again::dismissed(&app, super::PREF));
+    let id = {
+        let r = menus::invoke(&mut app, &ctx, "file.save", json!({})).unwrap();
+        dialog_of(&app, &r)
+    };
+    app.framework.dialogs.set_json_field(&ctx, id, "skip", json!(true)).unwrap();
+    crate::dialogs::cancel(&mut app, &ctx, id).unwrap();
+    assert!(!super::alerts::dismissed(&app, super::PREF), "Cancel keeps nothing");
+    let id = {
+        let r = menus::invoke(&mut app, &ctx, "file.save", json!({})).unwrap();
+        dialog_of(&app, &r)
+    };
+    app.framework.dialogs.set_json_field(&ctx, id, "skip", json!(true)).unwrap();
+    crate::dialogs::confirm(&mut app, &ctx, id).unwrap();
+    assert!(super::alerts::dismissed(&app, super::PREF));
     std::fs::write(&path, GROUPS).unwrap();
     app.run("layer.new.layer", json!({})).unwrap();
     menus::invoke(&mut app, &ctx, "file.save", json!({})).unwrap();
@@ -141,16 +180,20 @@ fn a_played_save_step_writes_without_asking() {
 /// again". A document that lost nothing is asked as before.
 #[test]
 fn saving_over_a_file_whose_import_left_parts_out_says_so() {
-    let ctx = egui::Context::default();
     let (mut app, written, asked) = app();
+    let ctx = app.ctx().clone();
 
     let (dir, path) = legacy_file("nothing-left-out");
     app.open_file(&path, GROUPS).unwrap();
-    let id = menus::invoke(&mut app, &ctx, "file.save", json!({})).unwrap()["dialog"].as_u64().unwrap();
-    let p = app.ui.dialog_mut(id).unwrap();
-    assert_eq!(p.fields["choice"], "save");
-    assert!(!super::leaves_parts_out(&p.fields) && p.fields.contains_key("__dontShowAgain"));
-    app.ui.close_dialog(id);
+    let id = {
+        let r = menus::invoke(&mut app, &ctx, "file.save", json!({})).unwrap();
+        dialog_of(&app, &r)
+    };
+    assert!(!super::pending(&app).unwrap().left_out);
+    let shown = fields(&app, id);
+    assert_eq!(shown["choice"], "proceed");
+    assert!(shown.get("skip").is_some(), "it has \"Don't show again\": {shown}");
+    crate::dialogs::cancel(&mut app, &ctx, id).unwrap();
     std::fs::remove_dir_all(dir).unwrap();
 
     // Data of a later 0.4 build this version does not know: the import leaves it out.
@@ -161,19 +204,18 @@ fn saving_over_a_file_whose_import_left_parts_out_says_so() {
     let (dir, path) = legacy_file("left-out");
     std::fs::write(&path, &bytes).unwrap();
     app.open_file(&path, &bytes).unwrap();
-    super::dont_show_again::remember(&mut app, super::PREF);
+    super::alerts::remember_skip(&mut app, super::PREF);
 
     let r = menus::invoke(&mut app, &ctx, "file.save", json!({})).unwrap();
     assert!(written.borrow().is_empty(), "{r}");
-    let p = prompt(&app).expect("asked although \"Don't show again\" was ticked");
-    assert!(super::leaves_parts_out(&p.fields));
-    assert_eq!(p.fields["choice"], "saveAs");
-    assert!(!p.fields.contains_key("__dontShowAgain"));
-    // Its default answer keeps the old file.
-    let id = p.id;
-    crate::dialogs::confirm(&mut app, id).unwrap();
-    app.poll_file_dialog(&ctx, None);
-    assert!(matches!(asked.borrow().as_slice(), [crate::FileDialogRequest::Save { .. }]));
+    let id = prompt(&app).expect("asked although \"Don't show again\" was ticked");
+    assert!(super::pending(&app).unwrap().left_out);
+    let shown = fields(&app, id);
+    assert!(shown.get("skip").is_none(), "no \"Don't show again\": {shown}");
+    // Its default answer (Save As…) keeps the old file.
+    crate::dialogs::confirm(&mut app, &ctx, id).unwrap();
+    app.poll_file_dialog();
+    assert_eq!(asked_kinds(&asked), [PickKind::Save]);
     assert!(written.borrow().is_empty());
     assert!(photocraft_io::legacy_pigment::is_legacy(&std::fs::read(&path).unwrap()));
     std::fs::remove_dir_all(dir).unwrap();

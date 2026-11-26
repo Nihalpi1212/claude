@@ -22,6 +22,11 @@ mod healing_reset_tip;
 #[allow(dead_code)]
 mod interactive_bench_reporting;
 mod layout_perf;
+// Pigment: documents of Pigment 0.1–0.4.
+mod legacy_pigment;
+// Pigment: generative AI (`ai`) and the Assistant (`ai_assistant`) wait for the AI interface's
+// port to the craft framework (merge of PhotoCraft 057297b): `ai_ui` is a stub until then, and
+// `tests/it/ai.rs` and `tests/it/ai_assistant.rs` are not compiled.
 mod magnetic_lasso_right_click;
 mod paint_bucket_all_layers;
 mod pending_remove_pointer;

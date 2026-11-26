@@ -1,4 +1,4 @@
-//! The Home screen: the framework start page with PhotoCraft's recent files, links and drop hint, and the Home rule
+//! The Home screen: the framework start page with the app's recent files, links and drop hint, and the Home rule
 //! the options bar's button, the rail's Home link and `window.home` share.
 
 use craft::behavior::IconId;
@@ -60,14 +60,15 @@ fn reveal(app: &mut PhotocraftApp, path: &std::path::Path) {
     let _ = (app, path);
 }
 
-/// The links of the Home rail: Home, which leaves Home for the open documents, then Learn and the community pages.
-fn links() -> [StartLink; 5] {
+/// The links of the Home rail: Home, which leaves Home for the open documents, then Learn and the project pages.
+/// Pigment: its user guide, releases, issues and repository; no Discord or getartcraft.com (docs/FORK.md).
+pub(crate) fn links() -> [StartLink; 5] {
     [
         StartLink::command(tl!("Home"), Some(IconId::new("home")), "window.home"),
         StartLink::url(tl!("Learn"), Some(IconId::new("sparkles")), crate::links::TUTORIALS),
-        StartLink::url(tl!("Website"), Some(IconId::new("link")), crate::links::APP_PAGE),
-        StartLink::url(tl!("Discord"), Some(IconId::new("globe")), crate::links::DISCORD),
-        StartLink::url(tl!("GitHub"), Some(IconId::new("globe")), crate::links::GITHUB),
+        StartLink::url(tl!("Releases"), Some(IconId::new("link")), crate::links::RELEASES),
+        StartLink::url(tl!("Report an Issue"), Some(IconId::new("message-square")), crate::links::ISSUES),
+        StartLink::url(tl!("GitHub"), Some(IconId::new("link-2")), crate::links::GITHUB),
     ]
 }
 

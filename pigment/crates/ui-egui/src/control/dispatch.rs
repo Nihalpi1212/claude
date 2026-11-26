@@ -1377,7 +1377,7 @@ fn app_open(app: &mut PhotocraftApp, path: &str, approved: bool) -> Reply {
 /// source; the single-file (zip) form falls back to the bytes path, as do all
 /// other formats. `None` means "not a directory .pcraft".
 fn open_pcraft_directory(app: &mut PhotocraftApp, path: &str) -> Option<Reply> {
-    if !path.rsplit_once('.').is_some_and(|(_, ext)| ext.eq_ignore_ascii_case(photocraft_format::EXTENSION)) {
+    if !path.rsplit_once('.').is_some_and(|(_, ext)| photocraft_format::brand::is_native_extension(ext)) {
         return None;
     }
     let open = app.services.automation_open_pcraft.as_mut()?;

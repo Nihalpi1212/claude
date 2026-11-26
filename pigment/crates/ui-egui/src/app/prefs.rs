@@ -57,13 +57,19 @@ impl PhotocraftApp {
         theme::apply(ctx, &self.ui.theme);
     }
 
-    /// Follows the theme selection the suite's folder holds, shared with the other Craft apps, in
-    /// place of the in-memory selection the app starts with. The desktop app calls it at startup.
+    /// Follows the theme selection a theme folder holds, in place of the in-memory selection the
+    /// app starts with. The desktop app calls it at startup. Pigment: the folder is its own,
+    /// [`THEME_FOLDER`] in its settings folder (the preferences store's), never ArtCraft's that the
+    /// Craft apps share; with no settings folder the themes stay in memory (docs/FORK.md).
     #[cfg(not(target_arch = "wasm32"))]
     pub fn open_suite(&mut self, ctx: &egui::Context) {
-        self.framework.open_suite(ctx);
+        let folder = self.services.settings.as_ref().and_then(|(store, _)| store.dir()).map(|dir| dir.join(THEME_FOLDER));
+        self.framework.open_suite(ctx, folder);
     }
 }
+
+/// Pigment: the theme folder's name in its settings folder (no Pigment 0.1–0.4 file has it).
+pub const THEME_FOLDER: &str = "Themes";
 
 impl PhotocraftApp {
     /// Install the app's icons, fonts, image loaders and the theme. Call from the app creator

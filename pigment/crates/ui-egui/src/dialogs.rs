@@ -412,6 +412,8 @@ pub(crate) const PROMPTS: &[PromptRow] = &[
     crate::jobs_ui::answer,
     crate::gpu_status::answer,
     crate::actions::library::answer,
+    // Pigment: the first Save over a file of Pigment 0.1–0.4.
+    legacy_save_prompt::answer,
 ];
 
 /// [`prompts_take`] over the rows `rows`.
@@ -621,8 +623,14 @@ const ENGINE_READ: &[&str] = &["ui.layersPanelOptions", "file.print", "file.expo
 
 /// The "Don't show again" entries (`{"skip": true}`), by key, as their prompt modules read them. Told apart by key, not
 /// by the shape of the value.
-fn dont_show_again_keys() -> [&'static str; 4] {
-    [delete_layer_prompt::PREF, live_shape_prompt::PREF, crate::analysis::note_alerts::DELETE_NOTE_PREF, crate::retouch_ui::CAM_NO_PIXELS_PREF]
+fn dont_show_again_keys() -> [&'static str; 5] {
+    [
+        delete_layer_prompt::PREF,
+        live_shape_prompt::PREF,
+        crate::analysis::note_alerts::DELETE_NOTE_PREF,
+        crate::retouch_ui::CAM_NO_PIXELS_PREF,
+        legacy_save_prompt::PREF, // Pigment
+    ]
 }
 
 /// Where the remembered value of the preference entry `key` goes: `None` keeps it in `Preferences.dialogs`, else the
