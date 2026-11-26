@@ -8,11 +8,13 @@ is built on, and how to bring in a later upstream revision without losing the re
 - **Upstream revision:** `abb30dff47638eaa38a09de11b60ae8a14baa334`, PhotoCraft workspace version
   0.23.1. The current revision is always in [`UPSTREAM-REVISION`](../UPSTREAM-REVISION); the version
   Pigment names in `--version` and About is `UPSTREAM_VERSION` in
-  [`crates/format/src/brand.rs`](../crates/format/src/brand.rs).
+  [`crates/format/src/brand.rs`](../crates/format/src/brand.rs), followed by `UPSTREAM_REVISION`, the
+  first 7 characters of `UPSTREAM-REVISION` (upstream's version moves slowly while its tree moves fast;
+  a test checks the two agree).
 - **Pigment's version:** 0.5.0 (`[workspace.package] version` in `Cargo.toml`). It follows the
   JavaScript Pigment 0.1 to 0.4 (an Electron app, released up to `pigment-v0.4.0`), which this
   version replaces. `pigment --version`, `pigment-cli --version` and Help › About print
-  `Pigment 0.5.0 (based on PhotoCraft 0.23.1)`.
+  `Pigment 0.5.0 (based on PhotoCraft 0.23.1+057297b)`.
 - **Pigment's repository:** <https://github.com/Nihalpi1212/claude> (the app lives in `pigment/`).
   Issues: <https://github.com/Nihalpi1212/claude/issues>. Releases: tags `pigment-vX.Y.Z`, assets
   `pigment-*`, at <https://github.com/Nihalpi1212/claude/releases>.
@@ -54,7 +56,7 @@ The rebrand keeps every crate, package and module name (`photocraft-*`, `photocr
 | Product name in the interface, messages, logs, CLI help, MCP, the web build's page | PhotoCraft | Pigment |
 | Desktop binary (`[[bin]]` of package `photocraft`) | `photocraft` | `pigment` |
 | CLI binary (`[[bin]]` of package `photocraft-cli`) | `photocraft-cli` | `pigment-cli` |
-| Version | 0.23.1 | 0.5.0, shown as `Pigment 0.5.0 (based on PhotoCraft 0.23.1)` |
+| Version | 0.23.1 | 0.5.0, shown as `Pigment 0.5.0 (based on PhotoCraft 0.23.1+057297b)` |
 | Application id (Wayland/X11 app id, desktop entry, AppStream, MIME icon, macOS bundle id, Flatpak id) | `ai.storyteller.photocraft` | `io.github.nihalpi1212.pigment` |
 | Packaging files | `packaging/linux/ai.storyteller.photocraft.*`, `packaging/linux/flatpak/ai.storyteller.photocraft*.yml`, `packaging/windows/photocraft.wxs`, `photocraft.en-us.wxl` | `…/io.github.nihalpi1212.pigment.*`, `packaging/windows/pigment.wxs`, `pigment.en-us.wxl` |
 | Windows installer | UpgradeCode `D9660F32-…`, component GUID `A6DE41B7-…`, `Program Files\ArtCraft\PhotoCraft`, `Software\PhotoCraft`, ProgIds `Photocraft.*`, publisher Learning Machines LLC | new UpgradeCode `E3B35B0C-7545-464E-928A-546E924AC29F` and component GUID `267EC2F2-849F-4160-8162-83687268DDAB`, `Program Files\Pigment` (`Programs\Pigment` per user), `Software\Pigment`, ProgIds `Pigment.*`, `pigment.exe`, `pigment-cli.exe`, publisher "Pigment contributors" |
@@ -74,7 +76,7 @@ The rebrand keeps every crate, package and module name (`photocraft-*`, `photocr
 | Windows version resources | ProductName PhotoCraft, CompanyName Learning Machines LLC | ProductName Pigment, CompanyName "Pigment contributors", copyright naming both |
 | App icon | the engraved nine-tailed fox on blue | Pigment's palette-and-brush icon (the JavaScript app's `build/icon.svg`, [`assets/app-icon/`](../assets/app-icon/README.md)): hicolor PNGs, `.ico`, `.icns`, the runtime icons, the brand mark, the MSI art (drawn from it by `package.ps1`) |
 | Help menu, About, start screen links | ArtCraft Discord, getartcraft.com, `storytold/photocraft` | Report an Issue, Pigment on GitHub, Pigment Releases, PhotoCraft (upstream project) |
-| About | "Part of ArtCraft", Discord button | `Pigment 0.5.0 (based on PhotoCraft 0.23.1)`, "Pigment is based on PhotoCraft by the ArtCraft team and the PhotoCraft contributors (MIT OR Apache-2.0)", with the upstream contributors list kept |
+| About | "Part of ArtCraft", Discord button | `Pigment 0.5.0 (based on PhotoCraft 0.23.1+057297b)`, "Pigment is based on PhotoCraft by the ArtCraft team and the PhotoCraft contributors (MIT OR Apache-2.0)", with the upstream contributors list kept |
 | Interface translations | craft-i18n's `photocraft.tsv` and `common.tsv`, embedded raw | the same catalogs, rebranded by `crates/ui-egui/build.rs` as it embeds them |
 | README, NOTICE, ATTRIBUTION.md | PhotoCraft's | Pigment's README; NOTICE and ATTRIBUTION.md keep upstream's text with Pigment's lines added |
 | `docs/brand/` (ArtCraft's name, wordmark and logos) | shipped, under a trademark licence that tells forks to remove them | removed |
@@ -161,6 +163,9 @@ serves a headless session with the folders given to it, exactly as before; with 
 uses the open window and, while the app is closed, does what **When Pigment is closed** says
 (start it, a headless session, or an error). `pigment --control` and `pigment-cli mcp --bridge` work
 as before, whatever the switch. `pigment-cli` always calls its MCP server `pigment`.
+Upstream's `pigment-cli mcp` asks `craft::automation::agents::mcp_flag()` before it reaches the open
+window (and links `craft` for that alone); Pigment's asks only `--headless`
+(`apps/photocraft-cli/src/automation.rs`) and its `Cargo.toml` has no `craft` dependency.
 
 ### Updates and the network
 
@@ -456,7 +461,7 @@ the version line (`apps/photocraft/src/launch_args.rs`, `apps/photocraft-cli/src
 `crates/engine/src/build_info.rs`, `canvas/start_screen.rs`), updates
 (`crates/ui-egui/src/updates_ui.rs`, `menus/state.rs`, `lib.rs`, `apps/photocraft/src/main.rs`),
 the agents gate (`crates/automation/src/{agent_link,live}.rs`, `crates/ui-egui/src/prefs/prefs_ui/{agents,fields}.rs`,
-`apps/photocraft-cli/src/automation.rs`, `apps/photocraft/src/main.rs`), the `[[bin]]` names in
+`apps/photocraft-cli/{src/automation.rs,Cargo.toml}`, `apps/photocraft/src/main.rs`), the `[[bin]]` names in
 `apps/*/Cargo.toml`, the Windows resources (`apps/*/build.rs`), the catalog rebrand
 (`crates/ui-egui/build.rs`), packaging (desktop entry, AppStream, MIME package, AppRun, nfpm,
 package scripts, Flatpak manifests, Info.plist document types, WiX, the install policy), the icon
@@ -492,8 +497,9 @@ the release notes.
    at build time. A new file-format marker that PhotoCraft reads back must keep its name: add it to
    `KEEP_LINE` in the script (or put `upstream-ok` on the line). Check new `///` doc comments in the
    clap and MCP files (`HELP_DOC_FILES`) and new packaging files by hand.
-6. Update `UPSTREAM-REVISION`, `UPSTREAM_VERSION` in `crates/format/src/brand.rs` and the tests that
-   print the version line (`brand.rs`, `apps/photocraft-cli/tests/it/cli.rs`), this page's upstream
+6. Update `UPSTREAM-REVISION`, `UPSTREAM_VERSION` and `UPSTREAM_REVISION` in
+   `crates/format/src/brand.rs` and the tests that print the version line (`brand.rs`,
+   `apps/photocraft-cli/tests/it/cli.rs`, `apps/photocraft/tests/it/command_line_usage.rs`), this page's upstream
    revision, and `craft-i18n.rev` if upstream moved it (the Flatpak manifests pin the same commit).
 7. If upstream added an update path (a new craft-update call, an updater in a package format, a
    version check) or another outgoing request, point it at Pigment's releases or turn it into a link,
