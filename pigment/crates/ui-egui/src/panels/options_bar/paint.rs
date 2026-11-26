@@ -195,7 +195,7 @@ fn apply_values(app: &mut PhotocraftApp, tool: Tool, brush: &mut BrushSettings, 
 /// The Eraser's range alert for a value typed out of range. One alert at a time: a second typed
 /// value while one is open adds none.
 fn open_range_alert(app: &mut PhotocraftApp, ui: &egui::Ui, range: &RangeAlert) {
-    let alert = Alert::range(tl!("PhotoCraft").to_owned(), range, &Env::of(ui));
+    let alert = Alert::range(tl!("Pigment").to_owned(), range, &Env::of(ui));
     // An `Err` is the alert that was not opened because one is already up.
     let _ = app.framework.dialogs.open_unless_open(HostedAlert::new(alert));
 }

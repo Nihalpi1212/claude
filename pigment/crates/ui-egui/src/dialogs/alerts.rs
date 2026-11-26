@@ -17,7 +17,7 @@ pub(crate) struct AlertOnce {
 }
 
 /// The title every alert of the app carries.
-const TITLE: &str = "PhotoCraft";
+const TITLE: &str = "Pigment";
 
 /// Shows `alert` on the host. One alert is open at a time, and the same message opened again while it
 /// is up adds nothing: the open alert's id comes back.

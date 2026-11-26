@@ -118,7 +118,7 @@ pub(crate) struct NumberCellOutput {
 /// Opens the out-of-range alert for `alert`; `ui` supplies the env that words its range. One alert
 /// is open per message (the helper's rule).
 pub(crate) fn range_alert(app: &mut PhotocraftApp, ui: &egui::Ui, alert: &RangeAlert) {
-    let _ = crate::dialogs::alerts::show(app, Alert::range(tl!("PhotoCraft"), alert, &Env::of(ui)));
+    let _ = crate::dialogs::alerts::show(app, Alert::range(tl!("Pigment"), alert, &Env::of(ui)));
 }
 
 /// A faint one-line hint after a bar's members.

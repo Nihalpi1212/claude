@@ -50,7 +50,7 @@ pub(crate) fn open(app: &mut PhotocraftApp) -> DialogId {
             .background_color(background)
             .profiles(profiles.clone())
             .custom_pixel_aspects(custom.clone())
-            .app_name("PhotoCraft")
+            .app_name("Pigment")
             .remember(WINDOW);
         if let Some(size) = clipboard {
             dialog = dialog.clipboard(size);

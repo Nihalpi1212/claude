@@ -32,8 +32,8 @@ pub(super) fn load_source(app: &mut PhotocraftApp, name: &str, params: Value) ->
         let note = crate::i18n::trn(
             crate::i18n::current(),
             unsupported as u64,
-            "{n} step has no PhotoCraft equivalent yet",
-            "{n} steps have no PhotoCraft equivalent yet",
+            "{n} step has no Pigment equivalent yet",
+            "{n} steps have no Pigment equivalent yet",
         );
         let template = "{message} ({note})";
         crate::i18n::fmt(tl!(template), &[("message", &loaded), ("note", &note)])
@@ -117,7 +117,7 @@ pub(super) fn load_dialog(app: &mut PhotocraftApp) -> Result<Value, String> {
         let files = crate::i18n::trn(lang, loaded as u64, "{n} action file loaded", "{n} action files loaded");
         let mut notes = vec![crate::i18n::trn(lang, actions as u64, "{n} action", "{n} actions")];
         if unsupported > 0 {
-            notes.push(crate::i18n::trn(lang, unsupported as u64, "{n} step has no PhotoCraft equivalent yet", "{n} steps have no PhotoCraft equivalent yet"));
+            notes.push(crate::i18n::trn(lang, unsupported as u64, "{n} step has no Pigment equivalent yet", "{n} steps have no Pigment equivalent yet"));
         }
         notes.extend(replaced);
         if !errors.is_empty() {

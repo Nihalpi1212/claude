@@ -511,7 +511,7 @@ fn builder(
             .reset_to(reset.clone())
             .layout(ParamLayout::Stacked)
             .previews(previews(&key))
-            .alert_title(tl!("PhotoCraft"));
+            .alert_title(tl!("Pigment"));
         if let Some(canvas) = canvas {
             dialog = dialog.canvas(canvas);
         }

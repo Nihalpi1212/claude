@@ -59,7 +59,7 @@ pub(crate) fn bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         }
     }
     if let Some(range) = out.out_of_range {
-        let alert = Alert::range(tl!("PhotoCraft").to_owned(), &range, &Env::of(ui));
+        let alert = Alert::range(tl!("Pigment").to_owned(), &range, &Env::of(ui));
         // An `Err` is the alert that was not opened because one is already up.
         let _ = app.framework.dialogs.open_unless_open(HostedAlert::new(alert));
     }

@@ -1311,7 +1311,7 @@ fn temporary_type_transform_preserves_depth_and_color_model() {
     for (depth, mode) in [(8, "rgb"), (16, "rgb"), (32, "rgb"), (16, "gray"), (8, "cmyk"), (16, "lab")] {
         let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
         app.run("file.new", json!({"width": 1200, "height": 900, "depth": depth, "mode": mode})).unwrap();
-        let id = LayerId(app.run("type.create", json!({"text": "PhotoCraft é世界", "size": 32, "x": 300, "y": 350})).unwrap()["layer"].as_u64().unwrap());
+        let id = LayerId(app.run("type.create", json!({"text": "Pigment é世界", "size": 32, "x": 300, "y": 350})).unwrap()["layer"].as_u64().unwrap());
         begin_edit(&mut app).unwrap();
         let format = app.session.active().unwrap().doc.pixel_format();
         let a = frame_of(&mut app).unwrap().quad[2];
@@ -1322,7 +1322,7 @@ fn temporary_type_transform_preserves_depth_and_color_model() {
         assert_eq!(text_layer(&shown, id).unwrap().cache.as_ref().unwrap().format(), format);
         tool_event(&mut app, ToolEvent::Up { x: a[0] + 30.0, y: a[1] + 15.0 }, Modifiers::NONE);
         assert_eq!(text(&app, id).cache.as_ref().unwrap().format(), format);
-        assert_eq!(text(&app, id).text, "PhotoCraft é世界");
+        assert_eq!(text(&app, id).text, "Pigment é世界");
     }
 }
 

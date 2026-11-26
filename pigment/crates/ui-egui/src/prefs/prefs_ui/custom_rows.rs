@@ -356,7 +356,7 @@ fn scratch_disks_row(ui: &mut egui::Ui, draft: &mut SettingsDraft) {
         let dir = scratch.dir.as_deref().map(|p| p.display().to_string()).unwrap_or_else(|| tl!("Unknown").into());
         let warning = crate::i18n::fmt(
             tl!(
-                "The current scratch directory ({path}) doesn't report its free space, so PhotoCraft can't stop before it fills up, and large files get no extra room from it without a Scratch Size Limit. This warning applies to the current configuration; changes above take effect on Apply or OK. Set a limit or use a local disk."
+                "The current scratch directory ({path}) doesn't report its free space, so Pigment can't stop before it fills up, and large files get no extra room from it without a Scratch Size Limit. This warning applies to the current configuration; changes above take effect on Apply or OK. Set a limit or use a local disk."
             ),
             &[("path", &dir)],
         );

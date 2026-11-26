@@ -37,8 +37,8 @@ pub(crate) fn title_text(app: &PhotocraftApp) -> String {
     let show_name = app.session.prefs().interface.show_file_name_in_title;
     app.session
         .active()
-        .map(|d| format!("{}{}", if show_name { d.doc.name.as_str() } else { "PhotoCraft" }, if d.is_dirty() { "  •" } else { "" }))
-        .unwrap_or_else(|| "PhotoCraft".into())
+        .map(|d| format!("{}{}", if show_name { d.doc.name.as_str() } else { "Pigment" }, if d.is_dirty() { "  •" } else { "" }))
+        .unwrap_or_else(|| "Pigment".into())
 }
 
 /// The OS window title: the active document's name suffixed with the app name (a `*` prefix
@@ -47,9 +47,9 @@ pub(crate) fn title_text(app: &PhotocraftApp) -> String {
 /// drops out and only the app name (and the `*`) remains (#5037).
 pub fn window_title(app: &PhotocraftApp) -> String {
     if !app.session.prefs().interface.show_file_name_in_title {
-        return format!("{}PhotoCraft", if app.session.active().is_some_and(|d| d.is_dirty()) { "*" } else { "" });
+        return format!("{}Pigment", if app.session.active().is_some_and(|d| d.is_dirty()) { "*" } else { "" });
     }
-    app.session.active().map(|d| format!("{}{} \u{2014} PhotoCraft", if d.is_dirty() { "*" } else { "" }, d.doc.name)).unwrap_or_else(|| "PhotoCraft".into())
+    app.session.active().map(|d| format!("{}{} \u{2014} Pigment", if d.is_dirty() { "*" } else { "" }, d.doc.name)).unwrap_or_else(|| "Pigment".into())
 }
 
 #[cfg(test)]

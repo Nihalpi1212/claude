@@ -29,7 +29,7 @@ pub(crate) fn open(app: &mut PhotocraftApp, kind: ShapeKind, at: Point) -> Optio
     let units = GuideUnits::new(ruler, size[0], size[1], dpi).points_per_inch(points);
     // The options bar has no star ratio: a polygon opens as a plain polygon.
     let options = CreateShapeOptions::initial(kind, at).units(units).tool(radius, sides, 1.0);
-    Some(app.framework.dialogs.open(CreateShapeDialog::new(options).alert_title(tl!("PhotoCraft"))))
+    Some(app.framework.dialogs.open(CreateShapeDialog::new(options).alert_title(tl!("Pigment"))))
 }
 
 /// Whether a click at `at` (document px) with the Rectangle tool in Shape mode lies inside the active live

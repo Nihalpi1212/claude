@@ -20,7 +20,7 @@ fn tick(app: &mut PhotocraftApp, ctx: &egui::Context) {
 fn linked_app(switch: AgentSwitch) -> (Box<PhotocraftApp>, tempfile::TempDir, Arc<Mutex<Vec<AgentSettings>>>) {
     let (mut app, _) = app_with_store();
     let dir = tempfile::tempdir().unwrap();
-    app.services.agent_link = Some(AgentLink::new(Some(dir.path().to_path_buf()), "PhotoCraft test"));
+    app.services.agent_link = Some(AgentLink::new(Some(dir.path().to_path_buf()), "Pigment test"));
     app.services.agent_switch = Some(switch);
     let asked: Arc<Mutex<Vec<AgentSettings>>> = Arc::default();
     let seen = asked.clone();

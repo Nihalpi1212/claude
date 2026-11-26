@@ -122,7 +122,7 @@ fn a_color_row_opens_the_color_picker_as_a_child_and_its_ok_answers_the_row() {
 
 #[test]
 fn the_one_time_move_stores_owned_dialog_values_once_and_leaves_engine_read_keys() {
-    let host = Host::builder(AppInfo { id: "photocraft", name: "PhotoCraft", version: "0" }).settings(Arc::new(MemorySections::default())).build();
+    let host = Host::builder(AppInfo { id: "photocraft", name: "Pigment", version: "0" }).settings(Arc::new(MemorySections::default())).build();
     let mut prefs = photocraft_engine::prefs::Preferences::default();
     let dialogs = &mut prefs.dialogs;
     // Generic: the old key under `photocraft.`, nulls dropped.
