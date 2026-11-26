@@ -6490,7 +6490,6 @@ dependencies = [
  "clap",
  "clap_complete",
  "clap_mangen",
- "craft",
  "craft-cms",
  "craft-image-codecs 0.1.0 (git+https://github.com/storytold/craft-libs?rev=18ffc07519b15f5ef39e752aa0f405261fec8ebb)",
  "craft-psd",

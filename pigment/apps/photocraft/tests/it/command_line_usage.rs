@@ -89,7 +89,7 @@ fn version_prints_the_long_version() {
     // Pigment's version line (docs/FORK.md), not clap's `<name> <version>`.
     let Run { status, stdout, .. } = run_photocraft(&["--version", "--safegpu"]);
     assert_eq!(status.code(), Some(0));
-    assert_eq!(stdout, format!("Pigment {} (based on PhotoCraft 0.23.1)\n", photocraft_engine::build_info::VERSION));
+    assert_eq!(stdout, format!("Pigment {} (based on PhotoCraft 0.23.1+057297b)\n", photocraft_engine::build_info::VERSION));
 }
 
 #[test]
