@@ -156,7 +156,7 @@ the entry is now. Where Pigment 0.5.0 has PhotoCraft's status, the column names 
 | Export As: GIF | Done | Partial: no GIF in Export As | F2 |
 | Open: AVIF | Done | Partial: AVIF does not open | F3 |
 | Fill: Scripted Patterns | Approximate | Missing | B18 |
-| Presets › Export/Import Presets and Migrate Presets † | Done | Partial: brushes, custom shapes and tool presets only | P1b, P4 |
+| Presets › Export/Import Presets and Migrate Presets † | Done | Done in 0.6: every kind, `.pigment-bundle`, Migrate Presets from Pigment 0.4's folder | P1b, P4 |
 | Presets › Preset Manager † | Done | Partial: three kinds, rename and delete | P1a |
 | File Info: Origin, IPTC, IPTC Extension, GPS Data | Partial | Missing | F1 |
 | File Info: Basic (rating) | Done | Partial: no rating | F1 |
