@@ -34,6 +34,8 @@ use serde_json::{Value, json};
 
 use crate::PhotocraftApp;
 
+// Pigment: adjustment presets
+pub mod preset_row;
 mod session;
 pub mod values;
 
@@ -164,6 +166,9 @@ pub enum AdjustAsk {
     /// A colour well was clicked: the host opens the colour picker with the request and writes the answer with
     /// [`answer_color`].
     PickColor(ColorRequest),
+    // Pigment: adjustment presets
+    /// The Preset row asks for a preset command or a file dialog (`preset_row::answer_dialog`).
+    Preset(preset_row::PresetAsk),
 }
 
 /// What one pass of an editor reports.
@@ -195,6 +200,10 @@ pub struct EditorSetup {
     /// The clipping display the Levels editor reported on the pass before: the dialog's display changes when the editor's
     /// report does (an Alt-held thumb), so a display set from outside (automation) stays until the editor next reports.
     pub reported_clipping: std::cell::Cell<Option<craft::imaging::ui::adjust::LevelsClip>>,
+    // Pigment: adjustment presets
+    /// The kind's presets the Preset row lists, and the `presets.rev` they were read at.
+    pub presets: Vec<preset_row::PresetEntry>,
+    pub presets_rev: u64,
 }
 
 impl Default for EditorSetup {
@@ -208,6 +217,9 @@ impl Default for EditorSetup {
             tone: None,
             stale: false,
             reported_clipping: Default::default(),
+            // Pigment: adjustment presets
+            presets: Vec::new(),
+            presets_rev: 0,
         }
     }
 }

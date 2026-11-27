@@ -200,6 +200,11 @@ pub fn layer_editor(app: &mut PhotocraftApp, ui: &mut egui::Ui, id: LayerId, adj
         tone: record.tone.take(),
         ..Default::default()
     };
+    // Pigment: adjustment presets (a pick is one `layer.setAdjustment`, one history step)
+    if let Some(applied) = super::preset_row::in_properties(app, ui, id, kind, &value, &vcx) {
+        commit(app, id, &mut record, &committed, &applied, &vcx, None);
+        value = applied;
+    }
     let armed = crate::layer_picker::armed(app).filter(|(layer, _)| *layer == id).map(|(_, picker)| picker);
     let mut picker: Option<TonePicker> = armed;
     let out = {
