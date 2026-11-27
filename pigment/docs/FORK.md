@@ -371,8 +371,8 @@ The JavaScript Pigment's AI features rebuilt on PhotoCraft; the contract is
 `crates/engine/src/generative/mock.rs`, `crates/engine/src/cmd/ai_cmds.rs` and
 `crates/engine/src/cmd/ai_cmds/` (`region.rs`, `fill.rs`, `expand.rs`, `generate.rs`,
 `background.rs`, `describe.rs`, `tests.rs`), this page's section and `docs/generative-ai.md`; the
-provider crate `crates/genai` (package `pigment-genai`, with its tests in `crates/genai/tests/genai/`;
-Sign in with ChatGPT is its `src/chatgpt.rs` and `tests/genai/chatgpt.rs`),
+provider crate `crates/genai` (package `pigment-genai`, with its tests in `crates/genai/tests/it/`;
+Sign in with ChatGPT is its `src/chatgpt.rs` and `tests/it/chatgpt.rs`),
 `crates/automation/src/genai.rs`, `apps/photocraft-cli/src/ai.rs` and
 `apps/photocraft-cli/tests/it/ai.rs`; the interface `crates/ui-egui/src/ai_ui.rs` and
 `crates/ui-egui/src/ai_ui/` (`generate.rs`, `accounts.rs`, `describe.rs`, `task_bar.rs`, and the

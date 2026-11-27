@@ -53,7 +53,7 @@ env:
   RUST_TOOLCHAIN: '1.97.0'
   # storytold/craft-fonts at PhotoCraft's pinned commit (its release.yml and ci.yml). The release
   # binaries embed its OFL fonts; the packages carry their licences as OFL-<family>.txt.
-  CRAFT_FONTS_REF: b076417b5880bd4154bd22f00695b1d28c6bea83
+  CRAFT_FONTS_REF: cc9269cd8d8258785dac603fba3122e5d2556795
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
   CARGO_NET_RETRY: 10
