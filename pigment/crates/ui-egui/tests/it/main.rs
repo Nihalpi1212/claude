@@ -24,11 +24,11 @@ mod interactive_bench_reporting;
 mod layout_perf;
 // Pigment: documents of Pigment 0.1–0.4.
 mod legacy_pigment;
-// Pigment: generative AI. The Assistant (`ai_assistant`) waits for the last part of the AI
-// interface's port to the craft framework (merge of PhotoCraft 057297b): `tests/it/ai_assistant.rs`
-// is not compiled yet.
+// Pigment: generative AI, and its Assistant (Window › Assistant).
 #[cfg(not(target_arch = "wasm32"))]
 mod ai;
+#[cfg(not(target_arch = "wasm32"))]
+mod ai_assistant;
 mod magnetic_lasso_right_click;
 mod paint_bucket_all_layers;
 mod pending_remove_pointer;

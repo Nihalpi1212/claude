@@ -10,7 +10,8 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use egui_kittest::kittest::Queryable;
+use craft::menu::ItemKind;
+use egui_kittest::kittest::{NodeT, Queryable};
 use photocraft_engine::Session;
 use photocraft_engine::generative::mock::{MockAnswer, MockBackend};
 use photocraft_engine::generative::{
@@ -19,12 +20,12 @@ use photocraft_engine::generative::{
 use photocraft_raster::Rgba8Image;
 use photocraft_ui_egui::PhotocraftApp;
 use photocraft_ui_egui::ai_ui::assistant_tools::{self as tools, Outcome};
-use photocraft_ui_egui::ai_ui::{self, accounts, assistant};
+use photocraft_ui_egui::ai_ui::{self, accounts, assistant, describe, generate};
 use photocraft_ui_egui::menus;
 use pigment_genai::AiAccounts;
 use serde_json::{Value, json};
 
-use super::ai::{Harness, harness, layer_names, synthetic_click, type_into, with_mock};
+use super::ai::{Harness, browser_lands, control, harness, invoke, layer_names, plan_harness, plan_server, synthetic_click, type_into, until_idle, with_mock};
 
 /// The mock backend, keeping every chat request whole (the mock itself only counts them).
 struct Recorder {
@@ -92,7 +93,7 @@ impl GenerativeBackend for Recorder {
 }
 
 /// The app without a window: a 200 × 160 white document with its Background layer.
-fn app() -> PhotocraftApp {
+fn app() -> Box<PhotocraftApp> {
     let mut app = PhotocraftApp::new(Session::new(), Default::default());
     app.session.prefs.edit(|p| p.interface.language = "en".into());
     app.run("file.new", json!({"width": 200, "height": 160, "background": "white"})).expect("new");
@@ -805,7 +806,7 @@ fn a_command_that_opens_a_dialog_waits_for_the_person() {
     rec.answer("", &[("run_command", json!({"id": "filter.blur.gaussianBlur"})), ("new_layer", json!({"name": "After"}))]);
     rec.answer("Done after your dialog.", &[]);
     assert_eq!(assistant::send(h.state_mut(), "blur it, I will pick the radius"), Ok(true));
-    until(&mut h, "the dialog", |app| !app.ui.dialogs.is_empty());
+    until(&mut h, "the dialog", |app| app.dialog_open());
     h.run_steps(5);
     assert!(assistant::running(h.state()));
     let m = assistant::messages(h.state()).last().unwrap();
@@ -817,7 +818,11 @@ fn a_command_that_opens_a_dialog_waits_for_the_person() {
     h.run_steps(2);
     assert!(assistant::running(h.state()) && assistant::stopping(h.state()));
     assert!(h.query_by_label("Stopping after the current step…").is_some());
-    h.state_mut().ui.dialogs.clear();
+    // The dialog is done with: cancelled (the framework's hosted dialog, through the control channel).
+    let dialog = control(&mut h, "ui.inspect", json!({}))["result"]["dialogs"][0]["id"].clone();
+    assert!(!dialog.is_null(), "the dialog is listed");
+    assert_eq!(control(&mut h, "ui.dialog.cancel", json!({"dialog": dialog}))["ok"], true);
+    assert!(!h.state().dialog_open());
     until_done(&mut h);
     let m = assistant::messages(h.state()).last().unwrap();
     assert_eq!(m.calls[0].result, Some(json!(tools::DIALOG_CLOSED)));
@@ -844,6 +849,50 @@ fn a_model_list_that_failed_can_be_asked_for_again() {
     h.get_by_label("List models").click();
     h.run_steps(3);
     assert_eq!(assistant::listed_models(h.state(), ProviderId::OpenAi), Some(&["chat-a".to_string(), "chat-b".to_string()][..]));
+}
+
+/// The chat model is picked in the window's select (the framework's `Select`): Automatic, then
+/// the listed models; a pick is the person's choice, and Automatic takes it back.
+#[test]
+fn the_chat_model_is_picked_in_the_window() {
+    let rec = Recorder::connected();
+    let r = Arc::clone(&rec);
+    let mut h = harness(move |app| {
+        r.install(app);
+        assistant::open(app);
+    });
+    rec.mock.push(MockAnswer::Models(vec![("chat-a".into(), "text"), ("chat-b".into(), "text")]));
+    h.get_by_label("List models").click();
+    h.run_steps(3);
+    assert_eq!(assistant::model(h.state(), ProviderId::OpenAi), None, "automatic until one is picked");
+    // The select's place and what its face shows.
+    let select = |h: &Harness| {
+        h.query_all_by_role(egui::accesskit::Role::ComboBox)
+            .find(|n| n.accesskit_node().label().as_deref() == Some("Chat model"))
+            .map(|n| (n.rect().center(), n.value().unwrap_or_default()))
+            .expect("the Chat model select")
+    };
+    assert_eq!(select(&h).1, "Automatic (gpt-5)");
+    let pick = |h: &mut Harness, entry: &str| {
+        click_at(h, select(h).0);
+        let row = h.get_by_label(entry).rect().center();
+        click_at(h, row);
+    };
+    pick(&mut h, "chat-b");
+    assert_eq!(assistant::model(h.state(), ProviderId::OpenAi).as_deref(), Some("chat-b"));
+    assert!(h.query_by_label("chat-a").is_none(), "the list closed with the pick");
+    assert_eq!(select(&h).1, "chat-b");
+    pick(&mut h, "Automatic (gpt-5)");
+    assert_eq!(assistant::model(h.state(), ProviderId::OpenAi), None, "Automatic again");
+    assert_eq!(select(&h).1, "Automatic (gpt-5)");
+}
+
+/// A click of the person's own pointer at `pos`.
+fn click_at(h: &mut Harness, pos: egui::Pos2) {
+    let button = |pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
+    h.input_mut().events.extend([egui::Event::PointerMoved(pos), button(true), button(false)]);
+    h.step();
+    h.run_steps(2);
 }
 
 /// A step whose command runs as a background job (how the app runs Generative Fill): the turn
@@ -972,15 +1021,15 @@ fn agents_need_permission_and_a_missing_account_keeps_the_message() {
 #[test]
 fn the_window_item_and_the_saved_choices() {
     let mut app = app();
-    let items = menus::menu_items(&app);
-    let at = |id: &str| items.iter().position(|i| i.id == id).unwrap_or_else(|| panic!("{id} is not in the menus"));
+    let items = menus::menu_rows(&app);
+    let at = |id: &str| items.iter().position(|i| i.command.id == id).unwrap_or_else(|| panic!("{id} is not in the menus"));
     let item = &items[at("window.panel.aiAssistant")];
-    assert_eq!((item.label.as_str(), item.path.join(" › "), item.checked), ("Assistant", "Window".to_string(), Some(false)));
+    assert_eq!((item.label.as_str(), item.path.join(" › "), item.kind), ("Assistant", "Window".to_string(), ItemKind::Check(false)));
     assert_eq!(at("window.panel.aiAssistant"), at("window.panel.adjustments") + 1, "after Adjustments, in Photoshop's alphabetical list");
     assert!(menus::is_live("window.panel.aiAssistant") && menus::is_enabled(&app, "window.panel.aiAssistant"));
     let ctx = egui::Context::default();
     assert_eq!(menus::invoke(&mut app, &ctx, "window.panel.aiAssistant", json!({})).unwrap(), json!({"visible": true}));
-    assert_eq!(menus::menu_items(&app)[at("window.panel.aiAssistant")].checked, Some(true));
+    assert_eq!(menus::menu_rows(&app)[at("window.panel.aiAssistant")].kind, ItemKind::Check(true));
     assert_eq!(menus::invoke(&mut app, &ctx, "window.panel.aiAssistant", json!({"show": false})).unwrap(), json!({"visible": false}));
     assert!(!assistant::is_open(&app));
     assert_eq!(assistant::send(&mut app, "hello"), Err("Generative AI is available in the desktop app.".to_string()), "no backend");
@@ -1217,9 +1266,7 @@ fn an_answer_with_a_step_too_large_to_run_runs_none() {
 }
 
 // ---- Sign in with ChatGPT and the Assistant -------------------------------------------------
-// Moved from `ai.rs` in the 057297b merge (the Assistant is ported last); it uses `ai.rs`'s plan
-// server: `use super::ai::{browser_lands, invoke, plan_harness, plan_server, until_idle};` and
-// `photocraft_ui_egui::ai_ui::describe`.
+// On `ai.rs`'s plan server.
 
 /// With a ChatGPT sign-in the Assistant and Describe Image run on the plan route, and the image
 /// features ask for an API key before anything is sent, as in the JavaScript app. A sign-in
@@ -1268,4 +1315,3 @@ fn a_sign_in_serves_the_assistant_and_describe_and_images_ask_for_a_key() {
     assert_eq!(server.log.lock().unwrap().len(), before, "nothing sent");
     assert_eq!(layer_names(h.state()).len(), 1);
 }
-

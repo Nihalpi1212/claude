@@ -22,8 +22,9 @@
 //!   Sign in with ChatGPT (chat models only), whose tokens the interface never holds.
 //!   Preferences › AI Integrations has its button and the agents' permission too
 //!   ([`preferences_rows`]).
-//! * **Window › Assistant**: a chat about the active document whose model edits it through
-//!   tools, each an ordinary undoable command; a conversation per document, kept in memory only.
+//! * **Window › Assistant** ([`assistant`]): a chat about the active document whose model edits
+//!   it through tools ([`assistant_tools`]), each an ordinary undoable command; a conversation
+//!   per document, kept in memory only.
 //! * **Agents** (the control channel, MCP through the open window, synthetic input) may run a
 //!   command that sends only while "Allow agents to run AI commands" is on: [`gate`] refuses the
 //!   agent's own request, and the session's backend (`AppBackend`) a command the agent reaches
@@ -34,15 +35,14 @@
 //!
 //! The task bars ([`task_bar`]) are the framework's contextual task bar, as the Crop tool's.
 //!
-//! **The 057297b merge** ports this module in three parts: the menus, the Generate window,
-//! Describe Image, AI Accounts and the control `Reply`; the task bars; then the Assistant
-//! (Window › Assistant is not in the menus yet; `ai_ui/assistant*.rs` wait in the tree, not
-//! compiled).
-//!
 //! The browser build has no provider: this module keeps its signatures there and does nothing.
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod accounts;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod assistant;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod assistant_tools;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod describe;
 #[cfg(not(target_arch = "wasm32"))]
@@ -89,11 +89,8 @@ pub const ITEMS: &[(&str, &str, &[&str], &str)] = &[
     (ASSISTANT, "Assistant", &["Window"], "window.panel.adjustments"),
 ];
 
-/// The items not offered yet: the 057297b merge ports the Assistant last.
-const NOT_PORTED: &[&str] = &[ASSISTANT];
-
 /// The commands of the shell's own (not engine commands).
-const SHELL: &[&str] = &[ACCOUNTS, REMOVE_WITH_PROVIDER];
+const SHELL: &[&str] = &[ACCOUNTS, REMOVE_WITH_PROVIDER, ASSISTANT];
 
 /// What the app holds for generative AI. Nothing here is saved with the interface state.
 #[derive(Default)]
@@ -119,6 +116,9 @@ pub struct AiUi {
     pub(crate) sign_in_watch: bool,
     #[cfg(not(target_arch = "wasm32"))]
     pub describe: describe::State,
+    /// Window › Assistant: its window and the conversations, per document, in memory only.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub assistant: assistant::State,
     /// The task bar's Generative Fill prompt.
     #[cfg(not(target_arch = "wasm32"))]
     pub bar_prompt: String,
@@ -205,7 +205,6 @@ pub fn menu_items(app: &PhotocraftApp) -> Vec<Row> {
     }
     ITEMS
         .iter()
-        .filter(|i| !NOT_PORTED.contains(&i.0))
         .map(|&(id, label, path, _)| {
             let row = Row::new(path, id, label).enabled(crate::menus::is_enabled(app, id));
             match checked(app, id) {
@@ -216,9 +215,14 @@ pub fn menu_items(app: &PhotocraftApp) -> Vec<Row> {
         .collect()
 }
 
-/// Whether menu item `id` shows a check mark, for this module's items (Window › Assistant while
-/// its window is open, once the Assistant is ported). `None` for the rest.
-pub fn checked(_: &PhotocraftApp, _: &str) -> Option<bool> {
+/// Whether menu item `id` shows a check mark, for this module's items: Window › Assistant
+/// while its window is open. `None` for the rest.
+pub fn checked(app: &PhotocraftApp, id: &str) -> Option<bool> {
+    #[cfg(not(target_arch = "wasm32"))]
+    if id == ASSISTANT {
+        return Some(app.ai.assistant.open);
+    }
+    let _ = (app, id);
     None
 }
 
@@ -312,8 +316,8 @@ mod native {
     use serde_json::{Value, json};
 
     use super::{
-        ACCOUNTS, ACCOUNTS_PATH, BACKGROUND, DESCRIBE, EXPAND, FILL, GENERATE_IMAGE, ITEMS, PhotocraftApp, PrefsAi, REMOVE_BACKGROUND, REMOVE_WITH_PROVIDER,
-        SKY, accounts, describe, generate, task_bar,
+        ACCOUNTS, ACCOUNTS_PATH, ASSISTANT, BACKGROUND, DESCRIBE, EXPAND, FILL, GENERATE_IMAGE, ITEMS, PhotocraftApp, PrefsAi, REMOVE_BACKGROUND,
+        REMOVE_WITH_PROVIDER, SKY, accounts, assistant, describe, generate, task_bar,
     };
 
     /// Keep the AI accounts in Pigment's settings folder `dir` (the desktop app, at start-up): keys
@@ -471,6 +475,7 @@ mod native {
             DESCRIBE if params.as_object().is_none_or(|o| o.is_empty()) => describe::start(app),
             REMOVE_BACKGROUND if params.as_object().is_none_or(|o| o.is_empty()) => remove_background(app, "local"),
             REMOVE_WITH_PROVIDER => remove_background(app, "provider"),
+            ASSISTANT => assistant::toggle(app, params),
             _ => return None,
         })
     }
@@ -506,7 +511,7 @@ mod native {
             // The job's document, not whichever tab is active when it lands.
             removed_background(app, e.document);
         }
-        if describe::on_job_event(app, e) {
+        if describe::on_job_event(app, e) || assistant::on_job_event(app, e) {
             return true;
         }
         generate::on_job_event(app, e)
@@ -521,13 +526,15 @@ mod native {
         let ctx = ui.ctx().clone();
         generate::show(app, &ctx);
         describe::show(app, &ctx);
+        assistant::show(app, &ctx);
         accounts::show(app, &ctx);
     }
 
     /// A key was connected or removed, a sign-in started or ended: the Assistant forgets the
-    /// model lists it read. (The Assistant is ported last in the 057297b merge: it then calls
-    /// `assistant::forget_models` here.)
-    pub(crate) fn forget_assistant_models(_: &mut PhotocraftApp) {}
+    /// model lists it read.
+    pub(crate) fn forget_assistant_models(app: &mut PhotocraftApp) {
+        assistant::forget_models(app);
+    }
 
     /// The task bars under a selection (Generative Fill) and after Remove Background (Generate
     /// Background), drawn by the canvas over the active document's tile `rect` (the framework's

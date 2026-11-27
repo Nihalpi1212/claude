@@ -30,6 +30,9 @@ use serde_json::{Value, json};
 
 use super::assistant_tools::{self as tools, MAX_MESSAGES, MAX_ROUNDS, Outcome, Then};
 use super::{account_blocker, fitting, fixed_in_accounts, message, refresh, with_accounts};
+use craft::ui::contract::{Bind, Entry, Props as _, Show as _};
+use craft::ui::pickers::Select;
+
 use crate::PhotocraftApp;
 use crate::theme::Tokens;
 
@@ -708,6 +711,8 @@ pub(crate) fn poll(app: &mut PhotocraftApp, ctx: &egui::Context) {
         }
         app.ai.assistant.conversations.retain(|d, _| open.contains(d));
     }
+    // The dialogs open now (the framework's hosted dialogs): a step that opened one waits for it.
+    let dialogs = app.dialog_count();
     let Some(turn) = app.ai.assistant.turn.as_mut() else { return };
     // The answer of a request, or of a step's job, comes with a later frame.
     ctx.request_repaint_after(std::time::Duration::from_millis(100));
@@ -716,7 +721,7 @@ pub(crate) fn poll(app: &mut PhotocraftApp, ctx: &egui::Context) {
     }
     match &turn.current {
         Some(Running::Job { .. }) => return,
-        Some(Running::Dialog { open_before, .. }) if app.ui.dialogs.len() > *open_before => return,
+        Some(Running::Dialog { open_before, .. }) if dialogs > *open_before => return,
         Some(Running::Dialog { .. }) => {
             if let Some(Running::Dialog { result, index, call, .. }) = turn.current.take() {
                 record(app, index, &call, tools::capped(tools::dialog_result(result)));
@@ -730,7 +735,7 @@ pub(crate) fn poll(app: &mut PhotocraftApp, ctx: &egui::Context) {
         return finish(app, End::Stopped);
     }
     // A step never runs behind a dialog the person has open: it waits until the dialog is done.
-    if !turn.queue.is_empty() && !app.ui.dialogs.is_empty() {
+    if !turn.queue.is_empty() && dialogs > 0 {
         return;
     }
     if let Some(call) = turn.queue.pop_front() {
@@ -868,7 +873,7 @@ fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> Option<Act> {
     let t = Tokens::get(ui.ctx());
     let mut act = top_rows(app, ui);
     ui.add_space(4.0);
-    crate::widgets::hairline(ui);
+    ui.separator();
     ui.add_space(4.0);
     let doc = app.session.active().map(|st| st.doc.id);
     // The conversation takes what the input, the status row and the note below leave.
@@ -909,7 +914,7 @@ fn top_rows(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> Option<Act> {
         }
     });
     ui.horizontal(|ui| {
-        let l = ui.label(tl!("Chat model:"));
+        ui.label(tl!("Chat model:"));
         let Some(p) = chosen else {
             ui.label(egui::RichText::new(tl!("Add an API key in AI Accounts")).color(t.text_dim));
             return;
@@ -925,21 +930,14 @@ fn top_rows(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> Option<Act> {
         if let Some(c) = current.as_ref().filter(|c| !listed.contains(c)) {
             listed.insert(0, c.clone());
         }
-        craft_ui::ComboBox::from_id_salt("pigment-ai-chat-model")
-            .selected_text(current.clone().unwrap_or_else(|| automatic.clone()))
-            .width(190.0)
-            .show_ui(ui, |ui| {
-                if ui.selectable_label(current.is_none(), automatic.as_str()).clicked() {
-                    act = Some(Act::Model(String::new()));
-                }
-                for m in &listed {
-                    if ui.selectable_label(current.as_ref() == Some(m), m.as_str()).clicked() {
-                        act = Some(Act::Model(m.clone()));
-                    }
-                }
-            })
-            .response
-            .labelled_by(l.id);
+        // The framework's select: Automatic (the empty id) and the listed models.
+        let entries: Vec<Entry<String>> =
+            std::iter::once(Entry::new(String::new(), automatic)).chain(listed.iter().map(|m| Entry::new(m.clone(), m.clone()))).collect();
+        let picked =
+            Select::new(tl!("Chat model").to_string(), Bind::given(current.clone().unwrap_or_default()), &entries).id_salt("pigment-ai-chat-model").show(ui);
+        if let Some(m) = picked.value().filter(|m| Some(*m) != current.as_ref() && !(m.is_empty() && current.is_none())) {
+            act = Some(Act::Model(m.clone()));
+        }
         if let Some(ModelList::Failed(why)) = list {
             let text = crate::i18n::fmt(tl!("Could not list models: {message}"), &[("message", why)]);
             ui.label(egui::RichText::new(text).color(ui.visuals().error_fg_color));
@@ -966,10 +964,12 @@ fn top_rows(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> Option<Act> {
             act = Some(Act::Attach(attach));
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if crate::widgets::secondary_button(ui, tl!("Clear"), 0.0).on_hover_text(tl!("Clear the conversation")).clicked() {
+            let clear = super::button(ui, tl!("Clear"), false, true);
+            let _ = clear.response.clone().on_hover_text(tl!("Clear the conversation"));
+            if clear.clicked() {
                 act = Some(Act::Clear);
             }
-            if crate::widgets::secondary_button(ui, tl!("AI Accounts…"), 0.0).clicked() {
+            if super::button(ui, tl!("AI Accounts…"), false, true).clicked() {
                 act = Some(Act::Accounts);
             }
         });
@@ -1099,14 +1099,14 @@ fn input_rows(app: &mut PhotocraftApp, ui: &mut egui::Ui, t: &Tokens, has_doc: b
         };
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if busy {
-                let stop = ui.add_enabled_ui(!stopping(app), |ui| crate::widgets::secondary_button(ui, tl!("Stop"), 72.0)).inner;
-                if stop.clicked() {
+                if super::button(ui, tl!("Stop"), false, !stopping(app)).clicked() {
                     act = Some(Act::Stop);
                 }
             } else {
                 let ready = has_doc && !app.ai.assistant.input.trim().is_empty();
-                let send = ui.add_enabled_ui(ready, |ui| crate::widgets::primary_button(ui, tl!("Send"), 72.0)).inner;
-                if send.on_hover_text(tl!("Send (Enter)")).clicked() {
+                let send = super::button(ui, tl!("Send"), true, ready);
+                let _ = send.response.clone().on_hover_text(tl!("Send (Enter)"));
+                if send.clicked() {
                     act = Some(Act::Send);
                 }
             }
