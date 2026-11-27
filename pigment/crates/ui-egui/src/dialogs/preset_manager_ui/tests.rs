@@ -9,7 +9,10 @@ use serde_json::json;
 
 use super::*;
 
-fn app_with(files: Vec<Picked>) -> (PhotocraftApp, Arc<Mutex<Vec<(String, Vec<u8>)>>>) {
+/// The files the app wrote: (path, bytes).
+type Written = Arc<Mutex<Vec<(String, Vec<u8>)>>>;
+
+fn app_with(files: Vec<Picked>) -> (PhotocraftApp, Written) {
     let written = Arc::new(Mutex::new(Vec::new()));
     let sink = written.clone();
     let services = crate::Services {
@@ -86,9 +89,10 @@ fn cmd_selecting_two_presets_and_delete_removes_both() {
     dialog(&mut app).select(0, Mods::default());
     dialog(&mut app).select(2, cmd);
     assert_eq!(fields(&mut app)["selected"], json!([0, 2]));
-    // Cmd-click again toggles off; Shift extends a range from the anchor.
+    // Cmd-click again toggles off; Shift extends a range from the last click.
     dialog(&mut app).select(2, cmd);
     assert_eq!(fields(&mut app)["selected"], json!([0]));
+    dialog(&mut app).select(0, Mods::default());
     dialog(&mut app).select(2, Mods { shift: true, ..Mods::default() });
     assert_eq!(fields(&mut app)["selected"], json!([0, 1, 2]));
     dialog(&mut app).select(1, cmd);

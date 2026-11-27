@@ -28,8 +28,8 @@ use craft::ui::layout_components::Stack;
 use craft::ui::menu::Menu;
 use craft::ui::patterns::presets::{PresetBrowser, PresetEvent, PresetFooterEvent, PresetFooterOptions, PresetReorder, PresetRow, PresetState, PresetView};
 use craft::ui::pickers::Select;
-use craft::ui::primitives::{ContentPainterCx, IconSpec};
 use craft::ui::primitives::textures::TextureCache;
+use craft::ui::primitives::{ContentPainterCx, IconSpec};
 use craft::ui::runtime::access::PopupKind;
 use craft::ui::runtime::overlay::CloseReason;
 use craft::ui::sections::{DialogRole, FooterButton};
@@ -433,7 +433,11 @@ impl StackDialog for PresetManagerDialog {
                         // The search field; the view comes from the ⚙ menu (`view_lock` hides the view buttons).
                         .toolbar(true)
                         .row_menu(true)
-                        .view_lock(if view == View::TextOnly || matches!(view, View::SmallList | View::LargeList) { PresetView::List } else { PresetView::Grid })
+                        .view_lock(if view == View::TextOnly || matches!(view, View::SmallList | View::LargeList) {
+                            PresetView::List
+                        } else {
+                            PresetView::Grid
+                        })
                         .thumb_range(ZOOMS)
                         .max_rows(12)
                         .can_rename(|key| matches!(key, PresetKey::Item(_)))
@@ -497,9 +501,10 @@ impl StackDialog for PresetManagerDialog {
     fn set_json_field(&mut self, ctx: &egui::Context, field: &str, value: Value) -> Result<(), String> {
         match field {
             "kind" => {
-                let k = value.as_str().filter(|k| KINDS.iter().any(|(id, _)| id == k)).ok_or_else(|| {
-                    format!("`kind` can't take {value}: one of {}", KINDS.iter().map(|(k, _)| *k).collect::<Vec<_>>().join(", "))
-                })?;
+                let k = value
+                    .as_str()
+                    .filter(|k| KINDS.iter().any(|(id, _)| id == k))
+                    .ok_or_else(|| format!("`kind` can't take {value}: one of {}", KINDS.iter().map(|(k, _)| *k).collect::<Vec<_>>().join(", ")))?;
                 if k != self.kind {
                     self.kind = k.to_string();
                     self.selected.clear();
@@ -509,9 +514,10 @@ impl StackDialog for PresetManagerDialog {
                 Ok(())
             }
             "view" => {
-                let v = value.as_str().and_then(View::parse).ok_or_else(|| {
-                    format!("`view` can't take {value}: one of {}", View::ALL.iter().map(|v| v.id()).collect::<Vec<_>>().join(", "))
-                })?;
+                let v = value
+                    .as_str()
+                    .and_then(View::parse)
+                    .ok_or_else(|| format!("`view` can't take {value}: one of {}", View::ALL.iter().map(|v| v.id()).collect::<Vec<_>>().join(", ")))?;
                 self.set_view(v);
                 Ok(())
             }
@@ -568,28 +574,25 @@ fn thumb(app: &PhotocraftApp, ctx: &egui::Context, kind: &str, group: &str, name
     let s = &app.session;
     match kind {
         "swatch" => hint.and_then(|h| Color32::from_hex(h).ok()).map_or(Thumb::None, Thumb::Color),
-        "gradient" => s
-            .presets
-            .gradients
-            .iter()
-            .filter(|g| g.name == group)
-            .flat_map(|g| &g.items)
-            .find(|g| g.name == name)
-            .map_or(Thumb::None, |g| Thumb::Gradient(g.resolve(s.tools.foreground, s.tools.background).iter().map(|&(at, c)| (at, Srgba::new(c[0], c[1], c[2], c[3]))).collect())),
-        "pattern" => s.patterns.items.iter().find(|p| p.id == key).map_or(Thumb::None, |p| Thumb::Texture(crate::panels::preset_browser::pattern_texture(ctx, p))),
+        "gradient" => s.presets.gradients.iter().filter(|g| g.name == group).flat_map(|g| &g.items).find(|g| g.name == name).map_or(Thumb::None, |g| {
+            Thumb::Gradient(g.resolve(s.tools.foreground, s.tools.background).iter().map(|&(at, c)| (at, Srgba::new(c[0], c[1], c[2], c[3]))).collect())
+        }),
+        "pattern" => {
+            s.patterns.items.iter().find(|p| p.id == key).map_or(Thumb::None, |p| Thumb::Texture(crate::panels::preset_browser::pattern_texture(ctx, p)))
+        }
         "style" => s.presets.styles.iter().flat_map(|g| &g.items).find(|st| st.name == name).map_or(Thumb::None, |st| {
             let cache = ("pigment-preset-manager-style", st.name.clone(), st.effects.len(), s.presets.rev);
             Thumb::Texture(TextureCache::texture(ctx, cache, || crate::panels::preset_browser::style_image(s, st)))
         }),
-        "shape" => photocraft_engine::presets::shapes::all_groups(s)
-            .iter()
-            .filter(|g| g.name == group)
-            .flat_map(|g| &g.items)
-            .find(|sh| sh.name == name)
-            .map_or(Thumb::None, |sh| {
-                let cache = ("pigment-preset-manager-shape", sh.name.clone(), sh.path.subpaths.iter().map(|p| p.knots.len()).sum::<usize>());
-                Thumb::Texture(TextureCache::texture(ctx, cache, || crate::panels::preset_browser::shape_image(sh)))
-            }),
+        "shape" => {
+            photocraft_engine::presets::shapes::all_groups(s).iter().filter(|g| g.name == group).flat_map(|g| &g.items).find(|sh| sh.name == name).map_or(
+                Thumb::None,
+                |sh| {
+                    let cache = ("pigment-preset-manager-shape", sh.name.clone(), sh.path.subpaths.iter().map(|p| p.knots.len()).sum::<usize>());
+                    Thumb::Texture(TextureCache::texture(ctx, cache, || crate::panels::preset_browser::shape_image(sh)))
+                },
+            )
+        }
         "brush" => s.tools.presets.iter().find(|b| b.name == name).map_or(Thumb::None, |b| {
             let br = &b.brush;
             let sig = crate::panels::brush_preview::tip_sig(&br.tip, br.hardness, br.angle, br.roundness, (false, false));
@@ -602,7 +605,9 @@ fn thumb(app: &PhotocraftApp, ctx: &egui::Context, kind: &str, group: &str, name
             .contours
             .iter()
             .find_map(|c| match c {
-                photocraft_doc::Contour::Custom { name: n, points, .. } if n == name => Some(Thumb::Curve(points.iter().map(|p| [p.input, p.output]).collect())),
+                photocraft_doc::Contour::Custom { name: n, points, .. } if n == name => {
+                    Some(Thumb::Curve(points.iter().map(|p| [p.input, p.output]).collect()))
+                }
                 _ => None,
             })
             .unwrap_or(Thumb::None),
@@ -710,9 +715,15 @@ fn run_ask(app: &mut PhotocraftApp, kind: &str, ask: Ask) -> Result<Value, Strin
             let label = kind_label(kind);
             let replace = ask == Ask::Replace;
             let (title, text) = if replace {
-                (crate::i18n::fmt(tl!("Replace {kind}"), &[("kind", label)]), crate::i18n::fmt(tl!("Replace current {kind} with the presets from a file?"), &[("kind", label)]))
+                (
+                    crate::i18n::fmt(tl!("Replace {kind}"), &[("kind", label)]),
+                    crate::i18n::fmt(tl!("Replace current {kind} with the presets from a file?"), &[("kind", label)]),
+                )
             } else {
-                (crate::i18n::fmt(tl!("Reset {kind}"), &[("kind", label)]), crate::i18n::fmt(tl!("Replace current {kind} with the default {kind}?"), &[("kind", label)]))
+                (
+                    crate::i18n::fmt(tl!("Reset {kind}"), &[("kind", label)]),
+                    crate::i18n::fmt(tl!("Replace current {kind} with the default {kind}?"), &[("kind", label)]),
+                )
             };
             let prompt = StandardPrompt::custom(text)
                 .title(title)
@@ -744,12 +755,8 @@ fn run_ask(app: &mut PhotocraftApp, kind: &str, ask: Ask) -> Result<Value, Strin
 /// Load… (or Replace…) of `kind`: a file of the kind's extensions. Load… of a file File › Open imports goes through
 /// `preset_files_ui::open`; the rest, and every Replace…, through the engine's `load`.
 fn load(app: &mut PhotocraftApp, kind: &str, replace: bool) -> Result<Value, String> {
-    let exts: Vec<String> = app
-        .session
-        .execute(CMD, json!({"kind": kind}))
-        .ok()
-        .and_then(|out| serde_json::from_value(out["info"][kind]["load"].clone()).ok())
-        .unwrap_or_default();
+    let exts: Vec<String> =
+        app.session.execute(CMD, json!({"kind": kind})).ok().and_then(|out| serde_json::from_value(out["info"][kind]["load"].clone()).ok()).unwrap_or_default();
     let filter: Vec<String> = exts.clone();
     let filter: Vec<&str> = filter.iter().map(String::as_str).collect();
     let kind = kind.to_string();

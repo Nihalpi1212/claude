@@ -214,9 +214,7 @@ fn row_of(rows: &[Row], p: &Value) -> Result<usize> {
     }
     let name = p.get("name").and_then(Value::as_str).ok_or_else(|| bad(CMD, "give `index` or `name`"))?;
     let group = p.get("group").and_then(Value::as_str);
-    rows.iter()
-        .position(|r| r.name == name && group.is_none_or(|g| r.group == g))
-        .ok_or_else(|| bad(CMD, format!("no preset named `{name}`")))
+    rows.iter().position(|r| r.name == name && group.is_none_or(|g| r.group == g)).ok_or_else(|| bad(CMD, format!("no preset named `{name}`")))
 }
 
 /// The rows `p` names: `indices` (several, all or none), else one by `index` or `name`.
@@ -363,7 +361,9 @@ fn load(s: &mut Session, p: &Value) -> Result<Value> {
     let ext = extension(&name).ok_or_else(|| bad(CMD, "give `path`, or `data` with a `fileName`: the extension says what the file holds"))?;
     let kind = match p.get("kind").and_then(Value::as_str) {
         Some(k) => library_or_err(k)?.id(),
-        None => kind_of_extension(&ext).ok_or_else(|| bad(CMD, format!("give `kind`: .{ext} is not a preset file the manager reads, or several kinds take it")))?,
+        None => {
+            kind_of_extension(&ext).ok_or_else(|| bad(CMD, format!("give `kind`: .{ext} is not a preset file the manager reads, or several kinds take it")))?
+        }
     };
     let (_, _, command) = LOADERS
         .iter()
@@ -390,7 +390,10 @@ fn load(s: &mut Session, p: &Value) -> Result<Value> {
     let group = stem(&name);
     let lib = library_or_err(kind)?;
     // The commands that keep the file's name as the new group's take it from `path` only.
-    let named_group = matches!(*command, "brush.presets.importAbr" | "swatches.import" | "gradient.presets.importGrd" | "style.presets.importAsl" | "shape.presets.importCsh");
+    let named_group = matches!(
+        *command,
+        "brush.presets.importAbr" | "swatches.import" | "gradient.presets.importGrd" | "style.presets.importAsl" | "shape.presets.importCsh"
+    );
     if named_group && p.get("data").is_some() && !group.is_empty() {
         q.insert("group".into(), json!(group));
     }
@@ -779,7 +782,12 @@ impl Library for Patterns {
             .pattern_groups
             .iter()
             .flat_map(|g| {
-                g.items.iter().filter_map(|id| lib.iter().find(|p| &p.id == id)).map(|p| Row { group: g.name.clone(), name: p.display_name().to_string(), key: p.id.clone(), hint: None })
+                g.items.iter().filter_map(|id| lib.iter().find(|p| &p.id == id)).map(|p| Row {
+                    group: g.name.clone(),
+                    name: p.display_name().to_string(),
+                    key: p.id.clone(),
+                    hint: None,
+                })
             })
             .collect())
     }

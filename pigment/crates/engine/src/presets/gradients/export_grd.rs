@@ -32,8 +32,11 @@ pub fn to_grd(preset: &GradientPreset) -> GrdGradient {
             },
         })
         .collect();
-    let opacity =
-        if preset.opacity.is_empty() { vec![(0.0, 1.0, 0.5), (1.0, 1.0, 0.5)] } else { preset.opacity.iter().map(|&(at, o)| (clamp(at), clamp(o), 0.5)).collect() };
+    let opacity = if preset.opacity.is_empty() {
+        vec![(0.0, 1.0, 0.5), (1.0, 1.0, 0.5)]
+    } else {
+        preset.opacity.iter().map(|&(at, o)| (clamp(at), clamp(o), 0.5)).collect()
+    };
     GrdGradient { name: preset.name.clone(), noise: false, stops, opacity }
 }
 

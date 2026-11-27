@@ -9,6 +9,17 @@ still running (expected red on `every_adjustment_command_runs`, fixed by `90265f
 package pushed, so there was no red run on `8821fdf` or later to fix. **The next engineer checks CI first**: the runs
 on `8821fdf` and on this package's commits (see "Commits").
 
+## Commits (pushed)
+
+- `ac26271` Pigment Preset Manager for every kind (P1a), engine: edit.presets.presetManager over nine kinds,
+  gradient.presets.exportGrd
+- `1c92254` Pigment Preset Manager for every kind (P1a), interface: the dialog's views, multi-select, Load, Save Set,
+  Reset and Replace
+
+CI when this package returned: 46038027153 (`75ec448`) failed only on `engine tests::every_adjustment_command_runs`,
+as expected (fixed by `90265ff`); 46041402514 (`8821fdf`) was still running; the runs on `ac26271` and `1c92254` were
+queued. Not waited for, as the brief says: check them first.
+
 ## What was built
 
 1. **Engine**, `crates/engine/src/cmd/edit_menu_cmds/preset_manager.rs` (new, Pigment's): `edit.presets.presetManager`
@@ -120,7 +131,39 @@ New: `crates/engine/src/cmd/edit_menu_cmds/preset_manager.rs`, `.../preset_manag
 `crates/ui-egui/src/dialogs/preset_manager_ui/tests.rs`. Edited: the hook files, `docs/FORK.md`, `scorecard/ui.toml`,
 `docs/scorecard.md` (regenerated), `docs/file-format-parity.md`.
 
-TESTS_AND_CHECKS
+## Tests (all green here)
+
+- engine `cmd::edit_menu_cmds::preset_manager::tests` (11): `list` covers all nine kinds with thumbnails, rows,
+  load/save extensions and `canReset`; a defined custom shape is listed once (in `Custom Shapes`), renamed and deleted
+  through the manager and refused a move out of its group; multi-delete through `indices` removes exactly those presets
+  in every kind, all or none; rename in every kind and move in every kind that reorders (`to`, `toGroup` + `position`);
+  **Save Set… writes a file that Replace… loads back with the same names** (.aco, .asl, .pat, .shc, .grd, .pcpresets),
+  and Load… adds; saveSet to a path, one preset names the file, formats checked, adjustments one at a time; **load
+  dispatches .abr .aco .ase .gpl .grd .asl .pat .shc .csh .acv .pcpresets** to their kinds (the .abr built with
+  craft-psd's writer, the .csh with `tests/common/csh_fixture.rs`); a Replace of a damaged file changes nothing;
+  reset restores gradients and adjustment built-ins and refuses brushes, patterns, contours; no document history;
+  adversarial params are errors.
+- engine `presets::gradients::export_grd::tests` (2): exportGrd → importGrd keeps names, stop kinds, colours,
+  locations and opacity; by name, group and path; errors.
+- engine lib, all (4212 passed, 17 ignored; `cancelling_the_open_stops_the_smart_filters` skipped, L3's
+  container-speed test), including upstream's `define_custom_shape_and_preset_manager` (adjusted), the three
+  `preset_manager_brush_*` tests and `every_adjustment_command_runs`.
+- engine panic hunt (`--test panic_hunt -- --ignored`): 1 passed (the new and changed commands included).
+- automation `workspace` (56), with `registry_filesystem_path_params_are_classified`.
+- ui-egui `dialogs::preset_manager_ui::tests` (7): opens from the Edit › Presets menu item, lists swatches with their
+  colour chips, draws every kind in grid and list; **Cmd-selecting two gradients and Delete removes both** (plus Cmd
+  toggle and Shift range); **Save Set… of two styles writes the `.asl` through `ScriptedFiles`** and the status says
+  so; Load… of a `.shc` fills the contour library (and File › Open of a `.shc` adds to it); Reset asks first, then
+  restores the tool presets, and kinds without a reset refuse it; **the view is remembered per kind** and across a
+  reopen (in `presets_ui.browsers`); a browser reorder runs the engine's move. Plus `preset_files_ui`,
+  `prefs_ui::tests::edit_dialogs_open`, `preset_browser`, `file_open` (95 in that run, all green).
+
+## Checks
+
+`cargo fmt --all -- --check`; `cargo clippy -p photocraft-engine -p photocraft-ui-egui -p photocraft-automation
+--all-targets -- -D warnings`; `python3 scripts/pigment-rebrand.py --check`; panic hunt; `cargo xtask layers`,
+`panel-commands`, `scorecard` (regenerated `docs/scorecard.md`) and `scorecard --check`, `test-binaries`; `cargo test -p
+xtask`: all green.
 
 ## Not done (with why)
 

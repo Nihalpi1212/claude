@@ -153,7 +153,9 @@ fn save_set_writes_a_file_that_loads_back_with_the_same_names() {
         assert!(file.ends_with(&format!(".{ext}")), "{kind}: {file}");
         // Replace in another session: the library is exactly the file's presets.
         let mut t = session();
-        let r = t.execute(CMD, json!({"action": "load", "kind": kind, "data": data(&out), "fileName": file, "replace": true})).unwrap_or_else(|e| panic!("{kind}: {e}"));
+        let r = t
+            .execute(CMD, json!({"action": "load", "kind": kind, "data": data(&out), "fileName": file, "replace": true}))
+            .unwrap_or_else(|e| panic!("{kind}: {e}"));
         assert_eq!(r["kind"], kind);
         let mut back = names(&mut t, kind);
         back.sort();
@@ -251,7 +253,8 @@ fn load_dispatches_each_extension_to_its_kind() {
 fn a_replace_that_fails_changes_nothing() {
     let mut s = session();
     let before = names(&mut s, "gradients");
-    let r = s.execute(CMD, json!({"action": "load", "data": photocraft_paint::tile::b64_encode(b"not a gradient file"), "fileName": "Bad.grd", "replace": true}));
+    let r =
+        s.execute(CMD, json!({"action": "load", "data": photocraft_paint::tile::b64_encode(b"not a gradient file"), "fileName": "Bad.grd", "replace": true}));
     assert!(r.is_err());
     assert_eq!(names(&mut s, "gradients"), before);
     let before = names(&mut s, "brushes");
