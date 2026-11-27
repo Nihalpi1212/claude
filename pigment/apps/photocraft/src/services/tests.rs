@@ -88,6 +88,41 @@ fn busy_native_clipboard_preserves_copied_shape() {
     }
 }
 
+/// Pigment: the brush presets live in `Preset Library`, never in PhotoCraft's `Presets`, which on
+/// Windows and macOS is the same folder as Pigment 0.1–0.4's `presets` (docs/FORK.md).
+#[test]
+fn brush_presets_live_in_the_preset_library_folder() {
+    assert_eq!(PRESETS_DIR, "Preset Library");
+    assert_eq!(presets_dir(), config_dir().map(|d| d.join("Preset Library")));
+    let src = include_str!("../services.rs");
+    assert!(!src.contains(r#"join("Presets")"#), "nothing writes PhotoCraft's folder name");
+}
+
+/// Pigment makes no network request on its own (docs/FORK.md): the native services start no
+/// update check, and the app installs no updates.
+#[test]
+fn the_native_services_never_check_for_updates() {
+    let src = include_str!("../services.rs");
+    let main = include_str!("../main.rs");
+    for text in [src, main] {
+        for call in ["check_now(", "check_at_start(", "self_update::finish(", "Updater::"] {
+            assert!(!text.contains(call), "{call}");
+        }
+    }
+}
+
+/// Pigment's agents gate (docs/FORK.md): the app never watches the ArtCraft Launcher's switch and
+/// never reads the suite's feature flags; its own switch alone lets agents in.
+#[test]
+fn the_app_never_watches_the_artcraft_launcher() {
+    let main = include_str!("../main.rs");
+    for call in ["AgentSwitch::watch", "agents::mcp_flag(", "agents::launcher_allows(", "craft_flags::"] {
+        assert!(!main.contains(call), "{call}");
+    }
+    assert!(main.contains("AgentSwitch::fixed("));
+    assert!(!photocraft_automation::agent_link::mcp_flag() && !photocraft_automation::agent_link::launcher_allows_agents());
+}
+
 #[test]
 fn xwayland_command_matches_how_photocraft_was_installed() {
     // Flatpak: WAYLAND_DISPLAY doesn't reach the sandbox's socket choice; flatpak's flags do.

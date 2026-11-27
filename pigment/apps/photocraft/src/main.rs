@@ -117,7 +117,7 @@ fn automation_workspace(
 }
 
 /// The control port this launch listens on, and the warning to print when a request was refused.
-/// Only `--control` (or `PHOTOCRAFT_CONTROL_PORT`) opens one at launch: the agent link starts and
+/// Only `--control` (or `PIGMENT_CONTROL_PORT`) opens one at launch: the agent link starts and
 /// stops its own while the app runs (`craft::automation::agents::AgentLink`). Allow Agent Control
 /// off refuses the flag too, and says so rather than ignoring it silently.
 fn control_port_for(cli: Option<u16>, prefs: &photocraft_engine::prefs::Integrations) -> (Option<u16>, Option<String>) {
@@ -141,7 +141,7 @@ fn control_port_for(cli: Option<u16>, prefs: &photocraft_engine::prefs::Integrat
 fn native_options(frame: &Frame) -> eframe::NativeOptions {
     let viewport = egui::ViewportBuilder::default().with_icon(app_icon::viewport_icon(std::env::current_exe().ok().as_deref()));
     let viewport =
-        viewport.with_app_id(APP_ID).with_title("PhotoCraft").with_inner_size([1440.0, 900.0]).with_min_inner_size(MIN_WINDOW_SIZE).with_drag_and_drop(true);
+        viewport.with_app_id(APP_ID).with_title("Pigment").with_inner_size([1440.0, 900.0]).with_min_inner_size(MIN_WINDOW_SIZE).with_drag_and_drop(true);
     eframe::NativeOptions {
         viewport: window_policy::apply(viewport, frame),
         centered: true,
@@ -656,23 +656,25 @@ fn main() -> eframe::Result {
                     log::warn!("couldn't remember GPU backend {}: {e}", b.name());
                 }
             });
-            // Agents in the open window. Behind the suite's AI-MCP flag the ArtCraft Launcher's
-            // switch (Settings › AI agents) is the one consent; without it, as before, a Control
-            // Port saved in the preferences. The launch flags (`--control`) manage the connection
-            // for the whole run instead.
-            app.services.agent_switch = Some(craft::automation::agents::AgentSwitch::watch(photocraft_automation::agent_link::LAUNCHER_APP_ID, {
-                let ctx = cc.egui_ctx.clone();
-                craft::host::Wake::new(move || ctx.request_repaint())
-            }));
+            // Agents in the open window. Pigment's own switch (Preferences › AI Integrations › Let
+            // AI apps use this window, `connectAgents`, off by default) is the one consent: Pigment
+            // reads neither the suite's feature flags nor the ArtCraft Launcher's switch, so the
+            // switch is fixed off and nothing watches the launcher's files (docs/FORK.md). The
+            // launch flags (`--control`) manage the connection for the whole run instead.
+            app.services.agent_switch = Some(craft::automation::agents::AgentSwitch::fixed(
+                photocraft_automation::agent_link::mcp_flag(),
+                photocraft_automation::agent_link::launcher_allows_agents(),
+            ));
             let link = if let Some((listener, token, _)) = control {
                 let host = craft::ui::runtime::windows::WindowHost::of(&cc.egui_ctx);
                 let (requests, server) = craft::automation::server::serve(listener, token, host)?;
-                eprintln!("photocraft: control server listening on {}", server.addr);
+                eprintln!("pigment: control server listening on {}", server.addr);
                 app = app.with_control(requests);
                 craft::automation::agents::AgentLink::from_launch(server)
             } else {
                 app.services.agent_automation = Some(Box::new(services::agent_automation));
-                craft::automation::agents::AgentLink::new(services::config_dir(), photocraft_engine::build_info::long_version())
+                // The connection file names Pigment's version line, for diagnostics.
+                craft::automation::agents::AgentLink::new(services::config_dir(), photocraft_format::brand::version_line())
             };
             app.services.agent_link = Some(link);
             #[cfg(target_os = "macos")]
