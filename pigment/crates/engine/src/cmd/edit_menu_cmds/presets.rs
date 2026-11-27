@@ -75,6 +75,26 @@ pub struct PresetFile {
     pub brushes: Vec<photocraft_paint::BrushPreset>,
     pub custom_shapes: Vec<CustomShape>,
     pub tool_presets: Vec<crate::presets::tools::ToolPreset>,
+    // Pigment: Export/Import Presets for every kind (P1b): the other six kinds (`preset_file.rs`).
+    // Absent from upstream's three-kind files, and left out when empty.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub swatches: Vec<craft::color_ui::palette::SwatchGroup>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub gradients: Vec<crate::presets::Group<crate::presets::gradients::GradientPreset>>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub styles: Vec<crate::presets::Group<crate::presets::styles::StylePreset>>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub patterns: Vec<super::preset_file::PatternEntry>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub pattern_groups: Vec<crate::presets::Group<String>>,
+    /// The contour library's saved form (`layer.layerStyle.contours.*` curve objects).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub contours: Vec<Value>,
+    /// The Shapes panel's groups (Define Custom Shape results stay in `custom_shapes`).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub shapes: Vec<crate::presets::Group<crate::presets::shapes::ShapePreset>>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub adjustments: Vec<super::preset_file::AdjustmentEntry>,
 }
 
 pub const PRESET_FORMAT: &str = "photocraft-presets";

@@ -242,15 +242,12 @@ fn surface_of_mut(doc: &mut Document, target: FadeTarget) -> Option<&mut Surface
 
 fn export_import(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "edit.presets.exportImportPresets";
-    let kinds: Vec<String> = p
-        .get("kinds")
-        .and_then(Value::as_array)
-        .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
-        .unwrap_or_else(|| ["brushes", "customShapes", "tools"].iter().map(ToString::to_string).collect());
+    // Pigment: Export/Import Presets for every kind (P1b): nine kinds, unknown ones refused.
+    let kinds: Vec<String> = preset_file::kinds_param(p, cmd)?;
     let want = |k: &str| kinds.iter().any(|x| x == k);
     match str_or(p, "action", "export") {
         "export" => {
-            let file = PresetFile {
+            let mut file = PresetFile {
                 format: PRESET_FORMAT.into(),
                 version: 1,
                 brushes: if want("brushes") {
@@ -271,19 +268,28 @@ fn export_import(s: &mut Session, p: &Value) -> Result<Value> {
                 } else {
                     Vec::new()
                 },
+                ..PresetFile::default()
             };
-            Ok(json!({"data": file, "brushes": file.brushes.len(), "customShapes": file.custom_shapes.len(), "tools": file.tool_presets.len()}))
+            // Pigment: Export/Import Presets for every kind (P1b)
+            let pick = preset_file::Pick::All { builtins: bool_or(p, "includeBuiltins", false) };
+            for k in kinds.iter().filter(|k| !matches!(k.as_str(), "brushes" | "tools")) {
+                preset_file::export_kind(s, &mut file, k, &pick, cmd)?;
+            }
+            let mut reply = json!({"brushes": file.brushes.len(), "customShapes": file.custom_shapes.len(), "tools": file.tool_presets.len()});
+            preset_file::export_counts(&file, &kinds, &mut reply);
+            reply["data"] = json!(file);
+            Ok(reply)
         }
         "import" => {
             let data = p.get("data").cloned().ok_or_else(|| bad(cmd, "missing `data` (an exported preset file)"))?;
-            let data = match data {
-                Value::String(text) => serde_json::from_str(&text).map_err(|e| bad(cmd, format!("not a preset file: {e}")))?,
-                v => v,
-            };
-            let file: PresetFile = serde_json::from_value(data).map_err(|e| bad(cmd, format!("not a preset file: {e}")))?;
+            // Pigment: Export/Import Presets for every kind (P1b): old swatches upgraded, bundles told apart
+            let data = preset_file::read_data(cmd, data)?;
+            let mut file: PresetFile = serde_json::from_value(data).map_err(|e| bad(cmd, format!("not a preset file: {e}")))?;
             if file.format != PRESET_FORMAT {
                 return Err(bad(cmd, format!("not a preset file (format `{}`)", file.format)));
             }
+            // Pigment: Export/Import Presets for every kind (P1b): the six other kinds, checked first
+            let staged = preset_file::Staged::read(s, &mut file, &kinds, cmd)?;
             // Validate the whole tool import before changing any preset library.
             let mut tools = s.presets.tool_presets.clone();
             let nt = if want("tools") { file.tool_presets.len() } else { 0 };
@@ -335,7 +341,9 @@ fn export_import(s: &mut Session, p: &Value) -> Result<Value> {
                 s.presets.tool_presets = tools;
                 s.presets_changed();
             }
-            Ok(json!({"brushes": nb, "customShapes": ns, "tools": nt}))
+            let mut reply = json!({"brushes": nb, "customShapes": ns, "tools": nt});
+            staged.apply(s, &mut reply);
+            Ok(reply)
         }
         other => Err(bad(cmd, format!("unknown action `{other}` (export|import)"))),
     }
@@ -355,6 +363,8 @@ mod fade;
 mod find_replace;
 // Pigment: Preset Manager for every kind (P1a)
 pub mod preset_manager;
+// Pigment: Export/Import Presets for every kind (P1b)
+pub mod preset_file;
 mod presets;
 mod purge;
 
@@ -453,7 +463,8 @@ pub fn specs() -> Vec<CommandSpec> {
             "Export/Import Presets…",
             ["Edit", "Presets"],
             None,
-            r##"{"action":"export|import","kinds":["brushes","customShapes","tools"]?,"data":json (import),"includeBuiltins":bool=false}"##,
+            // Pigment: Export/Import Presets for every kind (P1b)
+            r##"{"action":"export|import","kinds":["brushes"|"swatches"|"gradients"|"styles"|"patterns"|"contours"|"customShapes"|"tools"|"adjustments",…]?=["brushes","customShapes","tools"],"data":json (import: a .pcpresets file, as an object or its text),"includeBuiltins":bool=false (export: also the built-in presets as shipped)} → export {data, <kind>: count}; import {<kind>: added, skipped:{<kind>: n}} (the six kinds Pigment adds append to the group of the same name and skip a preset already there, so importing twice adds nothing)"##,
             always,
             export_import
         ),
