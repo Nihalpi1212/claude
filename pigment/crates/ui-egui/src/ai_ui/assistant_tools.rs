@@ -34,9 +34,10 @@ use photocraft_engine::generative::ToolSpec;
 use photocraft_engine::jobs::JobId;
 use serde_json::{Map, Value, json};
 
+use craft::ui::patterns::form_dialogs::{Param, ParamKind};
+
 use super::FILL;
 use crate::PhotocraftApp;
-use crate::filter_dialog::{Kind, parse_spec};
 
 /// Tool rounds per turn (JS `MAX_ROUNDS`).
 pub const MAX_ROUNDS: usize = 12;
@@ -462,11 +463,11 @@ pub fn blocked(id: &str, params: &Value) -> Result<(), String> {
     }
     // The values the command itself lists for each of its params.
     let choices: HashMap<String, Vec<String>> = photocraft_engine::commands::find(id)
-        .map(|spec| parse_spec(spec.params))
+        .map(|spec| Param::parse_list(spec.params))
         .unwrap_or_default()
         .into_iter()
         .filter_map(|p| match p.kind {
-            Kind::Choice { options, .. } => Some((p.key, options)),
+            ParamKind::Choice { options, .. } => Some((p.key, options.into_iter().map(|(id, _)| id).collect())),
             _ => None,
         })
         .collect();
@@ -533,16 +534,15 @@ impl Ranges {
     /// From a command's params spec: the same fields its dialog is built from.
     fn of(spec: &str) -> Self {
         let mut r = Self::none();
-        for p in parse_spec(spec) {
+        // The framework's parse of the notation (the one the command's dialog is built from); its
+        // bounds are the spec's decimal text read as `f64`, so 0.1 stays 0.1.
+        for p in Param::parse_list(spec) {
             match p.kind {
-                Kind::Range { min, max, .. } if min <= max => {
-                    // Through the decimal text, so 0.1 stays 0.1 (not the f32's 0.100000001, which
-                    // a command would refuse as out of range at the upper end).
-                    let exact = |x: f32| x.to_string().parse::<f64>().unwrap_or(f64::from(x));
-                    r.range.insert(p.key.clone(), (exact(min), exact(max)));
+                ParamKind::Range { min, max, .. } if min <= max => {
+                    r.range.insert(p.key.clone(), (min, max));
                     r.numeric.insert(p.key);
                 }
-                Kind::Int { .. } => {
+                ParamKind::Int { .. } => {
                     r.numeric.insert(p.key);
                 }
                 _ => {}
@@ -1237,9 +1237,9 @@ fn run_command(app: &mut PhotocraftApp, ctx: &egui::Context, args: &Map<String, 
     } else if !crate::menus::is_enabled(app, &id) {
         return Err(format!("Command \"{id}\" is not available right now"));
     }
-    let open_before = app.ui.dialogs.len();
+    let open_before = app.dialog_count();
     let r = crate::menus::invoke(app, ctx, &id, params)?;
-    if app.ui.dialogs.len() > open_before {
+    if app.dialog_count() > open_before {
         return Ok(Outcome::Dialog { open_before, result: r });
     }
     finish(app, Ok(r), |_, v| Ok(plain_result(v)))

@@ -8,7 +8,7 @@
 //! (experimental, chat models only): the same listener plays the sign-in server and the plan
 //! route, and the test plays the browser.
 //!
-//! The Assistant's tests are in `ai_assistant.rs` (ported last in the 057297b merge).
+//! The Assistant's tests are in `ai_assistant.rs`.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
