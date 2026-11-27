@@ -5,8 +5,9 @@ Pigment is a free, open-source image editor based on
 contributors (MIT OR Apache-2.0). This page says what Pigment changed, which upstream revision it
 is built on, and how to bring in a later upstream revision without losing the rebrand.
 
-- **Upstream revision:** `abb30dff47638eaa38a09de11b60ae8a14baa334`, PhotoCraft workspace version
-  0.23.1. The current revision is always in [`UPSTREAM-REVISION`](../UPSTREAM-REVISION); the version
+- **Upstream revision:** `057297bb0b0872244ac0910e640db8d87e46572f` (PhotoCraft's `main` on
+  19 November 2026), PhotoCraft workspace version 0.23.1. Pigment 0.5.0 was built on `abb30df`
+  ([below](#upstream-after-the-import)). The current revision is always in [`UPSTREAM-REVISION`](../UPSTREAM-REVISION); the version
   Pigment names in `--version` and About is `UPSTREAM_VERSION` in
   [`crates/format/src/brand.rs`](../crates/format/src/brand.rs), followed by `UPSTREAM_REVISION`, the
   first 7 characters of `UPSTREAM-REVISION` (upstream's version moves slowly while its tree moves fast;
@@ -21,18 +22,69 @@ is built on, and how to bring in a later upstream revision without losing the re
 
 ## Upstream after the import
 
-PhotoCraft kept moving fast after Pigment imported it. On 18 November 2026 upstream's `main` was at
-`6dbe43e`: 1,760 files changed since `abb30df`, with about 127,000 lines added and 278,000 removed
-(172 commits on `main` since 15 November alone). **Pigment 0.5.0 does not include any of it:** a
-merge of that size is not a small step to take in the last days before a release, and every Pigment
-hook below would have to be checked against it.
+Pigment 0.5.0 was built on upstream `abb30df` (15 November 2026). PhotoCraft kept moving fast: by
+19 November its `main` was at `057297b`, 1,856 files changed (about 132,000 lines added and 282,000
+removed), most of it the interface rebuilt on the craft framework (`craft::ui`, `craft::menu`,
+`craft::automation`, `craft::settings`, `craft::update`, `craft::theme_store`) from craft-libs
+`18ffc07`. Pigment merged `057297b` after the 0.5.0 release, before the 0.6 work (the packages
+listed on the [parity page](parity/README.md#the-06-packages)), following
+[Merging a later upstream revision](#merging-a-later-upstream-revision): one commit with upstream's
+change alone, then one per area that put Pigment's hooks back on the new code. The hook tables on
+this page name the places they have now.
 
-The merge is planned as its own step right after the 0.5.0 release, before the 0.6 work (the
-packages listed on the [parity page](parity/README.md#the-06-packages)) starts, while the gap is
-still manageable: upstream moves by thousands of lines a day. It follows
-[Merging a later upstream revision](#merging-a-later-upstream-revision) below. Until then
-`UPSTREAM-REVISION` stays `abb30df`, and the parity page and PhotoCraft's own documents in `docs/`
-describe that revision.
+What the framework changed for Pigment's promises, and what Pigment does about it:
+
+- **Updates.** Help › Check for Updates and its result window are craft-update's `Updater`
+  (`crates/ui-egui/src/updates_ui.rs`); Pigment's `check` opens the releases page instead of
+  `Updater::check_now`, and nothing calls `Updater::check_at_start` (the once-per-launch check) or
+  `craft::update::self_update::finish` (`--finish-update`). Upstream's `apps/photocraft/src/updates.rs`
+  and `crates/engine/src/cmd/updates_cmds.rs` are gone; the releases link lives in
+  `crates/engine/src/build_info.rs` (`RELEASES`).
+- **Agents.** The connection file, token, probe and the ArtCraft Launcher's switch moved into
+  `craft::automation::agents`; Pigment's gate stays `crates/automation/src/agent_link.rs` (below),
+  the app builds `AgentSwitch::fixed(false, false)` instead of upstream's `AgentSwitch::watch`
+  (which polls the launcher's files), and Preferences › AI Integrations is Pigment's switch above
+  the framework's `AgentsPage` drawn with `mcp_flag(true)` in Pigment's words
+  ([below](#ai-agents-and-mcp)).
+- **Settings.** Preferences are saved in `config.toml` (`craft::settings::SettingsStore`); a
+  `preferences.json` of Pigment 0.5.0 is read once while no `config.toml` exists, with its
+  `connectAgents`, `controlPort` and agent folders, and never written again.
+- **Themes.** The framework keeps themes in the folder the Craft apps share
+  (`ArtCraft/themes`, or `$CRAFT_SUITE_DIR`); Pigment opens its own, `Themes` in its settings
+  folder (`SuiteDir::at`, `crates/ui-egui/src/app/framework.rs::open_suite`,
+  `app/prefs.rs::THEME_FOLDER`).
+- **Words that live in craft-libs.** The framework's agents page named the ArtCraft Launcher in
+  `agents.intro` and `agents.off`; Pigment overrides those two rows
+  (`prefs/prefs_ui/agents.rs::pigment_words`). The rest of the framework's words come from the same
+  craft-i18n catalogs `build.rs` rebrands, and its host name is "Pigment"
+  (`app/framework.rs`, `AppInfo`), so "When Pigment is closed", "About Pigment" and the alerts'
+  titles name Pigment.
+- **The version line** names the upstream revision too:
+  `Pigment 0.5.0 (based on PhotoCraft 0.23.1+057297b)`, since upstream's version 0.23.1 now names
+  two very different trees.
+
+The [parity page](parity/README.md) measures Pigment 0.5.0 (`abb30df`) and was not measured again
+for the merge; PhotoCraft's own documents in `docs/` and `book/` came with the merge and describe
+`057297b`.
+
+Decisions on upstream's new product-name strings (the rebrand script wrote all of them; these are
+the ones that needed a choice):
+
+| String | Where | Decision |
+|---|---|---|
+| "PhotoCraft Basics", the new default actions set | `crates/engine/src/cmd/actions_edit_cmds/library_commands.rs` (`BASICS_SET`) | "Pigment Basics": a name people see; it is matched only against itself |
+| A CUBE LUT's creator line, `write_cube_export("PhotoCraft", …)` | `crates/engine/src/cmd/file_cmds/export.rs` | "Pigment", as 0.5.0 wrote |
+| "PhotoCraft Manages Colors" (print dialog) | `crates/ui-egui/src/dialogs/file_ui/print.rs` | "Pigment Manages Colors"; the stored id `photocraftManages` stays |
+| "{n} steps have no PhotoCraft equivalent yet" (Actions panel, `.atn` import) | `crates/ui-egui/src/panels/actions/files.rs`, `crates/engine/src/cmd/atn_cmds.rs` | "Pigment" |
+| The open and save type "PhotoCraft" with `pcraft` | `crates/ui-egui/src/file_dialog/filters.rs` (moved there from the app's `services.rs`) | "Pigment" with `pigment` first, then `pcraft` |
+| The framework's host name, viewport title, `os_window::APP_ID`, the screen picker's owner | `app/framework.rs`, `apps/photocraft/src/main.rs`, `os_window.rs` | Pigment's name and id; the host id stays `photocraft` (an internal key) |
+| Raw warnings "… not applied by PhotoCraft" | `crates/raw/src/shared.rs` | "Pigment" |
+| "Save Full-Size Composite in .pcraft Files" (upstream moved the label into a table) | `prefs/prefs_ui/fields.rs` (`label_override`) | ".pigment", as 0.5.0 said and as the rebranded catalogs translate it |
+| craft-update's `App::website()` (getartcraft.com) and suite apps | craft-libs | not called by Pigment |
+
+Labels of Pigment's own features (Generative Fill…, Generative Expand, …) are 0.5.0's. Upstream's
+AGENTS.md rule 10 ("Our features use our own names") arrived with this revision; whether it applies
+to them is a question for the project's owner, and ids never change either way.
 
 Everything in PhotoCraft's docs (`docs/*.md` other than this page, the release notes and
 `docs/parity/`, `book/`) describes PhotoCraft as it was at the upstream revision; read "PhotoCraft"
@@ -66,17 +118,18 @@ The rebrand keeps every crate, package and module name (`photocraft-*`, `photocr
 | FreeBSD and Linux trees | `bin/photocraft`, `share/doc/photocraft`, `photocraft-<ver>-freebsd-<arch>.tar.gz` | `bin/pigment`, `share/doc/pigment`, `pigment-<ver>-freebsd-<arch>.tar.gz`; deb/rpm package `pigment` |
 | Settings, logs, Data Recovery, presets folder | `Photocraft` (`~/.config/photocraft`, `%APPDATA%\Photocraft`, `~/Library/Application Support/Photocraft`; recovery in `%LOCALAPPDATA%\Photocraft` and `$XDG_STATE_HOME/photocraft`) | `Pigment` (`~/.config/pigment`, `%APPDATA%\Pigment`, `~/Library/Application Support/Pigment`; `%LOCALAPPDATA%\Pigment`, `$XDG_STATE_HOME/pigment`); nothing is read from PhotoCraft's or ArtCraft's folders |
 | Brush and preset library in the settings folder | `Presets` | `Preset Library` (see [the clash check](#the-settings-folder-and-pigment-0104)) |
+| Themes (Preferences › Interface, the theme editor) | the folder the Craft apps share: `~/.config/ArtCraft/themes`, `%LOCALAPPDATA%\ArtCraft\themes`, `~/Library/Application Support/ArtCraft/themes`, or `$CRAFT_SUITE_DIR` | `Themes` in Pigment's settings folder (`SuiteDir::at`); `CRAFT_SUITE_DIR` is not read |
 | Portable mode | `portable.txt` beside the exe, `PhotoCraftData` | `portable.txt`, `PigmentData` |
 | Log file | `logs/photocraft.log` (`photocraft.1.log` …), lock `photocraft.lock` | `logs/pigment.log` (`pigment.1.log` …), lock `pigment.lock` |
 | Native file extension | `.pcraft` | `.pigment` (MIME `application/x-pigment`, "Pigment Image"; macOS type `io.github.nihalpi1212.pigment.document`); `.pcraft` still opens and can still be saved |
 | Pigment 0.1–0.4 documents | — | a `.pigment` ZIP with `document.json` and `layers/<id>.png` is recognised by content and converted ([below](#documents-from-pigment-0104)) |
-| Shortcut set and actions | "PhotoCraft Defaults", "PhotoCraft Actions" | "Pigment Defaults", "Pigment Actions" |
+| Shortcut set and actions | "PhotoCraft Defaults", "PhotoCraft Actions", "PhotoCraft Basics" | "Pigment Defaults", "Pigment Actions", "Pigment Basics" |
 | MCP server | `serverInfo.name` `photocraft` | `pigment` (title and instructions say Pigment) |
 | Agent consent | the ArtCraft Launcher's switch, behind the suite's `AI-MCP` flag | Pigment's own preference ([below](#ai-agents-and-mcp)) |
 | Windows version resources | ProductName PhotoCraft, CompanyName Learning Machines LLC | ProductName Pigment, CompanyName "Pigment contributors", copyright naming both |
 | App icon | the engraved nine-tailed fox on blue | Pigment's palette-and-brush icon (the JavaScript app's `build/icon.svg`, [`assets/app-icon/`](../assets/app-icon/README.md)): hicolor PNGs, `.ico`, `.icns`, the runtime icons, the brand mark, the MSI art (drawn from it by `package.ps1`) |
 | Help menu, About, start screen links | ArtCraft Discord, getartcraft.com, `storytold/photocraft` | Report an Issue, Pigment on GitHub, Pigment Releases, PhotoCraft (upstream project) |
-| About | "Part of ArtCraft", Discord button | `Pigment 0.5.0 (based on PhotoCraft 0.23.1+057297b)`, "Pigment is based on PhotoCraft by the ArtCraft team and the PhotoCraft contributors (MIT OR Apache-2.0)", with the upstream contributors list kept |
+| About (the framework's, `crates/ui-egui/src/dialogs/credits.rs::about_info`) | "Part of ArtCraft", Discord button | no community button; `Pigment 0.5.0 (based on PhotoCraft 0.23.1+057297b)`, "Pigment is based on PhotoCraft by the ArtCraft team and the PhotoCraft contributors (MIT OR Apache-2.0)", with the upstream contributors list kept |
 | Interface translations | craft-i18n's `photocraft.tsv` and `common.tsv`, embedded raw | the same catalogs, rebranded by `crates/ui-egui/build.rs` as it embeds them |
 | README, NOTICE, ATTRIBUTION.md | PhotoCraft's | Pigment's README; NOTICE and ATTRIBUTION.md keep upstream's text with Pigment's lines added |
 | `docs/brand/` (ArtCraft's name, wordmark and logos) | shipped, under a trademark licence that tells forks to remove them | removed |
@@ -102,8 +155,9 @@ The opened document keeps its file (`ImportResult::source_read_only` is false) a
 import report (`Metadata::import_conversion`, source format `pigment-0.1-0.4`) that says where it
 came from and lists what was approximated or left out. In the interface, the first File › Save over
 a file that is still a Pigment 0.1–0.4 document asks "Save in the new Pigment format? Pigment 0.4
-will no longer be able to open this file." (Save / Save As… / Cancel, with "Don't show again";
-`crates/ui-egui/src/dialogs/legacy_save_prompt.rs`). The engine's `file.save` (scripts, agents,
+will no longer be able to open this file." (Save / Save As… / Cancel, with "Don't show again",
+which the framework's prompt keeps only with Save; `crates/ui-egui/src/dialogs/legacy_save_prompt.rs`,
+a framework `StandardPrompt`). The engine's `file.save` (scripts, agents,
 the CLI) and a Save step of an action being played write without asking.
 
 ### The settings folder and Pigment 0.1–0.4
@@ -115,7 +169,7 @@ two folders on case-sensitive file systems). What each writes there:
 
 | Pigment 0.1–0.4 (`src/main/*.js` and Electron itself) | Pigment 0.5 (PhotoCraft's files) |
 |---|---|
-| `settings.json`, `recent.json`, `ai-credentials.json`, `presets/` (`<kind>.json` and `<kind>/<name>`) | `preferences.json`, `ui.ron`, `gpu-compositor.json`, `gpu-starting.json`, `instance.lock`, `instance.json`, `agent-connection.json`, `agent-control.token`, `recovery-migration.lock`, `logs/` (`pigment.log`, `pigment.lock`, `rotate.lock`), `Recovery/` (macOS; Windows keeps it in `%LOCALAPPDATA%\Pigment`), `Presets` → `Preset Library/` (`index.json`, `actions.json`, `patterns.json` and tip bitmaps) |
+| `settings.json`, `recent.json`, `ai-credentials.json`, `presets/` (`<kind>.json` and `<kind>/<name>`) | `config.toml` (the preferences since the `057297b` merge; `config.toml.bak`, the last copy that parsed, and `config.broken-<time>.toml` for a damaged one set aside), `preferences.json` (Pigment 0.5.0's preferences: read once into `config.toml`, never written again), `Themes/` (`selection.json`, `selection.lock`, `library/<theme>.json`), `ai.json` and, on Linux, `ai-keys.json` (generative AI, Pigment's own), `ui.ron`, `gpu-compositor.json`, `gpu-starting.json`, `instance.lock`, `instance.json`, `agent-connection.json`, `agent-control.token`, `recovery-migration.lock`, `logs/` (`pigment.log`, `pigment.lock`, `rotate.lock`), `Recovery/` (macOS; Windows keeps it in `%LOCALAPPDATA%\Pigment`), `Presets` → `Preset Library/` (`index.json`, `actions.json`, `patterns.json` and tip bitmaps) |
 | Electron and Chromium: `Preferences`, `Local State`, `Cache/`, `Code Cache/`, `GPUCache/`, `DawnGraphiteCache/`, `DawnWebGPUCache/`, `Local Storage/`, `Session Storage/`, `IndexedDB/`, `blob_storage/`, `Shared Dictionary/`, `SharedStorage`, `Network Persistent State`, `TransportSecurity`, `Trust Tokens`, `Cookies`, `Crashpad/` | — |
 
 One name clashed: PhotoCraft's `Presets` folder and the JavaScript app's `presets` are the same
@@ -125,6 +179,14 @@ folder on the case-insensitive file systems Windows and macOS use by default, an
 `Preferences` has no extension, PhotoCraft's `preferences.json` has one, and Electron writes no
 `logs`, `Recovery` or `ui.ron`. `com.pigmentapp.app` and `io.github.nihalpi1212.pigment` are
 different application ids, and Pigment 0.5 reads none of the JavaScript app's files.
+
+The `057297b` merge added `config.toml` (and its `.bak` and `.broken-…` copies) and `Themes/`:
+neither name is one the JavaScript app or Electron writes. The framework's settings library can
+also keep presets in `presets/<kind>/` and named settings profiles in `profiles/` beside
+`config.toml` (`craft::settings::PresetFolder::new`, `Profiles`); Pigment calls neither at this
+revision. `presets/` is the JavaScript app's folder: if a later merge starts using
+`PresetFolder::new(config_dir, …)`, give it another folder (or `PresetFolder::in_settings`), as
+`Preset Library` does for PhotoCraft's own presets.
 
 **Install locations do clash.** The JavaScript app's installers used the same places Pigment 0.5's
 use by default, so installing 0.5 there replaces 0.4 instead of installing beside it:
@@ -149,20 +211,34 @@ loads plug-ins and scripts from where the user opens them, and keeps templates i
 ### AI agents and MCP
 
 PhotoCraft lets agents use the open window only behind the suite's `AI-MCP` feature flag
-(`ArtCraft/flags.toml` or `CRAFT_FLAGS`, read by `craft-flags`) and the ArtCraft Launcher's switch
-(the launcher's app list, read by `craft_ai_agents::allowed("photocraft")`). Pigment reads neither:
-`agent_link::mcp_flag()` and `agent_link::launcher_allows_agents()` in
-`crates/automation/src/agent_link.rs` are always false, the app no longer loads the flags file or
-watches the launcher, and the gate is Pigment's own preference, **Preferences › AI Integrations ›
-Let AI apps use this window** (`connectAgents`, also turned on by a Control Port saved in older
-preferences). Allow Agent Control off still refuses agents.
+(`ArtCraft/flags.toml` or `CRAFT_FLAGS`, read by `craft::automation::agents::mcp_flag`) and the
+ArtCraft Launcher's switch (the launcher's app list, read by `agents::launcher_allows("photocraft")`
+and watched by `AgentSwitch::watch`). Pigment reads neither: `agent_link::mcp_flag()` and
+`agent_link::launcher_allows_agents()` in `crates/automation/src/agent_link.rs` are always false,
+`agents_allowed_now` is the framework's rule with those two answers (so Pigment's switch alone), the
+app builds `AgentSwitch::fixed(false, false)` (`apps/photocraft/src/main.rs`) and never starts the
+watch, and the gate is Pigment's own preference, **Preferences › AI Integrations › Let AI apps use
+this window** (`connectAgents`, also turned on by a Control Port saved in older preferences).
+Allow Agent Control off still refuses agents. The connection file and token
+(`agent-connection.json`, `agent-control.token` in the settings folder) are the framework's
+(`craft::automation::agents`), written only while the switch is on; their `app` field reads the
+version line.
+
+The page (`crates/ui-egui/src/prefs/prefs_ui/agents.rs::page`, drawn from `custom_rows.rs`) is
+Pigment's switch, then the framework's `AgentsPage` drawn with `mcp_flag(true)`, so that its two
+agent folders and **When Pigment is closed** show, with its words `agents.intro` and `agents.off`
+replaced by Pigment's (`pigment_words`: they named the ArtCraft Launcher), then generative AI's rows:
+**AI Accounts…** and **Allow agents to run AI commands** (`ai_ui::preferences_rows`). Only the
+person's click changes that permission, as in AI Accounts. `sync_agent_link` lets agents in on
+`connect_agents` alone and never consults the app's `AgentSwitch`.
 
 **Default: off.** That is what PhotoCraft gives a user without the launcher (no app list counts as
 no), and it keeps the command line and the MCP server usable as upstream intends: `pigment-cli mcp`
 serves a headless session with the folders given to it, exactly as before; with the switch on it
 uses the open window and, while the app is closed, does what **When Pigment is closed** says
 (start it, a headless session, or an error). `pigment --control` and `pigment-cli mcp --bridge` work
-as before, whatever the switch. `pigment-cli` always calls its MCP server `pigment`.
+as before, whatever the switch. `pigment-cli` always calls its MCP server `pigment`
+(`agent_link::SERVER_NAME`, read by `server/conventions.rs`).
 Upstream's `pigment-cli mcp` asks `craft::automation::agents::mcp_flag()` before it reaches the open
 window (and links `craft` for that alone); Pigment's asks only `--headless`
 (`apps/photocraft-cli/src/automation.rs`) and its `Cargo.toml` has no `craft` dependency.
@@ -172,14 +248,18 @@ window (and links `craft` for that alone); Pigment's asks only `--headless`
 Pigment never downloads or installs anything and makes no network request on its own:
 
 - **Check for Updates** (`help.checkForUpdates`) opens the releases page in the browser
-  (`crates/ui-egui/src/updates_ui.rs`); it is always enabled, and fetches nothing.
-- The once-per-launch check is gone: the desktop app has no update service (`check_updates` and
-  `last_update` are `None` in `apps/photocraft/src/services.rs`), and `updates_ui::tick` starts no
-  check. **Automatically Check for Updates** is hidden from Preferences
-  (`prefs::HIDDEN_UNTIL_IMPLEMENTED`; the setting still loads and saves). craft-update's release window stays
-  compiled in, pointed at Pigment's repository and ids (`UPDATE_APP` in
-  `crates/ui-egui/src/lib.rs`). `apps/photocraft/src/updates.rs` (PhotoCraft's checker) is kept for
-  merges but not wired in, and the Windows update helper (`--finish-update`) is not wired in.
+  (`updates_ui::check` in `crates/ui-egui/src/updates_ui.rs`, through `links::open`); it is always
+  enabled (`menus/state.rs`), and fetches nothing. The release window's Check Now and Check Again
+  call the same `check`.
+- The once-per-launch check is gone: upstream's checker is craft-update's `Updater`, kept in
+  `updates_ui.rs` for its result window, and nothing calls `Updater::check_now` or
+  `Updater::check_at_start`; `updates_ui::tick` only reads the last update's record, a local file.
+  **Automatically Check for Updates** is hidden from Preferences
+  (`prefs::HIDDEN_UNTIL_IMPLEMENTED`; the setting still loads and saves). The release window is
+  pointed at Pigment's repository and ids (`UPDATE_APP` in `crates/ui-egui/src/lib.rs`). The
+  Windows update helper (`--finish-update`, `craft::update::self_update::finish`) is not wired into
+  `apps/photocraft/src/main.rs`, and the app's `craft-update` dependency is kept only so that
+  `Cargo.toml` and `Cargo.lock` stay upstream's.
 - The AppImage carries no update information and no `.zsync`; the Flatpaks lost
   `--talk-name=org.freedesktop.Flatpak` and the ArtCraft Launcher folder
   (`--filesystem=xdg-data/ArtCraft/versions:ro`). The network stays for printing to a CUPS server and
@@ -191,15 +271,16 @@ Every place in the shipped code that can reach another machine, and what Pigment
 
 | Endpoint | Where | In PhotoCraft | In Pigment |
 |---|---|---|---|
-| GitHub releases API (`api.github.com/repos/storytold/photocraft/releases`) and release downloads | `craft-update` via `apps/photocraft/src/updates.rs` | checked once per launch and from Help › Check for Updates; the installer downloads and runs updates | not called: no update service, the menu opens <https://github.com/Nihalpi1212/claude/releases> |
-| Windows self-update helper (`--finish-update`) | `craft_update::self_update::finish` in `main.rs` | finishes a downloaded update | not wired in |
-| ArtCraft Launcher app list and suite flags | `craft_ai_agents::allowed`, `craft_flags::load` (local files under the launcher's data folder) | decides whether agents may use the window | never read |
+| GitHub releases API (`api.github.com/repos/storytold/photocraft/releases`) and release downloads | craft-update's `Updater` (`check_now`, `check_at_start`) in `crates/ui-egui/src/updates_ui.rs` | checked once per launch and from Help › Check for Updates; the installer downloads and runs updates | not called: the menu and the release window open <https://github.com/Nihalpi1212/claude/releases> |
+| Windows self-update helper (`--finish-update`) | `craft::update::self_update::finish`, called from upstream's `main.rs` | finishes a downloaded update | not wired in |
+| ArtCraft Launcher app list and suite flags | `craft::automation::agents::{launcher_allows, mcp_flag}` and `AgentSwitch::watch`, which polls them (local files under the launcher's data folder, `ArtCraft/flags.toml`, `CRAFT_FLAGS`) | decides whether agents may use the window | never read; `AgentSwitch::fixed(false, false)` |
+| Font downloads: Google Fonts and Noto families, the craft-i18n language packs (`cdn.jsdelivr.net`, `raw.githubusercontent.com`, `notofonts.github.io`, `github.com/storytold/craft-i18n/releases`) | `craft-font-store`, linked through `craft-font-manager` | linked; PhotoCraft calls no install path at `057297b`, and the store downloads only after the person turns it on (`enable_network`, refused for agents) | not called (no installer is built, nothing turns downloads on); the font catalog only reads the suite's installed fonts, `~/.local/share/craft-fonts` (`Craft Fonts` on macOS and Windows, or `$CRAFT_FONT_STORE`) |
 | Release pages in error messages and the release window | `crates/engine/src/build_info.rs` (`RELEASES`), `crates/engine/src/error.rs` | `storytold/photocraft/releases` | Pigment's releases; opened only when the user clicks |
 | Help, About and start-screen links; contributor profiles (`github.com/<login>`) in About › Contributors; Learn (`pigment/docs/user` on GitHub) | `crates/ui-egui/src/links.rs`, `dialogs/credits.rs`, `canvas/start_screen.rs` | Discord, getartcraft.com, `storytold/photocraft` | Pigment's issues, repository and releases, and the upstream project; opened in the browser only when clicked |
 | Printing (IPP to a printer or CUPS server, `lp`/`lpstat`, Avahi) | `crates/ipp`, the print commands | when the user prints | unchanged |
-| Control server, MCP bridge, single-instance hand-off, agent connection | `apps/photocraft/src/control_server.rs`, `crates/automation/src/{bridge,agent_link}.rs`, `single_instance.rs` | loopback (`127.0.0.1`) only | unchanged, loopback only |
+| Control server, MCP bridge, single-instance hand-off, agent connection | `craft::automation::{server, agents}` (built in `apps/photocraft/src/main.rs`), `crates/automation/src/{bridge,live,agent_link}.rs`, `apps/photocraft/src/single_instance.rs` | loopback (`127.0.0.1`) only | unchanged, loopback only |
 | Web build: its own WebAssembly parts and served fonts | `apps/photocraft-web-boot`, `crates/text` (`fonts/manifest.txt`) | same origin as the page | unchanged (the web build is not part of Pigment's releases) |
-| Telemetry, crash reports, font or model downloads | — | none: crash and start-up reports are local files and dialogs, fonts are system or embedded, the face-detection weights are bundled | none |
+| Telemetry, crash reports, model downloads | — | none: crash and start-up reports are local files and dialogs, fonts are system or embedded, the face-detection weights are bundled | none |
 | Packaging and developer tooling: appimagetool and its runtime, nfpm, cargo-fuzz, corpora (`cargo xtask corpus`) | `packaging/`, `xtask/` | pinned, SHA-256 checked downloads | unchanged; never part of the app |
 
 ### Not renamed (internal identifiers, kept for upstream merges)
@@ -224,12 +305,17 @@ Every place in the shipped code that can reach another machine, and what Pigment
   `PIGMENT_CONTROL_TOKEN` and `PIGMENT_CONTROL_TOKEN_FILE` (`crates/automation/src/args.rs`),
   `PIGMENT_AUTOMATION_READ_ROOT` and `PIGMENT_AUTOMATION_WRITE_ROOT` (`launch_args.rs`); the
   `PHOTOCRAFT_*` names of those six are not read. PhotoCraft's docs and `book/` still use the old
-  names.
+  names. Of the framework's folder variables, `CRAFT_SUITE_DIR` (the themes the Craft apps share)
+  is not read, since Pigment keeps its themes in its own folder; `CRAFT_FONT_STORE` (the suite's
+  installed fonts, which every app's font list reads and none writes here) is read as upstream
+  reads it.
 - The library crates' log targets (`photocraft_engine::…`). The desktop binary is `pigment`, so
   its own modules log as `pigment::…` (`RUST_LOG=pigment=debug`); the default filter
   (`apps/photocraft/src/logging.rs`) shows `info` for both `photocraft*` and `pigment*`. A second
   instance's log is `pigment-<pid>.log`.
-- The id the ArtCraft Launcher would know PhotoCraft by (`LAUNCHER_APP_ID`), unused.
+- The id the ArtCraft Launcher would know PhotoCraft by (`LAUNCHER_APP_ID` in
+  `crates/automation/src/agent_link.rs`), unused, and the framework's host id `photocraft`
+  (`AppInfo` in `crates/ui-egui/src/app/framework.rs`), an internal key; its name is "Pigment".
 - Comments, PhotoCraft's docs, `book/`, changelogs and roadmap, the contributor credits
   (`contributors/`, Help › About › Contributors), `NOTICE`'s upstream text, `ATTRIBUTION.md`'s rows
   and the licence files.
@@ -248,7 +334,7 @@ the rebrand (counts of matching lines, 2026-11-15):
 | Environment variables `PHOTOCRAFT_*` (code, scripts, docs) | 577 | keep (internal interface) |
 | `Cargo.toml` and `Cargo.lock` (package names, `storytold/craft-libs`, `storytold/egui` and other dependency sources) | 511 | keep (internal names, dependencies) |
 | `PhotoCraft` as a word in Rust code outside comments | 30 lines | keep: the XMP toolkit marker and its tests, profile descriptions documents carry, the font-face alias and case probe, the upstream link, credit and version line (`brand.rs`, `links.rs`, `shell_commands.rs`), the copyright in the Windows resources, the catalog rebrand (`build.rs`), the example plug-in's author, developer tooling (`xtask`), tests of those (including the test that the embedded catalogues name neither) |
-| `ArtCraft` in Rust code outside comments | 6 lines | keep: the credit line in About, the never-wired launcher watch (`apps/photocraft/src/agent_link.rs`), a test that the launcher is gone |
+| `ArtCraft` in Rust code outside comments | 5 lines (2026-11-27) | keep: the credit line in About, tests that the launcher and its Flatpak folder are gone (`agents_tests.rs`, `tests/it/flatpak_updates.rs`) |
 | Packaging (`packaging/`) | 147 lines | keep: environment variables, `-p photocraft` package names, `apps/photocraft*` paths, WiX element ids (`PhotocraftExe`, …), the web build's `photocraft-web` file names and `photocraft-parts` marker, `.pcraft`'s own types (`application/x-photocraft`, `ai.storyteller.photocraft.document`, "PhotoCraft Document"), the craft-i18n and craft-fonts sources, credits and comments, the ArtCraft Launcher's own install-policy mode in `check-install-policy.ps1` (unused by Pigment) |
 | README, NOTICE, ATTRIBUTION.md, this page, the release notes | 204 | keep: credits, upstream links, upstream notice and asset rows |
 | `AGENTS.md`, `ROADMAP.md`, `SECURITY.md`, `Dockerfile`, `xtask/`, `scorecard/`, `perf/`, `tests/`, `examples/` | 169 | keep (upstream guides, roadmap and developer tooling) |
@@ -314,19 +400,19 @@ Assistant's `assistant.rs` and `assistant_tools.rs`) with its tests in
 | `crates/ui-egui/Cargo.toml` | `pigment-genai` under the not-wasm target dependencies; the engine's `testgen` feature in the dev-dependencies |
 | `crates/ui-egui/src/lib.rs` | `pub mod ai_ui;` and the `PhotocraftApp` field `ai: ai_ui::AiUi` |
 | `crates/ui-egui/src/app.rs` | `ai: Default::default()` in `PhotocraftApp::new` |
-| `crates/ui-egui/src/app/frame.rs` | `crate::ai_ui::show(self, &ctx)` after `dialogs::show` (the windows, AI Accounts, and the Assistant's turn, moved on once a frame) |
+| `crates/ui-egui/src/app/frame.rs` | `crate::ai_ui::show(self, ui)` right after `crate::dialogs::run(self, ui)` in `ui_body` (the windows, AI Accounts, and the Assistant's turn, moved on once a frame; egui windows over the hosted dialogs, not hosted dialogs themselves, so the Assistant reads the dialog host through `PhotocraftApp::dialog_count()`) |
 | `crates/ui-egui/src/app/commands.rs` | `crate::ai_ui::gate(self, id, &params)?` after the automation check in `run_command_at_depth` (agents need "Allow agents to run AI commands") |
-| `crates/ui-egui/src/control.rs` | `handle` runs `dispatch` inside `crate::ai_ui::as_agent` |
-| `crates/ui-egui/src/menus/items.rs` | `is_live` asks `ai_ui::handles`; `menu_items` adds `ai_ui::menu_items` to the extras and asks `ai_ui::place_after` after `PLACE_AFTER` |
-| `crates/ui-egui/src/menus/state.rs` | `is_enabled` asks `ai_ui::is_enabled` for the shell's AI commands; `checked` asks `ai_ui::checked` (Window › Assistant's check mark) |
+| `crates/ui-egui/src/control.rs` | `handle` runs `dispatch` inside `crate::ai_ui::as_agent` (generic over upstream's `Reply`) |
+| `crates/ui-egui/src/menus/items.rs` | `is_live` asks `ai_ui::handles`; `menu_rows` adds `ai_ui::menu_items` (framework `craft::menu::Row`s) to the extras and asks `ai_ui::place_after` after `PLACE_AFTER` |
+| `crates/ui-egui/src/menus/state.rs` | `is_enabled` asks `ai_ui::is_enabled` for the shell's AI commands (after `crate::analysis::handles`); `checked` asks `ai_ui::checked` (Window › Assistant's check mark, the native menus too) |
 | `crates/ui-egui/src/menus/invoke.rs` | `crate::ai_ui::menu(app, id, params)` in `invoke_early_commands` (the windows, AI Accounts, Remove Background, Describe, Window › Assistant) |
-| `crates/ui-egui/src/jobs_ui.rs` | `on_event` gives `ai_ui::on_job_event` the events first; `dialog` leaves `ai.*` jobs to the status bar (no modal) |
-| `crates/ui-egui/src/canvas.rs` | `crate::ai_ui::task_bars(app, ui, xf)` after `crop_task_bar::draw` |
-| `crates/ui-egui/src/tools/crop_task_bar.rs` | `crate::ai_ui::crop_task_bar_item(app, ui)` in the slot kept for Generative Expand |
-| `crates/ui-egui/src/canvas/canvas_tool_menu.rs` | the `Generative Fill…` row of `SELECTION_MENU` (and its doc line) |
-| `crates/ui-egui/src/canvas/canvas_tool_menu/tests.rs` | `selection_menus_follow_photoshop_order` expects that row |
-| `crates/ui-egui/src/prefs/prefs_ui/agents.rs` | the Generative AI rows with the AI Accounts… button (`ai_ui::preferences_button`) and its `aiAccounts` action |
-| `crates/ui-egui/tests/it/main.rs` | `mod ai;` and `mod ai_assistant;` (not on wasm) |
+| `crates/ui-egui/src/jobs_ui.rs` | `on_event` gives `ai_ui::on_job_event` the events first; the progress `dialog` leaves `ai.*` jobs to the status bar (no modal) |
+| `crates/ui-egui/src/canvas/document_display.rs` | `crate::ai_ui::task_bars(app, ui, rect, space)` in `canvas_controls`, after the Frame tool's task bar, for the active document only (one bar per window; the bars are framework `TaskBar`s anchored to document points) |
+| `crates/ui-egui/src/tools/crop_task_bar.rs` | `crate::ai_ui::crop_task_bar_item(app, ui)` inside the framework `TaskBar`'s body, in the slot kept for Generative Expand (before `preset_list`) |
+| `crates/ui-egui/src/canvas/canvas_tool_menu.rs` | the `Generative Fill…` row of `SELECTION_MENU` (and its doc line); upstream dropped the test that listed the menu's rows, so `tests/it/ai.rs::menus_put_each_feature_in_its_photoshop_place` checks that it follows Content-Aware Fill |
+| `crates/ui-egui/src/prefs/prefs_ui/agents.rs` | `page` takes `&ai_ui::PrefsAi` and calls `ai_ui::preferences_rows` after the framework's `AgentsPage`: AI Accounts… (opened by `ai_ui::show` on the next pass) and "Allow agents to run AI commands" |
+| `crates/ui-egui/src/prefs/prefs_ui/custom_rows.rs` | the field `PrefsCustom.ai: ai_ui::PrefsAi` (`PrefsAi::of(app)`), handed to `agents::page` |
+| `crates/ui-egui/tests/it/main.rs` | `mod ai;` and `mod ai_assistant;` (not on wasm), in upstream's regrouped module list |
 | `apps/photocraft/src/main.rs` | `photocraft_ui_egui::ai_ui::install(&mut app, &dir)` with the settings folder, after `background_jobs` |
 | `xtask/src/layers.rs` | `pigment-genai` in the layers table (L6), and the two orderings that let `automation` and `ui-egui` (also L6) depend on it |
 
@@ -423,7 +509,7 @@ stays undrawn, reported.
 | `crates/automation/tests/it/main.rs` | `mod legacy_pigment;` |
 | `apps/photocraft-cli/tests/it/main.rs` | `mod legacy_pigment;` |
 | `crates/ui-egui/src/app/files.rs` | `save_in_place` asks `legacy_save_prompt::intercept` first; its old body is `save_in_place_unasked`, which `replay_save` calls for a played Save (an action's Save step does not ask) |
-| `crates/ui-egui/src/dialogs.rs` | `pub mod legacy_save_prompt;`; `save_prompt`, `save_prompt_body` and `save_prompt_confirm` take the place of the disk-change prompt's arms in `command_body` and `confirm_command` and dispatch to either; the Save / Cancel / Save As… buttons (one call, `legacy_save_prompt::buttons`); the `ROUTES` entry; `file_command` names `file.save` for it |
+| `crates/ui-egui/src/dialogs.rs` | `pub mod legacy_save_prompt;`; `legacy_save_prompt::answer` as the last row of `PROMPTS` (the framework prompt's answer: Save, Save As… or Cancel); `legacy_save_prompt::PREF` in `dont_show_again_keys()`, so the remembered "Don't show again" stays in `Preferences.dialogs` where `alerts::dismissed` reads it |
 | `crates/ui-egui/src/lib.rs` | `pub use dialogs::legacy_save_prompt;` |
 | `crates/ui-egui/tests/it/main.rs` | `mod legacy_pigment;` |
 | `docs/user/guides/index.md` | the links to `open-pigment-0-4-documents.md` and `use-generative-ai.md` (Pigment's own pages); the rest of `docs/user/` is rewritten for Pigment ([the user guide](#the-user-guide)) |
@@ -452,15 +538,18 @@ The rest was done by hand and is listed above: `crates/format/src/brand.rs` (nam
 application id, extension, the legacy check), `crates/io/src/legacy_pigment/`, the `.pigment`
 extension (`crates/io/src/lib.rs`, `export_estimate.rs`, `crates/automation/src/{files,workspace}.rs`,
 `crates/engine/src/cmd/file_cmds/{open,paths,batch_run}.rs`, `print_cmds.rs`, `video_cmds.rs`,
-`crates/ui-egui/src/{app/files.rs, control/dispatch.rs, home_recent_ui.rs}`,
+`crates/ui-egui/src/{app/files.rs, control/dispatch.rs, home_recent_ui.rs, file_dialog/filters.rs}`,
+`crates/ui-egui/src/prefs/prefs_ui/fields.rs` (the File Handling label),
 `apps/photocraft/src/services.rs`, `apps/photocraft-cli/src/batch.rs`, `apps/photocraft-web/src/web.rs`),
-the version line (`apps/photocraft/src/launch_args.rs`, `apps/photocraft-cli/src/lib.rs`, About in
-`crates/ui-egui/src/dialogs.rs`), the folders (`crates/automation/src/app_dirs.rs`,
-`apps/photocraft/src/{app_dirs.rs, logging.rs, services.rs}`), the links
-(`crates/ui-egui/src/links.rs`, `crates/engine/src/shell_commands.rs`,
-`crates/engine/src/build_info.rs`, `canvas/start_screen.rs`), updates
+the version line (`crates/format/src/brand.rs`, `apps/photocraft/src/launch_args.rs`,
+`apps/photocraft-cli/src/lib.rs`, About in `crates/ui-egui/src/dialogs/credits.rs`), the folders
+(`crates/automation/src/app_dirs.rs`, `apps/photocraft/src/{app_dirs.rs, logging.rs, services.rs}`,
+the theme folder in `crates/ui-egui/src/app/{framework,prefs}.rs`), the links
+(`crates/ui-egui/src/links.rs`, `dialogs/credits.rs`, `canvas/start_screen.rs`,
+`crates/engine/src/shell_commands.rs`, `crates/engine/src/build_info.rs`), updates
 (`crates/ui-egui/src/updates_ui.rs`, `menus/state.rs`, `lib.rs`, `apps/photocraft/src/main.rs`),
-the agents gate (`crates/automation/src/{agent_link,live}.rs`, `crates/ui-egui/src/prefs/prefs_ui/{agents,fields}.rs`,
+the agents gate (`crates/automation/src/{agent_link,live}.rs`,
+`crates/ui-egui/src/prefs/prefs_ui/{agents,custom_rows,fields}.rs`,
 `apps/photocraft-cli/{src/automation.rs,Cargo.toml}`, `apps/photocraft/src/main.rs`), the `[[bin]]` names in
 `apps/*/Cargo.toml`, the Windows resources (`apps/*/build.rs`), the catalog rebrand
 (`crates/ui-egui/build.rs`), packaging (desktop entry, AppStream, MIME package, AppRun, nfpm,
@@ -482,30 +571,43 @@ the release notes.
    ```sh
    cd /path/to/claude && git apply --3way --directory=pigment /tmp/upstream.patch
    ```
-   For renamed files (the packaging files, `packaging/windows/photocraft.wxs` and `.wxl`, the icon
+   `git apply` is all or nothing: an upstream deletion of a file Pigment changed fails as "patch does
+   not apply" and stops the whole patch. Pass `--exclude=pigment/<path>` for each such file and `git rm`
+   it after (the `057297b` merge had 13). For renamed files (the packaging files, `packaging/windows/photocraft.wxs` and `.wxl`, the icon
    files) apply their hunks to the Pigment names (`git apply --3way` follows a rename only when it
    can; otherwise apply the hunk by hand). Never take back PhotoCraft's icon files or `docs/brand/`.
 4. Resolve the conflicts by keeping Pigment's names, ids, links, folders, update behaviour and
    agents gate from the tables above and taking upstream's other changes.
 5. Run the rebrand pass, then check that it left nothing:
    ```sh
-   python3 pigment/scripts/pigment-rebrand.py && python3 pigment/scripts/pigment-rebrand.py --check
-   rg -n 'PhotoCraft' pigment --glob '*.rs' --glob '!target' | grep -v -E ':\s*//'   # only the kept markers
-   rg -n -i 'getartcraft|discord\.gg|storytold/photocraft' pigment --glob '!target' --glob '!docs/**' --glob '!book/**'
+   cd pigment   # the globs below are relative to the folder searched
+   python3 scripts/pigment-rebrand.py && python3 scripts/pigment-rebrand.py --check
+   rg -n 'PhotoCraft' . --glob '*.rs' --glob '!target' | grep -v -E ':[0-9]+:\s*(//|\*)'   # only the kept markers
+   rg -n -i 'getartcraft|discord\.gg|storytold/photocraft' . --glob '!target' --glob '!docs/**' --glob '!book/**'
+   rg -n '\.pcraft' . --glob '*.rs' --glob '!target'   # new messages and labels should name .pigment too
    ```
+   Compare each list with the previous revision's (`git grep` at the last release) rather than
+   reading it whole: the new lines are the ones to decide.
    New upstream strings that name the product become "Pigment"; their catalogue rows are rebranded
    at build time. A new file-format marker that PhotoCraft reads back must keep its name: add it to
    `KEEP_LINE` in the script (or put `upstream-ok` on the line). Check new `///` doc comments in the
-   clap and MCP files (`HELP_DOC_FILES`) and new packaging files by hand.
+   clap and MCP files (`HELP_DOC_FILES`) and new packaging files by hand. Words the craft framework
+   draws come from craft-libs: those in the craft-i18n catalogs are rebranded by `build.rs`, but an
+   English default that names the suite (as the agents page's `agents.intro` and `agents.off` named
+   the ArtCraft Launcher) needs an override on Pigment's side; look at every framework page or
+   window upstream newly draws.
 6. Update `UPSTREAM-REVISION`, `UPSTREAM_VERSION` and `UPSTREAM_REVISION` in
    `crates/format/src/brand.rs` and the tests that print the version line (`brand.rs`,
    `apps/photocraft-cli/tests/it/cli.rs`, `apps/photocraft/tests/it/command_line_usage.rs`), this page's upstream
    revision, and `craft-i18n.rev` if upstream moved it (the Flatpak manifests pin the same commit).
 7. If upstream added an update path (a new craft-update call, an updater in a package format, a
    version check) or another outgoing request, point it at Pigment's releases or turn it into a link,
-   and add it to the endpoint table above; Pigment makes no network request on its own. If upstream
-   added a file or folder to the settings folder, check it against the
-   [clash table](#the-settings-folder-and-pigment-0104).
+   and add it to the endpoint table above; Pigment makes no network request on its own. A craft-libs
+   crate newly linked can bring a network path even when upstream's own code does not change
+   (`cargo tree -p photocraft -i ureq` lists who links the HTTP client). If upstream or the framework
+   added a file or folder to the settings folder, or a variable that chooses a folder, check it
+   against the [clash table](#the-settings-folder-and-pigment-0104) and the variables above; the
+   framework's defaults are the Craft apps' shared folders, so pass Pigment's own explicitly.
 8. Build and test the packages the merge touched (`cargo build -p photocraft -p photocraft-cli`,
    `cargo test -p …`), and run `pigment --version` and `pigment-cli --version`.
 9. Check `scripts/upstream-test-failures.txt`. It lists the 60 integration tests (in
@@ -523,10 +625,9 @@ PhotoCraft's own gate does: one process per test, which its tests are written fo
 gate also runs the engine's panic hunt (upstream's AGENTS.md rule 9): run it after adding or
 changing a command, `cargo test -p photocraft-engine --test panic_hunt -- --ignored`.
 
-One upstream test was repaired for nextest rather than skipped:
-`crates/ui-egui/src/tools/type_tool/panels_toggle_tests.rs`, whose `bare_app()` now waits for the
-installed fonts' scan (`photocraft_text::shared()`, one line marked `// Pigment:`). The Type
-options bar draws "Loading fonts…" until that background scan ends and then moves its buttons;
-`without_a_document_it_opens_and_closes_the_group`, alone in its process, clicked a button of the
-frame before and missed (7 of 64 runs on a busy machine, once in CI). Other tests that click in
-the Type options bar without a type layer would need the same line.
+Pigment 0.5.0 repaired one upstream test for nextest rather than skipping it:
+`crates/ui-egui/src/tools/type_tool/panels_toggle_tests.rs`, whose `bare_app()` waited for the
+installed fonts' scan (`photocraft_text::shared()`), since the Type options bar draws "Loading
+fonts…" until that scan ends and then moves its buttons. Upstream rewrote those tests at `057297b`
+and `bare_app()` is gone, so the line went with it. If a test that clicks in the Type options bar
+without a type layer starts to miss now and then, that wait is the repair.

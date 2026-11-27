@@ -350,12 +350,16 @@ when one is missing) and shows the answer with Copy, Use as Document Description
 
 **Remove Background with AI Provider** checks the provider and the agreement the same way first.
 
-**The task bars** (`ai_ui/task_bar.rs`, on `widgets::task_bar`) show only once a provider has a
+**The task bars** (`ai_ui/task_bar.rs`, on the framework's `craft::ui::canvas_controls::TaskBar`,
+as the Crop tool's bar is) show only once a provider has a
 key, so the bar stays as it was for people who don't use AI: under a selection, a prompt field and
 Generate (Generative Fill at once; the window opens when something stops it); after Remove
 Background, while the document is as it left it, Generate Background…; in the Crop tool's bar,
-Generative Expand, which takes the crop frame's size and the sides it reaches past as the new
-canvas and anchor, and lets the frame go.
+Generative Expand, which takes the crop frame's size (a turned frame by its bounds) and the sides it
+reaches past as the new canvas and anchor, and lets the frame go. Since the `057297b` merge the Crop
+tool keeps its frame inside the canvas while Delete Cropped Pixels is on, so the frame reaches past
+it only with that option off; and the AI bar does not show with the Frame tool, which has its own
+bar in the same place.
 
 **AI Accounts** (`ai_ui/accounts.rs`) is a modal: what is sent and who bills (a request stopped
 after it was sent is still billed), OpenAI and Google Gemini tabs, the key state ("ends in …WXYZ",
@@ -388,6 +392,10 @@ sends when it starts for an agent or under the session's automation gate, which 
 first never sees (a step of a script the agent runs). In AI Accounts, synthetic input can switch
 tabs and close the dialog, nothing else: keys, the ChatGPT sign-in (starting, cancelling, pasting
 an address, signing out), the agreement and the agents' permission are the person's.
+Preferences › AI Integrations shows the same permission under its AI Accounts… button
+(`ai_ui::preferences_rows`): a click saves it at once into `ai.json`, as AI Accounts' checkbox
+does (it is not a preference, so OK and Cancel don't apply), and a click in a pass that carries
+injected input changes nothing.
 
 ## The Assistant (`crates/ui-egui/src/ai_ui/assistant.rs`, `assistant_tools.rs`)
 
@@ -395,7 +403,8 @@ Window › Assistant is a chat about the active document whose model can also ed
 JavaScript app's Assistant panel, as a floating window.
 
 **The window.** The provider (the connected ones; the choice is saved as `chatProvider`, which AI
-Accounts' Preferred provider resets) and the chat model (Automatic, or one of the provider's chat
+Accounts' Preferred provider resets) and the chat model (a select, `craft::ui::pickers::Select`,
+with keyboard and type-ahead: Automatic, or one of the provider's chat
 models; saved as that provider's `chatModel`, the same choice AI Accounts shows). The model list is
 the one AI Accounts read in the last ten minutes, or **List models** asks for it (one request with
 the key, as Test Connection); it is never fetched unasked. **Attach image** (on by default, saved

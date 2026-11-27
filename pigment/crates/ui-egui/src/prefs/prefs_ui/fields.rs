@@ -286,11 +286,13 @@ pub(super) fn read_at_launch(path: &str) -> bool {
 #[cfg(test)]
 mod pigment_tests {
     #[test]
-    fn labels_name_pigment_s_extension_not_photocraft_s() {
+    fn labels_name_pigment_s_extension_and_the_update_check_stays_hidden() {
         let rules = super::rules();
         let label = |key: &str| rules.iter().find(|r| r.key == key).and_then(|r| r.label.clone());
         // The catalogs translate this label with `.pigment` (build.rs), so it must be spelt so to be found.
         assert_eq!(label("fileHandling.pcraftFullComposite").as_deref(), Some("Save Full-Size Composite in .pigment Files"));
+        // Pigment checks for no updates on its own, so the setting that would start one stays hidden.
+        assert!(rules.iter().any(|r| r.key == "general.automaticallyCheckUpdates" && r.hidden));
         let upstream = "PhotoCraft"; // upstream-ok
         for r in &rules {
             for text in [&r.label, &r.help].into_iter().flatten() {
