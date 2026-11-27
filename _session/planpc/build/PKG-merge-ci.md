@@ -91,7 +91,12 @@ The two local failures:
 - `88de0b5` (before this step): clippy, rebrand, fmt, panic hunt, doctests, packaging, smoke test
   green; Tests failed on the 2 font tests and the scorecard test, repository checks on the stale
   scorecard: all three fixed by this step.
-- This step's commits: see the "CI result" line at the end (filled in when the run finished).
+- **CI result on `9205833` (run 45931901504): green, every step.** Tests: 14135 run, 14135 passed,
+  91 skipped (1556 s); known upstream failures: 0 tests (`--no-tests=pass`); panic hunt 1 passed;
+  repository checks (with egui-fork and test-binaries), packaging, CLI smoke test, lockfile
+  unchanged: success. The job took 70 min on a cold cache (the new CARGO_PROFILE_* variables change
+  rust-cache's key), within its 150-minute limit. The run for `b45cbd8` was superseded (cancelled
+  while pending) by `9205833`'s. Ready for the verifier to fast-forward `claude/pigment-photocraft`.
 
 ## Left
 
