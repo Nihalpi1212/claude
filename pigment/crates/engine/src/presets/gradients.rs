@@ -10,6 +10,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use super::{Group, Named, always, bad, edit_groups, find, group_index, req_str, str_param, unique_name};
+
+// Pigment: gradient.presets.exportGrd (P1a)
+pub mod export_grd;
 use crate::commands::CommandSpec;
 use crate::{Result, Session};
 
@@ -708,6 +711,8 @@ pub fn specs() -> Vec<CommandSpec> {
     let stops = r##""stops":[[t 0..1,"#rrggbb"|"foreground"|"background"],…],"transparency":[[t,opacity 0..100],…]?"##;
     let leak = |s: String| -> &'static str { Box::leak(s.into_boxed_str()) };
     vec![
+        // Pigment: gradient.presets.exportGrd (P1a)
+        export_grd::spec(),
         CommandSpec {
             id: "gradient.presets.list",
             label: "Gradient Presets",

@@ -696,14 +696,17 @@ fn define_custom_shape_and_preset_manager() {
     assert_eq!(custom_shapes(&s).len(), 2);
     assert_eq!(custom_shapes(&s)[1].name, "Shape 2");
     let list = s.execute("edit.presets.presetManager", json!({})).unwrap();
-    assert_eq!(list["customShapes"], json!(["Box", "Shape 2"]));
+    // Pigment: the manager lists the Shapes panel's library (its groups, then the Define Custom
+    // Shape results), and every kind (P1a).
+    let shapes: Vec<&str> = list["customShapes"].as_array().unwrap().iter().filter_map(serde_json::Value::as_str).collect();
+    assert_eq!(shapes[shapes.len() - 2..], ["Box", "Shape 2"]);
     assert!(list["brushes"].as_array().unwrap().len() > 3);
     s.execute("edit.presets.presetManager", json!({"action": "rename", "kind": "customShapes", "name": "Shape 2", "newName": "Star"})).unwrap();
-    s.execute("edit.presets.presetManager", json!({"action": "move", "kind": "customShapes", "index": 1, "to": 0})).unwrap();
+    s.execute("edit.presets.presetManager", json!({"action": "move", "kind": "customShapes", "name": "Star", "toGroup": "Custom Shapes", "position": 0})).unwrap();
     assert_eq!(custom_shapes(&s)[0].name, "Star");
     s.execute("edit.presets.presetManager", json!({"action": "delete", "kind": "customShapes", "name": "Box"})).unwrap();
     assert_eq!(custom_shapes(&s).len(), 1);
-    assert!(s.execute("edit.presets.presetManager", json!({"action": "delete", "kind": "gradients", "index": 0})).is_err());
+    assert!(s.execute("edit.presets.presetManager", json!({"action": "delete", "kind": "nope", "index": 0})).is_err());
     // The pattern library (Edit › Define Pattern) is managed here too.
     let n = list["patterns"].as_array().unwrap().len();
     assert!(n > 0);

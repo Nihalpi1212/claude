@@ -420,7 +420,8 @@ fn import(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn export(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "pattern.export";
-    let path = p.get("path").and_then(Value::as_str).ok_or_else(|| bad(cmd, "missing `path`"))?;
+    // Pigment: Preset Manager › Save Set… (no `path`: the bytes come back as base64 `data`)
+    let path = p.get("path").and_then(Value::as_str);
     let pats: Vec<Pattern> = match p.get("patterns").and_then(Value::as_array) {
         Some(keys) => {
             keys.iter().filter_map(Value::as_str).map(|k| resolve(s, k).ok_or_else(|| bad(cmd, format!("no pattern \"{k}\"")))).collect::<Result<_>>()?
@@ -428,6 +429,7 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
         None => s.patterns.items.iter().map(|p| full(s, p).map_err(|e| bad(cmd, e))).collect::<Result<_>>()?,
     };
     let bytes = photocraft_io::pattern_map::write_pat(&pats).map_err(EngineError::Other)?;
+    let Some(path) = path else { return Ok(json!({"data": photocraft_paint::tile::b64_encode(&bytes), "count": pats.len(), "bytes": bytes.len()})) };
     crate::file_cmds::write_file(path, &bytes)?;
     Ok(json!({"path": path, "count": pats.len(), "bytes": bytes.len()}))
 }
@@ -601,7 +603,7 @@ pub fn specs() -> Vec<CommandSpec> {
             label: "Export Patterns…",
             menu: &[],
             shortcut: None,
-            params: r##"{"path":".pat file","patterns":[id|name]? (default: the whole library)}"##,
+            params: r##"{"path":".pat file"? (Pigment: without one the bytes come back as base64 `data`),"patterns":[id|name]? (default: the whole library)}"##,
             enabled: has_pattern,
             journal: true,
             run: export,
