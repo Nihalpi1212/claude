@@ -375,7 +375,19 @@ fn fill_layers() {
     assert!(stops.len() > 100 && opacity_stops.len() == stops.len());
     let Fill::Gradient { stops, opacity_stops, .. } = fill("v3-fill-gradient-v2") else { panic!() };
     assert!(stops.len() > 100 && opacity_stops.iter().any(|s| (s.1 - 0.4).abs() < 1e-3));
-    assert!(matches!(fill("v3-fill-gradient-noise"), Fill::Gradient { .. }));
+    // A noise gradient opens editable: its settings kept (P3), its bake the stops.
+    let Fill::Gradient { stops, noise: Some(n), .. } = fill("v3-fill-gradient-noise") else { panic!("a noise gradient keeps its settings") };
+    let want = photocraft_doc::NoiseGradient {
+        roughness: 0.4,
+        model: photocraft_doc::NoiseModel::Rgb,
+        min: [0.0, 0.2, 0.0, 0.0],
+        max: [1.0, 0.8, 1.0, 1.0],
+        restrict: true,
+        transparency: false,
+        seed: 7,
+    };
+    assert_eq!(n, want);
+    assert_eq!(stops, n.fill_stops().0);
 }
 
 fn shape_of<'a>(doc: &'a photocraft_doc::Document, name: &str) -> &'a photocraft_doc::vector::ShapeLayer {

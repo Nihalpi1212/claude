@@ -77,15 +77,19 @@ fn gradient(p: &Value) -> Gradient {
         Some(stops) => stops,
         None => gradient_stops(p, color(p, "from", [0.0; 3]), color(p, "to", [1.0; 3])),
     };
-    Gradient {
-        stops,
-        opacity_stops: opacity_stops_param(p, "layer.layerStyle").ok().flatten().unwrap_or_default(),
-        style: gradient_style(p.get("style").and_then(Value::as_str).unwrap_or("linear")),
-        angle: f(p, "angle", 90.0),
-        scale: (f(p, "scale", 100.0) / 100.0).clamp(0.1, 1.5),
-        reverse: b(p, "reverse", false),
-        ..Gradient::default()
-    }
+    // Pigment: `"noise": {…}` makes a noise gradient (P3).
+    crate::presets::gradients::noise::effect_params(
+        Gradient {
+            stops,
+            opacity_stops: opacity_stops_param(p, "layer.layerStyle").ok().flatten().unwrap_or_default(),
+            style: gradient_style(p.get("style").and_then(Value::as_str).unwrap_or("linear")),
+            angle: f(p, "angle", 90.0),
+            scale: (f(p, "scale", 100.0) / 100.0).clamp(0.1, 1.5),
+            reverse: b(p, "reverse", false),
+            ..Gradient::default()
+        },
+        p,
+    )
 }
 
 /// `Err` when `stops` or `opacityStops` are present but malformed, so a command refuses them
@@ -790,7 +794,7 @@ fn overlay_stroke(s: &mut StrokeFx, p: &Value) {
         };
     }
     overlay_bool(p, "overprint", &mut s.overprint);
-    if p.get("from").is_some() || p.get("stops").is_some() {
+    if p.get("from").is_some() || p.get("stops").is_some() || crate::presets::gradients::noise::has(p) {
         s.paint = FxPaint::Gradient(gradient(p));
     } else if let Some(c) = color_of(p, "color") {
         s.paint = FxPaint::Color(c);
@@ -938,7 +942,10 @@ pub fn overlay_effect(fx: &mut Effect, p: &Value) {
         }
         Effect::GradientOverlay { common, gradient, dither, interpolation } => {
             overlay_common(common, p);
+            // Pigment: noise gradients (P3)
+            let before = gradient.stops.clone();
             gradient_overlay::overlay(gradient, interpolation, p);
+            crate::presets::gradients::noise::after_effect_edit(gradient, interpolation, &before, p);
             if let Some(x) = b_of(p, "dither") {
                 *dither = x;
             }
@@ -1162,13 +1169,13 @@ pub fn specs() -> Vec<CommandSpec> {
         style_cmd!(
             "stroke",
             "Stroke…",
-            r##"{"size":px=1,"position":"inside|outside|center","color":"#rrggbb","from":"#rrggbb","to":"#rrggbb","method":"classic|perceptual|linear|smooth"?,"smoothness":0..100=100,"style":str,"angle":deg,"opacity":0..100,"blend":str,"overprint":bool,"add":bool}"##
+            r##"{"size":px=1,"position":"inside|outside|center","color":"#rrggbb","from":"#rrggbb","to":"#rrggbb","method":"classic|perceptual|linear|smooth"?,"smoothness":0..100=100,"style":str,"angle":deg,"opacity":0..100,"blend":str,"overprint":bool,"add":bool,"noise":{…}? (a noise gradient, as gradientOverlay takes it)}"##
         ),
         style_cmd!("colorOverlay", "Color Overlay…", r##"{"color":"#rrggbb","opacity":0..100=100,"blend":str,"add":bool}"##),
         style_cmd!(
             "gradientOverlay",
             "Gradient Overlay…",
-            r##"{"from":"#rrggbb","to":"#rrggbb","stops":[[0..1,"#rrggbb"],.]? (2..256 source stops),"opacityStops":[[0..1,0..100],.]?,"method":"classic|perceptual|linear|smooth"? (Photoshop's interpolation; omitted on new effects: straight stops; edits retain the recorded method),"smoothness":0..100=100,"style":"linear|radial|angle|reflected|diamond","angle":deg=90,"scale":10..150=100,"reverse":bool,"opacity":0..100,"blend":str,"add":bool}"##
+            r##"{"from":"#rrggbb","to":"#rrggbb","stops":[[0..1,"#rrggbb"],.]? (2..256 source stops),"opacityStops":[[0..1,0..100],.]?,"method":"classic|perceptual|linear|smooth"? (Photoshop's interpolation; omitted on new effects: straight stops; edits retain the recorded method),"smoothness":0..100=100,"style":"linear|radial|angle|reflected|diamond","angle":deg=90,"scale":10..150=100,"reverse":bool,"opacity":0..100,"blend":str,"add":bool,"noise":{"roughness":0..100,"model":"rgb|hsb|lab","min":[0..100 ×3|4],"max":[…],"restrict":bool,"transparency":bool,"seed":int}? (a noise gradient; over the current settings) | false}"##
         ),
         style_cmd!(
             "patternOverlay",

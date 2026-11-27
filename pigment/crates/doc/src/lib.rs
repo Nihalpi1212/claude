@@ -19,6 +19,8 @@ pub mod effects;
 pub mod frame;
 pub mod import_conversion;
 pub mod mode;
+// Pigment: noise gradients
+pub mod noise_gradient;
 pub mod pattern;
 pub mod slices;
 pub mod text;
@@ -41,6 +43,8 @@ pub use effects::{
 };
 pub use frame::Frame;
 pub use mode::{ColorTable, Duotone, DuotoneInk, StackMode};
+// Pigment: noise gradients
+pub use noise_gradient::{NoiseGradient, NoiseModel};
 pub use pattern::Pattern;
 pub use photocraft_color::{BlendMode, Color, ColorMode, PixelFormat, SampleType};
 pub use photocraft_geom::{Affine, Rect, Size};
@@ -357,6 +361,10 @@ pub enum Fill {
         /// "Align with layer": lay out in the layer's frame (its masks' bounds), else the canvas.
         #[serde(default = "effects::yes")]
         align: bool,
+        /// Pigment: a noise gradient (Gradient Type: Noise); `stops` and `opacity_stops` are its
+        /// bake. Whoever edits the stops drops it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        noise: Option<NoiseGradient>,
     },
     /// A pattern from [`Document::patterns`] (looked up by `id`, then `name`).
     Pattern {
@@ -380,7 +388,19 @@ impl Fill {
     /// A gradient fill with the classic settings: opaque stops at their alpha, 50 % midpoints,
     /// centred, no dither, aligned with the layer.
     pub fn gradient(stops: Vec<(f32, Color)>, angle: f32, scale: f32, style: GradientStyle, reverse: bool) -> Fill {
-        Fill::Gradient { stops, angle, scale, style, reverse, opacity_stops: Vec::new(), midpoints: Vec::new(), offset: (0.0, 0.0), dither: false, align: true }
+        Fill::Gradient {
+            stops,
+            angle,
+            scale,
+            style,
+            reverse,
+            opacity_stops: Vec::new(),
+            midpoints: Vec::new(),
+            offset: (0.0, 0.0),
+            dither: false,
+            align: true,
+            noise: None,
+        }
     }
 
     /// This fill with its colours in `mode`'s model (see [`Color::in_mode`]): a fill layer's

@@ -909,6 +909,59 @@ code).
 | `crates/ui-egui/src/dialogs.rs` | `tool_presets_menu::answer` in `PROMPTS` |
 | `crates/ui-egui/src/preset_files_ui.rs` | `PRESET_EXTS` gains `tpl`; `open` sends a `.tpl` to `tool_presets_menu::open_file` |
 
+### Noise gradients
+
+Gradient Type: Noise, as the JavaScript Pigment had it and Photoshop stores it (upstream read only Photoshop's
+constant-colour noise fills and kept the raw block for the rest, #6272; `.grd` import skipped noise gradients).
+
+- **Document**: `crates/doc/src/noise_gradient.rs`: `NoiseGradient { roughness, model: Rgb|Hsb|Lab, min, max (four
+  channels, alpha last), restrict, transparency, seed }` and the JavaScript app's sampler (`seededRandom` mulberry32,
+  `noiseKnots`, Restrict Colors at 85 %), moved here from the `.pigment` importer. `bake()` gives the dense stops: every
+  knot, and where straight RGB lines between knots would not draw it (HSB, Lab, Restrict Colors) halves until the middle
+  is within a third of a level. One colour (every minimum equal to its maximum) is two stops of exactly that colour.
+  `noise: Option<NoiseGradient>` (`#[serde(default, skip_serializing_if = "Option::is_none")]`, so `.pcraft` files and
+  the preferences are unchanged without it) on `Fill::Gradient`, `GradientSource` (Gradient Map: its knots are the
+  editable stops) and `effects::Gradient` (Gradient Overlay, glows, gradient strokes). The renderers are untouched: the
+  stops are the bake; whoever edits the stops drops the noise.
+- **io**: `crates/io/src/grd_noise.rs`: the `ClNs` keys of a `Grdn` object (`ShTr`, `VctC`, `ClrS` `RGBC|HSBl|LbCl`,
+  `RndS`, `Smth` /4096, `Mnm `/`Mxm ` four longs /100) read and written for `GdFl`, the effects' `Grad` and `.grd`
+  files (read again with `craft_psd::descriptor`, as `craft_psd::grd` keeps only the flag; `write_grd` patches
+  `craft_psd::grd::write`'s output); the `grdm` noise settings (mode 1, seed, transparency, restrict, roughness /4096,
+  model 3/4/6, min/max /32768), written over the knots' stops. A noise gradient whose settings do not parse (HSL, broken
+  ranges) keeps upstream's placeholder and raw block. The `.pigment` importer's gradients (`legacy_pigment/gradient.rs`
+  `Def::paint`, used by `paint.rs` and `styles.rs`) keep a noise gradient's settings and its Reverse.
+- **Engine**: `crates/engine/src/presets/gradients/noise.rs`: `"noise": {"roughness": 0..100, "model", "min", "max",
+  "restrict", "transparency", "seed"}` (read over the current settings; `false` makes it solid, the knots becoming stops)
+  in `gradient.presets.new`, `select`, `apply`, `stop {"action": "set"}`, `gradient.fill.create`, `set` (and `get`
+  reports it), `paint.gradient`, `layer.layerStyle.gradientOverlay`/`stroke` (and `replace`), and a Gradient Map's
+  `source`. `GradientPreset.noise` persists in the preferences and in `.pcpresets`; `importGrd` reads noise gradients and
+  `exportGrd` writes them.
+
+| Upstream file | Hook |
+|---|---|
+| `crates/doc/src/lib.rs` | `pub mod noise_gradient;` and its `pub use`; `Fill::Gradient.noise`; `Fill::gradient` sets `noise: None` |
+| `crates/doc/src/adjust.rs` | `GradientSource.noise` |
+| `crates/doc/src/effects.rs` | `Gradient.noise`; `Gradient::default` sets it `None` |
+| `crates/vector/src/lib.rs`, `crates/compose/src/gradient_fill.rs` (test), `crates/io/src/affinity.rs`, `crates/io/src/svg.rs`, `crates/engine/src/cmd/vector_cmds/params.rs`, `crates/ui-egui/src/tools/shape_paint_ui.rs` | `noise: _` / `noise: None` in exhaustive patterns and literals (renderers draw the bake) |
+| `crates/io/src/lib.rs` | `pub mod grd_noise;` |
+| `crates/io/src/blocks.rs` | `fill_from_desc`: `grd_noise::noise_stops` before the placeholder; `fill_to_desc`: `grd_noise::grad_or_noise` for `Grad` |
+| `crates/io/src/effects_map.rs` | `gradient_from`: `grd_noise::noise_stops`; `gradient_keys`: `grd_noise::grad_or_noise` |
+| `crates/io/src/adjust_map.rs` | `parse_gradient_map`: `grd_noise::grdm_noise` before the stop-count check; the `grdm` writer patches a noise source's settings in (`grd_noise::patch_grdm`) |
+| `crates/io/src/gradient_bake.rs` | `bake_source`: a noise source bakes its settings |
+| `crates/engine/src/presets/gradients.rs` | `pub mod noise;`; `GradientPreset.noise`; `to_json`, `from_params`, `tool_preset`, `preset_param`, `select`, `apply`, `new_preset` and `apply_preset_stop` take `noise`; the params strings |
+| `crates/engine/src/presets/gradients/export_grd.rs` (P1a's) | `to_grd` flags noise; `export` writes through `grd_noise::write_grd` |
+| `crates/engine/src/cmd/gradient_fill_cmds.rs` | `preset_param` takes `noise`; `apply_set` ends with `noise::apply_fill_params`; `new_layer` keeps the preset's noise; `apply_stop` drops it; `describe_fill` reports it; the params strings |
+| `crates/engine/src/cmd/preset_import_cmds.rs` | `import_grd` reads `grd_noise::grd_noise` and imports noise gradients; the warning names what is still skipped |
+| `crates/engine/src/layer_style.rs` | `gradient()` through `noise::effect_params`; `overlay_stroke` takes `noise`; the Gradient Overlay arm calls `noise::after_effect_edit`; the params strings |
+| `crates/engine/src/adjust_params.rs` | `source_params` reports noise; `gradient_source` takes `noise` |
+| `crates/engine/src/cmd/paint_cmds.rs` | the `paint.gradient` params string |
+| `crates/engine/src/cmd/edit_menu_cmds/preset_file.rs` (P1b's) | `tidy_gradient` rebakes a noise gradient |
+| `crates/engine/tests/panic_hunt.rs` | two param sets with adversarial noise settings |
+| `crates/io/src/blocks/tests.rs` | `variable_or_transparent_noise_stays_a_fill_with_the_placeholder_ramp`: the preview is the bake now; an HSL noise gradient keeps the placeholder |
+| `crates/engine/src/cmd/preset_import_cmds.rs` (tests) | `grd_import_adds_a_gradient_group`: the noise gradient imports |
+| `crates/io/tests/it/main.rs` | `mod psd_noise_gradients;` |
+| Test literals: `crates/{compose,vector}/src/tests.rs`, `crates/format/tests/it/{common/mod,roundtrip}.rs`, `crates/gpu/tests/it/parity.rs`, `crates/io/src/{adjust_map,blocks}/tests.rs`, `crates/engine/src/cmd/vector_cmds/tests.rs`, `crates/ui-egui/src/canvas/triangle_alt_eyedropper_tests.rs`, `crates/ui-egui/src/tools/vector_ui/paint_tests.rs` | `noise: None` / `noise: _` |
+
 ## Keeping the rebrand: `scripts/pigment-rebrand.py`
 
 Most of the rebrand is mechanical and done by [`scripts/pigment-rebrand.py`](../scripts/pigment-rebrand.py):

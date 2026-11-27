@@ -387,8 +387,11 @@ fn import_grd(s: &mut Session, p: &Value) -> Result<Value> {
     let mut warnings = Vec::new();
     let mut items = Vec::new();
     let (mut noise, mut midpoints) = (0, false);
+    // Pigment: noise gradients are read with their settings (P3).
+    let noise_settings = photocraft_io::grd_noise::grd_noise(&bytes);
     for (i, g) in grads.iter().enumerate() {
-        if g.noise || g.stops.len() < 2 {
+        let settings = noise_settings.get(i).cloned().flatten().filter(|_| g.noise);
+        if settings.is_none() && (g.noise || g.stops.len() < 2) {
             noise += 1;
             continue;
         }
@@ -410,10 +413,13 @@ fn import_grd(s: &mut Session, p: &Value) -> Result<Value> {
             taken.taken.insert(unique.clone());
             unique
         };
-        items.push(GradientPreset { name, stops, opacity });
+        items.push(match settings {
+            Some(n) => crate::presets::gradients::noise::preset(&name, n),
+            None => GradientPreset { name, stops, opacity, noise: None },
+        });
     }
     if noise > 0 {
-        warnings.push(format!("{noise} noise gradients are not supported and were skipped"));
+        warnings.push(format!("{noise} noise gradients in a colour model Pigment does not draw, or without stops, were skipped"));
     }
     if midpoints {
         warnings.push("colour and opacity midpoints other than 50 % are drawn at 50 %".to_string());
@@ -703,8 +709,9 @@ mod tests {
         let mut s = Session::new();
         let data = photocraft_paint::tile::b64_encode(&write(&grads));
         let r = s.execute("gradient.presets.importGrd", json!({"data": data, "group": "Fire"})).unwrap();
-        assert_eq!(r["imported"], json!(["Ember"]));
-        assert_eq!(r["warnings"].as_array().map(Vec::len), Some(1));
+        // Pigment: noise gradients import (P3), with Photoshop's defaults when the file has none.
+        assert_eq!(r["imported"], json!(["Ember", "Static"]));
+        assert_eq!(r["warnings"].as_array().map(Vec::len), Some(0));
         let g = s.presets.gradients.iter().find(|g| g.name == "Fire").unwrap();
         assert_eq!(g.items[0].stops, vec![(0.0, StopColor::Foreground), (1.0, StopColor::Rgb([1.0, 0.0, 0.0]))]);
         assert_eq!(g.items[0].opacity, vec![(0.0, 1.0), (1.0, 0.0)]);
@@ -720,7 +727,8 @@ mod tests {
             assert!(s.execute("gradient.presets.importGrd", p.clone()).is_err(), "{p}");
         }
         let only_noise = photocraft_paint::tile::b64_encode(&write(&grads[1..]));
-        assert!(s.execute("gradient.presets.importGrd", json!({"data": only_noise})).is_err());
+        // Pigment: a file of noise gradients imports them (P3).
+        assert!(s.execute("gradient.presets.importGrd", json!({"data": only_noise})).is_ok());
     }
 
     #[test]

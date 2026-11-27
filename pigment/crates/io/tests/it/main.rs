@@ -64,6 +64,8 @@ mod psd_kerning;
 mod psd_layer_block_length;
 mod psd_maximize_compatibility;
 mod psd_noise_fill_roundtrip;
+// Pigment: noise gradients (P3)
+mod psd_noise_gradients;
 mod psd_recovery_generated;
 mod psd_roundtrip_bytes;
 mod psd_structure;

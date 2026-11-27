@@ -4,7 +4,8 @@
 //!
 //! Colour stops keep their kind (a fixed RGB colour, or the live foreground or background
 //! colour), transparency stops their opacity; midpoints are 50 %, as PhotoCraft draws them. A
-//! preset with no transparency stops is written opaque at both ends, as Photoshop writes one.
+//! preset with no transparency stops is written opaque at both ends, as Photoshop writes one. A
+//! noise gradient (P3) is written as one (`ClNs` and its settings, no stops).
 
 use craft_psd::grd::{GrdColor, GrdGradient, GrdStop};
 use serde_json::{Value, json};
@@ -37,7 +38,7 @@ pub fn to_grd(preset: &GradientPreset) -> GrdGradient {
     } else {
         preset.opacity.iter().map(|&(at, o)| (clamp(at), clamp(o), 0.5)).collect()
     };
-    GrdGradient { name: preset.name.clone(), noise: false, stops, opacity }
+    GrdGradient { name: preset.name.clone(), noise: preset.noise.is_some(), stops, opacity }
 }
 
 /// `{"group"?, "names"?, "path"?}` → `{count, bytes, path | data}`.
@@ -66,7 +67,9 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(CMD, "there are no gradients to save"));
     }
     let grads: Vec<GrdGradient> = presets.iter().map(|g| to_grd(g)).collect();
-    let bytes = craft_psd::grd::write(&grads);
+    // Noise gradients (P3) are written with their settings.
+    let noise: Vec<_> = presets.iter().map(|g| g.noise.clone()).collect();
+    let bytes = photocraft_io::grd_noise::write_grd(&grads, &noise);
     let mut out = json!({"count": grads.len(), "bytes": bytes.len()});
     match str_param(p, "path") {
         Some(path) => {

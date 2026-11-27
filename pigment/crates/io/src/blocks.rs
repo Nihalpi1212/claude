@@ -470,6 +470,8 @@ pub fn fill_from_desc(key: &[u8; 4], d: &Descriptor) -> Option<Fill> {
             if opacity_stops.iter().all(|o| o.1 >= 1.0 - 1e-4) {
                 opacity_stops.clear();
             }
+            // Pigment: a noise gradient renders through its bake.
+            let noise = crate::grd_noise::noise_stops(gradient, &mut stops, &mut opacity_stops);
             if stops.is_empty() {
                 // A provably constant-RGB noise gradient renders one exact colour. Any other
                 // noise gradient (variable ranges, transparency, other models) has no stops to
@@ -496,6 +498,7 @@ pub fn fill_from_desc(key: &[u8; 4], d: &Descriptor) -> Option<Fill> {
                 offset,
                 dither: bool_of(d, "Dthr"),
                 align: !matches!(d.get("Algn"), Some(Value::Boolean(false))),
+                noise,
             })
         }
         b"PtFl" => {
@@ -518,13 +521,14 @@ pub fn write_fill(f: &Fill) -> ([u8; 4], Vec<u8>) {
 pub fn fill_to_desc(f: &Fill) -> ([u8; 4], Descriptor) {
     match f {
         Fill::Solid(c) => (*b"SoCo", Descriptor::new("null").with("Clr ", Value::Descriptor(color_to_desc_with_pc_alpha(c)))),
-        Fill::Gradient { stops, angle, scale, style, reverse, opacity_stops, midpoints, offset, dither, align } => {
+        Fill::Gradient { stops, angle, scale, style, reverse, opacity_stops, midpoints, offset, dither, align, noise } => {
             let prc = |v: f32| Value::UnitFloat { unit: *b"#Prc", value: f64::from(v * 100.0) };
             let mut d = Descriptor::new("null")
                 .with("Angl", Value::UnitFloat { unit: *b"#Ang", value: f64::from(*angle) })
                 .with("Type", gradient_style_value(*style))
                 .with("Scl ", prc(*scale))
-                .with("Grad", Value::Descriptor(gradient_desc_with(stops, opacity_stops, midpoints)));
+                // Pigment: a noise gradient writes its settings (`ClNs`).
+                .with("Grad", Value::Descriptor(crate::grd_noise::grad_or_noise(noise.as_ref(), || gradient_desc_with(stops, opacity_stops, midpoints))));
             if *reverse {
                 d = d.with("Rvrs", Value::Boolean(true));
             }

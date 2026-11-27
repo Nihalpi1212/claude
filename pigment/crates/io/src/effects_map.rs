@@ -184,7 +184,10 @@ fn common(d: &Descriptor, blend: BlendMode, opacity: f32) -> FxCommon {
 }
 
 fn gradient_from(d: &Descriptor) -> Gradient {
-    let (stops, opacity_stops) = get_desc(d, "Grad").map(|g| crate::blocks::gradient_stops_with(g, crate::blocks::gradient_method(d))).unwrap_or_default();
+    let (mut stops, mut opacity_stops) =
+        get_desc(d, "Grad").map(|g| crate::blocks::gradient_stops_with(g, crate::blocks::gradient_method(d))).unwrap_or_default();
+    // Pigment: a noise gradient renders through its bake.
+    let noise = crate::grd_noise::noise_stops(get_desc(d, "Grad"), &mut stops, &mut opacity_stops);
     let off = get_desc(d, "Ofst");
     Gradient {
         stops: if stops.is_empty() { Gradient::default().stops } else { stops },
@@ -195,6 +198,7 @@ fn gradient_from(d: &Descriptor) -> Gradient {
         reverse: bool_of(d, "Rvrs"),
         align: !matches!(d.get("Algn"), Some(Value::Boolean(false))),
         offset: off.map_or((0.0, 0.0), |o| (pct(o, "Hrzn", 0.0), pct(o, "Vrtc", 0.0))),
+        noise,
     }
 }
 
@@ -398,7 +402,8 @@ fn with_common(d: Descriptor, c: &FxCommon) -> Descriptor {
 
 fn gradient_keys(mut d: Descriptor, g: &Gradient) -> Descriptor {
     d = d
-        .with("Grad", Value::Descriptor(gradient_desc(&g.stops, &g.opacity_stops)))
+        // Pigment: a noise gradient writes its settings (`ClNs`).
+        .with("Grad", Value::Descriptor(crate::grd_noise::grad_or_noise(g.noise.as_ref(), || gradient_desc(&g.stops, &g.opacity_stops))))
         .with("Angl", unit(b"#Ang", g.angle))
         .with("Type", gradient_style_value(g.style))
         .with("Rvrs", Value::Boolean(g.reverse))

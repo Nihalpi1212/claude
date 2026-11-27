@@ -132,7 +132,7 @@ fn preset_param(s: &Session, p: &Value, cmd: &str) -> Result<GradientPreset> {
             .ok_or_else(|| bad(cmd, format!("no gradient preset \"{name}\" (see gradient.presets.list)")))?
             .with_transparency(p, cmd);
     }
-    if p.get("stops").is_some() {
+    if p.get("stops").is_some() || crate::presets::gradients::noise::has(p) {
         return GradientPreset::from_params("Custom", p, cmd);
     }
     s.presets.gradient.clone().with_transparency(p, cmd)
@@ -175,7 +175,7 @@ fn frame_with_align(layer: &Layer, f: &Fill, canvas: Rect) -> Rect {
 pub fn apply_set(layer: &Layer, f: &Fill, canvas: Rect, p: &Value, fg: [f32; 4], bg: [f32; 4]) -> Result<Fill> {
     const CMD: &str = SET;
     let mut out = f.clone();
-    let Fill::Gradient { stops, angle, scale, style, reverse, opacity_stops, midpoints, offset, dither, align } = &mut out else {
+    let Fill::Gradient { stops, angle, scale, style, reverse, opacity_stops, midpoints, offset, dither, align, noise: _ } = &mut out else {
         return Err(bad(CMD, "not a gradient fill"));
     };
     let old_frame = frame_with_align(layer, f, canvas);
@@ -216,6 +216,7 @@ pub fn apply_set(layer: &Layer, f: &Fill, canvas: Rect, p: &Value, fg: [f32; 4],
             offset: *offset,
             dither: *dither,
             align: *align,
+            noise: None,
         };
         frame_with_align(layer, &tmp, canvas)
     };
@@ -282,6 +283,8 @@ pub fn apply_set(layer: &Layer, f: &Fill, canvas: Rect, p: &Value, fg: [f32; 4],
         }
         *midpoints = mids;
     }
+    // Pigment: `"noise"` (and stops edited without it make a noise gradient solid).
+    crate::presets::gradients::noise::apply_fill_params(&mut out, p, CMD)?;
     Ok(out)
 }
 
@@ -307,8 +310,21 @@ pub fn new_layer(s: &Session, doc: &Document, p: &Value) -> Result<Layer> {
         return Err(bad(CMD, "the document is empty"));
     }
     let (angle, scale, offset) = gf::from_handles(style, from, to, canvas, 0.0);
-    let fill = Fill::Gradient { stops, angle, scale: clamp_scale(scale), style, reverse, opacity_stops, midpoints: Vec::new(), offset, dither, align: false }
-        .in_mode(doc.mode);
+    let fill = Fill::Gradient {
+        stops,
+        angle,
+        scale: clamp_scale(scale),
+        style,
+        reverse,
+        opacity_stops,
+        midpoints: Vec::new(),
+        offset,
+        dither,
+        align: false,
+        // Pigment: noise gradients
+        noise: g.noise.clone(),
+    }
+    .in_mode(doc.mode);
     let mut l = Layer::new(doc.next_layer_name("Gradient Fill"), LayerContent::Fill(fill));
     l.opacity = opacity;
     l.blend = blend;
@@ -378,6 +394,8 @@ fn unpair(v: Vec<(f32, Color, f32)>) -> (Vec<(f32, Color)>, Vec<f32>) {
 pub fn apply_stop(f: &Fill, p: &Value, fg: [f32; 4], bg: [f32; 4]) -> Result<Fill> {
     const CMD: &str = STOP;
     let mut out = f.clone();
+    // Pigment: editing the stops of a noise gradient makes it solid.
+    crate::presets::gradients::noise::drop_fill_noise(&mut out);
     let Fill::Gradient { stops, opacity_stops, midpoints, .. } = &mut out else { return Err(bad(CMD, "not a gradient fill")) };
     let action = p.get("action").and_then(Value::as_str).ok_or_else(|| bad(CMD, "missing `action` (add|move|delete|color|opacity|midpoint)"))?;
     let opacity_kind = match p.get("kind").and_then(Value::as_str).unwrap_or("color") {
@@ -504,6 +522,7 @@ fn ramp_color_alpha(f: &Fill, t: f32) -> f32 {
         offset: (0.0, 0.0),
         dither: false,
         align: true,
+        noise: None,
     };
     gf::Ramp::new(&bare).map_or(1.0, |r| r.sample(t)[3]).max(1e-6)
 }
@@ -520,9 +539,9 @@ fn stop(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// A gradient fill layer's settings as JSON (`gradient.fill.get`).
 pub fn describe_fill(f: &Fill, frame: Rect) -> Value {
-    let Fill::Gradient { stops, angle, scale, style, reverse, opacity_stops, midpoints, offset, dither, align } = f else { return Value::Null };
+    let Fill::Gradient { stops, angle, scale, style, reverse, opacity_stops, midpoints, offset, dither, align, noise } = f else { return Value::Null };
     let (from, to) = gf::handles(*style, *angle, *scale, *offset, frame);
-    json!({
+    let mut v = json!({
         "style": style_name(*style),
         "angle": angle,
         "scale": scale * 100.0,
@@ -535,7 +554,10 @@ pub fn describe_fill(f: &Fill, frame: Rect) -> Value {
         "stops": stops.iter().map(|(t, c)| json!([t, hex(c)])).collect::<Vec<_>>(),
         "transparency": opacity_stops.iter().map(|(t, a)| json!([t, a * 100.0])).collect::<Vec<_>>(),
         "midpoints": midpoints,
-    })
+    });
+    // Pigment: noise gradients
+    crate::presets::gradients::noise::describe(&mut v, noise.as_ref());
+    v
 }
 
 fn describe(s: &Session, id: LayerId) -> Result<Value> {
@@ -557,7 +579,7 @@ pub fn specs() -> Vec<CommandSpec> {
             label: "Gradient (Live)",
             menu: &[],
             shortcut: None,
-            params: r##"{"from":[x,y],"to":[x,y],"style":"linear|radial|angle|reflected|diamond"="linear","gradient":preset name?,"stops":[[t,"#rrggbb"|"foreground"|"background"],…]?,"transparency":[[t,0..100],…]? (default: the current gradient),"reverse":bool=false,"dither":bool=true,"opacity":0..100=100,"mode":"normal|multiply|…"="normal"} → {"layer":id}; a Gradient Fill layer above the active layer, masked by the selection"##,
+            params: r##"{"from":[x,y],"to":[x,y],"style":"linear|radial|angle|reflected|diamond"="linear","gradient":preset name?,"stops":[[t,"#rrggbb"|"foreground"|"background"],…]?,"transparency":[[t,0..100],…]?,"noise":{…}? (a noise gradient, as gradient.fill.set takes it; default: the current gradient),"reverse":bool=false,"dither":bool=true,"opacity":0..100=100,"mode":"normal|multiply|…"="normal"} → {"layer":id}; a Gradient Fill layer above the active layer, masked by the selection"##,
             enabled: has_doc,
             run: create,
             journal: true,
@@ -567,7 +589,7 @@ pub fn specs() -> Vec<CommandSpec> {
             label: "Edit Gradient Fill",
             menu: &[],
             shortcut: None,
-            params: r##"{"layer":id?,"from":[x,y]?,"to":[x,y]?,"style":"linear|radial|angle|reflected|diamond"?,"angle":deg?,"scale":%?,"offset":[x%,y%]?,"reverse":bool?,"dither":bool?,"align":bool?,"stops":[[t,"#rrggbb"|"#rrggbbaa"|[r,g,b,a]|"foreground"|"background"],…]?,"transparency":[[t,0..100],…]?,"midpoints":[0.05..0.95 per segment]?} → the gradient (see gradient.fill.get)"##,
+            params: r##"{"layer":id?,"from":[x,y]?,"to":[x,y]?,"style":"linear|radial|angle|reflected|diamond"?,"angle":deg?,"scale":%?,"offset":[x%,y%]?,"reverse":bool?,"dither":bool?,"align":bool?,"stops":[[t,"#rrggbb"|"#rrggbbaa"|[r,g,b,a]|"foreground"|"background"],…]?,"transparency":[[t,0..100],…]?,"midpoints":[0.05..0.95 per segment]?,"noise":{"roughness":0..100,"model":"rgb|hsb|lab","min":[0..100 ×3|4],"max":[…],"restrict":bool,"transparency":bool,"seed":int} (over the current settings) | false (solid)?} → the gradient (see gradient.fill.get)"##,
             enabled: has_gradient_fill,
             run: set,
             journal: true,
@@ -587,7 +609,7 @@ pub fn specs() -> Vec<CommandSpec> {
             label: "Gradient Fill Settings",
             menu: &[],
             shortcut: None,
-            params: r##"{"layer":id?} → {"style","angle","scale":%,"offset":[%,%],"reverse","dither","align","from":[x,y],"to":[x,y],"stops":[[t,"#hex"]],"transparency":[[t,%]],"midpoints":[…]}"##,
+            params: r##"{"layer":id?} → {"style","angle","scale":%,"offset":[%,%],"reverse","dither","align","from":[x,y],"to":[x,y],"stops":[[t,"#hex"]],"transparency":[[t,%]],"midpoints":[…],"noise":{…}? (a noise gradient's settings)}"##,
             enabled: has_gradient_fill,
             run: get,
             journal: false,

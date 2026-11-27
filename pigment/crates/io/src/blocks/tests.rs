@@ -30,9 +30,20 @@ fn variable_or_transparent_noise_stays_a_fill_with_the_placeholder_ramp() {
     // stored pixels (`fill_cache`) and its raw `GdFl` block. Only the uncached preview
     // shows the placeholder ramp.
     for descriptor in [noise_gradient_fill([0, 0, 0, 0], [100, 100, 100, 100], false), noise_gradient_fill([50, 25, 0, 0], [50, 25, 0, 100], true)] {
-        let Some(Fill::Gradient { stops, .. }) = fill_from_desc(b"GdFl", &descriptor) else { panic!("variable noise gradient must stay a fill layer") };
-        assert_eq!(stops, vec![(0.0, Color::BLACK), (1.0, Color::WHITE)]);
+        let Some(Fill::Gradient { stops, noise, .. }) = fill_from_desc(b"GdFl", &descriptor) else { panic!("variable noise gradient must stay a fill layer") };
+        // Pigment: the noise settings are read (P3) and the preview is their bake.
+        assert_eq!(stops, noise.expect("noise settings").fill_stops().0);
     }
+    // Settings Pigment cannot draw (HSL) keep the placeholder ramp.
+    let mut hsl = noise_gradient_fill([0, 0, 0, 0], [100, 100, 100, 100], false);
+    if let Some((_, Value::Descriptor(g))) = hsl.items.iter_mut().find(|(k, _)| k.is("Grad")) {
+        for (k, v) in g.items.iter_mut().filter(|(k, _)| k.is("ClrS")) {
+            let _ = k;
+            *v = Value::Enumerated { type_id: Id::new("ClrS"), value: Id::new("HSLC") };
+        }
+    }
+    let Some(Fill::Gradient { stops, noise: None, .. }) = fill_from_desc(b"GdFl", &hsl) else { panic!("an HSL noise gradient stays a fill layer") };
+    assert_eq!(stops, vec![(0.0, Color::BLACK), (1.0, Color::WHITE)]);
 }
 
 /// psd-tools layers-minimal/gradient-fill.psd ("Color to Transparent", no stored pixels): a
@@ -165,6 +176,7 @@ fn gradient_stop_alpha_round_trips_once() {
         offset: (0.0, 0.0),
         dither: false,
         align: true,
+        noise: None,
     };
     let (k, d) = super::fill_to_desc(&fill);
     let Fill::Gradient { stops, opacity_stops, .. } = super::fill_from_desc(&k, &d).unwrap() else { panic!("grad") };
@@ -317,6 +329,7 @@ fn fills_roundtrip() {
             offset: (0.125, -0.375),
             dither: true,
             align: false,
+            noise: None,
         },
         Fill::Pattern { name: "Bubbles".into(), scale: 0.5, id: "abc".into(), angle: 30.0, link: false, phase: (3.0, -2.0) },
     ] {

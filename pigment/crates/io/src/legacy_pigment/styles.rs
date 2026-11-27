@@ -156,9 +156,8 @@ impl StyleReader<'_> {
                 let size = get(o, "size", 5.0, 0.0, 250.0);
                 let paint = match (o.get("fill").and_then(Value::as_str), o.get("gradient")) {
                     (Some("gradient"), Some(g)) if g.is_object() => {
-                        let def = Def::parse(g);
-                        let (stops, opacity_stops) = def.fill_stops(false);
-                        FxPaint::Gradient(Gradient { stops, opacity_stops, ..Gradient::default() })
+                        let ((stops, opacity_stops), _, noise) = Def::parse(g).paint(false);
+                        FxPaint::Gradient(Gradient { stops, opacity_stops, noise, ..Gradient::default() })
                     }
                     _ => FxPaint::Color(c),
                 };
@@ -199,10 +198,9 @@ impl StyleReader<'_> {
                 // 0.4: `gradient` (a version 2 definition); 0.3: the stops on the effect itself.
                 let def = Def::parse(o.get("gradient").filter(|g| g.is_object()).unwrap_or(&Value::Object(o.clone())));
                 let reverse = flag(o, "reverse", false) != turns_back(o);
-                let (stops, opacity_stops) = def.fill_stops(reverse);
                 Effect::GradientOverlay {
                     common: self.common(o, BlendMode::Normal, 1.0, 1.0),
-                    gradient: placed(o, stops, opacity_stops, 90.0),
+                    gradient: placed(o, def.paint(reverse), 90.0),
                     dither: flag(o, "dither", false),
                     interpolation: if def.method == gradient::Method::Classic { None } else { def.interpolation() },
                 }
@@ -225,8 +223,7 @@ impl StyleReader<'_> {
                 let paint = match o.get("fill").and_then(Value::as_str) {
                     Some("gradient") => {
                         let def = Def::parse(o.get("gradient").unwrap_or(&Value::Null));
-                        let (stops, opacity_stops) = def.fill_stops(flag(o, "reverse", false) != turns_back(o));
-                        FxPaint::Gradient(placed(o, stops, opacity_stops, 90.0))
+                        FxPaint::Gradient(placed(o, def.paint(flag(o, "reverse", false) != turns_back(o)), 90.0))
                     }
                     Some("pattern") => match self.pattern(o.get("pattern")) {
                         Some((name, id)) => FxPaint::Pattern { name, id, scale: get(o, "patternScale", 1.0, 0.01, 10.0) },
@@ -353,7 +350,10 @@ fn pair(v: Option<&Value>) -> (f64, f64) {
 
 /// A gradient effect's placement: `kind`, `angle` (counter-clockwise), `scale` (a fraction),
 /// `offset` (percent of the box), `align`.
-fn placed(o: &Map<String, Value>, stops: Vec<(f32, Color)>, opacity_stops: Vec<(f32, f32)>, default_angle: f64) -> Gradient {
+/// `paint` is [`Def::paint`]: the stops, Reverse (a noise gradient's; others are reversed in the
+/// stops) and the noise settings.
+fn placed(o: &Map<String, Value>, paint: (gradient::Stops, bool, Option<photocraft_doc::NoiseGradient>), default_angle: f64) -> Gradient {
+    let ((stops, opacity_stops), reverse, noise) = paint;
     let (ox, oy) = pair(o.get("offset"));
     Gradient {
         stops,
@@ -367,9 +367,9 @@ fn placed(o: &Map<String, Value>, stops: Vec<(f32, Color)>, opacity_stops: Vec<(
         },
         angle: angle(o, "angle", default_angle),
         scale: get(o, "scale", 1.0, 0.1, 1.5),
-        // Reversed in the stops already.
-        reverse: false,
+        reverse,
         align: flag(o, "align", true),
         offset: ((ox / 100.0) as f32, (oy / 100.0) as f32),
+        noise,
     }
 }

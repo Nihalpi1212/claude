@@ -51,6 +51,8 @@ mod exr_native;
 pub mod exr_parts;
 mod flat;
 pub mod gradient_bake;
+// Pigment: noise gradients
+pub mod grd_noise;
 pub mod guides_map;
 pub mod legacy_pigment;
 mod png_steps;
