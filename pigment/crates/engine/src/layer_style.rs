@@ -78,15 +78,18 @@ fn gradient(p: &Value) -> Gradient {
         None => gradient_stops(p, color(p, "from", [0.0; 3]), color(p, "to", [1.0; 3])),
     };
     // Pigment: `"noise": {…}` makes a noise gradient (P3).
-    crate::presets::gradients::noise::effect_params(Gradient {
-        stops,
-        opacity_stops: opacity_stops_param(p, "layer.layerStyle").ok().flatten().unwrap_or_default(),
-        style: gradient_style(p.get("style").and_then(Value::as_str).unwrap_or("linear")),
-        angle: f(p, "angle", 90.0),
-        scale: (f(p, "scale", 100.0) / 100.0).clamp(0.1, 1.5),
-        reverse: b(p, "reverse", false),
-        ..Gradient::default()
-    }, p)
+    crate::presets::gradients::noise::effect_params(
+        Gradient {
+            stops,
+            opacity_stops: opacity_stops_param(p, "layer.layerStyle").ok().flatten().unwrap_or_default(),
+            style: gradient_style(p.get("style").and_then(Value::as_str).unwrap_or("linear")),
+            angle: f(p, "angle", 90.0),
+            scale: (f(p, "scale", 100.0) / 100.0).clamp(0.1, 1.5),
+            reverse: b(p, "reverse", false),
+            ..Gradient::default()
+        },
+        p,
+    )
 }
 
 /// `Err` when `stops` or `opacityStops` are present but malformed, so a command refuses them

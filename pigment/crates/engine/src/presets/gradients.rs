@@ -91,7 +91,12 @@ impl GradientPreset {
         }
     }
     pub fn foreground_to_background() -> Self {
-        GradientPreset { name: "Foreground to Background".into(), stops: vec![(0.0, StopColor::Foreground), (1.0, StopColor::Background)], opacity: Vec::new(), noise: None }
+        GradientPreset {
+            name: "Foreground to Background".into(),
+            stops: vec![(0.0, StopColor::Foreground), (1.0, StopColor::Background)],
+            opacity: Vec::new(),
+            noise: None,
+        }
     }
 
     /// RGBA stops for painting: colour and transparency stops merged (see [`apply_opacity`]).

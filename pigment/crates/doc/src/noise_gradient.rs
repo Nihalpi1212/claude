@@ -38,6 +38,11 @@ fn refine(f: &impl Fn(f64) -> [f64; 3], a: (f64, [f64; 3]), b: (f64, [f64; 3]), 
     }
 }
 
+/// Colour stops `(location, sRGB 0..1)` and opacity stops `(location, opacity)`.
+pub type MapStops = (Vec<(f32, [f32; 3])>, Vec<(f32, f32)>);
+/// Colour stops and opacity stops as fills and effects keep them.
+pub type FillStops = (Vec<(f32, Color)>, Vec<(f32, f32)>);
+
 /// The colour model a noise gradient walks in (Photoshop's `ClrS`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -206,7 +211,7 @@ impl NoiseGradient {
     /// straight RGB lines between knots would not draw it, as many between as it takes), and opacity stops
     /// `(location, opacity)` at every knot, empty when opaque. One colour (each channel's minimum
     /// equal to its maximum) gives two stops of exactly that colour.
-    pub fn bake(&self) -> (Vec<(f32, [f32; 3])>, Vec<(f32, f32)>) {
+    pub fn bake(&self) -> MapStops {
         let k = self.knots();
         let knot_at: Vec<f64> = (0..k.count).map(|i| i as f64 / (k.count - 1) as f64).collect();
         let colors: Vec<(f32, [f32; 3])> = if self.flat_color() {
@@ -246,7 +251,7 @@ impl NoiseGradient {
     }
 
     /// [`Self::bake`] as a fill's or an effect's colour and opacity stops.
-    pub fn fill_stops(&self) -> (Vec<(f32, Color)>, Vec<(f32, f32)>) {
+    pub fn fill_stops(&self) -> FillStops {
         let (c, o) = self.bake();
         (c.into_iter().map(|(t, c)| (t, Color::rgb(c[0], c[1], c[2]))).collect(), o)
     }

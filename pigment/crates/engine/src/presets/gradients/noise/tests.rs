@@ -136,7 +136,9 @@ fn a_gradient_overlay_and_a_gradient_map_take_noise() {
     let Some(Effect::GradientOverlay { gradient, .. }) = fx(&s).first().cloned() else { panic!() };
     assert!(gradient.noise.is_none());
     s.execute("layer.layerStyle.stroke", json!({"size": 3, NOISE: {"seed": 8}})).unwrap();
-    assert!(fx(&s).iter().any(|e| matches!(e, Effect::Stroke(st) if matches!(&st.paint, FxPaint::Gradient(g) if g.noise.as_ref().is_some_and(|n| n.seed == 8)))));
+    assert!(
+        fx(&s).iter().any(|e| matches!(e, Effect::Stroke(st) if matches!(&st.paint, FxPaint::Gradient(g) if g.noise.as_ref().is_some_and(|n| n.seed == 8))))
+    );
 
     s.execute("layer.newAdjustmentLayer.gradientMap", json!({"source": {NOISE: {"model": "lab", "seed": 12}}})).unwrap();
     let LayerContent::Adjustment(Adjustment::GradientMap { stops, source: Some(src), .. }) = active_content(&s) else { panic!("gradient map") };
@@ -176,7 +178,9 @@ fn bad_noise_params_are_errors_and_change_nothing() {
     s.execute("gradient.fill.create", json!({"from": [0, 0], "to": [10, 0]})).unwrap();
     let before = active_content(&s);
     let current = s.presets.gradient.clone();
-    for bad in [json!(3), json!("x"), json!({"model": "cmyk"}), json!({"seed": "a"}), json!({"min": [1]}), json!({"restrict": 2}), json!({"roughness": "rough"})] {
+    for bad in
+        [json!(3), json!("x"), json!({"model": "cmyk"}), json!({"seed": "a"}), json!({"min": [1]}), json!({"restrict": 2}), json!({"roughness": "rough"})]
+    {
         assert!(s.execute("gradient.fill.set", json!({NOISE: bad.clone()})).is_err(), "{bad}");
         assert!(s.execute("gradient.presets.stop", json!({"action": "set", NOISE: bad.clone()})).is_err(), "{bad}");
         assert!(s.execute("gradient.presets.new", json!({NOISE: bad.clone()})).is_err() || !bad.is_object(), "{bad}");

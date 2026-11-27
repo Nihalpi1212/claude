@@ -7,7 +7,7 @@ use photocraft_geom::{Rect, Size};
 use photocraft_io::{ExportOptions, export, import};
 
 fn noise(model: NoiseModel, seed: u32) -> NoiseGradient {
-    NoiseGradient { roughness: 0.5, model, min: [0.0, 0.25, 0.5, 0.0], max: [1.0, 0.75, 1.0, 1.0], restrict: seed % 2 == 0, transparency: true, seed }
+    NoiseGradient { roughness: 0.5, model, min: [0.0, 0.25, 0.5, 0.0], max: [1.0, 0.75, 1.0, 1.0], restrict: seed.is_multiple_of(2), transparency: true, seed }
 }
 
 fn noisy_fill(n: NoiseGradient) -> Fill {

@@ -73,7 +73,10 @@ pub fn set_preset(g: &GradientPreset, p: &Value, cmd: &str) -> Result<Option<Gra
     })
 }
 
-fn fill_parts(f: &mut Fill) -> Option<(&mut Vec<(f32, Color)>, &mut Vec<(f32, f32)>, &mut Vec<f32>, &mut Option<NoiseGradient>)> {
+/// A gradient fill's colour stops, opacity stops, midpoints and noise.
+type FillParts<'a> = (&'a mut Vec<(f32, Color)>, &'a mut Vec<(f32, f32)>, &'a mut Vec<f32>, &'a mut Option<NoiseGradient>);
+
+fn fill_parts(f: &mut Fill) -> Option<FillParts<'_>> {
     match f {
         Fill::Gradient { stops, opacity_stops, midpoints, noise, .. } => Some((stops, opacity_stops, midpoints, noise)),
         _ => None,
