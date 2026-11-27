@@ -52,31 +52,44 @@ pub(crate) fn open_manager(app: &mut PhotocraftApp) -> DialogId {
     app.framework.dialogs.open(manager)
 }
 
-/// The rows of Export/Import Presets.
-fn io_params() -> Vec<Param> {
-    vec![
-        Param::new(
-            "action",
-            tl!("Action"),
-            ParamKind::radio(
-                vec![("export".to_string(), tl!("Export Presets").into()), ("import".to_string(), tl!("Import Presets").into())],
-                Some("export".to_string()),
-            ),
-        ),
-        Param::new("brushes", tl!("Brushes"), ParamKind::bool(true)),
-        Param::new("customShapes", tl!("Custom Shapes"), ParamKind::bool(true)),
-        Param::new("tools", tl!("Tool Presets"), ParamKind::bool(true)),
+// Pigment: Export/Import Presets for every kind (P1b): the nine kinds of the Preset Manager, in its order.
+/// The kinds Export/Import Presets offers, with their ids in `edit.presets.exportImportPresets`.
+pub(crate) fn io_kinds() -> [(&'static str, &'static str); 9] {
+    [
+        ("brushes", tl!("Brushes")),
+        ("swatches", tl!("Swatches")),
+        ("gradients", tl!("Gradients")),
+        ("styles", tl!("Styles")),
+        ("patterns", tl!("Patterns")),
+        ("contours", tl!("Contours")),
+        ("customShapes", tl!("Custom Shapes")),
+        ("tools", tl!("Tool Presets")),
+        ("adjustments", tl!("Adjustments")),
     ]
+}
+
+/// The rows of Export/Import Presets.
+pub(crate) fn io_params() -> Vec<Param> {
+    vec![Param::new(
+        "action",
+        tl!("Action"),
+        ParamKind::radio(
+            vec![("export".to_string(), tl!("Export Presets").into()), ("import".to_string(), tl!("Import Presets").into())],
+            Some("export".to_string()),
+        ),
+    )]
+    .into_iter()
+    // Pigment (P1b): one check box per kind.
+    .chain(io_kinds().into_iter().map(|(id, label)| Param::new(id, label, ParamKind::bool(true))))
+    .collect()
 }
 
 /// Opens Export/Import Presets, set to export everything.
 pub(crate) fn open_io(app: &mut PhotocraftApp) -> DialogId {
-    let fields = DialogFields::from_pairs([
-        ("action", FieldValue::Text("export".into())),
-        ("brushes", FieldValue::Bool(true)),
-        ("customShapes", FieldValue::Bool(true)),
-        ("tools", FieldValue::Bool(true)),
-    ]);
+    // Pigment (P1b): every kind checked.
+    let fields = DialogFields::from_pairs(
+        std::iter::once(("action", FieldValue::Text("export".into()))).chain(io_kinds().into_iter().map(|(id, _)| (id, FieldValue::Bool(true)))),
+    );
     let dialog = HostedParamDialog::command(app.ctx(), IO, fields, |fields| {
         ParamDialog::command(IO, tl!("Export/Import Presets"), io_params()).values(Bind::bound(fields))
     });
@@ -134,10 +147,15 @@ fn run_io(app: &mut PhotocraftApp, _ctx: &egui::Context, result: ParamResult) {
 
 /// OK on Export/Import Presets.
 fn confirm_io(app: &mut PhotocraftApp, f: &DialogFields) -> Result<Value, String> {
-    let kinds: Vec<&str> = ["brushes", "customShapes", "tools"].into_iter().filter(|k| f.bool(k).unwrap_or(true)).collect();
+    // Pigment (P1b): the nine kinds; Import reads .pcpresets and tells a Pigment 0.1–0.4 bundle apart.
+    let kinds: Vec<&str> = io_kinds().into_iter().map(|(id, _)| id).filter(|k| f.bool(k).unwrap_or(true)).collect();
     if f.text("action") == Some("import") {
-        app.pick_file_bytes(move |app, name, bytes| {
-            let text = String::from_utf8(bytes).map_err(|_| format!("{name} is not a preset file"))?;
+        app.pick_file_bytes_filtered(&["pcpresets", "pigment-bundle"], move |app, name, bytes| {
+            let text = if bytes.starts_with(b"PK\x03\x04") {
+                photocraft_engine::paint::tile::b64_encode(&bytes)
+            } else {
+                String::from_utf8(bytes).map_err(|_| format!("{name} is not a preset file"))?
+            };
             app.run("edit.presets.exportImportPresets", json!({"action": "import", "kinds": kinds, "data": text}))
         })
     } else {
@@ -152,3 +170,8 @@ fn confirm_io(app: &mut PhotocraftApp, f: &DialogFields) -> Result<Value, String
         })
     }
 }
+
+// Pigment: Export/Import Presets for every kind (P1b)
+#[cfg(test)]
+#[path = "presets_io_tests.rs"]
+mod io_tests;
