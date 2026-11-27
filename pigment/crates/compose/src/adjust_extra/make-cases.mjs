@@ -1,5 +1,6 @@
-// Writes js-cases.txt beside this file: Pigment 0.4's own Color and Vibrance, Clarity and Dehaze and
-// Grain results on a small synthetic image, for `adjust_extra/tests.rs` to compare the Rust port with.
+// Writes js-cases.txt beside this file: Pigment 0.4's own Clarity and Dehaze and Grain results on a small synthetic image, for
+// `adjust_extra/tests.rs` to compare the Rust port with. (Color and Vibrance follows Camera Raw's gains and the
+// Vibrance adjustment instead of the app's own formulas, so it has no cases.)
 // README.md names the commit the functions come from.
 //
 //   node make-cases.mjs <path to a checkout's pigment/ folder> <output folder>
@@ -44,8 +45,6 @@ const cases = [
   ['grain', { amount: 50, size: 25, roughness: 50 }, { origin: { x: 100, y: 37 } }],
   ['grain', { amount: 80, size: 0, roughness: 0 }],
   ['grain', { amount: 30, size: 100, roughness: 100 }, { origin: { x: -7, y: 3 } }],
-  ['color-vibrance', { temperature: 50, tint: 0 }],
-  ['color-vibrance', { temperature: -30, tint: 40 }],
 ].map(([kind, params, ctx = null]) => {
   const img = image();
   adjust.applyAdjustment(img, kind, params, null, ctx);
