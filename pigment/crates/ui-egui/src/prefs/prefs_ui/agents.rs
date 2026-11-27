@@ -7,9 +7,6 @@
 //! the agent link is the framework's; PhotoCraft supplies what agent requests may read, write and
 //! run (`Services::agent_automation`).
 
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-
 use craft::automation::agents::{AgentLinkStatus, LinkProblem};
 use craft::automation::control::ControlChannel;
 use craft::automation::ui::agents::{AgentsPage, AgentsWords};
@@ -81,8 +78,9 @@ pub(super) fn pigment_words() -> WordRows {
 
 /// Preferences › AI Integrations: Pigment's switch, then the framework's page (status, Control
 /// Port, the two folders, When Closed) in Pigment's words, then generative AI's rows (AI Accounts…,
-/// whose click `accounts` keeps for `ai_ui`). Every edit goes into the window's `draft`.
-pub(super) fn page(ui: &mut egui::Ui, page: &str, draft: &mut SettingsDraft, status: &AgentLinkStatus, accounts: &Arc<AtomicBool>) {
+/// whose click `ai` keeps for `ai_ui`, and "Allow agents to run AI commands"). Every edit but that
+/// permission (AI Accounts' own setting) goes into the window's `draft`.
+pub(super) fn page(ui: &mut egui::Ui, page: &str, draft: &mut SettingsDraft, status: &AgentLinkStatus, ai: &crate::ai_ui::PrefsAi) {
     // Off by default: then `pigment-cli mcp` serves a session without a window, as it always did.
     let on = draft.get::<bool>(SWITCH).unwrap_or(false);
     let mut next = None;
@@ -100,8 +98,6 @@ pub(super) fn page(ui: &mut egui::Ui, page: &str, draft: &mut SettingsDraft, sta
             AgentsPage::new(page, draft, status).mcp_flag(true).show(ui);
         },
     );
-    // Pigment: generative AI's accounts.
-    if crate::ai_ui::preferences_button(ui) {
-        accounts.store(true, Ordering::SeqCst);
-    }
+    // Pigment: generative AI's accounts and the agents' permission to run AI commands.
+    crate::ai_ui::preferences_rows(ui, ai);
 }

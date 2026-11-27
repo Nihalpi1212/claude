@@ -7,25 +7,29 @@
 //! Accounts talks to a `TcpListener` on 127.0.0.1. The last tests are Sign in with ChatGPT
 //! (experimental, chat models only): the same listener plays the sign-in server and the plan
 //! route, and the test plays the browser.
+//!
+//! The task bars' tests are in `ai_task_bar.rs` and the Assistant's in `ai_assistant.rs` (both
+//! ported after this file in the 057297b merge).
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use craft::ui::runtime::windows::WindowHost;
 use egui::vec2;
-use egui_kittest::kittest::{By, NodeT, Queryable};
+use egui_kittest::kittest::{By, Queryable};
 use photocraft_engine::Session;
 use photocraft_engine::generative::ProviderId;
 use photocraft_engine::generative::mock::{MockAnswer, MockBackend};
 use photocraft_ui_egui::PhotocraftApp;
-use photocraft_ui_egui::ai_ui::{self, accounts, describe, generate, task_bar};
-use photocraft_ui_egui::control::{ControlRequest, Outcome, handle};
+use photocraft_ui_egui::ai_ui::{self, accounts, describe, generate};
+use photocraft_ui_egui::control::{ControlRequest, Reply, handle};
 use photocraft_ui_egui::menus;
 use pigment_genai::AiAccounts;
 use serde_json::{Value, json};
 
-pub(super) type Harness = egui_kittest::Harness<'static, PhotocraftApp>;
+pub(super) type Harness = egui_kittest::Harness<'static, Box<PhotocraftApp>>;
 
 pub(super) const KEY: &str = "sk-test-0123456789abcdefWXYZ";
 
@@ -64,7 +68,7 @@ pub(super) fn layer_names(app: &PhotocraftApp) -> Vec<String> {
 }
 
 /// Draw frames until no job runs and the windows have taken their answers.
-fn until_idle(h: &mut Harness) {
+pub(super) fn until_idle(h: &mut Harness) {
     for _ in 0..1000 {
         h.run_steps(1);
         let app = h.state();
@@ -88,7 +92,7 @@ pub(super) fn type_into(h: &mut Harness, label: &str, text: &str) {
 pub(super) fn control(h: &mut Harness, method: &str, params: Value) -> Value {
     let ctx = h.ctx.clone();
     let (req, _rx) = ControlRequest::new(method, params.clone());
-    let Outcome::Done(v) = handle(h.state_mut(), &ctx, &req) else { panic!("{method} {params}: not done") };
+    let Reply::Done(v) = handle(h.state_mut(), &ctx, &req) else { panic!("{method} {params}: not done") };
     h.run_steps(3);
     v
 }
@@ -97,8 +101,8 @@ pub(super) fn control(h: &mut Harness, method: &str, params: Value) -> Value {
 #[test]
 fn menus_put_each_feature_in_its_photoshop_place() {
     let app = PhotocraftApp::new(Session::new(), Default::default());
-    let items = menus::menu_items(&app);
-    let at = |id: &str| items.iter().position(|i| i.id == id).unwrap_or_else(|| panic!("{id} is not in the menus"));
+    let items = menus::menu_rows(&app);
+    let at = |id: &str| items.iter().position(|i| i.command.id == id).unwrap_or_else(|| panic!("{id} is not in the menus"));
     let path = |id: &str| items[at(id)].path.join(" › ");
     for (id, after, menu) in [
         ("ai.generativeFill", "edit.contentAwareFill", "Edit"),
@@ -348,7 +352,7 @@ fn ai_accounts_connects_a_key_that_never_shows_anywhere() {
     assert!(!photocraft_ui_egui::control::inspect(app, &h.ctx).to_string().contains(KEY), "ui.inspect");
     assert!(!serde_json::to_string(&app.ui).unwrap().contains(KEY), "the interface state");
     assert!(!serde_json::to_string(app.session.prefs()).unwrap().contains(KEY), "the preferences");
-    assert!(!format!("{:?}", menus::menu_items(app)).contains(KEY), "the menus");
+    assert!(!format!("{:?}", menus::menu_rows(app)).contains(KEY), "the menus");
     let status = h.state_mut().run("ai.status", json!({})).unwrap();
     assert_eq!(status["providers"][0]["connected"], true);
     assert!(!status.to_string().contains(KEY), "ai.status");
@@ -420,153 +424,6 @@ fn describe_without_a_provider_opens_ai_accounts() {
     assert!(invoke(&mut h, "ai.describe").is_err());
     assert!(accounts::is_open(h.state()));
     assert!(mock.calls().is_empty());
-}
-
-/// The task bars: Generative Fill under a selection and Generative Expand in the Crop tool's bar
-/// appear only once a provider has a key; Generate Background follows Remove Background.
-#[test]
-fn task_bar_items_appear_only_with_a_key() {
-    let mock = Arc::new(MockBackend::disconnected());
-    let m = Arc::clone(&mock);
-    let mut h = harness(move |app| {
-        with_mock(app, &m);
-        app.ui.panels.context_task_bar = true;
-        app.run("select.rect", json!({"x": 20, "y": 20, "width": 40, "height": 40})).unwrap();
-    });
-    assert_eq!(task_bar::which(h.state()), None, "no key: the bar stays as it was");
-    let connected = Arc::new(MockBackend::connected());
-    with_mock(h.state_mut(), &connected);
-    h.run_steps(4);
-    assert_eq!(task_bar::which(h.state()), Some(task_bar::Bar::Selection));
-    assert!(h.query_by_label("Generate").is_some(), "the bar's Generate");
-    // Generate from the bar with a prompt runs Generative Fill at once.
-    h.state_mut().ai.bar_prompt = "a moon".into();
-    task_bar::fill_from_bar(h.state_mut());
-    h.run_steps(3);
-    assert_eq!(connected.calls().len(), 1);
-    assert!(layer_names(h.state()).iter().any(|n| n == "Generative Fill"));
-    // Remove Background with the provider, then the bar offers Generate Background.
-    h.state_mut().run("select.deselect", json!({})).unwrap();
-    connected.push(MockAnswer::Pattern(|x, _| if x < 50 { [0, 0, 0, 0] } else { [10, 200, 30, 255] }));
-    let r = ai_ui::menu(h.state_mut(), "ai.removeBackgroundWithProvider", &json!({})).unwrap();
-    assert!(r.is_ok(), "{r:?}");
-    h.run_steps(4);
-    assert_eq!(task_bar::which(h.state()), Some(task_bar::Bar::AfterRemove));
-    assert!(h.query_by_label("Generate Background…").is_some());
-    // The Crop tool's bar: Generative Expand, which takes the frame's size and side.
-    control(&mut h, "ui.set", json!({"tool": "crop"}));
-    h.state_mut().ui.crop_rect = Some([-50.0, 0.0, 200.0, 160.0]);
-    h.run_steps(4);
-    assert!(h.query_by_label("Generative Expand").is_some());
-    h.get_by_label("Generative Expand").click();
-    h.run_steps(3);
-    let g = &h.state().ai.generate;
-    assert!(g.open && g.feature == "ai.generativeExpand");
-    assert_eq!((g.width, g.height, g.anchor), (250, 160, "right"));
-    assert!(h.state().ui.crop_rect.is_none(), "the frame is let go");
-}
-
-/// Remove Background with AI Provider as a background job, with another tab made active while it
-/// runs: Generate Background is offered on the document whose background was removed, not on the
-/// tab that happens to be active when the job lands.
-#[test]
-fn generate_background_follows_the_document_the_job_ran_on() {
-    let mock = Arc::new(MockBackend::connected());
-    let m = Arc::clone(&mock);
-    let mut h = harness(move |app| {
-        with_mock(app, &m);
-        app.background_jobs = true;
-        app.ui.panels.context_task_bar = true;
-        app.run("file.new", json!({"width": 120, "height": 90, "background": "white"})).expect("B");
-        app.session.set_active(0);
-    });
-    mock.push(MockAnswer::Pattern(|x, _| if x < 50 { [0, 0, 0, 0] } else { [10, 200, 30, 255] }));
-    let a = h.state().session.active().unwrap().doc.id;
-    let r = ai_ui::menu(h.state_mut(), "ai.removeBackgroundWithProvider", &json!({})).unwrap();
-    assert!(r.is_ok(), "{r:?}");
-    h.state_mut().session.set_active(1);
-    until_idle(&mut h);
-    assert_eq!(mock.calls().len(), 1);
-    let rev_a = h.state().session.documents().iter().find(|st| st.doc.id == a).unwrap().revision;
-    assert_eq!(h.state().ai.after_remove, Some((a, rev_a)), "the job's document");
-    assert_eq!(task_bar::which(h.state()), None, "not on the other tab");
-    h.state_mut().session.set_active(0);
-    h.run_steps(2);
-    assert_eq!(task_bar::which(h.state()), Some(task_bar::Bar::AfterRemove));
-}
-
-/// Generative Expand from the Crop bar on a document wider than 30,000 px (PhotoCraft allows
-/// 300,000 a side): no panic while the canvas is drawn, and the window keeps the size the frame
-/// asked for instead of capping it below the document's own.
-#[test]
-fn expand_from_crop_on_a_very_wide_document() {
-    let mock = Arc::new(MockBackend::connected());
-    let m = Arc::clone(&mock);
-    let mut h = harness(move |app| {
-        with_mock(app, &m);
-        app.run("file.new", json!({"width": 40_000, "height": 100, "background": "transparent"})).expect("wide");
-    });
-    control(&mut h, "ui.set", json!({"tool": "crop"}));
-    h.state_mut().ui.crop_rect = Some([-100.0, 0.0, 40_000.0, 100.0]);
-    task_bar::expand_from_crop(h.state_mut());
-    h.run_steps(3);
-    let g = &h.state().ai.generate;
-    assert!(g.open && g.feature == "ai.generativeExpand");
-    assert_eq!((g.width, g.height, g.anchor), (40_100, 100, "right"));
-    assert_eq!(generate::params(h.state())["width"], 40_100);
-    assert!(mock.calls().is_empty(), "nothing sent before Generate");
-}
-
-/// Generative Expand where the document can't take it (Indexed Color): the Crop bar's item is
-/// dimmed with the reason, and asking anyway keeps the crop frame and says why in the status bar.
-#[test]
-fn expand_from_crop_keeps_the_frame_where_expand_is_disabled() {
-    let mock = Arc::new(MockBackend::connected());
-    let m = Arc::clone(&mock);
-    let mut h = harness(move |app| {
-        with_mock(app, &m);
-        app.ui.panels.context_task_bar = true;
-        app.run("image.mode.indexedColor", json!({})).expect("indexed");
-    });
-    control(&mut h, "ui.set", json!({"tool": "crop"}));
-    let frame = [-20.0, 0.0, 200.0, 160.0];
-    h.state_mut().ui.crop_rect = Some(frame);
-    h.run_steps(3);
-    let item = h.get_by_label("Generative Expand");
-    assert!(item.accesskit_node().is_disabled(), "the Crop bar's item is dimmed");
-    task_bar::expand_from_crop(h.state_mut());
-    h.run_steps(3);
-    let app = h.state();
-    assert!(!app.ai.generate.open);
-    assert_eq!(app.ui.crop_rect, Some(frame), "the frame is kept");
-    assert!(app.ui.status.contains("Generative AI needs an RGB, CMYK, Lab or Grayscale document"), "{:?}", app.ui.status);
-}
-
-/// The selection bar's Generate sends one request, whatever the Generate window was last set to,
-/// and a model typed for another feature is not carried over.
-#[test]
-fn the_bar_generate_sends_one_request() {
-    let mock = Arc::new(MockBackend::connected());
-    let m = Arc::clone(&mock);
-    let mut h = harness(move |app| {
-        with_mock(app, &m);
-        app.run("select.rect", json!({"x": 20, "y": 20, "width": 40, "height": 40})).unwrap();
-    });
-    generate::open(h.state_mut(), "ai.generativeFill", None).unwrap();
-    h.state_mut().ai.generate.variations = 3;
-    generate::close(h.state_mut());
-    h.run_steps(2);
-    h.state_mut().ai.bar_prompt = "a moon".into();
-    task_bar::fill_from_bar(h.state_mut());
-    h.run_steps(3);
-    assert_eq!(mock.calls().len(), 1, "{:?}", mock.calls());
-    assert_eq!(layer_names(h.state()).iter().filter(|n| n.starts_with("Generative Fill")).count(), 1);
-    // A model typed for Generate Image stays with it.
-    generate::open(h.state_mut(), "ai.generateImage", None).unwrap();
-    h.state_mut().ai.generate.model = "image-model-x".into();
-    generate::close(h.state_mut());
-    generate::open(h.state_mut(), "ai.generativeFill", None).unwrap();
-    assert_eq!(h.state().ai.generate.model, "", "another feature's model");
 }
 
 /// Describe Image shows at most 20,000 characters of an answer, however long the provider's.
@@ -665,7 +522,7 @@ fn an_action_with_an_ai_step_never_sends() {
         ai_ui::install_accounts(app, a);
         with_mock(app, &m);
         app.run("select.rect", json!({"x": 10, "y": 10, "width": 30, "height": 30})).unwrap();
-        app.session.actions.list.push(photocraft_engine::actions_cmds::Action::new("Built", Vec::new()));
+        app.session.actions.list.push(photocraft_engine::actions_cmds::Action::new("Built", Vec::new())).expect("the action");
     });
     let insert = json!({"command": "actions.insert", "params": {"action": "Built", "id": "ai.generativeFill", "params": {"prompt": "x"}}});
     let v = control(&mut h, "engine.execute", insert);
@@ -680,17 +537,25 @@ fn an_action_with_an_ai_step_never_sends() {
     assert_eq!(layer_names(h.state()).len(), 1, "nothing changed");
 }
 
-/// Click `label` as an agent does: `ui.click` through the control channel, its events delivered
-/// in one frame the way the app's input hook delivers them (as automation's input).
+/// Click `label` as an agent does: `ui.click` through the control channel, its events queued on
+/// the window host, which injects them in the passes after (as automation's input).
 pub(super) fn synthetic_click(h: &mut Harness, label: &str) {
     let at = h.get_by_label(label).rect().center();
     let ctx = h.ctx.clone();
     let (req, _rx) = ControlRequest::new("ui.click", json!({"x": at.x, "y": at.y}));
-    assert!(matches!(handle(h.state_mut(), &ctx, &req), Outcome::AfterInput), "ui.click on {label}");
-    let events = h.state_mut().take_synthetic_step();
-    assert!(!events.is_empty());
-    h.input_mut().events.extend(events);
-    h.step();
+    assert!(matches!(handle(h.state_mut(), &ctx, &req), Reply::AfterInput), "ui.click on {label}");
+    until_injected(h);
+}
+
+/// Run passes until the window host has injected all the queued synthetic input.
+fn until_injected(h: &mut Harness) {
+    for _ in 0..64 {
+        if WindowHost::of(&h.ctx).injected_idle() {
+            break;
+        }
+        h.step();
+    }
+    assert!(WindowHost::of(&h.ctx).injected_idle(), "the synthetic input was delivered");
     h.run_steps(2);
 }
 
@@ -811,17 +676,13 @@ fn ai_accounts_removes_a_sign_in_the_feature_hides() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// Type `text` as an agent does: `ui.type` through the control channel, delivered in one frame as
-/// automation's input.
+/// Type `text` as an agent does: `ui.type` through the control channel, injected by the window
+/// host as automation's input.
 fn synthetic_type(h: &mut Harness, text: &str) {
     let ctx = h.ctx.clone();
     let (req, _rx) = ControlRequest::new("ui.type", json!({"text": text}));
-    assert!(matches!(handle(h.state_mut(), &ctx, &req), Outcome::AfterInput), "ui.type");
-    let events = h.state_mut().take_synthetic_step();
-    assert!(!events.is_empty());
-    h.input_mut().events.extend(events);
-    h.step();
-    h.run_steps(2);
+    assert!(matches!(handle(h.state_mut(), &ctx, &req), Reply::AfterInput), "ui.type");
+    until_injected(h);
 }
 
 /// Nor can synthetic input choose the models or the provider the person's own requests are billed
@@ -962,13 +823,13 @@ fn the_last_prompt_comes_back() {
 /// The sign-in server and the ChatGPT plan route on 127.0.0.1: the token endpoint (its ID token
 /// carries `nonce`, set once the attempt's address is known), a streamed `POST /v1/responses`
 /// and `GET /v1/models`. `log` keeps each request's path and bearer token.
-struct PlanServer {
-    url: String,
-    nonce: Arc<Mutex<String>>,
-    log: Arc<Mutex<Vec<(String, String)>>>,
+pub(super) struct PlanServer {
+    pub(super) url: String,
+    pub(super) nonce: Arc<Mutex<String>>,
+    pub(super) log: Arc<Mutex<Vec<(String, String)>>>,
 }
 
-fn plan_server() -> PlanServer {
+pub(super) fn plan_server() -> PlanServer {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
     let (nonce, log) = (Arc::new(Mutex::new(String::new())), Arc::new(Mutex::new(vec![])));
@@ -1027,7 +888,7 @@ fn plan_answer(stream: TcpStream, nonce: &Mutex<String>, log: &Mutex<Vec<(String
 }
 
 /// The app with accounts whose sign-in and OpenAI requests go to `server`, the agreement given.
-fn plan_harness(server: &PlanServer) -> Harness {
+pub(super) fn plan_harness(server: &PlanServer) -> Harness {
     let url = server.url.clone();
     harness(move |app| {
         let mut a = AiAccounts::in_memory();
@@ -1059,7 +920,7 @@ fn param(url: &str, name: &str) -> String {
 
 /// What the browser does with the sign-in address: lands on the loopback callback with a code.
 /// The page it gets.
-fn browser_lands(server: &PlanServer, sign_in_url: &str) -> String {
+pub(super) fn browser_lands(server: &PlanServer, sign_in_url: &str) -> String {
     *server.nonce.lock().unwrap() = param(sign_in_url, "nonce");
     let redirect = param(sign_in_url, "redirect_uri");
     let (host, path) = redirect.strip_prefix("http://").unwrap().split_once('/').unwrap();
@@ -1180,52 +1041,4 @@ fn the_pasted_address_finishes_a_sign_in_and_agents_cannot_start_or_end_one() {
     assert!(accounts::sign_in_status(h.state()).pending);
     pointer_click(&mut h, "Cancel");
     assert!(!accounts::sign_in_status(h.state()).pending && h.query_by_label("Sign in with ChatGPT").is_some());
-}
-
-/// With a ChatGPT sign-in the Assistant and Describe Image run on the plan route, and the image
-/// features ask for an API key before anything is sent, as in the JavaScript app. A sign-in
-/// that completes while AI Accounts is closed is still noticed.
-#[test]
-fn a_sign_in_serves_the_assistant_and_describe_and_images_ask_for_a_key() {
-    let server = plan_server();
-    let mut h = plan_harness(&server);
-    if !accounts::sign_in_offered(h.state()) {
-        return;
-    }
-    invoke(&mut h, "ai.accounts").unwrap();
-    let url = accounts::start_sign_in(h.state_mut()).unwrap();
-    accounts::close(h.state_mut());
-    assert!(browser_lands(&server, &url).contains("now connected"));
-    h.run_steps(3);
-    assert_eq!(h.state().ui.status, "Signed in with ChatGPT as me@example.com.", "said in the status bar when the dialog is closed");
-    // The Assistant.
-    ai_ui::assistant::open(h.state_mut());
-    assert_eq!(ai_ui::assistant::provider(h.state()), Some(ProviderId::OpenAi));
-    assert!(ai_ui::assistant::send(h.state_mut(), "Say hello").unwrap());
-    for _ in 0..2000 {
-        h.run_steps(1);
-        if !ai_ui::assistant::running(h.state()) {
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(5));
-    }
-    let last = ai_ui::assistant::messages(h.state()).last().unwrap();
-    assert!(!last.error && last.text == "Hello from the plan.", "{:?}", last.text);
-    // Describe Image.
-    describe::start(h.state_mut()).unwrap();
-    until_idle(&mut h);
-    assert_eq!(h.state().ai.describe.text.as_ref().map(|t| t.0.as_str()), Some("Hello from the plan."));
-    let asked: Vec<(String, String)> = server.log.lock().unwrap().iter().filter(|(p, _)| p == "/v1/responses").cloned().collect();
-    assert_eq!(asked.len(), 2);
-    assert!(asked.iter().all(|(_, bearer)| bearer == "access-token-ONE"), "with the plan's token");
-    // Image features: the window says a key is needed, and nothing is sent.
-    let before = server.log.lock().unwrap().len();
-    h.state_mut().run("select.rect", json!({"x": 10, "y": 10, "width": 30, "height": 30})).unwrap();
-    ai_ui::menu(h.state_mut(), "ai.generativeFill", &json!({"prompt": "clouds"})).unwrap().unwrap();
-    h.run_steps(3);
-    assert!(generate::blocked(h.state()).unwrap_or_default().contains("API key"));
-    let refused = h.state_mut().run("ai.generativeFill", json!({"prompt": "clouds", "provider": "openai"})).unwrap_err();
-    assert!(refused.contains("not connected for image models"), "{refused}");
-    assert_eq!(server.log.lock().unwrap().len(), before, "nothing sent");
-    assert_eq!(layer_names(h.state()).len(), 1);
 }

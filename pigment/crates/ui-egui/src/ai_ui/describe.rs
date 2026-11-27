@@ -174,15 +174,15 @@ fn body(app: &PhotocraftApp, ui: &mut egui::Ui) -> Option<Act> {
     ui.add_space(8.0);
     ui.horizontal(|ui| {
         if d.text.is_some() {
-            if crate::widgets::secondary_button(ui, tl!("Copy"), 72.0).clicked() {
+            if super::button(ui, tl!("Copy"), false, true).clicked() {
                 act = Some(Act::Copy);
             }
-            if crate::widgets::secondary_button(ui, tl!("Use as Document Description"), 0.0).clicked() {
+            if super::button(ui, tl!("Use as Document Description"), false, true).clicked() {
                 act = Some(Act::Use);
             }
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if crate::widgets::primary_button(ui, tl!("Close"), 72.0).clicked() {
+            if super::button(ui, tl!("Close"), true, true).clicked() {
                 act = Some(Act::Close);
             }
         });

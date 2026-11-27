@@ -355,7 +355,7 @@ pub fn use_pasted_address(app: &mut PhotocraftApp) {
 pub fn sign_out(app: &mut PhotocraftApp) {
     let r = with_accounts(app, |a| a.sign_out());
     reread(app);
-    super::assistant::forget_models(app);
+    super::forget_assistant_models(app);
     match r {
         Some(Ok(())) => note(app, false, tl!("Signed out of ChatGPT.").into()),
         Some(Err(e)) => note(app, true, message(&e.message)),
@@ -431,7 +431,7 @@ pub fn wait(app: &mut PhotocraftApp, timeout: Duration) -> bool {
 
 fn finished(app: &mut PhotocraftApp, work: Work, p: ProviderId, r: Result<Vec<ModelInfo>, AiError>) {
     reread(app);
-    super::assistant::forget_models(app);
+    super::forget_assistant_models(app);
     if work == Work::SignIn {
         // A sign-in that ended (signed in, or failed for good) is said by `poll_sign_in`; an
         // address that was refused while the attempt goes on (another attempt's, unreadable)
@@ -472,7 +472,7 @@ pub fn remove_key(app: &mut PhotocraftApp) {
     let Some(p) = app.ai.accounts.as_ref().map(|f| f.provider) else { return };
     let r = with_accounts(app, |a| a.clear_key(p));
     reread(app);
-    super::assistant::forget_models(app);
+    super::forget_assistant_models(app);
     match r {
         Some(Ok(())) => note(app, false, crate::i18n::fmt(tl!("Key removed for {provider}."), &[("provider", p.label())])),
         Some(Err(e)) => note(app, true, message(&e.message)),
@@ -584,7 +584,7 @@ pub(crate) fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let modal = egui::Modal::new(id).show(ctx, |ui| {
         ui.set_width(500.0);
         ui.label(egui::RichText::new(tl!("AI Accounts")).font(crate::theme::semibold(15.0)));
-        crate::widgets::hairline(ui);
+        ui.separator();
         ui.add_space(8.0);
         body(app, ui, &mut acts);
     });
@@ -662,7 +662,7 @@ fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, acts: &mut Vec<Act>) {
     if app.ai.store.is_none() {
         ui.label(tl!("AI Accounts are not available in this build."));
         ui.add_space(8.0);
-        if crate::widgets::primary_button(ui, tl!("Done"), 72.0).clicked() {
+        if super::button(ui, tl!("Done"), true, true).clicked() {
             acts.push(Act::Close);
         }
         return;
@@ -691,7 +691,7 @@ fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, acts: &mut Vec<Act>) {
     }
     ui.add_space(12.0);
     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-        if crate::widgets::primary_button(ui, tl!("Done"), 72.0).clicked() {
+        if super::button(ui, tl!("Done"), true, true).clicked() {
             acts.push(Act::Close);
         }
     });
@@ -764,7 +764,7 @@ fn key_rows(app: &mut PhotocraftApp, ui: &mut egui::Ui, acts: &mut Vec<Act>) {
         let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
         let label = if busy == Some(Work::Connect) { tl!("Checking…") } else { tl!("Connect") };
         let can = !f.key.trim().is_empty() && busy.is_none();
-        let clicked = ui.add_enabled_ui(can, |ui| crate::widgets::primary_button(ui, label, 84.0)).inner.clicked();
+        let clicked = super::button(ui, label, true, can).clicked();
         if (clicked || enter) && can {
             acts.push(Act::Connect);
         }
