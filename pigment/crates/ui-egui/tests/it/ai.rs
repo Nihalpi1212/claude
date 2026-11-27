@@ -8,8 +8,7 @@
 //! (experimental, chat models only): the same listener plays the sign-in server and the plan
 //! route, and the test plays the browser.
 //!
-//! The task bars' tests are in `ai_task_bar.rs` and the Assistant's in `ai_assistant.rs` (both
-//! ported after this file in the 057297b merge).
+//! The Assistant's tests are in `ai_assistant.rs` (ported last in the 057297b merge).
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -18,14 +17,14 @@ use std::time::Duration;
 
 use craft::ui::runtime::windows::WindowHost;
 use egui::vec2;
-use egui_kittest::kittest::{By, Queryable};
+use egui_kittest::kittest::{By, NodeT, Queryable};
 use photocraft_engine::Session;
 use photocraft_engine::generative::ProviderId;
 use photocraft_engine::generative::mock::{MockAnswer, MockBackend};
 use photocraft_ui_egui::PhotocraftApp;
-use photocraft_ui_egui::ai_ui::{self, accounts, describe, generate};
+use photocraft_ui_egui::ai_ui::{self, accounts, describe, generate, task_bar};
 use photocraft_ui_egui::control::{ControlRequest, Reply, handle};
-use photocraft_ui_egui::menus;
+use photocraft_ui_egui::{crop_task_bar, crop_ui, menus};
 use pigment_genai::AiAccounts;
 use serde_json::{Value, json};
 
@@ -161,7 +160,9 @@ fn generative_fill_sends_nothing_before_generate_and_lands_as_one_step() {
     assert_eq!(generate::blocked(h.state()).as_deref(), Some("Describe what to generate."));
     type_into(&mut h, "Describe what to generate", "a red fox");
     assert!(mock.calls().is_empty(), "nothing sent while typing");
-    mock.set_delay(Duration::from_millis(600));
+    // Long enough that the request still runs when the window is read below, also on a busy
+    // machine running the other tests beside this one.
+    mock.set_delay(Duration::from_millis(2500));
     h.get_by_label("Generate").click();
     h.run_steps(3);
     assert!(h.state().ai.generate.job.is_some(), "running");
@@ -445,6 +446,232 @@ fn describe_without_a_provider_opens_ai_accounts() {
     assert!(invoke(&mut h, "ai.describe").is_err());
     assert!(accounts::is_open(h.state()));
     assert!(mock.calls().is_empty());
+}
+
+/// Drag the Crop tool's frame at `from` (an edge or a corner) to `to`, both in document px, as an
+/// agent's `ui.pointer` does; then let the app draw.
+fn drag_crop_frame(h: &mut Harness, from: [f64; 2], to: [f64; 2]) {
+    let events = json!([
+        {"kind": "down", "x": from[0], "y": from[1]},
+        {"kind": "move", "x": (from[0] + to[0]) / 2.0, "y": (from[1] + to[1]) / 2.0},
+        {"kind": "move", "x": to[0], "y": to[1]},
+        {"kind": "up", "x": to[0], "y": to[1]},
+    ]);
+    let ctx = h.ctx.clone();
+    let (req, _rx) = ControlRequest::new("ui.pointer", json!({"events": events}));
+    match handle(h.state_mut(), &ctx, &req) {
+        Reply::Done(v) => assert_eq!(v["ok"], true, "ui.pointer: {v}"),
+        Reply::AfterInput => {}
+        _ => panic!("ui.pointer: not done"),
+    }
+    until_injected(h);
+    h.run_steps(4);
+}
+
+/// The Crop tool on the active document in Classic Mode with Delete Cropped Pixels off, so its
+/// frame can reach past the canvas (where Generative Expand takes it), and no snapping.
+fn crop_tool(h: &mut Harness) {
+    let app = h.state_mut();
+    app.ui.tool_options.crop.shield.classic_mode = true;
+    app.ui.tool_options.crop.delete_pixels = false;
+    app.ui.extras.snap = false;
+    control(h, "ui.set", json!({"tool": "crop"}));
+    h.run_steps(2);
+}
+
+/// The Crop tool's frame as `[x0, y0, x1, y1]` (document px).
+fn crop_frame(h: &Harness) -> Option<[f64; 4]> {
+    crop_ui::frame(h.state()).map(|f| [f.rect.x0, f.rect.y0, f.rect.x1, f.rect.y1])
+}
+
+/// The task bars: Generative Fill under a selection and Generative Expand in the Crop tool's bar
+/// appear only once a provider has a key; Generate Background follows Remove Background.
+#[test]
+fn task_bar_items_appear_only_with_a_key() {
+    let mock = Arc::new(MockBackend::disconnected());
+    let m = Arc::clone(&mock);
+    let mut h = harness(move |app| {
+        with_mock(app, &m);
+        app.ui.panels.context_task_bar = true;
+        app.run("select.rect", json!({"x": 20, "y": 20, "width": 40, "height": 40})).unwrap();
+    });
+    assert_eq!(task_bar::which(h.state()), None, "no key: the bar stays as it was");
+    assert!(h.query_by_label("Generate").is_none());
+    let connected = Arc::new(MockBackend::connected());
+    with_mock(h.state_mut(), &connected);
+    h.run_steps(4);
+    assert_eq!(task_bar::which(h.state()), Some(task_bar::Bar::Selection));
+    assert!(h.query_by_label("Generate").is_some(), "the bar's Generate");
+    assert!(h.query_by_label("Describe what to generate").is_some(), "the bar's prompt");
+    assert!(h.state().ui.task_bar_shown.is_some(), "the bar reports where it is");
+    // Generate from the bar with a prompt runs Generative Fill at once.
+    h.state_mut().ai.bar_prompt = "a moon".into();
+    pointer_click(&mut h, "Generate");
+    h.run_steps(3);
+    assert_eq!(connected.calls().len(), 1);
+    assert!(layer_names(h.state()).iter().any(|n| n == "Generative Fill"));
+    assert!(h.state().ai.bar_prompt.is_empty(), "the prompt went with the request");
+    assert!(!h.state().ai.generate.open, "the window opened only to run it");
+    // Remove Background with the provider, then the bar offers Generate Background.
+    h.state_mut().run("select.deselect", json!({})).unwrap();
+    connected.push(MockAnswer::Pattern(|x, _| if x < 50 { [0, 0, 0, 0] } else { [10, 200, 30, 255] }));
+    let r = ai_ui::menu(h.state_mut(), "ai.removeBackgroundWithProvider", &json!({})).unwrap();
+    assert!(r.is_ok(), "{r:?}");
+    h.run_steps(4);
+    assert_eq!(task_bar::which(h.state()), Some(task_bar::Bar::AfterRemove));
+    pointer_click(&mut h, "Generate Background…");
+    let g = &h.state().ai.generate;
+    assert!(g.open && g.feature == "ai.replaceBackground", "the bar opens Generate Background");
+    generate::close(h.state_mut());
+    // The Crop tool's bar: Generative Expand, which takes the frame's size and side.
+    crop_tool(&mut h);
+    assert_eq!(task_bar::which(h.state()), None, "the Crop tool's bar has the place");
+    assert_eq!(crop_frame(&h), Some([0.0, 0.0, 200.0, 160.0]), "the untouched frame is the canvas");
+    drag_crop_frame(&mut h, [0.0, 80.0], [-50.0, 80.0]);
+    assert_eq!(crop_frame(&h), Some([-50.0, 0.0, 200.0, 160.0]), "the frame reaches past the left edge");
+    assert!(crop_task_bar::eligible(h.state()));
+    assert!(h.query_by_label("Generative Expand").is_some());
+    h.get_by_label("Generative Expand").click();
+    h.run_steps(3);
+    let g = &h.state().ai.generate;
+    assert!(g.open && g.feature == "ai.generativeExpand");
+    assert_eq!((g.width, g.height, g.anchor), (250, 160, "right"));
+    assert!(!crop_ui::pending(h.state()), "the frame is let go");
+    assert!(connected.calls().len() == 2, "nothing more sent before Generate: {:?}", connected.calls());
+}
+
+/// The person types a prompt into the selection bar and presses Enter: Generative Fill runs with
+/// it, as the bar's Generate does; Enter in an empty field sends nothing.
+#[test]
+fn the_bar_s_prompt_runs_on_enter() {
+    let mock = Arc::new(MockBackend::connected());
+    let m = Arc::clone(&mock);
+    let mut h = harness(move |app| {
+        with_mock(app, &m);
+        app.ui.panels.context_task_bar = true;
+        app.run("select.rect", json!({"x": 20, "y": 20, "width": 40, "height": 40})).unwrap();
+    });
+    h.get_by_label("Describe what to generate").click();
+    h.run_steps(2);
+    h.key_press(egui::Key::Enter);
+    h.run_steps(3);
+    assert!(mock.calls().is_empty(), "an empty prompt sends nothing");
+    type_into(&mut h, "Describe what to generate", "a moon");
+    h.key_press(egui::Key::Enter);
+    h.run_steps(3);
+    let calls = mock.calls();
+    assert_eq!(calls.len(), 1, "{calls:?}");
+    assert_eq!(calls[0].prompt, "a moon");
+    assert!(layer_names(h.state()).iter().any(|n| n == "Generative Fill"));
+}
+
+/// Remove Background with AI Provider as a background job, with another tab made active while it
+/// runs: Generate Background is offered on the document whose background was removed, not on the
+/// tab that happens to be active when the job lands.
+#[test]
+fn generate_background_follows_the_document_the_job_ran_on() {
+    let mock = Arc::new(MockBackend::connected());
+    let m = Arc::clone(&mock);
+    let mut h = harness(move |app| {
+        with_mock(app, &m);
+        app.background_jobs = true;
+        app.ui.panels.context_task_bar = true;
+        app.run("file.new", json!({"width": 120, "height": 90, "background": "white"})).expect("B");
+        app.session.set_active(0);
+    });
+    mock.push(MockAnswer::Pattern(|x, _| if x < 50 { [0, 0, 0, 0] } else { [10, 200, 30, 255] }));
+    let a = h.state().session.active().unwrap().doc.id;
+    let r = ai_ui::menu(h.state_mut(), "ai.removeBackgroundWithProvider", &json!({})).unwrap();
+    assert!(r.is_ok(), "{r:?}");
+    h.state_mut().session.set_active(1);
+    until_idle(&mut h);
+    assert_eq!(mock.calls().len(), 1);
+    let rev_a = h.state().session.documents().iter().find(|st| st.doc.id == a).unwrap().revision;
+    assert_eq!(h.state().ai.after_remove, Some((a, rev_a)), "the job's document");
+    assert_eq!(task_bar::which(h.state()), None, "not on the other tab");
+    assert!(h.query_by_label("Generate Background…").is_none());
+    h.state_mut().session.set_active(0);
+    h.run_steps(2);
+    assert_eq!(task_bar::which(h.state()), Some(task_bar::Bar::AfterRemove));
+    assert!(h.query_by_label("Generate Background…").is_some());
+}
+
+/// Generative Expand from the Crop bar on a document wider than 30,000 px (PhotoCraft allows
+/// 300,000 a side): no panic while the canvas is drawn, and the window keeps the size the frame
+/// asked for instead of capping it below the document's own.
+#[test]
+fn expand_from_crop_on_a_very_wide_document() {
+    let mock = Arc::new(MockBackend::connected());
+    let m = Arc::clone(&mock);
+    let mut h = harness(move |app| {
+        with_mock(app, &m);
+        app.run("file.new", json!({"width": 40_000, "height": 100, "background": "transparent"})).expect("wide");
+    });
+    crop_tool(&mut h);
+    // At 100 %, the left edge in view, so the frame's edge is under the pointer.
+    control(&mut h, "ui.set", json!({"zoom": 1.0, "center": [200.0, 50.0]}));
+    drag_crop_frame(&mut h, [0.0, 50.0], [-100.0, 50.0]);
+    assert_eq!(crop_frame(&h), Some([-100.0, 0.0, 40_000.0, 100.0]));
+    task_bar::expand_from_crop(h.state_mut());
+    h.run_steps(3);
+    let g = &h.state().ai.generate;
+    assert!(g.open && g.feature == "ai.generativeExpand");
+    assert_eq!((g.width, g.height, g.anchor), (40_100, 100, "right"));
+    assert_eq!(generate::params(h.state())["width"], 40_100);
+    assert!(mock.calls().is_empty(), "nothing sent before Generate");
+}
+
+/// Generative Expand where the document can't take it (Indexed Color): the Crop bar's item is
+/// dimmed with the reason, and asking anyway keeps the crop frame and says why in the status bar.
+#[test]
+fn expand_from_crop_keeps_the_frame_where_expand_is_disabled() {
+    let mock = Arc::new(MockBackend::connected());
+    let m = Arc::clone(&mock);
+    let mut h = harness(move |app| {
+        with_mock(app, &m);
+        app.ui.panels.context_task_bar = true;
+        app.run("image.mode.indexedColor", json!({})).expect("indexed");
+    });
+    crop_tool(&mut h);
+    drag_crop_frame(&mut h, [0.0, 80.0], [-20.0, 80.0]);
+    let frame = Some([-20.0, 0.0, 200.0, 160.0]);
+    assert_eq!(crop_frame(&h), frame);
+    let item = h.get_by_label("Generative Expand");
+    assert!(item.accesskit_node().is_disabled(), "the Crop bar's item is dimmed");
+    task_bar::expand_from_crop(h.state_mut());
+    h.run_steps(3);
+    assert!(!h.state().ai.generate.open);
+    assert_eq!(crop_frame(&h), frame, "the frame is kept");
+    assert!(crop_ui::pending(h.state()));
+    let status = &h.state().ui.status;
+    assert!(status.contains("Generative AI needs an RGB, CMYK, Lab or Grayscale document"), "{status:?}");
+}
+
+/// The selection bar's Generate sends one request, whatever the Generate window was last set to,
+/// and a model typed for another feature is not carried over.
+#[test]
+fn the_bar_generate_sends_one_request() {
+    let mock = Arc::new(MockBackend::connected());
+    let m = Arc::clone(&mock);
+    let mut h = harness(move |app| {
+        with_mock(app, &m);
+        app.run("select.rect", json!({"x": 20, "y": 20, "width": 40, "height": 40})).unwrap();
+    });
+    generate::open(h.state_mut(), "ai.generativeFill", None).unwrap();
+    h.state_mut().ai.generate.variations = 3;
+    generate::close(h.state_mut());
+    h.run_steps(2);
+    h.state_mut().ai.bar_prompt = "a moon".into();
+    task_bar::fill_from_bar(h.state_mut());
+    h.run_steps(3);
+    assert_eq!(mock.calls().len(), 1, "{:?}", mock.calls());
+    assert_eq!(layer_names(h.state()).iter().filter(|n| n.starts_with("Generative Fill")).count(), 1);
+    // A model typed for Generate Image stays with it.
+    generate::open(h.state_mut(), "ai.generateImage", None).unwrap();
+    h.state_mut().ai.generate.model = "image-model-x".into();
+    generate::close(h.state_mut());
+    generate::open(h.state_mut(), "ai.generativeFill", None).unwrap();
+    assert_eq!(h.state().ai.generate.model, "", "another feature's model");
 }
 
 /// Describe Image shows at most 20,000 characters of an answer, however long the provider's.
