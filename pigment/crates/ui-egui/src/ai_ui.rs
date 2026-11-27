@@ -32,11 +32,12 @@
 //! The windows are egui windows drawn after the framework's hosted dialogs ([`show`]); the
 //! buttons are the framework's (`craft::ui::buttons::Button`).
 //!
-//! **The 057297b merge** ports this module in three parts: this one (the menus, the Generate
-//! window, Describe Image, AI Accounts, the control `Reply`), then the task bars ([`task_bars`],
-//! [`crop_task_bar_item`] still do nothing; Pigment 0.5.0's `ai_ui/task_bar.rs` waits in the tree,
-//! not compiled), then the Assistant (Window › Assistant is not in the menus yet;
-//! `ai_ui/assistant*.rs` wait likewise).
+//! The task bars ([`task_bar`]) are the framework's contextual task bar, as the Crop tool's.
+//!
+//! **The 057297b merge** ports this module in three parts: the menus, the Generate window,
+//! Describe Image, AI Accounts and the control `Reply`; the task bars; then the Assistant
+//! (Window › Assistant is not in the menus yet; `ai_ui/assistant*.rs` wait in the tree, not
+//! compiled).
 //!
 //! The browser build has no provider: this module keeps its signatures there and does nothing.
 
@@ -46,6 +47,8 @@ pub mod accounts;
 pub mod describe;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod generate;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod task_bar;
 
 use craft::menu::Row;
 use serde_json::Value;
@@ -116,6 +119,9 @@ pub struct AiUi {
     pub(crate) sign_in_watch: bool,
     #[cfg(not(target_arch = "wasm32"))]
     pub describe: describe::State,
+    /// The task bar's Generative Fill prompt.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub bar_prompt: String,
     /// Remove Background just ran: (document, revision after it). The task bar offers Generate
     /// Background while that document is unchanged.
     #[cfg(not(target_arch = "wasm32"))]
@@ -307,7 +313,7 @@ mod native {
 
     use super::{
         ACCOUNTS, ACCOUNTS_PATH, BACKGROUND, DESCRIBE, EXPAND, FILL, GENERATE_IMAGE, ITEMS, PhotocraftApp, PrefsAi, REMOVE_BACKGROUND, REMOVE_WITH_PROVIDER,
-        SKY, accounts, describe, generate,
+        SKY, accounts, describe, generate, task_bar,
     };
 
     /// Keep the AI accounts in Pigment's settings folder `dir` (the desktop app, at start-up): keys
@@ -524,13 +530,16 @@ mod native {
     pub(crate) fn forget_assistant_models(_: &mut PhotocraftApp) {}
 
     /// The task bars under a selection (Generative Fill) and after Remove Background (Generate
-    /// Background), drawn by the canvas over the active document's tile `rect`, in `space`'s view.
-    /// Not ported yet (part 2 of the 057297b merge's AI interface): nothing is drawn.
-    pub fn task_bars(_: &mut PhotocraftApp, _: &mut egui::Ui, _: egui::Rect, _: &craft::ui::canvas::CanvasSpace) {}
+    /// Background), drawn by the canvas over the active document's tile `rect` (the framework's
+    /// task bar reads the pass's view itself, so `space` is not needed).
+    pub fn task_bars(app: &mut PhotocraftApp, ui: &mut egui::Ui, rect: egui::Rect, _space: &craft::ui::canvas::CanvasSpace) {
+        task_bar::draw(app, ui, rect);
+    }
 
-    /// The Crop tool's task bar slot: Generative Expand, before the preset list. Not ported yet
-    /// (part 2): nothing is drawn.
-    pub fn crop_task_bar_item(_: &mut PhotocraftApp, _: &mut egui::Ui) {}
+    /// The Crop tool's task bar slot: Generative Expand, before the preset list.
+    pub fn crop_task_bar_item(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
+        task_bar::crop_item(app, ui);
+    }
 
     /// Preferences › AI Integrations' Generative AI rows, under the agents' page: what the AI
     /// commands use, AI Accounts… (opened by [`show`] on the next pass) and "Allow agents to run

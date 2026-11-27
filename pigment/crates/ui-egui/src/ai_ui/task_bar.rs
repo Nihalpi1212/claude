@@ -1,5 +1,6 @@
-//! The generative AI contexts of the contextual task bar (`widgets::task_bar`), shown only once a
-//! provider has a key, so the bar stays as it was for people who don't use AI:
+//! The generative AI contexts of the contextual task bar (the framework's
+//! `craft::ui::canvas_controls::TaskBar`, as the Crop tool's in `tools/crop_task_bar.rs`), shown
+//! only once a provider has a key, so the bar stays as it was for people who don't use AI:
 //!
 //! * under a **selection**: a prompt field and **Generate** (Generative Fill), as in Photoshop's
 //!   selection bar;
@@ -8,15 +9,22 @@
 //! * in the **Crop tool's** bar, the slot it keeps for it: **Generative Expand**, which takes the
 //!   crop frame's size and side as the new canvas.
 //!
-//! Like the Crop tool's, the bars follow Window › Contextual Task Bar and hide behind dialogs.
+//! The bars share the Crop tool's place, pin and Hide setting (`app.ui.panels.task_bar`), follow
+//! Window › Contextual Task Bar and hide behind dialogs. One bar shows at a time: the AI's never
+//! with the Crop, Perspective Crop or Frame tool, whose bars have the place.
 
+use craft::behavior::geometry::CropBox;
+use craft::behavior::kurbo::Point;
+use craft::ui::buttons::Button;
+use craft::ui::canvas_controls::TaskBar;
+use craft::ui::contract::{Bind, Props as _, Show as _};
+use craft::ui::runtime::env::Label;
+use craft::ui::text::TextField;
 use photocraft_engine::generative::ModelKind;
 
 use super::{BACKGROUND, EXPAND, FILL, fits, generate};
 use crate::PhotocraftApp;
-use crate::canvas::ViewXform;
 use crate::state::Tool;
-use crate::widgets::task_bar;
 
 /// Which bar shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -31,10 +39,10 @@ pub enum Bar {
 pub fn which(app: &PhotocraftApp) -> Option<Bar> {
     if !fits(app, ModelKind::Image)
         || !app.ui.panels.context_task_bar
-        || !app.ui.dialogs.is_empty()
+        || app.dialog_open()
         || app.ui.transform.is_some()
         || app.ui.text_edit.is_some()
-        || matches!(app.ui.tool, Tool::Crop | Tool::PerspectiveCrop)
+        || matches!(app.ui.tool, Tool::Crop | Tool::PerspectiveCrop | Tool::Frame)
     {
         return None;
     }
@@ -45,56 +53,59 @@ pub fn which(app: &PhotocraftApp) -> Option<Bar> {
     (app.ai.after_remove == Some((st.doc.id, st.revision))).then_some(Bar::AfterRemove)
 }
 
-/// The anchor of `bar` on screen: the selection's bounds, or the canvas.
-fn anchor(app: &PhotocraftApp, bar: Bar, xf: &ViewXform) -> Option<egui::Rect> {
+/// The anchor of `bar` in document points: the corners of the selection's bounds, or of the canvas.
+fn anchor(app: &PhotocraftApp, bar: Bar) -> Option<[Point; 4]> {
     let st = app.session.active()?;
     let r = match bar {
         Bar::Selection => st.doc.selection.as_ref()?.content_bounds().intersect(&st.doc.bounds()),
         Bar::AfterRemove => st.doc.bounds(),
     };
-    let pts = [(r.x0, r.y0), (r.x1, r.y0), (r.x1, r.y1), (r.x0, r.y1)].map(|(x, y)| xf.to_screen(x as f32, y as f32));
-    Some(egui::Rect::from_points(&pts))
+    let (x0, y0, x1, y1) = (f64::from(r.x0), f64::from(r.y0), f64::from(r.x1), f64::from(r.y1));
+    Some([Point::new(x0, y0), Point::new(x1, y0), Point::new(x1, y1), Point::new(x0, y1)])
 }
 
-/// Draw the AI's task bar over the active document, when one applies.
-pub(crate) fn draw(app: &mut PhotocraftApp, ui: &mut egui::Ui, xf: &ViewXform) {
+/// Draw the AI's task bar over the active document inside `area` (its tile's rect), when one
+/// applies. The framework's bar maps the anchor through the pass's canvas view itself.
+pub(crate) fn draw(app: &mut PhotocraftApp, ui: &mut egui::Ui, area: egui::Rect) {
     let Some(bar) = which(app) else { return };
-    let Some(anchor) = anchor(app, bar, xf) else { return };
-    let ctx = ui.ctx().clone();
+    let Some(anchor) = anchor(app, bar) else { return };
+    // The body borrows `app`, so the place lives in a local while the bar is shown.
     let mut place = app.ui.panels.task_bar;
-    let shown = task_bar::show(&ctx, &mut place, anchor, xf.rect, |ui, more| contents(app, ui, more, bar));
+    let shown = TaskBar::new(label(tl!("Contextual Task Bar")), &anchor, Bind::bound(&mut place)).show(ui, area, |ui, cx| {
+        contents(app, ui, bar);
+        cx.more_menu(ui);
+    });
     app.ui.panels.task_bar = place;
-    let Some(shown) = shown else { return };
-    if shown.hide {
+    if shown.output.hide {
         app.ui.panels.context_task_bar = false;
         return;
     }
-    let r = shown.rect;
+    let r = shown.output.rect;
     app.ui.task_bar_shown = Some([r.min.x, r.min.y, r.max.x, r.max.y]);
 }
 
-fn contents(app: &mut PhotocraftApp, ui: &mut egui::Ui, more: &mut task_bar::MoreMenu, bar: Bar) {
+fn contents(app: &mut PhotocraftApp, ui: &mut egui::Ui, bar: Bar) {
     match bar {
         Bar::Selection => {
-            let r = ui.add(
-                egui::TextEdit::singleline(&mut app.ai.bar_prompt)
-                    .id(egui::Id::unique("pigment-ai-bar-prompt"))
-                    .desired_width(220.0)
-                    .hint_text(tl!("Describe what to generate"))
-                    .char_limit(photocraft_engine::ai_cmds::PROMPT_LIMIT),
-            );
-            let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-            if ui.button(tl!("Generate")).clicked() || (enter && !app.ai.bar_prompt.trim().is_empty()) {
+            // The field's name is its accessible name only: the placeholder is what shows.
+            let what = tl!("Describe what to generate");
+            let field = TextField::new(label(what), Bind::bound(&mut app.ai.bar_prompt))
+                .id_salt("pigment-ai-bar-prompt")
+                .placeholder(label(what))
+                .limit(photocraft_engine::ai_cmds::PROMPT_LIMIT)
+                .submits()
+                .show(ui);
+            let enter = field.submitted && !app.ai.bar_prompt.trim().is_empty();
+            if Button::new(label(tl!("Generate"))).show(ui).clicked() || enter {
                 fill_from_bar(app);
             }
         }
         Bar::AfterRemove => {
-            if ui.button(tl!("Generate Background…")).clicked() {
+            if Button::new(label(tl!("Generate Background…"))).show(ui).clicked() {
                 let _ = generate::open(app, BACKGROUND, None);
             }
         }
     }
-    more.show(ui);
 }
 
 /// The selection bar's Generate: Generative Fill with the bar's prompt. When something stops it
@@ -118,27 +129,41 @@ pub(crate) fn crop_item(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     }
     // Dimmed, with the engine's reason, where the document can't take it (Indexed Color, …).
     let why = app.session.disabled_reason(EXPAND);
-    let r = ui.add_enabled(why.is_none(), egui::Button::new(tl!("Generative Expand")));
-    if let Some(why) = why {
-        r.on_disabled_hover_text(why);
-    } else if r.clicked() {
+    let button = Button::new(label(tl!("Generative Expand"))).enabled(why.is_none());
+    let button = match why {
+        Some(why) => button.tooltip(why),
+        None => button,
+    };
+    if button.show(ui).clicked() {
         expand_from_crop(app);
     }
 }
 
-/// Generative Expand from the crop frame: the canvas grows to take in the frame, on the sides it
-/// reaches past; the frame is let go and the Generate window opens with that size. When the
-/// window can't open, the frame stays and the status bar says why.
+/// Generative Expand from the Crop tool's frame: the canvas grows to take in the frame, on the
+/// sides it reaches past; the frame is let go and the Generate window opens with that size. When
+/// the window can't open, the frame stays and the status bar says why.
 pub fn expand_from_crop(app: &mut PhotocraftApp) {
-    let Some(st) = app.session.active() else { return };
+    let frame = crate::crop_ui::frame(app);
+    if open_expand(app, frame) {
+        crate::crop_ui::discard(app);
+    }
+}
+
+/// Open the Generate window on Generative Expand with the canvas grown to take in `frame`
+/// (document points; a turned frame by its bounds). False, with the reason in the status bar,
+/// when it can't open.
+fn open_expand(app: &mut PhotocraftApp, frame: Option<CropBox>) -> bool {
+    let Some(st) = app.session.active() else { return false };
     let (w, h) = (f64::from(st.doc.size.width), f64::from(st.doc.size.height));
-    let frame = app.ui.crop_rect;
     if let Err(why) = generate::open(app, EXPAND, None) {
         app.ui.status = why;
-        return;
+        return false;
     }
-    crate::crop_ui::dismiss(app);
-    let Some([x0, y0, x1, y1]) = frame else { return };
+    let Some(frame) = frame.filter(CropBox::is_finite) else { return true };
+    let corners = frame.corners();
+    let fold = |pick: fn(f64, f64) -> f64, axis: fn(&Point) -> f64| corners.iter().map(axis).reduce(pick).unwrap_or(0.0);
+    let (x0, x1) = (fold(f64::min, |p| p.x), fold(f64::max, |p| p.x));
+    let (y0, y1) = (fold(f64::min, |p| p.y), fold(f64::max, |p| p.y));
     let (left, right) = ((-x0).max(0.0), (x1 - w).max(0.0));
     let (top, bottom) = ((-y0).max(0.0), (y1 - h).max(0.0));
     let side = |before: f64, after: f64| match (before > 0.0, after > 0.0) {
@@ -152,4 +177,9 @@ pub fn expand_from_crop(app: &mut PhotocraftApp) {
     g.width = (w + left + right).round().min(max).max(w) as u32;
     g.height = (h + top + bottom).round().min(max).max(h) as u32;
     g.anchor = generate::ANCHORS[side(top, bottom) * 3 + side(left, right)];
+    true
+}
+
+fn label(text: &str) -> Label {
+    Label::from(text.to_string())
 }

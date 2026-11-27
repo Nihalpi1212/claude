@@ -24,9 +24,9 @@ mod interactive_bench_reporting;
 mod layout_perf;
 // Pigment: documents of Pigment 0.1–0.4.
 mod legacy_pigment;
-// Pigment: generative AI. The task bars (`ai_task_bar`) and the Assistant (`ai_assistant`) wait
-// for the rest of the AI interface's port to the craft framework (merge of PhotoCraft 057297b):
-// `tests/it/ai_task_bar.rs` and `tests/it/ai_assistant.rs` are not compiled yet.
+// Pigment: generative AI. The Assistant (`ai_assistant`) waits for the last part of the AI
+// interface's port to the craft framework (merge of PhotoCraft 057297b): `tests/it/ai_assistant.rs`
+// is not compiled yet.
 #[cfg(not(target_arch = "wasm32"))]
 mod ai;
 mod magnetic_lasso_right_click;
