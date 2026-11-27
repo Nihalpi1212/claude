@@ -33,7 +33,7 @@ pub(crate) fn block_on<T>(future: impl Future<Output = T>) -> T {
     }
 }
 
-/// Per-user settings directory: `PIGMENT_CONFIG_DIR`, else `<exe dir>/PhotoCraftData` in
+/// Per-user settings directory: `PIGMENT_CONFIG_DIR`, else `<exe dir>/PigmentData` in
 /// portable mode, else the platform convention. Everything the app persists lives under it
 /// except, on Windows and Linux, crash-recovery autosaves; see [`crate::app_dirs`].
 pub fn config_dir() -> Option<PathBuf> {
