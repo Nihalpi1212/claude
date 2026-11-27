@@ -275,6 +275,8 @@ pub fn from_params(kind: &str, params: &Value, cx: &ValueCx) -> Result<AdjustVal
         "exposure" => AdjustValue::Exposure { values: vec![number(&v, "exposure", 0.0), number(&v, "offset", 0.0), number(&v, "gamma", 1.0)] },
         "vibrance" => AdjustValue::Vibrance { values: vec![number(&v, "vibrance", 0.0), number(&v, "saturation", 0.0)] },
         "posterize" => AdjustValue::Posterize { values: vec![number(&v, "levels", 4.0)] },
+        // Pigment: Color and Vibrance, Clarity and Dehaze, Grain
+        "colorVibrance" | "clarityDehaze" | "grain" => super::newer::value(kind, &v),
         "hueSaturation" => AdjustValue::HueSaturation { value: read_hue_saturation(&v) },
         "colorBalance" => AdjustValue::ColorBalance {
             value: ColorBalance::new(
@@ -416,6 +418,10 @@ fn kind_name(value: &AdjustValue) -> &'static str {
         AdjustValue::Exposure { .. } => "exposure",
         AdjustValue::Vibrance { .. } => "vibrance",
         AdjustValue::Posterize { .. } => "posterize",
+        // Pigment: Color and Vibrance, Clarity and Dehaze, Grain
+        AdjustValue::ColorVibrance { .. } => "colorVibrance",
+        AdjustValue::ClarityDehaze { .. } => "clarityDehaze",
+        AdjustValue::Grain { .. } => "grain",
         AdjustValue::HueSaturation { .. } => "hueSaturation",
         AdjustValue::ColorBalance { .. } => "colorBalance",
         AdjustValue::BlackWhite { .. } => "blackWhite",
@@ -471,6 +477,8 @@ fn write_params(value: &AdjustValue, cx: &ValueCx) -> Value {
                 out.insert("levels".into(), json!(levels.round()));
             }
         }
+        // Pigment: Color and Vibrance, Clarity and Dehaze, Grain
+        AdjustValue::ColorVibrance { .. } | AdjustValue::ClarityDehaze { .. } | AdjustValue::Grain { .. } => super::newer::write(value, &mut out),
         AdjustValue::HueSaturation { value } => {
             out.insert("hue".into(), json!(value.hue));
             out.insert("saturation".into(), json!(value.saturation));

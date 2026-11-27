@@ -685,6 +685,65 @@ Curves' hand is in its left tool column, Black & White's at the top). The hand's
 with the move badge (no new SVG). In the dialog each drag step edits the dialog's value (OK is the one history step);
 in Properties the drag previews and the release is one `layer.setAdjustment`.
 
+### Color and Vibrance, Clarity and Dehaze, Grain
+
+The JavaScript Pigment 0.4's newer adjustment layers (Photoshop's Camera Raw controls as live layers): three
+`Adjustment` variants with Image › Adjustments and Layer › New Adjustment Layer commands (`colorVibrance`
+temperature/tint/vibrance/saturation −100..100, `clarityDehaze` clarity/dehaze −100..100, `grain`
+amount/size/roughness 0..100 and seed 1..99999), editors in the dialogs and Properties, three buttons after the
+Adjustments panel's grid and the seven Adjustments panel presets that use them.
+
+- **Evaluation** is `crates/compose/src/adjust_extra.rs` (tests and the JavaScript app's own results in
+  `adjust_extra/`). Color and Vibrance: Camera Raw's white-balance gains (copied from
+  `photocraft_algo::camera_raw::white_balance_gains`, since compose does not depend on algo; an engine test keeps the
+  two equal), normalised by luminance, in linear light, then the Vibrance adjustment's Vibrance and Saturation.
+  Clarity and Dehaze and Grain are ports of the app's `clarityDehaze` (a fixed 24 px neighbourhood, white haze) and
+  `grain`/`grainNoise` (value noise fixed to the document position); they match the app within a level.
+- **The neighbourhood.** The compositor renders each tile (and the one-tile path) grown by the summed margins of the
+  visible Clarity and Dehaze layers (`stack_margin`, `grow`, `with_margin`; not past an edge of the canvas) and cuts it
+  back, so tiles, bands and parts of the canvas equal the whole image (all three places that apply an adjustment:
+  plain, clipped, Blend If). Downsampled proxies and one-colour-area shortcuts are turned off while Grain or Clarity
+  and Dehaze is visible. Destructive Clarity and Dehaze reads each tile's neighbours from the untouched surface
+  (`crates/engine/src/pixels/newer.rs`). The GPU has programs for Color and Vibrance (the Vibrance kernel with gains)
+  and Grain (kernel 18, `pigment_grain`); its planner refuses Clarity and Dehaze, so the stack composites on the CPU.
+- **Files.** PSD: a private `pcAd` block (`crates/io/src/adjust_map/pcad.rs`: `PCAD\0\0\0\x01` then the adjustment's
+  JSON) on a layer with no pixels, which other apps show as an empty layer; the export says so per layer. `.pcraft`
+  stores the variants as it stores every adjustment. `.pigment` 0.4 layers open live
+  (`crates/doc/src/adjust_pigment.rs`, called by `legacy_pigment/adjust.rs`), and the `pcJS` blocks an earlier Pigment
+  0.5 build kept them in turn live when a PSD or `.pcraft` holding them opens.
+
+| Upstream file | Hook |
+|---|---|
+| `crates/doc/src/adjust.rs` | the three variants (`Grain.seed` defaults to 1), their labels, `spatial_margin`, `CLARITY_DEHAZE_MARGIN` |
+| `crates/doc/src/lib.rs` | `pub mod adjust_pigment;` |
+| `crates/compose/src/lib.rs` | `pub mod adjust_extra;` |
+| `crates/compose/src/adjust.rs` | one `apply_depth_mode` arm calling `adjust_extra::apply` |
+| `crates/compose/src/render.rs` | `render_tiled_with_alloc`: the margin, the effect clip and preparation over the grown rect, both composite paths through `adjust_extra::with_margin` |
+| `crates/compose/src/uniform.rs` | `per_pixel`: not for `adjust_extra::positional` kinds |
+| `crates/compose/src/proxy.rs` | `proxy_faithful`: false while `adjust_extra::has_positional` |
+| `crates/gpu/src/plan.rs` | `mod pigment_lower;` (`plan/pigment_lower.rs`) |
+| `crates/gpu/src/plan/lower.rs` | one `adjustment_program` arm; `Program` is `pub(super)` |
+| `crates/gpu/src/plan/planner.rs` | `adjust`: refuses a set Clarity and Dehaze |
+| `crates/gpu/src/compose.wgsl` | Vibrance (kind 9) applies gains first when `p2.w` is set; kind 18 and its `pigment_*` functions |
+| `crates/gpu/tests/it/parity.rs` | `mod pigment;` (`parity/pigment.rs`) |
+| `crates/format/src/convert.rs` | the adjustment of a loaded layer goes through `adjust_pigment::upgrade` |
+| `crates/io/src/adjust_map.rs` | `pub mod pcad;`; `ADJUSTMENT_KEYS` has `pcAd` (17 keys); a `parse_any` arm and a `write` arm |
+| `crates/io/src/psd_export.rs` | the notice for the three kinds |
+| `crates/io/src/psd_import.rs` | an unknown-key `pcJS` block goes through `adjust_pigment::upgrade` (no warning then) and its block is not kept |
+| `crates/io/tests/it/adjust_blend_roundtrip.rs` | the three kinds in the round-trip list and its exhaustiveness guard |
+| `crates/engine/src/adjust_params.rs` | `pub mod newer;`; a `from_params` arm and a `to_params` arm |
+| `crates/engine/src/cmd/adjust_params.rs` | three `adjustment_kind` arms |
+| `crates/engine/src/cmd.rs` | three rows of the `ADJ` table |
+| `crates/engine/src/pixels.rs` | `mod newer;`; `adjust_surface` reads tiles from a copy of the surface when the kind has a margin; `adjusted_with_transfer` calls `newer::apply_around` first |
+| `crates/ui-egui/src/dialogs/adjust_editors.rs` | `pub mod newer;`; `KINDS` (17); three `AdjustValue` variants; one `show` arm |
+| `crates/ui-egui/src/dialogs/adjust_editors/values.rs` | a `from_params` arm, three `kind_name` arms, a `write_params` arm |
+| `crates/ui-egui/src/panels/properties/adjustments.rs` | the three buttons (`adjustment_presets::newer_buttons`) after the grid |
+| `crates/ui-egui/src/menus/items.rs` | placement through `adjust_editors::newer::place_after` (Image › Adjustments after Selective Color…, Layer › New Adjustment Layer after Color Lookup…) |
+
+Pigment's own files changed: `presets/adjustments.rs` (`KINDS` + the three), `presets/adjustments/panel.rs` (the seven
+panel presets, in the JavaScript order), `legacy_pigment/{adjust,filters,layer_kinds_tests}.rs` (the live arm, smart
+filters, the fixtures' tighter bounds), `panels/adjustment_presets.rs` (`newer_buttons`).
+
 ## Keeping the rebrand: `scripts/pigment-rebrand.py`
 
 Most of the rebrand is mechanical and done by [`scripts/pigment-rebrand.py`](../scripts/pigment-rebrand.py):

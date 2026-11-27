@@ -199,6 +199,7 @@ pub fn base_rows(app: &PhotocraftApp) -> Vec<Row> {
                 .find(|(id, _)| *id == e.command.id)
                 .map(|(_, a)| *a)
                 .or_else(|| crate::ai_ui::place_after(&e.command.id)) // Pigment: generative AI
+                .or_else(|| crate::dialogs::adjust_editors::newer::place_after(&e.command.id)) // Pigment: A6's adjustments
                 .and_then(|a| rows.iter().position(|i| i.command.id == a));
             if let Some(path) = after.and_then(|a| rows.get(a)).map(|i| i.path.clone()) {
                 e.path = path;

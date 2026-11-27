@@ -64,6 +64,26 @@ fn preset_button(ui: &mut egui::Ui, label: &str, tip: &str, salt: (&str, &str)) 
 
 /// The presets section, drawn after the Adjustments panel's grid
 /// (`panels::properties::adjustments::panel`).
+/// Pigment (A6): Color and Vibrance, Clarity and Dehaze and Grain, which the framework's grid
+/// (`AdjustmentKind::ALL`, closed to Pigment) leaves out: three icon buttons in a row after it, each
+/// naming the kind of `layer.newAdjustmentLayer.<kind>` the panel runs.
+pub(crate) fn newer_buttons(ui: &mut egui::Ui) -> Option<&'static str> {
+    let mut picked = None;
+    craft::ui::layout_components::Row::new().show(ui, |ui, _| {
+        for (kind, icon, label) in [
+            ("colorVibrance", "sun", tl!("Color and Vibrance")),
+            ("clarityDehaze", "cloud", tl!("Clarity and Dehaze")),
+            ("grain", "sparkles", tl!("Grain")),
+        ] {
+            let response = craft::ui::buttons::IconButton::new(craft::behavior::IconId::new(icon)).label(label).tooltip(label).show(ui);
+            if clicked(&response) {
+                picked = Some(kind);
+            }
+        }
+    });
+    picked
+}
+
 pub(crate) fn section(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let has_doc = app.session.active().is_some();
     let mut hovered: Option<(String, String)> = None;

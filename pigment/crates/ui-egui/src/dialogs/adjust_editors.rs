@@ -38,6 +38,8 @@ use crate::PhotocraftApp;
 pub mod auto_row;
 // Pigment: Curves display options and Show Clipping
 pub mod curves_display;
+// Pigment: Color and Vibrance, Clarity and Dehaze, Grain
+pub mod newer;
 // Pigment: adjustment presets
 pub mod preset_row;
 mod session;
@@ -47,7 +49,7 @@ pub(crate) use session::PropertiesAdjust;
 pub use session::{layer_editor, layer_reset};
 
 /// Kinds edited here (Color Lookup has its own editor in `adjust_ui`; Invert has none).
-pub const KINDS: [&str; 14] = [
+pub const KINDS: [&str; 17] = [
     "brightnessContrast",
     "levels",
     "curves",
@@ -62,6 +64,10 @@ pub const KINDS: [&str; 14] = [
     "threshold",
     "gradientMap",
     "selectiveColor",
+    // Pigment: Color and Vibrance, Clarity and Dehaze, Grain
+    "colorVibrance",
+    "clarityDehaze",
+    "grain",
 ];
 
 /// Whether `kind` has an editor here.
@@ -105,6 +111,22 @@ pub enum AdjustValue {
     /// Vibrance: Vibrance, Saturation.
     Vibrance {
         /// The two rows.
+        values: Vec<f64>,
+    },
+    // Pigment: Color and Vibrance, Clarity and Dehaze, Grain (`newer`)
+    /// Color and Vibrance: Temperature, Tint, Vibrance, Saturation.
+    ColorVibrance {
+        /// The four rows.
+        values: Vec<f64>,
+    },
+    /// Clarity and Dehaze: Clarity, Dehaze.
+    ClarityDehaze {
+        /// The two rows.
+        values: Vec<f64>,
+    },
+    /// Grain: Amount, Size, Roughness, Seed.
+    Grain {
+        /// The four rows.
         values: Vec<f64>,
     },
     /// Posterize: Levels.
@@ -397,6 +419,8 @@ fn show(kind: &str, setup: &EditorSetup, ui: &mut Ui, value: &mut AdjustValue, c
             let out = SelectiveColorEditor::new("Selective Color", Bind::bound(value)).context(context).show(ui);
             lifted(out.edit.events, |value| AdjustValue::SelectiveColor { value })
         }
+        // Pigment: Color and Vibrance, Clarity and Dehaze, Grain
+        (kind, value) if newer::KINDS.contains(&kind) => newer::show(kind, ui, value, context),
         // A value of another kind than the editor's: nothing to draw.
         _ => AdjustOut::default(),
     }

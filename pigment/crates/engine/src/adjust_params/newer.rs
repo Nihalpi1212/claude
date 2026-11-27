@@ -59,3 +59,6 @@ pub fn to_params(adj: &Adjustment) -> Option<Value> {
 
 /// The engine kinds of the three, with their JavaScript Pigment names.
 pub const KINDS: [(&str, &str); 3] = [("colorVibrance", "color-vibrance"), ("clarityDehaze", "clarity-dehaze"), ("grain", "grain")];
+
+#[cfg(test)]
+mod tests;
