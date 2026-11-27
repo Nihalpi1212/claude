@@ -390,6 +390,27 @@ fn preferences_open_ai_accounts() {
     assert!(accounts::is_open(h.state()));
 }
 
+/// Preferences › AI Integrations has "Allow agents to run AI commands" too (AI Accounts' own
+/// setting in `ai.json`, saved at once): the person's click turns it on and off; an agent's
+/// synthetic click neither grants nor revokes it.
+#[test]
+fn preferences_allow_agents_to_run_ai_commands_on_the_person_s_click_only() {
+    let mut h = harness(|app| ai_ui::install_accounts(app, AiAccounts::in_memory()));
+    invoke(&mut h, "edit.preferences.integrations").unwrap();
+    h.run_steps(4);
+    let label = "Allow agents to run AI commands";
+    let allowed = |h: &Harness| ai_ui::with_accounts(h.state(), |a| a.settings.allow_agents).unwrap();
+    assert!(!allowed(&h), "off until the person turns it on");
+    synthetic_click(&mut h, label);
+    assert!(!allowed(&h), "an agent's click grants nothing");
+    pointer_click(&mut h, label);
+    assert!(allowed(&h), "the person's click does");
+    synthetic_click(&mut h, label);
+    assert!(allowed(&h), "nor does an agent's click take it back");
+    pointer_click(&mut h, label);
+    assert!(!allowed(&h));
+}
+
 /// Describe Image asks at once and shows the answer; Use as Document Description makes it the
 /// document's description in one undo step.
 #[test]
