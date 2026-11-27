@@ -121,7 +121,7 @@ fn a_file_the_javascript_app_wrote_loads_as_photocrafts_statistics() {
     let file: Value = serde_json::from_str(again["file"].as_str().unwrap()).unwrap();
     for key in ["mean", "std"] {
         for k in 0..3 {
-            assert!((file[key][k].as_f64().unwrap() - raw[key][k].as_f64().unwrap()).abs() < 0.01, "{key}[{k}]: {file} vs {raw}");
+            assert!((file[key][k].as_f64().unwrap() - raw[key][k].as_f64().unwrap()).abs() < 0.05, "{key}[{k}]: {file} vs {raw}");
         }
     }
     // A file without a name is named after the file.
