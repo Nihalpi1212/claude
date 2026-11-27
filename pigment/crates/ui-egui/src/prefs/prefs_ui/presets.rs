@@ -54,7 +54,7 @@ pub(crate) fn open_manager(app: &mut PhotocraftApp) -> DialogId {
 
 // Pigment: Export/Import Presets for every kind (P1b): the nine kinds of the Preset Manager, in its order.
 /// The kinds Export/Import Presets offers, with their ids in `edit.presets.exportImportPresets`.
-pub(crate) fn io_kinds() -> [(&'static str, String); 9] {
+pub(crate) fn io_kinds() -> [(&'static str, &'static str); 9] {
     [
         ("brushes", tl!("Brushes")),
         ("swatches", tl!("Swatches")),
@@ -70,16 +70,14 @@ pub(crate) fn io_kinds() -> [(&'static str, String); 9] {
 
 /// The rows of Export/Import Presets.
 pub(crate) fn io_params() -> Vec<Param> {
-    vec![
-        Param::new(
-            "action",
-            tl!("Action"),
-            ParamKind::radio(
-                vec![("export".to_string(), tl!("Export Presets").into()), ("import".to_string(), tl!("Import Presets").into())],
-                Some("export".to_string()),
-            ),
+    vec![Param::new(
+        "action",
+        tl!("Action"),
+        ParamKind::radio(
+            vec![("export".to_string(), tl!("Export Presets").into()), ("import".to_string(), tl!("Import Presets").into())],
+            Some("export".to_string()),
         ),
-    ]
+    )]
     .into_iter()
     // Pigment (P1b): one check box per kind.
     .chain(io_kinds().into_iter().map(|(id, label)| Param::new(id, label, ParamKind::bool(true))))

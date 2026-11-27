@@ -108,11 +108,7 @@ fn clip(s: &str) -> String {
 
 /// `groups`, keeping only the presets `keep(group, item)` takes and the groups left with any.
 fn filter_groups<T: Clone>(groups: &[Group<T>], keep: impl Fn(&str, &T) -> bool) -> Vec<Group<T>> {
-    groups
-        .iter()
-        .map(|g| Group::new(&g.name, g.items.iter().filter(|i| keep(&g.name, i)).cloned().collect()))
-        .filter(|g| !g.items.is_empty())
-        .collect()
+    groups.iter().map(|g| Group::new(&g.name, g.items.iter().filter(|i| keep(&g.name, i)).cloned().collect())).filter(|g| !g.items.is_empty()).collect()
 }
 
 /// Whether `item` of `group` is in `builtin` as shipped.
@@ -206,7 +202,8 @@ fn export_patterns(s: &mut Session, file: &mut PresetFile, pick: &Pick, cmd: &st
                 continue;
             }
             let full = crate::pattern_cmds::full(s, p).map_err(|e| bad(cmd, e))?;
-            let bytes = photocraft_io::pattern_map::write_pat(std::slice::from_ref(&full)).map_err(|e| bad(cmd, format!("pattern \"{}\": {e}", p.display_name())))?;
+            let bytes =
+                photocraft_io::pattern_map::write_pat(std::slice::from_ref(&full)).map_err(|e| bad(cmd, format!("pattern \"{}\": {e}", p.display_name())))?;
             entries.push(PatternEntry { id: p.id.clone(), name: p.name.clone(), data: photocraft_paint::tile::b64_encode(&bytes) });
             ids.push(p.id.clone());
         }
@@ -299,7 +296,13 @@ fn same<T: Named + Clone + PartialEq>(have: &T, want: &T) -> bool {
 
 /// Merges `incoming` into `lib` (see the module docs); names stay unique across `lib` and
 /// `also_taken`. Returns (added, skipped).
-fn merge<T: Named + Clone + PartialEq>(lib: &mut Vec<Group<T>>, incoming: Vec<Group<T>>, also_taken: &dyn Fn(&str) -> bool, kind: &str, cmd: &str) -> Result<(usize, usize)> {
+fn merge<T: Named + Clone + PartialEq>(
+    lib: &mut Vec<Group<T>>,
+    incoming: Vec<Group<T>>,
+    also_taken: &dyn Fn(&str) -> bool,
+    kind: &str,
+    cmd: &str,
+) -> Result<(usize, usize)> {
     let (mut added, mut skipped) = (0, 0);
     if incoming.iter().map(|g| g.items.len()).sum::<usize>() > MAX_ENTRIES {
         return Err(bad(cmd, format!("too many {kind} (a preset file holds at most {MAX_ENTRIES})")));
@@ -336,7 +339,10 @@ impl Staged {
             let n = st.count(&mut lib, incoming, &none, "swatches", cmd)?;
             let total: usize = lib.iter().map(|g| g.items.len()).sum();
             if n > 0 && (total > crate::swatch_cmds::MAX_SWATCHES || lib.len() > crate::swatch_cmds::MAX_GROUPS) {
-                return Err(bad(cmd, format!("too many swatches: the panel holds at most {} in {} groups", crate::swatch_cmds::MAX_SWATCHES, crate::swatch_cmds::MAX_GROUPS)));
+                return Err(bad(
+                    cmd,
+                    format!("too many swatches: the panel holds at most {} in {} groups", crate::swatch_cmds::MAX_SWATCHES, crate::swatch_cmds::MAX_GROUPS),
+                ));
             }
             st.swatches = Some(from_swatch_groups(lib));
         }
@@ -363,7 +369,8 @@ impl Staged {
             if let Some(i) = incoming.iter().position(|g| g.name == CUSTOM_GROUP) {
                 st.custom = incoming.remove(i).items.into_iter().map(|p| super::CustomShape { name: clip(&p.name), path: p.path }).collect();
             }
-            let custom: Vec<String> = s.edit_state.custom_shapes.iter().map(|c| c.name.clone()).chain(file.custom_shapes.iter().map(|c| c.name.clone())).collect();
+            let custom: Vec<String> =
+                s.edit_state.custom_shapes.iter().map(|c| c.name.clone()).chain(file.custom_shapes.iter().map(|c| c.name.clone())).collect();
             st.count(&mut lib, incoming, &|n| custom.iter().any(|c| c == n), "shapes", cmd)?;
             st.shapes = Some(lib);
         }
@@ -477,7 +484,8 @@ impl Staged {
                 unknown += 1;
                 continue;
             }
-            let name = adjustments::clean_name(&e.name).ok_or_else(|| bad(cmd, format!("an adjustment preset's name must be 1..{} characters", adjustments::MAX_NAME_CHARS)))?;
+            let name = adjustments::clean_name(&e.name)
+                .ok_or_else(|| bad(cmd, format!("an adjustment preset's name must be 1..{} characters", adjustments::MAX_NAME_CHARS)))?;
             let params = crate::cmd::adjust_preset_cmds::preset_params(&e.kind, &e.params, cmd)?;
             if lib.list(&e.kind).iter().any(|have| same_name(&have.preset.name, &name) && have.preset.params == params) {
                 skipped += 1;
@@ -563,7 +571,6 @@ fn tidy_gradient(g: &mut GradientPreset) {
     }
     g.opacity.sort_by(|a, b| a.0.total_cmp(&b.0));
 }
-
 
 #[cfg(test)]
 #[path = "preset_file_tests.rs"]

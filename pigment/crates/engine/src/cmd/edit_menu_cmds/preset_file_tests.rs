@@ -53,7 +53,8 @@ fn libraries(s: &mut Session) -> Value {
         "shapes": s.presets.shapes,
         "customShapes": s.edit_state.custom_shapes,
         "patterns": patterns,
-        "patternGroups": s.presets.pattern_groups,
+        // An empty folder holds no preset (Define Pattern can leave an empty "Patterns" behind).
+        "patternGroups": s.presets.pattern_groups.iter().filter(|g| !g.items.is_empty()).collect::<Vec<_>>(),
         "contours": crate::contour_lib_cmds::to_json(&s.presets.contours),
         "tools": s.presets.tool_presets,
         "adjustments": s.presets.adjustments.to_json(),
@@ -66,7 +67,17 @@ fn every_kind_exports_and_imports_into_a_fresh_session_equal() {
     let mut s = source();
     let out = export_all(&mut s);
     // Only what the user made: the built-ins as shipped are in every library already.
-    for (kind, n) in [("swatches", 1), ("gradients", 1), ("styles", 1), ("patterns", 1), ("contours", 1), ("customShapes", 2), ("tools", 1), ("adjustments", 2), ("brushes", 0)] {
+    for (kind, n) in [
+        ("swatches", 1),
+        ("gradients", 1),
+        ("styles", 1),
+        ("patterns", 1),
+        ("contours", 1),
+        ("customShapes", 2),
+        ("tools", 1),
+        ("adjustments", 2),
+        ("brushes", 0),
+    ] {
         assert_eq!(out[kind], n, "{kind} in {out}");
     }
     let data = &out["data"];
@@ -74,7 +85,8 @@ fn every_kind_exports_and_imports_into_a_fresh_session_equal() {
     assert_eq!(data["patternGroups"], json!([{"name": "Custom", "items": [data["patterns"][0]["id"].clone()]}]));
     assert_eq!(data["shapes"][0]["name"], "Mine");
     assert_eq!(data["customShapes"][0]["name"], "Defined");
-    assert_eq!(data["adjustments"][1], json!({"kind": "levels", "group": "Tone", "name": "Lift", "params": {"inputBlack": 10}}));
+    // In the kinds' order (Levels before Curves).
+    assert_eq!(data["adjustments"][0], json!({"kind": "levels", "group": "Tone", "name": "Lift", "params": {"inputBlack": 10}}));
     // The text of the file imports as the object does.
     let mut t = Session::new();
     let r = t.execute(CMD, json!({"action": "import", "kinds": KINDS, "data": data.to_string()})).unwrap();
@@ -82,7 +94,10 @@ fn every_kind_exports_and_imports_into_a_fresh_session_equal() {
         assert!(r[kind].as_u64().unwrap() >= 1, "{kind} added: {r}");
     }
     assert_eq!(r["customShapes"], 2, "the Define Custom Shape result and the Shapes group's shape");
-    assert_eq!(libraries(&mut t), libraries(&mut s));
+    let (got, want) = (libraries(&mut t), libraries(&mut s));
+    for key in want.as_object().unwrap().keys() {
+        assert!(got[key] == want[key], "{key} differs:\n{}\n{}", got[key], want[key]);
+    }
     assert!(t.presets.rev > 0);
 }
 
@@ -207,7 +222,8 @@ fn a_pigment_bundle_is_told_apart_and_refused_until_migrate_presets_reads_it() {
 #[test]
 fn include_builtins_exports_every_preset_and_a_fresh_library_skips_them() {
     let mut s = Session::new();
-    let all = s.execute(CMD, json!({"action": "export", "kinds": ["gradients", "styles", "swatches", "patterns", "adjustments"], "includeBuiltins": true})).unwrap();
+    let all =
+        s.execute(CMD, json!({"action": "export", "kinds": ["gradients", "styles", "swatches", "patterns", "adjustments"], "includeBuiltins": true})).unwrap();
     let gradients: usize = s.presets.gradients.iter().map(|g| g.items.len()).sum();
     assert_eq!(all["gradients"].as_u64().unwrap() as usize, gradients);
     assert_eq!(all["patterns"].as_u64().unwrap() as usize, s.patterns.items.len());
