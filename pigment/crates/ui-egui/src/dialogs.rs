@@ -708,7 +708,6 @@ pub mod alerts;
 mod arbitrary_ruler_prefill_tests;
 pub mod auto_options_ui;
 // Pigment: Curves display options
-pub mod curves_display_ui;
 pub(crate) mod bitmap_dialog;
 pub mod blend_options;
 pub mod blur_pins;
@@ -726,6 +725,7 @@ pub mod color_range_ui;
 pub mod color_table_ui;
 pub mod count_group_name_ui;
 pub mod credits;
+pub mod curves_display_ui;
 pub mod dds_options_ui;
 pub mod delete_layer_prompt;
 pub mod discard_ui;

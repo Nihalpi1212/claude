@@ -622,6 +622,35 @@ ones without asking).
 | `crates/ui-egui/src/dialogs.rs` | `pub mod auto_options_ui;`; `auto_options_ui::FAMILY` in `PARAM_FAMILIES`; `auto_options_ui::take` last in `TAKERS`; `auto_options_ui::answer_prompt` in `PROMPTS`; `auto_options_ui::PREF` in `dont_show_again_keys` |
 | `crates/ui-egui/src/lib.rs`, `crates/ui-egui/src/app.rs` | the `PhotocraftApp` field `auto_options` (the session's options, the open dialog) and its `Default` |
 
+### Curve Display Options and Curves' Show Clipping
+
+Photoshop's Curves › Curve Display Options and Show Clipping, as the JavaScript Pigment had them. The six options are
+stored in `Preferences.adjustments.curvesDisplay` (`crates/engine/src/cmd/auto_options_cmds/curves_display.rs`, tests
+beside it): Show Amount of per colour mode (Pigment/Ink % for CMYK, Light for the others, as Photoshop defaults), the
+grid, Channel Overlays, Histogram, Baseline and Intersection Line; the JavaScript app's `adjust.curvesDisplay` keys are
+read too. The interface is `crates/ui-egui/src/dialogs/adjust_editors/curves_display.rs` (the controls under the
+framework's Curves panel) and `crates/ui-egui/src/dialogs/curves_display_ui.rs` (the options dialog, the state; tests in
+`curves_display_ui_tests.rs`). The Curves dialog gets a row under the panel with **Show Clipping** (dialog only; off in
+each new dialog) and **Curve Display Options…**; Properties has **Curves Display Options…** in its panel menu on a
+Curves layer, as Photoshop does. While Show Clipping is on, or Alt is held, a drag of the shown curve's first or last
+point's input shows upstream's Levels clipping display (`levels_clipping.rs`) for the Levels whose input levels are
+each curve's end points; the gesture's end clears it. **A choice recorded**: the framework's curve graph (pinned
+craft-libs) draws only the histogram option, so Show Histogram works (off hands the panel no histograms) and the other
+five rows of the options dialog are shown disabled with a note, keeping what is saved until the framework has props for
+them (a craft-libs change, asked of the project's owner; Pigment does not fork craft-libs or redraw Curves).
+
+| Upstream file | Hook |
+|---|---|
+| `crates/ui-egui/src/dialogs/adjust_editors.rs` | `pub mod curves_display;`; the `AdjustAsk::CurvesDisplay` variant; `EditorSetup.curves_display` and its `Default`; in the `curves` arm, the panel's histograms go through `curves_display::histograms`, and after the panel `curves_display::controls` and (dialog only) `curves_display::clipping` on the pass's edit |
+| `crates/ui-egui/src/dialogs/adjust_dialog.rs` | `build_setup`: the `curves_display` field; `answer_asks`: `curves_display_ui::follow_dialog` first, and the `AdjustAsk::CurvesDisplay` arm |
+| `crates/ui-egui/src/dialogs/adjust_editors/session.rs` | `layer_editor`: the setup's `curves_display` (Show Histogram in Properties) |
+| `crates/ui-egui/src/levels_clipping.rs` | `dialog` accepts `curves`; `request` reads the open kind's params and turns Curves into Levels with `curves_display::clipping_levels` (the test `curves_show_the_clipping_of_their_end_points` is added to `levels_clipping_tests.rs`) |
+| `crates/ui-egui/src/dialogs.rs` | `pub mod curves_display_ui;`; `curves_display_ui::FAMILY` in `PARAM_FAMILIES` |
+| `crates/ui-egui/src/lib.rs`, `crates/ui-egui/src/app.rs` | the `PhotocraftApp` field `curves_display` (the open options dialog, Show Clipping's dialog) and its `Default` |
+
+Pigment's own files changed: `auto_options_cmds.rs` (`pub mod curves_display;`, the `AdjustmentPrefs` field
+`curves_display`), `panels/adjustment_presets.rs` (the Properties menu row `PropertiesCommand::CurvesDisplayOptions`).
+
 ## Keeping the rebrand: `scripts/pigment-rebrand.py`
 
 Most of the rebrand is mechanical and done by [`scripts/pigment-rebrand.py`](../scripts/pigment-rebrand.py):

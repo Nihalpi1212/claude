@@ -49,11 +49,7 @@ fn click(h: &mut H, at: Pos2) {
 }
 
 fn node_center(h: &H, label: &str, role: egui::accesskit::Role) -> Pos2 {
-    h.query_all_by_label(label)
-        .find(|n| n.accesskit_node().role() == role)
-        .unwrap_or_else(|| panic!("a {label} {role:?}"))
-        .rect()
-        .center()
+    h.query_all_by_label(label).find(|n| n.accesskit_node().role() == role).unwrap_or_else(|| panic!("a {label} {role:?}")).rect().center()
 }
 
 fn open_curves(h: &mut H) -> DialogId {

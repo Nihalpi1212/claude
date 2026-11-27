@@ -263,7 +263,13 @@ mod tests {
         let d: CurvesDisplay = serde_json::from_value(json!({"amount": {"rgb": "pigment"}})).unwrap();
         assert_eq!((d.amount.rgb, d.amount.cmyk), (CurvesAmount::Pigment, CurvesAmount::Pigment));
         assert_eq!(d.amount.gray, CurvesAmount::Light);
-        for bad in [json!({"amount": "ink"}), json!({"amount": {"rgb": "dark"}}), json!({"amount": {"hsl": "light"}}), json!({"grid": "fine"}), json!({"histogram": 1})] {
+        for bad in [
+            json!({"amount": "ink"}),
+            json!({"amount": {"rgb": "dark"}}),
+            json!({"amount": {"hsl": "light"}}),
+            json!({"grid": "fine"}),
+            json!({"histogram": 1}),
+        ] {
             assert!(serde_json::from_value::<CurvesDisplay>(bad.clone()).is_err(), "{bad}");
         }
     }

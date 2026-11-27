@@ -22,8 +22,8 @@ use photocraft_engine::presets::adjustments::panel::{self, PANEL_PRESETS, Preset
 use serde_json::{Value, json};
 
 use crate::PhotocraftApp;
-use crate::dialogs::params::{self, ParamFamily};
 use crate::dialogs::curves_display_ui;
+use crate::dialogs::params::{self, ParamFamily};
 
 /// Preview keys (`canvas::display_doc`) are `BASE` plus a hash of the document, its revision and
 /// the preset.

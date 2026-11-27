@@ -549,7 +549,7 @@ fn curves_show_the_clipping_of_their_end_points() {
         let adj = request(&app, 0).map(|r| r.adj);
         (adj, paint_view(&mut app, &ctx, &view(10.0)))
     };
-    let curves = json!({"points": [[60, 0], [128, 140], [200, 255]], "red": {"points": [[20, 10], [240, 255]]}});
+    let curves = json!({"points": [[60, 0], [128, 140], [200, 255]], "red": [[20, 10], [240, 255]]});
     let levels = json!({"inBlack": 60, "inWhite": 200, "gamma": 1.0, "red": {"inBlack": 20, "inWhite": 240}});
     for end in [LevelsClip::Shadows, LevelsClip::Highlights] {
         let (curves_adj, curves_px) = shown("curves", curves.clone(), end);
@@ -558,7 +558,10 @@ fn curves_show_the_clipping_of_their_end_points() {
         let levels_of = |c: &LevelsChannel| ((c.in_black * 255.0).round(), (c.in_white * 255.0).round());
         assert_eq!(levels_of(&master), (60.0, 200.0));
         assert_eq!(levels_of(&per_channel[0]), (20.0, 240.0));
-        assert_eq!(thresholds(&levels_adj, SampleType::U8), thresholds(&Adjustment::Levels { master, per_channel, space: ToneSpace::Rgb, black: LevelsChannel::default() }, SampleType::U8));
+        assert_eq!(
+            thresholds(&levels_adj, SampleType::U8),
+            thresholds(&Adjustment::Levels { master, per_channel, space: ToneSpace::Rgb, black: LevelsChannel::default() }, SampleType::U8)
+        );
         assert!(curves_px.is_some());
         assert_eq!(curves_px, levels_px, "{end:?}: the same display");
     }
