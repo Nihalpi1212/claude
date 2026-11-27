@@ -257,6 +257,7 @@ impl PhotocraftApp {
         // The Keyboard Shortcuts dialog draws while its session is open.
         prefs_ui::show_shortcuts(self, ui);
         crate::dialogs::run(self, ui);
+        crate::ai_ui::show(self, ui); // Pigment: generative AI (over the hosted dialogs)
         canvas::extra_windows(self, ui);
         screen_picker::show(self, ui);
         smart_svg_ui::poll(self, &ctx);

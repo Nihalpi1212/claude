@@ -57,13 +57,19 @@ impl PhotocraftApp {
         theme::apply(ctx, &self.ui.theme);
     }
 
-    /// Follows the theme selection the suite's folder holds, shared with the other Craft apps, in
-    /// place of the in-memory selection the app starts with. The desktop app calls it at startup.
+    /// Follows the theme selection a theme folder holds, in place of the in-memory selection the
+    /// app starts with. The desktop app calls it at startup. Pigment: the folder is its own,
+    /// [`THEME_FOLDER`] in its settings folder (the preferences store's), never ArtCraft's that the
+    /// Craft apps share; with no settings folder the themes stay in memory (docs/FORK.md).
     #[cfg(not(target_arch = "wasm32"))]
     pub fn open_suite(&mut self, ctx: &egui::Context) {
-        self.framework.open_suite(ctx);
+        let folder = self.services.settings.as_ref().and_then(|(store, _)| store.dir()).map(|dir| dir.join(THEME_FOLDER));
+        self.framework.open_suite(ctx, folder);
     }
 }
+
+/// Pigment: the theme folder's name in its settings folder (no Pigment 0.1–0.4 file has it).
+pub const THEME_FOLDER: &str = "Themes";
 
 impl PhotocraftApp {
     /// Install the app's icons, fonts, image loaders and the theme. Call from the app creator
@@ -88,5 +94,30 @@ impl PhotocraftApp {
         // egui's own ⌘+ / ⌘- / ⌘0 scale the whole interface; PhotoCraft zooms the canvas instead
         // (shortcuts.rs), like Photoshop.
         ctx.options_mut(|o| o.zoom_with_keyboard = false);
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod theme_folder_tests {
+    use crate::{PhotocraftApp, Services};
+
+    /// Pigment keeps its themes in its own settings folder (`Themes`), never in the folder the Craft
+    /// apps share (`ArtCraft/themes`, `$CRAFT_SUITE_DIR`), and in memory without a settings folder.
+    #[test]
+    fn themes_live_in_pigment_s_settings_folder_not_artcraft_s() {
+        let dir = tempfile::tempdir().unwrap();
+        let options = craft::settings::OpenOptions::new(craft::settings::Location::Dir(dir.path().to_path_buf()));
+        let services = Services { settings: Some(craft::settings::SettingsStore::open_with(options)), ..Default::default() };
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), services);
+        let ctx = app.ctx().clone();
+        app.open_suite(&ctx);
+        assert_eq!(app.framework.suite_folder.as_deref(), Some(dir.path().join(super::THEME_FOLDER).as_path()));
+        assert_eq!(super::THEME_FOLDER, "Themes");
+
+        let mut plain = PhotocraftApp::new(photocraft_engine::Session::new(), Services::default());
+        plain.open_suite(&ctx);
+        assert_eq!(plain.framework.suite_folder, None, "no settings folder: the themes stay in memory");
+        let source = include_str!("framework.rs");
+        assert!(!source.contains(&["SuiteDir::", "resolve("].concat()), "never the suite's shared folder");
     }
 }

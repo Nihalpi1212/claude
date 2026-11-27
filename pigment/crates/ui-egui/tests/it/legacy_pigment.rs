@@ -8,7 +8,7 @@ use photocraft_ui_egui::{PhotocraftApp, Services};
 const GROUPS: &[u8] = include_bytes!("../../../io/tests/fixtures/pigment-0.4/v3-groups.pigment");
 
 /// An app with the real importer and no file dialog.
-fn app() -> PhotocraftApp {
+fn app() -> Box<PhotocraftApp> {
     let services = Services {
         import: Some(Box::new(|name: &str, bytes: &[u8], opts: &photocraft_io::ImportOptions| {
             photocraft_io::import_with_options(name, bytes, opts).map(|r| (r.document, r.warnings)).map_err(|e| e.to_string())

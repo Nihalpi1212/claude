@@ -8,11 +8,12 @@ use craft::host::PickRequest;
 /// Everything File › Open reads: PhotoCraft, Photoshop, OpenRaster, Krita and Affinity documents, flat images, and
 /// Photoshop brushes (.abr), gradients (.grd), layer styles (.asl), swatches (.aco, .act, .ase) and keyboard shortcut sets
 /// (.kys), which go to the preset libraries and Edit › Keyboard Shortcuts.
+/// Pigment: its own extension first (also Pigment 0.1–0.4's documents), then PhotoCraft's.
 pub(super) const OPEN_EXTS: &[&str] = &[
-    "pcraft", "pdn", "ora", "xcf", "xcfgz", "gz", "kra", "krz", "psd", "psb", "psdt", "png", "jpg", "jpeg", "tif", "tiff", "webp", "gif", "bmp", "dib", "tga",
-    "ico", "qoi", "exr", "hdr", "pbm", "pgm", "ppm", "pnm", "pam", "pfm", "pcx", "dds", "xpm", "fits", "fit", "fts", "dpx", "cin", "dcm", "dicom", "dc3",
-    "iff", "lbm", "ilbm", "heic", "heif", "hif", "dng", "cr2", "cr3", "nef", "nrw", "arw", "pef", "orf", "rw2", "raf", "abr", "grd", "asl", "svg", "svgz",
-    "aco", "act", "ase", "kys", "af", "afdesign", "afphoto", "afpub",
+    "pigment", "pcraft", "pdn", "ora", "xcf", "xcfgz", "gz", "kra", "krz", "psd", "psb", "psdt", "png", "jpg", "jpeg", "tif", "tiff", "webp", "gif", "bmp",
+    "dib", "tga", "ico", "qoi", "exr", "hdr", "pbm", "pgm", "ppm", "pnm", "pam", "pfm", "pcx", "dds", "xpm", "fits", "fit", "fts", "dpx", "cin", "dcm",
+    "dicom", "dc3", "iff", "lbm", "ilbm", "heic", "heif", "hif", "dng", "cr2", "cr3", "nef", "nrw", "arw", "pef", "orf", "rw2", "raf", "abr", "grd", "asl",
+    "svg", "svgz", "aco", "act", "ase", "kys", "af", "afdesign", "afphoto", "afpub",
 ];
 const SVG_EXTS: &[&str] = &["svg", "svgz"];
 
@@ -23,7 +24,7 @@ const SVG_EXTS: &[&str] = &["svg", "svgz"];
 /// picker defaults to another filter.
 pub(super) const OPEN_FILTERS: &[(&str, &[&str])] = &[
     ("Photoshop", &["psd", "psb", "psdt"]),
-    ("PhotoCraft", &["pcraft"]),
+    ("Pigment", &["pigment", "pcraft"]),
     ("Affinity", &["af", "afdesign", "afphoto", "afpub"]),
     ("Amiga IFF", &["iff", "lbm", "ilbm"]),
     ("BMP", &["bmp", "dib"]),
@@ -67,7 +68,7 @@ pub(super) const OPEN_FILTERS: &[(&str, &[&str])] = &[
 pub(super) const SAVE_FILTERS: &[(&str, &[&str])] = &[
     ("PSD Document", &["psd", "psb"]),
     ("PSB Large Document", &["psb"]),
-    ("PhotoCraft", &["pcraft"]),
+    ("Pigment", &["pigment", "pcraft"]),
     ("Amiga IFF", &["iff"]),
     ("BMP", &["bmp", "dib"]),
     ("Cineon", &["cin"]),

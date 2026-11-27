@@ -53,9 +53,9 @@ pub(super) struct PrefsCustom {
     /// The agent link's state, for the Agents page.
     #[cfg(not(target_arch = "wasm32"))]
     agent_status: craft::automation::agents::AgentLinkStatus,
-    /// The suite's `AI-MCP` flag: the Agents page points to the ArtCraft Launcher's switch.
+    /// Pigment: AI Accounts… was clicked on the page (`ai_ui` opens it).
     #[cfg(not(target_arch = "wasm32"))]
-    mcp_flag: bool,
+    ai_accounts: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl PrefsCustom {
@@ -74,7 +74,7 @@ impl PrefsCustom {
             #[cfg(not(target_arch = "wasm32"))]
             agent_status: app.services.agent_link.as_ref().map(|link| link.status().clone()).unwrap_or_default(),
             #[cfg(not(target_arch = "wasm32"))]
-            mcp_flag: app.services.agent_switch.as_ref().is_some_and(|switch| switch.mcp_flag()),
+            ai_accounts: std::sync::Arc::clone(&app.ai.accounts_asked),
         }
     }
 }
@@ -97,8 +97,9 @@ impl CustomSettings<PrefPages> for PrefsCustom {
 
     #[cfg(not(target_arch = "wasm32"))]
     fn page(&mut self, ui: &mut egui::Ui, page: &str, draft: &mut SettingsDraft) {
+        // Pigment: its own switch over the framework's page, never the ArtCraft Launcher's (`agents::page`).
         if page == AGENTS_PAGE {
-            craft::automation::ui::agents::AgentsPage::new(AGENTS_PAGE, draft, &self.agent_status).mcp_flag(self.mcp_flag).show(ui);
+            super::agents::page(ui, AGENTS_PAGE, draft, &self.agent_status, &self.ai_accounts);
         }
     }
 
@@ -356,7 +357,7 @@ fn scratch_disks_row(ui: &mut egui::Ui, draft: &mut SettingsDraft) {
         let dir = scratch.dir.as_deref().map(|p| p.display().to_string()).unwrap_or_else(|| tl!("Unknown").into());
         let warning = crate::i18n::fmt(
             tl!(
-                "The current scratch directory ({path}) doesn't report its free space, so PhotoCraft can't stop before it fills up, and large files get no extra room from it without a Scratch Size Limit. This warning applies to the current configuration; changes above take effect on Apply or OK. Set a limit or use a local disk."
+                "The current scratch directory ({path}) doesn't report its free space, so Pigment can't stop before it fills up, and large files get no extra room from it without a Scratch Size Limit. This warning applies to the current configuration; changes above take effect on Apply or OK. Set a limit or use a local disk."
             ),
             &[("path", &dir)],
         );

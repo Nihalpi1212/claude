@@ -126,7 +126,7 @@ fn edit(app: &mut PhotocraftApp, key: &str, value: PrefValue) {
 }
 
 /// A kittest harness on an app (built inside it, on the harness's context) with Preferences open on `section`.
-fn prefs_harness(
+pub(super) fn prefs_harness(
     files: &Arc<MemoryFiles>,
     section: &'static str,
     size: egui::Vec2,

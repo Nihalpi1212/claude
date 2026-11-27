@@ -14,9 +14,11 @@
 /// and installs nothing (docs/FORK.md).
 #[cfg(not(target_arch = "wasm32"))]
 pub const UPDATE_APP: craft::update::app::App = craft::update::app::App {
-    icon_png: Some(include_bytes!("../../../assets/app-icon/hicolor/128x128/apps/ai.storyteller.photocraft.png")),
-    accent: Some([0x2f, 0x7b, 0xf5]),
-    ..craft::update::suite::PHOTOCRAFT
+    icon_png: Some(include_bytes!("../../../assets/app-icon/hicolor/128x128/apps/io.github.nihalpi1212.pigment.png")),
+    accent: Some([0xe1, 0x1d, 0x74]),
+    developer: "Pigment contributors",
+    bundle_id_override: Some(photocraft_format::brand::APP_ID),
+    ..craft::update::app::App::new("pigment", "Pigment", "Image editing", "Nihalpi1212/claude")
 };
 
 /// Translate a string literal into the current UI language: `tl!("Image Size…")`.

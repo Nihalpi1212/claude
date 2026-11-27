@@ -2,6 +2,10 @@ use super::invoke::{panel_alias, proof_preset, workspace_id};
 use super::{DOCUMENT_ITEM, PhotocraftApp, Value};
 
 pub fn is_enabled(app: &PhotocraftApp, id: &str) -> bool {
+    // Pigment's Check for Updates is a link to its releases page (`updates_ui::check`).
+    if id == "help.checkForUpdates" {
+        return true;
+    }
     // Shortcut-only: the tool host owns presses during a gesture.
     if id == "layer.selectUnderCursor" {
         return app.session.active().is_some() && !app.brush_resize.active();
@@ -41,6 +45,10 @@ pub fn is_enabled(app: &PhotocraftApp, id: &str) -> bool {
     }
     if crate::analysis::handles(id) {
         return true;
+    }
+    // Pigment: generative AI's shell commands.
+    if let Some(e) = crate::ai_ui::is_enabled(app, id) {
+        return e;
     }
     if let Some(e) = crate::view_cmds::is_enabled(app, id) {
         return e;
@@ -143,6 +151,10 @@ pub(super) fn checked(app: &PhotocraftApp, id: &str) -> Option<bool> {
         return Some(c);
     }
     if let Some(c) = crate::analysis::checked(app, id).or_else(|| crate::workspace_ui::checked(app, id)).or_else(|| crate::file_ui::checked(app, id)) {
+        return Some(c);
+    }
+    // Pigment: Window › Assistant.
+    if let Some(c) = crate::ai_ui::checked(app, id) {
         return Some(c);
     }
     if let Some(alias) = panel_alias(id) {

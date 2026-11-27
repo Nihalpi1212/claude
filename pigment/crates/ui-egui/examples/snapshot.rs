@@ -113,7 +113,7 @@ fn main() {
             PhotocraftApp::setup_context(&cc.egui_ctx, Default::default());
             let mut services = services;
             services.is_wayland = wayland_notice;
-            services.xwayland_command = wayland_notice.then(|| "WAYLAND_DISPLAY= photocraft".into());
+            services.xwayland_command = wayland_notice.then(|| "WAYLAND_DISPLAY= pigment".into());
             let mut app = PhotocraftApp::with_context(cc.egui_ctx.clone(), photocraft_engine::Session::new(), services);
             if update_notice {
                 photocraft_ui_egui::updates_ui::preview_release(&mut app, "99.0.0", "https://github.com/storytold/photocraft/releases/tag/v99.0.0");

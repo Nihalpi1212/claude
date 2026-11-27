@@ -105,7 +105,7 @@ fn bulk_load_keeps_selection_order_and_earlier_warnings_and_errors() {
     {
         assert!(app.ui.status.contains(part), "{part}: {}", app.ui.status);
     }
-    assert!(!app.ui.status.contains("PhotoCraft equivalent"), "{}", app.ui.status);
+    assert!(!app.ui.status.contains("Pigment equivalent"), "{}", app.ui.status);
 }
 
 #[test]
@@ -219,7 +219,7 @@ fn bulk_load_summary_counts_unsupported_steps_of_surviving_sets() {
     a.actions[0].items[0].event = craft_psd::atn::AtnEvent::Code(*b"Xxxx");
     let chosen = vec![("a.atn".into(), craft_psd::atn::write(&a).unwrap()), ("b.atn".into(), action_set_bytes("Set B", "B"))];
     let (app, status) = bulk_load_status(chosen);
-    assert!(status.contains("1 step has no PhotoCraft equivalent yet"), "{status}");
+    assert!(status.contains("1 step has no Pigment equivalent yet"), "{status}");
     assert!(!app.ui.status_error, "{status}");
     // Both sets stay loaded: the unsupported step is counted for one that is in the panel.
     assert_eq!(names(&app), ["A", "B"]);

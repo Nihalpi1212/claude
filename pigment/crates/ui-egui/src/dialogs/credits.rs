@@ -77,15 +77,18 @@ pub fn credits() -> Credits {
     Credits::new(people, models, TOTAL_COMMITS)
 }
 
-/// The About tab's contents: name, blurb, version, the community button and the project links.
+/// The About tab's contents: name, blurb, version and the project links. Pigment: the blurb carries the version line
+/// (what it is based on, `brand::version_line`) and the credit line; the links are Pigment's four (issues, repository,
+/// releases, the upstream project), with no community button (docs/FORK.md).
 pub fn about_info(_app: &PhotocraftApp) -> AboutInfo {
-    AboutInfo::new("PhotoCraft", tl!("PhotoCraft — an open-source, native image editor written in Rust."), photocraft_engine::build_info::long_version())
-        .community(AboutLink::new(tl!("Join us on Discord"), crate::links::DISCORD))
-        .links([
-            AboutLink::new(tl!("PhotoCraft website"), crate::links::APP_PAGE),
-            AboutLink::new(tl!("GitHub"), crate::links::GITHUB),
-            AboutLink::new(tl!("ArtCraft"), crate::links::ARTCRAFT_WEBSITE),
-        ])
+    let blurb = format!(
+        "{}\n{}\n{}",
+        tl!("Pigment — an open-source, native image editor written in Rust."),
+        photocraft_format::brand::version_line(),
+        crate::links::credit()
+    );
+    AboutInfo::new("Pigment", blurb, photocraft_engine::build_info::long_version())
+        .links(crate::links::ABOUT.iter().map(|&(label, url)| AboutLink::new(crate::i18n::t(label), url)))
         .built_with("egui · wgpu · photocraft-engine")
 }
 

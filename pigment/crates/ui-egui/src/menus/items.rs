@@ -31,6 +31,7 @@ pub fn is_live(id: &str) -> bool {
         || crate::view_cmds::handles(id)
         || crate::shortcut_dispatch::is_bridged(id)
         || crate::workspace_ui::handles(id)
+        || crate::ai_ui::handles(id) // Pigment: generative AI
 }
 
 /// Commands outside the catalogue that belong right after a catalogue item: `(id, after)`.
@@ -193,7 +194,12 @@ pub fn base_rows(app: &PhotocraftApp) -> Vec<Row> {
             // Insert after the item it belongs next to, else after the last item of the same
             // top-level menu, keeping menus contiguous.
             let top = e.path.first().cloned();
-            let after = PLACE_AFTER.iter().find(|(id, _)| *id == e.command.id).and_then(|(_, a)| rows.iter().position(|i| i.command.id == *a));
+            let after = PLACE_AFTER
+                .iter()
+                .find(|(id, _)| *id == e.command.id)
+                .map(|(_, a)| *a)
+                .or_else(|| crate::ai_ui::place_after(&e.command.id)) // Pigment: generative AI
+                .and_then(|a| rows.iter().position(|i| i.command.id == a));
             if let Some(path) = after.and_then(|a| rows.get(a)).map(|i| i.path.clone()) {
                 e.path = path;
             }

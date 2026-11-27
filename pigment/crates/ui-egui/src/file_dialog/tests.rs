@@ -80,11 +80,11 @@ fn pdn_save_requests_a_native_copy_without_overwriting_the_source() {
     st.path = Some("/pics/layers.PDN".into());
     let ctx = egui::Context::default();
     menus::invoke(&mut app, &ctx, "file.save", json!({})).unwrap();
-    assert_eq!(asked_save(&files), "/pics/layers.pcraft");
-    answer(&files, chose("/pics/layers.pcraft"));
+    assert_eq!(asked_save(&files), "/pics/layers.pigment");
+    answer(&files, chose("/pics/layers.pigment"));
     app.poll_file_dialog();
-    assert_eq!(*written.borrow(), ["/pics/layers.pcraft"]);
-    assert_eq!(app.session.active().unwrap().path.as_deref(), Some("/pics/layers.pcraft"));
+    assert_eq!(*written.borrow(), ["/pics/layers.pigment"]);
+    assert_eq!(app.session.active().unwrap().path.as_deref(), Some("/pics/layers.pigment"));
 }
 
 /// A real flat JPEG import, optionally edited to contain another layer. A filename without a
@@ -570,7 +570,7 @@ fn scripts_browse_extendscript_picks_report_the_error() {
 fn save_and_export_dialogs_start_beside_the_document() {
     let (mut app, files, _) = app();
     let ctx = app.ctx().clone();
-    let dir = std::env::temp_dir().join("PhotoCraft projects").join("图像");
+    let dir = std::env::temp_dir().join("Pigment projects").join("图像");
     let source = dir.join("original.psd");
     app.session.active_mut().unwrap().path = Some(source.to_string_lossy().into_owned());
     for command in ["file.saveAs", "file.export.exportAs", "file.export.saveForWebLegacy"] {
@@ -1604,7 +1604,8 @@ fn save_types(suggested: &str) -> Vec<(String, Vec<String>)> {
 #[test]
 fn save_as_offers_only_writable_formats_including_ico() {
     // Layered formats, and PDF, are written by `photocraft-io`, not a codec.
-    let layered = ["psd", "psb", "pcraft", "ora", "pdf"];
+    // Pigment's `.pigment` holds PhotoCraft's native format.
+    let layered = ["psd", "psb", "pigment", "pcraft", "ora", "pdf"];
     for (name, exts) in filters::SAVE_FILTERS {
         for ext in exts.iter().filter(|e| !layered.contains(e)) {
             let format = photocraft_codecs::from_extension(ext).unwrap_or_else(|| panic!("{name}: .{ext} is no known format"));
@@ -1682,11 +1683,11 @@ fn psb_is_its_own_save_type() {
 #[test]
 fn save_types_list_the_document_formats_then_the_rest_by_name() {
     let names: Vec<&str> = filters::SAVE_FILTERS.iter().map(|(name, _)| *name).collect();
-    assert_eq!(names[..3], ["PSD Document", "PSB Large Document", "PhotoCraft"]);
+    assert_eq!(names[..3], ["PSD Document", "PSB Large Document", "Pigment"]);
     let key = |name: &&str| name.to_ascii_lowercase();
     assert!(names[3..].is_sorted_by_key(key), "{:?}", &names[3..]);
     let names: Vec<&str> = filters::OPEN_FILTERS.iter().map(|(name, _)| *name).collect();
-    assert_eq!(names[..2], ["Photoshop", "PhotoCraft"]);
+    assert_eq!(names[..2], ["Photoshop", "Pigment"]);
     let formats = names.iter().position(|name| *name == "Brushes").expect("the app's own resources");
     assert!(names[2..formats].is_sorted_by_key(key), "{:?}", &names[2..formats]);
 }

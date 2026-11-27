@@ -1,7 +1,8 @@
 #![cfg(not(target_arch = "wasm32"))]
-//! Agents in the open window (`agents.rs`): the agent link follows the preferences and the
-//! ArtCraft Launcher's switch, and agent requests get the app's policy while it runs. The link, the
-//! switch and the Agents page have their own trials in craft-automation (`tests/it/agents.rs`).
+//! Agents in the open window (`agents.rs`): the agent link follows the preferences, Pigment's own
+//! switch alone lets agents in (never the ArtCraft Launcher's or the suite's `AI-MCP` flag), and
+//! agent requests get the app's policy while it runs. The link, the switch and the framework's
+//! Agents page have their own trials in craft-automation (`tests/it/agents.rs`).
 
 use super::tests::app_with_store;
 use super::*;
@@ -20,7 +21,7 @@ fn tick(app: &mut PhotocraftApp, ctx: &egui::Context) {
 fn linked_app(switch: AgentSwitch) -> (Box<PhotocraftApp>, tempfile::TempDir, Arc<Mutex<Vec<AgentSettings>>>) {
     let (mut app, _) = app_with_store();
     let dir = tempfile::tempdir().unwrap();
-    app.services.agent_link = Some(AgentLink::new(Some(dir.path().to_path_buf()), "PhotoCraft test"));
+    app.services.agent_link = Some(AgentLink::new(Some(dir.path().to_path_buf()), "Pigment test"));
     app.services.agent_switch = Some(switch);
     let asked: Arc<Mutex<Vec<AgentSettings>>> = Arc::default();
     let seen = asked.clone();
@@ -73,37 +74,67 @@ fn preferences_start_and_stop_the_agent_link_and_the_policy_follows() {
     assert!(app.control.is_none() && port(&app).is_none() && app.services.automation_command.is_none());
 }
 
-/// With the AI-MCP flag the ArtCraft Launcher's switch is the one consent: it starts the link,
-/// turning it off there stops it again, and a Control Port saved before doesn't keep it on.
+/// Pigment: its switch ("Let AI apps use this window") alone decides. The launcher's switch and the
+/// `AI-MCP` flag, whatever `Services::agent_switch` says, neither turn the link on nor keep it off
+/// (docs/FORK.md, decision D1).
 #[test]
-fn with_the_flag_the_launcher_switch_alone_turns_the_agent_link_on_and_off() {
-    let (mut app, _dir, asked) = linked_app(AgentSwitch::fixed(true, false));
-    app.run("prefs.set", json!({"values": {"integrations.connectAgents": true}})).unwrap();
-    let ctx = egui::Context::default();
-    tick(&mut app, &ctx);
-    assert!(port(&app).is_none(), "a saved Control Port needs the launcher's switch");
-    app.services.agent_switch = Some(AgentSwitch::fixed(true, true));
-    tick(&mut app, &ctx);
-    let on = port(&app);
-    assert!(on.is_some() && app.control.is_some(), "the launcher's switch alone starts it");
-    tick(&mut app, &ctx);
-    assert_eq!((port(&app), asked.lock().unwrap().len()), (on, 1), "no change, no restart");
-    app.services.agent_switch = Some(AgentSwitch::fixed(true, false));
-    tick(&mut app, &ctx);
-    assert!(port(&app).is_none() && app.control.is_none(), "off in the launcher stops it");
+fn pigment_s_switch_alone_turns_the_agent_link_on_and_off() {
+    for switch in [AgentSwitch::fixed(true, true), AgentSwitch::fixed(true, false), AgentSwitch::fixed(false, true)] {
+        let (mut app, _dir, _) = linked_app(switch);
+        let ctx = egui::Context::default();
+        tick(&mut app, &ctx);
+        assert!(port(&app).is_none() && app.control.is_none(), "off by default, whatever the launcher says");
+        app.run("prefs.set", json!({"values": {"integrations.connectAgents": true}})).unwrap();
+        tick(&mut app, &ctx);
+        assert!(port(&app).is_some() && app.control.is_some(), "Pigment's switch starts it");
+        app.run("prefs.set", json!({"values": {"integrations.connectAgents": false}})).unwrap();
+        tick(&mut app, &ctx);
+        assert!(port(&app).is_none() && app.control.is_none(), "and stops it");
+    }
 }
 
-/// Without the AI-MCP flag nothing changes from before: the launcher's switch means nothing, and a
-/// Control Port saved in the preferences keeps its connection.
+/// The page never calls the suite's flag or the launcher's list (`agents::mcp_flag`,
+/// `agents::launcher_allows`) nor starts the launcher's watch, and its words never name the
+/// ArtCraft Launcher.
 #[test]
-fn without_the_flag_the_launcher_switch_means_nothing() {
-    let (mut app, _dir, _) = linked_app(AgentSwitch::fixed(false, true));
-    let ctx = egui::Context::default();
-    tick(&mut app, &ctx);
-    assert!(port(&app).is_none(), "the launcher's switch needs the flag");
-    app.run("prefs.set", json!({"values": {"integrations.connectAgents": true}})).unwrap();
-    tick(&mut app, &ctx);
-    assert!(port(&app).is_some(), "a saved Control Port still counts");
+fn the_agents_page_reads_neither_the_suite_flag_nor_the_launcher() {
+    let source = concat!(include_str!("agents.rs"), include_str!("custom_rows.rs"));
+    for call in ["agents::mcp_flag(", "launcher_allows(", "AgentSwitch::watch", "switch.mcp_flag()", "switch.allows("] {
+        assert!(!source.contains(call), "{call}");
+    }
+    let rows = super::agents::pigment_words();
+    let launcher = ["ArtCraft", "Launcher"].join(" ");
+    for (word, text) in rows.iter() {
+        assert!(!text.contains(&launcher), "{text}");
+        assert!(word.english.contains(&launcher), "{} replaces a word that names the launcher", word.id);
+    }
+    assert_eq!(rows.iter().count(), 2, "agents.intro and agents.off");
+}
+
+/// Preferences › AI Integrations: Pigment's own switch over the framework's page, which shows the
+/// port, the folders and When Pigment Is Closed, in words that never send anyone to the ArtCraft
+/// Launcher.
+#[test]
+fn ai_integrations_have_pigments_own_switch_and_the_folders() {
+    use egui_kittest::kittest::Queryable;
+    let files = Arc::new(craft::settings::testing::MemoryFiles::new());
+    let mut h = super::tests::prefs_harness(&files, "integrations", egui::vec2(1280.0, 800.0), |_| {});
+    assert!(h.query_by_label("Let AI apps use this window").is_some(), "Pigment's own switch");
+    assert!(h.query_all_by_label_contains("while Let AI apps use this window is on").next().is_some(), "the intro names it");
+    assert!(h.query_all_by_label_contains("ArtCraft").next().is_none(), "no launcher");
+    assert!(h.query_all_by_label("Off: AI apps get a session without a window.").next().is_some(), "Pigment's off line");
+    assert!(h.query_all_by_label("Folder agents can open from").next().is_some(), "the folders stay");
+    assert!(h.query_all_by_label_contains("When Pigment is closed").next().is_some(), "When Closed stays, with Pigment's name");
+    for label in ["Copy Configuration", "Add to Claude Desktop", "Copy Prompt for an Agent"] {
+        assert!(h.query_by_label(label).is_none(), "{label}");
+    }
+    // The switch edits the draft; OK saves it.
+    assert!(!h.state().session.prefs().integrations.connect_agents, "off by default");
+    h.get_by_label("Let AI apps use this window").click();
+    h.run_steps(3);
+    h.get_by_label("OK").click();
+    h.run_steps(4);
+    assert!(h.state().session.prefs().integrations.connect_agents);
 }
 
 #[test]

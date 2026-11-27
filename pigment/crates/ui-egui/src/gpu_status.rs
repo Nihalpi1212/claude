@@ -192,7 +192,7 @@ pub fn system_info(app: &PhotocraftApp) -> Vec<String> {
 
 /// Help › System Info's on-screen text: version, platform and the graphics state.
 pub fn system_info_ui(app: &PhotocraftApp) -> Vec<String> {
-    let mut v = vec![format!("PhotoCraft {}", photocraft_engine::build_info::long_version()), {
+    let mut v = vec![format!("Pigment {}", photocraft_engine::build_info::long_version()), {
         let template = "Platform: {os} {arch}";
         crate::i18n::fmt(tl!(template), &[("os", std::env::consts::OS), ("arch", std::env::consts::ARCH)])
     }];
@@ -223,7 +223,7 @@ fn prompt(app: &PhotocraftApp, reason: &str) -> StandardPrompt {
         if can_retry_now(app) { tl!("Retry GPU tries the graphics processor again now.") } else { tl!("Retry GPU requires a restart. Save your work first.") };
     StandardPrompt::custom(tl!("GPU acceleration could not continue. Your documents are unchanged.").to_string())
         .title(tl!("Switched to CPU rendering").to_string())
-        .paragraph(tl!("PhotoCraft is using the CPU image compositor. The window may still use your graphics adapter.").to_string())
+        .paragraph(tl!("Pigment is using the CPU image compositor. The window may still use your graphics adapter.").to_string())
         .details(tl!("Details").to_string(), reason.to_owned())
         .paragraph(retry_line.to_string())
         .button(PromptChoice::Proceed, tl!("Keep Using CPU").to_string())
@@ -309,7 +309,7 @@ fn choose_recovery(app: &mut PhotocraftApp, retry: bool) -> Result<(), String> {
         crate::notices::post(
             app,
             "GPU retry scheduled",
-            vec!["Save your work and restart PhotoCraft to retry GPU acceleration. CPU rendering remains active for this session.".into()],
+            vec!["Save your work and restart Pigment to retry GPU acceleration. CPU rendering remains active for this session.".into()],
             craft::theme::variant::Tone::Neutral,
             None,
         );

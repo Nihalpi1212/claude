@@ -230,7 +230,7 @@ const CHOICES: [(Editor, &str, &str); 4] = [
     (Editor::VectorCraft, "vectorCraft", "VectorCraft"),
     (Editor::Illustrator, "illustrator", "Adobe Illustrator"),
     (Editor::Program, "program", "Other application"),
-    (Editor::Internal, "internal", "PhotoCraft (internal editor)"),
+    (Editor::Internal, "internal", "Pigment (internal editor)"),
 ];
 
 fn editor_id(editor: Editor) -> &'static str {
@@ -265,9 +265,9 @@ fn params(svg: bool) -> Vec<Param> {
         Param::new("program", Label::from(tr("Executable")), ParamKind::text("")).browse(PathKind::open_file(extensions)).visible_when("editor", "program"),
     );
     let saved = tr(if svg {
-        "Save to the opened SVG file. Each saved change becomes one undo step in PhotoCraft."
+        "Save to the opened SVG file. Each saved change becomes one undo step in Pigment."
     } else {
-        "Save to the opened original-format file. Each saved change becomes one undo step in PhotoCraft."
+        "Save to the opened original-format file. Each saved change becomes one undo step in Pigment."
     });
     rows.push(Param::read_only_text("savedNote", Label::Empty, Label::from(saved)).full_width());
     rows.push(
