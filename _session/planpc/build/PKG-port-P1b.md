@@ -6,8 +6,9 @@ REBASE-P "P1b" (it wins). Group A has landed, so the `adjustments` kind is in.
 **CI first.** The newest finished run at the start was 46038027153 (`75ec448`), red only on
 `engine tests::every_adjustment_command_runs`, already fixed on the branch by `90265ff` (group A's review). The runs
 on `8821fdf` (46041402514) and on P1a's `1c92254` (46050395075) were still running/queued, so nothing red on a
-newer commit to fix and no CI commit. **The next engineer checks CI first**: 46041402514, 46050395075, and the runs
-on this package's two commits.
+newer commit to fix and no CI commit. Before returning: 46041402514 (`8821fdf`) finished **green**. **The next engineer checks CI
+first**: 46050395075 (P1a's `1c92254`, still running) and 46055487780 (this package's `007cd8b`, queued; the run on
+`4ca9356`, 46055466776, was cancelled by the next push).
 
 ## Commits (pushed)
 
