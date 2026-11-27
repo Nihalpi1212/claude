@@ -17,6 +17,8 @@ use crate::PhotocraftApp;
 pub(crate) mod clone_offsets;
 pub(crate) mod clone_source;
 pub(crate) mod tool_presets;
+// Pigment: the Tool Presets panel menu with .tpl files (P2)
+pub(crate) mod tool_presets_menu;
 
 pub use super::preset_browser::{finish_custom_shape, gradients_panel, patterns_panel, shape_picker, shapes_panel, styles_panel, tool_presets_panel};
 pub use clone_offsets::{clone_mapping_at, clone_sample_point};
