@@ -87,6 +87,8 @@ pub mod svg;
 mod text_import;
 pub mod text_styles_map;
 pub mod tiff_layers;
+/// Pigment: Photoshop tool presets (`.tpl`).
+pub mod tpl_map;
 pub mod vector_map;
 pub mod vector_preview;
 mod xcf;

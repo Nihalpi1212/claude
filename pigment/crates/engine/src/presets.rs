@@ -473,6 +473,8 @@ pub fn specs() -> Vec<CommandSpec> {
     v.extend(styles::specs());
     v.extend(shapes::specs());
     v.extend(tools::specs());
+    // Pigment: .tpl tool presets (P2)
+    v.extend(tools::tpl::specs());
     v.extend(clone_source::specs());
     v
 }

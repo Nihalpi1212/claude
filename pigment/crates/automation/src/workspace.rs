@@ -778,7 +778,9 @@ fn command_uses_ambient_path(id: &str, params: &Value) -> bool {
         | "style.presets.importAsl"
         | "layer.layerStyle.contours.load"
         // Pigment: adjustment presets
-        | "adjustment.presets.load" => {
+        | "adjustment.presets.load"
+        // Pigment: .tpl tool presets (P2)
+        | "tool.presets.importTpl" => {
             // `data` wins over `path` in these commands; any `path` without it reads the filesystem.
             params.get("data").is_none() && params.get("path").is_some()
         }
@@ -788,6 +790,8 @@ fn command_uses_ambient_path(id: &str, params: &Value) -> bool {
         "adjustment.presets.export" => params.get("path").is_some(),
         // Pigment: Preset Manager (P1a): load reads, saveSet writes a `path`; exportGrd writes one
         "edit.presets.presetManager" | "gradient.presets.exportGrd" => params.get("path").is_some(),
+        // Pigment: .tpl tool presets (P2)
+        "tool.presets.exportTpl" => params.get("path").is_some(),
         // Pigment: Match Color statistics, read from or written to a `path`
         "image.adjustments.matchColor.statistics" => params.get("path").is_some(),
         // Shortcut sets: a .kys read or written by path, or a Summarize page written by path.

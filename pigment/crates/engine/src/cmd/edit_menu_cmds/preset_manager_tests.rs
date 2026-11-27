@@ -143,7 +143,7 @@ fn rename_and_move_in_every_kind_that_reorders() {
 /// Save Set… of two presets writes the kind's file, and Load… of that file brings back the same names.
 #[test]
 fn save_set_writes_a_file_that_loads_back_with_the_same_names() {
-    for (kind, ext) in [("swatches", "aco"), ("styles", "asl"), ("patterns", "pat"), ("contours", "shc"), ("gradients", "grd"), ("tools", "pcpresets")] {
+    for (kind, ext) in [("swatches", "aco"), ("styles", "asl"), ("patterns", "pat"), ("contours", "shc"), ("gradients", "grd"), ("tools", "tpl")] {
         let mut s = session();
         let all = names(&mut s, kind);
         let chosen = [all[0].clone(), all[1].clone()];
@@ -239,7 +239,8 @@ fn load_dispatches_each_extension_to_its_kind() {
     assert!(s.presets.styles.iter().any(|g| g.name == "Two"));
     assert!(names(&mut s, "adjustments").iter().any(|n| n == "Contrast"));
     // .pcpresets: the kind says which part of the file to read.
-    let set = s.execute(CMD, json!({"action": "saveSet", "kind": "tools", "indices": [0]})).unwrap();
+    // Tools save as Photoshop's .tpl first (P2); `format` asks for the .pcpresets.
+    let set = s.execute(CMD, json!({"action": "saveSet", "kind": "tools", "indices": [0], "format": "pcpresets"})).unwrap();
     let mut t = session();
     t.presets.tool_presets.clear();
     t.execute(CMD, json!({"action": "load", "kind": "tools", "data": data(&set), "fileName": "T.pcpresets"})).unwrap();

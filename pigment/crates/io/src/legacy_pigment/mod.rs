@@ -25,7 +25,7 @@
 //! format over it, which Pigment 0.4 cannot open (`legacy_save_prompt` in photocraft-ui-egui).
 
 mod adjust;
-mod blend;
+pub(crate) mod blend;
 mod container;
 mod filters;
 mod gradient;
