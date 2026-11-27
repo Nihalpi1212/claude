@@ -81,6 +81,7 @@ the ones that needed a choice):
 | Raw warnings "… not applied by PhotoCraft" | `crates/raw/src/shared.rs` | "Pigment" |
 | "Save Full-Size Composite in .pcraft Files" (upstream moved the label into a table) | `prefs/prefs_ui/fields.rs` (`label_override`) | ".pigment", as 0.5.0 said and as the rebranded catalogs translate it |
 | craft-update's `App::website()` (getartcraft.com) and suite apps | craft-libs | not called by Pigment |
+| The built-in theme name "ArtCraft" (`craft.artcraft`), shown as a theme chip's tooltip and accessible name in Preferences › Interface | craft-libs (`craft-theme`, the theme store's `AppearancePage`) | left: craft-libs offers no override; Pigment's menus call it "Pro (Medium Gray)" ([below](#classification-of-the-remaining-upstream-names)) |
 
 Labels of Pigment's own features (Generative Fill…, Generative Expand, …) are 0.5.0's. Upstream's
 AGENTS.md rule 10 ("Our features use our own names") arrived with this revision; whether it applies
@@ -253,7 +254,10 @@ Pigment never downloads or installs anything and makes no network request on its
   call the same `check`.
 - The once-per-launch check is gone: upstream's checker is craft-update's `Updater`, kept in
   `updates_ui.rs` for its result window, and nothing calls `Updater::check_now` or
-  `Updater::check_at_start`; `updates_ui::tick` only reads the last update's record, a local file.
+  `Updater::check_at_start`; `updates_ui::tick` only reads the last update's record, a local file
+  that only craft-update's own installer writes, so Pigment never finds one
+  (`self-update-done.txt` and `logs/self-update-error.txt` in craft-update's `Paths::for_app`:
+  `pigment` in the per-user data folder, `Pigment` on macOS and Windows).
   **Automatically Check for Updates** is hidden from Preferences
   (`prefs::HIDDEN_UNTIL_IMPLEMENTED`; the setting still loads and saves). The release window is
   pointed at Pigment's repository and ids (`UPDATE_APP` in `crates/ui-egui/src/lib.rs`). The
@@ -335,11 +339,12 @@ the rebrand (counts of matching lines, 2026-11-15):
 | `Cargo.toml` and `Cargo.lock` (package names, `storytold/craft-libs`, `storytold/egui` and other dependency sources) | 511 | keep (internal names, dependencies) |
 | `PhotoCraft` as a word in Rust code outside comments | 30 lines | keep: the XMP toolkit marker and its tests, profile descriptions documents carry, the font-face alias and case probe, the upstream link, credit and version line (`brand.rs`, `links.rs`, `shell_commands.rs`), the copyright in the Windows resources, the catalog rebrand (`build.rs`), the example plug-in's author, developer tooling (`xtask`), tests of those (including the test that the embedded catalogues name neither) |
 | `ArtCraft` in Rust code outside comments | 5 lines (2026-11-27) | keep: the credit line in About, tests that the launcher and its Flatpak folder are gone (`agents_tests.rs`, `tests/it/flatpak_updates.rs`) |
+| The name of the craft framework's built-in theme `craft.artcraft`, "ArtCraft" (craft-theme's `themes/artcraft.json`, linked since `057297b`) | 1 (in craft-libs) | not changed, and not changeable from Pigment at craft-libs `18ffc07`: Preferences › Interface's theme chips (the framework's `AppearancePage`, drawn in `prefs/prefs_ui/custom_rows.rs`) take each built-in theme's own name as the chip's tooltip and accessible name, and the page has no name override, so that one chip reads "ArtCraft". Pigment's own Appearance menu and theme commands call the theme "Pro (Medium Gray)" (`theme.rs`, `AppTheme::palette_label`). A fix needs a name override in craft-libs' page or Pigment's own page instead of the framework's: a question for the project's owner |
 | Packaging (`packaging/`) | 147 lines | keep: environment variables, `-p photocraft` package names, `apps/photocraft*` paths, WiX element ids (`PhotocraftExe`, …), the web build's `photocraft-web` file names and `photocraft-parts` marker, `.pcraft`'s own types (`application/x-photocraft`, `ai.storyteller.photocraft.document`, "PhotoCraft Document"), the craft-i18n and craft-fonts sources, credits and comments, the ArtCraft Launcher's own install-policy mode in `check-install-policy.ps1` (unused by Pigment) |
 | README, NOTICE, ATTRIBUTION.md, this page, the release notes | 204 | keep: credits, upstream links, upstream notice and asset rows |
 | `AGENTS.md`, `ROADMAP.md`, `SECURITY.md`, `Dockerfile`, `xtask/`, `scorecard/`, `perf/`, `tests/`, `examples/` | 169 | keep (upstream guides, roadmap and developer tooling) |
 | `contributors/` | 1 | keep (credits) |
-| User-visible strings, catalogues (rebranded at build time), packaging names, icons, links | 0 left | changed to Pigment |
+| User-visible strings, catalogues (rebranded at build time), packaging names, icons, links | 0 left in Pigment's tree (the framework's theme name above is in craft-libs) | changed to Pigment |
 
 ### The user guide
 
