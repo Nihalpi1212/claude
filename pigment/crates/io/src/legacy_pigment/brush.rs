@@ -230,7 +230,10 @@ pub(crate) fn to_brush(v: &Value, tips: &mut dyn FnMut(&str) -> Option<Vec<u8>>)
             Some(t) => d.pattern = Pattern::Tile(t),
             None if d.enabled => {
                 let name = pattern.and_then(|p| p.get("name")).and_then(Value::as_str).unwrap_or("");
-                notes.push(format!("the Texture's pattern {}was not kept with the preset; Texture is off", if name.is_empty() { String::new() } else { format!("\"{name}\" ") }));
+                notes.push(format!(
+                    "the Texture's pattern {}was not kept with the preset; Texture is off",
+                    if name.is_empty() { String::new() } else { format!("\"{name}\" ") }
+                ));
                 d.enabled = false;
             }
             None => {}
@@ -397,7 +400,10 @@ pub(crate) mod tests {
 
     #[test]
     fn a_pigment_04_flat_preset_keeps_its_tip_and_flow() {
-        let (b, _) = to_brush(&json!({"id": "u1", "name": "Mine", "size": 60, "hardness": 0.2, "spacing": 0.3, "angle": -45, "roundness": 0.7, "flow": 0.4}), &mut no_tips);
+        let (b, _) = to_brush(
+            &json!({"id": "u1", "name": "Mine", "size": 60, "hardness": 0.2, "spacing": 0.3, "angle": -45, "roundness": 0.7, "flow": 0.4}),
+            &mut no_tips,
+        );
         assert_eq!((b.size, b.hardness, b.spacing, b.angle, b.roundness, b.flow), (60.0, 0.2, 0.3, -45.0, 0.7, 0.4));
         // A preset without a flow takes the tool's full flow, as 0.4's Brushes panel did.
         let (b, _) = to_brush(&json!({"name": "No flow", "size": 10}), &mut no_tips);

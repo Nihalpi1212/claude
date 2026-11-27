@@ -66,6 +66,16 @@ fn every_kind_of_the_folder_migrates() {
     assert_eq!(r["migrated"], 22, "{r:#}");
     assert!(r["found"].as_u64().unwrap() >= 13);
 
+    check_swatches(&s);
+    check_gradients(&s);
+    check_adjustments(&mut s);
+    check_tools(&s);
+    check_brushes_patterns_styles_shapes_contours(&s);
+    check_settings(&s);
+    check_skipped(&r);
+}
+
+fn check_swatches(s: &Session) {
     // Swatches: the store's groups and colours, and Pigment 0.4's own palette from settings.json.
     let sw = serde_json::to_value(&s.presets.swatches).unwrap();
     let group = |name: &str| sw.as_array().unwrap().iter().find(|g| g["name"] == name).cloned().unwrap_or_else(|| panic!("{name}: {sw}"));
@@ -76,25 +86,34 @@ fn every_kind_of_the_folder_migrates() {
     let old = group("Pigment 0.4");
     let old_names: Vec<&str> = old["entries"].as_array().unwrap().iter().map(|e| e["name"].as_str().unwrap()).collect();
     assert_eq!(old_names, ["Paper", "Half Grey", "#112233", "#ffcc00"]);
+}
 
+fn check_gradients(s: &Session) {
     // Gradients: groups kept, foreground/background references kept, the noise gradient's settings.
     let grads = names(&s.presets.gradients, |g| &g.name);
     assert!(grads.contains(&("Skies".into(), "Sunset".into())) && grads.contains(&("Pigment 0.4".into(), "Ink to Paper".into())), "{grads:?}");
     let ink = s.presets.gradients.iter().flat_map(|g| &g.items).find(|g| g.name == "Ink to Paper").unwrap();
-    assert!(matches!(ink.stops[..], [(_, photocraft_engine::presets::gradients::StopColor::Foreground), (_, photocraft_engine::presets::gradients::StopColor::Background)]));
+    assert!(matches!(
+        ink.stops[..],
+        [(_, photocraft_engine::presets::gradients::StopColor::Foreground), (_, photocraft_engine::presets::gradients::StopColor::Background)]
+    ));
     let sunset = s.presets.gradients.iter().flat_map(|g| &g.items).find(|g| g.name == "Sunset").unwrap();
     assert_eq!(sunset.stops.len(), 3);
     assert_eq!(sunset.opacity, [(0.0, 1.0), (1.0, 0.5)]);
     let noise = s.presets.gradients.iter().flat_map(|g| &g.items).find(|g| g.name == "Static").unwrap();
     assert_eq!(noise.noise.as_ref().map(|n| (n.seed, n.restrict)), Some((42, true)));
+}
 
+fn check_adjustments(s: &mut Session) {
     // Adjustment presets (A1's library): Curves and Hue/Saturation; Shadows/Highlights has none.
     let curves = s.execute("adjustment.presets.list", json!({"kind": "curves", "params": true})).unwrap();
     let soft = curves["curves"].as_array().unwrap().iter().find(|p| p["name"] == "Soft Matte").unwrap_or_else(|| panic!("{curves}"));
     assert!(soft["params"].to_string().contains("32"), "{soft}");
     let hs = s.execute("adjustment.presets.list", json!({"kind": "hueSaturation", "params": true})).unwrap();
     assert!(hs["hueSaturation"].as_array().unwrap().iter().any(|p| p["name"] == "Muted" && p["params"]["saturation"] == -40), "{hs}");
+}
 
+fn check_tools(s: &Session) {
     // Tool presets: options mapped, the pencil's sampled tip read from brushes/, the colour.
     let tool = |n: &str| s.presets.tool_presets.iter().find(|t| t.name == n).unwrap_or_else(|| panic!("{n}")).clone();
     let air = tool("Soft Airbrush 40");
@@ -104,11 +123,16 @@ fn every_kind_of_the_folder_migrates() {
     assert_eq!(pencil.options["brush"]["tip"]["sampled"]["width"], 5, "{}", pencil.options);
     assert_eq!(pencil.options["foreground"][2].as_f64().map(|b| (b * 255.0).round()), Some(128.0));
     assert_eq!(tool("Wand 20").options["toolOptions"]["tolerance"], 20.0);
+}
 
+fn check_brushes_patterns_styles_shapes_contours(s: &Session) {
     // Brushes: the store's (sampled tip, dynamics, group) and settings.json's flat one.
     let ink = s.tools.presets.iter().find(|b| b.name == "Grainy Ink").unwrap();
     assert_eq!(ink.group, "Inking");
-    assert!(matches!(ink.brush.tip, photocraft_engine::paint::TipShape::Sampled(ref t) if (t.width, t.height) == (5, 3)) || matches!(ink.brush.tip, photocraft_engine::paint::TipShape::Stored(_)));
+    assert!(
+        matches!(ink.brush.tip, photocraft_engine::paint::TipShape::Sampled(ref t) if (t.width, t.height) == (5, 3))
+            || matches!(ink.brush.tip, photocraft_engine::paint::TipShape::Stored(_))
+    );
     assert_eq!((ink.brush.size, ink.brush.angle, ink.brush.scattering.count), (30.0, 15.0, 2));
     let big = s.tools.presets.iter().find(|b| b.name == "Big Soft").unwrap();
     assert_eq!((big.brush.size, big.brush.hardness, big.brush.flow), (120.0, 0.1, 0.5));
@@ -121,23 +145,27 @@ fn every_kind_of_the_folder_migrates() {
     let kite = s.presets.shapes.iter().find(|g| g.name == "My Shapes").and_then(|g| g.items.iter().find(|p| p.name == "Kite")).unwrap();
     assert_eq!(kite.path.subpaths[0].knots[1].anchor.x, 100.0, "shapes come into the library's 0..100 box");
     assert!(s.presets.contours.iter().any(|c| matches!(c, photocraft_engine::doc::Contour::Custom { name, .. } if name == "Double Dip")));
+}
 
+fn check_settings(s: &Session) {
     // settings.json: Auto Color Correction Options saved as the defaults, Curve Display Options.
     let a = &s.prefs().adjustments;
     assert!(a.auto_options_saved);
     assert_eq!((a.auto_options.0.shadow, a.auto_options.0.snap_neutral), ([16, 16, 16], true));
-    let shown = serde_json::to_value(&a.curves_display).unwrap();
-    assert_eq!((shown["grid"].as_str(), shown["baseline"].as_bool(), shown["channelOverlays"].as_bool()), (Some("detailed"), Some(false), Some(false)), "{shown}");
+    let shown = serde_json::to_value(a.curves_display).unwrap();
+    assert_eq!(
+        (shown["grid"].as_str(), shown["baseline"].as_bool(), shown["channelOverlays"].as_bool()),
+        (Some("detailed"), Some(false), Some(false)),
+        "{shown}"
+    );
+}
 
+fn check_skipped(r: &Value) {
     // What was not migrated, each with a reason.
-    let sk = skipped(&r);
-    for want in [
-        ("patterns", "Lost"),
-        ("tool-presets", "Adjust Brush"),
-        ("stroke-styles", ""),
-        ("adjustment:shadows-highlights", ""),
-        ("actions", "My Actions"),
-    ] {
+    let sk = skipped(r);
+    for want in
+        [("patterns", "Lost"), ("tool-presets", "Adjust Brush"), ("stroke-styles", ""), ("adjustment:shadows-highlights", ""), ("actions", "My Actions")]
+    {
         assert!(sk.contains(&(want.0.into(), want.1.into())), "{want:?} in {sk:?}");
     }
     assert!(r["skipped"].as_array().unwrap().iter().all(|k| !k["reason"].as_str().unwrap().is_empty()));
@@ -256,12 +284,24 @@ fn hostile_folders_and_bundles_never_panic() {
     std::fs::create_dir_all(dir.join("patterns")).unwrap();
     for (name, text) in [
         ("gradients.json", r#"{"format":"pigment-presets","items":[{"id":"a","name":"x","data":7},{"id":"b","data":{"gradientVersion":2,"stops":"no"}}]}"#),
-        ("patterns.json", r#"{"format":"pigment-presets","items":[{"id":"a","name":"p","data":{"blob":"../../etc/passwd"}},{"id":"b","name":"q","data":{"blob":"x.png"}}]}"#),
-        ("brushes.json", r#"{"format":"pigment-presets","items":[{"id":"a","name":"b","data":{"tip":{"kind":"sampled","size":"huge","sample":{"blob":"x.png"}}}}]}"#),
-        ("tool-presets.json", r#"{"format":"pigment-presets","items":[{"id":"a","data":{"tool":7}},{"id":"b","data":{"tool":"brush","options":{"size":-5,"opacity":"x"}}}]}"#),
+        (
+            "patterns.json",
+            r#"{"format":"pigment-presets","items":[{"id":"a","name":"p","data":{"blob":"../../etc/passwd"}},{"id":"b","name":"q","data":{"blob":"x.png"}}]}"#,
+        ),
+        (
+            "brushes.json",
+            r#"{"format":"pigment-presets","items":[{"id":"a","name":"b","data":{"tip":{"kind":"sampled","size":"huge","sample":{"blob":"x.png"}}}}]}"#,
+        ),
+        (
+            "tool-presets.json",
+            r#"{"format":"pigment-presets","items":[{"id":"a","data":{"tool":7}},{"id":"b","data":{"tool":"brush","options":{"size":-5,"opacity":"x"}}}]}"#,
+        ),
         ("adjustment__levels.json", r#"{"format":"pigment-presets","items":[{"id":"a","name":"L","data":{"rgb":{"inBlack":"x"}}}]}"#),
         ("swatches.json", r#"{"format":"pigment-presets","items":[{"id":"a","data":{"color":{"space":"rgb","values":[1e308,"x"]}}}]}"#),
-        ("settings.json", r##"{"adjust":{"autoOptions":{"algorithm":"nope"},"curvesDisplay":{"grid":5}},"swatches":[3,"#zz"],"brushPresets":[{"size":"x"}],"actions":{"sets":7}}"##),
+        (
+            "settings.json",
+            r##"{"adjust":{"autoOptions":{"algorithm":"nope"},"curvesDisplay":{"grid":5}},"swatches":[3,"#zz"],"brushPresets":[{"size":"x"}],"actions":{"sets":7}}"##,
+        ),
     ] {
         std::fs::write(dir.join(name), text).unwrap();
     }

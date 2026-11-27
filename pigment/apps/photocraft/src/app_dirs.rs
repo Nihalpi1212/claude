@@ -436,5 +436,9 @@ fn copy_file(from: &Path, to: &Path) -> std::io::Result<()> {
     dst.sync_all()
 }
 
+// Pigment: Migrate Presets (P4): the JavaScript Pigment's presets folder.
+mod legacy;
+pub use legacy::legacy_pigment_dir;
+
 #[cfg(test)]
 mod tests;

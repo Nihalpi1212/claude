@@ -665,7 +665,13 @@ fn place(tool: &str, mut c: Common, brush: Option<Value>) -> (Value, usize) {
 /// with the same option table as a `.tpl`'s `pigmentData`. `brush` is the preset's brush as
 /// brush settings JSON (`legacy_pigment::presets::brush`); the JS options for size, hardness,
 /// opacity and flow are laid over it. `None` when Pigment has no such tool.
-pub fn js_tool_preset(tool: &str, options: &Map<String, Value>, js_type: Option<&Value>, color: Option<&str>, brush: Option<Value>) -> Option<(&'static str, Value, usize)> {
+pub fn js_tool_preset(
+    tool: &str,
+    options: &Map<String, Value>,
+    js_type: Option<&Value>,
+    color: Option<&str>,
+    brush: Option<Value>,
+) -> Option<(&'static str, Value, usize)> {
     let tool = tool_for_js(tool).or_else(|| canonical_tool(tool))?;
     let mut o = options.clone();
     o.remove("brush");

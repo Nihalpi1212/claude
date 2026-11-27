@@ -56,7 +56,8 @@ const MAX_BUNDLE: usize = 1 << 30;
 /// Presets of one kind read; more are left out with a line.
 const MAX_ITEMS: usize = crate::cmd::edit_menu_cmds::preset_file::MAX_ENTRIES;
 /// Why the JS Actions panel's own sets are not converted.
-const ACTIONS: &str = "the JavaScript Pigment's actions name its own commands, which do not map onto Pigment's; record the action again (recorded .atn files keep working)";
+const ACTIONS: &str =
+    "the JavaScript Pigment's actions name its own commands, which do not map onto Pigment's; record the action again (recorded .atn files keep working)";
 
 /// One preset of a JS kind file or bundle.
 struct Item {
@@ -160,7 +161,10 @@ fn read_folder(dir: &Path) -> Result<Source> {
     let has_kind_files = |d: &Path| {
         std::fs::read_dir(d).is_ok_and(|rd| {
             rd.flatten().any(|e| {
-                e.file_name().to_str().and_then(|n| n.strip_suffix(".json")).is_some_and(|k| kind_for(&k.replacen("__", ":", 1)).is_some() || k == "stroke-styles")
+                e.file_name()
+                    .to_str()
+                    .and_then(|n| n.strip_suffix(".json"))
+                    .is_some_and(|k| kind_for(&k.replacen("__", ":", 1)).is_some() || k == "stroke-styles")
             })
         })
     };
@@ -210,7 +214,11 @@ fn read_folder(dir: &Path) -> Result<Source> {
         src.found += 1;
         match std::fs::read_to_string(&path).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).filter(Value::is_object) {
             Some(v) => src.settings = Some(v),
-            None => src.skipped.push(Skip { kind: "settings".into(), name: "settings.json".into(), reason: "settings.json could not be read; it was skipped".into() }),
+            None => src.skipped.push(Skip {
+                kind: "settings".into(),
+                name: "settings.json".into(),
+                reason: "settings.json could not be read; it was skipped".into(),
+            }),
         }
     }
     Ok(src)
@@ -368,11 +376,14 @@ impl Plan {
                         .colors
                         .into_iter()
                         .map(|(t, c, r)| {
-                            (t, match r {
-                                Some(js::StopRef::Foreground) => StopColor::Foreground,
-                                Some(js::StopRef::Background) => StopColor::Background,
-                                None => StopColor::Rgb(c),
-                            })
+                            (
+                                t,
+                                match r {
+                                    Some(js::StopRef::Foreground) => StopColor::Foreground,
+                                    Some(js::StopRef::Background) => StopColor::Background,
+                                    None => StopColor::Rgb(c),
+                                },
+                            )
                         })
                         .collect(),
                     opacity: g.opacity,
@@ -507,7 +518,14 @@ impl Plan {
                 self.skip("brushes", &it.name, format!("its brush could not be used ({e})"));
                 continue;
             }
-            self.brushes.push(photocraft_paint::BrushPreset { name: it.name, brush, builtin: false, group: it.group, folder: Vec::new(), captures: Default::default() });
+            self.brushes.push(photocraft_paint::BrushPreset {
+                name: it.name,
+                brush,
+                builtin: false,
+                group: it.group,
+                folder: Vec::new(),
+                captures: Default::default(),
+            });
         }
     }
 

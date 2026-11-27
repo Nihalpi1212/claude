@@ -9,9 +9,9 @@
 //! Every function takes the item's `data` as the JS app normalised it and never panics on
 //! hostile values; what does not map is reported, one line each, where a function returns notes.
 
+use photocraft_color::BlendMode;
 use photocraft_doc::Effects;
 use photocraft_doc::vector::Path;
-use photocraft_color::BlendMode;
 use photocraft_doc::{Adjustment, Contour, NoiseGradient, Pattern};
 use photocraft_paint::BrushSettings;
 use serde_json::Value;

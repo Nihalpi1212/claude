@@ -602,6 +602,9 @@ pub struct Services {
     pub shader_compiler: Option<String>,
     /// Photoshop's live keyboard shortcut set, imported once at first launch (`kys_import`).
     pub photoshop_shortcuts: Option<PhotoshopShortcutsFn>,
+    /// Pigment: the JavaScript Pigment's presets folder, when it exists (Edit › Presets ›
+    /// Migrate Presets, P4); `None` in the web build and in tests.
+    pub legacy_presets_dir: Option<std::path::PathBuf>,
     /// The native window is connected directly to a Wayland compositor.
     pub is_wayland: bool,
     /// On Wayland, the shell command that starts this install under XWayland, where native file

@@ -456,7 +456,12 @@ impl Def {
     pub(crate) fn preset(&self) -> PresetStops {
         if let Some(n) = &self.noise {
             let (c, a) = n.fill_stops();
-            return PresetStops { colors: c.into_iter().map(|(t, c)| (t, [c.c[0], c.c[1], c.c[2]], None)).collect(), opacity: a, noise: Some(n.clone()), sampled: false };
+            return PresetStops {
+                colors: c.into_iter().map(|(t, c)| (t, [c.c[0], c.c[1], c.c[2]], None)).collect(),
+                opacity: a,
+                noise: Some(n.clone()),
+                sampled: false,
+            };
         }
         let centred = self.stops.iter().all(|s| s.mid == 0.5) && self.opacity.iter().all(|s| s.mid == 0.5) && self.method != Method::Stripes;
         if centred {

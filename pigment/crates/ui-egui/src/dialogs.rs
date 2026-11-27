@@ -426,6 +426,8 @@ pub(crate) const PROMPTS: &[PromptRow] = &[
     preset_manager_ui::answer_prompt,
     // Pigment: the Tool Presets panel's Reset and Replace confirmations (P2)
     crate::panels::preset_panels::tool_presets_menu::answer,
+    // Pigment: Migrate Presets from Pigment 0.4 (P4)
+    migrate_presets_ui::answer_prompt,
 ];
 
 /// [`prompts_take`] over the rows `rows`.
@@ -777,6 +779,8 @@ pub mod palette;
 mod paths_export_default_tests;
 #[cfg(test)]
 mod paths_export_document_bounds_tests;
+// Pigment: Migrate Presets from Pigment 0.4 (P4)
+pub(crate) mod migrate_presets_ui;
 pub(crate) mod pattern_fill_ui;
 pub mod preset_group_prompt;
 // Pigment: Preset Manager for every kind (P1a)
