@@ -17,7 +17,7 @@ use std::time::Duration;
 
 use craft::ui::runtime::windows::WindowHost;
 use egui::vec2;
-use egui_kittest::kittest::{By, Queryable};
+use egui_kittest::kittest::{By, NodeT, Queryable};
 use photocraft_engine::Session;
 use photocraft_engine::generative::ProviderId;
 use photocraft_engine::generative::mock::{MockAnswer, MockBackend};
@@ -160,7 +160,9 @@ fn generative_fill_sends_nothing_before_generate_and_lands_as_one_step() {
     assert_eq!(generate::blocked(h.state()).as_deref(), Some("Describe what to generate."));
     type_into(&mut h, "Describe what to generate", "a red fox");
     assert!(mock.calls().is_empty(), "nothing sent while typing");
-    mock.set_delay(Duration::from_millis(600));
+    // Long enough that the request still runs when the window is read below, also on a busy
+    // machine running the other tests beside this one.
+    mock.set_delay(Duration::from_millis(2500));
     h.get_by_label("Generate").click();
     h.run_steps(3);
     assert!(h.state().ai.generate.job.is_some(), "running");
@@ -536,6 +538,31 @@ fn task_bar_items_appear_only_with_a_key() {
     assert_eq!((g.width, g.height, g.anchor), (250, 160, "right"));
     assert!(!crop_ui::pending(h.state()), "the frame is let go");
     assert!(connected.calls().len() == 2, "nothing more sent before Generate: {:?}", connected.calls());
+}
+
+/// The person types a prompt into the selection bar and presses Enter: Generative Fill runs with
+/// it, as the bar's Generate does; Enter in an empty field sends nothing.
+#[test]
+fn the_bar_s_prompt_runs_on_enter() {
+    let mock = Arc::new(MockBackend::connected());
+    let m = Arc::clone(&mock);
+    let mut h = harness(move |app| {
+        with_mock(app, &m);
+        app.ui.panels.context_task_bar = true;
+        app.run("select.rect", json!({"x": 20, "y": 20, "width": 40, "height": 40})).unwrap();
+    });
+    h.get_by_label("Describe what to generate").click();
+    h.run_steps(2);
+    h.key_press(egui::Key::Enter);
+    h.run_steps(3);
+    assert!(mock.calls().is_empty(), "an empty prompt sends nothing");
+    type_into(&mut h, "Describe what to generate", "a moon");
+    h.key_press(egui::Key::Enter);
+    h.run_steps(3);
+    let calls = mock.calls();
+    assert_eq!(calls.len(), 1, "{calls:?}");
+    assert_eq!(calls[0].prompt, "a moon");
+    assert!(layer_names(h.state()).iter().any(|n| n == "Generative Fill"));
 }
 
 /// Remove Background with AI Provider as a background job, with another tab made active while it
