@@ -13,8 +13,12 @@ commit. (The runs on A3's and A4's interface commits were cancelled by later pus
 
 ## Commits (pushed together; CI on the last push not waited for)
 
-See the StructuredOutput / git log: one engine-side commit (doc, compose, gpu, format, io, engine) and one interface
-commit (ui-egui, FORK.md). Both were verified on the whole tree before the push.
+- `51007ac` Pigment Color and Vibrance, Clarity and Dehaze, Grain (A6), engine: the adjustments, the compositor's tile
+  margin, GPU programs, PSD pcAd, the .pigment and pcJS upgrade, the panel presets
+- `0581bde` Pigment Color and Vibrance, Clarity and Dehaze, Grain (A6), interface: the editors in the dialogs and
+  Properties, the Adjustments panel buttons, the menus
+
+Both were verified on the whole tree and pushed together (CI runs on `0581bde`; the engine commit alone was not run).
 
 ## What was built
 
@@ -103,7 +107,12 @@ commit (ui-egui, FORK.md). Both were verified on the whole tree before the push.
   R32Float), container-only.
 - ui-egui: `adjust_editors::newer::tests` (dialogs show rows, OK one step; Properties drag one step in RGB 8/32, CMYK,
   Lab; menus order; preview = command unmasked), `panels::adjustment_presets::tests` (the three buttons), the adjust,
-  properties, menus, adjustment_presets subsets; the whole ui-egui run: see the StructuredOutput.
+  properties, menus, adjustment_presets subsets. Whole ui-egui `--lib --test it` (nextest, 3 threads): 3760 of 3761
+  passed; `it ai_assistant::adjustments_and_filters_are_clamped_and_take_json_text` fails here on its Gaussian Blur
+  radius 99999 step ("not enough working memory", `raster::memory::try_reserve_operation` against this container's
+  memory budget), a filter path A6 does not touch; container-only as far as checked (not re-run on the old HEAD).
+- **Disk**: a full test build here fills the ~39 GB quota (`target/debug/examples` held 7.9 GB of example binaries; the
+  brief's cleanup only names `deps`). Delete large executables in `target/debug/examples` too before a big run.
 
 ## Checks
 
