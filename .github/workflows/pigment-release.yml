@@ -415,9 +415,12 @@ jobs:
       # The build's libraries and the packaging tools (craft-common-actions' install-linux-deps):
       # desktop-file-validate and appstreamcli check the desktop entry and metainfo, file is used
       # by appimagetool. appimagetool and the AppImage runtime are downloaded, pinned and SHA-256
-      # checked, by package.sh itself.
+      # checked, by package.sh itself. The runner image also lists Microsoft's package repository,
+      # which none of this uses; it is left out, since apt-get update fails when it refuses requests
+      # (403 Forbidden on Nov 27, 2026).
       - name: Install build and packaging dependencies
         run: |
+          grep -rlZ 'packages\.microsoft\.com' /etc/apt/sources.list.d 2>/dev/null | xargs -0 -r sudo rm -f --
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             libxkbcommon-dev libwayland-dev libx11-dev libxrandr-dev libxi-dev libgl1-mesa-dev \
