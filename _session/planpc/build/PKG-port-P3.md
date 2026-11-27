@@ -6,13 +6,14 @@ Built on `claude/pigment-photocraft` after `5a5cceb` (P2; PhotoCraft 057297b). S
 **CI first.** At the start the newest finished run was 46055487780 (`007cd8b`, P1b), **green**; P2's runs (46061145778
 on `4fa6da5`, 46066083083 on `5a5cceb`) were running and have since finished **green**. Nothing red, so no CI commit.
 **The next engineer checks CI first**: the run on `d54176d` (46074153799, in progress when this package returned) and
-the run on this package's second commit (see "Commits"). Not waited for, as the brief says.
+the run on `4fa297d` (this package's second commit; it may cancel the one on `d54176d`). Not waited for, as the brief says.
 
 ## Commits (pushed)
 
 - `d54176d` Pigment noise gradients (P3), document, io and engine: NoiseGradient with the JavaScript Pigment's sampler,
   PSD/GRD/grdm noise keys, noise in the gradient commands
-- the interface commit: see `git log` (subject "Pigment noise gradients (P3), interface: …")
+- `4fa297d` Pigment noise gradients (P3), interface: Gradient Type, Roughness, Color Model, channel ranges, Restrict
+  Colors, Add Transparency and Randomize in the Gradient Editor
 
 ## What was built
 
@@ -144,7 +145,7 @@ Pigment's own files touched: `legacy_pigment/{gradient,paint,styles,layer_kinds_
 - ui-egui `tools::gradient_ui::noise::tests` (2): **switching a fill layer to Noise is one history entry; Randomize
   changes the seed** (to `next_seed`), Restrict Colors, undo, Solid; the tool gradient turns noise, its stop bar is
   hidden, Randomize, Add Transparency gives opacity stops, Solid brings the stop bar back. `gradient_ui` filter: 15
-  passed; ui-egui `--lib --tests` whole suite through nextest -j 3: see "Checks".
+  passed; ui-egui `--lib --tests` whole suite through nextest -j 3 (profile ci): **3789 passed**, 6 skipped.
 - compose, vector, format, doc through nextest: green; gpu: 196 of 197, the one failure
   (`bounded_readback_preserves_effect_halos_across_seams`) fails the same without this package (container GPU).
 
