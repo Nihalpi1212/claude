@@ -1249,6 +1249,8 @@ pub fn user_keys(p: &Value) -> Map<String, Value> {
 
 // Pigment: eyedropper target colours
 pub mod targets;
+// Pigment: on-image tools and eyedroppers
+pub mod on_image;
 
 #[cfg(test)]
 mod tests;

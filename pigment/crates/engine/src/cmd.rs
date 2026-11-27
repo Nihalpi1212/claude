@@ -983,11 +983,12 @@ fn build() -> Vec<CommandSpec> {
             "Adjustment Properties",
             [],
             None,
-            r##"{"layer":id?, …params of that adjustment kind} (Levels, Curves: "eyedropper":{"point":"black|gray|white","at":[x,y],"size":1..101=1} or {"point",…,"color":[r,g,b] 0..1} = the Properties panel's Set Black/Neutral Gray/White Point, sampling the image below the layer, RGB and Grayscale (no gray) only)"##,
+            r##"{"layer":id?, …params of that adjustment kind} (Levels, Curves: "eyedropper":{"point":"black|gray|white","at":[x,y],"size":1..101=1} or {"point",…,"color":[r,g,b] 0..1} = the Properties panel's Set Black/Neutral Gray/White Point, sampling the image below the layer, RGB and Grayscale (no gray) only; Exposure's "eyedropper", Hue/Saturation's "rangeEyedropper" and "edit", Curves', Hue/Saturation's and Black & White's "onImage" as their image.adjustments.* commands have them, sampling below the layer)"##,
             has_layer,
             |s, p| {
                 let id = layer_param(s, p)?;
-                let eyedropped = crate::adjust_params::layer_eyedropper(s, id, p)?;
+                // Pigment: on-image tools and eyedroppers (Exposure's, Hue/Saturation's, the hand), before upstream's
+                let eyedropped = match crate::adjust_params::on_image::layer(s, id, p)? { Some(adj) => Some(adj), None => crate::adjust_params::layer_eyedropper(s, id, p)? };
                 s.edit("Modify Adjustment", |doc, _| {
                     let mode = doc.mode;
                     let l = doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?;
@@ -1237,14 +1238,14 @@ fn build() -> Vec<CommandSpec> {
         (
             "curves",
             "Curves…",
-            r##"{"points":json,"red":json,"green":json,"blue":json,"pencil":bool=false,"smooth":0..10=0,"eyedropper":json} (curves as [[in,out],…] in 0..255, 2..19 points: points = composite; red/green/blue, gray, cyan/magenta/yellow/black or lightness/a/b per channel; pencil = drawn curves (Draw to modify the curve): each curve is 256 output levels in 0..255 (point curves given are drawn in, and turning pencil off fits points to the drawing); smooth = Smooth passes over the drawn curves; eyedropper = the dialog's Set Black/Neutral Gray/White Point picker {"point":"black|gray|white","at":[x,y],"size":1..101=1} or {"point",…,"color":[r,g,b] 0..1}, colour composites: RGB and Grayscale (no gray); Image adjustments targeting a mask, alpha or Quick Mask sample that gray plane in any document mode, applied over the given curves)"##,
+            r##"{"points":json,"red":json,"green":json,"blue":json,"pencil":bool=false,"smooth":0..10=0,"eyedropper":json} (curves as [[in,out],…] in 0..255, 2..19 points: points = composite; red/green/blue, gray, cyan/magenta/yellow/black or lightness/a/b per channel; pencil = drawn curves (Draw to modify the curve): each curve is 256 output levels in 0..255 (point curves given are drawn in, and turning pencil off fits points to the drawing); smooth = Smooth passes over the drawn curves; eyedropper = the dialog's Set Black/Neutral Gray/White Point picker {"point":"black|gray|white","at":[x,y],"size":1..101=1} or {"point",…,"color":[r,g,b] 0..1}, colour composites: RGB and Grayscale (no gray); Image adjustments targeting a mask, alpha or Quick Mask sample that gray plane in any document mode, applied over the given curves; onImage = the on-image tool {"at":[x,y] or "color":[r,g,b],"size","drag":[dx,dy] screen pixels,"channel":"composite|red|green|blue"="composite"}: a point at the sample's tone moved by -dy/2 levels)"##,
         ),
-        ("exposure", "Exposure…", r##"{"exposure":-20..20=0,"offset":-0.5..0.5=0,"gamma":0.01..9.99=1}"##),
+        ("exposure", "Exposure…", r##"{"exposure":-20..20=0,"offset":-0.5..0.5=0,"gamma":0.01..9.99=1,"eyedropper":json} (eyedropper = the dialog's Sample in image to set black/gray/white point {"point":"black|gray|white","at":[x,y],"size":1..101=1} or {"point",…,"color":[r,g,b] 0..1}: black sets Offset so the sample becomes black, gray and white set Exposure so it becomes 18 % grey or white)"##),
         ("vibrance", "Vibrance…", r##"{"vibrance":-100..100=0,"saturation":-100..100=0}"##),
         (
             "hueSaturation",
             "Hue/Saturation…",
-            r##"{"hue":-180..180=0,"saturation":-100..100=0,"lightness":-100..100=0,"colorize":bool=false,"reds":json,"yellows":json,"greens":json,"cyans":json,"blues":json,"magentas":json} (per range {"hue","saturation","lightness","range":[4 hue degrees]}; colorize: hue 0..360, saturation 0..100)"##,
+            r##"{"hue":-180..180=0,"saturation":-100..100=0,"lightness":-100..100=0,"colorize":bool=false,"reds":json,"yellows":json,"greens":json,"cyans":json,"blues":json,"magentas":json,"edit":"master|reds|yellows|greens|cyans|blues|magentas","rangeEyedropper":json,"onImage":json} (per range {"hue","saturation","lightness","range":[4 hue degrees]}; colorize: hue 0..360, saturation 0..100; edit = the range the dialog edits; rangeEyedropper = {"mode":"pick|add|subtract","at":[x,y],"size":1..101=1} or {"mode",…,"color":[r,g,b] 0..1}: pick edits the sample's range centred on its hue, add widens the edited range to it, subtract narrows it; onImage = the on-image tool {"at":[x,y] or "color","drag":[dx,dy] screen pixels,"hue":bool=false}: the range under the sample, saturation (hue with "hue") + dx/2)"##,
         ),
         (
             "colorBalance",
@@ -1254,7 +1255,7 @@ fn build() -> Vec<CommandSpec> {
         (
             "blackWhite",
             "Black & White…",
-            r##"{"reds":-200..300=40,"yellows":-200..300=60,"greens":-200..300=40,"cyans":-200..300=60,"blues":-200..300=20,"magentas":-200..300=80,"tint":bool=false,"tintColor":"#rrggbb"}"##,
+            r##"{"reds":-200..300=40,"yellows":-200..300=60,"greens":-200..300=40,"cyans":-200..300=60,"blues":-200..300=20,"magentas":-200..300=80,"tint":bool=false,"tintColor":"#rrggbb","onImage":json} (onImage = the on-image tool {"at":[x,y] or "color":[r,g,b],"size","drag":[dx,dy] screen pixels}: the colour slider nearest the sample's hue + dx/2)"##,
         ),
         (
             "photoFilter",
@@ -1294,6 +1295,8 @@ fn build() -> Vec<CommandSpec> {
             run: |s, p| {
                 let kind = p.get("__kind").and_then(Value::as_str).unwrap_or("invert").to_string();
                 let eyedropped = if matches!(kind.as_str(), "levels" | "curves") { crate::adjust_params::eyedropper_from_params(s, &kind, p)? } else { None };
+                // Pigment: on-image tools and eyedroppers
+                let eyedropped = match eyedropped { Some(adj) => Some(adj), None => crate::adjust_params::on_image::image(s, &kind, p)? };
                 let adj = match eyedropped {
                     Some(adj) => adj,
                     None => crate::adjust_params::from_params(&kind, p, None, doc_mode(s))?,
@@ -1323,12 +1326,16 @@ fn build() -> Vec<CommandSpec> {
                     crate::channel_cmds::resolve_tone_target(s, false, p)?;
                 }
                 let eyedropped = if matches!(kind.as_str(), "levels" | "curves") { crate::adjust_params::destructive_eyedropper(s, &kind, p)? } else { None };
+                // Pigment: on-image tools and eyedroppers
+                let eyedropped = match eyedropped { Some(adj) => Some(adj), None => crate::adjust_params::on_image::image(s, &kind, p)? };
                 // A smart filter re-runs its params, so it records what an eyedropper resolved
                 // to, not the sample (#3127).
                 let recorded = eyedropped.as_ref().map(|adj| {
                     let mut q = p.clone();
                     if let (Value::Object(q), Value::Object(resolved)) = (&mut q, crate::adjust_params::to_params(adj)) {
                         q.remove("eyedropper");
+                        // Pigment: on-image tools and eyedroppers
+                        crate::adjust_params::on_image::strip(q);
                         q.extend(resolved);
                     }
                     q
