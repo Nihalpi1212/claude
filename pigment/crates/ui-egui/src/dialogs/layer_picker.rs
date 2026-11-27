@@ -56,7 +56,11 @@ pub fn armed(app: &PhotocraftApp) -> Option<(LayerId, TonePicker)> {
     let st = app.session.active()?;
     let layer = LayerId(picker.layer);
     let tonal = st.doc.layer(layer).is_some_and(|l| matches!(l.content, LayerContent::Adjustment(Adjustment::Levels { .. } | Adjustment::Curves { .. })));
-    let point = tone_picker(picker).filter(|p| p.supported(st.doc.mode == ColorMode::Rgb, is_gray(st.doc.mode)))?;
+    // Pigment: on-image tools (Exposure's eyedroppers: all three in RGB and Grayscale)
+    let exposure = st.doc.layer(layer).is_some_and(|l| crate::dialogs::adjust_on_image::exposure_layer(&l.content))
+        && matches!(st.doc.mode, ColorMode::Rgb | ColorMode::Grayscale);
+    let tonal = tonal || exposure;
+    let point = tone_picker(picker).filter(|p| exposure || p.supported(st.doc.mode == ColorMode::Rgb, is_gray(st.doc.mode)))?;
     (picker.tool == app.ui.tool && st.active_layer == Some(layer) && tonal).then_some((layer, point))
 }
 

@@ -44,6 +44,9 @@ pub(crate) enum DialogPick {
     PatternPhase,
     /// A click on the image moves a filter preview's view to the point.
     Locator,
+    // Pigment: on-image tools
+    /// The hand or a Hue/Saturation range eyedropper (`adjust_on_image`).
+    OnImage(super::adjust_on_image::OnImageTool),
 }
 
 /// The pipette's tip, at the bottom left of its 24-unit icon box.
@@ -55,10 +58,18 @@ const PIPETTE_HOTSPOT: egui::Vec2 = egui::vec2(2.0, 22.0);
 pub(crate) fn armed(app: &PhotocraftApp) -> Option<DialogPick> {
     let dialogs = &app.framework.dialogs;
     let Some(top) = dialogs.stack().top() else {
+        // Pigment: on-image tools (the Properties editor's)
+        if let Some(tool) = super::adjust_on_image::armed_properties(app) {
+            return Some(DialogPick::OnImage(tool));
+        }
         return super::layer_picker::armed(app).map(|(_, picker)| DialogPick::TonePicker(picker));
     };
     if let Some(open) = super::adjust_dialog::open_value(app).filter(|open| open.id == top) {
         let dialog = super::adjust_dialog::hosted(app, top)?;
+        // Pigment: on-image tools (the dialog's)
+        if let Some(tool) = super::adjust_on_image::armed_dialog(open) {
+            return Some(DialogPick::OnImage(tool));
+        }
         if let Some(picker) = dialog.picker() {
             return super::adjust_dialog::picker_applies(app, open, picker).then_some(DialogPick::TonePicker(picker));
         }
@@ -111,6 +122,8 @@ pub(crate) fn follows_drag(app: &PhotocraftApp, pick: DialogPick) -> bool {
     match pick {
         DialogPick::TonePicker(_) => app.framework.dialogs.stack().top().is_some(),
         DialogPick::Color | DialogPick::ParamDropper | DialogPick::ColorRange => true,
+        // Pigment: on-image tools (the range eyedroppers sample again; the hand's drag changes the value)
+        DialogPick::OnImage(tool) => tool != super::adjust_on_image::OnImageTool::Hand,
         _ => false,
     }
 }
@@ -215,6 +228,10 @@ pub(crate) fn locate(app: &mut PhotocraftApp, at: [f64; 2]) -> bool {
 
 /// The end of a gesture of `pick`: a Layer Style drag ends. The other picks have nothing to end.
 pub(crate) fn release(app: &mut PhotocraftApp, pick: DialogPick) {
+    // Pigment: on-image tools (Properties commits the gesture)
+    if let DialogPick::OnImage(_) = pick {
+        super::adjust_on_image::release(app);
+    }
     if matches!(pick, DialogPick::ShadowDrag | DialogPick::GradientDrag)
         && let Some(dialog) = app.framework.dialogs.get_mut::<HostedLayerStyle>()
     {
@@ -241,5 +258,7 @@ pub(crate) fn cursor(app: &PhotocraftApp, pick: DialogPick) -> Cursor {
         DialogPick::CurvesPoint => pipette(None),
         DialogPick::ShadowDrag | DialogPick::GradientDrag | DialogPick::PatternPhase => Cursor::System(CursorIcon::Move),
         DialogPick::Locator => Cursor::Painted(PaintedCursor::Locator),
+        // Pigment: on-image tools
+        DialogPick::OnImage(tool) => super::adjust_on_image::cursor(tool),
     }
 }

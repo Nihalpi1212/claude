@@ -701,6 +701,8 @@ pub(crate) fn move_memories(prefs: &mut Preferences, host: &Host) {
 
 pub mod adjust_dialog;
 pub mod adjust_editors;
+// Pigment: on-image adjustment tools and eyedroppers
+pub mod adjust_on_image;
 pub mod adjust_preview;
 pub mod alerts;
 // Pigment: Auto Color Correction Options
