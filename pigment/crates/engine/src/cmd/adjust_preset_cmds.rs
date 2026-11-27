@@ -14,6 +14,8 @@ use crate::presets::adjustments::{self, Entry, KINDS, MAX_PARAMS_BYTES};
 use crate::presets::{always, bad, req_str, str_param};
 use crate::{EngineError, Result, Session};
 
+pub mod panel;
+
 /// Largest preset file `adjustment.presets.load` reads (Photoshop's are a few hundred bytes).
 const MAX_FILE_BYTES: u64 = 1 << 20;
 
@@ -237,9 +239,9 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     }
 }
 
-/// Every `adjustment.presets.*` command.
+/// Every `adjustment.presets.*` command, and the Adjustments panel's preset commands ([`panel`]).
 pub fn specs() -> Vec<CommandSpec> {
-    vec![
+    let mut v = vec![
         CommandSpec {
             id: "adjustment.presets.list",
             label: "Adjustment Presets",
@@ -310,7 +312,9 @@ pub fn specs() -> Vec<CommandSpec> {
             run: export,
             journal: false,
         },
-    ]
+    ];
+    v.extend(panel::specs());
+    v
 }
 
 #[cfg(test)]

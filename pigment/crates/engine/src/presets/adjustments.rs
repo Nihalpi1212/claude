@@ -24,6 +24,8 @@ use serde_json::{Map, Value, json};
 
 use super::{Group, Named};
 
+pub mod panel;
+
 /// Every kind that has presets: the adjustment kinds of `layer.newAdjustmentLayer.*` that have
 /// settings (Invert has none), and HDR Toning (`image.adjustments.hdrToning`).
 pub const KINDS: &[&str] = &[

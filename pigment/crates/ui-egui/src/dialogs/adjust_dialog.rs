@@ -555,6 +555,9 @@ fn build_setup(app: &mut PhotocraftApp, kind: &str, target: &ToneTarget, mode: C
         tone: None,
         stale: false,
         reported_clipping: Default::default(),
+        // Pigment: adjustment presets
+        presets: adjust_editors::preset_row::entries(app, kind),
+        presets_rev: app.session.presets.rev,
     }
 }
 
@@ -569,7 +572,9 @@ fn shared_editor(
             ui.label(tl!("The adjustment target is missing or unavailable.").to_string());
             return None;
         }
-        adjust_editors::dialog_editor(&kind, setup)(ui, &mut value.value, cx)
+        // Pigment: adjustment presets
+        let preset = adjust_editors::preset_row::in_dialog(ui, &kind, &setup.presets, value);
+        adjust_editors::dialog_editor(&kind, setup)(ui, &mut value.value, cx).or(preset)
     }
 }
 
@@ -753,6 +758,8 @@ pub(crate) fn smart_filter_params(app: &PhotocraftApp, open: &OpenAdjust, value:
 /// dialog edits and writes the weights into the value; a colour well opens the Color Picker as the dialog's child; the
 /// colour it answers with goes into the value.
 fn answer_asks(app: &mut PhotocraftApp, id: DialogId) {
+    // Pigment: adjustment presets
+    adjust_editors::preset_row::follow_dialog(app, id);
     let Some(asks) = app.framework.dialogs.get_mut_by_id::<HostedAdjustDialog>(id).map(HostedAdjustDialog::take_asks) else { return };
     for ask in asks {
         match ask {
@@ -776,6 +783,8 @@ fn answer_asks(app: &mut PhotocraftApp, id: DialogId) {
             AdjustAsk::PickColor(request) => {
                 crate::color_picker_ui::open_for_request(app, id, request);
             }
+            // Pigment: adjustment presets
+            AdjustAsk::Preset(ask) => adjust_editors::preset_row::answer_dialog(app, id, ask),
         }
     }
     while let Some((key, color)) = crate::color_picker_ui::answer_for(app, id) {

@@ -325,7 +325,8 @@ fn preset_commands_leave_documents_and_history_alone() {
     s.execute("adjustment.presets.save", json!({"kind": "exposure", "name": "Up", "params": {"exposure": 0.5}})).unwrap();
     s.execute("adjustment.presets.reset", json!({"kind": "exposure"})).unwrap();
     assert_eq!(s.active().unwrap().history.entries().len(), steps);
-    for spec in super::specs() {
+    // The panel presets' `layer.adjustmentPreset` changes the document: its tests are in `panel_tests.rs`.
+    for spec in super::specs().into_iter().filter(|spec| spec.id.starts_with("adjustment.presets.")) {
         assert!(!spec.journal, "{}", spec.id);
     }
 }
