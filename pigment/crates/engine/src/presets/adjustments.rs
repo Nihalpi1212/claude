@@ -338,7 +338,8 @@ fn preset(id: &str, name: &str, params: Value) -> AdjustmentPreset {
 /// HDR Toning's settings with the JavaScript app's defaults under `o`. The app's Strength
 /// (0..100, default 50) is PhotoCraft's 0.1..4 (default 0.5) divided by 100.
 fn hdr(id: &str, name: &str, o: Value) -> AdjustmentPreset {
-    let mut p = json!({"radius": 100, "strength": 0.5, "gamma": 1, "exposure": 0, "detail": 30, "shadow": 0, "highlight": 0, "vibrance": 0, "saturation": 20});
+    // Every built-in is the JavaScript app's Local Adaptation (A7 added the Method menu: a pick sets it back).
+    let mut p = json!({"method": "localAdaptation", "radius": 100, "strength": 0.5, "gamma": 1, "exposure": 0, "detail": 30, "shadow": 0, "highlight": 0, "vibrance": 0, "saturation": 20});
     if let (Some(m), Value::Object(o)) = (p.as_object_mut(), o) {
         m.extend(o);
     }
