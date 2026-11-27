@@ -17,6 +17,8 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 pub mod adjust;
+// Pigment: Color and Vibrance, Clarity and Dehaze, Grain
+pub mod adjust_extra;
 pub mod advanced;
 pub mod bounds;
 pub mod cmyk;

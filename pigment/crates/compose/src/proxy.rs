@@ -140,6 +140,8 @@ pub fn proxy_document(doc: &Document, k: u32) -> Document {
 pub fn proxy_faithful(doc: &Document) -> bool {
     // Hidden layers (and what they hold) are not composited, so they don't count.
     crate::visible_layers(&doc.layers).iter().all(|l| !crate::effects::has_effects(l) && l.vector_mask.as_ref().is_none_or(|v| !v.enabled || v.path.is_empty()))
+        // Pigment: Grain and Clarity and Dehaze are drawn in document pixels
+        && !crate::adjust_extra::has_positional(doc)
 }
 
 #[cfg(test)]

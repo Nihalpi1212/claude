@@ -190,6 +190,14 @@ impl HueRange {
     }
 }
 
+/// Pigment: the neighbourhood Clarity and Dehaze read, in document pixels (three box passes of
+/// radius 8 for Clarity; a minimum of radius 4 and three box passes of 6 for Dehaze).
+pub const CLARITY_DEHAZE_MARGIN: u32 = 24;
+
+fn default_grain_seed() -> u32 {
+    1
+}
+
 fn default_hue_ranges() -> [HueRange; 6] {
     HueRange::defaults()
 }
@@ -326,6 +334,30 @@ pub enum Adjustment {
         relative: bool,
         adjustments: [[f32; 4]; 9],
     },
+    /// Pigment: Color and Vibrance (Camera Raw's white balance and Vibrance as a layer):
+    /// Temperature and Tint as white-balance gains in linear light, then Vibrance and
+    /// Saturation; each -100..=100.
+    ColorVibrance {
+        temperature: f32,
+        tint: f32,
+        vibrance: f32,
+        saturation: f32,
+    },
+    /// Pigment: Clarity and Dehaze (-100..=100 each), evaluated over a fixed neighbourhood
+    /// ([`Adjustment::spatial_margin`]).
+    ClarityDehaze {
+        clarity: f32,
+        dehaze: f32,
+    },
+    /// Pigment: film grain fixed to the document position: Amount, Size and Roughness
+    /// (0..=100), and the noise's seed.
+    Grain {
+        amount: f32,
+        size: f32,
+        roughness: f32,
+        #[serde(default = "default_grain_seed")]
+        seed: u32,
+    },
     /// A PSD adjustment we can't evaluate yet; preserved raw for round-trip, shared between
     /// document snapshots (#4535).
     Unsupported {
@@ -353,7 +385,22 @@ impl Adjustment {
             Adjustment::Threshold { .. } => "Threshold",
             Adjustment::GradientMap { .. } => "Gradient Map",
             Adjustment::SelectiveColor { .. } => "Selective Color",
+            Adjustment::ColorVibrance { .. } => "Color and Vibrance",
+            Adjustment::ClarityDehaze { .. } => "Clarity and Dehaze",
+            Adjustment::Grain { .. } => "Grain",
             Adjustment::Unsupported { .. } => "Adjustment",
+        }
+    }
+
+    /// Pigment: how far (in pixels at `scale` of the document) the adjustment reads around each
+    /// pixel it changes: 24 px for Clarity and Dehaze when either is set, 0 for the per-pixel kinds.
+    pub fn spatial_margin(&self, scale: f32) -> u32 {
+        match self {
+            Adjustment::ClarityDehaze { clarity, dehaze } if *clarity != 0.0 || *dehaze != 0.0 => {
+                let s = if scale.is_finite() { scale.clamp(0.0, 64.0) } else { 1.0 };
+                (CLARITY_DEHAZE_MARGIN as f32 * s).ceil() as u32
+            }
+            _ => 0,
         }
     }
 
@@ -402,6 +449,28 @@ mod tests {
         assert!(matches!(c, Adjustment::Curves { space: ToneSpace::Rgb, pencil: false, .. }));
         let g: Adjustment = serde_json::from_str(r#"{"GradientMap":{"stops":[],"reverse":true}}"#).unwrap();
         assert!(matches!(g, Adjustment::GradientMap { dither: false, .. }));
+    }
+
+    /// Pigment: the newer adjustments' margin, labels and saved form.
+    #[test]
+    fn newer_adjustments_margin_labels_and_serde() {
+        let cd = Adjustment::ClarityDehaze { clarity: 30.0, dehaze: 0.0 };
+        assert_eq!(cd.spatial_margin(1.0), 24);
+        assert_eq!(cd.spatial_margin(0.5), 12);
+        assert_eq!(cd.spatial_margin(f32::NAN), 24);
+        assert_eq!(Adjustment::ClarityDehaze { clarity: 0.0, dehaze: 0.0 }.spatial_margin(1.0), 0);
+        let grain = Adjustment::Grain { amount: 40.0, size: 25.0, roughness: 50.0, seed: 7 };
+        assert_eq!(grain.spatial_margin(1.0), 0);
+        assert_eq!(grain.label(), "Grain");
+        assert_eq!(cd.label(), "Clarity and Dehaze");
+        let cv = Adjustment::ColorVibrance { temperature: 10.0, tint: -5.0, vibrance: 20.0, saturation: 0.0 };
+        assert_eq!(cv.label(), "Color and Vibrance");
+        for a in [cd, grain, cv] {
+            let back: Adjustment = serde_json::from_str(&serde_json::to_string(&a).unwrap()).unwrap();
+            assert_eq!(back, a);
+        }
+        let old: Adjustment = serde_json::from_str(r#"{"Grain":{"amount":1.0,"size":2.0,"roughness":3.0}}"#).unwrap();
+        assert!(matches!(old, Adjustment::Grain { seed: 1, .. }));
     }
 
     #[test]

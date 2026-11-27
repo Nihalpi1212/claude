@@ -286,6 +286,8 @@ fn apply_depth_mode(adj: &Adjustment, buf: &mut Buffer, transfer: Transfer, dept
                 p[..3].copy_from_slice(&o);
             }
         }
+        // Pigment: Color and Vibrance, Clarity and Dehaze, Grain
+        Adjustment::ColorVibrance { .. } | Adjustment::ClarityDehaze { .. } | Adjustment::Grain { .. } => crate::adjust_extra::apply(adj, buf, transfer, depth),
         // Not evaluated: identity (still round-trips through PSD).
         Adjustment::ColorLookup { .. } | Adjustment::Unsupported { .. } => {}
     }
