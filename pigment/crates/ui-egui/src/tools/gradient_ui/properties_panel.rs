@@ -17,6 +17,9 @@ use crate::PhotocraftApp;
 /// pass of a frame, so the events kept from the pass that did are applied once.
 pub(super) fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui, layer: &Layer) {
     let Some(fill) = fill_of(layer) else { return };
+    // Pigment: Gradient Type and the noise settings (P3), above the framework's rows (which show a noise gradient's
+    // bake; editing its stops there makes it solid).
+    super::noise::show(app, ui, super::noise::Target::Layer(layer.id));
     let committed = stops::fill_value(fill);
     let preview = app.gradient.panel.clone().filter(|(id, _)| *id == layer.id);
     let mut value = match &preview {

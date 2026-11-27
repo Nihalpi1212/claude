@@ -22,7 +22,10 @@ pub(crate) fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         return;
     }
     Text::new(tl!("The gradient the Gradient tool paints with").to_string()).shade(Shade::Muted).show(ui);
-    tool_gradient(app, ui);
+    // Pigment: Gradient Type and the noise settings (P3); a noise gradient has no stop bar.
+    if !super::noise::show(app, ui, super::noise::Target::Tool) {
+        tool_gradient(app, ui);
+    }
     Row::new().show(ui, |ui, _| {
         let save = Button::new(tl!("Save As Preset")).tooltip(Label::from(tl!("Adds the current gradient to the Gradients panel").to_string())).show(ui);
         if save.clicked() {
