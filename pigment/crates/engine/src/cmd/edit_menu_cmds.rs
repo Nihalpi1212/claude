@@ -353,6 +353,8 @@ mod content_aware;
 mod content_aware_scale;
 mod fade;
 mod find_replace;
+// Pigment: Preset Manager for every kind (P1a)
+pub mod preset_manager;
 mod presets;
 mod purge;
 
@@ -367,7 +369,9 @@ pub use find_replace::find_matches;
 use find_replace::{find_replace, has_type_layer};
 pub(crate) use presets::current_path;
 pub use presets::{PRESET_FORMAT, PresetFile};
-use presets::{can_define_shape, define_brush_preset, define_custom_shape, preset_manager};
+// Pigment: Preset Manager for every kind (P1a)
+use preset_manager::preset_manager;
+use presets::{can_define_shape, define_brush_preset, define_custom_shape};
 use purge::{can_purge_all, can_purge_clipboard, can_purge_histories, can_purge_undo, purge};
 
 pub fn specs() -> Vec<CommandSpec> {
@@ -439,7 +443,8 @@ pub fn specs() -> Vec<CommandSpec> {
             "Preset Manager…",
             ["Edit", "Presets"],
             None,
-            r##"{"action":"list|rename|delete|move","kind":"brushes|customShapes|patterns","index":n?,"name":str?,"newName":str?,"to":n?}"##,
+            // Pigment: Preset Manager for every kind (P1a)
+            r##"{"action":"list|rename|delete|move|load|saveSet|reset"="list","kind":"brushes|swatches|gradients|styles|patterns|contours|customShapes|tools|adjustments" (list: every kind when absent),"index":n? | "name":str? ("group":str? narrows it) | "indices":[n…]? (delete, saveSet: several),"newName":str (rename),"to":n (move: the position in the list) | "toGroup":str,"position":n? (move into a folder),"path":file? (load: the file to read; saveSet: the file to write, else base64 `data` comes back),"data":base64? (load, with "fileName"),"fileName":str?,"replace":bool=false (load: Replace… empties the library first),"format":ext? (saveSet)} → {<kind>:[names], info:{<kind>:{thumb, rows:[{index,group,name,key,hint?}], canReset, canMove, load:[ext], save:[ext]}}}; saveSet → {fileName, count, bytes, path|data}. load reads .abr .aco .ase .act .gpl .grd .asl .pat .shc .csh .alv .acv .ahu .cha .asv .blw .pcpresets"##,
             always,
             preset_manager
         ),
