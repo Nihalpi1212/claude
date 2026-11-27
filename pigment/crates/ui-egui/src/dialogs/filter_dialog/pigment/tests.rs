@@ -291,19 +291,9 @@ fn replace_color_previews_the_selection_and_a_press_on_it_samples() {
         .max_by(|a, b| (a.rect().area()).total_cmp(&b.rect().area()))
         .expect("the preview pane")
         .rect();
-    for n in h.query_all_by_label("Preview") {
-        eprintln!("DBG {:?} {:?}", n.accesskit_node().role(), n.rect());
-    }
-    eprintln!("DBG tool {:?}", fields(h.state(), REPLACE_COLOR).text(SAMPLE_TOOL));
-    for n in h.query_all(egui_kittest::kittest::by()) {
-        if let Some(r) = n.accesskit_node().bounding_box() && r.y0 > 440.0 && r.y0 < 700.0 {
-            eprintln!("DBG node {:?} {:?} {:?}", n.accesskit_node().role(), n.accesskit_node().label(), r);
-        }
-    }
     click(&mut h, egui::pos2(pane.left() + pane.width() * 0.2, pane.center().y));
     h.run_steps(3);
     let f = fields(h.state(), REPLACE_COLOR);
-    eprintln!("DBG fields {}", serde_json::to_string(&f).unwrap());
     let points = command_params(REPLACE_COLOR, &f)["points"].clone();
     assert_eq!(points.as_array().map(Vec::len), Some(1), "one sample: {points}");
     assert!(points[0][0].as_f64().unwrap() < 20.0, "on the red half: {points}");

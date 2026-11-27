@@ -19,8 +19,9 @@ use std::sync::Arc;
 use craft::keymap::Mods;
 use craft::ui::buttons::Button;
 use craft::ui::choice::Segmented;
-use craft::ui::contract::{Bind, Entry, Props as _, Show as _, clicked};
+use craft::ui::contract::{Bind, Entry, Props as _, Show as _, ShowContainer as _, clicked};
 use craft::ui::dialog::{StackDialog as _, dialog_id};
+use craft::ui::layout_components::{Row, Stack};
 use craft::ui::patterns::form_dialogs::{DialogFields, FieldValue, HostedParamDialog, Param, ParamKind, PreviewPane, PreviewState, PreviewView};
 use craft::ui::primitives::TextureCache;
 use craft::ui::runtime::env::Label;
@@ -367,36 +368,40 @@ pub(super) fn replace_color(params: &mut Vec<Param>) {
     let row = Param::custom(PREVIEW_VIEW, Label::from(tl!("Preview")), |ui, fields, _| {
         let preview: ReplacePreview = ui.ctx().data(|d| d.get_temp(replace_preview_id())).unwrap_or_default();
         let image_shown = fields.text(PREVIEW_VIEW) == Some("image");
-        ui.vertical(|ui| {
-            let views = [Entry::new(false, Label::from(tl!("Selection"))), Entry::new(true, Label::from(tl!("Image")))];
-            if let Some(&shown) =
-                Segmented::new(Label::from(tl!("Preview")), Bind::given(image_shown), &views).id_salt("pigment.replaceColor.view").show(ui).value()
-            {
-                fields.set(PREVIEW_VIEW, FieldValue::Text(if shown { "image" } else { "selection" }.into()));
+        let picture = if image_shown { preview.image.clone() } else { preview.mask.clone() };
+        let state = match (&preview.error, picture) {
+            (Some(error), _) => PreviewState::Failed(Label::from(error.clone())),
+            (None, Some(image)) => {
+                let [w, h] = image.size;
+                let id = TextureCache::texture(ui.ctx(), ("pigment.replaceColor", image_shown, preview.key, w, h), || (*image).clone());
+                PreviewState::Ready(SizedTexture::new(id, Vec2::new(w as f32, h as f32)))
             }
-            let picture = if image_shown { preview.image.clone() } else { preview.mask.clone() };
-            let state = match (&preview.error, picture) {
-                (Some(error), _) => PreviewState::Failed(Label::from(error.clone())),
-                (None, Some(image)) => {
-                    let [w, h] = image.size;
-                    let id = TextureCache::texture(ui.ctx(), ("pigment.replaceColor", image_shown, preview.key, w, h), || (*image).clone());
-                    PreviewState::Ready(SizedTexture::new(id, Vec2::new(w as f32, h as f32)))
+            (None, None) => PreviewState::Pending(None),
+        };
+        let aspect = preview.size().map_or(1.0, |[w, h]| w as f32 / h.max(1) as f32);
+        // As Color Range's dialog lays its preview out: the picture, and beside it Selection / Image.
+        Row::new()
+            .show(ui, |ui, _| {
+                let pane = PreviewPane::state(Label::from(tl!("Preview")), state.clone(), &PreviewView::fixed()).aspect(aspect).click_centres(false).show(ui);
+                if let Some(p) = pane.pressed
+                    && !fields.text(SAMPLE_TOOL).unwrap_or_default().is_empty()
+                {
+                    // The picture is the proxy, `k` times smaller: the sample is the proxy pixel's centre, as Color Range's.
+                    let k = f64::from(preview.k.max(1));
+                    let at = [f64::from(p.x.floor().max(0.0)) * k + (k / 2.0).floor(), f64::from(p.y.floor().max(0.0)) * k + (k / 2.0).floor()];
+                    let mods = pointer::frame(ui.ctx()).mods;
+                    fields.set(PREVIEW_PICK, FieldValue::Json(json!([at[0], at[1], mods.shift, mods.alt])));
                 }
-                (None, None) => PreviewState::Pending(None),
-            };
-            let aspect = preview.size().map_or(1.0, |[w, h]| w as f32 / h.max(1) as f32);
-            let pane = PreviewPane::state(Label::from(tl!("Preview")), state, &PreviewView::fixed()).aspect(aspect).click_centres(false).show(ui);
-            if let Some(p) = pane.pressed
-                && !fields.text(SAMPLE_TOOL).unwrap_or_default().is_empty()
-            {
-                // The picture is the proxy, `k` times smaller: the sample is the proxy pixel's centre, as Color Range's.
-                let k = f64::from(preview.k.max(1));
-                let at = [f64::from(p.x.floor().max(0.0)) * k + (k / 2.0).floor(), f64::from(p.y.floor().max(0.0)) * k + (k / 2.0).floor()];
-                let mods = pointer::frame(ui.ctx()).mods;
-                fields.set(PREVIEW_PICK, FieldValue::Json(json!([at[0], at[1], mods.shift, mods.alt])));
-            }
-        })
-        .response
+                Stack::new().show(ui, |ui, _| {
+                    let views = [Entry::new(false, Label::from(tl!("Selection"))), Entry::new(true, Label::from(tl!("Image")))];
+                    if let Some(&shown) =
+                        Segmented::new(Label::from(tl!("View")), Bind::given(image_shown), &views).id_salt("pigment.replaceColor.view").show(ui).value()
+                    {
+                        fields.set(PREVIEW_VIEW, FieldValue::Text(if shown { "image" } else { "selection" }.into()));
+                    }
+                });
+            })
+            .output
     })
     .full_width()
     .not_remembered();
