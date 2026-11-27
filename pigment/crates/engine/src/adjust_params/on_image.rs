@@ -59,7 +59,8 @@ pub fn exposure_eyedropper(base: &Value, picker: CurvesEyedropper, sample: [f32;
     let Adjustment::Exposure { exposure, offset, gamma } = from_params("exposure", base, None, ColorMode::Rgb)? else {
         return Err(bad(CMD, "expected an Exposure adjustment"));
     };
-    let lin = f64::from(transfer.decode(rgb_luma(sample.map(|v| v.clamp(0.0, 1.0)))));
+    // Not held to 1: a 32-bit document stores linear light above white, which the eyedroppers must reach.
+    let lin = f64::from(transfer.decode(rgb_luma(sample.map(|v| v.max(0.0)))));
     let multiplier = 2f64.powf(f64::from(exposure));
     let (mut exposure, mut offset) = (f64::from(exposure), f64::from(offset));
     match picker {

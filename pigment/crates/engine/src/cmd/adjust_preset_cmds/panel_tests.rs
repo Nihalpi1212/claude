@@ -164,6 +164,25 @@ fn your_presets_survive_the_settings_file() {
     assert!(matches!(adjustment(&t, out["layer"].as_u64().unwrap()), Adjustment::Threshold { .. }));
 }
 
+/// Review A: a Color Lookup layer's look survives "Your Presets": a built-in look by its id, a loaded file by its
+/// bytes (upstream's `to_params` keeps neither), also through the settings file.
+#[test]
+fn your_presets_keep_a_color_lookup_layers_look() {
+    let cube = "LUT_3D_SIZE 2\n0 0 0\n1 0 0\n0 1 0\n1 1 0\n0 0 1\n1 0 1\n0 1 1\n0.5 0.5 0.5\n";
+    for (name, params) in [("Warm", json!({"lut": "warm"})), ("Mine", json!({"data": cube, "fileName": "mine.cube"}))] {
+        let mut s = doc(None);
+        s.execute("layer.newAdjustmentLayer.colorLookup", params).unwrap();
+        let original = adjustment(&s, s.active().unwrap().doc.layers.last().unwrap().id.0);
+        assert!(matches!(&original, Adjustment::ColorLookup { lut: Some(_), .. }), "{original:?}");
+        s.execute("layer.saveAdjustmentPreset", json!({"name": name})).unwrap();
+        let mut t = Session::new();
+        t.load_presets_json(s.presets.to_json(&s));
+        t.execute("file.new", json!({"width": 4, "height": 4})).unwrap();
+        let out = t.execute("layer.adjustmentPreset", json!({"group": YOUR_PRESETS, "preset": name})).unwrap();
+        assert_eq!(adjustment(&t, out["layer"].as_u64().unwrap()), original, "{name}");
+    }
+}
+
 #[test]
 fn saving_needs_adjustment_layers() {
     let mut s = doc(None);
