@@ -371,8 +371,8 @@ The JavaScript Pigment's AI features rebuilt on PhotoCraft; the contract is
 `crates/engine/src/generative/mock.rs`, `crates/engine/src/cmd/ai_cmds.rs` and
 `crates/engine/src/cmd/ai_cmds/` (`region.rs`, `fill.rs`, `expand.rs`, `generate.rs`,
 `background.rs`, `describe.rs`, `tests.rs`), this page's section and `docs/generative-ai.md`; the
-provider crate `crates/genai` (package `pigment-genai`, with its tests in `crates/genai/tests/genai/`;
-Sign in with ChatGPT is its `src/chatgpt.rs` and `tests/genai/chatgpt.rs`),
+provider crate `crates/genai` (package `pigment-genai`, with its tests in `crates/genai/tests/it/`;
+Sign in with ChatGPT is its `src/chatgpt.rs` and `tests/it/chatgpt.rs`),
 `crates/automation/src/genai.rs`, `apps/photocraft-cli/src/ai.rs` and
 `apps/photocraft-cli/tests/it/ai.rs`; the interface `crates/ui-egui/src/ai_ui.rs` and
 `crates/ui-egui/src/ai_ui/` (`generate.rs`, `accounts.rs`, `describe.rs`, `task_bar.rs`, and the
@@ -610,14 +610,21 @@ the release notes.
    framework's defaults are the Craft apps' shared folders, so pass Pigment's own explicitly.
 8. Build and test the packages the merge touched (`cargo build -p photocraft -p photocraft-cli`,
    `cargo test -p …`), and run `pigment --version` and `pigment-cli --version`.
-9. Check `scripts/upstream-test-failures.txt`. It lists the 60 integration tests (in
-   photocraft-format, photocraft-io and photocraft-raw) that already fail on PhotoCraft's own tree
-   at the imported revision, because they were written for an earlier craft-libs than the one its
-   Cargo.lock pins; Pigment changes none of the code they exercise. `pigment-ci.yml` skips exactly
-   those names in its Tests step and runs them on their own in a step that doesn't fail the job.
-   Remove the lines of the tests that pass after the merge, and never add a test that the rebrand
-   broke: fix that one. `scripts/upstream-test-filter.py` turns the list into the test filter, by
-   package and exact name, so keep each test under its `# <package> --test <target>` section line.
+9. Check `scripts/upstream-test-failures.txt`. It lists the integration tests that already fail on
+   PhotoCraft's own tree at the imported revision through no change of Pigment's (0.5.0 listed 60
+   in photocraft-format, photocraft-io and photocraft-raw, written for an earlier craft-libs than
+   the one abb30df's Cargo.lock pinned; at `057297b` upstream deleted 7 and the other 53 pass, so
+   the list is empty). `pigment-ci.yml` skips exactly those names in its Tests step and runs them on
+   their own in a step that doesn't fail the job. Run that step's command after a merge, remove the
+   lines of the tests that pass and of those upstream deleted, and add a test only when it fails on
+   upstream's own tree too; never add one that the rebrand or a Pigment hook broke: fix that one.
+   `scripts/upstream-test-filter.py` turns the list into the test filter, by package and exact
+   name, so keep each test under its `# <package> --test <target>` section line. Also check the CI
+   settings upstream's gate changed (`.github/` is left out of the patch): the craft-fonts commit
+   in `pigment-ci.yml` and `pigment-release.yml` (`CRAFT_FONTS_REF`), the test build's
+   environment (`CARGO_PROFILE_DEV_DEBUG`, `CARGO_PROFILE_TEST_STRIP`), and the checks of
+   `cargo xtask ci lint` (Pigment's gate runs `egui-fork`, `layers`, `panel-commands`,
+   `test-binaries` and `scorecard --check`).
 
 `pigment-ci.yml` runs the tests with cargo-nextest (its `ci` profile in `.config/nextest.toml`), as
 PhotoCraft's own gate does: one process per test, which its tests are written for. Under plain
