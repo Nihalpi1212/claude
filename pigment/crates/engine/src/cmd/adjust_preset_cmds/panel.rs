@@ -122,7 +122,7 @@ fn save_preset(s: &mut Session, p: &Value) -> Result<Value> {
         match &l.content {
             LayerContent::Adjustment(adj) if !matches!(adj, Adjustment::Unsupported { .. }) => layers.push(PresetLayer {
                 kind: crate::commands::adjustment_kind(adj).to_string(),
-                params: crate::adjust_params::to_params(adj),
+                params: layer_params(adj),
                 name: adjustments::clean_name(&l.name),
             }),
             // Named layers must all be adjustment layers; a selection keeps the ones that are.
@@ -144,6 +144,29 @@ fn save_preset(s: &mut Session, p: &Value) -> Result<Value> {
     let replaced = s.presets.adjustments.save(PANEL_KIND, &name, params, None).map_err(|e| bad(cmd, e))?;
     s.presets_changed();
     Ok(json!({"name": name, "layers": count, "replaced": replaced}))
+}
+
+/// The params that rebuild `adj` as a preset layer. Upstream's `to_params` keeps only a Color Lookup's interpolation
+/// and dither, so a preset of it would come back with no look: its table goes in too, as the file it was loaded from or
+/// the built-in look's id.
+fn layer_params(adj: &Adjustment) -> Value {
+    let mut v = crate::adjust_params::to_params(adj);
+    if let Adjustment::ColorLookup { name, lut: Some(_), source, .. } = adj {
+        if let Some(src) = source {
+            let format = match src.format {
+                photocraft_doc::adjust::LutFormat::Cube => "cube",
+                photocraft_doc::adjust::LutFormat::ThreeDl => "3dl",
+                photocraft_doc::adjust::LutFormat::Look => "look",
+            };
+            v["data"] = json!(photocraft_paint::tile::b64_encode(&src.bytes));
+            v["dataEncoding"] = json!("base64");
+            v["lutFormat"] = json!(format);
+            v["fileName"] = json!(name);
+        } else if let Some((id, _)) = crate::adjust_cmds::LOOKS.iter().find(|(id, _)| craft_cms::lutfile::builtin(id).is_some_and(|f| f.title == *name)) {
+            v["lut"] = json!(id);
+        }
+    }
+    v
 }
 
 fn delete_preset(s: &mut Session, p: &Value) -> Result<Value> {

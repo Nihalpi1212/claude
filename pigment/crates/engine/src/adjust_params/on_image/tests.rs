@@ -43,6 +43,32 @@ fn exposure_eyedroppers_set_black_gray_and_white() {
     assert!(exposure_eyedropper(&json!({"offset": 0.5}), CurvesEyedropper::NeutralGray, encoded(0.09), rgb_transfer()).is_err());
 }
 
+/// Review A: a 32-bit document stores linear light above 1 (Exposure's own domain); the white eyedropper on such a
+/// highlight lowers Exposure until the sample is 1, and the gray one finds 18 % from it, rather than reading the sample
+/// as 1.
+#[test]
+fn exposure_eyedroppers_read_32_bit_highlights_above_white() {
+    let linear = exposure_transfer(ColorMode::Rgb, SampleType::F32);
+    let white = exposure_eyedropper(&json!({}), CurvesEyedropper::White, [4.0; 3], linear).unwrap();
+    assert_eq!(exposure(&white).0, -2.0, "2^-2 · 4 = 1");
+    let gray = exposure_eyedropper(&json!({}), CurvesEyedropper::NeutralGray, [2.0, 2.0, 2.0], linear).unwrap();
+    assert!((exposure(&gray).0 - (0.18f32 / 2.0).log2()).abs() < 0.01, "{gray:?}");
+    let black = exposure_eyedropper(&json!({}), CurvesEyedropper::Black, [3.0; 3], linear).unwrap();
+    assert_eq!(exposure(&black).1, -0.5, "the offset is held to its range");
+    // Through the command: a 32-bit document whose pixels were lifted by +2 stops.
+    let mut s = Session::new();
+    s.execute("file.new", json!({"width": 8, "height": 8, "depth": 32})).unwrap();
+    assert_eq!(s.active().unwrap().doc.depth, SampleType::F32);
+    s.execute("edit.fill", json!({"color": [0.5, 0.5, 0.5]})).unwrap();
+    let base = pixel(&mut s)[0];
+    s.execute("image.adjustments.exposure", json!({"exposure": 3})).unwrap();
+    let lifted = pixel(&mut s)[0];
+    assert!(lifted > 1.0, "{base} → {lifted}");
+    s.execute("layer.newAdjustmentLayer.exposure", json!({"eyedropper": {"point": "white", "at": [2, 2]}})).unwrap();
+    assert!((exposure(&top_adjustment(&s)).0 - (1.0 / lifted).log2()).abs() < 0.02, "{:?} for {lifted}", top_adjustment(&s));
+    assert!((pixel(&mut s)[0] - 1.0).abs() < 0.02, "the sample becomes white");
+}
+
 fn range(p: &Value, key: &str) -> [f32; 4] {
     serde_json::from_value(p[key]["range"].clone()).unwrap()
 }
