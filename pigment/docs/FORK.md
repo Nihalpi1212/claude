@@ -843,6 +843,34 @@ three, as a list with Rename and Delete).
 | `crates/ui-egui/src/prefs/prefs_ui/presets.rs` | `open_manager` kept, `#[cfg_attr(not(test), allow(dead_code))]` |
 | `crates/ui-egui/src/preset_files_ui.rs` | `PRESET_EXTS` gains `shc csh alv acv ahu cha asv blw`; `open`'s last arm asks `preset_manager_ui::open_file` |
 
+### Export/Import Presets for every kind
+
+Edit › Presets › Export/Import Presets… writes and reads the nine kinds of the Preset Manager in one `.pcpresets` file
+(upstream's had brushes, custom shapes and tool presets).
+
+- **Engine**: `crates/engine/src/cmd/edit_menu_cmds/preset_file.rs`. `PresetFile` gains `swatches` (craft-color's
+  `SwatchGroup`s as they are), `gradients`, `styles`, `patterns` (`{id, name, data}`: the pattern with its pixels as a
+  base64 `.pat`) with `patternGroups`, `contours` (the library's saved curve objects), `shapes` (the Shapes panel's
+  groups; Define Custom Shape results stay in upstream's `customShapes`) and `adjustments` (`{kind, group, name,
+  params}`), each left out of the file when empty, so a three-kind export is byte for byte upstream's. `kinds` takes
+  the nine ids (unknown ones are refused; the default is still upstream's three). Export leaves out the built-ins as
+  shipped unless `includeBuiltins`. Import of the six new kinds appends to the group of the same name and skips a
+  preset already there (same data, and the same name or the number an earlier import gave it), so importing twice adds
+  nothing; it reads and checks all of them before anything changes. Upstream's three kinds keep upstream's rules
+  (replace by name). Swatches in the old `items` shape load through `swatches::upgrade_saved`. A Pigment 0.1–0.4
+  `.pigment-bundle` (a ZIP, as text or base64) is recognised and refused with a pointer to Migrate Presets (P4 reads
+  it there).
+- The **Preset Manager** reads and writes `.pcpresets` for every kind (Save Set… of several adjustment presets writes
+  one), through `preset_file::export_kind` with the manager's rows.
+- **Interface**: upstream's parameter dialog in `prefs_ui/presets.rs`, with a check box per kind; Import filters
+  `.pcpresets` and `.pigment-bundle`.
+
+| Upstream file | Hook |
+|---|---|
+| `crates/engine/src/cmd/edit_menu_cmds.rs` | `pub mod preset_file;`; `export_import`: `kinds_param`, `..PresetFile::default()` and the `export_kind`/`export_counts` loop on export, `read_data` and `Staged::read`/`apply` on import; the params string |
+| `crates/engine/src/cmd/edit_menu_cmds/presets.rs` | `PresetFile`: eight `#[serde(skip_serializing_if = "Vec::is_empty")]` fields |
+| `crates/ui-egui/src/prefs/prefs_ui/presets.rs` | `io_kinds`; `io_params` and `open_io` over the nine kinds; `confirm_io`'s kind list and `pick_file_bytes_filtered(["pcpresets", "pigment-bundle"])`, a ZIP sent as base64; the `io_tests` module |
+
 ## Keeping the rebrand: `scripts/pigment-rebrand.py`
 
 Most of the rebrand is mechanical and done by [`scripts/pigment-rebrand.py`](../scripts/pigment-rebrand.py):

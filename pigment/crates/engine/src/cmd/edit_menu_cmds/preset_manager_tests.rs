@@ -190,7 +190,11 @@ fn save_set_to_a_path_and_one_preset_names_the_file() {
     let i = index_of(&mut s, "adjustments", "Strong Contrast (RGB)");
     let acv = s.execute(CMD, json!({"action": "saveSet", "kind": "adjustments", "index": i})).unwrap();
     assert_eq!(acv["fileName"], "Strong Contrast (RGB).acv");
-    assert!(s.execute(CMD, json!({"action": "saveSet", "kind": "adjustments", "indices": [i, i + 1]})).is_err());
+    assert!(s.execute(CMD, json!({"action": "saveSet", "kind": "adjustments", "indices": [i, i + 1], "format": "acv"})).is_err());
+    // P1b: several adjustment presets travel together in a .pcpresets.
+    let two = s.execute(CMD, json!({"action": "saveSet", "kind": "adjustments", "indices": [i, i + 1]})).unwrap();
+    assert_eq!(two["fileName"], "Presets.pcpresets");
+    assert_eq!(two["count"], 2);
 }
 
 #[test]

@@ -129,6 +129,13 @@ const LOADERS: &[(&str, &str, &str)] = &[
     ("pcpresets", "brushes", "edit.presets.exportImportPresets"),
     ("pcpresets", "customShapes", "edit.presets.exportImportPresets"),
     ("pcpresets", "tools", "edit.presets.exportImportPresets"),
+    // Pigment: Export/Import Presets for every kind (P1b)
+    ("pcpresets", "swatches", "edit.presets.exportImportPresets"),
+    ("pcpresets", "gradients", "edit.presets.exportImportPresets"),
+    ("pcpresets", "styles", "edit.presets.exportImportPresets"),
+    ("pcpresets", "patterns", "edit.presets.exportImportPresets"),
+    ("pcpresets", "contours", "edit.presets.exportImportPresets"),
+    ("pcpresets", "adjustments", "edit.presets.exportImportPresets"),
 ];
 
 /// The extensions Load… of `kind` reads (lowercase, no dot).
@@ -540,6 +547,13 @@ fn empty_file() -> PresetFile {
     PresetFile { format: PRESET_FORMAT.into(), version: 1, ..PresetFile::default() }
 }
 
+/// A `.pcpresets` of `rows` of `kind`, written by Export/Import Presets (P1b).
+fn pcpresets_of(s: &mut Session, kind: &str, rows: &[Row]) -> Result<Value> {
+    let mut file = empty_file();
+    let n = super::preset_file::export_kind(s, &mut file, kind, &super::preset_file::Pick::Rows(rows), CMD)?;
+    pcpresets(file, n)
+}
+
 /// A group edit (`<prefix>.edit`) of the kinds whose presets are `Group<T>`s with names unique
 /// across the library: gradients, styles.
 fn group_rename(s: &mut Session, edit: &str, row: &Row, to: &str) -> Result<()> {
@@ -681,9 +695,12 @@ impl Library for Swatches {
         Ok(())
     }
     fn save_extensions(&self) -> &'static [&'static str] {
-        &["aco", "ase", "act", "gpl", "css"]
+        &["aco", "ase", "act", "gpl", "css", "pcpresets"]
     }
     fn save_set(&self, s: &mut Session, rows: &[Row], ext: &str) -> Result<Value> {
+        if ext == "pcpresets" {
+            return pcpresets_of(s, self.id(), rows);
+        }
         let mut q = json!({"format": ext, "swatches": names(rows)});
         let mut groups: Vec<&str> = rows.iter().map(|r| r.group.as_str()).collect();
         groups.dedup();
@@ -723,9 +740,12 @@ impl Library for Gradients {
         Ok(())
     }
     fn save_extensions(&self) -> &'static [&'static str] {
-        &["grd"]
+        &["grd", "pcpresets"]
     }
-    fn save_set(&self, s: &mut Session, rows: &[Row], _: &str) -> Result<Value> {
+    fn save_set(&self, s: &mut Session, rows: &[Row], ext: &str) -> Result<Value> {
+        if ext == "pcpresets" {
+            return pcpresets_of(s, self.id(), rows);
+        }
         call(s, "gradient.presets.exportGrd", json!({"names": names(rows)}))
     }
 }
@@ -759,9 +779,12 @@ impl Library for Styles {
         Ok(())
     }
     fn save_extensions(&self) -> &'static [&'static str] {
-        &["asl"]
+        &["asl", "pcpresets"]
     }
-    fn save_set(&self, s: &mut Session, rows: &[Row], _: &str) -> Result<Value> {
+    fn save_set(&self, s: &mut Session, rows: &[Row], ext: &str) -> Result<Value> {
+        if ext == "pcpresets" {
+            return pcpresets_of(s, self.id(), rows);
+        }
         call(s, "style.presets.exportAsl", json!({"styles": names(rows)}))
     }
 }
@@ -809,9 +832,12 @@ impl Library for Patterns {
         Ok(())
     }
     fn save_extensions(&self) -> &'static [&'static str] {
-        &["pat"]
+        &["pat", "pcpresets"]
     }
-    fn save_set(&self, s: &mut Session, rows: &[Row], _: &str) -> Result<Value> {
+    fn save_set(&self, s: &mut Session, rows: &[Row], ext: &str) -> Result<Value> {
+        if ext == "pcpresets" {
+            return pcpresets_of(s, self.id(), rows);
+        }
         let keys: Vec<&str> = rows.iter().map(|r| r.key.as_str()).collect();
         call(s, "pattern.export", json!({"patterns": keys}))
     }
@@ -865,9 +891,12 @@ impl Library for Contours {
         Ok(())
     }
     fn save_extensions(&self) -> &'static [&'static str] {
-        &["shc"]
+        &["shc", "pcpresets"]
     }
-    fn save_set(&self, s: &mut Session, rows: &[Row], _: &str) -> Result<Value> {
+    fn save_set(&self, s: &mut Session, rows: &[Row], ext: &str) -> Result<Value> {
+        if ext == "pcpresets" {
+            return pcpresets_of(s, self.id(), rows);
+        }
         call(s, "layer.layerStyle.contours.save", json!({"names": names(rows)}))
     }
 }
@@ -928,15 +957,8 @@ impl Library for Shapes {
         &["pcpresets"]
     }
     fn save_set(&self, s: &mut Session, rows: &[Row], _: &str) -> Result<Value> {
-        let groups = crate::presets::shapes::all_groups(s);
-        let mut file = empty_file();
-        for row in rows {
-            if let Some(shape) = groups.iter().filter(|g| g.name == row.group).flat_map(|g| &g.items).find(|i| i.name == row.name) {
-                file.custom_shapes.push(super::CustomShape { name: shape.name.clone(), path: shape.path.clone() });
-            }
-        }
-        let n = file.custom_shapes.len();
-        pcpresets(file, n)
+        // P1b: the Shapes panel's groups in `shapes`, Define Custom Shape results in `customShapes`.
+        pcpresets_of(s, self.id(), rows)
     }
 }
 
@@ -1036,7 +1058,11 @@ impl Library for Adjustments {
         Some("adjustment.presets.reset")
     }
     fn save_extension_for(&self, rows: &[Row]) -> &'static str {
-        rows.first().and_then(|r| photocraft_io::adjust_presets::extension(&r.key)).unwrap_or("acv")
+        // Several presets, or a kind without a Photoshop file, travel in a .pcpresets (P1b).
+        match rows {
+            [row] => photocraft_io::adjust_presets::extension(&row.key).map_or("pcpresets", |e| e.trim_start_matches('.')),
+            _ => "pcpresets",
+        }
     }
     fn move_to(&self, _: &mut Session, _: &Row, _: &[Row], _: &Dest) -> Result<()> {
         // The dialogs list built-ins first, then the user's groups: the order is fixed.
@@ -1046,9 +1072,12 @@ impl Library for Adjustments {
         Err(bad(CMD, "adjustment presets cannot be replaced"))
     }
     fn save_extensions(&self) -> &'static [&'static str] {
-        &["alv", "acv", "ahu", "cha", "asv", "blw"]
+        &["alv", "acv", "ahu", "cha", "asv", "blw", "pcpresets"]
     }
     fn save_set(&self, s: &mut Session, rows: &[Row], ext: &str) -> Result<Value> {
+        if ext == "pcpresets" {
+            return pcpresets_of(s, self.id(), rows);
+        }
         // Photoshop's adjustment files hold one preset each.
         let [row] = rows else { return Err(bad(CMD, "Photoshop's adjustment preset files hold one preset: select one")) };
         let file_ext = photocraft_io::adjust_presets::extension(&row.key)
