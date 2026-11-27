@@ -6,7 +6,13 @@ tests; panic hunt 1 passed; repository checks, packaging, CLI smoke test, lockfi
 Notes read: PKG-merge-{import,engine,automation,cli,ui,app,ai-ui-1,ai-ui-2,ai-ui-3,rebrand-docs,ci}.md.
 Upstream trees compared from the objects in /home/user/claude (NEW `057297b`, OLD `abb30df`).
 
-RESULT_PLACEHOLDER
+**Result: merged.** One commit of mine, `03ccb71` (FORK.md only), on top of `9205833`; CI on
+`03ccb71` (run 45944415974) green on every step (Tests: 14135 run, 14135 passed, 91 skipped;
+panic hunt, doctests, repository checks, packaging, CLI smoke test, lockfile). The release branch
+`claude/pigment-photocraft` had no commits the merge branch lacked (it was at `f4e3ffa`, an
+ancestor), so it was fast-forwarded: `git push origin
+claude/pigment-merge-057297b:claude/pigment-photocraft` (`f4e3ffa..03ccb71`). `/home/user/claude`
+is on `claude/pigment-photocraft` at `03ccb71`, tree clean.
 
 ## 1. CI and the tests
 
@@ -117,7 +123,10 @@ behaviour change — "Don't show again" kept with Save only — is in the user g
 
 ## Commits of this review
 
-COMMITS_PLACEHOLDER
+- `03ccb71` "Pigment merge 057297b, verification: FORK.md records the framework's ArtCraft theme
+  name and the update record's folder" (docs/FORK.md: a row in the decisions table, a row in the
+  classification table and its "0 left" row qualified, the `updates_ui::tick` local read named).
+  No code changed: the probe test used to confirm the theme chip was reverted.
 
 ## Left
 
