@@ -71,7 +71,8 @@ pub fn read(kind: &str, bytes: &[u8]) -> Result<(Adjustment, Vec<String>), Strin
 
 /// Writes `adj` as its Photoshop preset file (the extension is [`extension`] of its kind).
 pub fn write(adj: &Adjustment) -> Result<Vec<u8>, String> {
-    let block = |key: &[u8; 4]| write_blocks(adj).into_iter().find(|(k, _)| k == key).map(|(_, d)| d).ok_or_else(|| "the setting could not be written".to_string());
+    let block =
+        |key: &[u8; 4]| write_blocks(adj).into_iter().find(|(k, _)| k == key).map(|(_, d)| d).ok_or_else(|| "the setting could not be written".to_string());
     match adj {
         Adjustment::Levels { .. } => block(b"levl"),
         Adjustment::Curves { master, per_channel, space, black, pencil } => Ok(write_acv(master, per_channel, *space, black, *pencil)),
@@ -238,7 +239,8 @@ fn read_ahu(d: &[u8]) -> Result<(Adjustment, Vec<String>), String> {
     if matches!(adj, Adjustment::Unsupported { .. }) {
         return Err("This is not a Hue/Saturation file".into());
     }
-    let report = if version == 1 { vec!["An old (version 1) Hue/Saturation file: its ranges were read with Photoshop's later layout".to_string()] } else { Vec::new() };
+    let report =
+        if version == 1 { vec!["An old (version 1) Hue/Saturation file: its ranges were read with Photoshop's later layout".to_string()] } else { Vec::new() };
     Ok((adj, report))
 }
 

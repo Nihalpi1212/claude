@@ -207,7 +207,8 @@ fn records_beyond_rgb_are_reported() {
     assert_eq!(report, ["1 more channel curve skipped"]);
     let Adjustment::Curves { per_channel, space, .. } = adj else { panic!() };
     assert_eq!((per_channel[0].clone(), space), (pts(&[(0, 10), (255, 255)]), ToneSpace::Rgb));
-    let levels = Adjustment::Levels { master: LevelsChannel::default(), per_channel: Default::default(), space: ToneSpace::Cmyk, black: lv(0, 200, 1.0, 0, 255) };
+    let levels =
+        Adjustment::Levels { master: LevelsChannel::default(), per_channel: Default::default(), space: ToneSpace::Cmyk, black: lv(0, 200, 1.0, 0, 255) };
     let (_, report) = read("levels", &write(&levels).unwrap()).unwrap();
     assert_eq!(report, ["1 more channel setting skipped"]);
 }

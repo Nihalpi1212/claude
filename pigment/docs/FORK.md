@@ -519,6 +519,22 @@ stays undrawn, reported.
 | `crates/ui-egui/tests/it/main.rs` | `mod legacy_pigment;` |
 | `docs/user/guides/index.md` | the links to `open-pigment-0-4-documents.md` and `use-generative-ai.md` (Pigment's own pages); the rest of `docs/user/` is rewritten for Pigment ([the user guide](#the-user-guide)) |
 
+### Adjustment presets
+
+The JavaScript Pigment's adjustment presets (its Preset menu above every adjustment editor, the
+built-in lists and Photoshop's preset files), rebuilt on PhotoCraft. Photoshop's files are
+`crates/io/src/adjust_map/preset_files.rs` (`.alv`, `.acv`, `.ahu`, `.cha`, `.asv`, `.blw`: each
+the PSD adjustment block of its kind, read and written through `adjust_map::parse` and
+`adjust_map::write`, so no upstream encoder changed visibility) with its tests in
+`crates/io/src/adjust_map/preset_files/tests.rs` and the fixtures the JavaScript app's own writers
+made, `crates/io/tests/fixtures/adjust-presets/` (`make-fixtures.mjs` and a README that names the
+commit).
+
+| Upstream file | Hook |
+|---|---|
+| `crates/io/src/adjust_map.rs` | `pub mod preset_files;` beside `mod encode;` (a child module, so it reads the block helpers it shares with `parse`) |
+| `crates/io/src/lib.rs` | `pub use adjust_map::preset_files as adjust_presets;` beside `ADJUSTMENT_KEYS` |
+
 ## Keeping the rebrand: `scripts/pigment-rebrand.py`
 
 Most of the rebrand is mechanical and done by [`scripts/pigment-rebrand.py`](../scripts/pigment-rebrand.py):

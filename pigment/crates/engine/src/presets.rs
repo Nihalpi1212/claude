@@ -19,6 +19,8 @@
 //! not copied from Photoshop's presets. User edits persist with the preferences document: see
 //! [`PresetState::to_json`] (saved under `"presets"` by [`Session::prefs_to_json`]).
 
+// Pigment: adjustment presets
+pub mod adjustments;
 pub mod clone_source;
 pub mod gradients;
 pub mod patterns;
@@ -93,6 +95,9 @@ pub struct PresetState {
     pub swatches: Vec<swatches::SwatchGroup>,
     /// The user contour library of the Layer Style dialog (`layer.layerStyle.contours.*`).
     pub contours: Vec<photocraft_doc::Contour>,
+    // Pigment: adjustment presets
+    /// The adjustment presets the user saved, and what they did to the built-ins.
+    pub adjustments: adjustments::AdjustmentPresets,
     /// Bumped on every preset change (UIs key thumbnail caches on it).
     pub rev: u64,
 }
@@ -114,6 +119,8 @@ impl Default for PresetState {
             layer_defaults: BTreeMap::new(),
             swatches: craft::color_ui::palette::default_swatches(),
             contours: Vec::new(),
+            // Pigment: adjustment presets
+            adjustments: Default::default(),
             rev: 0,
         }
     }
@@ -150,6 +157,9 @@ struct Persisted {
     // Read entry by entry: a bad contour must not discard the other presets.
     #[serde(default)]
     contours: Option<Value>,
+    // Pigment: adjustment presets, read entry by entry (`adjustments::AdjustmentPresets::load`).
+    #[serde(default)]
+    adjustments: Option<Value>,
 }
 
 impl PresetState {
@@ -169,6 +179,8 @@ impl PresetState {
             layer_defaults: Some(self.layer_defaults.clone()),
             swatches: Some(self.swatches.clone()),
             contours: Some(crate::contour_lib_cmds::to_json(&self.contours)),
+            // Pigment: adjustment presets
+            adjustments: Some(self.adjustments.to_json()),
         };
         serde_json::to_value(p).unwrap_or(Value::Null)
     }
@@ -203,6 +215,8 @@ impl Session {
                 take(&mut m, "swatches")
             },
             contours: take(&mut m, "contours"),
+            // Pigment: adjustment presets
+            adjustments: take(&mut m, "adjustments"),
         };
         let st = &mut self.presets;
         if let Some(g) = p.gradient {
@@ -272,6 +286,10 @@ impl Session {
         }
         if let Some(c) = p.contours.filter(Value::is_array) {
             self.presets.contours = crate::contour_lib_cmds::from_json(&c);
+        }
+        // Pigment: adjustment presets
+        if let Some(a) = p.adjustments {
+            self.presets.adjustments = adjustments::AdjustmentPresets::load(&a);
         }
         self.presets.rev += 1;
     }
