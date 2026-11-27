@@ -215,7 +215,8 @@ fn label_override(key: &str) -> Option<&'static str> {
         "bundleNudges" => "Bundle Arrow-Key Nudges",
         "nudgeBundlePauseMs" => "Nudge Bundle Pause (ms)",
         "doNotAppendCopy" => "Do not append \"copy\" to filename when saving a copy",
-        "pcraftFullComposite" => "Save Full-Size Composite in .pcraft Files",
+        // Pigment: its interface names its own extension (the catalogs say `.pigment` too, build.rs).
+        "pcraftFullComposite" => "Save Full-Size Composite in .pigment Files",
         "generatorEnabled" => "Enable Generator",
         "lowLatencyDrawing" => "Low-Latency Drawing (vsync off, applies at next launch)",
         "sizeLimitMb" => "Scratch Size Limit (MB, 0 = No Limit)",
@@ -278,5 +279,23 @@ pub(super) fn read_at_launch(path: &str) -> bool {
         // The WinTab context is opened once, when the window starts.
         "tools.tabletInput" => cfg!(target_os = "windows"),
         _ => false,
+    }
+}
+
+/// Pigment: the Preferences window names Pigment and its `.pigment` extension (docs/FORK.md).
+#[cfg(test)]
+mod pigment_tests {
+    #[test]
+    fn labels_name_pigment_s_extension_not_photocraft_s() {
+        let rules = super::rules();
+        let label = |key: &str| rules.iter().find(|r| r.key == key).and_then(|r| r.label.clone());
+        // The catalogs translate this label with `.pigment` (build.rs), so it must be spelt so to be found.
+        assert_eq!(label("fileHandling.pcraftFullComposite").as_deref(), Some("Save Full-Size Composite in .pigment Files"));
+        let upstream = "PhotoCraft"; // upstream-ok
+        for r in &rules {
+            for text in [&r.label, &r.help].into_iter().flatten() {
+                assert!(!text.contains(".pcraft") && !text.contains(upstream), "{}: {text}", r.key);
+            }
+        }
     }
 }
