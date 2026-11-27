@@ -282,6 +282,10 @@ fn export_import(s: &mut Session, p: &Value) -> Result<Value> {
         }
         "import" => {
             let data = p.get("data").cloned().ok_or_else(|| bad(cmd, "missing `data` (an exported preset file)"))?;
+            // Pigment: Migrate Presets (P4): a JavaScript Pigment bundle goes through its migration
+            if let Some(bytes) = preset_file::bundle_bytes(&data) {
+                return crate::migrate_cmds::import_bundle(s, &bytes, Some(&kinds));
+            }
             // Pigment: Export/Import Presets for every kind (P1b): old swatches upgraded, bundles told apart
             let data = preset_file::read_data(cmd, data)?;
             let mut file: PresetFile = serde_json::from_value(data).map_err(|e| bad(cmd, format!("not a preset file: {e}")))?;

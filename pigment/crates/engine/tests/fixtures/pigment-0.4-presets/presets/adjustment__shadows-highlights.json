@@ -1,0 +1,2 @@
+{"format":"pigment-presets","version":1,"kind":"adjustment:shadows-highlights","kindVersion":1,"groups":[],
+ "items":[{"id":"sh-1","name":"Open Shadows","group":null,"data":{"shadows":{"amount":35}}}],"hidden":[]}

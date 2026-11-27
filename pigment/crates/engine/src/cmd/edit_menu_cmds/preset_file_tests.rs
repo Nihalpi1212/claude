@@ -210,12 +210,13 @@ fn a_damaged_file_changes_nothing() {
 }
 
 #[test]
-fn a_pigment_bundle_is_told_apart_and_refused_until_migrate_presets_reads_it() {
+fn a_pigment_bundle_is_told_apart_and_a_damaged_one_refused() {
+    // P4 (Migrate Presets) reads bundles (`tests/it/migrate_pigment_04.rs` imports a whole one).
     let mut s = Session::new();
     let zip = b"PK\x03\x04\x14\x00\x00\x00bundle.json";
     for data in [String::from_utf8_lossy(zip).into_owned(), photocraft_paint::tile::b64_encode(zip)] {
         let e = s.execute(CMD, json!({"action": "import", "kinds": KINDS, "data": data})).unwrap_err().to_string();
-        assert!(e.contains("Migrate Presets"), "{e}");
+        assert!(e.contains("not a Pigment bundle"), "{e}");
     }
 }
 

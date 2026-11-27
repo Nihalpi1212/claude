@@ -7,6 +7,14 @@ use serde_json::{Value, json};
 use crate::presets::{Group, PresetState};
 use crate::{EngineError, Result, Session};
 
+// Pigment: Migrate Presets from the JavaScript Pigment's preset folder or bundle (P4).
+mod legacy;
+pub use legacy::import_bundle;
+
+fn bad(msg: impl Into<String>) -> EngineError {
+    EngineError::BadParams { cmd: legacy::CMD.into(), msg: msg.into() }
+}
+
 /// Append incoming groups whose name the library doesn't already have; returns how many were added.
 fn merge_groups<T>(cur: &mut Vec<Group<T>>, incoming: Vec<Group<T>>) -> usize {
     let mut added = 0;
@@ -25,11 +33,17 @@ fn groups<T: serde::de::DeserializeOwned>(v: &Value, key: &str) -> Vec<Group<T>>
 }
 
 fn migrate(s: &mut Session, p: &Value) -> Result<Value> {
-    let path = p
-        .get("path")
-        .and_then(Value::as_str)
-        .ok_or_else(|| EngineError::BadParams { cmd: "edit.presets.migratePresets".into(), msg: "need `path` to a presets or preferences file".into() })?;
-    let text = std::fs::read_to_string(path).map_err(|e| EngineError::Other(format!("read `{path}`: {e}")))?;
+    // Pigment (P4): a JavaScript Pigment presets folder or `.pigment-bundle`; the app passes the
+    // old app's folder, the engine never looks for it.
+    let path = p.get("path").and_then(Value::as_str).filter(|s| !s.trim().is_empty()).ok_or_else(|| bad("no Pigment 0.4 presets folder given (`path`)"))?;
+    if std::path::Path::new(path).is_dir() {
+        return legacy::migrate_folder(s, std::path::Path::new(path));
+    }
+    let bytes = std::fs::read(path).map_err(|e| EngineError::Other(format!("read `{path}`: {e}")))?;
+    if legacy::is_zip(&bytes) {
+        return import_bundle(s, &bytes, None);
+    }
+    let text = String::from_utf8(bytes).map_err(|e| EngineError::Other(format!("`{path}` is not JSON: {e}")))?;
     let root: Value = serde_json::from_str(&text).map_err(|e| EngineError::Other(format!("`{path}` is not JSON: {e}")))?;
     // Accept a full preferences file (has a `presets` section) or a bare presets object.
     let v = root.get("presets").cloned().unwrap_or(root);
@@ -72,7 +86,7 @@ pub fn specs() -> Vec<crate::commands::CommandSpec> {
         label: "Migrate Presets",
         menu: &["Edit", "Presets"],
         shortcut: None,
-        params: r#"{path} → {migrated, added:{gradients,styles,shapes,patternGroups,toolPresets}}: merge a presets/preferences file into the library (appends groups by name)"#,
+        params: r#"{path} → {migrated, added:{gradients,styles,shapes,patternGroups,toolPresets}}: merge a presets/preferences file into the library (appends groups by name). Pigment: `path` may be the JavaScript Pigment's presets folder (or the settings folder holding it) or a .pigment-bundle → {migrated, found, added:{brushes,swatches,gradients,styles,patterns,contours,customShapes,tools,adjustments,settings}, unchanged:{…}, skipped:[{kind,name,reason}], notes:[…]}; migrating twice adds nothing"#,
         enabled: |_s| Ok(()),
         journal: false,
         run: |s, p| migrate(s, p),

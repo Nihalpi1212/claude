@@ -61,6 +61,15 @@ struct Stop {
     mid: f64,
     /// 0..255, whole numbers (the app kept colours as `#rrggbb`).
     rgb: [f64; 3],
+    /// A `{ ref: 'fg' | 'bg' }` stop (`rgb` is then black or white); presets keep the reference.
+    refers: Option<StopRef>,
+}
+
+/// The colour a preset's stop refers to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StopRef {
+    Foreground,
+    Background,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -74,6 +83,19 @@ struct OpacityStop {
 type Sampled = (Vec<(f64, [f64; 3])>, Vec<(f64, f64)>);
 /// Colour stops and opacity stops as PhotoCraft's fills and effects keep them.
 pub(crate) type Stops = (Vec<(f32, Color)>, Vec<(f32, f32)>);
+
+/// A gradient as a preset keeps it ([`Def::preset`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct PresetStops {
+    /// `(location 0..1, sRGB 0..1, the colour a stop refers to)`, sorted.
+    pub colors: Vec<(f32, [f32; 3], Option<StopRef>)>,
+    /// `(location, opacity 0..1)`, sorted.
+    pub opacity: Vec<(f32, f32)>,
+    /// A noise gradient's settings; the stops are its bake.
+    pub noise: Option<NoiseGradient>,
+    /// The stops are samples of a gradient PhotoCraft's linear stops cannot draw as it was.
+    pub sampled: bool,
+}
 
 /// A gradient as the app's model held it after `normalizeGradient`.
 #[derive(Clone, Debug, PartialEq)]
@@ -165,13 +187,21 @@ fn stop_color(v: Option<&Value>) -> [f64; 4] {
     }
 }
 
+/// The colour a `{ ref }` stop refers to.
+fn stop_ref(v: Option<&Value>) -> Option<StopRef> {
+    match v?.as_object()?.get("ref")?.as_str()? {
+        "bg" => Some(StopRef::Background),
+        _ => Some(StopRef::Foreground),
+    }
+}
+
 fn sort_stable<T>(list: &mut [T], pos: impl Fn(&T) -> f64) {
     list.sort_by(|a, b| pos(a).total_cmp(&pos(b)));
 }
 
 fn default_stops() -> (Vec<Stop>, Vec<OpacityStop>) {
     (
-        vec![Stop { pos: 0.0, mid: 0.5, rgb: [0.0; 3] }, Stop { pos: 1.0, mid: 0.5, rgb: [255.0; 3] }],
+        vec![Stop { pos: 0.0, mid: 0.5, rgb: [0.0; 3], refers: None }, Stop { pos: 1.0, mid: 0.5, rgb: [255.0; 3], refers: None }],
         vec![OpacityStop { pos: 0.0, mid: 0.5, opacity: 1.0 }, OpacityStop { pos: 1.0, mid: 0.5, opacity: 1.0 }],
     )
 }
@@ -216,7 +246,7 @@ impl Def {
             let Some(pos) = pos else { continue };
             let pos = clamp01(pos);
             let rgba = stop_color(color);
-            stops.push(Stop { pos, mid: 0.5, rgb: hex_rounded(rgba) });
+            stops.push(Stop { pos, mid: 0.5, rgb: hex_rounded(rgba), refers: stop_ref(color) });
             opacity.push(OpacityStop { pos, mid: 0.5, opacity: clamp01(rgba[3]) * extra });
         }
         if stops.is_empty() {
@@ -234,7 +264,9 @@ impl Def {
         let mid = |m: &serde_json::Map<String, Value>| num(m.get("mid")).unwrap_or(0.5).clamp(0.05, 0.95);
         let mut stops: Vec<Stop> = list("stops")
             .into_iter()
-            .filter_map(|m| Some(Stop { pos: clamp01(num(m.get("pos"))?), mid: mid(m), rgb: hex_rounded(stop_color(m.get("color"))) }))
+            .filter_map(|m| {
+                Some(Stop { pos: clamp01(num(m.get("pos"))?), mid: mid(m), rgb: hex_rounded(stop_color(m.get("color"))), refers: stop_ref(m.get("color")) })
+            })
             .collect();
         let mut opacity: Vec<OpacityStop> = list("opacityStops")
             .into_iter()
@@ -414,6 +446,34 @@ impl Def {
             colors.into_iter().map(|(t, c)| (t as f32, Color::rgb(c[0] as f32, c[1] as f32, c[2] as f32))).collect(),
             alphas.into_iter().map(|(t, a)| (t as f32, a as f32)).collect(),
         )
+    }
+
+    /// The gradient as a preset of the Gradients panel: colour stops `(location, sRGB 0..1,
+    /// reference)`, opacity stops and the noise settings, and whether the stops are samples.
+    /// PhotoCraft's presets interpolate linearly: a gradient whose midpoints are all centred
+    /// keeps its own stops (and its foreground / background references) whatever its
+    /// interpolation method; one with moved midpoints or stripes is sampled ([`Self::fill_stops`]).
+    pub(crate) fn preset(&self) -> PresetStops {
+        if let Some(n) = &self.noise {
+            let (c, a) = n.fill_stops();
+            return PresetStops {
+                colors: c.into_iter().map(|(t, c)| (t, [c.c[0], c.c[1], c.c[2]], None)).collect(),
+                opacity: a,
+                noise: Some(n.clone()),
+                sampled: false,
+            };
+        }
+        let centred = self.stops.iter().all(|s| s.mid == 0.5) && self.opacity.iter().all(|s| s.mid == 0.5) && self.method != Method::Stripes;
+        if centred {
+            return PresetStops {
+                colors: self.stops.iter().map(|s| (s.pos as f32, s.rgb.map(|v| (v / 255.0) as f32), s.refers)).collect(),
+                opacity: self.opacity.iter().map(|s| (s.pos as f32, s.opacity as f32)).collect(),
+                noise: None,
+                sampled: false,
+            };
+        }
+        let (c, a) = self.fill_stops(false);
+        PresetStops { colors: c.into_iter().map(|(t, c)| (t, [c.c[0], c.c[1], c.c[2]], None)).collect(), opacity: a, noise: None, sampled: true }
     }
 
     /// Gradient Map stops: the colours the app mapped grey levels to, in 0..1 sRGB, not

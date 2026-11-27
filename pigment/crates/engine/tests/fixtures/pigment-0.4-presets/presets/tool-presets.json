@@ -1,0 +1,7 @@
+{"format":"pigment-presets","version":1,"kind":"tool-presets","kindVersion":1,"groups":[],
+ "items":[
+  {"id":"t-1","name":"Soft Airbrush 40","group":null,"data":{"tool":"brush","options":{"size":40,"hardness":0,"opacity":0.6,"flow":0.3,"blend":"multiply","airbrush":true,"wobble":3}}},
+  {"id":"t-2","name":"Inked Pencil","group":null,"data":{"tool":"pencil","options":{"opacity":1},"brush":{"brushVersion":1,"tip":{"kind":"sampled","size":12,"sample":{"blob":"tip-0123456789abcdef0123456789abcdef01234567.png","hash":"0123456789abcdef0123456789abcdef01234567","width":5,"height":3},"spacing":0.25}},"color":"#204080"}},
+  {"id":"t-3","name":"Wand 20","group":null,"data":{"tool":"wand","options":{"tolerance":20,"contiguous":false}}},
+  {"id":"t-4","name":"Adjust Brush","group":null,"data":{"tool":"adjustment-brush","options":{}}}],
+ "hidden":[]}

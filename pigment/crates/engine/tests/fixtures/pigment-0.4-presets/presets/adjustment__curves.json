@@ -1,0 +1,4 @@
+{"format":"pigment-presets","version":1,"kind":"adjustment:curves","kindVersion":1,"groups":[],
+ "items":[{"ref":"darker"},{"ref":"lighter"},
+  {"id":"c-1","name":"Soft Matte","group":null,"data":{"space":"rgb","rgb":[[0,32],[64,70],[192,200],[255,235]],"r":null,"g":null,"b":[[0,20],[255,255]]}}],
+ "hidden":["cross-process"]}

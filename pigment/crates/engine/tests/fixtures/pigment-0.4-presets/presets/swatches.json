@@ -1,0 +1,8 @@
+{"format":"pigment-presets","version":1,"kind":"swatches","kindVersion":1,
+ "groups":[{"id":"g-brand","name":"Brand","parent":null,"builtin":false}],
+ "items":[{"ref":"default-0"},{"ref":"default-1"},
+  {"id":"s-1","name":"Brand Red","group":"g-brand","data":{"color":{"space":"rgb","values":[200,16,46]}}},
+  {"id":"s-2","name":"Brand Ink","group":"g-brand","data":{"color":{"space":"cmyk","values":[100,80,0,20]}}},
+  {"id":"s-3","name":"Paper","group":null,"data":{"color":{"space":"lab","values":[96,0,4]}}},
+  {"id":"s-4","name":"Half Grey","data":{"color":{"space":"gray","values":[50]}}}],
+ "hidden":["default-2"]}

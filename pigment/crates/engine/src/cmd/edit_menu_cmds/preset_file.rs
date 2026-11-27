@@ -242,7 +242,8 @@ pub fn read_data(cmd: &str, data: Value) -> Result<Value> {
     let mut v = match data {
         Value::String(text) => {
             if is_bundle(&text) {
-                // P4 (Migrate Presets) maps a bundle's kinds: it calls its `import_bundle` here.
+                // Not reached from the import (P4 reads bundles first, `bundle_bytes`); kept for
+                // other callers of `read_data`.
                 return Err(bad(cmd, "this is a Pigment 0.1–0.4 preset bundle (.pigment-bundle): use Edit › Presets › Migrate Presets"));
             }
             serde_json::from_str(&text).map_err(|e| bad(cmd, format!("not a preset file: {e}")))?
@@ -253,6 +254,17 @@ pub fn read_data(cmd: &str, data: Value) -> Result<Value> {
         crate::presets::swatches::upgrade_saved(sw);
     }
     Ok(v)
+}
+
+/// The bytes of a `.pigment-bundle` given as `data` (raw or base64), for Migrate Presets'
+/// `import_bundle` (P4); `None` for anything else.
+pub fn bundle_bytes(data: &Value) -> Option<Vec<u8>> {
+    const ZIP: &[u8] = b"PK\x03\x04";
+    let t = data.as_str()?.trim();
+    if t.as_bytes().starts_with(ZIP) {
+        return Some(t.as_bytes().to_vec());
+    }
+    t.starts_with("UEsDB").then(|| photocraft_paint::tile::b64_decode(t)).flatten().filter(|b| b.starts_with(ZIP))
 }
 
 /// Whether `text` is a ZIP (a `.pigment-bundle`), as text or as base64.

@@ -1,0 +1,6 @@
+{"format":"pigment-presets","version":1,"kind":"patterns","kindVersion":1,
+ "groups":[{"id":"g-tex","name":"Textures","parent":null}],
+ "items":[{"ref":"bubbles"},
+  {"id":"p-1","name":"Checks","group":"g-tex","data":{"width":4,"height":4,"blob":"p1.png","mode":"rgb"}},
+  {"id":"p-2","name":"Lost","group":"g-tex","data":{"width":8,"height":8,"blob":"p-missing.png","mode":"rgb"}}],
+ "hidden":[]}

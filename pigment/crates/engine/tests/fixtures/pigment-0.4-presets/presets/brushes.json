@@ -1,0 +1,10 @@
+{"format":"pigment-presets","version":1,"kind":"brushes","kindVersion":1,
+ "groups":[{"id":"g-ink","name":"Inking","parent":null}],
+ "items":[{"ref":"soft-round"},
+  {"id":"b-1","name":"Grainy Ink","group":"g-ink","data":{"brushVersion":1,
+    "tip":{"kind":"sampled","size":30,"hardness":1,"sample":{"blob":"tip-0123456789abcdef0123456789abcdef01234567.png","hash":"0123456789abcdef0123456789abcdef01234567","width":5,"height":3},"angle":15,"roundness":0.8,"flipX":false,"flipY":false,"spacing":0.2,"spacingOn":true},
+    "shapeDynamics":{"enabled":true,"sizeJitter":0.3,"sizeControl":{"type":"pen-pressure","fadeSteps":25},"minimumDiameter":0.1},
+    "scattering":{"enabled":true,"scatter":1.5,"bothAxes":false,"count":2},
+    "transfer":{"enabled":true,"opacityControl":{"type":"pen-pressure","fadeSteps":25}},
+    "wetEdges":false,"tool":{"opacity":0.9,"flow":0.8},"extras":{}}}],
+ "hidden":[]}

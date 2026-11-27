@@ -1,0 +1,2 @@
+{"format":"pigment-presets","version":1,"kind":"stroke-styles","kindVersion":1,"groups":[],
+ "items":[{"ref":"solid"},{"id":"ss-1","name":"Long Dash","group":null,"data":{"dash":[8,2],"cap":"butt","join":"miter","align":"center"}}],"hidden":[]}

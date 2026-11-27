@@ -1,0 +1,13 @@
+{
+  "theme": "dark",
+  "brushPresets": [
+    {"id": "user-1", "name": "Big Soft", "size": 120, "hardness": 0.1, "spacing": 0.15, "angle": 0, "roundness": 1, "flow": 0.5}
+  ],
+  "swatches": ["#112233", "#ffcc00"],
+  "swatchesEdited": true,
+  "adjust": {
+    "autoOptions": {"algorithm": "perChannel", "snap": true, "shadowClip": 0.5, "highlightClip": 0.2, "shadowColor": "#101010", "midColor": "#808080", "highlightColor": "#f0f0f0"},
+    "curvesDisplay": {"amount": "pigment", "grid": "detailed", "overlays": false, "histogram": true, "baseline": false, "intersection": true}
+  },
+  "actions": {"sets": [{"name": "My Actions", "actions": [{"name": "Sharpen for web", "steps": [{"id": "filter:unsharp-mask", "args": {"amount": 80}}]}]}], "playback": {"mode": "accelerated"}, "buttonMode": false}
+}

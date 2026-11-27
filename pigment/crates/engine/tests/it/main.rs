@@ -92,6 +92,7 @@ mod magnetic_lasso_composite;
 mod mask_lock_all;
 mod memory_prefs;
 mod merge_transparent_bounds;
+mod migrate_pigment_04;
 mod missing_layer_error;
 mod multi_channel_editing;
 mod nonfinite_style;

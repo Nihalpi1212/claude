@@ -86,7 +86,7 @@ fn export_writes_every_kind_and_import_of_it_restores_a_deleted_gradient() {
 }
 
 #[test]
-fn unchecked_kinds_stay_out_and_a_bundle_is_refused_with_a_reason() {
+fn unchecked_kinds_stay_out_and_a_damaged_bundle_is_refused_with_a_reason() {
     let (mut a, written, _) = app_with(vec![Picked::Paths(vec!["/tmp/Only.pcpresets".into()])]);
     a.run("gradient.presets.new", json!({"name": "Keep", "group": "Mine"})).unwrap();
     let off: Vec<(&str, Value)> = io_kinds().into_iter().filter(|(id, _)| *id != "tools").map(|(id, _)| (id, json!(false))).collect();
@@ -98,5 +98,6 @@ fn unchecked_kinds_stay_out_and_a_bundle_is_refused_with_a_reason() {
     let zip = b"PK\x03\x04\x14\x00\x00\x00bundle.json\xff\xfe".to_vec();
     let (mut b, _, _) = app_with(vec![Picked::Contents(vec![("Old.pigment-bundle".into(), zip)])]);
     run_dialog(&mut b, &[("action", json!("import"))]);
-    assert!(b.ui.status.contains("Migrate Presets"), "{}", b.ui.status);
+    // P4 reads bundles; this one is damaged.
+    assert!(b.ui.status.contains("not a Pigment bundle"), "{}", b.ui.status);
 }

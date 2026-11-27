@@ -51,7 +51,7 @@ fn angle(o: &Map<String, Value>, key: &str, default: f64) -> f32 {
 }
 
 /// `contour` (`{ name?, points: [{ x, y, corner }] }`, `normalizeContour` of contour.js).
-fn contour(v: Option<&Value>) -> Contour {
+pub(crate) fn contour(v: Option<&Value>) -> Contour {
     let Some(points) = v.and_then(|v| v.get("points")).and_then(Value::as_array) else { return Contour::Linear };
     let mut pts: Vec<(f64, f64, bool)> = points
         .iter()
