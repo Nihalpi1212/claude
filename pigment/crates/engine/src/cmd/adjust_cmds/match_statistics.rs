@@ -172,8 +172,14 @@ fn answer(name: &str, stats: &LabStats) -> Value {
 fn statistics(s: &mut Session, p: &Value) -> Result<Value> {
     let path = p.get("path").and_then(Value::as_str);
     let named = p.get("name").and_then(Value::as_str).filter(|n| !n.trim().is_empty());
-    let source = p.get("source").and_then(Value::as_i64).filter(|i| *i >= 0);
     let given = p.get("statistics").filter(|v| !v.is_null());
+    // With nothing to read or compute from, the active document is the source (Save Statistics… of the image open),
+    // so the command runs on `{}` as every `image.adjustments.*` command does.
+    let reads = p.get("data").and_then(Value::as_str).is_some() || path.is_some();
+    let source = match p.get("source").and_then(Value::as_i64).filter(|i| *i >= 0) {
+        None if given.is_none() && !reads => s.active_index().map(|i| i as i64),
+        source => source,
+    };
     let (name, stats) = match (source, given) {
         (Some(_), Some(_)) => return Err(bad(STATISTICS, "give a `source` document or `statistics`, not both")),
         (Some(i), None) => {
@@ -197,7 +203,7 @@ fn statistics(s: &mut Session, p: &Value) -> Result<Value> {
                     }
                     (std::fs::read_to_string(path).map_err(|e| bad(STATISTICS, format!("{path}: {e}")))?, Some(path.to_owned()))
                 }
-                (None, None) => return Err(bad(STATISTICS, "give a `source` document, `statistics`, or a file's `data` or `path`")),
+                (None, None) => return Err(bad(STATISTICS, "no document is open: give a `source` document, `statistics`, or a file's `data` or `path`")),
             };
             let (name, stats) = read_file(&text, file.as_deref()).map_err(|e| bad(STATISTICS, e))?;
             return Ok(answer(&name, &stats));
@@ -218,7 +224,7 @@ pub(super) fn specs() -> Vec<CommandSpec> {
         label: "Match Color Statistics",
         menu: &[],
         shortcut: None,
-        params: r##"{"source":doc?,"sourceLayer":id?,"useSelectionInSource":bool=false,"statistics":{"mean","std"}?,"name":text?,"path":path?,"data":text?,"fileName":text?} → {"name","mean":[L,a,b],"std":[L,a,b],"file"?} (Save Statistics…: a source document's statistics, or the given `statistics`, with the file's text as `file`, written to `path` when given. Load Statistics…: without either, reads the file's `data` text or the file at `path`. Statistics are Pigment's D50 L*a*b*, as `image.adjustments.matchColor` takes them in `sourceStatistics`; the file is the JavaScript Pigment's ("format":"pigment-match-color-statistics", D65).)"##,
+        params: r##"{"source":doc?,"sourceLayer":id?,"useSelectionInSource":bool=false,"statistics":{"mean","std"}?,"name":text?,"path":path?,"data":text?,"fileName":text?} → {"name","mean":[L,a,b],"std":[L,a,b],"file"?} (Save Statistics…: a source document's statistics (the active document's when nothing else is given), or the given `statistics`, with the file's text as `file`, written to `path` when given. Load Statistics…: without either, reads the file's `data` text or the file at `path`. Statistics are Pigment's D50 L*a*b*, as `image.adjustments.matchColor` takes them in `sourceStatistics`; the file is the JavaScript Pigment's ("format":"pigment-match-color-statistics", D65).)"##,
         enabled: |_| Ok(()),
         run: statistics,
         journal: false,
