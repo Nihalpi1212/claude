@@ -73,7 +73,7 @@ reason is the framework's tooltip.
 
 | Command | Result |
 |---|---|
-| `cargo nextest run --profile ci -p photocraft-ui-egui --test it -E 'test(/^ai::/) \| test(/crop_task_bar::/) \| test(/^legacy_pigment::/)'` | **40 run: 40 passed**, twice, before the Enter test was added: 30 `ai::` (0.5.0's 30 minus the Assistant sign-in test moved to `ai_assistant.rs`, plus part 1's Preferences test), the crop task bar's and legacy_pigment's. ai.rs now has 31 tests |
+| `cargo nextest run --profile ci -p photocraft-ui-egui --test it -E 'test(/^ai::/) \| test(/crop_task_bar::/) \| test(/^legacy_pigment::/)'` | **40 run: 40 passed**, twice, before the Enter test was added: 30 `ai::` (0.5.0's 30 minus the Assistant sign-in test moved to `ai_assistant.rs`, plus part 1's Preferences test), the crop task bar's and legacy_pigment's. ai.rs now has 31 tests; after the commit, `-E 'test(/^ai::/)'`: **31 run: 31 passed** |
 | same, `test(/^ai::the_bar/)` after adding the Enter test | 2 passed |
 | `cargo clippy -p photocraft-ui-egui --all-targets -- -D warnings` | clean |
 | `cargo fmt --all -- --check` | clean |
