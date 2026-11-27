@@ -23,6 +23,8 @@ use crate::state::Tool;
 mod bar;
 pub(crate) mod editor;
 pub(crate) mod live_overlay;
+// Pigment: noise gradients (P3)
+mod noise;
 mod properties_panel;
 pub(crate) mod stops;
 pub(crate) mod tool;

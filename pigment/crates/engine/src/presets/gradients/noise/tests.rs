@@ -85,6 +85,15 @@ fn presets_fills_and_the_gradient_tool_paint_noise() {
     let (stops2, noise2) = fill_noise(&s);
     assert_eq!(noise2.as_ref().map(|n| n.seed), Some(5));
     assert_ne!(stops2, stops);
+    // `.pcraft` keeps the settings, and undo and redo step over the edit.
+    let bytes = photocraft_format::save_to_bytes(&s.active().unwrap().doc, &Default::default()).unwrap();
+    let doc = photocraft_format::load_from_bytes(&bytes).unwrap();
+    let back = doc.layers.iter().find(|l| matches!(l.content, LayerContent::Fill(_))).unwrap();
+    assert_eq!(back.content, active_content(&s));
+    s.execute("edit.undo", json!({})).unwrap();
+    assert_eq!(fill_noise(&s).1, g.noise);
+    s.execute("edit.redo", json!({})).unwrap();
+    assert_eq!(fill_noise(&s).1.map(|n| n.seed), Some(5));
     // A stop edit makes it solid; `noise: false` too, with the knots as stops.
     s.execute("gradient.fill.set", json!({NOISE: {"seed": 6}})).unwrap();
     s.execute("gradient.fill.stop", json!({"action": "color", "index": 0, "color": "#00ff00"})).unwrap();
