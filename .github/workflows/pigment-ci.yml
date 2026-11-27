@@ -96,8 +96,12 @@ jobs:
 
       # The Linux build's system libraries (upstream's gate packages; mesa-vulkan-drivers gives the
       # GPU tests lavapipe) and the packaging tests' tools.
+      # The runner image also lists Microsoft's package repository, which none of this uses. When
+      # it refuses requests (403 Forbidden on Nov 27, 2026), apt-get update fails, and with it
+      # every check after this step, so leave that repository out.
       - name: Install Linux build dependencies
         run: |
+          grep -rlZ 'packages\.microsoft\.com' /etc/apt/sources.list.d 2>/dev/null | xargs -0 -r sudo rm -f --
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             libxkbcommon-dev libwayland-dev libx11-dev libxrandr-dev libxi-dev libgl1-mesa-dev \
