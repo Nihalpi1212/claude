@@ -702,7 +702,7 @@ fn define_custom_shape_and_preset_manager() {
     assert_eq!(shapes[shapes.len() - 2..], ["Box", "Shape 2"]);
     assert!(list["brushes"].as_array().unwrap().len() > 3);
     s.execute("edit.presets.presetManager", json!({"action": "rename", "kind": "customShapes", "name": "Shape 2", "newName": "Star"})).unwrap();
-    s.execute("edit.presets.presetManager", json!({"action": "move", "kind": "customShapes", "name": "Star", "toGroup": "Custom Shapes", "position": 0})).unwrap();
+    s.execute("edit.presets.presetManager", json!({"action": "move", "kind": "customShapes", "name": "Star", "group": "Custom Shapes", "toGroup": "Custom Shapes", "position": 0})).unwrap();
     assert_eq!(custom_shapes(&s)[0].name, "Star");
     s.execute("edit.presets.presetManager", json!({"action": "delete", "kind": "customShapes", "name": "Box"})).unwrap();
     assert_eq!(custom_shapes(&s).len(), 1);

@@ -20,7 +20,7 @@ fn app_with(files: Vec<Picked>) -> (PhotocraftApp, Arc<Mutex<Vec<(String, Vec<u8
         })),
         ..Default::default()
     };
-    (PhotocraftApp::new(photocraft_engine::Session::new(), services), written)
+    (*PhotocraftApp::new(photocraft_engine::Session::new(), services), written)
 }
 
 /// Opens the manager from the Edit › Presets menu item.
@@ -70,7 +70,8 @@ fn opens_from_the_menu_and_lists_swatches_with_their_colours() {
         assert!(!names(&mut app).is_empty() || kind == "contours", "{kind} lists its presets");
         crate::dialogs::testing::show(&mut app);
     }
-    assert!(dialog(&mut app).set_json_field(&app.ctx().clone(), "kind", json!("nope")).is_err());
+    let ctx = app.ctx().clone();
+    assert!(dialog(&mut app).set_json_field(&ctx, "kind", json!("nope")).is_err());
 }
 
 #[test]

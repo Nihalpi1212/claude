@@ -28,7 +28,7 @@ use craft::ui::layout_components::Stack;
 use craft::ui::menu::Menu;
 use craft::ui::patterns::presets::{PresetBrowser, PresetEvent, PresetFooterEvent, PresetFooterOptions, PresetReorder, PresetRow, PresetState, PresetView};
 use craft::ui::pickers::Select;
-use craft::ui::primitives::ContentPainterCx;
+use craft::ui::primitives::{ContentPainterCx, IconSpec};
 use craft::ui::primitives::textures::TextureCache;
 use craft::ui::runtime::access::PopupKind;
 use craft::ui::runtime::overlay::CloseReason;
@@ -256,12 +256,12 @@ impl PresetManagerDialog {
     /// What the browser reported, as asks (selection changes are the dialog's own).
     fn event(&mut self, event: PresetEvent<PresetKey>, rows: &[PresetRow<PresetKey>]) {
         match event {
-            PresetEvent::Select { key, mods } | PresetEvent::Activate { key, mods } => {
+            PresetEvent::Select { key, mods, .. } | PresetEvent::Activate { key, mods, .. } => {
                 if let Some(i) = Self::index(&key) {
                     self.select(i, mods);
                 }
             }
-            PresetEvent::Rename { key, text } => {
+            PresetEvent::Rename { key, text, .. } => {
                 if let Some(index) = Self::index(&key) {
                     self.queued.push(Ask::Rename { index, text });
                 }
@@ -272,7 +272,7 @@ impl PresetManagerDialog {
                 }
             }
             PresetEvent::Footer(PresetFooterEvent::Delete) => self.delete_selected(),
-            PresetEvent::MoveTo { key, group: PresetKey::Group(group) } => {
+            PresetEvent::MoveTo { key, group: PresetKey::Group(group), .. } => {
                 if let Some(i) = Self::index(&key) {
                     self.queued.push(Ask::Move(json!({"index": i, "toGroup": group})));
                 }
@@ -358,8 +358,11 @@ impl PresetManagerDialog {
 
 /// The browser's id, which Rename… asks to rename in.
 fn browser_id() -> egui::Id {
-    egui::Id::new("pigment-preset-manager-browser")
+    egui::Id::unique("pigment-preset-manager-browser")
 }
+
+/// The ring around the presets in the selection set.
+const SELECTED: Color32 = Color32::from_rgb(56, 132, 255);
 
 /// Paints a row's thumbnail into `rect`, with a ring when it is in the selection set.
 fn paint(cx: &ContentPainterCx, rect: Rect, thumb: &Thumb, selected: bool) {
@@ -382,11 +385,11 @@ fn paint(cx: &ContentPainterCx, rect: Rect, thumb: &Thumb, selected: bool) {
         }
         Thumb::Icon(icon) => {
             let side = rect.width().min(rect.height()) * 0.6;
-            cx.icon(icon, Rect::from_center_size(rect.center(), egui::vec2(side, side)));
+            cx.icon(Rect::from_center_size(rect.center(), egui::vec2(side, side)), &IconSpec::svg(icon.clone()));
         }
     }
     if selected {
-        cx.painter.rect_stroke(rect, 3.0, Stroke::new(2.0, cx.painter.ctx().style().visuals.selection.stroke.color), egui::StrokeKind::Inside);
+        cx.painter.rect_stroke(rect, 3.0, Stroke::new(2.0, SELECTED), egui::StrokeKind::Inside);
     }
 }
 
@@ -427,7 +430,8 @@ impl StackDialog for PresetManagerDialog {
                 .show(ui, |ui, _| {
                     let mut browser = PresetBrowser::new(tl!("Presets"), Bind::bound(&mut state), &rows)
                         .browser_id(browser_id())
-                        .toolbar(false)
+                        // The search field; the view comes from the ⚙ menu (`view_lock` hides the view buttons).
+                        .toolbar(true)
                         .row_menu(true)
                         .view_lock(if view == View::TextOnly || matches!(view, View::SmallList | View::LargeList) { PresetView::List } else { PresetView::Grid })
                         .thumb_range(ZOOMS)
@@ -642,11 +646,12 @@ struct ManagerPrompt {
 /// Reads what the Preset Manager did since the last pass and runs it, then refreshes its rows when the libraries
 /// changed.
 pub(crate) fn take(app: &mut PhotocraftApp, ctx: &egui::Context) {
+    let rev = revision(app);
     let Some(dialog) = app.framework.dialogs.get_mut::<PresetManagerDialog>() else { return };
     let asks = std::mem::take(&mut dialog.queued);
     let kind = dialog.kind.clone();
     let states = dialog.states.clone();
-    let stale = dialog.rev != revision(app);
+    let stale = dialog.rev != rev;
     for (k, state) in states {
         app.ui.presets_ui.browsers.insert(state_key(&k), state);
     }
@@ -745,7 +750,8 @@ fn load(app: &mut PhotocraftApp, kind: &str, replace: bool) -> Result<Value, Str
         .ok()
         .and_then(|out| serde_json::from_value(out["info"][kind]["load"].clone()).ok())
         .unwrap_or_default();
-    let filter: Vec<&str> = exts.iter().map(String::as_str).collect();
+    let filter: Vec<String> = exts.clone();
+    let filter: Vec<&str> = filter.iter().map(String::as_str).collect();
     let kind = kind.to_string();
     app.pick_file_bytes_filtered(&filter, move |app, name, bytes| {
         let ext = std::path::Path::new(&name).extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
