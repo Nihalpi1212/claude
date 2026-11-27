@@ -5,13 +5,14 @@ REBASE-P "P2" (it wins).
 
 **CI first.** At the start the newest finished run was 46041402514 (`8821fdf`), **green**; P1a's 46050395075
 (`1c92254`) and P1b's 46055487780 (`007cd8b`) were still running and have since finished **green**. Nothing red, so no
-CI commit. **The next engineer checks CI first**: the runs on this package's two commits (see "Commits").
+CI commit. **The next engineer checks CI first**: the runs on this package's two commits (see "Commits"): 46061145778 on `4fa6da5` was in progress when the second
+push went out (it may be cancelled by it); the run on `5a5cceb` was queued. Not waited for, as the brief says.
 
 ## Commits (pushed)
 
 - `4fa6da5` Pigment .tpl tool presets (P2), io and engine: tpl_map reads and writes Photoshop tool presets,
   tool.presets.importTpl and exportTpl
-- `UI_SHA` Pigment .tpl tool presets (P2), interface: the Tool Presets panel menu, File › Open of a .tpl
+- `5a5cceb` Pigment .tpl tool presets (P2), interface: the Tool Presets panel menu, File › Open of a .tpl
 
 ## What was built
 
@@ -143,13 +144,17 @@ Pigment's own files touched: `crates/io/src/legacy_pigment/mod.rs` (`pub(crate) 
   `ScriptedFiles`** and Load… of it restores the list; Replace… asks (Cancel keeps, OK replaces; the note is in the
   status; choosing the imported eraser switches tool, `eraser_mode`, `erase_to_history`); Reset asks then restores;
   File › Open of a `.tpl` loads it. Plus `tool_presets`, `preset_files_ui`, `preset_manager_ui` filters (20 in all).
-  UI_FULL
+  ui-egui lib, every test of `panels dialogs preset file_open menus keymap commands registry` (1298 passed, with
+  `--test-threads 2`). A full ui-egui lib run here showed only the two container-only type-tool font failures
+  (`temporary_type_transform_imported_psd_retains_editability_and_styles`,
+  `caret_font_and_face_persist_across_more_font_choices_and_paste`) before the kernel killed it for memory; run the
+  whole ui-egui suite with `--test-threads 2` here.
 
 ## Checks
 
 `cargo fmt --all -- --check`; `cargo clippy -p photocraft-io -p photocraft-engine -p photocraft-automation
 -p photocraft-ui-egui --all-targets -- -D warnings`; `python3 scripts/pigment-rebrand.py --check`; panic hunt;
-`cargo xtask layers`, `panel-commands`, `scorecard --check`, `test-binaries`; XTASK_TEST: all green.
+`cargo xtask layers`, `panel-commands`, `scorecard --check`, `test-binaries`; `cargo test -p xtask`: all green.
 
 ## Not done (with why)
 
