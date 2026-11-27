@@ -422,6 +422,8 @@ pub(crate) const PROMPTS: &[PromptRow] = &[
     legacy_save_prompt::answer,
     // Pigment: "Save the new target colors as defaults?"
     auto_options_ui::answer_prompt,
+    // Pigment: the Preset Manager's Reset and Replace confirmations (P1a)
+    preset_manager_ui::answer_prompt,
 ];
 
 /// [`prompts_take`] over the rows `rows`.
@@ -481,6 +483,8 @@ pub(crate) const TAKERS: &[fn(&mut PhotocraftApp, &egui::Context)] = &[
     crate::actions::dialogs::take_stops,
     // Pigment: Auto Color Correction Options (the dialog's live Auto, a target colour's answer)
     auto_options_ui::take,
+    // Pigment: Preset Manager for every kind (P1a)
+    preset_manager_ui::take,
 ];
 
 /// Runs the answers of every dialog that finished: parameter dialogs, prompts, then each family's own results. It runs
@@ -773,6 +777,8 @@ mod paths_export_default_tests;
 mod paths_export_document_bounds_tests;
 pub(crate) mod pattern_fill_ui;
 pub mod preset_group_prompt;
+// Pigment: Preset Manager for every kind (P1a)
+pub mod preset_manager_ui;
 pub mod rasterize_prompt;
 pub mod screen_picker;
 pub mod select_mask_ui;

@@ -78,6 +78,10 @@ pub trait Library: Sync {
     /// The extensions Save Set… writes, the first the default (the kind's Photoshop file,
     /// else `.pcpresets`).
     fn save_extensions(&self) -> &'static [&'static str];
+    /// The extension Save Set… of `rows` writes when none is asked for.
+    fn save_extension_for(&self, _rows: &[Row]) -> &'static str {
+        self.save_extensions()[0]
+    }
     /// Writes `rows` as a file of `ext`: `{data (base64), bytes, count}`.
     fn save_set(&self, s: &mut Session, rows: &[Row], ext: &str) -> Result<Value>;
 }
@@ -419,6 +423,12 @@ fn load(s: &mut Session, p: &Value) -> Result<Value> {
         }
         _ => {}
     }
+    // A brush import can finish on a worker (`jobs::run`), after this command returns: read the file
+    // first, so a Replace… of a damaged file never empties the library.
+    if replace && *command == "brush.presets.importAbr" {
+        let (bytes, _) = crate::preset_import_cmds::file_bytes(&Value::Object(q.clone()), CMD, ".abr file")?;
+        photocraft_io::abr_map::read_abr(&bytes, &group).map_err(|e| bad(CMD, e))?;
+    }
     let backup = (replace && !own_replace).then(|| Backup::take(s));
     let result = (|| {
         if replace && !own_replace {
@@ -457,7 +467,7 @@ fn save_set(s: &mut Session, p: &Value) -> Result<Value> {
     let ext = match p.get("format").and_then(Value::as_str).map(str::to_ascii_lowercase).or_else(|| path.and_then(extension)) {
         Some(e) if exts.contains(&e.as_str()) => e,
         Some(e) => return Err(bad(CMD, format!("{} save as {}, not .{e}", lib.id(), exts.iter().map(|x| format!(".{x}")).collect::<Vec<_>>().join(", ")))),
-        None => exts[0].to_string(),
+        None => lib.save_extension_for(&chosen).to_string(),
     };
     let out = lib.save_set(s, &chosen, &ext)?;
     let data = out.get("data").and_then(Value::as_str).ok_or_else(|| EngineError::Other("the export returned no data".into()))?;
@@ -874,9 +884,6 @@ impl Library for Shapes {
         Ok(crate::presets::shapes::all_groups(s).iter().flat_map(|g| g.items.iter().map(|i| Row::new(g.name.clone(), i.name.clone()))).collect())
     }
     fn rename(&self, s: &mut Session, row: &Row, to: &str) -> Result<()> {
-        if crate::presets::shapes::all_groups(s).iter().any(|g| g.items.iter().any(|i| i.name == to)) {
-            return Err(bad(CMD, format!("a shape named \"{to}\" already exists")));
-        }
         call(s, "shape.presets.edit", json!({"action": "rename", "preset": row.name, "group": row.group, "name": to})).map(drop)
     }
     fn delete(&self, s: &mut Session, rows: &[Row]) -> Result<()> {
@@ -1016,6 +1023,12 @@ impl Library for Adjustments {
             call(s, "adjustment.presets.edit", json!({"kind": kind, "action": "delete", "name": names}))?;
         }
         Ok(())
+    }
+    fn reset_command(&self) -> Option<&'static str> {
+        Some("adjustment.presets.reset")
+    }
+    fn save_extension_for(&self, rows: &[Row]) -> &'static str {
+        rows.first().and_then(|r| photocraft_io::adjust_presets::extension(&r.key)).unwrap_or("acv")
     }
     fn move_to(&self, _: &mut Session, _: &Row, _: &[Row], _: &Dest) -> Result<()> {
         // The dialogs list built-ins first, then the user's groups: the order is fixed.

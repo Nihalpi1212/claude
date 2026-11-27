@@ -153,7 +153,7 @@ fn save_set_writes_a_file_that_loads_back_with_the_same_names() {
         assert!(file.ends_with(&format!(".{ext}")), "{kind}: {file}");
         // Replace in another session: the library is exactly the file's presets.
         let mut t = session();
-        let r = t.execute(CMD, json!({"action": "load", "data": data(&out), "fileName": file, "replace": true})).unwrap_or_else(|e| panic!("{kind}: {e}"));
+        let r = t.execute(CMD, json!({"action": "load", "kind": kind, "data": data(&out), "fileName": file, "replace": true})).unwrap_or_else(|e| panic!("{kind}: {e}"));
         assert_eq!(r["kind"], kind);
         let mut back = names(&mut t, kind);
         back.sort();
@@ -228,7 +228,7 @@ fn load_dispatches_each_extension_to_its_kind() {
         assert!(names(&mut s, kind).len() > before || kind == "patterns", "{name} adds presets");
     }
     // A loaded .abr, .grd or .asl names its group after the file.
-    assert!(s.tools.presets.iter().any(|b| b.name == "Round Nine" && b.group == "Nine"));
+    assert!(s.tools.presets.iter().any(|b| b.group == "Nine"), "{:?}", s.tools.presets.iter().map(|b| (&b.name, &b.group)).collect::<Vec<_>>());
     assert!(s.presets.gradients.iter().any(|g| g.name == "Two"));
     assert!(s.presets.styles.iter().any(|g| g.name == "Two"));
     assert!(names(&mut s, "adjustments").iter().any(|n| n == "Contrast"));

@@ -43,6 +43,8 @@ fn load_rows(app: &mut PhotocraftApp, kind: &str) -> Vec<PresetRow<usize>> {
 }
 
 /// Opens the Preset Manager on Brushes.
+// Pigment: the menu opens `dialogs::preset_manager_ui` (P1a); this one stays for upstream merges.
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn open_manager(app: &mut PhotocraftApp) -> DialogId {
     let mut manager = Manager::new(tl!("Preset Manager"), kinds(), "brushes".to_string());
     manager.rows(load_rows(app, "brushes"));
