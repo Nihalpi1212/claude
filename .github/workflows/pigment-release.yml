@@ -141,13 +141,23 @@ jobs:
           } >>"$GITHUB_OUTPUT"
           echo "Pigment $version, tag '${tag:-none: build only}', prerelease $prerelease"
 
-  macos:
-    name: macOS universal
+  # The two macOS architectures build on runners of their own at the same time, and the job after
+  # them joins the two with lipo and makes the DMG. Built in one cargo run, the workspace merged
+  # with PhotoCraft 057297b ran out of the job's time on macos-15: the largest crates of both
+  # targets compiled side by side there, in 7 GB of memory.
+  macos-build:
+    name: macOS ${{ matrix.arch }}
     needs: version
     runs-on: macos-15
-    # A cold universal build (two targets) of the workspace merged with PhotoCraft 057297b took
-    # more than three hours on macos-15; GitHub allows six.
-    timeout-minutes: 330
+    timeout-minutes: 240
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - arch: aarch64
+            triple: aarch64-apple-darwin
+          - arch: x86_64
+            triple: x86_64-apple-darwin
     defaults:
       run:
         working-directory: pigment
@@ -182,17 +192,85 @@ jobs:
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
-          targets: aarch64-apple-darwin, x86_64-apple-darwin
+          targets: ${{ matrix.triple }}
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: pigment
-          key: release-macos-universal
+          key: release-macos-${{ matrix.arch }}
+
+      - name: Build (${{ matrix.arch }})
+        run: packaging/macos/package.sh --arch ${{ matrix.arch }} --build-only
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: macos-bin-${{ matrix.arch }}
+          path: |
+            pigment/target/${{ matrix.triple }}/release/pigment
+            pigment/target/${{ matrix.triple }}/release/pigment-cli
+          if-no-files-found: error
+
+  macos:
+    name: macOS universal
+    needs: [version, macos-build]
+    runs-on: macos-15
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: pigment
+    env:
+      PHOTOCRAFT_BUILD_SHA: ${{ github.sha }}
+      PHOTOCRAFT_BUILD_DATE: ${{ needs.version.outputs.date }}
+      CRAFT_FONTS_DIR: ${{ github.workspace }}/craft-fonts
+      CRAFT_FONTS_REQUIRED: '1'
+      CRAFT_I18N_DIR: ${{ github.workspace }}/craft-i18n
+      CRAFT_I18N_REQUIRED: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Check out craft-fonts
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: storytold/craft-fonts
+          ref: ${{ env.CRAFT_FONTS_REF }}
+          path: craft-fonts
+          persist-credentials: false
+
+      - name: Check out craft-i18n
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: storytold/craft-i18n
+          ref: ${{ needs.version.outputs.i18n }}
+          path: craft-i18n
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: macos-bin-*
+          path: macos-bin
+
+      # Artifacts don't keep the executable bit.
+      - name: Put the two builds where package.sh looks for them
+        run: |
+          set -euo pipefail
+          for a in aarch64 x86_64; do
+            t="$a-apple-darwin"
+            mkdir -p "target/$t/release"
+            cp "../macos-bin/macos-bin-$a/pigment" "../macos-bin/macos-bin-$a/pigment-cli" "target/$t/release/"
+            chmod +x "target/$t/release/pigment" "target/$t/release/pigment-cli"
+            file "target/$t/release/pigment"
+          done
 
       # No MACOS_SIGN_IDENTITY: package.sh signs ad hoc (codesign -s -), which Apple silicon needs
       # to start the app at all, and skips notarization.
-      - name: Build and package (Pigment.app on a DMG, CLI zip)
-        run: packaging/macos/package.sh --arch universal
+      - name: Join and package (Pigment.app on a DMG, CLI zip)
+        run: packaging/macos/package.sh --arch universal --skip-build
 
       - name: Check the packages
         run: |

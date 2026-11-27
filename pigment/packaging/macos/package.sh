@@ -4,7 +4,9 @@
 #   $DIST/pigment-<version>-macos-<arch>.dmg          Pigment.app on a drag-to-Applications DMG
 #   $DIST/pigment-cli-<version>-macos-<arch>.zip      the headless CLI
 #
-# Usage: packaging/macos/package.sh [--arch universal|aarch64|x86_64] [--skip-build]
+# Usage: packaging/macos/package.sh [--arch universal|aarch64|x86_64] [--skip-build | --build-only]
+#   --skip-build  package the binaries already in $CARGO_TARGET_DIR/<target>/release
+#   --build-only  build the binaries and stop (the release workflow builds each architecture apart)
 #
 # Signing (env):
 #   MACOS_SIGN_IDENTITY   codesign identity (name or SHA-1). Default "-" = ad-hoc (local testing;
@@ -19,10 +21,12 @@ HERE="$ROOT/packaging/macos"
 
 ARCH=universal
 SKIP_BUILD=0
+BUILD_ONLY=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --arch) ARCH="$2"; shift 2 ;;
     --skip-build) SKIP_BUILD=1; shift ;;
+    --build-only) BUILD_ONLY=1; shift ;;
     -h | --help) sed -n '2,16p' "$0"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
@@ -33,6 +37,10 @@ case "$ARCH" in
   x86_64) TARGETS=(x86_64-apple-darwin) ;;
   *) echo "unknown --arch $ARCH" >&2; exit 2 ;;
 esac
+if [[ "$SKIP_BUILD" = 1 ]] && [[ "$BUILD_ONLY" = 1 ]]; then
+  echo "--skip-build and --build-only exclude each other" >&2
+  exit 2
+fi
 
 # Keep in sync with LSMinimumSystemVersion in Info.plist.in.
 export MACOSX_DEPLOYMENT_TARGET=11.0
@@ -44,7 +52,9 @@ DMG="$DIST/pigment-$VERSION-macos-$ARCH.dmg"
 CLI_ZIP="$DIST/pigment-cli-$VERSION-macos-$ARCH.zip"
 
 NOTARIZE=0
-if [[ "$IDENTITY" = "-" ]]; then
+if [[ "$BUILD_ONLY" = 1 ]]; then
+  : # nothing is signed
+elif [[ "$IDENTITY" = "-" ]]; then
   warn "macOS: ad-hoc signing (no MACOS_SIGN_IDENTITY); artifacts are not notarized"
 elif [[ -n "${APPLE_ID:-}" ]] && [[ -n "${APPLE_PASSWORD:-}" ]] && [[ -n "${APPLE_TEAM_ID:-}" ]]; then
   NOTARIZE=1
@@ -59,6 +69,10 @@ if [[ "$SKIP_BUILD" = 0 ]]; then
   args=()
   for t in "${TARGETS[@]}"; do args+=(--target "$t"); done
   (cd "$ROOT" && cargo build --release --locked -p photocraft -p photocraft-cli --features heif "${args[@]}")
+fi
+if [[ "$BUILD_ONLY" = 1 ]]; then
+  echo "==> built ${TARGETS[*]} (--build-only: not packaged)"
+  exit 0
 fi
 
 rm -rf "$WORK"
