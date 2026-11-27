@@ -60,7 +60,9 @@ fn hdr_params(v: &Value, cmd: &str) -> Result<()> {
     for (k, x) in v.as_object().into_iter().flatten() {
         let ok = match k.as_str() {
             k if NUMBERS.contains(&k) => x.as_f64().is_some_and(f64::is_finite),
-            "curve" => x.as_array().is_some_and(|a| a.len() <= 64 && a.iter().all(|p| p.as_array().is_some_and(|p| p.len() == 2 && p.iter().all(|n| n.is_number())))),
+            "curve" => {
+                x.as_array().is_some_and(|a| a.len() <= 64 && a.iter().all(|p| p.as_array().is_some_and(|p| p.len() == 2 && p.iter().all(|n| n.is_number()))))
+            }
             "method" => x.is_string(),
             _ => return Err(bad(cmd, format!("HDR Toning has no setting `{k}`"))),
         };
@@ -153,7 +155,10 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
         }
         "delete" => {
             let names: Vec<String> = match p.get("name") {
-                Some(Value::Array(a)) => a.iter().map(|n| n.as_str().map(str::to_string).ok_or_else(|| bad(cmd, "`name` must be a name or a list of names"))).collect::<Result<_>>()?,
+                Some(Value::Array(a)) => a
+                    .iter()
+                    .map(|n| n.as_str().map(str::to_string).ok_or_else(|| bad(cmd, "`name` must be a name or a list of names")))
+                    .collect::<Result<_>>()?,
                 _ => vec![req_str(p, "name", cmd)?.to_string()],
             };
             let deleted = s.presets.adjustments.delete(kind, &names).map_err(|e| bad(cmd, e))?;
@@ -186,7 +191,11 @@ fn load(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, format!("{kind} has no Photoshop preset file")));
     }
     let (bytes, stem) = crate::preset_import_cmds::file_bytes_limited(p, cmd, "an adjustment preset file", MAX_FILE_BYTES)?;
-    let stem = if stem.is_empty() { file_name.and_then(|f| std::path::Path::new(f).file_stem()).and_then(|s| s.to_str()).unwrap_or_default().to_string() } else { stem };
+    let stem = if stem.is_empty() {
+        file_name.and_then(|f| std::path::Path::new(f).file_stem()).and_then(|s| s.to_str()).unwrap_or_default().to_string()
+    } else {
+        stem
+    };
     let (adj, report) = photocraft_io::adjust_presets::read(kind, &bytes).map_err(|e| bad(cmd, e))?;
     // A file holds one setting; the preset is named after the file, as the app named it.
     let base = match p.get("name") {

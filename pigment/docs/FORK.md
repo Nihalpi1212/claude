@@ -522,7 +522,15 @@ stays undrawn, reported.
 ### Adjustment presets
 
 The JavaScript Pigment's adjustment presets (its Preset menu above every adjustment editor, the
-built-in lists and Photoshop's preset files), rebuilt on PhotoCraft. Photoshop's files are
+built-in lists and Photoshop's preset files), rebuilt on PhotoCraft. The model is
+`crates/engine/src/presets/adjustments.rs` (a preset is a name and the params of
+`image.adjustments.<kind>`; the built-ins of Levels, Curves, Exposure, Brightness/Contrast,
+Threshold, Hue/Saturation, Black & White, Channel Mixer and HDR Toning are the app's, generated in
+code; saved under `presets.adjustments` in `config.toml` are the user's presets, the built-ins
+deleted and the names given). The commands are `adjustment.presets.list`, `get`, `save`, `edit`
+(rename, delete), `reset`, `load` and `export`, in `crates/engine/src/cmd/adjust_preset_cmds.rs`
+with their tests in `crates/engine/src/cmd/adjust_preset_cmds/tests.rs`; none is journaled
+(applying a preset is setting the dialog or layer to its params). Photoshop's files are
 `crates/io/src/adjust_map/preset_files.rs` (`.alv`, `.acv`, `.ahu`, `.cha`, `.asv`, `.blw`: each
 the PSD adjustment block of its kind, read and written through `adjust_map::parse` and
 `adjust_map::write`, so no upstream encoder changed visibility) with its tests in
@@ -534,6 +542,9 @@ commit).
 |---|---|
 | `crates/io/src/adjust_map.rs` | `pub mod preset_files;` beside `mod encode;` (a child module, so it reads the block helpers it shares with `parse`) |
 | `crates/io/src/lib.rs` | `pub use adjust_map::preset_files as adjust_presets;` beside `ADJUSTMENT_KEYS` |
+| `crates/engine/src/presets.rs` | `pub mod adjustments;`; the `PresetState` field `adjustments` and its `Default`; the `Persisted` field `adjustments` (a `Value`, read entry by entry by `AdjustmentPresets::load`), its line in `to_json` and in `load_presets_json`, and the three lines that load it |
+| `crates/engine/src/cmd.rs` | `pub mod adjust_preset_cmds;` and `v.extend(adjust_preset_cmds::specs());` after `adjust_cmds::specs()` in `build()` |
+| `crates/automation/src/workspace.rs` | `adjustment.presets.load` (a `path` without `data` reads the disk) and `adjustment.presets.export` (a `path` writes there) in `command_uses_ambient_path`, so agents reach files only through their workspace |
 
 ## Keeping the rebrand: `scripts/pigment-rebrand.py`
 

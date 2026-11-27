@@ -259,8 +259,12 @@ impl AdjustmentPresets {
 
     /// The saved form (`presets.adjustments`): the kinds the user changed.
     pub fn to_json(&self) -> Value {
-        let m: Map<String, Value> =
-            self.kinds.iter().filter(|(_, k)| **k != KindPresets::default()).map(|(kind, k)| (kind.clone(), serde_json::to_value(k).unwrap_or(Value::Null))).collect();
+        let m: Map<String, Value> = self
+            .kinds
+            .iter()
+            .filter(|(_, k)| **k != KindPresets::default())
+            .map(|(kind, k)| (kind.clone(), serde_json::to_value(k).unwrap_or(Value::Null)))
+            .collect();
         Value::Object(m)
     }
 
@@ -290,7 +294,8 @@ impl AdjustmentPresets {
             for g in kv.get("groups").and_then(Value::as_array).into_iter().flatten() {
                 let Some(group) = g.get("name").and_then(Value::as_str).and_then(clean_name) else { continue };
                 for item in g.get("items").and_then(Value::as_array).into_iter().flatten() {
-                    let (Some(name), Some(params)) = (item.get("name").and_then(Value::as_str).and_then(clean_name), item.get("params").filter(|p| p.is_object()))
+                    let (Some(name), Some(params)) =
+                        (item.get("name").and_then(Value::as_str).and_then(clean_name), item.get("params").filter(|p| p.is_object()))
                     else {
                         continue;
                     };
@@ -376,10 +381,15 @@ pub fn builtin(kind: &str) -> Vec<AdjustmentPreset> {
             .into_iter()
             .map(|(id, name, e)| preset(id, name, json!({"exposure": e, "offset": 0, "gamma": 1})))
             .collect(),
-        "brightnessContrast" => [("brighter", "Brighter", 30, 0), ("darker", "Darker", -30, 0), ("more-contrast", "More Contrast", 0, 30), ("less-contrast", "Less Contrast", 0, -30)]
-            .into_iter()
-            .map(|(id, name, b, c)| preset(id, name, json!({"brightness": b, "contrast": c, "legacy": false})))
-            .collect(),
+        "brightnessContrast" => [
+            ("brighter", "Brighter", 30, 0),
+            ("darker", "Darker", -30, 0),
+            ("more-contrast", "More Contrast", 0, 30),
+            ("less-contrast", "Less Contrast", 0, -30),
+        ]
+        .into_iter()
+        .map(|(id, name, b, c)| preset(id, name, json!({"brightness": b, "contrast": c, "legacy": false})))
+        .collect(),
         "threshold" => [("dark", "Dark (96)", 96), ("middle", "Middle (128)", 128), ("light", "Light (160)", 160)]
             .into_iter()
             .map(|(id, name, level)| preset(id, name, json!({"level": level})))
@@ -418,7 +428,9 @@ pub fn builtin(kind: &str) -> Vec<AdjustmentPreset> {
             ("yellow-filter", "Yellow Filter", [120, 110, 40, -30, 0, 70]),
         ]
         .into_iter()
-        .map(|(id, name, [r, y, g, c, b, m])| preset(id, name, json!({"reds": r, "yellows": y, "greens": g, "cyans": c, "blues": b, "magentas": m, "tint": false})))
+        .map(|(id, name, [r, y, g, c, b, m])| {
+            preset(id, name, json!({"reds": r, "yellows": y, "greens": g, "cyans": c, "blues": b, "magentas": m, "tint": false}))
+        })
         .collect(),
         "channelMixer" => [
             ("bw-infrared", "Black & White Infrared (RGB)", [-70, 200, -30]),

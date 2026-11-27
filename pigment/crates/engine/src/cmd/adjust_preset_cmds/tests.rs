@@ -89,7 +89,9 @@ fn every_adjustment_layer_kind_with_settings_has_presets() {
 fn save_rename_delete_and_reset() {
     let mut s = Session::new();
     let rev = s.presets.rev;
-    let r = s.execute("adjustment.presets.save", json!({"kind": "levels", "name": "Mine", "params": {"inBlack": 4, "red": {"gamma": 1.1}, "eyedropper": null}})).unwrap();
+    let r = s
+        .execute("adjustment.presets.save", json!({"kind": "levels", "name": "Mine", "params": {"inBlack": 4, "red": {"gamma": 1.1}, "eyedropper": null}}))
+        .unwrap();
     assert_eq!(r, json!({"kind": "levels", "name": "Mine", "replaced": false}));
     assert!(s.presets.rev > rev, "presets_changed bumps the revision");
     let v = s.execute("adjustment.presets.get", json!({"kind": "levels", "name": "Mine"})).unwrap();
@@ -149,7 +151,11 @@ fn bad_settings_are_refused() {
         assert!(s.execute("adjustment.presets.save", p.clone()).is_err(), "{p}");
     }
     assert!(names(&mut s, "levels").len() == 8);
-    s.execute("adjustment.presets.save", json!({"kind": "hdrToning", "name": "Glow", "params": {"radius": 50, "method": "localAdaptation", "curve": [[0, 0], [255, 255]]}})).unwrap();
+    s.execute(
+        "adjustment.presets.save",
+        json!({"kind": "hdrToning", "name": "Glow", "params": {"radius": 50, "method": "localAdaptation", "curve": [[0, 0], [255, 255]]}}),
+    )
+    .unwrap();
 }
 
 #[test]
@@ -160,7 +166,10 @@ fn loading_a_file_names_the_preset_after_it() {
     assert_eq!(r, json!({"kind": "curves", "added": ["curves"], "report": []}));
     let v = s.execute("adjustment.presets.get", json!({"kind": "curves", "name": "curves"})).unwrap();
     // The identity green channel is left out, so the preset applies in any mode.
-    assert_eq!(v["params"], json!({"points": [[0, 0], [64, 40], [192, 220], [255, 255]], "red": [[0, 0], [128, 150], [255, 255]], "blue": [[0, 20], [255, 235]]}));
+    assert_eq!(
+        v["params"],
+        json!({"points": [[0, 0], [64, 40], [192, 220], [255, 255]], "red": [[0, 0], [128, 150], [255, 255]], "blue": [[0, 20], [255, 235]]})
+    );
     // Again: a number. From bytes: the kind and name from `fileName`.
     let r = s.execute("adjustment.presets.load", json!({"path": path})).unwrap();
     assert_eq!(r["added"], json!(["curves 2"]));
@@ -170,7 +179,9 @@ fn loading_a_file_names_the_preset_after_it() {
     assert_eq!((v["params"]["colorize"].clone(), v["params"]["hue"].clone()), (json!(true), json!(205)));
     // Every fixture loads, and what it holds applies as a layer.
     s.execute("file.new", json!({"width": 8, "height": 8})).unwrap();
-    for (file, kind) in [("levels.alv", "levels"), ("channel-mixer.cha", "channelMixer"), ("selective-color.asv", "selectiveColor"), ("black-white.blw", "blackWhite")] {
+    for (file, kind) in
+        [("levels.alv", "levels"), ("channel-mixer.cha", "channelMixer"), ("selective-color.asv", "selectiveColor"), ("black-white.blw", "blackWhite")]
+    {
         let r = s.execute("adjustment.presets.load", json!({"data": b64(&fixture(file)), "kind": kind, "name": "Loaded"})).unwrap();
         let name = r["added"][0].as_str().unwrap().to_string();
         let params = s.execute("adjustment.presets.get", json!({"kind": kind, "name": name})).unwrap()["params"].clone();
@@ -195,7 +206,10 @@ fn exporting_writes_photoshops_file() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("mix.cha");
     let r = s
-        .execute("adjustment.presets.export", json!({"kind": "channelMixer", "params": {"monochrome": true, "gray": [30, 50, 20, 0]}, "path": path.to_string_lossy()}))
+        .execute(
+            "adjustment.presets.export",
+            json!({"kind": "channelMixer", "params": {"monochrome": true, "gray": [30, 50, 20, 0]}, "path": path.to_string_lossy()}),
+        )
         .unwrap();
     assert_eq!(r["bytes"], json!(44));
     let r = s.execute("adjustment.presets.load", json!({"path": path.to_string_lossy()})).unwrap();
@@ -209,8 +223,16 @@ fn exporting_writes_photoshops_file() {
 #[test]
 fn presets_survive_the_settings_file() {
     let mut s = Session::new();
-    s.execute("adjustment.presets.save", json!({"kind": "curves", "name": "S", "params": {"points": [[0, 0], [64, 50.5], [255, 255]], "red": [[0, 10], [255, 255]]}})).unwrap();
-    s.execute("adjustment.presets.save", json!({"kind": "blackWhite", "name": "Warm", "params": {"reds": 70, "tint": true, "tintColor": "#e0c090"}, "group": "Toned"})).unwrap();
+    s.execute(
+        "adjustment.presets.save",
+        json!({"kind": "curves", "name": "S", "params": {"points": [[0, 0], [64, 50.5], [255, 255]], "red": [[0, 10], [255, 255]]}}),
+    )
+    .unwrap();
+    s.execute(
+        "adjustment.presets.save",
+        json!({"kind": "blackWhite", "name": "Warm", "params": {"reds": 70, "tint": true, "tintColor": "#e0c090"}, "group": "Toned"}),
+    )
+    .unwrap();
     s.execute("adjustment.presets.save", json!({"kind": "hdrToning", "name": "Soft", "params": {"radius": 80, "strength": 0.3}})).unwrap();
     s.execute("adjustment.presets.edit", json!({"kind": "curves", "action": "delete", "name": "Negative (RGB)"})).unwrap();
     s.execute("adjustment.presets.edit", json!({"kind": "threshold", "action": "rename", "name": "Dark (96)", "newName": "Night"})).unwrap();
@@ -252,7 +274,20 @@ fn a_damaged_saved_preset_does_not_discard_the_others() {
         },
         "gradients": "junk"
     }));
-    assert_eq!(names(&mut s, "levels"), ["Increase Contrast 1", "Increase Contrast 2", "Increase Contrast 3", "Lighten Shadows", "Bright", "Midtones Brighter", "Midtones Darker", "Good", "Good 2"]);
+    assert_eq!(
+        names(&mut s, "levels"),
+        [
+            "Increase Contrast 1",
+            "Increase Contrast 2",
+            "Increase Contrast 3",
+            "Lighten Shadows",
+            "Bright",
+            "Midtones Brighter",
+            "Midtones Darker",
+            "Good",
+            "Good 2"
+        ]
+    );
     assert_eq!(names(&mut s, "curves").len(), 9);
     // A kind this build doesn't know survives a save.
     assert!(s.presets.to_json(&s)["adjustments"]["futureKind"]["groups"][0]["items"][0]["name"] == "Kept");
