@@ -18,7 +18,7 @@ on `8821fdf` and on this package's commits (see "Commits").
 
 CI when this package returned: 46038027153 (`75ec448`) failed only on `engine tests::every_adjustment_command_runs`,
 as expected (fixed by `90265ff`); 46041402514 (`8821fdf`) was still running; the runs on `ac26271` and `1c92254` were
-queued. Not waited for, as the brief says: check them first.
+the run on `ac26271` (46050356531) was cancelled by the push of `1c92254` (concurrency), whose run (46050395075) was queued. Not waited for, as the brief says: check 46041402514 and 46050395075 first.
 
 ## What was built
 
