@@ -9,6 +9,9 @@ use crate::PhotocraftApp;
 /// adjustment layer; the command brings Properties forward to edit it. The pick is the pass's own
 /// click, so a rerun pass of the frame adds no second layer.
 pub(crate) fn panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
-    let Some(kind) = AdjustmentsPanel::new(tl!("Adjustments")).show(ui).picked else { return };
+    let picked = AdjustmentsPanel::new(tl!("Adjustments")).show(ui).picked;
+    // Pigment: the adjustment presets under the grid
+    crate::panels::adjustment_presets::section(app, ui);
+    let Some(kind) = picked else { return };
     let _ = app.run(&format!("layer.newAdjustmentLayer.{}", kind.key()), json!({}));
 }

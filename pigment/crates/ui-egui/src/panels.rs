@@ -16,6 +16,8 @@ use crate::{PhotocraftApp, icons};
 
 pub mod actions;
 pub mod adjust_ui;
+// Pigment: the Adjustments panel's adjustment presets
+pub(crate) mod adjustment_presets;
 pub mod apply_color;
 pub(crate) mod blend_preview;
 #[cfg(test)]

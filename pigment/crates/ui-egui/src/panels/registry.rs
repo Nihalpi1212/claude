@@ -117,7 +117,14 @@ pub(crate) static PANELS: &[PanelEntry] = &[
     },
     panel("gradients", || tl!("Gradients").to_string(), "blend", LEAST, super::preset_panels::gradients_panel),
     panel("patterns", || tl!("Patterns").to_string(), "grid", LEAST, super::preset_panels::patterns_panel),
-    PanelEntry { heights: Some(PROPERTIES_HEIGHTS), ..panel("properties", || tl!("Properties").to_string(), "adjustments", LEAST, super::properties::panel) },
+    PanelEntry {
+        heights: Some(PROPERTIES_HEIGHTS),
+        // Pigment: Save Adjustment Preset… (the Properties panel menu has no upstream rows)
+        rows: super::adjustment_presets::panel_rows,
+        states: super::adjustment_presets::command_states,
+        run: super::adjustment_presets::run_fired,
+        ..panel("properties", || tl!("Properties").to_string(), "adjustments", LEAST, super::properties::panel)
+    },
     panel("adjustments", || tl!("Adjustments").to_string(), "contrast", LEAST, |app, ui| scrolled(app, ui, super::properties::adjustments::panel)),
     PanelEntry {
         heights: Some(CHARACTER_HEIGHTS),

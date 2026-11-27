@@ -547,7 +547,12 @@ New…, Rename…, Delete, Load… and Save… of Photoshop's file for the six k
 and "Your Presets" saved from the selected adjustment layers) are
 `crates/engine/src/presets/adjustments/panel.rs` and `crates/engine/src/cmd/adjust_preset_cmds/panel.rs`
 (`layer.adjustmentPreset`, journaled, one history step; `layer.saveAdjustmentPreset` and
-`layer.deleteAdjustmentPreset`, not journaled), tested in `panel_tests.rs` beside it.
+`layer.deleteAdjustmentPreset`, not journaled), tested in `panel_tests.rs` beside it. Their
+interface is `crates/ui-egui/src/panels/adjustment_presets.rs` (tests in
+`adjustment_presets/tests.rs`): a section of collapsible groups under the Adjustments panel's grid,
+one button per preset; hovering a button previews the preset on the canvas, built by the engine's
+`panel::preview` exactly as the command builds it; the Properties panel menu's Save Adjustment
+Preset… asks for a name and saves the selected adjustment layers.
 
 | Upstream file | Hook |
 |---|---|
@@ -559,6 +564,12 @@ and "Your Presets" saved from the selected adjustment layers) are
 | `crates/ui-egui/src/dialogs/adjust_editors.rs` | `pub mod preset_row;`; the `AdjustAsk::Preset` variant; the `EditorSetup` fields `presets` and `presets_rev` and their `Default` |
 | `crates/ui-egui/src/dialogs/adjust_dialog.rs` | `build_setup`: the two `EditorSetup` fields; `shared_editor`: `preset_row::in_dialog` before the editor (two lines); `answer_asks`: `preset_row::follow_dialog` first, and the `AdjustAsk::Preset` arm |
 | `crates/ui-egui/src/dialogs/adjust_editors/session.rs` | `layer_editor`: `preset_row::in_properties` before the editor, a pick committed through `commit` (one history step) |
+| `crates/ui-egui/src/panels.rs` | `pub(crate) mod adjustment_presets;` |
+| `crates/ui-egui/src/lib.rs`, `crates/ui-egui/src/app.rs` | the `PhotocraftApp` field `adjust_panel_hover` (the hovered panel preset) and its `None` |
+| `crates/ui-egui/src/canvas/display.rs` | `display_doc_live`: the hovered panel preset's document, after the blend-mode preview |
+| `crates/ui-egui/src/panels/properties/adjustments.rs` | the grid's pick is kept, `adjustment_presets::section` is drawn, then the pick runs |
+| `crates/ui-egui/src/panels/registry.rs` | the Properties entry's `rows`, `states` and `run` (Save Adjustment Preset…; upstream's Properties menu has no rows) |
+| `crates/ui-egui/src/dialogs.rs` | `adjustment_presets::SAVE_FAMILY` in `PARAM_FAMILIES` (the name dialog of Save Adjustment Preset…) |
 
 ## Keeping the rebrand: `scripts/pigment-rebrand.py`
 

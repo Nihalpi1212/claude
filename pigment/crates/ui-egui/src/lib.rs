@@ -697,6 +697,8 @@ pub struct PhotocraftApp {
     pub jobs: jobs_ui::JobsUi,
     /// Pigment: generative AI's windows and accounts (`ai_ui`).
     pub ai: ai_ui::AiUi,
+    /// Pigment: the Adjustments panel's preset under the pointer, previewed (`panels::adjustment_presets`).
+    pub(crate) adjust_panel_hover: Option<panels::adjustment_presets::Hover>,
     #[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
     live_tokens: theme::live::LiveTokens,
 }

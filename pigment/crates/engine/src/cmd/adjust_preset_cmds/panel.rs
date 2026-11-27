@@ -31,39 +31,67 @@ fn layer_name(doc: &photocraft_doc::Document, made: &[Layer], base: &str) -> Str
     (1..).map(|n| format!("{base} {n}")).find(|n| !taken(n) && doc.walk().iter().all(|(_, _, l)| l.name != *n)).unwrap_or(first)
 }
 
+/// The adjustments a preset adds in a document of `mode`, bottom first, with the names the user
+/// gave them, and the preset's name.
+type Made = (String, Vec<(Adjustment, Option<String>)>);
+
+fn preset_adjustments(presets: &adjustments::AdjustmentPresets, group: &str, preset: &str, mode: photocraft_color::ColorMode, cmd: &str) -> Result<Made> {
+    let (name, layers) = panel::find(presets, group, preset).ok_or_else(|| bad(cmd, format!("no adjustment preset \"{group}/{preset}\"")))?;
+    if layers.is_empty() {
+        return Err(bad(cmd, format!("the adjustment preset \"{name}\" has no layers")));
+    }
+    let made = layers.iter().map(|l| Ok((adjustment_of(l, mode, cmd)?, l.name.clone()))).collect::<Result<_>>()?;
+    Ok((name, made))
+}
+
+/// Adds the preset's layers to `doc` above `active`, as `layer.adjustmentPreset` does: each one
+/// masked by the selection (which the last drops), else by a mask that shows everything, and in a
+/// group named after the preset when there are several. Returns the new top layer and the
+/// adjustment layers, bottom first; `active` becomes the top layer.
+fn insert_layers(doc: &mut photocraft_doc::Document, active: &mut Option<LayerId>, (name, made): Made, cmd: &str) -> Result<(LayerId, Vec<LayerId>)> {
+    let mut built: Vec<Layer> = Vec::new();
+    let selection = doc.selection.clone();
+    for (adj, given) in made {
+        doc.selection.clone_from(&selection);
+        let layer_name = given.unwrap_or_else(|| layer_name(doc, &built, adj.label()));
+        let mut l = Layer::new(layer_name, LayerContent::Adjustment(adj));
+        crate::cmd::layer_params::mask_new_layer(doc, &mut l, &json!({}), cmd, true)?;
+        built.push(l);
+    }
+    let ids: Vec<LayerId> = built.iter().map(|l| l.id).collect();
+    let layer = if built.len() == 1 { built.remove(0) } else { Layer::group(name, built) };
+    let top = crate::layer_place::insert_new(doc, *active, layer, crate::layer_place::Place::Auto);
+    crate::clip_group::settle(doc, &[top], &Default::default(), false);
+    if doc.max_group_depth() > MAX_GROUP_DEPTH {
+        return Err(EngineError::Other(format!("groups can be nested at most {MAX_GROUP_DEPTH} deep")));
+    }
+    *active = Some(top);
+    Ok((top, ids))
+}
+
+/// `doc` as it would look with the preset `preset` of `group` added above `active`: the
+/// Adjustments panel's hover preview, built as the command builds the layers. `None` when the
+/// preset is unknown or can't be added.
+pub fn preview(
+    doc: &photocraft_doc::Document,
+    active: Option<LayerId>,
+    presets: &adjustments::AdjustmentPresets,
+    group: &str,
+    preset: &str,
+) -> Option<photocraft_doc::Document> {
+    let made = preset_adjustments(presets, group, preset, doc.mode, "layer.adjustmentPreset").ok()?;
+    let (mut shown, mut active) = (doc.clone(), active);
+    insert_layers(&mut shown, &mut active, made, "layer.adjustmentPreset").ok()?;
+    Some(shown)
+}
+
 fn add_preset(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "layer.adjustmentPreset";
     let group = req_str(p, "group", cmd)?;
     let preset = req_str(p, "preset", cmd)?;
-    let (name, layers) = panel::find(&s.presets.adjustments, group, preset).ok_or_else(|| bad(cmd, format!("no adjustment preset \"{group}/{preset}\"")))?;
-    if layers.is_empty() {
-        return Err(bad(cmd, format!("the adjustment preset \"{name}\" has no layers")));
-    }
-    let mode = crate::cmd::adjust_params::doc_mode(s);
-    let made: Vec<(Adjustment, Option<String>)> = layers.iter().map(|l| Ok((adjustment_of(l, mode, cmd)?, l.name.clone()))).collect::<Result<_>>()?;
-    let label = format!("Adjustment Preset: {name}");
-    let (top, ids) = s.edit(&label, |doc, active| {
-        let mut built: Vec<Layer> = Vec::new();
-        // Each layer takes the selection as its mask; the last one drops it.
-        let selection = doc.selection.clone();
-        for (adj, given) in made {
-            doc.selection.clone_from(&selection);
-            let name = given.unwrap_or_else(|| layer_name(doc, &built, adj.label()));
-            let mut l = Layer::new(name, LayerContent::Adjustment(adj));
-            // The selection, else a mask that shows everything, as a new adjustment layer gets.
-            crate::cmd::layer_params::mask_new_layer(doc, &mut l, &json!({}), cmd, true)?;
-            built.push(l);
-        }
-        let ids: Vec<LayerId> = built.iter().map(|l| l.id).collect();
-        let layer = if built.len() == 1 { built.remove(0) } else { Layer::group(name.clone(), built) };
-        let top = crate::layer_place::insert_new(doc, *active, layer, crate::layer_place::Place::Auto);
-        crate::clip_group::settle(doc, &[top], &Default::default(), false);
-        if doc.max_group_depth() > MAX_GROUP_DEPTH {
-            return Err(EngineError::Other(format!("groups can be nested at most {MAX_GROUP_DEPTH} deep")));
-        }
-        *active = Some(top);
-        Ok((top, ids))
-    })?;
+    let made = preset_adjustments(&s.presets.adjustments, group, preset, crate::cmd::adjust_params::doc_mode(s), cmd)?;
+    let name = made.0.clone();
+    let (top, ids) = s.edit(&format!("Adjustment Preset: {name}"), |doc, active| insert_layers(doc, active, made, cmd))?;
     Ok(json!({"layer": top.0, "layers": ids.iter().map(|id| id.0).collect::<Vec<_>>(), "name": name}))
 }
 
