@@ -206,6 +206,9 @@ folder page, or another folder on macOS). Pigment 0.5 opens 0.4's `.pigment` doc
 needs exporting first. Changing the default install folder or the app bundle name is left as a decision
 for a later release.
 
+Edit › Presets › Migrate Presets reads the JavaScript app's `presets/` folder and `settings.json`
+(read only: nothing there is written, moved or deleted); see "Migrate Presets from Pigment 0.4" below.
+
 There are no separate fonts, plug-ins, scripts or templates folders: PhotoCraft reads system fonts,
 loads plug-ins and scripts from where the user opens them, and keeps templates in its presets.
 
@@ -857,9 +860,8 @@ Edit › Presets › Export/Import Presets… writes and reads the nine kinds of
   shipped unless `includeBuiltins`. Import of the six new kinds appends to the group of the same name and skips a
   preset already there (same data, and the same name or the number an earlier import gave it), so importing twice adds
   nothing; it reads and checks all of them before anything changes. Upstream's three kinds keep upstream's rules
-  (replace by name). Swatches in the old `items` shape load through `swatches::upgrade_saved`. A Pigment 0.1–0.4
-  `.pigment-bundle` (a ZIP, as text or base64) is recognised and refused with a pointer to Migrate Presets (P4 reads
-  it there).
+  (replace by name). Swatches in the old `items` shape load through `swatches::upgrade_saved`. A JavaScript Pigment
+  `.pigment-bundle` (a ZIP, base64) is imported by Migrate Presets' `import_bundle` (P4, below).
 - The **Preset Manager** reads and writes `.pcpresets` for every kind (Save Set… of several adjustment presets writes
   one), through `preset_file::export_kind` with the manager's rows.
 - **Interface**: upstream's parameter dialog in `prefs_ui/presets.rs`, with a check box per kind; Import filters
@@ -970,6 +972,51 @@ constant-colour noise fills and kept the raw block for the rest, #6272; `.grd` i
 | `crates/ui-egui/src/tools/gradient_ui/editor.rs` | `show`: `noise::show` for the tool gradient; the stop bar only when solid |
 | `crates/ui-egui/src/tools/gradient_ui/properties_panel.rs` | `show`: `noise::show` for the layer above the framework's rows |
 | Test literals: `crates/{compose,vector}/src/tests.rs`, `crates/format/tests/it/{common/mod,roundtrip}.rs`, `crates/gpu/tests/it/parity.rs`, `crates/io/src/{adjust_map,blocks}/tests.rs`, `crates/engine/src/cmd/vector_cmds/tests.rs`, `crates/ui-egui/src/canvas/triangle_alt_eyedropper_tests.rs`, `crates/ui-egui/src/tools/vector_ui/paint_tests.rs` | `noise: None` / `noise: _` |
+
+### Migrate Presets from Pigment 0.4
+
+Edit › Presets › Migrate Presets brings the presets of the JavaScript Pigment (0.1 to 0.5): Photoshop's item imports
+an earlier version's presets, and for Pigment the earlier versions are the Electron app. Upstream's command merged
+another PhotoCraft presets or preferences JSON; that still works.
+
+- **io**: `crates/io/src/legacy_pigment/presets.rs` (`pub mod presets`), the public face of the document importer's
+  mappers for one preset at a time: `gradient` (stops with their foreground/background references, opacity, noise;
+  a gradient whose midpoints are moved is sampled), `style`, `shape` (into the Shapes library's 0..100 box), `path`,
+  `adjustment`, `contour`, `pattern` (a PNG side file) and `brush`, the new `legacy_pigment/brush.rs` after the JS
+  `normalizeBrush` schema (tip, sampled tip from its side file, every Brush Settings section, the tool's opacity, flow,
+  blend and smoothing; Pigment 0.4's flat presets). `gradient.rs` keeps a stop's `{ref}` (`StopRef`) and has
+  `Def::preset`; `styles::contour` is `pub(crate)`. `tpl_map::js_tool_preset` maps a JS tool preset with P2's table.
+- **Engine**: `crates/engine/src/cmd/migrate_cmds/legacy.rs`. `edit.presets.migratePresets {path}` with `path` a
+  directory reads the JS preset store (`<kind>.json`, `:` as `__`, side files in `<kind>/`; the folder itself, or the
+  settings folder holding `presets/`) and `settings.json` (in the folder, or beside a `presets` folder); with a ZIP,
+  a `.pigment-bundle` (`import_bundle`, also called by Export/Import Presets' Import). Built-ins as shipped (`{ref}`)
+  are left out. Swatches, gradients, styles (and the patterns they paint with), patterns, contours, shapes and
+  adjustment presets go through P1b's `Staged` merge one kind at a time; brushes and tool presets are merged the same
+  way here (same data under its name or an import's number: skipped). `adjustment:<kind>` → A1's adjustment presets
+  (`file_params`, HDR Toning's Strength /100); `settings.json`: `brushPresets` and `swatches` (Pigment 0.4's own),
+  `adjust.autoOptions` → A3's options saved as the defaults, `adjust.curvesDisplay` → A4's Curve Display Options,
+  `actions` reported, not converted. Reply `{migrated, found, added, unchanged, skipped: [{kind, name, reason}],
+  notes}`; migrating twice adds nothing. Without `path` it is an error: the engine never looks for the old folder.
+- **App**: `apps/photocraft/src/app_dirs/legacy.rs` `legacy_pigment_dir()` (Electron's `userData` + `presets`, by the
+  platform rule, not `PIGMENT_*` or portable mode), passed to the shell as `Services::legacy_presets_dir`.
+- **Interface**: `crates/ui-egui/src/dialogs/migrate_presets_ui.rs`: the menu item asks "Migrate presets from
+  Pigment 0.4 at {folder}?" (a `StandardPrompt`) when that folder exists, else opens a folder dialog; the status line
+  says "{n} presets migrated." (and what was not) or "No Pigment 0.4 presets were found.".
+
+| Upstream file | Hook |
+|---|---|
+| `crates/engine/src/cmd/migrate_cmds.rs` | `mod legacy; pub use legacy::import_bundle;`, `bad`; `migrate`: a folder → `legacy::migrate_folder`, a ZIP → `import_bundle`, no `path` → "no Pigment 0.4 presets folder given"; the params string |
+| `crates/engine/src/cmd/edit_menu_cmds.rs` | `export_import`'s import: `preset_file::bundle_bytes` → `migrate_cmds::import_bundle` with the checked kinds |
+| `crates/engine/src/presets/tools/tpl.rs` (P2's) | `preset_of` is `pub(crate)` |
+| `crates/engine/src/cmd/edit_menu_cmds/preset_file.rs` (P1b's) | `bundle_bytes`; its test of the bundle refusal now expects a damaged bundle's error |
+| `crates/io/src/tpl_map.rs` (P2's) | `js_tool_preset` |
+| `crates/engine/tests/it/main.rs` | `mod migrate_pigment_04;` |
+| `apps/photocraft/src/app_dirs.rs` | `mod legacy; pub use legacy::legacy_pigment_dir;` |
+| `apps/photocraft/src/services.rs` | `legacy_presets_dir: crate::app_dirs::legacy_pigment_dir()` |
+| `crates/ui-egui/src/services.rs` | `Services::legacy_presets_dir` |
+| `crates/ui-egui/src/dialogs.rs` | `pub(crate) mod migrate_presets_ui;`; `migrate_presets_ui::answer_prompt` in `PROMPTS` |
+| `crates/ui-egui/src/prefs/prefs_ui/dialogs.rs` | `invoke`: the menu item without params opens `migrate_presets_ui::open` |
+| `crates/ui-egui/src/prefs/prefs_ui/presets_io_tests.rs` (P1b's) | the damaged bundle's status names "not a Pigment bundle" |
 
 ## Keeping the rebrand: `scripts/pigment-rebrand.py`
 

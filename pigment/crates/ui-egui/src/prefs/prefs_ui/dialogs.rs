@@ -78,6 +78,8 @@ pub fn invoke(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, params: &V
         // Pigment: Preset Manager for every kind (P1a); upstream's `open_manager` stays, unused.
         "edit.presets.presetManager" => Some(Ok(json!({"dialog": crate::dialogs::preset_manager_ui::open(app).value().to_string()}))),
         "edit.presets.exportImportPresets" => Some(Ok(json!({"dialog": super::presets::open_io(app).value().to_string()}))),
+        // Pigment: Migrate Presets from Pigment 0.4 (P4)
+        crate::dialogs::migrate_presets_ui::COMMAND => Some(crate::dialogs::migrate_presets_ui::open(app)),
         _ => None,
     }
 }

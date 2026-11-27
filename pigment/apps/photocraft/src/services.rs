@@ -558,6 +558,8 @@ pub fn native(automation: Option<photocraft_automation::AuthorizedWorkspace>, wa
         }),
         clipboard_unreadable: Some(Box::new(move || clip_unreadable.get())),
         photoshop_shortcuts: Some(Box::new(|| crate::photoshop_settings::live_keyboard_shortcuts(&|k| std::env::var_os(k)))),
+        // Pigment: Migrate Presets (P4)
+        legacy_presets_dir: crate::app_dirs::legacy_pigment_dir(),
         load_gpu_memo: Some(Box::new(load_gpu_memo_text)),
         save_gpu_memo: Some(Box::new(|text: &str| {
             if text.len() > photocraft_ui_egui::gpu_memo::MAX_GPU_MEMO_BYTES {
