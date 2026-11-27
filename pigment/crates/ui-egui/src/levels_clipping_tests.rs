@@ -529,3 +529,40 @@ fn the_display_never_reaches_the_document() {
         assert_eq!(commit(Some(end)), plain, "{end}: OK commits only the levels");
     }
 }
+
+/// Pigment (A4): a Curves dialog's clipping display is the one of the Levels with each curve's end points as its input
+/// levels, drawn with the same thresholds and texture.
+#[test]
+fn curves_show_the_clipping_of_their_end_points() {
+    let shown = |kind: &str, params: Value, end: LevelsClip| {
+        let mut app = ramp_app(ColorMode::Rgb, SampleType::U8);
+        let ctx = app.ctx().clone();
+        let id = crate::adjust_dialog::open(&mut app, &format!("image.adjustments.{kind}")).unwrap();
+        let cx = ValueCx::new(ColorMode::Rgb, Value::Null);
+        let mut merged = values::to_params(&hosted(&mut app, id).value().value, &cx, true);
+        if let (Some(merged), Value::Object(extra)) = (merged.as_object_mut(), params) {
+            merged.extend(extra);
+        }
+        let dialog = hosted(&mut app, id);
+        dialog.value_mut().value = values::from_params(kind, &merged, &cx).unwrap();
+        dialog.set_clipping(Some(end));
+        let adj = request(&app, 0).map(|r| r.adj);
+        (adj, paint_view(&mut app, &ctx, &view(10.0)))
+    };
+    let curves = json!({"points": [[60, 0], [128, 140], [200, 255]], "red": [[20, 10], [240, 255]]});
+    let levels = json!({"inBlack": 60, "inWhite": 200, "gamma": 1.0, "red": {"inBlack": 20, "inWhite": 240}});
+    for end in [LevelsClip::Shadows, LevelsClip::Highlights] {
+        let (curves_adj, curves_px) = shown("curves", curves.clone(), end);
+        let (levels_adj, levels_px) = shown("levels", levels.clone(), end);
+        let (Some(Adjustment::Levels { master, per_channel, .. }), Some(levels_adj)) = (curves_adj, levels_adj) else { panic!("{end:?}: both show") };
+        let levels_of = |c: &LevelsChannel| ((c.in_black * 255.0).round(), (c.in_white * 255.0).round());
+        assert_eq!(levels_of(&master), (60.0, 200.0));
+        assert_eq!(levels_of(&per_channel[0]), (20.0, 240.0));
+        assert_eq!(
+            thresholds(&levels_adj, SampleType::U8),
+            thresholds(&Adjustment::Levels { master, per_channel, space: ToneSpace::Rgb, black: LevelsChannel::default() }, SampleType::U8)
+        );
+        assert!(curves_px.is_some());
+        assert_eq!(curves_px, levels_px, "{end:?}: the same display");
+    }
+}

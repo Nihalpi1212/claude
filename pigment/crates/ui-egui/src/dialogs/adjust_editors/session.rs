@@ -198,6 +198,8 @@ pub fn layer_editor(app: &mut PhotocraftApp, ui: &mut egui::Ui, id: LayerId, adj
         gradients: if kind == "gradientMap" { gradient_presets(app) } else { Vec::new() },
         swatches: swatches(app),
         tone: record.tone.take(),
+        // Pigment: Curves display options (Show Histogram)
+        curves_display: crate::dialogs::curves_display_ui::view(app, None),
         ..Default::default()
     };
     // Pigment: adjustment presets (a pick is one `layer.setAdjustment`, one history step)

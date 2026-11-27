@@ -560,6 +560,8 @@ fn build_setup(app: &mut PhotocraftApp, kind: &str, target: &ToneTarget, mode: C
         // Pigment: adjustment presets
         presets: adjust_editors::preset_row::entries(app, kind),
         presets_rev: app.session.presets.rev,
+        // Pigment: Curves display options
+        curves_display: super::curves_display_ui::view(app, None),
     }
 }
 
@@ -762,6 +764,8 @@ pub(crate) fn smart_filter_params(app: &PhotocraftApp, open: &OpenAdjust, value:
 fn answer_asks(app: &mut PhotocraftApp, id: DialogId) {
     // Pigment: adjustment presets
     adjust_editors::preset_row::follow_dialog(app, id);
+    // Pigment: Curves display options
+    super::curves_display_ui::follow_dialog(app, id);
     let Some(asks) = app.framework.dialogs.get_mut_by_id::<HostedAdjustDialog>(id).map(HostedAdjustDialog::take_asks) else { return };
     for ask in asks {
         match ask {
@@ -789,6 +793,8 @@ fn answer_asks(app: &mut PhotocraftApp, id: DialogId) {
             AdjustAsk::Preset(ask) => adjust_editors::preset_row::answer_dialog(app, id, ask),
             // Pigment: Auto Color Correction Options
             AdjustAsk::AutoOptions(ask) => super::auto_options_ui::answer_dialog(app, id, ask),
+            // Pigment: Curves display options
+            AdjustAsk::CurvesDisplay(ask) => super::curves_display_ui::answer_dialog(app, id, ask),
         }
     }
     while let Some((key, color)) = crate::color_picker_ui::answer_for(app, id) {

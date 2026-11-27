@@ -107,6 +107,8 @@ pub(crate) mod params {
         crate::prefs_ui::PRESETS_FAMILY,
         // Pigment: Auto Color Correction Options
         super::auto_options_ui::FAMILY,
+        // Pigment: Curve Display Options
+        super::curves_display_ui::FAMILY,
         ParamFamily { check: Some(crate::crop_presets::check), ..ParamFamily::new(crate::crop_presets::owns, crate::crop_presets::run) },
         crate::actions::dialogs::NEW_SET_FAMILY,
         // Pigment: Save Adjustment Preset… (the Properties panel menu)
@@ -705,6 +707,7 @@ pub mod alerts;
 #[cfg(test)]
 mod arbitrary_ruler_prefill_tests;
 pub mod auto_options_ui;
+// Pigment: Curves display options
 pub(crate) mod bitmap_dialog;
 pub mod blend_options;
 pub mod blur_pins;
@@ -722,6 +725,7 @@ pub mod color_range_ui;
 pub mod color_table_ui;
 pub mod count_group_name_ui;
 pub mod credits;
+pub mod curves_display_ui;
 pub mod dds_options_ui;
 pub mod delete_layer_prompt;
 pub mod discard_ui;
