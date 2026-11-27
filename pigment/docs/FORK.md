@@ -598,6 +598,29 @@ targets they are upstream's eyedroppers exactly.
 | `crates/engine/src/cmd/edit_cmds.rs` | `auto_adjust` takes the params and first calls `auto_options_cmds::auto_adjust` (which steps aside when no options apply); the three Image › Auto specs take `AUTO_PARAMS` (the option keys) instead of `"{}"` |
 | `crates/engine/src/adjust_params.rs` | `pub mod targets;`; `eyedropper_from_params` and `layer_eyedropper` call `targets::adjustment_eyedropper_with` with `targets::of_param` (the `eyedropper.targets` param, else the saved targets) |
 
+The interface is `crates/ui-egui/src/dialogs/adjust_editors/auto_row.rs` (the controls, drawn around the framework's
+editors, which Pigment cannot change) and `crates/ui-egui/src/dialogs/auto_options_ui.rs` (the host side and the
+dialog; tests in `auto_options_ui/tests.rs`). Levels keeps the framework's Auto button: its "Auto" edit is taken out of
+the pass and the host keeps it (nothing saved or chosen this session) or replaces it with Auto Color Correction Options'
+result, as one edit. Curves and Brightness/Contrast get an Auto button, and Levels and Curves an Options… button, in a
+row below the editor (**a choice recorded**: Photoshop puts them beside the Channel select, inside the framework's
+panel). Alt-click on Auto and Options… open the options dialog, a framework parameter dialog stacked over the
+adjustment dialog (or alone over an adjustment layer's Properties) that previews Auto in its parent on every change;
+Cancel puts the parent back, OK keeps it and saves the options when Save as defaults is ticked (else they stay for the
+app session). The Levels and Curves eyedropper row is Pigment's copy of the framework's `TonePickerRow` (same labels,
+icons and canvas pass-through) that also reports a double-click: the Color Picker for that target colour, then "Save
+the new target colors as defaults?" (Yes saves; No keeps them for the session; "Don't show again" with Yes saves later
+ones without asking).
+
+| Upstream file | Hook |
+|---|---|
+| `crates/ui-egui/src/dialogs/adjust_editors.rs` | `pub mod auto_row;`; the `AdjustAsk::AutoOptions` variant; in `show`, the `brightnessContrast` arm draws Auto after the editor, the `levels` and `curves` arms draw `auto_row::pickers` instead of passing `.pickers(…)` (and Levels its `pickers_unavailable`) to the panel, Levels hands its Auto to `auto_row::levels_auto`, and both draw `auto_row::buttons` after the panel |
+| `crates/ui-egui/src/dialogs/adjust_dialog.rs` | `answer_asks`: the `AdjustAsk::AutoOptions` arm, and `auto_options_ui::answer_target` first in the colour answers' loop; `pick`: the eyedropper takes `auto_options_ui::targets` through `targets::adjustment_eyedropper_with` |
+| `crates/ui-egui/src/dialogs/adjust_editors/session.rs` | `layer_editor`: the `AdjustAsk::AutoOptions` arm (Auto committed through `commit`, one history step) |
+| `crates/ui-egui/src/dialogs/layer_picker.rs` | `sample_at`: `auto_options_ui::with_targets` adds the session's target colours to the eyedropper |
+| `crates/ui-egui/src/dialogs.rs` | `pub mod auto_options_ui;`; `auto_options_ui::FAMILY` in `PARAM_FAMILIES`; `auto_options_ui::take` last in `TAKERS`; `auto_options_ui::answer_prompt` in `PROMPTS`; `auto_options_ui::PREF` in `dont_show_again_keys` |
+| `crates/ui-egui/src/lib.rs`, `crates/ui-egui/src/app.rs` | the `PhotocraftApp` field `auto_options` (the session's options, the open dialog) and its `Default` |
+
 ## Keeping the rebrand: `scripts/pigment-rebrand.py`
 
 Most of the rebrand is mechanical and done by [`scripts/pigment-rebrand.py`](../scripts/pigment-rebrand.py):
