@@ -85,8 +85,10 @@ pub(super) fn destructive_adjust(s: &mut Session, label: &str, adj: Adjustment, 
     s.edit(label, |doc, _| {
         let sel = doc.selection.clone();
         let mode = doc.mode;
+        // Pigment: Clarity and Dehaze replicates the canvas's edges, as the compositor does
+        let canvas = doc.bounds();
         let surf = paint_surface(doc, id, p)?;
-        pixels::adjust_surface(surf, &adj, sel.as_ref(), mode).map_err(EngineError::Other)?;
+        pixels::newer::with_canvas(canvas, || pixels::adjust_surface(surf, &adj, sel.as_ref(), mode)).map_err(EngineError::Other)?;
         Ok(())
     })?;
     Ok(Value::Null)

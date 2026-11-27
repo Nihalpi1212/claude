@@ -70,11 +70,9 @@ fn preset_button(ui: &mut egui::Ui, label: &str, tip: &str, salt: (&str, &str)) 
 pub(crate) fn newer_buttons(ui: &mut egui::Ui) -> Option<&'static str> {
     let mut picked = None;
     craft::ui::layout_components::Row::new().show(ui, |ui, _| {
-        for (kind, icon, label) in [
-            ("colorVibrance", "sun", tl!("Color and Vibrance")),
-            ("clarityDehaze", "cloud", tl!("Clarity and Dehaze")),
-            ("grain", "sparkles", tl!("Grain")),
-        ] {
+        for (kind, icon, label) in
+            [("colorVibrance", "sun", tl!("Color and Vibrance")), ("clarityDehaze", "cloud", tl!("Clarity and Dehaze")), ("grain", "sparkles", tl!("Grain"))]
+        {
             let response = craft::ui::buttons::IconButton::new(craft::behavior::IconId::new(icon)).label(label).tooltip(label).show(ui);
             if clicked(&response) {
                 picked = Some(kind);

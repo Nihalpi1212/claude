@@ -29,11 +29,19 @@ pub fn place_after(id: &str) -> Option<&'static str> {
 /// The rows of `kind`: (engine key, English label, range, default).
 fn rows(kind: &str) -> &'static [(&'static str, &'static str, f64, f64, f64)] {
     match kind {
-        "colorVibrance" => {
-            &[("temperature", "Temperature", -100.0, 100.0, 0.0), ("tint", "Tint", -100.0, 100.0, 0.0), ("vibrance", "Vibrance", -100.0, 100.0, 0.0), ("saturation", "Saturation", -100.0, 100.0, 0.0)]
-        }
+        "colorVibrance" => &[
+            ("temperature", "Temperature", -100.0, 100.0, 0.0),
+            ("tint", "Tint", -100.0, 100.0, 0.0),
+            ("vibrance", "Vibrance", -100.0, 100.0, 0.0),
+            ("saturation", "Saturation", -100.0, 100.0, 0.0),
+        ],
         "clarityDehaze" => &[("clarity", "Clarity", -100.0, 100.0, 0.0), ("dehaze", "Dehaze", -100.0, 100.0, 0.0)],
-        "grain" => &[("amount", "Amount", 0.0, 100.0, 0.0), ("size", "Size", 0.0, 100.0, 25.0), ("roughness", "Roughness", 0.0, 100.0, 50.0), ("seed", "Seed", 1.0, 99_999.0, 1.0)],
+        "grain" => &[
+            ("amount", "Amount", 0.0, 100.0, 0.0),
+            ("size", "Size", 0.0, 100.0, 25.0),
+            ("roughness", "Roughness", 0.0, 100.0, 50.0),
+            ("seed", "Seed", 1.0, 99_999.0, 1.0),
+        ],
         _ => &[],
     }
 }

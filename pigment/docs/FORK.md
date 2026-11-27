@@ -738,6 +738,8 @@ Adjustments panel's grid and the seven Adjustments panel presets that use them.
 | `crates/ui-egui/src/dialogs/adjust_editors.rs` | `pub mod newer;`; `KINDS` (17); three `AdjustValue` variants; one `show` arm |
 | `crates/ui-egui/src/dialogs/adjust_editors/values.rs` | a `from_params` arm, three `kind_name` arms, a `write_params` arm |
 | `crates/ui-egui/src/panels/properties/adjustments.rs` | the three buttons (`adjustment_presets::newer_buttons`) after the grid |
+| `crates/ui-egui/src/dialogs/adjust_preview.rs` | `pub(crate) mod tests` (Pigment's preview test reuses its documents) |
+| `crates/ui-egui/src/dialogs/adjust_preview/tests.rs`, `crates/ui-egui/tests/it/gpu_tests/adjust_preview_gpu.rs` | `KINDS` is 17; samples for the three; they preview on the CPU proxy in Grayscale (`GRAY_COLOUR`); the two preview-against-command tests leave Clarity and Dehaze out (their targets are masked; Pigment's own test compares it unmasked); the GPU tests skip a preview the planner refuses (Clarity and Dehaze) |
 | `crates/ui-egui/src/menus/items.rs` | placement through `adjust_editors::newer::place_after` (Image › Adjustments after Selective Color…, Layer › New Adjustment Layer after Color Lookup…) |
 
 Pigment's own files changed: `presets/adjustments.rs` (`KINDS` + the three), `presets/adjustments/panel.rs` (the seven

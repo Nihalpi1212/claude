@@ -112,6 +112,7 @@ pub fn adjust_surface(s: &mut Surface, adj: &Adjustment, selection: Option<&Surf
     }
     // Pigment: Clarity and Dehaze reads each tile's neighbours from the untouched layer.
     let whole = (adj.spatial_margin(1.0) > 0).then(|| s.clone());
+    let canvas = newer::canvas();
     let taken = if over { stored.into_iter().flat_map(|c| s.take_tiles(c.rect())).collect() } else { s.take_tiles(r) };
     let done: Vec<_> = taken
         .into_par_iter()
@@ -120,7 +121,7 @@ pub fn adjust_surface(s: &mut Surface, adj: &Adjustment, selection: Option<&Surf
             let mut one = Surface::new(fmt);
             one.put_tiles([(tc, tile)]);
             let tr = tc.rect().intersect(&r);
-            let out = adjusted(whole.as_ref().unwrap_or(&one), tr, adj, selection, mode);
+            let out = newer::with_limit(canvas, || adjusted(whole.as_ref().unwrap_or(&one), tr, adj, selection, mode));
             one.write_region(tr, &out);
             photocraft_raster::scratch::give(out);
             one.take_tiles(tc.rect())
@@ -135,7 +136,7 @@ mod flatten_cmyk_tests;
 #[cfg(test)]
 mod tests;
 // Pigment: Clarity and Dehaze reads around the pixels it changes
-mod newer;
+pub(crate) mod newer;
 
 /// Applies `adj` to a layer mask through the selection. Untouched mask pixels count (they read as
 /// the mask's default value), and without a selection the default changes too, since a mask

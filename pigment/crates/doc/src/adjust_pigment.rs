@@ -69,10 +69,7 @@ mod tests {
             upgrade(&block(r#"{"kind":"grain","params":{"amount":35,"size":"x","roughness":250}}"#)),
             Some(Adjustment::Grain { amount: 35.0, size: 25.0, roughness: 100.0, seed: 1 })
         );
-        assert_eq!(
-            upgrade(&block(r#"{"kind":"clarity-dehaze","params":{"clarity":-30}}"#)),
-            Some(Adjustment::ClarityDehaze { clarity: -30.0, dehaze: 0.0 })
-        );
+        assert_eq!(upgrade(&block(r#"{"kind":"clarity-dehaze","params":{"clarity":-30}}"#)), Some(Adjustment::ClarityDehaze { clarity: -30.0, dehaze: 0.0 }));
         assert_eq!(
             upgrade(&block(r#"{"kind":"color-vibrance","params":{"temperature":18,"vibrance":10}}"#)),
             Some(Adjustment::ColorVibrance { temperature: 18.0, tint: 0.0, vibrance: 10.0, saturation: 0.0 })

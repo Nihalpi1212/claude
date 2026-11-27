@@ -154,3 +154,37 @@ fn a_preview_is_dropped_once_the_panel_is_no_longer_drawn() {
 fn is_preview_key(key: u64) -> bool {
     (BASE..BASE << 1).contains(&key)
 }
+
+// A6
+/// The Adjustments panel's three buttons after the framework's grid add the layers.
+#[test]
+fn the_adjustments_panel_buttons_add_the_layers() {
+    let mut s = photocraft_engine::Session::new();
+    s.execute("file.new", json!({"width": 32, "height": 24})).unwrap();
+    let app = PhotocraftApp::new(s, crate::Services::default());
+    let mut h = Harness::builder()
+        .with_context(app.ctx().clone())
+        .with_size(vec2(320.0, 1400.0))
+        .with_step_dt(1.0 / 60.0)
+        .build_ui_state(|ui, app| super::super::properties::adjustments::panel(app, ui), app);
+    PhotocraftApp::setup_context(&h.ctx, crate::theme::AppTheme::pro());
+    h.run_steps(3);
+    for (label, kind) in [("Color and Vibrance", "colorVibrance"), ("Clarity and Dehaze", "clarityDehaze"), ("Grain", "grain")] {
+        let at = h
+            .query_all_by_label(label)
+            .find(|n| egui_kittest::kittest::NodeT::accesskit_node(n).role() == egui::accesskit::Role::Button)
+            .unwrap_or_else(|| panic!("no {label} button"))
+            .rect()
+            .center();
+        h.hover_at(at);
+        h.run_steps(1);
+        h.drag_at(at);
+        h.run_steps(1);
+        h.drop_at(at);
+        h.run_steps(3);
+        let st = h.state().session.active().unwrap();
+        let top = st.doc.layer(st.active_layer.unwrap()).unwrap();
+        let LayerContent::Adjustment(a) = &top.content else { panic!("{label}: not an adjustment layer") };
+        assert_eq!(photocraft_engine::commands::adjustment_kind(a), kind);
+    }
+}

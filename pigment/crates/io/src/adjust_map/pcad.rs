@@ -59,7 +59,9 @@ fn clamped(adj: Adjustment) -> Adjustment {
             Adjustment::ColorVibrance { temperature: c(temperature), tint: c(tint), vibrance: c(vibrance), saturation: c(saturation) }
         }
         Adjustment::ClarityDehaze { clarity, dehaze } => Adjustment::ClarityDehaze { clarity: c(clarity), dehaze: c(dehaze) },
-        Adjustment::Grain { amount, size, roughness, seed } => Adjustment::Grain { amount: p(amount), size: p(size), roughness: p(roughness), seed: seed.clamp(1, 99_999) },
+        Adjustment::Grain { amount, size, roughness, seed } => {
+            Adjustment::Grain { amount: p(amount), size: p(size), roughness: p(roughness), seed: seed.clamp(1, 99_999) }
+        }
         other => other,
     }
 }
@@ -81,7 +83,10 @@ mod tests {
         }
         assert_eq!(parse(b"PCAD\0\0\0\x02{}"), None, "another version");
         assert_eq!(parse(&[&HEADER[..], br#""Invert""#].concat()), None, "a kind PSD has a block for");
-        assert_eq!(parse(&[&HEADER[..], br#"{"Grain":{"amount":1e30,"size":-5,"roughness":3,"seed":0}}"#].concat()), Some(Adjustment::Grain { amount: 100.0, size: 0.0, roughness: 3.0, seed: 1 }));
+        assert_eq!(
+            parse(&[&HEADER[..], br#"{"Grain":{"amount":1e30,"size":-5,"roughness":3,"seed":0}}"#].concat()),
+            Some(Adjustment::Grain { amount: 100.0, size: 0.0, roughness: 3.0, seed: 1 })
+        );
         // Truncated and flipped bytes never panic.
         let data = write(&Adjustment::Grain { amount: 1.0, size: 2.0, roughness: 3.0, seed: 4 });
         for n in 0..data.len() {
@@ -159,12 +164,19 @@ mod file_tests {
             psd_key: "pcJS".into(),
             raw: format!(r#"{{"kind":"{kind}","params":{params}}}"#).into_bytes().into(),
         };
-        let old = doc(&[pcjs("grain", r#"{"amount":35,"size":25,"roughness":60}"#), pcjs("clarity-dehaze", r#"{"clarity":25,"dehaze":10}"#), pcjs("shadows-highlights", "{}")]);
+        let old = doc(&[
+            pcjs("grain", r#"{"amount":35,"size":25,"roughness":60}"#),
+            pcjs("clarity-dehaze", r#"{"clarity":25,"dehaze":10}"#),
+            pcjs("shadows-highlights", "{}"),
+        ]);
         let want = [NEWER[2].clone(), NEWER[1].clone()];
         let check = |got: Vec<Adjustment>, what: &str| {
             assert_eq!(got[..2], want, "{what}");
             // The kind nobody knows stays its block (a PSD pads it).
-            assert!(matches!(&got[2], Adjustment::Unsupported { psd_key, raw } if psd_key == "pcJS" && raw.starts_with(br#"{"kind":"shadows-highlights""#)), "{what}");
+            assert!(
+                matches!(&got[2], Adjustment::Unsupported { psd_key, raw } if psd_key == "pcJS" && raw.starts_with(br#"{"kind":"shadows-highlights""#)),
+                "{what}"
+            );
         };
         for name in ["a.psd", "a.pcraft"] {
             let saved = crate::export(&old, name, &crate::ExportOptions::default()).unwrap();

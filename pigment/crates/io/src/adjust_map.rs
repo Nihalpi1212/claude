@@ -22,7 +22,22 @@ pub mod pcad;
 
 /// All PSD adjustment keys recognized as adjustment layers.
 pub const ADJUSTMENT_KEYS: [&[u8; 4]; 17] = [
-    b"levl", b"curv", b"hue2", b"brit", b"nvrt", b"thrs", b"post", b"expA", b"vibA", b"blnc", b"mixr", b"grdm", b"phfl", b"selc", b"blwh", b"clrL",
+    b"levl",
+    b"curv",
+    b"hue2",
+    b"brit",
+    b"nvrt",
+    b"thrs",
+    b"post",
+    b"expA",
+    b"vibA",
+    b"blnc",
+    b"mixr",
+    b"grdm",
+    b"phfl",
+    b"selc",
+    b"blwh",
+    b"clrL",
     // Pigment: its own adjustments (pcad.rs)
     &pcad::KEY,
 ];

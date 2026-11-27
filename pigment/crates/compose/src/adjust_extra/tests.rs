@@ -95,7 +95,9 @@ const CD: Adjustment = Adjustment::ClarityDehaze { clarity: 70.0, dehaze: 45.0 }
 /// bands.
 #[test]
 fn clarity_dehaze_has_no_tile_or_band_seams() {
-    for adjs in [vec![CD], vec![Adjustment::ClarityDehaze { clarity: -60.0, dehaze: -30.0 }], vec![CD, Adjustment::ClarityDehaze { clarity: 40.0, dehaze: 0.0 }]] {
+    for adjs in
+        [vec![CD], vec![Adjustment::ClarityDehaze { clarity: -60.0, dehaze: -30.0 }], vec![CD, Adjustment::ClarityDehaze { clarity: 40.0, dehaze: 0.0 }]]
+    {
         let d = busy_doc(256, 256, &adjs);
         let full = whole(&d);
         for tile in [16, 64, 100, 256] {

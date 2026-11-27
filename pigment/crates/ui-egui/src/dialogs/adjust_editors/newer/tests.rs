@@ -6,7 +6,7 @@ use craft::behavior::dock::Action;
 use egui::accesskit::Role;
 use egui::{Pos2, vec2};
 use egui_kittest::Harness;
-use egui_kittest::kittest::{NodeT, Queryable};
+use egui_kittest::kittest::Queryable;
 use photocraft_doc::{Adjustment, LayerContent};
 use serde_json::json;
 
@@ -130,34 +130,6 @@ fn properties_edits_each_kind_in_one_step() {
     }
 }
 
-/// The Adjustments panel's three buttons after the framework's grid add the layers.
-#[test]
-fn the_adjustments_panel_buttons_add_the_layers() {
-    let mut s = photocraft_engine::Session::new();
-    s.execute("file.new", json!({"width": 32, "height": 24})).unwrap();
-    let app = PhotocraftApp::new(s, crate::Services::default());
-    let mut h = Harness::builder()
-        .with_context(app.ctx().clone())
-        .with_size(vec2(320.0, 1400.0))
-        .with_step_dt(1.0 / 60.0)
-        .build_ui_state(|ui, app| crate::panels::properties::adjustments::panel(app, ui), app);
-    PhotocraftApp::setup_context(&h.ctx, crate::theme::AppTheme::pro());
-    h.run_steps(3);
-    for (label, kind) in [("Color and Vibrance", "colorVibrance"), ("Clarity and Dehaze", "clarityDehaze"), ("Grain", "grain")] {
-        let at = h.query_all_by_label(label).find(|n| n.accesskit_node().role() == Role::Button).unwrap_or_else(|| panic!("no {label} button")).rect().center();
-        h.hover_at(at);
-        h.run_steps(1);
-        h.drag_at(at);
-        h.run_steps(1);
-        h.drop_at(at);
-        h.run_steps(3);
-        let st = h.state().session.active().unwrap();
-        let top = st.doc.layer(st.active_layer.unwrap()).unwrap();
-        let LayerContent::Adjustment(a) = &top.content else { panic!("{label}: not an adjustment layer") };
-        assert_eq!(photocraft_engine::commands::adjustment_kind(a), kind);
-    }
-}
-
 /// Image › Adjustments lists them after Selective Color…, Layer › New Adjustment Layer after Color
 /// Lookup…, in this order.
 #[test]
@@ -171,4 +143,22 @@ fn the_menus_place_them_after_selective_color_and_color_lookup() {
     let layer = order("Layer › New Adjustment Layer");
     let at = layer.iter().position(|id| id == "layer.newAdjustmentLayer.colorLookup").unwrap();
     assert_eq!(layer[at + 1..at + 4], ["layer.newAdjustmentLayer.colorVibrance", "layer.newAdjustmentLayer.clarityDehaze", "layer.newAdjustmentLayer.grain"]);
+}
+
+/// The dialog's live preview of Clarity and Dehaze (the adjustment clipped to the target) is the
+/// command's result on an unmasked target. On a masked one the clipping base's alpha (its mask
+/// included, as in Photoshop) weights the blur, so the two differ near the mask (the upstream
+/// preview-vs-command tests leave the kind out for that).
+#[test]
+fn clarity_dehaze_previews_like_the_command() {
+    use photocraft_color::{ColorMode, SampleType};
+    for selection in [false, true] {
+        let (mut doc, target) = crate::dialogs::adjust_preview::tests::document(ColorMode::Rgb, SampleType::U8, selection);
+        doc.layer_mut(target).unwrap().mask = None;
+        let p = json!({"clarity": 60, "dehaze": 30});
+        let want = crate::dialogs::adjust_preview::tests::destructive(&doc, target, "clarityDehaze", &p).unwrap();
+        let got = crate::adjust_preview::preview_document(&doc, target, "clarityDehaze", &p).unwrap();
+        let d = crate::dialogs::adjust_preview::tests::max_diff(&got, &want);
+        assert!(d <= 1.0 / 255.0 + 1e-4, "selection {selection}: {:.2}/255", d * 255.0);
+    }
 }

@@ -104,7 +104,8 @@ fn commands_make_layers_edit_pixels_and_are_recorded() {
         .iter()
         .map(|step| step[0].as_str().unwrap().to_string())
         .collect();
-    for id in ["layer.newAdjustmentLayer.colorVibrance", "layer.newAdjustmentLayer.clarityDehaze", "layer.newAdjustmentLayer.grain", "image.adjustments.grain"] {
+    for id in ["layer.newAdjustmentLayer.colorVibrance", "layer.newAdjustmentLayer.clarityDehaze", "layer.newAdjustmentLayer.grain", "image.adjustments.grain"]
+    {
         assert!(steps.iter().any(|s| s == id), "{id} recorded: {steps:?}");
     }
     // Played back on a new document, the same layers appear.
@@ -123,7 +124,8 @@ fn commands_make_layers_edit_pixels_and_are_recorded() {
 }
 
 /// Image › Adjustments › Clarity and Dehaze on a layer larger than a tile: tile by tile, each
-/// tile reads its neighbours, so it equals the adjustment applied to the whole layer at once.
+/// tile reads its neighbours, so it equals the adjustment applied to the whole layer at once, the
+/// canvas's edges included.
 #[test]
 fn destructive_clarity_dehaze_has_no_tile_seams() {
     let mut s = doc(300, 200);
@@ -132,18 +134,18 @@ fn destructive_clarity_dehaze_has_no_tile_seams() {
         let surf = s.active().unwrap().doc.layer(id).unwrap().surface().unwrap().clone();
         let fmt = surf.format();
         let raw = surf.read_region(Rect::new(0, 0, 300, 200));
-        let mut buf = photocraft_compose::Buffer { rect: Rect::new(0, 0, 300, 200), px: raw.chunks_exact(4).map(|p| photocraft_raster::to_rgba(&fmt, p)).collect() };
+        let mut buf =
+            photocraft_compose::Buffer { rect: Rect::new(0, 0, 300, 200), px: raw.chunks_exact(4).map(|p| photocraft_raster::to_rgba(&fmt, p)).collect() };
         let adj = Adjustment::ClarityDehaze { clarity: 70.0, dehaze: 40.0 };
         photocraft_compose::adjust::apply_in(&adj, &mut buf, photocraft_compose::adjust::Transfer::Srgb, None, ColorMode::Rgb);
         buf
     };
     s.execute("image.adjustments.clarityDehaze", json!({"clarity": 70, "dehaze": 40})).unwrap();
     let got = s.active().unwrap().doc.layer(id).unwrap().surface().unwrap().read_region(Rect::new(0, 0, 300, 200));
-    // Past the layer's pixels it reads transparent, as one pass over the layer's whole surface
-    // does not: compare away from the canvas edges.
+    // The canvas's edges replicate, as one pass over the whole image does (and the compositor).
     let mut worst = 0.0f32;
-    for y in 30..170 {
-        for x in 30..270 {
+    for y in 0..200 {
+        for x in 0..300 {
             let i = (y * 300 + x) as usize;
             for c in 0..3 {
                 worst = worst.max((got[i * 4 + c] - whole.px[i][c]).abs());
@@ -175,8 +177,7 @@ fn panel_presets_of_the_newer_kinds() {
     let out = s.execute("layer.adjustmentPreset", json!({"group": "photo-repair", "preset": "cool-cast"})).unwrap();
     assert_eq!(out["layers"].as_array().map(Vec::len), Some(1));
     assert_eq!(active_adjustment(&s), Adjustment::ColorVibrance { temperature: -20.0, tint: 0.0, vibrance: 0.0, saturation: 0.0 });
-    let names: Vec<&str> =
-        crate::presets::adjustments::panel::PANEL_PRESETS.iter().flat_map(|g| g.presets.iter().map(|p| p.name)).collect();
+    let names: Vec<&str> = crate::presets::adjustments::panel::PANEL_PRESETS.iter().flat_map(|g| g.presets.iter().map(|p| p.name)).collect();
     assert_eq!(names.len(), 18, "the JavaScript app's 18");
     for n in ["Bright and Warm", "Soft Skin", "Vivid", "Clear Distance", "Remove Warm Cast", "Vintage Fade", "Film Grain"] {
         assert!(names.contains(&n), "{n}");

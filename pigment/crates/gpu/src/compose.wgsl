@@ -806,9 +806,9 @@ fn pigment_tri(x: i32, y: i32, salt: i32) -> f32 {
 // the ceiling is 1 unless the document is 32-bit).
 fn pigment_grain(c: vec3<f32>, d: vec2<i32>, p: vec4<f32>) -> vec3<f32> {
     let s = i32(p.w);
-    var smooth: f32;
+    var sm: f32;
     if (p.y <= 1.0) {
-        smooth = pigment_tri(d.x, d.y, 1 + s);
+        sm = pigment_tri(d.x, d.y, 1 + s);
     } else {
         let g = vec2(f32(d.x), f32(d.y)) / p.y;
         let i = floor(g);
@@ -820,10 +820,10 @@ fn pigment_grain(c: vec3<f32>, d: vec2<i32>, p: vec4<f32>) -> vec3<f32> {
         let b = pigment_tri(ix + 1, iy, 1 + s);
         let cc = pigment_tri(ix, iy + 1, 1 + s);
         let e = pigment_tri(ix + 1, iy + 1, 1 + s);
-        smooth = ((a + (b - a) * f.x) * (1.0 - f.y) + (cc + (e - cc) * f.x) * f.y) * 1.6;
+        sm = ((a + (b - a) * f.x) * (1.0 - f.y) + (cc + (e - cc) * f.x) * f.y) * 1.6;
     }
-    var n = smooth;
-    if (p.z > 0.0) { n = smooth * (1.0 - p.z) + pigment_tri(d.x, d.y, 3 + s) * p.z; }
+    var n = sm;
+    if (p.z > 0.0) { n = sm * (1.0 - p.z) + pigment_tri(d.x, d.y, 3 + s) * p.z; }
     let l = clamp(0.299 * c.r + 0.587 * c.g + 0.114 * c.b, 0.0, 1.0);
     let k = n * p.x * 0.18 * (0.4 + 0.6 * sin(3.14159265358979 * l));
     let hi = select(1.0, F32_MAX, (op.flags & F_HDR) != 0u);

@@ -149,6 +149,10 @@ fn sample(kind: &str) -> Value {
         "threshold" => json!({"level": 90}),
         "gradientMap" => json!({"stops": [[0, "#200040"], [1, "#ffd080"]]}),
         "selectiveColor" => json!({"method": "absolute", "reds": [10, -20, 30, 5], "blues": [-15, 0, 25, 0]}),
+        // Pigment: Color and Vibrance, Clarity and Dehaze, Grain
+        "colorVibrance" => json!({"temperature": 40, "vibrance": 30}),
+        "clarityDehaze" => json!({"clarity": 60, "dehaze": 30}),
+        "grain" => json!({"amount": 60}),
         _ => json!({}),
     }
 }
@@ -156,7 +160,9 @@ fn sample(kind: &str) -> Value {
 /// Grayscale kinds that make colour from gray: only these preview on the CPU proxy, so a
 /// Grayscale preview error is expected only for them. The Hue/Saturation sample leaves
 /// `colorize` off, so it stays gray.
-const GRAY_COLOUR: [&str; 7] = ["vibrance", "colorBalance", "blackWhite", "photoFilter", "channelMixer", "gradientMap", "selectiveColor"];
+// Pigment: Color and Vibrance, Clarity and Dehaze and Grain preview on the CPU proxy in Grayscale (`keeps_gray`).
+const GRAY_COLOUR: [&str; 10] =
+    ["vibrance", "colorBalance", "blackWhite", "photoFilter", "channelMixer", "gradientMap", "selectiveColor", "colorVibrance", "clarityDehaze", "grain"];
 
 fn pm(p: &[f32; 4]) -> [f32; 4] {
     [p[0] * p[3], p[1] * p[3], p[2] * p[3], p[3]]
@@ -202,6 +208,10 @@ fn preview_layer_composites_on_the_gpu_like_the_command() {
                     // The GPU holds 16- and 32-bit layers as half floats: Threshold and Posterize
                     // may flip a few pixels sitting right at a step (1 % allowed).
                     let skip = if matches!(kind, "threshold" | "posterize") && depth != SampleType::U8 { (b.width() * b.height()) as usize / 100 } else { 0 };
+                    // Pigment: Clarity and Dehaze composites on the CPU (the planner refuses it).
+                    if photocraft_gpu::plan(&preview).is_err() {
+                        continue;
+                    }
                     let on_gpu = render_to_vec(&mut comp, &device, &queue, &preview, b).unwrap_or_else(|e| panic!("{what}: {e:?}"));
                     let on_cpu = photocraft_compose::render(&preview, b).into_px();
                     let d = max_diff(&on_gpu, &on_cpu, skip);
@@ -257,6 +267,10 @@ fn clipped_target_preview_composites_on_the_gpu_like_the_command() {
             let what = format!("{kind} {mode:?} {depth:?} selection {selection}");
             let b = preview.bounds();
             let skip = if matches!(kind, "threshold" | "posterize") && depth != SampleType::U8 { (b.width() * b.height()) as usize / 100 } else { 0 };
+            // Pigment: Clarity and Dehaze composites on the CPU (the planner refuses it).
+            if photocraft_gpu::plan(&preview).is_err() {
+                continue;
+            }
             let on_gpu = render_to_vec(&mut comp, &device, &queue, &preview, b).unwrap_or_else(|e| panic!("{what}: {e:?}"));
             let on_cpu = photocraft_compose::render(&preview, b).into_px();
             let d = max_diff(&on_gpu, &on_cpu, skip);
@@ -287,6 +301,10 @@ fn proxy_preview_composites_on_the_gpu() {
         render_to_vec(&mut comp, &device, &queue, &doc, doc.bounds()).unwrap();
         for kind in photocraft_ui_egui::adjust_editors::KINDS {
             let p = proxy_with_settings(&proxy, kind, &sample(kind)).unwrap();
+            // Pigment: Clarity and Dehaze composites on the CPU (the planner refuses it).
+            if photocraft_gpu::plan(&p).is_err() {
+                continue;
+            }
             let on_gpu = render_to_vec(&mut comp, &device, &queue, &p, p.bounds()).unwrap();
             let on_cpu = photocraft_compose::render(&p, p.bounds()).into_px();
             let d = max_diff(&on_gpu, &on_cpu, 0);

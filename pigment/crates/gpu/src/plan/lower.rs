@@ -329,7 +329,9 @@ pub fn adjustment_program(adj: &Adjustment, transfer: Transfer, depth: photocraf
         }
         // Pigment: Color and Vibrance (the Vibrance kernel with gains), Grain; Clarity and Dehaze
         // is refused by the planner (composited on the CPU).
-        Adjustment::ColorVibrance { .. } | Adjustment::Grain { .. } | Adjustment::ClarityDehaze { .. } => crate::plan::pigment_lower::program(adj, transfer, depth),
+        Adjustment::ColorVibrance { .. } | Adjustment::Grain { .. } | Adjustment::ClarityDehaze { .. } => {
+            crate::plan::pigment_lower::program(adj, transfer, depth)
+        }
         // Identity on the CPU too (not evaluated there).
         Adjustment::ColorLookup { .. } | Adjustment::Unsupported { .. } => (0, p, None),
     }

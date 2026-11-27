@@ -569,4 +569,4 @@ pub fn live_uncovered(app: &mut PhotocraftApp, doc: DocId, key: u64, visible: Re
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
