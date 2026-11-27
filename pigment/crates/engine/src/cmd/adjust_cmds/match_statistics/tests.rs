@@ -110,8 +110,8 @@ fn a_file_the_javascript_app_wrote_loads_as_photocrafts_statistics() {
     let js = stats_of(&raw);
     let (mut converted, mut unconverted) = (0f32, 0f32);
     for k in 0..3 {
-        assert!((loaded.mean[k] - ours.mean[k]).abs() < 0.05, "mean[{k}]: loaded {loaded:?}, PhotoCraft {ours:?}");
-        assert!((loaded.std[k] - ours.std[k]).abs() < 0.03 * ours.std[k] + 0.1, "std[{k}]: loaded {loaded:?}, PhotoCraft {ours:?}");
+        assert!((loaded.mean[k] - ours.mean[k]).abs() < 0.05, "mean[{k}]: loaded {loaded:?}, Pigment {ours:?}");
+        assert!((loaded.std[k] - ours.std[k]).abs() < 0.03 * ours.std[k] + 0.1, "std[{k}]: loaded {loaded:?}, Pigment {ours:?}");
         converted += (loaded.mean[k] - ours.mean[k]).abs();
         unconverted += (js.mean[k] - ours.mean[k]).abs();
     }

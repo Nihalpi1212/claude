@@ -43,6 +43,7 @@ pub(crate) mod info;
 pub mod layer_filter_ui;
 pub mod layer_menu_ui;
 pub mod layer_props_ui;
+// Pigment: a Solid Color fill's colour in Properties
 pub(super) mod layer_reveal;
 pub mod layer_row_ui;
 pub(super) mod layer_transfer;
@@ -61,6 +62,7 @@ mod properties;
 pub(crate) mod region_versions;
 pub(crate) mod registry;
 pub mod smart_ui;
+pub(crate) mod solid_fill_props;
 mod status_bar;
 pub mod swatches_ui;
 pub(super) mod timeline_ui;

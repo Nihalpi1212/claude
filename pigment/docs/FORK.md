@@ -746,6 +746,35 @@ Pigment's own files changed: `presets/adjustments.rs` (`KINDS` + the three), `pr
 panel presets, in the JavaScript order), `legacy_pigment/{adjust,filters,layer_kinds_tests}.rs` (the live arm, smart
 filters, the fixtures' tighter bounds), `panels/adjustment_presets.rs` (`newer_buttons`).
 
+### HDR Toning's methods, Match Color's statistics, Replace Color's preview, a solid fill in Properties
+
+Four rows of the JavaScript Pigment 0.4 that PhotoCraft lacked.
+
+- **HDR Toning's Method menu**: Local Adaptation (upstream's, unchanged), Equalize Histogram, Exposure and Gamma and
+  Highlight Compression, as `image.adjustments.hdrToning`'s `"method"` (`localAdaptation` by default; the
+  JavaScript app's ids `local-adaptation`, … are read too). The three new methods are ports of the app's `toneMap`
+  branches (`crates/algo/src/tone/hdr_methods.rs`; they match the app's own output within a level,
+  `hdr_methods/js-cases.json`): they decode to linear light (a 32-bit document is linear already) and encode the result.
+  **Followed the code, not the spec**: the method is an argument of `hdr_toning_with`, not a field of upstream's
+  `HdrToning`, which Merge to HDR Pro and its checked replay build. Exposure acts on Highlight Compression too, as it did
+  in the JavaScript app (Photoshop's has no settings). The eight built-in HDR presets name `"method":"localAdaptation"`.
+- **Match Color's Load Statistics… and Save Statistics…**: `image.adjustments.matchColor` takes
+  `"sourceStatistics":{"mean":[L,a,b],"std":[L,a,b]}` in place of a source document (so an action plays back with no
+  source open), and `image.adjustments.matchColor.statistics` (not journaled) computes a source's statistics or reads
+  and writes the JavaScript app's file (`{"format":"pigment-match-color-statistics","version":1,"name","mean","std"}`).
+  The JavaScript app's L\*a\*b\* is D65 and PhotoCraft's D50: the file keeps D65, the parameter is D50, converted
+  through linear sRGB (`crates/engine/src/cmd/adjust_cmds/match_statistics.rs`; a file the app wrote,
+  `match_statistics/js-statistics.json`, loads as PhotoCraft's own statistics of the same pixels).
+
+| Upstream file | Hook |
+|---|---|
+| `crates/algo/src/tone.rs` | `pub mod hdr_methods;` |
+| `crates/engine/src/cmd/adjust_cmds.rs` | `pub mod match_statistics;`; `match_color` reads `match_statistics::given` first; `hdr_toning` reads `method` and calls `hdr_methods::hdr_toning_with`; the two params strings; `specs()` chains `match_statistics::specs()` |
+| `crates/automation/src/workspace.rs` | `image.adjustments.matchColor.statistics` with a `path` in `command_uses_ambient_path` |
+
+Pigment's own files changed: `presets/adjustments.rs` (the HDR built-ins' `method`), `cmd/adjust_preset_cmds.rs` (an
+HDR preset's `method` must be one of the menu's).
+
 ## Keeping the rebrand: `scripts/pigment-rebrand.py`
 
 Most of the rebrand is mechanical and done by [`scripts/pigment-rebrand.py`](../scripts/pigment-rebrand.py):

@@ -24,6 +24,9 @@ use crate::PhotocraftApp;
 
 mod rows;
 pub(crate) use rows::{REPLACE_COLOR, replace_color_sample};
+// Pigment: HDR Toning's presets and methods, Match Color's statistics, Replace Color's preview
+mod pigment;
+pub(crate) use pigment::pump as pigment_pump;
 
 const MATCH_COLOR: &str = "image.adjustments.matchColor";
 #[cfg(test)]
@@ -506,7 +509,9 @@ fn builder(
     let key = command.to_owned();
     let canvas = app.session.active_index().map(|idx| crate::canvas::document_display::CanvasHost::primary(app, idx).canvas_id());
     move |fields: &mut DialogFields| {
-        let mut dialog = ParamDialog::command(key.clone(), title.clone(), params.clone())
+        // Pigment: Match Color's Source menu gains loaded statistics.
+        let rows = pigment::params_for(&key, &params, fields).into_owned();
+        let mut dialog = ParamDialog::command(key.clone(), title.clone(), rows)
             .values(Bind::bound(fields))
             .reset_to(reset.clone())
             .layout(ParamLayout::Stacked)
@@ -621,6 +626,8 @@ pub(crate) fn command_params(command: &str, fields: &DialogFields) -> Value {
     if command == crate::dialogs::image_processor_ui::COMMAND {
         crate::dialogs::image_processor_ui::nest(&mut map);
     }
+    // Pigment: loaded statistics are Match Color's `sourceStatistics`.
+    pigment::command_params_of(command, &mut map);
     params_of(&map)
 }
 

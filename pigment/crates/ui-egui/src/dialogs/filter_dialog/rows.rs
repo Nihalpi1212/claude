@@ -61,6 +61,8 @@ pub(crate) fn custom_rows(app: &mut PhotocraftApp, command: &str, params: &mut V
         COLOR_LOOKUP => color_lookup(app, params),
         REPLACE_COLOR => replace_color(app, params),
         RADIAL_BLUR => radial_blur(params),
+        // Pigment: HDR Toning's Preset row and Method menu
+        super::pigment::HDR_TONING => super::pigment::hdr_toning(app, params),
         _ if crate::blur_pins::handles(command) => {
             if let Some((kind, bounds, start)) = crate::blur_pins::initial(app, command) {
                 params.push(crate::blur_pins::blur_row(kind, bounds, start));
@@ -394,6 +396,8 @@ fn match_color(app: &PhotocraftApp, params: &mut Vec<Param>) {
         })
         .enabled_when_in("source", (0..count).map(|i| i.to_string())),
     );
+    // Pigment: Load Statistics… and Save Statistics…
+    super::pigment::match_color(params);
 }
 
 /// The source layer a form holds: the row's own choice, or the id a caller set through the row's key.
@@ -415,6 +419,8 @@ fn replace_color(app: &PhotocraftApp, params: &mut Vec<Param>) {
     let at = params.iter().position(|p| p.key == "color").map_or(params.len(), |i| i + 1);
     params.insert(at, droppers_row());
     params.push(result_row());
+    // Pigment: the Selection / Image preview
+    super::pigment::replace_color(params);
 }
 
 /// The three droppers (#6280), as Photoshop's: Eyedropper, Add to Sample and Subtract from Sample. Clicking

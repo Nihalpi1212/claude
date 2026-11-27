@@ -183,7 +183,9 @@ fn statistics(s: &mut Session, p: &Value) -> Result<Value> {
             let stats = tone::lab_stats(&px, mask.as_deref()).ok_or_else(|| bad(STATISTICS, "the source has no opaque pixels"))?;
             (named.map_or_else(|| d.doc.name.clone(), str::to_owned), rounded(&stats))
         }
-        (None, Some(v)) => (named.unwrap_or("Statistics").to_owned(), read(v).ok_or_else(|| bad(STATISTICS, "`statistics` must be {\"mean\":[L,a,b],\"std\":[L,a,b]}"))?),
+        (None, Some(v)) => {
+            (named.unwrap_or("Statistics").to_owned(), read(v).ok_or_else(|| bad(STATISTICS, "`statistics` must be {\"mean\":[L,a,b],\"std\":[L,a,b]}"))?)
+        }
         (None, None) => {
             // Load Statistics…: the file's text, or the file at `path`.
             let (text, file) = match (p.get("data").and_then(Value::as_str), path) {
@@ -216,7 +218,7 @@ pub(super) fn specs() -> Vec<CommandSpec> {
         label: "Match Color Statistics",
         menu: &[],
         shortcut: None,
-        params: r##"{"source":doc?,"sourceLayer":id?,"useSelectionInSource":bool=false,"statistics":{"mean","std"}?,"name":text?,"path":path?,"data":text?,"fileName":text?} → {"name","mean":[L,a,b],"std":[L,a,b],"file"?} (Save Statistics…: a source document's statistics, or the given `statistics`, with the file's text as `file`, written to `path` when given. Load Statistics…: without either, reads the file's `data` text or the file at `path`. Statistics are PhotoCraft's D50 L*a*b*, as `image.adjustments.matchColor` takes them in `sourceStatistics`; the file is the JavaScript Pigment's ("format":"pigment-match-color-statistics", D65).)"##,
+        params: r##"{"source":doc?,"sourceLayer":id?,"useSelectionInSource":bool=false,"statistics":{"mean","std"}?,"name":text?,"path":path?,"data":text?,"fileName":text?} → {"name","mean":[L,a,b],"std":[L,a,b],"file"?} (Save Statistics…: a source document's statistics, or the given `statistics`, with the file's text as `file`, written to `path` when given. Load Statistics…: without either, reads the file's `data` text or the file at `path`. Statistics are Pigment's D50 L*a*b*, as `image.adjustments.matchColor` takes them in `sourceStatistics`; the file is the JavaScript Pigment's ("format":"pigment-match-color-statistics", D65).)"##,
         enabled: |_| Ok(()),
         run: statistics,
         journal: false,
