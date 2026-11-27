@@ -105,6 +105,8 @@ pub(crate) mod params {
         },
         ParamFamily { cancel: Some(filter_dialog::cancel), ..ParamFamily::new(crate::view_cmds::dialogs::is_form, filter_dialog::run) },
         crate::prefs_ui::PRESETS_FAMILY,
+        // Pigment: Auto Color Correction Options
+        super::auto_options_ui::FAMILY,
         ParamFamily { check: Some(crate::crop_presets::check), ..ParamFamily::new(crate::crop_presets::owns, crate::crop_presets::run) },
         crate::actions::dialogs::NEW_SET_FAMILY,
         // Pigment: Save Adjustment Preset… (the Properties panel menu)
@@ -416,6 +418,8 @@ pub(crate) const PROMPTS: &[PromptRow] = &[
     crate::actions::library::answer,
     // Pigment: the first Save over a file of Pigment 0.1–0.4.
     legacy_save_prompt::answer,
+    // Pigment: "Save the new target colors as defaults?"
+    auto_options_ui::answer_prompt,
 ];
 
 /// [`prompts_take`] over the rows `rows`.
@@ -473,6 +477,8 @@ pub(crate) const TAKERS: &[fn(&mut PhotocraftApp, &egui::Context)] = &[
     crate::crop_presets::take,
     crate::variables_ui::take,
     crate::actions::dialogs::take_stops,
+    // Pigment: Auto Color Correction Options (the dialog's live Auto, a target colour's answer)
+    auto_options_ui::take,
 ];
 
 /// Runs the answers of every dialog that finished: parameter dialogs, prompts, then each family's own results. It runs
@@ -625,13 +631,14 @@ const ENGINE_READ: &[&str] = &["ui.layersPanelOptions", "file.print", "file.expo
 
 /// The "Don't show again" entries (`{"skip": true}`), by key, as their prompt modules read them. Told apart by key, not
 /// by the shape of the value.
-fn dont_show_again_keys() -> [&'static str; 5] {
+fn dont_show_again_keys() -> [&'static str; 6] {
     [
         delete_layer_prompt::PREF,
         live_shape_prompt::PREF,
         crate::analysis::note_alerts::DELETE_NOTE_PREF,
         crate::retouch_ui::CAM_NO_PIXELS_PREF,
         legacy_save_prompt::PREF, // Pigment
+        auto_options_ui::PREF,    // Pigment
     ]
 }
 
@@ -694,8 +701,10 @@ pub mod adjust_dialog;
 pub mod adjust_editors;
 pub mod adjust_preview;
 pub mod alerts;
+// Pigment: Auto Color Correction Options
 #[cfg(test)]
 mod arbitrary_ruler_prefill_tests;
+pub mod auto_options_ui;
 pub(crate) mod bitmap_dialog;
 pub mod blend_options;
 pub mod blur_pins;

@@ -243,6 +243,12 @@ pub fn layer_editor(app: &mut PhotocraftApp, ui: &mut egui::Ui, id: LayerId, adj
             Err(err) => app.ui.status = err,
         },
         Some(AdjustAsk::ImportGradients) => crate::preset_files_ui::import_gradients_dialog(app),
+        // Pigment: Auto Color Correction Options (Auto is one `layer.setAdjustment`)
+        Some(AdjustAsk::AutoOptions(ask)) => {
+            if let Some(auto) = crate::dialogs::auto_options_ui::answer_properties(app, id, kind, &vcx, ask) {
+                commit(app, id, &mut record, &committed, &auto, &vcx, None);
+            }
+        }
         Some(AdjustAsk::PickColor(request)) if record.pick.is_none() => {
             let (key, opened) = (request.key.clone(), request.color);
             // Properties has no parent dialog for `open_for_request`: the panel holds its picker itself.

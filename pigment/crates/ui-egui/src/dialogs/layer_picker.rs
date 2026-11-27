@@ -78,7 +78,9 @@ pub fn cancel(app: &mut PhotocraftApp) -> bool {
 pub fn sample_at(app: &mut PhotocraftApp, x: f64, y: f64) -> bool {
     let Some((layer, point)) = armed(app) else { return false };
     let size = app.ui.tool_options.eyedropper.size.pixels();
-    let p = json!({"layer": layer.0, "eyedropper": {"point": point_name(point), "at": [x, y], "size": size}});
+    let mut p = json!({"layer": layer.0, "eyedropper": {"point": point_name(point), "at": [x, y], "size": size}});
+    // Pigment: Auto Color Correction Options (this session's target colours)
+    crate::dialogs::auto_options_ui::with_targets(app, &mut p);
     if let Err(err) = app.run("layer.setAdjustment", p) {
         app.ui.status = err;
         app.ui.status_error = true;

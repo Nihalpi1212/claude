@@ -272,7 +272,9 @@ pub(crate) fn pick(app: &mut PhotocraftApp, at: [f64; 2]) -> bool {
             .and_then(|a| a.ok_or_else(|| photocraft_engine::EngineError::Other("missing eyedropper adjustment".into())))
     } else {
         let Some(sample) = crate::canvas::composite_color(app, at[0], at[1]) else { return true };
-        photocraft_engine::adjust_params::adjustment_eyedropper(&kind, &base, eyedropper, sample, mode)
+        // Pigment: Auto Color Correction Options (the eyedroppers' target colours)
+        let targets = super::auto_options_ui::targets(app);
+        photocraft_engine::adjust_params::targets::adjustment_eyedropper_with(&kind, &base, eyedropper, sample, mode, &targets)
     };
     let adjustment = match adjustment {
         Ok(adjustment) => adjustment,
@@ -785,9 +787,15 @@ fn answer_asks(app: &mut PhotocraftApp, id: DialogId) {
             }
             // Pigment: adjustment presets
             AdjustAsk::Preset(ask) => adjust_editors::preset_row::answer_dialog(app, id, ask),
+            // Pigment: Auto Color Correction Options
+            AdjustAsk::AutoOptions(ask) => super::auto_options_ui::answer_dialog(app, id, ask),
         }
     }
     while let Some((key, color)) = crate::color_picker_ui::answer_for(app, id) {
+        // Pigment: Auto Color Correction Options (an eyedropper's target colour)
+        if super::auto_options_ui::answer_target(app, &key, color) {
+            continue;
+        }
         if let Some(dialog) = app.framework.dialogs.get_mut_by_id::<HostedAdjustDialog>(id) {
             adjust_editors::answer_color(&mut dialog.value_mut().value, &key, color);
         }

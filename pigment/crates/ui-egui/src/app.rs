@@ -228,6 +228,8 @@ impl PhotocraftApp {
             ai: Default::default(),
             // Pigment: the Adjustments panel's presets
             adjust_panel_hover: None,
+            // Pigment: Auto Color Correction Options
+            auto_options: Default::default(),
             #[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
             live_tokens: theme::live::LiveTokens::from_env(),
         };

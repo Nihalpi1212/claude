@@ -34,6 +34,8 @@ use serde_json::{Value, json};
 
 use crate::PhotocraftApp;
 
+// Pigment: Auto Color Correction Options
+pub mod auto_row;
 // Pigment: adjustment presets
 pub mod preset_row;
 mod session;
@@ -169,6 +171,9 @@ pub enum AdjustAsk {
     // Pigment: adjustment presets
     /// The Preset row asks for a preset command or a file dialog (`preset_row::answer_dialog`).
     Preset(preset_row::PresetAsk),
+    // Pigment: Auto Color Correction Options
+    /// Auto, Options… or an eyedropper's double-click (`auto_options_ui`).
+    AutoOptions(auto_row::AutoAsk),
 }
 
 /// What one pass of an editor reports.
@@ -235,31 +240,33 @@ fn show(kind: &str, setup: &EditorSetup, ui: &mut Ui, value: &mut AdjustValue, c
     match (kind, value) {
         ("brightnessContrast", AdjustValue::BrightnessContrast { value }) => {
             let out = BrightnessContrastEditor::new("Brightness/Contrast", Bind::bound(value)).context(context).show(ui);
-            lifted(out.events, |value| AdjustValue::BrightnessContrast { value })
+            // Pigment: Auto Color Correction Options (Brightness/Contrast's Auto)
+            let ask = auto_row::buttons(ui, "brightnessContrast", true, false).map(AdjustAsk::AutoOptions);
+            AdjustOut { ask, edit: out.events.map(|value| AdjustValue::BrightnessContrast { value }) }
         }
         ("levels", AdjustValue::Levels { levels }) => {
-            let mut panel = LevelsPanel::new("Levels", Bind::bound(levels), setup.channels.clone())
+            // Pigment: Auto Color Correction Options (Pigment's eyedropper row, which reports a double-click)
+            let picked = auto_row::pickers(ui, setup, cx);
+            let before = levels.clone();
+            let out = LevelsPanel::new("Levels", Bind::bound(&mut *levels), setup.channels.clone())
                 .histograms(&setup.histograms)
-                .pickers(Bind::bound(&mut *cx.picker))
                 .channel(Bind::bound(&mut *cx.channel))
-                .context(context);
-            if let Some(canvas) = cx.canvas {
-                panel = panel.canvas(canvas);
-            }
-            if setup.pickers_unavailable {
-                panel = panel.pickers_unavailable();
-            }
-            let out = panel.show(ui);
+                .context(context)
+                .show(ui);
             if setup.reported_clipping.replace(out.clipping) != out.clipping {
                 *cx.clipping = out.clipping;
             }
-            lifted(out.edit, |levels| AdjustValue::Levels { levels })
+            // Pigment: Auto Color Correction Options (the framework's Auto handed to the host; Options…)
+            let (edit, auto) = auto_row::levels_auto(ui, levels, before, out.edit);
+            let options = auto_row::buttons(ui, "levels", false, true);
+            AdjustOut { ask: auto.or(options).or(picked).map(AdjustAsk::AutoOptions), edit: edit.map(|levels| AdjustValue::Levels { levels }) }
         }
         ("curves", AdjustValue::Curves { curves }) => {
+            // Pigment: Auto Color Correction Options (Pigment's eyedropper row, which reports a double-click)
+            let picked = auto_row::pickers(ui, setup, cx);
             let mut panel = CurvesPanel::new("Curves", Bind::bound(&mut *curves), setup.channels.clone())
                 .histograms(&setup.histograms)
                 .sampler(values::curve_sampler)
-                .pickers(Bind::bound(&mut *cx.picker))
                 .channel(Bind::bound(&mut *cx.channel))
                 .context(context);
             if let Some(canvas) = cx.canvas {
@@ -267,9 +274,6 @@ fn show(kind: &str, setup: &EditorSetup, ui: &mut Ui, value: &mut AdjustValue, c
             }
             if let Some(point) = cx.select_point {
                 panel = panel.select(point);
-            }
-            if setup.pickers_unavailable {
-                panel = panel.pickers_unavailable();
             }
             let out = panel.show(ui);
             let mut edit = out.edit.map(|curves| AdjustValue::Curves { curves });
@@ -281,7 +285,9 @@ fn show(kind: &str, setup: &EditorSetup, ui: &mut Ui, value: &mut AdjustValue, c
                 *curves = converted.clone();
                 edit.push(EditEvent::set(Mixed::Same(from), AdjustValue::Curves { curves: converted }, Arc::from("Curves Mode"), None));
             }
-            AdjustOut { ask: None, edit }
+            // Pigment: Auto Color Correction Options (Auto, Options…)
+            let auto = auto_row::buttons(ui, "curves", true, true);
+            AdjustOut { ask: auto.or(picked).map(AdjustAsk::AutoOptions), edit }
         }
         ("exposure", AdjustValue::Exposure { values }) => {
             let fields = AdjustField::exposure(&Env::of(ui).words::<AdjustWords>());

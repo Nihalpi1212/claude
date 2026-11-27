@@ -699,6 +699,8 @@ pub struct PhotocraftApp {
     pub ai: ai_ui::AiUi,
     /// Pigment: the Adjustments panel's preset under the pointer, previewed (`panels::adjustment_presets`).
     pub(crate) adjust_panel_hover: Option<panels::adjustment_presets::Hover>,
+    /// Pigment: Auto Color Correction Options' session options and open dialog (`dialogs::auto_options_ui`).
+    pub(crate) auto_options: dialogs::auto_options_ui::State,
     #[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
     live_tokens: theme::live::LiveTokens,
 }
