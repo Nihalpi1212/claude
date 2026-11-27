@@ -218,6 +218,8 @@ pub mod auto_levels;
 // Pigment: Auto Color Correction Options
 pub mod auto_options;
 pub mod checked_hdr;
+// Pigment: HDR Toning's Method menu
+pub mod hdr_methods;
 
 impl Default for HdrToning {
     fn default() -> Self {

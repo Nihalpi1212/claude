@@ -786,6 +786,8 @@ fn command_uses_ambient_path(id: &str, params: &Value) -> bool {
         "actions.save" | "swatches.export" | "style.presets.exportAsl" | "layer.layerStyle.contours.save" => params.get("path").is_some(),
         // Pigment: adjustment presets
         "adjustment.presets.export" => params.get("path").is_some(),
+        // Pigment: Match Color statistics, read from or written to a `path`
+        "image.adjustments.matchColor.statistics" => params.get("path").is_some(),
         // Shortcut sets: a .kys read or written by path, or a Summarize page written by path.
         "edit.keyboardShortcuts" => {
             params.get("path").is_some() || ["importKys", "exportKys", "summarize"].iter().any(|k| params.get(*k).and_then(|v| v.get("path")).is_some())

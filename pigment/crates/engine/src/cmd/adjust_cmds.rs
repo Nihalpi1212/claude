@@ -19,6 +19,8 @@ use crate::commands::CommandSpec;
 use crate::{EngineError, Result, Session};
 
 mod replace_color_range;
+// Pigment: Match Color's Load/Save Statistics
+pub mod match_statistics;
 
 /// Built-in Color Lookup looks `(id, label)`.
 pub use craft_cms::lutfile::BUILTIN as LOOKS;
@@ -597,7 +599,10 @@ fn match_color(s: &mut Session, p: &Value) -> Result<Value> {
         fade: num(p, "fade", 0.0).clamp(0.0, 100.0),
         neutralize: p.get("neutralize").and_then(Value::as_bool).unwrap_or(false),
     };
+    // Pigment: statistics given in place of a source document (Load Statistics…, or an action that recorded them).
+    let given = match_statistics::given(p, CMD)?;
     let source = match p.get("source").and_then(Value::as_i64) {
+        _ if given.is_some() => given,
         Some(i) if i >= 0 => {
             let d = s.documents().get(i as usize).ok_or_else(|| bad(CMD, format!("no document {i}")))?;
             let layer = p.get("sourceLayer").and_then(Value::as_u64);
@@ -627,6 +632,13 @@ fn hdr_toning(s: &mut Session, p: &Value) -> Result<Value> {
         .and_then(Value::as_array)
         .map(|a| a.iter().filter_map(|v| Some((v.get(0)?.as_f64()? as f32 / 255.0, v.get(1)?.as_f64()? as f32 / 255.0))).collect())
         .unwrap_or_default();
+    // Pigment: HDR Toning's Method menu.
+    let method = match p.get("method").filter(|v| !v.is_null()) {
+        None => tone::hdr_methods::HdrMethod::default(),
+        Some(v) => v.as_str().and_then(tone::hdr_methods::HdrMethod::parse).ok_or_else(|| {
+            bad("image.adjustments.hdrToning", format!("unknown method {v} (localAdaptation|equalizeHistogram|exposureGamma|highlightCompression)"))
+        })?,
+    };
     let h = HdrToning {
         radius: num(p, "radius", d.radius).clamp(1.0, 500.0),
         strength: num(p, "strength", d.strength).clamp(0.1, 4.0),
@@ -644,8 +656,8 @@ fn hdr_toning(s: &mut Session, p: &Value) -> Result<Value> {
         let buf = photocraft_compose::flatten(doc).over_background([1.0, 1.0, 1.0]);
         let (w, hgt) = (buf.rect.width() as usize, buf.rect.height() as usize);
         let mut px = buf.into_px();
-        tone::hdr_toning(&mut px, w, hgt, &h);
         let fmt = doc.pixel_format();
+        tone::hdr_methods::hdr_toning_with(&mut px, w, hgt, &h, method, fmt.sample == photocraft_color::SampleType::F32);
         let data: Vec<f32> = px.iter().flat_map(|q| photocraft_raster::from_rgba(&fmt, *q)).collect();
         let mut bg = Layer::raster("Background", fmt);
         bg.locks.transparency = true;
@@ -692,7 +704,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "image.adjustments.matchColor",
             "Match Color…",
             ["Image", "Adjustments"],
-            r##"{"source":doc,"sourceLayer":json,"luminance":1..200=100,"intensity":1..200=100,"fade":0..100=0,"neutralize":bool=false,"useSelectionInSource":bool=false,"useSelectionInTarget":bool=false} (source: document index; sourceLayer: layer id, default the merged image)"##,
+            r##"{"source":doc,"sourceLayer":json,"luminance":1..200=100,"intensity":1..200=100,"fade":0..100=0,"neutralize":bool=false,"useSelectionInSource":bool=false,"useSelectionInTarget":bool=false,"sourceStatistics":json} (source: document index; sourceLayer: layer id, default the merged image; sourceStatistics: {"mean":[L,a,b],"std":[L,a,b]} D50 in place of a source, see image.adjustments.matchColor.statistics)"##,
             has_pixels,
             match_color
         ),
@@ -700,7 +712,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "image.adjustments.hdrToning",
             "HDR Toning…",
             ["Image", "Adjustments"],
-            r##"{"radius":1..500=30,"strength":0.1..4=0.5,"gamma":0.1..2=1,"exposure":-5..5=0,"detail":-100..300=30,"shadow":-100..100=0,"highlight":-100..100=0,"vibrance":-100..100=0,"saturation":-100..100=20,"curve":[[in,out],…] 0..255} (flattens the image)"##,
+            r##"{"method":"localAdaptation|equalizeHistogram|exposureGamma|highlightCompression"="localAdaptation","radius":1..500=30,"strength":0.1..4=0.5,"gamma":0.1..2=1,"exposure":-5..5=0,"detail":-100..300=30,"shadow":-100..100=0,"highlight":-100..100=0,"vibrance":-100..100=0,"saturation":-100..100=20,"curve":[[in,out],…] 0..255} (flattens the image; Equalize Histogram has no settings, Exposure and Gamma uses exposure and gamma, Highlight Compression exposure)"##,
             has_doc,
             hdr_toning
         ),
@@ -725,6 +737,10 @@ pub fn specs() -> Vec<CommandSpec> {
             journal: false,
         },
     ]
+    .into_iter()
+    // Pigment: Match Color's Load/Save Statistics
+    .chain(match_statistics::specs())
+    .collect()
 }
 
 /// At most this many pixels are sampled for [`auto_black_white`].

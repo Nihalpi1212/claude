@@ -65,7 +65,7 @@ fn hdr_params(v: &Value, cmd: &str) -> Result<()> {
             "curve" => {
                 x.as_array().is_some_and(|a| a.len() <= 64 && a.iter().all(|p| p.as_array().is_some_and(|p| p.len() == 2 && p.iter().all(|n| n.is_number()))))
             }
-            "method" => x.is_string(),
+            "method" => x.as_str().and_then(photocraft_algo::tone::hdr_methods::HdrMethod::parse).is_some(),
             _ => return Err(bad(cmd, format!("HDR Toning has no setting `{k}`"))),
         };
         if !ok {

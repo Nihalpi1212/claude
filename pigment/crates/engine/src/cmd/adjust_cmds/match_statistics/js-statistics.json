@@ -1,0 +1,15 @@
+{
+  "format": "pigment-match-color-statistics",
+  "version": 1,
+  "name": "Sunset",
+  "mean": [
+    49.331,
+    32.72,
+    49.44
+  ],
+  "std": [
+    9.298,
+    8.561,
+    8.971
+  ]
+}
