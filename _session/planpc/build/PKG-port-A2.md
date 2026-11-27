@@ -3,6 +3,15 @@
 Built on `claude/pigment-photocraft` (PhotoCraft 057297b). Spec: PORTS-A §2.1 "Build (A2: UI)", §2.12,
 §9 A2; REBASE-A "A2" (it wins). Read with PKG-port-A1.md.
 
+## Commits (all pushed)
+
+- `c5690a2` Pigment adjustment presets (A1), model and commands: adjustment.presets.* (A1's
+  uncommitted work, verified and committed first)
+- `1707b3b` Pigment adjustment presets (A2): the Preset row in the dialogs and Properties, the panel
+  presets' commands
+- `a90c780` Pigment adjustment presets (A2): the Adjustments panel's presets, their hover preview,
+  Save Adjustment Preset
+
 ## First: A1's engine half was not committed
 
 A1's notes describe the model and the commands, but when A2 started only A1's io half (`852f6aa`) was
