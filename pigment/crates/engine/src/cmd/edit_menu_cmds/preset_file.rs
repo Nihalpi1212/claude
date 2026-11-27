@@ -561,6 +561,11 @@ impl Staged {
 /// A gradient read from a file: stops within 0..1, in order (the panel and the renderer expect
 /// both).
 fn tidy_gradient(g: &mut GradientPreset) {
+    // A noise gradient (P3): its stops are its settings' bake, whatever the file says.
+    if let Some(n) = g.noise.take() {
+        *g = crate::presets::gradients::noise::preset(&g.name, n.sanitized());
+        return;
+    }
     for (at, _) in &mut g.stops {
         *at = at.clamp(0.0, 1.0);
     }

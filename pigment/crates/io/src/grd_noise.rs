@@ -199,12 +199,16 @@ pub fn grdm_noise(d: &[u8]) -> Option<NoiseGradient> {
     })
 }
 
+/// A Gradient Map's editor record of a noise gradient: its knots as the stops (classic, midpoints
+/// halfway) and its settings.
+pub fn noise_source(n: NoiseGradient) -> GradientSource {
+    let knots = n.knot_stops();
+    GradientSource { midpoints: vec![0.5; knots.len().saturating_sub(1)], stops: knots, smoothness: 0.0, method: "classic".into(), noise: Some(n) }
+}
+
 /// A Gradient Map of a noise gradient: its bake renders; the editable stops are its knots.
 pub fn noise_map(n: NoiseGradient, reverse: bool, dither: bool) -> Adjustment {
-    let knots = n.knot_stops();
-    let source =
-        GradientSource { midpoints: vec![0.5; knots.len().saturating_sub(1)], stops: knots, smoothness: 0.0, method: "classic".into(), noise: Some(n.clone()) };
-    Adjustment::GradientMap { stops: n.bake().0, reverse, dither, source: Some(source) }
+    Adjustment::GradientMap { stops: n.bake().0, reverse, dither, source: Some(noise_source(n)) }
 }
 
 /// A `grdm` block written for `n`'s knots (`plain`) with `n`'s noise settings in place of the

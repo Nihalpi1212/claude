@@ -13,6 +13,8 @@ use super::{Group, Named, always, bad, edit_groups, find, group_index, req_str, 
 
 // Pigment: gradient.presets.exportGrd (P1a)
 pub mod export_grd;
+// Pigment: noise gradients (P3)
+pub mod noise;
 use crate::commands::CommandSpec;
 use crate::{Result, Session};
 
@@ -33,6 +35,9 @@ pub struct GradientPreset {
     /// Transparency stops `(location, opacity 0..1)`; empty = opaque.
     #[serde(default)]
     pub opacity: Vec<(f32, f32)>,
+    /// Pigment: a noise gradient; `stops` and `opacity` are its bake (see [`noise`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub noise: Option<photocraft_doc::NoiseGradient>,
 }
 
 impl Named for GradientPreset {
@@ -82,10 +87,11 @@ impl GradientPreset {
             name: name.into(),
             stops: colors.iter().enumerate().map(|(i, c)| (i as f32 / n as f32, StopColor::Rgb(hex(c)))).collect(),
             opacity: Vec::new(),
+            noise: None,
         }
     }
     pub fn foreground_to_background() -> Self {
-        GradientPreset { name: "Foreground to Background".into(), stops: vec![(0.0, StopColor::Foreground), (1.0, StopColor::Background)], opacity: Vec::new() }
+        GradientPreset { name: "Foreground to Background".into(), stops: vec![(0.0, StopColor::Foreground), (1.0, StopColor::Background)], opacity: Vec::new(), noise: None }
     }
 
     /// RGBA stops for painting: colour and transparency stops merged (see [`apply_opacity`]).
@@ -140,11 +146,18 @@ impl GradientPreset {
             })
             .collect();
         let opacity: Vec<Value> = self.opacity.iter().map(|(t, a)| json!([t, (a * 100.0).round()])).collect();
-        json!({"name": self.name, "stops": stops, "transparency": opacity})
+        let mut v = json!({"name": self.name, "stops": stops, "transparency": opacity});
+        // Pigment: noise gradients
+        noise::describe(&mut v, self.noise.as_ref());
+        v
     }
 
     /// Parse `{"stops":[[t,"#hex"|"foreground"|"background"],…],"transparency":[[t,0..100],…]}`.
     pub fn from_params(name: &str, p: &Value, cmd: &str) -> Result<Self> {
+        // Pigment: `"noise": {…}` makes a noise gradient (its bake as the stops).
+        if let Some(Some(n)) = noise::param(p, None, cmd)? {
+            return Ok(noise::preset(name, n));
+        }
         let arr = p.get("stops").and_then(Value::as_array).ok_or_else(|| bad(cmd, "missing `stops`"))?;
         let mut stops = Vec::new();
         for (i, s) in arr.iter().enumerate() {
@@ -166,7 +179,7 @@ impl GradientPreset {
             return Err(bad(cmd, "a gradient needs at least 2 colour stops"));
         }
         stops.sort_by(|a, b| a.0.total_cmp(&b.0));
-        GradientPreset { name: name.into(), stops, opacity: Vec::new() }.with_transparency(p, cmd)
+        GradientPreset { name: name.into(), stops, opacity: Vec::new(), noise: None }.with_transparency(p, cmd)
     }
 
     /// This gradient with its transparency stops replaced by explicit `"transparency"` stops,
@@ -236,6 +249,7 @@ pub fn builtin() -> Vec<Group<GradientPreset>> {
         name: "Foreground to Transparent".into(),
         stops: vec![(0.0, StopColor::Foreground), (1.0, StopColor::Foreground)],
         opacity: vec![(0.0, 1.0), (1.0, 0.0)],
+        noise: None,
     };
     // A smooth spectrum: 13 hues evenly spaced from red (0°) to magenta (300°). The pastel and
     // neon presets reuse the same hues at a different saturation/lightness, and Rainbow Fade
@@ -421,7 +435,7 @@ fn tool_preset(s: &Session, p: &Value) -> Result<Option<GradientPreset>> {
     Ok(Some(if let Some(name) = str_param(p, "gradient") {
         let (gi, ii) = find(&s.presets.gradients, name, None).ok_or_else(|| bad(CMD, format!("no gradient preset \"{name}\"")))?;
         s.presets.gradients[gi].items[ii].clone().with_transparency(p, CMD)?
-    } else if p.get("stops").is_some() {
+    } else if p.get("stops").is_some() || noise::has(p) {
         GradientPreset::from_params("Custom", p, CMD)?
     } else {
         s.presets.gradient.clone().with_transparency(p, CMD)?
@@ -435,7 +449,7 @@ fn preset_param(s: &Session, p: &Value, cmd: &str) -> Result<GradientPreset> {
             .ok_or_else(|| bad(cmd, format!("no gradient preset \"{name}\" (see gradient.presets.list)")))?;
         return Ok(s.presets.gradients[gi].items[ii].clone());
     }
-    if p.get("stops").is_some() {
+    if p.get("stops").is_some() || noise::has(p) {
         return GradientPreset::from_params(str_param(p, "name").unwrap_or("Custom"), p, cmd);
     }
     Ok(s.presets.gradient.clone())
@@ -483,8 +497,10 @@ fn select(s: &mut Session, p: &Value) -> Result<Value> {
                 _ => (90.0, 1.0, photocraft_doc::GradientStyle::Linear, false),
             };
             let mut fill = Fill::gradient(stops_new, angle, scale, style, reverse);
-            if let Fill::Gradient { opacity_stops, .. } = &mut fill {
+            if let Fill::Gradient { opacity_stops, noise, .. } = &mut fill {
                 *opacity_stops = opacity_new;
+                // Pigment: noise gradients
+                *noise = g.noise.clone();
             }
             sh.fill = Some(fill);
             Ok(())
@@ -498,11 +514,13 @@ fn select(s: &mut Session, p: &Value) -> Result<Value> {
         s.edit("Change Gradient Fill", |doc, _| {
             let mode = doc.mode;
             if let Some(l) = doc.layer_mut(id)
-                && let LayerContent::Fill(Fill::Gradient { stops, opacity_stops, midpoints, .. }) = &mut l.content
+                && let LayerContent::Fill(Fill::Gradient { stops, opacity_stops, midpoints, noise, .. }) = &mut l.content
             {
                 *stops = stops_new.into_iter().map(|(t, c)| (t, c.in_mode(mode))).collect();
                 *opacity_stops = opacity_new;
                 midpoints.clear();
+                // Pigment: noise gradients
+                *noise = g.noise.clone();
             }
             Ok(())
         })?;
@@ -528,8 +546,14 @@ fn stop_color_param(v: &Value, cmd: &str) -> Result<StopColor> {
 /// them. Pure, so the editor previews a drag with exactly what the command commits.
 pub fn apply_preset_stop(g: &GradientPreset, p: &Value, fg: [f32; 4], bg: [f32; 4], cmd: &str) -> Result<GradientPreset> {
     let mut out = g.clone();
+    // Pigment: editing the stops of a noise gradient makes it solid.
+    out.noise = None;
     let action = p.get("action").and_then(Value::as_str).ok_or_else(|| bad(cmd, "missing `action` (add|move|delete|color|set|opacity)"))?;
     if action == "set" {
+        // Pigment: `"noise"` sets the noise settings (over the current ones) or makes it solid.
+        if let Some(n) = noise::set_preset(g, p, cmd)? {
+            return Ok(n);
+        }
         // The whole gradient at once (an editor commit): the stops and transparency stops replace
         // the current ones; the preset keeps its name.
         if p.get("stops").and_then(Value::as_array).is_some_and(|a| a.len() > 1024) {
@@ -660,7 +684,11 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
     let style = crate::layer_style::gradient_style(p.get("style").and_then(Value::as_str).unwrap_or("linear"));
     let reverse = p.get("reverse").and_then(Value::as_bool).unwrap_or(false);
     let id = s.edit("New Gradient Fill Layer", |doc, active| {
-        let fill = Fill::gradient(stops, angle, scale, style, reverse).in_mode(doc.mode);
+        let mut fill = Fill::gradient(stops, angle, scale, style, reverse).in_mode(doc.mode);
+        // Pigment: noise gradients
+        if let Fill::Gradient { noise, .. } = &mut fill {
+            *noise = g.noise.clone();
+        }
         let layer = Layer::new(doc.next_layer_name("Gradient Fill"), LayerContent::Fill(fill));
         let id = crate::layer_place::insert_new(doc, *active, layer, crate::layer_place::Place::Auto);
         *active = Some(id);
@@ -671,7 +699,8 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn new_preset(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "gradient.presets.new";
-    let mut g = if p.get("stops").is_some() { GradientPreset::from_params("", p, CMD)? } else { s.presets.gradient.clone() };
+    // Pigment: or `"noise"` (P3).
+    let mut g = if p.get("stops").is_some() || noise::has(p) { GradientPreset::from_params("", p, CMD)? } else { s.presets.gradient.clone() };
     g.name = unique_name(&s.presets.gradients, str_param(p, "name").unwrap_or("Custom"));
     let gi = group_index(&mut s.presets.gradients, str_param(p, "group"));
     s.presets.gradients[gi].items.push(g.clone());
@@ -708,7 +737,7 @@ pub(crate) fn unique_group<T>(groups: &[Group<T>], base: &str) -> String {
 }
 
 pub fn specs() -> Vec<CommandSpec> {
-    let stops = r##""stops":[[t 0..1,"#rrggbb"|"foreground"|"background"],…],"transparency":[[t,opacity 0..100],…]?"##;
+    let stops = r##""stops":[[t 0..1,"#rrggbb"|"foreground"|"background"],…],"transparency":[[t,opacity 0..100],…]? | "noise":{"roughness":0..100,"model":"rgb|hsb|lab","min":[0..100 ×3|4],"max":[…],"restrict":bool,"transparency":bool,"seed":int}"##;
     let leak = |s: String| -> &'static str { Box::leak(s.into_boxed_str()) };
     vec![
         // Pigment: gradient.presets.exportGrd (P1a)
@@ -740,7 +769,7 @@ pub fn specs() -> Vec<CommandSpec> {
             label: "Edit Gradient Stop",
             menu: &[],
             shortcut: None,
-            params: r##"{"action":"add|move|delete|color|opacity|set","kind":"color|opacity"="color","index":stop number,"location":0..1,"color":"#rrggbb"|"foreground"|"background" (add: default the colour there),"opacity":0..100; set: "stops":[[t 0..1,"#rrggbb"|"foreground"|"background"],…] (2..1024),"transparency":[[t,opacity 0..100],…]? replaces every stop} → {"current"}. Edits the Gradient tool's current gradient (no layer, midpoints stay centred)."##,
+            params: r##"{"action":"add|move|delete|color|opacity|set","kind":"color|opacity"="color","index":stop number,"location":0..1,"color":"#rrggbb"|"foreground"|"background" (add: default the colour there),"opacity":0..100; set: "stops":[[t 0..1,"#rrggbb"|"foreground"|"background"],…] (2..1024),"transparency":[[t,opacity 0..100],…]? replaces every stop; "noise":{roughness 0..100,model,min,max,restrict,transparency,seed} (over the current settings) | false (solid: the knots become stops)} → {"current"}. Edits the Gradient tool's current gradient (no layer, midpoints stay centred)."##,
             enabled: always,
             run: stop,
             journal: true,

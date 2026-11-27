@@ -1203,18 +1203,25 @@ fn gradient_stops(cmd: &str, v: &Value) -> Result<Vec<(f32, [f32; 3])>> {
 /// A Gradient Map's Photoshop gradient as params: `{"stops": [[location, "#rrggbb"], …],
 /// "midpoints": [0.05..0.95 per segment], "smoothness": 0..1, "method": name}`.
 pub fn source_params(src: &photocraft_doc::adjust::GradientSource) -> Value {
-    json!({
+    let mut v = json!({
         "stops": src.stops.iter().map(|(t, c)| json!([t, hex(*c)])).collect::<Vec<_>>(),
         "midpoints": src.midpoints,
         "smoothness": src.smoothness,
         "method": src.method,
-    })
+    });
+    // Pigment: noise gradients (P3)
+    crate::presets::gradients::noise::describe(&mut v, src.noise.as_ref());
+    v
 }
 
 /// [`source_params`] read back, checked: 2..=64 stops (sorted), one midpoint (0.05..0.95) per
 /// segment (default halfway), Smoothness 0..1 (default 0), a known method (default classic).
 fn gradient_source(cmd: &str, v: &Value) -> Result<photocraft_doc::adjust::GradientSource> {
     let o = v.as_object().ok_or_else(|| bad(cmd, "`source` must be {stops, midpoints?, smoothness?, method?}"))?;
+    // Pigment: `"noise": {…}` makes a noise gradient (its knots the stops).
+    if let Some(Some(n)) = crate::presets::gradients::noise::param(v, None, cmd)? {
+        return Ok(photocraft_io::grd_noise::noise_source(n));
+    }
     let stops = gradient_stops(cmd, o.get("stops").ok_or_else(|| bad(cmd, "`source.stops` is missing"))?)?;
     let segments = stops.len() - 1;
     let midpoints = match o.get("midpoints") {

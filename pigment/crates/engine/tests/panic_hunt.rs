@@ -94,6 +94,10 @@ fn no_command_panics_or_hangs_on_adversarial_params() {
         json!({"points": [[1e9, -1e9], [0.5, 0.5]], "subtractPoints": [[-1e9, 1e9], [2, 2]], "order": ["+", "-", "x", 5], "localized": true, "range": 0}),
         json!({"points": [[3, 3]], "subtractPoints": [[3]], "order": {}, "fuzziness": -1}),
         json!({"subtractPoints": "none", "order": ["-"], "labMinimum": [0, 0, 0], "labMaximum": [100, 0, 0]}),
+        // Pigment: noise gradients (P3) for every command that takes a gradient (paint.gradient,
+        // gradient.fill.*, gradient.presets.*, the layer styles, Gradient Map): extreme, broken.
+        json!({"from": [0, 0], "to": [20, 10], "action": "set", "noise": {"roughness": 1e308, "model": "lab", "min": [-1e9, 1e9, 1e300, 5], "max": [0, 0, 0, 0], "restrict": true, "transparency": true, "seed": -1e300}, "source": {"noise": {"roughness": -5, "seed": 1e20, "max": [1e9, -1e9, 0]}}}),
+        json!({"from": [0, 0], "to": [0, 0], "action": "set", "noise": {"min": [], "model": 7, "seed": "x"}, "source": {"noise": []}, "stops": [[0, "#000000"], [1, "#ffffff"]]}),
     ];
     let mut bad: Vec<String> = Vec::new();
     for spec in command_specs() {
