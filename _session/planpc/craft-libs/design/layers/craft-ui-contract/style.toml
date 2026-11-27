@@ -1,5 +1,0 @@
-config_version = 1
-
-[[module]]
-path = "style"
-layer = 2

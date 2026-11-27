@@ -17,7 +17,7 @@ IDX=$(mktemp "$SCR/wip-index.XXXXXX")
 trap 'rm -f "$IDX"' EXIT
 cp .git/index "$IDX"
 GIT_INDEX_FILE="$IDX" git add -A
-(cd "$SCR" && find planpc photocraft-eval -type f -size -2000k ! -name 'wip-index.*' ! -name '*.log' -print0 2>/dev/null) |
+(cd "$SCR" && find planpc photocraft-eval -type f -size -2000k ! -name 'wip-index.*' ! -name '*.log' ! -path 'planpc/craft-libs/*' ! -path 'planpc/work/*' ! -path '*/.git/*' -print0 2>/dev/null) |
   while IFS= read -r -d '' f; do
     printf '100644 %s\t%s\0' "$(git hash-object -w "$SCR/$f")" "_session/$f"
   done | GIT_INDEX_FILE="$IDX" git update-index -z --add --index-info

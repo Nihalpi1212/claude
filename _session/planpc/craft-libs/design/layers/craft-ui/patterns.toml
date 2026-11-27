@@ -1,5 +1,0 @@
-config_version = 1
-
-[[module]]
-path = "patterns"
-layer = 6
