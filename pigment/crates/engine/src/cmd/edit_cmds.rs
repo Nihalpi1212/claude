@@ -847,8 +847,15 @@ fn median(h: &[u64; 256]) -> f32 {
     0.5
 }
 
+// Pigment: Auto Color Correction Options (the options Image › Auto takes)
+const AUTO_PARAMS: &str = crate::cmd::auto_options_cmds::AUTO_COMMAND_PARAMS;
+
 /// Image › Auto Tone / Auto Contrast / Auto Color (0.1% clipping, Photoshop's defaults).
-fn auto_adjust(s: &mut Session, kind: &str) -> Result<Value> {
+fn auto_adjust(s: &mut Session, kind: &str, p: &Value) -> Result<Value> {
+    // Pigment: Auto Color Correction Options (explicit or saved options; else the Auto below)
+    if let Some(done) = crate::cmd::auto_options_cmds::auto_adjust(s, kind, p)? {
+        return Ok(done);
+    }
     let id = active_id(s)?;
     let d = s.active().ok_or(EngineError::NoDocument)?;
     let surf = d.doc.layer(id).and_then(Layer::surface).ok_or(EngineError::Other("the active layer has no pixels".into()))?;
@@ -1278,9 +1285,9 @@ pub fn specs() -> Vec<CommandSpec> {
         spec!("layer.new.layerViaCopy", "Layer Via Copy", &["Layer", "New"], Some("Cmd+J"), "{}", has_doc, |s, _| layer_via(s, false)),
         spec!("layer.new.layerViaCut", "Layer Via Cut", &["Layer", "New"], Some("Cmd+Shift+J"), "{}", has_pixels, |s, _| layer_via(s, true)),
         spec!("layer.mergeVisible", "Merge Visible", &["Layer"], Some("Cmd+Shift+E"), "{}", has_doc, |s, _| merge_visible(s)),
-        spec!("image.autoTone", "Auto Tone", &["Image"], Some("Cmd+Shift+L"), "{}", has_pixels, |s, _| auto_adjust(s, "tone")),
-        spec!("image.autoContrast", "Auto Contrast", &["Image"], Some("Cmd+Alt+Shift+L"), "{}", has_pixels, |s, _| auto_adjust(s, "contrast")),
-        spec!("image.autoColor", "Auto Color", &["Image"], Some("Cmd+Shift+B"), "{}", has_pixels, |s, _| auto_adjust(s, "color")),
+        spec!("image.autoTone", "Auto Tone", &["Image"], Some("Cmd+Shift+L"), AUTO_PARAMS, has_pixels, |s, p| auto_adjust(s, "tone", p)),
+        spec!("image.autoContrast", "Auto Contrast", &["Image"], Some("Cmd+Alt+Shift+L"), AUTO_PARAMS, has_pixels, |s, p| auto_adjust(s, "contrast", p)),
+        spec!("image.autoColor", "Auto Color", &["Image"], Some("Cmd+Shift+B"), AUTO_PARAMS, has_pixels, |s, p| auto_adjust(s, "color", p)),
         spec!("edit.toggleLastState", "Toggle Last State", &["Edit"], Some("Cmd+Alt+Z"), "{}", has_doc, |s, _| toggle_last_state(s)),
         spec!("edit.transform.again", "Again", &["Edit", "Transform"], Some("Cmd+Shift+T"), "{}", has_doc, |s, _| transform_again(s)),
         spec!(

@@ -60,6 +60,8 @@ pub mod adjust_cmds;
 mod adjust_params;
 // Pigment: adjustment presets
 pub mod adjust_preset_cmds;
+// Pigment: Auto Color Correction Options
+pub mod auto_options_cmds;
 // Pigment: generative AI
 pub mod ai_cmds;
 pub mod align_cmds;
@@ -1428,6 +1430,8 @@ fn build() -> Vec<CommandSpec> {
     v.extend(crate::adjust_cmds::specs());
     // Pigment: adjustment presets
     v.extend(adjust_preset_cmds::specs());
+    // Pigment: Auto Color Correction Options
+    v.extend(auto_options_cmds::specs());
     v.extend(crate::layer_menu_cmds::specs());
     v.extend(crate::layer_label_cmds::specs());
     v.extend(crate::layer_css_cmds::specs());

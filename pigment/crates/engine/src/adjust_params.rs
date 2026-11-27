@@ -935,7 +935,8 @@ pub fn eyedropper_from_params(s: &crate::Session, kind: &str, p: &Value) -> Resu
     if let Some(o) = base.as_object_mut() {
         o.remove("eyedropper");
     }
-    adjustment_eyedropper(kind, &base, picker, sample, d.doc.mode).map(Some)
+    // Pigment: eyedropper target colours
+    targets::adjustment_eyedropper_with(kind, &base, picker, sample, d.doc.mode, &targets::of_param(s, e)?).map(Some)
 }
 
 /// The Image > Adjustments picker: a mask/alpha/Quick Mask is sampled directly in gray levels,
@@ -990,7 +991,8 @@ pub fn layer_eyedropper(s: &crate::Session, layer: photocraft_doc::LayerId, p: &
     }
     let current = if user_keys(&rest).is_empty() { adj.clone() } else { from_params(kind, &rest, Some(adj), d.doc.mode)? };
     let (picker, sample) = eyedropper_sample(&d.doc, Some(layer), e, None)?;
-    adjustment_eyedropper(kind, &to_params(&current), picker, sample, d.doc.mode).map(Some)
+    // Pigment: eyedropper target colours
+    targets::adjustment_eyedropper_with(kind, &to_params(&current), picker, sample, d.doc.mode, &targets::of_param(s, e)?).map(Some)
 }
 
 const EYEDROPPER: &str = "eyedropper";
@@ -1244,6 +1246,9 @@ pub fn user_keys(p: &Value) -> Map<String, Value> {
         })
         .unwrap_or_default()
 }
+
+// Pigment: eyedropper target colours
+pub mod targets;
 
 #[cfg(test)]
 mod tests;

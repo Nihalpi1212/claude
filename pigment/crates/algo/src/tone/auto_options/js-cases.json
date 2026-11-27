@@ -1,0 +1,587 @@
+{
+ "images": {
+  "lowContrast": {
+   "width": 24,
+   "height": 24,
+   "rgba": "52403cff594c3bff57493eff5f4540ff58453fff5b463eff614942ff614146ff694a46ff67484aff71424eff704952ff71494aff75454cff764952ff79434dff814a51ff894954ff84485cff8e485eff904b55ff894a59ff974662ff974261ff554543ff4f483aff554742ff59493dff604d41ff5b474aff5f4548ff664743ff644447ff6d4b46ff6e4949ff754654ff794d4aff734357ff784c57ff784658ff844d52ff7e4556ff87465dff874e5eff8e4b58ff8e4759ff8f4e64ff91475bff4a4f3eff504844ff545142ff584e42ff594c48ff634743ff644e42ff634b4eff6a4a49ff6c4652ff6e4d50ff6c4753ff704f4eff794a53ff7f474fff794e50ff804b5aff80475eff8c465eff844b5dff8c4b60ff8b4964ff934c5bff914d5eff4c5142ff4d4a3cff555145ff5d5147ff61494bff64494cff625048ff604a4dff67494dff6c5152ff6e524aff70524dff78524eff73514eff7e5454ff825359ff805058ff7f4b5fff884a5dff8a4b59ff914c59ff8f4d66ff944f5cff974966ff564e44ff585345ff555346ff5c5645ff5f5545ff5b5748ff67524dff644d50ff6a5549ff655553ff6b5054ff6b4f4dff725752ff765451ff7c5659ff7d4d57ff85525fff895358ff88535eff8e5063ff87515dff895261ff965067ff9a5161ff515542ff595745ff564f45ff555642ff5d534aff5c5148ff60524eff66504dff645850ff67554bff6a5354ff775455ff745454ff725659ff7a4f56ff785760ff85555fff834f5aff8b505dff8d595fff8f5963ff8b505fff945565ff945368ff535c40ff585945ff5a5846ff575c4aff605550ff5e5b48ff605650ff63584fff665b53ff715358ff6c5353ff735756ff725a5cff7a5356ff77545aff785359ff7f555fff805360ff875e64ff885863ff8e5365ff8d5568ff975669ff9a5e6cff545a45ff50604bff51584eff5b5e45ff5e5c47ff5c5651ff5d604cff645653ff6a5f58ff666056ff6f5950ff755759ff795857ff7c5f56ff7d565cff7b5758ff7c5a5fff7f605eff815a5eff875565ff926161ff925c63ff975662ff905a6dff525c46ff525d4bff56614dff5c594cff5b5d52ff615b55ff65634dff6b5852ff645f4fff6c5951ff6c5d54ff725954ff71605eff775e61ff7d5962ff785a5fff815f5bff816064ff845e66ff8f6069ff8f6164ff946267ff90626eff9a596fff506045ff526048ff56674dff53674eff5e5b53ff636456ff67634dff67615aff696252ff6e5d57ff6b5d57ff6c5b59ff6f6357ff756061ff7b675dff7b615eff7f6261ff835c60ff875b60ff866264ff876662ff8a6565ff8e646cff985e6eff4e694eff50614aff536648ff566a4fff5a6654ff5d6658ff645f56ff626454ff6e6456ff705f57ff726955ff736161ff705f5eff72665cff74625eff806762ff836a60ff886366ff836866ff8c656aff906167ff8d676cff91686eff8f6673ff536648ff566552ff536a4cff5b614fff596655ff5a6654ff5f6952ff6b635cff6a6a56ff696359ff726958ff73685bff7a6662ff7c6862ff7c6b66ff826b65ff7f6461ff876363ff87616cff8c6b6aff896c67ff91626fff946470ff966c6cff4d6851ff556c4aff5b6e4eff5a664eff5a6550ff606754ff646f55ff6a6958ff6e695fff6b6956ff6c6a5bff716b64ff726462ff726666ff7f6e65ff836467ff7a6666ff806b6cff847064ff836a6cff8e6866ff906e72ff92656bff906a6cff516d53ff4f714fff566c51ff5e6b53ff5c7159ff627155ff66715aff60675eff69715eff6b6e62ff6c6d5bff706e60ff706c61ff7c6b64ff7c6868ff826d6bff7b6b6dff876a6cff856e66ff8b6a6cff896a6eff8a6a6bff966974ff98696fff556b54ff517350ff576f52ff5a7055ff586d5bff60755cff607256ff6a6b57ff62735cff71715cff6b725fff757565ff777465ff717669ff7a6f60ff806a6aff83746cff826e6fff8c7369ff856a68ff926e6dff8c6e6cff966d75ff9a6f77ff4c7353ff587155ff527855ff547958ff5f755dff63745bff677859ff616f63ff6c7461ff6c725fff717263ff707164ff767966ff7b7668ff757866ff806d6cff7c6f6bff84716fff87716bff89726cff8c6d6eff92736eff8f6f77ff997271ff557456ff567153ff527456ff557657ff59725fff647461ff627662ff647a5fff6a7361ff707163ff6b7166ff707167ff727468ff7c716bff7d7369ff7c726cff807c6aff85746eff817b71ff887870ff87786cff92726eff8c7177ff90777bff4f7858ff4f785cff5c7a5aff5c7854ff617d5fff5e7861ff627e5cff60735cff657566ff6a7863ff68786aff6f7c64ff767969ff777564ff7e7c6fff807f67ff7f7473ff837474ff8b7773ff897872ff8d7973ff927b70ff977c75ff917f78ff4a7b55ff527857ff527e57ff577d61ff5e7c60ff5d8262ff627b5fff697e60ff6b7e60ff6d7d62ff6b7b6aff6c826cff707b68ff79806aff777c6eff7c7f71ff7e8072ff7f816eff897a70ff8e8070ff897d73ff8e7777ff8e7773ff927d7eff538455ff4e7e5dff557c59ff5e795eff577d60ff61805eff5c7a5dff66825eff6e7a61ff6a7d67ff6d7d66ff757e6bff778169ff798070ff7f826fff7e8269ff7b8372ff88796dff8a8579ff8d8472ff8d8075ff937f7bff947a7bff978577ff527e5dff55855bff558559ff577d60ff57875cff607f65ff5e8263ff637e5fff678168ff69816dff70866aff76846dff72886dff7b8669ff78836cff7c8871ff838474ff808275ff8b7d6fff87867bff887e7dff8e7d77ff928679ff987d7dff4a855aff4f8160ff55815cff5b8362ff57825eff638665ff648067ff698a68ff688368ff658763ff69896dff6e8867ff778a70ff778873ff7c886dff7d8973ff7e8273ff818479ff8a8077ff8d8172ff898578ff947f80ff8e8681ff978282ff548d58ff53875aff548c5dff568460ff628764ff5f8a65ff608964ff608664ff658469ff6f846bff6e8d71ff728968ff778d71ff7d8c6cff7e8473ff808875ff818d70ff818375ff828778ff838379ff8c877cff908c77ff948381ff9b867fff4b8c5aff4d905dff588f5cff5f895dff5a8768ff598d66ff5f8f67ff5f8c6dff678b6eff658e68ff6e8a69ff6f8f70ff738a6dff768f6fff7f8678ff7f876fff858578ff868d7dff888677ff8c8d77ff88867aff8d897dff92887dff988e87ff"
+  },
+  "cast": {
+   "width": 24,
+   "height": 24,
+   "rgba": "141726ff0f111fff0f101fff121524ff171a2aff141726ff131524ff111322ff171a2aff0f101fff181b2bff101221ff141626ff1a1d2dff171929ff111322ff181b2cff151727ff1d2132ff111322ff1d2032ff121423ff131524ff141626ff121423ff1f2334ff191b2cff1b1f2fff212436ff171929ff1a1d2eff191c2cff151827ff1c1f30ff161929ff161929ff232739ff212537ff161929ff24283aff181b2bff24293bff1f2234ff1a1e2eff212537ff191c2dff23283aff262a3dff25293bff202435ff272c3eff1b1f2fff24293bff282d40ff272b3eff24293bff232739ff1d2031ff282d40ff282d40ff25293bff222638ff2a2f43ff2b3043ff25293bff24283aff1f2335ff2c3245ff24283bff262b3dff2b3044ff2d3246ff2e3347ff272c3fff24293bff2b3043ff2b3043ff2c3245ff30354aff262b3dff272c3fff292d41ff2c3144ff25293cff292e41ff30364bff282c3fff30364bff2b3144ff2c3145ff2c3145ff33384dff2e3347ff353b51ff2c3144ff292e42ff32384dff292e41ff33394eff343a50ff33394eff2e3448ff2f3549ff343a4fff2d3246ff2e3348ff363c52ff394056ff353b51ff2e3448ff353b51ff3a4157ff2e3448ff363c52ff353c51ff383f55ff3b4158ff353b51ff373d53ff31374bff3c435aff373d53ff343a4fff394056ff383e54ff3a4057ff394056ff373d53ff363c52ff3f475eff3c4359ff3b4258ff373d53ff373d53ff383f55ff40485fff383f54ff434b63ff394056ff414961ff3b4258ff3b4259ff414961ff444c64ff3d445bff3e455cff444c64ff454d65ff3e455cff3f475eff464e67ff474f67ff424961ff464e67ff3d445bff40485fff40475fff3e455cff414860ff49516aff41485fff414960ff4a526bff40475eff414960ff3f475eff485169ff48516aff475069ff4b536cff454d66ff4c556fff424961ff4a536cff4b546dff4d5670ff444c64ff4a536cff454d66ff48516aff48516aff505973ff4c556eff4e5872ff454d65ff4e5771ff464f67ff525b76ff464e67ff4a526bff485069ff535d78ff49516aff505a74ff4f5872ff4f5872ff49516aff4e5770ff505973ff56607bff4c556eff535d77ff535c77ff4d5670ff4c546eff525c76ff57617cff535d78ff555f7aff555f7aff535d77ff56617cff4f5872ff545e79ff505a74ff57627dff4f5872ff59637fff5b6682ff535c77ff525c76ff555f7aff5d6885ff56607bff57617dff59637fff5b6682ff58627eff535d78ff5b6581ff5c6784ff58637eff5a6581ff5c6784ff5f6a87ff55607bff626e8bff616d8aff58627eff5b6682ff5c6783ff57617cff5e6985ff65708eff5b6581ff5b6581ff59637fff59637fff606c89ff606b88ff606c89ff64708eff5d6885ff626d8aff667290ff66728fff5d6884ff64708eff65718fff5d6885ff636f8cff616d8aff6a7695ff626e8bff606b88ff6b7796ff697593ff65708eff697694ff636f8cff616c89ff6a7796ff687492ff6c7998ff6d7a99ff636e8cff6c7998ff6c7998ff697594ff687492ff677391ff6b7796ff6d7a99ff687493ff677392ff667290ff6b7897ff6a7795ff6f7c9bff667290ff677492ff6a7796ff7381a1ff7280a0ff7582a3ff697695ff697594ff6a7796ff7482a2ff6d7998ff6e7b9aff727fa0ff6c7897ff727fa0ff717e9eff727f9fff707e9eff7381a1ff707e9dff7785a6ff7886a7ff7381a1ff6e7b9bff6f7c9bff7786a7ff7280a0ff7482a2ff727f9fff7a89aaff707e9dff7b89abff7583a4ff7b8aacff7583a3ff7c8badff7582a3ff7482a3ff7887a8ff7b89abff7785a6ff7a89aaff7e8db0ff7a88aaff7c8aacff7d8badff7785a5ff8191b3ff7784a5ff7d8caeff8291b4ff7f8eb0ff7c8aacff8190b2ff8392b6ff7d8badff8190b2ff7d8badff7c8badff7988a9ff8291b4ff8595b8ff7b8aacff7b8aabff7d8caeff8494b7ff8291b4ff8392b5ff7c8badff8291b4ff8190b3ff7f8eb0ff8493b6ff8696b9ff8190b3ff8b9cc0ff8797bbff8b9bc0ff8898bbff8999bdff8594b7ff8292b5ff8291b4ff8392b5ff8b9cc0ff8696baff8c9cc1ff8fa0c5ff8e9ec3ff8b9cc0ff899abeff90a1c7ff8898bcff8696b9ff8b9cc0ff8898bcff92a3c8ff8695b9ff8f9fc4ff90a1c7ff8696baff8d9dc2ff8c9dc1ff8797bbff94a5cbff92a3c8ff92a3c8ff91a2c7ff95a6ccff8a9abeff8d9dc2ff8fa0c5ff91a2c7ff90a1c6ff8fa0c5ff97a9d0ff8c9cc1ff98a9d0ff8e9ec4ff92a3c9ff8c9cc1ff92a3c8ff8d9ec2ff96a7ceff8f9fc5ff98aad0ff97a9d0ff96a7ceff98aad1ff93a4caff90a1c7ff93a5cbff95a7cdff93a4caff98a9d0ff9eb0d8ff94a5ccff9aacd3ff9aacd3ff92a4caff9badd4ff9aacd3ff9eb0d8ff9fb2daff9badd4ff9badd5ff9baed5ff96a7ceffa0b2daffa1b4dcffa1b4dcff97a9cfff98aad1ffa1b4dcffa2b5ddffa4b7e0ffa2b6deff9eb0d8ff9fb2daffa4b7e0ff9aadd4ffa6bae3ffa4b7e0ff9cafd6ff9caed5ff9dafd7ff9badd4ffa7bae4ffa5b8e2ffa1b4dcffa6bae3ffa3b6deff9eb0d8ffa2b5ddffa6bae3ffa6bae3ff9eb1d9ffaabee8ffa7bbe5ffa1b4dcffa8bce5ffaabee8ffa8bce5ffa9bde7ffa2b5deffa3b6deffa1b4dcffa9bde7ffa8bce5ffa6b9e2ffa9bde7ffabbfe9ffa6bae3ffa4b8e1ffb0c5f0ffaabee9ffb0c5f0ffaec2edffafc3eeffabbfe9ffb3c8f4ffafc4eeffafc3eeffb3c8f3ffa8bce6ffafc4efffacc1ebffaec3eeffaabee8ffb3c8f3ffadc2ecffa9bde7ffb5cbf7ffb1c6f1ffb0c5f0ffb6cbf7ffafc4efffb4c9f5ffb8cefbffaec2edffacc0eaffaec3eeffb3c8f4ffb2c7f3ffb7ccf9ffadc2ecffb7ccf8ffb1c5f1ffb4c9f5ffbbd1feffb2c7f3ffb1c6f1ffb9cffcffb2c6f2ffb2c7f2ffbad0fdffb5caf6ffbcd2ffffb9cefbffbdd3ffffbdd4ffffb5caf6ffbed4ffffb9cffcffbed4ffffc0d7ffffc1d8ffffb8cefaffb5cbf7ffbed4ffffb7cdf9ffc1d8ffffc2d8ffffbed4ffffc0d6ffffc2d9ffffbcd2ffffb8cdfaffc1d8ffffbfd6ffffc3daffffc1d8ffffc0d6ffffbbd2ffffbfd6ffffc6ddffffc5dcffffc4dbffffbed4ffffc3daffffc6ddffffbed5ffffc6ddffffc2d9ffffbdd4ffffc0d7ffffc3daffffc8e0ffffc9e0ffffc4dbffffc3daffffc8e0ffffc8e0ffffc4dbffffcbe3ffffc6ddffffc3daffff"
+  },
+  "dark": {
+   "width": 24,
+   "height": 24,
+   "rgba": "0c040cff090a0dff0f050dff12060cff160813ff1a0714ff170913ff1e0810ff210619ff230719ff20071aff220419ff2b091cff2d091cff2a071dff32071eff320921ff37091fff390a21ff3d0b25ff3d0c26ff3b0526ff440727ff420828ff0b0a0fff0a0e10ff110d0cff110812ff160c16ff1a0f14ff1c0e17ff1a0c19ff1d0c14ff220b16ff26071cff220a1eff240c18ff290f1dff2a071bff310c22ff340d1dff320822ff380b25ff380e21ff400824ff3e0a27ff3f0c24ff430d27ff0a0d12ff090a0dff0c1113ff140d0fff130c10ff140d12ff150e15ff1b111aff210c17ff1f0b1bff1f0b19ff290c1cff250e1fff27111dff2a0a1fff311121ff331123ff371024ff350e28ff3a0b23ff3c0b27ff410b2aff420c27ff470f2aff0d1012ff0c0f13ff0e1210ff141015ff171317ff160e12ff171218ff1f0e1aff1c1317ff20111dff250d1eff231420ff2a121dff270e20ff2d1121ff2c1423ff331326ff381427ff331026ff361127ff3f1226ff3f1126ff3e0f2cff42102cff0a100dff0c1011ff0c1212ff141216ff141719ff181619ff1b1518ff1f1118ff1d111dff23121cff221219ff241320ff2a171fff27151eff2d1322ff301420ff351223ff361023ff3a1129ff391424ff391028ff401028ff42152aff421129ff061516ff0b1210ff0d1715ff0f1613ff101313ff161815ff1a131bff19131dff1d151fff23181bff25181cff231a20ff2b1820ff2c1520ff2b1923ff2c1324ff341825ff361429ff36122aff37162cff3c162aff421528ff401329ff44132fff071a13ff0e1914ff0f1a19ff0e1619ff141818ff16191cff161c1bff191c1fff20191dff1e181bff201920ff281c1dff2a1920ff271926ff2d1921ff331b28ff311827ff381628ff381627ff3c1928ff40172fff3b1c29ff41162aff41172cff081d13ff0b1b18ff0c1f15ff141c1aff171d1cff151f1cff1a1d1eff181d1eff20181dff201d20ff201d20ff251b1eff2c1a22ff2d1923ff2a1c23ff2f1e24ff341f26ff371f26ff361e2cff3d1b2fff3a192dff421d2fff421a2fff451d2dff0b2015ff091c16ff0d2114ff0e2219ff17211bff141f1aff1a1f1fff1f1f1bff1f2121ff1d211dff211b21ff281e23ff2a2023ff2c1d26ff2d1f29ff2d2027ff311a2bff312129ff341e28ff3d1d30ff3b1c2fff3d1e2cff3e222fff421c31ff082419ff0b2319ff0d241aff121d1dff14211aff17221eff191f1bff1f2521ff221e23ff222022ff232224ff252122ff242128ff2e2323ff2f232bff2e1f25ff312327ff381f29ff37202cff372430ff3b2030ff402434ff401f2fff441e33ff092619ff092619ff0f231dff0e261eff17251fff152221ff17221fff1d261fff1e271eff202627ff242527ff232523ff29252aff2c282aff2a222bff2d2027ff35262aff34272cff35272cff3d282dff3f2331ff3f2135ff402332ff422530ff092716ff102717ff0b241eff12291eff15251fff18251cff162423ff192420ff1b231fff212921ff232824ff222324ff282527ff282427ff2a252bff32292eff322629ff32282dff372330ff372b2fff3c2533ff3e2936ff3e2430ff422a35ff09271aff0b2c19ff0c2d1fff11261dff142b1cff17291eff162b25ff1e2d23ff212c28ff232a23ff222a23ff242729ff2b2d29ff2c2728ff2a2d28ff33272eff31292aff342831ff382c30ff382c30ff3f2933ff3e2c31ff3e2a38ff452833ff0e2d1dff102c1eff122e1dff112b1dff142b21ff192d1fff1b2c24ff1f2e25ff203024ff242d25ff232f2bff252c26ff253029ff2c3028ff2d2f2fff302c31ff35292bff382e32ff352f35ff3c3033ff3e2e34ff3b2a38ff3d3037ff412836ff073219ff0e2f1cff0c2d21ff142d1dff142c20ff182c21ff1c2f24ff1c2c26ff1c3128ff212c27ff222d29ff242d29ff2a3029ff29312fff2d322cff2d312fff352d32ff372e35ff332d31ff362c35ff392d37ff413238ff413036ff402c39ff0a3020ff103221ff0c2e1eff122e1eff152f21ff153322ff173226ff193425ff20342aff1e3429ff273329ff283229ff26332dff2b3431ff2f3332ff2d332eff363230ff36352fff393535ff392f35ff3b3137ff3e2f39ff413036ff413338ff0a331fff0e3724ff123423ff0e341fff173621ff153323ff1a3422ff1d3626ff1c3929ff1f372aff243429ff293529ff24332bff2e382cff2f312fff313433ff353136ff373737ff373232ff383934ff3a3236ff403737ff3e383dff42353eff073523ff0f3b1fff0c3922ff103a24ff133826ff133b29ff1b3929ff1e3827ff1b392eff1d3a2dff203b2bff253a2fff263a2fff293930ff303533ff2e3636ff2e3632ff373433ff373838ff383a35ff403636ff3c363bff44363dff47343aff0b3821ff0a3e27ff0e3a26ff123c27ff173724ff173a29ff153c28ff193c2cff1f3d2cff203d2eff21392eff263a2dff2b3a32ff2e3b34ff2b3c2eff2c3e37ff313838ff353e39ff343a35ff3c3d3cff383c3cff3c393cff41393bff423a39ff0c3a27ff0f3b23ff0b4024ff103f25ff123f28ff193e27ff193b2aff19402cff1e3d2cff21402eff243a32ff224031ff253e35ff2b392eff303b37ff2e3d35ff313b38ff314039ff373a39ff363f39ff39413cff3b3c3dff41403cff453a3eff0d3f21ff0b3f28ff10412aff143d27ff113e29ff183f2dff173e2cff1f412fff1c3e2aff21402eff274230ff254330ff283f32ff273c37ff2a3e35ff2c4039ff343f37ff32423cff343d37ff3d3d3bff3f3e3dff423d3aff3d413dff44433dff0e4225ff0b3f25ff11432aff15412cff174126ff17402bff16442bff19442fff21442dff224332ff214035ff244536ff284137ff2e4432ff2e4536ff323f3aff354235ff384237ff343f3cff36433cff3d4640ff404442ff44423fff41453eff064925ff0e4425ff0b422bff154826ff17482cff144629ff19492dff1b432cff1b4932ff1f4832ff214531ff234633ff2b4839ff274934ff2e4638ff304438ff354439ff32483aff344640ff3d453bff3c4540ff3d453fff404745ff414843ff0c4c2aff0d472cff0e472cff154a2eff184830ff16482dff1c4c2dff1b472eff1e4835ff224630ff244c34ff254631ff274a33ff2d4a34ff2f4639ff2e4c3aff304c3aff32473eff37443eff394c3eff3b463cff3d4641ff454844ff474743ff"
+  },
+  "full": {
+   "width": 24,
+   "height": 24,
+   "rgba": "000000ff000000ff010101ff010101ff020202ff020202ff030303ff030303ff040404ff040404ff040404ff050505ff050505ff060606ff060606ff070707ff070707ff080808ff080808ff080808ff090909ff090909ff0a0a0aff0a0a0aff0b0b0bff0b0b0bff0c0c0cff0c0c0cff0c0c0cff0d0d0dff0d0d0dff0e0e0eff0e0e0eff0f0f0fff0f0f0fff101010ff101010ff101010ff111111ff111111ff121212ff121212ff131313ff131313ff141414ff141414ff141414ff151515ff151515ff161616ff161616ff171717ff171717ff181818ff181818ff181818ff191919ff191919ff1a1a1aff1a1a1aff1b1b1bff1b1b1bff1b1b1bff1c1c1cff1c1c1cff1d1d1dff1d1d1dff1e1e1eff1e1e1eff1f1f1fff1f1f1fff1f1f1fff202020ff202020ff212121ff212121ff222222ff222222ff232323ff232323ff232323ff242424ff242424ff252525ff252525ff262626ff262626ff272727ff272727ff272727ff282828ff282828ff292929ff292929ff2a2a2aff2a2a2aff2b2b2bff2b2b2bff2b2b2bff2c2c2cff2c2c2cff2d2d2dff2d2d2dff2e2e2eff2e2e2eff2f2f2fff2f2f2fff2f2f2fff303030ff303030ff313131ff313131ff323232ff323232ff333333ff333333ff333333ff343434ff343434ff353535ff353535ff363636ff363636ff373737ff373737ff373737ff383838ff383838ff393939ff393939ff3a3a3aff3a3a3aff3b3b3bff3b3b3bff3b3b3bff3c3c3cff3c3c3cff3d3d3dff3d3d3dff3e3e3eff3e3e3eff3f3f3fff3f3f3fff3f3f3fff404040ff404040ff414141ff414141ff424242ff424242ff434343ff434343ff434343ff444444ff444444ff454545ff454545ff464646ff464646ff474747ff474747ff474747ff484848ff484848ff494949ff494949ff4a4a4aff4a4a4aff4b4b4bff4b4b4bff4b4b4bff4c4c4cff4c4c4cff4d4d4dff4d4d4dff4e4e4eff4e4e4eff4e4e4eff4f4f4fff4f4f4fff505050ff505050ff515151ff515151ff525252ff525252ff525252ff535353ff535353ff545454ff545454ff555555ff555555ff565656ff565656ff565656ff575757ff575757ff585858ff585858ff595959ff595959ff5a5a5aff5a5a5aff5a5a5aff5b5b5bff5b5b5bff5c5c5cff5c5c5cff5d5d5dff5d5d5dff5e5e5eff5e5e5eff5e5e5eff5f5f5fff5f5f5fff606060ff606060ff616161ff616161ff626262ff626262ff626262ff636363ff636363ff646464ff646464ff656565ff656565ff666666ff666666ff666666ff676767ff676767ff686868ff686868ff696969ff696969ff6a6a6aff6a6a6aff6a6a6aff6b6b6bff6b6b6bff6c6c6cff6c6c6cff6d6d6dff6d6d6dff6e6e6eff6e6e6eff6e6e6eff6f6f6fff6f6f6fff707070ff707070ff717171ff717171ff727272ff727272ff727272ff737373ff737373ff747474ff747474ff757575ff757575ff767676ff767676ff767676ff777777ff777777ff787878ff787878ff797979ff797979ff7a7a7aff7a7a7aff7a7a7aff7b7b7bff7b7b7bff7c7c7cff7c7c7cff7d7d7dff7d7d7dff7e7e7eff7e7e7eff7e7e7eff7f7f7fff7f7f7fff808080ff808080ff818181ff818181ff818181ff828282ff828282ff838383ff838383ff848484ff848484ff858585ff858585ff858585ff868686ff868686ff878787ff878787ff888888ff888888ff898989ff898989ff898989ff8a8a8aff8a8a8aff8b8b8bff8b8b8bff8c8c8cff8c8c8cff8d8d8dff8d8d8dff8d8d8dff8e8e8eff8e8e8eff8f8f8fff8f8f8fff909090ff909090ff919191ff919191ff919191ff929292ff929292ff939393ff939393ff949494ff949494ff959595ff959595ff959595ff969696ff969696ff979797ff979797ff989898ff989898ff999999ff999999ff999999ff9a9a9aff9a9a9aff9b9b9bff9b9b9bff9c9c9cff9c9c9cff9d9d9dff9d9d9dff9d9d9dff9e9e9eff9e9e9eff9f9f9fff9f9f9fffa0a0a0ffa0a0a0ffa1a1a1ffa1a1a1ffa1a1a1ffa2a2a2ffa2a2a2ffa3a3a3ffa3a3a3ffa4a4a4ffa4a4a4ffa5a5a5ffa5a5a5ffa5a5a5ffa6a6a6ffa6a6a6ffa7a7a7ffa7a7a7ffa8a8a8ffa8a8a8ffa9a9a9ffa9a9a9ffa9a9a9ffaaaaaaffaaaaaaffabababffabababffacacacffacacacffadadadffadadadffadadadffaeaeaeffaeaeaeffafafafffafafafffb0b0b0ffb0b0b0ffb1b1b1ffb1b1b1ffb1b1b1ffb2b2b2ffb2b2b2ffb3b3b3ffb3b3b3ffb4b4b4ffb4b4b4ffb4b4b4ffb5b5b5ffb5b5b5ffb6b6b6ffb6b6b6ffb7b7b7ffb7b7b7ffb8b8b8ffb8b8b8ffb8b8b8ffb9b9b9ffb9b9b9ffbababaffbababaffbbbbbbffbbbbbbffbcbcbcffbcbcbcffbcbcbcffbdbdbdffbdbdbdffbebebeffbebebeffbfbfbfffbfbfbfffc0c0c0ffc0c0c0ffc0c0c0ffc1c1c1ffc1c1c1ffc2c2c2ffc2c2c2ffc3c3c3ffc3c3c3ffc4c4c4ffc4c4c4ffc4c4c4ffc5c5c5ffc5c5c5ffc6c6c6ffc6c6c6ffc7c7c7ffc7c7c7ffc8c8c8ffc8c8c8ffc8c8c8ffc9c9c9ffc9c9c9ffcacacaffcacacaffcbcbcbffcbcbcbffccccccffccccccffccccccffcdcdcdffcdcdcdffcececeffcececeffcfcfcfffcfcfcfffd0d0d0ffd0d0d0ffd0d0d0ffd1d1d1ffd1d1d1ffd2d2d2ffd2d2d2ffd3d3d3ffd3d3d3ffd4d4d4ffd4d4d4ffd4d4d4ffd5d5d5ffd5d5d5ffd6d6d6ffd6d6d6ffd7d7d7ffd7d7d7ffd8d8d8ffd8d8d8ffd8d8d8ffd9d9d9ffd9d9d9ffdadadaffdadadaffdbdbdbffdbdbdbffdcdcdcffdcdcdcffdcdcdcffddddddffddddddffdededeffdededeffdfdfdfffdfdfdfffe0e0e0ffe0e0e0ffe0e0e0ffe1e1e1ffe1e1e1ffe2e2e2ffe2e2e2ffe3e3e3ffe3e3e3ffe4e4e4ffe4e4e4ffe4e4e4ffe5e5e5ffe5e5e5ffe6e6e6ffe6e6e6ffe7e7e7ffe7e7e7ffe7e7e7ffe8e8e8ffe8e8e8ffe9e9e9ffe9e9e9ffeaeaeaffeaeaeaffebebebffebebebffebebebffecececffecececffedededffedededffeeeeeeffeeeeeeffefefefffefefefffefefeffff0f0f0fff0f0f0fff1f1f1fff1f1f1fff2f2f2fff2f2f2fff3f3f3fff3f3f3fff3f3f3fff4f4f4fff4f4f4fff5f5f5fff5f5f5fff6f6f6fff6f6f6fff7f7f7fff7f7f7fff7f7f7fff8f8f8fff8f8f8fff9f9f9fff9f9f9fffafafafffafafafffbfbfbfffbfbfbfffbfbfbfffcfcfcfffcfcfcfffdfdfdfffdfdfdfffefefefffefefeffffffffffffffffff"
+  },
+  "holes": {
+   "width": 24,
+   "height": 24,
+   "rgba": "ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff0000005c5a43ff5d5348ff60574cff5d5a4bff64524aff625b49ff69594aff635a4aff68534eff71544bff71554fff755550ff6f5b54ff785756ff775355ff795558ff7b525aff7a565bff7b545bff7e5c54ff815a58ff865357ff88575aff8c525fff5f5746ff605c48ff635b48ff5c5749ff5f574dff605549ff695a4bff645752ff685b50ff685c53ff6f554fff6f5550ff765755ff705c4fff765c51ff795554ff7c5758ff79575cff7f595aff7b5a5bff7d5558ff825a5fff875d5fff86555aff55584aff5c564aff5f594cff636046ff605e48ff625e46ff685b4aff655d50ff6b5c50ff6b5c4cff6a5a50ff6c5c51ff725a52ff735952ff765d53ff755e51ff795d52ff786053ff7e5a54ff7d6058ff7d5c5cff875b58ff835f61ff88575fff5a5b42ff5c6247ff5b5a4dff5d604bff635849ff68584eff665e4bff665f51ff685c49ff6a604fff726250ff71594dff725d52ff755c4eff776250ff755c59ff7e6156ff776055ff825f54ff81615eff81595cff856058ff875c5dff895c5aff595e43ff5a5e4aff5e5c45ff625d4cff625b4bff685b4dff67614cff67634dff675b49ff6a624eff705a53ff6c6051ff715c50ff765e54ff745d51ff776358ff79605aff7a5e58ff796053ff7b635dff815f5eff815c5cff84615bff84645fffff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff0000005d6646ff5c6245ff61674dff5d6645ff5e664fff66634bff656351ff645f4eff6e6050ff705e52ff71664fff6e5f51ff706354ff716650ff796653ff756050ff7d6752ff806256ff7c6357ff7b5e54ff806257ff83635fff85675fff8c635dff5b6a43ff616245ff5b6249ff5b6649ff64634bff63644dff68654fff6a604eff686552ff716251ff71654fff726451ff746551ff736652ff796650ff7c6156ff7d6a54ff776557ff7f6356ff836859ff83685dff84675cff8b6760ff8d6461ff5c634bff5b664bff5f6344ff5c6b4bff5f6349ff64684bff62664cff65694fff6a6649ff6b6a4eff6a664cff726350ff6f6752ff776551ff786657ff786359ff776856ff786a55ff7b6654ff84635dff816a5eff846757ff86685cff85625fff576e45ff576a45ff636743ff646449ff646d4eff61664eff656b50ff6a684cff6a694cff68674dff6a6a52ff716854ff706c4fff726c58ff796b50ff756b57ff756d56ff7c6c58ff7a6454ff81645cff7d6a55ff866958ff8b695aff846759ff566747ff607045ff5a6a4aff64664aff646d49ff60704bff626d4bff65684dff6c694cff6b6952ff6d664dff736f55ff706f57ff716a52ff796652ff7a6a52ff756e53ff7b705bff7b6d5bff7d6c5dff826d57ff866d5dff886d58ff876962ffff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff00000056734aff5c6e4bff626d4cff5e6f45ff636c4fff607448ff66704cff6a714eff6b6d4cff6e6b53ff6f7254ff736c4fff707155ff6f6b53ff746b50ff786b53ff777053ff7c7057ff79705bff7c7057ff806b55ff806d58ff866e5bff8d6e5dff556e4aff60764bff5f7547ff63734aff5f724cff5f6f4dff636d4eff6c6d4dff69714dff6a6e54ff72734fff746e56ff707055ff737356ff746d52ff746c58ff767257ff797458ff7a7356ff7d6d54ff806f59ff7f6d56ff89735fff88745bff5d7246ff577346ff5f734cff5d6e4aff5e6f48ff697648ff637647ff6c754cff666f50ff6d7252ff6a764eff6d764fff6f7251ff727853ff767259ff767251ff7e7053ff797454ff80785dff7c7157ff7e715cff807056ff886f5dff85725dff5d7344ff5f7247ff5d7149ff5d7149ff64724cff68764bff63784dff69754bff67714bff6c7852ff6d7a53ff6c7153ff6e7854ff717457ff777151ff787157ff7d7653ff7f7756ff81765cff81725dff847359ff83765aff87715dff887762ff5d7745ff59764bff617543ff5c7a4dff60764dff667746ff6a7c4dff6d754eff6a764eff687451ff6a7652ff6e794dff707b4eff717553ff777958ff767558ff7e7957ff80785aff7d7a54ff807c58ff817a5cff85755eff88745fff85775dffff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000ff000000597a46ff607e48ff617b4aff617948ff5e8047ff667c4fff65794bff667c51ff687b4fff697b52ff6e794fff74764dff747f52ff777c55ff767c58ff7c7c51ff777d56ff787755ff807d54ff817a55ff7e7d59ff877858ff897b5bff8b7761ff5b7d49ff5d7c46ff5b7e4aff5c7f49ff66824aff687a50ff62784fff657b50ff6c7d4dff6d8152ff6d794eff6f7d53ff747854ff788250ff757952ff777d53ff778055ff78805cff7c7e56ff827d5bff847856ff897960ff817d61ff8a815aff5a844aff5d814aff5f8049ff5f8447ff637c4aff617c4fff64834aff6d8051ff6d7c4fff6e824fff717a4cff747c50ff73804fff757a51ff7a8153ff748152ff7a7c54ff80825aff7a7f5bff7f7d5eff867b58ff847d5cff867b58ff837e61ff598044ff5c8342ff5a824bff5f834cff60854eff65864cff63804cff6a824bff6e8050ff6d834dff717e4fff6e8155ff6f824dff758553ff728055ff767e53ff7e8453ff7c855aff7e7e5bff81855bff86855cff857d5bff867f58ff8a8561ff568346ff608446ff5c8445ff657f48ff64814cff658146ff687f4bff6d874eff6e8149ff68824fff72844eff747f51ff74864fff728254ff798753ff757f51ff7c7f52ff7f8559ff7f825dff838659ff868356ff83835dff89815eff86835aff"
+  }
+ },
+ "levels": [
+  {
+   "name": "perChannel",
+   "image": "lowContrast",
+   "options": {},
+   "result": {
+    "space": "rgb",
+    "perChannel": true,
+    "rgb": {
+     "inBlack": 0,
+     "inWhite": 255,
+     "gamma": 1,
+     "outBlack": 0,
+     "outWhite": 255
+    },
+    "r": {
+     "inBlack": 74,
+     "inWhite": 155,
+     "gamma": 1,
+     "outBlack": 0,
+     "outWhite": 255
+    },
+    "g": {
+     "inBlack": 64,
+     "inWhite": 144,
+     "gamma": 1,
+     "outBlack": 0,
+     "outWhite": 255
+    },
+    "b": {
+     "inBlack": 58,
+     "inWhite": 135,
+     "gamma": 1,
+     "outBlack": 0,
+     "outWhite": 255
+    }
+   }
+  },
+  {
+   "name": "mono",
+   "image": "lowContrast",
+   "options": {
+    "algorithm": "mono"
+   },
+   "result": {
+    "space": "rgb",
+    "perChannel": true,
+    "rgb": {
+     "inBlack": 69,
+     "inWhite": 144,
+     "gamma": 1,
+     "outBlack": 0,
+     "outWhite": 255
+    },
+    "r": null,
+    "g": null,
+    "b": null
+   }
+  },
+  {
+   "name": "darkLight",
+   "image": "cast",
+   "options": {
+    "algorithm": "darkLight"
+   },
+   "result": {
+    "space": "rgb",
+    "perChannel": true,
+    "rgb": {
+     "inBlack": 0,
+     "inWhite": 255,
+     "gamma": 1,
+     "outBlack": 0,
+     "outWhite": 255
+    },
+    "r": {
+     "inBlack": 15,
+     "inWhite": 203,
+     "gamma": 1,
+     "outBlack": 0,
+     "outWhite": 255
+    },
+    "g": {
+     "inBlack": 16,
+     "inWhite": 227,
+     "gamma": 1,
+     "outBlack": 0,
+     "outWhite": 255
+    },
+    "b": {
+     "inBlack": 31,
+     "inWhite": 255,
+     "gamma": 1,
+     "outBlack": 0,
+     "outWhite": 255
+    }
+   }
+  },
+  {
+   "name": "darkLight snap",
+   "image": "cast",
+   "options": {
+    "algorithm": "darkLight",
+    "snap": true
+   },
+   "result": {
+    "space": "rgb",
+    "perChannel": true,
+    "rgb": {
+     "inBlack": 0,
+     "inWhite": 255,
+     "gamma": 1,
+     "outBlack": 0,
+     "outWhite": 255
+    },
+    "r": {
+     "inBlack": 15,
+     "inWhite": 203,
+     "gamma": 1.01,
+     "outBlack": 0,
+     "outWhite": 255
+    },
+    "g": {
+     "inBlack": 16,
+     "inWhite": 227,
+     "gamma": 1.01,
+     "outBlack": 0,
+     "outWhite": 255
+    },
+    "b": {
+     "inBlack": 31,
+     "inWhite": 255,
+     "gamma": 0.93,
+     "outBlack": 0,
+     "outWhite": 255
+    }
+   }
+  },
+  {
+   "name": "brightness",
+   "image": "dark",
+   "options": {
+    "algorithm": "brightness"
+   },
+   "result": {
+    "space": "rgb",
+    "perChannel": true,
+    "rgb": {
+     "inBlack": 7,
+     "inWhite": 71,
+     "gamma": 0.96,
+     "outBlack": 0,
+     "outWhite": 255
+    },
+    "r": null,
+    "g": null,
+    "b": null
+   }
+  },
+  {
+   "name": "targets and clips",
+   "image": "cast",
+   "options": {
+    "algorithm": "perChannel",
+    "snap": true,
+    "shadowClip": 2,
+    "highlightClip": 1.5,
+    "shadowColor": "#141e28",
+    "midColor": "#8c8080",
+    "highlightColor": "#f5ebe1"
+   },
+   "result": {
+    "space": "rgb",
+    "perChannel": true,
+    "rgb": {
+     "inBlack": 0,
+     "inWhite": 255,
+     "gamma": 1,
+     "outBlack": 0,
+     "outWhite": 255
+    },
+    "r": {
+     "inBlack": 19,
+     "inWhite": 198,
+     "gamma": 1.82,
+     "outBlack": 20,
+     "outWhite": 245
+    },
+    "g": {
+     "inBlack": 21,
+     "inWhite": 221,
+     "gamma": 1.54,
+     "outBlack": 30,
+     "outWhite": 235
+    },
+    "b": {
+     "inBlack": 36,
+     "inWhite": 255,
+     "gamma": 1.44,
+     "outBlack": 40,
+     "outWhite": 225
+    }
+   }
+  },
+  {
+   "name": "mono clip 0",
+   "image": "lowContrast",
+   "options": {
+    "algorithm": "mono",
+    "shadowClip": 0,
+    "highlightClip": 0
+   },
+   "result": {
+    "space": "rgb",
+    "perChannel": true,
+    "rgb": {
+     "inBlack": 69,
+     "inWhite": 144,
+     "gamma": 1,
+     "outBlack": 0,
+     "outWhite": 255
+    },
+    "r": null,
+    "g": null,
+    "b": null
+   }
+  },
+  {
+   "name": "mono clip 2",
+   "image": "lowContrast",
+   "options": {
+    "algorithm": "mono",
+    "shadowClip": 2,
+    "highlightClip": 2
+   },
+   "result": {
+    "space": "rgb",
+    "perChannel": true,
+    "rgb": {
+     "inBlack": 76,
+     "inWhite": 136,
+     "gamma": 1,
+     "outBlack": 0,
+     "outWhite": 255
+    },
+    "r": null,
+    "g": null,
+    "b": null
+   }
+  },
+  {
+   "name": "brightness snap",
+   "image": "holes",
+   "options": {
+    "algorithm": "brightness",
+    "snap": true
+   },
+   "result": {
+    "space": "rgb",
+    "perChannel": true,
+    "rgb": {
+     "inBlack": 0,
+     "inWhite": 255,
+     "gamma": 1,
+     "outBlack": 0,
+     "outWhite": 255
+    },
+    "r": {
+     "inBlack": 85,
+     "inWhite": 130,
+     "gamma": 0.62,
+     "outBlack": 0,
+     "outWhite": 255
+    },
+    "g": {
+     "inBlack": 85,
+     "inWhite": 130,
+     "gamma": 1,
+     "outBlack": 0,
+     "outWhite": 255
+    },
+    "b": {
+     "inBlack": 85,
+     "inWhite": 130,
+     "gamma": 1,
+     "outBlack": 0,
+     "outWhite": 255
+    }
+   }
+  },
+  {
+   "name": "mono snap",
+   "image": "cast",
+   "options": {
+    "algorithm": "mono",
+    "snap": true
+   },
+   "result": {
+    "space": "rgb",
+    "perChannel": true,
+    "rgb": {
+     "inBlack": 0,
+     "inWhite": 255,
+     "gamma": 1,
+     "outBlack": 0,
+     "outWhite": 255
+    },
+    "r": {
+     "inBlack": 17,
+     "inWhite": 223,
+     "gamma": 1.13,
+     "outBlack": 0,
+     "outWhite": 255
+    },
+    "g": {
+     "inBlack": 17,
+     "inWhite": 223,
+     "gamma": 1,
+     "outBlack": 0,
+     "outWhite": 255
+    },
+    "b": {
+     "inBlack": 17,
+     "inWhite": 223,
+     "gamma": 0.71,
+     "outBlack": 0,
+     "outWhite": 255
+    }
+   }
+  },
+  {
+   "name": "full perChannel",
+   "image": "full",
+   "options": {},
+   "result": {
+    "space": "rgb",
+    "perChannel": true,
+    "rgb": {
+     "inBlack": 0,
+     "inWhite": 255,
+     "gamma": 1,
+     "outBlack": 0,
+     "outWhite": 255
+    },
+    "r": {
+     "inBlack": 0,
+     "inWhite": 255,
+     "gamma": 1,
+     "outBlack": 0,
+     "outWhite": 255
+    },
+    "g": {
+     "inBlack": 0,
+     "inWhite": 255,
+     "gamma": 1,
+     "outBlack": 0,
+     "outWhite": 255
+    },
+    "b": {
+     "inBlack": 0,
+     "inWhite": 255,
+     "gamma": 1,
+     "outBlack": 0,
+     "outWhite": 255
+    }
+   }
+  },
+  {
+   "name": "clamped options",
+   "image": "lowContrast",
+   "options": {
+    "algorithm": "nope",
+    "shadowClip": 50,
+    "highlightClip": -3
+   },
+   "result": {
+    "space": "rgb",
+    "perChannel": true,
+    "rgb": {
+     "inBlack": 0,
+     "inWhite": 255,
+     "gamma": 1,
+     "outBlack": 0,
+     "outWhite": 255
+    },
+    "r": {
+     "inBlack": 85,
+     "inWhite": 155,
+     "gamma": 1,
+     "outBlack": 0,
+     "outWhite": 255
+    },
+    "g": {
+     "inBlack": 75,
+     "inWhite": 144,
+     "gamma": 1,
+     "outBlack": 0,
+     "outWhite": 255
+    },
+    "b": {
+     "inBlack": 74,
+     "inWhite": 135,
+     "gamma": 1,
+     "outBlack": 0,
+     "outWhite": 255
+    }
+   }
+  }
+ ],
+ "curves": [
+  {
+   "name": "perChannel curves",
+   "image": "lowContrast",
+   "options": {},
+   "space": "rgb",
+   "result": {
+    "space": "rgb",
+    "rgb": [
+     [
+      0,
+      0
+     ],
+     [
+      255,
+      255
+     ]
+    ],
+    "r": [
+     [
+      74,
+      0
+     ],
+     [
+      155,
+      255
+     ]
+    ],
+    "g": [
+     [
+      64,
+      0
+     ],
+     [
+      144,
+      255
+     ]
+    ],
+    "b": [
+     [
+      58,
+      0
+     ],
+     [
+      135,
+      255
+     ]
+    ]
+   }
+  },
+  {
+   "name": "brightness curves",
+   "image": "dark",
+   "options": {
+    "algorithm": "brightness"
+   },
+   "space": "rgb",
+   "result": {
+    "space": "rgb",
+    "rgb": [
+     [
+      7,
+      0
+     ],
+     [
+      39,
+      124
+     ],
+     [
+      71,
+      255
+     ]
+    ],
+    "r": null,
+    "g": null,
+    "b": null
+   }
+  },
+  {
+   "name": "darkLight gray",
+   "image": "cast",
+   "options": {
+    "algorithm": "darkLight"
+   },
+   "space": "gray",
+   "result": {
+    "space": "gray",
+    "gray": {
+     "inBlack": 17,
+     "inWhite": 223,
+     "gamma": 1,
+     "outBlack": 0,
+     "outWhite": 255
+    }
+   }
+  }
+ ],
+ "brightnessContrast": [
+  {
+   "image": "dark",
+   "result": {
+    "brightness": 73,
+    "contrast": 100,
+    "legacy": false
+   }
+  },
+  {
+   "image": "lowContrast",
+   "result": {
+    "brightness": 18,
+    "contrast": 100,
+    "legacy": false
+   }
+  },
+  {
+   "image": "full",
+   "result": {
+    "brightness": 1,
+    "contrast": 0,
+    "legacy": false
+   }
+  },
+  {
+   "image": "holes",
+   "result": {
+    "brightness": 18,
+    "contrast": 100,
+    "legacy": false
+   }
+  }
+ ],
+ "defaults": {
+  "algorithm": "perChannel",
+  "snap": false,
+  "shadowClip": 0.1,
+  "highlightClip": 0.1,
+  "shadowColor": "#000000",
+  "midColor": "#808080",
+  "highlightColor": "#ffffff"
+ },
+ "clamped": {
+  "algorithm": "perChannel",
+  "snap": false,
+  "shadowClip": 9.99,
+  "highlightClip": 0,
+  "shadowColor": "#000000",
+  "midColor": "#808080",
+  "highlightColor": "#ffffff"
+ }
+}

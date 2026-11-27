@@ -215,6 +215,8 @@ pub struct HdrToning {
 }
 
 pub mod auto_levels;
+// Pigment: Auto Color Correction Options
+pub mod auto_options;
 pub mod checked_hdr;
 
 impl Default for HdrToning {

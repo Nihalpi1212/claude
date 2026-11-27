@@ -571,6 +571,33 @@ Preset… asks for a name and saves the selected adjustment layers.
 | `crates/ui-egui/src/panels/registry.rs` | the Properties entry's `rows`, `states` and `run` (Save Adjustment Preset…; upstream's Properties menu has no rows) |
 | `crates/ui-egui/src/dialogs.rs` | `adjustment_presets::SAVE_FAMILY` in `PARAM_FAMILIES` (the name dialog of Save Adjustment Preset…) |
 
+### Auto Color Correction Options
+
+Photoshop's Auto Color Correction Options, as the JavaScript Pigment had them: the four algorithms
+(Enhance Monochromatic Contrast, Enhance Per Channel Contrast, Find Dark & Light Colors, Enhance
+Brightness and Contrast), Snap Neutral Midtones, the shadow and highlight clipping and the three
+target colours. The algorithms are `crates/algo/src/tone/auto_options.rs`, ported line for line from
+the app's `adjust-tonal.js` and checked against its own results on synthetic images
+(`auto_options/js-cases.json`, written by `make-cases.mjs` with the app's functions; a README names
+the commit). The engine side is `crates/engine/src/cmd/auto_options_cmds.rs` (tests beside it):
+`Preferences.adjustments` (`autoOptions`, clamped as Photoshop's fields, and `autoOptionsSaved`, in
+`config.toml`'s `[adjustments]`), `image.adjustments.autoOptions` (read, save as defaults, reset; not
+journaled), `image.adjustments.auto` (the Levels, Curves or Brightness/Contrast settings Auto gives
+for a layer, read as `image.adjustments.blackWhite.auto` reads it; nothing changes), and Image ›
+Auto Tone, Auto Contrast and Auto Color with options: explicit option params (recorded by Actions),
+else the saved clipping and targets with each command's own algorithm, else upstream's own Auto,
+unchanged. The Levels and Curves eyedroppers map the sample to the target colours
+(`crates/engine/src/adjust_params/targets.rs`, tests in `targets/tests.rs`); with Photoshop's default
+targets they are upstream's eyedroppers exactly.
+
+| Upstream file | Hook |
+|---|---|
+| `crates/algo/src/tone.rs` | `pub mod auto_options;` after `pub mod auto_levels;` |
+| `crates/engine/src/prefs.rs` | the `Preferences` field `adjustments` (its type lives in `auto_options_cmds.rs`; its serde clamps the clips and refuses bad algorithms and colours, so `prefs.set` needs no validator) |
+| `crates/engine/src/cmd.rs` | `pub mod auto_options_cmds;` and `v.extend(auto_options_cmds::specs());` after the adjustment presets' |
+| `crates/engine/src/cmd/edit_cmds.rs` | `auto_adjust` takes the params and first calls `auto_options_cmds::auto_adjust` (which steps aside when no options apply); the three Image › Auto specs take `AUTO_PARAMS` (the option keys) instead of `"{}"` |
+| `crates/engine/src/adjust_params.rs` | `pub mod targets;`; `eyedropper_from_params` and `layer_eyedropper` call `targets::adjustment_eyedropper_with` with `targets::of_param` (the `eyedropper.targets` param, else the saved targets) |
+
 ## Keeping the rebrand: `scripts/pigment-rebrand.py`
 
 Most of the rebrand is mechanical and done by [`scripts/pigment-rebrand.py`](../scripts/pigment-rebrand.py):
