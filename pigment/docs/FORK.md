@@ -760,7 +760,8 @@ Four rows of the JavaScript Pigment 0.4 that PhotoCraft lacked.
   in the JavaScript app (Photoshop's has no settings). The eight built-in HDR presets name `"method":"localAdaptation"`.
 - **Match Color's Load Statistics… and Save Statistics…**: `image.adjustments.matchColor` takes
   `"sourceStatistics":{"mean":[L,a,b],"std":[L,a,b]}` in place of a source document (so an action plays back with no
-  source open), and `image.adjustments.matchColor.statistics` (not journaled) computes a source's statistics or reads
+  source open), and `image.adjustments.matchColor.statistics` (not journaled) computes a source's statistics (the
+  active document's when it is given nothing, as every `image.adjustments.*` command runs on `{}`) or reads
   and writes the JavaScript app's file (`{"format":"pigment-match-color-statistics","version":1,"name","mean","std"}`).
   The JavaScript app's L\*a\*b\* is D65 and PhotoCraft's D50: the file keeps D65, the parameter is D50, converted
   through linear sRGB (`crates/engine/src/cmd/adjust_cmds/match_statistics.rs`; a file the app wrote,

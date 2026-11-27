@@ -15,10 +15,22 @@ Color statistics file, the saved presets in `config.toml`) bound their input, re
 hostile-value tests. One history step per action holds where I looked (dialog OK, a Properties pick, a panel preset,
 the hand's gesture, Auto in Properties, the solid fill's OK).
 
-I found two real defects, both fixed with a test each, and several minor gaps that I recorded below rather than fixed.
+I found three real defects, all fixed with a test each (one of them had turned CI red), and several minor gaps that I
+recorded below rather than fixed.
+
+**A lesson for the next group:** run the crate's whole test target (or at least upstream's registry-wide tests:
+`tests::every_adjustment_command_runs`, `panic_hunt`, automation's `registry_filesystem_path_params_are_classified`)
+after adding a command; a name filter on one's own module misses the upstream tests that enumerate every command.
 
 ## Found and fixed
 
+0. **CI was red on A7: `image.adjustments.matchColor.statistics` failed on `{}`** (blocker, A7). Upstream's
+   `engine tests::every_adjustment_command_runs` runs every `image.adjustments.*` and `layer.newAdjustmentLayer.*`
+   command with `{}`; the new statistics command answered "give a `source` document…", so CI run 46032481221 (on
+   9f07b56) failed with 14275 of 14276 passing, and 75ec448 carries the same code. A7's own subset of engine tests did
+   not include that upstream test, and its own test asserted the opposite (`{}` is an error). Now, with nothing to read
+   or compute from, the active document is the source (Save Statistics… of the open image), and with no document open
+   it is still an error. The params string says so. A7's test now checks both.
 1. **Exposure's eyedroppers could not reach a 32-bit highlight** (major for 32-bit documents, A5).
    `adjust_params::on_image::exposure_eyedropper` held the sample to 0..1 before linearising it. A 32-bit document
    stores linear light above 1, which is where Exposure is used most; the white eyedropper on a pixel of 4.0 gave
@@ -58,7 +70,29 @@ I found two real defects, both fixed with a test each, and several minor gaps th
 
 ## Checks run
 
-See the final section of this file, filled in once the runs ended.
+All with `-j 4`, `CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_STRIP=symbols`, one cargo process at
+a time, the brief's TMPDIR/CRAFT_* variables.
+
+- io lib `adjust_map pcad legacy_pigment::adjust`: 46 passed (preset files, `pcAd`, the `pcJS` upgrade, the importer's
+  adjustment arm).
+- engine lib `adjust_params:: adjust_preset_cmds auto_options_cmds match_statistics presets:: adjust_cmds prefs`:
+  262 passed (before the statistics fix); after all three fixes `adjust_preset_cmds on_image match_statistics
+  adjust_cmds every_adjustment_command_runs`: 87 passed, including upstream's `tests::every_adjustment_command_runs`.
+- engine panic hunt (`--test panic_hunt -- --ignored`): 1 passed.
+- `cargo clippy -p photocraft-engine --all-targets -- -D warnings`: clean. `cargo fmt --all -- --check`: clean.
+  `python3 scripts/pigment-rebrand.py --check`: exit 0.
+- Not run here: the ui-egui suites (A2 to A7's interface tests). The last finished CI run that held A1 to A6
+  (46027202552 on 611e2b2) was green across the workspace, including those tests; CI on the review commits covers
+  A7's interface. The A7 engine commit's run (46032481221) was red only on the test fixed above.
+- CI: 46032481221 (9f07b56) failed one test, `engine tests::every_adjustment_command_runs` (fixed in 90265ff). The
+  run on 75ec448 (46038027153) was still running when the fixes were pushed; it carries the same failure. Check the
+  run on 8821fdf.
+
+## Commits
+
+- `90265ff` Pigment review A, CI: image.adjustments.matchColor.statistics runs on {} (the active document's
+  statistics).
+- `8821fdf` Pigment review A: Exposure's eyedroppers reach 32-bit highlights, Your Presets keep a Color Lookup's look.
 
 ## What the next group should know
 

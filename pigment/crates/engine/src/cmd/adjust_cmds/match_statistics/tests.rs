@@ -151,7 +151,12 @@ fn bad_statistics_are_errors() {
     }
     let missing = tempfile::tempdir().unwrap().path().join("none.json");
     assert!(s.execute(STATISTICS, json!({"path": missing.to_str().unwrap()})).is_err());
-    assert!(s.execute(STATISTICS, json!({})).is_err(), "nothing to read or compute");
+    // Review A: with nothing to read or compute from, the active document is the source (upstream's
+    // `every_adjustment_command_runs` runs each `image.adjustments.*` command on `{}`); with no document open, an error.
+    let active = s.execute(STATISTICS, json!({})).unwrap();
+    assert_eq!(active, s.execute(STATISTICS, json!({"source": 0})).unwrap());
+    assert!(active["file"].as_str().is_some_and(|f| f.contains(FORMAT)), "{active}");
+    assert!(Session::new().execute(STATISTICS, json!({})).is_err(), "nothing to read or compute");
     assert!(s.execute(STATISTICS, json!({"source": 5})).is_err(), "no such document");
     assert!(s.execute(STATISTICS, json!({"source": 0, "statistics": {"mean": [1, 2, 3], "std": [1, 2, 3]}})).is_err());
     assert!(s.execute(STATISTICS, json!({"statistics": {"mean": [1, 2, 3]}})).is_err());
