@@ -1,80 +1,15 @@
 # Integration tests that fail on PhotoCraft's own tree at the revision in UPSTREAM-REVISION, with the
-# craft-libs revision its Cargo.lock pins: the tests were written for an earlier craft-libs and the
-# pinned one behaves differently (directory bundles create tiles/ only when they hold a tile,
-# craft-raw decodes and rejects other inputs, the SVG importer's embedded-image budgets). Pigment
-# changes none of the code they exercise (since the import, 15b8ea5, photocraft-format only gained
-# its brand module, photocraft-raw two warning strings and the SVG importer one error string), and
-# Cargo.lock's dependencies are upstream's. They fail in CI (a normal user, craft-fonts present) and
-# here as root alike, each also when run on its own.
+# craft-libs revision its Cargo.lock pins, through no change of Pigment's. Pigment never lists a test
+# that its own changes broke: those are fixed.
 #
 # pigment-ci.yml leaves exactly these tests out of the Tests step (scripts/upstream-test-filter.py
 # turns this list into the cargo-nextest filter, by package and exact name) and runs
 # them on their own, without failing the job, so a later upstream merge shows when they pass.
 # Remove a line when it passes after a merge (docs/FORK.md, "Merging a later upstream revision").
-# One full test name per line (module path inside its test binary); `#` starts a comment.
-
-# photocraft-format --test it (crates/format/tests/it)
-autosave::failed_cleanup_after_commit_does_not_fail_the_save
-corruption::manifest_size_limit
-directory_symlinks::directory_cleanup_preserves_unrelated_zst_files
-directory_symlinks::permissions::denied_object_cleanup_remains_best_effort_after_manifest_commit
-directory_symlinks::permissions::denied_stale_preview_cleanup_is_retried_after_a_successful_save
-directory_symlinks::permissions::directory_save_cleans_stale_previews_through_search_only_root_and_composite
-directory_symlinks::permissions::directory_save_without_previews_does_not_require_composite_read_permission
-directory_symlinks::permissions::directory_save_writes_current_preview_without_composite_read_permission
-roundtrip::bundles_without_the_full_composite_still_open
-roundtrip::directory_save_rejects_manifest_symlink_without_overwriting_target
-
-# photocraft-io --test it (crates/io/tests/it/svg.rs)
-svg::an_embedded_svg_gets_only_the_nesting_depth_the_drawing_left
-svg::embedded_png_with_a_huge_claimed_size_is_not_decoded
-svg::gzip_compressed_embedded_svg_decompresses_once_with_a_size_cap
-
-# photocraft-raw --test it (crates/raw/tests/it)
-cr3::broken_tables_and_raw_codec_tracks_are_not_used
-dng::an_infinite_white_level_falls_back_to_the_default
-dng::broken_monochrome_linear_raw_errors
-dng::default_crop_origin_without_size_falls_back_to_active_area_with_warning
-dng::deflate_strips_round_trip
-dng::enormous_double_crop_origin_is_rejected
-dng::floating_point_jpeg_xl_linear_raw_decodes
-dng::floating_point_raw_data_ignores_a_linearization_table
-dng::floating_point_raw_data_that_isnt_jpeg_xl_is_unsupported
-dng::floating_point_white_levels_per_plane_scale_from_the_highest
-dng::jpeg_xl_mismatches_are_errors
-dng::lossy_jpeg_component_count_mismatch_errors
-dng::lossy_jpeg_levels_and_linearization_apply_to_stored_values
-dng::lossy_jpeg_rejects_other_depths_and_sample_counts
-dng::lossy_jpeg_tile_dimension_mismatch_errors
-dng::map_polynomial_follows_the_linearization_table
-dng::map_polynomial_maps_each_plane_of_floating_point_data
-dng::metadata_is_read
-dng::out_of_range_default_crop_falls_back_to_active_area_with_warning
-dng::profile_gain_table_map_is_reported
-dng::unsupported_variants_say_so
-hasselblad::compressed_3fr_is_reported_unsupported
-hasselblad::metadata
-hasselblad::missing_levels_fall_back
-hasselblad::truncated_strip_is_malformed
-hasselblad::unknown_body_warns_about_the_assumed_phase
-hasselblad::zero_dimensions_are_malformed
-hostile::originals_develop
-nef_packed::nikon_crop_area_uses_sensor_coordinates_and_ignores_invalid_rectangles
-nef_packed::packed_nef_uses_maker_mode_not_the_shared_tiff_compression
-nikon_d4_depth::a_12_bit_d4_nef_develops_as_bright_as_the_same_scene_at_14_bit
-raf::bad_layouts_and_sizes_fail_cleanly
-raf::bayer_layouts
-raf::compressed_variants_that_cannot_be_decoded_fail_cleanly
-raf::every_storage_decodes_exactly
-raf::xtrans_metadata
-vendor_codecs::craw_unusual_variants_are_unsupported
-vendor_codecs::orf_truncated_in_ifd0_is_malformed_not_the_compressed_variant
-vendor_codecs::rw2_format4_crosses_pages
-vendor_codecs::rw2_format4_rejects_other_block_widths
-vendor_codecs::rw2_round_trip_12_and_14_bit
-vendor_codecs::rw2_undecoded_formats_fall_back
-vendors::cr2_cfa_phase_falls_back_to_the_model_table
-vendors::cr2_cfa_phase_is_measured_for_every_row_phase_and_border_parity
-vendors::cr2_srgb_raw_is_unsupported
-vendors::nef_like_with_maker_tags
-vendors::other_raw_containers_are_recognised_but_unsupported
+# One full test name per line (module path inside its test binary), under a section line
+# `# <package> --test <target> (<folder>)`; `#` starts a comment.
+#
+# Empty since the 057297b merge. Pigment 0.5.0 (upstream abb30df) listed 60 tests in photocraft-format,
+# photocraft-io and photocraft-raw, written for an earlier craft-libs than the one abb30df's Cargo.lock
+# pinned. At 057297b upstream deleted 7 of them, and the other 53 pass with craft-libs 18ffc07 (and
+# craft-svg 7b8c1ec).
