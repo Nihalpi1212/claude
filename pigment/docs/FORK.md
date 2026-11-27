@@ -280,7 +280,7 @@ Every place in the shipped code that can reach another machine, and what Pigment
 | Printing (IPP to a printer or CUPS server, `lp`/`lpstat`, Avahi) | `crates/ipp`, the print commands | when the user prints | unchanged |
 | Control server, MCP bridge, single-instance hand-off, agent connection | `craft::automation::{server, agents}` (built in `apps/photocraft/src/main.rs`), `crates/automation/src/{bridge,live,agent_link}.rs`, `apps/photocraft/src/single_instance.rs` | loopback (`127.0.0.1`) only | unchanged, loopback only |
 | Web build: its own WebAssembly parts and served fonts | `apps/photocraft-web-boot`, `crates/text` (`fonts/manifest.txt`) | same origin as the page | unchanged (the web build is not part of Pigment's releases) |
-| Telemetry, crash reports, model downloads | — | none: crash and start-up reports are local files and dialogs, fonts are system or embedded, the face-detection weights are bundled | none |
+| Telemetry, crash reports, model downloads | — | none: crash and start-up reports are local files and dialogs, fonts are system, embedded or already installed in the suite's font store, the face-detection weights are bundled | none |
 | Packaging and developer tooling: appimagetool and its runtime, nfpm, cargo-fuzz, corpora (`cargo xtask corpus`) | `packaging/`, `xtask/` | pinned, SHA-256 checked downloads | unchanged; never part of the app |
 
 ### Not renamed (internal identifiers, kept for upstream merges)
