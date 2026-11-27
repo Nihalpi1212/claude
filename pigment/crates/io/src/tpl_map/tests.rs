@@ -120,13 +120,22 @@ fn photoshop_presets_built_by_hand() {
                 .with(
                     "Tool",
                     DValue::Descriptor(
-                        Descriptor::new("paintbrushTool").with("Opct", DValue::Integer(50)).with("flow", unit(b"#Prc", 25.0)).with("Md  ", crate::effects_map::blend_value(BlendMode::Darken)),
+                        Descriptor::new("paintbrushTool")
+                            .with("Opct", DValue::Integer(50))
+                            .with("flow", unit(b"#Prc", 25.0))
+                            .with("Md  ", crate::effects_map::blend_value(BlendMode::Darken)),
                     ),
                 )
                 .with("Brsh", DValue::Descriptor(brush)),
         ),
-        DValue::Descriptor(Descriptor::new("toolPreset").with("Nm  ", text_value("Wand")).with("Tool", DValue::Descriptor(Descriptor::new("magicWandTool").with("Opct", DValue::Integer(10))))),
-        DValue::Descriptor(Descriptor::new("toolPreset").with("Nm  ", text_value("3D")).with("Tool", DValue::Descriptor(Descriptor::new("threeDObjectRotateTool")))),
+        DValue::Descriptor(
+            Descriptor::new("toolPreset")
+                .with("Nm  ", text_value("Wand"))
+                .with("Tool", DValue::Descriptor(Descriptor::new("magicWandTool").with("Opct", DValue::Integer(10)))),
+        ),
+        DValue::Descriptor(
+            Descriptor::new("toolPreset").with("Nm  ", text_value("3D")).with("Tool", DValue::Descriptor(Descriptor::new("threeDObjectRotateTool"))),
+        ),
     ];
     let mut file = b"8BTP\0\x01\0\x02".to_vec();
     put_section(&mut file, b"desc", &VersionedDescriptor::new(Descriptor::new("null").with("Hrch", DValue::List(presets))).to_bytes());
@@ -233,7 +242,9 @@ fn truncated_and_foreign_files() {
 fn a_file_without_sections_is_scanned_for_descriptors() {
     let d = Descriptor::new("null").with(
         "Prst",
-        DValue::List(vec![DValue::Descriptor(Descriptor::new("toolPreset").with("Nm  ", text_value("Zoom In")).with("Tool", DValue::Descriptor(Descriptor::new("zoomTool"))))]),
+        DValue::List(vec![DValue::Descriptor(
+            Descriptor::new("toolPreset").with("Nm  ", text_value("Zoom In")).with("Tool", DValue::Descriptor(Descriptor::new("zoomTool"))),
+        )]),
     );
     let mut file = b"8BTP\0\x01\0\x02\0\0".to_vec();
     file.extend_from_slice(&VersionedDescriptor::new(d).to_bytes());

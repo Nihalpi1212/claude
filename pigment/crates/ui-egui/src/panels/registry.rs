@@ -192,7 +192,13 @@ pub(crate) static PANELS: &[PanelEntry] = &[
         ..floating("styles", || tl!("Styles").to_string(), "sparkles", [300.0, 420.0], |app, ui| scrolled(app, ui, super::preset_panels::styles_panel))
     },
     floating("shapes", || tl!("Shapes").to_string(), "square", [300.0, 420.0], super::preset_panels::shapes_panel),
-    floating("toolPresets", || tl!("Tool Presets").to_string(), "target", [300.0, 380.0], super::preset_panels::tool_presets_panel),
+    // Pigment: the Tool Presets panel menu (P2)
+    PanelEntry {
+        rows: super::preset_panels::tool_presets_menu::rows,
+        states: super::preset_panels::tool_presets_menu::states,
+        run: super::preset_panels::tool_presets_menu::run,
+        ..floating("toolPresets", || tl!("Tool Presets").to_string(), "target", [300.0, 380.0], super::preset_panels::tool_presets_panel)
+    },
     floating("cloneSource", || tl!("Clone Source").to_string(), "stamp", [300.0, 360.0], |app, ui| scrolled(app, ui, super::preset_panels::clone_source_panel)),
     PanelEntry {
         rows: super::type_panels_ui::styles::panel_rows,

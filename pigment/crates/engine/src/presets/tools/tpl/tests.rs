@@ -152,6 +152,7 @@ fn the_preset_manager_loads_and_saves_tpl() {
     let saved = s.execute("edit.presets.presetManager", json!({"action": "saveSet", "kind": "tools", "indices": [0, 1]})).unwrap();
     assert!(saved["fileName"].as_str().unwrap().ends_with(".tpl"), "{saved}");
     let mut t = Session::new();
-    t.execute("edit.presets.presetManager", json!({"action": "load", "kind": "tools", "data": saved["data"], "fileName": "Mine.tpl", "replace": true})).unwrap();
+    t.execute("edit.presets.presetManager", json!({"action": "load", "kind": "tools", "data": saved["data"], "fileName": "Mine.tpl", "replace": true}))
+        .unwrap();
     assert_eq!(names(&t), names(&s)[..2]);
 }

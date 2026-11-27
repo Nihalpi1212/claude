@@ -17,8 +17,10 @@ use crate::panel_docking::show_panel;
 /// the Swatches panel through [`crate::swatches_ui::import_bytes`]).
 /// `.psp` is Photoshop's live `Keyboard Shortcuts.psp` (the same XML as a `.kys`); other `.psp`
 /// settings files are refused with a clear message.
-// Pigment: contours (.shc), custom shapes (.csh) and Photoshop's adjustment presets go to the Preset Manager's load (P1a).
-pub const PRESET_EXTS: &[&str] = &["abr", "grd", "asl", "pat", "aco", "act", "ase", "kys", "psp", "shc", "csh", "alv", "acv", "ahu", "cha", "asv", "blw"];
+// Pigment: contours (.shc), custom shapes (.csh) and Photoshop's adjustment presets go to the Preset Manager's load (P1a),
+// tool presets (.tpl) to the Tool Presets panel (P2).
+pub const PRESET_EXTS: &[&str] =
+    &["abr", "grd", "asl", "pat", "aco", "act", "ase", "kys", "psp", "shc", "csh", "alv", "acv", "ahu", "cha", "asv", "blw", "tpl"];
 
 fn ext(name: &str) -> String {
     std::path::Path::new(name).extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default()
@@ -94,6 +96,8 @@ pub fn open(app: &mut PhotocraftApp, name: &str, bytes: &[u8]) -> Option<Result<
         "pat" => ("pattern.import", "patterns"),
         "aco" | "act" | "ase" => return Some(crate::swatches_ui::import_bytes(app, name, bytes, false).map(|_| ())),
         "kys" | "psp" => return Some(crate::kys_import::open_bytes(app, name, bytes).map(|_| ())),
+        // Pigment: tool presets (P2)
+        "tpl" => return Some(crate::panels::preset_panels::tool_presets_menu::open_file(app, name, bytes)),
         // Pigment: the kinds only the Preset Manager loaded before (P1a)
         _ => return crate::dialogs::preset_manager_ui::open_file(app, name, bytes),
     };

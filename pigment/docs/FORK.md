@@ -871,6 +871,44 @@ Edit › Presets › Export/Import Presets… writes and reads the nine kinds of
 | `crates/engine/src/cmd/edit_menu_cmds/presets.rs` | `PresetFile`: eight `#[serde(skip_serializing_if = "Vec::is_empty")]` fields |
 | `crates/ui-egui/src/prefs/prefs_ui/presets.rs` | `io_kinds`; `io_params` and `open_io` over the nine kinds; `confirm_io`'s kind list and `pick_file_bytes_filtered(["pcpresets", "pigment-bundle"])`, a ZIP sent as base64; the `io_tests` module |
 
+### Tool presets in Photoshop's `.tpl` files
+
+Window › Tool Presets loads, replaces and saves Photoshop tool preset files (`.tpl`), and resets the list, as
+Photoshop's panel menu does; File › Open, drag-and-drop and the Preset Manager take `.tpl` too (upstream had no `.tpl`
+code).
+
+- **io**: `crates/io/src/tpl_map.rs` (`read_tpl`, `write_tpl`), the layout the JavaScript Pigment 0.5 wrote
+  (`8BTP` 1.2, `8BIM` sections `samp`, `patt`, `desc` with a `Prst` list of `toolPreset` objects: `Nm  `, `Tool` with
+  Photoshop's tool class and `Opct`, `flow`, `Md  `, `TxtS`, `Brsh` and `pigmentData`). The tips are read through
+  craft-psd's `.abr` reader (the section is `.abr` 6.2's) and written by `craft_psd::abr::write_v6` (its `samp` section
+  copied out), at 16 bits. `pigmentData` holds the tool preset as the engine keeps it (`format:
+  "pigment-tool-preset"`, tips as `{"tplSample": id}`), so Pigment's own files come back exactly; files the JavaScript
+  Pigment 0.5 wrote are mapped through `JS_TOOLS` and its option names; Photoshop's keys are mapped when there is no
+  `pigmentData`. `TOOL_CLASSES` maps PhotoCraft's tool names to Photoshop's classes (a ui-egui test checks it against
+  `Tool::from_name` and `Tool::ALL`). A brush is mapped by `abr_map::brush_from_descriptor`.
+- **Engine**: `crates/engine/src/presets/tools/tpl.rs`: `tool.presets.importTpl {"path"|"data", "replace"}` (a preset
+  already in the list as it is is skipped, so loading twice adds nothing; a taken name gets " 2"; a brush that
+  `tools.setBrush` would refuse is left out with a warning) and `tool.presets.exportTpl {"names"?, "path"?}` (stored tips
+  are loaded first). The Preset Manager's `.tpl` load and Save Set… (P1a's dispatch) use them; tool presets now save as
+  `.tpl` first there.
+- **Interface**: `crates/ui-egui/src/panels/preset_panels/tool_presets_menu.rs`: the Tool Presets panel menu, the
+  framework's `PresetFiles` rows Load…, Replace…, Save… for `.tpl` and Pigment's Reset Tool Presets…; Replace… and Reset
+  ask first (`StandardPrompt`s answered in `dialogs::PROMPTS`).
+- The fixture `crates/io/tests/fixtures/pigment-0.4/wip05-tool-presets.tpl` was written by the JavaScript app's own
+  writer (`make-fixture-tpl.mjs` beside it).
+
+| Upstream file | Hook |
+|---|---|
+| `crates/io/src/abr_map.rs` | `pub fn brush_from_descriptor` (a wrapper of the private `Mapper::preset`) |
+| `crates/io/src/lib.rs` | `pub mod tpl_map;` |
+| `crates/engine/src/presets/tools.rs` | `pub mod tpl;` |
+| `crates/engine/src/presets.rs` | `tools::tpl::specs()` in `specs()` |
+| `crates/automation/src/workspace.rs` | `tool.presets.importTpl` (reads a `path` without `data`) and `tool.presets.exportTpl` (writes a `path`) in `command_uses_ambient_path` |
+| `crates/ui-egui/src/panels/preset_panels.rs` | `pub(crate) mod tool_presets_menu;` |
+| `crates/ui-egui/src/panels/registry.rs` | the `toolPresets` entry is a `PanelEntry` with `rows`, `states` and `run` from `tool_presets_menu` |
+| `crates/ui-egui/src/dialogs.rs` | `tool_presets_menu::answer` in `PROMPTS` |
+| `crates/ui-egui/src/preset_files_ui.rs` | `PRESET_EXTS` gains `tpl`; `open` sends a `.tpl` to `tool_presets_menu::open_file` |
+
 ## Keeping the rebrand: `scripts/pigment-rebrand.py`
 
 Most of the rebrand is mechanical and done by [`scripts/pigment-rebrand.py`](../scripts/pigment-rebrand.py):

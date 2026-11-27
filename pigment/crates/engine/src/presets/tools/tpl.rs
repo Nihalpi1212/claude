@@ -95,7 +95,9 @@ fn numbered(name: &str, base: &str) -> bool {
 
 /// A brush whose tip, Dual Brush tip or texture the preset store keeps (`{"stored": …}`).
 fn has_stored_tip(b: &Value) -> bool {
-    [&["tip"][..], &["dualBrush", "tip"], &["texture", "pattern"]].iter().any(|path| path.iter().try_fold(b, |v, k| v.get(*k)).is_some_and(|v| v.get("stored").is_some()))
+    [&["tip"][..], &["dualBrush", "tip"], &["texture", "pattern"]]
+        .iter()
+        .any(|path| path.iter().try_fold(b, |v, k| v.get(*k)).is_some_and(|v| v.get("stored").is_some()))
 }
 
 /// `{"names"?, "path"?}` → `{count, bytes, warnings, path | data}`.
@@ -106,7 +108,12 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
             let mut out = Vec::with_capacity(names.len());
             for n in names {
                 let n = n.as_str().ok_or_else(|| bad(EXPORT, "`names` must be tool preset names"))?;
-                let t = s.presets.tool_presets.iter().find(|t| t.name == n).ok_or_else(|| bad(EXPORT, format!("no tool preset \"{n}\" (see tool.presets.list)")))?;
+                let t = s
+                    .presets
+                    .tool_presets
+                    .iter()
+                    .find(|t| t.name == n)
+                    .ok_or_else(|| bad(EXPORT, format!("no tool preset \"{n}\" (see tool.presets.list)")))?;
                 out.push(t.clone());
             }
             out

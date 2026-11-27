@@ -424,6 +424,8 @@ pub(crate) const PROMPTS: &[PromptRow] = &[
     auto_options_ui::answer_prompt,
     // Pigment: the Preset Manager's Reset and Replace confirmations (P1a)
     preset_manager_ui::answer_prompt,
+    // Pigment: the Tool Presets panel's Reset and Replace confirmations (P2)
+    crate::panels::preset_panels::tool_presets_menu::answer,
 ];
 
 /// [`prompts_take`] over the rows `rows`.

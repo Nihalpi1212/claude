@@ -749,7 +749,8 @@ pub fn read_tpl(bytes: &[u8]) -> Result<TplImport, String> {
 fn read_preset(entry: &Descriptor, file: &AbrFile, n: usize, warnings: &mut Vec<String>) -> Option<TplPreset> {
     let name = text(entry, "Nm  ").map(|s| strip_localized(&s)).filter(|s| !s.is_empty()).unwrap_or_else(|| format!("Tool Preset {n}"));
     let name: String = name.chars().take(255).collect();
-    let pigment: Option<Value> = text(entry, "pigmentData").filter(|s| s.len() <= MAX_PIGMENT_DATA).and_then(|s| serde_json::from_str(&s).ok()).filter(Value::is_object);
+    let pigment: Option<Value> =
+        text(entry, "pigmentData").filter(|s| s.len() <= MAX_PIGMENT_DATA).and_then(|s| serde_json::from_str(&s).ok()).filter(Value::is_object);
     let tool_obj = obj(entry, "Tool");
     let class = match entry.get("Tool") {
         Some(DValue::Descriptor(t) | DValue::GlobalObject(t)) => id_string(&t.class_id),
