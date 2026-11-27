@@ -1,0 +1,2 @@
+{"format":"pigment-presets","version":1,"kind":"adjustment:hue-saturation","kindVersion":1,"groups":[],
+ "items":[{"id":"h-1","name":"Muted","group":null,"data":{"colorize":false,"hue":0,"saturation":-40,"lightness":5}}],"hidden":[]}

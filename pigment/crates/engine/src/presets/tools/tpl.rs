@@ -19,7 +19,7 @@ pub(crate) const IMPORT: &str = "tool.presets.importTpl";
 pub(crate) const EXPORT: &str = "tool.presets.exportTpl";
 
 /// A file's preset as the library keeps it, or why it cannot be kept.
-fn preset_of(p: photocraft_io::tpl_map::TplPreset, warnings: &mut Vec<String>) -> Option<ToolPreset> {
+pub(crate) fn preset_of(p: photocraft_io::tpl_map::TplPreset, warnings: &mut Vec<String>) -> Option<ToolPreset> {
     let name = match checked_name(&p.name.chars().take(crate::brush_preset_cmds::MAX_NAME).collect::<String>(), IMPORT) {
         Ok(n) => n,
         Err(_) => {

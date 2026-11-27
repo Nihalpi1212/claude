@@ -1,0 +1,11 @@
+{"format":"pigment-presets","version":1,"kind":"gradients","kindVersion":1,
+ "groups":[{"id":"g-sky","name":"Skies","parent":null}],
+ "items":[{"ref":"foreground-to-background"},
+  {"id":"u-1","name":"Sunset","group":"g-sky","data":{"gradientVersion":2,"type":"solid","interpolation":"perceptual","smoothness":1,
+    "stops":[{"pos":0,"mid":0.5,"color":"#ff8000"},{"pos":0.6,"mid":0.5,"color":"#c02060"},{"pos":1,"mid":0.5,"color":"#200040"}],
+    "opacityStops":[{"pos":0,"mid":0.5,"opacity":1},{"pos":1,"mid":0.5,"opacity":0.5}]}},
+  {"id":"u-2","name":"Ink to Paper","group":null,"data":{"gradientVersion":2,"type":"solid","interpolation":"classic","smoothness":0,
+    "stops":[{"pos":0,"mid":0.5,"color":{"ref":"fg"}},{"pos":1,"mid":0.5,"color":{"ref":"bg"}}],
+    "opacityStops":[{"pos":0,"mid":0.5,"opacity":1},{"pos":1,"mid":0.5,"opacity":1}]}},
+  {"id":"u-3","name":"Static","group":"g-sky","data":{"gradientVersion":2,"type":"noise","noise":{"roughness":0.7,"model":"hsb","min":[0,0.2,0.3],"max":[1,1,1],"restrict":true,"transparency":false,"seed":42}}}],
+ "hidden":[]}

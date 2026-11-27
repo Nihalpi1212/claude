@@ -26,6 +26,8 @@
 
 mod adjust;
 pub(crate) mod blend;
+// Pigment: Migrate Presets (P4): the JS brush presets, and the public face of the mappers.
+mod brush;
 mod container;
 mod filters;
 mod gradient;
@@ -33,6 +35,7 @@ mod info;
 mod layers;
 mod paint;
 mod path;
+pub mod presets;
 mod smart;
 mod styles;
 mod text;

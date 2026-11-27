@@ -1,0 +1,2 @@
+{"format":"pigment-presets","version":1,"kind":"styles","kindVersion":1,"groups":[],
+ "items":[{"id":"st-1","name":"Lifted","group":null,"data":{"styles":{"dropShadow":{"enabled":true,"blend":"multiply","color":"#000000","opacity":0.6,"angle":120,"distance":8,"size":12}},"opacity":1,"fillOpacity":0.8}}],"hidden":[]}

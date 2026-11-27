@@ -659,6 +659,23 @@ fn place(tool: &str, mut c: Common, brush: Option<Value>) -> (Value, usize) {
     (Value::Object(options), c.skipped)
 }
 
+/// Pigment: Migrate Presets (P4). A tool preset of the JavaScript Pigment's preset store
+/// (`tool-presets` kind: `{ tool, options, brush?, type?, color? }`, Pigment 0.4 kept the brush
+/// in `options.brush`) as the engine keeps it: `(PhotoCraft tool, options, options skipped)`,
+/// with the same option table as a `.tpl`'s `pigmentData`. `brush` is the preset's brush as
+/// brush settings JSON (`legacy_pigment::presets::brush`); the JS options for size, hardness,
+/// opacity and flow are laid over it. `None` when Pigment has no such tool.
+pub fn js_tool_preset(tool: &str, options: &Map<String, Value>, js_type: Option<&Value>, color: Option<&str>, brush: Option<Value>) -> Option<(&'static str, Value, usize)> {
+    let tool = tool_for_js(tool).or_else(|| canonical_tool(tool))?;
+    let mut o = options.clone();
+    o.remove("brush");
+    let (mut options, skipped) = place(tool, common_from_js(tool, &o, js_type), brush);
+    if let Some(c) = color.and_then(hex_color) {
+        options["foreground"] = c;
+    }
+    Some((tool, options, skipped))
+}
+
 /// A brush descriptor mapped as an `.abr` preset is (craft-psd tips and patterns of the file).
 fn brush_json(d: &Descriptor, file: &AbrFile, label: &str, warnings: &mut Vec<String>) -> Option<Value> {
     let (brush, lines) = crate::abr_map::brush_from_descriptor(d, file);
