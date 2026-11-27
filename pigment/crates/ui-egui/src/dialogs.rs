@@ -504,6 +504,8 @@ pub fn run(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     crate::type_panels_ui::color_picker::check(app, ui.ctx());
     palette::show(app, ui);
     crate::filter_dialog::reconcile_match_color(app);
+    // Pigment: the HDR Toning, Match Color and Replace Color rows' asks and pictures
+    crate::filter_dialog::pigment_pump(app);
     filter_preview_ui::feed(app, ui.ctx());
     crate::prefs_ui::feed(app);
     app.framework.dialogs.run(ui);

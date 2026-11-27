@@ -223,7 +223,8 @@ fn scope_preview(proxy: &Document, params: &Value, mask: &mut [f32]) {
 
 /// The selection mask `params` would make, on the proxy: the engine command run on a scratch
 /// session (Out Of Gamut uses the document's own proof setup).
-fn proxy_mask(app: &PhotocraftApp, proxy: &Document, k: u32, params: &Value) -> Result<Vec<f32>, String> {
+// Pigment: Replace Color's preview makes its picture here too.
+pub(crate) fn proxy_mask(app: &PhotocraftApp, proxy: &Document, k: u32, params: &Value) -> Result<Vec<f32>, String> {
     let area = proxy.bounds();
     if params.get("select").and_then(Value::as_str).unwrap_or("sampledColors") == "sampledColors" {
         // Pick on the original document, not the thumbnail's nearest retained pixel. The

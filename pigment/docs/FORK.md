@@ -771,9 +771,36 @@ Four rows of the JavaScript Pigment 0.4 that PhotoCraft lacked.
 | `crates/algo/src/tone.rs` | `pub mod hdr_methods;` |
 | `crates/engine/src/cmd/adjust_cmds.rs` | `pub mod match_statistics;`; `match_color` reads `match_statistics::given` first; `hdr_toning` reads `method` and calls `hdr_methods::hdr_toning_with`; the two params strings; `specs()` chains `match_statistics::specs()` |
 | `crates/automation/src/workspace.rs` | `image.adjustments.matchColor.statistics` with a `path` in `command_uses_ambient_path` |
+| `crates/ui-egui/src/dialogs/filter_dialog.rs` | `mod pigment;` and `pigment_pump`; the builder takes its rows from `pigment::params_for` (Match Color's Source menu gains the loaded statistics); `command_params` calls `pigment::command_params_of` (loaded statistics as `sourceStatistics`) |
+| `crates/ui-egui/src/dialogs/filter_dialog/rows.rs` | `custom_rows`: an HDR Toning arm (`pigment::hdr_toning`); one line at the end of `match_color` and of `replace_color` |
+| `crates/ui-egui/src/dialogs.rs` | `run`: `filter_dialog::pigment_pump` after `reconcile_match_color` |
+| `crates/ui-egui/src/dialogs/color_range_ui.rs` | `proxy_mask` is `pub(crate)` |
+| `crates/ui-egui/src/panels.rs` | `pub(crate) mod solid_fill_props;` |
+| `crates/ui-egui/src/panels/layer_props_ui.rs` | `properties`: `solid_fill_props::section` before the gradient branch |
+
+The interface is `crates/ui-egui/src/dialogs/filter_dialog/pigment.rs` (tests beside it) and
+`crates/ui-egui/src/panels/solid_fill_props.rs`:
+
+- HDR Toning's dialog opens with A2's Preset row (`preset_row::params_row`, the params-based form of the row) and the
+  Method menu; the Local Adaptation rows are shown for it only, Exposure and Gamma are enabled for the methods that use
+  them, and Equalize Histogram shows a note instead. The dialog has no Toning Curve row (upstream's spec parser makes
+  none for `curve`; presets carry one through).
+- Match Color's Load Statistics… and Save Statistics… sit under the source layer; a loaded file is "Statistics:
+  {name}" in the Source menu, its numbers under the buttons.
+- Replace Color's preview is the Color Range proxy's (`color_range_ui::proxy_mask` with the params Replace Color
+  matches with), Selection or Image, laid out as Color Range's dialog lays its preview; a press on it samples through
+  `rows::replace_color_sample`, as the canvas does.
+- A Solid Color fill layer's Properties show a Color section with its swatch first; a click runs
+  `layer.layerContentOptions`, which opens the layer's Color Picker (live preview, Cancel, OK as one step). **A choice
+  recorded**: the step keeps upstream's history name "Solid Color", not Photoshop's "Modify Fill Layer" (an upstream
+  engine string).
+
+The rows reach the app through private fields (`__hdrPresetAsk`, `__statisticsAsk`, `__previewPick`) that the pump
+answers before the dialogs run, and read what it prepares from the egui context's data.
 
 Pigment's own files changed: `presets/adjustments.rs` (the HDR built-ins' `method`), `cmd/adjust_preset_cmds.rs` (an
-HDR preset's `method` must be one of the menu's).
+HDR preset's `method` must be one of the menu's), `dialogs/adjust_editors/preset_row.rs` (the drawing shared by the
+value row and the new `params_row`).
 
 ## Keeping the rebrand: `scripts/pigment-rebrand.py`
 

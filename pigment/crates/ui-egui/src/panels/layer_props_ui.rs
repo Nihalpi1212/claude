@@ -187,6 +187,8 @@ pub fn properties(app: &mut PhotocraftApp, ui: &mut egui::Ui, layer: &Layer) {
         let bb = frame(layer, app.layer_frame_bounds(layer, s));
         transform_section(app, ui, layer, bb);
     }
+    // Pigment: a Solid Color fill's colour, as Photoshop's Properties shows it (first, as a gradient fill's gradient).
+    crate::panels::solid_fill_props::section(app, ui, layer);
     // Gradient fills: their gradient first, as in Photoshop's Properties panel.
     if matches!(layer.content, LayerContent::Fill(photocraft_doc::Fill::Gradient { .. })) {
         crate::gradient_ui::properties(app, ui, layer);

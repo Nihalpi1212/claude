@@ -181,19 +181,82 @@ fn file_of(kind: &str, value: &AdjustValue, cx: &ValueCx, name: Option<&str>) ->
 /// Shows the row for `kind` over `value` (in `cx`) for one pass. `entries` are the kind's presets
 /// ([`entries`]).
 pub fn preset_row(ui: &mut egui::Ui, kind: &str, entries: &[PresetEntry], value: &AdjustValue, cx: &ValueCx) -> RowOut {
-    let mut out = RowOut::default();
-    let rows = rows(entries);
     let held = held(kind, entries, value, cx);
+    let shown_name = held.as_deref().filter(|k| *k != DEFAULT_KEY).map(str::to_owned);
+    let (picked, asks) = draw(ui, kind, entries, held, |_| file_of(kind, value, cx, shown_name.as_deref()));
+    let apply = picked.and_then(|key| match key.as_str() {
+        DEFAULT_KEY => default_value(kind, cx),
+        name => entries.iter().find(|e| e.name == name).and_then(|e| preset_value(kind, &e.params, cx)),
+    });
+    RowOut { apply, asks }
+}
+
+/// What one pass of [`params_row`] reports.
+#[derive(Debug, Default)]
+pub struct ParamsRowOut {
+    /// A preset was picked: the params to show (the preset's over `defaults`).
+    pub apply: Option<Value>,
+    /// What the host carries out, in order.
+    pub asks: Vec<PresetAsk>,
+}
+
+/// Whether the settings `current` have the preset `preset`'s: every key the preset names has its value (numbers to
+/// 1/1000, so `15` and `15.0` are one).
+pub fn params_match(preset: &Value, current: &Value) -> bool {
+    fn same(a: &Value, b: &Value) -> bool {
+        match (a, b) {
+            (Value::Number(x), Value::Number(y)) => x.as_f64().zip(y.as_f64()).is_some_and(|(x, y)| (x - y).abs() < 1e-3),
+            (Value::Array(x), Value::Array(y)) => x.len() == y.len() && x.iter().zip(y).all(|(x, y)| same(x, y)),
+            _ => a == b,
+        }
+    }
+    preset.as_object().is_some_and(|keys| keys.iter().all(|(k, v)| current.get(k).is_some_and(|c| same(v, c))))
+}
+
+/// The row for a kind whose dialog keeps command params, not an [`AdjustValue`] (HDR Toning, a parameter dialog):
+/// the preset shown is Default when `current` has every one of `defaults`, else the first whose settings it has
+/// ([`params_match`]); a pick gives the preset's params over `defaults`.
+pub fn params_row(ui: &mut egui::Ui, kind: &str, entries: &[PresetEntry], current: &Value, defaults: &Value) -> ParamsRowOut {
+    let held = if params_match(defaults, current) {
+        Some(DEFAULT_KEY.to_owned())
+    } else {
+        entries.iter().find(|e| params_match(&e.params, current)).map(|e| e.name.clone())
+    };
+    let (picked, asks) = draw(ui, kind, entries, held, |_| None);
+    let apply = picked.and_then(|key| {
+        let mut out = defaults.clone();
+        if key != DEFAULT_KEY {
+            let e = entries.iter().find(|e| e.name == key)?;
+            if let (Some(m), Some(p)) = (out.as_object_mut(), e.params.as_object()) {
+                m.extend(p.iter().map(|(k, v)| (k.clone(), v.clone())));
+            }
+        }
+        Some(out)
+    });
+    ParamsRowOut { apply, asks }
+}
+
+/// The row's picker and buttons for one pass: the key picked (a preset's name or [`DEFAULT_KEY`]) and the asks.
+/// `export` makes the Save… file (Photoshop's), for the kinds that have one.
+fn draw(
+    ui: &mut egui::Ui,
+    kind: &str,
+    entries: &[PresetEntry],
+    held: Option<String>,
+    export: impl Fn(Option<&String>) -> Option<PresetExport>,
+) -> (Option<String>, Vec<PresetAsk>) {
+    let mut asks = Vec::new();
+    let mut picked = None;
+    let rows = rows(entries);
     let state_id = egui::Id::unique(("pigment.adjustPresets", kind));
     let mut state: PresetState<String> = ui.data(|d| d.get_temp(state_id)).unwrap_or_else(|| {
         let mut s = PresetState::new();
         s.view = PresetView::List;
         s
     });
-    let shown_name = held.as_deref().filter(|k| *k != DEFAULT_KEY).map(str::to_owned);
     let ext = photocraft_io::adjust_presets::extension(kind);
     let extensions: Vec<&str> = ext.into_iter().collect();
-    let files = PresetFiles::new(format!("adjustment.{kind}"), files_title(kind), &extensions).export(|_| file_of(kind, value, cx, shown_name.as_deref()));
+    let files = PresetFiles::new(format!("adjustment.{kind}"), files_title(kind), &extensions).export(export);
     let suggestion = {
         let base = tl!("Preset");
         let taken = |n: &str| entries.iter().any(|e| e.name.eq_ignore_ascii_case(n));
@@ -214,24 +277,19 @@ pub fn preset_row(ui: &mut egui::Ui, kind: &str, entries: &[PresetEntry], value:
     let shown = row.show(ui);
     for event in shown.events {
         match event {
-            NamedPresetEvent::Apply(key) if key == DEFAULT_KEY => out.apply = default_value(kind, cx),
-            NamedPresetEvent::Apply(key) => {
-                if let Some(e) = entries.iter().find(|e| e.name == key) {
-                    out.apply = preset_value(kind, &e.params, cx);
-                }
-            }
-            NamedPresetEvent::Create { name, .. } => out.asks.push(PresetAsk::Create(name)),
-            NamedPresetEvent::Rename { key, text, .. } if key != DEFAULT_KEY => out.asks.push(PresetAsk::Rename { from: key, to: text }),
-            NamedPresetEvent::Delete(key) if key != DEFAULT_KEY => out.asks.push(PresetAsk::Delete(key)),
-            NamedPresetEvent::File(request) => out.asks.push(PresetAsk::File(request)),
+            NamedPresetEvent::Apply(key) => picked = Some(key),
+            NamedPresetEvent::Create { name, .. } => asks.push(PresetAsk::Create(name)),
+            NamedPresetEvent::Rename { key, text, .. } if key != DEFAULT_KEY => asks.push(PresetAsk::Rename { from: key, to: text }),
+            NamedPresetEvent::Delete(key) if key != DEFAULT_KEY => asks.push(PresetAsk::Delete(key)),
+            NamedPresetEvent::File(request) => asks.push(PresetAsk::File(request)),
             _ => {}
         }
     }
     if clicked(&Button::new(tl!("Reset Presets")).id_salt(("pigment.adjustPresets.reset", kind)).show(ui)) {
-        out.asks.push(PresetAsk::Reset);
+        asks.push(PresetAsk::Reset);
     }
     ui.data_mut(|d| d.insert_temp(state_id, state));
-    out
+    (picked, asks)
 }
 
 /// Numbers held to four decimals: the editors keep `f32`s, whose `1.2` reads back as
