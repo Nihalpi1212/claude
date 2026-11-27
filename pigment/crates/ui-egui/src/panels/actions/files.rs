@@ -29,12 +29,8 @@ pub(super) fn load_source(app: &mut PhotocraftApp, name: &str, params: Value) ->
         crate::i18n::fmt(&crate::i18n::trn(crate::i18n::current(), n, "Loaded {n} action from {file}", "Loaded {n} actions from {file}"), &[("file", &shown)]);
     app.ui.status_error = false;
     app.ui.status = if unsupported > 0 {
-        let note = crate::i18n::trn(
-            crate::i18n::current(),
-            unsupported as u64,
-            "{n} step has no Pigment equivalent yet",
-            "{n} steps have no Pigment equivalent yet",
-        );
+        let note =
+            crate::i18n::trn(crate::i18n::current(), unsupported as u64, "{n} step has no Pigment equivalent yet", "{n} steps have no Pigment equivalent yet");
         let template = "{message} ({note})";
         crate::i18n::fmt(tl!(template), &[("message", &loaded), ("note", &note)])
     } else {

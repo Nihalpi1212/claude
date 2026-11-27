@@ -44,12 +44,8 @@ pub fn open(app: &mut PhotocraftApp, ctx: &egui::Context, url: &str) -> Value {
 }
 
 /// The About window's links: (label, url), in their order.
-pub const ABOUT: &[(&str, &str)] = &[
-    ("Report an Issue", ISSUES),
-    ("Pigment on GitHub", GITHUB),
-    ("Pigment Releases", RELEASES),
-    ("PhotoCraft (upstream project)", UPSTREAM),
-];
+pub const ABOUT: &[(&str, &str)] =
+    &[("Report an Issue", ISSUES), ("Pigment on GitHub", GITHUB), ("Pigment Releases", RELEASES), ("PhotoCraft (upstream project)", UPSTREAM)];
 
 /// The About window's credit line: what Pigment is based on, and its licence.
 pub fn credit() -> &'static str {

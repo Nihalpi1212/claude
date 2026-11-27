@@ -96,3 +96,28 @@ impl PhotocraftApp {
         ctx.options_mut(|o| o.zoom_with_keyboard = false);
     }
 }
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod theme_folder_tests {
+    use crate::{PhotocraftApp, Services};
+
+    /// Pigment keeps its themes in its own settings folder (`Themes`), never in the folder the Craft
+    /// apps share (`ArtCraft/themes`, `$CRAFT_SUITE_DIR`), and in memory without a settings folder.
+    #[test]
+    fn themes_live_in_pigment_s_settings_folder_not_artcraft_s() {
+        let dir = tempfile::tempdir().unwrap();
+        let options = craft::settings::OpenOptions::new(craft::settings::Location::Dir(dir.path().to_path_buf()));
+        let services = Services { settings: Some(craft::settings::SettingsStore::open_with(options)), ..Default::default() };
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), services);
+        let ctx = app.ctx().clone();
+        app.open_suite(&ctx);
+        assert_eq!(app.framework.suite_folder.as_deref(), Some(dir.path().join(super::THEME_FOLDER).as_path()));
+        assert_eq!(super::THEME_FOLDER, "Themes");
+
+        let mut plain = PhotocraftApp::new(photocraft_engine::Session::new(), Services::default());
+        plain.open_suite(&ctx);
+        assert_eq!(plain.framework.suite_folder, None, "no settings folder: the themes stay in memory");
+        let source = include_str!("framework.rs");
+        assert!(!source.contains(&["SuiteDir::", "resolve("].concat()), "never the suite's shared folder");
+    }
+}

@@ -65,7 +65,9 @@ pub(super) fn pigment_words() -> WordRows {
     let words = [
         (
             "agents.intro",
-            tl!("AI apps such as Claude can open, edit and save documents in this window while Let AI apps use this window is on. Only programs on this computer can connect."),
+            tl!(
+                "AI apps such as Claude can open, edit and save documents in this window while Let AI apps use this window is on. Only programs on this computer can connect."
+            ),
         ),
         ("agents.off", tl!("Off: AI apps get a session without a window.")),
     ];

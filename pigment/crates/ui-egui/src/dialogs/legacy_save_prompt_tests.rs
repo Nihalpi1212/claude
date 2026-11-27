@@ -87,10 +87,13 @@ fn the_first_save_over_a_pigment_0_4_file_asks_once() {
     assert_eq!(dialog_of(&app, &r), id);
     assert_eq!(super::pending(&app).unwrap().path, path);
     // Asked again while it is open: the same prompt.
-    assert_eq!({
-        let r = menus::invoke(&mut app, &ctx, "file.save", json!({})).unwrap();
-        dialog_of(&app, &r)
-    }, id);
+    assert_eq!(
+        {
+            let r = menus::invoke(&mut app, &ctx, "file.save", json!({})).unwrap();
+            dialog_of(&app, &r)
+        },
+        id
+    );
 
     // Cancel leaves the old file and the document as they are.
     crate::dialogs::cancel(&mut app, &ctx, id).unwrap();
