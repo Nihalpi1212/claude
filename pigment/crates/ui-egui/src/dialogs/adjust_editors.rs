@@ -36,6 +36,8 @@ use crate::PhotocraftApp;
 
 // Pigment: Auto Color Correction Options
 pub mod auto_row;
+// Pigment: Curves display options and Show Clipping
+pub mod curves_display;
 // Pigment: adjustment presets
 pub mod preset_row;
 mod session;
@@ -174,6 +176,9 @@ pub enum AdjustAsk {
     // Pigment: Auto Color Correction Options
     /// Auto, Options… or an eyedropper's double-click (`auto_options_ui`).
     AutoOptions(auto_row::AutoAsk),
+    // Pigment: Curves display options
+    /// Curve Display Options… or Show Clipping (`curves_display_ui`).
+    CurvesDisplay(curves_display::CurvesAsk),
 }
 
 /// What one pass of an editor reports.
@@ -209,6 +214,9 @@ pub struct EditorSetup {
     /// The kind's presets the Preset row lists, and the `presets.rev` they were read at.
     pub presets: Vec<preset_row::PresetEntry>,
     pub presets_rev: u64,
+    // Pigment: Curves display options
+    /// What Curves shows of Curve Display Options and Show Clipping (`curves_display_ui::view`).
+    pub curves_display: curves_display::View,
 }
 
 impl Default for EditorSetup {
@@ -225,6 +233,8 @@ impl Default for EditorSetup {
             // Pigment: adjustment presets
             presets: Vec::new(),
             presets_rev: 0,
+            // Pigment: Curves display options
+            curves_display: Default::default(),
         }
     }
 }
@@ -264,8 +274,10 @@ fn show(kind: &str, setup: &EditorSetup, ui: &mut Ui, value: &mut AdjustValue, c
         ("curves", AdjustValue::Curves { curves }) => {
             // Pigment: Auto Color Correction Options (Pigment's eyedropper row, which reports a double-click)
             let picked = auto_row::pickers(ui, setup, cx);
+            // Pigment: Curves display options (Show Histogram; Show Clipping compares the pass's edit with its start)
+            let start = curves.clone();
             let mut panel = CurvesPanel::new("Curves", Bind::bound(&mut *curves), setup.channels.clone())
-                .histograms(&setup.histograms)
+                .histograms(curves_display::histograms(&setup.curves_display, &setup.histograms))
                 .sampler(values::curve_sampler)
                 .channel(Bind::bound(&mut *cx.channel))
                 .context(context);
@@ -276,6 +288,12 @@ fn show(kind: &str, setup: &EditorSetup, ui: &mut Ui, value: &mut AdjustValue, c
                 panel = panel.select(point);
             }
             let out = panel.show(ui);
+            // Pigment: Curves display options (Show Clipping, or Alt, on an end point's drag; Curve Display Options…)
+            let (show_clipping, display) = curves_display::controls(ui, &setup.curves_display, cx);
+            if cx.context.is_dialog() {
+                let on = show_clipping || ui.input(|i| i.modifiers.alt);
+                curves_display::clipping(on, out.channel, &start, &out.edit, &mut *cx.clipping);
+            }
             let mut edit = out.edit.map(|curves| AdjustValue::Curves { curves });
             // The panel reports the other mode's icon and leaves the conversion to the engine.
             if let Some(mode) = out.mode {
@@ -287,7 +305,8 @@ fn show(kind: &str, setup: &EditorSetup, ui: &mut Ui, value: &mut AdjustValue, c
             }
             // Pigment: Auto Color Correction Options (Auto, Options…)
             let auto = auto_row::buttons(ui, "curves", true, true);
-            AdjustOut { ask: auto.or(picked).map(AdjustAsk::AutoOptions), edit }
+            let ask = auto.or(picked).map(AdjustAsk::AutoOptions).or(display.map(AdjustAsk::CurvesDisplay));
+            AdjustOut { ask, edit }
         }
         ("exposure", AdjustValue::Exposure { values }) => {
             let fields = AdjustField::exposure(&Env::of(ui).words::<AdjustWords>());

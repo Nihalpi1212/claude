@@ -23,6 +23,7 @@ use serde_json::{Value, json};
 
 use crate::PhotocraftApp;
 use crate::dialogs::params::{self, ParamFamily};
+use crate::dialogs::curves_display_ui;
 
 /// Preview keys (`canvas::display_doc`) are `BASE` plus a hash of the document, its revision and
 /// the preset.
@@ -169,11 +170,17 @@ pub(crate) enum PropertiesCommand {
     /// Save the selected adjustment layers as one of the Adjustments panel's Your Presets.
     #[command(label = "Save Adjustment Preset…")]
     SaveAdjustmentPreset,
+    /// Curve Display Options of the Curves layer Properties shows (A4; Photoshop's panel menu item).
+    #[command(label = "Curves Display Options…")]
+    CurvesDisplayOptions,
 }
 
 /// The Properties panel menu's rows.
 pub(crate) fn panel_rows(_app: &PhotocraftApp) -> Vec<PanelRow> {
-    vec![PanelRow::Command(CommandRef::from(PropertiesCommand::SaveAdjustmentPreset))]
+    vec![
+        PanelRow::Command(CommandRef::from(PropertiesCommand::SaveAdjustmentPreset)),
+        PanelRow::Command(CommandRef::from(PropertiesCommand::CurvesDisplayOptions)),
+    ]
 }
 
 /// Whether the selected layers hold an adjustment layer the app can edit.
@@ -185,16 +192,25 @@ fn adjustment_selected(app: &PhotocraftApp) -> bool {
     })
 }
 
-/// The rows' states: Save Adjustment Preset… needs a selected adjustment layer.
+/// The rows' states: Save Adjustment Preset… needs a selected adjustment layer, Curves Display Options… a Curves layer.
 pub(crate) fn command_states(app: &PhotocraftApp) -> Vec<(CommandRef, CommandState)> {
-    vec![(CommandRef::from(PropertiesCommand::SaveAdjustmentPreset), CommandState::new().enabled(adjustment_selected(app)))]
+    vec![
+        (CommandRef::from(PropertiesCommand::SaveAdjustmentPreset), CommandState::new().enabled(adjustment_selected(app))),
+        (CommandRef::from(PropertiesCommand::CurvesDisplayOptions), CommandState::new().enabled(curves_display_ui::curves_layer_active(app))),
+    ]
 }
 
 /// Runs a fired row of the Properties panel menu; `false` for another panel's command.
 pub(crate) fn run_fired(app: &mut PhotocraftApp, _ctx: &egui::Context, command: &CommandRef) -> bool {
-    let Some(PropertiesCommand::SaveAdjustmentPreset) = PropertiesCommand::from_ref(command) else { return false };
-    if adjustment_selected(app) {
-        open_save_dialog(app);
+    match PropertiesCommand::from_ref(command) {
+        Some(PropertiesCommand::SaveAdjustmentPreset) if adjustment_selected(app) => {
+            open_save_dialog(app);
+        }
+        Some(PropertiesCommand::CurvesDisplayOptions) if curves_display_ui::curves_layer_active(app) => {
+            curves_display_ui::open(app, curves_display_ui::Host::Properties);
+        }
+        Some(_) => {}
+        None => return false,
     }
     true
 }

@@ -5,7 +5,7 @@
 //! [`crate::adjust_params::targets`].
 //!
 //! - `Preferences.adjustments` ([`AdjustmentPrefs`]): the options and whether they were saved as the defaults, kept in
-//!   `config.toml` under `[adjustments]` like every preference.
+//!   `config.toml` under `[adjustments]` like every preference; also Curves' display options ([`curves_display`], A4).
 //! - `image.adjustments.autoOptions`: reads or saves the options (no document change, not journaled).
 //! - `image.adjustments.auto`: the Levels, Curves or Brightness/Contrast settings Auto gives for a layer (what the
 //!   dialogs' Auto buttons apply; nothing changes, not journaled).
@@ -22,6 +22,8 @@ use serde_json::{Map, Value, json};
 use crate::commands::CommandSpec;
 use crate::{EngineError, Result, Session};
 
+pub mod curves_display;
+
 /// `Preferences.adjustments`: state of the adjustment dialogs kept across restarts (PORTS-A D3).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -33,6 +35,8 @@ pub struct AdjustmentPrefs {
     /// targets (with their own algorithm), and the dialogs' Auto takes the saved options. Until then they keep
     /// PhotoCraft's own Auto (0.1 % clipping).
     pub auto_options_saved: bool,
+    /// Curves › Curve Display Options (A4, [`curves_display`]).
+    pub curves_display: curves_display::CurvesDisplay,
 }
 
 /// [`AutoOptions`] as the preferences and the commands write them:

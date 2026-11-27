@@ -218,7 +218,8 @@ struct Request {
 /// Whether a Levels dialog is open. A Smart Filter's Levels edits the filter, not the layer's pixels, so
 /// it has no display (`adjust_preview` keeps it off the layer path too).
 fn dialog(app: &PhotocraftApp) -> Option<&crate::adjust_dialog::OpenAdjust> {
-    crate::adjust_dialog::open_value(app).filter(|open| open.kind == "levels" && open.smart_filter.is_none())
+    // Pigment: Curves Show Clipping (Curves shows the display too)
+    crate::adjust_dialog::open_value(app).filter(|open| matches!(open.kind.as_str(), "levels" | "curves") && open.smart_filter.is_none())
 }
 
 /// The display the open Levels dialog asks for on document `idx`. None when no Levels dialog
@@ -228,7 +229,7 @@ fn request(app: &PhotocraftApp, idx: usize) -> Option<Request> {
     let open = dialog(app)?;
     let end = crate::adjust_dialog::hosted(app, open.id)?.clipping()?;
     let params = crate::adjust_dialog::open_params(app)?;
-    if app.session.active_index() != Some(idx) || crate::adjust_preview::targets_channel(app, idx, "levels", &params) {
+    if app.session.active_index() != Some(idx) || crate::adjust_preview::targets_channel(app, idx, &open.kind, &params) {
         return None;
     }
     let st = app.session.documents().get(idx)?;
@@ -239,7 +240,9 @@ fn request(app: &PhotocraftApp, idx: usize) -> Option<Request> {
     if !matches!(st.doc.layer(target).map(|l| &l.content), Some(LayerContent::Raster(_))) {
         return None;
     }
-    let adj = photocraft_engine::adjust_params::from_params("levels", &params, None, st.doc.mode).ok()?;
+    // Pigment: Curves Show Clipping (the Levels with each curve's end points)
+    let adj = photocraft_engine::adjust_params::from_params(&open.kind, &params, None, st.doc.mode).ok()?;
+    let adj = crate::adjust_editors::curves_display::clipping_levels(adj);
     Some(Request { end, adj, doc: st.doc.clone(), revision: st.revision, target })
 }
 

@@ -701,6 +701,8 @@ pub struct PhotocraftApp {
     pub(crate) adjust_panel_hover: Option<panels::adjustment_presets::Hover>,
     /// Pigment: Auto Color Correction Options' session options and open dialog (`dialogs::auto_options_ui`).
     pub(crate) auto_options: dialogs::auto_options_ui::State,
+    /// Pigment: Curve Display Options' open dialog and the Curves dialog's Show Clipping (`dialogs::curves_display_ui`).
+    pub(crate) curves_display: dialogs::curves_display_ui::State,
     #[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
     live_tokens: theme::live::LiveTokens,
 }
