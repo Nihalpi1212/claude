@@ -45,6 +45,10 @@ pub const KINDS: &[&str] = &[
     "selectiveColor",
     "colorLookup",
     "hdrToning",
+    // Pigment: Color and Vibrance, Clarity and Dehaze, Grain (A6)
+    "colorVibrance",
+    "clarityDehaze",
+    "grain",
 ];
 
 /// The group the built-in presets are listed in.

@@ -80,7 +80,7 @@ fn lut_rows(f: impl Fn(usize, f32) -> f32, rows: usize) -> Vec<[f32; 4096]> {
         .collect()
 }
 
-type Program = (i32, [[f32; 4]; 4], Option<Vec<[f32; 4096]>>);
+pub(super) type Program = (i32, [[f32; 4]; 4], Option<Vec<[f32; 4096]>>);
 
 /// What the LUT rows of `adj` at `depth` are built from, hashed bit for bit (so `-0.0` and `0.0`
 /// stay apart): every field the row builder reads and nothing else, so settings outside the
@@ -326,6 +326,11 @@ pub fn adjustment_program(adj: &Adjustment, transfer: Transfer, depth: photocraf
                 .collect();
             p[0] = [n as f32, if *tetrahedral { 1.0 } else { 0.0 }, if *dither { 1.0 } else { 0.0 }, 0.0];
             (16, p, Some(rows))
+        }
+        // Pigment: Color and Vibrance (the Vibrance kernel with gains), Grain; Clarity and Dehaze
+        // is refused by the planner (composited on the CPU).
+        Adjustment::ColorVibrance { .. } | Adjustment::Grain { .. } | Adjustment::ClarityDehaze { .. } => {
+            crate::plan::pigment_lower::program(adj, transfer, depth)
         }
         // Identity on the CPU too (not evaluated there).
         Adjustment::ColorLookup { .. } | Adjustment::Unsupported { .. } => (0, p, None),

@@ -515,6 +515,8 @@ impl Ctx<'_> {
         // `psd_raw` shares the Arc of the matching `psd_blocks` entry.
         let principal = |k: &[u8; 4]| blocks.iter().find(|(bk, _)| bk == k).map(|(_, d)| d.clone());
         let mut fill_cache = None;
+        // Pigment: a `pcJS` block turned into the live adjustment is not saved again.
+        let mut pcjs_upgraded = false;
 
         let content = if let Some(k) = adj_key {
             let data = rec.block(k).map(|b| b.data.clone()).unwrap_or_default();
@@ -628,17 +630,30 @@ impl Ctx<'_> {
             // An adjustment type no mapper knows: kept verbatim like an unreadable one, not
             // opened as an empty pixel layer without a word (#6575).
             let key = String::from_utf8_lossy(&k).into_owned();
-            self.warn(format!(
-                "layer \"{name}\": its adjustment settings could not be read (unknown adjustment type \"{key}\"); the layer is kept as saved but has no effect"
-            ));
             let raw = rec.block(&k).map(|b| b.data.as_slice()).unwrap_or_default().into();
-            LayerContent::Adjustment(photocraft_doc::Adjustment::Unsupported { psd_key: key, raw })
+            let kept = photocraft_doc::Adjustment::Unsupported { psd_key: key.clone(), raw };
+            // Pigment: a `pcJS` block of an old Pigment 0.5 build is Color and Vibrance, Clarity and Dehaze or Grain.
+            match photocraft_doc::adjust_pigment::upgrade(&kept) {
+                Some(live) => {
+                    pcjs_upgraded = true;
+                    LayerContent::Adjustment(live)
+                }
+                None => {
+                    self.warn(format!(
+                        "layer \"{name}\": its adjustment settings could not be read (unknown adjustment type \"{key}\"); the layer is kept as saved but has no effect"
+                    ));
+                    LayerContent::Adjustment(kept)
+                }
+            }
         } else {
             LayerContent::Raster(self.record_surface(rec, &name))
         };
         let rendered = matches!(content, LayerContent::Shape(_) | LayerContent::Text(_) | LayerContent::Smart(_));
         let mut l = Layer::new(name, content);
         l.psd_blocks = blocks;
+        if pcjs_upgraded {
+            l.psd_blocks.retain(|(k, _)| k.as_slice() != photocraft_doc::adjust_pigment::UNSUPPORTED_KEY.as_bytes());
+        }
         l.fill_cache = fill_cache;
         self.apply_common(&mut l, rec, None);
         // Mask flag bit 3: the user mask was rendered from vector data. For

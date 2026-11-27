@@ -1288,6 +1288,22 @@ fn build() -> Vec<CommandSpec> {
             "Color Lookup…",
             r##"{"lut":"none|warm|cool|tealOrange|bleachBypass|fadedFilm|dayForNight|monoContrast|crossProcess"="none","file":text,"interpolation":"trilinear|tetrahedral"="trilinear","dither":bool=false,"data":text,"dataEncoding":"text|base64"="text","fileName":text,"lutFormat":"auto|cube|3dl|look"="auto"} (file: LUT path; data: file text or encoded bytes; lutFormat overrides format detection, auto detects it)"##,
         ),
+        // Pigment: Color and Vibrance, Clarity and Dehaze, Grain
+        (
+            "colorVibrance",
+            "Color and Vibrance…",
+            r##"{"temperature":-100..100=0,"tint":-100..100=0,"vibrance":-100..100=0,"saturation":-100..100=0} (Temperature and Tint as white-balance gains in linear light, then Vibrance and Saturation as the Vibrance adjustment)"##,
+        ),
+        (
+            "clarityDehaze",
+            "Clarity and Dehaze…",
+            r##"{"clarity":-100..100=0,"dehaze":-100..100=0} (midtone local contrast and haze removal over a 24 px neighbourhood; negative Dehaze adds haze)"##,
+        ),
+        (
+            "grain",
+            "Grain…",
+            r##"{"amount":0..100=0,"size":0..100=25,"roughness":0..100=50,"seed":1..99999=1} (film grain fixed to the document position; seed picks another pattern)"##,
+        ),
     ];
     for &(kind, label, params) in ADJ {
         let layer_id: &'static str = Box::leak(format!("layer.newAdjustmentLayer.{kind}").into_boxed_str());

@@ -24,6 +24,8 @@ use photocraft_raster::Surface;
 use crate::bounds;
 
 mod lower;
+// Pigment: Color and Vibrance and Grain on the GPU
+mod pigment_lower;
 mod planner;
 mod types;
 

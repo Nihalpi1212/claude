@@ -9,9 +9,9 @@
 //! so they persist with the others (`presets.adjustments` in the settings file). Their params are
 //! `{"layers": [{"kind", "params", "name"?}, …]}`, bottom layer first.
 //!
-//! The JavaScript app had 18 presets in six groups; seven of them use Color and Vibrance, Clarity
-//! and Dehaze or Grain, kinds PhotoCraft does not have yet, and are added with those kinds (Bright
-//! and Warm, Soft Skin, Vivid, Clear Distance, Remove Warm Cast, Vintage Fade, Film Grain).
+//! The JavaScript app's 18 presets in six groups, all of them: seven use Color and Vibrance,
+//! Clarity and Dehaze or Grain (Bright and Warm, Soft Skin, Vivid, Clear Distance, Remove Warm
+//! Cast, Vintage Fade, Film Grain), added with those kinds.
 
 use photocraft_color::ColorMode;
 use serde_json::{Value, json};
@@ -45,23 +45,43 @@ pub const PANEL_PRESETS: &[PanelGroup] = &[
     PanelGroup {
         id: "portraits",
         name: "Portraits",
-        presets: &[PanelPreset {
-            id: "warm-contrast",
-            name: "Warm Contrast",
-            layers: &[
-                ("curves", r#"{"points":[[0,0],[64,52],[192,205],[255,255]]}"#),
-                ("photoFilter", r##"{"color":"#ec8a00","density":15,"preserveLuminosity":true}"##),
-            ],
-        }],
+        presets: &[
+            PanelPreset {
+                id: "bright-warm",
+                name: "Bright and Warm",
+                layers: &[("curves", r#"{"points":[[0,0],[120,140],[255,255]]}"#), ("colorVibrance", r#"{"temperature":18,"vibrance":10}"#)],
+            },
+            PanelPreset {
+                id: "soft-skin",
+                name: "Soft Skin",
+                layers: &[("clarityDehaze", r#"{"clarity":-30}"#), ("vibrance", r#"{"vibrance":-10,"saturation":0}"#)],
+            },
+            PanelPreset {
+                id: "warm-contrast",
+                name: "Warm Contrast",
+                layers: &[
+                    ("curves", r#"{"points":[[0,0],[64,52],[192,205],[255,255]]}"#),
+                    ("photoFilter", r##"{"color":"#ec8a00","density":15,"preserveLuminosity":true}"##),
+                ],
+            },
+        ],
     },
     PanelGroup {
         id: "landscape",
         name: "Landscape",
-        presets: &[PanelPreset {
-            id: "golden-hour",
-            name: "Golden Hour",
-            layers: &[("photoFilter", r##"{"color":"#fa9600","density":30,"preserveLuminosity":true}"##), ("curves", r#"{"points":[[0,10],[255,250]]}"#)],
-        }],
+        presets: &[
+            PanelPreset {
+                id: "vivid",
+                name: "Vivid",
+                layers: &[("colorVibrance", r#"{"vibrance":35,"saturation":5}"#), ("clarityDehaze", r#"{"clarity":25}"#)],
+            },
+            PanelPreset { id: "clear-distance", name: "Clear Distance", layers: &[("clarityDehaze", r#"{"dehaze":35,"clarity":10}"#)] },
+            PanelPreset {
+                id: "golden-hour",
+                name: "Golden Hour",
+                layers: &[("photoFilter", r##"{"color":"#fa9600","density":30,"preserveLuminosity":true}"##), ("curves", r#"{"points":[[0,10],[255,250]]}"#)],
+            },
+        ],
     },
     PanelGroup {
         id: "photo-repair",
@@ -76,6 +96,7 @@ pub const PANEL_PRESETS: &[PanelGroup] = &[
                     ("vibrance", r#"{"vibrance":40,"saturation":10}"#),
                 ],
             },
+            PanelPreset { id: "cool-cast", name: "Remove Warm Cast", layers: &[("colorVibrance", r#"{"temperature":-20}"#)] },
         ],
     },
     PanelGroup {
@@ -89,6 +110,15 @@ pub const PANEL_PRESETS: &[PanelGroup] = &[
                     "curves",
                     r#"{"points":[[0,0],[255,255]],"red":[[0,0],[64,50],[192,210],[255,255]],"green":[[0,0],[64,70],[192,200],[255,255]],"blue":[[0,40],[255,215]]}"#,
                 )],
+            },
+            PanelPreset {
+                id: "vintage-fade",
+                name: "Vintage Fade",
+                layers: &[
+                    ("curves", r#"{"points":[[0,30],[128,128],[255,235]]}"#),
+                    ("hueSaturation", r#"{"saturation":-30}"#),
+                    ("grain", r#"{"amount":25,"size":30,"roughness":50}"#),
+                ],
             },
             PanelPreset {
                 id: "duotone-blue",
@@ -130,6 +160,11 @@ pub const PANEL_PRESETS: &[PanelGroup] = &[
                 id: "moody",
                 name: "Moody",
                 layers: &[("curves", r#"{"points":[[0,15],[128,110],[255,240]]}"#), ("hueSaturation", r#"{"saturation":-25}"#)],
+            },
+            PanelPreset {
+                id: "film-grain",
+                name: "Film Grain",
+                layers: &[("curves", r#"{"points":[[0,12],[255,245]]}"#), ("grain", r#"{"amount":35,"size":25,"roughness":60}"#)],
             },
         ],
     },

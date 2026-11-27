@@ -105,5 +105,6 @@ impl<'a> UniformAreas<'a> {
 
 /// Whether adjustment `a` maps each pixel on its own (dithered ones vary with the position).
 fn per_pixel(a: &Adjustment) -> bool {
-    !matches!(a, Adjustment::GradientMap { dither: true, .. } | Adjustment::ColorLookup { dither: true, .. })
+    // Pigment: Grain and Clarity and Dehaze vary with the position too
+    !matches!(a, Adjustment::GradientMap { dither: true, .. } | Adjustment::ColorLookup { dither: true, .. }) && !crate::adjust_extra::positional(a)
 }

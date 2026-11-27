@@ -9,6 +9,8 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 pub mod adjust;
+// Pigment: the JavaScript Pigment's Color and Vibrance, Clarity and Dehaze and Grain
+pub mod adjust_pigment;
 pub mod advanced;
 pub mod analysis;
 pub mod blend_if;

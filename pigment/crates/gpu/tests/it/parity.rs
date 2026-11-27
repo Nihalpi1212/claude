@@ -3586,3 +3586,6 @@ fn sibling_compositors_have_independent_residency_and_configuration() {
     assert!(g.comp.resident_bytes() > 0);
     assert_ne!(g.comp.resident_budget(), sibling.resident_budget());
 }
+
+// Pigment: Color and Vibrance, Grain and Clarity and Dehaze against the CPU.
+mod pigment;
