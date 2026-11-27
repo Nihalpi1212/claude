@@ -1640,6 +1640,9 @@ pub struct Preferences {
     pub script_events: crate::automate_cmds::ScriptEvents,
     /// Layer Mask Display Options: the layer mask rubylith's colour and opacity.
     pub layer_mask_overlay: LayerMaskOverlay,
+    // Pigment: Auto Color Correction Options
+    /// The adjustment dialogs' own state (Auto Color Correction Options).
+    pub adjustments: crate::cmd::auto_options_cmds::AdjustmentPrefs,
 }
 
 impl Preferences {
