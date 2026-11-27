@@ -53,9 +53,10 @@ pub(super) struct PrefsCustom {
     /// The agent link's state, for the Agents page.
     #[cfg(not(target_arch = "wasm32"))]
     agent_status: craft::automation::agents::AgentLinkStatus,
-    /// Pigment: AI Accounts… was clicked on the page (`ai_ui` opens it).
+    /// Pigment: generative AI's rows on the page (AI Accounts…, which `ai_ui` opens, and "Allow agents to run AI
+    /// commands").
     #[cfg(not(target_arch = "wasm32"))]
-    ai_accounts: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ai: crate::ai_ui::PrefsAi,
 }
 
 impl PrefsCustom {
@@ -74,7 +75,7 @@ impl PrefsCustom {
             #[cfg(not(target_arch = "wasm32"))]
             agent_status: app.services.agent_link.as_ref().map(|link| link.status().clone()).unwrap_or_default(),
             #[cfg(not(target_arch = "wasm32"))]
-            ai_accounts: std::sync::Arc::clone(&app.ai.accounts_asked),
+            ai: crate::ai_ui::PrefsAi::of(app),
         }
     }
 }
@@ -99,7 +100,7 @@ impl CustomSettings<PrefPages> for PrefsCustom {
     fn page(&mut self, ui: &mut egui::Ui, page: &str, draft: &mut SettingsDraft) {
         // Pigment: its own switch over the framework's page, never the ArtCraft Launcher's (`agents::page`).
         if page == AGENTS_PAGE {
-            super::agents::page(ui, AGENTS_PAGE, draft, &self.agent_status, &self.ai_accounts);
+            super::agents::page(ui, AGENTS_PAGE, draft, &self.agent_status, &self.ai);
         }
     }
 

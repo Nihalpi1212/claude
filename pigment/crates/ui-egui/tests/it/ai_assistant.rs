@@ -1215,3 +1215,57 @@ fn an_answer_with_a_step_too_large_to_run_runs_none() {
     let m = assistant::messages(h.state()).last().unwrap();
     assert!(!m.error && m.calls.len() == 1 && !m.calls[0].failed(), "{}", m.text);
 }
+
+// ---- Sign in with ChatGPT and the Assistant -------------------------------------------------
+// Moved from `ai.rs` in the 057297b merge (the Assistant is ported last); it uses `ai.rs`'s plan
+// server: `use super::ai::{browser_lands, invoke, plan_harness, plan_server, until_idle};` and
+// `photocraft_ui_egui::ai_ui::describe`.
+
+/// With a ChatGPT sign-in the Assistant and Describe Image run on the plan route, and the image
+/// features ask for an API key before anything is sent, as in the JavaScript app. A sign-in
+/// that completes while AI Accounts is closed is still noticed.
+#[test]
+fn a_sign_in_serves_the_assistant_and_describe_and_images_ask_for_a_key() {
+    let server = plan_server();
+    let mut h = plan_harness(&server);
+    if !accounts::sign_in_offered(h.state()) {
+        return;
+    }
+    invoke(&mut h, "ai.accounts").unwrap();
+    let url = accounts::start_sign_in(h.state_mut()).unwrap();
+    accounts::close(h.state_mut());
+    assert!(browser_lands(&server, &url).contains("now connected"));
+    h.run_steps(3);
+    assert_eq!(h.state().ui.status, "Signed in with ChatGPT as me@example.com.", "said in the status bar when the dialog is closed");
+    // The Assistant.
+    ai_ui::assistant::open(h.state_mut());
+    assert_eq!(ai_ui::assistant::provider(h.state()), Some(ProviderId::OpenAi));
+    assert!(ai_ui::assistant::send(h.state_mut(), "Say hello").unwrap());
+    for _ in 0..2000 {
+        h.run_steps(1);
+        if !ai_ui::assistant::running(h.state()) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let last = ai_ui::assistant::messages(h.state()).last().unwrap();
+    assert!(!last.error && last.text == "Hello from the plan.", "{:?}", last.text);
+    // Describe Image.
+    describe::start(h.state_mut()).unwrap();
+    until_idle(&mut h);
+    assert_eq!(h.state().ai.describe.text.as_ref().map(|t| t.0.as_str()), Some("Hello from the plan."));
+    let asked: Vec<(String, String)> = server.log.lock().unwrap().iter().filter(|(p, _)| p == "/v1/responses").cloned().collect();
+    assert_eq!(asked.len(), 2);
+    assert!(asked.iter().all(|(_, bearer)| bearer == "access-token-ONE"), "with the plan's token");
+    // Image features: the window says a key is needed, and nothing is sent.
+    let before = server.log.lock().unwrap().len();
+    h.state_mut().run("select.rect", json!({"x": 10, "y": 10, "width": 30, "height": 30})).unwrap();
+    ai_ui::menu(h.state_mut(), "ai.generativeFill", &json!({"prompt": "clouds"})).unwrap().unwrap();
+    h.run_steps(3);
+    assert!(generate::blocked(h.state()).unwrap_or_default().contains("API key"));
+    let refused = h.state_mut().run("ai.generativeFill", json!({"prompt": "clouds", "provider": "openai"})).unwrap_err();
+    assert!(refused.contains("not connected for image models"), "{refused}");
+    assert_eq!(server.log.lock().unwrap().len(), before, "nothing sent");
+    assert_eq!(layer_names(h.state()).len(), 1);
+}
+

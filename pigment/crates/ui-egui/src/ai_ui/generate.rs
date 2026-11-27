@@ -576,7 +576,7 @@ fn action_row(app: &PhotocraftApp, ui: &mut egui::Ui) -> Option<Act> {
     let mut act = None;
     ui.horizontal(|ui| {
         if let Some((_, started)) = app.ai.generate.job {
-            if crate::widgets::secondary_button(ui, tl!("Stop"), 72.0).clicked() {
+            if super::button(ui, tl!("Stop"), false, true).clicked() {
                 act = Some(Act::Stop);
             }
             ui.add(egui::Spinner::new().size(14.0).color(t.accent));
@@ -585,9 +585,9 @@ fn action_row(app: &PhotocraftApp, ui: &mut egui::Ui) -> Option<Act> {
             return;
         }
         let why = blocked(app);
-        let r = ui.add_enabled_ui(why.is_none(), |ui| crate::widgets::primary_button(ui, tl!("Generate"), 96.0)).inner;
+        let r = super::button(ui, tl!("Generate"), true, why.is_none());
         if let Some(why) = why {
-            let _ = r.on_disabled_hover_text(why);
+            let _ = r.response.on_disabled_hover_text(why);
         } else if r.clicked() {
             act = Some(Act::Generate);
         }
