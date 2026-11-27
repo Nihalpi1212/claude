@@ -776,12 +776,16 @@ fn command_uses_ambient_path(id: &str, params: &Value) -> bool {
         | "plugin.install"
         | "swatches.import"
         | "style.presets.importAsl"
-        | "layer.layerStyle.contours.load" => {
+        | "layer.layerStyle.contours.load"
+        // Pigment: adjustment presets
+        | "adjustment.presets.load" => {
             // `data` wins over `path` in these commands; any `path` without it reads the filesystem.
             params.get("data").is_none() && params.get("path").is_some()
         }
         // With a `path` the file is written there; without one the bytes come back as `data`.
         "actions.save" | "swatches.export" | "style.presets.exportAsl" | "layer.layerStyle.contours.save" => params.get("path").is_some(),
+        // Pigment: adjustment presets
+        "adjustment.presets.export" => params.get("path").is_some(),
         // Shortcut sets: a .kys read or written by path, or a Summarize page written by path.
         "edit.keyboardShortcuts" => {
             params.get("path").is_some() || ["importKys", "exportKys", "summarize"].iter().any(|k| params.get(*k).and_then(|v| v.get("path")).is_some())
