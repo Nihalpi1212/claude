@@ -69,13 +69,13 @@ ref_clone() { # name url commit
   echo "$1: $(git -C "$d" rev-parse --short HEAD 2>/dev/null || echo FAILED) $(du -sh "$d" | cut -f1)"
 }
 ref_clone photocraft https://github.com/storytold/photocraft "$(cat "$REPO/pigment/UPSTREAM-REVISION" 2>/dev/null || echo abb30dff47638eaa38a09de11b60ae8a14baa334)"
-ref_clone craft-libs https://github.com/storytold/craft-libs e2dc681a3ad8a47038da2f11ddd2c5e1c0454991
+ref_clone craft-libs https://github.com/storytold/craft-libs 18ffc07519b15f5ef39e752aa0f405261fec8ebb
 ref_clone craft-ai-integrations https://github.com/storytold/craft-ai-integrations db30646d9df2ae5d36d74f3feed6dc6f00d3ef6b
 ref_clone craft-i18n https://github.com/storytold/craft-i18n "$(tr -d '[:space:]' < "$REPO/pigment/craft-i18n.rev" 2>/dev/null || echo e56d26244bbac099bfd42e23fb12f78a4be418a7)"
-ref_clone craft-fonts https://github.com/storytold/craft-fonts b076417b5880bd4154bd22f00695b1d28c6bea83
+ref_clone craft-fonts https://github.com/storytold/craft-fonts cc9269cd8d8258785dac603fba3122e5d2556795
 
 echo "== 4. scratch"
 mkdir -p /dev/shm/pt "$SCR/pc-build" "$SCR/planpc/build"
 chmod +x "$SCR/planpc/"*.sh 2>/dev/null
 df -h / | tail -1
-echo "done. Test runs: TMPDIR=/dev/shm/pt CRAFT_I18N_DIR=$REF/craft-i18n CRAFT_FONTS_DIR=$REF/craft-fonts; builds: CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0, -j 4."
+echo "done. Test runs: TMPDIR=/dev/shm/pt CRAFT_I18N_DIR=$REF/craft-i18n CRAFT_FONTS_DIR=$REF/craft-fonts; builds: CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_STRIP=symbols, -j 4."

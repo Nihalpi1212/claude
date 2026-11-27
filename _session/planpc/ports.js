@@ -48,7 +48,7 @@ for (let i = 0; i < PKGS.length; i++) {
   const id = PKGS[i]
   const prior = PKGS.slice(0, i)
   const note = NOTES[id] ? `\n\n${NOTES[id]}` : ''
-  reports[id] = await agent(`Read the brief ${BRIEF}. Then read package ${id} in ${SPEC}: its section, and every row it lists in full. Build package ${id} in /home/user/claude/pigment, with its tests, exactly as the spec says. The spec is the plan; where it is wrong about the code you find, follow the code and record it.
+  reports[id] = await agent(`Read the brief ${BRIEF}. Then read package ${id} in ${SPEC}: its section, and every row it lists in full. The spec was written against PhotoCraft abb30df; Pigment now runs on PhotoCraft 057297b, whose interface moved onto the craft framework, so read the package's section in ${SCR}/planpc/ports/REBASE-${G.group}.md too: it says which rows upstream now does, where the spec's files went, and the adjusted plan, and it wins where the two differ. Build package ${id} in /home/user/claude/pigment, with its tests, as those two say. Where both are wrong about the code you find, follow the code and record it.
 ${(G.done || []).concat(prior).length ? `Earlier packages of this group are committed on the branch. Read their notes first: ${(G.done || []).concat(prior).map((p) => `${SCR}/planpc/build/PKG-port-${p}.md`).join(', ')}.` : 'You are the first package of this group.'} Other packages from earlier groups and the AI port are also committed; git log shows them.
 Follow the brief's rules:
 - one cargo process at a time, with -j 4 and CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0;
@@ -60,7 +60,7 @@ Write ${SCR}/planpc/build/PKG-port-${id}.md for the next engineer. Return the sc
 
 phase('Review')
 const ALL = (G.done || []).concat(PKGS)
-const review = await agent(`You review group ${G.group} of the port of the JavaScript Pigment's extras: packages ${ALL.join(', ')}, which other engineers just finished. Read the brief ${BRIEF} and those packages' sections in ${SPEC}. The work is the local commits on branch claude/pigment-photocraft in /home/user/claude (git log, git show) and the notes ${ALL.map((p) => `${SCR}/planpc/build/PKG-port-${p}.md`).join(', ')}. The engineers' reports follow where this run has them (a restarted run has only the notes), but judge from the code:
+const review = await agent(`You review group ${G.group} of the port of the JavaScript Pigment's extras: packages ${ALL.join(', ')}, which other engineers just finished. Read the brief ${BRIEF}, those packages' sections in ${SPEC}, and their sections in ${SCR}/planpc/ports/REBASE-${G.group}.md (the plan adjusted for PhotoCraft 057297b; it wins where they differ). The work is the local commits on branch claude/pigment-photocraft in /home/user/claude (git log, git show) and the notes ${ALL.map((p) => `${SCR}/planpc/build/PKG-port-${p}.md`).join(', ')}. The engineers' reports follow where this run has them (a restarted run has only the notes), but judge from the code:
 ${JSON.stringify(reports)}
 
 Be a skeptic. Check:

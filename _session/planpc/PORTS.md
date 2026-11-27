@@ -2,6 +2,10 @@
 
 Task #2. The old JavaScript Pigment (0.1 to 0.4) was ahead of PhotoCraft on 93 Photoshop rows. The generative-AI rows go through planpc/AI-PORT.md. This brief covers the rest, plus opening the `.pigment` files that Pigment 0.1 to 0.4 wrote, so nobody who used Pigment loses a feature or a file.
 
+## The base moved (Nov 27)
+
+Pigment now runs on PhotoCraft 057297b (FORK.md, "Upstream after the import"; the merge notes are planpc/build/PKG-merge-*.md and MERGE-PLAN.md). Upstream rebuilt its interface on the craft framework: dialogs, widgets, task bars, menus (craft::menu Rows), prompts, preferences and the canvas chrome now come from the framework. The specs below were written before that; **planpc/ports/REBASE-<group>.md** re-checks each package against the new tree (what upstream now does, where the files went, the adjusted plan) and wins where they differ. scripts/upstream-test-failures.txt is now empty: every test must pass.
+
 ## The specs (read your package's section and every row it lists)
 
 Both are in `/tmp/claude-0/-home-user-claude/02aa60de-818c-5d38-b2f3-33055ac112a1/scratchpad/planpc/ports/`.
@@ -40,7 +44,7 @@ After each group: read its reports and review, verify the commits (build, the gr
 
 ## Rules for every package
 
-- **Builds.** 4 CPUs and one shared target directory. Run one cargo process at a time with `-j 4`, and never `cargo clean`. Always set `CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0`. Test runs use `TMPDIR=/dev/shm/pt CRAFT_I18N_DIR=/home/user/storytold/craft-i18n CRAFT_FONTS_DIR=/home/user/storytold/craft-fonts` (the translations and fonts CI uses, at the same commits); without that TMPDIR, PhotoCraft's scratch-disk check misreads the 252 GB volume. Run the tests of the crates and files you touched; CI runs the whole workspace.
+- **Builds.** 4 CPUs and one shared target directory. Run one cargo process at a time with `-j 4`, and never `cargo clean`. Always set `CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_STRIP=symbols` (since the merge with PhotoCraft 057297b on Nov 27, a test build without stripping is about 19 GB; one cargo call without these variables starts a full debug rebuild). craft-fonts for tests is at cc9269c (/home/user/storytold/craft-fonts), as CI pins it. Test runs use `TMPDIR=/dev/shm/pt CRAFT_I18N_DIR=/home/user/storytold/craft-i18n CRAFT_FONTS_DIR=/home/user/storytold/craft-fonts` (the translations and fonts CI uses, at the same commits); without that TMPDIR, PhotoCraft's scratch-disk check misreads the 252 GB volume. Run the tests of the crates and files you touched; CI runs the whole workspace.
 - **Disk.** The real quota is about 39 GB. Before a big test build, check `df -h /`. If less than 6 GB is free, delete the test executables over 20 MB in `pigment/target/debug/deps` (`find pigment/target/debug/deps -maxdepth 1 -type f -perm -u+x -size +20M -delete`) and `target/debug/incremental`.
 - **Container-only failures.** These fail only in this container, so don't chase them:
   - permission tests, which can't pass as root;
