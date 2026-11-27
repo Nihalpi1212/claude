@@ -128,6 +128,21 @@ pub fn map_file_with(f: &AbrFile, group: &str, ctl: &photocraft_raster::Interrup
     Ok(out)
 }
 
+/// One `brushPreset` descriptor mapped as [`map_file`] maps an `.abr` preset, with the sampled
+/// tips and patterns of `file` it may name (Pigment: a `.tpl` tool preset's `Brsh`). `None` when
+/// its sampled tip is missing; the lines say what has no equivalent.
+pub fn brush_from_descriptor(d: &Descriptor, file: &AbrFile) -> (Option<BrushSettings>, Vec<String>) {
+    let mut m = Mapper { file, warnings: BTreeSet::new(), unknown: BTreeSet::new(), tips: Default::default() };
+    let brush = m.preset(d);
+    // The `.tpl` writers' "use the brush's own size" flag: the size is the brush's either way.
+    m.unknown.remove("useBrushSize");
+    let mut lines: Vec<String> = m.warnings.into_iter().collect();
+    if !m.unknown.is_empty() {
+        lines.push(format!("settings without a Pigment equivalent were ignored: {}", m.unknown.into_iter().collect::<Vec<_>>().join(", ")));
+    }
+    (brush, lines)
+}
+
 // ------------------------------------------------------------------ descriptor helpers
 
 fn get<'a>(d: &'a Descriptor, k: &str) -> Option<&'a Value> {

@@ -98,3 +98,20 @@ pictures show 0.4's gradients and patterns. The files differ from run to run in 
 layer ids and ZIP timestamps only. The script writes no ZIP and no `document.json` itself: for the
 image modes, whose conversions are app commands that need the whole interface, it calls the same
 pixel conversion the command calls and sets the fields the command sets.
+
+## Tool presets (`wip05-tool-presets.tpl`)
+
+`wip05-tool-presets.tpl` was written by the unfinished 0.5's own `.tpl` writer (`writeTplFile` in
+`src/renderer/lib/preset-files/tpl.js`, checkout `e9845fc`) through `make-fixture-tpl.mjs`, with no
+canvas: its one sampled tip is a 6 × 4 grey PNG (coverage `x * 40 + y * 10`) made by the app's own
+PNG encoder. It holds eight presets: a brush with mode, opacity, flow and smoothing; a pencil with
+that sampled tip and Auto Erase; an eraser in Pencil mode erasing to history; a radial gradient in
+Overlay at 50 % with Include Color; a type preset (Inter, 36); a Spot Healing Brush; a Dodge on the
+highlights; and an Adjustment Brush, a tool Pigment 0.5 does not have yet.
+`crates/io/src/tpl_map/tests.rs` reads it with its `pigmentData`, and with `pigmentData` taken out
+(the keys a Photoshop file holds).
+
+```sh
+# the wip05 checkout as above, with ag-psd 31.0.3 installed
+node <this folder>/make-fixture-tpl.mjs /tmp/pigment-js/pigment <this folder>
+```
