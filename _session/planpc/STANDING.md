@@ -72,6 +72,7 @@ A cloud container is reclaimed after inactivity; a usage-limit stop of a few hou
 ## State (update at every check-in)
 
 - **Resumed by the user on Nov 26 at 23:15 UTC ("resum")** after the pause of Nov 19 06:22. The hourly check is enabled again (fires at :39). The session runs on claude-opus-5-5 (trailer "Claude Opus 5.5"). The container had restarted; files and the build folder survived; /dev/shm/pt made again; 13 GB free.
+- Nov 27 00:42 UTC hourly check: merge step ui done (b4f88a0: Pigment's hooks on upstream's framework interface, AI windows stubbed; PKG-merge-ui.md). Step app running (first build of the desktop app). Disk 7.8 GB free: watch it (the rule: below 5 GB delete test executables).
 - Nov 26 23:42 UTC hourly check: merge step cli done (f42fe5f pushed: Pigment's live-MCP condition, the AI hook, the version line; PKG-merge-cli.md). Step ui running (the interface without the AI windows; 30 files changed in the tree). Disk 13 GB.
 - **Running since 23:17:** planpc/merge-run.js with steps ["cli","ui","app","ai-ui-1","ai-ui-2","ai-ui-3","rebrand","ci","verify"] and a continuation note for cli (run wf_4a46c129-47d, task wnhgemfjt). It stops after a step that returns finished=false; then relaunch with the steps left and a note for that step (PKG-merge-<step>.md shows what is done).
 - Upstream moved on during the pause; the merge stays pinned to NEW = 057297b (the plan's rule: pin and don't chase). The next merge catches up after this one.
