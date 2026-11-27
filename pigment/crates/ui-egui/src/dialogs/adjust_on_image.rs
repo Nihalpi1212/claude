@@ -9,7 +9,7 @@
 //! - **Exposure's eyedroppers** (black, gray, white): the dialog's tone picker (`cx.picker`), so upstream's canvas
 //!   routing of `DialogPick::TonePicker` reaches [`pick_exposure`].
 //!
-//! The framework's editors cannot be changed here (pinned craft-libs), so the controls are a row Pigment draws above
+//! The framework's editors cannot be changed here (pinned craft-libs), so the controls are a row Pigment draws below
 //! each editor ([`row`], [`exposure_pickers`]), and the state they arm is a [`View`] shared between the editor's setup
 //! and the app. The settings come from the engine's pure functions (`photocraft_engine::adjust_params::on_image`),
 //! recomputed from the settings before the press on every drag step. In the dialog each step is an edit of its value
@@ -135,7 +135,7 @@ fn hand_label(kind: &str) -> String {
     }
 }
 
-/// The row of on-image tools above `kind`'s editor: the hand (Curves, Hue/Saturation, Black & White) and Hue/Saturation's
+/// The row of on-image tools below `kind`'s editor: the hand (Curves, Hue/Saturation, Black & White) and Hue/Saturation's
 /// three range eyedroppers. Arming one puts the dialog's tone picker away; arming a tone picker puts the tool away.
 /// While a tool is armed, a press on the image passes through the modal dialog to the canvas.
 pub fn row(ui: &mut Ui, kind: &str, setup: &EditorSetup, cx: &mut AdjustDialogCx<'_>) {
@@ -185,7 +185,7 @@ fn pipette(picker: TonePicker) -> IconSpec<'static> {
     IconSpec::svg(IconId::new("eyedropper")).badge(DataColor::new(egui::Color32::from_gray(picker.tone())))
 }
 
-/// Exposure's three eyedroppers (black, gray, white) over its sliders: they arm the editor's tone picker, which the
+/// Exposure's three eyedroppers (black, gray, white) under its sliders: they arm the editor's tone picker, which the
 /// canvas routes to [`pick_exposure`] (dialog) or `layer_picker::sample_at` (Properties).
 pub fn exposure_pickers(ui: &mut Ui, setup: &EditorSetup, cx: &mut AdjustDialogCx<'_>) {
     let (usable, current, canvas) = (!setup.pickers_unavailable, *cx.picker, cx.canvas);

@@ -668,6 +668,22 @@ read colour. A Smart Filter records the resolved settings, not the tool keys.
 |---|---|
 | `crates/engine/src/adjust_params.rs` | `pub mod on_image;` |
 | `crates/engine/src/cmd.rs` | `layer.setAdjustment`: `on_image::layer` before upstream's `layer_eyedropper`; `layer.newAdjustmentLayer.*` and `image.adjustments.*`: `on_image::image` when upstream's eyedropper resolved nothing; the Smart Filter record drops the tool keys (`on_image::strip`); the params strings of `exposure`, `hueSaturation`, `curves`, `blackWhite` and `layer.setAdjustment` name the new keys |
+| `crates/ui-egui/src/dialogs.rs` | `pub mod adjust_on_image;` |
+| `crates/ui-egui/src/dialogs/adjust_editors.rs` | `EditorSetup.on_image` and its `Default`; the `curves`, `hueSaturation` and `blackWhite` arms call `adjust_on_image::row` after the editor, the `exposure` arm `adjust_on_image::exposure_pickers` after the sliders; Hue/Saturation's shown range is host-kept (`.range(shown_range)`, then `keep_range`) so a sample can show the range it picked |
+| `crates/ui-egui/src/dialogs/adjust_dialog.rs` | `build_setup`: the `on_image` field; `picker_applies` and `pick`: an `exposure` arm first (`exposure_applies`, `pick_exposure`) |
+| `crates/ui-egui/src/dialogs/adjust_editors/session.rs` | `layer_editor` setup: `on_image: adjust_on_image::properties_view(app, id)` |
+| `crates/ui-egui/src/dialogs/layer_picker.rs` | `armed`: an Exposure layer takes the three eyedroppers in RGB and Grayscale |
+| `crates/ui-egui/src/dialogs/canvas_input.rs` | `DialogPick::OnImage`; `armed` asks `adjust_on_image::armed_properties` (no dialog) and `armed_dialog` (the adjustment dialog) first; `follows_drag`, `release` and `cursor` arms |
+| `crates/ui-egui/src/canvas/tools/dialog.rs` | the `OnImage` press, drag (the travel measured on screen) and `takes_every_move`/`samples` arms |
+| `crates/ui-egui/src/lib.rs`, `crates/ui-egui/src/app.rs` | the `PhotocraftApp` field `on_image` (the Properties tool and the press in progress) and its `Default` |
+
+The interface is `crates/ui-egui/src/dialogs/adjust_on_image.rs` (tests in `adjust_on_image_tests.rs`): a row under
+the editor with the hand (Curves, Hue/Saturation, Black & White) and Hue/Saturation's Eyedropper, Add to Sample and
+Subtract from Sample, and Exposure's three eyedroppers under its sliders. **A choice recorded**: Pigment cannot draw
+inside the framework's editors, so the tools sit in a row below each editor (Photoshop has Hue/Saturation's there too;
+Curves' hand is in its left tool column, Black & White's at the top). The hand's cursor is the framework's `hand` icon
+with the move badge (no new SVG). In the dialog each drag step edits the dialog's value (OK is the one history step);
+in Properties the drag previews and the release is one `layer.setAdjustment`.
 
 ## Keeping the rebrand: `scripts/pigment-rebrand.py`
 
