@@ -351,8 +351,9 @@ biggest gaps.
 - PhotoCraft's own measures: [`ROADMAP.md`](ROADMAP.md), [`docs/gaps.md`](docs/gaps.md) and
   [`docs/target-app-parity.md`](docs/target-app-parity.md).
 
-Upstream PhotoCraft has changed a great deal since `abb30df`; none of that is in 0.5.0. Merging it
-is the next step after this release ([`docs/FORK.md`](docs/FORK.md#upstream-after-the-import)).
+Upstream PhotoCraft has changed a great deal since `abb30df`; none of that is in the 0.5.0
+release. This tree has merged upstream's `057297b` (19 November 2026), whose interface is rebuilt on
+the craft framework, for the next release ([`docs/FORK.md`](docs/FORK.md#upstream-after-the-import)).
 
 ## License and credits
 

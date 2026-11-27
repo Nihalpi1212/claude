@@ -23,7 +23,7 @@ Nothing leaves your computer before you agree, and afterwards only when you run 
 | Feature | Where | What it does |
 |---|---|---|
 | **Generative Fill** | **Edit › Generative Fill…**, the bar under a selection, or right-click a selection | Fills the selection with what you describe, using the image around it. 1 to 3 **Variations**, each on a new layer. |
-| **Generative Expand** | The Crop tool's bar when the crop frame reaches past the canvas, or the command palette | Enlarges the canvas and fills the new area so the picture continues. |
+| **Generative Expand** | The Crop tool's bar when the crop frame reaches past the canvas (turn off **Delete Cropped Pixels** in the options bar to drag it there), or the command palette | Enlarges the canvas and fills the new area so the picture continues. |
 | **Generate Image** | **Edit › Generate Image…** | Makes a picture from a description, as a new layer or a new document, with a **Transparent background** if you like. |
 | **Remove Background** | **Layer › Remove Background** | Masks the layer down to its subject on your computer. Needs no account and sends nothing. |
 | **Remove Background with AI Provider** | **Layer › Remove Background with AI Provider** | The same, with the subject found by your provider. Needs a pixel layer: rasterize a type or shape layer first. |
@@ -48,7 +48,7 @@ A request you stop after it was sent may still be billed by your provider.
 
 - **Models** are chosen automatically from your provider's list. To pick one, type its name in **Chat model** or **Image model** in AI Accounts (**Use Suggested** fills in the automatic choice), or in the feature's **Model:** field for one request.
 - **Actions never call a provider.** A recorded action, a batch or a droplet skips the AI steps, so replaying an action never spends money. **Layer › Remove Background**, which sends nothing, is recorded.
-- **AI agents and scripts** (MCP, the control channel, `pigment-cli run`) can use these features only while **Allow agents to run AI commands** is on in AI Accounts, or with `--allow-ai` on the command line.
+- **AI agents and scripts** (MCP, the control channel, `pigment-cli run`) can use these features only while **Allow agents to run AI commands** is on in AI Accounts or in **Preferences › AI Integrations**, or with `--allow-ai` on the command line. Only your own click turns it on.
 - **From the command line**, `pigment-cli ai status`, `ai set-key`, `ai consent`, `ai test` and `ai sign-in` do what AI Accounts does.
 - The AI windows are in English in every interface language.
 - These features were tested against stand-ins for the two providers, not with live accounts. If your account behaves differently, please [report it](../troubleshooting/get-help.md).

@@ -52,7 +52,7 @@ The document keeps its file. The first time you choose **File › Save**, Pigmen
 
 When parts of the document were left out as it opened (the notes list them), saving over the old file loses them for good. The question then says so, **Save As…** is its default button, and it is asked even after **Don't show again**.
 
-Tick **Don't show again** to stop the question. After the first save the file is in the new format and **File › Save** does not ask again. A Save step of an action you play, a script and an AI agent save without asking. Keep a copy of the old file if you still use Pigment 0.4.
+Tick **Don't show again** and choose **Save** to stop the question (with **Save As…** the question comes back next time). After the first save the file is in the new format and **File › Save** does not ask again. A Save step of an action you play, a script and an AI agent save without asking. Keep a copy of the old file if you still use Pigment 0.4.
 
 ## Pigment 0.4 features not in 0.5 yet
 
