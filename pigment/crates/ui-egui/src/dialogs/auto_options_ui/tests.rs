@@ -57,6 +57,20 @@ fn click(h: &mut H, at: egui::Pos2) {
     h.run_steps(3);
 }
 
+/// A click with Alt held from before the press to after the release.
+fn alt_click(h: &mut H, at: egui::Pos2) {
+    let alt = egui::Modifiers::ALT;
+    h.hover_at(at);
+    h.event(egui::Event::ModifiersChanged(alt));
+    h.run_steps(1);
+    for pressed in [true, false] {
+        h.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: alt });
+        h.run_steps(1);
+    }
+    h.event(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
+    h.run_steps(3);
+}
+
 /// Two presses at `at` within the double-click time.
 fn double_click(h: &mut H, at: egui::Pos2) {
     h.hover_at(at);
@@ -127,10 +141,7 @@ fn alt_click_on_levels_auto_opens_the_options_and_cancel_restores_the_fields() {
     h.run_steps(2);
     let before = adjustment("levels", &params(h.state()));
     let at = button(&h, "Auto");
-    h.input_mut().modifiers = egui::Modifiers::ALT;
-    click(&mut h, at);
-    h.input_mut().modifiers = egui::Modifiers::NONE;
-    h.run_steps(2);
+    alt_click(&mut h, at);
     let options = open_id(h.state()).expect("Alt-click on Auto opens Auto Color Correction Options");
     assert!(h.query_all_by_label("Snap Neutral Midtones").next().is_some());
     // The dialog previews: Levels shows the options' Auto.
