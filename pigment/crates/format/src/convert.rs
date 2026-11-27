@@ -479,7 +479,8 @@ impl Loader<'_> {
             ContentM::Group { expanded, artboard, frame_stroke, .. } => {
                 LayerContent::Group(Group { artboard: artboard.clone(), children, expanded: *expanded, frame_stroke: frame_stroke.clone() })
             }
-            ContentM::Adjustment { adjustment } => LayerContent::Adjustment(adjustment.clone()),
+            // Pigment: a `pcJS` block of an old Pigment 0.5 build opens as the live adjustment.
+            ContentM::Adjustment { adjustment } => LayerContent::Adjustment(photocraft_doc::adjust_pigment::upgrade(adjustment).unwrap_or_else(|| adjustment.clone())),
             ContentM::Fill { fill } => LayerContent::Fill(fill.clone()),
             ContentM::Text { text, font_family, size_pt, color, transform, cache, psd_raw, runs, paragraphs, shape, orientation, antialias, warp } => {
                 LayerContent::Text(TextLayer {

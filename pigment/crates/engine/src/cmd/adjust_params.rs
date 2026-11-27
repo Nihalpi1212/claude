@@ -142,6 +142,10 @@ pub fn adjustment_kind(a: &Adjustment) -> &'static str {
         Adjustment::GradientMap { .. } => "gradientMap",
         Adjustment::SelectiveColor { .. } => "selectiveColor",
         Adjustment::ColorLookup { .. } => "colorLookup",
+        // Pigment: Color and Vibrance, Clarity and Dehaze, Grain
+        Adjustment::ColorVibrance { .. } => "colorVibrance",
+        Adjustment::ClarityDehaze { .. } => "clarityDehaze",
+        Adjustment::Grain { .. } => "grain",
         Adjustment::Unsupported { .. } => "unsupported",
         _ => "invert",
     }

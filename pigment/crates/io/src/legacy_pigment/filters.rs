@@ -220,6 +220,12 @@ fn adjustment(a: &Adjustment) -> Option<(&'static str, Value)> {
             }
             ("selectiveColor", v)
         }
+        // A6: Color and Vibrance, Clarity and Dehaze, Grain as smart filters.
+        Adjustment::ColorVibrance { temperature, tint, vibrance, saturation } => {
+            ("colorVibrance", json!({"temperature": temperature, "tint": tint, "vibrance": vibrance, "saturation": saturation}))
+        }
+        Adjustment::ClarityDehaze { clarity, dehaze } => ("clarityDehaze", json!({"clarity": clarity, "dehaze": dehaze})),
+        Adjustment::Grain { amount, size, roughness, seed } => ("grain", json!({"amount": amount, "size": size, "roughness": roughness, "seed": seed})),
         _ => return None,
     })
 }

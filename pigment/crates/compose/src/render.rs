@@ -80,12 +80,12 @@ fn render_tiled_with_alloc<A: BufferAlloc + Sync>(doc: &Document, rect: Rect, ti
         Ok(b)
     };
     if i64::from(rect.width()) <= i64::from(tile) && i64::from(rect.height()) <= i64::from(tile) {
-        return photocraft_color::convert::with_cmyk_space(cmyk, || crate::adjust_extra::with_margin(rect, margin, cx.canvas, alloc, &one));
+        return photocraft_color::convert::with_cmyk_space(cmyk, || crate::adjust_extra::with_margin(rect, margin, cx.canvas, alloc, one));
     }
     // Effect maps are built once, here, before any tile needs them (#276).
     let fx_rect = crate::adjust_extra::grow(rect, margin, cx.canvas);
     prepare_effects_with(&doc.layers, fx_rect, cx, alloc, |f| photocraft_color::convert::with_cmyk_space(cmyk, || in_blend_space(lab, hdr, f)))?;
-    let run = |t: Rect| photocraft_color::convert::with_cmyk_space(cmyk, || crate::adjust_extra::with_margin(t, margin, cx.canvas, alloc, &one));
+    let run = |t: Rect| photocraft_color::convert::with_cmyk_space(cmyk, || crate::adjust_extra::with_margin(t, margin, cx.canvas, alloc, one));
     // Tiles are written straight into the output, one row of tiles (a band) at a time, so the
     // peak is the output plus the tiles in flight, not a second full-size copy.
     let w = rect.width() as usize;

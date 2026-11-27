@@ -235,6 +235,8 @@ pub fn from_params(kind: &str, p: &Value, base: Option<&Adjustment>, mode: Color
         }
         "selectiveColor" => crate::adjust_cmds::selective_from_params(p, base.filter(|b| matches!(b, Adjustment::SelectiveColor { .. })))?,
         "colorLookup" => crate::adjust_cmds::lookup_from_params(p, base.filter(|b| matches!(b, Adjustment::ColorLookup { .. })))?,
+        // Pigment: Color and Vibrance, Clarity and Dehaze, Grain
+        "colorVibrance" | "clarityDehaze" | "grain" => newer::from_params(kind, &r, base)?,
         other => return Err(bad("adjustment", format!("unknown adjustment kind `{other}`"))),
     })
 }
@@ -352,6 +354,8 @@ pub fn to_params(adj: &Adjustment) -> Value {
         Adjustment::ColorLookup { tetrahedral, dither, .. } => {
             json!({"interpolation": if *tetrahedral { "tetrahedral" } else { "trilinear" }, "dither": dither})
         }
+        // Pigment: Color and Vibrance, Clarity and Dehaze, Grain
+        Adjustment::ColorVibrance { .. } | Adjustment::ClarityDehaze { .. } | Adjustment::Grain { .. } => newer::to_params(adj).unwrap_or_default(),
     }
 }
 
@@ -1251,6 +1255,8 @@ pub fn user_keys(p: &Value) -> Map<String, Value> {
 pub mod targets;
 // Pigment: on-image tools and eyedroppers
 pub mod on_image;
+// Pigment: Color and Vibrance, Clarity and Dehaze, Grain
+pub mod newer;
 
 #[cfg(test)]
 mod tests;

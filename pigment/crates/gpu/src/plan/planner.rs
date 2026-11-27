@@ -793,6 +793,10 @@ impl<'a> Planner<'a> {
         if let Adjustment::GradientMap { stops, .. } = adj {
             check_gradient_stops(stops)?;
         }
+        // Pigment: Clarity and Dehaze reads a neighbourhood the GPU passes don't have.
+        if adj.spatial_margin(1.0) > 0 {
+            return Err(Unsupported("Clarity and Dehaze (composited on the CPU)".into()));
+        }
         let mut p = Pass::new(Kernel::Adjust, 0);
         p.a = Some(src);
         let (kind, params, lut) = adjustment_program(adj, self.cx.transfer, self.cx.depth, self.cx.mode);

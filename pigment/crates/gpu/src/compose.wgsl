@@ -727,6 +727,8 @@ fn adjust(c: vec3<f32>) -> vec3<f32> {
             // compose::adjust::vibrance_px: linear light (transfer p0.z), Vibrance (p0.x, boost
             // fit p1, p2.xyz) then Saturation (p0.y) towards 0.288 R + 0.712 G; p0.w the ceiling.
             var l = vec3(t_decode(c.r, p0.z), t_decode(c.g, p0.z), t_decode(c.b, p0.z));
+            // Pigment: Color and Vibrance's white-balance gains (p3.xyz) first when p2.w is set.
+            if (p2.w > 0.5) { l = clamp(l * p3.xyz, vec3(0.0), vec3(p0.w)); }
             if (p0.x != 0.0) { l = vibrance_lin(l, p0.x, p1, p2.xyz); }
             if (p0.y != 0.0) {
                 let g = 0.288 * l.r + 0.712 * l.g;
@@ -783,8 +785,49 @@ fn adjust(c: vec3<f32>) -> vec3<f32> {
             if (p0.z > 0.5) { o = clamp(o + bayer4(adj_px) / 255.0, vec3(0.0), vec3(1.0)); }
             return o;
         }
+        case 18: { return pigment_grain(c, adj_px, p0); }                       // Pigment: Grain
         default: { return c; }
     }
+}
+
+// Pigment: compose::adjust_extra::hash01, the integer hash of a document position and a salt.
+fn pigment_hash01(x: i32, y: i32, salt: i32) -> f32 {
+    var h = (bitcast<u32>(x) * 374761393u) ^ (bitcast<u32>(y) * 668265263u) ^ (bitcast<u32>(salt) * 1274126177u);
+    h = (h ^ (h >> 13u)) * 1103515245u;
+    h = h ^ (h >> 16u);
+    return f32(h >> 8u) / 16777216.0;
+}
+
+fn pigment_tri(x: i32, y: i32, salt: i32) -> f32 {
+    return pigment_hash01(x, y, salt) + pigment_hash01(x, y, salt + 101) - 1.0;
+}
+
+// Pigment: compose::adjust_extra::grain_px (p = amount 0..1, lattice cell, roughness 0..1, seed salt;
+// the ceiling is 1 unless the document is 32-bit).
+fn pigment_grain(c: vec3<f32>, d: vec2<i32>, p: vec4<f32>) -> vec3<f32> {
+    let s = i32(p.w);
+    var smooth: f32;
+    if (p.y <= 1.0) {
+        smooth = pigment_tri(d.x, d.y, 1 + s);
+    } else {
+        let g = vec2(f32(d.x), f32(d.y)) / p.y;
+        let i = floor(g);
+        var f = g - i;
+        f = f * f * (3.0 - 2.0 * f);
+        let ix = i32(i.x);
+        let iy = i32(i.y);
+        let a = pigment_tri(ix, iy, 1 + s);
+        let b = pigment_tri(ix + 1, iy, 1 + s);
+        let cc = pigment_tri(ix, iy + 1, 1 + s);
+        let e = pigment_tri(ix + 1, iy + 1, 1 + s);
+        smooth = ((a + (b - a) * f.x) * (1.0 - f.y) + (cc + (e - cc) * f.x) * f.y) * 1.6;
+    }
+    var n = smooth;
+    if (p.z > 0.0) { n = smooth * (1.0 - p.z) + pigment_tri(d.x, d.y, 3 + s) * p.z; }
+    let l = clamp(0.299 * c.r + 0.587 * c.g + 0.114 * c.b, 0.0, 1.0);
+    let k = n * p.x * 0.18 * (0.4 + 0.6 * sin(3.14159265358979 * l));
+    let hi = select(1.0, F32_MAX, (op.flags & F_HDR) != 0u);
+    return clamp(c + k, vec3(0.0), vec3(hi));
 }
 
 // ---- fills ----------------------------------------------------------------------------------

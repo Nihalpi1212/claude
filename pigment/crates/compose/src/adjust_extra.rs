@@ -62,9 +62,10 @@ pub fn color_vibrance_px(c: [f32; 3], gains: Option<[f32; 3]>, v: f32, s: f32, t
     l.map(|x| transfer.encode(x.clamp(0.0, hi)))
 }
 
-/// Grain's noise salt for `seed` (seed 1 is the JavaScript app's noise).
-fn seed_salt(seed: u32) -> i32 {
-    seed.wrapping_sub(1).wrapping_mul(7919) as i32
+/// Grain's noise salt for `seed` (seed 1 is the JavaScript app's noise). Below 2^24, so the GPU
+/// gets it exactly as an f32 parameter.
+pub fn seed_salt(seed: u32) -> i32 {
+    (seed.wrapping_sub(1) % 100_000 * 163) as i32
 }
 
 /// The app's `hash01`: an integer hash of a document position and a salt, in 0..1, kept to 24
@@ -108,11 +109,23 @@ pub fn grain_cell(size: f32) -> f32 {
     1.0 + size.clamp(0.0, 100.0) / 16.0
 }
 
-/// One pixel of Grain at document position (`x`, `y`); `amount`, `roughness` 0…1, `cell` from
-/// [`grain_cell`]. Weaker in deep shadows and highlights, like film.
-pub fn grain_px(c: [f32; 3], x: i32, y: i32, amount: f32, cell: f32, roughness: f32, seed: u32, hi: f32) -> [f32; 3] {
+/// Grain's settings as the noise takes them.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GrainSettings {
+    /// Amount, 0…1.
+    pub amount: f32,
+    /// The lattice cell ([`grain_cell`]).
+    pub cell: f32,
+    /// Roughness, 0…1.
+    pub roughness: f32,
+    pub seed: u32,
+}
+
+/// One pixel of Grain at document position (`x`, `y`). Weaker in deep shadows and highlights,
+/// like film.
+pub fn grain_px(c: [f32; 3], x: i32, y: i32, g: &GrainSettings, hi: f32) -> [f32; 3] {
     let l = (0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]).clamp(0.0, 1.0);
-    let k = grain_noise(x, y, cell, roughness, seed) * amount * 0.18 * (0.4 + 0.6 * (std::f32::consts::PI * l).sin());
+    let k = grain_noise(x, y, g.cell, g.roughness, g.seed) * g.amount * 0.18 * (0.4 + 0.6 * (std::f32::consts::PI * l).sin());
     c.map(|v| (v + k).clamp(0.0, hi))
 }
 
@@ -267,15 +280,15 @@ pub(crate) fn apply(adj: &Adjustment, buf: &mut Buffer, transfer: Transfer, dept
         Adjustment::ClarityDehaze { clarity, dehaze } => clarity_dehaze(buf, *clarity, *dehaze, hi),
         Adjustment::Grain { amount, size, roughness, seed } => {
             let amount = amount.clamp(0.0, 100.0) / 100.0;
-            if amount == 0.0 {
+            if amount.is_nan() || amount <= 0.0 {
                 return;
             }
-            let (cell, rough) = (grain_cell(*size), roughness.clamp(0.0, 100.0) / 100.0);
+            let g = GrainSettings { amount, cell: grain_cell(*size), roughness: roughness.clamp(0.0, 100.0) / 100.0, seed: *seed };
             let (w, x0, y0) = (buf.rect.width().max(1) as usize, buf.rect.x0, buf.rect.y0);
             for (i, p) in buf.px.iter_mut().enumerate() {
                 if p[3] > 0.0 {
                     let (x, y) = (x0.wrapping_add((i % w) as i32), y0.wrapping_add((i / w) as i32));
-                    let o = grain_px([p[0], p[1], p[2]], x, y, amount, cell, rough, *seed, hi);
+                    let o = grain_px([p[0], p[1], p[2]], x, y, &g, hi);
                     p[..3].copy_from_slice(&o);
                 }
             }

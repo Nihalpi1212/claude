@@ -494,6 +494,10 @@ impl Ex<'_> {
         };
         match &l.content {
             LayerContent::Adjustment(a) => {
+                // Pigment: Color and Vibrance, Clarity and Dehaze and Grain have no Photoshop block.
+                if adjust_map::pcad::is_pigment_only(a) {
+                    self.warnings.push(format!("layer \"{}\": {} layers open in Pigment; other apps show them as empty layers", l.name, a.label()));
+                }
                 let channels = match self.fmt.mode {
                     ColorMode::Rgb => adjust_map::Channels::Rgb,
                     ColorMode::Grayscale => adjust_map::Channels::Gray,

@@ -114,6 +114,10 @@ fn adjustments() -> Vec<(Adjustment, bool)> {
         (Adjustment::SelectiveColor { relative: false, adjustments: std::array::from_fn(|r| [0.0, r as f32 * 5.0, 0.0, -10.0]) }, true),
         // A block this version cannot read (a truncated Selective Color) is kept verbatim.
         (Adjustment::Unsupported { psd_key: "selc".into(), raw: vec![0, 1, 0, 0].into() }, true),
+        // Pigment: its own `pcAd` block.
+        (Adjustment::ColorVibrance { temperature: 25.0, tint: -10.0, vibrance: 30.0, saturation: 5.0 }, true),
+        (Adjustment::ClarityDehaze { clarity: 40.0, dehaze: 25.0 }, true),
+        (Adjustment::Grain { amount: 45.0, size: 20.0, roughness: 70.0, seed: 3 }, true),
     ];
     // Compile-time guard: a new Adjustment kind must be added to the list above.
     for (a, _) in &all {
@@ -134,6 +138,9 @@ fn adjustments() -> Vec<(Adjustment, bool)> {
             | Adjustment::Threshold { .. }
             | Adjustment::GradientMap { .. }
             | Adjustment::SelectiveColor { .. }
+            | Adjustment::ColorVibrance { .. }
+            | Adjustment::ClarityDehaze { .. }
+            | Adjustment::Grain { .. }
             | Adjustment::Unsupported { .. } => {}
         }
     }

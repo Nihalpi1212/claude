@@ -107,10 +107,10 @@ const DIFFERENT_BY_DESIGN: &[(&str, u8, f64)] = &[
     ("v3-adjust-photo-filter-no-luminosity", 107, 11.25),
     ("v3-adjust-selective-color", 41, 5.50),
     ("v3-adjust-vibrance", 87, 5.75),
-    // Kinds PhotoCraft does not have yet: the layer changes nothing, the app's picture is the adjusted one.
-    ("v3-adjust-clarity-dehaze", 34, 10.50),
-    ("v3-adjust-color-vibrance", 41, 5.00),
-    ("v3-adjust-grain", 23, 3.75),
+    // Color and Vibrance follows Camera Raw's white-balance gains (±35 % against the app's ±30 %) and the
+    // Vibrance adjustment's Photoshop-fitted Vibrance and Saturation, not the app's own formulas (A6, the
+    // plan's choice): saturated colours move further. Clarity and Dehaze and Grain are the app's own.
+    ("v3-adjust-color-vibrance", 75, 3.25),
     // Pigment 0.3 drew an adjustment layer's blend mode as Normal; 0.4 and PhotoCraft draw Luminosity.
     ("v2-adjust-masked", 136, 14.00),
     // Gradients: PhotoCraft samples a linear gradient half a pixel earlier and puts its ends on whole pixels
@@ -322,12 +322,11 @@ fn adjustments_pigment_0_4_added() {
     assert_eq!((per_channel[0].gamma, black.in_black * 255.0), (1.5, 20.0));
     let Adjustment::Curves { space: ToneSpace::Lab, per_channel, black, .. } = adjustment("v3-adjust-curves-lab").0 else { panic!() };
     assert_eq!((per_channel[0].len(), per_channel[1].len(), per_channel[2][0].output * 255.0, black.len()), (3, 2, 30.0, 0));
-    for (kind, what) in [("color-vibrance", "Color and Vibrance"), ("clarity-dehaze", "Clarity and Dehaze"), ("grain", "Grain")] {
+    // A6: the three 0.4 kinds open as the live adjustments, without a warning.
+    for kind in ["color-vibrance", "clarity-dehaze", "grain"] {
         let (a, w) = adjustment(&format!("v3-adjust-{kind}"));
-        let Adjustment::Unsupported { psd_key, raw } = a else { panic!() };
-        let kept: serde_json::Value = serde_json::from_slice(&raw).unwrap();
-        assert_eq!((psd_key.as_str(), kept["kind"].as_str()), ("pcJS", Some(kind)));
-        assert_eq!(w, [format!("{what} adjustments are not in Pigment yet; the layer keeps its settings and changes nothing (\"Adjustment\")")]);
+        assert_eq!(a.label(), photocraft_doc::adjust_pigment::from_js(kind, &serde_json::Value::Null).unwrap().label());
+        assert!(w.is_empty(), "{kind}: {w:?}");
     }
 }
 

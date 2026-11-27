@@ -17,10 +17,15 @@ use photocraft_doc::adjust::{CURVE_MAP_LEN, CurvePoint, HueRange, LevelsChannel,
 mod encode;
 // Pigment: adjustment preset files
 pub mod preset_files;
+// Pigment: Color and Vibrance, Clarity and Dehaze and Grain in a private `pcAd` block
+pub mod pcad;
 
 /// All PSD adjustment keys recognized as adjustment layers.
-pub const ADJUSTMENT_KEYS: [&[u8; 4]; 16] =
-    [b"levl", b"curv", b"hue2", b"brit", b"nvrt", b"thrs", b"post", b"expA", b"vibA", b"blnc", b"mixr", b"grdm", b"phfl", b"selc", b"blwh", b"clrL"];
+pub const ADJUSTMENT_KEYS: [&[u8; 4]; 17] = [
+    b"levl", b"curv", b"hue2", b"brit", b"nvrt", b"thrs", b"post", b"expA", b"vibA", b"blnc", b"mixr", b"grdm", b"phfl", b"selc", b"blwh", b"clrL",
+    // Pigment: its own adjustments (pcad.rs)
+    &pcad::KEY,
+];
 
 fn be16(d: &[u8], at: usize) -> Option<u16> {
     d.get(at..at + 2).map(|b| u16::from_be_bytes([b[0], b[1]]))
@@ -275,6 +280,8 @@ fn parse_any(key: &[u8; 4], data: &[u8], cged: Option<&[u8]>) -> Adjustment {
         b"blwh" => parse_black_white(data),
         b"phfl" => parse_photo_filter(data),
         b"mixr" => parse_channel_mixer(data),
+        // Pigment: Color and Vibrance, Clarity and Dehaze, Grain
+        &pcad::KEY => pcad::parse(data),
         _ => None,
     };
     parsed.unwrap_or_else(|| unsupported(key, data))
@@ -734,6 +741,8 @@ pub fn write(adj: &Adjustment) -> Vec<([u8; 4], Vec<u8>)> {
         Adjustment::ChannelMixer { matrix, monochrome } => {
             return block(b"mixr", encode::channel_mixer(matrix, *monochrome));
         }
+        // Pigment: Color and Vibrance, Clarity and Dehaze, Grain
+        Adjustment::ColorVibrance { .. } | Adjustment::ClarityDehaze { .. } | Adjustment::Grain { .. } => return block(&pcad::KEY, pcad::write(adj)),
         Adjustment::Unsupported { psd_key, raw } => {
             let k = psd_key.as_bytes();
             if k.len() == 4 {
