@@ -95,7 +95,7 @@ fn brush_presets_live_in_the_preset_library_folder() {
     assert_eq!(PRESETS_DIR, "Preset Library");
     assert_eq!(presets_dir(), config_dir().map(|d| d.join("Preset Library")));
     let src = include_str!("../services.rs");
-    assert!(!src.contains(r#"join("Presets")"#), "nothing writes PhotoCraft's folder name");
+    assert!(!src.contains(r#"join("Presets")"#), "nothing writes the upstream folder name");
 }
 
 /// Pigment makes no network request on its own (docs/FORK.md): the native services start no
