@@ -1,0 +1,181 @@
+{
+  "curves.acv": {
+    "space": "rgb",
+    "rgb": [
+      [
+        0,
+        0
+      ],
+      [
+        64,
+        40
+      ],
+      [
+        192,
+        220
+      ],
+      [
+        255,
+        255
+      ]
+    ],
+    "r": [
+      [
+        0,
+        0
+      ],
+      [
+        128,
+        150
+      ],
+      [
+        255,
+        255
+      ]
+    ],
+    "g": null,
+    "b": [
+      [
+        0,
+        20
+      ],
+      [
+        255,
+        235
+      ]
+    ]
+  },
+  "levels.alv": {
+    "space": "rgb",
+    "perChannel": true,
+    "rgb": {
+      "inBlack": 12,
+      "inWhite": 240,
+      "gamma": 1.2,
+      "outBlack": 5,
+      "outWhite": 250
+    },
+    "r": {
+      "inBlack": 20,
+      "inWhite": 255,
+      "gamma": 0.8,
+      "outBlack": 0,
+      "outWhite": 255
+    },
+    "g": null,
+    "b": {
+      "inBlack": 0,
+      "inWhite": 255,
+      "gamma": 1,
+      "outBlack": 0,
+      "outWhite": 230
+    }
+  },
+  "hue-saturation.ahu": {
+    "hue": 15,
+    "saturation": -20,
+    "lightness": 5,
+    "colorize": false,
+    "colorizeHue": 0,
+    "colorizeSat": 25,
+    "colorizeLight": 0,
+    "range": "master",
+    "ranges": [
+      {
+        "base": "reds",
+        "bounds": [
+          310,
+          340,
+          20,
+          50
+        ],
+        "hue": 10,
+        "saturation": 30,
+        "lightness": -5
+      },
+      {
+        "base": "blues",
+        "bounds": [
+          195,
+          225,
+          255,
+          285
+        ],
+        "hue": 0,
+        "saturation": -40,
+        "lightness": 0
+      }
+    ]
+  },
+  "sepia.ahu": {
+    "hue": 0,
+    "saturation": 0,
+    "lightness": 0,
+    "colorize": true,
+    "colorizeHue": 205,
+    "colorizeSat": 30,
+    "colorizeLight": -10,
+    "range": "master",
+    "ranges": []
+  },
+  "channel-mixer.cha": {
+    "monochrome": true,
+    "r": {
+      "r": 100,
+      "g": 0,
+      "b": 0,
+      "constant": 0
+    },
+    "g": {
+      "r": 0,
+      "g": 100,
+      "b": 0,
+      "constant": 0
+    },
+    "b": {
+      "r": 0,
+      "g": 0,
+      "b": 100,
+      "constant": 0
+    },
+    "gray": {
+      "r": 50,
+      "g": 30,
+      "b": 20,
+      "constant": 5
+    }
+  },
+  "selective-color.asv": {
+    "relative": false,
+    "reds": {
+      "c": -20,
+      "m": 10,
+      "y": 30,
+      "k": 0
+    },
+    "neutrals": {
+      "c": 0,
+      "m": 0,
+      "y": 0,
+      "k": 15
+    },
+    "blacks": {
+      "c": 5,
+      "m": 5,
+      "y": 5,
+      "k": -10
+    }
+  },
+  "black-white.blw": {
+    "reds": 55,
+    "yellows": 70,
+    "greens": 30,
+    "cyans": 60,
+    "blues": -10,
+    "magentas": 90,
+    "tint": {
+      "hue": 35,
+      "sat": 25
+    }
+  }
+}

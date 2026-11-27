@@ -98,6 +98,8 @@ pub use photocraft_codecs::{DdsCompression, DdsOptions, DpxBits};
 use photocraft_doc::{Adjustment, Document, Layer, LayerContent};
 
 pub use adjust_map::ADJUSTMENT_KEYS;
+// Pigment: adjustment preset files
+pub use adjust_map::preset_files as adjust_presets;
 pub use flat::{
     DEFAULT_LOSSY_WEBP_QUALITY, FramesImport, apply_file_encoding, document_to_image, document_to_image_with_renderer, export_flat, export_flat_with_renderer,
     export_png_streamed_with_renderer, export_preview_png_with_renderer, file_encoding, import_gif_frames, import_tiff_page, import_tiff_page_with_options,
