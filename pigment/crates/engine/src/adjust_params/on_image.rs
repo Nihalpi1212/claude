@@ -95,7 +95,7 @@ pub fn hue_of(rgb: [f32; 3]) -> Option<f32> {
     let [r, g, b] = rgb;
     let (max, min) = (r.max(g).max(b), r.min(g).min(b));
     let delta = max - min;
-    if !(delta > 0.0) {
+    if delta.is_nan() || delta <= 0.0 {
         return None;
     }
     let h = if max == r {
@@ -356,9 +356,11 @@ pub fn on_image_curves(base: &Value, channel: CurveChannel, sample: [f32; 3], dy
         },
     };
     let input = (tone * 255.0).round() / 255.0;
-    let near = curve.iter().enumerate().filter(|(_, p)| (p.input - input).abs() <= NEAR_POINT / 255.0).min_by(|(_, a), (_, b)| {
-        (a.input - input).abs().total_cmp(&(b.input - input).abs())
-    });
+    let near = curve
+        .iter()
+        .enumerate()
+        .filter(|(_, p)| (p.input - input).abs() <= NEAR_POINT / 255.0)
+        .min_by(|(_, a), (_, b)| (a.input - input).abs().total_cmp(&(b.input - input).abs()));
     let index = match near.map(|(i, _)| i) {
         Some(i) => i,
         None => {
@@ -394,7 +396,8 @@ pub fn on_image_hue_sat(base: &Value, sample: [f32; 3], dx: f64, hue: bool) -> R
     let edit = match hue_of(sample).filter(|_| saturation_of(sample) >= GRAY_SATURATION) {
         None => None,
         Some(h) => {
-            let best = ranges.iter().enumerate().map(|(i, r)| (i, r.weight(h))).fold((None, 0.0f32), |(bi, bw), (i, w)| if w > bw { (Some(i), w) } else { (bi, bw) });
+            let best =
+                ranges.iter().enumerate().map(|(i, r)| (i, r.weight(h))).fold((None, 0.0f32), |(bi, bw), (i, w)| if w > bw { (Some(i), w) } else { (bi, bw) });
             best.0.or_else(|| range_for_color(sample))
         }
     };

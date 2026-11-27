@@ -703,6 +703,8 @@ pub struct PhotocraftApp {
     pub(crate) auto_options: dialogs::auto_options_ui::State,
     /// Pigment: Curve Display Options' open dialog and the Curves dialog's Show Clipping (`dialogs::curves_display_ui`).
     pub(crate) curves_display: dialogs::curves_display_ui::State,
+    /// Pigment: the on-image adjustment tools' Properties state and the press in progress (`dialogs::adjust_on_image`).
+    pub(crate) on_image: dialogs::adjust_on_image::State,
     #[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
     live_tokens: theme::live::LiveTokens,
 }

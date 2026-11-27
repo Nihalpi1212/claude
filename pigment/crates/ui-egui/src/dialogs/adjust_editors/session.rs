@@ -200,6 +200,8 @@ pub fn layer_editor(app: &mut PhotocraftApp, ui: &mut egui::Ui, id: LayerId, adj
         tone: record.tone.take(),
         // Pigment: Curves display options (Show Histogram)
         curves_display: crate::dialogs::curves_display_ui::view(app, None),
+        // Pigment: on-image tools (the Properties editor's armed tool and shown range)
+        on_image: crate::dialogs::adjust_on_image::properties_view(app, id),
         ..Default::default()
     };
     // Pigment: adjustment presets (a pick is one `layer.setAdjustment`, one history step)

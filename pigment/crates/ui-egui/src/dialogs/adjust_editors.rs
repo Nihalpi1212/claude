@@ -217,6 +217,9 @@ pub struct EditorSetup {
     // Pigment: Curves display options
     /// What Curves shows of Curve Display Options and Show Clipping (`curves_display_ui::view`).
     pub curves_display: curves_display::View,
+    // Pigment: on-image tools
+    /// The armed on-image tool and Hue/Saturation's shown range (`adjust_on_image`), shared with the app.
+    pub on_image: crate::dialogs::adjust_on_image::Shared,
 }
 
 impl Default for EditorSetup {
@@ -235,6 +238,8 @@ impl Default for EditorSetup {
             presets_rev: 0,
             // Pigment: Curves display options
             curves_display: Default::default(),
+            // Pigment: on-image tools
+            on_image: Default::default(),
         }
     }
 }
@@ -272,6 +277,8 @@ fn show(kind: &str, setup: &EditorSetup, ui: &mut Ui, value: &mut AdjustValue, c
             AdjustOut { ask: auto.or(options).or(picked).map(AdjustAsk::AutoOptions), edit: edit.map(|levels| AdjustValue::Levels { levels }) }
         }
         ("curves", AdjustValue::Curves { curves }) => {
+            // Pigment: on-image tools (the hand)
+            crate::dialogs::adjust_on_image::row(ui, "curves", setup, cx);
             // Pigment: Auto Color Correction Options (Pigment's eyedropper row, which reports a double-click)
             let picked = auto_row::pickers(ui, setup, cx);
             // Pigment: Curves display options (Show Histogram; Show Clipping compares the pass's edit with its start)
@@ -309,6 +316,8 @@ fn show(kind: &str, setup: &EditorSetup, ui: &mut Ui, value: &mut AdjustValue, c
             AdjustOut { ask, edit }
         }
         ("exposure", AdjustValue::Exposure { values }) => {
+            // Pigment: on-image tools (Exposure's eyedroppers)
+            crate::dialogs::adjust_on_image::exposure_pickers(ui, setup, cx);
             let fields = AdjustField::exposure(&Env::of(ui).words::<AdjustWords>());
             let out = AdjustSliders::new("Exposure", &fields, Bind::bound(values)).context(context).show(ui);
             lifted(out.events, |values| AdjustValue::Exposure { values })
@@ -324,7 +333,11 @@ fn show(kind: &str, setup: &EditorSetup, ui: &mut Ui, value: &mut AdjustValue, c
             lifted(out.events, |values| AdjustValue::Posterize { values })
         }
         ("hueSaturation", AdjustValue::HueSaturation { value }) => {
-            let out = HueSaturationEditor::new("Hue/Saturation", Bind::bound(value)).context(context).show(ui);
+            // Pigment: on-image tools (the hand, the range eyedroppers; the shown range is kept with them)
+            crate::dialogs::adjust_on_image::row(ui, "hueSaturation", setup, cx);
+            let shown = crate::dialogs::adjust_on_image::shown_range(setup);
+            let out = HueSaturationEditor::new("Hue/Saturation", Bind::bound(value)).range(shown).context(context).show(ui);
+            crate::dialogs::adjust_on_image::keep_range(setup, out.shown_range);
             lifted(out.edit.events, |value| AdjustValue::HueSaturation { value })
         }
         ("colorBalance", AdjustValue::ColorBalance { value }) => {
@@ -336,6 +349,8 @@ fn show(kind: &str, setup: &EditorSetup, ui: &mut Ui, value: &mut AdjustValue, c
             lifted(out.edit.events, |value| AdjustValue::ColorBalance { value })
         }
         ("blackWhite", AdjustValue::BlackWhite { value }) => {
+            // Pigment: on-image tools (the hand)
+            crate::dialogs::adjust_on_image::row(ui, "blackWhite", setup, cx);
             let out = BlackWhiteEditor::new("Black & White", Bind::bound(value)).context(context).show(ui);
             let ask = if out.auto { Some(AdjustAsk::Auto) } else { out.pick_color.map(AdjustAsk::PickColor) };
             AdjustOut { ask, edit: out.edit.events.map(|value| AdjustValue::BlackWhite { value }) }

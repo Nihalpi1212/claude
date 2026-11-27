@@ -651,6 +651,24 @@ them (a craft-libs change, asked of the project's owner; Pigment does not fork c
 Pigment's own files changed: `auto_options_cmds.rs` (`pub mod curves_display;`, the `AdjustmentPrefs` field
 `curves_display`), `panels/adjustment_presets.rs` (the Properties menu row `PropertiesCommand::CurvesDisplayOptions`).
 
+### On-image adjustment tools and the new eyedroppers
+
+Photoshop's targeted adjustment tool (the hand) in Curves, Hue/Saturation and Black & White, Hue/Saturation's range
+eyedroppers (pick, Add to Sample, Subtract from Sample) and Exposure's black, gray and white eyedroppers, as the
+JavaScript Pigment had them. The engine half is `crates/engine/src/adjust_params/on_image.rs` (tests beside it): pure
+functions over a sample (`exposure_eyedropper`, `hue_saturation_eyedropper`, `on_image_curves`, `on_image_hue_sat`,
+`on_image_black_white`; the range maths is a port of the JavaScript app's `rangeForColor`, `addHueToRange` and
+`subtractHueFromRange`) and the params that reach them: Exposure's `"eyedropper"`, Hue/Saturation's
+`"rangeEyedropper"` and `"edit"` (the range the dialog edits), and `"onImage":{"at"|"color","drag":[dx,dy],"hue",
+"channel"}` on Curves, Hue/Saturation and Black & White, through `image.adjustments.*`, `layer.newAdjustmentLayer.*`
+and `layer.setAdjustment` (which samples below the layer). A mask, channel or Quick Mask target is refused: the tools
+read colour. A Smart Filter records the resolved settings, not the tool keys.
+
+| Upstream file | Hook |
+|---|---|
+| `crates/engine/src/adjust_params.rs` | `pub mod on_image;` |
+| `crates/engine/src/cmd.rs` | `layer.setAdjustment`: `on_image::layer` before upstream's `layer_eyedropper`; `layer.newAdjustmentLayer.*` and `image.adjustments.*`: `on_image::image` when upstream's eyedropper resolved nothing; the Smart Filter record drops the tool keys (`on_image::strip`); the params strings of `exposure`, `hueSaturation`, `curves`, `blackWhite` and `layer.setAdjustment` name the new keys |
+
 ## Keeping the rebrand: `scripts/pigment-rebrand.py`
 
 Most of the rebrand is mechanical and done by [`scripts/pigment-rebrand.py`](../scripts/pigment-rebrand.py):

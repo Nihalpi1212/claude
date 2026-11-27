@@ -159,6 +159,10 @@ fn curve_mode(app: &PhotocraftApp, kind: &str, target: &ToneTarget) -> ColorMode
 
 /// Whether the armed `picker` can sample for the open dialog now: a resolved target in a mode the picker works in.
 pub(crate) fn picker_applies(app: &PhotocraftApp, open: &OpenAdjust, picker: TonePicker) -> bool {
+    // Pigment: on-image tools (Exposure's eyedroppers)
+    if open.kind == "exposure" {
+        return super::adjust_on_image::exposure_applies(app);
+    }
     matches!(open.kind.as_str(), "levels" | "curves")
         && app.session.active().is_some()
         && hosted(app, open.id).is_some_and(|dialog| target_context(app, open.smart_filter.as_ref(), &dialog.value().cx.base).is_ok())
@@ -241,6 +245,10 @@ pub(crate) fn pick(app: &mut PhotocraftApp, at: [f64; 2]) -> bool {
     let Some(open) = open_value(app) else { return false };
     let id = open.id;
     let Some(picker) = hosted(app, id).and_then(|dialog| dialog.picker()) else { return false };
+    // Pigment: on-image tools (Exposure's eyedroppers)
+    if open.kind == "exposure" {
+        return super::adjust_on_image::pick_exposure(app, picker, at);
+    }
     if !matches!(open.kind.as_str(), "levels" | "curves") {
         return false;
     }
@@ -562,6 +570,8 @@ fn build_setup(app: &mut PhotocraftApp, kind: &str, target: &ToneTarget, mode: C
         presets_rev: app.session.presets.rev,
         // Pigment: Curves display options
         curves_display: super::curves_display_ui::view(app, None),
+        // Pigment: on-image tools
+        on_image: Default::default(),
     }
 }
 

@@ -58,7 +58,9 @@ pub(crate) fn end_if_disarmed(app: &crate::PhotocraftApp, state: &mut DialogTool
 
 /// Whether the pick samples a colour from the image, so the precise cursor (Caps Lock) shows a crosshair.
 fn samples(pick: DialogPick) -> bool {
+    // Pigment: on-image tools (the range eyedroppers)
     matches!(pick, DialogPick::TonePicker(_) | DialogPick::Color | DialogPick::ParamDropper | DialogPick::ColorRange)
+        || matches!(pick, DialogPick::OnImage(crate::dialogs::adjust_on_image::OnImageTool::Range(_)))
 }
 
 struct DialogTool<'a> {
@@ -89,6 +91,8 @@ impl CanvasTool for DialogTool<'_> {
                     state.phase = pattern_fill_ui::press(app, at);
                     (state.phase.is_some(), false)
                 }
+                // Pigment: on-image tools (a gesture: the release ends it)
+                DialogPick::OnImage(tool) => (crate::dialogs::adjust_on_image::press(app, tool, at, mods), false),
             }
         });
         if !took {
@@ -112,6 +116,11 @@ impl CanvasTool for DialogTool<'_> {
         let Some(start) = self.state.press else { return };
         let at = doc_point(pointer, cx);
         let total = [at[0] - start[0], at[1] - start[1]];
+        // Pigment: on-image tools (the hand reads the travel on screen, as Photoshop's)
+        let screen = cx.space().map_or(total, |space| {
+            let from = space.view.to_screen(craft::behavior::kurbo::Point::new(start[0], start[1]));
+            [f64::from(pointer.pos.x - from.x), f64::from(pointer.pos.y - from.y)]
+        });
         let (pick, mods) = (self.pick, self.state.mods);
         let state = &mut *self.state;
         self.scope.with_app(|app| match pick {
@@ -129,6 +138,8 @@ impl CanvasTool for DialogTool<'_> {
                     state.phase = Some(drag);
                 }
             }
+            // Pigment: on-image tools
+            DialogPick::OnImage(_) => crate::dialogs::adjust_on_image::drag(app, at, screen, mods),
             // The pipettes keep sampling while the button is held.
             _ => canvas_input::resample(app, pick, at, mods),
         });
@@ -160,7 +171,15 @@ impl CanvasTool for DialogTool<'_> {
     /// The drags that move content (the pattern's phase, a shadow's offset, a gradient's offset) follow every move from
     /// the press, so a move of a pixel or two moves it, as production's dialog drags; none of them reads a click.
     fn takes_every_move(&self) -> bool {
-        self.state.press.is_some() && matches!(self.pick, DialogPick::PatternPhase | DialogPick::ShadowDrag | DialogPick::GradientDrag)
+        // Pigment: on-image tools (the hand)
+        self.state.press.is_some()
+            && matches!(
+                self.pick,
+                DialogPick::PatternPhase
+                    | DialogPick::ShadowDrag
+                    | DialogPick::GradientDrag
+                    | DialogPick::OnImage(crate::dialogs::adjust_on_image::OnImageTool::Hand)
+            )
     }
 
     fn paint(&self, _draw: &Draw<'_>, _cx: &ToolContext<'_>) {}

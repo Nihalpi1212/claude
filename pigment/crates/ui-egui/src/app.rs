@@ -232,6 +232,8 @@ impl PhotocraftApp {
             auto_options: Default::default(),
             // Pigment: Curves display options
             curves_display: Default::default(),
+            // Pigment: on-image adjustment tools
+            on_image: Default::default(),
             #[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
             live_tokens: theme::live::LiveTokens::from_env(),
         };
