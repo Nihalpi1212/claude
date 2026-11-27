@@ -4,7 +4,7 @@ Branch `claude/pigment-merge-057297b`, on top of rebrand-docs' `88de0b5`. Two co
 
 - **`b45cbd8`** "Pigment merge 057297b, CI: craft-fonts cc9269c, stripped test builds, egui-fork and
   test-binaries checks".
-- **`ad2b0fa`**-style second commit (see `git log`): "Pigment merge 057297b: the known upstream test
+- **`9205833`** "Pigment merge 057297b: the known upstream test
   failures pass at 057297b, the list is empty".
 
 ## What I did
