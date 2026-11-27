@@ -12,6 +12,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use super::{Group, Named, always, bad, edit_groups, req_str, str_param};
+
+/// Pigment: Load, Replace and Save Tool Presets… with Photoshop's `.tpl` (P2).
+pub mod tpl;
 use crate::commands::CommandSpec;
 use crate::{Result, Session};
 
