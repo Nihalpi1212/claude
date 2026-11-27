@@ -72,7 +72,7 @@ select's accessible name "Chat model" (`tl!`).
 | `cargo fmt --all -- --check` | clean |
 | `cargo xtask panel-commands` | OK (0 direct mutations, 0 allow-listed) |
 | `pigment-rebrand.py --check` | only `crates/raw/src/shared.rs` (step 8, as before) |
-| whole ui-egui suite `--lib --tests` | see below |
+| `cargo nextest run --profile ci -p photocraft-ui-egui --lib --tests --no-fail-fast` (on `acdfbdb`) | **3724 run: 3724 passed, 6 skipped** (upstream's menu tests with Window › Assistant in) |
 
 Screenshot evidence (`PIGMENT_AI_EVIDENCE_DIR`): the Assistant window renders with the framework
 buttons and the select ("Automatic (gpt-5)") as 0.5.0's layout.
