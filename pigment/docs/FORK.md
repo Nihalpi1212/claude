@@ -570,6 +570,7 @@ Preset… asks for a name and saves the selected adjustment layers.
 | `crates/ui-egui/src/panels/properties/adjustments.rs` | the grid's pick is kept, `adjustment_presets::section` is drawn, then the pick runs |
 | `crates/ui-egui/src/panels/registry.rs` | the Properties entry's `rows`, `states` and `run` (Save Adjustment Preset…; upstream's Properties menu has no rows) |
 | `crates/ui-egui/src/dialogs.rs` | `adjustment_presets::SAVE_FAMILY` in `PARAM_FAMILIES` (the name dialog of Save Adjustment Preset…) |
+| `crates/ui-egui/tests/it/tone_targets.rs` | `names` (the dialog's channel dropdowns) leaves out the Preset row's picker |
 
 ### Auto Color Correction Options
 

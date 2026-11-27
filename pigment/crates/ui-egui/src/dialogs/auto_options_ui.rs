@@ -155,8 +155,23 @@ fn merged(kind: &str, current: &Value, auto: &Value) -> Value {
     let Some(o) = out.as_object_mut() else { return auto.clone() };
     if kind != "brightnessContrast" {
         const TONE: [&str; 17] = [
-            "inBlack", "inWhite", "gamma", "outBlack", "outWhite", "points", "red", "green", "blue", "gray", "cyan", "magenta", "yellow", "black",
-            "lightness", "a", "b",
+            "inBlack",
+            "inWhite",
+            "gamma",
+            "outBlack",
+            "outWhite",
+            "points",
+            "red",
+            "green",
+            "blue",
+            "gray",
+            "cyan",
+            "magenta",
+            "yellow",
+            "black",
+            "lightness",
+            "a",
+            "b",
         ];
         o.retain(|k, _| !TONE.contains(&k.as_str()) && k != "pencil" && k != "smooth" && k != "eyedropper");
     }

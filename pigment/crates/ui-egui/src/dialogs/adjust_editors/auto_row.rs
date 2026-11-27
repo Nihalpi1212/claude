@@ -29,7 +29,7 @@ pub enum AutoAsk {
     /// Auto was pressed on `kind` ("levels", "curves", "brightnessContrast"). `framework`: what the framework's Levels
     /// Auto set (taken back out of the value), for the host to keep when no options apply. `options`: Alt was held,
     /// so the host opens Auto Color Correction Options instead (Photoshop's Alt-click on Auto).
-    Auto { kind: &'static str, framework: Option<AdjustValue>, options: bool },
+    Auto { kind: &'static str, framework: Option<Box<AdjustValue>>, options: bool },
     /// Options… was pressed on `kind`.
     Options { kind: &'static str },
     /// An eyedropper was double-clicked: the host opens the Color Picker for its target colour.
@@ -98,7 +98,7 @@ pub fn levels_auto(ui: &Ui, levels: &mut Vec<Levels>, before: Vec<Levels>, edit:
     let Some(after) = auto else { return (kept, None) };
     *levels = before;
     let options = ui.input(|i| i.modifiers.alt);
-    (kept, Some(AutoAsk::Auto { kind: "levels", framework: Some(AdjustValue::Levels { levels: after }), options }))
+    (kept, Some(AutoAsk::Auto { kind: "levels", framework: Some(Box::new(AdjustValue::Levels { levels: after })), options }))
 }
 
 /// The row below an editor: Auto (Curves, Brightness/Contrast) and Options… (Levels, Curves).

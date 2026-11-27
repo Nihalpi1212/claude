@@ -702,9 +702,9 @@ pub mod adjust_editors;
 pub mod adjust_preview;
 pub mod alerts;
 // Pigment: Auto Color Correction Options
-pub mod auto_options_ui;
 #[cfg(test)]
 mod arbitrary_ruler_prefill_tests;
+pub mod auto_options_ui;
 pub(crate) mod bitmap_dialog;
 pub mod blend_options;
 pub mod blur_pins;

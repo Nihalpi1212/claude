@@ -1,14 +1,20 @@
 # PKG-port-A3: Auto Color Correction Options, Auto in Curves and Brightness/Contrast, eyedropper targets (rows 2, 5, 14, 15, 16)
 
 Built on `claude/pigment-photocraft` (PhotoCraft 057297b), after A1/A2. Spec: PORTS-A §2.2, §2.4, §9 A3;
-REBASE-A "A3" (it wins). CI before the package: the newest finished Pigment CI run was green (45959676448, A1's
-model commit); A2's two runs were still running / later cancelled by the next push, so nothing to fix first.
+REBASE-A "A3" (it wins). CI at the start: the newest finished Pigment CI run was green (45959676448, A1's model
+commit) while A2's runs were still going. **A2's run then finished red** (45965030354, and 45973984660 on this
+package's engine commit): 14 `photocraft-ui-egui::it tone_targets::*` tests failed because their `names` helper
+listed every dropdown of the dialog, and A2 added the Preset dropdown. Fixed in its own commit `e98b7a1`.
 
 ## Commits (pushed)
 
 - `975b565` Pigment Auto Color Correction Options (A3), engine: the algorithms, the preference,
   image.adjustments.autoOptions and .auto, Image › Auto with options, eyedropper targets
-- the interface commit (see the result for its sha): Auto buttons, the options dialog, the eyedropper double-click
+- `e98b7a1` Pigment CI: tone_targets reads the channel dropdowns without the Preset row's picker (the red CI)
+- `2d1fc97` Pigment Auto Color Correction Options (A3), interface: Auto in Levels, Curves and Brightness/Contrast,
+  the options dialog, eyedropper target colours
+
+CI on the last push was not waited for.
 
 ## What was built
 
@@ -80,6 +86,7 @@ model commit); A2's two runs were still running / later cancelled by the next pu
 | `crates/ui-egui/src/dialogs/layer_picker.rs` | `sample_at`: `with_targets` |
 | `crates/ui-egui/src/dialogs.rs` | module, `FAMILY` in `PARAM_FAMILIES`, `take` in `TAKERS`, `answer_prompt` in `PROMPTS`, `PREF` in `dont_show_again_keys` (array 5 → 6) |
 | `crates/ui-egui/src/lib.rs`, `app.rs` | field `auto_options` + `Default` |
+| `crates/ui-egui/tests/it/tone_targets.rs` | the CI fix: `names` leaves out the Preset picker (listed under "Adjustment presets" in FORK.md) |
 
 Also regenerated `docs/scorecard.md` (prefs count 202 → 203).
 
@@ -104,12 +111,17 @@ Also regenerated `docs/scorecard.md` (prefs count 202 → 203).
   armed, opens the Color Picker, the answer becomes the highlight target, Yes saves it, the white eyedropper then
   maps to it**; No keeps session targets and Properties' eyedropper carries them; **Levels Auto in Properties is one
   history step**.
-- ui-egui whole lib: see the result (run after the interface was done).
+- ui-egui whole lib: 3519 passed, 7 ignored (the run was OOM-killed here near its end with 4 test threads; the 95
+  tests it had not reached were run on their own with 2 threads: all passed). ui-egui `--test it tone_targets`
+  30/30 (with the fix and this package's eyedropper row, which tests click by "Set White Point").
 
 ## Checks
 
-fmt, clippy `-D warnings` (algo, engine, ui-egui, all targets), rebrand check, `cargo xtask scorecard --check`
-(after regenerating), panic hunt; `xtask panel-commands`, `layers`, `cargo test -p xtask`: see the result.
+All green: `cargo fmt --all -- --check`; clippy `-D warnings --all-targets` on photocraft-algo, photocraft-engine,
+photocraft-ui-egui; `python3 scripts/pigment-rebrand.py --check`; panic hunt (`--ignored`, 1/1, with the two new
+commands and the three Image › Auto commands' new params); `cargo xtask scorecard --check` (regenerated: prefs
+202 → 203), `panel-commands`, `layers`, `egui-fork`; `cargo test -p xtask` (108).
+Memory: a full ui-egui lib run with `--test-threads 4` can be OOM-killed in this container; use 2.
 
 ## Not done (with why)
 
