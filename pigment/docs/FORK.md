@@ -538,6 +538,22 @@ the PSD adjustment block of its kind, read and written through `adjust_map::pars
 made, `crates/io/tests/fixtures/adjust-presets/` (`make-fixtures.mjs` and a README that names the
 commit).
 
+The Preset row above every adjustment editor (Image › Adjustments dialogs and an adjustment layer's
+Properties) is `crates/ui-egui/src/dialogs/adjust_editors/preset_row.rs` with its tests in
+`preset_row/tests.rs`: the framework's `NamedPresetRow` around a `PresetPicker` (Default, the
+built-ins, the user's groups, "Custom" when the settings match none, the app's `sameSettings` rule;
+New…, Rename…, Delete, Load… and Save… of Photoshop's file for the six kinds that have one) and a
+"Reset Presets" button. The Adjustments panel's presets (Photoshop's "Adjustment Presets" groups,
+and "Your Presets" saved from the selected adjustment layers) are
+`crates/engine/src/presets/adjustments/panel.rs` and `crates/engine/src/cmd/adjust_preset_cmds/panel.rs`
+(`layer.adjustmentPreset`, journaled, one history step; `layer.saveAdjustmentPreset` and
+`layer.deleteAdjustmentPreset`, not journaled), tested in `panel_tests.rs` beside it. Their
+interface is `crates/ui-egui/src/panels/adjustment_presets.rs` (tests in
+`adjustment_presets/tests.rs`): a section of collapsible groups under the Adjustments panel's grid,
+one button per preset; hovering a button previews the preset on the canvas, built by the engine's
+`panel::preview` exactly as the command builds it; the Properties panel menu's Save Adjustment
+Preset… asks for a name and saves the selected adjustment layers.
+
 | Upstream file | Hook |
 |---|---|
 | `crates/io/src/adjust_map.rs` | `pub mod preset_files;` beside `mod encode;` (a child module, so it reads the block helpers it shares with `parse`) |
@@ -545,6 +561,15 @@ commit).
 | `crates/engine/src/presets.rs` | `pub mod adjustments;`; the `PresetState` field `adjustments` and its `Default`; the `Persisted` field `adjustments` (a `Value`, read entry by entry by `AdjustmentPresets::load`), its line in `to_json` and in `load_presets_json`, and the three lines that load it |
 | `crates/engine/src/cmd.rs` | `pub mod adjust_preset_cmds;` and `v.extend(adjust_preset_cmds::specs());` after `adjust_cmds::specs()` in `build()` |
 | `crates/automation/src/workspace.rs` | `adjustment.presets.load` (a `path` without `data` reads the disk) and `adjustment.presets.export` (a `path` writes there) in `command_uses_ambient_path`, so agents reach files only through their workspace |
+| `crates/ui-egui/src/dialogs/adjust_editors.rs` | `pub mod preset_row;`; the `AdjustAsk::Preset` variant; the `EditorSetup` fields `presets` and `presets_rev` and their `Default` |
+| `crates/ui-egui/src/dialogs/adjust_dialog.rs` | `build_setup`: the two `EditorSetup` fields; `shared_editor`: `preset_row::in_dialog` before the editor (two lines); `answer_asks`: `preset_row::follow_dialog` first, and the `AdjustAsk::Preset` arm |
+| `crates/ui-egui/src/dialogs/adjust_editors/session.rs` | `layer_editor`: `preset_row::in_properties` before the editor, a pick committed through `commit` (one history step) |
+| `crates/ui-egui/src/panels.rs` | `pub(crate) mod adjustment_presets;` |
+| `crates/ui-egui/src/lib.rs`, `crates/ui-egui/src/app.rs` | the `PhotocraftApp` field `adjust_panel_hover` (the hovered panel preset) and its `None` |
+| `crates/ui-egui/src/canvas/display.rs` | `display_doc_live`: the hovered panel preset's document, after the blend-mode preview |
+| `crates/ui-egui/src/panels/properties/adjustments.rs` | the grid's pick is kept, `adjustment_presets::section` is drawn, then the pick runs |
+| `crates/ui-egui/src/panels/registry.rs` | the Properties entry's `rows`, `states` and `run` (Save Adjustment Preset…; upstream's Properties menu has no rows) |
+| `crates/ui-egui/src/dialogs.rs` | `adjustment_presets::SAVE_FAMILY` in `PARAM_FAMILIES` (the name dialog of Save Adjustment Preset…) |
 
 ## Keeping the rebrand: `scripts/pigment-rebrand.py`
 

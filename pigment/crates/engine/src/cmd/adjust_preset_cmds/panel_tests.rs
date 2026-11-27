@@ -198,3 +198,17 @@ fn bad_panel_preset_params_are_errors_not_panics() {
     }
     assert_eq!(history(&s), steps);
 }
+
+#[test]
+fn the_hover_preview_is_the_document_the_command_makes() {
+    let mut s = doc(None);
+    s.execute("select.rect", json!({"x": 2, "y": 2, "width": 4, "height": 4})).unwrap();
+    let st = s.active().unwrap();
+    let shown = super::preview(&st.doc, st.active_layer, &s.presets.adjustments, "black-white", "high-contrast").unwrap();
+    assert!(st.doc.selection.is_some(), "the preview leaves the document alone");
+    s.execute("layer.adjustmentPreset", json!({"group": "black-white", "preset": "high-contrast"})).unwrap();
+    let made = &s.active().unwrap().doc;
+    let shape = |d: &photocraft_doc::Document| d.walk().iter().map(|(p, _, l)| (p.clone(), l.name.clone(), l.mask.is_some())).collect::<Vec<_>>();
+    assert_eq!(shape(&shown), shape(made));
+    assert!(super::preview(&made.clone(), None, &s.presets.adjustments, "black-white", "nope").is_none());
+}

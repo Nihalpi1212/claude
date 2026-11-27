@@ -16,7 +16,12 @@ fn cx() -> ValueCx {
 
 fn curves_entries() -> Vec<PresetEntry> {
     let s = photocraft_engine::Session::new();
-    s.presets.adjustments.list("curves").into_iter().map(|e| PresetEntry { group: e.group, name: e.preset.name, builtin: e.builtin, params: e.preset.params }).collect()
+    s.presets
+        .adjustments
+        .list("curves")
+        .into_iter()
+        .map(|e| PresetEntry { group: e.group, name: e.preset.name, builtin: e.builtin, params: e.preset.params })
+        .collect()
 }
 
 fn strong_contrast() -> Value {
@@ -39,8 +44,13 @@ fn a_value_shows_the_preset_whose_keys_it_matches_else_custom() {
     assert_eq!(held("curves", &entries, &red, &cx()).as_deref(), Some("Strong Contrast (RGB)"));
     // Numbers compare by value: Levels' `15` and `15.0`.
     let s = photocraft_engine::Session::new();
-    let levels: Vec<PresetEntry> =
-        s.presets.adjustments.list("levels").into_iter().map(|e| PresetEntry { group: e.group, name: e.preset.name, builtin: e.builtin, params: e.preset.params }).collect();
+    let levels: Vec<PresetEntry> = s
+        .presets
+        .adjustments
+        .list("levels")
+        .into_iter()
+        .map(|e| PresetEntry { group: e.group, name: e.preset.name, builtin: e.builtin, params: e.preset.params })
+        .collect();
     let darker = preset_value("levels", &json!({"inBlack": 15.0, "gamma": 0.85}), &cx()).unwrap();
     assert_eq!(held("levels", &levels, &darker, &cx()).as_deref(), Some("Darker"));
 }
@@ -121,7 +131,7 @@ fn picking_a_preset_in_the_curves_dialog_sets_its_curve_and_an_edit_shows_custom
     let id = crate::adjust_dialog::open(h.state_mut(), "image.adjustments.curves").unwrap();
     h.run_steps(4);
     pick(&mut h, "Strong Contrast (RGB)");
-    assert_eq!(dialog_points(h.state()), strong_contrast(), "the dialog's points are the built-in's");
+    assert_eq!(dialog_points(h.state()), json!([[0.0, 0.0], [64.0, 32.0], [192.0, 224.0], [255.0, 255.0]]), "the dialog's points are the built-in's");
     let setup = h.state().adjust_open.as_ref().unwrap().setup.lock().unwrap().clone();
     let value = crate::adjust_dialog::hosted(h.state(), id).unwrap().value().clone();
     assert_eq!(held("curves", &setup.presets, &value.value, &value.cx).as_deref(), Some("Strong Contrast (RGB)"));
@@ -145,7 +155,7 @@ fn saving_renaming_and_deleting_a_preset_from_the_dialog() {
     answer_dialog(h.state_mut(), id, PresetAsk::Create("Mine".into()));
     h.run_steps(3);
     let saved = h.state().session.presets.adjustments.find("levels", Some("Mine"), None).expect("saved");
-    assert_eq!((saved.preset.params["inBlack"].as_f64(), saved.preset.params["gamma"].as_f64()), (Some(33.0), Some(1.2)));
+    assert_eq!((&saved.preset.params["inBlack"], &saved.preset.params["gamma"]), (&json!(33), &json!(1.2)), "numbers as typed");
     assert!(saved.preset.params.get("target").is_none() && saved.preset.params.get("layer").is_none(), "settings only");
     // The dialog lists it at once and shows it as the current preset.
     let setup = h.state().adjust_open.as_ref().unwrap().setup.lock().unwrap().clone();

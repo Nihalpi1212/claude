@@ -226,6 +226,8 @@ impl PhotocraftApp {
             last_frame_start_ms: 0.0,
             jobs: Default::default(),
             ai: Default::default(),
+            // Pigment: the Adjustments panel's presets
+            adjust_panel_hover: None,
             #[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
             live_tokens: theme::live::LiveTokens::from_env(),
         };

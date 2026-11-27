@@ -173,7 +173,8 @@ fn file_of(kind: &str, value: &AdjustValue, cx: &ValueCx, name: Option<&str>) ->
     let params = values::to_params(value, cx, true);
     let adj = photocraft_engine::adjust_params::from_params(kind, &params, None, tone_mode(cx)).ok()?;
     let bytes = photocraft_io::adjust_presets::write(&adj).ok()?;
-    let stem: String = name.unwrap_or(files_title(kind)).chars().map(|c| if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') { '_' } else { c }).collect();
+    let stem: String =
+        name.unwrap_or(files_title(kind)).chars().map(|c| if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') { '_' } else { c }).collect();
     Some(PresetExport::new(format!("{stem}.{ext}"), bytes))
 }
 
@@ -233,13 +234,35 @@ pub fn preset_row(ui: &mut egui::Ui, kind: &str, entries: &[PresetEntry], value:
     out
 }
 
+/// Numbers held to four decimals: the editors keep `f32`s, whose `1.2` reads back as
+/// `1.2000000476837158` (the settings file then keeps what the user typed).
+fn tidy_numbers(v: &mut Value) {
+    match v {
+        Value::Number(n) if n.is_f64() => {
+            if let Some(x) = n.as_f64().filter(|x| x.is_finite()) {
+                let r = (x * 1e4).round() / 1e4;
+                *v = if r.fract() == 0.0 && r.abs() < 1e15 { json!(r as i64) } else { json!(r) };
+            }
+        }
+        Value::Array(a) => a.iter_mut().for_each(tidy_numbers),
+        Value::Object(m) => m.values_mut().for_each(tidy_numbers),
+        _ => {}
+    }
+}
+
 /// Answers one ask of the row for `kind`: `params` are the current settings (a new preset's, a
 /// saved file's). `loaded` is called with a loaded file's preset params, to show them.
 pub fn answer(app: &mut PhotocraftApp, kind: &str, ask: PresetAsk, params: Value, loaded: impl FnOnce(&mut PhotocraftApp, Value) + 'static) {
     let kind_owned = kind.to_owned();
     let result = match ask {
-        PresetAsk::Create(name) => app.run("adjustment.presets.save", json!({"kind": kind, "name": name, "params": params})).map(|_| ()),
-        PresetAsk::Rename { from, to } => app.run("adjustment.presets.edit", json!({"kind": kind, "action": "rename", "name": from, "newName": to})).map(|_| ()),
+        PresetAsk::Create(name) => {
+            let mut params = params;
+            tidy_numbers(&mut params);
+            app.run("adjustment.presets.save", json!({"kind": kind, "name": name, "params": params})).map(|_| ())
+        }
+        PresetAsk::Rename { from, to } => {
+            app.run("adjustment.presets.edit", json!({"kind": kind, "action": "rename", "name": from, "newName": to})).map(|_| ())
+        }
         PresetAsk::Delete(name) => app.run("adjustment.presets.edit", json!({"kind": kind, "action": "delete", "name": name})).map(|_| ()),
         PresetAsk::Reset => app.run("adjustment.presets.reset", json!({"kind": kind})).map(|_| ()),
         PresetAsk::File(PresetFileRequest::Open { extensions, .. }) => {
@@ -338,7 +361,14 @@ pub(crate) fn answer_dialog(app: &mut PhotocraftApp, id: craft::ui::dialog::Dial
 
 /// The row in an adjustment layer's Properties (`session::layer_editor`), over the layer's
 /// `value`: answers the asks here and returns a picked preset's value, which the editor commits.
-pub(crate) fn in_properties(app: &mut PhotocraftApp, ui: &mut egui::Ui, id: photocraft_doc::LayerId, kind: &str, value: &AdjustValue, cx: &ValueCx) -> Option<AdjustValue> {
+pub(crate) fn in_properties(
+    app: &mut PhotocraftApp,
+    ui: &mut egui::Ui,
+    id: photocraft_doc::LayerId,
+    kind: &str,
+    value: &AdjustValue,
+    cx: &ValueCx,
+) -> Option<AdjustValue> {
     if !has_presets(kind) {
         return None;
     }

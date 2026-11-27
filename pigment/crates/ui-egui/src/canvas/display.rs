@@ -173,6 +173,10 @@ pub(crate) fn display_doc_live(app: &mut PhotocraftApp, idx: usize, live: LivePr
     if let Some(shown) = crate::blend_preview::display_doc(app, idx) {
         return shown;
     }
+    // Pigment: an adjustment preset hovered in the Adjustments panel.
+    if let Some(shown) = crate::panels::adjustment_presets::display_doc(app, idx) {
+        return shown;
+    }
     crate::transform_tool::follow_edits(app);
     let st = &app.session.documents()[idx];
     if let Some(l) = live_stroke(app, idx) {

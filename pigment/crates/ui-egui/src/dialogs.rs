@@ -107,6 +107,8 @@ pub(crate) mod params {
         crate::prefs_ui::PRESETS_FAMILY,
         ParamFamily { check: Some(crate::crop_presets::check), ..ParamFamily::new(crate::crop_presets::owns, crate::crop_presets::run) },
         crate::actions::dialogs::NEW_SET_FAMILY,
+        // Pigment: Save Adjustment Preset… (the Properties panel menu)
+        crate::panels::adjustment_presets::SAVE_FAMILY,
         crate::actions::dialogs::INSERT_STOP_FAMILY,
         crate::actions::playback::FAMILY,
         crate::actions::menu_item::FAMILY,

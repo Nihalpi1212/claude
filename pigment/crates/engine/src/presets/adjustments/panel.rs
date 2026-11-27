@@ -90,7 +90,11 @@ pub const PANEL_PRESETS: &[PanelGroup] = &[
                     r#"{"points":[[0,0],[255,255]],"red":[[0,0],[64,50],[192,210],[255,255]],"green":[[0,0],[64,70],[192,200],[255,255]],"blue":[[0,40],[255,215]]}"#,
                 )],
             },
-            PanelPreset { id: "duotone-blue", name: "Duotone Blue", layers: &[("gradientMap", r##"{"stops":[[0,"#0b1e3f"],[1,"#d8ecff"]],"reverse":false}"##)] },
+            PanelPreset {
+                id: "duotone-blue",
+                name: "Duotone Blue",
+                layers: &[("gradientMap", r##"{"stops":[[0,"#0b1e3f"],[1,"#d8ecff"]],"reverse":false}"##)],
+            },
         ],
     },
     PanelGroup {
