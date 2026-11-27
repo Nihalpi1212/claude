@@ -936,6 +936,12 @@ constant-colour noise fills and kept the raw block for the rest, #6272; `.grd` i
   reports it), `paint.gradient`, `layer.layerStyle.gradientOverlay`/`stroke` (and `replace`), and a Gradient Map's
   `source`. `GradientPreset.noise` persists in the preferences and in `.pcpresets`; `importGrd` reads noise gradients and
   `exportGrd` writes them.
+- **Interface**: `crates/ui-egui/src/tools/gradient_ui/noise.rs`: Gradient Type (Solid, Noise) and, for a noise
+  gradient, Roughness, Color Model, a range per channel, Restrict Colors, Add Transparency and Randomize (a step of the
+  gradient's generator), drawn with the framework's widgets in the Gradient Editor panel above the stop bar. Each change
+  is one command on commit (`gradient.presets.stop` `set` for the tool's gradient, `gradient.fill.set` for a fill layer:
+  one history step). The tool gradient's stop bar is hidden for a noise gradient; a fill layer keeps the framework's
+  `GradientFillEditor` below (it has no way to hide its stops), showing the bake.
 
 | Upstream file | Hook |
 |---|---|
@@ -960,6 +966,9 @@ constant-colour noise fills and kept the raw block for the rest, #6272; `.grd` i
 | `crates/io/src/blocks/tests.rs` | `variable_or_transparent_noise_stays_a_fill_with_the_placeholder_ramp`: the preview is the bake now; an HSL noise gradient keeps the placeholder |
 | `crates/engine/src/cmd/preset_import_cmds.rs` (tests) | `grd_import_adds_a_gradient_group`: the noise gradient imports |
 | `crates/io/tests/it/main.rs` | `mod psd_noise_gradients;` |
+| `crates/ui-egui/src/tools/gradient_ui.rs` | `mod noise;` |
+| `crates/ui-egui/src/tools/gradient_ui/editor.rs` | `show`: `noise::show` for the tool gradient; the stop bar only when solid |
+| `crates/ui-egui/src/tools/gradient_ui/properties_panel.rs` | `show`: `noise::show` for the layer above the framework's rows |
 | Test literals: `crates/{compose,vector}/src/tests.rs`, `crates/format/tests/it/{common/mod,roundtrip}.rs`, `crates/gpu/tests/it/parity.rs`, `crates/io/src/{adjust_map,blocks}/tests.rs`, `crates/engine/src/cmd/vector_cmds/tests.rs`, `crates/ui-egui/src/canvas/triangle_alt_eyedropper_tests.rs`, `crates/ui-egui/src/tools/vector_ui/paint_tests.rs` | `noise: None` / `noise: _` |
 
 ## Keeping the rebrand: `scripts/pigment-rebrand.py`
