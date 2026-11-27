@@ -216,6 +216,10 @@ pub struct GradientSource {
     pub smoothness: f32,
     /// `classic`, `perceptual`, `linear` or `smooth`.
     pub method: String,
+    /// Pigment: a noise gradient. `stops` are then the colours at its knots (classic, midpoints
+    /// halfway) and the map's baked stops its [`crate::NoiseGradient::bake`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub noise: Option<crate::NoiseGradient>,
 }
 
 /// Photoshop adjustment layers (Layer → New Adjustment Layer).

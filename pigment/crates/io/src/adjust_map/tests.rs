@@ -726,8 +726,13 @@ fn legacy_brit_without_cged() {
 #[test]
 fn gradient_map_keeps_photoshops_stops_midpoints_and_smoothness() {
     use photocraft_doc::adjust::GradientSource;
-    let src =
-        GradientSource { stops: vec![(0.0, [0.1, 0.2, 0.6]), (1.0, [1.0, 0.8, 0.2])], midpoints: vec![0.3], smoothness: 0.8, method: "perceptual".into() };
+    let src = GradientSource {
+        stops: vec![(0.0, [0.1, 0.2, 0.6]), (1.0, [1.0, 0.8, 0.2])],
+        midpoints: vec![0.3],
+        smoothness: 0.8,
+        method: "perceptual".into(),
+        noise: None,
+    };
     let block = write_grdm(&src.stops, &src.midpoints, src.smoothness, crate::gradient_bake::Method::Perceptual, false, true);
     let a = parse(b"grdm", &block, None, Channels::Rgb);
     let Adjustment::GradientMap { stops, dither: true, source: Some(kept), .. } = &a else { panic!("{a:?}") };

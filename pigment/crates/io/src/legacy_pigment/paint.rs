@@ -200,18 +200,20 @@ fn gradient_fill(g: &Map<String, Value>, place: &Place) -> Fill {
     };
     let (angle, scale, offset) = from_handles(style, from, to, place.frame);
     let reverse = g.get("reverse").and_then(Value::as_bool).unwrap_or(false);
-    let (stops, opacity_stops) = def.fill_stops(reverse != flip);
+    // A noise gradient keeps its settings and Reverse; others are reversed in the stops.
+    let ((stops, opacity_stops), reverse, noise) = def.paint(reverse != flip);
     Fill::Gradient {
         stops,
         angle,
         scale,
         style,
-        reverse: false,
+        reverse,
         opacity_stops,
         midpoints: Vec::new(),
         offset,
         dither: g.get("dither").and_then(Value::as_bool).unwrap_or(false),
         align: place.align,
+        noise,
     }
 }
 

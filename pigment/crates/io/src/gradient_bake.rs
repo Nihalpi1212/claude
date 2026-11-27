@@ -178,6 +178,10 @@ impl Method {
 /// compositors render. Hostile values (from a file or a command) are clamped: locations and
 /// Smoothness to 0..1, midpoints to 0.05..0.95, a missing midpoint is the middle.
 pub fn bake_source(src: &photocraft_doc::adjust::GradientSource) -> Vec<(f32, [f32; 3])> {
+    // Pigment: a noise gradient bakes its settings.
+    if let Some(n) = &src.noise {
+        return n.bake().0;
+    }
     let unit = |v: f32| if v.is_finite() { v.clamp(0.0, 1.0) } else { 0.0 };
     let mut stops: Vec<(f32, Color)> = src.stops.iter().map(|(t, c)| (unit(*t), Color::rgba(unit(c[0]), unit(c[1]), unit(c[2]), 1.0))).collect();
     stops.sort_by(|a, b| a.0.total_cmp(&b.0));

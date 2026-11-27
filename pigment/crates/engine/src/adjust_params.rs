@@ -1236,7 +1236,7 @@ fn gradient_source(cmd: &str, v: &Value) -> Result<photocraft_doc::adjust::Gradi
             .map(|m| m.name().to_string())
             .ok_or_else(|| bad(cmd, "`source.method` must be classic, perceptual, linear or smooth"))?,
     };
-    Ok(photocraft_doc::adjust::GradientSource { stops, midpoints, smoothness, method })
+    Ok(photocraft_doc::adjust::GradientSource { stops, midpoints, smoothness, method, noise: None })
 }
 
 /// Params with the private keys (`layer`, `coalesce`, `__kind`) removed.

@@ -14,6 +14,7 @@
 
 use photocraft_color::Color;
 use photocraft_doc::adjust::GradientSource;
+use photocraft_doc::{NoiseGradient, NoiseModel};
 use serde_json::Value;
 
 /// Stops read from one gradient; more are left out.
@@ -54,25 +55,6 @@ impl Method {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Model {
-    Rgb,
-    Hsb,
-    Lab,
-}
-
-/// A noise gradient's settings (`NOISE_DEFAULTS` of gradient-model.js).
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct Noise {
-    roughness: f64,
-    model: Model,
-    min: [f64; 3],
-    max: [f64; 3],
-    restrict: bool,
-    transparency: bool,
-    seed: f64,
-}
-
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Stop {
     pos: f64,
@@ -100,7 +82,9 @@ pub(crate) struct Def {
     opacity: Vec<OpacityStop>,
     pub(crate) method: Method,
     smoothness: f64,
-    pub(crate) noise: Option<Noise>,
+    /// A noise gradient's settings (`NOISE_DEFAULTS` of gradient-model.js; the sampler is
+    /// [`photocraft_doc::noise_gradient`]).
+    pub(crate) noise: Option<NoiseGradient>,
 }
 
 fn num(v: Option<&Value>) -> Option<f64> {
@@ -273,18 +257,20 @@ impl Def {
                 Some(a) if a.len() >= 3 => [0, 1, 2].map(|i| clamp01(num(a.get(i)).unwrap_or(d[i]))),
                 _ => d,
             };
-            Noise {
-                roughness: clamp01(num(get("roughness")).unwrap_or(0.5)),
+            let (min, max) = (triple("min", [0.0; 3]), triple("max", [1.0; 3]));
+            NoiseGradient {
+                roughness: clamp01(num(get("roughness")).unwrap_or(0.5)) as f32,
                 model: match get("model").and_then(Value::as_str) {
-                    Some("hsb") => Model::Hsb,
-                    Some("lab") => Model::Lab,
-                    _ => Model::Rgb,
+                    Some("hsb") => NoiseModel::Hsb,
+                    Some("lab") => NoiseModel::Lab,
+                    _ => NoiseModel::Rgb,
                 },
-                min: triple("min", [0.0; 3]),
-                max: triple("max", [1.0; 3]),
+                // The app's alpha walk spans 0..1.
+                min: [min[0] as f32, min[1] as f32, min[2] as f32, 0.0],
+                max: [max[0] as f32, max[1] as f32, max[2] as f32, 1.0],
                 restrict: get("restrict").is_some_and(truthy),
                 transparency: get("transparency").is_some_and(truthy),
-                seed: num(get("seed")).unwrap_or(1.0).trunc(),
+                seed: photocraft_doc::noise_gradient::seed_of(num(get("seed")).unwrap_or(1.0)),
             }
         });
         Def {
@@ -309,7 +295,8 @@ impl Def {
     pub(crate) fn sample(&self, t: f64) -> [f64; 4] {
         let t = if t.is_finite() { clamp01(t) } else { 0.0 };
         if let Some(n) = &self.noise {
-            return noise_sample(n, t);
+            let c = n.sample(t);
+            return [c[0] * 255.0, c[1] * 255.0, c[2] * 255.0, c[3]];
         }
         let [r, g, b] = self.solid_rgb(t);
         [r, g, b, self.solid_alpha(t)]
@@ -410,6 +397,16 @@ impl Def {
         (colors, alphas)
     }
 
+    /// A fill's, a stroke's or an effect's colour and opacity stops, its Reverse and its noise:
+    /// a noise gradient keeps its settings, with its bake as the stops and `reverse` as the
+    /// flag; any other gradient is [`Self::fill_stops`] (reversed into the stops).
+    pub(crate) fn paint(&self, reverse: bool) -> (Stops, bool, Option<NoiseGradient>) {
+        match &self.noise {
+            Some(n) => (n.fill_stops(), reverse, Some(n.clone())),
+            None => (self.fill_stops(reverse), false, None),
+        }
+    }
+
     /// Colour stops (opaque) and opacity stops for a fill, a stroke or an effect.
     pub(crate) fn fill_stops(&self, reverse: bool) -> Stops {
         let (colors, alphas) = self.stops_and_opacity(reverse);
@@ -422,13 +419,26 @@ impl Def {
     /// Gradient Map stops: the colours the app mapped grey levels to, in 0..1 sRGB, not
     /// reversed (the adjustment reverses them itself).
     pub(crate) fn map_stops(&self) -> Vec<(f32, [f32; 3])> {
+        if let Some(n) = &self.noise {
+            return n.bake().0;
+        }
         self.stops_and_opacity(false).0.into_iter().map(|(t, c)| (t as f32, c.map(|v| v as f32))).collect()
     }
 
     /// The stops as PhotoCraft's Gradient Editor holds them, for the methods it has (not
-    /// stripes, not noise).
+    /// stripes); a noise gradient's knots with its settings.
     pub(crate) fn source(&self) -> Option<GradientSource> {
-        if self.noise.is_some() || self.method == Method::Stripes {
+        if let Some(n) = &self.noise {
+            let knots = n.knot_stops();
+            return Some(GradientSource {
+                midpoints: vec![0.5; knots.len().saturating_sub(1)],
+                stops: knots,
+                smoothness: 0.0,
+                method: "classic".into(),
+                noise: Some(n.clone()),
+            });
+        }
+        if self.method == Method::Stripes {
             return None;
         }
         Some(GradientSource {
@@ -437,12 +447,16 @@ impl Def {
             midpoints: self.stops.iter().skip(1).map(|s| s.mid as f32).collect(),
             smoothness: self.smoothness as f32,
             method: self.method.name().to_string(),
+            noise: None,
         })
     }
 
     /// The editable colour stops and method of an effect's gradient (see
     /// [`photocraft_doc::effects::GradientInterpolation`]), for the methods PhotoCraft has.
     pub(crate) fn interpolation(&self) -> Option<photocraft_doc::effects::GradientInterpolation> {
+        if self.noise.is_some() {
+            return None;
+        }
         let src = self.source()?;
         Some(photocraft_doc::effects::GradientInterpolation {
             method: src.method,
@@ -563,83 +577,6 @@ fn hermite(y0: f64, y1: f64, m0: f64, m1: f64, h: f64, u: f64) -> f64 {
     (2.0 * u3 - 3.0 * u2 + 1.0) * y0 + (u3 - 2.0 * u2 + u) * h * m0 + (-2.0 * u3 + 3.0 * u2) * y1 + (u3 - u2) * h * m1
 }
 
-/// mulberry32, as `seededRandom` (the same sequence for the same seed).
-struct Mulberry(u32);
-
-impl Mulberry {
-    fn new(seed: f64) -> Self {
-        // `Math.trunc(seed) | 0`: the seed modulo 2³².
-        Mulberry(seed.trunc().rem_euclid(4_294_967_296.0) as u32)
-    }
-    fn next(&mut self) -> f64 {
-        self.0 = self.0.wrapping_add(0x6d2b_79f5);
-        let mut t = self.0;
-        t = (t ^ (t >> 15)).wrapping_mul(t | 1);
-        t ^= t.wrapping_add((t ^ (t >> 7)).wrapping_mul(t | 61));
-        f64::from(t ^ (t >> 14)) / 4_294_967_296.0
-    }
-}
-
-fn noise_sample(n: &Noise, t: f64) -> [f64; 4] {
-    // `noiseKnots`: a random walk per channel (three colour channels and alpha).
-    let count = 3 + (n.roughness * 61.0).round() as usize;
-    let step = 0.12 + 0.88 * n.roughness;
-    let mut rand = Mulberry::new(n.seed);
-    let mut knots = [vec![0.0; count], vec![0.0; count], vec![0.0; count], vec![0.0; count]];
-    for ch in &mut knots {
-        let mut v = rand.next();
-        for (i, k) in ch.iter_mut().enumerate() {
-            if i > 0 {
-                v += (rand.next() * 2.0 - 1.0) * step;
-                if v < 0.0 {
-                    v = -v;
-                }
-                if v > 1.0 {
-                    v = 2.0 - v;
-                }
-                v = clamp01(v);
-            }
-            *k = v;
-        }
-    }
-    let x = t * (count - 1) as f64;
-    let i = (x.floor() as usize).min(count - 2);
-    let f = x - i as f64;
-    let at = |c: usize| knots[c][i] + (knots[c][i + 1] - knots[c][i]) * f;
-    let v = [0, 1, 2].map(|c| n.min[c] + (n.max[c] - n.min[c]) * at(c));
-    let mut rgb = match n.model {
-        Model::Hsb => hsv_to_rgb(v[0] * 360.0, v[1], v[2]),
-        Model::Lab => lab_to_rgb(v[0] * 100.0, v[1] * 255.0 - 128.0, v[2] * 255.0 - 128.0),
-        Model::Rgb => v.map(|c| c * 255.0),
-    };
-    if n.restrict {
-        let (max, min) = (rgb[0].max(rgb[1]).max(rgb[2]), rgb[0].min(rgb[1]).min(rgb[2]));
-        let s = if max > 0.0 { (max - min) / max } else { 0.0 };
-        if s > 0.85 {
-            let k = 0.85 / s;
-            rgb = rgb.map(|c| max - (max - c) * k);
-        }
-    }
-    [rgb[0], rgb[1], rgb[2], if n.transparency { at(3) } else { 1.0 }]
-}
-
-/// `hsvToRgb` of shared/pixels/color.js: 0..255.
-pub(crate) fn hsv_to_rgb(h: f64, s: f64, v: f64) -> [f64; 3] {
-    let hh = h.rem_euclid(360.0) / 60.0;
-    let i = hh.floor();
-    let f = hh - i;
-    let (p, q, t) = (v * (1.0 - s), v * (1.0 - s * f), v * (1.0 - s * (1.0 - f)));
-    let [r, g, b] = match (i as i64).rem_euclid(6) {
-        0 => [v, t, p],
-        1 => [q, v, p],
-        2 => [p, v, t],
-        3 => [p, q, v],
-        4 => [t, p, v],
-        _ => [v, p, q],
-    };
-    [r * 255.0, g * 255.0, b * 255.0]
-}
-
 /// `hslToRgb` of shared/pixels/color.js (`s`, `l` in 0..1): 0..255.
 pub(crate) fn hsl_to_rgb(h: f64, s: f64, l: f64) -> [f64; 3] {
     let hh = h.rem_euclid(360.0) / 360.0;
@@ -666,22 +603,6 @@ pub(crate) fn hsl_to_rgb(h: f64, s: f64, l: f64) -> [f64; 3] {
         }
     };
     [f(hh + 1.0 / 3.0) * 255.0, f(hh) * 255.0, f(hh - 1.0 / 3.0) * 255.0]
-}
-
-fn lab_to_rgb(l: f64, a: f64, b: f64) -> [f64; 3] {
-    const XN: f64 = 0.95047;
-    const ZN: f64 = 1.08883;
-    let finv = |t: f64| if t > 0.206_893 { t * t * t } else { (t - 16.0 / 116.0) / 7.787 };
-    let fy = (l + 16.0) / 116.0;
-    let (fx, fz) = (fy + a / 500.0, fy - b / 200.0);
-    let (x, y, z) = (finv(fx) * XN, finv(fy), finv(fz) * ZN);
-    let r = x * 3.240_454_2 + y * -1.537_138_5 + z * -0.498_531_4;
-    let g = x * -0.969_266 + y * 1.876_010_8 + z * 0.041_556;
-    let bb = x * 0.055_643_4 + y * -0.204_025_9 + z * 1.057_225_2;
-    [r, g, bb].map(|v| {
-        let s = if v <= 0.003_130_8 { 12.92 * v } else { 1.055 * v.powf(1.0 / 2.4) - 0.055 };
-        (s * 255.0).clamp(0.0, 255.0)
-    })
 }
 
 #[cfg(test)]
@@ -731,7 +652,7 @@ mod tests {
         assert_eq!(d.sample(0.3)[..3], [0.0, 0.0, 255.0]);
         assert!(d.source().is_none());
         let n = Def::parse(&json!({"gradientVersion": 2, "type": "noise", "noise": {"roughness": 0.4, "seed": 7}}));
-        assert!(n.noise.is_some() && n.source().is_none());
+        assert!(n.noise.is_some() && n.source().is_some_and(|s| s.noise == n.noise && s.stops.len() == 27));
         // The same seed, the same gradient; another seed, another one.
         assert_eq!(n.sample(0.37), Def::parse(&json!({"gradientVersion": 2, "type": "noise", "noise": {"roughness": 0.4, "seed": 7}})).sample(0.37));
         assert_ne!(n.sample(0.37), Def::parse(&json!({"gradientVersion": 2, "type": "noise", "noise": {"roughness": 0.4, "seed": 8}})).sample(0.37));
@@ -739,17 +660,6 @@ mod tests {
             assert!(n.sample(t).iter().all(|v| v.is_finite()));
         }
     }
-
-    #[test]
-    fn mulberry32_gives_the_apps_sequence() {
-        // seededRandom(7)() three times, in Node.
-        let mut r = Mulberry::new(7.0);
-        let got: Vec<u64> = (0..3).map(|_| (r.next() * 4_294_967_296.0) as u64).collect();
-        assert_eq!(got, [MULBERRY_7[0], MULBERRY_7[1], MULBERRY_7[2]]);
-    }
-
-    /// `seededRandom(7)` × 2³², from the app's code under Node.
-    const MULBERRY_7: [u64; 3] = [50_271_532, 266_108_690, 4_195_786_334];
 
     #[test]
     fn colours_the_app_read() {

@@ -39,6 +39,9 @@ pub struct Gradient {
     pub align: bool,
     /// Centre offset as a fraction of the bounds.
     pub offset: (f32, f32),
+    /// Pigment: a noise gradient; `stops` and `opacity_stops` are its bake.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub noise: Option<crate::NoiseGradient>,
 }
 
 /// Editable colour stops behind a Gradient Overlay's baked render stops.
@@ -62,6 +65,7 @@ impl Default for Gradient {
             reverse: false,
             align: true,
             offset: (0.0, 0.0),
+            noise: None,
         }
     }
 }

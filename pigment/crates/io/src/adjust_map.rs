@@ -338,6 +338,10 @@ fn parse_gradient_map(d: &[u8]) -> Option<Adjustment> {
         mids.push(mid);
         at += 20;
     }
+    // Pigment: a noise gradient (mode 1 in its settings).
+    if let Some(n) = crate::grd_noise::grdm_noise(d) {
+        return Some(crate::grd_noise::noise_map(n, reverse, dither));
+    }
     if stops.len() < 2 {
         return None;
     }
@@ -355,6 +359,7 @@ fn parse_gradient_map(d: &[u8]) -> Option<Adjustment> {
         midpoints: mids.clone(),
         smoothness: smooth.clamp(0.0, 1.0),
         method: method.name().to_string(),
+        noise: None,
     };
     let baked = crate::gradient_bake::bake(stops, &mids, smooth, method);
     let mut stops: Vec<(f32, [f32; 3])> = baked.iter().map(|(t, c)| (*t, c.to_rgb())).collect();
@@ -740,7 +745,13 @@ pub fn write(adj: &Adjustment) -> Vec<([u8; 4], Vec<u8>)> {
             let mut stops = src.stops.clone();
             stops.sort_by(|a, b| a.0.total_cmp(&b.0));
             let method = crate::gradient_bake::Method::from_name(&src.method).unwrap_or(crate::gradient_bake::Method::Classic);
-            return block(b"grdm", write_grdm(&stops, &src.midpoints, src.smoothness, method, *reverse, *dither));
+            let bytes = write_grdm(&stops, &src.midpoints, src.smoothness, method, *reverse, *dither);
+            // Pigment: a noise gradient writes its settings (its knots as the stops).
+            let bytes = match &src.noise {
+                Some(n) => crate::grd_noise::patch_grdm(bytes, n),
+                None => bytes,
+            };
+            return block(b"grdm", bytes);
         }
         Adjustment::GradientMap { stops, reverse, dither, .. } => {
             return block(b"grdm", write_gradient_map(&encode::gradient_stops(stops), *reverse, *dither));
