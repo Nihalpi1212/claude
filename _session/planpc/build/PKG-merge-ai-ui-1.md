@@ -1,7 +1,8 @@
 # Merge 057297b, step "ai-ui part 1" (§6 step 7, part 1 of 3: the AI interface's core)
 
-Branch `claude/pigment-merge-057297b`, one commit on top of the app commit `8ead1af` (hash in the
-commit list of this run; message "Pigment merge 057297b, AI interface part 1: …"). Pushed. Only
+Branch `claude/pigment-merge-057297b`, commit **`56b1f41`** "Pigment merge 057297b, AI interface part 1:
+menus, Generate, Describe, AI Accounts on the framework", on top of the app commit `8ead1af`. Pushed;
+tree clean after it. Only
 `pigment/crates/ui-egui` changed.
 
 ## What I did
@@ -89,7 +90,8 @@ commands" (0.5.0 had it in AI Accounts only; it is still there too). The user gu
 | Command | Result |
 |---|---|
 | `cargo nextest run --profile ci -p photocraft-ui-egui --test it -E 'test(/^ai::/)'` | **25 run: 25 passed** (the 24 of 0.5.0's 30 that drive part 1, plus the new one) |
-| `cargo nextest run --profile ci -p photocraft-ui-egui --lib --tests --no-fail-fast` | see "Full suite" below |
+| `cargo nextest run --profile ci -p photocraft-ui-egui --lib --tests --no-fail-fast` | **3678 run: 3678 passed, 6 skipped** (incl. the agents page's kittest and upstream's menu tests with the AI rows in) |
+| `pigment-rebrand.py --check` | only `crates/raw/src/shared.rs` (step 8, as before) |
 | `cargo clippy -p photocraft-ui-egui --all-targets -- -D warnings` | clean |
 | `cargo fmt -p photocraft-ui-egui -- --check` | clean |
 
@@ -118,3 +120,5 @@ step 9 whether the xtask scans `ai_ui`).
 - **Step 8 (FORK.md):** the hook table: `ai_ui::show(self, ui)` in `app/frame.rs`,
   `ai_ui::preferences_rows` in `prefs_ui/agents.rs::page`, `PrefsCustom.ai` in `custom_rows.rs`,
   `ai_ui::menu_items` returning `craft::menu::Row`s in `menus/items.rs`.
+
+Disk at the end: about 7.8 GB free after deleting the test executables over 20 MB and `target/debug/incremental`.
