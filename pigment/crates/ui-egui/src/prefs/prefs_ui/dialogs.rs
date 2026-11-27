@@ -75,7 +75,8 @@ pub fn invoke(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, params: &V
         "edit.contentAwareFill" => Some(crate::caf_ui::open(app).map(|_| json!({"contentAwareFill": crate::caf_ui::describe(app)}))),
         // Photoshop has no dialog: the menu opens the scale box (with params: the engine).
         crate::cas_transform::COMMAND => Some(crate::cas_transform::begin(app, ctx)),
-        "edit.presets.presetManager" => Some(Ok(json!({"dialog": super::presets::open_manager(app).value().to_string()}))),
+        // Pigment: Preset Manager for every kind (P1a); upstream's `open_manager` stays, unused.
+        "edit.presets.presetManager" => Some(Ok(json!({"dialog": crate::dialogs::preset_manager_ui::open(app).value().to_string()}))),
         "edit.presets.exportImportPresets" => Some(Ok(json!({"dialog": super::presets::open_io(app).value().to_string()}))),
         _ => None,
     }

@@ -148,9 +148,9 @@ note = "View › Rulers is remembered in unitsAndRulers.showRulers and applied a
 [[item]]
 id = "UI-217-21"
 target = "One Preset Manager for every preset kind with folders, search, reorder, load/save sets"
-status = "partial"
+status = "done"
 issue = 217
-note = "edit_menu_cmds.rs:714 covers brushes, custom shapes, patterns with reorder"
+note = "Pigment: edit.presets.presetManager (edit_menu_cmds/preset_manager.rs) covers brushes, swatches, gradients, styles, patterns, contours, custom shapes, tool presets and adjustment presets (folders, multi-delete, reorder, Load…/Replace… by extension, Save Set…, Reset); dialogs/preset_manager_ui.rs shows them in Photoshop's five views with search and Shift/Cmd multi-select"
 
 [[item]]
 id = "UI-217-22"

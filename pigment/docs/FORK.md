@@ -803,6 +803,46 @@ Pigment's own files changed: `presets/adjustments.rs` (the HDR built-ins' `metho
 HDR preset's `method` must be one of the menu's), `dialogs/adjust_editors/preset_row.rs` (the drawing shared by the
 value row and the new `params_row`).
 
+### The Preset Manager for every kind
+
+Edit › Presets › Preset Manager… lists and edits the nine libraries Photoshop's dialog shows: brushes, swatches,
+gradients, styles, patterns, contours, custom shapes, tool presets and Pigment's adjustment presets (upstream's had
+three, as a list with Rename and Delete).
+
+- **Engine**: `edit.presets.presetManager` is in `crates/engine/src/cmd/edit_menu_cmds/preset_manager.rs`, a `Library`
+  per kind that delegates to the kind's own commands (`swatches.*`, `gradient.presets.*`, `style.presets.*`,
+  `pattern.presets.*`, `layer.layerStyle.contours.*`, `shape.presets.*`, `tool.presets.*`, `adjustment.presets.*`).
+  Actions: `list` (names, plus `info.<kind>`: rows with groups and keys, the thumbnail kind, the files Load… reads and
+  Save Set… writes, `canReset`, `canMove`), `rename`, `delete` (`indices` for several, all or none), `move` (`to` a
+  position, or `toGroup` and `position`), `load` (by extension: `.abr .aco .ase .act .gpl .grd .asl .pat .shc .csh .alv
+  .acv .ahu .cha .asv .blw .pcpresets`, and `.tpl` once P2's `tool.presets.importTpl` exists; `replace` empties the
+  library first and puts it back if the load fails), `saveSet` (the kind's Photoshop file; brushes, custom shapes and
+  tool presets as `.pcpresets`; base64 `data` without a `path`) and `reset` (the kind's reset; brushes, patterns and
+  contours have none and refuse it). `customShapes` is the Shapes panel's library (`presets::shapes::all_groups`, the
+  Define Custom Shape results as its `Custom Shapes` group), not upstream's storage merge.
+- **`gradient.presets.exportGrd`** (`crates/engine/src/presets/gradients/export_grd.rs`) writes gradients as a `.grd`
+  through `craft_psd::grd::write`.
+- **Interface**: `crates/ui-egui/src/dialogs/preset_manager_ui.rs`, a `StackDialog` over the framework's
+  `PresetBrowser`: Preset Type, the five views from the ⚙ menu (kept per kind as `presetManager.<kind>` in `ui.ron`),
+  Shift/Cmd multi-select kept by the dialog over the browser's single selection, drag to reorder, Done, Load…, Save
+  Set…, Rename…, Delete, Reset {kind}… and Replace {kind}… (both confirmed). Agents drive it with `ui.dialog.set` of
+  `kind`, `view`, `selected` and `press`.
+- File › Open and drag-and-drop now take `.shc`, `.csh` and Photoshop's adjustment preset files too (through the
+  manager's `load`).
+
+| Upstream file | Hook |
+|---|---|
+| `crates/engine/src/cmd/edit_menu_cmds.rs` | `pub mod preset_manager;`; `preset_manager` imported from it; the command's params string |
+| `crates/engine/src/cmd/edit_menu_cmds/presets.rs` | upstream's `PRESET_KINDS`, `preset_names`, `preset_index` and `preset_manager` removed (a comment points to `preset_manager.rs`); `str_or` no longer imported |
+| `crates/engine/src/cmd/edit_menu_cmds/tests.rs` | `define_custom_shape_and_preset_manager`: the custom shapes are the last of the Shapes library, the move names its group, the refused kind is an unknown one |
+| `crates/engine/src/presets/gradients.rs` | `pub mod export_grd;`; `export_grd::spec()` first in `specs()` |
+| `crates/engine/src/cmd/pattern_cmds.rs` | `pattern.export`: without `path` the bytes come back as `data` (and its params string) |
+| `crates/automation/src/workspace.rs` | `edit.presets.presetManager` and `gradient.presets.exportGrd` with a `path` in `command_uses_ambient_path` |
+| `crates/ui-egui/src/dialogs.rs` | `pub mod preset_manager_ui;`; `preset_manager_ui::take` in `TAKERS`; `preset_manager_ui::answer_prompt` in `PROMPTS` |
+| `crates/ui-egui/src/prefs/prefs_ui/dialogs.rs` | the menu item opens `preset_manager_ui::open` |
+| `crates/ui-egui/src/prefs/prefs_ui/presets.rs` | `open_manager` kept, `#[cfg_attr(not(test), allow(dead_code))]` |
+| `crates/ui-egui/src/preset_files_ui.rs` | `PRESET_EXTS` gains `shc csh alv acv ahu cha asv blw`; `open`'s last arm asks `preset_manager_ui::open_file` |
+
 ## Keeping the rebrand: `scripts/pigment-rebrand.py`
 
 Most of the rebrand is mechanical and done by [`scripts/pigment-rebrand.py`](../scripts/pigment-rebrand.py):
