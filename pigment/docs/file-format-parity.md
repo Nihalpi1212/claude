@@ -32,7 +32,7 @@ XL are missing (gap G10). Remaining: 300–500 h including PSD fidelity.
 | GIF | R/W | yes | yes | File › Open keeps the first frame; New Video Layer from File and Video Frames to Layers take every frame, with the timeline rate from the delays (#572). Per-frame delays and keeping the frames in `.pcraft` are not done |
 | BMP | R/W | yes | yes | 8-bit; palette BMPs open in Indexed Color mode and Indexed Color documents save as palette BMPs (no transparency) |
 | WebP | R/W | yes | yes | Lossless and our own lossy VP8 encoder; ICC/EXIF/XMP (the CLI's `--metadata none` leaves the document XMP out, #9466); Save keeps an opened file lossy (at its quality) or lossless (#2399); Save for Web (Legacy) writes it too, lossy at its Quality or lossless, a format Photoshop's legacy dialog lacks (#6391). File › Open keeps an animation's first frame; New Video Layer from File and Video Frames to Layers take every frame, with the timeline rate from the durations (#1198) |
-| AVIF | R/W | no (#463) | optional feature, off by default | |
+| AVIF | R/W | yes in Pigment (craft-image-codecs' `avif-decode`, craft-video's pure-Rust AV1 decoder, through photocraft-io's default `avif` feature; desktop and CLI, not the web build); upstream: no (#463) | optional feature, off by default | Pigment: 8/10/12-bit (10 and 12-bit open as 16-bit, PQ/HLG as 32-bit float), 4:2:0/4:2:2/4:4:4/monochrome, alpha, grids, `irot`/`imir`/`clap`, ICC and `nclx`, Exif and XMP; not image sequences or layered (`lsel`/`a1lx`) files |
 | JPEG XL | R/W | inside DNG only | no | |
 | HEIF/HEIC | R/W(HEIF) | yes (pure-Rust heic-rs, `heif` feature, on in releases) | no | 8/16-bit |
 | OpenEXR | R/W | yes | yes | f16/f32; deep EXR and Cryptomatte readers (`corpus/exr`) |
