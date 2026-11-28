@@ -83,7 +83,31 @@ CI on arrival: the newest finished Pigment CI run (46141006052 on `7594595`) was
 
 ## Checks run
 
-(filled in below)
+All with nextest `--profile ci`, `TMPDIR=/dev/shm/pt` and CI's font and translation folders, one cargo process at a
+time, `-j 4` (`-j 3` for the interface suite), `CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_STRIP=symbols`.
+
+- photocraft-io (`--features heif --lib --bins --tests`), whole suite before the fixes: 1470 passed, 14 skipped;
+  after them, the IIM and File Info tests: 13 passed.
+- photocraft-engine (`--features photocraft-io/heif --lib --bins --tests`), whole suite before the fixes: 5043 passed,
+  26 skipped (the container-only `cancelling_the_open_stops_the_smart_filters` passed this time); after them, the File
+  Info, LUT and colour-lookup tests: 45 passed, and after the ICC fix 25 passed.
+- Panic hunt (`--run-ignored only -E 'binary_id(photocraft-engine::panic_hunt)'`) after the File Info change: 1 passed.
+- photocraft-ui-egui, whole suite after the fixes (drop_caches first): 3834 passed, 6 skipped.
+- `cargo fmt --all -- --check`, `cargo clippy --locked --features heif -p photocraft-io -p photocraft-engine
+  -p photocraft-ui-egui --all-targets -- -D warnings`, `python3 scripts/pigment-rebrand.py --check`: clean.
+- Not run: xtask layers/panel-commands/scorecard (no crate, preference or panel command added), the tablet and app
+  crates (not touched), cross-target checks.
+- CI: 46147699680 on `748ad9f` (the F1 and F2 fixes on top of all of group FU) finished green; the runs on `2d39c93`
+  and `8854e4e` were in progress when I finished.
+
+## Commits
+
+- `2247dadc` File Info (F1), engine and io: edited structures keep their other fields and items; stale IIM digest dropped.
+- `748ad9f3` Color Lookup Tables (F2), engine: one format with lowercase off takes the uppercase extension.
+- `2d39c937` Info panel (U1), interface: a linear composite reads through the sRGB curve.
+- `8854e4e9` Color Lookup Tables (F2), engine: the DeviceLink ICC carries its `pseq` tag.
+
+No upstream file was touched by these fixes (all four are in Pigment files), so FORK.md needed no new hook row.
 
 ## For the next group
 
