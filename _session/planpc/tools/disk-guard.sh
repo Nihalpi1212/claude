@@ -1,7 +1,7 @@
 #!/bin/bash
 # Keep free disk above a floor while the engineers build.
-# When free space falls below FLOOR GB (default 7), wait for a gap between builds (20 s with no cargo,
-# cargo-nextest or rustc) and run clean-target.py on builds untouched for HOURS hours (default 2).
+# When free space falls below FLOOR GB (default 7), wait for a gap between builds (20 s with no cargo
+# or rustc process) and run clean-target.py on builds untouched for HOURS hours (default 2).
 # If no gap comes and free space falls below HARD GB (default 4), clean at once with 1 hour: a build
 # may then fail once on a vanished artifact, which is better than a full disk.
 # After a clean it waits 10 minutes (5 below the hard floor) before cleaning again.
@@ -13,7 +13,9 @@ log="$here/disk-guard.log"
 deps=/home/user/claude/pigment/target/debug/deps
 free_mb() { df -BM --output=avail /home/user | tail -1 | tr -dc 0-9; }
 free_gb() { awk -v m="$(free_mb)" 'BEGIN{printf "%.1f", m/1024}'; }
-busy() { pgrep -f '(^|/)cargo( |$)|cargo-nextest|(^|/)rustc( |$)' >/dev/null; }
+# Busy means compiling: a cargo or rustc process. A nextest run that has finished building (only cargo-nextest
+# and test binaries left) does not count, since the tests no longer read the build's older artifacts.
+busy() { pgrep -f '(^|/)cargo( |$)|(^|/)rustc( |$)' >/dev/null; }
 stamp() { date -u +%m-%dT%H:%M:%S; }
 clean() { # $1 = hours, $2 = why
   local before after out

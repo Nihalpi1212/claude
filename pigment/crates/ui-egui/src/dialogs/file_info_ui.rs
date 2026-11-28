@@ -103,8 +103,11 @@ fn location() -> Vec<(&'static str, &'static str)> {
     ]
 }
 
+/// A structure key, its section title and its fields (key, label).
+type Structure = (&'static str, &'static str, Vec<(&'static str, &'static str)>);
+
 /// The section title of each structure key, and its fields' labels.
-fn structures() -> [(&'static str, &'static str, Vec<(&'static str, &'static str)>); 9] {
+fn structures() -> [Structure; 9] {
     let name_id = |name: &'static str, id: &'static str| vec![(name, tl!("Name")), (id, tl!("ID"))];
     [
         (
@@ -126,7 +129,13 @@ fn structures() -> [(&'static str, &'static str, Vec<(&'static str, &'static str
         (
             "licensor",
             tl!("Licensor"),
-            vec![("LicensorName", tl!("Name")), ("LicensorID", tl!("ID")), ("LicensorTelephone1", tl!("Phone(s)")), ("LicensorEmail", tl!("Email(s)")), ("LicensorURL", tl!("Website(s)"))],
+            vec![
+                ("LicensorName", tl!("Name")),
+                ("LicensorID", tl!("ID")),
+                ("LicensorTelephone1", tl!("Phone(s)")),
+                ("LicensorEmail", tl!("Email(s)")),
+                ("LicensorURL", tl!("Website(s)")),
+            ],
         ),
         ("imageSupplier", tl!("Image Supplier"), name_id("ImageSupplierName", "ImageSupplierID")),
         ("imageCreator", tl!("Image Creator"), name_id("ImageCreatorName", "ImageCreatorID")),
@@ -175,9 +184,10 @@ fn tab_row(shown: Vec<(&'static str, &'static str)>) -> Param {
         }
         let current = fields.text(TAB).and_then(|t| shown.iter().position(|(id, _)| *id == t)).unwrap_or(0);
         let source = Tabs(shown.clone());
-        let strip = TabStrip::new(Label::from(tl!("File Info"))).kind(TabKind::Text).shown(current).show_items(ui, &source, &mut |key, _| {
-            Tab::new(Label::from(shown.get(*key).map_or("", |(_, label)| *label)))
-        });
+        let strip = TabStrip::new(Label::from(tl!("File Info")))
+            .kind(TabKind::Text)
+            .shown(current)
+            .show_items(ui, &source, &mut |key, _| Tab::new(Label::from(shown.get(*key).map_or("", |(_, label)| *label))));
         for event in &strip.response.events {
             if let CollectionEvent::Selection(SelectionChange::Set(keys)) = event
                 && let Some((id, _)) = keys.last().and_then(|k| shown.get(*k))
@@ -236,10 +246,13 @@ pub(crate) fn form(app: &mut PhotocraftApp) -> Option<(Vec<Param>, DialogFields)
     let has = |key: &str| info[key].as_object().is_some_and(|m| !m.is_empty()) || info[key].as_str().is_some_and(|s| !s.is_empty());
     let shown: Vec<(&'static str, &'static str)> = tabs()
         .into_iter()
-        .filter(|(id, _, optional)| !optional || has(match *id {
-            "audioVideo" => "dynamicMedia",
-            other => other,
-        }))
+        .filter(|(id, _, optional)| {
+            !optional
+                || has(match *id {
+                    "audioVideo" => "dynamicMedia",
+                    other => other,
+                })
+        })
         .map(|(id, label, _)| (id, label))
         .collect();
     let mut rows = vec![tab_row(shown)];
@@ -298,7 +311,10 @@ pub(crate) fn form(app: &mut PhotocraftApp) -> Option<(Vec<Param>, DialogFields)
                     rows.push(on(Param::new(key, *label, ParamKind::text("")), tab));
                 }
                 if info[field.key].as_array().is_some_and(|a| a.len() > 1) {
-                    let more = crate::i18n::fmt(tl!("The file lists {n} entries; the first one is shown here."), &[("n", &info[field.key].as_array().map_or(0, Vec::len).to_string())]);
+                    let more = crate::i18n::fmt(
+                        tl!("The file lists {n} entries; the first one is shown here."),
+                        &[("n", &info[field.key].as_array().map_or(0, Vec::len).to_string())],
+                    );
                     rows.push(on(Param::read_only_text(format!("{}/more", field.key), "", more).full_width(), tab));
                 }
             }

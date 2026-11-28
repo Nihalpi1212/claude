@@ -52,14 +52,19 @@ fn the_origin_tab_edits_the_headline_in_one_history_step() {
     let before = past(&app);
     let id = open(&mut app, &ctx);
     assert_eq!(fields(&app, id)[TAB], "basic", "File Info opens on Basic");
-    set(&mut app, &ctx, id, TAB, json!("origin"));
-    frame(&mut app, &ctx);
-    assert_eq!(fields(&app, id)[TAB], "origin");
-    set(&mut app, &ctx, id, "headline", json!("Starry Night"));
     set(&mut app, &ctx, id, "rating", json!(3));
-    set(&mut app, &ctx, id, "urgency", json!("2"));
-    set(&mut app, &ctx, id, "creatorContactInfo/CiAdrCity", json!("Arles"));
-    set(&mut app, &ctx, id, "personInImage", json!("Ann; Smith, Bo"));
+    // A row of another tab takes no input until its tab is shown.
+    assert!(app.framework.dialogs.set_json_field(&ctx, id, "headline", json!("x")).is_err());
+    let on = |app: &mut PhotocraftApp, tab: &str, key: &str, value: Value| {
+        set(app, &ctx, id, TAB, json!(tab));
+        frame(app, &ctx);
+        assert_eq!(fields(app, id)[TAB], tab);
+        set(app, &ctx, id, key, value);
+    };
+    on(&mut app, "origin", "headline", json!("Starry Night"));
+    on(&mut app, "origin", "urgency", json!("2"));
+    on(&mut app, "iptc", "creatorContactInfo/CiAdrCity", json!("Arles"));
+    on(&mut app, "iptcExt", "personInImage", json!("Ann; Smith, Bo"));
     crate::dialogs::confirm(&mut app, &ctx, id).unwrap();
     assert_eq!(past(&app), before + 1, "one step");
     assert_eq!(app.session.active().unwrap().history.undo_label(), Some("File Info"));
@@ -72,7 +77,10 @@ fn the_origin_tab_edits_the_headline_in_one_history_step() {
     // The form reopens with what was written.
     let id = open(&mut app, &ctx);
     let f = fields(&app, id);
-    assert_eq!((f["headline"].as_str(), f["creatorContactInfo/CiAdrCity"].as_str(), f["personInImage"].as_str()), (Some("Starry Night"), Some("Arles"), Some("Ann; Smith, Bo")));
+    assert_eq!(
+        (f["headline"].as_str(), f["creatorContactInfo/CiAdrCity"].as_str(), f["personInImage"].as_str()),
+        (Some("Starry Night"), Some("Arles"), Some("Ann; Smith, Bo"))
+    );
     assert_eq!(f["rating"], 3);
     assert_eq!(f[TAB], "basic", "the tab is not remembered");
 }
@@ -96,6 +104,8 @@ fn ok_on_an_unchanged_form_leaves_the_packet_byte_for_byte() {
     assert_eq!(info["locationShown"], json!([{"City": "Arles"}, {"City": "Paris"}]));
     // Editing the first location keeps the second.
     let id = open(&mut app, &ctx);
+    set(&mut app, &ctx, id, TAB, json!("iptcExt"));
+    frame(&mut app, &ctx);
     set(&mut app, &ctx, id, "locationShown/City", json!("Nîmes"));
     crate::dialogs::confirm(&mut app, &ctx, id).unwrap();
     assert_eq!(app.run(COMMAND, json!({})).unwrap()["locationShown"], json!([{"City": "Nîmes"}, {"City": "Paris"}]));

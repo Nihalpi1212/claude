@@ -1144,6 +1144,22 @@ Tests: `file_cmds/info_more_tests.rs`, `crates/io/tests/it/file_info_iim.rs`, th
 | `crates/io/src/flat.rs` | `iptc_iim::on_import(..)` beside the two guide reads |
 | `crates/io/tests/it/main.rs` | `mod file_info_iim;` |
 
+The dialog (`crates/ui-egui/src/dialogs/file_info_ui.rs`) stays upstream's hosted parameter form, so upstream's tests
+that drive it by key still hold: a first row draws a tab strip (Basic, Camera Data, Origin, IPTC, IPTC Extension, GPS
+Data, Raw Data, and Audio/Video Data, DICOM and Photoshop when the file has them) and keeps the tab in the `tab`
+field; every other row is `visible_when` its tab. Basic has upstream's eight rows (same keys), the Rating stars
+(`craft::ui::choice::Rating`; a rejected −1 stays unless a star is clicked) and the read-outs; Camera Data keeps
+upstream's `camera/<label>` rows and adds Pigment's. Structures are flat rows with slashed keys (a list of structures
+shows its first item), lists are one field split on `;`, Raw Data has Copy. `file_info_ui::nest` drops the tab and
+read-only rows and folds the slashed keys: an arm of the Pigment `match` in `dialogs/filter_dialog/pigment.rs`
+`command_params_of`, so upstream's `filter_dialog.rs` needs no new line. Tests: `dialogs/file_info_ui_tests.rs`.
+
+| Upstream file | Hook |
+|---|---|
+| `crates/ui-egui/src/menus/view_cmds/dialogs.rs` | `file_info_form`'s body is `crate::dialogs::file_info_ui::form(app)` |
+| `crates/ui-egui/src/dialogs.rs` | `pub(crate) mod file_info_ui;` |
+| `docs/parity/README.md`, `docs/user/guides/open-and-save-files.md` | the four File Info rows; a File Info section in the guide |
+
 ## Keeping the rebrand: `scripts/pigment-rebrand.py`
 
 Most of the rebrand is mechanical and done by [`scripts/pigment-rebrand.py`](../scripts/pigment-rebrand.py):
