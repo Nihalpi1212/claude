@@ -48,7 +48,7 @@ fn gif_is_offered_after_jpg_with_transparency_only() {
 fn choosing_gif_in_the_dialog_hides_quality() {
     let services =
         crate::Services { export: Some(Box::new(|_, _, _| Ok((Vec::new(), Vec::new())))), write: Some(Box::new(|_, _| Ok(()))), ..Default::default() };
-    let mut app = Box::new(PhotocraftApp::new(photocraft_engine::Session::new(), services));
+    let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), services);
     app.run("file.new", json!({"width": 20, "height": 10})).unwrap();
     let mut h = Harness::builder()
         .with_size(egui::vec2(900.0, 700.0))
@@ -65,7 +65,7 @@ fn choosing_gif_in_the_dialog_hides_quality() {
         h.run_steps(3);
         let options = h.state().framework.dialogs.get::<HostedExportAs>().expect("Export As is open").options().clone();
         assert_eq!(options.format, label.to_ascii_lowercase());
-        assert_eq!(h.query_by_label("Quality").is_some(), quality, "{label}: Quality shown");
+        assert_eq!(h.query_all_by_label("Quality").next().is_some(), quality, "{label}: Quality shown");
     }
 }
 
