@@ -49,11 +49,15 @@ pub mod export_estimate;
 #[cfg(any(unix, windows))]
 mod exr_native;
 pub mod exr_parts;
+/// Pigment: File Info's XMP writer (F1).
+pub mod file_info_xmp;
 mod flat;
 pub mod gradient_bake;
 // Pigment: noise gradients
 pub mod grd_noise;
 pub mod guides_map;
+/// Pigment: IPTC-IIM, resource 1028 and JPEG APP13 (F1).
+pub mod iptc_iim;
 pub mod legacy_pigment;
 mod png_steps;
 pub use gradient_bake::{Method as GradientMethod, bake as bake_gradient, bake_smooth_opacity as bake_gradient_smooth_opacity};
@@ -1310,7 +1314,8 @@ fn export_stages_with_renderer(
         }
         return Ok(res.into());
     }
-    flat::export_flat_with_renderer(doc, format, opts, ctl, renderer).map(EncodedExport::from)
+    // Pigment: a JPEG with its metadata carries the document's IPTC-IIM in APP13 (F1).
+    flat::export_flat_with_renderer(doc, format, opts, ctl, renderer).map(|r| iptc_iim::with_app13(doc, format, opts, r)).map(EncodedExport::from)
 }
 
 /// The flattened document at its canvas size, in 8-bit RGBA like a `.pcraft` file's two previews,
