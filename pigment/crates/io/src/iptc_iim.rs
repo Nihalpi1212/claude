@@ -412,6 +412,7 @@ mod tests {
             let _ = seed_xmp(&iim[..n]);
         }
         let jpeg = [0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10];
-        assert_eq!(insert_app13(&jpeg, &iim)[..6], jpeg);
+        // A truncated APP0: the segment goes right after SOI, and nothing panics.
+        assert_eq!(insert_app13(&jpeg, &iim)[..4], [0xff, 0xd8, 0xff, 0xed]);
     }
 }

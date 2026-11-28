@@ -27,6 +27,8 @@ mod effects_multi;
 mod exif_resolution;
 mod export_progress;
 mod exr_part_profile;
+// Pigment: File Info's IPTC-IIM (F1)
+mod file_info_iim;
 mod flat;
 mod flat_export_renderer;
 mod gif_frames;

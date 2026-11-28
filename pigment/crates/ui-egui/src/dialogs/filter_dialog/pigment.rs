@@ -281,6 +281,8 @@ pub(super) fn command_params_of(command: &str, map: &mut Map<String, Value>) {
         MATCH_COLOR => match_color_params(map),
         // Color Lookup Tables: Quality and the format check boxes (F2).
         crate::dialogs::lut_export_ui::COMMAND => crate::dialogs::lut_export_ui::fold(map),
+        // File Info: the tab and read-only rows left out, the structures' rows folded (F1).
+        crate::dialogs::file_info_ui::COMMAND => crate::dialogs::file_info_ui::nest(map),
         _ => {}
     }
 }

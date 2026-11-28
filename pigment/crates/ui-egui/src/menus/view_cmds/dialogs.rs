@@ -424,47 +424,8 @@ pub(super) fn params_for(app: &mut PhotocraftApp, id: &str) -> Option<(Vec<Param
 
 /// File › File Info…: the document's metadata in Photoshop's order and labels, then its read-only Camera Data.
 fn file_info_form(app: &mut PhotocraftApp) -> Option<(Vec<Param>, DialogFields)> {
-    let info = app.session.execute("file.fileInfo", json!({})).ok()?;
-    let text = |key: &str| info[key].as_str().unwrap_or_default().to_owned();
-    let keywords = info["keywords"].as_array().map(|a| a.iter().filter_map(Value::as_str).collect::<Vec<_>>().join("; ")).unwrap_or_default();
-    let mut rows = vec![
-        Param::new("title", tl!("Document Title"), ParamKind::text("")),
-        Param::new("author", tl!("Author"), ParamKind::text("")),
-        Param::new("authorTitle", tl!("Author Title"), ParamKind::text("")),
-        Param::new("description", tl!("Description"), ParamKind::text("")).multiline(3),
-        Param::new("keywords", tl!("Keywords"), ParamKind::text("")).multiline(3),
-        choice(
-            "copyrightStatus",
-            tl!("Copyright Status"),
-            opts(&[("unknown", tl!("Unknown")), ("copyrighted", tl!("Copyrighted")), ("publicDomain", tl!("Public Domain"))]),
-            "unknown",
-        ),
-        Param::new("copyright", tl!("Copyright Notice"), ParamKind::text("")).multiline(3),
-        Param::new("copyrightUrl", tl!("Copyright Info URL"), ParamKind::text("")),
-    ];
-    let camera: Vec<(&'static str, String)> = photocraft_engine::file_cmds::CAMERA_FIELDS
-        .iter()
-        .filter_map(|(key, label)| info["camera"].get(*key).and_then(Value::as_str).map(|v| (*label, v.to_owned())))
-        .collect();
-    if !camera.is_empty() {
-        rows.push(Param::section(tl!("Camera Data")));
-        let lang = crate::i18n::current();
-        for (label, value) in camera {
-            rows.push(Param::read_only_text(format!("camera/{label}"), crate::i18n::tr_ctx(lang, "cameraData", label), value));
-        }
-    }
-    let status = info["copyrightStatus"].as_str().unwrap_or("unknown").to_owned();
-    let fields = DialogFields::from_pairs([
-        ("title", text("title")),
-        ("author", text("author")),
-        ("authorTitle", text("authorTitle")),
-        ("description", text("description")),
-        ("keywords", keywords),
-        ("copyrightStatus", status),
-        ("copyright", text("copyright")),
-        ("copyrightUrl", text("copyrightUrl")),
-    ]);
-    Some((rows, fields))
+    // Pigment: Photoshop's File Info tabs, upstream's rows and keys among them (F1).
+    crate::dialogs::file_info_ui::form(app)
 }
 
 /// File › Automate › Batch…: the selected action and its set, and where the files come from and go.

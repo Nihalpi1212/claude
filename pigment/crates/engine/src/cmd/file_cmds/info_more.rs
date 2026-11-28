@@ -71,14 +71,8 @@ const SUPPLIER: &[Sub] = &[("ImageSupplierName", T), ("ImageSupplierID", T)];
 const CREATOR: &[Sub] = &[("ImageCreatorName", T), ("ImageCreatorID", T)];
 const OWNER: &[Sub] = &[("CopyrightOwnerName", T), ("CopyrightOwnerID", T)];
 const REGISTRY: &[Sub] = &[("RegItemId", T), ("RegOrgId", T)];
-const ARTWORK: &[Sub] = &[
-    ("AOTitle", SubKind::Alt),
-    ("AOCreator", SubKind::Seq),
-    ("AODateCreated", T),
-    ("AOSource", T),
-    ("AOSourceInvNo", T),
-    ("AOCopyrightNotice", T),
-];
+const ARTWORK: &[Sub] =
+    &[("AOTitle", SubKind::Alt), ("AOCreator", SubKind::Seq), ("AODateCreated", T), ("AOSource", T), ("AOSourceInvNo", T), ("AOCopyrightNotice", T)];
 
 macro_rules! f {
     ($key:literal, $prop:literal, $kind:expr, $tab:literal) => {
@@ -142,7 +136,8 @@ pub fn owns(key: &str) -> bool {
 }
 
 /// File Info's read-only Basic read-outs: (result key, XMP property).
-const READ_OUTS: [(&str, &str); 4] = [("created", "xmp:CreateDate"), ("modified", "xmp:ModifyDate"), ("application", "xmp:CreatorTool"), ("format", "dc:format")];
+const READ_OUTS: [(&str, &str); 4] =
+    [("created", "xmp:CreateDate"), ("modified", "xmp:ModifyDate"), ("application", "xmp:CreatorTool"), ("format", "dc:format")];
 
 /// Camera Data beyond upstream's [`super::CAMERA_FIELDS`], as (result key, English label), shown after them.
 pub const CAMERA_MORE: [(&str, &str); 11] = [
@@ -210,8 +205,15 @@ fn read_value(field: &Field, v: Option<&XmpValue>) -> Value {
         (Kind::Struct(subs), Some(v)) => struct_json(v, ns, subs),
         (Kind::Struct(_), None) => json!({}),
         (Kind::StructBag(subs) | Kind::StructSeq(subs), v) => Value::Array(
-            v.map(|v| v.items().iter().filter(|i| matches!(i, XmpValue::Struct(_))).map(|i| struct_json(i, ns, subs)).filter(|o| o.as_object().is_some_and(|m| !m.is_empty())).collect())
-                .unwrap_or_default(),
+            v.map(|v| {
+                v.items()
+                    .iter()
+                    .filter(|i| matches!(i, XmpValue::Struct(_)))
+                    .map(|i| struct_json(i, ns, subs))
+                    .filter(|o| o.as_object().is_some_and(|m| !m.is_empty()))
+                    .collect()
+            })
+            .unwrap_or_default(),
         ),
     }
 }
@@ -297,7 +299,9 @@ fn normalize(field: &Field, v: &Value, cur: &Value) -> Result<Value> {
                 Value::Array(items)
             }
             Value::Null => json!([]),
-            Value::Array(a) => Value::Array(a.iter().map(|i| norm_struct(key, subs, i)).filter(|r| r.as_ref().map_or(true, |o| !empty_object(o))).collect::<Result<_>>()?),
+            Value::Array(a) => {
+                Value::Array(a.iter().map(|i| norm_struct(key, subs, i)).filter(|r| r.as_ref().map_or(true, |o| !empty_object(o))).collect::<Result<_>>()?)
+            }
             _ => return Err(bad(format!("`{key}` must be a list of objects"))),
         },
     })
@@ -429,7 +433,8 @@ fn camera_more(exif: Option<&[u8]>, x: &XmpData) -> serde_json::Map<String, Valu
     let rows = exif.map(|e| craft_metadata::file_tag_rows(craft_metadata::strip_exif_header(e))).unwrap_or_default();
     let xt = |p: &str| x.values.get(p).and_then(XmpValue::text).filter(|t| !t.is_empty()).map(str::to_string);
     let code = |v: Option<u16>, p: &str| v.or_else(|| xt(p).and_then(|t| t.parse().ok()));
-    let program = code(e.exposure_program, "exif:ExposureProgram").and_then(|c| Metadata { exposure_program: Some(c), ..Default::default() }.exposure_program_name());
+    let program =
+        code(e.exposure_program, "exif:ExposureProgram").and_then(|c| Metadata { exposure_program: Some(c), ..Default::default() }.exposure_program_name());
     let metering = code(e.metering_mode, "exif:MeteringMode").and_then(|c| Metadata { metering_mode: Some(c), ..Default::default() }.metering_name());
     let flash = e.flash.map(|f| flash_text(f.raw)).or_else(|| {
         let fired = x.properties.get("exif:Flash/exif:Fired")?.first()?.trim().eq_ignore_ascii_case("true");
@@ -489,11 +494,13 @@ fn gps(exif: Option<&[u8]>, x: &XmpData) -> serde_json::Map<String, Value> {
         (Some(d), Some(t)) => Some(format!("{d} {t} UTC")),
         (d, t) => d.or(t).or_else(|| xt("exif:GPSTimeStamp")),
     };
-    let with_ref = |value: u16, reference: u16| row(value).map(|v| match row(reference).as_deref() {
-        Some("T") => format!("{v} (true north)"),
-        Some("M") => format!("{v} (magnetic north)"),
-        _ => v,
-    });
+    let with_ref = |value: u16, reference: u16| {
+        row(value).map(|v| match row(reference).as_deref() {
+            Some("T") => format!("{v} (true north)"),
+            Some("M") => format!("{v} (magnetic north)"),
+            _ => v,
+        })
+    };
     let values = [
         pos.map(|p| degrees(p.0, 'N', 'S')),
         pos.map(|p| degrees(p.1, 'E', 'W')),

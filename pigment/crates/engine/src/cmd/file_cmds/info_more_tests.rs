@@ -85,7 +85,7 @@ fn every_field_reads_back_as_set_and_is_one_history_step() {
     let all = every_field();
     s.execute("file.fileInfo", all.clone()).unwrap();
     assert_eq!(past(&s), before + 1, "one step");
-    assert_eq!(s.active().unwrap().history.undo_label().as_deref(), Some("File Info"));
+    assert_eq!(s.active().unwrap().history.undo_label(), Some("File Info"));
     let read = info(&mut s);
     for (key, want) in all.as_object().unwrap() {
         assert_eq!(&read[key], want, "{key}");
@@ -130,14 +130,15 @@ fn unknown_properties_survive_and_unchanged_fields_leave_the_packet_alone() {
     assert_eq!(parsed.values["crs:Exposure2012"].text(), Some("+0.50"), "{xmp}");
     assert_eq!(parsed.values["photoshop:Headline"].text(), Some("New"));
     assert_eq!(parsed.values["photoshop:City"].text(), Some("Arles"));
-    assert_eq!(xmp.matches("photoshop:Headline").count(), 1, "replaced, not duplicated: {xmp}");
+    assert_eq!(xmp.matches("<photoshop:Headline>").count(), 1, "replaced, not duplicated: {xmp}");
+    assert!(!xmp.contains("photoshop:Headline=\""), "the attribute form is gone: {xmp}");
     // Sending the same values again changes nothing in the packet.
     let all = info(&mut s);
     s.execute("file.fileInfo", all).unwrap();
     assert_eq!(doc_xmp(&s), xmp);
     // Clearing a field removes it.
     s.execute("file.fileInfo", json!({"city": ""})).unwrap();
-    assert!(craft_metadata::parse_xmp(&doc_xmp(&s)).unwrap().values.get("photoshop:City").is_none());
+    assert!(!craft_metadata::parse_xmp(&doc_xmp(&s)).unwrap().values.contains_key("photoshop:City"));
     // Upstream's keys still work beside Pigment's in one call.
     s.execute("file.fileInfo", json!({"title": "T", "credit": "C"})).unwrap();
     let r = info(&mut s);
@@ -375,7 +376,8 @@ fn file_info_writes_iim_that_parse_iptc_reads_back_in_utf8() {
     let iim = iim_of(&s).expect("resource 1028");
     let m = craft_metadata::parse_iptc(&iim);
     assert_eq!(m.title.as_deref(), Some("Nuit étoilée"));
-    assert_eq!(m.artist.as_deref(), Some("Vincent"));
+    // craft-metadata keeps the last By-line of several.
+    assert_eq!(m.artist.as_deref(), Some("Théo"));
     assert_eq!(m.keywords, ["étoiles", "nuit"]);
     assert_eq!(m.copyright.as_deref(), Some("© MoMA"));
     assert_eq!(m.caption.as_deref(), Some("Huile sur toile"));
