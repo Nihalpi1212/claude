@@ -38,6 +38,8 @@ craft-xml = { workspace = true }
 craft-psd = { workspace = true }
 photocraft-format = { workspace = true }
 photocraft-plugins = { workspace = true }
+# Pigment: File Info's tabs read and merge XMP and read EXIF (cmd/file_cmds/info_more.rs).
+craft-metadata = { workspace = true }
 base64 = "0.22"
 blake3 = { version = "1.8", default-features = false, features = ["pure"] }
 photocraft-codecs = { workspace = true }

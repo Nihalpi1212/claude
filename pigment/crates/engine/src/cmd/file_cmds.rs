@@ -23,6 +23,8 @@ use crate::{EngineError, Result, Session};
 mod batch_run;
 mod export;
 mod info;
+// Pigment: File Info's other tabs (F1)
+pub mod info_more;
 // Pigment: Color Lookup Tables in .3dl, .csp and ICC (F2)
 mod lut_writers;
 mod open;
@@ -360,7 +362,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "File Info…",
             &["File"],
             Some("Cmd+Alt+Shift+I"),
-            r##"{"title":str?,"author":str?,"authorTitle":str?,"description":str?,"keywords":[str]|"a; b"?,"copyright":str?,"copyrightStatus":"unknown|copyrighted|publicDomain"?,"copyrightUrl":str?} (no keys: read; the result also has read-only "camera":{"make","model","dateTaken","exposure","fNumber","iso","focalLength","focalLength35mm","lens"}, present keys only)"##,
+            r##"{"title":str?,"author":str?,"authorTitle":str?,"description":str?,"keywords":[str]|"a; b"?,"copyright":str?,"copyrightStatus":"unknown|copyrighted|publicDomain"?,"copyrightUrl":str?,"rating":-1..5?,"descriptionWriter":str?,"dateCreated":str?,"city":str?,"state":str?,"country":str?,"credit":str?,"source":str?,"headline":str?,"instructions":str?,"transmissionReference":str?,"urgency":0..8?,"creatorContactInfo":{"CiAdrExtadr","CiAdrCity","CiAdrRegion","CiAdrPcode","CiAdrCtry","CiTelWork","CiEmailWork","CiUrlWork"}?,"subjectCode":[str]?,"intellectualGenre":str?,"scene":[str]?,"sublocation":str?,"countryCode":str?,"usageTerms":str?,"altText":str?,"extDescrAccessibility":str?,"personInImage":[str]?,"locationShown":[{"Sublocation","City","ProvinceState","CountryName","CountryCode","WorldRegion"}]|{..}?,"locationCreated":[{..}]|{..}?,"organisationInImageName":[str]?,"organisationInImageCode":[str]?,"event":str?,"modelReleaseStatus":str?,"modelReleaseId":[str]?,"propertyReleaseStatus":str?,"propertyReleaseId":[str]?,"modelAge":[str]?,"additionalModelInfo":str?,"licensor":[{"LicensorName","LicensorID","LicensorTelephone1","LicensorEmail","LicensorURL"}]|{..}?,"imageSupplier":[{"ImageSupplierName","ImageSupplierID"}]|{..}?,"imageCreator":[{"ImageCreatorName","ImageCreatorID"}]|{..}?,"copyrightOwner":[{"CopyrightOwnerName","CopyrightOwnerID"}]|{..}?,"digitalSourceType":str?,"maxAvailWidth":int?,"maxAvailHeight":int?,"registryId":[{"RegItemId","RegOrgId"}]|{..}?,"artworkOrObject":[{"AOTitle","AOCreator","AODateCreated","AOSource","AOSourceInvNo","AOCopyrightNotice"}]|{..}?,"imageSupplierImageId":str?,"minorModelAgeDisclosure":str?} (no keys: read; a lone object edits a list's first item; lists of text also take "a; b"; the result also has read-only "camera":{"make","model","dateTaken","exposure","fNumber","iso","focalLength","focalLength35mm","lens","program","metering","flash","exposureBias","whiteBalance","lensMake","serialNumber","software","dateTime","pixelDimensions","orientation"}, present keys only, "gps":{"latitude","longitude","altitude","time","direction","speed","mapDatum"}, "created","modified","application","format","raw" (the XMP packet),"history","dynamicMedia":{..},"dicom":{..})"##,
             has_doc,
             file_info
         ),
@@ -462,6 +464,11 @@ mod tests;
 #[cfg(test)]
 #[path = "file_cmds/export_clut_cube_header_tests.rs"]
 mod export_clut_cube_header_tests;
+
+// Pigment: File Info's other tabs and IPTC-IIM (F1).
+#[cfg(test)]
+#[path = "file_cmds/info_more_tests.rs"]
+mod info_more_tests;
 
 #[cfg(test)]
 #[path = "file_cmds/place_job_tests.rs"]

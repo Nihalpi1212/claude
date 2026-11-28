@@ -935,6 +935,8 @@ fn flat_document(
     if let Some(g) = guides.as_ref().and_then(|(res, _)| res.iter().find(|r| r.id == 1032)) {
         crate::psd_import::parse_guides(&g.data, &mut doc);
     }
+    // Pigment: IPTC-IIM (resource 1028) kept, and seeding the XMP of a file without one (F1).
+    crate::iptc_iim::on_import(&mut doc, meta.photoshop_resources.as_deref());
     Ok(ImportResult { document: doc, warnings, source_read_only: false, preview_only: false })
 }
 
@@ -1149,6 +1151,8 @@ fn single_layer_document(
     if let Some(g) = guides.as_ref().and_then(|(res, _)| res.iter().find(|r| r.id == 1032)) {
         crate::psd_import::parse_guides(&g.data, &mut doc);
     }
+    // Pigment: IPTC-IIM (resource 1028) kept, and seeding the XMP of a file without one (F1).
+    crate::iptc_iim::on_import(&mut doc, meta.photoshop_resources.as_deref());
     ImportResult { document: doc, warnings, source_read_only: false, preview_only: false }
 }
 

@@ -593,11 +593,15 @@ pub fn write_file_info(xmp: Option<&str>, info: &Value) -> String {
 
 pub(super) fn file_info(s: &mut Session, p: &Value) -> Result<Value> {
     let keys = ["title", "author", "authorTitle", "description", "keywords", "copyright", "copyrightStatus", "copyrightUrl"];
-    let edits = p.as_object().is_some_and(|m| m.keys().any(|k| keys.contains(&k.as_str())));
+    // Pigment: and the other tabs' keys (F1).
+    let edits = p.as_object().is_some_and(|m| m.keys().any(|k| keys.contains(&k.as_str()) || super::info_more::owns(k)));
     if edits {
         let xmp = s.active().ok_or(EngineError::NoDocument)?.doc.metadata.xmp.clone();
         let new = write_file_info(xmp.as_deref(), p);
+        // Pigment: the other tabs' keys merged in; IPTC-IIM (resource 1028) follows the edit (F1).
+        let new = super::info_more::write(new, p)?;
         s.edit("File Info", |doc, _| {
+            photocraft_io::iptc_iim::sync_resource(&mut doc.metadata.psd_resources, doc.metadata.xmp.as_deref(), Some(&new));
             doc.metadata.xmp = Some(new.into());
             Ok(())
         })?;
@@ -607,5 +611,7 @@ pub(super) fn file_info(s: &mut Session, p: &Value) -> Result<Value> {
     if let Value::Object(m) = &mut info {
         m.insert("camera".into(), camera_data(d.doc.metadata.exif.as_deref().map(Vec::as_slice), d.doc.metadata.xmp.as_deref()));
     }
+    // Pigment: the other tabs and read-outs (F1).
+    super::info_more::read(&mut info, &d.doc);
     Ok(info)
 }

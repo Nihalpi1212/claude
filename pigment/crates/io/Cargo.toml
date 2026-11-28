@@ -57,6 +57,8 @@ craft-xml = { workspace = true }
 craft-zip = { workspace = true }
 # Pigment: Targa variants (src/tga_more.rs).
 craft-tga = { workspace = true }
+# Pigment: File Info's XMP and IPTC-IIM (src/iptc_iim.rs, src/file_info_xmp.rs).
+craft-metadata = { workspace = true }
 thiserror = { workspace = true }
 ttf-parser = "0.25.1"
 serde_json = { workspace = true }

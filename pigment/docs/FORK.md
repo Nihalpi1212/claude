@@ -1115,6 +1115,35 @@ cap, CMYK/Lab refusal, bad params) and `dialogs/lut_export_ui_tests.rs` (rows, f
 | `crates/ui-egui/src/dialogs.rs` | `pub(crate) mod lut_export_ui;` |
 | `docs/parity/README.md`, `docs/user/guides/export-an-image.md` | the Targa, GIF and LUT rows; GIF and Color Lookup Tables in the guide |
 
+### File Info: Rating, Origin, IPTC, IPTC Extension, GPS Data, Raw Data and the fuller Camera Data
+
+Photoshop's File Info tabs beside upstream's Basic, as the JavaScript Pigment had Rating, Credit and Source and its
+17 EXIF tags. Upstream's `file_cmds/info.rs` keeps the eight keys it owns (title, author, authorTitle, description,
+keywords, copyright, copyrightStatus, copyrightUrl) and its own XMP reader and writer, so its fixes stay in one
+place. `crates/engine/src/cmd/file_cmds/info_more.rs` adds the rest of `file.fileInfo`'s keys (`FIELDS`: rating,
+descriptionWriter, the Origin tab, IPTC Core with creator contact info and alt text, IPTC Extension with locations,
+releases, licensing, registry and artwork structures), read with `craft_metadata::parse_xmp_with` and written by
+serializing only the changed keys into a fresh packet (`crates/io/src/file_info_xmp.rs`) merged into the document's
+with `craft_metadata::merge_xmp`, which keeps every other property byte for byte (so an unchanged field leaves the
+packet alone). It also reports read-only `created`, `modified`, `application`, `format`, `gps`, `raw` (the packet),
+`history`, `dynamicMedia` (`xmpDM:`), `dicom`, and eleven more Camera Data keys after upstream's nine
+(`CAMERA_MORE`: exposure program, metering, flash, bias, white balance, lens make, serial number, software, IFD0 date,
+pixel dimensions, orientation). A lone object for a list of structures edits its first item (the dialog shows one).
+IPTC-IIM: `crates/io/src/iptc_iim.rs` maps Photoshop's record-2 datasets to the XMP fields, writes a UTF-8 stream
+(keeping the old stream's unmapped datasets), rewrites resource 1028 inside the "File Info" edit only when a mapped
+field changed (so an unchanged PSD saves byte-identical), keeps a flat file's 1028 on open and seeds the XMP of a
+file that has IIM but no XMP, and puts 1028 into a JPEG export's APP13 when Metadata is All (the encoder writes none).
+Tests: `file_cmds/info_more_tests.rs`, `crates/io/tests/it/file_info_iim.rs`, the unit tests of the two io modules.
+
+| Upstream file | Hook |
+|---|---|
+| `crates/engine/Cargo.toml`, `crates/io/Cargo.toml`, `Cargo.lock` | `craft-metadata` (already a workspace dependency) |
+| `crates/engine/src/cmd/file_cmds.rs` | `pub mod info_more;`, `mod info_more_tests;`, the `file.fileInfo` params string (the new keys appended) |
+| `crates/engine/src/cmd/file_cmds/info.rs` | `file_info`: the `edits` test also asks `info_more::owns`; after upstream's write `info_more::write(new, p)?`; inside the edit `iptc_iim::sync_resource(..)`; after the read `info_more::read(&mut info, &d.doc)` |
+| `crates/io/src/lib.rs` | `pub mod file_info_xmp;`, `pub mod iptc_iim;`; the flat export's result goes through `iptc_iim::with_app13` |
+| `crates/io/src/flat.rs` | `iptc_iim::on_import(..)` beside the two guide reads |
+| `crates/io/tests/it/main.rs` | `mod file_info_iim;` |
+
 ## Keeping the rebrand: `scripts/pigment-rebrand.py`
 
 Most of the rebrand is mechanical and done by [`scripts/pigment-rebrand.py`](../scripts/pigment-rebrand.py):
