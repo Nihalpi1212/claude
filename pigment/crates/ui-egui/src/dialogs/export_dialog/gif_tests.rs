@@ -46,7 +46,8 @@ fn gif_is_offered_after_jpg_with_transparency_only() {
 /// Picking GIF in the Format list hides Quality, which JPG shows.
 #[test]
 fn choosing_gif_in_the_dialog_hides_quality() {
-    let services = crate::Services { export: Some(Box::new(|_, _, _| Ok((Vec::new(), Vec::new())))), write: Some(Box::new(|_, _| Ok(()))), ..Default::default() };
+    let services =
+        crate::Services { export: Some(Box::new(|_, _, _| Ok((Vec::new(), Vec::new())))), write: Some(Box::new(|_, _| Ok(()))), ..Default::default() };
     let mut app = Box::new(PhotocraftApp::new(photocraft_engine::Session::new(), services));
     app.run("file.new", json!({"width": 20, "height": 10})).unwrap();
     let mut h = Harness::builder()

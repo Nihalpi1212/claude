@@ -276,7 +276,18 @@ pub(super) fn params_for<'p>(command: &str, params: &'p [Param], fields: &Dialog
 
 /// The command's params from the dialog's: Match Color's loaded statistics as `sourceStatistics`.
 pub(super) fn command_params_of(command: &str, map: &mut Map<String, Value>) {
-    if command != MATCH_COLOR || map.get("source").and_then(Value::as_str) != Some(STATISTICS_SOURCE) {
+    // One arm per Pigment form whose fields are not the command's params as they are.
+    match command {
+        MATCH_COLOR => match_color_params(map),
+        // Color Lookup Tables: Quality and the format check boxes (F2).
+        crate::dialogs::lut_export_ui::COMMAND => crate::dialogs::lut_export_ui::fold(map),
+        _ => {}
+    }
+}
+
+/// Match Color with loaded statistics as its source: they are `sourceStatistics`.
+fn match_color_params(map: &mut Map<String, Value>) {
+    if map.get("source").and_then(Value::as_str) != Some(STATISTICS_SOURCE) {
         return;
     }
     map.remove("source");

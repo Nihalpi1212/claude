@@ -3440,7 +3440,8 @@ fn selected_cube_validation_is_explicit_and_never_mutates_the_document() {
     assert_eq!(valid["layerCount"], 1);
     for params in [
         json!({"size": 1}),
-        json!({"size": 130}),
+        // Pigment: writing takes up to 256 points (F2); was 130.
+        json!({"size": 257}),
         json!({"size": 1.5}),
         json!({"size": -3}),
         json!({"scope": "unknown"}),

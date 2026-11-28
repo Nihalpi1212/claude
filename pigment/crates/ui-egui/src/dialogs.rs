@@ -766,7 +766,9 @@ pub mod layer_style;
 // Pigment: the first Save over a Pigment 0.1–0.4 file asks first.
 pub mod legacy_save_prompt;
 pub mod liquify_ui;
+// Pigment: Color Lookup Tables in four formats (F2)
 pub mod live_shape_prompt;
+pub(crate) mod lut_export_ui;
 pub mod mask_trash_prompt;
 pub mod merge_channels_ui;
 pub mod new_doc_ui;

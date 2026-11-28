@@ -1071,6 +1071,50 @@ byte) and `tga_more::tests`.
 | `crates/io/tests/it/main.rs` | `mod targa_variants;` |
 | `docs/file-format-parity.md` | the Targa row |
 
+**GIF in Export As.** File › Export › Export As offers GIF after JPG, with Transparency as its only option, as
+Photoshop's Export As and the JavaScript Pigment had it. No encoder of Pigment's own: Export As writes through
+`photocraft_io::export(doc, "x.gif", …)`, the GIF encoder Save As uses (adaptive 256 colours), and Transparency off
+flattens on white as for the other formats. An Export As preset with GIF saves (the engine's preset formats list it).
+Tests: `crates/ui-egui/src/dialogs/export_dialog/gif_tests.rs`.
+
+| Upstream file | Hook |
+|---|---|
+| `crates/ui-egui/src/dialogs/export_dialog.rs` | `("gif", "GIF")` in `FORMATS` (8 entries); `dialog_formats` inserts `ExportFormat::new("gif", "GIF").transparency(true)` after JPG; `mod gif_tests;` |
+| `crates/engine/src/cmd/export_preset_cmds.rs` | `"gif"` in `FORMATS` and in `file.export.presets.save`'s params string |
+
+**Color Lookup Tables in four formats.** File › Export › Color Lookup Tables writes `.3dl`, `.cube`, `.csp` and an
+ICC profile at once, as Photoshop does, one file each with the path's base name; with a Description (upstream's
+`title`), a Copyright, Use lowercase file extensions and Quality (Poor 7, Low 17, Medium 33, High 64, Maximum 256, or
+Custom grid points). The JavaScript Pigment wrote `.cube` and `.3dl`. The table is baked once
+(`file_cmds/export.rs` `bake_table`, split out of upstream's `bake_cube_layers`, in bands of blue slices of at most
+4 Mpx, so 256 points do not need a 268 MB lattice), and `crates/engine/src/cmd/file_cmds/lut_writers.rs` writes:
+`.cube` through upstream's `write_cube_export` (a `#Copyright:` line under `#Created by:` when there is one, so
+without a copyright the file is upstream's byte for byte); `.3dl` as the JavaScript `write3dl` (10-bit ramp, 12-bit
+codes, blue fastest) plus the `3DMESH`/`Mesh <k> 12` header for 2^k + 1 grids, which craft-cms's `parse_3dl` reads
+back; `.csp` (`CSPLUTV100`, identity pre-LUTs, metadata); and an RGB → RGB DeviceLink ICC (`mAB` A2B0 = identity
+curves, the CLUT, identity curves; `desc`, `cprt`). craft-cms's encoder writes the PCS field as XYZ or Lab only, so the
+header's connection space is set to `RGB ` after encoding and the profile ID stamped again with `craft_cms::profile_id`.
+craft-cms holds at most 16 Mi CLUT values, so the ICC grid is at most 177 points: a larger table is resampled
+(trilinear) and the result's `iccSize` says so. ICC is refused for CMYK and Lab documents (Photoshop writes an
+abstract Lab profile there; not built). Writing takes 2 to 256 points; craft-cms's 129 cap (`MAX_SIZE`) still holds
+for reading, so our own reader reads back tables up to 129. New params: `formats` (default `["cube"]`), `copyright`,
+`lowercase` (default true); every upstream key and result key is kept (`path` is the first file, `files` lists them).
+The form's Quality and format check boxes are folded into `size` and `formats` by
+`crates/ui-egui/src/dialogs/lut_export_ui.rs` `fold`, an arm of the Pigment `match` in
+`dialogs/filter_dialog/pigment.rs` `command_params_of` (where F1's File Info fix-up goes too). Upstream's form
+offered Grid Size 2..256 while the engine refused more than 129; both say 256 now. Tests:
+`file_cmds/lut_writers_tests.rs` (each format read back, copyright, four files, lowercase, 256 points in bands, ICC
+cap, CMYK/Lab refusal, bad params) and `dialogs/lut_export_ui_tests.rs` (rows, fold, OK writes the ticked files).
+
+| Upstream file | Hook |
+|---|---|
+| `crates/engine/src/cmd/file_cmds.rs` | `mod lut_writers;`; the `file.export.colorLookupTables` params string |
+| `crates/engine/src/cmd/file_cmds/export.rs` | `bake_cube_layers` calls `bake_table` (the bake moved there, banded); the size check takes `lut_writers::MAX_EXPORT_SIZE` (256); the result comes from `lut_writers::export` |
+| `crates/engine/src/cmd/file_cmds/tests.rs` | `selected_cube_validation_is_explicit_and_never_mutates_the_document`: `{"size": 257}` is refused (was 130) |
+| `crates/ui-egui/src/menus/view_cmds/dialogs.rs` | the form arm's rows are `lut_export_ui::rows(..)` |
+| `crates/ui-egui/src/dialogs.rs` | `pub(crate) mod lut_export_ui;` |
+| `docs/parity/README.md`, `docs/user/guides/export-an-image.md` | the Targa, GIF and LUT rows; GIF and Color Lookup Tables in the guide |
+
 ## Keeping the rebrand: `scripts/pigment-rebrand.py`
 
 Most of the rebrand is mechanical and done by [`scripts/pigment-rebrand.py`](../scripts/pigment-rebrand.py):

@@ -312,12 +312,8 @@ pub(super) fn params_for(app: &mut PhotocraftApp, id: &str) -> Option<(Vec<Param
                     })
             });
             let scope = if selected_adjustments { "selected" } else { "all" };
-            plain(vec![
-                Param::new("path", tl!("File"), ParamKind::text(format!("{dir}/{base}.cube"))),
-                Param::new("size", tl!("Grid Size"), ParamKind::int(Some(2), Some(256), 33)),
-                Param::new("title", tl!("Title"), ParamKind::text(base)),
-                choice("scope", tl!("Scope"), opts(&[("all", tl!("All Visible Layers")), ("selected", tl!("Selected Adjustments"))]), scope),
-            ])
+            // Pigment: Description, Copyright, Quality, lowercase extensions and the four formats (F2).
+            plain(crate::dialogs::lut_export_ui::rows(format!("{dir}/{base}.cube"), base, scope))
         }
         // Photography automation (photo_cmds / lens_cmds): a folder (or the open documents).
         "file.automate.photomerge" => plain(vec![
