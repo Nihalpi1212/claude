@@ -53,7 +53,9 @@ fn lerp_pt(a: &StrokePoint, b: &StrokePoint, f: f64) -> StrokePoint {
         pressure: a.pressure + (b.pressure - a.pressure) * ff,
         tilt_x: a.tilt_x + (b.tilt_x - a.tilt_x) * ff,
         tilt_y: a.tilt_y + (b.tilt_y - a.tilt_y) * ff,
-        rotation: a.rotation + (b.rotation - a.rotation) * ff,
+        // Pigment (U3, #1301): barrel rotation the shorter way round, as `pull` does (350° to 10°
+        // passes 0°, not 180°).
+        rotation: (a.rotation + ((b.rotation - a.rotation + 540.0).rem_euclid(360.0) - 180.0) * ff).rem_euclid(360.0),
         wheel: a.wheel + (b.wheel - a.wheel) * ff,
         time: a.time + (b.time - a.time) * f,
     }
@@ -489,7 +491,9 @@ pub fn control_angle(c: Control, fade_steps: u32, s: &StepInput) -> f32 {
             }
         }
         Control::StylusWheel => 360.0 * p.wheel.clamp(0.0, 1.0),
-        Control::Rotation => p.rotation,
+        // Pigment (U3, #1301): the pen's rotation is clockwise (W3C twist, Windows Ink, WinTab,
+        // `photocraft_tablet::Sample`) and angles here are counter-clockwise: the tip turns with the pen.
+        Control::Rotation => -p.rotation,
         Control::InitialDirection => s.initial_direction.to_degrees(),
         Control::Direction => s.direction.to_degrees(),
     }
@@ -642,7 +646,7 @@ impl DabBuilder {
                     roundness = (roundness * k).clamp(0.01, 1.0);
                 }
                 if sd.brush_projection {
-                    angle += s.point.rotation;
+                    angle -= s.point.rotation; // Pigment (U3, #1301): clockwise, as in `control_angle`.
                     if tilt > 0.0 {
                         proj_angle = (-s.point.tilt_y).atan2(s.point.tilt_x);
                         proj_scale = tilt.to_radians().cos().max(0.05);
