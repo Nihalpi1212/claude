@@ -189,6 +189,59 @@ fn struct_json(v: &XmpValue, ns: &str, subs: &[Sub]) -> Value {
     Value::Object(m)
 }
 
+/// The stored items of a list of structures: the ones File Info shows (a field it edits holds
+/// text) as it shows them, beside the items they are; and the others, which a write keeps.
+fn struct_items<'a>(v: Option<&'a XmpValue>, ns: &str, subs: &[Sub]) -> (Vec<Value>, Vec<&'a XmpValue>, Vec<&'a XmpValue>) {
+    let (mut shown, mut from, mut hidden) = (Vec::new(), Vec::new(), Vec::new());
+    for item in v.map(XmpValue::items).unwrap_or_default() {
+        match item {
+            XmpValue::Struct(m) => {
+                let o = struct_json(item, ns, subs);
+                if o.as_object().is_some_and(|o| !o.is_empty()) {
+                    shown.push(o);
+                    from.push(item);
+                } else if !m.is_empty() {
+                    hidden.push(item);
+                }
+            }
+            XmpValue::Text(t) if t.trim().is_empty() => {}
+            _ => hidden.push(item),
+        }
+    }
+    (shown, from, hidden)
+}
+
+/// How deep a kept value is copied (the reader's trees are small; this only bounds the walk).
+const MAX_KEPT_DEPTH: usize = 16;
+
+/// A stored value File Info does not edit, written back as it was read. The reader keeps no array
+/// kind, so the IPTC fields that are language alternatives or ordered lists are named here (an
+/// alternative keeps its default text); any other array is written as a bag.
+fn kept(name: &str, v: &XmpValue, depth: usize) -> Option<Out> {
+    if depth > MAX_KEPT_DEPTH {
+        return None;
+    }
+    let local = name.rsplit(':').next().unwrap_or(name);
+    let items = |items: &[XmpValue]| items.iter().filter_map(|i| kept("", i, depth + 1)).collect::<Vec<_>>();
+    Some(match v {
+        XmpValue::Text(t) => Out::Text(t.clone()),
+        XmpValue::Struct(m) => Out::Struct(m.iter().filter_map(|(k, v)| Some((k.clone(), kept(k, v, depth + 1)?))).collect()),
+        XmpValue::Array(a) => match local {
+            "LocationName" | "AOTitle" | "AOContentDescription" | "AOContributionDescription" | "AOPhysicalDescription" => Out::Alt(v.text()?.to_string()),
+            "AOCreator" | "AOCreatorId" => Out::Seq(items(a)),
+            _ => Out::Bag(items(a)),
+        },
+    })
+}
+
+/// The fields of the stored structure `raw` that File Info does not edit (`subs` of `ns`), written
+/// back beside the edited ones: a location's GPS position and identifiers, a licensor's address.
+fn extras(raw: Option<&XmpValue>, ns: &str, subs: &[Sub]) -> Vec<(String, Out)> {
+    let Some(XmpValue::Struct(m)) = raw else { return Vec::new() };
+    let edited = |k: &str| k.strip_prefix(ns).and_then(|r| r.strip_prefix(':')).is_some_and(|l| subs.iter().any(|(s, _)| *s == l));
+    m.iter().filter(|(k, _)| !edited(k)).filter_map(|(k, v)| Some((k.clone(), kept(k, v, 0)?))).collect()
+}
+
 fn number(t: &str) -> Option<i64> {
     let t = t.trim();
     t.parse::<i64>().ok().or_else(|| t.parse::<f64>().ok().filter(|v| v.is_finite()).map(|v| v.round() as i64))
@@ -204,17 +257,7 @@ fn read_value(field: &Field, v: Option<&XmpValue>) -> Value {
         (Kind::Bag | Kind::Seq, v) => json!(v.map(texts).unwrap_or_default()),
         (Kind::Struct(subs), Some(v)) => struct_json(v, ns, subs),
         (Kind::Struct(_), None) => json!({}),
-        (Kind::StructBag(subs) | Kind::StructSeq(subs), v) => Value::Array(
-            v.map(|v| {
-                v.items()
-                    .iter()
-                    .filter(|i| matches!(i, XmpValue::Struct(_)))
-                    .map(|i| struct_json(i, ns, subs))
-                    .filter(|o| o.as_object().is_some_and(|m| !m.is_empty()))
-                    .collect()
-            })
-            .unwrap_or_default(),
-        ),
+        (Kind::StructBag(subs) | Kind::StructSeq(subs), v) => Value::Array(struct_items(v, ns, subs).0),
     }
 }
 
@@ -266,10 +309,16 @@ fn empty_object(v: &Value) -> bool {
     v.as_object().is_none_or(serde_json::Map::is_empty)
 }
 
-/// The param `v` of `field` in the form File Info reads it back, given the current value `cur`.
-fn normalize(field: &Field, v: &Value, cur: &Value) -> Result<Value> {
+/// Where each item of a list of structures to write comes from: its index in the list as read
+/// (whose fields File Info does not edit it keeps), or `None` for a new item.
+type Origins = Vec<Option<usize>>;
+
+/// The param `v` of `field` in the form File Info reads it back, given the current value `cur`, and
+/// for a list of structures where its items come from.
+fn normalize(field: &Field, v: &Value, cur: &Value) -> Result<(Value, Origins)> {
     let key = field.key;
-    Ok(match field.kind {
+    let mut origins = Origins::new();
+    let value = match field.kind {
         Kind::Text | Kind::Alt => json!(as_text(key, v)?),
         Kind::Int(lo, hi) => {
             let n = match v {
@@ -287,24 +336,40 @@ fn normalize(field: &Field, v: &Value, cur: &Value) -> Result<Value> {
             // One object edits the first item (the dialog shows one), keeping the others.
             Value::Object(_) => {
                 let mut items = cur.as_array().cloned().unwrap_or_default();
+                origins = (0..items.len()).map(Some).collect();
                 let item = norm_struct(key, subs, v)?;
                 match (items.is_empty(), empty_object(&item)) {
                     (true, true) => {}
-                    (true, false) => items.push(item),
+                    (true, false) => {
+                        items.push(item);
+                        origins.push(None);
+                    }
                     (false, true) => {
                         items.remove(0);
+                        origins.remove(0);
                     }
                     (false, false) => items[0] = item,
                 }
                 Value::Array(items)
             }
             Value::Null => json!([]),
+            // A whole list: item `i` is the read list's item `i` (an empty one is dropped).
             Value::Array(a) => {
-                Value::Array(a.iter().map(|i| norm_struct(key, subs, i)).filter(|r| r.as_ref().map_or(true, |o| !empty_object(o))).collect::<Result<_>>()?)
+                let n = cur.as_array().map_or(0, Vec::len);
+                let mut items = Vec::new();
+                for (i, item) in a.iter().enumerate() {
+                    let item = norm_struct(key, subs, item)?;
+                    if !empty_object(&item) {
+                        items.push(item);
+                        origins.push((i < n).then_some(i));
+                    }
+                }
+                Value::Array(items)
             }
             _ => return Err(bad(format!("`{key}` must be a list of objects"))),
         },
-    })
+    };
+    Ok((value, origins))
 }
 
 fn struct_out(ns: &str, subs: &[Sub], v: &Value) -> Vec<(String, Out)> {
@@ -321,18 +386,41 @@ fn struct_out(ns: &str, subs: &[Sub], v: &Value) -> Vec<(String, Out)> {
         .collect()
 }
 
-/// A normalized value as the XMP to write, or `None` when it clears the property.
-fn to_out(field: &Field, v: &Value) -> Option<Out> {
+/// A normalized value as the XMP to write, or `None` when it clears the property. `raw` is the stored
+/// value and `origins` where a list of structures' items come from ([`normalize`]): a structure
+/// keeps the fields File Info does not edit, and a list keeps the items it does not show.
+fn to_out(field: &Field, v: &Value, raw: Option<&XmpValue>, origins: &[Option<usize>]) -> Option<Out> {
     let ns = prefix(field.prop);
     let texts = || v.as_array().map(|a| a.iter().filter_map(Value::as_str).map(|s| Out::Text(s.into())).collect::<Vec<_>>()).unwrap_or_default();
-    let structs = |subs: &[Sub]| v.as_array().map(|a| a.iter().map(|o| Out::Struct(struct_out(ns, subs, o))).collect::<Vec<_>>()).unwrap_or_default();
+    let structs = |subs: &[Sub]| {
+        let (_, from, hidden) = struct_items(raw, ns, subs);
+        let mut items: Vec<Out> = v
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .enumerate()
+                    .map(|(i, o)| {
+                        let mut fields = struct_out(ns, subs, o);
+                        fields.extend(extras(origins.get(i).copied().flatten().and_then(|k| from.get(k).copied()), ns, subs));
+                        Out::Struct(fields)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        items.extend(hidden.into_iter().filter_map(|item| kept("", item, 0)));
+        items
+    };
     let out = match field.kind {
         Kind::Text => Out::Text(v.as_str()?.to_string()),
         Kind::Alt => Out::Alt(v.as_str()?.to_string()),
         Kind::Int(..) => Out::Text(v.as_i64().filter(|n| *n != 0)?.to_string()),
         Kind::Bag => Out::Bag(texts()),
         Kind::Seq => Out::Seq(texts()),
-        Kind::Struct(subs) => Out::Struct(struct_out(ns, subs, v)),
+        Kind::Struct(subs) => {
+            let mut fields = struct_out(ns, subs, v);
+            fields.extend(extras(raw, ns, subs));
+            Out::Struct(fields)
+        }
         Kind::StructBag(subs) => Out::Bag(structs(subs)),
         Kind::StructSeq(subs) => Out::Seq(structs(subs)),
     };
@@ -356,13 +444,14 @@ pub fn write(xmp: String, p: &Value) -> Result<String> {
     let mut props: Vec<(String, Out)> = Vec::new();
     for field in &FIELDS {
         let Some(v) = p.get(field.key) else { continue };
-        let now = read_value(field, cur.values.get(field.prop));
-        let want = normalize(field, v, &now)?;
+        let raw = cur.values.get(field.prop);
+        let now = read_value(field, raw);
+        let (want, origins) = normalize(field, v, &now)?;
         if want == now {
             continue;
         }
         owned.push(field.prop);
-        props.extend(to_out(field, &want).map(|o| (field.prop.to_string(), o)));
+        props.extend(to_out(field, &want, raw, &origins).map(|o| (field.prop.to_string(), o)));
     }
     if owned.is_empty() {
         return Ok(xmp);

@@ -176,6 +176,55 @@ fn one_object_edits_the_first_item_of_a_list_of_structures() {
     assert_eq!(info(&mut s)["licensor"], json!([{"LicensorName": "Agency"}]));
 }
 
+/// Review FU: editing a structure in File Info rewrote it from the fields File Info shows, so a
+/// location's GPS position, name and identifier, a licensor's address and the items File Info
+/// cannot show were lost.
+#[test]
+fn editing_a_structure_keeps_its_fields_and_items_file_info_does_not_show() {
+    let mut s = session();
+    let packet = r#"<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?><x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description rdf:about=""
+      xmlns:Iptc4xmpExt="http://iptc.org/std/Iptc4xmpExt/2008-02-29/" xmlns:Iptc4xmpCore="http://iptc.org/std/Iptc4xmpCore/1.0/xmlns/" xmlns:exif="http://ns.adobe.com/exif/1.0/" xmlns:plus="http://ns.useplus.org/ldf/xmp/1.0/">
+     <Iptc4xmpExt:LocationShown><rdf:Bag>
+      <rdf:li rdf:parseType="Resource"><Iptc4xmpExt:City>Arles</Iptc4xmpExt:City><exif:GPSLatitude>43,40.6N</exif:GPSLatitude><exif:GPSLongitude>4,37.8E</exif:GPSLongitude><Iptc4xmpExt:LocationName><rdf:Alt><rdf:li xml:lang="x-default">Place du Forum</rdf:li></rdf:Alt></Iptc4xmpExt:LocationName></rdf:li>
+      <rdf:li rdf:parseType="Resource"><Iptc4xmpExt:LocationId><rdf:Bag><rdf:li>https://sws.geonames.org/3037854/</rdf:li></rdf:Bag></Iptc4xmpExt:LocationId></rdf:li>
+     </rdf:Bag></Iptc4xmpExt:LocationShown>
+     <plus:Licensor><rdf:Seq><rdf:li rdf:parseType="Resource"><plus:LicensorName>Agency</plus:LicensorName><plus:LicensorCity>Lyon</plus:LicensorCity></rdf:li></rdf:Seq></plus:Licensor>
+     <Iptc4xmpCore:CreatorContactInfo rdf:parseType="Resource"><Iptc4xmpCore:CiAdrCity>Arles</Iptc4xmpCore:CiAdrCity><Iptc4xmpCore:CiTelCell>+33 6</Iptc4xmpCore:CiTelCell></Iptc4xmpCore:CreatorContactInfo>
+    </rdf:Description></rdf:RDF></x:xmpmeta><?xpacket end="w"?>"#;
+    Arc::make_mut(&mut s.active_mut().unwrap().doc).metadata.xmp = Some(Arc::from(packet));
+    // File Info shows the first location only; the second has no field it edits.
+    assert_eq!(info(&mut s)["locationShown"], json!([{"City": "Arles"}]));
+    // The dialog's single object, an API caller's whole list, and a plain structure.
+    s.execute(
+        "file.fileInfo",
+        json!({"locationShown": {"City": "Arles (Provence)"}, "licensor": [{"LicensorName": "Agency 2"}], "creatorContactInfo": {"CiAdrCity": "Nîmes"}}),
+    )
+    .unwrap();
+    let xmp = doc_xmp(&s);
+    let d = craft_metadata::parse_xmp_with(&xmp, &photocraft_io::file_info_xmp::EXTRA_NAMESPACES).unwrap();
+    let shown = d.values["Iptc4xmpExt:LocationShown"].items();
+    assert_eq!(shown.len(), 2, "{xmp}");
+    let text = |v: &craft_metadata::XmpValue, k: &str| v.field(k).and_then(craft_metadata::XmpValue::text).map(str::to_owned);
+    assert_eq!(text(&shown[0], "Iptc4xmpExt:City").as_deref(), Some("Arles (Provence)"));
+    assert_eq!(text(&shown[0], "exif:GPSLatitude").as_deref(), Some("43,40.6N"), "{xmp}");
+    assert_eq!(text(&shown[0], "exif:GPSLongitude").as_deref(), Some("4,37.8E"));
+    assert_eq!(text(&shown[0], "Iptc4xmpExt:LocationName").as_deref(), Some("Place du Forum"));
+    assert!(xmp.contains("<Iptc4xmpExt:LocationName><rdf:Alt>"), "a language alternative stays one: {xmp}");
+    assert_eq!(text(&shown[1], "Iptc4xmpExt:LocationId").as_deref(), Some("https://sws.geonames.org/3037854/"), "{xmp}");
+    let licensor = &d.values["plus:Licensor"].items()[0];
+    assert_eq!(text(licensor, "plus:LicensorName").as_deref(), Some("Agency 2"));
+    assert_eq!(text(licensor, "plus:LicensorCity").as_deref(), Some("Lyon"), "{xmp}");
+    let contact = &d.values["Iptc4xmpCore:CreatorContactInfo"];
+    assert_eq!(text(contact, "Iptc4xmpCore:CiAdrCity").as_deref(), Some("Nîmes"));
+    assert_eq!(text(contact, "Iptc4xmpCore:CiTelCell").as_deref(), Some("+33 6"), "{xmp}");
+    // Clearing the shown fields of the first location removes it, the hidden one stays.
+    s.execute("file.fileInfo", json!({"locationShown": {"City": ""}})).unwrap();
+    let d = craft_metadata::parse_xmp_with(&doc_xmp(&s), &photocraft_io::file_info_xmp::EXTRA_NAMESPACES).unwrap();
+    let shown = d.values["Iptc4xmpExt:LocationShown"].items();
+    assert_eq!(shown.len(), 1);
+    assert!(shown[0].field("Iptc4xmpExt:LocationId").is_some());
+}
+
 #[test]
 fn read_outs_raw_data_and_the_other_namespaces() {
     let mut s = session();

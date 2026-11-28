@@ -172,6 +172,15 @@ fn file_paths_keep_other_dots() {
     assert_eq!(file_paths("c:\\x\\look.icm", &f, false), ["c:\\x\\look.CUBE", "c:\\x\\look.ICC"]);
 }
 
+/// Review FU: with one format, Use lowercase file extensions off still wrote the save dialog's
+/// lowercase `.cube`.
+#[test]
+fn one_format_with_lowercase_off_takes_the_uppercase_extension() {
+    assert_eq!(file_paths("/a/look.cube", &[LutFormat::Cube], false), ["/a/look.CUBE"]);
+    assert_eq!(file_paths("/a/look.cube", &[LutFormat::Cube], true), ["/a/look.cube"]);
+    assert_eq!(file_paths("/a/look.CUBE", &[LutFormat::Cube], true), ["/a/look.CUBE"], "upstream's path as given");
+}
+
 /// Photoshop's Maximum (256 points) is written, baked in bands; the ICC holds 177 points and says so.
 #[test]
 fn a_256_point_table_bakes_in_bands_and_the_icc_is_capped() {

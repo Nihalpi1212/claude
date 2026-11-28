@@ -20,7 +20,7 @@ pub const DICOM: XmpNamespace<'static> = XmpNamespace { prefix: "DICOM", uri: "h
 pub const EXTRA_NAMESPACES: [XmpNamespace<'static>; 3] = [PLUS, XMP_DM, DICOM];
 
 /// Every namespace a written property can use, declared on the description.
-const DECLARED: [(&str, &str); 9] = [
+const DECLARED: [(&str, &str); 11] = [
     ("dc", "http://purl.org/dc/elements/1.1/"),
     ("xmp", "http://ns.adobe.com/xap/1.0/"),
     ("xmpRights", "http://ns.adobe.com/xap/1.0/rights/"),
@@ -30,6 +30,9 @@ const DECLARED: [(&str, &str); 9] = [
     ("plus", "http://ns.useplus.org/ldf/xmp/1.0/"),
     ("xmpDM", "http://ns.adobe.com/xmp/1.0/DynamicMedia/"),
     ("DICOM", "http://ns.adobe.com/DICOM/"),
+    // An IPTC location's GPS position is in the EXIF namespaces (kept when File Info edits it).
+    ("exif", "http://ns.adobe.com/exif/1.0/"),
+    ("exifEX", "http://cipa.jp/exif/1.0/"),
 ];
 
 /// A value to write.
