@@ -116,6 +116,8 @@ pub(crate) mod params {
         crate::actions::dialogs::INSERT_STOP_FAMILY,
         // Pigment: Insert Conditional…
         crate::actions::conditional::FAMILY,
+        // Pigment: Info Panel Options
+        crate::panels::info_readout::FAMILY,
         crate::actions::playback::FAMILY,
         crate::actions::menu_item::FAMILY,
         crate::smart_svg_ui::family(),

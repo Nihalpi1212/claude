@@ -53,10 +53,18 @@ pub fn readout(doc: &Document, pos: [f64; 2], size: u32) -> ([i32; 3], [i32; 4])
     ([q(rgba[0]), q(rgba[1]), q(rgba[2])], cmyk)
 }
 
+/// Pigment (U1): [`readout`]'s straight RGBA average before rounding, for the Info panel's 16-bit and 32-bit readouts
+/// (32-bit values are not clamped).
+pub fn deep_readout(doc: &Document, pos: [f64; 2], size: u32) -> [f32; 4] {
+    let size = if matches!(doc.mode, photocraft_color::ColorMode::Bitmap | photocraft_color::ColorMode::Multichannel) { 1 } else { size };
+    crate::sample_cmds::sample_color(doc, None, pos[0], pos[1], size, crate::sample_cmds::SampleLayers::All).map(|v| if v.is_finite() { v } else { 0.0 })
+}
+
 /// One point as the list command reports it, read with Sample Size `size`.
 pub fn point_json(doc: &Document, index: usize, pos: [f64; 2], size: u32) -> Value {
     let (rgb, cmyk) = readout(doc, pos, size);
-    json!({"index": index, "number": index + 1, "position": [pos[0], pos[1]], "rgb": rgb, "cmyk": cmyk})
+    // Pigment (U1): `float`, the unrounded RGBA.
+    json!({"index": index, "number": index + 1, "position": [pos[0], pos[1]], "rgb": rgb, "cmyk": cmyk, "float": deep_readout(doc, pos, size)})
 }
 
 fn list_json(doc: &Document, points: &[[f64; 2]], size: u32) -> Value {
@@ -208,7 +216,7 @@ pub fn specs() -> Vec<CommandSpec> {
             label: "Color Samplers",
             menu: &[],
             shortcut: None,
-            params: r##"{"size":1|3|5|11|31|51|101|"point"=1 (Sample Size: each readout is the size × size average of document pixels around the point)} → {max, size, samplers:[{index, number, position, rgb, cmyk}]}"##,
+            params: r##"{"size":1|3|5|11|31|51|101|"point"=1 (Sample Size: each readout is the size × size average of document pixels around the point)} → {max, size, samplers:[{index, number, position, rgb, cmyk, float:[r,g,b,a] (unrounded)}]}"##,
             enabled: has_doc,
             run: list,
             journal: false,
@@ -224,3 +232,7 @@ mod pixel_centre_tests;
 
 #[cfg(test)]
 mod sample_size_tests;
+
+// Pigment (U1): the unrounded `float` readout.
+#[cfg(test)]
+mod deep_tests;

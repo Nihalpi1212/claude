@@ -40,6 +40,8 @@ pub mod histogram_panel;
 pub(crate) mod history;
 pub mod history_menu_ui;
 pub(crate) mod info;
+// Pigment: the Info panel's readout modes and 16-bit and 32-bit values
+pub(crate) mod info_readout;
 pub mod layer_filter_ui;
 pub mod layer_menu_ui;
 pub mod layer_props_ui;

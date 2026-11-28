@@ -1265,6 +1265,43 @@ Tests: `crates/engine/src/cmd/actions_default/tests.rs`, `crates/ui-egui/src/pan
 | `crates/ui-egui/src/panels/actions/menu_tests.rs` | `rows()` skips rows that are not the framework's `ActionsPanelCommands` (`filter_map`) instead of expecting every row to be one |
 | `crates/ui-egui/src/dialogs.rs` | `PARAM_FAMILIES`: `crate::actions::conditional::FAMILY` after Insert Stop's |
 
+### The Info panel's readout modes and 16-bit and 32-bit values
+
+Photoshop's Info panel has two colour readouts, each in one of ten modes (Actual Color, Proof Color, Grayscale, RGB
+Color, Web Color, HSB Color, CMYK Color, Lab Color, Total Ink, Opacity), a mode per Color Sampler, 16-bit values in
+0–32768 or 0–65535 and floats in 32-bit documents; the JavaScript Pigment had the second readout's CMYK/Lab/HSB and the
+deep values (`renderer/lib/panels/info.js`, `renderer/lib/depth.js`). The framework's `InfoPanel` (pinned craft-libs)
+draws fixed 8-bit RGB and CMYK lines, so `crates/ui-egui/src/panels/info_readout.rs` draws Pigment's own grid, in the
+same layout (two name/value columns, the Ruler tool's measure, X/Y beside W/H, `Doc: …`, the samplers; the
+framework's `InfoWords` for its labels), whenever the readouts are not the framework's: `info_readout::custom` is
+`None` (the framework draws) for an 8-bit document whose first readout is RGB Color or Actual Color of an RGB-like
+document, second CMYK Color, no sampler with a mode of its own, and without a document.
+- **Modes**: the panel menu's First Color Readout ▸ and Second Color Readout ▸ (radio rows, `InfoPanelCommand`,
+  prefix `infoPanel`; the framework's grid has no clickable eyedropper label) and Panel Options…, which also has the
+  16-bit range and a mode per Color Sampler (by index; "Same as the Panel" shows the two readouts). Units & Rulers…
+  in the same menu opens the preference the X/Y and W/H cells use (Photoshop's Mouse Coordinates), instead of a copy.
+- **Values**: Actual is the document's own channels (RGB; K for Grayscale, Bitmap and Duotone; CMYK; Lab); RGB in the
+  depth's scale (0–255, 0–32768 or 0–65535, 32-bit floats with four decimals, not clamped); Proof Color through View ›
+  Proof Setup's profile, whether Proof Colors is on or not (CMYK, RGB or gray numbers; the transform is cached);
+  CMYK and Total Ink through the document's CMYK profile, as the framework's CMYK; Lab, HSB, Web and Grayscale of the
+  composite clamped, as sRGB (upstream's Lab documents composite through `srgb_to_lab` too). Whole numbers like the
+  framework's CMYK; HSB, Total Ink and Opacity carry ° and %.
+- **Deep sampler values**: `view.colorSamplers.list` (and `add`/`move`) report `float`, the unrounded RGBA
+  (`sampler_cmds::deep_readout`); the grid reads it.
+- **Saved** as JSON in `Preferences.dialogs["infoPanel"]` (`{"first","second","sixteenBit","samplers":[mode|""]}`; no
+  nulls, the file is TOML), as the Histogram panel keeps its options, and read from there each frame, so nothing is
+  restored at launch and `prefs.rs` is not touched.
+Tests: `crates/ui-egui/src/panels/info_readout_tests.rs`, `crates/engine/src/cmd/sampler_cmds/deep_tests.rs`.
+
+| Upstream file | Hook |
+|---|---|
+| `crates/ui-egui/src/panels/info.rs` | `info_panel`: `if let Some(o) = super::info_readout::custom(app) { return super::info_readout::show_panel(..) }` after `sampler_rows` |
+| `crates/ui-egui/src/panels.rs` | `pub(crate) mod info_readout;` |
+| `crates/ui-egui/src/panels/registry.rs` | the `info` entry gets `rows`/`states`/`run` from `info_readout` |
+| `crates/ui-egui/src/dialogs.rs` | `PARAM_FAMILIES`: `crate::panels::info_readout::FAMILY` after Insert Conditional's |
+| `crates/engine/src/cmd/sampler_cmds.rs` | `deep_readout` (new fn), `"float"` in `point_json`, the list's params text, `#[cfg(test)] mod deep_tests;` |
+| `docs/parity/README.md`, `docs/user/guides/adjust-colors-with-adjustment-layers.md` | the two Info panel rows; "Read the colours in the Info panel" |
+
 ## Keeping the rebrand: `scripts/pigment-rebrand.py`
 
 Most of the rebrand is mechanical and done by [`scripts/pigment-rebrand.py`](../scripts/pigment-rebrand.py):

@@ -206,8 +206,8 @@ the entry is now. Where Pigment 0.5.0 has PhotoCraft's status, the column names 
 
 | Entry | Pigment 0.4 | PhotoCraft and Pigment 0.5.0 | 0.6 package |
 |---|---|---|---|
-| Info panel: second colour readout modes | Partial | Partial: fixed CMYK | U1 |
-| Info panel: 16-bit and 32-bit values | Done | Missing | U1 |
+| Info panel: second colour readout modes | Partial | Done in 0.6: two readouts in ten modes each, a mode per Color Sampler, Panel Options | U1 |
+| Info panel: 16-bit and 32-bit values | Done | Done in 0.6: 0–32768 or 0–65535, 32-bit floats, deep sampler values | U1 |
 | Actions: Default Actions set | Approximate | Done in 0.6: Pigment 0.4's ten actions plus Make Clip Path and Mixer Brush Cloning Paint Setup | U2 |
 | Actions: Clear All Actions, Reset Actions | Done | Done (PhotoCraft built them, with Replace Actions and an undo) | U2 |
 | Actions: Insert Conditional | Done | Done in 0.6: Insert Conditional… in the panel menu; Record Again edits a conditional | U2 |
