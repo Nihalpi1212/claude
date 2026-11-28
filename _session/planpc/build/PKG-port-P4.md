@@ -161,8 +161,8 @@ Python), `apps/photocraft/src/app_dirs/legacy.rs`, `crates/ui-egui/src/dialogs/m
   the prompt; Cancel migrates nothing; OK migrates and sets "22 presets migrated."**, again "0 presets migrated.";
   **without it the folder dialog is asked (`ScriptedFiles`)** and migrates, an empty folder says "No Pigment 0.4 presets
   were found."; with `path` the engine runs directly. Plus `prefs_ui`, `io_tests` (bundle test adjusted),
-  `preset_manager_ui`, `preset_files_ui`, `tool_presets_menu`: 87 + 19 passed. A wider run (`menus commands registry
-  keymap dialogs i18n control`) was started before returning; see "Checks".
+  `preset_manager_ui`, `preset_files_ui`, `tool_presets_menu`: 87 + 19 passed. A wider nextest run (filters `menus
+  commands registry keymap dialogs i18n control`): 941 passed.
 
 ## Checks
 
