@@ -24,7 +24,9 @@ fn offered(command: ActionsPanelCommands) -> bool {
 
 /// The rows of the panel menu, in the framework's groups.
 pub(crate) fn panel_rows(app: &PhotocraftApp) -> Vec<PanelRow> {
-    craft::automation::ui::actions::panel_rows(facts(app), &offered)
+    let mut rows = craft::automation::ui::actions::panel_rows(facts(app), &offered);
+    super::conditional::splice(&mut rows); // Pigment: Insert Conditional…
+    rows
 }
 
 /// The state of every command the rows name; they come from the same list, so a state never exists for a row the
@@ -32,7 +34,7 @@ pub(crate) fn panel_rows(app: &PhotocraftApp) -> Vec<PanelRow> {
 pub(crate) fn states(app: &PhotocraftApp) -> Vec<(CommandRef, CommandState)> {
     let facts = facts(app);
     let (panel, list) = (&app.ui.actions.panel, &app.session.actions.list);
-    panel_rows(app)
+    let mut states = panel_rows(app)
         .into_iter()
         .filter_map(|row| match row {
             PanelRow::Command(command) => {
@@ -41,12 +43,17 @@ pub(crate) fn states(app: &PhotocraftApp) -> Vec<(CommandRef, CommandState)> {
             }
             _ => None,
         })
-        .collect()
+        .collect();
+    super::conditional::add_state(&mut states); // Pigment: Insert Conditional…
+    states
 }
 
 /// Runs a fired command of the Actions panel; `false` for a command of another set. Its event goes through the one
 /// mapping that every Actions event takes.
 pub(crate) fn run_fired(app: &mut PhotocraftApp, _ctx: &egui::Context, command: &CommandRef) -> bool {
+    if super::conditional::run_fired(app, command) {
+        return true; // Pigment: Insert Conditional…
+    }
     let Some(command) = ActionsPanelCommands::from_ref(command) else { return false };
     // A command the app does not offer (Button Mode answers `SettingsChanged`) has nothing to run.
     if !offered(command) {

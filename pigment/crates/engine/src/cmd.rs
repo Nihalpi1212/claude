@@ -55,6 +55,8 @@ macro_rules! cmd {
 }
 
 pub mod actions_cmds;
+// Pigment: Photoshop's Default Actions set
+pub mod actions_default;
 pub mod actions_edit_cmds;
 pub mod adjust_cmds;
 mod adjust_params;

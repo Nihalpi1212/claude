@@ -5,6 +5,8 @@ use craft_psd::atn::{AtnAction, AtnFile, write};
 use craft_psd::descriptor::UnicodeString;
 use serde_json::json;
 
+use super::BASICS_SET as BASICS; // Pigment: the tests name the set through its constant
+
 fn names(s: &Session) -> Vec<&str> {
     s.actions.list.actions().iter().map(|action| action.name.as_str()).collect()
 }
@@ -80,19 +82,24 @@ fn reset_appends_a_numbered_set_and_persists_it() {
     s.attach_preset_store(open(Box::new(store.clone())));
     s.actions.list.new_set("Existing").unwrap();
     assert!(s.execute("actions.reset", json!({"confirm":true,"mode":"bad"})).is_err());
-    assert_eq!(s.execute("actions.reset", json!({"confirm":true,"mode":"append"})).unwrap()["set"], "Pigment Basics");
-    assert_eq!(s.execute("actions.reset", json!({"confirm":true,"mode":"append"})).unwrap()["set"], "Pigment Basics 2");
-    assert_eq!(s.actions.list.sets(), ["Pigment Basics", "Pigment Basics 2", "Existing"]);
-    assert_eq!(names(&s), ["Invert Colors", "Desaturate", "Invert Colors 2", "Desaturate 2"]);
-    assert_eq!(s.actions.list.actions()[0].steps[0].command, "image.adjustments.invert");
-    assert_eq!(s.actions.list.actions()[1].steps[0].command, "image.adjustments.desaturate");
+    // Pigment: the Default Actions set (`actions_default`) instead of upstream's Invert Colors and Desaturate.
+    let second = format!("{BASICS} 2");
+    assert_eq!(s.execute("actions.reset", json!({"confirm":true,"mode":"append"})).unwrap()["set"], BASICS);
+    assert_eq!(s.execute("actions.reset", json!({"confirm":true,"mode":"append"})).unwrap()["set"], second.as_str());
+    assert_eq!(s.actions.list.sets(), [BASICS, second.as_str(), "Existing"]);
+    let defaults = crate::commands::actions_default::default_actions(BASICS);
+    let once: Vec<String> = defaults.iter().map(|action| action.name.clone()).collect();
+    let twice: Vec<String> = once.iter().cloned().chain(once.iter().map(|name| format!("{name} 2"))).collect();
+    assert_eq!(names(&s), twice);
+    assert_eq!(s.actions.list.actions()[0].steps, defaults[0].steps);
+    assert_eq!(s.actions.list.actions()[1].steps, defaults[1].steps);
     s.sync_preset_store();
     let mut reopened = Session::new();
     reopened.attach_preset_store(open(Box::new(store)));
     assert_eq!(reopened.actions.list.actions(), s.actions.list.actions());
     assert_eq!(reopened.actions.list.sets(), s.actions.list.sets());
     s.execute("actions.reset", json!({"confirm":true,"mode":"replace"})).unwrap();
-    assert_eq!(s.actions.list.sets(), ["Pigment Basics"]);
+    assert_eq!(s.actions.list.sets(), [BASICS]);
     s.execute("actions.undoLibrary", json!({})).unwrap();
     assert_eq!(s.actions.list.sets(), reopened.actions.list.sets());
     assert!(s.execute("actions.undoLibrary", json!({})).is_err());
@@ -234,8 +241,9 @@ fn pre_attachment_replacement_persists_without_reloading_disk_and_keeps_undo() {
             continue;
         }
 
-        assert_eq!(s.actions.list.sets(), ["Pigment Basics"]);
-        assert_eq!(names(&s), ["Invert Colors", "Desaturate"]);
+        // Pigment: the Default Actions set.
+        assert_eq!(s.actions.list.sets(), [BASICS]);
+        assert_eq!(names(&s), crate::commands::actions_default::default_actions(BASICS).iter().map(|action| action.name.as_str()).collect::<Vec<_>>());
         let mut reopened = Session::new();
         assert!(reopened.attach_preset_store(open(Box::new(store.clone()))).is_empty());
         assert_eq!(reopened.actions.list.actions(), s.actions.list.actions());

@@ -461,6 +461,8 @@ fn main() -> eframe::Result {
     #[cfg(not(target_os = "linux"))]
     let monitor = monitor_profile::detect_async();
     // Brush presets load in the background; the app attaches them when they arrive.
+    // Pigment: a new preset store starts with Photoshop's Default Actions set.
+    photocraft_engine::commands::actions_default::seed_on_first_launch();
     let presets = services::presets_dir().map(photocraft_engine::preset_store::open_dir_async);
     // Who draws the window frame, decided once: the viewport below and the runtime's root frame both follow it.
     // `PHOTOCRAFT_TITLEBAR`, `PHOTOCRAFT_CAPTION_STYLE` and `PHOTOCRAFT_CAPTION_LAYOUT` are read by the decision.
