@@ -500,6 +500,7 @@ impl Ctx<'_> {
                 }
             }
         }
+        crate::type_xmp::import_packet(l); // Pigment (B1): the type extras kept in the layer's XMP
         let name = l.name.clone();
         l.mask = self.record_mask(rec, &name);
     }

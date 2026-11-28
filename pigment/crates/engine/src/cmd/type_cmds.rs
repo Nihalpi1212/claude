@@ -149,7 +149,7 @@ pub fn check_size_tracking(p: &Value) -> std::result::Result<(), String> {
             }
         }
     }
-    Ok(())
+    crate::type_layer_opts_cmds::check_extra(p) // Pigment (B1)
 }
 
 /// The PostScript name of the installed face of `family` at exactly `weight`/`italic`. A PSD names
@@ -359,6 +359,7 @@ fn apply_char_values(s: &mut CharStyle, p: &Value) -> bool {
         ("fauxItalic", &mut s.faux_italic),
         ("ligatures", &mut s.ligatures),
         ("discretionaryLigatures", &mut s.discretionary_ligatures),
+        ("noBreak", &mut s.no_break), // Pigment (B1)
     ] {
         if let Some(v) = p.get(k).and_then(Value::as_bool) {
             *f = v;
@@ -476,6 +477,7 @@ pub fn apply_para_props(s: &mut ParagraphStyle, p: &Value) -> bool {
         s.hyphenate = v;
         any = true;
     }
+    any |= crate::type_layer_opts_cmds::apply_para_extra(s, p); // Pigment (B1)
     any
 }
 
@@ -894,6 +896,8 @@ fn info(s: &Session, p: &Value) -> Result<Value> {
         "antialias": t.antialias,
         "orientation": t.orientation,
         "warp": t.warp,
+        "fractionalWidths": t.fractional_widths, // Pigment (B1)
+        "systemLayout": t.system_layout,
         "runs": runs,
         "paragraphs": paragraphs,
         "lines": lines,
@@ -1004,7 +1008,7 @@ pub fn name_selection_commit(s: &mut Session) {
     }
 }
 
-const CHAR_PARAMS: &str = r##""font":str,"fontStyle":str,"weight":100..900,"italic":bool,"size":0.1..=1296 pt,"color":"#rrggbb"|[r,g,b,a],"tracking":-1000..=10000 (1/1000 em),"leading":pt|"auto","baselineShift":pt,"horizontalScale":%,"verticalScale":%,"underline":bool,"strikethrough":bool,"fauxBold":bool,"fauxItalic":bool,"kerning":1/1000em (manual, after each character)|"metrics"|"optical"|"off","caps":"normal|small|all","baseline":"normal|superscript|subscript","ligatures":bool,"discretionaryLigatures":bool,"features":{"ss01":1},"variations":{"wght":650},"language":str"##;
+const CHAR_PARAMS: &str = r##""font":str,"fontStyle":str,"weight":100..900,"italic":bool,"size":0.1..=1296 pt,"color":"#rrggbb"|[r,g,b,a],"tracking":-1000..=10000 (1/1000 em),"leading":pt|"auto","baselineShift":pt,"horizontalScale":%,"verticalScale":%,"underline":bool,"strikethrough":bool,"fauxBold":bool,"fauxItalic":bool,"kerning":1/1000em (manual, after each character)|"metrics"|"optical"|"off","caps":"normal|small|all","baseline":"normal|superscript|subscript","ligatures":bool,"discretionaryLigatures":bool,"features":{"ss01":1},"variations":{"wght":650},"language":str,"noBreak":bool"##;
 
 /// The Type commands: create and edit type layers, set styles, fill paths, and the queries about them.
 pub fn specs() -> Vec<CommandSpec> {
@@ -1048,7 +1052,7 @@ pub fn specs() -> Vec<CommandSpec> {
             label: "Edit Type",
             menu: &[],
             shortcut: None,
-            params: r##"{"layer":id?,"text":str? (replace all, styles kept),"replace":{"start":char,"end":char,"text":str}?,"runs":[{"start":char,"end":char,…character keys}]?,"box":[x,y,w,h]? (to paragraph text),"point":[x,y]? (to point text),"move":[dx,dy]?,"transform":[a,b,c,d,e,f]?,"antialias":"none|sharp|crisp|strong|smooth"?,"name":str?,"kerning":1/1000em|"metrics"|"optical"|"off"? (with "range":[startChar,endChar]?, default all),"kernPair":{"at":caretChar,"by":1/1000em}? (Alt+←/→: the pair before the caret becomes manual, its current kerning + by)}"##,
+            params: r##"{"layer":id?,"text":str? (replace all, styles kept),"replace":{"start":char,"end":char,"text":str}?,"runs":[{"start":char,"end":char,…character keys}]?,"box":[x,y,w,h]? (to paragraph text),"point":[x,y]? (to point text),"move":[dx,dy]?,"transform":[a,b,c,d,e,f]?,"antialias":"none|sharp|crisp|strong|smooth"?,"fractionalWidths":bool?,"systemLayout":bool?,"name":str?,"kerning":1/1000em|"metrics"|"optical"|"off"? (with "range":[startChar,endChar]?, default all),"kernPair":{"at":caretChar,"by":1/1000em}? (Alt+←/→: the pair before the caret becomes manual, its current kerning + by)}"##,
             enabled: has_doc,
             journal: true,
             run: |s, p| {
@@ -1161,6 +1165,7 @@ pub fn specs() -> Vec<CommandSpec> {
                             _ => AntiAlias::Smooth,
                         };
                     }
+                    crate::type_layer_opts_cmds::apply_layer_keys(t, p); // Pigment (B1)
                     // The rename lands in the same undo step as the edit (#497).
                     *rename = name.clone();
                     Ok(())
@@ -1174,7 +1179,7 @@ pub fn specs() -> Vec<CommandSpec> {
             menu: &[],
             shortcut: None,
             params: Box::leak(
-                format!(r##"{{"layer":id? or "layers":[id,…]? (default selected Type layers),"range":[startChar,endChar]? (single layer; default all),"metricsAsShown":bool=false (size/leading/leadingBy include each layer's transform scale), {CHAR_PARAMS}, relative steps from each character's own value: "leadingBy":pt (auto leading starts from its laid-out value; result 0.01..=5000),"baselineShiftBy":pt (result -5000..=5000),"trackingBy":1/1000 em (result -1000..=10000), paragraph keys: "align":"left|center|right|justify|justifyCenter|justifyRight|justifyAll","firstLineIndent":pt,"startIndent":pt,"endIndent":pt,"spaceBefore":pt,"spaceAfter":pt,"autoLeading":%,"direction":"auto|ltr|rtl","hyphenate":bool}}"##)
+                format!(r##"{{"layer":id? or "layers":[id,…]? (default selected Type layers),"range":[startChar,endChar]? (single layer; default all),"metricsAsShown":bool=false (size/leading/leadingBy include each layer's transform scale), {CHAR_PARAMS}, relative steps from each character's own value: "leadingBy":pt (auto leading starts from its laid-out value; result 0.01..=5000),"baselineShiftBy":pt (result -5000..=5000),"trackingBy":1/1000 em (result -1000..=10000), paragraph keys: "align":"left|center|right|justify|justifyCenter|justifyRight|justifyAll","firstLineIndent":pt,"startIndent":pt,"endIndent":pt,"spaceBefore":pt,"spaceAfter":pt,"autoLeading":%,"direction":"auto|ltr|rtl","hyphenate":bool,"hyphenation":{{"wordsLongerThan":2..=25,"afterFirst":1..=15,"beforeLast":1..=15,"hyphenLimit":0..=25,"zone":0..=8640 pt,"capitalized":bool,"lastWord":bool,"acrossColumn":bool}} (partial merges),"justification":{{"wordSpacing":[min,desired,max] 0..=1000 %,"letterSpacing":[…] -100..=500 %,"glyphScaling":[…] 50..=200 %,"singleWord":"justify|left|center|right"}} (partial merges),"composer":"singleLine|everyLine","hangingPunctuation":bool,"list":null|{{"type":"bullet|number","marker":str,"start":0..=9999,"level":0..=8}}}}"##)
                     .into_boxed_str(),
             ),
             enabled: has_doc,

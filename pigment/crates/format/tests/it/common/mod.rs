@@ -139,6 +139,9 @@ pub fn rich_doc(mode: ColorMode, depth: SampleType) -> Document {
             orientation: text::Orientation::Vertical,
             antialias: text::AntiAlias::Crisp,
             warp: Some(TextWarp { style: "warpArc".into(), value: 25.0, ..Default::default() }),
+            // Pigment (B1): the layer flags round-trip too.
+            fractional_widths: false,
+            system_layout: true,
         }),
     );
     let mut shape = Layer::new(

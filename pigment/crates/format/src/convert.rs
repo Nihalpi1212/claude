@@ -148,6 +148,8 @@ fn layer_m(l: &Layer, sink: &mut dyn Sink) -> LayerM {
             orientation: t.orientation,
             antialias: t.antialias,
             warp: t.warp.clone(),
+            fractional_widths: t.fractional_widths,
+            system_layout: t.system_layout,
         },
         LayerContent::Shape(s) => ContentM::Shape {
             fill: s.fill.clone(),
@@ -484,7 +486,7 @@ impl Loader<'_> {
                 LayerContent::Adjustment(photocraft_doc::adjust_pigment::upgrade(adjustment).unwrap_or_else(|| adjustment.clone()))
             }
             ContentM::Fill { fill } => LayerContent::Fill(fill.clone()),
-            ContentM::Text { text, font_family, size_pt, color, transform, cache, psd_raw, runs, paragraphs, shape, orientation, antialias, warp } => {
+            ContentM::Text { text, font_family, size_pt, color, transform, cache, psd_raw, runs, paragraphs, shape, orientation, antialias, warp, fractional_widths, system_layout } => {
                 LayerContent::Text(TextLayer {
                     text: text.clone(),
                     font_family: font_family.clone(),
@@ -499,6 +501,8 @@ impl Loader<'_> {
                     orientation: *orientation,
                     antialias: *antialias,
                     warp: warp.clone(),
+                    fractional_widths: *fractional_widths,
+                    system_layout: *system_layout,
                 })
             }
             ContentM::Shape { fill, cache, psd_raw, path, stroke, live, arrow_live, triangle_live, density, feather } => LayerContent::Shape(ShapeLayer {

@@ -180,6 +180,9 @@ pub mod type_area_cmds;
 pub mod type_caret_cmds;
 pub mod type_cmds;
 pub mod type_extra_cmds;
+// Pigment: Character/Paragraph panel menu commands and resets (PORTS-B B1).
+pub mod type_layer_opts_cmds;
+pub mod type_reset_cmds;
 #[cfg(test)]
 mod type_indexed_mode_tests;
 pub mod type_mask_cmds;
@@ -1444,6 +1447,8 @@ fn build() -> Vec<CommandSpec> {
     v.extend(crate::file_cmds::specs());
     v.extend(crate::exr_cmds::specs());
     v.extend(crate::type_extra_cmds::specs());
+    v.extend(crate::type_layer_opts_cmds::specs()); // Pigment (B1)
+    v.extend(crate::type_reset_cmds::specs()); // Pigment (B1)
     v.extend(crate::type_area_cmds::specs());
     v.extend(crate::type_styles_cmds::specs());
     v.extend(crate::type_spell_cmds::specs());

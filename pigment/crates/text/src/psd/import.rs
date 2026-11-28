@@ -435,6 +435,8 @@ fn apply_engine_data(layer: &mut TextLayer, e: &E, txt: Option<&str>, k: f32) {
     // Photoshop always ends the engine text with a paragraph break; the descriptor text doesn't.
     let text = txt.map(str::to_string).unwrap_or_else(|| ed_text.strip_suffix('\r').unwrap_or(&ed_text).to_string());
     layer.text = text.replace('\r', "\n");
+    // Pigment (B1): the layer's Fractional Widths (on when the file doesn't say).
+    layer.fractional_widths = e.path(&["EngineDict", "UseFractionalGlyphWidths"]).and_then(E::as_bool).unwrap_or(true);
     let res = e.get("ResourceDict").or_else(|| e.get("DocumentResources"));
     let fonts: Vec<String> = res
         .and_then(|r| r.get("FontSet"))
@@ -614,6 +616,7 @@ pub(crate) fn char_style(base: &[Option<&E>], d: &E, fonts: &[String], k: f32) -
     // Vertical type's roman text: 2 rotated along the column, 1 upright (#9470). A run without
     // its own value takes the style sheet's, which Photoshop writes as 2.
     s.rotate_roman = g("BaselineDirection").and_then(E::as_i64) == Some(2);
+    super::pigment_keys::read_char(&mut s, &g); // Pigment (B1)
     if let Some(c) = g("FillColor") {
         // Positions matter (alpha, then the channels): a non-finite entry voids the colour.
         let v: Vec<f64> = c.get("Values").and_then(E::as_array).map(|a| a.iter().filter_map(E::as_f64).collect()).unwrap_or_default();
@@ -633,7 +636,7 @@ pub(crate) fn char_style(base: &[Option<&E>], d: &E, fonts: &[String], k: f32) -
 pub(crate) fn para_style(base: &[Option<&E>], d: &E, k: f32) -> ParagraphStyle {
     let num = |key: &str| lookup(d, base, key).and_then(E::as_f64);
     let numk = |key: &str, k: f32| num(key).map(|v| v as f32 * k).filter(|v| v.is_finite());
-    ParagraphStyle {
+    let mut p = ParagraphStyle {
         align: match num("Justification").map(|v| v as i64) {
             Some(1) => TextAlign::Right,
             Some(2) => TextAlign::Center,
@@ -651,7 +654,9 @@ pub(crate) fn para_style(base: &[Option<&E>], d: &E, k: f32) -> ParagraphStyle {
         auto_leading: numk("AutoLeading", 1.0).unwrap_or(1.2),
         hyphenate: lookup(d, base, "AutoHyphenate").and_then(E::as_bool).unwrap_or(false),
         ..Default::default()
-    }
+    };
+    super::pigment_keys::read_para(&mut p, &|key| lookup(d, base, key), k); // Pigment (B1)
+    p
 }
 
 // ---------- writing ----------

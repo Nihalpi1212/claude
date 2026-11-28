@@ -165,6 +165,8 @@ pub use cmd::type_area_cmds;
 pub use cmd::type_caret_cmds;
 pub use cmd::type_cmds;
 pub use cmd::type_extra_cmds;
+pub use cmd::type_layer_opts_cmds; // Pigment (B1)
+pub use cmd::type_reset_cmds; // Pigment (B1)
 pub use cmd::type_mask_cmds;
 pub use cmd::type_spell_cmds;
 pub use cmd::type_styles_cmds;

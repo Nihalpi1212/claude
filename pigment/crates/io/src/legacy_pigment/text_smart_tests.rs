@@ -127,16 +127,22 @@ fn mixed_runs_keep_their_characters_and_paragraphs() {
     );
     assert_eq!((paras[1].style.align, paras[1].style.auto_leading), (TextAlign::Right, 1.4));
     assert_eq!(t.antialias, AntiAlias::Crisp);
-    // What PhotoCraft's type does not have is named, once.
+    // Pigment (B1): No Break, the list, hanging punctuation and the justification spacing come
+    // across, and the hyphenating paragraph gets the app's hyphenation defaults.
+    assert!(runs[6].style.no_break && !runs[5].style.no_break);
+    // The fixture is 144 dpi: the app's 36 px zone is 18 pt.
+    assert_eq!(p.hyphenation, photocraft_doc::text::Hyphenation { words_longer_than: 7, hyphen_limit: 2, zone_pt: 18.0, ..Default::default() });
+    assert_eq!(p.composer, photocraft_doc::text::Composer::EveryLine);
+    let p = &paras[1].style;
+    assert_eq!(p.list, Some(photocraft_doc::text::ListStyle::new(photocraft_doc::text::ListKind::Bullet)));
+    assert!(p.hanging_punctuation);
+    assert_eq!(p.justification, photocraft_doc::text::Justification { word: [70.0, 90.0, 120.0], ..Default::default() });
+    assert!(t.fractional_widths && !t.system_layout);
+    // What PhotoCraft's type does not have is named, once; the settings above are not.
     let w = r.warnings.join("\n");
-    for what in [
-        "No Break",
-        "bulleted and numbered lists",
-        "Roman Hanging Punctuation",
-        "Justification word, letter and glyph spacing",
-        "stroke differed between characters",
-    ] {
-        assert!(w.contains(what), "{what}: {w}");
+    assert!(w.contains("stroke differed between characters"), "{w}");
+    for what in ["No Break", "lists", "Hanging Punctuation", "Justification", "Hyphenation settings", "Fractional Widths"] {
+        assert!(!w.contains(what), "{what}: {w}");
     }
 }
 

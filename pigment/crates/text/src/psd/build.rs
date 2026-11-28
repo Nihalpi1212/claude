@@ -66,6 +66,7 @@ pub(crate) fn style_sheet_data(s: &CharStyle, font: usize, k: f32) -> E {
         ("FillColor".into(), E::Dict(vec![("Type".into(), E::Int(color_type)), ("Values".into(), E::Array(values))])),
     ];
     dict.append(&mut opentype);
+    super::pigment_keys::put_char(&mut dict, s); // Pigment (B1)
     E::Dict(dict)
 }
 
@@ -79,7 +80,7 @@ pub(crate) fn paragraph_properties(p: &ParagraphStyle, k: f32) -> E {
         TextAlign::JustifyCenter => 5,
         TextAlign::JustifyAll => 6,
     };
-    E::Dict(vec![
+    let mut dict = vec![
         ("Justification".into(), E::Int(j)),
         ("FirstLineIndent".into(), real(p.first_line_indent_pt / k)),
         ("StartIndent".into(), real(p.start_indent_pt / k)),
@@ -89,7 +90,9 @@ pub(crate) fn paragraph_properties(p: &ParagraphStyle, k: f32) -> E {
         ("AutoHyphenate".into(), E::Bool(p.hyphenate)),
         ("AutoLeading".into(), real(p.auto_leading)),
         ("LeadingType".into(), E::Int(0)),
-    ])
+    ];
+    super::pigment_keys::put_para(&mut dict, p, k); // Pigment (B1)
+    E::Dict(dict)
 }
 
 pub(super) fn utf16_len(s: &str) -> i64 {
@@ -1010,12 +1013,16 @@ pub fn build_engine_data(layer: &TextLayer, template: Option<E>, dpi: f32) -> E 
     };
     let mut sruns = Vec::new();
     let mut slens = Vec::new();
+    let kept_languages = super::pigment_keys::template_languages(&e); // Pigment (B1)
+    let mut at16 = 0usize;
     for (ri, pair, n) in pair_runs(&ed_text, &runs) {
         let Some(r) = runs.get(ri) else { continue };
         let fi = font_index(postscript_for(&r.style));
         let mut data = style_sheet_data(&r.style, fi, k);
         data.set("AutoKerning", E::Bool(pair.0));
         data.set("Kerning", E::Int(pair.1));
+        super::pigment_keys::keep_language(&mut data, &r.style, &kept_languages, at16); // Pigment (B1)
+        at16 += n;
         sruns.push(E::Dict(vec![("StyleSheet".into(), E::Dict(vec![("StyleSheetData".into(), data)]))]));
         slens.push(E::Int(n as i64));
     }
@@ -1069,9 +1076,8 @@ pub fn build_engine_data(layer: &TextLayer, template: Option<E>, dpi: f32) -> E 
             AntiAlias::Windows | AntiAlias::WindowsLcd => 3,
         }),
     );
-    if dict.get("UseFractionalGlyphWidths").is_none() {
-        dict.set("UseFractionalGlyphWidths", E::Bool(true));
-    }
+    // Pigment (B1): the layer's Fractional Widths.
+    dict.set("UseFractionalGlyphWidths", E::Bool(layer.fractional_widths));
     let (shape_type, box_bounds) = match &layer.shape {
         // Type on a path: the path goes into the layer's `Txt2` frame ([`build_txt2`], #7962),
         // which only a file that already has a `Txt2` object for the layer gets; EngineData

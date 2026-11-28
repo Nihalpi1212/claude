@@ -12,3 +12,5 @@ mod roundtrip;
 mod scratch_retry;
 mod smart_contents;
 mod triangle_live;
+// Pigment (B1)
+mod type_settings;

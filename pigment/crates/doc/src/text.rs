@@ -106,6 +106,9 @@ pub struct CharStyle {
     /// (`BaselineDirection` 1, what Photoshop's Vertical Type tool sets, #9470). CJK text stands
     /// upright either way.
     pub rotate_roman: bool,
+    /// No Break (Character panel menu): these characters never break across lines and are
+    /// never hyphenated (PSD `NoBreak`).
+    pub no_break: bool,
     /// Applied character style (id in [`crate::TextStyles`]); `None` = "None". Attributes above
     /// stay fully resolved; differences from the style are local overrides.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -141,6 +144,7 @@ impl Default for CharStyle {
             variations: Vec::new(),
             language: None,
             rotate_roman: false,
+            no_break: false,
             style_sheet: None,
         }
     }
@@ -198,9 +202,178 @@ pub struct ParagraphStyle {
     pub auto_leading: f32,
     pub direction: TextDirection,
     pub hyphenate: bool,
+    /// The Hyphenation dialog's settings; [`Self::hyphenate`] stays the on/off.
+    pub hyphenation: Hyphenation,
+    /// The Justification dialog's word, letter and glyph spacing (Auto Leading is
+    /// [`Self::auto_leading`]).
+    pub justification: Justification,
+    /// Adobe Single-line or Every-line Composer. A new paragraph gets Every-line, as in Photoshop;
+    /// a document saved before the field existed reads as Single-line, so it keeps its breaks.
+    #[serde(default = "legacy_composer")]
+    pub composer: Composer,
+    /// Roman Hanging Punctuation.
+    pub hanging_punctuation: bool,
+    /// Bulleted or numbered list; `None` = not a list item.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub list: Option<ListStyle>,
     /// Applied paragraph style (id in [`crate::TextStyles`]); `None` = Basic Paragraph.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub style_sheet: Option<u32>,
+}
+
+/// The composer of a paragraph that has no `composer` field: one saved before the field existed
+/// was laid out greedily, line by line, which is what Single-line does.
+fn legacy_composer() -> Composer {
+    Composer::SingleLine
+}
+
+/// Adobe's two paragraph composers (Paragraph panel menu). The JSON names (`singleLine`,
+/// `everyLine`) are also `type.setStyle`'s values.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Composer {
+    /// Adobe Single-line Composer: each line broken on its own.
+    SingleLine,
+    /// Adobe Every-line Composer: the breaks of the whole paragraph chosen together.
+    #[default]
+    EveryLine,
+}
+
+/// The Hyphenation dialog (Paragraph panel menu › Hyphenation…). Ranges are Photoshop's; the
+/// engine rejects values outside them. The JSON field names are `type.setStyle`'s
+/// `"hyphenation"` keys, so a model value and a command value read the same.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Hyphenation {
+    /// Words Longer Than _ letters (2..=25; PSD `HyphenatedWordSize`).
+    pub words_longer_than: u8,
+    /// After First _ letters (1..=15; PSD `PreHyphen`).
+    pub after_first: u8,
+    /// Before Last _ letters (1..=15; PSD `PostHyphen`).
+    pub before_last: u8,
+    /// Hyphen Limit _ hyphens in a row (0..=25, 0 = no limit; PSD `ConsecutiveHyphens`).
+    pub hyphen_limit: u8,
+    /// Hyphenation Zone in points (ragged text; PSD `Zone`).
+    #[serde(rename = "zone")]
+    pub zone_pt: f32,
+    /// Hyphenate Capitalized Words.
+    pub capitalized: bool,
+    /// Hyphenate Last Word.
+    pub last_word: bool,
+    /// Hyphenate Across Column (stored only: PhotoCraft type has no columns).
+    pub across_column: bool,
+}
+
+impl Hyphenation {
+    pub const WORDS_LONGER_THAN: std::ops::RangeInclusive<u8> = 2..=25;
+    pub const AFTER_FIRST: std::ops::RangeInclusive<u8> = 1..=15;
+    pub const BEFORE_LAST: std::ops::RangeInclusive<u8> = 1..=15;
+    pub const HYPHEN_LIMIT: std::ops::RangeInclusive<u8> = 0..=25;
+    /// Hyphenation Zone range in points (0 to 120 inches).
+    pub const ZONE_PT: std::ops::RangeInclusive<f32> = 0.0..=8640.0;
+}
+
+impl Default for Hyphenation {
+    /// The ParagraphSheet values Photoshop files commonly hold: HyphenatedWordSize 6, PreHyphen 2,
+    /// PostHyphen 2, ConsecutiveHyphens 8, Zone 36, capitalized words, last word and across column
+    /// on. Not yet checked against a Photoshop 2026 sample.
+    fn default() -> Self {
+        Self { words_longer_than: 6, after_first: 2, before_last: 2, hyphen_limit: 8, zone_pt: 36.0, capitalized: true, last_word: true, across_column: true }
+    }
+}
+
+/// How a justified line with a single word aligns (Justification dialog).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SingleWord {
+    /// Full Justify: the word's letters spread to both edges.
+    #[default]
+    Justify,
+    Left,
+    Center,
+    Right,
+}
+
+/// The Justification dialog: minimum, desired and maximum spacing, in percent. The JSON field
+/// names are `type.setStyle`'s `"justification"` keys.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Justification {
+    /// Word Spacing, % of the space's width (0..=1000; PSD `WordSpacing`, as fractions).
+    #[serde(rename = "wordSpacing")]
+    pub word: [f32; 3],
+    /// Letter Spacing, % of a space (-100..=500; PSD `LetterSpacing`).
+    #[serde(rename = "letterSpacing")]
+    pub letter: [f32; 3],
+    /// Glyph Scaling, % of the glyph's width (50..=200; PSD `GlyphSpacing`).
+    #[serde(rename = "glyphScaling")]
+    pub glyph: [f32; 3],
+    #[serde(rename = "singleWord")]
+    pub single_word: SingleWord,
+}
+
+impl Justification {
+    pub const WORD: std::ops::RangeInclusive<f32> = 0.0..=1000.0;
+    pub const LETTER: std::ops::RangeInclusive<f32> = -100.0..=500.0;
+    pub const GLYPH: std::ops::RangeInclusive<f32> = 50.0..=200.0;
+}
+
+impl Default for Justification {
+    /// Photoshop's defaults: words 80/100/133 %, letters 0/0/0 %, glyphs 100/100/100 %.
+    fn default() -> Self {
+        Self { word: [80.0, 100.0, 133.0], letter: [0.0; 3], glyph: [100.0; 3], single_word: SingleWord::Justify }
+    }
+}
+
+/// A bulleted or numbered list item.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ListKind {
+    #[default]
+    Bullet,
+    Number,
+}
+
+/// The numbering styles of a numbered list (the `marker` of a [`ListKind::Number`] list).
+pub const LIST_NUMBER_STYLES: [&str; 5] = ["decimal", "lowerAlpha", "upperAlpha", "lowerRoman", "upperRoman"];
+
+/// A paragraph's list settings: Photoshop's Paragraph panel list controls. The JSON shape is
+/// `type.setStyle`'s `"list"` value: `{"type":"bullet|number","marker","start","level"}`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ListStyle {
+    #[serde(rename = "type")]
+    pub kind: ListKind,
+    /// The bullet character for a bulleted list, or one of [`LIST_NUMBER_STYLES`] for a numbered one.
+    pub marker: String,
+    /// The number of the first item (0..=9999).
+    pub start: u32,
+    /// Nesting level, 0 (top) ..= 8.
+    pub level: u8,
+}
+
+impl ListStyle {
+    pub const MAX_START: u32 = 9999;
+    pub const MAX_LEVEL: u8 = 8;
+
+    /// A list of `kind` with its default marker ("•" or decimal), starting at 1, at the top level.
+    pub fn new(kind: ListKind) -> Self {
+        Self { marker: Self::default_marker(kind).into(), kind, start: 1, level: 0 }
+    }
+
+    /// The marker a new list of `kind` gets.
+    pub fn default_marker(kind: ListKind) -> &'static str {
+        match kind {
+            ListKind::Bullet => "\u{2022}",
+            ListKind::Number => "decimal",
+        }
+    }
+}
+
+impl Default for ListStyle {
+    fn default() -> Self {
+        Self::new(ListKind::Bullet)
+    }
 }
 
 impl Default for ParagraphStyle {
@@ -215,6 +388,11 @@ impl Default for ParagraphStyle {
             auto_leading: 1.2,
             direction: TextDirection::Auto,
             hyphenate: false,
+            hyphenation: Hyphenation::default(),
+            justification: Justification::default(),
+            composer: Composer::EveryLine,
+            hanging_punctuation: false,
+            list: None,
             style_sheet: None,
         }
     }
@@ -294,6 +472,10 @@ pub struct TextWarp {
     /// Horizontal (true) or vertical warp axis.
     pub horizontal: bool,
 }
+
+#[cfg(test)]
+#[path = "text_pigment_tests.rs"]
+mod pigment_tests;
 
 #[cfg(test)]
 mod tests {
