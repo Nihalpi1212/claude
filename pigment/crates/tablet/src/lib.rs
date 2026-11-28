@@ -34,6 +34,8 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 pub mod appkit;
+pub mod ink; // Pigment (U3): Windows Ink tilt and rotation, the pure mapping
+pub mod wheel; // Pigment (U3): the stylus wheel beside the samples
 pub mod xi;
 
 #[cfg(target_os = "macos")]

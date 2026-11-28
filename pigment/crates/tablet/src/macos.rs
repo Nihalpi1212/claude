@@ -36,6 +36,7 @@ impl Monitor {
             return Err(Error::NotMainThread);
         }
         let state = RefCell::new(State::default());
+        let wheel = RefCell::new(crate::wheel::AppKitWheel::default()); // Pigment (U3)
         let handler = RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
             // SAFETY: AppKit calls a local monitor's handler with the event it is about to
             // dispatch, a valid `NSEvent` that it keeps alive for the duration of the call; we
@@ -48,6 +49,12 @@ impl Monitor {
                 && let Update::Set(sample) = st.handle(&raw)
             {
                 deliver(&callback, sample);
+            }
+            // Pigment (U3): the stylus wheel, beside the sample.
+            if let Ok(mut w) = wheel.try_borrow_mut()
+                && let Some(v) = w.handle(&raw)
+            {
+                crate::wheel::set(v);
             }
             // Pass the event on unchanged.
             event.as_ptr()
@@ -87,8 +94,10 @@ fn read(e: &NSEvent) -> RawEvent {
     } else {
         (0.0, (0.0, 0.0), 0.0)
     };
+    // Pigment (U3): the stylus wheel, also only on tablet point events.
+    let tangential = if point { e.tangentialPressure() } else { 0.0 };
     let (device, entering) = if proximity { (e.pointingDeviceType().0, e.isEnteringProximity()) } else { (0, false) };
-    RawEvent { kind, subtype, pressure, tilt, rotation, device, entering }
+    RawEvent { kind, subtype, pressure, tilt, rotation, device, entering, tangential }
 }
 
 fn is_mouse(kind: usize) -> bool {
@@ -157,9 +166,11 @@ mod tests {
             dbl(e, CGEventField::TabletEventTiltX, 0.5);
             dbl(e, CGEventField::TabletEventTiltY, -0.5);
             dbl(e, CGEventField::TabletEventRotation, 45.0);
+            dbl(e, CGEventField::TabletEventTangentialPressure, 0.5); // Pigment (U3)
         });
         let raw = read(&drag);
         assert_eq!((raw.kind, raw.subtype), (6, 1));
+        assert!((raw.tangential - 0.5).abs() < 0.01, "the stylus wheel: {raw:?}"); // Pigment (U3)
         let Update::Set(Some(s)) = st.handle(&raw) else { panic!("{raw:?}") };
         assert!((s.pressure - 0.25).abs() < 0.01, "{s:?}"); // Quartz keeps 8 bits of mouse pressure.
         assert!((s.tilt_x - 30.0).abs() < 0.1 && (s.tilt_y - 30.0).abs() < 0.1, "{s:?}");

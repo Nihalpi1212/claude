@@ -216,14 +216,63 @@ pub fn handle_pointer_message(message: u32, w_param: usize, pen_flags: impl FnOn
 }
 
 /// `GetPointerPenInfo`'s pen flags for a pointer (`None`: not a pen).
+#[allow(dead_code)] // Pigment (U3): the hooks read the whole pen info through `read_pen_info`.
 fn read_pen_flags(pointer_id: u32) -> Option<u32> {
+    read_pen_info(pointer_id).map(|info| info.flags)
+}
+
+/// Pigment (U3): `GetPointerPenInfo` for a pointer (`None`: not a pen): the pen flags, and the
+/// pressure, rotation and tilt with the mask saying which of them the pen reports.
+fn read_pen_info(pointer_id: u32) -> Option<crate::ink::PenInfo> {
     // SAFETY: `info` is a stack-allocated buffer initialized to zero that outlives the call, and
     // `pointer_id` comes from a WM_POINTER message; an unknown id makes the call fail, not crash.
     let info = unsafe {
         let mut info: POINTER_PEN_INFO = std::mem::zeroed();
         (GetPointerPenInfo(pointer_id, &mut info) != 0).then_some(info)
     }?;
-    Some(info.pen_flags)
+    Some(crate::ink::PenInfo {
+        flags: info.pen_flags,
+        mask: info.pen_mask,
+        pressure: info.pressure,
+        rotation: info.rotation,
+        tilt_x: info.tilt_x,
+        tilt_y: info.tilt_y,
+    })
+}
+
+/// Pigment (U3): the pen's last Windows Ink reading (tilt and rotation that winit drops), kept
+/// while the last pointer message was the pen's ([`crate::ink::next_pose`]).
+static POSE: std::sync::Mutex<Option<crate::Sample>> = std::sync::Mutex::new(None);
+
+fn pose_slot() -> std::sync::MutexGuard<'static, Option<crate::Sample>> {
+    POSE.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Pigment (U3): [`handle_pointer_message`] with the whole pen info, which also keeps the reading
+/// [`pen_pose`] returns. The hooks call this; tests call it with a fake reader.
+pub fn handle_pen_message(message: u32, w_param: usize, pen_info: impl FnOnce(u32) -> Option<crate::ink::PenInfo>) {
+    let mut read = None;
+    let mut asked = false;
+    handle_pointer_message(message, w_param, |id| {
+        asked = true;
+        read = pen_info(id);
+        read.map(|info| info.flags)
+    });
+    let input = if asked {
+        crate::ink::PoseInput::Reading { info: read, eraser: pen_end() == Some(true) }
+    } else if message == WM_POINTERLEAVE && PEN_ID.load(Ordering::Relaxed) == NO_PEN {
+        crate::ink::PoseInput::PenLeft
+    } else {
+        crate::ink::PoseInput::Keep
+    };
+    let mut pose = pose_slot();
+    *pose = crate::ink::next_pose(*pose, input);
+}
+
+/// Pigment (U3): the pen's tilt and barrel rotation from Windows Ink (pressure: winit's touch
+/// force has it), `None` when the last pointer was not a pen or the pen left range.
+pub fn pen_pose() -> Option<crate::Sample> {
+    *pose_slot()
 }
 
 /// `WH_GETMESSAGE`: the posted pointer messages, as the UI thread takes them from its queue.
@@ -235,7 +284,8 @@ unsafe extern "system" fn get_msg_proc(code: i32, w_param: usize, l_param: isize
         // The WinTab backend shares this thread hook: it decodes the driver's proximity
         // messages (and ignores everything else) to clear a pen that left the tablet.
         crate::wintab::on_message(msg.message, msg.w_param, msg.l_param);
-        handle_pointer_message(msg.message, msg.w_param, read_pen_flags);
+        // Pigment (U3): the whole pen info, for tilt and rotation too.
+        handle_pen_message(msg.message, msg.w_param, read_pen_info);
     }
     // SAFETY: CallNextHookEx passes the parameters down the hook chain. MSDN notes the first
     // parameter is ignored and can be null.
@@ -250,8 +300,9 @@ unsafe extern "system" fn call_wnd_proc(code: i32, w_param: usize, l_param: isiz
         // CWPSTRUCT describing the message being sent.
         let msg = unsafe { &*(l_param as *const CWPSTRUCT) };
         match msg.message {
-            WM_POINTERENTER => handle_pointer_message(msg.message, msg.w_param, read_pen_flags),
-            WM_POINTERLEAVE => handle_pointer_message(msg.message, msg.w_param, |_| None),
+            // Pigment (U3): the whole pen info, for tilt and rotation too.
+            WM_POINTERENTER => handle_pen_message(msg.message, msg.w_param, read_pen_info),
+            WM_POINTERLEAVE => handle_pen_message(msg.message, msg.w_param, |_| None),
             _ => {}
         }
     }
@@ -313,6 +364,7 @@ impl Drop for Monitor {
         PEN_END.store(encode_end(None), Ordering::Relaxed);
         PEN_ID.store(NO_PEN, Ordering::Relaxed);
         CONTACT_END.store(encode_end(None), Ordering::Relaxed);
+        *pose_slot() = None; // Pigment (U3)
     }
 }
 
@@ -520,6 +572,37 @@ mod tests {
         assert_eq!(installed, [WH_GETMESSAGE, WH_CALLWNDPROC]);
         assert!(!monitor.hooks[0].is_null());
         assert!(!monitor.tracks_leave());
+    }
+
+    /// Pigment (U3): the hooks' Windows Ink pipeline with a synthetic `POINTER_PEN_INFO`: the pen's
+    /// tilt and rotation are kept for the UI while the pen is the last pointer, and the flags still
+    /// drive the barrel button and the eraser end.
+    #[test]
+    fn pen_info_keeps_tilt_and_rotation_for_the_ui() {
+        use crate::ink::{PEN_MASK_PRESSURE, PEN_MASK_ROTATION, PEN_MASK_TILT_X, PEN_MASK_TILT_Y, PenInfo};
+        let _globals = GLOBALS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let all = PEN_MASK_PRESSURE | PEN_MASK_ROTATION | PEN_MASK_TILT_X | PEN_MASK_TILT_Y;
+        let pen = |flags: u32, tilt_x: i32, rotation: u32| {
+            move |id: u32| (id == 7).then_some(PenInfo { flags, mask: all, pressure: 512, rotation, tilt_x, tilt_y: -10 })
+        };
+        handle_pen_message(WM_POINTERENTER, wp(0), pen(0, 20, 30));
+        let s = pen_pose().expect("the pen entering range");
+        assert_eq!((s.tilt_x, s.tilt_y, s.rotation, s.eraser), (20.0, -10.0, 30.0, false));
+        handle_pen_message(WM_POINTERDOWN, wp(POINTER_FLAG_INCONTACT), pen(PEN_FLAG_BARREL, 35, 90));
+        assert_eq!(pen_pose().map(|s| (s.tilt_x, s.rotation)), Some((35.0, 90.0)));
+        assert!(is_barrel_button_down(), "the flags still reach the barrel button");
+        handle_pen_message(WM_POINTERUP, wp(0), |_| panic!("up does not read the pen"));
+        assert_eq!(pen_pose().map(|s| s.rotation), Some(90.0), "lifting keeps the reading");
+        handle_pen_message(WM_POINTERUPDATE, wp(0), pen(PEN_FLAG_INVERTED, 0, 0));
+        assert!(pen_pose().is_some_and(|s| s.eraser) && pen_end() == Some(true), "the eraser end");
+        handle_pen_message(WM_POINTERDOWN, 2 | ((POINTER_FLAG_INCONTACT as usize) << 16), |_| None);
+        assert_eq!(pen_pose(), None, "a finger touching paints with no pen tilt");
+        handle_pen_message(WM_POINTERUPDATE, wp(0), pen(0, 15, 10));
+        handle_pen_message(WM_POINTERLEAVE, 2, |_| None);
+        assert!(pen_pose().is_some(), "the finger leaving keeps the pen");
+        handle_pen_message(WM_POINTERLEAVE, wp(0), |_| None);
+        assert_eq!(pen_pose(), None, "the pen leaving range");
+        let _ = take_pen_end();
     }
 
     #[test]
