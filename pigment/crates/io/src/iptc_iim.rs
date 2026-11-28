@@ -23,6 +23,11 @@ use crate::{ExportOptions, ExportResult, XmpEmbed};
 
 /// The image resource that holds the IIM stream.
 pub const RESOURCE: u16 = 1028;
+/// The image resource that holds the MD5 digest of the IIM stream (Photoshop's "IPTC-NAA digest").
+/// Readers that follow the Metadata Working Group's guidance take a digest that does not match
+/// the stream as a sign that an older application changed the IIM, and then prefer the IIM to
+/// the XMP; so a rewritten stream drops it.
+pub const DIGEST: u16 = 1061;
 /// 1:90 Coded Character Set: UTF-8.
 const UTF8: &[u8] = b"\x1b%G";
 /// The longest dataset written with a standard (two-byte) length.
@@ -255,13 +260,15 @@ pub fn encode(fields: &[(u8, String)], keep: Option<&[u8]>) -> Vec<u8> {
 }
 
 /// Keeps resource 1028 in step with a File Info edit from `old` to `new` (the XMP packets): when a
-/// mapped field changed, 1028 is rewritten (added, or removed when nothing is left); otherwise the
-/// resources are left as they are, byte for byte.
+/// mapped field changed, 1028 is rewritten (added, or removed when nothing is left) and its digest
+/// (1061) dropped; otherwise the resources are left as they are, byte for byte.
 pub fn sync_resource(resources: &mut Vec<(u16, String, Arc<Vec<u8>>)>, old: Option<&str>, new: Option<&str>) {
     let fields = from_xmp(new);
     if from_xmp(old) == fields {
         return;
     }
+    // The old stream's digest no longer describes what is written.
+    resources.retain(|(id, _, _)| *id != DIGEST);
     let at = resources.iter().position(|(id, _, _)| *id == RESOURCE);
     let stream = encode(&fields, at.map(|i| resources[i].2.as_slice()));
     match (at, stream.is_empty()) {
@@ -402,6 +409,22 @@ mod tests {
         let sets = datasets(&new);
         assert_eq!(sets.iter().map(|(r, d, _)| (*r, *d)).collect::<Vec<_>>(), [(1, 0), (1, 90), (2, 0), (2, 5), (2, 15), (2, 20), (3, 10)]);
         assert_eq!(decode(&new), [(5, "New title".into()), (15, "ART".into()), (20, "Cé".into())]);
+    }
+
+    /// Review FU: a rewritten stream kept the old IPTC digest, which tells MWG-guided readers
+    /// (Photoshop among them) that the IIM was changed behind the XMP's back.
+    #[test]
+    fn a_rewritten_stream_drops_its_stale_digest_and_an_unchanged_one_keeps_it() {
+        let old = encode(&[(5, "Old".into())], None);
+        let packet = |title: &str| packet(&[("dc:title".to_string(), Out::Alt(title.into()))]);
+        let mut res =
+            vec![(RESOURCE, String::new(), Arc::new(old.clone())), (DIGEST, String::new(), Arc::new(vec![7; 16])), (1005, String::new(), Arc::new(vec![1]))];
+        let kept = res.clone();
+        sync_resource(&mut res, Some(&packet("Old")), Some(&packet("Old")));
+        assert_eq!(res, kept, "nothing mapped changed");
+        sync_resource(&mut res, Some(&packet("Old")), Some(&packet("New")));
+        assert_eq!(res.iter().map(|(id, _, _)| *id).collect::<Vec<_>>(), [RESOURCE, 1005]);
+        assert_eq!(decode(&res[0].2), [(5, "New".to_string())]);
     }
 
     #[test]
