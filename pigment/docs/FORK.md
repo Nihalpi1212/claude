@@ -956,7 +956,7 @@ constant-colour noise fills and kept the raw block for the rest, #6272; `.grd` i
 | `crates/io/src/effects_map.rs` | `gradient_from`: `grd_noise::noise_stops`; `gradient_keys`: `grd_noise::grad_or_noise` |
 | `crates/io/src/adjust_map.rs` | `parse_gradient_map`: `grd_noise::grdm_noise` before the stop-count check; the `grdm` writer patches a noise source's settings in (`grd_noise::patch_grdm`) |
 | `crates/io/src/gradient_bake.rs` | `bake_source`: a noise source bakes its settings |
-| `crates/engine/src/presets/gradients.rs` | `pub mod noise;`; `GradientPreset.noise`; `to_json`, `from_params`, `tool_preset`, `preset_param`, `select`, `apply`, `new_preset` and `apply_preset_stop` take `noise`; the params strings |
+| `crates/engine/src/presets/gradients.rs` | `pub mod noise;`; `GradientPreset.noise`; `to_json`, `from_params`, `tool_preset`, `preset_param`, `select`, `apply`, `new_preset` and `apply_preset_stop` take `noise`; `with_transparency` drops it (transparency stops of their own make it solid); the params strings |
 | `crates/engine/src/presets/gradients/export_grd.rs` (P1a's) | `to_grd` flags noise; `export` writes through `grd_noise::write_grd` |
 | `crates/engine/src/cmd/gradient_fill_cmds.rs` | `preset_param` takes `noise`; `apply_set` ends with `noise::apply_fill_params`; `new_layer` keeps the preset's noise; `apply_stop` drops it; `describe_fill` reports it; the params strings |
 | `crates/engine/src/cmd/preset_import_cmds.rs` | `import_grd` reads `grd_noise::grd_noise` and imports noise gradients; the warning names what is still skipped |

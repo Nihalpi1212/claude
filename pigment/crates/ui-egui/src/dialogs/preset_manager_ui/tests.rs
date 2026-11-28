@@ -244,8 +244,7 @@ fn the_selection_follows_its_presets_when_the_rows_move() {
     take(&mut app, &ctx);
     let now = names(&mut app);
     assert_eq!(now[0], "Added Elsewhere");
-    let selected: Vec<String> =
-        fields(&mut app)["selected"].as_array().unwrap().iter().map(|i| now[i.as_u64().unwrap() as usize].clone()).collect();
+    let selected: Vec<String> = fields(&mut app)["selected"].as_array().unwrap().iter().map(|i| now[i.as_u64().unwrap() as usize].clone()).collect();
     assert_eq!(selected, chosen);
     // Delete removes exactly those.
     set(&mut app, "press", json!("delete"));
