@@ -308,7 +308,13 @@ fn single_line(it: &[Item], width: &dyn Fn(usize) -> f64, s: &Setting, p: &Param
         let d = l - natural(a, b);
         if d >= 0.0 {
             let y = sums.y[b.min(len)] - sums.y[a];
-            if y > 0.0 { d / y } else if d > 1e-6 { f64::INFINITY } else { 0.0 }
+            if y > 0.0 {
+                d / y
+            } else if d > 1e-6 {
+                f64::INFINITY
+            } else {
+                0.0
+            }
         } else {
             let z = sums.z[b.min(len)] - sums.z[a];
             if z > 0.0 { d / z } else { f64::NEG_INFINITY }
@@ -354,7 +360,7 @@ fn single_line(it: &[Item], width: &dyn Fn(usize) -> f64, s: &Setting, p: &Param
             let lo = best.unwrap_or(start);
             let hi = over.unwrap_or(len);
             let allowed = s.hyphen_limit == 0 || run < s.hyphen_limit;
-            let hy = (lo + 1..hi).filter(|&h| allowed && hyph(h) && fits(start, h, l)).last();
+            let hy = (lo + 1..hi).rev().find(|&h| allowed && hyph(h) && fits(start, h, l));
             if let Some(h) = hy {
                 let take = match best {
                     None => true,
@@ -366,7 +372,7 @@ fn single_line(it: &[Item], width: &dyn Fn(usize) -> f64, s: &Setting, p: &Param
                 }
             }
             if choice.is_none() {
-                choice = (start + 1..hi).filter(|&e| emergency(e) && fits(start, e, l)).last().or(over).or(Some(len));
+                choice = (start + 1..hi).rev().find(|&e| emergency(e) && fits(start, e, l)).or(over).or(Some(len));
             }
         }
         let b = choice.unwrap_or(len);
@@ -391,7 +397,15 @@ fn is_hangul(c: char) -> bool {
 /// automatic hyphenation `points` (sorted), no breaks where `no_break(offset)` holds on either
 /// side (`no_break(offset)` of the character before a break), and emergency breaks inside words wider than `narrow` px. `hyphen(i)` is the width of a
 /// hyphen after unit `i`.
-pub(super) fn set_befores(text: &str, units: &mut [Unit], opps: &[usize], points: &[usize], no_break: &dyn Fn(usize) -> bool, hyphen: &dyn Fn(usize) -> f64, narrow: f64) {
+pub(super) fn set_befores(
+    text: &str,
+    units: &mut [Unit],
+    opps: &[usize],
+    points: &[usize],
+    no_break: &dyn Fn(usize) -> bool,
+    hyphen: &dyn Fn(usize) -> f64,
+    narrow: f64,
+) {
     for i in 1..units.len() {
         let at = units[i].range.start;
         let prev_at = units[i - 1].range.start;
@@ -688,7 +702,7 @@ impl Para<'_> {
         let Some(x) = out.clusters[c0..].iter().filter(|c| c.range.end == b && !c.rtl).map(|c| c.x + c.advance).reduce(f32::max) else {
             return 0.0;
         };
-        let Some(g) = out.glyphs[g0..].iter().zip(&out.glyph_ranges[g0..]).filter(|(_, r)| r.end == b).map(|(g, _)| *g).last() else {
+        let Some(g) = out.glyphs[g0..].iter().zip(&out.glyph_ranges[g0..]).rev().find(|(_, r)| r.end == b).map(|(g, _)| *g) else {
             return 0.0;
         };
         let Some(face) = out.faces.get(g.face as usize) else { return 0.0 };

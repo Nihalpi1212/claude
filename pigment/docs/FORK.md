@@ -1458,6 +1458,44 @@ Tests: `crates/text/src/pigment_type_tests.rs`, `crates/text/src/layout/whole_px
 | `crates/ui-egui/src/panels/registry.rs` | the `character` entry's `rows`, `states`, `run` |
 | `crates/ui-egui/src/menus/invoke.rs` | `invoke_type_command`: the menu's ids take the panel's target |
 
+### The Single-line and Every-line composers and hyphenation (typography, part 3)
+
+The third typography package (PORTS-B B3) breaks box text with Adobe's composers and hyphenates it, in
+`crates/text/src/layout/compose.rs` (new).
+- **Which paragraphs compose:** horizontal box text whose paragraph uses the Every-line composer (Photoshop's
+  default and `ParagraphStyle::default()`) or Hyphenate. Point, path, area and vertical type, and a Single-line
+  paragraph that doesn't hyphenate, keep parley's greedy breaks unchanged (the fast path; native documents saved
+  before B1 and PSDs without `EveryLineComposer` read as Single-line, so they keep their breaks).
+- **How:** the shaped paragraph's clusters become `craft::text::linebreak` boxes, glue and penalties (UAX #14
+  opportunities from `craft::text::segment`, hyphenation points from `craft::text::hyphen` in each run's language,
+  explicit and soft hyphens, emergency breaks inside words wider than the box). Every-line runs Knuth and Plass
+  (passes without hyphenation, with it, then accepting anything; the JavaScript Pigment's TeX costs); Single-line is
+  that app's `composeSingle` (spacing within Minimum..Maximum beats a hyphen; ragged text hyphenates only past the
+  Hyphenation Zone). Hyphen Limit, Words Longer Than, After First, Before Last, Hyphenate Capitalized Words and
+  Hyphenate Last Word apply; No Break ranges take no break inside or at their end and no hyphen.
+- **parley still lays the lines out:** it breaks the paragraph again, a line at a time, with each line's
+  maximum width set to the width the composer chose, so its own breaker ends the line there and it still aligns and
+  justifies the line. A hyphenated word is shaped `WordBreak::BreakAll` so parley may end a line inside it; the hyphen
+  (U+2010, else `-`, in the face of the line's last glyph) is drawn after the last glyph and has no text offset, so
+  carets, selections and `LineInfo.range` stay in layer offsets. Should parley's lines start elsewhere than the
+  composer's (an opportunity only one breaker sees), the paragraph takes parley's greedy lines.
+- **Not yet:** word spaces don't shrink below their width (parley's justification only stretches; B4 adds shrinking
+  and letter and glyph tiers), area type doesn't hyphenate, a right-to-left paragraph composes without hyphenation.
+- **Dependencies:** `photocraft-text` enables the `craft` facade's `text` and `text-german`, `-french`, `-spanish`,
+  `-italian`, `-dutch`, `-portuguese` (hypher's patterns; no GPL Slovak: `cargo tree -e features -i hypher`). The
+  pattern notices are in `NOTICE` and `ATTRIBUTION.md`.
+Tests: `crates/text/src/layout/compose_tests.rs` (the JavaScript composer tests on fixed advances),
+`crates/text/src/pigment_compose_tests.rs` (Inter layouts; an `#[ignore]` bench for a 2,000-word box).
+
+| Upstream file | Hook |
+|---|---|
+| `crates/text/Cargo.toml` | the `craft` features `text`, `text-german`, `text-french`, `text-spanish`, `text-italian`, `text-dutch`, `text-portuguese` |
+| `crates/text/src/layout.rs` | `mod compose;` |
+| `crates/text/src/layout/shaping.rs` | `Para.hyphens` (field and its init); `shape`: `self.push_hyphen_words(&mut b)`; `break_lines`: `if !self.compose_lines(layout)` around parley's `break_all_lines` |
+| `crates/text/src/layout/lines.rs` | `place_line`: `state.extra += self.place_hyphen(out, line, c0, g0)` |
+| `crates/text/src/lib.rs` | `#[cfg(test)] mod pigment_compose_tests;` |
+| `NOTICE`, `ATTRIBUTION.md` | the hyphenation dictionary and pattern notices |
+
 ## Keeping the rebrand: `scripts/pigment-rebrand.py`
 
 Most of the rebrand is mechanical and done by [`scripts/pigment-rebrand.py`](../scripts/pigment-rebrand.py):

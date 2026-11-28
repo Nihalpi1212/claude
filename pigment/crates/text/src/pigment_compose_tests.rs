@@ -68,7 +68,11 @@ fn a_long_word_hyphenates_in_a_narrow_box_and_offsets_stay_in_layer_text() {
     let (x, top, _) = l.caret(b);
     assert!(top > l.lines[0].baseline, "caret {x} {top} on the second line");
     // Hyphenation points come from craft-text's English dictionary.
-    let pts = craft::text::hyphen::hyphen_points_in("internationalization", &craft::text::hyphen::Limits { min_word: 6, after_first: 2, before_last: 2, capitalized: true }, craft::text::hyphen::Lang::English);
+    let pts = craft::text::hyphen::hyphen_points_in(
+        "internationalization",
+        &craft::text::hyphen::Limits { min_word: 6, after_first: 2, before_last: 2, capitalized: true },
+        craft::text::hyphen::Lang::English,
+    );
     assert!(pts.contains(&b), "{b} in {pts:?}");
 }
 
@@ -158,7 +162,12 @@ fn single_line_without_hyphenation_is_parleys_greedy_layout() {
     assert!(l.lines.len() > 3);
     for (i, li) in l.lines.iter().enumerate().take(l.lines.len() - 1) {
         let next_first = t.text[l.lines[i + 1].range.clone()].split(' ').next().unwrap_or("");
-        let mut probe = boxed(&format!("{} {next_first}", t.text[li.range.clone()].trim()), 12.0, 10_000.0, ParagraphStyle { composer: Composer::SingleLine, ..Default::default() });
+        let mut probe = boxed(
+            &format!("{} {next_first}", t.text[li.range.clone()].trim()),
+            12.0,
+            10_000.0,
+            ParagraphStyle { composer: Composer::SingleLine, ..Default::default() },
+        );
         probe.shape = TextShape::Point;
         let w = e.layout(&probe, 72.0).lines[0].x1;
         assert!(w > 150.0, "line {i} could take {next_first:?}: {w}");
@@ -176,7 +185,8 @@ fn composed_justified_lines_stay_flush_with_the_box() {
         // Justified: each line's last letter (its hyphen, on a hyphenated line) ends at the box's
         // right edge. (`LineInfo.x1` is parley's unjustified extent, as on the fast path.)
         let ink = |i: usize| {
-            let text_end = l.clusters.iter().filter(|c| c.line == i && !t.text[c.range.clone()].trim().is_empty()).map(|c| c.x + c.advance).fold(f32::MIN, f32::max);
+            let text_end =
+                l.clusters.iter().filter(|c| c.line == i && !t.text[c.range.clone()].trim().is_empty()).map(|c| c.x + c.advance).fold(f32::MIN, f32::max);
             let hyphen = l.glyphs.iter().zip(&l.glyph_ranges).find(|(g, r)| r.is_empty() && (g.y - l.lines[i].baseline).abs() < 1e-3).map(|(g, _)| g.x);
             (text_end, hyphen)
         };
