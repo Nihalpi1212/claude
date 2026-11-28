@@ -5,7 +5,7 @@ and §9 U1; REBASE-FU "U1" (it wins). Sixth package of group FU (F3, F2, F1, U4,
 
 **CI first.** At the start (08:05 UTC) the newest finished runs were 46121376495 (`a123260`, **cancelled**: superseded
 by the next push, not red) and 46115758573 (`e8ec9d5`, **green**); 46118018605 (`53805fb`) then finished **green**.
-46123186831 (`58a4854`, U2's last) was still in progress when I last looked. Nothing red, so no CI commit. **The next
+46123186831 (`58a4854`, U2's last) was still in progress when I last looked (09:30). Nothing red, so no CI commit. **The next
 engineer checks 46123186831 and the runs on this package's commit first.**
 
 **REBASE-FU's line numbers** checked against the tree: `info.rs` `info_panel` is at :162 (REBASE said :176), `byte`
@@ -19,7 +19,8 @@ Insert Conditional line, mine is right after it; `app.rs` histogram restore is :
 
 ## Commit (pushed)
 
-- (see the commit list in the return; one commit: engine `float` + interface + docs)
+- `b7ea01f` Pigment Info panel readout modes and deep values (U1), engine, interface and docs: two readouts in ten
+  modes, a mode per Color Sampler, 16-bit and 32-bit values
 
 ## What was built
 
@@ -103,7 +104,12 @@ Results (nextest `--profile ci`, `TMPDIR=/dev/shm/pt`, CI's font and i18n dirs):
 - `-p photocraft-ui-egui --features photocraft-io/heif --lib -E 'test(/info_readout|panels::info|info_ruler|rulers::tests|panel_docking|registry/)'`:
   41 run; one of mine failed first (expected 9830, the 16-bit storage gives 9831; the expectation was wrong), fixed:
   `info_readout` 15 passed.
-- Whole ui-egui suite: RESULT
+- Whole ui-egui suite (`-j 3 -p photocraft-ui-egui --features photocraft-io/heif --lib --bins --tests`): **3827 passed,
+  1 failed**, 6 skipped (about 21 minutes). The failure was `it ai_assistant::adjustments_and_filters_are_clamped_and_take_json_text`
+  ("not enough working memory" from `photocraft_raster::memory::try_reserve_operation` on a Gaussian Blur): **container
+  only**, the page cache had filled RAM after the long build (`free`: 4 GB free, 10 GB cache) and the memory gate
+  counted it. After `echo 1 > /proc/sys/vm/drop_caches` all 31 `ai_assistant` tests pass. Nothing of U1 is on that
+  path. If it shows again, drop the caches and re-run.
 - `cargo fmt --all -- --check`; `cargo clippy --locked --features heif -p photocraft-io -p photocraft-engine
   -p photocraft-ui-egui --all-targets -- -D warnings`; `python3 scripts/pigment-rebrand.py --check`; `cargo xtask
   layers`, `panel-commands`, `test-binaries`, `scorecard --check`: all clean. No engine command added (only a result
@@ -122,7 +128,9 @@ Results (nextest `--profile ci`, `TMPDIR=/dev/shm/pt`, CI's font and i18n dirs):
 
 ## For the next package
 
-- **CI**: check 46123186831 (`58a4854`) and the run on this package's commit first.
+- **CI**: check 46123186831 (`58a4854`) and the run on `b7ea01f` first (not waited for).
+- **Container**: the memory gate reads free memory, not available; after a long build drop the page cache before a
+  big test run, or image-filter tests refuse work (see Tests).
 - **U3** is the last of group FU; it touches nothing of mine.
 - The Info panel menu now exists (`info_readout::panel_rows`): anything else for the Info panel menu goes there.
 - A `CommandSet` takes unit variants only, and `CommandState` is keyed by command id (params ignored), so a menu of
