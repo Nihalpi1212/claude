@@ -762,6 +762,8 @@ pub mod history_options_ui;
 pub(crate) mod image_processor_ui;
 pub mod jpeg_options_ui;
 pub mod layer_picker;
+// Pigment: File Info's tabs (F1)
+pub(crate) mod file_info_ui;
 pub mod layer_style;
 // Pigment: the first Save over a Pigment 0.1–0.4 file asks first.
 pub mod legacy_save_prompt;

@@ -33,6 +33,19 @@ The **Save As…** dialog also lists OpenRaster, PNG, JPEG, JPEG XL, WebP, TIFF,
 
 A `.pigment` file saved by Pigment 0.5 holds the same format as PhotoCraft's `.pcraft` files, so Pigment opens `.pcraft` files and saves them back as they are. Pigment 0.4 cannot open the new `.pigment` files.
 
+## Describe a file: File Info
+
+**File › File Info…** shows and edits the file's description, as Photoshop's File Info does, in tabs:
+
+- **Basic**: title, author, description, a **Rating** of 0 to 5 stars, the description writer, keywords and copyright, and when the file was created and changed and by which application.
+- **Camera Data**: what the camera recorded (make and model, lens, exposure, aperture, ISO, flash, white balance and more), read only.
+- **Origin**, **IPTC** and **IPTC Extension**: where and when the picture was taken, headline, credit, source, instructions, urgency, the creator's contact details, subject and scene codes, alt text for accessibility, the people, places and organisations shown, model and property releases, licensing and artwork. A field that holds a list takes several entries separated by `;`. For a list of places or licensors, the tab shows the first one.
+- **GPS Data**: the position the camera recorded, read only.
+- **Raw Data**: the XMP metadata as it is stored, with **Copy**.
+- **Audio/Video Data**, **DICOM** and **Photoshop** (the history log) appear when the file has them.
+
+Pigment saves the fields in the file's XMP metadata, and also keeps the IPTC copy that older applications read (in a PSD, and in a JPEG exported with **Metadata: All**) in step. A JPEG that has only that older IPTC copy opens with its fields filled in. OK adds one step to the History panel.
+
 ## Good to know
 
 Saving a PSD again keeps the layers and the rendered result, but the file is not byte for byte the same as the one you opened. Pigment rewrites image resources, layer records and the composite. It keeps parts it does not model yet instead of dropping them. Photoshop does not yet open every PSD that Pigment writes exactly as Pigment shows it; keep your original file until you have checked the result.
