@@ -10,8 +10,13 @@ macOS-only code was compiled for those targets (see "The other platforms"). The 
 `docs/hardware-parity.md` ("Pigment: to check on hardware") and below.
 
 **CI first.** At the start (about 09:20 UTC) the newest finished run was 46123186831 (`58a4854`, U2's last), **green**;
-46129580711 (`b7ea01f`, U1) was in progress. Nothing red, so no CI commit. **The next engineer checks 46129580711 and
-the runs on this package's commits first** (not waited for, as the brief says).
+46129580711 (`b7ea01f`, U1) was in progress; it finished **green** (checked at 11:15 after the restart). Nothing red,
+so no CI commit. **The next engineer checks the runs on this package's commits first** (not waited for, as the brief
+says).
+
+**A container restart at about 11:10 UTC** stopped the first engineer during the last checks, with nothing committed.
+The second engineer reran every final check on the tree as it was, found one Windows compile error (see "Found in the
+code", 6), committed in three parts and finished these notes.
 
 **REBASE-FU's line numbers** checked against the tree: `windows.rs` `POINTER_PEN_INFO` :90-98, `read_pen_flags` :219,
 `handle_pointer_message` :204, `next_state` :178, `Monitor::install` :275 (all matched; U4's shell32 section is at the
@@ -22,7 +27,15 @@ end, kept); `apps/photocraft/src/tablet.rs` `sink` :33, `install_windows` :40, m
 
 ## Commits (pushed)
 
-(filled in below)
+- `7594595` Pigment pen rotation turns the tip with the pen (U3, #1301), paint and interface: the barrel's clockwise
+  rotation turns the tip clockwise (`dynamics.rs`, `brush_tests.rs`, `pen_rotation_tests.rs`, `brush_cursor.rs`).
+- `65f1dcc` Pigment pen tablets (U3), tablet: Windows Ink tilt and rotation kept by the pointer hooks, the stylus wheel
+  on macOS and WinTab (`ink.rs`, `wheel.rs`, `windows.rs`, `wintab.rs`, `appkit.rs`, `macos.rs`, `lib.rs`).
+- `34c2234` Pigment pen tablets (U3), interface, app and docs: Windows Ink tilt and rotation reach the brush, the stylus
+  wheel as paint.stroke's 8th value (`pen_extras.rs` and its tests, `stylus.rs`, `canvas.rs`, `strokes.rs`,
+  `services.rs`, `lib.rs`; the app's `tablet.rs`, `tablet/rotation_tests.rs`, `main.rs`; the three docs).
+
+Each builds on its own (the paint fix uses nothing new; the tablet crate's new modules are used only by the third).
 
 ## Found in the code (where the spec and REBASE-FU were wrong)
 
@@ -52,6 +65,10 @@ end, kept); `apps/photocraft/src/tablet.rs` `sink` :33, `install_windows` :40, m
 4. **The wheel column already existed.** `paint.stroke`'s points already read an 8th value, `wheel` (default 1), and
    the params string already named it (`brush_cmds.rs:55`, `:1455`). So no engine format change: only the UI writes it
    now. The panic hunt was run anyway (the paint crate changed).
+6. **WinTab's packet fields must follow PKTDEF.H.** The first `WheelPacket` listed `orientation, tangent_pressure`;
+   `wintab-sys`'s `packet!` asserts the header's order at compile time (`pkTangentPressure` is 11, `pkOrientation`
+   12), so the Windows build failed ("fields must follow PKTDEF.H order without repeats"). Linux never compiles
+   `wintab.rs`, so only the cross check showed it. Now `normal_pressure, tangent_pressure, orientation`.
 5. **The wheel cannot travel with the samples.** Neither `photocraft_tablet::Sample` (whose struct literals are in ~25
    upstream lines) nor the framework's `PointerSample` (`#[non_exhaustive]`, craft-libs) has a wheel. So the readers
    store the latest wheel in `photocraft_tablet::wheel` (an atomic), read with the Windows Ink pose through the same
@@ -172,19 +189,24 @@ New:
 Changed upstream tests: `crates/paint/src/brush_tests.rs` `tilt_direction_and_rotation_drive_angle` (+30° → −30°) and
 `brush_projection_foreshortens_along_tilt_and_turns_with_rotation` (+90° → −90°).
 
-Results (nextest `--profile ci`, `TMPDIR=/dev/shm/pt`, CI's font and i18n dirs):
-- `-p photocraft -p photocraft-tablet -p photocraft-paint` (whole) and `-p photocraft-ui-egui` filtered to
-  `pen_extras|stylus|paint_tool|brush_cursor|brush_panel|brush_sections|strokes`, `--features heif --lib --bins --tests`:
-  572 run, 571 passed; the one failure was my own pipeline test's assertion for the 0° case (it expected a rotation
-  column a 0° stroke rightly has not), fixed; then `rotation_tests|tablet::` 9 passed.
-- `-p photocraft-paint --lib --tests`: 247 passed (earlier run, before the ui work).
-- `-p photocraft-engine --features photocraft-io/heif --lib --tests -E 'test(/brush|paint|stroke|mixer|retouch|pencil|eraser|smudge|tool_presets|tpl/)'`: 661 passed.
-- Panic hunt (`cargo test -p photocraft-engine --features photocraft-io/heif --test panic_hunt -- --ignored`): 1 passed.
-- Whole ui-egui suite (`-j 3 -p photocraft-ui-egui --features photocraft-io/heif --lib --bins --tests`): see below.
-- `cargo fmt --all -- --check`; `cargo clippy --locked --features heif -p photocraft-tablet -p photocraft-paint
-  -p photocraft-ui-egui -p photocraft --all-targets -- -D warnings`; `python3 scripts/pigment-rebrand.py --check`:
-  clean. No crate, preference or panel command added, so `cargo xtask layers`/`panel-commands`/`scorecard` were not
-  required (see below for what was run).
+Results. The first engineer's runs (before the restart) are kept in the snapshot's history; these are the final
+runs on the committed tree, after the restart (nextest `--profile ci`, `TMPDIR=/dev/shm/pt`, CI's font and i18n
+dirs, `CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_STRIP=symbols`):
+- `cargo fmt --all -- --check`: clean. `python3 scripts/pigment-rebrand.py --check`: clean.
+- `cargo clippy -j 4 --locked --features heif -p photocraft-tablet -p photocraft-paint -p photocraft-ui-egui
+  -p photocraft --all-targets -- -D warnings`: clean.
+- `-p photocraft -p photocraft-tablet -p photocraft-paint --features heif --lib --bins --tests`: **493 passed**, 3
+  skipped (includes the #1301 pipeline test, `pen_rotation_tests`, `ink`, `wheel`, the two changed brush tests).
+- `-p photocraft-ui-egui --features photocraft-io/heif --lib --bins --tests`, whole suite, `-j 3`: **3832 of 3833
+  passed**, 6 skipped (34 minutes with the build). The one failure,
+  `it ai_assistant::adjustments_and_filters_are_clamped_and_take_json_text` ("not enough working memory" on its
+  Gaussian Blur radius 99999), is the container-only one U1 and A6 recorded: the memory gate counts the page cache
+  after a long build. After `echo 1 > /proc/sys/vm/drop_caches`, all 31 `ai_assistant` tests passed.
+- `-p photocraft-engine --features photocraft-io/heif --lib --bins --tests`, whole suite: **5043 passed**, 26 skipped.
+- Panic hunt (`--run-ignored only -E 'binary_id(photocraft-engine::panic_hunt)'`, as CI): **1 passed** (70 s).
+- Cross checks: see "The other platforms".
+- No crate, preference or panel command added, so `cargo xtask layers`/`panel-commands`/`scorecard` were not
+  required and not run.
 
 ## Hooks into upstream files (all in FORK.md, "Pen tablets: …")
 
@@ -208,11 +230,25 @@ Results (nextest `--profile ci`, `TMPDIR=/dev/shm/pt`, CI's font and i18n dirs):
 
 ## The other platforms
 
-(filled in below)
+- `cargo check` and `cargo clippy --all-targets -- -D warnings` of `-p photocraft-tablet` for
+  **x86_64-pc-windows-msvc** and **aarch64-apple-darwin** (the targets U4 installed): the Windows check first failed on
+  `WheelPacket`'s field order (above), then both clean: `windows.rs` (the hooks, `handle_pen_message`, its test),
+  `wintab.rs` (`Backend::Wheel`, its test), `macos.rs` (the `tangentialPressure` read, the wheel store, the test line).
+- `-p photocraft` (the app) for those targets: not possible here, as U4 found (`ring`'s build script needs the MSVC or
+  Apple C toolchain). The app's only platform-only line is `ink_pose`'s `photocraft_tablet::windows::pen_pose()` (a
+  `pub fn` of a `pub mod`, like the `is_barrel_button_down` and `take_pen_end` services beside it); CI's Windows and
+  macOS release builds compile it.
+- Nothing ran on Windows or macOS: the Windows-only and macOS-only tests are compiled, not run.
+- The `target/x86_64-pc-windows-msvc` and `target/aarch64-apple-darwin` folders were deleted afterwards.
 
 ## For the next package
 
-- **CI**: check 46129580711 (`b7ea01f`, U1) and the runs on this package's commits first.
+- **CI**: check the runs on this package's three commits first: 46141006052 (`7594595`), 46141148655 (`65f1dcc`) and
+  the run on `34c2234` (not waited for). 46129580711 (`b7ea01f`, U1) was green.
+- **The ai_assistant Gaussian Blur test** fails here after any long build (page cache); drop the caches and rerun it
+  before treating it as real.
+- **WinTab packets**: any new `wintab::packet!` must list its fields in PKTDEF.H order; only the Windows cross check
+  (`cargo check --target x86_64-pc-windows-msvc -p photocraft-tablet`) catches it, never the Linux build.
 - **Group FU is complete.** The group's review should run the hardware list above on the release dry run's machines if
   any have a pen; otherwise it stays "not yet confirmed on hardware" in the docs.
 - `photocraft_tablet::wheel` is a process-wide latest value: anything else that reports a wheel (X11 "Abs Wheel", the
