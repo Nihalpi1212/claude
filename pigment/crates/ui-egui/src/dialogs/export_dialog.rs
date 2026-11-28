@@ -24,7 +24,9 @@ use photocraft_engine::export_preset_cmds::{DEFAULT_RESAMPLE, export_resample};
 
 use crate::{ExportSettings, PhotocraftApp};
 
-const FORMATS: [(&str, &str); 7] = [("png", "PNG"), ("jpg", "JPG"), ("webp", "WebP"), ("tif", "TIFF"), ("tga", "TGA"), ("ico", "ICO"), ("jxl", "JPEG XL")];
+// Pigment: GIF (F2, as Photoshop's Export As and the JavaScript Pigment).
+const FORMATS: [(&str, &str); 8] =
+    [("png", "PNG"), ("jpg", "JPG"), ("gif", "GIF"), ("webp", "WebP"), ("tif", "TIFF"), ("tga", "TGA"), ("ico", "ICO"), ("jxl", "JPEG XL")];
 
 /// The command id Export As records its automation step under (#7207) and replays from.
 pub(crate) const COMMAND: &str = "file.export.exportAs";
@@ -222,6 +224,8 @@ struct PreviewWork {
 fn dialog_formats() -> Vec<ExportFormat> {
     let mut formats = ExportFormat::standard();
     formats.push(ExportFormat::new("jxl", "JPEG XL").transparency(true));
+    // Pigment: GIF after JPG, as Photoshop lists it; Transparency is its only option (F2).
+    formats.insert(2, ExportFormat::new("gif", "GIF").transparency(true));
     formats
 }
 
@@ -1304,6 +1308,10 @@ mod tests;
 
 #[cfg(test)]
 mod jpg_progressive_tests;
+
+// Pigment: GIF in Export As (F2)
+#[cfg(test)]
+mod gif_tests;
 #[cfg(test)]
 mod layer_name_sanitise_tests;
 

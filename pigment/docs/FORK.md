@@ -1048,6 +1048,29 @@ pure-Rust AV1 decoder, which upstream leaves off. Pigment switches it on.
 | `crates/io/tests/it/main.rs` | `mod avif;` |
 | `docs/file-format-parity.md`, `README.md` | the AVIF row and sentence say Pigment reads it |
 
+### Targa variants, GIF in Export As, Color Lookup Table formats
+
+**Targa.** Upstream reads Targa through the `image` crate, which opens nearly every file. Pigment opens the rest
+as the JavaScript Pigment did (`shared/pixels/tga.js`), through craft-tga (craft-libs, the pinned revision):
+`crates/io/src/tga_more.rs` sends a 16-bit true-colour file whose descriptor says one attribute bit (alpha; the
+`image` crate drops it) and a colour map with 16-bit indices into 15-bit entries (the `image` crate refuses it) to
+craft-tga, and falls back to craft-tga when the `image` crate fails on any other Targa (its error is kept when
+craft-tga fails too). The picture comes back as RGBA8 when a pixel is not opaque, else RGB8, so upstream's
+`apply_flat_format` turns the alpha into "Alpha 1" as for a 32-bit file. 32-bit files still go the old way, so
+upstream's Photoshop-measured rule (#2225: the fourth byte is "Alpha 1" even when the header declares no alpha) holds.
+The codecs' detector expects 8-bit indices, so a footerless file with 16-bit ones is recognised by craft-tga's
+sniff (which wants a Targa extension). Writing stays 24/32-bit (craft-tga writes 8-bit layouts only; the
+JavaScript app did not write 16-bit either). Tests: `crates/io/tests/it/targa_variants.rs` (files built byte by
+byte) and `tga_more::tests`.
+
+| Upstream file | Hook |
+|---|---|
+| `Cargo.toml` (workspace), `crates/io/Cargo.toml`, `Cargo.lock` | `craft-tga` (craft-libs, same revision) |
+| `crates/io/src/lib.rs` | `mod tga_more;` |
+| `crates/io/src/flat.rs` | `import_flat_impl_with_options`: the format is `codecs::detect(..)` or `tga_more::sniff`, and the decode goes through `tga_more::decode` |
+| `crates/io/tests/it/main.rs` | `mod targa_variants;` |
+| `docs/file-format-parity.md` | the Targa row |
+
 ## Keeping the rebrand: `scripts/pigment-rebrand.py`
 
 Most of the rebrand is mechanical and done by [`scripts/pigment-rebrand.py`](../scripts/pigment-rebrand.py):

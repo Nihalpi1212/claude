@@ -85,6 +85,8 @@ mod smart_corpus;
 mod source_images;
 mod streaming_exr;
 mod svg;
+// Pigment: Targa variants (F2)
+mod targa_variants;
 mod text_corpus;
 mod text_styles;
 mod tiff_banded_import;
