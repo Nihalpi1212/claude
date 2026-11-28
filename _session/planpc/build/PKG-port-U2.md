@@ -20,7 +20,8 @@ before it); `actions.rs:132` (`action_form_choices`) is `panels/actions.rs:132`;
 ## Commits (pushed)
 
 - `a123260` Pigment Default Actions (U2), engine and app: Photoshop's set on first launch and from Reset Actions
-- (UI commit, see the end of this file)
+- `58a4854` Pigment Insert Conditional (U2), interface and docs: the Actions menu row, the Conditional Action dialog,
+  editing through Record Again
 
 ## What was built
 
@@ -117,7 +118,10 @@ Results (nextest `--profile ci`, `TMPDIR=/dev/shm/pt`, CI's font and i18n dirs):
   177 passed.
 - `-p photocraft-ui-egui --features photocraft-io/heif --lib -E 'test(/panels::actions|dialogs|menus/)'`: 902 passed;
   `-E 'test(/conditional|library_tests|menu_tests|shortcuts|crop_ui|transform_undo/)'`: 125 passed.
-- Whole ui-egui suite and whole engine suite: see the end of this file.
+- Whole ui-egui suite (`-j 3 -p photocraft-ui-egui --features photocraft-io/heif --lib --bins --tests`): **3813 passed**,
+  6 skipped (about 22 minutes).
+- Whole engine and app suites (`-p photocraft-engine -p photocraft --features photocraft-io/heif --lib --bins --tests`):
+  **5284 passed**, 28 skipped.
 - `cargo fmt --all -- --check`; `cargo clippy --locked --features heif -p photocraft-engine -p photocraft-ui-egui
   -p photocraft --all-targets -- -D warnings`; `python3 scripts/pigment-rebrand.py --check`; `cargo xtask layers`,
   `panel-commands`, `test-binaries`, `scorecard --check`: all clean. No engine command was added (no panic hunt needed;
