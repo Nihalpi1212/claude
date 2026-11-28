@@ -7,7 +7,9 @@
 //! layers, or one layer and a character range), so it records into Actions and runs from the CLI
 //! and MCP. An omitted `on` toggles from the style where the edit starts, as `type.openType.*` do.
 
-use photocraft_doc::text::{Caps, CharStyle, Composer, FontBaseline, Hyphenation, Justification, LIST_NUMBER_STYLES, ListKind, ListStyle, ParagraphStyle, SingleWord};
+use photocraft_doc::text::{
+    Caps, CharStyle, Composer, FontBaseline, Hyphenation, Justification, LIST_NUMBER_STYLES, ListKind, ListStyle, ParagraphStyle, SingleWord,
+};
 use photocraft_doc::{LayerContent, TextLayer};
 use serde_json::{Value, json};
 
@@ -544,8 +546,7 @@ fn set_list(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({ "type": p.get("type") }))
 }
 
-const TOGGLE_PARAMS: &str =
-    r##"{"layer":id? or "layers":[id,…]? (default selected Type layers),"range":[startChar,endChar]? (single layer; default all),"on":bool? (default: toggle from where the edit starts)}"##;
+const TOGGLE_PARAMS: &str = r##"{"layer":id? or "layers":[id,…]? (default selected Type layers),"range":[startChar,endChar]? (single layer; default all),"on":bool? (default: toggle from where the edit starts)}"##;
 const LAYER_PARAMS: &str = r##"{"layer":id? or "layers":[id,…]? (default selected Type layers),"on":bool? (default: toggle the active layer's)}"##;
 const PARA_PARAMS: &str = r##"{"layer":id? or "layers":[id,…]? (default selected Type layers),"range":[startChar,endChar]? (single layer; default all)}"##;
 

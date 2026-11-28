@@ -583,8 +583,23 @@ mod tests {
         let paras = t.paragraph_runs();
         let p = &paras[0].style;
         assert_eq!(p.composer, Composer::SingleLine);
-        assert_eq!(p.hyphenation, Hyphenation { words_longer_than: 9, after_first: 3, before_last: 4, hyphen_limit: 1, zone_pt: 36.0, capitalized: false, last_word: true, across_column: false });
-        assert_eq!((p.justification.word, p.justification.letter, p.justification.glyph, p.justification.single_word), ([60.0, 90.0, 150.0], [-10.0, 0.0, 20.0], [90.0, 100.0, 110.0], SingleWord::Center));
+        assert_eq!(
+            p.hyphenation,
+            Hyphenation {
+                words_longer_than: 9,
+                after_first: 3,
+                before_last: 4,
+                hyphen_limit: 1,
+                zone_pt: 36.0,
+                capitalized: false,
+                last_word: true,
+                across_column: false
+            }
+        );
+        assert_eq!(
+            (p.justification.word, p.justification.letter, p.justification.glyph, p.justification.single_word),
+            ([60.0, 90.0, 150.0], [-10.0, 0.0, 20.0], [90.0, 100.0, 110.0], SingleWord::Center)
+        );
         let p = &paras[1].style;
         assert_eq!(p.list, Some(ListStyle { kind: ListKind::Number, marker: "upperRoman".into(), start: 3, level: 2 }));
         assert!(p.hanging_punctuation && p.composer == Composer::EveryLine);

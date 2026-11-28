@@ -66,10 +66,10 @@ mod psd_frame_stroke;
 mod psd_import_file;
 mod psd_kerning;
 // Pigment (B1)
-mod psd_type_settings;
 mod psd_layer_block_length;
 mod psd_maximize_compatibility;
 mod psd_noise_fill_roundtrip;
+mod psd_type_settings;
 // Pigment: noise gradients (P3)
 mod psd_noise_gradients;
 mod psd_recovery_generated;

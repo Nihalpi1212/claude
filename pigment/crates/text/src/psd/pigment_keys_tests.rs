@@ -9,7 +9,12 @@ use photocraft_doc::text::{CharStyle, Composer, Hyphenation, Justification, Para
 use super::super::{E, build_engine_data, build_tysh, engine_data, parse_tysh, text_layer_from_tysh};
 
 fn layer(text: &str, run: CharStyle, para: ParagraphStyle) -> TextLayer {
-    TextLayer { text: text.into(), runs: vec![TextRun { len: text.len(), style: run }], paragraphs: vec![ParagraphRun { len: text.len(), style: para }], ..Default::default() }
+    TextLayer {
+        text: text.into(),
+        runs: vec![TextRun { len: text.len(), style: run }],
+        paragraphs: vec![ParagraphRun { len: text.len(), style: para }],
+        ..Default::default()
+    }
 }
 
 fn styled() -> (CharStyle, ParagraphStyle) {

@@ -181,11 +181,11 @@ pub mod type_caret_cmds;
 pub mod type_cmds;
 pub mod type_extra_cmds;
 // Pigment: Character/Paragraph panel menu commands and resets (PORTS-B B1).
-pub mod type_layer_opts_cmds;
-pub mod type_reset_cmds;
 #[cfg(test)]
 mod type_indexed_mode_tests;
+pub mod type_layer_opts_cmds;
 pub mod type_mask_cmds;
+pub mod type_reset_cmds;
 pub mod type_spell_cmds;
 pub mod type_styles_cmds;
 pub(super) mod variables_cmds;

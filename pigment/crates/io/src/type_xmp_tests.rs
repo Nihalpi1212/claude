@@ -100,7 +100,7 @@ fn only_type_layers_get_the_extras_and_lists_warn() {
     l.xmp = Some(std::sync::Arc::from(OTHER));
     let packet = export_packet(&l).unwrap();
     assert!(read(&packet).is_some() && packet.contains("app:arc"));
-    let LayerContent::Text(t) = &l.content else { unreachable!() };
+    let LayerContent::Text(t) = &l.content else { panic!("not text") };
     assert!(export_warning(&l, t).is_some_and(|w| w.contains("list markers")));
     assert!(export_warning(&l, &three_paragraphs()).is_none());
     let mut raster = Layer::raster("Pixels", photocraft_color::PixelFormat::RGBA8);
@@ -110,7 +110,7 @@ fn only_type_layers_get_the_extras_and_lists_warn() {
     let mut back = Layer::new("Type", LayerContent::Text(three_paragraphs()));
     back.xmp = Some(std::sync::Arc::from(packet.as_ref()));
     import_packet(&mut back);
-    let LayerContent::Text(t) = &back.content else { unreachable!() };
+    let LayerContent::Text(t) = &back.content else { panic!("not text") };
     assert!(t.system_layout);
     assert_eq!(paragraph_styles(t), paragraph_styles(&extras()));
 }

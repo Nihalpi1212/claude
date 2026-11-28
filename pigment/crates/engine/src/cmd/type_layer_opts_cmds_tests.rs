@@ -60,7 +60,10 @@ fn a_range_toggle_follows_where_it_starts_and_pairs_share_a_field() {
     let id = text_layer(&mut s, "H2O and x2");
     s.execute("type.character.subscript", json!({"layer": id.0, "range": [1, 2]})).unwrap();
     let runs = text(&s, id).char_runs();
-    assert_eq!(runs.iter().map(|r| (r.len, r.style.baseline)).collect::<Vec<_>>(), [(1, FontBaseline::Normal), (1, FontBaseline::Subscript), (8, FontBaseline::Normal)]);
+    assert_eq!(
+        runs.iter().map(|r| (r.len, r.style.baseline)).collect::<Vec<_>>(),
+        [(1, FontBaseline::Normal), (1, FontBaseline::Subscript), (8, FontBaseline::Normal)]
+    );
     // Superscript on the same character replaces subscript (one field, as Photoshop's buttons).
     s.execute("type.character.superscript", json!({"layer": id.0, "range": [1, 2]})).unwrap();
     assert_eq!(text(&s, id).char_runs()[1].style.baseline, FontBaseline::Superscript);
@@ -152,13 +155,13 @@ fn hanging_punctuation_and_the_composers_act_on_the_targeted_paragraphs() {
     let mut s = session();
     let id = text_layer(&mut s, "One\nTwo\nThree");
     s.execute("type.hangingPunctuation", json!({"layer": id.0, "range": [4, 5]})).unwrap();
-    let hang: Vec<bool> = text(&s, id).paragraph_runs().iter().map(|p| p.style.hanging_punctuation).collect();
+    let hang: Vec<bool> = photocraft_io::type_xmp::paragraph_styles(text(&s, id)).iter().map(|(_, p)| p.hanging_punctuation).collect();
     assert_eq!(hang, [false, true, false]);
     assert_eq!(label(&s), "Roman Hanging Punctuation");
     // Toggling from the second paragraph turns it off again.
     assert_eq!(s.execute("type.hangingPunctuation", json!({"layer": id.0, "range": [4, 5]})).unwrap()["on"], json!(false));
     s.execute("type.composer.singleLine", json!({"layer": id.0, "range": [0, 1]})).unwrap();
-    let c: Vec<Composer> = text(&s, id).paragraph_runs().iter().map(|p| p.style.composer).collect();
+    let c: Vec<Composer> = photocraft_io::type_xmp::paragraph_styles(text(&s, id)).iter().map(|(_, p)| p.composer).collect();
     assert_eq!(c, [Composer::SingleLine, Composer::EveryLine, Composer::EveryLine]);
     assert_eq!(label(&s), "Composer");
     s.execute("type.composer.everyLine", json!({})).unwrap();

@@ -54,14 +54,18 @@ fn type_settings_round_trip_through_psd_with_the_layer_packet_kept() {
     assert_eq!(got.len(), 2);
     for (g, w) in got.iter().zip(&want) {
         let (g, w) = (&g.style, &w.style);
-        assert_eq!((g.hyphenate, g.hyphenation, g.justification, g.composer, g.hanging_punctuation, &g.list), (w.hyphenate, w.hyphenation, w.justification, w.composer, w.hanging_punctuation, &w.list));
+        assert_eq!(
+            (g.hyphenate, g.hyphenation, g.justification, g.composer, g.hanging_punctuation, &g.list),
+            (w.hyphenate, w.hyphenation, w.justification, w.composer, w.hanging_punctuation, &w.list)
+        );
     }
 }
 
 #[test]
 fn a_type_layer_without_extras_saves_no_packet() {
     let mut doc = Document::new("t", photocraft_geom::Size::new(200, 80), photocraft_color::ColorMode::Rgb, photocraft_color::SampleType::U8);
-    let mut t = TextLayer { text: "Plain".into(), runs: vec![TextRun { len: 5, style: CharStyle { size_pt: 24.0, ..Default::default() } }], ..Default::default() };
+    let mut t =
+        TextLayer { text: "Plain".into(), runs: vec![TextRun { len: 5, style: CharStyle { size_pt: 24.0, ..Default::default() } }], ..Default::default() };
     t.sync_summary();
     photocraft_text::TextEngine::new().render_layer(&mut t, doc.resolution_dpi, doc.pixel_format());
     doc.layers.push(Layer::new("Plain", LayerContent::Text(t)));

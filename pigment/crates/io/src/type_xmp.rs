@@ -15,8 +15,8 @@
 use std::borrow::Cow;
 use std::ops::Range;
 
-use photocraft_doc::{Layer, LayerContent, TextLayer};
 use photocraft_doc::text::{Hyphenation, LIST_NUMBER_STYLES, ListKind, ListStyle, ParagraphRun, ParagraphStyle, SingleWord};
+use photocraft_doc::{Layer, LayerContent, TextLayer};
 use serde_json::{Map, Value, json};
 
 /// The XMP namespace of the property.
@@ -39,7 +39,8 @@ pub fn paragraph_styles(t: &TextLayer) -> Vec<(Range<usize>, ParagraphStyle)> {
     photocraft_text::layout::split_paragraphs(&t.text)
         .into_iter()
         .map(|p| {
-            let i = if trailing_break && p.start == t.text.len() { runs.len().saturating_sub(1) } else { starts.iter().rposition(|&s| s <= p.start).unwrap_or(0) };
+            let i =
+                if trailing_break && p.start == t.text.len() { runs.len().saturating_sub(1) } else { starts.iter().rposition(|&s| s <= p.start).unwrap_or(0) };
             let style = runs.get(i).map(|r| r.style.clone()).unwrap_or_default();
             (p, style)
         })

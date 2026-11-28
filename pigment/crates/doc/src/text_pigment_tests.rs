@@ -13,7 +13,10 @@ fn the_settings_serialize_under_the_command_keys() {
         v["hyphenation"],
         json!({"wordsLongerThan": 6, "afterFirst": 2, "beforeLast": 2, "hyphenLimit": 8, "zone": 36.0, "capitalized": true, "lastWord": true, "acrossColumn": true})
     );
-    assert_eq!(v["justification"], json!({"wordSpacing": [80.0, 100.0, 133.0], "letterSpacing": [0.0, 0.0, 0.0], "glyphScaling": [100.0, 100.0, 100.0], "singleWord": "justify"}));
+    assert_eq!(
+        v["justification"],
+        json!({"wordSpacing": [80.0, 100.0, 133.0], "letterSpacing": [0.0, 0.0, 0.0], "glyphScaling": [100.0, 100.0, 100.0], "singleWord": "justify"})
+    );
     assert_eq!(v["composer"], json!("everyLine"));
     assert_eq!(v["list"], json!({"type": "number", "marker": "decimal", "start": 1, "level": 0}));
     assert_eq!(serde_json::from_value::<ParagraphStyle>(v).unwrap(), p);

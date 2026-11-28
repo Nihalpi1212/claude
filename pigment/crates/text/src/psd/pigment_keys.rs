@@ -91,9 +91,11 @@ pub(super) fn read_para<'a>(p: &mut ParagraphStyle, g: &dyn Fn(&str) -> Option<&
         h.zone_pt = z;
     }
     let j = &mut p.justification;
-    for (key, range, field) in
-        [("WordSpacing", Justification::WORD, &mut j.word), ("LetterSpacing", Justification::LETTER, &mut j.letter), ("GlyphSpacing", Justification::GLYPH, &mut j.glyph)]
-    {
+    for (key, range, field) in [
+        ("WordSpacing", Justification::WORD, &mut j.word),
+        ("LetterSpacing", Justification::LETTER, &mut j.letter),
+        ("GlyphSpacing", Justification::GLYPH, &mut j.glyph),
+    ] {
         if let Some(v) = percents(g, key, range) {
             *field = v;
         }
