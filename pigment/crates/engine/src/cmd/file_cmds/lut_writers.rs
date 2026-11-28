@@ -309,13 +309,48 @@ pub(crate) fn write_icc(table: &[[f32; 3]], n: usize, title: &str, copyright: &s
     profile.copyright = one_line(copyright);
     let curves = || Stage::Curves(vec![Curve::Identity; 3]);
     profile.a2b = [Some(Lut { kind: LutKind::Ab, inputs: 3, outputs: 3, stages: vec![curves(), Stage::Clut(clut), curves()] }), None, None];
-    let mut bytes = profile.to_bytes().to_vec();
+    // A DeviceLink must carry a profile sequence (ICC.1:2010 §8.2.6); craft-cms writes none.
+    let mut bytes = with_empty_sequence(&profile.to_bytes()).ok_or("the ICC tag table is malformed")?;
     // A DeviceLink's PCS field names its output space (ICC.1:2010 §7.2.7).
     let pcs = bytes.get_mut(20..24).ok_or("the ICC header is short")?;
     pcs.copy_from_slice(b"RGB ");
     let id = craft_cms::profile_id(&bytes).map_err(|e| e.to_string())?;
     bytes.get_mut(84..100).ok_or("the ICC header is short")?.copy_from_slice(&id);
     Ok(bytes)
+}
+
+/// Profile `bytes` with an empty `pseq` (profile sequence description) tag added: its tag table
+/// grows by one entry, so every tag moves 12 bytes, and the tag's 12 bytes go at the end. `None`
+/// when the tag table does not fit the profile. The profile ID is left for the caller to stamp.
+fn with_empty_sequence(bytes: &[u8]) -> Option<Vec<u8>> {
+    let be = |at: usize| bytes.get(at..at + 4).map(|b| u32::from_be_bytes([b[0], b[1], b[2], b[3]]));
+    let count = usize::try_from(be(128)?).ok()?;
+    let table_end = 132usize.checked_add(count.checked_mul(12)?)?;
+    let size = usize::try_from(be(0)?).ok()?.min(bytes.len());
+    if table_end > size {
+        return None;
+    }
+    let mut out = Vec::with_capacity(size + 28);
+    out.extend_from_slice(bytes.get(..128)?);
+    out.extend_from_slice(&u32::try_from(count + 1).ok()?.to_be_bytes());
+    for i in 0..count {
+        let at = 132 + i * 12;
+        out.extend_from_slice(bytes.get(at..at + 4)?);
+        out.extend_from_slice(&be(at + 4)?.checked_add(12)?.to_be_bytes());
+        out.extend_from_slice(bytes.get(at + 8..at + 12)?);
+    }
+    // The data starts 12 bytes later and stays 4-byte aligned; the new tag goes at the aligned end.
+    let data_end = (size + 12).div_ceil(4) * 4;
+    out.extend_from_slice(b"pseq");
+    out.extend_from_slice(&u32::try_from(data_end).ok()?.to_be_bytes());
+    out.extend_from_slice(&12u32.to_be_bytes());
+    out.extend_from_slice(bytes.get(table_end..size)?);
+    out.resize(data_end, 0);
+    // `pseq`, reserved, no profile descriptions.
+    out.extend_from_slice(b"pseq\0\0\0\0\0\0\0\0");
+    let total = u32::try_from(out.len()).ok()?;
+    out.get_mut(..4)?.copy_from_slice(&total.to_be_bytes());
+    Some(out)
 }
 
 #[cfg(test)]
