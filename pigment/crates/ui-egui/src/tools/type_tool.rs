@@ -20,9 +20,11 @@ mod editing;
 mod fonts;
 mod host;
 mod insertion_style;
+mod languages; // Pigment (B2)
 mod layout;
 mod options_bar;
 mod panel;
+pub(crate) mod panel_menu; // Pigment (B2): the Character panel menu
 mod pointer;
 mod values;
 
@@ -114,6 +116,8 @@ mod font_picker_tests;
 #[cfg(test)]
 mod panels_toggle_tests;
 
+#[cfg(test)]
+mod pigment_character_tests; // Pigment (B2)
 #[cfg(test)]
 mod tests;
 
