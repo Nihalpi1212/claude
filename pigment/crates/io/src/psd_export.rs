@@ -427,6 +427,7 @@ impl Ex<'_> {
         if matches!(t.shape, photocraft_doc::text::TextShape::Area { .. }) {
             self.warnings.push(format!("layer \"{}\": area type is saved as paragraph text over its path's bounds (PSD area type is not written yet)", l.name));
         }
+        self.warnings.extend(crate::type_xmp::export_warning(l, t)); // Pigment (B1)
         match self.type_tysh(l, t) {
             Some(d) => match raw.iter_mut().find(|(k, _)| k == b"TySh") {
                 Some(e) => e.1 = d.to_vec(),
@@ -639,14 +640,15 @@ impl Ex<'_> {
             let id = self.layer_ids.get(&l.id).copied().unwrap_or(0);
             crate::comps_map::set_cmls(&mut raw, crate::comps_map::write_cmls(comps, last.as_ref(), l, id));
         }
-        self.layer_xmp_block(l, &mut raw);
+        let xmp = crate::type_xmp::export_packet(l); // Pigment (B1): a type layer's packet carries its type extras
+        self.layer_xmp_block(l, xmp.as_deref(), &mut raw);
         regenerated.into_iter().chain(raw).map(|(k, d)| TaggedBlock::new(k, d)).collect()
     }
 
     /// Writes the layer's XMP packet into its `shmd` block (created when it has none). Import
     /// takes the packet out of `shmd`, so a layer without one keeps the block as it was.
-    fn layer_xmp_block(&mut self, l: &Layer, raw: &mut Vec<([u8; 4], Vec<u8>)>) {
-        let Some(xmp) = l.xmp.as_deref() else { return };
+    fn layer_xmp_block(&mut self, l: &Layer, xmp: Option<&str>, raw: &mut Vec<([u8; 4], Vec<u8>)>) {
+        let Some(xmp) = xmp else { return };
         let pos = raw.iter().position(|(k, _)| k == b"shmd");
         match craft_psd::metadata::put_layer_xmp(pos.map(|i| raw[i].1.as_slice()), xmp) {
             Ok(data) => match pos {

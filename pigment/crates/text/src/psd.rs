@@ -24,6 +24,10 @@ use crate::fonts::guess_from_postscript;
 mod build;
 mod edit;
 mod import;
+// Pigment: EngineData `Language` codes (PORTS-B B1).
+pub mod language;
+// Pigment: the paragraph and character keys PORTS-B B1 adds.
+mod pigment_keys;
 
 #[cfg(test)]
 pub(crate) use build::font_entry;

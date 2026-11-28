@@ -112,12 +112,13 @@ fn perturbed_char() -> CharStyle {
         variations: vec![FontVariation { axis: "\u{1}".into(), value: -1.0 }],
         language: Some("\u{1}".into()),
         rotate_roman: true,
+        no_break: true,
         style_sheet: None,
     }
 }
 
 fn perturbed_para() -> ParagraphStyle {
-    use photocraft_doc::text::{TextAlign, TextDirection};
+    use photocraft_doc::text::{Composer, Hyphenation, Justification, ListKind, ListStyle, SingleWord, TextAlign, TextDirection};
     ParagraphStyle {
         align: TextAlign::JustifyAll,
         first_line_indent_pt: -1.0,
@@ -128,6 +129,20 @@ fn perturbed_para() -> ParagraphStyle {
         auto_leading: -1.0,
         direction: TextDirection::Rtl,
         hyphenate: true,
+        hyphenation: Hyphenation {
+            words_longer_than: 0,
+            after_first: 0,
+            before_last: 0,
+            hyphen_limit: 255,
+            zone_pt: -1.0,
+            capitalized: false,
+            last_word: false,
+            across_column: false,
+        },
+        justification: Justification { word: [-1.0; 3], letter: [-1000.0; 3], glyph: [-1.0; 3], single_word: SingleWord::Right },
+        composer: Composer::SingleLine,
+        hanging_punctuation: true,
+        list: Some(ListStyle { kind: ListKind::Number, marker: "\u{1}".into(), start: u32::MAX, level: u8::MAX }),
         style_sheet: None,
     }
 }

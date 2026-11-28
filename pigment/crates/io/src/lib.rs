@@ -97,6 +97,8 @@ mod tga_more;
 pub mod tiff_layers;
 /// Pigment: Photoshop tool presets (`.tpl`).
 pub mod tpl_map;
+// Pigment: type settings kept in the layer's XMP (PORTS-B B1).
+pub mod type_xmp;
 pub mod vector_map;
 pub mod vector_preview;
 mod xcf;

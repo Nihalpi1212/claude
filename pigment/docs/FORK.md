@@ -1355,6 +1355,65 @@ synthetic `POINTER_PEN_INFO`; Windows only), `crates/tablet/src/wintab.rs` (the 
 | `apps/photocraft/src/main.rs` | `app.services.pen_extras = tablet::pen_extras_service(app.services.tablet_poll.is_some());` |
 | `docs/hardware-parity.md`, `docs/parity/README.md` | the pen rows, the Windows paragraph, the hardware checks, a revision row; the two pen rows |
 
+### Type settings: the model, the commands and the PSD keys (typography, part 1)
+
+The first typography package (PORTS-B B1) adds the model fields, commands and file mappings of the JavaScript
+Pigment's type settings; the panels, menus and layout that use them come with the later packages (the Character and
+Paragraph panel menus, the composer, justification, hanging punctuation and list markers). Until then the settings are
+kept, saved and edited, but the layout does not change with them.
+- **Model** (`crates/doc/src/text.rs`, `lib.rs`): `CharStyle.no_break`; `ParagraphStyle.hyphenation`
+  (`Hyphenation`: Words Longer Than, After First, Before Last, Hyphen Limit, Zone, Capitalized, Last Word, Across
+  Column), `.justification` (`Justification`: word, letter and glyph min/desired/max %, Single Word Justification),
+  `.composer` (`Composer`, Every-line for new paragraphs; a paragraph saved before the field reads as Single-line, so
+  old documents keep their breaks), `.hanging_punctuation`, `.list` (`ListStyle`); `TextLayer.fractional_widths`
+  (on) and `.system_layout`, per layer as in Photoshop, in the native manifest too (missing = on / off). The new
+  structs' JSON field names are `type.setStyle`'s keys, so Paragraph Style Options' attributes read them either way.
+- **Commands** (`crates/engine/src/cmd/type_layer_opts_cmds.rs`, `type_reset_cmds.rs`): `type.character.fauxBold`,
+  `.fauxItalic`, `.allCaps`, `.smallCaps`, `.superscript`, `.subscript`, `.underline`, `.strikethrough`,
+  `type.noBreak`, `type.fractionalWidths`, `type.systemLayout`, `type.hangingPunctuation`,
+  `type.composer.singleLine`/`.everyLine`, `type.list` (with the JavaScript app's indent rule), `type.resetCharacter`
+  and `type.resetParagraph` (an applied style stays, its overrides go; font, size and colour reset too, as
+  Photoshop). Each is one journaled step with Photoshop's words; no menu row or chord yet. `type.setStyle` takes
+  `noBreak`, `hyphenation` and `justification` (partial objects merge), `composer`, `hangingPunctuation` and `list`;
+  `type.edit` takes `fractionalWidths` and `systemLayout`; out-of-range values are errors.
+- **PSD** (`crates/text/src/psd/pigment_keys.rs`): `NoBreak`, `HyphenatedWordSize`, `PreHyphen`, `PostHyphen`,
+  `ConsecutiveHyphens`, `Zone`, `WordSpacing`, `LetterSpacing`, `GlyphSpacing`, `Hanging`, `EveryLineComposer`
+  read and written, `UseFractionalGlyphWidths` written from the layer (it was `true` when absent). `Language` goes
+  through `crates/text/src/psd/language.rs`, a table of codes read from Photoshop samples, empty until a sample is
+  saved; a code it can't name imports as no language and an edit keeps it on the runs that still have none. The
+  settings with no known EngineData key (Hyphenate Capitalized Words, Last Word, Across Column, Single Word
+  Justification, lists, System Layout) go into the layer's XMP as `pigment:typeExtra` (namespace
+  `urn:x-pigment:type:1`, JSON; `crates/io/src/type_xmp.rs`), merged into the layer's own packet; a layer with lists
+  gets an export warning, as Photoshop will not draw them. None of these keys' values has been checked against a
+  Photoshop 2026 sample yet.
+- **Pigment 0.1–0.4 documents** (`crates/io/src/legacy_pigment/text.rs`, Pigment's own): No Break, Fractional Widths
+  (off when every run had it off), System Layout, hyphenation, justification, the composer (0.3's text and
+  `composer: 'single'` open Single-line), lists and hanging punctuation are mapped instead of reported lost.
+Tests: `crates/doc/src/text_pigment_tests.rs`, `crates/format/tests/it/type_settings.rs`,
+`crates/engine/src/cmd/type_layer_opts_cmds_tests.rs`, `type_reset_cmds_tests.rs`,
+`crates/text/src/psd/pigment_keys_tests.rs`, `crates/text/src/psd/language.rs`, `crates/io/src/type_xmp_tests.rs`,
+`crates/io/tests/it/psd_type_settings.rs`, `crates/io/src/legacy_pigment/text.rs` and `text_smart_tests.rs`.
+
+| Upstream file | Hook |
+|---|---|
+| `crates/doc/src/text.rs` | `CharStyle.no_break`; `ParagraphStyle`'s five fields and their defaults; the new types after `ParagraphStyle`; `#[cfg(test)] mod pigment_tests;` |
+| `crates/doc/src/lib.rs` | `TextLayer.fractional_widths`, `.system_layout` and their defaults |
+| `crates/format/src/manifest.rs` | `ContentM::Text`: `fractional_widths` (`default = "yes"`), `system_layout` |
+| `crates/format/src/convert.rs` | the two fields both ways |
+| `crates/format/tests/it/common/mod.rs` | the sample type layer sets the two flags off their defaults |
+| `crates/format/tests/it/main.rs` | `mod type_settings;` |
+| `crates/engine/src/cmd.rs` | `pub mod type_layer_opts_cmds; pub mod type_reset_cmds;` and their two `specs()` lines after `type_extra_cmds` |
+| `crates/engine/src/lib.rs` | `pub use cmd::type_layer_opts_cmds; pub use cmd::type_reset_cmds;` |
+| `crates/engine/src/cmd/type_cmds.rs` | `"noBreak"` in `apply_char_values`' flags; `apply_para_props` calls `apply_para_extra`; `check_size_tracking` ends with `check_extra`; `type.edit` calls `apply_layer_keys`; the `CHAR_PARAMS`, `type.edit` and `type.setStyle` docs; `type.info`'s `fractionalWidths` and `systemLayout` |
+| `crates/engine/src/cmd/type_styles_cmds.rs` | `perturbed_char` / `perturbed_para` perturb the new fields |
+| `crates/text/src/psd.rs` | `pub mod language; mod pigment_keys;` |
+| `crates/text/src/psd/build.rs` | `style_sheet_data` and `paragraph_properties` call `put_char` / `put_para`; `build_engine_data` keeps a file's `Language` (`template_languages`, `keep_language`) and writes `UseFractionalGlyphWidths` from the layer |
+| `crates/text/src/psd/import.rs` | `char_style` and `para_style` call `read_char` / `read_para`; `apply_engine_data` reads `UseFractionalGlyphWidths` |
+| `crates/io/src/lib.rs` | `pub mod type_xmp;` |
+| `crates/io/src/psd_export.rs` | `type_blocks`: the list warning; `layer_xmp_block` takes the packet (`type_xmp::export_packet`) instead of reading `l.xmp` |
+| `crates/io/src/psd_import.rs` | `apply_common`: `type_xmp::import_packet(l)` after the layer's packet is taken |
+| `crates/io/tests/it/main.rs` | `mod psd_type_settings;` |
+
 ## Keeping the rebrand: `scripts/pigment-rebrand.py`
 
 Most of the rebrand is mechanical and done by [`scripts/pigment-rebrand.py`](../scripts/pigment-rebrand.py):

@@ -17,7 +17,8 @@ use photocraft_color::{Color, ColorMode};
 use photocraft_doc::TextLayer;
 use photocraft_doc::effects::{Effect, FxCommon, FxPaint, StrokeFx, StrokePosition};
 use photocraft_doc::text::{
-    AntiAlias, Caps, CharStyle, FontBaseline, FontFeature, Kerning, Orientation, ParagraphRun, ParagraphStyle, TextAlign, TextRun, TextShape,
+    AntiAlias, Caps, CharStyle, Composer, FontBaseline, FontFeature, Hyphenation, Justification, Kerning, Orientation, ParagraphRun, ParagraphStyle,
+    SingleWord, TextAlign, TextRun, TextShape,
 };
 use photocraft_geom::Affine;
 use serde_json::{Map, Value};
@@ -79,7 +80,7 @@ impl Losses {
     }
 }
 
-fn char_style(c: &Char<'_>, pt: f64, mode: ColorMode, losses: &mut Losses) -> CharStyle {
+fn char_style(c: &Char<'_>, pt: f64, mode: ColorMode) -> CharStyle {
     let o = c.0;
     let mut s = CharStyle {
         font_family: c.str("fontFamily").unwrap_or("Arial").chars().take(256).collect(),
@@ -132,35 +133,96 @@ fn char_style(c: &Char<'_>, pt: f64, mode: ColorMode, losses: &mut Losses) -> Ch
             }
         }
     }
-    if c.bool("noBreak") {
-        losses.add("No Break");
-    }
-    if o.get("fractionalWidths").and_then(Value::as_bool) == Some(false) {
-        losses.add("Fractional Widths off");
-    }
+    s.no_break = c.bool("noBreak");
     s
+}
+
+/// Whether a character run of the file has Fractional Widths off (the app kept it per run;
+/// PhotoCraft, as Photoshop, per layer).
+fn fractional_widths_off(c: &Char<'_>) -> bool {
+    c.0.get("fractionalWidths").and_then(Value::as_bool) == Some(false)
+}
+
+/// The app's Hyphenation dialog settings (`HYPHENATION_DEFAULTS` for what a sparse object leaves
+/// out: 7 / 2 / 2 / 2 / 36 and the three options on). The zone was pixels, like the indents.
+fn hyphenation(h: Option<&Map<String, Value>>, pt: f64) -> Hyphenation {
+    let int = |key: &str, default: u8, range: std::ops::RangeInclusive<u8>| {
+        h.and_then(|h| num(h, key)).map_or(default, |n| n.round().clamp(f64::from(*range.start()), f64::from(*range.end())) as u8)
+    };
+    let flag = |key: &str| h.and_then(|h| h.get(key)).and_then(Value::as_bool).unwrap_or(true);
+    let zone = h.and_then(|h| num(h, "zone")).unwrap_or(36.0) * pt;
+    Hyphenation {
+        words_longer_than: int("minWord", 7, Hyphenation::WORDS_LONGER_THAN),
+        after_first: int("after", 2, Hyphenation::AFTER_FIRST),
+        before_last: int("before", 2, Hyphenation::BEFORE_LAST),
+        hyphen_limit: int("limit", 2, Hyphenation::HYPHEN_LIMIT),
+        zone_pt: (zone as f32).clamp(*Hyphenation::ZONE_PT.start(), *Hyphenation::ZONE_PT.end()),
+        capitalized: flag("capitalized"),
+        last_word: flag("lastWord"),
+        across_column: flag("acrossColumn"),
+    }
+}
+
+/// The app's Justification dialog spacing (word, letter and glyph; Auto Leading is read apart).
+/// `singleWord` `'justify-all'`, the app's name for Full Justify, is [`SingleWord::Justify`].
+fn justification(j: &Map<String, Value>) -> Justification {
+    let d = Justification::default();
+    let three = |key: &str, default: [f32; 3], range: std::ops::RangeInclusive<f32>| {
+        let Some(a) = j.get(key).and_then(Value::as_array).filter(|a| a.len() == 3) else { return default };
+        let mut v = [0.0f32; 3];
+        for (o, x) in v.iter_mut().zip(a) {
+            let Some(x) = x.as_f64().filter(|x| x.is_finite()) else { return default };
+            *o = (x as f32).clamp(*range.start(), *range.end());
+        }
+        if v[0] <= v[1] && v[1] <= v[2] { v } else { default }
+    };
+    Justification {
+        word: three("word", d.word, Justification::WORD),
+        letter: three("letter", d.letter, Justification::LETTER),
+        glyph: three("glyph", d.glyph, Justification::GLYPH),
+        single_word: match j.get("singleWord").and_then(Value::as_str) {
+            Some("left") => SingleWord::Left,
+            Some("center") => SingleWord::Center,
+            Some("right") => SingleWord::Right,
+            _ => SingleWord::Justify,
+        },
+    }
+}
+
+/// The app's list (`{type, marker, start, level}`); its numbering names (`lower-alpha`) are
+/// PhotoCraft's (`lowerAlpha`).
+fn list(v: &Value) -> Option<photocraft_doc::text::ListStyle> {
+    let mut v = v.clone();
+    if let Some(m) = v.get("marker").and_then(Value::as_str) {
+        let renamed = match m {
+            "lower-alpha" => Some("lowerAlpha"),
+            "upper-alpha" => Some("upperAlpha"),
+            "lower-roman" => Some("lowerRoman"),
+            "upper-roman" => Some("upperRoman"),
+            _ => None,
+        };
+        if let Some(r) = renamed {
+            v["marker"] = Value::from(r);
+        }
+    }
+    crate::type_xmp::list_from_json(&v)
 }
 
 fn para_style(p: &Map<String, Value>, pt: f64, losses: &mut Losses) -> ParagraphStyle {
     let px = |key: &str| (clamp(num(p, key), 0.0, -10_000.0, 10_000.0) * pt) as f32;
     let justification = p.get("justification").and_then(Value::as_object);
     let auto_leading = justification.and_then(|j| num(j, "autoLeading")).map_or(120.0, |a| a.clamp(0.0, 500.0));
-    if p.get("list").is_some_and(Value::is_object) {
-        losses.add("bulleted and numbered lists");
-    }
-    if p.get("hangingPunctuation").and_then(Value::as_bool) == Some(true) {
-        losses.add("Roman Hanging Punctuation");
-    }
-    if let Some(j) = justification {
-        let three = |key: &str, default: [f64; 3]| j.get(key).and_then(Value::as_array).is_some_and(|a| a.iter().map(Value::as_f64).ne(default.map(Some)));
-        if three("word", [80.0, 100.0, 133.0]) || three("letter", [0.0, 0.0, 0.0]) || three("glyph", [100.0, 100.0, 100.0]) {
-            losses.add("Justification word, letter and glyph spacing");
-        }
-    }
     let hyphenate = p.get("hyphenate").and_then(Value::as_bool).unwrap_or(false);
-    if hyphenate && p.get("hyphenation").is_some_and(Value::is_object) {
-        losses.add("Hyphenation settings");
-    }
+    // The settings a hyphenating paragraph used are its own or the app's defaults; one that
+    // doesn't hyphenate and has none keeps Photoshop's.
+    let hyphenation_settings = match p.get("hyphenation").and_then(Value::as_object) {
+        Some(h) => hyphenation(Some(h), pt),
+        None if hyphenate => hyphenation(None, pt),
+        None => Hyphenation::default(),
+    };
+    // 0.3's paragraphs (`breakRules: 'legacy'`) and those set to Single-line; the app's default
+    // was Every-line.
+    let single = p.get("composer").and_then(Value::as_str) == Some("single") || p.get("breakRules").and_then(Value::as_str) == Some("legacy");
     if num(p, "tabStop").is_some_and(|t| t != 36.0) {
         losses.add("tab stops");
     }
@@ -181,6 +243,11 @@ fn para_style(p: &Map<String, Value>, pt: f64, losses: &mut Losses) -> Paragraph
         space_after_pt: px("spaceAfter"),
         auto_leading: (auto_leading / 100.0) as f32,
         hyphenate,
+        hyphenation: hyphenation_settings,
+        justification: justification.map(self::justification).unwrap_or_default(),
+        composer: if single { Composer::SingleLine } else { Composer::EveryLine },
+        hanging_punctuation: p.get("hangingPunctuation").and_then(Value::as_bool) == Some(true),
+        list: p.get("list").and_then(list),
         ..Default::default()
     }
 }
@@ -210,7 +277,10 @@ fn from_legacy(desc: &Map<String, Value>) -> Content {
     if let Some(ls) = num(&f, "letterSpacing").filter(|l| *l != 0.0) {
         char.insert("tracking".into(), Value::from(ls * 1000.0 / size));
     }
+    // As `fromLegacy`: 0.1-0.3 text was broken line by line.
     let mut para = Map::new();
+    para.insert("composer".into(), Value::from("single"));
+    para.insert("breakRules".into(), Value::from("legacy"));
     if let Some(a) = f.get("align") {
         para.insert("align".into(), a.clone());
     }
@@ -305,10 +375,17 @@ pub(crate) fn text_layer(desc: &Map<String, Value>, dpi: f32, mode: ColorMode, n
 
     let mut char_runs = Vec::with_capacity(byte_runs.len());
     let mut strokes: Vec<Option<([u8; 3], f64)>> = Vec::new();
+    let mut fractional_off = 0usize;
     for (len, style) in &byte_runs {
         let c = Char(style);
-        char_runs.push(TextRun { len: *len, style: char_style(&c, pt, mode, &mut losses) });
+        char_runs.push(TextRun { len: *len, style: char_style(&c, pt, mode) });
         strokes.push(c.stroke());
+        fractional_off += usize::from(fractional_widths_off(&c));
+    }
+    // Fractional Widths is the layer's: off when every run had it off.
+    let fractional_widths = fractional_off < byte_runs.len().max(1);
+    if fractional_widths && fractional_off > 0 {
+        losses.add("Fractional Widths off on some characters");
     }
     let para_runs: Vec<ParagraphRun> = paragraph_lengths(&text)
         .into_iter()
@@ -343,7 +420,8 @@ pub(crate) fn text_layer(desc: &Map<String, Value>, dpi: f32, mode: ColorMode, n
         Some("strong") => AntiAlias::Strong,
         _ => AntiAlias::Smooth,
     };
-    let mut t = TextLayer { text, runs: char_runs, paragraphs: para_runs, antialias, ..Default::default() };
+    let system_layout = options.and_then(|o| o.get("systemLayout")).and_then(Value::as_bool) == Some(true);
+    let mut t = TextLayer { text, runs: char_runs, paragraphs: para_runs, antialias, fractional_widths, system_layout, ..Default::default() };
     t.sync_summary();
 
     let n = |key: &str| num(desc, key).filter(|v| v.abs() <= 1.0e7);
@@ -479,6 +557,71 @@ mod tests {
         assert_eq!((text.as_str(), runs.len(), paras.len()), ("Hi\nthere", 1, 2));
         assert_eq!(runs[0].1.get("tracking"), Some(&json!(100.0)));
         assert_eq!(paras[1].get("justification").and_then(|j| j.get("autoLeading")), Some(&json!(150.0)));
+    }
+
+    /// Pigment (B1): a 0.4 layer's No Break, Fractional Widths, System Layout, hyphenation and
+    /// justification settings, composer, list and hanging punctuation become the model's.
+    #[test]
+    fn type_settings_of_0_4_become_photocraft_settings() {
+        use photocraft_doc::text::{Composer, Hyphenation, ListKind, ListStyle, SingleWord};
+        let desc = json!({
+            "content": {"v": 1, "text": "ab\ncd", "runs": [{"len": 2, "style": {"noBreak": true, "fractionalWidths": false}}, {"len": 3, "style": {"fractionalWidths": false}}],
+                "paras": [
+                    {"style": {"composer": "single", "hyphenate": true, "hyphenation": {"minWord": 9, "after": 3, "before": 4, "limit": 1, "zone": 72, "capitalized": false, "lastWord": true, "acrossColumn": false}, "justification": {"word": [60, 90, 150], "letter": [-10, 0, 20], "glyph": [90, 100, 110], "autoLeading": 120, "singleWord": "center"}}},
+                    {"style": {"list": {"type": "number", "marker": "upper-roman", "start": 3, "level": 2}, "hangingPunctuation": true}}
+                ]},
+            "typeOptions": {"systemLayout": true}
+        });
+        let mut notes = Vec::new();
+        // 144 dpi: the zone was pixels, like the indents.
+        let c = text_layer(desc.as_object().unwrap(), 144.0, ColorMode::Rgb, &mut notes);
+        let t = c.text;
+        assert!(notes.iter().all(|n| !n.contains("left out")), "{notes:?}");
+        assert!(!t.fractional_widths && t.system_layout);
+        let runs = t.char_runs();
+        assert!(runs[0].style.no_break && !runs[1].style.no_break);
+        let paras = t.paragraph_runs();
+        let p = &paras[0].style;
+        assert_eq!(p.composer, Composer::SingleLine);
+        assert_eq!(
+            p.hyphenation,
+            Hyphenation {
+                words_longer_than: 9,
+                after_first: 3,
+                before_last: 4,
+                hyphen_limit: 1,
+                zone_pt: 36.0,
+                capitalized: false,
+                last_word: true,
+                across_column: false
+            }
+        );
+        assert_eq!(
+            (p.justification.word, p.justification.letter, p.justification.glyph, p.justification.single_word),
+            ([60.0, 90.0, 150.0], [-10.0, 0.0, 20.0], [90.0, 100.0, 110.0], SingleWord::Center)
+        );
+        let p = &paras[1].style;
+        assert_eq!(p.list, Some(ListStyle { kind: ListKind::Number, marker: "upperRoman".into(), start: 3, level: 2 }));
+        assert!(p.hanging_punctuation && p.composer == Composer::EveryLine);
+
+        // Some runs off: the layer keeps Fractional Widths on and says so.
+        let desc = json!({"content": {"v": 1, "text": "ab", "runs": [{"len": 1, "style": {"fractionalWidths": false}}, {"len": 1, "style": {}}], "paras": [{"style": {}}]}});
+        let mut notes = Vec::new();
+        let c = text_layer(desc.as_object().unwrap(), 72.0, ColorMode::Rgb, &mut notes);
+        assert!(c.text.fractional_widths);
+        assert!(notes.iter().any(|n| n.contains("Fractional Widths off on some characters")), "{notes:?}");
+    }
+
+    /// 0.1-0.3 text was broken line by line (`fromLegacy`'s `composer: 'single'`, `breakRules: 'legacy'`).
+    #[test]
+    fn text_of_0_3_opens_single_line() {
+        let desc = json!({"text": "Hi\nthere", "font": {"family": "Georgia", "size": 20}});
+        let mut notes = Vec::new();
+        let c = text_layer(desc.as_object().unwrap(), 72.0, ColorMode::Rgb, &mut notes);
+        assert!(c.text.paragraph_runs().iter().all(|p| p.style.composer == photocraft_doc::text::Composer::SingleLine));
+        let desc = json!({"content": {"v": 1, "text": "x", "runs": [], "paras": [{"style": {"breakRules": "legacy"}}]}});
+        let c = text_layer(desc.as_object().unwrap(), 72.0, ColorMode::Rgb, &mut notes);
+        assert_eq!(c.text.paragraph_runs()[0].style.composer, photocraft_doc::text::Composer::SingleLine);
     }
 
     #[test]

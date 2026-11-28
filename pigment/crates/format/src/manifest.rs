@@ -273,6 +273,11 @@ pub enum ContentM {
         antialias: text::AntiAlias,
         #[serde(default)]
         warp: Option<text::TextWarp>,
+        /// Fractional Widths; a file saved before the field existed had them on.
+        #[serde(default = "yes")]
+        fractional_widths: bool,
+        #[serde(default)]
+        system_layout: bool,
     },
     Shape {
         fill: Option<Fill>,

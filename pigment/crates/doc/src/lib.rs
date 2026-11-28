@@ -438,6 +438,12 @@ pub struct TextLayer {
     pub antialias: text::AntiAlias,
     /// Warp Text settings (applied to the glyph outlines when rendering).
     pub warp: Option<text::TextWarp>,
+    /// Fractional Widths (Character panel menu, per layer as in Photoshop): off rounds glyph
+    /// advances to whole pixels. PSD `UseFractionalGlyphWidths`.
+    pub fractional_widths: bool,
+    /// System Layout (Character panel menu, per layer): whole-pixel positions and the platform's
+    /// sharper rasterisation, for interface mock-ups.
+    pub system_layout: bool,
 }
 
 impl Default for TextLayer {
@@ -456,6 +462,8 @@ impl Default for TextLayer {
             orientation: text::Orientation::Horizontal,
             antialias: text::AntiAlias::Smooth,
             warp: None,
+            fractional_widths: true,
+            system_layout: false,
         }
     }
 }
