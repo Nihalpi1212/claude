@@ -110,11 +110,10 @@ pub fn grd_noise(data: &[u8]) -> Vec<Option<NoiseGradient>> {
     items
         .iter()
         .take(craft_psd::grd::MAX_GRADIENTS)
+        // The same items `craft_psd::grd::parse` keeps (a `Grad` object or global object), so
+        // the settings stay beside their gradient.
         .filter_map(|v| match v {
-            Value::Descriptor(d) => match d.get("Grad") {
-                Some(Value::Descriptor(g)) => Some(noise_from_grad(g)),
-                _ => None,
-            },
+            Value::Descriptor(d) => d.get_object("Grad").map(noise_from_grad),
             _ => None,
         })
         .collect()

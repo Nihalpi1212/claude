@@ -129,3 +129,33 @@ fn grd_files_carry_noise_settings() {
         assert!(grd_noise(bad).iter().all(Option::is_none));
     }
 }
+
+#[test]
+fn settings_stay_beside_their_gradient_when_a_grad_is_a_global_object() {
+    // Review P: `craft_psd::grd::parse` keeps a gradient whose `Grad` is a global object (`GlbO`),
+    // which `grd_noise` skipped, so the noise settings of the next gradient went to this one.
+    let solid = GrdGradient {
+        name: "Solid".into(),
+        noise: false,
+        stops: vec![
+            craft_psd::grd::GrdStop { location: 0.0, midpoint: 0.5, color: craft_psd::grd::GrdColor::Rgb([1.0, 0.0, 0.0]) },
+            craft_psd::grd::GrdStop { location: 1.0, midpoint: 0.5, color: craft_psd::grd::GrdColor::Rgb([0.0, 0.0, 1.0]) },
+        ],
+        opacity: vec![(0.0, 1.0, 0.5), (1.0, 1.0, 0.5)],
+    };
+    let noisy = GrdGradient { name: "Noisy".into(), noise: true, ..GrdGradient::default() };
+    let n = sample(NoiseModel::Hsb);
+    let bytes = write_grd(&[solid, noisy], &[None, Some(n.clone())]);
+    let (mut vd, _) = VersionedDescriptor::parse_prefix(&bytes[6..]).unwrap();
+    let Some((_, Value::List(items))) = vd.descriptor.items.iter_mut().find(|(k, _)| k.is("GrdL")) else { panic!("GrdL") };
+    let Value::Descriptor(first) = &mut items[0] else { panic!("an object") };
+    let Some((_, grad)) = first.items.iter_mut().find(|(k, _)| k.is("Grad")) else { panic!("Grad") };
+    let Value::Descriptor(g) = grad.clone() else { panic!("Grad object") };
+    *grad = Value::GlobalObject(g);
+    let mut file = b"8BGR".to_vec();
+    file.extend_from_slice(&5u16.to_be_bytes());
+    file.extend_from_slice(&vd.to_bytes());
+    let parsed = craft_psd::grd::parse(&file).unwrap();
+    assert_eq!(parsed.iter().map(|g| g.name.as_str()).collect::<Vec<_>>(), ["Solid", "Noisy"]);
+    assert_eq!(grd_noise(&file), vec![None, Some(n)], "one entry per gradient craft-psd reads, in its order");
+}

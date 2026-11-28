@@ -211,3 +211,45 @@ fn a_reorder_runs_the_engines_move() {
     assert_eq!(after[2], before[0]);
     assert_eq!(after[0], before[1]);
 }
+
+#[test]
+fn the_selection_follows_its_presets_when_the_rows_move() {
+    // Review P: the selection was kept by row position, so after a reorder (or a change made
+    // elsewhere) it marked other presets, and Delete then removed presets the user had not chosen.
+    let (mut app, _) = app_with(Vec::new());
+    open_from_menu(&mut app);
+    set(&mut app, "kind", json!("tools"));
+    let before = names(&mut app);
+    let ctx = app.ctx().clone();
+    dialog(&mut app).select(0, Mods::default());
+    let rows = dialog(&mut app).browser_rows();
+    let mv = craft::ui::contract::ReorderMove { key: PresetKey::Item("0".into()), keys: vec![PresetKey::Item("0".into())], to: 2, copy: false, parent: None };
+    let edit = craft::behavior::EditEvent::set(craft::behavior::Mixed::Same(mv.clone()), mv, std::sync::Arc::from("Reorder"), None);
+    dialog(&mut app).event(PresetEvent::Reorder(edit), &rows);
+    take(&mut app, &ctx);
+    assert_eq!(names(&mut app)[2], before[0]);
+    assert_eq!(fields(&mut app)["selected"], json!([2]), "the moved preset stays selected");
+    // A rename keeps it selected too.
+    set(&mut app, "selected", json!([1]));
+    dialog(&mut app).queued.push(Ask::Rename { index: 1, text: "Renamed Preset".into() });
+    take(&mut app, &ctx);
+    assert_eq!(names(&mut app)[1], "Renamed Preset");
+    assert_eq!(fields(&mut app)["selected"], json!([1]));
+    // A preset added elsewhere (the Tool Presets panel) shifts the rows: the selection follows.
+    set(&mut app, "selected", json!([1, 3]));
+    let chosen = [names(&mut app)[1].clone(), names(&mut app)[3].clone()];
+    app.session.execute("tool.presets.new", json!({"name": "Added Elsewhere", "tool": "brush", "options": {}})).unwrap();
+    let last = app.session.presets.tool_presets.len() - 1;
+    app.session.execute(CMD, json!({"action": "move", "kind": "tools", "index": last, "to": 0})).unwrap();
+    take(&mut app, &ctx);
+    let now = names(&mut app);
+    assert_eq!(now[0], "Added Elsewhere");
+    let selected: Vec<String> =
+        fields(&mut app)["selected"].as_array().unwrap().iter().map(|i| now[i.as_u64().unwrap() as usize].clone()).collect();
+    assert_eq!(selected, chosen);
+    // Delete removes exactly those.
+    set(&mut app, "press", json!("delete"));
+    let left = names(&mut app);
+    assert!(chosen.iter().all(|c| !left.contains(c)) && left.contains(&"Added Elsewhere".to_string()), "{left:?}");
+    assert_eq!(left.len(), now.len() - 2);
+}

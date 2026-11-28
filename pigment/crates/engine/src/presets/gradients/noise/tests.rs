@@ -202,3 +202,26 @@ fn bad_noise_params_are_errors_and_change_nothing() {
     let n = fill_noise(&s).1.unwrap();
     assert!(n.roughness == 1.0 && n.min[0] == 0.0 && n.seed == u32::MAX - 4);
 }
+
+#[test]
+fn a_noise_preset_with_transparency_stops_of_its_own_is_solid() {
+    // Review P: `gradient.fill.create {"gradient": <a noise preset>, "transparency": …}` kept the
+    // noise settings beside stops that were no longer their bake, so a PSD save wrote the noise
+    // and dropped the transparency.
+    let mut s = session();
+    s.execute("gradient.presets.new", json!({"name": "Noisy", NOISE: {"roughness": 80, "seed": 2}})).unwrap();
+    s.execute("gradient.fill.create", json!({"from": [0, 8], "to": [64, 8], "gradient": "Noisy", "transparency": [[0, 100], [1, 0]]})).unwrap();
+    let LayerContent::Fill(photocraft_doc::Fill::Gradient { noise, opacity_stops, .. }) = active_content(&s) else { panic!("a gradient fill") };
+    assert!(noise.is_none(), "the transparency stops are the file's, so it is solid");
+    assert_eq!(opacity_stops.len(), 2);
+    // Without them the fill keeps the settings.
+    s.execute("gradient.fill.create", json!({"from": [0, 8], "to": [64, 8], "gradient": "Noisy"})).unwrap();
+    assert!(fill_noise(&s).1.is_some());
+    // The Gradient tool's current noise gradient with transparency of its own paints, and the
+    // current gradient keeps its settings.
+    s.execute("gradient.presets.select", json!({"preset": "Noisy", "applyToLayer": false})).unwrap();
+    assert!(s.presets.gradient.noise.is_some());
+    s.execute("layer.new.layer", json!({})).unwrap();
+    s.execute("paint.gradient", json!({"from": [0, 8], "to": [64, 8], "transparency": [[0, 100], [1, 0]]})).unwrap();
+    assert!(s.presets.gradient.noise.is_some());
+}
