@@ -4,13 +4,14 @@ Built on `claude/pigment-photocraft` after `fb7ecac` (review P; PhotoCraft 05729
 PORTS-A §4.1 and §9 F3; REBASE-FU "F3" (it wins). First package of group FU.
 
 **CI first.** At the start (01:00 UTC) the newest finished run was 46084412661 (`31d2422`, P4), **green**; the runs on
-`e44d7b9` (46089736315) and `fb7ecac` (46090349536, group P's review) were still running (in progress / pending at
-01:40). Nothing red, so no CI commit. **The next engineer checks CI first**: those two runs and the run on this
-package's commit (COMMIT_SHA). Not waited for, as the brief says.
+`e44d7b9` (46089736315) and `fb7ecac` (46090349536, group P's review) were still running (still in progress / pending at
+01:45). Nothing red, so no CI commit. **The next engineer checks CI first**: those two runs and the run on this
+package's commit (`1c7c73b`). Not waited for, as the brief says.
 
 ## Commit (pushed)
 
-- COMMIT_LINE
+- `1c7c73b` Pigment AVIF open (F3), io and interface: craft-image-codecs' AVIF decoder switched on, AVIF in File ›
+  Open
 
 ## What was built
 
@@ -77,7 +78,17 @@ small box dump checked the alpha and grid layouts. Not covered by a fixture: ICC
 PQ/HLG (craft-libs' own unit tests cover the decoder side; the flat path's ICC and CICP tagging is upstream's and shared
 with HEIF).
 
-Results: RESULTS
+Results (nextest, `--profile ci`, `TMPDIR=/dev/shm/pt` and the CI font/i18n dirs):
+- `cargo nextest run -p photocraft-io --features heif --lib --bins --tests`: 1452 passed, 14 skipped (the 9 AVIF tests
+  among them).
+- `cargo nextest run -j 3 -p photocraft-ui-egui --features photocraft-io/heif --lib --bins --tests` (the whole suite):
+  3793 passed, 6 skipped.
+- `cargo nextest run -p photocraft-engine --lib -E 'test(/folder_listing_takes_every_format|same_format/)'`: 3 passed
+  (the edited upstream test and the two Batch "same format" tests).
+- `cargo fmt --all -- --check`, `cargo clippy --locked --features heif -p photocraft-io -p photocraft-engine
+  -p photocraft-ui-egui --all-targets -- -D warnings`, `python3 pigment/scripts/pigment-rebrand.py --check`,
+  `cargo xtask layers`, `cargo xtask test-binaries`, `cargo metadata --locked`: all clean. No engine command,
+  preference, panel command or crate of the workspace was added, so no panic hunt, panel-commands or scorecard run.
 
 ## Hooks into upstream files
 
