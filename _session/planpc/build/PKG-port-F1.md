@@ -12,7 +12,7 @@ was not looked at (the brief says not to wait): **the next engineer checks both 
 
 - `51dedef` Pigment File Info tabs (F1), engine and io: Rating, Origin, IPTC, IPTC Extension, GPS, Raw Data, fuller
   Camera Data, IPTC-IIM in resource 1028 and JPEG APP13
-- `SHA2` Pigment File Info tabs (F1), interface: Photoshop's tabs, the Rating stars, the structure rows and Raw Data's
+- `2ca195b` Pigment File Info tabs (F1), interface: Photoshop's tabs, the Rating stars, the structure rows and Raw Data's
   Copy (also the parity page and the user guide)
 
 ## What was built
@@ -119,7 +119,7 @@ Results (nextest, CI's env):
 - `photocraft-engine --features photocraft-io/heif --lib --bins --tests --profile ci`: 5025 passed, 1 failed (the known
   container-only `legacy_pigment_render::tests::cancelling_the_open_stops_the_smart_filters`), 26 skipped.
 - Panic hunt: 1 passed.
-- `photocraft-ui-egui` whole suite (`-j 3 --profile ci --lib --bins --tests`): UIRESULT.
+- `photocraft-ui-egui` whole suite (`-j 3 --profile ci --lib --bins --tests`): 3804 passed, 6 skipped.
 - fmt, clippy `-D warnings` (io, engine, ui-egui, all targets, `--locked --features heif`), rebrand check: clean.
 
 ## Hooks into upstream files (FORK.md, "File Info: Rating, Origin, IPTC, …")
@@ -138,7 +138,7 @@ Results (nextest, CI's env):
 
 ## For the next package
 
-- **CI**: check the runs on `51dedef` and `SHA2` first.
+- **CI**: check the runs on `51dedef` and `2ca195b` first.
 - **AI team**: `altText` (`Iptc4xmpCore:AltTextAccessibility`) and `extDescrAccessibility` are `file.fileInfo` keys now;
   Describe Image (`ai_ui/describe.rs:98`) still writes only `description`. `ai_cmds/generate.rs` stamps `description`
   through upstream's `write_file_info` directly, so its edit does not resync IIM 1028 (harmless: it is a new layer's
