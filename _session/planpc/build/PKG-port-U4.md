@@ -6,7 +6,7 @@ built yet: REBASE-FU's order puts U4 right after F1).
 
 **CI first.** At the start (05:00 UTC) the newest finished run was 46101890525 (`aacdf9b`, F2), **green**;
 46106173806 (`51dedef`) and 46110072787 (`2ca195b`, F1) then finished **green** too. Nothing red, so no CI commit.
-The runs on this package's commits (46115758573 on `e8ec9d5`, then `0a8765f`, then the notes commit) were in
+The runs on this package's commits (46115758573 on `e8ec9d5`, then `0a8765f` and `53805fb`) were in
 progress when I finished: **the next engineer checks them first.**
 
 **REBASE-FU's line numbers** were checked against the tree: `layer_multi_cmds.rs:96-114` (specs),
@@ -22,7 +22,7 @@ is now 1516). All matched or had moved by a few lines; nothing was missing.
   after Deselect Layers
 - `0a8765f` Pigment operating-system recent documents (U4), app, interface and tablet: files opened or saved go on
   Windows', macOS' and the desktop's recent lists
-- a last small commit with the FORK.md fix (`pub mod recent_os`) and nothing else (see the schema's commit list).
+- `53805fb` Pigment recent documents (U4), docs: FORK.md names `pub mod recent_os` and its NoteRecentFn
 
 ## What was built
 
@@ -126,8 +126,8 @@ Results (nextest `--profile ci`, `TMPDIR=/dev/shm/pt`, CI's font and i18n dirs):
   the recent-file and menu tests were re-run on the final tree (see the last line of this list).
 - `cargo nextest run -p photocraft -p photocraft-tablet --features heif --lib --bins --tests`: **258 passed**, 2 skipped
   (the 11 `os_recent` tests among them; one of mine failed first on its own off-by-indent assertion, fixed).
-- Re-run on the final tree: `-p photocraft-ui-egui --lib -E 'test(/recent_os|similar_layers|recent|home_recent/)'`:
-  see the schema's test line.
+- Re-run on the final tree: `-p photocraft-ui-egui --features photocraft-io/heif --lib
+  -E 'test(/recent_os|similar_layers|recent|home_recent/)'`: 27 passed.
 - `cargo fmt --all -- --check`; `cargo clippy --locked --features heif -p photocraft-engine -p photocraft-ui-egui
   -p photocraft-tablet -p photocraft --all-targets -- -D warnings`; `python3 scripts/pigment-rebrand.py --check`;
   `cargo xtask layers`, `panel-commands`, `test-binaries`, `scorecard --check`: all clean.
@@ -165,7 +165,7 @@ Results (nextest `--profile ci`, `TMPDIR=/dev/shm/pt`, CI's font and i18n dirs):
 
 ## For the next package
 
-- **CI**: check the runs on `e8ec9d5`, `0a8765f` and the notes commit first.
+- **CI**: check the runs on `e8ec9d5`, `0a8765f` and `53805fb` first.
 - **U3** edits `crates/tablet/src/windows.rs` too: my code is one marked section just above `#[cfg(test)] mod tests`,
   plus the test `recent_documents_take_a_terminated_path_and_never_null` at the top of that module. Keep both.
   U3 also adds `install_windows(feed)` to `apps/photocraft/src/main.rs`; my only line there is `mod os_recent;`.
