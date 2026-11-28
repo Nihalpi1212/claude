@@ -47,6 +47,8 @@ mod external_svg;
 mod linux_libs;
 mod logging;
 mod monitor_profile;
+// Pigment: the operating system's recent documents.
+mod os_recent;
 mod photoshop_settings;
 mod presentation;
 // The print portal needs the session bus (zbus, Linux only); its pure helpers are tested everywhere.

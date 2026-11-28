@@ -69,11 +69,12 @@ core-graphics2 = { version = "=0.6.1", default-features = false, features = ["di
 fmv-macos-events = "=0.1.0"
 # Safe AppKit calls only: turn off AppKit's title bar dragging (mac_window.rs) and find where the
 # pointer is when files are dropped (cursor.rs; winit 0.30 drops carry no position), and play the
-# system alert sound for Beep When Done (services.rs, NSBeep). Already in
+# system alert sound for Beep When Done (services.rs, NSBeep). Pigment: NSDocumentController,
+# NSString and NSURL for the recent documents (os_recent.rs). Already in
 # Cargo.lock (winit, photocraft-tablet); pinned exactly to the same versions.
 objc2 = "=0.6.5"
-objc2-foundation = { version = "=0.3.2", default-features = false, features = ["std", "NSArray", "NSEnumerator", "NSGeometry"] }
-objc2-app-kit = { version = "=0.3.2", default-features = false, features = ["std", "NSApplication", "NSApplicationScripting", "NSEvent", "NSGraphics", "NSResponder", "NSView", "NSWindow"] }
+objc2-foundation = { version = "=0.3.2", default-features = false, features = ["std", "NSArray", "NSEnumerator", "NSGeometry", "NSString", "NSURL"] }
+objc2-app-kit = { version = "=0.3.2", default-features = false, features = ["std", "NSApplication", "NSApplicationScripting", "NSDocumentController", "NSEvent", "NSGraphics", "NSResponder", "NSView", "NSWindow"] }
 
 [target.'cfg(unix)'.dependencies]
 rustix = { version = "=1.1.5", features = ["fs"] }

@@ -334,9 +334,55 @@ pub fn take_pen_end() -> Option<bool> {
     decode_end(CONTACT_END.swap(encode_end(None), Ordering::Relaxed)).or_else(pen_end)
 }
 
+// ---------- Pigment: the operating system's recent documents (U4) ----------
+//
+// Not pen input: this crate is the workspace's one isolated `unsafe` helper, and the app crate
+// forbids `unsafe`, so the one shell call the app needs for Windows' recent documents lives here.
+
+#[link(name = "shell32")]
+unsafe extern "system" {
+    fn SHAddToRecentDocs(u_flags: u32, pv: *const std::ffi::c_void);
+}
+
+/// `SHARD_PATHW` (shlobj_core.h): `pv` is a NUL-terminated UTF-16 path.
+const SHARD_PATHW: u32 = 0x0000_0003;
+
+/// The UTF-16, NUL-terminated form of `path` for `SHAddToRecentDocs`; `None` for an empty path or
+/// one with a NUL inside (it would name another file; passing NULL would clear the whole list).
+pub fn recent_document_wide(path: &std::path::Path) -> Option<Vec<u16>> {
+    use std::os::windows::ffi::OsStrExt;
+    let mut wide: Vec<u16> = path.as_os_str().encode_wide().collect();
+    if wide.is_empty() || wide.contains(&0) {
+        return None;
+    }
+    wide.push(0);
+    Some(wide)
+}
+
+/// Add `path` to the user's Recent items (Explorer's Recent, Start, and the app's taskbar Jump
+/// List when the shell ties the process to one), as Electron's `app.addRecentDocument` did for
+/// the JavaScript Pigment. Windows offers no per-app removal, so Clear Recent File List leaves
+/// these entries alone (`SHAddToRecentDocs(0, NULL)` would clear every app's).
+pub fn add_recent_document(path: &std::path::Path) {
+    let Some(wide) = recent_document_wide(path) else { return };
+    // SAFETY: `wide` is a NUL-terminated UTF-16 buffer that outlives the call, which is what
+    // SHARD_PATHW asks for; the shell copies the path and keeps no pointer to it. The function
+    // returns nothing and reports no error (a missing file is ignored).
+    unsafe { SHAddToRecentDocs(SHARD_PATHW, wide.as_ptr().cast()) }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recent_documents_take_a_terminated_path_and_never_null() {
+        assert_eq!(recent_document_wide(std::path::Path::new(r"C:\a.psd")), Some("C:\\a.psd\0".encode_utf16().collect()));
+        assert_eq!(recent_document_wide(std::path::Path::new("")), None);
+        // A missing file is not an error, and nothing panics.
+        add_recent_document(std::path::Path::new(r"C:\no such folder\pigment-test.psd"));
+        add_recent_document(std::path::Path::new(""));
+    }
 
     const POINTER_FLAG_INCONTACT: u32 = 0x0004;
     const POINTER_FLAG_FIRSTBUTTON: u32 = 0x0010;

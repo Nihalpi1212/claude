@@ -605,6 +605,10 @@ pub struct Services {
     /// Pigment: the JavaScript Pigment's presets folder, when it exists (Edit › Presets ›
     /// Migrate Presets, P4); `None` in the web build and in tests.
     pub legacy_presets_dir: Option<std::path::PathBuf>,
+    /// Pigment: the operating system's recent documents (U4). `Some(path)` notes a file opened or
+    /// saved (Windows Recent and Jump List, macOS Recent Items, the XDG `recently-used.xbel`),
+    /// `None` clears Pigment's own entries where the platform can. `None` in the web build and tests.
+    pub note_recent: Option<Box<dyn Fn(Option<&std::path::Path>) + Send + Sync>>,
     /// The native window is connected directly to a Wayland compositor.
     pub is_wayland: bool,
     /// On Wayland, the shell command that starts this install under XWayland, where native file

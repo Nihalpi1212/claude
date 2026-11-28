@@ -213,8 +213,8 @@ the entry is now. Where Pigment 0.5.0 has PhotoCraft's status, the column names 
 | Actions: Insert Conditional | Done | Partial: no dialog in the panel | U2 |
 | Pen tablet: tilt, rotation, barrel wheel, eraser end, side buttons † | Done | Partial (as above) | U3 |
 | Tool presets: load, save, replace, reset, `.tpl` † | Done | Partial: no `.tpl` | P2 |
-| Select Similar Layers | Done | Missing | U4 |
-| Operating-system recent documents | Done | Missing | U4 |
+| Select Similar Layers | Done | Done in 0.6: Select › Similar Layers, after Deselect Layers; adjustment and fill layers of any kind match | U4 |
+| Operating-system recent documents | Done | Done in 0.6: Windows Recent (`SHAddToRecentDocs`), macOS Recent Items, Linux `recently-used.xbel` | U4 |
 
 ### The 0.6 packages
 
