@@ -97,10 +97,16 @@ Hooks (all in docs/FORK.md, "The Single-line and Every-line composers and hyphen
   hyphenation is greedy; composed justified lines end flush (hyphen included); Fractional Widths off composes inside the
   box on whole pixels; first-line indent and forced line breaks.
 - Runs: `cargo nextest run --profile ci -j 4 -p photocraft-text -p photocraft-io -p photocraft-engine --features
-  photocraft-io/heif --lib --tests`: 6924 passed, 46 skipped. ui-egui whole suite: see the result below.
+  photocraft-io/heif --lib --tests`: 6924 passed, 46 skipped. ui-egui whole suite (`nextest --profile ci -j 3 -p
+  photocraft-ui-egui --features photocraft-io/heif --lib --bins --tests`): 3849 passed, 6 skipped.
 - Checks: `cargo fmt --all -- --check`, `cargo clippy -p photocraft-text --all-targets -- -D warnings`,
   `python3 scripts/pigment-rebrand.py --check`: OK. No engine command, crate, preference or panel command was added
   (no panic hunt, xtask layers/panel-commands/scorecard needed).
+
+## Commit (pushed to `claude/pigment-photocraft`; CI on it not waited for)
+- `1f878ad6` Pigment Single-line and Every-line composers and hyphenation (B3), text and docs
+
+CI before starting: B1 and B2 runs green.
 
 ## For the next package (B4)
 - Turn on `Setting.shrink` (in `Setting::of`) only together with a justification pass in `lines.rs` that can close
