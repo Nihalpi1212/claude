@@ -645,6 +645,9 @@ pub struct Services {
     /// Which end of the pen is in use, where the platform reports it outside the stylus feed
     /// (Windows: the feed carries no pen samples there). Read for the eraser-end tool switch.
     pub pen_end: Option<PenEndFn>,
+    /// Pigment (U3): the pen's tilt and rotation where the stylus feed cannot carry them (Windows
+    /// Ink), and the stylus wheel ([`crate::pen_extras`]). Read once per frame.
+    pub pen_extras: Option<crate::pen_extras::PenExtrasFn>,
     /// WinTab packet poll (Windows with Windows Ink disabled; see `photocraft_tablet::wintab`).
     pub tablet_poll: Option<TabletPollFn>,
     /// The persistent brush preset store, loading in the background (desktop; see

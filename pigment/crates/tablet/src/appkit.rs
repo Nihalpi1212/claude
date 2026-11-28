@@ -64,6 +64,9 @@ pub struct RawEvent {
     pub device: usize,
     /// `isEnteringProximity` (proximity events only).
     pub entering: bool,
+    /// Pigment (U3): `tangentialPressure` (tablet point events only; -1..1), the stylus wheel
+    /// ([`crate::wheel`]).
+    pub tangential: f32,
 }
 
 /// The mask of event types [`State::handle`] maps (`NSEventMask` bits are `1 << type`).

@@ -727,6 +727,7 @@ fn main() -> eframe::Result {
             tablet::spawn_x11(&app.stylus.feed, display);
             app.services.right_button_down = tablet::right_button_service();
             app.services.pen_end = tablet::pen_end_service();
+            app.services.pen_extras = tablet::pen_extras_service(app.services.tablet_poll.is_some()); // Pigment (U3)
             // Paths on the command line (Linux/Windows file associations, `photocraft a.psd`).
             app.open_paths(&files);
             if !unreadable_paths.is_empty() {

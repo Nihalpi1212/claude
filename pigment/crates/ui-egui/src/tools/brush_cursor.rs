@@ -112,7 +112,7 @@ pub(crate) fn pose(brush: &BrushSettings, pen: Option<PointerSample>) -> TipPose
         _ => 0.0,
     };
     if sd.brush_projection {
-        angle += point.rotation;
+        angle -= point.rotation; // Pigment (U3, #1301): clockwise, as the stroke paints it.
     }
     TipPose::pen(f64::from(angle), sd.brush_projection.then_some([point.tilt_x, point.tilt_y]))
 }

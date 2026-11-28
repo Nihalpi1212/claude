@@ -27,11 +27,27 @@ wintab::packet! {
     struct PressurePacket { status, buttons, x, y, normal_pressure }
 }
 
+// Pigment (U3): an airbrush (orientation axes and a finger wheel) also reports the wheel.
+wintab::packet! {
+    struct WheelPacket { status, buttons, x, y, normal_pressure, orientation, tangent_pressure }
+}
+
 /// The open context. A device that reports orientation gets tilt and rotation; a pressure-only
 /// device gets a packet without the orientation field, so a zeroed field never becomes a tilt.
 enum Backend {
-    Oriented { context: wintab::Context<PenPacket>, axes: [wintab::Axis; 3] },
-    PressureOnly { context: wintab::Context<PressurePacket> },
+    Oriented {
+        context: wintab::Context<PenPacket>,
+        axes: [wintab::Axis; 3],
+    },
+    PressureOnly {
+        context: wintab::Context<PressurePacket>,
+    },
+    /// Pigment (U3): orientation and the stylus wheel (`DVC_TPRESSURE`).
+    Wheel {
+        context: wintab::Context<WheelPacket>,
+        axes: [wintab::Axis; 3],
+        wheel: wintab::Axis,
+    },
 }
 
 struct State {
@@ -69,6 +85,15 @@ pub fn install(hwnd: isize, wake: Box<dyn Fn()>) -> Result<(), Error> {
     // Ask only for the fields the device reports: a pressure-only tablet never fills
     // orientation, and reading a zeroed orientation would invent a maximum tilt.
     let backend = match device.orientation {
+        // Pigment (U3): a device with a wheel axis asks for the wheel too.
+        Some(axes) if device.tangent_pressure.is_some() => {
+            let wheel = device.tangent_pressure.unwrap_or(pressure_axis);
+            let context = wintab.open::<WheelPacket>(hwnd, &options).map_err(|e| Error::Platform(e.to_string()))?;
+            if let Err(error) = context.overlap(true) {
+                log::warn!("WinTab: could not take overlap priority: {error}");
+            }
+            Backend::Wheel { context, axes, wheel }
+        }
         Some(axes) => {
             let context = wintab.open::<PenPacket>(hwnd, &options).map_err(|e| Error::Platform(e.to_string()))?;
             if let Err(error) = context.overlap(true) {
@@ -110,6 +135,7 @@ pub fn poll(focused: bool, callback: &dyn Fn(Option<Sample>)) {
             let result = match &state.backend {
                 Backend::Oriented { context, .. } => context.overlap(true),
                 Backend::PressureOnly { context } => context.overlap(true),
+                Backend::Wheel { context, .. } => context.overlap(true), // Pigment (U3)
             };
             if let Err(error) = result {
                 log::warn!("WinTab: could not take overlap priority: {error}");
@@ -118,6 +144,7 @@ pub fn poll(focused: bool, callback: &dyn Fn(Option<Sample>)) {
             let result = match &state.backend {
                 Backend::Oriented { context, .. } => context.overlap(false),
                 Backend::PressureOnly { context } => context.overlap(false),
+                Backend::Wheel { context, .. } => context.overlap(false), // Pigment (U3)
             };
             if let Err(error) = result {
                 log::warn!("WinTab: could not release overlap priority: {error}");
@@ -126,6 +153,25 @@ pub fn poll(focused: bool, callback: &dyn Fn(Option<Sample>)) {
         state.focused = focused;
         let State { backend, pressure_axis, last_packet, emitted, proximity_in, .. } = state;
         match backend {
+            // Pigment (U3): as `Oriented`, with the stylus wheel stored beside each sample.
+            Backend::Wheel { context, axes, wheel } => {
+                let mut packets = Vec::new();
+                context.drain(&mut packets);
+                for packet in packets {
+                    if packet.status.out_of_context() {
+                        if *emitted {
+                            *emitted = false;
+                            callback(None);
+                        }
+                        continue;
+                    }
+                    let (sample, value) = wheel_sample(&packet, pressure_axis, axes, wheel);
+                    *last_packet = Instant::now();
+                    *emitted = true;
+                    crate::wheel::set(Some(value));
+                    callback(Some(sample));
+                }
+            }
             Backend::Oriented { context, axes } => {
                 let mut packets = Vec::new();
                 context.drain(&mut packets);
@@ -169,6 +215,10 @@ pub fn poll(focused: bool, callback: &dyn Fn(Option<Sample>)) {
             *emitted = false;
             callback(None);
         }
+        // Pigment (U3): no pen in use, no wheel.
+        if !*emitted {
+            crate::wheel::set(None);
+        }
     });
 }
 
@@ -186,6 +236,7 @@ pub(crate) fn on_message(message: u32, wparam: usize, lparam: isize) {
         let decoded = match &state.backend {
             Backend::Oriented { context, .. } => context.message(message, WPARAM(wparam), LPARAM(lparam)),
             Backend::PressureOnly { context } => context.message(message, WPARAM(wparam), LPARAM(lparam)),
+            Backend::Wheel { context, .. } => context.message(message, WPARAM(wparam), LPARAM(lparam)), // Pigment (U3)
         };
         let win_message = decoded.is_some();
         if let Some(wintab::Message::Proximity { entering, hardware }) = decoded
@@ -229,6 +280,20 @@ fn sample(packet: &PenPacket, pressure: &wintab::Axis, orientation: &[wintab::Ax
         eraser: packet.status.inverted(),
     }
     .sanitized()
+}
+
+/// Pigment (U3): one packet from an airbrush: the sample as [`sample`] reads it, and the stylus
+/// wheel 0..1 through the device's own wheel axis.
+fn wheel_sample(packet: &WheelPacket, pressure: &wintab::Axis, orientation: &[wintab::Axis; 3], wheel: &wintab::Axis) -> (Sample, f32) {
+    let pen = PenPacket {
+        status: packet.status,
+        buttons: packet.buttons,
+        x: packet.x,
+        y: packet.y,
+        normal_pressure: packet.normal_pressure,
+        orientation: packet.orientation,
+    };
+    (sample(&pen, pressure, orientation), wheel.normalize(i32::try_from(packet.tangent_pressure).unwrap_or(i32::MAX)))
 }
 
 /// One packet from a device without orientation axes: pressure and the eraser end, neutral tilt.
@@ -318,6 +383,26 @@ mod tests {
         assert!(bottom.tilt_x.abs() < 0.1 && (bottom.tilt_y - 45.0).abs() < 0.1, "{bottom:?}");
         let left = tilt(2700);
         assert!((left.tilt_x + 45.0).abs() < 0.1 && left.tilt_y.abs() < 0.1, "{left:?}");
+    }
+
+    /// Pigment (U3): an airbrush's packet gives the pen sample and its wheel through the wheel axis.
+    #[test]
+    fn airbrush_packets_carry_the_wheel() {
+        let wheel = wintab::Axis { min: 0, max: 1023, units: Units::None, resolution: 0.0 };
+        let p = WheelPacket {
+            status: wintab::Status(0),
+            buttons: wintab::Buttons(0),
+            x: 0,
+            y: 0,
+            normal_pressure: 16384,
+            orientation: wintab::Orientation { azimuth: 0, altitude: 900, twist: 900 },
+            tangent_pressure: 512,
+        };
+        let (s, w) = wheel_sample(&p, &pressure_axis(), &axes(), &wheel);
+        assert!((s.pressure - 0.5).abs() < 0.01 && (s.rotation - 90.0).abs() < 0.1, "{s:?}");
+        assert!((w - 0.5).abs() < 0.01, "{w}");
+        let (_, w) = wheel_sample(&WheelPacket { tangent_pressure: u32::MAX, ..p }, &pressure_axis(), &axes(), &wheel);
+        assert_eq!(w, 1.0, "out of range is clamped");
     }
 
     /// An upright pen has no tilt; a flat one has the most.

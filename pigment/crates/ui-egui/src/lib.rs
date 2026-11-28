@@ -58,6 +58,8 @@ pub mod monitor_status;
 pub mod notices;
 pub mod os_window;
 pub mod panels;
+// Pigment (U3): Windows Ink tilt and rotation, the stylus wheel.
+pub mod pen_extras;
 pub mod preset_files_ui;
 pub mod proxy;
 // Pigment: the operating system's recent documents.

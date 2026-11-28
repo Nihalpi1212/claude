@@ -104,6 +104,30 @@ pub fn pen_end_service() -> Option<photocraft_ui_egui::PenEndFn> {
     None
 }
 
+/// Pigment (U3): the pen's tilt and rotation that the stylus feed cannot carry on Windows Ink, and
+/// the stylus wheel (macOS, WinTab), for the canvas to read once per frame
+/// (`photocraft_ui_egui::pen_extras`). `wintab` is whether the WinTab backend runs: its samples
+/// already carry tilt and rotation, and Windows Ink's pose then stays out so the two never mix.
+pub fn pen_extras_service(wintab: bool) -> Option<photocraft_ui_egui::pen_extras::PenExtrasFn> {
+    Some(Box::new(move || extras(ink_pose(wintab), photocraft_tablet::wheel::get())))
+}
+
+/// Windows Ink's reading kept by the pointer hooks (`None` elsewhere and under WinTab).
+fn ink_pose(wintab: bool) -> Option<Sample> {
+    #[cfg(target_os = "windows")]
+    if !wintab {
+        return photocraft_tablet::windows::pen_pose();
+    }
+    let _ = wintab;
+    None
+}
+
+/// One frame's [`photocraft_ui_egui::pen_extras::PenExtras`] from the platform's values.
+fn extras(pose: Option<Sample>, wheel: Option<f32>) -> photocraft_ui_egui::pen_extras::PenExtras {
+    let pose = pose.map(Sample::sanitized).map(|s| [s.tilt_x, s.tilt_y, s.rotation]);
+    photocraft_ui_egui::pen_extras::PenExtras { pose, wheel }
+}
+
 /// Install the AppKit tablet monitor (main thread, once winit created the shared application:
 /// from eframe's app creation, not before the event loop). Keep the result until the event loop
 /// returns. On failure this logs why: pens then paint like a mouse.
@@ -204,6 +228,9 @@ impl DisplayKind {
         })
     }
 }
+
+#[cfg(test)]
+mod rotation_tests; // Pigment (U3, #1301)
 
 #[cfg(test)]
 mod tests {
@@ -407,6 +434,20 @@ mod tests {
         assert!(pen_needs_xwayland(DisplaySession::Wayland, env(&zero), || true, || true));
         // X11 already gets the pen; the probes don't even run off Wayland.
         assert!(!pen_needs_xwayland(DisplaySession::X11, env(&[("DISPLAY", ":0")]), || panic!("probed"), || panic!("probed")));
+    }
+
+    /// Pigment (U3): the service passes the platform's values on, and keeps Windows Ink's pose
+    /// out while WinTab runs.
+    #[test]
+    fn pen_extras_carry_the_pose_and_the_wheel() {
+        let e = extras(Some(Sample { pressure: 0.3, tilt_x: 20.0, tilt_y: -5.0, rotation: -30.0, eraser: false }), Some(0.5));
+        assert_eq!(e.pose, Some([20.0, -5.0, 330.0]));
+        assert_eq!(e.wheel, Some(0.5));
+        assert_eq!(extras(None, None), photocraft_ui_egui::pen_extras::PenExtras::default());
+        assert_eq!(ink_pose(true), None, "WinTab: no Windows Ink pose");
+        let service = pen_extras_service(false).expect("every desktop platform");
+        photocraft_tablet::wheel::set(None);
+        assert_eq!(service().wheel, None);
     }
 
     #[test]

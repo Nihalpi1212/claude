@@ -548,6 +548,7 @@ pub(super) fn feed_live_stroke_waiting(app: &mut PhotocraftApp, stroke: &PaintSt
             let mut sp = photocraft_engine::paint::StrokePoint::new(p[0], p[1], p[2] as f32);
             (sp.tilt_x, sp.tilt_y, sp.rotation) = (t[0], t[1], t[2]);
             sp.time = app.stylus.point_ms(i) - t0;
+            sp.wheel = app.stylus.pigment.wheel_at(i); // Pigment (U3): the stylus wheel
             Some(sp)
         })
         .collect();
@@ -778,6 +779,7 @@ pub(super) fn commit_brush_stroke(app: &mut PhotocraftApp, d: &PaintStroke) {
             let mut sp = photocraft_engine::paint::StrokePoint::new(q[0], q[1], q[2] as f32);
             (sp.tilt_x, sp.tilt_y, sp.rotation) = (t[0], t[1], t[2]);
             sp.time = app.stylus.point_ms(i) - t0;
+            sp.wheel = app.stylus.pigment.wheel_at(i); // Pigment (U3): the stylus wheel
             Some(sp)
         })
         .collect();
