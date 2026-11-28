@@ -64,8 +64,6 @@ pub mod adjust_preset_cmds;
 pub mod auto_options_cmds;
 // Pigment: generative AI
 pub mod ai_cmds;
-// Pigment: Select › Similar Layers
-pub mod similar_layers_cmds;
 pub mod align_cmds;
 pub mod analysis_cmds;
 pub mod artboard_cmds;
@@ -162,6 +160,8 @@ mod sample_zoom_box_tests;
 pub mod sampler_cmds;
 pub mod select_extra_cmds;
 pub mod selection_cmds;
+// Pigment: Select › Similar Layers
+pub mod similar_layers_cmds;
 pub mod slice_cmds;
 pub mod smart_cmds;
 pub mod smart_svg_cmds;

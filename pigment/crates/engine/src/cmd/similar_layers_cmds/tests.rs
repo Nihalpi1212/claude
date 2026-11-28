@@ -22,8 +22,8 @@ fn history(s: &Session) -> usize {
     s.active().unwrap().history.entries().len()
 }
 
-/// Background, a pixel layer, two type layers each in its own group (one nested in the other's
-/// group), two adjustment layers of different kinds, two fill layers of different kinds, a shape.
+/// Background, a pixel layer, two type layers each in a group of its own, two adjustment layers
+/// of different kinds, two fill layers of different kinds, a shape.
 struct Doc {
     s: Session,
     bg: LayerId,
@@ -46,10 +46,7 @@ fn doc() -> Doc {
     let g1 = id(s.execute("layer.groupLayers", json!({"layer": t1.0, "name": "Outer"})).unwrap());
     let t2 = id(s.execute("type.create", json!({"x": 5, "y": 30, "text": "Two", "size": 12})).unwrap());
     let g2 = id(s.execute("layer.groupLayers", json!({"layer": t2.0, "name": "Inner"})).unwrap());
-    let adj = [
-        id(s.execute("layer.newAdjustmentLayer.invert", json!({})).unwrap()),
-        id(s.execute("layer.newAdjustmentLayer.levels", json!({})).unwrap()),
-    ];
+    let adj = [id(s.execute("layer.newAdjustmentLayer.invert", json!({})).unwrap()), id(s.execute("layer.newAdjustmentLayer.levels", json!({})).unwrap())];
     let fill = [
         id(s.execute("layer.newFillLayer.solidColor", json!({"color": "#c82828"})).unwrap()),
         id(s.execute("layer.newFillLayer.gradient", json!({})).unwrap()),

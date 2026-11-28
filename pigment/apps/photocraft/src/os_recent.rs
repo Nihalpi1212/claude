@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 /// The `note_recent` service: `Some(path)` notes a file, `None` clears Pigment's own entries where
 /// the platform allows (Linux; Windows and macOS have only an every-app clear, never called).
 pub fn service(recovery: Option<PathBuf>) -> Box<dyn Fn(Option<&Path>) + Send + Sync> {
-    Box::new(move |path| match path {
+    Box::new(move |path: Option<&Path>| match path {
         Some(p) if !in_folder(p, recovery.as_deref()) => note(p),
         Some(_) => {}
         None => clear_ours(),
@@ -77,7 +77,7 @@ mod mac {
     }
 }
 
-#[cfg(any(all(unix, not(target_os = "macos")), test))]
+#[cfg(all(unix, any(not(target_os = "macos"), test)))]
 pub mod xbel {
     //! The freedesktop recently-used list, `$XDG_DATA_HOME/recently-used.xbel` (default
     //! `~/.local/share/recently-used.xbel`), in the layout GLib's `GBookmarkFile` writes.
@@ -237,7 +237,8 @@ pub mod xbel {
         let mut text = if text.trim().is_empty() { EMPTY.to_string() } else { text.to_string() };
         let close = root_close(&text)?;
         let target = percent_decode(&unescape(uri));
-        match blocks(&text).into_iter().find(|b| href(&text[b.start..b.tag_end]).is_some_and(|h| percent_decode(&unescape(h)) == target)) {
+        let found = blocks(&text).into_iter().find(|b| href(&text[b.start..b.tag_end]).is_some_and(|h| percent_decode(&unescape(h)) == target));
+        match found {
             Some(b) => {
                 let block = &text[b.start..b.end];
                 let updated = touched(block, b.tag_end - b.start, now)?;
@@ -260,8 +261,10 @@ pub mod xbel {
     /// changes (or the file isn't a list this module writes).
     pub fn cleared(text: &str, keep: usize) -> Option<String> {
         root_close(text)?;
-        let mut ours: Vec<(Block, String)> =
-            blocks(text).into_iter().filter_map(|b| our_app(&text[b.start..b.end]).map(|(s, e)| (b, attr(&text[b.start + s..b.start + e], "modified").unwrap_or_default().to_string()))).collect();
+        let mut ours: Vec<(Block, String)> = blocks(text)
+            .into_iter()
+            .filter_map(|b| our_app(&text[b.start..b.end]).map(|(s, e)| (b, attr(&text[b.start + s..b.start + e], "modified").unwrap_or_default().to_string())))
+            .collect();
         if ours.len() <= keep {
             return None;
         }
@@ -478,5 +481,28 @@ pub mod xbel {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests;
+
+#[cfg(test)]
+mod smoke {
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn recovery_files_are_never_noted() {
+        assert!(super::in_folder(Path::new("/state/pigment/Recovery/x.pcraft"), Some(Path::new("/state/pigment/Recovery"))));
+        assert!(!super::in_folder(Path::new("/state/pigment/Recovery2/x.pcraft"), Some(Path::new("/state/pigment/Recovery"))));
+        assert!(!super::in_folder(Path::new("/a.png"), None));
+    }
+
+    #[test]
+    fn the_platform_call_does_not_panic_on_a_missing_file() {
+        // Through the recovery filter (every path is "in" `/`), so a test run on Linux never adds
+        // to the person's own recent files.
+        let service = super::service(Some(PathBuf::from("/")));
+        service(Some(Path::new("/no/such/folder/pigment-test.psd")));
+        // Windows and macOS: the real call, for a file that doesn't exist.
+        #[cfg(any(target_os = "windows", target_os = "macos"))]
+        super::note(Path::new("/no/such/folder/pigment-test.psd"));
+    }
+}

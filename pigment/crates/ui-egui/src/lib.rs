@@ -29,11 +29,6 @@ macro_rules! tl {
 }
 // Pigment: generative AI.
 pub mod ai_ui;
-// Pigment: the operating system's recent documents.
-mod recent_os;
-// Pigment: Select › Similar Layers.
-#[cfg(test)]
-mod similar_layers_tests;
 mod brush_mode_menu;
 pub mod canvas;
 #[cfg(not(target_arch = "wasm32"))]
@@ -65,7 +60,12 @@ pub mod os_window;
 pub mod panels;
 pub mod preset_files_ui;
 pub mod proxy;
+// Pigment: the operating system's recent documents.
+mod recent_os;
 pub mod render_path;
+// Pigment: Select › Similar Layers.
+#[cfg(test)]
+mod similar_layers_tests;
 pub mod state;
 pub mod texel_guard;
 pub mod theme;

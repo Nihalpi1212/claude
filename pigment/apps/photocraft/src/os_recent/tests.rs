@@ -1,3 +1,4 @@
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 use super::xbel;
@@ -59,9 +60,12 @@ fn data_home() -> (tempfile::TempDir, PathBuf) {
     (dir, file)
 }
 
+fn env(vars: &'static [(&'static str, &'static str)]) -> impl Fn(&str) -> Option<OsString> {
+    move |k| vars.iter().find(|(n, _)| *n == k).map(|(_, v)| OsString::from(*v))
+}
+
 #[test]
 fn the_list_is_found_where_xdg_says() {
-    let env = |vars: &'static [(&'static str, &'static str)]| move |k: &str| vars.iter().find(|(n, _)| *n == k).map(|(_, v)| v.into());
     assert_eq!(xbel::default_file(env(&[("XDG_DATA_HOME", "/d"), ("HOME", "/h")])), Some(PathBuf::from("/d/recently-used.xbel")));
     assert_eq!(xbel::default_file(env(&[("XDG_DATA_HOME", "rel"), ("HOME", "/h")])), Some(PathBuf::from("/h/.local/share/recently-used.xbel")));
     assert_eq!(xbel::default_file(env(&[("HOME", "/h")])), Some(PathBuf::from("/h/.local/share/recently-used.xbel")));
@@ -118,7 +122,10 @@ fn a_file_another_app_listed_gets_our_entry_beside_its_own() {
     assert!(again.contains(&format!("name=\"Pigment\" exec=\"&apos;pigment %u&apos;\" modified=\"{T2}\" count=\"2\"/>")));
     // Clearing ours leaves the viewer's entry and the bookmark.
     let cleared = xbel::cleared(&again, 0).unwrap();
-    assert_eq!(cleared.replace(&format!("modified=\"{T2}\" visited=\"{T2}\""), "modified=\"2026-02-01T00:00:00.000000Z\" visited=\"2026-02-01T00:00:00.000000Z\""), OTHERS);
+    assert_eq!(
+        cleared.replace(&format!("modified=\"{T2}\" visited=\"{T2}\""), "modified=\"2026-02-01T00:00:00.000000Z\" visited=\"2026-02-01T00:00:00.000000Z\""),
+        OTHERS
+    );
 }
 
 #[test]
@@ -181,23 +188,10 @@ fn an_unwritable_list_is_an_error_the_service_swallows() {
 }
 
 #[test]
-fn uris_mime_types_and_recovery_files() {
+fn uris_and_mime_types() {
     assert_eq!(xbel::file_uri(Path::new("/a/ä &<\"'.png")).as_deref(), Some("file:///a/%C3%A4%20%26%3C%22%27.png"));
     assert_eq!(xbel::file_uri(Path::new("rel.png")), None);
     assert_eq!(xbel::mime_type(Path::new("/x/A.JPG")), "image/jpeg");
     assert_eq!(xbel::mime_type(Path::new("/x/a.pigment")), "application/x-pigment");
     assert_eq!(xbel::mime_type(Path::new("/x/a")), "application/octet-stream");
-    assert!(super::in_folder(Path::new("/state/pigment/Recovery/x.pcraft"), Some(Path::new("/state/pigment/Recovery"))));
-    assert!(!super::in_folder(Path::new("/state/pigment/Recovery2/x.pcraft"), Some(Path::new("/state/pigment/Recovery"))));
-    assert!(!super::in_folder(Path::new("/a.png"), None));
-}
-
-#[test]
-fn the_platform_call_does_not_panic_on_a_missing_file() {
-    // On Linux this spawns the writer for the real list (`$XDG_DATA_HOME`): use the recovery
-    // filter instead, so a test run never adds to the person's recent files.
-    let service = super::service(Some(PathBuf::from("/")));
-    service(Some(Path::new("/no/such/folder/pigment-test.psd")));
-    #[cfg(any(target_os = "windows", target_os = "macos"))]
-    super::note(Path::new("/no/such/folder/pigment-test.psd"));
 }
