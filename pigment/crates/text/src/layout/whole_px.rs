@@ -103,10 +103,12 @@ mod tests {
 
     #[test]
     fn advances_round_and_glyphs_follow() {
-        let mut out = TextLayout::default();
-        out.clusters = vec![cluster(0.4, 5.4), cluster(5.8, 5.4), cluster(11.2, 5.4)];
-        out.glyphs = vec![glyph(0.4), glyph(5.8), glyph(11.2)];
-        out.decorations = vec![DecorationRect { x0: 0.4, y0: 0.0, x1: 16.6, y1: 1.0, style: 0 }];
+        let mut out = TextLayout {
+            clusters: vec![cluster(0.4, 5.4), cluster(5.8, 5.4), cluster(11.2, 5.4)],
+            glyphs: vec![glyph(0.4), glyph(5.8), glyph(11.2)],
+            decorations: vec![DecorationRect { x0: 0.4, y0: 0.0, x1: 16.6, y1: 1.0, style: 0 }],
+            ..Default::default()
+        };
         let (s, e) = snap_line(&mut out, 0, 0, 0);
         let xs: Vec<f32> = out.glyphs.iter().map(|g| g.x).collect();
         assert_eq!(xs, vec![0.0, 5.0, 10.0]);

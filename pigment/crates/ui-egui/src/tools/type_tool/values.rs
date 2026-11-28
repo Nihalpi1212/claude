@@ -11,8 +11,7 @@ use craft::behavior::{EditEvent, Mixed, Preview};
 use craft::font_manager::axes::{FontAxis, NamedInstance};
 use craft::text::ui::DocUnit;
 use craft::text::ui::character::{
-    BaselinePosition, Caps, CharacterChange, CharacterValues, FaceAxes, Kerning, Leading, ParagraphChange, ParagraphDirection, ParagraphValues,
-    TextAlign,
+    BaselinePosition, Caps, CharacterChange, CharacterValues, FaceAxes, Kerning, Leading, ParagraphChange, ParagraphDirection, ParagraphValues, TextAlign,
 };
 use craft::text::ui::type_bar::TypeBarChange;
 use craft::text::ui::type_options::{TextAntiAlias, TextOrientation};

@@ -1414,6 +1414,48 @@ Tests: `crates/doc/src/text_pigment_tests.rs`, `crates/format/tests/it/type_sett
 | `crates/io/src/psd_import.rs` | `apply_common`: `type_xmp::import_packet(l)` after the layer's packet is taken |
 | `crates/io/tests/it/main.rs` | `mod psd_type_settings;` |
 
+### The Character panel's Superscript, Subscript, Language and panel menu; No Break, Fractional Widths and System Layout in the layout (typography, part 2)
+
+The second typography package (PORTS-B B2) puts B1's character settings on the Character panel and into the layout.
+- **Panel** (`crates/ui-egui/src/tools/type_tool/panel.rs`): the framework's `CharacterControls` show their
+  Superscript and Subscript toggles (after Small Caps, as Photoshop) and the Language select over
+  `type_tool/languages.rs` (Photoshop's languages as best known, BCP 47 tags; a language with neither a hyphenation
+  nor a spelling dictionary reads "… (no dictionary)"). `type_tool/values.rs` maps the toggles to `"baseline"`. The
+  Properties panel's Character section shares the controls. New text takes the interface language's row
+  (`type_tool/defaults.rs`, en-US when none matches) unless a saved default names one.
+- **Character panel menu** (`type_tool/panel_menu.rs`, rows on the registry's `character` entry): Faux Bold … Strikethrough
+  (checked while on), Fractional Widths, System Layout, No Break, Reset Character, each an engine command run on the
+  panel's target; Fractional Widths is greyed while System Layout is on, as in Photoshop. Without a type layer the
+  character toggles set the next layer's defaults, as the panel's buttons do.
+- **Chords** (`panel_menu::TypeChords`): ⇧⌘= Superscript, ⌥⇧⌘= Subscript, ⇧⌘H Small Caps, a command set in the
+  framework text editor's typing scope (`textEditor`), so they work only while type is edited and come before View ›
+  Zoom In's alternate key and View › Show › Target Path there, as in Photoshop. The rows REBASE-BT asked for in the
+  app catalog cannot be in that scope (the framework's `AppCatalog` refuses them), so the chords are their own set.
+- **Layout** (`crates/text/src/layout/whole_px.rs`): Fractional Widths off rounds each caret cluster's advance on a
+  placed horizontal line to whole pixels and starts the line on one (glyphs, carets, decorations and the line extent
+  follow); System Layout does that, snaps the baselines and draws with the Sharp anti-aliasing curve (None stays
+  None) without changing the stored setting. Breaking still measures shaped widths (under a pixel per glyph). Vertical
+  type keeps fractional positions. No Break: the runs do not wrap (parley `TextWrapMode::NoWrap`) and do not break at
+  the box edge (`OverflowWrap::Normal`), so a no-break word wider than the box runs out of it, as Photoshop.
+Tests: `crates/text/src/pigment_type_tests.rs`, `crates/text/src/layout/whole_px.rs`,
+`crates/ui-egui/src/tools/type_tool/pigment_character_tests.rs`, `type_tool/languages.rs`.
+
+| Upstream file | Hook |
+|---|---|
+| `crates/text/src/layout.rs` | `mod whole_px; pub use whole_px::drawn_antialias;`; `Env.whole_px` and its line in `layout` |
+| `crates/text/src/layout/lines.rs` | `frame_line`: the baseline through `whole_px.baseline`; `place_line`: `d0`, the `snap_line` call and its shift of `x0` |
+| `crates/text/src/layout/style.rs` | `style_props`: `TextWrapMode` (NoWrap for No Break) |
+| `crates/text/src/layout/shaping.rs` | `push_run_piece`: `OverflowWrap::Normal` on a No Break run |
+| `crates/text/src/lib.rs` | `render`: `layout::drawn_antialias(layer)`; `#[cfg(test)] mod pigment_type_tests;` |
+| `crates/io/src/text_import.rs` | the imported layer's render: `drawn_antialias` |
+| `crates/ui-egui/src/tools/type_box_preview.rs` | `render`: `drawn_antialias` |
+| `crates/ui-egui/src/tools/type_tool.rs` | `mod languages; pub(crate) mod panel_menu;` and the test module |
+| `crates/ui-egui/src/tools/type_tool/panel.rs` | `character_controls`: `.superscript(true).languages(&languages)` |
+| `crates/ui-egui/src/tools/type_tool/values.rs` | `CharacterChange::Position` → `"baseline"`; `target_styles` is `pub(super)` |
+| `crates/ui-egui/src/tools/type_tool/defaults.rs` | `default_style_params`: the interface language |
+| `crates/ui-egui/src/panels/registry.rs` | the `character` entry's `rows`, `states`, `run` |
+| `crates/ui-egui/src/menus/invoke.rs` | `invoke_type_command`: the menu's ids take the panel's target |
+
 ## Keeping the rebrand: `scripts/pigment-rebrand.py`
 
 Most of the rebrand is mechanical and done by [`scripts/pigment-rebrand.py`](../scripts/pigment-rebrand.py):

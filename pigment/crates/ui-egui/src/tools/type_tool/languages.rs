@@ -72,11 +72,7 @@ pub(crate) fn rows() -> Vec<(String, String)> {
     static HAS: OnceLock<Vec<bool>> = OnceLock::new();
     let has = HAS.get_or_init(|| LANGUAGES.iter().map(|&(tag, _)| has_hyphenation(tag) || has_spelling(tag)).collect());
     let suffix = tl!("(no dictionary)");
-    LANGUAGES
-        .iter()
-        .zip(has)
-        .map(|(&(tag, name), &has)| (tag.to_string(), if has { name.to_string() } else { format!("{name} {suffix}") }))
-        .collect()
+    LANGUAGES.iter().zip(has).map(|(&(tag, name), &has)| (tag.to_string(), if has { name.to_string() } else { format!("{name} {suffix}") })).collect()
 }
 
 /// The table's language for an interface language code (`de`, `pt-BR`, `zh-Hant`…): the exact

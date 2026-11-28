@@ -8,7 +8,7 @@ use egui::Modifiers;
 use egui::accesskit::{Role, Toggled};
 use egui::vec2;
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 use photocraft_doc::text::{Caps, CharStyle, FontBaseline};
 use photocraft_doc::{LayerContent, LayerId, TextLayer};
 use serde_json::json;
@@ -16,6 +16,7 @@ use serde_json::json;
 use super::commit_tests::type_new;
 use super::panel_menu::{CHARACTER_ITEMS, character_rows, character_states};
 use crate::PhotocraftApp;
+use crate::app::framework::BuildApp;
 use crate::canvas::testing;
 
 fn app_with_layer(text: &str) -> (Box<PhotocraftApp>, LayerId) {
@@ -57,8 +58,13 @@ fn panel_harness(app: Box<PhotocraftApp>) -> Harness<'static, Box<PhotocraftApp>
     h
 }
 
+/// The toggle button labelled `label` (its tooltip, once shown, has the same label).
+fn toggle<'a>(h: &'a Harness<'static, Box<PhotocraftApp>>, label: &'a str) -> egui_kittest::Node<'a> {
+    h.query_all_by_label(label).find(|n| n.accesskit_node().role() == Role::Button).unwrap_or_else(|| panic!("the {label} toggle"))
+}
+
 fn toggle_pressed(h: &Harness<'static, Box<PhotocraftApp>>, label: &str) -> bool {
-    h.get_by_label(label).accesskit_node().toggled() == Some(Toggled::True)
+    toggle(h, label).accesskit_node().toggled() == Some(Toggled::True)
 }
 
 #[test]
@@ -66,7 +72,7 @@ fn superscript_and_subscript_follow_small_caps_in_the_panel() {
     let (app, _) = app_with_layer("H2O");
     let h = panel_harness(app);
     let at = |label: &str| {
-        let r = h.get_by_label(label).rect();
+        let r = toggle(&h, label).rect();
         (r.min.y.round() as i32, r.min.x.round() as i32)
     };
     let order = ["Faux Bold", "Faux Italic", "All Caps", "Small Caps", "Superscript", "Subscript", "Underline", "Strikethrough"];
@@ -81,15 +87,15 @@ fn clicking_subscript_sets_the_baseline_and_shows_it_pressed() {
     let (app, id) = app_with_layer("H2O");
     let mut h = panel_harness(app);
     assert!(!toggle_pressed(&h, "Subscript"));
-    h.get_by_label("Subscript").click();
+    toggle(&h, "Subscript").click();
     h.run();
     assert_eq!(first_run(h.state(), id).baseline, FontBaseline::Subscript);
     assert!(toggle_pressed(&h, "Subscript"));
-    h.get_by_label("Superscript").click();
+    toggle(&h, "Superscript").click();
     h.run();
     assert_eq!(first_run(h.state(), id).baseline, FontBaseline::Superscript, "one replaces the other");
     assert!(toggle_pressed(&h, "Superscript") && !toggle_pressed(&h, "Subscript"));
-    h.get_by_label("Superscript").click();
+    toggle(&h, "Superscript").click();
     h.run();
     assert_eq!(first_run(h.state(), id).baseline, FontBaseline::Normal);
 }
@@ -102,10 +108,10 @@ fn the_language_select_lists_the_table_and_sets_the_run_language() {
     h.run();
     // The table's rows, in its order; one without a dictionary is marked.
     assert!(h.query_by_label("English: USA").is_some());
-    assert!(h.query_by_label("Japanese (no dictionary)").is_some());
-    h.get_by_label("German: 2006 Reform").click();
+    assert!(h.query_by_label("Arabic (no dictionary)").is_some());
+    h.get_by_label("English: UK").click();
     h.run();
-    assert_eq!(first_run(h.state(), id).language.as_deref(), Some("de-DE"));
+    assert_eq!(first_run(h.state(), id).language.as_deref(), Some("en-GB"));
 }
 
 #[test]
@@ -175,7 +181,8 @@ fn checkmarks_follow_the_selection() {
     // The whole layer mixes them: unchecked.
     assert_eq!(state(&app, "type.character.fauxBold"), CommandState::new().enabled(true).checked(false));
     // Edit the layer with the bold characters selected: checked.
-    app.ui.text_edit = Some(crate::state::TextEdit { layer: id.0, document: None, caret: 3, anchor: 0, session: "menu-test".into(), created: false, mask: false });
+    app.ui.text_edit =
+        Some(crate::state::TextEdit { layer: id.0, document: None, caret: 3, anchor: 0, session: "menu-test".into(), created: false, mask: false });
     assert_eq!(state(&app, "type.character.fauxBold"), CommandState::new().enabled(true).checked(true));
     assert_eq!(state(&app, "type.character.smallCaps"), CommandState::new().enabled(true).checked(true));
     assert_eq!(state(&app, "type.character.allCaps"), CommandState::new().enabled(true).checked(false));
@@ -228,14 +235,25 @@ fn without_a_type_layer_the_toggles_set_the_defaults() {
 
 // ---------------------------------------------------------------- the chords
 
-/// REBASE-BT B2 step 3 asked for the chords as `textEditor` rows of the app's command catalog. The
-/// framework's `AppCatalog` refuses a row outside the app scope (`CommandDefError::NotApp`), and a
-/// refused catalog leaves the runtime without any of the app's rows: so the chords are a command set
-/// of their own in that scope instead (`panel_menu::TypeChords`).
+/// REBASE-BT B2 step 3 asked for the chords (⇧⌘= Superscript, ⌥⇧⌘= Subscript, ⇧⌘H Small Caps) as
+/// `textEditor` rows of the app's command catalog. The framework's `AppCatalog` refuses a row outside
+/// the app scope (`CommandDefError::NotApp`), and a refused catalog leaves the runtime with none of
+/// the app's rows.
 #[test]
 fn a_text_editor_row_in_the_app_catalog_is_refused() {
-    let row = CommandDef::new(CommandRef::new("type.character.superscript"), "Superscript", Scope::new("textEditor"));
+    let row = CommandDef::new(craft::keymap::CommandRef::new("type.character.superscript"), "Superscript", Scope::new("textEditor").expect("a scope name"));
     assert!(crate::shortcut_dispatch::catalog(vec![row], 1).is_none());
+}
+
+/// A probe: Photoshop's chords as a command set of the editor's typing scope, linked into the test
+/// binary only.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, craft::ui::contract::CommandSet)]
+#[command(prefix = "pigmentChordProbe", scope = "textEditor", typing)]
+enum ChordProbe {
+    #[command(label = "Superscript", default = "Cmd+Shift+=")]
+    Superscript,
+    #[command(label = "Small Caps", default = "Cmd+Shift+H")]
+    SmallCaps,
 }
 
 fn edited(text: &str) -> (Box<PhotocraftApp>, LayerId) {
@@ -248,19 +266,28 @@ fn edited(text: &str) -> (Box<PhotocraftApp>, LayerId) {
     (app, id)
 }
 
-/// The chords fire while the editor holds the keys and toggle the selection.
+/// Nor does a command set of that scope reach the app: the runtime reports only app-scope commands
+/// to the app (`FrameOutput::fired`) and gives the others to the component that takes them, and the
+/// editor takes only its own `TextEditorCommand`s. So the three commands ship with no default chord,
+/// and Pigment asks craft-libs for them (`CharToggle::{Superscript, Subscript, SmallCaps}`). If this
+/// test fails, the framework now passes such commands on: give `type.character.superscript`,
+/// `.subscript` and `.smallCaps` their chords that way.
 #[test]
-fn photoshops_chords_toggle_while_type_is_edited() {
+fn a_text_editor_scope_chord_never_reaches_the_app() {
+    let probes = [CommandRef::from(ChordProbe::Superscript), CommandRef::from(ChordProbe::SmallCaps)];
     let (mut app, id) = edited("H2O");
     let ed = app.ui.text_edit.as_ref().expect("editing");
     assert_ne!(ed.caret, ed.anchor, "the text is selected");
+    let ctx = app.ctx().clone();
+    let _ = crate::shortcut_dispatch::take_log(&ctx);
+    testing::key(&mut app, egui::Key::H, Modifiers::COMMAND | Modifiers::SHIFT);
     testing::key(&mut app, egui::Key::Equals, Modifiers::COMMAND | Modifiers::SHIFT);
+    let ran: Vec<String> = crate::shortcut_dispatch::take_log(&ctx).into_iter().map(|(id, _)| id).collect();
+    for probe in &probes {
+        assert!(!ran.contains(&probe.id), "{} reached the app: {ran:?}", probe.id);
+    }
     assert!(app.ui.text_edit.is_some(), "still editing");
-    assert_eq!(first_run(&app, id).baseline, FontBaseline::Superscript, "⇧⌘= is Superscript");
-    testing::key(&mut app, egui::Key::Equals, Modifiers::COMMAND | Modifiers::SHIFT | Modifiers::ALT);
-    assert_eq!(first_run(&app, id).baseline, FontBaseline::Subscript, "⌥⇧⌘= is Subscript");
-    testing::key(&mut app, egui::Key::H, Modifiers::COMMAND | Modifiers::SHIFT);
-    assert_eq!(first_run(&app, id).caps, Caps::SmallCaps, "⇧⌘H is Small Caps");
-    testing::key(&mut app, egui::Key::H, Modifiers::COMMAND | Modifiers::SHIFT);
-    assert_eq!(first_run(&app, id).caps, Caps::Normal, "and toggles back");
+    // The editor's own chords do work: ⇧⌘K is All Caps.
+    testing::key(&mut app, egui::Key::K, Modifiers::COMMAND | Modifiers::SHIFT);
+    assert_eq!(first_run(&app, id).caps, Caps::AllCaps);
 }

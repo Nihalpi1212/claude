@@ -7,10 +7,13 @@
 //! type target the character toggles set the defaults of the next Type-tool layer, as the panel's
 //! buttons do.
 //!
-//! The superscript, subscript and small caps chords (⇧⌘=, ⌥⇧⌘=, ⇧⌘H) are Photoshop's while type is
-//! edited: [`TypeChords`] holds them in the text editor's typing scope (see its docs).
+//! Photoshop's superscript, subscript and small caps chords (⇧⌘=, ⌥⇧⌘=, ⇧⌘H) work only while type
+//! is edited, and there the framework text editor holds the keys: a command of its `textEditor`
+//! scope reaches only a component that takes it, never the app, and the editor takes only its own
+//! (`pigment_character_tests::a_text_editor_scope_chord_never_reaches_the_app`). So the three
+//! commands have no default chord (Edit › Keyboard Shortcuts can give them one); the chords wait for
+//! craft-libs' `CharToggle` to gain them.
 
-use craft::ui::contract::CommandSet;
 use craft::ui::menu::PanelRow;
 use craft::ui::runtime::commands::{CommandRef, CommandState};
 use serde_json::{Value, json};
@@ -45,35 +48,6 @@ const RESET_CHARACTER: &str = "type.resetCharacter";
 /// Character panel's (`menus::invoke`'s type arm).
 pub(crate) fn takes_panel_target(id: &str) -> bool {
     CHARACTER_ITEMS.iter().flatten().any(|&item| item == id)
-}
-
-/// Superscript, Subscript and Small Caps on Photoshop's chords while type is edited. Photoshop
-/// binds them only then: elsewhere ⇧⌘= is View › Zoom In's alternate and ⇧⌘H View › Show › Target
-/// Path. The set sits in the framework text editor's typing scope, so its keys come before the
-/// application's while the editor holds them; the editor ignores ids it does not know, and the fired
-/// command reaches [`run_fired`] (`character` registry entry).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, CommandSet)]
-#[command(prefix = "pigmentTypeChords", scope = "textEditor", typing)]
-pub(crate) enum TypeChords {
-    /// Toggle Superscript on the selection.
-    #[command(label = "Superscript", default = "Cmd+Shift+=")]
-    Superscript,
-    /// Toggle Subscript on the selection.
-    #[command(label = "Subscript", default = "Cmd+Alt+Shift+=")]
-    Subscript,
-    /// Toggle Small Caps on the selection.
-    #[command(label = "Small Caps", default = "Cmd+Shift+H")]
-    SmallCaps,
-}
-
-impl TypeChords {
-    fn command(self) -> &'static str {
-        match self {
-            Self::Superscript => "type.character.superscript",
-            Self::Subscript => "type.character.subscript",
-            Self::SmallCaps => "type.character.smallCaps",
-        }
-    }
 }
 
 /// Whether the toggle `id` is on at the target (a mixed selection is off), or `None` for a row
@@ -168,15 +142,13 @@ pub(crate) fn run_item(app: &mut PhotocraftApp, id: &str) {
     }
 }
 
-/// Runs a fired row of the Character panel menu, or one of [`TypeChords`]; `false` for another
-/// panel's command.
+/// Runs a fired row of the Character panel menu (or the same command from a key the user gave it);
+/// `false` for another panel's command.
 pub(crate) fn run_fired(app: &mut PhotocraftApp, _ctx: &egui::Context, command: &CommandRef) -> bool {
-    let id = match TypeChords::from_ref(command) {
-        Some(chord) => chord.command(),
-        None if takes_panel_target(&command.id) => command.id.as_str(),
-        None => return false,
-    };
-    let id = id.to_owned();
+    if !takes_panel_target(&command.id) {
+        return false;
+    }
+    let id = command.id.clone();
     run_item(app, &id);
     true
 }
