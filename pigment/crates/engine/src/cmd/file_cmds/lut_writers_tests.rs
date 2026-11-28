@@ -104,6 +104,12 @@ fn check_icc(bytes: &[u8], n: usize, title: &str, copyright: &str) {
     assert_eq!(&bytes[12..16], b"link");
     assert_eq!((&bytes[16..20], &bytes[20..24]), (&b"RGB "[..], &b"RGB "[..]));
     assert_eq!(craft_cms::profile_id(bytes).unwrap()[..], bytes[84..100], "the profile ID is stamped");
+    assert_eq!(u32::from_be_bytes(bytes[0..4].try_into().unwrap()) as usize, bytes.len(), "the header's size");
+    // Review FU: a DeviceLink must carry a profile sequence (ICC.1:2010 §8.2.6).
+    let count = u32::from_be_bytes(bytes[128..132].try_into().unwrap()) as usize;
+    let tag = (0..count).map(|i| &bytes[132 + i * 12..144 + i * 12]).find(|t| &t[..4] == b"pseq").expect("a pseq tag");
+    let (at, len) = (u32::from_be_bytes(tag[4..8].try_into().unwrap()) as usize, u32::from_be_bytes(tag[8..12].try_into().unwrap()) as usize);
+    assert_eq!((at % 4, &bytes[at..at + len]), (0, &b"pseq\0\0\0\0\0\0\0\0"[..]));
     let p = craft_cms::Profile::parse(bytes).unwrap();
     assert_eq!(p.class, craft_cms::ProfileClass::DeviceLink);
     assert_eq!((p.description.as_str(), p.copyright.as_str()), (title, copyright));

@@ -4,6 +4,7 @@
 # or rustc process) and run clean-target.py on builds untouched for HOURS hours (default 2).
 # If no gap comes and free space falls below HARD GB (default 4), clean at once with 1 hour: a build
 # may then fail once on a vanished artifact, which is better than a full disk.
+# If that clean leaves it below FLOOR, it cleans again at once with 1 hour, still only while nothing compiles.
 # After a clean it waits 10 minutes (5 below the hard floor) before cleaning again.
 # Runs until the caller's timeout. Log: planpc/tools/disk-guard.log
 # Usage: disk-guard.sh [FLOOR] [HOURS] [HARD]
@@ -32,7 +33,11 @@ while :; do
     clean 1 "below the hard floor"; last=$(date +%s)
   elif [ "$f" -lt $((floor * 1024)) ] && [ $((now - last)) -ge 600 ] && ! busy; then
     sleep 20
-    if ! busy; then clean "$hours" "below the floor, idle"; last=$(date +%s); fi
+    if ! busy; then
+      clean "$hours" "below the floor, idle"; last=$(date +%s)
+      # Still below the floor (everything was rebuilt lately): while nothing compiles, go down to 1 hour.
+      if [ "$(free_mb)" -lt $((floor * 1024)) ] && [ "$hours" != 1 ] && ! busy; then clean 1 "still below the floor, idle"; fi
+    fi
   fi
   sleep 15
 done
