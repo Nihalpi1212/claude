@@ -55,6 +55,8 @@ craft-crs = { workspace = true }
 craft-xml = { workspace = true }
 # Pigment: legacy_pigment reads the ZIP container of Pigment 0.1–0.4 documents.
 craft-zip = { workspace = true }
+# Pigment: Targa variants (src/tga_more.rs).
+craft-tga = { workspace = true }
 thiserror = { workspace = true }
 ttf-parser = "0.25.1"
 serde_json = { workspace = true }

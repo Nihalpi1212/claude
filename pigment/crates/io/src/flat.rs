@@ -103,7 +103,8 @@ fn import_flat_impl_with_options(
     stream_min: Option<u64>,
 ) -> Result<ImportResult, IoError> {
     // Detected once; every step below branches on it.
-    let format = codecs::detect(bytes);
+    // Pigment: or a Targa that only craft-tga recognises (F2).
+    let format = codecs::detect(bytes).or_else(|| crate::tga_more::sniff(name, bytes));
     if format == Some(Format::Tiff) {
         // The banded decoder checks the cancellation between groups; a decode error is reported
         // as itself, not as the cancel that follows it.
@@ -120,7 +121,10 @@ fn import_flat_impl_with_options(
         Some(r) => (r, None),
         None => {
             let limits = decode_limits(opts);
-            let img = codecs::decode_as_with(format.ok_or(codecs::CodecError::UnknownFormat)?, bytes, &codecs::DecodeOptions { limits, ..Default::default() })?;
+            let decode =
+                || codecs::decode_as_with(format.ok_or(codecs::CodecError::UnknownFormat)?, bytes, &codecs::DecodeOptions { limits, ..Default::default() });
+            // Pigment: the Targa variants the `image` crate misreads go through craft-tga (F2).
+            let img = crate::tga_more::decode(format, bytes, &limits, decode)?;
             ctl.check().map_err(|_| IoError::Cancelled)?;
             ctl.progress(0.6);
             (image_to_document_with(name, &img, ctl)?, Some(img))

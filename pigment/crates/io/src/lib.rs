@@ -88,6 +88,8 @@ pub mod smart_map;
 pub mod svg;
 mod text_import;
 pub mod text_styles_map;
+// Pigment: Targa variants the `image` crate misreads (F2).
+mod tga_more;
 pub mod tiff_layers;
 /// Pigment: Photoshop tool presets (`.tpl`).
 pub mod tpl_map;
