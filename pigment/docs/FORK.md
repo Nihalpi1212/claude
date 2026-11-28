@@ -1302,6 +1302,59 @@ Tests: `crates/ui-egui/src/panels/info_readout_tests.rs`, `crates/engine/src/cmd
 | `crates/engine/src/cmd/sampler_cmds.rs` | `deep_readout` (new fn), `"float"` in `point_json`, the list's params text, `#[cfg(test)] mod deep_tests;` |
 | `docs/parity/README.md`, `docs/user/guides/adjust-colors-with-adjustment-layers.md` | the two Info panel rows; "Read the colours in the Info panel" |
 
+### Pen tablets: Windows Ink tilt and rotation, the tip turning with the pen, the stylus wheel
+
+The JavaScript Pigment got tilt, `twist` and `tangentialPressure` from Chromium's pointer events on every platform.
+None of this is confirmed on a real pen yet: the checks to make are listed in `docs/hardware-parity.md`, "Pigment:
+to check on hardware".
+- **Windows Ink tilt and rotation.** winit delivers a Windows Ink pen as touch input with the pressure only, and the
+  framework gives a pass with touch events the touch's force as the pen's reading, whatever the stylus feed holds
+  (craft-libs `ui-contract/src/runtime/egui/input.rs` `pointer_read`), so a sample written into the feed (the
+  spec's plan) would never reach the canvas. Instead the pointer hooks, which already call `GetPointerPenInfo` for
+  the barrel button and the eraser end, read the whole `POINTER_PEN_INFO` (`read_pen_info`) and keep the pen's
+  reading while the pen is the last pointer (`handle_pen_message`, `pen_pose`; a finger or the pen leaving clears
+  it). The pure mapping (`penMask` bits, pressure / 1024, tilt in degrees, clockwise rotation) is
+  `crates/tablet/src/ink.rs` (`sample_from_pen_info`, `next_pose`), tested on every platform. The app's
+  `Services::pen_extras` reads it once per frame (`crates/ui-egui/src/pen_extras.rs`), and `Stylus::record_pointer`
+  adds its tilt and rotation to a reading that has none; the pressure stays winit's (the same field). Under WinTab
+  the Windows Ink reading stays out.
+- **#1301: the tip turns the way the pen turns.** Every platform reports the barrel rotation clockwise (W3C `twist`,
+  Windows Ink, WinTab, `photocraft_tablet::Sample`); the brush engine's angles are counter-clockwise, and
+  `control_angle` added the rotation as it was, so the tip turned against the pen (Brush Projection and the brush
+  cursor too). It now subtracts it. Interpolating a stroke's points also takes the rotation the shorter way round
+  (350° to 10° passes 0°), as smoothing already did. macOS's `NSEvent.rotation` is taken as clockwise, as Chromium
+  (the JavaScript app's) takes it; Qt reads it the other way, so this is check 6 on hardware.
+- **The stylus wheel.** Neither `photocraft_tablet::Sample` nor the framework's pointer reading has a wheel, so the
+  readers store it beside the samples (`crates/tablet/src/wheel.rs`): macOS's `tangentialPressure` (once a pen has
+  shown a wheel since it came into proximity), WinTab's `pkTangentPressure` on a device with `DVC_TPRESSURE` and
+  orientation axes (a packet and a backend of its own, `Backend::Wheel`). The stroke records it per point beside tilt
+  and rotation; `paint.stroke` gets it as each point's 8th value, which the engine already read (`wheel`, 1 when
+  absent), so the command's format did not change. Windows Ink, X11 and the web have no wheel.
+Tests: `crates/tablet/src/ink.rs`, `crates/tablet/src/wheel.rs`, `crates/tablet/src/windows.rs` (the hooks with a
+synthetic `POINTER_PEN_INFO`; Windows only), `crates/tablet/src/wintab.rs` (the airbrush packet; Windows only),
+`crates/paint/src/pen_rotation_tests.rs`, `crates/ui-egui/src/pen_extras/tests.rs`,
+`apps/photocraft/src/tablet/rotation_tests.rs` (AppKit values through the whole app to the painted tip).
+
+| Upstream file | Hook |
+|---|---|
+| `crates/tablet/src/lib.rs` | `pub mod ink;`, `pub mod wheel;` |
+| `crates/tablet/src/windows.rs` | `read_pen_info` (new; `read_pen_flags` now wraps it), `POSE`, `handle_pen_message`, `pen_pose`; the two hooks call `handle_pen_message` with `read_pen_info`; `Monitor::drop` clears the reading; one test |
+| `crates/tablet/src/wintab.rs` | `WheelPacket`, `Backend::Wheel` (opened when the device has orientation and a wheel axis) and its arms in `poll`, the overlap calls and `on_message`; `wheel_sample`; `poll` clears the wheel when no pen is in use; one test |
+| `crates/tablet/src/appkit.rs` | `RawEvent::tangential` |
+| `crates/tablet/src/macos.rs` | `read` reads `tangentialPressure` on tablet point events; the monitor stores the wheel through `wheel::AppKitWheel`; the test sets and reads it |
+| `crates/paint/src/dynamics.rs` | `control_angle`: `Control::Rotation => -p.rotation`; Brush Projection `angle -= rotation`; `lerp_pt` takes the rotation the shorter way |
+| `crates/paint/src/brush_tests.rs` | `tilt_direction_and_rotation_drive_angle` and `brush_projection_foreshortens_along_tilt_and_turns_with_rotation` expect −30° and −90° (clockwise) |
+| `crates/paint/src/lib.rs` | `#[cfg(test)] mod pen_rotation_tests;` |
+| `crates/ui-egui/src/tools/brush_cursor.rs` | `pose`: Brush Projection `angle -= point.rotation` |
+| `crates/ui-egui/src/input/stylus.rs` | `Stylus::pigment` (field and constructor line); `record_pointer` merges `pen_extras`; `begin_stroke` clears and `record_point` pushes the wheel; `stroke_points` adds the wheel column |
+| `crates/ui-egui/src/canvas.rs` | `crate::pen_extras::refresh(app)` after the Use Tablet Pressure line |
+| `crates/ui-egui/src/canvas/strokes.rs` | the live stroke's points take `sp.wheel` (two places) |
+| `crates/ui-egui/src/services.rs` | `Services::pen_extras` |
+| `crates/ui-egui/src/lib.rs` | `pub mod pen_extras;` |
+| `apps/photocraft/src/tablet.rs` | `pen_extras_service`, `ink_pose`, `extras`; `#[cfg(test)] mod rotation_tests;`; one test |
+| `apps/photocraft/src/main.rs` | `app.services.pen_extras = tablet::pen_extras_service(app.services.tablet_poll.is_some());` |
+| `docs/hardware-parity.md`, `docs/parity/README.md` | the pen rows, the Windows paragraph, the hardware checks, a revision row; the two pen rows |
+
 ## Keeping the rebrand: `scripts/pigment-rebrand.py`
 
 Most of the rebrand is mechanical and done by [`scripts/pigment-rebrand.py`](../scripts/pigment-rebrand.py):

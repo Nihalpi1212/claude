@@ -204,6 +204,7 @@ pub fn canvas_view(
     // Pen pressure/tilt for this frame's tool events (mouse = 1.0), unless Preferences › Tools › Use Tablet Pressure
     // is off; the pen's eraser end selects the Eraser.
     app.stylus.use_pressure = app.session.prefs().tools.use_tablet_pressure;
+    crate::pen_extras::refresh(app); // Pigment (U3): Windows Ink tilt and rotation, the stylus wheel
     let curve = app.session.prefs().tools.pressure_curve.clone();
     app.stylus.set_pressure_curve(&curve);
     crate::stylus::Stylus::sync_eraser_tool(app);

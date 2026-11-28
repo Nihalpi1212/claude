@@ -154,6 +154,8 @@ pub struct Stylus {
     /// Time in milliseconds of each point of the current drag (parallel to its points), from the
     /// pointers' times. Speed spacing, airbrush build-up and smoothing catch-up use it.
     pub(crate) times: Vec<f64>,
+    /// Pigment (U3): Windows Ink's tilt and rotation, the stylus wheel ([`crate::pen_extras`]).
+    pub(crate) pigment: crate::pen_extras::PenState,
 }
 
 impl Default for Stylus {
@@ -178,6 +180,7 @@ impl Stylus {
             pen_contacts: PenContacts::default(),
             stroke: Vec::new(),
             times: Vec::new(),
+            pigment: Default::default(),
         }
     }
 }
@@ -189,7 +192,8 @@ impl Stylus {
     /// that records the same pointer again changes nothing.
     pub fn record_pointer(&mut self, time_ms: f64, sample: Option<PointerSample>) {
         self.time_ms = time_ms;
-        self.pose = sample.map(PenSample::of_pointer);
+        // Pigment (U3): with the platform's tilt and rotation where the reading has none (Windows Ink).
+        self.pose = sample.map(PenSample::of_pointer).map(|p| crate::pen_extras::merge(p, &self.pigment.extras));
         if let Some(p) = self.pose {
             self.peak = self.peak.max(p.pressure);
         }
@@ -280,6 +284,7 @@ impl Stylus {
         self.peak = self.pose.map_or(0.0, |p| p.pressure);
         self.stroke.clear();
         self.times.clear();
+        self.pigment.wheels.clear(); // Pigment (U3)
         self.record_point();
     }
 
@@ -288,6 +293,7 @@ impl Stylus {
         let s = self.sample().unwrap_or_default();
         self.stroke.push([s.tilt_x, s.tilt_y, s.rotation]);
         self.times.push(self.time_ms);
+        self.pigment.wheels.push(self.pigment.wheel_now(self.sample().is_some())); // Pigment (U3)
     }
 
     /// Record a point the held pen repeats at `time_ms` (the pose stays the last pointer's).
@@ -310,9 +316,11 @@ impl Stylus {
     /// `tiltX, tiltY, rotation` when the drag carried any tilt or rotation, and with `timeMs`
     /// (from the drag's first point) when its points carry times.
     pub fn stroke_points(&self, points: &[[f64; 3]]) -> Vec<Vec<f64>> {
-        let has_pose = self.stroke.iter().any(|t| t.iter().any(|v| *v != 0.0));
+        // Pigment (U3): the stylus wheel is the 8th column, so it brings the pose and time ones.
+        let has_wheel = self.pigment.has_wheel();
+        let has_pose = has_wheel || self.stroke.iter().any(|t| t.iter().any(|v| *v != 0.0));
         let t0 = self.point_ms(0);
-        let has_time = self.times.iter().any(|t| *t != t0);
+        let has_time = has_wheel || self.times.iter().any(|t| *t != t0);
         points
             .iter()
             .enumerate()
@@ -324,6 +332,9 @@ impl Stylus {
                 }
                 if has_time {
                     v.push(self.point_ms(i) - t0);
+                }
+                if has_wheel {
+                    v.push(f64::from(self.pigment.wheel_at(i))); // Pigment (U3)
                 }
                 v
             })
