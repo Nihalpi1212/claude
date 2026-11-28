@@ -160,6 +160,8 @@ mod sample_zoom_box_tests;
 pub mod sampler_cmds;
 pub mod select_extra_cmds;
 pub mod selection_cmds;
+// Pigment: Select › Similar Layers
+pub mod similar_layers_cmds;
 pub mod slice_cmds;
 pub mod smart_cmds;
 pub mod smart_svg_cmds;
@@ -1514,6 +1516,8 @@ fn build() -> Vec<CommandSpec> {
     v.extend(crate::actions_cmds::specs());
     // Pigment: generative AI
     v.extend(crate::ai_cmds::specs());
+    // Pigment: Select › Similar Layers
+    v.extend(similar_layers_cmds::specs());
     // The dispatch guard's unit test needs a command that panics on purpose (REL-3).
     #[cfg(test)]
     v.push(test_panic_command());

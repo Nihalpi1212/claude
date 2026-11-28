@@ -61,6 +61,9 @@ pub mod panels;
 pub mod preset_files_ui;
 pub mod proxy;
 pub mod render_path;
+// Pigment: Select › Similar Layers.
+#[cfg(test)]
+mod similar_layers_tests;
 pub mod state;
 pub mod texel_guard;
 pub mod theme;

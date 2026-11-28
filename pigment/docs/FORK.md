@@ -1160,6 +1160,23 @@ read-only rows and folds the slashed keys: an arm of the Pigment `match` in `dia
 | `crates/ui-egui/src/dialogs.rs` | `pub(crate) mod file_info_ui;` |
 | `docs/parity/README.md`, `docs/user/guides/open-and-save-files.md` | the four File Info rows; a File Info section in the guide |
 
+### Select › Similar Layers
+
+Photoshop's Select › Similar Layers, which the JavaScript Pigment had (`layer:select-similar`): every layer, inside
+groups too, of the kinds of the selected layers (pixel, type, shape, adjustment of any kind, fill of any kind, smart
+object, group: `LayerContent::kind_name`). The Background joins only when it was selected (as Select › All Layers
+leaves it out); the active layer stays active; no history step. `crates/engine/src/cmd/similar_layers_cmds.rs`
+(`select.similarLayers`, menu `["Select"]`, so the menus build its row themselves; `menu_catalog.rs` is not touched),
+placed after Deselect Layers, where Photoshop has it. Tests: `similar_layers_cmds/tests.rs`,
+`crates/ui-egui/src/similar_layers_tests.rs`.
+
+| Upstream file | Hook |
+|---|---|
+| `crates/engine/src/cmd.rs` | `pub mod similar_layers_cmds;` and `v.extend(similar_layers_cmds::specs());` beside the generative AI lines |
+| `crates/ui-egui/src/menus/items.rs` | `PLACE_AFTER`: `("select.similarLayers", "select.deselectLayers")` |
+| `crates/ui-egui/src/lib.rs` | `#[cfg(test)] mod similar_layers_tests;` (the menu placement test) |
+| `docs/parity/README.md` | the Select Similar Layers row |
+
 ## Keeping the rebrand: `scripts/pigment-rebrand.py`
 
 Most of the rebrand is mechanical and done by [`scripts/pigment-rebrand.py`](../scripts/pigment-rebrand.py):
