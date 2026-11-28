@@ -228,13 +228,17 @@ pub(crate) struct Space {
     pub(crate) cmyk: Option<Arc<CmykSpace>>,
     /// The composite → Proof Setup transform, when a Proof Color readout needs it and it could be built.
     pub(crate) proof: Option<Proof>,
+    /// The composite is linear light (an OpenEXR or Radiance file, a linear profile): the readouts that
+    /// read it as sRGB (Grayscale, Lab, HSB, Web, CMYK, Total Ink) take it through the sRGB curve first,
+    /// as the canvas shows it. RGB shows the stored values, as Photoshop's 32-bit readout does.
+    pub(crate) linear: bool,
 }
 
 impl Space {
     /// An 8-bit RGB document's.
     #[cfg(test)]
     pub(crate) fn rgb(depth: SampleType) -> Space {
-        Space { depth, mode: ColorMode::Rgb, sixteen: SixteenBit::Half, cmyk: None, proof: None }
+        Space { depth, mode: ColorMode::Rgb, sixteen: SixteenBit::Half, cmyk: None, proof: None, linear: false }
     }
 }
 
@@ -338,25 +342,27 @@ fn cmyk(rgb: [f32; 3], space: &Space) -> [i32; 4] {
 pub(crate) fn readout(mode: Mode, rgba: [f32; 4], space: &Space) -> Vec<(Name, String)> {
     let rgb = [rgba[0], rgba[1], rgba[2]];
     let unit_rgb = rgb.map(unit);
+    // Review FU: a linear composite read as sRGB showed mid grey (0.2159) as 363636 and L 22.
+    let encoded = if space.linear { unit_rgb.map(photocraft_color::convert::linear_to_srgb) } else { unit_rgb };
     match mode {
         Mode::Actual => readout(actual_mode(space.mode), rgba, space),
         Mode::Rgb => [Name::R, Name::G, Name::B].into_iter().zip(rgb).map(|(n, v)| (n, deep(v, space.depth, space.sixteen))).collect(),
-        Mode::Cmyk => [Name::C, Name::M, Name::Y, Name::K].into_iter().zip(cmyk(rgb, space)).map(|(n, v)| (n, v.to_string())).collect(),
-        Mode::Gray => vec![(Name::K, percent(1.0 - rgb_to_gray(unit_rgb)).to_string())],
+        Mode::Cmyk => [Name::C, Name::M, Name::Y, Name::K].into_iter().zip(cmyk(encoded, space)).map(|(n, v)| (n, v.to_string())).collect(),
+        Mode::Gray => vec![(Name::K, percent(1.0 - rgb_to_gray(encoded)).to_string())],
         Mode::Lab => {
-            let lab = srgb_to_lab(unit_rgb).map(|v| (v.round() as i32).to_string());
+            let lab = srgb_to_lab(encoded).map(|v| (v.round() as i32).to_string());
             [Name::L, Name::LabA, Name::LabB].into_iter().zip(lab).collect()
         }
         Mode::Hsb => {
-            let [h, s, b] = rgb_to_hsb(unit_rgb);
+            let [h, s, b] = rgb_to_hsb(encoded);
             let degrees = (h.round() as i32).rem_euclid(360);
             vec![(Name::Hue, format!("{degrees}°")), (Name::Saturation, format!("{}%", percent(s))), (Name::Brightness, format!("{}%", percent(b)))]
         }
         Mode::Web => {
-            let [r, g, b] = rgb.map(byte);
+            let [r, g, b] = encoded.map(byte);
             vec![(Name::Hex, format!("{r:02X}{g:02X}{b:02X}"))]
         }
-        Mode::TotalInk => vec![(Name::TotalInk, format!("{}%", cmyk(rgb, space).iter().sum::<i32>()))],
+        Mode::TotalInk => vec![(Name::TotalInk, format!("{}%", cmyk(encoded, space).iter().sum::<i32>()))],
         Mode::Opacity => vec![(Name::Opacity, format!("{}%", percent(rgba[3])))],
         Mode::Proof => match &space.proof {
             Some(proof) => proof_readout(proof, unit_rgb, space),
@@ -418,6 +424,7 @@ fn space(app: &PhotocraftApp, o: &InfoOptions) -> Option<Space> {
         sixteen: o.sixteen,
         cmyk: photocraft_compose::cmyk_space(&st.doc),
         proof: if uses_proof { proof(app) } else { None },
+        linear: app.session.color.canvas_display_for(&st.doc, None).is_ok_and(|d| d.encode_srgb),
     })
 }
 

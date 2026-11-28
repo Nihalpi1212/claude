@@ -54,6 +54,27 @@ fn hsb_of_red_web_hex_lab_gray_and_opacity() {
     assert_eq!(values(Mode::Opacity, [0.0, 0.0, 0.0, 0.25], &s), ["25%"]);
 }
 
+/// Review FU: an OpenEXR's linear composite was read as sRGB-encoded, so its mid grey showed as
+/// 363636, B 21% and L 22 instead of what the canvas shows.
+#[test]
+fn a_linear_composite_reads_through_the_srgb_curve_except_rgb() {
+    let linear = Space { linear: true, ..Space::rgb(SampleType::F32) };
+    let grey = photocraft_color::convert::srgb_to_linear(128.0 / 255.0);
+    let px = [grey, grey, grey, 1.0];
+    assert_eq!(values(Mode::Web, px, &linear), ["808080"]);
+    assert_eq!(values(Mode::Hsb, px, &linear)[2], "50%");
+    assert_eq!(values(Mode::Lab, px, &linear)[0], "54");
+    assert_eq!(values(Mode::Gray, px, &linear), ["50"]);
+    assert_eq!(values(Mode::Cmyk, px, &linear), values(Mode::Cmyk, [0.5, 0.5, 0.5, 1.0], &Space::rgb(SampleType::F32)));
+    assert_eq!(values(Mode::Rgb, px, &linear), [format!("{grey:.4}"), format!("{grey:.4}"), format!("{grey:.4}")], "RGB is the stored value");
+    // The app sees a linear profile as linear.
+    let mut app = app_with("rgb", 32);
+    assert!(!space(&app, &InfoOptions::default()).unwrap().linear);
+    let lin = craft::cms::Builtin::LinearSrgb.profile().to_bytes();
+    std::sync::Arc::make_mut(&mut app.session.active_mut().unwrap().doc).icc_profile = Some(lin);
+    assert!(space(&app, &InfoOptions::default()).unwrap().linear);
+}
+
 #[test]
 fn total_ink_of_black_is_the_sum_of_its_inks() {
     let s = rgb8();
