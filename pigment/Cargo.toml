@@ -134,7 +134,7 @@ test_threads = 4
 # The one build of each crate a target dir holds after the selection's test build (`cl doctor` compares).
 [workspace.metadata.cl.expected_features]
 egui = ["bytemuck", "default_fonts", "monochrome_emoji_fonts", "persistence", "ron", "serde"]
-photocraft-io = ["pdf-editable", "testgen"]
+photocraft-io = ["avif", "default", "pdf-editable", "testgen"]
 craft-affinity = ["synth"]
 craft-ui-contract = ["default", "snapshot", "testing"]
 craft-imaging = ["default", "screen-testing", "ui"]

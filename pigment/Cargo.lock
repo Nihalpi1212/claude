@@ -1780,6 +1780,7 @@ dependencies = [
  "craft-jpeg 0.1.0 (git+https://github.com/storytold/craft-libs?rev=18ffc07519b15f5ef39e752aa0f405261fec8ebb)",
  "craft-metadata 0.1.0 (git+https://github.com/storytold/craft-libs?rev=18ffc07519b15f5ef39e752aa0f405261fec8ebb)",
  "craft-tiff 0.1.0 (git+https://github.com/storytold/craft-libs?rev=18ffc07519b15f5ef39e752aa0f405261fec8ebb)",
+ "craft-video",
  "crc32fast",
  "exr",
  "flate2",
@@ -1900,6 +1901,11 @@ dependencies = [
  "egui",
  "serde",
 ]
+
+[[package]]
+name = "craft-media"
+version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs?rev=18ffc07519b15f5ef39e752aa0f405261fec8ebb#18ffc07519b15f5ef39e752aa0f405261fec8ebb"
 
 [[package]]
 name = "craft-menu"
@@ -2469,6 +2475,15 @@ dependencies = [
  "winreg",
  "winsafe",
  "zip",
+]
+
+[[package]]
+name = "craft-video"
+version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs?rev=18ffc07519b15f5ef39e752aa0f405261fec8ebb#18ffc07519b15f5ef39e752aa0f405261fec8ebb"
+dependencies = [
+ "craft-media",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
