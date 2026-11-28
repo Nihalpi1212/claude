@@ -26,7 +26,7 @@ use serde_json::{Map, Value, json};
 use super::preset_manager::Row;
 use super::{PresetFile, Result, Session, bad};
 use crate::presets::adjustments::{self, BUILTIN_GROUP, USER_GROUP};
-use crate::presets::gradients::GradientPreset;
+use crate::presets::gradients::{GradientPreset, StopColor};
 use crate::presets::shapes::{CUSTOM_GROUP, ShapePreset};
 use crate::presets::styles::StylePreset;
 use crate::presets::{Group, Named, group_index, unique_name_by};
@@ -39,6 +39,8 @@ pub const DEFAULT_KINDS: [&str; 3] = ["brushes", "customShapes", "tools"];
 pub const MAX_ENTRIES: usize = 10_000;
 /// Longest preset or group name kept, in characters.
 const MAX_NAME: usize = 255;
+/// The stops of one gradient (as `gradient.presets.stop`'s `set` takes them).
+const MAX_STOPS: usize = 1024;
 
 /// A pattern in a preset file: its id and name (for people reading the file) and the pattern
 /// itself, pixels included, as a base64 Photoshop `.pat`.
@@ -363,7 +365,7 @@ impl Staged {
             let mut incoming = std::mem::take(&mut file.gradients);
             for g in &mut incoming {
                 for item in &mut g.items {
-                    tidy_gradient(item);
+                    tidy_gradient(item).map_err(|e| bad(cmd, format!("gradient \"{}\": {e}", clip(&item.name))))?;
                 }
             }
             st.count(&mut lib, incoming, &none, "gradients", cmd)?;
@@ -571,22 +573,35 @@ impl Staged {
 }
 
 /// A gradient read from a file: stops within 0..1, in order (the panel and the renderer expect
-/// both).
-fn tidy_gradient(g: &mut GradientPreset) {
+/// both), colours within 0..1, and at least two colour stops (one stop is that colour all along,
+/// as Photoshop draws it); a gradient without colour stops is refused.
+fn tidy_gradient(g: &mut GradientPreset) -> std::result::Result<(), String> {
     // A noise gradient (P3): its stops are its settings' bake, whatever the file says.
     if let Some(n) = g.noise.take() {
         *g = crate::presets::gradients::noise::preset(&g.name, n.sanitized());
-        return;
+        return Ok(());
     }
-    for (at, _) in &mut g.stops {
+    if g.stops.len() > MAX_STOPS || g.opacity.len() > MAX_STOPS {
+        return Err(format!("a gradient holds at most {MAX_STOPS} stops"));
+    }
+    for (at, c) in &mut g.stops {
         *at = at.clamp(0.0, 1.0);
+        if let StopColor::Rgb(rgb) = c {
+            *rgb = rgb.map(|v| v.clamp(0.0, 1.0));
+        }
     }
     g.stops.sort_by(|a, b| a.0.total_cmp(&b.0));
+    match g.stops.as_slice() {
+        [] => return Err("it has no colour stops".into()),
+        [(_, c)] => g.stops = vec![(0.0, *c), (1.0, *c)],
+        _ => {}
+    }
     for (at, o) in &mut g.opacity {
         *at = at.clamp(0.0, 1.0);
         *o = o.clamp(0.0, 1.0);
     }
     g.opacity.sort_by(|a, b| a.0.total_cmp(&b.0));
+    Ok(())
 }
 
 #[cfg(test)]

@@ -192,6 +192,9 @@ impl GradientPreset {
     pub fn with_transparency(mut self, p: &Value, cmd: &str) -> Result<Self> {
         if let Some(opacity) = transparency_param(p, cmd)? {
             self.opacity = opacity;
+            // Pigment: transparency stops of their own make a noise gradient solid (its stops
+            // are no longer its bake).
+            self.noise = None;
         }
         Ok(self)
     }

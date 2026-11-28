@@ -273,3 +273,38 @@ fn the_preset_manager_saves_a_set_of_any_kind_as_pcpresets() {
     assert_eq!(file["shapes"][0]["name"], "Mine");
     assert_eq!(file["customShapes"][0]["name"], "Defined");
 }
+
+#[test]
+fn a_files_gradients_are_tidied_and_one_without_stops_is_refused() {
+    // Review P: a shared file's gradient went in as written: without colour stops, with one
+    // stop, or with colours outside 0..1, which the Gradient tool and the editor never make.
+    let mut s = Session::new();
+    let file = |items: Value| json!({"format": PRESET_FORMAT, "version": 1, "gradients": [{"name": "Odd", "items": items}]}).to_string();
+    let before = s.presets.gradients.clone();
+    let err = s
+        .execute(
+            CMD,
+            json!({"action": "import", "kinds": ["gradients"], "data": file(json!([
+                {"name": "Fine", "stops": [[0, "foreground"], [1, "background"]]},
+                {"name": "Empty", "stops": []}
+            ]))}),
+        )
+        .unwrap_err();
+    assert!(err.to_string().contains("\"Empty\": it has no colour stops"), "{err}");
+    assert_eq!(s.presets.gradients, before, "nothing changes");
+    s.execute(
+        CMD,
+        json!({"action": "import", "kinds": ["gradients"], "data": file(json!([
+            {"name": "One", "stops": [[0.5, {"rgb": [1.0, 0.0, 0.0]}]]},
+            {"name": "Far", "stops": [[-3.0, {"rgb": [9.0, -1.0, 0.5]}], [7.0, "foreground"]]}
+        ]))}),
+    )
+    .unwrap();
+    let find = |s: &Session, n: &str| s.presets.gradients.iter().flat_map(|g| &g.items).find(|g| g.name == n).unwrap().clone();
+    let one = find(&s, "One");
+    assert_eq!(one.stops.iter().map(|(t, _)| *t).collect::<Vec<_>>(), [0.0, 1.0], "one stop: its colour all along");
+    assert!(one.stops.iter().all(|(_, c)| *c == crate::presets::gradients::StopColor::Rgb([1.0, 0.0, 0.0])));
+    let far = find(&s, "Far");
+    assert_eq!(far.stops[0], (0.0, crate::presets::gradients::StopColor::Rgb([1.0, 0.0, 0.5])));
+    assert_eq!(far.stops[1].0, 1.0);
+}

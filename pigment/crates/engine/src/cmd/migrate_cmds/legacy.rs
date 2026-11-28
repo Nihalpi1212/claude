@@ -212,7 +212,8 @@ fn read_folder(dir: &Path) -> Result<Source> {
     }
     if let Some(path) = settings_at.into_iter().find(|p| p.is_file()) {
         src.found += 1;
-        match std::fs::read_to_string(&path).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).filter(Value::is_object) {
+        let small = std::fs::metadata(&path).is_ok_and(|m| m.len() <= MAX_KIND_FILE);
+        match small.then(|| std::fs::read_to_string(&path).ok()).flatten().and_then(|t| serde_json::from_str::<Value>(&t).ok()).filter(Value::is_object) {
             Some(v) => src.settings = Some(v),
             None => src.skipped.push(Skip {
                 kind: "settings".into(),
