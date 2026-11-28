@@ -1427,10 +1427,12 @@ The second typography package (PORTS-B B2) puts B1's character settings on the C
   (checked while on), Fractional Widths, System Layout, No Break, Reset Character, each an engine command run on the
   panel's target; Fractional Widths is greyed while System Layout is on, as in Photoshop. Without a type layer the
   character toggles set the next layer's defaults, as the panel's buttons do.
-- **Chords** (`panel_menu::TypeChords`): ⇧⌘= Superscript, ⌥⇧⌘= Subscript, ⇧⌘H Small Caps, a command set in the
-  framework text editor's typing scope (`textEditor`), so they work only while type is edited and come before View ›
-  Zoom In's alternate key and View › Show › Target Path there, as in Photoshop. The rows REBASE-BT asked for in the
-  app catalog cannot be in that scope (the framework's `AppCatalog` refuses them), so the chords are their own set.
+- **No default chords.** Photoshop's ⇧⌘= Superscript, ⌥⇧⌘= Subscript and ⇧⌘H Small Caps work only while type is
+  edited, where the framework text editor holds the keys. Its `textEditor` scope cannot carry app rows (the
+  framework's `AppCatalog` refuses them), and a command of that scope never reaches the app: the editor takes only
+  its own `TextEditorCommand`s (`pigment_character_tests::a_text_editor_scope_chord_never_reaches_the_app`). So the
+  three commands have no default key; the panel menu and Edit › Keyboard Shortcuts reach them. The chords wait for
+  craft-libs' `CharToggle` to gain Superscript, Subscript and Small Caps (the owner's call: craft-libs is pinned).
 - **Layout** (`crates/text/src/layout/whole_px.rs`): Fractional Widths off rounds each caret cluster's advance on a
   placed horizontal line to whole pixels and starts the line on one (glyphs, carets, decorations and the line extent
   follow); System Layout does that, snaps the baselines and draws with the Sharp anti-aliasing curve (None stays
