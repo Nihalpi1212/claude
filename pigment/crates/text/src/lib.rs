@@ -134,7 +134,7 @@ impl TextEngine {
     pub fn render(&mut self, layer: &TextLayer, dpi: f32, format: PixelFormat) -> (TextLayout, Rendered) {
         let l = self.layout(layer, dpi);
         let warp = render::layout_deform(&l, layer);
-        let r = render::rasterize_warped(&l, &layer.transform, format, layer.antialias, warp.as_ref());
+        let r = render::rasterize_warped(&l, &layer.transform, format, layout::drawn_antialias(layer), warp.as_ref()); // Pigment (B2): System Layout
         (l, r)
     }
 
@@ -343,6 +343,8 @@ mod warm {
 
 #[cfg(test)]
 mod color_tests;
+#[cfg(test)]
+mod pigment_type_tests; // Pigment (B2)
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

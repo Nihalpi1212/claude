@@ -268,7 +268,7 @@ fn render(layer: &TextLayer, dpi: f32, format: PixelFormat) -> Surface {
         engine.layout(layer, dpi)
     };
     let warp = photocraft_text::render::layout_deform(&layout, layer);
-    photocraft_text::render::rasterize_warped(&layout, &layer.transform, format, layer.antialias, warp.as_ref()).surface
+    photocraft_text::render::rasterize_warped(&layout, &layer.transform, format, photocraft_text::layout::drawn_antialias(layer), warp.as_ref()).surface
 }
 
 /// Starts a worker thread that renders `layer` and sends back its surface; `None` if no thread could be started.

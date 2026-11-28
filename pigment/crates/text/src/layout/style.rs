@@ -124,6 +124,8 @@ pub(super) fn style_props(st: &CharStyle, k: f32, fallback: &[String], idx: u32,
         StyleProperty::Strikethrough(st.strikethrough),
         StyleProperty::Brush(RunBrush(idx, 0)),
         StyleProperty::Locale(st.language.as_deref().and_then(|l| parley::fontique::Language::parse(l).ok())),
+        // Pigment (B2): No Break keeps the run's characters on one line.
+        StyleProperty::TextWrapMode(if st.no_break { parley::TextWrapMode::NoWrap } else { parley::TextWrapMode::Wrap }),
     ]
 }
 

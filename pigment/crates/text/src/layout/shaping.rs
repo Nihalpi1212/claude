@@ -368,6 +368,10 @@ impl<'a> Para<'a> {
         for p in style_props(&env.styles[ri], env.k, &self.fallback, ri as u32, env.small_caps[ri]) {
             b.push(p, range.clone());
         }
+        // Pigment (B2): a No Break run runs out of the box rather than break mid-word.
+        if env.styles[ri].no_break {
+            b.push(StyleProperty::OverflowWrap(parley::style::OverflowWrap::Normal), range.clone());
+        }
         if env.vertical {
             let piece = VerticalPiece { style: &env.styles[ri], run: ri, small_caps: env.small_caps[ri], start: range.start };
             piece.push_all(b, self.text_of(range));
