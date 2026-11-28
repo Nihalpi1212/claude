@@ -235,8 +235,8 @@ fn a_sampler_reads_its_unrounded_16_bit_value() {
     app.run("view.colorSamplers.add", json!({"x": 4, "y": 4})).unwrap();
     let panel = lines(&mut app).unwrap();
     let red = panel.samplers[0].1[1][0].clone().unwrap();
-    // 0.3 of 32768 = 9830.4, where the 8-bit readout (77) would read 9894.
-    assert_eq!(red, ("R".to_owned(), Some("9830".to_owned())));
+    // 0.3 stored in 16 bits (19661/65535) reads 9831 of 32768, where the 8-bit readout (77) would read 9894.
+    assert_eq!(red, ("R".to_owned(), Some("9831".to_owned())));
 }
 
 #[test]
