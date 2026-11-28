@@ -10,7 +10,11 @@ package's commits were still running when I finished: **the next engineer checks
 
 ## Commits (pushed)
 
-COMMITS
+- `fb8c47c` Pigment Targa variants (F2), io: 16-bit files with an alpha bit and wide colour-map indices open through
+  craft-tga
+- `a84fb4e` Pigment GIF in Export As (F2), interface and engine: GIF after JPG with Transparency only
+- `aacdf9b` Pigment Color Lookup Tables in four formats (F2), engine and interface: .3dl, .csp and ICC beside .cube,
+  Copyright, Quality up to 256 points (also FORK.md, the parity page and the user guide)
 
 ## What was built
 
@@ -101,11 +105,59 @@ flattens on white.
 
 ## Tests
 
-TESTS
+New tests:
+- `crates/io/src/tga_more.rs` `tests::only_the_two_variants_pick_craft_tga`; `crates/io/tests/it/targa_variants.rs`
+  (6): 16-bit + alpha bit (raw, top-left, RLE) → RGB + "Alpha 1"; all alpha bits set → no channel, and no attribute
+  bit declared → opaque (old path); type 1 with 16-bit indices into 15-bit entries from index 300 (both origins);
+  type 9 RLE colour-mapped with a packet over the row end; a 24-bit file claiming 8 alpha bits (refused by `image`)
+  falls back to craft-tga; every prefix of three files is an error and an index outside the map too; the
+  `flat_max_pixel_bytes` limit holds (`LimitExceeded`).
+- `crates/ui-egui/src/dialogs/export_dialog/gif_tests.rs` (4): GIF after JPG with Transparency only and no quality in
+  the settings; picking GIF in the Format list hides Quality (JPG shows it); an exported 2-colour GIF89a decodes to the
+  document with the transparent pixel, and to white with Transparency off; a GIF Export As preset saves.
+- `crates/engine/src/cmd/file_cmds/lut_writers_tests.rs` (7): .cube, .3dl (craft-cms readers) and .csp (a test
+  parser) read back as the table at 3, 7, 17 and 33 points (.3dl within half a 12-bit code); the ICC is a `link`
+  RGB→RGB with a stamped ID, parses, and its A2B0 maps nodes like the table; copyright and description in each file
+  (and without a copyright the cube is upstream's); four files with lowercase extensions, uppercase, a single format
+  keeping its path, the extension replaced; `file_paths` keeps other dots; 256 points baked in bands (band edges
+  checked), ICC capped at 177 with `iccSize`, 257 refused, 130 points written; ICC refused for CMYK and Lab while the
+  text formats are written; bad `formats`/`copyright`/`lowercase` refused, repeats once.
+- `crates/ui-egui/src/dialogs/lut_export_ui_tests.rs` (3): the form's rows and defaults (Medium, size 33, CUBE on);
+  `fold` for every Quality; OK writes the four ticked files at Low (17) with the copyright, and Custom 9 with
+  uppercase extensions.
+
+Results (nextest `--profile ci`, `TMPDIR=/dev/shm/pt`, CI's font and i18n dirs):
+- `cargo nextest run -p photocraft-io --features heif --lib --bins --tests`: 1460 passed, 14 skipped.
+- `cargo nextest run -j 3 -p photocraft-ui-egui --features photocraft-io/heif --lib --bins --tests` (whole suite):
+  3800 passed, 6 skipped.
+- `cargo nextest run -p photocraft-engine --features photocraft-io/heif --lib --bins --tests`: 5016 passed, 1 failed,
+  26 skipped. The failure is the known container-only `legacy_pigment_render::tests::cancelling_the_open_stops_the_smart_filters`
+  (timing; "stopped 45 s after the cancel" alone too; PKG-merge-engine, A2, P1a, P2 notes).
+- Panic hunt (`cargo test -p photocraft-engine --test panic_hunt -- --ignored`): 1 passed.
+- `cargo fmt --all -- --check`, `cargo clippy --locked --features heif -p photocraft-io -p photocraft-engine
+  -p photocraft-ui-egui --all-targets -- -D warnings`, `python3 scripts/pigment-rebrand.py --check`,
+  `cargo xtask layers`, `cargo metadata --locked`: clean. No preference, panel command or workspace crate was added,
+  so no scorecard or panel-commands run.
 
 ## Hooks into upstream files (all in FORK.md, "Targa variants, GIF in Export As, Color Lookup Table formats")
 
-HOOKS
+- `Cargo.toml` (workspace), `crates/io/Cargo.toml`, `Cargo.lock`: `craft-tga`.
+- `crates/io/src/lib.rs`: `mod tga_more;`.
+- `crates/io/src/flat.rs` `import_flat_impl_with_options`: `codecs::detect(bytes).or_else(|| tga_more::sniff(..))`;
+  the decode wrapped in `tga_more::decode(format, bytes, &limits, decode)`.
+- `crates/io/tests/it/main.rs`: `mod targa_variants;`.
+- `crates/ui-egui/src/dialogs/export_dialog.rs`: `FORMATS` (8 entries, GIF), `dialog_formats` (insert GIF), `mod gif_tests;`.
+- `crates/engine/src/cmd/export_preset_cmds.rs`: `"gif"` in `FORMATS` and the save params string.
+- `crates/engine/src/cmd/file_cmds.rs`: `mod lut_writers;`, the CLUT params string.
+- `crates/engine/src/cmd/file_cmds/export.rs`: `bake_cube_layers` → `bake_table` (banded), the size check
+  (`MAX_EXPORT_SIZE`), the result through `lut_writers::export`.
+- `crates/engine/src/cmd/file_cmds/tests.rs`: `{"size": 257}` (was 130) in
+  `selected_cube_validation_is_explicit_and_never_mutates_the_document`.
+- `crates/ui-egui/src/menus/view_cmds/dialogs.rs`: the CLUT arm's rows are `lut_export_ui::rows(..)`.
+- `crates/ui-egui/src/dialogs.rs`: `pub(crate) mod lut_export_ui;`.
+- Pigment file, not upstream: `dialogs/filter_dialog/pigment.rs` `command_params_of` is a `match` now.
+- Docs: `docs/file-format-parity.md` (Targa row), `docs/parity/README.md` (four rows), `docs/user/guides/export-an-image.md`
+  (GIF, a Color Lookup Tables section), `docs/FORK.md`.
 
 ## For the next package
 
