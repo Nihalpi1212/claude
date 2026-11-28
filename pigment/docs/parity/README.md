@@ -152,8 +152,8 @@ the entry is now. Where Pigment 0.5.0 has PhotoCraft's status, the column names 
 | Entry | Pigment 0.4 | PhotoCraft and Pigment 0.5.0 | 0.6 package |
 |---|---|---|---|
 | Cursors: brush leash colour † | Done | Partial: Other Cursors and Brush Preview colour, no leash colour | B17 |
-| Color Lookup Tables (export) | Partial | Partial: `.cube` only, no copyright field | F2 |
-| Export As: GIF | Done | Partial: no GIF in Export As | F2 |
+| Color Lookup Tables (export) | Partial | Done in 0.6: `.cube`, `.3dl`, `.csp` and ICC (RGB documents) at once, Description, Copyright, Quality up to 256 points, lowercase extensions | F2 |
+| Export As: GIF | Done | Done in 0.6: GIF in Export As, with Transparency | F2 |
 | Open: AVIF | Done | Done in 0.6: AVIF opens (8, 10 and 12-bit, alpha, grids, rotation, ICC, Exif and XMP), read only | F3 |
 | Fill: Scripted Patterns | Approximate | Missing | B18 |
 | Presets › Export/Import Presets and Migrate Presets † | Done | Done in 0.6: every kind, `.pigment-bundle`, Migrate Presets from Pigment 0.4's folder | P1b, P4 |
@@ -182,8 +182,8 @@ the entry is now. Where Pigment 0.5.0 has PhotoCraft's status, the column names 
 | Entry | Pigment 0.4 | PhotoCraft and Pigment 0.5.0 | 0.6 package |
 |---|---|---|---|
 | AVIF | Partial | Done in 0.6: opens, read only (more than Pigment 0.4, which opened 8-bit sRGB only) | F3 |
-| Targa: 15 and 16-bit and colour-mapped | Done | Done for 24 and 32-bit only | F2 |
-| Export Color Lookup Tables: `.3dl` and the others | Partial | Partial: `.cube` only | F2 |
+| Targa: 15 and 16-bit and colour-mapped | Done | Done in 0.6: 16-bit files keep their alpha bit, colour maps with 16-bit indices open; writing stays 24 and 32-bit | F2 |
+| Export Color Lookup Tables: `.3dl` and the others | Partial | Done in 0.6: `.3dl`, `.csp` and ICC besides `.cube` | F2 |
 | File Info: Origin, IPTC and IPTC Extension tabs | Partial | Missing | F1 |
 | EXIF reading (Camera Data) | Partial | Partial: fewer tags | F1 |
 | Actions: Default Actions and bundled sets | Partial | Missing (Photoshop `.atn` sets you own load and play) | U2 |

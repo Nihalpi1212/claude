@@ -23,6 +23,8 @@ use crate::{EngineError, Result, Session};
 mod batch_run;
 mod export;
 mod info;
+// Pigment: Color Lookup Tables in .3dl, .csp and ICC (F2)
+mod lut_writers;
 mod open;
 mod open_as_smart_object;
 mod paths;
@@ -435,7 +437,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Color Lookup Tables…",
             &["File", "Export"],
             None,
-            r##"{"path":str? (.cube; omit to return the text),"size":2..129=33,"title":str?,"scope":"all|selected"="all","layers":[id,…]?} (selected layer IDs use original document stacking; masks are spatial and omitted)"##,
+            r##"{"path":str? (.cube; omit to return the text; with several formats the base name, each file taking its format's extension),"size":2..256=33 (grid points; Photoshop's Quality: Poor 7, Low 17, Medium 33, High 64, Maximum 256; an ICC profile holds at most 177),"title":str?,"copyright":str?,"formats":["3dl"|"cube"|"csp"|"icc",…]=["cube"],"lowercase":bool=true,"scope":"all|selected"="all","layers":[id,…]?} (selected layer IDs use original document stacking; masks are spatial and omitted) → {cube?,threeDl?,csp?,icc? (base64),iccSize?,size,layerCount} or, with path, {path,files,size,layerCount}"##,
             has_adjustments,
             color_lookup_tables
         ),

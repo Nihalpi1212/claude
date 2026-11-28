@@ -151,39 +151,60 @@ fn lut_layers<'a>(doc: &'a Document, ids: Option<&[LayerId]>) -> Result<Vec<&'a 
 /// Bake the chosen adjustment stack against an identity RGB lattice.
 /// Source order always follows the document stack, even if an explicit list is reversed.
 fn bake_cube_layers(size: usize, title: &str, layers: &[&Layer], depth: photocraft_color::SampleType) -> String {
+    // Pigment: the bake is `bake_table`, shared with the other LUT formats (F2).
+    let rows = bake_table(size, layers);
+    // The shared writer owns CUBE syntax and precision; baking stays app-local.
+    craft_cms::lutfile::write_cube_export("Pigment", title, size, !matches!(depth, photocraft_color::SampleType::F32), rows.into_iter())
+}
+
+/// Pigment (F2): pixels of one bake lattice at most, so a 256-point table is baked in bands of
+/// blue slices (each slice is `size²` pixels) instead of one 268 MB lattice.
+const BAKE_BAND_PIXELS: usize = 1 << 22;
+
+/// The adjustment stack applied to every node of a `size`-point identity RGB lattice: `size³`
+/// rows, red fastest, then green, then blue. Pigment (F2): split out of `bake_cube_layers`.
+pub(super) fn bake_table(size: usize, layers: &[&Layer]) -> Vec<[f32; 3]> {
     let n = size;
-    let (w, h) = ((n * n) as u32, n as u32);
-    let mut lattice = Document::new("lut", photocraft_doc::Size::new(w, h), ColorMode::Rgb, photocraft_color::SampleType::F32);
-    let fmt = lattice.pixel_format();
     let step = 1.0 / (n - 1) as f32;
-    let mut data = Vec::with_capacity((w * h) as usize * fmt.channels());
-    for g in 0..n {
-        for b in 0..n {
-            for r in 0..n {
-                let mut px = [0.0f32; 8];
-                let k = from_rgba_into(&fmt, [r as f32 * step, g as f32 * step, b as f32 * step, 1.0], &mut px);
-                data.extend_from_slice(&px[..k]);
+    let band = (BAKE_BAND_PIXELS / (n * n)).clamp(1, n);
+    let mut rows = Vec::with_capacity(n * n * n);
+    for b0 in (0..n).step_by(band) {
+        let b1 = (b0 + band).min(n);
+        let (w, h) = ((n * (b1 - b0)) as u32, n as u32);
+        let mut lattice = Document::new("lut", photocraft_doc::Size::new(w, h), ColorMode::Rgb, photocraft_color::SampleType::F32);
+        let fmt = lattice.pixel_format();
+        let mut data = Vec::with_capacity((w * h) as usize * fmt.channels());
+        for g in 0..n {
+            for b in b0..b1 {
+                for r in 0..n {
+                    let mut px = [0.0f32; 8];
+                    let k = from_rgba_into(&fmt, [r as f32 * step, g as f32 * step, b as f32 * step, 1.0], &mut px);
+                    data.extend_from_slice(&px[..k]);
+                }
+            }
+        }
+        let mut surf = Surface::new(fmt);
+        surf.write_region(Rect::new(0, 0, w as i32, h as i32), &data);
+        lattice.layers.push(Layer::new("Lattice", LayerContent::Raster(surf)));
+        for l in layers {
+            let mut a = (*l).clone();
+            // Masks and clipping are spatial; a LUT is the adjustment stack's colour mapping.
+            a.mask = None;
+            a.vector_mask = None;
+            a.clipped = false;
+            lattice.layers.push(a);
+        }
+        let out = photocraft_compose::flatten(&lattice);
+        for b in b0..b1 {
+            for g in 0..n {
+                for r in 0..n {
+                    let px = out.px[g * w as usize + (b - b0) * n + r];
+                    rows.push([px[0], px[1], px[2]]);
+                }
             }
         }
     }
-    let mut surf = Surface::new(fmt);
-    surf.write_region(Rect::new(0, 0, w as i32, h as i32), &data);
-    lattice.layers.push(Layer::new("Lattice", LayerContent::Raster(surf)));
-    for l in layers {
-        let mut a = (*l).clone();
-        // Masks and clipping are spatial; a LUT is the adjustment stack's colour mapping.
-        a.mask = None;
-        a.vector_mask = None;
-        a.clipped = false;
-        lattice.layers.push(a);
-    }
-    let out = photocraft_compose::flatten(&lattice);
-    // The shared writer owns CUBE syntax and precision; baking stays app-local.
-    let rows = (0..n).flat_map(|b| (0..n).flat_map(move |g| (0..n).map(move |r| (b, g, r)))).map(|(b, g, r)| {
-        let px = out.px[g * w as usize + b * n + r];
-        [px[0], px[1], px[2]]
-    });
-    craft_cms::lutfile::write_cube_export("Pigment", title, n, !matches!(depth, photocraft_color::SampleType::F32), rows)
+    rows
 }
 
 /// Backwards-compatible helper for exporting all visible top-level adjustments.
@@ -201,8 +222,9 @@ pub(super) fn color_lookup_tables(s: &mut Session, p: &Value) -> Result<Value> {
         None | Some(Value::Null) => 33,
         Some(v) => v.as_u64().ok_or_else(|| EngineError::BadParams { cmd: CMD.into(), msg: "size must be an integer".into() })?,
     };
-    if !(2..=craft_cms::lutfile::MAX_SIZE as u64).contains(&size) {
-        return Err(EngineError::BadParams { cmd: CMD.into(), msg: format!("size must be 2..={}", craft_cms::lutfile::MAX_SIZE) });
+    // Pigment: writing takes Photoshop's Maximum, 256 points (the 129 cap is craft-cms's for reading; F2).
+    if !(2..=super::lut_writers::MAX_EXPORT_SIZE as u64).contains(&size) {
+        return Err(EngineError::BadParams { cmd: CMD.into(), msg: format!("size must be 2..={}", super::lut_writers::MAX_EXPORT_SIZE) });
     }
     let scope = match p.get("scope") {
         None | Some(Value::Null) => "all",
@@ -229,16 +251,9 @@ pub(super) fn color_lookup_tables(s: &mut Session, p: &Value) -> Result<Value> {
         None
     };
     let layers = lut_layers(&d.doc, explicit.as_deref())?;
-    let count = layers.len();
     let title = p.get("title").and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| stem(&d.doc.name));
-    let cube = bake_cube_layers(size as usize, &title, &layers, d.doc.depth);
-    match p.get("path").and_then(Value::as_str) {
-        Some(path) => {
-            write_file(path, cube.as_bytes())?;
-            Ok(json!({"path": path, "size": size, "layerCount": count}))
-        }
-        None => Ok(json!({"cube": cube, "size": size, "layerCount": count})),
-    }
+    // Pigment: .3dl, .csp and ICC beside .cube, the copyright and lowercase extensions (F2).
+    super::lut_writers::export(CMD, p, size as usize, &title, &layers, &d.doc)
 }
 
 // ---------- guides ----------
