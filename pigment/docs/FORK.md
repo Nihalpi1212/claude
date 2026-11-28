@@ -1210,7 +1210,7 @@ missing file; Windows only).
 |---|---|
 | `crates/ui-egui/src/services.rs` | `Services::note_recent` (one field; `Default` is derived) |
 | `crates/ui-egui/src/app/files.rs` | `push_recent`: `crate::recent_os::note(self, path)`; `clear_recent`: `crate::recent_os::clear(self)` |
-| `crates/ui-egui/src/lib.rs` | `mod recent_os;` |
+| `crates/ui-egui/src/lib.rs` | `pub mod recent_os;` (`NoteRecentFn`, the field's type, lives there) |
 | `apps/photocraft/src/main.rs` | `mod os_recent;` |
 | `apps/photocraft/src/services.rs` | `native`: `let recovery = recovery_dir();` once, `note_recent: Some(crate::os_recent::service(recovery.clone()))`, `..recovery_services(recovery)` |
 | `apps/photocraft/Cargo.toml` | macOS features: `NSString`, `NSURL` (objc2-foundation), `NSDocumentController` (objc2-app-kit) |
