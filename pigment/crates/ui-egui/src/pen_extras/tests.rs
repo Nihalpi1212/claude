@@ -40,7 +40,7 @@ fn the_wheel_is_full_for_a_mouse_and_without_one() {
 }
 
 /// An app whose platform reports `extras` through the service, as the desktop app's does.
-fn app_with(extras: &Arc<Mutex<PenExtras>>) -> crate::PhotocraftApp {
+fn app_with(extras: &Arc<Mutex<PenExtras>>) -> Box<crate::PhotocraftApp> {
     let mut app = crate::PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
     app.session.execute("file.new", json!({"width": 120, "height": 80})).unwrap();
     app.session.execute("layer.new.layer", json!({})).unwrap();
@@ -105,7 +105,7 @@ fn the_stylus_wheel_is_the_strokes_eighth_column() {
     session.execute("file.new", json!({"width": 120, "height": 80, "background": "transparent"})).unwrap();
     session.execute("tools.setBrush", json!({ "brush": brush })).unwrap();
     session.execute("paint.stroke", json!({"points": p["points"], "color": "#000000"})).unwrap();
-    let alpha = |x: i32| -> f64 { session.execute("document.pixel", json!({"x": x, "y": 40})).unwrap()[3].as_f64().unwrap() };
+    let mut alpha = |x: i32| -> f64 { session.execute("document.pixel", json!({"x": x, "y": 40})).unwrap()[3].as_f64().unwrap() };
     let (low, high) = (alpha(20), alpha(90));
     assert!(high > low + 0.2, "the wheel drives the opacity: {low} → {high}");
 }
