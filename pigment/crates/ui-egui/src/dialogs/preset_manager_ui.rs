@@ -676,25 +676,59 @@ pub(crate) fn take(app: &mut PhotocraftApp, ctx: &egui::Context) {
     }
 }
 
-/// Reads the shown kind's rows again, keeping the selection where the rows still exist.
+/// Which preset row `i` of `rows` is: its group, its name, and how many rows before it have both
+/// (names can repeat, swatches' even in one group).
+fn identity(rows: &[Row], i: usize) -> Option<(String, String, usize)> {
+    let r = rows.get(i)?;
+    let n = rows[..i].iter().filter(|x| x.group == r.group && x.name == r.name).count();
+    Some((r.group.clone(), r.name.clone(), n))
+}
+
+/// Where the preset `id` is in `rows`, if it is still there.
+fn position(rows: &[Row], id: &(String, String, usize)) -> Option<usize> {
+    rows.iter().enumerate().filter(|(_, r)| r.group == id.0 && r.name == id.1).nth(id.2).map(|(i, _)| i)
+}
+
+/// Reads the shown kind's rows again. The selection follows its presets (a reorder, a move to
+/// another group, a rename or a change made elsewhere moves the rows), and drops those that are gone.
 fn refresh(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let Some(kind) = app.framework.dialogs.get_mut::<PresetManagerDialog>().map(|d| d.kind.clone()) else { return };
     let (rows, info) = load_rows(app, ctx, &kind);
     let rev = revision(app);
     if let Some(dialog) = app.framework.dialogs.get_mut::<PresetManagerDialog>() {
-        let n = rows.len();
+        let chosen: Vec<_> = dialog.selected.iter().filter_map(|&i| identity(&dialog.rows, i)).collect();
+        let anchor = dialog.anchor.and_then(|a| identity(&dialog.rows, a));
+        dialog.selected = chosen.iter().filter_map(|id| position(&rows, id)).collect();
+        dialog.anchor = anchor.and_then(|id| position(&rows, &id));
         dialog.rows = rows;
         dialog.info = info;
         dialog.rev = rev;
-        dialog.selected.retain(|&i| i < n);
-        dialog.anchor = dialog.anchor.filter(|&a| a < n);
+    }
+}
+
+/// After a rename or a move into another group, row `index` is called `name` in `group`: the
+/// selection keeps following it when the rows are read again.
+fn renamed(app: &mut PhotocraftApp, index: usize, group: Option<&str>, name: Option<&str>) {
+    if let Some(row) = app.framework.dialogs.get_mut::<PresetManagerDialog>().and_then(|d| d.rows.get_mut(index)) {
+        if let Some(g) = group {
+            row.group = g.to_string();
+        }
+        if let Some(n) = name {
+            row.name = n.to_string();
+        }
     }
 }
 
 fn run_ask(app: &mut PhotocraftApp, kind: &str, ask: Ask) -> Result<Value, String> {
     match ask {
         Ask::Kind => Ok(Value::Null),
-        Ask::Rename { index, text } => app.run(CMD, json!({"action": "rename", "kind": kind, "index": index, "newName": text})),
+        Ask::Rename { index, text } => {
+            let r = app.run(CMD, json!({"action": "rename", "kind": kind, "index": index, "newName": text}));
+            if r.is_ok() {
+                renamed(app, index, None, Some(text.trim()));
+            }
+            r
+        }
         Ask::Delete(indices) => {
             let r = app.run(CMD, json!({"action": "delete", "kind": kind, "indices": indices}));
             if r.is_ok()
@@ -708,7 +742,13 @@ fn run_ask(app: &mut PhotocraftApp, kind: &str, ask: Ask) -> Result<Value, Strin
         Ask::Move(mut q) => {
             q["action"] = json!("move");
             q["kind"] = json!(kind);
-            app.run(CMD, q)
+            let r = app.run(CMD, q.clone());
+            if r.is_ok()
+                && let Some(index) = q["index"].as_u64().and_then(|i| usize::try_from(i).ok())
+            {
+                renamed(app, index, q["toGroup"].as_str(), None);
+            }
+            r
         }
         Ask::Load => load(app, kind, false),
         Ask::Replace | Ask::Reset => {
