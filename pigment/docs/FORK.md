@@ -72,7 +72,7 @@ the ones that needed a choice):
 
 | String | Where | Decision |
 |---|---|---|
-| "PhotoCraft Basics", the new default actions set | `crates/engine/src/cmd/actions_edit_cmds/library_commands.rs` (`BASICS_SET`) | "Pigment Basics": a name people see; it is matched only against itself |
+| "PhotoCraft Basics", the new default actions set | `crates/engine/src/cmd/actions_edit_cmds/library_commands.rs` (`BASICS_SET`) | "Default Actions", Photoshop's and the JavaScript Pigment's name, with Photoshop's actions ([below](#default-actions-and-insert-conditional)); it was "Pigment Basics" until U2. To go back, set `BASICS_SET` to `"Pigment Basics"` (the rebrand script maps upstream's "PhotoCraft Basics" there) |
 | A CUBE LUT's creator line, `write_cube_export("PhotoCraft", …)` | `crates/engine/src/cmd/file_cmds/export.rs` | "Pigment", as 0.5.0 wrote |
 | "PhotoCraft Manages Colors" (print dialog) | `crates/ui-egui/src/dialogs/file_ui/print.rs` | "Pigment Manages Colors"; the stored id `photocraftManages` stays |
 | "{n} steps have no PhotoCraft equivalent yet" (Actions panel, `.atn` import) | `crates/ui-egui/src/panels/actions/files.rs`, `crates/engine/src/cmd/atn_cmds.rs` | "Pigment" |
@@ -124,7 +124,7 @@ The rebrand keeps every crate, package and module name (`photocraft-*`, `photocr
 | Log file | `logs/photocraft.log` (`photocraft.1.log` …), lock `photocraft.lock` | `logs/pigment.log` (`pigment.1.log` …), lock `pigment.lock` |
 | Native file extension | `.pcraft` | `.pigment` (MIME `application/x-pigment`, "Pigment Image"; macOS type `io.github.nihalpi1212.pigment.document`); `.pcraft` still opens and can still be saved |
 | Pigment 0.1–0.4 documents | — | a `.pigment` ZIP with `document.json` and `layers/<id>.png` is recognised by content and converted ([below](#documents-from-pigment-0104)) |
-| Shortcut set and actions | "PhotoCraft Defaults", "PhotoCraft Actions", "PhotoCraft Basics" | "Pigment Defaults", "Pigment Actions", "Pigment Basics" |
+| Shortcut set and actions | "PhotoCraft Defaults", "PhotoCraft Actions", "PhotoCraft Basics" | "Pigment Defaults", "Pigment Actions", "Default Actions" (Photoshop's set name; see the row above) |
 | MCP server | `serverInfo.name` `photocraft` | `pigment` (title and instructions say Pigment) |
 | Agent consent | the ArtCraft Launcher's switch, behind the suite's `AI-MCP` flag | Pigment's own preference ([below](#ai-agents-and-mcp)) |
 | Windows version resources | ProductName PhotoCraft, CompanyName Learning Machines LLC | ProductName Pigment, CompanyName "Pigment contributors", copyright naming both |
@@ -1216,6 +1216,54 @@ missing file; Windows only).
 | `apps/photocraft/Cargo.toml` | macOS features: `NSString`, `NSURL` (objc2-foundation), `NSDocumentController` (objc2-app-kit) |
 | `crates/tablet/src/windows.rs` | `SHAddToRecentDocs` (shell32), `add_recent_document`, `recent_document_wide`, one test |
 | `docs/parity/README.md`, `docs/user/guides/open-and-save-files.md` | the recent documents row; the recent-lists sentence |
+
+### Default Actions and Insert Conditional
+
+**Default Actions.** Photoshop and the JavaScript Pigment (`renderer/lib/actions/defaults.js`) start with a set
+called "Default Actions"; upstream's Reset Actions restores a set of two (Invert Colors, Desaturate) under its own
+name. `crates/engine/src/cmd/actions_default.rs` holds Photoshop's set as Pigment commands: the JavaScript app's ten
+(Vignette (selection), Frame Channel – 50 pixel, Wood Frame – 50 pixel, Cast Shadow (type), Water Reflection (type),
+Custom RGB to Grayscale, Molten Lead, Sepia Toning (layer), Quadrant Colors, Gradient Map) translated step by step,
+plus Make Clip Path (selection) and Mixer Brush Cloning Paint Setup, in Photoshop's order. Left out, with why, in the
+module's header: Save As Photoshop PDF (a played Save As writes its recorded path; the player does not open the Save
+As dialog), the Mixer Brush tool switch (choosing a tool is not a step), Cast Shadow's slant (Free Transform's
+relative form has no skew). The names stay English, as in Photoshop's shipped file: the framework's Actions panel draws
+action and set names itself, with no host hook to translate them.
+- **The set's name** is "Default Actions" (the owner's choice, Nov 28): `BASICS_SET` takes `actions_default::SET`.
+  The rebrand script needs no change (the line no longer holds a product name). To undo: `BASICS_SET =
+  "Pigment Basics"`, and the two upstream test edits below go back to naming the constant either way.
+- **Reset Actions…** restores the set (`library_commands::basics` builds its file from `default_file(set)`); Append
+  numbers it ("Default Actions 2") as before.
+- **First launch:** the desktop app calls `actions_default::seed_on_first_launch()` before it opens the preset store.
+  A store with neither `actions.json` nor the brush index (`index.json`) then opens with the set, and writes
+  `actions.json` at once, so a later brush change does not make the set vanish. A store whose `actions.json` exists
+  (Clear All Actions leaves it empty) is never seeded, and deleting the set is kept, as Photoshop does (the JavaScript
+  app re-created it). Tests, the CLI and the web app never set the flag, so upstream's
+  `a_store_directory_that_does_not_exist_yet_opens_without_warnings` still opens an empty list.
+
+**Insert Conditional…** The engine already played and round-tripped `actions.conditional` (33 conditions); the
+framework's Actions menu has no row for it. `crates/ui-egui/src/panels/actions/conditional.rs` adds one, an
+`ActionsExtraCommand` (`#[derive(CommandSet)]`, prefix `pigmentActionsPanel`: the derive takes a single lower-camel segment) spliced right after Insert Stop…, with
+Insert Stop…'s state. Its dialog, Conditional Action, has If Current (the conditions in Photoshop's and the JavaScript
+app's words), Then Play Action and Else Play Action (the panel's actions, or None), and inserts the step after the
+selected step or last in the selected action. Editing: the framework's list has no double-click on a step, so
+**Record Again** on a conditional step opens the dialog on its values (Record Again would otherwise replay the
+condition and the branch it picks on the document); OK deletes the step and inserts the new one at the same place,
+two list edits, no document history (the step's own include/dialog flags are reset; the others' are kept).
+Tests: `crates/engine/src/cmd/actions_default/tests.rs`, `crates/ui-egui/src/panels/actions/conditional_tests.rs`.
+
+| Upstream file | Hook |
+|---|---|
+| `crates/engine/src/cmd.rs` | `pub mod actions_default;` |
+| `crates/engine/src/cmd/actions_edit_cmds/library_commands.rs` | `BASICS_SET = crate::commands::actions_default::SET`; `basics` returns `actions_default::default_file(set)`; the `use` line loses `Action` and `ActionStep`; a comment's example name |
+| `crates/engine/src/cmd/actions_edit_cmds/library_commands/tests.rs` | `reset_appends_a_numbered_set_and_persists_it` and `pre_attachment_replacement_persists_without_reloading_disk_and_keeps_undo` name the set through `BASICS_SET` and the actions through `default_actions(BASICS_SET)` instead of "Pigment Basics", Invert Colors and Desaturate |
+| `crates/engine/src/cmd/actions_edit_cmds.rs` | `actions.reset`'s params text: "Restores the Default Actions set" |
+| `crates/engine/src/preset_store.rs` | `load_actions`: the missing-file arm returns `actions_default::first_launch(backend)` instead of an empty list |
+| `apps/photocraft/src/main.rs` | `actions_default::seed_on_first_launch()` before `open_dir_async` |
+| `crates/ui-egui/src/panels/actions.rs` | `pub(crate) mod conditional;`, `#[cfg(test)] mod conditional_tests;`, a `RecordAgain` arm guarded by `conditional::is_conditional` before upstream's |
+| `crates/ui-egui/src/panels/actions/menu.rs` | `panel_rows`: `conditional::splice`; `states`: `conditional::add_state`; `run_fired`: `conditional::run_fired` first |
+| `crates/ui-egui/src/panels/actions/menu_tests.rs` | `rows()` skips rows that are not the framework's `ActionsPanelCommands` (`filter_map`) instead of expecting every row to be one |
+| `crates/ui-egui/src/dialogs.rs` | `PARAM_FAMILIES`: `crate::actions::conditional::FAMILY` after Insert Stop's |
 
 ## Keeping the rebrand: `scripts/pigment-rebrand.py`
 

@@ -114,6 +114,8 @@ pub(crate) mod params {
         // Pigment: Save Adjustment Preset… (the Properties panel menu)
         crate::panels::adjustment_presets::SAVE_FAMILY,
         crate::actions::dialogs::INSERT_STOP_FAMILY,
+        // Pigment: Insert Conditional…
+        crate::actions::conditional::FAMILY,
         crate::actions::playback::FAMILY,
         crate::actions::menu_item::FAMILY,
         crate::smart_svg_ui::family(),

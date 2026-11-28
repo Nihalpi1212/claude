@@ -186,7 +186,7 @@ the entry is now. Where Pigment 0.5.0 has PhotoCraft's status, the column names 
 | Export Color Lookup Tables: `.3dl` and the others | Partial | Done in 0.6: `.3dl`, `.csp` and ICC besides `.cube` | F2 |
 | File Info: Origin, IPTC and IPTC Extension tabs | Partial | Done in 0.6: in XMP, and in IPTC-IIM (resource 1028, JPEG APP13) for the fields IIM holds | F1 |
 | EXIF reading (Camera Data) | Partial | Done in 0.6: Pigment 0.4's 17 tags, serial number, pixel size, orientation and GPS | F1 |
-| Actions: Default Actions and bundled sets | Partial | Missing (Photoshop `.atn` sets you own load and play) | U2 |
+| Actions: Default Actions and bundled sets | Partial | Done in 0.6: the Default Actions set (12 of Photoshop's 13: all but Save As Photoshop PDF) on first launch and from Reset Actions; Adobe's other sets are not included (Photoshop `.atn` sets you own load and play) | U2 |
 
 ### Tools (9)
 
@@ -208,9 +208,9 @@ the entry is now. Where Pigment 0.5.0 has PhotoCraft's status, the column names 
 |---|---|---|---|
 | Info panel: second colour readout modes | Partial | Partial: fixed CMYK | U1 |
 | Info panel: 16-bit and 32-bit values | Done | Missing | U1 |
-| Actions: Default Actions set | Approximate | Missing | U2 |
-| Actions: Clear All Actions, Reset Actions | Done | Missing | U2 |
-| Actions: Insert Conditional | Done | Partial: no dialog in the panel | U2 |
+| Actions: Default Actions set | Approximate | Done in 0.6: Pigment 0.4's ten actions plus Make Clip Path and Mixer Brush Cloning Paint Setup | U2 |
+| Actions: Clear All Actions, Reset Actions | Done | Done (PhotoCraft built them, with Replace Actions and an undo) | U2 |
+| Actions: Insert Conditional | Done | Done in 0.6: Insert Conditional… in the panel menu; Record Again edits a conditional | U2 |
 | Pen tablet: tilt, rotation, barrel wheel, eraser end, side buttons † | Done | Partial (as above) | U3 |
 | Tool presets: load, save, replace, reset, `.tpl` † | Done | Partial: no `.tpl` | P2 |
 | Select Similar Layers | Done | Done in 0.6: Select › Similar Layers, after Deselect Layers; adjustment and fill layers of any kind match | U4 |

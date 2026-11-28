@@ -17,9 +17,10 @@ fn app() -> Box<PhotocraftApp> {
 fn rows(app: &PhotocraftApp) -> Vec<Option<C>> {
     menu::panel_rows(app)
         .into_iter()
-        .map(|row| match row {
-            PanelRow::Command(command) => Some(C::from_ref(&command).expect("an Actions row")),
-            _ => None,
+        .filter_map(|row| match row {
+            // Pigment: the Pigment rows (Insert Conditional…) are not the framework's commands.
+            PanelRow::Command(command) => C::from_ref(&command).map(Some),
+            _ => Some(None),
         })
         .collect()
 }
