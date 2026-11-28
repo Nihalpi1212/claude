@@ -1300,7 +1300,7 @@ Tests: `crates/ui-egui/src/panels/info_readout_tests.rs`, `crates/engine/src/cmd
 | `crates/ui-egui/src/panels/registry.rs` | the `info` entry gets `rows`/`states`/`run` from `info_readout` |
 | `crates/ui-egui/src/dialogs.rs` | `PARAM_FAMILIES`: `crate::panels::info_readout::FAMILY` after Insert Conditional's |
 | `crates/engine/src/cmd/sampler_cmds.rs` | `deep_readout` (new fn), `"float"` in `point_json`, the list's params text, `#[cfg(test)] mod deep_tests;` |
-| `docs/parity/README.md` | the two Info panel rows |
+| `docs/parity/README.md`, `docs/user/guides/adjust-colors-with-adjustment-layers.md` | the two Info panel rows; "Read the colours in the Info panel" |
 
 ## Keeping the rebrand: `scripts/pigment-rebrand.py`
 

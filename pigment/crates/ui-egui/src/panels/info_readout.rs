@@ -23,7 +23,7 @@ use std::sync::Arc;
 use craft::behavior::ColumnWidth;
 use craft::cms::Transform;
 use craft::color_ui::ui::{InfoMeasure, InfoWords, SamplerReadout};
-use craft::ui::contract::{Bind, CommandSet, Show as _, ShowContainer as _};
+use craft::ui::contract::{Bind, CommandSet, Props as _, Show as _, ShowContainer as _};
 use craft::ui::display::Text;
 use craft::ui::layout_components::{Grid, Stack};
 use craft::ui::menu::PanelRow;
@@ -379,9 +379,12 @@ fn proof_readout(proof: &Proof, rgb: [f32; 3], space: &Space) -> Vec<(Name, Stri
     }
 }
 
+/// What a Proof Color transform is built from: the source and proof profiles' hashes, the intent, BPC.
+type ProofKey = (u64, u64, String, bool);
+
 thread_local! {
-    /// The last Proof Color transform and the (source, proof profile, intent, BPC) it was built for.
-    static PROOF: RefCell<Option<((u64, u64, String, bool), Arc<Transform>)>> = const { RefCell::new(None) };
+    /// The last Proof Color transform and what it was built from.
+    static PROOF: RefCell<Option<(ProofKey, Arc<Transform>)>> = const { RefCell::new(None) };
 }
 
 /// The active document's Proof Color transform: from its composite to View › Proof Setup's profile, with its intent
@@ -511,6 +514,7 @@ pub(crate) fn panel_lines(app: &mut PhotocraftApp, samplers: &[(SamplerReadout, 
 
 /// The grid of the active document as the panel shows it now, in English, or `None` while the framework's panel
 /// draws it: what the tests read.
+#[cfg(test)]
 pub(crate) fn lines(app: &mut PhotocraftApp) -> Option<Panel> {
     let o = custom(app)?;
     let samplers = info::sampler_rows(app);
@@ -704,7 +708,7 @@ pub(crate) fn fields_of(o: &InfoOptions, count: usize) -> DialogFields {
     f.set("second", o.second.key());
     f.set("sixteenBit", o.sixteen.key());
     for i in 0..count {
-        f.set(&sampler_key(i), o.sampler(i).map_or(PANEL_READOUTS, Mode::key));
+        f.set(sampler_key(i), o.sampler(i).map_or(PANEL_READOUTS, Mode::key));
     }
     f
 }
@@ -744,10 +748,7 @@ fn rows(count: usize) -> Vec<Param> {
             "sixteenBit",
             "",
             ParamKind::radio(
-                vec![
-                    ("32768".to_owned(), Label::from(tl!("16-bit values: 0–32768"))),
-                    ("65535".to_owned(), Label::from(tl!("16-bit values: 0–65535"))),
-                ],
+                vec![("32768".to_owned(), Label::from(tl!("16-bit values: 0–32768"))), ("65535".to_owned(), Label::from(tl!("16-bit values: 0–65535")))],
                 None,
             ),
         ),

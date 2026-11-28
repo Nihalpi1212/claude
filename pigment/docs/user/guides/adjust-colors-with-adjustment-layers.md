@@ -30,3 +30,12 @@ Click the adjustment layer in the **Layers** panel and edit its settings in **Pr
 ## Apply an adjustment straight to the pixels
 
 If you do not need to change it later, use **Image › Adjustments**, for example **Image › Adjustments › Curves…**. These change the pixels of the layer directly and are not kept as a separate layer.
+
+## Read the colours in the Info panel
+
+**Window › Info** shows the colour under the pointer in two readouts. To change what each one shows, open the panel
+menu and choose a mode under **First Color Readout** or **Second Color Readout**: Actual Color (the document's own
+channels), Proof Color (the numbers of **View › Proof Setup**'s profile), Grayscale, RGB Color, Web Color, HSB Color,
+CMYK Color, Lab Color, Total Ink or Opacity. **Panel Options…** in the same menu sets both readouts, whether 16-bit
+documents read 0–32768 or 0–65535, and a mode of its own for each Color Sampler. 32-bit documents show their values as
+decimals, above 1.0000 for colours brighter than white.

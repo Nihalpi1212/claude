@@ -181,7 +181,7 @@ fn a_16_bit_document_reads_0_to_32768_and_0_to_65535() {
     assert_eq!(value(&panel, 0), "16448");
     let ctx = app.ctx().clone();
     let id = open_options(&mut app);
-    app.framework.dialogs.set_json_field(id, "sixteenBit", &json!("65535")).unwrap();
+    app.framework.dialogs.set_json_field(&ctx, id, "sixteenBit", json!("65535")).unwrap();
     crate::dialogs::confirm(&mut app, &ctx, id).unwrap();
     assert_eq!(options(&app).sixteen, SixteenBit::Full);
     assert_eq!(value(&lines(&mut app).unwrap(), 0), "32896");
@@ -207,7 +207,7 @@ fn panel_options_sets_both_readouts_and_a_sampler_s_own_mode() {
     assert_eq!((fields.text("first"), fields.text("second"), fields.text("sixteenBit")), (Some("actual"), Some("cmyk"), Some("32768")));
     assert_eq!((fields.text("sampler0"), fields.text("sampler1")), (Some("panel"), Some("panel")));
     for (key, value) in [("first", "web"), ("second", "opacity"), ("sampler1", "hsb")] {
-        app.framework.dialogs.set_json_field(id, key, &json!(value)).unwrap();
+        app.framework.dialogs.set_json_field(&ctx, id, key, json!(value)).unwrap();
     }
     crate::dialogs::confirm(&mut app, &ctx, id).unwrap();
     let o = options(&app);

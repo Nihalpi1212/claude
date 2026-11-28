@@ -11,7 +11,7 @@ fn session_with(depth: u32, rgba: [f32; 4]) -> Session {
     s.edit("paint", |doc, _| {
         let surf = doc.layers[0].surface_mut().unwrap();
         let px = photocraft_raster::from_rgba(&surf.format(), rgba);
-        surf.fill_rect(Rect::new(3, 3, 1, 1), &px);
+        surf.fill_rect(Rect::new(3, 3, 4, 4), &px);
         Ok(())
     })
     .unwrap();
