@@ -115,7 +115,30 @@ No Break, Fractional Widths and System Layout in the layout (typography, part 2)
 - `docs/FORK.md`.
 
 ## Tests
-RESULTS_PLACEHOLDER
+All pass.
+- text: `pigment_type_tests` (5: Fractional Widths off puts every glyph and cluster on a whole pixel and keeps the
+  line within 0.5 px per glyph of the fractional width, on is today's layout glyph for glyph; box lines and
+  underlines whole; System Layout snaps glyphs and baselines, Sharp, None stays None, off restores the layout
+  exactly; "aaa bbb ccc" breaks after "aaa" with "bbb ccc" no-break; a no-break word wider than the box runs out of
+  it), `layout::whole_px::tests` (3). Whole `nextest -p photocraft-text -p photocraft-io --features
+  photocraft-io/heif --lib --tests`: 1848 passed.
+- ui-egui: `pigment_character_tests` (12: Superscript/Subscript after Small Caps in Photoshop's order; clicking
+  Subscript sets `baseline` and shows pressed, Superscript replaces it, a second click clears; the Language select
+  lists the table with the "(no dictionary)" mark and sets `en-GB`; new text takes the interface language; the
+  menu's rows in order, all engine commands, on the registry entry; No Break is one "No Break" history step and
+  checks; checkmarks follow the selection; Fractional Widths greyed and inert under System Layout; Reset Character;
+  without a type layer the toggles set defaults, no history step; the two chord proofs), `languages::tests` (3).
+  Whole suite `nextest --profile ci -j 3 -p photocraft-ui-egui --features photocraft-io/heif --lib --bins --tests`:
+  3849 passed, 6 skipped.
+- Checks: `cargo fmt --all -- --check`, `cargo clippy -p photocraft-text -p photocraft-io -p photocraft-ui-egui
+  --all-targets -- -D warnings`, `python3 scripts/pigment-rebrand.py --check`, `cargo xtask layers`,
+  `cargo xtask panel-commands`, `cargo xtask scorecard --check`: all OK. No engine command was added or changed
+  (B1's), so no panic hunt; no catalogue row, so no `xtask parity`.
+
+## Commits (pushed to `claude/pigment-photocraft`; CI on them not waited for)
+- `07d19b49` Pigment No Break, Fractional Widths and System Layout in the type layout (B2), text, io and interface
+- `d6fe4428` Pigment Character panel (B2), interface and docs: Superscript, Subscript and Language in the panel, the
+  Character panel menu, the interface language for new text
 
 ## Spec rows
 - Row 1/2 Superscript/Subscript: panel toggles (framework) wired to `baseline`, menu rows with checkmarks; the
