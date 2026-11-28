@@ -467,6 +467,7 @@ pub fn native(automation: Option<photocraft_automation::AuthorizedWorkspace>, wa
     let clip: Rc<RefCell<Option<arboard::Clipboard>>> = Rc::default();
     let clip_unreadable: Rc<Cell<bool>> = Rc::default();
     let automation = self::automation(automation);
+    let recovery = recovery_dir(); // Pigment: OS recent documents (shared with the recovery services)
     Services {
         import: Some(Box::new(|name: &str, bytes: &[u8], opts: &photocraft_io::ImportOptions| {
             crate::crash_guard::guard("Open", || {
@@ -560,6 +561,8 @@ pub fn native(automation: Option<photocraft_automation::AuthorizedWorkspace>, wa
         photoshop_shortcuts: Some(Box::new(|| crate::photoshop_settings::live_keyboard_shortcuts(&|k| std::env::var_os(k)))),
         // Pigment: Migrate Presets (P4)
         legacy_presets_dir: crate::app_dirs::legacy_pigment_dir(),
+        // Pigment: OS recent documents (U4)
+        note_recent: Some(crate::os_recent::service(recovery.clone())),
         load_gpu_memo: Some(Box::new(load_gpu_memo_text)),
         save_gpu_memo: Some(Box::new(|text: &str| {
             if text.len() > photocraft_ui_egui::gpu_memo::MAX_GPU_MEMO_BYTES {
@@ -578,7 +581,7 @@ pub fn native(automation: Option<photocraft_automation::AuthorizedWorkspace>, wa
         // Set by main, which starts loading the store before the window opens.
         preset_store: None,
         is_wayland: false,
-        ..recovery_services(recovery_dir())
+        ..recovery_services(recovery)
     }
 }
 

@@ -21,6 +21,7 @@ impl PhotocraftApp {
         r.truncate(cap);
         self.ui.recent_files = r.clone();
         self.session.prefs.edit(|p| p.file_handling.recent_files = r);
+        crate::recent_os::note(self, path); // Pigment: OS recent documents
         let mut cache = self.thumbnail_cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         cache.invalidate(path);
         for evicted_path in evicted {
@@ -32,6 +33,7 @@ impl PhotocraftApp {
     pub fn clear_recent(&mut self) {
         self.ui.recent_files.clear();
         self.session.prefs.edit(|p| p.file_handling.recent_files.clear());
+        crate::recent_os::clear(self); // Pigment: OS recent documents
         self.thumbnail_cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clear();
     }
 

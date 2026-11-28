@@ -1177,6 +1177,46 @@ placed after Deselect Layers, where Photoshop has it. Tests: `similar_layers_cmd
 | `crates/ui-egui/src/lib.rs` | `#[cfg(test)] mod similar_layers_tests;` (the menu placement test) |
 | `docs/parity/README.md` | the Select Similar Layers row |
 
+### The operating system's recent documents
+
+Files opened or saved go on the system's recent lists too, as the JavaScript Pigment's Electron
+`app.addRecentDocument` did: only while the in-app list is on (Recent File List Contains above 0), never for a file in
+the crash-recovery folder. `crates/ui-egui` stays platform-free: `Services::note_recent` (`Some(path)` notes a file,
+`None` clears Pigment's own entries) is called from `push_recent` and `clear_recent` through
+`crates/ui-egui/src/recent_os.rs`; `remove_recent` (one file off the Home screen) leaves the OS lists alone. The
+desktop's closure is `apps/photocraft/src/os_recent.rs`:
+- **Windows**: `SHAddToRecentDocs(SHARD_PATHW, path)`. The app crate forbids `unsafe`, so the call is
+  `photocraft_tablet::windows::add_recent_document`, in the workspace's one `unsafe` helper crate (marked section at
+  the end of `crates/tablet/src/windows.rs`). No per-app clear exists (`SHAddToRecentDocs(0, NULL)` clears every
+  app's), so Clear Recent leaves Windows' list alone. The Jump List needs the shell to tie the process to an
+  AppUserModelID; Pigment keeps Windows' implicit one (`app_icon.rs`), so Recent gets the entries and the Jump List may
+  not: to check on Windows.
+- **macOS**: `NSDocumentController::sharedDocumentController(mtm).noteNewRecentDocumentURL(..)`, safe objc2 calls on
+  the main thread (skipped off it). No clear (AppKit's `clearRecentDocuments:` clears the app's whole list, which is
+  Pigment's own, but it is an `unsafe` binding; left out).
+- **Linux and the BSDs**: a bookmark in `$XDG_DATA_HOME/recently-used.xbel` (default `~/.local/share`), GLib's
+  layout: `mime:mime-type`, application `Pigment`, exec `'pigment %u'`, `added`/`modified`/`visited`. Edited as text so
+  every other application's bookmark stays byte for byte; a file already listed gets fresh times and Pigment's entry
+  beside the others'; at most 500 bookmarks name Pigment; written with `photocraft_format::atomic_write` under an
+  `flock` on the file, on a thread of its own. A file that doesn't declare GLib's namespaces, is over 32 MiB or can't be
+  written is left alone, quietly. Clear Recent takes Pigment's bookmarks out (only Pigment's entry when another app
+  also lists the file). In the Flatpak, `$XDG_DATA_HOME` is the sandbox's own unless the manifest grants
+  `xdg-data/recently-used.xbel`.
+Tests: `crates/ui-egui/src/recent_os.rs` (the hook is called, and not with the list off), `apps/photocraft/src/os_recent/tests.rs`
+(the xbel writer on temporary folders, parsed back by craft-xml), `crates/tablet/src/windows.rs` (the wide path, a
+missing file; Windows only).
+
+| Upstream file | Hook |
+|---|---|
+| `crates/ui-egui/src/services.rs` | `Services::note_recent` (one field; `Default` is derived) |
+| `crates/ui-egui/src/app/files.rs` | `push_recent`: `crate::recent_os::note(self, path)`; `clear_recent`: `crate::recent_os::clear(self)` |
+| `crates/ui-egui/src/lib.rs` | `mod recent_os;` |
+| `apps/photocraft/src/main.rs` | `mod os_recent;` |
+| `apps/photocraft/src/services.rs` | `native`: `let recovery = recovery_dir();` once, `note_recent: Some(crate::os_recent::service(recovery.clone()))`, `..recovery_services(recovery)` |
+| `apps/photocraft/Cargo.toml` | macOS features: `NSString`, `NSURL` (objc2-foundation), `NSDocumentController` (objc2-app-kit) |
+| `crates/tablet/src/windows.rs` | `SHAddToRecentDocs` (shell32), `add_recent_document`, `recent_document_wide`, one test |
+| `docs/parity/README.md`, `docs/user/guides/open-and-save-files.md` | the recent documents row; the recent-lists sentence |
+
 ## Keeping the rebrand: `scripts/pigment-rebrand.py`
 
 Most of the rebrand is mechanical and done by [`scripts/pigment-rebrand.py`](../scripts/pigment-rebrand.py):
