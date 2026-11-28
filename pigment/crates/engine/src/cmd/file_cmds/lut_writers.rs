@@ -159,8 +159,8 @@ pub(super) fn export(cmd: &str, p: &Value, size: usize, title: &str, layers: &[&
     Ok(out)
 }
 
-/// The file of each format: `path` itself when it is the one format's file, else `path` without a
-/// LUT extension plus each format's, in lowercase or uppercase.
+/// The file of each format: `path` itself when it is the one format's file (and lowercase is on),
+/// else `path` without a LUT extension plus each format's, in lowercase or uppercase.
 fn file_paths(path: &str, formats: &[LutFormat], lowercase: bool) -> Vec<String> {
     let ext = |f: LutFormat| if lowercase { f.id().to_owned() } else { f.id().to_ascii_uppercase() };
     let name_start = path.rfind(['/', '\\']).map_or(0, |i| i + 1);
@@ -172,8 +172,11 @@ fn file_paths(path: &str, formats: &[LutFormat], lowercase: bool) -> Vec<String>
         }
         _ => (path, None),
     };
+    // One format and a path with its extension: the path as given (upstream's behaviour), unless
+    // Use lowercase file extensions is off, which asks for the uppercase one.
     if let ([only], Some(current)) = (formats, current)
         && only.id().eq_ignore_ascii_case(current)
+        && lowercase
     {
         return vec![path.to_owned()];
     }
