@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 
 /// The `note_recent` service: `Some(path)` notes a file, `None` clears Pigment's own entries where
 /// the platform allows (Linux; Windows and macOS have only an every-app clear, never called).
-pub fn service(recovery: Option<PathBuf>) -> Box<dyn Fn(Option<&Path>) + Send + Sync> {
+pub fn service(recovery: Option<PathBuf>) -> photocraft_ui_egui::recent_os::NoteRecentFn {
     Box::new(move |path: Option<&Path>| match path {
         Some(p) if !in_folder(p, recovery.as_deref()) => note(p),
         Some(_) => {}
@@ -308,11 +308,9 @@ pub mod xbel {
                 if let Some(at) = body.find("</bookmark:applications>") {
                     let at = line_start(&body, at);
                     body.insert_str(at, &format!("          {element}\n"));
-                } else if let Some(at) = body.find("</metadata>") {
-                    let at = line_start(&body, at);
-                    body.insert_str(at, &format!("        <bookmark:applications>\n          {element}\n        </bookmark:applications>\n"));
                 } else {
-                    return None;
+                    let at = line_start(&body, body.find("</metadata>")?);
+                    body.insert_str(at, &format!("        <bookmark:applications>\n          {element}\n        </bookmark:applications>\n"));
                 }
             }
         }
@@ -481,7 +479,7 @@ pub mod xbel {
     }
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod tests;
 
 #[cfg(test)]

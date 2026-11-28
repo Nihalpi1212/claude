@@ -608,7 +608,7 @@ pub struct Services {
     /// Pigment: the operating system's recent documents (U4). `Some(path)` notes a file opened or
     /// saved (Windows Recent and Jump List, macOS Recent Items, the XDG `recently-used.xbel`),
     /// `None` clears Pigment's own entries where the platform can. `None` in the web build and tests.
-    pub note_recent: Option<Box<dyn Fn(Option<&std::path::Path>) + Send + Sync>>,
+    pub note_recent: Option<crate::recent_os::NoteRecentFn>,
     /// The native window is connected directly to a Wayland compositor.
     pub is_wayland: bool,
     /// On Wayland, the shell command that starts this install under XWayland, where native file

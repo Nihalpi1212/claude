@@ -61,7 +61,7 @@ pub mod panels;
 pub mod preset_files_ui;
 pub mod proxy;
 // Pigment: the operating system's recent documents.
-mod recent_os;
+pub mod recent_os;
 pub mod render_path;
 // Pigment: Select › Similar Layers.
 #[cfg(test)]

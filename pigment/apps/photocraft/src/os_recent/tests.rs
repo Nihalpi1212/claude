@@ -1,3 +1,6 @@
+// The xbel writer is built on Linux and the BSDs, and on macOS for these tests.
+#![cfg(unix)]
+
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
@@ -96,8 +99,9 @@ fn others_bookmarks_stay_byte_for_byte_and_a_second_note_updates_ours() {
     xbel::note_in(&file, Path::new("/home/ann/work/cover.tif"), T2).unwrap();
     let text = std::fs::read_to_string(&file).unwrap();
     // Everything before our bookmark is the other list, unchanged.
-    let ours = text.find("<bookmark href=\"file:///home/ann/work/cover.tif\"").unwrap();
-    assert_eq!(&text[..ours], &OTHERS[..OTHERS.rfind("</xbel>").unwrap()]);
+    let others = &OTHERS[..OTHERS.rfind("</xbel>").unwrap()];
+    assert_eq!(&text[..others.len()], others);
+    assert!(text[others.len()..].starts_with("  <bookmark href=\"file:///home/ann/work/cover.tif\""));
     assert!(text.ends_with("</bookmark>\n</xbel>\n"));
     // One bookmark, not two: added stays, the times and the count move.
     assert_eq!(text.matches("cover.tif").count(), 1);

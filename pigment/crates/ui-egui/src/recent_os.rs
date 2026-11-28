@@ -8,6 +8,10 @@
 
 use crate::PhotocraftApp;
 
+/// [`crate::Services::note_recent`]: `Some(path)` notes a file opened or saved, `None` clears
+/// Pigment's own entries where the platform can.
+pub type NoteRecentFn = Box<dyn Fn(Option<&std::path::Path>) + Send + Sync>;
+
 /// A file was added to File › Open Recent: tell the OS too, while the in-app list is on
 /// (Preferences › File Handling › Recent File List Contains above 0), as Photoshop does.
 pub(crate) fn note(app: &PhotocraftApp, path: &str) {
@@ -33,8 +37,10 @@ mod tests {
 
     use crate::{PhotocraftApp, Services};
 
-    fn app() -> (Box<PhotocraftApp>, Arc<Mutex<Vec<Option<PathBuf>>>>) {
-        let calls: Arc<Mutex<Vec<Option<PathBuf>>>> = Arc::default();
+    type Calls = Arc<Mutex<Vec<Option<PathBuf>>>>;
+
+    fn app() -> (Box<PhotocraftApp>, Calls) {
+        let calls: Calls = Arc::default();
         let seen = calls.clone();
         let services = Services { note_recent: Some(Box::new(move |p| seen.lock().unwrap().push(p.map(PathBuf::from)))), ..Default::default() };
         (PhotocraftApp::new(photocraft_engine::Session::new(), services), calls)
