@@ -27,9 +27,10 @@ wintab::packet! {
     struct PressurePacket { status, buttons, x, y, normal_pressure }
 }
 
-// Pigment (U3): an airbrush (orientation axes and a finger wheel) also reports the wheel.
+// Pigment (U3): an airbrush (orientation axes and a finger wheel) also reports the wheel. The
+// fields follow PKTDEF.H: the tangent pressure comes before the orientation.
 wintab::packet! {
-    struct WheelPacket { status, buttons, x, y, normal_pressure, orientation, tangent_pressure }
+    struct WheelPacket { status, buttons, x, y, normal_pressure, tangent_pressure, orientation }
 }
 
 /// The open context. A device that reports orientation gets tilt and rotation; a pressure-only
