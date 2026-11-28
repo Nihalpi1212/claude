@@ -44,12 +44,12 @@ fn every_step_is_a_registered_command_with_object_params() {
     }
 }
 
-/// A 400×300 RGB document with a mid-grey Background, plus what the action's name asks for: a
+/// A 400×300 RGB document with an orange Background, plus what the action's name asks for: a
 /// type layer, a selection.
 fn fixture(action: &str) -> Session {
     let mut s = Session::new();
     s.execute("file.new", json!({"width": 400, "height": 300})).unwrap();
-    s.execute("edit.fill", json!({"contents": "color", "color": "#808080"})).unwrap();
+    s.execute("edit.fill", json!({"contents": "color", "color": "#c06030"})).unwrap();
     if action.ends_with("(type)") {
         s.execute("type.create", json!({"x": 60, "y": 160, "text": "Pigment", "size": 64, "color": "#204080"})).unwrap();
     }
@@ -112,7 +112,9 @@ fn the_actions_do_what_their_names_say() {
     let paths = s.execute("path.list", json!({})).unwrap();
     assert_eq!(paths["clippingPath"]["name"].as_str().or(paths["clippingPath"].as_str()), Some("Path 1"), "{paths}");
 
-    for (action, added) in [("Gradient Map", 1), ("Sepia Toning (layer)", 2), ("Cast Shadow (type)", 1), ("Water Reflection (type)", 1), ("Mixer Brush Cloning Paint Setup", 1)] {
+    for (action, added) in
+        [("Gradient Map", 1), ("Sepia Toning (layer)", 2), ("Cast Shadow (type)", 1), ("Water Reflection (type)", 1), ("Mixer Brush Cloning Paint Setup", 1)]
+    {
         let mut s = fixture(action);
         s.execute("actions.reset", json!({"confirm": true, "mode": "replace"})).unwrap();
         let before = layer_names(&s).len();
@@ -159,18 +161,41 @@ fn reset_restores_default_actions_and_append_keeps_the_users_actions() {
     assert_eq!(s.actions.list.actions().len(), 1 + 2 * PHOTOSHOP_ORDER.len());
 }
 
+/// The steps Pigment has no `.atn` event for yet: Save Actions… leaves them out with Skip
+/// Unsupported. Every other step round-trips.
+const NOT_IN_ATN: [&str; 10] = [
+    "select.saveSelection",
+    "filter.render.fibers",
+    "layer.layerStyle.bevelEmboss",
+    "layer.layerStyle.innerShadow",
+    "layer.layerStyle.dropShadow",
+    "select.toWorkPath",
+    "path.rename",
+    "path.clippingPath.set",
+    "brush.mixer.sampleAllLayers",
+    "brush.mixer.autoLoad",
+];
+
 #[test]
 fn the_set_saves_as_atn_and_loads_back() {
     let mut s = Session::new();
     s.execute("actions.reset", json!({"confirm": true, "mode": "replace"})).unwrap();
-    let saved = s.execute("actions.save", json!({"set": SET})).unwrap();
+    let not_in_atn = |id: &str| NOT_IN_ATN.contains(&id) || id == "brush.mixer.autoClean";
+    let saved = s.execute("actions.save", json!({"set": SET, "skipUnsupported": true})).unwrap();
+    let skipped: Vec<&str> = saved["skipped"].as_array().unwrap().iter().map(|step| step["id"].as_str().unwrap()).collect();
+    assert!(skipped.iter().all(|id| not_in_atn(id)), "{skipped:?}");
     let data = saved["data"].as_str().unwrap().to_owned();
     let mut other = Session::new();
     other.execute("actions.load", json!({"data": data})).unwrap();
     assert_eq!(names(other.actions.list.actions()), PHOTOSHOP_ORDER);
     for (loaded, original) in other.actions.list.actions().iter().zip(s.actions.list.actions()) {
-        assert_eq!(loaded.steps.len(), original.steps.len(), "{}", original.name);
+        let kept: Vec<&str> = original.steps.iter().map(|step| step.command.as_str()).filter(|id| !not_in_atn(id)).collect();
+        let back: Vec<&str> = loaded.steps.iter().map(|step| step.command.as_str()).collect();
+        assert_eq!(back, kept, "{}", original.name);
     }
+    // The eight actions without such steps save as they are.
+    let whole = default_actions(SET).into_iter().filter(|action| action.steps.iter().all(|step| !not_in_atn(&step.command))).count();
+    assert_eq!(whole, 8);
 }
 
 #[test]

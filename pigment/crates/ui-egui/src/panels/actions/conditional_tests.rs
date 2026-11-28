@@ -4,7 +4,7 @@ use craft::automation::ui::actions::{ActionSelection, ActionsPanelCommands as C}
 use craft::ui::dialog::DialogId;
 use craft::ui::menu::PanelRow;
 use craft::ui::patterns::form_dialogs::HostedParamDialog;
-use craft::ui::runtime::commands::{CommandRef, CommandSet as _, CommandState};
+use craft::ui::runtime::commands::{CommandRef, CommandState};
 use photocraft_engine::actions_cmds::ActionStep;
 
 use conditional::ActionsExtraCommand;
@@ -82,6 +82,10 @@ fn the_row_follows_insert_stop_with_its_state() {
     let stop = menu::states(&app).into_iter().find(|(row, _)| *row == CommandRef::from(C::InsertStop)).unwrap().1;
     assert_eq!(state(&app), stop);
     app.run("actions.stop", json!({})).unwrap();
+    // A click on the row goes through the menus' one dispatcher, as the framework's rows do.
+    let reply = control(&mut app, "ui.menu.invoke", json!({"id": conditional_row().id}));
+    assert_ne!(reply["ok"], false, "{reply}");
+    assert!(app.dialog_open(), "the row opened the Conditional Action dialog: {reply}");
 }
 
 #[test]
@@ -122,7 +126,8 @@ fn insert_conditional_adds_the_step_after_the_selected_step() {
 #[test]
 fn record_again_on_a_conditional_step_edits_it_in_place() {
     let mut app = app();
-    app.run("actions.insert", json!({"action": 0, "at": 1, "id": "actions.conditional", "params": {"if": "isTypeLayer", "then": "Landscape", "else": null}})).unwrap();
+    app.run("actions.insert", json!({"action": 0, "at": 1, "id": "actions.conditional", "params": {"if": "isTypeLayer", "then": "Landscape", "else": null}}))
+        .unwrap();
     app.run("actions.toggle", json!({"action": 0, "step": 2, "enabled": false})).unwrap();
     let history = app.session.active().unwrap().history.past_len();
     app.ui.actions.panel.selected = Some(ActionSelection::Step(0, 1));

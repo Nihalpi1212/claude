@@ -406,7 +406,9 @@ fn apply_event(app: &mut PhotocraftApp, event: ActionsEvent) -> Result<(), Strin
         ActionsEvent::Reorder(ActionMove { row, place, .. }) => reorder(app, row, place)?,
         ActionsEvent::Toggle(SweepStep::Flip(edit) | SweepStep::Restore(edit)) => toggle_cell(app, &edit)?,
         // Pigment: Record Again on a conditional step edits it in the Conditional Action dialog.
-        ActionsEvent::RecordAgain { action, step, .. } if conditional::is_conditional(app, action, step) => conditional::open(app, Some((action, step))).map(drop)?,
+        ActionsEvent::RecordAgain { action, step, .. } if conditional::is_conditional(app, action, step) => {
+            conditional::open(app, Some((action, step))).map(drop)?
+        }
         ActionsEvent::RecordAgain { action, step, .. } => record_again::open(app, action, step).map(drop)?,
         ActionsEvent::InsertMenuItem => {
             let (action, at) = insert_target(app)?;

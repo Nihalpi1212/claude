@@ -18,6 +18,11 @@
 //!   has no skew, and a matrix would depend on where the layer sits. The shadow is flattened
 //!   onto the text's base line instead.
 //!
+//! Save Actions… writes the set to `.atn` with Skip Unsupported only: the layer-style steps, Save
+//! Selection, Fibers with its own colours, Make Work Path, the path rename, Clipping Path and the
+//! Mixer Brush options have no `.atn` event in Pigment yet (`atn_cmds/events.rs`), so four actions
+//! lose those steps there.
+//!
 //! Where the set comes from: Reset Actions… (`actions.reset`, `library_commands::basics`) and, in
 //! the desktop app only ([`seed_on_first_launch`]), a new preset store on first launch. It is
 //! never re-created when the user deletes it (Photoshop does not either; the JavaScript app did).
@@ -94,6 +99,7 @@ pub fn default_actions(set: &str) -> Vec<Action> {
                 plain("select.all"),
                 step("edit.stroke", json!({"width": 50, "color": "#8a5a2b", "location": "inside"})),
                 step("select.loadSelection", json!({"channel": "transparency"})),
+                // The wood's two colours are the step's own, so the swatches stay as they were.
                 step("filter.render.fibers", json!({"variance": 20, "strength": 30, "seed": 3, "foreground": "#5b3716", "background": "#b07a3f"})),
                 plain("select.deselect"),
                 step("layer.layerStyle.bevelEmboss", json!({"style": "inner", "size": 14, "depth": 180, "soften": 1})),

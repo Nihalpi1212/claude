@@ -1243,7 +1243,7 @@ action and set names itself, with no host hook to translate them.
 
 **Insert Conditional…** The engine already played and round-tripped `actions.conditional` (33 conditions); the
 framework's Actions menu has no row for it. `crates/ui-egui/src/panels/actions/conditional.rs` adds one, an
-`ActionsExtraCommand` (`#[derive(CommandSet)]`, prefix `actionsPanel.pigment`) spliced right after Insert Stop…, with
+`ActionsExtraCommand` (`#[derive(CommandSet)]`, prefix `pigmentActionsPanel`: the derive takes a single lower-camel segment) spliced right after Insert Stop…, with
 Insert Stop…'s state. Its dialog, Conditional Action, has If Current (the conditions in Photoshop's and the JavaScript
 app's words), Then Play Action and Else Play Action (the panel's actions, or None), and inserts the step after the
 selected step or last in the selected action. Editing: the framework's list has no double-click on a step, so

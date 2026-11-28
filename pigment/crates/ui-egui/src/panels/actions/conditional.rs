@@ -29,7 +29,7 @@ const KEY: &str = "actionsPanel.insertConditional";
 
 /// The Actions panel menu's Pigment rows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, CommandSet)]
-#[command(prefix = "actionsPanel.pigment", scope = "app")]
+#[command(prefix = "pigmentActionsPanel", scope = "app")]
 pub(crate) enum ActionsExtraCommand {
     /// Open the Conditional Action dialog for a step after the selected one.
     #[command(label = "Insert Conditional…")]
@@ -172,10 +172,9 @@ fn step_of(result: &ParamResult) -> ActionStep {
 /// edits, not document history.
 fn run(app: &mut PhotocraftApp, _ctx: &egui::Context, result: ParamResult) {
     let captured = params::captured(app, KEY);
-    let (Some(action), Some(at)) = (
-        captured["action"].as_u64().and_then(|n| usize::try_from(n).ok()),
-        captured["at"].as_u64().and_then(|n| usize::try_from(n).ok()),
-    ) else {
+    let (Some(action), Some(at)) =
+        (captured["action"].as_u64().and_then(|n| usize::try_from(n).ok()), captured["at"].as_u64().and_then(|n| usize::try_from(n).ok()))
+    else {
         return super::dialogs::report(app, tl!("The dialog names no action").to_string());
     };
     let step = step_of(&result);
