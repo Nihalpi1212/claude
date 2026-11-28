@@ -25,6 +25,7 @@ use skrifa::raw::types::Tag;
 use crate::fonts::FontDb;
 
 mod area;
+mod compose; // Pigment (B3): the Single-line and Every-line composers, hyphenation
 mod lines;
 mod navigate;
 mod paragraphs;

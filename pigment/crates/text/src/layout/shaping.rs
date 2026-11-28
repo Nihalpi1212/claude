@@ -209,6 +209,8 @@ pub(super) struct Para<'a> {
     pub(super) tab_px: f32,
     /// Line-breaking passes left for this paragraph's area type (see `break_area`).
     area_budget: Cell<usize>,
+    /// Pigment (B3): the paragraph's hyphenation points, found once (`compose`).
+    pub(super) hyphens: std::cell::OnceCell<super::compose::Hyphens>,
 }
 
 impl<'a> Para<'a> {
@@ -256,6 +258,7 @@ impl<'a> Para<'a> {
             break_scale: 1.0,
             tab_px: DEFAULT_TAB_STOP_PT * k,
             area_budget: Cell::new(MAX_AREA_PASSES),
+            hyphens: Default::default(), // Pigment (B3)
         };
         para.break_scale = para.horizontal_break_scale();
         para.roman = para.roman_ranges();
@@ -344,6 +347,7 @@ impl<'a> Para<'a> {
         for range in hangul_runs(&self.ptext) {
             b.push(StyleProperty::WordBreak(parley::WordBreak::KeepAll), range);
         }
+        self.push_hyphen_words(&mut b); // Pigment (B3): hyphenated words may break inside
         for (&at, &spacing) in self.tabs.iter().zip(tab_spacing) {
             b.push(StyleProperty::LetterSpacing(spacing), at..at + 1);
         }
@@ -397,7 +401,10 @@ impl<'a> Para<'a> {
             layout.set_text_indent(self.first_indent / self.break_scale, parley::IndentOptions::default());
         }
         let Some(a) = &env.area else {
-            layout.break_all_lines(self.avail.map(|a| a / self.break_scale));
+            if !self.compose_lines(layout) {
+                // Pigment (B3): the composers break box text (`compose`), else parley's greedy.
+                layout.break_all_lines(self.avail.map(|a| a / self.break_scale));
+            }
             return (Vec::new(), false);
         };
         // Plan every row with the paragraph's real line metrics (its tallest font and
