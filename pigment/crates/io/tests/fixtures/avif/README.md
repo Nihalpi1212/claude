@@ -22,12 +22,15 @@ family and licence, MIT OR Apache-2.0); their README gives the commands (libaom 
 `alpha-source.rgba` (the quadrants with alpha falling from 255 at the left to 0 at the right, the top
 row opaque), `card-source.gbrp10le` (a 33×17 10-bit card: R = x·1023/32, G = y·1023/16,
 B = (31x + 51y) mod 1024, planar G, B, R, little-endian) and `tile1.rgb`…`tile3.rgb` (the quadrant
-source with its channels permuted (1, 2, 0), (2, 0, 1) and (2, 1, 0)) were written by a few lines of
+source with its channels permuted (1, 2, 0), (2, 0, 1) and (2, 1, 0)), and the split of `alpha-source.rgba` below, were written by a few lines of
 Python; only the AVIFs and the two sources the tests compare with are committed.
 
-- `quad-444-alpha-lossless.avif`: lossless 8-bit 4:4:4 GBR colour with a lossless monochrome alpha
-  item (`auxl`, `auxC` `urn:mpeg:mpegB:cicp:systems:auxiliary:alpha`):
-  `ffmpeg -f rawvideo -pix_fmt rgba -s 33x17 -i alpha-source.rgba -filter_complex "[0:v]format=gbrap,split[c][a];[c]format=gbrp[c2];[a]alphaextract,format=gray[a2]" -map "[c2]" -map "[a2]" -c:v libaom-av1 -crf 0 -still-picture 1 -colorspace:v:0 rgb -color_range pc quad-444-alpha-lossless.avif`
+- `quad-444-alpha-lossless.avif`: lossless 8-bit 4:4:4 GBR colour (the quadrants) with a lossless
+  monochrome alpha item (`auxl`, `auxC` `urn:mpeg:mpegB:cicp:systems:auxiliary:alpha`). The colour
+  (`alpha-colour.rgb`, equal to `quad-source.rgb`) and the alpha plane (`alpha-plane.gray`) are
+  `alpha-source.rgba` split, given to FFmpeg as two inputs so that no filter converts the alpha
+  (an `alphaextract` → `gray` chain moved 247 to 248):
+  `ffmpeg -f rawvideo -pix_fmt rgb24 -s 33x17 -i alpha-colour.rgb -f rawvideo -pix_fmt gray -s 33x17 -i alpha-plane.gray -map 0:v -map 1:v -c:v libaom-av1 -crf 0 -still-picture 1 -pix_fmt:v:0 gbrp -colorspace:v:0 rgb -color_range pc quad-444-alpha-lossless.avif`
 - `card-444-10bit-lossless.avif`: lossless 10-bit 4:4:4 GBR, full range:
   `ffmpeg -f rawvideo -pix_fmt gbrp10le -s 33x17 -i card-source.gbrp10le -c:v libaom-av1 -crf 0 -still-picture 1 -pix_fmt gbrp10le -colorspace rgb -color_range pc card-444-10bit-lossless.avif`
 - `tile1.avif`, `tile2.avif`, `tile3.avif`: the permuted quadrants, lossless 8-bit 4:4:4 GBR, the input

@@ -1018,6 +1018,36 @@ another PhotoCraft presets or preferences JSON; that still works.
 | `crates/ui-egui/src/prefs/prefs_ui/dialogs.rs` | `invoke`: the menu item without params opens `migrate_presets_ui::open` |
 | `crates/ui-egui/src/prefs/prefs_ui/presets_io_tests.rs` (P1b's) | the damaged bundle's status names "not a Pigment bundle" |
 
+### Opening AVIF
+
+File › Open reads AVIF, as the JavaScript Pigment did through Chromium (8-bit sRGB only there). Pigment has no
+reader of its own: craft-image-codecs at the pinned craft-libs revision has a full AVIF decoder (`avif-decode`:
+the primary `av01` item or a `grid`, 8/10/12-bit, 4:2:0/4:2:2/4:4:4/monochrome, alpha, `clap`/`irot`/`imir`,
+ICC and `nclx`, Exif and XMP; PQ and HLG as linear 32-bit float; bounded for hostile files) over craft-video's
+pure-Rust AV1 decoder, which upstream leaves off. Pigment switches it on.
+
+- **io**: `crates/io/Cargo.toml` feature `avif = ["photocraft-codecs/avif-decode"]`, in `default`, so the app, the
+  CLI, the web build and every test build have it (on wasm32 the decoder compiles to nothing and AVIF stays
+  unreadable). No route is added: AVIF is not a document format, so it takes the flat path, where
+  `codecs::detect` names it from its `ftyp` brand, `decode_limits` bounds it and `cicp_profile`/`hdr_fallback`
+  tag its colour as for HEIF. The batch folder listing (`file_cmds/paths.rs` `openable_name`) and Batch's "same
+  format" (`batch_run.rs` `same_format`: read only, so PSD) follow the codec's caps by themselves. Writing AVIF is
+  out of scope (the JavaScript app could not either).
+- **Interface**: `.avif` in File › Open's All Formats and an "AVIF" file type.
+- **Tests**: `crates/io/tests/it/avif.rs` over `crates/io/tests/fixtures/avif/` (its README names the encoder,
+  FFmpeg 6.1 with libaom, the commands, and `make-containers.py`, which builds the grid, `irot` + XMP and
+  oversized-`ispe` containers FFmpeg cannot write).
+
+| Upstream file | Hook |
+|---|---|
+| `crates/io/Cargo.toml` | `default = ["avif"]`, `avif = ["photocraft-codecs/avif-decode"]` |
+| `Cargo.toml` (workspace) | `[workspace.metadata.cl.expected_features]`: `photocraft-io` gains `avif` and `default` |
+| `Cargo.lock` | `craft-video` and `craft-media` (craft-libs, same revision) |
+| `crates/ui-egui/src/file_dialog/filters.rs` | `"avif"` in `OPEN_EXTS`; `("AVIF", &["avif"])` in `OPEN_FILTERS` |
+| `crates/engine/src/cmd/file_cmds/tests.rs` | `folder_listing_takes_every_format_photocraft_opens`: `a.avif` is openable when `Format::Avif.caps().read` (was: never) |
+| `crates/io/tests/it/main.rs` | `mod avif;` |
+| `docs/file-format-parity.md`, `README.md` | the AVIF row and sentence say Pigment reads it |
+
 ## Keeping the rebrand: `scripts/pigment-rebrand.py`
 
 Most of the rebrand is mechanical and done by [`scripts/pigment-rebrand.py`](../scripts/pigment-rebrand.py):

@@ -154,7 +154,7 @@ the entry is now. Where Pigment 0.5.0 has PhotoCraft's status, the column names 
 | Cursors: brush leash colour † | Done | Partial: Other Cursors and Brush Preview colour, no leash colour | B17 |
 | Color Lookup Tables (export) | Partial | Partial: `.cube` only, no copyright field | F2 |
 | Export As: GIF | Done | Partial: no GIF in Export As | F2 |
-| Open: AVIF | Done | Partial: AVIF does not open | F3 |
+| Open: AVIF | Done | Done in 0.6: AVIF opens (8, 10 and 12-bit, alpha, grids, rotation, ICC, Exif and XMP), read only | F3 |
 | Fill: Scripted Patterns | Approximate | Missing | B18 |
 | Presets › Export/Import Presets and Migrate Presets † | Done | Done in 0.6: every kind, `.pigment-bundle`, Migrate Presets from Pigment 0.4's folder | P1b, P4 |
 | Presets › Preset Manager † | Done | Partial: three kinds, rename and delete | P1a |
@@ -181,7 +181,7 @@ the entry is now. Where Pigment 0.5.0 has PhotoCraft's status, the column names 
 
 | Entry | Pigment 0.4 | PhotoCraft and Pigment 0.5.0 | 0.6 package |
 |---|---|---|---|
-| AVIF | Partial | Missing: does not open | F3 |
+| AVIF | Partial | Done in 0.6: opens, read only (more than Pigment 0.4, which opened 8-bit sRGB only) | F3 |
 | Targa: 15 and 16-bit and colour-mapped | Done | Done for 24 and 32-bit only | F2 |
 | Export Color Lookup Tables: `.3dl` and the others | Partial | Partial: `.cube` only | F2 |
 | File Info: Origin, IPTC and IPTC Extension tabs | Partial | Missing | F1 |
