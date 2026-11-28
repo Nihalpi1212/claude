@@ -427,6 +427,7 @@ impl Para<'_> {
                 self.emit_run(out, &lc, &mut state, &gr);
             }
         }
+        state.extra += self.place_hyphen(out, line, c0, g0); // Pigment (B3): a hyphenated line's hyphen
         if env.vertical {
             state.extra -= squeeze_punctuation(env.text, &mut out.clusters[c0..], &mut out.glyphs[g0..]);
         }

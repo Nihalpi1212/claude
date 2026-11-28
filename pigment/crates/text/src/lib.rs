@@ -346,6 +346,8 @@ mod color_tests;
 #[cfg(test)]
 mod pigment_type_tests; // Pigment (B2)
 #[cfg(test)]
+mod pigment_compose_tests; // Pigment (B3)
+#[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod vertical_tests;
