@@ -608,7 +608,7 @@ pub fn specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             id: "type.composer.singleLine",
-            label: "Adobe Single-line Composer",
+            label: "Single-line Composer",
             menu: &[],
             shortcut: None,
             params: PARA_PARAMS,
@@ -618,7 +618,7 @@ pub fn specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             id: "type.composer.everyLine",
-            label: "Adobe Every-line Composer",
+            label: "Every-line Composer",
             menu: &[],
             shortcut: None,
             params: PARA_PARAMS,

@@ -40,7 +40,9 @@ saved, journaled and edited, but the text lays out as before.
 - Commands, all journaled, `menu: &[]`, no shortcut, Photoshop's words as labels and history names:
   `type.character.{fauxBold,fauxItalic,allCaps,smallCaps,superscript,subscript,underline,strikethrough}`,
   `type.noBreak`, `type.fractionalWidths`, `type.systemLayout` (per layer), `type.hangingPunctuation`,
-  `type.composer.singleLine` / `.everyLine` (history "Composer"), `type.list` (`type` bullet|number|none, marker,
+  `type.composer.singleLine` / `.everyLine` (labels "Single-line Composer" / "Every-line Composer": the
+  ui-egui test `display_names::production_display_names_stay_neutral` bans "Adobe" in source literals, so the
+  menu rows B5 adds must drop Photoshop's "Adobe" too; history "Composer"), `type.list` (`type` bullet|number|none, marker,
   start, level, `indent` = true: JS `listPatch`'s 1.5 em × (level+1) when the paragraph has no left indent; history
   "Bullets"/"Numbering"), `type.resetCharacter`, `type.resetParagraph`. Params: `layer` | `layers`, `range`, `on`
   (omitted: toggles from the active target's style where the edit starts, as `type.openType.*`).
@@ -104,7 +106,16 @@ both), hangingPunctuation, list (lower-alpha → lowerAlpha …). The loss lines
   --features photocraft-io/heif --lib --tests`: 1480 passed.
 - engine `type_layer_opts_cmds::tests` (8), `type_reset_cmds::tests` (3) — whole `nextest -p photocraft-engine --lib
   --tests`: 5056 run, all pass after one test fix; panic hunt (`--test panic_hunt -- --ignored`): ok.
-- ui-egui whole suite (nextest, -j 3, `--lib --bins --tests`): see the return summary.
+- ui-egui whole suite (nextest, -j 3, `--features photocraft-io/heif --lib --bins --tests`): 3834 run, 3832 passed,
+  2 failed: `display_names::production_display_names_stay_neutral` (my "Adobe ..." labels; fixed, rerun green) and
+  `ai_assistant::adjustments_and_filters_are_clamped_and_take_json_text` (container-only "not enough working memory",
+  as U1/U3 recorded; after `echo 1 > /proc/sys/vm/drop_caches` all 35 `ai_assistant` + `display_names` tests pass).
+- Checks: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`, rebrand check,
+  `cargo xtask layers`, `panel-commands`, `test-binaries`, `scorecard --check`: all OK.
+
+## Commit
+- `4adcf9c6` Pigment type settings (B1), doc, engine, text, io and format: … (pushed to
+  `claude/pigment-photocraft`; CI on it not waited for: the next engineer checks it first).
 
 ## For the next package (B2 onward)
 - Use the B1 command ids for the Character panel menu: `type.character.*`, `type.noBreak`, `type.fractionalWidths`,
