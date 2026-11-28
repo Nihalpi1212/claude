@@ -161,6 +161,10 @@ pub(crate) fn sampler_rows(app: &mut PhotocraftApp) -> Vec<(SamplerReadout, [Lab
 /// Photoshop's Info panel: colour under the pointer (RGB and CMYK), position, selection size.
 pub(super) fn info_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let samplers = sampler_rows(app);
+    // Pigment: the readout modes and deep values draw Pigment's grid (U1).
+    if let Some(o) = super::info_readout::custom(app) {
+        return super::info_readout::show_panel(app, ui, &samplers, o);
+    }
     let readings = readings(app, &samplers);
     InfoPanel::new(tl!("Info"), &readings).show(ui);
 }

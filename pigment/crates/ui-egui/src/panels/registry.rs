@@ -151,7 +151,13 @@ pub(crate) static PANELS: &[PanelEntry] = &[
         run: super::histogram_panel::run_fired,
         ..panel("histogram", || tl!("Histogram").to_string(), "chart_line", LEAST, |app, ui| scrolled(app, ui, super::histogram_panel::show))
     },
-    panel("info", || tl!("Info").to_string(), "info", LEAST, |app, ui| scrolled(app, ui, super::info::info_panel)),
+    PanelEntry {
+        // Pigment: the readout modes, Panel Options… (the Info panel menu has no upstream rows)
+        rows: super::info_readout::panel_rows,
+        states: super::info_readout::command_states,
+        run: super::info_readout::run_fired,
+        ..panel("info", || tl!("Info").to_string(), "info", LEAST, |app, ui| scrolled(app, ui, super::info::info_panel))
+    },
     PanelEntry {
         heights: Some(HISTORY_HEIGHTS),
         rows: super::history_menu_ui::panel_rows,
