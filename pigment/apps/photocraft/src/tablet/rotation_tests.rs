@@ -37,30 +37,25 @@ fn tap(rotation: f32, brush_projection: bool) -> (f64, f64) {
         v.clear_pending();
     }
     h.run_steps(2);
+    // AppKit's tablet mouse-down and mouse-up, each read by the monitor before winit, which sends
+    // the pointer's position with each (winit's view moves the pointer before a click).
     let mut st = appkit::State::default();
-    let e = appkit::RawEvent {
-        kind: appkit::event_type::LEFT_MOUSE_DRAGGED,
-        subtype: appkit::subtype::TABLET_POINT,
-        pressure: 1.0,
-        rotation,
-        ..Default::default()
-    };
-    if let Update::Set(s) = st.handle(&e) {
-        sink(s);
-    }
     let p = h.state().last_canvas_rect.center();
-    h.event(egui::Event::PointerMoved(p));
-    h.run_steps(1);
-    h.event(egui::Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE });
-    h.run_steps(1);
-    h.event(egui::Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE });
-    h.run_steps(3);
+    for (kind, pressed) in [(appkit::event_type::LEFT_MOUSE_DOWN, true), (appkit::event_type::LEFT_MOUSE_UP, false)] {
+        let e = appkit::RawEvent { kind, subtype: appkit::subtype::TABLET_POINT, pressure: 1.0, rotation, ..Default::default() };
+        if let Update::Set(s) = st.handle(&e) {
+            sink(s);
+        }
+        h.event(egui::Event::PointerMoved(p));
+        h.event(egui::Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
+        h.run_steps(if pressed { 1 } else { 3 });
+    }
     sink(None);
     let app = h.state_mut();
     let committed = app.session.journal.iter().rev().find(|(id, _)| id == "paint.stroke").map(|(_, p)| p.clone()).expect("the tap committed a stroke");
     let first = committed["points"][0].as_array().cloned().unwrap_or_default();
     assert!(
-        first.get(5).and_then(Value::as_f64).is_some_and(|r| (r - f64::from(rotation)).abs() < 0.01 || rotation == 0.0),
+        rotation == 0.0 || first.get(5).and_then(Value::as_f64).is_some_and(|r| (r - f64::from(rotation)).abs() < 0.01),
         "the stroke carries the rotation: {first:?}"
     );
     let mut dark = |x: i32, y: i32| -> f64 {

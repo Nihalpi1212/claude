@@ -192,7 +192,7 @@ the entry is now. Where Pigment 0.5.0 has PhotoCraft's status, the column names 
 
 | Entry | Pigment 0.4 | PhotoCraft and Pigment 0.5.0 | 0.6 package |
 |---|---|---|---|
-| Pen tilt, barrel rotation and stylus wheel input † | Done | Partial: no tilt or rotation through Windows Ink, barrel rotation not applied on macOS, no native Wayland pen | U3 |
+| Pen tilt, barrel rotation and stylus wheel input † | Done | Done in 0.6, not yet confirmed on hardware: tilt and rotation through Windows Ink, the tip turns the way the pen turns (#1301), the stylus wheel on macOS and WinTab; no native Wayland pen | U3 |
 | Shape fill: none, solid, gradient, pattern | Done | Partial: no pattern fill for shapes | B15 |
 | Polygon tool: Smooth Corners, Smooth Star Indents | Done | Partial | B15 |
 | Preset management † | Done | Partial | P1a |
@@ -211,7 +211,7 @@ the entry is now. Where Pigment 0.5.0 has PhotoCraft's status, the column names 
 | Actions: Default Actions set | Approximate | Done in 0.6: Pigment 0.4's ten actions plus Make Clip Path and Mixer Brush Cloning Paint Setup | U2 |
 | Actions: Clear All Actions, Reset Actions | Done | Done (PhotoCraft built them, with Replace Actions and an undo) | U2 |
 | Actions: Insert Conditional | Done | Done in 0.6: Insert Conditional… in the panel menu; Record Again edits a conditional | U2 |
-| Pen tablet: tilt, rotation, barrel wheel, eraser end, side buttons † | Done | Partial (as above) | U3 |
+| Pen tablet: tilt, rotation, barrel wheel, eraser end, side buttons † | Done | Done in 0.6 (as above), not yet confirmed on hardware | U3 |
 | Tool presets: load, save, replace, reset, `.tpl` † | Done | Partial: no `.tpl` | P2 |
 | Select Similar Layers | Done | Done in 0.6: Select › Similar Layers, after Deselect Layers; adjustment and fill layers of any kind match | U4 |
 | Operating-system recent documents | Done | Done in 0.6: Windows Recent (`SHAddToRecentDocs`), macOS Recent Items, Linux `recently-used.xbel` | U4 |

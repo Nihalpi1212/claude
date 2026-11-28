@@ -1,6 +1,6 @@
 # Hardware parity
 
-> **Last reviewed:** 2026-10-12 · **Last updated:** 2026-11-08 · **Change:** minor (Graphics Adapter choice on Linux, #1885; Camera Raw's preview develops its per-pixel stages on the GPU; GPU, Wayland (tilt and eraser end via Xwayland) and monitor-profile rows refreshed against main; Windows: flipping the pen to its eraser end selects the Eraser with Windows Ink on, #2285, not yet confirmed on a pen with an eraser end; previously minor: optional WinTab backend on Windows: pressure and the eraser end; tilt on devices with orientation axes; rotation only with a pen and driver that report twist, with Windows Ink off) · **Target:** Adobe Photoshop 2026
+> **Last reviewed:** 2026-10-12 · **Last updated:** 2026-11-28 · **Change:** minor (Pigment: Windows Ink tilt and barrel rotation through the pointer hooks; the tip turns the way the pen turns, #1301; the stylus wheel on macOS and WinTab; none of it confirmed on hardware yet; previously minor: Graphics Adapter choice on Linux, #1885; Camera Raw's preview develops its per-pixel stages on the GPU; GPU, Wayland (tilt and eraser end via Xwayland) and monitor-profile rows refreshed against main; Windows: flipping the pen to its eraser end selects the Eraser with Windows Ink on, #2285, not yet confirmed on a pen with an eraser end; previously minor: optional WinTab backend on Windows: pressure and the eraser end; tilt on devices with orientation axes; rotation only with a pen and driver that report twist, with Windows Ink off) · **Target:** Adobe Photoshop 2026
 
 Each hardware feature Photoshop 2026 (27.11.0) uses, per platform, against PhotoCraft. Photoshop
 side: its bundle (Metal and OpenCL paths, "Precise Color Management for HDR Display" and EDR
@@ -9,8 +9,8 @@ strings, Touch Bar resources, pen pressure/tilt strings) and Adobe's GPU FAQ. Ph
 `engine/src/display_color.rs`, `apps/photocraft/src/monitor_profile.rs`.
 
 **Summary (estimated):** ~50% ready. GPU compositing and colour-managed display are solid; pen
-input is uneven by platform (the default Windows Ink path lacks tilt and rotation, Wayland is
-broken; the opt-in WinTab path on Windows supplies tilt only on devices that report orientation
+input is uneven by platform (the default Windows Ink path's tilt and rotation are new and not yet
+confirmed on hardware, Wayland is broken; the opt-in WinTab path on Windows supplies tilt only on devices that report orientation
 axes, and rotation only when the pen and driver report twist) and there is no HDR
 output. Remaining: 80–150 h (gap G12). Human: tablets (Wacom, XP-Pen, Huion) on each OS and an
 HDR display to verify.
@@ -33,8 +33,9 @@ HDR display to verify.
 | Feature | Photoshop | macOS | Windows | Linux X11 | Linux Wayland | Web |
 |---|---|---|---|---|---|---|
 | Pressure | yes | yes (AppKit monitor) | yes (WM_POINTER), jumpy (#2046) | yes (XInput2) | via Xwayland only; GNOME 50 pen doesn't click (#2622); KDE fixed in 0.6.0 (#2297, #1070) | yes |
-| Tilt | yes | yes | **no** (WinTab: with orientation axes, opt-in) | yes | via Xwayland only (native Wayland: no) | yes |
-| Barrel rotation | yes | yes (not applied to tip angle, #1301) | no (WinTab: with a twist-reporting pen and driver, opt-in) | partial | no | yes (twist) |
+| Tilt | yes | yes | yes with Windows Ink (pointer hooks), not yet confirmed on hardware; WinTab: with orientation axes, opt-in | yes | via Xwayland only (native Wayland: no) | yes |
+| Barrel rotation | yes | yes; the tip turns the way the pen turns (#1301), not yet confirmed on hardware | yes with Windows Ink and a twist-reporting pen (pointer hooks), not yet confirmed on hardware; WinTab: with a twist-reporting pen and driver, opt-in | partial | no | yes (twist) |
+| Stylus wheel (airbrush) | yes | yes (`tangentialPressure`), not yet confirmed on hardware | WinTab only, with an airbrush (`DVC_TPRESSURE`), not yet confirmed on hardware; Windows Ink has none | no | no | no |
 | Eraser end | yes | yes | yes with Windows Ink, not yet confirmed on hardware (#2285); WinTab: yes (opt-in) | partial | partial, via Xwayland only (native Wayland: no) | partial |
 | WinTab driver mode | yes | – | yes (opt-in; Windows Ink off) | – | – | – |
 | Pressure curve | Windows Ink / driver | global curve in Preferences (#2195) | same | same | same | same |
@@ -42,8 +43,38 @@ HDR display to verify.
 Windows: the opt-in WinTab backend (`tools.tabletInput = "winTab"`, with Windows Ink turned off
 in the tablet utility) supplies pressure and the eraser end, tilt only on devices that report
 orientation axes, and rotation only when the pen and driver report twist (pressure-only devices
-get neutral tilt and rotation). The default Windows Ink path still lacks tilt and
-rotation; its eraser end comes from the pointer hooks (#2285).
+get neutral tilt and rotation). The default Windows Ink path gets tilt and rotation from the
+same pointer hooks that give it the eraser end (#2285): winit delivers the pen as touch input with
+the pressure only, so the hooks keep `GetPointerPenInfo`'s tilt and rotation (its `penMask` says
+which the pen reports) and the canvas adds them to the pen's reading (Pigment,
+`crates/tablet/src/ink.rs`, `crates/ui-egui/src/pen_extras.rs`).
+
+Barrel rotation is clockwise on every platform (W3C `twist`, Windows Ink, WinTab; macOS's
+`NSEvent.rotation` is taken as Chromium takes it, as `twist`), and the brush tip's angle is
+counter-clockwise; the angle used to add the rotation, so the tip turned against the pen (#1301).
+The stylus wheel is each `paint.stroke` point's 8th value (`wheel`, 1 when there is none).
+
+### Pigment: to check on hardware (not yet confirmed on hardware)
+
+None of these has been tried on a real pen yet. Each needs a brush with Shape Dynamics › Angle
+Jitter › Control: Rotation (or Pen Tilt), a 4:1 elliptical tip, and for the wheel Transfer ›
+Opacity Jitter › Control: Stylus Wheel.
+
+1. **Windows Ink, tilt** (Wacom with Windows Ink on, or a Surface pen): the tip follows Pen Tilt;
+   a finger stroke right after a pen stroke paints upright; the pen leaving range and a mouse stroke
+   paint upright too.
+2. **Windows Ink, rotation** (a Wacom Art Pen with Windows Ink on): turning the barrel clockwise
+   turns the tip clockwise.
+3. **Windows Ink, pressure**: unchanged (winit's), including a pen that reports no pressure bit.
+4. **Windows, WinTab mode**: tilt and rotation as before; Windows Ink's reading stays out.
+5. **Windows, WinTab with an airbrush**: the finger wheel drives Stylus Wheel; a plain pen paints
+   at a full wheel; the context opens (a driver that refuses the wheel packet would fail WinTab).
+6. **macOS, rotation** (#1301): turning an Art Pen's barrel clockwise turns the tip clockwise. If
+   it turns the other way, `NSEvent.rotation` is counter-clockwise (Qt reads it as `360 − r`), and
+   `crates/tablet/src/appkit.rs` `sample` should negate it.
+7. **macOS, airbrush wheel**: the wheel drives Stylus Wheel once it has been turned; a plain pen
+   paints at a full wheel.
+8. **Brush cursor**: with Brush Projection, the cursor's tip turns the same way as the dabs.
 
 ## Displays and colour
 
@@ -81,3 +112,4 @@ rotation; its eraser end comes from the pointer hooks (#2285).
 | 2026-10-17 | minor | GPU filters: Camera Raw's preview, Dehaze, Clarity and Texture (#6916 step 3) |
 | 2026-10-19 | minor | Graphics Adapter choice on Linux (#1885) |
 | 2026-11-08 | minor | Linux Wayland: tilt and the eraser end work through Xwayland, like pressure; native Wayland still has no pen |
+| 2026-11-28 | minor | Pigment: Windows Ink tilt and rotation through the pointer hooks; barrel rotation turns the tip clockwise with the pen (#1301); the stylus wheel on macOS and WinTab; hardware checks listed, none confirmed yet |
