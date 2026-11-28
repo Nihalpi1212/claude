@@ -11,7 +11,8 @@ use craft::behavior::{EditEvent, Mixed, Preview};
 use craft::font_manager::axes::{FontAxis, NamedInstance};
 use craft::text::ui::DocUnit;
 use craft::text::ui::character::{
-    Caps, CharacterChange, CharacterValues, FaceAxes, Kerning, Leading, ParagraphChange, ParagraphDirection, ParagraphValues, TextAlign,
+    BaselinePosition, Caps, CharacterChange, CharacterValues, FaceAxes, Kerning, Leading, ParagraphChange, ParagraphDirection, ParagraphValues,
+    TextAlign,
 };
 use craft::text::ui::type_bar::TypeBarChange;
 use craft::text::ui::type_options::{TextAntiAlias, TextOrientation};
@@ -57,7 +58,7 @@ fn covering<S>(runs: impl Iterator<Item = (usize, S)>, a: usize, b: usize) -> Ve
 
 /// The character and paragraph styles the controls describe: the selected characters, the caret's style, every run
 /// of the selected type layers, else the tool defaults. Neither list is empty.
-fn target_styles(app: &PhotocraftApp) -> (Vec<CharStyle>, Vec<ParagraphStyle>) {
+pub(super) fn target_styles(app: &PhotocraftApp) -> (Vec<CharStyle>, Vec<ParagraphStyle>) {
     runs_at_target(app).unwrap_or_else(|| {
         let (c, p) = default_styles(app);
         (vec![c], vec![p])
@@ -299,8 +300,12 @@ fn character_step(change: &CharacterChange) -> Option<Step> {
             Caps::SmallCaps => "smallCaps",
             _ => "normal",
         }}),
-        // The engine has no superscript/subscript style key; the controls hide those toggles (`superscript` is off).
-        CharacterChange::Position(_) => return None,
+        // Pigment (B2): Superscript and Subscript, as the engine's `baseline` key.
+        CharacterChange::Position(p) => json!({"baseline": match p {
+            BaselinePosition::Superscript => "superscript",
+            BaselinePosition::Subscript => "subscript",
+            _ => "normal",
+        }}),
         CharacterChange::Underline(on) => json!({"underline": on}),
         CharacterChange::Strikethrough(on) => json!({"strikethrough": on}),
         CharacterChange::OpenType { tag, on, .. } => return Some(Step::OpenType { tag, on: *on }),

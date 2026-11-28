@@ -31,6 +31,8 @@ mod paragraphs;
 mod shaping;
 mod style;
 mod vertical;
+mod whole_px; // Pigment (B2): Fractional Widths off, System Layout
+pub use whole_px::drawn_antialias;
 
 #[cfg(test)]
 pub(crate) use area::AREA_PASSES;
@@ -324,6 +326,7 @@ impl Layouter {
             box_rect,
             path_range: crate::warp::path_range_length(&t.shape).map(|n| n.min(f32::MAX as f64) as f32),
             area,
+            whole_px: whole_px::WholePixels::of(t), // Pigment (B2)
         };
         let mut flow = Flow::default();
         for (pi, prange) in split_paragraphs(&t.text).into_iter().enumerate() {
@@ -385,6 +388,8 @@ struct Env<'a> {
     /// `None` keeps legacy alignment around the start anchor (an alignment span of zero).
     path_range: Option<f32>,
     area: Option<crate::area::AreaShape>,
+    /// Pigment (B2): whole-pixel advances and baselines (Fractional Widths off, System Layout).
+    whole_px: whole_px::WholePixels,
 }
 
 impl Env<'_> {

@@ -76,7 +76,8 @@ fn character_controls(app: &mut PhotocraftApp, ui: &mut egui::Ui, unit: DocUnit)
     let styles = values::style_names(app, &shown);
     let face = values::face_axes(app);
     let mut font_state = fonts::font_state(app);
-    let mut controls = CharacterControls::new(tl!("Character"), &shown, &families, &styles).unit(unit);
+    let languages = super::languages::rows(); // Pigment (B2)
+    let mut controls = CharacterControls::new(tl!("Character"), &shown, &families, &styles).unit(unit).superscript(true).languages(&languages);
     controls = controls.font_picker(font_state.source());
     if let Some(face) = &face {
         controls = controls.axes(face.view());

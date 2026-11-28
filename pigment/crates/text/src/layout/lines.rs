@@ -391,6 +391,7 @@ impl Para<'_> {
             (None, None) => 0.0,
             (None, Some(b)) => b + leading + flow.pending_space,
         };
+        let baseline = env.whole_px.baseline(baseline); // Pigment (B2): System Layout
         flow.pending_space = 0.0;
         // Photoshop keeps a horizontal line whose baseline is inside the box and lets
         // its descenders hang below the bottom edge (#1317: three 35 pt lines in a
@@ -419,7 +420,7 @@ impl Para<'_> {
         let growth = if self.env.path_range.is_some() { slots.iter().map(|s| s.growth).sum::<f32>() - trailing_growth } else { 0.0 };
         let dx = self.line_start(f, m.offset, adv, line_kern + growth);
         let lc = LineCtx { dx, baseline: f.baseline, slots: &slots, kern_px: &kern_px, line_index: out.lines.len() };
-        let (g0, c0) = (out.glyphs.len(), out.clusters.len());
+        let (g0, c0, d0) = (out.glyphs.len(), out.clusters.len(), out.decorations.len());
         let mut state = LineState { cursors: kern_cursors(line, &slots), seen_runs: Vec::new(), vinfo: Vec::new(), extra: 0.0 };
         for item in line.items() {
             if let PositionedLayoutItem::GlyphRun(gr) = item {
@@ -433,11 +434,14 @@ impl Para<'_> {
             let slack = self.line_avail(f).unwrap_or(0.0) - (adv + state.extra);
             state.extra += justify_line(out, c0, g0, slack);
         }
+        // Pigment (B2): Fractional Widths off / System Layout (horizontal lines).
+        let (snap0, snap1) = if env.whole_px.advances && !env.vertical { super::whole_px::snap_line(out, c0, g0, d0) } else { (0.0, 0.0) };
+        state.extra += snap1 - snap0;
         if env.vertical {
             rotate_to_text_space(&mut out.glyphs[g0..], &state.vinfo, f.baseline);
         }
         let lr = line.text_range();
-        let x0 = dx + m.offset;
+        let x0 = dx + m.offset + snap0;
         out.lines.push(LineInfo {
             range: self.map_offset(lr.start)..self.map_offset(lr.end).min(self.content_end),
             baseline: f.baseline,

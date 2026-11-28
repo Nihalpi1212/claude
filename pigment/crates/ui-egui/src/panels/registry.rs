@@ -128,6 +128,10 @@ pub(crate) static PANELS: &[PanelEntry] = &[
     panel("adjustments", || tl!("Adjustments").to_string(), "contrast", LEAST, |app, ui| scrolled(app, ui, super::properties::adjustments::panel)),
     PanelEntry {
         heights: Some(CHARACTER_HEIGHTS),
+        // Pigment (B2): the Character panel menu.
+        rows: crate::type_tool::panel_menu::character_rows,
+        states: crate::type_tool::panel_menu::character_states,
+        run: crate::type_tool::panel_menu::run_fired,
         ..panel(
             "character",
             || tl!("Character").to_string(),

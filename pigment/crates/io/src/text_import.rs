@@ -44,7 +44,7 @@ fn render_bounded(eng: &mut photocraft_text::TextEngine, t: &mut TextLayer, dpi:
         return false;
     };
     *budget = rest;
-    let r = photocraft_text::render::rasterize_warped(&layout, &t.transform, format, t.antialias, warp.as_ref());
+    let r = photocraft_text::render::rasterize_warped(&layout, &t.transform, format, photocraft_text::layout::drawn_antialias(t), warp.as_ref());
     t.cache = Some(r.surface);
     true
 }

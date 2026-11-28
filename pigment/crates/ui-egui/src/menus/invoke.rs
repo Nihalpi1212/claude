@@ -662,7 +662,8 @@ fn invoke_type_command(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, p
             if (command.starts_with("type.antiAlias.")
                 || command.starts_with("type.orientation.")
                 || command.starts_with("type.openType.")
-                || matches!(command, "type.warpText" | "type.loadDefaultTypeStyles"))
+                || matches!(command, "type.warpText" | "type.loadDefaultTypeStyles")
+                || crate::type_tool::panel_menu::takes_panel_target(command)) // Pigment (B2)
                 && params.get("layer").is_none()
                 && params.get("layers").is_none()
                 && params.get("range").is_none() =>

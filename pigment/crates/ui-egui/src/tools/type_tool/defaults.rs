@@ -89,6 +89,10 @@ pub(super) fn default_style_params(app: &PhotocraftApp) -> serde_json::Value {
     p["align"] = json!(o.type_align);
     p["direction"] = json!(o.type_direction);
     p["color"] = json!(hex(app.session.tools.foreground));
+    // Pigment (B2): new text is in the interface's language (hyphenation, spelling), unless set.
+    if p.get("language").is_none() {
+        p["language"] = json!(super::languages::for_interface(crate::i18n::current().code()));
+    }
     p
 }
 
