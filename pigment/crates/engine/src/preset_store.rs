@@ -705,7 +705,8 @@ pub fn open(backend: Box<dyn PresetBackend>) -> Opened {
 fn load_actions(backend: &dyn PresetBackend, warnings: &mut Vec<String>) -> Option<(ActionList, Vec<(String, String)>)> {
     let bytes = match backend.read(ACTIONS_FILE, MAX_ACTIONS_BYTES) {
         Ok(b) => b,
-        Err(e) if missing_file(&e) => return Some((ActionList::new(), Vec::new())),
+        // Pigment: a new store in the desktop app starts with the Default Actions set.
+        Err(e) if missing_file(&e) => return Some((crate::commands::actions_default::first_launch(backend), Vec::new())),
         Err(e) => {
             warnings.push(format!("actions: {ACTIONS_FILE} skipped: {e}"));
             return None;

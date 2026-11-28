@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use craft::automation::actions::{ActionList, ActionListError, LibraryEdit};
 use serde_json::{Value, json};
 
-use crate::actions_cmds::{Action, ActionStep, ActionsFile, is_action_key, list_error, not_playing};
+use crate::actions_cmds::{ActionsFile, is_action_key, list_error, not_playing}; // Pigment: Action and ActionStep went with `basics`
 use crate::{Result, Session};
 
 use super::bad;
@@ -22,7 +22,8 @@ type Shortcuts = BTreeMap<String, String>;
 type Alternates = BTreeMap<String, Vec<String>>;
 
 /// The set Reset Actions… restores.
-pub const BASICS_SET: &str = "Pigment Basics";
+// Pigment: Photoshop's Default Actions set (`actions_default`), not upstream's two-action set.
+pub const BASICS_SET: &str = crate::commands::actions_default::SET;
 
 /// What the undo of the last Clear All, Reset or Replace restores beside the list.
 #[derive(Clone, Debug, PartialEq)]
@@ -135,11 +136,8 @@ pub(super) fn clear(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// The actions Reset Actions… restores, in `set`.
 fn basics(set: &str) -> ActionsFile {
-    let actions = [("Invert Colors", "image.adjustments.invert"), ("Desaturate", "image.adjustments.desaturate")]
-        .into_iter()
-        .map(|(name, command)| Action { set: Some(set.to_owned()), ..Action::new(name, vec![ActionStep::new(command, json!({}))]) })
-        .collect();
-    ActionsFile::new(actions, Vec::new())
+    // Pigment: the Default Actions set.
+    crate::commands::actions_default::default_file(set)
 }
 
 pub(super) fn reset(s: &mut Session, p: &Value) -> Result<Value> {
@@ -150,7 +148,7 @@ pub(super) fn reset(s: &mut Session, p: &Value) -> Result<Value> {
         Some("replace") => false,
         _ => return Err(bad(CMD, "`mode` must be append or replace")),
     };
-    // Appended beside a set of that name, the defaults get a set of their own (`PhotoCraft Basics 2`).
+    // Appended beside a set of that name, the defaults get a set of their own (`Default Actions 2`).
     let set = if append { crate::preset_import_cmds::UniqueNames::new_exact(s.actions.list.sets()).unique(BASICS_SET) } else { BASICS_SET.to_owned() };
     let defaults = basics(&set);
     let merged = publish_library(s, CMD, (!append).then(Shortcuts::new), |list| list.reset(defaults, append, |_, _| {}))?;
